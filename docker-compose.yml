@@ -1,0 +1,16 @@
+services:
+    tgvpn_bot:
+        image: ghcr.io/USERNAME/tgvpn_go:latest
+        container_name: tgvpn_bot
+        restart: unless-stopped
+        volumes:
+            - ./.env:/app/.env:ro
+            - ./data:/app/data
+        environment:
+            - TZ=Europe/Moscow
+        healthcheck:
+            test: ["CMD", "pgrep", "tgvpn_bot"]
+            interval: 30s
+            timeout: 10s
+            retries: 3
+            start_period: 10s
