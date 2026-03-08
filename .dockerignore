@@ -1,0 +1,50 @@
+# Binaries
+tgvpn_bot
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary
+*.test
+
+# Output of go coverage
+*.out
+
+# Dependency directories
+vendor/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Logs and Database (mounted as volumes)
+logs/
+*.log
+bot.log
+*.db
+*.db-shm
+*.db-wal
+
+# Environment (sensitive data)
+.env
+
+# Git
+.git/
+.gitignore
+
+# Docker
+Dockerfile
+.dockerignore
+
+# Documentation
+README.md
+
+# Qwen
+.qwen/
+
+data/
