@@ -20,14 +20,12 @@ import (
 )
 
 func main() {
-	// Load configuration
 	cfg, err := config.Load()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
 		os.Exit(1)
 	}
 
-	// Initialize logger
 	if err := logger.Init(cfg.LogFilePath, cfg.LogLevel); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
 		os.Exit(1)
@@ -36,17 +34,14 @@ func main() {
 
 	logger.Info("Starting TGVPN Bot...")
 
-	// Initialize database
 	if err := database.Init(cfg.DatabasePath); err != nil {
 		logger.Fatalf("Failed to initialize database: %v", err)
 	}
 	defer database.Close()
 	logger.Info("Database initialized successfully")
 
-	// Initialize 3x-ui client
 	xuiClient := xui.NewClient(cfg.XUIHost, cfg.XUIUsername, cfg.XUIPassword)
 
-	// Validate 3x-ui connection
 	logger.Info("Connecting to 3x-ui panel...")
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	if err := xuiClient.Login(ctx); err != nil {
@@ -56,7 +51,6 @@ func main() {
 	cancel()
 	logger.Info("✓ 3x-ui panel connected")
 
-	// Validate Telegram bot token
 	logger.Info("Validating Telegram bot token...")
 	botAPI, err := tgbotapi.NewBotAPI(cfg.TelegramBotToken)
 	if err != nil {
@@ -64,25 +58,20 @@ func main() {
 	}
 	logger.Infof("✓ Telegram bot authorized: @%s", botAPI.Self.UserName)
 
-	// Create bot handler
 	handler := bot.NewHandler(botAPI, cfg, xuiClient)
 
-	// Get updates channel
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = 60
 	updates := botAPI.GetUpdatesChan(u)
 
-	// Create context for graceful shutdown
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 	defer stop()
 
 	logger.Info("Bot started successfully")
 
-	// WaitGroup to track backup scheduler goroutine
 	var wg sync.WaitGroup
 	wg.Add(1)
 
-	// Start daily backup scheduler (at 3 AM) with panic recovery
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
@@ -93,7 +82,6 @@ func main() {
 		startBackupScheduler(ctx, cfg.DatabasePath)
 	}()
 
-	// Handle updates with panic recovery
 	for {
 		select {
 		case update := <-updates:
@@ -110,7 +98,6 @@ func main() {
 			logger.Info("Graceful shutdown initiated...")
 			botAPI.StopReceivingUpdates()
 
-			// Wait for backup scheduler to finish (with timeout)
 			done := make(chan struct{})
 			go func() {
 				wg.Wait()
@@ -147,12 +134,10 @@ func handleUpdate(handler *bot.Handler, update tgbotapi.Update) {
 	}
 }
 
-// startBackupScheduler runs daily backups at 3 AM
 func startBackupScheduler(ctx context.Context, dbPath string) {
 	logger.Info("Backup scheduler started (daily at 03:00)")
 
 	for {
-		// Calculate time until next 3 AM
 		now := time.Now()
 		next := time.Date(now.Year(), now.Month(), now.Day(), 3, 0, 0, 0, now.Location())
 		if now.After(next) {

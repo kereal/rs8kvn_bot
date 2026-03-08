@@ -26,7 +26,7 @@ func NewHandler(bot *tgbotapi.BotAPI, cfg *config.Config, xuiClient *xui.Client)
 		bot:         bot,
 		config:      cfg,
 		xui:         xuiClient,
-		rateLimiter: ratelimiter.NewTokenBucket(30, 5), // 30 burst, 5 requests/second
+		rateLimiter: ratelimiter.NewTokenBucket(30, 5),
 	}
 }
 
@@ -38,7 +38,6 @@ func (h *Handler) HandleStart(update tgbotapi.Update) {
 
 	chatID := update.Message.Chat.ID
 
-	// Safe username extraction with nil checks
 	username := ""
 	if update.Message.From != nil {
 		username = update.Message.From.UserName
@@ -49,7 +48,6 @@ func (h *Handler) HandleStart(update tgbotapi.Update) {
 
 	logger.Infof("User %s (%d) started the bot", username, chatID)
 
-	// Check if admin
 	isAdmin := chatID == h.config.TelegramAdminID
 
 	msg := tgbotapi.NewMessage(chatID, fmt.Sprintf("👋 Привет, %s!\n\nЯ бот для выдачи подписок на прокси VLESS+Reality+Vision.\n\nВыберите действие:", username))
@@ -63,7 +61,6 @@ func (h *Handler) HandleStart(update tgbotapi.Update) {
 		),
 	)
 
-	// Add admin button for admin users
 	if isAdmin {
 		keyboard.InlineKeyboard = append(keyboard.InlineKeyboard,
 			tgbotapi.NewInlineKeyboardRow(
@@ -93,11 +90,10 @@ func (h *Handler) HandleCallback(update tgbotapi.Update) {
 
 	logger.Infof("Callback received: %s from user %s (%d)", data, username, chatID)
 
-	// Answer callback with proper error handling
 	callback := tgbotapi.NewCallback(update.CallbackQuery.ID, "")
 	if _, err := h.bot.Request(callback); err != nil {
 		logger.Errorf("Failed to answer callback: %v", err)
-		return // Don't proceed if callback failed
+		return
 	}
 
 	ctx := context.Background()
@@ -161,7 +157,6 @@ func (h *Handler) handleMySubscription(ctx context.Context, chatID int64, userna
 func (h *Handler) handleAdminStats(ctx context.Context, chatID int64, username string) {
 	logger.Infof("Admin %s requesting stats", username)
 
-	// Get all subscriptions from database with error handling
 	var allSubs []database.Subscription
 	if err := database.DB.Find(&allSubs).Error; err != nil {
 		logger.Errorf("Failed to fetch subscriptions for stats: %v", err)
@@ -206,7 +201,6 @@ func (h *Handler) createSubscription(ctx context.Context, chatID int64, username
 		return
 	}
 
-	// Use current config for new subscription
 	subscriptionURL := h.xui.GetSubscriptionLink(xui.GetExternalURL(h.config.XUIHost), client.SubID, h.config.XUISubPath)
 
 	sub := &database.Subscription{
@@ -223,7 +217,6 @@ func (h *Handler) createSubscription(ctx context.Context, chatID int64, username
 
 	if err := database.CreateSubscription(sub); err != nil {
 		logger.Errorf("Failed to save subscription: %v", err)
-		// Cleanup: remove client from 3x-ui since DB save failed
 		if cleanupErr := h.xui.RemoveClient(ctx, h.config.XUIInboundID, client.ID); cleanupErr != nil {
 			logger.Errorf("Failed to cleanup orphaned XUI client: %v", cleanupErr)
 		}
@@ -261,7 +254,6 @@ func (h *Handler) notifyAdmin(ctx context.Context, username string, chatID int64
 }
 
 func (h *Handler) send(ctx context.Context, msg tgbotapi.MessageConfig) {
-	// Wait for rate limiter to allow request (context-aware)
 	if !h.rateLimiter.Wait(ctx) {
 		logger.Warn("Message send cancelled due to context")
 		return
@@ -273,11 +265,9 @@ func (h *Handler) send(ctx context.Context, msg tgbotapi.MessageConfig) {
 	}
 }
 
-// sendWithRetry sends a message with exponential backoff retry
 func (h *Handler) sendWithRetry(ctx context.Context, msg tgbotapi.MessageConfig, maxRetries int) {
 	delay := time.Second
 	for i := 0; i < maxRetries; i++ {
-		// Wait for rate limiter to allow request (context-aware)
 		if !h.rateLimiter.Wait(ctx) {
 			logger.Warn("Message send cancelled due to context")
 			return

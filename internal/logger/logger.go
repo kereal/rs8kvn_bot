@@ -28,30 +28,25 @@ func Init(logFilePath, level string) error {
 		zapLevel = zapcore.InfoLevel
 	}
 
-	// Simple encoder
 	encoderConfig := zap.NewProductionEncoderConfig()
 	encoderConfig.TimeKey = "timestamp"
 	encoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
 	encoderConfig.EncodeLevel = zapcore.CapitalLevelEncoder
 	encoder := zapcore.NewConsoleEncoder(encoderConfig)
 
-	// Use both file (with rotation) and console
 	var cores []zapcore.Core
 
-	// Console core (always enabled for Docker)
 	cores = append(cores, zapcore.NewCore(encoder, zapcore.AddSync(os.Stdout), zapLevel))
 
-	// File core with rotation - use package-level variable for proper cleanup
 	fileWriter = &lumberjack.Logger{
 		Filename:   logFilePath,
-		MaxSize:    10,    // MB
-		MaxBackups: 3,     // files
-		MaxAge:     30,    // days
-		Compress:   false, // disabled for simplicity
+		MaxSize:    10,
+		MaxBackups: 3,
+		MaxAge:     30,
+		Compress:   false,
 	}
 	cores = append(cores, zapcore.NewCore(encoder, zapcore.AddSync(fileWriter), zapLevel))
 
-	// Multi-core
 	core := zapcore.NewTee(cores...)
 
 	Log = zap.New(core, zap.AddCaller(), zap.AddCallerSkip(1)).Sugar()
@@ -106,7 +101,6 @@ func Sync() error {
 	return nil
 }
 
-// Close closes the log file and syncs buffers
 func Close() error {
 	logMu.Lock()
 	defer logMu.Unlock()
@@ -117,7 +111,6 @@ func Close() error {
 		}
 	}
 
-	// Close the lumberjack file writer to release file handles
 	if fileWriter != nil {
 		if err := fileWriter.Close(); err != nil {
 			return err
@@ -127,7 +120,6 @@ func Close() error {
 	return nil
 }
 
-// GetRotationTime returns the next rotation time (daily)
 func GetRotationTime() time.Time {
 	now := time.Now()
 	return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).AddDate(0, 0, 1)

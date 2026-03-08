@@ -11,13 +11,12 @@ import (
 	"gorm.io/gorm"
 )
 
-// Subscription represents a user subscription with embedded user data
 type Subscription struct {
 	ID              uint           `gorm:"primaryKey"`
 	TelegramID      int64          `gorm:"uniqueIndex:idx_telegram_status;not null"`
 	Username        string         `gorm:"size:255"`
 	ClientID        string         `gorm:"size:255"`
-	XUIHost         string         `gorm:"size:255"` // Panel URL for this subscription
+	XUIHost         string         `gorm:"size:255"`
 	InboundID       int            `gorm:"index"`
 	TrafficLimit    int64          `gorm:"default:107374182400"`
 	ExpiryTime      time.Time      `gorm:"index:idx_expiry"`
@@ -31,7 +30,6 @@ type Subscription struct {
 var DB *gorm.DB
 var sqlDB *sql.DB
 
-// Init initializes the database connection
 func Init(dbPath string) error {
 	dbDir := filepath.Dir(dbPath)
 	if err := os.MkdirAll(dbDir, 0755); err != nil {
@@ -48,18 +46,15 @@ func Init(dbPath string) error {
 		return err
 	}
 
-	// Get underlying sql.DB for connection pool
 	sqlDB, err = DB.DB()
 	if err != nil {
 		return err
 	}
 
-	// Configure connection pool - optimized for single-user app
 	sqlDB.SetMaxOpenConns(1)
 	sqlDB.SetMaxIdleConns(1)
 	sqlDB.SetConnMaxLifetime(10 * time.Minute)
 
-	// Verify database connection
 	if err := sqlDB.Ping(); err != nil {
 		return fmt.Errorf("database connection failed: %w", err)
 	}
@@ -67,7 +62,6 @@ func Init(dbPath string) error {
 	return nil
 }
 
-// Close closes the database connection
 func Close() error {
 	if sqlDB != nil {
 		return sqlDB.Close()
@@ -75,7 +69,6 @@ func Close() error {
 	return nil
 }
 
-// GetByTelegramID returns active subscription for a user
 func GetByTelegramID(telegramID int64) (*Subscription, error) {
 	if DB == nil {
 		return nil, fmt.Errorf("database not initialized")
@@ -91,22 +84,18 @@ func GetByTelegramID(telegramID int64) (*Subscription, error) {
 	return &sub, nil
 }
 
-// CreateSubscription creates a new subscription (creates/updates user data)
-// Uses transaction to ensure atomicity - either both operations succeed or neither does
 func CreateSubscription(sub *Subscription) error {
 	if DB == nil {
 		return fmt.Errorf("database not initialized")
 	}
 
 	return DB.Transaction(func(tx *gorm.DB) error {
-		// Deactivate any existing active subscriptions for this user
 		if err := tx.Model(&Subscription{}).
 			Where("telegram_id = ? AND status = ?", sub.TelegramID, "active").
 			Update("status", "revoked").Error; err != nil {
 			return fmt.Errorf("failed to revoke old subscription: %w", err)
 		}
 
-		// Create new subscription
 		if err := tx.Create(sub).Error; err != nil {
 			return fmt.Errorf("failed to create new subscription: %w", err)
 		}
@@ -115,13 +104,11 @@ func CreateSubscription(sub *Subscription) error {
 	})
 }
 
-// UpdateSubscription updates an existing subscription
 func UpdateSubscription(sub *Subscription) error {
 	result := DB.Save(sub)
 	return result.Error
 }
 
-// GetExpired returns all expired active subscriptions
 func GetExpired() ([]Subscription, error) {
 	var subs []Subscription
 	result := DB.Where("status = ? AND expiry_time < ?", "active", time.Now()).
