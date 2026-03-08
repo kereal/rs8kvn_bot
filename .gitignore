@@ -1,0 +1,35 @@
+# Environment
+.env
+
+# Data
+*.db
+*.db.backup
+*.db.backup.*
+data/
+
+# Logs
+*.log
+logs/
+
+# Binary
+tgvpn_bot
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test
+*.test
+*.out
+
+# Go
+go.work
+go.work.sum
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~

@@ -15,7 +15,6 @@ import (
 	"tgvpn_go/internal/logger"
 )
 
-// maxResponseSize is the maximum allowed HTTP response size (1MB)
 const maxResponseSize = 1 << 20
 
 type Client struct {
@@ -33,7 +32,6 @@ type APIResponse struct {
 	Obj     json.RawMessage `json:"obj,omitempty"`
 }
 
-// Inbound represents a 3x-ui inbound
 type Inbound struct {
 	ID       int             `json:"id"`
 	Port     int             `json:"port"`
@@ -75,11 +73,8 @@ func (c *Client) Login(ctx context.Context) error {
 	return c.ensureLoggedIn(ctx, true)
 }
 
-// ensureLoggedIn checks if session is valid and logs in if needed
-// force=true means always re-login regardless of session age
 func (c *Client) ensureLoggedIn(ctx context.Context, force bool) error {
 	c.mu.RLock()
-	// Session valid for 15 minutes
 	if !force && time.Since(c.lastLogin) < 15*time.Minute {
 		c.mu.RUnlock()
 		return nil
@@ -89,12 +84,10 @@ func (c *Client) ensureLoggedIn(ctx context.Context, force bool) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	// Double-check after acquiring write lock
 	if !force && time.Since(c.lastLogin) < 15*time.Minute {
 		return nil
 	}
 
-	// Retry login with exponential backoff
 	return retryWithBackoff(ctx, func() error {
 		return c.doLogin(ctx)
 	}, 3, 2*time.Second)
@@ -185,7 +178,6 @@ func (c *Client) GetInbound(ctx context.Context, inboundID int) (*Inbound, error
 		return nil, err
 	}
 
-	// Handle double-encoded settings (JSON string inside JSON)
 	if len(inbound.Settings) > 0 && inbound.Settings[0] == '"' {
 		var settingsStr string
 		if err := json.Unmarshal(inbound.Settings, &settingsStr); err == nil {
@@ -196,13 +188,11 @@ func (c *Client) GetInbound(ctx context.Context, inboundID int) (*Inbound, error
 	return &inbound, nil
 }
 
-// AddClient adds a new client to the specified inbound
 func (c *Client) AddClient(ctx context.Context, inboundID int, email string, trafficGB int64, expiryTime time.Time) (*ClientConfig, error) {
 	if err := c.ensureLoggedIn(ctx, false); err != nil {
 		return nil, fmt.Errorf("authentication required: %w", err)
 	}
 
-	// First check if client already exists
 	inbound, err := c.GetInbound(ctx, inboundID)
 	if err != nil {
 		return nil, err
@@ -220,11 +210,9 @@ func (c *Client) AddClient(ctx context.Context, inboundID int, email string, tra
 		}
 	}
 
-	// Generate new client data
 	clientID := generateUUID()
 	subID := generateSubID()
 
-	// Create settings as JSON string (3x-ui expects string, not object)
 	settingsJSON := map[string]interface{}{
 		"clients": []map[string]interface{}{
 			{
@@ -242,7 +230,6 @@ func (c *Client) AddClient(ctx context.Context, inboundID int, email string, tra
 	}
 	settingsStr, _ := json.Marshal(settingsJSON)
 
-	// Create the full request data - settings must be a JSON string
 	requestData := map[string]interface{}{
 		"id":       inboundID,
 		"settings": string(settingsStr),
@@ -253,7 +240,6 @@ func (c *Client) AddClient(ctx context.Context, inboundID int, email string, tra
 		return nil, err
 	}
 
-	// Use addClient endpoint
 	addURL := fmt.Sprintf("%s/panel/api/inbounds/addClient", c.host)
 	req, err := http.NewRequestWithContext(ctx, "POST", addURL, bytes.NewBuffer(body))
 	if err != nil {
@@ -287,7 +273,6 @@ func (c *Client) AddClient(ctx context.Context, inboundID int, email string, tra
 
 	logger.Infof("Client %s added successfully to inbound %d", email, inboundID)
 
-	// Return client config
 	return &ClientConfig{
 		ID:         clientID,
 		Email:      email,
@@ -303,13 +288,11 @@ func (c *Client) GetSubscriptionLink(baseURL string, subID string, subPath strin
 	return fmt.Sprintf("%s/%s/%s", baseURL, subPath, subID)
 }
 
-// RemoveClient removes a client from the specified inbound by client ID
 func (c *Client) RemoveClient(ctx context.Context, inboundID int, clientID string) error {
 	if err := c.ensureLoggedIn(ctx, false); err != nil {
 		return fmt.Errorf("authentication required: %w", err)
 	}
 
-	// First get the current inbound
 	inbound, err := c.GetInbound(ctx, inboundID)
 	if err != nil {
 		return err
@@ -320,7 +303,6 @@ func (c *Client) RemoveClient(ctx context.Context, inboundID int, clientID strin
 		return fmt.Errorf("failed to parse inbound settings: %w", err)
 	}
 
-	// Filter out the client to remove
 	newClients := make([]ClientConfig, 0, len(settings.Clients))
 	for _, client := range settings.Clients {
 		if client.ID != clientID {
@@ -328,7 +310,6 @@ func (c *Client) RemoveClient(ctx context.Context, inboundID int, clientID strin
 		}
 	}
 
-	// Create settings as JSON string
 	settingsJSON := map[string]interface{}{
 		"clients": make([]map[string]interface{}, 0, len(newClients)),
 	}
@@ -352,7 +333,6 @@ func (c *Client) RemoveClient(ctx context.Context, inboundID int, clientID strin
 	}
 	settingsStr, _ := json.Marshal(settingsJSON)
 
-	// Create the full request data
 	requestData := map[string]interface{}{
 		"id":       inboundID,
 		"settings": string(settingsStr),
@@ -418,7 +398,6 @@ func generateSubID() string {
 	return fmt.Sprintf("%x", time.Now().UnixNano()&0xFFFFFFFFFFFFFF)
 }
 
-// retryWithBackoff retries a function with exponential backoff
 func retryWithBackoff(ctx context.Context, fn func() error, maxRetries int, initialDelay time.Duration) error {
 	var lastErr error
 	delay := initialDelay
@@ -433,15 +412,13 @@ func retryWithBackoff(ctx context.Context, fn func() error, maxRetries int, init
 		if i < maxRetries-1 {
 			logger.Warnf("Retry %d/%d after error: %v", i+1, maxRetries, lastErr)
 
-			// Use context-aware sleep
 			select {
 			case <-time.After(delay):
-				// Continue to next retry
 			case <-ctx.Done():
 				return fmt.Errorf("context cancelled: %w", ctx.Err())
 			}
 
-			delay *= 2 // Exponential backoff
+			delay *= 2
 		}
 	}
 

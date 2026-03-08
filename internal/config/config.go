@@ -68,7 +68,6 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("TELEGRAM_BOT_TOKEN is required")
 	}
 
-	// Validate XUI configuration
 	if config.XUIHost == "" {
 		return nil, fmt.Errorf("XUI_HOST is required")
 	}
@@ -79,17 +78,14 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("XUI_PASSWORD is required")
 	}
 
-	// Validate traffic limit
 	if config.TrafficLimitGB < 1 || config.TrafficLimitGB > 1000 {
 		return nil, fmt.Errorf("TRAFFIC_LIMIT_GB must be between 1 and 1000")
 	}
 
-	// Validate inbound ID
 	if config.XUIInboundID < 1 {
 		return nil, fmt.Errorf("XUI_INBOUND_ID must be positive")
 	}
 
-	// Validate Telegram admin ID (can be 0 for no admin)
 	if config.TelegramAdminID < 0 {
 		return nil, fmt.Errorf("TELEGRAM_ADMIN_ID must be non-negative")
 	}

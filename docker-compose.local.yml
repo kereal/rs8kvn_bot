@@ -1,5 +1,4 @@
 # Docker Compose for local development
-# Note: Create data directory first with: mkdir -p data && chmod 755 data
 
 services:
     tgvpn_bot:
