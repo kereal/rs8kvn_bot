@@ -1,7 +1,7 @@
 services:
     tgvpn_bot:
-        image: ghcr.io/USERNAME/tgvpn_go:latest
-        container_name: tgvpn_bot
+        image: ghcr.io/kereal/rs8kvn_bot:latest
+        container_name: rs8kvn_bot
         restart: unless-stopped
         volumes:
             - ./.env:/app/.env:ro
