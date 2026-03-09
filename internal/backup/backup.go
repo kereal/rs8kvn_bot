@@ -8,7 +8,7 @@ import (
 	"sort"
 	"time"
 
-	"tgvpn_go/internal/logger"
+	"rs8kvn_bot/internal/logger"
 )
 
 func BackupDatabase(dbPath string) error {

@@ -1,4 +1,4 @@
-module tgvpn_go
+module rs8kvn_bot
 
 go 1.21
 
@@ -17,5 +17,3 @@ require (
 	github.com/mattn/go-sqlite3 v1.14.22 // indirect
 	go.uber.org/multierr v1.10.0 // indirect
 )
-
-replace github.com/tgvpn_go => ./

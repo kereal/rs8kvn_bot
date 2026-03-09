@@ -1,5 +1,5 @@
 services:
-    tgvpn_bot:
+    rs8kvn_bot:
         image: ghcr.io/kereal/rs8kvn_bot:latest
         container_name: rs8kvn_bot
         restart: unless-stopped
@@ -9,7 +9,7 @@ services:
         environment:
             - TZ=Europe/Moscow
         healthcheck:
-            test: ["CMD", "pgrep", "tgvpn_bot"]
+            test: ["CMD", "pgrep", "rs8kvn_bot"]
             interval: 30s
             timeout: 10s
             retries: 3

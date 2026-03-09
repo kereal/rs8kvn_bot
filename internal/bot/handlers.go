@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"time"
 
-	"tgvpn_go/internal/config"
-	"tgvpn_go/internal/database"
-	"tgvpn_go/internal/logger"
-	"tgvpn_go/internal/ratelimiter"
-	"tgvpn_go/internal/xui"
+	"rs8kvn_bot/internal/config"
+	"rs8kvn_bot/internal/database"
+	"rs8kvn_bot/internal/logger"
+	"rs8kvn_bot/internal/ratelimiter"
+	"rs8kvn_bot/internal/xui"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
