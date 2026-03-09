@@ -32,17 +32,6 @@ type APIResponse struct {
 	Obj     json.RawMessage `json:"obj,omitempty"`
 }
 
-type Inbound struct {
-	ID       int             `json:"id"`
-	Port     int             `json:"port"`
-	Protocol string          `json:"protocol"`
-	Settings json.RawMessage `json:"settings"`
-}
-
-type InboundSettings struct {
-	Clients []ClientConfig `json:"clients"`
-}
-
 type ClientConfig struct {
 	ID         string `json:"id"`
 	Email      string `json:"email"`
@@ -137,57 +126,6 @@ func (c *Client) doLogin(ctx context.Context) error {
 	return nil
 }
 
-func (c *Client) GetInbound(ctx context.Context, inboundID int) (*Inbound, error) {
-	if err := c.ensureLoggedIn(ctx, false); err != nil {
-		return nil, fmt.Errorf("authentication required: %w", err)
-	}
-
-	url := fmt.Sprintf("%s/panel/api/inbounds/get/%d", c.host, inboundID)
-
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
-	if err != nil {
-		return nil, err
-	}
-
-	logger.Debugf("3x-ui getInbound response: %s", string(respBody))
-
-	var apiResp APIResponse
-	if err := json.Unmarshal(respBody, &apiResp); err != nil {
-		return nil, err
-	}
-
-	if !apiResp.Success {
-		return nil, fmt.Errorf("failed to get inbound: %s", apiResp.Msg)
-	}
-
-	var inbound Inbound
-	if err := json.Unmarshal(apiResp.Obj, &inbound); err != nil {
-		return nil, err
-	}
-
-	if len(inbound.Settings) > 0 && inbound.Settings[0] == '"' {
-		var settingsStr string
-		if err := json.Unmarshal(inbound.Settings, &settingsStr); err == nil {
-			inbound.Settings = []byte(settingsStr)
-		}
-	}
-
-	return &inbound, nil
-}
-
 func (c *Client) AddClient(ctx context.Context, inboundID int, email string, trafficGB int64, expiryTime time.Time) (*ClientConfig, error) {
 	if err := c.ensureLoggedIn(ctx, false); err != nil {
 		return nil, fmt.Errorf("authentication required: %w", err)
@@ -205,7 +143,7 @@ func (c *Client) AddClientWithID(ctx context.Context, inboundID int, email strin
 		return nil, fmt.Errorf("authentication required: %w", err)
 	}
 
-	// Формируем данные только для нового клиента — addClient API добавит к существующим
+	// Данные только нового клиента — 3x-ui сам добавит его к существующим
 	clientData := map[string]interface{}{
 		"id":         clientID,
 		"email":      email,
@@ -223,7 +161,7 @@ func (c *Client) AddClientWithID(ctx context.Context, inboundID int, email strin
 		return nil, err
 	}
 
-	// Используем addClient API — он добавляет к существующим, а не заменяет
+	// POST /panel/api/inbounds/addClient — добавляет клиента к существующим
 	addURL := fmt.Sprintf("%s/panel/api/inbounds/addClient", c.host)
 	req, err := http.NewRequestWithContext(ctx, "POST", addURL, bytes.NewBuffer(body))
 	if err != nil {
@@ -255,7 +193,7 @@ func (c *Client) AddClientWithID(ctx context.Context, inboundID int, email strin
 		return nil, fmt.Errorf("failed to add client: %s", apiResp.Msg)
 	}
 
-	logger.Infof("Client %s added successfully to inbound %d", email, inboundID)
+	logger.Infof("Клиент %s успешно добавлен в inbound %d", email, inboundID)
 
 	return &ClientConfig{
 		ID:         clientID,
