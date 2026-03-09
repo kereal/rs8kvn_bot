@@ -194,11 +194,11 @@ func (h *Handler) createSubscription(ctx context.Context, chatID int64, username
 	logger.Infof("Creating subscription for %s: traffic=%d GB, expiry=%s",
 		username, h.config.TrafficLimitGB, expiryTime.Format("02.01.2006, 15:04:05"))
 
-	// Step 1: Generate IDs
+	// Шаг 1: Генерируем ID
 	clientID := generateUUID()
 	subID := generateSubID()
 
-	// Step 2: Add client to 3x-ui panel first
+	// Шаг 2: Сначала добавляем клиента в 3x-ui панель
 	client, err := h.xui.AddClientWithID(ctx, h.config.XUIInboundID, username, clientID, subID, trafficBytes, expiryTime)
 	if err != nil {
 		logger.Errorf("Failed to add client to 3x-ui: %v", err)
@@ -206,7 +206,7 @@ func (h *Handler) createSubscription(ctx context.Context, chatID int64, username
 		return
 	}
 
-	// Step 3: Save to database
+	// Шаг 3: Сохраняем в базу данных
 	subscriptionURL := h.xui.GetSubscriptionLink(xui.GetExternalURL(h.config.XUIHost), client.SubID, h.config.XUISubPath)
 
 	sub := &database.Subscription{
