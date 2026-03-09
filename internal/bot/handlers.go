@@ -194,17 +194,25 @@ func (h *Handler) createSubscription(ctx context.Context, chatID int64, username
 	logger.Infof("Creating subscription for %s: traffic=%d GB, expiry=%s",
 		username, h.config.TrafficLimitGB, expiryTime.Format("02.01.2006, 15:04:05"))
 
-	// Generate IDs first
+	// Step 1: Generate IDs
 	clientID := generateUUID()
 	subID := generateSubID()
 
-	// Step 1: Save to database first
-	subscriptionURL := h.xui.GetSubscriptionLink(xui.GetExternalURL(h.config.XUIHost), subID, h.config.XUISubPath)
+	// Step 2: Add client to 3x-ui panel first
+	client, err := h.xui.AddClientWithID(ctx, h.config.XUIInboundID, username, clientID, subID, trafficBytes, expiryTime)
+	if err != nil {
+		logger.Errorf("Failed to add client to 3x-ui: %v", err)
+		h.SendMessage(ctx, chatID, "❌ Произошла ошибка при создании подписки. Попробуйте позже.")
+		return
+	}
+
+	// Step 3: Save to database
+	subscriptionURL := h.xui.GetSubscriptionLink(xui.GetExternalURL(h.config.XUIHost), client.SubID, h.config.XUISubPath)
 
 	sub := &database.Subscription{
 		TelegramID:      chatID,
 		Username:        username,
-		ClientID:        clientID,
+		ClientID:        client.ID,
 		XUIHost:         h.config.XUIHost,
 		InboundID:       h.config.XUIInboundID,
 		TrafficLimit:    trafficBytes,
@@ -215,36 +223,18 @@ func (h *Handler) createSubscription(ctx context.Context, chatID int64, username
 
 	if err := database.CreateSubscription(sub); err != nil {
 		logger.Errorf("Failed to save subscription: %v", err)
-		h.SendMessage(ctx, chatID, "❌ Произошла ошибка при сохранении подписки. Попробуйте позже.")
+		h.SendMessage(ctx, chatID, "❌ Подписка создана в панели, но не сохранена в базе. Обратитесь к администратору.")
 		return
-	}
-
-	// Step 2: Add client to 3x-ui panel
-	client, err := h.xui.AddClientWithID(ctx, h.config.XUIInboundID, username, clientID, subID, trafficBytes, expiryTime)
-	if err != nil {
-		logger.Errorf("Failed to add client to 3x-ui: %v", err)
-		// Remove from DB since 3x-ui operation failed
-		if dbErr := database.DeleteSubscription(sub); dbErr != nil {
-			logger.Errorf("Failed to delete orphaned DB record: %v", dbErr)
-		}
-		h.SendMessage(ctx, chatID, "❌ Произошла ошибка при создании подписки. Попробуйте позже.")
-		return
-	}
-
-	// Update subscription URL with actual subID from panel (if different)
-	if client.SubID != subID {
-		sub.SubscriptionURL = h.xui.GetSubscriptionLink(xui.GetExternalURL(h.config.XUIHost), client.SubID, h.config.XUISubPath)
-		database.UpdateSubscription(sub)
 	}
 
 	msg := tgbotapi.NewMessage(chatID, fmt.Sprintf("✅ Подписка успешно создана!\n\n📊 Трафик: %d ГБ\n\n🔗 Ссылка на подписку:\n`%s`\n\n📱 Используйте эту ссылку в любом клиенте поддерживающем VLESS+Reality+Vision",
 		h.config.TrafficLimitGB,
-		sub.SubscriptionURL,
+		subscriptionURL,
 	))
 	msg.ParseMode = "Markdown"
 	h.sendWithRetry(ctx, msg, 3)
 
-	h.notifyAdmin(ctx, username, chatID, sub.SubscriptionURL, expiryTime)
+	h.notifyAdmin(ctx, username, chatID, subscriptionURL, expiryTime)
 	logger.Infof("Subscription created for user %s (%d)", username, chatID)
 }
 
