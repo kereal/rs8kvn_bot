@@ -194,19 +194,17 @@ func (h *Handler) createSubscription(ctx context.Context, chatID int64, username
 	logger.Infof("Creating subscription for %s: traffic=%d GB, expiry=%s",
 		username, h.config.TrafficLimitGB, expiryTime.Format("02.01.2006, 15:04:05"))
 
-	client, err := h.xui.AddClient(ctx, h.config.XUIInboundID, username, trafficBytes, expiryTime)
-	if err != nil {
-		logger.Errorf("Failed to add client to 3x-ui: %v", err)
-		h.SendMessage(ctx, chatID, "❌ Произошла ошибка при создании подписки. Попробуйте позже.")
-		return
-	}
+	// Generate IDs first
+	clientID := generateUUID()
+	subID := generateSubID()
 
-	subscriptionURL := h.xui.GetSubscriptionLink(xui.GetExternalURL(h.config.XUIHost), client.SubID, h.config.XUISubPath)
+	// Step 1: Save to database first
+	subscriptionURL := h.xui.GetSubscriptionLink(xui.GetExternalURL(h.config.XUIHost), subID, h.config.XUISubPath)
 
 	sub := &database.Subscription{
 		TelegramID:      chatID,
 		Username:        username,
-		ClientID:        client.ID,
+		ClientID:        clientID,
 		XUIHost:         h.config.XUIHost,
 		InboundID:       h.config.XUIInboundID,
 		TrafficLimit:    trafficBytes,
@@ -217,21 +215,33 @@ func (h *Handler) createSubscription(ctx context.Context, chatID int64, username
 
 	if err := database.CreateSubscription(sub); err != nil {
 		logger.Errorf("Failed to save subscription: %v", err)
-		if cleanupErr := h.xui.RemoveClient(ctx, h.config.XUIInboundID, client.ID); cleanupErr != nil {
-			logger.Errorf("Failed to cleanup orphaned XUI client: %v", cleanupErr)
-		}
 		h.SendMessage(ctx, chatID, "❌ Произошла ошибка при сохранении подписки. Попробуйте позже.")
 		return
 	}
 
+	// Step 2: Add client to 3x-ui panel
+	client, err := h.xui.AddClientWithID(ctx, h.config.XUIInboundID, username, clientID, subID, trafficBytes, expiryTime)
+	if err != nil {
+		logger.Errorf("Failed to add client to 3x-ui: %v", err)
+		// Don't remove from DB - admin can clean up manually
+		h.SendMessage(ctx, chatID, "❌ Подписка сохранена, но произошла ошибка при добавлении в панель. Обратитесь к администратору.")
+		return
+	}
+
+	// Update subscription URL with actual subID from panel (if different)
+	if client.SubID != subID {
+		sub.SubscriptionURL = h.xui.GetSubscriptionLink(xui.GetExternalURL(h.config.XUIHost), client.SubID, h.config.XUISubPath)
+		database.UpdateSubscription(sub)
+	}
+
 	msg := tgbotapi.NewMessage(chatID, fmt.Sprintf("✅ Подписка успешно создана!\n\n📊 Трафик: %d ГБ\n\n🔗 Ссылка на подписку:\n`%s`\n\n📱 Используйте эту ссылку в любом клиенте поддерживающем VLESS+Reality+Vision",
 		h.config.TrafficLimitGB,
-		subscriptionURL,
+		sub.SubscriptionURL,
 	))
 	msg.ParseMode = "Markdown"
 	h.sendWithRetry(ctx, msg, 3)
 
-	h.notifyAdmin(ctx, username, chatID, subscriptionURL, expiryTime)
+	h.notifyAdmin(ctx, username, chatID, sub.SubscriptionURL, expiryTime)
 	logger.Infof("Subscription created for user %s (%d)", username, chatID)
 }
 
@@ -295,6 +305,20 @@ func (h *Handler) sendWithRetry(ctx context.Context, msg tgbotapi.MessageConfig,
 func (h *Handler) SendMessage(ctx context.Context, chatID int64, text string) {
 	msg := tgbotapi.NewMessage(chatID, text)
 	h.send(ctx, msg)
+}
+
+func generateUUID() string {
+	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
+		time.Now().Unix(),
+		time.Now().UnixNano()&0xFFFF,
+		(time.Now().UnixNano()>>16)&0xFFFF,
+		(time.Now().UnixNano()>>32)&0xFFFF,
+		time.Now().UnixNano()&0xFFFFFFFFFFFF,
+	)
+}
+
+func generateSubID() string {
+	return fmt.Sprintf("%x", time.Now().UnixNano()&0xFFFFFFFFFFFFFF)
 }
 
 func getLastSecondOfMonth(t time.Time) time.Time {

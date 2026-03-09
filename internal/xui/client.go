@@ -193,53 +193,37 @@ func (c *Client) AddClient(ctx context.Context, inboundID int, email string, tra
 		return nil, fmt.Errorf("authentication required: %w", err)
 	}
 
-	inbound, err := c.GetInbound(ctx, inboundID)
-	if err != nil {
-		return nil, err
-	}
-
-	var settings InboundSettings
-	if err := json.Unmarshal(inbound.Settings, &settings); err != nil {
-		return nil, fmt.Errorf("failed to parse inbound settings: %w", err)
-	}
-
-	for _, client := range settings.Clients {
-		if client.Email == email {
-			logger.Infof("Client with email %s already exists, returning existing subscription", email)
-			return &client, nil
-		}
-	}
-
 	clientID := generateUUID()
 	subID := generateSubID()
 
-	settingsJSON := map[string]interface{}{
-		"clients": []map[string]interface{}{
-			{
-				"id":         clientID,
-				"email":      email,
-				"limitIp":    0,
-				"totalGB":    trafficGB,
-				"expiryTime": expiryTime.UnixMilli(),
-				"enable":     true,
-				"flow":       "xtls-rprx-vision",
-				"subId":      subID,
-				"reset":      31,
-			},
-		},
-	}
-	settingsStr, _ := json.Marshal(settingsJSON)
+	return c.AddClientWithID(ctx, inboundID, email, clientID, subID, trafficGB, expiryTime)
+}
 
-	requestData := map[string]interface{}{
-		"id":       inboundID,
-		"settings": string(settingsStr),
+// AddClientWithID adds a client with predefined IDs (for atomic DB-first operations)
+func (c *Client) AddClientWithID(ctx context.Context, inboundID int, email string, clientID, subID string, trafficGB int64, expiryTime time.Time) (*ClientConfig, error) {
+	if err := c.ensureLoggedIn(ctx, false); err != nil {
+		return nil, fmt.Errorf("authentication required: %w", err)
 	}
 
-	body, err := json.Marshal(requestData)
+	// Prepare only the new client data - addClient API will add to existing clients
+	clientData := map[string]interface{}{
+		"id":         clientID,
+		"email":      email,
+		"limitIp":    0,
+		"totalGB":    trafficGB,
+		"expiryTime": expiryTime.UnixMilli(),
+		"enable":     true,
+		"flow":       "xtls-rprx-vision",
+		"subId":      subID,
+		"reset":      31,
+	}
+
+	body, err := json.Marshal(clientData)
 	if err != nil {
 		return nil, err
 	}
 
+	// Use addClient API - it adds to existing clients, doesn't replace
 	addURL := fmt.Sprintf("%s/panel/api/inbounds/addClient", c.host)
 	req, err := http.NewRequestWithContext(ctx, "POST", addURL, bytes.NewBuffer(body))
 	if err != nil {
