@@ -223,8 +223,11 @@ func (h *Handler) createSubscription(ctx context.Context, chatID int64, username
 	client, err := h.xui.AddClientWithID(ctx, h.config.XUIInboundID, username, clientID, subID, trafficBytes, expiryTime)
 	if err != nil {
 		logger.Errorf("Failed to add client to 3x-ui: %v", err)
-		// Don't remove from DB - admin can clean up manually
-		h.SendMessage(ctx, chatID, "❌ Подписка сохранена, но произошла ошибка при добавлении в панель. Обратитесь к администратору.")
+		// Remove from DB since 3x-ui operation failed
+		if dbErr := database.DeleteSubscription(sub); dbErr != nil {
+			logger.Errorf("Failed to delete orphaned DB record: %v", dbErr)
+		}
+		h.SendMessage(ctx, chatID, "❌ Произошла ошибка при создании подписки. Попробуйте позже.")
 		return
 	}
 
