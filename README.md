@@ -1,4 +1,4 @@
-# TGVPN Bot - Telegram Bot for 3x-ui VLESS Subscription Distribution
+# rs8kvn_bot - Telegram Bot for 3x-ui VLESS Subscription Distribution
 
 Telegram bot for distributing VLESS+Reality+Vision proxy subscriptions from 3x-ui panel.
 
@@ -26,8 +26,8 @@ Telegram bot for distributing VLESS+Reality+Vision proxy subscriptions from 3x-u
 #### 1. Create directory structure
 
 ```bash
-mkdir -p tgvpn_go
-cd tgvpn_go
+mkdir -p rs8kvn_bot
+cd rs8kvn_bot
 ```
 
 #### 2. Configure environment
@@ -84,28 +84,28 @@ chmod 755 data
 
 ```bash
 # Pull from GitHub Container Registry
-docker pull ghcr.io/YOUR_USERNAME/tgvpn_go:latest
+docker pull ghcr.io/YOUR_USERNAME/rs8kvn_bot:latest
 
 # Run container
 docker run -d \
-  --name tgvpn_bot \
+  --name rs8kvn_bot \
   --restart unless-stopped \
   -v $(pwd)/.env:/app/.env:ro \
   -v $(pwd)/data:/app/data \
-  ghcr.io/YOUR_USERNAME/tgvpn_go:latest
+  ghcr.io/YOUR_USERNAME/rs8kvn_bot:latest
 ```
 
 #### 6. View logs
 
 ```bash
-docker logs -f tgvpn_bot
+docker logs -f rs8kvn_bot
 ```
 
 #### 7. Stop/Start
 
 ```bash
-docker stop tgvpn_bot
-docker start tgvpn_bot
+docker stop rs8kvn_bot
+docker start rs8kvn_bot
 ```
 
 ### Option 2: Docker Compose
@@ -134,7 +134,7 @@ docker-compose logs -f
 #### 1. Clone and install dependencies
 
 ```bash
-cd tgvpn_go
+cd rs8kvn_bot
 go mod tidy
 ```
 
@@ -149,10 +149,10 @@ cp .env.example .env
 
 ```bash
 # Build
-go build -ldflags="-s -w" -o tgvpn_bot ./cmd/bot
+go build -ldflags="-s -w" -o rs8kvn_bot ./cmd/bot
 
 # Run
-./tgvpn_bot
+./rs8kvn_bot
 ```
 
 Or run directly:
@@ -176,7 +176,7 @@ This project includes a GitHub Actions workflow that automatically builds and pu
 
 1. Go to your GitHub repository settings
 2. Enable "Packages" in Features
-3. The workflow will automatically push to `ghcr.io/YOUR_USERNAME/tgvpn_go`
+3. The workflow will automatically push to `ghcr.io/YOUR_USERNAME/rs8kvn_bot`
 
 ### Triggers
 
@@ -193,7 +193,7 @@ This project includes a GitHub Actions workflow that automatically builds and pu
 ## Project Structure
 
 ```
-tgvpn_go/
+rs8kvn_bot/
 ├── cmd/
 │   └── bot/
 │       └── main.go          # Entry point

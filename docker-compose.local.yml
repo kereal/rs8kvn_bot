@@ -1,9 +1,9 @@
 # Docker Compose for local development
 
 services:
-    tgvpn_bot:
+    rs8kvn_bot:
         build: .
-        container_name: tgvpn_bot_local
+        container_name: rs8kvn_bot_local
         restart: unless-stopped
         volumes:
             - ./.env:/app/.env:ro

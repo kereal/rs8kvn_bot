@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"tgvpn_go/internal/logger"
+	"rs8kvn_bot/internal/logger"
 )
 
 const maxResponseSize = 1 << 20

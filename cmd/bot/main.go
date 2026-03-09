@@ -9,12 +9,12 @@ import (
 	"syscall"
 	"time"
 
-	"tgvpn_go/internal/backup"
-	"tgvpn_go/internal/bot"
-	"tgvpn_go/internal/config"
-	"tgvpn_go/internal/database"
-	"tgvpn_go/internal/logger"
-	"tgvpn_go/internal/xui"
+	"rs8kvn_bot/internal/backup"
+	"rs8kvn_bot/internal/bot"
+	"rs8kvn_bot/internal/config"
+	"rs8kvn_bot/internal/database"
+	"rs8kvn_bot/internal/logger"
+	"rs8kvn_bot/internal/xui"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
@@ -32,7 +32,7 @@ func main() {
 	}
 	defer logger.Close()
 
-	logger.Info("Starting TGVPN Bot...")
+	logger.Info("Starting rs8kvn_bot...")
 
 	if err := database.Init(cfg.DatabasePath); err != nil {
 		logger.Fatalf("Failed to initialize database: %v", err)
