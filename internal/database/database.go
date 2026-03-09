@@ -109,6 +109,13 @@ func UpdateSubscription(sub *Subscription) error {
 	return result.Error
 }
 
+func DeleteSubscription(sub *Subscription) error {
+	if DB == nil {
+		return fmt.Errorf("database not initialized")
+	}
+	return DB.Delete(sub).Error
+}
+
 func GetExpired() ([]Subscription, error) {
 	var subs []Subscription
 	result := DB.Where("status = ? AND expiry_time < ?", "active", time.Now()).
