@@ -199,13 +199,13 @@ func (c *Client) AddClient(ctx context.Context, inboundID int, email string, tra
 	return c.AddClientWithID(ctx, inboundID, email, clientID, subID, trafficGB, expiryTime)
 }
 
-// AddClientWithID adds a client with predefined IDs (for atomic DB-first operations)
+// AddClientWithID добавляет клиента с заранее определёнными ID (для атомарной операции БД)
 func (c *Client) AddClientWithID(ctx context.Context, inboundID int, email string, clientID, subID string, trafficGB int64, expiryTime time.Time) (*ClientConfig, error) {
 	if err := c.ensureLoggedIn(ctx, false); err != nil {
 		return nil, fmt.Errorf("authentication required: %w", err)
 	}
 
-	// Prepare only the new client data - addClient API will add to existing clients
+	// Формируем данные только для нового клиента — addClient API добавит к существующим
 	clientData := map[string]interface{}{
 		"id":         clientID,
 		"email":      email,
@@ -223,7 +223,7 @@ func (c *Client) AddClientWithID(ctx context.Context, inboundID int, email strin
 		return nil, err
 	}
 
-	// Use addClient API - it adds to existing clients, doesn't replace
+	// Используем addClient API — он добавляет к существующим, а не заменяет
 	addURL := fmt.Sprintf("%s/panel/api/inbounds/addClient", c.host)
 	req, err := http.NewRequestWithContext(ctx, "POST", addURL, bytes.NewBuffer(body))
 	if err != nil {
