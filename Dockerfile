@@ -22,9 +22,9 @@ FROM alpine:3.19
 # Install runtime dependencies for SQLite
 RUN apk add --no-cache ca-certificates
 
-# Create app directory and data directory
-WORKDIR /opt/rs8kvn
-RUN mkdir -p /app/data
+# Create app directory and data directory with proper permissions
+WORKDIR /app
+RUN mkdir -p /app/data && chmod 777 /app/data
 
 # Copy binary from builder
 COPY --from=builder /app/rs8kvn_bot .
@@ -36,12 +36,5 @@ EXPOSE 0
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
     CMD pgrep rs8kvn_bot > /dev/null && exit 0 || exit 1
 
-# Run as non-root user
-RUN adduser -D -g '' appuser && chown -R appuser:appuser /app
-USER appuser
-
-# Set working directory to /app for volume mount
-WORKDIR /app
-
 # Run the bot
-CMD ["/opt/rs8kvn/rs8kvn_bot"]
+CMD ["/app/rs8kvn_bot"]
