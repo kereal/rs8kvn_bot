@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -143,25 +144,40 @@ func (c *Client) AddClientWithID(ctx context.Context, inboundID int, email strin
 		return nil, fmt.Errorf("authentication required: %w", err)
 	}
 
-	// Данные только нового клиента — 3x-ui сам добавит его к существующим
-	clientData := map[string]interface{}{
-		"id":         clientID,
-		"email":      email,
-		"limitIp":    0,
-		"totalGB":    trafficGB,
-		"expiryTime": expiryTime.UnixMilli(),
-		"enable":     true,
-		"flow":       "xtls-rprx-vision",
-		"subId":      subID,
-		"reset":      31,
+	// Данные нового клиента в формате settings
+	clientSettings := map[string]interface{}{
+		"clients": []map[string]interface{}{
+			{
+				"id":         clientID,
+				"email":      email,
+				"limitIp":    0,
+				"totalGB":    trafficGB,
+				"expiryTime": expiryTime.UnixMilli(),
+				"enable":     true,
+				"flow":       "xtls-rprx-vision",
+				"subId":      subID,
+				"reset":      31,
+			},
+		},
 	}
 
-	body, err := json.Marshal(clientData)
+	settingsJSON, err := json.Marshal(clientSettings)
 	if err != nil {
 		return nil, err
 	}
 
-	// POST /panel/api/inbounds/addClient — добавляет клиента к существующим
+	// Формируем запрос: id + settings (как строка JSON)
+	requestData := map[string]interface{}{
+		"id":       inboundID, // 3x-ui ожидает int
+		"settings": string(settingsJSON),
+	}
+
+	body, err := json.Marshal(requestData)
+	if err != nil {
+		return nil, err
+	}
+
+	// POST /panel/api/inbounds/addClient — добавляет нового клиента к существующим
 	addURL := fmt.Sprintf("%s/panel/api/inbounds/addClient", c.host)
 	req, err := http.NewRequestWithContext(ctx, "POST", addURL, bytes.NewBuffer(body))
 	if err != nil {
@@ -184,13 +200,26 @@ func (c *Client) AddClientWithID(ctx context.Context, inboundID int, email strin
 
 	logger.Infof("3x-ui addClient response: %s", string(respBody))
 
-	var apiResp APIResponse
-	if err := json.Unmarshal(respBody, &apiResp); err != nil {
+	// Пробуем распарсить как простой ответ с success/msg
+	type SimpleResponse struct {
+		Success bool        `json:"success"`
+		Msg     string      `json:"msg"`
+		Obj     interface{} `json:"obj,omitempty"`
+	}
+
+	var simpleResp SimpleResponse
+	if err := json.Unmarshal(respBody, &simpleResp); err != nil {
 		return nil, fmt.Errorf("failed to parse response: %w", err)
 	}
 
-	if !apiResp.Success {
-		return nil, fmt.Errorf("failed to add client: %s", apiResp.Msg)
+	// 3x-ui иногда возвращает success=false но с сообщением об успехе
+	// Проверяем msg на наличие "successfully" или "added"
+	if !simpleResp.Success && simpleResp.Msg != "" {
+		if containsSuccess(simpleResp.Msg) {
+			logger.Infof("3x-ui вернул success=false, но операция успешна: %s", simpleResp.Msg)
+		} else {
+			return nil, fmt.Errorf("failed to add client: %s", simpleResp.Msg)
+		}
 	}
 
 	logger.Infof("Клиент %s успешно добавлен в inbound %d", email, inboundID)
@@ -204,6 +233,13 @@ func (c *Client) AddClientWithID(ctx context.Context, inboundID int, email strin
 		SubID:      subID,
 		Reset:      31,
 	}, nil
+}
+
+func containsSuccess(msg string) bool {
+	msg = strings.ToLower(msg)
+	return strings.Contains(msg, "successfully") ||
+		strings.Contains(msg, "added") ||
+		strings.Contains(msg, "success")
 }
 
 func (c *Client) GetSubscriptionLink(baseURL string, subID string, subPath string) string {
