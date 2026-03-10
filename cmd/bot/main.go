@@ -123,8 +123,10 @@ func handleUpdate(handler *bot.Handler, update tgbotapi.Update) {
 			switch update.Message.Command() {
 			case "start":
 				handler.HandleStart(update)
+			case "help":
+				handler.HandleHelp(update)
 			default:
-				handler.SendMessage(context.Background(), update.Message.Chat.ID, "Неизвестная команда. Используйте /start")
+				handler.SendMessage(context.Background(), update.Message.Chat.ID, "Неизвестная команда. Используйте /start или /help")
 			}
 		} else {
 			handler.SendMessage(context.Background(), update.Message.Chat.ID, "Пожалуйста, используйте кнопки для взаимодействия с ботом.")
