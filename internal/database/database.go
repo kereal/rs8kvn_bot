@@ -108,10 +108,3 @@ func UpdateSubscription(sub *Subscription) error {
 	result := DB.Save(sub)
 	return result.Error
 }
-
-func GetExpired() ([]Subscription, error) {
-	var subs []Subscription
-	result := DB.Where("status = ? AND expiry_time < ?", "active", time.Now()).
-		Find(&subs)
-	return subs, result.Error
-}
