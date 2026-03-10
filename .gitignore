@@ -13,6 +13,7 @@ logs/
 
 # Binary
 tgvpn_bot
+rs8kvn_bot
 *.exe
 *.exe~
 *.dll
