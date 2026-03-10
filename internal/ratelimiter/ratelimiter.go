@@ -37,20 +37,6 @@ func (tb *TokenBucket) Allow() bool {
 	return false
 }
 
-func (tb *TokenBucket) AllowN(n int) bool {
-	tb.mu.Lock()
-	defer tb.mu.Unlock()
-
-	tb.refill()
-
-	if tb.tokens >= float64(n) {
-		tb.tokens -= float64(n)
-		return true
-	}
-
-	return false
-}
-
 func (tb *TokenBucket) Wait(ctx context.Context) bool {
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
@@ -78,11 +64,4 @@ func (tb *TokenBucket) refill() {
 	}
 
 	tb.lastRefill = now
-}
-
-func (tb *TokenBucket) Tokens() float64 {
-	tb.mu.Lock()
-	defer tb.mu.Unlock()
-	tb.refill()
-	return tb.tokens
 }
