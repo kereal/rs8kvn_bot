@@ -74,6 +74,44 @@ func (h *Handler) HandleStart(update tgbotapi.Update) {
 	h.send(context.Background(), msg)
 }
 
+func (h *Handler) HandleHelp(update tgbotapi.Update) {
+	if update.Message == nil {
+		logger.Error("HandleHelp called with nil Message")
+		return
+	}
+
+	chatID := update.Message.Chat.ID
+
+	helpText := `📖 *Справка по командам бота*
+
+*Доступные команды:*
+/start - Начать работу с ботом
+/help - Показать эту справку
+
+*Функции бота:*
+📥 *Получить подписку* - Создать новую подписку или получить существующую
+📋 *Моя подписка* - Посмотреть информацию о текущей подписке
+
+*Параметры подписки:*
+📊 Трафик: ` + fmt.Sprintf("%d", h.config.TrafficLimitGB) + ` ГБ в месяц
+
+*Технические детали:*
+🔐 Протокол: VLESS+Reality+Vision
+📱 Совместимость: V2Ray, Xray, и другие клиенты
+
+*Поддержка:*
+При возникновении проблем обратитесь к администратору: [@kereal](https://t.me/kereal)
+
+*Дополнительная информация:*
+- Подписка автоматически обновляется в конце месяца
+- Не передавайте ссылку на подписку третьим лицам
+- При истечении трафика подписка перестанет работать до следующего месяца`
+
+	msg := tgbotapi.NewMessage(chatID, helpText)
+	msg.ParseMode = "Markdown"
+	h.send(context.Background(), msg)
+}
+
 func (h *Handler) HandleCallback(update tgbotapi.Update) {
 	if update.CallbackQuery == nil {
 		logger.Error("HandleCallback called with nil CallbackQuery")

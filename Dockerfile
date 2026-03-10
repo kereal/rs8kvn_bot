@@ -32,7 +32,7 @@ COPY --from=builder /app/rs8kvn_bot .
 # Expose nothing (bot uses polling)
 EXPOSE 0
 
-# Health check - verifies process and basic functionality
+# Health check - verifies process is running
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
     CMD pgrep rs8kvn_bot > /dev/null && exit 0 || exit 1
 
