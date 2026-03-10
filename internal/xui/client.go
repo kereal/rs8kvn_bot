@@ -222,8 +222,6 @@ func (c *Client) AddClientWithID(ctx context.Context, inboundID int, email strin
 		}
 	}
 
-	logger.Infof("Клиент %s успешно добавлен в inbound %d", email, inboundID)
-
 	return &ClientConfig{
 		ID:         clientID,
 		Email:      email,

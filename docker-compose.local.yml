@@ -10,3 +10,9 @@ services:
             - ./data:/app/data
         environment:
             - TZ=Europe/Moscow
+        healthcheck:
+            test: ["CMD", "pgrep", "rs8kvn_bot"]
+            interval: 30s
+            timeout: 10s
+            retries: 3
+            start_period: 30s
