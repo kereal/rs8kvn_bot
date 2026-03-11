@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -238,9 +239,9 @@ func TestSendHeartbeat_MultipleRequests(t *testing.T) {
 }
 
 func TestStart_IntervalTiming(t *testing.T) {
-	requestCount := 0
+	var requestCount int64
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requestCount++
+		atomic.AddInt64(&requestCount, 1)
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()
@@ -255,7 +256,7 @@ func TestStart_IntervalTiming(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Initial heartbeat should have been sent
-	if requestCount < 1 {
+	if atomic.LoadInt64(&requestCount) < 1 {
 		t.Error("Initial heartbeat was not sent")
 	}
 
