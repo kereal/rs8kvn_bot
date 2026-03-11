@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"rs8kvn_bot/internal/utils"
 	"rs8kvn_bot/internal/config"
 	"rs8kvn_bot/internal/database"
 	"rs8kvn_bot/internal/logger"
@@ -233,8 +234,8 @@ func (h *Handler) createSubscription(ctx context.Context, chatID int64, username
 		username, h.config.TrafficLimitGB, expiryTime.Format("02.01.2006, 15:04:05"))
 
 	// Шаг 1: Генерируем ID
-	clientID := generateUUID()
-	subID := generateSubID()
+	clientID := utils.GenerateUUID()
+	subID := utils.GenerateSubID()
 
 	// Шаг 2: Сначала добавляем клиента в 3x-ui панель
 	client, err := h.xui.AddClientWithID(ctx, h.config.XUIInboundID, username, clientID, subID, trafficBytes, expiryTime)
@@ -336,20 +337,6 @@ func (h *Handler) sendWithRetry(ctx context.Context, msg tgbotapi.MessageConfig,
 func (h *Handler) SendMessage(ctx context.Context, chatID int64, text string) {
 	msg := tgbotapi.NewMessage(chatID, text)
 	h.send(ctx, msg)
-}
-
-func generateUUID() string {
-	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
-		time.Now().Unix(),
-		time.Now().UnixNano()&0xFFFF,
-		(time.Now().UnixNano()>>16)&0xFFFF,
-		(time.Now().UnixNano()>>32)&0xFFFF,
-		time.Now().UnixNano()&0xFFFFFFFFFFFF,
-	)
-}
-
-func generateSubID() string {
-	return fmt.Sprintf("%x", time.Now().UnixNano()&0xFFFFFFFFFFFFFF)
 }
 
 func getLastSecondOfMonth(t time.Time) time.Time {
