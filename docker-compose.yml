@@ -8,9 +8,21 @@ services:
             - ./data:/app/data
         environment:
             - TZ=Europe/Moscow
+            # Go runtime optimizations for minimal memory
+            - GOMEMLIMIT=67108864
+            - GOGC=50
         healthcheck:
             test: ["CMD", "pgrep", "rs8kvn_bot"]
             interval: 30s
             timeout: 10s
             retries: 3
             start_period: 30s
+        # Resource limits for minimal memory footprint
+        deploy:
+            resources:
+                limits:
+                    cpus: "0.5"
+                    memory: 64M
+                reservations:
+                    cpus: "0.1"
+                    memory: 4M

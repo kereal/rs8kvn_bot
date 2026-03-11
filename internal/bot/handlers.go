@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"time"
 
-	"rs8kvn_bot/internal/utils"
 	"rs8kvn_bot/internal/config"
 	"rs8kvn_bot/internal/database"
 	"rs8kvn_bot/internal/logger"
 	"rs8kvn_bot/internal/ratelimiter"
+	"rs8kvn_bot/internal/utils"
 	"rs8kvn_bot/internal/xui"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -132,7 +132,6 @@ func (h *Handler) HandleCallback(update tgbotapi.Update) {
 	callback := tgbotapi.NewCallback(update.CallbackQuery.ID, "")
 	if _, err := h.bot.Request(callback); err != nil {
 		logger.Errorf("Failed to answer callback: %v", err)
-		return
 	}
 
 	ctx := context.Background()

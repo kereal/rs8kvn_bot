@@ -13,8 +13,8 @@ import (
 	"sync"
 	"time"
 
-	"rs8kvn_bot/internal/utils"
 	"rs8kvn_bot/internal/logger"
+	"rs8kvn_bot/internal/utils"
 )
 
 const maxResponseSize = 1 << 20
@@ -49,13 +49,24 @@ type ClientConfig struct {
 
 func NewClient(host, username, password string) *Client {
 	jar, _ := cookiejar.New(nil)
+
+	// Optimized transport for minimal memory footprint
+	transport := &http.Transport{
+		MaxIdleConns:        1, // Only 1 idle connection
+		MaxIdleConnsPerHost: 1, // Only 1 idle per host
+		IdleConnTimeout:     30 * time.Second,
+		DisableCompression:  false,
+		ForceAttemptHTTP2:   false,
+	}
+
 	return &Client{
 		host:     host,
 		username: username,
 		password: password,
 		httpClient: &http.Client{
-			Timeout: 10 * time.Second,
-			Jar:     jar,
+			Timeout:   10 * time.Second,
+			Jar:       jar,
+			Transport: transport,
 		},
 	}
 }

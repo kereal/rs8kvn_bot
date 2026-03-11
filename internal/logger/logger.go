@@ -39,10 +39,10 @@ func Init(logFilePath, level string) error {
 
 	fileWriter = &lumberjack.Logger{
 		Filename:   logFilePath,
-		MaxSize:    10,
-		MaxBackups: 3,
-		MaxAge:     30,
-		Compress:   false,
+		MaxSize:    5,     // 5MB max file size (reduced from 10MB)
+		MaxBackups: 2,     // Keep only 2 backup files (reduced from 3)
+		MaxAge:     7,     // Keep logs for 7 days (reduced from 30)
+		Compress:   false, // Disable compression to save memory
 	}
 	cores = append(cores, zapcore.NewCore(encoder, zapcore.AddSync(fileWriter), zapLevel))
 
