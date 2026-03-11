@@ -13,14 +13,14 @@ import (
 
 type Subscription struct {
 	ID              uint           `gorm:"primaryKey"`
-	TelegramID      int64          `gorm:"uniqueIndex:idx_telegram_status;not null"`
+	TelegramID      int64          `gorm:"index;not null"`
 	Username        string         `gorm:"size:255"`
 	ClientID        string         `gorm:"size:255"`
 	XUIHost         string         `gorm:"size:255"`
 	InboundID       int            `gorm:"index"`
 	TrafficLimit    int64          `gorm:"default:107374182400"`
 	ExpiryTime      time.Time      `gorm:"index:idx_expiry"`
-	Status          string         `gorm:"default:active;size:50"`
+	Status          string         `gorm:"default:active;size:50;index"`
 	SubscriptionURL string         `gorm:"size:512;column:subscription_url"`
 	CreatedAt       time.Time      `gorm:"autoCreateTime"`
 	UpdatedAt       time.Time      `gorm:"autoUpdateTime"`
@@ -37,7 +37,10 @@ func Init(dbPath string) error {
 	}
 
 	var err error
-	DB, err = gorm.Open(sqlite.Open(dbPath), &gorm.Config{})
+	// Open with PrepareStmt disabled to reduce memory overhead
+	DB, err = gorm.Open(sqlite.Open(dbPath), &gorm.Config{
+		PrepareStmt: false, // Disable prepared statement cache to save memory
+	})
 	if err != nil {
 		return err
 	}
@@ -51,9 +54,11 @@ func Init(dbPath string) error {
 		return err
 	}
 
-	sqlDB.SetMaxOpenConns(1)
-	sqlDB.SetMaxIdleConns(1)
-	sqlDB.SetConnMaxLifetime(10 * time.Minute)
+	// Minimal connection pool for low memory footprint
+	sqlDB.SetMaxOpenConns(1)                  // Single connection for SQLite
+	sqlDB.SetMaxIdleConns(1)                  // Keep 1 idle connection
+	sqlDB.SetConnMaxLifetime(5 * time.Minute) // Reduce from 10min to 5min
+	sqlDB.SetConnMaxIdleTime(2 * time.Minute) // Close idle connections after 2min
 
 	if err := sqlDB.Ping(); err != nil {
 		return fmt.Errorf("database connection failed: %w", err)
@@ -64,7 +69,10 @@ func Init(dbPath string) error {
 
 func Close() error {
 	if sqlDB != nil {
-		return sqlDB.Close()
+		err := sqlDB.Close()
+		sqlDB = nil
+		DB = nil
+		return err
 	}
 	return nil
 }

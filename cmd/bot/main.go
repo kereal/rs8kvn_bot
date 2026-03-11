@@ -13,6 +13,7 @@ import (
 	"rs8kvn_bot/internal/bot"
 	"rs8kvn_bot/internal/config"
 	"rs8kvn_bot/internal/database"
+	"rs8kvn_bot/internal/heartbeat"
 	"rs8kvn_bot/internal/logger"
 	"rs8kvn_bot/internal/xui"
 
@@ -62,6 +63,8 @@ func main() {
 
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = 60
+	// Explicitly request all update types including callback queries
+	u.AllowedUpdates = []string{"message", "callback_query", "edited_message", "channel_post", "edited_channel_post", "inline_query", "chosen_inline_result", "shipping_query", "pre_checkout_query", "poll", "poll_answer"}
 	updates := botAPI.GetUpdatesChan(u)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
@@ -70,7 +73,7 @@ func main() {
 	logger.Info("Bot started successfully")
 
 	var wg sync.WaitGroup
-	wg.Add(1)
+	wg.Add(2)
 
 	go func() {
 		defer func() {
@@ -80,6 +83,16 @@ func main() {
 			wg.Done()
 		}()
 		startBackupScheduler(ctx, cfg.DatabasePath)
+	}()
+
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				logger.Errorf("Heartbeat scheduler panicked: %v", r)
+			}
+			wg.Done()
+		}()
+		heartbeat.Start(ctx, cfg.HeartbeatURL, cfg.HeartbeatInterval)
 	}()
 
 	for {

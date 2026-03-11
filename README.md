@@ -9,6 +9,7 @@ Telegram bot for distributing VLESS+Reality+Vision proxy subscriptions from 3x-u
 - 📊 100GB traffic per month
 - 📅 Auto-renewal on the last day of each month
 - 🔔 Admin notifications on new subscriptions
+- 💓 Heartbeat monitoring support
 - 📝 File logging
 - 🐳 Docker support
 
@@ -61,6 +62,10 @@ LOG_LEVEL=info
 
 # Subscription Configuration
 TRAFFIC_LIMIT_GB=100
+
+# Heartbeat Configuration (optional)
+HEARTBEAT_URL=https://monitor.example.com/heartbeat
+HEARTBEAT_INTERVAL=300
 ```
 
 #### 3. Get your Telegram Admin ID
@@ -258,6 +263,8 @@ rs8kvn_bot/
 | `LOG_FILE_PATH` | Log file path | ./data/bot.log | ❌ |
 | `LOG_LEVEL` | Log level (debug/info/warn/error) | info | ❌ |
 | `TRAFFIC_LIMIT_GB` | Traffic limit in GB | 100 | ❌ |
+| `HEARTBEAT_URL` | URL for heartbeat monitoring (empty = disabled) | - | ❌ |
+| `HEARTBEAT_INTERVAL` | Heartbeat interval in seconds | 300 | ❌ |
 
 ## Admin Notifications
 

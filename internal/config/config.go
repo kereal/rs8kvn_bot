@@ -24,12 +24,15 @@ type Config struct {
 	LogLevel    string
 
 	TrafficLimitGB int
+
+	HeartbeatURL      string
+	HeartbeatInterval int
 }
 
 func Load() (*Config, error) {
-	if err := godotenv.Load(); err != nil {
-		return nil, fmt.Errorf("failed to load .env file: %w", err)
-	}
+	// Load .env file if it exists, but don't fail if it doesn't
+	// This allows the application to work with just environment variables
+	godotenv.Load()
 
 	telegramAdminID, err := strconv.ParseInt(getEnv("TELEGRAM_ADMIN_ID", "0"), 10, 64)
 	if err != nil {
@@ -44,6 +47,11 @@ func Load() (*Config, error) {
 	trafficLimitGB, err := strconv.Atoi(getEnv("TRAFFIC_LIMIT_GB", "100"))
 	if err != nil {
 		return nil, fmt.Errorf("invalid TRAFFIC_LIMIT_GB: %w", err)
+	}
+
+	heartbeatInterval, err := strconv.Atoi(getEnv("HEARTBEAT_INTERVAL", "300"))
+	if err != nil {
+		return nil, fmt.Errorf("invalid HEARTBEAT_INTERVAL: %w", err)
 	}
 
 	config := &Config{
@@ -62,6 +70,9 @@ func Load() (*Config, error) {
 		LogLevel:    getEnv("LOG_LEVEL", "info"),
 
 		TrafficLimitGB: trafficLimitGB,
+
+		HeartbeatURL:      getEnv("HEARTBEAT_URL", ""),
+		HeartbeatInterval: heartbeatInterval,
 	}
 
 	if config.TelegramBotToken == "" {
