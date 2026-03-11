@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"rs8kvn_bot/internal/utils"
 	"rs8kvn_bot/internal/logger"
 )
 
@@ -132,8 +133,8 @@ func (c *Client) AddClient(ctx context.Context, inboundID int, email string, tra
 		return nil, fmt.Errorf("authentication required: %w", err)
 	}
 
-	clientID := generateUUID()
-	subID := generateSubID()
+	clientID := utils.GenerateUUID()
+	subID := utils.GenerateSubID()
 
 	return c.AddClientWithID(ctx, inboundID, email, clientID, subID, trafficGB, expiryTime)
 }
@@ -250,20 +251,6 @@ func GetExternalURL(host string) string {
 		return host
 	}
 	return fmt.Sprintf("%s://%s", u.Scheme, u.Host)
-}
-
-func generateUUID() string {
-	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
-		time.Now().Unix(),
-		time.Now().UnixNano()&0xFFFF,
-		(time.Now().UnixNano()>>16)&0xFFFF,
-		(time.Now().UnixNano()>>32)&0xFFFF,
-		time.Now().UnixNano()&0xFFFFFFFFFFFF,
-	)
-}
-
-func generateSubID() string {
-	return fmt.Sprintf("%x", time.Now().UnixNano()&0xFFFFFFFFFFFFFF)
 }
 
 func retryWithBackoff(ctx context.Context, fn func() error, maxRetries int, initialDelay time.Duration) error {
