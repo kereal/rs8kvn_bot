@@ -339,7 +339,7 @@ func (h *Handler) SendMessage(ctx context.Context, chatID int64, text string) {
 }
 
 func getLastSecondOfMonth(t time.Time) time.Time {
-	nextMonth := t.AddDate(0, 1, 0)
-	firstDayNextMonth := time.Date(nextMonth.Year(), nextMonth.Month(), 1, 0, 0, 0, 0, t.Location())
+	year, month, _ := t.Date()
+	firstDayNextMonth := time.Date(year, month+1, 1, 0, 0, 0, 0, t.Location())
 	return firstDayNextMonth.Add(-1 * time.Second)
 }
