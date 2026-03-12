@@ -27,6 +27,8 @@ type Config struct {
 
 	HeartbeatURL      string
 	HeartbeatInterval int
+
+	SentryDSN string
 }
 
 func Load() (*Config, error) {
@@ -73,6 +75,8 @@ func Load() (*Config, error) {
 
 		HeartbeatURL:      getEnv("HEARTBEAT_URL", ""),
 		HeartbeatInterval: heartbeatInterval,
+
+		SentryDSN: getEnv("SENTRY_DSN", ""),
 	}
 
 	if config.TelegramBotToken == "" {

@@ -17,6 +17,7 @@ import (
 	"rs8kvn_bot/internal/logger"
 	"rs8kvn_bot/internal/xui"
 
+	"github.com/getsentry/sentry-go"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
@@ -25,6 +26,22 @@ func main() {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
 		os.Exit(1)
+	}
+
+	// Initialize Sentry for error tracking
+	if cfg.SentryDSN != "" {
+		err := sentry.Init(sentry.ClientOptions{
+			Dsn:              cfg.SentryDSN,
+			Environment:      "production",
+			Release:          "rs8kvn_bot@1.5.1",
+			TracesSampleRate: 0.1,
+		})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to initialize Sentry: %v\n", err)
+		} else {
+			defer sentry.Flush(5 * time.Second)
+			logger.Info("Sentry error tracking initialized")
+		}
 	}
 
 	if err := logger.Init(cfg.LogFilePath, cfg.LogLevel); err != nil {
@@ -78,6 +95,8 @@ func main() {
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
+				sentry.CurrentHub().Recover(r)
+				sentry.Flush(2 * time.Second)
 				logger.Errorf("Backup scheduler panicked: %v", r)
 			}
 			wg.Done()
@@ -88,6 +107,8 @@ func main() {
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
+				sentry.CurrentHub().Recover(r)
+				sentry.Flush(2 * time.Second)
 				logger.Errorf("Heartbeat scheduler panicked: %v", r)
 			}
 			wg.Done()
@@ -101,6 +122,8 @@ func main() {
 			func() {
 				defer func() {
 					if r := recover(); r != nil {
+						sentry.CurrentHub().Recover(r)
+						sentry.Flush(2 * time.Second)
 						logger.Errorf("Panic in update handler: %v", r)
 					}
 				}()

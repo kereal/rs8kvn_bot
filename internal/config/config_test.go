@@ -71,6 +71,9 @@ func TestLoad_DefaultValues(t *testing.T) {
 	if cfg.HeartbeatInterval != 300 {
 		t.Errorf("HeartbeatInterval = %v, want 300", cfg.HeartbeatInterval)
 	}
+	if cfg.SentryDSN != "" {
+		t.Errorf("SentryDSN = %v, want empty", cfg.SentryDSN)
+	}
 }
 
 func TestLoad_CustomValues(t *testing.T) {
@@ -88,6 +91,7 @@ func TestLoad_CustomValues(t *testing.T) {
 	os.Setenv("TRAFFIC_LIMIT_GB", "200")
 	os.Setenv("HEARTBEAT_URL", "https://monitor.example.com/heartbeat")
 	os.Setenv("HEARTBEAT_INTERVAL", "600")
+	os.Setenv("SENTRY_DSN", "https://test@sentry.example.com/123")
 
 	defer func() {
 		os.Unsetenv("TELEGRAM_BOT_TOKEN")
@@ -103,6 +107,7 @@ func TestLoad_CustomValues(t *testing.T) {
 		os.Unsetenv("TRAFFIC_LIMIT_GB")
 		os.Unsetenv("HEARTBEAT_URL")
 		os.Unsetenv("HEARTBEAT_INTERVAL")
+		os.Unsetenv("SENTRY_DSN")
 	}()
 
 	cfg, err := Load()
@@ -148,6 +153,9 @@ func TestLoad_CustomValues(t *testing.T) {
 	}
 	if cfg.HeartbeatInterval != 600 {
 		t.Errorf("HeartbeatInterval = %v, want 600", cfg.HeartbeatInterval)
+	}
+	if cfg.SentryDSN != "https://test@sentry.example.com/123" {
+		t.Errorf("SentryDSN = %v, want https://test@sentry.example.com/123", cfg.SentryDSN)
 	}
 }
 
