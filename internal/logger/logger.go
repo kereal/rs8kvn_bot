@@ -1,10 +1,13 @@
 package logger
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
+	"github.com/getsentry/sentry-go"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"gopkg.in/natefinch/lumberjack.v2"
@@ -63,10 +66,14 @@ func Infof(template string, args ...interface{}) {
 
 func Error(args ...interface{}) {
 	Log.Error(args...)
+	// Send error to Sentry
+	sentry.CaptureMessage(formatArgs(args...))
 }
 
 func Errorf(template string, args ...interface{}) {
 	Log.Errorf(template, args...)
+	// Send error to Sentry
+	sentry.CaptureMessage(fmt.Sprintf(template, args...))
 }
 
 func Debug(args ...interface{}) {
@@ -86,10 +93,16 @@ func Warnf(template string, args ...interface{}) {
 }
 
 func Fatal(args ...interface{}) {
+	// Send fatal error to Sentry before exit
+	sentry.CaptureMessage("[FATAL] " + formatArgs(args...))
+	sentry.Flush(2 * time.Second)
 	Log.Fatal(args...)
 }
 
 func Fatalf(template string, args ...interface{}) {
+	// Send fatal error to Sentry before exit
+	sentry.CaptureMessage("[FATAL] " + fmt.Sprintf(template, args...))
+	sentry.Flush(2 * time.Second)
 	Log.Fatalf(template, args...)
 }
 
@@ -117,4 +130,9 @@ func Close() error {
 	}
 
 	return nil
+}
+
+// formatArgs formats variadic args to a string
+func formatArgs(args ...interface{}) string {
+	return fmt.Sprint(args...)
 }
