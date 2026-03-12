@@ -40,7 +40,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Failed to initialize Sentry: %v\n", err)
 		} else {
 			defer sentry.Flush(5 * time.Second)
-			logger.Info("Sentry error tracking initialized")
+			fmt.Println("Sentry error tracking initialized")
 		}
 	}
 
