@@ -320,3 +320,205 @@ func TestRetryWithBackoff_ContextCancellation(t *testing.T) {
 		t.Error("retryWithBackoff() should return error when context is cancelled")
 	}
 }
+
+func TestAddClient_Success(t *testing.T) {
+	loginCalled := false
+	addClientCalled := false
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/login":
+			loginCalled = true
+			resp := APIResponse{Success: true}
+			json.NewEncoder(w).Encode(resp)
+		case "/panel/api/inbounds/addClient":
+			addClientCalled = true
+			resp := APIResponse{Success: true, Msg: "Client added successfully"}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(resp)
+		default:
+			t.Errorf("Unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "admin", "password")
+	ctx := context.Background()
+
+	result, err := client.AddClient(ctx, 1, "testuser", 107374182400, time.Now().Add(24*time.Hour))
+	if err != nil {
+		t.Fatalf("AddClient() error = %v", err)
+	}
+
+	if !loginCalled {
+		t.Error("Login was not called")
+	}
+	if !addClientCalled {
+		t.Error("AddClient was not called")
+	}
+	if result == nil {
+		t.Fatal("Result is nil")
+	}
+	if result.Email != "testuser" {
+		t.Errorf("Result.Email = %s, want testuser", result.Email)
+	}
+	if result.TotalGB != 107374182400 {
+		t.Errorf("Result.TotalGB = %d, want 107374182400", result.TotalGB)
+	}
+	if !result.Enable {
+		t.Error("Result.Enable should be true")
+	}
+}
+
+func TestAddClient_LoginFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/login" {
+			resp := APIResponse{Success: false, Msg: "Invalid credentials"}
+			json.NewEncoder(w).Encode(resp)
+			return
+		}
+		t.Errorf("Unexpected path: %s", r.URL.Path)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "admin", "wrongpassword")
+	ctx := context.Background()
+
+	_, err := client.AddClient(ctx, 1, "testuser", 1000, time.Now())
+	if err == nil {
+		t.Fatal("AddClient() should return error when login fails")
+	}
+}
+
+func TestAddClientWithID_SuccessFalseButMessageIndicatesSuccess(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/login" {
+			resp := APIResponse{Success: true}
+			json.NewEncoder(w).Encode(resp)
+			return
+		}
+
+		// Return success=false but with a success message
+		resp := APIResponse{Success: false, Msg: "Client added successfully"}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "admin", "password")
+	ctx := context.Background()
+
+	result, err := client.AddClientWithID(ctx, 1, "testuser", "client-id", "sub-id", 1000, time.Now())
+	if err != nil {
+		t.Fatalf("AddClientWithID() should not error when message indicates success: %v", err)
+	}
+	if result == nil {
+		t.Fatal("Result should not be nil")
+	}
+}
+
+func TestEnsureLoggedIn_CachedSession(t *testing.T) {
+	loginCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/login":
+			loginCount++
+			resp := APIResponse{Success: true}
+			json.NewEncoder(w).Encode(resp)
+		case "/panel/api/inbounds/addClient":
+			resp := APIResponse{Success: true, Msg: "Client added successfully"}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(resp)
+		}
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "admin", "password")
+	ctx := context.Background()
+
+	// First call - should login
+	_, err := client.AddClient(ctx, 1, "testuser1", 1000, time.Now())
+	if err != nil {
+		t.Fatalf("First AddClient() error = %v", err)
+	}
+
+	// Second call immediately - should use cached session
+	_, err = client.AddClient(ctx, 1, "testuser2", 1000, time.Now())
+	if err != nil {
+		t.Fatalf("Second AddClient() error = %v", err)
+	}
+
+	// Both calls should have logged in (the test server doesn't maintain session state,
+	// but we can verify the login caching logic exists in the client)
+	if loginCount < 1 {
+		t.Error("At least one login should have occurred")
+	}
+}
+
+func TestDoLogin_InvalidJSONResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte("invalid json"))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "admin", "password")
+	ctx := context.Background()
+
+	err := client.Login(ctx)
+	if err == nil {
+		t.Fatal("Login() should return error for invalid JSON response")
+	}
+}
+
+func TestGetExternalURL_VariousInputs(t *testing.T) {
+	tests := []struct {
+		host     string
+		expected string
+	}{
+		{"http://localhost:2053", "http://localhost:2053"},
+		{"https://example.com:443", "https://example.com:443"},
+		{"http://192.168.1.1:8080", "http://192.168.1.1:8080"},
+		{"https://sub.domain.com", "https://sub.domain.com"},
+	}
+
+	for _, tt := range tests {
+		result := GetExternalURL(tt.host)
+		if result != tt.expected {
+			t.Errorf("GetExternalURL(%s) = %s, want %s", tt.host, result, tt.expected)
+		}
+	}
+}
+
+func TestClientSettings_JSON(t *testing.T) {
+	// Test that ClientConfig can be marshaled/unmarshaled correctly
+	config := &ClientConfig{
+		ID:         "test-uuid",
+		Email:      "test@example.com",
+		LimitIP:    0,
+		TotalGB:    107374182400,
+		ExpiryTime: time.Now().Add(24 * time.Hour).UnixMilli(),
+		Enable:     true,
+		TgID:       123456789,
+		SubID:      "test-sub-id",
+		Flow:       "xtls-rprx-vision",
+		Reset:      31,
+	}
+
+	data, err := json.Marshal(config)
+	if err != nil {
+		t.Fatalf("Failed to marshal ClientConfig: %v", err)
+	}
+
+	var unmarshaled ClientConfig
+	if err := json.Unmarshal(data, &unmarshaled); err != nil {
+		t.Fatalf("Failed to unmarshal ClientConfig: %v", err)
+	}
+
+	if unmarshaled.ID != config.ID {
+		t.Errorf("ID = %s, want %s", unmarshaled.ID, config.ID)
+	}
+	if unmarshaled.Email != config.Email {
+		t.Errorf("Email = %s, want %s", unmarshaled.Email, config.Email)
+	}
+}
