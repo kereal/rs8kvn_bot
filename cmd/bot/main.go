@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"sync"
 	"syscall"
 	"time"
@@ -21,6 +22,32 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
+// getVersion returns the current version from build info or git tag
+func getVersion() string {
+	// Try to get version from Go build info (set by go install or git tags)
+	if info, ok := debug.ReadBuildInfo(); ok {
+		// Check for vcs tag (git tag)
+		for _, setting := range info.Settings {
+			if setting.Key == "vcs.revision" {
+				// If we have a tagged version, use it
+				if info.Main.Version != "" && info.Main.Version != "(devel)" {
+					return "rs8kvn_bot@" + info.Main.Version
+				}
+				// Otherwise use short commit hash
+				if len(setting.Value) >= 7 {
+					return "rs8kvn_bot@" + setting.Value[:7]
+				}
+			}
+		}
+		// Fallback to module version if available
+		if info.Main.Version != "" && info.Main.Version != "(devel)" {
+			return "rs8kvn_bot@" + info.Main.Version
+		}
+	}
+	// Default version if no build info available
+	return "rs8kvn_bot@dev"
+}
+
 func main() {
 	cfg, err := config.Load()
 	if err != nil {
@@ -33,7 +60,7 @@ func main() {
 		err := sentry.Init(sentry.ClientOptions{
 			Dsn:              cfg.SentryDSN,
 			Environment:      "production",
-			Release:          "rs8kvn_bot@1.5.1",
+			Release:          getVersion(),
 			TracesSampleRate: 0.1,
 		})
 		if err != nil {
