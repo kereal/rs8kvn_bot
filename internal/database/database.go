@@ -49,6 +49,11 @@ func Init(dbPath string) error {
 		return err
 	}
 
+	// Run database migrations
+	if err := RunMigrations(DB); err != nil {
+		return fmt.Errorf("failed to run migrations: %w", err)
+	}
+
 	sqlDB, err = DB.DB()
 	if err != nil {
 		return err
