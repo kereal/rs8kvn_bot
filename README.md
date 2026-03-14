@@ -6,17 +6,22 @@ Telegram bot for distributing VLESS+Reality+Vision proxy subscriptions from 3x-u
 
 - 📥 Get subscription on demand
 - 📋 View current subscription status
-- 📊 100GB traffic per month
+- 📊 Configurable traffic limit (default 100GB/month)
 - 📅 Auto-renewal on the last day of each month
 - 🔔 Admin notifications on new subscriptions
 - 💓 Heartbeat monitoring support
-- 📝 File logging
+- 📝 File logging with rotation (zap)
+- 🗄️ Daily database backups with rotation
+- 🔄 Database migrations system
+- 🐛 Sentry error tracking
+- 🛡️ Rate limiting
+- ⚡ Graceful shutdown
 - 🐳 Docker support
 
 ## Requirements
 
 - Docker & Docker Compose (recommended)
-- OR Go 1.21+
+- OR Go 1.24+
 - 3x-ui panel (https://github.com/MHSanaei/3x-ui)
 - Telegram Bot Token
 
@@ -39,34 +44,7 @@ Copy `.env.example` to `.env` and fill in your values:
 cp .env.example .env
 ```
 
-Edit `.env`:
-
-```env
-# Telegram Bot Configuration
-TELEGRAM_BOT_TOKEN=your_bot_token_from_botfather
-TELEGRAM_ADMIN_ID=your_telegram_id
-
-# 3x-ui Panel Configuration
-XUI_HOST=http://your-panel-ip:2053
-XUI_USERNAME=your_panel_username
-XUI_PASSWORD=your_panel_password
-XUI_INBOUND_ID=1  # ID of your VLESS+Reality inbound
-XUI_SUB_PATH=sub
-
-# Database Configuration
-DATABASE_PATH=./data/tgvpn.db
-
-# Logging Configuration
-LOG_FILE_PATH=./data/bot.log
-LOG_LEVEL=info
-
-# Subscription Configuration
-TRAFFIC_LIMIT_GB=100
-
-# Heartbeat Configuration (optional)
-HEARTBEAT_URL=https://monitor.example.com/heartbeat
-HEARTBEAT_INTERVAL=300
-```
+Edit `.env` with your configuration. See the Configuration section below for all available options.
 
 #### 3. Get your Telegram Admin ID
 
@@ -172,6 +150,8 @@ go run ./cmd/bot
 2. Use the inline buttons:
    - **📥 Получить подписку** - Get or create subscription
    - **📋 Моя подписка** - View current subscription info
+3. Admin users also see:
+   - **📊 Статистика** - View bot statistics
 
 ## CI/CD with GitHub Actions
 
@@ -201,22 +181,35 @@ This project includes a GitHub Actions workflow that automatically builds and pu
 rs8kvn_bot/
 ├── cmd/
 │   └── bot/
-│       └── main.go          # Entry point
+│       └── main.go              # Entry point
 ├── internal/
+│   ├── backup/
+│   │   └── backup.go            # Database backup and rotation
+│   ├── bot/
+│   │   └── handlers.go          # Telegram bot handlers
 │   ├── config/
-│   │   └── config.go        # Environment configuration
+│   │   └── config.go            # Environment configuration
 │   ├── database/
-│   │   └── database.go      # Database models and functions
+│   │   ├── database.go          # Database models and functions
+│   │   └── migrations.go        # Database migrations system
+│   ├── heartbeat/
+│   │   └── heartbeat.go         # Heartbeat monitoring
 │   ├── logger/
-│   │   └── logger.go        # File logging
-│   ├── xui/
-│   │   └── client.go        # 3x-ui API client
-│   └── bot/
-│       └── handlers.go      # Telegram bot handlers
-├── .env.example
-├── .env                     # Your configuration (create from .env.example)
+│   │   └── logger.go            # Zap logger with Sentry integration
+│   ├── ratelimiter/
+│   │   └── ratelimiter.go       # Token bucket rate limiter
+│   ├── utils/
+│   │   └── uuid.go              # UUID and SubID generators
+│   └── xui/
+│       └── client.go            # 3x-ui API client
+├── data/                        # Data directory (created at runtime)
+│   ├── tgvpn.db                 # SQLite database
+│   ├── tgvpn.db.backup          # Latest backup
+│   └── bot.log                  # Log file
+├── .env.example                 # Example environment configuration
+├── .env                         # Your configuration (create from .env.example)
 ├── Dockerfile
-├── docker-compose.yml       # Optional
+├── docker-compose.yml
 ├── go.mod
 ├── go.sum
 └── README.md
@@ -224,27 +217,35 @@ rs8kvn_bot/
 
 ## Database Schema
 
-### Users
-- `id` - Telegram chat ID (primary key)
-- `username` - Telegram username
-- `created_at` - Registration date
-- `updated_at` - Last update date
+### subscriptions
 
-### Subscriptions
-- `id` - Subscription ID (primary key)
-- `user_id` - Reference to user
-- `client_id` - 3x-ui client ID
-- `inbound_id` - 3x-ui inbound ID
-- `traffic_limit` - Traffic limit in bytes
-- `expiry_time` - Subscription expiry date
-- `status` - active/revoked/expired
-- `subscription` - Subscription URL
-- `created_at` - Creation date
-- `updated_at` - Last update date
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | INTEGER | Primary key |
+| `telegram_id` | INTEGER | Telegram chat ID |
+| `username` | TEXT | Telegram username |
+| `client_id` | TEXT | 3x-ui client UUID |
+| `xui_host` | TEXT | 3x-ui panel URL |
+| `inbound_id` | INTEGER | 3x-ui inbound ID |
+| `traffic_limit` | INTEGER | Traffic limit in bytes |
+| `expiry_time` | DATETIME | Subscription expiry date |
+| `status` | TEXT | active/revoked |
+| `subscription_url` | TEXT | Subscription URL |
+| `created_at` | DATETIME | Creation timestamp |
+| `updated_at` | DATETIME | Update timestamp |
+| `deleted_at` | DATETIME | Soft delete timestamp |
+
+### schema_migrations
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | INTEGER | Primary key |
+| `name` | TEXT | Migration name |
+| `applied_at` | DATETIME | When migration was applied |
 
 ## Traffic and Expiry
 
-- **Traffic**: 100GB per month (configurable via `TRAFFIC_LIMIT_GB`)
+- **Traffic**: Configurable via `TRAFFIC_LIMIT_GB` (default: 100GB)
 - **Expiry**: Last second of current month (e.g., 31.03.2026 23:59:59)
 - **Auto-renewal**: 31 days (reset parameter in 3x-ui)
 
@@ -263,8 +264,9 @@ rs8kvn_bot/
 | `LOG_FILE_PATH` | Log file path | ./data/bot.log | ❌ |
 | `LOG_LEVEL` | Log level (debug/info/warn/error) | info | ❌ |
 | `TRAFFIC_LIMIT_GB` | Traffic limit in GB | 100 | ❌ |
-| `HEARTBEAT_URL` | URL for heartbeat monitoring (empty = disabled) | - | ❌ |
+| `HEARTBEAT_URL` | URL for heartbeat monitoring | - | ❌ |
 | `HEARTBEAT_INTERVAL` | Heartbeat interval in seconds | 300 | ❌ |
+| `SENTRY_DSN` | Sentry DSN for error tracking | - | ❌ |
 
 ## Admin Notifications
 
@@ -273,10 +275,42 @@ When a new subscription is created, the admin (specified in `TELEGRAM_ADMIN_ID`)
 - Subscription expiry date
 - Subscription link
 
+## Database Migrations
+
+The bot includes a simple migration system. To add a new migration:
+
+1. Edit `internal/database/migrations.go`
+2. Add a new migration to the `migrations` slice:
+
+```go
+var migrations = []Migration{
+    {
+        Name: "001_add_column",
+        SQL:  "ALTER TABLE subscriptions ADD COLUMN new_field TEXT;",
+    },
+}
+```
+
+Migrations are applied automatically on startup. Already applied migrations are skipped.
+
+## Database Backups
+
+- **Automatic**: Daily at 03:00
+- **Retention**: 7 days by default
+- **Location**: Same directory as database file with `.backup` extension
+- **Rotation**: Old backups are automatically cleaned up
+
+## Error Tracking
+
+The bot supports Sentry for error tracking. Set `SENTRY_DSN` in your environment to enable:
+- Automatic error capture
+- Fatal error reporting
+- Panic recovery
+
 ## Resource Usage
 
 - **Memory**: ~17 MB RSS
-- **Binary size**: 9.5 MB
+- **Binary size**: ~10 MB
 - **CPU**: Minimal (idle most of the time)
 
 ## License
