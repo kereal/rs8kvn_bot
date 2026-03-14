@@ -71,20 +71,9 @@ func (w *stdLogWriter) Write(p []byte) (n int, err error) {
 		return len(p), nil
 	}
 
-	// Detect error/warning messages and handle accordingly
-	if strings.Contains(msg, "Conflict:") ||
-		strings.Contains(msg, "Failed to") ||
-		strings.Contains(msg, "Error:") ||
-		strings.Contains(msg, "error:") {
-		// Send to Sentry
-		sentry.CaptureMessage("[TGAPI] " + msg)
-		Log.Warn(msg)
-	} else if strings.Contains(msg, "WARN") || strings.Contains(msg, "warn") {
-		Log.Warn(msg)
-	} else {
-		// Default to info level
-		Log.Info(msg)
-	}
+	// Log all messages from third-party libraries at INFO level with consistent format
+	// Sentry reporting is handled by application code where appropriate
+	Log.Info(msg)
 
 	return len(p), nil
 }
