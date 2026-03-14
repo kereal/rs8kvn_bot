@@ -2,6 +2,7 @@ package logger
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -10,10 +11,13 @@ import (
 	"time"
 
 	"github.com/getsentry/sentry-go"
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"gopkg.in/natefinch/lumberjack.v2"
 )
+
+// stdLogWriter is an io.Writer that redirects standard log output to our zap logger
 
 var (
 	Log        *zap.SugaredLogger
@@ -58,7 +62,6 @@ func Init(logFilePath, level string) error {
 	return nil
 }
 
-// stdLogWriter is an io.Writer that redirects standard log output to our zap logger
 type stdLogWriter struct{}
 
 func (w *stdLogWriter) Write(p []byte) (n int, err error) {
@@ -72,18 +75,42 @@ func (w *stdLogWriter) Write(p []byte) (n int, err error) {
 	}
 
 	// Log all messages from third-party libraries at INFO level with consistent format
-	// Sentry reporting is handled by application code where appropriate
 	Log.Info(msg)
 
 	return len(p), nil
+}
+
+// tgbotapiLogger implements tgbotapi.BotLogger interface
+type tgbotapiLogger struct{}
+
+func (l *tgbotapiLogger) Println(v ...interface{}) {
+	if Log != nil {
+		Log.Info(v...)
+	}
+}
+
+func (l *tgbotapiLogger) Printf(format string, v ...interface{}) {
+	if Log != nil {
+		Log.Infof(format, v...)
+	}
 }
 
 // RedirectStdLog redirects standard Go log output to our zap logger.
 // This ensures all log messages (including from third-party libraries)
 // have consistent formatting.
 func RedirectStdLog() {
+	// Redirect standard log output
 	log.SetOutput(&stdLogWriter{})
 	log.SetFlags(0) // Disable standard log flags since we handle formatting ourselves
+
+	// Redirect tgbotapi library's internal logger
+	tgbotapi.SetLogger(&tgbotapiLogger{})
+}
+
+// Writer returns an io.Writer that logs to our zap logger at INFO level.
+// Useful for redirecting output from other libraries.
+func Writer() io.Writer {
+	return &stdLogWriter{}
 }
 
 func Info(args ...interface{}) {
