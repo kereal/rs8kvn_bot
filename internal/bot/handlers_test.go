@@ -100,9 +100,6 @@ func TestNewHandler(t *testing.T) {
 		rateLimiter: nil,
 	}
 
-	if handler == nil {
-		t.Fatal("Handler is nil")
-	}
 	if handler.config != cfg {
 		t.Error("Config not set correctly")
 	}
@@ -272,9 +269,9 @@ func TestHandleMySubscription_ExpiredSubscription(t *testing.T) {
 	}
 
 	// The subscription exists but is expired
-	if time.Now().After(got.ExpiryTime) {
-		// This is the expected behavior - subscription exists but is expired
-		// The handler should check this and show appropriate message
+	// Verify the subscription is actually expired
+	if !time.Now().After(got.ExpiryTime) {
+		t.Error("Expected subscription to be expired")
 	}
 }
 
