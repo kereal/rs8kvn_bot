@@ -13,6 +13,9 @@ RUN go mod download
 # Copy source code
 COPY . .
 
+# Ensure go.mod is consistent with dependencies
+RUN go mod tidy
+
 # Build with optimizations:
 # - trimpath: remove file system paths for reproducible builds
 # - ldflags: strip debug info (-s) and DWARF (-w)
@@ -25,7 +28,7 @@ RUN CGO_ENABLED=1 GOOS=linux go build \
 RUN upx -9 rs8kvn_bot
 
 # Runtime stage - using minimal alpine
-FROM alpine:3.19
+FROM alpine:3.23
 
 # Install only essential runtime dependencies
 RUN apk add --no-cache ca-certificates procps && \
