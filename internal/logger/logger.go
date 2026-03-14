@@ -83,13 +83,13 @@ type tgbotapiLogger struct{}
 
 func (l *tgbotapiLogger) Println(v ...interface{}) {
 	if Log != nil {
-		Log.Info(v...)
+		Log.Warn(v...)
 	}
 }
 
 func (l *tgbotapiLogger) Printf(format string, v ...interface{}) {
 	if Log != nil {
-		Log.Infof(format, v...)
+		Log.Warnf(format, v...)
 	}
 }
 
