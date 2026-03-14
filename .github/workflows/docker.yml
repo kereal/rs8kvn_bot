@@ -6,9 +6,6 @@ on:
             - main
         tags:
             - "v*"
-    pull_request:
-        branches:
-            - main
 
 env:
     REGISTRY: ghcr.io
@@ -20,10 +17,10 @@ jobs:
         runs-on: ubuntu-latest
         steps:
             - name: Checkout repository
-              uses: actions/checkout@v4
+              uses: actions/checkout@v6
 
             - name: Set up Go
-              uses: actions/setup-go@v5
+              uses: actions/setup-go@v6
               with:
                   go-version: "1.25"
                   cache: true
@@ -52,7 +49,7 @@ jobs:
 
         steps:
             - name: Checkout repository
-              uses: actions/checkout@v4
+              uses: actions/checkout@v6
 
             - name: Set up QEMU
               uses: docker/setup-qemu-action@v3
