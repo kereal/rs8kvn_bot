@@ -77,6 +77,9 @@ func main() {
 	}
 	defer logger.Close()
 
+	// Redirect standard log output (from third-party libraries) to our logger
+	logger.RedirectStdLog()
+
 	logger.Info("Starting rs8kvn_bot...")
 
 	if err := database.Init(cfg.DatabasePath); err != nil {

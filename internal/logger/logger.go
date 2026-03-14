@@ -2,8 +2,10 @@ package logger
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -54,6 +56,45 @@ func Init(logFilePath, level string) error {
 	Log = zap.New(core, zap.AddCaller(), zap.AddCallerSkip(1)).Sugar()
 
 	return nil
+}
+
+// stdLogWriter is an io.Writer that redirects standard log output to our zap logger
+type stdLogWriter struct{}
+
+func (w *stdLogWriter) Write(p []byte) (n int, err error) {
+	if Log == nil {
+		return len(p), nil
+	}
+
+	msg := strings.TrimSpace(string(p))
+	if len(msg) == 0 {
+		return len(p), nil
+	}
+
+	// Detect error/warning messages and handle accordingly
+	if strings.Contains(msg, "Conflict:") ||
+		strings.Contains(msg, "Failed to") ||
+		strings.Contains(msg, "Error:") ||
+		strings.Contains(msg, "error:") {
+		// Send to Sentry
+		sentry.CaptureMessage("[TGAPI] " + msg)
+		Log.Warn(msg)
+	} else if strings.Contains(msg, "WARN") || strings.Contains(msg, "warn") {
+		Log.Warn(msg)
+	} else {
+		// Default to info level
+		Log.Info(msg)
+	}
+
+	return len(p), nil
+}
+
+// RedirectStdLog redirects standard Go log output to our zap logger.
+// This ensures all log messages (including from third-party libraries)
+// have consistent formatting.
+func RedirectStdLog() {
+	log.SetOutput(&stdLogWriter{})
+	log.SetFlags(0) // Disable standard log flags since we handle formatting ourselves
 }
 
 func Info(args ...interface{}) {
