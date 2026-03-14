@@ -8,12 +8,16 @@ import (
 // GenerateUUID generates a unique identifier in UUID-like format
 // based on current timestamp and nanoseconds.
 func GenerateUUID() string {
+	now := time.Now()
+	unix := now.Unix()
+	nano := now.UnixNano()
+
 	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
-		time.Now().Unix(),
-		time.Now().UnixNano()&0xFFFF,
-		(time.Now().UnixNano()>>16)&0xFFFF,
-		(time.Now().UnixNano()>>32)&0xFFFF,
-		time.Now().UnixNano()&0xFFFFFFFFFFFF,
+		unix,
+		nano&0xFFFF,
+		(nano>>16)&0xFFFF,
+		(nano>>32)&0xFFFF,
+		nano&0xFFFFFFFFFFFF,
 	)
 }
 

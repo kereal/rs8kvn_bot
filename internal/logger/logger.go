@@ -17,8 +17,6 @@ import (
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 
-// stdLogWriter is an io.Writer that redirects standard log output to our zap logger
-
 var (
 	Log        *zap.SugaredLogger
 	fileWriter *lumberjack.Logger

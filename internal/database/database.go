@@ -118,6 +118,9 @@ func CreateSubscription(sub *Subscription) error {
 }
 
 func UpdateSubscription(sub *Subscription) error {
+	if DB == nil {
+		return fmt.Errorf("database not initialized")
+	}
 	result := DB.Save(sub)
 	return result.Error
 }

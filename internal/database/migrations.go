@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"time"
 
+	"rs8kvn_bot/internal/logger"
+
 	"gorm.io/gorm"
 )
 
@@ -52,13 +54,13 @@ func RunMigrations(db *gorm.DB) error {
 			continue
 		}
 
-		fmt.Printf("Applying migration: %s\n", migration.Name)
+		logger.Infof("Applying migration: %s", migration.Name)
 
 		if err := applyMigration(db, migration); err != nil {
 			return fmt.Errorf("migration %s failed: %w", migration.Name, err)
 		}
 
-		fmt.Printf("Migration applied: %s\n", migration.Name)
+		logger.Infof("Migration applied: %s", migration.Name)
 	}
 
 	return nil
