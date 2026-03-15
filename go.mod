@@ -1,6 +1,6 @@
 module rs8kvn_bot
 
-go 1.25
+go 1.25.0
 
 require (
 	github.com/getsentry/sentry-go v0.43.0
@@ -20,4 +20,3 @@ require (
 	golang.org/x/sys v0.42.0 // indirect
 	golang.org/x/text v0.35.0 // indirect
 )
-

@@ -15,23 +15,26 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
+// Handler handles Telegram bot updates and manages subscription operations.
 type Handler struct {
 	bot         *tgbotapi.BotAPI
-	config      *config.Config
+	cfg         *config.Config
 	xui         *xui.Client
-	rateLimiter *ratelimiter.TokenBucket
+	rateLimiter *ratelimiter.RateLimiter
 }
 
+// NewHandler creates a new bot handler.
 func NewHandler(bot *tgbotapi.BotAPI, cfg *config.Config, xuiClient *xui.Client) *Handler {
 	return &Handler{
 		bot:         bot,
-		config:      cfg,
+		cfg:         cfg,
 		xui:         xuiClient,
-		rateLimiter: ratelimiter.NewTokenBucket(30, 5),
+		rateLimiter: ratelimiter.NewRateLimiter(config.RateLimiterMaxTokens, config.RateLimiterRefillRate),
 	}
 }
 
-func (h *Handler) HandleStart(update tgbotapi.Update) {
+// HandleStart handles the /start command.
+func (h *Handler) HandleStart(ctx context.Context, update tgbotapi.Update) {
 	if update.Message == nil {
 		logger.Error("HandleStart called with nil Message")
 		return
@@ -39,19 +42,15 @@ func (h *Handler) HandleStart(update tgbotapi.Update) {
 
 	chatID := update.Message.Chat.ID
 
-	username := ""
-	if update.Message.From != nil {
-		username = update.Message.From.UserName
-		if username == "" {
-			username = update.Message.From.FirstName
-		}
-	}
-
+	username := h.getUsername(update.Message.From)
 	logger.Infof("User %s (%d) started the bot", username, chatID)
 
-	isAdmin := chatID == h.config.TelegramAdminID
+	isAdmin := chatID == h.cfg.TelegramAdminID
 
-	msg := tgbotapi.NewMessage(chatID, fmt.Sprintf("👋 Привет, %s!\n\nЯ бот для выдачи подписок на прокси VLESS+Reality+Vision.\n\nВыберите действие:", username))
+	msg := tgbotapi.NewMessage(chatID, fmt.Sprintf(
+		"👋 Привет, %s!\n\nЯ бот для выдачи подписок на прокси VLESS+Reality+Vision.\n\nВыберите действие:",
+		username,
+	))
 
 	keyboard := tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
@@ -71,11 +70,11 @@ func (h *Handler) HandleStart(update tgbotapi.Update) {
 	}
 
 	msg.ReplyMarkup = keyboard
-
-	h.send(context.Background(), msg)
+	h.send(ctx, msg)
 }
 
-func (h *Handler) HandleHelp(update tgbotapi.Update) {
+// HandleHelp handles the /help command.
+func (h *Handler) HandleHelp(ctx context.Context, update tgbotapi.Update) {
 	if update.Message == nil {
 		logger.Error("HandleHelp called with nil Message")
 		return
@@ -94,7 +93,7 @@ func (h *Handler) HandleHelp(update tgbotapi.Update) {
 📋 *Моя подписка* - Посмотреть информацию о текущей подписке
 
 *Параметры подписки:*
-📊 Трафик: ` + fmt.Sprintf("%d", h.config.TrafficLimitGB) + ` ГБ в месяц
+📊 Трафик: ` + fmt.Sprintf("%d", h.cfg.TrafficLimitGB) + ` ГБ в месяц
 
 *Технические детали:*
 🔐 Протокол: VLESS+Reality+Vision
@@ -110,10 +109,11 @@ func (h *Handler) HandleHelp(update tgbotapi.Update) {
 
 	msg := tgbotapi.NewMessage(chatID, helpText)
 	msg.ParseMode = "Markdown"
-	h.send(context.Background(), msg)
+	h.send(ctx, msg)
 }
 
-func (h *Handler) HandleCallback(update tgbotapi.Update) {
+// HandleCallback handles callback queries from inline keyboards.
+func (h *Handler) HandleCallback(ctx context.Context, update tgbotapi.Update) {
 	if update.CallbackQuery == nil {
 		logger.Error("HandleCallback called with nil CallbackQuery")
 		return
@@ -121,20 +121,16 @@ func (h *Handler) HandleCallback(update tgbotapi.Update) {
 
 	data := update.CallbackQuery.Data
 	chatID := update.CallbackQuery.Message.Chat.ID
-
-	username := ""
-	if update.CallbackQuery.From != nil {
-		username = update.CallbackQuery.From.UserName
-	}
+	username := h.getUsername(update.CallbackQuery.From)
 
 	logger.Infof("Callback received: %s from user %s (%d)", data, username, chatID)
 
+	// Answer the callback to remove the loading state
 	callback := tgbotapi.NewCallback(update.CallbackQuery.ID, "")
 	if _, err := h.bot.Request(callback); err != nil {
 		logger.Errorf("Failed to answer callback: %v", err)
 	}
 
-	ctx := context.Background()
 	switch data {
 	case "get_subscription":
 		h.handleGetSubscription(ctx, chatID, username)
@@ -142,22 +138,28 @@ func (h *Handler) HandleCallback(update tgbotapi.Update) {
 		h.handleMySubscription(ctx, chatID, username)
 	case "admin_stats":
 		h.handleAdminStats(ctx, chatID, username)
+	default:
+		logger.Warnf("Unknown callback data: %s", data)
 	}
 }
 
+// handleGetSubscription handles the "get subscription" callback.
 func (h *Handler) handleGetSubscription(ctx context.Context, chatID int64, username string) {
 	logger.Infof("User %s requesting subscription", username)
 
 	sub, err := database.GetByTelegramID(chatID)
 	if err == nil && sub != nil {
-		if time.Now().After(sub.ExpiryTime) {
+		// Check if subscription is expired
+		if sub.IsExpired() {
 			logger.Infof("Subscription expired for user %s, creating new one", username)
 			h.createSubscription(ctx, chatID, username)
 			return
 		}
 
-		msg := tgbotapi.NewMessage(chatID, fmt.Sprintf("✅ Ваша активная подписка:\n\n📊 Трафик: %d ГБ\n\n🔗 Ссылка на подписку:\n`%s`",
-			h.config.TrafficLimitGB,
+		// Return existing active subscription
+		msg := tgbotapi.NewMessage(chatID, fmt.Sprintf(
+			"✅ Ваша активная подписка:\n\n📊 Трафик: %d ГБ\n\n🔗 Ссылка на подписку:\n`%s`",
+			h.cfg.TrafficLimitGB,
 			sub.SubscriptionURL,
 		))
 		msg.ParseMode = "Markdown"
@@ -165,9 +167,11 @@ func (h *Handler) handleGetSubscription(ctx context.Context, chatID int64, usern
 		return
 	}
 
+	// No existing subscription, create new one
 	h.createSubscription(ctx, chatID, username)
 }
 
+// handleMySubscription handles the "my subscription" callback.
 func (h *Handler) handleMySubscription(ctx context.Context, chatID int64, username string) {
 	logger.Infof("User %s checking subscription status", username)
 
@@ -178,22 +182,30 @@ func (h *Handler) handleMySubscription(ctx context.Context, chatID int64, userna
 		return
 	}
 
-	if time.Now().After(sub.ExpiryTime) {
+	if sub.IsExpired() {
 		msg := tgbotapi.NewMessage(chatID, "⚠️ Ваша подписка истекла.\n\nНажмите «Получить подписку» для создания новой.")
 		h.send(ctx, msg)
 		return
 	}
 
-	msg := tgbotapi.NewMessage(chatID, fmt.Sprintf("📋 Информация о вашей подписке:\n\n📊 Трафик: %d ГБ\n\n🔗 Ссылка:\n`%s`",
-		h.config.TrafficLimitGB,
+	msg := tgbotapi.NewMessage(chatID, fmt.Sprintf(
+		"📋 Информация о вашей подписке:\n\n📊 Трафик: %d ГБ\n\n🔗 Ссылка:\n`%s`",
+		h.cfg.TrafficLimitGB,
 		sub.SubscriptionURL,
 	))
 	msg.ParseMode = "Markdown"
 	h.send(ctx, msg)
 }
 
+// handleAdminStats handles the "admin stats" callback.
 func (h *Handler) handleAdminStats(ctx context.Context, chatID int64, username string) {
 	logger.Infof("Admin %s requesting stats", username)
+
+	// Verify admin access
+	if chatID != h.cfg.TelegramAdminID {
+		logger.Warnf("Non-admin user %d attempted to access admin stats", chatID)
+		return
+	}
 
 	var allSubs []database.Subscription
 	if err := database.DB.Find(&allSubs).Error; err != nil {
@@ -206,7 +218,7 @@ func (h *Handler) handleAdminStats(ctx context.Context, chatID int64, username s
 	expiredCount := 0
 	for _, sub := range allSubs {
 		if sub.Status == "active" {
-			if time.Now().After(sub.ExpiryTime) {
+			if sub.IsExpired() {
 				expiredCount++
 			} else {
 				activeCount++
@@ -214,7 +226,8 @@ func (h *Handler) handleAdminStats(ctx context.Context, chatID int64, username s
 		}
 	}
 
-	msg := tgbotapi.NewMessage(chatID, fmt.Sprintf("📊 **Статистика бота**:\n\n👥 Всего пользователей: %d\n✅ Активные подписки: %d\n⏰ Истекшие: %d\n📁 Записей в БД: %d",
+	msg := tgbotapi.NewMessage(chatID, fmt.Sprintf(
+		"📊 **Статистика бота**:\n\n👥 Всего пользователей: %d\n✅ Активные подписки: %d\n⏰ Истекшие: %d\n📁 Записей в БД: %d",
 		len(allSubs),
 		activeCount,
 		expiredCount,
@@ -224,35 +237,38 @@ func (h *Handler) handleAdminStats(ctx context.Context, chatID int64, username s
 	h.sendWithRetry(ctx, msg, 3)
 }
 
+// createSubscription creates a new subscription for the user.
+// This operation is atomic with rollback: if database save fails,
+// the client is removed from the 3x-ui panel to prevent orphan records.
 func (h *Handler) createSubscription(ctx context.Context, chatID int64, username string) {
 	now := time.Now()
 	expiryTime := getLastSecondOfMonth(now)
-	trafficBytes := int64(h.config.TrafficLimitGB) * 1024 * 1024 * 1024
+	trafficBytes := int64(h.cfg.TrafficLimitGB) * 1024 * 1024 * 1024
 
 	logger.Infof("Creating subscription for %s: traffic=%d GB, expiry=%s",
-		username, h.config.TrafficLimitGB, expiryTime.Format("02.01.2006, 15:04:05"))
+		username, h.cfg.TrafficLimitGB, expiryTime.Format("02.01.2006 15:04:05"))
 
-	// Шаг 1: Генерируем ID
+	// Step 1: Generate IDs
 	clientID := utils.GenerateUUID()
 	subID := utils.GenerateSubID()
 
-	// Шаг 2: Сначала добавляем клиента в 3x-ui панель
-	client, err := h.xui.AddClientWithID(ctx, h.config.XUIInboundID, username, clientID, subID, trafficBytes, expiryTime)
+	// Step 2: Add client to 3x-ui panel
+	client, err := h.xui.AddClientWithID(ctx, h.cfg.XUIInboundID, username, clientID, subID, trafficBytes, expiryTime)
 	if err != nil {
 		logger.Errorf("Failed to add client to 3x-ui: %v", err)
 		h.SendMessage(ctx, chatID, "❌ Произошла ошибка при создании подписки. Попробуйте позже.")
 		return
 	}
 
-	// Шаг 3: Сохраняем в базу данных
-	subscriptionURL := h.xui.GetSubscriptionLink(xui.GetExternalURL(h.config.XUIHost), client.SubID, h.config.XUISubPath)
+	// Step 3: Save to database (with rollback on failure)
+	subscriptionURL := h.xui.GetSubscriptionLink(xui.GetExternalURL(h.cfg.XUIHost), client.SubID, h.cfg.XUISubPath)
 
 	sub := &database.Subscription{
 		TelegramID:      chatID,
 		Username:        username,
 		ClientID:        client.ID,
-		XUIHost:         h.config.XUIHost,
-		InboundID:       h.config.XUIInboundID,
+		XUIHost:         h.cfg.XUIHost,
+		InboundID:       h.cfg.XUIInboundID,
 		TrafficLimit:    trafficBytes,
 		ExpiryTime:      expiryTime,
 		Status:          "active",
@@ -260,33 +276,55 @@ func (h *Handler) createSubscription(ctx context.Context, chatID int64, username
 	}
 
 	if err := database.CreateSubscription(sub); err != nil {
-		logger.Errorf("Failed to save subscription: %v", err)
+		logger.Errorf("Failed to save subscription to database: %v", err)
+
+		// CRITICAL: Rollback - remove client from 3x-ui panel to prevent orphan record
+		logger.Infof("Attempting rollback: removing client %s from 3x-ui panel", client.ID)
+		if rollbackErr := h.xui.DeleteClient(ctx, h.cfg.XUIInboundID, client.ID); rollbackErr != nil {
+			logger.Errorf("CRITICAL: Failed to rollback client deletion from 3x-ui: %v", rollbackErr)
+			// This is a critical error - we have an orphan client in the panel
+			// Admin should be notified
+			h.notifyAdminError(ctx, fmt.Sprintf(
+				"⚠️ ORPHAN CLIENT WARNING\n\nClient ID: %s\nUsername: %s\nInbound: %d\n\nClient was created in 3x-ui but database save failed and rollback also failed!",
+				client.ID, username, h.cfg.XUIInboundID,
+			))
+		} else {
+			logger.Infof("Rollback successful: client %s removed from 3x-ui panel", client.ID)
+		}
+
 		h.SendMessage(ctx, chatID, "❌ Подписка создана в панели, но не сохранена в базе. Обратитесь к администратору.")
 		return
 	}
 
-	msg := tgbotapi.NewMessage(chatID, fmt.Sprintf("✅ Подписка успешно создана!\n\n📊 Трафик: %d ГБ\n\n🔗 Ссылка на подписку:\n`%s`\n\n📱 Используйте эту ссылку в любом клиенте поддерживающем VLESS+Reality+Vision",
-		h.config.TrafficLimitGB,
+	// Success - send subscription to user
+	msg := tgbotapi.NewMessage(chatID, fmt.Sprintf(
+		"✅ Подписка успешно создана!\n\n📊 Трафик: %d ГБ\n\n🔗 Ссылка на подписку:\n`%s`\n\n📱 Используйте эту ссылку в любом клиенте поддерживающем VLESS+Reality+Vision",
+		h.cfg.TrafficLimitGB,
 		subscriptionURL,
 	))
 	msg.ParseMode = "Markdown"
 	h.sendWithRetry(ctx, msg, 3)
 
+	// Notify admin about new subscription
 	h.notifyAdmin(ctx, username, chatID, subscriptionURL, expiryTime)
-	logger.Infof("Subscription created for user %s (%d)", username, chatID)
+	logger.Infof("Subscription created successfully for user %s (%d)", username, chatID)
 }
 
+// notifyAdmin sends a notification to the admin about a new subscription.
 func (h *Handler) notifyAdmin(ctx context.Context, username string, chatID int64, subscriptionURL string, expiryTime time.Time) {
-	if h.config.TelegramAdminID == 0 {
+	if h.cfg.TelegramAdminID == 0 {
 		return
 	}
 
-	msg := tgbotapi.NewMessage(h.config.TelegramAdminID,
-		fmt.Sprintf("🔔 Новая подписка создана!\n\n👤 Пользователь: @%s\n🆔 ID: %d\n📅 Истекает: %s\n🔗 Подписка:\n`%s`",
+	// Mask the subscription URL for security (show only last 8 chars)
+	maskedURL := maskSubscriptionURL(subscriptionURL)
+
+	msg := tgbotapi.NewMessage(h.cfg.TelegramAdminID,
+		fmt.Sprintf("🔔 Новая подписка создана!\n\n👤 Пользователь: @%s\n🆔 ID: %d\n📅 Истекает: %s\n🔗 Подписка: `%s`",
 			username,
 			chatID,
-			expiryTime.Format("02.01.2006, 15:04:05"),
-			subscriptionURL,
+			expiryTime.Format("02.01.2006 15:04:05"),
+			maskedURL,
 		))
 	msg.ParseMode = "Markdown"
 	h.send(ctx, msg)
@@ -294,6 +332,18 @@ func (h *Handler) notifyAdmin(ctx context.Context, username string, chatID int64
 	logger.Infof("Admin notified about new subscription for %s", username)
 }
 
+// notifyAdminError sends an error notification to the admin.
+func (h *Handler) notifyAdminError(ctx context.Context, message string) {
+	if h.cfg.TelegramAdminID == 0 {
+		return
+	}
+
+	msg := tgbotapi.NewMessage(h.cfg.TelegramAdminID, message)
+	msg.ParseMode = "Markdown"
+	h.send(ctx, msg)
+}
+
+// send sends a message with rate limiting.
 func (h *Handler) send(ctx context.Context, msg tgbotapi.MessageConfig) {
 	if !h.rateLimiter.Wait(ctx) {
 		logger.Warn("Message send cancelled due to context")
@@ -306,8 +356,10 @@ func (h *Handler) send(ctx context.Context, msg tgbotapi.MessageConfig) {
 	}
 }
 
+// sendWithRetry sends a message with rate limiting and retry logic.
 func (h *Handler) sendWithRetry(ctx context.Context, msg tgbotapi.MessageConfig, maxRetries int) {
 	delay := time.Second
+
 	for i := 0; i < maxRetries; i++ {
 		if !h.rateLimiter.Wait(ctx) {
 			logger.Warn("Message send cancelled due to context")
@@ -318,28 +370,76 @@ func (h *Handler) sendWithRetry(ctx context.Context, msg tgbotapi.MessageConfig,
 		if err == nil {
 			return
 		}
+
 		if i < maxRetries-1 {
 			logger.Warnf("Message send failed, retrying in %v: %v", delay, err)
 
 			select {
 			case <-time.After(delay):
-				delay *= 2
+				delay *= 2 // Exponential backoff
 			case <-ctx.Done():
 				logger.Warn("Message retry cancelled due to context")
 				return
 			}
 		}
 	}
+
 	logger.Errorf("Failed to send message after %d retries", maxRetries)
 }
 
+// SendMessage sends a plain text message to a chat.
 func (h *Handler) SendMessage(ctx context.Context, chatID int64, text string) {
 	msg := tgbotapi.NewMessage(chatID, text)
 	h.send(ctx, msg)
 }
 
+// getUsername extracts a username from a Telegram user.
+func (h *Handler) getUsername(user *tgbotapi.User) string {
+	if user == nil {
+		return "unknown"
+	}
+
+	if user.UserName != "" {
+		return user.UserName
+	}
+
+	if user.FirstName != "" {
+		return user.FirstName
+	}
+
+	return fmt.Sprintf("user_%d", user.ID)
+}
+
+// getLastSecondOfMonth returns the last second of the current month.
 func getLastSecondOfMonth(t time.Time) time.Time {
 	year, month, _ := t.Date()
 	firstDayNextMonth := time.Date(year, month+1, 1, 0, 0, 0, 0, t.Location())
 	return firstDayNextMonth.Add(-1 * time.Second)
+}
+
+// maskSubscriptionURL masks a subscription URL for logging/notification purposes.
+// Shows only the last 8 characters of the subscription ID.
+func maskSubscriptionURL(url string) string {
+	if len(url) < 12 {
+		return "***"
+	}
+	// Find the last segment (subscription ID)
+	lastSlash := -1
+	for i := len(url) - 1; i >= 0; i-- {
+		if url[i] == '/' {
+			lastSlash = i
+			break
+		}
+	}
+
+	if lastSlash == -1 || lastSlash == len(url)-1 {
+		return url[:8] + "..."
+	}
+
+	subID := url[lastSlash+1:]
+	if len(subID) <= 8 {
+		return url[:lastSlash+1] + "***"
+	}
+
+	return url[:lastSlash+1+len(subID)-8] + "..." + subID[len(subID)-8:]
 }

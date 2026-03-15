@@ -1,18 +1,54 @@
 # Docker Compose for local development
+# Usage: docker compose -f docker-compose.local.yml up -d
 
 services:
     rs8kvn_bot:
-        build: .
+        build:
+            context: .
+            dockerfile: Dockerfile
+        image: rs8kvn_bot:local
         container_name: rs8kvn_bot_local
         restart: unless-stopped
+
+        # Security: Run as non-root user (created in Dockerfile)
+        user: "1000:1000"
+
         volumes:
             - ./.env:/app/.env:ro
             - ./data:/app/data
+
         environment:
             - TZ=Europe/Moscow
+            # Go runtime optimizations for minimal memory
+            - GOMEMLIMIT=67108864 # 64MB soft limit
+            - GOGC=50 # More aggressive GC
+
+        # Security hardening
+        security_opt:
+            - no-new-privileges:true
+        read_only: false # Need write access to data/
+
+        # Health check
         healthcheck:
-            test: ["CMD", "pgrep", "rs8kvn_bot"]
+            test: ["CMD", "pgrep", "-f", "rs8kvn_bot"]
             interval: 30s
             timeout: 10s
             retries: 3
             start_period: 30s
+
+        # Resource limits for development
+        deploy:
+            resources:
+                limits:
+                    cpus: "1.0"
+                    memory: 256M
+                reservations:
+                    cpus: "0.1"
+                    memory: 32M
+
+        # Logging configuration
+        logging:
+            driver: "json-file"
+            options:
+                max-size: "10m"
+                max-file: "3"

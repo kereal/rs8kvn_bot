@@ -22,6 +22,12 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
+// Build information (set via ldflags)
+var (
+	version   = "dev"
+	buildTime = "unknown"
+)
+
 // getVersion returns the current version from build info or git tag
 func getVersion() string {
 	// Try to get version from Go build info (set by go install or git tags)
@@ -45,32 +51,34 @@ func getVersion() string {
 		}
 	}
 	// Default version if no build info available
-	return "rs8kvn_bot@dev"
+	return "rs8kvn_bot@" + version
 }
 
 func main() {
+	// Load configuration first
 	cfg, err := config.Load()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
 		os.Exit(1)
 	}
 
-	// Initialize Sentry for error tracking
+	// Initialize Sentry for error tracking (before logger)
 	if cfg.SentryDSN != "" {
 		err := sentry.Init(sentry.ClientOptions{
 			Dsn:              cfg.SentryDSN,
 			Environment:      "production",
 			Release:          getVersion(),
-			TracesSampleRate: 0.1,
+			TracesSampleRate: config.SentryTracesSampleRate,
 		})
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to initialize Sentry: %v\n", err)
 		} else {
-			defer sentry.Flush(5 * time.Second)
+			defer sentry.Flush(config.SentryFlushTimeout)
 			fmt.Println("Sentry error tracking initialized")
 		}
 	}
 
+	// Initialize logger
 	if err := logger.Init(cfg.LogFilePath, cfg.LogLevel); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
 		os.Exit(1)
@@ -80,18 +88,22 @@ func main() {
 	// Redirect standard log output (from third-party libraries) to our logger
 	logger.RedirectStdLog()
 
-	logger.Info("Starting rs8kvn_bot...")
+	logger.Infof("Starting %s (built: %s)", getVersion(), buildTime)
+	logger.Infof("Configuration: %s", cfg.String())
 
+	// Initialize database
 	if err := database.Init(cfg.DatabasePath); err != nil {
 		logger.Fatalf("Failed to initialize database: %v", err)
 	}
 	defer database.Close()
 	logger.Info("Database initialized successfully")
 
+	// Initialize 3x-ui client
 	xuiClient := xui.NewClient(cfg.XUIHost, cfg.XUIUsername, cfg.XUIPassword)
 
+	// Connect to 3x-ui panel with timeout
 	logger.Info("Connecting to 3x-ui panel...")
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), config.DefaultHTTPTimeout)
 	if err := xuiClient.Login(ctx); err != nil {
 		cancel()
 		logger.Fatalf("Failed to connect to 3x-ui panel: %v", err)
@@ -99,6 +111,7 @@ func main() {
 	cancel()
 	logger.Info("✓ 3x-ui panel connected")
 
+	// Initialize Telegram bot
 	logger.Info("Validating Telegram bot token...")
 	botAPI, err := tgbotapi.NewBotAPI(cfg.TelegramBotToken)
 	if err != nil {
@@ -106,14 +119,16 @@ func main() {
 	}
 	logger.Infof("✓ Telegram bot authorized: @%s", botAPI.Self.UserName)
 
+	// Create bot handler
 	handler := bot.NewHandler(botAPI, cfg, xuiClient)
 
+	// Configure update listener
 	u := tgbotapi.NewUpdate(0)
-	u.Timeout = 60
-	// Explicitly request all update types including callback queries
-	u.AllowedUpdates = []string{"message", "callback_query", "edited_message", "channel_post", "edited_channel_post", "inline_query", "chosen_inline_result", "shipping_query", "pre_checkout_query", "poll", "poll_answer"}
+	u.Timeout = config.BotUpdateTimeout
+	u.AllowedUpdates = []string{"message", "callback_query"}
 	updates := botAPI.GetUpdatesChan(u)
 
+	// Setup graceful shutdown
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 	defer stop()
 
@@ -122,11 +137,12 @@ func main() {
 	var wg sync.WaitGroup
 	wg.Add(2)
 
+	// Start backup scheduler
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
 				sentry.CurrentHub().Recover(r)
-				sentry.Flush(2 * time.Second)
+				sentry.Flush(config.SentryPanicFlushTimeout)
 				logger.Errorf("Backup scheduler panicked: %v", r)
 			}
 			wg.Done()
@@ -134,11 +150,12 @@ func main() {
 		startBackupScheduler(ctx, cfg.DatabasePath)
 	}()
 
+	// Start heartbeat monitor
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
 				sentry.CurrentHub().Recover(r)
-				sentry.Flush(2 * time.Second)
+				sentry.Flush(config.SentryPanicFlushTimeout)
 				logger.Errorf("Heartbeat scheduler panicked: %v", r)
 			}
 			wg.Done()
@@ -146,24 +163,18 @@ func main() {
 		heartbeat.Start(ctx, cfg.HeartbeatURL, cfg.HeartbeatInterval)
 	}()
 
+	// Main event loop
 	for {
 		select {
 		case update := <-updates:
-			func() {
-				defer func() {
-					if r := recover(); r != nil {
-						sentry.CurrentHub().Recover(r)
-						sentry.Flush(2 * time.Second)
-						logger.Errorf("Panic in update handler: %v", r)
-					}
-				}()
-				handleUpdate(handler, update)
-			}()
+			// Process update in a separate goroutine for better concurrency
+			go handleUpdateSafely(ctx, handler, update)
 
 		case <-ctx.Done():
 			logger.Info("Graceful shutdown initiated...")
 			botAPI.StopReceivingUpdates()
 
+			// Wait for background tasks with timeout
 			done := make(chan struct{})
 			go func() {
 				wg.Wait()
@@ -172,9 +183,9 @@ func main() {
 
 			select {
 			case <-done:
-				logger.Info("Backup scheduler stopped successfully")
-			case <-time.After(30 * time.Second):
-				logger.Warn("Timeout waiting for backup scheduler to stop")
+				logger.Info("All background tasks stopped successfully")
+			case <-time.After(config.ShutdownTimeout):
+				logger.Warn("Timeout waiting for background tasks to stop")
 			}
 
 			logger.Info("Bot stopped successfully")
@@ -183,31 +194,49 @@ func main() {
 	}
 }
 
-func handleUpdate(handler *bot.Handler, update tgbotapi.Update) {
+// handleUpdateSafely handles a Telegram update with panic recovery.
+func handleUpdateSafely(ctx context.Context, handler *bot.Handler, update tgbotapi.Update) {
+	defer func() {
+		if r := recover(); r != nil {
+			sentry.CurrentHub().Recover(r)
+			sentry.Flush(config.SentryPanicFlushTimeout)
+			logger.Errorf("Panic in update handler: %v", r)
+		}
+	}()
+
+	handleUpdate(ctx, handler, update)
+}
+
+// handleUpdate routes the update to the appropriate handler.
+func handleUpdate(ctx context.Context, handler *bot.Handler, update tgbotapi.Update) {
 	if update.Message != nil {
 		if update.Message.IsCommand() {
 			switch update.Message.Command() {
 			case "start":
-				handler.HandleStart(update)
+				handler.HandleStart(ctx, update)
 			case "help":
-				handler.HandleHelp(update)
+				handler.HandleHelp(ctx, update)
 			default:
-				handler.SendMessage(context.Background(), update.Message.Chat.ID, "Неизвестная команда. Используйте /start или /help")
+				handler.SendMessage(ctx, update.Message.Chat.ID,
+					"Неизвестная команда. Используйте /start или /help")
 			}
 		} else {
-			handler.SendMessage(context.Background(), update.Message.Chat.ID, "Пожалуйста, используйте кнопки для взаимодействия с ботом.")
+			handler.SendMessage(ctx, update.Message.Chat.ID,
+				"Пожалуйста, используйте кнопки для взаимодействия с ботом.")
 		}
 	} else if update.CallbackQuery != nil {
-		handler.HandleCallback(update)
+		handler.HandleCallback(ctx, update)
 	}
 }
 
+// startBackupScheduler runs the database backup scheduler.
 func startBackupScheduler(ctx context.Context, dbPath string) {
 	logger.Info("Backup scheduler started (daily at 03:00)")
 
 	for {
 		now := time.Now()
-		next := time.Date(now.Year(), now.Month(), now.Day(), 3, 0, 0, 0, now.Location())
+		next := time.Date(now.Year(), now.Month(), now.Day(),
+			config.DefaultBackupHour, 0, 0, 0, now.Location())
 		if now.After(next) {
 			next = next.Add(24 * time.Hour)
 		}
@@ -218,7 +247,7 @@ func startBackupScheduler(ctx context.Context, dbPath string) {
 		select {
 		case <-time.After(sleepDuration):
 			logger.Info("Running scheduled database backup...")
-			if err := backup.DailyBackup(dbPath, 7); err != nil {
+			if err := backup.DailyBackup(dbPath, config.DefaultBackupRetention); err != nil {
 				logger.Errorf("Backup failed: %v", err)
 			} else {
 				logger.Info("Database backup completed successfully")

@@ -7,12 +7,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"rs8kvn_bot/internal/config"
 	"rs8kvn_bot/internal/database"
 	"rs8kvn_bot/internal/logger"
+	"rs8kvn_bot/internal/ratelimiter"
 	"rs8kvn_bot/internal/xui"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -95,12 +97,12 @@ func TestNewHandler(t *testing.T) {
 	// So we test with nil and expect it to work for structure tests
 	handler := &Handler{
 		bot:         nil,
-		config:      cfg,
+		cfg:         cfg,
 		xui:         xuiClient,
 		rateLimiter: nil,
 	}
 
-	if handler.config != cfg {
+	if handler.cfg != cfg {
 		t.Error("Config not set correctly")
 	}
 	if handler.xui != xuiClient {
@@ -111,40 +113,40 @@ func TestNewHandler(t *testing.T) {
 // TestHandleStart_NilMessage tests HandleStart with nil message
 func TestHandleStart_NilMessage(t *testing.T) {
 	handler := &Handler{
-		config: &config.Config{
+		cfg: &config.Config{
 			TelegramAdminID: 123456789,
 		},
 	}
 
 	// Should not panic with nil message
 	update := tgbotapi.Update{}
-	handler.HandleStart(update)
+	handler.HandleStart(context.Background(), update)
 	// If we reach here, the test passes (no panic)
 }
 
 // TestHandleHelp_NilMessage tests HandleHelp with nil message
 func TestHandleHelp_NilMessage(t *testing.T) {
 	handler := &Handler{
-		config: &config.Config{
+		cfg: &config.Config{
 			TrafficLimitGB: 100,
 		},
 	}
 
 	// Should not panic with nil message
 	update := tgbotapi.Update{}
-	handler.HandleHelp(update)
+	handler.HandleHelp(context.Background(), update)
 	// If we reach here, the test passes (no panic)
 }
 
 // TestHandleCallback_NilCallback tests HandleCallback with nil callback
 func TestHandleCallback_NilCallback(t *testing.T) {
 	handler := &Handler{
-		config: &config.Config{},
+		cfg: &config.Config{},
 	}
 
 	// Should not panic with nil callback
 	update := tgbotapi.Update{}
-	handler.HandleCallback(update)
+	handler.HandleCallback(context.Background(), update)
 	// If we reach here, the test passes (no panic)
 }
 
@@ -644,3 +646,254 @@ func TestSubscriptionURL(t *testing.T) {
 		t.Errorf("Subscription URL = %s, want http://localhost:2053/sub/test123", expectedURL)
 	}
 }
+
+// ==================== Helper Function Tests ====================
+
+func TestGetUsername(t *testing.T) {
+	tests := []struct {
+		name     string
+		user     *tgbotapi.User
+		expected string
+	}{
+		{
+			name: "user with username",
+			user: &tgbotapi.User{
+				ID:        123,
+				FirstName: "John",
+				UserName:  "johndoe",
+			},
+			expected: "johndoe",
+		},
+		{
+			name: "user without username, with first name",
+			user: &tgbotapi.User{
+				ID:        456,
+				FirstName: "Jane",
+			},
+			expected: "Jane",
+		},
+		{
+			name: "user without username and first name",
+			user: &tgbotapi.User{
+				ID: 789,
+			},
+			expected: "user_789",
+		},
+		{
+			name:     "nil user",
+			user:     nil,
+			expected: "unknown",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			handler := &Handler{}
+			got := handler.getUsername(tt.user)
+			if got != tt.expected {
+				t.Errorf("getUsername() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestMaskSubscriptionURL(t *testing.T) {
+	tests := []struct {
+		name     string
+		url      string
+		contains string
+	}{
+		{
+			name:     "standard URL",
+			url:      "http://localhost:2053/sub/abc123def456",
+			contains: "...",
+		},
+		{
+			name:     "URL with long sub ID",
+			url:      "http://example.com/sub/1234567890abcdef12345678",
+			contains: "...",
+		},
+		{
+			name:     "short URL",
+			url:      "http://x.co/s/a",
+			contains: "***",
+		},
+		{
+			name:     "empty URL",
+			url:      "",
+			contains: "***",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := maskSubscriptionURL(tt.url)
+			if !strings.Contains(got, tt.contains) {
+				t.Errorf("maskSubscriptionURL(%q) = %q, should contain %q", tt.url, got, tt.contains)
+			}
+		})
+	}
+}
+
+func TestMaskSubscriptionURL_PreservesHost(t *testing.T) {
+	tests := []struct {
+		name string
+		url  string
+		host string
+	}{
+		{
+			name: "localhost",
+			url:  "http://localhost:2053/sub/abc123",
+			host: "localhost:2053",
+		},
+		{
+			name: "example.com",
+			url:  "https://example.com/sub/xyz789",
+			host: "example.com",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := maskSubscriptionURL(tt.url)
+			if !strings.Contains(got, tt.host) {
+				t.Errorf("maskSubscriptionURL(%q) = %q, should contain host %q", tt.url, got, tt.host)
+			}
+			// Should not contain the full subscription ID
+			if strings.Contains(got, "abc123") || strings.Contains(got, "xyz789") {
+				t.Errorf("maskSubscriptionURL(%q) = %q, should mask subscription ID", tt.url, got)
+			}
+		})
+	}
+}
+
+func TestMaskSubscriptionURL_EdgeCases(t *testing.T) {
+	t.Run("very short URL", func(t *testing.T) {
+		got := maskSubscriptionURL("http://a/b")
+		if got == "" {
+			t.Error("maskSubscriptionURL should not return empty string")
+		}
+	})
+
+	t.Run("URL with no path", func(t *testing.T) {
+		got := maskSubscriptionURL("http://example.com")
+		if got == "" {
+			t.Error("maskSubscriptionURL should not return empty string")
+		}
+	})
+
+	t.Run("URL with multiple segments", func(t *testing.T) {
+		got := maskSubscriptionURL("http://example.com/path/to/sub/abc123def456")
+		// Should mask the last segment
+		if !strings.Contains(got, "...") {
+			t.Errorf("maskSubscriptionURL should mask the subscription ID, got: %s", got)
+		}
+	})
+}
+
+// ==================== Context Propagation Tests ====================
+
+func TestHandleStart_WithContext(t *testing.T) {
+	cfg := &config.Config{
+		TelegramAdminID:  123456789,
+		TrafficLimitGB:   100,
+		XUIHost:          "http://localhost:2053",
+		XUIInboundID:     1,
+		XUISubPath:       "sub",
+		TelegramBotToken: "123456:test_token",
+	}
+
+	xuiClient := xui.NewClient(cfg.XUIHost, "admin", "password")
+
+	handler := &Handler{
+		bot:         nil,
+		cfg:         cfg,
+		xui:         xuiClient,
+		rateLimiter: nil,
+	}
+
+	// Test with background context
+	ctx := context.Background()
+	update := tgbotapi.Update{}
+
+	// Should not panic
+	handler.HandleStart(ctx, update)
+}
+
+func TestHandleHelp_WithContext(t *testing.T) {
+	cfg := &config.Config{
+		TrafficLimitGB: 100,
+	}
+
+	handler := &Handler{
+		cfg: cfg,
+	}
+
+	ctx := context.Background()
+	update := tgbotapi.Update{}
+
+	// Should not panic
+	handler.HandleHelp(ctx, update)
+}
+
+func TestHandleCallback_WithContext(t *testing.T) {
+	handler := &Handler{
+		cfg: &config.Config{},
+	}
+
+	ctx := context.Background()
+	update := tgbotapi.Update{}
+
+	// Should not panic
+	handler.HandleCallback(ctx, update)
+}
+
+// ==================== Config Field Tests ====================
+
+func TestHandler_ConfigField(t *testing.T) {
+	cfg := &config.Config{
+		TelegramBotToken: "123456:test_token",
+		TelegramAdminID:  999888777,
+		TrafficLimitGB:   50,
+		XUIHost:          "http://test.local:8080",
+		XUIInboundID:     5,
+		XUISubPath:       "mysub",
+	}
+
+	xuiClient := xui.NewClient(cfg.XUIHost, "user", "pass")
+
+	handler := &Handler{
+		cfg: cfg,
+		xui: xuiClient,
+	}
+
+	if handler.cfg != cfg {
+		t.Error("Handler.cfg not set correctly")
+	}
+	if handler.cfg.TelegramAdminID != 999888777 {
+		t.Errorf("cfg.TelegramAdminID = %d, want 999888777", handler.cfg.TelegramAdminID)
+	}
+	if handler.cfg.TrafficLimitGB != 50 {
+		t.Errorf("cfg.TrafficLimitGB = %d, want 50", handler.cfg.TrafficLimitGB)
+	}
+}
+
+// ==================== RateLimiter Integration Tests ====================
+
+func TestHandler_RateLimiterField(t *testing.T) {
+	handler := &Handler{
+		rateLimiter: ratelimiter.NewRateLimiter(10, 1),
+	}
+
+	if handler.rateLimiter == nil {
+		t.Error("Handler.rateLimiter should not be nil")
+	}
+
+	// Test that rate limiter works
+	ctx := context.Background()
+	if !handler.rateLimiter.Wait(ctx) {
+		t.Error("RateLimiter should allow first request")
+	}
+}
+
+// ==================== Traffic Calculation Tests ====================

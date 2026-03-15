@@ -1,28 +1,53 @@
 package utils
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
-	"time"
+	"io"
 )
 
-// GenerateUUID generates a unique identifier in UUID-like format
-// based on current timestamp and nanoseconds.
+// GenerateUUID generates a cryptographically secure UUID v4 identifier.
+// This implementation follows RFC 4122 section 4.4 for UUID version 4.
+//
+// Format: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx
+// Where x is random hex digit, 4 is version, y is variant (8, 9, a, or b)
 func GenerateUUID() string {
-	now := time.Now()
-	unix := now.Unix()
-	nano := now.UnixNano()
+	uuid := make([]byte, 16)
 
-	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
-		unix,
-		nano&0xFFFF,
-		(nano>>16)&0xFFFF,
-		(nano>>32)&0xFFFF,
-		nano&0xFFFFFFFFFFFF,
+	// Read random bytes
+	if _, err := io.ReadFull(rand.Reader, uuid); err != nil {
+		// Fallback to pseudo-random if crypto/rand fails (should never happen)
+		panic(fmt.Sprintf("crypto/rand failed: %v", err))
+	}
+
+	// Set version to 4 (random UUID) - bits 12-15 of time_hi_and_version
+	uuid[6] = (uuid[6] & 0x0f) | 0x40
+
+	// Set variant to RFC 4122 - bits 6-7 of clock_seq_hi_and_reserved
+	uuid[8] = (uuid[8] & 0x3f) | 0x80
+
+	// Format as UUID string: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+	return fmt.Sprintf("%x-%x-%x-%x-%x",
+		uuid[0:4],
+		uuid[4:6],
+		uuid[6:8],
+		uuid[8:10],
+		uuid[10:16],
 	)
 }
 
-// GenerateSubID generates a unique subscription identifier
-// based on current nanosecond timestamp.
+// GenerateSubID generates a cryptographically secure random subscription identifier.
+// Returns a 28-character hex string (14 random bytes).
+//
+// This provides 56 bits of entropy which is sufficient for subscription IDs
+// and is URL-safe.
 func GenerateSubID() string {
-	return fmt.Sprintf("%x", time.Now().UnixNano()&0xFFFFFFFFFFFFFF)
+	bytes := make([]byte, 14)
+
+	if _, err := io.ReadFull(rand.Reader, bytes); err != nil {
+		panic(fmt.Sprintf("crypto/rand failed: %v", err))
+	}
+
+	return hex.EncodeToString(bytes)
 }
