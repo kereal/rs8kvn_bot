@@ -75,6 +75,14 @@ jobs:
                       type=semver,pattern={{major}}.{{minor}}
                       type=sha,prefix=
 
+            - name: Get version
+              id: get_version
+              run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+            - name: Get build time
+              id: get_build_time
+              run: echo "BUILD_TIME=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> $GITHUB_OUTPUT
+
             - name: Build and push Docker image
               uses: docker/build-push-action@v6
               with:
@@ -83,6 +91,10 @@ jobs:
                   tags: ${{ steps.meta.outputs.tags }}
                   labels: ${{ steps.meta.outputs.labels }}
                   platforms: linux/amd64
+                  build-args: |
+                      VERSION=${{ steps.get_version.outputs.VERSION }}
+                      COMMIT_SHA=${{ github.sha }}
+                      BUILD_TIME=${{ steps.get_build_time.outputs.BUILD_TIME }}
                   cache-from: type=gha
                   cache-to: type=gha,mode=max
 

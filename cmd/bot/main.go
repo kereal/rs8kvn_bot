@@ -25,11 +25,17 @@ import (
 // Build information (set via ldflags)
 var (
 	version   = "dev"
+	commit    = "unknown"
 	buildTime = "unknown"
 )
 
 // getVersion returns the current version from build info or git tag
 func getVersion() string {
+	// If version was set via ldflags and is not "dev", use it
+	if version != "dev" {
+		return "rs8kvn_bot@" + version
+	}
+
 	// Try to get version from Go build info (set by go install or git tags)
 	if info, ok := debug.ReadBuildInfo(); ok {
 		// Check for vcs tag (git tag)
@@ -50,6 +56,12 @@ func getVersion() string {
 			return "rs8kvn_bot@" + info.Main.Version
 		}
 	}
+
+	// If commit was set via ldflags, use it
+	if commit != "unknown" && len(commit) >= 7 {
+		return "rs8kvn_bot@" + commit[:7]
+	}
+
 	// Default version if no build info available
 	return "rs8kvn_bot@" + version
 }
