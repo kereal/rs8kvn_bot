@@ -13,6 +13,7 @@ import (
 	"rs8kvn_bot/internal/xui"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"go.uber.org/zap"
 )
 
 // Handler handles Telegram bot updates and manages subscription operations.
@@ -43,7 +44,9 @@ func (h *Handler) HandleStart(ctx context.Context, update tgbotapi.Update) {
 	chatID := update.Message.Chat.ID
 
 	username := h.getUsername(update.Message.From)
-	logger.Infof("User %s (%d) started the bot", username, chatID)
+	logger.Info("User started the bot",
+		zap.String("username", username),
+		zap.Int64("chat_id", chatID))
 
 	isAdmin := chatID == h.cfg.TelegramAdminID
 
@@ -123,12 +126,15 @@ func (h *Handler) HandleCallback(ctx context.Context, update tgbotapi.Update) {
 	chatID := update.CallbackQuery.Message.Chat.ID
 	username := h.getUsername(update.CallbackQuery.From)
 
-	logger.Infof("Callback received: %s from user %s (%d)", data, username, chatID)
+	logger.Info("Callback received",
+		zap.String("data", data),
+		zap.String("username", username),
+		zap.Int64("chat_id", chatID))
 
 	// Answer the callback to remove the loading state
 	callback := tgbotapi.NewCallback(update.CallbackQuery.ID, "")
 	if _, err := h.bot.Request(callback); err != nil {
-		logger.Errorf("Failed to answer callback: %v", err)
+		logger.Error("Failed to answer callback", zap.Error(err))
 	}
 
 	switch data {
@@ -139,19 +145,19 @@ func (h *Handler) HandleCallback(ctx context.Context, update tgbotapi.Update) {
 	case "admin_stats":
 		h.handleAdminStats(ctx, chatID, username)
 	default:
-		logger.Warnf("Unknown callback data: %s", data)
+		logger.Warn("Unknown callback data", zap.String("data", data))
 	}
 }
 
 // handleGetSubscription handles the "get subscription" callback.
 func (h *Handler) handleGetSubscription(ctx context.Context, chatID int64, username string) {
-	logger.Infof("User %s requesting subscription", username)
+	logger.Info("User requesting subscription", zap.String("username", username))
 
 	sub, err := database.GetByTelegramID(chatID)
 	if err == nil && sub != nil {
 		// Check if subscription is expired
 		if sub.IsExpired() {
-			logger.Infof("Subscription expired for user %s, creating new one", username)
+			logger.Info("Subscription expired, creating new one", zap.String("username", username))
 			h.createSubscription(ctx, chatID, username)
 			return
 		}
@@ -173,7 +179,7 @@ func (h *Handler) handleGetSubscription(ctx context.Context, chatID int64, usern
 
 // handleMySubscription handles the "my subscription" callback.
 func (h *Handler) handleMySubscription(ctx context.Context, chatID int64, username string) {
-	logger.Infof("User %s checking subscription status", username)
+	logger.Info("User checking subscription status", zap.String("username", username))
 
 	sub, err := database.GetByTelegramID(chatID)
 	if err != nil || sub == nil {
@@ -199,17 +205,17 @@ func (h *Handler) handleMySubscription(ctx context.Context, chatID int64, userna
 
 // handleAdminStats handles the "admin stats" callback.
 func (h *Handler) handleAdminStats(ctx context.Context, chatID int64, username string) {
-	logger.Infof("Admin %s requesting stats", username)
+	logger.Info("Admin requesting stats", zap.String("username", username))
 
 	// Verify admin access
 	if chatID != h.cfg.TelegramAdminID {
-		logger.Warnf("Non-admin user %d attempted to access admin stats", chatID)
+		logger.Warn("Non-admin user attempted to access admin stats", zap.Int64("chat_id", chatID))
 		return
 	}
 
 	var allSubs []database.Subscription
 	if err := database.DB.Find(&allSubs).Error; err != nil {
-		logger.Errorf("Failed to fetch subscriptions for stats: %v", err)
+		logger.Error("Failed to fetch subscriptions for stats", zap.Error(err))
 		h.SendMessage(ctx, chatID, "❌ Ошибка получения статистики")
 		return
 	}
@@ -245,8 +251,10 @@ func (h *Handler) createSubscription(ctx context.Context, chatID int64, username
 	expiryTime := getLastSecondOfMonth(now)
 	trafficBytes := int64(h.cfg.TrafficLimitGB) * 1024 * 1024 * 1024
 
-	logger.Infof("Creating subscription for %s: traffic=%d GB, expiry=%s",
-		username, h.cfg.TrafficLimitGB, expiryTime.Format("02.01.2006 15:04:05"))
+	logger.Info("Creating subscription",
+		zap.String("username", username),
+		zap.Int("traffic_gb", h.cfg.TrafficLimitGB),
+		zap.String("expiry", expiryTime.Format("02.01.2006 15:04:05")))
 
 	// Step 1: Generate IDs
 	clientID := utils.GenerateUUID()
@@ -255,7 +263,7 @@ func (h *Handler) createSubscription(ctx context.Context, chatID int64, username
 	// Step 2: Add client to 3x-ui panel
 	client, err := h.xui.AddClientWithID(ctx, h.cfg.XUIInboundID, username, clientID, subID, trafficBytes, expiryTime)
 	if err != nil {
-		logger.Errorf("Failed to add client to 3x-ui: %v", err)
+		logger.Error("Failed to add client to 3x-ui", zap.Error(err))
 		h.SendMessage(ctx, chatID, "❌ Произошла ошибка при создании подписки. Попробуйте позже.")
 		return
 	}
@@ -276,12 +284,12 @@ func (h *Handler) createSubscription(ctx context.Context, chatID int64, username
 	}
 
 	if err := database.CreateSubscription(sub); err != nil {
-		logger.Errorf("Failed to save subscription to database: %v", err)
+		logger.Error("Failed to save subscription to database", zap.Error(err))
 
 		// CRITICAL: Rollback - remove client from 3x-ui panel to prevent orphan record
-		logger.Infof("Attempting rollback: removing client %s from 3x-ui panel", client.ID)
+		logger.Info("Attempting rollback: removing client from 3x-ui panel", zap.String("client_id", client.ID))
 		if rollbackErr := h.xui.DeleteClient(ctx, h.cfg.XUIInboundID, client.ID); rollbackErr != nil {
-			logger.Errorf("CRITICAL: Failed to rollback client deletion from 3x-ui: %v", rollbackErr)
+			logger.Error("CRITICAL: Failed to rollback client deletion from 3x-ui", zap.Error(rollbackErr))
 			// This is a critical error - we have an orphan client in the panel
 			// Admin should be notified
 			h.notifyAdminError(ctx, fmt.Sprintf(
@@ -289,7 +297,7 @@ func (h *Handler) createSubscription(ctx context.Context, chatID int64, username
 				client.ID, username, h.cfg.XUIInboundID,
 			))
 		} else {
-			logger.Infof("Rollback successful: client %s removed from 3x-ui panel", client.ID)
+			logger.Info("Rollback successful: client removed from 3x-ui panel", zap.String("client_id", client.ID))
 		}
 
 		h.SendMessage(ctx, chatID, "❌ Подписка создана в панели, но не сохранена в базе. Обратитесь к администратору.")
@@ -307,7 +315,9 @@ func (h *Handler) createSubscription(ctx context.Context, chatID int64, username
 
 	// Notify admin about new subscription
 	h.notifyAdmin(ctx, username, chatID, subscriptionURL, expiryTime)
-	logger.Infof("Subscription created successfully for user %s (%d)", username, chatID)
+	logger.Info("Subscription created successfully",
+		zap.String("username", username),
+		zap.Int64("chat_id", chatID))
 }
 
 // notifyAdmin sends a notification to the admin about a new subscription.
@@ -329,7 +339,7 @@ func (h *Handler) notifyAdmin(ctx context.Context, username string, chatID int64
 	msg.ParseMode = "Markdown"
 	h.send(ctx, msg)
 
-	logger.Infof("Admin notified about new subscription for %s", username)
+	logger.Info("Admin notified about new subscription", zap.String("username", username))
 }
 
 // notifyAdminError sends an error notification to the admin.
@@ -352,7 +362,7 @@ func (h *Handler) send(ctx context.Context, msg tgbotapi.MessageConfig) {
 
 	_, err := h.bot.Send(msg)
 	if err != nil {
-		logger.Errorf("Failed to send message: %v", err)
+		logger.Error("Failed to send message", zap.Error(err))
 	}
 }
 
@@ -372,7 +382,9 @@ func (h *Handler) sendWithRetry(ctx context.Context, msg tgbotapi.MessageConfig,
 		}
 
 		if i < maxRetries-1 {
-			logger.Warnf("Message send failed, retrying in %v: %v", delay, err)
+			logger.Warn("Message send failed, retrying",
+				zap.Duration("delay", delay),
+				zap.Error(err))
 
 			select {
 			case <-time.After(delay):
@@ -384,7 +396,7 @@ func (h *Handler) sendWithRetry(ctx context.Context, msg tgbotapi.MessageConfig,
 		}
 	}
 
-	logger.Errorf("Failed to send message after %d retries", maxRetries)
+	logger.Error("Failed to send message after retries", zap.Int("max_retries", maxRetries))
 }
 
 // SendMessage sends a plain text message to a chat.

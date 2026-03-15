@@ -8,6 +8,8 @@ import (
 
 	"rs8kvn_bot/internal/config"
 	"rs8kvn_bot/internal/logger"
+
+	"go.uber.org/zap"
 )
 
 var (
@@ -50,13 +52,16 @@ func Start(ctx context.Context, url string, intervalSeconds int) {
 
 	// Validate and normalize interval
 	if intervalSeconds < config.MinHeartbeatInterval {
-		logger.Warnf("Heartbeat interval %ds is too low, using minimum: %ds",
-			intervalSeconds, config.MinHeartbeatInterval)
+		logger.Warn("Heartbeat interval is too low, using minimum",
+			zap.Int("requested", intervalSeconds),
+			zap.Int("minimum", config.MinHeartbeatInterval))
 		intervalSeconds = config.MinHeartbeatInterval
 	}
 
 	interval := time.Duration(intervalSeconds) * time.Second
-	logger.Infof("Heartbeat scheduler started: URL=%s, interval=%v", maskURL(url), interval)
+	logger.Info("Heartbeat scheduler started",
+		zap.String("url", maskURL(url)),
+		zap.Duration("interval", interval))
 
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -82,7 +87,7 @@ func sendHeartbeat(url string) {
 
 	resp, err := client.Post(url, "application/json", nil)
 	if err != nil {
-		logger.Errorf("Heartbeat failed: %v", err)
+		logger.Error("Heartbeat failed", zap.Error(err))
 		return
 	}
 	defer resp.Body.Close()
@@ -90,7 +95,7 @@ func sendHeartbeat(url string) {
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		logger.Debug("Heartbeat sent successfully")
 	} else {
-		logger.Warnf("Heartbeat returned status: %d", resp.StatusCode)
+		logger.Warn("Heartbeat returned non-success status", zap.Int("status_code", resp.StatusCode))
 	}
 }
 

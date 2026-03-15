@@ -68,7 +68,7 @@ USER appuser
 # GOGC: Garbage collection frequency (lower = more aggressive, default 100)
 # These settings optimize for low memory footprint
 ENV GOMEMLIMIT=67108864
-ENV GOGC=50
+ENV GOGC=40
 
 # No ports exposed - bot uses Telegram long polling
 EXPOSE 0
