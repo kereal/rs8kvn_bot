@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"go.uber.org/zap"
 )
 
 func TestInit(t *testing.T) {
@@ -68,7 +70,7 @@ func TestInfo(t *testing.T) {
 
 	// Should not panic
 	Info("test info message")
-	Infof("test info message: %s", "formatted")
+	Info("test info message", zap.String("formatted", "formatted"))
 }
 
 func TestError(t *testing.T) {
@@ -82,7 +84,7 @@ func TestError(t *testing.T) {
 
 	// Should not panic
 	Error("test error message")
-	Errorf("test error message: %s", "formatted")
+	Error("test error message", zap.String("formatted", "formatted"))
 }
 
 func TestDebug(t *testing.T) {
@@ -96,7 +98,7 @@ func TestDebug(t *testing.T) {
 
 	// Should not panic
 	Debug("test debug message")
-	Debugf("test debug message: %s", "formatted")
+	Debug("test debug message", zap.String("formatted", "formatted"))
 }
 
 func TestWarn(t *testing.T) {
@@ -110,7 +112,7 @@ func TestWarn(t *testing.T) {
 
 	// Should not panic
 	Warn("test warn message")
-	Warnf("test warn message: %s", "formatted")
+	Warn("test warn message", zap.String("formatted", "formatted"))
 }
 
 func TestSync(t *testing.T) {
@@ -206,24 +208,7 @@ func TestLogFileWritten(t *testing.T) {
 	}
 }
 
-func TestFormatArgs(t *testing.T) {
-	tests := []struct {
-		args     []interface{}
-		expected string
-	}{
-		{[]interface{}{"hello"}, "hello"},
-		{[]interface{}{123}, "123"},
-		{[]interface{}{"hello", "world"}, "helloworld"},
-		{[]interface{}{1, 2, 3}, "1 2 3"}, // fmt.Sprint adds spaces between numbers
-	}
-
-	for _, tt := range tests {
-		result := formatArgs(tt.args...)
-		if result != tt.expected {
-			t.Errorf("formatArgs(%v) = %q, want %q", tt.args, result, tt.expected)
-		}
-	}
-}
+// formatArgs function removed - no longer needed with structured logging
 
 // ==================== Service Tests ====================
 
@@ -288,7 +273,7 @@ func TestService_Info(t *testing.T) {
 
 	// Should not panic
 	service.Info("test info message")
-	service.Infof("test info: %s", "formatted")
+	service.Info("test info", zap.String("formatted", "formatted"))
 }
 
 func TestService_Debug(t *testing.T) {
@@ -303,7 +288,7 @@ func TestService_Debug(t *testing.T) {
 	defer service.Close()
 
 	service.Debug("test debug message")
-	service.Debugf("test debug: %s", "formatted")
+	service.Debug("test debug", zap.String("formatted", "formatted"))
 }
 
 func TestService_Warn(t *testing.T) {
@@ -318,7 +303,7 @@ func TestService_Warn(t *testing.T) {
 	defer service.Close()
 
 	service.Warn("test warn message")
-	service.Warnf("test warn: %s", "formatted")
+	service.Warn("test warn", zap.String("formatted", "formatted"))
 }
 
 func TestService_Error(t *testing.T) {
@@ -333,10 +318,10 @@ func TestService_Error(t *testing.T) {
 	defer service.Close()
 
 	service.Error("test error message")
-	service.Errorf("test error: %s", "formatted")
+	service.Error("test error", zap.String("formatted", "formatted"))
 }
 
-func TestService_WithField(t *testing.T) {
+func TestService_With(t *testing.T) {
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
 
@@ -347,9 +332,9 @@ func TestService_WithField(t *testing.T) {
 	}
 	defer service.Close()
 
-	newService := service.WithField("key", "value")
+	newService := service.With(zap.String("key", "value"))
 	if newService == nil {
-		t.Error("WithField() returned nil")
+		t.Error("With() returned nil")
 	}
 
 	newService.Info("test with field")
@@ -366,14 +351,12 @@ func TestService_WithFields(t *testing.T) {
 	}
 	defer service.Close()
 
-	fields := map[string]interface{}{
-		"key1": "value1",
-		"key2": 123,
-	}
-
-	newService := service.WithFields(fields)
+	newService := service.With(
+		zap.String("key1", "value1"),
+		zap.Int("key2", 123),
+	)
 	if newService == nil {
-		t.Error("WithFields() returned nil")
+		t.Error("With() returned nil")
 	}
 
 	newService.Info("test with fields")
@@ -544,9 +527,9 @@ func TestNilLoggerSafety(t *testing.T) {
 
 	// These should not panic
 	Info("test")
-	Infof("test %s", "formatted")
+	Info("test", zap.String("formatted", "formatted"))
 	Debug("test")
-	Debugf("test %s", "formatted")
+	Debug("test", zap.String("formatted", "formatted"))
 	Warn("test")
-	Warnf("test %s", "formatted")
+	Warn("test", zap.String("formatted", "formatted"))
 }
