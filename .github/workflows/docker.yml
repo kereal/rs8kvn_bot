@@ -85,3 +85,50 @@ jobs:
                   platforms: linux/amd64
                   cache-from: type=gha
                   cache-to: type=gha,mode=max
+
+    release:
+        name: Create GitHub Release
+        runs-on: ubuntu-latest
+        needs: [test, build-and-push]
+        if: startsWith(github.ref, 'refs/tags/v')
+        permissions:
+            contents: write
+
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v6
+              with:
+                  fetch-depth: 0
+
+            - name: Get version from tag
+              id: get_version
+              run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+            - name: Generate changelog
+              id: changelog
+              run: |
+                  # Get previous tag
+                  PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+
+                  if [ -z "$PREV_TAG" ]; then
+                      # First release, get all commits
+                      CHANGELOG=$(git log --pretty=format:"- %s (%h)" --no-merges)
+                  else
+                      # Get commits since last tag
+                      CHANGELOG=$(git log ${PREV_TAG}..HEAD --pretty=format:"- %s (%h)" --no-merges)
+                  fi
+
+                  # Save changelog to file for multiline support
+                  echo "$CHANGELOG" > /tmp/changelog.txt
+                  echo "changelog_file=/tmp/changelog.txt" >> $GITHUB_OUTPUT
+
+            - name: Create Release
+              uses: ncipollo/release-action@v1
+              with:
+                  tag: ${{ steps.get_version.outputs.VERSION }}
+                  name: Release ${{ steps.get_version.outputs.VERSION }}
+                  bodyFile: ${{ steps.changelog.outputs.changelog_file }}
+                  generateReleaseNotes: true
+                  draft: false
+                  prerelease: false
+                  token: ${{ secrets.GITHUB_TOKEN }}
