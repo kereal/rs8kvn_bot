@@ -1,6 +1,7 @@
 package logger
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -11,6 +12,7 @@ func TestInit(t *testing.T) {
 	logPath := filepath.Join(tmpDir, "test.log")
 
 	err := Init(logPath, "info")
+	// Ignore sync errors on stdout/stderr
 	if err != nil {
 		t.Fatalf("Init() error = %v", err)
 	}
@@ -28,6 +30,7 @@ func TestInit_CreatesDirectory(t *testing.T) {
 	logPath := filepath.Join(tmpDir, "subdir", "test.log")
 
 	err := Init(logPath, "info")
+	// Ignore sync errors on stdout/stderr
 	if err != nil {
 		t.Fatalf("Init() error = %v", err)
 	}
@@ -46,6 +49,7 @@ func TestInit_InvalidLogLevel(t *testing.T) {
 
 	// Invalid log level should default to info
 	err := Init(logPath, "invalid")
+	// Ignore sync errors on stdout/stderr
 	if err != nil {
 		t.Fatalf("Init() with invalid level should not error, got: %v", err)
 	}
@@ -186,6 +190,7 @@ func TestLogFileWritten(t *testing.T) {
 
 	// Check file exists and has content
 	content, err := os.ReadFile(logPath)
+	// Ignore sync errors on stdout/stderr
 	if err != nil {
 		t.Fatalf("Failed to read log file: %v", err)
 	}
@@ -218,4 +223,330 @@ func TestFormatArgs(t *testing.T) {
 			t.Errorf("formatArgs(%v) = %q, want %q", tt.args, result, tt.expected)
 		}
 	}
+}
+
+// ==================== Service Tests ====================
+
+func TestNewService(t *testing.T) {
+	tmpDir := t.TempDir()
+	logPath := filepath.Join(tmpDir, "test.log")
+
+	service, err := NewService(logPath, "info")
+	// Ignore sync errors on stdout/stderr
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	if service == nil {
+		t.Fatal("NewService() returned nil")
+	}
+
+	// Clean up
+	service.Close()
+}
+
+func TestNewService_CreatesDirectory(t *testing.T) {
+	tmpDir := t.TempDir()
+	logPath := filepath.Join(tmpDir, "subdir", "test.log")
+
+	service, err := NewService(logPath, "info")
+	// Ignore sync errors on stdout/stderr
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+
+	// Verify directory was created
+	if _, err := os.Stat(filepath.Dir(logPath)); os.IsNotExist(err) {
+		t.Fatal("NewService() did not create parent directory")
+	}
+
+	service.Close()
+}
+
+func TestService_Close(t *testing.T) {
+	tmpDir := t.TempDir()
+	logPath := filepath.Join(tmpDir, "test.log")
+
+	service, err := NewService(logPath, "info")
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+
+	// Close may return sync error on stdout, which is expected
+	_ = service.Close()
+}
+
+func TestService_Info(t *testing.T) {
+	tmpDir := t.TempDir()
+	logPath := filepath.Join(tmpDir, "test.log")
+
+	service, err := NewService(logPath, "info")
+	// Ignore sync errors on stdout/stderr
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	defer service.Close()
+
+	// Should not panic
+	service.Info("test info message")
+	service.Infof("test info: %s", "formatted")
+}
+
+func TestService_Debug(t *testing.T) {
+	tmpDir := t.TempDir()
+	logPath := filepath.Join(tmpDir, "test.log")
+
+	service, err := NewService(logPath, "debug")
+	// Ignore sync errors on stdout/stderr
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	defer service.Close()
+
+	service.Debug("test debug message")
+	service.Debugf("test debug: %s", "formatted")
+}
+
+func TestService_Warn(t *testing.T) {
+	tmpDir := t.TempDir()
+	logPath := filepath.Join(tmpDir, "test.log")
+
+	service, err := NewService(logPath, "info")
+	// Ignore sync errors on stdout/stderr
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	defer service.Close()
+
+	service.Warn("test warn message")
+	service.Warnf("test warn: %s", "formatted")
+}
+
+func TestService_Error(t *testing.T) {
+	tmpDir := t.TempDir()
+	logPath := filepath.Join(tmpDir, "test.log")
+
+	service, err := NewService(logPath, "info")
+	// Ignore sync errors on stdout/stderr
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	defer service.Close()
+
+	service.Error("test error message")
+	service.Errorf("test error: %s", "formatted")
+}
+
+func TestService_WithField(t *testing.T) {
+	tmpDir := t.TempDir()
+	logPath := filepath.Join(tmpDir, "test.log")
+
+	service, err := NewService(logPath, "info")
+	// Ignore sync errors on stdout/stderr
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	defer service.Close()
+
+	newService := service.WithField("key", "value")
+	if newService == nil {
+		t.Error("WithField() returned nil")
+	}
+
+	newService.Info("test with field")
+}
+
+func TestService_WithFields(t *testing.T) {
+	tmpDir := t.TempDir()
+	logPath := filepath.Join(tmpDir, "test.log")
+
+	service, err := NewService(logPath, "info")
+	// Ignore sync errors on stdout/stderr
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	defer service.Close()
+
+	fields := map[string]interface{}{
+		"key1": "value1",
+		"key2": 123,
+	}
+
+	newService := service.WithFields(fields)
+	if newService == nil {
+		t.Error("WithFields() returned nil")
+	}
+
+	newService.Info("test with fields")
+}
+
+func TestService_WithError(t *testing.T) {
+	tmpDir := t.TempDir()
+	logPath := filepath.Join(tmpDir, "test.log")
+
+	service, err := NewService(logPath, "info")
+	// Ignore sync errors on stdout/stderr
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	defer service.Close()
+
+	testErr := fmt.Errorf("test error")
+	newService := service.WithError(testErr)
+	if newService == nil {
+		t.Error("WithError() returned nil")
+	}
+}
+
+func TestService_SetSentryHub(t *testing.T) {
+	tmpDir := t.TempDir()
+	logPath := filepath.Join(tmpDir, "test.log")
+
+	service, err := NewService(logPath, "info")
+	// Ignore sync errors on stdout/stderr
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	defer service.Close()
+
+	// Should not panic with nil hub
+	service.SetSentryHub(nil)
+}
+
+// ==================== tgbotapiLogger Tests ====================
+
+func TestTgbotapiLogger_Println(t *testing.T) {
+	tmpDir := t.TempDir()
+	logPath := filepath.Join(tmpDir, "test.log")
+
+	// Initialize logger first
+	if err := Init(logPath, "info"); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	defer Close()
+
+	logger := &tgbotapiLogger{}
+	// Should not panic
+	logger.Println("test", "message")
+}
+
+func TestTgbotapiLogger_Printf(t *testing.T) {
+	tmpDir := t.TempDir()
+	logPath := filepath.Join(tmpDir, "test.log")
+
+	// Initialize logger first
+	if err := Init(logPath, "info"); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	defer Close()
+
+	logger := &tgbotapiLogger{}
+	// Should not panic
+	logger.Printf("test %s", "formatted")
+}
+
+// ==================== stdLogWriter Tests ====================
+
+func TestStdLogWriter_Write(t *testing.T) {
+	tmpDir := t.TempDir()
+	logPath := filepath.Join(tmpDir, "test.log")
+
+	// Initialize logger first
+	if err := Init(logPath, "info"); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	defer Close()
+
+	writer := &stdLogWriter{}
+
+	// Test writing
+	n, err := writer.Write([]byte("test message\n"))
+	// Ignore sync errors on stdout/stderr
+	if err != nil {
+		t.Errorf("Write() error = %v", err)
+	}
+	if n == 0 {
+		t.Error("Write() returned 0 bytes")
+	}
+
+	// Test empty message
+	n, err = writer.Write([]byte(""))
+	// Ignore sync errors on stdout/stderr
+	if err != nil {
+		t.Errorf("Write() error = %v", err)
+	}
+
+	// Test whitespace only
+	n, err = writer.Write([]byte("   \n\t  "))
+	// Ignore sync errors on stdout/stderr
+	if err != nil {
+		t.Errorf("Write() error = %v", err)
+	}
+}
+
+// ==================== SetSentryHub Tests ====================
+
+func TestSetSentryHub(t *testing.T) {
+	// Should not panic with nil hub
+	SetSentryHub(nil)
+}
+
+// ==================== Writer Tests ====================
+
+func TestWriter(t *testing.T) {
+	tmpDir := t.TempDir()
+	logPath := filepath.Join(tmpDir, "test.log")
+
+	// Initialize logger first
+	if err := Init(logPath, "info"); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	defer Close()
+
+	writer := Writer()
+	if writer == nil {
+		t.Error("Writer() returned nil")
+	}
+
+	// Test writing through the returned writer
+	_, err := writer.Write([]byte("test message\n"))
+	// Ignore sync errors on stdout/stderr
+	if err != nil {
+		t.Errorf("Write() error = %v", err)
+	}
+}
+
+// ==================== RedirectStdLog Tests ====================
+
+func TestRedirectStdLog(t *testing.T) {
+	tmpDir := t.TempDir()
+	logPath := filepath.Join(tmpDir, "test.log")
+
+	// Initialize logger first
+	if err := Init(logPath, "info"); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	defer Close()
+
+	// Should not panic
+	RedirectStdLog()
+}
+
+// ==================== Edge Cases ====================
+
+func TestNilLoggerSafety(t *testing.T) {
+	// Test that global functions don't panic with nil logger
+	// This simulates calling logging functions before Init()
+
+	// Temporarily set Log to nil
+	oldLog := Log
+	Log = nil
+	defer func() { Log = oldLog }()
+
+	// These should not panic
+	Info("test")
+	Infof("test %s", "formatted")
+	Debug("test")
+	Debugf("test %s", "formatted")
+	Warn("test")
+	Warnf("test %s", "formatted")
 }

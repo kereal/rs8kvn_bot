@@ -247,9 +247,9 @@ func TestContainsSuccess(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		result := containsSuccess(tt.msg)
+		result := containsSuccessKeywords(tt.msg)
 		if result != tt.expected {
-			t.Errorf("containsSuccess(%q) = %v, want %v", tt.msg, result, tt.expected)
+			t.Errorf("containsSuccessKeywords(%q) = %v, want %v", tt.msg, result, tt.expected)
 		}
 	}
 }
@@ -258,10 +258,10 @@ func TestRetryWithBackoff_Success(t *testing.T) {
 	callCount := 0
 	ctx := context.Background()
 
-	err := retryWithBackoff(ctx, func() error {
+	err := retryWithBackoff(ctx, 3, 100*time.Millisecond, func() error {
 		callCount++
 		return nil
-	}, 3, 100*time.Millisecond)
+	})
 
 	if err != nil {
 		t.Errorf("retryWithBackoff() error = %v", err)
@@ -275,13 +275,13 @@ func TestRetryWithBackoff_Retries(t *testing.T) {
 	callCount := 0
 	ctx := context.Background()
 
-	err := retryWithBackoff(ctx, func() error {
+	err := retryWithBackoff(ctx, 5, 10*time.Millisecond, func() error {
 		callCount++
 		if callCount < 3 {
 			return fmt.Errorf("error %d", callCount)
 		}
 		return nil
-	}, 5, 10*time.Millisecond)
+	})
 
 	if err != nil {
 		t.Errorf("retryWithBackoff() error = %v", err)
@@ -295,10 +295,10 @@ func TestRetryWithBackoff_MaxRetries(t *testing.T) {
 	callCount := 0
 	ctx := context.Background()
 
-	err := retryWithBackoff(ctx, func() error {
+	err := retryWithBackoff(ctx, 3, 10*time.Millisecond, func() error {
 		callCount++
 		return fmt.Errorf("always fails")
-	}, 3, 10*time.Millisecond)
+	})
 
 	if err == nil {
 		t.Error("retryWithBackoff() should return error after max retries")
@@ -312,9 +312,9 @@ func TestRetryWithBackoff_ContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately
 
-	err := retryWithBackoff(ctx, func() error {
+	err := retryWithBackoff(ctx, 3, 10*time.Millisecond, func() error {
 		return fmt.Errorf("error")
-	}, 3, 10*time.Millisecond)
+	})
 
 	if err == nil {
 		t.Error("retryWithBackoff() should return error when context is cancelled")

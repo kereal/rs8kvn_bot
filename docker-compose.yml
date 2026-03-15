@@ -1,28 +1,62 @@
+# Production Docker Compose configuration
+# Usage: docker compose up -d
+
 services:
     rs8kvn_bot:
-        image: ghcr.io/kereal/rs8kvn_bot:latest
+        # Use specific version tag instead of :latest for reproducibility
+        # Replace 'v1.0.0' with your actual version
+        image: ghcr.io/kereal/rs8kvn_bot:v1.0.0
         container_name: rs8kvn_bot
         restart: unless-stopped
+
+        # Security: Run as non-root user (matches UID/GID in Dockerfile)
+        user: "1000:1000"
+
         volumes:
+            # Read-only config file
             - ./.env:/app/.env:ro
+            # Persistent data directory (must be writable)
             - ./data:/app/data
+
         environment:
             - TZ=Europe/Moscow
-            # Go runtime optimizations for minimal memory
+            # Go runtime memory optimization
+            # GOMEMLIMIT: 64MB soft limit (67108864 bytes)
+            # GOGC: More aggressive GC (50 instead of default 100)
             - GOMEMLIMIT=67108864
             - GOGC=50
+
+        # Security hardening
+        security_opt:
+            - no-new-privileges:true
+        # Note: read_only filesystem not possible due to SQLite writes
+
+        # Health check - verify process is running
         healthcheck:
-            test: ["CMD", "pgrep", "rs8kvn_bot"]
+            test: ["CMD", "pgrep", "-f", "rs8kvn_bot"]
             interval: 30s
             timeout: 10s
             retries: 3
             start_period: 30s
-        # Resource limits for minimal memory footprint
+
+        # Resource limits for production
+        # Note: Memory limit should be higher than GOMEMLIMIT to allow GC headroom
         deploy:
             resources:
                 limits:
                     cpus: "0.5"
-                    memory: 128M
+                    memory: 128M # 2x GOMEMLIMIT for GC headroom
                 reservations:
                     cpus: "0.1"
-                    memory: 6M
+                    memory: 32M # Minimum guaranteed memory
+
+        # Logging configuration - prevent disk overflow
+        logging:
+            driver: "json-file"
+            options:
+                max-size: "10m"
+                max-file: "3"
+
+        # Graceful shutdown
+        stop_grace_period: 30s
+        stop_signal: SIGTERM

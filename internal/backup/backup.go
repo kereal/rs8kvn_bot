@@ -8,35 +8,55 @@ import (
 	"sort"
 	"time"
 
+	"rs8kvn_bot/internal/config"
 	"rs8kvn_bot/internal/logger"
 )
 
+// BackupDatabase creates a backup of the SQLite database file.
+// It uses atomic write pattern: write to temp file, sync, then rename.
+// This ensures the backup is always in a consistent state.
 func BackupDatabase(dbPath string) error {
 	backupPath := dbPath + ".backup"
 	tempPath := backupPath + ".tmp"
 
+	// Open source database
 	src, err := os.Open(dbPath)
 	if err != nil {
 		return fmt.Errorf("failed to open database: %w", err)
 	}
 	defer src.Close()
 
+	// Create temp backup file
 	dst, err := os.Create(tempPath)
 	if err != nil {
 		return fmt.Errorf("failed to create temp backup: %w", err)
 	}
 	defer dst.Close()
 
+	// Copy database to temp file
 	if _, err := io.Copy(dst, src); err != nil {
 		os.Remove(tempPath)
 		return fmt.Errorf("failed to copy database: %w", err)
 	}
 
+	// Sync to ensure all data is written to disk
 	if err := dst.Sync(); err != nil {
 		os.Remove(tempPath)
 		return fmt.Errorf("failed to sync backup: %w", err)
 	}
 
+	// Close files before rename
+	if err := dst.Close(); err != nil {
+		os.Remove(tempPath)
+		return fmt.Errorf("failed to close backup file: %w", err)
+	}
+
+	if err := src.Close(); err != nil {
+		os.Remove(tempPath)
+		return fmt.Errorf("failed to close database file: %w", err)
+	}
+
+	// Atomic rename
 	if err := os.Rename(tempPath, backupPath); err != nil {
 		os.Remove(tempPath)
 		return fmt.Errorf("failed to rename backup: %w", err)
@@ -46,13 +66,21 @@ func BackupDatabase(dbPath string) error {
 	return nil
 }
 
+// RotateBackups rotates the current backup file to a timestamped version
+// and removes old backups beyond the retention limit.
 func RotateBackups(dbPath string, keep int) error {
-	basePath := dbPath + ".backup"
-
-	if _, err := os.Stat(basePath); os.IsNotExist(err) {
-		return nil
+	if keep < 1 {
+		keep = config.DefaultBackupRetention
 	}
 
+	basePath := dbPath + ".backup"
+
+	// Check if backup exists
+	if _, err := os.Stat(basePath); os.IsNotExist(err) {
+		return nil // No backup to rotate
+	}
+
+	// Create timestamped backup
 	timestamp := time.Now().Format("20060102_150405")
 	timedBackupPath := fmt.Sprintf("%s.%s", basePath, timestamp)
 
@@ -62,12 +90,14 @@ func RotateBackups(dbPath string, keep int) error {
 
 	logger.Infof("Rotated backup to: %s", timedBackupPath)
 
+	// Find and remove old backups
 	pattern := basePath + ".*"
 	matches, err := filepath.Glob(pattern)
 	if err != nil {
 		return fmt.Errorf("failed to find backups: %w", err)
 	}
 
+	// Sort backups by modification time (newest first)
 	type backupInfo struct {
 		path    string
 		modTime time.Time
@@ -84,11 +114,14 @@ func RotateBackups(dbPath string, keep int) error {
 		return backups[i].modTime.After(backups[j].modTime)
 	})
 
+	// Remove old backups beyond retention limit
 	removed := 0
 	for i := keep; i < len(backups); i++ {
 		if err := os.Remove(backups[i].path); err == nil {
 			logger.Infof("Removed old backup: %s", backups[i].path)
 			removed++
+		} else {
+			logger.Warnf("Failed to remove old backup %s: %v", backups[i].path, err)
 		}
 	}
 
@@ -99,9 +132,78 @@ func RotateBackups(dbPath string, keep int) error {
 	return nil
 }
 
+// DailyBackup performs a database backup and rotation.
+// This is the main entry point for scheduled backups.
 func DailyBackup(dbPath string, keepDays int) error {
-	if err := BackupDatabase(dbPath); err != nil {
-		return err
+	if keepDays < 1 {
+		keepDays = config.DefaultBackupRetention
 	}
-	return RotateBackups(dbPath, keepDays)
+
+	if err := BackupDatabase(dbPath); err != nil {
+		return fmt.Errorf("backup failed: %w", err)
+	}
+
+	if err := RotateBackups(dbPath, keepDays); err != nil {
+		return fmt.Errorf("rotation failed: %w", err)
+	}
+
+	return nil
+}
+
+// GetBackupInfo returns information about existing backups.
+func GetBackupInfo(dbPath string) ([]BackupInfo, error) {
+	basePath := dbPath + ".backup"
+	pattern := basePath + ".*"
+	matches, err := filepath.Glob(pattern)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find backups: %w", err)
+	}
+
+	// Also check for the main backup file
+	if _, err := os.Stat(basePath); err == nil {
+		matches = append(matches, basePath)
+	}
+
+	infos := make([]BackupInfo, 0, len(matches))
+	for _, match := range matches {
+		info, err := os.Stat(match)
+		if err != nil {
+			continue
+		}
+
+		infos = append(infos, BackupInfo{
+			Path:    match,
+			Size:    info.Size(),
+			ModTime: info.ModTime(),
+		})
+	}
+
+	// Sort by modification time (newest first)
+	sort.Slice(infos, func(i, j int) bool {
+		return infos[i].ModTime.After(infos[j].ModTime)
+	})
+
+	return infos, nil
+}
+
+// BackupInfo contains information about a backup file.
+type BackupInfo struct {
+	Path    string
+	Size    int64
+	ModTime time.Time
+}
+
+// TotalBackupSize returns the total size of all backup files.
+func TotalBackupSize(dbPath string) (int64, error) {
+	infos, err := GetBackupInfo(dbPath)
+	if err != nil {
+		return 0, err
+	}
+
+	var total int64
+	for _, info := range infos {
+		total += info.Size
+	}
+
+	return total, nil
 }

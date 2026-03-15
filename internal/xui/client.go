@@ -13,12 +13,13 @@ import (
 	"sync"
 	"time"
 
+	"rs8kvn_bot/internal/config"
 	"rs8kvn_bot/internal/logger"
 	"rs8kvn_bot/internal/utils"
 )
 
-const maxResponseSize = 1 << 20
-
+// Client manages communication with a 3x-ui panel.
+// It handles authentication, session management, and API requests.
 type Client struct {
 	host       string
 	username   string
@@ -28,12 +29,14 @@ type Client struct {
 	lastLogin  time.Time
 }
 
+// APIResponse represents a generic response from the 3x-ui API.
 type APIResponse struct {
 	Success bool            `json:"success"`
 	Msg     string          `json:"msg"`
 	Obj     json.RawMessage `json:"obj,omitempty"`
 }
 
+// ClientConfig represents a client configuration in 3x-ui.
 type ClientConfig struct {
 	ID         string `json:"id"`
 	Email      string `json:"email"`
@@ -47,54 +50,70 @@ type ClientConfig struct {
 	Reset      int    `json:"reset,omitempty"`
 }
 
+// NewClient creates a new 3x-ui API client.
+// The client is optimized for low memory usage with minimal connection pooling.
 func NewClient(host, username, password string) *Client {
-	jar, _ := cookiejar.New(nil)
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		// cookiejar.New should never fail with nil options
+		panic(fmt.Sprintf("failed to create cookie jar: %v", err))
+	}
 
 	// Optimized transport for minimal memory footprint
 	transport := &http.Transport{
-		MaxIdleConns:        1, // Only 1 idle connection
-		MaxIdleConnsPerHost: 1, // Only 1 idle per host
-		IdleConnTimeout:     30 * time.Second,
+		MaxIdleConns:        config.MaxIdleConns,
+		MaxIdleConnsPerHost: config.MaxIdleConns,
+		IdleConnTimeout:     config.DefaultIdleConnIdleTimeout,
 		DisableCompression:  false,
 		ForceAttemptHTTP2:   false,
 	}
 
 	return &Client{
-		host:     host,
+		host:     strings.TrimSuffix(host, "/"),
 		username: username,
 		password: password,
 		httpClient: &http.Client{
-			Timeout:   10 * time.Second,
+			Timeout:   config.DefaultHTTPTimeout,
 			Jar:       jar,
 			Transport: transport,
 		},
 	}
 }
 
+// Login authenticates with the 3x-ui panel.
+// The session is valid for approximately 15 minutes.
 func (c *Client) Login(ctx context.Context) error {
 	return c.ensureLoggedIn(ctx, true)
 }
 
+// ensureLoggedIn checks if the session is valid and re-authenticates if necessary.
+// If force is true, it will always re-authenticate.
 func (c *Client) ensureLoggedIn(ctx context.Context, force bool) error {
+	// Fast path: check if we have a valid session without locking
 	c.mu.RLock()
-	if !force && time.Since(c.lastLogin) < 15*time.Minute {
-		c.mu.RUnlock()
-		return nil
-	}
+	validSession := !force && time.Since(c.lastLogin) < config.XUISessionValidity
 	c.mu.RUnlock()
 
+	if validSession {
+		return nil
+	}
+
+	// Slow path: need to re-authenticate
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if !force && time.Since(c.lastLogin) < 15*time.Minute {
+	// Double-check after acquiring write lock
+	if !force && time.Since(c.lastLogin) < config.XUISessionValidity {
 		return nil
 	}
 
-	return retryWithBackoff(ctx, func() error {
+	return retryWithBackoff(ctx, config.XUIMaxRetries, config.XUIInitialRetryDelay, func() error {
 		return c.doLogin(ctx)
-	}, 3, 2*time.Second)
+	})
 }
 
+// doLogin performs the actual login request.
+// Must be called with c.mu held.
 func (c *Client) doLogin(ctx context.Context) error {
 	loginURL := fmt.Sprintf("%s/login", c.host)
 
@@ -103,12 +122,12 @@ func (c *Client) doLogin(ctx context.Context) error {
 		"password": c.password,
 	})
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to marshal login request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", loginURL, bytes.NewBuffer(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, loginURL, bytes.NewBuffer(body))
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create login request: %w", err)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
@@ -116,13 +135,13 @@ func (c *Client) doLogin(ctx context.Context) error {
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return err
+		return fmt.Errorf("login request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, config.MaxResponseSize))
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to read login response: %w", err)
 	}
 
 	var apiResp APIResponse
@@ -135,65 +154,84 @@ func (c *Client) doLogin(ctx context.Context) error {
 	}
 
 	c.lastLogin = time.Now()
-	logger.Infof("3x-ui login successful (session valid until %s)", c.lastLogin.Add(15*time.Minute).Format("15:04:05"))
+	logger.Infof("3x-ui login successful (session valid until %s)",
+		c.lastLogin.Add(config.XUISessionValidity).Format("15:04:05"))
+
 	return nil
 }
 
-func (c *Client) AddClient(ctx context.Context, inboundID int, email string, trafficGB int64, expiryTime time.Time) (*ClientConfig, error) {
-	if err := c.ensureLoggedIn(ctx, false); err != nil {
-		return nil, fmt.Errorf("authentication required: %w", err)
-	}
-
+// AddClient creates a new client in the 3x-ui panel with auto-generated IDs.
+func (c *Client) AddClient(ctx context.Context, inboundID int, email string, trafficBytes int64, expiryTime time.Time) (*ClientConfig, error) {
 	clientID := utils.GenerateUUID()
 	subID := utils.GenerateSubID()
 
-	return c.AddClientWithID(ctx, inboundID, email, clientID, subID, trafficGB, expiryTime)
+	return c.AddClientWithID(ctx, inboundID, email, clientID, subID, trafficBytes, expiryTime)
 }
 
-// AddClientWithID добавляет клиента с заранее определёнными ID (для атомарной операции БД)
-func (c *Client) AddClientWithID(ctx context.Context, inboundID int, email string, clientID, subID string, trafficGB int64, expiryTime time.Time) (*ClientConfig, error) {
+// AddClientWithID creates a new client in the 3x-ui panel with specified IDs.
+// This is useful for atomic operations where the IDs are generated before the API call.
+//
+// Parameters:
+//   - inboundID: The inbound ID in 3x-ui panel
+//   - email: User identifier (usually Telegram username)
+//   - clientID: UUID for the client
+//   - subID: Subscription ID for URL generation
+//   - trafficBytes: Traffic limit in bytes
+//   - expiryTime: Subscription expiry time
+func (c *Client) AddClientWithID(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time) (*ClientConfig, error) {
 	if err := c.ensureLoggedIn(ctx, false); err != nil {
 		return nil, fmt.Errorf("authentication required: %w", err)
 	}
 
-	// Данные нового клиента в формате settings
+	// Validate inputs
+	if inboundID < 1 {
+		return nil, fmt.Errorf("invalid inbound ID: %d", inboundID)
+	}
+	if clientID == "" {
+		return nil, fmt.Errorf("client ID cannot be empty")
+	}
+	if subID == "" {
+		return nil, fmt.Errorf("subscription ID cannot be empty")
+	}
+
+	// Build client settings in 3x-ui format
 	clientSettings := map[string]interface{}{
 		"clients": []map[string]interface{}{
 			{
 				"id":         clientID,
 				"email":      email,
 				"limitIp":    0,
-				"totalGB":    trafficGB,
+				"totalGB":    trafficBytes,
 				"expiryTime": expiryTime.UnixMilli(),
 				"enable":     true,
 				"flow":       "xtls-rprx-vision",
 				"subId":      subID,
-				"reset":      31,
+				"reset":      config.SubscriptionResetDay,
 			},
 		},
 	}
 
 	settingsJSON, err := json.Marshal(clientSettings)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to marshal client settings: %w", err)
 	}
 
-	// Формируем запрос: id + settings (как строка JSON)
+	// Build request: id + settings (as JSON string)
 	requestData := map[string]interface{}{
-		"id":       inboundID, // 3x-ui ожидает int
+		"id":       inboundID,
 		"settings": string(settingsJSON),
 	}
 
 	body, err := json.Marshal(requestData)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	// POST /panel/api/inbounds/addClient — добавляет нового клиента к существующим
+	// POST to /panel/api/inbounds/addClient
 	addURL := fmt.Sprintf("%s/panel/api/inbounds/addClient", c.host)
-	req, err := http.NewRequestWithContext(ctx, "POST", addURL, bytes.NewBuffer(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, addURL, bytes.NewBuffer(body))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
@@ -201,34 +239,33 @@ func (c *Client) AddClientWithID(ctx context.Context, inboundID int, email strin
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("add client request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, config.MaxResponseSize))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
 
-	logger.Infof("3x-ui addClient response: %s", string(respBody))
+	logger.Debugf("3x-ui addClient response: %s", string(respBody))
 
-	// Пробуем распарсить как простой ответ с success/msg
-	type SimpleResponse struct {
+	// Parse response
+	var simpleResp struct {
 		Success bool        `json:"success"`
 		Msg     string      `json:"msg"`
 		Obj     interface{} `json:"obj,omitempty"`
 	}
 
-	var simpleResp SimpleResponse
 	if err := json.Unmarshal(respBody, &simpleResp); err != nil {
 		return nil, fmt.Errorf("failed to parse response: %w", err)
 	}
 
-	// 3x-ui иногда возвращает success=false но с сообщением об успехе
-	// Проверяем msg на наличие "successfully" или "added"
+	// 3x-ui sometimes returns success=false but with a success message
+	// Check the message content as a fallback
 	if !simpleResp.Success && simpleResp.Msg != "" {
-		if containsSuccess(simpleResp.Msg) {
-			logger.Infof("3x-ui вернул success=false, но операция успешна: %s", simpleResp.Msg)
+		if containsSuccessKeywords(simpleResp.Msg) {
+			logger.Infof("3x-ui returned success=false but operation appears successful: %s", simpleResp.Msg)
 		} else {
 			return nil, fmt.Errorf("failed to add client: %s", simpleResp.Msg)
 		}
@@ -237,25 +274,58 @@ func (c *Client) AddClientWithID(ctx context.Context, inboundID int, email strin
 	return &ClientConfig{
 		ID:         clientID,
 		Email:      email,
-		TotalGB:    trafficGB,
+		TotalGB:    trafficBytes,
 		ExpiryTime: expiryTime.UnixMilli(),
 		Enable:     true,
 		SubID:      subID,
-		Reset:      31,
+		Reset:      config.SubscriptionResetDay,
 	}, nil
 }
 
-func containsSuccess(msg string) bool {
-	msg = strings.ToLower(msg)
-	return strings.Contains(msg, "successfully") ||
-		strings.Contains(msg, "added") ||
-		strings.Contains(msg, "success")
+// DeleteClient removes a client from the 3x-ui panel.
+func (c *Client) DeleteClient(ctx context.Context, inboundID int, clientID string) error {
+	if err := c.ensureLoggedIn(ctx, false); err != nil {
+		return fmt.Errorf("authentication required: %w", err)
+	}
+
+	deleteURL := fmt.Sprintf("%s/panel/api/inbounds/delClient/%d/%s", c.host, inboundID, clientID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, deleteURL, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create delete request: %w", err)
+	}
+
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("delete client request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, config.MaxResponseSize))
+	if err != nil {
+		return fmt.Errorf("failed to read response: %w", err)
+	}
+
+	var apiResp APIResponse
+	if err := json.Unmarshal(respBody, &apiResp); err != nil {
+		return fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	if !apiResp.Success {
+		return fmt.Errorf("failed to delete client: %s", apiResp.Msg)
+	}
+
+	logger.Infof("Successfully deleted client %s from inbound %d", clientID, inboundID)
+	return nil
 }
 
-func (c *Client) GetSubscriptionLink(baseURL string, subID string, subPath string) string {
-	return fmt.Sprintf("%s/%s/%s", baseURL, subPath, subID)
+// GetSubscriptionLink generates a subscription URL for the given subID.
+func (c *Client) GetSubscriptionLink(baseURL, subID, subPath string) string {
+	return fmt.Sprintf("%s/%s/%s", strings.TrimSuffix(baseURL, "/"), subPath, subID)
 }
 
+// GetExternalURL extracts the base URL (scheme + host) from a full URL.
 func GetExternalURL(host string) string {
 	u, err := url.Parse(host)
 	if err != nil {
@@ -264,27 +334,35 @@ func GetExternalURL(host string) string {
 	return fmt.Sprintf("%s://%s", u.Scheme, u.Host)
 }
 
-func retryWithBackoff(ctx context.Context, fn func() error, maxRetries int, initialDelay time.Duration) error {
+// containsSuccessKeywords checks if a message contains keywords indicating success.
+func containsSuccessKeywords(msg string) bool {
+	msg = strings.ToLower(msg)
+	return strings.Contains(msg, "successfully") ||
+		strings.Contains(msg, "added") ||
+		strings.Contains(msg, "success")
+}
+
+// retryWithBackoff executes a function with exponential backoff retry.
+func retryWithBackoff(ctx context.Context, maxRetries int, initialDelay time.Duration, fn func() error) error {
 	var lastErr error
 	delay := initialDelay
 
 	for i := 0; i < maxRetries; i++ {
-		if err := fn(); err == nil {
+		err := fn()
+		if err == nil {
 			return nil
-		} else {
-			lastErr = err
 		}
+		lastErr = err
 
 		if i < maxRetries-1 {
-			logger.Warnf("Retry %d/%d after error: %v", i+1, maxRetries, lastErr)
+			logger.Warnf("Retry %d/%d after error: %v", i+1, maxRetries, err)
 
 			select {
 			case <-time.After(delay):
+				delay *= 2 // Exponential backoff
 			case <-ctx.Done():
 				return fmt.Errorf("context cancelled: %w", ctx.Err())
 			}
-
-			delay *= 2
 		}
 	}
 
