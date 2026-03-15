@@ -20,6 +20,7 @@ import (
 
 	"github.com/getsentry/sentry-go"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"go.uber.org/zap"
 )
 
 // Build information (set via ldflags)
@@ -100,12 +101,14 @@ func main() {
 	// Redirect standard log output (from third-party libraries) to our logger
 	logger.RedirectStdLog()
 
-	logger.Infof("Starting %s (built: %s)", getVersion(), buildTime)
-	logger.Infof("Configuration: %s", cfg.String())
+	logger.Info("Starting bot",
+		zap.String("version", getVersion()),
+		zap.String("built", buildTime))
+	logger.Info("Configuration loaded", zap.String("config", cfg.String()))
 
 	// Initialize database
 	if err := database.Init(cfg.DatabasePath); err != nil {
-		logger.Fatalf("Failed to initialize database: %v", err)
+		logger.Fatal("Failed to initialize database", zap.Error(err))
 	}
 	defer database.Close()
 	logger.Info("Database initialized successfully")
@@ -114,22 +117,22 @@ func main() {
 	xuiClient := xui.NewClient(cfg.XUIHost, cfg.XUIUsername, cfg.XUIPassword)
 
 	// Connect to 3x-ui panel with timeout
-	logger.Info("Connecting to 3x-ui panel...")
+	logger.Info("Connecting to 3x-ui panel")
 	ctx, cancel := context.WithTimeout(context.Background(), config.DefaultHTTPTimeout)
 	if err := xuiClient.Login(ctx); err != nil {
 		cancel()
-		logger.Fatalf("Failed to connect to 3x-ui panel: %v", err)
+		logger.Fatal("Failed to connect to 3x-ui panel", zap.Error(err))
 	}
 	cancel()
-	logger.Info("✓ 3x-ui panel connected")
+	logger.Info("3x-ui panel connected")
 
 	// Initialize Telegram bot
-	logger.Info("Validating Telegram bot token...")
+	logger.Info("Validating Telegram bot token")
 	botAPI, err := tgbotapi.NewBotAPI(cfg.TelegramBotToken)
 	if err != nil {
-		logger.Fatalf("Invalid Telegram bot token: %v", err)
+		logger.Fatal("Invalid Telegram bot token", zap.Error(err))
 	}
-	logger.Infof("✓ Telegram bot authorized: @%s", botAPI.Self.UserName)
+	logger.Info("Telegram bot authorized", zap.String("username", botAPI.Self.UserName))
 
 	// Create bot handler
 	handler := bot.NewHandler(botAPI, cfg, xuiClient)
@@ -155,7 +158,7 @@ func main() {
 			if r := recover(); r != nil {
 				sentry.CurrentHub().Recover(r)
 				sentry.Flush(config.SentryPanicFlushTimeout)
-				logger.Errorf("Backup scheduler panicked: %v", r)
+				logger.Error("Backup scheduler panicked", zap.Any("panic", r))
 			}
 			wg.Done()
 		}()
@@ -168,7 +171,7 @@ func main() {
 			if r := recover(); r != nil {
 				sentry.CurrentHub().Recover(r)
 				sentry.Flush(config.SentryPanicFlushTimeout)
-				logger.Errorf("Heartbeat scheduler panicked: %v", r)
+				logger.Error("Heartbeat scheduler panicked", zap.Any("panic", r))
 			}
 			wg.Done()
 		}()
@@ -183,7 +186,7 @@ func main() {
 			go handleUpdateSafely(ctx, handler, update)
 
 		case <-ctx.Done():
-			logger.Info("Graceful shutdown initiated...")
+			logger.Info("Graceful shutdown initiated")
 			botAPI.StopReceivingUpdates()
 
 			// Wait for background tasks with timeout
@@ -212,7 +215,7 @@ func handleUpdateSafely(ctx context.Context, handler *bot.Handler, update tgbota
 		if r := recover(); r != nil {
 			sentry.CurrentHub().Recover(r)
 			sentry.Flush(config.SentryPanicFlushTimeout)
-			logger.Errorf("Panic in update handler: %v", r)
+			logger.Error("Panic in update handler", zap.Any("panic", r))
 		}
 	}()
 
@@ -243,7 +246,7 @@ func handleUpdate(ctx context.Context, handler *bot.Handler, update tgbotapi.Upd
 
 // startBackupScheduler runs the database backup scheduler.
 func startBackupScheduler(ctx context.Context, dbPath string) {
-	logger.Info("Backup scheduler started (daily at 03:00)")
+	logger.Info("Backup scheduler started", zap.String("schedule", "daily at 03:00"))
 
 	for {
 		now := time.Now()
@@ -254,13 +257,13 @@ func startBackupScheduler(ctx context.Context, dbPath string) {
 		}
 
 		sleepDuration := time.Until(next)
-		logger.Infof("Next backup in %v", sleepDuration.Round(time.Minute))
+		logger.Info("Next backup scheduled", zap.Duration("duration", sleepDuration.Round(time.Minute)))
 
 		select {
 		case <-time.After(sleepDuration):
-			logger.Info("Running scheduled database backup...")
+			logger.Info("Running scheduled database backup")
 			if err := backup.DailyBackup(dbPath, config.DefaultBackupRetention); err != nil {
-				logger.Errorf("Backup failed: %v", err)
+				logger.Error("Backup failed", zap.Error(err))
 			} else {
 				logger.Info("Database backup completed successfully")
 			}

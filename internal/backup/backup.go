@@ -10,6 +10,8 @@ import (
 
 	"rs8kvn_bot/internal/config"
 	"rs8kvn_bot/internal/logger"
+
+	"go.uber.org/zap"
 )
 
 // BackupDatabase creates a backup of the SQLite database file.
@@ -62,7 +64,7 @@ func BackupDatabase(dbPath string) error {
 		return fmt.Errorf("failed to rename backup: %w", err)
 	}
 
-	logger.Infof("Database backup created: %s", backupPath)
+	logger.Info("Database backup created", zap.String("path", backupPath))
 	return nil
 }
 
@@ -88,7 +90,7 @@ func RotateBackups(dbPath string, keep int) error {
 		return fmt.Errorf("failed to rename backup: %w", err)
 	}
 
-	logger.Infof("Rotated backup to: %s", timedBackupPath)
+	logger.Info("Rotated backup", zap.String("path", timedBackupPath))
 
 	// Find and remove old backups
 	pattern := basePath + ".*"
@@ -118,15 +120,17 @@ func RotateBackups(dbPath string, keep int) error {
 	removed := 0
 	for i := keep; i < len(backups); i++ {
 		if err := os.Remove(backups[i].path); err == nil {
-			logger.Infof("Removed old backup: %s", backups[i].path)
+			logger.Info("Removed old backup", zap.String("path", backups[i].path))
 			removed++
 		} else {
-			logger.Warnf("Failed to remove old backup %s: %v", backups[i].path, err)
+			logger.Warn("Failed to remove old backup",
+				zap.String("path", backups[i].path),
+				zap.Error(err))
 		}
 	}
 
 	if removed > 0 {
-		logger.Infof("Cleaned up %d old backup(s)", removed)
+		logger.Info("Cleaned up old backups", zap.Int("count", removed))
 	}
 
 	return nil

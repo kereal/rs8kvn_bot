@@ -7,6 +7,7 @@ import (
 
 	"rs8kvn_bot/internal/logger"
 
+	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
 
@@ -54,13 +55,13 @@ func RunMigrations(db *gorm.DB) error {
 			continue
 		}
 
-		logger.Infof("Applying migration: %s", migration.Name)
+		logger.Info("Applying migration", zap.String("name", migration.Name))
 
 		if err := applyMigration(db, migration); err != nil {
 			return fmt.Errorf("migration %s failed: %w", migration.Name, err)
 		}
 
-		logger.Infof("Migration applied: %s", migration.Name)
+		logger.Info("Migration applied", zap.String("name", migration.Name))
 	}
 
 	return nil

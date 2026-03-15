@@ -16,7 +16,27 @@ import (
 	"rs8kvn_bot/internal/config"
 	"rs8kvn_bot/internal/logger"
 	"rs8kvn_bot/internal/utils"
+
+	"go.uber.org/zap"
 )
+
+// bufferPool is a sync.Pool for bytes.Buffer to reduce memory allocations
+var bufferPool = sync.Pool{
+	New: func() interface{} {
+		return bytes.NewBuffer(make([]byte, 0, 1024))
+	},
+}
+
+// getBuffer returns a bytes.Buffer from the pool
+func getBuffer() *bytes.Buffer {
+	return bufferPool.Get().(*bytes.Buffer)
+}
+
+// putBuffer returns a bytes.Buffer to the pool after resetting it
+func putBuffer(buf *bytes.Buffer) {
+	buf.Reset()
+	bufferPool.Put(buf)
+}
 
 // Client manages communication with a 3x-ui panel.
 // It handles authentication, session management, and API requests.
@@ -125,7 +145,11 @@ func (c *Client) doLogin(ctx context.Context) error {
 		return fmt.Errorf("failed to marshal login request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, loginURL, bytes.NewBuffer(body))
+	buf := getBuffer()
+	defer putBuffer(buf)
+	buf.Write(body)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, loginURL, buf)
 	if err != nil {
 		return fmt.Errorf("failed to create login request: %w", err)
 	}
@@ -154,8 +178,8 @@ func (c *Client) doLogin(ctx context.Context) error {
 	}
 
 	c.lastLogin = time.Now()
-	logger.Infof("3x-ui login successful (session valid until %s)",
-		c.lastLogin.Add(config.XUISessionValidity).Format("15:04:05"))
+	logger.Info("3x-ui login successful",
+		zap.String("session_valid_until", c.lastLogin.Add(config.XUISessionValidity).Format("15:04:05")))
 
 	return nil
 }
@@ -227,9 +251,13 @@ func (c *Client) AddClientWithID(ctx context.Context, inboundID int, email, clie
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
+	buf := getBuffer()
+	defer putBuffer(buf)
+	buf.Write(body)
+
 	// POST to /panel/api/inbounds/addClient
 	addURL := fmt.Sprintf("%s/panel/api/inbounds/addClient", c.host)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, addURL, bytes.NewBuffer(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, addURL, buf)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -248,7 +276,7 @@ func (c *Client) AddClientWithID(ctx context.Context, inboundID int, email, clie
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
 
-	logger.Debugf("3x-ui addClient response: %s", string(respBody))
+	logger.Debug("3x-ui addClient response", zap.String("response", string(respBody)))
 
 	// Parse response
 	var simpleResp struct {
@@ -265,7 +293,8 @@ func (c *Client) AddClientWithID(ctx context.Context, inboundID int, email, clie
 	// Check the message content as a fallback
 	if !simpleResp.Success && simpleResp.Msg != "" {
 		if containsSuccessKeywords(simpleResp.Msg) {
-			logger.Infof("3x-ui returned success=false but operation appears successful: %s", simpleResp.Msg)
+			logger.Info("3x-ui returned success=false but operation appears successful",
+				zap.String("message", simpleResp.Msg))
 		} else {
 			return nil, fmt.Errorf("failed to add client: %s", simpleResp.Msg)
 		}
@@ -316,7 +345,9 @@ func (c *Client) DeleteClient(ctx context.Context, inboundID int, clientID strin
 		return fmt.Errorf("failed to delete client: %s", apiResp.Msg)
 	}
 
-	logger.Infof("Successfully deleted client %s from inbound %d", clientID, inboundID)
+	logger.Info("Successfully deleted client",
+		zap.String("client_id", clientID),
+		zap.Int("inbound_id", inboundID))
 	return nil
 }
 
@@ -355,7 +386,10 @@ func retryWithBackoff(ctx context.Context, maxRetries int, initialDelay time.Dur
 		lastErr = err
 
 		if i < maxRetries-1 {
-			logger.Warnf("Retry %d/%d after error: %v", i+1, maxRetries, err)
+			logger.Warn("Retry after error",
+				zap.Int("attempt", i+1),
+				zap.Int("max_retries", maxRetries),
+				zap.Error(err))
 
 			select {
 			case <-time.After(delay):

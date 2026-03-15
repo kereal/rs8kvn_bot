@@ -20,9 +20,9 @@ import (
 )
 
 var (
-	// Log is the global sugared logger instance.
+	// Log is the global logger instance.
 	// Deprecated: Use logger.Service for dependency injection.
-	Log        *zap.SugaredLogger
+	Log        *zap.Logger
 	fileWriter *lumberjack.Logger
 	logMu      sync.Mutex
 	sentryHub  *sentry.Hub
@@ -63,7 +63,7 @@ func Init(logFilePath, level string) error {
 	cores = append(cores, zapcore.NewCore(encoder, zapcore.AddSync(fileWriter), zapLevel))
 
 	core := zapcore.NewTee(cores...)
-	Log = zap.New(core, zap.AddCaller(), zap.AddCallerSkip(1)).Sugar()
+	Log = zap.New(core, zap.AddCaller(), zap.AddCallerSkip(1))
 
 	return nil
 }
@@ -90,13 +90,13 @@ type tgbotapiLogger struct{}
 
 func (l *tgbotapiLogger) Println(v ...interface{}) {
 	if Log != nil {
-		Log.Warn(v...)
+		Log.Warn(fmt.Sprint(v...))
 	}
 }
 
 func (l *tgbotapiLogger) Printf(format string, v ...interface{}) {
 	if Log != nil {
-		Log.Warnf(format, v...)
+		Log.Warn(fmt.Sprintf(format, v...))
 	}
 }
 
@@ -124,69 +124,36 @@ func SetSentryHub(hub *sentry.Hub) {
 
 // --- Global logger functions (deprecated, kept for backward compatibility) ---
 
-func Info(args ...interface{}) {
+func Info(msg string, fields ...zap.Field) {
 	if Log != nil {
-		Log.Info(args...)
+		Log.Info(msg, fields...)
 	}
 }
 
-func Infof(template string, args ...interface{}) {
+func Error(msg string, fields ...zap.Field) {
 	if Log != nil {
-		Log.Infof(template, args...)
+		Log.Error(msg, fields...)
+	}
+	captureToSentry(msg, "error")
+}
+
+func Debug(msg string, fields ...zap.Field) {
+	if Log != nil {
+		Log.Debug(msg, fields...)
 	}
 }
 
-func Error(args ...interface{}) {
+func Warn(msg string, fields ...zap.Field) {
 	if Log != nil {
-		Log.Error(args...)
-	}
-	captureToSentry(formatArgs(args...), "error")
-}
-
-func Errorf(template string, args ...interface{}) {
-	if Log != nil {
-		Log.Errorf(template, args...)
-	}
-	captureToSentry(fmt.Sprintf(template, args...), "error")
-}
-
-func Debug(args ...interface{}) {
-	if Log != nil {
-		Log.Debug(args...)
+		Log.Warn(msg, fields...)
 	}
 }
 
-func Debugf(template string, args ...interface{}) {
-	if Log != nil {
-		Log.Debugf(template, args...)
-	}
-}
-
-func Warn(args ...interface{}) {
-	if Log != nil {
-		Log.Warn(args...)
-	}
-}
-
-func Warnf(template string, args ...interface{}) {
-	if Log != nil {
-		Log.Warnf(template, args...)
-	}
-}
-
-func Fatal(args ...interface{}) {
-	captureToSentry("[FATAL] "+formatArgs(args...), "fatal")
+func Fatal(msg string, fields ...zap.Field) {
+	captureToSentry("[FATAL] "+msg, "fatal")
 	flushSentry(config.SentryFlushTimeout)
 	if Log != nil {
-		Log.Fatal(args...)
-	}
-}
-
-func Fatalf(template string, args ...interface{}) {
-	captureToSentry("[FATAL] "+fmt.Sprintf(template, args...), "fatal")
-	flushSentry(config.SentryFlushTimeout)
-	if Log != nil {
-		Log.Fatalf(template, args...)
+		Log.Fatal(msg, fields...)
 	}
 }
 
@@ -220,10 +187,6 @@ func Close() error {
 		return fmt.Errorf("errors closing logger: %v", errs)
 	}
 	return nil
-}
-
-func formatArgs(args ...interface{}) string {
-	return fmt.Sprint(args...)
 }
 
 func captureToSentry(message string, level string) {
@@ -279,7 +242,7 @@ func flushSentry(timeout time.Duration) {
 
 // Service wraps zap.Logger with Sentry integration.
 type Service struct {
-	log       *zap.SugaredLogger
+	log       *zap.Logger
 	file      *lumberjack.Logger
 	sentryHub *sentry.Hub
 }
@@ -318,7 +281,7 @@ func NewService(logFilePath, level string) (*Service, error) {
 	cores = append(cores, zapcore.NewCore(encoder, zapcore.AddSync(fileWriter), zapLevel))
 
 	core := zapcore.NewTee(cores...)
-	logger := zap.New(core, zap.AddCaller(), zap.AddCallerSkip(1)).Sugar()
+	logger := zap.New(core, zap.AddCaller(), zap.AddCallerSkip(1))
 
 	return &Service{
 		log:  logger,
@@ -354,59 +317,31 @@ func (s *Service) Close() error {
 }
 
 // Info logs at INFO level.
-func (s *Service) Info(args ...interface{}) {
-	s.log.Info(args...)
-}
-
-// Infof logs at INFO level with format.
-func (s *Service) Infof(template string, args ...interface{}) {
-	s.log.Infof(template, args...)
+func (s *Service) Info(msg string, fields ...zap.Field) {
+	s.log.Info(msg, fields...)
 }
 
 // Debug logs at DEBUG level.
-func (s *Service) Debug(args ...interface{}) {
-	s.log.Debug(args...)
-}
-
-// Debugf logs at DEBUG level with format.
-func (s *Service) Debugf(template string, args ...interface{}) {
-	s.log.Debugf(template, args...)
+func (s *Service) Debug(msg string, fields ...zap.Field) {
+	s.log.Debug(msg, fields...)
 }
 
 // Warn logs at WARN level.
-func (s *Service) Warn(args ...interface{}) {
-	s.log.Warn(args...)
-}
-
-// Warnf logs at WARN level with format.
-func (s *Service) Warnf(template string, args ...interface{}) {
-	s.log.Warnf(template, args...)
+func (s *Service) Warn(msg string, fields ...zap.Field) {
+	s.log.Warn(msg, fields...)
 }
 
 // Error logs at ERROR level and sends to Sentry.
-func (s *Service) Error(args ...interface{}) {
-	s.log.Error(args...)
-	s.captureSentry(formatArgs(args...), sentry.LevelError)
-}
-
-// Errorf logs at ERROR level with format and sends to Sentry.
-func (s *Service) Errorf(template string, args ...interface{}) {
-	s.log.Errorf(template, args...)
-	s.captureSentry(fmt.Sprintf(template, args...), sentry.LevelError)
+func (s *Service) Error(msg string, fields ...zap.Field) {
+	s.log.Error(msg, fields...)
+	s.captureSentry(msg, sentry.LevelError)
 }
 
 // Fatal logs at FATAL level, sends to Sentry, and exits.
-func (s *Service) Fatal(args ...interface{}) {
-	s.captureSentry("[FATAL] "+formatArgs(args...), sentry.LevelFatal)
+func (s *Service) Fatal(msg string, fields ...zap.Field) {
+	s.captureSentry("[FATAL] "+msg, sentry.LevelFatal)
 	s.flushSentry(config.SentryFlushTimeout)
-	s.log.Fatal(args...)
-}
-
-// Fatalf logs at FATAL level with format, sends to Sentry, and exits.
-func (s *Service) Fatalf(template string, args ...interface{}) {
-	s.captureSentry("[FATAL] "+fmt.Sprintf(template, args...), sentry.LevelFatal)
-	s.flushSentry(config.SentryFlushTimeout)
-	s.log.Fatalf(template, args...)
+	s.log.Fatal(msg, fields...)
 }
 
 // WithError returns a logger with error context for Sentry.
@@ -419,23 +354,10 @@ func (s *Service) WithError(err error) *Service {
 	return s
 }
 
-// WithField returns a logger with an additional field.
-func (s *Service) WithField(key string, value interface{}) *Service {
+// With returns a logger with additional fields.
+func (s *Service) With(fields ...zap.Field) *Service {
 	return &Service{
-		log:       s.log.With(key, value),
-		file:      s.file,
-		sentryHub: s.sentryHub,
-	}
-}
-
-// WithFields returns a logger with additional fields.
-func (s *Service) WithFields(fields map[string]interface{}) *Service {
-	args := make([]interface{}, 0, len(fields)*2)
-	for k, v := range fields {
-		args = append(args, k, v)
-	}
-	return &Service{
-		log:       s.log.With(args...),
+		log:       s.log.With(fields...),
 		file:      s.file,
 		sentryHub: s.sentryHub,
 	}
