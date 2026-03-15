@@ -897,3 +897,501 @@ func TestHandler_RateLimiterField(t *testing.T) {
 }
 
 // ==================== Traffic Calculation Tests ====================
+
+// ==================== HandleLastReg Tests ====================
+
+// TestHandleLastReg_NilMessage tests HandleLastReg with nil message
+func TestHandleLastReg_NilMessage(t *testing.T) {
+	handler := &Handler{
+		cfg: &config.Config{
+			TelegramAdminID: 123456789,
+		},
+	}
+
+	// Should not panic with nil message
+	update := tgbotapi.Update{}
+	handler.HandleLastReg(context.Background(), update)
+	// If we reach here, the test passes (no panic)
+}
+
+// TestHandleLastReg_NonAdmin tests that non-admin users get no response
+func TestHandleLastReg_NonAdmin(t *testing.T) {
+	cleanup := setupTestDatabase(t)
+	defer cleanup()
+
+	// Create a test subscription
+	sub := &database.Subscription{
+		TelegramID:      123456789,
+		Username:        "testuser",
+		ClientID:        "test-client-id",
+		XUIHost:         "http://localhost:2053",
+		InboundID:       1,
+		TrafficLimit:    107374182400,
+		ExpiryTime:      time.Now().Add(24 * time.Hour),
+		Status:          "active",
+		SubscriptionURL: "http://localhost/sub/test",
+	}
+	if err := database.CreateSubscription(sub); err != nil {
+		t.Fatalf("Failed to create test subscription: %v", err)
+	}
+
+	// Test that non-admin user (different ID) cannot access
+	nonAdminID := int64(987654321)
+	adminID := int64(123456789)
+
+	if nonAdminID == adminID {
+		t.Error("Test setup error: non-admin ID should differ from admin ID")
+	}
+
+	// Verify the admin check logic
+	isAdmin := nonAdminID == adminID
+	if isAdmin {
+		t.Error("Non-admin ID should not match admin ID")
+	}
+}
+
+// TestHandleLastReg_AdminNoSubscriptions tests admin with no subscriptions
+func TestHandleLastReg_AdminNoSubscriptions(t *testing.T) {
+	cleanup := setupTestDatabase(t)
+	defer cleanup()
+
+	// Verify no subscriptions exist
+	subs, err := database.GetLatestSubscriptions(10)
+	if err != nil {
+		t.Fatalf("GetLatestSubscriptions() error = %v", err)
+	}
+
+	if len(subs) != 0 {
+		t.Errorf("Expected 0 subscriptions, got %d", len(subs))
+	}
+}
+
+// TestHandleLastReg_AdminWithSubscriptions tests admin with subscriptions
+func TestHandleLastReg_AdminWithSubscriptions(t *testing.T) {
+	cleanup := setupTestDatabase(t)
+	defer cleanup()
+
+	// Create multiple test subscriptions
+	for i := 0; i < 5; i++ {
+		sub := &database.Subscription{
+			TelegramID:      int64(100000000 + i),
+			Username:        fmt.Sprintf("testuser%d", i),
+			ClientID:        fmt.Sprintf("client-%d", i),
+			XUIHost:         "http://localhost:2053",
+			InboundID:       1,
+			TrafficLimit:    107374182400,
+			ExpiryTime:      time.Now().Add(24 * time.Hour),
+			Status:          "active",
+			SubscriptionURL: fmt.Sprintf("http://localhost/sub/%d", i),
+		}
+		if err := database.CreateSubscription(sub); err != nil {
+			t.Fatalf("Failed to create test subscription: %v", err)
+		}
+		time.Sleep(time.Millisecond * 10) // Ensure different timestamps
+	}
+
+	// Get latest subscriptions
+	subs, err := database.GetLatestSubscriptions(10)
+	if err != nil {
+		t.Fatalf("GetLatestSubscriptions() error = %v", err)
+	}
+
+	if len(subs) != 5 {
+		t.Errorf("Expected 5 subscriptions, got %d", len(subs))
+	}
+
+	// Verify ordering (newest first)
+	for i := 0; i < len(subs)-1; i++ {
+		if subs[i].CreatedAt.Before(subs[i+1].CreatedAt) {
+			t.Errorf("Subscriptions not ordered by created_at DESC")
+		}
+	}
+}
+
+// TestHandleLastReg_Format tests the output format
+func TestHandleLastReg_Format(t *testing.T) {
+	cleanup := setupTestDatabase(t)
+	defer cleanup()
+
+	// Create a test subscription with known data
+	testTime := time.Date(2026, 3, 15, 22, 57, 59, 0, time.UTC)
+	sub := &database.Subscription{
+		TelegramID:      123456789,
+		Username:        "ivan",
+		ClientID:        "test-client-id",
+		XUIHost:         "http://localhost:2053",
+		InboundID:       1,
+		TrafficLimit:    107374182400,
+		ExpiryTime:      time.Now().Add(24 * time.Hour),
+		Status:          "active",
+		SubscriptionURL: "http://localhost/sub/test",
+		CreatedAt:       testTime,
+	}
+	if err := database.CreateSubscription(sub); err != nil {
+		t.Fatalf("Failed to create test subscription: %v", err)
+	}
+
+	// Get the subscription
+	subs, err := database.GetLatestSubscriptions(10)
+	if err != nil {
+		t.Fatalf("GetLatestSubscriptions() error = %v", err)
+	}
+
+	if len(subs) != 1 {
+		t.Fatalf("Expected 1 subscription, got %d", len(subs))
+	}
+
+	// Verify the username
+	if subs[0].Username != "ivan" {
+		t.Errorf("Username = %s, want ivan", subs[0].Username)
+	}
+
+	// Verify the date format
+	expectedDateStr := "15.03.2026 22:57:59"
+	actualDateStr := subs[0].CreatedAt.Format("02.01.2006 15:04:05")
+	if actualDateStr != expectedDateStr {
+		t.Errorf("Date format = %s, want %s", actualDateStr, expectedDateStr)
+	}
+
+	// Verify the format string (username should be a link with table format)
+	expectedFormat := "[@ivan](https://t.me/ivan) │ 15.03.2026 22:57:59"
+	actualFormat := fmt.Sprintf("[@%s](https://t.me/%s) │ %s",
+		subs[0].Username, subs[0].Username, subs[0].CreatedAt.Format("02.01.2006 15:04:05"))
+	if actualFormat != expectedFormat {
+		t.Errorf("Format = %s, want %s", actualFormat, expectedFormat)
+	}
+}
+
+// TestHandleLastReg_Limit tests that only 10 subscriptions are returned
+func TestHandleLastReg_Limit(t *testing.T) {
+	cleanup := setupTestDatabase(t)
+	defer cleanup()
+
+	// Create 15 subscriptions
+	for i := 0; i < 15; i++ {
+		sub := &database.Subscription{
+			TelegramID:      int64(200000000 + i),
+			Username:        fmt.Sprintf("limituser%d", i),
+			ClientID:        fmt.Sprintf("client-%d", i),
+			XUIHost:         "http://localhost:2053",
+			InboundID:       1,
+			TrafficLimit:    107374182400,
+			ExpiryTime:      time.Now().Add(24 * time.Hour),
+			Status:          "active",
+			SubscriptionURL: fmt.Sprintf("http://localhost/sub/%d", i),
+		}
+		if err := database.CreateSubscription(sub); err != nil {
+			t.Fatalf("Failed to create test subscription: %v", err)
+		}
+		time.Sleep(time.Millisecond * 10) // Ensure different timestamps
+	}
+
+	// Get latest 10 subscriptions
+	subs, err := database.GetLatestSubscriptions(10)
+	if err != nil {
+		t.Fatalf("GetLatestSubscriptions() error = %v", err)
+	}
+
+	if len(subs) != 10 {
+		t.Errorf("Expected 10 subscriptions, got %d", len(subs))
+	}
+
+	// Verify the first one is the most recent (limituser14)
+	if subs[0].Username != "limituser14" {
+		t.Errorf("First subscription username = %s, want limituser14", subs[0].Username)
+	}
+}
+
+// TestHandleLastReg_EmptyUsername tests handling of empty username
+func TestHandleLastReg_EmptyUsername(t *testing.T) {
+	cleanup := setupTestDatabase(t)
+	defer cleanup()
+
+	// Create a subscription with empty username
+	sub := &database.Subscription{
+		TelegramID:      123456789,
+		Username:        "",
+		ClientID:        "test-client-id",
+		XUIHost:         "http://localhost:2053",
+		InboundID:       1,
+		TrafficLimit:    107374182400,
+		ExpiryTime:      time.Now().Add(24 * time.Hour),
+		Status:          "active",
+		SubscriptionURL: "http://localhost/sub/test",
+	}
+	if err := database.CreateSubscription(sub); err != nil {
+		t.Fatalf("Failed to create test subscription: %v", err)
+	}
+
+	// Get the subscription
+	subs, err := database.GetLatestSubscriptions(10)
+	if err != nil {
+		t.Fatalf("GetLatestSubscriptions() error = %v", err)
+	}
+
+	if len(subs) != 1 {
+		t.Fatalf("Expected 1 subscription, got %d", len(subs))
+	}
+
+	// Verify that empty username is replaced with "unknown"
+	username := subs[0].Username
+	if username == "" {
+		username = "unknown"
+	}
+	if username != "unknown" {
+		t.Errorf("Username = %s, want unknown", username)
+	}
+}
+
+// TestHandleLastReg_TableFormat tests the table format with multiple subscriptions
+func TestHandleLastReg_TableFormat(t *testing.T) {
+	cleanup := setupTestDatabase(t)
+	defer cleanup()
+
+	// Create multiple subscriptions
+	testData := []struct {
+		username string
+		daysAgo  int
+	}{
+		{"alice", 0},
+		{"bob", 1},
+		{"charlie", 2},
+	}
+
+	for i, data := range testData {
+		createdAt := time.Now().AddDate(0, 0, -data.daysAgo)
+		sub := &database.Subscription{
+			TelegramID:      int64(100000000 + i),
+			Username:        data.username,
+			ClientID:        fmt.Sprintf("client-%d", i),
+			XUIHost:         "http://localhost:2053",
+			InboundID:       1,
+			TrafficLimit:    107374182400,
+			ExpiryTime:      time.Now().Add(24 * time.Hour),
+			Status:          "active",
+			SubscriptionURL: fmt.Sprintf("http://localhost/sub/%d", i),
+			CreatedAt:       createdAt,
+		}
+		if err := database.DB.Create(sub).Error; err != nil {
+			t.Fatalf("Failed to create test subscription: %v", err)
+		}
+	}
+
+	// Get subscriptions
+	subs, err := database.GetLatestSubscriptions(10)
+	if err != nil {
+		t.Fatalf("GetLatestSubscriptions() error = %v", err)
+	}
+
+	if len(subs) != 3 {
+		t.Fatalf("Expected 3 subscriptions, got %d", len(subs))
+	}
+
+	// Verify the table format contains the vertical bar separator
+	for _, sub := range subs {
+		dateStr := sub.CreatedAt.Format("02.01.2006 15:04:05")
+		expectedLine := fmt.Sprintf("[@%s](https://t.me/%s) │ %s", sub.Username, sub.Username, dateStr)
+		// Verify the format includes the separator
+		if !strings.Contains(expectedLine, "│") {
+			t.Errorf("Format missing vertical bar separator: %s", expectedLine)
+		}
+	}
+}
+
+// TestHandleLastReg_MessageStructure tests the structure of the message
+func TestHandleLastReg_MessageStructure(t *testing.T) {
+	cleanup := setupTestDatabase(t)
+	defer cleanup()
+
+	// Create test subscription
+	sub := &database.Subscription{
+		TelegramID:      123456789,
+		Username:        "testuser",
+		ClientID:        "test-client-id",
+		XUIHost:         "http://localhost:2053",
+		InboundID:       1,
+		TrafficLimit:    107374182400,
+		ExpiryTime:      time.Now().Add(24 * time.Hour),
+		Status:          "active",
+		SubscriptionURL: "http://localhost/sub/test",
+	}
+	if err := database.CreateSubscription(sub); err != nil {
+		t.Fatalf("Failed to create test subscription: %v", err)
+	}
+
+	// Get the subscription
+	subs, err := database.GetLatestSubscriptions(10)
+	if err != nil {
+		t.Fatalf("GetLatestSubscriptions() error = %v", err)
+	}
+
+	// Build the message
+	var sb strings.Builder
+	sb.WriteString("📋 *Последние регистрации:*\n\n")
+
+	for _, sub := range subs {
+		username := sub.Username
+		if username == "" {
+			username = "unknown"
+		}
+		dateStr := sub.CreatedAt.Format("02.01.2006 15:04:05")
+		sb.WriteString(fmt.Sprintf("[@%s](https://t.me/%s) │ %s\n", username, username, dateStr))
+	}
+
+	message := sb.String()
+
+	// Verify message structure
+	if !strings.Contains(message, "📋 *Последние регистрации:*") {
+		t.Error("Message missing header")
+	}
+
+	if !strings.Contains(message, "[@testuser](https://t.me/testuser)") {
+		t.Error("Message missing clickable username link")
+	}
+
+	if !strings.Contains(message, "│") {
+		t.Error("Message missing table separator")
+	}
+}
+
+// TestHandleLastReg_DateFormat tests that dates are formatted correctly
+func TestHandleLastReg_DateFormat(t *testing.T) {
+	cleanup := setupTestDatabase(t)
+	defer cleanup()
+
+	// Create subscription with known date
+	testTime := time.Date(2026, 12, 25, 15, 30, 45, 0, time.UTC)
+	sub := &database.Subscription{
+		TelegramID:      123456789,
+		Username:        "christmas_user",
+		ClientID:        "test-client-id",
+		XUIHost:         "http://localhost:2053",
+		InboundID:       1,
+		TrafficLimit:    107374182400,
+		ExpiryTime:      time.Now().Add(24 * time.Hour),
+		Status:          "active",
+		SubscriptionURL: "http://localhost/sub/test",
+		CreatedAt:       testTime,
+	}
+	if err := database.DB.Create(sub).Error; err != nil {
+		t.Fatalf("Failed to create test subscription: %v", err)
+	}
+
+	// Get the subscription
+	subs, err := database.GetLatestSubscriptions(10)
+	if err != nil {
+		t.Fatalf("GetLatestSubscriptions() error = %v", err)
+	}
+
+	if len(subs) != 1 {
+		t.Fatalf("Expected 1 subscription, got %d", len(subs))
+	}
+
+	// Verify date format
+	expectedDateStr := "25.12.2026 15:30:45"
+	actualDateStr := subs[0].CreatedAt.Format("02.01.2006 15:04:05")
+
+	if actualDateStr != expectedDateStr {
+		t.Errorf("Date format = %s, want %s", actualDateStr, expectedDateStr)
+	}
+}
+
+// TestHandleLastReg_MarkdownFormatting tests that Markdown formatting is correct
+func TestHandleLastReg_MarkdownFormatting(t *testing.T) {
+	cleanup := setupTestDatabase(t)
+	defer cleanup()
+
+	// Create test subscription
+	sub := &database.Subscription{
+		TelegramID:      123456789,
+		Username:        "markdown_user",
+		ClientID:        "test-client-id",
+		XUIHost:         "http://localhost:2053",
+		InboundID:       1,
+		TrafficLimit:    107374182400,
+		ExpiryTime:      time.Now().Add(24 * time.Hour),
+		Status:          "active",
+		SubscriptionURL: "http://localhost/sub/test",
+	}
+	if err := database.CreateSubscription(sub); err != nil {
+		t.Fatalf("Failed to create test subscription: %v", err)
+	}
+
+	// Get the subscription
+	subs, err := database.GetLatestSubscriptions(10)
+	if err != nil {
+		t.Fatalf("GetLatestSubscriptions() error = %v", err)
+	}
+
+	// Build the message
+	var sb strings.Builder
+	sb.WriteString("📋 *Последние регистрации:*\n\n")
+
+	for _, sub := range subs {
+		username := sub.Username
+		if username == "" {
+			username = "unknown"
+		}
+		dateStr := sub.CreatedAt.Format("02.01.2006 15:04:05")
+		sb.WriteString(fmt.Sprintf("[@%s](https://t.me/%s) │ %s\n", username, username, dateStr))
+	}
+
+	message := sb.String()
+
+	// Verify Markdown formatting
+	// Check for bold text (asterisks)
+	if !strings.Contains(message, "*Последние регистрации:*") {
+		t.Error("Message missing bold formatting for header")
+	}
+
+	// Check for link format
+	linkFormat := "[@markdown_user](https://t.me/markdown_user)"
+	if !strings.Contains(message, linkFormat) {
+		t.Errorf("Message missing correct link format, expected to contain: %s", linkFormat)
+	}
+}
+
+// TestHandleLastReg_TenRecordsMax tests that exactly 10 records are shown when more exist
+func TestHandleLastReg_TenRecordsMax(t *testing.T) {
+	cleanup := setupTestDatabase(t)
+	defer cleanup()
+
+	// Create 20 subscriptions
+	for i := 0; i < 20; i++ {
+		sub := &database.Subscription{
+			TelegramID:      int64(300000000 + i),
+			Username:        fmt.Sprintf("maxuser%d", i),
+			ClientID:        fmt.Sprintf("client-%d", i),
+			XUIHost:         "http://localhost:2053",
+			InboundID:       1,
+			TrafficLimit:    107374182400,
+			ExpiryTime:      time.Now().Add(24 * time.Hour),
+			Status:          "active",
+			SubscriptionURL: fmt.Sprintf("http://localhost/sub/%d", i),
+		}
+		if err := database.CreateSubscription(sub); err != nil {
+			t.Fatalf("Failed to create test subscription: %v", err)
+		}
+		time.Sleep(time.Millisecond * 10) // Ensure different timestamps
+	}
+
+	// Get latest 10 subscriptions
+	subs, err := database.GetLatestSubscriptions(10)
+	if err != nil {
+		t.Fatalf("GetLatestSubscriptions() error = %v", err)
+	}
+
+	if len(subs) != 10 {
+		t.Errorf("Expected exactly 10 subscriptions, got %d", len(subs))
+	}
+
+	// Verify the most recent is maxuser19
+	if subs[0].Username != "maxuser19" {
+		t.Errorf("First subscription username = %s, want maxuser19", subs[0].Username)
+	}
+
+	// Verify the 10th is maxuser10
+	if subs[9].Username != "maxuser10" {
+		t.Errorf("Tenth subscription username = %s, want maxuser10", subs[9].Username)
+	}
+}

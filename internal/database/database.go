@@ -172,6 +172,23 @@ func DeleteSubscription(telegramID int64) error {
 	return nil
 }
 
+// GetLatestSubscriptions retrieves the latest N subscriptions ordered by creation date.
+func GetLatestSubscriptions(limit int) ([]Subscription, error) {
+	if DB == nil {
+		return nil, fmt.Errorf("database not initialized")
+	}
+
+	var subs []Subscription
+	result := DB.Where("status = ?", "active").
+		Order("created_at DESC").
+		Limit(limit).
+		Find(&subs)
+	if result.Error != nil {
+		return nil, fmt.Errorf("failed to get latest subscriptions: %w", result.Error)
+	}
+	return subs, nil
+}
+
 // Service provides database operations with proper dependency injection.
 type Service struct {
 	db *gorm.DB
@@ -273,6 +290,20 @@ func (s *Service) DeleteSubscription(ctx context.Context, telegramID int64) erro
 		return fmt.Errorf("failed to delete subscription: %w", result.Error)
 	}
 	return nil
+}
+
+// GetLatestSubscriptions retrieves the latest N subscriptions ordered by creation date.
+func (s *Service) GetLatestSubscriptions(ctx context.Context, limit int) ([]Subscription, error) {
+	var subs []Subscription
+	result := s.db.WithContext(ctx).
+		Where("status = ?", "active").
+		Order("created_at DESC").
+		Limit(limit).
+		Find(&subs)
+	if result.Error != nil {
+		return nil, fmt.Errorf("failed to get latest subscriptions: %w", result.Error)
+	}
+	return subs, nil
 }
 
 // GetAllSubscriptions retrieves all subscriptions (for admin stats).

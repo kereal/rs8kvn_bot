@@ -3,6 +3,7 @@ package bot
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"rs8kvn_bot/internal/config"
@@ -111,6 +112,54 @@ func (h *Handler) HandleHelp(ctx context.Context, update tgbotapi.Update) {
 - При истечении трафика подписка перестанет работать до следующего месяца`
 
 	msg := tgbotapi.NewMessage(chatID, helpText)
+	msg.ParseMode = "Markdown"
+	h.send(ctx, msg)
+}
+
+// HandleLastReg handles the /lastreg command for admins.
+// Returns a list of the latest users who subscribed.
+func (h *Handler) HandleLastReg(ctx context.Context, update tgbotapi.Update) {
+	if update.Message == nil {
+		logger.Error("HandleLastReg called with nil Message")
+		return
+	}
+
+	chatID := update.Message.Chat.ID
+
+	// Verify admin access
+	if chatID != h.cfg.TelegramAdminID {
+		logger.Warn("Non-admin user attempted to access /lastreg", zap.Int64("chat_id", chatID))
+		return
+	}
+
+	// Get latest 10 subscriptions
+	subs, err := database.GetLatestSubscriptions(10)
+	if err != nil {
+		logger.Error("Failed to get latest subscriptions", zap.Error(err))
+		h.SendMessage(ctx, chatID, "❌ Ошибка получения списка подписок")
+		return
+	}
+
+	if len(subs) == 0 {
+		h.SendMessage(ctx, chatID, "📭 Нет активных подписок")
+		return
+	}
+
+	// Format the message as a table with 2 columns
+	var sb strings.Builder
+	sb.WriteString("📋 *Последние регистрации:*\n\n")
+
+	for _, sub := range subs {
+		// Column 1: Username (clickable link), Column 2: Date and time
+		username := sub.Username
+		if username == "" {
+			username = "unknown"
+		}
+		dateStr := sub.CreatedAt.Format("02.01.2006 15:04:05")
+		sb.WriteString(fmt.Sprintf("[@%s](https://t.me/%s) │ %s\n", username, username, dateStr))
+	}
+
+	msg := tgbotapi.NewMessage(chatID, sb.String())
 	msg.ParseMode = "Markdown"
 	h.send(ctx, msg)
 }
