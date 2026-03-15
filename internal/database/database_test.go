@@ -1131,3 +1131,478 @@ func TestService_CountExpiredSubscriptions(t *testing.T) {
 		t.Errorf("CountExpiredSubscriptions() = %d, want 2", count)
 	}
 }
+
+func TestGetLatestSubscriptions(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	if err := Init(dbPath); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	defer Close()
+
+	// Create test subscriptions with different creation times
+	for i := 0; i < 15; i++ {
+		time.Sleep(time.Millisecond * 10) // Ensure different timestamps
+		sub := &Subscription{
+			TelegramID:      int64(100000000 + i),
+			Username:        fmt.Sprintf("user%d", i),
+			ClientID:        fmt.Sprintf("client-%d", i),
+			XUIHost:         "http://localhost:2053",
+			InboundID:       1,
+			TrafficLimit:    107374182400,
+			ExpiryTime:      time.Now().Add(24 * time.Hour),
+			Status:          "active",
+			SubscriptionURL: fmt.Sprintf("http://localhost/sub/%d", i),
+		}
+		if err := CreateSubscription(sub); err != nil {
+			t.Fatalf("Failed to create test subscription: %v", err)
+		}
+	}
+
+	// Get latest 10 subscriptions
+	subs, err := GetLatestSubscriptions(10)
+	if err != nil {
+		t.Fatalf("GetLatestSubscriptions() error = %v", err)
+	}
+
+	if len(subs) != 10 {
+		t.Errorf("GetLatestSubscriptions() returned %d subscriptions, want 10", len(subs))
+	}
+
+	// Verify they are ordered by created_at DESC (newest first)
+	for i := 0; i < len(subs)-1; i++ {
+		if subs[i].CreatedAt.Before(subs[i+1].CreatedAt) {
+			t.Errorf("Subscriptions not ordered by created_at DESC: %v before %v",
+				subs[i].CreatedAt, subs[i+1].CreatedAt)
+		}
+	}
+
+	// Verify the first one is the most recent (user14)
+	if subs[0].Username != "user14" {
+		t.Errorf("First subscription username = %s, want user14", subs[0].Username)
+	}
+}
+
+func TestGetLatestSubscriptions_Empty(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	if err := Init(dbPath); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	defer Close()
+
+	// No subscriptions in database
+	subs, err := GetLatestSubscriptions(10)
+	if err != nil {
+		t.Fatalf("GetLatestSubscriptions() error = %v", err)
+	}
+
+	if len(subs) != 0 {
+		t.Errorf("GetLatestSubscriptions() returned %d subscriptions, want 0", len(subs))
+	}
+}
+
+func TestGetLatestSubscriptions_OnlyActive(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	if err := Init(dbPath); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	defer Close()
+
+	// Create active subscription
+	activeSub := &Subscription{
+		TelegramID:      100000001,
+		Username:        "active_user",
+		ClientID:        "client-active",
+		XUIHost:         "http://localhost:2053",
+		InboundID:       1,
+		TrafficLimit:    107374182400,
+		ExpiryTime:      time.Now().Add(24 * time.Hour),
+		Status:          "active",
+		SubscriptionURL: "http://localhost/sub/active",
+	}
+	if err := CreateSubscription(activeSub); err != nil {
+		t.Fatalf("Failed to create active subscription: %v", err)
+	}
+
+	// Create revoked subscription
+	revokedSub := &Subscription{
+		TelegramID:      100000002,
+		Username:        "revoked_user",
+		ClientID:        "client-revoked",
+		XUIHost:         "http://localhost:2053",
+		InboundID:       1,
+		TrafficLimit:    107374182400,
+		ExpiryTime:      time.Now().Add(24 * time.Hour),
+		Status:          "revoked",
+		SubscriptionURL: "http://localhost/sub/revoked",
+	}
+	if err := DB.Create(revokedSub).Error; err != nil {
+		t.Fatalf("Failed to create revoked subscription: %v", err)
+	}
+
+	// Get latest subscriptions
+	subs, err := GetLatestSubscriptions(10)
+	if err != nil {
+		t.Fatalf("GetLatestSubscriptions() error = %v", err)
+	}
+
+	if len(subs) != 1 {
+		t.Errorf("GetLatestSubscriptions() returned %d subscriptions, want 1", len(subs))
+	}
+
+	if len(subs) > 0 && subs[0].Username != "active_user" {
+		t.Errorf("Username = %s, want active_user", subs[0].Username)
+	}
+}
+
+func TestService_GetLatestSubscriptions(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	service, err := NewService(dbPath)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	defer service.Close()
+
+	// Create test subscriptions
+	for i := 0; i < 5; i++ {
+		time.Sleep(time.Millisecond * 10)
+		sub := &Subscription{
+			TelegramID:      int64(200000000 + i),
+			Username:        fmt.Sprintf("service_user%d", i),
+			ClientID:        fmt.Sprintf("client-%d", i),
+			XUIHost:         "http://localhost:2053",
+			InboundID:       1,
+			TrafficLimit:    107374182400,
+			ExpiryTime:      time.Now().Add(24 * time.Hour),
+			Status:          "active",
+			SubscriptionURL: fmt.Sprintf("http://localhost/sub/%d", i),
+		}
+		if err := service.CreateSubscription(nil, sub); err != nil {
+			t.Fatalf("Failed to create test subscription: %v", err)
+		}
+	}
+
+	// Get latest 3 subscriptions
+	subs, err := service.GetLatestSubscriptions(nil, 3)
+	if err != nil {
+		t.Fatalf("GetLatestSubscriptions() error = %v", err)
+	}
+
+	if len(subs) != 3 {
+		t.Errorf("GetLatestSubscriptions() returned %d subscriptions, want 3", len(subs))
+	}
+
+	// Verify the first one is the most recent
+	if subs[0].Username != "service_user4" {
+		t.Errorf("First subscription username = %s, want service_user4", subs[0].Username)
+	}
+}
+
+func TestGetLatestSubscriptions_DatabaseNotInitialized(t *testing.T) {
+	// Close any existing connection
+	Close()
+
+	_, err := GetLatestSubscriptions(10)
+	if err == nil {
+		t.Error("GetLatestSubscriptions() expected error when database not initialized, got nil")
+	}
+}
+
+func TestGetLatestSubscriptions_LimitZero(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	if err := Init(dbPath); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	defer Close()
+
+	// Create test subscriptions
+	for i := 0; i < 5; i++ {
+		sub := &Subscription{
+			TelegramID:      int64(100000000 + i),
+			Username:        fmt.Sprintf("user%d", i),
+			ClientID:        fmt.Sprintf("client-%d", i),
+			XUIHost:         "http://localhost:2053",
+			InboundID:       1,
+			TrafficLimit:    107374182400,
+			ExpiryTime:      time.Now().Add(24 * time.Hour),
+			Status:          "active",
+			SubscriptionURL: fmt.Sprintf("http://localhost/sub/%d", i),
+		}
+		if err := CreateSubscription(sub); err != nil {
+			t.Fatalf("Failed to create test subscription: %v", err)
+		}
+	}
+
+	// Get with limit 0
+	subs, err := GetLatestSubscriptions(0)
+	if err != nil {
+		t.Fatalf("GetLatestSubscriptions(0) error = %v", err)
+	}
+
+	if len(subs) != 0 {
+		t.Errorf("GetLatestSubscriptions(0) returned %d subscriptions, want 0", len(subs))
+	}
+}
+
+func TestGetLatestSubscriptions_LimitOne(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	if err := Init(dbPath); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	defer Close()
+
+	// Create test subscriptions
+	for i := 0; i < 5; i++ {
+		time.Sleep(time.Millisecond * 10)
+		sub := &Subscription{
+			TelegramID:      int64(100000000 + i),
+			Username:        fmt.Sprintf("user%d", i),
+			ClientID:        fmt.Sprintf("client-%d", i),
+			XUIHost:         "http://localhost:2053",
+			InboundID:       1,
+			TrafficLimit:    107374182400,
+			ExpiryTime:      time.Now().Add(24 * time.Hour),
+			Status:          "active",
+			SubscriptionURL: fmt.Sprintf("http://localhost/sub/%d", i),
+		}
+		if err := CreateSubscription(sub); err != nil {
+			t.Fatalf("Failed to create test subscription: %v", err)
+		}
+	}
+
+	// Get with limit 1
+	subs, err := GetLatestSubscriptions(1)
+	if err != nil {
+		t.Fatalf("GetLatestSubscriptions(1) error = %v", err)
+	}
+
+	if len(subs) != 1 {
+		t.Errorf("GetLatestSubscriptions(1) returned %d subscriptions, want 1", len(subs))
+	}
+
+	// Should be the most recent (user4)
+	if subs[0].Username != "user4" {
+		t.Errorf("Username = %s, want user4", subs[0].Username)
+	}
+}
+
+func TestGetLatestSubscriptions_LimitGreaterThanAvailable(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	if err := Init(dbPath); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	defer Close()
+
+	// Create 3 test subscriptions
+	for i := 0; i < 3; i++ {
+		time.Sleep(time.Millisecond * 10)
+		sub := &Subscription{
+			TelegramID:      int64(100000000 + i),
+			Username:        fmt.Sprintf("user%d", i),
+			ClientID:        fmt.Sprintf("client-%d", i),
+			XUIHost:         "http://localhost:2053",
+			InboundID:       1,
+			TrafficLimit:    107374182400,
+			ExpiryTime:      time.Now().Add(24 * time.Hour),
+			Status:          "active",
+			SubscriptionURL: fmt.Sprintf("http://localhost/sub/%d", i),
+		}
+		if err := CreateSubscription(sub); err != nil {
+			t.Fatalf("Failed to create test subscription: %v", err)
+		}
+	}
+
+	// Request 10 but only 3 exist
+	subs, err := GetLatestSubscriptions(10)
+	if err != nil {
+		t.Fatalf("GetLatestSubscriptions(10) error = %v", err)
+	}
+
+	if len(subs) != 3 {
+		t.Errorf("GetLatestSubscriptions(10) returned %d subscriptions, want 3", len(subs))
+	}
+}
+
+func TestGetLatestSubscriptions_SpecialCharacters(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	if err := Init(dbPath); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	defer Close()
+
+	// Create subscriptions with special characters in username
+	specialUsernames := []string{
+		"user_name",
+		"user-name",
+		"user.name",
+		"user123",
+		"User_Case",
+	}
+
+	for i, username := range specialUsernames {
+		sub := &Subscription{
+			TelegramID:      int64(100000000 + i),
+			Username:        username,
+			ClientID:        fmt.Sprintf("client-%d", i),
+			XUIHost:         "http://localhost:2053",
+			InboundID:       1,
+			TrafficLimit:    107374182400,
+			ExpiryTime:      time.Now().Add(24 * time.Hour),
+			Status:          "active",
+			SubscriptionURL: fmt.Sprintf("http://localhost/sub/%d", i),
+		}
+		if err := CreateSubscription(sub); err != nil {
+			t.Fatalf("Failed to create test subscription: %v", err)
+		}
+		time.Sleep(time.Millisecond * 10)
+	}
+
+	subs, err := GetLatestSubscriptions(10)
+	if err != nil {
+		t.Fatalf("GetLatestSubscriptions() error = %v", err)
+	}
+
+	if len(subs) != len(specialUsernames) {
+		t.Errorf("Expected %d subscriptions, got %d", len(specialUsernames), len(subs))
+	}
+
+	// Verify all usernames are preserved correctly
+	foundUsernames := make(map[string]bool)
+	for _, sub := range subs {
+		foundUsernames[sub.Username] = true
+	}
+
+	for _, username := range specialUsernames {
+		if !foundUsernames[username] {
+			t.Errorf("Username %s not found in results", username)
+		}
+	}
+}
+
+func TestGetLatestSubscriptions_OrderingConsistency(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	if err := Init(dbPath); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	defer Close()
+
+	// Create subscriptions with specific timestamps
+	baseTime := time.Date(2026, 3, 15, 12, 0, 0, 0, time.UTC)
+
+	for i := 0; i < 5; i++ {
+		sub := &Subscription{
+			TelegramID:      int64(100000000 + i),
+			Username:        fmt.Sprintf("ordered_user%d", i),
+			ClientID:        fmt.Sprintf("client-%d", i),
+			XUIHost:         "http://localhost:2053",
+			InboundID:       1,
+			TrafficLimit:    107374182400,
+			ExpiryTime:      time.Now().Add(24 * time.Hour),
+			Status:          "active",
+			SubscriptionURL: fmt.Sprintf("http://localhost/sub/%d", i),
+			CreatedAt:       baseTime.Add(time.Duration(i) * time.Hour),
+		}
+		// Use DB.Create to preserve CreatedAt
+		if err := DB.Create(sub).Error; err != nil {
+			t.Fatalf("Failed to create test subscription: %v", err)
+		}
+	}
+
+	// Get subscriptions
+	subs, err := GetLatestSubscriptions(10)
+	if err != nil {
+		t.Fatalf("GetLatestSubscriptions() error = %v", err)
+	}
+
+	// Verify ordering (newest first: ordered_user4, ordered_user3, ...)
+	expectedOrder := []string{"ordered_user4", "ordered_user3", "ordered_user2", "ordered_user1", "ordered_user0"}
+
+	for i, expected := range expectedOrder {
+		if i >= len(subs) {
+			break
+		}
+		if subs[i].Username != expected {
+			t.Errorf("Position %d: got %s, want %s", i, subs[i].Username, expected)
+		}
+	}
+}
+
+func TestGetLatestSubscriptions_MixedStatuses(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	if err := Init(dbPath); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	defer Close()
+
+	// Create subscriptions with different statuses
+	statuses := []string{"active", "revoked", "expired", "active", "active"}
+
+	for i, status := range statuses {
+		sub := &Subscription{
+			TelegramID:      int64(100000000 + i),
+			Username:        fmt.Sprintf("status_user%d", i),
+			ClientID:        fmt.Sprintf("client-%d", i),
+			XUIHost:         "http://localhost:2053",
+			InboundID:       1,
+			TrafficLimit:    107374182400,
+			ExpiryTime:      time.Now().Add(24 * time.Hour),
+			Status:          status,
+			SubscriptionURL: fmt.Sprintf("http://localhost/sub/%d", i),
+		}
+		if status == "active" {
+			if err := CreateSubscription(sub); err != nil {
+				t.Fatalf("Failed to create test subscription: %v", err)
+			}
+		} else {
+			// Direct DB create for non-active statuses
+			if err := DB.Create(sub).Error; err != nil {
+				t.Fatalf("Failed to create test subscription: %v", err)
+			}
+		}
+		time.Sleep(time.Millisecond * 10)
+	}
+
+	// Should only get active subscriptions
+	subs, err := GetLatestSubscriptions(10)
+	if err != nil {
+		t.Fatalf("GetLatestSubscriptions() error = %v", err)
+	}
+
+	// Count expected active subscriptions (3 active in the list)
+	expectedActive := 0
+	for _, status := range statuses {
+		if status == "active" {
+			expectedActive++
+		}
+	}
+
+	if len(subs) != expectedActive {
+		t.Errorf("Expected %d active subscriptions, got %d", expectedActive, len(subs))
+	}
+
+	// Verify all returned subscriptions are active
+	for _, sub := range subs {
+		if sub.Status != "active" {
+			t.Errorf("Got subscription with status %s, want active", sub.Status)
+		}
+	}
+}
