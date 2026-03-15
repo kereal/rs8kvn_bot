@@ -241,3 +241,5 @@ docker compose -f docker-compose.local.yml logs -f
 ```bash
 docker compose up -d
 ```
+
+Github: https://github.com/kereal/rs8kvn_bot

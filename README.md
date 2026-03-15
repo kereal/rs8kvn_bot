@@ -67,7 +67,7 @@ chmod 755 data
 
 ```bash
 # Pull from GitHub Container Registry
-docker pull ghcr.io/YOUR_USERNAME/rs8kvn_bot:latest
+docker pull ghcr.io/kereal/rs8kvn_bot:latest
 
 # Run container
 docker run -d \
@@ -75,7 +75,7 @@ docker run -d \
   --restart unless-stopped \
   -v $(pwd)/.env:/app/.env:ro \
   -v $(pwd)/data:/app/data \
-  ghcr.io/YOUR_USERNAME/rs8kvn_bot:latest
+  ghcr.io/kereal/rs8kvn_bot:latest
 ```
 
 #### 6. View logs
@@ -161,7 +161,7 @@ This project includes a GitHub Actions workflow that automatically builds and pu
 
 1. Go to your GitHub repository settings
 2. Enable "Packages" in Features
-3. The workflow will automatically push to `ghcr.io/YOUR_USERNAME/rs8kvn_bot`
+3. The workflow will automatically push to `ghcr.io/kereal/rs8kvn_bot`
 
 ### Triggers
 
