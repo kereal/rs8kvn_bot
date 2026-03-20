@@ -38,12 +38,12 @@ func GenerateUUID() string {
 }
 
 // GenerateSubID generates a cryptographically secure random subscription identifier.
-// Returns a 28-character hex string (14 random bytes).
+// Returns a 10-character hex string (5 random bytes).
 //
 // This provides 56 bits of entropy which is sufficient for subscription IDs
 // and is URL-safe.
 func GenerateSubID() string {
-	bytes := make([]byte, 14)
+	bytes := make([]byte, 5)
 
 	if _, err := io.ReadFull(rand.Reader, bytes); err != nil {
 		panic(fmt.Sprintf("crypto/rand failed: %v", err))

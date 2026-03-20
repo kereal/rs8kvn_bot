@@ -114,8 +114,8 @@ func TestGenerateSubID(t *testing.T) {
 
 	t.Run("generates correct length", func(t *testing.T) {
 		subID := GenerateSubID()
-		// 14 bytes = 28 hex characters
-		expectedLen := 28
+		// 5 bytes = 10 hex characters
+		expectedLen := 10
 
 		if len(subID) != expectedLen {
 			t.Errorf("GenerateSubID() length = %d, expected %d", len(subID), expectedLen)
