@@ -70,6 +70,18 @@ type ClientConfig struct {
 	Reset      int    `json:"reset,omitempty"`
 }
 
+// ClientTraffic represents traffic statistics for a client in 3x-ui.
+type ClientTraffic struct {
+	ID         string `json:"id"`
+	Email      string `json:"email"`
+	Up         int64  `json:"up"`
+	Down       int64  `json:"down"`
+	Total      int64  `json:"total"`
+	ExpiryTime int64  `json:"expiryTime"`
+	TotalGB    int64  `json:"totalGB"`
+	Enable     bool   `json:"enable"`
+}
+
 // NewClient creates a new 3x-ui API client.
 // The client is optimized for low memory usage with minimal connection pooling.
 func NewClient(host, username, password string) *Client {
@@ -349,6 +361,52 @@ func (c *Client) DeleteClient(ctx context.Context, inboundID int, clientID strin
 		zap.String("client_id", clientID),
 		zap.Int("inbound_id", inboundID))
 	return nil
+}
+
+// GetClientTraffic retrieves traffic statistics for a client by email.
+func (c *Client) GetClientTraffic(ctx context.Context, email string) (*ClientTraffic, error) {
+	if err := c.ensureLoggedIn(ctx, false); err != nil {
+		return nil, fmt.Errorf("authentication required: %w", err)
+	}
+
+	trafficURL := fmt.Sprintf("%s/panel/api/inbounds/getClientTraffics/%s", c.host, email)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, trafficURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("get client traffic request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, config.MaxResponseSize))
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	var apiResp APIResponse
+	if err := json.Unmarshal(respBody, &apiResp); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	if !apiResp.Success {
+		return nil, fmt.Errorf("failed to get client traffic: %s", apiResp.Msg)
+	}
+
+	var traffics []ClientTraffic
+	if err := json.Unmarshal(apiResp.Obj, &traffics); err != nil {
+		return nil, fmt.Errorf("failed to parse traffic data: %w", err)
+	}
+
+	if len(traffics) == 0 {
+		return nil, fmt.Errorf("client not found: %s", email)
+	}
+
+	return &traffics[0], nil
 }
 
 // GetSubscriptionLink generates a subscription URL for the given subID.
