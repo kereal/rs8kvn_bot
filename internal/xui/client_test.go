@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -520,5 +521,275 @@ func TestClientSettings_JSON(t *testing.T) {
 	}
 	if unmarshaled.Email != config.Email {
 		t.Errorf("Email = %s, want %s", unmarshaled.Email, config.Email)
+	}
+}
+
+func TestGetClientTraffic_Success(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/login":
+			resp := APIResponse{Success: true}
+			json.NewEncoder(w).Encode(resp)
+		case "/panel/api/inbounds/getClientTraffics/testuser":
+			if r.Method != "POST" {
+				t.Errorf("Expected POST method, got %s", r.Method)
+			}
+			traffics := []ClientTraffic{
+				{
+					ID:         "client-id-123",
+					Email:      "testuser",
+					Up:         1073741824, // 1 GB up
+					Down:       2147483648, // 2 GB down
+					Total:      3221225472, // 3 GB total
+					ExpiryTime: time.Now().Add(24 * time.Hour).UnixMilli(),
+					Enable:     true,
+				},
+			}
+			resp := APIResponse{
+				Success: true,
+				Msg:     "success",
+			}
+			resp.Obj, _ = json.Marshal(traffics)
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(resp)
+		default:
+			t.Errorf("Unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "admin", "password")
+	ctx := context.Background()
+
+	result, err := client.GetClientTraffic(ctx, "testuser")
+	if err != nil {
+		t.Fatalf("GetClientTraffic() error = %v", err)
+	}
+
+	if result.Email != "testuser" {
+		t.Errorf("Email = %s, want testuser", result.Email)
+	}
+	if result.Up != 1073741824 {
+		t.Errorf("Up = %d, want 1073741824", result.Up)
+	}
+	if result.Down != 2147483648 {
+		t.Errorf("Down = %d, want 2147483648", result.Down)
+	}
+	if result.Total != 3221225472 {
+		t.Errorf("Total = %d, want 3221225472", result.Total)
+	}
+	if !result.Enable {
+		t.Error("Enable should be true")
+	}
+}
+
+func TestGetClientTraffic_ClientNotFound(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/login":
+			resp := APIResponse{Success: true}
+			json.NewEncoder(w).Encode(resp)
+		case "/panel/api/inbounds/getClientTraffics/nonexistent":
+			// Return empty array
+			traffics := []ClientTraffic{}
+			resp := APIResponse{
+				Success: true,
+				Msg:     "success",
+			}
+			resp.Obj, _ = json.Marshal(traffics)
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(resp)
+		default:
+			t.Errorf("Unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "admin", "password")
+	ctx := context.Background()
+
+	_, err := client.GetClientTraffic(ctx, "nonexistent")
+	if err == nil {
+		t.Fatal("GetClientTraffic() should return error when client not found")
+	}
+	if !strings.Contains(err.Error(), "client not found") {
+		t.Errorf("Error should contain 'client not found', got: %v", err)
+	}
+}
+
+func TestGetClientTraffic_ServerError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/login":
+			resp := APIResponse{Success: true}
+			json.NewEncoder(w).Encode(resp)
+		case "/panel/api/inbounds/getClientTraffics/testuser":
+			resp := APIResponse{
+				Success: false,
+				Msg:     "Internal server error",
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(resp)
+		default:
+			t.Errorf("Unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "admin", "password")
+	ctx := context.Background()
+
+	_, err := client.GetClientTraffic(ctx, "testuser")
+	if err == nil {
+		t.Fatal("GetClientTraffic() should return error when server returns error")
+	}
+	if !strings.Contains(err.Error(), "failed to get client traffic") {
+		t.Errorf("Error should contain 'failed to get client traffic', got: %v", err)
+	}
+}
+
+func TestGetClientTraffic_LoginFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/login" {
+			resp := APIResponse{Success: false, Msg: "Invalid credentials"}
+			json.NewEncoder(w).Encode(resp)
+			return
+		}
+		t.Errorf("Unexpected path: %s", r.URL.Path)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "admin", "wrongpassword")
+	ctx := context.Background()
+
+	_, err := client.GetClientTraffic(ctx, "testuser")
+	if err == nil {
+		t.Fatal("GetClientTraffic() should return error when login fails")
+	}
+	if !strings.Contains(err.Error(), "authentication required") {
+		t.Errorf("Error should contain 'authentication required', got: %v", err)
+	}
+}
+
+func TestGetClientTraffic_ContextCancellation(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/login":
+			resp := APIResponse{Success: true}
+			json.NewEncoder(w).Encode(resp)
+		case "/panel/api/inbounds/getClientTraffics/testuser":
+			time.Sleep(2 * time.Second) // Delay to ensure context cancellation
+			traffics := []ClientTraffic{}
+			resp := APIResponse{Success: true}
+			resp.Obj, _ = json.Marshal(traffics)
+			json.NewEncoder(w).Encode(resp)
+		default:
+			t.Errorf("Unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "admin", "password")
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	_, err := client.GetClientTraffic(ctx, "testuser")
+	if err == nil {
+		t.Fatal("GetClientTraffic() should return error when context is cancelled")
+	}
+}
+
+func TestGetClientTraffic_InvalidJSONResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/login":
+			resp := APIResponse{Success: true}
+			json.NewEncoder(w).Encode(resp)
+		case "/panel/api/inbounds/getClientTraffics/testuser":
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte("invalid json"))
+		default:
+			t.Errorf("Unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "admin", "password")
+	ctx := context.Background()
+
+	_, err := client.GetClientTraffic(ctx, "testuser")
+	if err == nil {
+		t.Fatal("GetClientTraffic() should return error for invalid JSON response")
+	}
+}
+
+func TestClientTraffic_JSON(t *testing.T) {
+	// Test that ClientTraffic can be marshaled/unmarshaled correctly
+	traffic := &ClientTraffic{
+		ID:         "test-client-id",
+		Email:      "testuser",
+		Up:         1073741824,
+		Down:       2147483648,
+		Total:      3221225472,
+		ExpiryTime: time.Now().Add(24 * time.Hour).UnixMilli(),
+		Enable:     true,
+	}
+
+	data, err := json.Marshal(traffic)
+	if err != nil {
+		t.Fatalf("Failed to marshal ClientTraffic: %v", err)
+	}
+
+	var unmarshaled ClientTraffic
+	if err := json.Unmarshal(data, &unmarshaled); err != nil {
+		t.Fatalf("Failed to unmarshal ClientTraffic: %v", err)
+	}
+
+	if unmarshaled.ID != traffic.ID {
+		t.Errorf("ID = %s, want %s", unmarshaled.ID, traffic.ID)
+	}
+	if unmarshaled.Email != traffic.Email {
+		t.Errorf("Email = %s, want %s", unmarshaled.Email, traffic.Email)
+	}
+	if unmarshaled.Up != traffic.Up {
+		t.Errorf("Up = %d, want %d", unmarshaled.Up, traffic.Up)
+	}
+	if unmarshaled.Down != traffic.Down {
+		t.Errorf("Down = %d, want %d", unmarshaled.Down, traffic.Down)
+	}
+	if unmarshaled.Total != traffic.Total {
+		t.Errorf("Total = %d, want %d", unmarshaled.Total, traffic.Total)
+	}
+	if unmarshaled.Enable != traffic.Enable {
+		t.Errorf("Enable = %v, want %v", unmarshaled.Enable, traffic.Enable)
+	}
+}
+
+func TestClientTraffic_TrafficCalculation(t *testing.T) {
+	// Test traffic calculation in GB
+	tests := []struct {
+		name       string
+		up         int64
+		down       int64
+		expectedGB float64
+	}{
+		{"zero traffic", 0, 0, 0},
+		{"1 GB total", 536870912, 536870912, 1.0},   // 512MB up + 512MB down = 1GB
+		{"5 GB total", 2147483648, 3221225472, 5.0}, // 2GB up + 3GB down = 5GB
+		{"partial GB", 1073741824, 536870912, 1.5},  // 1GB up + 512MB down = 1.5GB
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			traffic := &ClientTraffic{
+				Up:   tt.up,
+				Down: tt.down,
+			}
+			gb := float64(traffic.Up+traffic.Down) / 1024 / 1024 / 1024
+			// Use approximate comparison for floating point
+			if gb < tt.expectedGB-0.01 || gb > tt.expectedGB+0.01 {
+				t.Errorf("Traffic in GB = %.2f, want %.2f", gb, tt.expectedGB)
+			}
+		})
 	}
 }
