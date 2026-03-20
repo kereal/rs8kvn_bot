@@ -49,6 +49,21 @@ func (h *Handler) HandleStart(ctx context.Context, update tgbotapi.Update) {
 		zap.String("username", username),
 		zap.Int64("chat_id", chatID))
 
+	// Check for deep link parameter (e.g., /start donate)
+	if update.Message.CommandArguments() == "donate" {
+		donateText := `☕ *Поддержка проекта*
+
+Пока у меня есть только сбор в т-банке
+[REDACTED_DONATE_URL](REDACTED_DONATE_URL)
+
+Если нужен другой способ — [напишите мне](https://t.me/kereal)`
+
+		msg := tgbotapi.NewMessage(chatID, donateText)
+		msg.ParseMode = "Markdown"
+		h.send(ctx, msg)
+		return
+	}
+
 	isAdmin := chatID == h.cfg.TelegramAdminID
 
 	msg := tgbotapi.NewMessage(chatID, fmt.Sprintf(
@@ -112,27 +127,6 @@ func (h *Handler) HandleHelp(ctx context.Context, update tgbotapi.Update) {
 - При истечении трафика подписка перестанет работать до следующего месяца`
 
 	msg := tgbotapi.NewMessage(chatID, helpText)
-	msg.ParseMode = "Markdown"
-	h.send(ctx, msg)
-}
-
-// HandleDonate handles the /donate command.
-func (h *Handler) HandleDonate(ctx context.Context, update tgbotapi.Update) {
-	if update.Message == nil {
-		logger.Error("HandleDonate called with nil Message")
-		return
-	}
-
-	chatID := update.Message.Chat.ID
-
-	donateText := `☕ *Поддержка проекта*
-
-Пока у меня есть только сбор в т-банке
-[REDACTED_DONATE_URL](REDACTED_DONATE_URL)
-
-Если нужен другой способ — [напишите мне](https://t.me/kereal)`
-
-	msg := tgbotapi.NewMessage(chatID, donateText)
 	msg.ParseMode = "Markdown"
 	h.send(ctx, msg)
 }
@@ -457,9 +451,8 @@ func (h *Handler) createSubscription(ctx context.Context, chatID int64, username
 
 	// Success - send subscription to user
 	msg := tgbotapi.NewMessage(chatID, fmt.Sprintf(
-		"🚀 *Ваша подписка готова!*\n\nТрафик: %dГб на месяц.\n\n📲 *1. Установите приложение Happ:*\n· [Скачать для iOS](https://apps.apple.com/ru/app/happ-proxy-utility-plus/id6746188973)\n· [Скачать для Android](https://play.google.com/store/apps/details?id=com.happproxy)\n\n📥 *2. Импортируйте подписку*\n\n[Нажмите для импорта](happ://add/%s)\n\n⚠️ Если не получилось.\nСкопируйте ссылку на подписку: `%s`\nВ приложении Happ нажмите *«+»* в правом верхнем углу и выберите *«Вставить из буфера»*.\n\n▶️ *3. Запустите VPN:*\nДождитесь загрузки и нажмите на большую круглую кнопку в центре экрана.\n\n🛡️ *Важно знать:*\nВ приложении Happ настроена автоматическая маршрутизация. Зарубежные сайты работают через VPN, а российские сервисы — напрямую. VPN можно не выключать.\n⚠️ _Если вы используете другое приложение или свою конфигурацию — не заходите через этот VPN на российские ресурсы, иначе сервер заблокируют._\n\n🤝 *Правила использования:*\n· Не передавайте свою подписку другим. Делитесь ссылкой на этого бота `@rs8kvn_bot`.\n· Не публикуйте ссылку на бота в интернете, передавайте только из рук в руки (приветствуется).\n· Пользуйтесь ответственно, не занимайтесь незаконной деятельностью.\n\n☕ *Поддержка проекта:*\nЭтот VPN бесплатный и существует благодаря вашим пожертвованиям и усилиям Кирилла. [Поддержите проект](https://t.me/rs8kvn_bot?donate) — важна каждая сотня.",
+		"🚀 *Ваша подписка готова!*\n\nТрафик: %dГб на месяц.\n\n📲 *1. Установите приложение Happ:*\n· [Скачать для iOS](https://apps.apple.com/ru/app/happ-proxy-utility-plus/id6746188973)\n· [Скачать для Android](https://play.google.com/store/apps/details?id=com.happproxy)\n\n📥 *2. Импортируйте подписку*\n\nНажмите, чтобы скопировать: `%s`\n\nВ приложении Happ нажмите *«+»* в правом верхнем углу и выберите *«Вставить из буфера»*.\n\n▶️ *3. Запустите VPN*\nДождитесь загрузки и нажмите на большую круглую кнопку в центре экрана.\n\n🛡️ *Важно знать*\nВ приложении Happ настроена автоматическая маршрутизация. Зарубежные сайты работают через VPN, а российские сервисы — напрямую. VPN можно не выключать.\n⚠️ _Если вы используете другое приложение или свою конфигурацию — не заходите через этот VPN на российские ресурсы, иначе сервер заблокируют._\n\n🤝 *Правила использования*\n· Не передавайте свою подписку другим. Делитесь ссылкой на этого бота `@rs8kvn_bot`.\n· Не публикуйте ссылку на бота в интернете, передавайте только из рук в руки (приветствуется).\n· Пользуйтесь ответственно, не занимайтесь незаконной деятельностью.\n\n☕ *Поддержка проекта:*\nЭтот VPN бесплатный и существует благодаря вашим пожертвованиям и усилиям Кирилла. [Поддержите проект](https://t.me/rs8kvn_bot?start=donate) — важна каждая сотня.",
 		h.cfg.TrafficLimitGB,
-		subscriptionURL,
 		subscriptionURL,
 	))
 	msg.ParseMode = "Markdown"
