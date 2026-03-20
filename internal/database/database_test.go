@@ -1606,3 +1606,153 @@ func TestGetLatestSubscriptions_MixedStatuses(t *testing.T) {
 		}
 	}
 }
+
+// ==================== GetSubscriptionByID Tests ====================
+
+func TestGetSubscriptionByID(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+	if err := Init(dbPath); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	defer Close()
+
+	// Create a subscription
+	sub := &Subscription{
+		TelegramID:      12345,
+		Username:        "testuser",
+		ClientID:        "client-123",
+		XUIHost:         "http://localhost:2053",
+		InboundID:       1,
+		TrafficLimit:    107374182400,
+		ExpiryTime:      time.Now().Add(24 * time.Hour),
+		Status:          "active",
+		SubscriptionURL: "http://test.url/sub/abc",
+	}
+
+	err := CreateSubscription(sub)
+	if err != nil {
+		t.Fatalf("CreateSubscription() error = %v", err)
+	}
+
+	// Get the subscription by ID
+	got, err := GetSubscriptionByID(sub.ID)
+	if err != nil {
+		t.Fatalf("GetSubscriptionByID() error = %v", err)
+	}
+
+	if got.ID != sub.ID {
+		t.Errorf("GetSubscriptionByID() ID = %d, want %d", got.ID, sub.ID)
+	}
+	if got.TelegramID != sub.TelegramID {
+		t.Errorf("GetSubscriptionByID() TelegramID = %d, want %d", got.TelegramID, sub.TelegramID)
+	}
+	if got.Username != sub.Username {
+		t.Errorf("GetSubscriptionByID() Username = %s, want %s", got.Username, sub.Username)
+	}
+	if got.ClientID != sub.ClientID {
+		t.Errorf("GetSubscriptionByID() ClientID = %s, want %s", got.ClientID, sub.ClientID)
+	}
+}
+
+func TestGetSubscriptionByID_NotFound(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+	if err := Init(dbPath); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	defer Close()
+
+	// Try to get non-existent subscription
+	_, err := GetSubscriptionByID(99999)
+	if err == nil {
+		t.Error("GetSubscriptionByID() should return error for non-existent ID")
+	}
+}
+
+func TestGetSubscriptionByID_DatabaseNotInitialized(t *testing.T) {
+	// Close database if open
+	Close()
+
+	_, err := GetSubscriptionByID(1)
+	if err == nil {
+		t.Error("GetSubscriptionByID() should return error when database not initialized")
+	}
+}
+
+// ==================== DeleteSubscriptionByID Tests ====================
+
+func TestDeleteSubscriptionByID(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+	if err := Init(dbPath); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	defer Close()
+
+	// Create a subscription
+	sub := &Subscription{
+		TelegramID:      54321,
+		Username:        "deleteuser",
+		ClientID:        "client-delete",
+		XUIHost:         "http://localhost:2053",
+		InboundID:       1,
+		TrafficLimit:    107374182400,
+		ExpiryTime:      time.Now().Add(24 * time.Hour),
+		Status:          "active",
+		SubscriptionURL: "http://test.url/sub/delete",
+	}
+
+	err := CreateSubscription(sub)
+	if err != nil {
+		t.Fatalf("CreateSubscription() error = %v", err)
+	}
+
+	id := sub.ID
+
+	// Delete the subscription by ID
+	deleted, err := DeleteSubscriptionByID(id)
+	if err != nil {
+		t.Fatalf("DeleteSubscriptionByID() error = %v", err)
+	}
+
+	// Verify returned subscription has correct data
+	if deleted.ID != id {
+		t.Errorf("DeleteSubscriptionByID() returned ID = %d, want %d", deleted.ID, id)
+	}
+	if deleted.TelegramID != sub.TelegramID {
+		t.Errorf("DeleteSubscriptionByID() returned TelegramID = %d, want %d", deleted.TelegramID, sub.TelegramID)
+	}
+
+	// Verify it's hard deleted (not soft delete)
+	var count int64
+	DB.Model(&Subscription{}).Unscoped().Where("id = ?", id).Count(&count)
+	if count != 0 {
+		t.Error("Subscription should be hard deleted (permanently removed)")
+	}
+}
+
+func TestDeleteSubscriptionByID_NotFound(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+	if err := Init(dbPath); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	defer Close()
+
+	// Try to delete non-existent subscription
+	_, err := DeleteSubscriptionByID(99999)
+	if err == nil {
+		t.Error("DeleteSubscriptionByID() should return error for non-existent ID")
+	}
+}
+
+func TestDeleteSubscriptionByID_DatabaseNotInitialized(t *testing.T) {
+	// Close database if open
+	Close()
+
+	_, err := DeleteSubscriptionByID(1)
+	if err == nil {
+		t.Error("DeleteSubscriptionByID() should return error when database not initialized")
+	}
+}

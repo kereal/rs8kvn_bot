@@ -317,7 +317,7 @@ func (c *Client) DeleteClient(ctx context.Context, inboundID int, clientID strin
 		return fmt.Errorf("authentication required: %w", err)
 	}
 
-	deleteURL := fmt.Sprintf("%s/panel/api/inbounds/delClient/%d/%s", c.host, inboundID, clientID)
+	deleteURL := fmt.Sprintf("%s/panel/api/inbounds/%d/delClient/%s", c.host, inboundID, clientID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, deleteURL, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create delete request: %w", err)

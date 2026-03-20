@@ -172,6 +172,42 @@ func DeleteSubscription(telegramID int64) error {
 	return nil
 }
 
+// GetSubscriptionByID retrieves a subscription by its database ID.
+func GetSubscriptionByID(id uint) (*Subscription, error) {
+	if DB == nil {
+		return nil, fmt.Errorf("database not initialized")
+	}
+	var sub Subscription
+	result := DB.First(&sub, id)
+	if result.Error != nil {
+		return nil, fmt.Errorf("failed to get subscription: %w", result.Error)
+	}
+	return &sub, nil
+}
+
+// DeleteSubscriptionByID hard-deletes a subscription by its database ID.
+// Returns the deleted subscription so the caller can use its data for cleanup.
+func DeleteSubscriptionByID(id uint) (*Subscription, error) {
+	if DB == nil {
+		return nil, fmt.Errorf("database not initialized")
+	}
+
+	// Get the subscription first to return it after deletion
+	var sub Subscription
+	result := DB.First(&sub, id)
+	if result.Error != nil {
+		return nil, fmt.Errorf("failed to find subscription: %w", result.Error)
+	}
+
+	// Hard delete (Unscoped)
+	result = DB.Unscoped().Delete(&sub)
+	if result.Error != nil {
+		return nil, fmt.Errorf("failed to delete subscription: %w", result.Error)
+	}
+
+	return &sub, nil
+}
+
 // GetLatestSubscriptions retrieves the latest N subscriptions ordered by creation date.
 func GetLatestSubscriptions(limit int) ([]Subscription, error) {
 	if DB == nil {

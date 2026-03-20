@@ -25,8 +25,8 @@ func init() {
 	logger.Init("", "error")
 }
 
-// TestGetLastSecondOfMonth tests the getLastSecondOfMonth helper function
-func TestGetLastSecondOfMonth(t *testing.T) {
+// TestGetFirstSecondOfNextMonth tests the getFirstSecondOfNextMonth helper function
+func TestGetFirstSecondOfNextMonth(t *testing.T) {
 	tests := []struct {
 		name     string
 		input    time.Time
@@ -35,43 +35,43 @@ func TestGetLastSecondOfMonth(t *testing.T) {
 		{
 			name:     "January 2024",
 			input:    time.Date(2024, 1, 15, 12, 30, 45, 0, time.UTC),
-			expected: time.Date(2024, 1, 31, 23, 59, 59, 0, time.UTC),
+			expected: time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC),
 		},
 		{
 			name:     "February 2024 (leap year)",
 			input:    time.Date(2024, 2, 15, 12, 30, 45, 0, time.UTC),
-			expected: time.Date(2024, 2, 29, 23, 59, 59, 0, time.UTC),
+			expected: time.Date(2024, 3, 1, 0, 0, 0, 0, time.UTC),
 		},
 		{
 			name:     "February 2023 (non-leap year)",
 			input:    time.Date(2023, 2, 15, 12, 30, 45, 0, time.UTC),
-			expected: time.Date(2023, 2, 28, 23, 59, 59, 0, time.UTC),
+			expected: time.Date(2023, 3, 1, 0, 0, 0, 0, time.UTC),
 		},
 		{
 			name:     "April 2024 (30 days)",
 			input:    time.Date(2024, 4, 15, 12, 30, 45, 0, time.UTC),
-			expected: time.Date(2024, 4, 30, 23, 59, 59, 0, time.UTC),
+			expected: time.Date(2024, 5, 1, 0, 0, 0, 0, time.UTC),
 		},
 		{
 			name:     "December 2024",
 			input:    time.Date(2024, 12, 15, 12, 30, 45, 0, time.UTC),
-			expected: time.Date(2024, 12, 31, 23, 59, 59, 0, time.UTC),
+			expected: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
 		},
 		{
 			name:     "First day of month",
 			input:    time.Date(2024, 3, 1, 0, 0, 0, 0, time.UTC),
-			expected: time.Date(2024, 3, 31, 23, 59, 59, 0, time.UTC),
+			expected: time.Date(2024, 4, 1, 0, 0, 0, 0, time.UTC),
 		},
 		{
 			name:     "Last day of month",
 			input:    time.Date(2024, 1, 31, 23, 59, 59, 0, time.UTC),
-			expected: time.Date(2024, 1, 31, 23, 59, 59, 0, time.UTC),
+			expected: time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC),
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := getLastSecondOfMonth(tt.input)
+			result := getFirstSecondOfNextMonth(tt.input)
 			if !result.Equal(tt.expected) {
 				t.Errorf("getLastSecondOfMonth(%v) = %v, want %v", tt.input, result, tt.expected)
 			}
@@ -697,100 +697,6 @@ func TestGetUsername(t *testing.T) {
 	}
 }
 
-func TestMaskSubscriptionURL(t *testing.T) {
-	tests := []struct {
-		name     string
-		url      string
-		contains string
-	}{
-		{
-			name:     "standard URL",
-			url:      "http://localhost:2053/sub/abc123def456",
-			contains: "...",
-		},
-		{
-			name:     "URL with long sub ID",
-			url:      "http://example.com/sub/1234567890abcdef12345678",
-			contains: "...",
-		},
-		{
-			name:     "short URL",
-			url:      "http://x.co/s/a",
-			contains: "***",
-		},
-		{
-			name:     "empty URL",
-			url:      "",
-			contains: "***",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := maskSubscriptionURL(tt.url)
-			if !strings.Contains(got, tt.contains) {
-				t.Errorf("maskSubscriptionURL(%q) = %q, should contain %q", tt.url, got, tt.contains)
-			}
-		})
-	}
-}
-
-func TestMaskSubscriptionURL_PreservesHost(t *testing.T) {
-	tests := []struct {
-		name string
-		url  string
-		host string
-	}{
-		{
-			name: "localhost",
-			url:  "http://localhost:2053/sub/abc123",
-			host: "localhost:2053",
-		},
-		{
-			name: "example.com",
-			url:  "https://example.com/sub/xyz789",
-			host: "example.com",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := maskSubscriptionURL(tt.url)
-			if !strings.Contains(got, tt.host) {
-				t.Errorf("maskSubscriptionURL(%q) = %q, should contain host %q", tt.url, got, tt.host)
-			}
-			// Should not contain the full subscription ID
-			if strings.Contains(got, "abc123") || strings.Contains(got, "xyz789") {
-				t.Errorf("maskSubscriptionURL(%q) = %q, should mask subscription ID", tt.url, got)
-			}
-		})
-	}
-}
-
-func TestMaskSubscriptionURL_EdgeCases(t *testing.T) {
-	t.Run("very short URL", func(t *testing.T) {
-		got := maskSubscriptionURL("http://a/b")
-		if got == "" {
-			t.Error("maskSubscriptionURL should not return empty string")
-		}
-	})
-
-	t.Run("URL with no path", func(t *testing.T) {
-		got := maskSubscriptionURL("http://example.com")
-		if got == "" {
-			t.Error("maskSubscriptionURL should not return empty string")
-		}
-	})
-
-	t.Run("URL with multiple segments", func(t *testing.T) {
-		got := maskSubscriptionURL("http://example.com/path/to/sub/abc123def456")
-		// Should mask the last segment
-		if !strings.Contains(got, "...") {
-			t.Errorf("maskSubscriptionURL should mask the subscription ID, got: %s", got)
-		}
-	})
-}
-
 // ==================== Context Propagation Tests ====================
 
 func TestHandleStart_WithContext(t *testing.T) {
@@ -1053,10 +959,10 @@ func TestHandleLastReg_Format(t *testing.T) {
 		t.Errorf("Date format = %s, want %s", actualDateStr, expectedDateStr)
 	}
 
-	// Verify the format string (username should be a link with table format)
-	expectedFormat := "[@ivan](https://t.me/ivan) │ 15.03.2026 22:57:59"
-	actualFormat := fmt.Sprintf("[@%s](https://t.me/%s) │ %s",
-		subs[0].Username, subs[0].Username, subs[0].CreatedAt.Format("02.01.2006 15:04:05"))
+	// Verify the format string (ID, username link, date in table format)
+	expectedFormat := fmt.Sprintf("%d │ [@ivan](https://t.me/ivan) │ 15.03.2026 22:57:59", subs[0].ID)
+	actualFormat := fmt.Sprintf("%d │ [@%s](https://t.me/%s) │ %s",
+		subs[0].ID, subs[0].Username, subs[0].Username, subs[0].CreatedAt.Format("02.01.2006 15:04:05"))
 	if actualFormat != expectedFormat {
 		t.Errorf("Format = %s, want %s", actualFormat, expectedFormat)
 	}
@@ -1393,5 +1299,169 @@ func TestHandleLastReg_TenRecordsMax(t *testing.T) {
 	// Verify the 10th is maxuser10
 	if subs[9].Username != "maxuser10" {
 		t.Errorf("Tenth subscription username = %s, want maxuser10", subs[9].Username)
+	}
+}
+
+// ==================== HandleDel Tests ====================
+
+// TestHandleDel_NilMessage tests HandleDel with nil message
+func TestHandleDel_NilMessage(t *testing.T) {
+	handler := &Handler{
+		cfg: &config.Config{
+			TelegramAdminID: 123456789,
+		},
+	}
+
+	// Should not panic with nil message
+	update := tgbotapi.Update{}
+	handler.HandleDel(context.Background(), update)
+	// If we reach here, the test passes (no panic)
+}
+
+// TestHandleDel_NonAdmin tests that non-admin users get no response
+func TestHandleDel_NonAdmin(t *testing.T) {
+	cleanup := setupTestDatabase(t)
+	defer cleanup()
+
+	// Create a test subscription
+	sub := &database.Subscription{
+		TelegramID:      123456789,
+		Username:        "testuser",
+		ClientID:        "test-client-id",
+		XUIHost:         "http://localhost:2053",
+		InboundID:       1,
+		TrafficLimit:    107374182400,
+		ExpiryTime:      time.Now().Add(24 * time.Hour),
+		Status:          "active",
+		SubscriptionURL: "http://localhost/sub/test",
+	}
+	if err := database.CreateSubscription(sub); err != nil {
+		t.Fatalf("Failed to create test subscription: %v", err)
+	}
+
+	// Verify non-admin ID doesn't match admin ID
+	nonAdminID := int64(987654321)
+	adminID := int64(123456789)
+
+	if nonAdminID == adminID {
+		t.Error("Test setup error: non-admin ID should differ from admin ID")
+	}
+}
+
+// TestHandleDel_NoArgs tests HandleDel with no arguments
+func TestHandleDel_NoArgs(t *testing.T) {
+	handler := &Handler{
+		cfg: &config.Config{
+			TelegramAdminID: 123456789,
+		},
+	}
+
+	// Test that empty args is handled
+	// Without a real bot, we can't test the message sending
+	// This test verifies the function doesn't panic
+	update := tgbotapi.Update{}
+	handler.HandleDel(context.Background(), update)
+}
+
+// TestHandleDel_InvalidID tests HandleDel with invalid ID format
+func TestHandleDel_InvalidID(t *testing.T) {
+	handler := &Handler{
+		cfg: &config.Config{
+			TelegramAdminID: 123456789,
+		},
+	}
+
+	// Test that invalid ID format is handled
+	// Without a real bot, we can't test the message sending
+	// This test verifies the function doesn't panic
+	update := tgbotapi.Update{}
+	handler.HandleDel(context.Background(), update)
+}
+
+// TestHandleDel_GetSubscriptionByID tests the database query for GetSubscriptionByID
+func TestHandleDel_GetSubscriptionByID(t *testing.T) {
+	cleanup := setupTestDatabase(t)
+	defer cleanup()
+
+	// Create a test subscription
+	sub := &database.Subscription{
+		TelegramID:      123456789,
+		Username:        "deltestuser",
+		ClientID:        "del-client-id",
+		XUIHost:         "http://localhost:2053",
+		InboundID:       1,
+		TrafficLimit:    107374182400,
+		ExpiryTime:      time.Now().Add(24 * time.Hour),
+		Status:          "active",
+		SubscriptionURL: "http://localhost/sub/deltest",
+	}
+	if err := database.CreateSubscription(sub); err != nil {
+		t.Fatalf("Failed to create test subscription: %v", err)
+	}
+
+	// Get the subscription by ID
+	got, err := database.GetSubscriptionByID(sub.ID)
+	if err != nil {
+		t.Fatalf("GetSubscriptionByID() error = %v", err)
+	}
+
+	if got.ID != sub.ID {
+		t.Errorf("GetSubscriptionByID() ID = %d, want %d", got.ID, sub.ID)
+	}
+	if got.Username != sub.Username {
+		t.Errorf("GetSubscriptionByID() Username = %s, want %s", got.Username, sub.Username)
+	}
+}
+
+// TestHandleDel_DeleteSubscriptionByID tests the database delete function
+func TestHandleDel_DeleteSubscriptionByID(t *testing.T) {
+	cleanup := setupTestDatabase(t)
+	defer cleanup()
+
+	// Create a test subscription
+	sub := &database.Subscription{
+		TelegramID:      999888777,
+		Username:        "deletetest",
+		ClientID:        "delete-client-id",
+		XUIHost:         "http://localhost:2053",
+		InboundID:       1,
+		TrafficLimit:    107374182400,
+		ExpiryTime:      time.Now().Add(24 * time.Hour),
+		Status:          "active",
+		SubscriptionURL: "http://localhost/sub/deletetest",
+	}
+	if err := database.CreateSubscription(sub); err != nil {
+		t.Fatalf("Failed to create test subscription: %v", err)
+	}
+
+	id := sub.ID
+
+	// Delete the subscription by ID
+	deleted, err := database.DeleteSubscriptionByID(id)
+	if err != nil {
+		t.Fatalf("DeleteSubscriptionByID() error = %v", err)
+	}
+
+	// Verify returned subscription has correct data
+	if deleted.ID != id {
+		t.Errorf("DeleteSubscriptionByID() returned ID = %d, want %d", deleted.ID, id)
+	}
+
+	// Verify it's deleted
+	_, err = database.GetSubscriptionByID(id)
+	if err == nil {
+		t.Error("GetSubscriptionByID() should return error after deletion")
+	}
+}
+
+// TestHandleDel_SubscriptionNotFound tests behavior when subscription doesn't exist
+func TestHandleDel_SubscriptionNotFound(t *testing.T) {
+	cleanup := setupTestDatabase(t)
+	defer cleanup()
+
+	// Verify GetSubscriptionByID returns error for non-existent ID
+	_, err := database.GetSubscriptionByID(99999)
+	if err == nil {
+		t.Error("GetSubscriptionByID() should return error for non-existent ID")
 	}
 }

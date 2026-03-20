@@ -145,23 +145,104 @@ func (h *Handler) HandleLastReg(ctx context.Context, update tgbotapi.Update) {
 		return
 	}
 
-	// Format the message as a table with 2 columns
+	// Format the message as a table with 3 columns
 	var sb strings.Builder
 	sb.WriteString("📋 *Последние регистрации:*\n\n")
 
 	for _, sub := range subs {
-		// Column 1: Username (clickable link), Column 2: Date and time
+		// Column 1: ID, Column 2: Username (clickable link), Column 3: Date and time
 		username := sub.Username
 		if username == "" {
 			username = "unknown"
 		}
 		dateStr := sub.CreatedAt.Format("02.01.2006 15:04:05")
-		sb.WriteString(fmt.Sprintf("[@%s](https://t.me/%s) │ %s\n", username, username, dateStr))
+		sb.WriteString(fmt.Sprintf("%d │ [@%s](https://t.me/%s) │ %s\n", sub.ID, username, username, dateStr))
 	}
 
 	msg := tgbotapi.NewMessage(chatID, sb.String())
 	msg.ParseMode = "Markdown"
 	h.send(ctx, msg)
+}
+
+// HandleDel handles the /del command for admins.
+// Deletes a subscription by database ID from both 3x-ui panel and database.
+// Usage: /del <id>
+func (h *Handler) HandleDel(ctx context.Context, update tgbotapi.Update) {
+	if update.Message == nil {
+		logger.Error("HandleDel called with nil Message")
+		return
+	}
+
+	chatID := update.Message.Chat.ID
+
+	// Verify admin access
+	if chatID != h.cfg.TelegramAdminID {
+		logger.Warn("Non-admin user attempted to access /del", zap.Int64("chat_id", chatID))
+		return
+	}
+
+	// Parse the command arguments
+	args := update.Message.CommandArguments()
+	if args == "" {
+		h.SendMessage(ctx, chatID, "❌ Использование: /del <id>\n\nПример: /del 5")
+		return
+	}
+
+	// Parse the ID
+	var id uint
+	if _, err := fmt.Sscanf(args, "%d", &id); err != nil {
+		h.SendMessage(ctx, chatID, "❌ Неверный формат ID. Использование: /del <id>\n\nПример: /del 5")
+		return
+	}
+
+	// Get the subscription
+	sub, err := database.GetSubscriptionByID(id)
+	if err != nil {
+		logger.Error("Failed to get subscription", zap.Error(err), zap.Uint("id", id))
+		h.SendMessage(ctx, chatID, fmt.Sprintf("❌ Подписка с ID %d не найдена", id))
+		return
+	}
+
+	// Delete from 3x-ui panel first
+	if err := h.xui.DeleteClient(ctx, sub.InboundID, sub.ClientID); err != nil {
+		logger.Error("Failed to delete client from 3x-ui",
+			zap.Error(err),
+			zap.String("client_id", sub.ClientID),
+			zap.Int("inbound_id", sub.InboundID))
+		h.SendMessage(ctx, chatID, fmt.Sprintf("❌ Ошибка удаления клиента из панели 3x-ui: %v", err))
+		return
+	}
+
+	// Delete from database
+	_, err = database.DeleteSubscriptionByID(id)
+	if err != nil {
+		logger.Error("Failed to delete subscription from database",
+			zap.Error(err),
+			zap.Uint("id", id))
+		// Client already deleted from 3x-ui, but database delete failed
+		// This is a warning, not a critical error since the client is gone from the panel
+		h.SendMessage(ctx, chatID, fmt.Sprintf("⚠️ Клиент удален из панели, но ошибка удаления из базы: %v\n\nОбратитесь к администратору.", err))
+		return
+	}
+
+	// Success
+	logger.Info("Subscription deleted",
+		zap.Uint("id", id),
+		zap.String("username", sub.Username),
+		zap.Int64("telegram_id", sub.TelegramID),
+		zap.String("client_id", sub.ClientID))
+
+	h.SendMessage(ctx, chatID, fmt.Sprintf(
+		"✅ Подписка успешно удалена!\n\n"+
+			"🆔 ID: %d\n"+
+			"👤 Пользователь: @%s\n"+
+			"🆔 Telegram ID: %d\n"+
+			"🔗 Client ID: `%s`",
+		id,
+		sub.Username,
+		sub.TelegramID,
+		sub.ClientID,
+	))
 }
 
 // HandleCallback handles callback queries from inline keyboards.
@@ -297,7 +378,7 @@ func (h *Handler) handleAdminStats(ctx context.Context, chatID int64, username s
 // the client is removed from the 3x-ui panel to prevent orphan records.
 func (h *Handler) createSubscription(ctx context.Context, chatID int64, username string) {
 	now := time.Now()
-	expiryTime := getLastSecondOfMonth(now)
+	expiryTime := getFirstSecondOfNextMonth(now)
 	trafficBytes := int64(h.cfg.TrafficLimitGB) * 1024 * 1024 * 1024
 
 	logger.Info("Creating subscription",
@@ -375,15 +456,12 @@ func (h *Handler) notifyAdmin(ctx context.Context, username string, chatID int64
 		return
 	}
 
-	// Mask the subscription URL for security (show only last 8 chars)
-	maskedURL := maskSubscriptionURL(subscriptionURL)
-
 	msg := tgbotapi.NewMessage(h.cfg.TelegramAdminID,
 		fmt.Sprintf("🔔 Новая подписка создана!\n\n👤 Пользователь: @%s\n🆔 ID: %d\n📅 Истекает: %s\n🔗 Подписка: `%s`",
 			username,
 			chatID,
 			expiryTime.Format("02.01.2006 15:04:05"),
-			maskedURL,
+			subscriptionURL,
 		))
 	msg.ParseMode = "Markdown"
 	h.send(ctx, msg)
@@ -472,35 +550,7 @@ func (h *Handler) getUsername(user *tgbotapi.User) string {
 }
 
 // getLastSecondOfMonth returns the last second of the current month.
-func getLastSecondOfMonth(t time.Time) time.Time {
+func getFirstSecondOfNextMonth(t time.Time) time.Time {
 	year, month, _ := t.Date()
-	firstDayNextMonth := time.Date(year, month+1, 1, 0, 0, 0, 0, t.Location())
-	return firstDayNextMonth.Add(-1 * time.Second)
-}
-
-// maskSubscriptionURL masks a subscription URL for logging/notification purposes.
-// Shows only the last 8 characters of the subscription ID.
-func maskSubscriptionURL(url string) string {
-	if len(url) < 12 {
-		return "***"
-	}
-	// Find the last segment (subscription ID)
-	lastSlash := -1
-	for i := len(url) - 1; i >= 0; i-- {
-		if url[i] == '/' {
-			lastSlash = i
-			break
-		}
-	}
-
-	if lastSlash == -1 || lastSlash == len(url)-1 {
-		return url[:8] + "..."
-	}
-
-	subID := url[lastSlash+1:]
-	if len(subID) <= 8 {
-		return url[:lastSlash+1] + "***"
-	}
-
-	return url[:lastSlash+1+len(subID)-8] + "..." + subID[len(subID)-8:]
+	return time.Date(year, month+1, 1, 0, 0, 0, 0, t.Location())
 }

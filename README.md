@@ -153,6 +153,21 @@ go run ./cmd/bot
 3. Admin users also see:
    - **📊 Статистика** - View bot statistics
 
+### Admin Commands
+
+Admins (specified in `TELEGRAM_ADMIN_ID`) have access to additional commands:
+
+| Command | Description |
+|---------|-------------|
+| `/lastreg` | Show the last 10 registered users |
+| `/del <id>` | Delete a subscription by database ID (removes from both 3x-ui panel and database) |
+
+**Example:**
+```
+/del 5
+```
+Deletes the subscription with database ID 5 from both the 3x-ui panel and the local database.
+
 ## CI/CD with GitHub Actions
 
 This project includes a GitHub Actions workflow that automatically builds and pushes Docker images to GitHub Container Registry.
@@ -246,7 +261,7 @@ rs8kvn_bot/
 ## Traffic and Expiry
 
 - **Traffic**: Configurable via `TRAFFIC_LIMIT_GB` (default: 100GB)
-- **Expiry**: Last second of current month (e.g., 31.03.2026 23:59:59)
+- **Expiry**: First second of next month (e.g., if today is March 15, 2026, expiry is April 1, 2026 00:00:00)
 - **Auto-renewal**: 31 days (reset parameter in 3x-ui)
 
 ## Configuration
@@ -273,7 +288,9 @@ rs8kvn_bot/
 When a new subscription is created, the admin (specified in `TELEGRAM_ADMIN_ID`) receives a notification with:
 - User username and ID
 - Subscription expiry date
-- Subscription link
+- Subscription link (full URL, not masked)
+
+Admins can also use the `/del <id>` command to delete subscriptions and `/lastreg` to view recent registrations.
 
 ## Database Migrations
 
