@@ -235,6 +235,8 @@ func handleUpdate(ctx context.Context, handler *bot.Handler, update tgbotapi.Upd
 				handler.HandleLastReg(ctx, update)
 			case "del":
 				handler.HandleDel(ctx, update)
+			case "donate":
+				handler.HandleDonate(ctx, update)
 			default:
 				handler.SendMessage(ctx, update.Message.Chat.ID,
 					"Неизвестная команда. Используйте /start или /help")
