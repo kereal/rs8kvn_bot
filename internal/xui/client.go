@@ -78,7 +78,6 @@ type ClientTraffic struct {
 	Down       int64  `json:"down"`
 	Total      int64  `json:"total"`
 	ExpiryTime int64  `json:"expiryTime"`
-	TotalGB    int64  `json:"totalGB"`
 	Enable     bool   `json:"enable"`
 }
 
