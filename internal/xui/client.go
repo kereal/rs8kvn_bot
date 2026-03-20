@@ -369,7 +369,7 @@ func (c *Client) GetClientTraffic(ctx context.Context, email string) (*ClientTra
 	}
 
 	trafficURL := fmt.Sprintf("%s/panel/api/inbounds/getClientTraffics/%s", c.host, email)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, trafficURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, trafficURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}

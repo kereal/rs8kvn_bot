@@ -531,8 +531,8 @@ func TestGetClientTraffic_Success(t *testing.T) {
 			resp := APIResponse{Success: true}
 			json.NewEncoder(w).Encode(resp)
 		case "/panel/api/inbounds/getClientTraffics/testuser":
-			if r.Method != "POST" {
-				t.Errorf("Expected POST method, got %s", r.Method)
+			if r.Method != "GET" {
+				t.Errorf("Expected GET method, got %s", r.Method)
 			}
 			traffics := []ClientTraffic{
 				{
