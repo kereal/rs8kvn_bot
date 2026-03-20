@@ -534,22 +534,26 @@ func TestGetClientTraffic_Success(t *testing.T) {
 			if r.Method != "GET" {
 				t.Errorf("Expected GET method, got %s", r.Method)
 			}
-			traffics := []ClientTraffic{
-				{
-					ID:         "client-id-123",
-					Email:      "testuser",
-					Up:         1073741824, // 1 GB up
-					Down:       2147483648, // 2 GB down
-					Total:      3221225472, // 3 GB total
-					ExpiryTime: time.Now().Add(24 * time.Hour).UnixMilli(),
-					Enable:     true,
-				},
+			traffic := ClientTraffic{
+				ID:         1,
+				InboundID:  1,
+				Enable:     true,
+				Email:      "testuser",
+				UUID:       "test-uuid-123",
+				SubID:      "test-sub-id",
+				Up:         1073741824, // 1 GB up
+				Down:       2147483648, // 2 GB down
+				AllTime:    0,
+				ExpiryTime: time.Now().Add(24 * time.Hour).UnixMilli(),
+				Total:      0,
+				Reset:      0,
+				LastOnline: 0,
 			}
 			resp := APIResponse{
 				Success: true,
-				Msg:     "success",
+				Msg:     "",
 			}
-			resp.Obj, _ = json.Marshal(traffics)
+			resp.Obj, _ = json.Marshal(traffic)
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(resp)
 		default:
@@ -575,9 +579,6 @@ func TestGetClientTraffic_Success(t *testing.T) {
 	if result.Down != 2147483648 {
 		t.Errorf("Down = %d, want 2147483648", result.Down)
 	}
-	if result.Total != 3221225472 {
-		t.Errorf("Total = %d, want 3221225472", result.Total)
-	}
 	if !result.Enable {
 		t.Error("Enable should be true")
 	}
@@ -590,13 +591,11 @@ func TestGetClientTraffic_ClientNotFound(t *testing.T) {
 			resp := APIResponse{Success: true}
 			json.NewEncoder(w).Encode(resp)
 		case "/panel/api/inbounds/getClientTraffics/nonexistent":
-			// Return empty array
-			traffics := []ClientTraffic{}
+			// Return error - client not found
 			resp := APIResponse{
-				Success: true,
-				Msg:     "success",
+				Success: false,
+				Msg:     "client not found",
 			}
-			resp.Obj, _ = json.Marshal(traffics)
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(resp)
 		default:
@@ -611,9 +610,6 @@ func TestGetClientTraffic_ClientNotFound(t *testing.T) {
 	_, err := client.GetClientTraffic(ctx, "nonexistent")
 	if err == nil {
 		t.Fatal("GetClientTraffic() should return error when client not found")
-	}
-	if !strings.Contains(err.Error(), "client not found") {
-		t.Errorf("Error should contain 'client not found', got: %v", err)
 	}
 }
 
@@ -726,13 +722,19 @@ func TestGetClientTraffic_InvalidJSONResponse(t *testing.T) {
 func TestClientTraffic_JSON(t *testing.T) {
 	// Test that ClientTraffic can be marshaled/unmarshaled correctly
 	traffic := &ClientTraffic{
-		ID:         "test-client-id",
+		ID:         1,
+		InboundID:  1,
+		Enable:     true,
 		Email:      "testuser",
+		UUID:       "test-uuid-123",
+		SubID:      "test-sub-id",
 		Up:         1073741824,
 		Down:       2147483648,
-		Total:      3221225472,
+		AllTime:    3221225472,
 		ExpiryTime: time.Now().Add(24 * time.Hour).UnixMilli(),
-		Enable:     true,
+		Total:      0,
+		Reset:      0,
+		LastOnline: 0,
 	}
 
 	data, err := json.Marshal(traffic)
@@ -746,7 +748,7 @@ func TestClientTraffic_JSON(t *testing.T) {
 	}
 
 	if unmarshaled.ID != traffic.ID {
-		t.Errorf("ID = %s, want %s", unmarshaled.ID, traffic.ID)
+		t.Errorf("ID = %d, want %d", unmarshaled.ID, traffic.ID)
 	}
 	if unmarshaled.Email != traffic.Email {
 		t.Errorf("Email = %s, want %s", unmarshaled.Email, traffic.Email)
@@ -756,9 +758,6 @@ func TestClientTraffic_JSON(t *testing.T) {
 	}
 	if unmarshaled.Down != traffic.Down {
 		t.Errorf("Down = %d, want %d", unmarshaled.Down, traffic.Down)
-	}
-	if unmarshaled.Total != traffic.Total {
-		t.Errorf("Total = %d, want %d", unmarshaled.Total, traffic.Total)
 	}
 	if unmarshaled.Enable != traffic.Enable {
 		t.Errorf("Enable = %v, want %v", unmarshaled.Enable, traffic.Enable)

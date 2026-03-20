@@ -72,13 +72,19 @@ type ClientConfig struct {
 
 // ClientTraffic represents traffic statistics for a client in 3x-ui.
 type ClientTraffic struct {
-	ID         string `json:"id"`
+	ID         int    `json:"id"`
+	InboundID  int    `json:"inboundId"`
+	Enable     bool   `json:"enable"`
 	Email      string `json:"email"`
+	UUID       string `json:"uuid"`
+	SubID      string `json:"subId"`
 	Up         int64  `json:"up"`
 	Down       int64  `json:"down"`
-	Total      int64  `json:"total"`
+	AllTime    int64  `json:"allTime"`
 	ExpiryTime int64  `json:"expiryTime"`
-	Enable     bool   `json:"enable"`
+	Total      int64  `json:"total"`
+	Reset      int    `json:"reset"`
+	LastOnline int64  `json:"lastOnline"`
 }
 
 // NewClient creates a new 3x-ui API client.
@@ -396,16 +402,12 @@ func (c *Client) GetClientTraffic(ctx context.Context, email string) (*ClientTra
 		return nil, fmt.Errorf("failed to get client traffic: %s", apiResp.Msg)
 	}
 
-	var traffics []ClientTraffic
-	if err := json.Unmarshal(apiResp.Obj, &traffics); err != nil {
+	var traffic ClientTraffic
+	if err := json.Unmarshal(apiResp.Obj, &traffic); err != nil {
 		return nil, fmt.Errorf("failed to parse traffic data: %w", err)
 	}
 
-	if len(traffics) == 0 {
-		return nil, fmt.Errorf("client not found: %s", email)
-	}
-
-	return &traffics[0], nil
+	return &traffic, nil
 }
 
 // GetSubscriptionLink generates a subscription URL for the given subID.
