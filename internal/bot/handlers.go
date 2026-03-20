@@ -339,9 +339,28 @@ func (h *Handler) handleMySubscription(ctx context.Context, chatID int64, userna
 		return
 	}
 
+	// Get traffic usage from 3x-ui panel
+	trafficUsedGB := float64(0)
+	trafficLimitGB := h.cfg.TrafficLimitGB
+
+	traffic, err := h.xui.GetClientTraffic(ctx, sub.Username)
+	if err != nil {
+		logger.Warn("Failed to get client traffic from panel",
+			zap.String("username", sub.Username),
+			zap.Error(err))
+	} else {
+		// Calculate used traffic in GB (up + down) / 1024^3
+		trafficUsedGB = float64(traffic.Up+traffic.Down) / 1024 / 1024 / 1024
+		if traffic.TotalGB > 0 {
+			trafficLimitGB = int(traffic.TotalGB / 1024 / 1024 / 1024)
+		}
+	}
+
+	trafficInfo := fmt.Sprintf("%.2f / %d ГБ", trafficUsedGB, trafficLimitGB)
+
 	msg := tgbotapi.NewMessage(chatID, fmt.Sprintf(
-		"📋 Информация о вашей подписке:\n\n📊 Трафик: %d ГБ\n\n🔗 Ссылка:\n`%s`",
-		h.cfg.TrafficLimitGB,
+		"📋 Информация о вашей подписке:\n\n📊 Трафик: %s\n\n🔗 Ссылка:\n`%s`",
+		trafficInfo,
 		sub.SubscriptionURL,
 	))
 	msg.ParseMode = "Markdown"
