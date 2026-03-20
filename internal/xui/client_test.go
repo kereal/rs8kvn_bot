@@ -793,3 +793,132 @@ func TestClientTraffic_TrafficCalculation(t *testing.T) {
 		})
 	}
 }
+
+func TestDeleteClient_Success(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/login":
+			resp := APIResponse{Success: true}
+			json.NewEncoder(w).Encode(resp)
+		case "/panel/api/inbounds/1/delClient/test-client-id":
+			if r.Method != "POST" {
+				t.Errorf("Expected POST method, got %s", r.Method)
+			}
+			resp := APIResponse{Success: true, Msg: "Client deleted successfully"}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(resp)
+		default:
+			t.Errorf("Unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "admin", "password")
+	ctx := context.Background()
+
+	err := client.DeleteClient(ctx, 1, "test-client-id")
+	if err != nil {
+		t.Fatalf("DeleteClient() error = %v", err)
+	}
+}
+
+func TestDeleteClient_ServerError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/login":
+			resp := APIResponse{Success: true}
+			json.NewEncoder(w).Encode(resp)
+		case "/panel/api/inbounds/1/delClient/test-client-id":
+			resp := APIResponse{Success: false, Msg: "Client not found"}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(resp)
+		default:
+			t.Errorf("Unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "admin", "password")
+	ctx := context.Background()
+
+	err := client.DeleteClient(ctx, 1, "test-client-id")
+	if err == nil {
+		t.Fatal("DeleteClient() should return error when server returns error")
+	}
+	if !strings.Contains(err.Error(), "failed to delete client") {
+		t.Errorf("Error should contain 'failed to delete client', got: %v", err)
+	}
+}
+
+func TestDeleteClient_LoginFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/login" {
+			resp := APIResponse{Success: false, Msg: "Invalid credentials"}
+			json.NewEncoder(w).Encode(resp)
+			return
+		}
+		t.Errorf("Unexpected path: %s", r.URL.Path)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "admin", "wrongpassword")
+	ctx := context.Background()
+
+	err := client.DeleteClient(ctx, 1, "test-client-id")
+	if err == nil {
+		t.Fatal("DeleteClient() should return error when login fails")
+	}
+	if !strings.Contains(err.Error(), "authentication required") {
+		t.Errorf("Error should contain 'authentication required', got: %v", err)
+	}
+}
+
+func TestDeleteClient_ContextCancellation(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/login":
+			resp := APIResponse{Success: true}
+			json.NewEncoder(w).Encode(resp)
+		case "/panel/api/inbounds/1/delClient/test-client-id":
+			time.Sleep(2 * time.Second) // Delay to ensure context cancellation
+			resp := APIResponse{Success: true}
+			json.NewEncoder(w).Encode(resp)
+		default:
+			t.Errorf("Unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "admin", "password")
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	err := client.DeleteClient(ctx, 1, "test-client-id")
+	if err == nil {
+		t.Fatal("DeleteClient() should return error when context is cancelled")
+	}
+}
+
+func TestDeleteClient_InvalidJSONResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/login":
+			resp := APIResponse{Success: true}
+			json.NewEncoder(w).Encode(resp)
+		case "/panel/api/inbounds/1/delClient/test-client-id":
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte("invalid json"))
+		default:
+			t.Errorf("Unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "admin", "password")
+	ctx := context.Background()
+
+	err := client.DeleteClient(ctx, 1, "test-client-id")
+	if err == nil {
+		t.Fatal("DeleteClient() should return error for invalid JSON response")
+	}
+}
