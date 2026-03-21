@@ -11,7 +11,7 @@ const (
 	DefaultIdleConnIdleTimeout = 30 * time.Second
 
 	// MaxIdleConns is the maximum number of idle connections (optimized for low memory)
-	MaxIdleConns = 1
+	MaxIdleConns = 2
 )
 
 // 3x-ui Panel Constants

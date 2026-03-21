@@ -52,14 +52,7 @@ func (h *Handler) HandleStart(ctx context.Context, update tgbotapi.Update) {
 
 	// Check for deep link parameter (e.g., /start donate)
 	if update.Message.CommandArguments() == "donate" {
-		donateText := `☕ *Поддержка проекта*
-
-Пока у меня есть только сбор в т-банке
-[REDACTED_DONATE_URL](REDACTED_DONATE_URL)
-
-Если нужен другой способ — [напишите мне](https://t.me/kereal)`
-
-		msg := tgbotapi.NewMessage(chatID, donateText)
+		msg := tgbotapi.NewMessage(chatID, h.getDonateText())
 		msg.ParseMode = "Markdown"
 		h.send(ctx, msg)
 		return
@@ -67,30 +60,64 @@ func (h *Handler) HandleStart(ctx context.Context, update tgbotapi.Update) {
 
 	isAdmin := chatID == h.cfg.TelegramAdminID
 
-	msg := tgbotapi.NewMessage(chatID, fmt.Sprintf(
-		"👋 Привет, %s!\n\nЯ бот для выдачи подписок на прокси VLESS+Reality+Vision.\n\nВыберите действие:",
-		username,
-	))
+	// Check if user has an active subscription
+	sub, err := database.GetByTelegramID(chatID)
+	hasSubscription := err == nil && sub != nil && sub.Status == "active"
 
-	keyboard := tgbotapi.NewInlineKeyboardMarkup(
-		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("📥 Получить подписку", "get_subscription"),
-		),
-		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("📋 Моя подписка", "my_subscription"),
-		),
-	)
-
-	if isAdmin {
-		keyboard.InlineKeyboard = append(keyboard.InlineKeyboard,
-			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData("📊 Статистика", "admin_stats"),
+	if hasSubscription {
+		// User has subscription - show Reply keyboard with 3 buttons
+		replyKeyboard := tgbotapi.NewReplyKeyboard(
+			tgbotapi.NewKeyboardButtonRow(
+				tgbotapi.NewKeyboardButton("☕ Донат"),
+				tgbotapi.NewKeyboardButton("📋 Подписка"),
+				tgbotapi.NewKeyboardButton("❓ Помощь"),
 			),
 		)
-	}
+		replyKeyboard.ResizeKeyboard = true
 
-	msg.ReplyMarkup = keyboard
-	h.send(ctx, msg)
+		msg := tgbotapi.NewMessage(chatID, fmt.Sprintf(
+			"👋 Привет, %s!\n\nЯ бот для выдачи подписок на прокси VLESS+Reality+Vision.\n\nИспользуйте кнопки внизу экрана для взаимодействия с ботом.",
+			username,
+		))
+		msg.ReplyMarkup = replyKeyboard
+		h.send(ctx, msg)
+
+		// Add admin button if user is admin
+		if isAdmin {
+			inlineKeyboard := tgbotapi.NewInlineKeyboardMarkup(
+				tgbotapi.NewInlineKeyboardRow(
+					tgbotapi.NewInlineKeyboardButtonData("📊 Статистика", "admin_stats"),
+				),
+			)
+			inlineMsg := tgbotapi.NewMessage(chatID, "👇")
+			inlineMsg.ReplyMarkup = inlineKeyboard
+			h.send(ctx, inlineMsg)
+		}
+	} else {
+		// User has no subscription - show inline button to get subscription
+		msg := tgbotapi.NewMessage(chatID, fmt.Sprintf(
+			"👋 Привет, %s!\n\nЯ бот для выдачи подписок на прокси VLESS+Reality+Vision.\n\nНажмите кнопку ниже, чтобы получить подписку:",
+			username,
+		))
+
+		inlineKeyboard := tgbotapi.NewInlineKeyboardMarkup(
+			tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("📥 Получить подписку", "get_subscription"),
+			),
+		)
+
+		// Add admin button if user is admin
+		if isAdmin {
+			inlineKeyboard.InlineKeyboard = append(inlineKeyboard.InlineKeyboard,
+				tgbotapi.NewInlineKeyboardRow(
+					tgbotapi.NewInlineKeyboardButtonData("📊 Статистика", "admin_stats"),
+				),
+			)
+		}
+
+		msg.ReplyMarkup = inlineKeyboard
+		h.send(ctx, msg)
+	}
 }
 
 // HandleHelp handles the /help command.
@@ -110,7 +137,7 @@ func (h *Handler) HandleHelp(ctx context.Context, update tgbotapi.Update) {
 
 *Функции бота:*
 📥 *Получить подписку* - Создать новую подписку или получить существующую
-📋 *Моя подписка* - Посмотреть информацию о текущей подписке
+📋 *Подписка* - Посмотреть информацию о текущей подписке
 
 *Параметры подписки:*
 📊 Трафик: ` + fmt.Sprintf("%d", h.cfg.TrafficLimitGB) + ` ГБ в месяц
@@ -302,6 +329,7 @@ func (h *Handler) HandleBroadcast(ctx context.Context, update tgbotapi.Update) {
 	for _, telegramID := range ids {
 		msg := tgbotapi.NewMessage(telegramID, message)
 		msg.ParseMode = "Markdown"
+		msg.DisableWebPagePreview = true
 		if _, err := h.bot.Send(msg); err != nil {
 			logger.Warn("Failed to send broadcast message",
 				zap.Int64("telegram_id", telegramID),
@@ -378,6 +406,7 @@ func (h *Handler) HandleSend(ctx context.Context, update tgbotapi.Update) {
 	// Send the message
 	msg := tgbotapi.NewMessage(telegramID, message)
 	msg.ParseMode = "Markdown"
+	msg.DisableWebPagePreview = true
 	sentMsg, err := h.bot.Send(msg)
 	if err != nil {
 		logger.Error("Failed to send message",
@@ -427,6 +456,23 @@ func (h *Handler) HandleCallback(ctx context.Context, update tgbotapi.Update) {
 		h.handleMySubscription(ctx, chatID, username)
 	case "admin_stats":
 		h.handleAdminStats(ctx, chatID, username)
+	case "back_to_start":
+		// Create a fake update to call HandleStart
+		fakeUpdate := tgbotapi.Update{
+			Message: &tgbotapi.Message{
+				Chat: update.CallbackQuery.Message.Chat,
+				From: update.CallbackQuery.From,
+				Text: "/start",
+				Entities: []tgbotapi.MessageEntity{
+					{
+						Type:   "bot_command",
+						Offset: 0,
+						Length: 6,
+					},
+				},
+			},
+		}
+		h.HandleStart(ctx, fakeUpdate)
 	default:
 		logger.Warn("Unknown callback data", zap.String("data", data))
 	}
@@ -464,12 +510,9 @@ func (h *Handler) handleGetSubscription(ctx context.Context, chatID int64, usern
 func (h *Handler) handleMySubscription(ctx context.Context, chatID int64, username string) {
 	logger.Info("User checking subscription status", zap.String("username", username))
 
-	// Show typing indicator
-	typing := tgbotapi.NewChatAction(chatID, tgbotapi.ChatTyping)
-	h.bot.Send(typing)
-
 	// Show loading message
 	loadingMsg := tgbotapi.NewMessage(chatID, "⏳ Загрузка...")
+	loadingMsg.DisableWebPagePreview = true
 	sentMsg, err := h.bot.Send(loadingMsg)
 	if err != nil {
 		logger.Error("Failed to send loading message", zap.Error(err))
@@ -513,6 +556,7 @@ func (h *Handler) handleMySubscription(ctx context.Context, chatID int64, userna
 		sub.SubscriptionURL,
 	))
 	editMsg.ParseMode = "Markdown"
+	editMsg.DisableWebPagePreview = true
 	h.bot.Send(editMsg)
 }
 
@@ -560,6 +604,16 @@ func (h *Handler) handleAdminStats(ctx context.Context, chatID int64, username s
 // This operation is atomic with rollback: if database save fails,
 // the client is removed from the 3x-ui panel to prevent orphan records.
 func (h *Handler) createSubscription(ctx context.Context, chatID int64, username string) {
+	// Show loading message
+	loadingMsg := tgbotapi.NewMessage(chatID, "⏳ Загрузка...")
+	loadingMsg.DisableWebPagePreview = true
+	sentMsg, err := h.bot.Send(loadingMsg)
+	if err != nil {
+		logger.Error("Failed to send loading message", zap.Error(err))
+		return
+	}
+	messageID := sentMsg.MessageID
+
 	now := time.Now()
 	expiryTime := getFirstSecondOfNextMonth(now)
 	trafficBytes := int64(h.cfg.TrafficLimitGB) * 1024 * 1024 * 1024
@@ -577,7 +631,8 @@ func (h *Handler) createSubscription(ctx context.Context, chatID int64, username
 	client, err := h.xui.AddClientWithID(ctx, h.cfg.XUIInboundID, username, clientID, subID, trafficBytes, expiryTime)
 	if err != nil {
 		logger.Error("Failed to add client to 3x-ui", zap.Error(err))
-		h.SendMessage(ctx, chatID, "❌ Произошла ошибка при создании подписки. Попробуйте позже.")
+		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "❌ Произошла ошибка при создании подписки. Попробуйте позже.")
+		h.bot.Send(editMsg)
 		return
 	}
 
@@ -613,18 +668,26 @@ func (h *Handler) createSubscription(ctx context.Context, chatID int64, username
 			logger.Info("Rollback successful: client removed from 3x-ui panel", zap.String("client_id", client.ID))
 		}
 
-		h.SendMessage(ctx, chatID, "❌ Подписка создана в панели, но не сохранена в базе. Обратитесь к администратору.")
+		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "❌ Подписка создана в панели, но не сохранена в базе. Обратитесь к администратору.")
+		h.bot.Send(editMsg)
 		return
 	}
 
-	// Success - send subscription to user
-	msg := tgbotapi.NewMessage(chatID, fmt.Sprintf(
-		"🚀 *Ваша подписка готова!*\n\nТрафик: %dГб на месяц.\n\n📲 *1. Установите приложение Happ:*\n· [Скачать для iOS](https://apps.apple.com/ru/app/happ-proxy-utility-plus/id6746188973)\n· [Скачать для Android](https://play.google.com/store/apps/details?id=com.happproxy)\n\n📥 *2. Импортируйте подписку*\n\nНажмите, чтобы скопировать: `%s`\n\nВ приложении Happ нажмите *«+»* в правом верхнем углу и выберите *«Вставить из буфера»*.\n\n▶️ *3. Запустите VPN*\nДождитесь загрузки и нажмите на большую круглую кнопку в центре экрана.\n\n🛡️ *Важно знать*\nВ приложении Happ настроена автоматическая маршрутизация. Зарубежные сайты работают через VPN, а российские сервисы — напрямую. VPN можно не выключать.\n⚠️ _Если вы используете другое приложение или свою конфигурацию — не заходите через этот VPN на российские ресурсы, иначе сервер заблокируют._\n\n🤝 *Правила использования*\n· Не передавайте свою подписку другим. Делитесь ссылкой на этого бота `@rs8kvn_bot`.\n· Не публикуйте ссылку на бота в интернете, передавайте только из рук в руки (приветствуется).\n· Пользуйтесь ответственно, не занимайтесь незаконной деятельностью.\n\n☕ *Поддержка проекта:*\nЭтот VPN бесплатный и существует благодаря вашим пожертвованиям и усилиям Кирилла. [Поддержите проект](https://t.me/rs8kvn_bot?start=donate) — важна каждая сотня.",
-		h.cfg.TrafficLimitGB,
-		subscriptionURL,
-	))
-	msg.ParseMode = "Markdown"
-	h.sendWithRetry(ctx, msg, 3)
+	// Success - send subscription info
+	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, h.getHelpText(h.cfg.TrafficLimitGB, subscriptionURL))
+	editMsg.ParseMode = "Markdown"
+	editMsg.DisableWebPagePreview = true
+	h.bot.Send(editMsg)
+
+	// Send "Back to start" button
+	backKeyboard := tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("🏠 В начало", "back_to_start"),
+		),
+	)
+	backMsg := tgbotapi.NewMessage(chatID, ".")
+	backMsg.ReplyMarkup = backKeyboard
+	h.send(ctx, backMsg)
 
 	// Notify admin about new subscription
 	h.notifyAdmin(ctx, username, chatID, subscriptionURL, expiryTime)
@@ -665,6 +728,9 @@ func (h *Handler) notifyAdminError(ctx context.Context, message string) {
 
 // send sends a message with rate limiting.
 func (h *Handler) send(ctx context.Context, msg tgbotapi.MessageConfig) {
+	// Disable link previews for all messages
+	msg.DisableWebPagePreview = true
+
 	if !h.rateLimiter.Wait(ctx) {
 		logger.Warn("Message send cancelled due to context")
 		return
@@ -678,6 +744,9 @@ func (h *Handler) send(ctx context.Context, msg tgbotapi.MessageConfig) {
 
 // sendWithRetry sends a message with rate limiting and retry logic.
 func (h *Handler) sendWithRetry(ctx context.Context, msg tgbotapi.MessageConfig, maxRetries int) {
+	// Disable link previews for all messages
+	msg.DisableWebPagePreview = true
+
 	delay := time.Second
 
 	for i := 0; i < maxRetries; i++ {
@@ -736,4 +805,73 @@ func (h *Handler) getUsername(user *tgbotapi.User) string {
 func getFirstSecondOfNextMonth(t time.Time) time.Time {
 	year, month, _ := t.Date()
 	return time.Date(year, month+1, 1, 0, 0, 0, 0, t.Location())
+}
+
+// getDonateText returns the donation message text.
+func (h *Handler) getDonateText() string {
+	return `☕ *Поддержка проекта*
+
+У меня есть сбор в Т-Банке
+[REDACTED_DONATE_URL](REDACTED_DONATE_URL)
+
+Если нужен другой способ — [напишите мне](https://t.me/kereal)`
+}
+
+// getHelpText returns the help/instruction message text with subscription URL.
+func (h *Handler) getHelpText(trafficLimitGB int, subscriptionURL string) string {
+	return fmt.Sprintf(
+		"🚀 *Ваша подписка готова!*\n\nТрафик: %dГб на месяц.\n\n📲 *1. Установите приложение Happ*\n· [Скачать для iOS](https://apps.apple.com/ru/app/happ-proxy-utility-plus/id6746188973)\n· [Скачать для Android](https://play.google.com/store/apps/details?id=com.happproxy)\n\n📥 *2. Импортируйте подписку*\n\nНажмите, чтобы скопировать: `%s`\n\nВ приложении Happ нажмите *«+»* в правом верхнем углу и выберите *«Вставить из буфера»*.\n\n▶️ *3. Запустите VPN*\nДождитесь загрузки и нажмите на большую круглую кнопку в центре экрана.\n\n🛡️ *Важно знать*\nВ приложении Happ настроена автоматическая маршрутизация. Зарубежные сайты работают через VPN, а российские сервисы — напрямую. VPN можно не выключать.\n⚠️ _Если вы используете другое приложение или свою конфигурацию — не заходите через этот VPN на российские ресурсы, иначе сервер заблокируют._\n\n🤝 *Правила использования*\n· Не передавайте свою подписку другим. Делитесь ссылкой на этого бота `@rs8kvn_bot`.\n· Не публикуйте ссылку на бота в интернете, передавайте только из рук в руки (приветствуется).\n· Пользуйтесь ответственно, не занимайтесь незаконной деятельностью.\n\n☕ *Поддержка проекта*\nЭтот VPN бесплатный и существует благодаря вашим пожертвованиям и усилиям Кирилла. [Поддержите проект](https://t.me/rs8kvn_bot?start=donate) — важна каждая сотня.\n\nПомощь, вопросы: [@kereal](https://t.me/kereal)",
+		trafficLimitGB,
+		subscriptionURL,
+	)
+}
+
+// HandleDonate handles the "☕ Донат" reply button.
+func (h *Handler) HandleDonate(ctx context.Context, update tgbotapi.Update) {
+	if update.Message == nil {
+		logger.Error("HandleDonate called with nil Message")
+		return
+	}
+
+	chatID := update.Message.Chat.ID
+
+	msg := tgbotapi.NewMessage(chatID, h.getDonateText())
+	msg.ParseMode = "Markdown"
+	h.send(ctx, msg)
+}
+
+// HandleMySubscriptionButton handles the "📋 Подписка" reply button.
+func (h *Handler) HandleMySubscriptionButton(ctx context.Context, update tgbotapi.Update) {
+	if update.Message == nil {
+		logger.Error("HandleMySubscriptionButton called with nil Message")
+		return
+	}
+
+	chatID := update.Message.Chat.ID
+	username := h.getUsername(update.Message.From)
+
+	h.handleMySubscription(ctx, chatID, username)
+}
+
+// HandleHelpButton handles the "❓ Помощь" reply button.
+// Note: This button is only shown when user has an active subscription (Reply keyboard is hidden otherwise)
+func (h *Handler) HandleHelpButton(ctx context.Context, update tgbotapi.Update) {
+	if update.Message == nil {
+		logger.Error("HandleHelpButton called with nil Message")
+		return
+	}
+
+	chatID := update.Message.Chat.ID
+
+	// Get user's subscription (should always exist since button is only shown when subscription exists)
+	sub, err := database.GetByTelegramID(chatID)
+	if err != nil || sub == nil {
+		h.SendMessage(ctx, chatID, "❌ Ошибка: подписка не найдена. Используйте /start для получения подписки.")
+		return
+	}
+
+	// Show instructions with subscription URL
+	msg := tgbotapi.NewMessage(chatID, h.getHelpText(h.cfg.TrafficLimitGB, sub.SubscriptionURL))
+	msg.ParseMode = "Markdown"
+	h.send(ctx, msg)
 }
