@@ -1756,3 +1756,135 @@ func TestDeleteSubscriptionByID_DatabaseNotInitialized(t *testing.T) {
 		t.Error("DeleteSubscriptionByID() should return error when database not initialized")
 	}
 }
+
+func TestGetAllTelegramIDs(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+	if err := Init(dbPath); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	defer Close()
+
+	// Create test subscriptions with different Telegram IDs
+	subs := []*Subscription{
+		{TelegramID: 111111111, Username: "user1", ClientID: "client1", Status: "active", ExpiryTime: time.Now().Add(24 * time.Hour)},
+		{TelegramID: 222222222, Username: "user2", ClientID: "client2", Status: "active", ExpiryTime: time.Now().Add(24 * time.Hour)},
+		{TelegramID: 333333333, Username: "user3", ClientID: "client3", Status: "active", ExpiryTime: time.Now().Add(24 * time.Hour)},
+		// Duplicate Telegram ID - should only appear once in results
+		{TelegramID: 111111111, Username: "user1_alt", ClientID: "client4", Status: "active", ExpiryTime: time.Now().Add(24 * time.Hour)},
+	}
+
+	for _, sub := range subs {
+		if err := CreateSubscription(sub); err != nil {
+			t.Fatalf("Failed to create subscription: %v", err)
+		}
+	}
+
+	// Get all Telegram IDs
+	ids, err := GetAllTelegramIDs()
+	if err != nil {
+		t.Fatalf("GetAllTelegramIDs() error = %v", err)
+	}
+
+	// Should have 3 unique IDs (111111111, 222222222, 333333333)
+	if len(ids) != 3 {
+		t.Errorf("GetAllTelegramIDs() returned %d IDs, want 3", len(ids))
+	}
+
+	// Verify IDs are present
+	idMap := make(map[int64]bool)
+	for _, id := range ids {
+		idMap[id] = true
+	}
+
+	for _, expectedID := range []int64{111111111, 222222222, 333333333} {
+		if !idMap[expectedID] {
+			t.Errorf("Expected Telegram ID %d not found in results", expectedID)
+		}
+	}
+}
+
+func TestGetAllTelegramIDs_Empty(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+	if err := Init(dbPath); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	defer Close()
+
+	// Get all Telegram IDs from empty database
+	ids, err := GetAllTelegramIDs()
+	if err != nil {
+		t.Fatalf("GetAllTelegramIDs() error = %v", err)
+	}
+
+	if len(ids) != 0 {
+		t.Errorf("GetAllTelegramIDs() returned %d IDs, want 0", len(ids))
+	}
+}
+
+func TestGetAllTelegramIDs_DatabaseNotInitialized(t *testing.T) {
+	// Close database if open
+	Close()
+
+	_, err := GetAllTelegramIDs()
+	if err == nil {
+		t.Error("GetAllTelegramIDs() should return error when database not initialized")
+	}
+}
+
+func TestGetTelegramIDByUsername(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+	if err := Init(dbPath); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	defer Close()
+
+	// Create test subscription
+	sub := &Subscription{
+		TelegramID: 123456789,
+		Username:   "testuser",
+		ClientID:   "client-id",
+		Status:     "active",
+		ExpiryTime: time.Now().Add(24 * time.Hour),
+	}
+	if err := CreateSubscription(sub); err != nil {
+		t.Fatalf("Failed to create subscription: %v", err)
+	}
+
+	// Get Telegram ID by username
+	id, err := GetTelegramIDByUsername("testuser")
+	if err != nil {
+		t.Fatalf("GetTelegramIDByUsername() error = %v", err)
+	}
+
+	if id != 123456789 {
+		t.Errorf("GetTelegramIDByUsername() returned %d, want 123456789", id)
+	}
+}
+
+func TestGetTelegramIDByUsername_NotFound(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+	if err := Init(dbPath); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	defer Close()
+
+	// Try to get non-existent username
+	_, err := GetTelegramIDByUsername("nonexistent")
+	if err == nil {
+		t.Error("GetTelegramIDByUsername() should return error for non-existent username")
+	}
+}
+
+func TestGetTelegramIDByUsername_DatabaseNotInitialized(t *testing.T) {
+	// Close database if open
+	Close()
+
+	_, err := GetTelegramIDByUsername("testuser")
+	if err == nil {
+		t.Error("GetTelegramIDByUsername() should return error when database not initialized")
+	}
+}
