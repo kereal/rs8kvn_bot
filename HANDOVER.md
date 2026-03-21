@@ -1,6 +1,6 @@
 # Handover Summary - TGVPN Go Bot
 
-**Version:** v1.8.9
+**Version:** v1.8.10
 **Github:** https://github.com/kereal/rs8kvn_bot
 
 ## Architecture
@@ -32,7 +32,7 @@ tgvpn_go/
 - **Errors:** `github.com/getsentry/sentry-go`
 - **Database:** SQLite (`./data/tgvpn.db`)
 
-## Current State (v1.8.9)
+## Current State (v1.8.10)
 
 **Bot Commands:**
 - `/start` - Greeting + deep link `?start=donate` for donation info
@@ -42,20 +42,43 @@ tgvpn_go/
 - `/broadcast <msg>` - Send message to all users (admin only)
 - `/send <id|username> <msg>` - Send message to specific user (admin only)
 
+**Reply Keyboard (3 buttons, shown only if user has subscription):**
+- "☕ Донат" - Shows donation text with T-Bank link
+- "📋 Подписка" - Shows subscription info with traffic usage
+- "❓ Помощь" - Shows VPN usage instructions
+
 **Features:**
 - VLESS+Reality+Vision subscription creation
 - Real traffic usage display from 3x-ui panel
-- Loading indicator (typing action + "⏳ Загрузка..." message)
+- Loading indicator ("⏳ Загрузка..." message, then edited to content)
 - Automatic rollback on DB save failure
 - Monthly auto-renewal (reset=31)
+- Link previews disabled for all messages (DisableWebPagePreview = true)
+- "🏠 В начало" button after subscription creation (executes /start)
 
-## Recent Changes (v1.8.x)
+## Recent Changes (v1.8.10)
 
-1. **ClientTraffic struct** - Updated to match real 3x-ui API response format
-2. **GetClientTraffic** - Changed to GET request, returns single object (not array)
-3. **Admin messaging commands** - `/broadcast` for mass messaging, `/send` for individual
-4. **Deep link** - `/start=donate` shows donation information
-5. **UX improvements** - Typing indicator + loading message for subscription queries
+1. **Reply Keyboard** - 3 buttons: "☕ Донат", "📋 Подписка", "❓ Помощь"
+   - Shown only when user has active subscription
+   - Replaced inline buttons "Получить подписку" and "Моя подписка" in main menu
+
+2. **"🏠 В начало" Button** - Inline button after subscription creation
+   - Uses zero-width space (`\u200B`) as invisible text
+   - Callback `back_to_start` executes HandleStart
+
+3. **Link Previews Disabled** - `DisableWebPagePreview = true` everywhere:
+   - `send()` method
+   - `sendWithRetry()` method
+   - `HandleBroadcast()`
+   - `HandleSend()`
+   - `handleMySubscription()` EditMessageText
+   - `createSubscription()` EditMessageText
+
+4. **Loading Indicator** - "⏳ Загрузка..." message when creating subscription
+   - Message sent first, then edited to show subscription instructions
+   - Same behavior as "Подписка" button
+
+5. **Typing Indicator Removed** - Removed ChatTyping action and delays
 
 ## Critical Details
 
@@ -92,16 +115,23 @@ type ClientTraffic struct {
 - Backup retention: 14 days
 - Log max size: 10MB
 
+### Message Sending:
+- All messages use `DisableWebPagePreview = true`
+- EditMessageText also requires `DisableWebPagePreview = true` for link control
+
+### Reply Keyboard Logic:
+- Only shown when user has active subscription
+- If no subscription: show inline button "📥 Получить подписку"
+- Admin always sees "📊 Статистика" button
+
 ## Current Task
 
-**Donations:** User wants to collect donations easily from users.
+**Status:** All requested features implemented and tested. Version v1.8.10 released.
 
-**Options discussed:**
-1. Telegram Stars - Native, built into Telegram
-2. CryptoBot API - Cryptocurrency payments
-3. Hybrid - Let user choose payment method
-
-**Status:** Discussion only, not implemented yet.
+**Next Steps (if needed):**
+1. Donations - Discussed options: Telegram Stars, CryptoBot API, hybrid approach
+2. Monitoring - Add metrics/metrics endpoint
+3. Tests - All tests pass
 
 ## Tests
 
