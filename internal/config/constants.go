@@ -80,7 +80,7 @@ const (
 	DefaultBackupHour = 3
 
 	// DefaultBackupRetention is the number of days to keep backups
-	DefaultBackupRetention = 7
+	DefaultBackupRetention = 14
 )
 
 // Heartbeat Constants
@@ -101,13 +101,13 @@ const (
 	DefaultLogLevel = "info"
 
 	// LogMaxSizeMB is the maximum size of a log file in MB
-	LogMaxSizeMB = 5
+	LogMaxSizeMB = 10
 
 	// LogMaxBackups is the maximum number of old log files to retain
 	LogMaxBackups = 2
 
 	// LogMaxAgeDays is the maximum number of days to retain old log files
-	LogMaxAgeDays = 7
+	LogMaxAgeDays = 14
 )
 
 // Sentry Constants

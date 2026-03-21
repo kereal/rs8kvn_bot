@@ -377,3 +377,33 @@ func (s *Service) CountExpiredSubscriptions(ctx context.Context) (int64, error) 
 	}
 	return count, nil
 }
+
+// GetAllTelegramIDs returns all unique Telegram IDs from subscriptions.
+func GetAllTelegramIDs() ([]int64, error) {
+	if DB == nil {
+		return nil, fmt.Errorf("database not initialized")
+	}
+
+	var ids []int64
+	result := DB.Model(&Subscription{}).
+		Distinct("telegram_id").
+		Pluck("telegram_id", &ids)
+	if result.Error != nil {
+		return nil, fmt.Errorf("failed to get telegram IDs: %w", result.Error)
+	}
+	return ids, nil
+}
+
+// GetTelegramIDByUsername returns the Telegram ID for a given username.
+func GetTelegramIDByUsername(username string) (int64, error) {
+	if DB == nil {
+		return 0, fmt.Errorf("database not initialized")
+	}
+
+	var sub Subscription
+	result := DB.Where("username = ?", username).First(&sub)
+	if result.Error != nil {
+		return 0, fmt.Errorf("failed to find user by username: %w", result.Error)
+	}
+	return sub.TelegramID, nil
+}
