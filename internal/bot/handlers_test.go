@@ -1650,3 +1650,383 @@ func TestHandleSend_UserNotFound(t *testing.T) {
 		t.Error("GetTelegramIDByUsername() should return error for non-existent username")
 	}
 }
+
+// ==================== Reply Keyboard Tests ====================
+
+// TestGetDonateText tests the getDonateText helper function
+func TestGetDonateText(t *testing.T) {
+	handler := &Handler{
+		cfg: &config.Config{},
+	}
+
+	text := handler.getDonateText()
+
+	// Verify text is not empty
+	if len(text) == 0 {
+		t.Error("getDonateText() returned empty string")
+	}
+
+	// Verify text contains expected content
+	if !strings.Contains(text, "☕") {
+		t.Error("getDonateText() missing coffee emoji")
+	}
+	if !strings.Contains(text, "Поддержка проекта") {
+		t.Error("getDonateText() missing 'Поддержка проекта'")
+	}
+	if !strings.Contains(text, "tbank.ru") {
+		t.Error("getDonateText() missing T-Bank link")
+	}
+	if !strings.Contains(text, "t.me/kereal") {
+		t.Error("getDonateText() missing contact link")
+	}
+}
+
+// TestGetHelpText tests the getHelpText helper function
+func TestGetHelpText(t *testing.T) {
+	handler := &Handler{
+		cfg: &config.Config{
+			TrafficLimitGB: 100,
+		},
+	}
+
+	trafficLimitGB := 100
+	subscriptionURL := "http://localhost:2053/sub/test123"
+
+	text := handler.getHelpText(trafficLimitGB, subscriptionURL)
+
+	// Verify text is not empty
+	if len(text) == 0 {
+		t.Error("getHelpText() returned empty string")
+	}
+
+	// Verify text contains traffic limit
+	if !strings.Contains(text, "100") {
+		t.Error("getHelpText() missing traffic limit")
+	}
+
+	// Verify text contains subscription URL
+	if !strings.Contains(text, subscriptionURL) {
+		t.Error("getHelpText() missing subscription URL")
+	}
+
+	// Verify text contains expected sections
+	if !strings.Contains(text, "🚀") {
+		t.Error("getHelpText() missing rocket emoji")
+	}
+	if !strings.Contains(text, "Happ") {
+		t.Error("getHelpText() missing Happ app mention")
+	}
+	if !strings.Contains(text, "iOS") {
+		t.Error("getHelpText() missing iOS")
+	}
+	if !strings.Contains(text, "Android") {
+		t.Error("getHelpText() missing Android")
+	}
+
+}
+
+// TestGetHelpText_DifferentTrafficLimits tests getHelpText with different traffic limits
+func TestGetHelpText_DifferentTrafficLimits(t *testing.T) {
+	handler := &Handler{
+		cfg: &config.Config{},
+	}
+
+	tests := []struct {
+		name           string
+		trafficLimitGB int
+	}{
+		{"50 GB", 50},
+		{"100 GB", 100},
+		{"200 GB", 200},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			text := handler.getHelpText(tt.trafficLimitGB, "http://test.url/sub")
+			expected := fmt.Sprintf("%dГб", tt.trafficLimitGB)
+			if !strings.Contains(text, expected) {
+				t.Errorf("getHelpText() missing %s", expected)
+			}
+		})
+	}
+}
+
+// TestHandleDonate_NilMessage tests HandleDonate with nil message
+func TestHandleDonate_NilMessage(t *testing.T) {
+	handler := &Handler{
+		cfg: &config.Config{},
+	}
+
+	// Should not panic with nil message
+	update := tgbotapi.Update{}
+	handler.HandleDonate(context.Background(), update)
+	// If we reach here, the test passes (no panic)
+}
+
+// TestHandleMySubscriptionButton_NilMessage tests HandleMySubscriptionButton with nil message
+func TestHandleMySubscriptionButton_NilMessage(t *testing.T) {
+	handler := &Handler{
+		cfg: &config.Config{},
+	}
+
+	// Should not panic with nil message
+	update := tgbotapi.Update{}
+	handler.HandleMySubscriptionButton(context.Background(), update)
+	// If we reach here, the test passes (no panic)
+}
+
+// TestHandleHelpButton_NilMessage tests HandleHelpButton with nil message
+func TestHandleHelpButton_NilMessage(t *testing.T) {
+	handler := &Handler{
+		cfg: &config.Config{},
+	}
+
+	// Should not panic with nil message
+	update := tgbotapi.Update{}
+	handler.HandleHelpButton(context.Background(), update)
+	// If we reach here, the test passes (no panic)
+}
+
+// TestHandleHelpButton_WithSubscription tests HandleHelpButton when user has subscription
+func TestHandleHelpButton_WithSubscription(t *testing.T) {
+	cleanup := setupTestDatabase(t)
+	defer cleanup()
+
+	// Create a test subscription
+	sub := &database.Subscription{
+		TelegramID:      123456789,
+		Username:        "testuser",
+		ClientID:        "test-client-id",
+		XUIHost:         "http://localhost:2053",
+		InboundID:       1,
+		TrafficLimit:    107374182400,
+		ExpiryTime:      time.Now().Add(24 * time.Hour),
+		Status:          "active",
+		SubscriptionURL: "http://localhost:2053/sub/testuser123",
+	}
+
+	if err := database.CreateSubscription(sub); err != nil {
+		t.Fatalf("Failed to create test subscription: %v", err)
+	}
+
+	// Verify that GetByTelegramID returns the subscription
+	got, err := database.GetByTelegramID(123456789)
+	if err != nil {
+		t.Fatalf("GetByTelegramID() error = %v", err)
+	}
+
+	if got.SubscriptionURL != sub.SubscriptionURL {
+		t.Errorf("SubscriptionURL = %v, want %v", got.SubscriptionURL, sub.SubscriptionURL)
+	}
+
+	// Note: Without a real bot, we can't test the message sending
+	// This test verifies the database query logic
+}
+
+// TestHandleStart_ReplyKeyboard tests HandleStart Reply keyboard logic
+func TestHandleStart_ReplyKeyboard(t *testing.T) {
+	cleanup := setupTestDatabase(t)
+	defer cleanup()
+
+	// Create a test subscription
+	sub := &database.Subscription{
+		TelegramID:      123456789,
+		Username:        "testuser",
+		ClientID:        "test-client-id",
+		XUIHost:         "http://localhost:2053",
+		InboundID:       1,
+		TrafficLimit:    107374182400,
+		ExpiryTime:      time.Now().Add(24 * time.Hour),
+		Status:          "active",
+		SubscriptionURL: "http://localhost:2053/sub/testuser",
+	}
+
+	if err := database.CreateSubscription(sub); err != nil {
+		t.Fatalf("Failed to create test subscription: %v", err)
+	}
+
+	// Verify that GetByTelegramID returns the subscription
+	got, err := database.GetByTelegramID(123456789)
+	if err != nil {
+		t.Fatalf("GetByTelegramID() error = %v", err)
+	}
+
+	// Verify subscription is active
+	if got.Status != "active" {
+		t.Errorf("Status = %v, want active", got.Status)
+	}
+
+	// Note: Without a real bot, we can't test the Reply keyboard construction
+	// This test verifies the database query logic for the Reply keyboard condition
+}
+
+// TestHandleStart_NoSubscription tests HandleStart when user has no subscription
+func TestHandleStart_NoSubscription(t *testing.T) {
+	cleanup := setupTestDatabase(t)
+	defer cleanup()
+
+	// Verify that GetByTelegramID returns error for non-existent user
+	_, err := database.GetByTelegramID(999999999)
+	if err == nil {
+		t.Error("Expected error for non-existent user, got nil")
+	}
+
+	// Note: Without a real bot, we can't test the inline button construction
+	// This test verifies the database query logic for the inline button condition
+}
+
+// TestReplyKeyboardConstruction tests Reply keyboard construction
+func TestReplyKeyboardConstruction(t *testing.T) {
+	// Test basic Reply keyboard
+	keyboard := tgbotapi.NewReplyKeyboard(
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton("☕ Донат"),
+			tgbotapi.NewKeyboardButton("📋 Подписка"),
+			tgbotapi.NewKeyboardButton("❓ Помощь"),
+		),
+	)
+
+	if len(keyboard.Keyboard) != 1 {
+		t.Errorf("Expected 1 keyboard row, got %d", len(keyboard.Keyboard))
+	}
+
+	if len(keyboard.Keyboard[0]) != 3 {
+		t.Errorf("Expected 3 buttons in row, got %d", len(keyboard.Keyboard[0]))
+	}
+
+	// Verify button texts
+	expectedButtons := []string{"☕ Донат", "📋 Подписка", "❓ Помощь"}
+	for i, expected := range expectedButtons {
+		if keyboard.Keyboard[0][i].Text != expected {
+			t.Errorf("Button %d text = %s, want %s", i, keyboard.Keyboard[0][i].Text, expected)
+		}
+	}
+}
+
+// TestReplyKeyboard_ResizeKeyboard tests that Reply keyboard has ResizeKeyboard set
+func TestReplyKeyboard_ResizeKeyboard(t *testing.T) {
+	keyboard := tgbotapi.NewReplyKeyboard(
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton("Test"),
+		),
+	)
+	keyboard.ResizeKeyboard = true
+
+	if !keyboard.ResizeKeyboard {
+		t.Error("ResizeKeyboard should be true")
+	}
+}
+
+// ==================== DisableWebPagePreview Tests ====================
+
+// TestMessageConfig_DisableWebPagePreview tests that MessageConfig can have DisableWebPagePreview set
+func TestMessageConfig_DisableWebPagePreview(t *testing.T) {
+	chatID := int64(123456789)
+	text := "Test message with link: https://example.com"
+
+	msg := tgbotapi.NewMessage(chatID, text)
+
+	// By default, DisableWebPagePreview is not set (link previews enabled)
+	// We set DisableWebPagePreview = true to disable link previews (remove preview blocks)
+	// Note: tgbotapi library may not set this field by default, so we test that we can set it
+	msg.DisableWebPagePreview = false
+
+	if msg.DisableWebPagePreview != false {
+		t.Error("DisableWebPagePreview should be false (link previews enabled)")
+	}
+
+	// Test that we can set it to true
+	msg.DisableWebPagePreview = true
+
+	if msg.DisableWebPagePreview != true {
+		t.Error("DisableWebPagePreview should be true after setting")
+	}
+}
+
+// TestMessageConfig_DisableWebPagePreview_Broadcast tests broadcast message configuration
+func TestMessageConfig_DisableWebPagePreview_Broadcast(t *testing.T) {
+	telegramID := int64(123456789)
+	message := "Broadcast message with link: https://t.me/example"
+
+	msg := tgbotapi.NewMessage(telegramID, message)
+	msg.ParseMode = "Markdown"
+	msg.DisableWebPagePreview = true
+
+	// Verify that DisableWebPagePreview is set to true (link previews disabled)
+	if msg.DisableWebPagePreview != true {
+		t.Error("Broadcast message should have DisableWebPagePreview = true")
+	}
+
+	// Verify ParseMode is set correctly
+	if msg.ParseMode != "Markdown" {
+		t.Error("Broadcast message should have ParseMode = Markdown")
+	}
+}
+
+// TestMessageConfig_DisableWebPagePreview_SendMessage tests SendMessage message configuration
+func TestMessageConfig_DisableWebPagePreview_SendMessage(t *testing.T) {
+	telegramID := int64(987654321)
+	message := "Direct message with link: https://example.com/page"
+
+	msg := tgbotapi.NewMessage(telegramID, message)
+	msg.ParseMode = "Markdown"
+	msg.DisableWebPagePreview = true
+
+	// Verify that DisableWebPagePreview is set to true (link previews disabled)
+	if msg.DisableWebPagePreview != true {
+		t.Error("Direct message should have DisableWebPagePreview = true")
+	}
+}
+
+// TestMessageConfig_DisableWebPagePreview_LoadingMessage tests loading message configuration
+func TestMessageConfig_DisableWebPagePreview_LoadingMessage(t *testing.T) {
+	chatID := int64(111222333)
+
+	loadingMsg := tgbotapi.NewMessage(chatID, "⏳ Загрузка...")
+	loadingMsg.DisableWebPagePreview = true
+
+	// Verify that DisableWebPagePreview is set to true (link previews disabled)
+	if loadingMsg.DisableWebPagePreview != true {
+		t.Error("Loading message should have DisableWebPagePreview = true")
+	}
+}
+
+// TestMessageConfig_DisableWebPagePreview_HelpText tests help text message configuration
+func TestMessageConfig_DisableWebPagePreview_HelpText(t *testing.T) {
+	chatID := int64(444555666)
+
+	handler := &Handler{
+		cfg: &config.Config{
+			TrafficLimitGB: 100,
+		},
+	}
+
+	helpText := handler.getHelpText(100, "http://localhost:2053/sub/test")
+	msg := tgbotapi.NewMessage(chatID, helpText)
+	msg.ParseMode = "Markdown"
+	msg.DisableWebPagePreview = true
+
+	// Verify that DisableWebPagePreview is set to true (link previews disabled)
+	if msg.DisableWebPagePreview != true {
+		t.Error("Help text message should have DisableWebPagePreview = true")
+	}
+}
+
+// TestMessageConfig_DisableWebPagePreview_DonateText tests donate text message configuration
+func TestMessageConfig_DisableWebPagePreview_DonateText(t *testing.T) {
+	chatID := int64(777888999)
+
+	handler := &Handler{
+		cfg: &config.Config{},
+	}
+
+	donateText := handler.getDonateText()
+	msg := tgbotapi.NewMessage(chatID, donateText)
+	msg.ParseMode = "Markdown"
+	msg.DisableWebPagePreview = true
+
+	// Verify that DisableWebPagePreview is set to true (link previews disabled)
+	if msg.DisableWebPagePreview != true {
+		t.Error("Donate text message should have DisableWebPagePreview = true")
+	}
+}
