@@ -161,12 +161,29 @@ Admins (specified in `TELEGRAM_ADMIN_ID`) have access to additional commands:
 |---------|-------------|
 | `/lastreg` | Show the last 10 registered users |
 | `/del <id>` | Delete a subscription by database ID (removes from both 3x-ui panel and database) |
+| `/broadcast <message>` | Send a message to all users who have a subscription |
+| `/send <id\|username> <message>` | Send a message to a specific user by Telegram ID or username |
 
-**Example:**
+**Examples:**
 ```
 /del 5
 ```
 Deletes the subscription with database ID 5 from both the 3x-ui panel and the local database.
+
+```
+/broadcast 🔔 Важное обновление: бот обновлен!
+```
+Sends the message "🔔 Важное обновление: бот обновлен!" to all users with subscriptions.
+
+```
+/send 123456789 Привет! Это личное сообщение.
+```
+Sends a private message to user with Telegram ID 123456789.
+
+```
+/send @username Привет!
+```
+Sends a private message to user with username "username".
 
 ## CI/CD with GitHub Actions
 
@@ -290,7 +307,7 @@ When a new subscription is created, the admin (specified in `TELEGRAM_ADMIN_ID`)
 - Subscription expiry date
 - Subscription link (full URL, not masked)
 
-Admins can also use the `/del <id>` command to delete subscriptions and `/lastreg` to view recent registrations.
+Admins can also use the `/del <id>` command to delete subscriptions, `/lastreg` to view recent registrations, `/broadcast` to send messages to all users, and `/send` to message specific users.
 
 ## Database Migrations
 

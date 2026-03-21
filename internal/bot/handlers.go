@@ -3,6 +3,7 @@ package bot
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -260,6 +261,143 @@ func (h *Handler) HandleDel(ctx context.Context, update tgbotapi.Update) {
 	))
 }
 
+// HandleBroadcast handles the /broadcast command for admins to send messages to all users.
+func (h *Handler) HandleBroadcast(ctx context.Context, update tgbotapi.Update) {
+	if update.Message == nil {
+		logger.Error("HandleBroadcast called with nil Message")
+		return
+	}
+
+	chatID := update.Message.Chat.ID
+
+	// Verify admin access
+	if chatID != h.cfg.TelegramAdminID {
+		logger.Warn("Non-admin user attempted to access /broadcast", zap.Int64("chat_id", chatID))
+		return
+	}
+
+	// Get the message to broadcast
+	message := update.Message.CommandArguments()
+	if message == "" {
+		h.SendMessage(ctx, chatID, "❌ Использование: /broadcast <сообщение>\n\nПример: /broadcast Привет всем!")
+		return
+	}
+
+	// Get all Telegram IDs
+	ids, err := database.GetAllTelegramIDs()
+	if err != nil {
+		logger.Error("Failed to get telegram IDs", zap.Error(err))
+		h.SendMessage(ctx, chatID, "❌ Ошибка получения списка пользователей")
+		return
+	}
+
+	if len(ids) == 0 {
+		h.SendMessage(ctx, chatID, "❌ Нет пользователей для рассылки")
+		return
+	}
+
+	// Send to all users
+	successCount := 0
+	failCount := 0
+	for _, telegramID := range ids {
+		msg := tgbotapi.NewMessage(telegramID, message)
+		msg.ParseMode = "Markdown"
+		if _, err := h.bot.Send(msg); err != nil {
+			logger.Warn("Failed to send broadcast message",
+				zap.Int64("telegram_id", telegramID),
+				zap.Error(err))
+			failCount++
+		} else {
+			successCount++
+		}
+		// Small delay to avoid rate limiting
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	h.SendMessage(ctx, chatID, fmt.Sprintf(
+		"✅ Рассылка завершена!\n\n📤 Отправлено: %d\n❌ Ошибок: %d\n👥 Всего пользователей: %d",
+		successCount,
+		failCount,
+		len(ids),
+	))
+
+	logger.Info("Broadcast completed",
+		zap.Int("success", successCount),
+		zap.Int("failed", failCount),
+		zap.Int("total", len(ids)))
+}
+
+// HandleSend handles the /send command for admins to send a message to a specific user.
+func (h *Handler) HandleSend(ctx context.Context, update tgbotapi.Update) {
+	if update.Message == nil {
+		logger.Error("HandleSend called with nil Message")
+		return
+	}
+
+	chatID := update.Message.Chat.ID
+
+	// Verify admin access
+	if chatID != h.cfg.TelegramAdminID {
+		logger.Warn("Non-admin user attempted to access /send", zap.Int64("chat_id", chatID))
+		return
+	}
+
+	// Parse the command arguments
+	args := update.Message.CommandArguments()
+	if args == "" {
+		h.SendMessage(ctx, chatID, "❌ Использование: /send <telegram_id|username> <сообщение>\n\nПримеры:\n/send 123456789 Привет!\n/send @username Привет!")
+		return
+	}
+
+	// Split args into target and message
+	parts := strings.SplitN(args, " ", 2)
+	if len(parts) < 2 {
+		h.SendMessage(ctx, chatID, "❌ Использование: /send <telegram_id|username> <сообщение>\n\nПримеры:\n/send 123456789 Привет!\n/send @username Привет!")
+		return
+	}
+
+	target := strings.TrimPrefix(parts[0], "@")
+	message := parts[1]
+
+	// Try to parse as Telegram ID first, then as username
+	var telegramID int64
+	var err error
+
+	// Check if target is a number (Telegram ID)
+	if id, parseErr := strconv.ParseInt(target, 10, 64); parseErr == nil {
+		telegramID = id
+	} else {
+		// Try to find by username
+		telegramID, err = database.GetTelegramIDByUsername(target)
+		if err != nil {
+			h.SendMessage(ctx, chatID, fmt.Sprintf("❌ Пользователь @%s не найден в базе", target))
+			return
+		}
+	}
+
+	// Send the message
+	msg := tgbotapi.NewMessage(telegramID, message)
+	msg.ParseMode = "Markdown"
+	sentMsg, err := h.bot.Send(msg)
+	if err != nil {
+		logger.Error("Failed to send message",
+			zap.Int64("telegram_id", telegramID),
+			zap.Error(err))
+		h.SendMessage(ctx, chatID, fmt.Sprintf("❌ Ошибка отправки сообщения: %v", err))
+		return
+	}
+
+	h.SendMessage(ctx, chatID, fmt.Sprintf(
+		"✅ Сообщение отправлено!\n\n👤 Получатель: %d\n💬 ID сообщения: %d",
+		telegramID,
+		sentMsg.MessageID,
+	))
+
+	logger.Info("Message sent via /send command",
+		zap.Int64("telegram_id", telegramID),
+		zap.Int64("admin_id", chatID))
+}
+
 // HandleCallback handles callback queries from inline keyboards.
 func (h *Handler) HandleCallback(ctx context.Context, update tgbotapi.Update) {
 	if update.CallbackQuery == nil {
@@ -326,16 +464,29 @@ func (h *Handler) handleGetSubscription(ctx context.Context, chatID int64, usern
 func (h *Handler) handleMySubscription(ctx context.Context, chatID int64, username string) {
 	logger.Info("User checking subscription status", zap.String("username", username))
 
+	// Show typing indicator
+	typing := tgbotapi.NewChatAction(chatID, tgbotapi.ChatTyping)
+	h.bot.Send(typing)
+
+	// Show loading message
+	loadingMsg := tgbotapi.NewMessage(chatID, "⏳ Загрузка...")
+	sentMsg, err := h.bot.Send(loadingMsg)
+	if err != nil {
+		logger.Error("Failed to send loading message", zap.Error(err))
+		return
+	}
+	messageID := sentMsg.MessageID
+
 	sub, err := database.GetByTelegramID(chatID)
 	if err != nil || sub == nil {
-		msg := tgbotapi.NewMessage(chatID, "❌ У вас нет активной подписки.\n\nНажмите «Получить подписку» для создания.")
-		h.send(ctx, msg)
+		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "❌ У вас нет активной подписки.\n\nНажмите «Получить подписку» для создания.")
+		h.bot.Send(editMsg)
 		return
 	}
 
 	if sub.IsExpired() {
-		msg := tgbotapi.NewMessage(chatID, "⚠️ Ваша подписка истекла.\n\nНажмите «Получить подписку» для создания новой.")
-		h.send(ctx, msg)
+		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "⚠️ Ваша подписка истекла.\n\nНажмите «Получить подписку» для создания новой.")
+		h.bot.Send(editMsg)
 		return
 	}
 
@@ -355,14 +506,14 @@ func (h *Handler) handleMySubscription(ctx context.Context, chatID int64, userna
 	trafficInfo := fmt.Sprintf("%.2f / %d ГБ", trafficUsedGB, h.cfg.TrafficLimitGB)
 	expiryDate := sub.ExpiryTime.Format("02.01.2006")
 
-	msg := tgbotapi.NewMessage(chatID, fmt.Sprintf(
+	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, fmt.Sprintf(
 		"📋 Информация о вашей подписке:\n\n📊 Трафик: %s\n📅 Сброс: %s\n\n🔗 Ссылка:\n`%s`",
 		trafficInfo,
 		expiryDate,
 		sub.SubscriptionURL,
 	))
-	msg.ParseMode = "Markdown"
-	h.send(ctx, msg)
+	editMsg.ParseMode = "Markdown"
+	h.bot.Send(editMsg)
 }
 
 // handleAdminStats handles the "admin stats" callback.

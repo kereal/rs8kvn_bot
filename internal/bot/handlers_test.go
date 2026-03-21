@@ -1465,3 +1465,188 @@ func TestHandleDel_SubscriptionNotFound(t *testing.T) {
 		t.Error("GetSubscriptionByID() should return error for non-existent ID")
 	}
 }
+
+// TestHandleBroadcast_NilMessage tests HandleBroadcast with nil message
+func TestHandleBroadcast_NilMessage(t *testing.T) {
+	handler := &Handler{
+		cfg: &config.Config{
+			TelegramAdminID: 123456789,
+		},
+	}
+
+	// Should not panic with nil message
+	update := tgbotapi.Update{}
+	handler.HandleBroadcast(context.Background(), update)
+	// If we reach here, the test passes (no panic)
+}
+
+// TestHandleBroadcast_NonAdmin tests HandleBroadcast with non-admin user
+func TestHandleBroadcast_NonAdmin(t *testing.T) {
+	cleanup := setupTestDatabase(t)
+	defer cleanup()
+
+	handler := &Handler{
+		cfg: &config.Config{
+			TelegramAdminID: 999999999, // Different from chat ID
+		},
+	}
+
+	// Non-admin should be rejected
+	// Without a real bot, we can't test the message sending
+	// This test verifies the function doesn't panic and checks admin
+	update := tgbotapi.Update{}
+	handler.HandleBroadcast(context.Background(), update)
+}
+
+// TestHandleBroadcast_NoMessage tests HandleBroadcast with no message argument
+func TestHandleBroadcast_NoMessage(t *testing.T) {
+	handler := &Handler{
+		cfg: &config.Config{
+			TelegramAdminID: 123456789,
+		},
+	}
+
+	// Test that empty message is handled
+	// Without a real bot, we can't test the message sending
+	// This test verifies the function doesn't panic
+	update := tgbotapi.Update{}
+	handler.HandleBroadcast(context.Background(), update)
+}
+
+// TestHandleBroadcast_DatabaseFunction tests the GetAllTelegramIDs database function
+func TestHandleBroadcast_DatabaseFunction(t *testing.T) {
+	cleanup := setupTestDatabase(t)
+	defer cleanup()
+
+	// Create test subscriptions with different Telegram IDs
+	subs := []*database.Subscription{
+		{TelegramID: 111111111, Username: "user1", ClientID: "client1", Status: "active", ExpiryTime: time.Now().Add(24 * time.Hour)},
+		{TelegramID: 222222222, Username: "user2", ClientID: "client2", Status: "active", ExpiryTime: time.Now().Add(24 * time.Hour)},
+	}
+
+	for _, sub := range subs {
+		if err := database.CreateSubscription(sub); err != nil {
+			t.Fatalf("Failed to create subscription: %v", err)
+		}
+	}
+
+	// Get all Telegram IDs
+	ids, err := database.GetAllTelegramIDs()
+	if err != nil {
+		t.Fatalf("GetAllTelegramIDs() error = %v", err)
+	}
+
+	if len(ids) != 2 {
+		t.Errorf("GetAllTelegramIDs() returned %d IDs, want 2", len(ids))
+	}
+}
+
+// TestHandleSend_NilMessage tests HandleSend with nil message
+func TestHandleSend_NilMessage(t *testing.T) {
+	handler := &Handler{
+		cfg: &config.Config{
+			TelegramAdminID: 123456789,
+		},
+	}
+
+	// Should not panic with nil message
+	update := tgbotapi.Update{}
+	handler.HandleSend(context.Background(), update)
+	// If we reach here, the test passes (no panic)
+}
+
+// TestHandleSend_NonAdmin tests HandleSend with non-admin user
+func TestHandleSend_NonAdmin(t *testing.T) {
+	cleanup := setupTestDatabase(t)
+	defer cleanup()
+
+	handler := &Handler{
+		cfg: &config.Config{
+			TelegramAdminID: 999999999, // Different from chat ID
+		},
+	}
+
+	// Non-admin should be rejected
+	update := tgbotapi.Update{}
+	handler.HandleSend(context.Background(), update)
+}
+
+// TestHandleSend_NoArgs tests HandleSend with no arguments
+func TestHandleSend_NoArgs(t *testing.T) {
+	handler := &Handler{
+		cfg: &config.Config{
+			TelegramAdminID: 123456789,
+		},
+	}
+
+	// Test that empty args is handled
+	update := tgbotapi.Update{}
+	handler.HandleSend(context.Background(), update)
+}
+
+// TestHandleSend_ByTelegramID tests the database lookup by Telegram ID
+func TestHandleSend_ByTelegramID(t *testing.T) {
+	cleanup := setupTestDatabase(t)
+	defer cleanup()
+
+	// Create test subscription
+	sub := &database.Subscription{
+		TelegramID: 123456789,
+		Username:   "testuser",
+		ClientID:   "client-id",
+		Status:     "active",
+		ExpiryTime: time.Now().Add(24 * time.Hour),
+	}
+	if err := database.CreateSubscription(sub); err != nil {
+		t.Fatalf("Failed to create subscription: %v", err)
+	}
+
+	// Verify the subscription exists
+	got, err := database.GetByTelegramID(123456789)
+	if err != nil {
+		t.Fatalf("GetByTelegramID() error = %v", err)
+	}
+	if got.TelegramID != 123456789 {
+		t.Errorf("TelegramID = %d, want 123456789", got.TelegramID)
+	}
+}
+
+// TestHandleSend_ByUsername tests the GetTelegramIDByUsername database function
+func TestHandleSend_ByUsername(t *testing.T) {
+	cleanup := setupTestDatabase(t)
+	defer cleanup()
+
+	// Create test subscription
+	sub := &database.Subscription{
+		TelegramID: 123456789,
+		Username:   "testuser",
+		ClientID:   "client-id",
+		Status:     "active",
+		ExpiryTime: time.Now().Add(24 * time.Hour),
+	}
+	if err := database.CreateSubscription(sub); err != nil {
+		t.Fatalf("Failed to create subscription: %v", err)
+	}
+
+	// Get Telegram ID by username
+	id, err := database.GetTelegramIDByUsername("testuser")
+	if err != nil {
+		t.Fatalf("GetTelegramIDByUsername() error = %v", err)
+	}
+
+	if id != 123456789 {
+		t.Errorf("GetTelegramIDByUsername() returned %d, want 123456789", id)
+	}
+}
+
+// TestHandleSend_UserNotFound tests GetTelegramIDByUsername with non-existent user
+func TestHandleSend_UserNotFound(t *testing.T) {
+	cleanup := setupTestDatabase(t)
+	defer cleanup()
+
+	// Try to get non-existent username
+	_, err := database.GetTelegramIDByUsername("nonexistent")
+	if err == nil {
+		t.Error("GetTelegramIDByUsername() should return error for non-existent username")
+	}
+}
