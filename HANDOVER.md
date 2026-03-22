@@ -1,6 +1,6 @@
 # Handover Summary - TGVPN Go Bot
 
-**Version:** v1.8.10
+**Version:** v1.9.0
 **Github:** https://github.com/kereal/rs8kvn_bot
 
 ## Architecture
@@ -11,7 +11,7 @@ tgvpn_go/
 ├── internal/
 │   ├── bot/handlers.go          # Telegram handlers, subscription logic, admin commands
 │   ├── xui/client.go            # 3x-ui API: Login, AddClient, DeleteClient, GetClientTraffic
-│   ├── database/database.go     # GORM models, CRUD, package-level funcs + Service methods
+│   ├── database/database.go     # GORM models, CRUD, package-level funcs
 │   ├── config/
 │   │   ├── config.go            # Env config loader with validation
 │   │   └── constants.go         # All constants (backup 14d, log 10MB, etc.)
@@ -32,53 +32,73 @@ tgvpn_go/
 - **Errors:** `github.com/getsentry/sentry-go`
 - **Database:** SQLite (`./data/tgvpn.db`)
 
-## Current State (v1.8.10)
+## Current State (v1.9.0)
 
 **Bot Commands:**
-- `/start` - Greeting + deep link `?start=donate` for donation info
+- `/start` - Greeting + main menu (InlineKeyboard)
 - `/help` - Help text
 - `/lastreg` - Last 10 registrations (admin only)
 - `/del <id>` - Delete subscription by DB ID (admin only)
 - `/broadcast <msg>` - Send message to all users (admin only)
 - `/send <id|username> <msg>` - Send message to specific user (admin only)
 
-**Reply Keyboard (3 buttons, shown only if user has subscription):**
-- "☕ Донат" - Shows donation text with T-Bank link
-- "📋 Подписка" - Shows subscription info with traffic usage
-- "❓ Помощь" - Shows VPN usage instructions
+**Inline Keyboard (v1.9.0 - replaces ReplyKeyboard):**
+
+For users WITH subscription:
+- **☕ Донат** - Shows donation text with T-Bank link
+- **📋 Подписка** - Shows subscription info with traffic usage
+- **❓ Помощь** - Shows VPN usage instructions
+
+For users WITHOUT subscription:
+- **📥 Получить подписку** - Create a new subscription
+
+Admin also sees:
+- **📊 Статистика** - View bot statistics
+
+**All submenus have "🏠 В начало" button to return to main menu.**
+
+**Key UI Changes:**
+- Buttons are INLINE (under the message), NOT at bottom of screen
+- No keyboard flickering or auto-focus issues
+- Messages are EDITED in place when navigating (not deleted + new)
 
 **Features:**
 - VLESS+Reality+Vision subscription creation
 - Real traffic usage display from 3x-ui panel
-- Loading indicator ("⏳ Загрузка..." message, then edited to content)
+- Loading indicator ("⏳ Загрузка...")
 - Automatic rollback on DB save failure
 - Monthly auto-renewal (reset=31)
-- Link previews disabled for all messages (DisableWebPagePreview = true)
-- "🏠 В начало" button after subscription creation (executes /start)
+- Link previews disabled for ALL messages
 
-## Recent Changes (v1.8.10)
+## Recent Changes (v1.9.0)
 
-1. **Reply Keyboard** - 3 buttons: "☕ Донат", "📋 Подписка", "❓ Помощь"
-   - Shown only when user has active subscription
-   - Replaced inline buttons "Получить подписку" and "Моя подписка" in main menu
+### 1. Replaced ReplyKeyboard with InlineKeyboard
+- Removed ReplyKeyboard (3 buttons at bottom of screen)
+- Added InlineKeyboard (buttons under message)
+- Benefits: No keyboard flickering, no auto-focus on input field
 
-2. **"🏠 В начало" Button** - Inline button after subscription creation
-   - Uses zero-width space (`\u200B`) as invisible text
-   - Callback `back_to_start` executes HandleStart
+### 2. New Menu Handlers
+- `handleMenuDonate(chatID, username, messageID)` - Shows donate info with back button
+- `handleMenuSubscription(chatID, username, messageID)` - Shows subscription info with back button
+- `handleMenuHelp(chatID, username, messageID)` - Shows help with back button
+- All use message EDITING (not new messages)
 
-3. **Link Previews Disabled** - `DisableWebPagePreview = true` everywhere:
-   - `send()` method
-   - `sendWithRetry()` method
-   - `HandleBroadcast()`
-   - `HandleSend()`
-   - `handleMySubscription()` EditMessageText
-   - `createSubscription()` EditMessageText
+### 3. Removed Old Handlers
+- Deleted: `HandleDonate()`, `HandleMySubscriptionButton()`, `HandleHelpButton()`
+- These were for ReplyKeyboard which no longer exists
 
-4. **Loading Indicator** - "⏳ Загрузка..." message when creating subscription
-   - Message sent first, then edited to show subscription instructions
-   - Same behavior as "Подписка" button
+### 4. Updated Callback Handling
+- Added callbacks: `menu_donate`, `menu_subscription`, `menu_help`
+- `back_to_start` now edits message instead of delete+send new
 
-5. **Typing Indicator Removed** - Removed ChatTyping action and delays
+### 5. DisableWebPagePreview Added Everywhere
+- All `EditMessageText` now have `DisableWebPagePreview = true`
+- Prevents link preview blocks in Telegram
+
+### 6. Code Cleanup
+- Removed ~130 lines of unused ReplyKeyboard handlers
+- Removed ~120 lines of obsolete tests
+- Updated test names and comments
 
 ## Critical Details
 
@@ -106,32 +126,43 @@ type ClientTraffic struct {
 }
 ```
 
+### Message Flow (v1.9.0):
+1. User sends `/start` or clicks "🏠 В начало"
+2. Bot shows message with InlineKeyboard (3 menu buttons)
+3. User clicks button → callback received
+4. Bot EDITS the message (same messageID) with new content + back button
+5. User clicks "🏠 В начало" → message edited back to main menu
+
 ### Database:
-- Package-level functions: `GetAllTelegramIDs()`, `GetTelegramIDByUsername()`
-- Service methods exist for DI but not used in handlers
+- Package-level functions: `GetAllTelegramIDs()`, `GetByTelegramID()`, `CreateSubscription()`
+- SQLite with soft deletes (`deleted_at` column)
 
 ### Config Defaults:
 - `TRAFFIC_LIMIT_GB=100`
 - Backup retention: 14 days
 - Log max size: 10MB
+- Rate limiter: 30 tokens max, 5/sec refill
 
-### Message Sending:
-- All messages use `DisableWebPagePreview = true`
-- EditMessageText also requires `DisableWebPagePreview = true` for link control
-
-### Reply Keyboard Logic:
-- Only shown when user has active subscription
-- If no subscription: show inline button "📥 Получить подписку"
-- Admin always sees "📊 Статистика" button
+### Key Functions:
+- `getMainMenuKeyboard()` - Returns InlineKeyboard with 3 buttons
+- `getBackKeyboard()` - Returns InlineKeyboard with "🏠 В начало"
+- `send()` - Sends message with DisableWebPagePreview=true, saves messageID
+- `setLastMessageType()` - Tracks what type of message is displayed
 
 ## Current Task
 
-**Status:** All requested features implemented and tested. Version v1.8.10 released.
+**Status:** v1.9.0 released. All features working correctly.
 
-**Next Steps (if needed):**
-1. Donations - Discussed options: Telegram Stars, CryptoBot API, hybrid approach
-2. Monitoring - Add metrics/metrics endpoint
-3. Tests - All tests pass
+**Completed:**
+- InlineKeyboard UI (no flickering)
+- Message type tracking (prevent duplicate updates)
+- Code cleanup and tests
+
+**Potential Next Steps:**
+1. Donations - Telegram Stars, CryptoBot, or hybrid
+2. Monitoring - Add metrics endpoint
+3. Multi-language support
+4. Subscription sharing prevention
 
 ## Tests
 
@@ -143,7 +174,9 @@ All tests pass.
 ## Deploy
 
 ```bash
-git tag v1.x.x && git push --tags
+git add -A && git commit -m "message"
+git tag -a v1.x.x -m "version"
+git push && git push --tags
 ```
 Auto Docker build + GitHub Release via CI/CD.
 
