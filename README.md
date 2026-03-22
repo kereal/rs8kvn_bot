@@ -147,11 +147,17 @@ go run ./cmd/bot
 ## Usage
 
 1. Start the bot with `/start` command
-2. Use the inline buttons:
-   - **📥 Получить подписку** - Get or create subscription
-   - **📋 Моя подписка** - View current subscription info
+2. Use the inline buttons (shown under the message):
+   - **For users with subscription:**
+     - **☕ Донат** - View donation info
+     - **📋 Подписка** - View subscription info (traffic usage, expiry date, subscription link)
+     - **❓ Помощь** - View VPN setup instructions
+   - **For users without subscription:**
+     - **📥 Получить подписку** - Create a new subscription
 3. Admin users also see:
    - **📊 Статистика** - View bot statistics
+
+**Note:** All menu buttons are inline (shown under the message), not at the bottom of the screen. Each submenu has a "🏠 В начало" button to return to the main menu.
 
 ### Admin Commands
 
