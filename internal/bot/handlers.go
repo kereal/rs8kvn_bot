@@ -36,6 +36,28 @@ func NewHandler(bot *tgbotapi.BotAPI, cfg *config.Config, xuiClient *xui.Client)
 	}
 }
 
+// getMainMenuKeyboard returns the inline keyboard with main menu buttons
+func (h *Handler) getMainMenuKeyboard() tgbotapi.InlineKeyboardMarkup {
+	return tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("☕ Донат", "menu_donate"),
+			tgbotapi.NewInlineKeyboardButtonData("📋 Подписка", "menu_subscription"),
+		),
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("❓ Помощь", "menu_help"),
+		),
+	)
+}
+
+// getBackKeyboard returns the inline keyboard with back button
+func (h *Handler) getBackKeyboard() tgbotapi.InlineKeyboardMarkup {
+	return tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("🏠 В начало", "back_to_start"),
+		),
+	)
+}
+
 // HandleStart handles the /start command.
 func (h *Handler) HandleStart(ctx context.Context, update tgbotapi.Update) {
 	if update.Message == nil {
@@ -54,6 +76,7 @@ func (h *Handler) HandleStart(ctx context.Context, update tgbotapi.Update) {
 	if update.Message.CommandArguments() == "donate" {
 		msg := tgbotapi.NewMessage(chatID, h.getDonateText())
 		msg.ParseMode = "Markdown"
+		msg.ReplyMarkup = h.getBackKeyboard()
 		h.send(ctx, msg)
 		return
 	}
@@ -65,34 +88,24 @@ func (h *Handler) HandleStart(ctx context.Context, update tgbotapi.Update) {
 	hasSubscription := err == nil && sub != nil && sub.Status == "active"
 
 	if hasSubscription {
-		// User has subscription - show Reply keyboard with 3 buttons
-		replyKeyboard := tgbotapi.NewReplyKeyboard(
-			tgbotapi.NewKeyboardButtonRow(
-				tgbotapi.NewKeyboardButton("☕ Донат"),
-				tgbotapi.NewKeyboardButton("📋 Подписка"),
-				tgbotapi.NewKeyboardButton("❓ Помощь"),
-			),
-		)
-		replyKeyboard.ResizeKeyboard = true
-
+		// User has subscription - show inline keyboard with menu buttons
 		msg := tgbotapi.NewMessage(chatID, fmt.Sprintf(
-			"👋 Привет, %s!\n\nЯ бот для выдачи подписок на прокси VLESS+Reality+Vision.\n\nИспользуйте кнопки внизу экрана для взаимодействия с ботом.",
+			"👋 Привет, %s!\n\nЯ бот для выдачи подписок на прокси VLESS+Reality+Vision.\n\nИспользуйте кнопки ниже для взаимодействия с ботом.",
 			username,
 		))
-		msg.ReplyMarkup = replyKeyboard
-		h.send(ctx, msg)
 
+		keyboard := h.getMainMenuKeyboard()
 		// Add admin button if user is admin
 		if isAdmin {
-			inlineKeyboard := tgbotapi.NewInlineKeyboardMarkup(
+			keyboard.InlineKeyboard = append(keyboard.InlineKeyboard,
 				tgbotapi.NewInlineKeyboardRow(
 					tgbotapi.NewInlineKeyboardButtonData("📊 Статистика", "admin_stats"),
 				),
 			)
-			inlineMsg := tgbotapi.NewMessage(chatID, "👇")
-			inlineMsg.ReplyMarkup = inlineKeyboard
-			h.send(ctx, inlineMsg)
 		}
+
+		msg.ReplyMarkup = keyboard
+		h.send(ctx, msg)
 	} else {
 		// User has no subscription - show inline button to get subscription
 		msg := tgbotapi.NewMessage(chatID, fmt.Sprintf(
@@ -438,7 +451,7 @@ func (h *Handler) HandleCallback(ctx context.Context, update tgbotapi.Update) {
 	chatID := update.CallbackQuery.Message.Chat.ID
 	username := h.getUsername(update.CallbackQuery.From)
 
-	logger.Info("Callback received",
+	logger.Debug("Callback received",
 		zap.String("data", data),
 		zap.String("username", username),
 		zap.Int64("chat_id", chatID))
@@ -451,35 +464,32 @@ func (h *Handler) HandleCallback(ctx context.Context, update tgbotapi.Update) {
 
 	switch data {
 	case "get_subscription":
-		h.handleGetSubscription(ctx, chatID, username)
+		messageID := update.CallbackQuery.Message.MessageID
+		h.handleGetSubscription(ctx, chatID, username, messageID)
 	case "my_subscription":
-		h.handleMySubscription(ctx, chatID, username)
+		messageID := update.CallbackQuery.Message.MessageID
+		h.handleMySubscription(ctx, chatID, username, messageID)
 	case "admin_stats":
 		h.handleAdminStats(ctx, chatID, username)
 	case "back_to_start":
-		// Create a fake update to call HandleStart
-		fakeUpdate := tgbotapi.Update{
-			Message: &tgbotapi.Message{
-				Chat: update.CallbackQuery.Message.Chat,
-				From: update.CallbackQuery.From,
-				Text: "/start",
-				Entities: []tgbotapi.MessageEntity{
-					{
-						Type:   "bot_command",
-						Offset: 0,
-						Length: 6,
-					},
-				},
-			},
-		}
-		h.HandleStart(ctx, fakeUpdate)
+		messageID := update.CallbackQuery.Message.MessageID
+		h.handleBackToStart(ctx, chatID, username, messageID)
+	case "menu_donate":
+		messageID := update.CallbackQuery.Message.MessageID
+		h.handleMenuDonate(ctx, chatID, username, messageID)
+	case "menu_subscription":
+		messageID := update.CallbackQuery.Message.MessageID
+		h.handleMenuSubscription(ctx, chatID, username, messageID)
+	case "menu_help":
+		messageID := update.CallbackQuery.Message.MessageID
+		h.handleMenuHelp(ctx, chatID, username, messageID)
 	default:
 		logger.Warn("Unknown callback data", zap.String("data", data))
 	}
 }
 
 // handleGetSubscription handles the "get subscription" callback.
-func (h *Handler) handleGetSubscription(ctx context.Context, chatID int64, username string) {
+func (h *Handler) handleGetSubscription(ctx context.Context, chatID int64, username string, messageID int) {
 	logger.Info("User requesting subscription", zap.String("username", username))
 
 	sub, err := database.GetByTelegramID(chatID)
@@ -487,48 +497,70 @@ func (h *Handler) handleGetSubscription(ctx context.Context, chatID int64, usern
 		// Check if subscription is expired
 		if sub.IsExpired() {
 			logger.Info("Subscription expired, creating new one", zap.String("username", username))
-			h.createSubscription(ctx, chatID, username)
+			h.createSubscription(ctx, chatID, username, messageID)
 			return
 		}
 
-		// Return existing active subscription
-		msg := tgbotapi.NewMessage(chatID, fmt.Sprintf(
+		// Return existing active subscription - edit the message
+		backKeyboard := tgbotapi.NewInlineKeyboardMarkup(
+			tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("🏠 В начало", "back_to_start"),
+			),
+		)
+		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, fmt.Sprintf(
 			"✅ Ваша активная подписка:\n\n📊 Трафик: %d ГБ\n\n🔗 Ссылка на подписку:\n`%s`",
 			h.cfg.TrafficLimitGB,
 			sub.SubscriptionURL,
 		))
-		msg.ParseMode = "Markdown"
-		h.send(ctx, msg)
+		editMsg.ParseMode = "Markdown"
+		editMsg.DisableWebPagePreview = true
+		editMsg.ReplyMarkup = &backKeyboard
+		h.bot.Send(editMsg)
 		return
 	}
 
 	// No existing subscription, create new one
-	h.createSubscription(ctx, chatID, username)
+	h.createSubscription(ctx, chatID, username, messageID)
 }
 
 // handleMySubscription handles the "my subscription" callback.
-func (h *Handler) handleMySubscription(ctx context.Context, chatID int64, username string) {
+func (h *Handler) handleMySubscription(ctx context.Context, chatID int64, username string, messageID int) {
 	logger.Info("User checking subscription status", zap.String("username", username))
 
-	// Show loading message
-	loadingMsg := tgbotapi.NewMessage(chatID, "⏳ Загрузка...")
-	loadingMsg.DisableWebPagePreview = true
-	sentMsg, err := h.bot.Send(loadingMsg)
-	if err != nil {
-		logger.Error("Failed to send loading message", zap.Error(err))
-		return
+	// Show loading message - try to edit existing, or send new if fails
+	if messageID > 0 {
+		// Try to edit existing message
+		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "⏳ Загрузка...")
+		editMsg.DisableWebPagePreview = true
+		if _, err := h.bot.Send(editMsg); err != nil {
+			logger.Warn("Failed to edit message for loading, sending new one", zap.Error(err))
+			messageID = 0 // Reset to send new message
+		}
 	}
-	messageID := sentMsg.MessageID
+
+	if messageID == 0 {
+		// Send new message
+		loadingMsg := tgbotapi.NewMessage(chatID, "⏳ Загрузка...")
+		loadingMsg.DisableWebPagePreview = true
+		sentMsg, err := h.bot.Send(loadingMsg)
+		if err != nil {
+			logger.Error("Failed to send loading message", zap.Error(err))
+			return
+		}
+		messageID = sentMsg.MessageID
+	}
 
 	sub, err := database.GetByTelegramID(chatID)
 	if err != nil || sub == nil {
 		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "❌ У вас нет активной подписки.\n\nНажмите «Получить подписку» для создания.")
+		editMsg.DisableWebPagePreview = true
 		h.bot.Send(editMsg)
 		return
 	}
 
 	if sub.IsExpired() {
 		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "⚠️ Ваша подписка истекла.\n\nНажмите «Получить подписку» для создания новой.")
+		editMsg.DisableWebPagePreview = true
 		h.bot.Send(editMsg)
 		return
 	}
@@ -550,14 +582,30 @@ func (h *Handler) handleMySubscription(ctx context.Context, chatID int64, userna
 	expiryDate := sub.ExpiryTime.Format("02.01.2006")
 
 	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, fmt.Sprintf(
-		"📋 *Информация о вашей подписке*\n\n📊 Трафик: %s\n📅 Сброс: %s\n\n🔗 Ссылка:\n`%s`",
+		"📋 *Информация о вашей подписке*\n\n📊 Трафик: %s\n📅 Сброс: %s\n\n🔗 Ссылка\n`%s`",
 		trafficInfo,
 		expiryDate,
 		sub.SubscriptionURL,
 	))
 	editMsg.ParseMode = "Markdown"
 	editMsg.DisableWebPagePreview = true
-	h.bot.Send(editMsg)
+	if _, err := h.bot.Send(editMsg); err != nil {
+		logger.Warn("Failed to edit message, sending new one", zap.Error(err), zap.Int64("chat_id", chatID), zap.Int("message_id", messageID))
+		// Delete old message if exists
+		if messageID > 0 {
+			deleteMsg := tgbotapi.NewDeleteMessage(chatID, messageID)
+			h.bot.Request(deleteMsg)
+		}
+		// Send new message instead
+		msg := tgbotapi.NewMessage(chatID, fmt.Sprintf(
+			"📋 *Информация о вашей подписке*\n\n📊 Трафик: %s\n📅 Сброс: %s\n\n🔗 Ссылка\n`%s`",
+			trafficInfo,
+			expiryDate,
+			sub.SubscriptionURL,
+		))
+		msg.ParseMode = "Markdown"
+		h.send(ctx, msg)
+	}
 }
 
 // handleAdminStats handles the "admin stats" callback.
@@ -603,16 +651,24 @@ func (h *Handler) handleAdminStats(ctx context.Context, chatID int64, username s
 // createSubscription creates a new subscription for the user.
 // This operation is atomic with rollback: if database save fails,
 // the client is removed from the 3x-ui panel to prevent orphan records.
-func (h *Handler) createSubscription(ctx context.Context, chatID int64, username string) {
-	// Show loading message
-	loadingMsg := tgbotapi.NewMessage(chatID, "⏳ Загрузка...")
-	loadingMsg.DisableWebPagePreview = true
-	sentMsg, err := h.bot.Send(loadingMsg)
-	if err != nil {
-		logger.Error("Failed to send loading message", zap.Error(err))
-		return
+func (h *Handler) createSubscription(ctx context.Context, chatID int64, username string, messageID int) {
+	// Show loading message - edit existing or send new
+	if messageID == 0 {
+		// No message to edit, send new one
+		loadingMsg := tgbotapi.NewMessage(chatID, "⏳ Загрузка...")
+		loadingMsg.DisableWebPagePreview = true
+		sentMsg, err := h.bot.Send(loadingMsg)
+		if err != nil {
+			logger.Error("Failed to send loading message", zap.Error(err))
+			return
+		}
+		messageID = sentMsg.MessageID
+	} else {
+		// Edit existing message to show loading
+		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "⏳ Загрузка...")
+		editMsg.DisableWebPagePreview = true
+		h.bot.Send(editMsg)
 	}
-	messageID := sentMsg.MessageID
 
 	now := time.Now()
 	expiryTime := getFirstSecondOfNextMonth(now)
@@ -632,6 +688,7 @@ func (h *Handler) createSubscription(ctx context.Context, chatID int64, username
 	if err != nil {
 		logger.Error("Failed to add client to 3x-ui", zap.Error(err))
 		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "❌ Произошла ошибка при создании подписки. Попробуйте позже.")
+		editMsg.DisableWebPagePreview = true
 		h.bot.Send(editMsg)
 		return
 	}
@@ -669,6 +726,7 @@ func (h *Handler) createSubscription(ctx context.Context, chatID int64, username
 		}
 
 		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "❌ Подписка создана в панели, но не сохранена в базе. Обратитесь к администратору.")
+		editMsg.DisableWebPagePreview = true
 		h.bot.Send(editMsg)
 		return
 	}
@@ -722,7 +780,7 @@ func (h *Handler) notifyAdminError(ctx context.Context, message string) {
 	h.send(ctx, msg)
 }
 
-// send sends a message with rate limiting.
+// send sends a message with rate limiting and saves the message ID for future editing.
 func (h *Handler) send(ctx context.Context, msg tgbotapi.MessageConfig) {
 	// Disable link previews for all messages
 	msg.DisableWebPagePreview = true
@@ -735,10 +793,13 @@ func (h *Handler) send(ctx context.Context, msg tgbotapi.MessageConfig) {
 	_, err := h.bot.Send(msg)
 	if err != nil {
 		logger.Error("Failed to send message", zap.Error(err))
+		return
 	}
+
 }
 
 // sendWithRetry sends a message with rate limiting and retry logic.
+// Saves the message ID for future editing on success.
 func (h *Handler) sendWithRetry(ctx context.Context, msg tgbotapi.MessageConfig, maxRetries int) {
 	// Disable link previews for all messages
 	msg.DisableWebPagePreview = true
@@ -822,52 +883,148 @@ func (h *Handler) getHelpText(trafficLimitGB int, subscriptionURL string) string
 	)
 }
 
-// HandleDonate handles the "☕ Донат" reply button.
-func (h *Handler) HandleDonate(ctx context.Context, update tgbotapi.Update) {
-	if update.Message == nil {
-		logger.Error("HandleDonate called with nil Message")
-		return
+// handleBackToStart handles the "back_to_start" callback
+// Edits message to show main menu with InlineKeyboard
+func (h *Handler) handleBackToStart(ctx context.Context, chatID int64, username string, messageID int) {
+	logger.Info("User returning to start", zap.String("username", username))
+
+	isAdmin := chatID == h.cfg.TelegramAdminID
+
+	// Check if user has an active subscription
+	sub, err := database.GetByTelegramID(chatID)
+	hasSubscription := err == nil && sub != nil && sub.Status == "active"
+
+	if hasSubscription {
+		// User has subscription - edit message with inline menu keyboard
+		text := fmt.Sprintf(
+			"👋 Привет, %s!\n\nЯ бот для выдачи подписок на прокси VLESS+Reality+Vision.\n\nИспользуйте кнопки ниже для взаимодействия с ботом.",
+			username,
+		)
+
+		keyboard := h.getMainMenuKeyboard()
+		// Add admin button if user is admin
+		if isAdmin {
+			keyboard.InlineKeyboard = append(keyboard.InlineKeyboard,
+				tgbotapi.NewInlineKeyboardRow(
+					tgbotapi.NewInlineKeyboardButtonData("📊 Статистика", "admin_stats"),
+				),
+			)
+		}
+
+		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, text)
+		editMsg.DisableWebPagePreview = true
+		editMsg.ReplyMarkup = &keyboard
+		h.bot.Send(editMsg)
+	} else {
+		// User has no subscription - edit message with inline button to get subscription
+		text := fmt.Sprintf(
+			"👋 Привет, %s!\n\nЯ бот для выдачи подписок на прокси VLESS+Reality+Vision.\n\nНажмите кнопку ниже, чтобы получить подписку:",
+			username,
+		)
+
+		inlineKeyboard := tgbotapi.NewInlineKeyboardMarkup(
+			tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("📥 Получить подписку", "get_subscription"),
+			),
+		)
+
+		// Add admin button if user is admin
+		if isAdmin {
+			inlineKeyboard.InlineKeyboard = append(inlineKeyboard.InlineKeyboard,
+				tgbotapi.NewInlineKeyboardRow(
+					tgbotapi.NewInlineKeyboardButtonData("📊 Статистика", "admin_stats"),
+				),
+			)
+		}
+
+		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, text)
+		editMsg.DisableWebPagePreview = true
+		editMsg.ReplyMarkup = &inlineKeyboard
+		h.bot.Send(editMsg)
 	}
-
-	chatID := update.Message.Chat.ID
-
-	msg := tgbotapi.NewMessage(chatID, h.getDonateText())
-	msg.ParseMode = "Markdown"
-	h.send(ctx, msg)
 }
 
-// HandleMySubscriptionButton handles the "📋 Подписка" reply button.
-func (h *Handler) HandleMySubscriptionButton(ctx context.Context, update tgbotapi.Update) {
-	if update.Message == nil {
-		logger.Error("HandleMySubscriptionButton called with nil Message")
-		return
-	}
+// handleMenuDonate handles the "menu_donate" callback - shows donate message with back button
+func (h *Handler) handleMenuDonate(ctx context.Context, chatID int64, username string, messageID int) {
+	logger.Info("User viewing donate", zap.String("username", username))
 
-	chatID := update.Message.Chat.ID
-	username := h.getUsername(update.Message.From)
-
-	h.handleMySubscription(ctx, chatID, username)
+	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, h.getDonateText())
+	editMsg.ParseMode = "Markdown"
+	editMsg.DisableWebPagePreview = true
+	keyboard := h.getBackKeyboard()
+	editMsg.ReplyMarkup = &keyboard
+	h.bot.Send(editMsg)
 }
 
-// HandleHelpButton handles the "❓ Помощь" reply button.
-// Note: This button is only shown when user has an active subscription (Reply keyboard is hidden otherwise)
-func (h *Handler) HandleHelpButton(ctx context.Context, update tgbotapi.Update) {
-	if update.Message == nil {
-		logger.Error("HandleHelpButton called with nil Message")
-		return
-	}
+// handleMenuSubscription handles the "menu_subscription" callback - shows subscription info with back button
+func (h *Handler) handleMenuSubscription(ctx context.Context, chatID int64, username string, messageID int) {
+	logger.Info("User viewing subscription", zap.String("username", username))
 
-	chatID := update.Message.Chat.ID
-
-	// Get user's subscription (should always exist since button is only shown when subscription exists)
 	sub, err := database.GetByTelegramID(chatID)
 	if err != nil || sub == nil {
-		h.SendMessage(ctx, chatID, "❌ Ошибка: подписка не найдена. Используйте /start для получения подписки.")
+		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "❌ У вас нет активной подписки.\n\nНажмите «🏠 В начало» для получения подписки.")
+		editMsg.DisableWebPagePreview = true
+		keyboard := h.getBackKeyboard()
+		editMsg.ReplyMarkup = &keyboard
+		h.bot.Send(editMsg)
 		return
 	}
 
-	// Show instructions with subscription URL
-	msg := tgbotapi.NewMessage(chatID, h.getHelpText(h.cfg.TrafficLimitGB, sub.SubscriptionURL))
-	msg.ParseMode = "Markdown"
-	h.send(ctx, msg)
+	if sub.IsExpired() {
+		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "⚠️ Ваша подписка истекла.\n\nНажмите «🏠 В начало» для создания новой.")
+		editMsg.DisableWebPagePreview = true
+		keyboard := h.getBackKeyboard()
+		editMsg.ReplyMarkup = &keyboard
+		h.bot.Send(editMsg)
+		return
+	}
+
+	// Get traffic usage from 3x-ui panel
+	trafficUsedGB := float64(0)
+	traffic, err := h.xui.GetClientTraffic(ctx, sub.Username)
+	if err != nil {
+		logger.Warn("Failed to get client traffic from panel", zap.String("username", sub.Username), zap.Error(err))
+	} else {
+		trafficUsedGB = float64(traffic.Up+traffic.Down) / 1024 / 1024 / 1024
+	}
+
+	trafficInfo := fmt.Sprintf("%.2f / %d ГБ", trafficUsedGB, h.cfg.TrafficLimitGB)
+	expiryDate := sub.ExpiryTime.Format("02.01.2006")
+
+	text := fmt.Sprintf(
+		"📋 *Информация о вашей подписке*\n\n📊 Трафик: %s\n📅 Сброс: %s\n\n🔗 Ссылка:\n`%s`",
+		trafficInfo,
+		expiryDate,
+		sub.SubscriptionURL,
+	)
+
+	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, text)
+	editMsg.ParseMode = "Markdown"
+	editMsg.DisableWebPagePreview = true
+	keyboard := h.getBackKeyboard()
+	editMsg.ReplyMarkup = &keyboard
+	h.bot.Send(editMsg)
+}
+
+// handleMenuHelp handles the "menu_help" callback - shows help message with back button
+func (h *Handler) handleMenuHelp(ctx context.Context, chatID int64, username string, messageID int) {
+	logger.Info("User viewing help", zap.String("username", username))
+
+	sub, err := database.GetByTelegramID(chatID)
+	if err != nil || sub == nil {
+		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "❌ Ошибка: подписка не найдена.")
+		editMsg.DisableWebPagePreview = true
+		keyboard := h.getBackKeyboard()
+		editMsg.ReplyMarkup = &keyboard
+		h.bot.Send(editMsg)
+		return
+	}
+
+	text := h.getHelpText(h.cfg.TrafficLimitGB, sub.SubscriptionURL)
+	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, text)
+	editMsg.ParseMode = "Markdown"
+	editMsg.DisableWebPagePreview = true
+	keyboard := h.getBackKeyboard()
+	editMsg.ReplyMarkup = &keyboard
+	h.bot.Send(editMsg)
 }

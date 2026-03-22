@@ -244,18 +244,9 @@ func handleUpdate(ctx context.Context, handler *bot.Handler, update tgbotapi.Upd
 					"Неизвестная команда. Используйте /start или /help")
 			}
 		} else {
-			// Handle Reply keyboard button messages
-			switch update.Message.Text {
-			case "☕ Донат":
-				handler.HandleDonate(ctx, update)
-			case "📋 Подписка":
-				handler.HandleMySubscriptionButton(ctx, update)
-			case "❓ Помощь":
-				handler.HandleHelpButton(ctx, update)
-			default:
-				handler.SendMessage(ctx, update.Message.Chat.ID,
-					"Пожалуйста, используйте кнопки для взаимодействия с ботом.")
-			}
+			// User sent a message that's not a command - show help
+			handler.SendMessage(ctx, update.Message.Chat.ID,
+				"Используйте /start для начала работы с ботом.")
 		}
 	} else if update.CallbackQuery != nil {
 		handler.HandleCallback(ctx, update)

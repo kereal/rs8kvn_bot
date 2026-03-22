@@ -1751,80 +1751,8 @@ func TestGetHelpText_DifferentTrafficLimits(t *testing.T) {
 	}
 }
 
-// TestHandleDonate_NilMessage tests HandleDonate with nil message
-func TestHandleDonate_NilMessage(t *testing.T) {
-	handler := &Handler{
-		cfg: &config.Config{},
-	}
-
-	// Should not panic with nil message
-	update := tgbotapi.Update{}
-	handler.HandleDonate(context.Background(), update)
-	// If we reach here, the test passes (no panic)
-}
-
-// TestHandleMySubscriptionButton_NilMessage tests HandleMySubscriptionButton with nil message
-func TestHandleMySubscriptionButton_NilMessage(t *testing.T) {
-	handler := &Handler{
-		cfg: &config.Config{},
-	}
-
-	// Should not panic with nil message
-	update := tgbotapi.Update{}
-	handler.HandleMySubscriptionButton(context.Background(), update)
-	// If we reach here, the test passes (no panic)
-}
-
-// TestHandleHelpButton_NilMessage tests HandleHelpButton with nil message
-func TestHandleHelpButton_NilMessage(t *testing.T) {
-	handler := &Handler{
-		cfg: &config.Config{},
-	}
-
-	// Should not panic with nil message
-	update := tgbotapi.Update{}
-	handler.HandleHelpButton(context.Background(), update)
-	// If we reach here, the test passes (no panic)
-}
-
-// TestHandleHelpButton_WithSubscription tests HandleHelpButton when user has subscription
-func TestHandleHelpButton_WithSubscription(t *testing.T) {
-	cleanup := setupTestDatabase(t)
-	defer cleanup()
-
-	// Create a test subscription
-	sub := &database.Subscription{
-		TelegramID:      123456789,
-		Username:        "testuser",
-		ClientID:        "test-client-id",
-		XUIHost:         "http://localhost:2053",
-		InboundID:       1,
-		TrafficLimit:    107374182400,
-		ExpiryTime:      time.Now().Add(24 * time.Hour),
-		Status:          "active",
-		SubscriptionURL: "http://localhost:2053/sub/testuser123",
-	}
-
-	if err := database.CreateSubscription(sub); err != nil {
-		t.Fatalf("Failed to create test subscription: %v", err)
-	}
-
-	// Verify that GetByTelegramID returns the subscription
-	got, err := database.GetByTelegramID(123456789)
-	if err != nil {
-		t.Fatalf("GetByTelegramID() error = %v", err)
-	}
-
-	if got.SubscriptionURL != sub.SubscriptionURL {
-		t.Errorf("SubscriptionURL = %v, want %v", got.SubscriptionURL, sub.SubscriptionURL)
-	}
-
-	// Note: Without a real bot, we can't test the message sending
-	// This test verifies the database query logic
-}
-
-// TestHandleStart_ReplyKeyboard tests HandleStart Reply keyboard logic
-func TestHandleStart_ReplyKeyboard(t *testing.T) {
+// TestHandleStart_WithSubscription tests HandleStart when user has subscription
+func TestHandleStart_WithSubscription(t *testing.T) {
 	cleanup := setupTestDatabase(t)
 	defer cleanup()
 
@@ -1856,8 +1784,8 @@ func TestHandleStart_ReplyKeyboard(t *testing.T) {
 		t.Errorf("Status = %v, want active", got.Status)
 	}
 
-	// Note: Without a real bot, we can't test the Reply keyboard construction
-	// This test verifies the database query logic for the Reply keyboard condition
+	// Note: Without a real bot, we can't test the inline keyboard construction
+	// This test verifies the database query logic for the subscription condition
 }
 
 // TestHandleStart_NoSubscription tests HandleStart when user has no subscription
@@ -1873,48 +1801,6 @@ func TestHandleStart_NoSubscription(t *testing.T) {
 
 	// Note: Without a real bot, we can't test the inline button construction
 	// This test verifies the database query logic for the inline button condition
-}
-
-// TestReplyKeyboardConstruction tests Reply keyboard construction
-func TestReplyKeyboardConstruction(t *testing.T) {
-	// Test basic Reply keyboard
-	keyboard := tgbotapi.NewReplyKeyboard(
-		tgbotapi.NewKeyboardButtonRow(
-			tgbotapi.NewKeyboardButton("☕ Донат"),
-			tgbotapi.NewKeyboardButton("📋 Подписка"),
-			tgbotapi.NewKeyboardButton("❓ Помощь"),
-		),
-	)
-
-	if len(keyboard.Keyboard) != 1 {
-		t.Errorf("Expected 1 keyboard row, got %d", len(keyboard.Keyboard))
-	}
-
-	if len(keyboard.Keyboard[0]) != 3 {
-		t.Errorf("Expected 3 buttons in row, got %d", len(keyboard.Keyboard[0]))
-	}
-
-	// Verify button texts
-	expectedButtons := []string{"☕ Донат", "📋 Подписка", "❓ Помощь"}
-	for i, expected := range expectedButtons {
-		if keyboard.Keyboard[0][i].Text != expected {
-			t.Errorf("Button %d text = %s, want %s", i, keyboard.Keyboard[0][i].Text, expected)
-		}
-	}
-}
-
-// TestReplyKeyboard_ResizeKeyboard tests that Reply keyboard has ResizeKeyboard set
-func TestReplyKeyboard_ResizeKeyboard(t *testing.T) {
-	keyboard := tgbotapi.NewReplyKeyboard(
-		tgbotapi.NewKeyboardButtonRow(
-			tgbotapi.NewKeyboardButton("Test"),
-		),
-	)
-	keyboard.ResizeKeyboard = true
-
-	if !keyboard.ResizeKeyboard {
-		t.Error("ResizeKeyboard should be true")
-	}
 }
 
 // ==================== DisableWebPagePreview Tests ====================
