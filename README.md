@@ -155,7 +155,7 @@ go run ./cmd/bot
    - **For users without subscription:**
      - **📥 Получить подписку** - Create a new subscription
 3. Admin users also see:
-   - **📊 Статистика** - View bot statistics
+   - **📊 Стат** - View bot statistics
 
 **Note:** All menu buttons are inline (shown under the message), not at the bottom of the screen. Each submenu has a "🏠 В начало" button to return to the main menu.
 

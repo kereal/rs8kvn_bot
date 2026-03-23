@@ -231,8 +231,6 @@ func handleUpdate(ctx context.Context, handler *bot.Handler, update tgbotapi.Upd
 				handler.HandleStart(ctx, update)
 			case "help":
 				handler.HandleHelp(ctx, update)
-			case "lastreg":
-				handler.HandleLastReg(ctx, update)
 			case "del":
 				handler.HandleDel(ctx, update)
 			case "broadcast":
