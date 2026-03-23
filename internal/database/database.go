@@ -56,7 +56,7 @@ var sqlDB *sql.DB
 // Deprecated: Use NewService for dependency injection.
 func Init(dbPath string) error {
 	dbDir := filepath.Dir(dbPath)
-	if err := os.MkdirAll(dbDir, 0755); err != nil {
+	if err := os.MkdirAll(dbDir, 0750); err != nil {
 		return fmt.Errorf("failed to create database directory: %w", err)
 	}
 
@@ -233,7 +233,7 @@ type Service struct {
 // NewService creates a new database service.
 func NewService(dbPath string) (*Service, error) {
 	dbDir := filepath.Dir(dbPath)
-	if err := os.MkdirAll(dbDir, 0755); err != nil {
+	if err := os.MkdirAll(dbDir, 0750); err != nil {
 		return nil, fmt.Errorf("failed to create database directory: %w", err)
 	}
 
