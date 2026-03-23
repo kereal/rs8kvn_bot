@@ -194,7 +194,7 @@ func (h *Handler) handleAdminLastReg(ctx context.Context, chatID int64, username
 		editMsg.DisableWebPagePreview = true
 		keyboard := h.getBackKeyboard()
 		editMsg.ReplyMarkup = &keyboard
-		h.bot.Send(editMsg)
+		h.safeSend(editMsg)
 		return
 	}
 
@@ -203,7 +203,7 @@ func (h *Handler) handleAdminLastReg(ctx context.Context, chatID int64, username
 		editMsg.DisableWebPagePreview = true
 		keyboard := h.getBackKeyboard()
 		editMsg.ReplyMarkup = &keyboard
-		h.bot.Send(editMsg)
+		h.safeSend(editMsg)
 		return
 	}
 
@@ -226,7 +226,7 @@ func (h *Handler) handleAdminLastReg(ctx context.Context, chatID int64, username
 	editMsg.DisableWebPagePreview = true
 	keyboard := h.getBackKeyboard()
 	editMsg.ReplyMarkup = &keyboard
-	h.bot.Send(editMsg)
+	h.safeSend(editMsg)
 }
 
 // HandleDel handles the /del command for admins.
@@ -528,7 +528,7 @@ func (h *Handler) handleGetSubscription(ctx context.Context, chatID int64, usern
 		editMsg.ParseMode = "Markdown"
 		editMsg.DisableWebPagePreview = true
 		editMsg.ReplyMarkup = &backKeyboard
-		h.bot.Send(editMsg)
+		h.safeSend(editMsg)
 		return
 	}
 
@@ -567,14 +567,14 @@ func (h *Handler) handleMySubscription(ctx context.Context, chatID int64, userna
 	if err != nil || sub == nil {
 		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "❌ У вас нет активной подписки.\n\nНажмите «Получить подписку» для создания.")
 		editMsg.DisableWebPagePreview = true
-		h.bot.Send(editMsg)
+		h.safeSend(editMsg)
 		return
 	}
 
 	if sub.IsExpired() {
 		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "⚠️ Ваша подписка истекла.\n\nНажмите «Получить подписку» для создания новой.")
 		editMsg.DisableWebPagePreview = true
-		h.bot.Send(editMsg)
+		h.safeSend(editMsg)
 		return
 	}
 
@@ -607,7 +607,7 @@ func (h *Handler) handleMySubscription(ctx context.Context, chatID int64, userna
 		// Delete old message if exists
 		if messageID > 0 {
 			deleteMsg := tgbotapi.NewDeleteMessage(chatID, messageID)
-			h.bot.Request(deleteMsg)
+			_, _ = h.bot.Request(deleteMsg) // Ignore error, message may already be deleted
 		}
 		// Send new message instead
 		msg := tgbotapi.NewMessage(chatID, fmt.Sprintf(
@@ -638,7 +638,7 @@ func (h *Handler) handleAdminStats(ctx context.Context, chatID int64, username s
 		editMsg.DisableWebPagePreview = true
 		keyboard := h.getBackKeyboard()
 		editMsg.ReplyMarkup = &keyboard
-		h.bot.Send(editMsg)
+		h.safeSend(editMsg)
 		return
 	}
 
@@ -667,7 +667,7 @@ func (h *Handler) handleAdminStats(ctx context.Context, chatID int64, username s
 	editMsg.DisableWebPagePreview = true
 	keyboard := h.getBackKeyboard()
 	editMsg.ReplyMarkup = &keyboard
-	h.bot.Send(editMsg)
+	h.safeSend(editMsg)
 }
 
 // createSubscription creates a new subscription for the user.
@@ -689,7 +689,7 @@ func (h *Handler) createSubscription(ctx context.Context, chatID int64, username
 		// Edit existing message to show loading
 		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "⏳ Загрузка...")
 		editMsg.DisableWebPagePreview = true
-		h.bot.Send(editMsg)
+		h.safeSend(editMsg)
 	}
 
 	now := time.Now()
@@ -711,7 +711,7 @@ func (h *Handler) createSubscription(ctx context.Context, chatID int64, username
 		logger.Error("Failed to add client to 3x-ui", zap.Error(err))
 		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "❌ Произошла ошибка при создании подписки. Попробуйте позже.")
 		editMsg.DisableWebPagePreview = true
-		h.bot.Send(editMsg)
+		h.safeSend(editMsg)
 		return
 	}
 
@@ -749,7 +749,7 @@ func (h *Handler) createSubscription(ctx context.Context, chatID int64, username
 
 		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "❌ Подписка создана в панели, но не сохранена в базе. Обратитесь к администратору.")
 		editMsg.DisableWebPagePreview = true
-		h.bot.Send(editMsg)
+		h.safeSend(editMsg)
 		return
 	}
 
@@ -763,7 +763,7 @@ func (h *Handler) createSubscription(ctx context.Context, chatID int64, username
 	editMsg.ParseMode = "Markdown"
 	editMsg.DisableWebPagePreview = true
 	editMsg.ReplyMarkup = &backKeyboard
-	h.bot.Send(editMsg)
+	h.safeSend(editMsg)
 
 	// Notify admin about new subscription
 	h.notifyAdmin(ctx, username, chatID, subscriptionURL, expiryTime)
@@ -818,6 +818,15 @@ func (h *Handler) send(ctx context.Context, msg tgbotapi.MessageConfig) {
 		return
 	}
 
+}
+
+// safeSend sends a message and logs any errors.
+// Use this for non-critical messages where you don't need to handle the error.
+func (h *Handler) safeSend(chattable tgbotapi.Chattable) {
+	_, err := h.bot.Send(chattable)
+	if err != nil {
+		logger.Error("Failed to send message", zap.Error(err))
+	}
 }
 
 // sendWithRetry sends a message with rate limiting and retry logic.
@@ -937,7 +946,7 @@ func (h *Handler) handleBackToStart(ctx context.Context, chatID int64, username 
 		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, text)
 		editMsg.DisableWebPagePreview = true
 		editMsg.ReplyMarkup = &keyboard
-		h.bot.Send(editMsg)
+		h.safeSend(editMsg)
 	} else {
 		// User has no subscription - edit message with inline button to get subscription
 		text := fmt.Sprintf(
@@ -964,7 +973,7 @@ func (h *Handler) handleBackToStart(ctx context.Context, chatID int64, username 
 		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, text)
 		editMsg.DisableWebPagePreview = true
 		editMsg.ReplyMarkup = &inlineKeyboard
-		h.bot.Send(editMsg)
+		h.safeSend(editMsg)
 	}
 }
 
@@ -977,7 +986,7 @@ func (h *Handler) handleMenuDonate(ctx context.Context, chatID int64, username s
 	editMsg.DisableWebPagePreview = true
 	keyboard := h.getBackKeyboard()
 	editMsg.ReplyMarkup = &keyboard
-	h.bot.Send(editMsg)
+	h.safeSend(editMsg)
 }
 
 // handleMenuSubscription handles the "menu_subscription" callback - shows subscription info with back button
@@ -990,7 +999,7 @@ func (h *Handler) handleMenuSubscription(ctx context.Context, chatID int64, user
 		editMsg.DisableWebPagePreview = true
 		keyboard := h.getBackKeyboard()
 		editMsg.ReplyMarkup = &keyboard
-		h.bot.Send(editMsg)
+		h.safeSend(editMsg)
 		return
 	}
 
@@ -999,7 +1008,7 @@ func (h *Handler) handleMenuSubscription(ctx context.Context, chatID int64, user
 		editMsg.DisableWebPagePreview = true
 		keyboard := h.getBackKeyboard()
 		editMsg.ReplyMarkup = &keyboard
-		h.bot.Send(editMsg)
+		h.safeSend(editMsg)
 		return
 	}
 
@@ -1027,7 +1036,7 @@ func (h *Handler) handleMenuSubscription(ctx context.Context, chatID int64, user
 	editMsg.DisableWebPagePreview = true
 	keyboard := h.getBackKeyboard()
 	editMsg.ReplyMarkup = &keyboard
-	h.bot.Send(editMsg)
+	h.safeSend(editMsg)
 }
 
 // handleMenuHelp handles the "menu_help" callback - shows help message with back button
@@ -1040,7 +1049,7 @@ func (h *Handler) handleMenuHelp(ctx context.Context, chatID int64, username str
 		editMsg.DisableWebPagePreview = true
 		keyboard := h.getBackKeyboard()
 		editMsg.ReplyMarkup = &keyboard
-		h.bot.Send(editMsg)
+		h.safeSend(editMsg)
 		return
 	}
 
@@ -1050,5 +1059,5 @@ func (h *Handler) handleMenuHelp(ctx context.Context, chatID int64, username str
 	editMsg.DisableWebPagePreview = true
 	keyboard := h.getBackKeyboard()
 	editMsg.ReplyMarkup = &keyboard
-	h.bot.Send(editMsg)
+	h.safeSend(editMsg)
 }

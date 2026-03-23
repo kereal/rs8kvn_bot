@@ -5,23 +5,56 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"sort"
-	"time"
-
 	"rs8kvn_bot/internal/config"
 	"rs8kvn_bot/internal/logger"
+	"sort"
+	"strings"
+	"time"
 
 	"go.uber.org/zap"
 )
+
+// validatePath checks if a path is safe (no directory traversal).
+func validatePath(path string) error {
+	// Clean the path to resolve any . or .. elements
+	cleaned := filepath.Clean(path)
+
+	// Check for directory traversal attempts
+	if strings.Contains(cleaned, "..") {
+		return fmt.Errorf("invalid path: directory traversal detected")
+	}
+
+	// Ensure the path is not trying to escape to sensitive locations
+	absPath, err := filepath.Abs(cleaned)
+	if err != nil {
+		return fmt.Errorf("failed to get absolute path: %w", err)
+	}
+
+	// Prevent access to system directories
+	if strings.HasPrefix(absPath, "/etc/") ||
+		strings.HasPrefix(absPath, "/root/") ||
+		strings.HasPrefix(absPath, "/sys/") ||
+		strings.HasPrefix(absPath, "/proc/") {
+		return fmt.Errorf("access to system directories is forbidden")
+	}
+
+	return nil
+}
 
 // BackupDatabase creates a backup of the SQLite database file.
 // It uses atomic write pattern: write to temp file, sync, then rename.
 // This ensures the backup is always in a consistent state.
 func BackupDatabase(dbPath string) error {
+	// Validate the database path to prevent directory traversal
+	if err := validatePath(dbPath); err != nil {
+		return fmt.Errorf("invalid database path: %w", err)
+	}
+
 	backupPath := dbPath + ".backup"
 	tempPath := backupPath + ".tmp"
 
 	// Open source database
+	// #nosec G304 -- File path is validated by validatePath() above to prevent directory traversal
 	src, err := os.Open(dbPath)
 	if err != nil {
 		return fmt.Errorf("failed to open database: %w", err)
@@ -29,6 +62,7 @@ func BackupDatabase(dbPath string) error {
 	defer src.Close()
 
 	// Create temp backup file
+	// #nosec G304 -- tempPath is derived from validated dbPath and is safe
 	dst, err := os.Create(tempPath)
 	if err != nil {
 		return fmt.Errorf("failed to create temp backup: %w", err)
@@ -37,30 +71,30 @@ func BackupDatabase(dbPath string) error {
 
 	// Copy database to temp file
 	if _, err := io.Copy(dst, src); err != nil {
-		os.Remove(tempPath)
+		_ = os.Remove(tempPath) // Ignore error, we're already returning an error
 		return fmt.Errorf("failed to copy database: %w", err)
 	}
 
 	// Sync to ensure all data is written to disk
 	if err := dst.Sync(); err != nil {
-		os.Remove(tempPath)
+		_ = os.Remove(tempPath) // Ignore error, we're already returning an error
 		return fmt.Errorf("failed to sync backup: %w", err)
 	}
 
 	// Close files before rename
 	if err := dst.Close(); err != nil {
-		os.Remove(tempPath)
+		_ = os.Remove(tempPath) // Ignore error, we're already returning an error
 		return fmt.Errorf("failed to close backup file: %w", err)
 	}
 
 	if err := src.Close(); err != nil {
-		os.Remove(tempPath)
+		_ = os.Remove(tempPath) // Ignore error, we're already returning an error
 		return fmt.Errorf("failed to close database file: %w", err)
 	}
 
 	// Atomic rename
 	if err := os.Rename(tempPath, backupPath); err != nil {
-		os.Remove(tempPath)
+		_ = os.Remove(tempPath) // Ignore error, we're already returning an error
 		return fmt.Errorf("failed to rename backup: %w", err)
 	}
 
