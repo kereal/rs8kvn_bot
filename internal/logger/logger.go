@@ -32,7 +32,7 @@ var (
 // Deprecated: Use NewService for dependency injection.
 func Init(logFilePath, level string) error {
 	logDir := filepath.Dir(logFilePath)
-	if err := os.MkdirAll(logDir, 0755); err != nil {
+	if err := os.MkdirAll(logDir, 0750); err != nil {
 		return fmt.Errorf("failed to create log directory: %w", err)
 	}
 
@@ -106,7 +106,8 @@ func (l *tgbotapiLogger) Printf(format string, v ...interface{}) {
 func RedirectStdLog() {
 	log.SetOutput(&stdLogWriter{})
 	log.SetFlags(0)
-	tgbotapi.SetLogger(&tgbotapiLogger{})
+	// Ignore error from SetLogger - this is not critical for application startup
+	_ = tgbotapi.SetLogger(&tgbotapiLogger{})
 }
 
 // Writer returns an io.Writer that logs to our zap logger at INFO level.
@@ -250,7 +251,7 @@ type Service struct {
 // NewService creates a new logger service with file and console output.
 func NewService(logFilePath, level string) (*Service, error) {
 	logDir := filepath.Dir(logFilePath)
-	if err := os.MkdirAll(logDir, 0755); err != nil {
+	if err := os.MkdirAll(logDir, 0750); err != nil {
 		return nil, fmt.Errorf("failed to create log directory: %w", err)
 	}
 
