@@ -53,7 +53,7 @@ For users WITHOUT subscription:
 - **📥 Получить подписку** - Create a new subscription
 
 Admin also sees:
-- **📊 Статистика** - View bot statistics
+- **📊 Стат** - View bot statistics
 
 **All submenus have "🏠 В начало" button to return to main menu.**
 

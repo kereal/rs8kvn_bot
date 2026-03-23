@@ -40,8 +40,8 @@ func NewHandler(bot *tgbotapi.BotAPI, cfg *config.Config, xuiClient *xui.Client)
 func (h *Handler) getMainMenuKeyboard() tgbotapi.InlineKeyboardMarkup {
 	return tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("☕ Донат", "menu_donate"),
 			tgbotapi.NewInlineKeyboardButtonData("📋 Подписка", "menu_subscription"),
+			tgbotapi.NewInlineKeyboardButtonData("☕ Донат", "menu_donate"),
 		),
 		tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData("❓ Помощь", "menu_help"),
@@ -95,11 +95,12 @@ func (h *Handler) HandleStart(ctx context.Context, update tgbotapi.Update) {
 		))
 
 		keyboard := h.getMainMenuKeyboard()
-		// Add admin button if user is admin
+		// Add admin buttons if user is admin
 		if isAdmin {
 			keyboard.InlineKeyboard = append(keyboard.InlineKeyboard,
 				tgbotapi.NewInlineKeyboardRow(
-					tgbotapi.NewInlineKeyboardButtonData("📊 Статистика", "admin_stats"),
+					tgbotapi.NewInlineKeyboardButtonData("📊 Стат", "admin_stats"),
+					tgbotapi.NewInlineKeyboardButtonData("📋 Посл.рег", "admin_lastreg"),
 				),
 			)
 		}
@@ -119,11 +120,12 @@ func (h *Handler) HandleStart(ctx context.Context, update tgbotapi.Update) {
 			),
 		)
 
-		// Add admin button if user is admin
+		// Add admin buttons if user is admin
 		if isAdmin {
 			inlineKeyboard.InlineKeyboard = append(inlineKeyboard.InlineKeyboard,
 				tgbotapi.NewInlineKeyboardRow(
-					tgbotapi.NewInlineKeyboardButtonData("📊 Статистика", "admin_stats"),
+					tgbotapi.NewInlineKeyboardButtonData("📊 Стат", "admin_stats"),
+					tgbotapi.NewInlineKeyboardButtonData("📋 Посл.рег", "admin_lastreg"),
 				),
 			)
 		}
@@ -174,17 +176,13 @@ func (h *Handler) HandleHelp(ctx context.Context, update tgbotapi.Update) {
 
 // HandleLastReg handles the /lastreg command for admins.
 // Returns a list of the latest users who subscribed.
-func (h *Handler) HandleLastReg(ctx context.Context, update tgbotapi.Update) {
-	if update.Message == nil {
-		logger.Error("HandleLastReg called with nil Message")
-		return
-	}
-
-	chatID := update.Message.Chat.ID
+// handleAdminLastReg handles the "admin_lastreg" callback - shows last 10 registrations
+func (h *Handler) handleAdminLastReg(ctx context.Context, chatID int64, username string, messageID int) {
+	logger.Info("Admin requesting last registrations", zap.String("username", username))
 
 	// Verify admin access
 	if chatID != h.cfg.TelegramAdminID {
-		logger.Warn("Non-admin user attempted to access /lastreg", zap.Int64("chat_id", chatID))
+		logger.Warn("Non-admin user attempted to access last registrations", zap.Int64("chat_id", chatID))
 		return
 	}
 
@@ -192,18 +190,26 @@ func (h *Handler) HandleLastReg(ctx context.Context, update tgbotapi.Update) {
 	subs, err := database.GetLatestSubscriptions(10)
 	if err != nil {
 		logger.Error("Failed to get latest subscriptions", zap.Error(err))
-		h.SendMessage(ctx, chatID, "❌ Ошибка получения списка подписок")
+		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "❌ Ошибка получения списка подписок")
+		editMsg.DisableWebPagePreview = true
+		keyboard := h.getBackKeyboard()
+		editMsg.ReplyMarkup = &keyboard
+		h.bot.Send(editMsg)
 		return
 	}
 
 	if len(subs) == 0 {
-		h.SendMessage(ctx, chatID, "📭 Нет активных подписок")
+		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "📭 Нет активных подписок")
+		editMsg.DisableWebPagePreview = true
+		keyboard := h.getBackKeyboard()
+		editMsg.ReplyMarkup = &keyboard
+		h.bot.Send(editMsg)
 		return
 	}
 
 	// Format the message as a table with 3 columns
 	var sb strings.Builder
-	sb.WriteString("📋 *Последние регистрации:*\n\n")
+	sb.WriteString("📋 *Последние регистрации*\n\n")
 
 	for _, sub := range subs {
 		// Column 1: ID, Column 2: Username (clickable link), Column 3: Date and time
@@ -215,9 +221,12 @@ func (h *Handler) HandleLastReg(ctx context.Context, update tgbotapi.Update) {
 		sb.WriteString(fmt.Sprintf("%d │ [@%s](https://t.me/%s) │ %s\n", sub.ID, username, username, dateStr))
 	}
 
-	msg := tgbotapi.NewMessage(chatID, sb.String())
-	msg.ParseMode = "Markdown"
-	h.send(ctx, msg)
+	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, sb.String())
+	editMsg.ParseMode = "Markdown"
+	editMsg.DisableWebPagePreview = true
+	keyboard := h.getBackKeyboard()
+	editMsg.ReplyMarkup = &keyboard
+	h.bot.Send(editMsg)
 }
 
 // HandleDel handles the /del command for admins.
@@ -470,7 +479,11 @@ func (h *Handler) HandleCallback(ctx context.Context, update tgbotapi.Update) {
 		messageID := update.CallbackQuery.Message.MessageID
 		h.handleMySubscription(ctx, chatID, username, messageID)
 	case "admin_stats":
-		h.handleAdminStats(ctx, chatID, username)
+		messageID := update.CallbackQuery.Message.MessageID
+		h.handleAdminStats(ctx, chatID, username, messageID)
+	case "admin_lastreg":
+		messageID := update.CallbackQuery.Message.MessageID
+		h.handleAdminLastReg(ctx, chatID, username, messageID)
 	case "back_to_start":
 		messageID := update.CallbackQuery.Message.MessageID
 		h.handleBackToStart(ctx, chatID, username, messageID)
@@ -609,7 +622,7 @@ func (h *Handler) handleMySubscription(ctx context.Context, chatID int64, userna
 }
 
 // handleAdminStats handles the "admin stats" callback.
-func (h *Handler) handleAdminStats(ctx context.Context, chatID int64, username string) {
+func (h *Handler) handleAdminStats(ctx context.Context, chatID int64, username string, messageID int) {
 	logger.Info("Admin requesting stats", zap.String("username", username))
 
 	// Verify admin access
@@ -621,7 +634,11 @@ func (h *Handler) handleAdminStats(ctx context.Context, chatID int64, username s
 	var allSubs []database.Subscription
 	if err := database.DB.Find(&allSubs).Error; err != nil {
 		logger.Error("Failed to fetch subscriptions for stats", zap.Error(err))
-		h.SendMessage(ctx, chatID, "❌ Ошибка получения статистики")
+		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "❌ Ошибка получения статистики")
+		editMsg.DisableWebPagePreview = true
+		keyboard := h.getBackKeyboard()
+		editMsg.ReplyMarkup = &keyboard
+		h.bot.Send(editMsg)
 		return
 	}
 
@@ -637,15 +654,20 @@ func (h *Handler) handleAdminStats(ctx context.Context, chatID int64, username s
 		}
 	}
 
-	msg := tgbotapi.NewMessage(chatID, fmt.Sprintf(
-		"📊 **Статистика бота**:\n\n👥 Всего пользователей: %d\n✅ Активные подписки: %d\n⏰ Истекшие: %d\n📁 Записей в БД: %d",
+	text := fmt.Sprintf(
+		"📊 *Статистика бота*\n\n👥 Всего пользователей: %d\n✅ Активные подписки: %d\n⏰ Истекшие: %d\n📁 Записей в БД: %d",
 		len(allSubs),
 		activeCount,
 		expiredCount,
 		len(allSubs),
-	))
-	msg.ParseMode = "Markdown"
-	h.sendWithRetry(ctx, msg, 3)
+	)
+
+	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, text)
+	editMsg.ParseMode = "Markdown"
+	editMsg.DisableWebPagePreview = true
+	keyboard := h.getBackKeyboard()
+	editMsg.ReplyMarkup = &keyboard
+	h.bot.Send(editMsg)
 }
 
 // createSubscription creates a new subscription for the user.
@@ -902,11 +924,12 @@ func (h *Handler) handleBackToStart(ctx context.Context, chatID int64, username 
 		)
 
 		keyboard := h.getMainMenuKeyboard()
-		// Add admin button if user is admin
+		// Add admin buttons if user is admin
 		if isAdmin {
 			keyboard.InlineKeyboard = append(keyboard.InlineKeyboard,
 				tgbotapi.NewInlineKeyboardRow(
-					tgbotapi.NewInlineKeyboardButtonData("📊 Статистика", "admin_stats"),
+					tgbotapi.NewInlineKeyboardButtonData("📊 Стат", "admin_stats"),
+					tgbotapi.NewInlineKeyboardButtonData("📋 Посл.рег", "admin_lastreg"),
 				),
 			)
 		}
@@ -928,11 +951,12 @@ func (h *Handler) handleBackToStart(ctx context.Context, chatID int64, username 
 			),
 		)
 
-		// Add admin button if user is admin
+		// Add admin buttons if user is admin
 		if isAdmin {
 			inlineKeyboard.InlineKeyboard = append(inlineKeyboard.InlineKeyboard,
 				tgbotapi.NewInlineKeyboardRow(
-					tgbotapi.NewInlineKeyboardButtonData("📊 Статистика", "admin_stats"),
+					tgbotapi.NewInlineKeyboardButtonData("📊 Стат", "admin_stats"),
+					tgbotapi.NewInlineKeyboardButtonData("📋 Посл.рег", "admin_lastreg"),
 				),
 			)
 		}
