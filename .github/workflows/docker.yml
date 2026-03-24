@@ -35,7 +35,7 @@ jobs:
                   args: --timeout=5m
 
             - name: Run gosec
-              uses: securego/gosec@v3
+              uses: securego/gosec@master
               with:
                   args: -no-fail -quiet ./...
 
