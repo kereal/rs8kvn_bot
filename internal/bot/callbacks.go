@@ -16,6 +16,19 @@ func (h *Handler) HandleCallback(ctx context.Context, update tgbotapi.Update) {
 		return
 	}
 
+	// Check if Message is nil (can happen with inline mode callbacks)
+	if update.CallbackQuery.Message == nil {
+		logger.Warn("CallbackQuery has nil Message, skipping",
+			zap.String("data", update.CallbackQuery.Data),
+			zap.Int64("from_id", update.CallbackQuery.From.ID))
+		// Still answer the callback to remove loading state
+		callback := tgbotapi.NewCallback(update.CallbackQuery.ID, "Сообщение не найдено")
+		if _, err := h.bot.Request(callback); err != nil {
+			logger.Error("Failed to answer callback", zap.Error(err))
+		}
+		return
+	}
+
 	data := update.CallbackQuery.Data
 	chatID := update.CallbackQuery.Message.Chat.ID
 	username := h.getUsername(update.CallbackQuery.From)

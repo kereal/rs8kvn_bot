@@ -87,12 +87,20 @@ func (h *Handler) HandleDel(ctx context.Context, update tgbotapi.Update) {
 		return
 	}
 
-	// Parse the ID
-	var id uint
-	if _, err := fmt.Sscanf(args, "%d", &id); err != nil {
+	// Parse the ID - use int64 to properly detect negative numbers
+	var parsedID int64
+	if _, err := fmt.Sscanf(args, "%d", &parsedID); err != nil {
 		h.SendMessage(ctx, chatID, "❌ Неверный формат ID. Использование: /del <id>\n\nПример: /del 5")
 		return
 	}
+
+	// Validate ID is positive
+	if parsedID <= 0 {
+		h.SendMessage(ctx, chatID, "❌ ID должен быть положительным числом")
+		return
+	}
+
+	id := uint(parsedID)
 
 	// Get the subscription
 	sub, err := h.db.GetByID(ctx, id)

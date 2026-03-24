@@ -412,10 +412,10 @@ func TestValidatePath(t *testing.T) {
 }
 
 func TestValidatePath_Empty(t *testing.T) {
-	// Empty path will pass validation (filepath.Clean("") returns ".")
+	// Empty path should now be rejected for security
 	err := validatePath("")
-	if err != nil {
-		t.Errorf("validatePath() on empty should not error: %v", err)
+	if err == nil {
+		t.Error("validatePath() should error on empty path")
 	}
 }
 
@@ -708,9 +708,9 @@ func TestValidatePath_DirectoryTraversal(t *testing.T) {
 		wantErr bool
 	}{
 		{"double dot in path", "../etc/passwd", true},
-		{"single dot in middle", "foo/../bar/baz", false}, // Cleaned by filepath.Clean to bar/baz
-		{"trailing dots", "foo/bar/..", false},            // Cleaned by filepath.Clean to foo
-		{"embedded dots", "foo/./bar", false},             // Cleaned to foo/bar
+		{"single dot in middle", "foo/../bar/baz", true}, // Now errors: contains ".."
+		{"trailing dots", "foo/bar/..", true},            // Now errors: contains ".."
+		{"embedded dots", "foo/./bar", false},            // Cleaned to foo/bar
 		{"absolute path with double dots", "/foo/../etc/passwd", true},
 		{"multiple double dots", "../../../etc/passwd", true},
 	}
