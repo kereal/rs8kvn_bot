@@ -48,6 +48,7 @@ type Client struct {
 	httpClient *http.Client
 	mu         sync.RWMutex
 	lastLogin  time.Time
+	breaker    *CircuitBreaker
 }
 
 // APIResponse represents a generic response from the 3x-ui API.
@@ -115,6 +116,7 @@ func NewClient(host, username, password string) *Client {
 			Jar:       jar,
 			Transport: transport,
 		},
+		breaker: NewCircuitBreaker(config.CircuitBreakerMaxFailures, config.CircuitBreakerTimeout),
 	}
 }
 
@@ -127,6 +129,15 @@ func (c *Client) Login(ctx context.Context) error {
 // ensureLoggedIn checks if the session is valid and re-authenticates if necessary.
 // If force is true, it will always re-authenticate.
 func (c *Client) ensureLoggedIn(ctx context.Context, force bool) error {
+	if err := c.breaker.Execute(ctx, func() error {
+		return c.doEnsureLoggedIn(ctx, force)
+	}); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (c *Client) doEnsureLoggedIn(ctx context.Context, force bool) error {
 	// Fast path: check if we have a valid session without locking
 	c.mu.RLock()
 	validSession := !force && time.Since(c.lastLogin) < config.XUISessionValidity
@@ -419,6 +430,10 @@ func (c *Client) GetSubscriptionLink(baseURL, subID, subPath string) string {
 // GetExternalURL extracts the base URL (scheme + host) from a full URL.
 func (c *Client) GetExternalURL(host string) string {
 	return GetExternalURL(host)
+}
+
+func (c *Client) CircuitBreakerState() CircuitState {
+	return c.breaker.State()
 }
 func GetExternalURL(host string) string {
 	u, err := url.Parse(host)
