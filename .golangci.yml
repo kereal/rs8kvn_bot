@@ -30,6 +30,7 @@ linters:
       check-type-assertions: true
       exclude-functions:
         - sync.Pool.Get
+        - "sync.(*Pool).Get"
     gosec:
       excludes:
         - G104
