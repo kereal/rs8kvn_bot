@@ -10,8 +10,6 @@ linters:
     - govet
     - staticcheck
     - unused
-    - gofmt
-    - goimports
     - misspell
     - unconvert
     - unparam
@@ -26,3 +24,8 @@ linters:
         - G104
         - G304
         - G306
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
