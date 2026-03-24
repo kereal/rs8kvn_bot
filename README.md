@@ -17,11 +17,13 @@ Telegram bot for distributing VLESS+Reality+Vision proxy subscriptions from 3x-u
 - 🛡️ Rate limiting
 - ⚡ Graceful shutdown
 - 🐳 Docker support
+- 🧪 Unit tests with ~60% coverage
+- ✅ golangci-lint for code quality
 
 ## Requirements
 
 - Docker & Docker Compose (recommended)
-- OR Go 1.24+
+- OR Go 1.25+
 - 3x-ui panel (https://github.com/MHSanaei/3x-ui)
 - Telegram Bot Token
 
@@ -193,7 +195,10 @@ Sends a private message to user with username "username".
 
 ## CI/CD with GitHub Actions
 
-This project includes a GitHub Actions workflow that automatically builds and pushes Docker images to GitHub Container Registry.
+This project includes a GitHub Actions workflow that automatically:
+- Builds and pushes Docker images to GitHub Container Registry
+- Runs `golangci-lint` for code quality checks
+- Runs tests with coverage
 
 ### Setup
 
@@ -224,22 +229,39 @@ rs8kvn_bot/
 │   ├── backup/
 │   │   └── backup.go            # Database backup and rotation
 │   ├── bot/
-│   │   └── handlers.go          # Telegram bot handlers
+│   │   ├── admin.go             # Admin handlers (/lastreg, /del, /broadcast)
+│   │   ├── callbacks.go         # Callback query handlers
+│   │   ├── commands.go         # Command handlers
+│   │   ├── handler.go          # Main handler setup
+│   │   ├── handlers.go         # Legacy handlers (backwards compat)
+│   │   ├── handlers_test.go   # Handler tests
+│   │   ├── menu.go            # Inline keyboard menus
+│   │   ├── message.go         # Message formatting
+│   │   └── subscription.go   # Subscription logic
 │   ├── config/
-│   │   └── config.go            # Environment configuration
+│   │   ├── config.go            # Environment configuration
+│   │   └── constants.go         # Application constants
 │   ├── database/
 │   │   ├── database.go          # Database models and functions
+│   │   ├── database_test.go    # Database tests
 │   │   └── migrations.go        # Database migrations system
 │   ├── heartbeat/
-│   │   └── heartbeat.go         # Heartbeat monitoring
+│   │   ├── heartbeat.go        # Heartbeat monitoring
+│   │   └── heartbeat_test.go  # Heartbeat tests
 │   ├── logger/
-│   │   └── logger.go            # Zap logger with Sentry integration
+│   │   ├── logger.go           # Zap logger with Sentry integration
+│   │   └── logger_test.go     # Logger tests
 │   ├── ratelimiter/
-│   │   └── ratelimiter.go       # Token bucket rate limiter
+│   │   ├── ratelimiter.go      # Token bucket rate limiter
+│   │   └── ratelimiter_test.go # Rate limiter tests
+│   ├── testutil/
+│   │   └── testutil.go        # Test utilities
 │   ├── utils/
-│   │   └── uuid.go              # UUID and SubID generators
+│   │   ├── uuid.go            # UUID and SubID generators
+│   │   └── uuid_test.go       # UUID tests
 │   └── xui/
-│       └── client.go            # 3x-ui API client
+│       ├── client.go           # 3x-ui API client
+│       └── client_test.go    # XUI client tests
 ├── data/                        # Data directory (created at runtime)
 │   ├── tgvpn.db                 # SQLite database
 │   ├── tgvpn.db.backup          # Latest backup
@@ -250,6 +272,7 @@ rs8kvn_bot/
 ├── docker-compose.yml
 ├── go.mod
 ├── go.sum
+├── .golangci.yml               # golangci-lint configuration
 └── README.md
 ```
 
