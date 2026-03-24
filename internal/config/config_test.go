@@ -650,3 +650,31 @@ func contains(s, substr string) bool {
 	}
 	return false
 }
+
+func TestMaskURL_Empty(t *testing.T) {
+	result := maskURL("")
+	if result != "(not set)" {
+		t.Errorf("maskURL(\"\") = %q, want %q", result, "(not set)")
+	}
+}
+
+func TestMaskURL_ValidURL(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{"http URL", "http://example.com/path", "http://example.com/***"},
+		{"https URL", "https://example.com:8080/path", "https://example.com:8080/***"},
+		{"URL without path", "https://example.com", "https://example.com/***"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := maskURL(tt.input)
+			if result != tt.expected {
+				t.Errorf("maskURL(%q) = %q, want %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}

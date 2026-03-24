@@ -2,6 +2,8 @@
 
 Telegram bot for distributing VLESS+Reality+Vision proxy subscriptions from 3x-ui panel.
 
+**Version:** v1.9.6 | **Coverage:** ~51% | **License:** MIT
+
 ## Features
 
 - 📥 Get subscription on demand
@@ -11,15 +13,17 @@ Telegram bot for distributing VLESS+Reality+Vision proxy subscriptions from 3x-u
 - 📅 Auto-renewal on the last day of each month
 - 🔔 Admin notifications on new subscriptions
 - 💓 Heartbeat monitoring support
+- 🏥 Health check endpoint (/healthz, /readyz)
 - 📝 File logging with rotation (zap)
 - 🗄️ Daily database backups with rotation
 - 🔄 Database migrations system
 - 🐛 Sentry error tracking
-- 🛡️ Rate limiting
-- ⚡ Graceful shutdown
-- 🐳 Docker support
-- 🧪 Unit tests with ~60% coverage
-- ✅ golangci-lint for code quality
+- 🛡️ Rate limiting per user
+- ⚡ Graceful shutdown with goroutine tracking
+- 🔒 Circuit breaker for 3x-ui panel
+- 🐳 Docker support with health checks
+- 🧪 Unit tests (~51% coverage)
+- ✅ golangci-lint and gosec for code quality
 
 ## Requirements
 
@@ -78,16 +82,17 @@ docker run -d \
   --restart unless-stopped \
   -v $(pwd)/.env:/app/.env:ro \
   -v $(pwd)/data:/app/data \
+  -p 127.0.0.1:8080:8080 \
   ghcr.io/kereal/rs8kvn_bot:latest
 ```
 
-#### 6. View logs
+#### 7. View logs
 
 ```bash
 docker logs -f rs8kvn_bot
 ```
 
-#### 7. Stop/Start
+#### 8. Stop/Start
 
 ```bash
 docker stop rs8kvn_bot
@@ -120,6 +125,7 @@ docker-compose logs -f
 #### 1. Clone and install dependencies
 
 ```bash
+git clone https://github.com/kereal/rs8kvn_bot.git
 cd rs8kvn_bot
 go mod tidy
 ```
@@ -178,9 +184,9 @@ Admins (specified in `TELEGRAM_ADMIN_ID`) have access to additional commands:
 | Command | Description |
 |---------|-------------|
 | `/lastreg` | Show the last 10 registered users |
-| `/del <id>` | Delete a subscription by database ID (removes from both 3x-ui panel and database) |
+| `/del <id>` | Delete a subscription by database ID |
 | `/broadcast <message>` | Send a message to all users who have a subscription |
-| `/send <id\|username> <message>` | Send a message to a specific user by Telegram ID or username |
+| `/send <id\|username> <message>` | Send a message to a specific user |
 
 **Examples:**
 ```
@@ -191,7 +197,7 @@ Deletes the subscription with database ID 5 from both the 3x-ui panel and the lo
 ```
 /broadcast 🔔 Важное обновление: бот обновлен!
 ```
-Sends the message "🔔 Важное обновление: бот обновлен!" to all users with subscriptions.
+Sends the message to all users with subscriptions.
 
 ```
 /send 123456789 Привет! Это личное сообщение.
@@ -203,29 +209,47 @@ Sends a private message to user with Telegram ID 123456789.
 ```
 Sends a private message to user with username "username".
 
+## Health Check
+
+The bot exposes HTTP health check endpoints on port 8080:
+
+| Endpoint | Description | Status Codes |
+|----------|-------------|--------------|
+| `GET /healthz` | Basic health (process alive, DB and xui status) | 200/503 |
+| `GET /readyz` | Ready state (accepting requests after init) | 200/503 |
+
+Example response:
+```json
+{
+  "status": "ok",
+  "timestamp": "2026-03-24T12:00:00Z",
+  "uptime": "2h30m",
+  "components": {
+    "database": {"status": "ok", "latency": "1.2ms"},
+    "xui": {"status": "ok", "latency": "45ms"}
+  }
+}
+```
+
+Health checks are integrated with Docker healthcheck in docker-compose.yml.
+
 ## CI/CD with GitHub Actions
 
 This project includes a GitHub Actions workflow that automatically:
-- Builds and pushes Docker images to GitHub Container Registry
 - Runs `golangci-lint` for code quality checks
+- Runs `gosec` for security scanning
 - Runs tests with coverage
-
-### Setup
-
-1. Go to your GitHub repository settings
-2. Enable "Packages" in Features
-3. The workflow will automatically push to `ghcr.io/kereal/rs8kvn_bot`
+- Builds and pushes Docker images to GitHub Container Registry
 
 ### Triggers
 
 - Push to `main` branch
-- Git tags (e.g., `v1.0.0`)
-- Pull requests
+- Git tags (e.g., `v1.9.6`)
 
 ### Images are tagged with
 
 - Branch name (e.g., `main`)
-- Semantic version (e.g., `1.0.0`, `1.0`)
+- Semantic version (e.g., `1.9.6`, `1.9`)
 - Commit SHA
 
 ## Project Structure
@@ -234,56 +258,72 @@ This project includes a GitHub Actions workflow that automatically:
 rs8kvn_bot/
 ├── cmd/
 │   └── bot/
-│       └── main.go              # Entry point
+│       ├── main.go                  # Entry point
+│       └── main_test.go            # Main tests
 ├── internal/
 │   ├── backup/
-│   │   └── backup.go            # Database backup and rotation
+│   │   ├── backup.go               # Database backup and rotation
+│   │   └── backup_test.go          # Backup tests
 │   ├── bot/
-│   │   ├── admin.go             # Admin handlers (/lastreg, /del, /broadcast)
-│   │   ├── callbacks.go         # Callback query routing
-│   │   ├── commands.go          # Command handlers (/start, /help)
-│   │   ├── handler.go           # Handler struct, helper functions
-│   │   ├── handlers_test.go     # Handler tests
-│   │   ├── menu.go              # Menu handlers (back, donate, help)
-│   │   ├── message.go           # Message sending utilities
-│   │   └── subscription.go      # Subscription logic, QR code handler
+│   │   ├── admin.go                # Admin handlers (/lastreg, /del, /broadcast)
+│   │   ├── callbacks.go            # Callback query routing
+│   │   ├── commands.go             # Command handlers (/start, /help)
+│   │   ├── handler.go              # Handler struct, helper functions
+│   │   ├── handlers_test.go        # Handler tests
+│   │   ├── integration_test.go     # Integration tests
+│   │   ├── menu.go                 # Menu handlers (back, donate, help)
+│   │   ├── message.go              # Message sending utilities
+│   │   └── subscription.go         # Subscription logic, QR code handler
 │   ├── config/
-│   │   ├── config.go            # Environment configuration
-│   │   └── constants.go         # Application constants
+│   │   ├── config.go               # Environment configuration
+│   │   ├── config_test.go          # Config tests
+│   │   └── constants.go            # Application constants
 │   ├── database/
-│   │   ├── database.go          # Database models and functions
-│   │   ├── database_test.go    # Database tests
-│   │   └── migrations.go        # Database migrations system
+│   │   ├── database.go             # Database models and functions
+│   │   ├── database_test.go        # Database tests
+│   │   └── migrations.go           # Database migrations system
+│   ├── health/
+│   │   ├── health.go               # Health check HTTP server
+│   │   └── health_test.go          # Health check tests
 │   ├── heartbeat/
-│   │   ├── heartbeat.go        # Heartbeat monitoring
-│   │   └── heartbeat_test.go  # Heartbeat tests
+│   │   ├── heartbeat.go            # Heartbeat monitoring
+│   │   └── heartbeat_test.go       # Heartbeat tests
+│   ├── interfaces/
+│   │   ├── interfaces.go           # Service interfaces
+│   │   └── interfaces_test.go      # Interface tests with mocks
 │   ├── logger/
-│   │   ├── logger.go           # Zap logger with Sentry integration
-│   │   └── logger_test.go     # Logger tests
+│   │   ├── logger.go               # Zap logger with Sentry integration
+│   │   └── logger_test.go          # Logger tests
 │   ├── ratelimiter/
-│   │   ├── ratelimiter.go      # Token bucket rate limiter
-│   │   └── ratelimiter_test.go # Rate limiter tests
+│   │   ├── ratelimiter.go          # Token bucket rate limiter
+│   │   └── ratelimiter_test.go     # Rate limiter tests
 │   ├── testutil/
-│   │   └── testutil.go        # Test utilities
+│   │   └── testutil.go             # Test utilities and mocks
 │   ├── utils/
-│   │   ├── qr.go              # QR code generation
-│   │   ├── time.go            # Time utilities
-│   │   ├── uuid.go            # UUID and SubID generators
-│   │   └── uuid_test.go       # UUID tests
+│   │   ├── qr.go                   # QR code generation
+│   │   ├── qr_test.go              # QR tests
+│   │   ├── time.go                 # Time utilities
+│   │   ├── time_test.go            # Time tests
+│   │   ├── uuid.go                 # UUID and SubID generators
+│   │   └── uuid_test.go            # UUID tests
 │   └── xui/
-│       ├── client.go           # 3x-ui API client
-│       └── client_test.go    # XUI client tests
-├── data/                        # Data directory (created at runtime)
-│   ├── tgvpn.db                 # SQLite database
-│   ├── tgvpn.db.backup          # Latest backup
-│   └── bot.log                  # Log file
-├── .env.example                 # Example environment configuration
-├── .env                         # Your configuration (create from .env.example)
+│       ├── breaker.go              # Circuit breaker for x-ui
+│       ├── breaker_test.go         # Circuit breaker tests
+│       ├── client.go               # 3x-ui API client
+│       └── client_test.go          # XUI client tests
+├── data/                            # Data directory (created at runtime)
+│   ├── tgvpn.db                    # SQLite database
+│   ├── tgvpn.db.backup             # Latest backup
+│   └── bot.log                     # Log file
+├── doc/
+│   └── PLAN.md                     # Unified development plan
+├── .env.example                     # Example environment configuration
+├── .env                             # Your configuration (create from .env.example)
 ├── Dockerfile
 ├── docker-compose.yml
 ├── go.mod
 ├── go.sum
-├── .golangci.yml               # golangci-lint configuration
+├── .golangci.yml                    # golangci-lint configuration
 └── README.md
 ```
 
@@ -318,7 +358,7 @@ rs8kvn_bot/
 ## Traffic and Expiry
 
 - **Traffic**: Configurable via `TRAFFIC_LIMIT_GB` (default: 100GB)
-- **Expiry**: First second of next month (e.g., if today is March 15, 2026, expiry is April 1, 2026 00:00:00)
+- **Expiry**: First second of next month (e.g., April 1, 2026 00:00:00)
 - **Auto-renewal**: 31 days (reset parameter in 3x-ui)
 
 ## Configuration
@@ -328,8 +368,8 @@ rs8kvn_bot/
 | `TELEGRAM_BOT_TOKEN` | Telegram bot token from @BotFather | - | ✅ |
 | `TELEGRAM_ADMIN_ID` | Admin Telegram ID for notifications | 0 | ❌ |
 | `XUI_HOST` | 3x-ui panel URL | http://localhost:2053 | ✅ |
-| `XUI_USERNAME` | 3x-ui admin username | admin | ✅ |
-| `XUI_PASSWORD` | 3x-ui admin password | admin | ✅ |
+| `XUI_USERNAME` | 3x-ui admin username | - | ✅ |
+| `XUI_PASSWORD` | 3x-ui admin password | - | ✅ |
 | `XUI_INBOUND_ID` | VLESS+Reality inbound ID | 1 | ✅ |
 | `XUI_SUB_PATH` | Subscription URL path | sub | ❌ |
 | `DATABASE_PATH` | SQLite database path | ./data/tgvpn.db | ❌ |
@@ -340,14 +380,22 @@ rs8kvn_bot/
 | `HEARTBEAT_INTERVAL` | Heartbeat interval in seconds | 300 | ❌ |
 | `SENTRY_DSN` | Sentry DSN for error tracking | - | ❌ |
 
+**Note:** `XUI_USERNAME` and `XUI_PASSWORD` have no defaults - they must be set explicitly.
+
 ## Admin Notifications
 
-When a new subscription is created, the admin (specified in `TELEGRAM_ADMIN_ID`) receives a notification with:
+When a new subscription is created, the admin receives:
 - User username and ID
 - Subscription expiry date
-- Subscription link (full URL, not masked)
+- Subscription link (full URL)
 
-Admins can also use the `/del <id>` command to delete subscriptions, `/lastreg` to view recent registrations, `/broadcast` to send messages to all users, and `/send` to message specific users.
+## Security Features
+
+- **Circuit breaker**: Automatically stops calling 3x-ui after 5 failures, with 30s timeout
+- **Rate limiting**: Token bucket rate limiter (30 tokens, refill 5/sec)
+- **No default credentials**: XUI_USERNAME/XUI_PASSWORD must be explicitly set
+- **Input validation**: Markdown injection prevention, path traversal protection
+- **Graceful shutdown**: Waits for in-flight requests with 30s timeout
 
 ## Database Migrations
 
@@ -365,18 +413,18 @@ var migrations = []Migration{
 }
 ```
 
-Migrations are applied automatically on startup. Already applied migrations are skipped.
+Migrations are applied automatically on startup.
 
 ## Database Backups
 
 - **Automatic**: Daily at 03:00
-- **Retention**: 7 days by default
+- **Retention**: 14 days by default
 - **Location**: Same directory as database file with `.backup` extension
 - **Rotation**: Old backups are automatically cleaned up
 
 ## Error Tracking
 
-The bot supports Sentry for error tracking. Set `SENTRY_DSN` in your environment to enable:
+The bot supports Sentry for error tracking. Set `SENTRY_DSN` to enable:
 - Automatic error capture
 - Fatal error reporting
 - Panic recovery
@@ -387,6 +435,36 @@ The bot supports Sentry for error tracking. Set `SENTRY_DSN` in your environment
 - **Binary size**: ~10 MB
 - **CPU**: Minimal (idle most of the time)
 
-## License
+## Development
 
-MIT
+### Running Tests
+
+```bash
+# Run all tests
+go test ./...
+
+# Run with coverage
+go test -coverprofile=coverage.out ./...
+go tool cover -func=coverage.out
+
+# Run specific package tests
+go test ./internal/database/... -v
+```
+
+### Linting
+
+```bash
+# Run golangci-lint
+golangci-lint run ./...
+
+# Run gosec security scanner
+gosec ./...
+```
+
+### Planning
+
+See `doc/PLAN.md` for the unified development plan including:
+- Bug fix status (P0-P4)
+- Technical improvements
+- New features roadmap
+- Implementation phases
