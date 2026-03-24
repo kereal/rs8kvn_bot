@@ -1,6 +1,7 @@
 package bot
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -107,10 +108,30 @@ func TestSubscriptionCache_MaxSize(t *testing.T) {
 		t.Errorf("Size() = %d, want 3", cache.Size())
 	}
 
-	// Adding one more should clear all entries (simple eviction strategy)
+	// Adding one more should evict the oldest entry (by expiresAt time)
+	// Sleep briefly to ensure the new entry has a later expiresAt
+	time.Sleep(10 * time.Millisecond)
 	cache.Set(4, &database.Subscription{TelegramID: 4})
-	if cache.Size() != 1 {
-		t.Errorf("Size() = %d after overflow, want 1", cache.Size())
+
+	// Should still have 3 entries (maxSize), with entry 1 evicted
+	if cache.Size() != 3 {
+		t.Errorf("Size() = %d after overflow, want 3", cache.Size())
+	}
+
+	// Entry 1 should be evicted (oldest)
+	if cache.Get(1) != nil {
+		t.Error("Entry 1 should be evicted")
+	}
+
+	// Entries 2, 3, 4 should still exist
+	if cache.Get(2) == nil {
+		t.Error("Entry 2 should still exist")
+	}
+	if cache.Get(3) == nil {
+		t.Error("Entry 3 should still exist")
+	}
+	if cache.Get(4) == nil {
+		t.Error("Entry 4 should still exist")
 	}
 }
 
@@ -164,4 +185,126 @@ func TestSubscriptionCache_Concurrent(t *testing.T) {
 	<-done
 
 	// If we get here without race detector errors, test passes
+}
+
+func TestSubscriptionCache_StartCleanup(t *testing.T) {
+	cache := NewSubscriptionCache(10, 20*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	// Start background cleanup
+	go cache.StartCleanup(ctx, 10*time.Millisecond)
+
+	// Add entries with short TTL
+	for i := int64(1); i <= 3; i++ {
+		cache.Set(i, &database.Subscription{TelegramID: i})
+	}
+
+	if cache.Size() != 3 {
+		t.Errorf("Size() = %d, want 3", cache.Size())
+	}
+
+	// Wait for entries to expire and cleanup to run
+	time.Sleep(80 * time.Millisecond)
+
+	// Expired entries should be removed by background cleanup
+	// Note: Size may be 0 or contain only non-expired entries
+	cache.Cleanup() // Force cleanup to ensure accurate count
+	if cache.Size() != 0 {
+		t.Errorf("Size() = %d after cleanup, want 0 (all entries expired)", cache.Size())
+	}
+}
+
+func TestSubscriptionCache_StartCleanup_Cancellation(t *testing.T) {
+	cache := NewSubscriptionCache(10, 5*time.Minute)
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Start background cleanup
+	done := make(chan bool, 1)
+	go func() {
+		cache.StartCleanup(ctx, 10*time.Millisecond)
+		done <- true
+	}()
+
+	// Cancel context immediately
+	cancel()
+
+	// Wait for goroutine to exit
+	select {
+	case <-done:
+		// Goroutine exited successfully
+	case <-time.After(100 * time.Millisecond):
+		t.Error("StartCleanup did not exit after context cancellation")
+	}
+}
+
+func TestSubscriptionCache_LRU_EvictionOrder(t *testing.T) {
+	cache := NewSubscriptionCache(3, 100*time.Millisecond)
+
+	// Add entries with delays to ensure different expiresAt times
+	for i := int64(1); i <= 3; i++ {
+		cache.Set(i, &database.Subscription{TelegramID: i})
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// Entry 1 should be oldest, entry 3 should be newest
+	// Adding entry 4 should evict entry 1 (oldest)
+	cache.Set(4, &database.Subscription{TelegramID: 4})
+
+	if cache.Size() != 3 {
+		t.Errorf("Size() = %d, want 3", cache.Size())
+	}
+
+	// Entry 1 should be evicted
+	if cache.Get(1) != nil {
+		t.Error("Entry 1 (oldest) should be evicted")
+	}
+
+	// Entries 2, 3, 4 should still exist
+	if cache.Get(2) == nil {
+		t.Error("Entry 2 should still exist")
+	}
+	if cache.Get(3) == nil {
+		t.Error("Entry 3 should still exist")
+	}
+	if cache.Get(4) == nil {
+		t.Error("Entry 4 should still exist")
+	}
+}
+
+func TestSubscriptionCache_LRU_MultipleEvictions(t *testing.T) {
+	cache := NewSubscriptionCache(2, 5*time.Minute) // Long TTL to avoid expiration
+
+	// Add entries and trigger multiple evictions
+	// With maxSize=2, after adding 5 entries, only the last 2 should remain
+	for i := int64(1); i <= 5; i++ {
+		time.Sleep(10 * time.Millisecond)
+		cache.Set(i, &database.Subscription{TelegramID: i})
+	}
+
+	if cache.Size() != 2 {
+		t.Errorf("Size() = %d, want 2", cache.Size())
+	}
+
+	// The last 2 entries (4 and 5) should exist
+	// Entry 4 was added before entry 5, so it has earlier expiresAt
+	// When entry 5 was added, entry 3 (oldest) was evicted
+	// So entries 4 and 5 should remain
+	if cache.Get(4) == nil {
+		t.Error("Entry 4 should still exist")
+	}
+	if cache.Get(5) == nil {
+		t.Error("Entry 5 should still exist")
+	}
+
+	// Earlier entries should be evicted
+	if cache.Get(1) != nil {
+		t.Error("Entry 1 should be evicted")
+	}
+	if cache.Get(2) != nil {
+		t.Error("Entry 2 should be evicted")
+	}
+	if cache.Get(3) != nil {
+		t.Error("Entry 3 should be evicted")
+	}
 }

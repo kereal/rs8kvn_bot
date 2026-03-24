@@ -82,7 +82,7 @@ docker run -d \
   --restart unless-stopped \
   -v $(pwd)/.env:/app/.env:ro \
   -v $(pwd)/data:/app/data \
-  -p 127.0.0.1:8080:8080 \
+  -p 127.0.0.1:8880:8880 \
   ghcr.io/kereal/rs8kvn_bot:latest
 ```
 
@@ -211,7 +211,7 @@ Sends a private message to user with username "username".
 
 ## Health Check
 
-The bot exposes HTTP health check endpoints on port 8080:
+The bot exposes HTTP health check endpoints on port 8880:
 
 | Endpoint | Description | Status Codes |
 |----------|-------------|--------------|

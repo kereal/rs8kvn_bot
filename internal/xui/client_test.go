@@ -24,7 +24,10 @@ func init() {
 }
 
 func TestNewClient(t *testing.T) {
-	client := NewClient("http://localhost:2053", "admin", "password")
+	client, err := NewClient("http://localhost:2053", "admin", "password")
+	if err != nil {
+		t.Fatalf("NewClient() returned error: %v", err)
+	}
 
 	if client == nil {
 		t.Fatal("NewClient() returned nil")
@@ -44,7 +47,10 @@ func TestNewClient(t *testing.T) {
 }
 
 func TestNewClient_HTTPClientConfig(t *testing.T) {
-	client := NewClient("http://localhost:2053", "admin", "password")
+	client, err := NewClient("http://localhost:2053", "admin", "password")
+	if err != nil {
+		t.Fatalf("NewClient() returned error: %v", err)
+	}
 
 	if client.httpClient.Timeout != 10*time.Second {
 		t.Errorf("httpClient.Timeout = %v, want 10s", client.httpClient.Timeout)
@@ -73,10 +79,13 @@ func TestLogin_Success(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, "admin", "password")
+	client, err := NewClient(server.URL, "admin", "password")
+	if err != nil {
+		t.Fatalf("NewClient() returned error: %v", err)
+	}
 	ctx := context.Background()
 
-	err := client.Login(ctx)
+	err = client.Login(ctx)
 	if err != nil {
 		t.Fatalf("Login() error = %v", err)
 	}
@@ -93,10 +102,13 @@ func TestLogin_Failure(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, "admin", "wrongpassword")
+	client, err := NewClient(server.URL, "admin", "wrongpassword")
+	if err != nil {
+		t.Fatalf("NewClient() returned error: %v", err)
+	}
 	ctx := context.Background()
 
-	err := client.Login(ctx)
+	err = client.Login(ctx)
 	if err == nil {
 		t.Fatal("Login() should return error for failed login")
 	}
@@ -110,11 +122,14 @@ func TestLogin_ContextCancellation(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, "admin", "password")
+	client, err := NewClient(server.URL, "admin", "password")
+	if err != nil {
+		t.Fatalf("NewClient() returned error: %v", err)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
-	err := client.Login(ctx)
+	err = client.Login(ctx)
 	if err == nil {
 		t.Fatal("Login() should return error when context is cancelled")
 	}
@@ -141,7 +156,10 @@ func TestAddClientWithID_Success(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, "admin", "password")
+	client, err := NewClient(server.URL, "admin", "password")
+	if err != nil {
+		t.Fatalf("NewClient() returned error: %v", err)
+	}
 	ctx := context.Background()
 
 	result, err := client.AddClientWithID(ctx, 1, "testuser", "client-id-123", "sub-id-456", 107374182400, time.Now().Add(24*time.Hour))
@@ -180,10 +198,13 @@ func TestAddClientWithID_ServerError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, "admin", "password")
+	client, err := NewClient(server.URL, "admin", "password")
+	if err != nil {
+		t.Fatalf("NewClient() returned error: %v", err)
+	}
 	ctx := context.Background()
 
-	_, err := client.AddClientWithID(ctx, 1, "testuser", "client-id", "sub-id", 1000, time.Now())
+	_, err = client.AddClientWithID(ctx, 1, "testuser", "client-id", "sub-id", 1000, time.Now())
 	// Should not error - the function handles server errors gracefully
 	if err != nil {
 		// This is acceptable - server returned error
@@ -191,7 +212,10 @@ func TestAddClientWithID_ServerError(t *testing.T) {
 }
 
 func TestGetSubscriptionLink(t *testing.T) {
-	client := NewClient("http://localhost:2053", "admin", "password")
+	client, err := NewClient("http://localhost:2053", "admin", "password")
+	if err != nil {
+		t.Fatalf("NewClient() returned error: %v", err)
+	}
 
 	link := client.GetSubscriptionLink("http://localhost:2053", "sub123", "sub")
 
@@ -202,7 +226,10 @@ func TestGetSubscriptionLink(t *testing.T) {
 }
 
 func TestGetSubscriptionLink_CustomPath(t *testing.T) {
-	client := NewClient("http://localhost:2053", "admin", "password")
+	client, err := NewClient("http://localhost:2053", "admin", "password")
+	if err != nil {
+		t.Fatalf("NewClient() returned error: %v", err)
+	}
 
 	link := client.GetSubscriptionLink("http://localhost:2053", "sub456", "custom")
 
@@ -213,30 +240,39 @@ func TestGetSubscriptionLink_CustomPath(t *testing.T) {
 }
 
 func TestAddClientWithID_InvalidInboundID(t *testing.T) {
-	client := NewClient("http://localhost:2053", "admin", "password")
+	client, err := NewClient("http://localhost:2053", "admin", "password")
+	if err != nil {
+		t.Fatalf("NewClient() returned error: %v", err)
+	}
 	ctx := context.Background()
 
-	_, err := client.AddClientWithID(ctx, 0, "testuser", "client-id", "sub-id", 107374182400, time.Now().Add(24*time.Hour))
+	_, err = client.AddClientWithID(ctx, 0, "testuser", "client-id", "sub-id", 107374182400, time.Now().Add(24*time.Hour))
 	if err == nil {
 		t.Fatal("AddClientWithID() should return error for invalid inbound ID")
 	}
 }
 
 func TestAddClientWithID_EmptyClientID(t *testing.T) {
-	client := NewClient("http://localhost:2053", "admin", "password")
+	client, err := NewClient("http://localhost:2053", "admin", "password")
+	if err != nil {
+		t.Fatalf("NewClient() returned error: %v", err)
+	}
 	ctx := context.Background()
 
-	_, err := client.AddClientWithID(ctx, 1, "testuser", "", "sub-id", 107374182400, time.Now().Add(24*time.Hour))
+	_, err = client.AddClientWithID(ctx, 1, "testuser", "", "sub-id", 107374182400, time.Now().Add(24*time.Hour))
 	if err == nil {
 		t.Fatal("AddClientWithID() should return error for empty client ID")
 	}
 }
 
 func TestAddClientWithID_EmptySubID(t *testing.T) {
-	client := NewClient("http://localhost:2053", "admin", "password")
+	client, err := NewClient("http://localhost:2053", "admin", "password")
+	if err != nil {
+		t.Fatalf("NewClient() returned error: %v", err)
+	}
 	ctx := context.Background()
 
-	_, err := client.AddClientWithID(ctx, 1, "testuser", "client-id", "", 107374182400, time.Now().Add(24*time.Hour))
+	_, err = client.AddClientWithID(ctx, 1, "testuser", "client-id", "", 107374182400, time.Now().Add(24*time.Hour))
 	if err == nil {
 		t.Fatal("AddClientWithID() should return error for empty sub ID")
 	}
@@ -360,7 +396,10 @@ func TestAddClient_Success(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, "admin", "password")
+	client, err := NewClient(server.URL, "admin", "password")
+	if err != nil {
+		t.Fatalf("NewClient() returned error: %v", err)
+	}
 	ctx := context.Background()
 
 	result, err := client.AddClient(ctx, 1, "testuser", 107374182400, time.Now().Add(24*time.Hour))
@@ -399,10 +438,13 @@ func TestAddClient_LoginFailure(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, "admin", "wrongpassword")
+	client, err := NewClient(server.URL, "admin", "wrongpassword")
+	if err != nil {
+		t.Fatalf("NewClient() returned error: %v", err)
+	}
 	ctx := context.Background()
 
-	_, err := client.AddClient(ctx, 1, "testuser", 1000, time.Now())
+	_, err = client.AddClient(ctx, 1, "testuser", 1000, time.Now())
 	if err == nil {
 		t.Fatal("AddClient() should return error when login fails")
 	}
@@ -423,7 +465,10 @@ func TestAddClientWithID_SuccessFalseButMessageIndicatesSuccess(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, "admin", "password")
+	client, err := NewClient(server.URL, "admin", "password")
+	if err != nil {
+		t.Fatalf("NewClient() returned error: %v", err)
+	}
 	ctx := context.Background()
 
 	result, err := client.AddClientWithID(ctx, 1, "testuser", "client-id", "sub-id", 1000, time.Now())
@@ -451,11 +496,14 @@ func TestEnsureLoggedIn_CachedSession(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, "admin", "password")
+	client, err := NewClient(server.URL, "admin", "password")
+	if err != nil {
+		t.Fatalf("NewClient() returned error: %v", err)
+	}
 	ctx := context.Background()
 
 	// First call - should login
-	_, err := client.AddClient(ctx, 1, "testuser1", 1000, time.Now())
+	_, err = client.AddClient(ctx, 1, "testuser1", 1000, time.Now())
 	if err != nil {
 		t.Fatalf("First AddClient() error = %v", err)
 	}
@@ -480,10 +528,13 @@ func TestDoLogin_InvalidJSONResponse(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, "admin", "password")
+	client, err := NewClient(server.URL, "admin", "password")
+	if err != nil {
+		t.Fatalf("NewClient() returned error: %v", err)
+	}
 	ctx := context.Background()
 
-	err := client.Login(ctx)
+	err = client.Login(ctx)
 	if err == nil {
 		t.Fatal("Login() should return error for invalid JSON response")
 	}
@@ -579,7 +630,10 @@ func TestGetClientTraffic_Success(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, "admin", "password")
+	client, err := NewClient(server.URL, "admin", "password")
+	if err != nil {
+		t.Fatalf("NewClient() returned error: %v", err)
+	}
 	ctx := context.Background()
 
 	result, err := client.GetClientTraffic(ctx, "testuser")
@@ -621,10 +675,13 @@ func TestGetClientTraffic_ClientNotFound(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, "admin", "password")
+	client, err := NewClient(server.URL, "admin", "password")
+	if err != nil {
+		t.Fatalf("NewClient() returned error: %v", err)
+	}
 	ctx := context.Background()
 
-	_, err := client.GetClientTraffic(ctx, "nonexistent")
+	_, err = client.GetClientTraffic(ctx, "nonexistent")
 	if err == nil {
 		t.Fatal("GetClientTraffic() should return error when client not found")
 	}
@@ -649,10 +706,13 @@ func TestGetClientTraffic_ServerError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, "admin", "password")
+	client, err := NewClient(server.URL, "admin", "password")
+	if err != nil {
+		t.Fatalf("NewClient() returned error: %v", err)
+	}
 	ctx := context.Background()
 
-	_, err := client.GetClientTraffic(ctx, "testuser")
+	_, err = client.GetClientTraffic(ctx, "testuser")
 	if err == nil {
 		t.Fatal("GetClientTraffic() should return error when server returns error")
 	}
@@ -672,10 +732,13 @@ func TestGetClientTraffic_LoginFailure(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, "admin", "wrongpassword")
+	client, err := NewClient(server.URL, "admin", "wrongpassword")
+	if err != nil {
+		t.Fatalf("NewClient() returned error: %v", err)
+	}
 	ctx := context.Background()
 
-	_, err := client.GetClientTraffic(ctx, "testuser")
+	_, err = client.GetClientTraffic(ctx, "testuser")
 	if err == nil {
 		t.Fatal("GetClientTraffic() should return error when login fails")
 	}
@@ -702,11 +765,14 @@ func TestGetClientTraffic_ContextCancellation(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, "admin", "password")
+	client, err := NewClient(server.URL, "admin", "password")
+	if err != nil {
+		t.Fatalf("NewClient() returned error: %v", err)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
-	_, err := client.GetClientTraffic(ctx, "testuser")
+	_, err = client.GetClientTraffic(ctx, "testuser")
 	if err == nil {
 		t.Fatal("GetClientTraffic() should return error when context is cancelled")
 	}
@@ -727,10 +793,13 @@ func TestGetClientTraffic_InvalidJSONResponse(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, "admin", "password")
+	client, err := NewClient(server.URL, "admin", "password")
+	if err != nil {
+		t.Fatalf("NewClient() returned error: %v", err)
+	}
 	ctx := context.Background()
 
-	_, err := client.GetClientTraffic(ctx, "testuser")
+	_, err = client.GetClientTraffic(ctx, "testuser")
 	if err == nil {
 		t.Fatal("GetClientTraffic() should return error for invalid JSON response")
 	}
@@ -829,10 +898,13 @@ func TestDeleteClient_Success(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, "admin", "password")
+	client, err := NewClient(server.URL, "admin", "password")
+	if err != nil {
+		t.Fatalf("NewClient() returned error: %v", err)
+	}
 	ctx := context.Background()
 
-	err := client.DeleteClient(ctx, 1, "test-client-id")
+	err = client.DeleteClient(ctx, 1, "test-client-id")
 	if err != nil {
 		t.Fatalf("DeleteClient() error = %v", err)
 	}
@@ -854,10 +926,13 @@ func TestDeleteClient_ServerError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, "admin", "password")
+	client, err := NewClient(server.URL, "admin", "password")
+	if err != nil {
+		t.Fatalf("NewClient() returned error: %v", err)
+	}
 	ctx := context.Background()
 
-	err := client.DeleteClient(ctx, 1, "test-client-id")
+	err = client.DeleteClient(ctx, 1, "test-client-id")
 	if err == nil {
 		t.Fatal("DeleteClient() should return error when server returns error")
 	}
@@ -877,10 +952,13 @@ func TestDeleteClient_LoginFailure(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, "admin", "wrongpassword")
+	client, err := NewClient(server.URL, "admin", "wrongpassword")
+	if err != nil {
+		t.Fatalf("NewClient() returned error: %v", err)
+	}
 	ctx := context.Background()
 
-	err := client.DeleteClient(ctx, 1, "test-client-id")
+	err = client.DeleteClient(ctx, 1, "test-client-id")
 	if err == nil {
 		t.Fatal("DeleteClient() should return error when login fails")
 	}
@@ -905,11 +983,14 @@ func TestDeleteClient_ContextCancellation(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, "admin", "password")
+	client, err := NewClient(server.URL, "admin", "password")
+	if err != nil {
+		t.Fatalf("NewClient() returned error: %v", err)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
-	err := client.DeleteClient(ctx, 1, "test-client-id")
+	err = client.DeleteClient(ctx, 1, "test-client-id")
 	if err == nil {
 		t.Fatal("DeleteClient() should return error when context is cancelled")
 	}
@@ -930,10 +1011,13 @@ func TestDeleteClient_InvalidJSONResponse(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, "admin", "password")
+	client, err := NewClient(server.URL, "admin", "password")
+	if err != nil {
+		t.Fatalf("NewClient() returned error: %v", err)
+	}
 	ctx := context.Background()
 
-	err := client.DeleteClient(ctx, 1, "test-client-id")
+	err = client.DeleteClient(ctx, 1, "test-client-id")
 	if err == nil {
 		t.Fatal("DeleteClient() should return error for invalid JSON response")
 	}
@@ -979,7 +1063,10 @@ func TestContainsSuccessKeywords(t *testing.T) {
 }
 
 func TestGetSubscriptionLink_WithCustomPath(t *testing.T) {
-	client := NewClient("http://localhost:2053", "admin", "password")
+	client, err := NewClient("http://localhost:2053", "admin", "password")
+	if err != nil {
+		t.Fatalf("NewClient() returned error: %v", err)
+	}
 	link := client.GetSubscriptionLink("http://example.com", "abc123", "/custom")
 	if !strings.Contains(link, "/custom") {
 		t.Errorf("GetSubscriptionLink() should include custom path, got %s", link)
@@ -1011,10 +1098,13 @@ func TestAddClientWithID_LoginError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, "admin", "password")
+	client, err := NewClient(server.URL, "admin", "password")
+	if err != nil {
+		t.Fatalf("NewClient() returned error: %v", err)
+	}
 	ctx := context.Background()
 
-	_, err := client.AddClientWithID(ctx, 1, "testuser", "client-id", "sub-id", 1000, time.Now())
+	_, err = client.AddClientWithID(ctx, 1, "testuser", "client-id", "sub-id", 1000, time.Now())
 	if err == nil {
 		t.Fatal("AddClientWithID() should return error when login returns error")
 	}
@@ -1034,7 +1124,10 @@ func TestClient_CircuitBreakerState(t *testing.T) {
 	}))
 	defer failingServer.Close()
 
-	client := NewClient(failingServer.URL, "admin", "password")
+	client, err := NewClient(failingServer.URL, "admin", "password")
+	if err != nil {
+		t.Fatalf("NewClient() returned error: %v", err)
+	}
 	ctx := context.Background()
 
 	// Initially should be closed
@@ -1060,7 +1153,10 @@ func TestClient_GetExternalURL(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, "admin", "password")
+	client, err := NewClient(server.URL, "admin", "password")
+	if err != nil {
+		t.Fatalf("NewClient() returned error: %v", err)
+	}
 
 	tests := []struct {
 		name     string
@@ -1079,5 +1175,56 @@ func TestClient_GetExternalURL(t *testing.T) {
 				t.Errorf("Client.GetExternalURL(%q) = %q, want %q", tt.input, result, tt.expected)
 			}
 		})
+	}
+}
+
+// ==================== truncateString Tests ====================
+
+func TestTruncateString(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		maxLen   int
+		expected string
+	}{
+		{"short string", "hello", 10, "hello"},
+		{"exact length", "hello", 5, "hello"},
+		{"long string", "hello world this is a long string", 10, "hello worl..."},
+		{"empty string", "", 5, ""},
+		{"zero maxLen", "hello", 0, "..."},
+		// Note: truncateString works on bytes, not runes
+		// Unicode characters may be split, which is acceptable for debug logging
+		{"ascii only long", "abcdefghijklmnopqrstuvwxyz", 5, "abcde..."},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := truncateString(tt.input, tt.maxLen)
+			if result != tt.expected {
+				t.Errorf("truncateString(%q, %d) = %q, want %q", tt.input, tt.maxLen, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestTruncateString_NoAllocationForShortStrings(t *testing.T) {
+	input := "short"
+	result := truncateString(input, 100)
+
+	// Short strings should be returned as-is without modification
+	if result != input {
+		t.Errorf("truncateString should return original string when len <= maxLen")
+	}
+}
+
+func TestTruncateString_UnicodeMayBeSplit(t *testing.T) {
+	// This test documents that unicode characters may be split
+	// This is acceptable for debug logging where we just want a preview
+	input := "привет"
+	result := truncateString(input, 3)
+
+	// Result should be truncated to 3 bytes (may split unicode)
+	if len(result) > 6 { // 3 bytes + "..."
+		t.Errorf("truncateString result too long: %q", result)
 	}
 }

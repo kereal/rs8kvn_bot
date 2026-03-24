@@ -16,6 +16,12 @@ func (h *Handler) HandleCallback(ctx context.Context, update tgbotapi.Update) {
 		return
 	}
 
+	if update.CallbackQuery.From == nil {
+		logger.Error("HandleCallback: CallbackQuery.From is nil",
+			zap.String("data", update.CallbackQuery.Data))
+		return
+	}
+
 	// Check if Message is nil (can happen with inline mode callbacks)
 	if update.CallbackQuery.Message == nil {
 		logger.Warn("CallbackQuery has nil Message, skipping",
