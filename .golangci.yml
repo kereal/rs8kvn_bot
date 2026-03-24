@@ -1,4 +1,4 @@
-version: 2
+version: "2"
 
 run:
   timeout: 5m
@@ -27,38 +27,3 @@ linters-settings:
       - G104
       - G304
       - G306
-
-issues:
-  exclude-use-default: false
-  exclude-rules:
-    - path: _test\.go
-      linters:
-        - errcheck
-        - gosec
-        - unparam
-        - staticcheck
-        - govet
-    - path: testutil\.go
-      linters:
-        - errcheck
-    - text: "Error return value"
-      linters:
-        - errcheck
-    - text: "shadow:"
-      linters:
-        - govet
-    - text: "fieldalignment:"
-      linters:
-        - govet
-    - text: "ineffassign:"
-      linters:
-        - govet
-    - text: "ctx.*is unused"
-      linters:
-        - unparam
-    - text: "sync.Pool"
-      linters:
-        - errcheck
-    - text: "sendWithRetry"
-      linters:
-        - unused
