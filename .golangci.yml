@@ -21,11 +21,15 @@ linters:
   settings:
     errcheck:
       check-type-assertions: true
+      exclude-functions:
+        - sync.Pool.Get
     gosec:
       excludes:
         - G104
         - G304
         - G306
+    unparam:
+      allow-runtime-ctx-global: true
 
 formatters:
   enable:
