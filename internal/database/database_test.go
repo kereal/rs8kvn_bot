@@ -2626,3 +2626,211 @@ func TestService_CountExpiredSubscriptions_Empty(t *testing.T) {
 		t.Errorf("Expected 0 expired subscriptions, got %d", count)
 	}
 }
+
+func TestService_GetByID(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	service, err := NewService(dbPath)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	defer service.Close()
+
+	sub := &Subscription{
+		TelegramID:      123,
+		Username:        "testuser",
+		ClientID:        "client-1",
+		XUIHost:         "http://localhost",
+		InboundID:       1,
+		TrafficLimit:    107374182400,
+		ExpiryTime:      time.Now().Add(24 * time.Hour),
+		Status:          "active",
+		SubscriptionURL: "http://test.url/sub/abc",
+	}
+
+	err = service.CreateSubscription(nil, sub)
+	if err != nil {
+		t.Fatalf("CreateSubscription() error = %v", err)
+	}
+
+	retrieved, err := service.GetByID(nil, sub.ID)
+	if err != nil {
+		t.Fatalf("GetByID() error = %v", err)
+	}
+	if retrieved.ID != sub.ID {
+		t.Errorf("GetByID() ID = %d, want %d", retrieved.ID, sub.ID)
+	}
+	if retrieved.TelegramID != 123 {
+		t.Errorf("GetByID() TelegramID = %d, want 123", retrieved.TelegramID)
+	}
+}
+
+func TestService_GetByID_NotFound(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	service, err := NewService(dbPath)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	defer service.Close()
+
+	_, err = service.GetByID(nil, 999)
+	if err == nil {
+		t.Error("GetByID() expected error for non-existent ID")
+	}
+}
+
+func TestService_GetAllTelegramIDs(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	service, err := NewService(dbPath)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	defer service.Close()
+
+	for i, id := range []int64{100, 200, 300} {
+		sub := &Subscription{
+			TelegramID:      id,
+			Username:        fmt.Sprintf("user%d", i),
+			ClientID:        fmt.Sprintf("client-%d", i),
+			XUIHost:         "http://localhost",
+			InboundID:       1,
+			TrafficLimit:    107374182400,
+			ExpiryTime:      time.Now().Add(24 * time.Hour),
+			Status:          "active",
+			SubscriptionURL: fmt.Sprintf("http://test.url/sub/%d", i),
+		}
+		if err := service.CreateSubscription(nil, sub); err != nil {
+			t.Fatalf("CreateSubscription() error = %v", err)
+		}
+	}
+
+	ids, err := service.GetAllTelegramIDs(nil)
+	if err != nil {
+		t.Fatalf("GetAllTelegramIDs() error = %v", err)
+	}
+
+	if len(ids) != 3 {
+		t.Errorf("GetAllTelegramIDs() len = %d, want 3", len(ids))
+	}
+
+	idMap := make(map[int64]bool)
+	for _, id := range ids {
+		idMap[id] = true
+	}
+	for _, expected := range []int64{100, 200, 300} {
+		if !idMap[expected] {
+			t.Errorf("GetAllTelegramIDs() missing ID %d", expected)
+		}
+	}
+}
+
+func TestService_GetTelegramIDByUsername(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	service, err := NewService(dbPath)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	defer service.Close()
+
+	sub := &Subscription{
+		TelegramID:      555,
+		Username:        "findme",
+		ClientID:        "client-find",
+		XUIHost:         "http://localhost",
+		InboundID:       1,
+		TrafficLimit:    107374182400,
+		ExpiryTime:      time.Now().Add(24 * time.Hour),
+		Status:          "active",
+		SubscriptionURL: "http://test.url/sub/find",
+	}
+	if err := service.CreateSubscription(nil, sub); err != nil {
+		t.Fatalf("CreateSubscription() error = %v", err)
+	}
+
+	id, err := service.GetTelegramIDByUsername(nil, "findme")
+	if err != nil {
+		t.Fatalf("GetTelegramIDByUsername() error = %v", err)
+	}
+	if id != 555 {
+		t.Errorf("GetTelegramIDByUsername() = %d, want 555", id)
+	}
+}
+
+func TestService_GetTelegramIDByUsername_NotFound(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	service, err := NewService(dbPath)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	defer service.Close()
+
+	_, err = service.GetTelegramIDByUsername(nil, "nonexistent")
+	if err == nil {
+		t.Error("GetTelegramIDByUsername() expected error for non-existent username")
+	}
+}
+
+func TestService_DeleteSubscriptionByID(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	service, err := NewService(dbPath)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	defer service.Close()
+
+	sub := &Subscription{
+		TelegramID:      666,
+		Username:        "deleteme",
+		ClientID:        "client-del",
+		XUIHost:         "http://localhost",
+		InboundID:       1,
+		TrafficLimit:    107374182400,
+		ExpiryTime:      time.Now().Add(24 * time.Hour),
+		Status:          "active",
+		SubscriptionURL: "http://test.url/sub/del",
+	}
+	if err := service.CreateSubscription(nil, sub); err != nil {
+		t.Fatalf("CreateSubscription() error = %v", err)
+	}
+
+	deleted, err := service.DeleteSubscriptionByID(nil, sub.ID)
+	if err != nil {
+		t.Fatalf("DeleteSubscriptionByID() error = %v", err)
+	}
+	if deleted.ID != sub.ID {
+		t.Errorf("DeleteSubscriptionByID() returned ID = %d, want %d", deleted.ID, sub.ID)
+	}
+
+	// Verify it's actually deleted
+	_, err = service.GetByID(nil, sub.ID)
+	if err == nil {
+		t.Error("Subscription still exists after DeleteSubscriptionByID()")
+	}
+}
+
+func TestService_DeleteSubscriptionByID_NotFound(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	service, err := NewService(dbPath)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	defer service.Close()
+
+	_, err = service.DeleteSubscriptionByID(nil, 999)
+	if err == nil {
+		t.Error("DeleteSubscriptionByID() expected error for non-existent ID")
+	}
+}
