@@ -17,16 +17,14 @@ linters:
   disable:
     - ineffassign
 
-  linters-settings:
-    errcheck:
-      check-type-assertions: true
-    gosec:
+linters-settings:
+  errcheck:
+    check-type-assertions: true
+  gosec:
     excludes:
       - G104
       - G304
       - G306
-  govet:
-    enable-all: true
 
 issues:
   exclude-use-default: false
