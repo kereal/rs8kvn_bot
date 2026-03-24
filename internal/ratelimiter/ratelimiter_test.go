@@ -218,3 +218,95 @@ func TestTokenBucket_ZeroRefillRate(t *testing.T) {
 		t.Error("Wait() should return false when no refill and context times out")
 	}
 }
+
+func TestTokenBucket_AvailableTokens(t *testing.T) {
+	tb := NewTokenBucket(10, 5)
+
+	// Initial available tokens should be 10
+	if got := tb.AvailableTokens(); got != 10 {
+		t.Errorf("AvailableTokens() = %v, want 10", got)
+	}
+
+	// Consume 3 tokens
+	if !tb.AllowN(3) {
+		t.Fatal("AllowN(3) failed")
+	}
+
+	// Now should have ~7 (allow floating point tolerance)
+	got := tb.AvailableTokens()
+	if got < 6.9 || got > 7.1 {
+		t.Errorf("AvailableTokens() = %v, want ~7", got)
+	}
+}
+
+func TestTokenBucket_AllowN_MoreThanAvailable(t *testing.T) {
+	tb := NewTokenBucket(5, 0)
+
+	// Try to consume more than available
+	if tb.AllowN(10) {
+		t.Error("AllowN(10) on bucket with 5 tokens should return false")
+	}
+}
+
+func TestTokenBucket_WaitN_Success(t *testing.T) {
+	tb := NewTokenBucket(10, 1000)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	// Should succeed immediately
+	if !tb.WaitN(ctx, 5) {
+		t.Error("WaitN() should succeed with available tokens")
+	}
+}
+
+func TestTokenBucket_WaitN_Timeout(t *testing.T) {
+	tb := NewTokenBucket(1, 0)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	// Consume the only token
+	tb.Allow()
+
+	// Should timeout
+	if tb.WaitN(ctx, 1) {
+		t.Error("WaitN() should timeout when no tokens available")
+	}
+}
+
+func TestRateLimiter_NewRateLimiter(t *testing.T) {
+	rl := NewRateLimiter(5, 10)
+	if rl == nil {
+		t.Error("NewRateLimiter() returned nil")
+	}
+}
+
+func TestRateLimiter_Wait(t *testing.T) {
+	rl := NewRateLimiter(3, 1000)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	// First wait should succeed
+	if !rl.Wait(ctx) {
+		t.Error("Wait() should succeed")
+	}
+}
+
+func TestRateLimiter_Allow(t *testing.T) {
+	rl := NewRateLimiter(2, 1000)
+
+	// First two should succeed
+	if !rl.Allow() {
+		t.Error("First Allow() should succeed")
+	}
+	if !rl.Allow() {
+		t.Error("Second Allow() should succeed")
+	}
+
+	// Third should fail (no refill)
+	if rl.Allow() {
+		t.Error("Third Allow() should fail")
+	}
+}
