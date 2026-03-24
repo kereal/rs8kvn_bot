@@ -6,6 +6,7 @@ Telegram bot for distributing VLESS+Reality+Vision proxy subscriptions from 3x-u
 
 - 📥 Get subscription on demand
 - 📋 View current subscription status
+- 📱 QR code for easy subscription import
 - 📊 Configurable traffic limit (default 100GB/month)
 - 📅 Auto-renewal on the last day of each month
 - 🔔 Admin notifications on new subscriptions
@@ -151,8 +152,10 @@ go run ./cmd/bot
 1. Start the bot with `/start` command
 2. Use the inline buttons (shown under the message):
    - **For users with subscription:**
-     - **☕ Донат** - View donation info
      - **📋 Подписка** - View subscription info (traffic usage, expiry date, subscription link)
+       - **📱 QR-код** - Generate QR code for easy import (scannable by Happ app)
+       - **🏠 В начало** - Return to main menu
+     - **☕ Донат** - View donation info
      - **❓ Помощь** - View VPN setup instructions
    - **For users without subscription:**
      - **📥 Получить подписку** - Create a new subscription
@@ -160,6 +163,13 @@ go run ./cmd/bot
    - **📊 Стат** - View bot statistics
 
 **Note:** All menu buttons are inline (shown under the message), not at the bottom of the screen. Each submenu has a "🏠 В начало" button to return to the main menu.
+
+### QR Code Flow
+
+When viewing subscription info, users can click **📱 QR-код** to generate a scannable QR code:
+1. QR code is sent as a photo (subscription message stays visible above)
+2. User can scan the QR code with Happ app to import subscription
+3. Click **⬅️ Назад** to close QR and return to subscription info
 
 ### Admin Commands
 
@@ -230,14 +240,13 @@ rs8kvn_bot/
 │   │   └── backup.go            # Database backup and rotation
 │   ├── bot/
 │   │   ├── admin.go             # Admin handlers (/lastreg, /del, /broadcast)
-│   │   ├── callbacks.go         # Callback query handlers
-│   │   ├── commands.go         # Command handlers
-│   │   ├── handler.go          # Main handler setup
-│   │   ├── handlers.go         # Legacy handlers (backwards compat)
-│   │   ├── handlers_test.go   # Handler tests
-│   │   ├── menu.go            # Inline keyboard menus
-│   │   ├── message.go         # Message formatting
-│   │   └── subscription.go   # Subscription logic
+│   │   ├── callbacks.go         # Callback query routing
+│   │   ├── commands.go          # Command handlers (/start, /help)
+│   │   ├── handler.go           # Handler struct, helper functions
+│   │   ├── handlers_test.go     # Handler tests
+│   │   ├── menu.go              # Menu handlers (back, donate, help)
+│   │   ├── message.go           # Message sending utilities
+│   │   └── subscription.go      # Subscription logic, QR code handler
 │   ├── config/
 │   │   ├── config.go            # Environment configuration
 │   │   └── constants.go         # Application constants
@@ -257,6 +266,8 @@ rs8kvn_bot/
 │   ├── testutil/
 │   │   └── testutil.go        # Test utilities
 │   ├── utils/
+│   │   ├── qr.go              # QR code generation
+│   │   ├── time.go            # Time utilities
 │   │   ├── uuid.go            # UUID and SubID generators
 │   │   └── uuid_test.go       # UUID tests
 │   └── xui/

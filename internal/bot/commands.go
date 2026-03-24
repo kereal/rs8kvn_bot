@@ -21,52 +21,12 @@ func (h *Handler) HandleStart(ctx context.Context, update tgbotapi.Update) {
 	sub, err := h.db.GetByTelegramID(ctx, chatID)
 	hasSubscription := err == nil && sub != nil && sub.Status == "active"
 
-	if hasSubscription {
-		// User has subscription - show inline keyboard with menu buttons
-		msg := tgbotapi.NewMessage(chatID, fmt.Sprintf(
-			"👋 Привет, %s!\n\nЯ бот для выдачи подписок на прокси VLESS+Reality+Vision.\n\nИспользуйте кнопки ниже для взаимодействия с ботом.",
-			username,
-		))
+	// Get main menu content
+	text, keyboard := h.getMainMenuContent(username, hasSubscription, chatID)
 
-		keyboard := h.getMainMenuKeyboard()
-		// Add admin buttons if user is admin
-		if h.isAdmin(chatID) {
-			keyboard.InlineKeyboard = append(keyboard.InlineKeyboard,
-				tgbotapi.NewInlineKeyboardRow(
-					tgbotapi.NewInlineKeyboardButtonData("📊 Стат", "admin_stats"),
-					tgbotapi.NewInlineKeyboardButtonData("📋 Посл.рег", "admin_lastreg"),
-				),
-			)
-		}
-
-		msg.ReplyMarkup = keyboard
-		h.send(ctx, msg)
-	} else {
-		// User has no subscription - show inline button to get subscription
-		msg := tgbotapi.NewMessage(chatID, fmt.Sprintf(
-			"👋 Привет, %s!\n\nЯ бот для выдачи подписок на прокси VLESS+Reality+Vision.\n\nНажмите кнопку ниже, чтобы получить подписку:",
-			username,
-		))
-
-		inlineKeyboard := tgbotapi.NewInlineKeyboardMarkup(
-			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData("📥 Получить подписку", "get_subscription"),
-			),
-		)
-
-		// Add admin buttons if user is admin
-		if h.isAdmin(chatID) {
-			inlineKeyboard.InlineKeyboard = append(inlineKeyboard.InlineKeyboard,
-				tgbotapi.NewInlineKeyboardRow(
-					tgbotapi.NewInlineKeyboardButtonData("📊 Стат", "admin_stats"),
-					tgbotapi.NewInlineKeyboardButtonData("📋 Посл.рег", "admin_lastreg"),
-				),
-			)
-		}
-
-		msg.ReplyMarkup = inlineKeyboard
-		h.send(ctx, msg)
-	}
+	msg := tgbotapi.NewMessage(chatID, text)
+	msg.ReplyMarkup = &keyboard
+	h.send(ctx, msg)
 }
 
 // HandleHelp handles the /help command.

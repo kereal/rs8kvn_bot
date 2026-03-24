@@ -1,6 +1,6 @@
 # Handover Summary - TGVPN Go Bot
 
-**Version:** v1.9.0
+**Version:** v2.0.0
 **Github:** https://github.com/kereal/rs8kvn_bot
 
 ## Architecture
@@ -9,180 +9,202 @@
 tgvpn_go/
 ├── cmd/bot/main.go              # Entry point, command routing, graceful shutdown
 ├── internal/
-│   ├── bot/handlers.go          # Telegram handlers, subscription logic, admin commands
-│   ├── xui/client.go            # 3x-ui API: Login, AddClient, DeleteClient, GetClientTraffic
-│   ├── database/database.go     # GORM models, CRUD, package-level funcs
-│   ├── config/
-│   │   ├── config.go            # Env config loader with validation
-│   │   └── constants.go         # All constants (backup 14d, log 10MB, etc.)
-│   ├── logger/logger.go         # Zap structured logging
-│   ├── ratelimiter/ratelimiter.go # Token bucket rate limiter
-│   ├── backup/backup.go         # Daily DB backup scheduler
-│   ├── heartbeat/heartbeat.go   # Health check monitoring
-│   └── utils/uuid.go            # UUID v4, SubID generation
-└── data/                        # Runtime data (tgvpn.db, bot.log, backups)
+│   ├── bot/
+│   │   ├── handler.go           # Handler struct, helper functions
+│   │   ├── callbacks.go         # Callback routing
+│   │   ├── commands.go          # Command handlers (/start, /help)
+│   │   ├── subscription.go      # Subscription logic, QR code
+│   │   ├── menu.go              # Menu handlers (back, donate, help)
+│   │   ├── admin.go             # Admin commands
+│   │   └── message.go           # Message sending utilities
+│   ├── xui/client.go            # 3x-ui API client
+│   ├── database/database.go     # GORM models, CRUD operations
+│   ├── config/                  # Configuration loader, constants
+│   ├── logger/                  # Zap structured logging
+│   ├── utils/
+│   │   ├── uuid.go              # UUID generation
+│   │   ├── time.go              # Time utilities
+│   │   └── qr.go                # QR code generation (NEW)
+│   ├── backup/                  # Daily DB backup
+│   ├── heartbeat/               # Health monitoring
+│   └── ratelimiter/             # Token bucket rate limiter
+└── data/                        # Runtime data (db, logs, backups)
 ```
 
 ## Stack
 
-- **Go 1.24+**
+- **Go 1.25+**
 - **Telegram Bot API:** `github.com/go-telegram-bot-api/telegram-bot-api/v5`
 - **ORM:** `gorm.io/gorm` + `gorm.io/driver/sqlite`
-- **Logging:** `go.uber.org/zap` + `lumberjack` (rotation)
+- **QR Code:** `github.com/piglig/go-qr` (NEW)
+- **Logging:** `go.uber.org/zap` + `lumberjack`
 - **Errors:** `github.com/getsentry/sentry-go`
 - **Database:** SQLite (`./data/tgvpn.db`)
 
-## Current State (v1.9.0)
+## Current State (v2.0.0)
 
-**Bot Commands:**
-- `/start` - Greeting + main menu (InlineKeyboard)
+### Bot Commands
+- `/start` - Greeting + main menu
 - `/help` - Help text
-- `/lastreg` - Last 10 registrations (admin only)
-- `/del <id>` - Delete subscription by DB ID (admin only)
-- `/broadcast <msg>` - Send message to all users (admin only)
-- `/send <id|username> <msg>` - Send message to specific user (admin only)
+- `/del <id>` - Delete subscription (admin)
+- `/broadcast <msg>` - Broadcast message (admin)
+- `/send <id|user> <msg>` - Send to user (admin)
 
-**Inline Keyboard (v1.9.0 - replaces ReplyKeyboard):**
+### User Flow
+```
+/start → Main Menu
+         ├── [📋 Подписка] → Subscription info + [📱 QR-код] [🏠 В начало]
+         │                              ↓
+         │                         [📱 QR-код] → QR photo + [⬅️ Назад]
+         │                              ↓
+         │                         [⬅️ Назад] → Delete QR, subscription visible
+         │
+         ├── [☕ Донат] → Donation info + [🏠 В начало]
+         │
+         └── [❓ Помощь] → Instructions + [🏠 В начало]
+```
 
-For users WITH subscription:
-- **☕ Донат** - Shows donation text with T-Bank link
-- **📋 Подписка** - Shows subscription info with traffic usage
-- **❓ Помощь** - Shows VPN usage instructions
+### Keyboard Layout (IMPORTANT)
+- QR and "В начало" buttons are on **SEPARATE ROWS**
+- QR keyboard has only "⬅️ Назад" button (callback: `back_to_subscription`)
 
-For users WITHOUT subscription:
-- **📥 Получить подписку** - Create a new subscription
+### All Callbacks
+```go
+"create_subscription"   // Create/get subscription
+"qr_code"               // Generate QR code
+"back_to_subscription"  // Close QR, return to subscription
+"menu_subscription"     // Show subscription info
+"menu_donate"           // Show donation info
+"menu_help"             // Show help
+"back_to_start"         // Return to main menu (edits message)
+"admin_stats"           // Admin statistics
+"admin_lastreg"         // Last registrations
+```
 
-Admin also sees:
-- **📊 Стат** - View bot statistics
+## Recent Changes (v2.0.0)
 
-**All submenus have "🏠 В начало" button to return to main menu.**
+### 1. QR Code Feature
+- Added `utils/qr.go` with `GenerateQRCodePNG()` function
+- QR code generated in memory (512px), sent as photo
+- Button "⬅️ Назад" deletes QR, subscription message stays visible
+- UX: Modal-style QR overlay over subscription
 
-**Key UI Changes:**
-- Buttons are INLINE (under the message), NOT at bottom of screen
-- No keyboard flickering or auto-focus issues
-- Messages are EDITED in place when navigating (not deleted + new)
+### 2. Code Refactoring
+- **`getMainMenuContent()`** - Returns text+keyboard for main menu (handler.go)
+- **`showLoadingMessage()`** - Shows loading, returns messageID (handler.go)
+- Removed ~100 lines of duplicate code
+- Unified callback name: `create_subscription` (was `get_subscription`)
 
-**Features:**
-- VLESS+Reality+Vision subscription creation
-- Real traffic usage display from 3x-ui panel
-- Loading indicator ("⏳ Загрузка...")
-- Automatic rollback on DB save failure
-- Monthly auto-renewal (reset=31)
-- Link previews disabled for ALL messages
+### 3. Message Flow Improvements
+- QR photo is sent as NEW message (subscription stays visible)
+- "back_to_subscription" DELETES QR photo only
+- "back_to_start" EDITS message (instant, no delete delays)
+- No more "message disappearing" delays
 
-## Recent Changes (v1.9.0)
+### 4. Logging Added
+- Non-command messages now logged in main.go:
+  ```go
+  logger.Info("Received non-command message",
+      zap.Int64("chat_id", ...),
+      zap.String("username", ...),
+      zap.String("text_preview", ...))  // First 50 chars
+  ```
 
-### 1. Replaced ReplyKeyboard with InlineKeyboard
-- Removed ReplyKeyboard (3 buttons at bottom of screen)
-- Added InlineKeyboard (buttons under message)
-- Benefits: No keyboard flickering, no auto-focus on input field
-
-### 2. New Menu Handlers
-- `handleMenuDonate(chatID, username, messageID)` - Shows donate info with back button
-- `handleMenuSubscription(chatID, username, messageID)` - Shows subscription info with back button
-- `handleMenuHelp(chatID, username, messageID)` - Shows help with back button
-- All use message EDITING (not new messages)
-
-### 3. Removed Old Handlers
-- Deleted: `HandleDonate()`, `HandleMySubscriptionButton()`, `HandleHelpButton()`
-- These were for ReplyKeyboard which no longer exists
-
-### 4. Updated Callback Handling
-- Added callbacks: `menu_donate`, `menu_subscription`, `menu_help`
-- `back_to_start` now edits message instead of delete+send new
-
-### 5. DisableWebPagePreview Added Everywhere
-- All `EditMessageText` now have `DisableWebPagePreview = true`
-- Prevents link preview blocks in Telegram
-
-### 6. Code Cleanup
-- Removed ~130 lines of unused ReplyKeyboard handlers
-- Removed ~120 lines of obsolete tests
-- Updated test names and comments
+### 5. Tests Updated
+- Fixed `TestCallbackQueryData` - updated callback list
+- Added 6 new tests for helper functions and keyboard layouts
+- Fixed pointer comparisons for `*string` CallbackData
 
 ## Critical Details
 
-### 3x-ui API:
-- `GET /panel/api/inbounds/getClientTraffics/{email}` - Returns **single object**
-- Session validity: 15 minutes
-- Auto re-login with exponential backoff
-
-### ClientTraffic struct:
-```go
-type ClientTraffic struct {
-    ID         int    `json:"id"`
-    InboundID  int    `json:"inboundId"`
-    Enable     bool   `json:"enable"`
-    Email      string `json:"email"`
-    UUID       string `json:"uuid"`
-    SubID      string `json:"subId"`
-    Up         int64  `json:"up"`
-    Down       int64  `json:"down"`
-    AllTime    int64  `json:"allTime"`
-    ExpiryTime int64  `json:"expiryTime"`
-    Total      int64  `json:"total"`
-    Reset      int    `json:"reset"`
-    LastOnline int64  `json:"lastOnline"`
-}
+### QR Code Flow
+```
+1. User clicks [📱 QR-код]
+2. Bot sends QR photo (NEW message) with [⬅️ Назад]
+3. Subscription message remains VISIBLE above QR
+4. User clicks [⬅️ Назад]
+5. Bot DELETES QR photo
+6. Subscription message is already visible
 ```
 
-### Message Flow (v1.9.0):
-1. User sends `/start` or clicks "🏠 В начало"
-2. Bot shows message with InlineKeyboard (3 menu buttons)
-3. User clicks button → callback received
-4. Bot EDITS the message (same messageID) with new content + back button
-5. User clicks "🏠 В начало" → message edited back to main menu
+### Why Not Delete+Send?
+- Telegram API delete → send causes visible delays
+- User sees "message disappearing" effect
+- Solution: Send new first, let user see content immediately
+- QR is "modal" over subscription, closing it reveals subscription
 
-### Database:
-- Package-level functions: `GetAllTelegramIDs()`, `GetByTelegramID()`, `CreateSubscription()`
-- SQLite with soft deletes (`deleted_at` column)
+### Helper Functions (handler.go)
 
-### Config Defaults:
-- `TRAFFIC_LIMIT_GB=100`
+```go
+// Returns main menu text and keyboard
+func (h *Handler) getMainMenuContent(username string, hasSubscription bool, chatID int64) (string, tgbotapi.InlineKeyboardMarkup)
+
+// Shows loading message, returns messageID for subsequent edits
+func (h *Handler) showLoadingMessage(chatID int64, messageID int) int
+```
+
+### 3x-ui API
+- Session validity: 15 minutes
+- Auto re-login with exponential backoff
+- `GetClientTraffic()` returns up/down bytes for user
+
+### Database
+- SQLite with soft deletes (`deleted_at`)
+- `Subscription` model: TelegramID, Username, ClientID, SubscriptionURL, ExpiryTime, Status
+
+### Config
+- `TRAFFIC_LIMIT_GB=100` (default)
 - Backup retention: 14 days
-- Log max size: 10MB
-- Rate limiter: 30 tokens max, 5/sec refill
-
-### Key Functions:
-- `getMainMenuKeyboard()` - Returns InlineKeyboard with 3 buttons
-- `getBackKeyboard()` - Returns InlineKeyboard with "🏠 В начало"
-- `send()` - Sends message with DisableWebPagePreview=true, saves messageID
-- `setLastMessageType()` - Tracks what type of message is displayed
+- Rate limiter: 30 tokens, 5/sec refill
 
 ## Current Task
 
-**Status:** v1.9.0 released. All features working correctly.
+**Status:** v2.0.0 ready. Tests fixed and new tests added.
 
-**Completed:**
-- InlineKeyboard UI (no flickering)
-- Message type tracking (prevent duplicate updates)
-- Code cleanup and tests
-
-**Potential Next Steps:**
-1. Donations - Telegram Stars, CryptoBot, or hybrid
-2. Monitoring - Add metrics endpoint
-3. Multi-language support
-4. Subscription sharing prevention
-
-## Tests
-
+**Pending Verification:**
 ```bash
-go test ./... -v
+cd /home/kereal/tgvpn_go
+go mod tidy
+go test ./...
+go build ./...
 ```
-All tests pass.
 
-## Deploy
+**Next Steps:**
+1. Run tests and build to verify everything works
+2. Deploy to production
+3. Test QR code flow in real Telegram
+
+## Business Context
+
+- **Target:** Russian users needing VPN for blocked services
+- **Legal:** VPN advertising prohibited in Russia → word-of-mouth only
+- **Protocol:** VLESS+Reality+Vision (undetectable by DPI)
+- **Payment:** T-Bank donations, planning CryptoBot integration
+
+## Files Modified in Last Session
+
+| File | Changes |
+|------|---------|
+| `go.mod` | Added `piglig/go-qr` dependency |
+| `internal/utils/qr.go` | NEW - QR code generation |
+| `internal/bot/handler.go` | Added `getMainMenuContent()`, `showLoadingMessage()` |
+| `internal/bot/subscription.go` | QR code handler, refactored loading |
+| `internal/bot/menu.go` | Refactored `handleBackToStart()` |
+| `internal/bot/callbacks.go` | Added `back_to_subscription`, unified `create_subscription` |
+| `cmd/bot/main.go` | Added non-command message logging |
+| `internal/bot/handlers_test.go` | Fixed callbacks, added 6 new tests |
+
+## Quick Reference
 
 ```bash
-git add -A && git commit -m "message"
-git tag -a v1.x.x -m "version"
+# Run tests
+go test ./... -v
+
+# Build
+go build -o rs8kvn_bot ./cmd/bot
+
+# Deploy
+git add -A && git commit -m "v2.0.0: QR code feature"
+git tag -a v2.0.0 -m "QR code support"
 git push && git push --tags
 ```
-Auto Docker build + GitHub Release via CI/CD.
-
-## Admin Notification Format
-
-When subscription created, admin receives:
-- Username, Telegram ID
-- Expiry date
-- Full subscription URL

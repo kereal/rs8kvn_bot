@@ -5,9 +5,11 @@ import (
 
 	"rs8kvn_bot/internal/config"
 	"rs8kvn_bot/internal/interfaces"
+	"rs8kvn_bot/internal/logger"
 	"rs8kvn_bot/internal/ratelimiter"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"go.uber.org/zap"
 )
 
 type Handler struct {
@@ -69,6 +71,82 @@ func (h *Handler) getUsername(user *tgbotapi.User) string {
 	}
 
 	return fmt.Sprintf("user_%d", user.ID)
+}
+
+// getMainMenuContent returns the text and keyboard for the main menu.
+func (h *Handler) getMainMenuContent(username string, hasSubscription bool, chatID int64) (string, tgbotapi.InlineKeyboardMarkup) {
+	var text string
+	var keyboard tgbotapi.InlineKeyboardMarkup
+
+	if hasSubscription {
+		text = fmt.Sprintf(
+			"👋 Привет, %s!\n\nЯ бот для выдачи подписок на прокси VLESS+Reality+Vision.\n\nИспользуйте кнопки ниже для взаимодействия с ботом.",
+			username,
+		)
+		keyboard = h.getMainMenuKeyboard()
+		if h.isAdmin(chatID) {
+			keyboard.InlineKeyboard = append(keyboard.InlineKeyboard,
+				tgbotapi.NewInlineKeyboardRow(
+					tgbotapi.NewInlineKeyboardButtonData("📊 Стат", "admin_stats"),
+					tgbotapi.NewInlineKeyboardButtonData("📋 Посл.рег", "admin_lastreg"),
+				),
+			)
+		}
+	} else {
+		text = fmt.Sprintf(
+			"👋 Привет, %s!\n\nЯ бот для выдачи подписок на прокси VLESS+Reality+Vision.\n\nНажмите кнопку ниже, чтобы получить подписку",
+			username,
+		)
+		keyboard = tgbotapi.NewInlineKeyboardMarkup(
+			tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("📥 Получить подписку", "create_subscription"),
+			),
+		)
+		if h.isAdmin(chatID) {
+			keyboard.InlineKeyboard = append(keyboard.InlineKeyboard,
+				tgbotapi.NewInlineKeyboardRow(
+					tgbotapi.NewInlineKeyboardButtonData("📊 Стат", "admin_stats"),
+					tgbotapi.NewInlineKeyboardButtonData("📋 Посл.рег", "admin_lastreg"),
+				),
+			)
+		}
+	}
+
+	return text, keyboard
+}
+
+// showLoadingMessage shows a loading message by editing existing or sending new.
+// Returns the messageID to use for subsequent edits.
+func (h *Handler) showLoadingMessage(chatID int64, messageID int) int {
+	if messageID == 0 {
+		// No message to edit, send new one
+		loadingMsg := tgbotapi.NewMessage(chatID, "⏳ Загрузка...")
+		loadingMsg.DisableWebPagePreview = true
+		sentMsg, err := h.bot.Send(loadingMsg)
+		if err != nil {
+			logger.Error("Failed to send loading message", zap.Error(err))
+			return 0
+		}
+		return sentMsg.MessageID
+	}
+
+	// Edit existing message to show loading
+	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "⏳ Загрузка...")
+	editMsg.DisableWebPagePreview = true
+	if _, err := h.bot.Send(editMsg); err != nil {
+		logger.Warn("Failed to edit message for loading, sending new one", zap.Error(err))
+		// Try to send new message instead
+		loadingMsg := tgbotapi.NewMessage(chatID, "⏳ Загрузка...")
+		loadingMsg.DisableWebPagePreview = true
+		sentMsg, err := h.bot.Send(loadingMsg)
+		if err != nil {
+			logger.Error("Failed to send loading message", zap.Error(err))
+			return 0
+		}
+		return sentMsg.MessageID
+	}
+
+	return messageID
 }
 
 // getDonateText returns the donation message text.

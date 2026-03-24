@@ -6,6 +6,7 @@ require (
 	github.com/getsentry/sentry-go v0.43.0
 	github.com/go-telegram-bot-api/telegram-bot-api/v5 v5.5.1
 	github.com/joho/godotenv v1.5.1
+	github.com/piglig/go-qr v0.2.6
 	go.uber.org/zap v1.27.1
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	gorm.io/driver/sqlite v1.6.0

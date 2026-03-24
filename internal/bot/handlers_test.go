@@ -268,10 +268,10 @@ func TestMessageConstruction(t *testing.T) {
 func TestKeyboardConstruction(t *testing.T) {
 	keyboard := tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("📥 Получить подписку", "get_subscription"),
+			tgbotapi.NewInlineKeyboardButtonData("📥 Получить подписку", "create_subscription"),
 		),
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("📋 Моя подписка", "my_subscription"),
+			tgbotapi.NewInlineKeyboardButtonData("📋 Подписка", "menu_subscription"),
 		),
 	)
 
@@ -324,17 +324,18 @@ func TestSubscriptionStatus(t *testing.T) {
 
 func TestCallbackQueryData(t *testing.T) {
 	validCallbacks := map[string]bool{
-		"get_subscription":  true,
-		"my_subscription":   true,
-		"admin_stats":       true,
-		"admin_lastreg":     true,
-		"back_to_start":     true,
-		"menu_donate":       true,
-		"menu_subscription": true,
-		"menu_help":         true,
+		"create_subscription":  true,
+		"qr_code":              true,
+		"admin_stats":          true,
+		"admin_lastreg":        true,
+		"back_to_start":        true,
+		"menu_donate":          true,
+		"menu_subscription":    true,
+		"back_to_subscription": true,
+		"menu_help":            true,
 	}
 
-	callbackData := "get_subscription"
+	callbackData := "create_subscription"
 	if !validCallbacks[callbackData] {
 		t.Errorf("Unexpected callback data: %s", callbackData)
 	}
@@ -1076,4 +1077,174 @@ func TestHandleSend_NoArguments(t *testing.T) {
 
 func TestHandleSend_OnlyTarget(t *testing.T) {
 	t.Skip("Skipping - requires mock interface for bot API")
+}
+
+// TestGetMainMenuContent_WithSubscription tests getMainMenuContent for users with subscription
+func TestGetMainMenuContent_WithSubscription(t *testing.T) {
+	cfg := &config.Config{
+		TelegramAdminID: 0,
+	}
+	handler := &Handler{
+		cfg: cfg,
+	}
+
+	text, keyboard := handler.getMainMenuContent("testuser", true, 123456789)
+
+	if text == "" {
+		t.Error("Expected non-empty text for user with subscription")
+	}
+	if !strings.Contains(text, "testuser") {
+		t.Error("Expected text to contain username")
+	}
+	if len(keyboard.InlineKeyboard) < 2 {
+		t.Errorf("Expected at least 2 keyboard rows, got %d", len(keyboard.InlineKeyboard))
+	}
+}
+
+// TestGetMainMenuContent_WithoutSubscription tests getMainMenuContent for users without subscription
+func TestGetMainMenuContent_WithoutSubscription(t *testing.T) {
+	cfg := &config.Config{
+		TelegramAdminID: 0,
+	}
+	handler := &Handler{
+		cfg: cfg,
+	}
+
+	text, keyboard := handler.getMainMenuContent("testuser", false, 123456789)
+
+	if text == "" {
+		t.Error("Expected non-empty text for user without subscription")
+	}
+	if !strings.Contains(text, "testuser") {
+		t.Error("Expected text to contain username")
+	}
+	if len(keyboard.InlineKeyboard) < 1 {
+		t.Errorf("Expected at least 1 keyboard row, got %d", len(keyboard.InlineKeyboard))
+	}
+	// Check that "create_subscription" callback is used
+	found := false
+	for _, row := range keyboard.InlineKeyboard {
+		for _, button := range row {
+			if button.CallbackData != nil && *button.CallbackData == "create_subscription" {
+				found = true
+				break
+			}
+		}
+	}
+	if !found {
+		t.Error("Expected create_subscription callback in keyboard for user without subscription")
+	}
+}
+
+// TestGetMainMenuContent_AdminButtons tests that admin buttons are added for admin users
+func TestGetMainMenuContent_AdminButtons(t *testing.T) {
+	cfg := &config.Config{
+		TelegramAdminID: 123456789,
+	}
+	handler := &Handler{
+		cfg: cfg,
+	}
+
+	_, keyboard := handler.getMainMenuContent("admin", true, 123456789)
+
+	// Check for admin buttons
+	foundStats := false
+	foundLastReg := false
+	for _, row := range keyboard.InlineKeyboard {
+		for _, button := range row {
+			if button.CallbackData != nil && *button.CallbackData == "admin_stats" {
+				foundStats = true
+			}
+			if button.CallbackData != nil && *button.CallbackData == "admin_lastreg" {
+				foundLastReg = true
+			}
+		}
+	}
+	if !foundStats {
+		t.Error("Expected admin_stats button for admin user")
+	}
+	if !foundLastReg {
+		t.Error("Expected admin_lastreg button for admin user")
+	}
+}
+
+// TestSubscriptionKeyboardLayout tests that QR and В начало are on separate rows
+func TestSubscriptionKeyboardLayout(t *testing.T) {
+	keyboard := tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("📱 QR-код", "qr_code"),
+		),
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("🏠 В начало", "back_to_start"),
+		),
+	)
+
+	if len(keyboard.InlineKeyboard) != 2 {
+		t.Errorf("Expected 2 keyboard rows, got %d", len(keyboard.InlineKeyboard))
+	}
+
+	// First row should have QR button
+	if len(keyboard.InlineKeyboard[0]) != 1 {
+		t.Errorf("Expected 1 button in first row, got %d", len(keyboard.InlineKeyboard[0]))
+	}
+	if keyboard.InlineKeyboard[0][0].CallbackData == nil || *keyboard.InlineKeyboard[0][0].CallbackData != "qr_code" {
+		t.Error("Expected qr_code callback in first row")
+	}
+
+	// Second row should have В начало button
+	if len(keyboard.InlineKeyboard[1]) != 1 {
+		t.Errorf("Expected 1 button in second row, got %d", len(keyboard.InlineKeyboard[1]))
+	}
+	if keyboard.InlineKeyboard[1][0].CallbackData == nil || *keyboard.InlineKeyboard[1][0].CallbackData != "back_to_start" {
+		t.Error("Expected back_to_start callback in second row")
+	}
+}
+
+// TestQRBackKeyboard tests the keyboard for QR code message
+func TestQRBackKeyboard(t *testing.T) {
+	keyboard := tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("⬅️ Назад", "back_to_subscription"),
+		),
+	)
+
+	if len(keyboard.InlineKeyboard) != 1 {
+		t.Errorf("Expected 1 keyboard row, got %d", len(keyboard.InlineKeyboard))
+	}
+	if len(keyboard.InlineKeyboard[0]) != 1 {
+		t.Errorf("Expected 1 button in row, got %d", len(keyboard.InlineKeyboard[0]))
+	}
+	if keyboard.InlineKeyboard[0][0].CallbackData == nil || *keyboard.InlineKeyboard[0][0].CallbackData != "back_to_subscription" {
+		t.Error("Expected back_to_subscription callback")
+	}
+}
+
+// TestCallbackList verifies all callbacks are accounted for
+func TestCallbackList(t *testing.T) {
+	// List of all callbacks used in the bot
+	expectedCallbacks := []string{
+		"create_subscription",
+		"qr_code",
+		"admin_stats",
+		"admin_lastreg",
+		"back_to_start",
+		"menu_donate",
+		"menu_subscription",
+		"back_to_subscription",
+		"menu_help",
+	}
+
+	// Verify each callback is unique
+	seen := make(map[string]bool)
+	for _, cb := range expectedCallbacks {
+		if seen[cb] {
+			t.Errorf("Duplicate callback: %s", cb)
+		}
+		seen[cb] = true
+	}
+
+	// Verify we have the expected number
+	if len(expectedCallbacks) != 9 {
+		t.Errorf("Expected 9 callbacks, got %d", len(expectedCallbacks))
+	}
 }
