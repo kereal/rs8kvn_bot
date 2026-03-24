@@ -10,12 +10,17 @@ import (
 	"testing"
 	"time"
 
+	"rs8kvn_bot/internal/config"
 	"rs8kvn_bot/internal/logger"
 )
 
 func init() {
-	// Initialize logger for tests
 	logger.Init("", "error")
+}
+
+func init() {
+	config.XUIMaxRetries = 1
+	config.XUIInitialRetryDelay = 10 * time.Millisecond
 }
 
 func TestNewClient(t *testing.T) {
