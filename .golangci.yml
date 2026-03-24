@@ -18,12 +18,11 @@ linters:
     - gosec
   disable:
     - ineffassign
-
-linters-settings:
-  errcheck:
-    check-type-assertions: true
-  gosec:
-    excludes:
-      - G104
-      - G304
-      - G306
+  settings:
+    errcheck:
+      check-type-assertions: true
+    gosec:
+      excludes:
+        - G104
+        - G304
+        - G306
