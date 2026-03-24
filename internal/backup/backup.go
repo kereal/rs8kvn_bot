@@ -16,26 +16,39 @@ import (
 
 // validatePath checks if a path is safe (no directory traversal).
 func validatePath(path string) error {
-	// Clean the path to resolve any . or .. elements
-	cleaned := filepath.Clean(path)
+	if path == "" {
+		return fmt.Errorf("path cannot be empty")
+	}
 
-	// Check for directory traversal attempts
-	if strings.Contains(cleaned, "..") {
+	// Check for directory traversal attempts in the original path
+	// This must be done BEFORE cleaning because Clean() resolves ".."
+	if strings.Contains(path, "..") {
 		return fmt.Errorf("invalid path: directory traversal detected")
 	}
 
-	// Ensure the path is not trying to escape to sensitive locations
-	absPath, err := filepath.Abs(cleaned)
+	// Get absolute path
+	absPath, err := filepath.Abs(path)
 	if err != nil {
 		return fmt.Errorf("failed to get absolute path: %w", err)
 	}
 
-	// Prevent access to system directories
-	if strings.HasPrefix(absPath, "/etc/") ||
-		strings.HasPrefix(absPath, "/root/") ||
-		strings.HasPrefix(absPath, "/sys/") ||
-		strings.HasPrefix(absPath, "/proc/") {
+	// Clean the path to resolve any . elements
+	cleaned := filepath.Clean(absPath)
+
+	// Prevent access to system directories (case-insensitive for safety)
+	lowerPath := strings.ToLower(cleaned)
+	if strings.HasPrefix(lowerPath, "/etc/") ||
+		strings.HasPrefix(lowerPath, "/root/") ||
+		strings.HasPrefix(lowerPath, "/sys/") ||
+		strings.HasPrefix(lowerPath, "/proc/") ||
+		strings.HasPrefix(lowerPath, "/dev/") ||
+		strings.HasPrefix(lowerPath, "/var/run/") {
 		return fmt.Errorf("access to system directories is forbidden")
+	}
+
+	// Ensure path is within reasonable bounds (not root)
+	if cleaned == "/" {
+		return fmt.Errorf("cannot use root directory")
 	}
 
 	return nil

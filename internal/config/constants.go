@@ -39,6 +39,10 @@ const (
 
 	// RateLimiterPollInterval is the interval for checking token availability
 	RateLimiterPollInterval = 100 * time.Millisecond
+
+	// MaxConcurrentHandlers is the maximum number of concurrent update handlers
+	// This prevents unbounded goroutine spawning under load
+	MaxConcurrentHandlers = 10
 )
 
 // Database Constants

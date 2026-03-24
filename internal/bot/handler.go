@@ -2,6 +2,7 @@ package bot
 
 import (
 	"fmt"
+	"strings"
 
 	"rs8kvn_bot/internal/config"
 	"rs8kvn_bot/internal/interfaces"
@@ -63,14 +64,31 @@ func (h *Handler) getUsername(user *tgbotapi.User) string {
 	}
 
 	if user.UserName != "" {
-		return user.UserName
+		return sanitizeForMarkdown(user.UserName)
 	}
 
 	if user.FirstName != "" {
-		return user.FirstName
+		return sanitizeForMarkdown(user.FirstName)
 	}
 
 	return fmt.Sprintf("user_%d", user.ID)
+}
+
+// sanitizeForMarkdown escapes special characters that have meaning in Telegram Markdown.
+// This prevents users from injecting formatting or links via their username/name.
+func sanitizeForMarkdown(s string) string {
+	// Telegram Markdown special chars: * _ ` [ ] ( )
+	// Replace with safe alternatives or escape them
+	r := strings.NewReplacer(
+		"*", "∗", // asterisk
+		"_", "＿", // underscore (fullwidth)
+		"`", "ˋ", // backtick
+		"[", "（", // bracket (using fullwidth parens as visual substitute)
+		"]", "）",
+		"(", "⁽", // paren
+		")", "⁾",
+	)
+	return r.Replace(s)
 }
 
 // getMainMenuContent returns the text and keyboard for the main menu.
