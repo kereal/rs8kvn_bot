@@ -29,43 +29,15 @@ var (
 )
 
 // Init initializes the global logger with file and console output.
-// Deprecated: Use NewService for dependency injection.
-func Init(logFilePath, level string) error {
-	logDir := filepath.Dir(logFilePath)
-	if err := os.MkdirAll(logDir, 0750); err != nil {
-		return fmt.Errorf("failed to create log directory: %w", err)
+// Returns a Service for dependency injection.
+// The global Log variable is also set for backward compatibility.
+func Init(logFilePath, level string) (*Service, error) {
+	svc, err := NewService(logFilePath, level)
+	if err != nil {
+		return nil, err
 	}
-
-	var zapLevel zapcore.Level
-	if err := zapLevel.UnmarshalText([]byte(level)); err != nil {
-		zapLevel = zapcore.InfoLevel
-	}
-
-	encoderConfig := zap.NewProductionEncoderConfig()
-	encoderConfig.TimeKey = "timestamp"
-	encoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
-	encoderConfig.EncodeLevel = zapcore.CapitalLevelEncoder
-	encoder := zapcore.NewConsoleEncoder(encoderConfig)
-
-	var cores []zapcore.Core
-
-	// Console output
-	cores = append(cores, zapcore.NewCore(encoder, zapcore.AddSync(os.Stdout), zapLevel))
-
-	// File output with rotation
-	fileWriter = &lumberjack.Logger{
-		Filename:   logFilePath,
-		MaxSize:    config.LogMaxSizeMB,
-		MaxBackups: config.LogMaxBackups,
-		MaxAge:     config.LogMaxAgeDays,
-		Compress:   false, // Disable compression to save memory
-	}
-	cores = append(cores, zapcore.NewCore(encoder, zapcore.AddSync(fileWriter), zapLevel))
-
-	core := zapcore.NewTee(cores...)
-	Log = zap.New(core, zap.AddCaller(), zap.AddCallerSkip(1))
-
-	return nil
+	Log = svc.log
+	return svc, nil
 }
 
 // stdLogWriter implements io.Writer for redirecting standard log output.
