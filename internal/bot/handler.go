@@ -1,0 +1,94 @@
+package bot
+
+import (
+	"fmt"
+	"time"
+
+	"rs8kvn_bot/internal/config"
+	"rs8kvn_bot/internal/ratelimiter"
+	"rs8kvn_bot/internal/xui"
+
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+)
+
+// Handler handles Telegram bot updates and manages subscription operations.
+type Handler struct {
+	bot         *tgbotapi.BotAPI
+	cfg         *config.Config
+	xui         *xui.Client
+	rateLimiter *ratelimiter.RateLimiter
+}
+
+// NewHandler creates a new bot handler.
+func NewHandler(bot *tgbotapi.BotAPI, cfg *config.Config, xuiClient *xui.Client) *Handler {
+	return &Handler{
+		bot:         bot,
+		cfg:         cfg,
+		xui:         xuiClient,
+		rateLimiter: ratelimiter.NewRateLimiter(config.RateLimiterMaxTokens, config.RateLimiterRefillRate),
+	}
+}
+
+// getMainMenuKeyboard returns the inline keyboard with main menu buttons
+func (h *Handler) getMainMenuKeyboard() tgbotapi.InlineKeyboardMarkup {
+	return tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("📋 Подписка", "menu_subscription"),
+			tgbotapi.NewInlineKeyboardButtonData("☕ Донат", "menu_donate"),
+		),
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("❓ Помощь", "menu_help"),
+		),
+	)
+}
+
+// getBackKeyboard returns the inline keyboard with back button
+func (h *Handler) getBackKeyboard() tgbotapi.InlineKeyboardMarkup {
+	return tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("🏠 В начало", "back_to_start"),
+		),
+	)
+}
+
+// getUsername extracts a username from a Telegram user.
+func (h *Handler) getUsername(user *tgbotapi.User) string {
+	if user == nil {
+		return "unknown"
+	}
+
+	if user.UserName != "" {
+		return user.UserName
+	}
+
+	if user.FirstName != "" {
+		return user.FirstName
+	}
+
+	return fmt.Sprintf("user_%d", user.ID)
+}
+
+// getFirstSecondOfNextMonth returns the first second of the next month.
+func getFirstSecondOfNextMonth(t time.Time) time.Time {
+	year, month, _ := t.Date()
+	return time.Date(year, month+1, 1, 0, 0, 0, 0, t.Location())
+}
+
+// getDonateText returns the donation message text.
+func (h *Handler) getDonateText() string {
+	return `☕ *Поддержка проекта*
+
+Есть сбор в Т-Банке
+[REDACTED_DONATE_URL](REDACTED_DONATE_URL)
+
+Если нужен другой способ — [напишите мне](https://t.me/kereal)`
+}
+
+// getHelpText returns the help/instruction message text with subscription URL.
+func (h *Handler) getHelpText(trafficLimitGB int, subscriptionURL string) string {
+	return fmt.Sprintf(
+		"🚀 *Ваша подписка готова!*\n\nТрафик: %dГб на месяц.\n\n📲 *1. Установите приложение Happ*\n· [Скачать для iOS](https://apps.apple.com/ru/app/happ-proxy-utility-plus/id6746188973)\n· [Скачать для Android](https://play.google.com/store/apps/details?id=com.happproxy)\n\n📥 *2. Импортируйте подписку*\n\nНажмите, чтобы скопировать: `%s`\n\nВ приложении Happ нажмите *«+»* в правом верхнем углу и выберите *«Вставить из буфера»*.\n\n▶️ *3. Запустите VPN*\nДождитесь загрузки и нажмите на большую круглую кнопку в центре экрана.\n\n🛡️ *Важно знать*\nВ приложении Happ настроена автоматическая маршрутизация. Зарубежные сайты работают через VPN, а российские сервисы — напрямую. VPN можно не выключать.\n⚠️ _Если вы используете другое приложение или свою конфигурацию — не заходите через этот VPN на российские ресурсы, иначе сервер заблокируют._\n\n🤝 *Правила использования*\n· Не передавайте свою подписку другим. Делитесь ссылкой на этого бота `@rs8kvn_bot`.\n· Не публикуйте ссылку на бота в интернете, передавайте только из рук в руки (приветствуется).\n· Пользуйтесь ответственно, не занимайтесь незаконной деятельностью.\n\n☕ *Поддержка проекта*\nЭтот VPN бесплатный и существует благодаря вашим пожертвованиям и усилиям Кирилла.\n[Поддержите проект](https://t.me/rs8kvn_bot?start=donate) — важна каждая сотня.\n\nПомощь, вопросы: [@kereal](https://t.me/kereal)",
+		trafficLimitGB,
+		subscriptionURL,
+	)
+}
