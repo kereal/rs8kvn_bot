@@ -256,7 +256,6 @@ shutdown:
 	}
 
 	logger.Info("Bot stopped successfully")
-	return
 }
 
 // handleUpdateSafely handles a Telegram update with panic recovery.
