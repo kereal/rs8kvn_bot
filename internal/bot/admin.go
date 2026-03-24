@@ -16,7 +16,7 @@ import (
 func (h *Handler) handleAdminLastReg(ctx context.Context, chatID int64, username string, messageID int) {
 	logger.Info("Admin requesting last registrations", zap.String("username", username))
 
-	if chatID != h.cfg.TelegramAdminID {
+	if !h.isAdmin(chatID) {
 		logger.Warn("Non-admin user attempted to access last registrations", zap.Int64("chat_id", chatID))
 		return
 	}
@@ -75,7 +75,7 @@ func (h *Handler) HandleDel(ctx context.Context, update tgbotapi.Update) {
 	chatID := update.Message.Chat.ID
 
 	// Verify admin access
-	if chatID != h.cfg.TelegramAdminID {
+	if !h.isAdmin(chatID) {
 		logger.Warn("Non-admin user attempted to access /del", zap.Int64("chat_id", chatID))
 		return
 	}
@@ -154,7 +154,7 @@ func (h *Handler) HandleBroadcast(ctx context.Context, update tgbotapi.Update) {
 	chatID := update.Message.Chat.ID
 
 	// Verify admin access
-	if chatID != h.cfg.TelegramAdminID {
+	if !h.isAdmin(chatID) {
 		logger.Warn("Non-admin user attempted to access /broadcast", zap.Int64("chat_id", chatID))
 		return
 	}
@@ -221,7 +221,7 @@ func (h *Handler) HandleSend(ctx context.Context, update tgbotapi.Update) {
 	chatID := update.Message.Chat.ID
 
 	// Verify admin access
-	if chatID != h.cfg.TelegramAdminID {
+	if !h.isAdmin(chatID) {
 		logger.Warn("Non-admin user attempted to access /send", zap.Int64("chat_id", chatID))
 		return
 	}
@@ -288,7 +288,7 @@ func (h *Handler) handleAdminStats(ctx context.Context, chatID int64, username s
 	logger.Info("Admin requesting stats", zap.String("username", username))
 
 	// Verify admin access
-	if chatID != h.cfg.TelegramAdminID {
+	if !h.isAdmin(chatID) {
 		logger.Warn("Non-admin user attempted to access admin stats", zap.Int64("chat_id", chatID))
 		return
 	}

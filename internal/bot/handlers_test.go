@@ -9,6 +9,7 @@ import (
 	"rs8kvn_bot/internal/config"
 	"rs8kvn_bot/internal/database"
 	"rs8kvn_bot/internal/testutil"
+	"rs8kvn_bot/internal/utils"
 	"rs8kvn_bot/internal/xui"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -27,7 +28,7 @@ func TestGetFirstSecondOfNextMonth(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := getFirstSecondOfNextMonth(tt.input)
+			result := utils.FirstSecondOfNextMonth(tt.input)
 			if !result.Equal(tt.expected) {
 				t.Errorf("Expected %v, got %v", tt.expected, result)
 			}
@@ -953,28 +954,28 @@ func TestHandler_notifyAdminError_ZeroAdminID(t *testing.T) {
 
 func TestGetFirstSecondOfNextMonth_January(t *testing.T) {
 	now := time.Date(2024, 1, 15, 12, 30, 0, 0, time.UTC)
-	result := getFirstSecondOfNextMonth(now)
+	result := utils.FirstSecondOfNextMonth(now)
 	expected := time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC)
 	if !result.Equal(expected) {
-		t.Errorf("getFirstSecondOfNextMonth() = %v, want %v", result, expected)
+		t.Errorf("utils.FirstSecondOfNextMonth() = %v, want %v", result, expected)
 	}
 }
 
 func TestGetFirstSecondOfNextMonth_December(t *testing.T) {
 	now := time.Date(2024, 12, 15, 12, 30, 0, 0, time.UTC)
-	result := getFirstSecondOfNextMonth(now)
+	result := utils.FirstSecondOfNextMonth(now)
 	expected := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 	if !result.Equal(expected) {
-		t.Errorf("getFirstSecondOfNextMonth() = %v, want %v", result, expected)
+		t.Errorf("utils.FirstSecondOfNextMonth() = %v, want %v", result, expected)
 	}
 }
 
 func TestGetFirstSecondOfNextMonth_FirstDay(t *testing.T) {
 	now := time.Date(2024, 3, 1, 0, 0, 0, 0, time.UTC)
-	result := getFirstSecondOfNextMonth(now)
+	result := utils.FirstSecondOfNextMonth(now)
 	expected := time.Date(2024, 4, 1, 0, 0, 0, 0, time.UTC)
 	if !result.Equal(expected) {
-		t.Errorf("getFirstSecondOfNextMonth() = %v, want %v", result, expected)
+		t.Errorf("utils.FirstSecondOfNextMonth() = %v, want %v", result, expected)
 	}
 }
 

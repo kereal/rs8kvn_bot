@@ -17,7 +17,6 @@ func (h *Handler) HandleStart(ctx context.Context, update tgbotapi.Update) {
 
 	chatID := update.Message.Chat.ID
 	username := h.getUsername(update.Message.From)
-	isAdmin := chatID == h.cfg.TelegramAdminID
 
 	sub, err := h.db.GetByTelegramID(ctx, chatID)
 	hasSubscription := err == nil && sub != nil && sub.Status == "active"
@@ -31,7 +30,7 @@ func (h *Handler) HandleStart(ctx context.Context, update tgbotapi.Update) {
 
 		keyboard := h.getMainMenuKeyboard()
 		// Add admin buttons if user is admin
-		if isAdmin {
+		if h.isAdmin(chatID) {
 			keyboard.InlineKeyboard = append(keyboard.InlineKeyboard,
 				tgbotapi.NewInlineKeyboardRow(
 					tgbotapi.NewInlineKeyboardButtonData("📊 Стат", "admin_stats"),
@@ -56,7 +55,7 @@ func (h *Handler) HandleStart(ctx context.Context, update tgbotapi.Update) {
 		)
 
 		// Add admin buttons if user is admin
-		if isAdmin {
+		if h.isAdmin(chatID) {
 			inlineKeyboard.InlineKeyboard = append(inlineKeyboard.InlineKeyboard,
 				tgbotapi.NewInlineKeyboardRow(
 					tgbotapi.NewInlineKeyboardButtonData("📊 Стат", "admin_stats"),
