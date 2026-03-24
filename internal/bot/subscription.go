@@ -156,7 +156,7 @@ func (h *Handler) createSubscription(ctx context.Context, chatID int64, username
 	}
 
 	now := time.Now()
-	expiryTime := getFirstSecondOfNextMonth(now)
+	expiryTime := utils.FirstSecondOfNextMonth(now)
 	trafficBytes := int64(h.cfg.TrafficLimitGB) * 1024 * 1024 * 1024
 
 	logger.Info("Creating subscription",
