@@ -417,6 +417,9 @@ func (c *Client) GetSubscriptionLink(baseURL, subID, subPath string) string {
 }
 
 // GetExternalURL extracts the base URL (scheme + host) from a full URL.
+func (c *Client) GetExternalURL(host string) string {
+	return GetExternalURL(host)
+}
 func GetExternalURL(host string) string {
 	u, err := url.Parse(host)
 	if err != nil {

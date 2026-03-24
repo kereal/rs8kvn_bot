@@ -4,14 +4,11 @@ import (
 	"context"
 	"fmt"
 
-	"rs8kvn_bot/internal/database"
 	"rs8kvn_bot/internal/logger"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
-	"go.uber.org/zap"
 )
 
-// HandleStart handles the /start command.
 func (h *Handler) HandleStart(ctx context.Context, update tgbotapi.Update) {
 	if update.Message == nil {
 		logger.Error("HandleStart called with nil Message")
@@ -19,25 +16,10 @@ func (h *Handler) HandleStart(ctx context.Context, update tgbotapi.Update) {
 	}
 
 	chatID := update.Message.Chat.ID
-
 	username := h.getUsername(update.Message.From)
-	logger.Info("User started the bot",
-		zap.String("username", username),
-		zap.Int64("chat_id", chatID))
-
-	// Check for deep link parameter (e.g., /start donate)
-	if update.Message.CommandArguments() == "donate" {
-		msg := tgbotapi.NewMessage(chatID, h.getDonateText())
-		msg.ParseMode = "Markdown"
-		msg.ReplyMarkup = h.getBackKeyboard()
-		h.send(ctx, msg)
-		return
-	}
-
 	isAdmin := chatID == h.cfg.TelegramAdminID
 
-	// Check if user has an active subscription
-	sub, err := database.GetByTelegramID(chatID)
+	sub, err := h.db.GetByTelegramID(ctx, chatID)
 	hasSubscription := err == nil && sub != nil && sub.Status == "active"
 
 	if hasSubscription {

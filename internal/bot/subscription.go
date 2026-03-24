@@ -9,17 +9,15 @@ import (
 	"rs8kvn_bot/internal/database"
 	"rs8kvn_bot/internal/logger"
 	"rs8kvn_bot/internal/utils"
-	"rs8kvn_bot/internal/xui"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"go.uber.org/zap"
 )
 
-// handleGetSubscription handles the "get subscription" callback.
 func (h *Handler) handleGetSubscription(ctx context.Context, chatID int64, username string, messageID int) {
 	logger.Info("User requesting subscription", zap.String("username", username))
 
-	sub, err := database.GetByTelegramID(chatID)
+	sub, err := h.db.GetByTelegramID(ctx, chatID)
 	if err == nil && sub != nil {
 		// Check if subscription is expired
 		if sub.IsExpired() {
@@ -77,7 +75,7 @@ func (h *Handler) handleMySubscription(ctx context.Context, chatID int64, userna
 		messageID = sentMsg.MessageID
 	}
 
-	sub, err := database.GetByTelegramID(chatID)
+	sub, err := h.db.GetByTelegramID(ctx, chatID)
 	if err != nil || sub == nil {
 		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "❌ У вас нет активной подписки.\n\nНажмите «Получить подписку» для создания.")
 		editMsg.DisableWebPagePreview = true
@@ -192,7 +190,7 @@ func (h *Handler) createSubscription(ctx context.Context, chatID int64, username
 	}
 
 	// Step 3: Save to database (with rollback on failure)
-	subscriptionURL := h.xui.GetSubscriptionLink(xui.GetExternalURL(h.cfg.XUIHost), client.SubID, h.cfg.XUISubPath)
+	subscriptionURL := h.xui.GetSubscriptionLink(h.xui.GetExternalURL(h.cfg.XUIHost), client.SubID, h.cfg.XUISubPath)
 
 	sub := &database.Subscription{
 		TelegramID:      chatID,
@@ -206,7 +204,7 @@ func (h *Handler) createSubscription(ctx context.Context, chatID int64, username
 		SubscriptionURL: subscriptionURL,
 	}
 
-	if err := database.CreateSubscription(sub); err != nil {
+	if err := h.db.CreateSubscription(ctx, sub); err != nil {
 		logger.Error("Failed to save subscription to database", zap.Error(err))
 
 		// CRITICAL: Rollback - remove client from 3x-ui panel to prevent orphan record

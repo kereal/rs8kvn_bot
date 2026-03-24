@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"rs8kvn_bot/internal/database"
 	"rs8kvn_bot/internal/logger"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -19,7 +18,7 @@ func (h *Handler) handleBackToStart(ctx context.Context, chatID int64, username 
 	isAdmin := chatID == h.cfg.TelegramAdminID
 
 	// Check if user has an active subscription
-	sub, err := database.GetByTelegramID(chatID)
+	sub, err := h.db.GetByTelegramID(ctx, chatID)
 	hasSubscription := err == nil && sub != nil && sub.Status == "active"
 
 	if hasSubscription {
@@ -90,7 +89,7 @@ func (h *Handler) handleMenuDonate(ctx context.Context, chatID int64, username s
 func (h *Handler) handleMenuSubscription(ctx context.Context, chatID int64, username string, messageID int) {
 	logger.Info("User viewing subscription", zap.String("username", username))
 
-	sub, err := database.GetByTelegramID(chatID)
+	sub, err := h.db.GetByTelegramID(ctx, chatID)
 	if err != nil || sub == nil {
 		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "❌ У вас нет активной подписки.\n\nНажмите «🏠 В начало» для получения подписки.")
 		editMsg.DisableWebPagePreview = true
@@ -140,7 +139,7 @@ func (h *Handler) handleMenuSubscription(ctx context.Context, chatID int64, user
 func (h *Handler) handleMenuHelp(ctx context.Context, chatID int64, username string, messageID int) {
 	logger.Info("User viewing help", zap.String("username", username))
 
-	sub, err := database.GetByTelegramID(chatID)
+	sub, err := h.db.GetByTelegramID(ctx, chatID)
 	if err != nil || sub == nil {
 		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "❌ Ошибка: подписка не найдена.")
 		editMsg.DisableWebPagePreview = true

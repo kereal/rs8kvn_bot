@@ -121,6 +121,17 @@ func main() {
 	}()
 	logger.Info("Database initialized successfully")
 
+	// Create database service for dependency injection
+	dbService, err := database.NewService(cfg.DatabasePath)
+	if err != nil {
+		logger.Fatal("Failed to create database service", zap.Error(err))
+	}
+	defer func() {
+		if err := dbService.Close(); err != nil {
+			logger.Error("Failed to close database service", zap.Error(err))
+		}
+	}()
+
 	// Initialize 3x-ui client
 	xuiClient := xui.NewClient(cfg.XUIHost, cfg.XUIUsername, cfg.XUIPassword)
 
@@ -143,7 +154,7 @@ func main() {
 	logger.Info("Telegram bot authorized", zap.String("username", botAPI.Self.UserName))
 
 	// Create bot handler
-	handler := bot.NewHandler(botAPI, cfg, xuiClient)
+	handler := bot.NewHandler(botAPI, cfg, dbService, xuiClient)
 
 	// Configure update listener
 	u := tgbotapi.NewUpdate(0)
