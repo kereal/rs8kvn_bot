@@ -6,7 +6,14 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"rs8kvn_bot/internal/logger"
 )
+
+func init() {
+	// Initialize logger for tests
+	_, _ = logger.Init("", "error")
+}
 
 func TestInit(t *testing.T) {
 	// Create temporary directory for test database

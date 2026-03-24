@@ -222,10 +222,16 @@ func (h *Handler) createSubscription(ctx context.Context, chatID int64, username
 		errMsg := "❌ Ошибка при создании подписки."
 		if strings.Contains(err.Error(), "connection refused") || strings.Contains(err.Error(), "timeout") {
 			errMsg = "❌ Не удается подключиться к серверу. Попробуйте позже."
-		} else if strings.Contains(err.Error(), "authentication") {
+		} else if strings.Contains(err.Error(), "authentication") || strings.Contains(err.Error(), "unauthorized") {
 			errMsg = "❌ Ошибка авторизации на сервере. Свяжитесь с администратором."
 		} else if strings.Contains(err.Error(), "context canceled") {
 			errMsg = "❌ Запрос был прерван. Попробуйте снова."
+		} else if strings.Contains(err.Error(), "no such host") || strings.Contains(err.Error(), "dial tcp") {
+			errMsg = "❌ Ошибка подключения к серверу. Проверьте настройки DNS."
+		} else if strings.Contains(err.Error(), "certificate") || strings.Contains(err.Error(), "TLS") {
+			errMsg = "❌ Ошибка SSL/TLS сертификата. Свяжитесь с администратором."
+		} else if strings.Contains(err.Error(), "inbound") || strings.Contains(err.Error(), "client") {
+			errMsg = "❌ Ошибка сервера при создании подписки. Попробуйте позже."
 		}
 
 		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, errMsg)

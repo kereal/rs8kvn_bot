@@ -8,12 +8,18 @@ import (
 
 	"rs8kvn_bot/internal/config"
 	"rs8kvn_bot/internal/database"
+	"rs8kvn_bot/internal/logger"
 	"rs8kvn_bot/internal/testutil"
 	"rs8kvn_bot/internal/utils"
 	"rs8kvn_bot/internal/xui"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
+
+func init() {
+	// Initialize logger for tests
+	_, _ = logger.Init("", "error")
+}
 
 func TestGetFirstSecondOfNextMonth(t *testing.T) {
 	tests := []struct {
@@ -70,7 +76,10 @@ func TestNewHandler(t *testing.T) {
 		TelegramBotToken: "test_token",
 	}
 
-	xuiClient := xui.NewClient(cfg.XUIHost, "admin", "password")
+	xuiClient, err := xui.NewClient(cfg.XUIHost, "admin", "password")
+	if err != nil {
+		t.Fatalf("Failed to create XUI client: %v", err)
+	}
 	mockDB := testutil.NewMockDatabaseService()
 	handler := NewHandler(nil, cfg, mockDB, xuiClient)
 
@@ -415,7 +424,10 @@ func TestHandler_ConfigField(t *testing.T) {
 		XUISubPath:       "mysub",
 	}
 
-	xuiClient := xui.NewClient(cfg.XUIHost, "user", "pass")
+	xuiClient, err := xui.NewClient(cfg.XUIHost, "user", "pass")
+	if err != nil {
+		t.Fatalf("Failed to create XUI client: %v", err)
+	}
 
 	handler := &Handler{
 		cfg: cfg,

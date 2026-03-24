@@ -1,6 +1,7 @@
 package bot
 
 import (
+	"context"
 	"sync"
 	"time"
 
@@ -56,9 +57,19 @@ func (c *SubscriptionCache) Set(telegramID int64, sub *database.Subscription) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	// If at capacity, evict oldest (simple: just clear all)
+	// If at capacity, evict oldest entry (by expiresAt time)
 	if len(c.items) >= c.maxSize {
-		c.items = make(map[int64]*cacheEntry)
+		var oldestID int64
+		var oldestTime time.Time
+		for id, entry := range c.items {
+			if oldestTime.IsZero() || entry.expiresAt.Before(oldestTime) {
+				oldestID = id
+				oldestTime = entry.expiresAt
+			}
+		}
+		if oldestID != 0 {
+			delete(c.items, oldestID)
+		}
 	}
 
 	c.items[telegramID] = &cacheEntry{
@@ -97,6 +108,22 @@ func (c *SubscriptionCache) Cleanup() {
 	for telegramID, entry := range c.items {
 		if now.After(entry.expiresAt) {
 			delete(c.items, telegramID)
+		}
+	}
+}
+
+// StartCleanup starts a background goroutine that periodically removes expired entries.
+// Call with context.Background() or a long-lived context, and cancel when application stops.
+func (c *SubscriptionCache) StartCleanup(ctx context.Context, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			c.Cleanup()
+		case <-ctx.Done():
+			return
 		}
 	}
 }

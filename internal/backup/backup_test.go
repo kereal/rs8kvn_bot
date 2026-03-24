@@ -1,6 +1,7 @@
 package backup
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -25,7 +26,7 @@ func TestBackupDatabase(t *testing.T) {
 		t.Fatalf("Failed to create test database: %v", err)
 	}
 
-	err := BackupDatabase(dbPath)
+	err := BackupDatabase(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("BackupDatabase() error = %v", err)
 	}
@@ -51,7 +52,7 @@ func TestBackupDatabase_NonExistentFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "nonexistent.db")
 
-	err := BackupDatabase(dbPath)
+	err := BackupDatabase(context.Background(), dbPath)
 	if err == nil {
 		t.Fatal("BackupDatabase() should return error for non-existent file")
 	}
@@ -68,7 +69,7 @@ func TestBackupDatabase_OverwritesExistingBackup(t *testing.T) {
 	}
 
 	// Create first backup
-	if err := BackupDatabase(dbPath); err != nil {
+	if err := BackupDatabase(context.Background(), dbPath); err != nil {
 		t.Fatalf("First BackupDatabase() error = %v", err)
 	}
 
@@ -78,7 +79,7 @@ func TestBackupDatabase_OverwritesExistingBackup(t *testing.T) {
 	}
 
 	// Create second backup
-	if err := BackupDatabase(dbPath); err != nil {
+	if err := BackupDatabase(context.Background(), dbPath); err != nil {
 		t.Fatalf("Second BackupDatabase() error = %v", err)
 	}
 
@@ -182,7 +183,7 @@ func TestDailyBackup(t *testing.T) {
 		t.Fatalf("Failed to create test database: %v", err)
 	}
 
-	err := DailyBackup(dbPath, 7)
+	err := DailyBackup(context.Background(), dbPath, 7)
 	if err != nil {
 		t.Fatalf("DailyBackup() error = %v", err)
 	}
@@ -203,7 +204,7 @@ func TestDailyBackup_NonExistentDatabase(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "nonexistent.db")
 
-	err := DailyBackup(dbPath, 7)
+	err := DailyBackup(context.Background(), dbPath, 7)
 	if err == nil {
 		t.Fatal("DailyBackup() should return error for non-existent database")
 	}
@@ -219,14 +220,14 @@ func TestDailyBackup_MultipleRuns(t *testing.T) {
 	}
 
 	// Run daily backup twice
-	if err := DailyBackup(dbPath, 5); err != nil {
+	if err := DailyBackup(context.Background(), dbPath, 5); err != nil {
 		t.Fatalf("First DailyBackup() error = %v", err)
 	}
 
 	// Small delay to ensure different timestamp
 	// time.Sleep(time.Second)
 
-	if err := DailyBackup(dbPath, 5); err != nil {
+	if err := DailyBackup(context.Background(), dbPath, 5); err != nil {
 		t.Fatalf("Second DailyBackup() error = %v", err)
 	}
 
@@ -266,12 +267,12 @@ func TestGetBackupInfo_WithBackups(t *testing.T) {
 	}
 
 	// Create current backup
-	if err := BackupDatabase(dbPath); err != nil {
+	if err := BackupDatabase(context.Background(), dbPath); err != nil {
 		t.Fatalf("BackupDatabase() error = %v", err)
 	}
 
 	// Create timed backup
-	if err := DailyBackup(dbPath, 7); err != nil {
+	if err := DailyBackup(context.Background(), dbPath, 7); err != nil {
 		t.Fatalf("DailyBackup() error = %v", err)
 	}
 
@@ -306,7 +307,7 @@ func TestGetBackupInfo_SortedByTime(t *testing.T) {
 
 	// Create multiple timed backups
 	for i := 0; i < 3; i++ {
-		if err := DailyBackup(dbPath, 7); err != nil {
+		if err := DailyBackup(context.Background(), dbPath, 7); err != nil {
 			t.Fatalf("DailyBackup() error = %v", err)
 		}
 		time.Sleep(10 * time.Millisecond)
@@ -350,7 +351,7 @@ func TestTotalBackupSize_WithBackups(t *testing.T) {
 	}
 
 	// Create backup
-	if err := BackupDatabase(dbPath); err != nil {
+	if err := BackupDatabase(context.Background(), dbPath); err != nil {
 		t.Fatalf("BackupDatabase() error = %v", err)
 	}
 
@@ -379,7 +380,7 @@ func TestTotalBackupSize_MultipleBackups(t *testing.T) {
 	}
 
 	// Create first backup
-	if err := BackupDatabase(dbPath); err != nil {
+	if err := BackupDatabase(context.Background(), dbPath); err != nil {
 		t.Fatalf("BackupDatabase() error = %v", err)
 	}
 
@@ -405,7 +406,7 @@ func TestValidatePath(t *testing.T) {
 	}
 
 	// ValidatePath should work for existing files
-	err := BackupDatabase(dbPath)
+	err := BackupDatabase(context.Background(), dbPath)
 	if err != nil {
 		t.Errorf("BackupDatabase() should work for valid path: %v", err)
 	}
@@ -437,7 +438,7 @@ func TestDailyBackup_KeepDaysZero(t *testing.T) {
 	}
 
 	// With keepDays=0, should still work (keep all)
-	err := DailyBackup(dbPath, 0)
+	err := DailyBackup(context.Background(), dbPath, 0)
 	if err != nil {
 		t.Errorf("DailyBackup() with keepDays=0 should not error: %v", err)
 	}
@@ -453,7 +454,7 @@ func TestDailyBackup_KeepDaysOne(t *testing.T) {
 	}
 
 	// With keepDays=1, should only keep latest
-	err := DailyBackup(dbPath, 1)
+	err := DailyBackup(context.Background(), dbPath, 1)
 	if err != nil {
 		t.Errorf("DailyBackup() with keepDays=1 should not error: %v", err)
 	}
@@ -492,7 +493,7 @@ func TestRotateBackups_KeepAll(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		os.WriteFile(dbPath, []byte(fmt.Sprintf("content-%d", i)), 0644)
 		time.Sleep(10 * time.Millisecond)
-		if err := BackupDatabase(dbPath); err != nil {
+		if err := BackupDatabase(context.Background(), dbPath); err != nil {
 			t.Fatalf("BackupDatabase() error = %v", err)
 		}
 	}
@@ -520,7 +521,7 @@ func TestRotateBackups_KeepZero_UsesDefault(t *testing.T) {
 	}
 
 	// Create backup
-	if err := BackupDatabase(dbPath); err != nil {
+	if err := BackupDatabase(context.Background(), dbPath); err != nil {
 		t.Fatalf("BackupDatabase() error = %v", err)
 	}
 
@@ -541,7 +542,7 @@ func TestRotateBackups_KeepNegative_UsesDefault(t *testing.T) {
 	}
 
 	// Create backup
-	if err := BackupDatabase(dbPath); err != nil {
+	if err := BackupDatabase(context.Background(), dbPath); err != nil {
 		t.Fatalf("BackupDatabase() error = %v", err)
 	}
 
@@ -562,21 +563,21 @@ func TestGetBackupInfo_SortByTime(t *testing.T) {
 	}
 
 	// Create initial backup
-	if err := BackupDatabase(dbPath); err != nil {
+	if err := BackupDatabase(context.Background(), dbPath); err != nil {
 		t.Fatalf("BackupDatabase() error = %v", err)
 	}
 	time.Sleep(20 * time.Millisecond)
 
 	// Modify and create another backup
 	os.WriteFile(dbPath, []byte("content2"), 0644)
-	if err := BackupDatabase(dbPath); err != nil {
+	if err := BackupDatabase(context.Background(), dbPath); err != nil {
 		t.Fatalf("BackupDatabase() error = %v", err)
 	}
 	time.Sleep(20 * time.Millisecond)
 
 	// Modify and create third backup
 	os.WriteFile(dbPath, []byte("content3"), 0644)
-	if err := BackupDatabase(dbPath); err != nil {
+	if err := BackupDatabase(context.Background(), dbPath); err != nil {
 		t.Fatalf("BackupDatabase() error = %v", err)
 	}
 
@@ -605,7 +606,7 @@ func TestDailyBackup_KeepDaysNegative_UsesDefault(t *testing.T) {
 		t.Fatalf("Failed to create test file: %v", err)
 	}
 
-	err := DailyBackup(dbPath, -5)
+	err := DailyBackup(context.Background(), dbPath, -5)
 	if err != nil {
 		t.Errorf("DailyBackup() with negative keepDays should not error: %v", err)
 	}
@@ -619,7 +620,7 @@ func TestBackupInfo_Path(t *testing.T) {
 		t.Fatalf("Failed to create test file: %v", err)
 	}
 
-	if err := BackupDatabase(dbPath); err != nil {
+	if err := BackupDatabase(context.Background(), dbPath); err != nil {
 		t.Fatalf("BackupDatabase() error = %v", err)
 	}
 
@@ -665,13 +666,13 @@ func TestGetBackupInfo_Order(t *testing.T) {
 		t.Fatalf("Failed to create test file: %v", err)
 	}
 
-	if err := BackupDatabase(dbPath); err != nil {
+	if err := BackupDatabase(context.Background(), dbPath); err != nil {
 		t.Fatalf("BackupDatabase() error = %v", err)
 	}
 
 	time.Sleep(20 * time.Millisecond)
 	os.WriteFile(dbPath, []byte("content2"), 0644)
-	if err := BackupDatabase(dbPath); err != nil {
+	if err := BackupDatabase(context.Background(), dbPath); err != nil {
 		t.Fatalf("BackupDatabase() error = %v", err)
 	}
 
@@ -759,7 +760,7 @@ func TestBackupDatabase_ReadError(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "nonexistent.db")
 
-	err := BackupDatabase(dbPath)
+	err := BackupDatabase(context.Background(), dbPath)
 	if err == nil {
 		t.Fatal("BackupDatabase() should return error for non-existent file")
 	}
@@ -773,7 +774,7 @@ func TestBackupDatabase_FilePermission(t *testing.T) {
 		t.Skipf("Skipping test: cannot create read-only file: %v", err)
 	}
 
-	err := BackupDatabase(dbPath)
+	err := BackupDatabase(context.Background(), dbPath)
 	if err == nil {
 		t.Fatal("BackupDatabase() should return error for unreadable file")
 	}
@@ -794,8 +795,122 @@ func TestBackupDatabase_WriteError(t *testing.T) {
 	}
 	defer os.Chmod(parentDir, 0755)
 
-	err := BackupDatabase(dbPath)
+	err := BackupDatabase(context.Background(), dbPath)
 	if err == nil {
 		t.Error("BackupDatabase() should return error when directory is not writable")
+	}
+}
+
+// ==================== Context Cancellation Tests ====================
+
+func TestBackupDatabase_ContextCancellation(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	// Create a test database file with some content
+	content := make([]byte, 1024*1024) // 1MB file
+	for i := range content {
+		content[i] = byte(i % 256)
+	}
+	if err := os.WriteFile(dbPath, content, 0644); err != nil {
+		t.Fatalf("Failed to create test database: %v", err)
+	}
+
+	// Create a context that will be cancelled immediately
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := BackupDatabase(ctx, dbPath)
+	if err == nil {
+		t.Error("BackupDatabase() should return error when context is cancelled")
+	}
+	if err != context.Canceled {
+		t.Errorf("BackupDatabase() error = %v, want context.Canceled", err)
+	}
+
+	// Verify no backup file was created
+	backupPath := dbPath + ".backup"
+	if _, err := os.Stat(backupPath); err == nil {
+		t.Error("Backup file should not be created when context is cancelled")
+	}
+}
+
+func TestBackupDatabase_ContextTimeout(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	// Create a test database file
+	content := make([]byte, 100*1024) // 100KB file
+	if err := os.WriteFile(dbPath, content, 0644); err != nil {
+		t.Fatalf("Failed to create test database: %v", err)
+	}
+
+	// Create a context with a very short timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Nanosecond)
+	defer cancel()
+
+	// Give the context time to expire
+	time.Sleep(10 * time.Millisecond)
+
+	err := BackupDatabase(ctx, dbPath)
+	if err == nil {
+		t.Error("BackupDatabase() should return error when context times out")
+	}
+	if err != context.DeadlineExceeded {
+		t.Errorf("BackupDatabase() error = %v, want context.DeadlineExceeded", err)
+	}
+}
+
+func TestDailyBackup_ContextCancellation(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	// Create a test database file
+	content := []byte("test database content")
+	if err := os.WriteFile(dbPath, content, 0644); err != nil {
+		t.Fatalf("Failed to create test database: %v", err)
+	}
+
+	// Create a context that will be cancelled
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := DailyBackup(ctx, dbPath, 7)
+	if err == nil {
+		t.Error("DailyBackup() should return error when context is cancelled")
+	}
+}
+
+func TestBackupDatabase_Success(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	// Create a test database file
+	content := []byte("test database content for success")
+	if err := os.WriteFile(dbPath, content, 0644); err != nil {
+		t.Fatalf("Failed to create test database: %v", err)
+	}
+
+	// Use a valid context
+	ctx := context.Background()
+	err := BackupDatabase(ctx, dbPath)
+	if err != nil {
+		t.Fatalf("BackupDatabase() error = %v", err)
+	}
+
+	// Verify backup was created
+	backupPath := dbPath + ".backup"
+	if _, err := os.Stat(backupPath); os.IsNotExist(err) {
+		t.Fatal("Backup file was not created")
+	}
+
+	// Verify backup content matches original
+	backupContent, err := os.ReadFile(backupPath)
+	if err != nil {
+		t.Fatalf("Failed to read backup file: %v", err)
+	}
+
+	if string(backupContent) != string(content) {
+		t.Error("Backup content does not match original")
 	}
 }

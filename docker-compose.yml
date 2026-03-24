@@ -28,7 +28,7 @@ services:
 
         # Expose health check port for monitoring (optional)
         ports:
-            - "127.0.0.1:8080:8080"
+            - "127.0.0.1:8880:8880"
 
         # Security hardening
         security_opt:
@@ -37,7 +37,15 @@ services:
 
         # Health check - verify service is responding
         healthcheck:
-            test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/healthz"]
+            test:
+                [
+                    "CMD",
+                    "wget",
+                    "--no-verbose",
+                    "--tries=1",
+                    "--spider",
+                    "http://localhost:8880/healthz",
+                ]
             interval: 30s
             timeout: 10s
             retries: 3

@@ -1,6 +1,7 @@
 package backup
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -57,7 +58,8 @@ func validatePath(path string) error {
 // BackupDatabase creates a backup of the SQLite database file.
 // It uses atomic write pattern: write to temp file, sync, then rename.
 // This ensures the backup is always in a consistent state.
-func BackupDatabase(dbPath string) error {
+// The context allows cancellation of the backup operation.
+func BackupDatabase(ctx context.Context, dbPath string) error {
 	// Validate the database path to prevent directory traversal
 	if err := validatePath(dbPath); err != nil {
 		return fmt.Errorf("invalid database path: %w", err)
@@ -73,8 +75,10 @@ func BackupDatabase(dbPath string) error {
 		return fmt.Errorf("failed to open database: %w", err)
 	}
 	defer func() {
-		if err := src.Close(); err != nil {
-			logger.Debug("Failed to close source", zap.Error(err))
+		if closeErr := src.Close(); closeErr != nil {
+			logger.Error("Failed to close source database file",
+				zap.String("path", dbPath),
+				zap.Error(closeErr))
 		}
 	}()
 
@@ -85,37 +89,59 @@ func BackupDatabase(dbPath string) error {
 		return fmt.Errorf("failed to create temp backup: %w", err)
 	}
 	defer func() {
-		if err := dst.Close(); err != nil {
-			logger.Debug("Failed to close destination", zap.Error(err))
+		if closeErr := dst.Close(); closeErr != nil {
+			logger.Error("Failed to close backup file",
+				zap.String("path", tempPath),
+				zap.Error(closeErr))
 		}
 	}()
 
-	// Copy database to temp file
-	if _, err := io.Copy(dst, src); err != nil {
-		_ = os.Remove(tempPath) // Ignore error, we're already returning an error
-		return fmt.Errorf("failed to copy database: %w", err)
+	// Copy database to temp file with context cancellation support
+	buf := make([]byte, 32*1024) // 32KB buffer
+	for {
+		select {
+		case <-ctx.Done():
+			_ = os.Remove(tempPath)
+			return ctx.Err()
+		default:
+		}
+
+		n, err := src.Read(buf)
+		if n > 0 {
+			if _, writeErr := dst.Write(buf[:n]); writeErr != nil {
+				_ = os.Remove(tempPath)
+				return fmt.Errorf("failed to write to backup: %w", writeErr)
+			}
+		}
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			_ = os.Remove(tempPath)
+			return fmt.Errorf("failed to read database: %w", err)
+		}
 	}
 
 	// Sync to ensure all data is written to disk
 	if err := dst.Sync(); err != nil {
-		_ = os.Remove(tempPath) // Ignore error, we're already returning an error
+		_ = os.Remove(tempPath)
 		return fmt.Errorf("failed to sync backup: %w", err)
 	}
 
 	// Close files before rename
 	if err := dst.Close(); err != nil {
-		_ = os.Remove(tempPath) // Ignore error, we're already returning an error
+		_ = os.Remove(tempPath)
 		return fmt.Errorf("failed to close backup file: %w", err)
 	}
 
 	if err := src.Close(); err != nil {
-		_ = os.Remove(tempPath) // Ignore error, we're already returning an error
+		_ = os.Remove(tempPath)
 		return fmt.Errorf("failed to close database file: %w", err)
 	}
 
 	// Atomic rename
 	if err := os.Rename(tempPath, backupPath); err != nil {
-		_ = os.Remove(tempPath) // Ignore error, we're already returning an error
+		_ = os.Remove(tempPath)
 		return fmt.Errorf("failed to rename backup: %w", err)
 	}
 
@@ -193,12 +219,13 @@ func RotateBackups(dbPath string, keep int) error {
 
 // DailyBackup performs a database backup and rotation.
 // This is the main entry point for scheduled backups.
-func DailyBackup(dbPath string, keepDays int) error {
+// The context allows cancellation of the backup operation.
+func DailyBackup(ctx context.Context, dbPath string, keepDays int) error {
 	if keepDays < 1 {
 		keepDays = config.DefaultBackupRetention
 	}
 
-	if err := BackupDatabase(dbPath); err != nil {
+	if err := BackupDatabase(ctx, dbPath); err != nil {
 		return fmt.Errorf("backup failed: %w", err)
 	}
 

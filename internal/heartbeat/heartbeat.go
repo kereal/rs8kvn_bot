@@ -24,7 +24,7 @@ func getHTTPClient() *http.Client {
 		transport := &http.Transport{
 			MaxIdleConns:        config.MaxIdleConns,
 			MaxIdleConnsPerHost: config.MaxIdleConns,
-			IdleConnTimeout:     config.DefaultIdleConnIdleTimeout,
+			IdleConnTimeout:     config.DefaultIdleConnTimeout,
 			DisableCompression:  false,
 			ForceAttemptHTTP2:   false,
 		}
