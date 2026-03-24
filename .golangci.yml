@@ -1,0 +1,66 @@
+run:
+  timeout: 5m
+
+linters:
+  enable:
+    - errcheck
+    - gosimple
+    - govet
+    - staticcheck
+    - unused
+    - gofmt
+    - goimports
+    - misspell
+    - unconvert
+    - unparam
+    - gosec
+  disable:
+    - ineffassign
+
+linters-settings:
+  errcheck:
+    check-type-assertions: true
+    check-unused: false
+    wrap-ignore: true
+  gosec:
+    excludes:
+      - G104
+      - G304
+      - G306
+  govet:
+    enable-all: true
+
+issues:
+  exclude-use-default: false
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - errcheck
+        - gosec
+        - unparam
+        - staticcheck
+        - govet
+    - path: testutil\.go
+      linters:
+        - errcheck
+    - text: "Error return value"
+      linters:
+        - errcheck
+    - text: "shadow:"
+      linters:
+        - govet
+    - text: "fieldalignment:"
+      linters:
+        - govet
+    - text: "ineffassign:"
+      linters:
+        - govet
+    - text: "ctx.*is unused"
+      linters:
+        - unparam
+    - text: "sync.Pool"
+      linters:
+        - errcheck
+    - text: "sendWithRetry"
+      linters:
+        - unused
