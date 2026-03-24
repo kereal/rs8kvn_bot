@@ -361,6 +361,18 @@ func StartExpiryNotifier(ctx context.Context, db interfaces.DatabaseService, not
 | 3.2 Integration тесты | ✅ Готово |
 | 4.3 Circuit breaker | ✅ Готово |
 
+### ✅ Выполнено
+
+| Задача | Статус |
+|--------|--------|
+| 1.1 Интерфейсы | ✅ Готово |
+| 1.2 Глобальное состояние | ✅ Готово |
+| 2.1 Дублирование | ✅ Готово |
+| 3.2 Integration тесты | ✅ Готово |
+| 4.3 Circuit breaker | ✅ Готово |
+| 5.1 golangci-lint в CI | ✅ Готово |
+| 5.2 gosec | ✅ Готово |
+
 ### 🔄 Осталось
 
 | Задача | Приоритет |
@@ -368,14 +380,12 @@ func StartExpiryNotifier(ctx context.Context, db interfaces.DatabaseService, not
 | 1.3 Разделить тестовые файлы | 🟡 P1 |
 | 2.2 x-ui error handling | 🟡 P1 |
 | 2.3 Panic recovery | 🟢 P2 |
-| ~~3.1 Покрытие bot-пакета~~ | ⚪ Пропущен (требует мок Telegram API) |
+| ~~3.1 Покрытие bot-пакета~~ | ⚪ Пропущен |
 | 3.3 Concurrent тесты | 🟢 P2 |
 | 4.1 Health check | 🟡 P1 |
 | 4.2 Prometheus metrics | 🟡 P1 |
 | 4.4 Уведомления об истечении | 🟡 P1 |
 | 4.5 Мульти-серверность | 🔴 P0 |
-| 5.1 golangci-lint в CI | 🟢 P2 |
-| 5.2 gosec | 🟢 P2 |
 
 **Примечание 3.1:** Требует мока Telegram Bot API для тестирования callback/menu handlers — сложная задача. Core логика (database, xui, utils) уже покрыта.
 
