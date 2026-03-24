@@ -2,41 +2,53 @@
 
 **Дата:** 2026-03-24
 **Статус:** В работе
+**Тестовое покрытие:** 51.3%
 
 ---
 
-## 🔄 Новые идеи для улучшения
+## 🔴 P0 - Критические баги (исправить немедленно)
 
-### Приоритет 1: Конфигурация и структура
+> См. `doc/BUG_FIXES_PLAN.md` для деталей
 
-**1.1 Конфиг-файл**
-- Переход с env vars на YAML/TOML конфиг
-- Пример: `config.yaml` с секциями bot, database, xui
-- Флаг `--config` для указания пути
-
-**1.2 Graceful shutdown**
-- Корректная обработка SIGTERM/SIGINT
-- Закрытие соединений перед выходом
-- Логирование процесса остановки
-
-**1.3 Структурированные логи (JSON)**
-- JSON формат вместо текстового
-- Поля: level, time, caller, message, fields
-- Легче парсить в ELK/Graylog
+| # | Проблема | Файл | Исправление |
+|---|----------|------|-------------|
+| 1 | **Goroutine leak** | `main.go:196` | WaitGroup для обработчиков |
+| 2 | **Buffer pool race** | `client.go:178` | Не возвращать буфер в пул |
+| 3 | **Nil pointer** | `callbacks.go:36-61` | Проверка Message != nil |
+| 4 | **Unbounded goroutines** | `main.go:196` | Worker pool с semaphore |
+| 5 | **uint overflow** | `admin.go:92` | Проверка id > 0 |
+| 6 | **Orphan clients** | `subscription.go:26` | DeleteClient перед созданием |
+| 7 | **Global DB state** | `database.go` | Удалить глобальную DB |
 
 ---
+
+## 🟡 P1 - Завершённые задачи
+
+- ✅ **1.1 Interfaces** — созданы `internal/interfaces/`
+- ✅ **1.2 Global state** — logger.Init() возвращает Service
+- ✅ **2.1 Duplication** — isAdmin(), utils/time.go
+- ✅ **3.2 Integration tests** — `integration_test.go`
+- ✅ **4.3 Circuit breaker** — `breaker.go`
+- ✅ **5.1 golangci-lint** — уже в docker.yml
+- ✅ **5.2 gosec** — уже в docker.yml
+- ✅ **6.1 Unit tests** — qr_test.go, uuid_test.go, time_test.go
+
+---
+
+## 🟢 P2 - Новые идеи для улучшения
 
 ### Приоритет 2: Безопасность
 
 **2.1 Admin ACL**
 - Список разрешённых admin Telegram ID
 - Защита от неавторизованного доступа
-- Конфиг: `admins: [123456789]`
 
 **2.2 Валидация input**
 - Проверка Telegram ID (числовой)
-- sanitize username
-- Лимиты на длину текстов
+- Sanitize username (Markdown escaping)
+
+**2.3 Default credentials**
+- Убрать admin/admin по умолчанию
 
 ---
 
@@ -44,17 +56,12 @@
 
 **3.1 Улучшенные клавиатуры**
 - Persistent keyboard для навигации
-- Callback data вместо username
-- Информативные названия кнопок
 
 **3.2 Превью подписки**
-- При создании — показать данные до подтверждения
-- Ссылка на x-ui панель
-- QR код для VPN конфига
+- Показать данные до подтверждения
 
 **3.3 /help команда**
-- Справка по всем командам
-- Разделение: user vs admin команды
+- Разделение user vs admin команды
 
 ---
 
@@ -62,37 +69,35 @@
 
 **4.1 Expiry notifications**
 - За 7/3/1 день до истечения
-- Ежедневная проверка в фоне
-- Шаблоны сообщений
 
 **4.2 Admin notifications**
-- Уведомление админам о новых подписках
-- Отчёты об ошибках x-ui
+- Уведомления о новых подписках
 
 ---
 
 ### Приоритет 5: Производительность
 
-**5.1 Connection pool для БД**
-- Настройка max connections
-- Логирование долгих запросов
+**5.1 Connection pool**
+- Настройка MaxOpenConns/MaxIdleConns
 
 **5.2 Кэш подписок**
-- LRU кэш в памяти
-- TTL: 5 минут
-- Инвалидация при update
+- LRU кэш, TTL: 5 минут
+
+**5.3 TLS конфигурация**
+- Опция для self-signed сертификатов
 
 ---
 
-### Приоритет 6: Тестирование
+### Приоритет 6: Качество кода
 
-**6.1 Unit тесты для утилит**
-- time.go функции
-- validation логика
+**6.1 Gosec включить G104**
+- Исправить unhandled errors
 
-**6.2 Mock интерфейсы**
-- Генерировать mocks с go:generate
-- Упростить тестирование
+**6.2 Logger interface**
+- Использовать для DI или удалить
+
+**6.3 MockDatabaseService**
+- Сделать thread-safe
 
 ---
 
@@ -100,16 +105,29 @@
 
 **7.1 Webhook режим**
 - Вместо long-polling
-- Telegram → наш сервер
-- SSL требуется
 
 **7.2 Multi-bot поддержка**
 - Несколько ботов с одной БД
-- Конфиг: bots: []
 
-**7.3 Метрики в /stats**
-- Команда для админов
+**7.3 Метрики**
 - uptime, users, subscriptions, errors
+
+---
+
+## Статус тестов
+
+| Модуль | Покрытие | Статус |
+|--------|----------|--------|
+| cmd/bot | 5.1% | Пропущен (user request) |
+| internal/bot | 9.7% | Пропущен (user request) |
+| internal/config | 88.6% | ✅ |
+| internal/database | 84.3% | ✅ |
+| internal/xui | 89.1% | ✅ |
+| internal/logger | 85.6% | ✅ |
+| internal/utils | 80.0% | ✅ |
+| internal/heartbeat | 95.8% | ✅ |
+| internal/ratelimiter | 100% | ✅ |
+| **Итого** | **51.3%** | |
 
 ---
 
