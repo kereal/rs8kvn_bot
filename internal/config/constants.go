@@ -15,7 +15,7 @@ const (
 )
 
 // 3x-ui Panel Constants
-const (
+var (
 	// XUISessionValidity is how long a 3x-ui session remains valid
 	XUISessionValidity = 15 * time.Minute
 
