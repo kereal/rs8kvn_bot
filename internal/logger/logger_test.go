@@ -6,25 +6,33 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/getsentry/sentry-go"
 	"go.uber.org/zap"
 )
 
-func TestInit(t *testing.T) {
-	tmpDir := t.TempDir()
-	logPath := filepath.Join(tmpDir, "test.log")
-
-	err := Init(logPath, "info")
-	// Ignore sync errors on stdout/stderr
-	if err != nil {
-		t.Fatalf("Init() error = %v", err)
+func TestSentryLevelFromString(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected sentry.Level
+	}{
+		{"debug", "debug", sentry.LevelDebug},
+		{"info", "info", sentry.LevelInfo},
+		{"warn", "warn", sentry.LevelWarning},
+		{"error", "error", sentry.LevelError},
+		{"fatal", "fatal", sentry.LevelFatal},
+		{"unknown", "unknown", sentry.LevelError},
+		{"empty", "", sentry.LevelError},
 	}
 
-	if Log == nil {
-		t.Fatal("Log is nil after Init()")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := sentryLevelFromString(tt.input)
+			if result != tt.expected {
+				t.Errorf("sentryLevelFromString(%q) = %v, want %v", tt.input, result, tt.expected)
+			}
+		})
 	}
-
-	// Clean up
-	Close()
 }
 
 func TestInit_CreatesDirectory(t *testing.T) {
@@ -362,24 +370,6 @@ func TestService_WithFields(t *testing.T) {
 	newService.Info("test with fields")
 }
 
-func TestService_WithError(t *testing.T) {
-	tmpDir := t.TempDir()
-	logPath := filepath.Join(tmpDir, "test.log")
-
-	service, err := NewService(logPath, "info")
-	// Ignore sync errors on stdout/stderr
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
-	defer service.Close()
-
-	testErr := fmt.Errorf("test error")
-	newService := service.WithError(testErr)
-	if newService == nil {
-		t.Error("WithError() returned nil")
-	}
-}
-
 func TestService_SetSentryHub(t *testing.T) {
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
@@ -532,4 +522,56 @@ func TestNilLoggerSafety(t *testing.T) {
 	Debug("test", zap.String("formatted", "formatted"))
 	Warn("test")
 	Warn("test", zap.String("formatted", "formatted"))
+}
+
+func TestFatal_NilLogger(t *testing.T) {
+	oldLog := Log
+	Log = nil
+	defer func() { Log = oldLog }()
+
+	// Should not panic
+	Fatal("test fatal message")
+}
+
+func TestFlushSentry(t *testing.T) {
+	// flushSentry should not panic with nil hub
+	flushSentry(0)
+}
+
+func TestCaptureToSentry(t *testing.T) {
+	tmpDir := t.TempDir()
+	logPath := filepath.Join(tmpDir, "test.log")
+
+	if err := Init(logPath, "info"); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	defer Close()
+
+	// Should not panic
+	captureToSentry("test message", "info")
+	captureToSentry("error message", "error")
+}
+
+func TestService_Fatal(t *testing.T) {
+	t.Skip("Fatal calls os.Exit which kills the test process")
+}
+
+func TestService_WithError(t *testing.T) {
+	tmpDir := t.TempDir()
+	logPath := filepath.Join(tmpDir, "test.log")
+
+	service, err := NewService(logPath, "info")
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	defer service.Close()
+
+	testErr := fmt.Errorf("test error with context")
+
+	newService := service.WithError(testErr)
+	if newService == nil {
+		t.Error("WithError() should not return nil")
+	}
+
+	newService.Info("logged with error")
 }
