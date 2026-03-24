@@ -19,61 +19,31 @@
 
 ## Приоритет 1: Рефакторинг архитектуры
 
-### 1.1 Интерфейсы для компонентов (🔴 Критично)
+### 1.1 Интерфейсы для компонентов ✅ (Выполнено)
 
-**Проблема:** Нет интерфейсов — сложно тестировать bot handlers без реальных зависимостей.
+**Сделано:**
+- Создан пакет `internal/interfaces/` с интерфейсами `DatabaseService`, `XUIClient`, `Logger`
+- Handler теперь принимает интерфейсы вместо конкретных типов
+- Все методы БД принимают `context.Context`
+- testutil обновлён с полными mock-реализациями
 
-**Решение:** Определить интерфейсы в отдельном пакете.
-
-```
-internal/interfaces/
-├── database.go    // DatabaseService interface
-├── xui.go         // XUIClient interface  
-├── notifier.go    // Notifier interface (Telegram)
-└── metrics.go     // MetricsCollector interface
-```
-
-**Шаги:**
-1. Создать пакет `internal/interfaces/`
-2. Вынести интерфейсы из testutil в interfaces
-3. Обновить Handler для приёма интерфейсов
-4. Обновить testutil.MockDatabaseService и testutil.MockXUIClient
-
-**Время:** 2-3 дня
-**Приоритет:** 🔴 P0
+**Время:** 2-3 дня → выполнено
+**Статус:** ✅ Готово
 
 ---
 
-### 1.2 Убрать глобальное состояние (🔴 Критично)
+### 1.2 Убрать глобальное состояние ✅ (Выполнено)
 
-**Проблема:** `var DB *gorm.DB` и `var Log *zap.Logger` — deprecated, но всё ещё используются.
+**Сделано:**
+- `logger.Init()` теперь возвращает `*Service` для dependency injection
+- Global `Log` устанавливается из Service для обратной совместимости
+- `main.go` использует Service pattern для БД и логгера
+- Убран дублирующий вызов `database.Init()`
 
-**Текущее состояние:**
-- `database/database.go:51` — `var DB *gorm.DB`
-- `logger/logger.go:25` — `var Log *zap.Logger`
-- `main.go` инициализирует глобальные переменные, но компоненты используют их напрямую
+**Примечание:** `logger.Log` остаётся как singleton — стандартный Go паттерн для логгеров
 
-**Решение:** Dependency injection через структуры.
-
-**Шаги:**
-
-1. **Logger:**
-   - `NewService(dbPath, logLevel) (*Service, error)` вместо `Init()`
-   - `Service` содержит `*zap.Logger`
-   - Убрать глобальный `Log`
-
-2. **Database:**
-   - `NewService(dbPath) (*Service, error)` вместо `Init()`
-   - `Service` содержит `*gorm.DB`
-   - Убрать глобальный `DB`
-   - Перенести методы `GetByTelegramID`, `CreateSubscription` и т.д. в `Service`
-
-3. **Main.go:**
-   - Создать `App` struct с внедрёнными зависимостями
-   - Передать зависимости в Handler
-
-**Время:** 2 дня
-**Приоритет:** 🔴 P0
+**Время:** 2 дня → выполнено
+**Статус:** ✅ Готово
 
 ---
 
@@ -109,24 +79,15 @@ internal/database/
 
 ## Приоритет 2: Качество кода
 
-### 2.1 Устранить дублирование (🟡 Важно)
+### 2.1 Устранить дублирование ✅ (Выполнено)
 
-**Найдено дублирование:**
+**Сделано:**
+- Добавлен метод `Handler.isAdmin(chatID int64)` в `handler.go`
+- Создан `internal/utils/time.go` с `FirstSecondOfNextMonth`
+- Все файлы обновлены: `commands.go`, `menu.go`, `admin.go`, `subscription.go`
 
-| Код | Места |
-|-----|-------|
-| `isAdmin` проверка | `commands.go:37`, `admin.go:22,82,161,228,295`, `menu.go:19` |
-| `getFirstSecondOfNextMonth` | `handler.go:72`, `subscription.go:161` |
-| Admin ID константа | Повторяется в нескольких файлах |
-
-**Решение:**
-
-1. Вынести `isAdmin` в `handler.go` как метод `Handler.isAdmin(chatID int64) bool`
-2. Создать `internal/utils/time.go` с `FirstSecondOfNextMonth`
-3. Использовать `h.cfg.TelegramAdminID` вместо константы
-
-**Время:** 2 часа
-**Приоритет:** 🟡 P1
+**Время:** 2 часа → выполнено
+**Статус:** ✅ Готово
 
 ---
 
@@ -208,28 +169,27 @@ func RecoverWithSentry(logger *zap.Logger) {
 
 ---
 
-### 3.2 Integration тесты (🟡 Важно)
+### 3.2 Integration тесты ✅ (Выполнено)
 
-**Текущее:** только unit-тесты
+**Сделано:**
+- `internal/bot/integration_test.go` с `NewIntegrationTestFixture`
+- In-memory SQLite база данных для изоляции
+- `MockXUIServer` для мокирования x-ui API
 
-**Нужно:**
-1. Поднять test database (SQLite in-memory)
-2. Mock x-ui server (httptest)
-3. Подготовить test fixtures
+**Добавлены тесты:**
+- `TestSubscriptionFlow_CreateAndGet`
+- `TestSubscriptionFlow_ExpiredSubscription`
+- `TestSubscriptionFlow_RevokeOldSubscription`
+- `TestAdminStats`
+- `TestDatabaseService_GetAllTelegramIDs`
+- `TestDatabaseService_GetByUsername`
 
-```go
-// internal/bot/integration_test.go
-func TestSubscriptionFlow(t *testing.T) {
-    // 1. Setup mock x-ui server
-    // 2. Create handler with mock dependencies
-    // 3. Simulate /start → callback → subscription creation
-    // 4. Verify database state
-    // 5. Verify x-ui API calls
-}
-```
+**Также добавлено:**
+- `internal/utils/time_test.go` — тесты для `FirstSecondOfNextMonth`
+- `internal/interfaces/interfaces_test.go` — mock-тесты для интерфейсов
 
-**Время:** 2 дня
-**Приоритет:** 🟡 P1
+**Время:** 2 дня → выполнено
+**Статус:** ✅ Готово
 
 ---
 
@@ -295,31 +255,21 @@ func (h *HealthChecker) Check(ctx context.Context) HealthStatus {
 
 ---
 
-### 4.3 Circuit breaker для x-ui (🟡 Важно)
+### 4.3 Circuit breaker для x-ui ✅ (Выполнено)
 
-**Проблема:** Бот зависает при недоступности x-ui панели.
+**Сделано:**
+- Собственная реализация `CircuitBreaker` в `internal/xui/breaker.go`
+- 9 тестов в `internal/xui/breaker_test.go`
+- Константы в `config.CircuitBreakerMaxFailures` и `config.CircuitBreakerTimeout`
 
-**Решение:** Добавить circuit breaker.
+**Параметры:**
+- Открывается после 5 неудачных запросов
+- Через 30 сек переходит в half-open
+- Закрывается после 3 успешных запросов
+- Интегрирован в `ensureLoggedIn` → все операции защищены
 
-```go
-// internal/xui/breaker.go
-import "github.com/rubyist/circuitbreaker"
-
-cb := circuitbreaker.NewCircuitBreaker(circuitbreaker.Config{
-    Name:    "xui",
-    MaxFail: 5,
-    Timeout: 30 * time.Second,
-})
-
-result := cb.Call(func() (interface{}, error) {
-    return client.Login(ctx)
-})
-```
-
-**Альтернатива:** Использовать `sony/gobreaker` или написать простой встроенный.
-
-**Время:** 4 часа
-**Приоритет:** 🟡 P1
+**Время:** 4 часа → выполнено
+**Статус:** ✅ Готово
 
 ---
 
@@ -401,46 +351,31 @@ func StartExpiryNotifier(ctx context.Context, db interfaces.DatabaseService, not
 
 ## Итоговый план по приоритетам
 
-### Фаза 1: Архитектура (1 неделя)
+### ✅ Выполнено
 
-| Задача | Время | Приоритет |
-|--------|-------|----------|
-| 1.1 Интерфейсы | 3 дня | 🔴 P0 |
-| 1.2 Убрать глобальное состояние | 2 дня | 🔴 P0 |
-| 1.3 Разделить тестовые файлы | 1 день | 🟡 P1 |
+| Задача | Статус |
+|--------|--------|
+| 1.1 Интерфейсы | ✅ Готово |
+| 1.2 Глобальное состояние | ✅ Готово |
+| 2.1 Дублирование | ✅ Готово |
+| 3.2 Integration тесты | ✅ Готово |
+| 4.3 Circuit breaker | ✅ Готово |
 
-### Фаза 2: Качество кода (2 дня)
+### 🔄 Осталось
 
-| Задача | Время | Приоритет |
-|--------|-------|----------|
-| 2.1 Устранить дублирование | 2 часа | 🟡 P1 |
-| 2.2 Улучшить x-ui error handling | 2 часа | 🟡 P1 |
-| 2.3 Panic recovery централизация | 1 час | 🟢 P2 |
-
-### Фаза 3: Тестирование (1 неделя)
-
-| Задача | Время | Приоритет |
-|--------|-------|----------|
-| 3.1 Покрытие bot-пакета (6.9% → 60%) | 4 дня | 🔴 P0 |
-| 3.2 Integration тесты | 2 дня | 🟡 P1 |
-| 3.3 Concurrent тесты | 1 день | 🟢 P2 |
-
-### Фаза 4: Новые фичи (2-3 недели)
-
-| Задача | Время | Приоритет |
-|--------|-------|----------|
-| 4.1 Health check | 2 часа | 🟡 P1 |
-| 4.2 Prometheus metrics | 4 часа | 🟡 P1 |
-| 4.3 Circuit breaker | 4 часа | 🟡 P1 |
-| 4.4 Уведомления об истечении | 1 день | 🟡 P1 |
-| 4.5 Мульти-серверность | 3 дня | 🔴 P0 |
-
-### Фаза 5: CI/CD (полдня)
-
-| Задача | Время | Приоритет |
-|--------|-------|-----------|
-| 5.1 golangci-lint в CI | 1 час | 🟢 P2 |
-| 5.2 gosec | 1 час | 🟢 P2 |
+| Задача | Приоритет |
+|--------|----------|
+| 1.3 Разделить тестовые файлы | 🟡 P1 |
+| 2.2 x-ui error handling | 🟡 P1 |
+| 2.3 Panic recovery | 🟢 P2 |
+| 3.1 Покрытие bot-пакета | 🔴 P0 |
+| 3.3 Concurrent тесты | 🟢 P2 |
+| 4.1 Health check | 🟡 P1 |
+| 4.2 Prometheus metrics | 🟡 P1 |
+| 4.4 Уведомления об истечении | 🟡 P1 |
+| 4.5 Мульти-серверность | 🔴 P0 |
+| 5.1 golangci-lint в CI | 🟢 P2 |
+| 5.2 gosec | 🟢 P2 |
 
 ---
 
