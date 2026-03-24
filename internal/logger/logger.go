@@ -44,10 +44,6 @@ func Init(logFilePath, level string) (*Service, error) {
 type stdLogWriter struct{}
 
 func (w *stdLogWriter) Write(p []byte) (n int, err error) {
-	if Log == nil {
-		return len(p), nil
-	}
-
 	msg := strings.TrimSpace(string(p))
 	if len(msg) == 0 {
 		return len(p), nil
@@ -61,15 +57,11 @@ func (w *stdLogWriter) Write(p []byte) (n int, err error) {
 type tgbotapiLogger struct{}
 
 func (l *tgbotapiLogger) Println(v ...interface{}) {
-	if Log != nil {
-		Log.Warn(fmt.Sprint(v...))
-	}
+	Log.Warn(fmt.Sprint(v...))
 }
 
 func (l *tgbotapiLogger) Printf(format string, v ...interface{}) {
-	if Log != nil {
-		Log.Warn(fmt.Sprintf(format, v...))
-	}
+	Log.Warn(fmt.Sprintf(format, v...))
 }
 
 // RedirectStdLog redirects standard Go log output to our zap logger.
@@ -97,44 +89,37 @@ func SetSentryHub(hub *sentry.Hub) {
 
 // --- Global logger functions (deprecated, kept for backward compatibility) ---
 
+// Info logs at INFO level.
 func Info(msg string, fields ...zap.Field) {
-	if Log != nil {
-		Log.Info(msg, fields...)
-	}
+	Log.Info(msg, fields...)
 }
 
+// Error logs at ERROR level and sends to Sentry.
 func Error(msg string, fields ...zap.Field) {
-	if Log != nil {
-		Log.Error(msg, fields...)
-	}
+	Log.Error(msg, fields...)
 	captureToSentry(msg, "error")
 }
 
+// Debug logs at DEBUG level.
 func Debug(msg string, fields ...zap.Field) {
-	if Log != nil {
-		Log.Debug(msg, fields...)
-	}
+	Log.Debug(msg, fields...)
 }
 
+// Warn logs at WARN level.
 func Warn(msg string, fields ...zap.Field) {
-	if Log != nil {
-		Log.Warn(msg, fields...)
-	}
+	Log.Warn(msg, fields...)
 }
 
+// Fatal logs at FATAL level, sends to Sentry, and exits.
 func Fatal(msg string, fields ...zap.Field) {
 	captureToSentry("[FATAL] "+msg, "fatal")
 	flushSentry(config.SentryFlushTimeout)
-	if Log != nil {
-		Log.Fatal(msg, fields...)
-	}
+	Log.Fatal(msg, fields...)
 }
 
+// Sync flushes any buffered log entries.
 func Sync() error {
-	if Log != nil {
-		return Log.Sync()
-	}
-	return nil
+	return Log.Sync()
 }
 
 // Close closes the logger and flushes any buffered data.
@@ -144,10 +129,8 @@ func Close() error {
 
 	var errs []error
 
-	if Log != nil {
-		if err := Log.Sync(); err != nil {
-			errs = append(errs, err)
-		}
+	if err := Log.Sync(); err != nil {
+		errs = append(errs, err)
 	}
 
 	if fileWriter != nil {

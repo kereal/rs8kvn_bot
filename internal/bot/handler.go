@@ -86,7 +86,7 @@ func (h *Handler) getUsername(user *tgbotapi.User) string {
 // sanitizeForMarkdown escapes special characters that have meaning in Telegram Markdown.
 // This prevents users from injecting formatting or links via their username/name.
 func sanitizeForMarkdown(s string) string {
-	// Telegram Markdown special chars: * _ ` [ ] ( )
+	// Telegram Markdown special chars: * _ ` [ ] ( ) ~ |
 	// Replace with safe alternatives or escape them
 	r := strings.NewReplacer(
 		"*", "∗", // asterisk
@@ -96,6 +96,10 @@ func sanitizeForMarkdown(s string) string {
 		"]", "）",
 		"(", "⁽", // paren
 		")", "⁾",
+		"~", "～", // tilde (for strikethrough)
+		"|", "｜", // pipe (for tables)
+		"\n", " ", // newline
+		"\t", " ", // tab
 	)
 	return r.Replace(s)
 }

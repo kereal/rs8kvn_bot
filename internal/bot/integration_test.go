@@ -50,7 +50,10 @@ func NewTestFixture(t *testing.T) *TestFixture {
 		DatabasePath:     ":memory:",
 	}
 
-	xuiClient := xui.NewClient(cfg.XUIHost, cfg.XUIUsername, cfg.XUIPassword)
+	xuiClient, err := xui.NewClient(cfg.XUIHost, cfg.XUIUsername, cfg.XUIPassword)
+	if err != nil {
+		t.Fatalf("Failed to create XUI client: %v", err)
+	}
 
 	handler := NewHandler(nil, cfg, dbService, xuiClient)
 
@@ -90,7 +93,10 @@ func NewMockXUIServer(t *testing.T) *MockXUIServer {
 	mux := http.NewServeMux()
 	server := httptest.NewServer(mux)
 
-	client := xui.NewClient(server.URL, "admin", "password")
+	client, err := xui.NewClient(server.URL, "admin", "password")
+	if err != nil {
+		t.Fatalf("Failed to create XUI client: %v", err)
+	}
 
 	mock := &MockXUIServer{
 		Server: server,

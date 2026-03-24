@@ -125,7 +125,10 @@ func main() {
 	logger.Info("Database initialized successfully")
 
 	// Initialize 3x-ui client
-	xuiClient := xui.NewClient(cfg.XUIHost, cfg.XUIUsername, cfg.XUIPassword)
+	xuiClient, err := xui.NewClient(cfg.XUIHost, cfg.XUIUsername, cfg.XUIPassword)
+	if err != nil {
+		logger.Fatal("Failed to initialize 3x-ui client", zap.Error(err))
+	}
 
 	// Connect to 3x-ui panel with timeout
 	logger.Info("Connecting to 3x-ui panel")
@@ -357,7 +360,7 @@ func startBackupScheduler(ctx context.Context, dbPath string) {
 		select {
 		case <-time.After(sleepDuration):
 			logger.Info("Running scheduled database backup")
-			if err := backup.DailyBackup(dbPath, config.DefaultBackupRetention); err != nil {
+			if err := backup.DailyBackup(ctx, dbPath, config.DefaultBackupRetention); err != nil {
 				logger.Error("Backup failed", zap.Error(err))
 			} else {
 				logger.Info("Database backup completed successfully")

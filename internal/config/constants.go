@@ -8,7 +8,7 @@ const (
 	DefaultHTTPTimeout = 10 * time.Second
 
 	// DefaultIdleConnTimeout is the default timeout for idle connections
-	DefaultIdleConnIdleTimeout = 30 * time.Second
+	DefaultIdleConnTimeout = 30 * time.Second
 
 	// MaxIdleConns is the maximum number of idle connections (optimized for low memory)
 	MaxIdleConns = 2
@@ -141,7 +141,7 @@ const (
 // Health Check Constants
 const (
 	// DefaultHealthCheckPort is the default port for the health check HTTP server
-	DefaultHealthCheckPort = 8080
+	DefaultHealthCheckPort = 8880
 )
 
 // 3x-ui Subscription Path Constants

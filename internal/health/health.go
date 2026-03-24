@@ -134,7 +134,9 @@ func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 	} else {
 		w.WriteHeader(http.StatusOK)
 	}
-	_ = json.NewEncoder(w).Encode(response)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		logger.Error("Failed to encode healthz response", zap.Error(err))
+	}
 }
 
 // handleReadyz handles the /readyz endpoint.
@@ -159,7 +161,9 @@ func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusServiceUnavailable)
-		_ = json.NewEncoder(w).Encode(response)
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			logger.Error("Failed to encode readyz response", zap.Error(err))
+		}
 		return
 	}
 
@@ -179,7 +183,9 @@ func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 	} else {
 		w.WriteHeader(http.StatusOK)
 	}
-	_ = json.NewEncoder(w).Encode(response)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		logger.Error("Failed to encode readyz response", zap.Error(err))
+	}
 }
 
 // handleIndex handles the root endpoint.
@@ -202,9 +208,14 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 func (s *Server) runChecks(ctx context.Context, checkers map[string]Checker) map[string]ComponentHealth {
 	components := make(map[string]ComponentHealth)
 
+	// Create a context with timeout for all checks
+	checkTimeout := 5 * time.Second
+	checkCtx, cancel := context.WithTimeout(ctx, checkTimeout)
+	defer cancel()
+
 	for name, checker := range checkers {
 		start := time.Now()
-		health := checker(ctx)
+		health := checker(checkCtx)
 		health.Latency = time.Since(start).String()
 		components[name] = health
 	}

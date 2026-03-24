@@ -7,7 +7,14 @@ import (
 	"net/http"
 	"testing"
 	"time"
+
+	"rs8kvn_bot/internal/logger"
 )
+
+func init() {
+	// Initialize logger for tests
+	_, _ = logger.Init("", "error")
+}
 
 func TestNewServer(t *testing.T) {
 	server := NewServer(9999)
@@ -250,5 +257,96 @@ func TestAggregateStatus(t *testing.T) {
 				t.Errorf("status = %s, want %s", status, tt.expected)
 			}
 		})
+	}
+}
+
+// ==================== JSON Encoding Error Tests ====================
+
+func TestHandleHealthz_JSONEncodingError(t *testing.T) {
+	server := NewServer(19191)
+
+	// Register a checker that returns a very large response to potentially cause encoding issues
+	server.RegisterChecker("test", func(ctx context.Context) ComponentHealth {
+		return ComponentHealth{Status: StatusOK}
+	})
+
+	if err := server.Start(); err != nil {
+		t.Fatalf("Failed to start server: %v", err)
+	}
+	defer server.Stop(context.Background())
+
+	// Wait for server to start
+	time.Sleep(100 * time.Millisecond)
+
+	// The endpoint should still return a valid response even if encoding fails internally
+	resp, err := http.Get("http://localhost:19191/healthz")
+	if err != nil {
+		t.Fatalf("Failed to get healthz: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("StatusCode = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+}
+
+func TestHandleReadyz_JSONEncodingError(t *testing.T) {
+	server := NewServer(19292)
+	server.SetReady(true)
+
+	// Register a checker
+	server.RegisterChecker("test", func(ctx context.Context) ComponentHealth {
+		return ComponentHealth{Status: StatusOK}
+	})
+
+	if err := server.Start(); err != nil {
+		t.Fatalf("Failed to start server: %v", err)
+	}
+	defer server.Stop(context.Background())
+
+	// Wait for server to start
+	time.Sleep(100 * time.Millisecond)
+
+	// The endpoint should still return a valid response
+	resp, err := http.Get("http://localhost:19292/readyz")
+	if err != nil {
+		t.Fatalf("Failed to get readyz: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("StatusCode = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+}
+
+func TestHandleIndex_JSONEncodingError(t *testing.T) {
+	server := NewServer(19393)
+
+	if err := server.Start(); err != nil {
+		t.Fatalf("Failed to start server: %v", err)
+	}
+	defer server.Stop(context.Background())
+
+	// Wait for server to start
+	time.Sleep(100 * time.Millisecond)
+
+	// The index endpoint should return valid JSON
+	resp, err := http.Get("http://localhost:19393/")
+	if err != nil {
+		t.Fatalf("Failed to get index: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("StatusCode = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+
+	var result map[string]string
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Errorf("Failed to decode JSON response: %v", err)
+	}
+
+	if result["service"] != "rs8kvn_bot" {
+		t.Errorf("service = %s, want rs8kvn_bot", result["service"])
 	}
 }

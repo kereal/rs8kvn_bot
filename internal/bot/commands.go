@@ -7,11 +7,18 @@ import (
 	"rs8kvn_bot/internal/logger"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"go.uber.org/zap"
 )
 
 func (h *Handler) HandleStart(ctx context.Context, update tgbotapi.Update) {
 	if update.Message == nil {
 		logger.Error("HandleStart called with nil Message")
+		return
+	}
+
+	if update.Message.From == nil {
+		logger.Error("HandleStart: Message.From is nil",
+			zap.Int64("chat_id", update.Message.Chat.ID))
 		return
 	}
 

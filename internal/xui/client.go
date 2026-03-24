@@ -95,18 +95,17 @@ type ClientTraffic struct {
 
 // NewClient creates a new 3x-ui API client.
 // The client is optimized for low memory usage with minimal connection pooling.
-func NewClient(host, username, password string) *Client {
+func NewClient(host, username, password string) (*Client, error) {
 	jar, err := cookiejar.New(nil)
 	if err != nil {
-		// cookiejar.New should never fail with nil options
-		panic(fmt.Sprintf("failed to create cookie jar: %v", err))
+		return nil, fmt.Errorf("failed to create cookie jar: %w", err)
 	}
 
 	// Optimized transport for minimal memory footprint
 	transport := &http.Transport{
 		MaxIdleConns:        config.MaxIdleConns,
 		MaxIdleConnsPerHost: config.MaxIdleConns,
-		IdleConnTimeout:     config.DefaultIdleConnIdleTimeout,
+		IdleConnTimeout:     config.DefaultIdleConnTimeout,
 		DisableCompression:  false,
 		ForceAttemptHTTP2:   false,
 	}
@@ -121,7 +120,7 @@ func NewClient(host, username, password string) *Client {
 			Transport: transport,
 		},
 		breaker: NewCircuitBreaker(config.CircuitBreakerMaxFailures, config.CircuitBreakerTimeout),
-	}
+	}, nil
 }
 
 // Login authenticates with the 3x-ui panel.
@@ -301,7 +300,10 @@ func (c *Client) AddClientWithID(ctx context.Context, inboundID int, email, clie
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
 
-	logger.Debug("3x-ui addClient response", zap.String("response", string(respBody)))
+	// Log response at DEBUG level only (may contain sensitive data)
+	logger.Debug("3x-ui addClient response",
+		zap.Int("body_length", len(respBody)),
+		zap.String("response_preview", truncateString(string(respBody), 200)))
 
 	// Parse response
 	var simpleResp struct {
@@ -431,6 +433,10 @@ func (c *Client) GetExternalURL(host string) string {
 func (c *Client) CircuitBreakerState() CircuitState {
 	return c.breaker.State()
 }
+
+// GetExternalURL extracts the base URL (scheme + host) from a full URL.
+// Returns the original host if URL parsing fails.
+// Example: "http://example.com:2053/sub/abc123" -> "http://example.com:2053"
 func GetExternalURL(host string) string {
 	u, err := url.Parse(host)
 	if err != nil {
@@ -445,6 +451,14 @@ func containsSuccessKeywords(msg string) bool {
 	return strings.Contains(msg, "successfully") ||
 		strings.Contains(msg, "added") ||
 		strings.Contains(msg, "success")
+}
+
+// truncateString returns a truncated version of s with ellipsis if it exceeds maxLen.
+func truncateString(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
 }
 
 // retryWithBackoff executes a function with exponential backoff retry.
