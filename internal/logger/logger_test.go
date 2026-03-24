@@ -575,3 +575,47 @@ func TestService_WithError(t *testing.T) {
 
 	newService.Info("logged with error")
 }
+
+func TestService_WithError_NoSentry(t *testing.T) {
+	tmpDir := t.TempDir()
+	logPath := filepath.Join(tmpDir, "test.log")
+
+	service, err := NewService(logPath, "info")
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	defer service.Close()
+
+	testErr := fmt.Errorf("test error without sentry")
+	newService := service.WithError(testErr)
+	if newService == nil {
+		t.Error("WithError() should not return nil")
+	}
+	newService.Info("test")
+}
+
+func TestService_CaptureSentry_NoSentry(t *testing.T) {
+	tmpDir := t.TempDir()
+	logPath := filepath.Join(tmpDir, "test.log")
+
+	service, err := NewService(logPath, "info")
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	defer service.Close()
+
+	service.captureSentry("test message", sentry.LevelInfo)
+}
+
+func TestService_FlushSentry_NoSentry(t *testing.T) {
+	tmpDir := t.TempDir()
+	logPath := filepath.Join(tmpDir, "test.log")
+
+	service, err := NewService(logPath, "info")
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	defer service.Close()
+
+	service.flushSentry(0)
+}

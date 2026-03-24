@@ -90,7 +90,11 @@ func sendHeartbeat(url string) {
 		logger.Error("Heartbeat failed", zap.Error(err))
 		return
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			logger.Debug("Failed to close heartbeat response body", zap.Error(closeErr))
+		}
+	}()
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		logger.Debug("Heartbeat sent successfully")
