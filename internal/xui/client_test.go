@@ -1053,3 +1053,31 @@ func TestClient_CircuitBreakerState(t *testing.T) {
 		t.Error("CircuitBreakerState() should be open after multiple failures")
 	}
 }
+
+func TestClient_GetExternalURL(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "admin", "password")
+
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{"full URL with port", "http://example.com:2053", "http://example.com:2053"},
+		{"https URL", "https://example.com", "https://example.com"},
+		{"URL with path", "http://example.com:2053/sub/path", "http://example.com:2053"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := client.GetExternalURL(tt.input)
+			if result != tt.expected {
+				t.Errorf("Client.GetExternalURL(%q) = %q, want %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}

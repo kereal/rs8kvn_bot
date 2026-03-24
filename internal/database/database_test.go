@@ -2834,3 +2834,34 @@ func TestService_DeleteSubscriptionByID_NotFound(t *testing.T) {
 		t.Error("DeleteSubscriptionByID() expected error for non-existent ID")
 	}
 }
+
+func TestService_Ping(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	service, err := NewService(dbPath)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	defer service.Close()
+
+	if err := service.Ping(); err != nil {
+		t.Errorf("Ping() error = %v", err)
+	}
+}
+
+func TestService_Ping_AfterClose(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	service, err := NewService(dbPath)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+
+	service.Close()
+
+	if err := service.Ping(); err == nil {
+		t.Error("Ping() expected error after Close()")
+	}
+}
