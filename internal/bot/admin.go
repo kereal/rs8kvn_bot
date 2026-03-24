@@ -56,7 +56,7 @@ func (h *Handler) handleAdminLastReg(ctx context.Context, chatID int64, username
 			username = "unknown"
 		}
 		dateStr := sub.CreatedAt.Format("02.01.2006 15:04:05")
-		sb.WriteString(fmt.Sprintf("%d │ [@%s](https://t.me/%s) │ %s\n", sub.ID, username, username, dateStr))
+		fmt.Fprintf(&sb, "%d │ [@%s](https://t.me/%s) │ %s\n", sub.ID, username, username, dateStr)
 	}
 
 	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, sb.String())

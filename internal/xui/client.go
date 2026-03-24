@@ -178,7 +178,7 @@ func (c *Client) doLogin(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("login request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, config.MaxResponseSize))
 	if err != nil {
@@ -286,7 +286,7 @@ func (c *Client) AddClientWithID(ctx context.Context, inboundID int, email, clie
 	if err != nil {
 		return nil, fmt.Errorf("add client request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, config.MaxResponseSize))
 	if err != nil {
@@ -346,7 +346,7 @@ func (c *Client) DeleteClient(ctx context.Context, inboundID int, clientID strin
 	if err != nil {
 		return fmt.Errorf("delete client request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, config.MaxResponseSize))
 	if err != nil {
@@ -386,7 +386,7 @@ func (c *Client) GetClientTraffic(ctx context.Context, email string) (*ClientTra
 	if err != nil {
 		return nil, fmt.Errorf("get client traffic request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, config.MaxResponseSize))
 	if err != nil {

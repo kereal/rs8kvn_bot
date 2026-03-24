@@ -41,7 +41,7 @@ func NewTestDatabase(t any) (*TestDatabase, error) {
 
 	sqlDB, err := database.DB.DB()
 	if err != nil {
-		database.Close()
+		_ = database.Close()
 		return nil, err
 	}
 
@@ -50,7 +50,7 @@ func NewTestDatabase(t any) (*TestDatabase, error) {
 		SQLDB: sqlDB,
 		Path:  dbPath,
 		Cleanup: func() {
-			database.Close()
+			_ = database.Close()
 		},
 	}, nil
 }
