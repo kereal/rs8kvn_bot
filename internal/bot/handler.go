@@ -2,7 +2,6 @@ package bot
 
 import (
 	"fmt"
-	"time"
 
 	"rs8kvn_bot/internal/config"
 	"rs8kvn_bot/internal/interfaces"
@@ -27,6 +26,10 @@ func NewHandler(bot *tgbotapi.BotAPI, cfg *config.Config, db interfaces.Database
 		xui:         xuiClient,
 		rateLimiter: ratelimiter.NewRateLimiter(config.RateLimiterMaxTokens, config.RateLimiterRefillRate),
 	}
+}
+
+func (h *Handler) isAdmin(chatID int64) bool {
+	return chatID == h.cfg.TelegramAdminID
 }
 
 // getMainMenuKeyboard returns the inline keyboard with main menu buttons
@@ -66,12 +69,6 @@ func (h *Handler) getUsername(user *tgbotapi.User) string {
 	}
 
 	return fmt.Sprintf("user_%d", user.ID)
-}
-
-// getFirstSecondOfNextMonth returns the first second of the next month.
-func getFirstSecondOfNextMonth(t time.Time) time.Time {
-	year, month, _ := t.Date()
-	return time.Date(year, month+1, 1, 0, 0, 0, 0, t.Location())
 }
 
 // getDonateText returns the donation message text.

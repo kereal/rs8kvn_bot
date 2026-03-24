@@ -15,8 +15,6 @@ import (
 func (h *Handler) handleBackToStart(ctx context.Context, chatID int64, username string, messageID int) {
 	logger.Info("User returning to start", zap.String("username", username))
 
-	isAdmin := chatID == h.cfg.TelegramAdminID
-
 	// Check if user has an active subscription
 	sub, err := h.db.GetByTelegramID(ctx, chatID)
 	hasSubscription := err == nil && sub != nil && sub.Status == "active"
@@ -30,7 +28,7 @@ func (h *Handler) handleBackToStart(ctx context.Context, chatID int64, username 
 
 		keyboard := h.getMainMenuKeyboard()
 		// Add admin buttons if user is admin
-		if isAdmin {
+		if h.isAdmin(chatID) {
 			keyboard.InlineKeyboard = append(keyboard.InlineKeyboard,
 				tgbotapi.NewInlineKeyboardRow(
 					tgbotapi.NewInlineKeyboardButtonData("📊 Стат", "admin_stats"),
@@ -57,7 +55,7 @@ func (h *Handler) handleBackToStart(ctx context.Context, chatID int64, username 
 		)
 
 		// Add admin buttons if user is admin
-		if isAdmin {
+		if h.isAdmin(chatID) {
 			inlineKeyboard.InlineKeyboard = append(inlineKeyboard.InlineKeyboard,
 				tgbotapi.NewInlineKeyboardRow(
 					tgbotapi.NewInlineKeyboardButtonData("📊 Стат", "admin_stats"),
