@@ -15,6 +15,9 @@ linters:
     - gosec
   disable:
     - ineffassign
+  exclusions:
+    paths:
+      - _test\.go
   settings:
     errcheck:
       check-type-assertions: true
@@ -23,10 +26,6 @@ linters:
         - G104
         - G304
         - G306
-
-exclusions:
-  paths:
-    - _test\.go
 
 formatters:
   enable:
