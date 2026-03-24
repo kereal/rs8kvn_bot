@@ -252,7 +252,23 @@ func handleUpdate(ctx context.Context, handler *bot.Handler, update tgbotapi.Upd
 					"Неизвестная команда. Используйте /start или /help")
 			}
 		} else {
-			// User sent a message that's not a command - show help
+			// User sent a message that's not a command - log and show help
+			username := "unknown"
+			if update.Message.From != nil {
+				if update.Message.From.UserName != "" {
+					username = update.Message.From.UserName
+				} else if update.Message.From.FirstName != "" {
+					username = update.Message.From.FirstName
+				}
+			}
+			textPreview := update.Message.Text
+			if len(textPreview) > 50 {
+				textPreview = textPreview[:50] + "..."
+			}
+			logger.Info("Received non-command message",
+				zap.Int64("chat_id", update.Message.Chat.ID),
+				zap.String("username", username),
+				zap.String("text_preview", textPreview))
 			handler.SendMessage(ctx, update.Message.Chat.ID,
 				"Используйте /start для начала работы с ботом.")
 		}

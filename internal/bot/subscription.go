@@ -14,7 +14,8 @@ import (
 	"go.uber.org/zap"
 )
 
-func (h *Handler) handleGetSubscription(ctx context.Context, chatID int64, username string, messageID int) {
+// Create subscription
+func (h *Handler) handleCreateSubscription(ctx context.Context, chatID int64, username string, messageID int) {
 	logger.Info("User requesting subscription", zap.String("username", username))
 
 	sub, err := h.db.GetByTelegramID(ctx, chatID)
@@ -27,19 +28,22 @@ func (h *Handler) handleGetSubscription(ctx context.Context, chatID int64, usern
 		}
 
 		// Return existing active subscription - edit the message
-		backKeyboard := tgbotapi.NewInlineKeyboardMarkup(
+		qrKeyboard := tgbotapi.NewInlineKeyboardMarkup(
+			tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("📱 QR-код", "qr_code"),
+			),
 			tgbotapi.NewInlineKeyboardRow(
 				tgbotapi.NewInlineKeyboardButtonData("🏠 В начало", "back_to_start"),
 			),
 		)
 		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, fmt.Sprintf(
-			"✅ Ваша активная подписка:\n\n📊 Трафик: %d ГБ\n\n🔗 Ссылка на подписку:\n`%s`",
+			"✅ Ваша подписка\n\n📊 Трафик: %d ГБ\n\n🔗 Ссылка\n`%s`",
 			h.cfg.TrafficLimitGB,
 			sub.SubscriptionURL,
 		))
 		editMsg.ParseMode = "Markdown"
 		editMsg.DisableWebPagePreview = true
-		editMsg.ReplyMarkup = &backKeyboard
+		editMsg.ReplyMarkup = &qrKeyboard
 		h.safeSend(editMsg)
 		return
 	}
@@ -52,40 +56,21 @@ func (h *Handler) handleGetSubscription(ctx context.Context, chatID int64, usern
 func (h *Handler) handleMySubscription(ctx context.Context, chatID int64, username string, messageID int) {
 	logger.Info("User checking subscription status", zap.String("username", username))
 
-	// Show loading message - try to edit existing, or send new if fails
-	if messageID > 0 {
-		// Try to edit existing message
-		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "⏳ Загрузка...")
-		editMsg.DisableWebPagePreview = true
-		if _, err := h.bot.Send(editMsg); err != nil {
-			logger.Warn("Failed to edit message for loading, sending new one", zap.Error(err))
-			messageID = 0 // Reset to send new message
-		}
-	}
-
+	// Show loading message
+	messageID = h.showLoadingMessage(chatID, messageID)
 	if messageID == 0 {
-		// Send new message
-		loadingMsg := tgbotapi.NewMessage(chatID, "⏳ Загрузка...")
-		loadingMsg.DisableWebPagePreview = true
-		sentMsg, err := h.bot.Send(loadingMsg)
-		if err != nil {
-			logger.Error("Failed to send loading message", zap.Error(err))
-			return
-		}
-		messageID = sentMsg.MessageID
+		return
 	}
 
 	sub, err := h.db.GetByTelegramID(ctx, chatID)
 	if err != nil || sub == nil {
 		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "❌ У вас нет активной подписки.\n\nНажмите «Получить подписку» для создания.")
-		editMsg.DisableWebPagePreview = true
 		h.safeSend(editMsg)
 		return
 	}
 
 	if sub.IsExpired() {
 		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "⚠️ Ваша подписка истекла.\n\nНажмите «Получить подписку» для создания новой.")
-		editMsg.DisableWebPagePreview = true
 		h.safeSend(editMsg)
 		return
 	}
@@ -99,60 +84,94 @@ func (h *Handler) handleMySubscription(ctx context.Context, chatID int64, userna
 			zap.String("username", sub.Username),
 			zap.Error(err))
 	} else {
-		// Calculate used traffic in GB (up + down) / 1024^3
 		trafficUsedGB = float64(traffic.Up+traffic.Down) / 1024 / 1024 / 1024
 	}
 
 	trafficInfo := fmt.Sprintf("%.2f / %d ГБ", trafficUsedGB, h.cfg.TrafficLimitGB)
 	expiryDate := sub.ExpiryTime.Format("02.01.2006")
 
+	qrKeyboard := tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("📱 QR-код", "qr_code"),
+		),
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("🏠 В начало", "back_to_start"),
+		),
+	)
 	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, fmt.Sprintf(
-		"📋 *Информация о вашей подписке*\n\n📊 Трафик: %s\n📅 Сброс: %s\n\n🔗 Ссылка\n`%s`",
+		"📋 *Ваша подписка*\n\n📊 Трафик: %s\n📅 Сброс: %s\n\n🔗 Ссылка\n`%s`",
 		trafficInfo,
 		expiryDate,
 		sub.SubscriptionURL,
 	))
 	editMsg.ParseMode = "Markdown"
 	editMsg.DisableWebPagePreview = true
-	if _, err := h.bot.Send(editMsg); err != nil {
-		logger.Warn("Failed to edit message, sending new one", zap.Error(err), zap.Int64("chat_id", chatID), zap.Int("message_id", messageID))
-		// Delete old message if exists
-		if messageID > 0 {
-			deleteMsg := tgbotapi.NewDeleteMessage(chatID, messageID)
-			_, _ = h.bot.Request(deleteMsg) // Ignore error, message may already be deleted
-		}
-		// Send new message instead
-		msg := tgbotapi.NewMessage(chatID, fmt.Sprintf(
-			"📋 *Информация о вашей подписке*\n\n📊 Трафик: %s\n📅 Сброс: %s\n\n🔗 Ссылка\n`%s`",
-			trafficInfo,
-			expiryDate,
-			sub.SubscriptionURL,
-		))
-		msg.ParseMode = "Markdown"
-		h.send(ctx, msg)
+	editMsg.ReplyMarkup = &qrKeyboard
+	h.safeSend(editMsg)
+}
+
+// handleQRCode handles the "qr_code" callback - generates and sends QR code image.
+func (h *Handler) handleQRCode(ctx context.Context, chatID int64, username string, messageID int) {
+	logger.Info("User requesting QR code", zap.String("username", username))
+
+	// Get subscription
+	sub, err := h.db.GetByTelegramID(ctx, chatID)
+	if err != nil || sub == nil {
+		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "❌ У вас нет активной подписки.")
+		h.safeSend(editMsg)
+		return
 	}
+
+	// Generate QR code
+	pngBytes, err := utils.GenerateQRCodePNG(sub.SubscriptionURL)
+	if err != nil {
+		logger.Error("Failed to generate QR code", zap.Error(err))
+		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "❌ Ошибка генерации QR-кода. Попробуйте позже.")
+		h.safeSend(editMsg)
+		return
+	}
+
+	// Send QR code as photo (instant, no delete)
+	photo := tgbotapi.NewPhoto(chatID, tgbotapi.FileBytes{
+		Name:  "qr.png",
+		Bytes: pngBytes,
+	})
+	photo.Caption = "📱 QR-код с подпиской\n\nНаведите камеру телефона на код, чтобы импортировать подписку"
+	photo.ParseMode = "Markdown"
+
+	backKeyboard := tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("⬅️ Назад", "back_to_subscription"),
+		),
+	)
+	photo.ReplyMarkup = &backKeyboard
+
+	if _, err := h.bot.Send(photo); err != nil {
+		logger.Error("Failed to send QR photo", zap.Error(err))
+	}
+}
+
+// handleBackToSubscription handles the "back_to_subscription" callback.
+// Deletes the QR photo message - the subscription message remains visible above.
+func (h *Handler) handleBackToSubscription(ctx context.Context, chatID int64, username string, messageID int) {
+	logger.Info("User closing QR code", zap.String("username", username))
+
+	// Delete the QR photo message
+	deleteMsg := tgbotapi.NewDeleteMessage(chatID, messageID)
+	if _, err := h.bot.Request(deleteMsg); err != nil {
+		logger.Warn("Failed to delete QR message", zap.Error(err))
+	}
+	// Subscription message is already visible above, no need to send anything
 }
 
 // createSubscription creates a new subscription for the user.
 // This operation is atomic with rollback: if database save fails,
 // the client is removed from the 3x-ui panel to prevent orphan records.
 func (h *Handler) createSubscription(ctx context.Context, chatID int64, username string, messageID int) {
-	// Show loading message - edit existing or send new
+	// Show loading message
+	messageID = h.showLoadingMessage(chatID, messageID)
 	if messageID == 0 {
-		// No message to edit, send new one
-		loadingMsg := tgbotapi.NewMessage(chatID, "⏳ Загрузка...")
-		loadingMsg.DisableWebPagePreview = true
-		sentMsg, err := h.bot.Send(loadingMsg)
-		if err != nil {
-			logger.Error("Failed to send loading message", zap.Error(err))
-			return
-		}
-		messageID = sentMsg.MessageID
-	} else {
-		// Edit existing message to show loading
-		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "⏳ Загрузка...")
-		editMsg.DisableWebPagePreview = true
-		h.safeSend(editMsg)
+		return
 	}
 
 	now := time.Now()

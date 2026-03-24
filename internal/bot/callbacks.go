@@ -32,12 +32,12 @@ func (h *Handler) HandleCallback(ctx context.Context, update tgbotapi.Update) {
 	}
 
 	switch data {
-	case "get_subscription":
+	case "create_subscription":
 		messageID := update.CallbackQuery.Message.MessageID
-		h.handleGetSubscription(ctx, chatID, username, messageID)
-	case "my_subscription":
+		h.handleCreateSubscription(ctx, chatID, username, messageID)
+	case "qr_code":
 		messageID := update.CallbackQuery.Message.MessageID
-		h.handleMySubscription(ctx, chatID, username, messageID)
+		h.handleQRCode(ctx, chatID, username, messageID)
 	case "admin_stats":
 		messageID := update.CallbackQuery.Message.MessageID
 		h.handleAdminStats(ctx, chatID, username, messageID)
@@ -52,7 +52,10 @@ func (h *Handler) HandleCallback(ctx context.Context, update tgbotapi.Update) {
 		h.handleMenuDonate(ctx, chatID, username, messageID)
 	case "menu_subscription":
 		messageID := update.CallbackQuery.Message.MessageID
-		h.handleMenuSubscription(ctx, chatID, username, messageID)
+		h.handleMySubscription(ctx, chatID, username, messageID)
+	case "back_to_subscription":
+		messageID := update.CallbackQuery.Message.MessageID
+		h.handleBackToSubscription(ctx, chatID, username, messageID)
 	case "menu_help":
 		messageID := update.CallbackQuery.Message.MessageID
 		h.handleMenuHelp(ctx, chatID, username, messageID)
