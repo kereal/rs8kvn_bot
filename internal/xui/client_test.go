@@ -1026,3 +1026,30 @@ func TestAddClientWithID_RequestCreationError(t *testing.T) {
 	// Skip this test as it's not feasible without mocking
 	t.Skip("Cannot trigger request creation error without mocking http.Client")
 }
+
+func TestClient_CircuitBreakerState(t *testing.T) {
+	failingServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("error"))
+	}))
+	defer failingServer.Close()
+
+	client := NewClient(failingServer.URL, "admin", "password")
+	ctx := context.Background()
+
+	// Initially should be closed
+	state := client.CircuitBreakerState()
+	if state != CircuitStateClosed {
+		t.Errorf("CircuitBreakerState() = %v, want %v", state, CircuitStateClosed)
+	}
+
+	// After failed login attempts, should trip
+	for i := 0; i < 10; i++ {
+		client.Login(ctx)
+	}
+
+	state = client.CircuitBreakerState()
+	if state == CircuitStateClosed {
+		t.Error("CircuitBreakerState() should be open after multiple failures")
+	}
+}
