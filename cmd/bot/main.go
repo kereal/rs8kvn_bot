@@ -92,12 +92,13 @@ func main() {
 	}
 
 	// Initialize logger
-	if err := logger.Init(cfg.LogFilePath, cfg.LogLevel); err != nil {
+	logService, err := logger.Init(cfg.LogFilePath, cfg.LogLevel)
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
 		os.Exit(1)
 	}
 	defer func() {
-		if err := logger.Close(); err != nil {
+		if err := logService.Close(); err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to close logger: %v\n", err)
 		}
 	}()
@@ -110,27 +111,17 @@ func main() {
 		zap.String("built", buildTime))
 	logger.Info("Configuration loaded", zap.String("config", cfg.String()))
 
-	// Initialize database
-	if err := database.Init(cfg.DatabasePath); err != nil {
+	// Initialize database with Service pattern for dependency injection
+	dbService, err := database.NewService(cfg.DatabasePath)
+	if err != nil {
 		logger.Fatal("Failed to initialize database", zap.Error(err))
 	}
 	defer func() {
-		if err := database.Close(); err != nil {
+		if err := dbService.Close(); err != nil {
 			logger.Error("Failed to close database", zap.Error(err))
 		}
 	}()
 	logger.Info("Database initialized successfully")
-
-	// Create database service for dependency injection
-	dbService, err := database.NewService(cfg.DatabasePath)
-	if err != nil {
-		logger.Fatal("Failed to create database service", zap.Error(err))
-	}
-	defer func() {
-		if err := dbService.Close(); err != nil {
-			logger.Error("Failed to close database service", zap.Error(err))
-		}
-	}()
 
 	// Initialize 3x-ui client
 	xuiClient := xui.NewClient(cfg.XUIHost, cfg.XUIUsername, cfg.XUIPassword)

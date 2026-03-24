@@ -39,7 +39,7 @@ func TestInit_CreatesDirectory(t *testing.T) {
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "subdir", "test.log")
 
-	err := Init(logPath, "info")
+	_, err := Init(logPath, "info")
 	// Ignore sync errors on stdout/stderr
 	if err != nil {
 		t.Fatalf("Init() error = %v", err)
@@ -58,7 +58,7 @@ func TestInit_InvalidLogLevel(t *testing.T) {
 	logPath := filepath.Join(tmpDir, "test.log")
 
 	// Invalid log level should default to info
-	err := Init(logPath, "invalid")
+	_, err := Init(logPath, "invalid")
 	// Ignore sync errors on stdout/stderr
 	if err != nil {
 		t.Fatalf("Init() with invalid level should not error, got: %v", err)
@@ -71,7 +71,7 @@ func TestInfo(t *testing.T) {
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
 
-	if err := Init(logPath, "info"); err != nil {
+	if _, err := Init(logPath, "info"); err != nil {
 		t.Fatalf("Init() error = %v", err)
 	}
 	defer Close()
@@ -85,7 +85,7 @@ func TestError(t *testing.T) {
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
 
-	if err := Init(logPath, "info"); err != nil {
+	if _, err := Init(logPath, "info"); err != nil {
 		t.Fatalf("Init() error = %v", err)
 	}
 	defer Close()
@@ -99,7 +99,7 @@ func TestDebug(t *testing.T) {
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
 
-	if err := Init(logPath, "debug"); err != nil {
+	if _, err := Init(logPath, "debug"); err != nil {
 		t.Fatalf("Init() error = %v", err)
 	}
 	defer Close()
@@ -113,7 +113,7 @@ func TestWarn(t *testing.T) {
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
 
-	if err := Init(logPath, "info"); err != nil {
+	if _, err := Init(logPath, "info"); err != nil {
 		t.Fatalf("Init() error = %v", err)
 	}
 	defer Close()
@@ -127,7 +127,7 @@ func TestSync(t *testing.T) {
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
 
-	if err := Init(logPath, "info"); err != nil {
+	if _, err := Init(logPath, "info"); err != nil {
 		t.Fatalf("Init() error = %v", err)
 	}
 	defer Close()
@@ -150,7 +150,7 @@ func TestClose(t *testing.T) {
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
 
-	if err := Init(logPath, "info"); err != nil {
+	if _, err := Init(logPath, "info"); err != nil {
 		t.Fatalf("Init() error = %v", err)
 	}
 
@@ -173,7 +173,7 @@ func TestClose_MultipleCalls(t *testing.T) {
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
 
-	if err := Init(logPath, "info"); err != nil {
+	if _, err := Init(logPath, "info"); err != nil {
 		t.Fatalf("Init() error = %v", err)
 	}
 
@@ -188,7 +188,7 @@ func TestLogFileWritten(t *testing.T) {
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
 
-	if err := Init(logPath, "info"); err != nil {
+	if _, err := Init(logPath, "info"); err != nil {
 		t.Fatalf("Init() error = %v", err)
 	}
 
@@ -392,7 +392,7 @@ func TestTgbotapiLogger_Println(t *testing.T) {
 	logPath := filepath.Join(tmpDir, "test.log")
 
 	// Initialize logger first
-	if err := Init(logPath, "info"); err != nil {
+	if _, err := Init(logPath, "info"); err != nil {
 		t.Fatalf("Init() error = %v", err)
 	}
 	defer Close()
@@ -407,7 +407,7 @@ func TestTgbotapiLogger_Printf(t *testing.T) {
 	logPath := filepath.Join(tmpDir, "test.log")
 
 	// Initialize logger first
-	if err := Init(logPath, "info"); err != nil {
+	if _, err := Init(logPath, "info"); err != nil {
 		t.Fatalf("Init() error = %v", err)
 	}
 	defer Close()
@@ -424,7 +424,7 @@ func TestStdLogWriter_Write(t *testing.T) {
 	logPath := filepath.Join(tmpDir, "test.log")
 
 	// Initialize logger first
-	if err := Init(logPath, "info"); err != nil {
+	if _, err := Init(logPath, "info"); err != nil {
 		t.Fatalf("Init() error = %v", err)
 	}
 	defer Close()
@@ -470,7 +470,7 @@ func TestWriter(t *testing.T) {
 	logPath := filepath.Join(tmpDir, "test.log")
 
 	// Initialize logger first
-	if err := Init(logPath, "info"); err != nil {
+	if _, err := Init(logPath, "info"); err != nil {
 		t.Fatalf("Init() error = %v", err)
 	}
 	defer Close()
@@ -495,7 +495,7 @@ func TestRedirectStdLog(t *testing.T) {
 	logPath := filepath.Join(tmpDir, "test.log")
 
 	// Initialize logger first
-	if err := Init(logPath, "info"); err != nil {
+	if _, err := Init(logPath, "info"); err != nil {
 		t.Fatalf("Init() error = %v", err)
 	}
 	defer Close()
@@ -542,7 +542,7 @@ func TestCaptureToSentry(t *testing.T) {
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
 
-	if err := Init(logPath, "info"); err != nil {
+	if _, err := Init(logPath, "info"); err != nil {
 		t.Fatalf("Init() error = %v", err)
 	}
 	defer Close()

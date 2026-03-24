@@ -6,7 +6,17 @@ import (
 
 	"rs8kvn_bot/internal/database"
 	"rs8kvn_bot/internal/xui"
+
+	"go.uber.org/zap"
 )
+
+type Logger interface {
+	Info(msg string, fields ...zap.Field)
+	Warn(msg string, fields ...zap.Field)
+	Error(msg string, fields ...zap.Field)
+	Debug(msg string, fields ...zap.Field)
+	Fatal(msg string, fields ...zap.Field)
+}
 
 type DatabaseService interface {
 	GetByTelegramID(ctx context.Context, telegramID int64) (*database.Subscription, error)
