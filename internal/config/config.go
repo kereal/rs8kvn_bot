@@ -40,6 +40,9 @@ type Config struct {
 
 	// Error tracking
 	SentryDSN string
+
+	// Health check configuration
+	HealthCheckPort int
 }
 
 // Load reads configuration from environment variables and validates it.
@@ -75,6 +78,8 @@ func Load() (*Config, error) {
 		HeartbeatInterval: parseEnvInt("HEARTBEAT_INTERVAL", DefaultHeartbeatInterval),
 
 		SentryDSN: getEnv("SENTRY_DSN", ""),
+
+		HealthCheckPort: parseEnvInt("HEALTH_CHECK_PORT", DefaultHealthCheckPort),
 	}
 
 	// Validate all required fields
@@ -128,6 +133,11 @@ func (c *Config) validate() error {
 	// Heartbeat validation
 	if c.HeartbeatInterval < MinHeartbeatInterval {
 		return fmt.Errorf("HEARTBEAT_INTERVAL must be at least %d seconds", MinHeartbeatInterval)
+	}
+
+	// Health check port validation
+	if c.HealthCheckPort < 1 || c.HealthCheckPort > 65535 {
+		return fmt.Errorf("HEALTH_CHECK_PORT must be between 1 and 65535")
 	}
 
 	// Log level validation

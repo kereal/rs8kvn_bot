@@ -47,6 +47,7 @@ func TestLoad_CustomValues(t *testing.T) {
 	os.Setenv("HEARTBEAT_INTERVAL", "120")
 	os.Setenv("DATABASE_PATH", "/custom/path/db.db")
 	os.Setenv("LOG_LEVEL", "debug")
+	os.Setenv("HEALTH_CHECK_PORT", "9090")
 	defer func() {
 		os.Unsetenv("TELEGRAM_BOT_TOKEN")
 		os.Unsetenv("TELEGRAM_ADMIN_ID")
@@ -58,6 +59,7 @@ func TestLoad_CustomValues(t *testing.T) {
 		os.Unsetenv("HEARTBEAT_INTERVAL")
 		os.Unsetenv("DATABASE_PATH")
 		os.Unsetenv("LOG_LEVEL")
+		os.Unsetenv("HEALTH_CHECK_PORT")
 	}()
 
 	cfg, err := Load()
@@ -70,6 +72,9 @@ func TestLoad_CustomValues(t *testing.T) {
 	}
 	if cfg.HeartbeatInterval != 120 {
 		t.Errorf("HeartbeatInterval = %d, want 120", cfg.HeartbeatInterval)
+	}
+	if cfg.HealthCheckPort != 9090 {
+		t.Errorf("HealthCheckPort = %d, want 9090", cfg.HealthCheckPort)
 	}
 }
 
@@ -502,6 +507,7 @@ func TestConfig_Validate_Valid(t *testing.T) {
 		TrafficLimitGB:    100,
 		HeartbeatInterval: 60,
 		LogLevel:          "info",
+		HealthCheckPort:   DefaultHealthCheckPort,
 	}
 
 	err := cfg.validate()
@@ -523,6 +529,7 @@ func TestConfig_Validate_SentryDSN_Valid(t *testing.T) {
 		HeartbeatInterval: 60,
 		LogLevel:          "info",
 		SentryDSN:         "https://abc@sentry.io/123",
+		HealthCheckPort:   DefaultHealthCheckPort,
 	}
 
 	err := cfg.validate()
@@ -561,6 +568,7 @@ func TestConfig_Validate_WithSubPath(t *testing.T) {
 		TrafficLimitGB:    100,
 		HeartbeatInterval: 60,
 		LogLevel:          "info",
+		HealthCheckPort:   DefaultHealthCheckPort,
 	}
 
 	err := cfg.validate()
@@ -582,6 +590,7 @@ func TestConfig_Validate_WithHeartbeatURL(t *testing.T) {
 		HeartbeatInterval: 60,
 		LogLevel:          "info",
 		HeartbeatURL:      "https://health.example.com",
+		HealthCheckPort:   DefaultHealthCheckPort,
 	}
 
 	err := cfg.validate()
@@ -639,6 +648,48 @@ func TestConfig_Validate_InvalidLogLevel(t *testing.T) {
 	err := cfg.validate()
 	if err == nil {
 		t.Error("validate() should error on invalid LogLevel")
+	}
+}
+
+func TestConfig_Validate_InvalidHealthCheckPort_TooLow(t *testing.T) {
+	cfg := &Config{
+		TelegramBotToken:  "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
+		TelegramAdminID:   123456,
+		XUIHost:           "http://localhost:2053",
+		XUIUsername:       "admin",
+		XUIPassword:       "password",
+		XUIInboundID:      1,
+		XUISubPath:        "/xui",
+		TrafficLimitGB:    100,
+		HeartbeatInterval: 60,
+		LogLevel:          "info",
+		HealthCheckPort:   0,
+	}
+
+	err := cfg.validate()
+	if err == nil {
+		t.Error("validate() should error on HealthCheckPort = 0")
+	}
+}
+
+func TestConfig_Validate_InvalidHealthCheckPort_TooHigh(t *testing.T) {
+	cfg := &Config{
+		TelegramBotToken:  "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
+		TelegramAdminID:   123456,
+		XUIHost:           "http://localhost:2053",
+		XUIUsername:       "admin",
+		XUIPassword:       "password",
+		XUIInboundID:      1,
+		XUISubPath:        "/xui",
+		TrafficLimitGB:    100,
+		HeartbeatInterval: 60,
+		LogLevel:          "info",
+		HealthCheckPort:   70000,
+	}
+
+	err := cfg.validate()
+	if err == nil {
+		t.Error("validate() should error on HealthCheckPort = 70000")
 	}
 }
 

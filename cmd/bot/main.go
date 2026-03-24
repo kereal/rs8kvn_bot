@@ -149,7 +149,7 @@ func main() {
 	handler := bot.NewHandler(botAPI, cfg, dbService, xuiClient)
 
 	// Initialize and start health check server
-	healthServer := health.NewServer(config.HealthCheckPort)
+	healthServer := health.NewServer(cfg.HealthCheckPort)
 	healthServer.RegisterChecker("database", health.DatabaseChecker(func(ctx context.Context) error {
 		return dbService.Ping()
 	}))
@@ -160,7 +160,7 @@ func main() {
 		logger.Fatal("Failed to start health check server", zap.Error(err))
 	}
 	healthServer.SetReady(true)
-	logger.Info("Health check server started", zap.Int("port", config.HealthCheckPort))
+	logger.Info("Health check server started", zap.Int("port", cfg.HealthCheckPort))
 	defer func() {
 		healthServer.SetReady(false)
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
