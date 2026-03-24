@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"rs8kvn_bot/internal/database"
@@ -78,6 +79,7 @@ func NewTestDatabaseService(t any) (*database.Service, error) {
 }
 
 type MockDatabaseService struct {
+	mu                            sync.RWMutex
 	Subscriptions                 map[int64]*database.Subscription
 	GetByTelegramIDFunc           func(ctx context.Context, telegramID int64) (*database.Subscription, error)
 	CreateSubscriptionFunc        func(ctx context.Context, sub *database.Subscription) error
@@ -97,6 +99,8 @@ func (m *MockDatabaseService) GetByTelegramID(ctx context.Context, telegramID in
 	if m.GetByTelegramIDFunc != nil {
 		return m.GetByTelegramIDFunc(ctx, telegramID)
 	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	if sub, ok := m.Subscriptions[telegramID]; ok {
 		return sub, nil
 	}
@@ -114,10 +118,14 @@ func (m *MockDatabaseService) CreateSubscription(ctx context.Context, sub *datab
 	if m.CreateSubscriptionFunc != nil {
 		return m.CreateSubscriptionFunc(ctx, sub)
 	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.Subscriptions == nil {
 		m.Subscriptions = make(map[int64]*database.Subscription)
 	}
+	m.mu.Lock()
 	m.Subscriptions[sub.TelegramID] = sub
+	m.mu.Unlock()
 	return nil
 }
 
@@ -125,6 +133,8 @@ func (m *MockDatabaseService) UpdateSubscription(ctx context.Context, sub *datab
 	if m.UpdateSubscriptionFunc != nil {
 		return m.UpdateSubscriptionFunc(ctx, sub)
 	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.Subscriptions == nil {
 		m.Subscriptions = make(map[int64]*database.Subscription)
 	}
@@ -136,7 +146,9 @@ func (m *MockDatabaseService) DeleteSubscription(ctx context.Context, telegramID
 	if m.DeleteSubscriptionFunc != nil {
 		return m.DeleteSubscriptionFunc(ctx, telegramID)
 	}
+	m.mu.Lock()
 	delete(m.Subscriptions, telegramID)
+	m.mu.Unlock()
 	return nil
 }
 
@@ -144,6 +156,8 @@ func (m *MockDatabaseService) GetLatestSubscriptions(ctx context.Context, limit 
 	if m.GetLatestSubscriptionsFunc != nil {
 		return m.GetLatestSubscriptionsFunc(ctx, limit)
 	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	var result []database.Subscription
 	for _, sub := range m.Subscriptions {
 		if sub.Status == "active" {
@@ -160,6 +174,8 @@ func (m *MockDatabaseService) GetAllSubscriptions(ctx context.Context) ([]databa
 	if m.GetAllSubscriptionsFunc != nil {
 		return m.GetAllSubscriptionsFunc(ctx)
 	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	var result []database.Subscription
 	for _, sub := range m.Subscriptions {
 		result = append(result, *sub)
@@ -171,6 +187,8 @@ func (m *MockDatabaseService) CountActiveSubscriptions(ctx context.Context) (int
 	if m.CountActiveSubscriptionsFunc != nil {
 		return m.CountActiveSubscriptionsFunc(ctx)
 	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	var count int64
 	for _, sub := range m.Subscriptions {
 		if sub.Status == "active" && !sub.IsExpired() {
@@ -184,6 +202,8 @@ func (m *MockDatabaseService) CountExpiredSubscriptions(ctx context.Context) (in
 	if m.CountExpiredSubscriptionsFunc != nil {
 		return m.CountExpiredSubscriptionsFunc(ctx)
 	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	var count int64
 	for _, sub := range m.Subscriptions {
 		if sub.Status == "active" && sub.IsExpired() {
@@ -197,6 +217,8 @@ func (m *MockDatabaseService) GetAllTelegramIDs(ctx context.Context) ([]int64, e
 	if m.GetAllTelegramIDsFunc != nil {
 		return m.GetAllTelegramIDsFunc(ctx)
 	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	var result []int64
 	for id := range m.Subscriptions {
 		result = append(result, id)
@@ -208,6 +230,8 @@ func (m *MockDatabaseService) GetTelegramIDByUsername(ctx context.Context, usern
 	if m.GetTelegramIDByUsernameFunc != nil {
 		return m.GetTelegramIDByUsernameFunc(ctx, username)
 	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	for _, sub := range m.Subscriptions {
 		if sub.Username == username {
 			return sub.TelegramID, nil

@@ -162,6 +162,10 @@ func main() {
 	var wg sync.WaitGroup
 	wg.Add(2)
 
+	// Channel to limit concurrent update handlers (worker pool)
+	// This prevents unbounded goroutine spawning
+	updateSem := make(chan struct{}, config.MaxConcurrentHandlers)
+
 	// Start backup scheduler
 	go func() {
 		defer func() {
@@ -188,35 +192,71 @@ func main() {
 		heartbeat.Start(ctx, cfg.HeartbeatURL, cfg.HeartbeatInterval)
 	}()
 
+	// Track in-flight update handlers
+	var updatesWg sync.WaitGroup
+
 	// Main event loop
 	for {
 		select {
 		case update := <-updates:
-			// Process update in a separate goroutine for better concurrency
-			go handleUpdateSafely(ctx, handler, update)
-
-		case <-ctx.Done():
-			logger.Info("Graceful shutdown initiated")
-			botAPI.StopReceivingUpdates()
-
-			// Wait for background tasks with timeout
-			done := make(chan struct{})
-			go func() {
-				wg.Wait()
-				close(done)
-			}()
-
+			// Acquire semaphore slot (blocks if all slots are busy)
 			select {
-			case <-done:
-				logger.Info("All background tasks stopped successfully")
-			case <-time.After(config.ShutdownTimeout):
-				logger.Warn("Timeout waiting for background tasks to stop")
+			case updateSem <- struct{}{}:
+				updatesWg.Add(1)
+				go func(u tgbotapi.Update) {
+					defer func() {
+						<-updateSem // Release semaphore slot
+						updatesWg.Done()
+					}()
+					handleUpdateSafely(ctx, handler, u)
+				}(update)
+			case <-ctx.Done():
+				// Shutdown initiated while waiting for semaphore
+				logger.Info("Graceful shutdown initiated, draining updates...")
+				goto shutdown
 			}
 
-			logger.Info("Bot stopped successfully")
-			return
+		case <-ctx.Done():
+			goto shutdown
 		}
 	}
+
+shutdown:
+	logger.Info("Graceful shutdown initiated")
+	botAPI.StopReceivingUpdates()
+
+	// Wait for in-flight update handlers to complete
+	logger.Info("Waiting for update handlers to complete...")
+	done := make(chan struct{})
+	go func() {
+		updatesWg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		logger.Info("All update handlers completed")
+	case <-time.After(config.ShutdownTimeout):
+		logger.Warn("Timeout waiting for update handlers")
+	}
+
+	// Wait for background tasks with timeout
+	logger.Info("Waiting for background tasks to stop...")
+	bgDone := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(bgDone)
+	}()
+
+	select {
+	case <-bgDone:
+		logger.Info("All background tasks stopped successfully")
+	case <-time.After(config.ShutdownTimeout):
+		logger.Warn("Timeout waiting for background tasks to stop")
+	}
+
+	logger.Info("Bot stopped successfully")
+	return
 }
 
 // handleUpdateSafely handles a Telegram update with panic recovery.

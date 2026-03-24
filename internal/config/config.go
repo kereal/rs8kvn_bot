@@ -59,8 +59,8 @@ func Load() (*Config, error) {
 		TelegramAdminID:  parseEnvInt64("TELEGRAM_ADMIN_ID", 0),
 
 		XUIHost:      getEnv("XUI_HOST", "http://localhost:2053"),
-		XUIUsername:  getEnv("XUI_USERNAME", "admin"),
-		XUIPassword:  getEnv("XUI_PASSWORD", "admin"),
+		XUIUsername:  getEnv("XUI_USERNAME", ""),
+		XUIPassword:  getEnv("XUI_PASSWORD", ""),
 		XUIInboundID: parseEnvInt("XUI_INBOUND_ID", 1),
 		XUISubPath:   getEnv("XUI_SUB_PATH", DefaultXUISubPath),
 

@@ -20,23 +20,14 @@ import (
 	"go.uber.org/zap"
 )
 
-// bufferPool is a sync.Pool for bytes.Buffer to reduce memory allocations
-var bufferPool = sync.Pool{
-	New: func() interface{} {
-		return bytes.NewBuffer(make([]byte, 0, 1024))
-	},
-}
-
-// getBuffer returns a bytes.Buffer from the pool
-func getBuffer() *bytes.Buffer {
-	//nolint:errcheck // sync.Pool.Get returns interface{}, type assertion is safe here
-	return bufferPool.Get().(*bytes.Buffer)
-}
-
-// putBuffer returns a bytes.Buffer to the pool after resetting it
-func putBuffer(buf *bytes.Buffer) {
-	buf.Reset()
-	bufferPool.Put(buf)
+// marshalJSON marshals data to JSON and returns a reader.
+// The returned reader must be consumed before calling this function again.
+func marshalJSON(v interface{}) (*bytes.Reader, error) {
+	body, err := json.Marshal(v)
+	if err != nil {
+		return nil, err
+	}
+	return bytes.NewReader(body), nil
 }
 
 // Client manages communication with a 3x-ui panel.
@@ -166,7 +157,7 @@ func (c *Client) doEnsureLoggedIn(ctx context.Context, force bool) error {
 func (c *Client) doLogin(ctx context.Context) error {
 	loginURL := fmt.Sprintf("%s/login", c.host)
 
-	body, err := json.Marshal(map[string]string{
+	reader, err := marshalJSON(map[string]string{
 		"username": c.username,
 		"password": c.password,
 	})
@@ -174,11 +165,7 @@ func (c *Client) doLogin(ctx context.Context) error {
 		return fmt.Errorf("failed to marshal login request: %w", err)
 	}
 
-	buf := getBuffer()
-	defer putBuffer(buf)
-	buf.Write(body)
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, loginURL, buf)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, loginURL, reader)
 	if err != nil {
 		return fmt.Errorf("failed to create login request: %w", err)
 	}
@@ -275,18 +262,14 @@ func (c *Client) AddClientWithID(ctx context.Context, inboundID int, email, clie
 		"settings": string(settingsJSON),
 	}
 
-	body, err := json.Marshal(requestData)
+	reader, err := marshalJSON(requestData)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	buf := getBuffer()
-	defer putBuffer(buf)
-	buf.Write(body)
-
 	// POST to /panel/api/inbounds/addClient
 	addURL := fmt.Sprintf("%s/panel/api/inbounds/addClient", c.host)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, addURL, buf)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, addURL, reader)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
