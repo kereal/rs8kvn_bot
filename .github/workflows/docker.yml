@@ -29,7 +29,7 @@ jobs:
               run: go mod download
 
             - name: Run golangci-lint
-              uses: golangci/golangci-lint-action@v7
+              uses: golangci/golangci-lint-action@v8
               with:
                   version: latest
 
@@ -93,7 +93,7 @@ jobs:
 
             - name: Extract metadata (tags, labels)
               id: meta
-              uses: docker/metadata-action@v5
+              uses: docker/metadata-action@v6
               with:
                   images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
                   tags: |
@@ -111,7 +111,7 @@ jobs:
               run: echo "BUILD_TIME=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> $GITHUB_OUTPUT
 
             - name: Build and push Docker image
-              uses: docker/build-push-action@v6
+              uses: docker/build-push-action@v7
               with:
                   context: .
                   push: true
