@@ -140,8 +140,8 @@ const (
 
 // Health Check Constants
 const (
-	// HealthCheckPort is the port for the health check HTTP server
-	HealthCheckPort = 8080
+	// DefaultHealthCheckPort is the default port for the health check HTTP server
+	DefaultHealthCheckPort = 8080
 )
 
 // 3x-ui Subscription Path Constants
