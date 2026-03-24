@@ -29,6 +29,7 @@ var bufferPool = sync.Pool{
 
 // getBuffer returns a bytes.Buffer from the pool
 func getBuffer() *bytes.Buffer {
+	//nolint:errcheck // sync.Pool.Get returns interface{}, type assertion is safe here
 	return bufferPool.Get().(*bytes.Buffer)
 }
 
