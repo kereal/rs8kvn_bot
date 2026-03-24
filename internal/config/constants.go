@@ -145,3 +145,8 @@ const (
 
 // MaxResponseSize is the maximum response size to read (1MB)
 const MaxResponseSize = 1 << 20
+
+const (
+	CircuitBreakerMaxFailures = 5
+	CircuitBreakerTimeout     = 30 * time.Second
+)
