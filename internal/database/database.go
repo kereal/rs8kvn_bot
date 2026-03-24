@@ -278,6 +278,15 @@ func (s *Service) Close() error {
 	return sqlDB.Close()
 }
 
+// Ping checks the database connection health.
+func (s *Service) Ping() error {
+	sqlDB, err := s.db.DB()
+	if err != nil {
+		return err
+	}
+	return sqlDB.Ping()
+}
+
 // GetByTelegramID retrieves an active subscription by Telegram ID.
 func (s *Service) GetByTelegramID(ctx context.Context, telegramID int64) (*Subscription, error) {
 	var sub Subscription
