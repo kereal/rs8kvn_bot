@@ -1,6 +1,28 @@
-# 🔬 Сравнение современного ПО для обхода блокировок
+# 🔬 Сравнение современного ПО для обхода блокировок — Расширенное исследование v2.0
 
-> Продолжение: [BYPASS_METHODS.md](BYPASS_METHODS.md)
+> **Технический документ для проекта rs8kvn_bot**  
+> Версия: 2.0 (Расширенная)  
+> Дата: Март 2026  
+> Целевая аудитория: разработчики, системные администраторы, пользователи VPN  
+> Автор: Research Team
+
+---
+
+## 📋 Содержание
+
+1. [Обзор современных ядер](#1-обзор-современных-ядер-cores)
+2. [Xray-core](#2-xray-core)
+3. [Mihomo (Clash Meta)](#3-mihomo-clash-meta)
+4. [Sing-box](#4-sing-box)
+5. [Cloudflare Warp](#5-cloudflare-warp-🆕)
+6. [AmneziaWG](#6-amneziawg-🔥)
+7. [TrustTunnel](#7-trusttunnel-🚀)
+8. [Leaf](#8-leaf-🦀)
+9. [Сравнительная таблица](#9-сравнительная-таблица-📊)
+10. [Другие решения](#10-другие-решения)
+11. [Рекомендации для проекта rs8kvn_bot](#11-рекомендации-для-проекта-rs8kvn_bot)
+12. [Итоговые рекомендации](#12-итоговые-рекомендации-🎯)
+13. [Заключение](#13-заключение)
 
 ---
 
@@ -8,42 +30,42 @@
 
 ### Что такое "ядро" (core)
 
-**Ядро (core)** — это программный компонент, который реализует сетевые протоколы для обхода блокировок и управляет маршрутизацией трафика.
+**Ядро VPN/прокси** — это программный компонент, реализующий логику работы одного или нескольких протоколов туннелирования. Это "движок", который:
 
-#### Определение
-Ядро — это основа VPN-клиента/сервера, отвечающая за:
-- Установление соединений по различным протоколам
-- Шифрование и расшифровку трафика
-- Маршрутизацию между различными endpoints
-- Обработку входящих и исходящих соединений
+- Устанавливает соединения с серверами
+- Шифрует и дешифрует трафик
+- Управляет маршрутизацией
+- Обеспечивает мультиплексирование
 
-#### Зачем нужны ядра
-- **Унификация** — одно ядро поддерживает множество протоколов
-- **Гибкость** — возможность комбинировать протоколы
-- **Масштабируемость** — поддержка множества серверов
-- **Конфигурируемость** — тонкая настройка маршрутизации
+### Разница между протоколом и ядром
 
-#### Разница между протоколом и ядром
+```
+Протокол (Protocol):
+┌──────────────────────────────────┐
+│ VLESS, VMess, Shadowsocks, etc. │  ← Спецификация
+│ Правила обмена данными           │
+│ Формат пакетов                   │
+└──────────────────────────────────┘
 
-| Аспект | Протокол | Ядро |
-|--------|----------|------|
-| **Суть** | Способ передачи данных | Программная реализация |
-| **Примеры** | VLESS, VMess, Trojan | Xray-core, Mihomo, Sing-box |
-| **Совместимость** | Может быть реализован разными ядрами | Поддерживает несколько протоколов |
-| **Роль** | "Язык общения" | "Переводчик + маршрутизатор" |
+Ядро (Core):
+┌──────────────────────────────────┐
+│ Xray-core, Sing-box, Mihomo     │  ← Реализация
+│ Код на Go/Rust/C++               │
+│ Поддержка нескольких протоколов  │
+└──────────────────────────────────┘
+```
 
----
+### Основные игроки на рынке (2026)
 
-### Основные игроки на рынке
-
-| Ядро | Год создания | Язык | Статус | Активность |
-|------|-------------|------|--------|------------|
-| **Xray-core** | 2020 | Go | Активный | Высокая |
-| **Mihomo (Clash Meta)** | 2021 | Go | Активный | Очень высокая |
-| **Sing-box** | 2022 | Go | Активный | Высокая |
-| **V2Ray** | 2016 | Go | Поддержка | Низкая |
-| **Clash Premium** | 2018 | Go | Закрыт | — |
-| **Clash.Meta** | 2021 | Go | → Mihomo | — |
+| Ядро | Язык | Протоколы | Рейтинг | Статус |
+|------|------|-----------|---------|--------|
+| **Xray-core** | Go | VLESS, VMess, Trojan, Shadowsocks | ⭐⭐⭐⭐⭐ | Активное развитие |
+| **Mihomo** | Go | VLESS, VMess, Trojan, Hysteria2, TUIC | ⭐⭐⭐⭐⭐ | Активное развитие |
+| **Sing-box** | Go | VLESS, VMess, Trojan, Hysteria2, TUIC | ⭐⭐⭐⭐⭐ | Активное развитие |
+| **AmneziaWG** | Go/C | WireGuard + обфускация | ⭐⭐⭐⭐ | Активное развитие |
+| **TrustTunnel** | Rust | HTTP/2, HTTP/3 (QUIC) | ⭐⭐⭐⭐ | Новое, активное |
+| **Leaf** | Rust | VLESS, VMess, Trojan, Shadowsocks | ⭐⭐⭐⭐ | Активное развитие |
+| **Cloudflare Warp** | Go/Rust | WireGuard, MASQUE | ⭐⭐⭐⭐ | Стабильное |
 
 ---
 
@@ -51,155 +73,73 @@
 
 ### История и развитие
 
-```
-V2Ray (2016)
-    ↓
-Project X (2020) — конфликт в сообществе
-    ↓
-Xray-core (2020) — форк V2Ray командой RPRX
-    ↓
-Внедрение XTLS и Reality
-    ↓
-Текущая версия (2024) — стабильное развитие
-```
+**Xray-core** — это высокопроизводительное ядро, развивающееся как форк V2Ray с 2020 года. Создано командой RPRX для решения проблем оригинального V2Ray.
 
-#### Ключевые события
-- **2020** — Создание форка V2Ray из-за разногласий в команде
-- **2021** — Внедрение Reality протокола
-- **2022** — XTLS Vision flow для VLESS
-- **2023-2024** — Оптимизации и исправления
-
-#### Команда RPRX
-- Группа разработчиков из Китая
-- Фокус на производительности и скрытности
-- Активное сообщество на GitHub
-
----
-
-### Поддерживаемые протоколы
-
-| Протокол | Статус | Рекомендация |
-|----------|--------|--------------|
-| **VLESS** | ✅ Основной | ⭐ Рекомендуется |
-| **VMess** | ✅ Поддержка | Устаревший |
-| **Trojan** | ✅ Поддержка | Хорош для TLS |
-| **Shadowsocks** | ✅ Поддержка | Детектируется |
-| **WireGuard** | ⚠️ Экспериментально | Не рекомендуется |
-| **Reality** | ✅ Уникальный | ⭐⭐⭐ Лучший для РФ |
-
----
+**Ключевые события:**
+- 2020: Форк V2Ray, создание Xray-core
+- 2021: Представление Reality протокола
+- 2022: XTLS Vision flow
+- 2023-2026: Оптимизация и новые транспорты
 
 ### Уникальные технологии
 
 #### 🔐 Reality — маскировка без сертификата
 
-**Принцип работы:**
+**Reality** — это революционная технология, позволяющая использовать TLS без сертификата, маскируясь под легитимные сайты.
+
+**Как работает:**
+
 ```
-Клиент → [Reality Handshake] → Целевой сайт (www.google.com)
-                    ↓
-            Сервер перехватывает
-                    ↓
-        Если ключ совпадает → прокси
-        Если нет → настоящий TLS
+┌─────────────────────────────────────────────────────────────┐
+│                   Reality Handshake Flow                     │
+├─────────────────────────────────────────────────────────────┤
+│  1. Client → Server:                                        │
+│     TLS ClientHello:                                        │
+│     ├─► SNI: www.microsoft.com ✅ (разрешённый домен)       │
+│     ├─► TLS 1.3 cipher suites ✅ (стандартные)              │
+│     └─► Reality extension ← секретный handshake             │
+│                                                             │
+│  2. Server → Client:                                        │
+│     Сертификат реального microsoft.com                      │
+│     + Reality-ответ для клиента                             │
+│                                                             │
+│  3. DPI видит: обычный HTTPS к microsoft.com ✅             │
+└─────────────────────────────────────────────────────────────┘
 ```
 
 **Преимущества Reality:**
-- ❌ Не нужен домен
-- ❌ Не нужен сертификат
-- ✅ Маскировка под популярный сайт
-- ✅ Устойчив к DPI
-- ✅ Очень сложно детектировать
-
-**Конфигурация Reality:**
-```json
-{
-  "inbounds": [
-    {
-      "tag": "vless-reality",
-      "protocol": "vless",
-      "listen": "::",
-      "port": 443,
-      "settings": {
-        "clients": [
-          {
-            "id": "uuid-здесь",
-            "flow": "xtls-rprx-vision"
-          }
-        ]
-      },
-      "streamSettings": {
-        "network": "tcp",
-        "security": "reality",
-        "realitySettings": {
-          "dest": "www.google.com:443",
-          "serverNames": [
-            "www.google.com",
-            "www.amazon.com"
-          ],
-          "privateKey": "приватный-ключ",
-          "shortIds": ["", "short-id"]
-        }
-      }
-    }
-  ]
-}
-```
+- 🎭 Идеальная маскировка (невозможно отличить от обычного HTTPS)
+- 🔒 Не нужен сертификат и домен
+- 🚀 Высокая производительность
+- 🛡️ Устойчивость к блокировкам
 
 #### 🚀 XTLS — оптимизация TLS
 
-**Проблема обычного TLS:**
-```
-Данные → TLS шифрование → Трафик увеличивается на ~5-15%
-```
-
-**Решение XTLS:**
-```
-Данные → XTLS Vision → Минимальные накладные расходы
-         (передаёт inner encryption напрямую)
-```
-
-**Результат:**
-- Меньше накладных расходов
-- Лучшая производительность
-- Меньше подозрительный трафик
+**XTLS** (Xray TLS) — оптимизация обработки TLS трафика, уменьшающая накладные расходы.
 
 #### 🔮 Vision flow — для VLESS
 
-```json
-{
-  "flow": "xtls-rprx-vision"
-}
-```
+**Vision flow** (`xtls-rprx-vision`) — оптимизированный режим для VLESS, обеспечивающий максимальную производительность.
 
-**Особенности:**
-- Автоматическое управление TLS
-- Оптимизация трафика
-- Работает только с VLESS + Reality
+### Конфигурация Xray-core
 
----
-
-### Конфигурация
-
-#### Полная конфигурация Xray-core
+**Базовая конфигурация VLESS+Reality:**
 
 ```json
 {
   "log": {
-    "level": "warning",
-    "access": "/var/log/xray/access.log",
-    "error": "/var/log/xray/error.log"
+    "level": "warning"
   },
-  
   "inbounds": [
     {
       "tag": "vless-reality",
       "protocol": "vless",
-      "listen": "::",
+      "listen": "0.0.0.0",
       "port": 443,
       "settings": {
         "clients": [
           {
-            "id": "uuid-клиента",
+            "id": "uuid-here",
             "flow": "xtls-rprx-vision"
           }
         ],
@@ -209,55 +149,62 @@ Xray-core (2020) — форк V2Ray командой RPRX
         "network": "tcp",
         "security": "reality",
         "realitySettings": {
-          "dest": "www.google.com:443",
-          "serverNames": ["www.google.com"],
-          "privateKey": "приватный-ключ",
-          "shortIds": ["", "abc123"]
+          "dest": "www.microsoft.com:443",
+          "serverNames": ["www.microsoft.com"],
+          "privateKey": "private-key-here",
+          "shortIds": ["short-id-1"]
         }
       }
     }
   ],
-  
   "outbounds": [
     {
-      "tag": "direct",
-      "protocol": "freedom"
-    },
-    {
-      "tag": "block",
-      "protocol": "blackhole"
+      "protocol": "freedom",
+      "tag": "direct"
     }
-  ],
-  
-  "routing": {
-    "domainStrategy": "IPIfNonMatch",
-    "rules": [
-      {
-        "type": "field",
-        "ip": ["geoip:private"],
-        "outboundTag": "direct"
-      },
-      {
-        "type": "field",
-        "domain": ["geosite:category-ads-all"],
-        "outboundTag": "block"
-      }
-    ]
-  }
+  ]
 }
 ```
 
----
-
 ### Мульти-серверность в Xray
 
-#### 🔄 Routing rules — маршрутизация между outbound
+**Xray поддерживает мульти-серверность через:**
+
+1. **Routing rules** — маршрутизация между outbound
+2. **Balancer** — балансировка нагрузки
+3. **Observatory** — мониторинг серверов
+
+**Пример конфигурации с балансировкой:**
 
 ```json
 {
+  "observatory": {
+    "subjectSelector": ["proxy"],
+    "probeURL": "https://www.google.com/generate_204",
+    "probeInterval": "30s",
+    "enableConcurrency": true
+  },
+  "routing": {
+    "balancers": [
+      {
+        "tag": "balancer",
+        "selector": ["nl-server", "de-server", "fi-server"],
+        "strategy": {
+          "type": "leastPing"
+        }
+      }
+    ],
+    "rules": [
+      {
+        "type": "field",
+        "balancerTag": "balancer",
+        "network": "tcp,udp"
+      }
+    ]
+  },
   "outbounds": [
     {
-      "tag": "server-nl",
+      "tag": "nl-server",
       "protocol": "vless",
       "settings": {
         "vnext": [{
@@ -265,19 +212,10 @@ Xray-core (2020) — форк V2Ray командой RPRX
           "port": 443,
           "users": [{"id": "uuid", "flow": "xtls-rprx-vision"}]
         }]
-      },
-      "streamSettings": {
-        "network": "tcp",
-        "security": "reality",
-        "realitySettings": {
-          "serverName": "www.google.com",
-          "publicKey": "публичный-ключ",
-          "shortId": "abc123"
-        }
       }
     },
     {
-      "tag": "server-de",
+      "tag": "de-server",
       "protocol": "vless",
       "settings": {
         "vnext": [{
@@ -287,136 +225,36 @@ Xray-core (2020) — форк V2Ray командой RPRX
         }]
       }
     }
-  ],
-  "routing": {
-    "rules": [
-      {
-        "type": "field",
-        "domain": ["geosite:netflix"],
-        "outboundTag": "server-nl"
-      },
-      {
-        "type": "field",
-        "domain": ["geosite:youtube"],
-        "outboundTag": "server-de"
-      }
-    ]
-  }
-}
-```
-
-#### ⚖️ Balancer — балансировка нагрузки
-
-```json
-{
-  "routing": {
-    "balancers": [
-      {
-        "tag": "vpn-balancer",
-        "selector": ["server-nl", "server-de", "server-us"],
-        "strategy": {
-          "type": "leastPing"
-        }
-      }
-    ],
-    "rules": [
-      {
-        "type": "field",
-        "balancerTag": "vpn-balancer",
-        "network": "tcp,udp"
-      }
-    ]
-  },
-  
-  "outbounds": [
-    {
-      "tag": "server-nl",
-      "protocol": "vless",
-      "settings": { "vnext": [{ "address": "nl.example.com", "port": 443 }] }
-    },
-    {
-      "tag": "server-de",
-      "protocol": "vless",
-      "settings": { "vnext": [{ "address": "de.example.com", "port": 443 }] }
-    },
-    {
-      "tag": "server-us",
-      "protocol": "vless",
-      "settings": { "vnext": [{ "address": "us.example.com", "port": 443 }] }
-    }
   ]
 }
 ```
 
-#### 📡 Observatory — мониторинг серверов
-
-```json
-{
-  "observatory": {
-    "subjectSelector": ["server-nl", "server-de", "server-us"],
-    "probeURL": "https://www.google.com/generate_204",
-    "probeInterval": "30s",
-    "enableConcurrency": true
-  },
-  
-  "routing": {
-    "balancers": [
-      {
-        "tag": "vpn",
-        "selector": ["server-nl", "server-de", "server-us"],
-        "strategy": {
-          "type": "leastPing"
-        }
-      }
-    ]
-  }
-}
-```
-
-**Как работает Observatory:**
-1. Каждые 30 секунд проверяет доступность серверов
-2. Измеряет задержку (ping)
-3. Balancer выбирает сервер с наименьшим ping
-4. Автоматическое переключение при падении
-
----
-
-### Преимущества
+### Преимущества Xray-core
 
 | Преимущество | Описание |
 |--------------|----------|
-| ✅ **Reality протокол** | Лучшая маскировка без сертификата |
-| ✅ **XTLS оптимизация** | Меньше накладных расходов |
-| ✅ **Активное развитие** | Регулярные обновления |
-| ✅ **Большое сообщество** | Много готовых решений |
-| ✅ **3x-ui интеграция** | Удобная панель управления |
-| ✅ **Балансировка** | Встроенный Balancer |
-| ✅ **Observatory** | Мониторинг серверов |
+| 🏆 **Reality** | Уникальная технология маскировки |
+| ⚡ **Производительность** | Высокая скорость, оптимизированный код |
+| 🌐 **Протоколы** | VLESS, VMess, Trojan, Shadowsocks |
+| 🔧 **Гибкость** | Мощная система маршрутизации |
+| 📊 **Мультисерверность** | Встроенная поддержка через Observatory |
+| 🛠️ **Экосистема** | Множество клиентов и панелей |
 
----
+### Недостатки Xray-core
 
-### Недостатки
-
-| Недостаток | Влияние |
-|------------|---------|
-| ❌ **Сложная конфигурация** | Высокий порог входа |
-| ❌ **Нет GUI по умолчанию** | Нужен 3x-ui или v2rayN |
-| ❌ **Только JSON** | Нет YAML конфигурации |
-| ❌ **Нет Hysteria2** | Нет UDP-based протоколов |
-| ❌ **Документация** | Среднее качество |
-
----
+| Недостаток | Описание |
+|------------|----------|
+| 📝 **Сложность конфигурации** | JSON конфигурация может быть сложной |
+| 🔍 **Требует понимания** | Необходимы технические знания |
+| 📦 **Размер бинарника** | ~15-20 MB |
 
 ### Для кого подходит
 
-| Сценарий | Рекомендация |
-|----------|--------------|
-| 🎯 **Опытные пользователи** | ⭐⭐⭐ Идеально |
-| 🎯 **Проекты с 3x-ui** | ⭐⭐⭐ Идеально |
-| 🎯 **Нужен Reality** | ⭐⭐⭐ Лучший выбор |
-| 🎯 **Россия, Иран, Китай** | ⭐⭐⭐ Рекомендуется |
-| 🎯 **Новички** | ⭐⭐ Сложно |
-| 🎯 **Нужна скорость QUIC** | ⭐ Рассмотреть Sing-box |
+- ✅ Продвинутые пользователи
+- ✅ Системные администраторы
+- ✅ Проекты, требующие максимальной скрытности (Reality)
+- ✅ Мульти-серверные конфигурации
+- ❌ Новички (лучше использовать панели типа 3x-ui)
 
 ---
 
@@ -424,184 +262,114 @@ Xray-core (2020) — форк V2Ray командой RPRX
 
 ### История
 
-```
-Clash (2018) — исходный проект
-    ↓
-Clash Premium (2020) — проприетарная версия
-    ↓
-Clash.Meta (2021) — форк с расширенными возможностями
-    ↓
-Удаление Clash (2023) — GitHub удаляет оригинал
-    ↓
-Mihomo (2023) — ребрендинг Clash.Meta
-    ↓
-Текущая версия (2024) — активное развитие
-```
+**Mihomo** (ранее известный как Clash Meta) — это форк оригинального Clash, созданный для добавления поддержки новых протоколов и функций, которые не были включены в основной проект.
 
-#### Ключевые особенности развития
-- **MetaCubeX** — команда разработчиков
-- **Форк оригинального Clash** — после его закрытия
-- **Ребрендинг в Mihomo** — в связи с событиями 2023 года
-- **Сообщество** — одно из крупнейших в сфере обхода блокировок
-
----
+**Ключевые особенности развития:**
+- 2021: Форк Clash, добавление VLESS
+- 2022: Поддержка Reality, Hysteria2
+- 2023-2026: Активное развитие, новый брендинг как Mihomo
 
 ### Поддерживаемые протоколы
 
-| Протокол | Статус | Примечание |
-|----------|--------|------------|
-| **VLESS** | ✅ Полная | Включая Vision flow |
-| **VMess** | ✅ Полная | AEAD шифрование |
-| **Trojan** | ✅ Полная | Trojan-Go |
-| **Shadowsocks** | ✅ Полная | SS2022 |
-| **Hysteria2** | ✅ Полная | ⭐ Высокая скорость |
-| **TUIC** | ✅ Полная | Новое поколение QUIC |
-| **WireGuard** | ✅ Полная | Встроенная поддержка |
-| **Reality** | ⚠️ Через плагины | Ограниченная поддержка |
-
----
+| Протокол | Поддержка | Нюансы |
+|----------|-----------|--------|
+| **VLESS** | ✅ | С поддержкой Reality |
+| **VMess** | ✅ | Полная поддержка |
+| **Trojan** | ✅ | Полная поддержка |
+| **Shadowsocks** | ✅ | Включая AEAD |
+| **Hysteria2** | ✅ | QUIC-based протокол |
+| **TUIC** | ✅ | QUIC-based протокол |
+| **WireGuard** | ✅ | Ограниченная поддержка |
 
 ### Уникальные возможности
 
 #### 📦 Proxy Groups — группы прокси с разными стратегиями
 
-**Типы групп:**
-
-| Тип | Описание | Стратегия |
-|-----|----------|-----------|
-| `select` | Ручной выбор | Пользователь выбирает |
-| `url-test` | Авто-выбор | Самый быстрый по ping |
-| `fallback` | Отказоустойчивость | Переключение при сбое |
-| `load-balance` | Балансировка | Распределение нагрузки |
-
-#### 🛤️ Rule-based routing — гибкая маршрутизация
-
-```yaml
-rules:
-  # Домены
-  - DOMAIN-SUFFIX,google.com,VPN
-  - DOMAIN-SUFFIX,youtube.com,VPN
-  - DOMAIN,api.telegram.org,VPN
-  
-  # GeoIP
-  - GEOIP,US,server-us
-  - GEOIP,NL,server-nl
-  
-  # Категории
-  - GEOSITE,category-ads-all,REJECT
-  - GEOSITE,netflix,server-nl
-  
-  # Порты
-  - DST-PORT,22,direct
-  - DST-PORT,80,VPN
-  
-  # По умолчанию
-  - MATCH,VPN
-```
-
-#### 🔄 Fallback groups — автоматическое переключение
-
-**Как работает:**
-```
-Запрос → server1
-    ↓ (недоступен)
-Переключение → server2
-    ↓ (недоступен)
-Переключение → server3
-```
-
-#### ⚡ Load Balance — распределение нагрузки
-
-**Стратегии:**
-- `round-robin` — по очереди
-- `consistent-hashing` — на основе хеша
-
----
-
-### Proxy Groups в Mihomo — КЛЮЧЕВАЯ ФИЧА!
+**Mihomo** имеет мощную систему Proxy Groups, которая позволяет создавать группы серверов с разными стратегиями выбора:
 
 ```yaml
 proxy-groups:
-  # 🎯 Автоматический выбор быстрого сервера
-  - name: "auto-fast"
+  # Автоматический выбор самого быстрого
+  - name: "Auto"
     type: url-test
     proxies:
-      - server1-nl
-      - server2-de
-      - server3-us
-    url: 'http://www.gstatic.com/generate_204'
-    interval: 300        # проверка каждые 300 сек
-    tolerance: 50        # разница в ping для переключения (мс)
-    lazy: false          # проверять даже при отсутствии трафика
+      - NL-Server
+      - DE-Server
+      - FI-Server
+    url: "http://www.gstatic.com/generate_204"
+    interval: 300
+    tolerance: 50
 
-  # 🔄 Fallback — переключение при недоступности
-  - name: "fallback-group"
+  # Fallback при недоступности
+  - name: "Fallback"
     type: fallback
     proxies:
-      - server1-nl      # основной
-      - server2-de      # резерв 1
-      - server3-us      # резерв 2
-    url: 'http://www.gstatic.com/generate_204'
+      - NL-Server
+      - DE-Server
+      - DIRECT
+    url: "http://www.gstatic.com/generate_204"
     interval: 300
-    lazy: true
 
-  # ⚖️ Load Balance — распределение нагрузки
-  - name: "load-balance"
+  # Балансировка нагрузки
+  - name: "LoadBalance"
     type: load-balance
     proxies:
-      - server1-nl
-      - server2-de
-      - server3-us
+      - NL-Server
+      - DE-Server
     strategy: round-robin
-    url: 'http://www.gstatic.com/generate_204'
+    url: "http://www.gstatic.com/generate_204"
     interval: 300
 
-  # 👆 Ручной выбор
-  - name: "manual-select"
+  # Ручной выбор
+  - name: "Proxy"
     type: select
     proxies:
-      - server1-nl
-      - server2-de
-      - server3-us
-      - auto-fast       # можно вкладывать группы!
-
-  # 🎬 Специализированные группы
-  - name: "streaming"
-    type: url-test
-    proxies:
-      - server-nl       # оптимален для Netflix
-      - server-us
-    url: 'http://www.gstatic.com/generate_204'
-    interval: 600
-
-  - name: "telegram"
-    type: fallback
-    proxies:
-      - server-de
-      - server-nl
-    url: 'http://www.gstatic.com/generate_204'
-    interval: 300
+      - Auto
+      - Fallback
+      - NL-Server
+      - DE-Server
+      - DIRECT
 ```
 
----
+#### 🛤️ Rule-based routing — гибкая маршрутизация
+
+**Пример правил маршрутизации:**
+
+```yaml
+rules:
+  # Telegram через VPN
+  - DOMAIN-SUFFIX,telegram.org,Proxy
+  - DOMAIN-SUFFIX,t.me,Proxy
+  
+  # YouTube через VPN
+  - DOMAIN-SUFFIX,youtube.com,Proxy
+  - DOMAIN-SUFFIX,googlevideo.com,Proxy
+  
+  # Российские сайты напрямую
+  - DOMAIN-SUFFIX,vk.com,DIRECT
+  - DOMAIN-SUFFIX,yandex.ru,DIRECT
+  - DOMAIN-SUFFIX,sberbank.ru,DIRECT
+  
+  # Географические правила
+  - GEOIP,RU,DIRECT
+  
+  # Все остальное через VPN
+  - MATCH,Proxy
+```
 
 ### Полная конфигурация Mihomo
 
 ```yaml
-# ============================================
-# Mihomo (Clash Meta) Configuration
-# ============================================
-
 # Основные настройки
 mixed-port: 7890
 socks-port: 7891
 port: 7892
 allow-lan: true
-bind-address: '*'
+bind-address: "*"
 mode: rule
 log-level: info
 ipv6: false
-external-controller: '127.0.0.1:9090'
+external-controller: 127.0.0.1:9090
 
 # DNS настройки
 dns:
@@ -610,42 +378,22 @@ dns:
   enhanced-mode: fake-ip
   fake-ip-range: 198.18.0.1/16
   fake-ip-filter:
-    - '*.lan'
+    - "*.lan"
     - localhost.ptlogin2.qq.com
   nameserver:
-    - 8.8.8.8
-    - 1.1.1.1
-  fallback:
     - https://dns.google/dns-query
-    - https://cloudflare-dns.com/dns-query
+    - https://dns.cloudflare.com/dns-query
+  fallback:
+    - https://1.1.1.1/dns-query
   fallback-filter:
     geoip: true
     geoip-code: RU
 
-# ============================================
 # Прокси серверы
-# ============================================
 proxies:
-  # Сервер 1: VLESS + Reality (Нидерланды)
-  - name: "server1-nl"
+  - name: "NL-VLESS-Reality"
     type: vless
     server: nl.example.com
-    port: 443
-    uuid: xxxx-xxxx-xxxx-xxxx
-    network: tcp
-    tls: true
-    udp: true
-    flow: xtls-rprx-vision
-    servername: www.google.com
-    reality-opts:
-      public-key: xxxx
-      short-id: xxxx
-    client-fingerprint: chrome
-
-  # Сервер 2: VLESS + Reality (Германия)
-  - name: "server2-de"
-    type: vless
-    server: de.example.com
     port: 443
     uuid: xxxx-xxxx-xxxx-xxxx
     network: tcp
@@ -656,9 +404,23 @@ proxies:
     reality-opts:
       public-key: xxxx
       short-id: xxxx
+    client-fingerprint: chrome
 
-  # Сервер 3: Hysteria2 (США)
-  - name: "server3-us-hy2"
+  - name: "DE-VLESS-Reality"
+    type: vless
+    server: de.example.com
+    port: 443
+    uuid: xxxx-xxxx-xxxx-xxxx
+    network: tcp
+    tls: true
+    udp: true
+    flow: xtls-rprx-vision
+    servername: www.google.com
+    reality-opts:
+      public-key: xxxx
+      short-id: xxxx
+
+  - name: "US-Hysteria2"
     type: hysteria2
     server: us.example.com
     port: 443
@@ -666,211 +428,62 @@ proxies:
     sni: us.example.com
     skip-cert-verify: false
 
-  # Сервер 4: Trojan (Финляндия)
-  - name: "server4-fi"
-    type: trojan
-    server: fi.example.com
-    port: 443
-    password: your-password
-    udp: true
-    sni: fi.example.com
-    skip-cert-verify: false
-
-  # Сервер 5: TUIC (Япония)
-  - name: "server5-jp-tuic"
-    type: tuic
-    server: jp.example.com
-    port: 443
-    uuid: xxxx-xxxx-xxxx-xxxx
-    password: your-password
-    alpn:
-      - h3
-    congestion-controller: bbr
-    sni: jp.example.com
-    skip-cert-verify: false
-    udp-relay-mode: native
-
-# ============================================
 # Группы прокси
-# ============================================
 proxy-groups:
-  # Главная группа — авто-выбор
-  - name: "VPN"
+  - name: "Auto"
     type: url-test
     proxies:
-      - server1-nl
-      - server2-de
-      - server3-us-hy2
-      - server4-fi
-    url: 'http://www.gstatic.com/generate_204'
+      - NL-VLESS-Reality
+      - DE-VLESS-Reality
+    url: "http://www.gstatic.com/generate_204"
     interval: 300
     tolerance: 50
 
-  # Fallback группа
-  - name: "VPN-Fallback"
-    type: fallback
-    proxies:
-      - server1-nl
-      - server2-de
-      - server3-us-hy2
-    url: 'http://www.gstatic.com/generate_204'
-    interval: 300
-
-  # Балансировка нагрузки
-  - name: "VPN-Balance"
-    type: load-balance
-    proxies:
-      - server1-nl
-      - server2-de
-    strategy: round-robin
-    url: 'http://www.gstatic.com/generate_204'
-    interval: 300
-
-  # Для стриминга
-  - name: "Streaming"
+  - name: "Proxy"
     type: select
     proxies:
-      - server1-nl
-      - server2-de
-      - VPN
-
-  # Для Telegram
-  - name: "Telegram"
-    type: fallback
-    proxies:
-      - server2-de
-      - server1-nl
-    url: 'http://www.gstatic.com/generate_204'
-    interval: 300
-
-  # Прямое соединение
-  - name: "DIRECT"
-    type: select
-    proxies:
+      - Auto
+      - NL-VLESS-Reality
+      - DE-VLESS-Reality
+      - US-Hysteria2
       - DIRECT
 
-  # Блокировка
-  - name: "REJECT"
-    type: select
-    proxies:
-      - REJECT
-
-# ============================================
 # Правила маршрутизации
-# ============================================
 rules:
-  # Telegram
-  - DOMAIN-SUFFIX,telegram.org,Telegram
-  - DOMAIN-SUFFIX,t.me,Telegram
-  - DOMAIN-SUFFIX,tdesktop.com,Telegram
-  - DOMAIN-SUFFIX,telegra.ph,Telegram
-  - DOMAIN-SUFFIX,telesco.pe,Telegram
-  - IP-CIDR,91.108.0.0/16,Telegram
-  - IP-CIDR,95.161.0.0/17,Telegram
-  - IP-CIDR,149.154.0.0/16,Telegram
-
-  # YouTube
-  - DOMAIN-SUFFIX,youtube.com,VPN
-  - DOMAIN-SUFFIX,googlevideo.com,VPN
-  - DOMAIN-SUFFIX,ytimg.com,VPN
-
-  # Netflix
-  - DOMAIN-SUFFIX,netflix.com,Streaming
-  - DOMAIN-SUFFIX,nflxvideo.net,Streaming
-  - DOMAIN-SUFFIX,nflxso.net,Streaming
-
-  # Google
-  - DOMAIN-SUFFIX,google.com,VPN
-  - DOMAIN-SUFFIX,googleapis.com,VPN
-  - DOMAIN-SUFFIX,gstatic.com,VPN
-
-  # Реклама — блокировать
-  - DOMAIN-SUFFIX,ads.google.com,REJECT
-  - DOMAIN-SUFFIX,adservice.google.com,REJECT
-  - DOMAIN,ad.doubleradio.com,REJECT
-  - DOMAIN,ad.doubleradio.net,REJECT
-
-  # Локальные сети
-  - IP-CIDR,10.0.0.0/8,DIRECT
-  - IP-CIDR,172.16.0.0/12,DIRECT
-  - IP-CIDR,192.168.0.0/16,DIRECT
-  - IP-CIDR,127.0.0.0/8,DIRECT
-
-  # Российские сайты
-  - GEOSITE,ru,DIRECT
+  - DOMAIN-SUFFIX,telegram.org,Proxy
+  - DOMAIN-SUFFIX,youtube.com,Proxy
+  - DOMAIN-SUFFIX,vk.com,DIRECT
+  - DOMAIN-SUFFIX,yandex.ru,DIRECT
   - GEOIP,RU,DIRECT
-
-  # Всё остальное
-  - MATCH,VPN
+  - MATCH,Proxy
 ```
 
----
-
-### Мульти-серверность — УЖЕ ВСТРОЕНА!
-
-| Тип группы | Как работает | Когда использовать | Пример |
-|------------|--------------|-------------------|--------|
-| **url-test** | Автовыбор быстрого по ping | По умолчанию, общий трафик | Основная группа |
-| **fallback** | Переключение при сбое | Критичные соединения | Telegram, важные сервисы |
-| **load-balance** | Распределение нагрузки | Высокая нагрузка, много пользователей | Torrent, загрузки |
-| **select** | Ручной выбор | Пользовательский контроль | Выбор сервера для Netflix |
-
-#### Преимущества встроенной мультисерверности
-
-```
-❌ Без Mihomo:
-Бот → Управляет → Сервер 1 (если упал → ошибка)
-                 Сервер 2 (нужно переключать вручную)
-                 Сервер 3
-
-✅ С Mihomo:
-Пользователь → Mihomo → Автоматически выбирает лучший
-                           ├── Server 1 (ping: 45ms) ✓
-                           ├── Server 2 (ping: 78ms)
-                           └── Server 3 (ping: 120ms)
-```
-
----
-
-### Преимущества
+### Преимущества Mihomo
 
 | Преимущество | Описание |
 |--------------|----------|
-| ✅ **Встроенная мультисерверность** | Proxy Groups из коробки |
-| ✅ **Автоматическое переключение** | url-test, fallback |
-| ✅ **YAML конфигурация** | Проще чем JSON |
-| ✅ **GUI клиенты** | Clash Verge, Happ, Stash |
-| ✅ **Поддержка Hysteria2, TUIC** | QUIC-based протоколы |
-| ✅ **Активное сообщество** | Много готовых конфигураций |
-| ✅ **Rule-based routing** | Гибкие правила |
-| ✅ **DNS over HTTPS** | Встроенная поддержка |
-| ✅ **Fake IP** | Ускорение DNS |
+| 🎯 **Proxy Groups** | Мощная система групп серверов |
+| 📋 **Rule-based routing** | Гибкая маршрутизация по правилам |
+| 🔄 **Автоматическое переключение** | url-test, fallback, load-balance |
+| 🌐 **Множество протоколов** | VLESS, VMess, Trojan, Hysteria2, TUIC |
+| 📱 **Клиенты** | Множество GUI клиентов |
+| 🛠️ **YAML конфигурация** | Человекочитаемый формат |
 
----
+### Недостатки Mihomo
 
-### Недостатки
-
-| Недостаток | Влияние |
-|------------|---------|
-| ❌ **Нет Reality (нативно)** | Нужны плагины или сертификаты |
-| ❌ **Меньше оптимизация TLS** | Чем у Xray |
-| ❌ **Сложнее Debug** | Меньше логов |
-| ❌ **Зависимости** | Нужен отдельный клиент |
-| ❌ **Потребление памяти** | Выше чем у Xray |
-
----
+| Недостаток | Описание |
+|------------|----------|
+| 📝 **Требует конфигурации** | YAML файл может быть сложным |
+| 🔄 **Перезапуск для изменений** | Некоторые изменения требуют перезапуска |
+| 📦 **Потребление памяти** | Может использовать больше памяти |
 
 ### Для кого подходит
 
-| Сценарий | Рекомендация |
-|----------|--------------|
-| 🎯 **Нужна мультисерверность из коробки** | ⭐⭐⭐ Идеально |
-| 🎯 **Распределённые системы** | ⭐⭐⭐ Идеально |
-| 🎯 **Важна простота конфигурации** | ⭐⭐⭐ Идеально |
-| 🎯 **GUI клиенты для пользователей** | ⭐⭐⭐ Идеально |
-| 🎯 **Нужны Hysteria2, TUIC** | ⭐⭐⭐ Отлично |
-| 🎯 **Нужен Reality** | ⭐⭐ Рассмотреть Xray |
-| 🎯 **Минимальное потребление ресурсов** | ⭐⭐ Рассмотреть Xray |
+- ✅ Пользователи, которым нужна гибкая маршрутизация
+- ✅ Те, кто хочет автоматическое переключение серверов
+- ✅ Пользователи с несколькими серверами
+- ✅ Любителиrule-based routing
+- ❌ Те, кому нужна простая конфигурация
 
 ---
 
@@ -878,50 +491,39 @@ rules:
 
 ### История
 
-```
-2022 — Создание проекта (SagerNet)
-    ↓
-Фокус на современную архитектуру
-    ↓
-Go 1.18+ — дженерики, оптимизации
-    ↓
-Интеграция с多种协议
-    ↓
-2024 — Активное развитие
-```
+**Sing-box** — это современный прокси-платформа, написанная на Go с фокусом на производительность и чистоту кода.
 
-#### Ключевые особенности
-- **Написан с нуля** — не форк
-- **Современный Go** — использование новых возможностей
-- **Модульность** — плагины и расширения
-- **Cross-platform** — Linux, Windows, macOS, Android, iOS
-
----
+**Ключевые особенности:**
+- 2022: Начало разработки
+- 2023: Поддержка Reality, активное развитие
+- 2024-2026: Стабилизация, расширение возможностей
 
 ### Поддерживаемые протоколы
 
-| Протокол | Статус | Примечание |
-|----------|--------|------------|
-| **VLESS** | ✅ Полная | Reality, Vision |
-| **VMess** | ✅ Полная | AEAD |
-| **Trojan** | ✅ Полная | — |
-| **Shadowsocks** | ✅ Полная | SS2022 |
-| **Hysteria2** | ✅ Полная | ⭐ Высокая скорость |
-| **TUIC** | ✅ Полная | Новое поколение |
-| **WireGuard** | ✅ Полная | Нативная поддержка |
-| **Reality** | ✅ Полная | ⭐ Как в Xray |
-
----
+| Протокол | Inbound | Outbound | Нюансы |
+|----------|---------|----------|--------|
+| **VLESS** | ✅ | ✅ | С поддержкой Reality |
+| **VMess** | ✅ | ✅ | Полная поддержка |
+| **Trojan** | ✅ | ✅ | Полная поддержка |
+| **Shadowsocks** | ✅ | ✅ | AEAD и 2022 |
+| **Hysteria2** | ✅ | ✅ | QUIC-based |
+| **TUIC** | ✅ | ✅ | QUIC-based |
+| **WireGuard** | ✅ | ✅ | Полная поддержка |
 
 ### Уникальные возможности
 
 #### 🔧 Современный код
-- Go 1.20+ с дженериками
+
+Sing-box написан с нуля на Go с использованием современных практик:
 - Чистая архитектура
-- Хорошее покрытие тестами
-- Активный рефакторинг
+- Модульность
+- Хорошая документация
+- Активное тестирование
 
 #### 🧩 Модульность
+
+Sing-box имеет модульную архитектуру:
+
 ```json
 {
   "experimental": {
@@ -937,17 +539,12 @@ Go 1.18+ — дженерики, оптимизации
 }
 ```
 
-#### 👥 Multi-user
-- Хорошая поддержка многих пользователей
-- Efficient connection pooling
-- User management API
-
 #### ⚡ Performance
-- Высокая производительность
-- Оптимизированная маршрутизация
-- Efficient memory usage
 
----
+Sing-box фокусируется на производительности:
+- Эффективное использование памяти
+- Оптимизированные алгоритмы
+- Минимальные накладные расходы
 
 ### Конфигурация Sing-box
 
@@ -955,10 +552,8 @@ Go 1.18+ — дженерики, оптимизации
 {
   "log": {
     "level": "info",
-    "timestamp": true,
-    "output": "/var/log/sing-box.log"
+    "timestamp": true
   },
-  
   "dns": {
     "servers": [
       {
@@ -979,7 +574,6 @@ Go 1.18+ — дженерики, оптимизации
     ],
     "strategy": "ipv4_only"
   },
-  
   "inbounds": [
     {
       "type": "tun",
@@ -996,56 +590,58 @@ Go 1.18+ — дженерики, оптимизации
       "listen_port": 7890
     }
   ],
-  
   "outbounds": [
     {
       "type": "vless",
-      "tag": "server-nl",
+      "tag": "proxy-nl",
       "server": "nl.example.com",
       "server_port": 443,
-      "uuid": "xxxx-xxxx-xxxx-xxxx",
+      "uuid": "uuid-here",
       "flow": "xtls-rprx-vision",
       "tls": {
         "enabled": true,
-        "server_name": "www.google.com",
+        "server_name": "www.microsoft.com",
         "utls": {
           "enabled": true,
           "fingerprint": "chrome"
         },
         "reality": {
           "enabled": true,
-          "public_key": "xxxx",
-          "short_id": "xxxx"
+          "public_key": "public-key",
+          "short_id": "short-id"
         }
       }
     },
     {
       "type": "vless",
-      "tag": "server-de",
+      "tag": "proxy-de",
       "server": "de.example.com",
       "server_port": 443,
-      "uuid": "xxxx-xxxx-xxxx-xxxx",
+      "uuid": "uuid-here",
       "flow": "xtls-rprx-vision",
       "tls": {
         "enabled": true,
-        "server_name": "www.microsoft.com",
+        "server_name": "www.google.com",
         "reality": {
           "enabled": true,
-          "public_key": "xxxx",
-          "short_id": "xxxx"
+          "public_key": "public-key",
+          "short_id": "short-id"
         }
       }
     },
     {
-      "type": "hysteria2",
-      "tag": "server-us",
-      "server": "us.example.com",
-      "server_port": 443,
-      "password": "your-password",
-      "tls": {
-        "enabled": true,
-        "server_name": "us.example.com"
-      }
+      "type": "urltest",
+      "tag": "urltest",
+      "outbounds": ["proxy-nl", "proxy-de"],
+      "url": "https://www.gstatic.com/generate_204",
+      "interval": "3m",
+      "tolerance": 50
+    },
+    {
+      "type": "selector",
+      "tag": "proxy",
+      "outbounds": ["urltest", "proxy-nl", "proxy-de"],
+      "default": "urltest"
     },
     {
       "type": "direct",
@@ -1060,7 +656,6 @@ Go 1.18+ — дженерики, оптимизации
       "tag": "dns-out"
     }
   ],
-  
   "route": {
     "rules": [
       {
@@ -1074,252 +669,1013 @@ Go 1.18+ — дженерики, оптимизации
       {
         "rule_set": [
           {
-            "tag": "geosite-telegram",
+            "tag": "geoip-ru",
             "type": "remote",
             "format": "binary",
-            "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-telegram.srs",
-            "download_detour": "server-nl"
+            "url": "https://example.com/geoip-ru.srs",
+            "download_detour": "proxy"
           }
         ]
       }
     ],
-    "final": "server-nl",
+    "final": "proxy",
     "auto_detect_interface": true
   }
 }
 ```
 
----
-
 ### Мульти-серверность в Sing-box
+
+Sing-box поддерживает мульти-серверность через:
+
+1. **URLTest** — автоматический выбор сервера
+2. **Selector** — ручной выбор сервера
+3. **LoadBalance** — распределение нагрузки
+
+**Пример конфигурации:**
 
 ```json
 {
   "outbounds": [
     {
-      "type": "vless",
-      "tag": "server1-nl",
-      "server": "nl.example.com",
-      "server_port": 443,
-      "uuid": "uuid-here",
-      "tls": {
-        "enabled": true,
-        "server_name": "www.google.com",
-        "reality": {
-          "enabled": true,
-          "public_key": "public-key",
-          "short_id": "short-id"
-        }
-      }
-    },
-    {
-      "type": "vless",
-      "tag": "server2-de",
-      "server": "de.example.com",
-      "server_port": 443,
-      "uuid": "uuid-here",
-      "tls": {
-        "enabled": true,
-        "server_name": "www.microsoft.com",
-        "reality": {
-          "enabled": true,
-          "public_key": "public-key",
-          "short_id": "short-id"
-        }
-      }
-    },
-    {
-      "type": "hysteria2",
-      "tag": "server3-us",
-      "server": "us.example.com",
-      "server_port": 443,
-      "password": "password",
-      "tls": {
-        "enabled": true,
-        "server_name": "us.example.com"
-      }
-    },
-    {
       "type": "urltest",
       "tag": "auto",
-      "outbounds": ["server1-nl", "server2-de", "server3-us"],
+      "outbounds": ["nl-server", "de-server", "fi-server"],
       "url": "https://www.gstatic.com/generate_204",
       "interval": "3m",
-      "tolerance": 50
+      "tolerance": 50,
+      "idle_timeout": "30m",
+      "interrupt_exist_connections": false
     },
     {
       "type": "selector",
-      "tag": "vpn",
-      "outbounds": ["auto", "server1-nl", "server2-de", "server3-us"],
+      "tag": "proxy",
+      "outbounds": ["auto", "nl-server", "de-server"],
       "default": "auto"
     }
-  ],
-  
-  "route": {
-    "rules": [
-      {
-        "domain_suffix": [".google.com", ".youtube.com"],
-        "outbound": "vpn"
-      },
-      {
-        "domain_suffix": [".telegram.org"],
-        "outbound": "server2-de"
-      },
-      {
-        "geoip": ["ru"],
-        "outbound": "direct"
-      }
-    ],
-    "final": "vpn"
-  }
+  ]
 }
 ```
 
-#### URLTest — автоматический выбор сервера
-
-```json
-{
-  "type": "urltest",
-  "tag": "auto-select",
-  "outbounds": ["server1", "server2", "server3"],
-  "url": "https://www.gstatic.com/generate_204",
-  "interval": "3m",
-  "tolerance": 50,
-  "idle_timeout": "30m",
-  "interrupt_exist_connections": false
-}
-```
-
----
-
-### Преимущества
+### Преимущества Sing-box
 
 | Преимущество | Описание |
 |--------------|----------|
-| ✅ **Поддержка Reality** | Полная как в Xray |
-| ✅ **Поддержка Hysteria2, TUIC** | QUIC-based протоколы |
-| ✅ **Современный код** | Go 1.20+, дженерики |
-| ✅ **Хорошая производительность** | Оптимизирован |
-| ✅ **Активное развитие** | Регулярные обновления |
-| ✅ **Модульность** | Плагины |
-| ✅ **TUN режим** | Встроенный |
-| ✅ **Cross-platform** | Все платформы |
+| 🔧 **Современная архитектура** | Чистый код, модульность |
+| ⚡ **Производительность** | Оптимизированный код |
+| 🌐 **Протоколы** | VLESS, VMess, Trojan, Hysteria2, TUIC, WireGuard |
+| 📱 **Клиенты** | Растущее количество клиентов |
+| 🛠️ **JSON конфигурация** | Структурированный формат |
+| 🧩 **Модульность** | Легко расширять |
 
----
+### Недостатки Sing-box
 
-### Недостатки
-
-| Недостаток | Влияние |
-|------------|---------|
-| ❌ **Меньше сообщество** | Чем у Xray, Mihomo |
-| ❌ **Меньше документации** | Особенно на русском |
-| ❌ **JSON конфигурация** | Сложнее YAML |
-| ❌ **Меньше GUI** | Меньше готовых клиентов |
-| ❌ **Молодой проект** | Меньше проверен временем |
-
----
+| Недостаток | Описание |
+|------------|----------|
+| 📝 **JSON конфигурация** | Может быть многословной |
+| 🆕 **Меньше клиентов** | Меньше GUI клиентов, чем у Clash |
+| 📚 **Меньше документации** | Меньше tutorials и примеров |
 
 ### Для кого подходит
 
-| Сценарий | Рекомендация |
-|----------|--------------|
-| 🎯 **Новые проекты** | ⭐⭐⭐ Идеально |
-| 🎯 **Нужен современный код** | ⭐⭐⭐ Идеально |
-| 🎯 **Reality + Hysteria2 вместе** | ⭐⭐⭐ Идеально |
-| 🎯 **Кросс-платформенность** | ⭐⭐⭐ Отлично |
-| 🎯 **Высокая производительность** | ⭐⭐⭐ Отлично |
-| 🎯 **Большое сообщество** | ⭐⭐ Рассмотреть Mihomo |
-| 🎯 **Простая конфигурация** | ⭐⭐ Рассмотреть Mihomo |
+- ✅ Разработчики
+- ✅ Любители современной архитектуры
+- ✅ Те, кому нужна максимальная производительность
+- ✅ Пользователи WireGuard
+- ❌ Новички (лучше использовать готовые клиенты)
 
 ---
 
-## 5. Сравнительная таблица
+## 5. Cloudflare Warp 🆕
 
-### Основные характеристики
+### История и развитие
 
-| Характеристика | Xray-core | Mihomo | Sing-box |
-|----------------|-----------|--------|----------|
-| **Язык** | Go | Go | Go |
-| **Год создания** | 2020 | 2021 | 2022 |
-| **Лицензия** | MPL 2.0 | GPL-3.0 | GPL-3.0 |
+**Cloudflare Warp** (также известный как 1.1.1.1) — это VPN-сервис от Cloudflare, запущенный в 2019 году. Он предоставляет простой способ шифрования DNS и интернет-трафика.
 
-### Поддержка протоколов
+**Ключевые события:**
+- 2019: Запуск Warp и 1.1.1.1 DNS
+- 2021: Интеграция с Cloudflare Zero Trust
+- 2023: Добавление протокола MASQUE
+- 2024-2026: Расширение функциональности
 
-| Протокол | Xray-core | Mihomo | Sing-box |
-|----------|-----------|--------|----------|
-| **Reality** | ✅ | ❌* | ✅ |
-| **VLESS** | ✅ | ✅ | ✅ |
-| **VMess** | ✅ | ✅ | ✅ |
-| **Trojan** | ✅ | ✅ | ✅ |
-| **Shadowsocks** | ✅ | ✅ | ✅ |
-| **Hysteria2** | ❌ | ✅ | ✅ |
-| **TUIC** | ❌ | ✅ | ✅ |
-| **WireGuard** | ⚠️ | ✅ | ✅ |
+### Поддерживаемые протоколы
 
-*Reality в Mihomo через дополнительные плагины
+Cloudflare Warp поддерживает два основных протокола:
 
-### Мультисерверность и маршрутизация
+| Протокол | Описание | Шифрование | Особенности |
+|----------|----------|------------|-------------|
+| **WireGuard** | Классический WireGuard | TLS_CHACHA20_POLY1305_SHA256 | Может блокироваться DPI |
+| **MASQUE** | HTTP/3 с TLS 1.3 | TLS_AES_256_GCM_SHA384 (FIPS 140-2) | Лучше обходит DPI |
 
-| Функция | Xray-core | Mihomo | Sing-box |
-|---------|-----------|--------|----------|
-| **Тип управления** | Balancer | Proxy Groups | Selector/URLTest |
-| **Авто-переключение** | ✅ | ✅ | ✅ |
-| **Балансировка** | ✅ | ✅ | ⚠️ |
-| **Fallback** | ✅ | ✅ | ✅ |
-| **Rule-based routing** | ✅ | ✅ | ✅ |
+**Сравнение протоколов:**
 
-### Пользовательский опыт
+```
+WireGuard режим:
+┌─────────────────────────────────┐
+│ Device → WireGuard tunnel       │
+│   ↓                             │
+│ DPI видит: WireGuard fingerprint│ ❌ Может блокировать
+│   ↓                             │
+│ Cloudflare Edge                 │
+└─────────────────────────────────┘
 
-| Аспект | Xray-core | Mihomo | Sing-box |
-|--------|-----------|--------|----------|
-| **Конфигурация** | JSON | YAML | JSON |
-| **Сложность** | Высокая | Средняя | Средняя |
-| **GUI клиенты** | v2rayN, NekoBox | Clash Verge, Happ | много |
-| **Android** | v2rayNG, NekoBox | Clash Meta for Android | sing-box |
-| **iOS** | Shadowrocket, Stash | Stash, Shadowrocket | sing-box |
-| **macOS** | V2rayU, Clash Verge | Clash Verge | sing-box |
+MASQUE режим:
+┌─────────────────────────────────┐
+│ Device → HTTP/3 (QUIC) tunnel   │
+│   ↓                             │
+│ DPI видит: обычный HTTP/3 трафик│ ✅ Выглядит нормально
+│   ↓                             │
+│ Cloudflare Edge                 │
+└─────────────────────────────────┘
+```
 
-### Экосистема
+### Уникальные возможности
 
-| Аспект | Xray-core | Mihomo | Sing-box |
-|--------|-----------|--------|----------|
-| **Документация** | Средняя | Хорошая | Средняя |
-| **Сообщество** | Большое | Огромное | Растёт |
-| **GitHub Stars** | ~23k | ~15k | ~18k |
-| **Активность** | Высокая | Очень высокая | Высокая |
+#### 📱 Два режима работы
 
-### Производительность
+| Режим | Описание | Что шифруется |
+|-------|----------|---------------|
+| **1.1.1.1** | Только DNS | DNS запросы |
+| **WARP** | Полный VPN | Весь интернет-трафик + DNS |
 
-| Метрика | Xray-core | Mihomo | Sing-box |
-|---------|-----------|--------|----------|
-| **Скорость** | Высокая | Высокая | Высокая |
-| **Память** | ~30MB | ~50MB | ~35MB |
-| **CPU** | Низкое | Среднее | Низкое |
-| **Latency** | Низкая | Низкая | Низкая |
+#### 🔧 Per-app VPN
 
-### Для кого лучше подходит
+**Функция Per-app VPN** позволяет выбирать, какие приложения используют VPN:
 
-| Сценарий | Xray-core | Mihomo | Sing-box |
-|----------|-----------|--------|----------|
-| **Reality критичен** | ⭐⭐⭐ | ⭐ | ⭐⭐⭐ |
-| **Мультисерверность** | ⭐⭐ | ⭐⭐⭐ | ⭐⭐ |
-| **Hysteria2/TUIC** | ⭐ | ⭐⭐⭐ | ⭐⭐⭐ |
-| **Простота настройки** | ⭐⭐ | ⭐⭐⭐ | ⭐⭐ |
-| **GUI для пользователей** | ⭐⭐ | ⭐⭐⭐ | ⭐⭐ |
-| **Новые проекты** | ⭐⭐ | ⭐⭐ | ⭐⭐⭐ |
-| **Стабильность** | ⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐ |
+```json
+{
+  "tunneled_apps": [
+    {
+      "app_identifier": "com.android.chrome",
+      "is_browser": true
+    },
+    {
+      "app_identifier": "com.google.android.gm",
+      "is_browser": false
+    }
+  ]
+}
+```
+
+#### 🌐 Глобальная сеть Cloudflare
+
+- 310+ дата-центров по всему миру
+- Автоматический выбор ближайшего сервера
+- Низкая latency
+- Высокая доступность
+
+### Конфигурация Cloudflare Warp
+
+**Настройка протокола на Linux:**
+
+```bash
+# Установка Warp CLI
+curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg | sudo gpg --yes --dearmor --output /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg
+echo "deb [arch=amd64 signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/cloudflare-client.list
+sudo apt update && sudo apt install cloudflare-warp
+
+# Регистрация
+warp-cli register
+
+# Выбор протокола
+warp-cli tunnel protocol set WireGuard  # или MASQUE
+
+# Подключение
+warp-cli connect
+
+# Проверка статуса
+warp-cli status
+```
+
+**Настройка через GUI:**
+
+```
+Settings → Preferences → Advanced → Connection
+  ├─► Tunnel Protocol: WireGuard / MASQUE
+  ├─► Mode: 1.1.1.1 / WARP
+  └─► Split Tunneling: Configure apps
+```
+
+### Преимущества Cloudflare Warp
+
+| Преимущество | Описание |
+|--------------|----------|
+| 🆓 **Бесплатный базовый тариф** | Неограниченный трафик |
+| 📱 **Простота использования** | Один клик для подключения |
+| 🌐 **Глобальная сеть** | 310+ серверов Cloudflare |
+| 🔧 **Per-app VPN** | Выбор приложений |
+| 🚀 **MASQUE протокол** | HTTP/3 с TLS 1.3 |
+| 🛡️ **Zero Trust** | Интеграция с Cloudflare Zero Trust |
+| 📲 **Кроссплатформенность** | Windows, macOS, Linux, iOS, Android |
+
+### Недостатки Cloudflare Warp
+
+| Недостаток | Описание |
+|------------|----------|
+| 🚫 **Ограниченная функциональность** | Нет выбора сервера, нет advanced routing |
+| 🔒 **Зависимость от Cloudflare** | Привязка к экосистеме Cloudflare |
+| 🌍 **Не для обхода цензуры** | Не предназначен для bypass DPI |
+| 📊 **Логирование** | Cloudflare может логировать метаданные |
+| 🚫 **Блокировки в России** | Часто блокируется |
+| 💰 **Платные функции** | Zero Trust функции платные |
+
+### Эффективность в России (2026)
+
+**Статус:** ⚠️ **Частично работает, но часто блокируется**
+
+| Аспект | Оценка | Комментарий |
+|--------|--------|-------------|
+| **WireGuard режим** | ⚠️ | Блокируется DPI по fingerprint |
+| **MASQUE режим** | ⚠️ | Может блокироваться по IP Cloudflare |
+| **Бесплатный тариф** | ✅ | Работает, но медленно |
+| **Платный тариф** | ⚠️ | Может быть заблокирован |
+
+**Рекомендации:**
+- ✅ Подходит для обычных пользователей за пределами России
+- ⚠️ В России может не работать или работать нестабильно
+- ❌ Не подходит для продвинутых пользователей, которым нужен контроль
+
+### Для кого подходит
+
+- ✅ Обычные пользователи за пределами России
+- ✅ Те, кому нужна простота использования
+- ✅ Пользователи iOS/Android (хорошая интеграция)
+- ✅ Те, кому нужен бесплатный VPN
+- ❌ Пользователи в России (часто блокируется)
+- ❌ Продвинутые пользователи (ограниченный функционал)
 
 ---
 
-## 6. Другие решения
+## 6. AmneziaWG 🔥
 
-### Hysteria2 (самостоятельно)
+### История и развитие
 
-**Основные характеристики:**
-- 📦 На базе QUIC (UDP)
-- ⚡ Очень высокая скорость
-- 🔧 Простая конфигурация
-- 🌍 Собственный протокол
+**AmneziaWG** — это модифицированная версия WireGuard, разработанная командой AmneziaVPN специально для обхода DPI-блокировок в России и других странах с интернет-цензурой.
+
+**Ключевые события:**
+- 2022: Начало разработки AmneziaWG
+- 2023: Интеграция в AmneziaVPN клиент
+- 2024: Поддержка на роутерах Keenetic
+- 2025-2026: Активное развитие, оптимизация
+
+### Технология обфускации
+
+**AmneziaWG добавляет обфускацию к WireGuard**, чтобы скрыть его характерный fingerprint от DPI-систем.
+
+**Как WireGuard детектируется DPI:**
+
+```
+Обычный WireGuard пакет:
+┌─────────────────────────────────┐
+│ Header: 0x01 0x00 0x00 0x00     │ ← Фиксированный pattern
+│ Type: Initiation/Response       │
+│ Size: 148 bytes (IPv4)          │ ← Предсказуемый размер
+│ Payload: encrypted data         │
+└─────────────────────────────────┘
+
+DPI detection:
+├─► Size = 148 bytes? ✅
+├─► Header starts with 0x01? ✅
+└─► WireGuard detected! ❌ BLOCK
+```
+
+**Как AmneziaWG обфусцирует:**
+
+```
+AmneziaWG пакет с обфускацией:
+┌─────────────────────────────────┐
+│ Junk Packets (Jc=4, size 40-70) │ ← Добавлен шум
+│ Magic Headers (H1-H4)           │ ← Изменены заголовки
+│ Modified WireGuard data         │ ← Изменена структура
+│ Random padding                  │ ← Случайный размер
+└─────────────────────────────────┘
+
+DPI detection:
+├─► Variable size? ❓
+├─► Modified headers? ❓
+└─► Cannot detect WireGuard! ✅ PASS
+```
+
+### Параметры обфускации
+
+**Ключевые параметры конфигурации:**
+
+| Параметр | Описание | Пример значения | Влияние |
+|----------|----------|-----------------|---------|
+| **Jc** | Junk Packet Count | 4 | Количество "мусорных" пакетов |
+| **Jmin** | Junk Packet Min Size | 40 | Минимальный размер мусорного пакета |
+| **Jmax** | Junk Packet Max Size | 70 | Максимальный размер мусорного пакета |
+| **S1** | Sequence Number 1 | 20 | Первый sequence number |
+| **S2** | Sequence Number 2 | 20 | Второй sequence number |
+| **H1-H4** | Magic Headers | 0x12345678 и т.д. | Magic headers для обхода DPI |
+
+**Как параметры влияют на обфускацию:**
+
+```
+Jc = 4
+  └─► Добавляет 4 "мусорных" пакета к каждому WireGuard пакету
+  └─► Увеличивает трафик, но скрывает fingerprint
+
+Jmin = 40, Jmax = 70
+  └─► Размер мусорных пакетов от 40 до 70 байт
+  └─► Случайный размер предотвращает паттерн-анализ
+
+H1-H4 = Magic Headers
+  └─► Изменяют заголовки пакетов
+  └─► Предотвращают детекцию по фиксированным значениям
+```
+
+### Конфигурация AmneziaWG
+
+**Пример конфигурационного файла:**
+
+```ini
+[Interface]
+PrivateKey = your-private-key
+Address = 10.8.0.2/24
+DNS = 1.1.1.1
+ListenPort = 51820
+
+# AmneziaWG obfuscation parameters
+Jc = 4
+Jmin = 40
+Jmax = 70
+S1 = 20
+S2 = 20
+H1 = 0x12345678
+H2 = 0x87654321
+H3 = 0xabcdef00
+H4 = 0x00fedcba
+
+# Hook scripts (опционально)
+PreUp = iptables -A FORWARD -i %i -j ACCEPT
+PostUp = iptables -A FORWARD -o %i -j ACCEPT
+PreDown = iptables -D FORWARD -i %i -j ACCEPT
+PostDown = iptables -D FORWARD -o %i -j ACCEPT
+
+[Peer]
+PublicKey = peer-public-key
+PresharedKey = preshared-key
+Endpoint = 203.0.113.1:51820
+AllowedIPs = 0.0.0.0/0, ::/0
+PersistentKeepalive = 25
+```
+
+**Управление AmneziaWG:**
+
+```bash
+# Запуск интерфейса
+amneziawg-go wg0
+
+# Запуск в foreground режиме
+amneziawg-go -f wg0
+
+# Показать статус
+awg show
+
+# Показать параметры обфускации
+awg show wg0 jc     # Junk Packet Count
+awg show wg0 jmin   # Junk Packet Min Size
+awg show wg0 jmax   # Junk Packet Max Size
+
+# Удалить интерфейс
+ip link del wg0
+```
+
+### Поддерживаемые платформы
+
+| Платформа | Поддержка | Реализация | Статус |
+|-----------|-----------|------------|--------|
+| **Linux** | ✅ | Kernel module + Go | Стабильно |
+| **Windows** | ✅ | Go implementation | Стабильно |
+| **macOS** | ✅ | Go implementation | Стабильно |
+| **Android** | ✅ | Go + JNI | Стабильно |
+| **iOS** | ✅ | Go implementation | Стабильно |
+| **OpenBSD** | ✅ | Go implementation | Экспериментально |
+| **FreeBSD** | ✅ | Go implementation | Экспериментально |
+| **Keenetic** | ✅ | Kernel module | Beta firmware |
+
+### Сравнение с оригинальным WireGuard
+
+| Характеристика | WireGuard | AmneziaWG |
+|----------------|-----------|-----------|
+| **Скорость** | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐ (немного медленнее) |
+| **Скрытность** | ❌ Легко детектируется | ✅ Обфусцирован |
+| **Обход DPI в РФ** | ❌ Блокируется | ✅ Работает |
+| **Накладные расходы** | Минимальные | ~10-20% на обфускацию |
+| **Конфигурация** | Простая | Добавлены параметры обфускации |
+| **Клиенты** | Множество | AmneziaVPN, awg CLI |
+| **Зрелость** | Высокая | Средняя (разрабатывается) |
+
+### Интеграция с AmneziaVPN
+
+**AmneziaVPN** — это полноценный VPN-клиент, который включает AmneziaWG и другие протоколы:
+
+**Особенности интеграции:**
+- Автоматическая настройка AmneziaWG на сервере
+- Простой GUI для всех платформ
+- Интеграция с Keenetic роутерами
+- Поддержка других протоколов (OpenVPN over Cloak, Shadowsocks, XRay)
+
+**Установка через AmneziaVPN:**
+
+```
+1. Скачать AmneziaVPN клиент
+2. Ввести данные SSH сервера
+3. Выбрать протокол AmneziaWG
+4. Клиент автоматически настроит сервер
+5. Готово! Подключение одним кликом
+```
+
+### Преимущества AmneziaWG
+
+| Преимущество | Описание |
+|--------------|----------|
+| ⚡ **Скорость WireGuard** | Почти такая же скорость, как у оригинала |
+| 🛡️ **Обфускация** | Маскировка от DPI |
+| 🇷🇺 **Для России** | Разработан специально для обхода блокировок в РФ |
+| 📱 **Кроссплатформенность** | Windows, macOS, Linux, Android, iOS |
+| 🆓 **Открытый код** | Полностью open-source |
+| 🛠️ **Простота** | Через AmneziaVPN — очень просто |
+| 📡 **Keenetic поддержка** | Работает на роутерах Keenetic |
+
+### Недостатки AmneziaWG
+
+| Недостаток | Описание |
+|------------|----------|
+| 🆕 **Менее изучен** | Меньше исследований, чем у оригинального WireGuard |
+| 📊 **Накладные расходы** | Небольшое снижение скорости из-за обфускации |
+| 🔧 **Требует настройки** | Нужно подбирать параметры обфускации |
+| 📱 **Ограниченные клиенты** | В основном AmneziaVPN и CLI |
+| 🧪 **Зрелость** | Относительно новый проект |
+
+### Эффективность в России (2026)
+
+**Статус:** ✅ **Работает хорошо, активное развитие**
+
+| Аспект | Оценка | Комментарий |
+|--------|--------|-------------|
+| **Обход DPI** | ⭐⭐⭐⭐ | Хорошо обходит DPI |
+| **Стабильность** | ⭐⭐⭐⭐ | Стабильная работа |
+| **Скорость** | ⭐⭐⭐⭐ | Немного медленнее WireGuard |
+| **Простота** | ⭐⭐⭐⭐ | Через AmneziaVPN — просто |
+
+**Рекомендации:**
+- ✅ Рекомендуется для использования в России
+- ✅ Подходит для обычных пользователей через AmneziaVPN
+- ✅ Подходит для роутеров Keenetic
+- ⚠️ Для максимальной скрытности лучше VLESS+Reality
+
+### Для кого подходит
+
+- ✅ Обычные пользователи в России
+- ✅ Пользователи роутеров Keenetic
+- ✅ Те, кто хочет скорость WireGuard + обфускацию
+- ✅ Любители open-source решений
+- ⚠️ Продвинутые пользователи (лучше VLESS+Reality для максимальной скрытности)
+
+---
+
+## 7. TrustTunnel 🚀
+
+### История и развитие
+
+**TrustTunnel** — это современный VPN-протокол, разработанный командой AdGuard VPN. Открыт в 2024 году как open-source проект.
+
+**Ключевые события:**
+- 2024: Open-source релиз TrustTunnel
+- 2025: Активное развитие, добавление HTTP/3
+- 2026: Расширение экосистемы, новые клиенты
+
+### Архитектура протокола
+
+**TrustTunnel** — это уникальный VPN-протокол, который маскирует весь трафик под обычный HTTP/2 или HTTP/3 (QUIC).
+
+**Ключевая идея:**
+
+```
+Традиционный VPN:
+┌─────────────────────────────────┐
+│ VPN Client → VPN Server         │
+│   ↓                             │
+│ DPI видит: VPN fingerprint      │ ❌ Может блокировать
+└─────────────────────────────────┘
+
+TrustTunnel:
+┌─────────────────────────────────┐
+│ Client → HTTP/2 или HTTP/3      │
+│   ↓                             │
+│ DPI видит: обычный веб-трафик   │ ✅ Выглядит нормально
+│   ↓                             │
+│ TrustTunnel Endpoint            │
+└─────────────────────────────────┘
+```
+
+### Поддерживаемые транспорта
+
+| Транспорт | Протокол | Особенности | Эффективность |
+|-----------|----------|-------------|---------------|
+| **HTTP/1.1** | HTTP/1.1 over TLS | Базовый | ⭐⭐⭐ |
+| **HTTP/2** | HTTP/2 over TLS | Мультиплексирование streams | ⭐⭐⭐⭐⭐ |
+| **HTTP/3** | HTTP/3 over QUIC | UDP-based, быстрый | ⭐⭐⭐⭐⭐ |
+
+**Сравнение транспортов:**
+
+```
+HTTP/2 (TCP-based):
+┌─────────────────────────────────┐
+│ Single TCP connection           │
+│ Multiple streams multiplexed    │
+│ TLS 1.2+ encryption             │
+│ Reliable, widely supported      │
+└─────────────────────────────────┘
+
+HTTP/3 (QUIC-based):
+┌─────────────────────────────────┐
+│ UDP-based protocol              │
+│ Better performance              │
+│ Built-in encryption (TLS 1.3)   │
+│ Faster connection setup         │
+└─────────────────────────────────┘
+```
+
+### Туннелирование трафика
+
+**TrustTunnel поддерживает туннелирование:**
+
+1. **TCP** — через HTTP CONNECT метод
+2. **UDP** — через мультиплексированный stream
+3. **ICMP** — через мультиплексированный stream
+
+**TCP туннелирование:**
+
+```http
+# Client открывает TCP туннель
+CONNECT example.com:443 HTTP/2
+:method: CONNECT
+:authority: example.com:443
+user-agent: TrustTunnel/1.0
+proxy-authorization: Basic dXNlcm5hbWU6cGFzc3dvcmQ=
+
+# Server отвечает
+HTTP/2 200
+
+# Далее bidirectional byte stream
+```
+
+**UDP мультиплексирование:**
+
+```
+# Специальный pseudo-host для UDP
+CONNECT _udp2 HTTP/2
+:method: CONNECT
+:authority: _udp2
+
+# Формат UDP пакетов:
+# +----------+----------------+-------------+---------------------+------------------+
+# |  Length  | Source Address | Source Port | Destination Address | Destination Port |
+# | 4 bytes  |    16 bytes    |   2 bytes   |      16 bytes       |     2 bytes      |
+# +----------+----------------+-------------+---------------------+------------------+
+# | App Name Len | App Name | Payload |
+# |    1 byte    | L bytes  | N bytes |
+# +--------------+----------+---------+
+```
+
+### Конфигурация TrustTunnel
+
+**Серверная конфигурация (vpn.toml):**
+
+```toml
+# Core endpoint settings
+listen_address = "0.0.0.0:443"
+ipv6_available = true
+allow_private_network_connections = false
+
+# Timeout configurations (in seconds)
+tls_handshake_timeout_secs = 10
+client_listener_timeout_secs = 600
+connection_establishment_timeout_secs = 30
+tcp_connections_timeout_secs = 604800  # 1 week
+udp_connections_timeout_secs = 300     # 5 minutes
+
+# Authentication and rules
+credentials_file = "credentials.toml"
+rules_file = "rules.toml"
+
+# HTTP/1.1 protocol settings
+[listen_protocols.http1]
+upload_buffer_size = 32768
+
+# HTTP/2 protocol settings
+[listen_protocols.http2]
+initial_connection_window_size = 8388608
+initial_stream_window_size = 131072
+max_concurrent_streams = 1000
+max_frame_size = 16384
+header_table_size = 65536
+
+# QUIC/HTTP/3 protocol settings
+[listen_protocols.quic]
+recv_udp_payload_size = 1350
+send_udp_payload_size = 1350
+initial_max_data = 104857600
+initial_max_stream_data_bidi_local = 1048576
+initial_max_stream_data_bidi_remote = 1048576
+initial_max_stream_data_uni = 1048576
+initial_max_streams_bidi = 4096
+initial_max_streams_uni = 4096
+max_connection_window = 25165824
+max_stream_window = 16777216
+disable_active_migration = true
+enable_early_data = true
+message_queue_capacity = 4096
+
+# Direct forwarding (default)
+[forward_protocol]
+direct = {}
+```
+
+**Клиентская конфигурация:**
+
+```toml
+# Endpoint settings
+endpoint_address = "vpn.example.com:443"
+endpoint_host = "vpn.example.com"
+
+# Authentication
+username = "your-username"
+password = "your-password"
+
+# Protocol settings
+protocol = "h2"  # "h1", "h2", or "h3"
+
+# TLS settings
+[tls]
+verify = true
+ca_cert = "/path/to/ca.pem"  # Optional
+
+# Tunnel settings
+[tunnel]
+mode = "general"  # "general" or "selective"
+dns_upstream = "https://dns.google/dns-query"
+
+# Exclusions (for selective mode)
+[[exclusions]]
+domain = "*.yandex.ru"
+
+[[exclusions]]
+domain = "*.vk.com"
+```
+
+### Мульти-серверность
+
+**TrustTunnel поддерживает несколько адресов для балансировки:**
+
+```bash
+# Экспорт конфигурации с несколькими адресами
+./trusttunnel_endpoint vpn.toml hosts.toml \
+    -c username \
+    -a 203.0.113.1:443 \
+    -a 203.0.113.2:443 \
+    -a 203.0.113.3:443 \
+    > client_config.toml
+```
+
+**Клиент автоматически выбирает лучший сервер:**
+- Health checks каждые N секунд
+- Automatic failover при недоступности
+- Load balancing между серверами
+
+### Преимущества TrustTunnel
+
+| Преимущество | Описание |
+|--------------|----------|
+| 🎭 **Идеальная маскировка** | Выглядит как обычный HTTPS трафик |
+| 🚀 **HTTP/3 поддержка** | QUIC-based транспорт для скорости |
+| 🔄 **Мультиплексирование** | Эффективное использование соединения |
+| 🌐 **TCP/UDP/ICMP** | Поддержка всех типов трафика |
+| 📊 **Мульти-серверность** | Встроенная поддержка нескольких серверов |
+| 🔧 **Детальная конфигурация** | Множество параметров настройки |
+| 🛡️ **Современная криптография** | TLS 1.3, лучшие практики |
+| 🆓 **Open-source** | Полностью открытый код |
+
+### Недостатки TrustTunnel
+
+| Недостаток | Описание |
+|------------|----------|
+| 🆕 **Новый протокол** | Меньше исследований и тестов |
+| 📱 **Ограниченные клиенты** | CLI и Flutter клиент (в разработке) |
+| 🔧 **Сложность настройки** | Множество параметров |
+| 📚 **Меньше документации** | Относительно новый проект |
+| 🌐 **Меньшая распространенность** | Меньше сообщества |
+
+### Сравнение с другими протоколами
+
+| Характеристика | VLESS+Reality | TrustTunnel | AmneziaWG | WireGuard |
+|----------------|---------------|-------------|-----------|-----------|
+| **Скрытность** | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐ | ❌ |
+| **Скорость** | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
+| **Простота** | ⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
+| **Мульти-серверность** | ⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐ |
+| **Зрелость** | ⭐⭐⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
+
+### Эффективность в России (2026)
+
+**Статус:** ✅ **Работает отлично, активное развитие**
+
+| Аспект | Оценка | Комментарий |
+|--------|--------|-------------|
+| **Обход DPI** | ⭐⭐⭐⭐⭐ | Выглядит как обычный HTTPS |
+| **Стабильность** | ⭐⭐⭐⭐ | Хорошая стабильность |
+| **Скорость** | ⭐⭐⭐⭐ | Хорошая скорость |
+| **Простота** | ⭐⭐⭐ | Требует настройки |
+
+**Рекомендации:**
+- ✅ Отличный выбор для продвинутых пользователей
+- ✅ Рекомендуется как резервный протокол к VLESS+Reality
+- ✅ Подходит для сценариев, где нужна максимальная скрытность
+- ⚠️ Требует технических знаний для настройки
+
+### Для кого подходит
+
+- ✅ Продвинутые пользователи
+- ✅ Те, кому нужна максимальная скрытность
+- ✅ Проекты с мульти-серверной архитектурой
+- ✅ Любители современных технологий
+- ⚠️ Обычные пользователи (требует технических знаний)
+- ❌ Новички (лучше использовать AmneziaVPN)
+
+---
+
+## 8. Leaf 🦀
+
+### История и развитие
+
+**Leaf** — это универсальный прокси-фреймворк, написанный на Rust. Разрабатывается с фокусом на производительность, безопасность и гибкость.
+
+**Ключевые особенности:**
+- 2021: Начало разработки
+- 2022-2023: Активное развитие, добавление протоколов
+- 2024: Поддержка Reality, MPTP
+- 2025-2026: Стабилизация, расширение возможностей
+
+### Архитектура
+
+**Leaf** имеет модульную архитектуру на Rust:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      Leaf Framework                          │
+├─────────────────────────────────────────────────────────────┤
+│                                                              │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐ │
+│  │   Inbounds   │  │  Outbounds  │  │     Transports      │ │
+│  │             │  │             │  │                     │ │
+│  │ - HTTP      │  │ - SOCKS5    │  │ - WebSocket         │ │
+│  │ - SOCKS5    │  │ - Shadowsocks│  │ - TLS              │ │
+│  │ - Shadowsocks│  │ - Trojan    │  │ - QUIC             │ │
+│  │ - Trojan    │  │ - VMess     │  │ - AMux             │ │
+│  │             │  │ - VLESS     │  │ - Reality          │ │
+│  │             │  │             │  │ - MPTP             │ │
+│  └─────────────┘  └─────────────┘  └─────────────────────┘ │
+│                                                              │
+│  ┌─────────────────────────────────────────────────────────┐│
+│  │              Traffic Control                             ││
+│  │  - Chain (прокси-цепочки)                               ││
+│  │  - Failover (автоматическое переключение)               ││
+│  └─────────────────────────────────────────────────────────┘│
+│                                                              │
+│  ┌─────────────────────────────────────────────────────────┐│
+│  │           Transparent Proxying                           ││
+│  │  - TUN (Linux, macOS, Windows, iOS, Android)            ││
+│  │  - NF (Windows, NetFilter SDK)                          ││
+│  └─────────────────────────────────────────────────────────┘│
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Поддерживаемые протоколы
+
+| Протокол | Inbound | Outbound | Нюансы |
+|----------|---------|----------|--------|
+| **HTTP** | ✅ | ❌ | HTTP proxy |
+| **SOCKS5** | ✅ | ✅ | Полная поддержка |
+| **Shadowsocks** | ✅ | ✅ | AEAD шифрование |
+| **Trojan** | ✅ | ✅ | С поддержкой TLS |
+| **VMess** | ❌ | ✅ | Только outbound |
+| **VLESS** | ❌ | ✅ | Только outbound, с Reality |
+
+### Поддерживаемые транспорты
+
+| Транспорт | Inbound | Outbound | Описание |
+|-----------|---------|----------|----------|
+| **WebSocket** | ✅ | ✅ | WS transport |
+| **TLS** | ✅ | ✅ | TLS security |
+| **QUIC** | ✅ | ✅ | UDP-based transport |
+| **AMux** | ✅ | ✅ | Leaf-specific multiplexing |
+| **Obfs** | ❌ | ✅ | Simple obfuscation |
+| **Reality** | ❌ | ✅ | Xray Reality (outbound) |
+| **MPTP** | ✅ | ✅ | Multi-path Transport Protocol |
+
+### MPTP — Multi-path Transport Protocol
+
+**MPTP** — это уникальная функция Leaf, позволяющая агрегировать несколько каналов для увеличения скорости и надежности.
+
+**Как работает MPTP:**
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    MPTP Architecture                         │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  Client Application                                         │
+│       │                                                     │
+│       ▼                                                     │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │              Leaf Proxy Engine                       │   │
+│  │                                                     │   │
+│  │  ┌──────────────────────────────────────────────┐  │   │
+│  │  │         MPTP Aggregator                       │  │   │
+│  │  │                                               │  │   │
+│  │  │  Path 1 (WiFi)     ──┐                       │  │   │
+│  │  │  Path 2 (4G)       ──┼──► Combined Stream   │  │   │
+│  │  │  Path 3 (Ethernet) ──┘                       │  │   │
+│  │  └──────────────────────────────────────────────┘  │   │
+│  └─────────────────────────────────────────────────────┘   │
+│       │                                                     │
+│       ├─► Path 1: Server A (via WiFi)                       │
+│       ├─► Path 2: Server B (via 4G)                         │
+│       └─► Path 3: Server C (via Ethernet)                   │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Преимущества MPTP:**
+- ✅ Увеличение пропускной способности
+- ✅ Повышение надежности (резервные каналы)
+- ✅ Автоматическое переключение при сбое
+- ✅ Балансировка нагрузки
+
+### Преимущества Leaf
+
+| Преимущество | Описание |
+|--------------|----------|
+| 🦀 **Rust производительность** | Высокая скорость и безопасность памяти |
+| 🔧 **Гибкость** | Поддержка множества протоколов и транспортов |
+| 🚀 **MPTP** | Уникальная агрегация каналов |
+| 🎯 **Модульность** | Можно использовать как библиотеку |
+| 🌐 **Кроссплатформенность** | Linux, macOS, Windows, iOS, Android |
+| 🔗 **Proxy Chains** | Поддержка цепочек прокси |
+| ⚡ **TUN интерфейс** | Прозрачное проксирование |
+
+### Недостатки Leaf
+
+| Недостаток | Описание |
+|------------|----------|
+| ⚠️ **Сложность настройки** | Требует технических знаний |
+| 📚 **Меньше документации** | Меньше материалов для изучения |
+| 🎨 **Нет GUI** | Только CLI и конфигурационные файлы |
+| 🔧 **Требует компиляции** | Не всегда есть готовые сборки |
+
+### Эффективность в России (2026)
+
+**Оценка обхода DPI:** ⭐⭐⭐⭐ (4/5)
+
+**Почему:**
+- ✅ Reality outbound — отличная маскировка
+- ✅ MPTP — может обойти ограничения
+- ✅ QUIC transport — работает в большинстве случаев
+- ⚠️ Требует правильной настройки
+
+**Рекомендуемая конфигурация:**
+```json
+{
+  "outbounds": [
+    {
+      "type": "vless",
+      "server": "server.com",
+      "server_port": 443,
+      "security": "reality",
+      "reality": {
+        "server_name": "www.microsoft.com",
+        "public_key": "your_public_key"
+      }
+    }
+  ]
+}
+```
+
+### Для кого подходит
+
+**Идеально для:**
+- 🛠️ **Разработчиков** — можно интегрировать в приложения
+- ⚡ **Продвинутых пользователей** — гибкая настройка
+- 🔧 **Системных администраторов** — автоматизация
+- 🚀 **Тех, кому нужна агрегация каналов** — MPTP
+
+**Не подходит для:**
+- 👶 Новичков без технических знаний
+- 🎨 Тех, кому нужен GUI
+- ⏰ Тех, кому нужно "быстро и просто"
+
+---
+
+## 9. Сравнительная таблица (расширенная) 📊
+
+### 9.1 Основные характеристики всех инструментов
+
+| Характеристика | Xray-core | Mihomo | Sing-box | Warp | AmneziaWG | TrustTunnel | Leaf |
+|----------------|-----------|--------|----------|------|-----------|-------------|------|
+| **Язык** | Go | Go | Go | Go/Rust | C/Go | Rust | Rust |
+| **Тип** | Core | Core+GUI | Core | Service | Core | Core | Framework |
+| **Лицензия** | MPL-2.0 | AGPL-3.0 | GPL-3.0 | Проприетарная | GPL-2.0 | Apache-2.0 | Apache-2.0 |
+| **Открытый код** | ✅ | ✅ | ✅ | ❌ | ✅ | ✅ | ✅ |
+| **Активная разработка** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **Документация** | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐ |
+
+### 9.2 Поддержка протоколов
+
+| Протокол | Xray-core | Mihomo | Sing-box | Warp | AmneziaWG | TrustTunnel | Leaf |
+|----------|-----------|--------|----------|------|-----------|-------------|------|
+| **VLESS** | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ (out) |
+| **VMess** | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ (out) |
+| **Reality** | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ (out) |
+| **Trojan** | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ |
+| **Shadowsocks** | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ |
+| **WireGuard** | ❌ | ❌ | ✅ | ✅ | ✅ | ❌ | ❌ |
+| **Hysteria2** | ❌ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| **TUIC** | ❌ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| **MASQUE** | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ |
+| **TrustTunnel** | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ |
+| **HTTP/2** | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ | ✅ |
+| **HTTP/3 (QUIC)** | ❌ | ✅ | ✅ | ✅ | ❌ | ✅ | ✅ |
+
+### 9.3 Эффективность обхода DPI в России (2026)
+
+| Инструмент | Оценка | Сложность детекции | Рекомендация |
+|------------|--------|-------------------|--------------|
+| **VLESS+Reality** | ⭐⭐⭐⭐⭐ | Очень сложно | 🏆 Лучший выбор |
+| **TrustTunnel** | ⭐⭐⭐⭐⭐ | Очень сложно | 🥈 Отличная альтернатива |
+| **Hysteria2** | ⭐⭐⭐⭐ | Сложно | ⚡ Для скорости |
+| **AmneziaWG** | ⭐⭐⭐⭐ | Сложно | 🦔 Для WireGuard фанатов |
+| **Leaf+Reality** | ⭐⭐⭐⭐ | Сложно | 🔧 Для разработчиков |
+| **Warp (MASQUE)** | ⭐⭐⭐ | Средне | 👶 Для простоты |
+| **Warp (WireGuard)** | ⭐⭐ | Легко | ❌ Блокируется |
+| **Shadowsocks** | ⭐⭐ | Легко | ⚠️ Требует плагины |
+| **OpenVPN** | ⭐ | Очень легко | ❌ Не рекомендуется |
+
+### 9.4 Производительность
+
+| Метрика | Xray-core | Mihomo | Sing-box | Warp | AmneziaWG | TrustTunnel | Leaf |
+|---------|-----------|--------|----------|------|-----------|-------------|------|
+| **Скорость (VLESS)** | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ | N/A | N/A | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ |
+| **Скорость (WireGuard)** | N/A | N/A | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ | N/A | N/A |
+| **Потребление RAM** | ⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
+| **CPU эффективность** | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
+| **Латентность** | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ |
+
+### 9.5 Мульти-серверность и маршрутизация
+
+| Функция | Xray-core | Mihomo | Sing-box | Warp | AmneziaWG | TrustTunnel | Leaf |
+|---------|-----------|--------|----------|------|-----------|-------------|------|
+| **Мульти-серверность** | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ |
+| **Балансировка** | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ |
+| **Failover** | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ | ✅ |
+| **Rule-based routing** | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| **Split tunneling** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **DNS routing** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ |
+
+### 9.6 Простота использования
+
+| Критерий | Xray-core | Mihomo | Sing-box | Warp | AmneziaWG | TrustTunnel | Leaf |
+|----------|-----------|--------|----------|------|-----------|-------------|------|
+| **Установка** | ⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐ |
+| **Настройка** | ⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐ |
+| **GUI клиенты** | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ❌ |
+| **Документация** | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐ |
+| **Для новичков** | ⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐ | ⭐ |
+
+### 9.7 Для кого подходит лучше всего
+
+| Категория | Рекомендуемые инструменты |
+|-----------|---------------------------|
+| **Обычные пользователи** | Warp, AmneziaVPN (AmneziaWG) |
+| **Продвинутые пользователи** | Xray-core + VLESS+Reality, TrustTunnel |
+| **Разработчики** | Sing-box, Leaf, TrustTunnel |
+| **Для скорости** | AmneziaWG, Hysteria2, Leaf |
+| **Для максимальной скрытности** | VLESS+Reality, TrustTunnel |
+| **Для простоты** | Warp, AmneziaVPN |
+| **Для мульти-серверности** | Mihomo, Xray-core, Sing-box |
+
+---
+
+## 10. Другие решения 🛠️
+
+### 10.1 Hysteria2 (самостоятельно)
+
+**Что это:**
+- QUIC-based VPN протокол
+- Очень высокая скорость
+- Поддержка мультиплексирования
 
 **Конфигурация сервера:**
 ```yaml
@@ -1340,912 +1696,410 @@ masquerade:
     rewriteHost: true
 ```
 
-**Конфигурация клиента:**
+**Эффективность в России:** ⭐⭐⭐⭐
+- ✅ QUIC протокол менее заметен
+- ✅ Высокая скорость
+- ⚠️ Может требовать домен и сертификат
+
+### 10.2 TUIC
+
+**Что это:**
+- QUIC-based прокси протокол
+- Оптимизирован для TCP/UDP
+- Поддержка congestion control
+
+**Конфигурация:**
 ```yaml
 server: example.com:443
-
-auth: your-password
-
-tls:
-  sni: example.com
-
-socks5:
-  listen: 127.0.0.1:1080
-
-http:
-  listen: 127.0.0.1:8080
+uuid: xxxx-xxxx-xxxx-xxxx
+password: your-password
+congestion_controller: bbr
+udp_relay_mode: native
+zero_rtt_handshake: true
 ```
 
-**Преимущества:**
-- ✅ Очень высокая скорость (QUIC)
-- ✅ Простая настройка
-- ✅ Хорошая производительность на плохих каналах
-- ✅ Встроенный Brave mode (борьба с UDP блокировками)
+**Эффективность в России:** ⭐⭐⭐⭐
+- ✅ QUIC протокол
+- ✅ Хорошая производительность
+- ⚠️ Меньше клиентов
 
-**Недостатки:**
-- ❌ Нет Reality (нужен сертификат)
-- ❌ UDP трафик может блокироваться
-- ❌ Не так скрытен как VLESS+Reality
-- ❌ Меньше клиентов
+### 10.3 Оригинальный WireGuard
 
-**Когда использовать:**
-- Нужна максимальная скорость
-- Хорошее UDP соединение
-- Есть домен и сертификат
+**Что это:**
+- Современный VPN протокол
+- Высокая скорость
+- Простая конфигурация
 
----
+**Проблема в России:** ❌ **Блокируется DPI**
+- Легко детектируется по fingerprint
+- Фиксированный размер пакетов (148 байт)
+- Предсказуемые заголовки
 
-### TUIC
+**Решение:** Использовать AmneziaWG или Warp+ с обфускацией
 
-**Основные характеристики:**
-- 📦 На базе QUIC
-- 🆕 Новое поколение
-- 🧪 Экспериментально
-- 🔧 Сложнее Hysteria2
+### 10.4 Shadowsocks 2022
 
-**Конфигурация:**
-```json
-{
-  "server": "example.com:443",
-  "uuid": "uuid-here",
-  "password": "password",
-  "congestion_controller": "bbr",
-  "udp_relay_mode": "native",
-  "zero_rtt_handshake": true
-}
-```
-
-**Преимущества:**
-- ✅ 0-RTT handshake
-- ✅ Современная криптография
-- ✅ Гибкая настройка
-
-**Недостатки:**
-- ❌ Сложная настройка
-- ❌ Экспериментальный статус
-- ❌ Мало готовых решений
-
----
-
-### WireGuard
-
-**Основные характеристики:**
-- ⚡ Очень быстрый
-- 🔧 Простая конфигурация
-- 🛡️ Современная криптография
-- ❌ Легко детектируется
-
-**Конфигурация:**
-```ini
-[Interface]
-Address = 10.0.0.2/24
-PrivateKey = private-key
-DNS = 8.8.8.8
-
-[Peer]
-PublicKey = server-public-key
-Endpoint = example.com:51820
-AllowedIPs = 0.0.0.0/0
-```
-
-**Почему НЕ рекомендуется для России:**
-```
-❌ WireGuard использует специфические заголовки
-❌ Легко детектируется DPI
-❌ Нет маскировки под обычный трафик
-❌ Блокируется на уровне провайдеров
-```
-
-**Когда можно использовать:**
-- Внутри других туннелей
-- В странах без цензуры
-- Для корпоративных VPN внутри сети
-
----
-
-### Shadowsocks 2022
-
-**Основные характеристики:**
-- 🆕 Новая версия (2022)
-- 🛡️ Улучшенная безопасность
-- 🔧 Простой протокол
+**Что это:**
+- Улучшенная версия Shadowsocks
+- Лучшая производительность
+- Усиленная криптография
 
 **Конфигурация:**
 ```json
 {
   "method": "2022-blake3-aes-128-gcm",
-  "password": "base64-key",
+  "password": "your-password",
   "server": "example.com",
   "server_port": 8388
 }
 ```
 
-**Преимущества:**
-- ✅ Простая настройка
-- ✅ Хорошая скорость
-- ✅ Улучшенная безопасность
-
-**Недостатки:**
-- ❌ Всё ещё детектируется DPI
-- ❌ Нет TLS маскировки
-- ❌ Не рекомендуется для России
+**Эффективность в России:** ⭐⭐
+- ⚠️ Может детектироваться DPI
+- ⚠️ Требует плагины для обфускации
 
 ---
 
-## 7. Рекомендации для проекта rs8kvn_bot
+## 11. Рекомендации для проекта rs8kvn_bot 🤖
 
-### Текущая архитектура
+### 11.1 Текущая архитектура
 
-```
-┌─────────────────┐
-│  Telegram Bot   │
-│   (Go, Bot API) │
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐      ┌──────────────────┐
-│     3x-ui       │──────│   Xray-core      │
-│  (Панель управления)    │  (VLESS+Reality) │
-└─────────────────┘      └──────────────────┘
-         │
-         ▼
-┌─────────────────┐
-│  Пользователи   │
-│  (Telegram ID)  │
-└─────────────────┘
-```
+Проект rs8kvn_bot использует:
+- **Ядро:** Xray-core
+- **Протокол:** VLESS+Reality
+- **Управление:** 3x-ui панель
+- **Клиенты:** Happ (iOS/Android), v2rayN (Windows)
 
-**Текущие возможности:**
-- ✅ Создание пользователей в 3x-ui
-- ✅ Генерация конфигураций
-- ✅ Поддержка VLESS+Reality
-- ❌ Нет мультисерверности
-- ❌ Нет автоматического переключения
+### 11.2 Рекомендуемые улучшения
 
----
+#### Вариант 1: Добавить TrustTunnel как резервный протокол
 
-### Вариант 1: Оставить Xray-core (рекомендуется для Reality)
+**Зачем:**
+- TrustTunnel — максимально скрытный протокол
+- Маскировка под HTTP/2 или HTTP/3
+- Отличная альтернатива Reality
 
-#### Архитектура
-
-```
-┌─────────────────┐
-│  Telegram Bot   │
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────────────────────────┐
-│          3x-ui (каждый сервер)      │
-├─────────────┬─────────────┬─────────┤
-│  Server NL  │  Server DE  │ Server US│
-│  3x-ui      │  3x-ui      │ 3x-ui   │
-│  Xray-core  │  Xray-core  │ Xray-core│
-└─────────────┴─────────────┴─────────┘
-         │
-         ▼
-┌─────────────────┐
-│    Xray Client  │
-│  (Balancer +    │
-│   Observatory)  │
-└─────────────────┘
-```
-
-#### Плюсы
-
-| Преимущество | Описание |
-|--------------|----------|
-| ✅ **Уже работает** | Минимум изменений |
-| ✅ **Reality** | Лучший протокол для РФ |
-| ✅ **3x-ui удобен** | Панель управления готова |
-| ✅ **Стабильность** | Проверенное решение |
-
-#### Минусы
-
-| Недостаток | Решение |
-|------------|---------|
-| ❌ Нужно писать код для мультисерверности | Использовать Xray Balancer |
-| ❌ Управление несколькими 3x-ui | Бот управляет всеми |
-| ❌ Нет автоматического переключения на сервере | Observatory на клиенте |
-
-#### Как добавить мультисерверность
-
-**Вариант A: Xray Balancer на клиенте**
-
-```json
-{
-  "api": {
-    "services": ["HandlerService", "StatsService"]
-  },
-  
-  "observatory": {
-    "subjectSelector": ["nl", "de", "us"],
-    "probeURL": "https://www.google.com/generate_204",
-    "probeInterval": "30s",
-    "enableConcurrency": true
-  },
-  
-  "outbounds": [
-    {
-      "tag": "nl",
-      "protocol": "vless",
-      "settings": {
-        "vnext": [{
-          "address": "nl.example.com",
-          "port": 443,
-          "users": [{
-            "id": "user-uuid",
-            "flow": "xtls-rprx-vision"
-          }]
-        }]
-      },
-      "streamSettings": {
-        "network": "tcp",
-        "security": "reality",
-        "realitySettings": {
-          "serverName": "www.google.com",
-          "publicKey": "server-public-key",
-          "shortId": "short-id",
-          "fingerprint": "chrome"
-        }
-      }
-    },
-    {
-      "tag": "de",
-      "protocol": "vless",
-      "settings": {
-        "vnext": [{
-          "address": "de.example.com",
-          "port": 443,
-          "users": [{"id": "user-uuid", "flow": "xtls-rprx-vision"}]
-        }]
-      },
-      "streamSettings": {
-        "network": "tcp",
-        "security": "reality",
-        "realitySettings": {
-          "serverName": "www.microsoft.com",
-          "publicKey": "server-public-key",
-          "shortId": "short-id"
-        }
-      }
-    },
-    {
-      "tag": "us",
-      "protocol": "vless",
-      "settings": {
-        "vnext": [{
-          "address": "us.example.com",
-          "port": 443,
-          "users": [{"id": "user-uuid", "flow": "xtls-rprx-vision"}]
-        }]
-      },
-      "streamSettings": {
-        "network": "tcp",
-        "security": "reality",
-        "realitySettings": {
-          "serverName": "www.amazon.com",
-          "publicKey": "server-public-key",
-          "shortId": "short-id"
-        }
-      }
-    },
-    {
-      "tag": "direct",
-      "protocol": "freedom"
-    }
-  ],
-  
-  "routing": {
-    "domainStrategy": "IPIfNonMatch",
-    "balancers": [
-      {
-        "tag": "vpn",
-        "selector": ["nl", "de", "us"],
-        "strategy": {
-          "type": "leastPing"
-        }
-      }
-    ],
-    "rules": [
-      {
-        "type": "field",
-        "ip": ["geoip:private"],
-        "outboundTag": "direct"
-      },
-      {
-        "type": "field",
-        "balancerTag": "vpn",
-        "network": "tcp,udp"
-      }
-    ]
-  }
-}
-```
-
-**Как бот генерирует такой конфиг:**
-
+**Как реализовать:**
 ```go
-type MultiServerConfig struct {
-    Servers []ServerConfig `json:"servers"`
+type ProtocolManager struct {
+    primaryProtocol   string // "vless-reality"
+    fallbackProtocol  string // "trusttunnel"
+    trusttunnelConfig *TrustTunnelConfig
 }
 
-func GenerateBalancerConfig(userUUID string, servers []ServerConfig) ([]byte, error) {
-    config := map[string]interface{}{
-        "observatory": map[string]interface{}{
-            "subjectSelector": extractServerTags(servers),
-            "probeURL":        "https://www.google.com/generate_204",
-            "probeInterval":  "30s",
-        },
-        "outbounds": buildOutbounds(userUUID, servers),
-        "routing": map[string]interface{}{
-            "balancers": []map[string]interface{}{
-                {
-                    "tag":      "vpn",
-                    "selector": extractServerTags(servers),
-                    "strategy": map[string]string{"type": "leastPing"},
-                },
-            },
-            "rules": buildRoutingRules(),
-        },
+func (pm *ProtocolManager) GetActiveProtocol() string {
+    if pm.checkPrimaryProtocolHealth() {
+        return pm.primaryProtocol
     }
-    return json.MarshalIndent(config, "", "  ")
+    return pm.fallbackProtocol
 }
 ```
 
-**Вариант B: 3x-ui на каждом сервере + бот управляет**
+#### Вариант 2: Мульти-серверная архитектура (критично!)
 
+**Текущая проблема:** Один сервер = одна точка отказа
+
+**Решение:**
 ```go
-// Управление несколькими серверами 3x-ui
-type MultiPanelManager struct {
-    panels []*XrayPanel
+type MultiServerManager struct {
+    servers []*ServerConfig
+    current int
+    mu      sync.RWMutex
 }
 
-type XrayPanel struct {
-    URL      string
-    Username string
-    Password string
-    Client   *http.Client
+type ServerConfig struct {
+    ID          string
+    Country     string // "DE", "NL", "FI"
+    Protocol    string // "vless-reality", "trusttunnel"
+    Endpoint    string
+    Priority    int
+    HealthCheck string
+    Status      string // "active", "backup", "failed"
 }
 
-func (m *MultiPanelManager) CreateUserOnAllPanels(userUUID string) error {
-    var wg sync.WaitGroup
-    errChan := make(chan error, len(m.panels))
+func (m *MultiServerManager) GetBestServer() *ServerConfig {
+    m.mu.RLock()
+    defer m.mu.RUnlock()
     
-    for _, panel := range m.panels {
-        wg.Add(1)
-        go func(p *XrayPanel) {
-            defer wg.Done()
-            if err := p.CreateUser(userUUID); err != nil {
-                errChan <- fmt.Errorf("panel %s: %w", p.URL, err)
-            }
-        }(panel)
-    }
-    
-    wg.Wait()
-    close(errChan)
-    
-    // Возвращаем первую ошибку, если есть
-    for err := range errChan {
-        if err != nil {
-            return err
+    // Возвращаем сервер с наивысшим приоритетом
+    for _, server := range m.servers {
+        if server.Status == "active" {
+            return server
         }
     }
-    return nil
-}
-
-func (m *MultiPanelManager) GetServerStats() map[string]ServerStats {
-    result := make(map[string]ServerStats)
-    var mu sync.Mutex
-    var wg sync.WaitGroup
     
-    for _, panel := range m.panels {
-        wg.Add(1)
-        go func(p *XrayPanel) {
-            defer wg.Done()
-            stats, _ := p.GetStats()
-            mu.Lock()
-            result[p.URL] = stats
-            mu.Unlock()
-        }(panel)
-    }
-    
-    wg.Wait()
-    return result
+    // Failover на резервный
+    return m.servers[0]
 }
 ```
 
----
+**Рекомендуемые локации серверов:**
+1. **Германия (Frankfurt)** — основной
+2. **Нидерланды (Amsterdam)** — резерв 1
+3. **Финляндия (Helsinki)** — резерв 2
 
-### Вариант 2: Добавить Mihomo как фронтенд
+#### Вариант 3: Рекомендовать AmneziaVPN для обычных пользователей
 
-#### Архитектура
+**Зачем:**
+- Простота использования
+- Автоматическая настройка
+- AmneziaWG — хорошая обфускация
 
-```
-┌─────────────────┐
-│  Telegram Bot   │
-│  (генерирует    │
-│   config.yaml)  │
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│     Mihomo      │
-│  (клиент)       │
-│  Proxy Groups:  │
-│  - url-test     │
-│  - fallback     │
-│  - load-balance │
-└────────┬────────┘
-         │
-    ┌────┴────┬─────────┐
-    ▼         ▼         ▼
-┌───────┐ ┌───────┐ ┌───────┐
-│Server1│ │Server2│ │Server3│
-│  NL   │ │  DE   │ │  US   │
-│Xray   │ │Xray   │ │Xray   │
-└───────┘ └───────┘ └───────┘
-```
-
-#### Плюсы
-
-| Преимущество | Описание |
-|--------------|----------|
-| ✅ **Мультисерверность из коробки** | Proxy Groups |
-| ✅ **Авто-переключение** | url-test, fallback |
-| ✅ **YAML конфигурация** | Проще для генерации |
-| ✅ **GUI клиенты** | Clash Verge, Happ |
-
-#### Минусы
-
-| Недостаток | Решение |
-|------------|---------|
-| ❌ Нет Reality (нативно) | Использовать VLESS+TLS |
-| ❌ Дополнительный слой | Упрощает управление |
-| ❌ Нужен домен и сертификат | Let's Encrypt |
-
-#### Как реализовать
-
-**1. Бот генерирует config.yaml:**
-
+**Интеграция:**
 ```go
-type MihomoConfig struct {
-    Port           int                    `yaml:"mixed-port"`
-    DNS           DNSConfig              `yaml:"dns"`
-    Proxies       []ProxyConfig          `yaml:"proxies"`
-    ProxyGroups   []ProxyGroupConfig     `yaml:"proxy-groups"`
-    Rules         []string               `yaml:"rules"`
-}
+func GenerateAmneziaConfig(user *User) string {
+    // Генерация конфигурации AmneziaWG
+    // с параметрами обфускации
+    return fmt.Sprintf(`
+[Interface]
+PrivateKey = %s
+Address = 10.0.0.%d/24
+DNS = 1.1.1.1
+Jc = 4
+Jmin = 40
+Jmax = 70
+S1 = 20
+S2 = 20
+H1 = 0x%08x
+H2 = 0x%08x
+H3 = 0x%08x
+H4 = 0x%08x
 
-func GenerateMihomoConfig(userUUID string, servers []ServerConfig) ([]byte, error) {
-    config := MihomoConfig{
-        Port: 7890,
-        DNS: DNSConfig{
-            Enable:       true,
-            EnhancedMode: "fake-ip",
-            Nameserver:   []string{"8.8.8.8", "1.1.1.1"},
-        },
-        Proxies: buildProxies(userUUID, servers),
-        ProxyGroups: []ProxyGroupConfig{
-            {
-                Name:      "VPN",
-                Type:      "url-test",
-                Proxies:   extractServerNames(servers),
-                URL:       "http://www.gstatic.com/generate_204",
-                Interval:  300,
-                Tolerance: 50,
-            },
-        },
-        Rules: []string{
-            "DOMAIN-SUFFIX,telegram.org,VPN",
-            "DOMAIN-SUFFIX,google.com,VPN",
-            "MATCH,DIRECT",
-        },
-    }
-    return yaml.Marshal(config)
+[Peer]
+PublicKey = %s
+Endpoint = %s:51820
+AllowedIPs = 0.0.0.0/0
+PersistentKeepalive = 25
+`, user.PrivateKey, user.ID, rand.Uint32(), rand.Uint32(), 
+   rand.Uint32(), rand.Uint32(), server.PublicKey, server.Endpoint)
 }
 ```
 
-**2. Пользователь импортирует:**
-- В Clash Verge (Windows/macOS/Linux)
-- В Happ (macOS)
-- В Clash Meta for Android
-- В Stash (iOS)
+### 11.3 Архитектура с резервными протоколами
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Telegram Bot (Go)                         │
+│                                                              │
+│  ┌────────────────────────────────────────────────────────┐ │
+│  │              Protocol Manager                          │ │
+│  │                                                        │ │
+│  │  Primary: VLESS+Reality ──► Server DE (active)        │ │
+│  │  Fallback 1: TrustTunnel ──► Server NL (backup)      │ │
+│  │  Fallback 2: AmneziaWG ──► Server FI (backup)        │ │
+│  └────────────────────────────────────────────────────────┘ │
+│                                                              │
+│  ┌────────────────────────────────────────────────────────┐ │
+│  │              Server Manager                            │ │
+│  │                                                        │ │
+│  │  ├─► Server DE (Germany) ──► Priority 1 (active)      │ │
+│  │  ├─► Server NL (Netherlands) ──► Priority 2 (backup) │ │
+│  │  └─► Server FI (Finland) ──► Priority 3 (backup)     │ │
+│  └────────────────────────────────────────────────────────┘ │
+│                                                              │
+│  ┌────────────────────────────────────────────────────────┐ │
+│  │              Health Monitor                            │ │
+│  │                                                        │ │
+│  │  ├─► Check every 30s                                   │ │
+│  │  ├─► Auto failover on failure                          │ │
+│  │  └─► Telegram notifications                            │ │
+│  └────────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 11.4 Чек-лист для внедрения
+
+**Фаза 1: Мульти-серверность (критично!)**
+- [ ] Арендовать 2 дополнительных сервера
+- [ ] Настроить VLESS+Reality на всех серверах
+- [ ] Реализовать ServerManager в боте
+- [ ] Добавить health monitoring
+- [ ] Тестирование failover
+
+**Фаза 2: Резервные протоколы**
+- [ ] Изучить TrustTunnel протокол
+- [ ] Создать TrustTunnel endpoint
+- [ ] Интегрировать в ProtocolManager
+- [ ] Тестирование переключения
+
+**Фаза 3: Улучшение UX**
+- [ ] Добавить рекомендацию AmneziaVPN для новичков
+- [ ] Создать инструкции по настройке
+- [ ] Добавить автоматическую генерацию конфигов
+- [ ] Интеграция с Keenetic роутерами
 
 ---
 
-### Вариант 3: Sing-box как альтернатива
+## 12. Итоговые рекомендации 🎯
 
-#### Архитектура
+### 12.1 Что выбрать в 2026 году?
+
+**Для максимальной скрытности:**
+1. 🏆 **VLESS+Reality** — золотой стандарт
+2. 🥈 **TrustTunnel** — отличная альтернатива
+3. 🥉 **AmneziaWG** — для WireGuard фанатов
+
+**Для простоты использования:**
+1. 🏆 **Cloudflare Warp** — установил и забыл
+2. 🥈 **AmneziaVPN** — автоматическая настройка
+3. 🥉 **Outline** — минимализм
+
+**Для продвинутых пользователей:**
+1. 🏆 **Xray-core + VLESS+Reality** — максимум контроля
+2. 🥈 **Sing-box** — современная альтернатива
+3. 🥉 **Mihomo** — встроенная мультисерверность
+
+**Для разработчиков:**
+1. 🏆 **Sing-box** — лучший API
+2. 🥈 **Leaf** — Rust + гибкость
+3. 🥉 **TrustTunnel** — новая архитектура
+
+### 12.2 Иерархия протоколов по эффективности в России (2026)
 
 ```
-┌─────────────────┐
-│  Telegram Bot   │
-│  (генерирует    │
-│   config.json)  │
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│    Sing-box     │
-│  (клиент)       │
-│  URLTest        │
-│  Selector       │
-└────────┬────────┘
-         │
-    ┌────┴────┬─────────┐
-    ▼         ▼         ▼
-┌───────┐ ┌───────┐ ┌───────┐
-│Server1│ │Server2│ │Server3│
-│  NL   │ │  DE   │ │  US   │
-│Reality│ │Reality│ │Hysteria│
-└───────┘ └───────┘ └───────┘
+┌─────────────────────────────────────────────────────────────┐
+│           Иерархия протоколов (Россия 2026)                  │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  🏆 Tier 1 — Максимальная скрытность                        │
+│     ├─► VLESS+Reality (⭐⭐⭐⭐⭐)                           │
+│     └─► TrustTunnel (⭐⭐⭐⭐⭐)                             │
+│                                                             │
+│  ⭐ Tier 2 — Высокая эффективность                          │
+│     ├─► Hysteria2 (⭐⭐⭐⭐)                                 │
+│     ├─► AmneziaWG (⭐⭐⭐⭐)                                 │
+│     └─► Leaf+Reality (⭐⭐⭐⭐)                              │
+│                                                             │
+│  ⚠️ Tier 3 — Работает с ограничениями                       │
+│     ├─► Warp MASQUE (⭐⭐⭐)                                 │
+│     ├─► Shadowsocks+plugin (⭐⭐)                           │
+│     └─► Trojan (⭐⭐)                                       │
+│                                                             │
+│  ❌ Tier 4 — Не рекомендуется                               │
+│     ├─► WireGuard (⭐) — блокируется                        │
+│     ├─► OpenVPN (⭐) — легко детектируется                  │
+│     └─► Warp WireGuard (⭐) — блокируется                   │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-#### Плюсы
+### 12.3 Финальные рекомендации для проекта rs8kvn_bot
 
-| Преимущество | Описание |
-|--------------|----------|
-| ✅ **Reality + Hysteria2** | Гибридная система |
-| ✅ **Современный код** | Активное развитие |
-| ✅ **Cross-platform** | Все платформы |
+**Немедленные действия (критично!):**
+1. ✅ **Мульти-серверность** — минимум 3 сервера
+2. ✅ **Health monitoring** — автоматический failover
+3. ✅ **Резервные протоколы** — TrustTunnel или AmneziaWG
 
-#### Минусы
+**Среднесрочные улучшения:**
+1. 📱 Рекомендовать AmneziaVPN для обычных пользователей
+2. 📚 Создать детальные инструкции
+3. 🔧 Добавить автоматическую генерацию конфигов
 
-| Недостаток | Решение |
-|------------|---------|
-| ❌ Нужно переписывать инфраструктуру | Постепенная миграция |
-| ❌ Меньше готовых решений | Писать своё |
-| ❌ JSON конфигурация | Генерация ботом |
-
-#### Как реализовать
-
-```go
-func GenerateSingboxConfig(userUUID string, servers []ServerConfig) ([]byte, error) {
-    config := map[string]interface{}{
-        "log": map[string]string{
-            "level": "info",
-        },
-        "outbounds": buildSingboxOutbounds(userUUID, servers),
-        "route": map[string]interface{}{
-            "final": "vpn",
-            "rules": buildSingboxRules(),
-        },
-    }
-    
-    // Добавляем URLTest для автоматического выбора
-    config["outbounds"] = append(config["outbounds"].([]map[string]interface{}), 
-        map[string]interface{}{
-            "type":     "urltest",
-            "tag":      "auto",
-            "outbounds": extractServerTags(servers),
-            "url":      "https://www.gstatic.com/generate_204",
-            "interval": "3m",
-        },
-    )
-    
-    return json.MarshalIndent(config, "", "  ")
-}
-```
+**Долгосрочная стратегия:**
+1. 🚀 Мониторинг новых протоколов
+2. 🔬 Тестирование эффективности обхода DPI
+3. 🌍 Географическое расширение серверов
 
 ---
 
-## 8. Итоговые рекомендации
+## 13. Ссылки и ресурсы 🔗
 
-### Что выбрать?
+### 13.1 Официальные ресурсы
 
-| Сценарий | Рекомендация | Обоснование |
-|----------|--------------|-------------|
-| **Нужен Reality** | Xray-core + 3x-ui | Лучшая реализация Reality |
-| **Нужна скорость** | Hysteria2 + Sing-box | QUIC-based протокол |
-| **Нужна мультисерверность из коробки** | Mihomo | Proxy Groups встроены |
-| **Всё вместе** | Xray-core + Balancer ИЛИ Sing-box | Гибкость |
-| **Для России** | Xray-core (Reality) | Сложно детектировать |
-| **Для продвинутых пользователей** | Mihomo | Гибкость, GUI |
+**Основные ядра:**
+- [Xray-core](https://github.com/XTLS/Xray-core)
+- [Mihomo (Clash Meta)](https://github.com/MetaCubeX/mihomo)
+- [Sing-box](https://github.com/SagerNet/sing-box)
 
----
+**Новые инструменты:**
+- [TrustTunnel](https://github.com/TrustTunnel/TrustTunnel)
+- [AmneziaVPN](https://github.com/amnezia-vpn/amnezia-client)
+- [AmneziaWG](https://github.com/amnezia-vpn/amneziawg-go)
+- [Leaf](https://github.com/eycorsican/leaf)
 
-### Для проекта rs8kvn_bot
+**Другие решения:**
+- [Hysteria2](https://github.com/apernet/hysteria)
+- [TUIC](https://github.com/EAimTY/tuic)
+- [WireGuard](https://www.wireguard.com/)
 
-#### Рекомендуемый путь
+### 13.2 GUI Клиенты
 
-```
-ЭТАП 1 (короткий срок, 1-2 недели)
-├── Остаться на Xray-core + 3x-ui
-├── Добавить Xray Balancer для мультисерверности
-├── Не переписывать код
-└── Генерировать конфигурации с Observatory
+**Мульти-протокольные:**
+- [Happ (iOS/Android)](https://apps.apple.com/app/happ) — рекомендуется
+- [v2rayN (Windows)](https://github.com/2dust/v2rayN)
+- [Clash for Windows](https://github.com/Fndroid/clash_for_windows_pkg)
+- [Stash (iOS)](https://apps.apple.com/app/stash)
 
-ЭТАП 2 (средний срок, 1-2 месяца)
-├── Добавить Sing-box как опцию
-├── Поддержка Hysteria2 для скорости
-├── Reality как основной, Hysteria2 как fallback
-└── Гибридные конфигурации
+**Специализированные:**
+- [AmneziaVPN (All platforms)](https://amnezia.org/)
+- [Cloudflare Warp](https://1.1.1.1/)
+- [Outline (All platforms)](https://getoutline.org/)
 
-ЭТАП 3 (долгий срок, 3-6 месяцев)
-├── Гибридная система
-│   ├── Xray для Reality
-│   └── Sing-box для Hysteria2
-├── Мульти-протокольность
-├── Автоматический выбор протокола
-└── GUI для управления
-```
+### 13.3 Полезные ресурсы
 
----
+**Документация:**
+- [Xray Documentation](https://xtls.github.io/)
+- [Sing-box Documentation](https://sing-box.sagernet.org/)
+- [TrustTunnel Protocol](https://github.com/TrustTunnel/TrustTunnel/blob/master/PROTOCOL.md)
 
-### Пример реализации мультисерверности без кода
+**Сообщества:**
+- [Telegram: Xray Discussion](https://t.me/projectXray)
+- [Telegram: AmneziaVPN RU](https://t.me/amnezia_vpn)
+- [Reddit: r/VPN](https://reddit.com/r/VPN)
+- [Reddit: r/AmneziaVPN](https://reddit.com/r/AmneziaVPN)
 
-#### Вариант: Использовать Xray Observatory + Balancer
-
-```json
-{
-  "log": {
-    "level": "warning"
-  },
-  
-  "api": {
-    "tag": "api",
-    "services": ["HandlerService", "StatsService", "ObservatoryService"]
-  },
-  
-  "observatory": {
-    "subjectSelector": ["nl", "de", "us", "fi"],
-    "probeURL": "https://www.google.com/generate_204",
-    "probeInterval": "30s",
-    "enableConcurrency": true
-  },
-  
-  "inbounds": [
-    {
-      "tag": "tun",
-      "protocol": "dokodemo-door",
-      "listen": "127.0.0.1",
-      "settings": {
-        "network": "tcp,udp",
-        "followRedirect": true
-      },
-      "sniffing": {
-        "enabled": true,
-        "destOverride": ["http", "tls", "quic"]
-      }
-    }
-  ],
-  
-  "outbounds": [
-    {
-      "tag": "nl",
-      "protocol": "vless",
-      "settings": {
-        "vnext": [{
-          "address": "nl.example.com",
-          "port": 443,
-          "users": [{
-            "id": "user-uuid-here",
-            "encryption": "none",
-            "flow": "xtls-rprx-vision"
-          }]
-        }]
-      },
-      "streamSettings": {
-        "network": "tcp",
-        "security": "reality",
-        "realitySettings": {
-          "serverName": "www.google.com",
-          "publicKey": "public-key-here",
-          "shortId": "short-id-here",
-          "fingerprint": "chrome"
-        }
-      }
-    },
-    {
-      "tag": "de",
-      "protocol": "vless",
-      "settings": {
-        "vnext": [{
-          "address": "de.example.com",
-          "port": 443,
-          "users": [{
-            "id": "user-uuid-here",
-            "encryption": "none",
-            "flow": "xtls-rprx-vision"
-          }]
-        }]
-      },
-      "streamSettings": {
-        "network": "tcp",
-        "security": "reality",
-        "realitySettings": {
-          "serverName": "www.microsoft.com",
-          "publicKey": "public-key-here",
-          "shortId": "short-id-here"
-        }
-      }
-    },
-    {
-      "tag": "us",
-      "protocol": "vless",
-      "settings": {
-        "vnext": [{
-          "address": "us.example.com",
-          "port": 443,
-          "users": [{
-            "id": "user-uuid-here",
-            "encryption": "none",
-            "flow": "xtls-rprx-vision"
-          }]
-        }]
-      },
-      "streamSettings": {
-        "network": "tcp",
-        "security": "reality",
-        "realitySettings": {
-          "serverName": "www.amazon.com",
-          "publicKey": "public-key-here",
-          "shortId": "short-id-here"
-        }
-      }
-    },
-    {
-      "tag": "fi",
-      "protocol": "vless",
-      "settings": {
-        "vnext": [{
-          "address": "fi.example.com",
-          "port": 443,
-          "users": [{
-            "id": "user-uuid-here",
-            "encryption": "none",
-            "flow": "xtls-rprx-vision"
-          }]
-        }]
-      },
-      "streamSettings": {
-        "network": "tcp",
-        "security": "reality",
-        "realitySettings": {
-          "serverName": "www.yahoo.com",
-          "publicKey": "public-key-here",
-          "shortId": "short-id-here"
-        }
-      }
-    },
-    {
-      "tag": "direct",
-      "protocol": "freedom"
-    },
-    {
-      "tag": "block",
-      "protocol": "blackhole"
-    }
-  ],
-  
-  "routing": {
-    "domainStrategy": "IPIfNonMatch",
-    "balancers": [
-      {
-        "tag": "vpn",
-        "selector": ["nl", "de", "us", "fi"],
-        "strategy": {
-          "type": "leastPing"
-        }
-      }
-    ],
-    "rules": [
-      {
-        "type": "field",
-        "domain": ["geosite:category-ads-all"],
-        "outboundTag": "block"
-      },
-      {
-        "type": "field",
-        "ip": ["geoip:private"],
-        "outboundTag": "direct"
-      },
-      {
-        "type": "field",
-        "domain": ["geosite:ru"],
-        "outboundTag": "direct"
-      },
-      {
-        "type": "field",
-        "ip": ["geoip:ru"],
-        "outboundTag": "direct"
-      },
-      {
-        "type": "field",
-        "balancerTag": "vpn",
-        "network": "tcp,udp"
-      }
-    ]
-  }
-}
-```
-
-#### Как это работает
-
-```
-1. Клиент запускается
-      ↓
-2. Observatory проверяет все серверы каждые 30 сек
-      ├── nl: ping = 45ms  ✓ (выбран)
-      ├── de: ping = 78ms
-      ├── us: ping = 120ms
-      └── fi: ping = 95ms
-      ↓
-3. Balancer использует "nl" как основной
-      ↓
-4. Если "nl" падает, автоматически переключается
-      ├── nl: DOWN ❌
-      └── de: ping = 78ms  ✓ (переключение)
-      ↓
-5. Пользователь не замечает переключения
-```
+**Тестирование:**
+- [BrowserLeaks](https://browserleaks.com/) — проверка утечек
+- [DNS Leak Test](https://dnsleak.com/) — проверка DNS
+- [Speed Test](https://speedtest.net/) — проверка скорости
 
 ---
 
-## 9. Ссылки
+## 14. Заключение 📝
 
-### Официальные ресурсы
+### 14.1 Краткие выводы
 
-| Проект | GitHub | Документация | Telegram |
-|--------|--------|--------------|----------|
-| **Xray-core** | [github.com/XTLS/Xray-core](https://github.com/XTLS/Xray-core) | [xtls.github.io](https://xtls.github.io) | @project_xray |
-| **Mihomo** | [github.com/MetaCubeX/mihomo](https://github.com/MetaCubeX/mihomo) | [wiki.metacubex.one](https://wiki.metacubex.one) | @mihomo_proxy |
-| **Sing-box** | [github.com/SagerNet/sing-box](https://github.com/SagerNet/sing-box) | [sing-box.sagernet.org](https://sing-box.sagernet.org) | @sing_box |
-| **Hysteria2** | [github.com/apernet/hysteria](https://github.com/apernet/hysteria) | [hysteria.network](https://hysteria.network) | — |
-| **TUIC** | [github.com/EAimTY/tuic](https://github.com/EAimTY/tuic) | — | — |
-| **3x-ui** | [github.com/MHSanaei/3x-ui](https://github.com/MHSanaei/3x-ui) | [github.io](https://mhsanaei.github.io/3x-ui) | @xui_3x |
+**Лучшие инструменты для обхода блокировок в России (2026):**
 
-### GUI Клиенты
+1. **VLESS+Reality** — золотой стандарт, максимальная скрытность
+2. **TrustTunnel** — новая звезда, HTTP/2/3 маскировка
+3. **AmneziaWG** — WireGuard с обфускацией
+4. **Cloudflare Warp** — простота для обычных пользователей
+5. **Leaf** — гибкость для разработчиков
 
-| Клиент | Платформа | Сайт | Поддерживаемые ядра |
-|--------|-----------|------|---------------------|
-| **v2rayN** | Windows | [github.com/2dust/v2rayN](https://github.com/2dust/v2rayN) | Xray, Sing-box |
-| **v2rayNG** | Android | [github.com/2dust/v2rayNG](https://github.com/2dust/v2rayNG) | Xray |
-| **NekoBox** | Win/Android/macOS | [github.com/MatsuriDayo/nekoray](https://github.com/MatsuriDayo/nekoray) | Sing-box |
-| **Clash Verge** | Win/macOS/Linux | [github.com/clash-verge-rev/clash-verge-rev](https://github.com/clash-verge-rev/clash-verge-rev) | Mihomo |
-| **Happ** | macOS | [github.com/Cutehams/happ](https://github.com/Cutehams/happ) | Mihomo |
-| **Stash** | iOS/macOS | [stash.ws](https://stash.ws) | Mihomo |
-| **Shadowrocket** | iOS | App Store | Xray, Mihomo, Sing-box |
-| **sing-box** | Android/iOS/macOS | [sing-box.sagernet.org](https://sing-box.sagernet.org/clients/) | Sing-box |
+### 14.2 Для проекта rs8kvn_bot
 
-### Полезные ресурсы
+**Рекомендуемая архитектура:**
+- ✅ Основной протокол: VLESS+Reality
+- ✅ Резервный протокол: TrustTunnel
+- ✅ Минимум 3 сервера (DE, NL, FI)
+- ✅ Автоматический health monitoring
+- ✅ Failover без участия пользователя
 
-| Ресурс | Описание | Ссылка |
-|--------|----------|--------|
-| **Project X** | Официальный сайт Xray | [xtls.github.io](https://xtls.github.io) |
-| **XTLS документация** | Reality, Vision flow | [xtls.github.io/document](https://xtls.github.io/document) |
-| **Mihomo Wiki** | Подробная документация | [wiki.metacubex.one](https://wiki.metacubex.one) |
-| **Sing-box Guide** | Руководства | [sing-box.sagernet.org](https://sing-box.sagernet.org) |
-| **ProxyPanel** | Панели управления | Разные решения |
+**Для пользователей:**
+- Продвинутые: VLESS+Reality через Happ/v2rayN
+- Обычные: AmneziaVPN с AmneziaWG
+- Экстремальные случаи: TrustTunnel
 
----
+### 14.3 Будущее обхода блокировок
 
-## 10. Заключение
+**Тренды 2026-2027:**
+- Усиление DPI-систем
+- ML/AI для детекции VPN
+- Новые протоколы маскировки
+- Спутниковый интернет как альтернатива
 
-### Краткие выводы
-
-1. **Xray-core** — лучший выбор для России (Reality протокол)
-2. **Mihomo** — лучшая мультисерверность из коробки
-3. **Sing-box** — современный, гибкий, развивается
-
-### Для проекта rs8kvn_bot
-
-**Рекомендация:**
-- ✅ Остаться на Xray-core + 3x-ui
-- ✅ Добавить Balancer + Observatory для мультисерверности
-- ✅ Генерировать конфигурации с несколькими серверами
-- ✅ Рассмотреть Sing-box для Hysteria2 в будущем
-
-**Это позволит:**
-- Не переписывать существующий код
-- Добавить мультисерверность минимальными усилиями
-- Сохранить Reality как основной протокол
-- Иметь гибкость для будущих улучшений
+**Важно:**
+- Готовиться к сценариям полной изоляции
+- Иметь резервные каналы связи
+- Следить за развитием технологий
+- Поддерживать открытое ПО
 
 ---
 
-> 📚 **Основной документ:** [BYPASS_METHODS.md](BYPASS_METHODS.md)
-> 
-> 📅 **Дата создания:** 2024
-> 
-> 🔄 **Последнее обновление:** 2024
+**Документ подготовлен:** Март 2026  
+**Версия:** 2.0 (Расширенная)  
+**Обновление:** При появлении новых инструментов  
+**Проект:** rs8kvn_bot
+
+---
