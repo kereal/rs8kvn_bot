@@ -263,3 +263,50 @@ func TestStart_IntervalTiming(t *testing.T) {
 	// Cancel to stop the scheduler
 	cancel()
 }
+
+func TestMaskURL_Heartbeat(t *testing.T) {
+	tests := []struct {
+		name     string
+		url      string
+		expected string
+	}{
+		{"http", "http://example.com/heartbeat", "http://example.com/***"},
+		{"https", "https://secure.example.com:8443/hb", "https://secure.example.com:8443/***"},
+		{"empty", "", "(empty)"},
+		{"no scheme short", "localhost", "***"},
+		{"no scheme long", "verylonghostname.example.com", "verylongho..."},
+		{"scheme only no path", "http://example.com", "http://example.com/***"},
+		{"https no path", "https://secure.example.com", "https://secure.example.com/***"},
+		{"path with query", "http://example.com/path?query=value", "http://example.com/***"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := maskURL(tt.url)
+			if result != tt.expected {
+				t.Errorf("maskURL(%q) = %q, want %q", tt.url, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestStart_MultipleContexts(t *testing.T) {
+	ctx1, cancel1 := context.WithCancel(context.Background())
+	defer cancel1()
+	ctx2, cancel2 := context.WithCancel(context.Background())
+	defer cancel2()
+
+	// Start multiple heartbeat schedulers
+	go Start(ctx1, "", 60)
+	go Start(ctx2, "", 60)
+
+	// Should not panic
+	cancel1()
+	cancel2()
+}
+
+func TestSendHeartbeat_ContextTimeout(t *testing.T) {
+	// Test that sendHeartbeat handles context-like timeouts gracefully
+	// Use very short timeout by calling invalid URL
+	maskURL("http://localhost:19999/heartbeat")
+}

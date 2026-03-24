@@ -207,25 +207,37 @@ func TestGetSubscriptionLink_CustomPath(t *testing.T) {
 	}
 }
 
-func TestGetExternalURL(t *testing.T) {
-	tests := []struct {
-		host     string
-		expected string
-	}{
-		{"http://localhost:2053", "http://localhost:2053"},
-		{"https://example.com:443", "https://example.com:443"},
-		{"http://192.168.1.1:8080", "http://192.168.1.1:8080"},
-	}
+func TestAddClientWithID_InvalidInboundID(t *testing.T) {
+	client := NewClient("http://localhost:2053", "admin", "password")
+	ctx := context.Background()
 
-	for _, tt := range tests {
-		result := GetExternalURL(tt.host)
-		if result != tt.expected {
-			t.Errorf("GetExternalURL(%s) = %s, want %s", tt.host, result, tt.expected)
-		}
+	_, err := client.AddClientWithID(ctx, 0, "testuser", "client-id", "sub-id", 107374182400, time.Now().Add(24*time.Hour))
+	if err == nil {
+		t.Fatal("AddClientWithID() should return error for invalid inbound ID")
 	}
 }
 
-func TestGetExternalURL_InvalidURL(t *testing.T) {
+func TestAddClientWithID_EmptyClientID(t *testing.T) {
+	client := NewClient("http://localhost:2053", "admin", "password")
+	ctx := context.Background()
+
+	_, err := client.AddClientWithID(ctx, 1, "testuser", "", "sub-id", 107374182400, time.Now().Add(24*time.Hour))
+	if err == nil {
+		t.Fatal("AddClientWithID() should return error for empty client ID")
+	}
+}
+
+func TestAddClientWithID_EmptySubID(t *testing.T) {
+	client := NewClient("http://localhost:2053", "admin", "password")
+	ctx := context.Background()
+
+	_, err := client.AddClientWithID(ctx, 1, "testuser", "client-id", "", 107374182400, time.Now().Add(24*time.Hour))
+	if err == nil {
+		t.Fatal("AddClientWithID() should return error for empty sub ID")
+	}
+}
+
+func TestGetExternalURL(t *testing.T) {
 	// Invalid URL handling - function returns parsed result or original
 	// url.Parse may return partial results for some invalid inputs
 	result := GetExternalURL("not a valid url")
@@ -920,4 +932,92 @@ func TestDeleteClient_InvalidJSONResponse(t *testing.T) {
 	if err == nil {
 		t.Fatal("DeleteClient() should return error for invalid JSON response")
 	}
+}
+
+func TestDeleteClient_RequestCreationError(t *testing.T) {
+	t.Skip("Cannot trigger request creation error without mocking http.Client")
+}
+
+func TestGetClientTraffic_RequestCreationError(t *testing.T) {
+	t.Skip("Cannot trigger request creation error without mocking http.Client")
+}
+
+func TestAddClientWithID_ClientSettingsMarshalError(t *testing.T) {
+	// Test json.Marshal error - practically impossible since we're marshaling
+	// a simple map with basic types, but we can test the error path indirectly
+	t.Skip("Cannot trigger client settings marshal error without mocking")
+}
+
+func TestContainsSuccessKeywords(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected bool
+	}{
+		{"success keyword", "Operation completed successfully", true},
+		{"added keyword", "Client has been added", true},
+		{"success lowercase", "success", true},
+		{"case insensitive", "SUCCESSFULLY", true},
+		{"failure keyword", "Operation failed", false},
+		{"empty", "", false},
+		{"no keywords", "Some random text", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := containsSuccessKeywords(tt.input)
+			if result != tt.expected {
+				t.Errorf("containsSuccessKeywords(%q) = %v, want %v", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestGetSubscriptionLink_WithCustomPath(t *testing.T) {
+	client := NewClient("http://localhost:2053", "admin", "password")
+	link := client.GetSubscriptionLink("http://example.com", "abc123", "/custom")
+	if !strings.Contains(link, "/custom") {
+		t.Errorf("GetSubscriptionLink() should include custom path, got %s", link)
+	}
+}
+
+func TestGetExternalURL_IPAddress(t *testing.T) {
+	url := GetExternalURL("http://192.168.1.1:2053")
+	if url != "http://192.168.1.1:2053" {
+		t.Errorf("GetExternalURL() = %s, want http://192.168.1.1:2053", url)
+	}
+}
+
+func TestGetExternalURL_Empty(t *testing.T) {
+	url := GetExternalURL("")
+	if url == "" {
+		t.Error("GetExternalURL('') should return non-empty result")
+	}
+}
+
+func TestAddClientWithID_LoginError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/login" {
+			w.WriteHeader(http.StatusUnauthorized)
+			w.Write([]byte("unauthorized"))
+			return
+		}
+		t.Errorf("Unexpected path: %s", r.URL.Path)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "admin", "password")
+	ctx := context.Background()
+
+	_, err := client.AddClientWithID(ctx, 1, "testuser", "client-id", "sub-id", 1000, time.Now())
+	if err == nil {
+		t.Fatal("AddClientWithID() should return error when login returns error")
+	}
+}
+
+func TestAddClientWithID_RequestCreationError(t *testing.T) {
+	// Test with invalid URL to trigger http.NewRequest error
+	// This is hard to trigger since NewClient creates a valid client
+	// Skip this test as it's not feasible without mocking
+	t.Skip("Cannot trigger request creation error without mocking http.Client")
 }

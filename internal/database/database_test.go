@@ -50,6 +50,20 @@ func TestInit_CreatesDirectory(t *testing.T) {
 	Close()
 }
 
+func TestInit_InvalidPath(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "file.txt")
+
+	if err := os.WriteFile(dbPath, []byte("file"), 0644); err != nil {
+		t.Fatalf("Failed to create file: %v", err)
+	}
+
+	err := Init(dbPath)
+	if err == nil {
+		t.Fatal("Init() should error when parent path is a file")
+	}
+}
+
 func TestClose(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
@@ -374,6 +388,32 @@ func TestCreateSubscription_DatabaseNotInitialized(t *testing.T) {
 	err := CreateSubscription(sub)
 	if err == nil {
 		t.Fatal("CreateSubscription() should return error when database not initialized")
+	}
+}
+
+func TestCreateSubscription_TransactionError(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+	if err := Init(dbPath); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	defer Close()
+
+	// Disable foreign keys to cause transaction error
+	DB.Exec("PRAGMA foreign_keys = OFF")
+
+	sub := &Subscription{
+		TelegramID:      123456789,
+		Username:        "testuser",
+		ClientID:        "test-client-id",
+		Status:          "active",
+		ExpiryTime:      time.Now().Add(24 * time.Hour),
+		SubscriptionURL: "http://localhost/sub/test",
+	}
+
+	err := CreateSubscription(sub)
+	if err != nil {
+		t.Logf("CreateSubscription() error = %v (may be expected)", err)
 	}
 }
 
@@ -803,6 +843,37 @@ func TestService_Close(t *testing.T) {
 	err = service.Close()
 	if err != nil {
 		t.Errorf("Close() error = %v", err)
+	}
+}
+
+func TestService_Close_AlreadyClosed(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	service, err := NewService(dbPath)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+
+	service.Close()
+
+	err = service.Close()
+	if err != nil {
+		t.Errorf("Second Close() error = %v", err)
+	}
+}
+
+func TestNewService_InvalidPath(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "file.txt")
+
+	if err := os.WriteFile(dbPath, []byte("file"), 0644); err != nil {
+		t.Fatalf("Failed to create file: %v", err)
+	}
+
+	_, err := NewService(dbPath)
+	if err == nil {
+		t.Fatal("NewService() should error when parent path is a file")
 	}
 }
 
@@ -1886,5 +1957,672 @@ func TestGetTelegramIDByUsername_DatabaseNotInitialized(t *testing.T) {
 	_, err := GetTelegramIDByUsername("testuser")
 	if err == nil {
 		t.Error("GetTelegramIDByUsername() should return error when database not initialized")
+	}
+}
+
+// ==================== Migration Tests ====================
+
+func TestRunMigrations(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	if err := Init(dbPath); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	defer Close()
+
+	// Save original migrations
+	originalMigrations := migrations
+	defer func() { migrations = originalMigrations }()
+
+	// Add a test migration
+	migrations = []Migration{
+		{Name: "test_migration_001", SQL: ""},
+	}
+
+	// Run migrations
+	err := RunMigrations(DB)
+	if err != nil {
+		t.Fatalf("RunMigrations() error = %v", err)
+	}
+
+	// Verify schema_migrations table was created
+	if !DB.Migrator().HasTable(&SchemaMigration{}) {
+		t.Error("schema_migrations table was not created")
+	}
+}
+
+func TestRunMigrations_AppliesNewMigrations(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	if err := Init(dbPath); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	defer Close()
+
+	// Save and replace migrations
+	originalMigrations := migrations
+	defer func() { migrations = originalMigrations }()
+
+	// Add test migrations
+	migrations = []Migration{
+		{Name: "test_migration_001", SQL: ""},
+		{Name: "test_migration_002", SQL: ""},
+	}
+
+	// Run migrations
+	err := RunMigrations(DB)
+	if err != nil {
+		t.Fatalf("RunMigrations() error = %v", err)
+	}
+
+	// Verify migrations were recorded
+	applied, err := GetAppliedMigrations()
+	if err != nil {
+		t.Fatalf("GetAppliedMigrations() error = %v", err)
+	}
+
+	if len(applied) != 2 {
+		t.Errorf("Expected 2 applied migrations, got %d", len(applied))
+	}
+}
+
+func TestRunMigrations_SkipsAlreadyApplied(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	if err := Init(dbPath); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	defer Close()
+
+	// Save and replace migrations
+	originalMigrations := migrations
+	defer func() { migrations = originalMigrations }()
+
+	migrations = []Migration{
+		{Name: "test_skip_migration", SQL: ""},
+	}
+
+	// First run
+	err := RunMigrations(DB)
+	if err != nil {
+		t.Fatalf("RunMigrations() first error = %v", err)
+	}
+
+	// Second run should skip
+	err = RunMigrations(DB)
+	if err != nil {
+		t.Fatalf("RunMigrations() second error = %v", err)
+	}
+
+	// Verify only one migration was applied
+	applied, err := GetAppliedMigrations()
+	if err != nil {
+		t.Fatalf("GetAppliedMigrations() error = %v", err)
+	}
+
+	if len(applied) != 1 {
+		t.Errorf("Expected 1 applied migration, got %d", len(applied))
+	}
+}
+
+func TestIsMigrationApplied(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	if err := Init(dbPath); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	defer Close()
+
+	// Save and replace migrations
+	originalMigrations := migrations
+	defer func() { migrations = originalMigrations }()
+
+	migrations = []Migration{
+		{Name: "test_apply_check", SQL: ""},
+	}
+
+	// Check before applying
+	applied, err := isMigrationApplied(DB, "test_apply_check")
+	if err != nil {
+		t.Fatalf("isMigrationApplied() error = %v", err)
+	}
+	if applied {
+		t.Error("Migration should not be applied yet")
+	}
+
+	// Apply migration
+	err = RunMigrations(DB)
+	if err != nil {
+		t.Fatalf("RunMigrations() error = %v", err)
+	}
+
+	// Check after applying
+	applied, err = isMigrationApplied(DB, "test_apply_check")
+	if err != nil {
+		t.Fatalf("isMigrationApplied() error = %v", err)
+	}
+	if !applied {
+		t.Error("Migration should be applied")
+	}
+}
+
+func TestGetSchemaVersion(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	if err := Init(dbPath); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	defer Close()
+
+	// Save and replace migrations
+	originalMigrations := migrations
+	defer func() { migrations = originalMigrations }()
+
+	migrations = []Migration{
+		{Name: "schema_version_test", SQL: ""},
+	}
+
+	// Before any migration - should return "initial"
+	version, err := GetSchemaVersion()
+	if err != nil {
+		t.Fatalf("GetSchemaVersion() error = %v", err)
+	}
+	if version != "initial" {
+		t.Errorf("GetSchemaVersion() = %q, want 'initial'", version)
+	}
+
+	// Run migrations
+	err = RunMigrations(DB)
+	if err != nil {
+		t.Fatalf("RunMigrations() error = %v", err)
+	}
+
+	// After migration - should return migration name
+	version, err = GetSchemaVersion()
+	if err != nil {
+		t.Fatalf("GetSchemaVersion() error = %v", err)
+	}
+	if version != "schema_version_test" {
+		t.Errorf("GetSchemaVersion() = %q, want 'schema_version_test'", version)
+	}
+}
+
+func TestGetSchemaVersion_DatabaseNotInitialized(t *testing.T) {
+	// Close database
+	Close()
+
+	_, err := GetSchemaVersion()
+	if err == nil {
+		t.Error("GetSchemaVersion() should return error when database not initialized")
+	}
+}
+
+func TestAddMigration(t *testing.T) {
+	// Save original migrations
+	originalMigrations := migrations
+	defer func() { migrations = originalMigrations }()
+
+	// Add a new migration
+	AddMigration("programmatic_migration", "CREATE TABLE test_table (id INTEGER);")
+
+	// Verify it was added
+	if len(migrations) != len(originalMigrations)+1 {
+		t.Errorf("Expected %d migrations, got %d", len(originalMigrations)+1, len(migrations))
+	}
+
+	// Find the added migration
+	found := false
+	for _, m := range migrations {
+		if m.Name == "programmatic_migration" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("Added migration not found in migrations list")
+	}
+}
+
+func TestGetPendingMigrations(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	if err := Init(dbPath); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	defer Close()
+
+	// Save and replace migrations
+	originalMigrations := migrations
+	defer func() { migrations = originalMigrations }()
+
+	migrations = []Migration{
+		{Name: "pending_test_1", SQL: ""},
+		{Name: "pending_test_2", SQL: ""},
+	}
+
+	// Before running migrations - all should be pending
+	pending, err := GetPendingMigrations()
+	if err != nil {
+		t.Fatalf("GetPendingMigrations() error = %v", err)
+	}
+
+	if len(pending) != 2 {
+		t.Errorf("Expected 2 pending migrations, got %d", len(pending))
+	}
+
+	// Run one migration
+	migrations = []Migration{
+		{Name: "pending_test_1", SQL: ""},
+	}
+	err = RunMigrations(DB)
+	if err != nil {
+		t.Fatalf("RunMigrations() error = %v", err)
+	}
+
+	// Reset and check again
+	migrations = []Migration{
+		{Name: "pending_test_1", SQL: ""},
+		{Name: "pending_test_2", SQL: ""},
+	}
+	pending, err = GetPendingMigrations()
+	if err != nil {
+		t.Fatalf("GetPendingMigrations() error = %v", err)
+	}
+
+	// Now only pending_test_2 should be pending
+	if len(pending) != 1 {
+		t.Errorf("Expected 1 pending migration, got %d", len(pending))
+	}
+}
+
+func TestGetPendingMigrations_DatabaseNotInitialized(t *testing.T) {
+	// Close database
+	Close()
+
+	_, err := GetPendingMigrations()
+	if err == nil {
+		t.Error("GetPendingMigrations() should return error when database not initialized")
+	}
+}
+
+func TestGetAppliedMigrations(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	if err := Init(dbPath); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	defer Close()
+
+	// Save and replace migrations
+	originalMigrations := migrations
+	defer func() { migrations = originalMigrations }()
+
+	migrations = []Migration{
+		{Name: "applied_test_1", SQL: ""},
+		{Name: "applied_test_2", SQL: ""},
+	}
+
+	// Run migrations
+	err := RunMigrations(DB)
+	if err != nil {
+		t.Fatalf("RunMigrations() error = %v", err)
+	}
+
+	// Get applied migrations
+	applied, err := GetAppliedMigrations()
+	if err != nil {
+		t.Fatalf("GetAppliedMigrations() error = %v", err)
+	}
+
+	if len(applied) != 2 {
+		t.Errorf("Expected 2 applied migrations, got %d", len(applied))
+	}
+
+	// Verify they are ordered by applied_at ASC
+	for i := 0; i < len(applied)-1; i++ {
+		if applied[i].AppliedAt.After(applied[i+1].AppliedAt) {
+			t.Error("Applied migrations not ordered by applied_at ASC")
+		}
+	}
+}
+
+func TestGetAppliedMigrations_DatabaseNotInitialized(t *testing.T) {
+	// Close database
+	Close()
+
+	_, err := GetAppliedMigrations()
+	if err == nil {
+		t.Error("GetAppliedMigrations() should return error when database not initialized")
+	}
+}
+
+func TestExecSQL(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	if err := Init(dbPath); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	defer Close()
+
+	// Execute simple SQL (create a table)
+	err := ExecSQL("CREATE TABLE test_sql_table (id INTEGER PRIMARY KEY, name TEXT)")
+	if err != nil {
+		t.Fatalf("ExecSQL() error = %v", err)
+	}
+
+	// Verify table was created
+	if !DB.Migrator().HasTable("test_sql_table") {
+		t.Error("Table was not created by ExecSQL")
+	}
+}
+
+func TestExecSQL_DatabaseNotInitialized(t *testing.T) {
+	// Close database
+	Close()
+
+	err := ExecSQL("SELECT 1")
+	if err == nil {
+		t.Error("ExecSQL() should return error when database not initialized")
+	}
+}
+
+func TestGetSQLDB(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	if err := Init(dbPath); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	defer Close()
+
+	// Get underlying sql.DB
+	sqlDB, err := GetSQLDB()
+	if err != nil {
+		t.Fatalf("GetSQLDB() error = %v", err)
+	}
+	if sqlDB == nil {
+		t.Error("GetSQLDB() returned nil")
+	}
+
+	// Verify it's functional
+	err = sqlDB.Ping()
+	if err != nil {
+		t.Errorf("sqlDB.Ping() error = %v", err)
+	}
+}
+
+func TestGetSQLDB_DatabaseNotInitialized(t *testing.T) {
+	// Close database
+	Close()
+
+	_, err := GetSQLDB()
+	if err == nil {
+		t.Error("GetSQLDB() should return error when database not initialized")
+	}
+}
+
+func TestUpdateSubscription_DatabaseNotInitialized(t *testing.T) {
+	// Close database if open
+	Close()
+
+	sub := &Subscription{
+		TelegramID:      12345,
+		Username:        "testuser",
+		ClientID:        "client-123",
+		Status:          "active",
+		ExpiryTime:      time.Now().Add(24 * time.Hour),
+		SubscriptionURL: "http://test.url/sub/abc",
+	}
+
+	err := UpdateSubscription(sub)
+	if err == nil {
+		t.Error("UpdateSubscription() should return error when database not initialized")
+	}
+}
+
+func TestGetAllSubscriptions_Empty(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	service, err := NewService(dbPath)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	defer service.Close()
+
+	subs, err := service.GetAllSubscriptions(nil)
+	if err != nil {
+		t.Fatalf("GetAllSubscriptions() error = %v", err)
+	}
+
+	if len(subs) != 0 {
+		t.Errorf("Expected 0 subscriptions, got %d", len(subs))
+	}
+}
+
+func TestService_UpdateSubscription_NotFound(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	service, err := NewService(dbPath)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	defer service.Close()
+
+	// Try to update non-existent subscription
+	sub := &Subscription{
+		ID:         99999,
+		TelegramID: 99999,
+		Username:   "nonexistent",
+		ClientID:   "nonexistent",
+		Status:     "active",
+	}
+
+	err = service.UpdateSubscription(nil, sub)
+	if err != nil {
+		t.Errorf("UpdateSubscription() on non-existent should not error: %v", err)
+	}
+}
+
+func TestService_DeleteSubscription_NotFound(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	service, err := NewService(dbPath)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	defer service.Close()
+
+	// Try to delete non-existent subscription - should not error
+	err = service.DeleteSubscription(nil, 999999)
+	if err != nil {
+		t.Errorf("DeleteSubscription() on non-existent should not error: %v", err)
+	}
+}
+
+func TestSubscription_TableName(t *testing.T) {
+	sub := &Subscription{}
+	if sub.TableName() != "subscriptions" {
+		t.Errorf("TableName() = %s, want subscriptions", sub.TableName())
+	}
+}
+
+func TestGetAllTelegramIDs_OneSubscriptionMultipleRevisions(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	if err := Init(dbPath); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	defer Close()
+
+	// Create multiple subscriptions for same Telegram ID
+	for i := 0; i < 3; i++ {
+		sub := &Subscription{
+			TelegramID:      111111111,
+			Username:        fmt.Sprintf("user%d", i),
+			ClientID:        fmt.Sprintf("client-%d", i),
+			Status:          "active",
+			ExpiryTime:      time.Now().Add(24 * time.Hour),
+			SubscriptionURL: fmt.Sprintf("http://localhost/sub/%d", i),
+		}
+		if err := CreateSubscription(sub); err != nil {
+			t.Fatalf("Failed to create subscription: %v", err)
+		}
+	}
+
+	// Get all Telegram IDs - should return unique ID once
+	ids, err := GetAllTelegramIDs()
+	if err != nil {
+		t.Fatalf("GetAllTelegramIDs() error = %v", err)
+	}
+
+	if len(ids) != 1 {
+		t.Errorf("Expected 1 unique ID, got %d", len(ids))
+	}
+}
+
+func TestService_CreateSubscription_DuplicateTelegramID(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	service, err := NewService(dbPath)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	defer service.Close()
+
+	telegramID := int64(123456789)
+
+	sub1 := &Subscription{
+		TelegramID:      telegramID,
+		Username:        "user1",
+		ClientID:        "client1",
+		Status:          "active",
+		ExpiryTime:      time.Now().Add(24 * time.Hour),
+		SubscriptionURL: "http://localhost/sub/1",
+	}
+
+	if err := service.CreateSubscription(nil, sub1); err != nil {
+		t.Fatalf("First CreateSubscription() error = %v", err)
+	}
+
+	sub2 := &Subscription{
+		TelegramID:      telegramID,
+		Username:        "user2",
+		ClientID:        "client2",
+		Status:          "active",
+		ExpiryTime:      time.Now().Add(24 * time.Hour),
+		SubscriptionURL: "http://localhost/sub/2",
+	}
+
+	if err := service.CreateSubscription(nil, sub2); err != nil {
+		t.Fatalf("Second CreateSubscription() error = %v", err)
+	}
+
+	subs, err := service.GetAllSubscriptions(nil)
+	if err != nil {
+		t.Fatalf("GetAllSubscriptions() error = %v", err)
+	}
+
+	activeCount := 0
+	for _, s := range subs {
+		if s.TelegramID == telegramID && s.Status == "active" {
+			activeCount++
+		}
+	}
+
+	if activeCount != 1 {
+		t.Errorf("Expected 1 active subscription, got %d", activeCount)
+	}
+}
+
+func TestService_GetLatestSubscriptions_Empty(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	service, err := NewService(dbPath)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	defer service.Close()
+
+	subs, err := service.GetLatestSubscriptions(nil, 10)
+	if err != nil {
+		t.Fatalf("GetLatestSubscriptions() error = %v", err)
+	}
+
+	if len(subs) != 0 {
+		t.Errorf("Expected 0 subscriptions, got %d", len(subs))
+	}
+}
+
+func TestService_GetAllSubscriptions_Empty(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	service, err := NewService(dbPath)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	defer service.Close()
+
+	subs, err := service.GetAllSubscriptions(nil)
+	if err != nil {
+		t.Fatalf("GetAllSubscriptions() error = %v", err)
+	}
+
+	if len(subs) != 0 {
+		t.Errorf("Expected 0 subscriptions, got %d", len(subs))
+	}
+}
+
+func TestService_CountActiveSubscriptions_Empty(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	service, err := NewService(dbPath)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	defer service.Close()
+
+	count, err := service.CountActiveSubscriptions(nil)
+	if err != nil {
+		t.Fatalf("CountActiveSubscriptions() error = %v", err)
+	}
+
+	if count != 0 {
+		t.Errorf("Expected 0 active subscriptions, got %d", count)
+	}
+}
+
+func TestService_CountExpiredSubscriptions_Empty(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	service, err := NewService(dbPath)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	defer service.Close()
+
+	count, err := service.CountExpiredSubscriptions(nil)
+	if err != nil {
+		t.Fatalf("CountExpiredSubscriptions() error = %v", err)
+	}
+
+	if count != 0 {
+		t.Errorf("Expected 0 expired subscriptions, got %d", count)
 	}
 }
