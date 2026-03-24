@@ -1,6 +1,6 @@
 module rs8kvn_bot
 
-go 1.24
+go 1.25
 
 require (
 	github.com/getsentry/sentry-go v0.43.0
