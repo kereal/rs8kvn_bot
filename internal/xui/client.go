@@ -30,6 +30,19 @@ func marshalJSON(v interface{}) (*bytes.Reader, error) {
 	return bytes.NewReader(body), nil
 }
 
+// closeResponseBody closes the response body and logs any error.
+// This prevents resource leaks while still logging potential issues.
+func closeResponseBody(resp *http.Response) {
+	if resp == nil || resp.Body == nil {
+		return
+	}
+	if err := resp.Body.Close(); err != nil {
+		logger.Debug("Failed to close response body",
+			zap.Error(err),
+			zap.String("url", resp.Request.URL.String()))
+	}
+}
+
 // Client manages communication with a 3x-ui panel.
 // It handles authentication, session management, and API requests.
 type Client struct {
@@ -177,7 +190,7 @@ func (c *Client) doLogin(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("login request failed: %w", err)
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer closeResponseBody(resp)
 
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, config.MaxResponseSize))
 	if err != nil {
@@ -281,7 +294,7 @@ func (c *Client) AddClientWithID(ctx context.Context, inboundID int, email, clie
 	if err != nil {
 		return nil, fmt.Errorf("add client request failed: %w", err)
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer closeResponseBody(resp)
 
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, config.MaxResponseSize))
 	if err != nil {
@@ -341,7 +354,7 @@ func (c *Client) DeleteClient(ctx context.Context, inboundID int, clientID strin
 	if err != nil {
 		return fmt.Errorf("delete client request failed: %w", err)
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer closeResponseBody(resp)
 
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, config.MaxResponseSize))
 	if err != nil {
@@ -381,7 +394,7 @@ func (c *Client) GetClientTraffic(ctx context.Context, email string) (*ClientTra
 	if err != nil {
 		return nil, fmt.Errorf("get client traffic request failed: %w", err)
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer closeResponseBody(resp)
 
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, config.MaxResponseSize))
 	if err != nil {

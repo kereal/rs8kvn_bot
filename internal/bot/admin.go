@@ -191,6 +191,20 @@ func (h *Handler) HandleBroadcast(ctx context.Context, update tgbotapi.Update) {
 	successCount := 0
 	failCount := 0
 	for _, telegramID := range ids {
+		// Check context cancellation to allow graceful shutdown
+		select {
+		case <-ctx.Done():
+			logger.Warn("Broadcast cancelled due to shutdown")
+			h.SendMessage(ctx, chatID, fmt.Sprintf(
+				"⚠️ Рассылка прервана!\n\n📤 Отправлено: %d\n❌ Ошибок: %d\n👥 Осталось: %d",
+				successCount,
+				failCount,
+				len(ids)-successCount-failCount,
+			))
+			return
+		default:
+		}
+
 		msg := tgbotapi.NewMessage(telegramID, message)
 		msg.ParseMode = "Markdown"
 		msg.DisableWebPagePreview = true
@@ -301,9 +315,10 @@ func (h *Handler) handleAdminStats(ctx context.Context, chatID int64, username s
 		return
 	}
 
-	allSubs, err := h.db.GetAllSubscriptions(ctx)
+	// Get counts efficiently using SQL COUNT queries
+	totalCount, err := h.db.CountActiveSubscriptions(ctx)
 	if err != nil {
-		logger.Error("Failed to fetch subscriptions for stats", zap.Error(err))
+		logger.Error("Failed to count subscriptions for stats", zap.Error(err))
 		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "❌ Ошибка получения статистики")
 		editMsg.DisableWebPagePreview = true
 		keyboard := h.getBackKeyboard()
@@ -312,24 +327,23 @@ func (h *Handler) handleAdminStats(ctx context.Context, chatID int64, username s
 		return
 	}
 
-	activeCount := 0
-	expiredCount := 0
-	for _, sub := range allSubs {
-		if sub.Status == "active" {
-			if sub.IsExpired() {
-				expiredCount++
-			} else {
-				activeCount++
-			}
-		}
+	activeCount, err := h.db.CountActiveSubscriptions(ctx)
+	if err != nil {
+		logger.Error("Failed to count active subscriptions", zap.Error(err))
+		activeCount = 0
+	}
+
+	expiredCount, err := h.db.CountExpiredSubscriptions(ctx)
+	if err != nil {
+		logger.Error("Failed to count expired subscriptions", zap.Error(err))
+		expiredCount = 0
 	}
 
 	text := fmt.Sprintf(
-		"📊 *Статистика бота*\n\n👥 Всего пользователей: %d\n✅ Активные подписки: %d\n⏰ Истекшие: %d\n📁 Записей в БД: %d",
-		len(allSubs),
+		"📊 *Статистика бота*\n\n👥 Всего пользователей: %d\n✅ Активные подписки: %d\n⏰ Истекшие: %d",
+		totalCount,
 		activeCount,
 		expiredCount,
-		len(allSubs),
 	)
 
 	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, text)
