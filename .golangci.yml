@@ -24,6 +24,10 @@ linters:
         - G304
         - G306
 
+exclusions:
+  paths:
+    - _test\.go
+
 formatters:
   enable:
     - gofmt

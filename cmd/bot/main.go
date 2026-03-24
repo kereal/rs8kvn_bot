@@ -96,7 +96,11 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
 		os.Exit(1)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to close logger: %v\n", err)
+		}
+	}()
 
 	// Redirect standard log output (from third-party libraries) to our logger
 	logger.RedirectStdLog()
@@ -110,7 +114,11 @@ func main() {
 	if err := database.Init(cfg.DatabasePath); err != nil {
 		logger.Fatal("Failed to initialize database", zap.Error(err))
 	}
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			logger.Error("Failed to close database", zap.Error(err))
+		}
+	}()
 	logger.Info("Database initialized successfully")
 
 	// Initialize 3x-ui client

@@ -59,7 +59,11 @@ func BackupDatabase(dbPath string) error {
 	if err != nil {
 		return fmt.Errorf("failed to open database: %w", err)
 	}
-	defer src.Close()
+	defer func() {
+		if err := src.Close(); err != nil {
+			logger.Debug("Failed to close source", zap.Error(err))
+		}
+	}()
 
 	// Create temp backup file
 	// #nosec G304 -- tempPath is derived from validated dbPath and is safe
@@ -67,7 +71,11 @@ func BackupDatabase(dbPath string) error {
 	if err != nil {
 		return fmt.Errorf("failed to create temp backup: %w", err)
 	}
-	defer dst.Close()
+	defer func() {
+		if err := dst.Close(); err != nil {
+			logger.Debug("Failed to close destination", zap.Error(err))
+		}
+	}()
 
 	// Copy database to temp file
 	if _, err := io.Copy(dst, src); err != nil {
