@@ -31,6 +31,8 @@ type DatabaseService interface {
 	GetAllTelegramIDs(ctx context.Context) ([]int64, error)
 	GetTelegramIDByUsername(ctx context.Context, username string) (int64, error)
 	DeleteSubscriptionByID(ctx context.Context, id uint) (*database.Subscription, error)
+	GetTelegramIDsBatch(ctx context.Context, offset, limit int) ([]int64, error)
+	GetTotalTelegramIDCount(ctx context.Context) (int64, error)
 	Close() error
 }
 

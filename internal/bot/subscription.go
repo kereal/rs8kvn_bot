@@ -14,11 +14,37 @@ import (
 	"go.uber.org/zap"
 )
 
+// getSubscriptionWithCache retrieves a subscription using cache first, then DB.
+func (h *Handler) getSubscriptionWithCache(ctx context.Context, chatID int64) (*database.Subscription, error) {
+	// Try cache first
+	if sub := h.cache.Get(chatID); sub != nil {
+		return sub, nil
+	}
+
+	// Cache miss, query database
+	sub, err := h.db.GetByTelegramID(ctx, chatID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Store in cache
+	if sub != nil {
+		h.cache.Set(chatID, sub)
+	}
+
+	return sub, nil
+}
+
+// invalidateCache removes a subscription from cache (call after updates/deletes).
+func (h *Handler) invalidateCache(chatID int64) {
+	h.cache.Invalidate(chatID)
+}
+
 // Create subscription
 func (h *Handler) handleCreateSubscription(ctx context.Context, chatID int64, username string, messageID int) {
 	logger.Info("User requesting subscription", zap.String("username", username))
 
-	sub, err := h.db.GetByTelegramID(ctx, chatID)
+	sub, err := h.getSubscriptionWithCache(ctx, chatID)
 	if err == nil && sub != nil {
 		// Check if subscription is expired
 		if sub.IsExpired() {
@@ -62,7 +88,7 @@ func (h *Handler) handleMySubscription(ctx context.Context, chatID int64, userna
 		return
 	}
 
-	sub, err := h.db.GetByTelegramID(ctx, chatID)
+	sub, err := h.getSubscriptionWithCache(ctx, chatID)
 	if err != nil || sub == nil {
 		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "❌ У вас нет активной подписки.\n\nНажмите «Получить подписку» для создания.")
 		h.safeSend(editMsg)
@@ -257,6 +283,9 @@ func (h *Handler) createSubscription(ctx context.Context, chatID int64, username
 	editMsg.DisableWebPagePreview = true
 	editMsg.ReplyMarkup = &backKeyboard
 	h.safeSend(editMsg)
+
+	// Update cache with new subscription
+	h.cache.Set(chatID, sub)
 
 	// Notify admin about new subscription
 	h.notifyAdmin(ctx, username, chatID, subscriptionURL, expiryTime)
