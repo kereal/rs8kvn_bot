@@ -155,9 +155,6 @@ func (h *Handler) HandleDel(ctx context.Context, update tgbotapi.Update) {
 	))
 }
 
-// Broadcast batch size for pagination
-const broadcastBatchSize = 100
-
 // HandleBroadcast handles the /broadcast command for admins to send messages to all users.
 func (h *Handler) HandleBroadcast(ctx context.Context, update tgbotapi.Update) {
 	if update.Message == nil {

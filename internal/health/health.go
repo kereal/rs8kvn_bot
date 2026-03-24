@@ -190,10 +190,12 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{
+	if err := json.NewEncoder(w).Encode(map[string]string{
 		"service":   "rs8kvn_bot",
 		"endpoints": "/healthz, /readyz",
-	})
+	}); err != nil {
+		logger.Error("Failed to encode index response", zap.Error(err))
+	}
 }
 
 // runChecks runs all registered health checkers.
