@@ -22,7 +22,7 @@ jobs:
             - name: Set up Go
               uses: actions/setup-go@v6
               with:
-                  go-version: "1.24"
+                  go-version: "1.25"
                   cache: true
 
             - name: Download dependencies
@@ -31,7 +31,7 @@ jobs:
             - name: Run golangci-lint
               uses: golangci/golangci-lint-action@v6
               with:
-                  version: v1.64
+                  version: v2.1
 
             - name: Run gosec
               uses: securego/gosec@master
@@ -49,7 +49,7 @@ jobs:
             - name: Set up Go
               uses: actions/setup-go@v6
               with:
-                  go-version: "1.24"
+                  go-version: "1.25"
                   cache: true
 
             - name: Download dependencies
