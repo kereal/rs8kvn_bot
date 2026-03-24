@@ -19,8 +19,12 @@ linters:
     paths:
       - _test\.go
     rules:
-      - source: "ctx is unused"
-      - source: "sendWithRetry"
+      - text: "ctx is unused"
+        linters:
+          - unparam
+      - text: "sendWithRetry"
+        linters:
+          - unused
   settings:
     errcheck:
       check-type-assertions: true
