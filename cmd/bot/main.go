@@ -14,6 +14,7 @@ import (
 	"rs8kvn_bot/internal/bot"
 	"rs8kvn_bot/internal/config"
 	"rs8kvn_bot/internal/database"
+	"rs8kvn_bot/internal/health"
 	"rs8kvn_bot/internal/heartbeat"
 	"rs8kvn_bot/internal/logger"
 	"rs8kvn_bot/internal/xui"
@@ -146,6 +147,28 @@ func main() {
 
 	// Create bot handler
 	handler := bot.NewHandler(botAPI, cfg, dbService, xuiClient)
+
+	// Initialize and start health check server
+	healthServer := health.NewServer(config.HealthCheckPort)
+	healthServer.RegisterChecker("database", health.DatabaseChecker(func(ctx context.Context) error {
+		return dbService.Ping()
+	}))
+	healthServer.RegisterChecker("xui", health.XUIChecker(func(ctx context.Context) error {
+		return xuiClient.Login(ctx)
+	}))
+	if err := healthServer.Start(); err != nil {
+		logger.Fatal("Failed to start health check server", zap.Error(err))
+	}
+	healthServer.SetReady(true)
+	logger.Info("Health check server started", zap.Int("port", config.HealthCheckPort))
+	defer func() {
+		healthServer.SetReady(false)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := healthServer.Stop(shutdownCtx); err != nil {
+			logger.Error("Failed to stop health check server", zap.Error(err))
+		}
+	}()
 
 	// Configure update listener
 	u := tgbotapi.NewUpdate(0)

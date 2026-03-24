@@ -26,14 +26,18 @@ services:
             - GOMEMLIMIT=67108864
             - GOGC=50
 
+        # Expose health check port for monitoring (optional)
+        ports:
+            - "127.0.0.1:8080:8080"
+
         # Security hardening
         security_opt:
             - no-new-privileges:true
         # Note: read_only filesystem not possible due to SQLite writes
 
-        # Health check - verify process is running
+        # Health check - verify service is responding
         healthcheck:
-            test: ["CMD", "pgrep", "-f", "rs8kvn_bot"]
+            test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/healthz"]
             interval: 30s
             timeout: 10s
             retries: 3

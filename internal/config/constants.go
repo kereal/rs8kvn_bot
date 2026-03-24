@@ -132,6 +132,12 @@ const (
 	ShutdownTimeout = 30 * time.Second
 )
 
+// Health Check Constants
+const (
+	// HealthCheckPort is the port for the health check HTTP server
+	HealthCheckPort = 8080
+)
+
 // 3x-ui Subscription Path Constants
 const (
 	// DefaultXUISubPath is the default subscription path segment
