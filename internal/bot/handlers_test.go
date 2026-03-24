@@ -70,8 +70,8 @@ func TestNewHandler(t *testing.T) {
 	}
 
 	xuiClient := xui.NewClient(cfg.XUIHost, "admin", "password")
-
-	handler := NewHandler(nil, cfg, xuiClient)
+	mockDB := testutil.NewMockDatabaseService()
+	handler := NewHandler(nil, cfg, mockDB, xuiClient)
 
 	if handler == nil {
 		t.Fatal("NewHandler returned nil")
