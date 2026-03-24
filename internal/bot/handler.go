@@ -3,6 +3,7 @@ package bot
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"rs8kvn_bot/internal/config"
 	"rs8kvn_bot/internal/interfaces"
@@ -13,12 +14,19 @@ import (
 	"go.uber.org/zap"
 )
 
+// Cache constants
+const (
+	CacheMaxSize = 1000
+	CacheTTL     = 5 * time.Minute
+)
+
 type Handler struct {
 	bot         *tgbotapi.BotAPI
 	cfg         *config.Config
 	db          interfaces.DatabaseService
 	xui         interfaces.XUIClient
 	rateLimiter *ratelimiter.RateLimiter
+	cache       *SubscriptionCache
 }
 
 func NewHandler(bot *tgbotapi.BotAPI, cfg *config.Config, db interfaces.DatabaseService, xuiClient interfaces.XUIClient) *Handler {
@@ -28,6 +36,7 @@ func NewHandler(bot *tgbotapi.BotAPI, cfg *config.Config, db interfaces.Database
 		db:          db,
 		xui:         xuiClient,
 		rateLimiter: ratelimiter.NewRateLimiter(config.RateLimiterMaxTokens, config.RateLimiterRefillRate),
+		cache:       NewSubscriptionCache(CacheMaxSize, CacheTTL),
 	}
 }
 

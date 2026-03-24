@@ -93,6 +93,8 @@ type MockDatabaseService struct {
 	GetByIDFunc                   func(ctx context.Context, id uint) (*database.Subscription, error)
 	GetTelegramIDByUsernameFunc   func(ctx context.Context, username string) (int64, error)
 	DeleteSubscriptionByIDFunc    func(ctx context.Context, id uint) (*database.Subscription, error)
+	GetTelegramIDsBatchFunc       func(ctx context.Context, offset, limit int) ([]int64, error)
+	GetTotalTelegramIDCountFunc   func(ctx context.Context) (int64, error)
 }
 
 func (m *MockDatabaseService) GetByTelegramID(ctx context.Context, telegramID int64) (*database.Subscription, error) {
@@ -245,6 +247,29 @@ func (m *MockDatabaseService) DeleteSubscriptionByID(ctx context.Context, id uin
 		return m.DeleteSubscriptionByIDFunc(ctx, id)
 	}
 	return nil, gorm.ErrRecordNotFound
+}
+
+func (m *MockDatabaseService) GetTelegramIDsBatch(ctx context.Context, offset, limit int) ([]int64, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var ids []int64
+	for id := range m.Subscriptions {
+		ids = append(ids, id)
+	}
+	if offset >= len(ids) {
+		return []int64{}, nil
+	}
+	end := offset + limit
+	if end > len(ids) {
+		end = len(ids)
+	}
+	return ids[offset:end], nil
+}
+
+func (m *MockDatabaseService) GetTotalTelegramIDCount(ctx context.Context) (int64, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return int64(len(m.Subscriptions)), nil
 }
 
 func (m *MockDatabaseService) Close() error {

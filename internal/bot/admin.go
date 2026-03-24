@@ -132,6 +132,9 @@ func (h *Handler) HandleDel(ctx context.Context, update tgbotapi.Update) {
 		return
 	}
 
+	// Invalidate cache
+	h.invalidateCache(sub.TelegramID)
+
 	// Success
 	logger.Info("Subscription deleted",
 		zap.Uint("id", id),
@@ -151,6 +154,9 @@ func (h *Handler) HandleDel(ctx context.Context, update tgbotapi.Update) {
 		sub.ClientID,
 	))
 }
+
+// Broadcast batch size for pagination
+const broadcastBatchSize = 100
 
 // HandleBroadcast handles the /broadcast command for admins to send messages to all users.
 func (h *Handler) HandleBroadcast(ctx context.Context, update tgbotapi.Update) {
@@ -174,63 +180,79 @@ func (h *Handler) HandleBroadcast(ctx context.Context, update tgbotapi.Update) {
 		return
 	}
 
-	// Get all Telegram IDs
-	ids, err := h.db.GetAllTelegramIDs(ctx)
+	// Get total count for progress reporting
+	totalCount, err := h.db.GetTotalTelegramIDCount(ctx)
 	if err != nil {
-		logger.Error("Failed to get telegram IDs", zap.Error(err))
+		logger.Error("Failed to count telegram IDs", zap.Error(err))
 		h.SendMessage(ctx, chatID, "❌ Ошибка получения списка пользователей")
 		return
 	}
 
-	if len(ids) == 0 {
+	if totalCount == 0 {
 		h.SendMessage(ctx, chatID, "❌ Нет пользователей для рассылки")
 		return
 	}
 
-	// Send to all users
+	h.SendMessage(ctx, chatID, fmt.Sprintf("📤 Начинаю рассылку для %d пользователей...", totalCount))
+
+	// Process in batches to avoid loading all IDs into memory
+	const batchSize = 100
 	successCount := 0
 	failCount := 0
-	for _, telegramID := range ids {
-		// Check context cancellation to allow graceful shutdown
-		select {
-		case <-ctx.Done():
-			logger.Warn("Broadcast cancelled due to shutdown")
-			h.SendMessage(ctx, chatID, fmt.Sprintf(
-				"⚠️ Рассылка прервана!\n\n📤 Отправлено: %d\n❌ Ошибок: %d\n👥 Осталось: %d",
-				successCount,
-				failCount,
-				len(ids)-successCount-failCount,
-			))
-			return
-		default:
+	offset := 0
+
+	for offset < int(totalCount) {
+		// Get batch of IDs
+		ids, err := h.db.GetTelegramIDsBatch(ctx, offset, batchSize)
+		if err != nil {
+			logger.Error("Failed to get telegram IDs batch", zap.Error(err), zap.Int("offset", offset))
+			break
 		}
 
-		msg := tgbotapi.NewMessage(telegramID, message)
-		msg.ParseMode = "Markdown"
-		msg.DisableWebPagePreview = true
-		if _, err := h.bot.Send(msg); err != nil {
-			logger.Warn("Failed to send broadcast message",
-				zap.Int64("telegram_id", telegramID),
-				zap.Error(err))
-			failCount++
-		} else {
-			successCount++
+		for _, telegramID := range ids {
+			// Check context cancellation to allow graceful shutdown
+			select {
+			case <-ctx.Done():
+				logger.Warn("Broadcast cancelled due to shutdown")
+				h.SendMessage(ctx, chatID, fmt.Sprintf(
+					"⚠️ Рассылка прервана!\n\n📤 Отправлено: %d\n❌ Ошибок: %d\n👥 Осталось: %d",
+					successCount,
+					failCount,
+					int(totalCount)-successCount-failCount,
+				))
+				return
+			default:
+			}
+
+			msg := tgbotapi.NewMessage(telegramID, message)
+			msg.ParseMode = "Markdown"
+			msg.DisableWebPagePreview = true
+			if _, err := h.bot.Send(msg); err != nil {
+				logger.Warn("Failed to send broadcast message",
+					zap.Int64("telegram_id", telegramID),
+					zap.Error(err))
+				failCount++
+			} else {
+				successCount++
+			}
+			// Small delay to avoid rate limiting
+			time.Sleep(50 * time.Millisecond)
 		}
-		// Small delay to avoid rate limiting
-		time.Sleep(50 * time.Millisecond)
+
+		offset += batchSize
 	}
 
 	h.SendMessage(ctx, chatID, fmt.Sprintf(
 		"✅ Рассылка завершена!\n\n📤 Отправлено: %d\n❌ Ошибок: %d\n👥 Всего пользователей: %d",
 		successCount,
 		failCount,
-		len(ids),
+		totalCount,
 	))
 
 	logger.Info("Broadcast completed",
 		zap.Int("success", successCount),
 		zap.Int("failed", failCount),
-		zap.Int("total", len(ids)))
+		zap.Int64("total", totalCount))
 }
 
 // HandleSend handles the /send command for admins to send a message to a specific user.

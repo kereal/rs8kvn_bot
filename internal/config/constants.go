@@ -96,6 +96,12 @@ const (
 	MinHeartbeatInterval = 10
 )
 
+// Database Pool Statistics Constants
+const (
+	// PoolStatsLogInterval is the interval for logging database pool statistics
+	PoolStatsLogInterval = 5 * time.Minute
+)
+
 // Logging Constants
 const (
 	// DefaultLogFilePath is the default path for log files
