@@ -273,7 +273,9 @@ func (s *Service) Close() error {
 
 	if s.log != nil {
 		if err := s.log.Sync(); err != nil {
-			errs = append(errs, err)
+			if !isStdoutError(err) {
+				errs = append(errs, err)
+			}
 		}
 	}
 
@@ -287,6 +289,14 @@ func (s *Service) Close() error {
 		return fmt.Errorf("errors closing logger: %v", errs)
 	}
 	return nil
+}
+
+func isStdoutError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+	return strings.Contains(errStr, "invalid argument") || strings.Contains(errStr, "bad file descriptor")
 }
 
 // Info logs at INFO level.
