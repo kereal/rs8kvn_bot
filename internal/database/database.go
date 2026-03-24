@@ -291,6 +291,16 @@ func (s *Service) GetByTelegramID(ctx context.Context, telegramID int64) (*Subsc
 	return &sub, nil
 }
 
+// GetByID retrieves a subscription by its database ID.
+func (s *Service) GetByID(ctx context.Context, id uint) (*Subscription, error) {
+	var sub Subscription
+	result := s.db.WithContext(ctx).First(&sub, id)
+	if result.Error != nil {
+		return nil, fmt.Errorf("failed to get subscription: %w", result.Error)
+	}
+	return &sub, nil
+}
+
 // CreateSubscription creates a new subscription and revokes any existing active subscriptions.
 func (s *Service) CreateSubscription(ctx context.Context, sub *Subscription) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -340,6 +350,44 @@ func (s *Service) GetLatestSubscriptions(ctx context.Context, limit int) ([]Subs
 		return nil, fmt.Errorf("failed to get latest subscriptions: %w", result.Error)
 	}
 	return subs, nil
+}
+
+// GetAllTelegramIDs returns all unique Telegram IDs from subscriptions.
+func (s *Service) GetAllTelegramIDs(ctx context.Context) ([]int64, error) {
+	var ids []int64
+	result := s.db.WithContext(ctx).Model(&Subscription{}).
+		Distinct("telegram_id").
+		Pluck("telegram_id", &ids)
+	if result.Error != nil {
+		return nil, fmt.Errorf("failed to get telegram IDs: %w", result.Error)
+	}
+	return ids, nil
+}
+
+// GetTelegramIDByUsername returns the Telegram ID for a given username.
+func (s *Service) GetTelegramIDByUsername(ctx context.Context, username string) (int64, error) {
+	var sub Subscription
+	result := s.db.WithContext(ctx).Where("username = ?", username).First(&sub)
+	if result.Error != nil {
+		return 0, fmt.Errorf("failed to find user by username: %w", result.Error)
+	}
+	return sub.TelegramID, nil
+}
+
+// DeleteSubscriptionByID hard-deletes a subscription by its database ID.
+func (s *Service) DeleteSubscriptionByID(ctx context.Context, id uint) (*Subscription, error) {
+	var sub Subscription
+	result := s.db.WithContext(ctx).First(&sub, id)
+	if result.Error != nil {
+		return nil, fmt.Errorf("failed to find subscription: %w", result.Error)
+	}
+
+	result = s.db.WithContext(ctx).Unscoped().Delete(&sub)
+	if result.Error != nil {
+		return nil, fmt.Errorf("failed to delete subscription: %w", result.Error)
+	}
+
+	return &sub, nil
 }
 
 // GetAllSubscriptions retrieves all subscriptions (for admin stats).

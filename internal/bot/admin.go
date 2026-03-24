@@ -7,25 +7,21 @@ import (
 	"strings"
 	"time"
 
-	"rs8kvn_bot/internal/database"
 	"rs8kvn_bot/internal/logger"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"go.uber.org/zap"
 )
 
-// handleAdminLastReg handles the "admin_lastreg" callback - shows last 10 registrations
 func (h *Handler) handleAdminLastReg(ctx context.Context, chatID int64, username string, messageID int) {
 	logger.Info("Admin requesting last registrations", zap.String("username", username))
 
-	// Verify admin access
 	if chatID != h.cfg.TelegramAdminID {
 		logger.Warn("Non-admin user attempted to access last registrations", zap.Int64("chat_id", chatID))
 		return
 	}
 
-	// Get latest 10 subscriptions
-	subs, err := database.GetLatestSubscriptions(10)
+	subs, err := h.db.GetLatestSubscriptions(ctx, 10)
 	if err != nil {
 		logger.Error("Failed to get latest subscriptions", zap.Error(err))
 		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "❌ Ошибка получения списка подписок")
@@ -99,7 +95,7 @@ func (h *Handler) HandleDel(ctx context.Context, update tgbotapi.Update) {
 	}
 
 	// Get the subscription
-	sub, err := database.GetSubscriptionByID(id)
+	sub, err := h.db.GetByID(ctx, id)
 	if err != nil {
 		logger.Error("Failed to get subscription", zap.Error(err), zap.Uint("id", id))
 		h.SendMessage(ctx, chatID, fmt.Sprintf("❌ Подписка с ID %d не найдена", id))
@@ -117,7 +113,7 @@ func (h *Handler) HandleDel(ctx context.Context, update tgbotapi.Update) {
 	}
 
 	// Delete from database
-	_, err = database.DeleteSubscriptionByID(id)
+	_, err = h.db.DeleteSubscriptionByID(ctx, id)
 	if err != nil {
 		logger.Error("Failed to delete subscription from database",
 			zap.Error(err),
@@ -171,7 +167,7 @@ func (h *Handler) HandleBroadcast(ctx context.Context, update tgbotapi.Update) {
 	}
 
 	// Get all Telegram IDs
-	ids, err := database.GetAllTelegramIDs()
+	ids, err := h.db.GetAllTelegramIDs(ctx)
 	if err != nil {
 		logger.Error("Failed to get telegram IDs", zap.Error(err))
 		h.SendMessage(ctx, chatID, "❌ Ошибка получения списка пользователей")
@@ -256,7 +252,7 @@ func (h *Handler) HandleSend(ctx context.Context, update tgbotapi.Update) {
 		telegramID = id
 	} else {
 		// Try to find by username
-		telegramID, err = database.GetTelegramIDByUsername(target)
+		telegramID, err = h.db.GetTelegramIDByUsername(ctx, target)
 		if err != nil {
 			h.SendMessage(ctx, chatID, fmt.Sprintf("❌ Пользователь @%s не найден в базе", target))
 			return
@@ -297,8 +293,8 @@ func (h *Handler) handleAdminStats(ctx context.Context, chatID int64, username s
 		return
 	}
 
-	var allSubs []database.Subscription
-	if err := database.DB.Find(&allSubs).Error; err != nil {
+	allSubs, err := h.db.GetAllSubscriptions(ctx)
+	if err != nil {
 		logger.Error("Failed to fetch subscriptions for stats", zap.Error(err))
 		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "❌ Ошибка получения статистики")
 		editMsg.DisableWebPagePreview = true

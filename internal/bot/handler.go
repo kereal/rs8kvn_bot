@@ -5,25 +5,25 @@ import (
 	"time"
 
 	"rs8kvn_bot/internal/config"
+	"rs8kvn_bot/internal/interfaces"
 	"rs8kvn_bot/internal/ratelimiter"
-	"rs8kvn_bot/internal/xui"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
-// Handler handles Telegram bot updates and manages subscription operations.
 type Handler struct {
 	bot         *tgbotapi.BotAPI
 	cfg         *config.Config
-	xui         *xui.Client
+	db          interfaces.DatabaseService
+	xui         interfaces.XUIClient
 	rateLimiter *ratelimiter.RateLimiter
 }
 
-// NewHandler creates a new bot handler.
-func NewHandler(bot *tgbotapi.BotAPI, cfg *config.Config, xuiClient *xui.Client) *Handler {
+func NewHandler(bot *tgbotapi.BotAPI, cfg *config.Config, db interfaces.DatabaseService, xuiClient interfaces.XUIClient) *Handler {
 	return &Handler{
 		bot:         bot,
 		cfg:         cfg,
+		db:          db,
 		xui:         xuiClient,
 		rateLimiter: ratelimiter.NewRateLimiter(config.RateLimiterMaxTokens, config.RateLimiterRefillRate),
 	}
