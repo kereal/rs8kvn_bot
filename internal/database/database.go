@@ -287,6 +287,36 @@ func (s *Service) Ping() error {
 	return sqlDB.Ping()
 }
 
+// PoolStats contains database connection pool statistics.
+type PoolStats struct {
+	MaxOpen       int
+	Open          int
+	InUse         int
+	Idle          int
+	WaitCount     int64
+	WaitDuration  time.Duration
+	MaxIdleClosed int64
+}
+
+// GetPoolStats returns current database connection pool statistics.
+func (s *Service) GetPoolStats() (*PoolStats, error) {
+	sqlDB, err := s.db.DB()
+	if err != nil {
+		return nil, err
+	}
+
+	stats := sqlDB.Stats()
+	return &PoolStats{
+		MaxOpen:       stats.MaxOpenConnections,
+		Open:          stats.OpenConnections,
+		InUse:         stats.InUse,
+		Idle:          stats.Idle,
+		WaitCount:     stats.WaitCount,
+		WaitDuration:  stats.WaitDuration,
+		MaxIdleClosed: stats.MaxIdleClosed,
+	}, nil
+}
+
 // GetByTelegramID retrieves an active subscription by Telegram ID.
 func (s *Service) GetByTelegramID(ctx context.Context, telegramID int64) (*Subscription, error) {
 	var sub Subscription
@@ -463,4 +493,34 @@ func GetTelegramIDByUsername(username string) (int64, error) {
 		return 0, fmt.Errorf("failed to find user by username: %w", result.Error)
 	}
 	return sub.TelegramID, nil
+}
+
+// GetTelegramIDsBatch returns a batch of unique Telegram IDs for broadcast.
+// offset is the starting position, limit is the maximum number of IDs to return.
+func (s *Service) GetTelegramIDsBatch(ctx context.Context, offset, limit int) ([]int64, error) {
+	var ids []int64
+	result := s.db.WithContext(ctx).
+		Model(&Subscription{}).
+		Distinct("telegram_id").
+		Order("telegram_id ASC").
+		Limit(limit).
+		Offset(offset).
+		Pluck("telegram_id", &ids)
+	if result.Error != nil {
+		return nil, fmt.Errorf("failed to get telegram IDs batch: %w", result.Error)
+	}
+	return ids, nil
+}
+
+// GetTotalTelegramIDCount returns the total count of unique Telegram IDs.
+func (s *Service) GetTotalTelegramIDCount(ctx context.Context) (int64, error) {
+	var count int64
+	result := s.db.WithContext(ctx).
+		Model(&Subscription{}).
+		Distinct("telegram_id").
+		Count(&count)
+	if result.Error != nil {
+		return 0, fmt.Errorf("failed to count telegram IDs: %w", result.Error)
+	}
+	return count, nil
 }

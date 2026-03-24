@@ -2865,3 +2865,107 @@ func TestService_Ping_AfterClose(t *testing.T) {
 		t.Error("Ping() expected error after Close()")
 	}
 }
+
+func TestService_GetTelegramIDsBatch(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	service, err := NewService(dbPath)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	defer service.Close()
+
+	// Create test subscriptions
+	for i := int64(1); i <= 5; i++ {
+		sub := &Subscription{
+			TelegramID:      i * 100,
+			Username:        fmt.Sprintf("user%d", i),
+			ClientID:        fmt.Sprintf("client-%d", i),
+			XUIHost:         "http://localhost",
+			InboundID:       1,
+			TrafficLimit:    107374182400,
+			ExpiryTime:      time.Now().Add(24 * time.Hour),
+			Status:          "active",
+			SubscriptionURL: fmt.Sprintf("http://test.url/sub/%d", i),
+		}
+		if err := service.CreateSubscription(nil, sub); err != nil {
+			t.Fatalf("CreateSubscription() error = %v", err)
+		}
+	}
+
+	// Test batch retrieval
+	ids, err := service.GetTelegramIDsBatch(nil, 0, 3)
+	if err != nil {
+		t.Fatalf("GetTelegramIDsBatch() error = %v", err)
+	}
+	if len(ids) != 3 {
+		t.Errorf("GetTelegramIDsBatch(0, 3) returned %d IDs, want 3", len(ids))
+	}
+
+	// Test offset
+	ids, err = service.GetTelegramIDsBatch(nil, 3, 3)
+	if err != nil {
+		t.Fatalf("GetTelegramIDsBatch() error = %v", err)
+	}
+	if len(ids) != 2 {
+		t.Errorf("GetTelegramIDsBatch(3, 3) returned %d IDs, want 2", len(ids))
+	}
+}
+
+func TestService_GetTotalTelegramIDCount(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	service, err := NewService(dbPath)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	defer service.Close()
+
+	// Create test subscriptions with unique telegram IDs
+	for i := int64(1); i <= 3; i++ {
+		sub := &Subscription{
+			TelegramID:      i * 100,
+			Username:        fmt.Sprintf("user%d", i),
+			ClientID:        fmt.Sprintf("client-%d", i),
+			XUIHost:         "http://localhost",
+			InboundID:       1,
+			TrafficLimit:    107374182400,
+			ExpiryTime:      time.Now().Add(24 * time.Hour),
+			Status:          "active",
+			SubscriptionURL: fmt.Sprintf("http://test.url/sub/%d", i),
+		}
+		if err := service.CreateSubscription(nil, sub); err != nil {
+			t.Fatalf("CreateSubscription() error = %v", err)
+		}
+	}
+
+	count, err := service.GetTotalTelegramIDCount(nil)
+	if err != nil {
+		t.Fatalf("GetTotalTelegramIDCount() error = %v", err)
+	}
+	if count != 3 {
+		t.Errorf("GetTotalTelegramIDCount() = %d, want 3", count)
+	}
+}
+
+func TestService_GetPoolStats(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	service, err := NewService(dbPath)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	defer service.Close()
+
+	stats, err := service.GetPoolStats()
+	if err != nil {
+		t.Fatalf("GetPoolStats() error = %v", err)
+	}
+
+	if stats.MaxOpen < 0 {
+		t.Errorf("GetPoolStats().MaxOpen = %d, want >= 0", stats.MaxOpen)
+	}
+}

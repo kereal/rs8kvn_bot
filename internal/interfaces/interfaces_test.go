@@ -102,6 +102,25 @@ func (m *mockDatabaseService) DeleteSubscriptionByID(ctx context.Context, id uin
 	return nil, nil
 }
 
+func (m *mockDatabaseService) GetTelegramIDsBatch(ctx context.Context, offset, limit int) ([]int64, error) {
+	var ids []int64
+	for id := range m.subscriptions {
+		ids = append(ids, id)
+	}
+	if offset >= len(ids) {
+		return []int64{}, nil
+	}
+	end := offset + limit
+	if end > len(ids) {
+		end = len(ids)
+	}
+	return ids[offset:end], nil
+}
+
+func (m *mockDatabaseService) GetTotalTelegramIDCount(ctx context.Context) (int64, error) {
+	return int64(len(m.subscriptions)), nil
+}
+
 func (m *mockDatabaseService) Close() error {
 	return nil
 }
