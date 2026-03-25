@@ -128,18 +128,7 @@ func BackupDatabase(ctx context.Context, dbPath string) error {
 		return fmt.Errorf("failed to sync backup: %w", err)
 	}
 
-	// Close files before rename
-	if err := dst.Close(); err != nil {
-		_ = os.Remove(tempPath)
-		return fmt.Errorf("failed to close backup file: %w", err)
-	}
-
-	if err := src.Close(); err != nil {
-		_ = os.Remove(tempPath)
-		return fmt.Errorf("failed to close database file: %w", err)
-	}
-
-	// Atomic rename
+	// Atomic rename (defer will close files after this)
 	if err := os.Rename(tempPath, backupPath); err != nil {
 		_ = os.Remove(tempPath)
 		return fmt.Errorf("failed to rename backup: %w", err)

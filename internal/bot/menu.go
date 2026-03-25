@@ -29,7 +29,7 @@ func (h *Handler) handleBackToStart(ctx context.Context, chatID int64, username 
 }
 
 // handleMenuDonate handles the "menu_donate" callback - shows donate message with back button
-func (h *Handler) handleMenuDonate(ctx context.Context, chatID int64, username string, messageID int) {
+func (h *Handler) handleMenuDonate(_ context.Context, chatID int64, username string, messageID int) {
 	logger.Info("User viewing donate", zap.String("username", username))
 
 	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, h.getDonateText())

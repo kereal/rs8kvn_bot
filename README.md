@@ -2,7 +2,7 @@
 
 Telegram bot for distributing VLESS+Reality+Vision proxy subscriptions from 3x-ui panel.
 
-**Version:** v1.9.6 | **Coverage:** ~51% | **License:** MIT
+**Version:** v1.9.8 | **Coverage:** ~51% | **License:** MIT
 
 ## Features
 
@@ -244,7 +244,7 @@ This project includes a GitHub Actions workflow that automatically:
 ### Triggers
 
 - Push to `main` branch
-- Git tags (e.g., `v1.9.6`)
+- Git tags (e.g., `v1.9.8`)
 
 ### Images are tagged with
 
@@ -379,6 +379,7 @@ rs8kvn_bot/
 | `HEARTBEAT_URL` | URL for heartbeat monitoring | - | ❌ |
 | `HEARTBEAT_INTERVAL` | Heartbeat interval in seconds | 300 | ❌ |
 | `SENTRY_DSN` | Sentry DSN for error tracking | - | ❌ |
+| `HEALTH_CHECK_PORT` | Port for health check HTTP server | 8880 | ❌ |
 
 **Note:** `XUI_USERNAME` and `XUI_PASSWORD` have no defaults - they must be set explicitly.
 
