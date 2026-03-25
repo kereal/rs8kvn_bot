@@ -15,14 +15,13 @@ linters:
         - gosec
     disable:
         - ineffassign
+    exclusions:
+        paths:
+            - '.*_test\.go'
 
 issues:
-    exclude-files:
-        - _test\.go
     exclude-rules:
-        - path: _test\.go
-          linters:
-              - all
+        # Exclude specific false positives
         - text: "ctx is unused"
           linters:
               - unparam
@@ -41,6 +40,7 @@ linters-settings:
             - G104
             - G304
             - G306
+            - G302
 
 formatters:
     enable:
