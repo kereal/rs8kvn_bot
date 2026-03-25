@@ -179,7 +179,7 @@ func (h *Handler) handleQRCode(ctx context.Context, chatID int64, username strin
 
 // handleBackToSubscription handles the "back_to_subscription" callback.
 // Deletes the QR photo message - the subscription message remains visible above.
-func (h *Handler) handleBackToSubscription(ctx context.Context, chatID int64, username string, messageID int) {
+func (h *Handler) handleBackToSubscription(_ context.Context, chatID int64, username string, messageID int) {
 	logger.Info("User closing QR code", zap.String("username", username))
 
 	// Delete the QR photo message
