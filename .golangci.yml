@@ -1,3 +1,6 @@
+# golangci-lint configuration
+# Compatible with both v1 and v2
+
 run:
     timeout: 5m
 
@@ -13,35 +16,32 @@ linters:
         - gosec
     disable:
         - ineffassign
-    exclusions:
-        paths:
-            - _test\.go
-        rules:
-            - text: "ctx is unused"
-              linters:
-                  - unparam
-            - text: "sendWithRetry"
-              linters:
-                  - unused
-        issues:
-            - path: _test\.go
-            - text: "ctx is unused"
-              linters:
-                  - unparam
-            - text: "sendWithRetry"
-              linters:
-                  - unused
-    settings:
-        errcheck:
-            check-type-assertions: true
-            exclude-functions:
-                - sync.Pool.Get
-                - "sync.(*Pool).Get"
-        gosec:
-            excludes:
-                - G104
-                - G304
-                - G306
+
+issues:
+    exclude-files:
+        - _test\.go
+    exclude-rules:
+        - path: _test\.go
+          linters:
+              - all
+        - text: "ctx is unused"
+          linters:
+              - unparam
+        - text: "sendWithRetry"
+          linters:
+              - unused
+
+linters-settings:
+    errcheck:
+        check-type-assertions: true
+        exclude-functions:
+            - sync.Pool.Get
+            - "sync.(*Pool).Get"
+    gosec:
+        excludes:
+            - G104
+            - G304
+            - G306
 
 formatters:
     enable:
