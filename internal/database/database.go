@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"time"
@@ -12,6 +14,7 @@ import (
 
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
+	gormlogger "gorm.io/gorm/logger"
 )
 
 // Subscription represents a user's VPN subscription.
@@ -62,8 +65,10 @@ func Init(dbPath string) error {
 
 	var err error
 	// Open with PrepareStmt disabled to reduce memory overhead
+	// Use silent logger to suppress SQL query output in console
 	DB, err = gorm.Open(sqlite.Open(dbPath), &gorm.Config{
-		PrepareStmt: false, // Disable prepared statement cache to save memory
+		PrepareStmt: false,
+		Logger:      gormlogger.New(log.New(io.Discard, "", 0), gormlogger.Config{SlowThreshold: 200 * time.Millisecond, LogLevel: gormlogger.Silent}),
 	})
 	if err != nil {
 		return fmt.Errorf("failed to open database: %w", err)
@@ -239,6 +244,7 @@ func NewService(dbPath string) (*Service, error) {
 
 	db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{
 		PrepareStmt: false,
+		Logger:      gormlogger.New(log.New(io.Discard, "", 0), gormlogger.Config{SlowThreshold: 200 * time.Millisecond, LogLevel: gormlogger.Silent}),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
