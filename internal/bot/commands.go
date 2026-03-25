@@ -25,6 +25,10 @@ func (h *Handler) HandleStart(ctx context.Context, update tgbotapi.Update) {
 	chatID := update.Message.Chat.ID
 	username := h.getUsername(update.Message.From)
 
+	logger.Info("User started bot",
+		zap.Int64("chat_id", chatID),
+		zap.String("username", username))
+
 	sub, err := h.db.GetByTelegramID(ctx, chatID)
 	hasSubscription := err == nil && sub != nil && sub.Status == "active"
 
