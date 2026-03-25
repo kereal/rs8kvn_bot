@@ -19,29 +19,6 @@ linters:
         paths:
             - '.*_test\.go'
 
-issues:
-    exclude-rules:
-        # Exclude specific false positives
-        - text: "ctx is unused"
-          linters:
-              - unparam
-        - text: "sendWithRetry"
-          linters:
-              - unused
-
-linters-settings:
-    errcheck:
-        check-type-assertions: true
-        exclude-functions:
-            - sync.Pool.Get
-            - "sync.(*Pool).Get"
-    gosec:
-        excludes:
-            - G104
-            - G304
-            - G306
-            - G302
-
 formatters:
     enable:
         - gofmt
