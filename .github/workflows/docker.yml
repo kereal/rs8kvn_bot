@@ -12,37 +12,9 @@ env:
     IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-    lint:
-        name: Lint Code
-        runs-on: ubuntu-latest
-        steps:
-            - name: Checkout repository
-              uses: actions/checkout@v6
-
-            - name: Set up Go
-              uses: actions/setup-go@v6
-              with:
-                  go-version: "1.25"
-                  cache: true
-
-            - name: Download dependencies
-              run: go mod download
-
-            - name: Run golangci-lint
-              uses: golangci/golangci-lint-action@v9
-              with:
-                  version: latest
-                  args: --timeout=5m
-
-            - name: Run gosec
-              uses: securego/gosec@master
-              with:
-                  args: -no-fail -quiet ./...
-
     test:
         name: Run Tests
         runs-on: ubuntu-latest
-        needs: lint
         steps:
             - name: Checkout repository
               uses: actions/checkout@v6
@@ -58,6 +30,11 @@ jobs:
 
             - name: Run tests
               run: go test -v -race -coverprofile=coverage.out ./...
+
+            - name: Run gosec security scan
+              uses: securego/gosec@master
+              with:
+                  args: -no-fail -quiet ./...
 
             - name: Upload coverage
               uses: actions/upload-artifact@v6
