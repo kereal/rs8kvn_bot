@@ -1,43 +1,49 @@
-version: "2"
-
 run:
-  timeout: 5m
+    timeout: 5m
 
 linters:
-  enable:
-    - errcheck
-    - govet
-    - staticcheck
-    - unused
-    - misspell
-    - unconvert
-    - unparam
-    - gosec
-  disable:
-    - ineffassign
-  exclusions:
-    paths:
-      - _test\.go
-    rules:
-      - text: "ctx is unused"
-        linters:
-          - unparam
-      - text: "sendWithRetry"
-        linters:
-          - unused
-  settings:
-    errcheck:
-      check-type-assertions: true
-      exclude-functions:
-        - sync.Pool.Get
-        - "sync.(*Pool).Get"
-    gosec:
-      excludes:
-        - G104
-        - G304
-        - G306
+    enable:
+        - errcheck
+        - govet
+        - staticcheck
+        - unused
+        - misspell
+        - unconvert
+        - unparam
+        - gosec
+    disable:
+        - ineffassign
+    exclusions:
+        paths:
+            - _test\.go
+        rules:
+            - text: "ctx is unused"
+              linters:
+                  - unparam
+            - text: "sendWithRetry"
+              linters:
+                  - unused
+        issues:
+            - path: _test\.go
+            - text: "ctx is unused"
+              linters:
+                  - unparam
+            - text: "sendWithRetry"
+              linters:
+                  - unused
+    settings:
+        errcheck:
+            check-type-assertions: true
+            exclude-functions:
+                - sync.Pool.Get
+                - "sync.(*Pool).Get"
+        gosec:
+            excludes:
+                - G104
+                - G304
+                - G306
 
 formatters:
-  enable:
-    - gofmt
-    - goimports
+    enable:
+        - gofmt
+        - goimports
