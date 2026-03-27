@@ -247,7 +247,7 @@ func (h *Handler) createSubscription(ctx context.Context, chatID int64, username
 		TelegramID:      chatID,
 		Username:        username,
 		ClientID:        client.ID,
-		XUIHost:         h.cfg.XUIHost,
+		SubscriptionID:  client.SubID,
 		InboundID:       h.cfg.XUIInboundID,
 		TrafficLimit:    trafficBytes,
 		ExpiryTime:      expiryTime,
