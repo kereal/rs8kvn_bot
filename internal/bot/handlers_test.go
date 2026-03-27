@@ -50,7 +50,8 @@ func TestGetUsername(t *testing.T) {
 		user     *tgbotapi.User
 		expected string
 	}{
-		{"first name only", &tgbotapi.User{ID: 1, UserName: "testuser", FirstName: "Test"}, "Test"},
+		{"first name only", &tgbotapi.User{ID: 1, UserName: "testuser", FirstName: "Test"}, "testuser"},
+		{"first name only no username", &tgbotapi.User{ID: 1, FirstName: "Test"}, "Test"},
 		{"no name", &tgbotapi.User{ID: 1}, "user_1"},
 		{"nil user", nil, "unknown"},
 	}
