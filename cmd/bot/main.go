@@ -163,7 +163,6 @@ func main() {
 		logger.Fatal("Failed to start health check server", zap.Error(err))
 	}
 	healthServer.SetReady(true)
-	logger.Info("Health check server started", zap.Int("port", cfg.HealthCheckPort))
 	defer func() {
 		healthServer.SetReady(false)
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

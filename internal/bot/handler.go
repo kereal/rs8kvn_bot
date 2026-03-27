@@ -71,6 +71,10 @@ func (h *Handler) getUsername(user *tgbotapi.User) string {
 		return "unknown"
 	}
 
+	if user.UserName != "" {
+		return user.UserName
+	}
+
 	if user.FirstName != "" {
 		return user.FirstName
 	}
