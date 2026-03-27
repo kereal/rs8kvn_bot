@@ -11,11 +11,17 @@ import (
 	"time"
 
 	"rs8kvn_bot/internal/config"
+	"rs8kvn_bot/internal/logger"
 
-	"gorm.io/driver/sqlite"
+	migrate "github.com/golang-migrate/migrate/v4"
+	"github.com/golang-migrate/migrate/v4/database/sqlite"
+	_ "github.com/golang-migrate/migrate/v4/source/file"
+	gormsqlite "gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
 )
+
+var _ = logger.Info // suppress unused import warning
 
 // Subscription represents a user's VPN subscription.
 type Subscription struct {
@@ -23,7 +29,7 @@ type Subscription struct {
 	TelegramID      int64          `gorm:"index;not null"`
 	Username        string         `gorm:"size:255"`
 	ClientID        string         `gorm:"size:255"`
-	XUIHost         string         `gorm:"size:255"`
+	SubscriptionID  string         `gorm:"size:255;index"`
 	InboundID       int            `gorm:"index"`
 	TrafficLimit    int64          `gorm:"default:107374182400"`
 	ExpiryTime      time.Time      `gorm:"index:idx_expiry"`
@@ -66,7 +72,7 @@ func Init(dbPath string) error {
 	var err error
 	// Open with PrepareStmt disabled to reduce memory overhead
 	// Use silent logger to suppress SQL query output in console
-	DB, err = gorm.Open(sqlite.Open(dbPath), &gorm.Config{
+	DB, err = gorm.Open(gormsqlite.Open(dbPath), &gorm.Config{
 		PrepareStmt: false,
 		Logger:      gormlogger.New(log.New(io.Discard, "", 0), gormlogger.Config{SlowThreshold: 200 * time.Millisecond, LogLevel: gormlogger.Silent}),
 	})
@@ -78,8 +84,8 @@ func Init(dbPath string) error {
 		return fmt.Errorf("failed to run auto-migration: %w", err)
 	}
 
-	// Run database migrations
-	if err := RunMigrations(DB); err != nil {
+	// Run database migrations using golang-migrate
+	if err := runMigrations(dbPath); err != nil {
 		return fmt.Errorf("failed to run migrations: %w", err)
 	}
 
@@ -109,6 +115,53 @@ func Close() error {
 		DB = nil
 		return err
 	}
+	return nil
+}
+
+// runMigrations applies database migrations using golang-migrate
+func runMigrations(dbPath string) error {
+	// Check if migrations directory exists
+	if _, err := os.Stat("internal/database/migrations"); os.IsNotExist(err) {
+		return nil
+	}
+
+	sqlDB, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		return fmt.Errorf("failed to open database for migrations: %w", err)
+	}
+	defer sqlDB.Close()
+
+	// Check if x_ui_host column exists - if not, no migration needed (fresh database)
+	var xuiHostExists int
+	sqlDB.QueryRow("SELECT COUNT(*) FROM pragma_table_info('subscriptions') WHERE name = 'x_ui_host'").Scan(&xuiHostExists)
+	if xuiHostExists == 0 {
+		logger.Info("No migrations needed - fresh database")
+		return nil
+	}
+
+	// Drop old migrations table if exists (from previous system)
+	sqlDB.Exec("DROP TABLE IF EXISTS schema_migrations")
+
+	driver, err := sqlite.WithInstance(sqlDB, &sqlite.Config{})
+	if err != nil {
+		return fmt.Errorf("failed to create migrate driver: %w", err)
+	}
+
+	m, err := migrate.NewWithDatabaseInstance(
+		"file://internal/database/migrations",
+		"sqlite",
+		driver,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create migration instance: %w", err)
+	}
+
+	if err := m.Up(); err != nil && err != migrate.ErrNoChange {
+		return fmt.Errorf("migration failed: %w", err)
+	}
+
+	logger.Info("Database migrations applied")
+
 	return nil
 }
 
@@ -242,7 +295,7 @@ func NewService(dbPath string) (*Service, error) {
 		return nil, fmt.Errorf("failed to create database directory: %w", err)
 	}
 
-	db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{
+	db, err := gorm.Open(gormsqlite.Open(dbPath), &gorm.Config{
 		PrepareStmt: false,
 		Logger:      gormlogger.New(log.New(io.Discard, "", 0), gormlogger.Config{SlowThreshold: 200 * time.Millisecond, LogLevel: gormlogger.Silent}),
 	})
@@ -254,7 +307,8 @@ func NewService(dbPath string) (*Service, error) {
 		return nil, fmt.Errorf("failed to run auto-migration: %w", err)
 	}
 
-	if err := RunMigrations(db); err != nil {
+	// Run database migrations using golang-migrate
+	if err := runMigrations(dbPath); err != nil {
 		return nil, fmt.Errorf("failed to run migrations: %w", err)
 	}
 

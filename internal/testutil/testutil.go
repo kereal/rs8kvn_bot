@@ -281,7 +281,7 @@ func CreateTestSubscription(telegramID int64, username string, status string, ex
 		TelegramID:      telegramID,
 		Username:        username,
 		ClientID:        "test-client-id-" + username,
-		XUIHost:         "http://localhost:2053",
+		SubscriptionID:  username,
 		InboundID:       1,
 		TrafficLimit:    107374182400,
 		ExpiryTime:      expiry,
