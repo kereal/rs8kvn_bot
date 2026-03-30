@@ -224,3 +224,192 @@ func BenchmarkGenerateSubID_Parallel(b *testing.B) {
 		}
 	})
 }
+
+// BenchmarkGenerateInviteCode benchmarks invite code generation
+func BenchmarkGenerateInviteCode(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		GenerateInviteCode()
+	}
+}
+
+// BenchmarkGenerateInviteCode_Parallel benchmarks parallel invite code generation
+func BenchmarkGenerateInviteCode_Parallel(b *testing.B) {
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			GenerateInviteCode()
+		}
+	})
+}
+
+func TestGenerateInviteCode_Concurrency(t *testing.T) {
+	t.Run("concurrent generation is safe", func(t *testing.T) {
+		const goroutines = 100
+		const codesPerGoroutine = 100
+
+		results := make(chan string, goroutines*codesPerGoroutine)
+
+		for i := 0; i < goroutines; i++ {
+			go func() {
+				for j := 0; j < codesPerGoroutine; j++ {
+					results <- GenerateInviteCode()
+				}
+			}()
+		}
+
+		codes := make(map[string]bool)
+		for i := 0; i < goroutines*codesPerGoroutine; i++ {
+			code := <-results
+			require.False(t, codes[code], "Concurrent generation produced duplicate code: %s", code)
+			codes[code] = true
+		}
+
+		assert.Len(t, codes, goroutines*codesPerGoroutine, "All codes should be unique")
+	})
+}
+
+func TestGenerateInviteCode_Entropy(t *testing.T) {
+	t.Run("generates high entropy codes", func(t *testing.T) {
+		const iterations = 10000
+		charCounts := make(map[rune]int)
+
+		for i := 0; i < iterations; i++ {
+			code := GenerateInviteCode()
+			for _, c := range code {
+				charCounts[c]++
+			}
+		}
+
+		// Each character should appear roughly 1/36 of the time (36 possible chars)
+		// With 8 chars * 10000 iterations = 80000 total chars
+		// Expected count per char: 80000 / 36 ≈ 2222
+		expectedPerChar := float64(iterations*8) / 36.0
+
+		for char, count := range charCounts {
+			// Allow 50% deviation from expected (rough check for randomness)
+			ratio := float64(count) / expectedPerChar
+			assert.Greater(t, ratio, 0.3, "Character %c appears too rarely: %d (ratio: %.2f)", char, count, ratio)
+			assert.Less(t, ratio, 3.0, "Character %c appears too frequently: %d (ratio: %.2f)", char, count, ratio)
+		}
+	})
+}
+
+func TestGenerateUUID_Entropy(t *testing.T) {
+	t.Run("version bit is always 4", func(t *testing.T) {
+		for i := 0; i < 1000; i++ {
+			uuid := GenerateUUID()
+			require.Len(t, uuid, 36, "UUID length")
+			assert.Equal(t, '4', uuid[14], "Version bit at position 14 should be '4'")
+		}
+	})
+
+	t.Run("variant bits are valid", func(t *testing.T) {
+		for i := 0; i < 1000; i++ {
+			uuid := GenerateUUID()
+			require.Len(t, uuid, 36, "UUID length")
+			variant := uuid[19]
+			assert.Contains(t, []byte{'8', '9', 'a', 'b'}, variant, "Variant bits should be 8, 9, a, or b")
+		}
+	})
+}
+
+func TestGenerateSubID_Entropy(t *testing.T) {
+	t.Run("generates high entropy IDs", func(t *testing.T) {
+		const iterations = 10000
+		charCounts := make(map[rune]int)
+
+		for i := 0; i < iterations; i++ {
+			id := GenerateSubID()
+			for _, c := range id {
+				charCounts[c]++
+			}
+		}
+
+		// Each character should appear roughly 1/16 of the time (hex chars)
+		// With 10 chars * 10000 iterations = 100000 total chars
+		// Expected count per char: 100000 / 16 = 6250
+		expectedPerChar := float64(iterations*10) / 16.0
+
+		for char, count := range charCounts {
+			ratio := float64(count) / expectedPerChar
+			assert.Greater(t, ratio, 0.5, "Character %c appears too rarely: %d (ratio: %.2f)", char, count, ratio)
+			assert.Less(t, ratio, 2.0, "Character %c appears too frequently: %d (ratio: %.2f)", char, count, ratio)
+		}
+	})
+}
+
+func TestGenerateUUID_Stress(t *testing.T) {
+	t.Run("stress test uniqueness", func(t *testing.T) {
+		const iterations = 100000
+		uuids := make(map[string]struct{}, iterations)
+
+		for i := 0; i < iterations; i++ {
+			uuid := GenerateUUID()
+			if _, exists := uuids[uuid]; exists {
+				t.Fatalf("Duplicate UUID found after %d iterations: %s", i, uuid)
+			}
+			uuids[uuid] = struct{}{}
+		}
+
+		assert.Len(t, uuids, iterations, "All UUIDs should be unique")
+	})
+}
+
+func TestGenerateSubID_Stress(t *testing.T) {
+	t.Run("stress test uniqueness", func(t *testing.T) {
+		const iterations = 100000
+		ids := make(map[string]struct{}, iterations)
+
+		for i := 0; i < iterations; i++ {
+			id := GenerateSubID()
+			if _, exists := ids[id]; exists {
+				t.Fatalf("Duplicate SubID found after %d iterations: %s", i, id)
+			}
+			ids[id] = struct{}{}
+		}
+
+		assert.Len(t, ids, iterations, "All SubIDs should be unique")
+	})
+}
+
+func TestGenerateInviteCode_Stress(t *testing.T) {
+	t.Run("stress test uniqueness", func(t *testing.T) {
+		const iterations = 100000
+		codes := make(map[string]struct{}, iterations)
+
+		for i := 0; i < iterations; i++ {
+			code := GenerateInviteCode()
+			if _, exists := codes[code]; exists {
+				t.Fatalf("Duplicate code found after %d iterations: %s", i, code)
+			}
+			codes[code] = struct{}{}
+		}
+
+		assert.Len(t, codes, iterations, "All codes should be unique")
+	})
+}
+
+func TestGenerateUUID_DashesPosition(t *testing.T) {
+	t.Run("dashes are at correct positions", func(t *testing.T) {
+		for i := 0; i < 100; i++ {
+			uuid := GenerateUUID()
+			require.Len(t, uuid, 36, "UUID length")
+			assert.Equal(t, '-', rune(uuid[8]), "Dash at position 8")
+			assert.Equal(t, '-', rune(uuid[13]), "Dash at position 13")
+			assert.Equal(t, '-', rune(uuid[18]), "Dash at position 18")
+			assert.Equal(t, '-', rune(uuid[23]), "Dash at position 23")
+		}
+	})
+}
+
+func TestGenerateSubID_Format(t *testing.T) {
+	t.Run("contains only hex characters", func(t *testing.T) {
+		for i := 0; i < 100; i++ {
+			id := GenerateSubID()
+			assert.Len(t, id, 10, "SubID length")
+			for _, c := range id {
+				assert.True(t, (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'),
+					"Character %c is not a valid hex character", c)
+			}
+		}
+	})
+}

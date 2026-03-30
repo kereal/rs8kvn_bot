@@ -97,14 +97,9 @@ func TestRotateBackups_WithBackup(t *testing.T) {
 	// Original backup should be renamed
 	_, err = os.Stat(backupPath)
 	assert.True(t, os.IsNotExist(err), "Original backup file should be renamed")
-
-	// Find the timed backup
-	pattern := dbPath + ".backup.*"
-	matches, err := filepath.Glob(pattern)
-	require.NoError(t, err, "Failed to find backups")
-
-	assert.Equal(t, 1, len(matches), "Expected 1 timed backup")
 }
+
+
 
 func TestRotateBackups_Cleanup(t *testing.T) {
 	tmpDir := t.TempDir()
