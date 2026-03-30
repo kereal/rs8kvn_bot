@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
-	mathrand "math/rand"
 )
 
 // GenerateUUID generates a cryptographically secure UUID v4 identifier.
@@ -19,9 +18,7 @@ func GenerateUUID() string {
 	// Read random bytes
 	if _, err := io.ReadFull(rand.Reader, uuid); err != nil {
 		// Fallback to pseudo-random if crypto/rand fails (should never happen)
-		for i := range uuid {
-			uuid[i] = byte(mathrand.Int())
-		}
+		panic(fmt.Sprintf("crypto/rand failed: %v", err))
 	}
 
 	// Set version to 4 (random UUID) - bits 12-15 of time_hi_and_version
@@ -49,9 +46,7 @@ func GenerateSubID() string {
 	bytes := make([]byte, 5)
 
 	if _, err := io.ReadFull(rand.Reader, bytes); err != nil {
-		for i := range bytes {
-			bytes[i] = byte(mathrand.Int())
-		}
+		panic(fmt.Sprintf("crypto/rand failed: %v", err))
 	}
 
 	return hex.EncodeToString(bytes)
@@ -64,9 +59,7 @@ func GenerateInviteCode() string {
 	bytes := make([]byte, 8)
 
 	if _, err := io.ReadFull(rand.Reader, bytes); err != nil {
-		for i := range bytes {
-			bytes[i] = byte(mathrand.Int())
-		}
+		panic(fmt.Sprintf("crypto/rand failed: %v", err))
 	}
 
 	for i := range bytes {

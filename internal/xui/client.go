@@ -326,8 +326,15 @@ func (c *Client) AddClientWithID(ctx context.Context, inboundID int, email, clie
 		return nil, fmt.Errorf("failed to parse response: %w", err)
 	}
 
-	if !simpleResp.Success {
-		return nil, fmt.Errorf("failed to add client: %s", simpleResp.Msg)
+	// 3x-ui sometimes returns success=false but with a success message
+	// Check the message content as a fallback
+	if !simpleResp.Success && simpleResp.Msg != "" {
+		if containsSuccessKeywords(simpleResp.Msg) {
+			logger.Info("3x-ui returned success=false but operation appears successful",
+				zap.String("message", simpleResp.Msg))
+		} else {
+			return nil, fmt.Errorf("failed to add client: %s", simpleResp.Msg)
+		}
 	}
 
 	return &ClientConfig{
@@ -402,7 +409,7 @@ func (c *Client) UpdateClient(ctx context.Context, inboundID int, clientID, emai
 				"enable":     true,
 				"flow":       "xtls-rprx-vision",
 				"subId":      subID,
-				"reset":      config.SubscriptionResetDay,
+				"reset":      30,
 				"tgId":       fmt.Sprintf("%d", tgID),
 				"comment":    comment,
 			},

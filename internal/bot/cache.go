@@ -65,7 +65,9 @@ func (c *SubscriptionCache) Set(telegramID int64, sub *database.Subscription) {
 				oldestTime = entry.expiresAt
 			}
 		}
-		delete(c.items, oldestID)
+		if oldestID != 0 {
+			delete(c.items, oldestID)
+		}
 	}
 
 	c.items[telegramID] = &cacheEntry{
