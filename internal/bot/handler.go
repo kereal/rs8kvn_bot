@@ -23,7 +23,7 @@ const (
 )
 
 type Handler struct {
-	bot           *tgbotapi.BotAPI
+	bot           interfaces.BotAPI
 	cfg           *config.Config
 	db            interfaces.DatabaseService
 	xui           interfaces.XUIClient
@@ -33,7 +33,7 @@ type Handler struct {
 	inProgress    map[int64]struct{}
 }
 
-func NewHandler(bot *tgbotapi.BotAPI, cfg *config.Config, db interfaces.DatabaseService, xuiClient interfaces.XUIClient) *Handler {
+func NewHandler(bot interfaces.BotAPI, cfg *config.Config, db interfaces.DatabaseService, xuiClient interfaces.XUIClient) *Handler {
 	return &Handler{
 		bot:         bot,
 		cfg:         cfg,

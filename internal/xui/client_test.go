@@ -1021,3 +1021,44 @@ func TestUpdateClient_EmptyClientID(t *testing.T) {
 	err = client.UpdateClient(ctx, 1, "", "testuser@example.com", "sub-id-123", 107374182400, time.UnixMilli(0), 12345, "from: @referrer")
 	require.Error(t, err, "UpdateClient() should return error when clientID is empty")
 }
+
+func TestPing_Success(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/login", r.URL.Path, "Expected /login path")
+		assert.Equal(t, "POST", r.Method, "Expected POST method")
+
+		resp := APIResponse{
+			Success: true,
+			Msg:     "Login successful",
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, "admin", "password")
+	require.NoError(t, err, "NewClient() returned error")
+	ctx := context.Background()
+
+	err = client.Ping(ctx)
+	require.NoError(t, err, "Ping() should return nil for successful ping")
+}
+
+func TestPing_Failure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := APIResponse{
+			Success: false,
+			Msg:     "Connection failed",
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, "admin", "password")
+	require.NoError(t, err, "NewClient() returned error")
+	ctx := context.Background()
+
+	err = client.Ping(ctx)
+	require.Error(t, err, "Ping() should return error for failed connection")
+}
