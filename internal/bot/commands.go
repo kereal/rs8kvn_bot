@@ -91,8 +91,10 @@ func (h *Handler) handleBindTrial(ctx context.Context, chatID int64, username, s
 	h.SendMessage(ctx, chatID, fmt.Sprintf("✅ Подписка активирована!\n\nДобро пожаловать!\n\nВам доступно: %dГб\n\nИспользуйте /start для работы с ботом.", h.cfg.TrafficLimitGB))
 
 	if h.cfg.TelegramAdminID > 0 {
-		invite, _ := h.db.GetInviteByCode(ctx, sub.InviteCode)
-		if invite != nil {
+		invite, err := h.db.GetInviteByCode(ctx, sub.InviteCode)
+		if err != nil {
+			logger.Warn("Failed to get invite for admin notification", zap.Error(err))
+		} else if invite != nil {
 			h.SendMessage(ctx, h.cfg.TelegramAdminID, fmt.Sprintf("🔔 Новый пользователь активировал подписку по реферальной ссылке!\n\n- Username: @%s\n- Telegram ID: %d\n- Пригласил: %d", username, chatID, invite.ReferrerTGID))
 		}
 	}

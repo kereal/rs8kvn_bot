@@ -82,6 +82,8 @@ func (s *Server) Start(ctx context.Context) error {
 	go func() {
 		if err := s.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			logger.Error("HTTP server error", zap.Error(err))
+		} else if err == http.ErrServerClosed {
+			logger.Info("HTTP server stopped gracefully")
 		}
 	}()
 
