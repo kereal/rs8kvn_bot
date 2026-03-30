@@ -5,9 +5,10 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
 
 	"rs8kvn_bot/internal/config"
 	"rs8kvn_bot/internal/database"
@@ -47,14 +48,10 @@ func TestHandleInvite_InvalidCode(t *testing.T) {
 
 	srv.handleInvite(rec, req)
 
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("handleInvite() status = %d, want %d", rec.Code, http.StatusNotFound)
-	}
+	assert.Equal(t, http.StatusNotFound, rec.Code, "handleInvite() status")
 
 	body := rec.Body.String()
-	if !strings.Contains(body, "Приглашение не найдено") {
-		t.Errorf("handleInvite() body should contain error message, got: %s", body)
-	}
+	assert.Contains(t, body, "Приглашение не найдено", "handleInvite() body should contain error message")
 }
 
 func TestHandleInvite_RateLimitExceeded(t *testing.T) {
@@ -86,14 +83,10 @@ func TestHandleInvite_RateLimitExceeded(t *testing.T) {
 
 	srv.handleInvite(rec, req)
 
-	if rec.Code != http.StatusTooManyRequests {
-		t.Errorf("handleInvite() status = %d, want %d", rec.Code, http.StatusTooManyRequests)
-	}
+	assert.Equal(t, http.StatusTooManyRequests, rec.Code, "handleInvite() status")
 
 	body := rec.Body.String()
-	if !strings.Contains(body, "Слишком много запросов") {
-		t.Errorf("handleInvite() body should contain rate limit message, got: %s", body)
-	}
+	assert.Contains(t, body, "Слишком много запросов", "handleInvite() body should contain rate limit message")
 }
 
 func TestHandleInvite_Success(t *testing.T) {
@@ -162,9 +155,7 @@ func TestHandleInvite_Success(t *testing.T) {
 
 	srv.handleInvite(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Errorf("handleInvite() status = %d, want %d", rec.Code, http.StatusOK)
-	}
+	assert.Equal(t, http.StatusOK, rec.Code, "handleInvite() status")
 
 	body := rec.Body.String()
 
@@ -178,9 +169,7 @@ func TestHandleInvite_Success(t *testing.T) {
 	}
 
 	for _, expected := range expectedElements {
-		if !strings.Contains(body, expected) {
-			t.Errorf("handleInvite() body should contain '%s'", expected)
-		}
+		assert.Contains(t, body, expected, "handleInvite() body should contain expected element")
 	}
 }
 
@@ -223,14 +212,10 @@ func TestHandleInvite_XUIError(t *testing.T) {
 
 	srv.handleInvite(rec, req)
 
-	if rec.Code != http.StatusInternalServerError {
-		t.Errorf("handleInvite() status = %d, want %d", rec.Code, http.StatusInternalServerError)
-	}
+	assert.Equal(t, http.StatusInternalServerError, rec.Code, "handleInvite() status")
 
 	body := rec.Body.String()
-	if !strings.Contains(body, "Ошибка сервера") {
-		t.Errorf("handleInvite() body should contain error message, got: %s", body)
-	}
+	assert.Contains(t, body, "Ошибка сервера", "handleInvite() body should contain error message")
 }
 
 func TestRenderTrialPage(t *testing.T) {
@@ -259,9 +244,7 @@ func TestRenderTrialPage(t *testing.T) {
 	}
 
 	for _, expected := range expectedElements {
-		if !strings.Contains(html, expected) {
-			t.Errorf("renderTrialPage() should contain '%s'", expected)
-		}
+		assert.Contains(t, html, expected, "renderTrialPage() should contain expected element")
 	}
 }
 
@@ -271,14 +254,10 @@ func TestRenderErrorPage(t *testing.T) {
 	html := srv.renderErrorPage("Тестовая ошибка")
 
 	// Check that HTML contains error message
-	if !strings.Contains(html, "Тестовая ошибка") {
-		t.Errorf("renderErrorPage() should contain error message")
-	}
+	assert.Contains(t, html, "Тестовая ошибка", "renderErrorPage() should contain error message")
 
 	// Check HTML structure
-	if !strings.Contains(html, "<!DOCTYPE html>") {
-		t.Errorf("renderErrorPage() should be valid HTML")
-	}
+	assert.Contains(t, html, "<!DOCTYPE html>", "renderErrorPage() should be valid HTML")
 }
 
 func TestGetClientIP_Direct(t *testing.T) {
@@ -287,9 +266,7 @@ func TestGetClientIP_Direct(t *testing.T) {
 
 	ip := getClientIP(req)
 
-	if ip != "192.168.1.100" {
-		t.Errorf("getClientIP() = %s, want 192.168.1.100", ip)
-	}
+	assert.Equal(t, "192.168.1.100", ip, "getClientIP()")
 }
 
 func TestGetClientIP_XForwardedFor(t *testing.T) {
@@ -300,9 +277,7 @@ func TestGetClientIP_XForwardedFor(t *testing.T) {
 	ip := getClientIP(req)
 
 	// Should use first IP from X-Forwarded-For
-	if ip != "203.0.113.50" {
-		t.Errorf("getClientIP() = %s, want 203.0.113.50", ip)
-	}
+	assert.Equal(t, "203.0.113.50", ip, "getClientIP() should use first IP from X-Forwarded-For")
 }
 
 func TestGenerateSubID(t *testing.T) {
@@ -310,20 +285,14 @@ func TestGenerateSubID(t *testing.T) {
 	id2 := utils.GenerateSubID()
 
 	// Should be 10 characters (5 random bytes hex-encoded)
-	if len(id1) != 10 {
-		t.Errorf("GenerateSubID() length = %d, want 10", len(id1))
-	}
+	assert.Equal(t, 10, len(id1), "GenerateSubID() length")
 
 	// Should be different each time
-	if id1 == id2 {
-		t.Error("GenerateSubID() should generate different IDs")
-	}
+	assert.NotEqual(t, id1, id2, "GenerateSubID() should generate different IDs")
 
 	// Should only contain hex characters
 	for _, c := range id1 {
-		if !isHexDigit(c) {
-			t.Errorf("GenerateSubID() contains non-hex character: %c", c)
-		}
+		assert.True(t, isHexDigit(c), "GenerateSubID() contains non-hex character: %c", c)
 	}
 }
 
@@ -348,9 +317,7 @@ func TestHandleInvite_EmptyCode(t *testing.T) {
 
 	srv.handleInvite(rec, req)
 
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("handleInvite() status = %d, want %d", rec.Code, http.StatusNotFound)
-	}
+	assert.Equal(t, http.StatusNotFound, rec.Code, "handleInvite() status")
 }
 
 func TestHandleInvite_DatabaseError(t *testing.T) {
@@ -375,9 +342,7 @@ func TestHandleInvite_DatabaseError(t *testing.T) {
 
 	srv.handleInvite(rec, req)
 
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("handleInvite() status = %d, want %d", rec.Code, http.StatusNotFound)
-	}
+	assert.Equal(t, http.StatusNotFound, rec.Code, "handleInvite() status")
 }
 
 func TestRenderTrialPage_HappLink(t *testing.T) {
@@ -388,7 +353,5 @@ func TestRenderTrialPage_HappLink(t *testing.T) {
 
 	// Check happ:// link is generated correctly
 	expectedHappLink := "happ://add/" + subURL
-	if !strings.Contains(html, expectedHappLink) {
-		t.Errorf("renderTrialPage() should contain happ link '%s'", expectedHappLink)
-	}
+	assert.Contains(t, html, expectedHappLink, "renderTrialPage() should contain happ link")
 }

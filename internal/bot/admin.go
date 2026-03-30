@@ -3,6 +3,7 @@ package bot
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -52,7 +53,7 @@ func (h *Handler) handleAdminLastReg(ctx context.Context, chatID int64, username
 			username = "unknown"
 		}
 		dateStr := sub.CreatedAt.Format("02.01.2006 15:04:05")
-		fmt.Fprintf(&sb, "%d │ [@%s](https://t.me/%s) │ %s\n", sub.ID, username, username, dateStr)
+		fmt.Fprintf(&sb, "%d │ [@%s](https://t.me/%s) │ %s\n", sub.ID, username, url.PathEscape(username), dateStr)
 	}
 
 	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, sb.String())
@@ -337,7 +338,7 @@ func (h *Handler) handleAdminStats(ctx context.Context, chatID int64, username s
 	}
 
 	// Get counts efficiently using SQL COUNT queries
-	totalCount, err := h.db.CountActiveSubscriptions(ctx)
+	totalCount, err := h.db.CountAllSubscriptions(ctx)
 	if err != nil {
 		logger.Error("Failed to count subscriptions for stats", zap.Error(err))
 		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "❌ Ошибка получения статистики")
