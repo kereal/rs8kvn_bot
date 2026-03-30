@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/getsentry/sentry-go"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 )
 
@@ -28,9 +30,7 @@ func TestSentryLevelFromString(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := sentryLevelFromString(tt.input)
-			if result != tt.expected {
-				t.Errorf("sentryLevelFromString(%q) = %v, want %v", tt.input, result, tt.expected)
-			}
+			assert.Equal(t, tt.expected, result, "sentryLevelFromString(%q)", tt.input)
 		})
 	}
 }
@@ -40,15 +40,11 @@ func TestInit_CreatesDirectory(t *testing.T) {
 	logPath := filepath.Join(tmpDir, "subdir", "test.log")
 
 	_, err := Init(logPath, "info")
-	// Ignore sync errors on stdout/stderr
-	if err != nil {
-		t.Fatalf("Init() error = %v", err)
-	}
+	require.NoError(t, err, "Init() error")
 
 	// Verify directory was created
-	if _, err := os.Stat(filepath.Dir(logPath)); os.IsNotExist(err) {
-		t.Fatal("Init() did not create parent directory")
-	}
+	_, err = os.Stat(filepath.Dir(logPath))
+	assert.NoError(t, err, "Init() did not create parent directory")
 
 	Close()
 }
@@ -59,10 +55,7 @@ func TestInit_InvalidLogLevel(t *testing.T) {
 
 	// Invalid log level should default to info
 	_, err := Init(logPath, "invalid")
-	// Ignore sync errors on stdout/stderr
-	if err != nil {
-		t.Fatalf("Init() with invalid level should not error, got: %v", err)
-	}
+	require.NoError(t, err, "Init() with invalid level should not error")
 
 	Close()
 }
@@ -71,9 +64,8 @@ func TestInfo(t *testing.T) {
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
 
-	if _, err := Init(logPath, "info"); err != nil {
-		t.Fatalf("Init() error = %v", err)
-	}
+	_, err := Init(logPath, "info")
+	require.NoError(t, err, "Init() error")
 	defer Close()
 
 	// Should not panic
@@ -85,9 +77,8 @@ func TestError(t *testing.T) {
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
 
-	if _, err := Init(logPath, "info"); err != nil {
-		t.Fatalf("Init() error = %v", err)
-	}
+	_, err := Init(logPath, "info")
+	require.NoError(t, err, "Init() error")
 	defer Close()
 
 	// Should not panic
@@ -99,9 +90,8 @@ func TestDebug(t *testing.T) {
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
 
-	if _, err := Init(logPath, "debug"); err != nil {
-		t.Fatalf("Init() error = %v", err)
-	}
+	_, err := Init(logPath, "debug")
+	require.NoError(t, err, "Init() error")
 	defer Close()
 
 	// Should not panic
@@ -113,9 +103,8 @@ func TestWarn(t *testing.T) {
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
 
-	if _, err := Init(logPath, "info"); err != nil {
-		t.Fatalf("Init() error = %v", err)
-	}
+	_, err := Init(logPath, "info")
+	require.NoError(t, err, "Init() error")
 	defer Close()
 
 	// Should not panic
@@ -127,9 +116,8 @@ func TestSync(t *testing.T) {
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
 
-	if _, err := Init(logPath, "info"); err != nil {
-		t.Fatalf("Init() error = %v", err)
-	}
+	_, err := Init(logPath, "info")
+	require.NoError(t, err, "Init() error")
 	defer Close()
 
 	// Sync may return error for stdout on some systems, that's acceptable
@@ -147,9 +135,8 @@ func TestClose(t *testing.T) {
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
 
-	if _, err := Init(logPath, "info"); err != nil {
-		t.Fatalf("Init() error = %v", err)
-	}
+	_, err := Init(logPath, "info")
+	require.NoError(t, err, "Init() error")
 
 	// Close may return sync error for stdout on some systems, that's acceptable
 	_ = Close()
@@ -166,9 +153,8 @@ func TestClose_MultipleCalls(t *testing.T) {
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
 
-	if _, err := Init(logPath, "info"); err != nil {
-		t.Fatalf("Init() error = %v", err)
-	}
+	_, err := Init(logPath, "info")
+	require.NoError(t, err, "Init() error")
 
 	// First close - ignore sync errors for stdout
 	_ = Close()
@@ -181,9 +167,8 @@ func TestLogFileWritten(t *testing.T) {
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
 
-	if _, err := Init(logPath, "info"); err != nil {
-		t.Fatalf("Init() error = %v", err)
-	}
+	_, err := Init(logPath, "info")
+	require.NoError(t, err, "Init() error")
 
 	Info("test message for file")
 
@@ -193,20 +178,13 @@ func TestLogFileWritten(t *testing.T) {
 
 	// Check file exists and has content
 	content, err := os.ReadFile(logPath)
-	// Ignore sync errors on stdout/stderr
-	if err != nil {
-		t.Fatalf("Failed to read log file: %v", err)
-	}
+	require.NoError(t, err, "Failed to read log file")
 
-	if len(content) == 0 {
-		t.Error("Log file is empty")
-	}
+	assert.NotEmpty(t, content, "Log file is empty")
 
 	// Check message is in file
 	contentStr := string(content)
-	if len(contentStr) < 10 {
-		t.Error("Log file content too short")
-	}
+	assert.Greater(t, len(contentStr), 10, "Log file content too short")
 }
 
 // formatArgs function removed - no longer needed with structured logging
@@ -218,13 +196,8 @@ func TestNewService(t *testing.T) {
 	logPath := filepath.Join(tmpDir, "test.log")
 
 	service, err := NewService(logPath, "info")
-	// Ignore sync errors on stdout/stderr
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
-	if service == nil {
-		t.Fatal("NewService() returned nil")
-	}
+	require.NoError(t, err, "NewService() error")
+	require.NotNil(t, service, "NewService() returned nil")
 
 	// Clean up
 	service.Close()
@@ -235,15 +208,11 @@ func TestNewService_CreatesDirectory(t *testing.T) {
 	logPath := filepath.Join(tmpDir, "subdir", "test.log")
 
 	service, err := NewService(logPath, "info")
-	// Ignore sync errors on stdout/stderr
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
+	require.NoError(t, err, "NewService() error")
 
 	// Verify directory was created
-	if _, err := os.Stat(filepath.Dir(logPath)); os.IsNotExist(err) {
-		t.Fatal("NewService() did not create parent directory")
-	}
+	_, err = os.Stat(filepath.Dir(logPath))
+	assert.NoError(t, err, "NewService() did not create parent directory")
 
 	service.Close()
 }
@@ -253,9 +222,7 @@ func TestService_Close(t *testing.T) {
 	logPath := filepath.Join(tmpDir, "test.log")
 
 	service, err := NewService(logPath, "info")
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
+	require.NoError(t, err, "NewService() error")
 
 	// Close may return sync error on stdout, which is expected
 	_ = service.Close()
@@ -266,10 +233,7 @@ func TestService_Info(t *testing.T) {
 	logPath := filepath.Join(tmpDir, "test.log")
 
 	service, err := NewService(logPath, "info")
-	// Ignore sync errors on stdout/stderr
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
+	require.NoError(t, err, "NewService() error")
 	defer service.Close()
 
 	// Should not panic
@@ -282,10 +246,7 @@ func TestService_Debug(t *testing.T) {
 	logPath := filepath.Join(tmpDir, "test.log")
 
 	service, err := NewService(logPath, "debug")
-	// Ignore sync errors on stdout/stderr
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
+	require.NoError(t, err, "NewService() error")
 	defer service.Close()
 
 	service.Debug("test debug message")
@@ -297,10 +258,7 @@ func TestService_Warn(t *testing.T) {
 	logPath := filepath.Join(tmpDir, "test.log")
 
 	service, err := NewService(logPath, "info")
-	// Ignore sync errors on stdout/stderr
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
+	require.NoError(t, err, "NewService() error")
 	defer service.Close()
 
 	service.Warn("test warn message")
@@ -312,10 +270,7 @@ func TestService_Error(t *testing.T) {
 	logPath := filepath.Join(tmpDir, "test.log")
 
 	service, err := NewService(logPath, "info")
-	// Ignore sync errors on stdout/stderr
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
+	require.NoError(t, err, "NewService() error")
 	defer service.Close()
 
 	service.Error("test error message")
@@ -327,16 +282,11 @@ func TestService_With(t *testing.T) {
 	logPath := filepath.Join(tmpDir, "test.log")
 
 	service, err := NewService(logPath, "info")
-	// Ignore sync errors on stdout/stderr
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
+	require.NoError(t, err, "NewService() error")
 	defer service.Close()
 
 	newService := service.With(zap.String("key", "value"))
-	if newService == nil {
-		t.Error("With() returned nil")
-	}
+	assert.NotNil(t, newService, "With() returned nil")
 
 	newService.Info("test with field")
 }
@@ -346,19 +296,14 @@ func TestService_WithFields(t *testing.T) {
 	logPath := filepath.Join(tmpDir, "test.log")
 
 	service, err := NewService(logPath, "info")
-	// Ignore sync errors on stdout/stderr
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
+	require.NoError(t, err, "NewService() error")
 	defer service.Close()
 
 	newService := service.With(
 		zap.String("key1", "value1"),
 		zap.Int("key2", 123),
 	)
-	if newService == nil {
-		t.Error("With() returned nil")
-	}
+	assert.NotNil(t, newService, "With() returned nil")
 
 	newService.Info("test with fields")
 }
@@ -368,10 +313,7 @@ func TestService_SetSentryHub(t *testing.T) {
 	logPath := filepath.Join(tmpDir, "test.log")
 
 	service, err := NewService(logPath, "info")
-	// Ignore sync errors on stdout/stderr
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
+	require.NoError(t, err, "NewService() error")
 	defer service.Close()
 
 	// Should not panic with nil hub
@@ -385,9 +327,8 @@ func TestTgbotapiLogger_Println(t *testing.T) {
 	logPath := filepath.Join(tmpDir, "test.log")
 
 	// Initialize logger first
-	if _, err := Init(logPath, "info"); err != nil {
-		t.Fatalf("Init() error = %v", err)
-	}
+	_, err := Init(logPath, "info")
+	require.NoError(t, err, "Init() error")
 	defer Close()
 
 	logger := &tgbotapiLogger{}
@@ -400,9 +341,8 @@ func TestTgbotapiLogger_Printf(t *testing.T) {
 	logPath := filepath.Join(tmpDir, "test.log")
 
 	// Initialize logger first
-	if _, err := Init(logPath, "info"); err != nil {
-		t.Fatalf("Init() error = %v", err)
-	}
+	_, err := Init(logPath, "info")
+	require.NoError(t, err, "Init() error")
 	defer Close()
 
 	logger := &tgbotapiLogger{}
@@ -417,36 +357,24 @@ func TestStdLogWriter_Write(t *testing.T) {
 	logPath := filepath.Join(tmpDir, "test.log")
 
 	// Initialize logger first
-	if _, err := Init(logPath, "info"); err != nil {
-		t.Fatalf("Init() error = %v", err)
-	}
+	_, err := Init(logPath, "info")
+	require.NoError(t, err, "Init() error")
 	defer Close()
 
 	writer := &stdLogWriter{}
 
 	// Test writing
 	n, err := writer.Write([]byte("test message\n"))
-	// Ignore sync errors on stdout/stderr
-	if err != nil {
-		t.Errorf("Write() error = %v", err)
-	}
-	if n == 0 {
-		t.Error("Write() returned 0 bytes")
-	}
+	assert.NoError(t, err, "Write() error")
+	assert.Greater(t, n, 0, "Write() returned 0 bytes")
 
 	// Test empty message
 	n, err = writer.Write([]byte(""))
-	// Ignore sync errors on stdout/stderr
-	if err != nil {
-		t.Errorf("Write() error = %v", err)
-	}
+	assert.NoError(t, err, "Write() error")
 
 	// Test whitespace only
 	n, err = writer.Write([]byte("   \n\t  "))
-	// Ignore sync errors on stdout/stderr
-	if err != nil {
-		t.Errorf("Write() error = %v", err)
-	}
+	assert.NoError(t, err, "Write() error")
 }
 
 // ==================== SetSentryHub Tests ====================
@@ -463,22 +391,16 @@ func TestWriter(t *testing.T) {
 	logPath := filepath.Join(tmpDir, "test.log")
 
 	// Initialize logger first
-	if _, err := Init(logPath, "info"); err != nil {
-		t.Fatalf("Init() error = %v", err)
-	}
+	_, err := Init(logPath, "info")
+	require.NoError(t, err, "Init() error")
 	defer Close()
 
 	writer := Writer()
-	if writer == nil {
-		t.Error("Writer() returned nil")
-	}
+	assert.NotNil(t, writer, "Writer() returned nil")
 
 	// Test writing through the returned writer
-	_, err := writer.Write([]byte("test message\n"))
-	// Ignore sync errors on stdout/stderr
-	if err != nil {
-		t.Errorf("Write() error = %v", err)
-	}
+	_, err = writer.Write([]byte("test message\n"))
+	assert.NoError(t, err, "Write() error")
 }
 
 // ==================== RedirectStdLog Tests ====================
@@ -488,9 +410,8 @@ func TestRedirectStdLog(t *testing.T) {
 	logPath := filepath.Join(tmpDir, "test.log")
 
 	// Initialize logger first
-	if _, err := Init(logPath, "info"); err != nil {
-		t.Fatalf("Init() error = %v", err)
-	}
+	_, err := Init(logPath, "info")
+	require.NoError(t, err, "Init() error")
 	defer Close()
 
 	// Should not panic
@@ -522,9 +443,8 @@ func TestCaptureToSentry(t *testing.T) {
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
 
-	if _, err := Init(logPath, "info"); err != nil {
-		t.Fatalf("Init() error = %v", err)
-	}
+	_, err := Init(logPath, "info")
+	require.NoError(t, err, "Init() error")
 	defer Close()
 
 	// Should not panic
@@ -541,17 +461,13 @@ func TestService_WithError(t *testing.T) {
 	logPath := filepath.Join(tmpDir, "test.log")
 
 	service, err := NewService(logPath, "info")
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
+	require.NoError(t, err, "NewService() error")
 	defer service.Close()
 
 	testErr := fmt.Errorf("test error with context")
 
 	newService := service.WithError(testErr)
-	if newService == nil {
-		t.Error("WithError() should not return nil")
-	}
+	assert.NotNil(t, newService, "WithError() should not return nil")
 
 	newService.Info("logged with error")
 }
@@ -561,16 +477,12 @@ func TestService_WithError_NoSentry(t *testing.T) {
 	logPath := filepath.Join(tmpDir, "test.log")
 
 	service, err := NewService(logPath, "info")
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
+	require.NoError(t, err, "NewService() error")
 	defer service.Close()
 
 	testErr := fmt.Errorf("test error without sentry")
 	newService := service.WithError(testErr)
-	if newService == nil {
-		t.Error("WithError() should not return nil")
-	}
+	assert.NotNil(t, newService, "WithError() should not return nil")
 	newService.Info("test")
 }
 
@@ -579,9 +491,7 @@ func TestService_CaptureSentry_NoSentry(t *testing.T) {
 	logPath := filepath.Join(tmpDir, "test.log")
 
 	service, err := NewService(logPath, "info")
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
+	require.NoError(t, err, "NewService() error")
 	defer service.Close()
 
 	service.captureSentry("test message", sentry.LevelInfo)
@@ -592,9 +502,7 @@ func TestService_FlushSentry_NoSentry(t *testing.T) {
 	logPath := filepath.Join(tmpDir, "test.log")
 
 	service, err := NewService(logPath, "info")
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
+	require.NoError(t, err, "NewService() error")
 	defer service.Close()
 
 	service.flushSentry(0)

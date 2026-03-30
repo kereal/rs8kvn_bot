@@ -3,6 +3,8 @@ package utils
 import (
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestFirstSecondOfNextMonth(t *testing.T) {
@@ -46,9 +48,7 @@ func TestFirstSecondOfNextMonth(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := FirstSecondOfNextMonth(tt.input)
-			if !result.Equal(tt.expected) {
-				t.Errorf("FirstSecondOfNextMonth(%v) = %v, want %v", tt.input, result, tt.expected)
-			}
+			assert.Equal(t, tt.expected, result, "FirstSecondOfNextMonth(%v)", tt.input)
 		})
 	}
 }
@@ -59,22 +59,15 @@ func TestFirstSecondOfNextMonth_LocalTimezone(t *testing.T) {
 	expected := time.Date(2024, 2, 1, 0, 0, 0, 0, loc)
 
 	result := FirstSecondOfNextMonth(input)
-	if !result.Equal(expected) {
-		t.Errorf("FirstSecondOfNextMonth() with local timezone = %v, want %v", result, expected)
-	}
-
-	if result.Location() != loc {
-		t.Errorf("FirstSecondOfNextMonth() should preserve timezone, got %v, want %v", result.Location(), loc)
-	}
+	assert.Equal(t, expected, result, "FirstSecondOfNextMonth() with local timezone")
+	assert.Equal(t, loc, result.Location(), "FirstSecondOfNextMonth() should preserve timezone")
 }
 
 func TestFirstSecondOfNextMonth_Now(t *testing.T) {
 	now := time.Now()
 	result := FirstSecondOfNextMonth(now)
 
-	if result.Before(now) {
-		t.Errorf("FirstSecondOfNextMonth(now) = %v, should be after now", result)
-	}
+	assert.False(t, result.Before(now), "FirstSecondOfNextMonth(now) should be after now")
 
 	year, month, _ := now.Date()
 	nextMonth := month + 1
@@ -85,26 +78,24 @@ func TestFirstSecondOfNextMonth_Now(t *testing.T) {
 	}
 	expected := time.Date(nextYear, nextMonth, 1, 0, 0, 0, 0, now.Location())
 
-	if !result.Equal(expected) {
-		t.Errorf("FirstSecondOfNextMonth(now) = %v, want %v", result, expected)
-	}
+	assert.Equal(t, expected, result, "FirstSecondOfNextMonth(now)")
 }
 
 func TestFirstSecondOfNextMonth_AllMonths(t *testing.T) {
 	for month := time.January; month <= time.December; month++ {
-		input := time.Date(2024, month, 15, 12, 0, 0, 0, time.UTC)
-		result := FirstSecondOfNextMonth(input)
+		t.Run(month.String(), func(t *testing.T) {
+			input := time.Date(2024, month, 15, 12, 0, 0, 0, time.UTC)
+			result := FirstSecondOfNextMonth(input)
 
-		expectedMonth := month + 1
-		expectedYear := 2024
-		if month == time.December {
-			expectedMonth = time.January
-			expectedYear = 2025
-		}
-		expected := time.Date(expectedYear, expectedMonth, 1, 0, 0, 0, 0, time.UTC)
+			expectedMonth := month + 1
+			expectedYear := 2024
+			if month == time.December {
+				expectedMonth = time.January
+				expectedYear = 2025
+			}
+			expected := time.Date(expectedYear, expectedMonth, 1, 0, 0, 0, 0, time.UTC)
 
-		if !result.Equal(expected) {
-			t.Errorf("FirstSecondOfNextMonth(%s) = %v, want %v", month, result, expected)
-		}
+			assert.Equal(t, expected, result, "FirstSecondOfNextMonth(%s)", month)
+		})
 	}
 }

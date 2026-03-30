@@ -4,6 +4,9 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNewTokenBucket(t *testing.T) {
@@ -20,18 +23,10 @@ func TestNewTokenBucket(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tb := NewTokenBucket(tt.maxTokens, tt.refillRate)
-			if tb == nil {
-				t.Fatal("NewTokenBucket returned nil")
-			}
-			if tb.tokens != tt.maxTokens {
-				t.Errorf("initial tokens = %v, want %v", tb.tokens, tt.maxTokens)
-			}
-			if tb.maxTokens != tt.maxTokens {
-				t.Errorf("maxTokens = %v, want %v", tb.maxTokens, tt.maxTokens)
-			}
-			if tb.refillRate != tt.refillRate {
-				t.Errorf("refillRate = %v, want %v", tb.refillRate, tt.refillRate)
-			}
+			require.NotNil(t, tb, "NewTokenBucket returned nil")
+			assert.Equal(t, tt.maxTokens, tb.tokens, "initial tokens")
+			assert.Equal(t, tt.maxTokens, tb.maxTokens, "maxTokens")
+			assert.Equal(t, tt.refillRate, tb.refillRate, "refillRate")
 		})
 	}
 }
@@ -41,15 +36,11 @@ func TestTokenBucket_Allow_WhenTokensAvailable(t *testing.T) {
 
 	// Should allow when tokens available
 	for i := 0; i < 10; i++ {
-		if !tb.Allow() {
-			t.Errorf("Allow() = false on iteration %d, expected true", i)
-		}
+		assert.True(t, tb.Allow(), "Allow() on iteration %d, expected true", i)
 	}
 
 	// Should not allow when no tokens
-	if tb.Allow() {
-		t.Error("Allow() = true when no tokens available, expected false")
-	}
+	assert.False(t, tb.Allow(), "Allow() when no tokens available, expected false")
 }
 
 func TestTokenBucket_Allow_ConsumesTokens(t *testing.T) {
@@ -61,9 +52,7 @@ func TestTokenBucket_Allow_ConsumesTokens(t *testing.T) {
 	}
 
 	// Verify no tokens left
-	if tb.Allow() {
-		t.Error("Allow() should return false when tokens depleted")
-	}
+	assert.False(t, tb.Allow(), "Allow() should return false when tokens depleted")
 }
 
 func TestTokenBucket_Allow_RefillsOverTime(t *testing.T) {
@@ -78,9 +67,7 @@ func TestTokenBucket_Allow_RefillsOverTime(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	// Should have tokens again
-	if !tb.Allow() {
-		t.Error("Allow() = false after waiting for refill, expected true")
-	}
+	assert.True(t, tb.Allow(), "Allow() after waiting for refill, expected true")
 }
 
 func TestTokenBucket_Wait_WhenTokenAvailable(t *testing.T) {
@@ -91,12 +78,8 @@ func TestTokenBucket_Wait_WhenTokenAvailable(t *testing.T) {
 	result := tb.Wait(ctx)
 	elapsed := time.Since(start)
 
-	if !result {
-		t.Error("Wait() = false when token available, expected true")
-	}
-	if elapsed > 100*time.Millisecond {
-		t.Errorf("Wait() took %v, should return immediately when token available", elapsed)
-	}
+	assert.True(t, result, "Wait() when token available, expected true")
+	assert.Less(t, elapsed, 100*time.Millisecond, "Wait() should return immediately when token available")
 }
 
 func TestTokenBucket_Wait_WhenNoTokenAvailable(t *testing.T) {
@@ -110,12 +93,8 @@ func TestTokenBucket_Wait_WhenNoTokenAvailable(t *testing.T) {
 	result := tb.Wait(ctx)
 	elapsed := time.Since(start)
 
-	if !result {
-		t.Error("Wait() = false, expected true after waiting")
-	}
-	if elapsed < 5*time.Millisecond {
-		t.Errorf("Wait() took %v, should have waited for token refill", elapsed)
-	}
+	assert.True(t, result, "Wait() expected true after waiting")
+	assert.GreaterOrEqual(t, elapsed, 5*time.Millisecond, "Wait() should have waited for token refill")
 }
 
 func TestTokenBucket_Wait_ContextCancellation(t *testing.T) {
@@ -128,9 +107,7 @@ func TestTokenBucket_Wait_ContextCancellation(t *testing.T) {
 	cancel() // Cancel immediately
 
 	result := tb.Wait(ctx)
-	if result {
-		t.Error("Wait() = true after context cancellation, expected false")
-	}
+	assert.False(t, result, "Wait() after context cancellation, expected false")
 }
 
 func TestTokenBucket_Wait_ContextTimeout(t *testing.T) {
@@ -146,12 +123,8 @@ func TestTokenBucket_Wait_ContextTimeout(t *testing.T) {
 	result := tb.Wait(ctx)
 	elapsed := time.Since(start)
 
-	if result {
-		t.Error("Wait() = true after context timeout, expected false")
-	}
-	if elapsed > 100*time.Millisecond {
-		t.Errorf("Wait() took %v, should respect context timeout", elapsed)
-	}
+	assert.False(t, result, "Wait() after context timeout, expected false")
+	assert.Less(t, elapsed, 100*time.Millisecond, "Wait() should respect context timeout")
 }
 
 func TestTokenBucket_Refill_DoesNotExceedMax(t *testing.T) {
@@ -161,10 +134,10 @@ func TestTokenBucket_Refill_DoesNotExceedMax(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	tb.mu.Lock()
-	if tb.tokens > tb.maxTokens {
-		t.Errorf("tokens = %v, should not exceed maxTokens = %v", tb.tokens, tb.maxTokens)
-	}
+	tokens := tb.tokens
 	tb.mu.Unlock()
+
+	assert.LessOrEqual(t, tokens, tb.maxTokens, "tokens should not exceed maxTokens")
 }
 
 func TestTokenBucket_ConcurrentAccess(t *testing.T) {
@@ -191,61 +164,45 @@ func TestTokenBucket_ConcurrentAccess(t *testing.T) {
 	tokens := tb.tokens
 	tb.mu.Unlock()
 
-	if tokens > 10 {
-		t.Errorf("tokens = %v after concurrent access, should be near 0", tokens)
-	}
+	assert.LessOrEqual(t, tokens, 10.0, "tokens after concurrent access, should be near 0")
 }
 
 func TestTokenBucket_ZeroRefillRate(t *testing.T) {
 	tb := NewTokenBucket(1, 0)
 
 	// Should allow first request
-	if !tb.Allow() {
-		t.Error("Allow() = false with 1 token, expected true")
-	}
+	assert.True(t, tb.Allow(), "Allow() with 1 token, expected true")
 
 	// Should not allow second request (no refill)
-	if tb.Allow() {
-		t.Error("Allow() = true with 0 tokens and 0 refill rate, expected false")
-	}
+	assert.False(t, tb.Allow(), "Allow() with 0 tokens and 0 refill rate, expected false")
 
 	// Wait should block indefinitely, but we'll use context timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
 	result := tb.Wait(ctx)
-	if result {
-		t.Error("Wait() should return false when no refill and context times out")
-	}
+	assert.False(t, result, "Wait() should return false when no refill and context times out")
 }
 
 func TestTokenBucket_AvailableTokens(t *testing.T) {
 	tb := NewTokenBucket(10, 5)
 
 	// Initial available tokens should be 10
-	if got := tb.AvailableTokens(); got != 10 {
-		t.Errorf("AvailableTokens() = %v, want 10", got)
-	}
+	assert.Equal(t, 10.0, tb.AvailableTokens(), "AvailableTokens() initial")
 
 	// Consume 3 tokens
-	if !tb.AllowN(3) {
-		t.Fatal("AllowN(3) failed")
-	}
+	require.True(t, tb.AllowN(3), "AllowN(3) failed")
 
 	// Now should have ~7 (allow floating point tolerance)
 	got := tb.AvailableTokens()
-	if got < 6.9 || got > 7.1 {
-		t.Errorf("AvailableTokens() = %v, want ~7", got)
-	}
+	assert.InDelta(t, 7.0, got, 0.1, "AvailableTokens() after consuming 3")
 }
 
 func TestTokenBucket_AllowN_MoreThanAvailable(t *testing.T) {
 	tb := NewTokenBucket(5, 0)
 
 	// Try to consume more than available
-	if tb.AllowN(10) {
-		t.Error("AllowN(10) on bucket with 5 tokens should return false")
-	}
+	assert.False(t, tb.AllowN(10), "AllowN(10) on bucket with 5 tokens should return false")
 }
 
 func TestTokenBucket_WaitN_Success(t *testing.T) {
@@ -255,9 +212,7 @@ func TestTokenBucket_WaitN_Success(t *testing.T) {
 	defer cancel()
 
 	// Should succeed immediately
-	if !tb.WaitN(ctx, 5) {
-		t.Error("WaitN() should succeed with available tokens")
-	}
+	assert.True(t, tb.WaitN(ctx, 5), "WaitN() should succeed with available tokens")
 }
 
 func TestTokenBucket_WaitN_Timeout(t *testing.T) {
@@ -270,16 +225,12 @@ func TestTokenBucket_WaitN_Timeout(t *testing.T) {
 	tb.Allow()
 
 	// Should timeout
-	if tb.WaitN(ctx, 1) {
-		t.Error("WaitN() should timeout when no tokens available")
-	}
+	assert.False(t, tb.WaitN(ctx, 1), "WaitN() should timeout when no tokens available")
 }
 
 func TestRateLimiter_NewRateLimiter(t *testing.T) {
 	rl := NewRateLimiter(5, 10)
-	if rl == nil {
-		t.Error("NewRateLimiter() returned nil")
-	}
+	assert.NotNil(t, rl, "NewRateLimiter() returned nil")
 }
 
 func TestRateLimiter_Wait(t *testing.T) {
@@ -289,24 +240,16 @@ func TestRateLimiter_Wait(t *testing.T) {
 	defer cancel()
 
 	// First wait should succeed
-	if !rl.Wait(ctx) {
-		t.Error("Wait() should succeed")
-	}
+	assert.True(t, rl.Wait(ctx), "Wait() should succeed")
 }
 
 func TestRateLimiter_Allow(t *testing.T) {
 	rl := NewRateLimiter(2, 1000)
 
 	// First two should succeed
-	if !rl.Allow() {
-		t.Error("First Allow() should succeed")
-	}
-	if !rl.Allow() {
-		t.Error("Second Allow() should succeed")
-	}
+	assert.True(t, rl.Allow(), "First Allow() should succeed")
+	assert.True(t, rl.Allow(), "Second Allow() should succeed")
 
 	// Third should fail (no refill)
-	if rl.Allow() {
-		t.Error("Third Allow() should fail")
-	}
+	assert.False(t, rl.Allow(), "Third Allow() should fail")
 }

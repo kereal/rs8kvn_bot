@@ -3,6 +3,9 @@ package config
 import (
 	"os"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestLoad_DefaultValues(t *testing.T) {
@@ -24,16 +27,10 @@ func TestLoad_DefaultValues(t *testing.T) {
 	}()
 
 	cfg, err := Load()
-	if err != nil {
-		t.Fatalf("Load() error = %v", err)
-	}
+	require.NoError(t, err, "Load() error")
 
-	if cfg.TelegramBotToken != "123456789:ABCdefGHIjklMNOpqrsTUVwxyz" {
-		t.Errorf("TelegramBotToken = %s", cfg.TelegramBotToken)
-	}
-	if cfg.TelegramAdminID != 123456 {
-		t.Errorf("TelegramAdminID = %d", cfg.TelegramAdminID)
-	}
+	assert.Equal(t, "123456789:ABCdefGHIjklMNOpqrsTUVwxyz", cfg.TelegramBotToken, "TelegramBotToken")
+	assert.Equal(t, int64(123456), cfg.TelegramAdminID, "TelegramAdminID")
 }
 
 func TestLoad_CustomValues(t *testing.T) {
@@ -63,19 +60,11 @@ func TestLoad_CustomValues(t *testing.T) {
 	}()
 
 	cfg, err := Load()
-	if err != nil {
-		t.Fatalf("Load() error = %v", err)
-	}
+	require.NoError(t, err, "Load() error")
 
-	if cfg.TrafficLimitGB != 500 {
-		t.Errorf("TrafficLimitGB = %d, want 500", cfg.TrafficLimitGB)
-	}
-	if cfg.HeartbeatInterval != 120 {
-		t.Errorf("HeartbeatInterval = %d, want 120", cfg.HeartbeatInterval)
-	}
-	if cfg.HealthCheckPort != 9090 {
-		t.Errorf("HealthCheckPort = %d, want 9090", cfg.HealthCheckPort)
-	}
+	assert.Equal(t, 500, cfg.TrafficLimitGB, "TrafficLimitGB")
+	assert.Equal(t, 120, cfg.HeartbeatInterval, "HeartbeatInterval")
+	assert.Equal(t, 9090, cfg.HealthCheckPort, "HealthCheckPort")
 }
 
 func TestLoad_MissingBotToken(t *testing.T) {
@@ -97,9 +86,7 @@ func TestLoad_MissingBotToken(t *testing.T) {
 	}()
 
 	_, err := Load()
-	if err == nil {
-		t.Error("Load() should error when BOT_TOKEN is empty")
-	}
+	assert.Error(t, err, "Load() should error when BOT_TOKEN is empty")
 }
 
 func TestLoad_InvalidTelegramAdminID(t *testing.T) {
@@ -120,12 +107,8 @@ func TestLoad_InvalidTelegramAdminID(t *testing.T) {
 	}()
 
 	cfg, err := Load()
-	if err != nil {
-		t.Fatalf("Load() should use default for invalid TELEGRAM_ADMIN_ID, got error: %v", err)
-	}
-	if cfg.TelegramAdminID != 0 {
-		t.Errorf("TelegramAdminID = %d, want 0 (default)", cfg.TelegramAdminID)
-	}
+	require.NoError(t, err, "Load() should use default for invalid TELEGRAM_ADMIN_ID")
+	assert.Equal(t, int64(0), cfg.TelegramAdminID, "TelegramAdminID should be 0 (default)")
 }
 
 func TestLoad_InvalidXUIInboundID(t *testing.T) {
@@ -146,12 +129,8 @@ func TestLoad_InvalidXUIInboundID(t *testing.T) {
 	}()
 
 	cfg, err := Load()
-	if err != nil {
-		t.Fatalf("Load() should use default for invalid XUI_INBOUND_ID, got error: %v", err)
-	}
-	if cfg.XUIInboundID != 1 {
-		t.Errorf("XUIInboundID = %d, want 1 (default)", cfg.XUIInboundID)
-	}
+	require.NoError(t, err, "Load() should use default for invalid XUI_INBOUND_ID")
+	assert.Equal(t, 1, cfg.XUIInboundID, "XUIInboundID should be 1 (default)")
 }
 
 func TestLoad_InvalidTrafficLimitGB_TooLow(t *testing.T) {
@@ -175,9 +154,7 @@ func TestLoad_InvalidTrafficLimitGB_TooLow(t *testing.T) {
 	}()
 
 	_, err := Load()
-	if err == nil {
-		t.Error("Load() should error for TRAFFIC_LIMIT_GB = 0")
-	}
+	assert.Error(t, err, "Load() should error for TRAFFIC_LIMIT_GB = 0")
 }
 
 func TestLoad_InvalidTrafficLimitGB_TooHigh(t *testing.T) {
@@ -201,9 +178,7 @@ func TestLoad_InvalidTrafficLimitGB_TooHigh(t *testing.T) {
 	}()
 
 	_, err := Load()
-	if err == nil {
-		t.Error("Load() should error for TRAFFIC_LIMIT_GB > 10000")
-	}
+	assert.Error(t, err, "Load() should error for TRAFFIC_LIMIT_GB > 10000")
 }
 
 func TestLoad_InvalidXUIInboundID_Negative(t *testing.T) {
@@ -224,9 +199,7 @@ func TestLoad_InvalidXUIInboundID_Negative(t *testing.T) {
 	}()
 
 	_, err := Load()
-	if err == nil {
-		t.Error("Load() should error for negative XUI_INBOUND_ID")
-	}
+	assert.Error(t, err, "Load() should error for negative XUI_INBOUND_ID")
 }
 
 func TestLoad_InvalidHeartbeatInterval(t *testing.T) {
@@ -250,90 +223,68 @@ func TestLoad_InvalidHeartbeatInterval(t *testing.T) {
 	}()
 
 	cfg, err := Load()
-	if err != nil {
-		t.Fatalf("Load() should use default for invalid HEARTBEAT_INTERVAL, got error: %v", err)
-	}
-	if cfg.HeartbeatInterval != DefaultHeartbeatInterval {
-		t.Errorf("HeartbeatInterval = %d, want %d (default)", cfg.HeartbeatInterval, DefaultHeartbeatInterval)
-	}
+	require.NoError(t, err, "Load() should use default for invalid HEARTBEAT_INTERVAL")
+	assert.Equal(t, DefaultHeartbeatInterval, cfg.HeartbeatInterval, "HeartbeatInterval should be default")
 }
 
 func TestGetEnv_DefaultValue(t *testing.T) {
 	os.Unsetenv("TEST_KEY")
 	result := getEnv("TEST_KEY", "default")
-	if result != "default" {
-		t.Errorf("getEnv() = %s, want default", result)
-	}
+	assert.Equal(t, "default", result, "getEnv() should return default value")
 }
 
 func TestGetEnv_ExistingValue(t *testing.T) {
 	os.Setenv("TEST_KEY", "value")
 	defer os.Unsetenv("TEST_KEY")
 	result := getEnv("TEST_KEY", "default")
-	if result != "value" {
-		t.Errorf("getEnv() = %s, want value", result)
-	}
+	assert.Equal(t, "value", result, "getEnv() should return existing value")
 }
 
 func TestGetEnv_WhitespaceTrimmed(t *testing.T) {
 	os.Setenv("TEST_KEY", "  value  ")
 	defer os.Unsetenv("TEST_KEY")
 	result := getEnv("TEST_KEY", "default")
-	if result != "value" {
-		t.Errorf("getEnv() = %q, want 'value'", result)
-	}
+	assert.Equal(t, "value", result, "getEnv() should trim whitespace")
 }
 
 func TestParseEnvInt(t *testing.T) {
 	os.Setenv("TEST_INT", "42")
 	defer os.Unsetenv("TEST_INT")
 	result := parseEnvInt("TEST_INT", 0)
-	if result != 42 {
-		t.Errorf("parseEnvInt() = %d, want 42", result)
-	}
+	assert.Equal(t, 42, result, "parseEnvInt()")
 }
 
 func TestParseEnvInt_Default(t *testing.T) {
 	os.Unsetenv("TEST_INT")
 	result := parseEnvInt("TEST_INT", 100)
-	if result != 100 {
-		t.Errorf("parseEnvInt() = %d, want 100", result)
-	}
+	assert.Equal(t, 100, result, "parseEnvInt() should return default")
 }
 
 func TestParseEnvInt_Invalid(t *testing.T) {
 	os.Setenv("TEST_INT", "invalid")
 	defer os.Unsetenv("TEST_INT")
 	result := parseEnvInt("TEST_INT", 0)
-	if result != 0 {
-		t.Errorf("parseEnvInt() = %d, want 0", result)
-	}
+	assert.Equal(t, 0, result, "parseEnvInt() should return default for invalid input")
 }
 
 func TestParseEnvInt64(t *testing.T) {
 	os.Setenv("TEST_INT64", "9999999999")
 	defer os.Unsetenv("TEST_INT64")
 	result := parseEnvInt64("TEST_INT64", 0)
-	if result != 9999999999 {
-		t.Errorf("parseEnvInt64() = %d, want 9999999999", result)
-	}
+	assert.Equal(t, int64(9999999999), result, "parseEnvInt64()")
 }
 
 func TestParseEnvInt64_Default(t *testing.T) {
 	os.Unsetenv("TEST_INT64")
 	result := parseEnvInt64("TEST_INT64", 500)
-	if result != 500 {
-		t.Errorf("parseEnvInt64() = %d, want 500", result)
-	}
+	assert.Equal(t, int64(500), result, "parseEnvInt64() should return default")
 }
 
 func TestParseEnvInt64_Invalid(t *testing.T) {
 	os.Setenv("TEST_INT64", "invalid")
 	defer os.Unsetenv("TEST_INT64")
 	result := parseEnvInt64("TEST_INT64", 0)
-	if result != 0 {
-		t.Errorf("parseEnvInt64() = %d, want 0", result)
-	}
+	assert.Equal(t, int64(0), result, "parseEnvInt64() should return default for invalid input")
 }
 
 func TestValidateURL(t *testing.T) {
@@ -359,8 +310,10 @@ func TestValidateURL(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := cfg.validateURL("test", tt.url)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("validateURL() error = %v, wantErr %v", err, tt.wantErr)
+			if tt.wantErr {
+				assert.Error(t, err, "validateURL() should error")
+			} else {
+				assert.NoError(t, err, "validateURL() should not error")
 			}
 		})
 	}
@@ -379,15 +332,9 @@ func TestConfig_String(t *testing.T) {
 
 	str := cfg.String()
 
-	if !contains(str, "TelegramBotToken") {
-		t.Error("String() should include TelegramBotToken")
-	}
-	if !contains(str, "123456") {
-		t.Error("String() should include TelegramAdminID")
-	}
-	if contains(str, "secret") {
-		t.Error("String() should mask password")
-	}
+	assert.Contains(t, str, "TelegramBotToken", "String() should include TelegramBotToken")
+	assert.Contains(t, str, "123456", "String() should include TelegramAdminID")
+	assert.NotContains(t, str, "secret", "String() should mask password")
 }
 
 func TestMaskURL(t *testing.T) {
@@ -405,18 +352,14 @@ func TestMaskURL(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := maskURL(tt.url)
-			if result != tt.expected {
-				t.Errorf("maskURL(%q) = %q, want %q", tt.url, result, tt.expected)
-			}
+			assert.Equal(t, tt.expected, result, "maskURL()")
 		})
 	}
 }
 
 func TestMaskURL_InvalidURL(t *testing.T) {
 	result := maskURL("not a valid url")
-	if result != ":///***" {
-		t.Errorf("maskURL() for invalid URL = %q, want ':///***'", result)
-	}
+	assert.Equal(t, ":///***", result, "maskURL() for invalid URL")
 }
 
 func TestConfig_Validate_EmptyXUIHost(t *testing.T) {
@@ -429,9 +372,7 @@ func TestConfig_Validate_EmptyXUIHost(t *testing.T) {
 	}
 
 	err := cfg.validate()
-	if err == nil {
-		t.Error("validate() should error on empty XUIHost")
-	}
+	assert.Error(t, err, "validate() should error on empty XUIHost")
 }
 
 func TestConfig_Validate_EmptyXUIUsername(t *testing.T) {
@@ -444,9 +385,7 @@ func TestConfig_Validate_EmptyXUIUsername(t *testing.T) {
 	}
 
 	err := cfg.validate()
-	if err == nil {
-		t.Error("validate() should error on empty XUIUsername")
-	}
+	assert.Error(t, err, "validate() should error on empty XUIUsername")
 }
 
 func TestConfig_Validate_EmptyXUIPassword(t *testing.T) {
@@ -459,9 +398,7 @@ func TestConfig_Validate_EmptyXUIPassword(t *testing.T) {
 	}
 
 	err := cfg.validate()
-	if err == nil {
-		t.Error("validate() should error on empty XUIPassword")
-	}
+	assert.Error(t, err, "validate() should error on empty XUIPassword")
 }
 
 func TestConfig_Validate_InvalidAdminID_Zero(t *testing.T) {
@@ -474,9 +411,7 @@ func TestConfig_Validate_InvalidAdminID_Zero(t *testing.T) {
 	}
 
 	err := cfg.validate()
-	if err == nil {
-		t.Error("validate() should error on zero AdminID")
-	}
+	assert.Error(t, err, "validate() should error on zero AdminID")
 }
 
 func TestConfig_Validate_InvalidInboundID_Zero(t *testing.T) {
@@ -490,9 +425,7 @@ func TestConfig_Validate_InvalidInboundID_Zero(t *testing.T) {
 	}
 
 	err := cfg.validate()
-	if err == nil {
-		t.Error("validate() should error on zero InboundID")
-	}
+	assert.Error(t, err, "validate() should error on zero InboundID")
 }
 
 func TestConfig_Validate_Valid(t *testing.T) {
@@ -514,9 +447,7 @@ func TestConfig_Validate_Valid(t *testing.T) {
 	}
 
 	err := cfg.validate()
-	if err != nil {
-		t.Errorf("validate() error = %v", err)
-	}
+	assert.NoError(t, err, "validate() should not error for valid config")
 }
 
 func TestConfig_Validate_SentryDSN_Valid(t *testing.T) {
@@ -539,9 +470,7 @@ func TestConfig_Validate_SentryDSN_Valid(t *testing.T) {
 	}
 
 	err := cfg.validate()
-	if err != nil {
-		t.Errorf("validate() error = %v", err)
-	}
+	assert.NoError(t, err, "validate() should not error for valid SentryDSN")
 }
 
 func TestConfig_Validate_SentryDSN_Invalid(t *testing.T) {
@@ -557,9 +486,7 @@ func TestConfig_Validate_SentryDSN_Invalid(t *testing.T) {
 	}
 
 	err := cfg.validate()
-	if err == nil {
-		t.Error("validate() should error on invalid SentryDSN")
-	}
+	assert.Error(t, err, "validate() should error on invalid SentryDSN")
 }
 
 func TestConfig_Validate_WithSubPath(t *testing.T) {
@@ -581,9 +508,7 @@ func TestConfig_Validate_WithSubPath(t *testing.T) {
 	}
 
 	err := cfg.validate()
-	if err != nil {
-		t.Errorf("validate() error = %v", err)
-	}
+	assert.NoError(t, err, "validate() should not error with SubPath")
 }
 
 func TestConfig_Validate_WithHeartbeatURL(t *testing.T) {
@@ -606,9 +531,7 @@ func TestConfig_Validate_WithHeartbeatURL(t *testing.T) {
 	}
 
 	err := cfg.validate()
-	if err != nil {
-		t.Errorf("validate() error = %v", err)
-	}
+	assert.NoError(t, err, "validate() should not error with HeartbeatURL")
 }
 
 func TestConfig_Validate_InvalidTokenFormat(t *testing.T) {
@@ -623,9 +546,7 @@ func TestConfig_Validate_InvalidTokenFormat(t *testing.T) {
 	}
 
 	err := cfg.validate()
-	if err == nil {
-		t.Error("validate() should error on invalid token format")
-	}
+	assert.Error(t, err, "validate() should error on invalid token format")
 }
 
 func TestConfig_Validate_NegativeAdminID(t *testing.T) {
@@ -640,9 +561,7 @@ func TestConfig_Validate_NegativeAdminID(t *testing.T) {
 	}
 
 	err := cfg.validate()
-	if err == nil {
-		t.Error("validate() should error on negative AdminID")
-	}
+	assert.Error(t, err, "validate() should error on negative AdminID")
 }
 
 func TestConfig_Validate_InvalidLogLevel(t *testing.T) {
@@ -658,9 +577,7 @@ func TestConfig_Validate_InvalidLogLevel(t *testing.T) {
 	}
 
 	err := cfg.validate()
-	if err == nil {
-		t.Error("validate() should error on invalid LogLevel")
-	}
+	assert.Error(t, err, "validate() should error on invalid LogLevel")
 }
 
 func TestConfig_Validate_InvalidHealthCheckPort_TooLow(t *testing.T) {
@@ -679,9 +596,7 @@ func TestConfig_Validate_InvalidHealthCheckPort_TooLow(t *testing.T) {
 	}
 
 	err := cfg.validate()
-	if err == nil {
-		t.Error("validate() should error on HealthCheckPort = 0")
-	}
+	assert.Error(t, err, "validate() should error on HealthCheckPort = 0")
 }
 
 func TestConfig_Validate_InvalidHealthCheckPort_TooHigh(t *testing.T) {
@@ -700,9 +615,7 @@ func TestConfig_Validate_InvalidHealthCheckPort_TooHigh(t *testing.T) {
 	}
 
 	err := cfg.validate()
-	if err == nil {
-		t.Error("validate() should error on HealthCheckPort = 70000")
-	}
+	assert.Error(t, err, "validate() should error on HealthCheckPort = 70000")
 }
 
 func contains(s, substr string) bool {
@@ -716,9 +629,7 @@ func contains(s, substr string) bool {
 
 func TestMaskURL_Empty(t *testing.T) {
 	result := maskURL("")
-	if result != "(not set)" {
-		t.Errorf("maskURL(\"\") = %q, want %q", result, "(not set)")
-	}
+	assert.Equal(t, "(not set)", result, "maskURL(\"\")")
 }
 
 func TestMaskURL_ValidURL(t *testing.T) {
@@ -735,9 +646,7 @@ func TestMaskURL_ValidURL(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := maskURL(tt.input)
-			if result != tt.expected {
-				t.Errorf("maskURL(%q) = %q, want %q", tt.input, result, tt.expected)
-			}
+			assert.Equal(t, tt.expected, result, "maskURL()")
 		})
 	}
 }

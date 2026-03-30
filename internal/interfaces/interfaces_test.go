@@ -5,6 +5,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"rs8kvn_bot/internal/database"
 	"rs8kvn_bot/internal/xui"
 )
@@ -138,20 +141,12 @@ func TestMockDatabaseService(t *testing.T) {
 	}
 
 	err := svc.CreateSubscription(context.Background(), sub)
-	if err != nil {
-		t.Fatalf("CreateSubscription() error = %v", err)
-	}
+	require.NoError(t, err, "CreateSubscription() error")
 
 	retrieved, err := svc.GetByTelegramID(context.Background(), 123)
-	if err != nil {
-		t.Fatalf("GetByTelegramID() error = %v", err)
-	}
-	if retrieved == nil {
-		t.Fatal("GetByTelegramID() returned nil")
-	}
-	if retrieved.Username != "testuser" {
-		t.Errorf("Username = %s, want testuser", retrieved.Username)
-	}
+	require.NoError(t, err, "GetByTelegramID() error")
+	require.NotNil(t, retrieved, "GetByTelegramID() returned nil")
+	assert.Equal(t, "testuser", retrieved.Username, "Username")
 }
 
 func TestMockDatabaseService_GetByID(t *testing.T) {
@@ -160,9 +155,7 @@ func TestMockDatabaseService_GetByID(t *testing.T) {
 	}
 
 	_, err := svc.GetByID(context.Background(), 1)
-	if err != nil {
-		t.Errorf("GetByID() error = %v", err)
-	}
+	assert.NoError(t, err, "GetByID() error")
 }
 
 type mockXUIClient struct {
@@ -221,32 +214,20 @@ func TestMockXUIClient(t *testing.T) {
 	}
 
 	err := client.Login(context.Background())
-	if err != nil {
-		t.Fatalf("Login() error = %v", err)
-	}
+	require.NoError(t, err, "Login() error")
 
 	config, err := client.AddClient(context.Background(), 1, "test", 1000, time.Now())
-	if err != nil {
-		t.Fatalf("AddClient() error = %v", err)
-	}
-	if config.ID != "test-id" {
-		t.Errorf("ID = %s, want test-id", config.ID)
-	}
+	require.NoError(t, err, "AddClient() error")
+	assert.Equal(t, "test-id", config.ID, "ID")
 
 	traffic, err := client.GetClientTraffic(context.Background(), "test")
-	if err != nil {
-		t.Fatalf("GetClientTraffic() error = %v", err)
-	}
-	if traffic.Up != 1000 {
-		t.Errorf("Up = %d, want 1000", traffic.Up)
-	}
+	require.NoError(t, err, "GetClientTraffic() error")
+	assert.Equal(t, int64(1000), traffic.Up, "Up")
 }
 
 func TestMockXUIClient_GetSubscriptionLink(t *testing.T) {
 	client := &mockXUIClient{}
 	link := client.GetSubscriptionLink("http://localhost", "sub123", "sub")
 	expected := "http://localhost/sub/sub123"
-	if link != expected {
-		t.Errorf("GetSubscriptionLink() = %s, want %s", link, expected)
-	}
+	assert.Equal(t, expected, link, "GetSubscriptionLink()")
 }

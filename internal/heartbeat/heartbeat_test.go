@@ -9,6 +9,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"rs8kvn_bot/internal/logger"
 )
 
@@ -25,15 +28,9 @@ func TestGetHTTPClient_Singleton(t *testing.T) {
 	client1 := getHTTPClient()
 	client2 := getHTTPClient()
 
-	if client1 == nil {
-		t.Fatal("getHTTPClient() returned nil")
-	}
-	if client2 == nil {
-		t.Fatal("getHTTPClient() returned nil on second call")
-	}
-	if client1 != client2 {
-		t.Error("getHTTPClient() should return the same client instance")
-	}
+	require.NotNil(t, client1, "getHTTPClient() returned nil")
+	require.NotNil(t, client2, "getHTTPClient() returned nil on second call")
+	assert.Equal(t, client1, client2, "getHTTPClient() should return the same client instance")
 }
 
 func TestGetHTTPClient_ConcurrentAccess(t *testing.T) {
@@ -56,9 +53,7 @@ func TestGetHTTPClient_ConcurrentAccess(t *testing.T) {
 
 	// All clients should be the same instance
 	for i := 1; i < 10; i++ {
-		if clients[i] != clients[0] {
-			t.Errorf("Client %d is not the same as client 0", i)
-		}
+		assert.Equal(t, clients[0], clients[i], "Client %d is not the same as client 0", i)
 	}
 }
 
@@ -69,9 +64,7 @@ func TestGetHTTPClient_Timeout(t *testing.T) {
 
 	client := getHTTPClient()
 
-	if client.Timeout != 10*time.Second {
-		t.Errorf("Client timeout = %v, want 10s", client.Timeout)
-	}
+	assert.Equal(t, 10*time.Second, client.Timeout, "Client timeout")
 }
 
 func TestStart_EmptyURL(t *testing.T) {
@@ -188,21 +181,15 @@ func TestSendHeartbeat_Success(t *testing.T) {
 	requestReceived := false
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestReceived = true
-		if r.Method != "POST" {
-			t.Errorf("Expected POST request, got %s", r.Method)
-		}
-		if r.Header.Get("Content-Type") != "application/json" {
-			t.Errorf("Expected Content-Type: application/json, got %s", r.Header.Get("Content-Type"))
-		}
+		assert.Equal(t, "POST", r.Method, "Expected POST request")
+		assert.Equal(t, "application/json", r.Header.Get("Content-Type"), "Content-Type header")
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()
 
 	sendHeartbeat(server.URL)
 
-	if !requestReceived {
-		t.Error("sendHeartbeat() did not send request to server")
-	}
+	assert.True(t, requestReceived, "sendHeartbeat() did not send request to server")
 }
 
 func TestSendHeartbeat_ServerError(t *testing.T) {
@@ -233,9 +220,7 @@ func TestSendHeartbeat_MultipleRequests(t *testing.T) {
 		sendHeartbeat(server.URL)
 	}
 
-	if requestCount != 5 {
-		t.Errorf("Expected 5 requests, got %d", requestCount)
-	}
+	assert.Equal(t, 5, requestCount, "Expected 5 requests")
 }
 
 func TestStart_IntervalTiming(t *testing.T) {
@@ -256,9 +241,7 @@ func TestStart_IntervalTiming(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Initial heartbeat should have been sent
-	if atomic.LoadInt64(&requestCount) < 1 {
-		t.Error("Initial heartbeat was not sent")
-	}
+	assert.GreaterOrEqual(t, atomic.LoadInt64(&requestCount), int64(1), "Initial heartbeat was not sent")
 
 	// Cancel to stop the scheduler
 	cancel()
@@ -283,9 +266,7 @@ func TestMaskURL_Heartbeat(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := maskURL(tt.url)
-			if result != tt.expected {
-				t.Errorf("maskURL(%q) = %q, want %q", tt.url, result, tt.expected)
-			}
+			assert.Equal(t, tt.expected, result, "maskURL(%q)", tt.url)
 		})
 	}
 }

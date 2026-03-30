@@ -8,6 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"rs8kvn_bot/internal/logger"
 )
 
@@ -18,12 +21,8 @@ func init() {
 
 func TestNewServer(t *testing.T) {
 	server := NewServer(9999)
-	if server == nil {
-		t.Fatal("NewServer returned nil")
-	}
-	if server.port != 9999 {
-		t.Errorf("port = %d, want 9999", server.port)
-	}
+	require.NotNil(t, server, "NewServer returned nil")
+	assert.Equal(t, 9999, server.port, "port")
 }
 
 func TestHealthEndpoint(t *testing.T) {
@@ -34,36 +33,23 @@ func TestHealthEndpoint(t *testing.T) {
 		return ComponentHealth{Status: StatusOK}
 	})
 
-	if err := server.Start(); err != nil {
-		t.Fatalf("Failed to start server: %v", err)
-	}
+	require.NoError(t, server.Start(), "Failed to start server")
 	defer server.Stop(context.Background())
 
 	// Wait for server to start
 	time.Sleep(100 * time.Millisecond)
 
 	resp, err := http.Get("http://localhost:19090/healthz")
-	if err != nil {
-		t.Fatalf("Failed to get healthz: %v", err)
-	}
+	require.NoError(t, err, "Failed to get healthz")
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("status = %d, want 200", resp.StatusCode)
-	}
+	assert.Equal(t, http.StatusOK, resp.StatusCode, "status code")
 
 	var health HealthResponse
-	if err := json.NewDecoder(resp.Body).Decode(&health); err != nil {
-		t.Fatalf("Failed to decode response: %v", err)
-	}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&health), "Failed to decode response")
 
-	if health.Status != StatusOK {
-		t.Errorf("status = %s, want ok", health.Status)
-	}
-
-	if health.Components["test"].Status != StatusOK {
-		t.Errorf("test component status = %s, want ok", health.Components["test"].Status)
-	}
+	assert.Equal(t, StatusOK, health.Status, "status")
+	assert.Equal(t, StatusOK, health.Components["test"].Status, "test component status")
 }
 
 func TestHealthEndpointWithFailure(t *testing.T) {
@@ -77,95 +63,67 @@ func TestHealthEndpointWithFailure(t *testing.T) {
 		}
 	})
 
-	if err := server.Start(); err != nil {
-		t.Fatalf("Failed to start server: %v", err)
-	}
+	require.NoError(t, server.Start(), "Failed to start server")
 	defer server.Stop(context.Background())
 
 	time.Sleep(100 * time.Millisecond)
 
 	resp, err := http.Get("http://localhost:19091/healthz")
-	if err != nil {
-		t.Fatalf("Failed to get healthz: %v", err)
-	}
+	require.NoError(t, err, "Failed to get healthz")
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusServiceUnavailable {
-		t.Errorf("status = %d, want 503", resp.StatusCode)
-	}
+	assert.Equal(t, http.StatusServiceUnavailable, resp.StatusCode, "status code")
 
 	var health HealthResponse
-	if err := json.NewDecoder(resp.Body).Decode(&health); err != nil {
-		t.Fatalf("Failed to decode response: %v", err)
-	}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&health), "Failed to decode response")
 
-	if health.Status != StatusDown {
-		t.Errorf("status = %s, want down", health.Status)
-	}
+	assert.Equal(t, StatusDown, health.Status, "status")
 }
 
 func TestReadyzNotReady(t *testing.T) {
 	server := NewServer(19092)
 
-	if err := server.Start(); err != nil {
-		t.Fatalf("Failed to start server: %v", err)
-	}
+	require.NoError(t, server.Start(), "Failed to start server")
 	defer server.Stop(context.Background())
 
 	time.Sleep(100 * time.Millisecond)
 
 	resp, err := http.Get("http://localhost:19092/readyz")
-	if err != nil {
-		t.Fatalf("Failed to get readyz: %v", err)
-	}
+	require.NoError(t, err, "Failed to get readyz")
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusServiceUnavailable {
-		t.Errorf("status = %d, want 503", resp.StatusCode)
-	}
+	assert.Equal(t, http.StatusServiceUnavailable, resp.StatusCode, "status code")
 }
 
 func TestReadyzReady(t *testing.T) {
 	server := NewServer(19093)
 	server.SetReady(true)
 
-	if err := server.Start(); err != nil {
-		t.Fatalf("Failed to start server: %v", err)
-	}
+	require.NoError(t, server.Start(), "Failed to start server")
 	defer server.Stop(context.Background())
 
 	time.Sleep(100 * time.Millisecond)
 
 	resp, err := http.Get("http://localhost:19093/readyz")
-	if err != nil {
-		t.Fatalf("Failed to get readyz: %v", err)
-	}
+	require.NoError(t, err, "Failed to get readyz")
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("status = %d, want 200", resp.StatusCode)
-	}
+	assert.Equal(t, http.StatusOK, resp.StatusCode, "status code")
 }
 
 func TestIndexEndpoint(t *testing.T) {
 	server := NewServer(19094)
 
-	if err := server.Start(); err != nil {
-		t.Fatalf("Failed to start server: %v", err)
-	}
+	require.NoError(t, server.Start(), "Failed to start server")
 	defer server.Stop(context.Background())
 
 	time.Sleep(100 * time.Millisecond)
 
 	resp, err := http.Get("http://localhost:19094/")
-	if err != nil {
-		t.Fatalf("Failed to get root: %v", err)
-	}
+	require.NoError(t, err, "Failed to get root")
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("status = %d, want 200", resp.StatusCode)
-	}
+	assert.Equal(t, http.StatusOK, resp.StatusCode, "status code")
 }
 
 func TestDatabaseChecker(t *testing.T) {
@@ -174,18 +132,14 @@ func TestDatabaseChecker(t *testing.T) {
 		return nil
 	})
 	health := checker(context.Background())
-	if health.Status != StatusOK {
-		t.Errorf("status = %s, want ok", health.Status)
-	}
+	assert.Equal(t, StatusOK, health.Status, "status for healthy database")
 
 	// Test unhealthy database
 	checker = DatabaseChecker(func(ctx context.Context) error {
 		return fmt.Errorf("connection refused")
 	})
 	health = checker(context.Background())
-	if health.Status != StatusDown {
-		t.Errorf("status = %s, want down", health.Status)
-	}
+	assert.Equal(t, StatusDown, health.Status, "status for unhealthy database")
 }
 
 func TestXUIChecker(t *testing.T) {
@@ -194,18 +148,14 @@ func TestXUIChecker(t *testing.T) {
 		return nil
 	})
 	health := checker(context.Background())
-	if health.Status != StatusOK {
-		t.Errorf("status = %s, want ok", health.Status)
-	}
+	assert.Equal(t, StatusOK, health.Status, "status for healthy x-ui")
 
 	// Test unhealthy x-ui
 	checker = XUIChecker(func(ctx context.Context) error {
 		return fmt.Errorf("timeout")
 	})
 	health = checker(context.Background())
-	if health.Status != StatusDegraded {
-		t.Errorf("status = %s, want degraded", health.Status)
-	}
+	assert.Equal(t, StatusDegraded, health.Status, "status for unhealthy x-ui")
 }
 
 func TestAggregateStatus(t *testing.T) {
@@ -253,9 +203,7 @@ func TestAggregateStatus(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			status := server.aggregateStatus(tt.components)
-			if status != tt.expected {
-				t.Errorf("status = %s, want %s", status, tt.expected)
-			}
+			assert.Equal(t, tt.expected, status, "status")
 		})
 	}
 }
@@ -270,9 +218,7 @@ func TestHandleHealthz_JSONEncodingError(t *testing.T) {
 		return ComponentHealth{Status: StatusOK}
 	})
 
-	if err := server.Start(); err != nil {
-		t.Fatalf("Failed to start server: %v", err)
-	}
+	require.NoError(t, server.Start(), "Failed to start server")
 	defer server.Stop(context.Background())
 
 	// Wait for server to start
@@ -280,14 +226,10 @@ func TestHandleHealthz_JSONEncodingError(t *testing.T) {
 
 	// The endpoint should still return a valid response even if encoding fails internally
 	resp, err := http.Get("http://localhost:19191/healthz")
-	if err != nil {
-		t.Fatalf("Failed to get healthz: %v", err)
-	}
+	require.NoError(t, err, "Failed to get healthz")
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("StatusCode = %d, want %d", resp.StatusCode, http.StatusOK)
-	}
+	assert.Equal(t, http.StatusOK, resp.StatusCode, "StatusCode")
 }
 
 func TestHandleReadyz_JSONEncodingError(t *testing.T) {
@@ -299,9 +241,7 @@ func TestHandleReadyz_JSONEncodingError(t *testing.T) {
 		return ComponentHealth{Status: StatusOK}
 	})
 
-	if err := server.Start(); err != nil {
-		t.Fatalf("Failed to start server: %v", err)
-	}
+	require.NoError(t, server.Start(), "Failed to start server")
 	defer server.Stop(context.Background())
 
 	// Wait for server to start
@@ -309,22 +249,16 @@ func TestHandleReadyz_JSONEncodingError(t *testing.T) {
 
 	// The endpoint should still return a valid response
 	resp, err := http.Get("http://localhost:19292/readyz")
-	if err != nil {
-		t.Fatalf("Failed to get readyz: %v", err)
-	}
+	require.NoError(t, err, "Failed to get readyz")
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("StatusCode = %d, want %d", resp.StatusCode, http.StatusOK)
-	}
+	assert.Equal(t, http.StatusOK, resp.StatusCode, "StatusCode")
 }
 
 func TestHandleIndex_JSONEncodingError(t *testing.T) {
 	server := NewServer(19393)
 
-	if err := server.Start(); err != nil {
-		t.Fatalf("Failed to start server: %v", err)
-	}
+	require.NoError(t, server.Start(), "Failed to start server")
 	defer server.Stop(context.Background())
 
 	// Wait for server to start
@@ -332,21 +266,13 @@ func TestHandleIndex_JSONEncodingError(t *testing.T) {
 
 	// The index endpoint should return valid JSON
 	resp, err := http.Get("http://localhost:19393/")
-	if err != nil {
-		t.Fatalf("Failed to get index: %v", err)
-	}
+	require.NoError(t, err, "Failed to get index")
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("StatusCode = %d, want %d", resp.StatusCode, http.StatusOK)
-	}
+	assert.Equal(t, http.StatusOK, resp.StatusCode, "StatusCode")
 
 	var result map[string]string
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		t.Errorf("Failed to decode JSON response: %v", err)
-	}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result), "Failed to decode JSON response")
 
-	if result["service"] != "rs8kvn_bot" {
-		t.Errorf("service = %s, want rs8kvn_bot", result["service"])
-	}
+	assert.Equal(t, "rs8kvn_bot", result["service"], "service")
 }
