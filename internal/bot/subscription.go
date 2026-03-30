@@ -116,10 +116,17 @@ func (h *Handler) handleMySubscription(ctx context.Context, chatID int64, userna
 	}
 
 	sub, err := h.getSubscriptionWithCache(ctx, chatID)
-	if err != nil || sub == nil {
-		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "❌ У вас нет активной подписки.\n\nНажмите «Получить подписку» для создания.")
-		h.safeSend(editMsg)
-		return
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "❌ У вас нет активной подписки.\n\nНажмите «Получить подписку» для создания.")
+			h.safeSend(editMsg)
+			return
+		} else {
+			logger.Error("Failed to get subscription", zap.Error(err))
+			editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "❌ Временная ошибка. Попробуйте позже.")
+			h.safeSend(editMsg)
+			return
+		}
 	}
 
 	if sub.IsExpired() {

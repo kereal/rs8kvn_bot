@@ -2,11 +2,13 @@ package bot
 
 import (
 	"context"
+	"errors"
 
 	"rs8kvn_bot/internal/logger"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"go.uber.org/zap"
+	"gorm.io/gorm"
 )
 
 // handleBackToStart handles the "back_to_start" callback
@@ -16,7 +18,19 @@ func (h *Handler) handleBackToStart(ctx context.Context, chatID int64, username 
 
 	// Check if user has an active subscription
 	sub, err := h.db.GetByTelegramID(ctx, chatID)
-	hasSubscription := err == nil && sub != nil && sub.Status == "active"
+	var hasSubscription bool
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			// No subscription found - this is normal
+			hasSubscription = false
+		} else {
+			// Database error - log it and treat as no subscription for UI purposes
+			logger.Error("Failed to get subscription", zap.Error(err))
+			hasSubscription = false
+		}
+	} else {
+		hasSubscription = sub != nil && sub.Status == "active"
+	}
 
 	// Get main menu content
 	text, keyboard := h.getMainMenuContent(username, hasSubscription, chatID)
@@ -45,13 +59,25 @@ func (h *Handler) handleMenuHelp(ctx context.Context, chatID int64, username str
 	logger.Info("User viewing help", zap.String("username", username))
 
 	sub, err := h.db.GetByTelegramID(ctx, chatID)
-	if err != nil || sub == nil {
-		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "❌ Ошибка: подписка не найдена.")
-		editMsg.DisableWebPagePreview = true
-		keyboard := h.getBackKeyboard()
-		editMsg.ReplyMarkup = &keyboard
-		h.safeSend(editMsg)
-		return
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			// No subscription found - this is normal
+			editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "❌ У вас нет активной подписки.\n\nНажмите «Получить подписку» для создания.")
+			editMsg.DisableWebPagePreview = true
+			keyboard := h.getBackKeyboard()
+			editMsg.ReplyMarkup = &keyboard
+			h.safeSend(editMsg)
+			return
+		} else {
+			// Database error - log it and show temporary error message
+			logger.Error("Failed to get subscription", zap.Error(err))
+			editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "❌ Временная ошибка. Попробуйте позже.")
+			editMsg.DisableWebPagePreview = true
+			keyboard := h.getBackKeyboard()
+			editMsg.ReplyMarkup = &keyboard
+			h.safeSend(editMsg)
+			return
+		}
 	}
 
 	text := h.getHelpText(h.cfg.TrafficLimitGB, sub.SubscriptionURL)
