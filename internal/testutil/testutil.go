@@ -108,6 +108,7 @@ type MockDatabaseService struct {
 	CleanupExpiredTrialsFunc            func(ctx context.Context, hours int, xuiClient interface {
 		DeleteClient(ctx context.Context, inboundID int, clientID string) error
 	}, inboundID int) (int64, error)
+	GetPoolStatsFunc                    func() (*database.PoolStats, error)
 }
 
 func (m *MockDatabaseService) Ping(ctx context.Context) error {
@@ -382,6 +383,13 @@ func (m *MockDatabaseService) CleanupExpiredTrials(ctx context.Context, hours in
 	return 0, nil
 }
 
+func (m *MockDatabaseService) GetPoolStats() (*database.PoolStats, error) {
+	if m.GetPoolStatsFunc != nil {
+		return m.GetPoolStatsFunc()
+	}
+	return &database.PoolStats{}, nil
+}
+
 func CreateTestSubscription(telegramID int64, username string, status string, expiry time.Time) *database.Subscription {
 	return &database.Subscription{
 		TelegramID:      telegramID,
@@ -551,6 +559,3 @@ func (m *MockBotAPI) GetUpdatesChan(config tgbotapi.UpdateConfig) tgbotapi.Updat
 func (m *MockBotAPI) StopReceivingUpdates() {
 	// No-op for mock
 }
-
-// Self is not implemented as it's a field in tgbotapi.BotAPI, not a method.
-// The handler tests don't require this field to be accessible.
