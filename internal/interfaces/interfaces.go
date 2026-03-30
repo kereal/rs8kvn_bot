@@ -27,7 +27,6 @@ type DatabaseService interface {
 	DeleteSubscription(ctx context.Context, telegramID int64) error
 	GetLatestSubscriptions(ctx context.Context, limit int) ([]database.Subscription, error)
 	GetAllSubscriptions(ctx context.Context) ([]database.Subscription, error)
-	CountAllSubscriptions(ctx context.Context) (int64, error)
 	CountActiveSubscriptions(ctx context.Context) (int64, error)
 	CountExpiredSubscriptions(ctx context.Context) (int64, error)
 	GetAllTelegramIDs(ctx context.Context) ([]int64, error)
