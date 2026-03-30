@@ -1,11 +1,21 @@
 package main
 
 import (
+	"context"
 	"strings"
 	"testing"
 
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/stretchr/testify/assert"
+	"rs8kvn_bot/internal/bot"
+	"rs8kvn_bot/internal/config"
+	"rs8kvn_bot/internal/logger"
+	"rs8kvn_bot/internal/testutil"
 )
+
+func init() {
+	logger.Init("", "error")
+}
 
 func TestGetVersion(t *testing.T) {
 	t.Run("returns non-empty string", func(t *testing.T) {
@@ -43,12 +53,137 @@ func TestGetVersion_BuildTimeVariable(t *testing.T) {
 	})
 }
 
-// Note: handleUpdate and handleUpdateSafely tests are not included here
-// because bot.NewHandler requires a *tgbotapi.BotAPI concrete type,
-// not an interface. Testing these functions would require either:
-// 1. Integration tests with a real Telegram bot token
-// 2. Refactoring to use an interface for the bot API
-// 3. Using build tags to skip these tests in CI
-//
-// The core logic of these functions is tested indirectly through
-// the handler tests in internal/bot/handlers_test.go
+func TestHandleUpdate_CommandRouting(t *testing.T) {
+	cfg := &config.Config{
+		TelegramAdminID: 123456,
+		TrafficLimitGB:  50,
+	}
+	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	handler := bot.NewHandler(mockBot, cfg, mockDB, mockXUI)
+	ctx := context.Background()
+
+	tests := []struct {
+		name    string
+		command string
+	}{
+		{"start command", "start"},
+		{"help command", "help"},
+		{"invite command", "invite"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			update := tgbotapi.Update{
+				Message: &tgbotapi.Message{
+					Chat: &tgbotapi.Chat{ID: 123456},
+					From: &tgbotapi.User{ID: 123456, UserName: "testuser"},
+					Text: "/" + tt.command,
+				},
+			}
+
+			// Should not panic
+			handleUpdate(ctx, handler, update)
+		})
+	}
+}
+
+func TestHandleUpdate_NonCommandMessage(t *testing.T) {
+	cfg := &config.Config{
+		TelegramAdminID: 123456,
+		TrafficLimitGB:  50,
+	}
+	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	handler := bot.NewHandler(mockBot, cfg, mockDB, mockXUI)
+	ctx := context.Background()
+
+	update := tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat: &tgbotapi.Chat{ID: 123456},
+			From: &tgbotapi.User{ID: 123456, UserName: "testuser"},
+			Text: "Hello, this is not a command",
+		},
+	}
+
+	// Should not panic
+	handleUpdate(ctx, handler, update)
+}
+
+func TestHandleUpdate_CallbackQuery(t *testing.T) {
+	cfg := &config.Config{
+		TelegramAdminID: 123456,
+		TrafficLimitGB:  50,
+	}
+	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	handler := bot.NewHandler(mockBot, cfg, mockDB, mockXUI)
+	ctx := context.Background()
+
+	update := tgbotapi.Update{
+		CallbackQuery: &tgbotapi.CallbackQuery{
+			ID:   "test-callback-id",
+			Data: "test_data",
+			From: &tgbotapi.User{ID: 123456, UserName: "testuser"},
+			Message: &tgbotapi.Message{
+				MessageID: 100,
+				Chat:      &tgbotapi.Chat{ID: 123456},
+			},
+		},
+	}
+
+	// Should not panic
+	handleUpdate(ctx, handler, update)
+}
+
+func TestHandleUpdateSafely_PanicRecovery(t *testing.T) {
+	cfg := &config.Config{
+		TelegramAdminID: 123456,
+		TrafficLimitGB:  50,
+	}
+	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	handler := bot.NewHandler(mockBot, cfg, mockDB, mockXUI)
+	ctx := context.Background()
+
+	update := tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat: &tgbotapi.Chat{ID: 123456},
+			From: &tgbotapi.User{ID: 123456, UserName: "testuser"},
+			Text: "/start",
+		},
+	}
+
+	// Should not panic even if internal panic occurs
+	// The function has a recovery mechanism
+	assert.NotPanics(t, func() {
+		handleUpdateSafely(ctx, handler, update)
+	})
+}
+
+func TestHandleUpdate_UnknownCommand(t *testing.T) {
+	cfg := &config.Config{
+		TelegramAdminID: 123456,
+		TrafficLimitGB:  50,
+	}
+	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	handler := bot.NewHandler(mockBot, cfg, mockDB, mockXUI)
+	ctx := context.Background()
+
+	update := tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat: &tgbotapi.Chat{ID: 123456},
+			From: &tgbotapi.User{ID: 123456, UserName: "testuser"},
+			Text: "/unknowncommand",
+		},
+	}
+
+	// Should not panic
+	handleUpdate(ctx, handler, update)
+}

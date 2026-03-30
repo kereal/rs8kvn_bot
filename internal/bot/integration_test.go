@@ -10,6 +10,7 @@ import (
 
 	"rs8kvn_bot/internal/config"
 	"rs8kvn_bot/internal/database"
+	"rs8kvn_bot/internal/testutil"
 	"rs8kvn_bot/internal/utils"
 	"rs8kvn_bot/internal/xui"
 )
@@ -55,7 +56,7 @@ func NewTestFixture(t *testing.T) *TestFixture {
 		t.Fatalf("Failed to create XUI client: %v", err)
 	}
 
-	handler := NewHandler(nil, cfg, dbService, xuiClient)
+	handler := NewHandler(testutil.NewMockBotAPI(), cfg, dbService, xuiClient)
 
 	return &TestFixture{
 		DB:          dbService,
@@ -204,7 +205,7 @@ func NewIntegrationTestFixture(t *testing.T) *IntegrationTestFixture {
 		DatabasePath:     ":memory:",
 	}
 
-	handler := NewHandler(nil, cfg, dbService, mockXUI.Client)
+	handler := NewHandler(testutil.NewMockBotAPI(), cfg, dbService, mockXUI.Client)
 
 	return &IntegrationTestFixture{
 		DB:          dbService,
