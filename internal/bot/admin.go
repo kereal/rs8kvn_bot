@@ -90,7 +90,8 @@ func (h *Handler) HandleDel(ctx context.Context, update tgbotapi.Update) {
 
 	// Parse the ID - use int64 to properly detect negative numbers
 	var parsedID int64
-	if _, err := fmt.Sscanf(args, "%d", &parsedID); err != nil {
+	var err error
+	if parsedID, err = strconv.ParseInt(strings.TrimSpace(args), 10, 64); err != nil {
 		h.SendMessage(ctx, chatID, "❌ Неверный формат ID. Использование: /del <id>\n\nПример: /del 5")
 		return
 	}
@@ -156,6 +157,17 @@ func (h *Handler) HandleDel(ctx context.Context, update tgbotapi.Update) {
 		sub.TelegramID,
 		sub.ClientID,
 	))
+}
+
+// escapeMarkdown escapes special characters in Markdown V2 to prevent injection
+func escapeMarkdown(text string) string {
+	// Characters that need to be escaped in Markdown V2: _ * [ ] ( ) ~ ` > # + - = | { } . !
+	specialChars := []string{"_", "*", "[", "]", "(", ")", "~", "`", ">", "#", "+", "-", "=", "|", "{", "}", ".", "!"}
+	result := text
+	for _, char := range specialChars {
+		result = strings.ReplaceAll(result, char, "\\"+char)
+	}
+	return result
 }
 
 // HandleBroadcast handles the /broadcast command for admins to send messages to all users.
@@ -224,8 +236,10 @@ func (h *Handler) HandleBroadcast(ctx context.Context, update tgbotapi.Update) {
 			default:
 			}
 
-			msg := tgbotapi.NewMessage(telegramID, message)
-			msg.ParseMode = "Markdown"
+			// Escape markdown to prevent injection
+			escapedMessage := escapeMarkdown(message)
+			msg := tgbotapi.NewMessage(telegramID, escapedMessage)
+			msg.ParseMode = "MarkdownV2"
 			msg.DisableWebPagePreview = true
 			if _, err := h.bot.Send(msg); err != nil {
 				logger.Warn("Failed to send broadcast message",
@@ -304,8 +318,10 @@ func (h *Handler) HandleSend(ctx context.Context, update tgbotapi.Update) {
 	}
 
 	// Send the message
-	msg := tgbotapi.NewMessage(telegramID, message)
-	msg.ParseMode = "Markdown"
+	// Escape markdown to prevent injection
+	escapedMessage := escapeMarkdown(message)
+	msg := tgbotapi.NewMessage(telegramID, escapedMessage)
+	msg.ParseMode = "MarkdownV2"
 	msg.DisableWebPagePreview = true
 	sentMsg, err := h.bot.Send(msg)
 	if err != nil {

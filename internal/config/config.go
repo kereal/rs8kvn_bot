@@ -48,9 +48,6 @@ type Config struct {
 	SiteURL            string
 	TrialDurationHours int
 	TrialRateLimit     int
-
-	// Supermemory configuration
-	SupermemoryAPIKey string
 }
 
 // Load reads configuration from environment variables and validates it.
@@ -67,33 +64,39 @@ func Load() (*Config, error) {
 
 	cfg := &Config{
 		TelegramBotToken: getEnv("TELEGRAM_BOT_TOKEN", ""),
-		TelegramAdminID:  parseEnvInt64("TELEGRAM_ADMIN_ID", 0),
+		XUIHost:          getEnv("XUI_HOST", "http://localhost:2053"),
+		XUIUsername:      getEnv("XUI_USERNAME", ""),
+		XUIPassword:      getEnv("XUI_PASSWORD", ""),
+		XUISubPath:       getEnv("XUI_SUB_PATH", DefaultXUISubPath),
+		DatabasePath:     getEnv("DATABASE_PATH", DefaultDatabasePath),
+		LogFilePath:      getEnv("LOG_FILE_PATH", DefaultLogFilePath),
+		LogLevel:         getEnv("LOG_LEVEL", DefaultLogLevel),
+		HeartbeatURL:     getEnv("HEARTBEAT_URL", ""),
+		SentryDSN:        getEnv("SENTRY_DSN", ""),
+		SiteURL:          getEnv("SITE_URL", DefaultSiteURL),
+	}
 
-		XUIHost:      getEnv("XUI_HOST", "http://localhost:2053"),
-		XUIUsername:  getEnv("XUI_USERNAME", ""),
-		XUIPassword:  getEnv("XUI_PASSWORD", ""),
-		XUIInboundID: parseEnvInt("XUI_INBOUND_ID", 1),
-		XUISubPath:   getEnv("XUI_SUB_PATH", DefaultXUISubPath),
-
-		DatabasePath: getEnv("DATABASE_PATH", DefaultDatabasePath),
-
-		LogFilePath: getEnv("LOG_FILE_PATH", DefaultLogFilePath),
-		LogLevel:    getEnv("LOG_LEVEL", DefaultLogLevel),
-
-		TrafficLimitGB: parseEnvInt("TRAFFIC_LIMIT_GB", DefaultTrafficLimitGB),
-
-		HeartbeatURL:      getEnv("HEARTBEAT_URL", ""),
-		HeartbeatInterval: parseEnvInt("HEARTBEAT_INTERVAL", DefaultHeartbeatInterval),
-
-		SentryDSN: getEnv("SENTRY_DSN", ""),
-
-		HealthCheckPort: parseEnvInt("HEALTH_CHECK_PORT", DefaultHealthCheckPort),
-
-		SiteURL:            getEnv("SITE_URL", DefaultSiteURL),
-		TrialDurationHours: parseEnvInt("TRIAL_DURATION_HOURS", DefaultTrialDurationHours),
-		TrialRateLimit:     parseEnvInt("TRIAL_RATE_LIMIT", DefaultTrialRateLimit),
-
-		SupermemoryAPIKey: getEnv("SUPERMEMORY_API_KEY", ""),
+	var err error
+	if cfg.TelegramAdminID, err = parseEnvInt64("TELEGRAM_ADMIN_ID", 0); err != nil {
+		return nil, fmt.Errorf("invalid TELEGRAM_ADMIN_ID: %w", err)
+	}
+	if cfg.XUIInboundID, err = parseEnvInt("XUI_INBOUND_ID", 1); err != nil {
+		return nil, fmt.Errorf("invalid XUI_INBOUND_ID: %w", err)
+	}
+	if cfg.TrafficLimitGB, err = parseEnvInt("TRAFFIC_LIMIT_GB", DefaultTrafficLimitGB); err != nil {
+		return nil, fmt.Errorf("invalid TRAFFIC_LIMIT_GB: %w", err)
+	}
+	if cfg.HeartbeatInterval, err = parseEnvInt("HEARTBEAT_INTERVAL", DefaultHeartbeatInterval); err != nil {
+		return nil, fmt.Errorf("invalid HEARTBEAT_INTERVAL: %w", err)
+	}
+	if cfg.HealthCheckPort, err = parseEnvInt("HEALTH_CHECK_PORT", DefaultHealthCheckPort); err != nil {
+		return nil, fmt.Errorf("invalid HEALTH_CHECK_PORT: %w", err)
+	}
+	if cfg.TrialDurationHours, err = parseEnvInt("TRIAL_DURATION_HOURS", DefaultTrialDurationHours); err != nil {
+		return nil, fmt.Errorf("invalid TRIAL_DURATION_HOURS: %w", err)
+	}
+	if cfg.TrialRateLimit, err = parseEnvInt("TRIAL_RATE_LIMIT", DefaultTrialRateLimit); err != nil {
+		return nil, fmt.Errorf("invalid TRIAL_RATE_LIMIT: %w", err)
 	}
 
 	// Validate all required fields
@@ -228,34 +231,36 @@ func getEnv(key, defaultValue string) string {
 
 // parseEnvInt parses an environment variable as an integer.
 // Returns the default value if the variable is not set or empty.
-func parseEnvInt(key string, defaultValue int) int {
+// Returns an error if the variable is set but cannot be parsed as an integer.
+func parseEnvInt(key string, defaultValue int) (int, error) {
 	value := os.Getenv(key)
 	if value == "" {
-		return defaultValue
+		return defaultValue, nil
 	}
 
 	intValue, err := strconv.Atoi(strings.TrimSpace(value))
 	if err != nil {
-		return defaultValue
+		return 0, fmt.Errorf("%s must be an integer, got: %q", key, value)
 	}
 
-	return intValue
+	return intValue, nil
 }
 
 // parseEnvInt64 parses an environment variable as an int64.
 // Returns the default value if the variable is not set or empty.
-func parseEnvInt64(key string, defaultValue int64) int64 {
+// Returns an error if the variable is set but cannot be parsed as an integer.
+func parseEnvInt64(key string, defaultValue int64) (int64, error) {
 	value := os.Getenv(key)
 	if value == "" {
-		return defaultValue
+		return defaultValue, nil
 	}
 
 	intValue, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
 	if err != nil {
-		return defaultValue
+		return 0, fmt.Errorf("%s must be an integer, got: %q", key, value)
 	}
 
-	return intValue
+	return intValue, nil
 }
 
 // String returns a safe string representation of the config (without sensitive data).
@@ -287,7 +292,6 @@ func (c *Config) String() string {
 		c.TrafficLimitGB,
 		maskURL(c.HeartbeatURL),
 		c.HeartbeatInterval,
-		maskAPIKey(c.SupermemoryAPIKey),
 	)
 }
 

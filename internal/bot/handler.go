@@ -35,12 +35,12 @@ type Handler struct {
 
 func NewHandler(bot interfaces.BotAPI, cfg *config.Config, db interfaces.DatabaseService, xuiClient interfaces.XUIClient) *Handler {
 	return &Handler{
-		bot:         bot,
-		cfg:         cfg,
-		db:          db,
-		xui:         xuiClient,
-		rateLimiter: ratelimiter.NewRateLimiter(config.RateLimiterMaxTokens, config.RateLimiterRefillRate),
-		cache:       NewSubscriptionCache(CacheMaxSize, CacheTTL),
+		bot:           bot,
+		cfg:           cfg,
+		db:            db,
+		xui:           xuiClient,
+		rateLimiter:   ratelimiter.NewRateLimiter(config.RateLimiterMaxTokens, config.RateLimiterRefillRate),
+		cache:         NewSubscriptionCache(CacheMaxSize, CacheTTL),
 		subCreationMu: sync.Mutex{},
 		inProgress:    make(map[int64]struct{}),
 	}
@@ -215,10 +215,6 @@ func (h *Handler) addAdminButtons(keyboard *tgbotapi.InlineKeyboardMarkup, chatI
 			),
 		)
 	}
-}
-
-func (h *Handler) isSupermemoryEnabled() bool {
-	return false
 }
 
 func (h *Handler) StoreConversation(ctx context.Context, chatID int64, userMessage, botResponse string) {

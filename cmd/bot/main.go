@@ -129,6 +129,11 @@ func main() {
 	if err != nil {
 		logger.Fatal("Failed to initialize 3x-ui client", zap.Error(err))
 	}
+	defer func() {
+		if err := xuiClient.Close(); err != nil {
+			logger.Error("Failed to close 3x-ui client", zap.Error(err))
+		}
+	}()
 
 	// Connect to 3x-ui panel with timeout
 	logger.Info("Connecting to 3x-ui panel")
@@ -269,6 +274,13 @@ func main() {
 shutdown:
 	logger.Info("Graceful shutdown initiated")
 	botAPI.StopReceivingUpdates()
+
+	// Drain the updates channel to prevent goroutine leak
+	go func() {
+		for range updates {
+			// Drain the channel until it's closed
+		}
+	}()
 
 	// Wait for in-flight update handlers to complete
 	logger.Info("Waiting for update handlers to complete...")
