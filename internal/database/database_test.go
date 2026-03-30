@@ -1,6 +1,7 @@
 package database
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -907,13 +908,13 @@ func TestService_GetByTelegramID(t *testing.T) {
 		SubscriptionURL: "http://test.url/sub/abc",
 	}
 
-	err = service.CreateSubscription(nil, sub)
+	err = service.CreateSubscription(context.Background(), sub)
 	if err != nil {
 		t.Fatalf("CreateSubscription() error = %v", err)
 	}
 
 	// Retrieve the subscription
-	retrieved, err := service.GetByTelegramID(nil, 12345)
+	retrieved, err := service.GetByTelegramID(context.Background(), 12345)
 	if err != nil {
 		t.Fatalf("GetByTelegramID() error = %v", err)
 	}
@@ -948,13 +949,13 @@ func TestService_CreateSubscription(t *testing.T) {
 		SubscriptionURL: "http://test.url/sub/xyz",
 	}
 
-	err = service.CreateSubscription(nil, sub)
+	err = service.CreateSubscription(context.Background(), sub)
 	if err != nil {
 		t.Fatalf("CreateSubscription() error = %v", err)
 	}
 
 	// Verify it was created
-	retrieved, err := service.GetByTelegramID(nil, 54321)
+	retrieved, err := service.GetByTelegramID(context.Background(), 54321)
 	if err != nil {
 		t.Fatalf("GetByTelegramID() error = %v", err)
 	}
@@ -987,7 +988,7 @@ func TestService_UpdateSubscription(t *testing.T) {
 		SubscriptionURL: "http://test.url/sub/update",
 	}
 
-	err = service.CreateSubscription(nil, sub)
+	err = service.CreateSubscription(context.Background(), sub)
 	if err != nil {
 		t.Fatalf("CreateSubscription() error = %v", err)
 	}
@@ -996,13 +997,13 @@ func TestService_UpdateSubscription(t *testing.T) {
 	sub.Username = "updateduser"
 	sub.TrafficLimit = 214748364800
 
-	err = service.UpdateSubscription(nil, sub)
+	err = service.UpdateSubscription(context.Background(), sub)
 	if err != nil {
 		t.Fatalf("UpdateSubscription() error = %v", err)
 	}
 
 	// Verify update
-	retrieved, err := service.GetByTelegramID(nil, 99999)
+	retrieved, err := service.GetByTelegramID(context.Background(), 99999)
 	if err != nil {
 		t.Fatalf("GetByTelegramID() error = %v", err)
 	}
@@ -1038,19 +1039,19 @@ func TestService_DeleteSubscription(t *testing.T) {
 		SubscriptionURL: "http://test.url/sub/delete",
 	}
 
-	err = service.CreateSubscription(nil, sub)
+	err = service.CreateSubscription(context.Background(), sub)
 	if err != nil {
 		t.Fatalf("CreateSubscription() error = %v", err)
 	}
 
 	// Delete subscription
-	err = service.DeleteSubscription(nil, 77777)
+	err = service.DeleteSubscription(context.Background(), 77777)
 	if err != nil {
 		t.Fatalf("DeleteSubscription() error = %v", err)
 	}
 
 	// Verify it's deleted
-	_, err = service.GetByTelegramID(nil, 77777)
+	_, err = service.GetByTelegramID(context.Background(), 77777)
 	if err == nil {
 		t.Error("GetByTelegramID() should return error for deleted subscription")
 	}
@@ -1079,14 +1080,14 @@ func TestService_GetAllSubscriptions(t *testing.T) {
 			Status:          "active",
 			SubscriptionURL: fmt.Sprintf("http://test.url/sub/%d", i),
 		}
-		err = service.CreateSubscription(nil, sub)
+		err = service.CreateSubscription(context.Background(), sub)
 		if err != nil {
 			t.Fatalf("CreateSubscription() error = %v", err)
 		}
 	}
 
 	// Get all subscriptions
-	subs, err := service.GetAllSubscriptions(nil)
+	subs, err := service.GetAllSubscriptions(context.Background())
 	if err != nil {
 		t.Fatalf("GetAllSubscriptions() error = %v", err)
 	}
@@ -1119,7 +1120,7 @@ func TestService_CountActiveSubscriptions(t *testing.T) {
 			Status:          "active",
 			SubscriptionURL: fmt.Sprintf("http://test.url/sub/active/%d", i),
 		}
-		err = service.CreateSubscription(nil, sub)
+		err = service.CreateSubscription(context.Background(), sub)
 		if err != nil {
 			t.Fatalf("CreateSubscription() error = %v", err)
 		}
@@ -1137,13 +1138,13 @@ func TestService_CountActiveSubscriptions(t *testing.T) {
 		Status:          "active",
 		SubscriptionURL: "http://test.url/sub/expired",
 	}
-	err = service.CreateSubscription(nil, expiredSub)
+	err = service.CreateSubscription(context.Background(), expiredSub)
 	if err != nil {
 		t.Fatalf("CreateSubscription() error = %v", err)
 	}
 
 	// Count active subscriptions
-	count, err := service.CountActiveSubscriptions(nil)
+	count, err := service.CountActiveSubscriptions(context.Background())
 	if err != nil {
 		t.Fatalf("CountActiveSubscriptions() error = %v", err)
 	}
@@ -1176,7 +1177,7 @@ func TestService_CountExpiredSubscriptions(t *testing.T) {
 			Status:          "active",
 			SubscriptionURL: fmt.Sprintf("http://test.url/sub/expired/%d", i),
 		}
-		err = service.CreateSubscription(nil, sub)
+		err = service.CreateSubscription(context.Background(), sub)
 		if err != nil {
 			t.Fatalf("CreateSubscription() error = %v", err)
 		}
@@ -1194,13 +1195,13 @@ func TestService_CountExpiredSubscriptions(t *testing.T) {
 		Status:          "active",
 		SubscriptionURL: "http://test.url/sub/active",
 	}
-	err = service.CreateSubscription(nil, activeSub)
+	err = service.CreateSubscription(context.Background(), activeSub)
 	if err != nil {
 		t.Fatalf("CreateSubscription() error = %v", err)
 	}
 
 	// Count expired subscriptions
-	count, err := service.CountExpiredSubscriptions(nil)
+	count, err := service.CountExpiredSubscriptions(context.Background())
 	if err != nil {
 		t.Fatalf("CountExpiredSubscriptions() error = %v", err)
 	}
@@ -1362,13 +1363,13 @@ func TestService_GetLatestSubscriptions(t *testing.T) {
 			Status:          "active",
 			SubscriptionURL: fmt.Sprintf("http://localhost/sub/%d", i),
 		}
-		if err := service.CreateSubscription(nil, sub); err != nil {
+		if err := service.CreateSubscription(context.Background(), sub); err != nil {
 			t.Fatalf("Failed to create test subscription: %v", err)
 		}
 	}
 
 	// Get latest 3 subscriptions
-	subs, err := service.GetLatestSubscriptions(nil, 3)
+	subs, err := service.GetLatestSubscriptions(context.Background(), 3)
 	if err != nil {
 		t.Fatalf("GetLatestSubscriptions() error = %v", err)
 	}
@@ -1967,3 +1968,430 @@ func TestGetTelegramIDByUsername_DatabaseNotInitialized(t *testing.T) {
 	}
 }
 
+// Trial-related tests
+
+func TestCreateTrialSubscription(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	if err := Init(dbPath); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	defer Close()
+
+	svc := &Service{db: DB}
+	ctx := context.Background()
+
+	sub, err := svc.CreateTrialSubscription(ctx, "testcode", "sub123", "client-uuid-123", 1, 107374182400, time.Now().Add(24*time.Hour), "http://example.com/sub/sub123")
+	if err != nil {
+		t.Fatalf("CreateTrialSubscription() error = %v", err)
+	}
+
+	if sub.InviteCode != "testcode" {
+		t.Errorf("InviteCode = %s, want testcode", sub.InviteCode)
+	}
+	if sub.SubscriptionID != "sub123" {
+		t.Errorf("SubscriptionID = %s, want sub123", sub.SubscriptionID)
+	}
+	if sub.ClientID != "client-uuid-123" {
+		t.Errorf("ClientID = %s, want client-uuid-123", sub.ClientID)
+	}
+	if sub.TelegramID != 0 {
+		t.Errorf("TelegramID = %d, want 0", sub.TelegramID)
+	}
+	if !sub.IsTrial {
+		t.Error("IsTrial should be true")
+	}
+	if sub.InboundID != 1 {
+		t.Errorf("InboundID = %d, want 1", sub.InboundID)
+	}
+}
+
+func TestBindTrialSubscription(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	if err := Init(dbPath); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	defer Close()
+
+	svc := &Service{db: DB}
+	ctx := context.Background()
+
+	// Create trial subscription
+	_, err := svc.CreateTrialSubscription(ctx, "testcode", "sub123", "client-uuid-123", 1, 107374182400, time.Now().Add(24*time.Hour), "http://example.com/sub/sub123")
+	if err != nil {
+		t.Fatalf("CreateTrialSubscription() error = %v", err)
+	}
+
+	// Create invite for referral
+	_, err = svc.GetOrCreateInvite(ctx, 12345, "invitecode")
+	if err != nil {
+		t.Fatalf("GetOrCreateInvite() error = %v", err)
+	}
+
+	// Bind trial subscription
+	sub, err := svc.BindTrialSubscription(ctx, "sub123", 999888, "testuser")
+	if err != nil {
+		t.Fatalf("BindTrialSubscription() error = %v", err)
+	}
+
+	if sub.TelegramID != 999888 {
+		t.Errorf("TelegramID = %d, want 999888", sub.TelegramID)
+	}
+	if sub.Username != "testuser" {
+		t.Errorf("Username = %s, want testuser", sub.Username)
+	}
+	if sub.IsTrial {
+		t.Error("IsTrial should be false after binding")
+	}
+}
+
+func TestBindTrialSubscription_AlreadyActivated(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	if err := Init(dbPath); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	defer Close()
+
+	svc := &Service{db: DB}
+	ctx := context.Background()
+
+	// Create and bind trial subscription
+	_, err := svc.CreateTrialSubscription(ctx, "testcode", "sub123", "client-uuid-123", 1, 107374182400, time.Now().Add(24*time.Hour), "http://example.com/sub/sub123")
+	if err != nil {
+		t.Fatalf("CreateTrialSubscription() error = %v", err)
+	}
+
+	_, err = svc.BindTrialSubscription(ctx, "sub123", 999888, "testuser")
+	if err != nil {
+		t.Fatalf("BindTrialSubscription() error = %v", err)
+	}
+
+	// Try to bind again - should fail
+	_, err = svc.BindTrialSubscription(ctx, "sub123", 111222, "anotheruser")
+	if err == nil {
+		t.Error("BindTrialSubscription() should fail when already activated")
+	}
+}
+
+func TestGetOrCreateInvite(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	if err := Init(dbPath); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	defer Close()
+
+	svc := &Service{db: DB}
+	ctx := context.Background()
+
+	// Create new invite
+	invite1, err := svc.GetOrCreateInvite(ctx, 12345, "code1")
+	if err != nil {
+		t.Fatalf("GetOrCreateInvite() error = %v", err)
+	}
+
+	// Get existing invite (should return same)
+	invite2, err := svc.GetOrCreateInvite(ctx, 12345, "code2")
+	if err != nil {
+		t.Fatalf("GetOrCreateInvite() error = %v", err)
+	}
+
+	if invite1.Code != invite2.Code {
+		t.Errorf("GetOrCreateInvite() returned different codes: %s vs %s", invite1.Code, invite2.Code)
+	}
+}
+
+func TestGetInviteByCode(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	if err := Init(dbPath); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	defer Close()
+
+	svc := &Service{db: DB}
+	ctx := context.Background()
+
+	// Create invite
+	created, err := svc.GetOrCreateInvite(ctx, 12345, "testcode")
+	if err != nil {
+		t.Fatalf("GetOrCreateInvite() error = %v", err)
+	}
+
+	// Get by code
+	found, err := svc.GetInviteByCode(ctx, "testcode")
+	if err != nil {
+		t.Fatalf("GetInviteByCode() error = %v", err)
+	}
+
+	if created.Code != found.Code {
+		t.Errorf("GetInviteByCode() code mismatch: %s vs %s", created.Code, found.Code)
+	}
+	if found.ReferrerTGID != 12345 {
+		t.Errorf("ReferrerTGID = %d, want 12345", found.ReferrerTGID)
+	}
+}
+
+func TestCleanupExpiredTrials(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	if err := Init(dbPath); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	defer Close()
+
+	svc := &Service{db: DB}
+	ctx := context.Background()
+
+	// Create trial subscription that will be "expired" (created_at old)
+	sub1, err := svc.CreateTrialSubscription(ctx, "testcode", "expired-sub", "expired-client", 1, 107374182400, time.Now().Add(24*time.Hour), "http://example.com/sub/expired")
+	if err != nil {
+		t.Fatalf("CreateTrialSubscription() error = %v", err)
+	}
+
+	// Manually set created_at to 25 hours ago
+	oldTime := time.Now().Add(-25 * time.Hour)
+	DB.Model(&Subscription{}).Where("id = ?", sub1.ID).Update("created_at", oldTime)
+
+	// Create active trial subscription (created recently)
+	_, err = svc.CreateTrialSubscription(ctx, "testcode", "active-sub", "active-client", 1, 107374182400, time.Now().Add(24*time.Hour), "http://example.com/sub/active")
+	if err != nil {
+		t.Fatalf("CreateTrialSubscription() error = %v", err)
+	}
+
+	// Create trial request for cleanup test
+	err = svc.CreateTrialRequest(ctx, "192.168.1.1")
+	if err != nil {
+		t.Fatalf("CreateTrialRequest() error = %v", err)
+	}
+
+	// Run cleanup
+	deleted, err := svc.CleanupExpiredTrials(ctx, 24, nil, 1)
+	if err != nil {
+		t.Fatalf("CleanupExpiredTrials() error = %v", err)
+	}
+
+	if deleted != 1 {
+		t.Errorf("CleanupExpiredTrials() deleted = %d, want 1", deleted)
+	}
+
+	// Verify active subscription still exists
+	_, err = svc.GetSubscriptionBySubscriptionID(ctx, "active-sub")
+	if err != nil {
+		t.Error("Active subscription should still exist after cleanup")
+	}
+
+	// Verify expired subscription was deleted
+	_, err = svc.GetSubscriptionBySubscriptionID(ctx, "expired-sub")
+	if err == nil {
+		t.Error("Expired subscription should be deleted after cleanup")
+	}
+}
+
+func TestGetSubscriptionBySubscriptionID(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	if err := Init(dbPath); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	defer Close()
+
+	svc := &Service{db: DB}
+	ctx := context.Background()
+
+	// Create trial subscription
+	_, err := svc.CreateTrialSubscription(ctx, "testcode", "sub123", "client-uuid-123", 1, 107374182400, time.Now().Add(24*time.Hour), "http://example.com/sub/sub123")
+	if err != nil {
+		t.Fatalf("CreateTrialSubscription() error = %v", err)
+	}
+
+	// Get by subscription ID
+	sub, err := svc.GetSubscriptionBySubscriptionID(ctx, "sub123")
+	if err != nil {
+		t.Fatalf("GetSubscriptionBySubscriptionID() error = %v", err)
+	}
+
+	if sub.SubscriptionID != "sub123" {
+		t.Errorf("SubscriptionID = %s, want sub123", sub.SubscriptionID)
+	}
+	if sub.ClientID != "client-uuid-123" {
+		t.Errorf("ClientID = %s, want client-uuid-123", sub.ClientID)
+	}
+}
+
+func TestGetSubscriptionBySubscriptionID_NotFound(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	if err := Init(dbPath); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	defer Close()
+
+	svc := &Service{db: DB}
+	ctx := context.Background()
+
+	_, err := svc.GetSubscriptionBySubscriptionID(ctx, "nonexistent")
+	if err == nil {
+		t.Error("GetSubscriptionBySubscriptionID() should return error for non-existent subscription")
+	}
+}
+
+func TestCreateTrialRequest(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	if err := Init(dbPath); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	defer Close()
+
+	svc := &Service{db: DB}
+	ctx := context.Background()
+
+	// Create trial request
+	err := svc.CreateTrialRequest(ctx, "192.168.1.1")
+	if err != nil {
+		t.Fatalf("CreateTrialRequest() error = %v", err)
+	}
+
+	// Verify it was created by counting
+	count, err := svc.CountTrialRequestsByIPLastHour(ctx, "192.168.1.1")
+	if err != nil {
+		t.Fatalf("CountTrialRequestsByIPLastHour() error = %v", err)
+	}
+	if count != 1 {
+		t.Errorf("CountTrialRequestsByIPLastHour() = %d, want 1", count)
+	}
+}
+
+func TestCountTrialRequestsByIPLastHour(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	if err := Init(dbPath); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	defer Close()
+
+	svc := &Service{db: DB}
+	ctx := context.Background()
+
+	// Create multiple trial requests from same IP
+	for i := 0; i < 3; i++ {
+		err := svc.CreateTrialRequest(ctx, "192.168.1.100")
+		if err != nil {
+			t.Fatalf("CreateTrialRequest() error = %v", err)
+		}
+	}
+
+	// Create request from different IP
+	err := svc.CreateTrialRequest(ctx, "10.0.0.1")
+	if err != nil {
+		t.Fatalf("CreateTrialRequest() error = %v", err)
+	}
+
+	// Count requests from first IP
+	count, err := svc.CountTrialRequestsByIPLastHour(ctx, "192.168.1.100")
+	if err != nil {
+		t.Fatalf("CountTrialRequestsByIPLastHour() error = %v", err)
+	}
+	if count != 3 {
+		t.Errorf("CountTrialRequestsByIPLastHour() = %d, want 3", count)
+	}
+
+	// Count requests from second IP
+	count, err = svc.CountTrialRequestsByIPLastHour(ctx, "10.0.0.1")
+	if err != nil {
+		t.Fatalf("CountTrialRequestsByIPLastHour() error = %v", err)
+	}
+	if count != 1 {
+		t.Errorf("CountTrialRequestsByIPLastHour() = %d, want 1", count)
+	}
+
+	// Count requests from unknown IP
+	count, err = svc.CountTrialRequestsByIPLastHour(ctx, "172.16.0.1")
+	if err != nil {
+		t.Fatalf("CountTrialRequestsByIPLastHour() error = %v", err)
+	}
+	if count != 0 {
+		t.Errorf("CountTrialRequestsByIPLastHour() = %d, want 0", count)
+	}
+}
+
+func TestCountTrialRequestsByIPLastHour_OldRequests(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	if err := Init(dbPath); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	defer Close()
+
+	svc := &Service{db: DB}
+	ctx := context.Background()
+
+	// Create trial request
+	err := svc.CreateTrialRequest(ctx, "192.168.1.200")
+	if err != nil {
+		t.Fatalf("CreateTrialRequest() error = %v", err)
+	}
+
+	// Manually set created_at to 2 hours ago (should be excluded from count)
+	oldTime := time.Now().Add(-2 * time.Hour)
+	DB.Model(&TrialRequest{}).Where("ip = ?", "192.168.1.200").Update("created_at", oldTime)
+
+	// Count - should be 0 because request is older than 1 hour
+	count, err := svc.CountTrialRequestsByIPLastHour(ctx, "192.168.1.200")
+	if err != nil {
+		t.Fatalf("CountTrialRequestsByIPLastHour() error = %v", err)
+	}
+	if count != 0 {
+		t.Errorf("CountTrialRequestsByIPLastHour() = %d, want 0 (old requests should be excluded)", count)
+	}
+}
+
+func TestBindTrialSubscription_WithReferral(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	if err := Init(dbPath); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	defer Close()
+
+	svc := &Service{db: DB}
+	ctx := context.Background()
+
+	// Create referrer's invite
+	_, err := svc.GetOrCreateInvite(ctx, 12345, "refcode")
+	if err != nil {
+		t.Fatalf("GetOrCreateInvite() error = %v", err)
+	}
+
+	// Create trial subscription with invite code
+	_, err = svc.CreateTrialSubscription(ctx, "refcode", "sub-ref", "client-ref", 1, 107374182400, time.Now().Add(24*time.Hour), "http://example.com/sub/sub-ref")
+	if err != nil {
+		t.Fatalf("CreateTrialSubscription() error = %v", err)
+	}
+
+	// Bind trial subscription
+	sub, err := svc.BindTrialSubscription(ctx, "sub-ref", 999888, "newuser")
+	if err != nil {
+		t.Fatalf("BindTrialSubscription() error = %v", err)
+	}
+
+	// Verify referral was recorded
+	if sub.ReferredBy != 12345 {
+		t.Errorf("ReferredBy = %d, want 12345", sub.ReferredBy)
+	}
+}

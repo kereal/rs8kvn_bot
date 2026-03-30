@@ -1,6 +1,7 @@
 package bot
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -8,6 +9,7 @@ import (
 	"rs8kvn_bot/internal/interfaces"
 	"rs8kvn_bot/internal/logger"
 	"rs8kvn_bot/internal/ratelimiter"
+	"rs8kvn_bot/internal/utils"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"go.uber.org/zap"
@@ -40,12 +42,12 @@ func NewHandler(bot *tgbotapi.BotAPI, cfg *config.Config, db interfaces.Database
 }
 
 func (h *Handler) isAdmin(chatID int64) bool {
-	return chatID == h.cfg.TelegramAdminID
+	return h.cfg.TelegramAdminID > 0 && chatID == h.cfg.TelegramAdminID
 }
 
 // getMainMenuKeyboard returns the inline keyboard with main menu buttons
-func (h *Handler) getMainMenuKeyboard() tgbotapi.InlineKeyboardMarkup {
-	return tgbotapi.NewInlineKeyboardMarkup(
+func (h *Handler) getMainMenuKeyboard(hasSubscription bool) tgbotapi.InlineKeyboardMarkup {
+	rows := [][]tgbotapi.InlineKeyboardButton{
 		tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData("📋 Подписка", "menu_subscription"),
 			tgbotapi.NewInlineKeyboardButtonData("☕ Донат", "menu_donate"),
@@ -53,7 +55,15 @@ func (h *Handler) getMainMenuKeyboard() tgbotapi.InlineKeyboardMarkup {
 		tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData("❓ Помощь", "menu_help"),
 		),
-	)
+	}
+
+	if hasSubscription {
+		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("📤 Поделиться", "share_invite"),
+		))
+	}
+
+	return tgbotapi.NewInlineKeyboardMarkup(rows...)
 }
 
 // getBackKeyboard returns the inline keyboard with back button
@@ -92,15 +102,7 @@ func (h *Handler) getMainMenuContent(username string, hasSubscription bool, chat
 			"👋 Привет, %s!\n\nЯ бот для выдачи подписок на прокси VLESS+Reality+Vision.\n\nИспользуйте кнопки ниже для взаимодействия с ботом.",
 			username,
 		)
-		keyboard = h.getMainMenuKeyboard()
-		if h.isAdmin(chatID) {
-			keyboard.InlineKeyboard = append(keyboard.InlineKeyboard,
-				tgbotapi.NewInlineKeyboardRow(
-					tgbotapi.NewInlineKeyboardButtonData("📊 Стат", "admin_stats"),
-					tgbotapi.NewInlineKeyboardButtonData("📋 Посл.рег", "admin_lastreg"),
-				),
-			)
-		}
+		keyboard = h.getMainMenuKeyboard(true)
 	} else {
 		text = fmt.Sprintf(
 			"👋 Привет, %s!\n\nЯ бот для выдачи подписок на прокси VLESS+Reality+Vision.\n\nНажмите кнопку ниже, чтобы получить подписку",
@@ -111,15 +113,9 @@ func (h *Handler) getMainMenuContent(username string, hasSubscription bool, chat
 				tgbotapi.NewInlineKeyboardButtonData("📥 Получить подписку", "create_subscription"),
 			),
 		)
-		if h.isAdmin(chatID) {
-			keyboard.InlineKeyboard = append(keyboard.InlineKeyboard,
-				tgbotapi.NewInlineKeyboardRow(
-					tgbotapi.NewInlineKeyboardButtonData("📊 Стат", "admin_stats"),
-					tgbotapi.NewInlineKeyboardButtonData("📋 Посл.рег", "admin_lastreg"),
-				),
-			)
-		}
 	}
+
+	h.addAdminButtons(&keyboard, chatID)
 
 	return text, keyboard
 }
@@ -175,4 +171,43 @@ func (h *Handler) getHelpText(trafficLimitGB int, subscriptionURL string) string
 		trafficLimitGB,
 		subscriptionURL,
 	)
+}
+
+func (h *Handler) sendInviteLink(ctx context.Context, chatID int64, messageID int) {
+	invite, err := h.db.GetOrCreateInvite(ctx, chatID, utils.GenerateInviteCode())
+	if err != nil {
+		logger.Error("Failed to get or create invite",
+			zap.Error(err),
+			zap.Int64("chat_id", chatID))
+		h.SendMessage(ctx, chatID, "❌ Не удалось создать пригласительную ссылку. Попробуйте позже.")
+		return
+	}
+
+	inviteLink := fmt.Sprintf("%s/i/%s", h.cfg.SiteURL, invite.Code)
+	text := fmt.Sprintf("🔗 *Ваша реферальная ссылка*\n\n`%s`\n\n📢 Поделитесь ссылкой с друзьями! За каждого активировавшего подписку друга вы получите бонус.", inviteLink)
+	backKeyboard := h.getBackKeyboard()
+
+	if messageID > 0 {
+		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, text)
+		editMsg.ParseMode = "Markdown"
+		editMsg.DisableWebPagePreview = true
+		editMsg.ReplyMarkup = &backKeyboard
+		h.safeSend(editMsg)
+	} else {
+		msg := tgbotapi.NewMessage(chatID, text)
+		msg.ParseMode = "Markdown"
+		msg.ReplyMarkup = &backKeyboard
+		h.send(ctx, msg)
+	}
+}
+
+func (h *Handler) addAdminButtons(keyboard *tgbotapi.InlineKeyboardMarkup, chatID int64) {
+	if h.isAdmin(chatID) {
+		keyboard.InlineKeyboard = append(keyboard.InlineKeyboard,
+			tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("📊 Стат", "admin_stats"),
+				tgbotapi.NewInlineKeyboardButtonData("📋 Посл.рег", "admin_lastreg"),
+			),
+		)
+	}
 }

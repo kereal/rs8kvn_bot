@@ -43,6 +43,11 @@ type Config struct {
 
 	// Health check configuration
 	HealthCheckPort int
+
+	// Trial & Referral configuration
+	SiteURL            string
+	TrialDurationHours int
+	TrialRateLimit     int
 }
 
 // Load reads configuration from environment variables and validates it.
@@ -80,6 +85,10 @@ func Load() (*Config, error) {
 		SentryDSN: getEnv("SENTRY_DSN", ""),
 
 		HealthCheckPort: parseEnvInt("HEALTH_CHECK_PORT", DefaultHealthCheckPort),
+
+		SiteURL:            getEnv("SITE_URL", DefaultSiteURL),
+		TrialDurationHours: parseEnvInt("TRIAL_DURATION_HOURS", DefaultTrialDurationHours),
+		TrialRateLimit:     parseEnvInt("TRIAL_RATE_LIMIT", DefaultTrialRateLimit),
 	}
 
 	// Validate all required fields
@@ -163,6 +172,21 @@ func (c *Config) validate() error {
 		if err := c.validateURL("HEARTBEAT_URL", c.HeartbeatURL); err != nil {
 			return err
 		}
+	}
+
+	// Site URL validation
+	if err := c.validateURL("SITE_URL", c.SiteURL); err != nil {
+		return err
+	}
+
+	// Trial duration validation
+	if c.TrialDurationHours < 1 || c.TrialDurationHours > 168 {
+		return fmt.Errorf("TRIAL_DURATION_HOURS must be between 1 and 168 (max 7 days)")
+	}
+
+	// Trial rate limit validation
+	if c.TrialRateLimit < 1 || c.TrialRateLimit > 100 {
+		return fmt.Errorf("TRIAL_RATE_LIMIT must be between 1 and 100")
 	}
 
 	return nil

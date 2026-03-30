@@ -497,17 +497,20 @@ func TestConfig_Validate_InvalidInboundID_Zero(t *testing.T) {
 
 func TestConfig_Validate_Valid(t *testing.T) {
 	cfg := &Config{
-		TelegramBotToken:  "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
-		TelegramAdminID:   123456,
-		XUIHost:           "http://localhost:2053",
-		XUIUsername:       "admin",
-		XUIPassword:       "password",
-		XUIInboundID:      1,
-		XUISubPath:        "/xui",
-		TrafficLimitGB:    100,
-		HeartbeatInterval: 60,
-		LogLevel:          "info",
-		HealthCheckPort:   DefaultHealthCheckPort,
+		TelegramBotToken:   "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
+		TelegramAdminID:    123456,
+		XUIHost:            "http://localhost:2053",
+		XUIUsername:        "admin",
+		XUIPassword:        "password",
+		XUIInboundID:       1,
+		XUISubPath:         "/xui",
+		TrafficLimitGB:     100,
+		HeartbeatInterval:  60,
+		LogLevel:           "info",
+		HealthCheckPort:    DefaultHealthCheckPort,
+		SiteURL:            "https://vpn.site",
+		TrialDurationHours: 3,
+		TrialRateLimit:     3,
 	}
 
 	err := cfg.validate()
@@ -518,18 +521,21 @@ func TestConfig_Validate_Valid(t *testing.T) {
 
 func TestConfig_Validate_SentryDSN_Valid(t *testing.T) {
 	cfg := &Config{
-		TelegramBotToken:  "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
-		TelegramAdminID:   123456,
-		XUIHost:           "http://localhost:2053",
-		XUIUsername:       "admin",
-		XUIPassword:       "password",
-		XUIInboundID:      1,
-		XUISubPath:        "/xui",
-		TrafficLimitGB:    100,
-		HeartbeatInterval: 60,
-		LogLevel:          "info",
-		SentryDSN:         "https://abc@sentry.io/123",
-		HealthCheckPort:   DefaultHealthCheckPort,
+		TelegramBotToken:   "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
+		TelegramAdminID:    123456,
+		XUIHost:            "http://localhost:2053",
+		XUIUsername:        "admin",
+		XUIPassword:        "password",
+		XUIInboundID:       1,
+		XUISubPath:         "/xui",
+		TrafficLimitGB:     100,
+		HeartbeatInterval:  60,
+		LogLevel:           "info",
+		SentryDSN:          "https://abc@sentry.io/123",
+		HealthCheckPort:    DefaultHealthCheckPort,
+		SiteURL:            "https://vpn.site",
+		TrialDurationHours: 3,
+		TrialRateLimit:     3,
 	}
 
 	err := cfg.validate()
@@ -558,17 +564,20 @@ func TestConfig_Validate_SentryDSN_Invalid(t *testing.T) {
 
 func TestConfig_Validate_WithSubPath(t *testing.T) {
 	cfg := &Config{
-		TelegramBotToken:  "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
-		TelegramAdminID:   123456,
-		XUIHost:           "http://localhost:2053",
-		XUIUsername:       "admin",
-		XUIPassword:       "password",
-		XUIInboundID:      1,
-		XUISubPath:        "/custom",
-		TrafficLimitGB:    100,
-		HeartbeatInterval: 60,
-		LogLevel:          "info",
-		HealthCheckPort:   DefaultHealthCheckPort,
+		TelegramBotToken:   "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
+		TelegramAdminID:    123456,
+		XUIHost:            "http://localhost:2053",
+		XUIUsername:        "admin",
+		XUIPassword:        "password",
+		XUIInboundID:       1,
+		XUISubPath:         "/custom",
+		TrafficLimitGB:     100,
+		HeartbeatInterval:  60,
+		LogLevel:           "info",
+		HealthCheckPort:    DefaultHealthCheckPort,
+		SiteURL:            "https://vpn.site",
+		TrialDurationHours: 3,
+		TrialRateLimit:     3,
 	}
 
 	err := cfg.validate()
@@ -579,18 +588,21 @@ func TestConfig_Validate_WithSubPath(t *testing.T) {
 
 func TestConfig_Validate_WithHeartbeatURL(t *testing.T) {
 	cfg := &Config{
-		TelegramBotToken:  "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
-		TelegramAdminID:   123456,
-		XUIHost:           "http://localhost:2053",
-		XUIUsername:       "admin",
-		XUIPassword:       "password",
-		XUIInboundID:      1,
-		XUISubPath:        "/xui",
-		TrafficLimitGB:    100,
-		HeartbeatInterval: 60,
-		LogLevel:          "info",
-		HeartbeatURL:      "https://health.example.com",
-		HealthCheckPort:   DefaultHealthCheckPort,
+		TelegramBotToken:   "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
+		TelegramAdminID:    123456,
+		XUIHost:            "http://localhost:2053",
+		XUIUsername:        "admin",
+		XUIPassword:        "password",
+		XUIInboundID:       1,
+		XUISubPath:         "/xui",
+		TrafficLimitGB:     100,
+		HeartbeatInterval:  60,
+		LogLevel:           "info",
+		HeartbeatURL:       "https://health.example.com",
+		HealthCheckPort:    DefaultHealthCheckPort,
+		SiteURL:            "https://vpn.site",
+		TrialDurationHours: 3,
+		TrialRateLimit:     3,
 	}
 
 	err := cfg.validate()

@@ -78,7 +78,15 @@ func (h *Handler) HandleCallback(ctx context.Context, update tgbotapi.Update) {
 	case "menu_help":
 		messageID := update.CallbackQuery.Message.MessageID
 		h.handleMenuHelp(ctx, chatID, username, messageID)
+	case "share_invite":
+		messageID := update.CallbackQuery.Message.MessageID
+		h.handleShareInvite(ctx, chatID, username, messageID)
 	default:
 		logger.Warn("Unknown callback data", zap.String("data", data))
 	}
+}
+
+func (h *Handler) handleShareInvite(ctx context.Context, chatID int64, username string, messageID int) {
+	logger.Info("User requesting share invite", zap.String("username", username))
+	h.sendInviteLink(ctx, chatID, messageID)
 }

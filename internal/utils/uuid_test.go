@@ -2,6 +2,7 @@ package utils
 
 import (
 	"regexp"
+	"strings"
 	"testing"
 )
 
@@ -131,6 +132,47 @@ func TestGenerateSubID(t *testing.T) {
 					t.Errorf("GenerateSubID() contains non-URL-safe character: %c", c)
 				}
 			}
+		}
+	})
+}
+
+func TestGenerateInviteCode(t *testing.T) {
+	t.Run("generates non-empty code", func(t *testing.T) {
+		got := GenerateInviteCode()
+		if got == "" {
+			t.Error("GenerateInviteCode() returned empty string")
+		}
+	})
+
+	t.Run("generates correct length", func(t *testing.T) {
+		code := GenerateInviteCode()
+		if len(code) != 8 {
+			t.Errorf("GenerateInviteCode() length = %d, want 8", len(code))
+		}
+	})
+
+	t.Run("generates valid characters", func(t *testing.T) {
+		code := GenerateInviteCode()
+		const validChars = "0123456789abcdefghijklmnopqrstuvwxyz"
+		for _, c := range code {
+			if !strings.ContainsRune(validChars, c) {
+				t.Errorf("GenerateInviteCode() contains invalid character: %c", c)
+			}
+		}
+	})
+
+	t.Run("generates unique codes", func(t *testing.T) {
+		code1 := GenerateInviteCode()
+		code2 := GenerateInviteCode()
+		if code1 == code2 {
+			t.Error("GenerateInviteCode() should generate different codes")
+		}
+	})
+
+	t.Run("generates lowercase only", func(t *testing.T) {
+		code := GenerateInviteCode()
+		if code != strings.ToLower(code) {
+			t.Errorf("GenerateInviteCode() should generate lowercase only, got: %s", code)
 		}
 	})
 }
