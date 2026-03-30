@@ -48,6 +48,9 @@ type Config struct {
 	SiteURL            string
 	TrialDurationHours int
 	TrialRateLimit     int
+
+	// Supermemory configuration
+	SupermemoryAPIKey string
 }
 
 // Load reads configuration from environment variables and validates it.
@@ -89,6 +92,8 @@ func Load() (*Config, error) {
 		SiteURL:            getEnv("SITE_URL", DefaultSiteURL),
 		TrialDurationHours: parseEnvInt("TRIAL_DURATION_HOURS", DefaultTrialDurationHours),
 		TrialRateLimit:     parseEnvInt("TRIAL_RATE_LIMIT", DefaultTrialRateLimit),
+
+		SupermemoryAPIKey: getEnv("SUPERMEMORY_API_KEY", ""),
 	}
 
 	// Validate all required fields
@@ -269,7 +274,8 @@ func (c *Config) String() string {
 		"TrafficLimitGB=%d, "+
 		"HeartbeatURL=%s, "+
 		"HeartbeatInterval=%d, "+
-		"SentryDSN=***}",
+		"SentryDSN=***, "+
+		"SupermemoryAPIKey=%s}",
 		c.TelegramAdminID,
 		c.XUIHost,
 		c.XUIUsername,
@@ -281,6 +287,7 @@ func (c *Config) String() string {
 		c.TrafficLimitGB,
 		maskURL(c.HeartbeatURL),
 		c.HeartbeatInterval,
+		maskAPIKey(c.SupermemoryAPIKey),
 	)
 }
 
@@ -297,4 +304,11 @@ func maskURL(urlStr string) string {
 
 	// Show scheme and host only
 	return fmt.Sprintf("%s://%s/***", u.Scheme, u.Host)
+}
+
+func maskAPIKey(key string) string {
+	if key == "" {
+		return "(not set)"
+	}
+	return "***"
 }
