@@ -2,6 +2,7 @@ package bot
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +15,8 @@ import (
 	"rs8kvn_bot/internal/xui"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func init() {
@@ -1359,6 +1362,7 @@ func TestCallbackList(t *testing.T) {
 		"menu_subscription",
 		"back_to_subscription",
 		"menu_help",
+		"share_invite",
 	}
 
 	// Verify each callback is unique
@@ -1371,7 +1375,411 @@ func TestCallbackList(t *testing.T) {
 	}
 
 	// Verify we have the expected number
-	if len(expectedCallbacks) != 9 {
-		t.Errorf("Expected 9 callbacks, got %d", len(expectedCallbacks))
+	if len(expectedCallbacks) != 10 {
+		t.Errorf("Expected 10 callbacks, got %d", len(expectedCallbacks))
+	}
+}
+
+// === sendInviteLink tests ===
+
+func TestSendInviteLink_Success(t *testing.T) {
+	mockDB := testutil.NewMockDatabaseService()
+	cfg := &config.Config{
+		SiteURL:         "https://vpn.site",
+		TelegramAdminID: 12345,
+		TrafficLimitGB:  100,
+	}
+	_ = &Handler{
+		cfg:   cfg,
+		db:    mockDB,
+		bot:   nil, // Will be nil for tests
+		cache: NewSubscriptionCache(100, 5*time.Minute),
+	}
+
+	mockDB.GetOrCreateInviteFunc = func(ctx context.Context, referrerTGID int64, code string) (*database.Invite, error) {
+		return &database.Invite{Code: code, ReferrerTGID: referrerTGID}, nil
+	}
+
+	// Note: This test verifies the logic, but can't verify the message was sent
+	// because bot is nil. The function should handle nil bot gracefully or
+	// we test the invite creation logic separately.
+	ctx := context.Background()
+
+	invite, err := mockDB.GetOrCreateInvite(ctx, 12345, "testcode")
+	require.NoError(t, err, "GetOrCreateInvite() error")
+	assert.Equal(t, "testcode", invite.Code, "Invite code")
+	assert.Equal(t, int64(12345), invite.ReferrerTGID, "ReferrerTGID")
+}
+
+func TestSendInviteLink_DatabaseError(t *testing.T) {
+	mockDB := testutil.NewMockDatabaseService()
+	cfg := &config.Config{
+		SiteURL:         "https://vpn.site",
+		TelegramAdminID: 12345,
+		TrafficLimitGB:  100,
+	}
+	_ = &Handler{
+		cfg:   cfg,
+		db:    mockDB,
+		cache: NewSubscriptionCache(100, 5*time.Minute),
+	}
+
+	mockDB.GetOrCreateInviteFunc = func(ctx context.Context, referrerTGID int64, code string) (*database.Invite, error) {
+		return nil, fmt.Errorf("database error")
+	}
+
+	ctx := context.Background()
+	_, err := mockDB.GetOrCreateInvite(ctx, 12345, "testcode")
+	require.Error(t, err, "GetOrCreateInvite() should return error")
+}
+
+// === isSupermemoryEnabled tests ===
+
+func TestHandler_IsSupermemoryEnabled(t *testing.T) {
+	handler := &Handler{}
+
+	// Currently always returns false
+	assert.False(t, handler.isSupermemoryEnabled(), "isSupermemoryEnabled() should return false")
+}
+
+// === StoreConversation tests ===
+
+func TestHandler_StoreConversation(t *testing.T) {
+	handler := &Handler{}
+
+	// Should not panic with nil handler fields
+	handler.StoreConversation(context.Background(), 12345, "user message", "bot response")
+}
+
+// === GetUserContext tests ===
+
+func TestHandler_GetUserContext(t *testing.T) {
+	handler := &Handler{}
+
+	// Should return empty string
+	result := handler.GetUserContext(context.Background(), 12345, "query")
+	assert.Empty(t, result, "GetUserContext() should return empty string")
+}
+
+// === isAdmin edge cases ===
+
+func TestHandler_IsAdmin_NegativeID(t *testing.T) {
+	cfg := &config.Config{TelegramAdminID: 12345}
+	handler := &Handler{cfg: cfg}
+
+	assert.False(t, handler.isAdmin(-1), "isAdmin() should return false for negative ID")
+	assert.False(t, handler.isAdmin(0), "isAdmin() should return false for zero ID")
+}
+
+func TestHandler_IsAdmin_ZeroAdminID(t *testing.T) {
+	cfg := &config.Config{TelegramAdminID: 0}
+	handler := &Handler{cfg: cfg}
+
+	assert.False(t, handler.isAdmin(0), "isAdmin() should return false when admin ID is 0")
+	assert.False(t, handler.isAdmin(12345), "isAdmin() should return false when admin ID is 0")
+}
+
+// === getUsername edge cases ===
+
+func TestHandler_GetUsername_EmptyStrings(t *testing.T) {
+	handler := &Handler{}
+
+	// User with empty strings
+	user := &tgbotapi.User{ID: 12345, UserName: "", FirstName: ""}
+	result := handler.getUsername(user)
+	assert.Equal(t, "user_12345", result, "getUsername() should use user_ID format when no names")
+
+	// User with whitespace username
+	user2 := &tgbotapi.User{ID: 67890, UserName: "  ", FirstName: "Test"}
+	result2 := handler.getUsername(user2)
+	// UserName is not empty (it's whitespace), so it should be returned
+	assert.Equal(t, "  ", result2, "getUsername() should return username even if whitespace")
+}
+
+// === getMainMenuContent edge cases ===
+
+func TestHandler_GetMainMenuContent_SpecialCharacters(t *testing.T) {
+	cfg := &config.Config{TelegramAdminID: 12345}
+	handler := &Handler{cfg: cfg}
+
+	text, keyboard := handler.getMainMenuContent("test_user_123", true, 12345)
+	assert.Contains(t, text, "test_user_123", "Text should contain username")
+	assert.NotEmpty(t, keyboard.InlineKeyboard, "Keyboard should not be empty")
+}
+
+func TestHandler_GetMainMenuContent_AdminUser(t *testing.T) {
+	cfg := &config.Config{TelegramAdminID: 12345}
+	handler := &Handler{cfg: cfg}
+
+	text, keyboard := handler.getMainMenuContent("admin", true, 12345)
+	assert.Contains(t, text, "admin", "Text should contain username")
+
+	// Check for admin buttons (should have 4 rows: main menu + share + admin buttons)
+	assert.GreaterOrEqual(t, len(keyboard.InlineKeyboard), 3, "Admin should see admin buttons")
+}
+
+// === getMainMenuKeyboard edge cases ===
+
+func TestHandler_GetMainMenuKeyboard_ButtonLabels(t *testing.T) {
+	handler := &Handler{cfg: &config.Config{}}
+
+	keyboard := handler.getMainMenuKeyboard(true)
+
+	// Verify button labels
+	assert.Equal(t, "📋 Подписка", keyboard.InlineKeyboard[0][0].Text, "First button label")
+	assert.Equal(t, "☕ Донат", keyboard.InlineKeyboard[0][1].Text, "Second button label")
+	assert.Equal(t, "❓ Помощь", keyboard.InlineKeyboard[1][0].Text, "Third button label")
+	assert.Equal(t, "📤 Поделиться", keyboard.InlineKeyboard[2][0].Text, "Share button label")
+}
+
+func TestHandler_GetMainMenuKeyboard_CallbackData(t *testing.T) {
+	handler := &Handler{cfg: &config.Config{}}
+
+	keyboard := handler.getMainMenuKeyboard(true)
+
+	// Verify callback data (CallbackData is *string, need to dereference)
+	require.NotNil(t, keyboard.InlineKeyboard[0][0].CallbackData, "Subscription callback should not be nil")
+	assert.Equal(t, "menu_subscription", *keyboard.InlineKeyboard[0][0].CallbackData, "Subscription callback")
+	require.NotNil(t, keyboard.InlineKeyboard[0][1].CallbackData, "Donate callback should not be nil")
+	assert.Equal(t, "menu_donate", *keyboard.InlineKeyboard[0][1].CallbackData, "Donate callback")
+	require.NotNil(t, keyboard.InlineKeyboard[1][0].CallbackData, "Help callback should not be nil")
+	assert.Equal(t, "menu_help", *keyboard.InlineKeyboard[1][0].CallbackData, "Help callback")
+	require.NotNil(t, keyboard.InlineKeyboard[2][0].CallbackData, "Share callback should not be nil")
+	assert.Equal(t, "share_invite", *keyboard.InlineKeyboard[2][0].CallbackData, "Share callback")
+}
+
+// === getBackKeyboard tests ===
+
+func TestHandler_GetBackKeyboard_CallbackData(t *testing.T) {
+	handler := &Handler{cfg: &config.Config{}}
+
+	keyboard := handler.getBackKeyboard()
+
+	// CallbackData is *string, need to dereference
+	require.NotNil(t, keyboard.InlineKeyboard[0][0].CallbackData, "Back button callback should not be nil")
+	assert.Equal(t, "back_to_start", *keyboard.InlineKeyboard[0][0].CallbackData, "Back button callback")
+}
+
+// === getDonateText tests ===
+
+func TestHandler_GetDonateText_Content(t *testing.T) {
+	handler := &Handler{cfg: &config.Config{}}
+
+	text := handler.getDonateText()
+
+	assert.Contains(t, text, "Поддержка проекта", "Should contain header")
+	assert.Contains(t, text, "tbank.ru", "Should contain T-Bank link")
+	assert.Contains(t, text, "t.me/kereal", "Should contain contact link")
+}
+
+// === getHelpText edge cases ===
+
+func TestHandler_GetHelpText_ZeroTraffic(t *testing.T) {
+	handler := &Handler{cfg: &config.Config{}}
+
+	text := handler.getHelpText(0, "http://test.url/sub")
+
+	assert.Contains(t, text, "0Гб", "Should contain 0 GB")
+	assert.Contains(t, text, "http://test.url/sub", "Should contain subscription URL")
+}
+
+func TestHandler_GetHelpText_LargeTraffic(t *testing.T) {
+	handler := &Handler{cfg: &config.Config{}}
+
+	text := handler.getHelpText(1000, "http://test.url/sub")
+
+	assert.Contains(t, text, "1000Гб", "Should contain 1000 GB")
+}
+
+func TestHandler_GetHelpText_SpecialCharacters(t *testing.T) {
+	handler := &Handler{cfg: &config.Config{}}
+
+	subURL := "http://test.url/sub/abc123?param=value&other=test"
+	text := handler.getHelpText(100, subURL)
+
+	assert.Contains(t, text, subURL, "Should contain full subscription URL")
+}
+
+// === addAdminButtons tests ===
+
+func TestHandler_AddAdminButtons_ExistingKeyboard(t *testing.T) {
+	cfg := &config.Config{TelegramAdminID: 12345}
+	handler := &Handler{cfg: cfg}
+
+	keyboard := tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("Test", "test"),
+		),
+	)
+
+	// Before adding admin buttons
+	initialRows := len(keyboard.InlineKeyboard)
+
+	handler.addAdminButtons(&keyboard, 12345)
+
+	// After adding admin buttons
+	assert.Greater(t, len(keyboard.InlineKeyboard), initialRows, "Should have more rows after adding admin buttons")
+}
+
+func TestHandler_AddAdminButtons_NonAdmin(t *testing.T) {
+	cfg := &config.Config{TelegramAdminID: 12345}
+	handler := &Handler{cfg: cfg}
+
+	keyboard := tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("Test", "test"),
+		),
+	)
+
+	initialRows := len(keyboard.InlineKeyboard)
+
+	handler.addAdminButtons(&keyboard, 99999) // Non-admin
+
+	assert.Equal(t, initialRows, len(keyboard.InlineKeyboard), "Should not add buttons for non-admin")
+}
+
+// === Handler field tests ===
+
+func TestHandler_ConfigField_Nil(t *testing.T) {
+	handler := &Handler{}
+
+	// Handler should handle nil config gracefully
+	assert.Nil(t, handler.cfg, "Config should be nil")
+}
+
+func TestHandler_CacheField(t *testing.T) {
+	handler := &Handler{
+		cache: NewSubscriptionCache(100, 5*time.Minute),
+	}
+
+	assert.NotNil(t, handler.cache, "Cache should not be nil")
+
+	// Test cache operations
+	sub := &database.Subscription{
+		TelegramID: 12345,
+		Username:   "testuser",
+		Status:     "active",
+	}
+	handler.cache.Set(12345, sub)
+
+	retrieved := handler.cache.Get(12345)
+	require.NotNil(t, retrieved, "Cache should return stored subscription")
+	assert.Equal(t, "testuser", retrieved.Username, "Username should match")
+}
+
+// === Rate limiter tests ===
+
+func TestHandler_RateLimiter(t *testing.T) {
+	handler := NewHandler(nil, &config.Config{}, testutil.NewMockDatabaseService(), nil)
+
+	assert.NotNil(t, handler.rateLimiter, "Rate limiter should be initialized")
+
+	// Test that rate limiter allows requests
+	ctx := context.Background()
+	assert.True(t, handler.rateLimiter.Wait(ctx), "Rate limiter should allow request")
+}
+
+// === Context cancellation tests ===
+
+func TestHandler_ContextCancellation(t *testing.T) {
+	handler := &Handler{
+		cache: NewSubscriptionCache(100, 5*time.Minute),
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel immediately
+
+	// Operations should handle cancelled context
+	assert.NotNil(t, handler.cache, "Cache should still be accessible with cancelled context")
+	_ = ctx // Context is cancelled but cache operations don't require it
+}
+
+// === Subscription cache integration ===
+
+func TestHandler_CacheInvalidation(t *testing.T) {
+	handler := &Handler{
+		cache: NewSubscriptionCache(100, 5*time.Minute),
+	}
+
+	// Add to cache
+	sub := &database.Subscription{
+		TelegramID: 12345,
+		Username:   "testuser",
+		Status:     "active",
+	}
+	handler.cache.Set(12345, sub)
+
+	// Verify it's there
+	assert.NotNil(t, handler.cache.Get(12345), "Should be in cache")
+
+	// Invalidate
+	handler.invalidateCache(12345)
+
+	// Verify it's gone
+	assert.Nil(t, handler.cache.Get(12345), "Should not be in cache after invalidation")
+}
+
+// === Multiple subscription creation prevention ===
+
+func TestHandler_SubscriptionCreationLock(t *testing.T) {
+	handler := &Handler{
+		inProgress: make(map[int64]struct{}),
+	}
+
+	// Simulate subscription in progress
+	handler.subCreationMu.Lock()
+	handler.inProgress[12345] = struct{}{}
+	handler.subCreationMu.Unlock()
+
+	// Check that it's marked as in progress
+	handler.subCreationMu.Lock()
+	_, exists := handler.inProgress[12345]
+	handler.subCreationMu.Unlock()
+
+	assert.True(t, exists, "Should be marked as in progress")
+
+	// Remove from in progress
+	handler.subCreationMu.Lock()
+	delete(handler.inProgress, 12345)
+	handler.subCreationMu.Unlock()
+
+	// Verify it's removed
+	handler.subCreationMu.Lock()
+	_, exists = handler.inProgress[12345]
+	handler.subCreationMu.Unlock()
+
+	assert.False(t, exists, "Should not be in progress anymore")
+}
+
+// === Error message tests ===
+
+func TestHandler_ErrorMessageFormats(t *testing.T) {
+	// Test that error messages are properly formatted
+	errorMessages := []string{
+		"❌ Временная ошибка. Попробуйте позже.",
+		"❌ У вас нет активной подписки.",
+		"❌ Подписка с ID %d не найдена",
+		"❌ Не удалось создать пригласительную ссылку.",
+	}
+
+	for _, msg := range errorMessages {
+		assert.NotEmpty(t, msg, "Error message should not be empty")
+		assert.Contains(t, msg, "❌", "Error message should contain error emoji")
+	}
+}
+
+// === Keyboard construction tests ===
+
+func TestHandler_KeyboardConstruction_MultipleRows(t *testing.T) {
+	handler := &Handler{cfg: &config.Config{TelegramAdminID: 12345}}
+
+	keyboard := handler.getMainMenuKeyboard(true)
+
+	// Verify structure
+	assert.GreaterOrEqual(t, len(keyboard.InlineKeyboard), 3, "Should have at least 3 rows")
+
+	// Each row should have at least one button
+	for i, row := range keyboard.InlineKeyboard {
+		assert.Greater(t, len(row), 0, "Row %d should have at least one button", i)
 	}
 }

@@ -5,6 +5,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"rs8kvn_bot/internal/database"
 )
 
@@ -20,19 +23,13 @@ func TestSubscriptionCache_GetSet(t *testing.T) {
 	}
 
 	// Get should return nil for missing key
-	if got := cache.Get(123); got != nil {
-		t.Errorf("Get(123) = %v, want nil", got)
-	}
+	assert.Nil(t, cache.Get(123), "Get(123) should return nil for missing key")
 
 	// Set and Get should work
 	cache.Set(123, sub)
 	got := cache.Get(123)
-	if got == nil {
-		t.Fatal("Get(123) returned nil after Set")
-	}
-	if got.Username != "testuser" {
-		t.Errorf("Get(123).Username = %v, want testuser", got.Username)
-	}
+	require.NotNil(t, got, "Get(123) returned nil after Set")
+	assert.Equal(t, "testuser", got.Username, "Username")
 }
 
 func TestSubscriptionCache_TTL(t *testing.T) {
@@ -46,17 +43,13 @@ func TestSubscriptionCache_TTL(t *testing.T) {
 	cache.Set(456, sub)
 
 	// Should be available immediately
-	if got := cache.Get(456); got == nil {
-		t.Fatal("Get() returned nil immediately after Set")
-	}
+	require.NotNil(t, cache.Get(456), "Get() returned nil immediately after Set")
 
 	// Wait for TTL to expire
 	time.Sleep(100 * time.Millisecond)
 
 	// Should be expired now
-	if got := cache.Get(456); got != nil {
-		t.Errorf("Get() returned %v after TTL expired, want nil", got)
-	}
+	assert.Nil(t, cache.Get(456), "Get() should return nil after TTL expired")
 }
 
 func TestSubscriptionCache_Invalidate(t *testing.T) {
@@ -68,14 +61,10 @@ func TestSubscriptionCache_Invalidate(t *testing.T) {
 	}
 
 	cache.Set(789, sub)
-	if got := cache.Get(789); got == nil {
-		t.Fatal("Get() returned nil after Set")
-	}
+	require.NotNil(t, cache.Get(789), "Get() returned nil after Set")
 
 	cache.Invalidate(789)
-	if got := cache.Get(789); got != nil {
-		t.Errorf("Get() returned %v after Invalidate, want nil", got)
-	}
+	assert.Nil(t, cache.Get(789), "Get() should return nil after Invalidate")
 }
 
 func TestSubscriptionCache_Clear(t *testing.T) {
@@ -86,14 +75,10 @@ func TestSubscriptionCache_Clear(t *testing.T) {
 		cache.Set(i, &database.Subscription{TelegramID: i})
 	}
 
-	if cache.Size() != 5 {
-		t.Errorf("Size() = %d, want 5", cache.Size())
-	}
+	assert.Equal(t, 5, cache.Size(), "Size()")
 
 	cache.Clear()
-	if cache.Size() != 0 {
-		t.Errorf("Size() = %d after Clear, want 0", cache.Size())
-	}
+	assert.Equal(t, 0, cache.Size(), "Size() after Clear")
 }
 
 func TestSubscriptionCache_MaxSize(t *testing.T) {
@@ -104,9 +89,7 @@ func TestSubscriptionCache_MaxSize(t *testing.T) {
 		cache.Set(i, &database.Subscription{TelegramID: i})
 	}
 
-	if cache.Size() != 3 {
-		t.Errorf("Size() = %d, want 3", cache.Size())
-	}
+	assert.Equal(t, 3, cache.Size(), "Size()")
 
 	// Adding one more should evict the oldest entry (by expiresAt time)
 	// Sleep briefly to ensure the new entry has a later expiresAt
@@ -114,25 +97,15 @@ func TestSubscriptionCache_MaxSize(t *testing.T) {
 	cache.Set(4, &database.Subscription{TelegramID: 4})
 
 	// Should still have 3 entries (maxSize), with entry 1 evicted
-	if cache.Size() != 3 {
-		t.Errorf("Size() = %d after overflow, want 3", cache.Size())
-	}
+	assert.Equal(t, 3, cache.Size(), "Size() after overflow")
 
 	// Entry 1 should be evicted (oldest)
-	if cache.Get(1) != nil {
-		t.Error("Entry 1 should be evicted")
-	}
+	assert.Nil(t, cache.Get(1), "Entry 1 should be evicted")
 
 	// Entries 2, 3, 4 should still exist
-	if cache.Get(2) == nil {
-		t.Error("Entry 2 should still exist")
-	}
-	if cache.Get(3) == nil {
-		t.Error("Entry 3 should still exist")
-	}
-	if cache.Get(4) == nil {
-		t.Error("Entry 4 should still exist")
-	}
+	assert.NotNil(t, cache.Get(2), "Entry 2 should still exist")
+	assert.NotNil(t, cache.Get(3), "Entry 3 should still exist")
+	assert.NotNil(t, cache.Get(4), "Entry 4 should still exist")
 }
 
 func TestSubscriptionCache_Cleanup(t *testing.T) {
@@ -152,13 +125,8 @@ func TestSubscriptionCache_Cleanup(t *testing.T) {
 	// Cleanup should remove expired entries
 	cache.Cleanup()
 
-	if cache.Size() != 1 {
-		t.Errorf("Size() = %d after Cleanup, want 1", cache.Size())
-	}
-
-	if got := cache.Get(4); got == nil {
-		t.Error("Get(4) returned nil after Cleanup, but it was just added")
-	}
+	assert.Equal(t, 1, cache.Size(), "Size() after Cleanup")
+	assert.NotNil(t, cache.Get(4), "Get(4) returned nil after Cleanup, but it was just added")
 }
 
 func TestSubscriptionCache_Concurrent(t *testing.T) {
@@ -200,9 +168,7 @@ func TestSubscriptionCache_StartCleanup(t *testing.T) {
 		cache.Set(i, &database.Subscription{TelegramID: i})
 	}
 
-	if cache.Size() != 3 {
-		t.Errorf("Size() = %d, want 3", cache.Size())
-	}
+	assert.Equal(t, 3, cache.Size(), "Size()")
 
 	// Wait for entries to expire and cleanup to run
 	time.Sleep(80 * time.Millisecond)
@@ -210,9 +176,7 @@ func TestSubscriptionCache_StartCleanup(t *testing.T) {
 	// Expired entries should be removed by background cleanup
 	// Note: Size may be 0 or contain only non-expired entries
 	cache.Cleanup() // Force cleanup to ensure accurate count
-	if cache.Size() != 0 {
-		t.Errorf("Size() = %d after cleanup, want 0 (all entries expired)", cache.Size())
-	}
+	assert.Equal(t, 0, cache.Size(), "Size() after cleanup (all entries expired)")
 }
 
 func TestSubscriptionCache_StartCleanup_Cancellation(t *testing.T) {
@@ -251,25 +215,15 @@ func TestSubscriptionCache_LRU_EvictionOrder(t *testing.T) {
 	// Adding entry 4 should evict entry 1 (oldest)
 	cache.Set(4, &database.Subscription{TelegramID: 4})
 
-	if cache.Size() != 3 {
-		t.Errorf("Size() = %d, want 3", cache.Size())
-	}
+	assert.Equal(t, 3, cache.Size(), "Size()")
 
 	// Entry 1 should be evicted
-	if cache.Get(1) != nil {
-		t.Error("Entry 1 (oldest) should be evicted")
-	}
+	assert.Nil(t, cache.Get(1), "Entry 1 (oldest) should be evicted")
 
 	// Entries 2, 3, 4 should still exist
-	if cache.Get(2) == nil {
-		t.Error("Entry 2 should still exist")
-	}
-	if cache.Get(3) == nil {
-		t.Error("Entry 3 should still exist")
-	}
-	if cache.Get(4) == nil {
-		t.Error("Entry 4 should still exist")
-	}
+	assert.NotNil(t, cache.Get(2), "Entry 2 should still exist")
+	assert.NotNil(t, cache.Get(3), "Entry 3 should still exist")
+	assert.NotNil(t, cache.Get(4), "Entry 4 should still exist")
 }
 
 func TestSubscriptionCache_LRU_MultipleEvictions(t *testing.T) {
@@ -282,29 +236,17 @@ func TestSubscriptionCache_LRU_MultipleEvictions(t *testing.T) {
 		cache.Set(i, &database.Subscription{TelegramID: i})
 	}
 
-	if cache.Size() != 2 {
-		t.Errorf("Size() = %d, want 2", cache.Size())
-	}
+	assert.Equal(t, 2, cache.Size(), "Size()")
 
 	// The last 2 entries (4 and 5) should exist
 	// Entry 4 was added before entry 5, so it has earlier expiresAt
 	// When entry 5 was added, entry 3 (oldest) was evicted
 	// So entries 4 and 5 should remain
-	if cache.Get(4) == nil {
-		t.Error("Entry 4 should still exist")
-	}
-	if cache.Get(5) == nil {
-		t.Error("Entry 5 should still exist")
-	}
+	assert.NotNil(t, cache.Get(4), "Entry 4 should still exist")
+	assert.NotNil(t, cache.Get(5), "Entry 5 should still exist")
 
 	// Earlier entries should be evicted
-	if cache.Get(1) != nil {
-		t.Error("Entry 1 should be evicted")
-	}
-	if cache.Get(2) != nil {
-		t.Error("Entry 2 should be evicted")
-	}
-	if cache.Get(3) != nil {
-		t.Error("Entry 3 should be evicted")
-	}
+	assert.Nil(t, cache.Get(1), "Entry 1 should be evicted")
+	assert.Nil(t, cache.Get(2), "Entry 2 should be evicted")
+	assert.Nil(t, cache.Get(3), "Entry 3 should be evicted")
 }

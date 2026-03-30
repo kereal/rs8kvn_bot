@@ -10,6 +10,7 @@ import (
 	"rs8kvn_bot/internal/database"
 	"rs8kvn_bot/internal/xui"
 
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"gorm.io/gorm"
 )
 
@@ -88,6 +89,7 @@ type MockDatabaseService struct {
 	DeleteSubscriptionFunc              func(ctx context.Context, telegramID int64) error
 	GetLatestSubscriptionsFunc          func(ctx context.Context, limit int) ([]database.Subscription, error)
 	GetAllSubscriptionsFunc             func(ctx context.Context) ([]database.Subscription, error)
+	CountAllSubscriptionsFunc           func(ctx context.Context) (int64, error)
 	CountActiveSubscriptionsFunc        func(ctx context.Context) (int64, error)
 	CountExpiredSubscriptionsFunc       func(ctx context.Context) (int64, error)
 	GetAllTelegramIDsFunc               func(ctx context.Context) ([]int64, error)
@@ -218,6 +220,15 @@ func (m *MockDatabaseService) CountActiveSubscriptions(ctx context.Context) (int
 		}
 	}
 	return count, nil
+}
+
+func (m *MockDatabaseService) CountAllSubscriptions(ctx context.Context) (int64, error) {
+	if m.CountAllSubscriptionsFunc != nil {
+		return m.CountAllSubscriptionsFunc(ctx)
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return int64(len(m.Subscriptions)), nil
 }
 
 func (m *MockDatabaseService) CountExpiredSubscriptions(ctx context.Context) (int64, error) {
@@ -479,3 +490,67 @@ func (m *MockXUIClient) GetExternalURL(host string) string {
 func NewMockXUIClient() *MockXUIClient {
 	return &MockXUIClient{}
 }
+
+// MockBotAPI is a mock implementation of the Telegram Bot API for testing.
+type MockBotAPI struct {
+	mu            sync.RWMutex
+	SendCalled    bool
+	RequestCalled bool
+	LastSentText  string
+	LastChatID    int64
+	SendError     error
+	RequestError  error
+}
+
+func NewMockBotAPI() *MockBotAPI {
+	return &MockBotAPI{}
+}
+
+func (m *MockBotAPI) Send(c tgbotapi.Chattable) (tgbotapi.Message, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.SendCalled = true
+
+	// Extract text and chat ID from various message types
+	switch v := c.(type) {
+	case tgbotapi.MessageConfig:
+		m.LastSentText = v.Text
+		m.LastChatID = v.ChatID
+	case tgbotapi.EditMessageTextConfig:
+		m.LastSentText = v.Text
+		m.LastChatID = v.ChatID
+	case tgbotapi.EditMessageReplyMarkupConfig:
+		m.LastChatID = v.ChatID
+	case tgbotapi.DeleteMessageConfig:
+		m.LastChatID = v.ChatID
+	}
+
+	if m.SendError != nil {
+		return tgbotapi.Message{}, m.SendError
+	}
+	return tgbotapi.Message{MessageID: 1}, nil
+}
+
+func (m *MockBotAPI) Request(c tgbotapi.Chattable) (*tgbotapi.APIResponse, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.RequestCalled = true
+
+	if m.RequestError != nil {
+		return nil, m.RequestError
+	}
+	return &tgbotapi.APIResponse{Ok: true}, nil
+}
+
+func (m *MockBotAPI) GetUpdatesChan(config tgbotapi.UpdateConfig) tgbotapi.UpdatesChannel {
+	ch := make(chan tgbotapi.Update)
+	close(ch)
+	return ch
+}
+
+func (m *MockBotAPI) StopReceivingUpdates() {
+	// No-op for mock
+}
+
+// Self is not implemented as it's a field in tgbotapi.BotAPI, not a method.
+// The handler tests don't require this field to be accessible.

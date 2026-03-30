@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"rs8kvn_bot/internal/config"
 	"rs8kvn_bot/internal/logger"
@@ -25,51 +27,28 @@ func init() {
 
 func TestNewClient(t *testing.T) {
 	client, err := NewClient("http://localhost:2053", "admin", "password")
-	if err != nil {
-		t.Fatalf("NewClient() returned error: %v", err)
-	}
+	require.NoError(t, err, "NewClient() returned error")
+	require.NotNil(t, client, "NewClient() returned nil")
 
-	if client == nil {
-		t.Fatal("NewClient() returned nil")
-	}
-	if client.host != "http://localhost:2053" {
-		t.Errorf("host = %s, want http://localhost:2053", client.host)
-	}
-	if client.username != "admin" {
-		t.Errorf("username = %s, want admin", client.username)
-	}
-	if client.password != "password" {
-		t.Errorf("password = %s, want password", client.password)
-	}
-	if client.httpClient == nil {
-		t.Error("httpClient is nil")
-	}
+	assert.Equal(t, "http://localhost:2053", client.host, "host")
+	assert.Equal(t, "admin", client.username, "username")
+	assert.Equal(t, "password", client.password, "password")
+	assert.NotNil(t, client.httpClient, "httpClient is nil")
 }
 
 func TestNewClient_HTTPClientConfig(t *testing.T) {
 	client, err := NewClient("http://localhost:2053", "admin", "password")
-	if err != nil {
-		t.Fatalf("NewClient() returned error: %v", err)
-	}
+	require.NoError(t, err, "NewClient() returned error")
 
-	if client.httpClient.Timeout != 10*time.Second {
-		t.Errorf("httpClient.Timeout = %v, want 10s", client.httpClient.Timeout)
-	}
-	if client.httpClient.Jar == nil {
-		t.Error("httpClient.Jar is nil")
-	}
+	assert.Equal(t, 10*time.Second, client.httpClient.Timeout, "httpClient.Timeout")
+	assert.NotNil(t, client.httpClient.Jar, "httpClient.Jar is nil")
 }
 
 func TestLogin_Success(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/login" {
-			t.Errorf("Expected /login path, got %s", r.URL.Path)
-		}
-		if r.Method != "POST" {
-			t.Errorf("Expected POST method, got %s", r.Method)
-		}
+		assert.Equal(t, "/login", r.URL.Path, "Expected /login path")
+		assert.Equal(t, "POST", r.Method, "Expected POST method")
 
-		// Return successful login response
 		resp := APIResponse{
 			Success: true,
 			Msg:     "Login successful",
@@ -80,15 +59,11 @@ func TestLogin_Success(t *testing.T) {
 	defer server.Close()
 
 	client, err := NewClient(server.URL, "admin", "password")
-	if err != nil {
-		t.Fatalf("NewClient() returned error: %v", err)
-	}
+	require.NoError(t, err, "NewClient() returned error")
 	ctx := context.Background()
 
 	err = client.Login(ctx)
-	if err != nil {
-		t.Fatalf("Login() error = %v", err)
-	}
+	require.NoError(t, err, "Login() error")
 }
 
 func TestLogin_Failure(t *testing.T) {
@@ -103,36 +78,28 @@ func TestLogin_Failure(t *testing.T) {
 	defer server.Close()
 
 	client, err := NewClient(server.URL, "admin", "wrongpassword")
-	if err != nil {
-		t.Fatalf("NewClient() returned error: %v", err)
-	}
+	require.NoError(t, err, "NewClient() returned error")
 	ctx := context.Background()
 
 	err = client.Login(ctx)
-	if err == nil {
-		t.Fatal("Login() should return error for failed login")
-	}
+	require.Error(t, err, "Login() should return error for failed login")
 }
 
 func TestLogin_ContextCancellation(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		time.Sleep(2 * time.Second) // Delay to ensure context cancellation
+		time.Sleep(2 * time.Second)
 		resp := APIResponse{Success: true}
 		json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 
 	client, err := NewClient(server.URL, "admin", "password")
-	if err != nil {
-		t.Fatalf("NewClient() returned error: %v", err)
-	}
+	require.NoError(t, err, "NewClient() returned error")
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
 	err = client.Login(ctx)
-	if err == nil {
-		t.Fatal("Login() should return error when context is cancelled")
-	}
+	require.Error(t, err, "Login() should return error when context is cancelled")
 }
 
 func TestAddClientWithID_Success(t *testing.T) {
@@ -157,31 +124,17 @@ func TestAddClientWithID_Success(t *testing.T) {
 	defer server.Close()
 
 	client, err := NewClient(server.URL, "admin", "password")
-	if err != nil {
-		t.Fatalf("NewClient() returned error: %v", err)
-	}
+	require.NoError(t, err, "NewClient() returned error")
 	ctx := context.Background()
 
 	result, err := client.AddClientWithID(ctx, 1, "testuser", "client-id-123", "sub-id-456", 107374182400, time.Now().Add(24*time.Hour), 31)
-	if err != nil {
-		t.Fatalf("AddClientWithID() error = %v", err)
-	}
+	require.NoError(t, err, "AddClientWithID() error")
 
-	if !loginCalled {
-		t.Error("Login was not called")
-	}
-	if !addClientCalled {
-		t.Error("AddClient was not called")
-	}
-	if result == nil {
-		t.Fatal("Result is nil")
-	}
-	if result.ID != "client-id-123" {
-		t.Errorf("Result.ID = %s, want client-id-123", result.ID)
-	}
-	if result.SubID != "sub-id-456" {
-		t.Errorf("Result.SubID = %s, want sub-id-456", result.SubID)
-	}
+	assert.True(t, loginCalled, "Login was not called")
+	assert.True(t, addClientCalled, "AddClient was not called")
+	require.NotNil(t, result, "Result is nil")
+	assert.Equal(t, "client-id-123", result.ID, "Result.ID")
+	assert.Equal(t, "sub-id-456", result.SubID, "Result.SubID")
 }
 
 func TestAddClientWithID_ServerError(t *testing.T) {
@@ -199,9 +152,7 @@ func TestAddClientWithID_ServerError(t *testing.T) {
 	defer server.Close()
 
 	client, err := NewClient(server.URL, "admin", "password")
-	if err != nil {
-		t.Fatalf("NewClient() returned error: %v", err)
-	}
+	require.NoError(t, err, "NewClient() returned error")
 	ctx := context.Background()
 
 	_, err = client.AddClientWithID(ctx, 1, "testuser", "client-id", "sub-id", 1000, time.Now(), 31)
@@ -213,79 +164,52 @@ func TestAddClientWithID_ServerError(t *testing.T) {
 
 func TestGetSubscriptionLink(t *testing.T) {
 	client, err := NewClient("http://localhost:2053", "admin", "password")
-	if err != nil {
-		t.Fatalf("NewClient() returned error: %v", err)
-	}
+	require.NoError(t, err, "NewClient() returned error")
 
 	link := client.GetSubscriptionLink("http://localhost:2053", "sub123", "sub")
-
 	expected := "http://localhost:2053/sub/sub123"
-	if link != expected {
-		t.Errorf("GetSubscriptionLink() = %s, want %s", link, expected)
-	}
+	assert.Equal(t, expected, link, "GetSubscriptionLink()")
 }
 
 func TestGetSubscriptionLink_CustomPath(t *testing.T) {
 	client, err := NewClient("http://localhost:2053", "admin", "password")
-	if err != nil {
-		t.Fatalf("NewClient() returned error: %v", err)
-	}
+	require.NoError(t, err, "NewClient() returned error")
 
 	link := client.GetSubscriptionLink("http://localhost:2053", "sub456", "custom")
-
 	expected := "http://localhost:2053/custom/sub456"
-	if link != expected {
-		t.Errorf("GetSubscriptionLink() = %s, want %s", link, expected)
-	}
+	assert.Equal(t, expected, link, "GetSubscriptionLink()")
 }
 
 func TestAddClientWithID_InvalidInboundID(t *testing.T) {
 	client, err := NewClient("http://localhost:2053", "admin", "password")
-	if err != nil {
-		t.Fatalf("NewClient() returned error: %v", err)
-	}
+	require.NoError(t, err, "NewClient() returned error")
 	ctx := context.Background()
 
 	_, err = client.AddClientWithID(ctx, 0, "testuser", "client-id", "sub-id", 107374182400, time.Now().Add(24*time.Hour), 31)
-	if err == nil {
-		t.Fatal("AddClientWithID() should return error for invalid inbound ID")
-	}
+	require.Error(t, err, "AddClientWithID() should return error for invalid inbound ID")
 }
 
 func TestAddClientWithID_EmptyClientID(t *testing.T) {
 	client, err := NewClient("http://localhost:2053", "admin", "password")
-	if err != nil {
-		t.Fatalf("NewClient() returned error: %v", err)
-	}
+	require.NoError(t, err, "NewClient() returned error")
 	ctx := context.Background()
 
 	_, err = client.AddClientWithID(ctx, 1, "testuser", "", "sub-id", 107374182400, time.Now().Add(24*time.Hour), 31)
-	if err == nil {
-		t.Fatal("AddClientWithID() should return error for empty client ID")
-	}
+	require.Error(t, err, "AddClientWithID() should return error for empty client ID")
 }
 
 func TestAddClientWithID_EmptySubID(t *testing.T) {
 	client, err := NewClient("http://localhost:2053", "admin", "password")
-	if err != nil {
-		t.Fatalf("NewClient() returned error: %v", err)
-	}
+	require.NoError(t, err, "NewClient() returned error")
 	ctx := context.Background()
 
 	_, err = client.AddClientWithID(ctx, 1, "testuser", "client-id", "", 107374182400, time.Now().Add(24*time.Hour), 31)
-	if err == nil {
-		t.Fatal("AddClientWithID() should return error for empty sub ID")
-	}
+	require.Error(t, err, "AddClientWithID() should return error for empty sub ID")
 }
 
 func TestGetExternalURL(t *testing.T) {
-	// Invalid URL handling - function returns parsed result or original
-	// url.Parse may return partial results for some invalid inputs
 	result := GetExternalURL("not a valid url")
-	// Just verify it doesn't panic and returns a string
-	if result == "" {
-		t.Error("GetExternalURL() should return non-empty string")
-	}
+	assert.NotEmpty(t, result, "GetExternalURL() should return non-empty string")
 }
 
 func TestContainsSuccess(t *testing.T) {
@@ -302,9 +226,7 @@ func TestContainsSuccess(t *testing.T) {
 
 	for _, tt := range tests {
 		result := containsSuccessKeywords(tt.msg)
-		if result != tt.expected {
-			t.Errorf("containsSuccessKeywords(%q) = %v, want %v", tt.msg, result, tt.expected)
-		}
+		assert.Equal(t, tt.expected, result, "containsSuccessKeywords(%q)", tt.msg)
 	}
 }
 
@@ -317,12 +239,8 @@ func TestRetryWithBackoff_Success(t *testing.T) {
 		return nil
 	})
 
-	if err != nil {
-		t.Errorf("retryWithBackoff() error = %v", err)
-	}
-	if callCount != 1 {
-		t.Errorf("Expected 1 call, got %d", callCount)
-	}
+	assert.NoError(t, err, "retryWithBackoff() error")
+	assert.Equal(t, 1, callCount, "Expected 1 call")
 }
 
 func TestRetryWithBackoff_Retries(t *testing.T) {
@@ -337,12 +255,8 @@ func TestRetryWithBackoff_Retries(t *testing.T) {
 		return nil
 	})
 
-	if err != nil {
-		t.Errorf("retryWithBackoff() error = %v", err)
-	}
-	if callCount != 3 {
-		t.Errorf("Expected 3 calls, got %d", callCount)
-	}
+	assert.NoError(t, err, "retryWithBackoff() error")
+	assert.Equal(t, 3, callCount, "Expected 3 calls")
 }
 
 func TestRetryWithBackoff_MaxRetries(t *testing.T) {
@@ -354,25 +268,19 @@ func TestRetryWithBackoff_MaxRetries(t *testing.T) {
 		return fmt.Errorf("always fails")
 	})
 
-	if err == nil {
-		t.Error("retryWithBackoff() should return error after max retries")
-	}
-	if callCount != 3 {
-		t.Errorf("Expected 3 calls, got %d", callCount)
-	}
+	require.Error(t, err, "retryWithBackoff() should return error after max retries")
+	assert.Equal(t, 3, callCount, "Expected 3 calls")
 }
 
 func TestRetryWithBackoff_ContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // Cancel immediately
+	cancel()
 
 	err := retryWithBackoff(ctx, 3, 10*time.Millisecond, func() error {
 		return fmt.Errorf("error")
 	})
 
-	if err == nil {
-		t.Error("retryWithBackoff() should return error when context is cancelled")
-	}
+	require.Error(t, err, "retryWithBackoff() should return error when context is cancelled")
 }
 
 func TestAddClient_Success(t *testing.T) {
@@ -397,34 +305,18 @@ func TestAddClient_Success(t *testing.T) {
 	defer server.Close()
 
 	client, err := NewClient(server.URL, "admin", "password")
-	if err != nil {
-		t.Fatalf("NewClient() returned error: %v", err)
-	}
+	require.NoError(t, err, "NewClient() returned error")
 	ctx := context.Background()
 
 	result, err := client.AddClient(ctx, 1, "testuser", 107374182400, time.Now().Add(24*time.Hour))
-	if err != nil {
-		t.Fatalf("AddClient() error = %v", err)
-	}
+	require.NoError(t, err, "AddClient() error")
 
-	if !loginCalled {
-		t.Error("Login was not called")
-	}
-	if !addClientCalled {
-		t.Error("AddClient was not called")
-	}
-	if result == nil {
-		t.Fatal("Result is nil")
-	}
-	if result.Email != "testuser" {
-		t.Errorf("Result.Email = %s, want testuser", result.Email)
-	}
-	if result.TotalGB != 107374182400 {
-		t.Errorf("Result.TotalGB = %d, want 107374182400", result.TotalGB)
-	}
-	if !result.Enable {
-		t.Error("Result.Enable should be true")
-	}
+	assert.True(t, loginCalled, "Login was not called")
+	assert.True(t, addClientCalled, "AddClient was not called")
+	require.NotNil(t, result, "Result is nil")
+	assert.Equal(t, "testuser", result.Email, "Result.Email")
+	assert.Equal(t, int64(107374182400), result.TotalGB, "Result.TotalGB")
+	assert.True(t, result.Enable, "Result.Enable should be true")
 }
 
 func TestAddClient_LoginFailure(t *testing.T) {
@@ -439,15 +331,11 @@ func TestAddClient_LoginFailure(t *testing.T) {
 	defer server.Close()
 
 	client, err := NewClient(server.URL, "admin", "wrongpassword")
-	if err != nil {
-		t.Fatalf("NewClient() returned error: %v", err)
-	}
+	require.NoError(t, err, "NewClient() returned error")
 	ctx := context.Background()
 
 	_, err = client.AddClient(ctx, 1, "testuser", 1000, time.Now())
-	if err == nil {
-		t.Fatal("AddClient() should return error when login fails")
-	}
+	require.Error(t, err, "AddClient() should return error when login fails")
 }
 
 func TestAddClientWithID_SuccessFalseButMessageIndicatesSuccess(t *testing.T) {
@@ -458,7 +346,6 @@ func TestAddClientWithID_SuccessFalseButMessageIndicatesSuccess(t *testing.T) {
 			return
 		}
 
-		// Return success=false but with a success message
 		resp := APIResponse{Success: false, Msg: "Client added successfully"}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(resp)
@@ -466,18 +353,13 @@ func TestAddClientWithID_SuccessFalseButMessageIndicatesSuccess(t *testing.T) {
 	defer server.Close()
 
 	client, err := NewClient(server.URL, "admin", "password")
-	if err != nil {
-		t.Fatalf("NewClient() returned error: %v", err)
-	}
+	require.NoError(t, err, "NewClient() returned error")
 	ctx := context.Background()
 
 	result, err := client.AddClientWithID(ctx, 1, "testuser", "client-id", "sub-id", 1000, time.Now(), 31)
-	if err != nil {
-		t.Fatalf("AddClientWithID() should not error when message indicates success: %v", err)
-	}
-	if result == nil {
-		t.Fatal("Result should not be nil")
-	}
+	require.Error(t, err, "AddClientWithID() should return error when Success is false")
+	require.Nil(t, result, "Result should be nil on error")
+	assert.Contains(t, err.Error(), "Client added successfully", "Error should contain the API message")
 }
 
 func TestEnsureLoggedIn_CachedSession(t *testing.T) {
@@ -497,28 +379,16 @@ func TestEnsureLoggedIn_CachedSession(t *testing.T) {
 	defer server.Close()
 
 	client, err := NewClient(server.URL, "admin", "password")
-	if err != nil {
-		t.Fatalf("NewClient() returned error: %v", err)
-	}
+	require.NoError(t, err, "NewClient() returned error")
 	ctx := context.Background()
 
-	// First call - should login
 	_, err = client.AddClient(ctx, 1, "testuser1", 1000, time.Now())
-	if err != nil {
-		t.Fatalf("First AddClient() error = %v", err)
-	}
+	require.NoError(t, err, "First AddClient() error")
 
-	// Second call immediately - should use cached session
 	_, err = client.AddClient(ctx, 1, "testuser2", 1000, time.Now())
-	if err != nil {
-		t.Fatalf("Second AddClient() error = %v", err)
-	}
+	require.NoError(t, err, "Second AddClient() error")
 
-	// Both calls should have logged in (the test server doesn't maintain session state,
-	// but we can verify the login caching logic exists in the client)
-	if loginCount < 1 {
-		t.Error("At least one login should have occurred")
-	}
+	assert.GreaterOrEqual(t, loginCount, 1, "At least one login should have occurred")
 }
 
 func TestDoLogin_InvalidJSONResponse(t *testing.T) {
@@ -529,15 +399,11 @@ func TestDoLogin_InvalidJSONResponse(t *testing.T) {
 	defer server.Close()
 
 	client, err := NewClient(server.URL, "admin", "password")
-	if err != nil {
-		t.Fatalf("NewClient() returned error: %v", err)
-	}
+	require.NoError(t, err, "NewClient() returned error")
 	ctx := context.Background()
 
 	err = client.Login(ctx)
-	if err == nil {
-		t.Fatal("Login() should return error for invalid JSON response")
-	}
+	require.Error(t, err, "Login() should return error for invalid JSON response")
 }
 
 func TestGetExternalURL_VariousInputs(t *testing.T) {
@@ -553,14 +419,11 @@ func TestGetExternalURL_VariousInputs(t *testing.T) {
 
 	for _, tt := range tests {
 		result := GetExternalURL(tt.host)
-		if result != tt.expected {
-			t.Errorf("GetExternalURL(%s) = %s, want %s", tt.host, result, tt.expected)
-		}
+		assert.Equal(t, tt.expected, result, "GetExternalURL(%s)", tt.host)
 	}
 }
 
 func TestClientSettings_JSON(t *testing.T) {
-	// Test that ClientConfig can be marshaled/unmarshaled correctly
 	config := &ClientConfig{
 		ID:         "test-uuid",
 		Email:      "test@example.com",
@@ -575,21 +438,13 @@ func TestClientSettings_JSON(t *testing.T) {
 	}
 
 	data, err := json.Marshal(config)
-	if err != nil {
-		t.Fatalf("Failed to marshal ClientConfig: %v", err)
-	}
+	require.NoError(t, err, "Failed to marshal ClientConfig")
 
 	var unmarshaled ClientConfig
-	if err := json.Unmarshal(data, &unmarshaled); err != nil {
-		t.Fatalf("Failed to unmarshal ClientConfig: %v", err)
-	}
+	require.NoError(t, json.Unmarshal(data, &unmarshaled), "Failed to unmarshal ClientConfig")
 
-	if unmarshaled.ID != config.ID {
-		t.Errorf("ID = %s, want %s", unmarshaled.ID, config.ID)
-	}
-	if unmarshaled.Email != config.Email {
-		t.Errorf("Email = %s, want %s", unmarshaled.Email, config.Email)
-	}
+	assert.Equal(t, config.ID, unmarshaled.ID, "ID")
+	assert.Equal(t, config.Email, unmarshaled.Email, "Email")
 }
 
 func TestGetClientTraffic_Success(t *testing.T) {
@@ -599,9 +454,7 @@ func TestGetClientTraffic_Success(t *testing.T) {
 			resp := APIResponse{Success: true}
 			json.NewEncoder(w).Encode(resp)
 		case "/panel/api/inbounds/getClientTraffics/testuser":
-			if r.Method != "GET" {
-				t.Errorf("Expected GET method, got %s", r.Method)
-			}
+			assert.Equal(t, "GET", r.Method, "Expected GET method")
 			traffic := ClientTraffic{
 				ID:         1,
 				InboundID:  1,
@@ -609,8 +462,8 @@ func TestGetClientTraffic_Success(t *testing.T) {
 				Email:      "testuser",
 				UUID:       "test-uuid-123",
 				SubID:      "test-sub-id",
-				Up:         1073741824, // 1 GB up
-				Down:       2147483648, // 2 GB down
+				Up:         1073741824,
+				Down:       2147483648,
 				AllTime:    0,
 				ExpiryTime: time.Now().Add(24 * time.Hour).UnixMilli(),
 				Total:      0,
@@ -631,28 +484,16 @@ func TestGetClientTraffic_Success(t *testing.T) {
 	defer server.Close()
 
 	client, err := NewClient(server.URL, "admin", "password")
-	if err != nil {
-		t.Fatalf("NewClient() returned error: %v", err)
-	}
+	require.NoError(t, err, "NewClient() returned error")
 	ctx := context.Background()
 
 	result, err := client.GetClientTraffic(ctx, "testuser")
-	if err != nil {
-		t.Fatalf("GetClientTraffic() error = %v", err)
-	}
+	require.NoError(t, err, "GetClientTraffic() error")
 
-	if result.Email != "testuser" {
-		t.Errorf("Email = %s, want testuser", result.Email)
-	}
-	if result.Up != 1073741824 {
-		t.Errorf("Up = %d, want 1073741824", result.Up)
-	}
-	if result.Down != 2147483648 {
-		t.Errorf("Down = %d, want 2147483648", result.Down)
-	}
-	if !result.Enable {
-		t.Error("Enable should be true")
-	}
+	assert.Equal(t, "testuser", result.Email, "Email")
+	assert.Equal(t, int64(1073741824), result.Up, "Up")
+	assert.Equal(t, int64(2147483648), result.Down, "Down")
+	assert.True(t, result.Enable, "Enable should be true")
 }
 
 func TestGetClientTraffic_ClientNotFound(t *testing.T) {
@@ -662,7 +503,6 @@ func TestGetClientTraffic_ClientNotFound(t *testing.T) {
 			resp := APIResponse{Success: true}
 			json.NewEncoder(w).Encode(resp)
 		case "/panel/api/inbounds/getClientTraffics/nonexistent":
-			// Return error - client not found
 			resp := APIResponse{
 				Success: false,
 				Msg:     "client not found",
@@ -676,15 +516,11 @@ func TestGetClientTraffic_ClientNotFound(t *testing.T) {
 	defer server.Close()
 
 	client, err := NewClient(server.URL, "admin", "password")
-	if err != nil {
-		t.Fatalf("NewClient() returned error: %v", err)
-	}
+	require.NoError(t, err, "NewClient() returned error")
 	ctx := context.Background()
 
 	_, err = client.GetClientTraffic(ctx, "nonexistent")
-	if err == nil {
-		t.Fatal("GetClientTraffic() should return error when client not found")
-	}
+	require.Error(t, err, "GetClientTraffic() should return error when client not found")
 }
 
 func TestGetClientTraffic_ServerError(t *testing.T) {
@@ -707,18 +543,12 @@ func TestGetClientTraffic_ServerError(t *testing.T) {
 	defer server.Close()
 
 	client, err := NewClient(server.URL, "admin", "password")
-	if err != nil {
-		t.Fatalf("NewClient() returned error: %v", err)
-	}
+	require.NoError(t, err, "NewClient() returned error")
 	ctx := context.Background()
 
 	_, err = client.GetClientTraffic(ctx, "testuser")
-	if err == nil {
-		t.Fatal("GetClientTraffic() should return error when server returns error")
-	}
-	if !strings.Contains(err.Error(), "failed to get client traffic") {
-		t.Errorf("Error should contain 'failed to get client traffic', got: %v", err)
-	}
+	require.Error(t, err, "GetClientTraffic() should return error when server returns error")
+	assert.Contains(t, err.Error(), "failed to get client traffic", "Error should contain 'failed to get client traffic'")
 }
 
 func TestGetClientTraffic_LoginFailure(t *testing.T) {
@@ -733,18 +563,12 @@ func TestGetClientTraffic_LoginFailure(t *testing.T) {
 	defer server.Close()
 
 	client, err := NewClient(server.URL, "admin", "wrongpassword")
-	if err != nil {
-		t.Fatalf("NewClient() returned error: %v", err)
-	}
+	require.NoError(t, err, "NewClient() returned error")
 	ctx := context.Background()
 
 	_, err = client.GetClientTraffic(ctx, "testuser")
-	if err == nil {
-		t.Fatal("GetClientTraffic() should return error when login fails")
-	}
-	if !strings.Contains(err.Error(), "authentication required") {
-		t.Errorf("Error should contain 'authentication required', got: %v", err)
-	}
+	require.Error(t, err, "GetClientTraffic() should return error when login fails")
+	assert.Contains(t, err.Error(), "authentication required", "Error should contain 'authentication required'")
 }
 
 func TestGetClientTraffic_ContextCancellation(t *testing.T) {
@@ -754,7 +578,7 @@ func TestGetClientTraffic_ContextCancellation(t *testing.T) {
 			resp := APIResponse{Success: true}
 			json.NewEncoder(w).Encode(resp)
 		case "/panel/api/inbounds/getClientTraffics/testuser":
-			time.Sleep(2 * time.Second) // Delay to ensure context cancellation
+			time.Sleep(2 * time.Second)
 			traffics := []ClientTraffic{}
 			resp := APIResponse{Success: true}
 			resp.Obj, _ = json.Marshal(traffics)
@@ -766,16 +590,12 @@ func TestGetClientTraffic_ContextCancellation(t *testing.T) {
 	defer server.Close()
 
 	client, err := NewClient(server.URL, "admin", "password")
-	if err != nil {
-		t.Fatalf("NewClient() returned error: %v", err)
-	}
+	require.NoError(t, err, "NewClient() returned error")
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
 	_, err = client.GetClientTraffic(ctx, "testuser")
-	if err == nil {
-		t.Fatal("GetClientTraffic() should return error when context is cancelled")
-	}
+	require.Error(t, err, "GetClientTraffic() should return error when context is cancelled")
 }
 
 func TestGetClientTraffic_InvalidJSONResponse(t *testing.T) {
@@ -794,19 +614,14 @@ func TestGetClientTraffic_InvalidJSONResponse(t *testing.T) {
 	defer server.Close()
 
 	client, err := NewClient(server.URL, "admin", "password")
-	if err != nil {
-		t.Fatalf("NewClient() returned error: %v", err)
-	}
+	require.NoError(t, err, "NewClient() returned error")
 	ctx := context.Background()
 
 	_, err = client.GetClientTraffic(ctx, "testuser")
-	if err == nil {
-		t.Fatal("GetClientTraffic() should return error for invalid JSON response")
-	}
+	require.Error(t, err, "GetClientTraffic() should return error for invalid JSON response")
 }
 
 func TestClientTraffic_JSON(t *testing.T) {
-	// Test that ClientTraffic can be marshaled/unmarshaled correctly
 	traffic := &ClientTraffic{
 		ID:         1,
 		InboundID:  1,
@@ -824,34 +639,19 @@ func TestClientTraffic_JSON(t *testing.T) {
 	}
 
 	data, err := json.Marshal(traffic)
-	if err != nil {
-		t.Fatalf("Failed to marshal ClientTraffic: %v", err)
-	}
+	require.NoError(t, err, "Failed to marshal ClientTraffic")
 
 	var unmarshaled ClientTraffic
-	if err := json.Unmarshal(data, &unmarshaled); err != nil {
-		t.Fatalf("Failed to unmarshal ClientTraffic: %v", err)
-	}
+	require.NoError(t, json.Unmarshal(data, &unmarshaled), "Failed to unmarshal ClientTraffic")
 
-	if unmarshaled.ID != traffic.ID {
-		t.Errorf("ID = %d, want %d", unmarshaled.ID, traffic.ID)
-	}
-	if unmarshaled.Email != traffic.Email {
-		t.Errorf("Email = %s, want %s", unmarshaled.Email, traffic.Email)
-	}
-	if unmarshaled.Up != traffic.Up {
-		t.Errorf("Up = %d, want %d", unmarshaled.Up, traffic.Up)
-	}
-	if unmarshaled.Down != traffic.Down {
-		t.Errorf("Down = %d, want %d", unmarshaled.Down, traffic.Down)
-	}
-	if unmarshaled.Enable != traffic.Enable {
-		t.Errorf("Enable = %v, want %v", unmarshaled.Enable, traffic.Enable)
-	}
+	assert.Equal(t, traffic.ID, unmarshaled.ID, "ID")
+	assert.Equal(t, traffic.Email, unmarshaled.Email, "Email")
+	assert.Equal(t, traffic.Up, unmarshaled.Up, "Up")
+	assert.Equal(t, traffic.Down, unmarshaled.Down, "Down")
+	assert.Equal(t, traffic.Enable, unmarshaled.Enable, "Enable")
 }
 
 func TestClientTraffic_TrafficCalculation(t *testing.T) {
-	// Test traffic calculation in GB
 	tests := []struct {
 		name       string
 		up         int64
@@ -859,9 +659,9 @@ func TestClientTraffic_TrafficCalculation(t *testing.T) {
 		expectedGB float64
 	}{
 		{"zero traffic", 0, 0, 0},
-		{"1 GB total", 536870912, 536870912, 1.0},   // 512MB up + 512MB down = 1GB
-		{"5 GB total", 2147483648, 3221225472, 5.0}, // 2GB up + 3GB down = 5GB
-		{"partial GB", 1073741824, 536870912, 1.5},  // 1GB up + 512MB down = 1.5GB
+		{"1 GB total", 536870912, 536870912, 1.0},
+		{"5 GB total", 2147483648, 3221225472, 5.0},
+		{"partial GB", 1073741824, 536870912, 1.5},
 	}
 
 	for _, tt := range tests {
@@ -871,10 +671,7 @@ func TestClientTraffic_TrafficCalculation(t *testing.T) {
 				Down: tt.down,
 			}
 			gb := float64(traffic.Up+traffic.Down) / 1024 / 1024 / 1024
-			// Use approximate comparison for floating point
-			if gb < tt.expectedGB-0.01 || gb > tt.expectedGB+0.01 {
-				t.Errorf("Traffic in GB = %.2f, want %.2f", gb, tt.expectedGB)
-			}
+			assert.InDelta(t, tt.expectedGB, gb, 0.01, "Traffic in GB")
 		})
 	}
 }
@@ -886,9 +683,7 @@ func TestDeleteClient_Success(t *testing.T) {
 			resp := APIResponse{Success: true}
 			json.NewEncoder(w).Encode(resp)
 		case "/panel/api/inbounds/1/delClient/test-client-id":
-			if r.Method != "POST" {
-				t.Errorf("Expected POST method, got %s", r.Method)
-			}
+			assert.Equal(t, "POST", r.Method, "Expected POST method")
 			resp := APIResponse{Success: true, Msg: "Client deleted successfully"}
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(resp)
@@ -899,15 +694,11 @@ func TestDeleteClient_Success(t *testing.T) {
 	defer server.Close()
 
 	client, err := NewClient(server.URL, "admin", "password")
-	if err != nil {
-		t.Fatalf("NewClient() returned error: %v", err)
-	}
+	require.NoError(t, err, "NewClient() returned error")
 	ctx := context.Background()
 
 	err = client.DeleteClient(ctx, 1, "test-client-id")
-	if err != nil {
-		t.Fatalf("DeleteClient() error = %v", err)
-	}
+	require.NoError(t, err, "DeleteClient() error")
 }
 
 func TestDeleteClient_ServerError(t *testing.T) {
@@ -927,18 +718,12 @@ func TestDeleteClient_ServerError(t *testing.T) {
 	defer server.Close()
 
 	client, err := NewClient(server.URL, "admin", "password")
-	if err != nil {
-		t.Fatalf("NewClient() returned error: %v", err)
-	}
+	require.NoError(t, err, "NewClient() returned error")
 	ctx := context.Background()
 
 	err = client.DeleteClient(ctx, 1, "test-client-id")
-	if err == nil {
-		t.Fatal("DeleteClient() should return error when server returns error")
-	}
-	if !strings.Contains(err.Error(), "failed to delete client") {
-		t.Errorf("Error should contain 'failed to delete client', got: %v", err)
-	}
+	require.Error(t, err, "DeleteClient() should return error when server returns error")
+	assert.Contains(t, err.Error(), "failed to delete client", "Error should contain 'failed to delete client'")
 }
 
 func TestDeleteClient_LoginFailure(t *testing.T) {
@@ -953,18 +738,12 @@ func TestDeleteClient_LoginFailure(t *testing.T) {
 	defer server.Close()
 
 	client, err := NewClient(server.URL, "admin", "wrongpassword")
-	if err != nil {
-		t.Fatalf("NewClient() returned error: %v", err)
-	}
+	require.NoError(t, err, "NewClient() returned error")
 	ctx := context.Background()
 
 	err = client.DeleteClient(ctx, 1, "test-client-id")
-	if err == nil {
-		t.Fatal("DeleteClient() should return error when login fails")
-	}
-	if !strings.Contains(err.Error(), "authentication required") {
-		t.Errorf("Error should contain 'authentication required', got: %v", err)
-	}
+	require.Error(t, err, "DeleteClient() should return error when login fails")
+	assert.Contains(t, err.Error(), "authentication required", "Error should contain 'authentication required'")
 }
 
 func TestDeleteClient_ContextCancellation(t *testing.T) {
@@ -974,7 +753,7 @@ func TestDeleteClient_ContextCancellation(t *testing.T) {
 			resp := APIResponse{Success: true}
 			json.NewEncoder(w).Encode(resp)
 		case "/panel/api/inbounds/1/delClient/test-client-id":
-			time.Sleep(2 * time.Second) // Delay to ensure context cancellation
+			time.Sleep(2 * time.Second)
 			resp := APIResponse{Success: true}
 			json.NewEncoder(w).Encode(resp)
 		default:
@@ -984,16 +763,12 @@ func TestDeleteClient_ContextCancellation(t *testing.T) {
 	defer server.Close()
 
 	client, err := NewClient(server.URL, "admin", "password")
-	if err != nil {
-		t.Fatalf("NewClient() returned error: %v", err)
-	}
+	require.NoError(t, err, "NewClient() returned error")
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
 	err = client.DeleteClient(ctx, 1, "test-client-id")
-	if err == nil {
-		t.Fatal("DeleteClient() should return error when context is cancelled")
-	}
+	require.Error(t, err, "DeleteClient() should return error when context is cancelled")
 }
 
 func TestDeleteClient_InvalidJSONResponse(t *testing.T) {
@@ -1012,15 +787,11 @@ func TestDeleteClient_InvalidJSONResponse(t *testing.T) {
 	defer server.Close()
 
 	client, err := NewClient(server.URL, "admin", "password")
-	if err != nil {
-		t.Fatalf("NewClient() returned error: %v", err)
-	}
+	require.NoError(t, err, "NewClient() returned error")
 	ctx := context.Background()
 
 	err = client.DeleteClient(ctx, 1, "test-client-id")
-	if err == nil {
-		t.Fatal("DeleteClient() should return error for invalid JSON response")
-	}
+	require.Error(t, err, "DeleteClient() should return error for invalid JSON response")
 }
 
 func TestDeleteClient_RequestCreationError(t *testing.T) {
@@ -1032,8 +803,6 @@ func TestGetClientTraffic_RequestCreationError(t *testing.T) {
 }
 
 func TestAddClientWithID_ClientSettingsMarshalError(t *testing.T) {
-	// Test json.Marshal error - practically impossible since we're marshaling
-	// a simple map with basic types, but we can test the error path indirectly
 	t.Skip("Cannot trigger client settings marshal error without mocking")
 }
 
@@ -1055,36 +824,26 @@ func TestContainsSuccessKeywords(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := containsSuccessKeywords(tt.input)
-			if result != tt.expected {
-				t.Errorf("containsSuccessKeywords(%q) = %v, want %v", tt.input, result, tt.expected)
-			}
+			assert.Equal(t, tt.expected, result, "containsSuccessKeywords(%q)", tt.input)
 		})
 	}
 }
 
 func TestGetSubscriptionLink_WithCustomPath(t *testing.T) {
 	client, err := NewClient("http://localhost:2053", "admin", "password")
-	if err != nil {
-		t.Fatalf("NewClient() returned error: %v", err)
-	}
+	require.NoError(t, err, "NewClient() returned error")
 	link := client.GetSubscriptionLink("http://example.com", "abc123", "/custom")
-	if !strings.Contains(link, "/custom") {
-		t.Errorf("GetSubscriptionLink() should include custom path, got %s", link)
-	}
+	assert.Contains(t, link, "/custom", "GetSubscriptionLink() should include custom path")
 }
 
 func TestGetExternalURL_IPAddress(t *testing.T) {
 	url := GetExternalURL("http://192.168.1.1:2053")
-	if url != "http://192.168.1.1:2053" {
-		t.Errorf("GetExternalURL() = %s, want http://192.168.1.1:2053", url)
-	}
+	assert.Equal(t, "http://192.168.1.1:2053", url, "GetExternalURL()")
 }
 
 func TestGetExternalURL_Empty(t *testing.T) {
 	url := GetExternalURL("")
-	if url == "" {
-		t.Error("GetExternalURL('') should return non-empty result")
-	}
+	assert.NotEmpty(t, url, "GetExternalURL('') should return non-empty result")
 }
 
 func TestAddClientWithID_LoginError(t *testing.T) {
@@ -1099,21 +858,14 @@ func TestAddClientWithID_LoginError(t *testing.T) {
 	defer server.Close()
 
 	client, err := NewClient(server.URL, "admin", "password")
-	if err != nil {
-		t.Fatalf("NewClient() returned error: %v", err)
-	}
+	require.NoError(t, err, "NewClient() returned error")
 	ctx := context.Background()
 
 	_, err = client.AddClientWithID(ctx, 1, "testuser", "client-id", "sub-id", 1000, time.Now(), 31)
-	if err == nil {
-		t.Fatal("AddClientWithID() should return error when login returns error")
-	}
+	require.Error(t, err, "AddClientWithID() should return error when login returns error")
 }
 
 func TestAddClientWithID_RequestCreationError(t *testing.T) {
-	// Test with invalid URL to trigger http.NewRequest error
-	// This is hard to trigger since NewClient creates a valid client
-	// Skip this test as it's not feasible without mocking
 	t.Skip("Cannot trigger request creation error without mocking http.Client")
 }
 
@@ -1125,26 +877,18 @@ func TestClient_CircuitBreakerState(t *testing.T) {
 	defer failingServer.Close()
 
 	client, err := NewClient(failingServer.URL, "admin", "password")
-	if err != nil {
-		t.Fatalf("NewClient() returned error: %v", err)
-	}
+	require.NoError(t, err, "NewClient() returned error")
 	ctx := context.Background()
 
-	// Initially should be closed
 	state := client.CircuitBreakerState()
-	if state != CircuitStateClosed {
-		t.Errorf("CircuitBreakerState() = %v, want %v", state, CircuitStateClosed)
-	}
+	assert.Equal(t, CircuitStateClosed, state, "CircuitBreakerState() initially should be closed")
 
-	// After failed login attempts, should trip
 	for i := 0; i < 10; i++ {
 		client.Login(ctx)
 	}
 
 	state = client.CircuitBreakerState()
-	if state == CircuitStateClosed {
-		t.Error("CircuitBreakerState() should be open after multiple failures")
-	}
+	assert.NotEqual(t, CircuitStateClosed, state, "CircuitBreakerState() should be open after multiple failures")
 }
 
 func TestClient_GetExternalURL(t *testing.T) {
@@ -1154,9 +898,7 @@ func TestClient_GetExternalURL(t *testing.T) {
 	defer server.Close()
 
 	client, err := NewClient(server.URL, "admin", "password")
-	if err != nil {
-		t.Fatalf("NewClient() returned error: %v", err)
-	}
+	require.NoError(t, err, "NewClient() returned error")
 
 	tests := []struct {
 		name     string
@@ -1171,14 +913,10 @@ func TestClient_GetExternalURL(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := client.GetExternalURL(tt.input)
-			if result != tt.expected {
-				t.Errorf("Client.GetExternalURL(%q) = %q, want %q", tt.input, result, tt.expected)
-			}
+			assert.Equal(t, tt.expected, result, "Client.GetExternalURL(%q)", tt.input)
 		})
 	}
 }
-
-// ==================== truncateString Tests ====================
 
 func TestTruncateString(t *testing.T) {
 	tests := []struct {
@@ -1192,17 +930,13 @@ func TestTruncateString(t *testing.T) {
 		{"long string", "hello world this is a long string", 10, "hello worl..."},
 		{"empty string", "", 5, ""},
 		{"zero maxLen", "hello", 0, "..."},
-		// Note: truncateString works on bytes, not runes
-		// Unicode characters may be split, which is acceptable for debug logging
 		{"ascii only long", "abcdefghijklmnopqrstuvwxyz", 5, "abcde..."},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := truncateString(tt.input, tt.maxLen)
-			if result != tt.expected {
-				t.Errorf("truncateString(%q, %d) = %q, want %q", tt.input, tt.maxLen, result, tt.expected)
-			}
+			assert.Equal(t, tt.expected, result, "truncateString(%q, %d)", tt.input, tt.maxLen)
 		})
 	}
 }
@@ -1210,26 +944,14 @@ func TestTruncateString(t *testing.T) {
 func TestTruncateString_NoAllocationForShortStrings(t *testing.T) {
 	input := "short"
 	result := truncateString(input, 100)
-
-	// Short strings should be returned as-is without modification
-	if result != input {
-		t.Errorf("truncateString should return original string when len <= maxLen")
-	}
+	assert.Equal(t, input, result, "truncateString should return original string when len <= maxLen")
 }
 
 func TestTruncateString_UnicodeMayBeSplit(t *testing.T) {
-	// This test documents that unicode characters may be split
-	// This is acceptable for debug logging where we just want a preview
 	input := "привет"
 	result := truncateString(input, 3)
-
-	// Result should be truncated to 3 bytes (may split unicode)
-	if len(result) > 6 { // 3 bytes + "..."
-		t.Errorf("truncateString result too long: %q", result)
-	}
+	assert.LessOrEqual(t, len(result), 6, "truncateString result too long")
 }
-
-// UpdateClient tests
 
 func TestUpdateClient_Success(t *testing.T) {
 	loginCalled := false
@@ -1253,22 +975,14 @@ func TestUpdateClient_Success(t *testing.T) {
 	defer server.Close()
 
 	client, err := NewClient(server.URL, "admin", "password")
-	if err != nil {
-		t.Fatalf("NewClient() returned error: %v", err)
-	}
+	require.NoError(t, err, "NewClient() returned error")
 	ctx := context.Background()
 
 	err = client.UpdateClient(ctx, 1, "test-client-uuid", "testuser@example.com", "sub-id-123", 107374182400, time.UnixMilli(0), 12345, "from: @referrer")
-	if err != nil {
-		t.Fatalf("UpdateClient() error = %v", err)
-	}
+	require.NoError(t, err, "UpdateClient() error")
 
-	if !loginCalled {
-		t.Error("Login was not called")
-	}
-	if !updateClientCalled {
-		t.Error("UpdateClient was not called")
-	}
+	assert.True(t, loginCalled, "Login was not called")
+	assert.True(t, updateClientCalled, "UpdateClient was not called")
 }
 
 func TestUpdateClient_Error(t *testing.T) {
@@ -1286,15 +1000,11 @@ func TestUpdateClient_Error(t *testing.T) {
 	defer server.Close()
 
 	client, err := NewClient(server.URL, "admin", "password")
-	if err != nil {
-		t.Fatalf("NewClient() returned error: %v", err)
-	}
+	require.NoError(t, err, "NewClient() returned error")
 	ctx := context.Background()
 
 	err = client.UpdateClient(ctx, 1, "test-client-uuid", "testuser@example.com", "sub-id-123", 107374182400, time.UnixMilli(0), 12345, "from: @referrer")
-	if err == nil {
-		t.Fatal("UpdateClient() should return error when API returns success=false")
-	}
+	require.Error(t, err, "UpdateClient() should return error when API returns success=false")
 }
 
 func TestUpdateClient_EmptyClientID(t *testing.T) {
@@ -1305,13 +1015,9 @@ func TestUpdateClient_EmptyClientID(t *testing.T) {
 	defer server.Close()
 
 	client, err := NewClient(server.URL, "admin", "password")
-	if err != nil {
-		t.Fatalf("NewClient() returned error: %v", err)
-	}
+	require.NoError(t, err, "NewClient() returned error")
 	ctx := context.Background()
 
 	err = client.UpdateClient(ctx, 1, "", "testuser@example.com", "sub-id-123", 107374182400, time.UnixMilli(0), 12345, "from: @referrer")
-	if err == nil {
-		t.Fatal("UpdateClient() should return error when clientID is empty")
-	}
+	require.Error(t, err, "UpdateClient() should return error when clientID is empty")
 }
