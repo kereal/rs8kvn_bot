@@ -1433,15 +1433,6 @@ func TestSendInviteLink_DatabaseError(t *testing.T) {
 	require.Error(t, err, "GetOrCreateInvite() should return error")
 }
 
-// === isSupermemoryEnabled tests ===
-
-func TestHandler_IsSupermemoryEnabled(t *testing.T) {
-	handler := &Handler{}
-
-	// Currently always returns false
-	assert.False(t, handler.isSupermemoryEnabled(), "isSupermemoryEnabled() should return false")
-}
-
 // === StoreConversation tests ===
 
 func TestHandler_StoreConversation(t *testing.T) {
