@@ -143,8 +143,10 @@ func Close() error {
 	return nil
 }
 
-// findMigrationsDir finds the migrations directory by checking multiple possible paths
-func findMigrationsDir() string {
+// runMigrations applies database migrations using golang-migrate
+func runMigrations(dbPath string) error {
+	// Check if migrations directory exists
+	// Find migrations directory - try multiple paths for different test contexts
 	wd, _ := os.Getwd()
 	possiblePaths := []string{
 		filepath.Join(wd, "migrations"),
@@ -153,17 +155,13 @@ func findMigrationsDir() string {
 		filepath.Join(wd, "../../database/migrations"),
 		filepath.Join(wd, "../../../database/migrations"),
 	}
+	var migrationsDir string
 	for _, p := range possiblePaths {
 		if _, err := os.Stat(p); err == nil {
-			return p
+			migrationsDir = p
+			break
 		}
 	}
-	return ""
-}
-
-// runMigrations applies database migrations using golang-migrate
-func runMigrations(dbPath string) error {
-	migrationsDir := findMigrationsDir()
 	if migrationsDir == "" {
 		return nil
 	}
@@ -179,7 +177,22 @@ func runMigrations(dbPath string) error {
 
 // runMigrationsWithDB applies database migrations using an existing database connection
 func runMigrationsWithDB(sqlDB *sql.DB) error {
-	migrationsDir := findMigrationsDir()
+	// Find migrations directory - try multiple paths for different test contexts
+	wd, _ := os.Getwd()
+	possiblePaths := []string{
+		filepath.Join(wd, "migrations"),
+		filepath.Join(wd, "internal/database/migrations"),
+		filepath.Join(wd, "../database/migrations"),
+		filepath.Join(wd, "../../database/migrations"),
+		filepath.Join(wd, "../../../database/migrations"),
+	}
+	var migrationsDir string
+	for _, p := range possiblePaths {
+		if _, err := os.Stat(p); err == nil {
+			migrationsDir = p
+			break
+		}
+	}
 	if migrationsDir == "" {
 		return nil
 	}
@@ -639,18 +652,6 @@ func (s *Service) GetAllSubscriptions(ctx context.Context) ([]Subscription, erro
 	return subs, nil
 }
 
-// CountAllSubscriptions returns the total number of subscriptions.
-func (s *Service) CountAllSubscriptions(ctx context.Context) (int64, error) {
-	var count int64
-	result := s.db.WithContext(ctx).
-		Model(&Subscription{}).
-		Count(&count)
-	if result.Error != nil {
-		return 0, fmt.Errorf("failed to count all subscriptions: %w", result.Error)
-	}
-	return count, nil
-}
-
 // CountActiveSubscriptions returns the number of active, non-expired subscriptions.
 func (s *Service) CountActiveSubscriptions(ctx context.Context) (int64, error) {
 	var count int64
@@ -669,7 +670,7 @@ func (s *Service) CountExpiredSubscriptions(ctx context.Context) (int64, error) 
 	var count int64
 	result := s.db.WithContext(ctx).
 		Model(&Subscription{}).
-		Where("expiry_time <= ?", time.Now()).
+		Where("status = ? AND expiry_time <= ?", "active", time.Now()).
 		Count(&count)
 	if result.Error != nil {
 		return 0, fmt.Errorf("failed to count expired subscriptions: %w", result.Error)
