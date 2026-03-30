@@ -280,7 +280,7 @@ func (c *Config) String() string {
 		"HeartbeatURL=%s, "+
 		"HeartbeatInterval=%d, "+
 		"SentryDSN=***, "+
-		"SupermemoryAPIKey=%s}",
+		"}",
 		c.TelegramAdminID,
 		c.XUIHost,
 		c.XUIUsername,
