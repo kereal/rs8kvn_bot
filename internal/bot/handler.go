@@ -188,8 +188,9 @@ func (h *Handler) sendInviteLink(ctx context.Context, chatID int64, messageID in
 		return
 	}
 
-	inviteLink := fmt.Sprintf("%s/i/%s", h.cfg.SiteURL, invite.Code)
-	text := fmt.Sprintf("🔗 *Ваша реферальная ссылка*\n\n`%s`\n\n📢 Поделитесь ссылкой с друзьями! За каждого активировавшего подписку друга вы получите бонус.", inviteLink)
+	telegramLink := fmt.Sprintf("t.me/rs8kvn_bot?start=share_%s", invite.Code)
+	webLink := fmt.Sprintf("%s/i/%s", h.cfg.SiteURL, invite.Code)
+	text := fmt.Sprintf("*Ваша ссылка*\n\nДля пользователей Telegram: [@rs8kvn_bot](%s)\n_нажмите и держите -> копировать_\n\nДля пользователей без Telegram: [%s](%s)\n_нажмите и держите -> копировать_\n\nОтправьте ссылку!\n\nЗа приглашенных активных пользователей вы получите бонус.", telegramLink, webLink, webLink)
 	backKeyboard := h.getBackKeyboard()
 
 	if messageID > 0 {
