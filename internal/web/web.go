@@ -132,26 +132,22 @@ func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 }
 
 type HealthResponse struct {
-	Status     string                 `json:"status"`
-	Components map[string]HealthCheck `json:"components"`
-	Timestamp  time.Time              `json:"timestamp"`
-}
-
-type HealthCheck struct {
-	Status  string        `json:"status"`
-	Latency time.Duration `json:"latency,omitempty"`
-	Error   string        `json:"error,omitempty"`
+	Status     string                     `json:"status"`
+	Components map[string]ComponentHealth `json:"components"`
+	Timestamp  time.Time                  `json:"timestamp"`
 }
 
 func (s *Server) checkHealth(ctx context.Context) HealthResponse {
-	checkers := map[string]func(context.Context) HealthCheck{
-		"database": s.checkDatabase,
-		"xui":      s.checkXUI,
+	s.mu.RLock()
+	checkers := make(map[string]func(context.Context) ComponentHealth, len(s.checkers))
+	for k, v := range s.checkers {
+		checkers[k] = v
 	}
+	s.mu.RUnlock()
 
 	response := HealthResponse{
-		Status:     "ok",
-		Components: make(map[string]HealthCheck),
+		Status:     string(StatusOK),
+		Components: make(map[string]ComponentHealth),
 		Timestamp:  time.Now(),
 	}
 
@@ -159,52 +155,14 @@ func (s *Server) checkHealth(ctx context.Context) HealthResponse {
 		component := checker(ctx)
 		response.Components[name] = component
 
-		if component.Status == "down" {
-			response.Status = "down"
-		} else if component.Status == "degraded" && response.Status == "ok" {
-			response.Status = "degraded"
+		if component.Status == StatusDown {
+			response.Status = string(StatusDown)
+		} else if component.Status == StatusDegraded && response.Status == string(StatusOK) {
+			response.Status = string(StatusDegraded)
 		}
 	}
 
 	return response
-}
-
-func (s *Server) checkDatabase(ctx context.Context) HealthCheck {
-	start := time.Now()
-	err := s.db.Ping(ctx)
-	latency := time.Since(start)
-
-	if err != nil {
-		return HealthCheck{
-			Status:  "down",
-			Error:   err.Error(),
-			Latency: latency,
-		}
-	}
-
-	return HealthCheck{
-		Status:  "ok",
-		Latency: latency,
-	}
-}
-
-func (s *Server) checkXUI(ctx context.Context) HealthCheck {
-	start := time.Now()
-	err := s.xuiClient.Ping(ctx)
-	latency := time.Since(start)
-
-	if err != nil {
-		return HealthCheck{
-			Status:  "down",
-			Error:   err.Error(),
-			Latency: latency,
-		}
-	}
-
-	return HealthCheck{
-		Status:  "ok",
-		Latency: latency,
-	}
 }
 
 func (s *Server) writeJSON(w http.ResponseWriter, resp HealthResponse) {
