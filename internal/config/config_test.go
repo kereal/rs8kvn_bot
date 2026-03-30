@@ -250,41 +250,47 @@ func TestGetEnv_WhitespaceTrimmed(t *testing.T) {
 func TestParseEnvInt(t *testing.T) {
 	os.Setenv("TEST_INT", "42")
 	defer os.Unsetenv("TEST_INT")
-	result := parseEnvInt("TEST_INT", 0)
+	result, err := parseEnvInt("TEST_INT", 0)
+	assert.NoError(t, err)
 	assert.Equal(t, 42, result, "parseEnvInt()")
 }
 
 func TestParseEnvInt_Default(t *testing.T) {
 	os.Unsetenv("TEST_INT")
-	result := parseEnvInt("TEST_INT", 100)
+	result, err := parseEnvInt("TEST_INT", 100)
+	assert.NoError(t, err)
 	assert.Equal(t, 100, result, "parseEnvInt() should return default")
 }
 
 func TestParseEnvInt_Invalid(t *testing.T) {
 	os.Setenv("TEST_INT", "invalid")
 	defer os.Unsetenv("TEST_INT")
-	result := parseEnvInt("TEST_INT", 0)
-	assert.Equal(t, 0, result, "parseEnvInt() should return default for invalid input")
+	result, err := parseEnvInt("TEST_INT", 0)
+	assert.Error(t, err)
+	assert.Equal(t, 0, result, "parseEnvInt() should return 0 for invalid input")
 }
 
 func TestParseEnvInt64(t *testing.T) {
 	os.Setenv("TEST_INT64", "9999999999")
 	defer os.Unsetenv("TEST_INT64")
-	result := parseEnvInt64("TEST_INT64", 0)
+	result, err := parseEnvInt64("TEST_INT64", 0)
+	assert.NoError(t, err)
 	assert.Equal(t, int64(9999999999), result, "parseEnvInt64()")
 }
 
 func TestParseEnvInt64_Default(t *testing.T) {
 	os.Unsetenv("TEST_INT64")
-	result := parseEnvInt64("TEST_INT64", 500)
+	result, err := parseEnvInt64("TEST_INT64", 500)
+	assert.NoError(t, err)
 	assert.Equal(t, int64(500), result, "parseEnvInt64() should return default")
 }
 
 func TestParseEnvInt64_Invalid(t *testing.T) {
 	os.Setenv("TEST_INT64", "invalid")
 	defer os.Unsetenv("TEST_INT64")
-	result := parseEnvInt64("TEST_INT64", 0)
-	assert.Equal(t, int64(0), result, "parseEnvInt64() should return default for invalid input")
+	result, err := parseEnvInt64("TEST_INT64", 0)
+	assert.Error(t, err)
+	assert.Equal(t, int64(0), result, "parseEnvInt64() should return 0 for invalid input")
 }
 
 func TestValidateURL(t *testing.T) {
