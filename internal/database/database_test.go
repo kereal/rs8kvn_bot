@@ -2419,3 +2419,180 @@ func TestService_GetSubscriptionBySubscriptionID_NotFound(t *testing.T) {
 	_, err = service.GetSubscriptionBySubscriptionID(context.Background(), "nonexistent-sub-id")
 	assert.Error(t, err, "GetSubscriptionBySubscriptionID() should return error for nonexistent ID")
 }
+
+// === GetByID tests ===
+
+func TestService_GetByID_Found(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	service, err := NewService(dbPath)
+	require.NoError(t, err, "NewService() error")
+	defer service.Close()
+
+	// Create subscription
+	sub := &Subscription{
+		TelegramID:      123456789,
+		Username:        "testuser",
+		ClientID:        "client-123",
+		SubscriptionID:  "sub-id-123",
+		InboundID:       1,
+		Status:          "active",
+		ExpiryTime:      time.Now().Add(24 * time.Hour),
+		SubscriptionURL: "http://test.url/sub",
+	}
+	require.NoError(t, service.db.Create(sub).Error, "Create subscription")
+
+	// Find by ID
+	found, err := service.GetByID(context.Background(), sub.ID)
+	require.NoError(t, err, "GetByID() error")
+	require.NotNil(t, found, "GetByID() returned nil")
+
+	assert.Equal(t, sub.ID, found.ID, "ID")
+	assert.Equal(t, int64(123456789), found.TelegramID, "TelegramID")
+	assert.Equal(t, "testuser", found.Username, "Username")
+}
+
+func TestService_GetByID_NotFound(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	service, err := NewService(dbPath)
+	require.NoError(t, err, "NewService() error")
+	defer service.Close()
+
+	_, err = service.GetByID(context.Background(), 99999)
+	assert.Error(t, err, "GetByID() should return error for nonexistent ID")
+}
+
+// === GetAllTelegramIDs tests ===
+
+func TestService_GetAllTelegramIDs_Empty(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	service, err := NewService(dbPath)
+	require.NoError(t, err, "NewService() error")
+	defer service.Close()
+
+	ids, err := service.GetAllTelegramIDs(context.Background())
+	require.NoError(t, err, "GetAllTelegramIDs() error")
+	assert.Empty(t, ids, "GetAllTelegramIDs() should return empty slice for empty database")
+}
+
+func TestService_GetAllTelegramIDs_WithData(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	service, err := NewService(dbPath)
+	require.NoError(t, err, "NewService() error")
+	defer service.Close()
+
+	// Create subscriptions
+	for i := 1; i <= 3; i++ {
+		sub := &Subscription{
+			TelegramID:      int64(100000 + i),
+			Username:        fmt.Sprintf("user%d", i),
+			ClientID:        fmt.Sprintf("client-%d", i),
+			SubscriptionID:  fmt.Sprintf("sub-id-%d", i),
+			InboundID:       1,
+			Status:          "active",
+			ExpiryTime:      time.Now().Add(24 * time.Hour),
+			SubscriptionURL: "http://test.url/sub",
+		}
+		require.NoError(t, service.db.Create(sub).Error, "Create subscription")
+	}
+
+	ids, err := service.GetAllTelegramIDs(context.Background())
+	require.NoError(t, err, "GetAllTelegramIDs() error")
+	assert.Len(t, ids, 3, "GetAllTelegramIDs() should return 3 IDs")
+	assert.Contains(t, ids, int64(100001), "GetAllTelegramIDs() should contain ID 100001")
+	assert.Contains(t, ids, int64(100002), "GetAllTelegramIDs() should contain ID 100002")
+	assert.Contains(t, ids, int64(100003), "GetAllTelegramIDs() should contain ID 100003")
+}
+
+// === GetTelegramIDByUsername tests ===
+
+func TestService_GetTelegramIDByUsername_Found(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	service, err := NewService(dbPath)
+	require.NoError(t, err, "NewService() error")
+	defer service.Close()
+
+	// Create subscription
+	sub := &Subscription{
+		TelegramID:      123456789,
+		Username:        "testuser",
+		ClientID:        "client-123",
+		SubscriptionID:  "sub-id-123",
+		InboundID:       1,
+		Status:          "active",
+		ExpiryTime:      time.Now().Add(24 * time.Hour),
+		SubscriptionURL: "http://test.url/sub",
+	}
+	require.NoError(t, service.db.Create(sub).Error, "Create subscription")
+
+	id, err := service.GetTelegramIDByUsername(context.Background(), "testuser")
+	require.NoError(t, err, "GetTelegramIDByUsername() error")
+	assert.Equal(t, int64(123456789), id, "GetTelegramIDByUsername() returned wrong ID")
+}
+
+func TestService_GetTelegramIDByUsername_NotFound(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	service, err := NewService(dbPath)
+	require.NoError(t, err, "NewService() error")
+	defer service.Close()
+
+	_, err = service.GetTelegramIDByUsername(context.Background(), "nonexistent")
+	assert.Error(t, err, "GetTelegramIDByUsername() should return error for nonexistent username")
+}
+
+// === DeleteSubscriptionByID tests ===
+
+func TestService_DeleteSubscriptionByID_Success(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	service, err := NewService(dbPath)
+	require.NoError(t, err, "NewService() error")
+	defer service.Close()
+
+	// Create subscription
+	sub := &Subscription{
+		TelegramID:      123456789,
+		Username:        "testuser",
+		ClientID:        "client-123",
+		SubscriptionID:  "sub-id-123",
+		InboundID:       1,
+		Status:          "active",
+		ExpiryTime:      time.Now().Add(24 * time.Hour),
+		SubscriptionURL: "http://test.url/sub",
+	}
+	require.NoError(t, service.db.Create(sub).Error, "Create subscription")
+
+	// Delete by ID
+	deleted, err := service.DeleteSubscriptionByID(context.Background(), sub.ID)
+	require.NoError(t, err, "DeleteSubscriptionByID() error")
+	require.NotNil(t, deleted, "DeleteSubscriptionByID() returned nil")
+	assert.Equal(t, sub.ID, deleted.ID, "Deleted subscription ID")
+
+	// Verify deleted
+	_, err = service.GetByID(context.Background(), sub.ID)
+	assert.Error(t, err, "GetByID() should return error after deletion")
+}
+
+func TestService_DeleteSubscriptionByID_NotFound(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	service, err := NewService(dbPath)
+	require.NoError(t, err, "NewService() error")
+	defer service.Close()
+
+	_, err = service.DeleteSubscriptionByID(context.Background(), 99999)
+	assert.Error(t, err, "DeleteSubscriptionByID() should return error for nonexistent ID")
+}

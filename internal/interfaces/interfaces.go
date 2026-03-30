@@ -7,6 +7,7 @@ import (
 	"rs8kvn_bot/internal/database"
 	"rs8kvn_bot/internal/xui"
 
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"go.uber.org/zap"
 )
 
@@ -58,4 +59,10 @@ type XUIClient interface {
 	GetClientTraffic(ctx context.Context, email string) (*xui.ClientTraffic, error)
 	GetSubscriptionLink(baseURL, subID, subPath string) string
 	GetExternalURL(host string) string
+}
+
+// BotAPI defines the interface for Telegram Bot API operations
+type BotAPI interface {
+	Send(c tgbotapi.Chattable) (tgbotapi.Message, error)
+	Request(c tgbotapi.Chattable) (*tgbotapi.APIResponse, error)
 }
