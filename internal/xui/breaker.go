@@ -18,12 +18,12 @@ const (
 )
 
 type CircuitBreaker struct {
-	mu          sync.RWMutex
-	state       CircuitState
-	failures    int
-	successes   int
+	mu               sync.RWMutex
+	state            CircuitState
+	failures         int
+	successes        int
 	halfOpenAttempts int
-	lastFailure time.Time
+	lastFailure      time.Time
 
 	maxFailures int
 	timeout     time.Duration
@@ -70,7 +70,7 @@ func (cb *CircuitBreaker) allowRequest() bool {
 		if time.Since(cb.lastFailure) >= cb.timeout {
 			cb.state = CircuitStateHalfOpen
 			cb.successes = 0
-			cb.halfOpenAttempts = 0
+			cb.halfOpenAttempts = 1 // Count this transition as the first half-open attempt
 			return true
 		}
 		return false
