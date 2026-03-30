@@ -47,6 +47,7 @@ type DatabaseService interface {
 		DeleteClient(ctx context.Context, inboundID int, clientID string) error
 	}, inboundID int) (int64, error)
 	Close() error
+	GetPoolStats() (*database.PoolStats, error)
 }
 
 type XUIClient interface {

@@ -29,7 +29,7 @@ var _ = logger.Info // suppress unused import warning
 type Subscription struct {
 	ID              uint           `gorm:"primaryKey"`
 	TelegramID      int64          `gorm:"index"`
-	Username        string         `gorm:"size:255"`
+	Username        string         `gorm:"size:255;index"`
 	ClientID        string         `gorm:"size:255"`
 	SubscriptionID  string         `gorm:"size:255;index"`
 	InboundID       int            `gorm:"index"`

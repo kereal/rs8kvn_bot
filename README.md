@@ -442,21 +442,37 @@ When a new subscription is created, the admin receives:
 
 ## Database Migrations
 
-The bot includes a simple migration system. To add a new migration:
+The bot uses [golang-migrate](https://github.com/golang-migrate/migrate) for database migrations. Migration files are stored in the `internal/database/migrations/` directory.
 
-1. Edit `internal/database/migrations.go`
-2. Add a new migration to the `migrations` slice:
+### How Migrations Work
 
-```go
-var migrations = []Migration{
-    {
-        Name: "001_add_column",
-        SQL:  "ALTER TABLE subscriptions ADD COLUMN new_field TEXT;",
-    },
-}
+1. Migration files are named with a numeric prefix followed by a description and `.up.sql` extension (e.g., `000_create_subscriptions.up.sql`)
+2. On application startup, the bot automatically applies any pending migrations
+3. The migration system tracks which migrations have been applied using its own internal schema
+
+### Adding a New Migration
+
+1. Create a new SQL file in `internal/database/migrations/` with the next sequential number:
+   ```bash
+   # Example: creating migration 004
+   touch internal/database/migrations/004_add_new_column.up.sql
+   ```
+2. Write your SQL migration statements in the file
+3. The migration will be automatically applied on the next application startup
+
+### Example Migration File
+
+```sql
+-- internal/database/migrations/004_add_new_column.up.sql
+ALTER TABLE subscriptions ADD COLUMN new_column VARCHAR(255);
 ```
 
-Migrations are applied automatically on startup.
+### Migration Files Currently in the Project
+
+- `000_create_subscriptions.up.sql` - Creates the initial subscriptions table
+- `001_replace_xuihost_with_subscription_id.up.sql` - Replaces x_ui_host column with subscription_id
+- `002_add_invites_and_trials.up.sql` - Adds invites and trial_requests tables
+- `003_add_referral_columns.up.sql` - Adds referral tracking columns (invite_code, is_trial, referred_by)
 
 ## Database Backups
 
