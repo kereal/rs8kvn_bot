@@ -11,16 +11,6 @@
 | # | Проблема | Файл |
 |---|----------|------|
 | 1 | Дублирование тестовых функций causing build failures | `internal/utils/time_test.go`, `internal/utils/time_extended_test.go` и другие |
-| 2 | Half-open circuit breaker пропускает безлимитные запросы | `internal/xui/breaker.go` |
-| 3 | Circuit breaker игнорирует отмену контекста | `internal/xui/breaker.go` |
-| 4 | Невалидные env vars молча используют значения по умолчанию | `internal/config/config.go` |
-| 5 | Команда `/del` — Sscanf парсит частичный ввод (`/del 5abc` → ID=5) | `internal/bot/admin.go` |
-| 6 | Markdown инъекция в `/broadcast` — без санитизации | `internal/bot/admin.go` |
-| 7 | Канал обновлений не дренируется при shutdown | `cmd/bot/main.go` |
-| 8 | Утечка idle соединений HTTP transport при shutdown | `internal/xui/client.go` |
-| 9 | containsSuccessKeywords ложные срабатывания ("not added" матчит "added") | `internal/xui/client.go` |
-| 10 | Отсутствует индекс на username | `internal/database/database.go` |
-| 11 | Ping/GetPoolStats не в интерфейсе DatabaseService | `internal/interfaces/interfaces.go` |
 
 ---
 

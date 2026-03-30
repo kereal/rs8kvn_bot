@@ -22,6 +22,7 @@ type CircuitBreaker struct {
 	state       CircuitState
 	failures    int
 	successes   int
+	halfOpenAttempts int
 	lastFailure time.Time
 
 	maxFailures int
@@ -39,6 +40,11 @@ func NewCircuitBreaker(maxFailures int, timeout time.Duration) *CircuitBreaker {
 }
 
 func (cb *CircuitBreaker) Execute(ctx context.Context, fn func() error) error {
+	// Check if context is cancelled before proceeding
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	if !cb.allowRequest() {
 		return ErrCircuitOpen
 	}
@@ -64,12 +70,17 @@ func (cb *CircuitBreaker) allowRequest() bool {
 		if time.Since(cb.lastFailure) >= cb.timeout {
 			cb.state = CircuitStateHalfOpen
 			cb.successes = 0
+			cb.halfOpenAttempts = 0
 			return true
 		}
 		return false
 
 	case CircuitStateHalfOpen:
-		return true
+		if cb.halfOpenAttempts < cb.halfOpenMax {
+			cb.halfOpenAttempts++
+			return true
+		}
+		return false
 
 	default:
 		return true
@@ -100,6 +111,7 @@ func (cb *CircuitBreaker) recordResult(err error) {
 			cb.state = CircuitStateClosed
 			cb.failures = 0
 			cb.successes = 0
+			cb.halfOpenAttempts = 0
 		}
 	}
 }
@@ -122,4 +134,5 @@ func (cb *CircuitBreaker) Reset() {
 	cb.state = CircuitStateClosed
 	cb.failures = 0
 	cb.successes = 0
+	cb.halfOpenAttempts = 0
 }

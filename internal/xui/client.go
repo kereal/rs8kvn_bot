@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -525,11 +526,21 @@ func GetExternalURL(host string) string {
 }
 
 // containsSuccessKeywords checks if a message contains keywords indicating success.
+// Uses word boundaries to prevent false positives (e.g., "not added" matching "added").
 func containsSuccessKeywords(msg string) bool {
 	msg = strings.ToLower(msg)
-	return strings.Contains(msg, "successfully") ||
-		strings.Contains(msg, "added") ||
-		strings.Contains(msg, "success")
+	// Check for whole words using word boundaries
+	patterns := []string{
+		`\bsuccessfully\b`,
+		`\badded\b`,
+		`\bsuccess\b`,
+	}
+	for _, pattern := range patterns {
+		if matched, _ := regexp.MatchString(pattern, msg); matched {
+			return true
+		}
+	}
+	return false
 }
 
 // truncateString returns a truncated version of s with ellipsis if it exceeds maxLen.
@@ -568,4 +579,11 @@ func retryWithBackoff(ctx context.Context, maxRetries int, initialDelay time.Dur
 	}
 
 	return fmt.Errorf("after %d retries: %w", maxRetries, lastErr)
+}
+
+func (c *Client) Close() error {
+	if transport, ok := c.httpClient.Transport.(*http.Transport); ok {
+		transport.CloseIdleConnections()
+	}
+	return nil
 }
