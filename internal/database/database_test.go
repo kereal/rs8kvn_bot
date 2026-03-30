@@ -1,20 +1,12 @@
 package database
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
-
-	"rs8kvn_bot/internal/logger"
 )
-
-func init() {
-	// Initialize logger for tests
-	_, _ = logger.Init("", "error")
-}
 
 func TestInit(t *testing.T) {
 	// Create temporary directory for test database
@@ -107,7 +99,7 @@ func TestGetByTelegramID(t *testing.T) {
 		TelegramID:      123456789,
 		Username:        "testuser",
 		ClientID:        "test-client-id",
-		SubscriptionID:  "test-sub-id",
+		XUIHost:         "http://localhost:2053",
 		InboundID:       1,
 		TrafficLimit:    107374182400,
 		ExpiryTime:      time.Now().Add(24 * time.Hour),
@@ -217,7 +209,7 @@ func TestCreateSubscription(t *testing.T) {
 		TelegramID:      123456789,
 		Username:        "testuser",
 		ClientID:        "test-client-id",
-		SubscriptionID:  "test-sub-id",
+		XUIHost:         "http://localhost:2053",
 		InboundID:       1,
 		TrafficLimit:    107374182400,
 		ExpiryTime:      time.Now().Add(24 * time.Hour),
@@ -462,7 +454,7 @@ func TestSubscription_AllFields(t *testing.T) {
 		TelegramID:      123456789,
 		Username:        "testuser",
 		ClientID:        "test-client-id",
-		SubscriptionID:  "test-sub-id",
+		XUIHost:         "http://localhost:2053",
 		InboundID:       1,
 		TrafficLimit:    107374182400,
 		ExpiryTime:      now.Add(24 * time.Hour),
@@ -489,8 +481,8 @@ func TestSubscription_AllFields(t *testing.T) {
 	if retrieved.ClientID != sub.ClientID {
 		t.Errorf("ClientID = %v, want %v", retrieved.ClientID, sub.ClientID)
 	}
-	if retrieved.SubscriptionID != sub.SubscriptionID {
-		t.Errorf("SubscriptionID = %v, want %v", retrieved.SubscriptionID, sub.SubscriptionID)
+	if retrieved.XUIHost != sub.XUIHost {
+		t.Errorf("XUIHost = %v, want %v", retrieved.XUIHost, sub.XUIHost)
 	}
 	if retrieved.InboundID != sub.InboundID {
 		t.Errorf("InboundID = %v, want %v", retrieved.InboundID, sub.InboundID)
@@ -743,7 +735,7 @@ func TestDeleteSubscription(t *testing.T) {
 		TelegramID:      12345,
 		Username:        "testuser",
 		ClientID:        "client-123",
-		SubscriptionID:  "test-sub-id",
+		XUIHost:         "http://localhost:2053",
 		InboundID:       1,
 		TrafficLimit:    107374182400,
 		ExpiryTime:      time.Now().Add(24 * time.Hour),
@@ -900,7 +892,7 @@ func TestService_GetByTelegramID(t *testing.T) {
 		TelegramID:      12345,
 		Username:        "testuser",
 		ClientID:        "client-123",
-		SubscriptionID:  "test-sub-id",
+		XUIHost:         "http://localhost:2053",
 		InboundID:       1,
 		TrafficLimit:    107374182400,
 		ExpiryTime:      time.Now().Add(24 * time.Hour),
@@ -908,13 +900,13 @@ func TestService_GetByTelegramID(t *testing.T) {
 		SubscriptionURL: "http://test.url/sub/abc",
 	}
 
-	err = service.CreateSubscription(context.Background(), sub)
+	err = service.CreateSubscription(nil, sub)
 	if err != nil {
 		t.Fatalf("CreateSubscription() error = %v", err)
 	}
 
 	// Retrieve the subscription
-	retrieved, err := service.GetByTelegramID(context.Background(), 12345)
+	retrieved, err := service.GetByTelegramID(nil, 12345)
 	if err != nil {
 		t.Fatalf("GetByTelegramID() error = %v", err)
 	}
@@ -941,7 +933,7 @@ func TestService_CreateSubscription(t *testing.T) {
 		TelegramID:      54321,
 		Username:        "newuser",
 		ClientID:        "client-456",
-		SubscriptionID:  "test-sub-id",
+		XUIHost:         "http://localhost:2053",
 		InboundID:       1,
 		TrafficLimit:    107374182400,
 		ExpiryTime:      time.Now().Add(24 * time.Hour),
@@ -949,13 +941,13 @@ func TestService_CreateSubscription(t *testing.T) {
 		SubscriptionURL: "http://test.url/sub/xyz",
 	}
 
-	err = service.CreateSubscription(context.Background(), sub)
+	err = service.CreateSubscription(nil, sub)
 	if err != nil {
 		t.Fatalf("CreateSubscription() error = %v", err)
 	}
 
 	// Verify it was created
-	retrieved, err := service.GetByTelegramID(context.Background(), 54321)
+	retrieved, err := service.GetByTelegramID(nil, 54321)
 	if err != nil {
 		t.Fatalf("GetByTelegramID() error = %v", err)
 	}
@@ -980,7 +972,7 @@ func TestService_UpdateSubscription(t *testing.T) {
 		TelegramID:      99999,
 		Username:        "updateuser",
 		ClientID:        "client-789",
-		SubscriptionID:  "test-sub-id",
+		XUIHost:         "http://localhost:2053",
 		InboundID:       1,
 		TrafficLimit:    107374182400,
 		ExpiryTime:      time.Now().Add(24 * time.Hour),
@@ -988,7 +980,7 @@ func TestService_UpdateSubscription(t *testing.T) {
 		SubscriptionURL: "http://test.url/sub/update",
 	}
 
-	err = service.CreateSubscription(context.Background(), sub)
+	err = service.CreateSubscription(nil, sub)
 	if err != nil {
 		t.Fatalf("CreateSubscription() error = %v", err)
 	}
@@ -997,13 +989,13 @@ func TestService_UpdateSubscription(t *testing.T) {
 	sub.Username = "updateduser"
 	sub.TrafficLimit = 214748364800
 
-	err = service.UpdateSubscription(context.Background(), sub)
+	err = service.UpdateSubscription(nil, sub)
 	if err != nil {
 		t.Fatalf("UpdateSubscription() error = %v", err)
 	}
 
 	// Verify update
-	retrieved, err := service.GetByTelegramID(context.Background(), 99999)
+	retrieved, err := service.GetByTelegramID(nil, 99999)
 	if err != nil {
 		t.Fatalf("GetByTelegramID() error = %v", err)
 	}
@@ -1031,7 +1023,7 @@ func TestService_DeleteSubscription(t *testing.T) {
 		TelegramID:      77777,
 		Username:        "deleteuser",
 		ClientID:        "client-delete",
-		SubscriptionID:  "test-sub-id",
+		XUIHost:         "http://localhost:2053",
 		InboundID:       1,
 		TrafficLimit:    107374182400,
 		ExpiryTime:      time.Now().Add(24 * time.Hour),
@@ -1039,19 +1031,19 @@ func TestService_DeleteSubscription(t *testing.T) {
 		SubscriptionURL: "http://test.url/sub/delete",
 	}
 
-	err = service.CreateSubscription(context.Background(), sub)
+	err = service.CreateSubscription(nil, sub)
 	if err != nil {
 		t.Fatalf("CreateSubscription() error = %v", err)
 	}
 
 	// Delete subscription
-	err = service.DeleteSubscription(context.Background(), 77777)
+	err = service.DeleteSubscription(nil, 77777)
 	if err != nil {
 		t.Fatalf("DeleteSubscription() error = %v", err)
 	}
 
 	// Verify it's deleted
-	_, err = service.GetByTelegramID(context.Background(), 77777)
+	_, err = service.GetByTelegramID(nil, 77777)
 	if err == nil {
 		t.Error("GetByTelegramID() should return error for deleted subscription")
 	}
@@ -1073,21 +1065,21 @@ func TestService_GetAllSubscriptions(t *testing.T) {
 			TelegramID:      int64(10000 + i),
 			Username:        fmt.Sprintf("user%d", i),
 			ClientID:        fmt.Sprintf("client-%d", i),
-			SubscriptionID:  "test-sub-id",
+			XUIHost:         "http://localhost:2053",
 			InboundID:       1,
 			TrafficLimit:    107374182400,
 			ExpiryTime:      time.Now().Add(24 * time.Hour),
 			Status:          "active",
 			SubscriptionURL: fmt.Sprintf("http://test.url/sub/%d", i),
 		}
-		err = service.CreateSubscription(context.Background(), sub)
+		err = service.CreateSubscription(nil, sub)
 		if err != nil {
 			t.Fatalf("CreateSubscription() error = %v", err)
 		}
 	}
 
 	// Get all subscriptions
-	subs, err := service.GetAllSubscriptions(context.Background())
+	subs, err := service.GetAllSubscriptions(nil)
 	if err != nil {
 		t.Fatalf("GetAllSubscriptions() error = %v", err)
 	}
@@ -1113,14 +1105,14 @@ func TestService_CountActiveSubscriptions(t *testing.T) {
 			TelegramID:      int64(20000 + i),
 			Username:        fmt.Sprintf("active%d", i),
 			ClientID:        fmt.Sprintf("client-active-%d", i),
-			SubscriptionID:  "test-sub-id",
+			XUIHost:         "http://localhost:2053",
 			InboundID:       1,
 			TrafficLimit:    107374182400,
 			ExpiryTime:      time.Now().Add(24 * time.Hour), // Future
 			Status:          "active",
 			SubscriptionURL: fmt.Sprintf("http://test.url/sub/active/%d", i),
 		}
-		err = service.CreateSubscription(context.Background(), sub)
+		err = service.CreateSubscription(nil, sub)
 		if err != nil {
 			t.Fatalf("CreateSubscription() error = %v", err)
 		}
@@ -1131,20 +1123,20 @@ func TestService_CountActiveSubscriptions(t *testing.T) {
 		TelegramID:      29999,
 		Username:        "expired",
 		ClientID:        "client-expired",
-		SubscriptionID:  "test-sub-id",
+		XUIHost:         "http://localhost:2053",
 		InboundID:       1,
 		TrafficLimit:    107374182400,
 		ExpiryTime:      time.Now().Add(-1 * time.Hour), // Past
 		Status:          "active",
 		SubscriptionURL: "http://test.url/sub/expired",
 	}
-	err = service.CreateSubscription(context.Background(), expiredSub)
+	err = service.CreateSubscription(nil, expiredSub)
 	if err != nil {
 		t.Fatalf("CreateSubscription() error = %v", err)
 	}
 
 	// Count active subscriptions
-	count, err := service.CountActiveSubscriptions(context.Background())
+	count, err := service.CountActiveSubscriptions(nil)
 	if err != nil {
 		t.Fatalf("CountActiveSubscriptions() error = %v", err)
 	}
@@ -1170,14 +1162,14 @@ func TestService_CountExpiredSubscriptions(t *testing.T) {
 			TelegramID:      int64(30000 + i),
 			Username:        fmt.Sprintf("expired%d", i),
 			ClientID:        fmt.Sprintf("client-expired-%d", i),
-			SubscriptionID:  "test-sub-id",
+			XUIHost:         "http://localhost:2053",
 			InboundID:       1,
 			TrafficLimit:    107374182400,
 			ExpiryTime:      time.Now().Add(-1 * time.Hour), // Past
 			Status:          "active",
 			SubscriptionURL: fmt.Sprintf("http://test.url/sub/expired/%d", i),
 		}
-		err = service.CreateSubscription(context.Background(), sub)
+		err = service.CreateSubscription(nil, sub)
 		if err != nil {
 			t.Fatalf("CreateSubscription() error = %v", err)
 		}
@@ -1188,20 +1180,20 @@ func TestService_CountExpiredSubscriptions(t *testing.T) {
 		TelegramID:      39999,
 		Username:        "active",
 		ClientID:        "client-active",
-		SubscriptionID:  "test-sub-id",
+		XUIHost:         "http://localhost:2053",
 		InboundID:       1,
 		TrafficLimit:    107374182400,
 		ExpiryTime:      time.Now().Add(1 * time.Hour), // Future
 		Status:          "active",
 		SubscriptionURL: "http://test.url/sub/active",
 	}
-	err = service.CreateSubscription(context.Background(), activeSub)
+	err = service.CreateSubscription(nil, activeSub)
 	if err != nil {
 		t.Fatalf("CreateSubscription() error = %v", err)
 	}
 
 	// Count expired subscriptions
-	count, err := service.CountExpiredSubscriptions(context.Background())
+	count, err := service.CountExpiredSubscriptions(nil)
 	if err != nil {
 		t.Fatalf("CountExpiredSubscriptions() error = %v", err)
 	}
@@ -1227,7 +1219,7 @@ func TestGetLatestSubscriptions(t *testing.T) {
 			TelegramID:      int64(100000000 + i),
 			Username:        fmt.Sprintf("user%d", i),
 			ClientID:        fmt.Sprintf("client-%d", i),
-			SubscriptionID:  "test-sub-id",
+			XUIHost:         "http://localhost:2053",
 			InboundID:       1,
 			TrafficLimit:    107374182400,
 			ExpiryTime:      time.Now().Add(24 * time.Hour),
@@ -1297,7 +1289,7 @@ func TestGetLatestSubscriptions_OnlyActive(t *testing.T) {
 		TelegramID:      100000001,
 		Username:        "active_user",
 		ClientID:        "client-active",
-		SubscriptionID:  "test-sub-id",
+		XUIHost:         "http://localhost:2053",
 		InboundID:       1,
 		TrafficLimit:    107374182400,
 		ExpiryTime:      time.Now().Add(24 * time.Hour),
@@ -1313,7 +1305,7 @@ func TestGetLatestSubscriptions_OnlyActive(t *testing.T) {
 		TelegramID:      100000002,
 		Username:        "revoked_user",
 		ClientID:        "client-revoked",
-		SubscriptionID:  "test-sub-id",
+		XUIHost:         "http://localhost:2053",
 		InboundID:       1,
 		TrafficLimit:    107374182400,
 		ExpiryTime:      time.Now().Add(24 * time.Hour),
@@ -1356,20 +1348,20 @@ func TestService_GetLatestSubscriptions(t *testing.T) {
 			TelegramID:      int64(200000000 + i),
 			Username:        fmt.Sprintf("service_user%d", i),
 			ClientID:        fmt.Sprintf("client-%d", i),
-			SubscriptionID:  "test-sub-id",
+			XUIHost:         "http://localhost:2053",
 			InboundID:       1,
 			TrafficLimit:    107374182400,
 			ExpiryTime:      time.Now().Add(24 * time.Hour),
 			Status:          "active",
 			SubscriptionURL: fmt.Sprintf("http://localhost/sub/%d", i),
 		}
-		if err := service.CreateSubscription(context.Background(), sub); err != nil {
+		if err := service.CreateSubscription(nil, sub); err != nil {
 			t.Fatalf("Failed to create test subscription: %v", err)
 		}
 	}
 
 	// Get latest 3 subscriptions
-	subs, err := service.GetLatestSubscriptions(context.Background(), 3)
+	subs, err := service.GetLatestSubscriptions(nil, 3)
 	if err != nil {
 		t.Fatalf("GetLatestSubscriptions() error = %v", err)
 	}
@@ -1409,7 +1401,7 @@ func TestGetLatestSubscriptions_LimitZero(t *testing.T) {
 			TelegramID:      int64(100000000 + i),
 			Username:        fmt.Sprintf("user%d", i),
 			ClientID:        fmt.Sprintf("client-%d", i),
-			SubscriptionID:  "test-sub-id",
+			XUIHost:         "http://localhost:2053",
 			InboundID:       1,
 			TrafficLimit:    107374182400,
 			ExpiryTime:      time.Now().Add(24 * time.Hour),
@@ -1448,7 +1440,7 @@ func TestGetLatestSubscriptions_LimitOne(t *testing.T) {
 			TelegramID:      int64(100000000 + i),
 			Username:        fmt.Sprintf("user%d", i),
 			ClientID:        fmt.Sprintf("client-%d", i),
-			SubscriptionID:  "test-sub-id",
+			XUIHost:         "http://localhost:2053",
 			InboundID:       1,
 			TrafficLimit:    107374182400,
 			ExpiryTime:      time.Now().Add(24 * time.Hour),
@@ -1492,7 +1484,7 @@ func TestGetLatestSubscriptions_LimitGreaterThanAvailable(t *testing.T) {
 			TelegramID:      int64(100000000 + i),
 			Username:        fmt.Sprintf("user%d", i),
 			ClientID:        fmt.Sprintf("client-%d", i),
-			SubscriptionID:  "test-sub-id",
+			XUIHost:         "http://localhost:2053",
 			InboundID:       1,
 			TrafficLimit:    107374182400,
 			ExpiryTime:      time.Now().Add(24 * time.Hour),
@@ -1538,7 +1530,7 @@ func TestGetLatestSubscriptions_SpecialCharacters(t *testing.T) {
 			TelegramID:      int64(100000000 + i),
 			Username:        username,
 			ClientID:        fmt.Sprintf("client-%d", i),
-			SubscriptionID:  "test-sub-id",
+			XUIHost:         "http://localhost:2053",
 			InboundID:       1,
 			TrafficLimit:    107374182400,
 			ExpiryTime:      time.Now().Add(24 * time.Hour),
@@ -1590,7 +1582,7 @@ func TestGetLatestSubscriptions_OrderingConsistency(t *testing.T) {
 			TelegramID:      int64(100000000 + i),
 			Username:        fmt.Sprintf("ordered_user%d", i),
 			ClientID:        fmt.Sprintf("client-%d", i),
-			SubscriptionID:  "test-sub-id",
+			XUIHost:         "http://localhost:2053",
 			InboundID:       1,
 			TrafficLimit:    107374182400,
 			ExpiryTime:      time.Now().Add(24 * time.Hour),
@@ -1640,7 +1632,7 @@ func TestGetLatestSubscriptions_MixedStatuses(t *testing.T) {
 			TelegramID:      int64(100000000 + i),
 			Username:        fmt.Sprintf("status_user%d", i),
 			ClientID:        fmt.Sprintf("client-%d", i),
-			SubscriptionID:  "test-sub-id",
+			XUIHost:         "http://localhost:2053",
 			InboundID:       1,
 			TrafficLimit:    107374182400,
 			ExpiryTime:      time.Now().Add(24 * time.Hour),
@@ -1701,7 +1693,7 @@ func TestGetSubscriptionByID(t *testing.T) {
 		TelegramID:      12345,
 		Username:        "testuser",
 		ClientID:        "client-123",
-		SubscriptionID:  "test-sub-id",
+		XUIHost:         "http://localhost:2053",
 		InboundID:       1,
 		TrafficLimit:    107374182400,
 		ExpiryTime:      time.Now().Add(24 * time.Hour),
@@ -1774,7 +1766,7 @@ func TestDeleteSubscriptionByID(t *testing.T) {
 		TelegramID:      54321,
 		Username:        "deleteuser",
 		ClientID:        "client-delete",
-		SubscriptionID:  "test-sub-id",
+		XUIHost:         "http://localhost:2053",
 		InboundID:       1,
 		TrafficLimit:    107374182400,
 		ExpiryTime:      time.Now().Add(24 * time.Hour),
@@ -1968,9 +1960,9 @@ func TestGetTelegramIDByUsername_DatabaseNotInitialized(t *testing.T) {
 	}
 }
 
-// Trial-related tests
+// ==================== Migration Tests ====================
 
-func TestCreateTrialSubscription(t *testing.T) {
+func TestRunMigrations(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
@@ -1979,35 +1971,28 @@ func TestCreateTrialSubscription(t *testing.T) {
 	}
 	defer Close()
 
-	svc := &Service{db: DB}
-	ctx := context.Background()
+	// Save original migrations
+	originalMigrations := migrations
+	defer func() { migrations = originalMigrations }()
 
-	sub, err := svc.CreateTrialSubscription(ctx, "testcode", "sub123", "client-uuid-123", 1, 107374182400, time.Now().Add(24*time.Hour), "http://example.com/sub/sub123")
+	// Add a test migration
+	migrations = []Migration{
+		{Name: "test_migration_001", SQL: ""},
+	}
+
+	// Run migrations
+	err := RunMigrations(DB)
 	if err != nil {
-		t.Fatalf("CreateTrialSubscription() error = %v", err)
+		t.Fatalf("RunMigrations() error = %v", err)
 	}
 
-	if sub.InviteCode != "testcode" {
-		t.Errorf("InviteCode = %s, want testcode", sub.InviteCode)
-	}
-	if sub.SubscriptionID != "sub123" {
-		t.Errorf("SubscriptionID = %s, want sub123", sub.SubscriptionID)
-	}
-	if sub.ClientID != "client-uuid-123" {
-		t.Errorf("ClientID = %s, want client-uuid-123", sub.ClientID)
-	}
-	if sub.TelegramID != 0 {
-		t.Errorf("TelegramID = %d, want 0", sub.TelegramID)
-	}
-	if !sub.IsTrial {
-		t.Error("IsTrial should be true")
-	}
-	if sub.InboundID != 1 {
-		t.Errorf("InboundID = %d, want 1", sub.InboundID)
+	// Verify schema_migrations table was created
+	if !DB.Migrator().HasTable(&SchemaMigration{}) {
+		t.Error("schema_migrations table was not created")
 	}
 }
 
-func TestBindTrialSubscription(t *testing.T) {
+func TestRunMigrations_AppliesNewMigrations(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
@@ -2016,39 +2001,34 @@ func TestBindTrialSubscription(t *testing.T) {
 	}
 	defer Close()
 
-	svc := &Service{db: DB}
-	ctx := context.Background()
+	// Save and replace migrations
+	originalMigrations := migrations
+	defer func() { migrations = originalMigrations }()
 
-	// Create trial subscription
-	_, err := svc.CreateTrialSubscription(ctx, "testcode", "sub123", "client-uuid-123", 1, 107374182400, time.Now().Add(24*time.Hour), "http://example.com/sub/sub123")
+	// Add test migrations
+	migrations = []Migration{
+		{Name: "test_migration_001", SQL: ""},
+		{Name: "test_migration_002", SQL: ""},
+	}
+
+	// Run migrations
+	err := RunMigrations(DB)
 	if err != nil {
-		t.Fatalf("CreateTrialSubscription() error = %v", err)
+		t.Fatalf("RunMigrations() error = %v", err)
 	}
 
-	// Create invite for referral
-	_, err = svc.GetOrCreateInvite(ctx, 12345, "invitecode")
+	// Verify migrations were recorded
+	applied, err := GetAppliedMigrations()
 	if err != nil {
-		t.Fatalf("GetOrCreateInvite() error = %v", err)
+		t.Fatalf("GetAppliedMigrations() error = %v", err)
 	}
 
-	// Bind trial subscription
-	sub, err := svc.BindTrialSubscription(ctx, "sub123", 999888, "testuser")
-	if err != nil {
-		t.Fatalf("BindTrialSubscription() error = %v", err)
-	}
-
-	if sub.TelegramID != 999888 {
-		t.Errorf("TelegramID = %d, want 999888", sub.TelegramID)
-	}
-	if sub.Username != "testuser" {
-		t.Errorf("Username = %s, want testuser", sub.Username)
-	}
-	if sub.IsTrial {
-		t.Error("IsTrial should be false after binding")
+	if len(applied) != 2 {
+		t.Errorf("Expected 2 applied migrations, got %d", len(applied))
 	}
 }
 
-func TestBindTrialSubscription_AlreadyActivated(t *testing.T) {
+func TestRunMigrations_SkipsAlreadyApplied(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
@@ -2057,28 +2037,158 @@ func TestBindTrialSubscription_AlreadyActivated(t *testing.T) {
 	}
 	defer Close()
 
-	svc := &Service{db: DB}
-	ctx := context.Background()
+	// Save and replace migrations
+	originalMigrations := migrations
+	defer func() { migrations = originalMigrations }()
 
-	// Create and bind trial subscription
-	_, err := svc.CreateTrialSubscription(ctx, "testcode", "sub123", "client-uuid-123", 1, 107374182400, time.Now().Add(24*time.Hour), "http://example.com/sub/sub123")
-	if err != nil {
-		t.Fatalf("CreateTrialSubscription() error = %v", err)
+	migrations = []Migration{
+		{Name: "test_skip_migration", SQL: ""},
 	}
 
-	_, err = svc.BindTrialSubscription(ctx, "sub123", 999888, "testuser")
+	// First run
+	err := RunMigrations(DB)
 	if err != nil {
-		t.Fatalf("BindTrialSubscription() error = %v", err)
+		t.Fatalf("RunMigrations() first error = %v", err)
 	}
 
-	// Try to bind again - should fail
-	_, err = svc.BindTrialSubscription(ctx, "sub123", 111222, "anotheruser")
+	// Second run should skip
+	err = RunMigrations(DB)
+	if err != nil {
+		t.Fatalf("RunMigrations() second error = %v", err)
+	}
+
+	// Verify only one migration was applied
+	applied, err := GetAppliedMigrations()
+	if err != nil {
+		t.Fatalf("GetAppliedMigrations() error = %v", err)
+	}
+
+	if len(applied) != 1 {
+		t.Errorf("Expected 1 applied migration, got %d", len(applied))
+	}
+}
+
+func TestIsMigrationApplied(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	if err := Init(dbPath); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	defer Close()
+
+	// Save and replace migrations
+	originalMigrations := migrations
+	defer func() { migrations = originalMigrations }()
+
+	migrations = []Migration{
+		{Name: "test_apply_check", SQL: ""},
+	}
+
+	// Check before applying
+	applied, err := isMigrationApplied(DB, "test_apply_check")
+	if err != nil {
+		t.Fatalf("isMigrationApplied() error = %v", err)
+	}
+	if applied {
+		t.Error("Migration should not be applied yet")
+	}
+
+	// Apply migration
+	err = RunMigrations(DB)
+	if err != nil {
+		t.Fatalf("RunMigrations() error = %v", err)
+	}
+
+	// Check after applying
+	applied, err = isMigrationApplied(DB, "test_apply_check")
+	if err != nil {
+		t.Fatalf("isMigrationApplied() error = %v", err)
+	}
+	if !applied {
+		t.Error("Migration should be applied")
+	}
+}
+
+func TestGetSchemaVersion(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	if err := Init(dbPath); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	defer Close()
+
+	// Save and replace migrations
+	originalMigrations := migrations
+	defer func() { migrations = originalMigrations }()
+
+	migrations = []Migration{
+		{Name: "schema_version_test", SQL: ""},
+	}
+
+	// Before any migration - should return "initial"
+	version, err := GetSchemaVersion()
+	if err != nil {
+		t.Fatalf("GetSchemaVersion() error = %v", err)
+	}
+	if version != "initial" {
+		t.Errorf("GetSchemaVersion() = %q, want 'initial'", version)
+	}
+
+	// Run migrations
+	err = RunMigrations(DB)
+	if err != nil {
+		t.Fatalf("RunMigrations() error = %v", err)
+	}
+
+	// After migration - should return migration name
+	version, err = GetSchemaVersion()
+	if err != nil {
+		t.Fatalf("GetSchemaVersion() error = %v", err)
+	}
+	if version != "schema_version_test" {
+		t.Errorf("GetSchemaVersion() = %q, want 'schema_version_test'", version)
+	}
+}
+
+func TestGetSchemaVersion_DatabaseNotInitialized(t *testing.T) {
+	// Close database
+	Close()
+
+	_, err := GetSchemaVersion()
 	if err == nil {
-		t.Error("BindTrialSubscription() should fail when already activated")
+		t.Error("GetSchemaVersion() should return error when database not initialized")
 	}
 }
 
-func TestGetOrCreateInvite(t *testing.T) {
+func TestAddMigration(t *testing.T) {
+	// Save original migrations
+	originalMigrations := migrations
+	defer func() { migrations = originalMigrations }()
+
+	// Add a new migration
+	AddMigration("programmatic_migration", "CREATE TABLE test_table (id INTEGER);")
+
+	// Verify it was added
+	if len(migrations) != len(originalMigrations)+1 {
+		t.Errorf("Expected %d migrations, got %d", len(originalMigrations)+1, len(migrations))
+	}
+
+	// Find the added migration
+	found := false
+	for _, m := range migrations {
+		if m.Name == "programmatic_migration" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("Added migration not found in migrations list")
+	}
+}
+
+func TestGetPendingMigrations(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
@@ -2087,116 +2197,61 @@ func TestGetOrCreateInvite(t *testing.T) {
 	}
 	defer Close()
 
-	svc := &Service{db: DB}
-	ctx := context.Background()
+	// Save and replace migrations
+	originalMigrations := migrations
+	defer func() { migrations = originalMigrations }()
 
-	// Create new invite
-	invite1, err := svc.GetOrCreateInvite(ctx, 12345, "code1")
-	if err != nil {
-		t.Fatalf("GetOrCreateInvite() error = %v", err)
+	migrations = []Migration{
+		{Name: "pending_test_1", SQL: ""},
+		{Name: "pending_test_2", SQL: ""},
 	}
 
-	// Get existing invite (should return same)
-	invite2, err := svc.GetOrCreateInvite(ctx, 12345, "code2")
+	// Before running migrations - all should be pending
+	pending, err := GetPendingMigrations()
 	if err != nil {
-		t.Fatalf("GetOrCreateInvite() error = %v", err)
+		t.Fatalf("GetPendingMigrations() error = %v", err)
 	}
 
-	if invite1.Code != invite2.Code {
-		t.Errorf("GetOrCreateInvite() returned different codes: %s vs %s", invite1.Code, invite2.Code)
+	if len(pending) != 2 {
+		t.Errorf("Expected 2 pending migrations, got %d", len(pending))
+	}
+
+	// Run one migration
+	migrations = []Migration{
+		{Name: "pending_test_1", SQL: ""},
+	}
+	err = RunMigrations(DB)
+	if err != nil {
+		t.Fatalf("RunMigrations() error = %v", err)
+	}
+
+	// Reset and check again
+	migrations = []Migration{
+		{Name: "pending_test_1", SQL: ""},
+		{Name: "pending_test_2", SQL: ""},
+	}
+	pending, err = GetPendingMigrations()
+	if err != nil {
+		t.Fatalf("GetPendingMigrations() error = %v", err)
+	}
+
+	// Now only pending_test_2 should be pending
+	if len(pending) != 1 {
+		t.Errorf("Expected 1 pending migration, got %d", len(pending))
 	}
 }
 
-func TestGetInviteByCode(t *testing.T) {
-	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "test.db")
+func TestGetPendingMigrations_DatabaseNotInitialized(t *testing.T) {
+	// Close database
+	Close()
 
-	if err := Init(dbPath); err != nil {
-		t.Fatalf("Init() error = %v", err)
-	}
-	defer Close()
-
-	svc := &Service{db: DB}
-	ctx := context.Background()
-
-	// Create invite
-	created, err := svc.GetOrCreateInvite(ctx, 12345, "testcode")
-	if err != nil {
-		t.Fatalf("GetOrCreateInvite() error = %v", err)
-	}
-
-	// Get by code
-	found, err := svc.GetInviteByCode(ctx, "testcode")
-	if err != nil {
-		t.Fatalf("GetInviteByCode() error = %v", err)
-	}
-
-	if created.Code != found.Code {
-		t.Errorf("GetInviteByCode() code mismatch: %s vs %s", created.Code, found.Code)
-	}
-	if found.ReferrerTGID != 12345 {
-		t.Errorf("ReferrerTGID = %d, want 12345", found.ReferrerTGID)
-	}
-}
-
-func TestCleanupExpiredTrials(t *testing.T) {
-	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "test.db")
-
-	if err := Init(dbPath); err != nil {
-		t.Fatalf("Init() error = %v", err)
-	}
-	defer Close()
-
-	svc := &Service{db: DB}
-	ctx := context.Background()
-
-	// Create trial subscription that will be "expired" (created_at old)
-	sub1, err := svc.CreateTrialSubscription(ctx, "testcode", "expired-sub", "expired-client", 1, 107374182400, time.Now().Add(24*time.Hour), "http://example.com/sub/expired")
-	if err != nil {
-		t.Fatalf("CreateTrialSubscription() error = %v", err)
-	}
-
-	// Manually set created_at to 25 hours ago
-	oldTime := time.Now().Add(-25 * time.Hour)
-	DB.Model(&Subscription{}).Where("id = ?", sub1.ID).Update("created_at", oldTime)
-
-	// Create active trial subscription (created recently)
-	_, err = svc.CreateTrialSubscription(ctx, "testcode", "active-sub", "active-client", 1, 107374182400, time.Now().Add(24*time.Hour), "http://example.com/sub/active")
-	if err != nil {
-		t.Fatalf("CreateTrialSubscription() error = %v", err)
-	}
-
-	// Create trial request for cleanup test
-	err = svc.CreateTrialRequest(ctx, "192.168.1.1")
-	if err != nil {
-		t.Fatalf("CreateTrialRequest() error = %v", err)
-	}
-
-	// Run cleanup
-	deleted, err := svc.CleanupExpiredTrials(ctx, 24, nil, 1)
-	if err != nil {
-		t.Fatalf("CleanupExpiredTrials() error = %v", err)
-	}
-
-	if deleted != 1 {
-		t.Errorf("CleanupExpiredTrials() deleted = %d, want 1", deleted)
-	}
-
-	// Verify active subscription still exists
-	_, err = svc.GetSubscriptionBySubscriptionID(ctx, "active-sub")
-	if err != nil {
-		t.Error("Active subscription should still exist after cleanup")
-	}
-
-	// Verify expired subscription was deleted
-	_, err = svc.GetSubscriptionBySubscriptionID(ctx, "expired-sub")
+	_, err := GetPendingMigrations()
 	if err == nil {
-		t.Error("Expired subscription should be deleted after cleanup")
+		t.Error("GetPendingMigrations() should return error when database not initialized")
 	}
 }
 
-func TestGetSubscriptionBySubscriptionID(t *testing.T) {
+func TestGetAppliedMigrations(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
@@ -2205,48 +2260,50 @@ func TestGetSubscriptionBySubscriptionID(t *testing.T) {
 	}
 	defer Close()
 
-	svc := &Service{db: DB}
-	ctx := context.Background()
+	// Save and replace migrations
+	originalMigrations := migrations
+	defer func() { migrations = originalMigrations }()
 
-	// Create trial subscription
-	_, err := svc.CreateTrialSubscription(ctx, "testcode", "sub123", "client-uuid-123", 1, 107374182400, time.Now().Add(24*time.Hour), "http://example.com/sub/sub123")
+	migrations = []Migration{
+		{Name: "applied_test_1", SQL: ""},
+		{Name: "applied_test_2", SQL: ""},
+	}
+
+	// Run migrations
+	err := RunMigrations(DB)
 	if err != nil {
-		t.Fatalf("CreateTrialSubscription() error = %v", err)
+		t.Fatalf("RunMigrations() error = %v", err)
 	}
 
-	// Get by subscription ID
-	sub, err := svc.GetSubscriptionBySubscriptionID(ctx, "sub123")
+	// Get applied migrations
+	applied, err := GetAppliedMigrations()
 	if err != nil {
-		t.Fatalf("GetSubscriptionBySubscriptionID() error = %v", err)
+		t.Fatalf("GetAppliedMigrations() error = %v", err)
 	}
 
-	if sub.SubscriptionID != "sub123" {
-		t.Errorf("SubscriptionID = %s, want sub123", sub.SubscriptionID)
+	if len(applied) != 2 {
+		t.Errorf("Expected 2 applied migrations, got %d", len(applied))
 	}
-	if sub.ClientID != "client-uuid-123" {
-		t.Errorf("ClientID = %s, want client-uuid-123", sub.ClientID)
+
+	// Verify they are ordered by applied_at ASC
+	for i := 0; i < len(applied)-1; i++ {
+		if applied[i].AppliedAt.After(applied[i+1].AppliedAt) {
+			t.Error("Applied migrations not ordered by applied_at ASC")
+		}
 	}
 }
 
-func TestGetSubscriptionBySubscriptionID_NotFound(t *testing.T) {
-	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "test.db")
+func TestGetAppliedMigrations_DatabaseNotInitialized(t *testing.T) {
+	// Close database
+	Close()
 
-	if err := Init(dbPath); err != nil {
-		t.Fatalf("Init() error = %v", err)
-	}
-	defer Close()
-
-	svc := &Service{db: DB}
-	ctx := context.Background()
-
-	_, err := svc.GetSubscriptionBySubscriptionID(ctx, "nonexistent")
+	_, err := GetAppliedMigrations()
 	if err == nil {
-		t.Error("GetSubscriptionBySubscriptionID() should return error for non-existent subscription")
+		t.Error("GetAppliedMigrations() should return error when database not initialized")
 	}
 }
 
-func TestCreateTrialRequest(t *testing.T) {
+func TestExecSQL(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
@@ -2255,26 +2312,29 @@ func TestCreateTrialRequest(t *testing.T) {
 	}
 	defer Close()
 
-	svc := &Service{db: DB}
-	ctx := context.Background()
-
-	// Create trial request
-	err := svc.CreateTrialRequest(ctx, "192.168.1.1")
+	// Execute simple SQL (create a table)
+	err := ExecSQL("CREATE TABLE test_sql_table (id INTEGER PRIMARY KEY, name TEXT)")
 	if err != nil {
-		t.Fatalf("CreateTrialRequest() error = %v", err)
+		t.Fatalf("ExecSQL() error = %v", err)
 	}
 
-	// Verify it was created by counting
-	count, err := svc.CountTrialRequestsByIPLastHour(ctx, "192.168.1.1")
-	if err != nil {
-		t.Fatalf("CountTrialRequestsByIPLastHour() error = %v", err)
-	}
-	if count != 1 {
-		t.Errorf("CountTrialRequestsByIPLastHour() = %d, want 1", count)
+	// Verify table was created
+	if !DB.Migrator().HasTable("test_sql_table") {
+		t.Error("Table was not created by ExecSQL")
 	}
 }
 
-func TestCountTrialRequestsByIPLastHour(t *testing.T) {
+func TestExecSQL_DatabaseNotInitialized(t *testing.T) {
+	// Close database
+	Close()
+
+	err := ExecSQL("SELECT 1")
+	if err == nil {
+		t.Error("ExecSQL() should return error when database not initialized")
+	}
+}
+
+func TestGetSQLDB(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
@@ -2283,115 +2343,286 @@ func TestCountTrialRequestsByIPLastHour(t *testing.T) {
 	}
 	defer Close()
 
-	svc := &Service{db: DB}
-	ctx := context.Background()
+	// Get underlying sql.DB
+	sqlDB, err := GetSQLDB()
+	if err != nil {
+		t.Fatalf("GetSQLDB() error = %v", err)
+	}
+	if sqlDB == nil {
+		t.Error("GetSQLDB() returned nil")
+	}
 
-	// Create multiple trial requests from same IP
+	// Verify it's functional
+	err = sqlDB.Ping()
+	if err != nil {
+		t.Errorf("sqlDB.Ping() error = %v", err)
+	}
+}
+
+func TestGetSQLDB_DatabaseNotInitialized(t *testing.T) {
+	// Close database
+	Close()
+
+	_, err := GetSQLDB()
+	if err == nil {
+		t.Error("GetSQLDB() should return error when database not initialized")
+	}
+}
+
+func TestUpdateSubscription_DatabaseNotInitialized(t *testing.T) {
+	// Close database if open
+	Close()
+
+	sub := &Subscription{
+		TelegramID:      12345,
+		Username:        "testuser",
+		ClientID:        "client-123",
+		Status:          "active",
+		ExpiryTime:      time.Now().Add(24 * time.Hour),
+		SubscriptionURL: "http://test.url/sub/abc",
+	}
+
+	err := UpdateSubscription(sub)
+	if err == nil {
+		t.Error("UpdateSubscription() should return error when database not initialized")
+	}
+}
+
+func TestGetAllSubscriptions_Empty(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	service, err := NewService(dbPath)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	defer service.Close()
+
+	subs, err := service.GetAllSubscriptions(nil)
+	if err != nil {
+		t.Fatalf("GetAllSubscriptions() error = %v", err)
+	}
+
+	if len(subs) != 0 {
+		t.Errorf("Expected 0 subscriptions, got %d", len(subs))
+	}
+}
+
+func TestService_UpdateSubscription_NotFound(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	service, err := NewService(dbPath)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	defer service.Close()
+
+	// Try to update non-existent subscription
+	sub := &Subscription{
+		ID:         99999,
+		TelegramID: 99999,
+		Username:   "nonexistent",
+		ClientID:   "nonexistent",
+		Status:     "active",
+	}
+
+	err = service.UpdateSubscription(nil, sub)
+	if err != nil {
+		t.Errorf("UpdateSubscription() on non-existent should not error: %v", err)
+	}
+}
+
+func TestService_DeleteSubscription_NotFound(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	service, err := NewService(dbPath)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	defer service.Close()
+
+	// Try to delete non-existent subscription - should not error
+	err = service.DeleteSubscription(nil, 999999)
+	if err != nil {
+		t.Errorf("DeleteSubscription() on non-existent should not error: %v", err)
+	}
+}
+
+func TestSubscription_TableName(t *testing.T) {
+	sub := &Subscription{}
+	if sub.TableName() != "subscriptions" {
+		t.Errorf("TableName() = %s, want subscriptions", sub.TableName())
+	}
+}
+
+func TestGetAllTelegramIDs_OneSubscriptionMultipleRevisions(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	if err := Init(dbPath); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	defer Close()
+
+	// Create multiple subscriptions for same Telegram ID
 	for i := 0; i < 3; i++ {
-		err := svc.CreateTrialRequest(ctx, "192.168.1.100")
-		if err != nil {
-			t.Fatalf("CreateTrialRequest() error = %v", err)
+		sub := &Subscription{
+			TelegramID:      111111111,
+			Username:        fmt.Sprintf("user%d", i),
+			ClientID:        fmt.Sprintf("client-%d", i),
+			Status:          "active",
+			ExpiryTime:      time.Now().Add(24 * time.Hour),
+			SubscriptionURL: fmt.Sprintf("http://localhost/sub/%d", i),
+		}
+		if err := CreateSubscription(sub); err != nil {
+			t.Fatalf("Failed to create subscription: %v", err)
 		}
 	}
 
-	// Create request from different IP
-	err := svc.CreateTrialRequest(ctx, "10.0.0.1")
+	// Get all Telegram IDs - should return unique ID once
+	ids, err := GetAllTelegramIDs()
 	if err != nil {
-		t.Fatalf("CreateTrialRequest() error = %v", err)
+		t.Fatalf("GetAllTelegramIDs() error = %v", err)
 	}
 
-	// Count requests from first IP
-	count, err := svc.CountTrialRequestsByIPLastHour(ctx, "192.168.1.100")
-	if err != nil {
-		t.Fatalf("CountTrialRequestsByIPLastHour() error = %v", err)
-	}
-	if count != 3 {
-		t.Errorf("CountTrialRequestsByIPLastHour() = %d, want 3", count)
-	}
-
-	// Count requests from second IP
-	count, err = svc.CountTrialRequestsByIPLastHour(ctx, "10.0.0.1")
-	if err != nil {
-		t.Fatalf("CountTrialRequestsByIPLastHour() error = %v", err)
-	}
-	if count != 1 {
-		t.Errorf("CountTrialRequestsByIPLastHour() = %d, want 1", count)
-	}
-
-	// Count requests from unknown IP
-	count, err = svc.CountTrialRequestsByIPLastHour(ctx, "172.16.0.1")
-	if err != nil {
-		t.Fatalf("CountTrialRequestsByIPLastHour() error = %v", err)
-	}
-	if count != 0 {
-		t.Errorf("CountTrialRequestsByIPLastHour() = %d, want 0", count)
+	if len(ids) != 1 {
+		t.Errorf("Expected 1 unique ID, got %d", len(ids))
 	}
 }
 
-func TestCountTrialRequestsByIPLastHour_OldRequests(t *testing.T) {
+func TestService_CreateSubscription_DuplicateTelegramID(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
-	if err := Init(dbPath); err != nil {
-		t.Fatalf("Init() error = %v", err)
-	}
-	defer Close()
-
-	svc := &Service{db: DB}
-	ctx := context.Background()
-
-	// Create trial request
-	err := svc.CreateTrialRequest(ctx, "192.168.1.200")
+	service, err := NewService(dbPath)
 	if err != nil {
-		t.Fatalf("CreateTrialRequest() error = %v", err)
+		t.Fatalf("NewService() error = %v", err)
+	}
+	defer service.Close()
+
+	telegramID := int64(123456789)
+
+	sub1 := &Subscription{
+		TelegramID:      telegramID,
+		Username:        "user1",
+		ClientID:        "client1",
+		Status:          "active",
+		ExpiryTime:      time.Now().Add(24 * time.Hour),
+		SubscriptionURL: "http://localhost/sub/1",
 	}
 
-	// Manually set created_at to 2 hours ago (should be excluded from count)
-	oldTime := time.Now().Add(-2 * time.Hour)
-	DB.Model(&TrialRequest{}).Where("ip = ?", "192.168.1.200").Update("created_at", oldTime)
+	if err := service.CreateSubscription(nil, sub1); err != nil {
+		t.Fatalf("First CreateSubscription() error = %v", err)
+	}
 
-	// Count - should be 0 because request is older than 1 hour
-	count, err := svc.CountTrialRequestsByIPLastHour(ctx, "192.168.1.200")
+	sub2 := &Subscription{
+		TelegramID:      telegramID,
+		Username:        "user2",
+		ClientID:        "client2",
+		Status:          "active",
+		ExpiryTime:      time.Now().Add(24 * time.Hour),
+		SubscriptionURL: "http://localhost/sub/2",
+	}
+
+	if err := service.CreateSubscription(nil, sub2); err != nil {
+		t.Fatalf("Second CreateSubscription() error = %v", err)
+	}
+
+	subs, err := service.GetAllSubscriptions(nil)
 	if err != nil {
-		t.Fatalf("CountTrialRequestsByIPLastHour() error = %v", err)
+		t.Fatalf("GetAllSubscriptions() error = %v", err)
 	}
-	if count != 0 {
-		t.Errorf("CountTrialRequestsByIPLastHour() = %d, want 0 (old requests should be excluded)", count)
+
+	activeCount := 0
+	for _, s := range subs {
+		if s.TelegramID == telegramID && s.Status == "active" {
+			activeCount++
+		}
+	}
+
+	if activeCount != 1 {
+		t.Errorf("Expected 1 active subscription, got %d", activeCount)
 	}
 }
 
-func TestBindTrialSubscription_WithReferral(t *testing.T) {
+func TestService_GetLatestSubscriptions_Empty(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
-	if err := Init(dbPath); err != nil {
-		t.Fatalf("Init() error = %v", err)
-	}
-	defer Close()
-
-	svc := &Service{db: DB}
-	ctx := context.Background()
-
-	// Create referrer's invite
-	_, err := svc.GetOrCreateInvite(ctx, 12345, "refcode")
+	service, err := NewService(dbPath)
 	if err != nil {
-		t.Fatalf("GetOrCreateInvite() error = %v", err)
+		t.Fatalf("NewService() error = %v", err)
 	}
+	defer service.Close()
 
-	// Create trial subscription with invite code
-	_, err = svc.CreateTrialSubscription(ctx, "refcode", "sub-ref", "client-ref", 1, 107374182400, time.Now().Add(24*time.Hour), "http://example.com/sub/sub-ref")
+	subs, err := service.GetLatestSubscriptions(nil, 10)
 	if err != nil {
-		t.Fatalf("CreateTrialSubscription() error = %v", err)
+		t.Fatalf("GetLatestSubscriptions() error = %v", err)
 	}
 
-	// Bind trial subscription
-	sub, err := svc.BindTrialSubscription(ctx, "sub-ref", 999888, "newuser")
+	if len(subs) != 0 {
+		t.Errorf("Expected 0 subscriptions, got %d", len(subs))
+	}
+}
+
+func TestService_GetAllSubscriptions_Empty(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	service, err := NewService(dbPath)
 	if err != nil {
-		t.Fatalf("BindTrialSubscription() error = %v", err)
+		t.Fatalf("NewService() error = %v", err)
+	}
+	defer service.Close()
+
+	subs, err := service.GetAllSubscriptions(nil)
+	if err != nil {
+		t.Fatalf("GetAllSubscriptions() error = %v", err)
 	}
 
-	// Verify referral was recorded
-	if sub.ReferredBy != 12345 {
-		t.Errorf("ReferredBy = %d, want 12345", sub.ReferredBy)
+	if len(subs) != 0 {
+		t.Errorf("Expected 0 subscriptions, got %d", len(subs))
+	}
+}
+
+func TestService_CountActiveSubscriptions_Empty(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	service, err := NewService(dbPath)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	defer service.Close()
+
+	count, err := service.CountActiveSubscriptions(nil)
+	if err != nil {
+		t.Fatalf("CountActiveSubscriptions() error = %v", err)
+	}
+
+	if count != 0 {
+		t.Errorf("Expected 0 active subscriptions, got %d", count)
+	}
+}
+
+func TestService_CountExpiredSubscriptions_Empty(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	service, err := NewService(dbPath)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	defer service.Close()
+
+	count, err := service.CountExpiredSubscriptions(nil)
+	if err != nil {
+		t.Fatalf("CountExpiredSubscriptions() error = %v", err)
+	}
+
+	if count != 0 {
+		t.Errorf("Expected 0 expired subscriptions, got %d", count)
 	}
 }
