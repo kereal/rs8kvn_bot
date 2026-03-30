@@ -463,7 +463,7 @@ func (c *Client) GetClientTraffic(ctx context.Context, email string) (*ClientTra
 		return nil, fmt.Errorf("authentication required: %w", err)
 	}
 
-	trafficURL := fmt.Sprintf("%s/panel/api/inbounds/getClientTraffics/%s", c.host, email)
+	trafficURL := fmt.Sprintf("%s/panel/api/inbounds/getClientTraffics/%s", c.host, url.PathEscape(email))
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, trafficURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
