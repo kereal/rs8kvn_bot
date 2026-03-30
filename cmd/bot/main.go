@@ -14,9 +14,9 @@ import (
 	"rs8kvn_bot/internal/bot"
 	"rs8kvn_bot/internal/config"
 	"rs8kvn_bot/internal/database"
-	"rs8kvn_bot/internal/health"
 	"rs8kvn_bot/internal/heartbeat"
 	"rs8kvn_bot/internal/logger"
+	"rs8kvn_bot/internal/web"
 	"rs8kvn_bot/internal/xui"
 
 	"github.com/getsentry/sentry-go"
@@ -151,24 +151,30 @@ func main() {
 	// Create bot handler
 	handler := bot.NewHandler(botAPI, cfg, dbService, xuiClient)
 
-	// Initialize and start health check server
-	healthServer := health.NewServer(cfg.HealthCheckPort)
-	healthServer.RegisterChecker("database", health.DatabaseChecker(func(ctx context.Context) error {
-		return dbService.Ping()
-	}))
-	healthServer.RegisterChecker("xui", health.XUIChecker(func(ctx context.Context) error {
-		return xuiClient.Login(ctx)
-	}))
-	if err := healthServer.Start(); err != nil {
-		logger.Fatal("Failed to start health check server", zap.Error(err))
+	// Initialize and start web server (health + trial pages)
+	webServer := web.NewServer(fmt.Sprintf(":%d", cfg.HealthCheckPort), dbService, xuiClient, cfg, botAPI.Self.UserName)
+	webServer.RegisterChecker("database", func(ctx context.Context) web.ComponentHealth {
+		if err := dbService.Ping(ctx); err != nil {
+			return web.ComponentHealth{Status: web.StatusDown, Message: err.Error()}
+		}
+		return web.ComponentHealth{Status: web.StatusOK}
+	})
+	webServer.RegisterChecker("xui", func(ctx context.Context) web.ComponentHealth {
+		if err := xuiClient.Login(ctx); err != nil {
+			return web.ComponentHealth{Status: web.StatusDegraded, Message: err.Error()}
+		}
+		return web.ComponentHealth{Status: web.StatusOK}
+	})
+	if err := webServer.Start(context.Background()); err != nil {
+		logger.Fatal("Failed to start web server", zap.Error(err))
 	}
-	healthServer.SetReady(true)
+	webServer.SetReady(true)
 	defer func() {
-		healthServer.SetReady(false)
+		webServer.SetReady(false)
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		if err := healthServer.Stop(shutdownCtx); err != nil {
-			logger.Error("Failed to stop health check server", zap.Error(err))
+		if err := webServer.Stop(shutdownCtx); err != nil {
+			logger.Error("Failed to stop web server", zap.Error(err))
 		}
 	}()
 
@@ -215,6 +221,20 @@ func main() {
 			wg.Done()
 		}()
 		heartbeat.Start(ctx, cfg.HeartbeatURL, cfg.HeartbeatInterval)
+	}()
+
+	// Start trial cleanup scheduler
+	wg.Add(1)
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				sentry.CurrentHub().Recover(r)
+				sentry.Flush(config.SentryPanicFlushTimeout)
+				logger.Error("Trial cleanup scheduler panicked", zap.Any("panic", r))
+			}
+			wg.Done()
+		}()
+		startTrialCleanupScheduler(ctx, dbService, xuiClient, cfg.XUIInboundID, cfg.TrialDurationHours)
 	}()
 
 	// Track in-flight update handlers
@@ -305,6 +325,8 @@ func handleUpdate(ctx context.Context, handler *bot.Handler, update tgbotapi.Upd
 				handler.HandleStart(ctx, update)
 			case "help":
 				handler.HandleHelp(ctx, update)
+			case "invite":
+				handler.HandleInvite(ctx, update)
 			case "del":
 				handler.HandleDel(ctx, update)
 			case "broadcast":
@@ -367,6 +389,31 @@ func startBackupScheduler(ctx context.Context, dbPath string) {
 
 		case <-ctx.Done():
 			logger.Info("Backup scheduler stopped")
+			return
+		}
+	}
+}
+
+// startTrialCleanupScheduler runs the trial subscription cleanup scheduler.
+func startTrialCleanupScheduler(ctx context.Context, db *database.Service, xuiClient *xui.Client, inboundID int, trialHours int) {
+	logger.Info("Trial cleanup scheduler started", zap.String("schedule", "hourly"))
+
+	ticker := time.NewTicker(1 * time.Hour)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			logger.Info("Running trial cleanup")
+			deleted, err := db.CleanupExpiredTrials(ctx, trialHours, xuiClient, inboundID)
+			if err != nil {
+				logger.Error("Trial cleanup failed", zap.Error(err))
+			} else if deleted > 0 {
+				logger.Info("Trial cleanup completed", zap.Int64("deleted", deleted))
+			}
+
+		case <-ctx.Done():
+			logger.Info("Trial cleanup scheduler stopped")
 			return
 		}
 	}

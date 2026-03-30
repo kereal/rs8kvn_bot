@@ -129,6 +129,11 @@ func (c *Client) Login(ctx context.Context) error {
 	return c.ensureLoggedIn(ctx, true)
 }
 
+// Ping checks if the 3x-ui panel is reachable.
+func (c *Client) Ping(ctx context.Context) error {
+	return c.ensureLoggedIn(ctx, true)
+}
+
 // ensureLoggedIn checks if the session is valid and re-authenticates if necessary.
 // If force is true, it will always re-authenticate.
 func (c *Client) ensureLoggedIn(ctx context.Context, force bool) error {
@@ -217,7 +222,7 @@ func (c *Client) AddClient(ctx context.Context, inboundID int, email string, tra
 	clientID := utils.GenerateUUID()
 	subID := utils.GenerateSubID()
 
-	return c.AddClientWithID(ctx, inboundID, email, clientID, subID, trafficBytes, expiryTime)
+	return c.AddClientWithID(ctx, inboundID, email, clientID, subID, trafficBytes, expiryTime, -1)
 }
 
 // AddClientWithID creates a new client in the 3x-ui panel with specified IDs.
@@ -230,7 +235,8 @@ func (c *Client) AddClient(ctx context.Context, inboundID int, email string, tra
 //   - subID: Subscription ID for URL generation
 //   - trafficBytes: Traffic limit in bytes
 //   - expiryTime: Subscription expiry time
-func (c *Client) AddClientWithID(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time) (*ClientConfig, error) {
+//   - resetDays: Day of month for traffic reset (0 = no auto-renewal)
+func (c *Client) AddClientWithID(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*ClientConfig, error) {
 	if err := c.ensureLoggedIn(ctx, false); err != nil {
 		return nil, fmt.Errorf("authentication required: %w", err)
 	}
@@ -246,6 +252,10 @@ func (c *Client) AddClientWithID(ctx context.Context, inboundID int, email, clie
 		return nil, fmt.Errorf("subscription ID cannot be empty")
 	}
 
+	if resetDays < 0 {
+		resetDays = config.SubscriptionResetDay
+	}
+
 	// Build client settings in 3x-ui format
 	clientSettings := map[string]interface{}{
 		"clients": []map[string]interface{}{
@@ -258,7 +268,7 @@ func (c *Client) AddClientWithID(ctx context.Context, inboundID int, email, clie
 				"enable":     true,
 				"flow":       "xtls-rprx-vision",
 				"subId":      subID,
-				"reset":      config.SubscriptionResetDay,
+				"reset":      resetDays,
 			},
 		},
 	}
@@ -375,6 +385,82 @@ func (c *Client) DeleteClient(ctx context.Context, inboundID int, clientID strin
 	logger.Info("Successfully deleted client",
 		zap.String("client_id", clientID),
 		zap.Int("inbound_id", inboundID))
+	return nil
+}
+
+// UpdateClient updates an existing client in the 3x-ui panel.
+func (c *Client) UpdateClient(ctx context.Context, inboundID int, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, tgID int64, comment string) error {
+	if err := c.ensureLoggedIn(ctx, false); err != nil {
+		return fmt.Errorf("authentication required: %w", err)
+	}
+
+	if clientID == "" {
+		return fmt.Errorf("client ID cannot be empty")
+	}
+
+	clientSettings := map[string]interface{}{
+		"clients": []map[string]interface{}{
+			{
+				"id":         clientID,
+				"email":      email,
+				"limitIp":    0,
+				"totalGB":    trafficBytes,
+				"expiryTime": expiryTime.UnixMilli(),
+				"enable":     true,
+				"flow":       "xtls-rprx-vision",
+				"subId":      subID,
+				"reset":      30,
+				"tgId":       fmt.Sprintf("%d", tgID),
+				"comment":    comment,
+			},
+		},
+	}
+
+	settingsJSON, err := json.Marshal(clientSettings)
+	if err != nil {
+		return fmt.Errorf("failed to marshal client settings: %w", err)
+	}
+
+	requestData := map[string]interface{}{
+		"id":       inboundID,
+		"settings": string(settingsJSON),
+	}
+
+	reader, err := marshalJSON(requestData)
+	if err != nil {
+		return fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	// POST to /panel/api/inbounds/updateClient/{clientID}
+	updateURL := fmt.Sprintf("%s/panel/api/inbounds/updateClient/%s", c.host, clientID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, updateURL, reader)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("update client request failed: %w", err)
+	}
+	defer closeResponseBody(resp)
+
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, config.MaxResponseSize))
+	if err != nil {
+		return fmt.Errorf("failed to read response: %w", err)
+	}
+
+	var apiResp APIResponse
+	if err := json.Unmarshal(respBody, &apiResp); err != nil {
+		return fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	if !apiResp.Success {
+		return fmt.Errorf("failed to update client: %s", apiResp.Msg)
+	}
+
 	return nil
 }
 

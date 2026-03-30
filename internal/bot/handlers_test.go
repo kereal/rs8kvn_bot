@@ -100,14 +100,14 @@ func TestGetMainMenuKeyboard(t *testing.T) {
 	cfg := &config.Config{TelegramAdminID: 123}
 	handler := &Handler{cfg: cfg}
 
-	keyboard := handler.getMainMenuKeyboard()
-
-	if len(keyboard.InlineKeyboard) == 0 {
-		t.Error("Keyboard should have rows")
+	keyboardWithShare := handler.getMainMenuKeyboard(true)
+	if len(keyboardWithShare.InlineKeyboard) != 3 {
+		t.Errorf("Expected 3 rows with subscription, got %d", len(keyboardWithShare.InlineKeyboard))
 	}
 
-	if len(keyboard.InlineKeyboard) != 2 {
-		t.Errorf("Expected 2 rows, got %d", len(keyboard.InlineKeyboard))
+	keyboardNoShare := handler.getMainMenuKeyboard(false)
+	if len(keyboardNoShare.InlineKeyboard) != 2 {
+		t.Errorf("Expected 2 rows without subscription, got %d", len(keyboardNoShare.InlineKeyboard))
 	}
 }
 
@@ -128,6 +128,121 @@ func TestGetBackKeyboard(t *testing.T) {
 	btn := keyboard.InlineKeyboard[0][0]
 	if btn.Text != "🏠 В начало" {
 		t.Errorf("Expected '🏠 В начало', got '%s'", btn.Text)
+	}
+}
+
+func TestAddAdminButtons(t *testing.T) {
+	tests := []struct {
+		name          string
+		adminID       int64
+		chatID        int64
+		expectButtons bool
+	}{
+		{"admin user", 123, 123, true},
+		{"non-admin user", 123, 456, false},
+		{"zero admin ID", 0, 0, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.Config{TelegramAdminID: tt.adminID}
+			handler := &Handler{cfg: cfg}
+
+			keyboard := tgbotapi.NewInlineKeyboardMarkup(
+				tgbotapi.NewInlineKeyboardRow(
+					tgbotapi.NewInlineKeyboardButtonData("📋 Подписка", "menu_subscription"),
+				),
+			)
+
+			handler.addAdminButtons(&keyboard, tt.chatID)
+
+			if tt.expectButtons && len(keyboard.InlineKeyboard) != 2 {
+				t.Errorf("Expected admin buttons, got %d rows", len(keyboard.InlineKeyboard))
+			}
+			if !tt.expectButtons && len(keyboard.InlineKeyboard) != 1 {
+				t.Errorf("Expected no admin buttons, got %d rows", len(keyboard.InlineKeyboard))
+			}
+		})
+	}
+}
+
+func TestGenerateInviteCode(t *testing.T) {
+	code1 := utils.GenerateInviteCode()
+	code2 := utils.GenerateInviteCode()
+
+	if len(code1) != 8 {
+		t.Errorf("Expected code length 8, got %d", len(code1))
+	}
+
+	if code1 == code2 {
+		t.Error("Expected different codes on consecutive calls")
+	}
+
+	validChars := "0123456789abcdefghijklmnopqrstuvwxyz"
+	for _, c := range code1 {
+		found := false
+		for _, vc := range validChars {
+			if c == vc {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("Invalid character %c in code", c)
+		}
+	}
+}
+
+// NOTE: Tests for sendInviteLink and handleBindTrial require real Telegram Bot API
+// and cannot be unit tested without mocking tgbotapi.BotAPI.
+// These functions are tested via integration tests with a real bot instance.
+// See integration_test.go for integration tests.
+
+func TestGetMainMenuContent(t *testing.T) {
+	cfg := &config.Config{
+		TelegramAdminID: 12345,
+	}
+	handler := &Handler{cfg: cfg}
+
+	tests := []struct {
+		name            string
+		username        string
+		hasSubscription bool
+		chatID          int64
+	}{
+		{
+			name:            "with subscription",
+			username:        "testuser",
+			hasSubscription: true,
+			chatID:          99999,
+		},
+		{
+			name:            "without subscription",
+			username:        "newuser",
+			hasSubscription: false,
+			chatID:          88888,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			text, keyboard := handler.getMainMenuContent(tt.username, tt.hasSubscription, tt.chatID)
+
+			// Check text contains username
+			if !strings.Contains(text, tt.username) {
+				t.Errorf("getMainMenuContent() text should contain username %s", tt.username)
+			}
+
+			// Check text is not empty
+			if len(text) == 0 {
+				t.Error("getMainMenuContent() text should not be empty")
+			}
+
+			// Check keyboard has buttons
+			if len(keyboard.InlineKeyboard) == 0 {
+				t.Error("getMainMenuContent() keyboard should have buttons")
+			}
+		})
 	}
 }
 
