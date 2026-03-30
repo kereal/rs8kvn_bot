@@ -238,6 +238,10 @@ func (m *mockDatabaseService) Close() error {
 	return nil
 }
 
+func (m *mockDatabaseService) GetPoolStats() (*database.PoolStats, error) {
+	return &database.PoolStats{}, nil
+}
+
 func TestMockDatabaseService(t *testing.T) {
 	svc := &mockDatabaseService{
 		subscriptions: make(map[int64]*database.Subscription),
