@@ -2,6 +2,7 @@ package bot
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -12,6 +13,7 @@ import (
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"go.uber.org/zap"
+	"gorm.io/gorm"
 )
 
 // getSubscriptionWithCache retrieves a subscription using cache first, then DB.
@@ -44,8 +46,33 @@ func (h *Handler) invalidateCache(chatID int64) {
 func (h *Handler) handleCreateSubscription(ctx context.Context, chatID int64, username string, messageID int) {
 	logger.Info("User requesting subscription", zap.String("username", username))
 
+	// Prevent duplicate subscription creation (double-click protection)
+	h.subCreationMu.Lock()
+	if _, inProgress := h.inProgress[chatID]; inProgress {
+		h.subCreationMu.Unlock()
+		logger.Info("Subscription creation already in progress", zap.Int64("chat_id", chatID))
+		return
+	}
+	h.inProgress[chatID] = struct{}{}
+	h.subCreationMu.Unlock()
+	defer func() {
+		h.subCreationMu.Lock()
+		delete(h.inProgress, chatID)
+		h.subCreationMu.Unlock()
+	}()
+
 	sub, err := h.getSubscriptionWithCache(ctx, chatID)
-	if err == nil && sub != nil {
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			logger.Info("No existing subscription, creating new one", zap.String("username", username))
+		} else {
+			logger.Error("Failed to check subscription", zap.Error(err))
+			errMsg := "❌ Временная ошибка. Попробуйте позже."
+			editMsg := tgbotapi.NewEditMessageText(chatID, messageID, errMsg)
+			h.safeSend(editMsg)
+			return
+		}
+	} else if sub != nil {
 		// Check if subscription is expired
 		if sub.IsExpired() {
 			logger.Info("Subscription expired, creating new one", zap.String("username", username))

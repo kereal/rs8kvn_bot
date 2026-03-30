@@ -3,13 +3,13 @@ package bot
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"rs8kvn_bot/internal/config"
 	"rs8kvn_bot/internal/interfaces"
 	"rs8kvn_bot/internal/logger"
 	"rs8kvn_bot/internal/ratelimiter"
-	"rs8kvn_bot/internal/supermemory"
 	"rs8kvn_bot/internal/utils"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -23,22 +23,17 @@ const (
 )
 
 type Handler struct {
-	bot         *tgbotapi.BotAPI
-	cfg         *config.Config
-	db          interfaces.DatabaseService
-	xui         interfaces.XUIClient
-	rateLimiter *ratelimiter.RateLimiter
-	cache       *SubscriptionCache
-	supermemory *supermemory.Client
+	bot           *tgbotapi.BotAPI
+	cfg           *config.Config
+	db            interfaces.DatabaseService
+	xui           interfaces.XUIClient
+	rateLimiter   *ratelimiter.RateLimiter
+	cache         *SubscriptionCache
+	subCreationMu sync.Mutex
+	inProgress    map[int64]struct{}
 }
 
 func NewHandler(bot *tgbotapi.BotAPI, cfg *config.Config, db interfaces.DatabaseService, xuiClient interfaces.XUIClient) *Handler {
-	var smClient *supermemory.Client
-	if cfg.SupermemoryAPIKey != "" {
-		smClient = supermemory.NewClient(cfg.SupermemoryAPIKey)
-		logger.Info("Supermemory client initialized")
-	}
-
 	return &Handler{
 		bot:         bot,
 		cfg:         cfg,
@@ -46,7 +41,8 @@ func NewHandler(bot *tgbotapi.BotAPI, cfg *config.Config, db interfaces.Database
 		xui:         xuiClient,
 		rateLimiter: ratelimiter.NewRateLimiter(config.RateLimiterMaxTokens, config.RateLimiterRefillRate),
 		cache:       NewSubscriptionCache(CacheMaxSize, CacheTTL),
-		supermemory: smClient,
+		subCreationMu: sync.Mutex{},
+		inProgress:    make(map[int64]struct{}),
 	}
 }
 
@@ -222,38 +218,12 @@ func (h *Handler) addAdminButtons(keyboard *tgbotapi.InlineKeyboardMarkup, chatI
 }
 
 func (h *Handler) isSupermemoryEnabled() bool {
-	return h.supermemory != nil && h.supermemory.IsEnabled()
+	return false
 }
 
 func (h *Handler) StoreConversation(ctx context.Context, chatID int64, userMessage, botResponse string) {
-	if !h.isSupermemoryEnabled() {
-		return
-	}
-
-	content := fmt.Sprintf("user: %s\nassistant: %s", userMessage, botResponse)
-	containerTag := fmt.Sprintf("user_%d", chatID)
-
-	if err := h.supermemory.AddMemory(ctx, content, containerTag); err != nil {
-		logger.Error("Failed to store conversation in Supermemory",
-			zap.Error(err),
-			zap.Int64("chat_id", chatID))
-	}
 }
 
 func (h *Handler) GetUserContext(ctx context.Context, chatID int64, query string) string {
-	if !h.isSupermemoryEnabled() {
-		return ""
-	}
-
-	containerTag := fmt.Sprintf("user_%d", chatID)
-
-	profile, err := h.supermemory.GetProfile(ctx, containerTag, query)
-	if err != nil {
-		logger.Error("Failed to get user profile from Supermemory",
-			zap.Error(err),
-			zap.Int64("chat_id", chatID))
-		return ""
-	}
-
-	return supermemory.BuildContextString(profile)
+	return ""
 }

@@ -7,6 +7,7 @@ import (
 	"html"
 	"net"
 	"net/http"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -33,25 +34,27 @@ type ComponentHealth struct {
 }
 
 type Server struct {
-	addr        string
-	db          interfaces.DatabaseService
-	xuiClient   interfaces.XUIClient
-	cfg         *config.Config
-	botUsername string
-	server      *http.Server
-	mu          sync.RWMutex
-	ready       bool
-	checkers    map[string]func(context.Context) ComponentHealth
+	addr            string
+	db              interfaces.DatabaseService
+	xuiClient       interfaces.XUIClient
+	cfg             *config.Config
+	botUsername     string
+	server          *http.Server
+	mu              sync.RWMutex
+	ready           bool
+	checkers        map[string]func(context.Context) ComponentHealth
+	inviteCodeRegex *regexp.Regexp
 }
 
 func NewServer(addr string, db interfaces.DatabaseService, xuiClient interfaces.XUIClient, cfg *config.Config, botUsername string) *Server {
 	return &Server{
-		addr:        addr,
-		db:          db,
-		xuiClient:   xuiClient,
-		cfg:         cfg,
-		botUsername: botUsername,
-		checkers:    make(map[string]func(context.Context) ComponentHealth),
+		addr:            addr,
+		db:              db,
+		xuiClient:       xuiClient,
+		cfg:             cfg,
+		botUsername:     botUsername,
+		checkers:        make(map[string]func(context.Context) ComponentHealth),
+		inviteCodeRegex: regexp.MustCompile(`^[a-zA-Z0-9_-]+$`),
 	}
 }
 
@@ -194,7 +197,7 @@ func (s *Server) handleInvite(w http.ResponseWriter, r *http.Request) {
 	}
 
 	code := path[3:]
-	if code == "" || strings.Contains(code, "/") {
+	if code == "" || strings.Contains(code, "/") || !s.inviteCodeRegex.MatchString(code) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusNotFound)
 		w.Write([]byte(s.renderErrorPage("Приглашение не найдено")))
