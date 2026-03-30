@@ -8,15 +8,7 @@
 
 ## 🔴 HIGH - Критические
 
-| # | Проблема | Файл |
-|---|----------|------|
-| 1 | **Orphan 3x-ui clients** — при двойном клике создаётся 2 клиента, в БД 1 | `internal/bot/subscription.go` |
-| 2 | Ошибка БД = "нет подписки" — не различаем gorm.ErrRecordNotFound от временных ошибок | `internal/bot/subscription.go`, `internal/bot/menu.go` |
-| 3 | Код приглашения не валидируется — принимает любые символы | `internal/web/web.go` |
-| 4 | Email в URL без кодирования — GetClientTraffic использует без url.PathEscape | `internal/xui/client.go` |
-| 5 | Валидация URL принимает произвольные схемы (javascript:, file:) | `internal/config/config.go` |
-| 6 | DeleteSubscriptionByID TOCTOU — чтение-удаление без транзакции | `internal/database/database.go` |
-| 7 | CleanupExpiredTrials race — повторный SELECT вместо WHERE id IN (...) | `internal/database/database.go` |
+*Все критические баги исправлены*
 
 ---
 
@@ -93,7 +85,7 @@
 ## 📝 План реализации
 
 ### Фаза 1: Стабильность (1 неделя)
-- [ ] HIGH #1-7
+- [ ] HIGH #1-7 (все выполнены)
 
 ### Фаза 2: Observability (2 недели)
 - [ ] MEDIUM #8-17
