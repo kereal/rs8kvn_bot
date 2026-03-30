@@ -51,3 +51,20 @@ func GenerateSubID() string {
 
 	return hex.EncodeToString(bytes)
 }
+
+// GenerateInviteCode generates a cryptographically secure random invite code.
+// Returns an 8-character lowercase alphanumeric string.
+func GenerateInviteCode() string {
+	const charset = "0123456789abcdefghijklmnopqrstuvwxyz"
+	bytes := make([]byte, 8)
+
+	if _, err := io.ReadFull(rand.Reader, bytes); err != nil {
+		panic(fmt.Sprintf("crypto/rand failed: %v", err))
+	}
+
+	for i := range bytes {
+		bytes[i] = charset[bytes[i]%byte(len(charset))]
+	}
+
+	return string(bytes)
+}

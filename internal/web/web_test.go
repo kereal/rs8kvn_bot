@@ -1,0 +1,394 @@
+package web
+
+import (
+	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"rs8kvn_bot/internal/config"
+	"rs8kvn_bot/internal/database"
+	"rs8kvn_bot/internal/logger"
+	"rs8kvn_bot/internal/testutil"
+	"rs8kvn_bot/internal/utils"
+	"rs8kvn_bot/internal/xui"
+
+	"gorm.io/gorm"
+)
+
+func init() {
+	// Initialize logger for tests
+	_, _ = logger.Init("", "error")
+}
+
+func TestHandleInvite_InvalidCode(t *testing.T) {
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+
+	cfg := &config.Config{
+		SiteURL:            "https://vpn.site",
+		TrialDurationHours: 3,
+		TrialRateLimit:     3,
+		XUIInboundID:       1,
+	}
+
+	srv := NewServer(":8880", mockDB, mockXUI, cfg, "testbot")
+
+	// Mock: invite not found
+	mockDB.GetInviteByCodeFunc = func(ctx context.Context, code string) (*database.Invite, error) {
+		return nil, gorm.ErrRecordNotFound
+	}
+
+	req := httptest.NewRequest("GET", "/i/invalidcode", nil)
+	rec := httptest.NewRecorder()
+
+	srv.handleInvite(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("handleInvite() status = %d, want %d", rec.Code, http.StatusNotFound)
+	}
+
+	body := rec.Body.String()
+	if !strings.Contains(body, "Приглашение не найдено") {
+		t.Errorf("handleInvite() body should contain error message, got: %s", body)
+	}
+}
+
+func TestHandleInvite_RateLimitExceeded(t *testing.T) {
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+
+	cfg := &config.Config{
+		SiteURL:            "https://vpn.site",
+		TrialDurationHours: 3,
+		TrialRateLimit:     2,
+		XUIInboundID:       1,
+	}
+
+	srv := NewServer(":8880", mockDB, mockXUI, cfg, "testbot")
+
+	// Mock: invite exists
+	mockDB.GetInviteByCodeFunc = func(ctx context.Context, code string) (*database.Invite, error) {
+		return &database.Invite{Code: "testcode", ReferrerTGID: 12345}, nil
+	}
+
+	// Mock: rate limit exceeded
+	mockDB.CountTrialRequestsByIPLastHourFunc = func(ctx context.Context, ip string) (int, error) {
+		return 3, nil // More than limit
+	}
+
+	req := httptest.NewRequest("GET", "/i/testcode", nil)
+	req.RemoteAddr = "192.168.1.1:12345"
+	rec := httptest.NewRecorder()
+
+	srv.handleInvite(rec, req)
+
+	if rec.Code != http.StatusTooManyRequests {
+		t.Errorf("handleInvite() status = %d, want %d", rec.Code, http.StatusTooManyRequests)
+	}
+
+	body := rec.Body.String()
+	if !strings.Contains(body, "Слишком много запросов") {
+		t.Errorf("handleInvite() body should contain rate limit message, got: %s", body)
+	}
+}
+
+func TestHandleInvite_Success(t *testing.T) {
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+
+	cfg := &config.Config{
+		SiteURL:            "https://vpn.site",
+		TrialDurationHours: 3,
+		TrialRateLimit:     3,
+		XUIInboundID:       1,
+		XUIHost:            "http://localhost:2053",
+		XUISubPath:         "sub",
+	}
+
+	srv := NewServer(":8880", mockDB, mockXUI, cfg, "testbot")
+
+	// Mock: invite exists
+	mockDB.GetInviteByCodeFunc = func(ctx context.Context, code string) (*database.Invite, error) {
+		return &database.Invite{Code: "testcode", ReferrerTGID: 12345}, nil
+	}
+
+	// Mock: rate limit OK
+	mockDB.CountTrialRequestsByIPLastHourFunc = func(ctx context.Context, ip string) (int, error) {
+		return 0, nil
+	}
+
+	// Mock: create trial request
+	mockDB.CreateTrialRequestFunc = func(ctx context.Context, ip string) error {
+		return nil
+	}
+
+	// Mock: create trial subscription
+	mockDB.CreateTrialSubscriptionFunc = func(ctx context.Context, inviteCode, subscriptionID, clientID string, inboundID int, trafficBytes int64, expiryTime time.Time, subURL string) (*database.Subscription, error) {
+		return &database.Subscription{
+			SubscriptionID:  subscriptionID,
+			ClientID:        clientID,
+			InviteCode:      inviteCode,
+			SubscriptionURL: subURL,
+		}, nil
+	}
+
+	// Mock: XUI login
+	mockXUI.LoginFunc = func(ctx context.Context) error {
+		return nil
+	}
+
+	// Mock: XUI add client
+	mockXUI.AddClientWithIDFunc = func(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
+		return &xui.ClientConfig{ID: clientID, SubID: subID}, nil
+	}
+
+	// Mock: XUI get subscription link
+	mockXUI.GetSubscriptionLinkFunc = func(host, subID, subPath string) string {
+		return "http://localhost:2053/sub/" + subID
+	}
+
+	// Mock: XUI get external URL
+	mockXUI.GetExternalURLFunc = func(host string) string {
+		return host
+	}
+
+	req := httptest.NewRequest("GET", "/i/testcode", nil)
+	req.RemoteAddr = "192.168.1.1:12345"
+	rec := httptest.NewRecorder()
+
+	srv.handleInvite(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("handleInvite() status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	body := rec.Body.String()
+
+	// Check HTML contains expected elements
+	expectedElements := []string{
+		"RS8 KVN",
+		"Добавить в Happ",
+		"Активировать",
+		"t.me/testbot",
+		"trial_",
+	}
+
+	for _, expected := range expectedElements {
+		if !strings.Contains(body, expected) {
+			t.Errorf("handleInvite() body should contain '%s'", expected)
+		}
+	}
+}
+
+func TestHandleInvite_XUIError(t *testing.T) {
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+
+	cfg := &config.Config{
+		SiteURL:            "https://vpn.site",
+		TrialDurationHours: 3,
+		TrialRateLimit:     3,
+		XUIInboundID:       1,
+	}
+
+	srv := NewServer(":8880", mockDB, mockXUI, cfg, "testbot")
+
+	// Mock: invite exists
+	mockDB.GetInviteByCodeFunc = func(ctx context.Context, code string) (*database.Invite, error) {
+		return &database.Invite{Code: "testcode", ReferrerTGID: 12345}, nil
+	}
+
+	// Mock: rate limit OK
+	mockDB.CountTrialRequestsByIPLastHourFunc = func(ctx context.Context, ip string) (int, error) {
+		return 0, nil
+	}
+
+	// Mock: create trial request
+	mockDB.CreateTrialRequestFunc = func(ctx context.Context, ip string) error {
+		return nil
+	}
+
+	// Mock: XUI login fails
+	mockXUI.LoginFunc = func(ctx context.Context) error {
+		return fmt.Errorf("unauthorized")
+	}
+
+	req := httptest.NewRequest("GET", "/i/testcode", nil)
+	req.RemoteAddr = "192.168.1.1:12345"
+	rec := httptest.NewRecorder()
+
+	srv.handleInvite(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("handleInvite() status = %d, want %d", rec.Code, http.StatusInternalServerError)
+	}
+
+	body := rec.Body.String()
+	if !strings.Contains(body, "Ошибка сервера") {
+		t.Errorf("handleInvite() body should contain error message, got: %s", body)
+	}
+}
+
+func TestRenderTrialPage(t *testing.T) {
+	cfg := &config.Config{
+		SiteURL:            "https://vpn.site",
+		TrialDurationHours: 3,
+	}
+
+	srv := NewServer(":8880", nil, nil, cfg, "testbot")
+
+	html := srv.renderTrialPage("sub123", "https://vpn.site/sub/sub123", "https://t.me/testbot?start=trial_sub123", 3)
+
+	// Check that HTML contains expected elements
+	expectedElements := []string{
+		"<!DOCTYPE html>",
+		"RS8 KVN",
+		"Добавить в Happ",
+		"happ://add/",
+		"Активировать",
+		"https://t.me/testbot?start=trial_sub123",
+		"3 часа",
+		"Срок действия",
+		"copyToClipboard",
+		"play.google.com",
+		"apps.apple.com",
+	}
+
+	for _, expected := range expectedElements {
+		if !strings.Contains(html, expected) {
+			t.Errorf("renderTrialPage() should contain '%s'", expected)
+		}
+	}
+}
+
+func TestRenderErrorPage(t *testing.T) {
+	srv := NewServer(":8880", nil, nil, nil, "")
+
+	html := srv.renderErrorPage("Тестовая ошибка")
+
+	// Check that HTML contains error message
+	if !strings.Contains(html, "Тестовая ошибка") {
+		t.Errorf("renderErrorPage() should contain error message")
+	}
+
+	// Check HTML structure
+	if !strings.Contains(html, "<!DOCTYPE html>") {
+		t.Errorf("renderErrorPage() should be valid HTML")
+	}
+}
+
+func TestGetClientIP_Direct(t *testing.T) {
+	req := httptest.NewRequest("GET", "/i/test", nil)
+	req.RemoteAddr = "192.168.1.100:12345"
+
+	ip := getClientIP(req)
+
+	if ip != "192.168.1.100" {
+		t.Errorf("getClientIP() = %s, want 192.168.1.100", ip)
+	}
+}
+
+func TestGetClientIP_XForwardedFor(t *testing.T) {
+	req := httptest.NewRequest("GET", "/i/test", nil)
+	req.RemoteAddr = "10.0.0.1:12345"
+	req.Header.Set("X-Forwarded-For", "203.0.113.50, 198.51.100.1")
+
+	ip := getClientIP(req)
+
+	// Should use first IP from X-Forwarded-For
+	if ip != "203.0.113.50" {
+		t.Errorf("getClientIP() = %s, want 203.0.113.50", ip)
+	}
+}
+
+func TestGenerateSubID(t *testing.T) {
+	id1 := utils.GenerateSubID()
+	id2 := utils.GenerateSubID()
+
+	// Should be 10 characters (5 random bytes hex-encoded)
+	if len(id1) != 10 {
+		t.Errorf("GenerateSubID() length = %d, want 10", len(id1))
+	}
+
+	// Should be different each time
+	if id1 == id2 {
+		t.Error("GenerateSubID() should generate different IDs")
+	}
+
+	// Should only contain hex characters
+	for _, c := range id1 {
+		if !isHexDigit(c) {
+			t.Errorf("GenerateSubID() contains non-hex character: %c", c)
+		}
+	}
+}
+
+func isHexDigit(c rune) bool {
+	return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')
+}
+
+func TestHandleInvite_EmptyCode(t *testing.T) {
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+
+	cfg := &config.Config{
+		SiteURL:            "https://vpn.site",
+		TrialDurationHours: 3,
+		TrialRateLimit:     3,
+	}
+
+	srv := NewServer(":8880", mockDB, mockXUI, cfg, "testbot")
+
+	req := httptest.NewRequest("GET", "/i/", nil)
+	rec := httptest.NewRecorder()
+
+	srv.handleInvite(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("handleInvite() status = %d, want %d", rec.Code, http.StatusNotFound)
+	}
+}
+
+func TestHandleInvite_DatabaseError(t *testing.T) {
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+
+	cfg := &config.Config{
+		SiteURL:            "https://vpn.site",
+		TrialDurationHours: 3,
+		TrialRateLimit:     3,
+	}
+
+	srv := NewServer(":8880", mockDB, mockXUI, cfg, "testbot")
+
+	// Mock: database error
+	mockDB.GetInviteByCodeFunc = func(ctx context.Context, code string) (*database.Invite, error) {
+		return nil, gorm.ErrInvalidDB
+	}
+
+	req := httptest.NewRequest("GET", "/i/testcode", nil)
+	rec := httptest.NewRecorder()
+
+	srv.handleInvite(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("handleInvite() status = %d, want %d", rec.Code, http.StatusNotFound)
+	}
+}
+
+func TestRenderTrialPage_HappLink(t *testing.T) {
+	srv := NewServer(":8880", nil, nil, &config.Config{}, "testbot")
+
+	subURL := "https://vpn.site/sub/abc123"
+	html := srv.renderTrialPage("abc123", subURL, "https://t.me/testbot?start=trial_abc123", 3)
+
+	// Check happ:// link is generated correctly
+	expectedHappLink := "happ://add/" + subURL
+	if !strings.Contains(html, expectedHappLink) {
+		t.Errorf("renderTrialPage() should contain happ link '%s'", expectedHappLink)
+	}
+}

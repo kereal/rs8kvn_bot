@@ -19,6 +19,7 @@ type Logger interface {
 }
 
 type DatabaseService interface {
+	Ping(ctx context.Context) error
 	GetByTelegramID(ctx context.Context, telegramID int64) (*database.Subscription, error)
 	GetByID(ctx context.Context, id uint) (*database.Subscription, error)
 	CreateSubscription(ctx context.Context, sub *database.Subscription) error
@@ -33,13 +34,25 @@ type DatabaseService interface {
 	DeleteSubscriptionByID(ctx context.Context, id uint) (*database.Subscription, error)
 	GetTelegramIDsBatch(ctx context.Context, offset, limit int) ([]int64, error)
 	GetTotalTelegramIDCount(ctx context.Context) (int64, error)
+	GetOrCreateInvite(ctx context.Context, referrerTGID int64, code string) (*database.Invite, error)
+	GetInviteByCode(ctx context.Context, code string) (*database.Invite, error)
+	CreateTrialSubscription(ctx context.Context, inviteCode, subscriptionID, clientID string, inboundID int, trafficBytes int64, expiryTime time.Time, subURL string) (*database.Subscription, error)
+	GetSubscriptionBySubscriptionID(ctx context.Context, subscriptionID string) (*database.Subscription, error)
+	BindTrialSubscription(ctx context.Context, subscriptionID string, telegramID int64, username string) (*database.Subscription, error)
+	CountTrialRequestsByIPLastHour(ctx context.Context, ip string) (int, error)
+	CreateTrialRequest(ctx context.Context, ip string) error
+	CleanupExpiredTrials(ctx context.Context, hours int, xuiClient interface {
+		DeleteClient(ctx context.Context, inboundID int, clientID string) error
+	}, inboundID int) (int64, error)
 	Close() error
 }
 
 type XUIClient interface {
+	Ping(ctx context.Context) error
 	Login(ctx context.Context) error
 	AddClient(ctx context.Context, inboundID int, email string, trafficBytes int64, expiryTime time.Time) (*xui.ClientConfig, error)
-	AddClientWithID(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time) (*xui.ClientConfig, error)
+	AddClientWithID(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error)
+	UpdateClient(ctx context.Context, inboundID int, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, tgID int64, comment string) error
 	DeleteClient(ctx context.Context, inboundID int, clientID string) error
 	GetClientTraffic(ctx context.Context, email string) (*xui.ClientTraffic, error)
 	GetSubscriptionLink(baseURL, subID, subPath string) string

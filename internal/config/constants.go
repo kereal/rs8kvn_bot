@@ -75,7 +75,7 @@ const (
 	DefaultTrafficLimitGB = 100
 
 	// SubscriptionResetDay is the day of month for traffic reset (31 = last day)
-	SubscriptionResetDay = 31
+	SubscriptionResetDay = 30
 )
 
 // Backup Constants
@@ -165,4 +165,11 @@ const MaxResponseSize = 1 << 20
 const (
 	CircuitBreakerMaxFailures = 5
 	CircuitBreakerTimeout     = 30 * time.Second
+)
+
+// Trial & Referral Constants
+const (
+	DefaultSiteURL            = "https://vpn.site"
+	DefaultTrialDurationHours = 3
+	DefaultTrialRateLimit     = 3
 )

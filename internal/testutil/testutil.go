@@ -79,22 +79,40 @@ func NewTestDatabaseService(t any) (*database.Service, error) {
 }
 
 type MockDatabaseService struct {
-	mu                            sync.RWMutex
-	Subscriptions                 map[int64]*database.Subscription
-	GetByTelegramIDFunc           func(ctx context.Context, telegramID int64) (*database.Subscription, error)
-	CreateSubscriptionFunc        func(ctx context.Context, sub *database.Subscription) error
-	UpdateSubscriptionFunc        func(ctx context.Context, sub *database.Subscription) error
-	DeleteSubscriptionFunc        func(ctx context.Context, telegramID int64) error
-	GetLatestSubscriptionsFunc    func(ctx context.Context, limit int) ([]database.Subscription, error)
-	GetAllSubscriptionsFunc       func(ctx context.Context) ([]database.Subscription, error)
-	CountActiveSubscriptionsFunc  func(ctx context.Context) (int64, error)
-	CountExpiredSubscriptionsFunc func(ctx context.Context) (int64, error)
-	GetAllTelegramIDsFunc         func(ctx context.Context) ([]int64, error)
-	GetByIDFunc                   func(ctx context.Context, id uint) (*database.Subscription, error)
-	GetTelegramIDByUsernameFunc   func(ctx context.Context, username string) (int64, error)
-	DeleteSubscriptionByIDFunc    func(ctx context.Context, id uint) (*database.Subscription, error)
-	GetTelegramIDsBatchFunc       func(ctx context.Context, offset, limit int) ([]int64, error)
-	GetTotalTelegramIDCountFunc   func(ctx context.Context) (int64, error)
+	mu                                  sync.RWMutex
+	Subscriptions                       map[int64]*database.Subscription
+	PingFunc                            func(ctx context.Context) error
+	GetByTelegramIDFunc                 func(ctx context.Context, telegramID int64) (*database.Subscription, error)
+	CreateSubscriptionFunc              func(ctx context.Context, sub *database.Subscription) error
+	UpdateSubscriptionFunc              func(ctx context.Context, sub *database.Subscription) error
+	DeleteSubscriptionFunc              func(ctx context.Context, telegramID int64) error
+	GetLatestSubscriptionsFunc          func(ctx context.Context, limit int) ([]database.Subscription, error)
+	GetAllSubscriptionsFunc             func(ctx context.Context) ([]database.Subscription, error)
+	CountActiveSubscriptionsFunc        func(ctx context.Context) (int64, error)
+	CountExpiredSubscriptionsFunc       func(ctx context.Context) (int64, error)
+	GetAllTelegramIDsFunc               func(ctx context.Context) ([]int64, error)
+	GetByIDFunc                         func(ctx context.Context, id uint) (*database.Subscription, error)
+	GetTelegramIDByUsernameFunc         func(ctx context.Context, username string) (int64, error)
+	DeleteSubscriptionByIDFunc          func(ctx context.Context, id uint) (*database.Subscription, error)
+	GetTelegramIDsBatchFunc             func(ctx context.Context, offset, limit int) ([]int64, error)
+	GetTotalTelegramIDCountFunc         func(ctx context.Context) (int64, error)
+	GetOrCreateInviteFunc               func(ctx context.Context, referrerTGID int64, code string) (*database.Invite, error)
+	GetInviteByCodeFunc                 func(ctx context.Context, code string) (*database.Invite, error)
+	CreateTrialSubscriptionFunc         func(ctx context.Context, inviteCode, subscriptionID, clientID string, inboundID int, trafficBytes int64, expiryTime time.Time, subURL string) (*database.Subscription, error)
+	GetSubscriptionBySubscriptionIDFunc func(ctx context.Context, subscriptionID string) (*database.Subscription, error)
+	BindTrialSubscriptionFunc           func(ctx context.Context, subscriptionID string, telegramID int64, username string) (*database.Subscription, error)
+	CountTrialRequestsByIPLastHourFunc  func(ctx context.Context, ip string) (int, error)
+	CreateTrialRequestFunc              func(ctx context.Context, ip string) error
+	CleanupExpiredTrialsFunc            func(ctx context.Context, hours int, xuiClient interface {
+		DeleteClient(ctx context.Context, inboundID int, clientID string) error
+	}, inboundID int) (int64, error)
+}
+
+func (m *MockDatabaseService) Ping(ctx context.Context) error {
+	if m.PingFunc != nil {
+		return m.PingFunc(ctx)
+	}
+	return nil
 }
 
 func (m *MockDatabaseService) GetByTelegramID(ctx context.Context, telegramID int64) (*database.Subscription, error) {
@@ -125,9 +143,9 @@ func (m *MockDatabaseService) CreateSubscription(ctx context.Context, sub *datab
 	if m.Subscriptions == nil {
 		m.Subscriptions = make(map[int64]*database.Subscription)
 	}
-	m.mu.Lock()
-	m.Subscriptions[sub.TelegramID] = sub
-	m.mu.Unlock()
+	if sub.TelegramID != 0 {
+		m.Subscriptions[sub.TelegramID] = sub
+	}
 	return nil
 }
 
@@ -140,7 +158,9 @@ func (m *MockDatabaseService) UpdateSubscription(ctx context.Context, sub *datab
 	if m.Subscriptions == nil {
 		m.Subscriptions = make(map[int64]*database.Subscription)
 	}
-	m.Subscriptions[sub.TelegramID] = sub
+	if sub.TelegramID != 0 {
+		m.Subscriptions[sub.TelegramID] = sub
+	}
 	return nil
 }
 
@@ -276,6 +296,81 @@ func (m *MockDatabaseService) Close() error {
 	return nil
 }
 
+func (m *MockDatabaseService) GetOrCreateInvite(ctx context.Context, referrerTGID int64, code string) (*database.Invite, error) {
+	if m.GetOrCreateInviteFunc != nil {
+		return m.GetOrCreateInviteFunc(ctx, referrerTGID, code)
+	}
+	return &database.Invite{Code: code, ReferrerTGID: referrerTGID}, nil
+}
+
+func (m *MockDatabaseService) GetInviteByCode(ctx context.Context, code string) (*database.Invite, error) {
+	if m.GetInviteByCodeFunc != nil {
+		return m.GetInviteByCodeFunc(ctx, code)
+	}
+	return nil, gorm.ErrRecordNotFound
+}
+
+func (m *MockDatabaseService) CreateTrialSubscription(ctx context.Context, inviteCode, subscriptionID, clientID string, inboundID int, trafficBytes int64, expiryTime time.Time, subURL string) (*database.Subscription, error) {
+	if m.CreateTrialSubscriptionFunc != nil {
+		return m.CreateTrialSubscriptionFunc(ctx, inviteCode, subscriptionID, clientID, inboundID, trafficBytes, expiryTime, subURL)
+	}
+	return &database.Subscription{InviteCode: inviteCode, SubscriptionID: subscriptionID, ClientID: clientID, IsTrial: true}, nil
+}
+
+func (m *MockDatabaseService) GetSubscriptionBySubscriptionID(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
+	if m.GetSubscriptionBySubscriptionIDFunc != nil {
+		return m.GetSubscriptionBySubscriptionIDFunc(ctx, subscriptionID)
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, sub := range m.Subscriptions {
+		if sub.SubscriptionID == subscriptionID {
+			return sub, nil
+		}
+	}
+	return nil, gorm.ErrRecordNotFound
+}
+
+func (m *MockDatabaseService) BindTrialSubscription(ctx context.Context, subscriptionID string, telegramID int64, username string) (*database.Subscription, error) {
+	if m.BindTrialSubscriptionFunc != nil {
+		return m.BindTrialSubscriptionFunc(ctx, subscriptionID, telegramID, username)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, sub := range m.Subscriptions {
+		if sub.SubscriptionID == subscriptionID {
+			sub.TelegramID = telegramID
+			sub.Username = username
+			sub.IsTrial = false
+			return sub, nil
+		}
+	}
+	return nil, gorm.ErrRecordNotFound
+}
+
+func (m *MockDatabaseService) CountTrialRequestsByIPLastHour(ctx context.Context, ip string) (int, error) {
+	if m.CountTrialRequestsByIPLastHourFunc != nil {
+		return m.CountTrialRequestsByIPLastHourFunc(ctx, ip)
+	}
+	return 0, nil
+}
+
+func (m *MockDatabaseService) CreateTrialRequest(ctx context.Context, ip string) error {
+	if m.CreateTrialRequestFunc != nil {
+		return m.CreateTrialRequestFunc(ctx, ip)
+	}
+	return nil
+}
+
+func (m *MockDatabaseService) CleanupExpiredTrials(ctx context.Context, hours int, xuiClient interface {
+	DeleteClient(ctx context.Context, inboundID int, clientID string) error
+}, inboundID int) (int64, error) {
+	if m.CleanupExpiredTrialsFunc != nil {
+		return m.CleanupExpiredTrialsFunc(ctx, hours, xuiClient, inboundID)
+	}
+	return 0, nil
+}
+
 func CreateTestSubscription(telegramID int64, username string, status string, expiry time.Time) *database.Subscription {
 	return &database.Subscription{
 		TelegramID:      telegramID,
@@ -291,13 +386,22 @@ func CreateTestSubscription(telegramID int64, username string, status string, ex
 }
 
 type MockXUIClient struct {
+	PingFunc                func(ctx context.Context) error
 	LoginFunc               func(ctx context.Context) error
 	AddClientFunc           func(ctx context.Context, inboundID int, email string, trafficBytes int64, expiryTime time.Time) (*xui.ClientConfig, error)
-	AddClientWithIDFunc     func(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time) (*xui.ClientConfig, error)
+	AddClientWithIDFunc     func(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error)
+	UpdateClientFunc        func(ctx context.Context, inboundID int, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, tgID int64, comment string) error
 	DeleteClientFunc        func(ctx context.Context, inboundID int, clientID string) error
 	GetClientTrafficFunc    func(ctx context.Context, email string) (*xui.ClientTraffic, error)
 	GetSubscriptionLinkFunc func(baseURL, subID, subPath string) string
 	GetExternalURLFunc      func(host string) string
+}
+
+func (m *MockXUIClient) Ping(ctx context.Context) error {
+	if m.PingFunc != nil {
+		return m.PingFunc(ctx)
+	}
+	return nil
 }
 
 func (m *MockXUIClient) Login(ctx context.Context) error {
@@ -320,9 +424,9 @@ func (m *MockXUIClient) AddClient(ctx context.Context, inboundID int, email stri
 	}, nil
 }
 
-func (m *MockXUIClient) AddClientWithID(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time) (*xui.ClientConfig, error) {
+func (m *MockXUIClient) AddClientWithID(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
 	if m.AddClientWithIDFunc != nil {
-		return m.AddClientWithIDFunc(ctx, inboundID, email, clientID, subID, trafficBytes, expiryTime)
+		return m.AddClientWithIDFunc(ctx, inboundID, email, clientID, subID, trafficBytes, expiryTime, resetDays)
 	}
 	return &xui.ClientConfig{
 		ID:         clientID,
@@ -332,6 +436,13 @@ func (m *MockXUIClient) AddClientWithID(ctx context.Context, inboundID int, emai
 		Enable:     true,
 		SubID:      subID,
 	}, nil
+}
+
+func (m *MockXUIClient) UpdateClient(ctx context.Context, inboundID int, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, tgID int64, comment string) error {
+	if m.UpdateClientFunc != nil {
+		return m.UpdateClientFunc(ctx, inboundID, clientID, email, subID, trafficBytes, expiryTime, tgID, comment)
+	}
+	return nil
 }
 
 func (m *MockXUIClient) DeleteClient(ctx context.Context, inboundID int, clientID string) error {

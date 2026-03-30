@@ -162,7 +162,7 @@ func TestAddClientWithID_Success(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	result, err := client.AddClientWithID(ctx, 1, "testuser", "client-id-123", "sub-id-456", 107374182400, time.Now().Add(24*time.Hour))
+	result, err := client.AddClientWithID(ctx, 1, "testuser", "client-id-123", "sub-id-456", 107374182400, time.Now().Add(24*time.Hour), 31)
 	if err != nil {
 		t.Fatalf("AddClientWithID() error = %v", err)
 	}
@@ -204,7 +204,7 @@ func TestAddClientWithID_ServerError(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	_, err = client.AddClientWithID(ctx, 1, "testuser", "client-id", "sub-id", 1000, time.Now())
+	_, err = client.AddClientWithID(ctx, 1, "testuser", "client-id", "sub-id", 1000, time.Now(), 31)
 	// Should not error - the function handles server errors gracefully
 	if err != nil {
 		// This is acceptable - server returned error
@@ -246,7 +246,7 @@ func TestAddClientWithID_InvalidInboundID(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	_, err = client.AddClientWithID(ctx, 0, "testuser", "client-id", "sub-id", 107374182400, time.Now().Add(24*time.Hour))
+	_, err = client.AddClientWithID(ctx, 0, "testuser", "client-id", "sub-id", 107374182400, time.Now().Add(24*time.Hour), 31)
 	if err == nil {
 		t.Fatal("AddClientWithID() should return error for invalid inbound ID")
 	}
@@ -259,7 +259,7 @@ func TestAddClientWithID_EmptyClientID(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	_, err = client.AddClientWithID(ctx, 1, "testuser", "", "sub-id", 107374182400, time.Now().Add(24*time.Hour))
+	_, err = client.AddClientWithID(ctx, 1, "testuser", "", "sub-id", 107374182400, time.Now().Add(24*time.Hour), 31)
 	if err == nil {
 		t.Fatal("AddClientWithID() should return error for empty client ID")
 	}
@@ -272,7 +272,7 @@ func TestAddClientWithID_EmptySubID(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	_, err = client.AddClientWithID(ctx, 1, "testuser", "client-id", "", 107374182400, time.Now().Add(24*time.Hour))
+	_, err = client.AddClientWithID(ctx, 1, "testuser", "client-id", "", 107374182400, time.Now().Add(24*time.Hour), 31)
 	if err == nil {
 		t.Fatal("AddClientWithID() should return error for empty sub ID")
 	}
@@ -471,7 +471,7 @@ func TestAddClientWithID_SuccessFalseButMessageIndicatesSuccess(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	result, err := client.AddClientWithID(ctx, 1, "testuser", "client-id", "sub-id", 1000, time.Now())
+	result, err := client.AddClientWithID(ctx, 1, "testuser", "client-id", "sub-id", 1000, time.Now(), 31)
 	if err != nil {
 		t.Fatalf("AddClientWithID() should not error when message indicates success: %v", err)
 	}
@@ -1104,7 +1104,7 @@ func TestAddClientWithID_LoginError(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	_, err = client.AddClientWithID(ctx, 1, "testuser", "client-id", "sub-id", 1000, time.Now())
+	_, err = client.AddClientWithID(ctx, 1, "testuser", "client-id", "sub-id", 1000, time.Now(), 31)
 	if err == nil {
 		t.Fatal("AddClientWithID() should return error when login returns error")
 	}
@@ -1226,5 +1226,92 @@ func TestTruncateString_UnicodeMayBeSplit(t *testing.T) {
 	// Result should be truncated to 3 bytes (may split unicode)
 	if len(result) > 6 { // 3 bytes + "..."
 		t.Errorf("truncateString result too long: %q", result)
+	}
+}
+
+// UpdateClient tests
+
+func TestUpdateClient_Success(t *testing.T) {
+	loginCalled := false
+	updateClientCalled := false
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/login":
+			loginCalled = true
+			resp := APIResponse{Success: true}
+			json.NewEncoder(w).Encode(resp)
+		case "/panel/api/inbounds/updateClient/test-client-uuid":
+			updateClientCalled = true
+			resp := APIResponse{Success: true, Msg: "Inbound client has been updated."}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(resp)
+		default:
+			t.Errorf("Unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, "admin", "password")
+	if err != nil {
+		t.Fatalf("NewClient() returned error: %v", err)
+	}
+	ctx := context.Background()
+
+	err = client.UpdateClient(ctx, 1, "test-client-uuid", "testuser@example.com", "sub-id-123", 107374182400, time.UnixMilli(0), 12345, "from: @referrer")
+	if err != nil {
+		t.Fatalf("UpdateClient() error = %v", err)
+	}
+
+	if !loginCalled {
+		t.Error("Login was not called")
+	}
+	if !updateClientCalled {
+		t.Error("UpdateClient was not called")
+	}
+}
+
+func TestUpdateClient_Error(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/login":
+			resp := APIResponse{Success: true}
+			json.NewEncoder(w).Encode(resp)
+		case "/panel/api/inbounds/updateClient/test-client-uuid":
+			resp := APIResponse{Success: false, Msg: "Something went wrong"}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(resp)
+		}
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, "admin", "password")
+	if err != nil {
+		t.Fatalf("NewClient() returned error: %v", err)
+	}
+	ctx := context.Background()
+
+	err = client.UpdateClient(ctx, 1, "test-client-uuid", "testuser@example.com", "sub-id-123", 107374182400, time.UnixMilli(0), 12345, "from: @referrer")
+	if err == nil {
+		t.Fatal("UpdateClient() should return error when API returns success=false")
+	}
+}
+
+func TestUpdateClient_EmptyClientID(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := APIResponse{Success: true}
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, "admin", "password")
+	if err != nil {
+		t.Fatalf("NewClient() returned error: %v", err)
+	}
+	ctx := context.Background()
+
+	err = client.UpdateClient(ctx, 1, "", "testuser@example.com", "sub-id-123", 107374182400, time.UnixMilli(0), 12345, "from: @referrer")
+	if err == nil {
+		t.Fatal("UpdateClient() should return error when clientID is empty")
 	}
 }

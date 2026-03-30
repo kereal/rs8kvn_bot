@@ -2,13 +2,15 @@
 
 Telegram bot for distributing VLESS+Reality+Vision proxy subscriptions from 3x-ui panel.
 
-**Version:** v1.9.8 | **Coverage:** ~51% | **License:** MIT
+**Version:** v2.0.0 | **Coverage:** ~51% | **License:** MIT
 
 ## Features
 
 - 📥 Get subscription on demand
 - 📋 View current subscription status
 - 📱 QR code for easy subscription import
+- 🔗 Invite/trial landing page (`/i/{code}`) with one-click Happ setup
+- 👥 Referral system — users generate invite codes for new subscribers
 - 📊 Configurable traffic limit (default 100GB/month)
 - 📅 Auto-renewal on the last day of each month
 - 🔔 Admin notifications on new subscriptions
@@ -209,14 +211,15 @@ Sends a private message to user with Telegram ID 123456789.
 ```
 Sends a private message to user with username "username".
 
-## Health Check
+## Health Check & Web Endpoints
 
-The bot exposes HTTP health check endpoints on port 8880:
+The bot exposes HTTP endpoints on port 8880:
 
 | Endpoint | Description | Status Codes |
 |----------|-------------|--------------|
 | `GET /healthz` | Basic health (process alive, DB and xui status) | 200/503 |
 | `GET /readyz` | Ready state (accepting requests after init) | 200/503 |
+| `GET /i/{code}` | Trial invite landing page | 200/404/429/500 |
 
 Example response:
 ```json
@@ -233,6 +236,19 @@ Example response:
 
 Health checks are integrated with Docker healthcheck in docker-compose.yml.
 
+### Invite/Trial Landing Page
+
+Each user can generate an invite code (`/start` → referral flow). The landing page at `/i/{code}`:
+1. Validates the invite code (404 if invalid)
+2. IP-based rate limiting (429 if exceeded)
+3. Creates a trial subscription in 3x-ui
+4. Renders a mobile-friendly page with:
+   - Happ app download links (Android / iOS)
+   - One-click "Добавить в Happ" button (`happ://add/` deep-link)
+   - Copy-to-clipboard subscription URL
+   - Telegram activation link
+   - Trial duration info
+
 ## CI/CD with GitHub Actions
 
 This project includes a GitHub Actions workflow that automatically:
@@ -244,12 +260,12 @@ This project includes a GitHub Actions workflow that automatically:
 ### Triggers
 
 - Push to `main` branch
-- Git tags (e.g., `v1.9.8`)
+- Git tags (e.g., `v2.0.0`)
 
 ### Images are tagged with
 
 - Branch name (e.g., `main`)
-- Semantic version (e.g., `1.9.6`, `1.9`)
+- Semantic version (e.g., `2.0.0`, `2.0`)
 - Commit SHA
 
 ## Project Structure
@@ -281,7 +297,8 @@ rs8kvn_bot/
 │   ├── database/
 │   │   ├── database.go             # Database models and functions
 │   │   ├── database_test.go        # Database tests
-│   │   └── migrations.go           # Database migrations system
+│   │   ├── migrations/             # SQL migration files
+│   │   └── migrations.go           # Migration runner
 │   ├── health/
 │   │   ├── health.go               # Health check HTTP server
 │   │   └── health_test.go          # Health check tests
@@ -306,6 +323,9 @@ rs8kvn_bot/
 │   │   ├── time_test.go            # Time tests
 │   │   ├── uuid.go                 # UUID and SubID generators
 │   │   └── uuid_test.go            # UUID tests
+│   ├── web/
+│   │   ├── web.go                  # HTTP server, health + invite endpoints
+│   │   └── web_test.go             # Web endpoint tests
 │   └── xui/
 │       ├── breaker.go              # Circuit breaker for x-ui
 │       ├── breaker_test.go         # Circuit breaker tests
@@ -316,7 +336,8 @@ rs8kvn_bot/
 │   ├── tgvpn.db.backup             # Latest backup
 │   └── bot.log                     # Log file
 ├── doc/
-│   └── PLAN.md                     # Unified development plan
+│   ├── PLAN.md                     # Unified development plan
+│   └── HANDOVER.md                 # Session handover summary
 ├── .env.example                     # Example environment configuration
 ├── .env                             # Your configuration (create from .env.example)
 ├── Dockerfile
@@ -333,27 +354,45 @@ rs8kvn_bot/
 
 | Column | Type | Description |
 |--------|------|-------------|
-| `id` | INTEGER | Primary key |
-| `telegram_id` | INTEGER | Telegram chat ID |
-| `username` | TEXT | Telegram username |
-| `client_id` | TEXT | 3x-ui client UUID |
-| `xui_host` | TEXT | 3x-ui panel URL |
+| `id` | INTEGER | Primary key (autoincrement) |
+| `telegram_id` | BIGINT | Telegram chat ID |
+| `username` | VARCHAR(255) | Telegram username |
+| `client_id` | VARCHAR(255) | 3x-ui client UUID |
+| `subscription_id` | VARCHAR(255) | Subscription SubID |
 | `inbound_id` | INTEGER | 3x-ui inbound ID |
-| `traffic_limit` | INTEGER | Traffic limit in bytes |
+| `traffic_limit` | BIGINT | Traffic limit in bytes |
 | `expiry_time` | DATETIME | Subscription expiry date |
-| `status` | TEXT | active/revoked |
-| `subscription_url` | TEXT | Subscription URL |
+| `status` | VARCHAR(50) | active/revoked |
+| `subscription_url` | VARCHAR(512) | Subscription URL |
 | `created_at` | DATETIME | Creation timestamp |
 | `updated_at` | DATETIME | Update timestamp |
 | `deleted_at` | DATETIME | Soft delete timestamp |
+| `invite_code` | VARCHAR(16) | Referral invite code (nullable) |
+| `is_trial` | INTEGER | 1 if trial subscription |
+| `referred_by` | BIGINT | Telegram ID of referrer (nullable) |
+
+### invites
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `code` | VARCHAR(16) | Primary key (invite code) |
+| `referrer_tg_id` | BIGINT | Telegram ID of the user who generated the code |
+| `created_at` | DATETIME | Creation timestamp |
+
+### trial_requests
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | INTEGER | Primary key (autoincrement) |
+| `ip` | VARCHAR(45) | Client IP address |
+| `created_at` | DATETIME | Creation timestamp |
 
 ### schema_migrations
 
 | Column | Type | Description |
 |--------|------|-------------|
-| `id` | INTEGER | Primary key |
-| `name` | TEXT | Migration name |
-| `applied_at` | DATETIME | When migration was applied |
+| `version` | INTEGER | Migration version |
+| `dirty` | INTEGER | Dirty flag (0/1) |
 
 ## Traffic and Expiry
 
@@ -380,6 +419,9 @@ rs8kvn_bot/
 | `HEARTBEAT_INTERVAL` | Heartbeat interval in seconds | 300 | ❌ |
 | `SENTRY_DSN` | Sentry DSN for error tracking | - | ❌ |
 | `HEALTH_CHECK_PORT` | Port for health check HTTP server | 8880 | ❌ |
+| `SITE_URL` | Base URL for invite/trial landing pages | https://vpn.site | ❌ |
+| `TRIAL_DURATION_HOURS` | Trial subscription duration (hours) | 3 | ❌ |
+| `TRIAL_RATE_LIMIT` | Max trial requests per IP per hour | 3 | ❌ |
 
 **Note:** `XUI_USERNAME` and `XUI_PASSWORD` have no defaults - they must be set explicitly.
 
@@ -469,3 +511,7 @@ See `doc/PLAN.md` for the unified development plan including:
 - Technical improvements
 - New features roadmap
 - Implementation phases
+
+### Handover
+
+See `doc/HANDOVER.md` for a session handover summary with architecture, stack, current state, and critical nuances.

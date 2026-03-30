@@ -44,9 +44,7 @@ func (c *SubscriptionCache) Get(telegramID int64) *database.Subscription {
 	}
 
 	if time.Now().After(entry.expiresAt) {
-		// Entry expired, remove it
-		delete(c.items, telegramID)
-		return nil
+		return nil // Expired; Cleanup() handles deletion under write lock
 	}
 
 	return entry.sub

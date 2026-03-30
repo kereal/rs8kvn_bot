@@ -133,7 +133,9 @@ func (h *Handler) HandleDel(ctx context.Context, update tgbotapi.Update) {
 	}
 
 	// Invalidate cache
-	h.invalidateCache(sub.TelegramID)
+	if sub.TelegramID != 0 {
+		h.invalidateCache(sub.TelegramID)
+	}
 
 	// Success
 	logger.Info("Subscription deleted",
@@ -306,7 +308,7 @@ func (h *Handler) HandleSend(ctx context.Context, update tgbotapi.Update) {
 	msg.DisableWebPagePreview = true
 	sentMsg, err := h.bot.Send(msg)
 	if err != nil {
-		logger.Error("Failed to send message",
+		logger.Error("Failed to send admin message",
 			zap.Int64("telegram_id", telegramID),
 			zap.Error(err))
 		h.SendMessage(ctx, chatID, fmt.Sprintf("❌ Ошибка отправки сообщения: %v", err))

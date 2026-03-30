@@ -214,7 +214,7 @@ func (h *Handler) createSubscription(ctx context.Context, chatID int64, username
 	subID := utils.GenerateSubID()
 
 	// Step 2: Add client to 3x-ui panel
-	client, err := h.xui.AddClientWithID(ctx, h.cfg.XUIInboundID, username, clientID, subID, trafficBytes, expiryTime)
+	client, err := h.xui.AddClientWithID(ctx, h.cfg.XUIInboundID, username, clientID, subID, trafficBytes, time.Time{}, 30)
 	if err != nil {
 		logger.Error("Failed to add client to 3x-ui", zap.Error(err))
 

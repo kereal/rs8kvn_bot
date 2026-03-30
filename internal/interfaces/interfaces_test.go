@@ -185,7 +185,7 @@ func (m *mockXUIClient) AddClient(ctx context.Context, inboundID int, email stri
 	return m.clientConfig, nil
 }
 
-func (m *mockXUIClient) AddClientWithID(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time) (*xui.ClientConfig, error) {
+func (m *mockXUIClient) AddClientWithID(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
 	if m.addClientErr != nil {
 		return nil, m.addClientErr
 	}
