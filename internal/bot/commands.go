@@ -73,7 +73,7 @@ func (h *Handler) handleBindTrial(ctx context.Context, chatID int64, username, s
 		logger.Error("Failed to bind trial subscription",
 			zap.Error(err),
 			zap.Int64("chat_id", chatID))
-		h.SendMessage(ctx, chatID, "❌ Не удалось активировать подписку. Возможно, ссылка уже была использована или истекла.")
+		h.SendMessage(ctx, chatID, "❌ Не удалось активировать подписку. Возможно, ссылка уже была использована.")
 		return
 	}
 

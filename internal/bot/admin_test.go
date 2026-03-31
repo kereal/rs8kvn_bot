@@ -1052,9 +1052,6 @@ func TestHandleAdminStats_Success(t *testing.T) {
 	mockDB.CountActiveSubscriptionsFunc = func(ctx context.Context) (int64, error) {
 		return 80, nil
 	}
-	mockDB.CountExpiredSubscriptionsFunc = func(ctx context.Context) (int64, error) {
-		return 20, nil
-	}
 
 	ctx := context.Background()
 	handler.handleAdminStats(ctx, 123456, "admin", 1)
@@ -1062,7 +1059,6 @@ func TestHandleAdminStats_Success(t *testing.T) {
 	assert.True(t, mockBot.SendCalled)
 	assert.Contains(t, mockBot.LastSentText, "100")
 	assert.Contains(t, mockBot.LastSentText, "80")
-	assert.Contains(t, mockBot.LastSentText, "20")
 }
 
 func TestHandleAdminStats_PartialDatabaseError(t *testing.T) {
