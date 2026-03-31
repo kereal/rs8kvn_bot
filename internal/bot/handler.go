@@ -22,6 +22,15 @@ const (
 	CacheTTL     = 5 * time.Minute
 )
 
+// pendingInvite хранит информацию о pending invite коде с TTL
+type pendingInvite struct {
+	code      string
+	expiresAt time.Time
+}
+
+// PendingInviteTTL — время жизни pending invite в кэше
+const PendingInviteTTL = 60 * time.Minute
+
 type Handler struct {
 	bot           interfaces.BotAPI
 	cfg           *config.Config
@@ -31,6 +40,10 @@ type Handler struct {
 	cache         *SubscriptionCache
 	subCreationMu sync.Mutex
 	inProgress    map[int64]struct{}
+	referrals     map[int64]int64
+	referralsMu   sync.RWMutex
+	pendingInvites map[int64]pendingInvite // chatID -> invite_code
+	pendingMu      sync.RWMutex
 }
 
 func NewHandler(bot interfaces.BotAPI, cfg *config.Config, db interfaces.DatabaseService, xuiClient interfaces.XUIClient) *Handler {
@@ -43,6 +56,10 @@ func NewHandler(bot interfaces.BotAPI, cfg *config.Config, db interfaces.Databas
 		cache:         NewSubscriptionCache(CacheMaxSize, CacheTTL),
 		subCreationMu: sync.Mutex{},
 		inProgress:    make(map[int64]struct{}),
+		referrals:     make(map[int64]int64),
+		referralsMu:   sync.RWMutex{},
+		pendingInvites: make(map[int64]pendingInvite),
+		pendingMu:      sync.RWMutex{},
 	}
 }
 

@@ -99,8 +99,6 @@ func TestRotateBackups_WithBackup(t *testing.T) {
 	assert.True(t, os.IsNotExist(err), "Original backup file should be renamed")
 }
 
-
-
 func TestRotateBackups_Cleanup(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")

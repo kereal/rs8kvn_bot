@@ -282,6 +282,9 @@ func (m *MockDatabaseService) DeleteSubscriptionByID(ctx context.Context, id uin
 }
 
 func (m *MockDatabaseService) GetTelegramIDsBatch(ctx context.Context, offset, limit int) ([]int64, error) {
+	if m.GetTelegramIDsBatchFunc != nil {
+		return m.GetTelegramIDsBatchFunc(ctx, offset, limit)
+	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	var ids []int64
@@ -299,6 +302,9 @@ func (m *MockDatabaseService) GetTelegramIDsBatch(ctx context.Context, offset, l
 }
 
 func (m *MockDatabaseService) GetTotalTelegramIDCount(ctx context.Context) (int64, error) {
+	if m.GetTotalTelegramIDCountFunc != nil {
+		return m.GetTotalTelegramIDCountFunc(ctx)
+	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return int64(len(m.Subscriptions)), nil

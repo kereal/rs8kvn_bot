@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -140,6 +141,17 @@ func (c *Config) validate() error {
 
 	if c.XUISubPath == "" {
 		return fmt.Errorf("XUI_SUB_PATH cannot be empty")
+	}
+
+	// Проверка на path traversal (защита от ../../../etc/passwd)
+	if strings.Contains(c.XUISubPath, "..") || strings.Contains(c.XUISubPath, "/") {
+		return fmt.Errorf("XUI_SUB_PATH cannot contain '..' or '/'")
+	}
+
+	// Проверка на допустимые символы (только буквы, цифры, дефис, подчеркивание)
+	validSubPath := regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+	if !validSubPath.MatchString(c.XUISubPath) {
+		return fmt.Errorf("XUI_SUB_PATH can only contain letters, numbers, underscore, and hyphen")
 	}
 
 	// Traffic limit validation

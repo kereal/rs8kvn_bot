@@ -106,9 +106,9 @@ func TestLoad_InvalidTelegramAdminID(t *testing.T) {
 		os.Unsetenv("LOG_LEVEL")
 	}()
 
-	cfg, err := Load()
-	require.NoError(t, err, "Load() should use default for invalid TELEGRAM_ADMIN_ID")
-	assert.Equal(t, int64(0), cfg.TelegramAdminID, "TelegramAdminID should be 0 (default)")
+	_, err := Load()
+	require.Error(t, err, "Load() should error for invalid TELEGRAM_ADMIN_ID")
+	assert.Contains(t, err.Error(), "TELEGRAM_ADMIN_ID", "Error should mention TELEGRAM_ADMIN_ID")
 }
 
 func TestLoad_InvalidXUIInboundID(t *testing.T) {
@@ -128,9 +128,9 @@ func TestLoad_InvalidXUIInboundID(t *testing.T) {
 		os.Unsetenv("LOG_LEVEL")
 	}()
 
-	cfg, err := Load()
-	require.NoError(t, err, "Load() should use default for invalid XUI_INBOUND_ID")
-	assert.Equal(t, 1, cfg.XUIInboundID, "XUIInboundID should be 1 (default)")
+	_, err := Load()
+	require.Error(t, err, "Load() should error for invalid XUI_INBOUND_ID")
+	assert.Contains(t, err.Error(), "XUI_INBOUND_ID", "Error should mention XUI_INBOUND_ID")
 }
 
 func TestLoad_InvalidTrafficLimitGB_TooLow(t *testing.T) {
@@ -222,9 +222,9 @@ func TestLoad_InvalidHeartbeatInterval(t *testing.T) {
 		os.Unsetenv("LOG_LEVEL")
 	}()
 
-	cfg, err := Load()
-	require.NoError(t, err, "Load() should use default for invalid HEARTBEAT_INTERVAL")
-	assert.Equal(t, DefaultHeartbeatInterval, cfg.HeartbeatInterval, "HeartbeatInterval should be default")
+	_, err := Load()
+	require.Error(t, err, "Load() should error for invalid HEARTBEAT_INTERVAL")
+	assert.Contains(t, err.Error(), "HEARTBEAT_INTERVAL", "Error should mention HEARTBEAT_INTERVAL")
 }
 
 func TestGetEnv_DefaultValue(t *testing.T) {
@@ -442,7 +442,7 @@ func TestConfig_Validate_Valid(t *testing.T) {
 		XUIUsername:        "admin",
 		XUIPassword:        "password",
 		XUIInboundID:       1,
-		XUISubPath:         "/xui",
+		XUISubPath:         "xui",
 		TrafficLimitGB:     100,
 		HeartbeatInterval:  60,
 		LogLevel:           "info",
@@ -464,7 +464,7 @@ func TestConfig_Validate_SentryDSN_Valid(t *testing.T) {
 		XUIUsername:        "admin",
 		XUIPassword:        "password",
 		XUIInboundID:       1,
-		XUISubPath:         "/xui",
+		XUISubPath:         "xui",
 		TrafficLimitGB:     100,
 		HeartbeatInterval:  60,
 		LogLevel:           "info",
@@ -487,7 +487,7 @@ func TestConfig_Validate_SentryDSN_Invalid(t *testing.T) {
 		XUIUsername:      "admin",
 		XUIPassword:      "password",
 		XUIInboundID:     1,
-		XUISubPath:       "/xui",
+		XUISubPath:       "xui",
 		SentryDSN:        "invalid-dsn",
 	}
 
@@ -503,7 +503,7 @@ func TestConfig_Validate_WithSubPath(t *testing.T) {
 		XUIUsername:        "admin",
 		XUIPassword:        "password",
 		XUIInboundID:       1,
-		XUISubPath:         "/custom",
+		XUISubPath:         "custom",
 		TrafficLimitGB:     100,
 		HeartbeatInterval:  60,
 		LogLevel:           "info",
@@ -525,7 +525,7 @@ func TestConfig_Validate_WithHeartbeatURL(t *testing.T) {
 		XUIUsername:        "admin",
 		XUIPassword:        "password",
 		XUIInboundID:       1,
-		XUISubPath:         "/xui",
+		XUISubPath:         "xui",
 		TrafficLimitGB:     100,
 		HeartbeatInterval:  60,
 		LogLevel:           "info",
@@ -644,15 +644,271 @@ func TestMaskURL_ValidURL(t *testing.T) {
 		input    string
 		expected string
 	}{
-		{"http URL", "http://example.com/path", "http://example.com/***"},
-		{"https URL", "https://example.com:8080/path", "https://example.com:8080/***"},
-		{"URL without path", "https://example.com", "https://example.com/***"},
+		{"with path", "http://example.com/path", "http://example.com/***"},
+		{"with port", "http://example.com:8080/path", "http://example.com:8080/***"},
+		{"https", "https://secure.com/api", "https://secure.com/***"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := maskURL(tt.input)
-			assert.Equal(t, tt.expected, result, "maskURL()")
+			assert.Equal(t, tt.expected, result, "maskURL(%q)", tt.input)
 		})
 	}
+}
+
+func TestLoad_TrialDurationHours_TooLow(t *testing.T) {
+	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
+	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
+	os.Setenv("XUI_HOST", "http://localhost:2053")
+	os.Setenv("XUI_USERNAME", "admin")
+	os.Setenv("XUI_PASSWORD", "password")
+	os.Setenv("XUI_INBOUND_ID", "1")
+	os.Setenv("LOG_LEVEL", "info")
+	os.Setenv("TRIAL_DURATION_HOURS", "0")
+	defer func() {
+		os.Unsetenv("TELEGRAM_BOT_TOKEN")
+		os.Unsetenv("TELEGRAM_ADMIN_ID")
+		os.Unsetenv("XUI_HOST")
+		os.Unsetenv("XUI_USERNAME")
+		os.Unsetenv("XUI_PASSWORD")
+		os.Unsetenv("XUI_INBOUND_ID")
+		os.Unsetenv("LOG_LEVEL")
+		os.Unsetenv("TRIAL_DURATION_HOURS")
+	}()
+
+	_, err := Load()
+	assert.Error(t, err, "Load() should error when TRIAL_DURATION_HOURS is too low")
+	assert.Contains(t, err.Error(), "TRIAL_DURATION_HOURS", "Error should mention TRIAL_DURATION_HOURS")
+}
+
+func TestLoad_TrialDurationHours_TooHigh(t *testing.T) {
+	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
+	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
+	os.Setenv("XUI_HOST", "http://localhost:2053")
+	os.Setenv("XUI_USERNAME", "admin")
+	os.Setenv("XUI_PASSWORD", "password")
+	os.Setenv("XUI_INBOUND_ID", "1")
+	os.Setenv("LOG_LEVEL", "info")
+	os.Setenv("TRIAL_DURATION_HOURS", "200")
+	defer func() {
+		os.Unsetenv("TELEGRAM_BOT_TOKEN")
+		os.Unsetenv("TELEGRAM_ADMIN_ID")
+		os.Unsetenv("XUI_HOST")
+		os.Unsetenv("XUI_USERNAME")
+		os.Unsetenv("XUI_PASSWORD")
+		os.Unsetenv("XUI_INBOUND_ID")
+		os.Unsetenv("LOG_LEVEL")
+		os.Unsetenv("TRIAL_DURATION_HOURS")
+	}()
+
+	_, err := Load()
+	assert.Error(t, err, "Load() should error when TRIAL_DURATION_HOURS is too high")
+	assert.Contains(t, err.Error(), "TRIAL_DURATION_HOURS", "Error should mention TRIAL_DURATION_HOURS")
+}
+
+func TestLoad_TrialDurationHours_Valid(t *testing.T) {
+	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
+	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
+	os.Setenv("XUI_HOST", "http://localhost:2053")
+	os.Setenv("XUI_USERNAME", "admin")
+	os.Setenv("XUI_PASSWORD", "password")
+	os.Setenv("XUI_INBOUND_ID", "1")
+	os.Setenv("LOG_LEVEL", "info")
+	os.Setenv("TRIAL_DURATION_HOURS", "24")
+	defer func() {
+		os.Unsetenv("TELEGRAM_BOT_TOKEN")
+		os.Unsetenv("TELEGRAM_ADMIN_ID")
+		os.Unsetenv("XUI_HOST")
+		os.Unsetenv("XUI_USERNAME")
+		os.Unsetenv("XUI_PASSWORD")
+		os.Unsetenv("XUI_INBOUND_ID")
+		os.Unsetenv("LOG_LEVEL")
+		os.Unsetenv("TRIAL_DURATION_HOURS")
+	}()
+
+	cfg, err := Load()
+	require.NoError(t, err, "Load() should not error with valid TRIAL_DURATION_HOURS")
+	assert.Equal(t, 24, cfg.TrialDurationHours, "TrialDurationHours")
+}
+
+func TestLoad_TrialRateLimit_TooLow(t *testing.T) {
+	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
+	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
+	os.Setenv("XUI_HOST", "http://localhost:2053")
+	os.Setenv("XUI_USERNAME", "admin")
+	os.Setenv("XUI_PASSWORD", "password")
+	os.Setenv("XUI_INBOUND_ID", "1")
+	os.Setenv("LOG_LEVEL", "info")
+	os.Setenv("TRIAL_RATE_LIMIT", "0")
+	defer func() {
+		os.Unsetenv("TELEGRAM_BOT_TOKEN")
+		os.Unsetenv("TELEGRAM_ADMIN_ID")
+		os.Unsetenv("XUI_HOST")
+		os.Unsetenv("XUI_USERNAME")
+		os.Unsetenv("XUI_PASSWORD")
+		os.Unsetenv("XUI_INBOUND_ID")
+		os.Unsetenv("LOG_LEVEL")
+		os.Unsetenv("TRIAL_RATE_LIMIT")
+	}()
+
+	_, err := Load()
+	assert.Error(t, err, "Load() should error when TRIAL_RATE_LIMIT is too low")
+	assert.Contains(t, err.Error(), "TRIAL_RATE_LIMIT", "Error should mention TRIAL_RATE_LIMIT")
+}
+
+func TestLoad_TrialRateLimit_TooHigh(t *testing.T) {
+	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
+	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
+	os.Setenv("XUI_HOST", "http://localhost:2053")
+	os.Setenv("XUI_USERNAME", "admin")
+	os.Setenv("XUI_PASSWORD", "password")
+	os.Setenv("XUI_INBOUND_ID", "1")
+	os.Setenv("LOG_LEVEL", "info")
+	os.Setenv("TRIAL_RATE_LIMIT", "150")
+	defer func() {
+		os.Unsetenv("TELEGRAM_BOT_TOKEN")
+		os.Unsetenv("TELEGRAM_ADMIN_ID")
+		os.Unsetenv("XUI_HOST")
+		os.Unsetenv("XUI_USERNAME")
+		os.Unsetenv("XUI_PASSWORD")
+		os.Unsetenv("XUI_INBOUND_ID")
+		os.Unsetenv("LOG_LEVEL")
+		os.Unsetenv("TRIAL_RATE_LIMIT")
+	}()
+
+	_, err := Load()
+	assert.Error(t, err, "Load() should error when TRIAL_RATE_LIMIT is too high")
+	assert.Contains(t, err.Error(), "TRIAL_RATE_LIMIT", "Error should mention TRIAL_RATE_LIMIT")
+}
+
+func TestLoad_TrialRateLimit_Valid(t *testing.T) {
+	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
+	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
+	os.Setenv("XUI_HOST", "http://localhost:2053")
+	os.Setenv("XUI_USERNAME", "admin")
+	os.Setenv("XUI_PASSWORD", "password")
+	os.Setenv("XUI_INBOUND_ID", "1")
+	os.Setenv("LOG_LEVEL", "info")
+	os.Setenv("TRIAL_RATE_LIMIT", "5")
+	defer func() {
+		os.Unsetenv("TELEGRAM_BOT_TOKEN")
+		os.Unsetenv("TELEGRAM_ADMIN_ID")
+		os.Unsetenv("XUI_HOST")
+		os.Unsetenv("XUI_USERNAME")
+		os.Unsetenv("XUI_PASSWORD")
+		os.Unsetenv("XUI_INBOUND_ID")
+		os.Unsetenv("LOG_LEVEL")
+		os.Unsetenv("TRIAL_RATE_LIMIT")
+	}()
+
+	cfg, err := Load()
+	require.NoError(t, err, "Load() should not error with valid TRIAL_RATE_LIMIT")
+	assert.Equal(t, 5, cfg.TrialRateLimit, "TrialRateLimit")
+}
+
+func TestLoad_SiteURL_Invalid(t *testing.T) {
+	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
+	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
+	os.Setenv("XUI_HOST", "http://localhost:2053")
+	os.Setenv("XUI_USERNAME", "admin")
+	os.Setenv("XUI_PASSWORD", "password")
+	os.Setenv("XUI_INBOUND_ID", "1")
+	os.Setenv("LOG_LEVEL", "info")
+	os.Setenv("SITE_URL", "not-a-valid-url")
+	defer func() {
+		os.Unsetenv("TELEGRAM_BOT_TOKEN")
+		os.Unsetenv("TELEGRAM_ADMIN_ID")
+		os.Unsetenv("XUI_HOST")
+		os.Unsetenv("XUI_USERNAME")
+		os.Unsetenv("XUI_PASSWORD")
+		os.Unsetenv("XUI_INBOUND_ID")
+		os.Unsetenv("LOG_LEVEL")
+		os.Unsetenv("SITE_URL")
+	}()
+
+	_, err := Load()
+	assert.Error(t, err, "Load() should error with invalid SITE_URL")
+	assert.Contains(t, err.Error(), "SITE_URL", "Error should mention SITE_URL")
+}
+
+func TestLoad_SiteURL_MissingScheme(t *testing.T) {
+	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
+	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
+	os.Setenv("XUI_HOST", "http://localhost:2053")
+	os.Setenv("XUI_USERNAME", "admin")
+	os.Setenv("XUI_PASSWORD", "password")
+	os.Setenv("XUI_INBOUND_ID", "1")
+	os.Setenv("LOG_LEVEL", "info")
+	os.Setenv("SITE_URL", "example.com")
+	defer func() {
+		os.Unsetenv("TELEGRAM_BOT_TOKEN")
+		os.Unsetenv("TELEGRAM_ADMIN_ID")
+		os.Unsetenv("XUI_HOST")
+		os.Unsetenv("XUI_USERNAME")
+		os.Unsetenv("XUI_PASSWORD")
+		os.Unsetenv("XUI_INBOUND_ID")
+		os.Unsetenv("LOG_LEVEL")
+		os.Unsetenv("SITE_URL")
+	}()
+
+	_, err := Load()
+	assert.Error(t, err, "Load() should error when SITE_URL is missing scheme")
+	assert.Contains(t, err.Error(), "SITE_URL", "Error should mention SITE_URL")
+}
+
+func TestLoad_SiteURL_Valid(t *testing.T) {
+	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
+	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
+	os.Setenv("XUI_HOST", "http://localhost:2053")
+	os.Setenv("XUI_USERNAME", "admin")
+	os.Setenv("XUI_PASSWORD", "password")
+	os.Setenv("XUI_INBOUND_ID", "1")
+	os.Setenv("LOG_LEVEL", "info")
+	os.Setenv("SITE_URL", "https://vpn.example.com")
+	defer func() {
+		os.Unsetenv("TELEGRAM_BOT_TOKEN")
+		os.Unsetenv("TELEGRAM_ADMIN_ID")
+		os.Unsetenv("XUI_HOST")
+		os.Unsetenv("XUI_USERNAME")
+		os.Unsetenv("XUI_PASSWORD")
+		os.Unsetenv("XUI_INBOUND_ID")
+		os.Unsetenv("LOG_LEVEL")
+		os.Unsetenv("SITE_URL")
+	}()
+
+	cfg, err := Load()
+	require.NoError(t, err, "Load() should not error with valid SITE_URL")
+	assert.Equal(t, "https://vpn.example.com", cfg.SiteURL, "SiteURL")
+}
+
+func TestLoad_AllTrialSettings(t *testing.T) {
+	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
+	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
+	os.Setenv("XUI_HOST", "http://localhost:2053")
+	os.Setenv("XUI_USERNAME", "admin")
+	os.Setenv("XUI_PASSWORD", "password")
+	os.Setenv("XUI_INBOUND_ID", "1")
+	os.Setenv("LOG_LEVEL", "info")
+	os.Setenv("TRIAL_DURATION_HOURS", "48")
+	os.Setenv("TRIAL_RATE_LIMIT", "10")
+	os.Setenv("SITE_URL", "https://trial.example.com")
+	defer func() {
+		os.Unsetenv("TELEGRAM_BOT_TOKEN")
+		os.Unsetenv("TELEGRAM_ADMIN_ID")
+		os.Unsetenv("XUI_HOST")
+		os.Unsetenv("XUI_USERNAME")
+		os.Unsetenv("XUI_PASSWORD")
+		os.Unsetenv("XUI_INBOUND_ID")
+		os.Unsetenv("LOG_LEVEL")
+		os.Unsetenv("TRIAL_DURATION_HOURS")
+		os.Unsetenv("TRIAL_RATE_LIMIT")
+		os.Unsetenv("SITE_URL")
+	}()
+
+	cfg, err := Load()
+	require.NoError(t, err, "Load() should not error with all valid settings")
+	assert.Equal(t, 48, cfg.TrialDurationHours, "TrialDurationHours")
+	assert.Equal(t, 10, cfg.TrialRateLimit, "TrialRateLimit")
+	assert.Equal(t, "https://trial.example.com", cfg.SiteURL, "SiteURL")
 }

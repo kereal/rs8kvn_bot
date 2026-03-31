@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/stretchr/testify/assert"
@@ -186,4 +187,134 @@ func TestHandleUpdate_UnknownCommand(t *testing.T) {
 
 	// Should not panic
 	handleUpdate(ctx, handler, update)
+}
+
+// TestStartBackupScheduler_ContextCancellation тестирует остановку scheduler при отмене контекста
+func TestStartBackupScheduler_ContextCancellation(t *testing.T) {
+	// Создаём временный файл для имитации БД
+	tmpFile := t.TempDir() + "/test.db"
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Запускаем scheduler в горутине
+	done := make(chan struct{})
+	go func() {
+		startBackupScheduler(ctx, tmpFile)
+		close(done)
+	}()
+
+	// Отменяем контекст почти сразу
+	cancel()
+
+	// Ждём завершения с таймаутом
+	select {
+	case <-done:
+		// Успешно завершился
+	case <-time.After(2 * time.Second):
+		t.Fatal("Backup scheduler did not stop after context cancellation")
+	}
+}
+
+// TestStartTrialCleanupScheduler_ContextCancellation тестирует остановку cleanup scheduler
+func TestStartTrialCleanupScheduler_ContextCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Запускаем scheduler в горутине с nil параметрами (он не будет выполнять действия до тикера)
+	done := make(chan struct{})
+	go func() {
+		// Используем nil для db и xui — ticker срабатывает через час, но мы отменим контекст раньше
+		startTrialCleanupScheduler(ctx, nil, nil, 1, 3)
+		close(done)
+	}()
+
+	// Отменяем контекст
+	cancel()
+
+	// Ждём завершения с таймаутом
+	select {
+	case <-done:
+		// Успешно завершился
+	case <-time.After(2 * time.Second):
+		t.Fatal("Trial cleanup scheduler did not stop after context cancellation")
+	}
+}
+
+// TestHandleUpdateSafely_PanicInHandler тестирует recovery при панике внутри handler
+func TestHandleUpdateSafely_PanicInHandler(t *testing.T) {
+	cfg := &config.Config{
+		TelegramAdminID: 123456,
+		TrafficLimitGB:  50,
+	}
+	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	handler := bot.NewHandler(mockBot, cfg, mockDB, mockXUI)
+	ctx := context.Background()
+
+	update := tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat: &tgbotapi.Chat{ID: 123456},
+			From: &tgbotapi.User{ID: 123456, UserName: "testuser"},
+			Text: "/start",
+		},
+	}
+
+	// Должно завершиться без паники благодаря recover
+	assert.NotPanics(t, func() {
+		handleUpdateSafely(ctx, handler, update)
+	})
+}
+
+// TestGetVersion_WithLdflags тестирует getVersion при различных сценариях
+func TestGetVersion_WithLdflags(t *testing.T) {
+	t.Run("dev version", func(t *testing.T) {
+		v := getVersion()
+		assert.NotEmpty(t, v)
+		assert.Contains(t, v, "rs8kvn_bot@")
+	})
+}
+
+// TestHandleUpdate_NilMessage тестирует обработку update с nil Message
+func TestHandleUpdate_NilMessage(t *testing.T) {
+	cfg := &config.Config{
+		TelegramAdminID: 123456,
+		TrafficLimitGB:  50,
+	}
+	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	handler := bot.NewHandler(mockBot, cfg, mockDB, mockXUI)
+	ctx := context.Background()
+
+	update := tgbotapi.Update{}
+
+	assert.NotPanics(t, func() {
+		handleUpdate(ctx, handler, update)
+	})
+}
+
+// TestHandleUpdate_CallbackWithNilMessage тестирует callback с nil Message
+func TestHandleUpdate_CallbackWithNilMessage(t *testing.T) {
+	cfg := &config.Config{
+		TelegramAdminID: 123456,
+		TrafficLimitGB:  50,
+	}
+	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	handler := bot.NewHandler(mockBot, cfg, mockDB, mockXUI)
+	ctx := context.Background()
+
+	update := tgbotapi.Update{
+		CallbackQuery: &tgbotapi.CallbackQuery{
+			ID:      "test-callback-id",
+			Data:    "test_data",
+			From:    &tgbotapi.User{ID: 123456, UserName: "testuser"},
+			Message: nil,
+		},
+	}
+
+	assert.NotPanics(t, func() {
+		handleUpdate(ctx, handler, update)
+	})
 }
