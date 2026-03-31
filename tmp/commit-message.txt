@@ -1,0 +1,10 @@
+refactor: extract BotConfig and SubscriptionService, improve test coverage
+
+- Extract BotConfig struct with full bot metadata (username, ID, capabilities)
+- Create SubscriptionService layer for subscription CRUD operations
+- Add admin send rate limiting with sync.Map
+- Add stack traces to panic recovery in Sentry
+- Simplify subscription flow by delegating to service layer
+- Update all tests to use new BotConfig and service mocks
+- Remove doc/PLAN.md, consolidate into doc/IMPROVEMENTS.md
+- Add test helpers for cleaner test setup
