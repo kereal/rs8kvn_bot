@@ -3,6 +3,7 @@ package bot
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 
 	"rs8kvn_bot/internal/config"
@@ -14,6 +15,7 @@ import (
 
 // mockBotAPIForMessage implements interfaces.BotAPI for message tests
 type mockBotAPIForMessage struct {
+	mu          sync.Mutex
 	sendFunc    func(c tgbotapi.Chattable) (tgbotapi.Message, error)
 	requestFunc func(c tgbotapi.Chattable) (*tgbotapi.APIResponse, error)
 	sendCalled  int
@@ -21,6 +23,8 @@ type mockBotAPIForMessage struct {
 }
 
 func (m *mockBotAPIForMessage) Send(c tgbotapi.Chattable) (tgbotapi.Message, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.sendCalled++
 	m.lastMessage = c
 	if m.sendFunc != nil {
