@@ -102,6 +102,7 @@ type MockDatabaseService struct {
 	GetInviteByCodeFunc                 func(ctx context.Context, code string) (*database.Invite, error)
 	CreateTrialSubscriptionFunc         func(ctx context.Context, inviteCode, subscriptionID, clientID string, inboundID int, trafficBytes int64, expiryTime time.Time, subURL string) (*database.Subscription, error)
 	GetSubscriptionBySubscriptionIDFunc func(ctx context.Context, subscriptionID string) (*database.Subscription, error)
+	GetTrialSubscriptionBySubIDFunc     func(ctx context.Context, subscriptionID string) (*database.Subscription, error)
 	BindTrialSubscriptionFunc           func(ctx context.Context, subscriptionID string, telegramID int64, username string) (*database.Subscription, error)
 	CountTrialRequestsByIPLastHourFunc  func(ctx context.Context, ip string) (int, error)
 	CreateTrialRequestFunc              func(ctx context.Context, ip string) error
@@ -343,6 +344,20 @@ func (m *MockDatabaseService) GetSubscriptionBySubscriptionID(ctx context.Contex
 	defer m.mu.RUnlock()
 	for _, sub := range m.Subscriptions {
 		if sub.SubscriptionID == subscriptionID {
+			return sub, nil
+		}
+	}
+	return nil, gorm.ErrRecordNotFound
+}
+
+func (m *MockDatabaseService) GetTrialSubscriptionBySubID(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
+	if m.GetTrialSubscriptionBySubIDFunc != nil {
+		return m.GetTrialSubscriptionBySubIDFunc(ctx, subscriptionID)
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, sub := range m.Subscriptions {
+		if sub.SubscriptionID == subscriptionID && sub.IsTrial {
 			return sub, nil
 		}
 	}

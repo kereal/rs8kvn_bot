@@ -100,6 +100,9 @@ func (m *mockDBServiceForMenu) CreateTrialSubscription(ctx context.Context, invi
 func (m *mockDBServiceForMenu) GetSubscriptionBySubscriptionID(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
 	return nil, nil
 }
+func (m *mockDBServiceForMenu) GetTrialSubscriptionBySubID(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
+	return nil, nil
+}
 func (m *mockDBServiceForMenu) BindTrialSubscription(ctx context.Context, subscriptionID string, telegramID int64, username string) (*database.Subscription, error) {
 	return nil, nil
 }

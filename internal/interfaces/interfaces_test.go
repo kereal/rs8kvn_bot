@@ -184,6 +184,15 @@ func (m *mockDatabaseService) BindTrialSubscription(ctx context.Context, subscri
 	return nil, fmt.Errorf("trial subscription not found")
 }
 
+func (m *mockDatabaseService) GetTrialSubscriptionBySubID(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
+	for _, sub := range m.subscriptions {
+		if sub.SubscriptionID == subscriptionID && sub.IsTrial {
+			return sub, nil
+		}
+	}
+	return nil, fmt.Errorf("trial subscription not found")
+}
+
 func (m *mockDatabaseService) CountTrialRequestsByIPLastHour(ctx context.Context, ip string) (int, error) {
 	if m.trialRequests == nil {
 		return 0, nil

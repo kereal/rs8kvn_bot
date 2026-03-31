@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"rs8kvn_bot/internal/config"
+	"rs8kvn_bot/internal/database"
 	"rs8kvn_bot/internal/interfaces"
 	"rs8kvn_bot/internal/logger"
 	"rs8kvn_bot/internal/utils"
@@ -213,6 +214,18 @@ func (s *Server) handleInvite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Проверяем куку на существующий trial
+	existingSub, err := s.getExistingTrialFromCookie(r, ctx, code)
+	if err == nil && existingSub != nil {
+		// Trial уже создан — показываем существующий
+		logger.Info("Existing trial found via cookie", zap.String("sub_id", existingSub.SubscriptionID))
+		telegramLink := "https://t.me/" + s.botUsername + "?start=trial_" + existingSub.SubscriptionID
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(s.renderTrialPage(existingSub.SubscriptionID, existingSub.SubscriptionURL, telegramLink, s.cfg.TrialDurationHours)))
+		return
+	}
+
 	ip := getClientIP(r)
 
 	count, err := s.db.CountTrialRequestsByIPLastHour(ctx, ip)
@@ -279,10 +292,51 @@ func (s *Server) handleInvite(w http.ResponseWriter, r *http.Request) {
 		zap.String("ip", ip),
 		zap.Int64("referrer_tg_id", invite.ReferrerTGID))
 
+	// Устанавливаем куку на 3 часа
+	http.SetCookie(w, &http.Cookie{
+		Name:     "rs8kvn_trial_" + code,
+		Value:    subID,
+		Path:     "/i/" + code,
+		Expires:  time.Now().Add(time.Duration(s.cfg.TrialDurationHours) * time.Hour),
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteStrictMode,
+	})
+
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	telegramLink := "https://t.me/" + s.botUsername + "?start=trial_" + subID
 	w.Write([]byte(s.renderTrialPage(subID, subURL, telegramLink, s.cfg.TrialDurationHours)))
+}
+
+// getExistingTrialFromCookie проверяет куку и возвращает существующий trial
+func (s *Server) getExistingTrialFromCookie(r *http.Request, ctx context.Context, code string) (*database.Subscription, error) {
+	cookie, err := r.Cookie("rs8kvn_trial_" + code)
+	if err != nil {
+		return nil, err
+	}
+
+	subID := cookie.Value
+	if subID == "" {
+		return nil, fmt.Errorf("empty cookie value")
+	}
+
+	sub, err := s.db.GetTrialSubscriptionBySubID(ctx, subID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Проверяем, что это всё ещё trial и не активирован
+	if !sub.IsTrial || sub.TelegramID != 0 {
+		return nil, fmt.Errorf("not a valid trial")
+	}
+
+	// Проверяем, что не истёк
+	if time.Now().After(sub.ExpiryTime) {
+		return nil, fmt.Errorf("trial expired")
+	}
+
+	return sub, nil
 }
 
 func (s *Server) renderTrialPage(subID, subURL, telegramLink string, trialHours int) string {
