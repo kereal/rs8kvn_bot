@@ -17,8 +17,6 @@ services:
             - ./.env:/app/.env:ro
             # Persistent data directory (must be writable)
             - ./data:/app/data
-            # Database migrations (read-only)
-            - ./internal/database/migrations:/app/internal/database/migrations:ro
 
         environment:
             - TZ=Europe/Moscow

@@ -177,7 +177,7 @@ func TestHandleBackToStart_WithActiveSubscription(t *testing.T) {
 		TrafficLimitGB:   30,
 	}
 
-	handler := NewHandler(mockBot, cfg, mockDB, &mockXUIClientForMenu{})
+	handler := NewHandler(mockBot, cfg, mockDB, &mockXUIClientForMenu{}, "testbot")
 
 	var capturedMsg interface{}
 	mockBot.sendFunc = func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
@@ -212,7 +212,7 @@ func TestHandleBackToStart_NoSubscription(t *testing.T) {
 		TrafficLimitGB:   30,
 	}
 
-	handler := NewHandler(mockBot, cfg, mockDB, &mockXUIClientForMenu{})
+	handler := NewHandler(mockBot, cfg, mockDB, &mockXUIClientForMenu{}, "testbot")
 
 	var capturedMsg interface{}
 	mockBot.sendFunc = func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
@@ -251,7 +251,7 @@ func TestHandleBackToStart_InactiveSubscription(t *testing.T) {
 		TrafficLimitGB:   30,
 	}
 
-	handler := NewHandler(mockBot, cfg, mockDB, &mockXUIClientForMenu{})
+	handler := NewHandler(mockBot, cfg, mockDB, &mockXUIClientForMenu{}, "testbot")
 
 	var capturedMsg interface{}
 	mockBot.sendFunc = func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
@@ -285,7 +285,7 @@ func TestHandleBackToStart_DatabaseError(t *testing.T) {
 		TrafficLimitGB:   30,
 	}
 
-	handler := NewHandler(mockBot, cfg, mockDB, &mockXUIClientForMenu{})
+	handler := NewHandler(mockBot, cfg, mockDB, &mockXUIClientForMenu{}, "testbot")
 
 	var capturedMsg interface{}
 	mockBot.sendFunc = func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
@@ -318,7 +318,7 @@ func TestHandleBackToStart_NilSubscription(t *testing.T) {
 		TrafficLimitGB:   30,
 	}
 
-	handler := NewHandler(mockBot, cfg, mockDB, &mockXUIClientForMenu{})
+	handler := NewHandler(mockBot, cfg, mockDB, &mockXUIClientForMenu{}, "testbot")
 
 	var capturedMsg interface{}
 	mockBot.sendFunc = func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
@@ -344,7 +344,7 @@ func TestHandleMenuDonate(t *testing.T) {
 		TrafficLimitGB:   30,
 	}
 
-	handler := NewHandler(mockBot, cfg, mockDB, &mockXUIClientForMenu{})
+	handler := NewHandler(mockBot, cfg, mockDB, &mockXUIClientForMenu{}, "testbot")
 
 	var capturedMsg interface{}
 	mockBot.sendFunc = func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
@@ -376,7 +376,7 @@ func TestHandleMenuDonate_WithDifferentUsernames(t *testing.T) {
 		TrafficLimitGB:   30,
 	}
 
-	handler := NewHandler(mockBot, cfg, mockDB, &mockXUIClientForMenu{})
+	handler := NewHandler(mockBot, cfg, mockDB, &mockXUIClientForMenu{}, "testbot")
 
 	testCases := []struct {
 		name     string
@@ -427,7 +427,7 @@ func TestHandleMenuHelp_WithSubscription(t *testing.T) {
 		TrafficLimitGB:   30,
 	}
 
-	handler := NewHandler(mockBot, cfg, mockDB, &mockXUIClientForMenu{})
+	handler := NewHandler(mockBot, cfg, mockDB, &mockXUIClientForMenu{}, "testbot")
 
 	var capturedMsg interface{}
 	mockBot.sendFunc = func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
@@ -463,7 +463,7 @@ func TestHandleMenuHelp_NoSubscription(t *testing.T) {
 		TrafficLimitGB:   30,
 	}
 
-	handler := NewHandler(mockBot, cfg, mockDB, &mockXUIClientForMenu{})
+	handler := NewHandler(mockBot, cfg, mockDB, &mockXUIClientForMenu{}, "testbot")
 
 	var capturedMsg interface{}
 	mockBot.sendFunc = func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
@@ -496,7 +496,7 @@ func TestHandleMenuHelp_DatabaseError(t *testing.T) {
 		TrafficLimitGB:   30,
 	}
 
-	handler := NewHandler(mockBot, cfg, mockDB, &mockXUIClientForMenu{})
+	handler := NewHandler(mockBot, cfg, mockDB, &mockXUIClientForMenu{}, "testbot")
 
 	var capturedMsg interface{}
 	mockBot.sendFunc = func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
@@ -549,7 +549,7 @@ func TestHandleMenuHelp_VariousTrafficLimits(t *testing.T) {
 				TrafficLimitGB:   tc.trafficGB,
 			}
 
-			handler := NewHandler(mockBot, cfg, mockDB, &mockXUIClientForMenu{})
+			handler := NewHandler(mockBot, cfg, mockDB, &mockXUIClientForMenu{}, "testbot")
 
 			var capturedMsg interface{}
 			mockBot.sendFunc = func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
@@ -596,7 +596,7 @@ func TestHandleBackToStart_VariousMessageIDs(t *testing.T) {
 				TrafficLimitGB:   30,
 			}
 
-			handler := NewHandler(mockBot, cfg, mockDB, &mockXUIClientForMenu{})
+			handler := NewHandler(mockBot, cfg, mockDB, &mockXUIClientForMenu{}, "testbot")
 
 			var capturedMsg interface{}
 			mockBot.sendFunc = func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
@@ -637,7 +637,7 @@ func TestHandleMenuHelp_ContextCancellation(t *testing.T) {
 		TrafficLimitGB:   30,
 	}
 
-	handler := NewHandler(mockBot, cfg, mockDB, &mockXUIClientForMenu{})
+	handler := NewHandler(mockBot, cfg, mockDB, &mockXUIClientForMenu{}, "testbot")
 
 	var capturedMsg interface{}
 	mockBot.sendFunc = func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
@@ -675,7 +675,7 @@ func TestHandleBackToStart_SendError(t *testing.T) {
 		TrafficLimitGB:   30,
 	}
 
-	handler := NewHandler(mockBot, cfg, mockDB, &mockXUIClientForMenu{})
+	handler := NewHandler(mockBot, cfg, mockDB, &mockXUIClientForMenu{}, "testbot")
 
 	mockBot.sendFunc = func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
 		return tgbotapi.Message{}, errors.New("send failed")
@@ -698,7 +698,7 @@ func TestHandleMenuDonate_SendError(t *testing.T) {
 		TrafficLimitGB:   30,
 	}
 
-	handler := NewHandler(mockBot, cfg, mockDB, &mockXUIClientForMenu{})
+	handler := NewHandler(mockBot, cfg, mockDB, &mockXUIClientForMenu{}, "testbot")
 
 	mockBot.sendFunc = func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
 		return tgbotapi.Message{}, errors.New("send failed")
@@ -730,7 +730,7 @@ func TestHandleMenuHelp_SendError(t *testing.T) {
 		TrafficLimitGB:   30,
 	}
 
-	handler := NewHandler(mockBot, cfg, mockDB, &mockXUIClientForMenu{})
+	handler := NewHandler(mockBot, cfg, mockDB, &mockXUIClientForMenu{}, "testbot")
 
 	mockBot.sendFunc = func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
 		return tgbotapi.Message{}, errors.New("send failed")
@@ -768,7 +768,7 @@ func TestHandleBackToStart_VariousChatIDs(t *testing.T) {
 				TrafficLimitGB:   30,
 			}
 
-			handler := NewHandler(mockBot, cfg, mockDB, &mockXUIClientForMenu{})
+			handler := NewHandler(mockBot, cfg, mockDB, &mockXUIClientForMenu{}, "testbot")
 
 			var capturedMsg interface{}
 			mockBot.sendFunc = func(c tgbotapi.Chattable) (tgbotapi.Message, error) {

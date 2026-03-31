@@ -44,9 +44,10 @@ type Handler struct {
 	referralsMu    sync.RWMutex
 	pendingInvites map[int64]pendingInvite // chatID -> invite_code
 	pendingMu      sync.RWMutex
+	botUsername    string
 }
 
-func NewHandler(bot interfaces.BotAPI, cfg *config.Config, db interfaces.DatabaseService, xuiClient interfaces.XUIClient) *Handler {
+func NewHandler(bot interfaces.BotAPI, cfg *config.Config, db interfaces.DatabaseService, xuiClient interfaces.XUIClient, botUsername string) *Handler {
 	return &Handler{
 		bot:            bot,
 		cfg:            cfg,
@@ -60,6 +61,7 @@ func NewHandler(bot interfaces.BotAPI, cfg *config.Config, db interfaces.Databas
 		referralsMu:    sync.RWMutex{},
 		pendingInvites: make(map[int64]pendingInvite),
 		pendingMu:      sync.RWMutex{},
+		botUsername:    botUsername,
 	}
 }
 
@@ -189,9 +191,11 @@ func (h *Handler) getDonateText() string {
 // getHelpText returns the help/instruction message text with subscription URL.
 func (h *Handler) getHelpText(trafficLimitGB int, subscriptionURL string) string {
 	return fmt.Sprintf(
-		"🚀 *Ваша подписка готова!*\n\nТрафик: %dГб на месяц.\n\n📲 *1. Установите приложение Happ*\n· [Скачать для iOS](https://apps.apple.com/ru/app/happ-proxy-utility-plus/id6746188973)\n· [Скачать для Android](https://play.google.com/store/apps/details?id=com.happproxy)\n\n📥 *2. Импортируйте подписку*\n\nНажмите, чтобы скопировать: `%s`\n\nВ приложении Happ нажмите *«+»* в правом верхнем углу и выберите *«Вставить из буфера»*.\n\n▶️ *3. Запустите VPN*\nДождитесь загрузки и нажмите на большую круглую кнопку в центре экрана.\n\n🛡️ *Важно знать*\nВ приложении Happ настроена автоматическая маршрутизация. Зарубежные сайты работают через VPN, а российские сервисы — напрямую. VPN можно не выключать.\n⚠️ _Если вы используете другое приложение или свою конфигурацию — не заходите через этот VPN на российские ресурсы, иначе сервер заблокируют._\n\n🤝 *Правила использования*\n· Не передавайте свою подписку другим. Делитесь ссылкой на этого бота `@rs8kvn_bot`.\n· Не публикуйте ссылку на бота в интернете, передавайте только из рук в руки (приветствуется).\n· Пользуйтесь ответственно, не занимайтесь незаконной деятельностью.\n\n☕ *Поддержка проекта*\nЭтот VPN бесплатный и существует благодаря вашим пожертвованиям и усилиям Кирилла.\n[Поддержите проект](https://t.me/rs8kvn_bot?start=donate) — важна каждая сотня.\n\nПомощь, вопросы: [@kereal](https://t.me/kereal)",
+		"🚀 *Ваша подписка готова!*\n\nТрафик: %dГб на месяц.\n\n📲 *1. Установите приложение Happ*\n· [Скачать для iOS](https://apps.apple.com/ru/app/happ-proxy-utility-plus/id6746188973)\n· [Скачать для Android](https://play.google.com/store/apps/details?id=com.happproxy)\n\n📥 *2. Импортируйте подписку*\n\nНажмите, чтобы скопировать: `%s`\n\nВ приложении Happ нажмите *«+»* в правом верхнем углу и выберите *«Вставить из буфера»*.\n\n▶️ *3. Запустите VPN*\nДождитесь загрузки и нажмите на большую круглую кнопку в центре экрана.\n\n🛡️ *Важно знать*\nВ приложении Happ настроена автоматическая маршрутизация. Зарубежные сайты работают через VPN, а российские сервисы — напрямую. VPN можно не выключать.\n⚠️ _Если вы используете другое приложение или свою конфигурацию — не заходите через этот VPN на российские ресурсы, иначе сервер заблокируют._\n\n🤝 *Правила использования*\n· Не передавайте свою подписку другим. Делитесь ссылкой на этого бота `@%s`.\n· Не публикуйте ссылку на бота в интернете, передавайте только из рук в руки (приветствуется).\n· Пользуйтесь ответственно, не занимайтесь незаконной деятельностью.\n\n☕ *Поддержка проекта*\nЭтот VPN бесплатный и существует благодаря вашим пожертвованиям и усилиям Кирилла.\n[Поддержите проект](https://t.me/%s?start=donate) — важна каждая сотня.\n\nПомощь, вопросы: [@kereal](https://t.me/kereal)",
 		trafficLimitGB,
 		subscriptionURL,
+		h.botUsername,
+		h.botUsername,
 	)
 }
 
@@ -205,12 +209,12 @@ func (h *Handler) sendInviteLink(ctx context.Context, chatID int64, messageID in
 		return
 	}
 
-	telegramLink := fmt.Sprintf("https://t.me/rs8kvn_bot?start=share_%s", invite.Code)
+	telegramLink := fmt.Sprintf("https://t.me/%s?start=share_%s", h.botUsername, invite.Code)
 	webLink := fmt.Sprintf("%s/i/%s", h.cfg.SiteURL, invite.Code)
 	text := fmt.Sprintf(`🔗 *Ваша пригласительная ссылка*
 
 📱 *Для пользователей Telegram:*
-[@rs8vpn_bot](%s)
+[@%s](%s)
 _нажмите и держите → копировать_
 
 🌐 *Для пользователей без Telegram:*
@@ -219,7 +223,7 @@ _нажмите и держите → копировать_
 
 📤 *Отправьте ссылку друзьям!*
 
-💎 За каждого приглашенного активного пользователя вы получите бонус.`, telegramLink, webLink, webLink)
+💎 За каждого приглашенного активного пользователя вы получите бонус.`, h.botUsername, telegramLink, webLink, webLink)
 	backKeyboard := h.getBackKeyboard()
 
 	if messageID > 0 {
