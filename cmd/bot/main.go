@@ -151,13 +151,18 @@ func main() {
 	if err != nil {
 		logger.Fatal("Invalid Telegram bot token", zap.Error(err))
 	}
-	logger.Info("Telegram bot authorized", zap.String("username", botAPI.Self.UserName))
+
+	botConfig, err := bot.NewBotConfig(botAPI)
+	if err != nil {
+		logger.Fatal("Failed to get bot config", zap.Error(err))
+	}
+	logger.Info("Telegram bot authorized", zap.String("username", botConfig.Username))
 
 	// Create bot handler
-	handler := bot.NewHandler(botAPI, cfg, dbService, xuiClient, botAPI.Self.UserName)
+	handler := bot.NewHandler(botAPI, cfg, dbService, xuiClient, botConfig)
 
 	// Initialize and start web server (health + trial pages)
-	webServer := web.NewServer(fmt.Sprintf(":%d", cfg.HealthCheckPort), dbService, xuiClient, cfg, botAPI.Self.UserName)
+	webServer := web.NewServer(fmt.Sprintf(":%d", cfg.HealthCheckPort), dbService, xuiClient, cfg, botConfig)
 	webServer.RegisterChecker("database", func(ctx context.Context) web.ComponentHealth {
 		if err := dbService.Ping(ctx); err != nil {
 			return web.ComponentHealth{Status: web.StatusDown, Message: err.Error()}
@@ -319,9 +324,13 @@ shutdown:
 func handleUpdateSafely(ctx context.Context, handler *bot.Handler, update tgbotapi.Update) {
 	defer func() {
 		if r := recover(); r != nil {
+			stack := debug.Stack()
 			sentry.CurrentHub().Recover(r)
 			sentry.Flush(config.SentryPanicFlushTimeout)
-			logger.Error("Panic in update handler", zap.Any("panic", r))
+			logger.Error("Panic in update handler",
+				zap.Any("panic", r),
+				zap.String("stack", string(stack)),
+			)
 		}
 	}()
 

@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"rs8kvn_bot/internal/config"
 	"rs8kvn_bot/internal/database"
 	"rs8kvn_bot/internal/logger"
 	"rs8kvn_bot/internal/utils"
@@ -75,14 +74,6 @@ func (h *Handler) handleCreateSubscription(ctx context.Context, chatID int64, us
 		}
 	} else if sub != nil {
 		// Return existing active subscription - edit the message
-		qrKeyboard := tgbotapi.NewInlineKeyboardMarkup(
-			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData("📱 QR-код", "qr_code"),
-			),
-			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData("🏠 В начало", "back_to_start"),
-			),
-		)
 		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, fmt.Sprintf(
 			"✅ Ваша подписка\n\n📊 Трафик: %d ГБ\n\n🔗 Ссылка\n`%s`",
 			h.cfg.TrafficLimitGB,
@@ -90,7 +81,8 @@ func (h *Handler) handleCreateSubscription(ctx context.Context, chatID int64, us
 		))
 		editMsg.ParseMode = "Markdown"
 		editMsg.DisableWebPagePreview = true
-		editMsg.ReplyMarkup = &qrKeyboard
+		kb := h.getQRKeyboard()
+		editMsg.ReplyMarkup = &kb
 		h.safeSend(editMsg)
 		return
 	}
@@ -137,14 +129,6 @@ func (h *Handler) handleMySubscription(ctx context.Context, chatID int64, userna
 
 	trafficInfo := fmt.Sprintf("%.2f / %d ГБ", trafficUsedGB, h.cfg.TrafficLimitGB)
 
-	qrKeyboard := tgbotapi.NewInlineKeyboardMarkup(
-		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("📱 QR-код", "qr_code"),
-		),
-		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("🏠 В начало", "back_to_start"),
-		),
-	)
 	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, fmt.Sprintf(
 		"📋 *Ваша подписка*\n\n📊 Трафик: %s\n\n🔗 Ссылка\n`%s`",
 		trafficInfo,
@@ -152,7 +136,8 @@ func (h *Handler) handleMySubscription(ctx context.Context, chatID int64, userna
 	))
 	editMsg.ParseMode = "Markdown"
 	editMsg.DisableWebPagePreview = true
-	editMsg.ReplyMarkup = &qrKeyboard
+	kb := h.getQRKeyboard()
+	editMsg.ReplyMarkup = &kb
 	h.safeSend(editMsg)
 }
 
@@ -260,129 +245,75 @@ func (h *Handler) handleBackToInvite(_ context.Context, chatID int64, username s
 // This operation is atomic with rollback: if database save fails,
 // the client is removed from the 3x-ui panel to prevent orphan records.
 func (h *Handler) createSubscription(ctx context.Context, chatID int64, username string, messageID int) {
-	// Show loading message
 	messageID = h.showLoadingMessage(chatID, messageID)
 	if messageID == 0 {
 		return
 	}
 
-	trafficBytes := int64(h.cfg.TrafficLimitGB) * 1024 * 1024 * 1024
-
 	logger.Info("Creating subscription",
 		zap.String("username", username),
 		zap.Int("traffic_gb", h.cfg.TrafficLimitGB))
 
-	// Step 1: Generate IDs
-	clientID := utils.GenerateUUID()
-	subID := utils.GenerateSubID()
-
-	// Step 2: Add client to 3x-ui panel
-	// expiryTime: zero (no expiry), reset: 30 (reset on last day of month)
-	client, err := h.xui.AddClientWithID(ctx, h.cfg.XUIInboundID, username, clientID, subID, trafficBytes, time.Time{}, config.SubscriptionResetDay)
+	result, err := h.subscriptionService.Create(ctx, chatID, username)
 	if err != nil {
-		logger.Error("Failed to add client to 3x-ui", zap.Error(err))
-
-		// Provide more specific error message based on error type
-		errMsg := "❌ Ошибка при создании подписки."
-		if strings.Contains(err.Error(), "connection refused") || strings.Contains(err.Error(), "timeout") {
-			errMsg = "❌ Не удается подключиться к серверу. Попробуйте позже."
-		} else if strings.Contains(err.Error(), "authentication") || strings.Contains(err.Error(), "unauthorized") {
-			errMsg = "❌ Ошибка авторизации на сервере. Свяжитесь с администратором."
-		} else if strings.Contains(err.Error(), "context canceled") {
-			errMsg = "❌ Запрос был прерван. Попробуйте снова."
-		} else if strings.Contains(err.Error(), "no such host") || strings.Contains(err.Error(), "dial tcp") {
-			errMsg = "❌ Ошибка подключения к серверу. Проверьте настройки DNS."
-		} else if strings.Contains(err.Error(), "certificate") || strings.Contains(err.Error(), "TLS") {
-			errMsg = "❌ Ошибка SSL/TLS сертификата. Свяжитесь с администратором."
-		} else if strings.Contains(err.Error(), "inbound") || strings.Contains(err.Error(), "client") {
-			errMsg = "❌ Ошибка сервера при создании подписки. Попробуйте позже."
-		}
-
-		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, errMsg)
-		editMsg.DisableWebPagePreview = true
-		h.safeSend(editMsg)
+		h.handleCreateError(ctx, chatID, messageID, username, err)
 		return
 	}
 
-	// Step 3: Проверяем pending invite для записи referred_by
-	var referredBy int64
-	h.pendingMu.RLock()
+	h.pendingMu.Lock()
 	if pending, ok := h.pendingInvites[chatID]; ok {
 		if time.Now().Before(pending.expiresAt) {
-			// Кэш валиден, получаем referrer_tg_id из БД
-			invite, err := h.db.GetInviteByCode(ctx, pending.code)
-			if err == nil {
-				referredBy = invite.ReferrerTGID
-				logger.Info("Using pending invite for subscription",
-					zap.Int64("chat_id", chatID),
-					zap.String("invite_code", pending.code),
-					zap.Int64("referred_by", referredBy))
+			invite, _ := h.db.GetInviteByCode(ctx, pending.code)
+			if invite != nil {
+				result.Subscription.ReferredBy = invite.ReferrerTGID
 			}
 		}
-		// Очищаем кэш в любом случае
-		h.pendingMu.Lock()
 		delete(h.pendingInvites, chatID)
-		h.pendingMu.Unlock()
 	}
-	h.pendingMu.RUnlock()
+	h.pendingMu.Unlock()
 
-	// Step 4: Save to database (with rollback on failure)
-	subscriptionURL := h.xui.GetSubscriptionLink(h.xui.GetExternalURL(h.cfg.XUIHost), client.SubID, h.cfg.XUISubPath)
+	h.cache.Set(chatID, result.Subscription)
+	h.notifyAdmin(ctx, username, chatID, result.SubscriptionURL, time.Time{})
 
-	sub := &database.Subscription{
-		TelegramID:      chatID,
-		Username:        username,
-		ClientID:        client.ID,
-		SubscriptionID:  client.SubID,
-		InboundID:       h.cfg.XUIInboundID,
-		TrafficLimit:    trafficBytes,
-		ExpiryTime:      time.Time{}, // zero value — no expiry
-		Status:          "active",
-		SubscriptionURL: subscriptionURL,
-		ReferredBy:      referredBy,
-	}
-
-	if err := h.db.CreateSubscription(ctx, sub); err != nil {
-		logger.Error("Failed to save subscription to database", zap.Error(err))
-
-		// CRITICAL: Rollback - remove client from 3x-ui panel to prevent orphan record
-		logger.Info("Attempting rollback: removing client from 3x-ui panel", zap.String("client_id", client.ID))
-		if rollbackErr := h.xui.DeleteClient(ctx, h.cfg.XUIInboundID, client.ID); rollbackErr != nil {
-			logger.Error("CRITICAL: Failed to rollback client deletion from 3x-ui", zap.Error(rollbackErr))
-			// This is a critical error - we have an orphan client in the panel
-			// Admin should be notified
-			h.notifyAdminError(ctx, fmt.Sprintf(
-				"⚠️ ORPHAN CLIENT WARNING\n\nClient ID: %s\nUsername: %s\nInbound: %d\n\nClient was created in 3x-ui but database save failed and rollback also failed!",
-				client.ID, username, h.cfg.XUIInboundID,
-			))
-		} else {
-			logger.Info("Rollback successful: client removed from 3x-ui panel", zap.String("client_id", client.ID))
-		}
-
-		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "❌ Подписка создана в панели, но не сохранена в базе. Обратитесь к администратору.")
-		editMsg.DisableWebPagePreview = true
-		h.safeSend(editMsg)
-		return
-	}
-
-	// Success - send subscription info with "Back to start" button
 	backKeyboard := tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData("🏠 В начало", "back_to_start"),
 		),
 	)
-	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, h.getHelpText(h.cfg.TrafficLimitGB, subscriptionURL))
+	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, h.getHelpText(h.cfg.TrafficLimitGB, result.SubscriptionURL))
 	editMsg.ParseMode = "Markdown"
 	editMsg.DisableWebPagePreview = true
 	editMsg.ReplyMarkup = &backKeyboard
 	h.safeSend(editMsg)
 
-	// Update cache with new subscription
-	h.cache.Set(chatID, sub)
-
-	// Notify admin about new subscription
-	h.notifyAdmin(ctx, username, chatID, subscriptionURL, time.Time{})
 	logger.Info("Subscription created successfully",
 		zap.String("username", username),
 		zap.Int64("chat_id", chatID))
+}
+
+func (h *Handler) handleCreateError(ctx context.Context, chatID int64, messageID int, username string, err error) {
+	logger.Error("Failed to create subscription", zap.Error(err))
+
+	errMsg := "❌ Ошибка при создании подписки."
+	errStr := err.Error()
+	if strings.Contains(errStr, "connection refused") || strings.Contains(errStr, "timeout") {
+		errMsg = "❌ Не удается подключиться к серверу. Попробуйте позже."
+	} else if strings.Contains(errStr, "authentication") || strings.Contains(errStr, "unauthorized") {
+		errMsg = "❌ Ошибка авторизации на сервере. Свяжитесь с администратором."
+	} else if strings.Contains(errStr, "context canceled") {
+		errMsg = "❌ Запрос был прерван. Попробуйте снова."
+	} else if strings.Contains(errStr, "no such host") || strings.Contains(errStr, "dial tcp") {
+		errMsg = "❌ Ошибка подключения к серверу. Проверьте настройки DNS."
+	} else if strings.Contains(errStr, "certificate") || strings.Contains(errStr, "TLS") {
+		errMsg = "❌ Ошибка SSL/TLS сертификата. Свяжитесь с администратором."
+	} else if strings.Contains(errStr, "inbound") || strings.Contains(errStr, "client") {
+		errMsg = "❌ Ошибка сервера при создании подписки. Попробуйте позже."
+	} else if strings.Contains(errStr, "rollback failed") {
+		errMsg = "❌ Подписка создана в панели, но не сохранена в базе. Обратитесь к администратору."
+		h.notifyAdminError(ctx, fmt.Sprintf("⚠️ ORPHAN CLIENT WARNING: %v", err))
+	}
+
+	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, errMsg)
+	editMsg.DisableWebPagePreview = true
+	h.safeSend(editMsg)
 }

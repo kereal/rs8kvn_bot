@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"rs8kvn_bot/internal/config"
 	"rs8kvn_bot/internal/logger"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -192,6 +193,14 @@ func (h *Handler) HandleBroadcast(ctx context.Context, update tgbotapi.Update) {
 		return
 	}
 
+	if len(message) > config.MaxTelegramMessageLen {
+		h.SendMessage(ctx, chatID, fmt.Sprintf(
+			"❌ Сообщение слишком длинное (%d символов).\n\nМаксимум: %d символов.",
+			len(message), config.MaxTelegramMessageLen,
+		))
+		return
+	}
+
 	// Get total count for progress reporting
 	totalCount, err := h.db.GetTotalTelegramIDCount(ctx)
 	if err != nil {
@@ -281,6 +290,12 @@ func (h *Handler) HandleSend(ctx context.Context, update tgbotapi.Update) {
 	// Verify admin access
 	if !h.isAdmin(chatID) {
 		logger.Warn("Non-admin user attempted to access /send", zap.Int64("chat_id", chatID))
+		return
+	}
+
+	// Rate limiting check
+	if !h.checkAdminSendRateLimit(chatID) {
+		h.SendMessage(ctx, chatID, "⚠️ Слишком много сообщений. Подождите минуту.")
 		return
 	}
 
@@ -386,9 +401,9 @@ func (h *Handler) handleAdminStats(ctx context.Context, chatID int64, username s
 }
 
 // notifyAdmin sends a notification to the admin about a new subscription.
-func (h *Handler) notifyAdmin(ctx context.Context, username string, chatID int64, subscriptionURL string, expiryTime time.Time) {
+func (h *Handler) notifyAdmin(ctx context.Context, username string, chatID int64, subscriptionURL string, expiryTime time.Time) error {
 	if h.cfg.TelegramAdminID == 0 {
-		return
+		return nil
 	}
 
 	msg := tgbotapi.NewMessage(h.cfg.TelegramAdminID,
@@ -398,9 +413,15 @@ func (h *Handler) notifyAdmin(ctx context.Context, username string, chatID int64
 			subscriptionURL,
 		))
 	msg.ParseMode = "Markdown"
-	h.send(ctx, msg)
+
+	err := h.sendWithError(ctx, msg)
+	if err != nil {
+		logger.Warn("Failed to notify admin", zap.String("username", username), zap.Error(err))
+		return fmt.Errorf("notify admin: %w", err)
+	}
 
 	logger.Info("Admin notified about new subscription", zap.String("username", username))
+	return nil
 }
 
 // notifyAdminError sends an error notification to the admin.

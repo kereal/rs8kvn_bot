@@ -84,7 +84,7 @@ func TestNewHandler(t *testing.T) {
 		t.Fatalf("Failed to create XUI client: %v", err)
 	}
 	mockDB := testutil.NewMockDatabaseService()
-	handler := NewHandler(testutil.NewMockBotAPI(), cfg, mockDB, xuiClient, "testbot")
+	handler := NewHandler(testutil.NewMockBotAPI(), cfg, mockDB, xuiClient, NewTestBotConfig())
 
 	if handler == nil {
 		t.Fatal("NewHandler returned nil")
@@ -101,7 +101,7 @@ func TestNewHandler(t *testing.T) {
 
 func TestGetMainMenuKeyboard(t *testing.T) {
 	cfg := &config.Config{TelegramAdminID: 123}
-	handler := &Handler{cfg: cfg}
+	handler := &Handler{cfg: cfg, botConfig: NewTestBotConfig()}
 
 	keyboardWithShare := handler.getMainMenuKeyboard(true)
 	if len(keyboardWithShare.InlineKeyboard) != 3 {
@@ -116,7 +116,7 @@ func TestGetMainMenuKeyboard(t *testing.T) {
 
 func TestGetBackKeyboard(t *testing.T) {
 	cfg := &config.Config{}
-	handler := &Handler{cfg: cfg}
+	handler := &Handler{cfg: cfg, botConfig: NewTestBotConfig()}
 
 	keyboard := handler.getBackKeyboard()
 
@@ -149,7 +149,7 @@ func TestAddAdminButtons(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := &config.Config{TelegramAdminID: tt.adminID}
-			handler := &Handler{cfg: cfg}
+			handler := &Handler{cfg: cfg, botConfig: NewTestBotConfig()}
 
 			keyboard := tgbotapi.NewInlineKeyboardMarkup(
 				tgbotapi.NewInlineKeyboardRow(
@@ -205,7 +205,7 @@ func TestGetMainMenuContent(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 12345,
 	}
-	handler := &Handler{cfg: cfg}
+	handler := &Handler{cfg: cfg, botConfig: NewTestBotConfig()}
 
 	tests := []struct {
 		name            string
@@ -251,7 +251,7 @@ func TestGetMainMenuContent(t *testing.T) {
 
 func TestGetDonateText(t *testing.T) {
 	cfg := &config.Config{}
-	handler := &Handler{cfg: cfg}
+	handler := &Handler{cfg: cfg, botConfig: NewTestBotConfig()}
 
 	text := handler.getDonateText()
 
@@ -276,7 +276,7 @@ func TestGetDonateText(t *testing.T) {
 
 func TestGetHelpText(t *testing.T) {
 	cfg := &config.Config{TrafficLimitGB: 100}
-	handler := &Handler{cfg: cfg}
+	handler := &Handler{cfg: cfg, botConfig: NewTestBotConfig()}
 
 	text := handler.getHelpText(100, "http://localhost/sub/test")
 
@@ -286,7 +286,7 @@ func TestGetHelpText(t *testing.T) {
 }
 
 func TestGetHelpText_DifferentTrafficLimits(t *testing.T) {
-	handler := &Handler{cfg: &config.Config{}}
+	handler := &Handler{cfg: &config.Config{}, botConfig: NewTestBotConfig()}
 
 	tests := []struct {
 		name           string
@@ -1111,7 +1111,7 @@ func TestGetFirstSecondOfNextMonth_FirstDay(t *testing.T) {
 }
 
 func TestHandler_getDonateText_NotEmpty(t *testing.T) {
-	handler := &Handler{cfg: &config.Config{}}
+	handler := &Handler{cfg: &config.Config{}, botConfig: NewTestBotConfig()}
 	text := handler.getDonateText()
 	if len(text) == 0 {
 		t.Error("getDonateText() should not return empty string")
@@ -1122,7 +1122,7 @@ func TestHandler_getDonateText_NotEmpty(t *testing.T) {
 }
 
 func TestHandler_getHelpText_NotEmpty(t *testing.T) {
-	handler := &Handler{cfg: &config.Config{TrafficLimitGB: 100}}
+	handler := &Handler{cfg: &config.Config{TrafficLimitGB: 100}, botConfig: NewTestBotConfig()}
 	text := handler.getHelpText(100, "http://example.com/sub/test")
 	if len(text) == 0 {
 		t.Error("getHelpText() should not return empty string")
@@ -1190,6 +1190,29 @@ func TestHandleBroadcast_NoArguments(t *testing.T) {
 	t.Skip("Skipping - requires mock interface for bot API")
 }
 
+func TestHandleBroadcast_MessageTooLong(t *testing.T) {
+	cfg := &config.Config{
+		TelegramAdminID: 123456,
+		TrafficLimitGB:  50,
+	}
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+
+	longMessage := make([]byte, config.MaxTelegramMessageLen+1)
+	for i := range longMessage {
+		longMessage[i] = 'a'
+	}
+
+	ctx := context.Background()
+	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "admin"}, "/broadcast "+string(longMessage))
+	handler.HandleBroadcast(ctx, update)
+
+	assert.True(t, mockBot.SendCalled)
+	assert.Contains(t, mockBot.LastSentText, "слишком длинное")
+}
+
 func TestHandleSend_EmptyMessage(t *testing.T) {
 	handler := &Handler{
 		cfg: &config.Config{
@@ -1199,6 +1222,32 @@ func TestHandleSend_EmptyMessage(t *testing.T) {
 
 	update := tgbotapi.Update{}
 	handler.HandleSend(context.Background(), update)
+}
+
+func TestHandleSend_RateLimit(t *testing.T) {
+	cfg := &config.Config{
+		TelegramAdminID: 123456,
+		TrafficLimitGB:  50,
+	}
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+
+	mockDB.GetTelegramIDByUsernameFunc = func(ctx context.Context, username string) (int64, error) {
+		return 999888777, nil
+	}
+
+	ctx := context.Background()
+	adminID := int64(123456)
+
+	update := createCommandUpdate(adminID, &tgbotapi.User{ID: adminID, UserName: "admin"}, "/send @testuser Test message")
+	handler.HandleSend(ctx, update)
+
+	update2 := createCommandUpdate(adminID, &tgbotapi.User{ID: adminID, UserName: "admin"}, "/send @testuser Second message")
+	handler.HandleSend(ctx, update2)
+
+	assert.True(t, mockBot.SendCalled)
 }
 
 func TestHandleSend_NoArguments(t *testing.T) {
@@ -1456,7 +1505,7 @@ func TestHandler_GetUserContext(t *testing.T) {
 
 func TestHandler_IsAdmin_NegativeID(t *testing.T) {
 	cfg := &config.Config{TelegramAdminID: 12345}
-	handler := &Handler{cfg: cfg}
+	handler := &Handler{cfg: cfg, botConfig: NewTestBotConfig()}
 
 	assert.False(t, handler.isAdmin(-1), "isAdmin() should return false for negative ID")
 	assert.False(t, handler.isAdmin(0), "isAdmin() should return false for zero ID")
@@ -1464,7 +1513,7 @@ func TestHandler_IsAdmin_NegativeID(t *testing.T) {
 
 func TestHandler_IsAdmin_ZeroAdminID(t *testing.T) {
 	cfg := &config.Config{TelegramAdminID: 0}
-	handler := &Handler{cfg: cfg}
+	handler := &Handler{cfg: cfg, botConfig: NewTestBotConfig()}
 
 	assert.False(t, handler.isAdmin(0), "isAdmin() should return false when admin ID is 0")
 	assert.False(t, handler.isAdmin(12345), "isAdmin() should return false when admin ID is 0")
@@ -1491,7 +1540,7 @@ func TestHandler_GetUsername_EmptyStrings(t *testing.T) {
 
 func TestHandler_GetMainMenuContent_SpecialCharacters(t *testing.T) {
 	cfg := &config.Config{TelegramAdminID: 12345}
-	handler := &Handler{cfg: cfg}
+	handler := &Handler{cfg: cfg, botConfig: NewTestBotConfig()}
 
 	text, keyboard := handler.getMainMenuContent("test_user_123", true, 12345)
 	assert.Contains(t, text, "test_user_123", "Text should contain username")
@@ -1500,7 +1549,7 @@ func TestHandler_GetMainMenuContent_SpecialCharacters(t *testing.T) {
 
 func TestHandler_GetMainMenuContent_AdminUser(t *testing.T) {
 	cfg := &config.Config{TelegramAdminID: 12345}
-	handler := &Handler{cfg: cfg}
+	handler := &Handler{cfg: cfg, botConfig: NewTestBotConfig()}
 
 	text, keyboard := handler.getMainMenuContent("admin", true, 12345)
 	assert.Contains(t, text, "admin", "Text should contain username")
@@ -1512,7 +1561,7 @@ func TestHandler_GetMainMenuContent_AdminUser(t *testing.T) {
 // === getMainMenuKeyboard edge cases ===
 
 func TestHandler_GetMainMenuKeyboard_ButtonLabels(t *testing.T) {
-	handler := &Handler{cfg: &config.Config{}}
+	handler := &Handler{cfg: &config.Config{}, botConfig: NewTestBotConfig()}
 
 	keyboard := handler.getMainMenuKeyboard(true)
 
@@ -1524,7 +1573,7 @@ func TestHandler_GetMainMenuKeyboard_ButtonLabels(t *testing.T) {
 }
 
 func TestHandler_GetMainMenuKeyboard_CallbackData(t *testing.T) {
-	handler := &Handler{cfg: &config.Config{}}
+	handler := &Handler{cfg: &config.Config{}, botConfig: NewTestBotConfig()}
 
 	keyboard := handler.getMainMenuKeyboard(true)
 
@@ -1542,7 +1591,7 @@ func TestHandler_GetMainMenuKeyboard_CallbackData(t *testing.T) {
 // === getBackKeyboard tests ===
 
 func TestHandler_GetBackKeyboard_CallbackData(t *testing.T) {
-	handler := &Handler{cfg: &config.Config{}}
+	handler := &Handler{cfg: &config.Config{}, botConfig: NewTestBotConfig()}
 
 	keyboard := handler.getBackKeyboard()
 
@@ -1554,7 +1603,7 @@ func TestHandler_GetBackKeyboard_CallbackData(t *testing.T) {
 // === getDonateText tests ===
 
 func TestHandler_GetDonateText_Content(t *testing.T) {
-	handler := &Handler{cfg: &config.Config{}}
+	handler := &Handler{cfg: &config.Config{}, botConfig: NewTestBotConfig()}
 
 	text := handler.getDonateText()
 
@@ -1566,7 +1615,7 @@ func TestHandler_GetDonateText_Content(t *testing.T) {
 // === getHelpText edge cases ===
 
 func TestHandler_GetHelpText_ZeroTraffic(t *testing.T) {
-	handler := &Handler{cfg: &config.Config{}}
+	handler := &Handler{cfg: &config.Config{}, botConfig: NewTestBotConfig()}
 
 	text := handler.getHelpText(0, "http://test.url/sub")
 
@@ -1575,7 +1624,7 @@ func TestHandler_GetHelpText_ZeroTraffic(t *testing.T) {
 }
 
 func TestHandler_GetHelpText_LargeTraffic(t *testing.T) {
-	handler := &Handler{cfg: &config.Config{}}
+	handler := &Handler{cfg: &config.Config{}, botConfig: NewTestBotConfig()}
 
 	text := handler.getHelpText(1000, "http://test.url/sub")
 
@@ -1583,7 +1632,7 @@ func TestHandler_GetHelpText_LargeTraffic(t *testing.T) {
 }
 
 func TestHandler_GetHelpText_SpecialCharacters(t *testing.T) {
-	handler := &Handler{cfg: &config.Config{}}
+	handler := &Handler{cfg: &config.Config{}, botConfig: NewTestBotConfig()}
 
 	subURL := "http://test.url/sub/abc123?param=value&other=test"
 	text := handler.getHelpText(100, subURL)
@@ -1595,7 +1644,7 @@ func TestHandler_GetHelpText_SpecialCharacters(t *testing.T) {
 
 func TestHandler_AddAdminButtons_ExistingKeyboard(t *testing.T) {
 	cfg := &config.Config{TelegramAdminID: 12345}
-	handler := &Handler{cfg: cfg}
+	handler := &Handler{cfg: cfg, botConfig: NewTestBotConfig()}
 
 	keyboard := tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
@@ -1614,7 +1663,7 @@ func TestHandler_AddAdminButtons_ExistingKeyboard(t *testing.T) {
 
 func TestHandler_AddAdminButtons_NonAdmin(t *testing.T) {
 	cfg := &config.Config{TelegramAdminID: 12345}
-	handler := &Handler{cfg: cfg}
+	handler := &Handler{cfg: cfg, botConfig: NewTestBotConfig()}
 
 	keyboard := tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
@@ -1661,7 +1710,7 @@ func TestHandler_CacheField(t *testing.T) {
 // === Rate limiter tests ===
 
 func TestHandler_RateLimiter(t *testing.T) {
-	handler := NewHandler(testutil.NewMockBotAPI(), &config.Config{}, testutil.NewMockDatabaseService(), nil, "testbot")
+	handler := NewHandler(testutil.NewMockBotAPI(), &config.Config{}, testutil.NewMockDatabaseService(), nil, NewTestBotConfig())
 
 	assert.NotNil(t, handler.rateLimiter, "Rate limiter should be initialized")
 

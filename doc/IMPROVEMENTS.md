@@ -1,9 +1,9 @@
 # TGVPN Go Bot — Полный Анализ и Предложения по Улучшению
 
-**Дата:** 2026-03-31  
+**Дата:** 2026-03-31 (обновлено)  
 **Версия:** v2.0.2  
 **Статус:** Активная разработка  
-**Покрытие тестами:** 72.6% (цель: 80%+)  
+**Покрытие тестами:** 73.2% (цель: 80%+)  
 **golangci-lint:** 51 warning (цель: < 20)
 
 ---
@@ -12,25 +12,26 @@
 
 ### Структура Кода
 ```
-Строк кода (Go):     ~8,000
-Файлов:              ~60
-Пакетов:             13
-Функций/Методов:     ~250
-Тестов:              ~180
+Строк кода (Go):     ~8,500
+Файлов:              ~65
+Пакетов:             14
+Функций/Методов:     ~260
+Тестов:              ~200
 ```
 
 ### Покрытие по Пакетам (Детально)
 | Пакет | Файлов | Строк | Покрытие | Статус |
 |-------|--------|-------|----------|--------|
-| `internal/bot` | 8 | 2,100 | 94.5% | ✅ Отлично |
+| `internal/bot` | 9 | 2,150 | 94.5% | ✅ Отлично |
 | `internal/ratelimiter` | 1 | 150 | 100% | ✅ Отлично |
 | `internal/heartbeat` | 1 | 120 | 95.8% | ✅ Отлично |
 | `internal/health` | 1 | 180 | 90.3% | ✅ Отлично |
+| `internal/audit` | 1 | 200 | ✅ Новый | ✅ Активен |
 | `internal/xui` | 2 | 650 | 86.8% | ✅ Хорошо |
 | `internal/config` | 2 | 330 | 83.2% | ✅ Хорошо |
-| `internal/web` | 1 | 480 | 75.6% | 🟡 Требует внимания |
 | `internal/logger` | 1 | 180 | 82.3% | ✅ Хорошо |
 | `internal/backup` | 1 | 290 | 81.4% | ✅ Хорошо |
+| `internal/web` | 1 | 480 | 75.6% | 🟡 Требует внимания |
 | `internal/database` | 1 | 920 | 78.1% | 🟡 Требует внимания |
 | `internal/utils` | 4 | 200 | 75.0% | 🟡 Требует внимания |
 | `cmd/bot` | 1 | 433 | 19.6% | 🔴 Критично |
@@ -268,71 +269,7 @@ if err := webServer.Shutdown(ctx); err != nil {
 
 ## 🟡 ПРОБЛЕМЫ СРЕДНЕЙ ВАЖНОСТИ (P1) — Исправить в Спринте
 
-### 6. Дублирование Кода в QR Обработчиках
-
-**Файл:** `internal/bot/callbacks.go:106-137`  
-**Серьёзность:** 🟡 Средняя  
-**Влияние:** Поддерживаемость, риск рассинхронизации
-
-**Текущий Код:**
-```go
-func handleQRTelegram(...) {
-    invite, err := h.db.GetOrCreateInvite(ctx, chatID, utils.GenerateInviteCode())
-    if err != nil {
-        logger.Error("Failed to get invite for QR", zap.Error(err))
-        editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "❌ Ошибка генерации QR-кода. Попробуйте позже.")
-        h.safeSend(editMsg)
-        return
-    }
-    telegramLink := fmt.Sprintf("https://t.me/%s?start=share_%s", h.botUsername, invite.Code)
-    h.sendQRCode(ctx, chatID, messageID, telegramLink, "📱 QR-код для Telegram...")
-}
-
-func handleQRWeb(...) {
-    invite, err := h.db.GetOrCreateInvite(ctx, chatID, utils.GenerateInviteCode())
-    if err != nil {
-        // ❌ Те же 7 строк дублируются!
-    }
-    webLink := fmt.Sprintf("%s/i/%s", h.cfg.SiteURL, invite.Code)
-    h.sendQRCode(ctx, chatID, messageID, webLink, "🌐 QR-код для веб-страницы...")
-}
-```
-
-**Решение:**
-```go
-// linkType: "telegram" | "web"
-func (h *Handler) generateInviteLink(ctx context.Context, chatID int64, linkType string) (string, error) {
-    invite, err := h.db.GetOrCreateInvite(ctx, chatID, utils.GenerateInviteCode())
-    if err != nil {
-        return "", fmt.Errorf("get invite: %w", err)
-    }
-    
-    switch linkType {
-    case "telegram":
-        return fmt.Sprintf("https://t.me/%s?start=share_%s", h.botUsername, invite.Code), nil
-    case "web":
-        return fmt.Sprintf("%s/i/%s", h.cfg.SiteURL, invite.Code), nil
-    default:
-        return "", fmt.Errorf("unknown link type: %s", linkType)
-    }
-}
-
-func (h *Handler) handleQRTelegram(ctx context.Context, chatID int64, username string, messageID int) {
-    link, err := h.generateInviteLink(ctx, chatID, "telegram")
-    if err != nil {
-        h.sendError(ctx, chatID, messageID, "Ошибка генерации QR-кода")
-        return
-    }
-    h.sendQRCode(ctx, chatID, messageID, link, "📱 QR-код для Telegram...")
-}
-```
-
-**Время на исправление:** 30 минут  
-**Выгода:** -40 строк кода, легче поддерживать
-
----
-
-### 7. Отсутствие Лимита на Длину Сообщений в `/broadcast`
+### 6. Отсутствие Лимита на Длину Сообщений в `/broadcast`
 
 **Файл:** `internal/bot/admin.go:174`  
 **Серьёзность:** 🟡 Средняя
@@ -506,77 +443,34 @@ func (h *Handler) handleCreateSubscription(...) {
 
 ## 🟢 УЛУЧШЕНИЯ (P2) — Плановые Улучшения
 
-### 11. Рефакторинг `handleUpdateSafely`
+### 11. Добавить Middleware для Логирования HTTP Запросов
 
-**Файл:** `cmd/bot/main.go:319`  
-**Текущее покрытие:** 50%
-
-**Проблема:** Функция смешивает recovery логику с бизнес-логикой.
+**Файл:** `internal/web/web.go`
 
 **Решение:**
 ```go
-func handleUpdateSafely(ctx context.Context, handler *bot.Handler, update tgbotapi.Update) {
-    defer func() {
-        if r := recover(); r != nil {
-            stack := debug.Stack()
-            logger.Error("Panic in handler",
-                zap.Any("panic", r),
-                zap.String("stack", string(stack)),
+type Middleware func(http.Handler) http.Handler
+
+func loggingMiddleware(logger *zap.Logger) Middleware {
+    return func(next http.Handler) http.Handler {
+        return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+            start := time.Now()
+            
+            logger.Info("Request",
+                zap.String("method", r.Method),
+                zap.String("path", r.URL.Path),
+                zap.String("ip", r.RemoteAddr),
             )
-            sentry.CaptureException(fmt.Errorf("panic: %v\n%s", r, stack))
-        }
-    }()
-    
-    handleUpdate(ctx, handler, update)
-}
-
-func handleUpdate(ctx context.Context, handler *bot.Handler, update tgbotapi.Update) {
-    // Чистая бизнес-логика
-    switch {
-    case update.Message != nil:
-        handler.HandleMessage(ctx, update)
-    case update.CallbackQuery != nil:
-        handler.HandleCallback(ctx, update)
+            
+            next.ServeHTTP(w, r)
+            
+            logger.Info("Response",
+                zap.String("method", r.Method),
+                zap.String("path", r.URL.Path),
+                zap.Duration("duration", time.Since(start)),
+            )
+        })
     }
-}
-```
-
-**Время на исправление:** 30 минут
-
----
-
-### 12. Добавить Middleware для Логирования Callback Queries
-
-**Файл:** `internal/bot/callbacks.go`
-
-**Решение:**
-```go
-type CallbackMiddleware func(ctx context.Context, update tgbotapi.Update, next func())
-
-func loggingMiddleware(logger *zap.Logger) CallbackMiddleware {
-    return func(ctx context.Context, update tgbotapi.Update, next func()) {
-        start := time.Now()
-        
-        logger.Debug("Callback received",
-            zap.String("data", update.CallbackQuery.Data),
-            zap.Int64("chat_id", update.CallbackQuery.Message.Chat.ID),
-            zap.String("username", update.CallbackQuery.From.UserName),
-        )
-        
-        next()
-        
-        logger.Debug("Callback processed",
-            zap.String("data", update.CallbackQuery.Data),
-            zap.Duration("duration", time.Since(start)),
-        )
-    }
-}
-
-func (h *Handler) HandleCallback(ctx context.Context, update tgbotapi.Update) {
-    middleware := loggingMiddleware(logger)
-    middleware(ctx, update, func() {
-        // Обработка callback
-    })
 }
 ```
 
@@ -584,7 +478,7 @@ func (h *Handler) HandleCallback(ctx context.Context, update tgbotapi.Update) {
 
 ---
 
-### 13. Оптимизация Запросов к БД
+### 12. Оптимизация Запросов к БД
 
 **Файл:** `internal/database/database.go`
 
@@ -599,7 +493,6 @@ func (s *Service) GetByTelegramID(ctx context.Context, telegramID int64) (*Subsc
 
 **Решение:**
 ```go
-// Быстрая проверка существования
 func (s *Service) HasActiveSubscription(ctx context.Context, telegramID int64) (bool, error) {
     var count int64
     err := s.db.WithContext(ctx).
@@ -609,111 +502,10 @@ func (s *Service) HasActiveSubscription(ctx context.Context, telegramID int64) (
         Count(&count).Error
     return count > 0, err
 }
-
-// Загрузка только нужных полей
-func (s *Service) GetSubscriptionStatus(ctx context.Context, telegramID int64) (*SubscriptionStatus, error) {
-    var status SubscriptionStatus
-    err := s.db.WithContext(ctx).
-        Model(&Subscription{}).
-        Where("telegram_id = ?", telegramID).
-        Select("status, traffic_limit, expiry_time").
-        First(&status).Error
-    return &status, err
-}
 ```
 
 **Время на исправление:** 40 минут  
 **Выгода:** -50% времени запросов
-
----
-
-### 14. Добавить Кэширование Настроек Бота
-
-**Файл:** Новый `internal/bot/botconfig.go`
-
-**Решение:**
-```go
-package bot
-
-type BotConfig struct {
-    Username              string
-    ID                    int64
-    FirstName             string
-    CanJoinGroups         bool
-    CanReadAllGroupMessages bool
-    SupportsInlineQueries bool
-    loadedAt              time.Time
-}
-
-func NewBotConfig(botAPI interfaces.BotAPI) (*BotConfig, error) {
-    user := botAPI.Self
-    return &BotConfig{
-        Username:              user.UserName,
-        ID:                    user.ID,
-        FirstName:             user.FirstName,
-        CanJoinGroups:         user.CanJoinGroups,
-        CanReadAllGroupMessages: user.CanReadAllGroupMessages,
-        SupportsInlineQueries: user.SupportsInlineQueries,
-        loadedAt:              time.Now(),
-    }, nil
-}
-
-// В main.go
-botConfig, err := bot.NewBotConfig(botAPI)
-if err != nil {
-    logger.Fatal("Failed to get bot config", zap.Error(err))
-}
-handler := bot.NewHandler(botAPI, cfg, dbService, xuiClient, botConfig.Username)
-```
-
-**Время на исправление:** 30 минут
-
----
-
-### 15. Добавить Аудит Логирование
-
-**Файл:** Новый `internal/audit/audit.go`
-
-**Решение:**
-```go
-package audit
-
-type Action string
-
-const (
-    ActionSubscriptionCreate  Action = "subscription.create"
-    ActionSubscriptionDelete  Action = "subscription.delete"
-    ActionTrialActivate       Action = "trial.activate"
-    ActionAdminBroadcast      Action = "admin.broadcast"
-    ActionAdminSend           Action = "admin.send"
-)
-
-type LogEntry struct {
-    Timestamp   time.Time
-    Action      Action
-    ActorID     int64
-    ActorType   string // "user" | "admin" | "system"
-    TargetID    int64
-    Details     map[string]interface{}
-    IPAddress   string
-    UserAgent   string
-}
-
-func Log(ctx context.Context, entry LogEntry) {
-    logger.Info("Audit log",
-        zap.Time("timestamp", entry.Timestamp),
-        zap.String("action", string(entry.Action)),
-        zap.Int64("actor_id", entry.ActorID),
-        zap.String("actor_type", entry.ActorType),
-        zap.Any("details", entry.Details),
-    )
-    
-    // Сохранение в БД для долгосрочного хранения
-    // db.Create(&entry)
-}
-```
-
-**Время на исправление:** 2 часа
 
 ---
 
@@ -1053,35 +845,38 @@ func HandleExport(ctx context.Context, chatID int64) {
 ---
 
 ### Спринт 2 (2 недели) — Рефакторинг
-- [ ] #6 Удалить дублирование в QR обработчиках
-- [ ] #7 Добавить лимит на длину сообщений
-- [ ] #8 Вынести магические числа в конфиг
-- [ ] #9 Добавить rate limiting на /send
-- [ ] #10 Разделить бизнес-логику и презентацию
+- [ ] #6 Добавить лимит на длину сообщений
+- [ ] #7 Вынести магические числа в конфиг
+- [ ] #8 Разделить бизнес-логику и презентацию
 
 **Ожидаемый результат:** -15% кода, +10% покрытие тестов
 
 ---
 
 ### Спринт 3 (2 недели) — Улучшения Кода
-- [ ] #11 Рефакторинг handleUpdateSafely
-- [ ] #12 Добавить middleware для логирования
-- [ ] #13 Оптимизация запросов к БД
-- [ ] #14 Кэширование настроек бота
-- [ ] #15 Добавить аудит логирование
+- [ ] #9 Добавить middleware для логирования HTTP
+- [ ] #10 Оптимизация запросов к БД
 
 **Ожидаемый результат:** +20% производительность, лучшая отладка
 
 ---
 
 ### Спринт 4 (3 недели) — Новые Функции
-- [ ] #16 Команда /stats для пользователей
-- [ ] #17 Автоматические уведомления об истечении
-- [ ] #18 Метрики Prometheus
-- [ ] #19 Поддержка нескольких админов
-- [ ] #20 Экспорт данных (GDPR)
+- [ ] #11 Команда /stats для пользователей
+- [ ] #12 Автоматические уведомления об истечении
+- [ ] #13 Метрики Prometheus
+- [ ] #14 Поддержка нескольких админов
+- [ ] #15 Экспорт данных (GDPR)
 
 **Ожидаемый результат:** +5 пользовательских функций, готово к продакшену
+
+---
+
+### ✅ Выполнено Ранее
+- QR deduplication (создан `generateInviteLink`)
+- `handleUpdateSafely` refactoring (добавлен `debug.Stack()`)
+- `BotConfig` caching (кэширование настроек бота)
+- Audit logging (`internal/audit` package)
 
 ---
 
@@ -1127,7 +922,7 @@ func HandleExport(ctx context.Context, chatID int64) {
 
 | Метрика | Текущее | Цель Q2 2026 | Цель Q3 2026 | Приоритет |
 |---------|---------|--------------|--------------|-----------|
-| **Общее покрытие тестами** | 72.6% | 80% | 85% | 🔴 Высокий |
+| **Общее покрытие тестами** | 73.2% | 80% | 85% | 🔴 Высокий |
 | **Покрытие cmd/bot** | 19.6% | 50% | 70% | 🟡 Средний |
 | **golangci-lint warnings** | 51 | < 20 | 0 | 🔴 Высокий |
 | **Время ответа бота (p95)** | ~200ms | < 150ms | < 100ms | 🟡 Средний |
@@ -1206,16 +1001,16 @@ clean:
 ✅ Dependency Injection через интерфейсы  
 ✅ Контекст передаётся корректно  
 ✅ Обработка ошибок на месте  
-✅ Хорошее покрытие тестами (72.6%)  
+✅ Хорошее покрытие тестами (73.2%)  
+✅ Аудит логирование  
 ✅ Нет глобального состояния  
 ✅ Graceful shutdown реализован частично  
 
 ### Слабые Стороны
 ⚠️  Утечки горутин в scheduler'ах  
 ⚠️  Смешение бизнес-логики с презентацией  
-⚠️  Дублирование кода (QR обработчики, error handling)  
 ⚠️  Магические числа в коде  
-⚠️  Отсутствует аудит логирование  
+✅  Аудит логирование (2026-03-31)  
 ⚠️  Нет метрик для продакшена  
 ⚠️  Низкое покрытие cmd/bot (19.6%)  
 
