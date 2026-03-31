@@ -3,9 +3,9 @@ package bot
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"rs8kvn_bot/internal/logger"
+	"rs8kvn_bot/internal/utils"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"go.uber.org/zap"
@@ -84,15 +84,11 @@ func (h *Handler) HandleCallback(ctx context.Context, update tgbotapi.Update) {
 		messageID := update.CallbackQuery.Message.MessageID
 		h.handleShareInvite(ctx, chatID, username, messageID)
 	case "qr_telegram":
-		// qr_telegram_{code}
 		messageID := update.CallbackQuery.Message.MessageID
-		code := strings.TrimPrefix(data, "qr_telegram_")
-		h.handleQRTelegram(ctx, chatID, username, messageID, code)
+		h.handleQRTelegram(ctx, chatID, username, messageID)
 	case "qr_web":
-		// qr_web_{code}
 		messageID := update.CallbackQuery.Message.MessageID
-		code := strings.TrimPrefix(data, "qr_web_")
-		h.handleQRWeb(ctx, chatID, username, messageID, code)
+		h.handleQRWeb(ctx, chatID, username, messageID)
 	case "back_to_invite":
 		messageID := update.CallbackQuery.Message.MessageID
 		h.handleBackToInvite(ctx, chatID, username, messageID)
@@ -106,18 +102,36 @@ func (h *Handler) handleShareInvite(ctx context.Context, chatID int64, username 
 	h.sendInviteLink(ctx, chatID, messageID)
 }
 
-// handleQRTelegram handles the "qr_telegram_{code}" callback - generates QR for Telegram invite link.
-func (h *Handler) handleQRTelegram(ctx context.Context, chatID int64, username string, messageID int, code string) {
-	logger.Info("User requesting QR for Telegram invite", zap.String("code", code))
+// handleQRTelegram handles the "qr_telegram" callback - generates QR for Telegram invite link.
+func (h *Handler) handleQRTelegram(ctx context.Context, chatID int64, username string, messageID int) {
+	logger.Info("User requesting QR for Telegram invite", zap.String("username", username))
 
-	telegramLink := fmt.Sprintf("https://t.me/%s?start=share_%s", h.botUsername, code)
-	h.sendQRCode(ctx, chatID, messageID, telegramLink, "📱 QR-код для Telegram\n\nОтправьте этот QR-код пользователю для быстрого добавления в Telegram")
+	// Get invite for this user
+	invite, err := h.db.GetOrCreateInvite(ctx, chatID, utils.GenerateInviteCode())
+	if err != nil {
+		logger.Error("Failed to get invite for QR", zap.Error(err))
+		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "❌ Ошибка генерации QR-кода. Попробуйте позже.")
+		h.safeSend(editMsg)
+		return
+	}
+
+	telegramLink := fmt.Sprintf("https://t.me/%s?start=share_%s", h.botUsername, invite.Code)
+	h.sendQRCode(ctx, chatID, messageID, telegramLink, "📱 QR-код для Telegram\n\nПокажите этот QR-код для быстрого добавления в Telegram")
 }
 
-// handleQRWeb handles the "qr_web_{code}" callback - generates QR for web invite link.
-func (h *Handler) handleQRWeb(ctx context.Context, chatID int64, username string, messageID int, code string) {
-	logger.Info("User requesting QR for web invite", zap.String("code", code))
+// handleQRWeb handles the "qr_web" callback - generates QR for web invite link.
+func (h *Handler) handleQRWeb(ctx context.Context, chatID int64, username string, messageID int) {
+	logger.Info("User requesting QR for web invite", zap.String("username", username))
 
-	webLink := fmt.Sprintf("%s/i/%s", h.cfg.SiteURL, code)
-	h.sendQRCode(ctx, chatID, messageID, webLink, "🌐 QR-код для веб-страницы\n\nОтправьте этот QR-код пользователю для открытия страницы с подпиской")
+	// Get invite for this user
+	invite, err := h.db.GetOrCreateInvite(ctx, chatID, utils.GenerateInviteCode())
+	if err != nil {
+		logger.Error("Failed to get invite for QR", zap.Error(err))
+		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "❌ Ошибка генерации QR-кода. Попробуйте позже.")
+		h.safeSend(editMsg)
+		return
+	}
+
+	webLink := fmt.Sprintf("%s/i/%s", h.cfg.SiteURL, invite.Code)
+	h.sendQRCode(ctx, chatID, messageID, webLink, "🌐 QR-код для веб-страницы\n\nПокажите этот QR-код для открытия страницы с подпиской")
 }
