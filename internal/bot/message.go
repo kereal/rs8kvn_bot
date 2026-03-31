@@ -11,20 +11,25 @@ import (
 
 // send sends a message with rate limiting and saves the message ID for future editing.
 func (h *Handler) send(ctx context.Context, msg tgbotapi.MessageConfig) {
-	// Disable link previews for all messages
+	h.sendWithError(ctx, msg) // nolint:errcheck // send is intentionally void for non-critical paths
+}
+
+// sendWithError sends a message with rate limiting and returns any error.
+// Use this when caller needs to handle or propagate send failures.
+func (h *Handler) sendWithError(ctx context.Context, msg tgbotapi.MessageConfig) error {
 	msg.DisableWebPagePreview = true
 
 	if !h.rateLimiter.Wait(ctx) {
-		logger.Warn("Message send cancelled due to context")
-		return
+		return ctx.Err()
 	}
 
 	_, err := h.bot.Send(msg)
 	if err != nil {
 		logger.Error("Failed to send message", zap.Error(err))
-		return
+		return err
 	}
 
+	return nil
 }
 
 // safeSend sends a message and logs any errors.

@@ -224,7 +224,7 @@ func (h *Handler) handleShareStart(ctx context.Context, chatID int64, username, 
 
 	// Показываем сообщение о приглашении с кнопкой получения подписки
 	text := fmt.Sprintf(
-		"🎉 Вас пригласили!\n\n"+
+		"🎉 Вас пригласили!\n\n" +
 			"Нажмите кнопку ниже, чтобы получить подписку и активировать реферальное подключение.",
 	)
 	keyboard := tgbotapi.NewInlineKeyboardMarkup(

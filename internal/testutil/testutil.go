@@ -109,7 +109,7 @@ type MockDatabaseService struct {
 	CleanupExpiredTrialsFunc            func(ctx context.Context, hours int, xuiClient interface {
 		DeleteClient(ctx context.Context, inboundID int, clientID string) error
 	}, inboundID int) (int64, error)
-	GetPoolStatsFunc                    func() (*database.PoolStats, error)
+	GetPoolStatsFunc func() (*database.PoolStats, error)
 }
 
 func (m *MockDatabaseService) Ping(ctx context.Context) error {
@@ -579,4 +579,16 @@ func (m *MockBotAPI) GetUpdatesChan(config tgbotapi.UpdateConfig) tgbotapi.Updat
 
 func (m *MockBotAPI) StopReceivingUpdates() {
 	// No-op for mock
+}
+
+func (m *MockBotAPI) Self() *tgbotapi.User {
+	return &tgbotapi.User{
+		ID:                      123456789,
+		FirstName:               "TestBot",
+		UserName:                "testbot",
+		IsBot:                   true,
+		CanJoinGroups:           false,
+		CanReadAllGroupMessages: false,
+		SupportsInlineQueries:   false,
+	}
 }

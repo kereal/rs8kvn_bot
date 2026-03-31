@@ -24,7 +24,7 @@ func TestShowLoadingMessage_WithMessageID(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, "testbot")
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
 
 	chatID := int64(123456)
 	messageID := 100
@@ -43,7 +43,7 @@ func TestShowLoadingMessage_WithoutMessageID(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, "testbot")
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
 
 	chatID := int64(123456)
 	messageID := 0
@@ -63,7 +63,7 @@ func TestShowLoadingMessage_SendFails(t *testing.T) {
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
 	mockBot.SendError = errors.New("send error")
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, "testbot")
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
 
 	chatID := int64(123456)
 	messageID := 0
@@ -83,7 +83,7 @@ func TestShowLoadingMessage_EditFails(t *testing.T) {
 	mockBot := testutil.NewMockBotAPI()
 	// First call fails (edit), second succeeds (send new)
 	mockBot.SendError = errors.New("edit error")
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, "testbot")
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
 
 	chatID := int64(123456)
 	messageID := 100
@@ -108,7 +108,7 @@ func TestCreateSubscription_Success(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, "testbot")
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
 
 	clientConfig := &xui.ClientConfig{
 		ID:    "client-uuid-123",
@@ -148,7 +148,7 @@ func TestCreateSubscription_XUIFailure(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, "testbot")
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
 
 	tests := []struct {
 		name          string
@@ -244,7 +244,7 @@ func TestCreateSubscription_DatabaseFailure_RollbackSuccess(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, "testbot")
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
 
 	clientConfig := &xui.ClientConfig{
 		ID:    "client-uuid-123",
@@ -282,7 +282,7 @@ func TestCreateSubscription_DatabaseFailure_RollbackFailure(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, "testbot")
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
 
 	clientConfig := &xui.ClientConfig{
 		ID:    "client-uuid-123",
@@ -318,7 +318,7 @@ func TestCreateSubscription_CacheUpdate(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, "testbot")
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
 
 	clientConfig := &xui.ClientConfig{
 		ID:    "client-uuid-123",
@@ -359,7 +359,7 @@ func TestHandleCreateSubscription_AlreadyInProgress(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, "testbot")
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
 
 	chatID := int64(123456)
 
@@ -383,7 +383,7 @@ func TestHandleCreateSubscription_ExistingActiveSubscription(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, "testbot")
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
 
 	sub := &database.Subscription{
 		TelegramID:      123456,
@@ -415,7 +415,7 @@ func TestHandleCreateSubscription_ExpiredSubscription(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, "testbot")
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
 
 	sub := &database.Subscription{
 		TelegramID:      123456,
@@ -458,7 +458,7 @@ func TestHandleCreateSubscription_DatabaseError(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, "testbot")
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
 
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 		return nil, errors.New("database error")
@@ -480,7 +480,7 @@ func TestHandleCreateSubscription_NoSubscription(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, "testbot")
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
 
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 		return nil, gorm.ErrRecordNotFound
@@ -513,7 +513,7 @@ func TestHandleMySubscription_NotFound(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, "testbot")
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
 
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 		return nil, gorm.ErrRecordNotFound
@@ -534,7 +534,7 @@ func TestHandleMySubscription_DatabaseError(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, "testbot")
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
 
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 		return nil, errors.New("database error")
@@ -555,7 +555,7 @@ func TestHandleMySubscription_ActiveSubscription(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, "testbot")
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
 
 	sub := &database.Subscription{
 		TelegramID:      123456,
@@ -594,7 +594,7 @@ func TestHandleMySubscription_TrafficFetchError(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, "testbot")
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
 
 	sub := &database.Subscription{
 		TelegramID:      123456,
@@ -629,7 +629,7 @@ func TestHandleMySubscription_UsesCache(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, "testbot")
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
 
 	sub := &database.Subscription{
 		TelegramID:      123456,
@@ -672,7 +672,7 @@ func TestHandleQRCode_NoSubscription(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, "testbot")
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
 
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 		return nil, gorm.ErrRecordNotFound
@@ -693,7 +693,7 @@ func TestHandleQRCode_Success(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, "testbot")
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
 
 	sub := &database.Subscription{
 		TelegramID:      123456,
@@ -719,7 +719,7 @@ func TestHandleQRCode_DatabaseError(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, "testbot")
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
 
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 		return nil, errors.New("database error")
@@ -740,7 +740,7 @@ func TestHandleQRCode_QRGenerationError(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, "testbot")
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
 
 	sub := &database.Subscription{
 		TelegramID:      123456,
@@ -766,7 +766,7 @@ func TestHandleBackToSubscription(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, "testbot")
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
 
 	ctx := context.Background()
 	handler.handleBackToSubscription(ctx, 123456, "testuser", 100)
@@ -783,7 +783,7 @@ func TestGetSubscriptionWithCache_CacheHit(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, "testbot")
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
 
 	chatID := int64(123456)
 	sub := &database.Subscription{
@@ -817,7 +817,7 @@ func TestGetSubscriptionWithCache_CacheMiss(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, "testbot")
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
 
 	chatID := int64(123456)
 	sub := &database.Subscription{
@@ -848,7 +848,7 @@ func TestGetSubscriptionWithCache_DatabaseError(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, "testbot")
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
 
 	chatID := int64(123456)
 
@@ -871,7 +871,7 @@ func TestInvalidateCache(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, "testbot")
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
 
 	chatID := int64(123456)
 	sub := &database.Subscription{
@@ -898,7 +898,7 @@ func TestSendQRCode(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, "testbot")
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
 
 	chatID := int64(123456)
 	messageID := 789
@@ -923,7 +923,7 @@ func TestHandleBackToInvite(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, "testbot")
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
 
 	chatID := int64(123456)
 	messageID := 789
@@ -948,7 +948,7 @@ func TestHandleCreateSubscription_ZeroMessageID(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, "testbot")
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
 
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 		return nil, gorm.ErrRecordNotFound

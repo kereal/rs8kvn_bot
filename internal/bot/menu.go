@@ -17,7 +17,7 @@ func (h *Handler) handleBackToStart(ctx context.Context, chatID int64, username 
 	logger.Info("User returning to start", zap.String("username", username))
 
 	// Check if user has an active subscription
-	sub, err := h.db.GetByTelegramID(ctx, chatID)
+	sub, err := h.getSubscriptionWithCache(ctx, chatID)
 	var hasSubscription bool
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -58,7 +58,7 @@ func (h *Handler) handleMenuDonate(_ context.Context, chatID int64, username str
 func (h *Handler) handleMenuHelp(ctx context.Context, chatID int64, username string, messageID int) {
 	logger.Info("User viewing help", zap.String("username", username))
 
-	sub, err := h.db.GetByTelegramID(ctx, chatID)
+	sub, err := h.getSubscriptionWithCache(ctx, chatID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			// No subscription found - this is normal

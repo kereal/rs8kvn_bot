@@ -102,12 +102,33 @@ func (h *Handler) handleShareInvite(ctx context.Context, chatID int64, username 
 	h.sendInviteLink(ctx, chatID, messageID)
 }
 
-// handleQRTelegram handles the "qr_telegram" callback - generates QR for Telegram invite link.
+type linkType string
+
+const (
+	linkTypeTelegram linkType = "telegram"
+	linkTypeWeb      linkType = "web"
+)
+
+func (h *Handler) generateInviteLink(ctx context.Context, chatID int64, lt linkType) (string, error) {
+	invite, err := h.db.GetOrCreateInvite(ctx, chatID, utils.GenerateInviteCode())
+	if err != nil {
+		return "", fmt.Errorf("get invite: %w", err)
+	}
+
+	switch lt {
+	case linkTypeTelegram:
+		return fmt.Sprintf("https://t.me/%s?start=share_%s", h.botConfig.Username, invite.Code), nil
+	case linkTypeWeb:
+		return fmt.Sprintf("%s/i/%s", h.cfg.SiteURL, invite.Code), nil
+	default:
+		return "", fmt.Errorf("unknown link type: %s", lt)
+	}
+}
+
 func (h *Handler) handleQRTelegram(ctx context.Context, chatID int64, username string, messageID int) {
 	logger.Info("User requesting QR for Telegram invite", zap.String("username", username))
 
-	// Get invite for this user
-	invite, err := h.db.GetOrCreateInvite(ctx, chatID, utils.GenerateInviteCode())
+	link, err := h.generateInviteLink(ctx, chatID, linkTypeTelegram)
 	if err != nil {
 		logger.Error("Failed to get invite for QR", zap.Error(err))
 		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "❌ Ошибка генерации QR-кода. Попробуйте позже.")
@@ -115,16 +136,13 @@ func (h *Handler) handleQRTelegram(ctx context.Context, chatID int64, username s
 		return
 	}
 
-	telegramLink := fmt.Sprintf("https://t.me/%s?start=share_%s", h.botUsername, invite.Code)
-	h.sendQRCode(ctx, chatID, messageID, telegramLink, "📱 QR-код для Telegram\n\nПокажите этот QR-код для быстрого добавления в Telegram")
+	h.sendQRCode(ctx, chatID, messageID, link, "📱 QR-код для Telegram\n\nПокажите этот QR-код для быстрого добавления в Telegram")
 }
 
-// handleQRWeb handles the "qr_web" callback - generates QR for web invite link.
 func (h *Handler) handleQRWeb(ctx context.Context, chatID int64, username string, messageID int) {
 	logger.Info("User requesting QR for web invite", zap.String("username", username))
 
-	// Get invite for this user
-	invite, err := h.db.GetOrCreateInvite(ctx, chatID, utils.GenerateInviteCode())
+	link, err := h.generateInviteLink(ctx, chatID, linkTypeWeb)
 	if err != nil {
 		logger.Error("Failed to get invite for QR", zap.Error(err))
 		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "❌ Ошибка генерации QR-кода. Попробуйте позже.")
@@ -132,6 +150,5 @@ func (h *Handler) handleQRWeb(ctx context.Context, chatID int64, username string
 		return
 	}
 
-	webLink := fmt.Sprintf("%s/i/%s", h.cfg.SiteURL, invite.Code)
-	h.sendQRCode(ctx, chatID, messageID, webLink, "🌐 QR-код для веб-страницы\n\nПокажите этот QR-код для открытия страницы с подпиской")
+	h.sendQRCode(ctx, chatID, messageID, link, "🌐 QR-код для веб-страницы\n\nПокажите этот QR-код для открытия страницы с подпиской")
 }
