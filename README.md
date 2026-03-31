@@ -2,7 +2,7 @@
 
 Telegram bot for distributing VLESS+Reality+Vision proxy subscriptions from 3x-ui panel.
 
-**Version:** v2.0.0 | **Coverage:** ~51% | **License:** MIT
+**Version:** v2.0.0 | **Coverage:** ~80% | **License:** MIT
 
 ## Features
 
@@ -10,9 +10,9 @@ Telegram bot for distributing VLESS+Reality+Vision proxy subscriptions from 3x-u
 - 📋 View current subscription status
 - 📱 QR code for easy subscription import
 - 🔗 Invite/trial landing page (`/i/{code}`) with one-click Happ setup
-- 👥 Referral system — users generate invite codes for new subscribers
+- 👥 Referral system — users generate invite codes (`t.me/rs8kvn_bot?start=share_{code}`)
 - 📊 Configurable traffic limit (default 100GB/month)
-- 📅 Auto-renewal on the last day of each month
+- 🔄 Monthly auto-renewal (last day of month, no expiry)
 - 🔔 Admin notifications on new subscriptions
 - 💓 Heartbeat monitoring support
 - 🏥 Health check endpoint (/healthz, /readyz)
@@ -24,7 +24,7 @@ Telegram bot for distributing VLESS+Reality+Vision proxy subscriptions from 3x-u
 - ⚡ Graceful shutdown with goroutine tracking
 - 🔒 Circuit breaker for 3x-ui panel
 - 🐳 Docker support with health checks
-- 🧪 Unit tests (~51% coverage)
+- 🧪 Unit tests (~80% coverage)
 - ✅ golangci-lint and gosec for code quality
 
 ## Requirements
@@ -160,7 +160,7 @@ go run ./cmd/bot
 1. Start the bot with `/start` command
 2. Use the inline buttons (shown under the message):
    - **For users with subscription:**
-     - **📋 Подписка** - View subscription info (traffic usage, expiry date, subscription link)
+     - **📋 Подписка** - View subscription info (traffic usage, subscription link)
        - **📱 QR-код** - Generate QR code for easy import (scannable by Happ app)
        - **🏠 В начало** - Return to main menu
      - **☕ Донат** - View donation info
@@ -397,8 +397,9 @@ rs8kvn_bot/
 ## Traffic and Expiry
 
 - **Traffic**: Configurable via `TRAFFIC_LIMIT_GB` (default: 100GB)
-- **Expiry**: First second of next month (e.g., April 1, 2026 00:00:00)
-- **Auto-renewal**: 31 days (reset parameter in 3x-ui)
+- **Expiry**: No expiry (`expiryTime = 0`)
+- **Reset**: Last day of each month (day 30)
+- **Auto-renewal**: Automatic on last day of month
 
 ## Configuration
 
@@ -509,6 +510,24 @@ go tool cover -func=coverage.out
 # Run specific package tests
 go test ./internal/database/... -v
 ```
+
+**Test Coverage by Package:**
+
+| Package | Coverage |
+|---------|----------|
+| `internal/bot` | 95.3% |
+| `internal/ratelimiter` | 100% |
+| `internal/heartbeat` | 95.8% |
+| `internal/health` | 90.3% |
+| `internal/xui` | 86.8% |
+| `internal/config` | 83.2% |
+| `internal/web` | 83.0% |
+| `internal/logger` | 82.3% |
+| `internal/backup` | 81.4% |
+| `internal/database` | 79.2% |
+| `internal/utils` | 75.0% |
+| `cmd/bot` | 19.6% |
+| **Overall** | **~80%** |
 
 ### Linting
 
