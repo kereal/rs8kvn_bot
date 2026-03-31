@@ -36,20 +36,30 @@ alt Invite not found
     Web -->> User: Error page (404)
 else Invite OK
 
-    Web ->> DB: COUNT trial_requests WHERE ip=? AND created_at > now-1h
+    %% Check for existing trial via cookie (prevents duplication)
+    Web ->> Web: Check cookie rs8kvn_trial_{code}
+    
+    alt Cookie exists (same browser, < 3 hours)
+        Web -->> User: Show existing trial page (no new creation)
+    else No cookie (new user or expired)
+    
+        Web ->> DB: COUNT trial_requests WHERE ip=? AND created_at > now-1h
 
-    alt Too many requests (>= TrialRateLimit)
-        Web -->> User: Rate limit page (429)
-    else Allowed
+        alt Too many requests (>= TrialRateLimit)
+            Web -->> User: Rate limit page (429)
+        else Allowed
 
-        Web ->> DB: INSERT trial_requests(ip)
+            Web ->> DB: INSERT trial_requests(ip)
 
-        Web ->> Panel: Create trial client (trafficBytes, expiryTime)
-        Panel -->> Web: client created
+            Web ->> Panel: Create trial client (trafficBytes, expiryTime)
+            Panel -->> Web: client created
 
-        Web ->> DB: INSERT subscriptions(subscription_id, invite_code, is_trial=true, telegram_id=0)
+            Web ->> DB: INSERT subscriptions(subscription_id, invite_code, is_trial=true, telegram_id=0)
 
-        Web -->> User: Show page with Happ link + Telegram activate button
+            %% Set cookie to prevent duplication on refresh
+            Web ->> User: Set cookie rs8kvn_trial_{code}={subID} (3 hours)
+            Web -->> User: Show page with Happ link + Telegram activate button
+        end
     end
 end
 
@@ -224,3 +234,44 @@ Trial → либо Activated → либо Deleted
 | `XUI_HOST` | — | URL 3x-ui панели |
 | `XUI_USERNAME` | — | Логин панели |
 | `XUI_PASSWORD` | — | Пароль панели |
+
+---
+
+## Критичные нюансы
+
+### Trial Duplication Prevention
+
+**Проблема:** Пользователь обновляет страницу → создаётся новая trial подписка.
+
+**Решение:** HttpOnly cookie `rs8kvn_trial_{invite_code}` на 3 часа.
+
+**Поведение:**
+- ✅ Refresh страницы = та же подписка (кука найдена)
+- ✅ Разные пользователи = разные подписки (разные браузеры/куки)
+- ✅ Одно устройство = максимум 1 trial за 3 часа
+- ✅ После активации (telegram_id != 0) кука не мешает
+
+**Реализация:**
+```go
+// internal/web/web.go
+cookie, err := r.Cookie("rs8kvn_trial_" + code)
+if err == nil {
+    // Кука есть — найти существующий trial
+    existingSub, _ := s.db.GetTrialSubscriptionBySubID(ctx, cookie.Value)
+    if existingSub != nil && !existingSub.IsActivated() {
+        // Показать существующий, не создавать новый
+        return s.renderTrialPage(existingSub, ...)
+    }
+}
+
+// Создать новый trial и установить куку
+http.SetCookie(w, &http.Cookie{
+    Name:     "rs8kvn_trial_" + code,
+    Value:    subID,
+    Path:     "/i/" + code,
+    Expires:  time.Now().Add(3 * time.Hour),
+    HttpOnly: true,
+    Secure:   true,
+    SameSite: http.SameSiteStrictMode,
+})
+```
