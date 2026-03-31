@@ -210,6 +210,52 @@ func (h *Handler) handleBackToSubscription(_ context.Context, chatID int64, user
 	// Subscription message is already visible above, no need to send anything
 }
 
+// sendQRCode generates and sends a QR code for the given URL.
+// Used for both subscription and invite link QR codes.
+func (h *Handler) sendQRCode(ctx context.Context, chatID int64, messageID int, url string, caption string) {
+	// Generate QR code
+	pngBytes, err := utils.GenerateQRCodePNG(url)
+	if err != nil {
+		logger.Error("Failed to generate QR code", zap.Error(err))
+		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "❌ Ошибка генерации QR-кода. Попробуйте позже.")
+		h.safeSend(editMsg)
+		return
+	}
+
+	// Send QR code as photo
+	photo := tgbotapi.NewPhoto(chatID, tgbotapi.FileBytes{
+		Name:  "qr.png",
+		Bytes: pngBytes,
+	})
+	photo.Caption = caption
+	photo.ParseMode = "Markdown"
+
+	// Keyboard with back button
+	backKeyboard := tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("⬅️ Назад", "back_to_invite"),
+		),
+	)
+	photo.ReplyMarkup = &backKeyboard
+
+	if _, err := h.bot.Send(photo); err != nil {
+		logger.Error("Failed to send QR photo", zap.Error(err))
+	}
+}
+
+// handleBackToInvite handles the "back_to_invite" callback.
+// Deletes the QR photo message and returns to invite link message.
+func (h *Handler) handleBackToInvite(_ context.Context, chatID int64, username string, messageID int) {
+	logger.Info("User closing QR code", zap.String("username", username))
+
+	// Delete the QR photo message
+	deleteMsg := tgbotapi.NewDeleteMessage(chatID, messageID)
+	if _, err := h.bot.Request(deleteMsg); err != nil {
+		logger.Warn("Failed to delete QR message", zap.Error(err))
+	}
+	// Invite message is already visible above, no need to send anything
+}
+
 // createSubscription creates a new subscription for the user.
 // This operation is atomic with rollback: if database save fails,
 // the client is removed from the 3x-ui panel to prevent orphan records.
