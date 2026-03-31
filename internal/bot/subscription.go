@@ -130,12 +130,6 @@ func (h *Handler) handleMySubscription(ctx context.Context, chatID int64, userna
 		}
 	}
 
-	if sub.IsExpired() {
-		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "⚠️ Ваша подписка истекла.\n\nНажмите «Получить подписку» для создания новой.")
-		h.safeSend(editMsg)
-		return
-	}
-
 	// Get traffic usage from 3x-ui panel
 	trafficUsedGB := float64(0)
 

@@ -526,35 +526,6 @@ func TestHandleMySubscription_NotFound(t *testing.T) {
 	assert.Contains(t, mockBot.LastSentText, "нет активной подписки")
 }
 
-func TestHandleMySubscription_Expired(t *testing.T) {
-	cfg := &config.Config{
-		TelegramAdminID: 123456,
-		TrafficLimitGB:  100,
-	}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI)
-
-	sub := &database.Subscription{
-		TelegramID:      123456,
-		Username:        "testuser",
-		SubscriptionURL: "https://test.url/sub",
-		ExpiryTime:      time.Now().Add(-24 * time.Hour), // Expired
-		Status:          "expired",
-	}
-
-	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
-		return sub, nil
-	}
-
-	ctx := context.Background()
-	handler.handleMySubscription(ctx, 123456, "testuser", 1)
-
-	assert.True(t, mockBot.SendCalled)
-	assert.Contains(t, mockBot.LastSentText, "истекла")
-}
-
 func TestHandleMySubscription_DatabaseError(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
