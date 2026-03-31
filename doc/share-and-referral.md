@@ -224,36 +224,3 @@ Trial → либо Activated → либо Deleted
 | `XUI_HOST` | — | URL 3x-ui панели |
 | `XUI_USERNAME` | — | Логин панели |
 | `XUI_PASSWORD` | — | Пароль панели |
-
----
-
-# Известные проблемы
-
-## 1. Race condition на bind (P1)
-`internal/database/database.go` — `BindTrialSubscription` делает SELECT и UPDATE без транзакции. Два конкурентных `/start trial_xxx` могут оба пройти SELECT, затем второй перезапишет первого.
-
-**Фикс:** SELECT + UPDATE в транзакции, или `UPDATE ... WHERE telegram_id = 0` с проверкой RowsAffected.
-
-## 2. Слабая генерация subID в web handler (P1)
-`internal/web/web.go` — локальный `generateSubID()` использует `time.Now().UnixNano()%16` (предсказуемо). В `utils/uuid.go` есть `GenerateSubID()` с `crypto/rand`.
-
-**Фикс:** Заменить на `utils.GenerateSubID()`.
-
-## 3. Rollback использует неправильный ID (P1)
-`internal/web/web.go` — `DeleteClient` получает `subID` (14-char hex) вместо `clientID` (UUID). Rollback не удалит клиента из xui.
-
-**Фикс:** Передавать `clientID` в `DeleteClient`.
-
-## 4. Rate limit fails open (P2)
-Если БД вернула ошибку при `CountTrialRequestsByIPLastHour` — rate limit пропускается.
-
-**Фикс:** Логировать и показывать ошибку пользователю при сбое проверки.
-
-## 5. Trial page хардкодит "3 часа" (P3)
-HTML-шаблон `renderTrialPage` содержит захардкоженный текст вместо динамического `TrialDurationHours`.
-
-## 6. Dead code — проверка "Already activated" (P3)
-`internal/bot/commands.go` — `if sub.IsTrial` после `BindTrialSubscription` никогда не true, т.к. метод уже установил `IsTrial = false`.
-
-## 7. Web handler не переиспользует xui клиент (P3)
-Каждый запрос `handleInvite` создаёт новый `xui.NewClient()` + логин. Поле `s.xuiClient` используется только для health check.
