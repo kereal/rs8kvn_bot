@@ -14,7 +14,8 @@
       "Bash(t *)",
       "Bash(fmt.println)",
       "Bash(})",
-      "Bash(eof)"
+      "Bash(eof)",
+      "Bash(sqlite3 *)"
     ]
   },
   "$version": 3

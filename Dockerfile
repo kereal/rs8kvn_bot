@@ -60,6 +60,9 @@ RUN mkdir -p /app/data && chown -R appuser:appuser /app/data
 # Copy binary from builder stage
 COPY --from=builder --chown=appuser:appuser /app/rs8kvn_bot .
 
+# Copy database migrations for runtime application
+COPY --chown=appuser:appuser internal/database/migrations internal/database/migrations
+
 # Switch to non-root user
 USER appuser
 
