@@ -2596,3 +2596,76 @@ func TestService_DeleteSubscriptionByID_NotFound(t *testing.T) {
 	_, err = service.DeleteSubscriptionByID(context.Background(), 99999)
 	assert.Error(t, err, "DeleteSubscriptionByID() should return error for nonexistent ID")
 }
+
+// === GetTrialSubscriptionBySubID tests ===
+
+func TestService_GetTrialSubscriptionBySubID_Success(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	service, err := NewService(dbPath)
+	require.NoError(t, err, "NewService() error")
+	defer service.Close()
+
+	// Create trial subscription
+	sub := &Subscription{
+		TelegramID:      0, // Unactivated trial
+		Username:        "",
+		ClientID:        "client-trial-123",
+		SubscriptionID:  "trial-sub-id-123",
+		InboundID:       1,
+		Status:          "active",
+		IsTrial:         true,
+		ExpiryTime:      time.Now().Add(24 * time.Hour),
+		SubscriptionURL: "http://test.url/sub",
+	}
+	require.NoError(t, service.db.Create(sub).Error, "Create trial subscription")
+
+	// Get by subscription ID
+	got, err := service.GetTrialSubscriptionBySubID(context.Background(), sub.SubscriptionID)
+	require.NoError(t, err, "GetTrialSubscriptionBySubID() error")
+	require.NotNil(t, got, "GetTrialSubscriptionBySubID() returned nil")
+	assert.Equal(t, sub.SubscriptionID, got.SubscriptionID, "SubscriptionID mismatch")
+	assert.True(t, got.IsTrial, "IsTrial should be true")
+	assert.Equal(t, int64(0), got.TelegramID, "TelegramID should be 0 for unactivated trial")
+}
+
+func TestService_GetTrialSubscriptionBySubID_NotFound(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	service, err := NewService(dbPath)
+	require.NoError(t, err, "NewService() error")
+	defer service.Close()
+
+	_, err = service.GetTrialSubscriptionBySubID(context.Background(), "nonexistent")
+	assert.Error(t, err, "GetTrialSubscriptionBySubID() should return error for nonexistent ID")
+}
+
+func TestService_GetTrialSubscriptionBySubID_NotTrial(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	service, err := NewService(dbPath)
+	require.NoError(t, err, "NewService() error")
+	defer service.Close()
+
+	// Create regular (non-trial) subscription
+	sub := &Subscription{
+		TelegramID:      123456789,
+		Username:        "testuser",
+		ClientID:        "client-regular-123",
+		SubscriptionID:  "regular-sub-id-123",
+		InboundID:       1,
+		Status:          "active",
+		IsTrial:         false,
+		ExpiryTime:      time.Now().Add(24 * time.Hour),
+		SubscriptionURL: "http://test.url/sub",
+	}
+	require.NoError(t, service.db.Create(sub).Error, "Create regular subscription")
+
+	// Try to get as trial - should return error (method filters by IsTrial)
+	got, err := service.GetTrialSubscriptionBySubID(context.Background(), sub.SubscriptionID)
+	assert.Error(t, err, "GetTrialSubscriptionBySubID() should return error for non-trial subscription")
+	assert.Nil(t, got, "GetTrialSubscriptionBySubID() should return nil for non-trial subscription")
+}
