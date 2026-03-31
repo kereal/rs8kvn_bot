@@ -1094,3 +1094,39 @@ func TestHandleAdminStats_PartialDatabaseError(t *testing.T) {
 	assert.True(t, mockBot.SendCalled)
 	assert.Contains(t, mockBot.LastSentText, "100")
 }
+
+func TestEscapeMarkdown(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{"empty string", "", ""},
+		{"no special chars", "hello world", "hello world"},
+		{"underscore", "hello_world", "hello\\_world"},
+		{"asterisk", "hello*world", "hello\\*world"},
+		{"brackets", "[test](url)", "\\[test\\]\\(url\\)"},
+		{"backticks", "`code`", "\\`code\\`"},
+		{"tilde", "~~strike~~", "\\~\\~strike\\~\\~"},
+		{"pipe", "a|b", "a\\|b"},
+		{"dot", "file.txt", "file\\.txt"},
+		{"exclamation", "wow!", "wow\\!"},
+		{"plus", "a+b", "a\\+b"},
+		{"minus", "a-b", "a\\-b"},
+		{"equals", "a=b", "a\\=b"},
+		{"hash", "#heading", "\\#heading"},
+		{"greater than", "a>b", "a\\>b"},
+		{"curly braces", "{a}", "\\{a\\}"},
+		{"all special chars", "_*[test](url)`~>#+-=|{}.!", "\\_\\*\\[test\\]\\(url\\)\\`\\~\\>\\#\\+\\-\\=\\|\\{\\}\\.\\!"},
+		{"cyrillic text", "Привет мир", "Привет мир"},
+		{"cyrillic with special", "Привет_мир", "Привет\\_мир"},
+		{"multiple underscores", "a_b_c", "a\\_b\\_c"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := escapeMarkdown(tt.input)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}

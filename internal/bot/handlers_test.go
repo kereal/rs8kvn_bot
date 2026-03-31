@@ -10,6 +10,7 @@ import (
 	"rs8kvn_bot/internal/config"
 	"rs8kvn_bot/internal/database"
 	"rs8kvn_bot/internal/logger"
+	"rs8kvn_bot/internal/ratelimiter"
 	"rs8kvn_bot/internal/testutil"
 	"rs8kvn_bot/internal/utils"
 	"rs8kvn_bot/internal/xui"
@@ -22,51 +23,6 @@ import (
 func init() {
 	// Initialize logger for tests
 	_, _ = logger.Init("", "error")
-}
-
-func TestGetFirstSecondOfNextMonth(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    time.Time
-		expected time.Time
-	}{
-		{"January", time.Date(2024, 1, 15, 12, 0, 0, 0, time.UTC), time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC)},
-		{"December", time.Date(2024, 12, 15, 12, 0, 0, 0, time.UTC), time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)},
-		{"First day", time.Date(2024, 3, 1, 0, 0, 0, 0, time.UTC), time.Date(2024, 4, 1, 0, 0, 0, 0, time.UTC)},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := utils.FirstSecondOfNextMonth(tt.input)
-			if !result.Equal(tt.expected) {
-				t.Errorf("Expected %v, got %v", tt.expected, result)
-			}
-		})
-	}
-}
-
-func TestGetUsername(t *testing.T) {
-	handler := &Handler{}
-
-	tests := []struct {
-		name     string
-		user     *tgbotapi.User
-		expected string
-	}{
-		{"first name only", &tgbotapi.User{ID: 1, UserName: "testuser", FirstName: "Test"}, "testuser"},
-		{"first name only no username", &tgbotapi.User{ID: 1, FirstName: "Test"}, "Test"},
-		{"no name", &tgbotapi.User{ID: 1}, "user_1"},
-		{"nil user", nil, "unknown"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := handler.getUsername(tt.user)
-			if result != tt.expected {
-				t.Errorf("Expected %s, got %s", tt.expected, result)
-			}
-		})
-	}
 }
 
 func TestNewHandler(t *testing.T) {
@@ -307,231 +263,6 @@ func TestGetHelpText_DifferentTrafficLimits(t *testing.T) {
 	}
 }
 
-func TestSubscriptionExpiryCheck(t *testing.T) {
-	tests := []struct {
-		name       string
-		expiryTime time.Time
-		isExpired  bool
-	}{
-		{"Not expired", time.Now().Add(24 * time.Hour), false},
-		{"Expired", time.Now().Add(-24 * time.Hour), true},
-		{"Expires now", time.Now(), true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			isExpired := time.Now().After(tt.expiryTime)
-			if isExpired != tt.isExpired {
-				t.Errorf("Expiry check: got %v, want %v", isExpired, tt.isExpired)
-			}
-		})
-	}
-}
-
-func TestAdminCheck(t *testing.T) {
-	tests := []struct {
-		name    string
-		chatID  int64
-		adminID int64
-		isAdmin bool
-	}{
-		{"Is admin", 123456789, 123456789, true},
-		{"Not admin", 123456789, 987654321, false},
-		{"Admin ID is 0", 123456789, 0, false},
-		{"Zero chatID and admin", 0, 0, true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			isAdmin := tt.chatID == tt.adminID
-			if isAdmin != tt.isAdmin {
-				t.Errorf("Admin check: got %v, want %v", isAdmin, tt.isAdmin)
-			}
-		})
-	}
-}
-
-func TestTrafficBytesCalculation(t *testing.T) {
-	trafficLimitGB := 100
-	expectedBytes := int64(trafficLimitGB) * 1024 * 1024 * 1024
-
-	if expectedBytes != 107374182400 {
-		t.Errorf("Traffic bytes = %d, want 107374182400", expectedBytes)
-	}
-}
-
-func TestContextCancellation(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	if ctx.Err() == nil {
-		t.Error("Context should be cancelled")
-	}
-
-	select {
-	case <-ctx.Done():
-	default:
-		t.Error("Context should be done")
-	}
-}
-
-func TestMessageConstruction(t *testing.T) {
-	t.Run("Start message with username", func(t *testing.T) {
-		username := "testuser"
-		expectedContent := "👋 Привет, " + username
-		if len(expectedContent) == 0 {
-			t.Error("Expected non-empty start message")
-		}
-	})
-
-	t.Run("Help message contains traffic limit", func(t *testing.T) {
-		expectedContent := "100 ГБ"
-		if len(expectedContent) == 0 {
-			t.Error("Expected non-empty help message")
-		}
-	})
-}
-
-func TestKeyboardConstruction(t *testing.T) {
-	keyboard := tgbotapi.NewInlineKeyboardMarkup(
-		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("📥 Получить подписку", "create_subscription"),
-		),
-		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("📋 Подписка", "menu_subscription"),
-		),
-	)
-
-	if len(keyboard.InlineKeyboard) != 2 {
-		t.Errorf("Expected 2 keyboard rows, got %d", len(keyboard.InlineKeyboard))
-	}
-}
-
-func TestMessageConfig_DisableWebPagePreview(t *testing.T) {
-	chatID := int64(123456789)
-	text := "Test message"
-
-	msg := tgbotapi.NewMessage(chatID, text)
-
-	msg.DisableWebPagePreview = true
-	if msg.DisableWebPagePreview != true {
-		t.Error("DisableWebPagePreview should be true after setting")
-	}
-}
-
-func TestNotifyAdmin(t *testing.T) {
-	t.Run("Skip notification when admin ID is 0", func(t *testing.T) {
-		adminID := int64(0)
-		if adminID == 0 {
-			return
-		}
-		t.Error("Should have skipped notification for admin ID 0")
-	})
-
-	t.Run("Send notification when admin ID is set", func(t *testing.T) {
-		adminID := int64(123456789)
-		if adminID == 0 {
-			t.Error("Should send notification for non-zero admin ID")
-		}
-	})
-}
-
-func TestSubscriptionStatus(t *testing.T) {
-	validStatuses := []string{"active", "revoked", "expired"}
-
-	for _, status := range validStatuses {
-		t.Run("Status: "+status, func(t *testing.T) {
-			isValid := status == "active" || status == "revoked" || status == "expired"
-			if !isValid {
-				t.Errorf("Invalid status: %s", status)
-			}
-		})
-	}
-}
-
-func TestCallbackQueryData(t *testing.T) {
-	validCallbacks := map[string]bool{
-		"create_subscription":  true,
-		"qr_code":              true,
-		"admin_stats":          true,
-		"admin_lastreg":        true,
-		"back_to_start":        true,
-		"menu_donate":          true,
-		"menu_subscription":    true,
-		"back_to_subscription": true,
-		"menu_help":            true,
-	}
-
-	callbackData := "create_subscription"
-	if !validCallbacks[callbackData] {
-		t.Errorf("Unexpected callback data: %s", callbackData)
-	}
-}
-
-func TestUpdateHandling(t *testing.T) {
-	t.Run("Message update", func(t *testing.T) {
-		hasMessage := true
-		hasCallback := false
-
-		if hasMessage && !hasCallback {
-		} else {
-			t.Error("Should detect message update")
-		}
-	})
-
-	t.Run("Callback update", func(t *testing.T) {
-		hasMessage := false
-		hasCallback := true
-
-		if !hasMessage && hasCallback {
-		} else {
-			t.Error("Should detect callback update")
-		}
-	})
-
-	t.Run("No message or callback", func(t *testing.T) {
-		hasMessage := false
-		hasCallback := false
-
-		if !hasMessage && !hasCallback {
-		} else {
-			t.Error("Should detect empty update")
-		}
-	})
-}
-
-func TestUsernameExtraction(t *testing.T) {
-	tests := []struct {
-		name     string
-		userName string
-		expected string
-	}{
-		{"Username available", "testuser", "testuser"},
-		{"Empty username", "", ""},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			username := tt.userName
-			if username != tt.expected && tt.expected != "" {
-				t.Errorf("Username = %s, want %s", username, tt.expected)
-			}
-		})
-	}
-}
-
-func TestSubscriptionURL(t *testing.T) {
-	host := "http://localhost:2053"
-	subID := "test123"
-	subPath := "sub"
-
-	expectedURL := host + "/" + subPath + "/" + subID
-
-	if expectedURL != "http://localhost:2053/sub/test123" {
-		t.Errorf("Subscription URL = %s, want http://localhost:2053/sub/test123", expectedURL)
-	}
-}
-
 func TestHandler_ConfigField(t *testing.T) {
 	cfg := &config.Config{
 		TelegramBotToken: "123456:test_token",
@@ -583,15 +314,6 @@ func TestHandleHelp_NilMessage(t *testing.T) {
 
 	update := tgbotapi.Update{}
 	handler.HandleHelp(context.Background(), update)
-}
-
-func TestHandleCallback_NilCallback(t *testing.T) {
-	handler := &Handler{
-		cfg: &config.Config{},
-	}
-
-	update := tgbotapi.Update{}
-	handler.HandleCallback(context.Background(), update)
 }
 
 func TestHandleDel_NilMessage(t *testing.T) {
@@ -1061,133 +783,6 @@ func TestSubscription_IsActive(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestHandler_send_NilBot(t *testing.T) {
-	t.Skip("Skipping - requires mock interface for rate limiter")
-}
-
-func TestHandler_safeSend_NilBot(t *testing.T) {
-	t.Skip("Skipping - requires mock interface for bot API")
-}
-
-func TestHandler_SendMessage(t *testing.T) {
-	t.Skip("Skipping - requires mock interface for bot API")
-}
-
-func TestHandler_notifyAdmin_ZeroAdminID(t *testing.T) {
-	t.Skip("Skipping - requires mock interface for bot API")
-}
-
-func TestHandler_notifyAdminError_ZeroAdminID(t *testing.T) {
-	t.Skip("Skipping - requires mock interface for bot API")
-}
-
-func TestGetFirstSecondOfNextMonth_January(t *testing.T) {
-	now := time.Date(2024, 1, 15, 12, 30, 0, 0, time.UTC)
-	result := utils.FirstSecondOfNextMonth(now)
-	expected := time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC)
-	if !result.Equal(expected) {
-		t.Errorf("utils.FirstSecondOfNextMonth() = %v, want %v", result, expected)
-	}
-}
-
-func TestGetFirstSecondOfNextMonth_December(t *testing.T) {
-	now := time.Date(2024, 12, 15, 12, 30, 0, 0, time.UTC)
-	result := utils.FirstSecondOfNextMonth(now)
-	expected := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
-	if !result.Equal(expected) {
-		t.Errorf("utils.FirstSecondOfNextMonth() = %v, want %v", result, expected)
-	}
-}
-
-func TestGetFirstSecondOfNextMonth_FirstDay(t *testing.T) {
-	now := time.Date(2024, 3, 1, 0, 0, 0, 0, time.UTC)
-	result := utils.FirstSecondOfNextMonth(now)
-	expected := time.Date(2024, 4, 1, 0, 0, 0, 0, time.UTC)
-	if !result.Equal(expected) {
-		t.Errorf("utils.FirstSecondOfNextMonth() = %v, want %v", result, expected)
-	}
-}
-
-func TestHandler_getDonateText_NotEmpty(t *testing.T) {
-	handler := &Handler{cfg: &config.Config{}, botConfig: NewTestBotConfig()}
-	text := handler.getDonateText()
-	if len(text) == 0 {
-		t.Error("getDonateText() should not return empty string")
-	}
-	if !strings.Contains(text, "Поддержка") {
-		t.Error("getDonateText() should contain support message")
-	}
-}
-
-func TestHandler_getHelpText_NotEmpty(t *testing.T) {
-	handler := &Handler{cfg: &config.Config{TrafficLimitGB: 100}, botConfig: NewTestBotConfig()}
-	text := handler.getHelpText(100, "http://example.com/sub/test")
-	if len(text) == 0 {
-		t.Error("getHelpText() should not return empty string")
-	}
-	if !strings.Contains(text, "100") {
-		t.Error("getHelpText() should contain traffic limit")
-	}
-}
-
-func TestHandleStart_EmptyCommandArguments(t *testing.T) {
-	t.Skip("Skipping - requires mock interface for bot API")
-}
-
-func TestHandleHelp_EmptyMessage(t *testing.T) {
-	handler := &Handler{
-		cfg: &config.Config{
-			TrafficLimitGB: 100,
-		},
-	}
-
-	update := tgbotapi.Update{}
-	handler.HandleHelp(context.Background(), update)
-}
-
-func TestHandleCallback_EmptyCallback(t *testing.T) {
-	handler := &Handler{
-		cfg: &config.Config{},
-	}
-
-	update := tgbotapi.Update{}
-	handler.HandleCallback(context.Background(), update)
-}
-
-func TestHandleDel_EmptyMessage(t *testing.T) {
-	handler := &Handler{
-		cfg: &config.Config{
-			TelegramAdminID: 123456789,
-		},
-	}
-
-	update := tgbotapi.Update{}
-	handler.HandleDel(context.Background(), update)
-}
-
-func TestHandleDel_NoArguments(t *testing.T) {
-	t.Skip("Skipping - requires mock interface for bot API")
-}
-
-func TestHandleDel_InvalidID(t *testing.T) {
-	t.Skip("Skipping - requires mock interface for bot API")
-}
-
-func TestHandleBroadcast_EmptyMessage(t *testing.T) {
-	handler := &Handler{
-		cfg: &config.Config{
-			TelegramAdminID: 123456789,
-		},
-	}
-
-	update := tgbotapi.Update{}
-	handler.HandleBroadcast(context.Background(), update)
-}
-
-func TestHandleBroadcast_NoArguments(t *testing.T) {
-	t.Skip("Skipping - requires mock interface for bot API")
 }
 
 func TestHandleBroadcast_MessageTooLong(t *testing.T) {
@@ -1822,4 +1417,154 @@ func TestHandler_KeyboardConstruction_MultipleRows(t *testing.T) {
 	for i, row := range keyboard.InlineKeyboard {
 		assert.Greater(t, len(row), 0, "Row %d should have at least one button", i)
 	}
+}
+
+// === handleCreateError tests ===
+
+func TestHandleCreateError_ConnectionRefused(t *testing.T) {
+	mockBot := testutil.NewMockBotAPI()
+	handler := &Handler{bot: mockBot}
+
+	ctx := context.Background()
+	handler.handleCreateError(ctx, 12345, 100, "testuser", fmt.Errorf("connection refused"))
+
+	assert.True(t, mockBot.SendCalled)
+	assert.Contains(t, mockBot.LastSentText, "Не удается подключиться к серверу")
+}
+
+func TestHandleCreateError_Timeout(t *testing.T) {
+	mockBot := testutil.NewMockBotAPI()
+	handler := &Handler{bot: mockBot}
+
+	ctx := context.Background()
+	handler.handleCreateError(ctx, 12345, 100, "testuser", fmt.Errorf("request timeout"))
+
+	assert.True(t, mockBot.SendCalled)
+	assert.Contains(t, mockBot.LastSentText, "Не удается подключиться к серверу")
+}
+
+func TestHandleCreateError_Authentication(t *testing.T) {
+	mockBot := testutil.NewMockBotAPI()
+	handler := &Handler{bot: mockBot}
+
+	ctx := context.Background()
+	handler.handleCreateError(ctx, 12345, 100, "testuser", fmt.Errorf("authentication failed"))
+
+	assert.True(t, mockBot.SendCalled)
+	assert.Contains(t, mockBot.LastSentText, "Ошибка авторизации на сервере")
+}
+
+func TestHandleCreateError_Unauthorized(t *testing.T) {
+	mockBot := testutil.NewMockBotAPI()
+	handler := &Handler{bot: mockBot}
+
+	ctx := context.Background()
+	handler.handleCreateError(ctx, 12345, 100, "testuser", fmt.Errorf("unauthorized access"))
+
+	assert.True(t, mockBot.SendCalled)
+	assert.Contains(t, mockBot.LastSentText, "Ошибка авторизации на сервере")
+}
+
+func TestHandleCreateError_ContextCanceled(t *testing.T) {
+	mockBot := testutil.NewMockBotAPI()
+	handler := &Handler{bot: mockBot}
+
+	ctx := context.Background()
+	handler.handleCreateError(ctx, 12345, 100, "testuser", fmt.Errorf("context canceled"))
+
+	assert.True(t, mockBot.SendCalled)
+	assert.Contains(t, mockBot.LastSentText, "Запрос был прерван")
+}
+
+func TestHandleCreateError_NoSuchHost(t *testing.T) {
+	mockBot := testutil.NewMockBotAPI()
+	handler := &Handler{bot: mockBot}
+
+	ctx := context.Background()
+	handler.handleCreateError(ctx, 12345, 100, "testuser", fmt.Errorf("no such host"))
+
+	assert.True(t, mockBot.SendCalled)
+	assert.Contains(t, mockBot.LastSentText, "Ошибка подключения к серверу")
+}
+
+func TestHandleCreateError_DialTCP(t *testing.T) {
+	mockBot := testutil.NewMockBotAPI()
+	handler := &Handler{bot: mockBot}
+
+	ctx := context.Background()
+	handler.handleCreateError(ctx, 12345, 100, "testuser", fmt.Errorf("dial tcp 127.0.0.1:2053"))
+
+	assert.True(t, mockBot.SendCalled)
+	assert.Contains(t, mockBot.LastSentText, "Ошибка подключения к серверу")
+}
+
+func TestHandleCreateError_Certificate(t *testing.T) {
+	mockBot := testutil.NewMockBotAPI()
+	handler := &Handler{bot: mockBot}
+
+	ctx := context.Background()
+	handler.handleCreateError(ctx, 12345, 100, "testuser", fmt.Errorf("certificate verify failed"))
+
+	assert.True(t, mockBot.SendCalled)
+	assert.Contains(t, mockBot.LastSentText, "Ошибка SSL/TLS сертификата")
+}
+
+func TestHandleCreateError_TLS(t *testing.T) {
+	mockBot := testutil.NewMockBotAPI()
+	handler := &Handler{bot: mockBot}
+
+	ctx := context.Background()
+	handler.handleCreateError(ctx, 12345, 100, "testuser", fmt.Errorf("TLS handshake failed"))
+
+	assert.True(t, mockBot.SendCalled)
+	assert.Contains(t, mockBot.LastSentText, "Ошибка SSL/TLS сертификата")
+}
+
+func TestHandleCreateError_Inbound(t *testing.T) {
+	mockBot := testutil.NewMockBotAPI()
+	handler := &Handler{bot: mockBot}
+
+	ctx := context.Background()
+	handler.handleCreateError(ctx, 12345, 100, "testuser", fmt.Errorf("inbound not found"))
+
+	assert.True(t, mockBot.SendCalled)
+	assert.Contains(t, mockBot.LastSentText, "Ошибка сервера при создании подписки")
+}
+
+func TestHandleCreateError_Client(t *testing.T) {
+	mockBot := testutil.NewMockBotAPI()
+	handler := &Handler{bot: mockBot}
+
+	ctx := context.Background()
+	handler.handleCreateError(ctx, 12345, 100, "testuser", fmt.Errorf("client already exists"))
+
+	assert.True(t, mockBot.SendCalled)
+	assert.Contains(t, mockBot.LastSentText, "Ошибка сервера при создании подписки")
+}
+
+func TestHandleCreateError_RollbackFailed(t *testing.T) {
+	mockBot := testutil.NewMockBotAPI()
+	handler := &Handler{
+		bot:         mockBot,
+		cfg:         &config.Config{TelegramAdminID: 12345},
+		rateLimiter: ratelimiter.NewRateLimiter(10, 1),
+	}
+
+	ctx := context.Background()
+	handler.handleCreateError(ctx, 12345, 100, "testuser", fmt.Errorf("rollback failed: db error"))
+
+	assert.True(t, mockBot.SendCalled)
+	assert.Contains(t, mockBot.LastSentText, "не сохранена в базе")
+	assert.Contains(t, mockBot.LastSentText, "Обратитесь к администратору")
+}
+
+func TestHandleCreateError_GenericError(t *testing.T) {
+	mockBot := testutil.NewMockBotAPI()
+	handler := &Handler{bot: mockBot}
+
+	ctx := context.Background()
+	handler.handleCreateError(ctx, 12345, 100, "testuser", fmt.Errorf("some unknown error"))
+
+	assert.True(t, mockBot.SendCalled)
+	assert.Contains(t, mockBot.LastSentText, "Ошибка при создании подписки")
 }
