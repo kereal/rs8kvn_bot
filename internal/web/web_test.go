@@ -719,3 +719,155 @@ func TestServer_StopWithoutStart(t *testing.T) {
 	err := srv.Stop(stopCtx)
 	assert.NoError(t, err, "Stop() without Start() should not return error")
 }
+
+// === getExistingTrialFromCookie tests ===
+
+func TestGetExistingTrialFromCookie_NoCookie(t *testing.T) {
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	cfg := &config.Config{}
+	srv := NewServer(":8880", mockDB, mockXUI, cfg, "testbot")
+
+	req := httptest.NewRequest("GET", "/i/test", nil)
+
+	ctx := context.Background()
+	sub, err := srv.getExistingTrialFromCookie(req, ctx, "test")
+
+	assert.Error(t, err, "getExistingTrialFromCookie() should return error when no cookie")
+	assert.Nil(t, sub, "getExistingTrialFromCookie() should return nil when no cookie")
+}
+
+func TestGetExistingTrialFromCookie_InvalidSubID(t *testing.T) {
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	cfg := &config.Config{}
+	srv := NewServer(":8880", mockDB, mockXUI, cfg, "testbot")
+
+	req := httptest.NewRequest("GET", "/i/test", nil)
+	req.AddCookie(&http.Cookie{
+		Name:  "rs8kvn_trial_test",
+		Value: "invalid-sub-id",
+	})
+
+	ctx := context.Background()
+	sub, err := srv.getExistingTrialFromCookie(req, ctx, "test")
+
+	assert.Error(t, err, "getExistingTrialFromCookie() should return error for invalid sub ID")
+	assert.Nil(t, sub, "getExistingTrialFromCookie() should return nil for invalid sub ID")
+}
+
+func TestGetExistingTrialFromCookie_NotTrial(t *testing.T) {
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	cfg := &config.Config{}
+	srv := NewServer(":8880", mockDB, mockXUI, cfg, "testbot")
+
+	// Mock: subscription exists but is not trial
+	mockDB.GetTrialSubscriptionBySubIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
+		return &database.Subscription{
+			SubscriptionID: subscriptionID,
+			IsTrial:        false,
+			TelegramID:     123456,
+		}, nil
+	}
+
+	req := httptest.NewRequest("GET", "/i/test", nil)
+	req.AddCookie(&http.Cookie{
+		Name:  "rs8kvn_trial_test",
+		Value: "valid-sub-id",
+	})
+
+	ctx := context.Background()
+	sub, err := srv.getExistingTrialFromCookie(req, ctx, "test")
+
+	assert.Error(t, err, "getExistingTrialFromCookie() should return error for non-trial subscription")
+	assert.Nil(t, sub, "getExistingTrialFromCookie() should return nil for non-trial subscription")
+}
+
+func TestGetExistingTrialFromCookie_AlreadyActivated(t *testing.T) {
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	cfg := &config.Config{}
+	srv := NewServer(":8880", mockDB, mockXUI, cfg, "testbot")
+
+	// Mock: trial subscription but already activated (telegram_id != 0)
+	mockDB.GetTrialSubscriptionBySubIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
+		return &database.Subscription{
+			SubscriptionID: subscriptionID,
+			IsTrial:        true,
+			TelegramID:     123456, // Activated
+		}, nil
+	}
+
+	req := httptest.NewRequest("GET", "/i/test", nil)
+	req.AddCookie(&http.Cookie{
+		Name:  "rs8kvn_trial_test",
+		Value: "valid-sub-id",
+	})
+
+	ctx := context.Background()
+	sub, err := srv.getExistingTrialFromCookie(req, ctx, "test")
+
+	assert.Error(t, err, "getExistingTrialFromCookie() should return error for activated trial")
+	assert.Nil(t, sub, "getExistingTrialFromCookie() should return nil for activated trial")
+}
+
+func TestGetExistingTrialFromCookie_Expired(t *testing.T) {
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	cfg := &config.Config{}
+	srv := NewServer(":8880", mockDB, mockXUI, cfg, "testbot")
+
+	// Mock: expired trial subscription
+	mockDB.GetTrialSubscriptionBySubIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
+		return &database.Subscription{
+			SubscriptionID: subscriptionID,
+			IsTrial:        true,
+			TelegramID:     0,
+			ExpiryTime:     time.Now().Add(-1 * time.Hour), // Expired
+		}, nil
+	}
+
+	req := httptest.NewRequest("GET", "/i/test", nil)
+	req.AddCookie(&http.Cookie{
+		Name:  "rs8kvn_trial_test",
+		Value: "valid-sub-id",
+	})
+
+	ctx := context.Background()
+	sub, err := srv.getExistingTrialFromCookie(req, ctx, "test")
+
+	assert.Error(t, err, "getExistingTrialFromCookie() should return error for expired trial")
+	assert.Nil(t, sub, "getExistingTrialFromCookie() should return nil for expired trial")
+}
+
+func TestGetExistingTrialFromCookie_Valid(t *testing.T) {
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	cfg := &config.Config{}
+	srv := NewServer(":8880", mockDB, mockXUI, cfg, "testbot")
+
+	// Mock: valid unactivated trial subscription
+	mockDB.GetTrialSubscriptionBySubIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
+		return &database.Subscription{
+			SubscriptionID: subscriptionID,
+			IsTrial:        true,
+			TelegramID:     0,
+			ExpiryTime:     time.Now().Add(2 * time.Hour),
+			SubscriptionURL: "https://vpn.site/sub/test",
+		}, nil
+	}
+
+	req := httptest.NewRequest("GET", "/i/test", nil)
+	req.AddCookie(&http.Cookie{
+		Name:  "rs8kvn_trial_test",
+		Value: "valid-sub-id",
+	})
+
+	ctx := context.Background()
+	sub, err := srv.getExistingTrialFromCookie(req, ctx, "test")
+
+	assert.NoError(t, err, "getExistingTrialFromCookie() should return nil error for valid trial")
+	assert.NotNil(t, sub, "getExistingTrialFromCookie() should return subscription for valid trial")
+	assert.Equal(t, "valid-sub-id", sub.SubscriptionID, "getExistingTrialFromCookie() should return correct sub ID")
+}
