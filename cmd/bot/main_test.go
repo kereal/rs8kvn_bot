@@ -62,7 +62,7 @@ func TestHandleUpdate_CommandRouting(t *testing.T) {
 	mockBot := testutil.NewMockBotAPI()
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
-	handler := bot.NewHandler(mockBot, cfg, mockDB, mockXUI)
+	handler := bot.NewHandler(mockBot, cfg, mockDB, mockXUI, "testbot")
 	ctx := context.Background()
 
 	tests := []struct {
@@ -98,7 +98,7 @@ func TestHandleUpdate_NonCommandMessage(t *testing.T) {
 	mockBot := testutil.NewMockBotAPI()
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
-	handler := bot.NewHandler(mockBot, cfg, mockDB, mockXUI)
+	handler := bot.NewHandler(mockBot, cfg, mockDB, mockXUI, "testbot")
 	ctx := context.Background()
 
 	update := tgbotapi.Update{
@@ -121,7 +121,7 @@ func TestHandleUpdate_CallbackQuery(t *testing.T) {
 	mockBot := testutil.NewMockBotAPI()
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
-	handler := bot.NewHandler(mockBot, cfg, mockDB, mockXUI)
+	handler := bot.NewHandler(mockBot, cfg, mockDB, mockXUI, "testbot")
 	ctx := context.Background()
 
 	update := tgbotapi.Update{
@@ -148,7 +148,7 @@ func TestHandleUpdateSafely_PanicRecovery(t *testing.T) {
 	mockBot := testutil.NewMockBotAPI()
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
-	handler := bot.NewHandler(mockBot, cfg, mockDB, mockXUI)
+	handler := bot.NewHandler(mockBot, cfg, mockDB, mockXUI, "testbot")
 	ctx := context.Background()
 
 	update := tgbotapi.Update{
@@ -174,7 +174,7 @@ func TestHandleUpdate_UnknownCommand(t *testing.T) {
 	mockBot := testutil.NewMockBotAPI()
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
-	handler := bot.NewHandler(mockBot, cfg, mockDB, mockXUI)
+	handler := bot.NewHandler(mockBot, cfg, mockDB, mockXUI, "testbot")
 	ctx := context.Background()
 
 	update := tgbotapi.Update{
@@ -248,7 +248,7 @@ func TestHandleUpdateSafely_PanicInHandler(t *testing.T) {
 	mockBot := testutil.NewMockBotAPI()
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
-	handler := bot.NewHandler(mockBot, cfg, mockDB, mockXUI)
+	handler := bot.NewHandler(mockBot, cfg, mockDB, mockXUI, "testbot")
 	ctx := context.Background()
 
 	update := tgbotapi.Update{
@@ -283,7 +283,7 @@ func TestHandleUpdate_NilMessage(t *testing.T) {
 	mockBot := testutil.NewMockBotAPI()
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
-	handler := bot.NewHandler(mockBot, cfg, mockDB, mockXUI)
+	handler := bot.NewHandler(mockBot, cfg, mockDB, mockXUI, "testbot")
 	ctx := context.Background()
 
 	update := tgbotapi.Update{}
@@ -316,7 +316,7 @@ func TestHandleUpdate_UnknownCommands(t *testing.T) {
 	mockBot := testutil.NewMockBotAPI()
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
-	handler := bot.NewHandler(mockBot, cfg, mockDB, mockXUI)
+	handler := bot.NewHandler(mockBot, cfg, mockDB, mockXUI, "testbot")
 	ctx := context.Background()
 
 	tests := []struct {

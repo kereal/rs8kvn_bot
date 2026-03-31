@@ -84,7 +84,7 @@ func TestNewHandler(t *testing.T) {
 		t.Fatalf("Failed to create XUI client: %v", err)
 	}
 	mockDB := testutil.NewMockDatabaseService()
-	handler := NewHandler(testutil.NewMockBotAPI(), cfg, mockDB, xuiClient)
+	handler := NewHandler(testutil.NewMockBotAPI(), cfg, mockDB, xuiClient, "testbot")
 
 	if handler == nil {
 		t.Fatal("NewHandler returned nil")
@@ -1661,7 +1661,7 @@ func TestHandler_CacheField(t *testing.T) {
 // === Rate limiter tests ===
 
 func TestHandler_RateLimiter(t *testing.T) {
-	handler := NewHandler(testutil.NewMockBotAPI(), &config.Config{}, testutil.NewMockDatabaseService(), nil)
+	handler := NewHandler(testutil.NewMockBotAPI(), &config.Config{}, testutil.NewMockDatabaseService(), nil, "testbot")
 
 	assert.NotNil(t, handler.rateLimiter, "Rate limiter should be initialized")
 

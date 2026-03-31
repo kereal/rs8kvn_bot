@@ -154,7 +154,7 @@ func main() {
 	logger.Info("Telegram bot authorized", zap.String("username", botAPI.Self.UserName))
 
 	// Create bot handler
-	handler := bot.NewHandler(botAPI, cfg, dbService, xuiClient)
+	handler := bot.NewHandler(botAPI, cfg, dbService, xuiClient, botAPI.Self.UserName)
 
 	// Initialize and start web server (health + trial pages)
 	webServer := web.NewServer(fmt.Sprintf(":%d", cfg.HealthCheckPort), dbService, xuiClient, cfg, botAPI.Self.UserName)
