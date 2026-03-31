@@ -177,13 +177,16 @@ func TestCircuitBreaker_HalfOpen_MaxAttempts(t *testing.T) {
 	// Wait for timeout to enter half-open
 	time.Sleep(60 * time.Millisecond)
 
-	// Use all half-open attempts (default is 3)
-	for i := 0; i < 3; i++ {
+	// Use all half-open attempts
+	// First call transitions from Open to HalfOpen and allows request
+	// Then we have halfOpenMax (3) more attempts in HalfOpen state
+	// Total: 4 allowed requests before blocking
+	for i := 0; i < 4; i++ {
 		allowed := cb.allowRequest()
 		assert.True(t, allowed, "Request %d should be allowed in half-open", i+1)
 	}
 
-	// Fourth request should be blocked
+	// Fifth request should be blocked
 	allowed := cb.allowRequest()
 	assert.False(t, allowed, "Request should be blocked after max half-open attempts")
 }

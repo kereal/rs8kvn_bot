@@ -274,7 +274,29 @@ func (h *Handler) createSubscription(ctx context.Context, chatID int64, username
 		return
 	}
 
-	// Step 3: Save to database (with rollback on failure)
+	// Step 3: Проверяем pending invite для записи referred_by
+	var referredBy int64
+	h.pendingMu.RLock()
+	if pending, ok := h.pendingInvites[chatID]; ok {
+		if time.Now().Before(pending.expiresAt) {
+			// Кэш валиден, получаем referrer_tg_id из БД
+			invite, err := h.db.GetInviteByCode(ctx, pending.code)
+			if err == nil {
+				referredBy = invite.ReferrerTGID
+				logger.Info("Using pending invite for subscription",
+					zap.Int64("chat_id", chatID),
+					zap.String("invite_code", pending.code),
+					zap.Int64("referred_by", referredBy))
+			}
+		}
+		// Очищаем кэш в любом случае
+		h.pendingMu.Lock()
+		delete(h.pendingInvites, chatID)
+		h.pendingMu.Unlock()
+	}
+	h.pendingMu.RUnlock()
+
+	// Step 4: Save to database (with rollback on failure)
 	subscriptionURL := h.xui.GetSubscriptionLink(h.xui.GetExternalURL(h.cfg.XUIHost), client.SubID, h.cfg.XUISubPath)
 
 	sub := &database.Subscription{
@@ -287,6 +309,7 @@ func (h *Handler) createSubscription(ctx context.Context, chatID int64, username
 		ExpiryTime:      expiryTime,
 		Status:          "active",
 		SubscriptionURL: subscriptionURL,
+		ReferredBy:      referredBy,
 	}
 
 	if err := h.db.CreateSubscription(ctx, sub); err != nil {

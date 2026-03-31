@@ -93,9 +93,10 @@ func TestGenerateQRCodePNG(t *testing.T) {
 		require.NoError(t, err, "GenerateQRCodePNG() error")
 		require.GreaterOrEqual(t, len(png), 12, "PNG data should contain IEND chunk")
 
-		// IEND is the last chunk
-		lastBytes := png[len(png)-8:]
-		assert.Equal(t, []byte{'I', 'E', 'N', 'D'}, lastBytes[4:8], "PNG should end with IEND chunk")
+		// IEND chunk: length (4 bytes, all zeros) + type "IEND" (4 bytes) + CRC (4 bytes)
+		// The "IEND" type is at bytes -8 to -4 from the end
+		iendType := png[len(png)-8 : len(png)-4]
+		assert.Equal(t, []byte{'I', 'E', 'N', 'D'}, iendType, "PNG should end with IEND chunk type")
 	})
 }
 

@@ -370,6 +370,87 @@ func TestHandleHealthz(t *testing.T) {
 	assert.Contains(t, rec.Body.String(), "ok", "handleHealthz() body should contain 'ok'")
 }
 
+func TestHandleHealthz_MethodNotAllowed(t *testing.T) {
+	srv := NewServer(":8880", nil, nil, &config.Config{}, "testbot")
+
+	// Test POST method
+	req := httptest.NewRequest("POST", "/healthz", nil)
+	rec := httptest.NewRecorder()
+
+	srv.handleHealthz(rec, req)
+
+	assert.Equal(t, http.StatusMethodNotAllowed, rec.Code, "handleHealthz() should reject POST")
+	assert.Equal(t, "GET, HEAD", rec.Header().Get("Allow"), "handleHealthz() should set Allow header")
+
+	// Test PUT method
+	req = httptest.NewRequest("PUT", "/healthz", nil)
+	rec = httptest.NewRecorder()
+
+	srv.handleHealthz(rec, req)
+
+	assert.Equal(t, http.StatusMethodNotAllowed, rec.Code, "handleHealthz() should reject PUT")
+
+	// Test DELETE method
+	req = httptest.NewRequest("DELETE", "/healthz", nil)
+	rec = httptest.NewRecorder()
+
+	srv.handleHealthz(rec, req)
+
+	assert.Equal(t, http.StatusMethodNotAllowed, rec.Code, "handleHealthz() should reject DELETE")
+}
+
+func TestHandleHealthz_HeadMethod(t *testing.T) {
+	srv := NewServer(":8880", nil, nil, &config.Config{}, "testbot")
+
+	req := httptest.NewRequest("HEAD", "/healthz", nil)
+	rec := httptest.NewRecorder()
+
+	srv.handleHealthz(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code, "handleHealthz() should accept HEAD")
+}
+
+func TestHandleReadyz_MethodNotAllowed(t *testing.T) {
+	srv := NewServer(":8880", nil, nil, &config.Config{}, "testbot")
+
+	// Test POST method
+	req := httptest.NewRequest("POST", "/readyz", nil)
+	rec := httptest.NewRecorder()
+
+	srv.handleReadyz(rec, req)
+
+	assert.Equal(t, http.StatusMethodNotAllowed, rec.Code, "handleReadyz() should reject POST")
+	assert.Equal(t, "GET, HEAD", rec.Header().Get("Allow"), "handleReadyz() should set Allow header")
+
+	// Test PUT method
+	req = httptest.NewRequest("PUT", "/readyz", nil)
+	rec = httptest.NewRecorder()
+
+	srv.handleReadyz(rec, req)
+
+	assert.Equal(t, http.StatusMethodNotAllowed, rec.Code, "handleReadyz() should reject PUT")
+
+	// Test DELETE method
+	req = httptest.NewRequest("DELETE", "/readyz", nil)
+	rec = httptest.NewRecorder()
+
+	srv.handleReadyz(rec, req)
+
+	assert.Equal(t, http.StatusMethodNotAllowed, rec.Code, "handleReadyz() should reject DELETE")
+}
+
+func TestHandleReadyz_HeadMethod(t *testing.T) {
+	srv := NewServer(":8880", nil, nil, &config.Config{}, "testbot")
+	srv.SetReady(true)
+
+	req := httptest.NewRequest("HEAD", "/readyz", nil)
+	rec := httptest.NewRecorder()
+
+	srv.handleReadyz(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code, "handleReadyz() should accept HEAD")
+}
+
 func TestHandleReadyz_NotReady(t *testing.T) {
 	srv := NewServer(":8880", nil, nil, &config.Config{}, "testbot")
 	// Register a failing checker to make health status not "ok"
