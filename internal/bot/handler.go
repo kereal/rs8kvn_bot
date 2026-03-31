@@ -224,18 +224,29 @@ _нажмите и держите → копировать_
 📤 *Отправьте ссылку друзьям!*
 
 💎 За каждого приглашенного активного пользователя вы получите бонус.`, h.botUsername, telegramLink, webLink, webLink)
-	backKeyboard := h.getBackKeyboard()
+
+	// Keyboard with QR buttons
+	keyboard := tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("📱 QR Telegram", "qr_telegram_"+invite.Code),
+			tgbotapi.NewInlineKeyboardButtonData("🌐 QR Web", "qr_web_"+invite.Code),
+		),
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("🏠 В начало", "back_to_start"),
+		),
+	)
 
 	if messageID > 0 {
 		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, text)
 		editMsg.ParseMode = "Markdown"
 		editMsg.DisableWebPagePreview = true
-		editMsg.ReplyMarkup = &backKeyboard
+		editMsg.ReplyMarkup = &keyboard
 		h.safeSend(editMsg)
 	} else {
 		msg := tgbotapi.NewMessage(chatID, text)
 		msg.ParseMode = "Markdown"
-		msg.ReplyMarkup = &backKeyboard
+		msg.DisableWebPagePreview = true
+		msg.ReplyMarkup = &keyboard
 		h.send(ctx, msg)
 	}
 }

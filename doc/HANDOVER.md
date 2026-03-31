@@ -2,7 +2,7 @@
 
 **Repo:** https://github.com/kereal/rs8kvn_bot  
 **Module:** `rs8kvn_bot` (Go 1.25+)  
-**Version:** v2.0.1  
+**Version:** v2.0.2  
 **Last Updated:** 2026-03-31
 
 ---

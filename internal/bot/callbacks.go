@@ -2,6 +2,8 @@ package bot
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
 	"rs8kvn_bot/internal/logger"
 
@@ -81,6 +83,19 @@ func (h *Handler) HandleCallback(ctx context.Context, update tgbotapi.Update) {
 	case "share_invite":
 		messageID := update.CallbackQuery.Message.MessageID
 		h.handleShareInvite(ctx, chatID, username, messageID)
+	case "qr_telegram":
+		// qr_telegram_{code}
+		messageID := update.CallbackQuery.Message.MessageID
+		code := strings.TrimPrefix(data, "qr_telegram_")
+		h.handleQRTelegram(ctx, chatID, username, messageID, code)
+	case "qr_web":
+		// qr_web_{code}
+		messageID := update.CallbackQuery.Message.MessageID
+		code := strings.TrimPrefix(data, "qr_web_")
+		h.handleQRWeb(ctx, chatID, username, messageID, code)
+	case "back_to_invite":
+		messageID := update.CallbackQuery.Message.MessageID
+		h.handleBackToInvite(ctx, chatID, username, messageID)
 	default:
 		logger.Warn("Unknown callback data", zap.String("data", data))
 	}
@@ -89,4 +104,20 @@ func (h *Handler) HandleCallback(ctx context.Context, update tgbotapi.Update) {
 func (h *Handler) handleShareInvite(ctx context.Context, chatID int64, username string, messageID int) {
 	logger.Info("User requesting share invite", zap.String("username", username))
 	h.sendInviteLink(ctx, chatID, messageID)
+}
+
+// handleQRTelegram handles the "qr_telegram_{code}" callback - generates QR for Telegram invite link.
+func (h *Handler) handleQRTelegram(ctx context.Context, chatID int64, username string, messageID int, code string) {
+	logger.Info("User requesting QR for Telegram invite", zap.String("code", code))
+
+	telegramLink := fmt.Sprintf("https://t.me/%s?start=share_%s", h.botUsername, code)
+	h.sendQRCode(ctx, chatID, messageID, telegramLink, "📱 QR-код для Telegram\n\nОтправьте этот QR-код пользователю для быстрого добавления в Telegram")
+}
+
+// handleQRWeb handles the "qr_web_{code}" callback - generates QR for web invite link.
+func (h *Handler) handleQRWeb(ctx context.Context, chatID int64, username string, messageID int, code string) {
+	logger.Info("User requesting QR for web invite", zap.String("code", code))
+
+	webLink := fmt.Sprintf("%s/i/%s", h.cfg.SiteURL, code)
+	h.sendQRCode(ctx, chatID, messageID, webLink, "🌐 QR-код для веб-страницы\n\nОтправьте этот QR-код пользователю для открытия страницы с подпиской")
 }
