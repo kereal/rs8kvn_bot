@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"rs8kvn_bot/internal/config"
 	"rs8kvn_bot/internal/database"
@@ -435,4 +436,97 @@ func TestHandleBindTrial_Success(t *testing.T) {
 
 	// Should not panic on successful bind
 	handler.handleBindTrial(ctx, 123456, "testuser", "trial-code-123")
+}
+
+func TestHandleShareStart_UserWithExistingSubscription(t *testing.T) {
+	cfg := &config.Config{
+		TelegramAdminID: 123456,
+		TrafficLimitGB:  100,
+	}
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI)
+
+	// User has active subscription
+	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
+		return &database.Subscription{
+			TelegramID: telegramID,
+			Status:     "active",
+		}, nil
+	}
+
+	ctx := context.Background()
+	handler.handleShareStart(ctx, 123456, "testuser", "ABC12345")
+
+	assert.True(t, mockBot.SendCalled)
+	// Should show main menu with subscription (not the invite message)
+	assert.Contains(t, mockBot.LastSentText, "Используйте кнопки ниже")
+}
+
+func TestHandleShareStart_InvalidInviteCode(t *testing.T) {
+	cfg := &config.Config{
+		TelegramAdminID: 123456,
+		TrafficLimitGB:  100,
+	}
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI)
+
+	// No subscription
+	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
+		return nil, nil
+	}
+
+	// Invalid invite code
+	mockDB.GetInviteByCodeFunc = func(ctx context.Context, code string) (*database.Invite, error) {
+		return nil, assert.AnError
+	}
+
+	ctx := context.Background()
+	handler.handleShareStart(ctx, 123456, "testuser", "INVALID")
+
+	assert.True(t, mockBot.SendCalled)
+	// Should show menu for new user (not the invite message)
+	assert.Contains(t, mockBot.LastSentText, "получить подписку")
+}
+
+func TestHandleShareStart_ValidInviteCode(t *testing.T) {
+	cfg := &config.Config{
+		TelegramAdminID: 123456,
+		TrafficLimitGB:  100,
+	}
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI)
+
+	// No subscription
+	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
+		return nil, nil
+	}
+
+	// Valid invite code
+	mockDB.GetInviteByCodeFunc = func(ctx context.Context, code string) (*database.Invite, error) {
+		return &database.Invite{
+			Code:         code,
+			ReferrerTGID: 999999,
+		}, nil
+	}
+
+	ctx := context.Background()
+	handler.handleShareStart(ctx, 123456, "testuser", "ABC12345")
+
+	assert.True(t, mockBot.SendCalled)
+	assert.Contains(t, mockBot.LastSentText, "Вас пригласили!")
+
+	// Check that invite was cached
+	handler.pendingMu.RLock()
+	pending, ok := handler.pendingInvites[123456]
+	handler.pendingMu.RUnlock()
+
+	assert.True(t, ok)
+	assert.Equal(t, "ABC12345", pending.code)
+	assert.True(t, pending.expiresAt.After(time.Now()))
 }
