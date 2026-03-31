@@ -56,7 +56,7 @@ func NewTestFixture(t *testing.T) *TestFixture {
 		t.Fatalf("Failed to create XUI client: %v", err)
 	}
 
-	handler := NewHandler(testutil.NewMockBotAPI(), cfg, dbService, xuiClient, "testbot")
+	handler := NewHandler(testutil.NewMockBotAPI(), cfg, dbService, xuiClient, NewTestBotConfig())
 
 	return &TestFixture{
 		DB:          dbService,
@@ -205,7 +205,7 @@ func NewIntegrationTestFixture(t *testing.T) *IntegrationTestFixture {
 		DatabasePath:     ":memory:",
 	}
 
-	handler := NewHandler(testutil.NewMockBotAPI(), cfg, dbService, mockXUI.Client, "testbot")
+	handler := NewHandler(testutil.NewMockBotAPI(), cfg, dbService, mockXUI.Client, NewTestBotConfig())
 
 	return &IntegrationTestFixture{
 		DB:          dbService,

@@ -173,3 +173,16 @@ const (
 	DefaultTrialDurationHours = 3
 	DefaultTrialRateLimit     = 3
 )
+
+// Telegram Limits
+const (
+	MaxTelegramMessageLen = 4096
+	MaxCaptionLen         = 1024
+)
+
+// Admin Rate Limiting
+const (
+	AdminSendRateLimit   = 10              // Max messages per window
+	AdminSendRateWindow  = 1 * time.Minute // Time window
+	AdminSendMinInterval = 6 * time.Second // Min interval between messages
+)

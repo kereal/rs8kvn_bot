@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"rs8kvn_bot/internal/bot"
 	"rs8kvn_bot/internal/config"
 	"rs8kvn_bot/internal/database"
 	"rs8kvn_bot/internal/interfaces"
@@ -39,7 +40,7 @@ type Server struct {
 	db              interfaces.DatabaseService
 	xuiClient       interfaces.XUIClient
 	cfg             *config.Config
-	botUsername     string
+	botConfig       *bot.BotConfig
 	server          *http.Server
 	mu              sync.RWMutex
 	ready           bool
@@ -47,13 +48,13 @@ type Server struct {
 	inviteCodeRegex *regexp.Regexp
 }
 
-func NewServer(addr string, db interfaces.DatabaseService, xuiClient interfaces.XUIClient, cfg *config.Config, botUsername string) *Server {
+func NewServer(addr string, db interfaces.DatabaseService, xuiClient interfaces.XUIClient, cfg *config.Config, botConfig *bot.BotConfig) *Server {
 	return &Server{
 		addr:            addr,
 		db:              db,
 		xuiClient:       xuiClient,
 		cfg:             cfg,
-		botUsername:     botUsername,
+		botConfig:       botConfig,
 		checkers:        make(map[string]func(context.Context) ComponentHealth),
 		inviteCodeRegex: regexp.MustCompile(`^[a-zA-Z0-9_-]+$`),
 	}
@@ -219,7 +220,7 @@ func (s *Server) handleInvite(w http.ResponseWriter, r *http.Request) {
 	if err == nil && existingSub != nil {
 		// Trial уже создан — показываем существующий
 		logger.Info("Existing trial found via cookie", zap.String("sub_id", existingSub.SubscriptionID))
-		telegramLink := "https://t.me/" + s.botUsername + "?start=trial_" + existingSub.SubscriptionID
+		telegramLink := "https://t.me/" + s.botConfig.Username + "?start=trial_" + existingSub.SubscriptionID
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(s.renderTrialPage(existingSub.SubscriptionID, existingSub.SubscriptionURL, telegramLink, s.cfg.TrialDurationHours)))
@@ -305,7 +306,7 @@ func (s *Server) handleInvite(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	telegramLink := "https://t.me/" + s.botUsername + "?start=trial_" + subID
+	telegramLink := "https://t.me/" + s.botConfig.Username + "?start=trial_" + subID
 	w.Write([]byte(s.renderTrialPage(subID, subURL, telegramLink, s.cfg.TrialDurationHours)))
 }
 
