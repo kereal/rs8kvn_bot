@@ -3,6 +3,7 @@ package bot
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 
 	"rs8kvn_bot/internal/config"
@@ -51,6 +52,61 @@ func createCommandUpdate(chatID int64, from *tgbotapi.User, text string) tgbotap
 			Entities: entities,
 		},
 	}
+}
+
+// mockBotAPIWithCounter is a mock that counts Send calls and can fail on specific calls
+type mockBotAPIWithCounter struct {
+	mu           sync.RWMutex
+	sendCalls    int
+	requestCalls int
+	lastMessage  tgbotapi.Chattable
+	sendError    error
+	failOnCalls  map[int]bool // Call numbers that should fail
+}
+
+func newMockBotAPIWithCounter() *mockBotAPIWithCounter {
+	return &mockBotAPIWithCounter{
+		failOnCalls: make(map[int]bool),
+	}
+}
+
+func (m *mockBotAPIWithCounter) Send(c tgbotapi.Chattable) (tgbotapi.Message, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.sendCalls++
+	m.lastMessage = c
+
+	if m.sendError != nil {
+		return tgbotapi.Message{}, m.sendError
+	}
+
+	// Check if this call should fail
+	if m.failOnCalls[m.sendCalls] {
+		return tgbotapi.Message{}, errors.New("simulated send failure")
+	}
+
+	return tgbotapi.Message{MessageID: m.sendCalls}, nil
+}
+
+func (m *mockBotAPIWithCounter) Request(c tgbotapi.Chattable) (*tgbotapi.APIResponse, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.requestCalls++
+	return &tgbotapi.APIResponse{Ok: true}, nil
+}
+
+func (m *mockBotAPIWithCounter) GetUpdatesChan(config tgbotapi.UpdateConfig) tgbotapi.UpdatesChannel {
+	ch := make(chan tgbotapi.Update)
+	close(ch)
+	return ch
+}
+
+func (m *mockBotAPIWithCounter) StopReceivingUpdates() {}
+
+func (m *mockBotAPIWithCounter) SendCalledCount() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.sendCalls
 }
 
 func TestHandleDel_NonAdminUser(t *testing.T) {
@@ -408,7 +464,7 @@ func TestHandleBroadcast_DatabaseError(t *testing.T) {
 	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "admin"}, "/broadcast Test message")
 
 	handler.HandleBroadcast(ctx, update)
-	
+
 	// Should send some message (either error or result)
 	assert.True(t, mockBot.SendCalled)
 }
@@ -464,7 +520,203 @@ func TestHandleBroadcast_ContextCancellation(t *testing.T) {
 	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "admin"}, "/broadcast Test message")
 
 	handler.HandleBroadcast(ctx, update)
+	// With cancelled context, no messages should be sent
+	assert.False(t, mockBot.SendCalled, "No messages should be sent when context is cancelled")
+}
+
+// TestHandleBroadcast_MultipleBatches tests broadcast with multiple batches of users
+func TestHandleBroadcast_MultipleBatches(t *testing.T) {
+	cfg := &config.Config{
+		TelegramAdminID: 123456,
+		TrafficLimitGB:  50,
+	}
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI)
+
+	// Set up 250 users to test multiple batches (batch size is 100)
+	mockDB.GetTotalTelegramIDCountFunc = func(ctx context.Context) (int64, error) {
+		return 250, nil
+	}
+
+	callCount := 0
+	mockDB.GetTelegramIDsBatchFunc = func(ctx context.Context, offset, limit int) ([]int64, error) {
+		callCount++
+		switch callCount {
+		case 1:
+			// First batch: 100 users
+			ids := make([]int64, 100)
+			for i := 0; i < 100; i++ {
+				ids[i] = int64(i + 1)
+			}
+			return ids, nil
+		case 2:
+			// Second batch: 100 users
+			ids := make([]int64, 100)
+			for i := 0; i < 100; i++ {
+				ids[i] = int64(i + 101)
+			}
+			return ids, nil
+		case 3:
+			// Third batch: 50 users
+			ids := make([]int64, 50)
+			for i := 0; i < 50; i++ {
+				ids[i] = int64(i + 201)
+			}
+			return ids, nil
+		default:
+			return []int64{}, nil
+		}
+	}
+
+	ctx := context.Background()
+	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "admin"}, "/broadcast Test message")
+
+	handler.HandleBroadcast(ctx, update)
 	assert.True(t, mockBot.SendCalled)
+	assert.Equal(t, 3, callCount, "Should call GetTelegramIDsBatch 3 times for 250 users")
+}
+
+// TestHandleBroadcast_BatchError tests broadcast when GetTelegramIDsBatch fails
+func TestHandleBroadcast_BatchError(t *testing.T) {
+	cfg := &config.Config{
+		TelegramAdminID: 123456,
+		TrafficLimitGB:  50,
+	}
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI)
+
+	mockDB.GetTotalTelegramIDCountFunc = func(ctx context.Context) (int64, error) {
+		return 200, nil
+	}
+
+	callCount := 0
+	mockDB.GetTelegramIDsBatchFunc = func(ctx context.Context, offset, limit int) ([]int64, error) {
+		callCount++
+		if callCount == 1 {
+			// First batch succeeds
+			return []int64{111, 222}, nil
+		}
+		// Second batch fails
+		return nil, errors.New("database connection lost")
+	}
+
+	ctx := context.Background()
+	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "admin"}, "/broadcast Test message")
+
+	handler.HandleBroadcast(ctx, update)
+	assert.True(t, mockBot.SendCalled, "Should send at least some messages before error")
+}
+
+
+
+
+// TestHandleBroadcast_EmptyBatchAfterFirst tests handling of empty subsequent batches
+func TestHandleBroadcast_EmptyBatchAfterFirst(t *testing.T) {
+	cfg := &config.Config{
+		TelegramAdminID: 123456,
+		TrafficLimitGB:  50,
+	}
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI)
+
+	// Total count says 50, but only first batch returns users
+	mockDB.GetTotalTelegramIDCountFunc = func(ctx context.Context) (int64, error) {
+		return 50, nil
+	}
+
+	callCount := 0
+	mockDB.GetTelegramIDsBatchFunc = func(ctx context.Context, offset, limit int) ([]int64, error) {
+		callCount++
+		if callCount == 1 {
+			return []int64{111, 222}, nil
+		}
+		// Subsequent batches return empty (inconsistency in database)
+		return []int64{}, nil
+	}
+
+	ctx := context.Background()
+	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "admin"}, "/broadcast Test message")
+
+	handler.HandleBroadcast(ctx, update)
+	assert.True(t, mockBot.SendCalled)
+}
+
+
+
+// TestHandleBroadcast_GetTelegramIDsBatchErrorOnFirstCall tests error on first batch call
+func TestHandleBroadcast_GetTelegramIDsBatchErrorOnFirstCall(t *testing.T) {
+	cfg := &config.Config{
+		TelegramAdminID: 123456,
+		TrafficLimitGB:  50,
+	}
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI)
+
+	mockDB.GetTotalTelegramIDCountFunc = func(ctx context.Context) (int64, error) {
+		return 100, nil
+	}
+
+	mockDB.GetTelegramIDsBatchFunc = func(ctx context.Context, offset, limit int) ([]int64, error) {
+		return nil, errors.New("database unavailable")
+	}
+
+	ctx := context.Background()
+	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "admin"}, "/broadcast Test message")
+
+	handler.HandleBroadcast(ctx, update)
+	// Should send starting message but not complete broadcast
+	assert.True(t, mockBot.SendCalled, "Should send initial status message")
+}
+
+// TestHandleBroadcast_ConcurrentBroadcasts tests handling of concurrent broadcast attempts
+func TestHandleBroadcast_ConcurrentBroadcasts(t *testing.T) {
+	cfg := &config.Config{
+		TelegramAdminID: 123456,
+		TrafficLimitGB:  50,
+	}
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI)
+
+	mockDB.GetTotalTelegramIDCountFunc = func(ctx context.Context) (int64, error) {
+		return 5, nil
+	}
+
+	mockDB.GetTelegramIDsBatchFunc = func(ctx context.Context, offset, limit int) ([]int64, error) {
+		return []int64{111, 222, 333, 444, 555}, nil
+	}
+
+	ctx := context.Background()
+	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "admin"}, "/broadcast Test message")
+
+	// Run two broadcasts concurrently
+	done1 := make(chan bool)
+	done2 := make(chan bool)
+
+	go func() {
+		handler.HandleBroadcast(ctx, update)
+		done1 <- true
+	}()
+
+	go func() {
+		handler.HandleBroadcast(ctx, update)
+		done2 <- true
+	}()
+
+	// Wait for both to complete
+	<-done1
+	<-done2
+
+	assert.True(t, mockBot.SendCalled, "Should have sent messages")
 }
 
 func TestHandleSend_NonAdminUser(t *testing.T) {

@@ -33,6 +33,12 @@ func (h *Handler) HandleStart(ctx context.Context, update tgbotapi.Update) {
 		return
 	}
 
+	// Обработка share-ссылок: t.me/rs8kvn_bot?start=share_{invite_code}
+	if strings.HasPrefix(args, "share_") {
+		h.handleShareStart(ctx, chatID, username, strings.TrimPrefix(args, "share_"))
+		return
+	}
+
 	logger.Info("User started bot",
 		zap.Int64("chat_id", chatID),
 		zap.String("username", username))
@@ -159,5 +165,74 @@ func (h *Handler) HandleHelp(ctx context.Context, update tgbotapi.Update) {
 
 	msg := tgbotapi.NewMessage(chatID, helpText)
 	msg.ParseMode = "Markdown"
+	h.send(ctx, msg)
+}
+
+// handleShareStart обрабатывает переход по share-ссылке: t.me/rs8kvn_bot?start=share_{invite_code}
+// Если у пользователя уже есть активная подписка — игнорируем код.
+// Если нет — сохраняем invite_code в кэш на 60 минут для последующего использования при создании подписки.
+func (h *Handler) handleShareStart(ctx context.Context, chatID int64, username, inviteCode string) {
+	logger.Info("User clicked share link",
+		zap.Int64("chat_id", chatID),
+		zap.String("username", username),
+		zap.String("invite_code", inviteCode))
+
+	// Проверяем, есть ли уже активная подписка
+	sub, err := h.db.GetByTelegramID(ctx, chatID)
+	hasSubscription := err == nil && sub != nil && sub.Status == "active"
+
+	if hasSubscription {
+		// У пользователя уже есть подписка — игнорируем share-код
+		logger.Info("User with existing subscription clicked share link, ignoring",
+			zap.Int64("chat_id", chatID),
+			zap.String("invite_code", inviteCode))
+
+		text, keyboard := h.getMainMenuContent(username, true, chatID)
+		msg := tgbotapi.NewMessage(chatID, text)
+		msg.ReplyMarkup = &keyboard
+		h.send(ctx, msg)
+		return
+	}
+
+	// Проверяем, что invite_code существует в БД
+	invite, err := h.db.GetInviteByCode(ctx, inviteCode)
+	if err != nil {
+		logger.Warn("Invalid invite code in share link",
+			zap.String("invite_code", inviteCode),
+			zap.Error(err))
+
+		// Показываем обычное меню для нового пользователя
+		text, keyboard := h.getMainMenuContent(username, false, chatID)
+		msg := tgbotapi.NewMessage(chatID, text)
+		msg.ReplyMarkup = &keyboard
+		h.send(ctx, msg)
+		return
+	}
+
+	// Сохраняем invite_code в кэш на 60 минут
+	h.pendingMu.Lock()
+	h.pendingInvites[chatID] = pendingInvite{
+		code:      inviteCode,
+		expiresAt: time.Now().Add(PendingInviteTTL),
+	}
+	h.pendingMu.Unlock()
+
+	logger.Info("Share invite code cached",
+		zap.Int64("chat_id", chatID),
+		zap.String("invite_code", inviteCode),
+		zap.Int64("referrer_tg_id", invite.ReferrerTGID))
+
+	// Показываем сообщение о приглашении с кнопкой получения подписки
+	text := fmt.Sprintf(
+		"🎉 Вас пригласили!\n\n"+
+			"Нажмите кнопку ниже, чтобы получить подписку и активировать реферальное подключение.",
+	)
+	keyboard := tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("📥 Получить подписку", "create_subscription"),
+		),
+	)
+	msg := tgbotapi.NewMessage(chatID, text)
+	msg.ReplyMarkup = &keyboard
 	h.send(ctx, msg)
 }

@@ -241,6 +241,79 @@ func BenchmarkGenerateInviteCode_Parallel(b *testing.B) {
 	})
 }
 
+// BenchmarkGenerateUUID_SmallBatch benchmarks generating a small batch of UUIDs
+func BenchmarkGenerateUUID_SmallBatch(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		for j := 0; j < 10; j++ {
+			GenerateUUID()
+		}
+	}
+}
+
+// BenchmarkGenerateUUID_LargeBatch benchmarks generating a large batch of UUIDs
+func BenchmarkGenerateUUID_LargeBatch(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		for j := 0; j < 1000; j++ {
+			GenerateUUID()
+		}
+	}
+}
+
+// BenchmarkGenerateSubID_SmallBatch benchmarks generating a small batch of SubIDs
+func BenchmarkGenerateSubID_SmallBatch(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		for j := 0; j < 10; j++ {
+			GenerateSubID()
+		}
+	}
+}
+
+// BenchmarkGenerateSubID_LargeBatch benchmarks generating a large batch of SubIDs
+func BenchmarkGenerateSubID_LargeBatch(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		for j := 0; j < 1000; j++ {
+			GenerateSubID()
+		}
+	}
+}
+
+// BenchmarkGenerateInviteCode_SmallBatch benchmarks generating a small batch of invite codes
+func BenchmarkGenerateInviteCode_SmallBatch(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		for j := 0; j < 10; j++ {
+			GenerateInviteCode()
+		}
+	}
+}
+
+// BenchmarkGenerateInviteCode_LargeBatch benchmarks generating a large batch of invite codes
+func BenchmarkGenerateInviteCode_LargeBatch(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		for j := 0; j < 1000; j++ {
+			GenerateInviteCode()
+		}
+	}
+}
+
+// BenchmarkAllGenerators benchmarks all generator functions together
+func BenchmarkAllGenerators(b *testing.B) {
+	b.Run("UUID", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			GenerateUUID()
+		}
+	})
+	b.Run("SubID", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			GenerateSubID()
+		}
+	})
+	b.Run("InviteCode", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			GenerateInviteCode()
+		}
+	})
+}
+
 func TestGenerateInviteCode_Concurrency(t *testing.T) {
 	t.Run("concurrent generation is safe", func(t *testing.T) {
 		const goroutines = 100
@@ -298,7 +371,7 @@ func TestGenerateUUID_Entropy(t *testing.T) {
 		for i := 0; i < 1000; i++ {
 			uuid := GenerateUUID()
 			require.Len(t, uuid, 36, "UUID length")
-			assert.Equal(t, '4', uuid[14], "Version bit at position 14 should be '4'")
+			assert.Equal(t, byte('4'), uuid[14], "Version bit at position 14 should be '4'")
 		}
 	})
 
