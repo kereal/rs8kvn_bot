@@ -890,6 +890,55 @@ func TestInvalidateCache(t *testing.T) {
 	assert.Nil(t, handler.cache.Get(chatID))
 }
 
+func TestSendQRCode(t *testing.T) {
+	cfg := &config.Config{
+		TelegramAdminID: 123456,
+		TrafficLimitGB:  100,
+	}
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, "testbot")
+
+	chatID := int64(123456)
+	messageID := 789
+	testURL := "https://t.me/testbot?start=share_ABC123"
+	testCaption := "📱 QR-код для Telegram"
+
+	ctx := context.Background()
+
+	// Should not panic and should call Send
+	assert.NotPanics(t, func() {
+		handler.sendQRCode(ctx, chatID, messageID, testURL, testCaption)
+	})
+
+	assert.True(t, mockBot.SendCalled, "Bot.Send should be called")
+}
+
+func TestHandleBackToInvite(t *testing.T) {
+	cfg := &config.Config{
+		TelegramAdminID: 123456,
+		TrafficLimitGB:  100,
+	}
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, "testbot")
+
+	chatID := int64(123456)
+	messageID := 789
+	username := "testuser"
+
+	ctx := context.Background()
+
+	// Should not panic and should call Request (for delete)
+	assert.NotPanics(t, func() {
+		handler.handleBackToInvite(ctx, chatID, username, messageID)
+	})
+
+	assert.True(t, mockBot.RequestCalled, "Bot.Request should be called for delete message")
+}
+
 func TestHandleCreateSubscription_ZeroMessageID(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,

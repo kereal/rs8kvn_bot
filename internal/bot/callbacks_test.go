@@ -572,6 +572,9 @@ func TestHandleCallback_AllCallbackTypes(t *testing.T) {
 		"back_to_subscription",
 		"menu_help",
 		"share_invite",
+		"qr_telegram",
+		"qr_web",
+		"back_to_invite",
 	}
 
 	for _, callback := range expectedCallbacks {
@@ -579,4 +582,185 @@ func TestHandleCallback_AllCallbackTypes(t *testing.T) {
 			assert.NotEmpty(t, callback, "Callback data should not be empty")
 		})
 	}
+}
+
+func TestHandleQRTelegram(t *testing.T) {
+	cfg := &config.Config{
+		TelegramAdminID: 123456,
+		TrafficLimitGB:  100,
+		SiteURL:         "https://vpn.site",
+	}
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, "testbot")
+
+	chatID := int64(123456)
+	messageID := 789
+	username := "testuser"
+
+	// Mock GetOrCreateInvite to return a valid invite
+	mockDB.GetOrCreateInviteFunc = func(ctx context.Context, referrerTGID int64, code string) (*database.Invite, error) {
+		return &database.Invite{
+			Code:         "ABC123",
+			ReferrerTGID: referrerTGID,
+		}, nil
+	}
+
+	ctx := context.Background()
+
+	// Should not panic and should call Send (QR photo)
+	assert.NotPanics(t, func() {
+		handler.handleQRTelegram(ctx, chatID, username, messageID)
+	})
+
+	assert.True(t, mockBot.SendCalled, "Bot.Send should be called for QR photo")
+}
+
+func TestHandleQRTelegram_DatabaseError(t *testing.T) {
+	cfg := &config.Config{
+		TelegramAdminID: 123456,
+		TrafficLimitGB:  100,
+	}
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, "testbot")
+
+	chatID := int64(123456)
+	messageID := 789
+	username := "testuser"
+
+	// Mock GetOrCreateInvite to return error
+	mockDB.GetOrCreateInviteFunc = func(ctx context.Context, referrerTGID int64, code string) (*database.Invite, error) {
+		return nil, errors.New("database error")
+	}
+
+	ctx := context.Background()
+
+	// Should not panic and should call Send (error message)
+	assert.NotPanics(t, func() {
+		handler.handleQRTelegram(ctx, chatID, username, messageID)
+	})
+
+	assert.True(t, mockBot.SendCalled, "Bot.Send should be called for error message")
+}
+
+func TestHandleQRWeb(t *testing.T) {
+	cfg := &config.Config{
+		TelegramAdminID: 123456,
+		TrafficLimitGB:  100,
+		SiteURL:         "https://vpn.site",
+	}
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, "testbot")
+
+	chatID := int64(123456)
+	messageID := 789
+	username := "testuser"
+
+	// Mock GetOrCreateInvite to return a valid invite
+	mockDB.GetOrCreateInviteFunc = func(ctx context.Context, referrerTGID int64, code string) (*database.Invite, error) {
+		return &database.Invite{
+			Code:         "XYZ789",
+			ReferrerTGID: referrerTGID,
+		}, nil
+	}
+
+	ctx := context.Background()
+
+	// Should not panic and should call Send (QR photo)
+	assert.NotPanics(t, func() {
+		handler.handleQRWeb(ctx, chatID, username, messageID)
+	})
+
+	assert.True(t, mockBot.SendCalled, "Bot.Send should be called for QR photo")
+}
+
+func TestHandleQRWeb_DatabaseError(t *testing.T) {
+	cfg := &config.Config{
+		TelegramAdminID: 123456,
+		TrafficLimitGB:  100,
+	}
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, "testbot")
+
+	chatID := int64(123456)
+	messageID := 789
+	username := "testuser"
+
+	// Mock GetOrCreateInvite to return error
+	mockDB.GetOrCreateInviteFunc = func(ctx context.Context, referrerTGID int64, code string) (*database.Invite, error) {
+		return nil, errors.New("database error")
+	}
+
+	ctx := context.Background()
+
+	// Should not panic and should call Send (error message)
+	assert.NotPanics(t, func() {
+		handler.handleQRWeb(ctx, chatID, username, messageID)
+	})
+
+	assert.True(t, mockBot.SendCalled, "Bot.Send should be called for error message")
+}
+
+func TestHandleCallback_NilMessage(t *testing.T) {
+	cfg := &config.Config{
+		TelegramAdminID: 123456,
+		TrafficLimitGB:  100,
+	}
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, "testbot")
+
+	ctx := context.Background()
+	update := tgbotapi.Update{
+		CallbackQuery: &tgbotapi.CallbackQuery{
+			ID:      "test-callback-id",
+			Data:    "create_subscription",
+			From:    &tgbotapi.User{ID: 123456, UserName: "testuser"},
+			Message: nil,
+		},
+	}
+
+	// Should not panic and should answer callback with error
+	assert.NotPanics(t, func() {
+		handler.HandleCallback(ctx, update)
+	})
+
+	assert.True(t, mockBot.RequestCalled, "Bot.Request should be called to answer callback")
+}
+
+func TestHandleCallback_UnknownCallback(t *testing.T) {
+	cfg := &config.Config{
+		TelegramAdminID: 123456,
+		TrafficLimitGB:  100,
+	}
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, "testbot")
+
+	ctx := context.Background()
+	update := tgbotapi.Update{
+		CallbackQuery: &tgbotapi.CallbackQuery{
+			ID:      "test-callback-id",
+			Data:    "unknown_callback",
+			From:    &tgbotapi.User{ID: 123456, UserName: "testuser"},
+			Message: &tgbotapi.Message{Chat: &tgbotapi.Chat{ID: 123456}, MessageID: 789},
+		},
+	}
+
+	// Should not panic
+	assert.NotPanics(t, func() {
+		handler.HandleCallback(ctx, update)
+	})
+
+	// Should answer callback
+	assert.True(t, mockBot.RequestCalled)
 }
