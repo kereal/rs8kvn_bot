@@ -265,7 +265,7 @@ func (c *Client) AddClientWithID(ctx context.Context, inboundID int, email, clie
 				"email":      email,
 				"limitIp":    0,
 				"totalGB":    trafficBytes,
-				"expiryTime": expiryTime.UnixMilli(),
+				"expiryTime": getExpiryTimeMillis(expiryTime),
 				"enable":     true,
 				"flow":       "xtls-rprx-vision",
 				"subId":      subID,
@@ -541,6 +541,15 @@ func containsSuccessKeywords(msg string) bool {
 		}
 	}
 	return false
+}
+
+// getExpiryTimeMillis returns expiry time in milliseconds.
+// Returns 0 for zero time values (no expiry).
+func getExpiryTimeMillis(expiryTime time.Time) int64 {
+	if expiryTime.IsZero() {
+		return 0
+	}
+	return expiryTime.UnixMilli()
 }
 
 // truncateString returns a truncated version of s with ellipsis if it exceeds maxLen.
