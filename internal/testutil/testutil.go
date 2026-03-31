@@ -426,6 +426,7 @@ func CreateTestSubscription(telegramID int64, username string, status string, ex
 }
 
 type MockXUIClient struct {
+	mu                      sync.Mutex
 	PingFunc                func(ctx context.Context) error
 	LoginFunc               func(ctx context.Context) error
 	AddClientFunc           func(ctx context.Context, inboundID int, email string, trafficBytes int64, expiryTime time.Time) (*xui.ClientConfig, error)
@@ -435,6 +436,12 @@ type MockXUIClient struct {
 	GetClientTrafficFunc    func(ctx context.Context, email string) (*xui.ClientTraffic, error)
 	GetSubscriptionLinkFunc func(baseURL, subID, subPath string) string
 	GetExternalURLFunc      func(host string) string
+
+	// Call tracking
+	AddClientCalled       bool
+	AddClientWithIDCalled bool
+	DeleteClientCalled    bool
+	UpdateClientCalled    bool
 }
 
 func (m *MockXUIClient) Ping(ctx context.Context) error {
@@ -452,6 +459,9 @@ func (m *MockXUIClient) Login(ctx context.Context) error {
 }
 
 func (m *MockXUIClient) AddClient(ctx context.Context, inboundID int, email string, trafficBytes int64, expiryTime time.Time) (*xui.ClientConfig, error) {
+	m.mu.Lock()
+	m.AddClientCalled = true
+	m.mu.Unlock()
 	if m.AddClientFunc != nil {
 		return m.AddClientFunc(ctx, inboundID, email, trafficBytes, expiryTime)
 	}
@@ -465,6 +475,9 @@ func (m *MockXUIClient) AddClient(ctx context.Context, inboundID int, email stri
 }
 
 func (m *MockXUIClient) AddClientWithID(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
+	m.mu.Lock()
+	m.AddClientWithIDCalled = true
+	m.mu.Unlock()
 	if m.AddClientWithIDFunc != nil {
 		return m.AddClientWithIDFunc(ctx, inboundID, email, clientID, subID, trafficBytes, expiryTime, resetDays)
 	}
@@ -479,6 +492,9 @@ func (m *MockXUIClient) AddClientWithID(ctx context.Context, inboundID int, emai
 }
 
 func (m *MockXUIClient) UpdateClient(ctx context.Context, inboundID int, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, tgID int64, comment string) error {
+	m.mu.Lock()
+	m.UpdateClientCalled = true
+	m.mu.Unlock()
 	if m.UpdateClientFunc != nil {
 		return m.UpdateClientFunc(ctx, inboundID, clientID, email, subID, trafficBytes, expiryTime, tgID, comment)
 	}
@@ -486,6 +502,9 @@ func (m *MockXUIClient) UpdateClient(ctx context.Context, inboundID int, clientI
 }
 
 func (m *MockXUIClient) DeleteClient(ctx context.Context, inboundID int, clientID string) error {
+	m.mu.Lock()
+	m.DeleteClientCalled = true
+	m.mu.Unlock()
 	if m.DeleteClientFunc != nil {
 		return m.DeleteClientFunc(ctx, inboundID, clientID)
 	}
@@ -527,6 +546,7 @@ type MockBotAPI struct {
 	RequestCalled bool
 	LastSentText  string
 	LastChatID    int64
+	SendCount     int
 	SendError     error
 	RequestError  error
 }
@@ -539,6 +559,7 @@ func (m *MockBotAPI) Send(c tgbotapi.Chattable) (tgbotapi.Message, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.SendCalled = true
+	m.SendCount++
 
 	// Extract text and chat ID from various message types
 	switch v := c.(type) {
@@ -569,6 +590,34 @@ func (m *MockBotAPI) Request(c tgbotapi.Chattable) (*tgbotapi.APIResponse, error
 		return nil, m.RequestError
 	}
 	return &tgbotapi.APIResponse{Ok: true}, nil
+}
+
+// SendCountSafe returns the number of Send calls (thread-safe).
+func (m *MockBotAPI) SendCountSafe() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.SendCount
+}
+
+// SendCalledSafe returns whether Send was called (thread-safe).
+func (m *MockBotAPI) SendCalledSafe() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.SendCalled
+}
+
+// RequestCalledSafe returns whether Request was called (thread-safe).
+func (m *MockBotAPI) RequestCalledSafe() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.RequestCalled
+}
+
+// LastSentTextSafe returns the last sent text (thread-safe).
+func (m *MockBotAPI) LastSentTextSafe() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.LastSentText
 }
 
 func (m *MockBotAPI) GetUpdatesChan(config tgbotapi.UpdateConfig) tgbotapi.UpdatesChannel {

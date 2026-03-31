@@ -661,15 +661,6 @@ func TestRateLimiter_Integration(t *testing.T) {
 	})
 }
 
-// TestHandler_ShowLoadingMessage tests loading message functionality
-func TestHandler_ShowLoadingMessage(t *testing.T) {
-	t.Run("loading message text is correct", func(t *testing.T) {
-		// Just verify the expected loading text
-		expectedText := "⏳ Загрузка..."
-		assert.Equal(t, expectedText, "⏳ Загрузка...")
-	})
-}
-
 // TestKeyboard_CallbackDataValidation tests callback data format
 func TestKeyboard_CallbackDataValidation(t *testing.T) {
 	cfg := &config.Config{TelegramAdminID: 123}
@@ -770,12 +761,6 @@ func TestErrorHandling_Scenarios(t *testing.T) {
 
 		assert.Equal(t, "user_999", result)
 	})
-}
-
-// TestConstants_Valid tests that constants are properly defined
-func TestConstants_Valid(t *testing.T) {
-	assert.Equal(t, 1000, CacheMaxSize)
-	assert.Equal(t, 5*time.Minute, CacheTTL)
 }
 
 // TestGetMainMenuContent_SpecialUsernameChars tests usernames with special chars

@@ -47,6 +47,8 @@ func TestHandleCallback_CallbackDataRouting(t *testing.T) {
 		name         string
 		callbackData string
 		setupMock    func(*testutil.MockDatabaseService, *testutil.MockXUIClient)
+		wantSend     bool
+		wantText     string
 	}{
 		{
 			name:         "create_subscription",
@@ -56,6 +58,8 @@ func TestHandleCallback_CallbackDataRouting(t *testing.T) {
 					return nil, gorm.ErrRecordNotFound
 				}
 			},
+			wantSend: true,
+			wantText: "Ваша подписка готова",
 		},
 		{
 			name:         "qr_code",
@@ -70,6 +74,8 @@ func TestHandleCallback_CallbackDataRouting(t *testing.T) {
 					}, nil
 				}
 			},
+			wantSend: true,
+			wantText: "",
 		},
 		{
 			name:         "admin_stats",
@@ -85,6 +91,8 @@ func TestHandleCallback_CallbackDataRouting(t *testing.T) {
 					return 2, nil
 				}
 			},
+			wantSend: true,
+			wantText: "10",
 		},
 		{
 			name:         "admin_lastreg",
@@ -97,6 +105,8 @@ func TestHandleCallback_CallbackDataRouting(t *testing.T) {
 					}, nil
 				}
 			},
+			wantSend: true,
+			wantText: "user1",
 		},
 		{
 			name:         "back_to_start",
@@ -106,6 +116,8 @@ func TestHandleCallback_CallbackDataRouting(t *testing.T) {
 					return nil, gorm.ErrRecordNotFound
 				}
 			},
+			wantSend: true,
+			wantText: "Привет",
 		},
 		{
 			name:         "menu_donate",
@@ -113,6 +125,8 @@ func TestHandleCallback_CallbackDataRouting(t *testing.T) {
 			setupMock: func(mockDB *testutil.MockDatabaseService, mockXUI *testutil.MockXUIClient) {
 				// No special setup needed
 			},
+			wantSend: true,
+			wantText: "Поддержка",
 		},
 		{
 			name:         "menu_subscription",
@@ -130,13 +144,17 @@ func TestHandleCallback_CallbackDataRouting(t *testing.T) {
 					return &xui.ClientTraffic{Up: 1000, Down: 2000}, nil
 				}
 			},
+			wantSend: true,
+			wantText: "Ваша подписка",
 		},
 		{
 			name:         "back_to_subscription",
 			callbackData: "back_to_subscription",
 			setupMock: func(mockDB *testutil.MockDatabaseService, mockXUI *testutil.MockXUIClient) {
-				// No special setup needed - just deletes message
+				// No special setup needed - just deletes message via Request, not Send
 			},
+			wantSend: false,
+			wantText: "",
 		},
 		{
 			name:         "menu_help",
@@ -151,6 +169,8 @@ func TestHandleCallback_CallbackDataRouting(t *testing.T) {
 					}, nil
 				}
 			},
+			wantSend: true,
+			wantText: "Ваша подписка",
 		},
 		{
 			name:         "share_invite",
@@ -160,6 +180,8 @@ func TestHandleCallback_CallbackDataRouting(t *testing.T) {
 					return &database.Invite{Code: code, ReferrerTGID: referrerTGID}, nil
 				}
 			},
+			wantSend: true,
+			wantText: "пригласительная",
 		},
 		{
 			name:         "unknown callback",
@@ -167,6 +189,8 @@ func TestHandleCallback_CallbackDataRouting(t *testing.T) {
 			setupMock: func(mockDB *testutil.MockDatabaseService, mockXUI *testutil.MockXUIClient) {
 				// No setup needed
 			},
+			wantSend: false,
+			wantText: "",
 		},
 	}
 
@@ -180,8 +204,9 @@ func TestHandleCallback_CallbackDataRouting(t *testing.T) {
 			}
 			mockDB := testutil.NewMockDatabaseService()
 			mockXUI := testutil.NewMockXUIClient()
+			mockBot := testutil.NewMockBotAPI()
 			tt.setupMock(mockDB, mockXUI)
-			handler := NewHandler(testutil.NewMockBotAPI(), cfg, mockDB, mockXUI, NewTestBotConfig())
+			handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
 
 			ctx := context.Background()
 			update := tgbotapi.Update{
@@ -196,8 +221,14 @@ func TestHandleCallback_CallbackDataRouting(t *testing.T) {
 				},
 			}
 
-			// Should not panic
 			handler.HandleCallback(ctx, update)
+
+			if tt.wantSend {
+				assert.True(t, mockBot.SendCalledSafe(), "Bot.Send should be called for %s", tt.name)
+				if tt.wantText != "" {
+					assert.Contains(t, mockBot.LastSentTextSafe(), tt.wantText, "message should contain %q", tt.wantText)
+				}
+			}
 		})
 	}
 }
@@ -209,7 +240,8 @@ func TestHandleCallback_AdminStats_NonAdmin(t *testing.T) {
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
-	handler := NewHandler(testutil.NewMockBotAPI(), cfg, mockDB, mockXUI, NewTestBotConfig())
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
 
 	ctx := context.Background()
 	update := tgbotapi.Update{
@@ -224,10 +256,10 @@ func TestHandleCallback_AdminStats_NonAdmin(t *testing.T) {
 		},
 	}
 
-	// Should not panic when non-admin tries to access admin stats
 	handler.HandleCallback(ctx, update)
 
-	// Verify isAdmin returns false for this user
+	assert.False(t, mockBot.SendCalledSafe(), "Bot.Send should not be called for non-admin")
+	assert.True(t, mockBot.RequestCalledSafe(), "Bot.Request should be called to answer callback")
 	assert.False(t, handler.isAdmin(123456))
 }
 
@@ -237,7 +269,8 @@ func TestHandleCallback_AdminLastReg_NonAdmin(t *testing.T) {
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
-	handler := NewHandler(testutil.NewMockBotAPI(), cfg, mockDB, mockXUI, NewTestBotConfig())
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
 
 	ctx := context.Background()
 	update := tgbotapi.Update{
@@ -252,8 +285,10 @@ func TestHandleCallback_AdminLastReg_NonAdmin(t *testing.T) {
 		},
 	}
 
-	// Should not panic when non-admin tries to access admin lastreg
 	handler.HandleCallback(ctx, update)
+
+	assert.False(t, mockBot.SendCalledSafe(), "Bot.Send should not be called for non-admin")
+	assert.True(t, mockBot.RequestCalledSafe(), "Bot.Request should be called to answer callback")
 }
 
 func TestHandleCallback_AdminStats_DatabaseError(t *testing.T) {
@@ -263,7 +298,8 @@ func TestHandleCallback_AdminStats_DatabaseError(t *testing.T) {
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
-	handler := NewHandler(testutil.NewMockBotAPI(), cfg, mockDB, mockXUI, NewTestBotConfig())
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
 
 	mockDB.CountAllSubscriptionsFunc = func(ctx context.Context) (int64, error) {
 		return 0, errors.New("database error")
@@ -282,8 +318,10 @@ func TestHandleCallback_AdminStats_DatabaseError(t *testing.T) {
 		},
 	}
 
-	// Should not panic on database error
 	handler.HandleCallback(ctx, update)
+
+	assert.True(t, mockBot.SendCalledSafe(), "Bot.Send should be called with error message")
+	assert.Contains(t, mockBot.LastSentTextSafe(), "Ошибка", "message should mention error")
 }
 
 func TestHandleCallback_AdminLastReg_EmptyList(t *testing.T) {
@@ -292,7 +330,8 @@ func TestHandleCallback_AdminLastReg_EmptyList(t *testing.T) {
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
-	handler := NewHandler(testutil.NewMockBotAPI(), cfg, mockDB, mockXUI, NewTestBotConfig())
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
 
 	mockDB.GetLatestSubscriptionsFunc = func(ctx context.Context, limit int) ([]database.Subscription, error) {
 		return []database.Subscription{}, nil
@@ -311,8 +350,10 @@ func TestHandleCallback_AdminLastReg_EmptyList(t *testing.T) {
 		},
 	}
 
-	// Should not panic with empty subscription list
 	handler.HandleCallback(ctx, update)
+
+	assert.True(t, mockBot.SendCalledSafe(), "Bot.Send should be called")
+	assert.Contains(t, mockBot.LastSentTextSafe(), "Нет", "message should indicate no registrations")
 }
 
 func TestHandleCallback_AdminLastReg_DatabaseError(t *testing.T) {
@@ -321,7 +362,8 @@ func TestHandleCallback_AdminLastReg_DatabaseError(t *testing.T) {
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
-	handler := NewHandler(testutil.NewMockBotAPI(), cfg, mockDB, mockXUI, NewTestBotConfig())
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
 
 	mockDB.GetLatestSubscriptionsFunc = func(ctx context.Context, limit int) ([]database.Subscription, error) {
 		return nil, errors.New("database error")
@@ -340,8 +382,10 @@ func TestHandleCallback_AdminLastReg_DatabaseError(t *testing.T) {
 		},
 	}
 
-	// Should not panic on database error
 	handler.HandleCallback(ctx, update)
+
+	assert.True(t, mockBot.SendCalledSafe(), "Bot.Send should be called with error message")
+	assert.Contains(t, mockBot.LastSentTextSafe(), "Ошибка", "message should mention error")
 }
 
 func TestHandleCallback_MenuSubscription_NoSubscription(t *testing.T) {
@@ -350,7 +394,8 @@ func TestHandleCallback_MenuSubscription_NoSubscription(t *testing.T) {
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
-	handler := NewHandler(testutil.NewMockBotAPI(), cfg, mockDB, mockXUI, NewTestBotConfig())
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
 
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 		return nil, gorm.ErrRecordNotFound
@@ -369,15 +414,18 @@ func TestHandleCallback_MenuSubscription_NoSubscription(t *testing.T) {
 		},
 	}
 
-	// Should not panic when no subscription exists
 	handler.HandleCallback(ctx, update)
+
+	assert.True(t, mockBot.SendCalledSafe(), "Bot.Send should be called")
+	assert.Contains(t, mockBot.LastSentTextSafe(), "подписк", "message should mention subscription")
 }
 
 func TestHandleCallback_QRCode_NoSubscription(t *testing.T) {
 	cfg := &config.Config{}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
-	handler := NewHandler(testutil.NewMockBotAPI(), cfg, mockDB, mockXUI, NewTestBotConfig())
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
 
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 		return nil, gorm.ErrRecordNotFound
@@ -396,15 +444,18 @@ func TestHandleCallback_QRCode_NoSubscription(t *testing.T) {
 		},
 	}
 
-	// Should not panic when no subscription exists
 	handler.HandleCallback(ctx, update)
+
+	assert.True(t, mockBot.SendCalledSafe(), "Bot.Send should be called with error message")
+	assert.Contains(t, mockBot.LastSentTextSafe(), "подписк", "message should mention subscription")
 }
 
 func TestHandleCallback_QRCode_WithSubscription(t *testing.T) {
 	cfg := &config.Config{}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
-	handler := NewHandler(testutil.NewMockBotAPI(), cfg, mockDB, mockXUI, NewTestBotConfig())
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
 
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 		return &database.Subscription{
@@ -428,8 +479,9 @@ func TestHandleCallback_QRCode_WithSubscription(t *testing.T) {
 		},
 	}
 
-	// Should not panic with subscription
 	handler.HandleCallback(ctx, update)
+
+	assert.True(t, mockBot.SendCalledSafe(), "Bot.Send should be called for QR photo")
 }
 
 func TestHandleShareInvite_Success(t *testing.T) {
@@ -438,7 +490,8 @@ func TestHandleShareInvite_Success(t *testing.T) {
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
-	handler := NewHandler(testutil.NewMockBotAPI(), cfg, mockDB, mockXUI, NewTestBotConfig())
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
 
 	mockDB.GetOrCreateInviteFunc = func(ctx context.Context, referrerTGID int64, code string) (*database.Invite, error) {
 		return &database.Invite{
@@ -448,9 +501,10 @@ func TestHandleShareInvite_Success(t *testing.T) {
 	}
 
 	ctx := context.Background()
-
-	// Should not panic
 	handler.handleShareInvite(ctx, 123456, "testuser", 100)
+
+	assert.True(t, mockBot.SendCalledSafe(), "Bot.Send should be called")
+	assert.Contains(t, mockBot.LastSentTextSafe(), "пригласительная", "message should mention invite")
 }
 
 func TestHandleShareInvite_DatabaseError(t *testing.T) {
@@ -459,16 +513,18 @@ func TestHandleShareInvite_DatabaseError(t *testing.T) {
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
-	handler := NewHandler(testutil.NewMockBotAPI(), cfg, mockDB, mockXUI, NewTestBotConfig())
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
 
 	mockDB.GetOrCreateInviteFunc = func(ctx context.Context, referrerTGID int64, code string) (*database.Invite, error) {
 		return nil, errors.New("database error")
 	}
 
 	ctx := context.Background()
-
-	// Should not panic on database error
 	handler.handleShareInvite(ctx, 123456, "testuser", 100)
+
+	assert.True(t, mockBot.SendCalledSafe(), "Bot.Send should be called with error message")
+	assert.Contains(t, mockBot.LastSentTextSafe(), "Не удалось", "message should mention failure")
 }
 
 func TestHandleCallback_CreateSubscription_DatabaseError(t *testing.T) {
@@ -478,7 +534,8 @@ func TestHandleCallback_CreateSubscription_DatabaseError(t *testing.T) {
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
-	handler := NewHandler(testutil.NewMockBotAPI(), cfg, mockDB, mockXUI, NewTestBotConfig())
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
 
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 		return nil, errors.New("database error")
@@ -497,8 +554,10 @@ func TestHandleCallback_CreateSubscription_DatabaseError(t *testing.T) {
 		},
 	}
 
-	// Should not panic on database error
 	handler.HandleCallback(ctx, update)
+
+	assert.True(t, mockBot.SendCalledSafe(), "Bot.Send should be called with error message")
+	assert.Contains(t, mockBot.LastSentTextSafe(), "ошибк", "message should mention error")
 }
 
 func TestHandleCallback_MenuHelp_NoSubscription(t *testing.T) {
@@ -507,7 +566,8 @@ func TestHandleCallback_MenuHelp_NoSubscription(t *testing.T) {
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
-	handler := NewHandler(testutil.NewMockBotAPI(), cfg, mockDB, mockXUI, NewTestBotConfig())
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
 
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 		return nil, gorm.ErrRecordNotFound
@@ -526,8 +586,10 @@ func TestHandleCallback_MenuHelp_NoSubscription(t *testing.T) {
 		},
 	}
 
-	// Should not panic when no subscription exists
 	handler.HandleCallback(ctx, update)
+
+	assert.True(t, mockBot.SendCalledSafe(), "Bot.Send should be called")
+	assert.Contains(t, mockBot.LastSentTextSafe(), "подписк", "message should mention subscription")
 }
 
 func TestHandleCallback_MenuHelp_DatabaseError(t *testing.T) {
@@ -536,7 +598,8 @@ func TestHandleCallback_MenuHelp_DatabaseError(t *testing.T) {
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
-	handler := NewHandler(testutil.NewMockBotAPI(), cfg, mockDB, mockXUI, NewTestBotConfig())
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
 
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 		return nil, errors.New("database error")
@@ -555,8 +618,10 @@ func TestHandleCallback_MenuHelp_DatabaseError(t *testing.T) {
 		},
 	}
 
-	// Should not panic on database error
 	handler.HandleCallback(ctx, update)
+
+	assert.True(t, mockBot.SendCalledSafe(), "Bot.Send should be called with error message")
+	assert.Contains(t, mockBot.LastSentTextSafe(), "ошибк", "message should mention error")
 }
 
 func TestHandleCallback_AllCallbackTypes(t *testing.T) {
@@ -599,7 +664,6 @@ func TestHandleQRTelegram(t *testing.T) {
 	messageID := 789
 	username := "testuser"
 
-	// Mock GetOrCreateInvite to return a valid invite
 	mockDB.GetOrCreateInviteFunc = func(ctx context.Context, referrerTGID int64, code string) (*database.Invite, error) {
 		return &database.Invite{
 			Code:         "ABC123",
@@ -608,13 +672,9 @@ func TestHandleQRTelegram(t *testing.T) {
 	}
 
 	ctx := context.Background()
+	handler.handleQRTelegram(ctx, chatID, username, messageID)
 
-	// Should not panic and should call Send (QR photo)
-	assert.NotPanics(t, func() {
-		handler.handleQRTelegram(ctx, chatID, username, messageID)
-	})
-
-	assert.True(t, mockBot.SendCalled, "Bot.Send should be called for QR photo")
+	assert.True(t, mockBot.SendCalledSafe(), "Bot.Send should be called for QR photo")
 }
 
 func TestHandleQRTelegram_DatabaseError(t *testing.T) {
@@ -631,19 +691,15 @@ func TestHandleQRTelegram_DatabaseError(t *testing.T) {
 	messageID := 789
 	username := "testuser"
 
-	// Mock GetOrCreateInvite to return error
 	mockDB.GetOrCreateInviteFunc = func(ctx context.Context, referrerTGID int64, code string) (*database.Invite, error) {
 		return nil, errors.New("database error")
 	}
 
 	ctx := context.Background()
+	handler.handleQRTelegram(ctx, chatID, username, messageID)
 
-	// Should not panic and should call Send (error message)
-	assert.NotPanics(t, func() {
-		handler.handleQRTelegram(ctx, chatID, username, messageID)
-	})
-
-	assert.True(t, mockBot.SendCalled, "Bot.Send should be called for error message")
+	assert.True(t, mockBot.SendCalledSafe(), "Bot.Send should be called for error message")
+	assert.Contains(t, mockBot.LastSentTextSafe(), "Ошибка", "message should mention error")
 }
 
 func TestHandleQRWeb(t *testing.T) {
@@ -661,7 +717,6 @@ func TestHandleQRWeb(t *testing.T) {
 	messageID := 789
 	username := "testuser"
 
-	// Mock GetOrCreateInvite to return a valid invite
 	mockDB.GetOrCreateInviteFunc = func(ctx context.Context, referrerTGID int64, code string) (*database.Invite, error) {
 		return &database.Invite{
 			Code:         "XYZ789",
@@ -670,13 +725,9 @@ func TestHandleQRWeb(t *testing.T) {
 	}
 
 	ctx := context.Background()
+	handler.handleQRWeb(ctx, chatID, username, messageID)
 
-	// Should not panic and should call Send (QR photo)
-	assert.NotPanics(t, func() {
-		handler.handleQRWeb(ctx, chatID, username, messageID)
-	})
-
-	assert.True(t, mockBot.SendCalled, "Bot.Send should be called for QR photo")
+	assert.True(t, mockBot.SendCalledSafe(), "Bot.Send should be called for QR photo")
 }
 
 func TestHandleQRWeb_DatabaseError(t *testing.T) {
@@ -693,19 +744,15 @@ func TestHandleQRWeb_DatabaseError(t *testing.T) {
 	messageID := 789
 	username := "testuser"
 
-	// Mock GetOrCreateInvite to return error
 	mockDB.GetOrCreateInviteFunc = func(ctx context.Context, referrerTGID int64, code string) (*database.Invite, error) {
 		return nil, errors.New("database error")
 	}
 
 	ctx := context.Background()
+	handler.handleQRWeb(ctx, chatID, username, messageID)
 
-	// Should not panic and should call Send (error message)
-	assert.NotPanics(t, func() {
-		handler.handleQRWeb(ctx, chatID, username, messageID)
-	})
-
-	assert.True(t, mockBot.SendCalled, "Bot.Send should be called for error message")
+	assert.True(t, mockBot.SendCalledSafe(), "Bot.Send should be called for error message")
+	assert.Contains(t, mockBot.LastSentTextSafe(), "Ошибка", "message should mention error")
 }
 
 func TestGenerateInviteLink_Telegram(t *testing.T) {
@@ -805,12 +852,10 @@ func TestHandleCallback_NilMessage(t *testing.T) {
 		},
 	}
 
-	// Should not panic and should answer callback with error
-	assert.NotPanics(t, func() {
-		handler.HandleCallback(ctx, update)
-	})
+	handler.HandleCallback(ctx, update)
 
-	assert.True(t, mockBot.RequestCalled, "Bot.Request should be called to answer callback")
+	assert.True(t, mockBot.RequestCalledSafe(), "Bot.Request should be called to answer callback")
+	assert.False(t, mockBot.SendCalledSafe(), "Bot.Send should not be called without message")
 }
 
 func TestHandleCallback_UnknownCallback(t *testing.T) {
@@ -833,11 +878,8 @@ func TestHandleCallback_UnknownCallback(t *testing.T) {
 		},
 	}
 
-	// Should not panic
-	assert.NotPanics(t, func() {
-		handler.HandleCallback(ctx, update)
-	})
+	handler.HandleCallback(ctx, update)
 
-	// Should answer callback
-	assert.True(t, mockBot.RequestCalled)
+	assert.True(t, mockBot.RequestCalledSafe(), "Bot.Request should be called to answer callback")
+	assert.False(t, mockBot.SendCalledSafe(), "Bot.Send should not be called for unknown callback")
 }

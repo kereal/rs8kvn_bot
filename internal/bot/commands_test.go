@@ -19,30 +19,29 @@ import (
 // are already defined in handlers_test.go and handlers_extended_test.go
 
 func TestHandleStart_WithTrialCode(t *testing.T) {
-	cfg := &config.Config{
-		TelegramAdminID: 123,
-		TrafficLimitGB:  50,
-		XUIInboundID:    1,
-	}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	handler := NewHandler(testutil.NewMockBotAPI(), cfg, mockDB, mockXUI, NewTestBotConfig())
-
 	ctx := context.Background()
 
 	tests := []struct {
-		name      string
-		args      string
-		setupMock func()
+		name          string
+		cfg           *config.Config
+		args          string
+		setupMock     func(db *testutil.MockDatabaseService)
+		wantText      string
+		wantSendCount int
 	}{
 		{
 			name: "valid trial code",
+			cfg: &config.Config{
+				TelegramAdminID: 0, // No admin notification to keep LastSentText predictable
+				TrafficLimitGB:  50,
+				XUIInboundID:    1,
+			},
 			args: "trial_abc12345",
-			setupMock: func() {
-				mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
+			setupMock: func(db *testutil.MockDatabaseService) {
+				db.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 					return nil, gorm.ErrRecordNotFound
 				}
-				mockDB.BindTrialSubscriptionFunc = func(ctx context.Context, subscriptionID string, telegramID int64, username string) (*database.Subscription, error) {
+				db.BindTrialSubscriptionFunc = func(ctx context.Context, subscriptionID string, telegramID int64, username string) (*database.Subscription, error) {
 					return &database.Subscription{
 						TelegramID:     telegramID,
 						Username:       username,
@@ -52,54 +51,79 @@ func TestHandleStart_WithTrialCode(t *testing.T) {
 						Status:         "active",
 					}, nil
 				}
-				mockDB.GetInviteByCodeFunc = func(ctx context.Context, code string) (*database.Invite, error) {
+				db.GetInviteByCodeFunc = func(ctx context.Context, code string) (*database.Invite, error) {
 					return &database.Invite{
 						Code:         code,
 						ReferrerTGID: 999888,
 					}, nil
 				}
 			},
+			wantText:      "Подписка активирована",
+			wantSendCount: 1,
 		},
 		{
 			name: "user already has subscription",
+			cfg: &config.Config{
+				TelegramAdminID: 0,
+				TrafficLimitGB:  50,
+			},
 			args: "trial_xyz99999",
-			setupMock: func() {
-				mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
+			setupMock: func(db *testutil.MockDatabaseService) {
+				db.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 					return &database.Subscription{
 						TelegramID: telegramID,
 						Status:     "active",
 					}, nil
 				}
 			},
+			wantText:      "уже есть активная",
+			wantSendCount: 1,
 		},
 		{
 			name: "bind fails",
+			cfg: &config.Config{
+				TelegramAdminID: 0,
+				TrafficLimitGB:  50,
+			},
 			args: "trial_fail123",
-			setupMock: func() {
-				mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
+			setupMock: func(db *testutil.MockDatabaseService) {
+				db.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 					return nil, gorm.ErrRecordNotFound
 				}
-				mockDB.BindTrialSubscriptionFunc = func(ctx context.Context, subscriptionID string, telegramID int64, username string) (*database.Subscription, error) {
+				db.BindTrialSubscriptionFunc = func(ctx context.Context, subscriptionID string, telegramID int64, username string) (*database.Subscription, error) {
 					return nil, errors.New("bind failed")
 				}
 			},
+			wantText:      "❌",
+			wantSendCount: 1,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tt.setupMock()
+			mockDB := testutil.NewMockDatabaseService()
+			mockXUI := testutil.NewMockXUIClient()
+			mockBot := testutil.NewMockBotAPI()
+			handler := NewHandler(mockBot, tt.cfg, mockDB, mockXUI, NewTestBotConfig())
+			tt.setupMock(mockDB)
 
+			fullText := "/start " + tt.args
 			update := tgbotapi.Update{
 				Message: &tgbotapi.Message{
 					Chat: &tgbotapi.Chat{ID: 123456},
 					From: &tgbotapi.User{ID: 123456, UserName: "testuser"},
-					Text: "/start " + tt.args,
+					Text: fullText,
+					Entities: []tgbotapi.MessageEntity{
+						{Type: "bot_command", Offset: 0, Length: 6}, // "/start"
+					},
 				},
 			}
 
-			// Should not panic
 			handler.HandleStart(ctx, update)
+
+			assert.True(t, mockBot.SendCalledSafe(), "Should send a message")
+			assert.Equal(t, tt.wantSendCount, mockBot.SendCountSafe(), "Should send expected number of messages")
+			assert.Contains(t, mockBot.LastSentText, tt.wantText, "Should contain expected text")
 		})
 	}
 }
@@ -109,20 +133,17 @@ func TestHandleStart_NormalFlow(t *testing.T) {
 		TelegramAdminID: 123,
 		TrafficLimitGB:  50,
 	}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	handler := NewHandler(testutil.NewMockBotAPI(), cfg, mockDB, mockXUI, NewTestBotConfig())
-
 	ctx := context.Background()
 
 	tests := []struct {
 		name      string
-		setupMock func()
+		setupMock func(db *testutil.MockDatabaseService)
+		wantText  string
 	}{
 		{
 			name: "user with active subscription",
-			setupMock: func() {
-				mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
+			setupMock: func(db *testutil.MockDatabaseService) {
+				db.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 					return &database.Subscription{
 						TelegramID: telegramID,
 						Status:     "active",
@@ -130,31 +151,42 @@ func TestHandleStart_NormalFlow(t *testing.T) {
 					}, nil
 				}
 			},
+			wantText: "кнопки",
 		},
 		{
 			name: "user without subscription",
-			setupMock: func() {
-				mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
+			setupMock: func(db *testutil.MockDatabaseService) {
+				db.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 					return nil, gorm.ErrRecordNotFound
 				}
 			},
+			wantText: "получить подписку",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tt.setupMock()
+			mockDB := testutil.NewMockDatabaseService()
+			mockXUI := testutil.NewMockXUIClient()
+			mockBot := testutil.NewMockBotAPI()
+			handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+			tt.setupMock(mockDB)
 
 			update := tgbotapi.Update{
 				Message: &tgbotapi.Message{
 					Chat: &tgbotapi.Chat{ID: 123456},
 					From: &tgbotapi.User{ID: 123456, UserName: "testuser"},
 					Text: "/start",
+					Entities: []tgbotapi.MessageEntity{
+						{Type: "bot_command", Offset: 0, Length: 6},
+					},
 				},
 			}
 
-			// Should not panic
 			handler.HandleStart(ctx, update)
+
+			assert.True(t, mockBot.SendCalledSafe(), "Should send a message")
+			assert.Contains(t, mockBot.LastSentText, tt.wantText, "Should contain expected text")
 		})
 	}
 }
@@ -208,7 +240,8 @@ func TestHandleInvite_Success(t *testing.T) {
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
-	handler := NewHandler(testutil.NewMockBotAPI(), cfg, mockDB, mockXUI, NewTestBotConfig())
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
 
 	mockDB.GetOrCreateInviteFunc = func(ctx context.Context, referrerTGID int64, code string) (*database.Invite, error) {
 		return &database.Invite{
@@ -225,8 +258,10 @@ func TestHandleInvite_Success(t *testing.T) {
 		},
 	}
 
-	// Should not panic
 	handler.HandleInvite(ctx, update)
+
+	assert.True(t, mockBot.SendCalledSafe(), "Should send invite link")
+	assert.Contains(t, mockBot.LastSentText, "пригласительная ссылка", "Should contain invite link text")
 }
 
 func TestHandleInvite_DatabaseError(t *testing.T) {
@@ -235,7 +270,8 @@ func TestHandleInvite_DatabaseError(t *testing.T) {
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
-	handler := NewHandler(testutil.NewMockBotAPI(), cfg, mockDB, mockXUI, NewTestBotConfig())
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
 
 	mockDB.GetOrCreateInviteFunc = func(ctx context.Context, referrerTGID int64, code string) (*database.Invite, error) {
 		return nil, errors.New("database error")
@@ -249,8 +285,10 @@ func TestHandleInvite_DatabaseError(t *testing.T) {
 		},
 	}
 
-	// Should not panic
 	handler.HandleInvite(ctx, update)
+
+	assert.True(t, mockBot.SendCalledSafe(), "Should send error message")
+	assert.Contains(t, mockBot.LastSentText, "❌", "Should show error")
 }
 
 func TestHandleHelp_Success(t *testing.T) {
@@ -259,7 +297,8 @@ func TestHandleHelp_Success(t *testing.T) {
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
-	handler := NewHandler(testutil.NewMockBotAPI(), cfg, mockDB, mockXUI, NewTestBotConfig())
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
 
 	ctx := context.Background()
 	update := tgbotapi.Update{
@@ -268,8 +307,11 @@ func TestHandleHelp_Success(t *testing.T) {
 		},
 	}
 
-	// Should not panic
 	handler.HandleHelp(ctx, update)
+
+	assert.True(t, mockBot.SendCalledSafe(), "Should send help message")
+	assert.Contains(t, mockBot.LastSentText, "Справка", "Help should contain title")
+	assert.Contains(t, mockBot.LastSentText, "/start", "Help should list commands")
 }
 
 func TestHandleHelp_VerifyHelpText(t *testing.T) {
@@ -297,7 +339,8 @@ func TestHandleBindTrial_AlreadyHasSubscription(t *testing.T) {
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
-	handler := NewHandler(testutil.NewMockBotAPI(), cfg, mockDB, mockXUI, NewTestBotConfig())
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
 
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 		return &database.Subscription{
@@ -308,9 +351,10 @@ func TestHandleBindTrial_AlreadyHasSubscription(t *testing.T) {
 	}
 
 	ctx := context.Background()
-
-	// Should not panic when user already has subscription
 	handler.handleBindTrial(ctx, 123456, "testuser", "trial-code-123")
+
+	assert.True(t, mockBot.SendCalledSafe(), "Should send a message")
+	assert.Contains(t, mockBot.LastSentText, "уже есть", "Should inform about existing subscription")
 }
 
 func TestHandleBindTrial_DatabaseError(t *testing.T) {
@@ -320,7 +364,8 @@ func TestHandleBindTrial_DatabaseError(t *testing.T) {
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
-	handler := NewHandler(testutil.NewMockBotAPI(), cfg, mockDB, mockXUI, NewTestBotConfig())
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
 
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 		return nil, gorm.ErrRecordNotFound
@@ -330,9 +375,10 @@ func TestHandleBindTrial_DatabaseError(t *testing.T) {
 	}
 
 	ctx := context.Background()
-
-	// Should not panic on database error
 	handler.handleBindTrial(ctx, 123456, "testuser", "trial-code-123")
+
+	assert.True(t, mockBot.SendCalledSafe(), "Should send error message")
+	assert.Contains(t, mockBot.LastSentText, "❌", "Should show error")
 }
 
 func TestHandleBindTrial_WithReferrerNotification(t *testing.T) {
@@ -343,7 +389,8 @@ func TestHandleBindTrial_WithReferrerNotification(t *testing.T) {
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
-	handler := NewHandler(testutil.NewMockBotAPI(), cfg, mockDB, mockXUI, NewTestBotConfig())
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
 
 	callCount := 0
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
@@ -371,9 +418,10 @@ func TestHandleBindTrial_WithReferrerNotification(t *testing.T) {
 	}
 
 	ctx := context.Background()
-
-	// Should not panic with referrer notification
 	handler.handleBindTrial(ctx, 123456, "testuser", "trial-code-123")
+
+	assert.True(t, mockBot.SendCalledSafe(), "Should send messages (user + referrer notification)")
+	assert.GreaterOrEqual(t, mockBot.SendCountSafe(), 1, "Should send at least one message")
 }
 
 func TestHandleStart_AdminUser(t *testing.T) {
@@ -383,7 +431,8 @@ func TestHandleStart_AdminUser(t *testing.T) {
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
-	handler := NewHandler(testutil.NewMockBotAPI(), cfg, mockDB, mockXUI, NewTestBotConfig())
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
 
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 		return nil, gorm.ErrRecordNotFound
@@ -398,10 +447,9 @@ func TestHandleStart_AdminUser(t *testing.T) {
 		},
 	}
 
-	// Should not panic for admin user
 	handler.HandleStart(ctx, update)
 
-	// Verify admin check works
+	assert.True(t, mockBot.SendCalledSafe(), "Should send welcome message")
 	assert.True(t, handler.isAdmin(123456))
 }
 
@@ -413,7 +461,8 @@ func TestHandleBindTrial_Success(t *testing.T) {
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
-	handler := NewHandler(testutil.NewMockBotAPI(), cfg, mockDB, mockXUI, NewTestBotConfig())
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
 
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 		return nil, gorm.ErrRecordNotFound
@@ -433,9 +482,10 @@ func TestHandleBindTrial_Success(t *testing.T) {
 	}
 
 	ctx := context.Background()
-
-	// Should not panic on successful bind
 	handler.handleBindTrial(ctx, 123456, "testuser", "trial-code-123")
+
+	assert.True(t, mockBot.SendCalledSafe(), "Should send subscription info")
+	assert.Contains(t, mockBot.LastSentText, "Подписка активирована", "Should contain activation message")
 }
 
 func TestHandleShareStart_UserWithExistingSubscription(t *testing.T) {
