@@ -510,6 +510,6 @@ func TestGenerateInviteCode_Format(t *testing.T) {
 			codes[code] = struct{}{}
 		}
 
-		assert.Len(t, codes, iterations, "All invite codes should be unique")
+		assert.Len(t, codes, iterations, "All codes should be unique")
 	})
 }
