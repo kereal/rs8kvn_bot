@@ -15,7 +15,8 @@
       "Bash(fmt.println)",
       "Bash(})",
       "Bash(eof)",
-      "Bash(sqlite3 *)"
+      "Bash(sqlite3 *)",
+      "Bash(git tag *)"
     ]
   },
   "$version": 3
