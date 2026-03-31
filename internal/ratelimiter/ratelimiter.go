@@ -60,6 +60,13 @@ func (tb *TokenBucket) Wait(ctx context.Context) bool {
 // Returns true if tokens were acquired, false if the context was cancelled.
 func (tb *TokenBucket) WaitN(ctx context.Context, n float64) bool {
 	for {
+		// Check if context is already cancelled before proceeding
+		select {
+		case <-ctx.Done():
+			return false
+		default:
+		}
+
 		tb.mu.Lock()
 		tb.refill()
 
