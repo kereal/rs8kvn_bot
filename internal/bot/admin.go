@@ -371,17 +371,10 @@ func (h *Handler) handleAdminStats(ctx context.Context, chatID int64, username s
 		activeCount = 0
 	}
 
-	expiredCount, err := h.db.CountExpiredSubscriptions(ctx)
-	if err != nil {
-		logger.Error("Failed to count expired subscriptions", zap.Error(err))
-		expiredCount = 0
-	}
-
 	text := fmt.Sprintf(
-		"📊 *Статистика бота*\n\n👥 Всего пользователей: %d\n✅ Активные подписки: %d\n⏰ Истекшие: %d",
+		"📊 *Статистика бота*\n\n👥 Всего пользователей: %d\n✅ Активные подписки: %d",
 		totalCount,
 		activeCount,
-		expiredCount,
 	)
 
 	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, text)
@@ -399,10 +392,9 @@ func (h *Handler) notifyAdmin(ctx context.Context, username string, chatID int64
 	}
 
 	msg := tgbotapi.NewMessage(h.cfg.TelegramAdminID,
-		fmt.Sprintf("🔔 Новая подписка создана!\n\n👤 Пользователь: @%s\n🆔 ID: %d\n📅 Истекает: %s\n🔗 Подписка: `%s`",
+		fmt.Sprintf("🔔 Новая подписка создана!\n\n👤 Пользователь: @%s\n🆔 ID: %d\n🔗 Подписка: `%s`",
 			username,
 			chatID,
-			expiryTime.Format("02.01.2006 15:04:05"),
 			subscriptionURL,
 		))
 	msg.ParseMode = "Markdown"

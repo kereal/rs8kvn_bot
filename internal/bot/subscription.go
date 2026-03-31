@@ -74,13 +74,6 @@ func (h *Handler) handleCreateSubscription(ctx context.Context, chatID int64, us
 			return
 		}
 	} else if sub != nil {
-		// Check if subscription is expired
-		if sub.IsExpired() {
-			logger.Info("Subscription expired, creating new one", zap.String("username", username))
-			h.createSubscription(ctx, chatID, username, messageID)
-			return
-		}
-
 		// Return existing active subscription - edit the message
 		qrKeyboard := tgbotapi.NewInlineKeyboardMarkup(
 			tgbotapi.NewInlineKeyboardRow(
@@ -143,7 +136,6 @@ func (h *Handler) handleMySubscription(ctx context.Context, chatID int64, userna
 	}
 
 	trafficInfo := fmt.Sprintf("%.2f / %d ГБ", trafficUsedGB, h.cfg.TrafficLimitGB)
-	expiryDate := sub.ExpiryTime.Format("02.01.2006")
 
 	qrKeyboard := tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
@@ -154,9 +146,8 @@ func (h *Handler) handleMySubscription(ctx context.Context, chatID int64, userna
 		),
 	)
 	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, fmt.Sprintf(
-		"📋 *Ваша подписка*\n\n📊 Трафик: %s\n📅 Сброс: %s\n\n🔗 Ссылка\n`%s`",
+		"📋 *Ваша подписка*\n\n📊 Трафик: %s\n\n🔗 Ссылка\n`%s`",
 		trafficInfo,
-		expiryDate,
 		sub.SubscriptionURL,
 	))
 	editMsg.ParseMode = "Markdown"
