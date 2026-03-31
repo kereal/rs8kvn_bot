@@ -118,7 +118,7 @@ func (h *Handler) HandleDel(ctx context.Context, update tgbotapi.Update) {
 			zap.Error(err),
 			zap.String("client_id", sub.ClientID),
 			zap.Int("inbound_id", sub.InboundID))
-		h.SendMessage(ctx, chatID, fmt.Sprintf("❌ Ошибка удаления клиента из панели 3x-ui: %v", err))
+		h.SendMessage(ctx, chatID, "❌ Ошибка удаления клиента из панели 3x-ui")
 		return
 	}
 
@@ -130,7 +130,7 @@ func (h *Handler) HandleDel(ctx context.Context, update tgbotapi.Update) {
 			zap.Uint("id", id))
 		// Client already deleted from 3x-ui, but database delete failed
 		// This is a warning, not a critical error since the client is gone from the panel
-		h.SendMessage(ctx, chatID, fmt.Sprintf("⚠️ Клиент удален из панели, но ошибка удаления из базы: %v\n\nОбратитесь к администратору.", err))
+		h.SendMessage(ctx, chatID, "⚠️ Клиент удален из панели, но ошибка удаления из базы")
 		return
 	}
 
