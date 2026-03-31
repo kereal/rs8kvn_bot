@@ -155,6 +155,22 @@ Or run directly:
 go run ./cmd/bot
 ```
 
+### Option 4: Development with Air (Hot Reload)
+
+#### 1. Install Air
+
+```bash
+go install github.com/air-verse/air@latest
+```
+
+#### 2. Run with hot reload
+
+```bash
+air
+```
+
+Air will automatically rebuild and restart the bot when you save changes to Go files.
+
 ## Usage
 
 1. Start the bot with `/start` command
