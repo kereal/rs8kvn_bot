@@ -33,7 +33,7 @@ func (h *Handler) HandleStart(ctx context.Context, update tgbotapi.Update) {
 		return
 	}
 
-	// Обработка share-ссылок: t.me/rs8kvn_bot?start=share_{invite_code}
+	// Обработка share-ссылок: t.me/{bot}?start=share_{invite_code}
 	if strings.HasPrefix(args, "share_") {
 		h.handleShareStart(ctx, chatID, username, strings.TrimPrefix(args, "share_"))
 		return
@@ -168,7 +168,7 @@ func (h *Handler) HandleHelp(ctx context.Context, update tgbotapi.Update) {
 	h.send(ctx, msg)
 }
 
-// handleShareStart обрабатывает переход по share-ссылке: t.me/rs8kvn_bot?start=share_{invite_code}
+// handleShareStart обрабатывает переход по share-ссылке: t.me/{bot}?start=share_{invite_code}
 // Если у пользователя уже есть активная подписка — игнорируем код.
 // Если нет — сохраняем invite_code в кэш на 60 минут для последующего использования при создании подписки.
 func (h *Handler) handleShareStart(ctx context.Context, chatID int64, username, inviteCode string) {

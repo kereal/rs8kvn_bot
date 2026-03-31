@@ -16,7 +16,9 @@
       "Bash(})",
       "Bash(eof)",
       "Bash(sqlite3 *)",
-      "Bash(git tag *)"
+      "Bash(git tag *)",
+      "Bash(find *)",
+      "Bash(sed *)"
     ]
   },
   "$version": 3
