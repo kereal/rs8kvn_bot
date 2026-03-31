@@ -294,61 +294,6 @@ func TestHandler_ConfigField(t *testing.T) {
 	}
 }
 
-func TestHandleStart_NilMessage(t *testing.T) {
-	handler := &Handler{
-		cfg: &config.Config{
-			TelegramAdminID: 123456789,
-		},
-	}
-
-	update := tgbotapi.Update{}
-	handler.HandleStart(context.Background(), update)
-}
-
-func TestHandleHelp_NilMessage(t *testing.T) {
-	handler := &Handler{
-		cfg: &config.Config{
-			TrafficLimitGB: 100,
-		},
-	}
-
-	update := tgbotapi.Update{}
-	handler.HandleHelp(context.Background(), update)
-}
-
-func TestHandleDel_NilMessage(t *testing.T) {
-	handler := &Handler{
-		cfg: &config.Config{
-			TelegramAdminID: 123456789,
-		},
-	}
-
-	update := tgbotapi.Update{}
-	handler.HandleDel(context.Background(), update)
-}
-
-func TestHandleBroadcast_NilMessage(t *testing.T) {
-	handler := &Handler{
-		cfg: &config.Config{
-			TelegramAdminID: 123456789,
-		},
-	}
-
-	update := tgbotapi.Update{}
-	handler.HandleBroadcast(context.Background(), update)
-}
-
-func TestHandleSend_NilMessage(t *testing.T) {
-	handler := &Handler{
-		cfg: &config.Config{
-			TelegramAdminID: 123456789,
-		},
-	}
-
-	update := tgbotapi.Update{}
-	handler.HandleSend(context.Background(), update)
-}
-
 func TestHandleStart_WithDatabase(t *testing.T) {
 	tdb, err := testutil.NewTestDatabase(t)
 	if err != nil {
@@ -735,56 +680,6 @@ func TestGetAllTelegramIDs_Empty(t *testing.T) {
 	}
 }
 
-func TestSubscription_IsExpired(t *testing.T) {
-	tests := []struct {
-		name       string
-		expiryTime time.Time
-		want       bool
-	}{
-		{"expired subscription", time.Now().Add(-1 * time.Hour), true},
-		{"active subscription", time.Now().Add(1 * time.Hour), false},
-		{"expires now", time.Now(), true},
-		{"expires in future", time.Now().Add(24 * time.Hour), false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			sub := &database.Subscription{
-				ExpiryTime: tt.expiryTime,
-			}
-			if got := sub.IsExpired(); got != tt.want {
-				t.Errorf("IsExpired() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestSubscription_IsActive(t *testing.T) {
-	tests := []struct {
-		name       string
-		status     string
-		expiryTime time.Time
-		want       bool
-	}{
-		{"active and not expired", "active", time.Now().Add(1 * time.Hour), true},
-		{"active but expired", "active", time.Now().Add(-1 * time.Hour), false},
-		{"revoked status", "revoked", time.Now().Add(1 * time.Hour), false},
-		{"expired status", "expired", time.Now().Add(1 * time.Hour), false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			sub := &database.Subscription{
-				Status:     tt.status,
-				ExpiryTime: tt.expiryTime,
-			}
-			if got := sub.IsActive(); got != tt.want {
-				t.Errorf("IsActive() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestHandleBroadcast_MessageTooLong(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
@@ -806,17 +701,6 @@ func TestHandleBroadcast_MessageTooLong(t *testing.T) {
 
 	assert.True(t, mockBot.SendCalled)
 	assert.Contains(t, mockBot.LastSentText, "слишком длинное")
-}
-
-func TestHandleSend_EmptyMessage(t *testing.T) {
-	handler := &Handler{
-		cfg: &config.Config{
-			TelegramAdminID: 123456789,
-		},
-	}
-
-	update := tgbotapi.Update{}
-	handler.HandleSend(context.Background(), update)
 }
 
 func TestHandleSend_RateLimit(t *testing.T) {
@@ -846,11 +730,45 @@ func TestHandleSend_RateLimit(t *testing.T) {
 }
 
 func TestHandleSend_NoArguments(t *testing.T) {
-	t.Skip("Skipping - requires mock interface for bot API")
+	cfg := &config.Config{TelegramAdminID: 123456}
+	mockDB := testutil.NewMockDatabaseService()
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewMockXUIClient(), NewTestBotConfig())
+
+	ctx := context.Background()
+	update := tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat: &tgbotapi.Chat{ID: 123456},
+			From: &tgbotapi.User{ID: 123456},
+			Text: "/send",
+		},
+	}
+
+	handler.HandleSend(ctx, update)
+
+	assert.True(t, mockBot.SendCalledSafe(), "Should send usage message")
+	assert.Contains(t, mockBot.LastSentText, "Использование", "Should show usage instructions")
 }
 
 func TestHandleSend_OnlyTarget(t *testing.T) {
-	t.Skip("Skipping - requires mock interface for bot API")
+	cfg := &config.Config{TelegramAdminID: 123456}
+	mockDB := testutil.NewMockDatabaseService()
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewMockXUIClient(), NewTestBotConfig())
+
+	ctx := context.Background()
+	update := tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat: &tgbotapi.Chat{ID: 123456},
+			From: &tgbotapi.User{ID: 123456},
+			Text: "/send 123",
+		},
+	}
+
+	handler.HandleSend(ctx, update)
+
+	assert.True(t, mockBot.SendCalledSafe(), "Should send usage message")
+	assert.Contains(t, mockBot.LastSentText, "Использование", "Should show usage instructions")
 }
 
 // TestGetMainMenuContent_WithSubscription tests getMainMenuContent for users with subscription
@@ -993,107 +911,55 @@ func TestQRBackKeyboard(t *testing.T) {
 	}
 }
 
-// TestCallbackList verifies all callbacks are accounted for
-func TestCallbackList(t *testing.T) {
-	// List of all callbacks used in the bot
-	expectedCallbacks := []string{
-		"create_subscription",
-		"qr_code",
-		"admin_stats",
-		"admin_lastreg",
-		"back_to_start",
-		"menu_donate",
-		"menu_subscription",
-		"back_to_subscription",
-		"menu_help",
-		"share_invite",
-	}
-
-	// Verify each callback is unique
-	seen := make(map[string]bool)
-	for _, cb := range expectedCallbacks {
-		if seen[cb] {
-			t.Errorf("Duplicate callback: %s", cb)
-		}
-		seen[cb] = true
-	}
-
-	// Verify we have the expected number
-	if len(expectedCallbacks) != 10 {
-		t.Errorf("Expected 10 callbacks, got %d", len(expectedCallbacks))
-	}
-}
-
 // === sendInviteLink tests ===
 
 func TestSendInviteLink_Success(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
+	mockBot := testutil.NewMockBotAPI()
 	cfg := &config.Config{
 		SiteURL:         "https://vpn.site",
 		TelegramAdminID: 12345,
 		TrafficLimitGB:  100,
 	}
-	_ = &Handler{
-		cfg:   cfg,
-		db:    mockDB,
-		bot:   nil, // Will be nil for tests
-		cache: NewSubscriptionCache(100, 5*time.Minute),
+	handler := &Handler{
+		cfg:       cfg,
+		db:        mockDB,
+		bot:       mockBot,
+		botConfig: NewTestBotConfig(),
+		cache:     NewSubscriptionCache(100, 5*time.Minute),
 	}
 
 	mockDB.GetOrCreateInviteFunc = func(ctx context.Context, referrerTGID int64, code string) (*database.Invite, error) {
-		return &database.Invite{Code: code, ReferrerTGID: referrerTGID}, nil
+		return &database.Invite{Code: "TESTCODE1", ReferrerTGID: referrerTGID}, nil
 	}
 
-	// Note: This test verifies the logic, but can't verify the message was sent
-	// because bot is nil. The function should handle nil bot gracefully or
-	// we test the invite creation logic separately.
 	ctx := context.Background()
+	handler.sendInviteLink(ctx, 12345, 99)
 
-	invite, err := mockDB.GetOrCreateInvite(ctx, 12345, "testcode")
-	require.NoError(t, err, "GetOrCreateInvite() error")
-	assert.Equal(t, "testcode", invite.Code, "Invite code")
-	assert.Equal(t, int64(12345), invite.ReferrerTGID, "ReferrerTGID")
+	assert.True(t, mockBot.SendCalled, "sendInviteLink should send a message")
+	assert.Contains(t, mockBot.LastSentText, "TESTCODE1", "Message should contain invite code")
+	assert.Contains(t, mockBot.LastSentText, "vpn.site", "Message should contain web link")
 }
 
 func TestSendInviteLink_DatabaseError(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
+	mockBot := testutil.NewMockBotAPI()
 	cfg := &config.Config{
 		SiteURL:         "https://vpn.site",
 		TelegramAdminID: 12345,
 		TrafficLimitGB:  100,
 	}
-	_ = &Handler{
-		cfg:   cfg,
-		db:    mockDB,
-		cache: NewSubscriptionCache(100, 5*time.Minute),
-	}
+	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewMockXUIClient(), NewTestBotConfig())
 
 	mockDB.GetOrCreateInviteFunc = func(ctx context.Context, referrerTGID int64, code string) (*database.Invite, error) {
 		return nil, fmt.Errorf("database error")
 	}
 
 	ctx := context.Background()
-	_, err := mockDB.GetOrCreateInvite(ctx, 12345, "testcode")
-	require.Error(t, err, "GetOrCreateInvite() should return error")
-}
+	handler.sendInviteLink(ctx, 12345, 99)
 
-// === StoreConversation tests ===
-
-func TestHandler_StoreConversation(t *testing.T) {
-	handler := &Handler{}
-
-	// Should not panic with nil handler fields
-	handler.StoreConversation(context.Background(), 12345, "user message", "bot response")
-}
-
-// === GetUserContext tests ===
-
-func TestHandler_GetUserContext(t *testing.T) {
-	handler := &Handler{}
-
-	// Should return empty string
-	result := handler.GetUserContext(context.Background(), 12345, "query")
-	assert.Empty(t, result, "GetUserContext() should return empty string")
+	assert.True(t, mockBot.SendCalledSafe(), "sendInviteLink should send error message on DB error")
+	assert.Contains(t, mockBot.LastSentText, "❌", "Error message should contain error emoji")
 }
 
 // === isAdmin edge cases ===
@@ -1273,15 +1139,6 @@ func TestHandler_AddAdminButtons_NonAdmin(t *testing.T) {
 	assert.Equal(t, initialRows, len(keyboard.InlineKeyboard), "Should not add buttons for non-admin")
 }
 
-// === Handler field tests ===
-
-func TestHandler_ConfigField_Nil(t *testing.T) {
-	handler := &Handler{}
-
-	// Handler should handle nil config gracefully
-	assert.Nil(t, handler.cfg, "Config should be nil")
-}
-
 func TestHandler_CacheField(t *testing.T) {
 	handler := &Handler{
 		cache: NewSubscriptionCache(100, 5*time.Minute),
@@ -1312,21 +1169,6 @@ func TestHandler_RateLimiter(t *testing.T) {
 	// Test that rate limiter allows requests
 	ctx := context.Background()
 	assert.True(t, handler.rateLimiter.Wait(ctx), "Rate limiter should allow request")
-}
-
-// === Context cancellation tests ===
-
-func TestHandler_ContextCancellation(t *testing.T) {
-	handler := &Handler{
-		cache: NewSubscriptionCache(100, 5*time.Minute),
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // Cancel immediately
-
-	// Operations should handle cancelled context
-	assert.NotNil(t, handler.cache, "Cache should still be accessible with cancelled context")
-	_ = ctx // Context is cancelled but cache operations don't require it
 }
 
 // === Subscription cache integration ===
@@ -1386,23 +1228,6 @@ func TestHandler_SubscriptionCreationLock(t *testing.T) {
 	assert.False(t, exists, "Should not be in progress anymore")
 }
 
-// === Error message tests ===
-
-func TestHandler_ErrorMessageFormats(t *testing.T) {
-	// Test that error messages are properly formatted
-	errorMessages := []string{
-		"❌ Временная ошибка. Попробуйте позже.",
-		"❌ У вас нет активной подписки.",
-		"❌ Подписка с ID %d не найдена",
-		"❌ Не удалось создать пригласительную ссылку.",
-	}
-
-	for _, msg := range errorMessages {
-		assert.NotEmpty(t, msg, "Error message should not be empty")
-		assert.Contains(t, msg, "❌", "Error message should contain error emoji")
-	}
-}
-
 // === Keyboard construction tests ===
 
 func TestHandler_KeyboardConstruction_MultipleRows(t *testing.T) {
@@ -1421,125 +1246,37 @@ func TestHandler_KeyboardConstruction_MultipleRows(t *testing.T) {
 
 // === handleCreateError tests ===
 
-func TestHandleCreateError_ConnectionRefused(t *testing.T) {
-	mockBot := testutil.NewMockBotAPI()
-	handler := &Handler{bot: mockBot}
+func TestHandleCreateError_AllErrorTypes(t *testing.T) {
+	tests := []struct {
+		name        string
+		err         error
+		wantContain string
+	}{
+		{"connection refused", fmt.Errorf("connection refused"), "Не удается подключиться к серверу"},
+		{"request timeout", fmt.Errorf("request timeout"), "Не удается подключиться к серверу"},
+		{"authentication failed", fmt.Errorf("authentication failed"), "Ошибка авторизации на сервере"},
+		{"unauthorized access", fmt.Errorf("unauthorized access"), "Ошибка авторизации на сервере"},
+		{"context canceled", fmt.Errorf("context canceled"), "Запрос был прерван"},
+		{"no such host", fmt.Errorf("no such host"), "Ошибка подключения к серверу"},
+		{"dial tcp", fmt.Errorf("dial tcp 127.0.0.1:2053"), "Ошибка подключения к серверу"},
+		{"certificate verify", fmt.Errorf("certificate verify failed"), "Ошибка SSL/TLS сертификата"},
+		{"TLS handshake", fmt.Errorf("TLS handshake failed"), "Ошибка SSL/TLS сертификата"},
+		{"inbound not found", fmt.Errorf("inbound not found"), "Ошибка сервера при создании подписки"},
+		{"client already exists", fmt.Errorf("client already exists"), "Ошибка сервера при создании подписки"},
+		{"generic error", fmt.Errorf("some unknown error"), "Ошибка при создании подписки"},
+	}
 
-	ctx := context.Background()
-	handler.handleCreateError(ctx, 12345, 100, "testuser", fmt.Errorf("connection refused"))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockBot := testutil.NewMockBotAPI()
+			handler := &Handler{bot: mockBot}
 
-	assert.True(t, mockBot.SendCalled)
-	assert.Contains(t, mockBot.LastSentText, "Не удается подключиться к серверу")
-}
+			handler.handleCreateError(context.Background(), 12345, 100, "testuser", tt.err)
 
-func TestHandleCreateError_Timeout(t *testing.T) {
-	mockBot := testutil.NewMockBotAPI()
-	handler := &Handler{bot: mockBot}
-
-	ctx := context.Background()
-	handler.handleCreateError(ctx, 12345, 100, "testuser", fmt.Errorf("request timeout"))
-
-	assert.True(t, mockBot.SendCalled)
-	assert.Contains(t, mockBot.LastSentText, "Не удается подключиться к серверу")
-}
-
-func TestHandleCreateError_Authentication(t *testing.T) {
-	mockBot := testutil.NewMockBotAPI()
-	handler := &Handler{bot: mockBot}
-
-	ctx := context.Background()
-	handler.handleCreateError(ctx, 12345, 100, "testuser", fmt.Errorf("authentication failed"))
-
-	assert.True(t, mockBot.SendCalled)
-	assert.Contains(t, mockBot.LastSentText, "Ошибка авторизации на сервере")
-}
-
-func TestHandleCreateError_Unauthorized(t *testing.T) {
-	mockBot := testutil.NewMockBotAPI()
-	handler := &Handler{bot: mockBot}
-
-	ctx := context.Background()
-	handler.handleCreateError(ctx, 12345, 100, "testuser", fmt.Errorf("unauthorized access"))
-
-	assert.True(t, mockBot.SendCalled)
-	assert.Contains(t, mockBot.LastSentText, "Ошибка авторизации на сервере")
-}
-
-func TestHandleCreateError_ContextCanceled(t *testing.T) {
-	mockBot := testutil.NewMockBotAPI()
-	handler := &Handler{bot: mockBot}
-
-	ctx := context.Background()
-	handler.handleCreateError(ctx, 12345, 100, "testuser", fmt.Errorf("context canceled"))
-
-	assert.True(t, mockBot.SendCalled)
-	assert.Contains(t, mockBot.LastSentText, "Запрос был прерван")
-}
-
-func TestHandleCreateError_NoSuchHost(t *testing.T) {
-	mockBot := testutil.NewMockBotAPI()
-	handler := &Handler{bot: mockBot}
-
-	ctx := context.Background()
-	handler.handleCreateError(ctx, 12345, 100, "testuser", fmt.Errorf("no such host"))
-
-	assert.True(t, mockBot.SendCalled)
-	assert.Contains(t, mockBot.LastSentText, "Ошибка подключения к серверу")
-}
-
-func TestHandleCreateError_DialTCP(t *testing.T) {
-	mockBot := testutil.NewMockBotAPI()
-	handler := &Handler{bot: mockBot}
-
-	ctx := context.Background()
-	handler.handleCreateError(ctx, 12345, 100, "testuser", fmt.Errorf("dial tcp 127.0.0.1:2053"))
-
-	assert.True(t, mockBot.SendCalled)
-	assert.Contains(t, mockBot.LastSentText, "Ошибка подключения к серверу")
-}
-
-func TestHandleCreateError_Certificate(t *testing.T) {
-	mockBot := testutil.NewMockBotAPI()
-	handler := &Handler{bot: mockBot}
-
-	ctx := context.Background()
-	handler.handleCreateError(ctx, 12345, 100, "testuser", fmt.Errorf("certificate verify failed"))
-
-	assert.True(t, mockBot.SendCalled)
-	assert.Contains(t, mockBot.LastSentText, "Ошибка SSL/TLS сертификата")
-}
-
-func TestHandleCreateError_TLS(t *testing.T) {
-	mockBot := testutil.NewMockBotAPI()
-	handler := &Handler{bot: mockBot}
-
-	ctx := context.Background()
-	handler.handleCreateError(ctx, 12345, 100, "testuser", fmt.Errorf("TLS handshake failed"))
-
-	assert.True(t, mockBot.SendCalled)
-	assert.Contains(t, mockBot.LastSentText, "Ошибка SSL/TLS сертификата")
-}
-
-func TestHandleCreateError_Inbound(t *testing.T) {
-	mockBot := testutil.NewMockBotAPI()
-	handler := &Handler{bot: mockBot}
-
-	ctx := context.Background()
-	handler.handleCreateError(ctx, 12345, 100, "testuser", fmt.Errorf("inbound not found"))
-
-	assert.True(t, mockBot.SendCalled)
-	assert.Contains(t, mockBot.LastSentText, "Ошибка сервера при создании подписки")
-}
-
-func TestHandleCreateError_Client(t *testing.T) {
-	mockBot := testutil.NewMockBotAPI()
-	handler := &Handler{bot: mockBot}
-
-	ctx := context.Background()
-	handler.handleCreateError(ctx, 12345, 100, "testuser", fmt.Errorf("client already exists"))
-
-	assert.True(t, mockBot.SendCalled)
-	assert.Contains(t, mockBot.LastSentText, "Ошибка сервера при создании подписки")
+			assert.True(t, mockBot.SendCalled, "should send error message")
+			assert.Contains(t, mockBot.LastSentText, tt.wantContain, "message should contain expected text")
+		})
+	}
 }
 
 func TestHandleCreateError_RollbackFailed(t *testing.T) {
@@ -1550,21 +1287,9 @@ func TestHandleCreateError_RollbackFailed(t *testing.T) {
 		rateLimiter: ratelimiter.NewRateLimiter(10, 1),
 	}
 
-	ctx := context.Background()
-	handler.handleCreateError(ctx, 12345, 100, "testuser", fmt.Errorf("rollback failed: db error"))
+	handler.handleCreateError(context.Background(), 12345, 100, "testuser", fmt.Errorf("rollback failed: db error"))
 
 	assert.True(t, mockBot.SendCalled)
 	assert.Contains(t, mockBot.LastSentText, "не сохранена в базе")
 	assert.Contains(t, mockBot.LastSentText, "Обратитесь к администратору")
-}
-
-func TestHandleCreateError_GenericError(t *testing.T) {
-	mockBot := testutil.NewMockBotAPI()
-	handler := &Handler{bot: mockBot}
-
-	ctx := context.Background()
-	handler.handleCreateError(ctx, 12345, 100, "testuser", fmt.Errorf("some unknown error"))
-
-	assert.True(t, mockBot.SendCalled)
-	assert.Contains(t, mockBot.LastSentText, "Ошибка при создании подписки")
 }

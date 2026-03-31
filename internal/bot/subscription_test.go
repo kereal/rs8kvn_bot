@@ -363,15 +363,23 @@ func TestHandleCreateSubscription_AlreadyInProgress(t *testing.T) {
 
 	chatID := int64(123456)
 
-	// Simulate subscription already in progress
+	// Simulate subscription already in progress (set by another goroutine)
+	handler.subCreationMu.Lock()
 	handler.inProgress[chatID] = struct{}{}
+	handler.subCreationMu.Unlock()
 
 	ctx := context.Background()
 	handler.handleCreateSubscription(ctx, chatID, "testuser", 1)
 
-	// Should not call any expensive operations
-	assert.Nil(t, mockDB.GetByTelegramIDFunc)
-	assert.Nil(t, mockXUI.AddClientWithIDFunc)
+	// inProgress entry should NOT be cleaned up — it belongs to the goroutine that set it.
+	// The early-return path doesn't register the defer cleanup.
+	handler.subCreationMu.Lock()
+	_, stillInProgress := handler.inProgress[chatID]
+	handler.subCreationMu.Unlock()
+	assert.True(t, stillInProgress, "inProgress entry should remain (belongs to other goroutine)")
+
+	// No bot interaction should have occurred (early return)
+	assert.False(t, mockBot.SendCalledSafe(), "Bot should not be called when already in progress")
 }
 
 func TestHandleCreateSubscription_ExistingActiveSubscription(t *testing.T) {
@@ -400,12 +408,11 @@ func TestHandleCreateSubscription_ExistingActiveSubscription(t *testing.T) {
 	ctx := context.Background()
 	handler.handleCreateSubscription(ctx, 123456, "testuser", 1)
 
-	assert.True(t, mockBot.SendCalled)
+	assert.True(t, mockBot.SendCalledSafe())
 	assert.Contains(t, mockBot.LastSentText, "Ваша подписка")
-	// Should not create new subscription
-	assert.Nil(t, mockXUI.AddClientWithIDFunc)
+	// Verify no new client was created on XUI (user already has active sub)
+	assert.False(t, mockXUI.AddClientWithIDCalled, "Should not create new XUI client for existing active subscription")
 }
-
 func TestHandleCreateSubscription_ExpiredSubscription(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,

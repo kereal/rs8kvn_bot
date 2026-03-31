@@ -723,7 +723,8 @@ func TestHandleBroadcast_ConcurrentBroadcasts(t *testing.T) {
 	<-done1
 	<-done2
 
-	assert.True(t, mockBot.SendCalled, "Should have sent messages")
+	// Use thread-safe accessor to avoid data race
+	assert.True(t, mockBot.SendCalledSafe(), "Should have sent messages")
 }
 
 func TestHandleSend_NonAdminUser(t *testing.T) {
