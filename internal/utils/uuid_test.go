@@ -486,3 +486,30 @@ func TestGenerateSubID_Format(t *testing.T) {
 		}
 	})
 }
+
+// TestGenerateInviteCode_Format тестирует формат invite кода
+func TestGenerateInviteCode_Format(t *testing.T) {
+	t.Run("contains only lowercase letters and digits", func(t *testing.T) {
+		for i := 0; i < 100; i++ {
+			code := GenerateInviteCode()
+			assert.Len(t, code, 8, "InviteCode length")
+			for _, c := range code {
+				assert.True(t, (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z'),
+					"Character %c is not a valid lowercase alphanumeric character", c)
+			}
+		}
+	})
+
+	t.Run("all codes are unique", func(t *testing.T) {
+		const iterations = 1000
+		codes := make(map[string]struct{})
+
+		for i := 0; i < iterations; i++ {
+			code := GenerateInviteCode()
+			assert.NotContains(t, codes, code, "Duplicate code generated")
+			codes[code] = struct{}{}
+		}
+
+		assert.Len(t, codes, iterations, "All invite codes should be unique")
+	})
+}

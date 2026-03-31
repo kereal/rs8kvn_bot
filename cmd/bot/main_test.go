@@ -293,8 +293,22 @@ func TestHandleUpdate_NilMessage(t *testing.T) {
 	})
 }
 
-// TestHandleUpdate_CallbackWithNilMessage тестирует callback с nil Message
-func TestHandleUpdate_CallbackWithNilMessage(t *testing.T) {
+// TestGetVersion_WithBuildInfo тестирует getVersion с различными build info
+func TestGetVersion_WithBuildInfo(t *testing.T) {
+	t.Run("dev version returns valid format", func(t *testing.T) {
+		v := getVersion()
+		assert.NotEmpty(t, v)
+		assert.Contains(t, v, "rs8kvn_bot@")
+	})
+
+	t.Run("version starts with rs8kvn_bot@", func(t *testing.T) {
+		v := getVersion()
+		assert.True(t, strings.HasPrefix(v, "rs8kvn_bot@"), "version should start with 'rs8kvn_bot@'")
+	})
+}
+
+// TestHandleUpdate_UnknownCommands тестирует обработку неизвестных команд
+func TestHandleUpdate_UnknownCommands(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  50,
@@ -305,16 +319,30 @@ func TestHandleUpdate_CallbackWithNilMessage(t *testing.T) {
 	handler := bot.NewHandler(mockBot, cfg, mockDB, mockXUI)
 	ctx := context.Background()
 
-	update := tgbotapi.Update{
-		CallbackQuery: &tgbotapi.CallbackQuery{
-			ID:      "test-callback-id",
-			Data:    "test_data",
-			From:    &tgbotapi.User{ID: 123456, UserName: "testuser"},
-			Message: nil,
-		},
+	tests := []struct {
+		name    string
+		command string
+	}{
+		{"del command", "del"},
+		{"broadcast command", "broadcast"},
+		{"send command", "send"},
+		{"unknown command", "unknown"},
 	}
 
-	assert.NotPanics(t, func() {
-		handleUpdate(ctx, handler, update)
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			update := tgbotapi.Update{
+				Message: &tgbotapi.Message{
+					Chat: &tgbotapi.Chat{ID: 123456},
+					From: &tgbotapi.User{ID: 123456, UserName: "testuser"},
+					Text: "/" + tt.command,
+				},
+			}
+
+			// Should not panic for any command
+			assert.NotPanics(t, func() {
+				handleUpdate(ctx, handler, update)
+			})
+		})
+	}
 }
