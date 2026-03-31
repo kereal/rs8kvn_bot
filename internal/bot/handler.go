@@ -228,8 +228,8 @@ _нажмите и держите → копировать_
 	// Keyboard with QR buttons
 	keyboard := tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("📱 QR Telegram", "qr_telegram_"+invite.Code),
-			tgbotapi.NewInlineKeyboardButtonData("🌐 QR Web", "qr_web_"+invite.Code),
+			tgbotapi.NewInlineKeyboardButtonData("📱 QR Telegram", "qr_telegram"),
+			tgbotapi.NewInlineKeyboardButtonData("🌐 QR Web", "qr_web"),
 		),
 		tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData("🏠 В начало", "back_to_start"),
