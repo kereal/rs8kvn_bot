@@ -872,3 +872,39 @@ func TestGetExistingTrialFromCookie_Valid(t *testing.T) {
 	assert.NotNil(t, sub, "getExistingTrialFromCookie() should return subscription for valid trial")
 	assert.Equal(t, "valid-sub-id", sub.SubscriptionID, "getExistingTrialFromCookie() should return correct sub ID")
 }
+
+func TestInviteCodeRegex(t *testing.T) {
+	srv := NewServer(":8880", nil, nil, &config.Config{}, bot.NewTestBotConfig())
+
+	tests := []struct {
+		name  string
+		code  string
+		valid bool
+	}{
+		{"alphanumeric", "abc123", true},
+		{"with underscore", "abc_123", true},
+		{"with hyphen", "abc-123", true},
+		{"uppercase", "ABC123", true},
+		{"mixed case", "AbC123", true},
+		{"empty string", "", false},
+		{"with slash", "abc/123", false},
+		{"with dot", "abc.123", false},
+		{"with space", "abc 123", false},
+		{"with at sign", "abc@123", false},
+		{"sql injection", "abc'; DROP TABLE--", false},
+		{"path traversal", "../etc/passwd", false},
+		{"only numbers", "123456", true},
+		{"only letters", "abcdef", true},
+		{"single char", "a", true},
+		{"long code", "abcdefghij1234567890", true},
+		{"cyrillic", "абв", false},
+		{"unicode", "用户", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := srv.inviteCodeRegex.MatchString(tt.code)
+			assert.Equal(t, tt.valid, result, "inviteCodeRegex.MatchString(%q)", tt.code)
+		})
+	}
+}
