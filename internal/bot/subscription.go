@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"rs8kvn_bot/internal/config"
 	"rs8kvn_bot/internal/database"
 	"rs8kvn_bot/internal/logger"
 	"rs8kvn_bot/internal/utils"
@@ -234,21 +235,19 @@ func (h *Handler) createSubscription(ctx context.Context, chatID int64, username
 		return
 	}
 
-	now := time.Now()
-	expiryTime := utils.FirstSecondOfNextMonth(now)
 	trafficBytes := int64(h.cfg.TrafficLimitGB) * 1024 * 1024 * 1024
 
 	logger.Info("Creating subscription",
 		zap.String("username", username),
-		zap.Int("traffic_gb", h.cfg.TrafficLimitGB),
-		zap.String("expiry", expiryTime.Format("02.01.2006 15:04:05")))
+		zap.Int("traffic_gb", h.cfg.TrafficLimitGB))
 
 	// Step 1: Generate IDs
 	clientID := utils.GenerateUUID()
 	subID := utils.GenerateSubID()
 
 	// Step 2: Add client to 3x-ui panel
-	client, err := h.xui.AddClientWithID(ctx, h.cfg.XUIInboundID, username, clientID, subID, trafficBytes, time.Time{}, 30)
+	// expiryTime: zero (no expiry), reset: 30 (reset on last day of month)
+	client, err := h.xui.AddClientWithID(ctx, h.cfg.XUIInboundID, username, clientID, subID, trafficBytes, time.Time{}, config.SubscriptionResetDay)
 	if err != nil {
 		logger.Error("Failed to add client to 3x-ui", zap.Error(err))
 
@@ -306,7 +305,7 @@ func (h *Handler) createSubscription(ctx context.Context, chatID int64, username
 		SubscriptionID:  client.SubID,
 		InboundID:       h.cfg.XUIInboundID,
 		TrafficLimit:    trafficBytes,
-		ExpiryTime:      expiryTime,
+		ExpiryTime:      time.Time{}, // zero value — no expiry
 		Status:          "active",
 		SubscriptionURL: subscriptionURL,
 		ReferredBy:      referredBy,
@@ -351,7 +350,7 @@ func (h *Handler) createSubscription(ctx context.Context, chatID int64, username
 	h.cache.Set(chatID, sub)
 
 	// Notify admin about new subscription
-	h.notifyAdmin(ctx, username, chatID, subscriptionURL, expiryTime)
+	h.notifyAdmin(ctx, username, chatID, subscriptionURL, time.Time{})
 	logger.Info("Subscription created successfully",
 		zap.String("username", username),
 		zap.Int64("chat_id", chatID))
