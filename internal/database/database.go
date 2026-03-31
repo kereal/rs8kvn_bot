@@ -798,6 +798,16 @@ func (s *Service) GetSubscriptionBySubscriptionID(ctx context.Context, subscript
 	return &sub, nil
 }
 
+// GetTrialSubscriptionBySubID returns a trial subscription by its subscription ID.
+func (s *Service) GetTrialSubscriptionBySubID(ctx context.Context, subscriptionID string) (*Subscription, error) {
+	var sub Subscription
+	result := s.db.WithContext(ctx).Where("subscription_id = ? AND is_trial = ?", subscriptionID, true).First(&sub)
+	if result.Error != nil {
+		return nil, fmt.Errorf("failed to get trial subscription by subscription_id: %w", result.Error)
+	}
+	return &sub, nil
+}
+
 // BindTrialSubscription binds a trial subscription to a Telegram user.
 // Uses UPDATE with WHERE to prevent race conditions — if telegram_id was already set
 // by a concurrent bind, RowsAffected will be 0.

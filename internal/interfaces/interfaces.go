@@ -40,6 +40,7 @@ type DatabaseService interface {
 	GetInviteByCode(ctx context.Context, code string) (*database.Invite, error)
 	CreateTrialSubscription(ctx context.Context, inviteCode, subscriptionID, clientID string, inboundID int, trafficBytes int64, expiryTime time.Time, subURL string) (*database.Subscription, error)
 	GetSubscriptionBySubscriptionID(ctx context.Context, subscriptionID string) (*database.Subscription, error)
+	GetTrialSubscriptionBySubID(ctx context.Context, subscriptionID string) (*database.Subscription, error)
 	BindTrialSubscription(ctx context.Context, subscriptionID string, telegramID int64, username string) (*database.Subscription, error)
 	CountTrialRequestsByIPLastHour(ctx context.Context, ip string) (int, error)
 	CreateTrialRequest(ctx context.Context, ip string) error
