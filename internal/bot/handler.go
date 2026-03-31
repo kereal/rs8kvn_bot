@@ -32,32 +32,32 @@ type pendingInvite struct {
 const PendingInviteTTL = 60 * time.Minute
 
 type Handler struct {
-	bot           interfaces.BotAPI
-	cfg           *config.Config
-	db            interfaces.DatabaseService
-	xui           interfaces.XUIClient
-	rateLimiter   *ratelimiter.RateLimiter
-	cache         *SubscriptionCache
-	subCreationMu sync.Mutex
-	inProgress    map[int64]struct{}
-	referrals     map[int64]int64
-	referralsMu   sync.RWMutex
+	bot            interfaces.BotAPI
+	cfg            *config.Config
+	db             interfaces.DatabaseService
+	xui            interfaces.XUIClient
+	rateLimiter    *ratelimiter.RateLimiter
+	cache          *SubscriptionCache
+	subCreationMu  sync.Mutex
+	inProgress     map[int64]struct{}
+	referrals      map[int64]int64
+	referralsMu    sync.RWMutex
 	pendingInvites map[int64]pendingInvite // chatID -> invite_code
 	pendingMu      sync.RWMutex
 }
 
 func NewHandler(bot interfaces.BotAPI, cfg *config.Config, db interfaces.DatabaseService, xuiClient interfaces.XUIClient) *Handler {
 	return &Handler{
-		bot:           bot,
-		cfg:           cfg,
-		db:            db,
-		xui:           xuiClient,
-		rateLimiter:   ratelimiter.NewRateLimiter(config.RateLimiterMaxTokens, config.RateLimiterRefillRate),
-		cache:         NewSubscriptionCache(CacheMaxSize, CacheTTL),
-		subCreationMu: sync.Mutex{},
-		inProgress:    make(map[int64]struct{}),
-		referrals:     make(map[int64]int64),
-		referralsMu:   sync.RWMutex{},
+		bot:            bot,
+		cfg:            cfg,
+		db:             db,
+		xui:            xuiClient,
+		rateLimiter:    ratelimiter.NewRateLimiter(config.RateLimiterMaxTokens, config.RateLimiterRefillRate),
+		cache:          NewSubscriptionCache(CacheMaxSize, CacheTTL),
+		subCreationMu:  sync.Mutex{},
+		inProgress:     make(map[int64]struct{}),
+		referrals:      make(map[int64]int64),
+		referralsMu:    sync.RWMutex{},
 		pendingInvites: make(map[int64]pendingInvite),
 		pendingMu:      sync.RWMutex{},
 	}
@@ -205,9 +205,21 @@ func (h *Handler) sendInviteLink(ctx context.Context, chatID int64, messageID in
 		return
 	}
 
-	telegramLink := fmt.Sprintf("t.me/rs8kvn_bot?start=share_%s", invite.Code)
+	telegramLink := fmt.Sprintf("t.me/rs8vpn_bot?start=share_%s", invite.Code)
 	webLink := fmt.Sprintf("%s/i/%s", h.cfg.SiteURL, invite.Code)
-	text := fmt.Sprintf("*Ваша ссылка*\n\nДля пользователей Telegram: [@rs8kvn_bot](%s)\n_нажмите и держите -> копировать_\n\nДля пользователей без Telegram: [%s](%s)\n_нажмите и держите -> копировать_\n\nОтправьте ссылку!\n\nЗа приглашенных активных пользователей вы получите бонус.", telegramLink, webLink, webLink)
+	text := fmt.Sprintf(`🔗 *Ваша пригласительная ссылка*
+
+📱 *Для пользователей Telegram:*
+[@rs8vpn_bot](%s)
+_нажмите и держите → копировать_
+
+🌐 *Для пользователей без Telegram:*
+[%s](%s)
+_нажмите и держите → копировать_
+
+📤 *Отправьте ссылку друзьям!*
+
+💎 За каждого приглашенного активного пользователя вы получите бонус.`, telegramLink, webLink, webLink)
 	backKeyboard := h.getBackKeyboard()
 
 	if messageID > 0 {
