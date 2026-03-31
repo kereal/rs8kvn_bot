@@ -2,7 +2,7 @@
 
 Telegram bot for distributing VLESS+Reality+Vision proxy subscriptions from 3x-ui panel.
 
-**Version:** v2.0.0 | **Coverage:** ~80% | **License:** MIT
+**Version:** v2.0.1 | **Coverage:** ~80% | **License:** MIT
 
 ## Features
 
@@ -10,7 +10,7 @@ Telegram bot for distributing VLESS+Reality+Vision proxy subscriptions from 3x-u
 - 📋 View current subscription status
 - 📱 QR code for easy subscription import
 - 🔗 Invite/trial landing page (`/i/{code}`) with one-click Happ setup
-- 👥 Referral system — users generate invite codes (`t.me/rs8kvn_bot?start=share_{code}`)
+- 👥 Referral system — users generate invite codes (`t.me/{bot}?start=share_{code}`)
 - 📊 Configurable traffic limit (default 100GB/month)
 - 🔄 Monthly auto-renewal (last day of month, no expiry)
 - 🔔 Admin notifications on new subscriptions
@@ -26,6 +26,7 @@ Telegram bot for distributing VLESS+Reality+Vision proxy subscriptions from 3x-u
 - 🐳 Docker support with health checks
 - 🧪 Unit tests (~80% coverage)
 - ✅ golangci-lint and gosec for code quality
+- 🍪 Trial duplication prevention (3-hour cookie)
 
 ## Requirements
 

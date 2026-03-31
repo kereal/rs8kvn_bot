@@ -2,7 +2,7 @@
 
 **Repo:** https://github.com/kereal/rs8kvn_bot  
 **Module:** `rs8kvn_bot` (Go 1.25+)  
-**Version:** v2.0.0  
+**Version:** v2.0.1  
 **Last Updated:** 2026-03-31
 
 ---
@@ -64,10 +64,11 @@ tgvpn_go/
 
 **User Features:**
 - ✅ `/start`, `/help` — start commands with inline keyboards
-- ✅ 📋 Subscription view — traffic usage, reset date, subscription link
+- ✅ 📋 Subscription view — traffic usage, subscription link
 - ✅ 📱 QR code generation — scannable by Happ app
 - ✅ ☕ Donate, ❓ Help — auxiliary menus
-- ✅ 🔗 Referral system — share links (`t.me/rs8kvn_bot?start=share_{code}`)
+- ✅ 🔗 Referral system — share links (`t.me/{bot}?start=share_{code}`)
+- ✅ 🎁 Trial subscriptions via `/i/{code}` landing page
 
 **Admin Features:**
 - ✅ `/lastreg` — last 10 registered users
@@ -85,6 +86,7 @@ tgvpn_go/
 - ✅ Sentry error tracking, Zap structured logging
 - ✅ Docker: multi-stage build, healthcheck, GHCR images
 - ✅ CI: lint, gosec, test, build, push
+- ✅ Trial duplication prevention via HttpOnly cookie (3 hours)
 
 ### Test Coverage
 
@@ -101,58 +103,42 @@ tgvpn_go/
 | `internal/backup` | **81.4%** | ✅ Good |
 | `internal/database` | **79.2%** | ✅ Good |
 | `internal/utils` | **75.0%** | ✅ Good |
-| `cmd/bot` | **19.6%** | 🟡 Low (main is 0%) |
+| `cmd/bot` | **19.6%** | 🟡 Low (main is integration) |
 | **Overall** | **~80%** | ✅ Good |
 
 ---
 
-## Last Changes (This Session)
+## Last Changes (This Session - v2.0.1)
 
-### 1. Share Referral Handling (`internal/bot/commands.go`)
-- Added `handleShareStart()` for processing `t.me/rs8kvn_bot?start=share_{invite_code}`
-- Users with existing subscription see main menu (share code ignored)
-- New users: invite code cached for 60 minutes in `pendingInvites` map
-- On subscription creation: `referred_by` set from invite's `referrer_tg_id`
+### 1. Trial Subscription Duplication Fix (`internal/web/web.go`)
+- **Problem:** Refresh page = new trial subscription created
+- **Solution:** HttpOnly cookie `rs8kvn_trial_{code}` for 3 hours
+- **Effect:** Same user refresh = same trial, different users = different trials
 
-### 2. Subscription Expiry Changes (`internal/bot/subscription.go`, `internal/xui/client.go`)
-- Non-trial subscriptions: `expiryTime = 0` (no expiry), `reset = 30` (last day of month)
-- Added `getExpiryTimeMillis()` helper — returns 0 for `time.Time{}`
-- Removed `sub.IsExpired()` check from `handleCreateSubscription`
-- Removed expiry date from user-facing messages
+### 2. Dynamic Bot Username (`internal/bot/handler.go`)
+- **Problem:** Hardcoded `@rs8kvn_bot` in messages
+- **Solution:** `botUsername` field in Handler, populated from `botAPI.Self.UserName`
+- **Effect:** Works for any bot, no hardcoded usernames
 
-### 3. Bot Message Improvements
-- **Invite link message** — added emoji icons (🔗, 📱, 🌐, 📤, 💎), section headers
-- **Removed expiry mentions** — no "Сброс", "Истекает", "Истекшие" in messages
-- **Admin notification** — removed expiry date
-- **Admin stats** — removed "Истекшие" count
-- **Error messages for `/del`** — shortened (removed detailed error text)
+### 3. Database Methods
+- Added `GetTrialSubscriptionBySubID()` for trial lookup
+- Updated interfaces and mocks
 
-### 4. Test Improvements
-- Added 3 tests for `handleShareStart` (coverage: 0% → 100%)
-- Consolidated 11 `FirstSecondOfNextMonth` tests into 1 table-driven test (52% reduction)
-- Added 6 tests for `cmd/bot/main.go` (coverage: 10.8% → 19.6%)
-- Fixed `TestCircuitBreaker_HalfOpen_MaxAttempts`
-
-### 5. Configuration Validation (`internal/config/config.go`)
-- Added `XUI_SUB_PATH` validation: no `..` or `/`, only `a-zA-Z0-9_-`
-- Fixed 4 failing tests (changed `"/xui"` → `"xui"`)
-
-### 6. Documentation
-- Updated `doc/share-and-referral.md` — removed "Known Issues" and "Technical Details" sections
-- Updated `doc/HANDOVER.md` — this file
+### 4. Docker Image
+- Added `COPY internal/database/migrations` to Dockerfile
+- Migrations now embedded in image (no volume mount needed)
 
 ---
 
 ## Current Problem / Task
 
-**Status:** All tests passing (13/13 packages), coverage ~80%.
+**Status:** All tests passing, v2.0.1 ready.
 
 **Completed:**
-- ✅ Share referral handling with 60-minute cache
-- ✅ Subscription expiry set to 0 (no expiry) with monthly reset (day 30)
-- ✅ Removed expiry date mentions from all user-facing messages
-- ✅ Test coverage improved from ~51% to ~80%
-- ✅ Configuration validation for `XUI_SUB_PATH`
+- ✅ Trial duplication prevention via cookie
+- ✅ Dynamic bot username (no hardcoded values)
+- ✅ Docker migrations fix
+- ✅ Test coverage ~80%
 
 **Next Steps** (per `doc/PLAN.md`):
 - **Phase 1:** Expiry notifications (7, 3, 1 days before), retry with jitter, audit logging, orphan xui client cleanup
@@ -167,13 +153,14 @@ tgvpn_go/
 ### 3x-ui Integration
 - **Session:** 15-minute validity, auto re-login with exponential backoff
 - **Circuit breaker:** 5 failures → 30s open state
-- **Subscription reset:** `reset: 30` (last day of month), `expiryTime: 0` (no expiry)
+- **Subscription:** `reset: 30` (last day of month), `expiryTime: 0` (no expiry)
 - **Client email:** `trial_{subID}` for trial, `{username}` for regular
 
 ### Subscription Flow
 - **Trial:** `/i/{code}` → IP rate limit (3/hour) → xui client (1GB, 3h) → bind via `/start trial_{subID}`
 - **Regular:** `create_subscription` callback → xui client (100GB, no expiry, reset:30)
 - **Share referral:** `pendingInvites[chatID]` cached for 60 minutes, `referred_by` set on creation
+- **Trial cookie:** `rs8kvn_trial_{code}` prevents duplication for 3 hours
 
 ### Database
 - **Soft deletes:** `deleted_at` column used (GORM)
@@ -184,6 +171,7 @@ tgvpn_go/
 - **Required:** `XUI_USERNAME`, `XUI_PASSWORD` (NO defaults)
 - **Validation:** `XUI_SUB_PATH` — only `a-zA-Z0-9_-`, no `..` or `/`
 - **Web server:** Runs on `HEALTH_CHECK_PORT` (default 8880)
+- **Bot username:** Auto-populated from `botAPI.Self.UserName`
 
 ### Telegram Callbacks
 - `create_subscription`, `qr_code`, `back_to_subscription`, `menu_*`, `back_to_start`, `admin_*`, `share_invite`
@@ -192,6 +180,12 @@ tgvpn_go/
 - **No secrets in code:** `.env` only, `.env.example` provides template
 - **Rate limiting:** Token bucket (30 tokens, 5/sec) per user
 - **Input validation:** Markdown injection prevention, path traversal protection
+- **Graceful shutdown:** Waits for in-flight requests with 30s timeout
+
+### Docker
+- **Migrations:** Embedded in image via `COPY internal/database/migrations`
+- **No volume mount needed** for migrations
+- **Data volume:** `./data:/app/data` for persistence
 
 ---
 
@@ -214,9 +208,13 @@ gosec ./...
 
 # Run locally
 go run ./cmd/bot
+
+# Development with hot reload
+air
 ```
 
 ---
 
 **Generated:** 2026-03-31  
-**Session:** Share referral handling, expiry removal, test improvements
+**Session:** Trial duplication fix, dynamic bot username, Docker migrations  
+**Version:** v2.0.1
