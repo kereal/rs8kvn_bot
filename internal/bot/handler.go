@@ -205,7 +205,7 @@ func (h *Handler) sendInviteLink(ctx context.Context, chatID int64, messageID in
 		return
 	}
 
-	telegramLink := fmt.Sprintf("t.me/rs8vpn_bot?start=share_%s", invite.Code)
+	telegramLink := fmt.Sprintf("https://t.me/rs8kvn_bot?start=share_%s", invite.Code)
 	webLink := fmt.Sprintf("%s/i/%s", h.cfg.SiteURL, invite.Code)
 	text := fmt.Sprintf(`🔗 *Ваша пригласительная ссылка*
 
