@@ -252,7 +252,7 @@ func (h *Handler) sendInviteLink(ctx context.Context, chatID int64, messageID in
 [@%s](%s)
 _нажмите и держите → копировать_
 
-🌐 *Для пользователей без Telegram:*
+🌐 *Тем, кто не может войти в Tg:*
 [%s](%s)
 _нажмите и держите → копировать_
 

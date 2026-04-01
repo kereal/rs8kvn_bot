@@ -671,27 +671,6 @@ func TestHandleMySubscription_UsesCache(t *testing.T) {
 	assert.False(t, dbCalled, "Database should not be called when cache exists")
 }
 
-func TestHandleQRCode_NoSubscription(t *testing.T) {
-	cfg := &config.Config{
-		TelegramAdminID: 123456,
-		TrafficLimitGB:  100,
-	}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
-
-	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
-		return nil, gorm.ErrRecordNotFound
-	}
-
-	ctx := context.Background()
-	handler.handleQRCode(ctx, 123456, "testuser", 1)
-
-	assert.True(t, mockBot.SendCalled)
-	assert.Contains(t, mockBot.LastSentText, "нет активной подписки")
-}
-
 func TestHandleQRCode_Success(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
@@ -737,49 +716,6 @@ func TestHandleQRCode_DatabaseError(t *testing.T) {
 
 	assert.True(t, mockBot.SendCalled)
 	assert.Contains(t, mockBot.LastSentText, "нет активной подписки")
-}
-
-func TestHandleQRCode_QRGenerationError(t *testing.T) {
-	cfg := &config.Config{
-		TelegramAdminID: 123456,
-		TrafficLimitGB:  100,
-	}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
-
-	sub := &database.Subscription{
-		TelegramID:      123456,
-		Username:        "testuser",
-		SubscriptionURL: "", // Empty URL should cause QR generation to succeed but with empty QR
-	}
-
-	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
-		return sub, nil
-	}
-
-	ctx := context.Background()
-	handler.handleQRCode(ctx, 123456, "testuser", 1)
-
-	assert.True(t, mockBot.SendCalled)
-}
-
-func TestHandleBackToSubscription(t *testing.T) {
-	cfg := &config.Config{
-		TelegramAdminID: 123456,
-		TrafficLimitGB:  100,
-	}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
-
-	ctx := context.Background()
-	handler.handleBackToSubscription(ctx, 123456, "testuser", 100)
-
-	// Should request message deletion
-	assert.True(t, mockBot.RequestCalled)
 }
 
 func TestGetSubscriptionWithCache_CacheHit(t *testing.T) {
@@ -979,4 +915,422 @@ func TestHandleCreateSubscription_ZeroMessageID(t *testing.T) {
 	handler.handleCreateSubscription(ctx, 123456, "testuser", 0)
 
 	assert.True(t, mockBot.SendCalled)
+}
+
+func TestHandleQRCode_WithSubscription(t *testing.T) {
+	cfg := &config.Config{
+		TelegramAdminID: 123456,
+		TrafficLimitGB:  100,
+	}
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+
+	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
+		return &database.Subscription{
+			TelegramID:      telegramID,
+			Username:        "testuser",
+			SubscriptionURL: "vless://test@url:443?mode=vpn",
+			Status:          "active",
+		}, nil
+	}
+
+	ctx := context.Background()
+	handler.handleQRCode(ctx, 123456, "testuser", 100)
+
+	assert.True(t, mockBot.SendCalledSafe(), "Bot.Send should be called for QR photo")
+}
+
+func TestHandleQRCode_NoSubscription(t *testing.T) {
+	cfg := &config.Config{
+		TelegramAdminID: 123456,
+		TrafficLimitGB:  100,
+	}
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+
+	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
+		return nil, gorm.ErrRecordNotFound
+	}
+
+	ctx := context.Background()
+	handler.handleQRCode(ctx, 123456, "testuser", 100)
+
+	assert.True(t, mockBot.SendCalledSafe(), "Bot.Send should be called with error message")
+	assert.Contains(t, mockBot.LastSentTextSafe(), "нет активной подписки", "message should mention no subscription")
+}
+
+func TestHandleBackToSubscription(t *testing.T) {
+	cfg := &config.Config{
+		TelegramAdminID: 123456,
+		TrafficLimitGB:  100,
+	}
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+
+	ctx := context.Background()
+	handler.handleBackToSubscription(ctx, 123456, "testuser", 789)
+
+	assert.True(t, mockBot.RequestCalledSafe(), "Bot.Request should be called to delete message")
+	assert.False(t, mockBot.SendCalledSafe(), "Bot.Send should not be called")
+}
+
+func TestSendQRCode_Success(t *testing.T) {
+	cfg := &config.Config{
+		TelegramAdminID: 123456,
+		TrafficLimitGB:  100,
+	}
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+
+	ctx := context.Background()
+	handler.sendQRCode(ctx, 123456, 100, "https://example.com/sub", "Test caption")
+
+	assert.True(t, mockBot.SendCalledSafe(), "Bot.Send should be called for QR photo")
+}
+
+func TestNotifyAdmin_Success(t *testing.T) {
+	cfg := &config.Config{
+		TelegramAdminID: 123456,
+		TrafficLimitGB:  100,
+	}
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+
+	ctx := context.Background()
+	err := handler.notifyAdmin(ctx, "testuser", 789012, "https://sub.url", time.Now().Add(24*time.Hour))
+
+	assert.NoError(t, err)
+	assert.True(t, mockBot.SendCalledSafe(), "Bot.Send should be called to notify admin")
+	assert.Contains(t, mockBot.LastSentTextSafe(), "Новая подписка", "message should mention new subscription")
+}
+
+func TestNotifyAdmin_ZeroAdminID(t *testing.T) {
+	cfg := &config.Config{
+		TelegramAdminID: 0,
+		TrafficLimitGB:  100,
+	}
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+
+	ctx := context.Background()
+	err := handler.notifyAdmin(ctx, "testuser", 789012, "https://sub.url", time.Now())
+
+	assert.NoError(t, err)
+	assert.False(t, mockBot.SendCalledSafe(), "Bot.Send should not be called when admin ID is zero")
+}
+
+func TestNotifyAdminError(t *testing.T) {
+	cfg := &config.Config{
+		TelegramAdminID: 123456,
+		TrafficLimitGB:  100,
+	}
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+
+	ctx := context.Background()
+	handler.notifyAdminError(ctx, "⚠️ Test error message")
+
+	assert.True(t, mockBot.SendCalledSafe(), "Bot.Send should be called for error notification")
+	assert.Contains(t, mockBot.LastSentTextSafe(), "Test error message", "message should contain error text")
+}
+
+func TestNotifyAdminError_ZeroAdminID(t *testing.T) {
+	cfg := &config.Config{
+		TelegramAdminID: 0,
+		TrafficLimitGB:  100,
+	}
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+
+	ctx := context.Background()
+	handler.notifyAdminError(ctx, "⚠️ Test error")
+
+	assert.False(t, mockBot.SendCalledSafe(), "Bot.Send should not be called when admin ID is zero")
+}
+
+func TestClearAdminSendRateLimit(t *testing.T) {
+	cfg := &config.Config{
+		TelegramAdminID: 123456,
+		TrafficLimitGB:  100,
+	}
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+
+	chatID := int64(123456)
+	handler.ClearAdminSendRateLimit(chatID)
+
+	// Should not panic and rate limit should be cleared
+	assert.True(t, handler.checkAdminSendRateLimit(chatID), "Rate limit should allow send after clear")
+}
+
+func TestHandleCreateError_RollbackFailed(t *testing.T) {
+	cfg := &config.Config{
+		TelegramAdminID: 123456,
+		TrafficLimitGB:  100,
+		SiteURL:         "https://vpn.site",
+		XUIInboundID:    1,
+	}
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+
+	ctx := context.Background()
+	rollbackErr := errors.New("create subscription: database error (rollback failed: rollback failed)")
+	handler.handleCreateError(ctx, 123456, 100, "testuser", rollbackErr)
+
+	assert.True(t, mockBot.SendCalledSafe(), "Bot.Send should be called with error message")
+	assert.Contains(t, mockBot.LastSentTextSafe(), "Обратитесь к администратору", "message should mention contacting admin")
+	assert.True(t, mockBot.SendCountSafe() >= 2, "Should send error message and admin notification")
+}
+
+func TestHandleCreateError_ConnectionRefused(t *testing.T) {
+	cfg := &config.Config{
+		TelegramAdminID: 123456,
+		TrafficLimitGB:  100,
+		SiteURL:         "https://vpn.site",
+		XUIInboundID:    1,
+	}
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+
+	ctx := context.Background()
+	err := errors.New("xui add client: connection refused")
+	handler.handleCreateError(ctx, 123456, 100, "testuser", err)
+
+	assert.True(t, mockBot.SendCalledSafe())
+	assert.Contains(t, mockBot.LastSentTextSafe(), "Не удается подключиться", "message should mention connection issue")
+}
+
+func TestHandleCreateError_Authentication(t *testing.T) {
+	cfg := &config.Config{
+		TelegramAdminID: 123456,
+		TrafficLimitGB:  100,
+		SiteURL:         "https://vpn.site",
+		XUIInboundID:    1,
+	}
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+
+	ctx := context.Background()
+	err := errors.New("xui add client: unauthorized")
+	handler.handleCreateError(ctx, 123456, 100, "testuser", err)
+
+	assert.True(t, mockBot.SendCalledSafe())
+	assert.Contains(t, mockBot.LastSentTextSafe(), "авторизации", "message should mention auth error")
+}
+
+func TestNotifyAdmin_SendError(t *testing.T) {
+	cfg := &config.Config{
+		TelegramAdminID: 123456,
+		TrafficLimitGB:  100,
+	}
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewMockBotAPI()
+	mockBot.SendError = errors.New("send failed")
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+
+	ctx := context.Background()
+	err := handler.notifyAdmin(ctx, "testuser", 789012, "https://sub.url", time.Now())
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "notify admin")
+}
+
+func TestSendQRCode_QRGenerationError(t *testing.T) {
+	cfg := &config.Config{
+		TelegramAdminID: 123456,
+		TrafficLimitGB:  100,
+	}
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+
+	ctx := context.Background()
+	// Empty URL still generates valid QR (empty image), so test with valid URL
+	handler.sendQRCode(ctx, 123456, 100, "https://example.com/sub", "Test caption")
+
+	assert.True(t, mockBot.SendCalledSafe())
+}
+
+func TestHandleQRCode_NilSubscription(t *testing.T) {
+	cfg := &config.Config{
+		TelegramAdminID: 123456,
+		TrafficLimitGB:  100,
+	}
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+
+	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
+		return nil, nil
+	}
+
+	ctx := context.Background()
+	handler.handleQRCode(ctx, 123456, "testuser", 100)
+
+	assert.True(t, mockBot.SendCalledSafe())
+	assert.Contains(t, mockBot.LastSentTextSafe(), "нет активной подписки")
+}
+
+func TestCreateSubscription_WithPendingInvite(t *testing.T) {
+	cfg := &config.Config{
+		TelegramAdminID: 123456,
+		TrafficLimitGB:  100,
+		XUIInboundID:    1,
+		XUIHost:         "https://panel.example.com",
+		XUISubPath:      "/sub",
+	}
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+
+	clientConfig := &xui.ClientConfig{
+		ID:    "client-uuid-123",
+		SubID: "sub-id-456",
+	}
+
+	mockXUI.AddClientWithIDFunc = func(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
+		return clientConfig, nil
+	}
+
+	var savedSub *database.Subscription
+	mockDB.CreateSubscriptionFunc = func(ctx context.Context, sub *database.Subscription) error {
+		savedSub = sub
+		return nil
+	}
+
+	inviteCode := "ABC123"
+	handler.pendingMu.Lock()
+	handler.pendingInvites[123456] = pendingInvite{
+		code:      inviteCode,
+		expiresAt: time.Now().Add(60 * time.Minute),
+	}
+	handler.pendingMu.Unlock()
+
+	mockDB.GetInviteByCodeFunc = func(ctx context.Context, code string) (*database.Invite, error) {
+		return &database.Invite{
+			Code:         inviteCode,
+			ReferrerTGID: 999999,
+		}, nil
+	}
+
+	ctx := context.Background()
+	handler.createSubscription(ctx, 123456, "testuser", 1)
+
+	assert.Equal(t, int64(999999), savedSub.ReferredBy, "ReferredBy should be set from pending invite")
+
+	handler.pendingMu.Lock()
+	_, exists := handler.pendingInvites[123456]
+	handler.pendingMu.Unlock()
+	assert.False(t, exists, "Pending invite should be removed after use")
+}
+
+func TestCreateSubscription_WithExpiredPendingInvite(t *testing.T) {
+	cfg := &config.Config{
+		TelegramAdminID: 123456,
+		TrafficLimitGB:  100,
+		XUIInboundID:    1,
+		XUIHost:         "https://panel.example.com",
+		XUISubPath:      "/sub",
+	}
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+
+	clientConfig := &xui.ClientConfig{
+		ID:    "client-uuid-123",
+		SubID: "sub-id-456",
+	}
+
+	mockXUI.AddClientWithIDFunc = func(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
+		return clientConfig, nil
+	}
+
+	var savedSub *database.Subscription
+	mockDB.CreateSubscriptionFunc = func(ctx context.Context, sub *database.Subscription) error {
+		savedSub = sub
+		return nil
+	}
+
+	handler.pendingMu.Lock()
+	handler.pendingInvites[123456] = pendingInvite{
+		code:      "EXPIRED",
+		expiresAt: time.Now().Add(-60 * time.Minute),
+	}
+	handler.pendingMu.Unlock()
+
+	ctx := context.Background()
+	handler.createSubscription(ctx, 123456, "testuser", 1)
+
+	assert.Equal(t, int64(0), savedSub.ReferredBy, "ReferredBy should be zero for expired pending invite")
+}
+
+func TestHandleBackToInvite_RequestError(t *testing.T) {
+	cfg := &config.Config{
+		TelegramAdminID: 123456,
+		TrafficLimitGB:  100,
+	}
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+
+	mockBot.RequestError = errors.New("request failed")
+
+	ctx := context.Background()
+	handler.handleBackToInvite(ctx, 123456, "testuser", 1)
+
+	assert.True(t, mockBot.RequestCalledSafe(), "Bot.Request should be called")
+}
+
+func TestCreateSubscription_ShowLoadingMessageFails(t *testing.T) {
+	cfg := &config.Config{
+		TelegramAdminID: 123456,
+		TrafficLimitGB:  100,
+	}
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+
+	mockBot.SendError = errors.New("send failed")
+
+	xuiCalled := false
+	mockXUI.AddClientWithIDFunc = func(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
+		xuiCalled = true
+		return nil, nil
+	}
+
+	ctx := context.Background()
+	handler.createSubscription(ctx, 123456, "testuser", 1)
+
+	assert.False(t, xuiCalled, "XUI should not be called when loading message fails")
 }
