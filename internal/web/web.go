@@ -182,6 +182,11 @@ func (s *Server) writeJSON(w http.ResponseWriter, resp HealthResponse) {
 }
 
 func (s *Server) handleInvite(w http.ResponseWriter, r *http.Request) {
+	s.HandleInvite(w, r)
+}
+
+// HandleInvite is the exported version of handleInvite for E2E testing.
+func (s *Server) HandleInvite(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", "GET")
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
