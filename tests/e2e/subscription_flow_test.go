@@ -2251,3 +2251,106 @@ func TestE2E_SendCommand_SendFails(t *testing.T) {
 	assert.True(t, env.botAPI.SendCalled)
 	assert.Contains(t, env.botAPI.LastSentText, "Ошибка отправки")
 }
+
+// ==================== Missing Callback E2E Tests ====================
+
+func TestE2E_Callback_ShareInvite(t *testing.T) {
+	env := setupE2EEnv(t)
+	defer env.db.Close()
+
+	ctx := context.Background()
+
+	resetMockBotAPI(env.botAPI)
+
+	env.handler.HandleCallback(ctx, tgbotapi.Update{
+		CallbackQuery: &tgbotapi.CallbackQuery{
+			From: &tgbotapi.User{
+				ID:       env.chatID,
+				UserName: env.username,
+			},
+			Data: "share_invite",
+			Message: &tgbotapi.Message{
+				Chat:      &tgbotapi.Chat{ID: env.chatID},
+				MessageID: 100,
+			},
+		},
+	})
+
+	assert.True(t, env.botAPI.SendCalled, "Invite link should be sent")
+	assert.Contains(t, env.botAPI.LastSentText, "t.me", "Should contain Telegram invite link")
+}
+
+func TestE2E_Callback_QRTelegram(t *testing.T) {
+	env := setupE2EEnv(t)
+	defer env.db.Close()
+
+	ctx := context.Background()
+
+	resetMockBotAPI(env.botAPI)
+
+	env.handler.HandleCallback(ctx, tgbotapi.Update{
+		CallbackQuery: &tgbotapi.CallbackQuery{
+			From: &tgbotapi.User{
+				ID:       env.chatID,
+				UserName: env.username,
+			},
+			Data: "qr_telegram",
+			Message: &tgbotapi.Message{
+				Chat:      &tgbotapi.Chat{ID: env.chatID},
+				MessageID: 100,
+			},
+		},
+	})
+
+	assert.True(t, env.botAPI.SendCalled, "QR code for Telegram link should be sent")
+}
+
+func TestE2E_Callback_QRWeb(t *testing.T) {
+	env := setupE2EEnv(t)
+	defer env.db.Close()
+
+	ctx := context.Background()
+
+	resetMockBotAPI(env.botAPI)
+
+	env.handler.HandleCallback(ctx, tgbotapi.Update{
+		CallbackQuery: &tgbotapi.CallbackQuery{
+			From: &tgbotapi.User{
+				ID:       env.chatID,
+				UserName: env.username,
+			},
+			Data: "qr_web",
+			Message: &tgbotapi.Message{
+				Chat:      &tgbotapi.Chat{ID: env.chatID},
+				MessageID: 100,
+			},
+		},
+	})
+
+	assert.True(t, env.botAPI.SendCalled, "QR code for web link should be sent")
+}
+
+func TestE2E_Callback_BackToInvite(t *testing.T) {
+	env := setupE2EEnv(t)
+	defer env.db.Close()
+
+	ctx := context.Background()
+
+	resetMockBotAPI(env.botAPI)
+
+	env.handler.HandleCallback(ctx, tgbotapi.Update{
+		CallbackQuery: &tgbotapi.CallbackQuery{
+			From: &tgbotapi.User{
+				ID:       env.chatID,
+				UserName: env.username,
+			},
+			Data: "back_to_invite",
+			Message: &tgbotapi.Message{
+				Chat:      &tgbotapi.Chat{ID: env.chatID},
+				MessageID: 100,
+			},
+		},
+	})
+
+	_ = env.botAPI.LastSentText
+}
