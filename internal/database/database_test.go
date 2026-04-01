@@ -3084,3 +3084,66 @@ func TestRunMigrationsWithDBAndDir_ConcurrentAccess(t *testing.T) {
 	// Table may or may not exist depending on which migration won the race
 	t.Logf("Table exists after concurrent migrations: %v", tableExists > 0)
 }
+
+// ==================== Additional Query Edge Cases ====================
+
+func TestService_GetByUsername_NotFound(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	service, err := NewService(dbPath)
+	require.NoError(t, err)
+	defer service.Close()
+
+	ctx := context.Background()
+
+	id, err := service.GetTelegramIDByUsername(ctx, "nonexistent_user_12345")
+	assert.Error(t, err, "GetTelegramIDByUsername should error for non-existent user")
+	assert.Equal(t, int64(0), id, "Should return 0 for non-existent user")
+}
+
+func TestService_CountTrialRequestsAtLimit(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	service, err := NewService(dbPath)
+	require.NoError(t, err)
+	defer service.Close()
+
+	ctx := context.Background()
+	ip := "192.168.1.100"
+
+	for i := 0; i < 3; i++ {
+		err := service.CreateTrialRequest(ctx, ip)
+		require.NoError(t, err, "CreateTrialRequest() error")
+	}
+
+	count, err := service.CountTrialRequestsByIPLastHour(ctx, ip)
+	require.NoError(t, err, "CountTrialRequestsByIPLastHour() error")
+	assert.Equal(t, 3, count, "Should be at rate limit")
+}
+
+func TestService_CountTrialRequests_MultipleIPs(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	service, err := NewService(dbPath)
+	require.NoError(t, err)
+	defer service.Close()
+
+	ctx := context.Background()
+
+	for i := 0; i < 2; i++ {
+		ip := fmt.Sprintf("192.168.1.%d", i)
+		err := service.CreateTrialRequest(ctx, ip)
+		require.NoError(t, err, "CreateTrialRequest() error")
+	}
+
+	count1, err := service.CountTrialRequestsByIPLastHour(ctx, "192.168.1.0")
+	require.NoError(t, err)
+	assert.Equal(t, 1, count1, "IP 1 should have 1 request")
+
+	count2, err := service.CountTrialRequestsByIPLastHour(ctx, "192.168.1.1")
+	require.NoError(t, err)
+	assert.Equal(t, 1, count2, "IP 2 should have 1 request")
+}
