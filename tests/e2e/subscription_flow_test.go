@@ -1793,3 +1793,461 @@ func TestE2E_Service_Create_RollbackFailure_ReturnsError(t *testing.T) {
 	_, err = env.subService.Create(ctx, env.chatID, env.username)
 	require.NoError(t, err, "Second creation should succeed (rollback not triggered when DB succeeds)")
 }
+
+// ==================== Admin Command E2E Tests ====================
+
+func TestE2E_DelCommand_Success(t *testing.T) {
+	env := setupE2EEnv(t)
+	defer env.db.Close()
+
+	ctx := context.Background()
+	adminID := env.cfg.TelegramAdminID
+
+	// Create a subscription first
+	_, err := env.subService.Create(ctx, env.chatID, env.username)
+	require.NoError(t, err)
+
+	sub, err := env.db.GetByTelegramID(ctx, env.chatID)
+	require.NoError(t, err)
+	subID := sub.ID
+
+	// Reset mock to capture messages
+	resetMockBotAPI(env.botAPI)
+
+	// Call HandleDel as admin
+	update := tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat: &tgbotapi.Chat{ID: adminID},
+			From: &tgbotapi.User{
+				ID:       adminID,
+				UserName: "admin",
+			},
+			Text: fmt.Sprintf("/del %d", subID),
+			Entities: []tgbotapi.MessageEntity{
+				{Type: "bot_command", Offset: 0, Length: 4},
+			},
+		},
+	}
+	env.handler.HandleDel(ctx, update)
+
+	// Verify success message
+	assert.True(t, env.botAPI.SendCalled)
+	assert.Contains(t, env.botAPI.LastSentText, "Подписка успешно удалена")
+	assert.Contains(t, env.botAPI.LastSentText, fmt.Sprintf("%d", subID))
+
+	// Verify subscription deleted from DB
+	_, err = env.db.GetByID(ctx, subID)
+	assert.Error(t, err, "Subscription should be deleted")
+
+	// Verify XUI DeleteClient was called
+	assert.True(t, env.xui.DeleteClientCalled)
+}
+
+func TestE2E_DelCommand_NoArgs(t *testing.T) {
+	env := setupE2EEnv(t)
+	defer env.db.Close()
+
+	ctx := context.Background()
+	adminID := env.cfg.TelegramAdminID
+	resetMockBotAPI(env.botAPI)
+
+	update := tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat: &tgbotapi.Chat{ID: adminID},
+			From: &tgbotapi.User{
+				ID:       adminID,
+				UserName: "admin",
+			},
+			Text:     "/del",
+			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 4}},
+		},
+	}
+	env.handler.HandleDel(ctx, update)
+
+	assert.True(t, env.botAPI.SendCalled)
+	assert.Contains(t, env.botAPI.LastSentText, "Использование: /del")
+}
+
+func TestE2E_DelCommand_InvalidID(t *testing.T) {
+	env := setupE2EEnv(t)
+	defer env.db.Close()
+
+	ctx := context.Background()
+	adminID := env.cfg.TelegramAdminID
+	resetMockBotAPI(env.botAPI)
+
+	update := tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat: &tgbotapi.Chat{ID: adminID},
+			From: &tgbotapi.User{
+				ID:       adminID,
+				UserName: "admin",
+			},
+			Text:     "/del not-a-number",
+			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 4}},
+		},
+	}
+	env.handler.HandleDel(ctx, update)
+
+	assert.True(t, env.botAPI.SendCalled)
+	assert.Contains(t, env.botAPI.LastSentText, "Неверный формат ID")
+}
+
+func TestE2E_DelCommand_NegativeID(t *testing.T) {
+	env := setupE2EEnv(t)
+	defer env.db.Close()
+
+	ctx := context.Background()
+	adminID := env.cfg.TelegramAdminID
+	resetMockBotAPI(env.botAPI)
+
+	update := tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat: &tgbotapi.Chat{ID: adminID},
+			From: &tgbotapi.User{
+				ID:       adminID,
+				UserName: "admin",
+			},
+			Text:     "/del -1",
+			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 4}},
+		},
+	}
+	env.handler.HandleDel(ctx, update)
+
+	assert.True(t, env.botAPI.SendCalled)
+	assert.Contains(t, env.botAPI.LastSentText, "положительным числом")
+}
+
+func TestE2E_DelCommand_NotFound(t *testing.T) {
+	env := setupE2EEnv(t)
+	defer env.db.Close()
+
+	ctx := context.Background()
+	adminID := env.cfg.TelegramAdminID
+	resetMockBotAPI(env.botAPI)
+
+	update := tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat: &tgbotapi.Chat{ID: adminID},
+			From: &tgbotapi.User{
+				ID:       adminID,
+				UserName: "admin",
+			},
+			Text:     "/del 99999",
+			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 4}},
+		},
+	}
+	env.handler.HandleDel(ctx, update)
+
+	assert.True(t, env.botAPI.SendCalled)
+	assert.Contains(t, env.botAPI.LastSentText, "не найдена")
+}
+
+func TestE2E_DelCommand_XUIFailure(t *testing.T) {
+	env := setupE2EEnv(t)
+	defer env.db.Close()
+
+	ctx := context.Background()
+	adminID := env.cfg.TelegramAdminID
+
+	// Create subscription
+	_, err := env.subService.Create(ctx, env.chatID, env.username)
+	require.NoError(t, err)
+
+	sub, err := env.db.GetByTelegramID(ctx, env.chatID)
+	require.NoError(t, err)
+
+	// Make XUI fail
+	env.xui.DeleteClientFunc = func(ctx context.Context, inboundID int, clientID string) error {
+		return fmt.Errorf("xui delete: connection refused")
+	}
+
+	resetMockBotAPI(env.botAPI)
+
+	update := tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat: &tgbotapi.Chat{ID: adminID},
+			From: &tgbotapi.User{
+				ID:       adminID,
+				UserName: "admin",
+			},
+			Text:     fmt.Sprintf("/del %d", sub.ID),
+			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 4}},
+		},
+	}
+	env.handler.HandleDel(ctx, update)
+
+	assert.True(t, env.botAPI.SendCalled)
+	assert.Contains(t, env.botAPI.LastSentText, "Ошибка удаления клиента")
+
+	// Subscription should still exist in DB (XUI failed first)
+	_, err = env.db.GetByID(ctx, sub.ID)
+	assert.NoError(t, err, "Subscription should still exist after XUI failure")
+}
+
+func TestE2E_BroadcastCommand_Success(t *testing.T) {
+	env := setupE2EEnv(t)
+	defer env.db.Close()
+
+	ctx := context.Background()
+	adminID := env.cfg.TelegramAdminID
+
+	// Create multiple subscriptions
+	for i := 0; i < 3; i++ {
+		chatID := int64(300000 + i)
+		_, err := env.subService.Create(ctx, chatID, fmt.Sprintf("user%d", i))
+		require.NoError(t, err)
+	}
+
+	resetMockBotAPI(env.botAPI)
+
+	update := tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat: &tgbotapi.Chat{ID: adminID},
+			From: &tgbotapi.User{
+				ID:       adminID,
+				UserName: "admin",
+			},
+			Text:     "/broadcast Hello everyone!",
+			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 10}},
+		},
+	}
+	env.handler.HandleBroadcast(ctx, update)
+
+	// Should have sent messages to all users + admin notification
+	assert.True(t, env.botAPI.SendCalled)
+	assert.GreaterOrEqual(t, env.botAPI.SendCount, 3, "Should send to at least 3 users")
+
+	// Check final report
+	assert.Contains(t, env.botAPI.LastSentText, "Рассылка завершена")
+}
+
+func TestE2E_BroadcastCommand_NoArgs(t *testing.T) {
+	env := setupE2EEnv(t)
+	defer env.db.Close()
+
+	ctx := context.Background()
+	adminID := env.cfg.TelegramAdminID
+	resetMockBotAPI(env.botAPI)
+
+	update := tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat: &tgbotapi.Chat{ID: adminID},
+			From: &tgbotapi.User{
+				ID:       adminID,
+				UserName: "admin",
+			},
+			Text:     "/broadcast",
+			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 10}},
+		},
+	}
+	env.handler.HandleBroadcast(ctx, update)
+
+	assert.True(t, env.botAPI.SendCalled)
+	assert.Contains(t, env.botAPI.LastSentText, "Использование: /broadcast")
+}
+
+func TestE2E_BroadcastCommand_NoUsers(t *testing.T) {
+	env := setupE2EEnv(t)
+	defer env.db.Close()
+
+	ctx := context.Background()
+	adminID := env.cfg.TelegramAdminID
+	resetMockBotAPI(env.botAPI)
+
+	update := tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat: &tgbotapi.Chat{ID: adminID},
+			From: &tgbotapi.User{
+				ID:       adminID,
+				UserName: "admin",
+			},
+			Text:     "/broadcast Hello",
+			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 10}},
+		},
+	}
+	env.handler.HandleBroadcast(ctx, update)
+
+	assert.True(t, env.botAPI.SendCalled)
+	assert.Contains(t, env.botAPI.LastSentText, "Нет пользователей")
+}
+
+func TestE2E_BroadcastCommand_SomeFailures(t *testing.T) {
+	env := setupE2EEnv(t)
+	defer env.db.Close()
+
+	ctx := context.Background()
+	adminID := env.cfg.TelegramAdminID
+
+	// Create subscriptions
+	for i := 0; i < 3; i++ {
+		chatID := int64(400000 + i)
+		_, err := env.subService.Create(ctx, chatID, fmt.Sprintf("user%d", i))
+		require.NoError(t, err)
+	}
+
+	// Set SendError to make all sends fail
+	resetMockBotAPI(env.botAPI)
+	env.botAPI.SendError = fmt.Errorf("send failed")
+
+	update := tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat: &tgbotapi.Chat{ID: adminID},
+			From: &tgbotapi.User{
+				ID:       adminID,
+				UserName: "admin",
+			},
+			Text:     "/broadcast Test broadcast",
+			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 10}},
+		},
+	}
+	env.handler.HandleBroadcast(ctx, update)
+
+	assert.True(t, env.botAPI.SendCalled)
+	assert.Contains(t, env.botAPI.LastSentText, "Рассылка завершена")
+	assert.Contains(t, env.botAPI.LastSentText, "Ошибок: 3")
+}
+
+func TestE2E_SendCommand_ByTelegramID(t *testing.T) {
+	env := setupE2EEnv(t)
+	defer env.db.Close()
+
+	ctx := context.Background()
+	adminID := env.cfg.TelegramAdminID
+
+	// Create a subscription for target user
+	targetID := int64(500001)
+	_, err := env.subService.Create(ctx, targetID, "targetuser")
+	require.NoError(t, err)
+
+	resetMockBotAPI(env.botAPI)
+
+	update := tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat: &tgbotapi.Chat{ID: adminID},
+			From: &tgbotapi.User{
+				ID:       adminID,
+				UserName: "admin",
+			},
+			Text:     fmt.Sprintf("/send %d Hello there!", targetID),
+			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 5}},
+		},
+	}
+	env.handler.HandleSend(ctx, update)
+
+	assert.True(t, env.botAPI.SendCalled)
+	assert.Contains(t, env.botAPI.LastSentText, "Сообщение отправлено")
+	assert.Contains(t, env.botAPI.LastSentText, fmt.Sprintf("%d", targetID))
+}
+
+func TestE2E_SendCommand_ByUsername(t *testing.T) {
+	env := setupE2EEnv(t)
+	defer env.db.Close()
+
+	ctx := context.Background()
+	adminID := env.cfg.TelegramAdminID
+
+	// Create subscription
+	_, err := env.subService.Create(ctx, env.chatID, env.username)
+	require.NoError(t, err)
+
+	resetMockBotAPI(env.botAPI)
+
+	update := tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat: &tgbotapi.Chat{ID: adminID},
+			From: &tgbotapi.User{
+				ID:       adminID,
+				UserName: "admin",
+			},
+			Text:     fmt.Sprintf("/send %s Hello via username!", env.username),
+			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 5}},
+		},
+	}
+	env.handler.HandleSend(ctx, update)
+
+	assert.True(t, env.botAPI.SendCalled)
+	assert.Contains(t, env.botAPI.LastSentText, "Сообщение отправлено")
+}
+
+func TestE2E_SendCommand_UserNotFound(t *testing.T) {
+	env := setupE2EEnv(t)
+	defer env.db.Close()
+
+	ctx := context.Background()
+	adminID := env.cfg.TelegramAdminID
+	resetMockBotAPI(env.botAPI)
+
+	update := tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat: &tgbotapi.Chat{ID: adminID},
+			From: &tgbotapi.User{
+				ID:       adminID,
+				UserName: "admin",
+			},
+			Text:     "/send nonexistent_user Hello!",
+			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 5}},
+		},
+	}
+	env.handler.HandleSend(ctx, update)
+
+	assert.True(t, env.botAPI.SendCalled)
+	assert.Contains(t, env.botAPI.LastSentText, "не найден в базе")
+}
+
+func TestE2E_SendCommand_NoArgs(t *testing.T) {
+	env := setupE2EEnv(t)
+	defer env.db.Close()
+
+	ctx := context.Background()
+	adminID := env.cfg.TelegramAdminID
+	resetMockBotAPI(env.botAPI)
+
+	update := tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat: &tgbotapi.Chat{ID: adminID},
+			From: &tgbotapi.User{
+				ID:       adminID,
+				UserName: "admin",
+			},
+			Text:     "/send",
+			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 5}},
+		},
+	}
+	env.handler.HandleSend(ctx, update)
+
+	assert.True(t, env.botAPI.SendCalled)
+	assert.Contains(t, env.botAPI.LastSentText, "Использование: /send")
+}
+
+func TestE2E_SendCommand_SendFails(t *testing.T) {
+	env := setupE2EEnv(t)
+	defer env.db.Close()
+
+	ctx := context.Background()
+	adminID := env.cfg.TelegramAdminID
+
+	// Create subscription
+	_, err := env.subService.Create(ctx, env.chatID, env.username)
+	require.NoError(t, err)
+
+	// Make send fail
+	resetMockBotAPI(env.botAPI)
+	env.botAPI.SendError = fmt.Errorf("send error")
+
+	update := tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat: &tgbotapi.Chat{ID: adminID},
+			From: &tgbotapi.User{
+				ID:       adminID,
+				UserName: "admin",
+			},
+			Text:     fmt.Sprintf("/send %d Hello!", env.chatID),
+			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 5}},
+		},
+	}
+	env.handler.HandleSend(ctx, update)
+
+	assert.True(t, env.botAPI.SendCalled)
+	assert.Contains(t, env.botAPI.LastSentText, "Ошибка отправки")
+}
