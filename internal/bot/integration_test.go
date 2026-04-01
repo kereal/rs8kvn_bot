@@ -5,9 +5,13 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"rs8kvn_bot/internal/config"
 	"rs8kvn_bot/internal/database"
 	"rs8kvn_bot/internal/testutil"
@@ -15,9 +19,9 @@ import (
 	"rs8kvn_bot/internal/xui"
 )
 
-type TestFixture struct {
+type IntegrationTestFixture struct {
 	DB          *database.Service
-	XUIServer   *httptest.Server
+	XUIServer   *MockXUIServer
 	XUIClient   *xui.Client
 	Handler     *Handler
 	Cfg         *config.Config
@@ -25,59 +29,6 @@ type TestFixture struct {
 	Cancel      context.CancelFunc
 	AdminChatID int64
 	UserChatID  int64
-}
-
-func NewTestFixture(t *testing.T) *TestFixture {
-	t.Helper()
-
-	ctx, cancel := context.WithCancel(context.Background())
-
-	dbService, err := database.NewService(":memory:")
-	if err != nil {
-		t.Fatalf("Failed to create in-memory database: %v", err)
-	}
-
-	cfg := &config.Config{
-		TrafficLimitGB:   100,
-		XUIHost:          "http://localhost:2053",
-		XUIInboundID:     1,
-		XUISubPath:       "sub",
-		XUIUsername:      "admin",
-		XUIPassword:      "password",
-		TelegramAdminID:  123456789,
-		TelegramBotToken: "test_token",
-		LogFilePath:      "/dev/null",
-		LogLevel:         "error",
-		DatabasePath:     ":memory:",
-	}
-
-	xuiClient, err := xui.NewClient(cfg.XUIHost, cfg.XUIUsername, cfg.XUIPassword)
-	if err != nil {
-		t.Fatalf("Failed to create XUI client: %v", err)
-	}
-
-	handler := NewHandler(testutil.NewMockBotAPI(), cfg, dbService, xuiClient, NewTestBotConfig())
-
-	return &TestFixture{
-		DB:          dbService,
-		XUIClient:   xuiClient,
-		Handler:     handler,
-		Cfg:         cfg,
-		Ctx:         ctx,
-		Cancel:      cancel,
-		AdminChatID: 123456789,
-		UserChatID:  987654321,
-	}
-}
-
-func (f *TestFixture) Close() {
-	f.Cancel()
-	if f.DB != nil {
-		_ = f.DB.Close()
-	}
-	if f.XUIServer != nil {
-		f.XUIServer.Close()
-	}
 }
 
 type MockXUIServer struct {
@@ -110,49 +61,44 @@ func NewMockXUIServer(t *testing.T) *MockXUIServer {
 
 	mux.HandleFunc("/login", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]bool{"success": true})
+		json.NewEncoder(w).Encode(map[string]any{"success": true})
 	})
 
 	mux.HandleFunc("/panel/api/inbounds/addClient", func(w http.ResponseWriter, r *http.Request) {
 		if mock.AddClientErr != nil {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"success": false,
 				"msg":     mock.AddClientErr.Error(),
 			})
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		json.NewEncoder(w).Encode(map[string]any{
 			"success": true,
-			"msg":     "ok",
+			"obj":     map[string]any{"id": "test-client-id"},
 		})
 	})
 
-	mux.HandleFunc("/panel/api/inbounds/", func(w http.ResponseWriter, r *http.Request) {
-		path := r.URL.Path
+	mux.HandleFunc("/panel/api/inbounds/getClientTraffics/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"success": true,
+			"obj":     mock.TrafficResp,
+		})
+	})
 
-		if path == "/panel/api/inbounds/getClientTraffics/testuser" {
+	mux.HandleFunc("/panel/api/inbounds/delClient/", func(w http.ResponseWriter, r *http.Request) {
+		if mock.DeleteErr != nil {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"success": true,
-				"obj":     mock.TrafficResp,
+			json.NewEncoder(w).Encode(map[string]any{
+				"success": false,
+				"msg":     mock.DeleteErr.Error(),
 			})
 			return
 		}
-
-		if r.Method == "POST" && contains(path, "delClient") {
-			if mock.DeleteErr != nil {
-				w.Header().Set("Content-Type", "application/json")
-				json.NewEncoder(w).Encode(map[string]interface{}{
-					"success": false,
-					"msg":     mock.DeleteErr.Error(),
-				})
-				return
-			}
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]bool{"success": true})
-		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"success": true})
 	})
 
 	return mock
@@ -163,23 +109,10 @@ func (m *MockXUIServer) Close() {
 }
 
 func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (len(s) == 0 ||
-		(len(s) > 0 && (s[:len(substr)] == substr || contains(s[1:], substr))))
+	return strings.Contains(s, substr)
 }
 
-type IntegrationTestFixture struct {
-	DB          *database.Service
-	XUIServer   *MockXUIServer
-	XUIClient   *xui.Client
-	Handler     *Handler
-	Cfg         *config.Config
-	Ctx         context.Context
-	Cancel      context.CancelFunc
-	AdminChatID int64
-	UserChatID  int64
-}
-
-func NewIntegrationTestFixture(t *testing.T) *IntegrationTestFixture {
+func NewTestFixture(t *testing.T) *IntegrationTestFixture {
 	t.Helper()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -254,7 +187,7 @@ func CreateTestSubscriptionInDB(t *testing.T, db *database.Service, chatID int64
 }
 
 func TestSubscriptionFlow_CreateAndGet(t *testing.T) {
-	f := NewIntegrationTestFixture(t)
+	f := NewTestFixture(t)
 	defer f.Close()
 
 	ctx := context.Background()
@@ -281,7 +214,7 @@ func TestSubscriptionFlow_CreateAndGet(t *testing.T) {
 }
 
 func TestSubscriptionFlow_ExpiredSubscription(t *testing.T) {
-	f := NewIntegrationTestFixture(t)
+	f := NewTestFixture(t)
 	defer f.Close()
 
 	ctx := context.Background()
@@ -303,7 +236,7 @@ func TestSubscriptionFlow_ExpiredSubscription(t *testing.T) {
 }
 
 func TestSubscriptionFlow_RevokeOldSubscription(t *testing.T) {
-	f := NewIntegrationTestFixture(t)
+	f := NewTestFixture(t)
 	defer f.Close()
 
 	ctx := context.Background()
@@ -343,7 +276,7 @@ func TestSubscriptionFlow_RevokeOldSubscription(t *testing.T) {
 }
 
 func TestAdminStats(t *testing.T) {
-	f := NewIntegrationTestFixture(t)
+	f := NewTestFixture(t)
 	defer f.Close()
 
 	ctx := context.Background()
@@ -372,7 +305,7 @@ func TestAdminStats(t *testing.T) {
 }
 
 func TestDatabaseService_GetAllTelegramIDs(t *testing.T) {
-	f := NewIntegrationTestFixture(t)
+	f := NewTestFixture(t)
 	defer f.Close()
 
 	ctx := context.Background()
@@ -392,7 +325,7 @@ func TestDatabaseService_GetAllTelegramIDs(t *testing.T) {
 }
 
 func TestDatabaseService_GetByUsername(t *testing.T) {
-	f := NewIntegrationTestFixture(t)
+	f := NewTestFixture(t)
 	defer f.Close()
 
 	ctx := context.Background()
@@ -412,4 +345,151 @@ func TestDatabaseService_GetByUsername(t *testing.T) {
 	if err == nil {
 		t.Error("Expected error for nonexistent username")
 	}
+}
+
+func TestHandler_GetMainMenuContent_Admin(t *testing.T) {
+	f := NewTestFixture(t)
+	defer f.Close()
+
+	text, keyboard := f.Handler.getMainMenuContent("testuser", true, f.AdminChatID)
+
+	assert.Contains(t, text, "testuser")
+	assert.NotEmpty(t, keyboard.InlineKeyboard)
+}
+
+func TestHandler_GetMainMenuContent_User(t *testing.T) {
+	f := NewTestFixture(t)
+	defer f.Close()
+
+	text, keyboard := f.Handler.getMainMenuContent("testuser", false, f.UserChatID)
+
+	assert.Contains(t, text, "testuser")
+	assert.NotEmpty(t, keyboard.InlineKeyboard)
+}
+
+func TestHandler_GetDonateText(t *testing.T) {
+	f := NewTestFixture(t)
+	defer f.Close()
+
+	text := f.Handler.getDonateText()
+	assert.NotEmpty(t, text)
+}
+
+func TestHandler_GetHelpText(t *testing.T) {
+	f := NewTestFixture(t)
+	defer f.Close()
+
+	text := f.Handler.getHelpText(100, "https://example.com/sub")
+	assert.Contains(t, text, "100")
+	assert.Contains(t, text, "Happ")
+}
+
+func TestHandler_GetUsername(t *testing.T) {
+	f := NewTestFixture(t)
+	defer f.Close()
+
+	tests := []struct {
+		name string
+		user *tgbotapi.User
+		want string
+	}{
+		{"with username", &tgbotapi.User{UserName: "testuser"}, "testuser"},
+		{"first name only", &tgbotapi.User{FirstName: "Test"}, "Test"},
+		{"both username and first", &tgbotapi.User{UserName: "testuser", FirstName: "Test"}, "testuser"},
+		{"empty user", &tgbotapi.User{ID: 0}, "user_0"},
+		{"nil user", nil, "unknown"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := f.Handler.getUsername(tc.user)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestMockXUIServer_Endpoints(t *testing.T) {
+	mock := NewMockXUIServer(t)
+	defer mock.Close()
+
+	t.Run("login", func(t *testing.T) {
+		resp, err := http.Get(mock.Server.URL + "/login")
+		require.NoError(t, err)
+		defer resp.Body.Close()
+
+		var result map[string]any
+		err = json.NewDecoder(resp.Body).Decode(&result)
+		require.NoError(t, err)
+		assert.True(t, result["success"].(bool))
+	})
+
+	t.Run("addClient", func(t *testing.T) {
+		resp, err := http.Post(mock.Server.URL+"/panel/api/inbounds/addClient", "application/json", nil)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+
+		var result map[string]any
+		err = json.NewDecoder(resp.Body).Decode(&result)
+		require.NoError(t, err)
+		assert.True(t, result["success"].(bool))
+	})
+
+	t.Run("getClientTraffics", func(t *testing.T) {
+		resp, err := http.Get(mock.Server.URL + "/panel/api/inbounds/getClientTraffics/testuser")
+		require.NoError(t, err)
+		defer resp.Body.Close()
+
+		var result map[string]any
+		err = json.NewDecoder(resp.Body).Decode(&result)
+		require.NoError(t, err)
+		assert.True(t, result["success"].(bool))
+
+		obj := result["obj"].(map[string]any)
+		assert.Equal(t, float64(1024*1024*100), obj["up"])
+		assert.Equal(t, float64(1024*1024*200), obj["down"])
+	})
+
+	t.Run("delClient", func(t *testing.T) {
+		resp, err := http.Post(mock.Server.URL+"/panel/api/inbounds/delClient/test-id", "application/json", nil)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+
+		var result map[string]any
+		err = json.NewDecoder(resp.Body).Decode(&result)
+		require.NoError(t, err)
+		assert.True(t, result["success"].(bool))
+	})
+}
+
+func TestMockXUIServer_ErrorResponses(t *testing.T) {
+	mock := NewMockXUIServer(t)
+	defer mock.Close()
+
+	t.Run("addClient error", func(t *testing.T) {
+		mock.AddClientErr = assert.AnError
+
+		resp, err := http.Post(mock.Server.URL+"/panel/api/inbounds/addClient", "application/json", nil)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+
+		var result map[string]any
+		err = json.NewDecoder(resp.Body).Decode(&result)
+		require.NoError(t, err)
+		assert.False(t, result["success"].(bool))
+		assert.Equal(t, assert.AnError.Error(), result["msg"])
+	})
+
+	t.Run("delClient error", func(t *testing.T) {
+		mock.DeleteErr = assert.AnError
+
+		resp, err := http.Post(mock.Server.URL+"/panel/api/inbounds/delClient/test-id", "application/json", nil)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+
+		var result map[string]any
+		err = json.NewDecoder(resp.Body).Decode(&result)
+		require.NoError(t, err)
+		assert.False(t, result["success"].(bool))
+		assert.Equal(t, assert.AnError.Error(), result["msg"])
+	})
 }

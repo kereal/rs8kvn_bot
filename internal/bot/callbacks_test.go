@@ -871,10 +871,13 @@ func TestHandleCallback_UnknownCallback(t *testing.T) {
 	ctx := context.Background()
 	update := tgbotapi.Update{
 		CallbackQuery: &tgbotapi.CallbackQuery{
-			ID:      "test-callback-id",
-			Data:    "unknown_callback",
-			From:    &tgbotapi.User{ID: 123456, UserName: "testuser"},
-			Message: &tgbotapi.Message{Chat: &tgbotapi.Chat{ID: 123456}, MessageID: 789},
+			ID:   "test-callback-id",
+			Data: "unknown_callback_data",
+			From: &tgbotapi.User{ID: 123456, UserName: "testuser"},
+			Message: &tgbotapi.Message{
+				Chat:      &tgbotapi.Chat{ID: 123456},
+				MessageID: 1,
+			},
 		},
 	}
 
@@ -882,4 +885,191 @@ func TestHandleCallback_UnknownCallback(t *testing.T) {
 
 	assert.True(t, mockBot.RequestCalledSafe(), "Bot.Request should be called to answer callback")
 	assert.False(t, mockBot.SendCalledSafe(), "Bot.Send should not be called for unknown callback")
+}
+
+func TestGenerateInviteLink_UnknownType(t *testing.T) {
+	cfg := &config.Config{TelegramAdminID: 123456, TrafficLimitGB: 100}
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+
+	ctx := context.Background()
+	_, err := handler.generateInviteLink(ctx, 123456, linkType("unknown"))
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown link type")
+}
+
+func TestSendQRCode_SendError(t *testing.T) {
+	cfg := &config.Config{TelegramAdminID: 123456, TrafficLimitGB: 100}
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewMockBotAPI()
+	mockBot.SendError = errors.New("send failed")
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+
+	ctx := context.Background()
+	handler.sendQRCode(ctx, 123456, 100, "https://example.com/sub", "Test caption")
+
+	assert.True(t, mockBot.SendCalledSafe())
+}
+
+func TestHandleQRCode_QRError(t *testing.T) {
+	cfg := &config.Config{TelegramAdminID: 123456, TrafficLimitGB: 100}
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+
+	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
+		return &database.Subscription{
+			TelegramID:      telegramID,
+			Username:        "testuser",
+			SubscriptionURL: "invalid://bad-url",
+		}, nil
+	}
+
+	ctx := context.Background()
+	handler.handleQRCode(ctx, 123456, "testuser", 100)
+
+	assert.True(t, mockBot.SendCalledSafe())
+}
+
+func TestHandleBackToSubscription_RequestError(t *testing.T) {
+	cfg := &config.Config{TelegramAdminID: 123456, TrafficLimitGB: 100}
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+
+	ctx := context.Background()
+	handler.handleBackToSubscription(ctx, 123456, "testuser", 789)
+
+	assert.True(t, mockBot.RequestCalledSafe())
+	assert.False(t, mockBot.SendCalledSafe())
+}
+
+func TestHandleCallback_NilMessage_RequestError(t *testing.T) {
+	cfg := &config.Config{TelegramAdminID: 123456, TrafficLimitGB: 100}
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewMockBotAPI()
+	mockBot.RequestError = errors.New("request failed")
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+
+	ctx := context.Background()
+	update := tgbotapi.Update{
+		CallbackQuery: &tgbotapi.CallbackQuery{
+			ID:      "test-callback-id",
+			Data:    "some_data",
+			From:    &tgbotapi.User{ID: 123456, UserName: "testuser"},
+			Message: nil,
+		},
+	}
+
+	handler.HandleCallback(ctx, update)
+
+	assert.True(t, mockBot.RequestCalledSafe(), "Bot.Request should be called to answer callback")
+}
+
+func TestHandleCallback_RequestError(t *testing.T) {
+	cfg := &config.Config{TelegramAdminID: 123456, TrafficLimitGB: 100}
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewMockBotAPI()
+	mockBot.RequestError = errors.New("request failed")
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+
+	ctx := context.Background()
+	update := tgbotapi.Update{
+		CallbackQuery: &tgbotapi.CallbackQuery{
+			ID:   "test-callback-id",
+			Data: "menu_help",
+			From: &tgbotapi.User{ID: 123456, UserName: "testuser"},
+			Message: &tgbotapi.Message{
+				MessageID: 100,
+				Chat:      &tgbotapi.Chat{ID: 123456},
+			},
+		},
+	}
+
+	handler.HandleCallback(ctx, update)
+
+	assert.True(t, mockBot.RequestCalledSafe(), "Bot.Request should be called to answer callback")
+}
+
+func TestHandleCallback_QRTelegram(t *testing.T) {
+	cfg := &config.Config{TelegramAdminID: 123456, TrafficLimitGB: 100}
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+
+	ctx := context.Background()
+	update := tgbotapi.Update{
+		CallbackQuery: &tgbotapi.CallbackQuery{
+			ID:   "test-callback-id",
+			Data: "qr_telegram",
+			From: &tgbotapi.User{ID: 123456, UserName: "testuser"},
+			Message: &tgbotapi.Message{
+				MessageID: 100,
+				Chat:      &tgbotapi.Chat{ID: 123456},
+			},
+		},
+	}
+
+	handler.HandleCallback(ctx, update)
+
+	assert.True(t, mockBot.SendCalledSafe(), "Bot.Send should be called for QR telegram")
+}
+
+func TestHandleCallback_QRWeb(t *testing.T) {
+	cfg := &config.Config{TelegramAdminID: 123456, TrafficLimitGB: 100}
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+
+	ctx := context.Background()
+	update := tgbotapi.Update{
+		CallbackQuery: &tgbotapi.CallbackQuery{
+			ID:   "test-callback-id",
+			Data: "qr_web",
+			From: &tgbotapi.User{ID: 123456, UserName: "testuser"},
+			Message: &tgbotapi.Message{
+				MessageID: 100,
+				Chat:      &tgbotapi.Chat{ID: 123456},
+			},
+		},
+	}
+
+	handler.HandleCallback(ctx, update)
+
+	assert.True(t, mockBot.SendCalledSafe(), "Bot.Send should be called for QR web")
+}
+
+func TestHandleCallback_BackToInvite(t *testing.T) {
+	cfg := &config.Config{TelegramAdminID: 123456, TrafficLimitGB: 100}
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+
+	ctx := context.Background()
+	update := tgbotapi.Update{
+		CallbackQuery: &tgbotapi.CallbackQuery{
+			ID:   "test-callback-id",
+			Data: "back_to_invite",
+			From: &tgbotapi.User{ID: 123456, UserName: "testuser"},
+			Message: &tgbotapi.Message{
+				MessageID: 100,
+				Chat:      &tgbotapi.Chat{ID: 123456},
+			},
+		},
+	}
+
+	handler.HandleCallback(ctx, update)
+
+	assert.True(t, mockBot.RequestCalledSafe(), "Bot.Request should be called to delete message")
 }

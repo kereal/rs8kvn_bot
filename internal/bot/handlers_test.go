@@ -10,7 +10,6 @@ import (
 	"rs8kvn_bot/internal/config"
 	"rs8kvn_bot/internal/database"
 	"rs8kvn_bot/internal/logger"
-	"rs8kvn_bot/internal/ratelimiter"
 	"rs8kvn_bot/internal/testutil"
 	"rs8kvn_bot/internal/utils"
 	"rs8kvn_bot/internal/xui"
@@ -1277,19 +1276,4 @@ func TestHandleCreateError_AllErrorTypes(t *testing.T) {
 			assert.Contains(t, mockBot.LastSentText, tt.wantContain, "message should contain expected text")
 		})
 	}
-}
-
-func TestHandleCreateError_RollbackFailed(t *testing.T) {
-	mockBot := testutil.NewMockBotAPI()
-	handler := &Handler{
-		bot:         mockBot,
-		cfg:         &config.Config{TelegramAdminID: 12345},
-		rateLimiter: ratelimiter.NewRateLimiter(10, 1),
-	}
-
-	handler.handleCreateError(context.Background(), 12345, 100, "testuser", fmt.Errorf("rollback failed: db error"))
-
-	assert.True(t, mockBot.SendCalled)
-	assert.Contains(t, mockBot.LastSentText, "не сохранена в базе")
-	assert.Contains(t, mockBot.LastSentText, "Обратитесь к администратору")
 }

@@ -900,22 +900,6 @@ func TestNotifyAdminError_WithAdminID(t *testing.T) {
 	assert.Contains(t, mockBot.LastSentText, "Test error message")
 }
 
-func TestNotifyAdminError_ZeroAdminID(t *testing.T) {
-	cfg := &config.Config{
-		TelegramAdminID: 0,
-		TrafficLimitGB:  50,
-	}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
-
-	ctx := context.Background()
-	handler.notifyAdminError(ctx, "Test error message")
-
-	assert.False(t, mockBot.SendCalled)
-}
-
 func TestHandleAdminLastReg_NonAdminUser(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 999999,

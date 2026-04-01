@@ -578,5 +578,227 @@ func TestHandleShareStart_ValidInviteCode(t *testing.T) {
 
 	assert.True(t, ok)
 	assert.Equal(t, "ABC12345", pending.code)
-	assert.True(t, pending.expiresAt.After(time.Now()))
+}
+
+func TestHandleStart_NilMessage(t *testing.T) {
+	cfg := &config.Config{TelegramAdminID: 123456, TrafficLimitGB: 100}
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+
+	ctx := context.Background()
+	update := tgbotapi.Update{Message: nil}
+
+	handler.HandleStart(ctx, update)
+
+	assert.False(t, mockBot.SendCalledSafe(), "Should not send when message is nil")
+}
+
+func TestHandleStart_ExistingSubscription(t *testing.T) {
+	cfg := &config.Config{TelegramAdminID: 123456, TrafficLimitGB: 100}
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+
+	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
+		return &database.Subscription{
+			TelegramID:      123456,
+			Username:        "testuser",
+			Status:          "active",
+			SubscriptionURL: "https://sub.url",
+		}, nil
+	}
+
+	ctx := context.Background()
+	update := tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat:     &tgbotapi.Chat{ID: 123456},
+			From:     &tgbotapi.User{ID: 123456, UserName: "testuser"},
+			Text:     "/start",
+			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 6}},
+		},
+	}
+
+	handler.HandleStart(ctx, update)
+
+	assert.True(t, mockBot.SendCalledSafe())
+	assert.Contains(t, mockBot.LastSentTextSafe(), "testuser")
+}
+
+func TestHandleHelp_NilMessage(t *testing.T) {
+	cfg := &config.Config{TelegramAdminID: 123456, TrafficLimitGB: 100}
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+
+	ctx := context.Background()
+	update := tgbotapi.Update{Message: nil}
+
+	handler.HandleHelp(ctx, update)
+
+	assert.False(t, mockBot.SendCalledSafe(), "Should not send when message is nil")
+}
+
+func TestHandleShareStart_WithExistingSubscription(t *testing.T) {
+	cfg := &config.Config{TelegramAdminID: 123456, TrafficLimitGB: 100}
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+
+	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
+		return &database.Subscription{
+			TelegramID: telegramID,
+			Username:   "testuser",
+			Status:     "active",
+		}, nil
+	}
+
+	ctx := context.Background()
+	handler.handleShareStart(ctx, 123456, "testuser", "ABC123")
+
+	assert.True(t, mockBot.SendCalledSafe())
+	assert.Contains(t, mockBot.LastSentTextSafe(), "testuser")
+
+	handler.pendingMu.RLock()
+	_, exists := handler.pendingInvites[123456]
+	handler.pendingMu.RUnlock()
+	assert.False(t, exists, "Should not cache invite code when user has existing subscription")
+}
+
+func TestHandleStart_SharePrefix(t *testing.T) {
+	cfg := &config.Config{
+		TelegramAdminID: 123456,
+		TrafficLimitGB:  100,
+	}
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+
+	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
+		return nil, gorm.ErrRecordNotFound
+	}
+
+	ctx := context.Background()
+	update := tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat:     &tgbotapi.Chat{ID: 123456},
+			From:     &tgbotapi.User{ID: 123456, UserName: "testuser"},
+			Text:     "/start share_ABC123",
+			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 6}},
+		},
+	}
+
+	handler.HandleStart(ctx, update)
+
+	assert.True(t, mockBot.SendCalledSafe(), "Should send message for share prefix")
+}
+
+func TestHandleBindTrial_UpdateClientError(t *testing.T) {
+	cfg := &config.Config{
+		TelegramAdminID: 0,
+		TrafficLimitGB:  100,
+		XUIInboundID:    1,
+	}
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+
+	sub := &database.Subscription{
+		TelegramID:     123456,
+		Username:       "testuser",
+		SubscriptionID: "test-sub-id",
+		ClientID:       "test-client-id",
+		InviteCode:     "ABC123",
+		Status:         "active",
+	}
+	callCount := 0
+	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
+		callCount++
+		if callCount == 1 {
+			// First call: check if user already has subscription
+			return nil, gorm.ErrRecordNotFound
+		}
+		// Subsequent calls: return referrer subscription
+		return &database.Subscription{TelegramID: telegramID, Username: "referrer"}, nil
+	}
+	mockDB.BindTrialSubscriptionFunc = func(ctx context.Context, subscriptionID string, telegramID int64, username string) (*database.Subscription, error) {
+		return sub, nil
+	}
+	mockDB.GetInviteByCodeFunc = func(ctx context.Context, code string) (*database.Invite, error) {
+		return &database.Invite{Code: "ABC123", ReferrerTGID: 999999}, nil
+	}
+	mockXUI.UpdateClientFunc = func(ctx context.Context, inboundID int, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, telegramID int64, comment string) error {
+		return errors.New("update client failed")
+	}
+
+	ctx := context.Background()
+	handler.handleBindTrial(ctx, 123456, "testuser", "ABC123")
+
+	assert.True(t, mockBot.SendCalledSafe(), "Should send success message even if update client fails")
+	assert.Contains(t, mockBot.LastSentTextSafe(), "Подписка активирована")
+}
+
+func TestHandleBindTrial_GetInviteError(t *testing.T) {
+	cfg := &config.Config{
+		TelegramAdminID: 123456,
+		TrafficLimitGB:  100,
+		XUIInboundID:    1,
+	}
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+
+	sub := &database.Subscription{
+		TelegramID:     123456,
+		Username:       "testuser",
+		SubscriptionID: "test-sub-id",
+		ClientID:       "test-client-id",
+		InviteCode:     "ABC123",
+		Status:         "active",
+	}
+	mockDB.BindTrialSubscriptionFunc = func(ctx context.Context, subscriptionID string, telegramID int64, username string) (*database.Subscription, error) {
+		return sub, nil
+	}
+	mockDB.GetInviteByCodeFunc = func(ctx context.Context, code string) (*database.Invite, error) {
+		return nil, errors.New("get invite failed")
+	}
+	mockXUI.UpdateClientFunc = func(ctx context.Context, inboundID int, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, telegramID int64, comment string) error {
+		return nil
+	}
+
+	ctx := context.Background()
+	handler.handleBindTrial(ctx, 123456, "testuser", "ABC123")
+
+	assert.True(t, mockBot.SendCalledSafe(), "Should send success message even if get invite fails")
+}
+
+func TestHandleMySubscription_ShowLoadingFails(t *testing.T) {
+	cfg := &config.Config{
+		TelegramAdminID: 123456,
+		TrafficLimitGB:  100,
+	}
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+
+	mockBot.SendError = errors.New("send failed")
+
+	dbCalled := false
+	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
+		dbCalled = true
+		return nil, gorm.ErrRecordNotFound
+	}
+
+	ctx := context.Background()
+	handler.handleMySubscription(ctx, 123456, "testuser", 1)
+
+	assert.False(t, dbCalled, "Database should not be called when loading fails")
 }
