@@ -61,3 +61,56 @@ func FuzzInviteCodeRegex(f *testing.F) {
 		}
 	})
 }
+
+func FuzzInviteCodeRegex_ValidOnly(f *testing.F) {
+	validCodes := []string{
+		"abc123",
+		"ABCDEFGHIJKLMNOP",
+		"test_code",
+		"another-code",
+		"1234567890",
+		"a",
+		"short",
+		"verylonginvitecode12345",
+	}
+
+	for _, tc := range validCodes {
+		f.Add(tc)
+	}
+
+	f.Fuzz(func(t *testing.T, code string) {
+		if len(code) == 0 {
+			return
+		}
+		// Only test codes that start with lowercase letter to avoid invalid codes
+		if code[0] < 'a' || code[0] > 'z' {
+			if code[0] < 'A' || code[0] > 'Z' {
+				if code[0] < '0' || code[0] > '9' {
+					t.Skip("Not a valid code format")
+				}
+			}
+		}
+
+		srv := NewServer(":0", nil, nil, &config.Config{}, bot.NewTestBotConfig())
+		result := srv.inviteCodeRegex.MatchString(code)
+
+		// Valid codes should always match
+		isValidFormat := func(s string) bool {
+			if len(s) == 0 {
+				return false
+			}
+			for _, ch := range s {
+				if !((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '_' || ch == '-') {
+					return false
+				}
+			}
+			return true
+		}
+
+		if isValidFormat(code) && len(code) <= 100 {
+			if !result {
+				t.Errorf("Valid code %q should match regex", code)
+			}
+		}
+	})
+}
