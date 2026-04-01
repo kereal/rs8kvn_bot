@@ -493,3 +493,185 @@ func TestMockXUIServer_ErrorResponses(t *testing.T) {
 		assert.Equal(t, assert.AnError.Error(), result["msg"])
 	})
 }
+
+func resetMockBotAPI(m *testutil.MockBotAPI) {
+	m.SendCalled = false
+	m.RequestCalled = false
+	m.LastSentText = ""
+	m.LastChatID = 0
+	m.SendCount = 0
+	m.SendError = nil
+	m.RequestError = nil
+}
+
+// ==================== Additional Integration Tests ====================
+
+func TestIntegration_HandleStart_NoSubscription(t *testing.T) {
+	f := NewTestFixture(t)
+	defer f.Close()
+
+	ctx := context.Background()
+	resetMockBotAPI(f.Handler.bot.(*testutil.MockBotAPI))
+
+	update := tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat: &tgbotapi.Chat{ID: f.UserChatID},
+			From: &tgbotapi.User{
+				ID:       f.UserChatID,
+				UserName: "testuser",
+			},
+			Text:     "/start",
+			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 6}},
+		},
+	}
+	f.Handler.HandleStart(ctx, update)
+
+	assert.True(t, f.Handler.bot.(*testutil.MockBotAPI).SendCalled)
+}
+
+func TestIntegration_HandleStart_WithSubscription(t *testing.T) {
+	f := NewTestFixture(t)
+	defer f.Close()
+
+	ctx := context.Background()
+	CreateTestSubscriptionInDB(t, f.DB, f.UserChatID, "testuser", "active", time.Now().Add(30*24*time.Hour))
+	resetMockBotAPI(f.Handler.bot.(*testutil.MockBotAPI))
+
+	update := tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat: &tgbotapi.Chat{ID: f.UserChatID},
+			From: &tgbotapi.User{
+				ID:       f.UserChatID,
+				UserName: "testuser",
+			},
+			Text:     "/start",
+			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 6}},
+		},
+	}
+	f.Handler.HandleStart(ctx, update)
+
+	assert.True(t, f.Handler.bot.(*testutil.MockBotAPI).SendCalled)
+}
+
+func TestIntegration_HandleHelp(t *testing.T) {
+	f := NewTestFixture(t)
+	defer f.Close()
+
+	ctx := context.Background()
+	resetMockBotAPI(f.Handler.bot.(*testutil.MockBotAPI))
+
+	update := tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat: &tgbotapi.Chat{ID: f.UserChatID},
+			From: &tgbotapi.User{
+				ID:       f.UserChatID,
+				UserName: "testuser",
+			},
+			Text:     "/help",
+			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 5}},
+		},
+	}
+	f.Handler.HandleHelp(ctx, update)
+
+	assert.True(t, f.Handler.bot.(*testutil.MockBotAPI).SendCalled)
+}
+
+func TestIntegration_HandleInvite(t *testing.T) {
+	f := NewTestFixture(t)
+	defer f.Close()
+
+	ctx := context.Background()
+	resetMockBotAPI(f.Handler.bot.(*testutil.MockBotAPI))
+
+	update := tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat: &tgbotapi.Chat{ID: f.UserChatID},
+			From: &tgbotapi.User{
+				ID:       f.UserChatID,
+				UserName: "testuser",
+			},
+			Text:     "/invite",
+			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 7}},
+		},
+	}
+	f.Handler.HandleInvite(ctx, update)
+
+	assert.True(t, f.Handler.bot.(*testutil.MockBotAPI).SendCalled)
+}
+
+func TestIntegration_Callback_CreateSubscription(t *testing.T) {
+	f := NewTestFixture(t)
+	defer f.Close()
+
+	ctx := context.Background()
+	resetMockBotAPI(f.Handler.bot.(*testutil.MockBotAPI))
+
+	update := tgbotapi.Update{
+		CallbackQuery: &tgbotapi.CallbackQuery{
+			From: &tgbotapi.User{
+				ID:       f.UserChatID,
+				UserName: "testuser",
+			},
+			Data: "create_subscription",
+			Message: &tgbotapi.Message{
+				Chat:      &tgbotapi.Chat{ID: f.UserChatID},
+				MessageID: 100,
+			},
+		},
+	}
+	f.Handler.HandleCallback(ctx, update)
+
+	assert.True(t, f.Handler.bot.(*testutil.MockBotAPI).SendCalled)
+}
+
+func TestIntegration_Callback_MenuSubscription(t *testing.T) {
+	f := NewTestFixture(t)
+	defer f.Close()
+
+	CreateTestSubscriptionInDB(t, f.DB, f.UserChatID, "testuser", "active", time.Now().Add(30*24*time.Hour))
+	resetMockBotAPI(f.Handler.bot.(*testutil.MockBotAPI))
+
+	ctx := context.Background()
+	update := tgbotapi.Update{
+		CallbackQuery: &tgbotapi.CallbackQuery{
+			From: &tgbotapi.User{
+				ID:       f.UserChatID,
+				UserName: "testuser",
+			},
+			Data: "menu_subscription",
+			Message: &tgbotapi.Message{
+				Chat:      &tgbotapi.Chat{ID: f.UserChatID},
+				MessageID: 100,
+			},
+		},
+	}
+	f.Handler.HandleCallback(ctx, update)
+
+	assert.True(t, f.Handler.bot.(*testutil.MockBotAPI).SendCalled)
+}
+
+func TestIntegration_Callback_QRCode(t *testing.T) {
+	f := NewTestFixture(t)
+	defer f.Close()
+
+	CreateTestSubscriptionInDB(t, f.DB, f.UserChatID, "testuser", "active", time.Now().Add(30*24*time.Hour))
+	resetMockBotAPI(f.Handler.bot.(*testutil.MockBotAPI))
+
+	ctx := context.Background()
+	update := tgbotapi.Update{
+		CallbackQuery: &tgbotapi.CallbackQuery{
+			From: &tgbotapi.User{
+				ID:       f.UserChatID,
+				UserName: "testuser",
+			},
+			Data: "qr_code",
+			Message: &tgbotapi.Message{
+				Chat:      &tgbotapi.Chat{ID: f.UserChatID},
+				MessageID: 100,
+			},
+		},
+	}
+	f.Handler.HandleCallback(ctx, update)
+
+	assert.True(t, f.Handler.bot.(*testutil.MockBotAPI).SendCalled)
+}
