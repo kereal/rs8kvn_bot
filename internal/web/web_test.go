@@ -908,3 +908,211 @@ func TestInviteCodeRegex(t *testing.T) {
 		})
 	}
 }
+
+// === Additional handleInvite error path tests ===
+
+func TestHandleInvite_XUIAddClientFails(t *testing.T) {
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+
+	cfg := &config.Config{
+		SiteURL:            "https://vpn.site",
+		TrialDurationHours: 3,
+		TrialRateLimit:     3,
+		XUIInboundID:       1,
+		XUIHost:            "http://localhost:2053",
+	}
+
+	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig())
+
+	mockDB.GetInviteByCodeFunc = func(ctx context.Context, code string) (*database.Invite, error) {
+		return &database.Invite{Code: "testcode", ReferrerTGID: 12345}, nil
+	}
+	mockDB.CountTrialRequestsByIPLastHourFunc = func(ctx context.Context, ip string) (int, error) {
+		return 0, nil
+	}
+	mockDB.CreateTrialRequestFunc = func(ctx context.Context, ip string) error {
+		return nil
+	}
+	mockXUI.LoginFunc = func(ctx context.Context) error {
+		return nil
+	}
+	mockXUI.AddClientWithIDFunc = func(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
+		return nil, fmt.Errorf("XUI error")
+	}
+
+	req := httptest.NewRequest("GET", "/i/testcode", nil)
+	req.RemoteAddr = "192.168.1.1:12345"
+	rec := httptest.NewRecorder()
+
+	srv.handleInvite(rec, req)
+
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+	assert.Contains(t, rec.Body.String(), "Ошибка создания подписки")
+}
+
+func TestHandleInvite_CreateTrialSubscriptionFails(t *testing.T) {
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+
+	cfg := &config.Config{
+		SiteURL:            "https://vpn.site",
+		TrialDurationHours: 3,
+		TrialRateLimit:     3,
+		XUIInboundID:       1,
+		XUIHost:            "http://localhost:2053",
+		XUISubPath:         "sub",
+	}
+
+	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig())
+
+	mockDB.GetInviteByCodeFunc = func(ctx context.Context, code string) (*database.Invite, error) {
+		return &database.Invite{Code: "testcode", ReferrerTGID: 12345}, nil
+	}
+	mockDB.CountTrialRequestsByIPLastHourFunc = func(ctx context.Context, ip string) (int, error) {
+		return 0, nil
+	}
+	mockDB.CreateTrialRequestFunc = func(ctx context.Context, ip string) error {
+		return nil
+	}
+	mockXUI.LoginFunc = func(ctx context.Context) error {
+		return nil
+	}
+	mockXUI.AddClientWithIDFunc = func(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
+		return &xui.ClientConfig{ID: clientID, SubID: subID}, nil
+	}
+	mockXUI.GetSubscriptionLinkFunc = func(host, subID, subPath string) string {
+		return "http://localhost:2053/sub/" + subID
+	}
+	mockXUI.GetExternalURLFunc = func(host string) string {
+		return host
+	}
+	mockDB.CreateTrialSubscriptionFunc = func(ctx context.Context, inviteCode, subscriptionID, clientID string, inboundID int, trafficBytes int64, expiryTime time.Time, subURL string) (*database.Subscription, error) {
+		return nil, fmt.Errorf("DB error")
+	}
+
+	req := httptest.NewRequest("GET", "/i/testcode", nil)
+	req.RemoteAddr = "192.168.1.1:12345"
+	rec := httptest.NewRecorder()
+
+	srv.handleInvite(rec, req)
+
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+	assert.Contains(t, rec.Body.String(), "Ошибка сервера")
+}
+
+func TestHandleInvite_ExistingTrialFromCookie(t *testing.T) {
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+
+	cfg := &config.Config{
+		SiteURL:            "https://vpn.site",
+		TrialDurationHours: 3,
+		TrialRateLimit:     3,
+		XUIInboundID:       1,
+	}
+
+	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig())
+
+	mockDB.GetInviteByCodeFunc = func(ctx context.Context, code string) (*database.Invite, error) {
+		return &database.Invite{Code: "testcode", ReferrerTGID: 12345}, nil
+	}
+	mockDB.GetTrialSubscriptionBySubIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
+		return &database.Subscription{
+			SubscriptionID:  "existing-sub-id",
+			SubscriptionURL: "https://vpn.site/sub/existing",
+			IsTrial:         true,
+			TelegramID:      0,
+			ExpiryTime:      time.Now().Add(2 * time.Hour),
+		}, nil
+	}
+
+	req := httptest.NewRequest("GET", "/i/testcode", nil)
+	req.AddCookie(&http.Cookie{
+		Name:  "rs8kvn_trial_testcode",
+		Value: "existing-sub-id",
+	})
+	rec := httptest.NewRecorder()
+
+	srv.handleInvite(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	body := rec.Body.String()
+	assert.Contains(t, body, "existing-sub-id")
+	assert.Contains(t, body, "https://vpn.site/sub/existing")
+}
+
+func TestHandleInvite_MethodNotAllowed(t *testing.T) {
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	cfg := &config.Config{}
+	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig())
+
+	req := httptest.NewRequest("POST", "/i/testcode", nil)
+	rec := httptest.NewRecorder()
+
+	srv.handleInvite(rec, req)
+
+	assert.Equal(t, http.StatusMethodNotAllowed, rec.Code)
+	assert.Equal(t, "GET", rec.Header().Get("Allow"))
+}
+
+func TestHandleInvite_InvalidPath(t *testing.T) {
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	cfg := &config.Config{}
+	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig())
+
+	req := httptest.NewRequest("GET", "/not-invite/testcode", nil)
+	rec := httptest.NewRecorder()
+
+	srv.handleInvite(rec, req)
+
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+	assert.Contains(t, rec.Body.String(), "Страница не найдена")
+}
+
+func TestHandleInvite_InvalidCodeChars(t *testing.T) {
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	cfg := &config.Config{}
+	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig())
+
+	req := httptest.NewRequest("GET", "/i/invalid@code!", nil)
+	rec := httptest.NewRecorder()
+
+	srv.handleInvite(rec, req)
+
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+	assert.Contains(t, rec.Body.String(), "Приглашение не найдено")
+}
+
+func TestHandleInvite_RateLimitCheckError(t *testing.T) {
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+
+	cfg := &config.Config{
+		SiteURL:            "https://vpn.site",
+		TrialDurationHours: 3,
+		TrialRateLimit:     3,
+		XUIInboundID:       1,
+	}
+
+	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig())
+
+	mockDB.GetInviteByCodeFunc = func(ctx context.Context, code string) (*database.Invite, error) {
+		return &database.Invite{Code: "testcode", ReferrerTGID: 12345}, nil
+	}
+	mockDB.CountTrialRequestsByIPLastHourFunc = func(ctx context.Context, ip string) (int, error) {
+		return 0, fmt.Errorf("DB connection failed")
+	}
+
+	req := httptest.NewRequest("GET", "/i/testcode", nil)
+	req.RemoteAddr = "192.168.1.1:12345"
+	rec := httptest.NewRecorder()
+
+	srv.handleInvite(rec, req)
+
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+	assert.Contains(t, rec.Body.String(), "Ошибка сервера")
+}

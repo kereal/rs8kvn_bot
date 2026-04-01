@@ -912,3 +912,35 @@ func TestLoad_AllTrialSettings(t *testing.T) {
 	assert.Equal(t, 10, cfg.TrialRateLimit, "TrialRateLimit")
 	assert.Equal(t, "https://trial.example.com", cfg.SiteURL, "SiteURL")
 }
+
+// ==================== maskAPIKey Tests ====================
+
+func TestMaskAPIKey_EmptyString(t *testing.T) {
+	result := maskAPIKey("")
+	assert.Equal(t, "(not set)", result, "empty key should return (not set)")
+}
+
+func TestMaskAPIKey_NonEmptyString(t *testing.T) {
+	result := maskAPIKey("some-api-key-here")
+	assert.Equal(t, "***", result, "non-empty key should return ***")
+}
+
+func TestMaskAPIKey_VariousInputs(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{"empty", "", "(not set)"},
+		{"single_char", "a", "***"},
+		{"whitespace", "   ", "***"},
+		{"long_key", "1234567890:ABCdefGHIjklMNOpqrsTUVwxyz", "***"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := maskAPIKey(tt.input)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
