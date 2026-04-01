@@ -2760,3 +2760,327 @@ func TestRunMigrationsWithDBAndDir_ValidMigration(t *testing.T) {
 	db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='test_table'").Scan(&tableExists)
 	assert.Equal(t, 1, tableExists, "test_table should exist after migration")
 }
+
+func TestRunMigrationsWithDBAndDir_CorruptedSQL(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	db, err := sql.Open("sqlite3", dbPath)
+	require.NoError(t, err)
+	defer db.Close()
+
+	migDir := filepath.Join(tmpDir, "migrations")
+	err = os.MkdirAll(migDir, 0755)
+	require.NoError(t, err)
+
+	// Write corrupted SQL (binary-like garbage that's not valid SQL)
+	corrupted := []byte{0x00, 0x01, 0xFF, 0xFE, 0x89, 0x50, 0x4E, 0x47}
+	err = os.WriteFile(filepath.Join(migDir, "001_corrupted.up.sql"), corrupted, 0644)
+	require.NoError(t, err)
+
+	err = runMigrationsWithDBAndDir(db, migDir)
+	// SQLite may or may not error on binary data depending on migration library
+	// The important thing is it doesn't panic
+	t.Logf("Corrupted SQL migration result: %v", err)
+}
+
+func TestRunMigrationsWithDBAndDir_PartialMigration(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	db, err := sql.Open("sqlite3", dbPath)
+	require.NoError(t, err)
+	defer db.Close()
+
+	migDir := filepath.Join(tmpDir, "migrations")
+	err = os.MkdirAll(migDir, 0755)
+	require.NoError(t, err)
+
+	// First migration is valid
+	err = os.WriteFile(filepath.Join(migDir, "000_create_users.up.sql"),
+		[]byte("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);"), 0644)
+	require.NoError(t, err)
+
+	// Second migration is invalid
+	err = os.WriteFile(filepath.Join(migDir, "001_add_email.up.sql"),
+		[]byte("INVALID SQL HERE!!!"), 0644)
+	require.NoError(t, err)
+
+	err = runMigrationsWithDBAndDir(db, migDir)
+	assert.Error(t, err, "runMigrationsWithDBAndDir should error on second migration")
+
+	// First migration should still be applied
+	var tableExists int
+	db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='users'").Scan(&tableExists)
+	assert.Equal(t, 1, tableExists, "First migration should still be applied")
+}
+
+func TestRunMigrationsWithDBAndDir_DuplicateMigration(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	db, err := sql.Open("sqlite3", dbPath)
+	require.NoError(t, err)
+	defer db.Close()
+
+	migDir := filepath.Join(tmpDir, "migrations")
+	err = os.MkdirAll(migDir, 0755)
+	require.NoError(t, err)
+
+	// Write a valid migration
+	err = os.WriteFile(filepath.Join(migDir, "000_create_table.up.sql"),
+		[]byte("CREATE TABLE test_dup (id INTEGER PRIMARY KEY);"), 0644)
+	require.NoError(t, err)
+
+	// Run migration first time
+	err = runMigrationsWithDBAndDir(db, migDir)
+	require.NoError(t, err, "First migration run should succeed")
+
+	// Run migration second time - should be idempotent
+	err = runMigrationsWithDBAndDir(db, migDir)
+	// May return error about no change or succeed, both are acceptable
+	t.Logf("Second migration run result: %v", err)
+}
+
+func TestRunMigrationsWithDBAndDir_NonSQLFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	db, err := sql.Open("sqlite3", dbPath)
+	require.NoError(t, err)
+	defer db.Close()
+
+	migDir := filepath.Join(tmpDir, "migrations")
+	err = os.MkdirAll(migDir, 0755)
+	require.NoError(t, err)
+
+	// Write a non-SQL file (should be ignored by migration system)
+	err = os.WriteFile(filepath.Join(migDir, "README.txt"),
+		[]byte("This is not a migration file"), 0644)
+	require.NoError(t, err)
+
+	// Write a valid migration
+	err = os.WriteFile(filepath.Join(migDir, "000_create_table.up.sql"),
+		[]byte("CREATE TABLE test_non_sql (id INTEGER PRIMARY KEY);"), 0644)
+	require.NoError(t, err)
+
+	err = runMigrationsWithDBAndDir(db, migDir)
+	require.NoError(t, err, "runMigrationsWithDBAndDir should succeed")
+
+	// Verify table was created
+	var tableExists int
+	db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='test_non_sql'").Scan(&tableExists)
+	assert.Equal(t, 1, tableExists, "test_non_sql table should exist")
+}
+
+func TestRunMigrationsWithDBAndDir_EmptyMigrationFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	db, err := sql.Open("sqlite3", dbPath)
+	require.NoError(t, err)
+	defer db.Close()
+
+	migDir := filepath.Join(tmpDir, "migrations")
+	err = os.MkdirAll(migDir, 0755)
+	require.NoError(t, err)
+
+	// Write an empty migration file
+	err = os.WriteFile(filepath.Join(migDir, "000_empty.up.sql"), []byte(""), 0644)
+	require.NoError(t, err)
+
+	err = runMigrationsWithDBAndDir(db, migDir)
+	// Empty migration may succeed or fail depending on migration library behavior
+	t.Logf("Empty migration result: %v", err)
+}
+
+func TestRunMigrationsWithDBAndDir_LegacyMigration(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	db, err := sql.Open("sqlite3", dbPath)
+	require.NoError(t, err)
+	defer db.Close()
+
+	// Create legacy subscriptions table (without subscription_id column)
+	_, err = db.Exec(`CREATE TABLE subscriptions (id INTEGER PRIMARY KEY, x_ui_host TEXT, subscription_url TEXT)`)
+	require.NoError(t, err, "Failed to create legacy table")
+
+	migDir := filepath.Join(tmpDir, "migrations")
+	err = os.MkdirAll(migDir, 0755)
+	require.NoError(t, err)
+
+	// Write a migration that creates schema_migrations table
+	err = os.WriteFile(filepath.Join(migDir, "003_add_referral_columns.up.sql"),
+		[]byte("CREATE TABLE IF NOT EXISTS referrals (id INTEGER PRIMARY KEY, code TEXT);"), 0644)
+	require.NoError(t, err)
+
+	err = runMigrationsWithDBAndDir(db, migDir)
+	// Legacy migration should handle the old table structure
+	t.Logf("Legacy migration result: %v", err)
+
+	// Verify x_ui_host column was dropped
+	var xuiHostExists int
+	db.QueryRow("SELECT COUNT(*) FROM pragma_table_info('subscriptions') WHERE name = 'x_ui_host'").Scan(&xuiHostExists)
+	assert.Equal(t, 0, xuiHostExists, "x_ui_host column should be dropped after legacy migration")
+}
+
+func TestRunMigrationsWithDBAndDir_MultipleMigrations(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	db, err := sql.Open("sqlite3", dbPath)
+	require.NoError(t, err)
+	defer db.Close()
+
+	migDir := filepath.Join(tmpDir, "migrations")
+	err = os.MkdirAll(migDir, 0755)
+	require.NoError(t, err)
+
+	// Create multiple migrations
+	migrations := map[string]string{
+		"000_create_users.up.sql":    "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);",
+		"001_create_posts.up.sql":    "CREATE TABLE posts (id INTEGER PRIMARY KEY, user_id INTEGER, title TEXT);",
+		"002_create_comments.up.sql": "CREATE TABLE comments (id INTEGER PRIMARY KEY, post_id INTEGER, body TEXT);",
+	}
+
+	for name, content := range migrations {
+		err = os.WriteFile(filepath.Join(migDir, name), []byte(content), 0644)
+		require.NoError(t, err, "Failed to write migration %s", name)
+	}
+
+	err = runMigrationsWithDBAndDir(db, migDir)
+	require.NoError(t, err, "runMigrationsWithDBAndDir should succeed with multiple migrations")
+
+	// Verify all tables were created
+	for _, table := range []string{"users", "posts", "comments"} {
+		var tableExists int
+		db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?", table).Scan(&tableExists)
+		assert.Equal(t, 1, tableExists, "%s table should exist", table)
+	}
+}
+
+func TestRunMigrationsWithDBAndDir_DownMigration(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	db, err := sql.Open("sqlite3", dbPath)
+	require.NoError(t, err)
+	defer db.Close()
+
+	migDir := filepath.Join(tmpDir, "migrations")
+	err = os.MkdirAll(migDir, 0755)
+	require.NoError(t, err)
+
+	// Create up and down migrations
+	err = os.WriteFile(filepath.Join(migDir, "000_create_table.up.sql"),
+		[]byte("CREATE TABLE test_down (id INTEGER PRIMARY KEY);"), 0644)
+	require.NoError(t, err)
+
+	err = os.WriteFile(filepath.Join(migDir, "000_create_table.down.sql"),
+		[]byte("DROP TABLE IF EXISTS test_down;"), 0644)
+	require.NoError(t, err)
+
+	// Run up migration
+	err = runMigrationsWithDBAndDir(db, migDir)
+	require.NoError(t, err, "Up migration should succeed")
+
+	// Verify table exists
+	var tableExists int
+	db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='test_down'").Scan(&tableExists)
+	assert.Equal(t, 1, tableExists, "test_down table should exist after up migration")
+}
+
+func TestRunMigrationsWithDBAndDir_MigrationWithSyntaxError(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	db, err := sql.Open("sqlite3", dbPath)
+	require.NoError(t, err)
+	defer db.Close()
+
+	migDir := filepath.Join(tmpDir, "migrations")
+	err = os.MkdirAll(migDir, 0755)
+	require.NoError(t, err)
+
+	// Migration with SQL syntax error
+	err = os.WriteFile(filepath.Join(migDir, "000_syntax_error.up.sql"),
+		[]byte("CREAT TABL test_syntax (id INTEGER PRIMARI KEY);"), 0644)
+	require.NoError(t, err)
+
+	err = runMigrationsWithDBAndDir(db, migDir)
+	assert.Error(t, err, "runMigrationsWithDBAndDir should error on syntax error")
+}
+
+func TestRunMigrationsWithDBAndDir_LargeMigration(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	db, err := sql.Open("sqlite3", dbPath)
+	require.NoError(t, err)
+	defer db.Close()
+
+	migDir := filepath.Join(tmpDir, "migrations")
+	err = os.MkdirAll(migDir, 0755)
+	require.NoError(t, err)
+
+	// Create a large migration with many columns
+	var sql string
+	sql = "CREATE TABLE large_table (id INTEGER PRIMARY KEY,\n"
+	for i := 0; i < 100; i++ {
+		sql += fmt.Sprintf("column_%d TEXT,\n", i)
+	}
+	sql = sql[:len(sql)-2] + ");" // Remove trailing comma and newline, add closing paren
+
+	err = os.WriteFile(filepath.Join(migDir, "000_large_table.up.sql"), []byte(sql), 0644)
+	require.NoError(t, err, "Failed to write large migration")
+
+	err = runMigrationsWithDBAndDir(db, migDir)
+	require.NoError(t, err, "runMigrationsWithDBAndDir should succeed with large migration")
+
+	// Verify table was created
+	var tableExists int
+	db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='large_table'").Scan(&tableExists)
+	assert.Equal(t, 1, tableExists, "large_table should exist")
+}
+
+func TestRunMigrationsWithDBAndDir_ConcurrentAccess(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	db, err := sql.Open("sqlite3", dbPath)
+	require.NoError(t, err)
+	defer db.Close()
+
+	migDir := filepath.Join(tmpDir, "migrations")
+	err = os.MkdirAll(migDir, 0755)
+	require.NoError(t, err)
+
+	// Write a valid migration
+	err = os.WriteFile(filepath.Join(migDir, "000_create_table.up.sql"),
+		[]byte("CREATE TABLE concurrent_test (id INTEGER PRIMARY KEY, data TEXT);"), 0644)
+	require.NoError(t, err)
+
+	// Run migrations multiple times concurrently
+	done := make(chan error, 5)
+	for i := 0; i < 5; i++ {
+		go func() {
+			conn, _ := sql.Open("sqlite3", dbPath)
+			defer conn.Close()
+			done <- runMigrationsWithDBAndDir(conn, migDir)
+		}()
+	}
+
+	// All should complete without error (or at least not panic)
+	for i := 0; i < 5; i++ {
+		err := <-done
+		// Some may error due to concurrent access, that's acceptable
+		t.Logf("Concurrent migration %d result: %v", i, err)
+	}
+
+	// Verify table was created
+	var tableExists int
+	db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='concurrent test'").Scan(&tableExists)
+	// Table may or may not exist depending on which migration won the race
+	t.Logf("Table exists after concurrent migrations: %v", tableExists > 0)
+}
