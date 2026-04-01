@@ -496,6 +496,37 @@ func TestTotalBackupSize_Zero(t *testing.T) {
 	assert.Equal(t, int64(0), size, "Expected 0 size")
 }
 
+func TestValidatePath_RootDirectory(t *testing.T) {
+	err := validatePath("/")
+	assert.Error(t, err, "validatePath() should reject root directory")
+	assert.Contains(t, err.Error(), "root", "Error should mention root")
+}
+
+func TestValidatePath_DevDirectory(t *testing.T) {
+	err := validatePath("/dev/sda")
+	assert.Error(t, err, "validatePath() should reject /dev directory")
+}
+
+func TestValidatePath_VarRunDirectory(t *testing.T) {
+	err := validatePath("/var/run/docker.sock")
+	assert.Error(t, err, "validatePath() should reject /var/run directory")
+}
+
+func TestValidatePath_ValidRelativePath(t *testing.T) {
+	err := validatePath("data/database.db")
+	assert.NoError(t, err, "validatePath() should accept valid relative path")
+}
+
+func TestValidatePath_ValidAbsoluteHomePath(t *testing.T) {
+	err := validatePath("/home/user/data.db")
+	assert.NoError(t, err, "validatePath() should accept valid home path")
+}
+
+func TestValidatePath_ValidTmpPath(t *testing.T) {
+	err := validatePath("/tmp/test.db")
+	assert.NoError(t, err, "validatePath() should accept valid tmp path")
+}
+
 func TestValidatePath_DirectoryTraversal(t *testing.T) {
 	tests := []struct {
 		name    string

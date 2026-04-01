@@ -261,10 +261,8 @@ func TestHandleIndex_JSONEncodingError(t *testing.T) {
 	require.NoError(t, server.Start(), "Failed to start server")
 	defer server.Stop(context.Background())
 
-	// Wait for server to start
 	time.Sleep(100 * time.Millisecond)
 
-	// The index endpoint should return valid JSON
 	resp, err := http.Get("http://localhost:19393/")
 	require.NoError(t, err, "Failed to get index")
 	defer resp.Body.Close()
@@ -275,4 +273,116 @@ func TestHandleIndex_JSONEncodingError(t *testing.T) {
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result), "Failed to decode JSON response")
 
 	assert.Equal(t, "rs8kvn_bot", result["service"], "service")
+}
+
+func TestHandleIndex_NotFound(t *testing.T) {
+	server := NewServer(19394)
+
+	require.NoError(t, server.Start(), "Failed to start server")
+	defer server.Stop(context.Background())
+
+	time.Sleep(100 * time.Millisecond)
+
+	resp, err := http.Get("http://localhost:19394/nonexistent")
+	require.NoError(t, err, "Failed to get nonexistent path")
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode, "StatusCode")
+}
+
+func TestStop_NilServer(t *testing.T) {
+	server := NewServer(19395)
+
+	err := server.Stop(context.Background())
+	assert.NoError(t, err, "Stop() with nil server should not error")
+}
+
+func TestHandleHealthz_AllComponentsDown(t *testing.T) {
+	server := NewServer(19396)
+
+	server.RegisterChecker("db", func(ctx context.Context) ComponentHealth {
+		return ComponentHealth{Status: StatusDown, Message: "db down"}
+	})
+	server.RegisterChecker("xui", func(ctx context.Context) ComponentHealth {
+		return ComponentHealth{Status: StatusDown, Message: "xui down"}
+	})
+
+	require.NoError(t, server.Start(), "Failed to start server")
+	defer server.Stop(context.Background())
+
+	time.Sleep(100 * time.Millisecond)
+
+	resp, err := http.Get("http://localhost:19396/healthz")
+	require.NoError(t, err, "Failed to get healthz")
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusServiceUnavailable, resp.StatusCode, "StatusCode")
+
+	var health HealthResponse
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&health), "Failed to decode response")
+
+	assert.Equal(t, StatusDown, health.Status, "status")
+	assert.Equal(t, StatusDown, health.Components["db"].Status, "db component")
+	assert.Equal(t, StatusDown, health.Components["xui"].Status, "xui component")
+}
+
+func TestHandleReadyz_NotReadyWithComponents(t *testing.T) {
+	server := NewServer(19397)
+
+	server.RegisterChecker("db", func(ctx context.Context) ComponentHealth {
+		return ComponentHealth{Status: StatusOK}
+	})
+
+	require.NoError(t, server.Start(), "Failed to start server")
+	defer server.Stop(context.Background())
+
+	time.Sleep(100 * time.Millisecond)
+
+	resp, err := http.Get("http://localhost:19397/readyz")
+	require.NoError(t, err, "Failed to get readyz")
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusServiceUnavailable, resp.StatusCode, "StatusCode")
+
+	var health HealthResponse
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&health), "Failed to decode response")
+
+	assert.Equal(t, StatusDegraded, health.Status, "status")
+	assert.Equal(t, StatusDown, health.Components["ready"].Status, "ready component")
+}
+
+func TestRegisterChecker(t *testing.T) {
+	server := NewServer(0)
+
+	checker := func(ctx context.Context) ComponentHealth {
+		return ComponentHealth{Status: StatusOK}
+	}
+
+	server.RegisterChecker("test", checker)
+
+	assert.Contains(t, server.checkers, "test", "Checker should be registered")
+}
+
+func TestHandleHealthz_DegradedComponents(t *testing.T) {
+	server := NewServer(19398)
+
+	server.RegisterChecker("degraded", func(ctx context.Context) ComponentHealth {
+		return ComponentHealth{Status: StatusDegraded, Message: "slow"}
+	})
+
+	require.NoError(t, server.Start(), "Failed to start server")
+	defer server.Stop(context.Background())
+
+	time.Sleep(100 * time.Millisecond)
+
+	resp, err := http.Get("http://localhost:19398/healthz")
+	require.NoError(t, err, "Failed to get healthz")
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode, "StatusCode - degraded should still be 200")
+
+	var health HealthResponse
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&health), "Failed to decode response")
+
+	assert.Equal(t, StatusDegraded, health.Status, "status")
 }
