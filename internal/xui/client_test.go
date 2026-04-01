@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -1228,4 +1229,352 @@ func TestPing_Failure(t *testing.T) {
 
 	err = client.Ping(ctx)
 	require.Error(t, err, "Ping() should return error for failed connection")
+}
+
+func TestClient_Close(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := APIResponse{Success: true}
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, "admin", "password")
+	require.NoError(t, err)
+
+	// Close should not error even without any active connections
+	err = client.Close()
+	assert.NoError(t, err, "Close() should not return error")
+}
+
+func TestClient_Close_MultipleTimes(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := APIResponse{Success: true}
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, "admin", "password")
+	require.NoError(t, err)
+
+	// Multiple closes should be safe
+	for i := 0; i < 3; i++ {
+		err := client.Close()
+		assert.NoError(t, err, "Close() iteration %d should not error", i)
+	}
+}
+
+func TestGetExpiryTimeMillis_ZeroTime(t *testing.T) {
+	result := getExpiryTimeMillis(time.Time{})
+	assert.Equal(t, int64(0), result, "Zero time should return 0")
+}
+
+func TestGetExpiryTimeMillis_NonZeroTime(t *testing.T) {
+	fixedTime := time.Date(2026, 4, 1, 12, 0, 0, 0, time.UTC)
+	result := getExpiryTimeMillis(fixedTime)
+	assert.Equal(t, fixedTime.UnixMilli(), result, "Should return time in milliseconds")
+}
+
+func TestGetExpiryTimeMillis_FutureTime(t *testing.T) {
+	future := time.Now().Add(24 * time.Hour)
+	result := getExpiryTimeMillis(future)
+	assert.Greater(t, result, time.Now().UnixMilli(), "Future time should be greater than now")
+}
+
+func TestNewClient_TrailingSlashTrimmed(t *testing.T) {
+	client, err := NewClient("http://localhost:2053/", "admin", "password")
+	require.NoError(t, err)
+	assert.Equal(t, "http://localhost:2053", client.host, "Trailing slash should be trimmed")
+}
+
+func TestNewClient_MultipleTrailingSlashes(t *testing.T) {
+	client, err := NewClient("http://localhost:2053///", "admin", "password")
+	require.NoError(t, err)
+	// TrimSuffix only removes one trailing slash
+	assert.Contains(t, client.host, "http://localhost:2053", "Should trim at least one trailing slash")
+}
+
+func TestUpdateClient_LoginFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/login" {
+			resp := APIResponse{Success: false, Msg: "Invalid credentials"}
+			json.NewEncoder(w).Encode(resp)
+			return
+		}
+		t.Errorf("Unexpected path: %s", r.URL.Path)
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, "admin", "wrongpassword")
+	require.NoError(t, err)
+	ctx := context.Background()
+
+	err = client.UpdateClient(ctx, 1, "test-client-uuid", "testuser", "sub-id", 1000, time.Now(), 12345, "")
+	require.Error(t, err, "UpdateClient() should return error when login fails")
+	assert.Contains(t, err.Error(), "authentication required")
+}
+
+func TestUpdateClient_ContextCancellation(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/login":
+			resp := APIResponse{Success: true}
+			json.NewEncoder(w).Encode(resp)
+		case "/panel/api/inbounds/updateClient/test-client-uuid":
+			time.Sleep(2 * time.Second)
+			resp := APIResponse{Success: true}
+			json.NewEncoder(w).Encode(resp)
+		default:
+			t.Errorf("Unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, "admin", "password")
+	require.NoError(t, err)
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	err = client.UpdateClient(ctx, 1, "test-client-uuid", "testuser", "sub-id", 1000, time.Now(), 12345, "")
+	require.Error(t, err, "UpdateClient() should return error when context is cancelled")
+}
+
+func TestUpdateClient_InvalidJSONResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/login":
+			resp := APIResponse{Success: true}
+			json.NewEncoder(w).Encode(resp)
+		case "/panel/api/inbounds/updateClient/test-client-uuid":
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte("invalid json"))
+		default:
+			t.Errorf("Unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, "admin", "password")
+	require.NoError(t, err)
+	ctx := context.Background()
+
+	err = client.UpdateClient(ctx, 1, "test-client-uuid", "testuser", "sub-id", 1000, time.Now(), 12345, "")
+	require.Error(t, err, "UpdateClient() should return error for invalid JSON response")
+}
+
+func TestAddClientWithID_DefaultResetDays(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/login":
+			resp := APIResponse{Success: true}
+			json.NewEncoder(w).Encode(resp)
+		case "/panel/api/inbounds/addClient":
+			resp := APIResponse{Success: true, Msg: "Client added"}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(resp)
+		default:
+			t.Errorf("Unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, "admin", "password")
+	require.NoError(t, err)
+	ctx := context.Background()
+
+	// resetDays = -1 should use default (config.SubscriptionResetDay)
+	result, err := client.AddClientWithID(ctx, 1, "testuser", "client-id", "sub-id", 1000, time.Now(), -1)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, config.SubscriptionResetDay, result.Reset, "Should use default reset day")
+}
+
+func TestAddClientWithID_ContextCancellation(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/login":
+			resp := APIResponse{Success: true}
+			json.NewEncoder(w).Encode(resp)
+		case "/panel/api/inbounds/addClient":
+			time.Sleep(2 * time.Second)
+			resp := APIResponse{Success: true}
+			json.NewEncoder(w).Encode(resp)
+		default:
+			t.Errorf("Unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, "admin", "password")
+	require.NoError(t, err)
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	_, err = client.AddClientWithID(ctx, 1, "testuser", "client-id", "sub-id", 1000, time.Now(), 31)
+	require.Error(t, err, "AddClientWithID() should return error when context is cancelled")
+}
+
+func TestAddClientWithID_InvalidJSONResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/login":
+			resp := APIResponse{Success: true}
+			json.NewEncoder(w).Encode(resp)
+		case "/panel/api/inbounds/addClient":
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte("invalid json"))
+		default:
+			t.Errorf("Unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, "admin", "password")
+	require.NoError(t, err)
+	ctx := context.Background()
+
+	_, err = client.AddClientWithID(ctx, 1, "testuser", "client-id", "sub-id", 1000, time.Now(), 31)
+	require.Error(t, err, "AddClientWithID() should return error for invalid JSON response")
+}
+
+func TestGetClientTraffic_EmptyEmail(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/login" {
+			resp := APIResponse{Success: true}
+			json.NewEncoder(w).Encode(resp)
+			return
+		}
+		// Empty email results in URL like /panel/api/inbounds/getClientTraffics/
+		resp := APIResponse{Success: false, Msg: "client not found"}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, "admin", "password")
+	require.NoError(t, err)
+	ctx := context.Background()
+
+	_, err = client.GetClientTraffic(ctx, "")
+	require.Error(t, err, "GetClientTraffic() should return error for empty email")
+	assert.Contains(t, err.Error(), "failed to get client traffic")
+}
+
+func TestGetSubscriptionLink_TrailingSlashInBaseURL(t *testing.T) {
+	client, err := NewClient("http://localhost:2053", "admin", "password")
+	require.NoError(t, err)
+
+	link := client.GetSubscriptionLink("http://localhost:2053/", "sub123", "sub")
+	assert.Equal(t, "http://localhost:2053/sub/sub123", link, "Should handle trailing slash in base URL")
+}
+
+func TestGetExternalURL_URLWithPath(t *testing.T) {
+	result := GetExternalURL("http://example.com:2053/sub/abc123")
+	assert.Equal(t, "http://example.com:2053", result, "Should strip path from URL")
+}
+
+func TestGetExternalURL_EmptyString(t *testing.T) {
+	result := GetExternalURL("")
+	// Empty string parses to "://" by url.Parse
+	assert.NotEmpty(t, result, "Empty string should return non-empty result")
+}
+
+func TestGetExternalURL_InvalidURL(t *testing.T) {
+	result := GetExternalURL("://invalid")
+	// Invalid URL should return original host
+	assert.Equal(t, "://invalid", result, "Invalid URL should return original")
+}
+
+func TestRetryWithBackoff_ContextCancellationDuringRetry(t *testing.T) {
+	callCount := 0
+	ctx, cancel := context.WithCancel(context.Background())
+
+	err := retryWithBackoff(ctx, 5, 50*time.Millisecond, func() error {
+		callCount++
+		if callCount == 2 {
+			cancel()
+		}
+		return fmt.Errorf("error %d", callCount)
+	})
+
+	require.Error(t, err, "retryWithBackoff() should return error when context cancelled during retry")
+	assert.LessOrEqual(t, callCount, 2, "Should stop after context cancellation")
+}
+
+func TestTruncateString_VeryLongString(t *testing.T) {
+	longString := strings.Repeat("a", 10000)
+	result := truncateString(longString, 10)
+	assert.Equal(t, 13, len(result), "Should be maxLen + len('...')")
+	assert.Equal(t, "aaaaaaaaaa...", result)
+}
+
+func TestCloseResponseBody_WithValidResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	resp, err := http.Get(server.URL)
+	require.NoError(t, err)
+
+	// Should not panic
+	closeResponseBody(resp)
+	// Body should be closed after this
+}
+
+func TestMarshalJSON_UnmarshalableData(t *testing.T) {
+	// chan cannot be marshaled to JSON
+	ch := make(chan int)
+	_, err := marshalJSON(ch)
+	require.Error(t, err, "marshalJSON() should error for unmarshalable data")
+}
+
+func TestClientSettings_ResetDayDefault(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/login":
+			resp := APIResponse{Success: true}
+			json.NewEncoder(w).Encode(resp)
+		case "/panel/api/inbounds/addClient":
+			resp := APIResponse{Success: true, Msg: "Client added"}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(resp)
+		default:
+			t.Errorf("Unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, "admin", "password")
+	require.NoError(t, err)
+	ctx := context.Background()
+
+	// resetDays = 0 should use default
+	result, err := client.AddClientWithID(ctx, 1, "testuser", "client-id", "sub-id", 1000, time.Now(), 0)
+	require.NoError(t, err)
+	assert.Equal(t, config.SubscriptionResetDay, result.Reset, "resetDays=0 should use default")
+}
+
+func TestAddClientWithID_NegativeResetDays(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/login":
+			resp := APIResponse{Success: true}
+			json.NewEncoder(w).Encode(resp)
+		case "/panel/api/inbounds/addClient":
+			resp := APIResponse{Success: true, Msg: "Client added"}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(resp)
+		default:
+			t.Errorf("Unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, "admin", "password")
+	require.NoError(t, err)
+	ctx := context.Background()
+
+	result, err := client.AddClientWithID(ctx, 1, "testuser", "client-id", "sub-id", 1000, time.Now(), -5)
+	require.NoError(t, err)
+	assert.Equal(t, config.SubscriptionResetDay, result.Reset, "Negative resetDays should use default")
 }
