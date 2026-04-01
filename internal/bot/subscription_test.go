@@ -1334,3 +1334,41 @@ func TestCreateSubscription_ShowLoadingMessageFails(t *testing.T) {
 
 	assert.False(t, xuiCalled, "XUI should not be called when loading message fails")
 }
+
+func TestHandleQRCode_DatabaseErrorReturnsError(t *testing.T) {
+	cfg := &config.Config{
+		TelegramAdminID: 123456,
+		TrafficLimitGB:  100,
+	}
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+
+	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
+		return nil, errors.New("database connection failed")
+	}
+
+	ctx := context.Background()
+	handler.handleQRCode(ctx, 123456, "testuser", 100)
+
+	assert.True(t, mockBot.SendCalledSafe(), "Bot.Send should be called with error message")
+	assert.Contains(t, mockBot.LastSentTextSafe(), "нет активной подписки")
+}
+
+func TestHandleBackToSubscription_DeleteFails(t *testing.T) {
+	cfg := &config.Config{
+		TelegramAdminID: 123456,
+		TrafficLimitGB:  100,
+	}
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewMockBotAPI()
+	mockBot.RequestError = errors.New("delete failed")
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+
+	ctx := context.Background()
+	handler.handleBackToSubscription(ctx, 123456, "testuser", 789)
+
+	assert.True(t, mockBot.RequestCalledSafe(), "Bot.Request should be called to delete message")
+}

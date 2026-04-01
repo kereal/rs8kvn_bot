@@ -1,5 +1,7 @@
 package bot
 
+import "time"
+
 func NewTestBotConfig() *BotConfig {
 	return &BotConfig{
 		Username:                "testbot",
@@ -9,5 +11,6 @@ func NewTestBotConfig() *BotConfig {
 		CanJoinGroups:           false,
 		CanReadAllGroupMessages: false,
 		SupportsInlineQueries:   false,
+		loadedAt:                time.Now(),
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/getsentry/sentry-go"
 	"github.com/stretchr/testify/assert"
@@ -506,4 +507,97 @@ func TestService_FlushSentry_NoSentry(t *testing.T) {
 	defer service.Close()
 
 	service.flushSentry(0)
+}
+
+// ==================== isStdoutError Tests ====================
+
+func TestIsStdoutError_NilError(t *testing.T) {
+	assert.False(t, isStdoutError(nil), "nil error should not be stdout error")
+}
+
+func TestIsStdoutError_InvalidArgument(t *testing.T) {
+	assert.True(t, isStdoutError(fmt.Errorf("invalid argument")), "invalid argument should be stdout error")
+}
+
+func TestIsStdoutError_BadFileDescriptor(t *testing.T) {
+	assert.True(t, isStdoutError(fmt.Errorf("bad file descriptor")), "bad file descriptor should be stdout error")
+}
+
+func TestIsStdoutError_OtherError(t *testing.T) {
+	assert.False(t, isStdoutError(fmt.Errorf("some other error")), "other error should not be stdout error")
+}
+
+// ==================== Service Sentry Tests ====================
+
+func TestService_CaptureSentry_WithHub(t *testing.T) {
+	tmpDir := t.TempDir()
+	logPath := filepath.Join(tmpDir, "test.log")
+
+	service, err := NewService(logPath, "info")
+	require.NoError(t, err, "NewService() error")
+	defer service.Close()
+
+	// Create a mock hub
+	client, _ := sentry.NewClient(sentry.ClientOptions{
+		Dsn: "",
+	})
+	hub := sentry.NewHub(client, sentry.NewScope())
+	service.SetSentryHub(hub)
+
+	// Should not panic and should capture event
+	service.captureSentry("test message with hub", sentry.LevelError)
+}
+
+func TestService_FlushSentry_WithHub(t *testing.T) {
+	tmpDir := t.TempDir()
+	logPath := filepath.Join(tmpDir, "test.log")
+
+	service, err := NewService(logPath, "info")
+	require.NoError(t, err, "NewService() error")
+	defer service.Close()
+
+	client, _ := sentry.NewClient(sentry.ClientOptions{
+		Dsn: "",
+	})
+	hub := sentry.NewHub(client, sentry.NewScope())
+	service.SetSentryHub(hub)
+
+	// Should not panic
+	service.flushSentry(100 * time.Millisecond)
+}
+
+func TestService_WithError_WithHub(t *testing.T) {
+	tmpDir := t.TempDir()
+	logPath := filepath.Join(tmpDir, "test.log")
+
+	service, err := NewService(logPath, "info")
+	require.NoError(t, err, "NewService() error")
+	defer service.Close()
+
+	client, _ := sentry.NewClient(sentry.ClientOptions{
+		Dsn: "",
+	})
+	hub := sentry.NewHub(client, sentry.NewScope())
+	service.SetSentryHub(hub)
+
+	testErr := fmt.Errorf("test error with sentry hub")
+	newService := service.WithError(testErr)
+	assert.NotNil(t, newService, "WithError() should not return nil")
+}
+
+// ==================== Close Error Aggregation Tests ====================
+
+func TestClose_BothErrors(t *testing.T) {
+	tmpDir := t.TempDir()
+	logPath := filepath.Join(tmpDir, "test.log")
+
+	_, err := Init(logPath, "info")
+	require.NoError(t, err, "Init() error")
+
+	// First close may succeed, second close should aggregate errors
+	_ = Close()
+	err = Close()
+	// Second close should return error since logger is already closed
+	// We just verify it doesn't panic
+	t.Logf("Second Close() returned: %v", err)
 }

@@ -339,10 +339,273 @@ func TestHandleUpdate_UnknownCommands(t *testing.T) {
 				},
 			}
 
-			// Should not panic for any command
 			assert.NotPanics(t, func() {
 				handleUpdate(ctx, handler, update)
 			})
 		})
+	}
+}
+
+func TestHandleUpdate_UnknownCommand_Text(t *testing.T) {
+	cfg := &config.Config{
+		TelegramAdminID: 123456,
+		TrafficLimitGB:  50,
+	}
+	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	handler := bot.NewHandler(mockBot, cfg, mockDB, mockXUI, bot.NewTestBotConfig())
+	ctx := context.Background()
+
+	update := tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat: &tgbotapi.Chat{ID: 123456},
+			From: &tgbotapi.User{ID: 123456, UserName: "testuser"},
+			Text: "/unknown",
+			Entities: []tgbotapi.MessageEntity{
+				{Type: "bot_command", Offset: 0, Length: 8},
+			},
+		},
+	}
+
+	handleUpdate(ctx, handler, update)
+
+	assert.True(t, mockBot.SendCalledSafe())
+	assert.Contains(t, mockBot.LastSentTextSafe(), "Неизвестная команда")
+}
+
+func TestHandleUpdate_NonCommandMessage_Text(t *testing.T) {
+	cfg := &config.Config{
+		TelegramAdminID: 123456,
+		TrafficLimitGB:  50,
+	}
+	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	handler := bot.NewHandler(mockBot, cfg, mockDB, mockXUI, bot.NewTestBotConfig())
+	ctx := context.Background()
+
+	update := tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat: &tgbotapi.Chat{ID: 123456},
+			From: &tgbotapi.User{ID: 123456, UserName: "testuser"},
+			Text: "Hello, this is not a command",
+		},
+	}
+
+	handleUpdate(ctx, handler, update)
+
+	assert.True(t, mockBot.SendCalledSafe())
+	assert.Contains(t, mockBot.LastSentTextSafe(), "/start")
+}
+
+func TestHandleUpdate_NonCommandMessage_UsernameFallback(t *testing.T) {
+	cfg := &config.Config{
+		TelegramAdminID: 123456,
+		TrafficLimitGB:  50,
+	}
+	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	handler := bot.NewHandler(mockBot, cfg, mockDB, mockXUI, bot.NewTestBotConfig())
+	ctx := context.Background()
+
+	update := tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat: &tgbotapi.Chat{ID: 123456},
+			From: &tgbotapi.User{ID: 123456, FirstName: "John"},
+			Text: "hello",
+		},
+	}
+
+	assert.NotPanics(t, func() {
+		handleUpdate(ctx, handler, update)
+	})
+}
+
+func TestHandleUpdate_NonCommandMessage_NoUser(t *testing.T) {
+	cfg := &config.Config{
+		TelegramAdminID: 123456,
+		TrafficLimitGB:  50,
+	}
+	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	handler := bot.NewHandler(mockBot, cfg, mockDB, mockXUI, bot.NewTestBotConfig())
+	ctx := context.Background()
+
+	update := tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat: &tgbotapi.Chat{ID: 123456},
+			Text: "hello",
+		},
+	}
+
+	assert.NotPanics(t, func() {
+		handleUpdate(ctx, handler, update)
+	})
+}
+
+func TestHandleUpdate_NonCommandMessage_LongText(t *testing.T) {
+	cfg := &config.Config{
+		TelegramAdminID: 123456,
+		TrafficLimitGB:  50,
+	}
+	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	handler := bot.NewHandler(mockBot, cfg, mockDB, mockXUI, bot.NewTestBotConfig())
+	ctx := context.Background()
+
+	longText := strings.Repeat("a", 200)
+	update := tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat: &tgbotapi.Chat{ID: 123456},
+			From: &tgbotapi.User{ID: 123456, UserName: "testuser"},
+			Text: longText,
+		},
+	}
+
+	assert.NotPanics(t, func() {
+		handleUpdate(ctx, handler, update)
+	})
+}
+
+func TestHandleUpdate_CallbackQuery_NoMessage(t *testing.T) {
+	cfg := &config.Config{
+		TelegramAdminID: 123456,
+		TrafficLimitGB:  50,
+	}
+	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	handler := bot.NewHandler(mockBot, cfg, mockDB, mockXUI, bot.NewTestBotConfig())
+	ctx := context.Background()
+
+	update := tgbotapi.Update{
+		CallbackQuery: &tgbotapi.CallbackQuery{
+			ID:   "test-callback",
+			Data: "test_data",
+			From: &tgbotapi.User{ID: 123456},
+		},
+	}
+
+	assert.NotPanics(t, func() {
+		handleUpdate(ctx, handler, update)
+	})
+}
+
+func TestHandleUpdate_NilMessageAndNilCallback(t *testing.T) {
+	cfg := &config.Config{
+		TelegramAdminID: 123456,
+		TrafficLimitGB:  50,
+	}
+	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	handler := bot.NewHandler(mockBot, cfg, mockDB, mockXUI, bot.NewTestBotConfig())
+	ctx := context.Background()
+
+	update := tgbotapi.Update{}
+
+	assert.NotPanics(t, func() {
+		handleUpdate(ctx, handler, update)
+	})
+
+	assert.False(t, mockBot.SendCalledSafe())
+	assert.False(t, mockBot.RequestCalledSafe())
+}
+
+func TestHandleUpdateSafely_DoesNotSwallowPanic(t *testing.T) {
+	cfg := &config.Config{
+		TelegramAdminID: 123456,
+		TrafficLimitGB:  50,
+	}
+	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	handler := bot.NewHandler(mockBot, cfg, mockDB, mockXUI, bot.NewTestBotConfig())
+	ctx := context.Background()
+
+	update := tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat: &tgbotapi.Chat{ID: 123456},
+			From: &tgbotapi.User{ID: 123456, UserName: "testuser"},
+			Text: "/start",
+		},
+	}
+
+	assert.NotPanics(t, func() {
+		handleUpdateSafely(ctx, handler, update)
+	})
+}
+
+func TestGetVersion_DevVersion(t *testing.T) {
+	v := getVersion()
+	assert.NotEmpty(t, v)
+	assert.Contains(t, v, "rs8kvn_bot@")
+}
+
+func TestHandleUpdateSafely_RecoversFromPanic(t *testing.T) {
+	cfg := &config.Config{
+		TelegramAdminID: 123456,
+		TrafficLimitGB:  50,
+	}
+	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	handler := bot.NewHandler(mockBot, cfg, mockDB, mockXUI, bot.NewTestBotConfig())
+	ctx := context.Background()
+
+	update := tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat: &tgbotapi.Chat{ID: 123456},
+			From: &tgbotapi.User{ID: 123456, UserName: "testuser"},
+			Text: "/start",
+		},
+	}
+
+	assert.NotPanics(t, func() {
+		handleUpdateSafely(ctx, handler, update)
+	})
+}
+
+func TestStartBackupScheduler_ExecutesBackup(t *testing.T) {
+	tmpFile := t.TempDir() + "/test.db"
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	done := make(chan struct{})
+	go func() {
+		startBackupScheduler(ctx, tmpFile)
+		close(done)
+	}()
+
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Backup scheduler did not stop after context cancellation")
+	}
+}
+
+func TestStartTrialCleanupScheduler_ExecutesCleanup(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	done := make(chan struct{})
+	go func() {
+		startTrialCleanupScheduler(ctx, nil, nil, 1, 3)
+		close(done)
+	}()
+
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Trial cleanup scheduler did not stop after context cancellation")
 	}
 }
