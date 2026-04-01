@@ -3,7 +3,7 @@
 **Repo:** https://github.com/kereal/rs8kvn_bot  
 **Module:** `rs8kvn_bot` (Go 1.25+)  
 **Version:** v2.0.2  
-**Last Updated:** 2026-03-31
+**Last Updated:** 2026-04-01
 
 ---
 
@@ -92,9 +92,10 @@ tgvpn_go/
 
 | Module | Coverage | Status |
 |--------|----------|--------|
-| `internal/bot` | **95.3%** | ✅ Excellent |
+| `internal/bot` | **95.1%** | ✅ Excellent |
 | `internal/ratelimiter` | **100%** | ✅ Excellent |
 | `internal/heartbeat` | **95.8%** | ✅ Excellent |
+| `internal/service` | **95.7%** | ✅ Excellent |
 | `internal/health` | **90.3%** | ✅ Excellent |
 | `internal/xui` | **86.8%** | ✅ Good |
 | `internal/config` | **83.2%** | ✅ Good |
@@ -104,11 +105,28 @@ tgvpn_go/
 | `internal/database` | **79.2%** | ✅ Good |
 | `internal/utils` | **75.0%** | ✅ Good |
 | `cmd/bot` | **19.6%** | 🟡 Low (main is integration) |
-| **Overall** | **~80%** | ✅ Good |
+| **Overall** | **~82%** | ✅ Good |
+
+All tests pass with `-race` detector (0 failures, 14 packages).
 
 ---
 
-## Last Changes (This Session - v2.0.1)
+## Last Changes (This Session - v2.0.2)
+
+### Test Suite Optimization
+- **Removed ~25 trivial/duplicate/skipped tests** — tests that verified Go language features instead of app logic
+- **Added behavioral assertions** to all handler/callback/subscription tests — verify actual message content, not just "not panic"
+- **Added missing test coverage** — QR code error paths, back navigation, notifyAdmin, createSubscription errors, admin stats
+- **Fixed data races in mock infrastructure** — added mutex-protected accessors (`SendCalledSafe()`, `LastSentTextSafe()`, `RequestCalledSafe()`, `SendCountSafe()`) to MockBotAPI
+- **Added call tracking to MockXUIClient** — `AddClientCalled`, `AddClientWithIDCalled`, `DeleteClientCalled`, `UpdateClientCalled` bool fields
+- **Improved integration tests** — replaced recursive O(n²) `contains()` with `strings.Contains`, improved MockXUIServer with dedicated endpoint handlers
+- **Added fuzzing tests** — `FuzzEscapeMarkdown`, `FuzzTruncateString`, `FuzzInviteCodeRegex`
+- **All 14 packages pass with `-race` detector, 0 failures**
+- **Bot package coverage: 95.1%**
+
+---
+
+## Last Changes (Previous Session - v2.0.1)
 
 ### 1. Trial Subscription Duplication Fix (`internal/web/web.go`)
 - **Problem:** Refresh page = new trial subscription created
@@ -215,6 +233,6 @@ air
 
 ---
 
-**Generated:** 2026-03-31  
-**Session:** Trial duplication fix, dynamic bot username, Docker migrations  
-**Version:** v2.0.1
+**Generated:** 2026-04-01  
+**Session:** Test suite optimization — behavioral assertions, race-safe mocks, fuzzing, coverage cleanup  
+**Version:** v2.0.2

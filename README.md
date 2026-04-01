@@ -2,7 +2,7 @@
 
 Telegram bot for distributing VLESS+Reality+Vision proxy subscriptions from 3x-ui panel.
 
-**Version:** v2.0.1 | **Coverage:** ~80% | **License:** MIT
+**Version:** v2.0.2 | **Coverage:** ~82% | **License:** MIT
 
 ## Features
 
@@ -24,7 +24,7 @@ Telegram bot for distributing VLESS+Reality+Vision proxy subscriptions from 3x-u
 - ⚡ Graceful shutdown with goroutine tracking
 - 🔒 Circuit breaker for 3x-ui panel
 - 🐳 Docker support with health checks
-- 🧪 Unit tests (~80% coverage)
+- 🧪 Unit tests (~82% coverage, race-safe, fuzzing)
 - ✅ golangci-lint and gosec for code quality
 - 🍪 Trial duplication prevention (3-hour cookie)
 
@@ -532,19 +532,27 @@ go test ./internal/database/... -v
 
 | Package | Coverage |
 |---------|----------|
-| `internal/bot` | 95.3% |
-| `internal/ratelimiter` | 100% |
-| `internal/heartbeat` | 95.8% |
-| `internal/health` | 90.3% |
-| `internal/xui` | 86.8% |
-| `internal/config` | 83.2% |
-| `internal/web` | 83.0% |
-| `internal/logger` | 82.3% |
-| `internal/backup` | 81.4% |
-| `internal/database` | 79.2% |
-| `internal/utils` | 75.0% |
-| `cmd/bot` | 19.6% |
-| **Overall** | **~80%** |
+| `internal/bot` | **95.1%** | ✅ Excellent |
+| `internal/ratelimiter` | **100%** | ✅ Excellent |
+| `internal/heartbeat` | **95.8%** | ✅ Excellent |
+| `internal/service` | **95.7%** | ✅ Excellent |
+| `internal/health` | **90.3%** | ✅ Excellent |
+| `internal/xui` | **86.8%** | ✅ Good |
+| `internal/config` | **83.2%** | ✅ Good |
+| `internal/web` | **83.0%** | ✅ Good |
+| `internal/logger` | **82.3%** | ✅ Good |
+| `internal/backup` | **81.4%** | ✅ Good |
+| `internal/database` | **79.2%** | ✅ Good |
+| `internal/utils` | **75.0%** | ✅ Good |
+| `cmd/bot` | **19.6%** | 🟡 Low (main is integration) |
+| **Overall** | **~82%** | ✅ Good |
+
+All tests pass with `-race` detector (0 failures). Test suite includes:
+- **Table-driven tests** for parameterized coverage
+- **Behavioral assertions** verifying message content, not just "not panic"
+- **Fuzzing tests** for `escapeMarkdown`, `truncateString`, `InviteCodeRegex`
+- **Integration tests** with mock HTTP server for 3x-ui endpoints
+- **Thread-safe mocks** with mutex-protected accessors for concurrent test safety
 
 ### Linting
 
