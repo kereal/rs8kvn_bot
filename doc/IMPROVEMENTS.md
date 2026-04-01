@@ -1,141 +1,177 @@
-# Project Improvements & Development Roadmap
+# Улучшения проекта и дорожная карта разработки
 
-**Generated:** 2026-03-31  
-**Version:** v2.0.2  
-**Overall Coverage:** ~80%
-
----
-
-## Current State Assessment
-
-After thorough review of every file in the project, here's the honest assessment:
-
-**What's already good:**
-- ✅ Goroutine leak issues fixed (backup scheduler, trial cleanup use `select { case <-ctx.Done() }`)
-- ✅ Graceful shutdown properly implemented (semaphore, wg.Wait, timeout)
-- ✅ Panic recovery with stack traces in Sentry
-- ✅ BotConfig extracted, SubscriptionService layer started
-- ✅ Circuit breaker for 3x-ui API
-- ✅ Rate limiting per user
-- ✅ Database migrations system
-- ✅ ~80% test coverage
-
-**What needs attention:** See priorities below.
+**Создано:** 2026-03-31  
+**Версия:** v2.0.2  
+**Общее покрытие:** ~80%
 
 ---
 
-## P0 — Critical Fixes (Do Now)
+## Текущее состояние проекта
 
-### 1. Hardcoded Donation Link & Contact
-**File:** `internal/bot/handler.go:218-224`
+После тщательного изучения каждого файла проекта — честная оценка:
 
-The T-Bank donation URL and personal Telegram `@kereal` are hardcoded. Should be env-configurable:
+**Что уже хорошо:**
+- ✅ Утечки горутин исправлены (планировщик бэкапов, очистка триалов используют `select { case <-ctx.Done() }`)
+- ✅ Корректное завершение работы (семафор, wg.Wait, таймаут)
+- ✅ Восстановление после паник со стеком в Sentry
+- ✅ BotConfig вынесен, слой SubscriptionService начат
+- ✅ Circuit breaker для 3x-ui API
+- ✅ Рейт-лимитинг на пользователя
+- ✅ Система миграций БД
+- ✅ ~80% покрытия тестами
+
+**Что требует внимания:** См. приоритеты ниже.
+
+---
+
+## P0 — Критические исправления (Сделать сейчас)
+
+### 1. Захардкоженная ссылка на донаты и контакт
+**Файл:** `internal/bot/handler.go:218-224`
+
+URL доната Т-Банка и личный Telegram `@kereal` захардкожены в коде.
+
+**Зачем:** При смене платёжной ссылки или контакта придётся пересобирать и деплоить бота. Вынос в конфиг позволяет менять ссылки на лету через `.env`.
+
+**Решение:** Добавить в `.env`:
 ```
 DONATE_URL=https://tbank.ru/cf/9J6agHgWdNg
 CONTACT_TELEGRAM=kereal
 ```
 
-### 2. Dead Code: `referrals` Map
-**File:** `internal/bot/handler.go:44-45`
+### 2. Мёртвый код: карта `referrals`
+**Файл:** `internal/bot/handler.go:44-45`
 
-`referrals map[int64]int64` and `referralsMu` are declared but never read or written. Either implement referral tracking or remove.
+`referrals map[int64]int64` и `referralsMu` объявлены, но нигде не читаются и не записываются.
 
-### 3. No-Op Stub Methods
-**File:** `internal/bot/handler.go:300-305`
+**Зачем:** Мёртвый код запутывает, создаёт ложное впечатление, что реферальная система реализована. Новому разработчику придётся разбираться, работает ли она.
 
-`StoreConversation()` and `GetUserContext()` are empty stubs. Remove or implement.
+**Решение:** Либо реализовать трекинг рефералов, либо удалить.
 
-### 4. Trial Creation Lacks Atomic Rollback
-**File:** `internal/web/web.go:269-288`
+### 3. Пустые заглушки методов
+**Файл:** `internal/bot/handler.go:300-305`
 
-If `CreateTrialSubscription` fails, xui client is deleted — but if that delete ALSO fails, an orphan client remains. Should use the same rollback-with-retry pattern as `SubscriptionService.Create()`.
+`StoreConversation()` и `GetUserContext()` — пустые методы, ничего не делают.
 
-### 5. Subscription Creation Lock Is Fragile
-**File:** `internal/bot/subscription.go:50-62`
+**Зачем:** Выглядят как реализованный функционал, но на самом деле это no-op. Любой код, который их вызовет, будет молча работать неправильно.
 
-Manual lock/unlock pattern with `inProgress` map. If any code path panics between lock/unlock, the entry stays forever. Use `defer` properly or `sync.Map`.
+**Решение:** Удалить или реализовать.
+
+### 4. Создание триала без атомарного отката
+**Файл:** `internal/web/web.go:269-288`
+
+Если `CreateTrialSubscription` падает, xui-клиент удаляется — но если и удаление тоже упадёт, останется «осиротевший» клиент на панели.
+
+**Зачем:** При ошибке на панели 3x-ui может остаться клиент без записи в БД. Это мусор, который занимает слот и может вызвать проблемы при лимите пользователей.
+
+**Решение:** Использовать тот же паттерн отката с повторными попытками, что и в `SubscriptionService.Create()`.
+
+### 5. Хрупкая блокировка создания подписок
+**Файл:** `internal/bot/subscription.go:50-62`
+
+Ручной lock/unlock через map `inProgress`. Если где-то между lock и unlock произойдёт паника — запись останется навсегда и все последующие запросы этого пользователя будут зависать.
+
+**Зачем:** Блокировка нужна, чтобы пользователь не создал две подписки одновременно. Но текущая реализация может навсегда заблокировать пользователя при любой ошибке.
+
+**Решение:** Использовать `defer` для гарантированного unlock или `sync.Map`.
 
 ---
 
-## P1 — High Priority Refactoring
+## P1 — Высокоприоритетный рефакторинг
 
-### 6. Extract Message Texts into Centralized Config
-**Files:** `internal/bot/handler.go`, `subscription.go`, `admin.go`, `web/web.go`
+### 6. Вынести тексты сообщений в централизованный конфиг
+**Файлы:** `internal/bot/handler.go`, `subscription.go`, `admin.go`, `web/web.go`
 
-All user-facing strings are hardcoded Russian text scattered across files. Benefits of extracting:
-- Change text without recompilation (YAML/JSON config)
-- Prepare for future i18n
-- Reduce duplication ("❌ Временная ошибка. Попробуйте позже." appears in multiple files)
-- A/B test messages
+Все пользовательские строки — захардкоженный русский текст, разбросанный по файлам.
 
-**Approach:** `internal/bot/messages.go` with a `Messages` struct or simple key-value map.
+**Зачем:**
+- Менять текст без пересборки (YAML/JSON конфиг)
+- Подготовить базу для мультиязычности (i18n)
+- Убрать дубликаты ("❌ Временная ошибка. Попробуйте позже." встречается в нескольких файлах)
+- A/B тестирование сообщений
 
-### 7. Inline HTML Should Be Externalized
-**File:** `internal/web/web.go:349-463`
+**Решение:** `internal/bot/messages.go` со структурой `Messages` или map ключ-значение.
 
-Massive HTML strings embedded in Go code. No syntax highlighting, hard to maintain, no template escaping.
+### 7. Инлайн-HTML нужно вынести в шаблоны
+**Файл:** `internal/web/web.go:349-463`
 
-**Solution:** Move to `internal/web/templates/` as `.html` files using `html/template` with `template.ParseFS()`. Automatic XSS protection via Go's template engine.
+Огромные HTML-строки встроены прямо в Go-код. Нет подсветки синтаксиса, сложно поддерживать, нет экранирования.
 
-### 8. `Handler` Is a God Object
-**File:** `internal/bot/handler.go:35-51`
+**Зачем:** HTML в Go-строках — это боль при редактировании, легко допустить XSS, невозможно отдать дизайнеру. Шаблоны `html/template` дают автоматическую защиту от XSS.
 
-14 fields, handles: subscription CRUD, admin commands, callbacks, menus, referrals, invites, QR codes, rate limiting, caching, notifications.
+**Решение:** Перенести в `internal/web/templates/` как `.html` файлы с `template.ParseFS()`.
 
-**Solution:** Split into focused handlers:
+### 8. `Handler` — «божественный объект» (God Object)
+**Файл:** `internal/bot/handler.go:35-51`
+
+14 полей, обрабатывает: CRUD подписок, админ-команды, колбэки, меню, рефералы, инвайты, QR-коды, рейт-лимитинг, кеширование, уведомления.
+
+**Зачем:** Один огромный struct, который делает всё — невозможно тестировать, сложно менять, тяжело читать. Новый разработчик тратит часы, чтобы понять, где что находится.
+
+**Решение:** Разделить на сфокусированные обработчики:
 ```
 internal/bot/
-├── handler.go              # Core struct + DI wiring
-├── subscription_handler.go # Subscription lifecycle
-├── admin_handler.go        # Admin commands
-├── invite_handler.go       # Referral/invite flow
-├── menu_handler.go         # Navigation
-└── message_handler.go      # Message sending utilities
+├── handler.go              # Основная структура + DI
+├── subscription_handler.go # Жизненный цикл подписок
+├── admin_handler.go        # Админ-команды
+├── invite_handler.go       # Рефералы/инвайты
+├── menu_handler.go         # Навигация
+└── message_handler.go      # Утилиты отправки сообщений
 ```
 
-### 9. Expand `SubscriptionService` to Absorb All Subscription Logic
-**File:** `internal/service/subscription.go`
+### 9. Расширить `SubscriptionService` — забрать всю бизнес-логику
+**Файл:** `internal/service/subscription.go`
 
-Currently only has `Create`, `GetByTelegramID`, `Delete`. But `handleCreateSubscription`, `handleMySubscription`, `handleQRCode` in `internal/bot/subscription.go` still contain business logic (cache lookups, traffic queries, error classification).
+Сейчас только `Create`, `GetByTelegramID`, `Delete`. Но `handleCreateSubscription`, `handleMySubscription`, `handleQRCode` в `internal/bot/subscription.go` всё ещё содержат бизнес-логику (поиск в кеше, запросы трафика, классификация ошибок).
 
-**Solution:** Move ALL subscription business logic into `SubscriptionService`:
-- `CreateWithPendingInvite()` — handles pending invite flow
-- `GetWithTraffic()` — combines DB lookup + xui traffic query
-- Bot layer should only handle Telegram formatting/sending
+**Зачем:** Бот-слой должен только форматировать и отправлять сообщения в Telegram. Вся логика работы с подписками должна быть в сервисе — тогда её можно переиспользовать (веб, API, бот) и легко тестировать.
 
-### 10. `ensureLoggedIn` Concurrent Login Deduplication
-**File:** `internal/xui/client.go:149-171`
+**Решение:** Перенести ВСЮ бизнес-логику подписок в `SubscriptionService`:
+- `CreateWithPendingInvite()` — обработка pending invite
+- `GetWithTraffic()` — запрос из БД + трафик из xui
+- Бот-слой — только форматирование и отправка
 
-Two goroutines calling `ensureLoggedIn` after session expiry may both attempt login. The mutex protects the second check but not the breaker.
+### 10. Дедупликация параллельных логинов в `ensureLoggedIn`
+**Файл:** `internal/xui/client.go:149-171`
 
-**Solution:** Use `singleflight.Group` from `golang.org/x/sync` to deduplicate concurrent login attempts.
+Две горутины, вызвавшие `ensureLoggedIn` после истечения сессии, могут обе попытаться залогиниться. Мьютекс защищает вторую проверку, но не circuit breaker.
+
+**Зачем:** При истечении сессии все ожидающие запросы одновременно попытаются залогиниться — это лишняя нагрузка на панель 3x-ui и может привести к бану по IP.
+
+**Решение:** Использовать `singleflight.Group` из `golang.org/x/sync` для дедупликации одновременных логинов.
 
 ---
 
-## P2 — Medium Priority Improvements
+## P2 — Среднеприоритетные улучшения
 
-### 11. Expiry Notification System
-**Current State:** Not implemented
+### 11. Система уведомлений об истечении подписки
+**Текущее состояние:** Не реализовано
 
-Daily scheduler that checks subscriptions approaching expiry:
-- 7 days before: "⏰ Ваша подписка истекает через 7 дней"
-- 3 days before: "⏰ Ваша подписка истекает через 3 дня"
-- 1 day before: "⚠️ Ваша подписка истекает завтра!"
+Ежедневный планировщик проверяет подписки, приближающиеся к истечению:
+- За 7 дней: "⏰ Ваша подписка истекает через 7 дней"
+- За 3 дня: "⏰ Ваша подписка истекает через 3 дня"
+- За 1 день: "⚠️ Ваша подписка истекает завтра!"
 
-New `internal/notifier/` package with ticker-based scheduler.
+**Зачем:** Пользователи забывают продлить подписку и уходят. Напоминания увеличивают удержание и конверсию в продление.
 
-### 12. `/extend` Admin Command
+**Решение:** Новый пакет `internal/notifier/` с планировщиком на тикере.
+
+### 12. Админ-команда `/extend`
 ```
 /extend <id> <days>
 /extend <id> <traffic_gb>
 ```
 
-### 13. Structured Error Types
-**File:** `internal/bot/subscription.go:294-319`
+**Зачем:** Сейчас админу нужно лезть в панель 3x-ui или БД, чтобы продлить подписку пользователю. Команда `/extend` позволяет сделать это прямо из Telegram за секунды.
 
-`handleCreateError` uses `strings.Contains(errStr, "connection refused")` — fragile string matching.
+### 13. Типизированные ошибки
+**Файл:** `internal/bot/subscription.go:294-319`
 
-**Solution:** Typed errors with `errors.Is()`:
+`handleCreateError` использует `strings.Contains(errStr, "connection refused")` — хрупкое сравнение строк.
+
+**Зачем:** Строки ошибок могут измениться при обновлении 3x-ui, и классификация ошибок перестанет работать. Типизированные ошибки надёжны и тестируемы.
+
+**Решение:**
 ```go
 var (
     ErrXUIConnection   = errors.New("xui connection failed")
@@ -144,186 +180,242 @@ var (
 )
 ```
 
-### 14. Prometheus Metrics
-Basic metrics exposed via `/metrics`:
-- `bot_subscriptions_created_total` (counter)
-- `bot_subscriptions_active` (gauge)
-- `bot_trial_requests_total` (counter)
-- `bot_callback_duration_seconds` (histogram)
-- `xui_api_requests_total` (counter)
-- `xui_api_duration_seconds` (histogram)
+### 14. Prometheus-метрики
+Базовые метрики через `/metrics`:
+- `bot_subscriptions_created_total` (счётчик)
+- `bot_subscriptions_active` (гейдж)
+- `bot_trial_requests_total` (счётчик)
+- `bot_callback_duration_seconds` (гистограмма)
+- `xui_api_requests_total` (счётчик)
+- `xui_api_duration_seconds` (гистограмма)
 
-### 15. Broadcast Progress Reporting
-**File:** `internal/bot/admin.go:174-279`
+**Зачем:** Без метрик вы слепы — не знаете, сколько пользователей, как часто падают запросы к 3x-ui, какая нагрузка. Prometheus + Grafana дают мониторинг и алерты.
 
-Currently sends "started" then "completed" with no intermediate feedback. Edit the message with progress:
+### 15. Прогресс рассылки
+**Файл:** `internal/bot/admin.go:174-279`
+
+Сейчас отправляет «начато» и «завершено» без промежуточной обратной связи.
+
+**Зачем:** При рассылке на 500+ пользователей админ не понимает, завис бот или работает. Обновляемое сообщение с прогрессом даёт уверенность и возможность отменить.
+
+**Решение:** Редактировать сообщение с прогрессом:
 ```
 📤 Рассылка: 150/500 (30%)
 ```
 
-### 16. SQLite Connection Pooling
-Configure GORM's underlying sql.DB:
+### 16. Пул соединений SQLite
+Настроить `sql.DB` под GORM:
 ```go
 sqlDB, _ := db.DB()
-sqlDB.SetMaxOpenConns(1)  // SQLite single writer
+sqlDB.SetMaxOpenConns(1)  // SQLite — один писатель
 sqlDB.SetMaxIdleConns(2)
 sqlDB.SetConnMaxLifetime(time.Hour)
 ```
 
-### 17. Context Timeouts for All Bot Operations
-Many handlers pass `ctx` without timeout. A slow xui call blocks indefinitely.
+**Зачем:** Без настройки пула GORM может создавать лишние соединения, что приводит к ошибкам `database is locked` в SQLite. Правильная настройка повышает стабильность.
 
-**Solution:** Wrap at handler entry:
+### 17. Таймауты контекста для всех операций бота
+Многие обработчики передают `ctx` без таймаута. Медленный вызов xui блокирует навсегда.
+
+**Зачем:** Если панель 3x-ui зависла, бот будет ждать бесконечно — горутина утекает, пользователь видит вечную загрузку. Таймаут гарантирует, что операция завершится за разумное время.
+
+**Решение:** Обернуть на входе в обработчик:
 ```go
 ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 defer cancel()
 ```
 
-### 18. Integration Tests for Trial Flow
-**File:** `internal/web/web_test.go`
+### 18. Интеграционные тесты для потока триалов
+**Файл:** `internal/web/web_test.go`
 
-The `/i/{code}` flow is the most complex feature but has limited test coverage:
-- Cookie-based trial deduplication
-- IP rate limiting
-- Invalid invite codes
-- Concurrent trial requests from same IP
+Поток `/i/{code}` — самая сложная фича, но покрыта тестами слабо.
 
-### 19. Multi-Admin Support
-**File:** `internal/config/config.go`
+**Зачем:** Триалы — это точка входа новых пользователей. Если сломается — не будет регистраций. Тесты ловят регрессии до деплоя.
 
-Currently `TELEGRAM_ADMIN_ID` (single). Change to `TELEGRAM_ADMIN_IDS=123,456,789`.
+**Что тестировать:**
+- Дедупликация триалов по кукам
+- Рейт-лимитинг по IP
+- Невалидные коды инвайтов
+- Параллельные запросы триала с одного IP
 
-### 20. `internal/health/` Is Dead Code
-**File:** `internal/health/health.go`
+### 19. Поддержка нескольких админов
+**Файл:** `internal/config/config.go`
 
-HANDOVER.md confirms: "legacy, unused — web/ replaces it". Delete it.
+Сейчас `TELEGRAM_ADMIN_ID` (один). Заменить на `TELEGRAM_ADMIN_IDS=123,456,789`.
+
+**Зачем:** Один админ — единая точка отказа. Если админ заболел/в отпуске — никто не может управлять ботом. Несколько админов решают эту проблему.
+
+### 20. `internal/health/` — мёртвый код
+**Файл:** `internal/health/health.go`
+
+HANDOVER.md подтверждает: «legacy, unused — web/ заменяет его».
+
+**Зачем:** Мёртвый код увеличивает время сборки, путает новых разработчиков, может содержать уязвимости (забытый endpoint).
+
+**Решение:** Удалить.
 
 ---
 
-## P3 — New Features
+## P3 — Новые фичи
 
-### 21. Subscription Auto-Renewal Notification
-When monthly reset happens:
+### 21. Уведомление об авто-продлении подписки
+При ежемесячном сбросе:
 ```
 🔄 Ваша подписка обновлена!
 📊 Трафик сброшен до 100 ГБ
 📅 Следующее обновление: 30 апреля
 ```
 
-### 22. User Activity Tracking
-Track last subscription check / VPN usage for:
-- Identifying inactive users
-- Re-engagement campaigns
-- Cleaning abandoned trials
+**Зачем:** Пользователи не знают, когда обновится трафик. Уведомление снижает количество обращений в поддержку и повышает доверие.
 
-### 23. Admin Dashboard Command
-`/dashboard` — comprehensive view:
-- Total users, active subscriptions, trials
-- Traffic usage summary
-- Recent registrations (24h)
-- Top referrers
-- System health
+### 22. Трекинг активности пользователей
+Отслеживать последнюю проверку подписки / использование VPN для:
+- Выявления неактивных пользователей
+- Кампаний по возвращению
+- Очистки заброшенных триалов
 
-### 24. Webhook Mode Support
-Currently long polling only. For production with high traffic:
+**Зачем:** Без данных об активности невозможно понять, сколько пользователей реально пользуются VPN. Это нужно для принятия решений о kapacитете и маркетинге.
+
+### 23. Команда админ-дашборда
+`/dashboard` — полный обзор:
+- Всего пользователей, активных подписок, триалов
+- Сводка по трафику
+- Последние регистрации (24ч)
+- Топ рефереров
+- Здоровье системы
+
+**Зачем:** Админу приходится собирать информацию из БД, панели 3x-ui и логов. Одна команда даёт полную картину за секунды.
+
+### 24. Поддержка webhook
+Сейчас только long polling. Для продакшена с высоким трафиком:
 ```
 TELEGRAM_WEBHOOK_URL=https://vpn.site/webhook
 ```
 
-### 25. Subscription Pause/Resume
-Allow users to temporarily pause their subscription while traveling.
+**Зачем:** Long polling имеет задержку и не масштабируется. Webhook даёт мгновенную доставку обновлений и работает стабильнее при высокой нагрузке.
 
-### 26. Analytics Dashboard (Web)
-Simple web dashboard at `/admin/dashboard` (secret-protected):
-- User growth chart
-- Subscription status distribution
-- Traffic usage over time
-- Referral network graph
+### 25. Пауза/возобновление подписки
+Позволить пользователям временно приостанавливать подписку (например, в отпуске).
 
----
+**Зачем:** Пользователи уезжают и не хотят терять дни подписки. Пауза повышает лояльность и снижает отток.
 
-## P4 — Technical Debt & Performance
+### 26. Аналитический дашборд (веб)
+Простой веб-дашборд на `/admin/dashboard` (под защитой секрета):
+- График роста пользователей
+- Распределение статусов подписок
+- Использование трафика во времени
+- Граф реферальной сети
 
-### 27. Suspicious Indirect Dependencies
-**File:** `go.mod`
-
-- `github.com/gohugoio/hugo v0.149.1` — Why is Hugo a dependency?
-- `github.com/bep/godartsass/v2` — Hugo's dependency
-- `github.com/air-verse/air` — Dev tool, should not be in `go.mod`
-
-Run `go mod tidy` and audit indirect dependencies.
-
-### 28. Cache Invalidation Gaps
-**File:** `internal/bot/cache.go`
-
-Cache invalidated on delete but not on other operations. Add TTL-based invalidation or explicit invalidation points.
-
-### 29. Consider `log/slog` Instead of `zap`
-Go 1.25 has mature `log/slog` in stdlib. Would remove one external dependency.
-
-### 30. Fuzzing Tests
-Go 1.25 native fuzzing for:
-- `inviteCodeRegex` validation
-- `escapeMarkdown` function
-- `truncateString` function
-- URL parsing in `GetExternalURL`
-
-### 31. Migration Rollback Support
-**File:** `internal/database/migrations/`
-
-Only `.up.sql` files exist. Add `.down.sql` for each migration.
-
-### 32. Config Hot-Reload
-Watch `.env` file with `fsnotify` and reload:
-- `LOG_LEVEL` — commonly needed
-- `TRAFFIC_LIMIT_GB` — adjusting limits
-- `DONATE_URL` — updating links
+**Зачем:** Telegram-дашборд удобен для быстрой проверки, но веб-дашборд с графиками даёт глубокую аналитику для принятия бизнес-решений.
 
 ---
 
-## Quick Wins (Under 30 Min Each)
+## P4 — Технический долг и производительность
 
-| # | Task | Impact | Effort |
-|---|------|--------|--------|
-| Q1 | Remove dead `referrals` map | Code clarity | 5 min |
-| Q2 | Remove empty `StoreConversation`/`GetUserContext` | Code clarity | 5 min |
-| Q3 | Delete unused `internal/health/` | Reduce confusion | 10 min |
-| Q4 | Extract donation/contact URLs to config | Flexibility | 15 min |
-| Q5 | Add context timeouts to bot handlers | Reliability | 30 min |
-| Q6 | Fix `go mod tidy` cleanup | Binary size | 15 min |
-| Q7 | Add migration `.down.sql` files | Safety | 30 min |
-| Q8 | Add `singleflight` for xui login | Performance | 20 min |
-| Q9 | Add context cancellation check in broadcast | Graceful shutdown | 10 min |
-| Q10 | Configure SQLite connection pooling | Reliability | 10 min |
+### 27. Подозрительные транзитивные зависимости
+**Файл:** `go.mod`
+
+- `github.com/gohugoio/hugo v0.149.1` — Зачем Hugo в зависимостях?
+- `github.com/bep/godartsass/v2` — Зависимость Hugo
+- `github.com/air-verse/air` — Dev-инструмент, не должен быть в `go.mod`
+
+**Зачем:** Лишние зависимости увеличивают размер бинарника, время сборки и поверхность для уязвимостей. Hugo в продакшен-боте — это минимум +50МБ к бинарнику.
+
+**Решение:** Запустить `go mod tidy` и провести аудит зависимостей.
+
+### 28. Пробелы в инвалидации кеша
+**Файл:** `internal/bot/cache.go`
+
+Кеш инвалидируется при удалении, но не при других операциях.
+
+**Зачем:** Если пользователь обновил подписку на панели, а бот показывает старые данные из кеша — это путает и создаёт ложные обращения в поддержку.
+
+**Решение:** Добавить TTL-инвалидацию или явные точки инвалидации.
+
+### 29. Рассмотреть `log/slog` вместо `zap`
+В Go 1.25 зрелый `log/slog` в стандартной библиотеке.
+
+**Зачем:** Убирает одну внешнюю зависимость, упрощает сборку. `slog` достаточно быстр для телеграм-бота и не требует отдельной настройки.
+
+### 30. Фаззинг-тесты
+Нативный фаззинг Go 1.25 для:
+- Валидация `inviteCodeRegex`
+- Функция `escapeMarkdown`
+- Функция `truncateString`
+- Парсинг URL в `GetExternalURL`
+
+**Зачем:** Фаззинг находит краевые случаи, которые невозможно предугадать вручную — пустые строки, спецсимволы, переполнения. Это предотвращает паники в продакшене.
+
+### 31. Поддержка отката миграций
+**Файл:** `internal/database/migrations/`
+
+Существуют только `.up.sql` файлы.
+
+**Зачем:** Если миграция сломала что-то в продакшене — без `.down.sql` единственный способ отката — восстанавливать бэкап БД, что означает потерю данных. Файлы отката позволяют отменить миграцию за секунды.
+
+**Решение:** Добавить `.down.sql` для каждой миграции.
+
+### 32. Горячая перезагрузка конфига
+Следить за `.env` через `fsnotify` и перезагружать:
+- `LOG_LEVEL` — часто нужно
+- `TRAFFIC_LIMIT_GB` — корректировка лимитов
+- `DONATE_URL` — обновление ссылок
+
+**Зачем:** Сейчас для смены уровня логов или лимита трафика нужно перезапускать бота — это обрывает активные соединения. Горячая перезагрузка позволяет менять настройки без даунтайма.
 
 ---
 
-## Recommended Implementation Order
+## Быстрые победы (до 30 минут каждая)
 
-### Sprint 1 — Cleanup & Stability (Week 1)
-1. Quick Wins Q1-Q4, Q9-Q10
-2. P0-4: Trial creation atomic rollback
-3. P0-5: Subscription creation lock fix
-4. P1-10: singleflight for xui login
-5. P4-20: Remove unused health package
+| # | Задача | Влияние | Время | Зачем |
+|---|--------|---------|-------|-------|
+| Q1 | Удалить мёртвую карту `referrals` | Чистота кода | 5 мин | Убирает путаницу, уменьшает размер кода |
+| Q2 | Удалить пустые `StoreConversation`/`GetUserContext` | Чистота кода | 5 мин | Убирает ложное впечатление реализованного функционала |
+| Q3 | Удалить неиспользуемый `internal/health/` | Уменьшение путаницы | 10 мин | Мёртвый код путает и может содержать уязвимости |
+| Q4 | Вынести ссылки донатов/контактов в конфиг | Гибкость | 15 мин | Смена ссылок без пересборки бота |
+| Q5 | Добавить таймауты контекста в обработчики | Надёжность | 30 мин | Предотвращает вечные зависания при проблемах с 3x-ui |
+| Q6 | Очистка `go mod tidy` | Размер бинарника | 15 мин | Уменьшает размер и время сборки |
+| Q7 | Добавить `.down.sql` для миграций | Безопасность | 30 мин | Возможность отката без восстановления из бэкапа |
+| Q8 | Добавить `singleflight` для логина xui | Производительность | 20 мин | Предотвращает множественные параллельные логины |
+| Q9 | Добавить проверку отмены контекста в рассылке | Корректное завершение | 10 мин | Рассылка остановится при shutdown бота |
+| Q10 | Настроить пул соединений SQLite | Надёжность | 10 мин | Предотвращает `database is locked` ошибки |
 
-### Sprint 2 — Architecture (Week 2)
-6. P1-6: Extract message templates
-7. P1-7: Externalize HTML templates
-8. P1-9: Expand SubscriptionService
-9. P2-13: Structured error types
-10. P2-17: Context timeouts everywhere
+---
 
-### Sprint 3 — Features (Week 3)
-11. P2-11: Expiry notification system
-12. P2-12: `/extend` admin command
-13. P2-14: Prometheus metrics
-14. P2-16: DB connection pooling
-15. P2-19: Multi-admin support
+## Рекомендуемый порядок реализации
 
-### Sprint 4 — Polish (Week 4)
-16. P2-15: Broadcast progress reporting
-17. P2-18: Integration tests for trial flow
-18. P3-23: Admin dashboard command
-19. P4-29: Consider slog migration
-20. P4-30: Fuzzing tests
+### Спринт 1 — Очистка и стабильность (Неделя 1)
+1. Быстрые победы Q1-Q4, Q9-Q10
+2. P0-4: Атомарный откат создания триала
+3. P0-5: Исправление блокировки создания подписок
+4. P1-10: singleflight для логина xui
+5. P4-20: Удаление неиспользуемого пакета health
+
+**Цель спринта:** Убрать мёртвый код, закрыть критические баги, повысить стабильность.
+
+### Спринт 2 — Архитектура (Неделя 2)
+6. P1-6: Вынести шаблоны сообщений
+7. P1-7: Вынести HTML-шаблоны
+8. P1-9: Расширить SubscriptionService
+9. P2-13: Типизированные ошибки
+10. P2-17: Таймауты контекста везде
+
+**Цель спринта:** Разделить ответственность, упростить тестирование и поддержку.
+
+### Спринт 3 — Фичи (Неделя 3)
+11. P2-11: Система уведомлений об истечении
+12. P2-12: Админ-команда `/extend`
+13. P2-14: Prometheus-метрики
+14. P2-16: Пул соединений БД
+15. P2-19: Поддержка нескольких админов
+
+**Цель спринта:** Добавить полезные фичи для пользователей и админов, настроить мониторинг.
+
+### Спринт 4 — Полировка (Неделя 4)
+16. P2-15: Прогресс рассылки
+17. P2-18: Интеграционные тесты для триалов
+18. P3-23: Команда админ-дашборда
+19. P4-29: Рассмотреть миграцию на slog
+20. P4-30: Фаззинг-тесты
+
+**Цель спринта:** Улучшить UX, покрыть тестами, подготовить к масштабированию.
