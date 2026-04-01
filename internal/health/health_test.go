@@ -386,3 +386,71 @@ func TestHandleHealthz_DegradedComponents(t *testing.T) {
 
 	assert.Equal(t, StatusDegraded, health.Status, "status")
 }
+
+// ==================== Additional Health Tests ====================
+
+func TestHandleIndex_Success(t *testing.T) {
+	server := NewServer(19400)
+
+	require.NoError(t, server.Start(), "Failed to start server")
+	defer server.Stop(context.Background())
+
+	time.Sleep(100 * time.Millisecond)
+
+	resp, err := http.Get("http://localhost:19400/")
+	require.NoError(t, err, "Failed to get index")
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode, "Index should return 200")
+}
+
+func TestHandleReadyz_AllComponentsUp(t *testing.T) {
+	server := NewServer(19401)
+	server.SetReady(true)
+
+	server.RegisterChecker("up", func(ctx context.Context) ComponentHealth {
+		return ComponentHealth{Status: StatusOK}
+	})
+
+	require.NoError(t, server.Start(), "Failed to start server")
+	defer server.Stop(context.Background())
+
+	time.Sleep(100 * time.Millisecond)
+
+	resp, err := http.Get("http://localhost:19401/readyz")
+	require.NoError(t, err, "Failed to get readyz")
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode, "readyz should return 200 when all components up")
+}
+
+func TestHandleReadyz_NoCheckers(t *testing.T) {
+	server := NewServer(19402)
+	server.SetReady(true)
+
+	require.NoError(t, server.Start(), "Failed to start server")
+	defer server.Stop(context.Background())
+
+	time.Sleep(100 * time.Millisecond)
+
+	resp, err := http.Get("http://localhost:19402/readyz")
+	require.NoError(t, err, "Failed to get readyz")
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode, "readyz should return 200 with no checkers")
+}
+
+func TestHandleHealthz_NoCheckers(t *testing.T) {
+	server := NewServer(19403)
+
+	require.NoError(t, server.Start(), "Failed to start server")
+	defer server.Stop(context.Background())
+
+	time.Sleep(100 * time.Millisecond)
+
+	resp, err := http.Get("http://localhost:19403/healthz")
+	require.NoError(t, err, "Failed to get healthz")
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode, "healthz should return 200 with no checkers")
+}

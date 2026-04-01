@@ -703,3 +703,116 @@ func TestBackupDatabase_Success(t *testing.T) {
 
 	assert.Equal(t, string(content), string(backupContent), "Backup content does not match original")
 }
+
+// ==================== Additional Error Path Tests ====================
+
+func TestBackupDatabase_EmptyFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	// Create an empty file
+	require.NoError(t, os.WriteFile(dbPath, []byte{}, 0644), "Failed to create empty test file")
+
+	err := BackupDatabase(context.Background(), dbPath)
+	require.NoError(t, err, "BackupDatabase() should succeed with empty file")
+
+	backupPath := dbPath + ".backup"
+	_, err = os.Stat(backupPath)
+	require.NoError(t, err, "Backup file should be created for empty source")
+}
+
+func TestBackupDatabase_LargeFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	// Create a 10MB file
+	content := make([]byte, 10*1024*1024)
+	for i := range content {
+		content[i] = byte(i % 256)
+	}
+	require.NoError(t, os.WriteFile(dbPath, content, 0644), "Failed to create large test file")
+
+	ctx := context.Background()
+	err := BackupDatabase(ctx, dbPath)
+	require.NoError(t, err, "BackupDatabase() should succeed with large file")
+
+	backupPath := dbPath + ".backup"
+	backupContent, err := os.ReadFile(backupPath)
+	require.NoError(t, err, "Failed to read backup file")
+	assert.Equal(t, content, backupContent, "Backup content should match large file")
+}
+
+func TestRotateBackups_ExceedsRetention(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	// Create multiple old backups
+	for i := 0; i < 5; i++ {
+		backupName := fmt.Sprintf("%s.backup.2024010%d_120000", dbPath, i)
+		require.NoError(t, os.WriteFile(backupName, []byte(fmt.Sprintf("backup %d", i)), 0644))
+	}
+
+	// Create current backup
+	require.NoError(t, os.WriteFile(dbPath+".backup", []byte("current backup"), 0644))
+
+	err := RotateBackups(dbPath, 3)
+	require.NoError(t, err, "RotateBackups() error")
+
+	// Count remaining backups
+	files, _ := filepath.Glob(dbPath + ".backup.*")
+	assert.LessOrEqual(t, len(files), 3, "Should have at most 3 backups after rotation")
+}
+
+func TestRotateBackups_KeepsNewest(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	// Create backups with different timestamps
+	timestamps := []string{
+		"20240101_120000",
+		"20240102_120000",
+		"20240103_120000",
+	}
+	for _, ts := range timestamps {
+		backupName := fmt.Sprintf("%s.backup.%s", dbPath, ts)
+		require.NoError(t, os.WriteFile(backupName, []byte(ts), 0644))
+	}
+
+	// Create current backup
+	require.NoError(t, os.WriteFile(dbPath+".backup", []byte("current"), 0644))
+
+	err := RotateBackups(dbPath, 2)
+	require.NoError(t, err, "RotateBackups() error")
+
+	files, _ := filepath.Glob(dbPath + ".backup.*")
+	assert.LessOrEqual(t, len(files), 2, "Should keep only 2 newest backups")
+}
+
+func TestValidatePath_PathTraversal(t *testing.T) {
+	tests := []struct {
+		name    string
+		path    string
+		wantErr bool
+	}{
+		{"dotdot", "../etc/passwd", true},
+		{"dotdot_subdir", "data/../../../etc/passwd", true},
+		{"root", "/", true},
+		{"dev", "/dev/sda", true},
+		{"var_run", "/var/run/docker.sock", true},
+		{"valid_relative", "data/database.db", false},
+		{"valid_home", "/home/user/data.db", false},
+		{"valid_tmp", "/tmp/test.db", false},
+		{"empty", "", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validatePath(tt.path)
+			if tt.wantErr {
+				assert.Error(t, err, "validatePath(%q) should error", tt.path)
+			} else {
+				assert.NoError(t, err, "validatePath(%q) should not error", tt.path)
+			}
+		})
+	}
+}
