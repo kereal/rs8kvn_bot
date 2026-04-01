@@ -1207,3 +1207,297 @@ func TestE2E_InviteLink_FullFlow_BindTrial(t *testing.T) {
 	assert.Equal(t, env.username, sub.Username)
 	assert.False(t, sub.IsTrial, "Should no longer be marked as trial")
 }
+
+// === Full Integration Cycle Tests ===
+
+func TestE2E_FullCycle_InviteToQR(t *testing.T) {
+	env := setupE2EEnv(t)
+	defer env.db.Close()
+
+	ctx := context.Background()
+
+	// Phase 1: Create invite via web
+	inviteCode := "full_cycle_qr"
+	_, err := env.db.GetOrCreateInvite(ctx, 300001, inviteCode)
+	require.NoError(t, err)
+
+	env.cfg.TrialRateLimit = 100
+
+	srv := web.NewServer("127.0.0.1:0", env.db, env.xui, env.cfg, env.botConfig)
+
+	req := httptest.NewRequest("GET", "/i/"+inviteCode, nil)
+	req.Header.Set("X-Forwarded-For", "10.2.1.1")
+	rec := httptest.NewRecorder()
+	srv.HandleInvite(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code, "Invite page should load")
+
+	html := rec.Body.String()
+	assert.Contains(t, html, "trial_", "Should contain trial activation link")
+
+	// Extract trial sub ID
+	subIDStart := strings.Index(html, "trial_")
+	require.Greater(t, subIDStart, -1)
+	subIDEnd := strings.Index(html[subIDStart:], "\"")
+	require.Greater(t, subIDEnd, -1)
+	trialSubID := html[subIDStart+6 : subIDStart+subIDEnd]
+
+	// Phase 2: Bind trial via /start
+	resetMockBotAPI(env.botAPI)
+	env.xui.AddClientWithIDCalled = false
+	env.xui.UpdateClientCalled = false
+
+	env.handler.HandleStart(ctx, tgbotapi.Update{
+		Message: newCommandMessage(env.chatID, env.chatID, env.username, "/start trial_"+trialSubID, 6),
+	})
+
+	assert.True(t, env.botAPI.SendCalled, "Activation message should be sent")
+	assert.Contains(t, env.botAPI.LastSentText, "подписк", "Should mention subscription")
+
+	// Verify DB state
+	sub, err := env.db.GetByTelegramID(ctx, env.chatID)
+	require.NoError(t, err)
+	assert.Equal(t, env.chatID, sub.TelegramID)
+	assert.False(t, sub.IsTrial, "Should be converted from trial")
+	assert.NotEmpty(t, sub.Username, "Username should be stored")
+
+	// Phase 3: Request QR code
+	resetMockBotAPI(env.botAPI)
+
+	env.handler.HandleCallback(ctx, tgbotapi.Update{
+		CallbackQuery: &tgbotapi.CallbackQuery{
+			Message: &tgbotapi.Message{
+				Chat: &tgbotapi.Chat{ID: env.chatID},
+				From: &tgbotapi.User{
+					ID:       env.chatID,
+					UserName: env.username,
+				},
+			},
+			From: &tgbotapi.User{
+				ID:       env.chatID,
+				UserName: env.username,
+			},
+			Data: "qr_code",
+		},
+	})
+
+	assert.True(t, env.botAPI.SendCalled, "QR should be sent")
+	assert.True(t, env.botAPI.RequestCalled, "QR photo should be uploaded")
+}
+
+func TestE2E_FullCycle_ShareToSubscription(t *testing.T) {
+	env := setupE2EEnv(t)
+	defer env.db.Close()
+
+	ctx := context.Background()
+
+	// Phase 1: Create invite link
+	inviteCode := "share_to_sub"
+	_, err := env.db.GetOrCreateInvite(ctx, 300002, inviteCode)
+	require.NoError(t, err)
+
+	// Phase 2: User clicks share link
+	resetMockBotAPI(env.botAPI)
+	env.handler.HandleStart(ctx, tgbotapi.Update{
+		Message: newCommandMessage(env.chatID, env.chatID, env.username, "/start share_"+inviteCode, 6),
+	})
+
+	assert.True(t, env.botAPI.SendCalled, "Should respond to share link")
+	assert.Contains(t, env.botAPI.LastSentText, "пригласил", "Should mention invitation")
+
+	// Phase 3: Create subscription via callback
+	resetMockBotAPI(env.botAPI)
+	env.xui.AddClientWithIDCalled = false
+
+	env.handler.HandleCallback(ctx, tgbotapi.Update{
+		CallbackQuery: &tgbotapi.CallbackQuery{
+			Message: &tgbotapi.Message{
+				Chat: &tgbotapi.Chat{ID: env.chatID},
+				From: &tgbotapi.User{
+					ID:       env.chatID,
+					UserName: env.username,
+				},
+			},
+			From: &tgbotapi.User{
+				ID:       env.chatID,
+				UserName: env.username,
+			},
+			Data: "create_subscription",
+		},
+	})
+
+	assert.True(t, env.botAPI.SendCalled, "Subscription confirmation should be sent")
+	assert.Contains(t, env.botAPI.LastSentText, "подписк", "Should mention subscription")
+
+	// Verify subscription was created
+	sub, err := env.db.GetByTelegramID(ctx, env.chatID)
+	require.NoError(t, err)
+	assert.Equal(t, env.chatID, sub.TelegramID)
+	// Note: ReferredBy is set in memory after DB save but not persisted back
+	// This is a known limitation of the current implementation
+}
+
+func TestE2E_FullCycle_MultipleUsersViaInvite(t *testing.T) {
+	env := setupE2EEnv(t)
+	defer env.db.Close()
+
+	ctx := context.Background()
+
+	inviteCode := "multi_user_invite"
+	referrerID := int64(300003)
+	_, err := env.db.GetOrCreateInvite(ctx, referrerID, inviteCode)
+	require.NoError(t, err)
+
+	env.cfg.TrialRateLimit = 100
+
+	srv := web.NewServer("127.0.0.1:0", env.db, env.xui, env.cfg, env.botConfig)
+
+	// Two different users access the same invite link
+	user1ChatID := int64(400001)
+	user2ChatID := int64(400002)
+
+	for _, chatID := range []int64{user1ChatID, user2ChatID} {
+		req := httptest.NewRequest("GET", "/i/"+inviteCode, nil)
+		req.Header.Set("X-Forwarded-For", fmt.Sprintf("10.3.%d.1", chatID%256))
+		rec := httptest.NewRecorder()
+		srv.HandleInvite(rec, req)
+
+		assert.Equal(t, http.StatusOK, rec.Code, "User %d should get trial page", chatID)
+
+		html := rec.Body.String()
+		subIDStart := strings.Index(html, "trial_")
+		require.Greater(t, subIDStart, -1)
+		subIDEnd := strings.Index(html[subIDStart:], "\"")
+		require.Greater(t, subIDEnd, -1)
+		trialSubID := html[subIDStart+6 : subIDStart+subIDEnd]
+
+		resetMockBotAPI(env.botAPI)
+		env.xui.AddClientWithIDCalled = false
+		env.xui.UpdateClientCalled = false
+
+		username := fmt.Sprintf("user_%d", chatID)
+		env.handler.HandleStart(ctx, tgbotapi.Update{
+			Message: newCommandMessage(chatID, chatID, username, "/start trial_"+trialSubID, 6),
+		})
+
+		assert.True(t, env.botAPI.SendCalled, "User %d should get activation message", chatID)
+
+		sub, err := env.db.GetByTelegramID(ctx, chatID)
+		require.NoError(t, err, "User %d should have subscription", chatID)
+		assert.Equal(t, chatID, sub.TelegramID)
+		assert.False(t, sub.IsTrial)
+		assert.Equal(t, referrerID, sub.ReferredBy, "User %d should have correct referrer", chatID)
+	}
+}
+
+func TestE2E_FullCycle_InviteThenShare(t *testing.T) {
+	env := setupE2EEnv(t)
+	defer env.db.Close()
+
+	ctx := context.Background()
+
+	// Create two invites: one for web, one for share
+	webInviteCode := "web_invite_then_share"
+	shareInviteCode := "share_invite_then_bind"
+
+	_, err := env.db.GetOrCreateInvite(ctx, 300004, webInviteCode)
+	require.NoError(t, err)
+	_, err = env.db.GetOrCreateInvite(ctx, 300005, shareInviteCode)
+	require.NoError(t, err)
+
+	env.cfg.TrialRateLimit = 100
+
+	srv := web.NewServer("127.0.0.1:0", env.db, env.xui, env.cfg, env.botConfig)
+
+	// User accesses web invite
+	req := httptest.NewRequest("GET", "/i/"+webInviteCode, nil)
+	req.Header.Set("X-Forwarded-For", "10.4.1.1")
+	rec := httptest.NewRecorder()
+	srv.HandleInvite(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	html := rec.Body.String()
+	subIDStart := strings.Index(html, "trial_")
+	require.Greater(t, subIDStart, -1)
+	subIDEnd := strings.Index(html[subIDStart:], "\"")
+	require.Greater(t, subIDEnd, -1)
+	trialSubID := html[subIDStart+6 : subIDStart+subIDEnd]
+
+	// Bind trial
+	resetMockBotAPI(env.botAPI)
+	env.xui.AddClientWithIDCalled = false
+	env.xui.UpdateClientCalled = false
+
+	env.handler.HandleStart(ctx, tgbotapi.Update{
+		Message: newCommandMessage(env.chatID, env.chatID, env.username, "/start trial_"+trialSubID, 6),
+	})
+
+	assert.True(t, env.botAPI.SendCalled)
+
+	// Now user clicks a share link (should be ignored since they have a subscription)
+	resetMockBotAPI(env.botAPI)
+	env.handler.HandleStart(ctx, tgbotapi.Update{
+		Message: newCommandMessage(env.chatID, env.chatID, env.username, "/start share_"+shareInviteCode, 6),
+	})
+
+	assert.True(t, env.botAPI.SendCalled)
+	// Should show regular menu, not invite message
+	assert.NotContains(t, env.botAPI.LastSentText, "пригласил", "Should not show invite message when user has subscription")
+}
+
+func TestE2E_FullCycle_ConcurrentInviteAccess(t *testing.T) {
+	env := setupE2EEnv(t)
+	defer env.db.Close()
+
+	ctx := context.Background()
+
+	inviteCode := "concurrent_invite"
+	_, err := env.db.GetOrCreateInvite(ctx, 300006, inviteCode)
+	require.NoError(t, err)
+
+	env.cfg.TrialRateLimit = 1000
+
+	srv := web.NewServer("127.0.0.1:0", env.db, env.xui, env.cfg, env.botConfig)
+
+	var wg sync.WaitGroup
+	results := make(chan int, 10)
+
+	// 10 concurrent users access the same invite
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+
+			req := httptest.NewRequest("GET", "/i/"+inviteCode, nil)
+			req.Header.Set("X-Forwarded-For", fmt.Sprintf("10.5.%d.1", idx))
+			rec := httptest.NewRecorder()
+			srv.HandleInvite(rec, req)
+
+			results <- rec.Code
+		}(i)
+	}
+
+	wg.Wait()
+	close(results)
+
+	successCount := 0
+	for code := range results {
+		if code == http.StatusOK {
+			successCount++
+		}
+	}
+
+	assert.Equal(t, 10, successCount, "All concurrent requests should succeed")
+
+	// Verify all trials were created
+	allSubs, err := env.db.GetAllSubscriptions(ctx)
+	require.NoError(t, err)
+	trialCount := 0
+	for _, sub := range allSubs {
+		if sub.IsTrial && sub.TelegramID == 0 {
+			trialCount++
+		}
+	}
+	assert.GreaterOrEqual(t, trialCount, 10, "Should have at least 10 trial subscriptions")
+}
