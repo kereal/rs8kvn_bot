@@ -944,3 +944,55 @@ func TestMaskAPIKey_VariousInputs(t *testing.T) {
 		})
 	}
 }
+
+// ==================== Fuzz Tests ====================
+
+func FuzzLoad_InvalidEnvValues(f *testing.F) {
+	baseEnvs := map[string]string{
+		"TELEGRAM_BOT_TOKEN": "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
+		"TELEGRAM_ADMIN_ID":  "123456",
+		"XUI_HOST":           "http://localhost:2053",
+		"XUI_USERNAME":       "admin",
+		"XUI_PASSWORD":       "password",
+		"XUI_INBOUND_ID":     "1",
+		"LOG_LEVEL":          "info",
+	}
+
+	invalidValues := []string{
+		"invalid",
+		"-1",
+		"0",
+		"999999999999999999",
+		"abc",
+		"",
+		"\x00",
+		"   ",
+		"\n",
+		"../../etc/passwd",
+		"<script>alert(1)</script>",
+	}
+
+	for _, val := range invalidValues {
+		f.Add(val)
+	}
+
+	f.Fuzz(func(t *testing.T, invalidVal string) {
+		for _, key := range []string{"TELEGRAM_ADMIN_ID", "XUI_INBOUND_ID", "TRAFFIC_LIMIT_GB", "HEARTBEAT_INTERVAL", "TRIAL_DURATION_HOURS", "TRIAL_RATE_LIMIT", "HEALTH_CHECK_PORT"} {
+			os.Setenv(key, invalidVal)
+		}
+		for k, v := range baseEnvs {
+			os.Setenv(k, v)
+		}
+		defer func() {
+			for _, key := range []string{"TELEGRAM_ADMIN_ID", "XUI_INBOUND_ID", "TRAFFIC_LIMIT_GB", "HEARTBEAT_INTERVAL", "TRIAL_DURATION_HOURS", "TRIAL_RATE_LIMIT", "HEALTH_CHECK_PORT", "TELEGRAM_BOT_TOKEN", "TELEGRAM_ADMIN_ID", "XUI_HOST", "XUI_USERNAME", "XUI_PASSWORD", "XUI_INBOUND_ID", "LOG_LEVEL"} {
+				os.Unsetenv(key)
+			}
+		}()
+
+		// Should either succeed with defaults or fail gracefully
+		cfg, err := Load()
+		if err == nil {
+			assert.NotNil(t, cfg, "Config should not be nil on success")
+		}
+	})
+}
