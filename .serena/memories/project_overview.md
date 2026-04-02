@@ -9,7 +9,7 @@ This is a Telegram bot for distributing VLESS+Reality+Vision proxy subscriptions
 - QR code for easy subscription import
 - Invite/trial landing page with one-click setup
 - Referral system
-- Configurable traffic limit (default 100GB/month)
+- Configurable traffic limit (default 30GB/month)
 - Auto-renewal on the last day of each month
 - Admin notifications on new subscriptions
 - Heartbeat monitoring support
