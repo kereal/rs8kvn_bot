@@ -110,33 +110,14 @@ const (
 )
 
 // Logging Constants
+// NOTE: LogMaxSizeMB, LogMaxBackups, LogMaxAgeDays have been moved to the
+// logger package. Sentry constants have also been moved to logger.
 const (
 	// DefaultLogFilePath is the default path for log files
 	DefaultLogFilePath = "./data/bot.log"
 
 	// DefaultLogLevel is the default log level
 	DefaultLogLevel = "info"
-
-	// LogMaxSizeMB is the maximum size of a log file in MB
-	LogMaxSizeMB = 10
-
-	// LogMaxBackups is the maximum number of old log files to retain
-	LogMaxBackups = 2
-
-	// LogMaxAgeDays is the maximum number of days to retain old log files
-	LogMaxAgeDays = 14
-)
-
-// Sentry Constants
-const (
-	// SentryFlushTimeout is the timeout for flushing Sentry events
-	SentryFlushTimeout = 5 * time.Second
-
-	// SentryPanicFlushTimeout is the timeout for flushing Sentry during panic recovery
-	SentryPanicFlushTimeout = 2 * time.Second
-
-	// SentryTracesSampleRate is the sample rate for performance monitoring
-	SentryTracesSampleRate = 0.1 // 10%
 )
 
 // Graceful Shutdown Constants

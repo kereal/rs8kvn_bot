@@ -82,12 +82,12 @@ func main() {
 			Dsn:              cfg.SentryDSN,
 			Environment:      "production",
 			Release:          getVersion(),
-			TracesSampleRate: config.SentryTracesSampleRate,
+			TracesSampleRate: logger.SentryTracesSampleRate,
 		})
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to initialize Sentry: %v\n", err)
 		} else {
-			defer sentry.Flush(config.SentryFlushTimeout)
+			defer sentry.Flush(logger.SentryFlushTimeout)
 			fmt.Fprintln(os.Stderr, "Sentry error tracking initialized")
 		}
 	}
@@ -96,7 +96,7 @@ func main() {
 	logService, err := logger.Init(cfg.LogFilePath, cfg.LogLevel)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
-		sentry.Flush(config.SentryFlushTimeout) // flush before exit
+		sentry.Flush(logger.SentryFlushTimeout) // flush before exit
 		os.Exit(1)                              //nolint:gocritic // flush called explicitly above
 	}
 	defer func() {
@@ -222,7 +222,7 @@ func main() {
 		defer func() {
 			if r := recover(); r != nil {
 				sentry.CurrentHub().Recover(r)
-				sentry.Flush(config.SentryPanicFlushTimeout)
+				sentry.Flush(logger.SentryPanicFlushTimeout)
 				logger.Error("Backup scheduler panicked", zap.Any("panic", r))
 			}
 			wg.Done()
@@ -235,7 +235,7 @@ func main() {
 		defer func() {
 			if r := recover(); r != nil {
 				sentry.CurrentHub().Recover(r)
-				sentry.Flush(config.SentryPanicFlushTimeout)
+				sentry.Flush(logger.SentryPanicFlushTimeout)
 				logger.Error("Heartbeat scheduler panicked", zap.Any("panic", r))
 			}
 			wg.Done()
@@ -249,7 +249,7 @@ func main() {
 		defer func() {
 			if r := recover(); r != nil {
 				sentry.CurrentHub().Recover(r)
-				sentry.Flush(config.SentryPanicFlushTimeout)
+				sentry.Flush(logger.SentryPanicFlushTimeout)
 				logger.Error("Trial cleanup scheduler panicked", zap.Any("panic", r))
 			}
 			wg.Done()
@@ -336,7 +336,7 @@ func handleUpdateSafely(ctx context.Context, handler *bot.Handler, update tgbota
 		if r := recover(); r != nil {
 			stack := debug.Stack()
 			sentry.CurrentHub().Recover(r)
-			sentry.Flush(config.SentryPanicFlushTimeout)
+			sentry.Flush(logger.SentryPanicFlushTimeout)
 			logger.Error("Panic in update handler",
 				zap.Any("panic", r),
 				zap.String("stack", string(stack)),
