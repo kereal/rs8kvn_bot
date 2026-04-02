@@ -237,91 +237,57 @@ func TestHandleStart_WithDatabase(t *testing.T) {
 	}
 
 	got, err := database.GetByTelegramID(123456789)
-	if err != nil {
-		t.Fatalf("GetByTelegramID() error = %v", err)
-	}
+	require.NoError(t, err, "GetByTelegramID() error")
 
-	if got.TelegramID != 123456789 {
-		t.Errorf("TelegramID = %d, want 123456789", got.TelegramID)
-	}
-
-	if got.Status != "active" {
-		t.Errorf("Status = %s, want active", got.Status)
-	}
+	assert.Equal(t, int64(123456789), got.TelegramID)
+	assert.Equal(t, "active", got.Status)
 }
 
 func TestHandleStart_NoDatabase(t *testing.T) {
 	tdb, err := testutil.NewTestDatabase(t)
-	if err != nil {
-		t.Fatalf("Failed to create test database: %v", err)
-	}
+	require.NoError(t, err, "Failed to create test database")
 	defer tdb.Cleanup()
 
 	_, err = database.GetByTelegramID(999999999)
-	if err == nil {
-		t.Error("Expected error for non-existent user")
-	}
+	assert.Error(t, err, "Expected error for non-existent user")
 }
 
 func TestHandleMySubscription_NoSubscription(t *testing.T) {
 	tdb, err := testutil.NewTestDatabase(t)
-	if err != nil {
-		t.Fatalf("Failed to create test database: %v", err)
-	}
+	require.NoError(t, err, "Failed to create test database")
 	defer tdb.Cleanup()
 
 	_, err = database.GetByTelegramID(999999999)
-	if err == nil {
-		t.Error("Expected error for non-existent user")
-	}
+	assert.Error(t, err, "Expected error for non-existent user")
 }
 
 func TestHandleMySubscription_WithSubscription(t *testing.T) {
 	tdb, err := testutil.NewTestDatabase(t)
-	if err != nil {
-		t.Fatalf("Failed to create test database: %v", err)
-	}
+	require.NoError(t, err, "Failed to create test database")
 	defer tdb.Cleanup()
 
 	sub := testutil.CreateTestSubscription(123456789, "testuser", "active", time.Now().Add(24*time.Hour))
-	if err := database.CreateSubscription(sub); err != nil {
-		t.Fatalf("Failed to create subscription: %v", err)
-	}
+	require.NoError(t, database.CreateSubscription(sub), "Failed to create subscription")
 
 	got, err := database.GetByTelegramID(123456789)
-	if err != nil {
-		t.Fatalf("GetByTelegramID() error = %v", err)
-	}
+	require.NoError(t, err, "GetByTelegramID() error")
 
-	if got.TelegramID != sub.TelegramID {
-		t.Errorf("TelegramID = %v, want %v", got.TelegramID, sub.TelegramID)
-	}
-
-	if got.Status != "active" {
-		t.Errorf("Status = %v, want active", got.Status)
-	}
+	assert.Equal(t, sub.TelegramID, got.TelegramID)
+	assert.Equal(t, "active", got.Status)
 }
 
 func TestHandleMySubscription_ExpiredSubscription(t *testing.T) {
 	tdb, err := testutil.NewTestDatabase(t)
-	if err != nil {
-		t.Fatalf("Failed to create test database: %v", err)
-	}
+	require.NoError(t, err, "Failed to create test database")
 	defer tdb.Cleanup()
 
 	sub := testutil.CreateTestSubscription(123456789, "testuser", "active", time.Now().Add(-24*time.Hour))
-	if err := database.CreateSubscription(sub); err != nil {
-		t.Fatalf("Failed to create subscription: %v", err)
-	}
+	require.NoError(t, database.CreateSubscription(sub), "Failed to create subscription")
 
 	got, err := database.GetByTelegramID(123456789)
-	if err != nil {
-		t.Fatalf("GetByTelegramID() error = %v", err)
-	}
+	require.NoError(t, err, "GetByTelegramID() error")
 
-	if !time.Now().After(got.ExpiryTime) {
-		t.Error("Expected subscription to be expired")
-	}
+	assert.True(t, time.Now().After(got.ExpiryTime), "Expected subscription to be expired")
 }
 
 func TestHandleAdminStats(t *testing.T) {
@@ -333,52 +299,34 @@ func TestHandleAdminStats(t *testing.T) {
 
 	for i := 0; i < 5; i++ {
 		sub := testutil.CreateTestSubscription(int64(100000000+i), "user", "active", time.Now().Add(24*time.Hour))
-		if err := database.CreateSubscription(sub); err != nil {
-			t.Fatalf("Failed to create subscription: %v", err)
-		}
+		require.NoError(t, database.CreateSubscription(sub), "Failed to create subscription")
 	}
 
 	var count int64
 	database.DB.Model(&database.Subscription{}).Count(&count)
-
-	if count != 5 {
-		t.Errorf("Expected 5 subscriptions, got %d", count)
-	}
+	assert.Equal(t, int64(5), count)
 }
 
 func TestHandleDel_GetSubscriptionByID(t *testing.T) {
 	tdb, err := testutil.NewTestDatabase(t)
-	if err != nil {
-		t.Fatalf("Failed to create test database: %v", err)
-	}
+	require.NoError(t, err, "Failed to create test database")
 	defer tdb.Cleanup()
 
 	sub := testutil.CreateTestSubscription(123456789, "deltestuser", "active", time.Now().Add(24*time.Hour))
-	if err := database.CreateSubscription(sub); err != nil {
-		t.Fatalf("Failed to create subscription: %v", err)
-	}
+	require.NoError(t, database.CreateSubscription(sub), "Failed to create subscription")
 
 	got, err := database.GetSubscriptionByID(sub.ID)
-	if err != nil {
-		t.Fatalf("GetSubscriptionByID() error = %v", err)
-	}
-
-	if got.ID != sub.ID {
-		t.Errorf("GetSubscriptionByID() ID = %d, want %d", got.ID, sub.ID)
-	}
+	require.NoError(t, err, "GetSubscriptionByID() error")
+	assert.Equal(t, sub.ID, got.ID)
 }
 
 func TestHandleDel_DeleteSubscriptionByID(t *testing.T) {
 	tdb, err := testutil.NewTestDatabase(t)
-	if err != nil {
-		t.Fatalf("Failed to create test database: %v", err)
-	}
+	require.NoError(t, err, "Failed to create test database")
 	defer tdb.Cleanup()
 
 	sub := testutil.CreateTestSubscription(999888777, "deletetest", "active", time.Now().Add(24*time.Hour))
-	if err := database.CreateSubscription(sub); err != nil {
-		t.Fatalf("Failed to create subscription: %v", err)
-	}
+	require.NoError(t, database.CreateSubscription(sub), "Failed to create subscription")
 
 	id := sub.ID
 
@@ -392,29 +340,21 @@ func TestHandleDel_DeleteSubscriptionByID(t *testing.T) {
 	}
 
 	_, err = database.GetSubscriptionByID(id)
-	if err == nil {
-		t.Error("GetSubscriptionByID() should return error after deletion")
-	}
+	assert.Error(t, err, "GetSubscriptionByID() should return error after deletion")
 }
 
 func TestHandleDel_SubscriptionNotFound(t *testing.T) {
 	tdb, err := testutil.NewTestDatabase(t)
-	if err != nil {
-		t.Fatalf("Failed to create test database: %v", err)
-	}
+	require.NoError(t, err, "Failed to create test database")
 	defer tdb.Cleanup()
 
 	_, err = database.GetSubscriptionByID(99999)
-	if err == nil {
-		t.Error("GetSubscriptionByID() should return error for non-existent ID")
-	}
+	assert.Error(t, err, "GetSubscriptionByID() should return error for non-existent ID")
 }
 
 func TestHandleBroadcast_DatabaseFunction(t *testing.T) {
 	tdb, err := testutil.NewTestDatabase(t)
-	if err != nil {
-		t.Fatalf("Failed to create test database: %v", err)
-	}
+	require.NoError(t, err, "Failed to create test database")
 	defer tdb.Cleanup()
 
 	subs := []*database.Subscription{
@@ -423,69 +363,43 @@ func TestHandleBroadcast_DatabaseFunction(t *testing.T) {
 	}
 
 	for _, sub := range subs {
-		if err := database.CreateSubscription(sub); err != nil {
-			t.Fatalf("Failed to create subscription: %v", err)
-		}
+		require.NoError(t, database.CreateSubscription(sub), "Failed to create subscription")
 	}
 
 	ids, err := database.GetAllTelegramIDs()
-	if err != nil {
-		t.Fatalf("GetAllTelegramIDs() error = %v", err)
-	}
-
-	if len(ids) != 2 {
-		t.Errorf("GetAllTelegramIDs() returned %d IDs, want 2", len(ids))
-	}
+	require.NoError(t, err, "GetAllTelegramIDs() error")
+	assert.Len(t, ids, 2)
 }
 
 func TestHandleSend_ByTelegramID(t *testing.T) {
 	tdb, err := testutil.NewTestDatabase(t)
-	if err != nil {
-		t.Fatalf("Failed to create test database: %v", err)
-	}
+	require.NoError(t, err, "Failed to create test database")
 	defer tdb.Cleanup()
 
 	sub := testutil.CreateTestSubscription(123456789, "testuser", "active", time.Now().Add(24*time.Hour))
-	if err := database.CreateSubscription(sub); err != nil {
-		t.Fatalf("Failed to create subscription: %v", err)
-	}
+	require.NoError(t, database.CreateSubscription(sub), "Failed to create subscription")
 
 	got, err := database.GetByTelegramID(123456789)
-	if err != nil {
-		t.Fatalf("GetByTelegramID() error = %v", err)
-	}
-	if got.TelegramID != 123456789 {
-		t.Errorf("TelegramID = %d, want 123456789", got.TelegramID)
-	}
+	require.NoError(t, err, "GetByTelegramID() error")
+	assert.Equal(t, int64(123456789), got.TelegramID)
 }
 
 func TestHandleSend_ByUsername(t *testing.T) {
 	tdb, err := testutil.NewTestDatabase(t)
-	if err != nil {
-		t.Fatalf("Failed to create test database: %v", err)
-	}
+	require.NoError(t, err, "Failed to create test database")
 	defer tdb.Cleanup()
 
 	sub := testutil.CreateTestSubscription(123456789, "testuser", "active", time.Now().Add(24*time.Hour))
-	if err := database.CreateSubscription(sub); err != nil {
-		t.Fatalf("Failed to create subscription: %v", err)
-	}
+	require.NoError(t, database.CreateSubscription(sub), "Failed to create subscription")
 
 	id, err := database.GetTelegramIDByUsername("testuser")
-	if err != nil {
-		t.Fatalf("GetTelegramIDByUsername() error = %v", err)
-	}
-
-	if id != 123456789 {
-		t.Errorf("GetTelegramIDByUsername() returned %d, want 123456789", id)
-	}
+	require.NoError(t, err, "GetTelegramIDByUsername() error")
+	assert.Equal(t, int64(123456789), id)
 }
 
 func TestHandleSend_UserNotFound(t *testing.T) {
 	tdb, err := testutil.NewTestDatabase(t)
-	if err != nil {
-		t.Fatalf("Failed to create test database: %v", err)
-	}
+	require.NoError(t, err, "Failed to create test database")
 	defer tdb.Cleanup()
 
 	_, err = database.GetTelegramIDByUsername("nonexistent")
@@ -496,51 +410,33 @@ func TestHandleSend_UserNotFound(t *testing.T) {
 
 func TestGetLatestSubscriptions(t *testing.T) {
 	tdb, err := testutil.NewTestDatabase(t)
-	if err != nil {
-		t.Fatalf("Failed to create test database: %v", err)
-	}
+	require.NoError(t, err, "Failed to create test database")
 	defer tdb.Cleanup()
 
 	for i := 0; i < 15; i++ {
 		sub := testutil.CreateTestSubscription(int64(100000000+i), "user", "active", time.Now().Add(24*time.Hour))
-		if err := database.CreateSubscription(sub); err != nil {
-			t.Fatalf("Failed to create subscription: %v", err)
-		}
+		require.NoError(t, database.CreateSubscription(sub), "Failed to create subscription")
 		time.Sleep(time.Millisecond * 10)
 	}
 
 	subs, err := database.GetLatestSubscriptions(10)
-	if err != nil {
-		t.Fatalf("GetLatestSubscriptions() error = %v", err)
-	}
-
-	if len(subs) != 10 {
-		t.Errorf("GetLatestSubscriptions() returned %d subscriptions, want 10", len(subs))
-	}
+	require.NoError(t, err, "GetLatestSubscriptions() error")
+	assert.Len(t, subs, 10)
 }
 
 func TestGetLatestSubscriptions_Empty(t *testing.T) {
 	tdb, err := testutil.NewTestDatabase(t)
-	if err != nil {
-		t.Fatalf("Failed to create test database: %v", err)
-	}
+	require.NoError(t, err, "Failed to create test database")
 	defer tdb.Cleanup()
 
 	subs, err := database.GetLatestSubscriptions(10)
-	if err != nil {
-		t.Fatalf("GetLatestSubscriptions() error = %v", err)
-	}
-
-	if len(subs) != 0 {
-		t.Errorf("GetLatestSubscriptions() returned %d subscriptions, want 0", len(subs))
-	}
+	require.NoError(t, err, "GetLatestSubscriptions() error")
+	assert.Empty(t, subs)
 }
 
 func TestGetLatestSubscriptions_OnlyActive(t *testing.T) {
 	tdb, err := testutil.NewTestDatabase(t)
-	if err != nil {
-		t.Fatalf("Failed to create test database: %v", err)
-	}
+	require.NoError(t, err, "Failed to create test database")
 	defer tdb.Cleanup()
 
 	sub1 := testutil.CreateTestSubscription(100000001, "active_user", "active", time.Now().Add(24*time.Hour))
@@ -554,20 +450,13 @@ func TestGetLatestSubscriptions_OnlyActive(t *testing.T) {
 	}
 
 	subs, err := database.GetLatestSubscriptions(10)
-	if err != nil {
-		t.Fatalf("GetLatestSubscriptions() error = %v", err)
-	}
-
-	if len(subs) != 1 {
-		t.Errorf("GetLatestSubscriptions() returned %d subscriptions, want 1", len(subs))
-	}
+	require.NoError(t, err, "GetLatestSubscriptions() error")
+	assert.Len(t, subs, 1)
 }
 
 func TestGetAllTelegramIDs(t *testing.T) {
 	tdb, err := testutil.NewTestDatabase(t)
-	if err != nil {
-		t.Fatalf("Failed to create test database: %v", err)
-	}
+	require.NoError(t, err, "Failed to create test database")
 	defer tdb.Cleanup()
 
 	subs := []*database.Subscription{
@@ -578,36 +467,22 @@ func TestGetAllTelegramIDs(t *testing.T) {
 	}
 
 	for _, sub := range subs {
-		if err := database.CreateSubscription(sub); err != nil {
-			t.Fatalf("Failed to create subscription: %v", err)
-		}
+		require.NoError(t, database.CreateSubscription(sub), "Failed to create subscription")
 	}
 
 	ids, err := database.GetAllTelegramIDs()
-	if err != nil {
-		t.Fatalf("GetAllTelegramIDs() error = %v", err)
-	}
-
-	if len(ids) != 3 {
-		t.Errorf("GetAllTelegramIDs() returned %d IDs, want 3", len(ids))
-	}
+	require.NoError(t, err, "GetAllTelegramIDs() error")
+	assert.Len(t, ids, 3)
 }
 
 func TestGetAllTelegramIDs_Empty(t *testing.T) {
 	tdb, err := testutil.NewTestDatabase(t)
-	if err != nil {
-		t.Fatalf("Failed to create test database: %v", err)
-	}
+	require.NoError(t, err, "Failed to create test database")
 	defer tdb.Cleanup()
 
 	ids, err := database.GetAllTelegramIDs()
-	if err != nil {
-		t.Fatalf("GetAllTelegramIDs() error = %v", err)
-	}
-
-	if len(ids) != 0 {
-		t.Errorf("GetAllTelegramIDs() returned %d IDs, want 0", len(ids))
-	}
+	require.NoError(t, err, "GetAllTelegramIDs() error")
+	assert.Empty(t, ids)
 }
 
 func TestHandleBroadcast_MessageTooLong(t *testing.T) {
@@ -712,15 +587,9 @@ func TestGetMainMenuContent_WithSubscription(t *testing.T) {
 
 	text, keyboard := handler.getMainMenuContent("testuser", true, 123456789)
 
-	if text == "" {
-		t.Error("Expected non-empty text for user with subscription")
-	}
-	if !strings.Contains(text, "testuser") {
-		t.Error("Expected text to contain username")
-	}
-	if len(keyboard.InlineKeyboard) < 2 {
-		t.Errorf("Expected at least 2 keyboard rows, got %d", len(keyboard.InlineKeyboard))
-	}
+	assert.NotEmpty(t, text, "Expected non-empty text for user with subscription")
+	assert.Contains(t, text, "testuser", "Expected text to contain username")
+	assert.GreaterOrEqual(t, len(keyboard.InlineKeyboard), 2, "Expected at least 2 keyboard rows")
 }
 
 // TestGetMainMenuContent_WithoutSubscription tests getMainMenuContent for users without subscription
@@ -734,15 +603,10 @@ func TestGetMainMenuContent_WithoutSubscription(t *testing.T) {
 
 	text, keyboard := handler.getMainMenuContent("testuser", false, 123456789)
 
-	if text == "" {
-		t.Error("Expected non-empty text for user without subscription")
-	}
-	if !strings.Contains(text, "testuser") {
-		t.Error("Expected text to contain username")
-	}
-	if len(keyboard.InlineKeyboard) < 1 {
-		t.Errorf("Expected at least 1 keyboard row, got %d", len(keyboard.InlineKeyboard))
-	}
+	assert.NotEmpty(t, text, "Expected non-empty text for user without subscription")
+	assert.Contains(t, text, "testuser", "Expected text to contain username")
+	assert.GreaterOrEqual(t, len(keyboard.InlineKeyboard), 1, "Expected at least 1 keyboard row")
+
 	// Check that "create_subscription" callback is used
 	found := false
 	for _, row := range keyboard.InlineKeyboard {
@@ -753,9 +617,7 @@ func TestGetMainMenuContent_WithoutSubscription(t *testing.T) {
 			}
 		}
 	}
-	if !found {
-		t.Error("Expected create_subscription callback in keyboard for user without subscription")
-	}
+	assert.True(t, found, "Expected create_subscription callback in keyboard for user without subscription")
 }
 
 // TestGetMainMenuContent_AdminButtons tests that admin buttons are added for admin users
@@ -782,12 +644,8 @@ func TestGetMainMenuContent_AdminButtons(t *testing.T) {
 			}
 		}
 	}
-	if !foundStats {
-		t.Error("Expected admin_stats button for admin user")
-	}
-	if !foundLastReg {
-		t.Error("Expected admin_lastreg button for admin user")
-	}
+	assert.True(t, foundStats, "Expected admin_stats button for admin user")
+	assert.True(t, foundLastReg, "Expected admin_lastreg button for admin user")
 }
 
 // TestSubscriptionKeyboardLayout tests that QR and В начало are on separate rows
@@ -801,25 +659,17 @@ func TestSubscriptionKeyboardLayout(t *testing.T) {
 		),
 	)
 
-	if len(keyboard.InlineKeyboard) != 2 {
-		t.Errorf("Expected 2 keyboard rows, got %d", len(keyboard.InlineKeyboard))
-	}
+	assert.Len(t, keyboard.InlineKeyboard, 2, "Expected 2 keyboard rows")
 
 	// First row should have QR button
-	if len(keyboard.InlineKeyboard[0]) != 1 {
-		t.Errorf("Expected 1 button in first row, got %d", len(keyboard.InlineKeyboard[0]))
-	}
-	if keyboard.InlineKeyboard[0][0].CallbackData == nil || *keyboard.InlineKeyboard[0][0].CallbackData != "qr_code" {
-		t.Error("Expected qr_code callback in first row")
-	}
+	assert.Len(t, keyboard.InlineKeyboard[0], 1, "Expected 1 button in first row")
+	require.NotNil(t, keyboard.InlineKeyboard[0][0].CallbackData, "CallbackData should not be nil")
+	assert.Equal(t, "qr_code", *keyboard.InlineKeyboard[0][0].CallbackData, "Expected qr_code callback in first row")
 
 	// Second row should have В начало button
-	if len(keyboard.InlineKeyboard[1]) != 1 {
-		t.Errorf("Expected 1 button in second row, got %d", len(keyboard.InlineKeyboard[1]))
-	}
-	if keyboard.InlineKeyboard[1][0].CallbackData == nil || *keyboard.InlineKeyboard[1][0].CallbackData != "back_to_start" {
-		t.Error("Expected back_to_start callback in second row")
-	}
+	assert.Len(t, keyboard.InlineKeyboard[1], 1, "Expected 1 button in second row")
+	require.NotNil(t, keyboard.InlineKeyboard[1][0].CallbackData, "CallbackData should not be nil")
+	assert.Equal(t, "back_to_start", *keyboard.InlineKeyboard[1][0].CallbackData, "Expected back_to_start callback in second row")
 }
 
 // TestQRBackKeyboard tests the keyboard for QR code message
