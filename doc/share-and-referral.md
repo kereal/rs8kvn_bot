@@ -124,7 +124,7 @@ SUBSCRIPTIONS {
     bigint telegram_id "INDEX, 0 = unbound trial"
     bigint referred_by "INDEX"
     int inbound_id
-    bigint traffic_limit "default 100GB"
+    bigint traffic_limit "default 30GB"
     timestamp expiry_time
     varchar status "default 'active'"
     varchar subscription_url
@@ -188,7 +188,7 @@ Expired --> [*]
 * telegram_id установлен на ID пользователя
 * is_trial = false
 * referred_by записан (referrer_tg_id из invites)
-* В xui: лимит увеличен до TrafficLimitGB (по умолчанию 100GB), username обновлён
+* В xui: лимит увеличен до TrafficLimitGB (по умолчанию 30GB), username обновлён
 
 ### ActiveUsage
 
@@ -230,7 +230,7 @@ Trial → либо Activated → либо Deleted
 | `SITE_URL` | `https://vpn.site` | Базовый URL для ссылок |
 | `TRIAL_DURATION_HOURS` | `3` | Время жизни неактивированного trial (1-168) |
 | `TRIAL_RATE_LIMIT` | `3` | Макс. trial с одного IP в час (1-100) |
-| `TRAFFIC_LIMIT_GB` | `100` | Лимит трафика после активации |
+| `TRAFFIC_LIMIT_GB` | `30` | Лимит трафика после активации |
 | `XUI_HOST` | — | URL 3x-ui панели |
 | `XUI_USERNAME` | — | Логин панели |
 | `XUI_PASSWORD` | — | Пароль панели |
