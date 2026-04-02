@@ -15,10 +15,13 @@ const (
 )
 
 // 3x-ui Panel Constants
-var (
+const (
 	// XUISessionValidity is how long a 3x-ui session remains valid
 	XUISessionValidity = 15 * time.Minute
+)
 
+// XUI Retry Settings (var for test override)
+var (
 	// XUIMaxRetries is the maximum number of retries for 3x-ui API calls
 	XUIMaxRetries = 3
 
@@ -195,6 +198,6 @@ const (
 	// DonateURL is the T-Bank collection link for donations
 	DonateURL = "https://tbank.ru/cf/9J6agHgWdNg"
 
-	// DonateContactUsername is the Telegram username for donation inquiries
-	DonateContactUsername = "kereal"
+	// ContactUsername is the Telegram username for contact/support
+	ContactUsername = "kereal"
 )

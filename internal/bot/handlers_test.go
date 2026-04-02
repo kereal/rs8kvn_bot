@@ -1063,7 +1063,7 @@ func TestHandler_GetBackKeyboard_CallbackData(t *testing.T) {
 // === getDonateText tests ===
 
 func TestHandler_GetDonateText_Content(t *testing.T) {
-	handler := &Handler{cfg: &config.Config{}, botConfig: NewTestBotConfig()}
+	handler := &Handler{cfg: &config.Config{ContactUsername: "kereal"}, botConfig: NewTestBotConfig()}
 
 	text := handler.getDonateText()
 

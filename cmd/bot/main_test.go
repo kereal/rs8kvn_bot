@@ -85,7 +85,7 @@ func TestHandleUpdate_CommandRouting(t *testing.T) {
 			}
 
 			// Should not panic
-			handleUpdate(ctx, handler, update)
+			handler.HandleUpdate(ctx, update)
 		})
 	}
 }
@@ -110,7 +110,7 @@ func TestHandleUpdate_NonCommandMessage(t *testing.T) {
 	}
 
 	// Should not panic
-	handleUpdate(ctx, handler, update)
+	handler.HandleUpdate(ctx, update)
 }
 
 func TestHandleUpdate_CallbackQuery(t *testing.T) {
@@ -137,7 +137,7 @@ func TestHandleUpdate_CallbackQuery(t *testing.T) {
 	}
 
 	// Should not panic
-	handleUpdate(ctx, handler, update)
+	handler.HandleUpdate(ctx, update)
 }
 
 func TestHandleUpdateSafely_PanicRecovery(t *testing.T) {
@@ -186,7 +186,7 @@ func TestHandleUpdate_UnknownCommand(t *testing.T) {
 	}
 
 	// Should not panic
-	handleUpdate(ctx, handler, update)
+	handler.HandleUpdate(ctx, update)
 }
 
 // TestStartBackupScheduler_ContextCancellation тестирует остановку scheduler при отмене контекста
@@ -289,7 +289,7 @@ func TestHandleUpdate_NilMessage(t *testing.T) {
 	update := tgbotapi.Update{}
 
 	assert.NotPanics(t, func() {
-		handleUpdate(ctx, handler, update)
+		handler.HandleUpdate(ctx, update)
 	})
 }
 
@@ -340,7 +340,7 @@ func TestHandleUpdate_UnknownCommands(t *testing.T) {
 			}
 
 			assert.NotPanics(t, func() {
-				handleUpdate(ctx, handler, update)
+				handler.HandleUpdate(ctx, update)
 			})
 		})
 	}
@@ -368,7 +368,7 @@ func TestHandleUpdate_UnknownCommand_Text(t *testing.T) {
 		},
 	}
 
-	handleUpdate(ctx, handler, update)
+	handler.HandleUpdate(ctx, update)
 
 	assert.True(t, mockBot.SendCalledSafe())
 	assert.Contains(t, mockBot.LastSentTextSafe(), "Неизвестная команда")
@@ -393,7 +393,7 @@ func TestHandleUpdate_NonCommandMessage_Text(t *testing.T) {
 		},
 	}
 
-	handleUpdate(ctx, handler, update)
+	handler.HandleUpdate(ctx, update)
 
 	assert.True(t, mockBot.SendCalledSafe())
 	assert.Contains(t, mockBot.LastSentTextSafe(), "/start")
@@ -419,7 +419,7 @@ func TestHandleUpdate_NonCommandMessage_UsernameFallback(t *testing.T) {
 	}
 
 	assert.NotPanics(t, func() {
-		handleUpdate(ctx, handler, update)
+		handler.HandleUpdate(ctx, update)
 	})
 }
 
@@ -442,7 +442,7 @@ func TestHandleUpdate_NonCommandMessage_NoUser(t *testing.T) {
 	}
 
 	assert.NotPanics(t, func() {
-		handleUpdate(ctx, handler, update)
+		handler.HandleUpdate(ctx, update)
 	})
 }
 
@@ -467,7 +467,7 @@ func TestHandleUpdate_NonCommandMessage_LongText(t *testing.T) {
 	}
 
 	assert.NotPanics(t, func() {
-		handleUpdate(ctx, handler, update)
+		handler.HandleUpdate(ctx, update)
 	})
 }
 
@@ -491,7 +491,7 @@ func TestHandleUpdate_CallbackQuery_NoMessage(t *testing.T) {
 	}
 
 	assert.NotPanics(t, func() {
-		handleUpdate(ctx, handler, update)
+		handler.HandleUpdate(ctx, update)
 	})
 }
 
@@ -509,7 +509,7 @@ func TestHandleUpdate_NilMessageAndNilCallback(t *testing.T) {
 	update := tgbotapi.Update{}
 
 	assert.NotPanics(t, func() {
-		handleUpdate(ctx, handler, update)
+		handler.HandleUpdate(ctx, update)
 	})
 
 	assert.False(t, mockBot.SendCalledSafe())

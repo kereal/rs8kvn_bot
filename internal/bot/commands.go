@@ -137,7 +137,7 @@ func (h *Handler) HandleHelp(ctx context.Context, update tgbotapi.Update) {
 
 	chatID := update.Message.Chat.ID
 
-	helpText := `📖 *Справка по командам бота*
+	helpText := fmt.Sprintf(`📖 *Справка по командам бота*
 
 *Доступные команды:*
 /start - Начать работу с ботом
@@ -149,19 +149,23 @@ func (h *Handler) HandleHelp(ctx context.Context, update tgbotapi.Update) {
 📋 *Подписка* - Посмотреть информацию о текущей подписке
 
 *Параметры подписки:*
-📊 Трафик: ` + fmt.Sprintf("%d", h.cfg.TrafficLimitGB) + ` ГБ в месяц
+📊 Трафик: %d ГБ в месяц
 
 *Технические детали:*
 🔐 Протокол: VLESS+Reality+Vision
 📱 Совместимость: V2Ray, Xray, и другие клиенты
 
 *Поддержка:*
-При возникновении проблем обратитесь к администратору: [@kereal](https://t.me/kereal)
+При возникновении проблем обратитесь к администратору: [@%s](https://t.me/%s)
 
 *Дополнительная информация:*
 - Подписка автоматически обновляется в конце месяца
 - Не передавайте ссылку на подписку третьим лицам
-- При истечении трафика подписка перестанет работать до следующего месяца`
+- При истечении трафика подписка перестанет работать до следующего месяца`,
+		h.cfg.TrafficLimitGB,
+		h.cfg.ContactUsername,
+		h.cfg.ContactUsername,
+	)
 
 	msg := tgbotapi.NewMessage(chatID, helpText)
 	msg.ParseMode = "Markdown"

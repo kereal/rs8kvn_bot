@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/rand"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
@@ -14,11 +15,10 @@ import (
 	"sync"
 	"time"
 
+	"go.uber.org/zap"
 	"rs8kvn_bot/internal/config"
 	"rs8kvn_bot/internal/logger"
 	"rs8kvn_bot/internal/utils"
-
-	"go.uber.org/zap"
 )
 
 // marshalJSON marshals data to JSON and returns a reader.
@@ -580,7 +580,7 @@ func retryWithBackoff(ctx context.Context, maxRetries int, initialDelay time.Dur
 				zap.Error(err))
 
 			select {
-			case <-time.After(delay):
+			case <-time.After(delay + time.Duration(rand.Int63n(int64(delay/2)))):
 				delay *= 2 // Exponential backoff
 			case <-ctx.Done():
 				return fmt.Errorf("context cancelled: %w", ctx.Err())

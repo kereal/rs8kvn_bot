@@ -73,6 +73,52 @@ func (h *Handler) isAdmin(chatID int64) bool {
 	return h.cfg.TelegramAdminID > 0 && chatID == h.cfg.TelegramAdminID
 }
 
+// HandleUpdate routes a Telegram update to the appropriate handler method.
+func (h *Handler) HandleUpdate(ctx context.Context, update tgbotapi.Update) {
+	if update.Message != nil {
+		if update.Message.IsCommand() {
+			switch update.Message.Command() {
+			case "start":
+				h.HandleStart(ctx, update)
+			case "help":
+				h.HandleHelp(ctx, update)
+			case "invite":
+				h.HandleInvite(ctx, update)
+			case "del":
+				h.HandleDel(ctx, update)
+			case "broadcast":
+				h.HandleBroadcast(context.WithoutCancel(ctx), update)
+			case "send":
+				h.HandleSend(ctx, update)
+			default:
+				h.SendMessage(ctx, update.Message.Chat.ID,
+					"Неизвестная команда. Используйте /start или /help")
+			}
+		} else {
+			username := "unknown"
+			if update.Message.From != nil {
+				if update.Message.From.UserName != "" {
+					username = update.Message.From.UserName
+				} else if update.Message.From.FirstName != "" {
+					username = update.Message.From.FirstName
+				}
+			}
+			textPreview := update.Message.Text
+			if len(textPreview) > 50 {
+				textPreview = textPreview[:50] + "..."
+			}
+			logger.Info("Received non-command message",
+				zap.Int64("chat_id", update.Message.Chat.ID),
+				zap.String("username", username),
+				zap.String("text_preview", textPreview))
+			h.SendMessage(ctx, update.Message.Chat.ID,
+				"Используйте /start для начала работы с ботом.")
+		}
+	} else if update.CallbackQuery != nil {
+		h.HandleCallback(ctx, update)
+	}
+}
+
 // StartCacheCleanup starts a background goroutine that periodically removes expired cache entries.
 func (h *Handler) StartCacheCleanup(ctx context.Context, interval time.Duration) {
 	go h.cache.StartCleanup(ctx, interval)
@@ -229,17 +275,19 @@ func (h *Handler) getDonateText() string {
 ` + "`" + config.DonateCardNumber + "`" + `
 
 🔗 [Сбор в Т-Банке](` + config.DonateURL + `)
-💬 [Связаться](https://t.me/` + config.DonateContactUsername + `)`
+💬 [Связаться](https://t.me/` + h.cfg.ContactUsername + `)`
 }
 
 // getHelpText returns the help/instruction message text with subscription URL.
 func (h *Handler) getHelpText(trafficLimitGB int, subscriptionURL string) string {
 	return fmt.Sprintf(
-		"🚀 *Ваша подписка готова!*\n\nТрафик: %dГб на месяц.\n\n📲 *1. Установите приложение Happ*\n· [Скачать для iOS](https://apps.apple.com/ru/app/happ-proxy-utility-plus/id6746188973)\n· [Скачать для Android](https://play.google.com/store/apps/details?id=com.happproxy)\n\n📥 *2. Импортируйте подписку*\n\nНажмите, чтобы скопировать: `%s`\n\nВ приложении Happ нажмите *«+»* в правом верхнем углу и выберите *«Вставить из буфера»*.\n\n▶️ *3. Запустите VPN*\nДождитесь загрузки и нажмите на большую круглую кнопку в центре экрана.\n\n🛡️ *Важно знать*\nВ приложении Happ настроена автоматическая маршрутизация. Зарубежные сайты работают через VPN, а российские сервисы — напрямую. VPN можно не выключать.\n⚠️ _Если вы используете другое приложение или свою конфигурацию — не заходите через этот VPN на российские ресурсы, иначе сервер заблокируют._\n\n🤝 *Правила использования*\n· Не передавайте свою подписку другим. Делитесь ссылкой на этого бота `@%s`.\n· Не публикуйте ссылку на бота в интернете, передавайте только из рук в руки (приветствуется).\n· Пользуйтесь ответственно, не занимайтесь незаконной деятельностью.\n\n☕ *Поддержка проекта*\nЭтот VPN бесплатный и существует благодаря вашим пожертвованиям и усилиям Кирилла.\n[Поддержите проект](https://t.me/%s?start=donate) — важна каждая сотня.\n\nПомощь, вопросы: [@kereal](https://t.me/kereal)",
+		"🚀 *Ваша подписка готова!*\n\nТрафик: %dГб на месяц.\n\n📲 *1. Установите приложение Happ*\n· [Скачать для iOS](https://apps.apple.com/ru/app/happ-proxy-utility-plus/id6746188973)\n· [Скачать для Android](https://play.google.com/store/apps/details?id=com.happproxy)\n\n📥 *2. Импортируйте подписку*\n\nНажмите, чтобы скопировать: `%s`\n\nВ приложении Happ нажмите *«+»* в правом верхнем углу и выберите *«Вставить из буфера»*.\n\n▶️ *3. Запустите VPN*\nДождитесь загрузки и нажмите на большую круглую кнопку в центре экрана.\n\n🛡️ *Важно знать*\nВ приложении Happ настроена автоматическая маршрутизация. Зарубежные сайты работают через VPN, а российские сервисы — напрямую. VPN можно не выключать.\n⚠️ _Если вы используете другое приложение или свою конфигурацию — не заходите через этот VPN на российские ресурсы, иначе сервер заблокируют._\n\n🤝 *Правила использования*\n· Не передавайте свою подписку другим. Делитесь ссылкой на этого бота `@%s`.\n· Не публикуйте ссылку на бота в интернете, передавайте только из рук в руки (приветствуется).\n· Пользуйтесь ответственно, не занимайтесь незаконной деятельностью.\n\n☕ *Поддержка проекта*\nЭтот VPN бесплатный и существует благодаря вашим пожертвованиям и усилиям Кирилла.\n[Поддержите проект](https://t.me/%s?start=donate) — важна каждая сотня.\n\nПомощь, вопросы: [@%s](https://t.me/%s)",
 		trafficLimitGB,
 		subscriptionURL,
 		h.botConfig.Username,
 		h.botConfig.Username,
+		h.cfg.ContactUsername,
+		h.cfg.ContactUsername,
 	)
 }
 
@@ -304,11 +352,4 @@ func (h *Handler) addAdminButtons(keyboard *tgbotapi.InlineKeyboardMarkup, chatI
 			),
 		)
 	}
-}
-
-func (h *Handler) StoreConversation(ctx context.Context, chatID int64, userMessage, botResponse string) {
-}
-
-func (h *Handler) GetUserContext(ctx context.Context, chatID int64, query string) string {
-	return ""
 }
