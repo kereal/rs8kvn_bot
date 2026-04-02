@@ -338,54 +338,7 @@ func handleUpdateSafely(ctx context.Context, handler *bot.Handler, update tgbota
 		}
 	}()
 
-	handleUpdate(ctx, handler, update)
-}
-
-// handleUpdate routes the update to the appropriate handler.
-func handleUpdate(ctx context.Context, handler *bot.Handler, update tgbotapi.Update) {
-	if update.Message != nil {
-		if update.Message.IsCommand() {
-			switch update.Message.Command() {
-			case "start":
-				handler.HandleStart(ctx, update)
-			case "help":
-				handler.HandleHelp(ctx, update)
-			case "invite":
-				handler.HandleInvite(ctx, update)
-			case "del":
-				handler.HandleDel(ctx, update)
-			case "broadcast":
-				handler.HandleBroadcast(context.WithoutCancel(ctx), update)
-			case "send":
-				handler.HandleSend(ctx, update)
-			default:
-				handler.SendMessage(ctx, update.Message.Chat.ID,
-					"Неизвестная команда. Используйте /start или /help")
-			}
-		} else {
-			// User sent a message that's not a command - log and show help
-			username := "unknown"
-			if update.Message.From != nil {
-				if update.Message.From.UserName != "" {
-					username = update.Message.From.UserName
-				} else if update.Message.From.FirstName != "" {
-					username = update.Message.From.FirstName
-				}
-			}
-			textPreview := update.Message.Text
-			if len(textPreview) > 50 {
-				textPreview = textPreview[:50] + "..."
-			}
-			logger.Info("Received non-command message",
-				zap.Int64("chat_id", update.Message.Chat.ID),
-				zap.String("username", username),
-				zap.String("text_preview", textPreview))
-			handler.SendMessage(ctx, update.Message.Chat.ID,
-				"Используйте /start для начала работы с ботом.")
-		}
-	} else if update.CallbackQuery != nil {
-		handler.HandleCallback(ctx, update)
-	}
+	handler.HandleUpdate(ctx, update)
 }
 
 // startBackupScheduler runs the database backup scheduler.

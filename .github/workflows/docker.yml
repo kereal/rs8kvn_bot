@@ -6,6 +6,10 @@ on:
             - main
         tags:
             - "v*"
+    pull_request:
+        branches:
+            - main
+        types: [opened, synchronize, reopened]
 
 env:
     REGISTRY: ghcr.io
