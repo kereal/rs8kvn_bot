@@ -285,7 +285,10 @@ func (s *Server) HandleInvite(w http.ResponseWriter, r *http.Request) {
 	_, err = s.db.CreateTrialSubscription(ctx, code, subID, clientID, s.cfg.XUIInboundID, trafficBytes, expiryTime, subURL)
 	if err != nil {
 		logger.Error("Failed to create trial subscription in DB", zap.Error(err))
-		s.xuiClient.DeleteClient(ctx, s.cfg.XUIInboundID, clientID)
+		if delErr := s.xuiClient.DeleteClient(ctx, s.cfg.XUIInboundID, clientID); delErr != nil {
+			logger.Error("Failed to rollback XUI client after DB error — orphan client may remain",
+				zap.String("client_id", clientID), zap.Error(delErr))
+		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(s.renderErrorPage("Ошибка сервера. Попробуйте позже.")))
@@ -469,21 +472,34 @@ func (s *Server) renderErrorPage(message string) string {
 }
 
 func getClientIP(r *http.Request) string {
-	forwarded := r.Header.Get("X-Forwarded-For")
-	if forwarded != "" {
-		ips := strings.Split(forwarded, ",")
-		if len(ips) > 0 {
-			ip := strings.TrimSpace(ips[0])
-			if ip != "" {
-				return ip
+	// Only trust X-Forwarded-For if the connection comes from a local address
+	// (i.e., behind a reverse proxy like nginx/caddy). Direct connections cannot
+	// be trusted to set this header correctly.
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err == nil && isLocalAddress(host) {
+		forwarded := r.Header.Get("X-Forwarded-For")
+		if forwarded != "" {
+			ips := strings.Split(forwarded, ",")
+			if len(ips) > 0 {
+				ip := strings.TrimSpace(ips[0])
+				if ip != "" {
+					return ip
+				}
 			}
 		}
 	}
 
-	ip, _, err := net.SplitHostPort(r.RemoteAddr)
+	// Fall back to the real remote address
 	if err != nil {
 		return r.RemoteAddr
 	}
+	return host
+}
 
-	return ip
+func isLocalAddress(host string) bool {
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	return ip.IsLoopback() || ip.IsPrivate()
 }

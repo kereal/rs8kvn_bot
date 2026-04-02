@@ -2,8 +2,8 @@
 
 **Repo:** https://github.com/kereal/rs8kvn_bot  
 **Module:** `rs8kvn_bot` (Go 1.25+)  
-**Version:** v2.0.2  
-**Last Updated:** 2026-04-01
+**Version:** v2.0.9  
+**Last Updated:** 2026-04-02
 
 ---
 
@@ -92,22 +92,61 @@ tgvpn_go/
 
 | Module | Coverage | Status |
 |--------|----------|--------|
-| `internal/bot` | **95.1%** | ✅ Excellent |
+| `internal/bot` | **97.7%** | ✅ Excellent |
 | `internal/ratelimiter` | **100%** | ✅ Excellent |
+| `internal/web` | **97.7%** | ✅ Excellent |
 | `internal/heartbeat` | **95.8%** | ✅ Excellent |
 | `internal/service` | **95.7%** | ✅ Excellent |
-| `internal/health` | **90.3%** | ✅ Excellent |
-| `internal/xui` | **86.8%** | ✅ Good |
-| `internal/config` | **83.2%** | ✅ Good |
-| `internal/web` | **83.0%** | ✅ Good |
-| `internal/logger` | **82.3%** | ✅ Good |
-| `internal/backup` | **81.4%** | ✅ Good |
-| `internal/database` | **79.2%** | ✅ Good |
+| `internal/health` | **93.5%** | ✅ Excellent |
+| `internal/xui` | **91.1%** | ✅ Excellent |
+| `internal/logger` | **87.6%** | ✅ Good |
+| `internal/config` | **86.1%** | ✅ Good |
+| `internal/backup` | **82.3%** | ✅ Good |
+| `internal/database` | **80.1%** | ✅ Good |
 | `internal/utils` | **75.0%** | ✅ Good |
-| `cmd/bot` | **19.6%** | 🟡 Low (main is integration) |
-| **Overall** | **~82%** | ✅ Good |
+| `cmd/bot` | **21.6%** | 🟡 Low (main is integration) |
+| **Overall** | **~84%** | ✅ Good |
 
-All tests pass with `-race` detector (0 failures, 14 packages).
+All tests pass with `-race` detector (0 failures, 15 packages).
+
+---
+
+## Last Changes (v2.0.3 — v2.0.9)
+
+### E2E Test Suite (v2.0.5 — v2.0.6)
+- **66 E2E tests** covering full subscription lifecycle:
+  - Invite → trial → bind → QR code flow
+  - Commands: `/start`, `/help`, `/invite`
+  - Admin commands: `/del` (6 tests), `/broadcast` (4), `/send` (5)
+  - Callbacks: `share_invite`, `qr_telegram`, `qr_web`, `back_to_invite`
+  - Concurrency: race conditions, mutex protection, atomic operations
+  - Rollback: XUI failure → no DB record, DB failure → XUI cleanup
+  - Full cycles: InviteToQR, ShareToSubscription, MultipleUsers
+- **Integration tests**: 7 tests (HandleStart, HandleHelp, HandleInvite, callbacks)
+- **Database migration tests**: 11 edge cases (corrupted SQL, partial, duplicate, concurrent)
+- **Fuzz tests**: config env vars, invite code regex, escapeMarkdown, xui truncate
+
+### Test Coverage Improvements (v2.0.3 — v2.0.4)
+- `internal/bot`: 95.1% → 97.7% — NewBotConfig, Self, QR error paths, StoreConversation, GetUserContext
+- `internal/web`: 83.0% → 97.7% — handleInvite error paths, method not allowed, rate limit, XUI/DB failures
+- `internal/database`: 79.2% → 80.1% — migration edge cases (corrupted SQL, partial, duplicate, empty, legacy, concurrent)
+- `internal/health`: 90.3% → 93.5% — handleIndex, Stop nil server, healthz all down, readyz not ready
+- `internal/backup`: 81.4% → 82.3% — validatePath (root, /dev, /var/run, relative, absolute, tmp)
+- `internal/logger`: 82.3% → 87.6% — isStdoutError, Sentry hub paths, Close error aggregation
+- `internal/config`: 83.2% → 86.1% — maskAPIKey
+- `cmd/bot`: 19.6% → 21.6% — unknown command, non-command messages, panic recovery, callback query, version
+- **Overall**: ~82% → ~84%
+
+### golangci-lint Fixes (v2.0.7 — v2.0.8)
+- **0 issues** remaining (was ~200)
+- Production code: sentry.Flush before os.Exit, notifyAdmin error check, sqlDB.Close/Scan errors, errors.Is, %w wrapping
+- Test code: removed unused mockBotAPIWithCounter, contains helpers, dbPath field, empty branches, De Morgan's law
+- Created `.golangci.yml` with sensible defaults for test files
+
+### Reliability Fixes (v2.0.9)
+- **Cache cleanup goroutine** — `StartCacheCleanup()` now called in main.go, prevents memory leaks from expired entries
+- **Trial rollback logging** — orphan XUI client errors now logged with client_id and warning
+- **IP spoofing protection** — `getClientIP()` only trusts X-Forwarded-For from local/private addresses
 
 ---
 
@@ -233,6 +272,6 @@ air
 
 ---
 
-**Generated:** 2026-04-01  
-**Session:** Test suite optimization — behavioral assertions, race-safe mocks, fuzzing, coverage cleanup  
-**Version:** v2.0.2
+**Generated:** 2026-04-02  
+**Session:** E2E tests, golangci-lint fixes, reliability improvements  
+**Version:** v2.0.9

@@ -162,6 +162,9 @@ func main() {
 	// Create bot handler
 	handler := bot.NewHandler(botAPI, cfg, dbService, xuiClient, botConfig)
 
+	// Start cache cleanup goroutine to prevent memory leaks
+	handler.StartCacheCleanup(ctx, bot.CacheTTL/2)
+
 	// Initialize and start web server (health + trial pages)
 	webServer := web.NewServer(fmt.Sprintf(":%d", cfg.HealthCheckPort), dbService, xuiClient, cfg, botConfig)
 	webServer.RegisterChecker("database", func(ctx context.Context) web.ComponentHealth {
