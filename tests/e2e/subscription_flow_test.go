@@ -179,6 +179,9 @@ func TestE2E_CreateSubscription_Success(t *testing.T) {
 
 	assert.True(t, env.botAPI.SendCalled, "Confirmation message should be sent")
 	assert.Contains(t, env.botAPI.LastSentText, "подписк", "Should mention subscription")
+
+	// Verify admin notification was sent (should be at least 2 messages: user confirmation + admin notification)
+	assert.GreaterOrEqual(t, env.botAPI.SendCount, 2, "Should send at least 2 messages: user confirmation + admin notification")
 }
 
 func TestE2E_CreateSubscription_NoDuplicate(t *testing.T) {
