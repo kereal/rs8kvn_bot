@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -14,8 +15,9 @@ import (
 	"rs8kvn_bot/internal/testutil"
 )
 
-func init() {
-	logger.Init("", "error")
+func TestMain(m *testing.M) {
+	_, _ = logger.Init("", "error")
+	os.Exit(m.Run())
 }
 
 func TestGetVersion(t *testing.T) {
@@ -608,4 +610,83 @@ func TestStartTrialCleanupScheduler_ExecutesCleanup(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("Trial cleanup scheduler did not stop after context cancellation")
 	}
+}
+
+// Skipped: requires proper test isolation for config.Load()
+// func TestConfigLoad_ValidEnvVars(t *testing.T) { ... }
+// func TestConfigLoad_InvalidNumericValues(t *testing.T) { ... }
+// func TestConfigLoad_InvalidURL(t *testing.T) { ... }
+// func TestConfigLoad_InvalidPort(t *testing.T) { ... }
+
+func TestConfigLoad_MissingRequiredFields(t *testing.T) {
+	os.Unsetenv("TELEGRAM_BOT_TOKEN")
+	os.Unsetenv("XUI_HOST")
+	os.Unsetenv("DATABASE_PATH")
+
+	_, err := config.Load()
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "TELEGRAM_BOT_TOKEN")
+}
+
+func TestConfigLoad_InvalidNumericValues(t *testing.T) {
+	t.Setenv("TELEGRAM_BOT_TOKEN", "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11")
+	t.Setenv("TELEGRAM_ADMIN_ID", "not_a_number")
+	t.Setenv("XUI_HOST", "http://localhost:2053")
+	t.Setenv("XUI_USERNAME", "admin")
+	t.Setenv("XUI_PASSWORD", "password")
+	t.Setenv("XUI_INBOUND_ID", "invalid")
+	t.Setenv("DATABASE_PATH", ":memory:")
+	t.Setenv("LOG_LEVEL", "error")
+	t.Setenv("TRAFFIC_LIMIT_GB", "negative")
+	t.Setenv("HEALTH_CHECK_PORT", "not_a_port")
+	t.Setenv("SITE_URL", "https://example.com")
+	t.Setenv("TRIAL_DURATION_HOURS", "24")
+	t.Setenv("TRIAL_RATE_LIMIT", "10")
+	t.Setenv("CONTACT_USERNAME", "admin")
+	t.Setenv("XUI_SUB_PATH", "xui")
+
+	_, err := config.Load()
+	assert.Error(t, err)
+}
+
+func TestConfigLoad_InvalidURL(t *testing.T) {
+	t.Setenv("TELEGRAM_BOT_TOKEN", "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11")
+	t.Setenv("TELEGRAM_ADMIN_ID", "123456789")
+	t.Setenv("XUI_HOST", "not-a-valid-url")
+	t.Setenv("XUI_USERNAME", "admin")
+	t.Setenv("XUI_PASSWORD", "password")
+	t.Setenv("XUI_INBOUND_ID", "1")
+	t.Setenv("DATABASE_PATH", ":memory:")
+	t.Setenv("LOG_LEVEL", "error")
+	t.Setenv("TRAFFIC_LIMIT_GB", "50")
+	t.Setenv("HEALTH_CHECK_PORT", "8080")
+	t.Setenv("SITE_URL", "invalid-url")
+	t.Setenv("TRIAL_DURATION_HOURS", "24")
+	t.Setenv("TRIAL_RATE_LIMIT", "10")
+	t.Setenv("CONTACT_USERNAME", "admin")
+	t.Setenv("XUI_SUB_PATH", "xui")
+
+	_, err := config.Load()
+	assert.Error(t, err)
+}
+
+func TestConfigLoad_InvalidPort(t *testing.T) {
+	t.Setenv("TELEGRAM_BOT_TOKEN", "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11")
+	t.Setenv("TELEGRAM_ADMIN_ID", "123456789")
+	t.Setenv("XUI_HOST", "http://localhost:2053")
+	t.Setenv("XUI_USERNAME", "admin")
+	t.Setenv("XUI_PASSWORD", "password")
+	t.Setenv("XUI_INBOUND_ID", "1")
+	t.Setenv("DATABASE_PATH", ":memory:")
+	t.Setenv("LOG_LEVEL", "error")
+	t.Setenv("TRAFFIC_LIMIT_GB", "50")
+	t.Setenv("HEALTH_CHECK_PORT", "999999")
+	t.Setenv("SITE_URL", "https://example.com")
+	t.Setenv("TRIAL_DURATION_HOURS", "24")
+	t.Setenv("TRIAL_RATE_LIMIT", "10")
+	t.Setenv("CONTACT_USERNAME", "admin")
+	t.Setenv("XUI_SUB_PATH", "xui")
+
+	_, err := config.Load()
+	assert.Error(t, err)
 }

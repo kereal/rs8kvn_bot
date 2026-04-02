@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+	"golang.org/x/sync/singleflight"
 	"rs8kvn_bot/internal/config"
 	"rs8kvn_bot/internal/logger"
 	"rs8kvn_bot/internal/utils"
@@ -54,6 +55,7 @@ type Client struct {
 	mu         sync.RWMutex
 	lastLogin  time.Time
 	breaker    *CircuitBreaker
+	loginGroup singleflight.Group // Deduplicates concurrent login attempts
 }
 
 // APIResponse represents a generic response from the 3x-ui API.
@@ -166,9 +168,14 @@ func (c *Client) doEnsureLoggedIn(ctx context.Context, force bool) error {
 		return nil
 	}
 
-	return RetryWithBackoff(ctx, config.XUIMaxRetries, config.XUIInitialRetryDelay, func() error {
-		return c.doLogin(ctx)
+	// Use singleflight to deduplicate concurrent login attempts
+	// Only one goroutine will perform the login, others will wait for the result
+	_, err, _ := c.loginGroup.Do("login", func() (interface{}, error) {
+		return nil, RetryWithBackoff(ctx, config.XUIMaxRetries, config.XUIInitialRetryDelay, func() error {
+			return c.doLogin(ctx)
+		})
 	})
+	return err
 }
 
 // doLogin performs the actual login request.
