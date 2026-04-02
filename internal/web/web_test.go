@@ -1179,3 +1179,72 @@ func TestGetClientIP_InvalidRemoteAddr(t *testing.T) {
 
 	assert.Equal(t, "invalid", ip, "Should fall back to raw remote addr")
 }
+
+func TestRenderTrialPage_XSSProtection(t *testing.T) {
+	cfg := &config.Config{
+		SiteURL:            "https://vpn.site",
+		TrialDurationHours: 3,
+		TrialRateLimit:     3,
+		XUIInboundID:       1,
+	}
+
+	srv := NewServer(":8880", testutil.NewMockDatabaseService(), testutil.NewMockXUIClient(), cfg, bot.NewTestBotConfig())
+
+	tests := []struct {
+		name         string
+		subURL       string
+		telegramLink string
+		checkXSS     func(t *testing.T, html string)
+	}{
+		{
+			name:         "script tag in subURL",
+			subURL:       "test<script>alert('xss')</script>",
+			telegramLink: "https://t.me/testbot?start=123",
+			checkXSS: func(t *testing.T, html string) {
+				assert.NotContains(t, html, "<script>alert('xss')</script>", "script tag should be escaped")
+				assert.Contains(t, html, "&lt;script&gt;alert(&#39;xss&#39;)&lt;/script&gt;", "script should be HTML-escaped")
+			},
+		},
+		{
+			name:         "javascript in subURL",
+			subURL:       "javascript:alert('xss')",
+			telegramLink: "https://t.me/testbot?start=123",
+			checkXSS: func(t *testing.T, html string) {
+				assert.NotContains(t, html, `<a href="javascript:alert`, "raw javascript href should be escaped")
+				assert.Contains(t, html, `javascript:alert(&#39;xss&#39;)`, "escaped javascript should be present")
+			},
+		},
+		{
+			name:         "onclick in subURL",
+			subURL:       `test" onclick="alert('xss')"`,
+			telegramLink: "https://t.me/testbot?start=123",
+			checkXSS: func(t *testing.T, html string) {
+				assert.NotContains(t, html, `onclick="alert`, "onclick should be escaped")
+			},
+		},
+		{
+			name:         "script tag in telegramLink",
+			subURL:       "test123",
+			telegramLink: "https://t.me/testbot?start=<script>alert('xss')</script>",
+			checkXSS: func(t *testing.T, html string) {
+				assert.NotContains(t, html, "<script>alert('xss')</script>", "script in telegramLink should be escaped")
+			},
+		},
+		{
+			name:         "normal input - no escaping needed",
+			subURL:       "abc123def456",
+			telegramLink: "https://t.me/testbot?start=abc123",
+			checkXSS: func(t *testing.T, html string) {
+				assert.Contains(t, html, "abc123def456", "normal subURL should be present")
+				assert.Contains(t, html, "https://t.me/testbot?start=abc123", "normal telegramLink should be present")
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			html := srv.renderTrialPage("sub1", tt.subURL, tt.telegramLink, 3)
+			tt.checkXSS(t, html)
+		})
+	}
+}

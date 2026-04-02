@@ -47,19 +47,11 @@ func (h *Handler) handleCreateSubscription(ctx context.Context, chatID int64, us
 	logger.Info("User requesting subscription", zap.String("username", username))
 
 	// Prevent duplicate subscription creation (double-click protection)
-	h.subCreationMu.Lock()
-	if _, inProgress := h.inProgress[chatID]; inProgress {
-		h.subCreationMu.Unlock()
+	if _, loaded := h.inProgressSyncMap.LoadOrStore(chatID, true); loaded {
 		logger.Info("Subscription creation already in progress", zap.Int64("chat_id", chatID))
 		return
 	}
-	h.inProgress[chatID] = struct{}{}
-	h.subCreationMu.Unlock()
-	defer func() {
-		h.subCreationMu.Lock()
-		delete(h.inProgress, chatID)
-		h.subCreationMu.Unlock()
-	}()
+	defer h.inProgressSyncMap.Delete(chatID)
 
 	sub, err := h.getSubscriptionWithCache(ctx, chatID)
 	if err != nil {
