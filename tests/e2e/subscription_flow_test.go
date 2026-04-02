@@ -66,7 +66,6 @@ func findProjectRoot() string {
 type e2eTestEnv struct {
 	t          *testing.T
 	db         *database.Service
-	dbPath     string
 	xui        *testutil.MockXUIClient
 	botAPI     *testutil.MockBotAPI
 	handler    *bot.Handler

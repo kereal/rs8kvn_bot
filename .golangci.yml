@@ -1,0 +1,82 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+issues:
+  exclude-rules:
+    # Test files: errcheck for os.Setenv/Unsetenv, Close, WriteFile, etc. is acceptable
+    - path: _test\.go
+      linters:
+        - errcheck
+      text: "Error return value"
+    # Disable noisy linters for test files
+    - path: _test\.go
+      linters:
+        - dupl
+        - err113
+        - gosec
+        - intrange
+        - nilnil
+        - perfsprint
+        - prealloc
+        - revive
+        - testifylint
+        - thelper
+        - unparam
+        - usetesting
+        - containedctx
+        - staticcheck
+        - ineffassign
+
+linters:
+  default: all
+  disable:
+    - depguard
+    - exhaustruct
+    - forcetypeassert
+    - funlen
+    - gochecknoglobals
+    - gocognit
+    - gochecknoinits
+    - goconst
+    - gocyclo
+    - godot
+    - godox
+    - ireturn
+    - lll
+    - maintidx
+    - mnd
+    - nestif
+    - nlreturn
+    - noctx
+    - paralleltest
+    - predeclared
+    - tagliatelle
+    - testpackage
+    - varnamelen
+    - wrapcheck
+    - wsl
+    - cyclop
+    - dupl
+    - err113
+    - funcorder
+    - gosmopolitan
+    - nonamedreturns
+    - perfsprint
+    - prealloc
+    - recvcheck
+    - revive
+    - gosec
+    - intrange
+    - nilnil
+    - exhaustive
+    - errcheck
+    - testifylint
+    - thelper
+    - unparam
+    - usetesting
+    - containedctx
+    - interfacebloat
+    - nolintlint
+    - usestdlibvars

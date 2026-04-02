@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
@@ -106,10 +105,6 @@ func NewMockXUIServer(t *testing.T) *MockXUIServer {
 
 func (m *MockXUIServer) Close() {
 	m.Server.Close()
-}
-
-func contains(s, substr string) bool {
-	return strings.Contains(s, substr)
 }
 
 func NewTestFixture(t *testing.T) *IntegrationTestFixture {
@@ -415,7 +410,7 @@ func TestMockXUIServer_Endpoints(t *testing.T) {
 	t.Run("login", func(t *testing.T) {
 		resp, err := http.Get(mock.Server.URL + "/login")
 		require.NoError(t, err)
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 
 		var result map[string]any
 		err = json.NewDecoder(resp.Body).Decode(&result)
@@ -426,7 +421,7 @@ func TestMockXUIServer_Endpoints(t *testing.T) {
 	t.Run("addClient", func(t *testing.T) {
 		resp, err := http.Post(mock.Server.URL+"/panel/api/inbounds/addClient", "application/json", nil)
 		require.NoError(t, err)
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 
 		var result map[string]any
 		err = json.NewDecoder(resp.Body).Decode(&result)
@@ -437,7 +432,7 @@ func TestMockXUIServer_Endpoints(t *testing.T) {
 	t.Run("getClientTraffics", func(t *testing.T) {
 		resp, err := http.Get(mock.Server.URL + "/panel/api/inbounds/getClientTraffics/testuser")
 		require.NoError(t, err)
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 
 		var result map[string]any
 		err = json.NewDecoder(resp.Body).Decode(&result)

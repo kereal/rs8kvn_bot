@@ -58,7 +58,7 @@ func (s *SubscriptionService) Create(ctx context.Context, chatID int64, username
 
 	if err := s.db.CreateSubscription(ctx, sub); err != nil {
 		if rollbackErr := s.xui.DeleteClient(ctx, s.cfg.XUIInboundID, client.ID); rollbackErr != nil {
-			return nil, fmt.Errorf("create subscription: %w (rollback failed: %v)", err, rollbackErr)
+			return nil, fmt.Errorf("create subscription: %w (rollback failed: %w)", err, rollbackErr)
 		}
 		return nil, fmt.Errorf("create subscription: %w", err)
 	}

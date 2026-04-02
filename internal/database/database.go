@@ -172,7 +172,11 @@ func runMigrations(dbPath string) error {
 	if err != nil {
 		return fmt.Errorf("failed to open database for migrations: %w", err)
 	}
-	defer sqlDB.Close()
+	defer func() {
+		if err := sqlDB.Close(); err != nil {
+			logger.Warn("Failed to close database after migrations", zap.Error(err))
+		}
+	}()
 
 	return runMigrationsWithDBAndDir(sqlDB, migrationsDir)
 }
@@ -193,12 +197,21 @@ func runMigrationsWithDBAndDir(sqlDB *sql.DB, migrationsDir string) error {
 
 	// Check if subscriptions table exists and its structure
 	var tableExists int
-	sqlDB.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='subscriptions'").Scan(&tableExists)
+	if err := sqlDB.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='subscriptions'").Scan(&tableExists); err != nil {
+		logger.Warn("Failed to check subscriptions table", zap.Error(err))
+		tableExists = 0
+	}
 
 	var xuiHostExists, subIDExists int
 	if tableExists > 0 {
-		sqlDB.QueryRow("SELECT COUNT(*) FROM pragma_table_info('subscriptions') WHERE name = 'x_ui_host'").Scan(&xuiHostExists)
-		sqlDB.QueryRow("SELECT COUNT(*) FROM pragma_table_info('subscriptions') WHERE name = 'subscription_id'").Scan(&subIDExists)
+		if err := sqlDB.QueryRow("SELECT COUNT(*) FROM pragma_table_info('subscriptions') WHERE name = 'x_ui_host'").Scan(&xuiHostExists); err != nil {
+			logger.Warn("Failed to check x_ui_host column", zap.Error(err))
+			xuiHostExists = 0
+		}
+		if err := sqlDB.QueryRow("SELECT COUNT(*) FROM pragma_table_info('subscriptions') WHERE name = 'subscription_id'").Scan(&subIDExists); err != nil {
+			logger.Warn("Failed to check subscription_id column", zap.Error(err))
+			subIDExists = 0
+		}
 	}
 
 	// Legacy database: has subscriptions table but missing subscription_id column
@@ -251,7 +264,7 @@ func runMigrationsWithDBAndDir(sqlDB *sql.DB, migrationsDir string) error {
 		_, _ = sqlDB.Exec(`DROP TABLE IF EXISTS schema_migrations`)
 		_, _ = sqlDB.Exec(`CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, dirty INTEGER)`)
 		_, _ = sqlDB.Exec(`INSERT INTO schema_migrations (version, dirty) VALUES (3, 0)`)
-		//logger.Info("Referral columns already exist, skipping migration 003")
+		// logger.Info("Referral columns already exist, skipping migration 003")
 		return nil
 	}
 
@@ -278,7 +291,7 @@ func runMigrationsWithDBAndDir(sqlDB *sql.DB, migrationsDir string) error {
 	// Get current version before migration
 	versionBefore, _, _ := m.Version()
 
-	if err := m.Up(); err != nil && err != migrate.ErrNoChange {
+	if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
 		return fmt.Errorf("migration failed: %w", err)
 	}
 
@@ -292,7 +305,7 @@ func runMigrationsWithDBAndDir(sqlDB *sql.DB, migrationsDir string) error {
 		for _, f := range migrationFiles {
 			name := filepath.Base(f)
 			var num int
-			fmt.Sscanf(name, "%d_", &num)
+			_, _ = fmt.Sscanf(name, "%d_", &num)
 			if uint(num) > versionBefore && uint(num) <= versionAfter {
 				appliedMigrations = append(appliedMigrations, name)
 			}

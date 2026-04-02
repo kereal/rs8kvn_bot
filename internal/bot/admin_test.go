@@ -3,7 +3,6 @@ package bot
 import (
 	"context"
 	"errors"
-	"sync"
 	"testing"
 
 	"rs8kvn_bot/internal/config"
@@ -52,73 +51,6 @@ func createCommandUpdate(chatID int64, from *tgbotapi.User, text string) tgbotap
 			Entities: entities,
 		},
 	}
-}
-
-// mockBotAPIWithCounter is a mock that counts Send calls and can fail on specific calls
-type mockBotAPIWithCounter struct {
-	mu           sync.RWMutex
-	sendCalls    int
-	requestCalls int
-	lastMessage  tgbotapi.Chattable
-	sendError    error
-	failOnCalls  map[int]bool // Call numbers that should fail
-}
-
-func newMockBotAPIWithCounter() *mockBotAPIWithCounter {
-	return &mockBotAPIWithCounter{
-		failOnCalls: make(map[int]bool),
-	}
-}
-
-func (m *mockBotAPIWithCounter) Send(c tgbotapi.Chattable) (tgbotapi.Message, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.sendCalls++
-	m.lastMessage = c
-
-	if m.sendError != nil {
-		return tgbotapi.Message{}, m.sendError
-	}
-
-	// Check if this call should fail
-	if m.failOnCalls[m.sendCalls] {
-		return tgbotapi.Message{}, errors.New("simulated send failure")
-	}
-
-	return tgbotapi.Message{MessageID: m.sendCalls}, nil
-}
-
-func (m *mockBotAPIWithCounter) Request(c tgbotapi.Chattable) (*tgbotapi.APIResponse, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.requestCalls++
-	return &tgbotapi.APIResponse{Ok: true}, nil
-}
-
-func (m *mockBotAPIWithCounter) GetUpdatesChan(config tgbotapi.UpdateConfig) tgbotapi.UpdatesChannel {
-	ch := make(chan tgbotapi.Update)
-	close(ch)
-	return ch
-}
-
-func (m *mockBotAPIWithCounter) StopReceivingUpdates() {}
-
-func (m *mockBotAPIWithCounter) Self() *tgbotapi.User {
-	return &tgbotapi.User{
-		ID:                      123456789,
-		FirstName:               "TestBot",
-		UserName:                "testbot",
-		IsBot:                   true,
-		CanJoinGroups:           false,
-		CanReadAllGroupMessages: false,
-		SupportsInlineQueries:   false,
-	}
-}
-
-func (m *mockBotAPIWithCounter) SendCalledCount() int {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return m.sendCalls
 }
 
 func TestHandleDel_NonAdminUser(t *testing.T) {
