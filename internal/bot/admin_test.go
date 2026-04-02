@@ -111,6 +111,8 @@ func TestHandleDel_ValidDeletion(t *testing.T) {
 
 	handler.HandleDel(ctx, update)
 	assert.True(t, mockBot.SendCalled)
+	assert.Contains(t, mockBot.LastSentTextSafe(), "удалена")
+	assert.True(t, mockXUI.DeleteClientCalled)
 }
 
 func TestHandleDel_InvalidIDFormat(t *testing.T) {
