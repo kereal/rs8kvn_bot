@@ -664,12 +664,12 @@ func (s *Service) CountAllSubscriptions(ctx context.Context) (int64, error) {
 	return count, nil
 }
 
-// CountActiveSubscriptions returns the number of active, non-expired subscriptions.
+// CountActiveSubscriptions returns the number of active subscriptions.
 func (s *Service) CountActiveSubscriptions(ctx context.Context) (int64, error) {
 	var count int64
 	result := s.db.WithContext(ctx).
 		Model(&Subscription{}).
-		Where("status = ? AND expiry_time > ?", "active", time.Now()).
+		Where("status = ?", "active").
 		Count(&count)
 	if result.Error != nil {
 		return 0, fmt.Errorf("failed to count active subscriptions: %w", result.Error)
