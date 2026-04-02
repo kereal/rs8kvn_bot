@@ -70,13 +70,14 @@ tgvpn_go/
 - ✅ `/start`, `/help` — start commands with inline keyboards
 - ✅ 📋 Subscription view — traffic usage, subscription link, QR code
 - ✅ ☕ Donate, ❓ Help — auxiliary menus
-- ✅ 🔗 Referral system — share links (`t.me/{bot}?start=share_{code}`)
+- ✅ 🔗 Referral system — share links (`t.me/{bot}?start=share_{code}`) with in-memory cache + periodic DB sync
 - ✅ 🎁 Trial subscriptions via `/i/{code}` landing page with Happ deep-links
 
 **Admin Features:**
 - ✅ `/del <id>` — delete subscription by ID
 - ✅ `/broadcast <msg>` — send message to all users (detached context)
 - ✅ `/send <id|username> <msg>` — send private message
+- ✅ `/refstats` — referral statistics (count per user from cache)
 - ✅ 📊 Stats — bot statistics
 
 **Infrastructure:**
@@ -93,6 +94,11 @@ tgvpn_go/
 - ✅ IP spoofing protection — X-Forwarded-For trusted only from local/private addresses
 - ✅ Cache cleanup goroutine — prevents memory leaks from expired entries
 - ✅ Atomic trial cleanup — `DELETE ... RETURNING` eliminates race condition
+- ✅ Referral cache — in-memory map with periodic sync, `/refstats` admin command
+- ✅ Atomic trial rollback — retry with backoff on cleanup failure
+- ✅ Atomic subscription locking — `sync.Map` with `LoadOrStore` for race-safe creation
+- ✅ Singleflight for XUI login — deduplicates concurrent login attempts
+- ✅ SQLite connection pool — configured for single-writer reliability
 
 ### Test Coverage
 
@@ -123,9 +129,37 @@ Test suite includes:
 
 ---
 
-## Last Changes (This Session)
+## Last Changes (v2.1.0 - Current Session)
 
-### Per-User Rate Limiter
+### Referral Cache System
+- **Problem:** Dead code `referrals` map existed but wasn't used
+- **Solution:** Implemented full referral cache system with:
+  - Database methods: `GetReferralCount`, `GetAllReferralCounts`
+  - Handler cache methods: `LoadReferralCache`, `GetReferralCount`, `IncrementReferralCount`, `DecrementReferralCount`
+  - Periodic sync: `StartReferralCacheSync` (every 5 minutes)
+  - Admin command: `/refstats` shows referral count per user
+- **Files:** `database/database.go`, `interfaces/interfaces.go`, `bot/handler.go`, `bot/subscription.go`, `bot/admin.go`, `testutil/testutil.go`, `cmd/bot/main.go`
+- **Commit:** `66f5d86`
+
+### Trial Atomic Rollback
+- **Problem:** Trial creation could leave orphaned client in 3x-ui if cleanup failed
+- **Solution:** Exported `RetryWithBackoff` from xui package, used for rollback with up to 3 retries
+- **Files:** `xui/client.go`, `web/web.go`
+- **Commit:** `d2d8c16`
+
+### Subscription Locking with sync.Map
+- **Problem:** Manual lock/unlock via map could deadlock on panic
+- **Solution:** Replaced `map + sync.Mutex` with `sync.Map` using `LoadOrStore` for atomic operations
+- **Files:** `bot/handler.go`, `bot/subscription.go`
+- **Commit:** `113f2bf`
+
+### Singleflight for XUI Login
+- **Problem:** Concurrent requests after session expiry could trigger multiple logins
+- **Solution:** Added `singleflight.Group` to deduplicate concurrent login attempts
+- **Files:** `xui/client.go`
+- **Commit:** `1857ae8`
+
+### Per-User Rate Limiter (Previous)
 - **Problem:** Global token bucket shared across all users — one active user can exhaust all 30 tokens, starving others
 - **Solution:** `PerUserRateLimiter` in `internal/ratelimiter/per_user.go` — separate bucket per `chatID`
 - **Files changed:** `ratelimiter/per_user.go` (new), `bot/handler.go`, `bot/message.go`, `cmd/bot/main.go`
@@ -169,9 +203,15 @@ Test suite includes:
 **Status:** All tests passing, golangci-lint: 0 issues.
 
 **Completed this session:**
+- ✅ Referral cache system with `/refstats` admin command
+- ✅ Trial atomic rollback with retry
+- ✅ Atomic subscription locking with sync.Map
+- ✅ Singleflight for XUI login deduplication
+- ✅ SQLite connection pool configured
 - ✅ Per-user rate limiter with cleanup goroutine
 - ✅ Cache LRU fix (lastAccess-based eviction)
 - ✅ modernc.org/sqlite analysis
+- ✅ Cleaned IMPROVEMENTS.md from completed items
 
 **Remaining tasks (prioritized):**
 1. **Re-enable linters** — errcheck, gosec in `.golangci.yml` (P1)
@@ -263,5 +303,5 @@ go run ./cmd/bot
 ---
 
 **Generated:** 2026-04-02  
-**Session:** Auto-reset traffic mechanism, ExpiryTime sync, daysUntilReset tests  
+**Session:** Referral cache, atomic rollback, sync.Map locking, singleflight, IMPROVEMENTS cleanup  
 **Version:** v2.1.0
