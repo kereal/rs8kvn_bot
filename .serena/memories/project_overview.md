@@ -21,6 +21,8 @@ This is a Telegram bot for distributing VLESS+Reality+Vision proxy subscriptions
 - Rate limiting per user
 - Graceful shutdown with goroutine tracking
 - Circuit breaker for 3x-ui panel
+- Donate message with card number in config (constants.go)
+- Friendly and inviting donation message tone
 
 ## Tech Stack
 - **Language**: Go 1.25.0
@@ -55,15 +57,42 @@ This is a Telegram bot for distributing VLESS+Reality+Vision proxy subscriptions
 - ✅ Correct: `cd: "tgvpn_go"` 
 - ❌ Wrong: `cd: "/home/kereal/tgvpn_go"` (causes worktree error)
 
-### Git Workflow Skill
-Project includes `.agents/skills/git-workflow-skill/` with best practices for:
+### Git Workflow
+**Simplified workflow without Pull Requests:**
+- Feature branches: `feature/description`
+- Workflow: `feature/* → merge → dev → merge → main`
+- Direct merge to dev (no PRs)
+- Merge dev to main for releases
+- Tag releases: `v2.1.0`, etc.
+- Sync dev with main after release
+
+**Commit conventions:**
 - Conventional Commits (`feat:`, `fix:`, `docs:`, etc.)
-- Branch naming conventions (`feature/TICKET-123-desc`)
-- Pull Request workflow
-- Release management
+- Branch naming: `feature/description`
+
+Project includes `.agents/skills/git-workflow-skill/` with best practices.
 
 ### Available Tools
 - `git` - version control
 - `gh` CLI (v2.46.0) - GitHub operations
 - `golangci-lint` - linting
 - `go` (v1.25.0) - Go toolchain
+
+## Recent Changes (v2.1.0)
+
+### Donate Improvements
+- **Card number added to config**: `DonateCardNumber = "2200702156780864"` (T-Bank)
+- **Donate constants**: `DonateURL`, `DonateContactUsername` in `internal/config/constants.go`
+- **Improved donate message text**:
+  - Friendly and inviting tone (no pressure)
+  - Emojis: 😊 (call to action), ❤️ (gratitude)
+  - Card number in code blocks for easy copying
+  - Better formatting with line breaks
+
+### Traffic Limit
+- **Default traffic limit**: Changed from 100GB to 30GB (`DefaultTrafficLimitGB = 30`)
+
+### Release Management
+- **Tag**: v2.1.0 created on commit a69c7f6
+- **Workflow**: Clean git history, removed empty merge commits
+- **Branches**: main and dev synchronized on same commit

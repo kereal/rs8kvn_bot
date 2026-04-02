@@ -570,6 +570,7 @@ func TestHandleMySubscription_ActiveSubscription(t *testing.T) {
 		SubscriptionURL: "https://test.url/sub",
 		ExpiryTime:      time.Now().Add(30 * 24 * time.Hour),
 		Status:          "active",
+		CreatedAt:       time.Now().Add(-7 * 24 * time.Hour), // Created 7 days ago
 	}
 
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
@@ -590,7 +591,10 @@ func TestHandleMySubscription_ActiveSubscription(t *testing.T) {
 
 	assert.True(t, mockBot.SendCalled)
 	assert.Contains(t, mockBot.LastSentText, "Ваша подписка")
-	assert.Contains(t, mockBot.LastSentText, "3.00 / 100 ГБ") // 1 + 2 = 3 GB
+	assert.Contains(t, mockBot.LastSentText, "3.00 из 100 ГБ (3%)") // 1 + 2 = 3 GB
+	assert.Contains(t, mockBot.LastSentText, "⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜")          // Empty progress bar (3%)
+	assert.Contains(t, mockBot.LastSentText, "📅 Создана:")
+	assert.Contains(t, mockBot.LastSentText, "🔄 Сброс:")
 }
 
 func TestHandleMySubscription_TrafficFetchError(t *testing.T) {
@@ -609,6 +613,7 @@ func TestHandleMySubscription_TrafficFetchError(t *testing.T) {
 		SubscriptionURL: "https://test.url/sub",
 		ExpiryTime:      time.Now().Add(30 * 24 * time.Hour),
 		Status:          "active",
+		CreatedAt:       time.Now().Add(-7 * 24 * time.Hour), // Created 7 days ago
 	}
 
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
@@ -625,7 +630,8 @@ func TestHandleMySubscription_TrafficFetchError(t *testing.T) {
 	assert.True(t, mockBot.SendCalled)
 	assert.Contains(t, mockBot.LastSentText, "Ваша подписка")
 	// Should still show subscription even if traffic fetch fails
-	assert.Contains(t, mockBot.LastSentText, "0.00 / 100 ГБ")
+	assert.Contains(t, mockBot.LastSentText, "0.00 из 100 ГБ (0%)")
+	assert.Contains(t, mockBot.LastSentText, "⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜") // Empty progress bar (0%)
 }
 
 func TestHandleMySubscription_UsesCache(t *testing.T) {
@@ -1371,4 +1377,80 @@ func TestHandleBackToSubscription_DeleteFails(t *testing.T) {
 	handler.handleBackToSubscription(ctx, 123456, "testuser", 789)
 
 	assert.True(t, mockBot.RequestCalledSafe(), "Bot.Request should be called to delete message")
+}
+
+// Tests for daysUntilReset function
+
+func TestDaysUntilReset_ZeroExpiryTime(t *testing.T) {
+	now := time.Now()
+	expiryTime := time.Time{} // zero value
+
+	result := daysUntilReset(now, expiryTime)
+
+	assert.Equal(t, -1, result, "Should return -1 when expiryTime is zero (auto-reset not configured)")
+}
+
+func TestDaysUntilReset_Expired(t *testing.T) {
+	now := time.Now()
+	expiryTime := now.Add(-24 * time.Hour) // expired 1 day ago
+
+	result := daysUntilReset(now, expiryTime)
+
+	assert.Equal(t, 0, result, "Should return 0 when already expired (reset should happen now)")
+}
+
+func TestDaysUntilReset_Equal(t *testing.T) {
+	now := time.Now()
+	expiryTime := now
+
+	result := daysUntilReset(now, expiryTime)
+
+	assert.Equal(t, 0, result, "Should return 0 when now equals expiryTime (reset should happen now)")
+}
+
+func TestDaysUntilReset_NormalCase(t *testing.T) {
+	now := time.Now()
+	expiryTime := now.Add(10 * 24 * time.Hour) // 10 days from now
+
+	result := daysUntilReset(now, expiryTime)
+
+	assert.Equal(t, 10, result, "Should return 10 when expiryTime is 10 days from now")
+}
+
+func TestDaysUntilReset_OneDayLeft(t *testing.T) {
+	now := time.Now()
+	expiryTime := now.Add(24 * time.Hour) // 1 day from now
+
+	result := daysUntilReset(now, expiryTime)
+
+	// Allow for +/- 1 hour tolerance due to time calculation
+	assert.True(t, result >= 0 && result <= 1, "Should return 0 or 1 when expiryTime is ~1 day from now")
+}
+
+func TestDaysUntilReset_TwentyNineDaysLeft(t *testing.T) {
+	now := time.Now()
+	expiryTime := now.Add(29 * 24 * time.Hour) // 29 days from now
+
+	result := daysUntilReset(now, expiryTime)
+
+	// Allow for +/- 1 day tolerance
+	assert.True(t, result >= 28 && result <= 30, "Should return ~29 when expiryTime is 29 days from now")
+}
+
+func TestDaysUntilReset_AlmostExpired(t *testing.T) {
+	now := time.Now()
+	expiryTime := now.Add(1 * time.Hour) // 1 hour from now
+
+	result := daysUntilReset(now, expiryTime)
+
+	assert.Equal(t, 0, result, "Should return 0 when less than 1 day remains")
+}
+
+func TestDaysUntilReset_FutureExpiry(t *testing.T) {
+	now := time.Date(2025, 1, 15, 12, 0, 0, 0, time.UTC)
+	expiryTime := time.Date(2025, 2, 14, 12, 0, 0, 0, time.UTC) // 30 days later
+
+	result := daysUntilReset(now, expiryTime)
+
+	assert.Equal(t, 30, result, "Should return 30 days for 30-day interval")
 }

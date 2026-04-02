@@ -142,6 +142,16 @@ Test suite includes:
 - **Finding:** Indirect dependency from `golang-migrate`, not imported in code, does not affect binary
 - **Decision:** Keep as-is — cannot exclude without migrate pulling newer version
 
+### Auto-Reset Traffic Mechanism (v2.1.0)
+- **Research:** Investigated 3x-ui source code to understand `reset` field behavior
+- **Finding:** `reset` is interval in days from creation date, NOT day of month
+- **Key insight:** Auto-reset only works when `expiryTime > 0` (was zero before)
+- **Fix:** Changed subscription creation to set `expiryTime = now + 30 days`
+- **Rename:** `SubscriptionResetDay` → `SubscriptionResetIntervalDays` (clearer name)
+- **Sync:** Added ExpiryTime synchronization from 3x-ui on subscription view
+- **Tests:** 8 new tests for `daysUntilReset` function
+- **Docs:** Updated README.md with correct explanation + source link
+
 ### Previous Sessions (v2.0.3 — v2.1.0)
 - Command routing moved from `cmd/bot/main.go` to `bot.Handler.HandleUpdate()`
 - Atomic trial cleanup with `DELETE ... RETURNING`
@@ -187,7 +197,9 @@ Test suite includes:
 
 ### Subscription Flow
 - **Trial:** `/i/{code}` → IP rate limit (3/hour) → xui client (1GB, 3h) → bind via `/start trial_{subID}`
-- **Regular:** `create_subscription` callback → xui client (30GB, no expiry, reset:30)
+- **Regular:** `create_subscription` callback → xui client (30GB, expiryTime: now + 30 days, reset: 30)
+- **Auto-reset:** Traffic resets every 30 days, expiryTime extends automatically by 3x-ui
+- **ExpiryTime sync:** Updated from 3x-ui on subscription view (see task #34 in IMPROVEMENTS.md)
 - **Share referral:** `pendingInvites[chatID]` cached for 60 minutes, `referred_by` set on creation
 - **Trial cookie:** `rs8kvn_trial_{code}` prevents duplication for 3 hours
 - **Atomic cleanup:** `DELETE ... RETURNING` for expired trials (SQLite 3.35+, PostgreSQL)
@@ -251,5 +263,5 @@ go run ./cmd/bot
 ---
 
 **Generated:** 2026-04-02  
-**Session:** Per-user rate limiter, cache LRU fix, dependency analysis  
+**Session:** Auto-reset traffic mechanism, ExpiryTime sync, daysUntilReset tests  
 **Version:** v2.1.0
