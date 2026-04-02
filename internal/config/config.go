@@ -49,6 +49,9 @@ type Config struct {
 	SiteURL            string
 	TrialDurationHours int
 	TrialRateLimit     int
+
+	// Contact configuration
+	ContactUsername string
 }
 
 // Load reads configuration from environment variables and validates it.
@@ -99,6 +102,7 @@ func Load() (*Config, error) {
 	if cfg.TrialRateLimit, err = parseEnvInt("TRIAL_RATE_LIMIT", DefaultTrialRateLimit); err != nil {
 		return nil, fmt.Errorf("invalid TRIAL_RATE_LIMIT: %w", err)
 	}
+	cfg.ContactUsername = getEnv("CONTACT_USERNAME", ContactUsername)
 
 	// Validate all required fields
 	if err := cfg.validate(); err != nil {

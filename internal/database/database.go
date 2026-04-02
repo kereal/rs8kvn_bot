@@ -889,20 +889,28 @@ func (s *Service) CreateTrialRequest(ctx context.Context, ip string) error {
 }
 
 // CleanupExpiredTrials deletes trial subscriptions that have expired without being activated.
+// Uses atomic DELETE ... RETURNING to prevent race conditions with concurrent trial activation.
 func (s *Service) CleanupExpiredTrials(ctx context.Context, hours int, xuiClient interface {
 	DeleteClient(ctx context.Context, inboundID int, clientID string) error
 }, inboundID int) (int64, error) {
 	cutoff := time.Now().Add(-time.Duration(hours) * time.Hour)
 
+	// Atomic delete with RETURNING prevents race condition where a trial
+	// is activated (BindTrialSubscription) between SELECT and DELETE.
 	var subs []Subscription
-	if err := s.db.WithContext(ctx).
-		Where("is_trial = ? AND telegram_id = ? AND created_at < ?", true, 0, cutoff).
-		Find(&subs).Error; err != nil {
-		return 0, fmt.Errorf("failed to find expired trials: %w", err)
+	result := s.db.WithContext(ctx).Raw(
+		`DELETE FROM subscriptions
+		 WHERE is_trial = ? AND telegram_id = ? AND created_at < ?
+		 RETURNING id, client_id, inbound_id`,
+		true, 0, cutoff,
+	).Scan(&subs)
+	if result.Error != nil {
+		return 0, fmt.Errorf("failed to cleanup expired trials: %w", result.Error)
 	}
 
 	deletedCount := int64(len(subs))
 
+	// Delete orphaned clients from XUI panel
 	for _, sub := range subs {
 		if sub.ClientID != "" && xuiClient != nil {
 			if err := xuiClient.DeleteClient(ctx, inboundID, sub.ClientID); err != nil {
@@ -910,15 +918,6 @@ func (s *Service) CleanupExpiredTrials(ctx context.Context, hours int, xuiClient
 					zap.String("client_id", sub.ClientID),
 					zap.Error(err))
 			}
-		}
-	}
-
-	if deletedCount > 0 {
-		result := s.db.WithContext(ctx).
-			Where("is_trial = ? AND telegram_id = ? AND created_at < ?", true, 0, cutoff).
-			Delete(&Subscription{})
-		if result.Error != nil {
-			return 0, fmt.Errorf("failed to cleanup expired trials: %w", result.Error)
 		}
 	}
 
