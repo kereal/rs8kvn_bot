@@ -16,15 +16,8 @@ import (
 	"rs8kvn_bot/internal/logger"
 )
 
-func initLogger(t *testing.T) {
-	_, err := logger.Init("", "error")
-	if err != nil {
-		t.Logf("Logger init error (non-fatal): %v", err)
-	}
-}
-
 func TestMain(m *testing.M) {
-	initLogger(&testing.T{})
+	_, _ = logger.Init("", "error")
 	os.Exit(m.Run())
 }
 
@@ -453,12 +446,10 @@ func TestCreateSubscription_MultipleRevokes(t *testing.T) {
 			Status:          "active",
 			ExpiryTime:      time.Now().Add(time.Duration(i+1) * 24 * time.Hour),
 			SubscriptionURL: fmt.Sprintf("http://localhost/sub/%d", i),
+			CreatedAt:       time.Now().Add(-time.Duration(3-i) * time.Minute),
 		}
 
 		require.NoError(t, CreateSubscription(sub), "CreateSubscription() iteration %d", i)
-
-		// Small delay to ensure different timestamps
-		time.Sleep(10 * time.Millisecond)
 	}
 
 	// Verify only one active subscription exists
@@ -961,7 +952,6 @@ func TestGetLatestSubscriptions(t *testing.T) {
 
 	// Create test subscriptions with different creation times
 	for i := 0; i < 15; i++ {
-		time.Sleep(time.Millisecond * 10) // Ensure different timestamps
 		sub := &Subscription{
 			TelegramID:      int64(100000000 + i),
 			Username:        fmt.Sprintf("user%d", i),
@@ -972,6 +962,7 @@ func TestGetLatestSubscriptions(t *testing.T) {
 			ExpiryTime:      time.Now().Add(24 * time.Hour),
 			Status:          "active",
 			SubscriptionURL: fmt.Sprintf("http://localhost/sub/%d", i),
+			CreatedAt:       time.Now().Add(-time.Duration(15-i) * time.Minute),
 		}
 		require.NoError(t, CreateSubscription(sub), "Failed to create test subscription")
 	}
@@ -1062,7 +1053,6 @@ func TestService_GetLatestSubscriptions(t *testing.T) {
 
 	// Create test subscriptions
 	for i := 0; i < 5; i++ {
-		time.Sleep(time.Millisecond * 10)
 		sub := &Subscription{
 			TelegramID:      int64(200000000 + i),
 			Username:        fmt.Sprintf("service_user%d", i),
@@ -1073,6 +1063,7 @@ func TestService_GetLatestSubscriptions(t *testing.T) {
 			ExpiryTime:      time.Now().Add(24 * time.Hour),
 			Status:          "active",
 			SubscriptionURL: fmt.Sprintf("http://localhost/sub/%d", i),
+			CreatedAt:       time.Now().Add(-time.Duration(5-i) * time.Minute),
 		}
 		require.NoError(t, service.CreateSubscription(context.Background(), sub), "Failed to create test subscription")
 	}
@@ -1134,7 +1125,6 @@ func TestGetLatestSubscriptions_LimitOne(t *testing.T) {
 
 	// Create test subscriptions
 	for i := 0; i < 5; i++ {
-		time.Sleep(time.Millisecond * 10)
 		sub := &Subscription{
 			TelegramID:      int64(100000000 + i),
 			Username:        fmt.Sprintf("user%d", i),
@@ -1145,6 +1135,7 @@ func TestGetLatestSubscriptions_LimitOne(t *testing.T) {
 			ExpiryTime:      time.Now().Add(24 * time.Hour),
 			Status:          "active",
 			SubscriptionURL: fmt.Sprintf("http://localhost/sub/%d", i),
+			CreatedAt:       time.Now().Add(-time.Duration(5-i) * time.Minute),
 		}
 		require.NoError(t, CreateSubscription(sub), "Failed to create test subscription")
 	}
@@ -1168,7 +1159,6 @@ func TestGetLatestSubscriptions_LimitGreaterThanAvailable(t *testing.T) {
 
 	// Create 3 test subscriptions
 	for i := 0; i < 3; i++ {
-		time.Sleep(time.Millisecond * 10)
 		sub := &Subscription{
 			TelegramID:      int64(100000000 + i),
 			Username:        fmt.Sprintf("user%d", i),
@@ -1179,6 +1169,7 @@ func TestGetLatestSubscriptions_LimitGreaterThanAvailable(t *testing.T) {
 			ExpiryTime:      time.Now().Add(24 * time.Hour),
 			Status:          "active",
 			SubscriptionURL: fmt.Sprintf("http://localhost/sub/%d", i),
+			CreatedAt:       time.Now().Add(-time.Duration(3-i) * time.Minute),
 		}
 		require.NoError(t, CreateSubscription(sub), "Failed to create test subscription")
 	}
@@ -1217,9 +1208,9 @@ func TestGetLatestSubscriptions_SpecialCharacters(t *testing.T) {
 			ExpiryTime:      time.Now().Add(24 * time.Hour),
 			Status:          "active",
 			SubscriptionURL: fmt.Sprintf("http://localhost/sub/%d", i),
+			CreatedAt:       time.Now().Add(-time.Duration(len(specialUsernames)-i) * time.Minute),
 		}
 		require.NoError(t, CreateSubscription(sub), "Failed to create test subscription")
-		time.Sleep(time.Millisecond * 10)
 	}
 
 	subs, err := GetLatestSubscriptions(10)
@@ -1301,6 +1292,7 @@ func TestGetLatestSubscriptions_MixedStatuses(t *testing.T) {
 			ExpiryTime:      time.Now().Add(24 * time.Hour),
 			Status:          status,
 			SubscriptionURL: fmt.Sprintf("http://localhost/sub/%d", i),
+			CreatedAt:       time.Now().Add(-time.Duration(len(statuses)-i) * time.Minute),
 		}
 		if status == "active" {
 			require.NoError(t, CreateSubscription(sub), "Failed to create test subscription")
@@ -1308,7 +1300,6 @@ func TestGetLatestSubscriptions_MixedStatuses(t *testing.T) {
 			// Direct DB create for non-active statuses
 			require.NoError(t, DB.Create(sub).Error, "Failed to create test subscription")
 		}
-		time.Sleep(time.Millisecond * 10)
 	}
 
 	// Should only get active subscriptions

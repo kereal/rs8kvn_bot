@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"rs8kvn_bot/internal/database"
+	"rs8kvn_bot/internal/logger"
 	"rs8kvn_bot/internal/xui"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -15,6 +16,18 @@ import (
 )
 
 var ErrRecordNotFound = gorm.ErrRecordNotFound
+
+const (
+	DefaultTelegramID = int64(123456789)
+	DefaultUsername   = "testuser"
+	DefaultTrafficGB  = 100
+	AdminTelegramID   = int64(999999)
+)
+
+func InitLogger(t any) error {
+	_, err := logger.Init("", "error")
+	return err
+}
 
 type TestDatabase struct {
 	DB      *gorm.DB
@@ -109,8 +122,8 @@ type MockDatabaseService struct {
 	CleanupExpiredTrialsFunc            func(ctx context.Context, hours int, xuiClient interface {
 		DeleteClient(ctx context.Context, inboundID int, clientID string) error
 	}, inboundID int) (int64, error)
-	GetPoolStatsFunc        func() (*database.PoolStats, error)
-	GetReferralCountFunc    func(ctx context.Context, referrerTGID int64) (int64, error)
+	GetPoolStatsFunc         func() (*database.PoolStats, error)
+	GetReferralCountFunc     func(ctx context.Context, referrerTGID int64) (int64, error)
 	GetAllReferralCountsFunc func(ctx context.Context) (map[int64]int64, error)
 }
 

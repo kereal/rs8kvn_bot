@@ -14,7 +14,6 @@ import (
 	"rs8kvn_bot/internal/bot"
 	"rs8kvn_bot/internal/config"
 	"rs8kvn_bot/internal/database"
-	"rs8kvn_bot/internal/logger"
 	"rs8kvn_bot/internal/testutil"
 	"rs8kvn_bot/internal/utils"
 	"rs8kvn_bot/internal/xui"
@@ -22,15 +21,8 @@ import (
 	"gorm.io/gorm"
 )
 
-func initLogger(t *testing.T) {
-	_, err := logger.Init("", "error")
-	if err != nil {
-		t.Logf("Logger init error (non-fatal): %v", err)
-	}
-}
-
 func TestMain(m *testing.M) {
-	initLogger(&testing.T{})
+	testutil.InitLogger(m)
 	os.Exit(m.Run())
 }
 

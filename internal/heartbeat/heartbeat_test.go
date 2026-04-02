@@ -13,18 +13,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"rs8kvn_bot/internal/logger"
+	"rs8kvn_bot/internal/testutil"
 )
 
-func initLogger(t *testing.T) {
-	_, err := logger.Init("", "error")
-	if err != nil {
-		t.Logf("Logger init error (non-fatal): %v", err)
-	}
-}
-
 func TestMain(m *testing.M) {
-	initLogger(&testing.T{})
+	testutil.InitLogger(m)
 	os.Exit(m.Run())
 }
 
