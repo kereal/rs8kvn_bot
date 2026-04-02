@@ -24,16 +24,9 @@ func initTestConfig() {
 	config.XUIInitialRetryDelay = 10 * time.Millisecond
 }
 
-func initLogger(t *testing.T) {
-	_, err := logger.Init("", "error")
-	if err != nil {
-		t.Logf("Logger init error (non-fatal): %v", err)
-	}
-}
-
 func TestMain(m *testing.M) {
 	initTestConfig()
-	initLogger(&testing.T{})
+	_, _ = logger.Init("", "error")
 	os.Exit(m.Run())
 }
 
