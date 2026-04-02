@@ -15,8 +15,27 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"gopkg.in/natefinch/lumberjack.v2"
+)
 
-	"rs8kvn_bot/internal/config"
+// Constants moved from config to break the logger→config dependency.
+const (
+	// SentryFlushTimeout is the timeout for flushing Sentry events.
+	SentryFlushTimeout = 5 * time.Second
+
+	// SentryPanicFlushTimeout is the timeout for flushing Sentry during panic recovery.
+	SentryPanicFlushTimeout = 2 * time.Second
+
+	// SentryTracesSampleRate is the sample rate for performance monitoring.
+	SentryTracesSampleRate = 0.1 // 10%
+
+	// LogMaxSizeMB is the maximum size of a log file in MB.
+	LogMaxSizeMB = 10
+
+	// LogMaxBackups is the maximum number of old log files to retain.
+	LogMaxBackups = 2
+
+	// LogMaxAgeDays is the maximum number of days to retain old log files.
+	LogMaxAgeDays = 14
 )
 
 var (
@@ -113,7 +132,7 @@ func Warn(msg string, fields ...zap.Field) {
 // Fatal logs at FATAL level, sends to Sentry, and exits.
 func Fatal(msg string, fields ...zap.Field) {
 	captureToSentry("[FATAL] "+msg, "fatal")
-	flushSentry(config.SentryFlushTimeout)
+	flushSentry(SentryFlushTimeout)
 	Log.Fatal(msg, fields...)
 }
 
@@ -229,9 +248,9 @@ func NewService(logFilePath, level string) (*Service, error) {
 	// File output with rotation
 	fileWriter := &lumberjack.Logger{
 		Filename:   logFilePath,
-		MaxSize:    config.LogMaxSizeMB,
-		MaxBackups: config.LogMaxBackups,
-		MaxAge:     config.LogMaxAgeDays,
+		MaxSize:    LogMaxSizeMB,
+		MaxBackups: LogMaxBackups,
+		MaxAge:     LogMaxAgeDays,
 		Compress:   false,
 	}
 	cores = append(cores, zapcore.NewCore(encoder, zapcore.AddSync(fileWriter), zapLevel))
@@ -306,7 +325,7 @@ func (s *Service) Error(msg string, fields ...zap.Field) {
 // Fatal logs at FATAL level, sends to Sentry, and exits.
 func (s *Service) Fatal(msg string, fields ...zap.Field) {
 	s.captureSentry("[FATAL] "+msg, sentry.LevelFatal)
-	s.flushSentry(config.SentryFlushTimeout)
+	s.flushSentry(SentryFlushTimeout)
 	s.log.Fatal(msg, fields...)
 }
 

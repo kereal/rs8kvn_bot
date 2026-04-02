@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -111,6 +112,11 @@ func (h *Handler) HandleDel(ctx context.Context, update tgbotapi.Update) {
 		logger.Error("Failed to get subscription", zap.Error(err), zap.Uint("id", id))
 		h.SendMessage(ctx, chatID, fmt.Sprintf("❌ Подписка с ID %d не найдена", id))
 		return
+	}
+
+	// Decrement referral cache if this subscription was referred
+	if sub.ReferredBy > 0 {
+		h.DecrementReferralCount(sub.ReferredBy)
 	}
 
 	// Delete from 3x-ui panel first
@@ -430,5 +436,71 @@ func (h *Handler) notifyAdminError(ctx context.Context, message string) {
 
 	msg := tgbotapi.NewMessage(h.cfg.TelegramAdminID, message)
 	msg.ParseMode = "Markdown"
+	h.send(ctx, msg)
+}
+
+// HandleRefstats handles the /refstats command to show referral statistics.
+func (h *Handler) HandleRefstats(ctx context.Context, update tgbotapi.Update) {
+	chatID := update.Message.Chat.ID
+	username := "unknown"
+	if update.Message.From != nil {
+		if update.Message.From.UserName != "" {
+			username = update.Message.From.UserName
+		}
+	}
+
+	if !h.isAdmin(chatID) {
+		h.SendMessage(ctx, chatID, "❌ Эта команда доступна только администратору")
+		return
+	}
+
+	logger.Info("Admin requesting referral stats", zap.String("username", username))
+
+	// Get referral counts from cache
+	h.referralsMu.RLock()
+	type referrer struct {
+		chatID int64
+		count  int64
+	}
+	referrals := make([]referrer, 0, len(h.referrals))
+	
+	for chatID, count := range h.referrals {
+		referrals = append(referrals, referrer{chatID: chatID, count: count})
+	}
+	h.referralsMu.RUnlock()
+
+	// Sort by count (descending)
+	sort.Slice(referrals, func(i, j int) bool {
+		return referrals[i].count > referrals[j].count
+	})
+
+	// Calculate totals
+	var totalReferrals int64
+	for _, r := range referrals {
+		totalReferrals += r.count
+	}
+
+	// Format message
+	var sb strings.Builder
+	sb.WriteString("📊 *Статистика рефералов*\n\n")
+	sb.WriteString(fmt.Sprintf("👥 Всего рефералов: %d\n", totalReferrals))
+	sb.WriteString(fmt.Sprintf("👤 Уникальных рефереров: %d\n\n", len(referrals)))
+
+	if len(referrals) > 0 {
+		sb.WriteString("🏆 *Топ-10 рефереров:*\n")
+		limit := 10
+		if len(referrals) < limit {
+			limit = len(referrals)
+		}
+		for i := 0; i < limit; i++ {
+			r := referrals[i]
+			sb.WriteString(fmt.Sprintf("%d\\. ID %d: %d рефералов\n", i+1, r.chatID, r.count))
+		}
+	} else {
+		sb.WriteString("📭 Нет данных о рефералах")
+	}
+
+	msg := tgbotapi.NewMessage(chatID, sb.String())
+	msg.ParseMode = "MarkdownV2"
 	h.send(ctx, msg)
 }

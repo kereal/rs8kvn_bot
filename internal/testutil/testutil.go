@@ -109,7 +109,9 @@ type MockDatabaseService struct {
 	CleanupExpiredTrialsFunc            func(ctx context.Context, hours int, xuiClient interface {
 		DeleteClient(ctx context.Context, inboundID int, clientID string) error
 	}, inboundID int) (int64, error)
-	GetPoolStatsFunc func() (*database.PoolStats, error)
+	GetPoolStatsFunc        func() (*database.PoolStats, error)
+	GetReferralCountFunc    func(ctx context.Context, referrerTGID int64) (int64, error)
+	GetAllReferralCountsFunc func(ctx context.Context) (map[int64]int64, error)
 }
 
 func (m *MockDatabaseService) Ping(ctx context.Context) error {
@@ -409,6 +411,20 @@ func (m *MockDatabaseService) GetPoolStats() (*database.PoolStats, error) {
 		return m.GetPoolStatsFunc()
 	}
 	return &database.PoolStats{}, nil
+}
+
+func (m *MockDatabaseService) GetReferralCount(ctx context.Context, referrerTGID int64) (int64, error) {
+	if m.GetReferralCountFunc != nil {
+		return m.GetReferralCountFunc(ctx, referrerTGID)
+	}
+	return 0, nil
+}
+
+func (m *MockDatabaseService) GetAllReferralCounts(ctx context.Context) (map[int64]int64, error) {
+	if m.GetAllReferralCountsFunc != nil {
+		return m.GetAllReferralCountsFunc(ctx)
+	}
+	return make(map[int64]int64), nil
 }
 
 func CreateTestSubscription(telegramID int64, username string, status string, expiry time.Time) *database.Subscription {

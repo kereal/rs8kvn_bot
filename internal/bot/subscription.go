@@ -296,8 +296,10 @@ func (h *Handler) createSubscription(ctx context.Context, chatID int64, username
 	if pending, ok := h.pendingInvites[chatID]; ok {
 		if time.Now().Before(pending.expiresAt) {
 			invite, _ := h.db.GetInviteByCode(ctx, pending.code)
-			if invite != nil {
+			if invite != nil && invite.ReferrerTGID > 0 {
 				result.Subscription.ReferredBy = invite.ReferrerTGID
+				// Increment referral cache
+				h.IncrementReferralCount(invite.ReferrerTGID)
 			}
 		}
 		delete(h.pendingInvites, chatID)

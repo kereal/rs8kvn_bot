@@ -251,6 +251,14 @@ func (m *mockDatabaseService) GetPoolStats() (*database.PoolStats, error) {
 	return &database.PoolStats{}, nil
 }
 
+func (m *mockDatabaseService) GetReferralCount(ctx context.Context, referrerTGID int64) (int64, error) {
+	return 0, nil
+}
+
+func (m *mockDatabaseService) GetAllReferralCounts(ctx context.Context) (map[int64]int64, error) {
+	return make(map[int64]int64), nil
+}
+
 func TestMockDatabaseService(t *testing.T) {
 	svc := &mockDatabaseService{
 		subscriptions: make(map[int64]*database.Subscription),
