@@ -194,9 +194,7 @@ func TestGetHelpText_DifferentTrafficLimits(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			text := handler.getHelpText(tt.trafficLimitGB, "http://test.url/sub")
-			if len(text) == 0 {
-				t.Error("text should not be empty")
-			}
+			assert.NotEmpty(t, text, "text should not be empty")
 		})
 	}
 }
@@ -331,13 +329,8 @@ func TestHandleDel_DeleteSubscriptionByID(t *testing.T) {
 	id := sub.ID
 
 	deleted, err := database.DeleteSubscriptionByID(id)
-	if err != nil {
-		t.Fatalf("DeleteSubscriptionByID() error = %v", err)
-	}
-
-	if deleted.ID != id {
-		t.Errorf("DeleteSubscriptionByID() returned ID = %d, want %d", deleted.ID, id)
-	}
+	require.NoError(t, err, "DeleteSubscriptionByID() error")
+	assert.Equal(t, id, deleted.ID, "DeleteSubscriptionByID() returned wrong ID")
 
 	_, err = database.GetSubscriptionByID(id)
 	assert.Error(t, err, "GetSubscriptionByID() should return error after deletion")
@@ -403,9 +396,7 @@ func TestHandleSend_UserNotFound(t *testing.T) {
 	defer tdb.Cleanup()
 
 	_, err = database.GetTelegramIDByUsername("nonexistent")
-	if err == nil {
-		t.Error("GetTelegramIDByUsername() should return error for non-existent username")
-	}
+	assert.Error(t, err, "GetTelegramIDByUsername() should return error for non-existent username")
 }
 
 func TestGetLatestSubscriptions(t *testing.T) {
@@ -680,15 +671,10 @@ func TestQRBackKeyboard(t *testing.T) {
 		),
 	)
 
-	if len(keyboard.InlineKeyboard) != 1 {
-		t.Errorf("Expected 1 keyboard row, got %d", len(keyboard.InlineKeyboard))
-	}
-	if len(keyboard.InlineKeyboard[0]) != 1 {
-		t.Errorf("Expected 1 button in row, got %d", len(keyboard.InlineKeyboard[0]))
-	}
-	if keyboard.InlineKeyboard[0][0].CallbackData == nil || *keyboard.InlineKeyboard[0][0].CallbackData != "back_to_subscription" {
-		t.Error("Expected back_to_subscription callback")
-	}
+	assert.Len(t, keyboard.InlineKeyboard, 1, "Expected 1 keyboard row")
+	assert.Len(t, keyboard.InlineKeyboard[0], 1, "Expected 1 button in row")
+	require.NotNil(t, keyboard.InlineKeyboard[0][0].CallbackData, "CallbackData should not be nil")
+	assert.Equal(t, "back_to_subscription", *keyboard.InlineKeyboard[0][0].CallbackData, "Expected back_to_subscription callback")
 }
 
 // === sendInviteLink tests ===
