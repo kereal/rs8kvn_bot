@@ -73,6 +73,11 @@ func (h *Handler) isAdmin(chatID int64) bool {
 	return h.cfg.TelegramAdminID > 0 && chatID == h.cfg.TelegramAdminID
 }
 
+// StartCacheCleanup starts a background goroutine that periodically removes expired cache entries.
+func (h *Handler) StartCacheCleanup(ctx context.Context, interval time.Duration) {
+	go h.cache.StartCleanup(ctx, interval)
+}
+
 func (h *Handler) checkAdminSendRateLimit(chatID int64) bool {
 	now := time.Now()
 
