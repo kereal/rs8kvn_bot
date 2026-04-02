@@ -49,6 +49,8 @@ type DatabaseService interface {
 	}, inboundID int) (int64, error)
 	Close() error
 	GetPoolStats() (*database.PoolStats, error)
+	GetReferralCount(ctx context.Context, referrerTGID int64) (int64, error)
+	GetAllReferralCounts(ctx context.Context) (map[int64]int64, error)
 }
 
 type XUIClient interface {

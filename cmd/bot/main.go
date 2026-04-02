@@ -168,6 +168,9 @@ func main() {
 	// Start rate limiter cleanup goroutine to remove stale user buckets
 	handler.StartRateLimiterCleanup(ctx, bot.CacheTTL, bot.CacheTTL*2)
 
+	// Start referral cache sync goroutine to keep referral counts up-to-date
+	handler.StartReferralCacheSync(ctx)
+
 	// Initialize and start web server (health + trial pages)
 	webServer := web.NewServer(fmt.Sprintf(":%d", cfg.HealthCheckPort), dbService, xuiClient, cfg, botConfig)
 	webServer.RegisterChecker("database", func(ctx context.Context) web.ComponentHealth {

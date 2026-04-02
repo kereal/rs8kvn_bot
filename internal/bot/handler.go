@@ -90,6 +90,8 @@ func (h *Handler) HandleUpdate(ctx context.Context, update tgbotapi.Update) {
 				h.HandleBroadcast(context.WithoutCancel(ctx), update)
 			case "send":
 				h.HandleSend(ctx, update)
+			case "refstats":
+				h.HandleRefstats(ctx, update)
 			default:
 				h.SendMessage(ctx, update.Message.Chat.ID,
 					"Неизвестная команда. Используйте /start или /help")
@@ -146,6 +148,75 @@ func (h *Handler) checkAdminSendRateLimit(chatID int64) bool {
 
 func (h *Handler) ClearAdminSendRateLimit(chatID int64) {
 	h.adminSendMu.Delete(chatID)
+}
+
+// LoadReferralCache loads referral counts from database into memory cache.
+func (h *Handler) LoadReferralCache(ctx context.Context) error {
+	counts, err := h.db.GetAllReferralCounts(ctx)
+	if err != nil {
+		return err
+	}
+	
+	h.referralsMu.Lock()
+	defer h.referralsMu.Unlock()
+	
+	h.referrals = counts
+	return nil
+}
+
+// GetReferralCount returns the cached referral count for a user.
+func (h *Handler) GetReferralCount(chatID int64) int64 {
+	h.referralsMu.RLock()
+	defer h.referralsMu.RUnlock()
+	
+	return h.referrals[chatID]
+}
+
+// IncrementReferralCount increments the referral count for a user in cache.
+func (h *Handler) IncrementReferralCount(chatID int64) {
+	h.referralsMu.Lock()
+	defer h.referralsMu.Unlock()
+	
+	h.referrals[chatID]++
+}
+
+// DecrementReferralCount decrements the referral count for a user in cache.
+func (h *Handler) DecrementReferralCount(chatID int64) {
+	h.referralsMu.Lock()
+	defer h.referralsMu.Unlock()
+	
+	if h.referrals[chatID] > 0 {
+		h.referrals[chatID]--
+	}
+}
+
+// SyncReferralCache reloads the referral cache from database.
+func (h *Handler) SyncReferralCache(ctx context.Context) error {
+	return h.LoadReferralCache(ctx)
+}
+
+// StartReferralCacheSync starts periodic synchronization of referral cache.
+func (h *Handler) StartReferralCacheSync(ctx context.Context) {
+	go func() {
+		ticker := time.NewTicker(1 * time.Hour)
+		defer ticker.Stop()
+		
+		// Load initial cache
+		if err := h.LoadReferralCache(ctx); err != nil {
+			logger.Error("Failed to load referral cache", zap.Error(err))
+		}
+		
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if err := h.SyncReferralCache(ctx); err != nil {
+					logger.Error("Failed to sync referral cache", zap.Error(err))
+				}
+			}
+		}
+	}()
 }
 
 // getMainMenuKeyboard returns the inline keyboard with main menu buttons

@@ -781,6 +781,40 @@ func (s *Service) GetInviteByCode(ctx context.Context, code string) (*Invite, er
 	return &invite, nil
 }
 
+// GetReferralCount returns the number of referrals for a user.
+func (s *Service) GetReferralCount(ctx context.Context, referrerTGID int64) (int64, error) {
+	var count int64
+	if err := s.db.WithContext(ctx).Model(&Subscription{}).
+		Where("referred_by = ?", referrerTGID).
+		Count(&count).Error; err != nil {
+		return 0, fmt.Errorf("failed to count referrals: %w", err)
+	}
+	return count, nil
+}
+
+// GetAllReferralCounts returns a map of referrer TGID to referral count.
+func (s *Service) GetAllReferralCounts(ctx context.Context) (map[int64]int64, error) {
+	type ReferralCount struct {
+		ReferredBy int64
+		Count      int64
+	}
+	var results []ReferralCount
+	
+	if err := s.db.WithContext(ctx).Model(&Subscription{}).
+		Select("referred_by, COUNT(*) as count").
+		Where("referred_by > 0").
+		Group("referred_by").
+		Scan(&results).Error; err != nil {
+		return nil, fmt.Errorf("failed to get referral counts: %w", err)
+	}
+	
+	counts := make(map[int64]int64)
+	for _, r := range results {
+		counts[r.ReferredBy] = r.Count
+	}
+	return counts, nil
+}
+
 // CreateTrialSubscription creates a new trial subscription.
 func (s *Service) CreateTrialSubscription(ctx context.Context, inviteCode, subscriptionID, clientID string, inboundID int, trafficBytes int64, expiryTime time.Time, subURL string) (*Subscription, error) {
 	sub := &Subscription{

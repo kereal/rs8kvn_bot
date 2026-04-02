@@ -3,12 +3,10 @@ package config
 import (
 	"fmt"
 	"net/url"
-	"os"
 	"regexp"
-	"strconv"
 	"strings"
 
-	"github.com/joho/godotenv"
+	flag "rs8kvn_bot/internal/flag"
 )
 
 // Config holds all configuration for the application.
@@ -54,55 +52,108 @@ type Config struct {
 	ContactUsername string
 }
 
+// configFlags holds typed flag values for config fields.
+type configFlags struct {
+	telegramBotToken   *flag.StringValue
+	telegramAdminID    *flag.Int64Value
+	xuiHost            *flag.StringValue
+	xuiUsername        *flag.StringValue
+	xuiPassword        *flag.StringValue
+	xuiInboundID       *flag.IntValue
+	xuiSubPath         *flag.StringValue
+	databasePath       *flag.StringValue
+	logFilePath        *flag.StringValue
+	logLevel           *flag.StringValue
+	trafficLimitGB     *flag.IntValue
+	heartbeatURL       *flag.StringValue
+	heartbeatInterval  *flag.IntValue
+	sentryDSN          *flag.StringValue
+	healthCheckPort    *flag.IntValue
+	siteURL            *flag.StringValue
+	trialDurationHours *flag.IntValue
+	trialRateLimit     *flag.IntValue
+	contactUsername    *flag.StringValue
+}
+
+// registerFlags creates a Registry with all config flags registered.
+func registerFlags() (*flag.Registry, *configFlags) {
+	r := flag.New()
+
+	f := &configFlags{
+		telegramBotToken:   flag.NewString(""),
+		telegramAdminID:    flag.NewInt64(0),
+		xuiHost:            flag.NewString("http://localhost:2053"),
+		xuiUsername:        flag.NewString(""),
+		xuiPassword:        flag.NewString(""),
+		xuiInboundID:       flag.NewInt(1),
+		xuiSubPath:         flag.NewString(DefaultXUISubPath),
+		databasePath:       flag.NewString(DefaultDatabasePath),
+		logFilePath:        flag.NewString(DefaultLogFilePath),
+		logLevel:           flag.NewString(DefaultLogLevel),
+		trafficLimitGB:     flag.NewInt(DefaultTrafficLimitGB),
+		heartbeatURL:       flag.NewString(""),
+		heartbeatInterval:  flag.NewInt(DefaultHeartbeatInterval),
+		sentryDSN:          flag.NewString(""),
+		healthCheckPort:    flag.NewInt(DefaultHealthCheckPort),
+		siteURL:            flag.NewString(DefaultSiteURL),
+		trialDurationHours: flag.NewInt(DefaultTrialDurationHours),
+		trialRateLimit:     flag.NewInt(DefaultTrialRateLimit),
+		contactUsername:    flag.NewString(ContactUsername),
+	}
+
+	r.Register("TELEGRAM_BOT_TOKEN", f.telegramBotToken)
+	r.Register("TELEGRAM_ADMIN_ID", f.telegramAdminID)
+	r.Register("XUI_HOST", f.xuiHost)
+	r.Register("XUI_USERNAME", f.xuiUsername)
+	r.Register("XUI_PASSWORD", f.xuiPassword)
+	r.Register("XUI_INBOUND_ID", f.xuiInboundID)
+	r.Register("XUI_SUB_PATH", f.xuiSubPath)
+	r.Register("DATABASE_PATH", f.databasePath)
+	r.Register("LOG_FILE_PATH", f.logFilePath)
+	r.Register("LOG_LEVEL", f.logLevel)
+	r.Register("TRAFFIC_LIMIT_GB", f.trafficLimitGB)
+	r.Register("HEARTBEAT_URL", f.heartbeatURL)
+	r.Register("HEARTBEAT_INTERVAL", f.heartbeatInterval)
+	r.Register("SENTRY_DSN", f.sentryDSN)
+	r.Register("HEALTH_CHECK_PORT", f.healthCheckPort)
+	r.Register("SITE_URL", f.siteURL)
+	r.Register("TRIAL_DURATION_HOURS", f.trialDurationHours)
+	r.Register("TRIAL_RATE_LIMIT", f.trialRateLimit)
+	r.Register("CONTACT_USERNAME", f.contactUsername)
+
+	return r, f
+}
+
 // Load reads configuration from environment variables and validates it.
 // Returns an error if any required field is missing or invalid.
 func Load() (*Config, error) {
-	// Load .env file if it exists, but don't fail if it doesn't
-	// This allows the application to work with just environment variables
-	if err := godotenv.Load(); err != nil {
-		// .env file is optional, ignore "not found" errors
-		if !os.IsNotExist(err) {
-			return nil, fmt.Errorf("failed to load .env file: %w", err)
-		}
+	r, f := registerFlags()
+
+	if err := r.LoadEnv(); err != nil {
+		return nil, fmt.Errorf("failed to load configuration: %w", err)
 	}
 
 	cfg := &Config{
-		TelegramBotToken: getEnv("TELEGRAM_BOT_TOKEN", ""),
-		XUIHost:          getEnv("XUI_HOST", "http://localhost:2053"),
-		XUIUsername:      getEnv("XUI_USERNAME", ""),
-		XUIPassword:      getEnv("XUI_PASSWORD", ""),
-		XUISubPath:       getEnv("XUI_SUB_PATH", DefaultXUISubPath),
-		DatabasePath:     getEnv("DATABASE_PATH", DefaultDatabasePath),
-		LogFilePath:      getEnv("LOG_FILE_PATH", DefaultLogFilePath),
-		LogLevel:         getEnv("LOG_LEVEL", DefaultLogLevel),
-		HeartbeatURL:     getEnv("HEARTBEAT_URL", ""),
-		SentryDSN:        getEnv("SENTRY_DSN", ""),
-		SiteURL:          getEnv("SITE_URL", DefaultSiteURL),
+		TelegramBotToken:   f.telegramBotToken.Get(),
+		TelegramAdminID:    f.telegramAdminID.Get(),
+		XUIHost:            f.xuiHost.Get(),
+		XUIUsername:        f.xuiUsername.Get(),
+		XUIPassword:        f.xuiPassword.Get(),
+		XUIInboundID:       f.xuiInboundID.Get(),
+		XUISubPath:         f.xuiSubPath.Get(),
+		DatabasePath:       f.databasePath.Get(),
+		LogFilePath:        f.logFilePath.Get(),
+		LogLevel:           f.logLevel.Get(),
+		TrafficLimitGB:     f.trafficLimitGB.Get(),
+		HeartbeatURL:       f.heartbeatURL.Get(),
+		HeartbeatInterval:  f.heartbeatInterval.Get(),
+		SentryDSN:          f.sentryDSN.Get(),
+		HealthCheckPort:    f.healthCheckPort.Get(),
+		SiteURL:            f.siteURL.Get(),
+		TrialDurationHours: f.trialDurationHours.Get(),
+		TrialRateLimit:     f.trialRateLimit.Get(),
+		ContactUsername:    f.contactUsername.Get(),
 	}
-
-	var err error
-	if cfg.TelegramAdminID, err = parseEnvInt64("TELEGRAM_ADMIN_ID", 0); err != nil {
-		return nil, fmt.Errorf("invalid TELEGRAM_ADMIN_ID: %w", err)
-	}
-	if cfg.XUIInboundID, err = parseEnvInt("XUI_INBOUND_ID", 1); err != nil {
-		return nil, fmt.Errorf("invalid XUI_INBOUND_ID: %w", err)
-	}
-	if cfg.TrafficLimitGB, err = parseEnvInt("TRAFFIC_LIMIT_GB", DefaultTrafficLimitGB); err != nil {
-		return nil, fmt.Errorf("invalid TRAFFIC_LIMIT_GB: %w", err)
-	}
-	if cfg.HeartbeatInterval, err = parseEnvInt("HEARTBEAT_INTERVAL", DefaultHeartbeatInterval); err != nil {
-		return nil, fmt.Errorf("invalid HEARTBEAT_INTERVAL: %w", err)
-	}
-	if cfg.HealthCheckPort, err = parseEnvInt("HEALTH_CHECK_PORT", DefaultHealthCheckPort); err != nil {
-		return nil, fmt.Errorf("invalid HEALTH_CHECK_PORT: %w", err)
-	}
-	if cfg.TrialDurationHours, err = parseEnvInt("TRIAL_DURATION_HOURS", DefaultTrialDurationHours); err != nil {
-		return nil, fmt.Errorf("invalid TRIAL_DURATION_HOURS: %w", err)
-	}
-	if cfg.TrialRateLimit, err = parseEnvInt("TRIAL_RATE_LIMIT", DefaultTrialRateLimit); err != nil {
-		return nil, fmt.Errorf("invalid TRIAL_RATE_LIMIT: %w", err)
-	}
-	cfg.ContactUsername = getEnv("CONTACT_USERNAME", ContactUsername)
 
 	// Validate all required fields
 	if err := cfg.validate(); err != nil {
@@ -234,49 +285,6 @@ func (c *Config) validateURL(name, value string) error {
 	}
 
 	return nil
-}
-
-// getEnv returns the value of an environment variable or a default value.
-func getEnv(key, defaultValue string) string {
-	value := os.Getenv(key)
-	if value == "" {
-		return defaultValue
-	}
-	return strings.TrimSpace(value)
-}
-
-// parseEnvInt parses an environment variable as an integer.
-// Returns the default value if the variable is not set or empty.
-// Returns an error if the variable is set but cannot be parsed as an integer.
-func parseEnvInt(key string, defaultValue int) (int, error) {
-	value := os.Getenv(key)
-	if value == "" {
-		return defaultValue, nil
-	}
-
-	intValue, err := strconv.Atoi(strings.TrimSpace(value))
-	if err != nil {
-		return 0, fmt.Errorf("%s must be an integer, got: %q", key, value)
-	}
-
-	return intValue, nil
-}
-
-// parseEnvInt64 parses an environment variable as an int64.
-// Returns the default value if the variable is not set or empty.
-// Returns an error if the variable is set but cannot be parsed as an integer.
-func parseEnvInt64(key string, defaultValue int64) (int64, error) {
-	value := os.Getenv(key)
-	if value == "" {
-		return defaultValue, nil
-	}
-
-	intValue, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
-	if err != nil {
-		return 0, fmt.Errorf("%s must be an integer, got: %q", key, value)
-	}
-
-	return intValue, nil
 }
 
 // String returns a safe string representation of the config (without sensitive data).
