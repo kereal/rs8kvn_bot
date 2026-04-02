@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -18,13 +19,22 @@ import (
 	"rs8kvn_bot/internal/logger"
 )
 
-func init() {
-	logger.Init("", "error")
-}
-
-func init() {
+func initTestConfig() {
 	config.XUIMaxRetries = 1
 	config.XUIInitialRetryDelay = 10 * time.Millisecond
+}
+
+func initLogger(t *testing.T) {
+	_, err := logger.Init("", "error")
+	if err != nil {
+		t.Logf("Logger init error (non-fatal): %v", err)
+	}
+}
+
+func TestMain(m *testing.M) {
+	initTestConfig()
+	initLogger(&testing.T{})
+	os.Exit(m.Run())
 }
 
 func TestNewClient(t *testing.T) {

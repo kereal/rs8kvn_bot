@@ -16,9 +16,16 @@ import (
 	"rs8kvn_bot/internal/logger"
 )
 
-func init() {
-	// Initialize logger for tests
-	_, _ = logger.Init("", "error")
+func initLogger(t *testing.T) {
+	_, err := logger.Init("", "error")
+	if err != nil {
+		t.Logf("Logger init error (non-fatal): %v", err)
+	}
+}
+
+func TestMain(m *testing.M) {
+	initLogger(&testing.T{})
+	os.Exit(m.Run())
 }
 
 func TestInit(t *testing.T) {
