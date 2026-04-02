@@ -45,64 +45,6 @@ func TestNewHandler(t *testing.T) {
 	assert.NotNil(t, handler.rateLimiter, "RateLimiter should not be nil")
 }
 
-func TestGetMainMenuKeyboard(t *testing.T) {
-	cfg := &config.Config{TelegramAdminID: 123}
-	handler := &Handler{cfg: cfg, botConfig: NewTestBotConfig()}
-
-	keyboardWithShare := handler.getMainMenuKeyboard(true)
-	assert.Len(t, keyboardWithShare.InlineKeyboard, 3, "Expected 3 rows with subscription")
-
-	keyboardNoShare := handler.getMainMenuKeyboard(false)
-	assert.Len(t, keyboardNoShare.InlineKeyboard, 2, "Expected 2 rows without subscription")
-}
-
-func TestGetBackKeyboard(t *testing.T) {
-	cfg := &config.Config{}
-	handler := &Handler{cfg: cfg, botConfig: NewTestBotConfig()}
-
-	keyboard := handler.getBackKeyboard()
-
-	assert.Len(t, keyboard.InlineKeyboard, 1, "Back keyboard should have 1 row")
-	assert.Len(t, keyboard.InlineKeyboard[0], 1, "Back keyboard should have 1 button")
-
-	btn := keyboard.InlineKeyboard[0][0]
-	assert.Equal(t, "🏠 В начало", btn.Text)
-}
-
-func TestAddAdminButtons(t *testing.T) {
-	tests := []struct {
-		name          string
-		adminID       int64
-		chatID        int64
-		expectButtons bool
-	}{
-		{"admin user", 123, 123, true},
-		{"non-admin user", 123, 456, false},
-		{"zero admin ID", 0, 0, false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			cfg := &config.Config{TelegramAdminID: tt.adminID}
-			handler := &Handler{cfg: cfg, botConfig: NewTestBotConfig()}
-
-			keyboard := tgbotapi.NewInlineKeyboardMarkup(
-				tgbotapi.NewInlineKeyboardRow(
-					tgbotapi.NewInlineKeyboardButtonData("📋 Подписка", "menu_subscription"),
-				),
-			)
-
-			handler.addAdminButtons(&keyboard, tt.chatID)
-
-			if tt.expectButtons {
-				assert.Len(t, keyboard.InlineKeyboard, 2, "Expected admin buttons")
-			} else {
-				assert.Len(t, keyboard.InlineKeyboard, 1, "Expected no admin buttons")
-			}
-		})
-	}
-}
-
 func TestGenerateInviteCode(t *testing.T) {
 	code1 := utils.GenerateInviteCode()
 	code2 := utils.GenerateInviteCode()
@@ -639,31 +581,8 @@ func TestGetMainMenuContent_AdminButtons(t *testing.T) {
 	assert.True(t, foundLastReg, "Expected admin_lastreg button for admin user")
 }
 
-// TestSubscriptionKeyboardLayout tests that QR and В начало are on separate rows
-func TestSubscriptionKeyboardLayout(t *testing.T) {
-	keyboard := tgbotapi.NewInlineKeyboardMarkup(
-		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("📱 QR-код", "qr_code"),
-		),
-		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("🏠 В начало", "back_to_start"),
-		),
-	)
+// sendInviteLink tests are now in keyboard_test.go
 
-	assert.Len(t, keyboard.InlineKeyboard, 2, "Expected 2 keyboard rows")
-
-	// First row should have QR button
-	assert.Len(t, keyboard.InlineKeyboard[0], 1, "Expected 1 button in first row")
-	require.NotNil(t, keyboard.InlineKeyboard[0][0].CallbackData, "CallbackData should not be nil")
-	assert.Equal(t, "qr_code", *keyboard.InlineKeyboard[0][0].CallbackData, "Expected qr_code callback in first row")
-
-	// Second row should have В начало button
-	assert.Len(t, keyboard.InlineKeyboard[1], 1, "Expected 1 button in second row")
-	require.NotNil(t, keyboard.InlineKeyboard[1][0].CallbackData, "CallbackData should not be nil")
-	assert.Equal(t, "back_to_start", *keyboard.InlineKeyboard[1][0].CallbackData, "Expected back_to_start callback in second row")
-}
-
-// TestQRBackKeyboard tests the keyboard for QR code message
 func TestQRBackKeyboard(t *testing.T) {
 	keyboard := tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
