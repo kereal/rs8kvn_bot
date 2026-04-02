@@ -222,10 +222,14 @@ func (h *Handler) showLoadingMessage(chatID int64, messageID int) int {
 func (h *Handler) getDonateText() string {
 	return `☕ *Поддержка проекта*
 
-Есть сбор в Т-Банке
-[https://tbank.ru/cf/9J6agHgWdNg](https://tbank.ru/cf/9J6agHgWdNg)
+Любая помощь важна для стабильной работы сервиса.
+Сделайте свой вклад — переведите любую сумму. Буду очень благодарен!
 
-Если нужен другой способ — [напишите мне](https://t.me/kereal)`
+💳 *Карта Т-Банка:*
+` + "`" + config.DonateCardNumber + "`" + `
+
+🔗 [Сбор в Т-Банке](` + config.DonateURL + `)
+💬 [Связаться](https://t.me/` + config.DonateContactUsername + `)`
 }
 
 // getHelpText returns the help/instruction message text with subscription URL.
