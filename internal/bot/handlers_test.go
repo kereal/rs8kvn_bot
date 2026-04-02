@@ -36,23 +36,13 @@ func TestNewHandler(t *testing.T) {
 	}
 
 	xuiClient, err := xui.NewClient(cfg.XUIHost, "admin", "password")
-	if err != nil {
-		t.Fatalf("Failed to create XUI client: %v", err)
-	}
+	require.NoError(t, err, "Failed to create XUI client")
 	mockDB := testutil.NewMockDatabaseService()
 	handler := NewHandler(testutil.NewMockBotAPI(), cfg, mockDB, xuiClient, NewTestBotConfig())
 
-	if handler == nil {
-		t.Fatal("NewHandler returned nil")
-	}
-
-	if handler.cfg != cfg {
-		t.Error("Config not set correctly")
-	}
-
-	if handler.rateLimiter == nil {
-		t.Error("RateLimiter should not be nil")
-	}
+	require.NotNil(t, handler, "NewHandler returned nil")
+	assert.Equal(t, cfg, handler.cfg, "Config not set correctly")
+	assert.NotNil(t, handler.rateLimiter, "RateLimiter should not be nil")
 }
 
 func TestGetMainMenuKeyboard(t *testing.T) {
@@ -60,14 +50,10 @@ func TestGetMainMenuKeyboard(t *testing.T) {
 	handler := &Handler{cfg: cfg, botConfig: NewTestBotConfig()}
 
 	keyboardWithShare := handler.getMainMenuKeyboard(true)
-	if len(keyboardWithShare.InlineKeyboard) != 3 {
-		t.Errorf("Expected 3 rows with subscription, got %d", len(keyboardWithShare.InlineKeyboard))
-	}
+	assert.Len(t, keyboardWithShare.InlineKeyboard, 3, "Expected 3 rows with subscription")
 
 	keyboardNoShare := handler.getMainMenuKeyboard(false)
-	if len(keyboardNoShare.InlineKeyboard) != 2 {
-		t.Errorf("Expected 2 rows without subscription, got %d", len(keyboardNoShare.InlineKeyboard))
-	}
+	assert.Len(t, keyboardNoShare.InlineKeyboard, 2, "Expected 2 rows without subscription")
 }
 
 func TestGetBackKeyboard(t *testing.T) {
@@ -76,18 +62,11 @@ func TestGetBackKeyboard(t *testing.T) {
 
 	keyboard := handler.getBackKeyboard()
 
-	if len(keyboard.InlineKeyboard) != 1 {
-		t.Error("Back keyboard should have 1 row")
-	}
-
-	if len(keyboard.InlineKeyboard[0]) != 1 {
-		t.Error("Back keyboard should have 1 button")
-	}
+	assert.Len(t, keyboard.InlineKeyboard, 1, "Back keyboard should have 1 row")
+	assert.Len(t, keyboard.InlineKeyboard[0], 1, "Back keyboard should have 1 button")
 
 	btn := keyboard.InlineKeyboard[0][0]
-	if btn.Text != "🏠 В начало" {
-		t.Errorf("Expected '🏠 В начало', got '%s'", btn.Text)
-	}
+	assert.Equal(t, "🏠 В начало", btn.Text)
 }
 
 func TestAddAdminButtons(t *testing.T) {
@@ -115,11 +94,10 @@ func TestAddAdminButtons(t *testing.T) {
 
 			handler.addAdminButtons(&keyboard, tt.chatID)
 
-			if tt.expectButtons && len(keyboard.InlineKeyboard) != 2 {
-				t.Errorf("Expected admin buttons, got %d rows", len(keyboard.InlineKeyboard))
-			}
-			if !tt.expectButtons && len(keyboard.InlineKeyboard) != 1 {
-				t.Errorf("Expected no admin buttons, got %d rows", len(keyboard.InlineKeyboard))
+			if tt.expectButtons {
+				assert.Len(t, keyboard.InlineKeyboard, 2, "Expected admin buttons")
+			} else {
+				assert.Len(t, keyboard.InlineKeyboard, 1, "Expected no admin buttons")
 			}
 		})
 	}
@@ -129,26 +107,12 @@ func TestGenerateInviteCode(t *testing.T) {
 	code1 := utils.GenerateInviteCode()
 	code2 := utils.GenerateInviteCode()
 
-	if len(code1) != 8 {
-		t.Errorf("Expected code length 8, got %d", len(code1))
-	}
-
-	if code1 == code2 {
-		t.Error("Expected different codes on consecutive calls")
-	}
+	assert.Len(t, code1, 8, "Expected code length 8")
+	assert.NotEqual(t, code1, code2, "Expected different codes on consecutive calls")
 
 	validChars := "0123456789abcdefghijklmnopqrstuvwxyz"
 	for _, c := range code1 {
-		found := false
-		for _, vc := range validChars {
-			if c == vc {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Errorf("Invalid character %c in code", c)
-		}
+		assert.True(t, strings.ContainsRune(validChars, c), "Invalid character %c in code", c)
 	}
 }
 
@@ -187,20 +151,9 @@ func TestGetMainMenuContent(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			text, keyboard := handler.getMainMenuContent(tt.username, tt.hasSubscription, tt.chatID)
 
-			// Check text contains username
-			if !strings.Contains(text, tt.username) {
-				t.Errorf("getMainMenuContent() text should contain username %s", tt.username)
-			}
-
-			// Check text is not empty
-			if len(text) == 0 {
-				t.Error("getMainMenuContent() text should not be empty")
-			}
-
-			// Check keyboard has buttons
-			if len(keyboard.InlineKeyboard) == 0 {
-				t.Error("getMainMenuContent() keyboard should have buttons")
-			}
+			assert.Contains(t, text, tt.username, "getMainMenuContent() text should contain username")
+			assert.NotEmpty(t, text, "getMainMenuContent() text should not be empty")
+			assert.NotEmpty(t, keyboard.InlineKeyboard, "getMainMenuContent() keyboard should have buttons")
 		})
 	}
 }
@@ -210,23 +163,11 @@ func TestGetDonateText(t *testing.T) {
 	handler := &Handler{cfg: cfg, botConfig: NewTestBotConfig()}
 
 	text := handler.getDonateText()
-
-	if len(text) == 0 {
-		t.Error("Donate text should not be empty")
-	}
+	assert.NotEmpty(t, text, "Donate text should not be empty")
 
 	expected := []string{"☕", "Поддержка проекта"}
 	for _, exp := range expected {
-		found := false
-		for i := 0; i <= len(text)-len(exp); i++ {
-			if text[i:i+len(exp)] == exp {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Errorf("Expected donate text to contain '%s'", exp)
-		}
+		assert.True(t, strings.Contains(text, exp), "Expected donate text to contain '%s'", exp)
 	}
 }
 
@@ -235,10 +176,7 @@ func TestGetHelpText(t *testing.T) {
 	handler := &Handler{cfg: cfg, botConfig: NewTestBotConfig()}
 
 	text := handler.getHelpText(100, "http://localhost/sub/test")
-
-	if len(text) == 0 {
-		t.Error("Help text should not be empty")
-	}
+	assert.NotEmpty(t, text, "Help text should not be empty")
 }
 
 func TestGetHelpText_DifferentTrafficLimits(t *testing.T) {
@@ -274,24 +212,16 @@ func TestHandler_ConfigField(t *testing.T) {
 	}
 
 	xuiClient, err := xui.NewClient(cfg.XUIHost, "user", "pass")
-	if err != nil {
-		t.Fatalf("Failed to create XUI client: %v", err)
-	}
+	require.NoError(t, err, "Failed to create XUI client")
 
 	handler := &Handler{
 		cfg: cfg,
 		xui: xuiClient,
 	}
 
-	if handler.cfg != cfg {
-		t.Error("Handler.cfg not set correctly")
-	}
-	if handler.cfg.TelegramAdminID != 999888777 {
-		t.Errorf("cfg.TelegramAdminID = %d, want 999888777", handler.cfg.TelegramAdminID)
-	}
-	if handler.cfg.TrafficLimitGB != 50 {
-		t.Errorf("cfg.TrafficLimitGB = %d, want 50", handler.cfg.TrafficLimitGB)
-	}
+	assert.Equal(t, cfg, handler.cfg, "Handler.cfg not set correctly")
+	assert.Equal(t, int64(999888777), handler.cfg.TelegramAdminID)
+	assert.Equal(t, 50, handler.cfg.TrafficLimitGB)
 }
 
 func TestHandleStart_WithDatabase(t *testing.T) {
