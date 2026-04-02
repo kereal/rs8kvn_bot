@@ -47,3 +47,23 @@ This is a Telegram bot for distributing VLESS+Reality+Vision proxy subscriptions
 - `internal/web/` - Web endpoints (invite/trial pages)
 - `internal/interfaces/` - Interface definitions
 - `internal/testutil/` - Test utilities and mocks
+
+## Development Workflow
+
+### Terminal Tool Usage
+**Important**: When using the `terminal` tool, use the basename of the root directory as `cd` parameter:
+- ✅ Correct: `cd: "tgvpn_go"` 
+- ❌ Wrong: `cd: "/home/kereal/tgvpn_go"` (causes worktree error)
+
+### Git Workflow Skill
+Project includes `.agents/skills/git-workflow-skill/` with best practices for:
+- Conventional Commits (`feat:`, `fix:`, `docs:`, etc.)
+- Branch naming conventions (`feature/TICKET-123-desc`)
+- Pull Request workflow
+- Release management
+
+### Available Tools
+- `git` - version control
+- `gh` CLI (v2.46.0) - GitHub operations
+- `golangci-lint` - linting
+- `go` (v1.25.0) - Go toolchain
