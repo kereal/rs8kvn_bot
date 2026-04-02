@@ -303,7 +303,7 @@ func TestGetDonateText_Content(t *testing.T) {
 	text := h.getDonateText()
 
 	assert.Contains(t, text, "Поддержка проекта")
-	assert.Contains(t, text, "Т-Банке")
+	assert.Contains(t, text, "Т-Банка")
 	assert.Contains(t, text, "https://tbank.ru/cf/9J6agHgWdNg")
 	assert.Contains(t, text, "t.me/kereal")
 	assert.Contains(t, text, "*") // Markdown formatting

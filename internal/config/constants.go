@@ -186,3 +186,15 @@ const (
 	AdminSendRateWindow  = 1 * time.Minute // Time window
 	AdminSendMinInterval = 6 * time.Second // Min interval between messages
 )
+
+// Donate Constants
+const (
+	// DonateCardNumber is the card number for donations (T-Bank)
+	DonateCardNumber = "2200702156780864"
+
+	// DonateURL is the T-Bank collection link for donations
+	DonateURL = "https://tbank.ru/cf/9J6agHgWdNg"
+
+	// DonateContactUsername is the Telegram username for donation inquiries
+	DonateContactUsername = "kereal"
+)
