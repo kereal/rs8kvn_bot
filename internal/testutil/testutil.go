@@ -549,6 +549,9 @@ type MockBotAPI struct {
 	SendCount     int
 	SendError     error
 	RequestError  error
+	LastChattable tgbotapi.Chattable
+	// SendFunc allows custom behavior per test. If set, Send calls this instead of default logic.
+	SendFunc func(c tgbotapi.Chattable) (tgbotapi.Message, error)
 }
 
 func NewMockBotAPI() *MockBotAPI {
@@ -560,6 +563,7 @@ func (m *MockBotAPI) Send(c tgbotapi.Chattable) (tgbotapi.Message, error) {
 	defer m.mu.Unlock()
 	m.SendCalled = true
 	m.SendCount++
+	m.LastChattable = c
 
 	// Extract text and chat ID from various message types
 	switch v := c.(type) {
@@ -573,6 +577,11 @@ func (m *MockBotAPI) Send(c tgbotapi.Chattable) (tgbotapi.Message, error) {
 		m.LastChatID = v.ChatID
 	case tgbotapi.DeleteMessageConfig:
 		m.LastChatID = v.ChatID
+	}
+
+	// Use custom send function if provided
+	if m.SendFunc != nil {
+		return m.SendFunc(c)
 	}
 
 	if m.SendError != nil {
@@ -618,6 +627,13 @@ func (m *MockBotAPI) LastSentTextSafe() string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.LastSentText
+}
+
+// LastChattableSafe returns the last sent Chattable (thread-safe).
+func (m *MockBotAPI) LastChattableSafe() tgbotapi.Chattable {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.LastChattable
 }
 
 func (m *MockBotAPI) GetUpdatesChan(config tgbotapi.UpdateConfig) tgbotapi.UpdatesChannel {

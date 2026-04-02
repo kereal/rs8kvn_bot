@@ -1116,3 +1116,66 @@ func TestHandleInvite_RateLimitCheckError(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 	assert.Contains(t, rec.Body.String(), "Ошибка сервера")
 }
+
+func TestIsLocalAddress_Loopback(t *testing.T) {
+	tests := []struct {
+		name     string
+		ip       string
+		expected bool
+	}{
+		{"127.0.0.1", "127.0.0.1", true},
+		{"localhost IPv4", "127.0.0.2", true},
+		{"localhost IPv6", "::1", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := isLocalAddress(tt.ip)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestIsLocalAddress_Private(t *testing.T) {
+	tests := []struct {
+		name     string
+		ip       string
+		expected bool
+	}{
+		{"10.x.x.x", "10.0.0.1", true},
+		{"10.x.x.x large", "10.255.255.255", true},
+		{"172.16.x.x", "172.16.0.1", true},
+		{"172.31.x.x", "172.31.255.255", true},
+		{"192.168.x.x", "192.168.1.1", true},
+		{"192.168.x.x max", "192.168.255.255", true},
+		{"public IP", "8.8.8.8", false},
+		{"public IP 2", "1.1.1.1", false},
+		{"invalid", "invalid", false},
+		{"empty", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := isLocalAddress(tt.ip)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestGetClientIP_NonLocalRemoteAddr(t *testing.T) {
+	req := httptest.NewRequest("GET", "/i/test", nil)
+	req.RemoteAddr = "8.8.8.8:12345"
+
+	ip := getClientIP(req)
+
+	assert.Equal(t, "8.8.8.8", ip, "Should use remote addr when not local")
+}
+
+func TestGetClientIP_InvalidRemoteAddr(t *testing.T) {
+	req := httptest.NewRequest("GET", "/i/test", nil)
+	req.RemoteAddr = "invalid"
+
+	ip := getClientIP(req)
+
+	assert.Equal(t, "invalid", ip, "Should fall back to raw remote addr")
+}

@@ -1454,3 +1454,51 @@ func TestDaysUntilReset_FutureExpiry(t *testing.T) {
 
 	assert.Equal(t, 30, result, "Should return 30 days for 30-day interval")
 }
+
+func TestGenerateProgressBar_ZeroLimit(t *testing.T) {
+	result := generateProgressBar(10.0, 0)
+
+	assert.Equal(t, "⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜", result, "Should return empty bar when limit is zero")
+}
+
+func TestGenerateProgressBar_NegativeLimit(t *testing.T) {
+	result := generateProgressBar(10.0, -5)
+
+	assert.Equal(t, "⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜", result, "Should return empty bar when limit is negative")
+}
+
+func TestGenerateProgressBar_Empty(t *testing.T) {
+	result := generateProgressBar(0, 100)
+
+	assert.Equal(t, "⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜", result, "Should return empty bar when no usage")
+}
+
+func TestGenerateProgressBar_50Percent(t *testing.T) {
+	result := generateProgressBar(50, 100)
+
+	assert.Equal(t, "🟩🟩🟩🟩🟩⬜⬜⬜⬜⬜", result, "Should return half-filled bar at 50%%")
+}
+
+func TestGenerateProgressBar_100Percent(t *testing.T) {
+	result := generateProgressBar(100, 100)
+
+	assert.Equal(t, "🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩", result, "Should return full bar at 100%%")
+}
+
+func TestGenerateProgressBar_Over100Percent(t *testing.T) {
+	result := generateProgressBar(150, 100)
+
+	assert.Equal(t, "🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩", result, "Should cap at full bar when over 100%%")
+}
+
+func TestGenerateProgressBar_10Percent(t *testing.T) {
+	result := generateProgressBar(10, 100)
+
+	assert.Equal(t, "🟩⬜⬜⬜⬜⬜⬜⬜⬜⬜", result, "Should return 1 block at 10%%")
+}
+
+func TestGenerateProgressBar_9Percent(t *testing.T) {
+	result := generateProgressBar(9, 100)
+
+	assert.Equal(t, "⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜", result, "Should return empty bar at 9%% (floor)")
+}

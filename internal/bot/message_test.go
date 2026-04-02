@@ -3,49 +3,22 @@ package bot
 import (
 	"context"
 	"errors"
-	"sync"
 	"testing"
 
 	"rs8kvn_bot/internal/config"
+	"rs8kvn_bot/internal/testutil"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// mockBotAPIForMessage implements interfaces.BotAPI for message tests
-type mockBotAPIForMessage struct {
-	mu          sync.Mutex
-	sendFunc    func(c tgbotapi.Chattable) (tgbotapi.Message, error)
-	requestFunc func(c tgbotapi.Chattable) (*tgbotapi.APIResponse, error)
-	sendCalled  int
-	lastMessage tgbotapi.Chattable
-}
-
-func (m *mockBotAPIForMessage) Send(c tgbotapi.Chattable) (tgbotapi.Message, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.sendCalled++
-	m.lastMessage = c
-	if m.sendFunc != nil {
-		return m.sendFunc(c)
-	}
-	return tgbotapi.Message{MessageID: 123}, nil
-}
-
-func (m *mockBotAPIForMessage) Request(c tgbotapi.Chattable) (*tgbotapi.APIResponse, error) {
-	if m.requestFunc != nil {
-		return m.requestFunc(c)
-	}
-	return &tgbotapi.APIResponse{Ok: true}, nil
-}
-
 // TestSend_Success tests the send function with successful message
 func TestSend_Success(t *testing.T) {
 	ctx := context.Background()
 
-	mockBot := &mockBotAPIForMessage{
-		sendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
+	mockBot := &testutil.MockBotAPI{
+		SendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
 			return tgbotapi.Message{MessageID: 123}, nil
 		},
 	}
@@ -61,8 +34,8 @@ func TestSend_Success(t *testing.T) {
 	msg := tgbotapi.NewMessage(12345, "test message")
 	handler.send(ctx, msg)
 
-	assert.Equal(t, 1, mockBot.sendCalled, "Send should be called once")
-	assert.NotNil(t, mockBot.lastMessage, "Message should be captured")
+	assert.Equal(t, 1, mockBot.SendCount, "Send should be called once")
+	assert.NotNil(t, mockBot.LastChattableSafe(), "Message should be captured")
 }
 
 // TestSend_RateLimitContext tests the send function with context cancellation
@@ -70,8 +43,8 @@ func TestSend_RateLimitContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately
 
-	mockBot := &mockBotAPIForMessage{
-		sendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
+	mockBot := &testutil.MockBotAPI{
+		SendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
 			return tgbotapi.Message{MessageID: 123}, nil
 		},
 	}
@@ -88,15 +61,15 @@ func TestSend_RateLimitContext(t *testing.T) {
 	handler.send(ctx, msg)
 
 	// With cancelled context, the rate limiter should return false and not send
-	assert.Equal(t, 0, mockBot.sendCalled, "Send should not be called with cancelled context")
+	assert.Equal(t, 0, mockBot.SendCount, "Send should not be called with cancelled context")
 }
 
 // TestSend_SendError tests the send function when bot.Send fails
 func TestSend_SendError(t *testing.T) {
 	ctx := context.Background()
 
-	mockBot := &mockBotAPIForMessage{
-		sendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
+	mockBot := &testutil.MockBotAPI{
+		SendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
 			return tgbotapi.Message{}, errors.New("send failed")
 		},
 	}
@@ -114,7 +87,7 @@ func TestSend_SendError(t *testing.T) {
 	// Should not panic on send error
 	handler.send(ctx, msg)
 
-	assert.Equal(t, 1, mockBot.sendCalled, "Send should be called once")
+	assert.Equal(t, 1, mockBot.SendCount, "Send should be called once")
 }
 
 // TestSend_DisablesWebPagePreview tests that send disables web page preview
@@ -122,8 +95,8 @@ func TestSend_DisablesWebPagePreview(t *testing.T) {
 	ctx := context.Background()
 
 	var capturedMsg tgbotapi.MessageConfig
-	mockBot := &mockBotAPIForMessage{
-		sendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
+	mockBot := &testutil.MockBotAPI{
+		SendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
 			if msg, ok := c.(tgbotapi.MessageConfig); ok {
 				capturedMsg = msg
 			}
@@ -147,8 +120,8 @@ func TestSend_DisablesWebPagePreview(t *testing.T) {
 
 // TestSafeSend_Success tests the safeSend function with successful message
 func TestSafeSend_Success(t *testing.T) {
-	mockBot := &mockBotAPIForMessage{
-		sendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
+	mockBot := &testutil.MockBotAPI{
+		SendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
 			return tgbotapi.Message{MessageID: 456}, nil
 		},
 	}
@@ -164,13 +137,13 @@ func TestSafeSend_Success(t *testing.T) {
 	msg := tgbotapi.NewMessage(12345, "safe message")
 	handler.safeSend(msg)
 
-	assert.Equal(t, 1, mockBot.sendCalled, "Send should be called once")
+	assert.Equal(t, 1, mockBot.SendCount, "Send should be called once")
 }
 
 // TestSafeSend_SendError tests safeSend when bot.Send fails
 func TestSafeSend_SendError(t *testing.T) {
-	mockBot := &mockBotAPIForMessage{
-		sendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
+	mockBot := &testutil.MockBotAPI{
+		SendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
 			return tgbotapi.Message{}, errors.New("safe send failed")
 		},
 	}
@@ -188,13 +161,13 @@ func TestSafeSend_SendError(t *testing.T) {
 	// Should not panic on send error
 	handler.safeSend(msg)
 
-	assert.Equal(t, 1, mockBot.sendCalled, "Send should be called once")
+	assert.Equal(t, 1, mockBot.SendCount, "Send should be called once")
 }
 
 // TestSafeSend_WithEditMessage tests safeSend with EditMessageText
 func TestSafeSend_WithEditMessage(t *testing.T) {
-	mockBot := &mockBotAPIForMessage{
-		sendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
+	mockBot := &testutil.MockBotAPI{
+		SendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
 			return tgbotapi.Message{MessageID: 789}, nil
 		},
 	}
@@ -210,8 +183,8 @@ func TestSafeSend_WithEditMessage(t *testing.T) {
 	editMsg := tgbotapi.NewEditMessageText(12345, 100, "edited message")
 	handler.safeSend(editMsg)
 
-	assert.Equal(t, 1, mockBot.sendCalled, "Send should be called once")
-	_, ok := mockBot.lastMessage.(tgbotapi.EditMessageTextConfig)
+	assert.Equal(t, 1, mockBot.SendCount, "Send should be called once")
+	_, ok := mockBot.LastChattableSafe().(tgbotapi.EditMessageTextConfig)
 	assert.True(t, ok, "Should be EditMessageTextConfig")
 }
 
@@ -219,8 +192,8 @@ func TestSafeSend_WithEditMessage(t *testing.T) {
 func TestSendMessage_Success(t *testing.T) {
 	ctx := context.Background()
 
-	mockBot := &mockBotAPIForMessage{
-		sendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
+	mockBot := &testutil.MockBotAPI{
+		SendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
 			return tgbotapi.Message{MessageID: 999}, nil
 		},
 	}
@@ -235,9 +208,9 @@ func TestSendMessage_Success(t *testing.T) {
 
 	handler.SendMessage(ctx, 12345, "Hello, World!")
 
-	assert.Equal(t, 1, mockBot.sendCalled, "Send should be called once")
+	assert.Equal(t, 1, mockBot.SendCount, "Send should be called once")
 
-	msg, ok := mockBot.lastMessage.(tgbotapi.MessageConfig)
+	msg, ok := mockBot.LastChattableSafe().(tgbotapi.MessageConfig)
 	require.True(t, ok, "Should be MessageConfig")
 	assert.Equal(t, int64(12345), msg.ChatID, "ChatID")
 	assert.Equal(t, "Hello, World!", msg.Text, "Message text")
@@ -248,8 +221,8 @@ func TestSendMessage_Success(t *testing.T) {
 func TestSendMessage_EmptyMessage(t *testing.T) {
 	ctx := context.Background()
 
-	mockBot := &mockBotAPIForMessage{
-		sendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
+	mockBot := &testutil.MockBotAPI{
+		SendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
 			return tgbotapi.Message{MessageID: 999}, nil
 		},
 	}
@@ -264,7 +237,7 @@ func TestSendMessage_EmptyMessage(t *testing.T) {
 
 	handler.SendMessage(ctx, 12345, "")
 
-	assert.Equal(t, 1, mockBot.sendCalled, "Send should be called even with empty message")
+	assert.Equal(t, 1, mockBot.SendCount, "Send should be called even with empty message")
 }
 
 // TestSendMessage_ContextCancellation tests SendMessage with context cancellation
@@ -272,8 +245,8 @@ func TestSendMessage_ContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately
 
-	mockBot := &mockBotAPIForMessage{
-		sendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
+	mockBot := &testutil.MockBotAPI{
+		SendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
 			return tgbotapi.Message{MessageID: 999}, nil
 		},
 	}
@@ -289,7 +262,7 @@ func TestSendMessage_ContextCancellation(t *testing.T) {
 	handler.SendMessage(ctx, 12345, "test message")
 
 	// With cancelled context, the rate limiter should return false and not send
-	assert.Equal(t, 0, mockBot.sendCalled, "Send should not be called with cancelled context")
+	assert.Equal(t, 0, mockBot.SendCount, "Send should not be called with cancelled context")
 }
 
 // TestSendMessage_SpecialCharacters tests SendMessage with special characters
@@ -297,8 +270,8 @@ func TestSendMessage_SpecialCharacters(t *testing.T) {
 	ctx := context.Background()
 
 	var capturedMsg tgbotapi.MessageConfig
-	mockBot := &mockBotAPIForMessage{
-		sendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
+	mockBot := &testutil.MockBotAPI{
+		SendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
 			if msg, ok := c.(tgbotapi.MessageConfig); ok {
 				capturedMsg = msg
 			}
@@ -325,8 +298,8 @@ func TestSendMessage_Unicode(t *testing.T) {
 	ctx := context.Background()
 
 	var capturedMsg tgbotapi.MessageConfig
-	mockBot := &mockBotAPIForMessage{
-		sendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
+	mockBot := &testutil.MockBotAPI{
+		SendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
 			if msg, ok := c.(tgbotapi.MessageConfig); ok {
 				capturedMsg = msg
 			}
@@ -353,8 +326,8 @@ func TestSendMessage_LongMessage(t *testing.T) {
 	ctx := context.Background()
 
 	var capturedMsg tgbotapi.MessageConfig
-	mockBot := &mockBotAPIForMessage{
-		sendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
+	mockBot := &testutil.MockBotAPI{
+		SendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
 			if msg, ok := c.(tgbotapi.MessageConfig); ok {
 				capturedMsg = msg
 			}
@@ -385,8 +358,8 @@ func TestSendMessage_LongMessage(t *testing.T) {
 func TestSendMessage_MultipleMessages(t *testing.T) {
 	ctx := context.Background()
 
-	mockBot := &mockBotAPIForMessage{
-		sendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
+	mockBot := &testutil.MockBotAPI{
+		SendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
 			return tgbotapi.Message{MessageID: 999}, nil
 		},
 	}
@@ -404,7 +377,7 @@ func TestSendMessage_MultipleMessages(t *testing.T) {
 		handler.SendMessage(ctx, 12345, "test message")
 	}
 
-	assert.Equal(t, 5, mockBot.sendCalled, "Send should be called 5 times")
+	assert.Equal(t, 5, mockBot.SendCount, "Send should be called 5 times")
 }
 
 // TestSendMessage_DifferentChatIDs tests SendMessage with different chat IDs
@@ -424,8 +397,8 @@ func TestSendMessage_DifferentChatIDs(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			var capturedMsg tgbotapi.MessageConfig
-			mockBot := &mockBotAPIForMessage{
-				sendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
+			mockBot := &testutil.MockBotAPI{
+				SendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
 					if msg, ok := c.(tgbotapi.MessageConfig); ok {
 						capturedMsg = msg
 					}
@@ -450,8 +423,8 @@ func TestSendMessage_DifferentChatIDs(t *testing.T) {
 
 // TestSend_WithContextTimeout tests send with a context that times out
 func TestSend_WithContextTimeout(t *testing.T) {
-	mockBot := &mockBotAPIForMessage{
-		sendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
+	mockBot := &testutil.MockBotAPI{
+		SendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
 			return tgbotapi.Message{MessageID: 123}, nil
 		},
 	}
@@ -472,7 +445,7 @@ func TestSend_WithContextTimeout(t *testing.T) {
 	handler.send(ctx, msg)
 
 	// With timed out context, the rate limiter should return false and not send
-	assert.Equal(t, 0, mockBot.sendCalled, "Send should not be called with timed out context")
+	assert.Equal(t, 0, mockBot.SendCount, "Send should not be called with timed out context")
 }
 
 // TestSafeSend_WithVariousChattables tests safeSend with different Chattable types
@@ -510,8 +483,8 @@ func TestSafeSend_WithVariousChattables(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			mockBot := &mockBotAPIForMessage{
-				sendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
+			mockBot := &testutil.MockBotAPI{
+				SendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
 					return tgbotapi.Message{MessageID: 999}, nil
 				},
 			}
@@ -526,8 +499,8 @@ func TestSafeSend_WithVariousChattables(t *testing.T) {
 
 			handler.safeSend(tc.chattable)
 
-			assert.Equal(t, 1, mockBot.sendCalled, "Send should be called once")
-			tc.checkFunc(t, mockBot.lastMessage)
+			assert.Equal(t, 1, mockBot.SendCount, "Send should be called once")
+			tc.checkFunc(t, mockBot.LastChattableSafe())
 		})
 	}
 }
@@ -536,8 +509,8 @@ func TestSafeSend_WithVariousChattables(t *testing.T) {
 func TestSend_MultipleConcurrentSends(t *testing.T) {
 	ctx := context.Background()
 
-	mockBot := &mockBotAPIForMessage{
-		sendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
+	mockBot := &testutil.MockBotAPI{
+		SendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
 			return tgbotapi.Message{MessageID: 123}, nil
 		},
 	}
@@ -565,15 +538,15 @@ func TestSend_MultipleConcurrentSends(t *testing.T) {
 		<-done
 	}
 
-	assert.Equal(t, 10, mockBot.sendCalled, "Send should be called 10 times")
+	assert.Equal(t, 10, mockBot.SendCount, "Send should be called 10 times")
 }
 
 // TestSendMessage_NilHandler tests that SendMessage doesn't panic with proper initialization
 func TestSendMessage_NilHandler(t *testing.T) {
 	ctx := context.Background()
 
-	mockBot := &mockBotAPIForMessage{
-		sendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
+	mockBot := &testutil.MockBotAPI{
+		SendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
 			return tgbotapi.Message{MessageID: 999}, nil
 		},
 	}
@@ -589,7 +562,7 @@ func TestSendMessage_NilHandler(t *testing.T) {
 	// Should not panic
 	handler.SendMessage(ctx, 12345, "test message")
 
-	assert.Equal(t, 1, mockBot.sendCalled, "Send should be called once")
+	assert.Equal(t, 1, mockBot.SendCount, "Send should be called once")
 }
 
 // TestSend_WithMarkdownText tests send with markdown formatted text
@@ -597,8 +570,8 @@ func TestSend_WithMarkdownText(t *testing.T) {
 	ctx := context.Background()
 
 	var capturedMsg tgbotapi.MessageConfig
-	mockBot := &mockBotAPIForMessage{
-		sendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
+	mockBot := &testutil.MockBotAPI{
+		SendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
 			if msg, ok := c.(tgbotapi.MessageConfig); ok {
 				capturedMsg = msg
 			}
