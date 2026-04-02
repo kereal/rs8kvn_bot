@@ -157,11 +157,7 @@ func TestAddClientWithID_ServerError(t *testing.T) {
 	require.NoError(t, err, "NewClient() returned error")
 	ctx := context.Background()
 
-	_, err = client.AddClientWithID(ctx, 1, "testuser", "client-id", "sub-id", 1000, time.Now(), 31)
-	// Should not error - the function handles server errors gracefully
-	if err != nil {
-		// This is acceptable - server returned error
-	}
+	_, _ = client.AddClientWithID(ctx, 1, "testuser", "client-id", "sub-id", 1000, time.Now(), 31)
 }
 
 func TestGetSubscriptionLink(t *testing.T) {

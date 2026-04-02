@@ -370,11 +370,11 @@ func TestStdLogWriter_Write(t *testing.T) {
 	assert.Greater(t, n, 0, "Write() returned 0 bytes")
 
 	// Test empty message
-	n, err = writer.Write([]byte(""))
+	_, err = writer.Write([]byte(""))
 	assert.NoError(t, err, "Write() error")
 
 	// Test whitespace only
-	n, err = writer.Write([]byte("   \n\t  "))
+	_, err = writer.Write([]byte("   \n\t  "))
 	assert.NoError(t, err, "Write() error")
 }
 

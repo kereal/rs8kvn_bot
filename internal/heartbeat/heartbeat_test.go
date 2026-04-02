@@ -289,5 +289,5 @@ func TestStart_MultipleContexts(t *testing.T) {
 func TestSendHeartbeat_ContextTimeout(t *testing.T) {
 	// Test that sendHeartbeat handles context-like timeouts gracefully
 	// Use very short timeout by calling invalid URL
-	maskURL("http://localhost:19999/heartbeat")
+	_ = maskURL("http://localhost:19999/heartbeat")
 }

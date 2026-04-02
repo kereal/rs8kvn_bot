@@ -100,7 +100,7 @@ func FuzzInviteCodeRegex_ValidOnly(f *testing.F) {
 				return false
 			}
 			for _, ch := range s {
-				if !((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '_' || ch == '-') {
+				if (ch < 'a' || ch > 'z') && (ch < 'A' || ch > 'Z') && (ch < '0' || ch > '9') && ch != '_' && ch != '-' {
 					return false
 				}
 			}

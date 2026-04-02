@@ -624,15 +624,6 @@ func TestConfig_Validate_InvalidHealthCheckPort_TooHigh(t *testing.T) {
 	assert.Error(t, err, "validate() should error on HealthCheckPort = 70000")
 }
 
-func contains(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
-}
-
 func TestMaskURL_Empty(t *testing.T) {
 	result := maskURL("")
 	assert.Equal(t, "(not set)", result, "maskURL(\"\")")
