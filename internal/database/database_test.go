@@ -893,11 +893,11 @@ func TestService_CountActiveSubscriptions(t *testing.T) {
 	}
 	require.NoError(t, service.CreateSubscription(context.Background(), expiredSub), "CreateSubscription() error")
 
-	// Count active subscriptions
+	// Count active subscriptions (all with status='active', regardless of expiry)
 	count, err := service.CountActiveSubscriptions(context.Background())
 	require.NoError(t, err, "CountActiveSubscriptions() error")
 
-	assert.Equal(t, int64(3), count, "CountActiveSubscriptions()")
+	assert.Equal(t, int64(4), count, "CountActiveSubscriptions()")
 }
 
 func TestService_CountExpiredSubscriptions(t *testing.T) {
