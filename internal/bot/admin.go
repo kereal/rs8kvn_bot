@@ -151,12 +151,10 @@ func (h *Handler) HandleDel(ctx context.Context, update tgbotapi.Update) {
 		"✅ Подписка успешно удалена!\n\n"+
 			"🆔 ID: %d\n"+
 			"👤 Пользователь: @%s\n"+
-			"🆔 Telegram ID: %d\n"+
-			"🔗 Client ID: %s",
+			"🆔 Telegram ID: %d",
 		id,
 		sub.Username,
 		sub.TelegramID,
-		sub.ClientID,
 	))
 }
 
