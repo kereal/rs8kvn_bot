@@ -398,12 +398,12 @@ func TestRetryWithBackoff_Success(t *testing.T) {
 	callCount := 0
 	ctx := context.Background()
 
-	err := retryWithBackoff(ctx, 3, 100*time.Millisecond, func() error {
+	err := RetryWithBackoff(ctx, 3, 100*time.Millisecond, func() error {
 		callCount++
 		return nil
 	})
 
-	assert.NoError(t, err, "retryWithBackoff() error")
+	assert.NoError(t, err, "RetryWithBackoff() error")
 	assert.Equal(t, 1, callCount, "Expected 1 call")
 }
 
@@ -411,7 +411,7 @@ func TestRetryWithBackoff_Retries(t *testing.T) {
 	callCount := 0
 	ctx := context.Background()
 
-	err := retryWithBackoff(ctx, 5, 10*time.Millisecond, func() error {
+	err := RetryWithBackoff(ctx, 5, 10*time.Millisecond, func() error {
 		callCount++
 		if callCount < 3 {
 			return fmt.Errorf("error %d", callCount)
@@ -419,7 +419,7 @@ func TestRetryWithBackoff_Retries(t *testing.T) {
 		return nil
 	})
 
-	assert.NoError(t, err, "retryWithBackoff() error")
+	assert.NoError(t, err, "RetryWithBackoff() error")
 	assert.Equal(t, 3, callCount, "Expected 3 calls")
 }
 
@@ -427,12 +427,12 @@ func TestRetryWithBackoff_MaxRetries(t *testing.T) {
 	callCount := 0
 	ctx := context.Background()
 
-	err := retryWithBackoff(ctx, 3, 10*time.Millisecond, func() error {
+	err := RetryWithBackoff(ctx, 3, 10*time.Millisecond, func() error {
 		callCount++
 		return fmt.Errorf("always fails")
 	})
 
-	require.Error(t, err, "retryWithBackoff() should return error after max retries")
+	require.Error(t, err, "RetryWithBackoff() should return error after max retries")
 	assert.Equal(t, 3, callCount, "Expected 3 calls")
 }
 
@@ -440,11 +440,11 @@ func TestRetryWithBackoff_ContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	err := retryWithBackoff(ctx, 3, 10*time.Millisecond, func() error {
+	err := RetryWithBackoff(ctx, 3, 10*time.Millisecond, func() error {
 		return fmt.Errorf("error")
 	})
 
-	require.Error(t, err, "retryWithBackoff() should return error when context is cancelled")
+	require.Error(t, err, "RetryWithBackoff() should return error when context is cancelled")
 }
 
 func TestAddClient_Success(t *testing.T) {
@@ -1484,7 +1484,7 @@ func TestRetryWithBackoff_ContextCancellationDuringRetry(t *testing.T) {
 	callCount := 0
 	ctx, cancel := context.WithCancel(context.Background())
 
-	err := retryWithBackoff(ctx, 5, 50*time.Millisecond, func() error {
+	err := RetryWithBackoff(ctx, 5, 50*time.Millisecond, func() error {
 		callCount++
 		if callCount == 2 {
 			cancel()
@@ -1492,7 +1492,7 @@ func TestRetryWithBackoff_ContextCancellationDuringRetry(t *testing.T) {
 		return fmt.Errorf("error %d", callCount)
 	})
 
-	require.Error(t, err, "retryWithBackoff() should return error when context cancelled during retry")
+	require.Error(t, err, "RetryWithBackoff() should return error when context cancelled during retry")
 	assert.LessOrEqual(t, callCount, 2, "Should stop after context cancellation")
 }
 

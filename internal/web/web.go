@@ -18,6 +18,7 @@ import (
 	"rs8kvn_bot/internal/interfaces"
 	"rs8kvn_bot/internal/logger"
 	"rs8kvn_bot/internal/utils"
+	"rs8kvn_bot/internal/xui"
 
 	"go.uber.org/zap"
 )
@@ -289,9 +290,14 @@ func (s *Server) HandleInvite(w http.ResponseWriter, r *http.Request) {
 	_, err = s.db.CreateTrialSubscription(ctx, code, subID, clientID, s.cfg.XUIInboundID, trafficBytes, expiryTime, subURL)
 	if err != nil {
 		logger.Error("Failed to create trial subscription in DB", zap.Error(err))
-		if delErr := s.xuiClient.DeleteClient(ctx, s.cfg.XUIInboundID, clientID); delErr != nil {
-			logger.Error("Failed to rollback XUI client after DB error — orphan client may remain",
-				zap.String("client_id", clientID), zap.Error(delErr))
+		// Rollback with retry to ensure client is deleted from XUI
+		rollbackErr := xui.RetryWithBackoff(ctx, config.XUIMaxRetries, config.XUIInitialRetryDelay, func() error {
+			return s.xuiClient.DeleteClient(ctx, s.cfg.XUIInboundID, clientID)
+		})
+		if rollbackErr != nil {
+			logger.Error("Failed to rollback XUI client after multiple retries — orphan client will remain",
+				zap.String("client_id", clientID),
+				zap.Error(rollbackErr))
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusInternalServerError)

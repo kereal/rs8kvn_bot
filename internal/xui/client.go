@@ -166,7 +166,7 @@ func (c *Client) doEnsureLoggedIn(ctx context.Context, force bool) error {
 		return nil
 	}
 
-	return retryWithBackoff(ctx, config.XUIMaxRetries, config.XUIInitialRetryDelay, func() error {
+	return RetryWithBackoff(ctx, config.XUIMaxRetries, config.XUIInitialRetryDelay, func() error {
 		return c.doLogin(ctx)
 	})
 }
@@ -561,8 +561,9 @@ func truncateString(s string, maxLen int) string {
 	return s[:maxLen] + "..."
 }
 
-// retryWithBackoff executes a function with exponential backoff retry.
-func retryWithBackoff(ctx context.Context, maxRetries int, initialDelay time.Duration, fn func() error) error {
+// RetryWithBackoff executes a function with exponential backoff retry.
+// Exported for use in other packages that need retry logic for XUI operations.
+func RetryWithBackoff(ctx context.Context, maxRetries int, initialDelay time.Duration, fn func() error) error {
 	var lastErr error
 	delay := initialDelay
 
