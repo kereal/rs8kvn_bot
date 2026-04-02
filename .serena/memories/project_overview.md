@@ -8,7 +8,7 @@ This is a Telegram bot for distributing VLESS+Reality+Vision proxy subscriptions
 - View current subscription status  
 - QR code for easy subscription import
 - Invite/trial landing page with one-click setup
-- Referral system
+- Referral system with in-memory cache + periodic sync
 - Configurable traffic limit (default 30GB/month)
 - Auto-renewal on the last day of each month
 - Admin notifications on new subscriptions
@@ -79,6 +79,31 @@ Project includes `.agents/skills/git-workflow-skill/` with best practices.
 - `go` (v1.25.0) - Go toolchain
 
 ## Recent Changes (v2.1.0)
+
+### Referral Cache System
+- **Implementation**: Full referral cache with database methods and in-memory sync
+- **Admin command**: `/refstats` shows referral count per user
+- **Files**: `database/database.go`, `bot/handler.go`, `bot/admin.go`, `cmd/bot/main.go`
+- **Commit**: `66f5d86`
+
+### Trial Atomic Rollback
+- **Problem**: Trial creation could leave orphaned client in 3x-ui if cleanup failed
+- **Solution**: `RetryWithBackoff` for rollback with up to 3 retries
+- **Commit**: `d2d8c16`
+
+### Subscription Locking
+- **Problem**: Manual lock/unlock via map could deadlock on panic
+- **Solution**: Replaced with `sync.Map` using `LoadOrStore`
+- **Commit**: `113f2bf`
+
+### Singleflight for XUI Login
+- **Problem**: Concurrent requests after session expiry triggered multiple logins
+- **Solution**: `singleflight.Group` to deduplicate concurrent login attempts
+- **Commit**: `1857ae8`
+
+### SQLite Connection Pool
+- **Configuration**: Set `MaxOpenConns(1)`, `MaxIdleConns(2)`, `ConnMaxLifetime(1h)`
+- **Purpose**: Prevents `database is locked` errors in SQLite
 
 ### Donate Improvements
 - **Card number added to config**: `DonateCardNumber = "2200702156780864"` (T-Bank)

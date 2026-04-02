@@ -10,7 +10,7 @@ Telegram bot for distributing VLESS+Reality+Vision proxy subscriptions from 3x-u
 - 📋 View current subscription status
 - 📱 QR code for easy subscription import
 - 🔗 Invite/trial landing page (`/i/{code}`) with one-click Happ setup
-- 👥 Referral system — users generate invite codes (`t.me/{bot}?start=share_{code}`)
+- 👥 Referral system — users generate invite codes (`t.me/{bot}?start=share_{code}`) with in-memory cache + periodic sync
 - 📊 Configurable traffic limit (default 30GB/month)
 - 🔄 Monthly auto-renewal (last day of month, no expiry)
 - 🔔 Admin notifications on new subscriptions
@@ -206,6 +206,7 @@ Admins (specified in `TELEGRAM_ADMIN_ID`) have access to additional commands:
 | `/del <id>` | Delete a subscription by database ID |
 | `/broadcast <message>` | Send a message to all users who have a subscription |
 | `/send <id\|username> <message>` | Send a message to a specific user |
+| `/refstats` | Show referral statistics (count per user from cache) |
 
 **Examples:**
 ```
