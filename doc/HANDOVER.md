@@ -215,7 +215,7 @@ All tests pass with `-race` detector (0 failures, 15 packages).
 
 ### Subscription Flow
 - **Trial:** `/i/{code}` → IP rate limit (3/hour) → xui client (1GB, 3h) → bind via `/start trial_{subID}`
-- **Regular:** `create_subscription` callback → xui client (100GB, no expiry, reset:30)
+- **Regular:** `create_subscription` callback → xui client (30GB, no expiry, reset:30)
 - **Share referral:** `pendingInvites[chatID]` cached for 60 minutes, `referred_by` set on creation
 - **Trial cookie:** `rs8kvn_trial_{code}` prevents duplication for 3 hours
 

@@ -11,7 +11,7 @@ Telegram bot for distributing VLESS+Reality+Vision proxy subscriptions from 3x-u
 - 📱 QR code for easy subscription import
 - 🔗 Invite/trial landing page (`/i/{code}`) with one-click Happ setup
 - 👥 Referral system — users generate invite codes (`t.me/{bot}?start=share_{code}`)
-- 📊 Configurable traffic limit (default 100GB/month)
+- 📊 Configurable traffic limit (default 30GB/month)
 - 🔄 Monthly auto-renewal (last day of month, no expiry)
 - 🔔 Admin notifications on new subscriptions
 - 💓 Heartbeat monitoring support
@@ -413,7 +413,7 @@ rs8kvn_bot/
 
 ## Traffic and Expiry
 
-- **Traffic**: Configurable via `TRAFFIC_LIMIT_GB` (default: 100GB)
+- **Traffic**: Configurable via `TRAFFIC_LIMIT_GB` (default: 30GB)
 - **Expiry**: No expiry (`expiryTime = 0`)
 - **Reset**: Last day of each month (day 30)
 - **Auto-renewal**: Automatic on last day of month
@@ -432,7 +432,7 @@ rs8kvn_bot/
 | `DATABASE_PATH` | SQLite database path | ./data/tgvpn.db | ❌ |
 | `LOG_FILE_PATH` | Log file path | ./data/bot.log | ❌ |
 | `LOG_LEVEL` | Log level (debug/info/warn/error) | info | ❌ |
-| `TRAFFIC_LIMIT_GB` | Traffic limit in GB | 100 | ❌ |
+| `TRAFFIC_LIMIT_GB` | Traffic limit in GB | 30 | ❌ |
 | `HEARTBEAT_URL` | URL for heartbeat monitoring | - | ❌ |
 | `HEARTBEAT_INTERVAL` | Heartbeat interval in seconds | 300 | ❌ |
 | `SENTRY_DSN` | Sentry DSN for error tracking | - | ❌ |

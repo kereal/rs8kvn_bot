@@ -72,7 +72,7 @@ const (
 	MaxTrafficLimitGB = 1000
 
 	// DefaultTrafficLimitGB is the default traffic limit in GB
-	DefaultTrafficLimitGB = 100
+	DefaultTrafficLimitGB = 30
 
 	// SubscriptionResetDay is the day of month for traffic reset (31 = last day)
 	SubscriptionResetDay = 30
