@@ -88,7 +88,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Failed to initialize Sentry: %v\n", err)
 		} else {
 			defer sentry.Flush(config.SentryFlushTimeout)
-			fmt.Println("Sentry error tracking initialized")
+			logger.Info("Sentry error tracking initialized")
 		}
 	}
 
@@ -96,7 +96,8 @@ func main() {
 	logService, err := logger.Init(cfg.LogFilePath, cfg.LogLevel)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
-		os.Exit(1)
+		sentry.Flush(config.SentryFlushTimeout) // flush before exit
+		os.Exit(1)                              //nolint:gocritic // flush called explicitly above
 	}
 	defer func() {
 		if err := logService.Close(); err != nil {

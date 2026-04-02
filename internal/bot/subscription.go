@@ -273,7 +273,9 @@ func (h *Handler) createSubscription(ctx context.Context, chatID int64, username
 	h.pendingMu.Unlock()
 
 	h.cache.Set(chatID, result.Subscription)
-	h.notifyAdmin(ctx, username, chatID, result.SubscriptionURL, time.Time{})
+	if err := h.notifyAdmin(ctx, username, chatID, result.SubscriptionURL, time.Time{}); err != nil {
+		logger.Warn("Failed to notify admin of new subscription", zap.Error(err))
+	}
 
 	backKeyboard := tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
@@ -296,19 +298,20 @@ func (h *Handler) handleCreateError(ctx context.Context, chatID int64, messageID
 
 	errMsg := "❌ Ошибка при создании подписки."
 	errStr := err.Error()
-	if strings.Contains(errStr, "connection refused") || strings.Contains(errStr, "timeout") {
+	switch {
+	case strings.Contains(errStr, "connection refused") || strings.Contains(errStr, "timeout"):
 		errMsg = "❌ Не удается подключиться к серверу. Попробуйте позже."
-	} else if strings.Contains(errStr, "authentication") || strings.Contains(errStr, "unauthorized") {
+	case strings.Contains(errStr, "authentication") || strings.Contains(errStr, "unauthorized"):
 		errMsg = "❌ Ошибка авторизации на сервере. Свяжитесь с администратором."
-	} else if strings.Contains(errStr, "context canceled") {
+	case strings.Contains(errStr, "context canceled"):
 		errMsg = "❌ Запрос был прерван. Попробуйте снова."
-	} else if strings.Contains(errStr, "no such host") || strings.Contains(errStr, "dial tcp") {
+	case strings.Contains(errStr, "no such host") || strings.Contains(errStr, "dial tcp"):
 		errMsg = "❌ Ошибка подключения к серверу. Проверьте настройки DNS."
-	} else if strings.Contains(errStr, "certificate") || strings.Contains(errStr, "TLS") {
+	case strings.Contains(errStr, "certificate") || strings.Contains(errStr, "TLS"):
 		errMsg = "❌ Ошибка SSL/TLS сертификата. Свяжитесь с администратором."
-	} else if strings.Contains(errStr, "inbound") || strings.Contains(errStr, "client") {
+	case strings.Contains(errStr, "inbound") || strings.Contains(errStr, "client"):
 		errMsg = "❌ Ошибка сервера при создании подписки. Попробуйте позже."
-	} else if strings.Contains(errStr, "rollback failed") {
+	case strings.Contains(errStr, "rollback failed"):
 		errMsg = "❌ Подписка создана в панели, но не сохранена в базе. Обратитесь к администратору."
 		h.notifyAdminError(ctx, fmt.Sprintf("⚠️ ORPHAN CLIENT WARNING: %v", err))
 	}
