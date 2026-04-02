@@ -15,6 +15,29 @@ func TestNewCircuitBreaker(t *testing.T) {
 
 	assert.Equal(t, CircuitStateClosed, cb.state, "Initial state should be closed")
 	assert.Equal(t, 0, cb.failures, "Initial failures should be 0")
+	assert.Equal(t, 3, cb.halfOpenMax, "halfOpenMax should be set to threshold")
+}
+
+func TestCircuitBreaker_Boundary_FailureThreshold_ExactlyAtThreshold(t *testing.T) {
+	cb := NewCircuitBreaker(2, 10*time.Second)
+
+	cb.recordResult(errors.New("failure"))
+	assert.Equal(t, CircuitStateClosed, cb.state, "State after 1 failure should still be closed")
+
+	allowed := cb.allowRequest()
+	assert.True(t, allowed, "Should allow request when at 1 failure (below threshold of 2)")
+
+	cb.recordResult(errors.New("failure"))
+	assert.Equal(t, CircuitStateOpen, cb.state, "State after 2 failures should be open")
+}
+
+func TestCircuitBreaker_Boundary_FailureThreshold_JustBelowThreshold(t *testing.T) {
+	cb := NewCircuitBreaker(2, 10*time.Second)
+
+	cb.recordResult(errors.New("failure"))
+
+	allowed := cb.allowRequest()
+	assert.True(t, allowed, "Should allow request when at 1 failure (below threshold of 2)")
 }
 
 func TestCircuitBreaker_AllowsRequestsWhenClosed(t *testing.T) {

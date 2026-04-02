@@ -1441,3 +1441,35 @@ func TestHandleUpdate_CallbackQuery(t *testing.T) {
 
 	assert.True(t, mockBot.SendCalled, "should handle callback query")
 }
+
+func TestGetQRKeyboard(t *testing.T) {
+	cfg := &config.Config{TelegramAdminID: 123}
+	handler := NewHandler(nil, cfg, nil, nil, NewTestBotConfig())
+
+	keyboard := handler.getQRKeyboard()
+
+	assert.Len(t, keyboard.InlineKeyboard, 2, "should have 2 rows")
+
+	row1 := keyboard.InlineKeyboard[0]
+	assert.Len(t, row1, 1, "first row should have 1 button")
+	assert.Equal(t, "📱 QR-код", row1[0].Text)
+	require.NotNil(t, row1[0].CallbackData)
+	assert.Equal(t, "qr_code", *row1[0].CallbackData)
+
+	row2 := keyboard.InlineKeyboard[1]
+	assert.Len(t, row2, 1, "second row should have 1 button")
+	assert.Equal(t, "🏠 В начало", row2[0].Text)
+	require.NotNil(t, row2[0].CallbackData)
+	assert.Equal(t, "back_to_start", *row2[0].CallbackData)
+}
+
+func TestGetQRKeyboard_PreservesHandlerState(t *testing.T) {
+	cfg := &config.Config{TelegramAdminID: 456}
+	handler := NewHandler(nil, cfg, nil, nil, NewTestBotConfig())
+
+	keyboard1 := handler.getQRKeyboard()
+	keyboard2 := handler.getQRKeyboard()
+
+	assert.Equal(t, keyboard1.InlineKeyboard[0][0].CallbackData,
+		keyboard2.InlineKeyboard[0][0].CallbackData, "should return consistent keyboard")
+}
