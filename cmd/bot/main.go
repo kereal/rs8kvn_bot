@@ -174,7 +174,7 @@ func main() {
 		return web.ComponentHealth{Status: web.StatusOK}
 	})
 	webServer.RegisterChecker("xui", func(ctx context.Context) web.ComponentHealth {
-		if err := xuiClient.Login(ctx); err != nil {
+		if err := xuiClient.Ping(ctx); err != nil {
 			return web.ComponentHealth{Status: web.StatusDegraded, Message: err.Error()}
 		}
 		return web.ComponentHealth{Status: web.StatusOK}
@@ -355,7 +355,7 @@ func handleUpdate(ctx context.Context, handler *bot.Handler, update tgbotapi.Upd
 			case "del":
 				handler.HandleDel(ctx, update)
 			case "broadcast":
-				handler.HandleBroadcast(ctx, update)
+				handler.HandleBroadcast(context.WithoutCancel(ctx), update)
 			case "send":
 				handler.HandleSend(ctx, update)
 			default:

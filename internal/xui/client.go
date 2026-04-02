@@ -130,9 +130,10 @@ func (c *Client) Login(ctx context.Context) error {
 	return c.ensureLoggedIn(ctx, true)
 }
 
-// Ping checks if the 3x-ui panel is reachable.
+// Ping checks if the 3x-ui panel is reachable without forcing re-authentication.
+// Returns nil if session is valid or re-authentication succeeds.
 func (c *Client) Ping(ctx context.Context) error {
-	return c.ensureLoggedIn(ctx, true)
+	return c.ensureLoggedIn(ctx, false)
 }
 
 // ensureLoggedIn checks if the session is valid and re-authenticates if necessary.
