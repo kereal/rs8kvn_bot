@@ -3,6 +3,7 @@ package bot
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -20,9 +21,16 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func init() {
-	// Initialize logger for tests
-	_, _ = logger.Init("", "error")
+func initLogger(t *testing.T) {
+	_, err := logger.Init("", "error")
+	if err != nil {
+		t.Logf("Logger init error (non-fatal): %v", err)
+	}
+}
+
+func TestMain(m *testing.M) {
+	initLogger(&testing.T{})
+	os.Exit(m.Run())
 }
 
 func TestNewHandler(t *testing.T) {
