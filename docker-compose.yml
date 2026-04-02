@@ -5,7 +5,7 @@ services:
     rs8kvn_bot:
         # Use specific version tag instead of :latest for reproducibility
         # Replace 'v1.0.0' with your actual version
-        image: ghcr.io/kereal/rs8kvn_bot:v1.0.0
+        image: ghcr.io/kereal/rs8kvn_bot:latest
         container_name: rs8kvn_bot
         restart: unless-stopped
 

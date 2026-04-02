@@ -297,7 +297,7 @@ func TestGetBackKeyboard_Structure(t *testing.T) {
 
 // TestGetDonateText_Content tests donation message content
 func TestGetDonateText_Content(t *testing.T) {
-	cfg := &config.Config{TelegramAdminID: 123}
+	cfg := &config.Config{TelegramAdminID: 123, ContactUsername: "kereal"}
 	h := &Handler{cfg: cfg, botConfig: NewTestBotConfig()}
 
 	text := h.getDonateText()
@@ -753,7 +753,7 @@ func TestCache_IntegrationWithHandler(t *testing.T) {
 // TestErrorHandling_Scenarios tests error handling scenarios
 func TestErrorHandling_Scenarios(t *testing.T) {
 	t.Run("getUsername handles all empty fields", func(t *testing.T) {
-		cfg := &config.Config{TelegramAdminID: 123}
+		cfg := &config.Config{TelegramAdminID: 123, ContactUsername: "kereal"}
 		h := &Handler{cfg: cfg, botConfig: NewTestBotConfig()}
 
 		user := &tgbotapi.User{ID: 999}

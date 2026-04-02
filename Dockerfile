@@ -73,8 +73,8 @@ USER appuser
 ENV GOMEMLIMIT=67108864
 ENV GOGC=40
 
-# No ports exposed - bot uses Telegram long polling
-EXPOSE 0
+# Health check port
+EXPOSE 8880
 
 # Health check - verifies process is running
 # Returns 0 if process found, 1 otherwise
