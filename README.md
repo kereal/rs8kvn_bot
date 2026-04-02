@@ -411,9 +411,16 @@ rs8kvn_bot/
 ## Traffic and Expiry
 
 - **Traffic**: Configurable via `TRAFFIC_LIMIT_GB` (default: 30GB)
-- **Expiry**: No expiry (`expiryTime = 0`)
-- **Reset**: Last day of each month (day 30)
-- **Auto-renewal**: Automatic on last day of month
+- **Expiry**: Set to creation time + 30 days for auto-reset to work
+- **Auto-reset**: Every 30 days from creation date (configurable via `SubscriptionResetIntervalDays`)
+- **Mechanism**: When `ExpiryTime` is set, 3x-ui automatically:
+  1. Resets traffic to 0 when `ExpiryTime` is reached
+  2. Extends `ExpiryTime` by `reset` days (30 days)
+  3. Re-enables the client if disabled
+
+**Important**: Auto-reset only works when `ExpiryTime > 0`. If `ExpiryTime = 0`, no automatic reset occurs.
+
+**Source**: [3x-ui inbound.go - autoRenewClients()](https://github.com/mhsanaei/3x-ui/blob/main/web/service/inbound.go#L888-L912)
 
 ## Configuration
 

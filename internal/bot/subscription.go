@@ -127,13 +127,45 @@ func (h *Handler) handleMySubscription(ctx context.Context, chatID int64, userna
 		trafficUsedGB = float64(traffic.Up+traffic.Down) / 1024 / 1024 / 1024
 	}
 
-	trafficInfo := fmt.Sprintf("%.2f / %d ГБ", trafficUsedGB, h.cfg.TrafficLimitGB)
+	// Calculate percentage for progress bar
+	trafficLimitGB := float64(h.cfg.TrafficLimitGB)
+	percentage := 0.0
+	if trafficLimitGB > 0 {
+		percentage = (trafficUsedGB / trafficLimitGB) * 100
+		if percentage > 100 {
+			percentage = 100
+		}
+	}
 
-	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, fmt.Sprintf(
-		"📋 *Ваша подписка*\n\n📊 Трафик: %s\n\n🔗 Ссылка\n`%s`",
+	// Format traffic info
+	trafficInfo := fmt.Sprintf("%.2f из %d ГБ (%.0f%%)", trafficUsedGB, h.cfg.TrafficLimitGB, percentage)
+	progressBar := generateProgressBar(trafficUsedGB, trafficLimitGB)
+
+	// Format dates
+	createdAt := formatDateRu(sub.CreatedAt)
+	daysUntilTrafficReset := daysUntilReset(time.Now(), sub.ExpiryTime)
+
+	// Build reset info string
+	var resetInfo string
+	if daysUntilTrafficReset < 0 {
+		resetInfo = "🔄 Сброс: отключен"
+	} else if daysUntilTrafficReset == 0 {
+		resetInfo = "🔄 Сброс: сегодня"
+	} else {
+		resetInfo = fmt.Sprintf("🔄 Сброс: через %d дн.", daysUntilTrafficReset)
+	}
+
+	// Build message
+	messageText := fmt.Sprintf(
+		"📋 *Ваша подписка*\n\n📊 Трафик: %s\n%s\n\n📅 Создана: %s\n%s\n\n🔗 Ссылка\n`%s`",
 		trafficInfo,
+		progressBar,
+		createdAt,
+		resetInfo,
 		sub.SubscriptionURL,
-	))
+	)
+
+	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, messageText)
 	editMsg.ParseMode = "Markdown"
 	editMsg.DisableWebPagePreview = true
 	kb := h.getQRKeyboard()
@@ -319,4 +351,71 @@ func (h *Handler) handleCreateError(ctx context.Context, chatID int64, messageID
 	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, errMsg)
 	editMsg.DisableWebPagePreview = true
 	h.safeSend(editMsg)
+}
+
+// generateProgressBar creates a visual progress bar using Unicode emojis.
+// Returns a string like "🟩🟩🟩🟩🟩⬜⬜⬜⬜⬜" representing used/total ratio.
+func generateProgressBar(usedGB, limitGB float64) string {
+	if limitGB <= 0 {
+		return "⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜"
+	}
+
+	percentage := (usedGB / limitGB) * 100
+	if percentage > 100 {
+		percentage = 100
+	}
+
+	// 10 blocks total
+	filled := int(percentage / 10)
+	if filled > 10 {
+		filled = 10
+	}
+
+	bar := ""
+	for i := 0; i < 10; i++ {
+		if i < filled {
+			bar += "🟩"
+		} else {
+			bar += "⬜"
+		}
+	}
+
+	return bar
+}
+
+// daysUntilReset calculates the number of days until the next traffic reset.
+// Returns -1 if auto-reset is not configured (expiryTime is zero).
+// Returns 0 if already expired (reset should happen now).
+// Returns positive number of days until reset otherwise.
+func daysUntilReset(now time.Time, expiryTime time.Time) int {
+	if expiryTime.IsZero() {
+		return -1 // Auto-reset not configured
+	}
+
+	if now.After(expiryTime) || now.Equal(expiryTime) {
+		return 0 // Already expired, reset should happen now
+	}
+
+	duration := expiryTime.Sub(now)
+	days := int(duration.Hours() / 24)
+
+	if days < 0 {
+		days = 0
+	}
+
+	return days
+}
+
+// formatDateRu formats a date in Russian locale (e.g., "15 января 2025").
+func formatDateRu(t time.Time) string {
+	months := []string{
+		"января", "февраля", "марта", "апреля", "мая", "июня",
+		"июля", "августа", "сентября", "октября", "ноября", "декабря",
+	}
+
+	day := t.Day()
+	month := months[t.Month()-1]
+	year := t.Year()
+
+	return fmt.Sprintf("%d %s %d", day, month, year)
 }

@@ -77,7 +77,11 @@ const (
 	// DefaultTrafficLimitGB is the default traffic limit in GB
 	DefaultTrafficLimitGB = 30
 
-	// SubscriptionResetDay is the day of month for traffic reset (31 = last day)
+	// SubscriptionResetDay is the interval in days for automatic traffic reset.
+	// When combined with ExpiryTime > 0, traffic resets every N days and expiry extends.
+	// Example: reset=30 means traffic resets every 30 days from creation date.
+	// IMPORTANT: Auto-reset only works when ExpiryTime is set (not zero).
+	// Source: https://github.com/mhsanaei/3x-ui/blob/main/web/service/inbound.go#L888-L912
 	SubscriptionResetDay = 30
 )
 

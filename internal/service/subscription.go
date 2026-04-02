@@ -37,7 +37,10 @@ func (s *SubscriptionService) Create(ctx context.Context, chatID int64, username
 	clientID := utils.GenerateUUID()
 	subID := utils.GenerateSubID()
 
-	client, err := s.xui.AddClientWithID(ctx, s.cfg.XUIInboundID, username, clientID, subID, trafficBytes, time.Time{}, config.SubscriptionResetDay)
+	// Calculate expiry time for auto-reset (now + reset days)
+	expiryTime := time.Now().Add(time.Duration(config.SubscriptionResetDay) * 24 * time.Hour)
+	
+	client, err := s.xui.AddClientWithID(ctx, s.cfg.XUIInboundID, username, clientID, subID, trafficBytes, expiryTime, config.SubscriptionResetDay)
 	if err != nil {
 		return nil, fmt.Errorf("xui add client: %w", err)
 	}
