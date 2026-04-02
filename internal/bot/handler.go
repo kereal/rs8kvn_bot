@@ -37,7 +37,7 @@ type Handler struct {
 	cfg                 *config.Config
 	db                  interfaces.DatabaseService
 	xui                 interfaces.XUIClient
-	rateLimiter         *ratelimiter.RateLimiter
+	rateLimiter         *ratelimiter.PerUserRateLimiter
 	cache               *SubscriptionCache
 	subCreationMu       sync.Mutex
 	inProgress          map[int64]struct{}
@@ -56,7 +56,7 @@ func NewHandler(bot interfaces.BotAPI, cfg *config.Config, db interfaces.Databas
 		cfg:                 cfg,
 		db:                  db,
 		xui:                 xuiClient,
-		rateLimiter:         ratelimiter.NewRateLimiter(config.RateLimiterMaxTokens, config.RateLimiterRefillRate),
+		rateLimiter:         ratelimiter.NewPerUserRateLimiter(float64(config.RateLimiterMaxTokens), float64(config.RateLimiterRefillRate)),
 		cache:               NewSubscriptionCache(CacheMaxSize, CacheTTL),
 		subCreationMu:       sync.Mutex{},
 		inProgress:          make(map[int64]struct{}),
@@ -122,6 +122,11 @@ func (h *Handler) HandleUpdate(ctx context.Context, update tgbotapi.Update) {
 // StartCacheCleanup starts a background goroutine that periodically removes expired cache entries.
 func (h *Handler) StartCacheCleanup(ctx context.Context, interval time.Duration) {
 	go h.cache.StartCleanup(ctx, interval)
+}
+
+// StartRateLimiterCleanup starts a background goroutine that removes stale user buckets.
+func (h *Handler) StartRateLimiterCleanup(ctx context.Context, interval, maxIdle time.Duration) {
+	go h.rateLimiter.StartCleanup(ctx, interval, maxIdle)
 }
 
 func (h *Handler) checkAdminSendRateLimit(chatID int64) bool {

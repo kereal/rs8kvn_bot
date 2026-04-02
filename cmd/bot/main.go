@@ -165,6 +165,9 @@ func main() {
 	// Start cache cleanup goroutine to prevent memory leaks
 	handler.StartCacheCleanup(ctx, bot.CacheTTL/2)
 
+	// Start rate limiter cleanup goroutine to remove stale user buckets
+	handler.StartRateLimiterCleanup(ctx, bot.CacheTTL, bot.CacheTTL*2)
+
 	// Initialize and start web server (health + trial pages)
 	webServer := web.NewServer(fmt.Sprintf(":%d", cfg.HealthCheckPort), dbService, xuiClient, cfg, botConfig)
 	webServer.RegisterChecker("database", func(ctx context.Context) web.ComponentHealth {

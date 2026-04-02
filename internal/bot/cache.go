@@ -8,10 +8,11 @@ import (
 	"rs8kvn_bot/internal/database"
 )
 
-// cacheEntry represents a cached subscription with expiration time.
+// cacheEntry represents a cached subscription with expiration and access tracking.
 type cacheEntry struct {
-	sub       *database.Subscription
-	expiresAt time.Time
+	sub        *database.Subscription
+	expiresAt  time.Time
+	lastAccess time.Time
 }
 
 // SubscriptionCache is a thread-safe LRU cache for subscriptions with TTL.
@@ -35,8 +36,8 @@ func NewSubscriptionCache(maxSize int, ttl time.Duration) *SubscriptionCache {
 // Get retrieves a subscription from cache.
 // Returns nil if not found or expired.
 func (c *SubscriptionCache) Get(telegramID int64) *database.Subscription {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
 	entry, ok := c.items[telegramID]
 	if !ok {
@@ -47,6 +48,7 @@ func (c *SubscriptionCache) Get(telegramID int64) *database.Subscription {
 		return nil // Expired; Cleanup() handles deletion under write lock
 	}
 
+	entry.lastAccess = time.Now()
 	return entry.sub
 }
 
@@ -55,22 +57,23 @@ func (c *SubscriptionCache) Set(telegramID int64, sub *database.Subscription) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	// If at capacity, evict oldest entry (by expiresAt time)
+	// If at capacity, evict least recently used entry (by lastAccess time)
 	if len(c.items) >= c.maxSize {
 		var oldestID int64
 		var oldestTime time.Time
 		for id, entry := range c.items {
-			if oldestTime.IsZero() || entry.expiresAt.Before(oldestTime) {
+			if oldestTime.IsZero() || entry.lastAccess.Before(oldestTime) {
 				oldestID = id
-				oldestTime = entry.expiresAt
+				oldestTime = entry.lastAccess
 			}
 		}
 		delete(c.items, oldestID)
 	}
 
 	c.items[telegramID] = &cacheEntry{
-		sub:       sub,
-		expiresAt: time.Now().Add(c.ttl),
+		sub:        sub,
+		expiresAt:  time.Now().Add(c.ttl),
+		lastAccess: time.Now(),
 	}
 }
 
