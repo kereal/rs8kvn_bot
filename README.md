@@ -2,7 +2,7 @@
 
 Telegram bot for distributing VLESS+Reality+Vision proxy subscriptions from 3x-ui panel.
 
-**Version:** v2.0.9 | **Coverage:** ~84% | **License:** MIT
+**Version:** v2.1.0 | **Coverage:** ~75% | **License:** MIT
 
 ## Features
 
@@ -20,18 +20,18 @@ Telegram bot for distributing VLESS+Reality+Vision proxy subscriptions from 3x-u
 - 🗄️ Daily database backups with rotation
 - 🔄 Database migrations system
 - 🐛 Sentry error tracking
-- 🛡️ Rate limiting per user
+- 🛡️ Rate limiting per user (per-user token buckets, 30 tokens, 5/sec refill)
 - ⚡ Graceful shutdown with goroutine tracking
 - 🔒 Circuit breaker for 3x-ui panel
 - 🐳 Docker support with health checks
-- 🧪 Unit + E2E tests (~84% coverage, race-safe, fuzzing, 66 E2E scenarios)
+- 🧪 Unit + E2E tests (~75% coverage, race-safe, fuzzing, 66+ E2E scenarios)
 - ✅ golangci-lint and gosec for code quality
 - 🍪 Trial duplication prevention (3-hour cookie)
 
 ## Requirements
 
 - Docker & Docker Compose (recommended)
-- OR Go 1.25+
+- OR Go 1.24+
 - 3x-ui panel (https://github.com/MHSanaei/3x-ui)
 - Telegram Bot Token
 
@@ -274,10 +274,7 @@ This project includes a GitHub Actions workflow that automatically:
 - Runs tests with coverage
 - Builds and pushes Docker images to GitHub Container Registry
 
-### Triggers
-
-- Push to `main` branch
-- Git tags (e.g., `v2.0.0`)
+- **Trigger:** Push to `main`, pull_request, tags
 
 ### Images are tagged with
 
@@ -424,6 +421,8 @@ rs8kvn_bot/
 |----------|-------------|---------|----------|
 | `TELEGRAM_BOT_TOKEN` | Telegram bot token from @BotFather | - | ✅ |
 | `TELEGRAM_ADMIN_ID` | Admin Telegram ID for notifications | 0 | ❌ |
+| `CONTACT_USERNAME` | Telegram username for support/contact | kereal | ❌ |
+| `CONTACT_USERNAME` | Telegram username for support/contact | kereal | ❌ |
 | `XUI_HOST` | 3x-ui panel URL | http://localhost:2053 | ✅ |
 | `XUI_USERNAME` | 3x-ui admin username | - | ✅ |
 | `XUI_PASSWORD` | 3x-ui admin password | - | ✅ |
@@ -532,20 +531,19 @@ go test ./internal/database/... -v
 
 | Package | Coverage |
 |---------|----------|
-| `internal/bot` | **97.7%** | ✅ Excellent |
-| `internal/ratelimiter` | **100%** | ✅ Excellent |
+| `internal/ratelimiter` | **97.5%** | ✅ Excellent |
+| `internal/bot` | **94.2%** | ✅ Excellent |
 | `internal/heartbeat` | **95.8%** | ✅ Excellent |
 | `internal/service` | **95.7%** | ✅ Excellent |
-| `internal/health` | **93.5%** | ✅ Excellent |
-| `internal/web` | **97.7%** | ✅ Excellent |
+| `internal/web` | **96.7%** | ✅ Excellent |
 | `internal/xui` | **91.1%** | ✅ Excellent |
-| `internal/config` | **86.1%** | ✅ Good |
+| `internal/config` | **87.3%** | ✅ Good |
 | `internal/logger` | **87.6%** | ✅ Good |
 | `internal/backup` | **82.3%** | ✅ Good |
-| `internal/database` | **80.1%** | ✅ Good |
+| `internal/database` | **82.9%** | ✅ Good |
 | `internal/utils` | **75.0%** | ✅ Good |
-| `cmd/bot` | **21.6%** | 🟡 Low (main is integration) |
-| **Overall** | **~84%** | ✅ Good |
+| `cmd/bot` | **14.9%** | 🟡 Low (main is integration) |
+| **Overall** | **~75%** | ✅ Good |
 
 All tests pass with `-race` detector (0 failures). Test suite includes:
 - **66 E2E tests** — full subscription lifecycle: invite→trial→bind, commands, callbacks, admin operations, concurrency, rollback scenarios

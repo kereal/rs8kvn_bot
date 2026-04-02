@@ -1167,7 +1167,7 @@ func TestHandler_RateLimiter(t *testing.T) {
 
 	// Test that rate limiter allows requests
 	ctx := context.Background()
-	assert.True(t, handler.rateLimiter.Wait(ctx), "Rate limiter should allow request")
+	assert.True(t, handler.rateLimiter.Wait(ctx, 12345), "Rate limiter should allow request")
 }
 
 // === Subscription cache integration ===

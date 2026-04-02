@@ -19,7 +19,7 @@ func (h *Handler) send(ctx context.Context, msg tgbotapi.MessageConfig) {
 func (h *Handler) sendWithError(ctx context.Context, msg tgbotapi.MessageConfig) error {
 	msg.DisableWebPagePreview = true
 
-	if !h.rateLimiter.Wait(ctx) {
+	if !h.rateLimiter.Wait(ctx, msg.ChatID) {
 		return ctx.Err()
 	}
 
