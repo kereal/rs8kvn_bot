@@ -364,18 +364,14 @@ func TestHandleCreateSubscription_AlreadyInProgress(t *testing.T) {
 	chatID := int64(123456)
 
 	// Simulate subscription already in progress (set by another goroutine)
-	handler.subCreationMu.Lock()
-	handler.inProgress[chatID] = struct{}{}
-	handler.subCreationMu.Unlock()
+	handler.inProgressSyncMap.Store(chatID, true)
 
 	ctx := context.Background()
 	handler.handleCreateSubscription(ctx, chatID, "testuser", 1)
 
 	// inProgress entry should NOT be cleaned up — it belongs to the goroutine that set it.
 	// The early-return path doesn't register the defer cleanup.
-	handler.subCreationMu.Lock()
-	_, stillInProgress := handler.inProgress[chatID]
-	handler.subCreationMu.Unlock()
+	_, stillInProgress := handler.inProgressSyncMap.Load(chatID)
 	assert.True(t, stillInProgress, "inProgress entry should remain (belongs to other goroutine)")
 
 	// No bot interaction should have occurred (early return)

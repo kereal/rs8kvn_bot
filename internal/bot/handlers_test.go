@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -1199,31 +1200,26 @@ func TestHandler_CacheInvalidation(t *testing.T) {
 
 func TestHandler_SubscriptionCreationLock(t *testing.T) {
 	handler := &Handler{
-		inProgress: make(map[int64]struct{}),
+		inProgressSyncMap: sync.Map{},
 	}
 
 	// Simulate subscription in progress
-	handler.subCreationMu.Lock()
-	handler.inProgress[12345] = struct{}{}
-	handler.subCreationMu.Unlock()
+	_, loaded := handler.inProgressSyncMap.LoadOrStore(12345, true)
+	assert.False(t, loaded, "First LoadOrStore should return false (not loaded)")
 
 	// Check that it's marked as in progress
-	handler.subCreationMu.Lock()
-	_, exists := handler.inProgress[12345]
-	handler.subCreationMu.Unlock()
-
+	_, exists := handler.inProgressSyncMap.Load(12345)
 	assert.True(t, exists, "Should be marked as in progress")
 
+	// Try to add again - should return true (already loaded)
+	_, loaded = handler.inProgressSyncMap.LoadOrStore(12345, true)
+	assert.True(t, loaded, "Second LoadOrStore should return true (already loaded)")
+
 	// Remove from in progress
-	handler.subCreationMu.Lock()
-	delete(handler.inProgress, 12345)
-	handler.subCreationMu.Unlock()
+	handler.inProgressSyncMap.Delete(12345)
 
 	// Verify it's removed
-	handler.subCreationMu.Lock()
-	_, exists = handler.inProgress[12345]
-	handler.subCreationMu.Unlock()
-
+	_, exists = handler.inProgressSyncMap.Load(12345)
 	assert.False(t, exists, "Should not be in progress anymore")
 }
 
@@ -1276,4 +1272,164 @@ func TestHandleCreateError_AllErrorTypes(t *testing.T) {
 			assert.Contains(t, mockBot.LastSentText, tt.wantContain, "message should contain expected text")
 		})
 	}
+}
+
+func TestHandleUpdate_CommandRouting(t *testing.T) {
+	cfg := &config.Config{
+		TelegramAdminID:  123456789,
+		TrafficLimitGB:   100,
+		XUIHost:          "http://localhost:2053",
+		XUIInboundID:     1,
+		TelegramBotToken: "test_token",
+	}
+
+	xuiClient, err := xui.NewClient(cfg.XUIHost, "admin", "password")
+	require.NoError(t, err)
+
+	tests := []struct {
+		name        string
+		update      tgbotapi.Update
+		wantCommand string
+	}{
+		{
+			name: "/start command",
+			update: tgbotapi.Update{
+				Message: &tgbotapi.Message{
+					Chat: &tgbotapi.Chat{ID: 111},
+					From: &tgbotapi.User{ID: 111, UserName: "user1"},
+					Text: "/start",
+				},
+			},
+			wantCommand: "start",
+		},
+		{
+			name: "/help command",
+			update: tgbotapi.Update{
+				Message: &tgbotapi.Message{
+					Chat: &tgbotapi.Chat{ID: 111},
+					From: &tgbotapi.User{ID: 111, UserName: "user1"},
+					Text: "/help",
+				},
+			},
+			wantCommand: "help",
+		},
+		{
+			name: "/invite command",
+			update: tgbotapi.Update{
+				Message: &tgbotapi.Message{
+					Chat: &tgbotapi.Chat{ID: 111},
+					From: &tgbotapi.User{ID: 111, UserName: "user1"},
+					Text: "/invite",
+				},
+			},
+			wantCommand: "invite",
+		},
+		{
+			name: "/refstats command",
+			update: tgbotapi.Update{
+				Message: &tgbotapi.Message{
+					Chat: &tgbotapi.Chat{ID: 123456789},
+					From: &tgbotapi.User{ID: 123456789, UserName: "admin"},
+					Text: "/refstats",
+				},
+			},
+			wantCommand: "refstats",
+		},
+		{
+			name: "unknown command",
+			update: tgbotapi.Update{
+				Message: &tgbotapi.Message{
+					Chat: &tgbotapi.Chat{ID: 111},
+					From: &tgbotapi.User{ID: 111, UserName: "user1"},
+					Text: "/unknown",
+				},
+			},
+			wantCommand: "unknown",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockBot := testutil.NewMockBotAPI()
+			mockDB := testutil.NewMockDatabaseService()
+			handler := NewHandler(mockBot, cfg, mockDB, xuiClient, NewTestBotConfig())
+
+			handler.HandleUpdate(context.Background(), tt.update)
+
+			assert.True(t, mockBot.SendCalled, "should send response")
+		})
+	}
+}
+
+func TestHandleUpdate_NonCommandMessage(t *testing.T) {
+	cfg := &config.Config{
+		TelegramAdminID:  123456789,
+		TrafficLimitGB:   100,
+		XUIHost:          "http://localhost:2053",
+		XUIInboundID:     1,
+		TelegramBotToken: "test_token",
+	}
+
+	xuiClient, err := xui.NewClient(cfg.XUIHost, "admin", "password")
+	require.NoError(t, err)
+
+	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewMockDatabaseService()
+	handler := NewHandler(mockBot, cfg, mockDB, xuiClient, NewTestBotConfig())
+
+	update := tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat: &tgbotapi.Chat{ID: 111},
+			From: &tgbotapi.User{ID: 111, UserName: "testuser"},
+			Text: "hello world",
+		},
+	}
+
+	handler.HandleUpdate(context.Background(), update)
+
+	assert.True(t, mockBot.SendCalled, "should send response for non-command message")
+	assert.Contains(t, mockBot.LastSentText, "/start", "should suggest /start command")
+}
+
+func TestHandleUpdate_CallbackQuery(t *testing.T) {
+	cfg := &config.Config{
+		TelegramAdminID:  123456789,
+		TrafficLimitGB:   100,
+		XUIHost:          "http://localhost:2053",
+		XUIInboundID:     1,
+		TelegramBotToken: "test_token",
+	}
+
+	xuiClient, err := xui.NewClient(cfg.XUIHost, "admin", "password")
+	require.NoError(t, err)
+
+	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewMockDatabaseService()
+	mockDB.GetByTelegramIDFunc = func(ctx context.Context, id int64) (*database.Subscription, error) {
+		return &database.Subscription{
+			ID:             1,
+			TelegramID:     111,
+			Username:       "testuser",
+			SubscriptionID: "test-sub-id",
+			TrafficLimit:   100,
+			ExpiryTime:     time.Now().Add(24 * time.Hour),
+			Status:         "active",
+		}, nil
+	}
+	handler := NewHandler(mockBot, cfg, mockDB, xuiClient, NewTestBotConfig())
+
+	update := tgbotapi.Update{
+		CallbackQuery: &tgbotapi.CallbackQuery{
+			ID:   "callback_123",
+			From: &tgbotapi.User{ID: 111, UserName: "testuser"},
+			Message: &tgbotapi.Message{
+				Chat: &tgbotapi.Chat{ID: 111},
+			},
+			Data: "create_subscription",
+		},
+	}
+
+	handler.HandleUpdate(context.Background(), update)
+
+	assert.True(t, mockBot.SendCalled, "should handle callback query")
 }

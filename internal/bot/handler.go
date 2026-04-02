@@ -39,8 +39,7 @@ type Handler struct {
 	xui                 interfaces.XUIClient
 	rateLimiter         *ratelimiter.PerUserRateLimiter
 	cache               *SubscriptionCache
-	subCreationMu       sync.Mutex
-	inProgress          map[int64]struct{}
+	inProgressSyncMap   sync.Map // Atomic tracking of subscription creation in progress
 	referrals           map[int64]int64
 	referralsMu         sync.RWMutex
 	pendingInvites      map[int64]pendingInvite // chatID -> invite_code
@@ -58,13 +57,13 @@ func NewHandler(bot interfaces.BotAPI, cfg *config.Config, db interfaces.Databas
 		xui:                 xuiClient,
 		rateLimiter:         ratelimiter.NewPerUserRateLimiter(float64(config.RateLimiterMaxTokens), float64(config.RateLimiterRefillRate)),
 		cache:               NewSubscriptionCache(CacheMaxSize, CacheTTL),
-		subCreationMu:       sync.Mutex{},
-		inProgress:          make(map[int64]struct{}),
+		inProgressSyncMap:   sync.Map{},
 		referrals:           make(map[int64]int64),
 		referralsMu:         sync.RWMutex{},
 		pendingInvites:      make(map[int64]pendingInvite),
 		pendingMu:           sync.RWMutex{},
 		botConfig:           botConfig,
+		adminSendMu:         sync.Map{},
 		subscriptionService: service.NewSubscriptionService(db, xuiClient, cfg),
 	}
 }
@@ -156,10 +155,10 @@ func (h *Handler) LoadReferralCache(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	
+
 	h.referralsMu.Lock()
 	defer h.referralsMu.Unlock()
-	
+
 	h.referrals = counts
 	return nil
 }
@@ -168,7 +167,7 @@ func (h *Handler) LoadReferralCache(ctx context.Context) error {
 func (h *Handler) GetReferralCount(chatID int64) int64 {
 	h.referralsMu.RLock()
 	defer h.referralsMu.RUnlock()
-	
+
 	return h.referrals[chatID]
 }
 
@@ -176,7 +175,7 @@ func (h *Handler) GetReferralCount(chatID int64) int64 {
 func (h *Handler) IncrementReferralCount(chatID int64) {
 	h.referralsMu.Lock()
 	defer h.referralsMu.Unlock()
-	
+
 	h.referrals[chatID]++
 }
 
@@ -184,7 +183,7 @@ func (h *Handler) IncrementReferralCount(chatID int64) {
 func (h *Handler) DecrementReferralCount(chatID int64) {
 	h.referralsMu.Lock()
 	defer h.referralsMu.Unlock()
-	
+
 	if h.referrals[chatID] > 0 {
 		h.referrals[chatID]--
 	}
@@ -200,12 +199,12 @@ func (h *Handler) StartReferralCacheSync(ctx context.Context) {
 	go func() {
 		ticker := time.NewTicker(1 * time.Hour)
 		defer ticker.Stop()
-		
+
 		// Load initial cache
 		if err := h.LoadReferralCache(ctx); err != nil {
 			logger.Error("Failed to load referral cache", zap.Error(err))
 		}
-		
+
 		for {
 			select {
 			case <-ctx.Done():
