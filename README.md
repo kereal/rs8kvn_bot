@@ -2,7 +2,7 @@
 
 Telegram bot for distributing VLESS+Reality+Vision proxy subscriptions from 3x-ui panel.
 
-**Version:** v2.0.2 | **Coverage:** ~82% | **License:** MIT
+**Version:** v2.0.9 | **Coverage:** ~84% | **License:** MIT
 
 ## Features
 
@@ -24,7 +24,7 @@ Telegram bot for distributing VLESS+Reality+Vision proxy subscriptions from 3x-u
 - ⚡ Graceful shutdown with goroutine tracking
 - 🔒 Circuit breaker for 3x-ui panel
 - 🐳 Docker support with health checks
-- 🧪 Unit tests (~82% coverage, race-safe, fuzzing)
+- 🧪 Unit + E2E tests (~84% coverage, race-safe, fuzzing, 66 E2E scenarios)
 - ✅ golangci-lint and gosec for code quality
 - 🍪 Trial duplication prevention (3-hour cookie)
 
@@ -532,26 +532,28 @@ go test ./internal/database/... -v
 
 | Package | Coverage |
 |---------|----------|
-| `internal/bot` | **95.1%** | ✅ Excellent |
+| `internal/bot` | **97.7%** | ✅ Excellent |
 | `internal/ratelimiter` | **100%** | ✅ Excellent |
 | `internal/heartbeat` | **95.8%** | ✅ Excellent |
 | `internal/service` | **95.7%** | ✅ Excellent |
-| `internal/health` | **90.3%** | ✅ Excellent |
-| `internal/xui` | **86.8%** | ✅ Good |
-| `internal/config` | **83.2%** | ✅ Good |
-| `internal/web` | **83.0%** | ✅ Good |
-| `internal/logger` | **82.3%** | ✅ Good |
-| `internal/backup` | **81.4%** | ✅ Good |
-| `internal/database` | **79.2%** | ✅ Good |
+| `internal/health` | **93.5%** | ✅ Excellent |
+| `internal/web` | **97.7%** | ✅ Excellent |
+| `internal/xui` | **91.1%** | ✅ Excellent |
+| `internal/config` | **86.1%** | ✅ Good |
+| `internal/logger` | **87.6%** | ✅ Good |
+| `internal/backup` | **82.3%** | ✅ Good |
+| `internal/database` | **80.1%** | ✅ Good |
 | `internal/utils` | **75.0%** | ✅ Good |
-| `cmd/bot` | **19.6%** | 🟡 Low (main is integration) |
-| **Overall** | **~82%** | ✅ Good |
+| `cmd/bot` | **21.6%** | 🟡 Low (main is integration) |
+| **Overall** | **~84%** | ✅ Good |
 
 All tests pass with `-race` detector (0 failures). Test suite includes:
+- **66 E2E tests** — full subscription lifecycle: invite→trial→bind, commands, callbacks, admin operations, concurrency, rollback scenarios
 - **Table-driven tests** for parameterized coverage
 - **Behavioral assertions** verifying message content, not just "not panic"
-- **Fuzzing tests** for `escapeMarkdown`, `truncateString`, `InviteCodeRegex`
+- **Fuzzing tests** for `escapeMarkdown`, `truncateString`, `InviteCodeRegex`, `TruncateString`, `NewClient`
 - **Integration tests** with mock HTTP server for 3x-ui endpoints
+- **Database migration tests** — corrupted SQL, partial migrations, duplicates, concurrent access
 - **Thread-safe mocks** with mutex-protected accessors for concurrent test safety
 
 ### Linting
