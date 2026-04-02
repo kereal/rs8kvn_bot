@@ -233,6 +233,34 @@ func TestRateLimiter_NewRateLimiter(t *testing.T) {
 	assert.NotNil(t, rl, "NewRateLimiter() returned nil")
 }
 
+func TestRateLimiter_Boundary_ZeroTokens(t *testing.T) {
+	rl := NewRateLimiter(0, 100)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	result := rl.Wait(ctx)
+	assert.False(t, result, "Wait() with 0 tokens should fail immediately")
+}
+
+func TestRateLimiter_Boundary_OneToken(t *testing.T) {
+	rl := NewRateLimiter(1, 100)
+
+	assert.True(t, rl.Allow(), "First Allow() with 1 token should succeed")
+	assert.False(t, rl.Allow(), "Second Allow() should fail (no tokens left)")
+}
+
+func TestRateLimiter_Boundary_RefillRate_Zero(t *testing.T) {
+	rl := NewRateLimiter(5, 0)
+
+	consumed := 0
+	for rl.Allow() {
+		consumed++
+	}
+
+	assert.Equal(t, 5, consumed, "Should consume all 5 tokens, then stop (refillRate=0)")
+}
+
 func TestRateLimiter_Wait(t *testing.T) {
 	rl := NewRateLimiter(3, 1000)
 
