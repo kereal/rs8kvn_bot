@@ -11,6 +11,7 @@ import (
 
 	"rs8kvn_bot/internal/config"
 	"rs8kvn_bot/internal/database"
+	"rs8kvn_bot/internal/ratelimiter"
 	"rs8kvn_bot/internal/testutil"
 	"rs8kvn_bot/internal/utils"
 	"rs8kvn_bot/internal/xui"
@@ -195,6 +196,8 @@ func TestSendInviteLink_Success(t *testing.T) {
 		bot:       mockBot,
 		botConfig: NewTestBotConfig(),
 		cache:     NewSubscriptionCache(100, 5*time.Minute),
+		keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, config.DonateCardNumber, config.DonateURL, cfg.SiteURL),
+		sender:    NewMessageSender(mockBot, ratelimiter.NewPerUserRateLimiter(float64(config.RateLimiterMaxTokens), float64(config.RateLimiterRefillRate))),
 	}
 
 	mockDB.GetOrCreateInviteFunc = func(ctx context.Context, referrerTGID int64, code string) (*database.Invite, error) {
@@ -374,7 +377,10 @@ func TestHandleCreateError_AllErrorTypes(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mockBot := testutil.NewMockBotAPI()
-			handler := &Handler{bot: mockBot}
+			handler := &Handler{
+				bot:    mockBot,
+				sender: NewMessageSender(mockBot, ratelimiter.NewPerUserRateLimiter(float64(config.RateLimiterMaxTokens), float64(config.RateLimiterRefillRate))),
+			}
 
 			handler.handleCreateError(context.Background(), 12345, 100, "testuser", tt.err)
 

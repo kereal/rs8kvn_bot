@@ -3,6 +3,7 @@ package database
 import (
 	"context"
 	"database/sql"
+	"embed"
 	"errors"
 	"fmt"
 	"io"
@@ -16,12 +17,15 @@ import (
 
 	migrate "github.com/golang-migrate/migrate/v4"
 	"github.com/golang-migrate/migrate/v4/database/sqlite"
-	_ "github.com/golang-migrate/migrate/v4/source/file"
+	"github.com/golang-migrate/migrate/v4/source/iofs"
 	"go.uber.org/zap"
 	gormsqlite "gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
 )
+
+//go:embed migrations/*.sql
+var migrationFiles embed.FS
 
 // Subscription represents a user's VPN subscription.
 type Subscription struct {
@@ -82,31 +86,7 @@ func (TrialRequest) TableName() string {
 	return "trial_requests"
 }
 
-func runMigrationsWithDB(sqlDB *sql.DB) error {
-	wd, _ := os.Getwd()
-	possiblePaths := []string{
-		filepath.Join(wd, "migrations"),
-		filepath.Join(wd, "internal/database/migrations"),
-		filepath.Join(wd, "../database/migrations"),
-		filepath.Join(wd, "../../database/migrations"),
-		filepath.Join(wd, "../../../database/migrations"),
-	}
-	var migrationsDir string
-	for _, p := range possiblePaths {
-		if _, err := os.Stat(p); err == nil {
-			migrationsDir = p
-			break
-		}
-	}
-	if migrationsDir == "" {
-		return nil
-	}
-
-	return runMigrationsWithDBAndDir(sqlDB, migrationsDir)
-}
-
-// runMigrationsWithDBAndDir applies database migrations using an existing database connection and migrations directory
-func runMigrationsWithDBAndDir(sqlDB *sql.DB, migrationsDir string) error {
+func runMigrations(sqlDB *sql.DB) error {
 	var err error
 
 	// Check if subscriptions table exists and its structure
@@ -178,26 +158,25 @@ func runMigrationsWithDBAndDir(sqlDB *sql.DB, migrationsDir string) error {
 		_, _ = sqlDB.Exec(`DROP TABLE IF EXISTS schema_migrations`)
 		_, _ = sqlDB.Exec(`CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, dirty INTEGER)`)
 		_, _ = sqlDB.Exec(`INSERT INTO schema_migrations (version, dirty) VALUES (3, 0)`)
-		// logger.Info("Referral columns already exist, skipping migration 003")
 		return nil
 	}
 
 	// Drop old migrations table if exists (to ensure correct schema)
 	_, _ = sqlDB.Exec(`DROP TABLE IF EXISTS schema_migrations`)
 
-	// Create migrations table for golang-migrate (will be created automatically by ensureVersionTable)
+	// Create embedded source driver from migrationFiles
+	sourceDriver, err := iofs.New(migrationFiles, "migrations")
+	if err != nil {
+		return fmt.Errorf("failed to create embedded migration source: %w", err)
+	}
 
-	// Run all other migrations
+	// Create SQLite driver
 	driver, err := sqlite.WithInstance(sqlDB, &sqlite.Config{})
 	if err != nil {
 		return fmt.Errorf("failed to create migrate driver: %w", err)
 	}
 
-	m, err := migrate.NewWithDatabaseInstance(
-		"file://"+migrationsDir,
-		"sqlite",
-		driver,
-	)
+	m, err := migrate.NewWithInstance("iofs", sourceDriver, "sqlite", driver)
 	if err != nil {
 		return fmt.Errorf("failed to create migration instance: %w", err)
 	}
@@ -213,19 +192,7 @@ func runMigrationsWithDBAndDir(sqlDB *sql.DB, migrationsDir string) error {
 	versionAfter, _, _ := m.Version()
 
 	if versionAfter > versionBefore {
-		// Read migration files that were applied
-		migrationFiles, _ := filepath.Glob(filepath.Join(migrationsDir, "*.up.sql"))
-		var appliedMigrations []string
-		for _, f := range migrationFiles {
-			name := filepath.Base(f)
-			var num int
-			_, _ = fmt.Sscanf(name, "%d_", &num)
-			if uint(num) > versionBefore && uint(num) <= versionAfter {
-				appliedMigrations = append(appliedMigrations, name)
-			}
-		}
 		logger.Info("Database migrations applied",
-			zap.Strings("migrations", appliedMigrations),
 			zap.Uint("version", versionAfter))
 	} else {
 		logger.Info("Database migrations up to date",
@@ -262,7 +229,7 @@ func NewService(dbPath string) (*Service, error) {
 	}
 
 	// Run database migrations using golang-migrate
-	if err := runMigrationsWithDB(sqlDB); err != nil {
+	if err := runMigrations(sqlDB); err != nil {
 		return nil, fmt.Errorf("failed to run migrations: %w", err)
 	}
 
