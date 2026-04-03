@@ -691,6 +691,53 @@ func TestGetClientIP_NoPort(t *testing.T) {
 	assert.Equal(t, "192.168.1.100", ip, "getClientIP() should handle address without port")
 }
 
+func TestGetClientIP_Localhost(t *testing.T) {
+	tests := []struct {
+		name     string
+		remote   string
+		forward  string
+		expected string
+	}{
+		{"localhost IPv4", "127.0.0.1:12345", "8.8.8.8", "8.8.8.8"},
+		{"localhost IPv6", "[::1]:12345", "", "::1"},
+		{"private network trusted", "192.168.1.1:12345", "10.0.0.5", "10.0.0.5"},
+		{"public IP not trusted", "8.8.8.8:12345", "1.2.3.4", "8.8.8.8"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest("GET", "/i/test", nil)
+			req.RemoteAddr = tt.remote
+			if tt.forward != "" {
+				req.Header.Set("X-Forwarded-For", tt.forward)
+			}
+
+			ip := getClientIP(req)
+			assert.Equal(t, tt.expected, ip)
+		})
+	}
+}
+
+func TestGetClientIP_EmptyXForwardedFor(t *testing.T) {
+	req := httptest.NewRequest("GET", "/i/test", nil)
+	req.RemoteAddr = "10.0.0.1:12345"
+	req.Header.Set("X-Forwarded-For", "") // Empty header
+
+	ip := getClientIP(req)
+
+	assert.Equal(t, "10.0.0.1", ip, "Should fall back to RemoteAddr when X-Forwarded-For is empty")
+}
+
+func TestGetClientIP_WhitespaceInXForwardedFor(t *testing.T) {
+	req := httptest.NewRequest("GET", "/i/test", nil)
+	req.RemoteAddr = "10.0.0.1:12345"
+	req.Header.Set("X-Forwarded-For", "  192.0.2.1  ,  198.51.100.1  ") // Extra whitespace
+
+	ip := getClientIP(req)
+
+	assert.Equal(t, "192.0.2.1", ip, "Should trim whitespace from IP")
+}
+
 // === Server Start/Stop tests ===
 
 func TestServer_StartAndStop(t *testing.T) {
