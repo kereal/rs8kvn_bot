@@ -47,6 +47,7 @@ type Server struct {
 	ready           bool
 	checkers        map[string]func(context.Context) ComponentHealth
 	inviteCodeRegex *regexp.Regexp
+	startTime       time.Time
 }
 
 func NewServer(addr string, db interfaces.DatabaseService, xuiClient interfaces.XUIClient, cfg *config.Config, botConfig *bot.BotConfig) *Server {
@@ -58,6 +59,7 @@ func NewServer(addr string, db interfaces.DatabaseService, xuiClient interfaces.
 		botConfig:       botConfig,
 		checkers:        make(map[string]func(context.Context) ComponentHealth),
 		inviteCodeRegex: regexp.MustCompile(`^[a-zA-Z0-9_-]+$`),
+		startTime:       time.Now(),
 	}
 }
 
@@ -147,6 +149,7 @@ type HealthResponse struct {
 	Status     string                     `json:"status"`
 	Components map[string]ComponentHealth `json:"components"`
 	Timestamp  time.Time                  `json:"timestamp"`
+	Uptime     string                     `json:"uptime"`
 }
 
 func (s *Server) checkHealth(ctx context.Context) HealthResponse {
@@ -161,6 +164,7 @@ func (s *Server) checkHealth(ctx context.Context) HealthResponse {
 		Status:     string(StatusOK),
 		Components: make(map[string]ComponentHealth),
 		Timestamp:  time.Now(),
+		Uptime:     time.Since(s.startTime).Round(time.Second).String(),
 	}
 
 	for name, checker := range checkers {
