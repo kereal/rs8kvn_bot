@@ -23,8 +23,11 @@ import (
 	"go.uber.org/zap"
 )
 
-//go:embed templates/*.html
-var templateFiles embed.FS
+//go:embed templates/*.html templates/logo.png
+var allFiles embed.FS
+
+var templateFiles = allFiles
+var staticFiles = allFiles
 
 type Status string
 
@@ -100,6 +103,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/healthz", s.handleHealthz)
 	mux.HandleFunc("/readyz", s.handleReadyz)
 	mux.HandleFunc("/i/", s.handleInvite)
+	mux.HandleFunc("/static/logo.png", s.handleLogo)
 
 	s.server = &http.Server{
 		Addr:              s.addr,
@@ -207,6 +211,20 @@ func (s *Server) writeJSON(w http.ResponseWriter, resp HealthResponse) {
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		logger.Error("Failed to encode JSON response", zap.Error(err))
 	}
+}
+
+func (s *Server) handleLogo(w http.ResponseWriter, r *http.Request) {
+	data, err := staticFiles.ReadFile("templates/logo.png")
+	if err != nil {
+		http.Error(w, "logo not found", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	if r.Method == http.MethodHead {
+		return
+	}
+	w.Write(data)
 }
 
 func (s *Server) handleInvite(w http.ResponseWriter, r *http.Request) {

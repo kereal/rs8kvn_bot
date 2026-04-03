@@ -1387,3 +1387,66 @@ func TestRenderTrialPage_XSSProtection(t *testing.T) {
 		})
 	}
 }
+
+// ==================== HandleLogo Tests ====================
+
+func TestHandleLogo_Success(t *testing.T) {
+	srv := NewServer(":8880", nil, nil, &config.Config{}, bot.NewTestBotConfig(), nil)
+
+	req := httptest.NewRequest("GET", "/static/logo.png", nil)
+	w := httptest.NewRecorder()
+
+	srv.handleLogo(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "image/png", w.Header().Get("Content-Type"))
+	assert.Equal(t, "public, max-age=86400", w.Header().Get("Cache-Control"))
+	assert.NotEmpty(t, w.Body.Bytes(), "logo body should not be empty")
+	assert.Equal(t, byte(0x89), w.Body.Bytes()[0], "PNG should start with 0x89")
+	assert.Equal(t, byte('P'), w.Body.Bytes()[1], "PNG should have 'P' as second byte")
+	assert.Equal(t, byte('N'), w.Body.Bytes()[2], "PNG should have 'N' as third byte")
+	assert.Equal(t, byte('G'), w.Body.Bytes()[3], "PNG should have 'G' as fourth byte")
+}
+
+func TestHandleLogo_CacheHeaders(t *testing.T) {
+	srv := NewServer(":8880", nil, nil, &config.Config{}, bot.NewTestBotConfig(), nil)
+
+	req := httptest.NewRequest("GET", "/static/logo.png", nil)
+	w := httptest.NewRecorder()
+
+	srv.handleLogo(w, req)
+
+	assert.Equal(t, "image/png", w.Header().Get("Content-Type"), "Content-Type should be image/png")
+	assert.Equal(t, "public, max-age=86400", w.Header().Get("Cache-Control"), "Cache-Control should be set")
+}
+
+func TestHandleLogo_HEAD(t *testing.T) {
+	srv := NewServer(":8880", nil, nil, &config.Config{}, bot.NewTestBotConfig(), nil)
+
+	req := httptest.NewRequest("HEAD", "/static/logo.png", nil)
+	w := httptest.NewRecorder()
+
+	srv.handleLogo(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "image/png", w.Header().Get("Content-Type"))
+	assert.Empty(t, w.Body.Bytes(), "HEAD should not return body")
+}
+
+func TestRenderTrialPage_TemplateRendersLogo(t *testing.T) {
+	srv := NewServer(":8880", nil, nil, &config.Config{}, bot.NewTestBotConfig(), nil)
+
+	w := httptest.NewRecorder()
+	srv.renderTrialPage(w, "sub1", "https://example.com/sub", "https://t.me/testbot?start=trial_sub1", 3)
+
+	assert.Contains(t, w.Body.String(), `/static/logo.png`, "trial page should reference logo")
+}
+
+func TestRenderErrorPage_TemplateRendersLogo(t *testing.T) {
+	srv := NewServer(":8880", nil, nil, &config.Config{}, bot.NewTestBotConfig(), nil)
+
+	w := httptest.NewRecorder()
+	srv.renderErrorPage(w, "Test error")
+
+	assert.Contains(t, w.Body.String(), `/static/logo.png`, "error page should reference logo")
+}
