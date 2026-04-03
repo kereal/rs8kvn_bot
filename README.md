@@ -583,3 +583,33 @@ See `doc/PLAN.md` for the unified development plan including:
 ### Handover
 
 See `doc/HANDOVER.md` for a session handover summary with architecture, stack, current state, and critical nuances.
+
+### Работа с ИИ-ассистентом
+
+Проект использует память Serena (`.serena/memories/`) для хранения контекста между сессиями работы с ИИ-ассистентом.
+
+**Перед началом работы:**
+1. Прочитайте `.serena/instructions.md` — инструкции для ИИ-ассистента
+2. Ознакомьтесь с `.serena/memories/project_overview.md`
+3. Проверьте `.serena/memories/roadmap.md` на актуальность
+
+**После завершения работы:**
+1. Обновите соответствующий файл в `.serena/memories/`:
+   - Добавлена новая фича → обновите `project_overview.md`
+   - Изменена архитектура → обновите `architecture.md`
+   - Изменены планы → обновите `roadmap.md`
+2. Закоммитьте изменения в памяти: `git add .serena/memories/`
+3. Отправьте на GitHub: `git push origin dev`
+
+**Структура памяти:**
+```
+.serena/memories/
+├── instructions.md      # Инструкции для ИИ (читать первым)
+├── project_overview.md  # Общая информация о проекте
+├── architecture.md      # Архитектурные решения
+├── roadmap.md           # Планы развития
+├── code_style.md        # Стиль кода
+└── test-info.md         # Информация о тестах
+```
+
+См. `.serena/instructions.md` для полного списка правил работы с ИИ-ассистентом.
