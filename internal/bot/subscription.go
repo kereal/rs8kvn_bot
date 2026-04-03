@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"rs8kvn_bot/internal/config"
 	"rs8kvn_bot/internal/database"
 	"rs8kvn_bot/internal/logger"
 	"rs8kvn_bot/internal/utils"
@@ -136,10 +137,10 @@ func (h *Handler) handleMySubscription(ctx context.Context, chatID int64, userna
 	// Format dates
 	createdAt := formatDateRu(sub.CreatedAt)
 
-	// Calculate traffic reset: if ExpiryTime is set, use it; otherwise use CreatedAt + 30 days
+	// Calculate traffic reset: if ExpiryTime is set, use it; otherwise use CreatedAt + reset days
 	var resetTime time.Time
 	if sub.ExpiryTime.IsZero() {
-		resetTime = sub.CreatedAt.AddDate(0, 0, 30)
+		resetTime = sub.CreatedAt.AddDate(0, 0, config.SubscriptionResetDay)
 	} else {
 		resetTime = sub.ExpiryTime
 	}
