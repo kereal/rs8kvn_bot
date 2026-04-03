@@ -255,10 +255,10 @@ Example response:
 {
   "status": "ok",
   "timestamp": "2026-03-24T12:00:00Z",
-  "uptime": "2h30m",
+  "uptime": "2h30m0s",
   "components": {
-    "database": {"status": "ok", "latency": "1.2ms"},
-    "xui": {"status": "ok", "latency": "45ms"}
+    "database": {"status": "ok"},
+    "xui": {"status": "ok"}
   }
 }
 ```
