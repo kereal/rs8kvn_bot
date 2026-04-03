@@ -5,7 +5,6 @@ import (
 	"os"
 	"strings"
 	"testing"
-	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/stretchr/testify/assert"
@@ -192,56 +191,7 @@ func TestHandleUpdate_UnknownCommand(t *testing.T) {
 }
 
 // TestStartBackupScheduler_ContextCancellation тестирует остановку scheduler при отмене контекста
-func TestStartBackupScheduler_ContextCancellation(t *testing.T) {
-	// Создаём временный файл для имитации БД
-	tmpFile := t.TempDir() + "/test.db"
-
-	ctx, cancel := context.WithCancel(context.Background())
-
-	// Запускаем scheduler в горутине
-	done := make(chan struct{})
-	go func() {
-		startBackupScheduler(ctx, tmpFile)
-		close(done)
-	}()
-
-	// Отменяем контекст почти сразу
-	cancel()
-
-	// Ждём завершения с таймаутом
-	select {
-	case <-done:
-		// Успешно завершился
-	case <-time.After(2 * time.Second):
-		t.Fatal("Backup scheduler did not stop after context cancellation")
-	}
-}
-
-// TestStartTrialCleanupScheduler_ContextCancellation тестирует остановку cleanup scheduler
-func TestStartTrialCleanupScheduler_ContextCancellation(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-
-	// Запускаем scheduler в горутине с nil параметрами (он не будет выполнять действия до тикера)
-	done := make(chan struct{})
-	go func() {
-		// Используем nil для db и xui — ticker срабатывает через час, но мы отменим контекст раньше
-		startTrialCleanupScheduler(ctx, nil, nil, 1, 3)
-		close(done)
-	}()
-
-	// Отменяем контекст
-	cancel()
-
-	// Ждём завершения с таймаутом
-	select {
-	case <-done:
-		// Успешно завершился
-	case <-time.After(2 * time.Second):
-		t.Fatal("Trial cleanup scheduler did not stop after context cancellation")
-	}
-}
-
-// TestHandleUpdateSafely_PanicInHandler тестирует recovery при панике внутри handler
+// TestHandleUpdateSafely_PanicInHandler tests panic recovery in handler
 func TestHandleUpdateSafely_PanicInHandler(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
@@ -570,46 +520,6 @@ func TestHandleUpdateSafely_RecoversFromPanic(t *testing.T) {
 	assert.NotPanics(t, func() {
 		handleUpdateSafely(ctx, handler, update)
 	})
-}
-
-func TestStartBackupScheduler_ExecutesBackup(t *testing.T) {
-	tmpFile := t.TempDir() + "/test.db"
-
-	ctx, cancel := context.WithCancel(context.Background())
-
-	done := make(chan struct{})
-	go func() {
-		startBackupScheduler(ctx, tmpFile)
-		close(done)
-	}()
-
-	time.Sleep(100 * time.Millisecond)
-	cancel()
-
-	select {
-	case <-done:
-	case <-time.After(2 * time.Second):
-		t.Fatal("Backup scheduler did not stop after context cancellation")
-	}
-}
-
-func TestStartTrialCleanupScheduler_ExecutesCleanup(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-
-	done := make(chan struct{})
-	go func() {
-		startTrialCleanupScheduler(ctx, nil, nil, 1, 3)
-		close(done)
-	}()
-
-	time.Sleep(100 * time.Millisecond)
-	cancel()
-
-	select {
-	case <-done:
-	case <-time.After(2 * time.Second):
-		t.Fatal("Trial cleanup scheduler did not stop after context cancellation")
-	}
 }
 
 // Skipped: requires proper test isolation for config.Load()

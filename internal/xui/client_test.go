@@ -379,24 +379,6 @@ func TestGetExternalURL(t *testing.T) {
 	assert.NotEmpty(t, result, "GetExternalURL() should return non-empty string")
 }
 
-func TestContainsSuccess(t *testing.T) {
-	tests := []struct {
-		msg      string
-		expected bool
-	}{
-		{"Client added successfully", true},
-		{"Successfully created", true},
-		{"Operation success", true},
-		{"Error occurred", false},
-		{"", false},
-	}
-
-	for _, tt := range tests {
-		result := containsSuccessKeywords(tt.msg)
-		assert.Equal(t, tt.expected, result, "containsSuccessKeywords(%q)", tt.msg)
-	}
-}
-
 func TestRetryWithBackoff_Success(t *testing.T) {
 	callCount := 0
 	ctx := context.Background()
@@ -993,29 +975,6 @@ func TestGetClientTraffic_RequestCreationError(t *testing.T) {
 	_, err = client.GetClientTraffic(ctx, "testuser")
 	require.Error(t, err, "GetClientTraffic() should return error with cancelled context")
 	assert.Contains(t, strings.ToLower(err.Error()), "cancel", "Error should indicate cancellation")
-}
-
-func TestContainsSuccessKeywords(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    string
-		expected bool
-	}{
-		{"success keyword", "Operation completed successfully", true},
-		{"added keyword", "Client has been added", true},
-		{"success lowercase", "success", true},
-		{"case insensitive", "SUCCESSFULLY", true},
-		{"failure keyword", "Operation failed", false},
-		{"empty", "", false},
-		{"no keywords", "Some random text", false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := containsSuccessKeywords(tt.input)
-			assert.Equal(t, tt.expected, result, "containsSuccessKeywords(%q)", tt.input)
-		})
-	}
 }
 
 func TestGetSubscriptionLink_WithCustomPath(t *testing.T) {

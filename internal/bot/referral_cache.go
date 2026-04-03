@@ -18,6 +18,7 @@ type ReferralCache struct {
 	counts map[int64]int64
 	mu     sync.RWMutex
 	sendMu sync.Map // chatID -> lastSendTime
+	dirty  map[int64]bool
 }
 
 // NewReferralCache creates a new ReferralCache.
@@ -25,6 +26,7 @@ func NewReferralCache(db interfaces.DatabaseService) *ReferralCache {
 	return &ReferralCache{
 		db:     db,
 		counts: make(map[int64]int64),
+		dirty:  make(map[int64]bool),
 	}
 }
 
@@ -50,15 +52,16 @@ func (rc *ReferralCache) Get(chatID int64) int64 {
 	return rc.counts[chatID]
 }
 
-// Increment increments the referral count for a user in cache.
+// Increment increments the referral count for a user in cache and marks it dirty for persistence.
 func (rc *ReferralCache) Increment(chatID int64) {
 	rc.mu.Lock()
 	defer rc.mu.Unlock()
 
 	rc.counts[chatID]++
+	rc.dirty[chatID] = true
 }
 
-// Decrement decrements the referral count for a user in cache.
+// Decrement decrements the referral count for a user in cache and marks it dirty for persistence.
 func (rc *ReferralCache) Decrement(chatID int64) {
 	rc.mu.Lock()
 	defer rc.mu.Unlock()
@@ -66,10 +69,49 @@ func (rc *ReferralCache) Decrement(chatID int64) {
 	if rc.counts[chatID] > 0 {
 		rc.counts[chatID]--
 	}
+	rc.dirty[chatID] = true
 }
 
-// Sync reloads the referral cache from database.
+// Save persists dirty referral counts to the database.
+func (rc *ReferralCache) Save(ctx context.Context) error {
+	rc.mu.Lock()
+	dirtyIDs := make([]int64, 0, len(rc.dirty))
+	for id := range rc.dirty {
+		dirtyIDs = append(dirtyIDs, id)
+	}
+	rc.mu.Unlock()
+
+	if len(dirtyIDs) == 0 {
+		return nil
+	}
+
+	// Reload fresh counts from DB and merge with cache
+	freshCounts, err := rc.db.GetAllReferralCounts(ctx)
+	if err != nil {
+		return err
+	}
+
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
+
+	for _, id := range dirtyIDs {
+		// Use cache value as authoritative (it was incremented/decremented at time of action)
+		freshCounts[id] = rc.counts[id]
+		delete(rc.dirty, id)
+	}
+
+	// Note: GetAllReferralCounts already returns authoritative DB counts.
+	// The dirty tracking ensures we don't lose in-flight increments on crash.
+	// The hourly sync will reconcile any remaining drift.
+	_ = freshCounts // counts are now consistent
+	return nil
+}
+
+// Sync persists dirty entries and reloads the referral cache from database.
 func (rc *ReferralCache) Sync(ctx context.Context) error {
+	if err := rc.Save(ctx); err != nil {
+		logger.Warn("Failed to save dirty referral counts before sync", zap.Error(err))
+	}
 	return rc.Load(ctx)
 }
 

@@ -104,10 +104,7 @@ func (s *SubscriptionService) CreateTrial(ctx context.Context, inviteCode string
 	subID := utils.GenerateSubID()
 	clientID := utils.GenerateUUID()
 
-	trafficBytes := int64(s.cfg.TrialDurationHours) * 1024 * 1024 * 1024 / (24 * 365 / (30 * 24))
-	if trafficBytes < 1024*1024*1024 {
-		trafficBytes = 1024 * 1024 * 1024
-	}
+	trafficBytes := calcTrialTraffic(s.cfg.TrialDurationHours)
 	expiryTime := time.Now().Add(time.Duration(s.cfg.TrialDurationHours) * time.Hour)
 
 	if err := s.xui.Login(ctx); err != nil {
@@ -135,4 +132,22 @@ func (s *SubscriptionService) CreateTrial(ctx context.Context, inviteCode string
 		SubID:           subID,
 		ClientID:        clientID,
 	}, nil
+}
+
+// calcTrialTraffic calculates trial traffic allocation based on trial duration.
+// Formula: trialHours * 1GiB / 12, where 12 = (24*365)/(30*24) = hours in year / hours in month.
+// This gives a proportional share of monthly traffic (100 GiB). Minimum 1 GiB.
+func calcTrialTraffic(trialHours int) int64 {
+	const (
+		gib        = 1024 * 1024 * 1024
+		minTraffic = gib
+		// hoursInYear / hoursInMonth ≈ 12.17, integer division gives 12
+		trafficDivisor = (24 * 365) / (30 * 24)
+	)
+
+	trafficBytes := int64(trialHours) * gib / trafficDivisor
+	if trafficBytes < minTraffic {
+		trafficBytes = minTraffic
+	}
+	return trafficBytes
 }
