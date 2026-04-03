@@ -1,7 +1,8 @@
 # Дорожная карта — rs8kvn_bot
 
 **Создано:** 2026-04-02  
-**Версия:** v2.1.0  
+**Обновлено:** 2026-04-04  
+**Версия:** v2.2.0  
 **Масштаб:** 10 клиентов → 100 клиентов
 
 ---
@@ -10,8 +11,29 @@
 
 - **Активные пользователи:** ~10 клиентов
 - **Покрытие тестами:** ~75%
-- **Архитектура:** 3x-ui один сервер (ограничение выявлено)
+- **Архитектура:** 3x-ui один сервер
 - **Приоритет:** Монетизация и рост
+
+## Выполненные улучшения (P0-P2)
+
+### P0 — Критические
+- ✅ Удалён deprecated глобальный DB API (~350 строк)
+- ✅ Бэкапы с WAL checkpoint перед копированием
+- ✅ Trial creation вынесен в service layer
+
+### P1 — Высокий приоритет
+- ✅ Handler разделён на ReferralCache, MessageSender, KeyboardBuilder
+- ✅ Миграции embedded через go:embed
+- ✅ HTML шаблоны в отдельных файлах (html/template, XSS prevention)
+- ✅ DatabaseService interface разделён (SubscriptionRepository, TrialRepository, InviteRepository)
+
+### P2 — Средний приоритет
+- ✅ Schedulers вынесены в отдельный пакет (scheduler/)
+- ✅ calcTrialTraffic() — именованная функция с константами
+- ✅ Удалён мёртвый код (maskAPIKey, containsSuccessKeywords, RateLimiter wrapper)
+- ✅ DONATE_CARD_NUMBER и DONATE_URL — конфигурируемы через env vars
+- ✅ ReferralCache с dirty tracking для crash-consistency
+- ✅ Logo вынесен в PNG файл, served как static file
 
 ---
 
