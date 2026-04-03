@@ -1,8 +1,19 @@
 # rs8kvn_bot - Telegram Bot for 3x-ui VLESS Subscription Distribution
 
-Telegram bot for distributing VLESS+Reality+Vision proxy subscriptions from 3x-ui panel.
+[![GitHub release](https://img.shields.io/github/v/release/kereal/rs8kvn_bot?logo=github)](https://github.com/kereal/rs8kvn_bot/releases)
+[![GitHub Release Date](https://img.shields.io/github/release-date/kereal/rs8kvn_bot?logo=github)](https://github.com/kereal/rs8kvn_bot/releases)
+[![GitHub commits](https://img.shields.io/github/commits-since/kereal/rs8kvn_bot/latest?logo=github)](https://github.com/kereal/rs8kvn_bot/commits/dev)
+[![GitHub last commit](https://img.shields.io/github/last-commit/kereal/rs8kvn_bot?logo=github)](https://github.com/kereal/rs8kvn_bot/commits/dev)
+[![Coverage](https://img.shields.io/badge/coverage-~75%25-green)]()
+[![Tests](https://img.shields.io/badge/tests-passing-brightgreen)]()
+[![Go](https://img.shields.io/badge/Go-1.24%2B-00ADD8?logo=go)](https://go.dev/)
+[![Go Report Card](https://goreportcard.com/badge/github.com/kereal/rs8kvn_bot)](https://goreportcard.com/report/github.com/kereal/rs8kvn_bot)
+[![GitHub stars](https://img.shields.io/github/stars/kereal/rs8kvn_bot?style=flat&logo=github)](https://github.com/kereal/rs8kvn_bot/stargazers)
+[![GitHub issues](https://img.shields.io/github/issues/kereal/rs8kvn_bot?logo=github)](https://github.com/kereal/rs8kvn_bot/issues)
+[![Code size](https://img.shields.io/github/languages/code-size/kereal/rs8kvn_bot?logo=github)](https://github.com/kereal/rs8kvn_bot)
+[![License](https://img.shields.io/github/license/kereal/rs8kvn_bot)](LICENSE)
 
-**Version:** v2.1.0 | **Coverage:** ~75% | **License:** MIT
+Telegram bot for distributing VLESS+Reality+Vision proxy subscriptions from 3x-ui panel.
 
 ## Features
 
