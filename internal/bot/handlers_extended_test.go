@@ -21,7 +21,7 @@ import (
 // TestGetUsername_EdgeCases tests edge cases for username extraction
 func TestGetUsername_EdgeCases(t *testing.T) {
 	cfg := &config.Config{TelegramAdminID: 123}
-	h := &Handler{cfg: cfg, botConfig: NewTestBotConfig()}
+	h := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, config.DonateCardNumber, config.DonateURL, cfg.SiteURL)}
 
 	tests := []struct {
 		name     string
@@ -240,7 +240,7 @@ func TestIsAdmin_EdgeCases(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := &config.Config{TelegramAdminID: tt.adminID}
-			h := &Handler{cfg: cfg, botConfig: NewTestBotConfig()}
+			h := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, config.DonateCardNumber, config.DonateURL, cfg.SiteURL)}
 			result := h.isAdmin(tt.chatID)
 			assert.Equal(t, tt.expected, result)
 		})
@@ -250,7 +250,7 @@ func TestIsAdmin_EdgeCases(t *testing.T) {
 // TestGetMainMenuKeyboard_ButtonCounts tests keyboard structure
 func TestGetMainMenuKeyboard_ButtonCounts(t *testing.T) {
 	cfg := &config.Config{TelegramAdminID: 123}
-	h := &Handler{cfg: cfg, botConfig: NewTestBotConfig()}
+	h := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, config.DonateCardNumber, config.DonateURL, cfg.SiteURL)}
 
 	t.Run("keyboard without subscription has correct buttons", func(t *testing.T) {
 		keyboard := h.getMainMenuKeyboard(false)
@@ -283,7 +283,7 @@ func TestGetMainMenuKeyboard_ButtonCounts(t *testing.T) {
 // TestGetBackKeyboard_Structure tests back keyboard structure
 func TestGetBackKeyboard_Structure(t *testing.T) {
 	cfg := &config.Config{TelegramAdminID: 123}
-	h := &Handler{cfg: cfg, botConfig: NewTestBotConfig()}
+	h := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, config.DonateCardNumber, config.DonateURL, cfg.SiteURL)}
 
 	keyboard := h.getBackKeyboard()
 
@@ -298,7 +298,7 @@ func TestGetBackKeyboard_Structure(t *testing.T) {
 // TestGetDonateText_Content tests donation message content
 func TestGetDonateText_Content(t *testing.T) {
 	cfg := &config.Config{TelegramAdminID: 123, ContactUsername: "kereal"}
-	h := &Handler{cfg: cfg, botConfig: NewTestBotConfig()}
+	h := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, config.DonateCardNumber, config.DonateURL, cfg.SiteURL)}
 
 	text := h.getDonateText()
 
@@ -313,7 +313,7 @@ func TestGetDonateText_Content(t *testing.T) {
 // TestGetHelpText_EdgeCases tests help text with various traffic limits
 func TestGetHelpText_EdgeCases(t *testing.T) {
 	cfg := &config.Config{TelegramAdminID: 123}
-	h := &Handler{cfg: cfg, botConfig: NewTestBotConfig()}
+	h := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, config.DonateCardNumber, config.DonateURL, cfg.SiteURL)}
 
 	tests := []struct {
 		name            string
@@ -373,7 +373,7 @@ func TestGetHelpText_EdgeCases(t *testing.T) {
 // TestGetMainMenuContent_Scenarios tests main menu content scenarios
 func TestGetMainMenuContent_Scenarios(t *testing.T) {
 	cfg := &config.Config{TelegramAdminID: 123456}
-	h := &Handler{cfg: cfg, botConfig: NewTestBotConfig()}
+	h := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, config.DonateCardNumber, config.DonateURL, cfg.SiteURL)}
 
 	t.Run("content for user without subscription", func(t *testing.T) {
 		text, keyboard := h.getMainMenuContent("TestUser", false, 654321)
@@ -442,7 +442,7 @@ func TestGetMainMenuContent_Scenarios(t *testing.T) {
 func TestAddAdminButtons_Scenarios(t *testing.T) {
 	t.Run("adds buttons for admin", func(t *testing.T) {
 		cfg := &config.Config{TelegramAdminID: 123456}
-		h := &Handler{cfg: cfg, botConfig: NewTestBotConfig()}
+		h := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, config.DonateCardNumber, config.DonateURL, cfg.SiteURL)}
 
 		keyboard := tgbotapi.NewInlineKeyboardMarkup(
 			tgbotapi.NewInlineKeyboardRow(
@@ -458,7 +458,7 @@ func TestAddAdminButtons_Scenarios(t *testing.T) {
 
 	t.Run("does not add buttons for non-admin", func(t *testing.T) {
 		cfg := &config.Config{TelegramAdminID: 123456}
-		h := &Handler{cfg: cfg, botConfig: NewTestBotConfig()}
+		h := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, config.DonateCardNumber, config.DonateURL, cfg.SiteURL)}
 
 		keyboard := tgbotapi.NewInlineKeyboardMarkup(
 			tgbotapi.NewInlineKeyboardRow(
@@ -474,7 +474,7 @@ func TestAddAdminButtons_Scenarios(t *testing.T) {
 
 	t.Run("does not add buttons when admin ID is zero", func(t *testing.T) {
 		cfg := &config.Config{TelegramAdminID: 0}
-		h := &Handler{cfg: cfg, botConfig: NewTestBotConfig()}
+		h := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, config.DonateCardNumber, config.DonateURL, cfg.SiteURL)}
 
 		keyboard := tgbotapi.NewInlineKeyboardMarkup(
 			tgbotapi.NewInlineKeyboardRow(
@@ -664,7 +664,7 @@ func TestRateLimiter_Integration(t *testing.T) {
 // TestKeyboard_CallbackDataValidation tests callback data format
 func TestKeyboard_CallbackDataValidation(t *testing.T) {
 	cfg := &config.Config{TelegramAdminID: 123}
-	h := &Handler{cfg: cfg, botConfig: NewTestBotConfig()}
+	h := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, config.DonateCardNumber, config.DonateURL, cfg.SiteURL)}
 
 	validCallbacks := map[string]string{
 		"menu_subscription":   "subscription menu",
@@ -704,7 +704,7 @@ func TestKeyboard_CallbackDataValidation(t *testing.T) {
 // TestMessageFormat_Validation tests message format validation
 func TestMessageFormat_Validation(t *testing.T) {
 	cfg := &config.Config{TelegramAdminID: 123, TrafficLimitGB: 50}
-	h := &Handler{cfg: cfg, botConfig: NewTestBotConfig()}
+	h := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, config.DonateCardNumber, config.DonateURL, cfg.SiteURL)}
 
 	t.Run("donate text has markdown links", func(t *testing.T) {
 		text := h.getDonateText()
@@ -754,7 +754,7 @@ func TestCache_IntegrationWithHandler(t *testing.T) {
 func TestErrorHandling_Scenarios(t *testing.T) {
 	t.Run("getUsername handles all empty fields", func(t *testing.T) {
 		cfg := &config.Config{TelegramAdminID: 123, ContactUsername: "kereal"}
-		h := &Handler{cfg: cfg, botConfig: NewTestBotConfig()}
+		h := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, config.DonateCardNumber, config.DonateURL, cfg.SiteURL)}
 
 		user := &tgbotapi.User{ID: 999}
 		result := h.getUsername(user)
@@ -766,7 +766,7 @@ func TestErrorHandling_Scenarios(t *testing.T) {
 // TestGetMainMenuContent_SpecialUsernameChars tests usernames with special chars
 func TestGetMainMenuContent_SpecialUsernameChars(t *testing.T) {
 	cfg := &config.Config{TelegramAdminID: 123}
-	h := &Handler{cfg: cfg, botConfig: NewTestBotConfig()}
+	h := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, config.DonateCardNumber, config.DonateURL, cfg.SiteURL)}
 
 	specialUsernames := []string{
 		"user\nwith\nnewlines",
@@ -788,7 +788,7 @@ func TestGetMainMenuContent_SpecialUsernameChars(t *testing.T) {
 // TestHelpText_InjectionSafety tests that subscription URL is safely included
 func TestHelpText_InjectionSafety(t *testing.T) {
 	cfg := &config.Config{TelegramAdminID: 123}
-	h := &Handler{cfg: cfg, botConfig: NewTestBotConfig()}
+	h := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, config.DonateCardNumber, config.DonateURL, cfg.SiteURL)}
 
 	maliciousURLs := []string{
 		"https://example.com?hack=1&evil=2",

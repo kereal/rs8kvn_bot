@@ -234,7 +234,9 @@ func TestRenderTrialPage(t *testing.T) {
 
 	srv := NewServer(":8880", nil, nil, cfg, bot.NewTestBotConfig(), nil)
 
-	html := srv.renderTrialPage("sub123", "https://vpn.site/sub/sub123", "https://t.me/testbot?start=trial_sub123", 3)
+	w := httptest.NewRecorder()
+	srv.renderTrialPage(w, "sub123", "https://vpn.site/sub/sub123", "https://t.me/testbot?start=trial_sub123", 3)
+	html := w.Body.String()
 
 	// Check that HTML contains expected elements
 	expectedElements := []string{
@@ -259,7 +261,9 @@ func TestRenderTrialPage(t *testing.T) {
 func TestRenderErrorPage(t *testing.T) {
 	srv := NewServer(":8880", nil, nil, nil, bot.NewTestBotConfig(), nil)
 
-	html := srv.renderErrorPage("Тестовая ошибка")
+	w := httptest.NewRecorder()
+	srv.renderErrorPage(w, "Тестовая ошибка")
+	html := w.Body.String()
 
 	// Check that HTML contains error message
 	assert.Contains(t, html, "Тестовая ошибка", "renderErrorPage() should contain error message")
@@ -357,7 +361,9 @@ func TestRenderTrialPage_HappLink(t *testing.T) {
 	srv := NewServer(":8880", nil, nil, &config.Config{}, bot.NewTestBotConfig(), nil)
 
 	subURL := "https://vpn.site/sub/abc123"
-	html := srv.renderTrialPage("abc123", subURL, "https://t.me/testbot?start=trial_abc123", 3)
+	w := httptest.NewRecorder()
+	srv.renderTrialPage(w, "abc123", subURL, "https://t.me/testbot?start=trial_abc123", 3)
+	html := w.Body.String()
 
 	// Check happ:// link is generated correctly
 	expectedHappLink := "happ://add/" + subURL
@@ -1334,7 +1340,7 @@ func TestRenderTrialPage_XSSProtection(t *testing.T) {
 			telegramLink: "https://t.me/testbot?start=123",
 			checkXSS: func(t *testing.T, html string) {
 				assert.NotContains(t, html, "<script>alert('xss')</script>", "script tag should be escaped")
-				assert.Contains(t, html, "&lt;script&gt;alert(&#39;xss&#39;)&lt;/script&gt;", "script should be HTML-escaped")
+				assert.Contains(t, html, `\u003cscript\u003ealert(\u0027xss\u0027)\u003c\/script\u003e`, "script should be JS-escaped in template context")
 			},
 		},
 		{
@@ -1343,7 +1349,7 @@ func TestRenderTrialPage_XSSProtection(t *testing.T) {
 			telegramLink: "https://t.me/testbot?start=123",
 			checkXSS: func(t *testing.T, html string) {
 				assert.NotContains(t, html, `<a href="javascript:alert`, "raw javascript href should be escaped")
-				assert.Contains(t, html, `javascript:alert(&#39;xss&#39;)`, "escaped javascript should be present")
+				assert.Contains(t, html, `javascript:alert(\u0027xss\u0027)`, "javascript should be JS-escaped")
 			},
 		},
 		{
@@ -1375,8 +1381,9 @@ func TestRenderTrialPage_XSSProtection(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			html := srv.renderTrialPage("sub1", tt.subURL, tt.telegramLink, 3)
-			tt.checkXSS(t, html)
+			w := httptest.NewRecorder()
+			srv.renderTrialPage(w, "sub1", tt.subURL, tt.telegramLink, 3)
+			tt.checkXSS(t, w.Body.String())
 		})
 	}
 }
