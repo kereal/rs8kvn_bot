@@ -1,7 +1,8 @@
 # Архитектурные решения — rs8kvn_bot
 
 **Создано:** 2026-04-02  
-**Версия:** v2.1.0  
+**Обновлено:** 2026-04-04  
+**Версия:** v2.2.0  
 **Статус:** Актуально
 
 ---
@@ -27,6 +28,7 @@ VLESS/VMess Server
    - Генерация QR-кодов
    - Реферальная система
    - Админ-команды
+   - Выделенные типы: `ReferralCache`, `MessageSender`, `KeyboardBuilder`
 
 2. **3x-ui Client** (`internal/xui/client.go`)
    - HTTP API клиент
@@ -37,13 +39,23 @@ VLESS/VMess Server
 3. **Web Server** (`internal/web/web.go`)
    - Health endpoints (`/healthz`, `/readyz`)
    - Invite/Trial landing (`/i/{code}`)
+   - Static files (`/static/logo.png`)
    - IP rate limiting
    - Cookie deduplication
+   - HTML templates (embedded via go:embed, html/template для XSS prevention)
 
 4. **Database** (`internal/database/`)
    - SQLite + GORM
-   - Миграции (golang-migrate)
-   - Ежедневные бэкапы
+   - Миграции (golang-migrate, embedded via go:embed)
+   - Ежедневные бэкапы с WAL checkpoint
+
+5. **Scheduler** (`internal/scheduler/`)
+   - `BackupScheduler` — ежедневные бэкапы в 03:00
+   - `TrialCleanupScheduler` — hourly очистка просроченных trial
+
+6. **Service Layer** (`internal/service/`)
+   - `SubscriptionService` — оркестрация создания trial/подписок
+   - `CreateTrial` — создание trial через XUI + DB с rollback
 
 ---
 
