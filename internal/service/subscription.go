@@ -39,7 +39,7 @@ func (s *SubscriptionService) Create(ctx context.Context, chatID int64, username
 
 	// Calculate expiry time for auto-reset (now + reset days)
 	expiryTime := time.Now().Add(time.Duration(config.SubscriptionResetDay) * 24 * time.Hour)
-	
+
 	client, err := s.xui.AddClientWithID(ctx, s.cfg.XUIInboundID, username, clientID, subID, trafficBytes, expiryTime, config.SubscriptionResetDay)
 	if err != nil {
 		return nil, fmt.Errorf("xui add client: %w", err)
@@ -91,4 +91,48 @@ func (s *SubscriptionService) Delete(ctx context.Context, telegramID int64) erro
 	}
 
 	return nil
+}
+
+type TrialCreateResult struct {
+	Subscription    *database.Subscription
+	SubscriptionURL string
+	SubID           string
+	ClientID        string
+}
+
+func (s *SubscriptionService) CreateTrial(ctx context.Context, inviteCode string) (*TrialCreateResult, error) {
+	subID := utils.GenerateSubID()
+	clientID := utils.GenerateUUID()
+
+	trafficBytes := int64(s.cfg.TrialDurationHours) * 1024 * 1024 * 1024 / (24 * 365 / (30 * 24))
+	if trafficBytes < 1024*1024*1024 {
+		trafficBytes = 1024 * 1024 * 1024
+	}
+	expiryTime := time.Now().Add(time.Duration(s.cfg.TrialDurationHours) * time.Hour)
+
+	if err := s.xui.Login(ctx); err != nil {
+		return nil, fmt.Errorf("xui login: %w", err)
+	}
+
+	_, err := s.xui.AddClientWithID(ctx, s.cfg.XUIInboundID, "trial_"+subID, clientID, subID, trafficBytes, expiryTime, 0)
+	if err != nil {
+		return nil, fmt.Errorf("xui add client: %w", err)
+	}
+
+	subURL := s.xui.GetSubscriptionLink(s.xui.GetExternalURL(s.cfg.XUIHost), subID, s.cfg.XUISubPath)
+
+	sub, err := s.db.CreateTrialSubscription(ctx, inviteCode, subID, clientID, s.cfg.XUIInboundID, trafficBytes, expiryTime, subURL)
+	if err != nil {
+		if rollbackErr := s.xui.DeleteClient(ctx, s.cfg.XUIInboundID, clientID); rollbackErr != nil {
+			return nil, fmt.Errorf("create trial subscription: %w (rollback failed: %w)", err, rollbackErr)
+		}
+		return nil, fmt.Errorf("create trial subscription: %w", err)
+	}
+
+	return &TrialCreateResult{
+		Subscription:    sub,
+		SubscriptionURL: subURL,
+		SubID:           subID,
+		ClientID:        clientID,
+	}, nil
 }

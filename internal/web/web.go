@@ -17,8 +17,7 @@ import (
 	"rs8kvn_bot/internal/database"
 	"rs8kvn_bot/internal/interfaces"
 	"rs8kvn_bot/internal/logger"
-	"rs8kvn_bot/internal/utils"
-	"rs8kvn_bot/internal/xui"
+	"rs8kvn_bot/internal/service"
 
 	"go.uber.org/zap"
 )
@@ -42,6 +41,7 @@ type Server struct {
 	xuiClient       interfaces.XUIClient
 	cfg             *config.Config
 	botConfig       *bot.BotConfig
+	subService      *service.SubscriptionService
 	server          *http.Server
 	mu              sync.RWMutex
 	ready           bool
@@ -50,13 +50,14 @@ type Server struct {
 	startTime       time.Time
 }
 
-func NewServer(addr string, db interfaces.DatabaseService, xuiClient interfaces.XUIClient, cfg *config.Config, botConfig *bot.BotConfig) *Server {
+func NewServer(addr string, db interfaces.DatabaseService, xuiClient interfaces.XUIClient, cfg *config.Config, botConfig *bot.BotConfig, subService *service.SubscriptionService) *Server {
 	return &Server{
 		addr:            addr,
 		db:              db,
 		xuiClient:       xuiClient,
 		cfg:             cfg,
 		botConfig:       botConfig,
+		subService:      subService,
 		checkers:        make(map[string]func(context.Context) ComponentHealth),
 		inviteCodeRegex: regexp.MustCompile(`^[a-zA-Z0-9_-]+$`),
 		startTime:       time.Now(),
@@ -263,46 +264,17 @@ func (s *Server) HandleInvite(w http.ResponseWriter, r *http.Request) {
 		logger.Error("Failed to create trial request", zap.Error(err))
 	}
 
-	subID := utils.GenerateSubID()
-
-	trafficBytes := int64(s.cfg.TrialDurationHours) * 1024 * 1024 * 1024 / (24 * 365 / (30 * 24))
-	if trafficBytes < 1024*1024*1024 {
-		trafficBytes = 1024 * 1024 * 1024
-	}
-	expiryTime := time.Now().Add(time.Duration(s.cfg.TrialDurationHours) * time.Hour)
-
-	if err := s.xuiClient.Login(ctx); err != nil {
-		logger.Error("Failed to login to xui", zap.Error(err))
+	if s.subService == nil {
+		logger.Error("Subscription service not initialized")
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(s.renderErrorPage("Ошибка сервера. Попробуйте позже.")))
 		return
 	}
 
-	clientID := utils.GenerateUUID()
-	_, err = s.xuiClient.AddClientWithID(ctx, s.cfg.XUIInboundID, "trial_"+subID, clientID, subID, trafficBytes, expiryTime, 0)
+	result, err := s.subService.CreateTrial(ctx, code)
 	if err != nil {
-		logger.Error("Failed to create trial client in xui", zap.Error(err))
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(s.renderErrorPage("Ошибка создания подписки. Попробуйте позже.")))
-		return
-	}
-
-	subURL := s.xuiClient.GetSubscriptionLink(s.xuiClient.GetExternalURL(s.cfg.XUIHost), subID, s.cfg.XUISubPath)
-
-	_, err = s.db.CreateTrialSubscription(ctx, code, subID, clientID, s.cfg.XUIInboundID, trafficBytes, expiryTime, subURL)
-	if err != nil {
-		logger.Error("Failed to create trial subscription in DB", zap.Error(err))
-		// Rollback with retry to ensure client is deleted from XUI
-		rollbackErr := xui.RetryWithBackoff(ctx, config.XUIMaxRetries, config.XUIInitialRetryDelay, func() error {
-			return s.xuiClient.DeleteClient(ctx, s.cfg.XUIInboundID, clientID)
-		})
-		if rollbackErr != nil {
-			logger.Error("Failed to rollback XUI client after multiple retries — orphan client will remain",
-				zap.String("client_id", clientID),
-				zap.Error(rollbackErr))
-		}
+		logger.Error("Failed to create trial subscription", zap.Error(err))
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(s.renderErrorPage("Ошибка сервера. Попробуйте позже.")))
@@ -311,14 +283,13 @@ func (s *Server) HandleInvite(w http.ResponseWriter, r *http.Request) {
 
 	logger.Info("Trial subscription created",
 		zap.String("code", code),
-		zap.String("subscription_id", subID),
+		zap.String("subscription_id", result.SubID),
 		zap.String("ip", ip),
 		zap.Int64("referrer_tg_id", invite.ReferrerTGID))
 
-	// Устанавливаем куку на 3 часа
 	http.SetCookie(w, &http.Cookie{
 		Name:     "rs8kvn_trial_" + code,
-		Value:    subID,
+		Value:    result.SubID,
 		Path:     "/i/" + code,
 		Expires:  time.Now().Add(time.Duration(s.cfg.TrialDurationHours) * time.Hour),
 		HttpOnly: true,
@@ -328,8 +299,8 @@ func (s *Server) HandleInvite(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	telegramLink := "https://t.me/" + s.botConfig.Username + "?start=trial_" + subID
-	w.Write([]byte(s.renderTrialPage(subID, subURL, telegramLink, s.cfg.TrialDurationHours)))
+	telegramLink := "https://t.me/" + s.botConfig.Username + "?start=trial_" + result.SubID
+	w.Write([]byte(s.renderTrialPage(result.SubID, result.SubscriptionURL, telegramLink, s.cfg.TrialDurationHours)))
 }
 
 // getExistingTrialFromCookie проверяет куку и возвращает существующий trial
