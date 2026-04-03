@@ -393,6 +393,8 @@ func TestHandleBindTrial_WithReferrerNotification(t *testing.T) {
 	mockBot := testutil.NewMockBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
 
+	referrerTGID := int64(888777)
+
 	callCount := 0
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 		callCount++
@@ -408,14 +410,14 @@ func TestHandleBindTrial_WithReferrerNotification(t *testing.T) {
 			SubscriptionID: subscriptionID,
 			ClientID:       "client-123",
 			InviteCode:     "invite-code",
-			ReferredBy:     888777, // Set referrer
+			ReferredBy:     referrerTGID,
 			Status:         "active",
 		}, nil
 	}
 	mockDB.GetInviteByCodeFunc = func(ctx context.Context, code string) (*database.Invite, error) {
 		return &database.Invite{
 			Code:         code,
-			ReferrerTGID: 888777,
+			ReferrerTGID: referrerTGID,
 		}, nil
 	}
 
@@ -428,15 +430,15 @@ func TestHandleBindTrial_WithReferrerNotification(t *testing.T) {
 	messages := mockBot.GetAllSentMessages()
 	assert.GreaterOrEqual(t, len(messages), 2, "Should send at least 2 messages: user + referrer")
 
-	// Verify referrer notification
+	// Verify referrer notification (use variable instead of hardcoded)
 	referrerNotified := false
 	for _, msg := range messages {
-		if msg.ChatID == 888777 && strings.Contains(msg.Text, "активировал подписку") {
+		if msg.ChatID == referrerTGID && strings.Contains(msg.Text, "активировал подписку") {
 			referrerNotified = true
 			break
 		}
 	}
-	assert.True(t, referrerNotified, "Referrer (888777) should receive notification about activation")
+	assert.True(t, referrerNotified, "Referrer should receive notification about activation")
 }
 
 func TestHandleStart_AdminUser(t *testing.T) {
