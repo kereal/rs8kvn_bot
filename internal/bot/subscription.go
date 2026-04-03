@@ -135,7 +135,15 @@ func (h *Handler) handleMySubscription(ctx context.Context, chatID int64, userna
 
 	// Format dates
 	createdAt := formatDateRu(sub.CreatedAt)
-	daysUntilTrafficReset := daysUntilReset(time.Now(), sub.CreatedAt)
+
+	// Calculate traffic reset: if ExpiryTime is set, use it; otherwise use CreatedAt + 30 days
+	var resetTime time.Time
+	if sub.ExpiryTime.IsZero() {
+		resetTime = sub.CreatedAt.AddDate(0, 0, 30)
+	} else {
+		resetTime = sub.ExpiryTime
+	}
+	daysUntilTrafficReset := daysUntilReset(time.Now(), resetTime)
 
 	// Build reset info string
 	var resetInfo string
