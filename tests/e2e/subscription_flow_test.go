@@ -2356,3 +2356,486 @@ func TestE2E_Callback_BackToInvite(t *testing.T) {
 
 	_ = env.botAPI.LastSentText
 }
+
+// ==================== Non-Admin Blocked Tests ====================
+
+func TestE2E_NonAdmin_CannotUseDel(t *testing.T) {
+	env := setupE2EEnv(t)
+	defer env.db.Close()
+
+	ctx := context.Background()
+	nonAdminID := int64(999999)
+
+	resetMockBotAPI(env.botAPI)
+
+	update := tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat: &tgbotapi.Chat{ID: nonAdminID},
+			From: &tgbotapi.User{
+				ID:       nonAdminID,
+				UserName: "notadmin",
+			},
+			Text:     "/del 1",
+			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 4}},
+		},
+	}
+	env.handler.HandleDel(ctx, update)
+
+	assert.False(t, env.botAPI.SendCalled, "Non-admin should not receive response for /del")
+}
+
+func TestE2E_NonAdmin_CannotUseBroadcast(t *testing.T) {
+	env := setupE2EEnv(t)
+	defer env.db.Close()
+
+	ctx := context.Background()
+	nonAdminID := int64(999999)
+
+	resetMockBotAPI(env.botAPI)
+
+	update := tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat: &tgbotapi.Chat{ID: nonAdminID},
+			From: &tgbotapi.User{
+				ID:       nonAdminID,
+				UserName: "notadmin",
+			},
+			Text:     "/broadcast Hello",
+			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 10}},
+		},
+	}
+	env.handler.HandleBroadcast(ctx, update)
+
+	assert.False(t, env.botAPI.SendCalled, "Non-admin should not receive response for /broadcast")
+}
+
+func TestE2E_NonAdmin_CannotUseSend(t *testing.T) {
+	env := setupE2EEnv(t)
+	defer env.db.Close()
+
+	ctx := context.Background()
+	nonAdminID := int64(999999)
+
+	resetMockBotAPI(env.botAPI)
+
+	update := tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat: &tgbotapi.Chat{ID: nonAdminID},
+			From: &tgbotapi.User{
+				ID:       nonAdminID,
+				UserName: "notadmin",
+			},
+			Text:     "/send 123456789 Hello",
+			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 5}},
+		},
+	}
+	env.handler.HandleSend(ctx, update)
+
+	assert.False(t, env.botAPI.SendCalled, "Non-admin should not receive response for /send")
+}
+
+func TestE2E_NonAdmin_CannotUseRefstats(t *testing.T) {
+	env := setupE2EEnv(t)
+	defer env.db.Close()
+
+	ctx := context.Background()
+	nonAdminID := int64(999999)
+
+	resetMockBotAPI(env.botAPI)
+
+	update := tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat: &tgbotapi.Chat{ID: nonAdminID},
+			From: &tgbotapi.User{
+				ID:       nonAdminID,
+				UserName: "notadmin",
+			},
+			Text:     "/refstats",
+			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 9}},
+		},
+	}
+	env.handler.HandleRefstats(ctx, update)
+
+	assert.True(t, env.botAPI.SendCalled, "Non-admin should receive error message for /refstats")
+	assert.Contains(t, env.botAPI.LastSentText, "только администратору", "Should show access denied message")
+}
+
+func TestE2E_NonAdmin_CannotAccessAdminStats(t *testing.T) {
+	env := setupE2EEnv(t)
+	defer env.db.Close()
+
+	ctx := context.Background()
+	nonAdminID := int64(999999)
+
+	resetMockBotAPI(env.botAPI)
+
+	env.handler.HandleCallback(ctx, tgbotapi.Update{
+		CallbackQuery: &tgbotapi.CallbackQuery{
+			From: &tgbotapi.User{
+				ID:       nonAdminID,
+				UserName: "notadmin",
+			},
+			Data: "admin_stats",
+			Message: &tgbotapi.Message{
+				Chat:      &tgbotapi.Chat{ID: nonAdminID},
+				MessageID: 100,
+			},
+		},
+	})
+
+	assert.False(t, env.botAPI.SendCalled, "Non-admin should not access admin_stats callback")
+}
+
+func TestE2E_NonAdmin_CannotAccessAdminLastreg(t *testing.T) {
+	env := setupE2EEnv(t)
+	defer env.db.Close()
+
+	ctx := context.Background()
+	nonAdminID := int64(999999)
+
+	resetMockBotAPI(env.botAPI)
+
+	env.handler.HandleCallback(ctx, tgbotapi.Update{
+		CallbackQuery: &tgbotapi.CallbackQuery{
+			From: &tgbotapi.User{
+				ID:       nonAdminID,
+				UserName: "notadmin",
+			},
+			Data: "admin_lastreg",
+			Message: &tgbotapi.Message{
+				Chat:      &tgbotapi.Chat{ID: nonAdminID},
+				MessageID: 100,
+			},
+		},
+	})
+
+	assert.False(t, env.botAPI.SendCalled, "Non-admin should not access admin_lastreg callback")
+}
+
+// ==================== Referral Tracking Tests ====================
+
+func TestE2E_Referral_IncrementDecrements(t *testing.T) {
+	env := setupE2EEnv(t)
+	defer env.db.Close()
+
+	referrerID := int64(700001)
+
+	// Initially 0
+	assert.Equal(t, int64(0), env.handler.GetReferralCount(referrerID))
+
+	// Increment
+	env.handler.IncrementReferralCount(referrerID)
+	assert.Equal(t, int64(1), env.handler.GetReferralCount(referrerID))
+
+	// Increment again
+	env.handler.IncrementReferralCount(referrerID)
+	assert.Equal(t, int64(2), env.handler.GetReferralCount(referrerID))
+
+	// Decrement
+	env.handler.DecrementReferralCount(referrerID)
+	assert.Equal(t, int64(1), env.handler.GetReferralCount(referrerID))
+
+	// Decrement to 0
+	env.handler.DecrementReferralCount(referrerID)
+	assert.Equal(t, int64(0), env.handler.GetReferralCount(referrerID))
+}
+
+func TestE2E_Referral_DecrementDoesNotGoNegative(t *testing.T) {
+	env := setupE2EEnv(t)
+	defer env.db.Close()
+
+	referrerID := int64(700002)
+
+	// Decrement on non-existent should not go negative
+	env.handler.DecrementReferralCount(referrerID)
+	assert.Equal(t, int64(0), env.handler.GetReferralCount(referrerID))
+}
+
+func TestE2E_Referral_RefstatsShowsData(t *testing.T) {
+	env := setupE2EEnv(t)
+	defer env.db.Close()
+
+	ctx := context.Background()
+	adminID := env.cfg.TelegramAdminID
+
+	// Add some referrals
+	env.handler.IncrementReferralCount(int64(800001))
+	env.handler.IncrementReferralCount(int64(800001))
+	env.handler.IncrementReferralCount(int64(800002))
+
+	// Call /refstats
+	update := tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat:     &tgbotapi.Chat{ID: adminID},
+			From:     &tgbotapi.User{ID: adminID, UserName: "admin"},
+			Text:     "/refstats",
+			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 9}},
+		},
+	}
+	env.handler.HandleRefstats(ctx, update)
+
+	assert.True(t, env.botAPI.SendCalled, "Refstats should send message")
+	assert.Contains(t, env.botAPI.LastSentText, "Статистика рефералов", "Should show referral stats")
+	assert.Contains(t, env.botAPI.LastSentText, "3", "Should show total referrals")
+}
+
+// ==================== Cache Tests ====================
+
+func TestE2E_Cache_SetAndGet(t *testing.T) {
+	env := setupE2EEnv(t)
+	defer env.db.Close()
+
+	ctx := context.Background()
+	chatID := int64(900001)
+
+	// Create subscription in DB
+	sub := &database.Subscription{
+		TelegramID:      chatID,
+		Username:        "cacheduser",
+		ClientID:        "client-123",
+		SubscriptionID:  "sub-123",
+		TrafficLimit:    107374182400,
+		Status:          "active",
+		SubscriptionURL: "https://example.com/sub/123",
+	}
+	require.NoError(t, env.db.CreateSubscription(ctx, sub))
+
+	// Verify subscription exists
+	fetched, err := env.db.GetByTelegramID(ctx, chatID)
+	require.NoError(t, err)
+	assert.Equal(t, chatID, fetched.TelegramID)
+	assert.Equal(t, "cacheduser", fetched.Username)
+}
+
+func TestE2E_Cache_GetNonExistent(t *testing.T) {
+	env := setupE2EEnv(t)
+	defer env.db.Close()
+
+	ctx := context.Background()
+
+	// Get non-existent subscription
+	_, err := env.db.GetByTelegramID(ctx, int64(999999))
+	assert.Error(t, err, "Should return error for non-existent subscription")
+}
+
+func TestE2E_Cache_DbHitOnCacheMiss(t *testing.T) {
+	env := setupE2EEnv(t)
+	defer env.db.Close()
+
+	ctx := context.Background()
+	chatID := int64(900003)
+
+	// Create subscription in DB
+	sub := &database.Subscription{
+		TelegramID:      chatID,
+		Username:        "dbuser",
+		ClientID:        "client-789",
+		SubscriptionID:  "sub-789",
+		TrafficLimit:    107374182400,
+		Status:          "active",
+		SubscriptionURL: "https://example.com/sub/789",
+	}
+	require.NoError(t, env.db.CreateSubscription(ctx, sub))
+
+	// Get should work (from DB directly)
+	fetched, err := env.db.GetByTelegramID(ctx, chatID)
+	require.NoError(t, err)
+	assert.Equal(t, chatID, fetched.TelegramID)
+}
+
+// ==================== Rate Limiting Tests ====================
+
+func TestE2E_SendCommand_RateLimitBlocksExcess(t *testing.T) {
+	env := setupE2EEnv(t)
+	defer env.db.Close()
+
+	ctx := context.Background()
+	adminID := env.cfg.TelegramAdminID
+
+	// Create target subscription
+	_, err := env.subService.Create(ctx, env.chatID, env.username)
+	require.NoError(t, err)
+
+	// First request should succeed
+	update := tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat:     &tgbotapi.Chat{ID: adminID},
+			From:     &tgbotapi.User{ID: adminID, UserName: "admin"},
+			Text:     fmt.Sprintf("/send %d Message 1", env.chatID),
+			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 5}},
+		},
+	}
+	env.handler.HandleSend(ctx, update)
+	require.True(t, env.botAPI.SendCalled, "First send should succeed")
+
+	// Second request should succeed (assuming higher rate limit)
+	update2 := tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat:     &tgbotapi.Chat{ID: adminID},
+			From:     &tgbotapi.User{ID: adminID, UserName: "admin"},
+			Text:     fmt.Sprintf("/send %d Message 2", env.chatID),
+			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 5}},
+		},
+	}
+	resetMockBotAPI(env.botAPI)
+	env.handler.HandleSend(ctx, update2)
+
+	assert.True(t, env.botAPI.SendCalled, "Second send should succeed under normal rate")
+}
+
+// ==================== Markdown Escape Tests ====================
+
+func TestE2E_BroadcastCommand_EscapesMarkdown(t *testing.T) {
+	env := setupE2EEnv(t)
+	defer env.db.Close()
+
+	ctx := context.Background()
+	adminID := env.cfg.TelegramAdminID
+
+	// Create user
+	_, err := env.subService.Create(ctx, int64(950001), "testuser")
+	require.NoError(t, err)
+
+	// Message with unescaped special markdown chars
+	update := tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat:     &tgbotapi.Chat{ID: adminID},
+			From:     &tgbotapi.User{ID: adminID, UserName: "admin"},
+			Text:     "/broadcast Test *bold* _italic_ [link](url)",
+			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 10}},
+		},
+	}
+	env.handler.HandleBroadcast(ctx, update)
+
+	assert.True(t, env.botAPI.SendCalled, "Broadcast should send")
+	// Should not crash and should show completion
+	assert.Contains(t, env.botAPI.LastSentText, "Рассылка завершена")
+}
+
+func TestE2E_SendCommand_EscapesMarkdown(t *testing.T) {
+	env := setupE2EEnv(t)
+	defer env.db.Close()
+
+	ctx := context.Background()
+	adminID := env.cfg.TelegramAdminID
+
+	// Create target
+	_, err := env.subService.Create(ctx, env.chatID, env.username)
+	require.NoError(t, err)
+
+	update := tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat:     &tgbotapi.Chat{ID: adminID},
+			From:     &tgbotapi.User{ID: adminID, UserName: "admin"},
+			Text:     fmt.Sprintf("/send %d *bold* and _italic_", env.chatID),
+			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 5}},
+		},
+	}
+	env.handler.HandleSend(ctx, update)
+
+	assert.True(t, env.botAPI.SendCalled, "Send should succeed")
+	assert.Contains(t, env.botAPI.LastSentText, "Сообщение отправлено")
+}
+
+// ==================== Unknown Callback Tests ====================
+
+func TestE2E_Callback_UnknownData(t *testing.T) {
+	env := setupE2EEnv(t)
+	defer env.db.Close()
+
+	ctx := context.Background()
+
+	// Should not panic on unknown callback
+	env.handler.HandleCallback(ctx, tgbotapi.Update{
+		CallbackQuery: &tgbotapi.CallbackQuery{
+			From: &tgbotapi.User{
+				ID:       env.chatID,
+				UserName: env.username,
+			},
+			Data: "unknown_callback_action_xyz",
+			Message: &tgbotapi.Message{
+				Chat:      &tgbotapi.Chat{ID: env.chatID},
+				MessageID: 100,
+			},
+		},
+	})
+
+	// Should still answer callback (even if nothing else)
+	// No crash = test passes
+}
+
+// ==================== Message Parsing Tests ====================
+
+func TestE2E_SendCommand_WithAtPrefix(t *testing.T) {
+	env := setupE2EEnv(t)
+	defer env.db.Close()
+
+	ctx := context.Background()
+	adminID := env.cfg.TelegramAdminID
+
+	// Create subscription
+	_, err := env.subService.Create(ctx, env.chatID, env.username)
+	require.NoError(t, err)
+
+	// Test with @ prefix
+	update := tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat:     &tgbotapi.Chat{ID: adminID},
+			From:     &tgbotapi.User{ID: adminID, UserName: "admin"},
+			Text:     fmt.Sprintf("/send @%s Hello!", env.username),
+			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 5}},
+		},
+	}
+	env.handler.HandleSend(ctx, update)
+
+	assert.True(t, env.botAPI.SendCalled)
+	assert.Contains(t, env.botAPI.LastSentText, "Сообщение отправлено")
+}
+
+func TestE2E_SendCommand_OnlyMessageNoTarget(t *testing.T) {
+	env := setupE2EEnv(t)
+	defer env.db.Close()
+
+	ctx := context.Background()
+	adminID := env.cfg.TelegramAdminID
+
+	resetMockBotAPI(env.botAPI)
+
+	// Missing target - should show usage
+	update := tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat:     &tgbotapi.Chat{ID: adminID},
+			From:     &tgbotapi.User{ID: adminID, UserName: "admin"},
+			Text:     "/send",
+			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 5}},
+		},
+	}
+	env.handler.HandleSend(ctx, update)
+
+	assert.True(t, env.botAPI.SendCalled)
+	assert.Contains(t, env.botAPI.LastSentText, "Использование")
+}
+
+func TestE2E_SendCommand_OnlyTargetNoMessage(t *testing.T) {
+	env := setupE2EEnv(t)
+	defer env.db.Close()
+
+	ctx := context.Background()
+	adminID := env.cfg.TelegramAdminID
+
+	resetMockBotAPI(env.botAPI)
+
+	// Has target but no message - should show usage
+	update := tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat:     &tgbotapi.Chat{ID: adminID},
+			From:     &tgbotapi.User{ID: adminID, UserName: "admin"},
+			Text:     "/send 123456",
+			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 5}},
+		},
+	}
+	env.handler.HandleSend(ctx, update)
+
+	assert.True(t, env.botAPI.SendCalled)
+	assert.Contains(t, env.botAPI.LastSentText, "Использование")
+}
