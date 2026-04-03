@@ -130,12 +130,12 @@ func (h *Handler) handleMySubscription(ctx context.Context, chatID int64, userna
 	}
 
 	// Format traffic info
-	trafficInfo := fmt.Sprintf("%.2f из %d ГБ (%.0f%%)", trafficUsedGB, h.cfg.TrafficLimitGB, percentage)
+	trafficInfo := fmt.Sprintf("%.2f из %d Гб (%.0f%%)", trafficUsedGB, h.cfg.TrafficLimitGB, percentage)
 	progressBar := generateProgressBar(trafficUsedGB, trafficLimitGB)
 
 	// Format dates
 	createdAt := formatDateRu(sub.CreatedAt)
-	daysUntilTrafficReset := daysUntilReset(time.Now(), sub.ExpiryTime)
+	daysUntilTrafficReset := daysUntilReset(time.Now(), sub.CreatedAt)
 
 	// Build reset info string
 	var resetInfo string
