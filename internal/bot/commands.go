@@ -104,6 +104,17 @@ func (h *Handler) handleBindTrial(ctx context.Context, chatID int64, username, s
 			h.SendMessage(ctx, h.cfg.TelegramAdminID, fmt.Sprintf("🔔 Новый пользователь активировал подписку по реферальной ссылке!\n\n- Username: @%s\n- Telegram ID: %d\n- Пригласил: %d", username, chatID, invite.ReferrerTGID))
 		}
 	}
+
+	// Notify referrer about new referral activation
+	if sub.ReferredBy > 0 {
+		referrerMsg := fmt.Sprintf("🎉 По вашей ссылке новый пользователь @%s активировал подписку!", username)
+		msg := tgbotapi.NewMessage(sub.ReferredBy, referrerMsg)
+		if err := h.sendWithError(ctx, msg); err != nil {
+			logger.Warn("Failed to notify referrer", zap.Int64("referrer_id", sub.ReferredBy), zap.Error(err))
+		} else {
+			logger.Info("Referrer notified", zap.Int64("referrer_id", sub.ReferredBy))
+		}
+	}
 }
 
 func (h *Handler) HandleInvite(ctx context.Context, update tgbotapi.Update) {

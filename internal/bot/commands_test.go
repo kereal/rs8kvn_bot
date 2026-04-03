@@ -407,6 +407,7 @@ func TestHandleBindTrial_WithReferrerNotification(t *testing.T) {
 			SubscriptionID: subscriptionID,
 			ClientID:       "client-123",
 			InviteCode:     "invite-code",
+			ReferredBy:     888777, // Set referrer
 			Status:         "active",
 		}, nil
 	}
@@ -420,8 +421,8 @@ func TestHandleBindTrial_WithReferrerNotification(t *testing.T) {
 	ctx := context.Background()
 	handler.handleBindTrial(ctx, 123456, "testuser", "trial-code-123")
 
-	assert.True(t, mockBot.SendCalledSafe(), "Should send messages (user + referrer notification)")
-	assert.GreaterOrEqual(t, mockBot.SendCountSafe(), 1, "Should send at least one message")
+	assert.True(t, mockBot.SendCalledSafe(), "Should send messages")
+	assert.GreaterOrEqual(t, mockBot.SendCountSafe(), 2, "Should send: user + referrer + admin")
 }
 
 func TestHandleStart_AdminUser(t *testing.T) {
