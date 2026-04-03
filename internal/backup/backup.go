@@ -2,6 +2,7 @@ package backup
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"io"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	_ "github.com/mattn/go-sqlite3"
 	"go.uber.org/zap"
 )
 
@@ -56,13 +58,17 @@ func validatePath(path string) error {
 }
 
 // BackupDatabase creates a backup of the SQLite database file.
-// It uses atomic write pattern: write to temp file, sync, then rename.
-// This ensures the backup is always in a consistent state.
-// The context allows cancellation of the backup operation.
+// It uses WAL checkpoint before copying to ensure a consistent snapshot,
+// then atomic write pattern (temp file + rename) for the copy itself.
 func BackupDatabase(ctx context.Context, dbPath string) error {
 	// Validate the database path to prevent directory traversal
 	if err := validatePath(dbPath); err != nil {
 		return fmt.Errorf("invalid database path: %w", err)
+	}
+
+	// Checkpoint WAL to ensure the main database file contains all data
+	if err := checkpointWAL(ctx, dbPath); err != nil {
+		logger.Warn("WAL checkpoint failed, proceeding with raw copy", zap.Error(err))
 	}
 
 	backupPath := dbPath + ".backup"
@@ -135,6 +141,28 @@ func BackupDatabase(ctx context.Context, dbPath string) error {
 	}
 
 	logger.Info("Database backup created", zap.String("path", backupPath))
+	return nil
+}
+
+// checkpointWAL opens the database in read-only mode, checkpoints WAL, and closes it.
+// This ensures the main database file contains all committed data before file copy.
+func checkpointWAL(ctx context.Context, dbPath string) error {
+	// #nosec G304 -- dbPath is validated by the caller
+	dsn := fmt.Sprintf("file:%s?mode=ro", dbPath)
+	db, err := sql.Open("sqlite3", dsn)
+	if err != nil {
+		return fmt.Errorf("failed to open database for checkpoint: %w", err)
+	}
+	defer db.Close()
+
+	// WAL checkpoint: PASSIVE returns immediately, TRUNCATE tries to reset WAL file
+	// Using TRUNCATE to ensure all data is in the main database file
+	ctxWithTimeout, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if _, err := db.ExecContext(ctxWithTimeout, "PRAGMA wal_checkpoint(TRUNCATE)"); err != nil {
+		return fmt.Errorf("checkpoint failed: %w", err)
+	}
+
 	return nil
 }
 

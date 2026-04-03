@@ -16,6 +16,7 @@ import (
 	"rs8kvn_bot/internal/database"
 	"rs8kvn_bot/internal/heartbeat"
 	"rs8kvn_bot/internal/logger"
+	"rs8kvn_bot/internal/service"
 	"rs8kvn_bot/internal/web"
 	"rs8kvn_bot/internal/xui"
 
@@ -159,8 +160,11 @@ func main() {
 	}
 	logger.Info("Telegram bot authorized", zap.String("username", botConfig.Username))
 
+	// Create subscription service (shared between bot handler and web server)
+	subService := service.NewSubscriptionService(dbService, xuiClient, cfg)
+
 	// Create bot handler
-	handler := bot.NewHandler(botAPI, cfg, dbService, xuiClient, botConfig)
+	handler := bot.NewHandler(botAPI, cfg, dbService, xuiClient, botConfig, subService)
 
 	// Start cache cleanup goroutine to prevent memory leaks
 	handler.StartCacheCleanup(ctx, bot.CacheTTL/2)
@@ -172,7 +176,7 @@ func main() {
 	handler.StartReferralCacheSync(ctx)
 
 	// Initialize and start web server (health + trial pages)
-	webServer := web.NewServer(fmt.Sprintf(":%d", cfg.HealthCheckPort), dbService, xuiClient, cfg, botConfig)
+	webServer := web.NewServer(fmt.Sprintf(":%d", cfg.HealthCheckPort), dbService, xuiClient, cfg, botConfig, subService)
 	webServer.RegisterChecker("database", func(ctx context.Context) web.ComponentHealth {
 		if err := dbService.Ping(ctx); err != nil {
 			return web.ComponentHealth{Status: web.StatusDown, Message: err.Error()}

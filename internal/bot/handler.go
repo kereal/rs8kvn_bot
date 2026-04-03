@@ -50,7 +50,7 @@ type Handler struct {
 	subscriptionService *service.SubscriptionService
 }
 
-func NewHandler(bot interfaces.BotAPI, cfg *config.Config, db interfaces.DatabaseService, xuiClient interfaces.XUIClient, botConfig *BotConfig) *Handler {
+func NewHandler(bot interfaces.BotAPI, cfg *config.Config, db interfaces.DatabaseService, xuiClient interfaces.XUIClient, botConfig *BotConfig, subService *service.SubscriptionService) *Handler {
 	return &Handler{
 		bot:                 bot,
 		cfg:                 cfg,
@@ -65,7 +65,7 @@ func NewHandler(bot interfaces.BotAPI, cfg *config.Config, db interfaces.Databas
 		pendingMu:           sync.RWMutex{},
 		botConfig:           botConfig,
 		adminSendMu:         sync.Map{},
-		subscriptionService: service.NewSubscriptionService(db, xuiClient, cfg),
+		subscriptionService: subService,
 	}
 }
 

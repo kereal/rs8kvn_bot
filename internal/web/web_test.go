@@ -3,17 +3,21 @@ package web
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"rs8kvn_bot/internal/bot"
 	"rs8kvn_bot/internal/config"
 	"rs8kvn_bot/internal/database"
+	"rs8kvn_bot/internal/service"
 	"rs8kvn_bot/internal/testutil"
 	"rs8kvn_bot/internal/utils"
 	"rs8kvn_bot/internal/xui"
@@ -37,7 +41,7 @@ func TestHandleInvite_InvalidCode(t *testing.T) {
 		XUIInboundID:       1,
 	}
 
-	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig())
+	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig(), nil)
 
 	// Mock: invite not found
 	mockDB.GetInviteByCodeFunc = func(ctx context.Context, code string) (*database.Invite, error) {
@@ -66,7 +70,7 @@ func TestHandleInvite_RateLimitExceeded(t *testing.T) {
 		XUIInboundID:       1,
 	}
 
-	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig())
+	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig(), nil)
 
 	// Mock: invite exists
 	mockDB.GetInviteByCodeFunc = func(ctx context.Context, code string) (*database.Invite, error) {
@@ -103,7 +107,7 @@ func TestHandleInvite_Success(t *testing.T) {
 		XUISubPath:         "sub",
 	}
 
-	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig())
+	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig(), nil)
 
 	// Mock: invite exists
 	mockDB.GetInviteByCodeFunc = func(ctx context.Context, code string) (*database.Invite, error) {
@@ -150,6 +154,9 @@ func TestHandleInvite_Success(t *testing.T) {
 		return host
 	}
 
+	subService := service.NewSubscriptionService(mockDB, mockXUI, cfg)
+	srv.subService = subService
+
 	req := httptest.NewRequest("GET", "/i/testcode", nil)
 	req.RemoteAddr = "192.168.1.1:12345"
 	rec := httptest.NewRecorder()
@@ -185,7 +192,7 @@ func TestHandleInvite_XUIError(t *testing.T) {
 		XUIInboundID:       1,
 	}
 
-	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig())
+	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig(), nil)
 
 	// Mock: invite exists
 	mockDB.GetInviteByCodeFunc = func(ctx context.Context, code string) (*database.Invite, error) {
@@ -225,7 +232,7 @@ func TestRenderTrialPage(t *testing.T) {
 		TrialDurationHours: 3,
 	}
 
-	srv := NewServer(":8880", nil, nil, cfg, bot.NewTestBotConfig())
+	srv := NewServer(":8880", nil, nil, cfg, bot.NewTestBotConfig(), nil)
 
 	html := srv.renderTrialPage("sub123", "https://vpn.site/sub/sub123", "https://t.me/testbot?start=trial_sub123", 3)
 
@@ -250,7 +257,7 @@ func TestRenderTrialPage(t *testing.T) {
 }
 
 func TestRenderErrorPage(t *testing.T) {
-	srv := NewServer(":8880", nil, nil, nil, bot.NewTestBotConfig())
+	srv := NewServer(":8880", nil, nil, nil, bot.NewTestBotConfig(), nil)
 
 	html := srv.renderErrorPage("Тестовая ошибка")
 
@@ -311,7 +318,7 @@ func TestHandleInvite_EmptyCode(t *testing.T) {
 		TrialRateLimit:     3,
 	}
 
-	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig())
+	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig(), nil)
 
 	req := httptest.NewRequest("GET", "/i/", nil)
 	rec := httptest.NewRecorder()
@@ -331,7 +338,7 @@ func TestHandleInvite_DatabaseError(t *testing.T) {
 		TrialRateLimit:     3,
 	}
 
-	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig())
+	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig(), nil)
 
 	// Mock: database error
 	mockDB.GetInviteByCodeFunc = func(ctx context.Context, code string) (*database.Invite, error) {
@@ -347,7 +354,7 @@ func TestHandleInvite_DatabaseError(t *testing.T) {
 }
 
 func TestRenderTrialPage_HappLink(t *testing.T) {
-	srv := NewServer(":8880", nil, nil, &config.Config{}, bot.NewTestBotConfig())
+	srv := NewServer(":8880", nil, nil, &config.Config{}, bot.NewTestBotConfig(), nil)
 
 	subURL := "https://vpn.site/sub/abc123"
 	html := srv.renderTrialPage("abc123", subURL, "https://t.me/testbot?start=trial_abc123", 3)
@@ -360,7 +367,7 @@ func TestRenderTrialPage_HappLink(t *testing.T) {
 // === Health endpoint tests ===
 
 func TestHandleHealthz(t *testing.T) {
-	srv := NewServer(":8880", nil, nil, &config.Config{}, bot.NewTestBotConfig())
+	srv := NewServer(":8880", nil, nil, &config.Config{}, bot.NewTestBotConfig(), nil)
 
 	req := httptest.NewRequest("GET", "/healthz", nil)
 	rec := httptest.NewRecorder()
@@ -372,7 +379,7 @@ func TestHandleHealthz(t *testing.T) {
 }
 
 func TestHandleHealthz_MethodNotAllowed(t *testing.T) {
-	srv := NewServer(":8880", nil, nil, &config.Config{}, bot.NewTestBotConfig())
+	srv := NewServer(":8880", nil, nil, &config.Config{}, bot.NewTestBotConfig(), nil)
 
 	// Test POST method
 	req := httptest.NewRequest("POST", "/healthz", nil)
@@ -401,7 +408,7 @@ func TestHandleHealthz_MethodNotAllowed(t *testing.T) {
 }
 
 func TestHandleHealthz_HeadMethod(t *testing.T) {
-	srv := NewServer(":8880", nil, nil, &config.Config{}, bot.NewTestBotConfig())
+	srv := NewServer(":8880", nil, nil, &config.Config{}, bot.NewTestBotConfig(), nil)
 
 	req := httptest.NewRequest("HEAD", "/healthz", nil)
 	rec := httptest.NewRecorder()
@@ -412,7 +419,7 @@ func TestHandleHealthz_HeadMethod(t *testing.T) {
 }
 
 func TestHandleReadyz_MethodNotAllowed(t *testing.T) {
-	srv := NewServer(":8880", nil, nil, &config.Config{}, bot.NewTestBotConfig())
+	srv := NewServer(":8880", nil, nil, &config.Config{}, bot.NewTestBotConfig(), nil)
 
 	// Test POST method
 	req := httptest.NewRequest("POST", "/readyz", nil)
@@ -441,7 +448,7 @@ func TestHandleReadyz_MethodNotAllowed(t *testing.T) {
 }
 
 func TestHandleReadyz_HeadMethod(t *testing.T) {
-	srv := NewServer(":8880", nil, nil, &config.Config{}, bot.NewTestBotConfig())
+	srv := NewServer(":8880", nil, nil, &config.Config{}, bot.NewTestBotConfig(), nil)
 	srv.SetReady(true)
 
 	req := httptest.NewRequest("HEAD", "/readyz", nil)
@@ -453,7 +460,7 @@ func TestHandleReadyz_HeadMethod(t *testing.T) {
 }
 
 func TestHandleReadyz_NotReady(t *testing.T) {
-	srv := NewServer(":8880", nil, nil, &config.Config{}, bot.NewTestBotConfig())
+	srv := NewServer(":8880", nil, nil, &config.Config{}, bot.NewTestBotConfig(), nil)
 	// Register a failing checker to make health status not "ok"
 	srv.RegisterChecker("failing", func(ctx context.Context) ComponentHealth {
 		return ComponentHealth{Status: StatusDown, Message: "service down"}
@@ -469,7 +476,7 @@ func TestHandleReadyz_NotReady(t *testing.T) {
 }
 
 func TestHandleReadyz_Ready(t *testing.T) {
-	srv := NewServer(":8880", nil, nil, &config.Config{}, bot.NewTestBotConfig())
+	srv := NewServer(":8880", nil, nil, &config.Config{}, bot.NewTestBotConfig(), nil)
 	// No checkers registered means health status will be "ok"
 
 	req := httptest.NewRequest("GET", "/readyz", nil)
@@ -482,7 +489,7 @@ func TestHandleReadyz_Ready(t *testing.T) {
 }
 
 func TestHandleReadyz_WithChecker(t *testing.T) {
-	srv := NewServer(":8880", nil, nil, &config.Config{}, bot.NewTestBotConfig())
+	srv := NewServer(":8880", nil, nil, &config.Config{}, bot.NewTestBotConfig(), nil)
 
 	// Register a health checker that returns OK
 	srv.RegisterChecker("test-component", func(ctx context.Context) ComponentHealth {
@@ -500,7 +507,7 @@ func TestHandleReadyz_WithChecker(t *testing.T) {
 }
 
 func TestHandleReadyz_WithFailingChecker(t *testing.T) {
-	srv := NewServer(":8880", nil, nil, &config.Config{}, bot.NewTestBotConfig())
+	srv := NewServer(":8880", nil, nil, &config.Config{}, bot.NewTestBotConfig(), nil)
 
 	// Register a health checker that returns degraded
 	srv.RegisterChecker("failing-component", func(ctx context.Context) ComponentHealth {
@@ -518,7 +525,7 @@ func TestHandleReadyz_WithFailingChecker(t *testing.T) {
 }
 
 func TestHandleReadyz_WithDownChecker(t *testing.T) {
-	srv := NewServer(":8880", nil, nil, &config.Config{}, bot.NewTestBotConfig())
+	srv := NewServer(":8880", nil, nil, &config.Config{}, bot.NewTestBotConfig(), nil)
 
 	// Register a health checker that returns down
 	srv.RegisterChecker("down-component", func(ctx context.Context) ComponentHealth {
@@ -535,7 +542,7 @@ func TestHandleReadyz_WithDownChecker(t *testing.T) {
 }
 
 func TestCheckHealth_NoCheckers(t *testing.T) {
-	srv := NewServer(":8880", nil, nil, &config.Config{}, bot.NewTestBotConfig())
+	srv := NewServer(":8880", nil, nil, &config.Config{}, bot.NewTestBotConfig(), nil)
 
 	health := srv.checkHealth(context.Background())
 
@@ -544,7 +551,7 @@ func TestCheckHealth_NoCheckers(t *testing.T) {
 }
 
 func TestCheckHealth_WithCheckers(t *testing.T) {
-	srv := NewServer(":8880", nil, nil, &config.Config{}, bot.NewTestBotConfig())
+	srv := NewServer(":8880", nil, nil, &config.Config{}, bot.NewTestBotConfig(), nil)
 
 	srv.RegisterChecker("comp1", func(ctx context.Context) ComponentHealth {
 		return ComponentHealth{Status: StatusOK, Message: "ok"}
@@ -560,7 +567,7 @@ func TestCheckHealth_WithCheckers(t *testing.T) {
 }
 
 func TestCheckHealth_AllDown(t *testing.T) {
-	srv := NewServer(":8880", nil, nil, &config.Config{}, bot.NewTestBotConfig())
+	srv := NewServer(":8880", nil, nil, &config.Config{}, bot.NewTestBotConfig(), nil)
 
 	srv.RegisterChecker("comp1", func(ctx context.Context) ComponentHealth {
 		return ComponentHealth{Status: StatusDown, Message: "down1"}
@@ -575,7 +582,7 @@ func TestCheckHealth_AllDown(t *testing.T) {
 }
 
 func TestWriteJSON(t *testing.T) {
-	srv := NewServer(":8880", nil, nil, &config.Config{}, bot.NewTestBotConfig())
+	srv := NewServer(":8880", nil, nil, &config.Config{}, bot.NewTestBotConfig(), nil)
 
 	rec := httptest.NewRecorder()
 
@@ -591,7 +598,7 @@ func TestWriteJSON(t *testing.T) {
 }
 
 func TestSetReady(t *testing.T) {
-	srv := NewServer(":8880", nil, nil, &config.Config{}, bot.NewTestBotConfig())
+	srv := NewServer(":8880", nil, nil, &config.Config{}, bot.NewTestBotConfig(), nil)
 
 	// Initially not ready
 	srv.mu.Lock()
@@ -615,7 +622,7 @@ func TestSetReady(t *testing.T) {
 }
 
 func TestRegisterChecker(t *testing.T) {
-	srv := NewServer(":8880", nil, nil, &config.Config{}, bot.NewTestBotConfig())
+	srv := NewServer(":8880", nil, nil, &config.Config{}, bot.NewTestBotConfig(), nil)
 
 	// Register multiple checkers
 	srv.RegisterChecker("checker1", func(ctx context.Context) ComponentHealth {
@@ -741,7 +748,7 @@ func TestGetClientIP_WhitespaceInXForwardedFor(t *testing.T) {
 // === Server Start/Stop tests ===
 
 func TestServer_StartAndStop(t *testing.T) {
-	srv := NewServer(":0", nil, nil, &config.Config{}, bot.NewTestBotConfig()) // :0 for random port
+	srv := NewServer(":0", nil, nil, &config.Config{}, bot.NewTestBotConfig(), nil) // :0 for random port
 
 	ctx := context.Background()
 
@@ -758,7 +765,7 @@ func TestServer_StartAndStop(t *testing.T) {
 }
 
 func TestServer_StopWithoutStart(t *testing.T) {
-	srv := NewServer(":0", nil, nil, &config.Config{}, bot.NewTestBotConfig())
+	srv := NewServer(":0", nil, nil, &config.Config{}, bot.NewTestBotConfig(), nil)
 
 	// Stop without start should not panic
 	stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -774,7 +781,7 @@ func TestGetExistingTrialFromCookie_NoCookie(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	cfg := &config.Config{}
-	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig())
+	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig(), nil)
 
 	req := httptest.NewRequest("GET", "/i/test", nil)
 
@@ -789,7 +796,7 @@ func TestGetExistingTrialFromCookie_InvalidSubID(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	cfg := &config.Config{}
-	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig())
+	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig(), nil)
 
 	req := httptest.NewRequest("GET", "/i/test", nil)
 	req.AddCookie(&http.Cookie{
@@ -808,7 +815,7 @@ func TestGetExistingTrialFromCookie_NotTrial(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	cfg := &config.Config{}
-	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig())
+	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig(), nil)
 
 	// Mock: subscription exists but is not trial
 	mockDB.GetTrialSubscriptionBySubIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
@@ -836,7 +843,7 @@ func TestGetExistingTrialFromCookie_AlreadyActivated(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	cfg := &config.Config{}
-	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig())
+	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig(), nil)
 
 	// Mock: trial subscription but already activated (telegram_id != 0)
 	mockDB.GetTrialSubscriptionBySubIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
@@ -864,7 +871,7 @@ func TestGetExistingTrialFromCookie_Expired(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	cfg := &config.Config{}
-	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig())
+	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig(), nil)
 
 	// Mock: expired trial subscription
 	mockDB.GetTrialSubscriptionBySubIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
@@ -893,7 +900,7 @@ func TestGetExistingTrialFromCookie_Valid(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	cfg := &config.Config{}
-	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig())
+	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig(), nil)
 
 	// Mock: valid unactivated trial subscription
 	mockDB.GetTrialSubscriptionBySubIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
@@ -921,7 +928,7 @@ func TestGetExistingTrialFromCookie_Valid(t *testing.T) {
 }
 
 func TestInviteCodeRegex(t *testing.T) {
-	srv := NewServer(":8880", nil, nil, &config.Config{}, bot.NewTestBotConfig())
+	srv := NewServer(":8880", nil, nil, &config.Config{}, bot.NewTestBotConfig(), nil)
 
 	tests := []struct {
 		name  string
@@ -970,7 +977,7 @@ func TestHandleInvite_XUIAddClientFails(t *testing.T) {
 		XUIHost:            "http://localhost:2053",
 	}
 
-	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig())
+	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig(), nil)
 
 	mockDB.GetInviteByCodeFunc = func(ctx context.Context, code string) (*database.Invite, error) {
 		return &database.Invite{Code: "testcode", ReferrerTGID: 12345}, nil
@@ -982,11 +989,11 @@ func TestHandleInvite_XUIAddClientFails(t *testing.T) {
 		return nil
 	}
 	mockXUI.LoginFunc = func(ctx context.Context) error {
-		return nil
+		return fmt.Errorf("XUI error")
 	}
-	mockXUI.AddClientWithIDFunc = func(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
-		return nil, fmt.Errorf("XUI error")
-	}
+
+	subService := service.NewSubscriptionService(mockDB, mockXUI, cfg)
+	srv.subService = subService
 
 	req := httptest.NewRequest("GET", "/i/testcode", nil)
 	req.RemoteAddr = "192.168.1.1:12345"
@@ -995,7 +1002,7 @@ func TestHandleInvite_XUIAddClientFails(t *testing.T) {
 	srv.handleInvite(rec, req)
 
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
-	assert.Contains(t, rec.Body.String(), "Ошибка создания подписки")
+	assert.Contains(t, rec.Body.String(), "Ошибка сервера")
 }
 
 func TestHandleInvite_CreateTrialSubscriptionFails(t *testing.T) {
@@ -1011,7 +1018,7 @@ func TestHandleInvite_CreateTrialSubscriptionFails(t *testing.T) {
 		XUISubPath:         "sub",
 	}
 
-	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig())
+	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig(), nil)
 
 	mockDB.GetInviteByCodeFunc = func(ctx context.Context, code string) (*database.Invite, error) {
 		return &database.Invite{Code: "testcode", ReferrerTGID: 12345}, nil
@@ -1038,6 +1045,9 @@ func TestHandleInvite_CreateTrialSubscriptionFails(t *testing.T) {
 		return nil, fmt.Errorf("DB error")
 	}
 
+	subService := service.NewSubscriptionService(mockDB, mockXUI, cfg)
+	srv.subService = subService
+
 	req := httptest.NewRequest("GET", "/i/testcode", nil)
 	req.RemoteAddr = "192.168.1.1:12345"
 	rec := httptest.NewRecorder()
@@ -1059,7 +1069,7 @@ func TestHandleInvite_ExistingTrialFromCookie(t *testing.T) {
 		XUIInboundID:       1,
 	}
 
-	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig())
+	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig(), nil)
 
 	mockDB.GetInviteByCodeFunc = func(ctx context.Context, code string) (*database.Invite, error) {
 		return &database.Invite{Code: "testcode", ReferrerTGID: 12345}, nil
@@ -1093,7 +1103,7 @@ func TestHandleInvite_MethodNotAllowed(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	cfg := &config.Config{}
-	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig())
+	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig(), nil)
 
 	req := httptest.NewRequest("POST", "/i/testcode", nil)
 	rec := httptest.NewRecorder()
@@ -1108,7 +1118,7 @@ func TestHandleInvite_InvalidPath(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	cfg := &config.Config{}
-	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig())
+	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig(), nil)
 
 	req := httptest.NewRequest("GET", "/not-invite/testcode", nil)
 	rec := httptest.NewRecorder()
@@ -1123,7 +1133,7 @@ func TestHandleInvite_InvalidCodeChars(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	cfg := &config.Config{}
-	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig())
+	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig(), nil)
 
 	req := httptest.NewRequest("GET", "/i/invalid@code!", nil)
 	rec := httptest.NewRecorder()
@@ -1145,7 +1155,7 @@ func TestHandleInvite_RateLimitCheckError(t *testing.T) {
 		XUIInboundID:       1,
 	}
 
-	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig())
+	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig(), nil)
 
 	mockDB.GetInviteByCodeFunc = func(ctx context.Context, code string) (*database.Invite, error) {
 		return &database.Invite{Code: "testcode", ReferrerTGID: 12345}, nil
@@ -1227,6 +1237,81 @@ func TestGetClientIP_InvalidRemoteAddr(t *testing.T) {
 	assert.Equal(t, "invalid", ip, "Should fall back to raw remote addr")
 }
 
+func TestServer_Start_PortInUse(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err, "Failed to create listener")
+
+	addr := listener.Addr().String()
+	port := strings.Split(addr, ":")[1]
+
+	srv := NewServer(":"+port, nil, nil, &config.Config{}, bot.NewTestBotConfig(), nil)
+
+	ctx := context.Background()
+	err = srv.Start(ctx)
+	require.NoError(t, err, "Start() should not return error (server runs in goroutine)")
+
+	// Give the goroutine time to attempt binding and fail
+	time.Sleep(100 * time.Millisecond)
+
+	// Now close our listener
+	listener.Close()
+
+	// Give the OS time to release the port
+	time.Sleep(50 * time.Millisecond)
+
+	// The server should NOT be listening because it already failed to bind
+	conn, dialErr := net.DialTimeout("tcp", "127.0.0.1:"+port, 100*time.Millisecond)
+	if dialErr == nil {
+		conn.Close()
+		t.Fatal("Server should not be listening on a port that was already in use at start time")
+	}
+}
+
+func TestGetClientIP_IPv6(t *testing.T) {
+	tests := []struct {
+		name     string
+		forward  string
+		remote   string
+		expected string
+	}{
+		{
+			name:     "single IPv6",
+			forward:  "2001:db8::1",
+			remote:   "[::1]:12345",
+			expected: "2001:db8::1",
+		},
+		{
+			name:     "IPv6 with port in brackets",
+			forward:  "[2001:db8::1]:8080",
+			remote:   "[::1]:12345",
+			expected: "[2001:db8::1]:8080",
+		},
+		{
+			name:     "IPv6 first of multiple",
+			forward:  "2001:db8::1, 192.168.1.1",
+			remote:   "[::1]:12345",
+			expected: "2001:db8::1",
+		},
+		{
+			name:     "IPv6 loopback",
+			forward:  "::1",
+			remote:   "[::1]:12345",
+			expected: "::1",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest("GET", "/i/test", nil)
+			req.RemoteAddr = tt.remote
+			req.Header.Set("X-Forwarded-For", tt.forward)
+
+			ip := getClientIP(req)
+			assert.Equal(t, tt.expected, ip)
+		})
+	}
+}
+
 func TestRenderTrialPage_XSSProtection(t *testing.T) {
 	cfg := &config.Config{
 		SiteURL:            "https://vpn.site",
@@ -1235,7 +1320,7 @@ func TestRenderTrialPage_XSSProtection(t *testing.T) {
 		XUIInboundID:       1,
 	}
 
-	srv := NewServer(":8880", testutil.NewMockDatabaseService(), testutil.NewMockXUIClient(), cfg, bot.NewTestBotConfig())
+	srv := NewServer(":8880", testutil.NewMockDatabaseService(), testutil.NewMockXUIClient(), cfg, bot.NewTestBotConfig(), nil)
 
 	tests := []struct {
 		name         string

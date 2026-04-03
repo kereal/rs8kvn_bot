@@ -43,7 +43,7 @@ func FuzzInviteCodeRegex(f *testing.F) {
 			return
 		}
 
-		srv := NewServer(":0", nil, nil, &config.Config{}, bot.NewTestBotConfig())
+		srv := NewServer(":0", nil, nil, &config.Config{}, bot.NewTestBotConfig(), nil)
 		result := srv.inviteCodeRegex.MatchString(code)
 		expected := validPattern.MatchString(code)
 
@@ -91,7 +91,7 @@ func FuzzInviteCodeRegex_ValidOnly(f *testing.F) {
 			}
 		}
 
-		srv := NewServer(":0", nil, nil, &config.Config{}, bot.NewTestBotConfig())
+		srv := NewServer(":0", nil, nil, &config.Config{}, bot.NewTestBotConfig(), nil)
 		result := srv.inviteCodeRegex.MatchString(code)
 
 		// Valid codes should always match

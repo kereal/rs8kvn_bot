@@ -962,15 +962,37 @@ func TestDeleteClient_InvalidJSONResponse(t *testing.T) {
 }
 
 func TestDeleteClient_RequestCreationError(t *testing.T) {
-	t.Skip("Cannot trigger request creation error without mocking http.Client")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := APIResponse{Success: true}
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, "admin", "password")
+	require.NoError(t, err, "NewClient() returned error")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err = client.DeleteClient(ctx, 1, "test-client-id")
+	require.Error(t, err, "DeleteClient() should return error with cancelled context")
+	assert.Contains(t, strings.ToLower(err.Error()), "cancel", "Error should indicate cancellation")
 }
 
 func TestGetClientTraffic_RequestCreationError(t *testing.T) {
-	t.Skip("Cannot trigger request creation error without mocking http.Client")
-}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := APIResponse{Success: true}
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
 
-func TestAddClientWithID_ClientSettingsMarshalError(t *testing.T) {
-	t.Skip("Cannot trigger client settings marshal error without mocking")
+	client, err := NewClient(server.URL, "admin", "password")
+	require.NoError(t, err, "NewClient() returned error")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err = client.GetClientTraffic(ctx, "testuser")
+	require.Error(t, err, "GetClientTraffic() should return error with cancelled context")
+	assert.Contains(t, strings.ToLower(err.Error()), "cancel", "Error should indicate cancellation")
 }
 
 func TestContainsSuccessKeywords(t *testing.T) {
@@ -1033,7 +1055,20 @@ func TestAddClientWithID_LoginError(t *testing.T) {
 }
 
 func TestAddClientWithID_RequestCreationError(t *testing.T) {
-	t.Skip("Cannot trigger request creation error without mocking http.Client")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := APIResponse{Success: true}
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, "admin", "password")
+	require.NoError(t, err, "NewClient() returned error")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err = client.AddClientWithID(ctx, 1, "testuser", "client-id", "sub-id", 1000, time.Now(), 31)
+	require.Error(t, err, "AddClientWithID() should return error with cancelled context")
+	assert.Contains(t, strings.ToLower(err.Error()), "cancel", "Error should indicate cancellation")
 }
 
 func TestClient_CircuitBreakerState(t *testing.T) {
