@@ -609,7 +609,7 @@ func TestSubscriptionCache_ConcurrentStress(t *testing.T) {
 // TestRateLimiter_Integration tests rate limiter integration with handler
 func TestRateLimiter_Integration(t *testing.T) {
 	t.Run("rate limiter allows requests", func(t *testing.T) {
-		rl := ratelimiter.NewRateLimiter(10, 1.0)
+		rl := ratelimiter.NewTokenBucket(10, 1.0)
 
 		// Should allow burst of 10
 		for i := 0; i < 10; i++ {
@@ -621,7 +621,7 @@ func TestRateLimiter_Integration(t *testing.T) {
 	})
 
 	t.Run("rate limiter refill", func(t *testing.T) {
-		rl := ratelimiter.NewRateLimiter(5, 10.0) // 10 tokens per second
+		rl := ratelimiter.NewTokenBucket(5, 10.0) // 10 tokens per second
 
 		// Consume all tokens
 		for i := 0; i < 5; i++ {
@@ -636,7 +636,7 @@ func TestRateLimiter_Integration(t *testing.T) {
 	})
 
 	t.Run("rate limiter wait with context", func(t *testing.T) {
-		rl := ratelimiter.NewRateLimiter(1, 0.1) // Very slow refill
+		rl := ratelimiter.NewTokenBucket(1, 0.1) // Very slow refill
 
 		// Consume the token
 		rl.Allow()
@@ -651,7 +651,7 @@ func TestRateLimiter_Integration(t *testing.T) {
 	})
 
 	t.Run("rate limiter wait success", func(t *testing.T) {
-		rl := ratelimiter.NewRateLimiter(10, 100.0) // Fast refill
+		rl := ratelimiter.NewTokenBucket(10, 100.0) // Fast refill
 
 		ctx := context.Background()
 
@@ -828,7 +828,7 @@ func TestCache_EvictionPolicy(t *testing.T) {
 
 // TestRateLimiter_WaitWithContextCancellation tests context cancellation during wait
 func TestRateLimiter_WaitWithContextCancellation(t *testing.T) {
-	rl := ratelimiter.NewRateLimiter(1, 0.01) // Very slow refill
+	rl := ratelimiter.NewTokenBucket(1, 0.01) // Very slow refill
 
 	// Use the only token
 	require.True(t, rl.Allow())

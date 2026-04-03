@@ -120,28 +120,3 @@ func (tb *TokenBucket) refill() {
 		tb.lastRefill = now
 	}
 }
-
-// RateLimiter wraps TokenBucket with a simpler interface for common use cases.
-type RateLimiter struct {
-	tb *TokenBucket
-}
-
-// NewRateLimiter creates a rate limiter with the specified burst size and refill rate.
-// burst is the maximum number of tokens (maximum burst size).
-// refillPerSecond is the rate at which tokens are replenished.
-func NewRateLimiter(burst int, refillPerSecond float64) *RateLimiter {
-	return &RateLimiter{
-		tb: NewTokenBucket(float64(burst), refillPerSecond),
-	}
-}
-
-// Wait blocks until a request can be made or context is cancelled.
-// Returns true if the request is allowed, false if cancelled.
-func (r *RateLimiter) Wait(ctx context.Context) bool {
-	return r.tb.Wait(ctx)
-}
-
-// Allow returns true if the request is allowed without waiting.
-func (r *RateLimiter) Allow() bool {
-	return r.tb.Allow()
-}
