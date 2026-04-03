@@ -587,7 +587,7 @@ func TestHandleMySubscription_ActiveSubscription(t *testing.T) {
 
 	assert.True(t, mockBot.SendCalled)
 	assert.Contains(t, mockBot.LastSentText, "Ваша подписка")
-	assert.Contains(t, mockBot.LastSentText, "3.00 из 100 ГБ (3%)") // 1 + 2 = 3 GB
+	assert.Contains(t, mockBot.LastSentText, "3.00 из 100 Гб (3%)") // 1 + 2 = 3 GB
 	assert.Contains(t, mockBot.LastSentText, "⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜")          // Empty progress bar (3%)
 	assert.Contains(t, mockBot.LastSentText, "📅 Создана:")
 	assert.Contains(t, mockBot.LastSentText, "🔄 Сброс:")
@@ -626,7 +626,7 @@ func TestHandleMySubscription_TrafficFetchError(t *testing.T) {
 	assert.True(t, mockBot.SendCalled)
 	assert.Contains(t, mockBot.LastSentText, "Ваша подписка")
 	// Should still show subscription even if traffic fetch fails
-	assert.Contains(t, mockBot.LastSentText, "0.00 из 100 ГБ (0%)")
+	assert.Contains(t, mockBot.LastSentText, "0.00 из 100 Гб (0%)")
 	assert.Contains(t, mockBot.LastSentText, "⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜") // Empty progress bar (0%)
 }
 
