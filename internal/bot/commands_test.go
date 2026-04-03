@@ -423,6 +423,10 @@ func TestHandleBindTrial_WithReferrerNotification(t *testing.T) {
 
 	assert.True(t, mockBot.SendCalledSafe(), "Should send messages")
 	assert.GreaterOrEqual(t, mockBot.SendCountSafe(), 2, "Should send: user + referrer + admin")
+
+	// Verify referrer notification content
+	lastText := mockBot.LastSentTextSafe()
+	assert.Contains(t, lastText, "активировал подписку", "Should contain activation message")
 }
 
 func TestHandleStart_AdminUser(t *testing.T) {
