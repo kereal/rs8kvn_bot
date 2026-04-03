@@ -2,6 +2,7 @@ package bot
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -202,7 +203,11 @@ func (h *Handler) StartReferralCacheSync(ctx context.Context) {
 
 		// Load initial cache
 		if err := h.LoadReferralCache(ctx); err != nil {
-			logger.Error("Failed to load referral cache", zap.Error(err))
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				logger.Info("Referral cache load skipped (context ending)")
+			} else {
+				logger.Error("Failed to load referral cache", zap.Error(err))
+			}
 		}
 
 		for {
