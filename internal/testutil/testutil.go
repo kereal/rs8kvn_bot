@@ -581,6 +581,14 @@ type MockBotAPI struct {
 	LastChattable tgbotapi.Chattable
 	// SendFunc allows custom behavior per test. If set, Send calls this instead of default logic.
 	SendFunc func(c tgbotapi.Chattable) (tgbotapi.Message, error)
+	// AllSentMessages captures all sent messages for verification
+	AllSentMessages []SentMessage
+}
+
+// SentMessage represents a captured message
+type SentMessage struct {
+	ChatID int64
+	Text   string
 }
 
 func NewMockBotAPI() *MockBotAPI {
@@ -594,19 +602,25 @@ func (m *MockBotAPI) Send(c tgbotapi.Chattable) (tgbotapi.Message, error) {
 	m.SendCount++
 	m.LastChattable = c
 
+	var msg SentMessage
+
 	// Extract text and chat ID from various message types
 	switch v := c.(type) {
 	case tgbotapi.MessageConfig:
 		m.LastSentText = v.Text
 		m.LastChatID = v.ChatID
+		msg = SentMessage{ChatID: v.ChatID, Text: v.Text}
 	case tgbotapi.EditMessageTextConfig:
 		m.LastSentText = v.Text
 		m.LastChatID = v.ChatID
+		msg = SentMessage{ChatID: v.ChatID, Text: v.Text}
 	case tgbotapi.EditMessageReplyMarkupConfig:
 		m.LastChatID = v.ChatID
 	case tgbotapi.DeleteMessageConfig:
 		m.LastChatID = v.ChatID
 	}
+
+	m.AllSentMessages = append(m.AllSentMessages, msg)
 
 	// Use custom send function if provided
 	if m.SendFunc != nil {
@@ -663,6 +677,13 @@ func (m *MockBotAPI) LastChattableSafe() tgbotapi.Chattable {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.LastChattable
+}
+
+// GetAllSentMessages returns all captured messages (thread-safe).
+func (m *MockBotAPI) GetAllSentMessages() []SentMessage {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.AllSentMessages
 }
 
 func (m *MockBotAPI) GetUpdatesChan(config tgbotapi.UpdateConfig) tgbotapi.UpdatesChannel {
