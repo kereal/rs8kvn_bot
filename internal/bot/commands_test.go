@@ -3,6 +3,7 @@ package bot
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -422,11 +423,20 @@ func TestHandleBindTrial_WithReferrerNotification(t *testing.T) {
 	handler.handleBindTrial(ctx, 123456, "testuser", "trial-code-123")
 
 	assert.True(t, mockBot.SendCalledSafe(), "Should send messages")
-	assert.GreaterOrEqual(t, mockBot.SendCountSafe(), 2, "Should send: user + referrer + admin")
 
-	// Verify referrer notification content
-	lastText := mockBot.LastSentTextSafe()
-	assert.Contains(t, lastText, "активировал подписку", "Should contain activation message")
+	// Verify all messages sent
+	messages := mockBot.GetAllSentMessages()
+	assert.GreaterOrEqual(t, len(messages), 2, "Should send at least 2 messages: user + referrer")
+
+	// Verify referrer notification
+	referrerNotified := false
+	for _, msg := range messages {
+		if msg.ChatID == 888777 && strings.Contains(msg.Text, "активировал подписку") {
+			referrerNotified = true
+			break
+		}
+	}
+	assert.True(t, referrerNotified, "Referrer (888777) should receive notification about activation")
 }
 
 func TestHandleStart_AdminUser(t *testing.T) {
