@@ -45,7 +45,7 @@ func NewMockXUIServer(t *testing.T) *MockXUIServer {
 	mux := http.NewServeMux()
 	server := httptest.NewServer(mux)
 
-	client, err := xui.NewClient(server.URL, "admin", "password")
+	client, err := xui.NewClient(server.URL, "admin", "password", 15*time.Minute)
 	if err != nil {
 		t.Fatalf("Failed to create XUI client: %v", err)
 	}

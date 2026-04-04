@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"os"
 	"os/signal"
 	"runtime/debug"
@@ -127,7 +128,7 @@ func main() {
 	logger.Info("Database initialized successfully")
 
 	// Initialize 3x-ui client
-	xuiClient, err := xui.NewClient(cfg.XUIHost, cfg.XUIUsername, cfg.XUIPassword)
+	xuiClient, err := xui.NewClient(cfg.XUIHost, cfg.XUIUsername, cfg.XUIPassword, time.Duration(cfg.XUISessionMaxAgeMinutes)*time.Minute)
 	if err != nil {
 		logger.Fatal("Failed to initialize 3x-ui client", zap.Error(err))
 	}
@@ -137,15 +138,29 @@ func main() {
 		}
 	}()
 
-	// Connect to 3x-ui panel with timeout
+	// Connect to 3x-ui panel with retry on startup
 	logger.Info("Connecting to 3x-ui panel")
-	ctx, cancel := context.WithTimeout(context.Background(), config.DefaultHTTPTimeout)
-	if err := xuiClient.Login(ctx); err != nil {
+	const startupLoginMaxAttempts = 5
+	startupLoginDelay := 5 * time.Second
+	for i := 0; i < startupLoginMaxAttempts; i++ {
+		ctx, cancel := context.WithTimeout(context.Background(), config.XUILoginTimeout)
+		err = xuiClient.Login(ctx)
 		cancel()
-		logger.Fatal("Failed to connect to 3x-ui panel", zap.Error(err))
+		if err == nil {
+			logger.Info("3x-ui panel connected")
+			break
+		}
+		if i == startupLoginMaxAttempts-1 {
+			logger.Fatal("Failed to connect to 3x-ui panel",
+				zap.Error(err),
+				zap.Int("attempts", startupLoginMaxAttempts))
+		}
+		logger.Warn("3x-ui login failed, retrying...",
+			zap.Int("attempt", i+1),
+			zap.Int("max_attempts", startupLoginMaxAttempts),
+			zap.Error(err))
+		time.Sleep(startupLoginDelay + time.Duration(rand.Int63n(int64(startupLoginDelay/2))))
 	}
-	cancel()
-	logger.Info("3x-ui panel connected")
 
 	// Initialize Telegram bot
 	logger.Info("Validating Telegram bot token")

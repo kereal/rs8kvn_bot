@@ -16,8 +16,15 @@ const (
 
 // 3x-ui Panel Constants
 const (
-	// XUISessionValidity is how long a 3x-ui session remains valid
-	XUISessionValidity = 15 * time.Minute
+	// DefaultXUISessionMaxAgeMinutes is the default session lifetime in minutes (12 hours).
+	// Must match the panel's sessionMaxAge setting.
+	DefaultXUISessionMaxAgeMinutes = 720
+
+	// XUISessionVerifyTimeout is the timeout for verifying session validity.
+	XUISessionVerifyTimeout = 5 * time.Second
+
+	// XUILoginTimeout is the timeout for login requests.
+	XUILoginTimeout = 5 * time.Second
 )
 
 // XUI Retry Settings (var for test override)

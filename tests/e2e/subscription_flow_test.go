@@ -1055,12 +1055,6 @@ func TestE2E_InviteLink_CreatesTrial(t *testing.T) {
 	// Set high rate limit to avoid cross-test pollution
 	env.cfg.TrialRateLimit = 100
 
-	loginCalled := false
-	env.xui.LoginFunc = func(ctx context.Context) error {
-		loginCalled = true
-		return nil
-	}
-
 	subService := service.NewSubscriptionService(env.db, env.xui, env.cfg)
 	srv := web.NewServer("127.0.0.1:0", env.db, env.xui, env.cfg, env.botConfig, subService)
 
@@ -1086,7 +1080,6 @@ func TestE2E_InviteLink_CreatesTrial(t *testing.T) {
 	}
 	assert.Equal(t, 1, trialCount, "Trial subscription should be created in DB")
 	assert.True(t, env.xui.AddClientWithIDCalled, "XUI AddClientWithID should be called")
-	assert.True(t, loginCalled, "XUI Login should be called")
 }
 
 func TestE2E_InviteLink_InvalidCode(t *testing.T) {
@@ -1120,8 +1113,10 @@ func TestE2E_InviteLink_XuiLoginFails(t *testing.T) {
 
 	env.cfg.TrialRateLimit = 100
 
-	env.xui.LoginFunc = func(ctx context.Context) error {
-		return fmt.Errorf("login failed")
+	// ensureLoggedIn внутри AddClientWithID вернёт ошибку через LoginFunc
+	// Mock AddClientWithID doesn't call ensureLoggedIn, so we simulate auth failure here
+	env.xui.AddClientWithIDFunc = func(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
+		return nil, fmt.Errorf("authentication failed")
 	}
 
 	subService := service.NewSubscriptionService(env.db, env.xui, env.cfg)

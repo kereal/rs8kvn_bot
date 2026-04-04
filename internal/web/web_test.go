@@ -1000,6 +1000,9 @@ func TestHandleInvite_XUIAddClientFails(t *testing.T) {
 	mockXUI.LoginFunc = func(ctx context.Context) error {
 		return fmt.Errorf("XUI error")
 	}
+	mockXUI.AddClientWithIDFunc = func(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
+		return nil, fmt.Errorf("XUI add client error")
+	}
 
 	subService := service.NewSubscriptionService(mockDB, mockXUI, cfg)
 	srv.subService = subService

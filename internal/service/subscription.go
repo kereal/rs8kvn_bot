@@ -35,11 +35,6 @@ func NewSubscriptionService(db interfaces.DatabaseService, xui interfaces.XUICli
 func (s *SubscriptionService) Create(ctx context.Context, chatID int64, username string) (*CreateResult, error) {
 	trafficBytes := int64(s.cfg.TrafficLimitGB) * 1024 * 1024 * 1024
 
-	// Ensure XUI session is valid before making API calls
-	if err := s.xui.Login(ctx); err != nil {
-		return nil, fmt.Errorf("xui login: %w", err)
-	}
-
 	clientID, err := utils.GenerateUUID()
 	if err != nil {
 		return nil, fmt.Errorf("generate client id: %w", err)
@@ -268,10 +263,6 @@ func (s *SubscriptionService) CreateTrial(ctx context.Context, inviteCode string
 
 	trafficBytes := calcTrialTraffic(s.cfg.TrialDurationHours)
 	expiryTime := time.Now().Add(time.Duration(s.cfg.TrialDurationHours) * time.Hour)
-
-	if err := s.xui.Login(ctx); err != nil {
-		return nil, fmt.Errorf("xui login: %w", err)
-	}
 
 	_, err = s.xui.AddClientWithID(ctx, s.cfg.XUIInboundID, "trial_"+subID, clientID, subID, trafficBytes, expiryTime, 0)
 	if err != nil {

@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -47,14 +48,20 @@ func closeResponseBody(resp *http.Response) {
 // Client manages communication with a 3x-ui panel.
 // It handles authentication, session management, and API requests.
 type Client struct {
-	host       string
-	username   string
-	password   string
-	httpClient *http.Client
-	mu         sync.RWMutex
-	lastLogin  time.Time
-	breaker    *CircuitBreaker
-	loginGroup singleflight.Group // Deduplicates concurrent login attempts
+	host            string
+	username        string
+	password        string
+	httpClient      *http.Client
+	transport       *http.Transport
+	mu              sync.RWMutex
+	lastLogin       time.Time
+	sessionValidity time.Duration
+	breaker         *CircuitBreaker
+	loginGroup      singleflight.Group // Deduplicates concurrent login attempts
+
+	// Observability counters
+	loginCount       int64
+	sessionFailCount int64
 }
 
 // APIResponse represents a generic response from the 3x-ui API.
@@ -96,14 +103,13 @@ type ClientTraffic struct {
 }
 
 // NewClient creates a new 3x-ui API client.
-// The client is optimized for low memory usage with minimal connection pooling.
-func NewClient(host, username, password string) (*Client, error) {
+// sessionMaxAge specifies how long the panel session remains valid (must match panel settings).
+func NewClient(host, username, password string, sessionMaxAge time.Duration) (*Client, error) {
 	jar, err := cookiejar.New(nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create cookie jar: %w", err)
 	}
 
-	// Optimized transport for minimal memory footprint
 	transport := &http.Transport{
 		MaxIdleConns:        config.MaxIdleConns,
 		MaxIdleConnsPerHost: config.MaxIdleConns,
@@ -113,28 +119,41 @@ func NewClient(host, username, password string) (*Client, error) {
 	}
 
 	return &Client{
-		host:     strings.TrimSuffix(host, "/"),
-		username: username,
-		password: password,
+		host:            strings.TrimSuffix(host, "/"),
+		username:        username,
+		password:        password,
+		sessionValidity: sessionMaxAge,
 		httpClient: &http.Client{
 			Timeout:   config.DefaultHTTPTimeout,
 			Jar:       jar,
 			Transport: transport,
 		},
-		breaker: NewCircuitBreaker(config.CircuitBreakerMaxFailures, config.CircuitBreakerTimeout),
+		transport: transport,
+		breaker:   NewCircuitBreaker(config.CircuitBreakerMaxFailures, config.CircuitBreakerTimeout),
 	}, nil
 }
 
 // Login authenticates with the 3x-ui panel.
-// The session is valid for approximately 15 minutes.
 func (c *Client) Login(ctx context.Context) error {
 	return c.ensureLoggedIn(ctx, true)
 }
 
-// Ping checks if the 3x-ui panel is reachable without forcing re-authentication.
-// Returns nil if session is valid or re-authentication succeeds.
+// Ping checks if the 3x-ui panel is reachable by verifying the session with a real request.
 func (c *Client) Ping(ctx context.Context) error {
-	return c.ensureLoggedIn(ctx, false)
+	c.mu.RLock()
+	hasRecentLogin := time.Since(c.lastLogin) < c.sessionValidity
+	c.mu.RUnlock()
+
+	if !hasRecentLogin {
+		return c.ensureLoggedIn(ctx, false)
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, config.XUISessionVerifyTimeout)
+	defer cancel()
+	if !c.verifySession(ctx) {
+		return c.ensureLoggedIn(ctx, false)
+	}
+	return nil
 }
 
 // ensureLoggedIn checks if the session is valid and re-authenticates if necessary.
@@ -151,7 +170,7 @@ func (c *Client) ensureLoggedIn(ctx context.Context, force bool) error {
 func (c *Client) doEnsureLoggedIn(ctx context.Context, force bool) error {
 	// Fast path: check if we have a valid session without locking
 	c.mu.RLock()
-	validSession := !force && time.Since(c.lastLogin) < config.XUISessionValidity
+	validSession := !force && time.Since(c.lastLogin) < c.sessionValidity
 	c.mu.RUnlock()
 
 	if validSession {
@@ -163,13 +182,22 @@ func (c *Client) doEnsureLoggedIn(ctx context.Context, force bool) error {
 	defer c.mu.Unlock()
 
 	// Double-check after acquiring write lock
-	if !force && time.Since(c.lastLogin) < config.XUISessionValidity {
+	if !force && time.Since(c.lastLogin) < c.sessionValidity {
 		return nil
 	}
 
 	// Use singleflight to deduplicate concurrent login attempts
-	// Only one goroutine will perform the login, others will wait for the result
 	_, err, _ := c.loginGroup.Do("login", func() (interface{}, error) {
+		// Try to verify existing session first before forcing re-login
+		verifyCtx, verifyCancel := context.WithTimeout(ctx, config.XUISessionVerifyTimeout)
+		defer verifyCancel()
+
+		if !force && c.verifySession(verifyCtx) {
+			c.lastLogin = time.Now()
+			logger.Debug("XUI session verified successfully, no re-login needed")
+			return nil, nil
+		}
+
 		return nil, RetryWithBackoff(ctx, config.XUIMaxRetries, config.XUIInitialRetryDelay, func() error {
 			return c.doLogin(ctx)
 		})
@@ -177,9 +205,53 @@ func (c *Client) doEnsureLoggedIn(ctx context.Context, force bool) error {
 	return err
 }
 
+// verifySession checks if the current session is still valid by making a real API request.
+// Returns true if the session is valid, false otherwise.
+func (c *Client) verifySession(ctx context.Context) bool {
+	statusURL := fmt.Sprintf("%s/panel/api/server/status", c.host)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, statusURL, nil)
+	if err != nil {
+		return false
+	}
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		atomic.AddInt64(&c.sessionFailCount, 1)
+		return false
+	}
+	defer closeResponseBody(resp)
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 256))
+		logger.Debug("XUI session verification failed",
+			zap.Int("status", resp.StatusCode),
+			zap.String("body", truncateString(string(body), 100)))
+		atomic.AddInt64(&c.sessionFailCount, 1)
+		return false
+	}
+
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, config.MaxResponseSize))
+	if err != nil {
+		atomic.AddInt64(&c.sessionFailCount, 1)
+		return false
+	}
+
+	var apiResp APIResponse
+	if err := json.Unmarshal(respBody, &apiResp); err != nil {
+		atomic.AddInt64(&c.sessionFailCount, 1)
+		return false
+	}
+
+	return apiResp.Success
+}
+
 // doLogin performs the actual login request.
 // Must be called with c.mu held.
 func (c *Client) doLogin(ctx context.Context) error {
+	// Clear stale connections before re-authentication
+	c.transport.CloseIdleConnections()
+
 	loginURL := fmt.Sprintf("%s/login", c.host)
 
 	reader, err := marshalJSON(map[string]string{
@@ -209,6 +281,10 @@ func (c *Client) doLogin(ctx context.Context) error {
 		return fmt.Errorf("failed to read login response: %w", err)
 	}
 
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("login returned HTTP %d: %s", resp.StatusCode, truncateString(string(respBody), 200))
+	}
+
 	var apiResp APIResponse
 	if err := json.Unmarshal(respBody, &apiResp); err != nil {
 		return fmt.Errorf("failed to parse login response: %w", err)
@@ -219,10 +295,49 @@ func (c *Client) doLogin(ctx context.Context) error {
 	}
 
 	c.lastLogin = time.Now()
+	atomic.AddInt64(&c.loginCount, 1)
 	logger.Info("3x-ui login successful",
-		zap.String("session_valid_until", c.lastLogin.Add(config.XUISessionValidity).Format("15:04:05")))
+		zap.String("session_valid_until", c.lastLogin.Add(c.sessionValidity).Format("15:04:05")))
 
 	return nil
+}
+
+// doRequestWithAuthRetry executes an HTTP request and automatically handles auth failures.
+// If the response status code is 401/302/307, it performs a re-login and retries the request once.
+// The response body is always read and closed before returning.
+func (c *Client) doRequestWithAuthRetry(ctx context.Context, fn func() (statusCode int, body []byte, err error)) ([]byte, error) {
+	statusCode, body, err := fn()
+	if err != nil {
+		return body, err
+	}
+
+	if statusCode == http.StatusUnauthorized ||
+		statusCode == http.StatusFound ||
+		statusCode == http.StatusTemporaryRedirect {
+		logger.Info("XUI auto-relogin triggered",
+			zap.Int("http_status", statusCode))
+
+		// Invalidate session
+		c.mu.Lock()
+		c.lastLogin = time.Time{}
+		c.mu.Unlock()
+
+		// Clear stale connections
+		c.transport.CloseIdleConnections()
+
+		// Re-login
+		if loginErr := c.doLogin(ctx); loginErr != nil {
+			return body, fmt.Errorf("auto-relogin failed: %w", loginErr)
+		}
+
+		logger.Debug("XUI auto-relogin succeeded, request retried")
+
+		// Retry the request once
+		_, body, err = fn()
+		return body, err
+	}
+
+	return body, nil
 }
 
 // AddClient creates a new client in the 3x-ui panel with auto-generated IDs.
@@ -316,27 +431,35 @@ func (c *Client) doAddClientWithID(ctx context.Context, inboundID int, email, cl
 
 	// POST to /panel/api/inbounds/addClient
 	addURL := fmt.Sprintf("%s/panel/api/inbounds/addClient", c.host)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, addURL, reader)
+
+	var respBody []byte
+	respBody, err = c.doRequestWithAuthRetry(ctx, func() (int, []byte, error) {
+		req, reqErr := http.NewRequestWithContext(ctx, http.MethodPost, addURL, reader)
+		if reqErr != nil {
+			return 0, nil, fmt.Errorf("failed to create request: %w", reqErr)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "application/json")
+
+		resp, reqErr := c.httpClient.Do(req)
+		if reqErr != nil {
+			return 0, nil, fmt.Errorf("add client request failed: %w", reqErr)
+		}
+		defer closeResponseBody(resp)
+
+		body, reqErr := io.ReadAll(io.LimitReader(resp.Body, config.MaxResponseSize))
+		if reqErr != nil {
+			return 0, nil, fmt.Errorf("failed to read response: %w", reqErr)
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			return resp.StatusCode, body, fmt.Errorf("server returned HTTP %d: %s", resp.StatusCode, truncateString(string(body), 200))
+		}
+
+		return resp.StatusCode, body, nil
+	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("add client request failed: %w", err)
-	}
-	defer closeResponseBody(resp)
-
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, config.MaxResponseSize))
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("server returned HTTP %d: %s", resp.StatusCode, truncateString(string(respBody), 200))
+		return nil, err
 	}
 
 	// Log response at DEBUG level only (may contain sensitive data)
@@ -384,26 +507,34 @@ func (c *Client) DeleteClient(ctx context.Context, inboundID int, clientID strin
 // doDeleteClient performs the actual delete client request.
 func (c *Client) doDeleteClient(ctx context.Context, inboundID int, clientID string) error {
 	deleteURL := fmt.Sprintf("%s/panel/api/inbounds/%d/delClient/%s", c.host, inboundID, clientID)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, deleteURL, nil)
+
+	var respBody []byte
+	respBody, err := c.doRequestWithAuthRetry(ctx, func() (int, []byte, error) {
+		req, reqErr := http.NewRequestWithContext(ctx, http.MethodPost, deleteURL, nil)
+		if reqErr != nil {
+			return 0, nil, fmt.Errorf("failed to create delete request: %w", reqErr)
+		}
+		req.Header.Set("Accept", "application/json")
+
+		resp, reqErr := c.httpClient.Do(req)
+		if reqErr != nil {
+			return 0, nil, fmt.Errorf("delete client request failed: %w", reqErr)
+		}
+		defer closeResponseBody(resp)
+
+		body, reqErr := io.ReadAll(io.LimitReader(resp.Body, config.MaxResponseSize))
+		if reqErr != nil {
+			return 0, nil, fmt.Errorf("failed to read response: %w", reqErr)
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			return resp.StatusCode, body, fmt.Errorf("server returned HTTP %d: %s", resp.StatusCode, truncateString(string(body), 200))
+		}
+
+		return resp.StatusCode, body, nil
+	})
 	if err != nil {
-		return fmt.Errorf("failed to create delete request: %w", err)
-	}
-
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("delete client request failed: %w", err)
-	}
-	defer closeResponseBody(resp)
-
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, config.MaxResponseSize))
-	if err != nil {
-		return fmt.Errorf("failed to read response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("server returned HTTP %d: %s", resp.StatusCode, truncateString(string(respBody), 200))
+		return err
 	}
 
 	var apiResp APIResponse
@@ -473,27 +604,35 @@ func (c *Client) doUpdateClient(ctx context.Context, inboundID int, clientID, em
 
 	// POST to /panel/api/inbounds/updateClient/{clientID}
 	updateURL := fmt.Sprintf("%s/panel/api/inbounds/updateClient/%s", c.host, clientID)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, updateURL, reader)
+
+	var respBody []byte
+	respBody, err = c.doRequestWithAuthRetry(ctx, func() (int, []byte, error) {
+		req, reqErr := http.NewRequestWithContext(ctx, http.MethodPost, updateURL, reader)
+		if reqErr != nil {
+			return 0, nil, fmt.Errorf("failed to create request: %w", reqErr)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "application/json")
+
+		resp, reqErr := c.httpClient.Do(req)
+		if reqErr != nil {
+			return 0, nil, fmt.Errorf("update client request failed: %w", reqErr)
+		}
+		defer closeResponseBody(resp)
+
+		body, reqErr := io.ReadAll(io.LimitReader(resp.Body, config.MaxResponseSize))
+		if reqErr != nil {
+			return 0, nil, fmt.Errorf("failed to read response: %w", reqErr)
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			return resp.StatusCode, body, fmt.Errorf("server returned HTTP %d: %s", resp.StatusCode, truncateString(string(body), 200))
+		}
+
+		return resp.StatusCode, body, nil
+	})
 	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("update client request failed: %w", err)
-	}
-	defer closeResponseBody(resp)
-
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, config.MaxResponseSize))
-	if err != nil {
-		return fmt.Errorf("failed to read response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("server returned HTTP %d: %s", resp.StatusCode, truncateString(string(respBody), 200))
+		return err
 	}
 
 	var apiResp APIResponse
@@ -526,26 +665,34 @@ func (c *Client) GetClientTraffic(ctx context.Context, email string) (*ClientTra
 // doGetClientTraffic performs the actual get client traffic request.
 func (c *Client) doGetClientTraffic(ctx context.Context, email string) (*ClientTraffic, error) {
 	trafficURL := fmt.Sprintf("%s/panel/api/inbounds/getClientTraffics/%s", c.host, url.PathEscape(email))
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, trafficURL, nil)
+
+	var respBody []byte
+	respBody, err := c.doRequestWithAuthRetry(ctx, func() (int, []byte, error) {
+		req, reqErr := http.NewRequestWithContext(ctx, http.MethodGet, trafficURL, nil)
+		if reqErr != nil {
+			return 0, nil, fmt.Errorf("failed to create request: %w", reqErr)
+		}
+		req.Header.Set("Accept", "application/json")
+
+		resp, reqErr := c.httpClient.Do(req)
+		if reqErr != nil {
+			return 0, nil, fmt.Errorf("get client traffic request failed: %w", reqErr)
+		}
+		defer closeResponseBody(resp)
+
+		body, reqErr := io.ReadAll(io.LimitReader(resp.Body, config.MaxResponseSize))
+		if reqErr != nil {
+			return 0, nil, fmt.Errorf("failed to read response: %w", reqErr)
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			return resp.StatusCode, body, fmt.Errorf("server returned HTTP %d: %s", resp.StatusCode, truncateString(string(body), 200))
+		}
+
+		return resp.StatusCode, body, nil
+	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("get client traffic request failed: %w", err)
-	}
-	defer closeResponseBody(resp)
-
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, config.MaxResponseSize))
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("server returned HTTP %d: %s", resp.StatusCode, truncateString(string(respBody), 200))
+		return nil, err
 	}
 
 	var apiResp APIResponse
@@ -579,6 +726,16 @@ func (c *Client) CircuitBreakerState() CircuitState {
 	return c.breaker.State()
 }
 
+// LoginCount returns the number of successful logins performed.
+func (c *Client) LoginCount() int64 {
+	return atomic.LoadInt64(&c.loginCount)
+}
+
+// SessionFailCount returns the number of session verification failures.
+func (c *Client) SessionFailCount() int64 {
+	return atomic.LoadInt64(&c.sessionFailCount)
+}
+
 // GetExternalURL extracts the base URL (scheme + host) from a full URL.
 // Returns the original host if URL parsing fails.
 // Example: "http://example.com:2053/sub/abc123" -> "http://example.com:2053"
@@ -607,6 +764,16 @@ func truncateString(s string, maxLen int) string {
 	return s[:maxLen] + "..."
 }
 
+// isRetryable checks if an error is worth retrying.
+// DNS errors (no such host) are not retryable as they indicate a configuration problem.
+func isRetryable(err error) bool {
+	if err == nil {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	return !strings.Contains(msg, "no such host")
+}
+
 // RetryWithBackoff executes a function with exponential backoff retry.
 // Exported for use in other packages that need retry logic for XUI operations.
 func RetryWithBackoff(ctx context.Context, maxRetries int, initialDelay time.Duration, fn func() error) error {
@@ -618,6 +785,13 @@ func RetryWithBackoff(ctx context.Context, maxRetries int, initialDelay time.Dur
 		if err == nil {
 			return nil
 		}
+
+		if !isRetryable(err) {
+			logger.Warn("Non-retryable XUI error, failing immediately",
+				zap.Error(err))
+			return err
+		}
+
 		lastErr = err
 
 		if i < maxRetries-1 {
@@ -639,8 +813,8 @@ func RetryWithBackoff(ctx context.Context, maxRetries int, initialDelay time.Dur
 }
 
 func (c *Client) Close() error {
-	if transport, ok := c.httpClient.Transport.(*http.Transport); ok {
-		transport.CloseIdleConnections()
+	if c.transport != nil {
+		c.transport.CloseIdleConnections()
 	}
 	return nil
 }

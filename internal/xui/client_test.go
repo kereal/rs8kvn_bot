@@ -31,7 +31,7 @@ func TestMain(m *testing.M) {
 }
 
 func TestNewClient(t *testing.T) {
-	client, err := NewClient("http://localhost:2053", "admin", "password")
+	client, err := NewClient("http://localhost:2053", "admin", "password", 15*time.Minute)
 	require.NoError(t, err, "NewClient() returned error")
 	require.NotNil(t, client, "NewClient() returned nil")
 
@@ -42,7 +42,7 @@ func TestNewClient(t *testing.T) {
 }
 
 func TestNewClient_HTTPClientConfig(t *testing.T) {
-	client, err := NewClient("http://localhost:2053", "admin", "password")
+	client, err := NewClient("http://localhost:2053", "admin", "password", 15*time.Minute)
 	require.NoError(t, err, "NewClient() returned error")
 
 	assert.Equal(t, 10*time.Second, client.httpClient.Timeout, "httpClient.Timeout")
@@ -63,7 +63,7 @@ func TestLogin_Success(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClient(server.URL, "admin", "password")
+	client, err := NewClient(server.URL, "admin", "password", 15*time.Minute)
 	require.NoError(t, err, "NewClient() returned error")
 	ctx := context.Background()
 
@@ -82,7 +82,7 @@ func TestLogin_Failure(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClient(server.URL, "admin", "wrongpassword")
+	client, err := NewClient(server.URL, "admin", "wrongpassword", 15*time.Minute)
 	require.NoError(t, err, "NewClient() returned error")
 	ctx := context.Background()
 
@@ -98,7 +98,7 @@ func TestLogin_ContextCancellation(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClient(server.URL, "admin", "password")
+	client, err := NewClient(server.URL, "admin", "password", 15*time.Minute)
 	require.NoError(t, err, "NewClient() returned error")
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
@@ -113,6 +113,9 @@ func TestAddClientWithID_Success(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case "/panel/api/server/status":
+			resp := APIResponse{Success: false}
+			json.NewEncoder(w).Encode(resp)
 		case "/login":
 			loginCalled = true
 			resp := APIResponse{Success: true}
@@ -128,7 +131,7 @@ func TestAddClientWithID_Success(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClient(server.URL, "admin", "password")
+	client, err := NewClient(server.URL, "admin", "password", 15*time.Minute)
 	require.NoError(t, err, "NewClient() returned error")
 	ctx := context.Background()
 
@@ -156,7 +159,7 @@ func TestAddClientWithID_ServerError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClient(server.URL, "admin", "password")
+	client, err := NewClient(server.URL, "admin", "password", 15*time.Minute)
 	require.NoError(t, err, "NewClient() returned error")
 	ctx := context.Background()
 
@@ -164,7 +167,7 @@ func TestAddClientWithID_ServerError(t *testing.T) {
 }
 
 func TestGetSubscriptionLink(t *testing.T) {
-	client, err := NewClient("http://localhost:2053", "admin", "password")
+	client, err := NewClient("http://localhost:2053", "admin", "password", 15*time.Minute)
 	require.NoError(t, err, "NewClient() returned error")
 
 	link := client.GetSubscriptionLink("http://localhost:2053", "sub123", "sub")
@@ -173,7 +176,7 @@ func TestGetSubscriptionLink(t *testing.T) {
 }
 
 func TestGetSubscriptionLink_CustomPath(t *testing.T) {
-	client, err := NewClient("http://localhost:2053", "admin", "password")
+	client, err := NewClient("http://localhost:2053", "admin", "password", 15*time.Minute)
 	require.NoError(t, err, "NewClient() returned error")
 
 	link := client.GetSubscriptionLink("http://localhost:2053", "sub456", "custom")
@@ -182,7 +185,7 @@ func TestGetSubscriptionLink_CustomPath(t *testing.T) {
 }
 
 func TestAddClientWithID_InvalidInboundID(t *testing.T) {
-	client, err := NewClient("http://localhost:2053", "admin", "password")
+	client, err := NewClient("http://localhost:2053", "admin", "password", 15*time.Minute)
 	require.NoError(t, err, "NewClient() returned error")
 	ctx := context.Background()
 
@@ -191,7 +194,7 @@ func TestAddClientWithID_InvalidInboundID(t *testing.T) {
 }
 
 func TestAddClientWithID_EmptyClientID(t *testing.T) {
-	client, err := NewClient("http://localhost:2053", "admin", "password")
+	client, err := NewClient("http://localhost:2053", "admin", "password", 15*time.Minute)
 	require.NoError(t, err, "NewClient() returned error")
 	ctx := context.Background()
 
@@ -315,7 +318,7 @@ func TestClient_LoginSession(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClient(server.URL, "admin", "password")
+	client, err := NewClient(server.URL, "admin", "password", 15*time.Minute)
 	require.NoError(t, err, "NewClient() returned error")
 	ctx := context.Background()
 
@@ -339,7 +342,7 @@ func TestClient_EnsureLoggedIn(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClient(server.URL, "admin", "password")
+	client, err := NewClient(server.URL, "admin", "password", 15*time.Minute)
 	require.NoError(t, err, "NewClient() returned error")
 
 	// Test ensureLoggedIn when not logged in
@@ -357,7 +360,7 @@ func TestClient_Ping(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClient(server.URL, "admin", "password")
+	client, err := NewClient(server.URL, "admin", "password", 15*time.Minute)
 	require.NoError(t, err, "NewClient() returned error")
 
 	err = client.Ping(context.Background())
@@ -366,7 +369,7 @@ func TestClient_Ping(t *testing.T) {
 }
 
 func TestAddClientWithID_EmptySubID(t *testing.T) {
-	client, err := NewClient("http://localhost:2053", "admin", "password")
+	client, err := NewClient("http://localhost:2053", "admin", "password", 15*time.Minute)
 	require.NoError(t, err, "NewClient() returned error")
 	ctx := context.Background()
 
@@ -438,6 +441,9 @@ func TestAddClient_Success(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case "/panel/api/server/status":
+			resp := APIResponse{Success: false}
+			json.NewEncoder(w).Encode(resp)
 		case "/login":
 			loginCalled = true
 			resp := APIResponse{Success: true}
@@ -453,7 +459,7 @@ func TestAddClient_Success(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClient(server.URL, "admin", "password")
+	client, err := NewClient(server.URL, "admin", "password", 15*time.Minute)
 	require.NoError(t, err, "NewClient() returned error")
 	ctx := context.Background()
 
@@ -470,6 +476,11 @@ func TestAddClient_Success(t *testing.T) {
 
 func TestAddClient_LoginFailure(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/panel/api/server/status" {
+			resp := APIResponse{Success: false}
+			json.NewEncoder(w).Encode(resp)
+			return
+		}
 		if r.URL.Path == "/login" {
 			resp := APIResponse{Success: false, Msg: "Invalid credentials"}
 			json.NewEncoder(w).Encode(resp)
@@ -479,7 +490,7 @@ func TestAddClient_LoginFailure(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClient(server.URL, "admin", "wrongpassword")
+	client, err := NewClient(server.URL, "admin", "wrongpassword", 15*time.Minute)
 	require.NoError(t, err, "NewClient() returned error")
 	ctx := context.Background()
 
@@ -489,6 +500,11 @@ func TestAddClient_LoginFailure(t *testing.T) {
 
 func TestAddClientWithID_SuccessFalseButMessageIndicatesSuccess(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/panel/api/server/status" {
+			resp := APIResponse{Success: false}
+			json.NewEncoder(w).Encode(resp)
+			return
+		}
 		if r.URL.Path == "/login" {
 			resp := APIResponse{Success: true}
 			json.NewEncoder(w).Encode(resp)
@@ -501,7 +517,7 @@ func TestAddClientWithID_SuccessFalseButMessageIndicatesSuccess(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClient(server.URL, "admin", "password")
+	client, err := NewClient(server.URL, "admin", "password", 15*time.Minute)
 	require.NoError(t, err, "NewClient() returned error")
 	ctx := context.Background()
 
@@ -515,6 +531,9 @@ func TestEnsureLoggedIn_CachedSession(t *testing.T) {
 	loginCount := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case "/panel/api/server/status":
+			resp := APIResponse{Success: false}
+			json.NewEncoder(w).Encode(resp)
 		case "/login":
 			loginCount++
 			resp := APIResponse{Success: true}
@@ -527,7 +546,7 @@ func TestEnsureLoggedIn_CachedSession(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClient(server.URL, "admin", "password")
+	client, err := NewClient(server.URL, "admin", "password", 15*time.Minute)
 	require.NoError(t, err, "NewClient() returned error")
 	ctx := context.Background()
 
@@ -547,7 +566,7 @@ func TestDoLogin_InvalidJSONResponse(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClient(server.URL, "admin", "password")
+	client, err := NewClient(server.URL, "admin", "password", 15*time.Minute)
 	require.NoError(t, err, "NewClient() returned error")
 	ctx := context.Background()
 
@@ -599,6 +618,9 @@ func TestClientSettings_JSON(t *testing.T) {
 func TestGetClientTraffic_Success(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case "/panel/api/server/status":
+			resp := APIResponse{Success: false}
+			json.NewEncoder(w).Encode(resp)
 		case "/login":
 			resp := APIResponse{Success: true}
 			json.NewEncoder(w).Encode(resp)
@@ -632,7 +654,7 @@ func TestGetClientTraffic_Success(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClient(server.URL, "admin", "password")
+	client, err := NewClient(server.URL, "admin", "password", 15*time.Minute)
 	require.NoError(t, err, "NewClient() returned error")
 	ctx := context.Background()
 
@@ -648,6 +670,9 @@ func TestGetClientTraffic_Success(t *testing.T) {
 func TestGetClientTraffic_ClientNotFound(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case "/panel/api/server/status":
+			resp := APIResponse{Success: false}
+			json.NewEncoder(w).Encode(resp)
 		case "/login":
 			resp := APIResponse{Success: true}
 			json.NewEncoder(w).Encode(resp)
@@ -664,7 +689,7 @@ func TestGetClientTraffic_ClientNotFound(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClient(server.URL, "admin", "password")
+	client, err := NewClient(server.URL, "admin", "password", 15*time.Minute)
 	require.NoError(t, err, "NewClient() returned error")
 	ctx := context.Background()
 
@@ -675,6 +700,9 @@ func TestGetClientTraffic_ClientNotFound(t *testing.T) {
 func TestGetClientTraffic_ServerError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case "/panel/api/server/status":
+			resp := APIResponse{Success: false}
+			json.NewEncoder(w).Encode(resp)
 		case "/login":
 			resp := APIResponse{Success: true}
 			json.NewEncoder(w).Encode(resp)
@@ -691,7 +719,7 @@ func TestGetClientTraffic_ServerError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClient(server.URL, "admin", "password")
+	client, err := NewClient(server.URL, "admin", "password", 15*time.Minute)
 	require.NoError(t, err, "NewClient() returned error")
 	ctx := context.Background()
 
@@ -702,6 +730,11 @@ func TestGetClientTraffic_ServerError(t *testing.T) {
 
 func TestGetClientTraffic_LoginFailure(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/panel/api/server/status" {
+			resp := APIResponse{Success: false}
+			json.NewEncoder(w).Encode(resp)
+			return
+		}
 		if r.URL.Path == "/login" {
 			resp := APIResponse{Success: false, Msg: "Invalid credentials"}
 			json.NewEncoder(w).Encode(resp)
@@ -711,7 +744,7 @@ func TestGetClientTraffic_LoginFailure(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClient(server.URL, "admin", "wrongpassword")
+	client, err := NewClient(server.URL, "admin", "wrongpassword", 15*time.Minute)
 	require.NoError(t, err, "NewClient() returned error")
 	ctx := context.Background()
 
@@ -723,6 +756,9 @@ func TestGetClientTraffic_LoginFailure(t *testing.T) {
 func TestGetClientTraffic_ContextCancellation(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case "/panel/api/server/status":
+			resp := APIResponse{Success: false}
+			json.NewEncoder(w).Encode(resp)
 		case "/login":
 			resp := APIResponse{Success: true}
 			json.NewEncoder(w).Encode(resp)
@@ -738,7 +774,7 @@ func TestGetClientTraffic_ContextCancellation(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClient(server.URL, "admin", "password")
+	client, err := NewClient(server.URL, "admin", "password", 15*time.Minute)
 	require.NoError(t, err, "NewClient() returned error")
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
@@ -750,6 +786,9 @@ func TestGetClientTraffic_ContextCancellation(t *testing.T) {
 func TestGetClientTraffic_InvalidJSONResponse(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case "/panel/api/server/status":
+			resp := APIResponse{Success: false}
+			json.NewEncoder(w).Encode(resp)
 		case "/login":
 			resp := APIResponse{Success: true}
 			json.NewEncoder(w).Encode(resp)
@@ -762,7 +801,7 @@ func TestGetClientTraffic_InvalidJSONResponse(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClient(server.URL, "admin", "password")
+	client, err := NewClient(server.URL, "admin", "password", 15*time.Minute)
 	require.NoError(t, err, "NewClient() returned error")
 	ctx := context.Background()
 
@@ -828,6 +867,9 @@ func TestClientTraffic_TrafficCalculation(t *testing.T) {
 func TestDeleteClient_Success(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case "/panel/api/server/status":
+			resp := APIResponse{Success: false}
+			json.NewEncoder(w).Encode(resp)
 		case "/login":
 			resp := APIResponse{Success: true}
 			json.NewEncoder(w).Encode(resp)
@@ -842,7 +884,7 @@ func TestDeleteClient_Success(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClient(server.URL, "admin", "password")
+	client, err := NewClient(server.URL, "admin", "password", 15*time.Minute)
 	require.NoError(t, err, "NewClient() returned error")
 	ctx := context.Background()
 
@@ -853,6 +895,9 @@ func TestDeleteClient_Success(t *testing.T) {
 func TestDeleteClient_ServerError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case "/panel/api/server/status":
+			resp := APIResponse{Success: false}
+			json.NewEncoder(w).Encode(resp)
 		case "/login":
 			resp := APIResponse{Success: true}
 			json.NewEncoder(w).Encode(resp)
@@ -866,7 +911,7 @@ func TestDeleteClient_ServerError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClient(server.URL, "admin", "password")
+	client, err := NewClient(server.URL, "admin", "password", 15*time.Minute)
 	require.NoError(t, err, "NewClient() returned error")
 	ctx := context.Background()
 
@@ -877,6 +922,11 @@ func TestDeleteClient_ServerError(t *testing.T) {
 
 func TestDeleteClient_LoginFailure(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/panel/api/server/status" {
+			resp := APIResponse{Success: false}
+			json.NewEncoder(w).Encode(resp)
+			return
+		}
 		if r.URL.Path == "/login" {
 			resp := APIResponse{Success: false, Msg: "Invalid credentials"}
 			json.NewEncoder(w).Encode(resp)
@@ -886,7 +936,7 @@ func TestDeleteClient_LoginFailure(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClient(server.URL, "admin", "wrongpassword")
+	client, err := NewClient(server.URL, "admin", "wrongpassword", 15*time.Minute)
 	require.NoError(t, err, "NewClient() returned error")
 	ctx := context.Background()
 
@@ -898,6 +948,9 @@ func TestDeleteClient_LoginFailure(t *testing.T) {
 func TestDeleteClient_ContextCancellation(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case "/panel/api/server/status":
+			resp := APIResponse{Success: false}
+			json.NewEncoder(w).Encode(resp)
 		case "/login":
 			resp := APIResponse{Success: true}
 			json.NewEncoder(w).Encode(resp)
@@ -911,7 +964,7 @@ func TestDeleteClient_ContextCancellation(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClient(server.URL, "admin", "password")
+	client, err := NewClient(server.URL, "admin", "password", 15*time.Minute)
 	require.NoError(t, err, "NewClient() returned error")
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
@@ -923,6 +976,9 @@ func TestDeleteClient_ContextCancellation(t *testing.T) {
 func TestDeleteClient_InvalidJSONResponse(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case "/panel/api/server/status":
+			resp := APIResponse{Success: false}
+			json.NewEncoder(w).Encode(resp)
 		case "/login":
 			resp := APIResponse{Success: true}
 			json.NewEncoder(w).Encode(resp)
@@ -935,7 +991,7 @@ func TestDeleteClient_InvalidJSONResponse(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClient(server.URL, "admin", "password")
+	client, err := NewClient(server.URL, "admin", "password", 15*time.Minute)
 	require.NoError(t, err, "NewClient() returned error")
 	ctx := context.Background()
 
@@ -950,7 +1006,7 @@ func TestDeleteClient_RequestCreationError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClient(server.URL, "admin", "password")
+	client, err := NewClient(server.URL, "admin", "password", 15*time.Minute)
 	require.NoError(t, err, "NewClient() returned error")
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -967,7 +1023,7 @@ func TestGetClientTraffic_RequestCreationError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClient(server.URL, "admin", "password")
+	client, err := NewClient(server.URL, "admin", "password", 15*time.Minute)
 	require.NoError(t, err, "NewClient() returned error")
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -978,7 +1034,7 @@ func TestGetClientTraffic_RequestCreationError(t *testing.T) {
 }
 
 func TestGetSubscriptionLink_WithCustomPath(t *testing.T) {
-	client, err := NewClient("http://localhost:2053", "admin", "password")
+	client, err := NewClient("http://localhost:2053", "admin", "password", 15*time.Minute)
 	require.NoError(t, err, "NewClient() returned error")
 	link := client.GetSubscriptionLink("http://example.com", "abc123", "/custom")
 	assert.Contains(t, link, "/custom", "GetSubscriptionLink() should include custom path")
@@ -996,6 +1052,11 @@ func TestGetExternalURL_Empty(t *testing.T) {
 
 func TestAddClientWithID_LoginError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/panel/api/server/status" {
+			resp := APIResponse{Success: false}
+			json.NewEncoder(w).Encode(resp)
+			return
+		}
 		if r.URL.Path == "/login" {
 			w.WriteHeader(http.StatusUnauthorized)
 			w.Write([]byte("unauthorized"))
@@ -1005,7 +1066,7 @@ func TestAddClientWithID_LoginError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClient(server.URL, "admin", "password")
+	client, err := NewClient(server.URL, "admin", "password", 15*time.Minute)
 	require.NoError(t, err, "NewClient() returned error")
 	ctx := context.Background()
 
@@ -1020,7 +1081,7 @@ func TestAddClientWithID_RequestCreationError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClient(server.URL, "admin", "password")
+	client, err := NewClient(server.URL, "admin", "password", 15*time.Minute)
 	require.NoError(t, err, "NewClient() returned error")
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -1037,7 +1098,7 @@ func TestClient_CircuitBreakerState(t *testing.T) {
 	}))
 	defer failingServer.Close()
 
-	client, err := NewClient(failingServer.URL, "admin", "password")
+	client, err := NewClient(failingServer.URL, "admin", "password", 15*time.Minute)
 	require.NoError(t, err, "NewClient() returned error")
 	ctx := context.Background()
 
@@ -1058,7 +1119,7 @@ func TestClient_GetExternalURL(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClient(server.URL, "admin", "password")
+	client, err := NewClient(server.URL, "admin", "password", 15*time.Minute)
 	require.NoError(t, err, "NewClient() returned error")
 
 	tests := []struct {
@@ -1120,6 +1181,9 @@ func TestUpdateClient_Success(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case "/panel/api/server/status":
+			resp := APIResponse{Success: false}
+			json.NewEncoder(w).Encode(resp)
 		case "/login":
 			loginCalled = true
 			resp := APIResponse{Success: true}
@@ -1135,7 +1199,7 @@ func TestUpdateClient_Success(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClient(server.URL, "admin", "password")
+	client, err := NewClient(server.URL, "admin", "password", 15*time.Minute)
 	require.NoError(t, err, "NewClient() returned error")
 	ctx := context.Background()
 
@@ -1149,6 +1213,9 @@ func TestUpdateClient_Success(t *testing.T) {
 func TestUpdateClient_Error(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case "/panel/api/server/status":
+			resp := APIResponse{Success: false}
+			json.NewEncoder(w).Encode(resp)
 		case "/login":
 			resp := APIResponse{Success: true}
 			json.NewEncoder(w).Encode(resp)
@@ -1160,7 +1227,7 @@ func TestUpdateClient_Error(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClient(server.URL, "admin", "password")
+	client, err := NewClient(server.URL, "admin", "password", 15*time.Minute)
 	require.NoError(t, err, "NewClient() returned error")
 	ctx := context.Background()
 
@@ -1175,7 +1242,7 @@ func TestUpdateClient_EmptyClientID(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClient(server.URL, "admin", "password")
+	client, err := NewClient(server.URL, "admin", "password", 15*time.Minute)
 	require.NoError(t, err, "NewClient() returned error")
 	ctx := context.Background()
 
@@ -1184,25 +1251,34 @@ func TestUpdateClient_EmptyClientID(t *testing.T) {
 }
 
 func TestPing_Success(t *testing.T) {
+	loginCalled := false
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, "/login", r.URL.Path, "Expected /login path")
-		assert.Equal(t, "POST", r.Method, "Expected POST method")
-
-		resp := APIResponse{
-			Success: true,
-			Msg:     "Login successful",
+		switch r.URL.Path {
+		case "/panel/api/server/status":
+			resp := APIResponse{Success: false}
+			json.NewEncoder(w).Encode(resp)
+		case "/login":
+			loginCalled = true
+			assert.Equal(t, "POST", r.Method, "Expected POST method")
+			resp := APIResponse{
+				Success: true,
+				Msg:     "Login successful",
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(resp)
+		default:
+			t.Errorf("Unexpected path: %s", r.URL.Path)
 		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 
-	client, err := NewClient(server.URL, "admin", "password")
+	client, err := NewClient(server.URL, "admin", "password", 15*time.Minute)
 	require.NoError(t, err, "NewClient() returned error")
 	ctx := context.Background()
 
 	err = client.Ping(ctx)
 	require.NoError(t, err, "Ping() should return nil for successful ping")
+	assert.True(t, loginCalled, "Login should have been called")
 }
 
 func TestPing_Failure(t *testing.T) {
@@ -1216,7 +1292,7 @@ func TestPing_Failure(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClient(server.URL, "admin", "password")
+	client, err := NewClient(server.URL, "admin", "password", 15*time.Minute)
 	require.NoError(t, err, "NewClient() returned error")
 	ctx := context.Background()
 
@@ -1231,7 +1307,7 @@ func TestClient_Close(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClient(server.URL, "admin", "password")
+	client, err := NewClient(server.URL, "admin", "password", 15*time.Minute)
 	require.NoError(t, err)
 
 	// Close should not error even without any active connections
@@ -1246,7 +1322,7 @@ func TestClient_Close_MultipleTimes(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClient(server.URL, "admin", "password")
+	client, err := NewClient(server.URL, "admin", "password", 15*time.Minute)
 	require.NoError(t, err)
 
 	// Multiple closes should be safe
@@ -1274,13 +1350,13 @@ func TestGetExpiryTimeMillis_FutureTime(t *testing.T) {
 }
 
 func TestNewClient_TrailingSlashTrimmed(t *testing.T) {
-	client, err := NewClient("http://localhost:2053/", "admin", "password")
+	client, err := NewClient("http://localhost:2053/", "admin", "password", 15*time.Minute)
 	require.NoError(t, err)
 	assert.Equal(t, "http://localhost:2053", client.host, "Trailing slash should be trimmed")
 }
 
 func TestNewClient_MultipleTrailingSlashes(t *testing.T) {
-	client, err := NewClient("http://localhost:2053///", "admin", "password")
+	client, err := NewClient("http://localhost:2053///", "admin", "password", 15*time.Minute)
 	require.NoError(t, err)
 	// TrimSuffix only removes one trailing slash
 	assert.Contains(t, client.host, "http://localhost:2053", "Should trim at least one trailing slash")
@@ -1288,6 +1364,11 @@ func TestNewClient_MultipleTrailingSlashes(t *testing.T) {
 
 func TestUpdateClient_LoginFailure(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/panel/api/server/status" {
+			resp := APIResponse{Success: false}
+			json.NewEncoder(w).Encode(resp)
+			return
+		}
 		if r.URL.Path == "/login" {
 			resp := APIResponse{Success: false, Msg: "Invalid credentials"}
 			json.NewEncoder(w).Encode(resp)
@@ -1297,7 +1378,7 @@ func TestUpdateClient_LoginFailure(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClient(server.URL, "admin", "wrongpassword")
+	client, err := NewClient(server.URL, "admin", "wrongpassword", 15*time.Minute)
 	require.NoError(t, err)
 	ctx := context.Background()
 
@@ -1309,6 +1390,9 @@ func TestUpdateClient_LoginFailure(t *testing.T) {
 func TestUpdateClient_ContextCancellation(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case "/panel/api/server/status":
+			resp := APIResponse{Success: false}
+			json.NewEncoder(w).Encode(resp)
 		case "/login":
 			resp := APIResponse{Success: true}
 			json.NewEncoder(w).Encode(resp)
@@ -1322,7 +1406,7 @@ func TestUpdateClient_ContextCancellation(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClient(server.URL, "admin", "password")
+	client, err := NewClient(server.URL, "admin", "password", 15*time.Minute)
 	require.NoError(t, err)
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
@@ -1334,6 +1418,9 @@ func TestUpdateClient_ContextCancellation(t *testing.T) {
 func TestUpdateClient_InvalidJSONResponse(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case "/panel/api/server/status":
+			resp := APIResponse{Success: false}
+			json.NewEncoder(w).Encode(resp)
 		case "/login":
 			resp := APIResponse{Success: true}
 			json.NewEncoder(w).Encode(resp)
@@ -1346,7 +1433,7 @@ func TestUpdateClient_InvalidJSONResponse(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClient(server.URL, "admin", "password")
+	client, err := NewClient(server.URL, "admin", "password", 15*time.Minute)
 	require.NoError(t, err)
 	ctx := context.Background()
 
@@ -1357,6 +1444,9 @@ func TestUpdateClient_InvalidJSONResponse(t *testing.T) {
 func TestAddClientWithID_DefaultResetDays(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case "/panel/api/server/status":
+			resp := APIResponse{Success: false}
+			json.NewEncoder(w).Encode(resp)
 		case "/login":
 			resp := APIResponse{Success: true}
 			json.NewEncoder(w).Encode(resp)
@@ -1370,7 +1460,7 @@ func TestAddClientWithID_DefaultResetDays(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClient(server.URL, "admin", "password")
+	client, err := NewClient(server.URL, "admin", "password", 15*time.Minute)
 	require.NoError(t, err)
 	ctx := context.Background()
 
@@ -1384,6 +1474,9 @@ func TestAddClientWithID_DefaultResetDays(t *testing.T) {
 func TestAddClientWithID_ContextCancellation(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case "/panel/api/server/status":
+			resp := APIResponse{Success: false}
+			json.NewEncoder(w).Encode(resp)
 		case "/login":
 			resp := APIResponse{Success: true}
 			json.NewEncoder(w).Encode(resp)
@@ -1397,7 +1490,7 @@ func TestAddClientWithID_ContextCancellation(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClient(server.URL, "admin", "password")
+	client, err := NewClient(server.URL, "admin", "password", 15*time.Minute)
 	require.NoError(t, err)
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
@@ -1409,6 +1502,9 @@ func TestAddClientWithID_ContextCancellation(t *testing.T) {
 func TestAddClientWithID_InvalidJSONResponse(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case "/panel/api/server/status":
+			resp := APIResponse{Success: false}
+			json.NewEncoder(w).Encode(resp)
 		case "/login":
 			resp := APIResponse{Success: true}
 			json.NewEncoder(w).Encode(resp)
@@ -1421,7 +1517,7 @@ func TestAddClientWithID_InvalidJSONResponse(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClient(server.URL, "admin", "password")
+	client, err := NewClient(server.URL, "admin", "password", 15*time.Minute)
 	require.NoError(t, err)
 	ctx := context.Background()
 
@@ -1431,6 +1527,11 @@ func TestAddClientWithID_InvalidJSONResponse(t *testing.T) {
 
 func TestGetClientTraffic_EmptyEmail(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/panel/api/server/status" {
+			resp := APIResponse{Success: true}
+			json.NewEncoder(w).Encode(resp)
+			return
+		}
 		if r.URL.Path == "/login" {
 			resp := APIResponse{Success: true}
 			json.NewEncoder(w).Encode(resp)
@@ -1443,7 +1544,7 @@ func TestGetClientTraffic_EmptyEmail(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClient(server.URL, "admin", "password")
+	client, err := NewClient(server.URL, "admin", "password", 15*time.Minute)
 	require.NoError(t, err)
 	ctx := context.Background()
 
@@ -1453,7 +1554,7 @@ func TestGetClientTraffic_EmptyEmail(t *testing.T) {
 }
 
 func TestGetSubscriptionLink_TrailingSlashInBaseURL(t *testing.T) {
-	client, err := NewClient("http://localhost:2053", "admin", "password")
+	client, err := NewClient("http://localhost:2053", "admin", "password", 15*time.Minute)
 	require.NoError(t, err)
 
 	link := client.GetSubscriptionLink("http://localhost:2053/", "sub123", "sub")
@@ -1524,6 +1625,9 @@ func TestMarshalJSON_UnmarshalableData(t *testing.T) {
 func TestClientSettings_ResetDayDefault(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case "/panel/api/server/status":
+			resp := APIResponse{Success: false}
+			json.NewEncoder(w).Encode(resp)
 		case "/login":
 			resp := APIResponse{Success: true}
 			json.NewEncoder(w).Encode(resp)
@@ -1537,7 +1641,7 @@ func TestClientSettings_ResetDayDefault(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClient(server.URL, "admin", "password")
+	client, err := NewClient(server.URL, "admin", "password", 15*time.Minute)
 	require.NoError(t, err)
 	ctx := context.Background()
 
@@ -1550,6 +1654,9 @@ func TestClientSettings_ResetDayDefault(t *testing.T) {
 func TestAddClientWithID_NegativeResetDays(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case "/panel/api/server/status":
+			resp := APIResponse{Success: false}
+			json.NewEncoder(w).Encode(resp)
 		case "/login":
 			resp := APIResponse{Success: true}
 			json.NewEncoder(w).Encode(resp)
@@ -1563,7 +1670,7 @@ func TestAddClientWithID_NegativeResetDays(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClient(server.URL, "admin", "password")
+	client, err := NewClient(server.URL, "admin", "password", 15*time.Minute)
 	require.NoError(t, err)
 	ctx := context.Background()
 

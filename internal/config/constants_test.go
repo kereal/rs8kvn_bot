@@ -17,7 +17,9 @@ func TestConstants_HTTPTimeouts(t *testing.T) {
 }
 
 func TestConstants_XUISession(t *testing.T) {
-	assert.Equal(t, 15*time.Minute, XUISessionValidity, "XUISessionValidity should be 15 minutes")
+	assert.Equal(t, 720, DefaultXUISessionMaxAgeMinutes, "DefaultXUISessionMaxAgeMinutes should be 720 (12h)")
+	assert.Equal(t, 5*time.Second, XUISessionVerifyTimeout, "XUISessionVerifyTimeout")
+	assert.Equal(t, 5*time.Second, XUILoginTimeout, "XUILoginTimeout")
 }
 
 func TestConstants_RateLimiter(t *testing.T) {

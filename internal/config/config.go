@@ -17,11 +17,12 @@ type Config struct {
 	TelegramAdminID  int64
 
 	// 3x-ui panel configuration
-	XUIHost      string
-	XUIUsername  string
-	XUIPassword  string
-	XUIInboundID int
-	XUISubPath   string
+	XUIHost                 string
+	XUIUsername             string
+	XUIPassword             string
+	XUIInboundID            int
+	XUISubPath              string
+	XUISessionMaxAgeMinutes int
 
 	// Database configuration
 	DatabasePath string
@@ -58,27 +59,28 @@ type Config struct {
 
 // configFlags holds typed flag values for config fields.
 type configFlags struct {
-	telegramBotToken   *flag.StringValue
-	telegramAdminID    *flag.Int64Value
-	xuiHost            *flag.StringValue
-	xuiUsername        *flag.StringValue
-	xuiPassword        *flag.StringValue
-	xuiInboundID       *flag.IntValue
-	xuiSubPath         *flag.StringValue
-	databasePath       *flag.StringValue
-	logFilePath        *flag.StringValue
-	logLevel           *flag.StringValue
-	trafficLimitGB     *flag.IntValue
-	heartbeatURL       *flag.StringValue
-	heartbeatInterval  *flag.IntValue
-	sentryDSN          *flag.StringValue
-	healthCheckPort    *flag.IntValue
-	siteURL            *flag.StringValue
-	trialDurationHours *flag.IntValue
-	trialRateLimit     *flag.IntValue
-	contactUsername    *flag.StringValue
-	donateCardNumber   *flag.StringValue
-	donateURL          *flag.StringValue
+	telegramBotToken        *flag.StringValue
+	telegramAdminID         *flag.Int64Value
+	xuiHost                 *flag.StringValue
+	xuiUsername             *flag.StringValue
+	xuiPassword             *flag.StringValue
+	xuiInboundID            *flag.IntValue
+	xuiSubPath              *flag.StringValue
+	xuiSessionMaxAgeMinutes *flag.IntValue
+	databasePath            *flag.StringValue
+	logFilePath             *flag.StringValue
+	logLevel                *flag.StringValue
+	trafficLimitGB          *flag.IntValue
+	heartbeatURL            *flag.StringValue
+	heartbeatInterval       *flag.IntValue
+	sentryDSN               *flag.StringValue
+	healthCheckPort         *flag.IntValue
+	siteURL                 *flag.StringValue
+	trialDurationHours      *flag.IntValue
+	trialRateLimit          *flag.IntValue
+	contactUsername         *flag.StringValue
+	donateCardNumber        *flag.StringValue
+	donateURL               *flag.StringValue
 }
 
 // registerFlags creates a Registry with all config flags registered.
@@ -86,27 +88,28 @@ func registerFlags() (*flag.Registry, *configFlags) {
 	r := flag.New()
 
 	f := &configFlags{
-		telegramBotToken:   flag.NewString(""),
-		telegramAdminID:    flag.NewInt64(0),
-		xuiHost:            flag.NewString("http://localhost:2053"),
-		xuiUsername:        flag.NewString(""),
-		xuiPassword:        flag.NewString(""),
-		xuiInboundID:       flag.NewInt(1),
-		xuiSubPath:         flag.NewString(DefaultXUISubPath),
-		databasePath:       flag.NewString(DefaultDatabasePath),
-		logFilePath:        flag.NewString(DefaultLogFilePath),
-		logLevel:           flag.NewString(DefaultLogLevel),
-		trafficLimitGB:     flag.NewInt(DefaultTrafficLimitGB),
-		heartbeatURL:       flag.NewString(""),
-		heartbeatInterval:  flag.NewInt(DefaultHeartbeatInterval),
-		sentryDSN:          flag.NewString(""),
-		healthCheckPort:    flag.NewInt(DefaultHealthCheckPort),
-		siteURL:            flag.NewString(DefaultSiteURL),
-		trialDurationHours: flag.NewInt(DefaultTrialDurationHours),
-		trialRateLimit:     flag.NewInt(DefaultTrialRateLimit),
-		contactUsername:    flag.NewString(ContactUsername),
-		donateCardNumber:   flag.NewString(DonateCardNumber),
-		donateURL:          flag.NewString(DonateURL),
+		telegramBotToken:        flag.NewString(""),
+		telegramAdminID:         flag.NewInt64(0),
+		xuiHost:                 flag.NewString("http://localhost:2053"),
+		xuiUsername:             flag.NewString(""),
+		xuiPassword:             flag.NewString(""),
+		xuiInboundID:            flag.NewInt(1),
+		xuiSubPath:              flag.NewString(DefaultXUISubPath),
+		xuiSessionMaxAgeMinutes: flag.NewInt(DefaultXUISessionMaxAgeMinutes),
+		databasePath:            flag.NewString(DefaultDatabasePath),
+		logFilePath:             flag.NewString(DefaultLogFilePath),
+		logLevel:                flag.NewString(DefaultLogLevel),
+		trafficLimitGB:          flag.NewInt(DefaultTrafficLimitGB),
+		heartbeatURL:            flag.NewString(""),
+		heartbeatInterval:       flag.NewInt(DefaultHeartbeatInterval),
+		sentryDSN:               flag.NewString(""),
+		healthCheckPort:         flag.NewInt(DefaultHealthCheckPort),
+		siteURL:                 flag.NewString(DefaultSiteURL),
+		trialDurationHours:      flag.NewInt(DefaultTrialDurationHours),
+		trialRateLimit:          flag.NewInt(DefaultTrialRateLimit),
+		contactUsername:         flag.NewString(ContactUsername),
+		donateCardNumber:        flag.NewString(DonateCardNumber),
+		donateURL:               flag.NewString(DonateURL),
 	}
 
 	r.Register("TELEGRAM_BOT_TOKEN", f.telegramBotToken)
@@ -116,6 +119,7 @@ func registerFlags() (*flag.Registry, *configFlags) {
 	r.Register("XUI_PASSWORD", f.xuiPassword)
 	r.Register("XUI_INBOUND_ID", f.xuiInboundID)
 	r.Register("XUI_SUB_PATH", f.xuiSubPath)
+	r.Register("XUI_SESSION_MAX_AGE_MINUTES", f.xuiSessionMaxAgeMinutes)
 	r.Register("DATABASE_PATH", f.databasePath)
 	r.Register("LOG_FILE_PATH", f.logFilePath)
 	r.Register("LOG_LEVEL", f.logLevel)
@@ -144,27 +148,28 @@ func Load() (*Config, error) {
 	}
 
 	cfg := &Config{
-		TelegramBotToken:   f.telegramBotToken.Get(),
-		TelegramAdminID:    f.telegramAdminID.Get(),
-		XUIHost:            f.xuiHost.Get(),
-		XUIUsername:        f.xuiUsername.Get(),
-		XUIPassword:        f.xuiPassword.Get(),
-		XUIInboundID:       f.xuiInboundID.Get(),
-		XUISubPath:         f.xuiSubPath.Get(),
-		DatabasePath:       f.databasePath.Get(),
-		LogFilePath:        f.logFilePath.Get(),
-		LogLevel:           f.logLevel.Get(),
-		TrafficLimitGB:     f.trafficLimitGB.Get(),
-		HeartbeatURL:       f.heartbeatURL.Get(),
-		HeartbeatInterval:  f.heartbeatInterval.Get(),
-		SentryDSN:          f.sentryDSN.Get(),
-		HealthCheckPort:    f.healthCheckPort.Get(),
-		SiteURL:            f.siteURL.Get(),
-		TrialDurationHours: f.trialDurationHours.Get(),
-		TrialRateLimit:     f.trialRateLimit.Get(),
-		ContactUsername:    f.contactUsername.Get(),
-		DonateCardNumber:   f.donateCardNumber.Get(),
-		DonateURL:          f.donateURL.Get(),
+		TelegramBotToken:        f.telegramBotToken.Get(),
+		TelegramAdminID:         f.telegramAdminID.Get(),
+		XUIHost:                 f.xuiHost.Get(),
+		XUIUsername:             f.xuiUsername.Get(),
+		XUIPassword:             f.xuiPassword.Get(),
+		XUIInboundID:            f.xuiInboundID.Get(),
+		XUISubPath:              f.xuiSubPath.Get(),
+		XUISessionMaxAgeMinutes: f.xuiSessionMaxAgeMinutes.Get(),
+		DatabasePath:            f.databasePath.Get(),
+		LogFilePath:             f.logFilePath.Get(),
+		LogLevel:                f.logLevel.Get(),
+		TrafficLimitGB:          f.trafficLimitGB.Get(),
+		HeartbeatURL:            f.heartbeatURL.Get(),
+		HeartbeatInterval:       f.heartbeatInterval.Get(),
+		SentryDSN:               f.sentryDSN.Get(),
+		HealthCheckPort:         f.healthCheckPort.Get(),
+		SiteURL:                 f.siteURL.Get(),
+		TrialDurationHours:      f.trialDurationHours.Get(),
+		TrialRateLimit:          f.trialRateLimit.Get(),
+		ContactUsername:         f.contactUsername.Get(),
+		DonateCardNumber:        f.donateCardNumber.Get(),
+		DonateURL:               f.donateURL.Get(),
 	}
 
 	// Validate all required fields
@@ -208,6 +213,10 @@ func (c *Config) validate() error {
 
 	if c.XUISubPath == "" {
 		return fmt.Errorf("XUI_SUB_PATH cannot be empty")
+	}
+
+	if c.XUISessionMaxAgeMinutes <= 0 {
+		return fmt.Errorf("XUI_SESSION_MAX_AGE_MINUTES must be positive")
 	}
 
 	// Проверка на path traversal (защита от ../../../etc/passwd)
@@ -309,6 +318,7 @@ func (c *Config) String() string {
 		"XUIPassword=***, "+
 		"XUIInboundID=%d, "+
 		"XUISubPath=%s, "+
+		"XUISessionMaxAgeMinutes=%d, "+
 		"DatabasePath=%s, "+
 		"LogFilePath=%s, "+
 		"LogLevel=%s, "+
@@ -322,6 +332,7 @@ func (c *Config) String() string {
 		c.XUIUsername,
 		c.XUIInboundID,
 		c.XUISubPath,
+		c.XUISessionMaxAgeMinutes,
 		c.DatabasePath,
 		c.LogFilePath,
 		c.LogLevel,
