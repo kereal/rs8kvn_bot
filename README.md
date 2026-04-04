@@ -33,7 +33,7 @@ Telegram bot for distributing VLESS+Reality+Vision proxy subscriptions from 3x-u
 - 🐛 Sentry error tracking
 - 🛡️ Rate limiting per user (per-user token buckets, 30 tokens, 5/sec refill)
 - ⚡ Graceful shutdown with goroutine tracking
-- 🔒 Circuit breaker for 3x-ui panel
+- 🔒 Circuit breaker for 3x-ui panel with auto-relogin on session expiry
 - 🐳 Docker support with health checks
 - 🧪 Unit + E2E tests (~75% coverage, race-safe, fuzzing, 66+ E2E scenarios)
 - ✅ golangci-lint and gosec for code quality
@@ -459,6 +459,7 @@ rs8kvn_bot/
 | `XUI_PASSWORD` | 3x-ui admin password | - | ✅ |
 | `XUI_INBOUND_ID` | VLESS+Reality inbound ID | 1 | ✅ |
 | `XUI_SUB_PATH` | Subscription URL path | sub | ❌ |
+| `XUI_SESSION_MAX_AGE_MINUTES` | Panel session lifetime in minutes (must match panel's sessionMaxAge setting) | 720 | ❌ |
 | `DATABASE_PATH` | SQLite database path | ./data/tgvpn.db | ❌ |
 | `LOG_FILE_PATH` | Log file path | ./data/bot.log | ❌ |
 | `LOG_LEVEL` | Log level (debug/info/warn/error) | info | ❌ |
@@ -485,11 +486,17 @@ When a new subscription is created, the admin receives:
 ## Security Features
 
 - **Circuit breaker**: Automatically stops calling 3x-ui after 5 failures, with 30s timeout
+- **Auto-relogin on session expiry**: Detects HTTP 401/redirect responses and automatically re-authenticates, then retries the failed request
+- **Session verification**: Health checks verify the session with a real API call (`/panel/api/server/status`) instead of relying on timers
+- **Configurable session lifetime**: `XUI_SESSION_MAX_AGE_MINUTES` must match the panel's `sessionMaxAge` setting (default: 720 = 12h)
+- **Stale connection cleanup**: Connection pool is cleared before re-authentication to prevent using dead connections
+- **DNS error fast-fail**: Non-retryable errors (like "no such host") fail immediately instead of wasting time on retries
 - **Rate limiting**: Token bucket rate limiter (30 tokens, refill 5/sec)
 - **No default credentials**: XUI_USERNAME/XUI_PASSWORD must be explicitly set
 - **Input validation**: Markdown injection prevention, path traversal protection
 - **XSS prevention**: html/template for all web pages (automatic context-aware escaping)
 - **Graceful shutdown**: Waits for in-flight requests with 30s timeout
+- **Startup retry**: Bot retries panel connection up to 5 times with jitter before failing
 
 ## Database Migrations
 

@@ -36,7 +36,7 @@ func TestNewHandler(t *testing.T) {
 		TelegramBotToken: "test_token",
 	}
 
-	xuiClient, err := xui.NewClient(cfg.XUIHost, "admin", "password")
+	xuiClient, err := xui.NewClient(cfg.XUIHost, "admin", "password", 15*time.Minute)
 	require.NoError(t, err, "Failed to create XUI client")
 	mockDB := testutil.NewMockDatabaseService()
 	handler := NewHandler(testutil.NewMockBotAPI(), cfg, mockDB, xuiClient, NewTestBotConfig(), nil)
@@ -76,7 +76,7 @@ func TestHandler_ConfigField(t *testing.T) {
 		XUISubPath:       "mysub",
 	}
 
-	xuiClient, err := xui.NewClient(cfg.XUIHost, "user", "pass")
+	xuiClient, err := xui.NewClient(cfg.XUIHost, "user", "pass", 15*time.Minute)
 	require.NoError(t, err, "Failed to create XUI client")
 
 	handler := &Handler{
@@ -401,7 +401,7 @@ func TestHandleUpdate_CommandRouting(t *testing.T) {
 		TelegramBotToken: "test_token",
 	}
 
-	xuiClient, err := xui.NewClient(cfg.XUIHost, "admin", "password")
+	xuiClient, err := xui.NewClient(cfg.XUIHost, "admin", "password", 15*time.Minute)
 	require.NoError(t, err)
 
 	tests := []struct {
@@ -488,7 +488,7 @@ func TestHandleUpdate_NonCommandMessage(t *testing.T) {
 		TelegramBotToken: "test_token",
 	}
 
-	xuiClient, err := xui.NewClient(cfg.XUIHost, "admin", "password")
+	xuiClient, err := xui.NewClient(cfg.XUIHost, "admin", "password", 15*time.Minute)
 	require.NoError(t, err)
 
 	mockBot := testutil.NewMockBotAPI()
@@ -518,7 +518,7 @@ func TestHandleUpdate_CallbackQuery(t *testing.T) {
 		TelegramBotToken: "test_token",
 	}
 
-	xuiClient, err := xui.NewClient(cfg.XUIHost, "admin", "password")
+	xuiClient, err := xui.NewClient(cfg.XUIHost, "admin", "password", 15*time.Minute)
 	require.NoError(t, err)
 
 	mockBot := testutil.NewMockBotAPI()
