@@ -364,7 +364,6 @@ func (c *Client) doRequestWithAuthRetry(ctx context.Context, fn func() (statusCo
 	if statusCode == http.StatusUnauthorized ||
 		statusCode == http.StatusFound ||
 		statusCode == http.StatusTemporaryRedirect {
-
 		logger.Info("XUI auto-relogin triggered",
 			zap.Int("http_status", statusCode))
 
