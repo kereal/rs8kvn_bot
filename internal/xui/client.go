@@ -736,6 +736,14 @@ func (c *Client) SessionFailCount() int64 {
 	return atomic.LoadInt64(&c.sessionFailCount)
 }
 
+// TestForceSessionExpiry sets lastLogin to the past to force re-authentication.
+// This is only for testing purposes.
+func (c *Client) TestForceSessionExpiry() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.lastLogin = time.Time{}
+}
+
 // GetExternalURL extracts the base URL (scheme + host) from a full URL.
 // Returns the original host if URL parsing fails.
 // Example: "http://example.com:2053/sub/abc123" -> "http://example.com:2053"

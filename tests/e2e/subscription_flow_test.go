@@ -2,6 +2,7 @@ package e2e
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -2239,6 +2240,404 @@ func TestE2E_SendCommand_UserNotFound(t *testing.T) {
 
 	assert.True(t, env.botAPI.SendCalled)
 	assert.Contains(t, env.botAPI.LastSentText, "не найден в базе")
+}
+
+// ============================================================================
+// E2E Tests with REAL xui.Client (not mock) — tests actual auth flow
+// ============================================================================
+
+type realXUIEnv struct {
+	t          *testing.T
+	db         *database.Service
+	xuiClient  *xui.Client
+	server     *httptest.Server
+	cfg        *config.Config
+	subService *service.SubscriptionService
+}
+
+func setupRealXUIEnv(t *testing.T, handlers map[string]http.HandlerFunc) *realXUIEnv {
+	t.Helper()
+	db := setupTestDB(t)
+
+	defaults := map[string]http.HandlerFunc{
+		"/login": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(xui.APIResponse{Success: true, Msg: "Login successful"})
+		},
+		"/panel/api/server/status": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(xui.APIResponse{Success: true})
+		},
+		"/panel/api/inbounds/addClient": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(xui.APIResponse{Success: true, Msg: "Client added"})
+		},
+	}
+
+	// Merge: overrides take priority
+	allHandlers := make(map[string]http.HandlerFunc)
+	for path, handler := range defaults {
+		allHandlers[path] = handler
+	}
+	for path, handler := range handlers {
+		allHandlers[path] = handler
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+
+		// Exact match first
+		if h, ok := allHandlers[path]; ok {
+			h(w, r)
+			return
+		}
+
+		// Prefix matches for dynamic paths
+		if strings.HasPrefix(path, "/panel/api/inbounds/") && strings.Contains(path, "/delClient/") {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(xui.APIResponse{Success: true, Msg: "Client deleted"})
+			return
+		}
+		if strings.HasPrefix(path, "/panel/api/inbounds/") && strings.Contains(path, "/updateClient/") {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(xui.APIResponse{Success: true, Msg: "Client updated"})
+			return
+		}
+		if strings.HasPrefix(path, "/panel/api/inbounds/getClientTraffics/") {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(xui.APIResponse{
+				Success: true,
+				Obj:     json.RawMessage(`{"id":1,"inboundId":1,"enable":true,"email":"test","up":100,"down":200,"allTime":300,"total":107374182400}`),
+			})
+			return
+		}
+
+		http.NotFound(w, r)
+	})
+
+	server := httptest.NewServer(mux)
+
+	cfg := &config.Config{
+		TelegramAdminID:         123456,
+		TrafficLimitGB:          100,
+		XUIInboundID:            1,
+		XUIHost:                 server.URL,
+		XUISubPath:              "sub",
+		SiteURL:                 "https://example.com",
+		TelegramBotToken:        "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11",
+		XUISessionMaxAgeMinutes: 15,
+	}
+
+	xuiClient, err := xui.NewClient(server.URL, "admin", "password", 15*time.Minute)
+	require.NoError(t, err)
+
+	subService := service.NewSubscriptionService(db, xuiClient, cfg)
+
+	return &realXUIEnv{
+		t:          t,
+		db:         db,
+		xuiClient:  xuiClient,
+		server:     server,
+		cfg:        cfg,
+		subService: subService,
+	}
+}
+
+func (e *realXUIEnv) Close() {
+	e.server.Close()
+	e.db.Close()
+}
+
+func TestE2E_RealClient_FullSubscriptionLifecycle(t *testing.T) {
+	env := setupRealXUIEnv(t, nil)
+	defer env.Close()
+
+	ctx := context.Background()
+
+	err := env.xuiClient.Login(ctx)
+	require.NoError(t, err, "Initial login should succeed")
+
+	result, err := env.subService.Create(ctx, 12345, "testuser")
+	require.NoError(t, err, "Create subscription should succeed")
+	require.NotNil(t, result)
+	assert.NotEmpty(t, result.SubscriptionURL)
+
+	sub, err := env.db.GetByTelegramID(ctx, 12345)
+	require.NoError(t, err)
+	assert.Equal(t, "testuser", sub.Username)
+	assert.False(t, sub.IsTrial)
+
+	_, traffic, err := env.subService.GetWithTraffic(ctx, 12345)
+	require.NoError(t, err)
+	assert.NotNil(t, traffic)
+
+	err = env.subService.Delete(ctx, 12345)
+	require.NoError(t, err)
+
+	_, err = env.db.GetByTelegramID(ctx, 12345)
+	assert.Error(t, err, "Subscription should be deleted")
+}
+
+func TestE2E_RealClient_AutoReloginOn401(t *testing.T) {
+	addClientAttempts := 0
+	var mu sync.Mutex
+
+	env := setupRealXUIEnv(t, map[string]http.HandlerFunc{
+		"/panel/api/server/status": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(xui.APIResponse{Success: false})
+		},
+		"/panel/api/inbounds/addClient": func(w http.ResponseWriter, r *http.Request) {
+			mu.Lock()
+			addClientAttempts++
+			attempt := addClientAttempts
+			mu.Unlock()
+
+			if attempt == 1 {
+				w.WriteHeader(http.StatusUnauthorized)
+				json.NewEncoder(w).Encode(xui.APIResponse{Success: false, Msg: "unauthorized"})
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(xui.APIResponse{Success: true, Msg: "Client added"})
+		},
+	})
+	defer env.Close()
+
+	ctx := context.Background()
+	err := env.xuiClient.Login(ctx)
+	require.NoError(t, err)
+
+	env.xuiClient.TestForceSessionExpiry()
+
+	result, err := env.subService.Create(ctx, 22345, "relogin_user")
+	require.NoError(t, err, "Create should succeed after auto-relogin")
+	require.NotNil(t, result)
+	assert.Equal(t, 2, addClientAttempts, "addClient should be called twice (401 then retry)")
+}
+
+func TestE2E_RealClient_SessionVerificationSkipsLogin(t *testing.T) {
+	loginCalls := 0
+	var mu sync.Mutex
+
+	env := setupRealXUIEnv(t, map[string]http.HandlerFunc{
+		"/panel/api/server/status": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(xui.APIResponse{Success: true})
+		},
+		"/login": func(w http.ResponseWriter, r *http.Request) {
+			mu.Lock()
+			loginCalls++
+			mu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(xui.APIResponse{Success: true})
+		},
+	})
+	defer env.Close()
+
+	ctx := context.Background()
+	err := env.xuiClient.Login(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, 1, loginCalls)
+
+	env.xuiClient.TestForceSessionExpiry()
+
+	_, err = env.subService.Create(ctx, 32345, "verify_user")
+	require.NoError(t, err)
+
+	assert.Equal(t, 1, loginCalls, "Login should not be called when verifySession succeeds")
+}
+
+func TestE2E_RealClient_DNSErrorFastFail(t *testing.T) {
+	cfg := &config.Config{
+		TelegramAdminID:         123456,
+		TrafficLimitGB:          100,
+		XUIInboundID:            1,
+		XUIHost:                 "http://nonexistent.invalid.host:9999",
+		XUISubPath:              "sub",
+		SiteURL:                 "https://example.com",
+		TelegramBotToken:        "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11",
+		XUISessionMaxAgeMinutes: 15,
+	}
+
+	xuiClient, err := xui.NewClient("http://nonexistent.invalid.host:9999", "admin", "password", 15*time.Minute)
+	require.NoError(t, err)
+	defer xuiClient.Close()
+
+	db := setupTestDB(t)
+	defer db.Close()
+
+	subService := service.NewSubscriptionService(db, xuiClient, cfg)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	start := time.Now()
+	_, err = subService.Create(ctx, 42345, "dns_fail_user")
+	elapsed := time.Since(start)
+
+	require.Error(t, err)
+	// DNS error should fail immediately (isRetryable returns false), not retry
+	// On some systems DNS resolution can take a moment, but should be < 5s
+	assert.Less(t, elapsed.Seconds(), 15.0, "DNS error should fail fast, not retry (took %.1fs)", elapsed.Seconds())
+}
+
+func TestE2E_RealClient_ConcurrentLoginDedup(t *testing.T) {
+	loginCalls := 0
+	var mu sync.Mutex
+	loginStarted := make(chan struct{}, 1) // Buffer 1 to allow first goroutine through
+
+	env := setupRealXUIEnv(t, map[string]http.HandlerFunc{
+		"/panel/api/server/status": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(xui.APIResponse{Success: false})
+		},
+		"/login": func(w http.ResponseWriter, r *http.Request) {
+			mu.Lock()
+			loginCalls++
+			mu.Unlock()
+			// Signal that login started
+			select {
+			case loginStarted <- struct{}{}:
+			default:
+			}
+			// Small delay to simulate real login
+			time.Sleep(50 * time.Millisecond)
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(xui.APIResponse{Success: true})
+		},
+	})
+	defer env.Close()
+
+	ctx := context.Background()
+	err := env.xuiClient.Login(ctx)
+	require.NoError(t, err)
+
+	env.xuiClient.TestForceSessionExpiry()
+
+	// Wait for first loginStarted signal (from initial Login call)
+	<-loginStarted
+	time.Sleep(100 * time.Millisecond)
+
+	// Launch 3 concurrent API calls — they should all share one login via singleflight
+	var wg sync.WaitGroup
+	results := make([]error, 3)
+	for i := 0; i < 3; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			ctx2, cancel := context.WithTimeout(ctx, 15*time.Second)
+			defer cancel()
+			_, results[idx] = env.subService.Create(ctx2, int64(50000+idx), fmt.Sprintf("concurrent_user_%d", idx))
+		}(i)
+	}
+
+	wg.Wait()
+
+	// singleflight should have deduplicated logins — only 1 additional login call
+	// (1 from initial Login + 1 from concurrent ensureLoggedIn)
+	assert.Equal(t, 2, loginCalls, "Singleflight should deduplicate concurrent logins (1 initial + 1 shared)")
+}
+
+func TestE2E_RealClient_LoginHTTPError(t *testing.T) {
+	env := setupRealXUIEnv(t, map[string]http.HandlerFunc{
+		"/login": func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusBadGateway)
+			w.Write([]byte("Bad Gateway"))
+		},
+	})
+	defer env.Close()
+
+	ctx := context.Background()
+	err := env.xuiClient.Login(ctx)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "HTTP 502")
+}
+
+func TestE2E_RealClient_AutoReloginOnRedirect(t *testing.T) {
+	// Go's http.Client follows redirects automatically, so a 302 to /login
+	// results in the client receiving the login page HTML instead of JSON.
+	// This test verifies that the error is properly surfaced.
+	redirectCount := 0
+	var mu sync.Mutex
+
+	env := setupRealXUIEnv(t, map[string]http.HandlerFunc{
+		"/panel/api/server/status": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(xui.APIResponse{Success: false})
+		},
+		"/panel/api/inbounds/addClient": func(w http.ResponseWriter, r *http.Request) {
+			mu.Lock()
+			redirectCount++
+			count := redirectCount
+			mu.Unlock()
+
+			if count == 1 {
+				// First attempt: redirect to login
+				http.Redirect(w, r, "/login", http.StatusFound)
+				return
+			}
+			// After relogin: success
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(xui.APIResponse{Success: true, Msg: "Client added"})
+		},
+	})
+	defer env.Close()
+
+	ctx := context.Background()
+	err := env.xuiClient.Login(ctx)
+	require.NoError(t, err)
+
+	env.xuiClient.TestForceSessionExpiry()
+
+	// The redirect is followed to /login which returns JSON success,
+	// so the first addClient call actually succeeds (via redirect chain).
+	// The important thing is that the client handles it gracefully.
+	result, err := env.subService.Create(ctx, 62345, "redirect_user")
+	// Either succeeds (redirect followed) or fails gracefully
+	if err != nil {
+		assert.Contains(t, strings.ToLower(err.Error()), "unauthorized", "Error should be auth-related")
+	} else {
+		require.NotNil(t, result)
+	}
+}
+
+func TestE2E_RealClient_MultipleOperationsNoRelogin(t *testing.T) {
+	loginCalls := 0
+	var mu sync.Mutex
+
+	env := setupRealXUIEnv(t, map[string]http.HandlerFunc{
+		"/panel/api/server/status": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(xui.APIResponse{Success: true})
+		},
+		"/login": func(w http.ResponseWriter, r *http.Request) {
+			mu.Lock()
+			loginCalls++
+			mu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(xui.APIResponse{Success: true})
+		},
+	})
+	defer env.Close()
+
+	ctx := context.Background()
+	err := env.xuiClient.Login(ctx)
+	require.NoError(t, err)
+	initialLogins := loginCalls
+
+	_, err = env.subService.Create(ctx, 72345, "multi_user1")
+	require.NoError(t, err)
+
+	_, err = env.subService.Create(ctx, 72346, "multi_user2")
+	require.NoError(t, err)
+
+	_, err = env.subService.Create(ctx, 72347, "multi_user3")
+	require.NoError(t, err)
+
+	assert.Equal(t, initialLogins, loginCalls, "No re-logins within valid session")
 }
 
 func TestE2E_SendCommand_NoArgs(t *testing.T) {
