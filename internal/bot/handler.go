@@ -11,7 +11,6 @@ import (
 	"rs8kvn_bot/internal/logger"
 	"rs8kvn_bot/internal/ratelimiter"
 	"rs8kvn_bot/internal/service"
-	"rs8kvn_bot/internal/utils"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"go.uber.org/zap"
@@ -273,44 +272,6 @@ func (h *Handler) getDonateText() string {
 // getHelpText returns the help/instruction message text with subscription URL.
 func (h *Handler) getHelpText(trafficLimitGB int, subscriptionURL string) string {
 	return h.keyboards.HelpText(trafficLimitGB, subscriptionURL)
-}
-
-func (h *Handler) sendInviteLink(ctx context.Context, chatID int64, messageID int) {
-	inviteCode, err := utils.GenerateInviteCode()
-	if err != nil {
-		logger.Error("Failed to generate invite code",
-			zap.Error(err),
-			zap.Int64("chat_id", chatID))
-		h.SendMessage(ctx, chatID, "❌ Не удалось создать пригласительную ссылку. Попробуйте позже.")
-		return
-	}
-	invite, err := h.db.GetOrCreateInvite(ctx, chatID, inviteCode)
-	if err != nil {
-		logger.Error("Failed to get or create invite",
-			zap.Error(err),
-			zap.Int64("chat_id", chatID))
-		h.SendMessage(ctx, chatID, "❌ Не удалось создать пригласительную ссылку. Попробуйте позже.")
-		return
-	}
-
-	telegramLink := fmt.Sprintf("https://t.me/%s?start=share_%s", h.botConfig.Username, invite.Code)
-	webLink := fmt.Sprintf("%s/i/%s", h.cfg.SiteURL, invite.Code)
-	text := h.keyboards.InviteLinkText(telegramLink, webLink)
-	keyboard := h.keyboards.Invite()
-
-	if messageID > 0 {
-		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, text)
-		editMsg.ParseMode = "Markdown"
-		editMsg.DisableWebPagePreview = true
-		editMsg.ReplyMarkup = &keyboard
-		h.safeSend(editMsg)
-	} else {
-		msg := tgbotapi.NewMessage(chatID, text)
-		msg.ParseMode = "Markdown"
-		msg.DisableWebPagePreview = true
-		msg.ReplyMarkup = &keyboard
-		h.send(ctx, msg)
-	}
 }
 
 func (h *Handler) addAdminButtons(keyboard *tgbotapi.InlineKeyboardMarkup, chatID int64) {

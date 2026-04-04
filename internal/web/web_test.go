@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -1451,4 +1452,69 @@ func TestRenderErrorPage_TemplateRendersLogo(t *testing.T) {
 	srv.renderErrorPage(w, "Test error")
 
 	assert.Contains(t, w.Body.String(), `/static/logo.png`, "error page should reference logo")
+}
+
+func TestHandleInvite_ParallelRequests(t *testing.T) {
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+
+	cfg := &config.Config{
+		SiteURL:            "https://vpn.site",
+		TrialDurationHours: 3,
+		TrialRateLimit:     3,
+		XUIInboundID:       1,
+	}
+
+	subService := service.NewSubscriptionService(mockDB, mockXUI, cfg)
+	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig(), subService)
+
+	mockDB.GetInviteByCodeFunc = func(ctx context.Context, code string) (*database.Invite, error) {
+		return &database.Invite{Code: "testcode", ReferrerTGID: 12345}, nil
+	}
+	mockDB.CountTrialRequestsByIPLastHourFunc = func(ctx context.Context, ip string) (int, error) {
+		return 0, nil
+	}
+	mockDB.CreateTrialRequestFunc = func(ctx context.Context, ip string) error {
+		return nil
+	}
+	mockDB.CreateTrialSubscriptionFunc = func(ctx context.Context, inviteCode, subscriptionID, clientID string, inboundID int, trafficBytes int64, expiryTime time.Time, subURL string) (*database.Subscription, error) {
+		return &database.Subscription{
+			SubscriptionID:  subscriptionID,
+			SubscriptionURL: subURL,
+			IsTrial:         true,
+			InviteCode:      inviteCode,
+		}, nil
+	}
+
+	const numParallel = 10
+	var wg sync.WaitGroup
+	results := make(chan int, numParallel)
+
+	for i := 0; i < numParallel; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			req := httptest.NewRequest("GET", "/i/testcode", nil)
+			req.RemoteAddr = "192.168.1.1:12345"
+			rec := httptest.NewRecorder()
+			srv.handleInvite(rec, req)
+			results <- rec.Code
+		}()
+	}
+
+	wg.Wait()
+	close(results)
+
+	successCount := 0
+	rateLimitedCount := 0
+	for code := range results {
+		if code == http.StatusOK {
+			successCount++
+		} else if code == http.StatusTooManyRequests {
+			rateLimitedCount++
+		}
+	}
+
+	assert.Equal(t, numParallel, successCount, "all parallel requests should complete successfully")
+	assert.Equal(t, numParallel, successCount+rateLimitedCount, "all requests should return a response")
 }
