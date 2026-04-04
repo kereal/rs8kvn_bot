@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math/rand"
+	"net"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
@@ -223,7 +225,7 @@ func (c *Client) verifySession(ctx context.Context) bool {
 	defer closeResponseBody(resp)
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 256))
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, config.MaxResponseSize))
 		logger.Debug("XUI session verification failed",
 			zap.Int("status", resp.StatusCode),
 			zap.String("body", truncateString(string(body), 100)))
@@ -297,9 +299,51 @@ func (c *Client) doLogin(ctx context.Context) error {
 	c.lastLogin = time.Now()
 	atomic.AddInt64(&c.loginCount, 1)
 	logger.Info("3x-ui login successful",
-		zap.String("session_valid_until", c.lastLogin.Add(c.sessionValidity).Format("15:04:05")))
+		zap.String("session_valid_until", c.lastLogin.Add(c.sessionValidity).Format("2006-01-02 15:04:05")))
 
 	return nil
+}
+
+// doHTTPRequest creates and executes an HTTP request with standard headers and response handling.
+// It is safe for use with doRequestWithAuthRetry — the request is recreated on each retry,
+// avoiding issues with consumed request bodies (e.g., bytes.Reader at EOF).
+func (c *Client) doHTTPRequest(ctx context.Context, method, url string, bodyFn func() (io.Reader, error)) ([]byte, error) {
+	return c.doRequestWithAuthRetry(ctx, func() (int, []byte, error) {
+		var body io.Reader
+		if bodyFn != nil {
+			var err error
+			body, err = bodyFn()
+			if err != nil {
+				return 0, nil, err
+			}
+		}
+
+		req, err := http.NewRequestWithContext(ctx, method, url, body)
+		if err != nil {
+			return 0, nil, fmt.Errorf("failed to create request: %w", err)
+		}
+		req.Header.Set("Accept", "application/json")
+		if body != nil {
+			req.Header.Set("Content-Type", "application/json")
+		}
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			return 0, nil, fmt.Errorf("request failed: %w", err)
+		}
+		defer closeResponseBody(resp)
+
+		respBody, err := io.ReadAll(io.LimitReader(resp.Body, config.MaxResponseSize))
+		if err != nil {
+			return 0, nil, fmt.Errorf("failed to read response: %w", err)
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			return resp.StatusCode, respBody, fmt.Errorf("server returned HTTP %d: %s", resp.StatusCode, truncateString(string(respBody), 200))
+		}
+
+		return resp.StatusCode, respBody, nil
+	})
 }
 
 // doRequestWithAuthRetry executes an HTTP request and automatically handles auth failures.
@@ -396,7 +440,6 @@ func (c *Client) AddClientWithID(ctx context.Context, inboundID int, email, clie
 
 // doAddClientWithID performs the actual add client request.
 func (c *Client) doAddClientWithID(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*ClientConfig, error) {
-	// Build client settings in 3x-ui format
 	clientSettings := map[string]interface{}{
 		"clients": []map[string]interface{}{
 			{
@@ -418,56 +461,24 @@ func (c *Client) doAddClientWithID(ctx context.Context, inboundID int, email, cl
 		return nil, fmt.Errorf("failed to marshal client settings: %w", err)
 	}
 
-	// Build request: id + settings (as JSON string)
 	requestData := map[string]interface{}{
 		"id":       inboundID,
 		"settings": string(settingsJSON),
 	}
 
-	reader, err := marshalJSON(requestData)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request: %w", err)
-	}
-
-	// POST to /panel/api/inbounds/addClient
 	addURL := fmt.Sprintf("%s/panel/api/inbounds/addClient", c.host)
 
-	var respBody []byte
-	respBody, err = c.doRequestWithAuthRetry(ctx, func() (int, []byte, error) {
-		req, reqErr := http.NewRequestWithContext(ctx, http.MethodPost, addURL, reader)
-		if reqErr != nil {
-			return 0, nil, fmt.Errorf("failed to create request: %w", reqErr)
-		}
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Accept", "application/json")
-
-		resp, reqErr := c.httpClient.Do(req)
-		if reqErr != nil {
-			return 0, nil, fmt.Errorf("add client request failed: %w", reqErr)
-		}
-		defer closeResponseBody(resp)
-
-		body, reqErr := io.ReadAll(io.LimitReader(resp.Body, config.MaxResponseSize))
-		if reqErr != nil {
-			return 0, nil, fmt.Errorf("failed to read response: %w", reqErr)
-		}
-
-		if resp.StatusCode != http.StatusOK {
-			return resp.StatusCode, body, fmt.Errorf("server returned HTTP %d: %s", resp.StatusCode, truncateString(string(body), 200))
-		}
-
-		return resp.StatusCode, body, nil
+	respBody, err := c.doHTTPRequest(ctx, http.MethodPost, addURL, func() (io.Reader, error) {
+		return marshalJSON(requestData)
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	// Log response at DEBUG level only (may contain sensitive data)
 	logger.Debug("3x-ui addClient response",
 		zap.Int("body_length", len(respBody)),
 		zap.String("response_preview", truncateString(string(respBody), 200)))
 
-	// Parse response
 	var simpleResp struct {
 		Success bool        `json:"success"`
 		Msg     string      `json:"msg"`
@@ -508,31 +519,7 @@ func (c *Client) DeleteClient(ctx context.Context, inboundID int, clientID strin
 func (c *Client) doDeleteClient(ctx context.Context, inboundID int, clientID string) error {
 	deleteURL := fmt.Sprintf("%s/panel/api/inbounds/%d/delClient/%s", c.host, inboundID, clientID)
 
-	var respBody []byte
-	respBody, err := c.doRequestWithAuthRetry(ctx, func() (int, []byte, error) {
-		req, reqErr := http.NewRequestWithContext(ctx, http.MethodPost, deleteURL, nil)
-		if reqErr != nil {
-			return 0, nil, fmt.Errorf("failed to create delete request: %w", reqErr)
-		}
-		req.Header.Set("Accept", "application/json")
-
-		resp, reqErr := c.httpClient.Do(req)
-		if reqErr != nil {
-			return 0, nil, fmt.Errorf("delete client request failed: %w", reqErr)
-		}
-		defer closeResponseBody(resp)
-
-		body, reqErr := io.ReadAll(io.LimitReader(resp.Body, config.MaxResponseSize))
-		if reqErr != nil {
-			return 0, nil, fmt.Errorf("failed to read response: %w", reqErr)
-		}
-
-		if resp.StatusCode != http.StatusOK {
-			return resp.StatusCode, body, fmt.Errorf("server returned HTTP %d: %s", resp.StatusCode, truncateString(string(body), 200))
-		}
-
-		return resp.StatusCode, body, nil
-	})
+	respBody, err := c.doHTTPRequest(ctx, http.MethodPost, deleteURL, nil)
 	if err != nil {
 		return err
 	}
@@ -597,39 +584,10 @@ func (c *Client) doUpdateClient(ctx context.Context, inboundID int, clientID, em
 		"settings": string(settingsJSON),
 	}
 
-	reader, err := marshalJSON(requestData)
-	if err != nil {
-		return fmt.Errorf("failed to marshal request: %w", err)
-	}
-
-	// POST to /panel/api/inbounds/updateClient/{clientID}
 	updateURL := fmt.Sprintf("%s/panel/api/inbounds/updateClient/%s", c.host, clientID)
 
-	var respBody []byte
-	respBody, err = c.doRequestWithAuthRetry(ctx, func() (int, []byte, error) {
-		req, reqErr := http.NewRequestWithContext(ctx, http.MethodPost, updateURL, reader)
-		if reqErr != nil {
-			return 0, nil, fmt.Errorf("failed to create request: %w", reqErr)
-		}
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Accept", "application/json")
-
-		resp, reqErr := c.httpClient.Do(req)
-		if reqErr != nil {
-			return 0, nil, fmt.Errorf("update client request failed: %w", reqErr)
-		}
-		defer closeResponseBody(resp)
-
-		body, reqErr := io.ReadAll(io.LimitReader(resp.Body, config.MaxResponseSize))
-		if reqErr != nil {
-			return 0, nil, fmt.Errorf("failed to read response: %w", reqErr)
-		}
-
-		if resp.StatusCode != http.StatusOK {
-			return resp.StatusCode, body, fmt.Errorf("server returned HTTP %d: %s", resp.StatusCode, truncateString(string(body), 200))
-		}
-
-		return resp.StatusCode, body, nil
+	respBody, err := c.doHTTPRequest(ctx, http.MethodPost, updateURL, func() (io.Reader, error) {
+		return marshalJSON(requestData)
 	})
 	if err != nil {
 		return err
@@ -666,31 +624,7 @@ func (c *Client) GetClientTraffic(ctx context.Context, email string) (*ClientTra
 func (c *Client) doGetClientTraffic(ctx context.Context, email string) (*ClientTraffic, error) {
 	trafficURL := fmt.Sprintf("%s/panel/api/inbounds/getClientTraffics/%s", c.host, url.PathEscape(email))
 
-	var respBody []byte
-	respBody, err := c.doRequestWithAuthRetry(ctx, func() (int, []byte, error) {
-		req, reqErr := http.NewRequestWithContext(ctx, http.MethodGet, trafficURL, nil)
-		if reqErr != nil {
-			return 0, nil, fmt.Errorf("failed to create request: %w", reqErr)
-		}
-		req.Header.Set("Accept", "application/json")
-
-		resp, reqErr := c.httpClient.Do(req)
-		if reqErr != nil {
-			return 0, nil, fmt.Errorf("get client traffic request failed: %w", reqErr)
-		}
-		defer closeResponseBody(resp)
-
-		body, reqErr := io.ReadAll(io.LimitReader(resp.Body, config.MaxResponseSize))
-		if reqErr != nil {
-			return 0, nil, fmt.Errorf("failed to read response: %w", reqErr)
-		}
-
-		if resp.StatusCode != http.StatusOK {
-			return resp.StatusCode, body, fmt.Errorf("server returned HTTP %d: %s", resp.StatusCode, truncateString(string(body), 200))
-		}
-
-		return resp.StatusCode, body, nil
-	})
+	respBody, err := c.doHTTPRequest(ctx, http.MethodGet, trafficURL, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -773,9 +707,18 @@ func truncateString(s string, maxLen int) string {
 }
 
 // isRetryable checks if an error is worth retrying.
-// DNS errors (no such host) are not retryable as they indicate a configuration problem.
+// DNS errors (no such host, name resolution failures) are not retryable
+// as they indicate a configuration problem that won't resolve on its own.
 func isRetryable(err error) bool {
 	if err == nil {
+		return true
+	}
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) {
+		return false
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
 		return true
 	}
 	msg := strings.ToLower(err.Error())
@@ -803,19 +746,23 @@ func RetryWithBackoff(ctx context.Context, maxRetries int, initialDelay time.Dur
 		lastErr = err
 
 		if i < maxRetries-1 {
-			logger.Warn("Retry after error",
+			logger.Debug("Retry after error",
 				zap.Int("attempt", i+1),
 				zap.Int("max_retries", maxRetries),
 				zap.Error(err))
 
 			select {
 			case <-time.After(delay + time.Duration(rand.Int63n(int64(delay/2)))):
-				delay *= 2 // Exponential backoff
+				delay *= 2
 			case <-ctx.Done():
 				return fmt.Errorf("context cancelled: %w", ctx.Err())
 			}
 		}
 	}
+
+	logger.Warn("XUI operation failed after retries",
+		zap.Int("retries", maxRetries),
+		zap.Error(lastErr))
 
 	return fmt.Errorf("after %d retries: %w", maxRetries, lastErr)
 }
