@@ -228,8 +228,14 @@ func (c *Client) doLogin(ctx context.Context) error {
 
 // AddClient creates a new client in the 3x-ui panel with auto-generated IDs.
 func (c *Client) AddClient(ctx context.Context, inboundID int, email string, trafficBytes int64, expiryTime time.Time) (*ClientConfig, error) {
-	clientID := utils.GenerateUUID()
-	subID := utils.GenerateSubID()
+	clientID, err := utils.GenerateUUID()
+	if err != nil {
+		return nil, fmt.Errorf("generate client id: %w", err)
+	}
+	subID, err := utils.GenerateSubID()
+	if err != nil {
+		return nil, fmt.Errorf("generate sub id: %w", err)
+	}
 
 	return c.AddClientWithID(ctx, inboundID, email, clientID, subID, trafficBytes, expiryTime, -1)
 }
@@ -265,6 +271,17 @@ func (c *Client) AddClientWithID(ctx context.Context, inboundID int, email, clie
 		resetDays = config.SubscriptionResetDay
 	}
 
+	var result *ClientConfig
+	err := RetryWithBackoff(ctx, config.XUIMaxRetries, config.XUIInitialRetryDelay, func() error {
+		var err error
+		result, err = c.doAddClientWithID(ctx, inboundID, email, clientID, subID, trafficBytes, expiryTime, resetDays)
+		return err
+	})
+	return result, err
+}
+
+// doAddClientWithID performs the actual add client request.
+func (c *Client) doAddClientWithID(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*ClientConfig, error) {
 	// Build client settings in 3x-ui format
 	clientSettings := map[string]interface{}{
 		"clients": []map[string]interface{}{
@@ -319,6 +336,10 @@ func (c *Client) AddClientWithID(ctx context.Context, inboundID int, email, clie
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
 
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("server returned HTTP %d: %s", resp.StatusCode, truncateString(string(respBody), 200))
+	}
+
 	// Log response at DEBUG level only (may contain sensitive data)
 	logger.Debug("3x-ui addClient response",
 		zap.Int("body_length", len(respBody)),
@@ -356,6 +377,13 @@ func (c *Client) DeleteClient(ctx context.Context, inboundID int, clientID strin
 		return fmt.Errorf("authentication required: %w", err)
 	}
 
+	return RetryWithBackoff(ctx, config.XUIMaxRetries, config.XUIInitialRetryDelay, func() error {
+		return c.doDeleteClient(ctx, inboundID, clientID)
+	})
+}
+
+// doDeleteClient performs the actual delete client request.
+func (c *Client) doDeleteClient(ctx context.Context, inboundID int, clientID string) error {
 	deleteURL := fmt.Sprintf("%s/panel/api/inbounds/%d/delClient/%s", c.host, inboundID, clientID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, deleteURL, nil)
 	if err != nil {
@@ -373,6 +401,10 @@ func (c *Client) DeleteClient(ctx context.Context, inboundID int, clientID strin
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, config.MaxResponseSize))
 	if err != nil {
 		return fmt.Errorf("failed to read response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("server returned HTTP %d: %s", resp.StatusCode, truncateString(string(respBody), 200))
 	}
 
 	var apiResp APIResponse
@@ -400,6 +432,13 @@ func (c *Client) UpdateClient(ctx context.Context, inboundID int, clientID, emai
 		return fmt.Errorf("client ID cannot be empty")
 	}
 
+	return RetryWithBackoff(ctx, config.XUIMaxRetries, config.XUIInitialRetryDelay, func() error {
+		return c.doUpdateClient(ctx, inboundID, clientID, email, subID, trafficBytes, expiryTime, tgID, comment)
+	})
+}
+
+// doUpdateClient performs the actual update client request.
+func (c *Client) doUpdateClient(ctx context.Context, inboundID int, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, tgID int64, comment string) error {
 	clientSettings := map[string]interface{}{
 		"clients": []map[string]interface{}{
 			{
@@ -454,6 +493,10 @@ func (c *Client) UpdateClient(ctx context.Context, inboundID int, clientID, emai
 		return fmt.Errorf("failed to read response: %w", err)
 	}
 
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("server returned HTTP %d: %s", resp.StatusCode, truncateString(string(respBody), 200))
+	}
+
 	var apiResp APIResponse
 	if err := json.Unmarshal(respBody, &apiResp); err != nil {
 		return fmt.Errorf("failed to parse response: %w", err)
@@ -472,6 +515,17 @@ func (c *Client) GetClientTraffic(ctx context.Context, email string) (*ClientTra
 		return nil, fmt.Errorf("authentication required: %w", err)
 	}
 
+	var result *ClientTraffic
+	err := RetryWithBackoff(ctx, config.XUIMaxRetries, config.XUIInitialRetryDelay, func() error {
+		var err error
+		result, err = c.doGetClientTraffic(ctx, email)
+		return err
+	})
+	return result, err
+}
+
+// doGetClientTraffic performs the actual get client traffic request.
+func (c *Client) doGetClientTraffic(ctx context.Context, email string) (*ClientTraffic, error) {
 	trafficURL := fmt.Sprintf("%s/panel/api/inbounds/getClientTraffics/%s", c.host, url.PathEscape(email))
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, trafficURL, nil)
 	if err != nil {
@@ -489,6 +543,10 @@ func (c *Client) GetClientTraffic(ctx context.Context, email string) (*ClientTra
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, config.MaxResponseSize))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("server returned HTTP %d: %s", resp.StatusCode, truncateString(string(respBody), 200))
 	}
 
 	var apiResp APIResponse

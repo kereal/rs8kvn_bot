@@ -110,7 +110,11 @@ const (
 )
 
 func (h *Handler) generateInviteLink(ctx context.Context, chatID int64, lt linkType) (string, error) {
-	invite, err := h.db.GetOrCreateInvite(ctx, chatID, utils.GenerateInviteCode())
+	inviteCode, err := utils.GenerateInviteCode()
+	if err != nil {
+		return "", fmt.Errorf("generate invite code: %w", err)
+	}
+	invite, err := h.db.GetOrCreateInvite(ctx, chatID, inviteCode)
 	if err != nil {
 		return "", fmt.Errorf("get invite: %w", err)
 	}

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"rs8kvn_bot/internal/bot"
 	"rs8kvn_bot/internal/config"
@@ -282,8 +283,10 @@ func TestGetClientIP_XForwardedFor(t *testing.T) {
 }
 
 func TestGenerateSubID(t *testing.T) {
-	id1 := utils.GenerateSubID()
-	id2 := utils.GenerateSubID()
+	id1, err := utils.GenerateSubID()
+	require.NoError(t, err)
+	id2, err := utils.GenerateSubID()
+	require.NoError(t, err)
 
 	// Should be 10 characters (5 random bytes hex-encoded)
 	assert.Equal(t, 10, len(id1), "GenerateSubID() length")
@@ -995,7 +998,7 @@ func TestHandleInvite_XUIAddClientFails(t *testing.T) {
 	srv.handleInvite(rec, req)
 
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
-	assert.Contains(t, rec.Body.String(), "Ошибка создания подписки")
+	assert.Contains(t, rec.Body.String(), "Ошибка сервера")
 }
 
 func TestHandleInvite_CreateTrialSubscriptionFails(t *testing.T) {
@@ -1248,8 +1251,8 @@ func TestRenderTrialPage_XSSProtection(t *testing.T) {
 			subURL:       "test<script>alert('xss')</script>",
 			telegramLink: "https://t.me/testbot?start=123",
 			checkXSS: func(t *testing.T, html string) {
-				assert.NotContains(t, html, "<script>alert('xss')</script>", "script tag should be escaped")
-				assert.Contains(t, html, "&lt;script&gt;alert(&#39;xss&#39;)&lt;/script&gt;", "script should be HTML-escaped")
+				assert.NotContains(t, html, `<script>alert('xss')</script>`, "raw script tag should not appear")
+				assert.Contains(t, html, `test\u003cscript\u003ealert`, "script should be JS-escaped in copyToClipboard")
 			},
 		},
 		{
@@ -1257,8 +1260,8 @@ func TestRenderTrialPage_XSSProtection(t *testing.T) {
 			subURL:       "javascript:alert('xss')",
 			telegramLink: "https://t.me/testbot?start=123",
 			checkXSS: func(t *testing.T, html string) {
-				assert.NotContains(t, html, `<a href="javascript:alert`, "raw javascript href should be escaped")
-				assert.Contains(t, html, `javascript:alert(&#39;xss&#39;)`, "escaped javascript should be present")
+				assert.NotContains(t, html, `<a href="javascript:alert`, "raw javascript href should not appear")
+				assert.Contains(t, html, `javascript:alert(\u0027xss\u0027)`, "escaped javascript should be present in JS context")
 			},
 		},
 		{
@@ -1266,7 +1269,7 @@ func TestRenderTrialPage_XSSProtection(t *testing.T) {
 			subURL:       `test" onclick="alert('xss')"`,
 			telegramLink: "https://t.me/testbot?start=123",
 			checkXSS: func(t *testing.T, html string) {
-				assert.NotContains(t, html, `onclick="alert`, "onclick should be escaped")
+				assert.NotContains(t, html, `onclick="alert`, "onclick should not appear unescaped")
 			},
 		},
 		{
@@ -1274,7 +1277,7 @@ func TestRenderTrialPage_XSSProtection(t *testing.T) {
 			subURL:       "test123",
 			telegramLink: "https://t.me/testbot?start=<script>alert('xss')</script>",
 			checkXSS: func(t *testing.T, html string) {
-				assert.NotContains(t, html, "<script>alert('xss')</script>", "script in telegramLink should be escaped")
+				assert.NotContains(t, html, `<script>alert('xss')</script>`, "raw script in telegramLink should not appear")
 			},
 		},
 		{

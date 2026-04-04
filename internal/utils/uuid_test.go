@@ -10,12 +10,14 @@ import (
 
 func TestGenerateUUID(t *testing.T) {
 	t.Run("generates non-empty UUID", func(t *testing.T) {
-		got := GenerateUUID()
+		got, err := GenerateUUID()
+		require.NoError(t, err)
 		assert.NotEmpty(t, got, "GenerateUUID() returned empty string")
 	})
 
 	t.Run("generates valid UUID v4 format", func(t *testing.T) {
-		uuid := GenerateUUID()
+		uuid, err := GenerateUUID()
+		require.NoError(t, err)
 
 		// UUID v4 format: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx
 		// where x is any hex digit, 4 is the version, y is one of 8, 9, a, or b
@@ -28,14 +30,16 @@ func TestGenerateUUID(t *testing.T) {
 		uuids := make(map[string]bool, iterations)
 
 		for i := 0; i < iterations; i++ {
-			uuid := GenerateUUID()
+			uuid, err := GenerateUUID()
+			require.NoError(t, err)
 			assert.False(t, uuids[uuid], "GenerateUUID() generated duplicate UUID after %d iterations: %s", i, uuid)
 			uuids[uuid] = true
 		}
 	})
 
 	t.Run("generates correct length", func(t *testing.T) {
-		uuid := GenerateUUID()
+		uuid, err := GenerateUUID()
+		require.NoError(t, err)
 		// UUID format: 8-4-4-4-12 = 36 characters (32 hex + 4 dashes)
 		expectedLen := 36
 
@@ -44,7 +48,8 @@ func TestGenerateUUID(t *testing.T) {
 
 	t.Run("version bit is set correctly", func(t *testing.T) {
 		for i := 0; i < 100; i++ {
-			uuid := GenerateUUID()
+			uuid, err := GenerateUUID()
+			require.NoError(t, err)
 			// Check that the 13th character (version) is '4'
 			if len(uuid) >= 15 {
 				assert.Equal(t, '4', rune(uuid[14]), "GenerateUUID() version bit not set correctly at position 14")
@@ -54,7 +59,8 @@ func TestGenerateUUID(t *testing.T) {
 
 	t.Run("variant bits are set correctly", func(t *testing.T) {
 		for i := 0; i < 100; i++ {
-			uuid := GenerateUUID()
+			uuid, err := GenerateUUID()
+			require.NoError(t, err)
 			// Check that the 17th character (variant) is one of 8, 9, a, b
 			if len(uuid) >= 20 {
 				variant := uuid[19]
@@ -66,12 +72,14 @@ func TestGenerateUUID(t *testing.T) {
 
 func TestGenerateSubID(t *testing.T) {
 	t.Run("generates non-empty SubID", func(t *testing.T) {
-		got := GenerateSubID()
+		got, err := GenerateSubID()
+		require.NoError(t, err)
 		assert.NotEmpty(t, got, "GenerateSubID() returned empty string")
 	})
 
 	t.Run("generates valid hex format", func(t *testing.T) {
-		subID := GenerateSubID()
+		subID, err := GenerateSubID()
+		require.NoError(t, err)
 
 		// SubID format: 14 hex characters (28 hex chars in the implementation)
 		pattern := `^[0-9a-f]+$`
@@ -83,14 +91,16 @@ func TestGenerateSubID(t *testing.T) {
 		subIDs := make(map[string]bool, iterations)
 
 		for i := 0; i < iterations; i++ {
-			subID := GenerateSubID()
+			subID, err := GenerateSubID()
+			require.NoError(t, err)
 			assert.False(t, subIDs[subID], "GenerateSubID() generated duplicate SubID after %d iterations: %s", i, subID)
 			subIDs[subID] = true
 		}
 	})
 
 	t.Run("generates correct length", func(t *testing.T) {
-		subID := GenerateSubID()
+		subID, err := GenerateSubID()
+		require.NoError(t, err)
 		// 5 bytes = 10 hex characters
 		expectedLen := 10
 
@@ -99,7 +109,8 @@ func TestGenerateSubID(t *testing.T) {
 
 	t.Run("generates URL-safe IDs", func(t *testing.T) {
 		for i := 0; i < 100; i++ {
-			subID := GenerateSubID()
+			subID, err := GenerateSubID()
+			require.NoError(t, err)
 			// Check that all characters are hex (0-9, a-f)
 			for _, c := range subID {
 				assert.True(t, (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'),
@@ -111,17 +122,20 @@ func TestGenerateSubID(t *testing.T) {
 
 func TestGenerateInviteCode(t *testing.T) {
 	t.Run("generates non-empty code", func(t *testing.T) {
-		got := GenerateInviteCode()
+		got, err := GenerateInviteCode()
+		require.NoError(t, err)
 		assert.NotEmpty(t, got, "GenerateInviteCode() returned empty string")
 	})
 
 	t.Run("generates correct length", func(t *testing.T) {
-		code := GenerateInviteCode()
+		code, err := GenerateInviteCode()
+		require.NoError(t, err)
 		assert.Len(t, code, 8, "GenerateInviteCode() length")
 	})
 
 	t.Run("generates valid characters", func(t *testing.T) {
-		code := GenerateInviteCode()
+		code, err := GenerateInviteCode()
+		require.NoError(t, err)
 		const validChars = "0123456789abcdefghijklmnopqrstuvwxyz"
 		for _, c := range code {
 			assert.True(t, strings.ContainsRune(validChars, c),
@@ -130,13 +144,16 @@ func TestGenerateInviteCode(t *testing.T) {
 	})
 
 	t.Run("generates unique codes", func(t *testing.T) {
-		code1 := GenerateInviteCode()
-		code2 := GenerateInviteCode()
+		code1, err := GenerateInviteCode()
+		require.NoError(t, err)
+		code2, err := GenerateInviteCode()
+		require.NoError(t, err)
 		assert.NotEqual(t, code1, code2, "GenerateInviteCode() should generate different codes")
 	})
 
 	t.Run("generates lowercase only", func(t *testing.T) {
-		code := GenerateInviteCode()
+		code, err := GenerateInviteCode()
+		require.NoError(t, err)
 		assert.Equal(t, strings.ToLower(code), code, "GenerateInviteCode() should generate lowercase only")
 	})
 }
@@ -151,7 +168,11 @@ func TestGenerateUUID_Concurrency(t *testing.T) {
 		for i := 0; i < goroutines; i++ {
 			go func() {
 				for j := 0; j < uuidsPerGoroutine; j++ {
-					results <- GenerateUUID()
+					uuid, err := GenerateUUID()
+					if err != nil {
+						return
+					}
+					results <- uuid
 				}
 			}()
 		}
@@ -177,7 +198,11 @@ func TestGenerateSubID_Concurrency(t *testing.T) {
 		for i := 0; i < goroutines; i++ {
 			go func() {
 				for j := 0; j < idsPerGoroutine; j++ {
-					results <- GenerateSubID()
+					subID, err := GenerateSubID()
+					if err != nil {
+						return
+					}
+					results <- subID
 				}
 			}()
 		}
@@ -196,14 +221,20 @@ func TestGenerateSubID_Concurrency(t *testing.T) {
 // BenchmarkGenerateUUID benchmarks UUID generation
 func BenchmarkGenerateUUID(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		GenerateUUID()
+		_, err := GenerateUUID()
+		if err != nil {
+			b.Fatal(err)
+		}
 	}
 }
 
 // BenchmarkGenerateSubID benchmarks SubID generation
 func BenchmarkGenerateSubID(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		GenerateSubID()
+		_, err := GenerateSubID()
+		if err != nil {
+			b.Fatal(err)
+		}
 	}
 }
 
@@ -211,7 +242,10 @@ func BenchmarkGenerateSubID(b *testing.B) {
 func BenchmarkGenerateUUID_Parallel(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			GenerateUUID()
+			_, err := GenerateUUID()
+			if err != nil {
+				b.Fatal(err)
+			}
 		}
 	})
 }
@@ -220,7 +254,10 @@ func BenchmarkGenerateUUID_Parallel(b *testing.B) {
 func BenchmarkGenerateSubID_Parallel(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			GenerateSubID()
+			_, err := GenerateSubID()
+			if err != nil {
+				b.Fatal(err)
+			}
 		}
 	})
 }
@@ -228,7 +265,10 @@ func BenchmarkGenerateSubID_Parallel(b *testing.B) {
 // BenchmarkGenerateInviteCode benchmarks invite code generation
 func BenchmarkGenerateInviteCode(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		GenerateInviteCode()
+		_, err := GenerateInviteCode()
+		if err != nil {
+			b.Fatal(err)
+		}
 	}
 }
 
@@ -236,7 +276,10 @@ func BenchmarkGenerateInviteCode(b *testing.B) {
 func BenchmarkGenerateInviteCode_Parallel(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			GenerateInviteCode()
+			_, err := GenerateInviteCode()
+			if err != nil {
+				b.Fatal(err)
+			}
 		}
 	})
 }
@@ -245,7 +288,10 @@ func BenchmarkGenerateInviteCode_Parallel(b *testing.B) {
 func BenchmarkGenerateUUID_SmallBatch(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		for j := 0; j < 10; j++ {
-			GenerateUUID()
+			_, err := GenerateUUID()
+			if err != nil {
+				b.Fatal(err)
+			}
 		}
 	}
 }
@@ -254,7 +300,10 @@ func BenchmarkGenerateUUID_SmallBatch(b *testing.B) {
 func BenchmarkGenerateUUID_LargeBatch(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		for j := 0; j < 1000; j++ {
-			GenerateUUID()
+			_, err := GenerateUUID()
+			if err != nil {
+				b.Fatal(err)
+			}
 		}
 	}
 }
@@ -263,7 +312,10 @@ func BenchmarkGenerateUUID_LargeBatch(b *testing.B) {
 func BenchmarkGenerateSubID_SmallBatch(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		for j := 0; j < 10; j++ {
-			GenerateSubID()
+			_, err := GenerateSubID()
+			if err != nil {
+				b.Fatal(err)
+			}
 		}
 	}
 }
@@ -272,7 +324,10 @@ func BenchmarkGenerateSubID_SmallBatch(b *testing.B) {
 func BenchmarkGenerateSubID_LargeBatch(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		for j := 0; j < 1000; j++ {
-			GenerateSubID()
+			_, err := GenerateSubID()
+			if err != nil {
+				b.Fatal(err)
+			}
 		}
 	}
 }
@@ -281,7 +336,10 @@ func BenchmarkGenerateSubID_LargeBatch(b *testing.B) {
 func BenchmarkGenerateInviteCode_SmallBatch(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		for j := 0; j < 10; j++ {
-			GenerateInviteCode()
+			_, err := GenerateInviteCode()
+			if err != nil {
+				b.Fatal(err)
+			}
 		}
 	}
 }
@@ -290,7 +348,10 @@ func BenchmarkGenerateInviteCode_SmallBatch(b *testing.B) {
 func BenchmarkGenerateInviteCode_LargeBatch(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		for j := 0; j < 1000; j++ {
-			GenerateInviteCode()
+			_, err := GenerateInviteCode()
+			if err != nil {
+				b.Fatal(err)
+			}
 		}
 	}
 }
@@ -299,17 +360,26 @@ func BenchmarkGenerateInviteCode_LargeBatch(b *testing.B) {
 func BenchmarkAllGenerators(b *testing.B) {
 	b.Run("UUID", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			GenerateUUID()
+			_, err := GenerateUUID()
+			if err != nil {
+				b.Fatal(err)
+			}
 		}
 	})
 	b.Run("SubID", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			GenerateSubID()
+			_, err := GenerateSubID()
+			if err != nil {
+				b.Fatal(err)
+			}
 		}
 	})
 	b.Run("InviteCode", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			GenerateInviteCode()
+			_, err := GenerateInviteCode()
+			if err != nil {
+				b.Fatal(err)
+			}
 		}
 	})
 }
@@ -324,7 +394,11 @@ func TestGenerateInviteCode_Concurrency(t *testing.T) {
 		for i := 0; i < goroutines; i++ {
 			go func() {
 				for j := 0; j < codesPerGoroutine; j++ {
-					results <- GenerateInviteCode()
+					code, err := GenerateInviteCode()
+					if err != nil {
+						return
+					}
+					results <- code
 				}
 			}()
 		}
@@ -346,7 +420,8 @@ func TestGenerateInviteCode_Entropy(t *testing.T) {
 		charCounts := make(map[rune]int)
 
 		for i := 0; i < iterations; i++ {
-			code := GenerateInviteCode()
+			code, err := GenerateInviteCode()
+			require.NoError(t, err)
 			for _, c := range code {
 				charCounts[c]++
 			}
@@ -369,7 +444,8 @@ func TestGenerateInviteCode_Entropy(t *testing.T) {
 func TestGenerateUUID_Entropy(t *testing.T) {
 	t.Run("version bit is always 4", func(t *testing.T) {
 		for i := 0; i < 1000; i++ {
-			uuid := GenerateUUID()
+			uuid, err := GenerateUUID()
+			require.NoError(t, err)
 			require.Len(t, uuid, 36, "UUID length")
 			assert.Equal(t, byte('4'), uuid[14], "Version bit at position 14 should be '4'")
 		}
@@ -377,7 +453,8 @@ func TestGenerateUUID_Entropy(t *testing.T) {
 
 	t.Run("variant bits are valid", func(t *testing.T) {
 		for i := 0; i < 1000; i++ {
-			uuid := GenerateUUID()
+			uuid, err := GenerateUUID()
+			require.NoError(t, err)
 			require.Len(t, uuid, 36, "UUID length")
 			variant := uuid[19]
 			assert.Contains(t, []byte{'8', '9', 'a', 'b'}, variant, "Variant bits should be 8, 9, a, or b")
@@ -391,7 +468,8 @@ func TestGenerateSubID_Entropy(t *testing.T) {
 		charCounts := make(map[rune]int)
 
 		for i := 0; i < iterations; i++ {
-			id := GenerateSubID()
+			id, err := GenerateSubID()
+			require.NoError(t, err)
 			for _, c := range id {
 				charCounts[c]++
 			}
@@ -416,7 +494,8 @@ func TestGenerateUUID_Stress(t *testing.T) {
 		uuids := make(map[string]struct{}, iterations)
 
 		for i := 0; i < iterations; i++ {
-			uuid := GenerateUUID()
+			uuid, err := GenerateUUID()
+			require.NoError(t, err)
 			if _, exists := uuids[uuid]; exists {
 				t.Fatalf("Duplicate UUID found after %d iterations: %s", i, uuid)
 			}
@@ -433,7 +512,8 @@ func TestGenerateSubID_Stress(t *testing.T) {
 		ids := make(map[string]struct{}, iterations)
 
 		for i := 0; i < iterations; i++ {
-			id := GenerateSubID()
+			id, err := GenerateSubID()
+			require.NoError(t, err)
 			if _, exists := ids[id]; exists {
 				t.Fatalf("Duplicate SubID found after %d iterations: %s", i, id)
 			}
@@ -450,7 +530,8 @@ func TestGenerateInviteCode_Stress(t *testing.T) {
 		codes := make(map[string]struct{}, iterations)
 
 		for i := 0; i < iterations; i++ {
-			code := GenerateInviteCode()
+			code, err := GenerateInviteCode()
+			require.NoError(t, err)
 			if _, exists := codes[code]; exists {
 				t.Fatalf("Duplicate code found after %d iterations: %s", i, code)
 			}
@@ -464,7 +545,8 @@ func TestGenerateInviteCode_Stress(t *testing.T) {
 func TestGenerateUUID_DashesPosition(t *testing.T) {
 	t.Run("dashes are at correct positions", func(t *testing.T) {
 		for i := 0; i < 100; i++ {
-			uuid := GenerateUUID()
+			uuid, err := GenerateUUID()
+			require.NoError(t, err)
 			require.Len(t, uuid, 36, "UUID length")
 			assert.Equal(t, '-', rune(uuid[8]), "Dash at position 8")
 			assert.Equal(t, '-', rune(uuid[13]), "Dash at position 13")
@@ -477,7 +559,8 @@ func TestGenerateUUID_DashesPosition(t *testing.T) {
 func TestGenerateSubID_Format(t *testing.T) {
 	t.Run("contains only hex characters", func(t *testing.T) {
 		for i := 0; i < 100; i++ {
-			id := GenerateSubID()
+			id, err := GenerateSubID()
+			require.NoError(t, err)
 			assert.Len(t, id, 10, "SubID length")
 			for _, c := range id {
 				assert.True(t, (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'),
@@ -491,7 +574,8 @@ func TestGenerateSubID_Format(t *testing.T) {
 func TestGenerateInviteCode_Format(t *testing.T) {
 	t.Run("contains only lowercase letters and digits", func(t *testing.T) {
 		for i := 0; i < 100; i++ {
-			code := GenerateInviteCode()
+			code, err := GenerateInviteCode()
+			require.NoError(t, err)
 			assert.Len(t, code, 8, "InviteCode length")
 			for _, c := range code {
 				assert.True(t, (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z'),
@@ -505,7 +589,8 @@ func TestGenerateInviteCode_Format(t *testing.T) {
 		codes := make(map[string]struct{})
 
 		for i := 0; i < iterations; i++ {
-			code := GenerateInviteCode()
+			code, err := GenerateInviteCode()
+			require.NoError(t, err)
 			assert.NotContains(t, codes, code, "Duplicate code generated")
 			codes[code] = struct{}{}
 		}

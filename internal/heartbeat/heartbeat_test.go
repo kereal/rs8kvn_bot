@@ -23,8 +23,7 @@ func TestMain(m *testing.M) {
 
 func TestGetHTTPClient_Singleton(t *testing.T) {
 	// Reset the singleton for this test
-	httpClientOnce = sync.Once{}
-	httpClient = nil
+	resetHTTPClient()
 
 	client1 := getHTTPClient()
 	client2 := getHTTPClient()
@@ -36,8 +35,7 @@ func TestGetHTTPClient_Singleton(t *testing.T) {
 
 func TestGetHTTPClient_ConcurrentAccess(t *testing.T) {
 	// Reset the singleton for this test
-	httpClientOnce = sync.Once{}
-	httpClient = nil
+	resetHTTPClient()
 
 	var wg sync.WaitGroup
 	clients := make([]*http.Client, 10)
@@ -60,8 +58,7 @@ func TestGetHTTPClient_ConcurrentAccess(t *testing.T) {
 
 func TestGetHTTPClient_Timeout(t *testing.T) {
 	// Reset the singleton for this test
-	httpClientOnce = sync.Once{}
-	httpClient = nil
+	resetHTTPClient()
 
 	client := getHTTPClient()
 

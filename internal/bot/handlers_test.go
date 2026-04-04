@@ -46,8 +46,10 @@ func TestNewHandler(t *testing.T) {
 }
 
 func TestGenerateInviteCode(t *testing.T) {
-	code1 := utils.GenerateInviteCode()
-	code2 := utils.GenerateInviteCode()
+	code1, err := utils.GenerateInviteCode()
+	require.NoError(t, err)
+	code2, err := utils.GenerateInviteCode()
+	require.NoError(t, err)
 
 	assert.Len(t, code1, 8, "Expected code length 8")
 	assert.NotEqual(t, code1, code2, "Expected different codes on consecutive calls")

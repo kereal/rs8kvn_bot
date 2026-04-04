@@ -367,7 +367,10 @@ func UpdateSubscription(sub *Subscription) error {
 	if DB == nil {
 		return fmt.Errorf("database not initialized")
 	}
-	result := DB.Save(sub)
+	result := DB.Model(&Subscription{}).
+		Where("id = ?", sub.ID).
+		Select("telegram_id", "username", "client_id", "subscription_id", "inbound_id", "traffic_limit", "expiry_time", "status", "subscription_url", "invite_code", "is_trial", "referred_by").
+		Updates(sub)
 	if result.Error != nil {
 		return fmt.Errorf("failed to update subscription: %w", result.Error)
 	}
@@ -574,7 +577,10 @@ func (s *Service) CreateSubscription(ctx context.Context, sub *Subscription) err
 
 // UpdateSubscription updates an existing subscription.
 func (s *Service) UpdateSubscription(ctx context.Context, sub *Subscription) error {
-	result := s.db.WithContext(ctx).Save(sub)
+	result := s.db.WithContext(ctx).Model(&Subscription{}).
+		Where("id = ?", sub.ID).
+		Select("telegram_id", "username", "client_id", "subscription_id", "inbound_id", "traffic_limit", "expiry_time", "status", "subscription_url", "invite_code", "is_trial", "referred_by").
+		Updates(sub)
 	if result.Error != nil {
 		return fmt.Errorf("failed to update subscription: %w", result.Error)
 	}
@@ -751,24 +757,16 @@ func (s *Service) GetTotalTelegramIDCount(ctx context.Context) (int64, error) {
 }
 
 // GetOrCreateInvite returns an existing invite for the referrer or creates a new one.
+// Uses atomic INSERT ... ON CONFLICT DO NOTHING to prevent TOCTOU race conditions.
 func (s *Service) GetOrCreateInvite(ctx context.Context, referrerTGID int64, code string) (*Invite, error) {
-	var invite Invite
-	result := s.db.WithContext(ctx).Where("referrer_tg_id = ?", referrerTGID).First(&invite)
-	if result.Error == nil {
-		return &invite, nil
-	}
-	if !errors.Is(result.Error, gorm.ErrRecordNotFound) {
-		return nil, fmt.Errorf("failed to get invite: %w", result.Error)
-	}
+	s.db.WithContext(ctx).Exec("INSERT OR IGNORE INTO invites (code, referrer_tg_id, created_at) VALUES (?, ?, ?)",
+		code, referrerTGID, time.Now())
 
-	invite = Invite{
-		Code:         code,
-		ReferrerTGID: referrerTGID,
+	var result Invite
+	if err := s.db.WithContext(ctx).Where("referrer_tg_id = ?", referrerTGID).First(&result).Error; err != nil {
+		return nil, fmt.Errorf("failed to get invite: %w", err)
 	}
-	if err := s.db.WithContext(ctx).Create(&invite).Error; err != nil {
-		return nil, fmt.Errorf("failed to create invite: %w", err)
-	}
-	return &invite, nil
+	return &result, nil
 }
 
 // GetInviteByCode returns an invite by its code.
@@ -799,7 +797,7 @@ func (s *Service) GetAllReferralCounts(ctx context.Context) (map[int64]int64, er
 		Count      int64
 	}
 	var results []ReferralCount
-	
+
 	if err := s.db.WithContext(ctx).Model(&Subscription{}).
 		Select("referred_by, COUNT(*) as count").
 		Where("referred_by > 0").
@@ -807,7 +805,7 @@ func (s *Service) GetAllReferralCounts(ctx context.Context) (map[int64]int64, er
 		Scan(&results).Error; err != nil {
 		return nil, fmt.Errorf("failed to get referral counts: %w", err)
 	}
-	
+
 	counts := make(map[int64]int64)
 	for _, r := range results {
 		counts[r.ReferredBy] = r.Count
@@ -860,34 +858,42 @@ func (s *Service) GetTrialSubscriptionBySubID(ctx context.Context, subscriptionI
 // by a concurrent bind, RowsAffected will be 0.
 func (s *Service) BindTrialSubscription(ctx context.Context, subscriptionID string, telegramID int64, username string) (*Subscription, error) {
 	var sub Subscription
-	if err := s.db.WithContext(ctx).Where("subscription_id = ? AND is_trial = ? AND telegram_id = ?", subscriptionID, true, 0).First(&sub).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, fmt.Errorf("trial subscription not found or already activated")
-		}
-		return nil, fmt.Errorf("failed to get trial subscription: %w", err)
-	}
-
 	var referredBy int64
-	if sub.InviteCode != "" {
-		var invite Invite
-		if err := s.db.WithContext(ctx).Where("code = ?", sub.InviteCode).First(&invite).Error; err == nil {
-			referredBy = invite.ReferrerTGID
-		}
-	}
 
-	result := s.db.WithContext(ctx).Model(&Subscription{}).
-		Where("id = ? AND telegram_id = ? AND is_trial = ?", sub.ID, 0, true).
-		Updates(map[string]interface{}{
-			"telegram_id": telegramID,
-			"username":    username,
-			"is_trial":    false,
-			"referred_by": referredBy,
-		})
-	if result.Error != nil {
-		return nil, fmt.Errorf("failed to bind trial subscription: %w", result.Error)
-	}
-	if result.RowsAffected == 0 {
-		return nil, fmt.Errorf("trial subscription not found or already activated")
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("subscription_id = ? AND is_trial = ? AND telegram_id = ?", subscriptionID, true, 0).First(&sub).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return fmt.Errorf("trial subscription not found or already activated")
+			}
+			return fmt.Errorf("failed to get trial subscription: %w", err)
+		}
+
+		if sub.InviteCode != "" {
+			var invite Invite
+			if err := tx.Where("code = ?", sub.InviteCode).First(&invite).Error; err == nil {
+				referredBy = invite.ReferrerTGID
+			}
+		}
+
+		result := tx.Model(&Subscription{}).
+			Where("id = ? AND telegram_id = ? AND is_trial = ?", sub.ID, 0, true).
+			Updates(map[string]interface{}{
+				"telegram_id": telegramID,
+				"username":    username,
+				"is_trial":    false,
+				"referred_by": referredBy,
+			})
+		if result.Error != nil {
+			return fmt.Errorf("failed to bind trial subscription: %w", result.Error)
+		}
+		if result.RowsAffected == 0 {
+			return fmt.Errorf("trial subscription not found or already activated")
+		}
+
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	sub.TelegramID = telegramID
