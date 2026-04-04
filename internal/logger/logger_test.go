@@ -2,6 +2,7 @@ package logger
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"testing"
@@ -406,17 +407,35 @@ func TestWriter(t *testing.T) {
 
 // ==================== RedirectStdLog Tests ====================
 
-func TestRedirectStdLog(t *testing.T) {
+func TestRedirectStdLog_ActualRedirection(t *testing.T) {
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
 
-	// Initialize logger first
 	_, err := Init(logPath, "info")
 	require.NoError(t, err, "Init() error")
 	defer Close()
 
-	// Should not panic
+	// Capture original std log output
+	oldFlags := log.Flags()
+	defer func() {
+		log.SetFlags(oldFlags)
+	}()
+
 	RedirectStdLog()
+
+	// Write via standard log package
+	log.Println("redirected stdlog test message")
+
+	// Give logger time to flush
+	time.Sleep(50 * time.Millisecond)
+	Sync()
+
+	// Verify the message appears in our log file
+	content, err := os.ReadFile(logPath)
+	require.NoError(t, err, "Failed to read log file")
+
+	contentStr := string(content)
+	assert.Contains(t, contentStr, "redirected stdlog test message", "Std log output should be redirected to zap logger")
 }
 
 // ==================== Edge Cases ====================

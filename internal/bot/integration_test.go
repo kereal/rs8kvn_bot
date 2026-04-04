@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"rs8kvn_bot/internal/config"
 	"rs8kvn_bot/internal/database"
+	"rs8kvn_bot/internal/service"
 	"rs8kvn_bot/internal/testutil"
 	"rs8kvn_bot/internal/utils"
 	"rs8kvn_bot/internal/xui"
@@ -133,7 +134,9 @@ func NewTestFixture(t *testing.T) *IntegrationTestFixture {
 		DatabasePath:     ":memory:",
 	}
 
-	handler := NewHandler(testutil.NewMockBotAPI(), cfg, dbService, mockXUI.Client, NewTestBotConfig())
+	handler := NewHandler(testutil.NewMockBotAPI(), cfg, dbService, mockXUI.Client, NewTestBotConfig(), nil)
+	subService := service.NewSubscriptionService(dbService, mockXUI.Client, cfg)
+	handler.subscriptionService = subService
 
 	return &IntegrationTestFixture{
 		DB:          dbService,

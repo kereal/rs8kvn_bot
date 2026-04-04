@@ -2,7 +2,6 @@ package bot
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -40,32 +39,35 @@ type Handler struct {
 	xui                 interfaces.XUIClient
 	rateLimiter         *ratelimiter.PerUserRateLimiter
 	cache               *SubscriptionCache
-	inProgressSyncMap   sync.Map // Atomic tracking of subscription creation in progress
-	referrals           map[int64]int64
-	referralsMu         sync.RWMutex
+	inProgressSyncMap   sync.Map                // Atomic tracking of subscription creation in progress
 	pendingInvites      map[int64]pendingInvite // chatID -> invite_code
 	pendingMu           sync.RWMutex
 	botConfig           *BotConfig
-	adminSendMu         sync.Map // chatID -> lastSendTime
 	subscriptionService *service.SubscriptionService
+	referralCache       *ReferralCache
+	sender              *MessageSender
+	keyboards           *KeyboardBuilder
 }
 
-func NewHandler(bot interfaces.BotAPI, cfg *config.Config, db interfaces.DatabaseService, xuiClient interfaces.XUIClient, botConfig *BotConfig) *Handler {
+func NewHandler(bot interfaces.BotAPI, cfg *config.Config, db interfaces.DatabaseService, xuiClient interfaces.XUIClient, botConfig *BotConfig, subService *service.SubscriptionService) *Handler {
+	rl := ratelimiter.NewPerUserRateLimiter(float64(config.RateLimiterMaxTokens), float64(config.RateLimiterRefillRate))
+	kb := NewKeyboardBuilder(botConfig.Username, cfg.ContactUsername, config.DonateCardNumber, config.DonateURL, cfg.SiteURL)
+
 	return &Handler{
 		bot:                 bot,
 		cfg:                 cfg,
 		db:                  db,
 		xui:                 xuiClient,
-		rateLimiter:         ratelimiter.NewPerUserRateLimiter(float64(config.RateLimiterMaxTokens), float64(config.RateLimiterRefillRate)),
+		rateLimiter:         rl,
 		cache:               NewSubscriptionCache(CacheMaxSize, CacheTTL),
 		inProgressSyncMap:   sync.Map{},
-		referrals:           make(map[int64]int64),
-		referralsMu:         sync.RWMutex{},
 		pendingInvites:      make(map[int64]pendingInvite),
 		pendingMu:           sync.RWMutex{},
 		botConfig:           botConfig,
-		adminSendMu:         sync.Map{},
-		subscriptionService: service.NewSubscriptionService(db, xuiClient, cfg),
+		subscriptionService: subService,
+		referralCache:       NewReferralCache(db),
+		sender:              NewMessageSender(bot, rl),
+		keyboards:           kb,
 	}
 }
 
@@ -132,137 +134,56 @@ func (h *Handler) StartRateLimiterCleanup(ctx context.Context, interval, maxIdle
 }
 
 func (h *Handler) checkAdminSendRateLimit(chatID int64) bool {
-	now := time.Now()
-
-	lastSend, loaded := h.adminSendMu.Load(chatID)
-	if loaded {
-		lastTime := lastSend.(time.Time)
-		if now.Sub(lastTime) < config.AdminSendMinInterval {
-			return false
-		}
-	}
-
-	h.adminSendMu.Store(chatID, now)
-	return true
+	return h.referralCache.CheckAdminSendRateLimit(chatID)
 }
 
 func (h *Handler) ClearAdminSendRateLimit(chatID int64) {
-	h.adminSendMu.Delete(chatID)
+	h.referralCache.ClearAdminSendRateLimit(chatID)
 }
 
 // LoadReferralCache loads referral counts from database into memory cache.
 func (h *Handler) LoadReferralCache(ctx context.Context) error {
-	counts, err := h.db.GetAllReferralCounts(ctx)
-	if err != nil {
-		return err
-	}
-
-	h.referralsMu.Lock()
-	defer h.referralsMu.Unlock()
-
-	h.referrals = counts
-	return nil
+	return h.referralCache.Load(ctx)
 }
 
 // GetReferralCount returns the cached referral count for a user.
 func (h *Handler) GetReferralCount(chatID int64) int64 {
-	h.referralsMu.RLock()
-	defer h.referralsMu.RUnlock()
-
-	return h.referrals[chatID]
+	return h.referralCache.Get(chatID)
 }
 
 // IncrementReferralCount increments the referral count for a user in cache.
 func (h *Handler) IncrementReferralCount(chatID int64) {
-	h.referralsMu.Lock()
-	defer h.referralsMu.Unlock()
-
-	h.referrals[chatID]++
+	h.referralCache.Increment(chatID)
 }
 
 // DecrementReferralCount decrements the referral count for a user in cache.
 func (h *Handler) DecrementReferralCount(chatID int64) {
-	h.referralsMu.Lock()
-	defer h.referralsMu.Unlock()
-
-	if h.referrals[chatID] > 0 {
-		h.referrals[chatID]--
-	}
+	h.referralCache.Decrement(chatID)
 }
 
 // SyncReferralCache reloads the referral cache from database.
 func (h *Handler) SyncReferralCache(ctx context.Context) error {
-	return h.LoadReferralCache(ctx)
+	return h.referralCache.Sync(ctx)
 }
 
 // StartReferralCacheSync starts periodic synchronization of referral cache.
 func (h *Handler) StartReferralCacheSync(ctx context.Context) {
-	go func() {
-		ticker := time.NewTicker(1 * time.Hour)
-		defer ticker.Stop()
-
-		// Load initial cache
-		if err := h.LoadReferralCache(ctx); err != nil {
-			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-				logger.Info("Referral cache load skipped (context ending)")
-			} else {
-				logger.Error("Failed to load referral cache", zap.Error(err))
-			}
-		}
-
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				if err := h.SyncReferralCache(ctx); err != nil {
-					logger.Error("Failed to sync referral cache", zap.Error(err))
-				}
-			}
-		}
-	}()
+	h.referralCache.StartSync(ctx)
 }
 
 // getMainMenuKeyboard returns the inline keyboard with main menu buttons
 func (h *Handler) getMainMenuKeyboard(hasSubscription bool) tgbotapi.InlineKeyboardMarkup {
-	rows := [][]tgbotapi.InlineKeyboardButton{
-		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("📋 Подписка", "menu_subscription"),
-			tgbotapi.NewInlineKeyboardButtonData("☕ Донат", "menu_donate"),
-		),
-		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("❓ Помощь", "menu_help"),
-		),
-	}
-
-	if hasSubscription {
-		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("📤 Поделиться", "share_invite"),
-		))
-	}
-
-	return tgbotapi.NewInlineKeyboardMarkup(rows...)
+	return h.keyboards.MainMenu(hasSubscription)
 }
 
 // getBackKeyboard returns the inline keyboard with back button
 func (h *Handler) getBackKeyboard() tgbotapi.InlineKeyboardMarkup {
-	return tgbotapi.NewInlineKeyboardMarkup(
-		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("🏠 В начало", "back_to_start"),
-		),
-	)
+	return h.keyboards.Back()
 }
 
 // getQRKeyboard returns the inline keyboard with QR code and back buttons
 func (h *Handler) getQRKeyboard() tgbotapi.InlineKeyboardMarkup {
-	return tgbotapi.NewInlineKeyboardMarkup(
-		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("📱 QR-код", "qr_code"),
-		),
-		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("🏠 В начало", "back_to_start"),
-		),
-	)
+	return h.keyboards.QR()
 }
 
 // getUsername extracts a username from a Telegram user.
@@ -346,31 +267,12 @@ func (h *Handler) showLoadingMessage(chatID int64, messageID int) int {
 
 // getDonateText returns the donation message text.
 func (h *Handler) getDonateText() string {
-	return `☕ *Поддержка проекта*
-
-Любая помощь важна для стабильной работы сервиса.
-
-😊 Сделайте свой вклад — переведите любую сумму.
-Буду очень благодарен! ❤️
-
-💳 *Карта Т-Банка:*
-` + "`" + config.DonateCardNumber + "`" + `
-
-🔗 [Сбор в Т-Банке](` + config.DonateURL + `)
-💬 [Связаться](https://t.me/` + h.cfg.ContactUsername + `)`
+	return h.keyboards.DonateText()
 }
 
 // getHelpText returns the help/instruction message text with subscription URL.
 func (h *Handler) getHelpText(trafficLimitGB int, subscriptionURL string) string {
-	return fmt.Sprintf(
-		"🚀 *Ваша подписка готова!*\n\nТрафик: %dГб на месяц.\n\n📲 *1. Установите приложение Happ*\n· [Скачать для iOS](https://apps.apple.com/ru/app/happ-proxy-utility-plus/id6746188973)\n· [Скачать для Android](https://play.google.com/store/apps/details?id=com.happproxy)\n\n📥 *2. Импортируйте подписку*\n\nНажмите, чтобы скопировать: `%s`\n\nВ приложении Happ нажмите *«+»* в правом верхнем углу и выберите *«Вставить из буфера»*.\n\n▶️ *3. Запустите VPN*\nДождитесь загрузки и нажмите на большую круглую кнопку в центре экрана.\n\n🛡️ *Важно знать*\nВ приложении Happ настроена автоматическая маршрутизация. Зарубежные сайты работают через VPN, а российские сервисы — напрямую. VPN можно не выключать.\n⚠️ _Если вы используете другое приложение или свою конфигурацию — не заходите через этот VPN на российские ресурсы, иначе сервер заблокируют._\n\n🤝 *Правила использования*\n· Не передавайте свою подписку другим. Делитесь ссылкой на этого бота `@%s`.\n· Не публикуйте ссылку на бота в интернете, передавайте только из рук в руки (приветствуется).\n· Пользуйтесь ответственно, не занимайтесь незаконной деятельностью.\n\n☕ *Поддержка проекта*\nЭтот VPN бесплатный и существует благодаря вашим пожертвованиям и усилиям Кирилла.\n[Поддержите проект](https://t.me/%s?start=donate) — важна каждая сотня.\n\nПомощь, вопросы: [@%s](https://t.me/%s)",
-		trafficLimitGB,
-		subscriptionURL,
-		h.botConfig.Username,
-		h.botConfig.Username,
-		h.cfg.ContactUsername,
-		h.cfg.ContactUsername,
-	)
+	return h.keyboards.HelpText(trafficLimitGB, subscriptionURL)
 }
 
 func (h *Handler) sendInviteLink(ctx context.Context, chatID int64, messageID int) {
@@ -393,30 +295,8 @@ func (h *Handler) sendInviteLink(ctx context.Context, chatID int64, messageID in
 
 	telegramLink := fmt.Sprintf("https://t.me/%s?start=share_%s", h.botConfig.Username, invite.Code)
 	webLink := fmt.Sprintf("%s/i/%s", h.cfg.SiteURL, invite.Code)
-	text := fmt.Sprintf(`🔗 *Ваша пригласительная ссылка*
-
-📱 *Для пользователей Telegram:*
-[@%s](%s)
-_нажмите и держите → копировать_
-
-🌐 *Тем, кто не может войти в Tg:*
-[%s](%s)
-_нажмите и держите → копировать_
-
-📤 *Отправьте ссылку друзьям!*
-
-💎 За каждого приглашенного активного пользователя вы получите бонус.`, h.botConfig.Username, telegramLink, webLink, webLink)
-
-	// Keyboard with QR buttons
-	keyboard := tgbotapi.NewInlineKeyboardMarkup(
-		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("📱 QR Telegram", "qr_telegram"),
-			tgbotapi.NewInlineKeyboardButtonData("🌐 QR Web", "qr_web"),
-		),
-		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("🏠 В начало", "back_to_start"),
-		),
-	)
+	text := h.keyboards.InviteLinkText(telegramLink, webLink)
+	keyboard := h.keyboards.Invite()
 
 	if messageID > 0 {
 		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, text)
@@ -434,12 +314,5 @@ _нажмите и держите → копировать_
 }
 
 func (h *Handler) addAdminButtons(keyboard *tgbotapi.InlineKeyboardMarkup, chatID int64) {
-	if h.isAdmin(chatID) {
-		keyboard.InlineKeyboard = append(keyboard.InlineKeyboard,
-			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData("📊 Стат", "admin_stats"),
-				tgbotapi.NewInlineKeyboardButtonData("📋 Посл.рег", "admin_lastreg"),
-			),
-		)
-	}
+	h.keyboards.WithAdminButtons(keyboard, h.isAdmin(chatID))
 }

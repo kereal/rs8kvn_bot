@@ -396,3 +396,22 @@ func TestCircuitBreaker_StateString(t *testing.T) {
 		assert.Equal(t, tt.expected, int(tt.state), "CircuitState value")
 	}
 }
+
+func TestCircuitBreaker_Execute_PanickingCallback(t *testing.T) {
+	cb := NewCircuitBreaker(3, 10*time.Second)
+
+	didPanic := false
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				didPanic = true
+			}
+		}()
+
+		_ = cb.Execute(context.Background(), func() error {
+			panic("test panic")
+		})
+	}()
+
+	assert.True(t, didPanic, "Execute() should not recover from panic - panic should propagate")
+}

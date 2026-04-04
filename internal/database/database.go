@@ -3,6 +3,7 @@ package database
 import (
 	"context"
 	"database/sql"
+	"embed"
 	"errors"
 	"fmt"
 	"io"
@@ -16,14 +17,15 @@ import (
 
 	migrate "github.com/golang-migrate/migrate/v4"
 	"github.com/golang-migrate/migrate/v4/database/sqlite"
-	_ "github.com/golang-migrate/migrate/v4/source/file"
+	"github.com/golang-migrate/migrate/v4/source/iofs"
 	"go.uber.org/zap"
 	gormsqlite "gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
 )
 
-var _ = logger.Info // suppress unused import warning
+//go:embed migrations/*.sql
+var migrationFiles embed.FS
 
 // Subscription represents a user's VPN subscription.
 type Subscription struct {
@@ -84,115 +86,7 @@ func (TrialRequest) TableName() string {
 	return "trial_requests"
 }
 
-// DB is the global database connection.
-// Deprecated: Use database.Service instead for better testability.
-var DB *gorm.DB
-
-var sqlDB *sql.DB
-
-// Init initializes the database connection and runs migrations.
-// Deprecated: Use NewService for dependency injection.
-func Init(dbPath string) error {
-	dbDir := filepath.Dir(dbPath)
-	if err := os.MkdirAll(dbDir, 0750); err != nil {
-		return fmt.Errorf("failed to create database directory: %w", err)
-	}
-
-	var err error
-	// Open with PrepareStmt disabled to reduce memory overhead
-	// Use silent logger to suppress SQL query output in console
-	DB, err = gorm.Open(gormsqlite.Open(dbPath), &gorm.Config{
-		PrepareStmt: false,
-		Logger:      gormlogger.New(log.New(io.Discard, "", 0), gormlogger.Config{SlowThreshold: 200 * time.Millisecond, LogLevel: gormlogger.Silent}),
-	})
-	if err != nil {
-		return fmt.Errorf("failed to open database: %w", err)
-	}
-
-	// Run database migrations using golang-migrate
-	if err := runMigrations(dbPath); err != nil {
-		return fmt.Errorf("failed to run migrations: %w", err)
-	}
-
-	sqlDB, err = DB.DB()
-	if err != nil {
-		return fmt.Errorf("failed to get underlying SQL DB: %w", err)
-	}
-
-	// Minimal connection pool for low memory footprint
-	sqlDB.SetMaxOpenConns(config.MaxOpenConns)
-	sqlDB.SetMaxIdleConns(config.MaxIdleConnsDB)
-	sqlDB.SetConnMaxLifetime(config.ConnMaxLifetime)
-	sqlDB.SetConnMaxIdleTime(config.ConnMaxIdleTime)
-
-	if err := sqlDB.Ping(); err != nil {
-		return fmt.Errorf("database connection test failed: %w", err)
-	}
-
-	return nil
-}
-
-// Close closes the database connection.
-func Close() error {
-	if sqlDB != nil {
-		err := sqlDB.Close()
-		sqlDB = nil
-		DB = nil
-		return err
-	}
-	return nil
-}
-
-// findMigrationsDir finds the migrations directory by checking multiple possible paths
-func findMigrationsDir() string {
-	wd, _ := os.Getwd()
-	possiblePaths := []string{
-		filepath.Join(wd, "migrations"),
-		filepath.Join(wd, "internal/database/migrations"),
-		filepath.Join(wd, "../database/migrations"),
-		filepath.Join(wd, "../../database/migrations"),
-		filepath.Join(wd, "../../../database/migrations"),
-	}
-	for _, p := range possiblePaths {
-		if _, err := os.Stat(p); err == nil {
-			return p
-		}
-	}
-	return ""
-}
-
-// runMigrations applies database migrations using golang-migrate
-func runMigrations(dbPath string) error {
-	migrationsDir := findMigrationsDir()
-	if migrationsDir == "" {
-		return nil
-	}
-
-	sqlDB, err := sql.Open("sqlite", dbPath)
-	if err != nil {
-		return fmt.Errorf("failed to open database for migrations: %w", err)
-	}
-	defer func() {
-		if err := sqlDB.Close(); err != nil {
-			logger.Warn("Failed to close database after migrations", zap.Error(err))
-		}
-	}()
-
-	return runMigrationsWithDBAndDir(sqlDB, migrationsDir)
-}
-
-// runMigrationsWithDB applies database migrations using an existing database connection
-func runMigrationsWithDB(sqlDB *sql.DB) error {
-	migrationsDir := findMigrationsDir()
-	if migrationsDir == "" {
-		return nil
-	}
-
-	return runMigrationsWithDBAndDir(sqlDB, migrationsDir)
-}
-
-// runMigrationsWithDBAndDir applies database migrations using an existing database connection and migrations directory
-func runMigrationsWithDBAndDir(sqlDB *sql.DB, migrationsDir string) error {
+func runMigrations(sqlDB *sql.DB) error {
 	var err error
 
 	// Check if subscriptions table exists and its structure
@@ -264,26 +158,25 @@ func runMigrationsWithDBAndDir(sqlDB *sql.DB, migrationsDir string) error {
 		_, _ = sqlDB.Exec(`DROP TABLE IF EXISTS schema_migrations`)
 		_, _ = sqlDB.Exec(`CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, dirty INTEGER)`)
 		_, _ = sqlDB.Exec(`INSERT INTO schema_migrations (version, dirty) VALUES (3, 0)`)
-		// logger.Info("Referral columns already exist, skipping migration 003")
 		return nil
 	}
 
 	// Drop old migrations table if exists (to ensure correct schema)
 	_, _ = sqlDB.Exec(`DROP TABLE IF EXISTS schema_migrations`)
 
-	// Create migrations table for golang-migrate (will be created automatically by ensureVersionTable)
+	// Create embedded source driver from migrationFiles
+	sourceDriver, err := iofs.New(migrationFiles, "migrations")
+	if err != nil {
+		return fmt.Errorf("failed to create embedded migration source: %w", err)
+	}
 
-	// Run all other migrations
+	// Create SQLite driver
 	driver, err := sqlite.WithInstance(sqlDB, &sqlite.Config{})
 	if err != nil {
 		return fmt.Errorf("failed to create migrate driver: %w", err)
 	}
 
-	m, err := migrate.NewWithDatabaseInstance(
-		"file://"+migrationsDir,
-		"sqlite",
-		driver,
-	)
+	m, err := migrate.NewWithInstance("iofs", sourceDriver, "sqlite", driver)
 	if err != nil {
 		return fmt.Errorf("failed to create migration instance: %w", err)
 	}
@@ -299,19 +192,7 @@ func runMigrationsWithDBAndDir(sqlDB *sql.DB, migrationsDir string) error {
 	versionAfter, _, _ := m.Version()
 
 	if versionAfter > versionBefore {
-		// Read migration files that were applied
-		migrationFiles, _ := filepath.Glob(filepath.Join(migrationsDir, "*.up.sql"))
-		var appliedMigrations []string
-		for _, f := range migrationFiles {
-			name := filepath.Base(f)
-			var num int
-			_, _ = fmt.Sscanf(name, "%d_", &num)
-			if uint(num) > versionBefore && uint(num) <= versionAfter {
-				appliedMigrations = append(appliedMigrations, name)
-			}
-		}
 		logger.Info("Database migrations applied",
-			zap.Strings("migrations", appliedMigrations),
 			zap.Uint("version", versionAfter))
 	} else {
 		logger.Info("Database migrations up to date",
@@ -319,127 +200,6 @@ func runMigrationsWithDBAndDir(sqlDB *sql.DB, migrationsDir string) error {
 	}
 
 	return nil
-}
-
-// GetByTelegramID retrieves an active subscription by Telegram ID.
-// Returns gorm.ErrRecordNotFound if no active subscription exists.
-func GetByTelegramID(telegramID int64) (*Subscription, error) {
-	if DB == nil {
-		return nil, fmt.Errorf("database not initialized")
-	}
-
-	var sub Subscription
-	result := DB.Where("telegram_id = ? AND status = ?", telegramID, "active").
-		Order("created_at DESC").
-		First(&sub)
-	if result.Error != nil {
-		return nil, result.Error
-	}
-	return &sub, nil
-}
-
-// CreateSubscription creates a new subscription and revokes any existing active subscriptions.
-// This operation is atomic - either both operations succeed or neither does.
-func CreateSubscription(sub *Subscription) error {
-	if DB == nil {
-		return fmt.Errorf("database not initialized")
-	}
-
-	return DB.Transaction(func(tx *gorm.DB) error {
-		// Revoke any existing active subscriptions for this user
-		if err := tx.Model(&Subscription{}).
-			Where("telegram_id = ? AND status = ?", sub.TelegramID, "active").
-			Update("status", "revoked").Error; err != nil {
-			return fmt.Errorf("failed to revoke old subscription: %w", err)
-		}
-
-		// Create the new subscription
-		if err := tx.Create(sub).Error; err != nil {
-			return fmt.Errorf("failed to create new subscription: %w", err)
-		}
-
-		return nil
-	})
-}
-
-// UpdateSubscription updates an existing subscription.
-func UpdateSubscription(sub *Subscription) error {
-	if DB == nil {
-		return fmt.Errorf("database not initialized")
-	}
-	result := DB.Model(&Subscription{}).
-		Where("id = ?", sub.ID).
-		Select("telegram_id", "username", "client_id", "subscription_id", "inbound_id", "traffic_limit", "expiry_time", "status", "subscription_url", "invite_code", "is_trial", "referred_by").
-		Updates(sub)
-	if result.Error != nil {
-		return fmt.Errorf("failed to update subscription: %w", result.Error)
-	}
-	return nil
-}
-
-// DeleteSubscription soft-deletes a subscription.
-func DeleteSubscription(telegramID int64) error {
-	if DB == nil {
-		return fmt.Errorf("database not initialized")
-	}
-	result := DB.Where("telegram_id = ?", telegramID).Delete(&Subscription{})
-	if result.Error != nil {
-		return fmt.Errorf("failed to delete subscription: %w", result.Error)
-	}
-	return nil
-}
-
-// GetSubscriptionByID retrieves a subscription by its database ID.
-func GetSubscriptionByID(id uint) (*Subscription, error) {
-	if DB == nil {
-		return nil, fmt.Errorf("database not initialized")
-	}
-	var sub Subscription
-	result := DB.First(&sub, id)
-	if result.Error != nil {
-		return nil, fmt.Errorf("failed to get subscription: %w", result.Error)
-	}
-	return &sub, nil
-}
-
-// DeleteSubscriptionByID hard-deletes a subscription by its database ID.
-// Returns the deleted subscription so the caller can use its data for cleanup.
-func DeleteSubscriptionByID(id uint) (*Subscription, error) {
-	if DB == nil {
-		return nil, fmt.Errorf("database not initialized")
-	}
-
-	// Get the subscription first to return it after deletion
-	var sub Subscription
-	result := DB.First(&sub, id)
-	if result.Error != nil {
-		return nil, fmt.Errorf("failed to find subscription: %w", result.Error)
-	}
-
-	// Hard delete (Unscoped)
-	result = DB.Unscoped().Delete(&sub)
-	if result.Error != nil {
-		return nil, fmt.Errorf("failed to delete subscription: %w", result.Error)
-	}
-
-	return &sub, nil
-}
-
-// GetLatestSubscriptions retrieves the latest N subscriptions ordered by creation date.
-func GetLatestSubscriptions(limit int) ([]Subscription, error) {
-	if DB == nil {
-		return nil, fmt.Errorf("database not initialized")
-	}
-
-	var subs []Subscription
-	result := DB.Where("status = ?", "active").
-		Order("created_at DESC").
-		Limit(limit).
-		Find(&subs)
-	if result.Error != nil {
-		return nil, fmt.Errorf("failed to get latest subscriptions: %w", result.Error)
-	}
-	return subs, nil
 }
 
 // Service provides database operations with proper dependency injection.
@@ -469,7 +229,7 @@ func NewService(dbPath string) (*Service, error) {
 	}
 
 	// Run database migrations using golang-migrate
-	if err := runMigrationsWithDB(sqlDB); err != nil {
+	if err := runMigrations(sqlDB); err != nil {
 		return nil, fmt.Errorf("failed to run migrations: %w", err)
 	}
 
@@ -694,36 +454,6 @@ func (s *Service) CountExpiredSubscriptions(ctx context.Context) (int64, error) 
 		return 0, fmt.Errorf("failed to count expired subscriptions: %w", result.Error)
 	}
 	return count, nil
-}
-
-// GetAllTelegramIDs returns all unique Telegram IDs from subscriptions.
-func GetAllTelegramIDs() ([]int64, error) {
-	if DB == nil {
-		return nil, fmt.Errorf("database not initialized")
-	}
-
-	var ids []int64
-	result := DB.Model(&Subscription{}).
-		Distinct("telegram_id").
-		Pluck("telegram_id", &ids)
-	if result.Error != nil {
-		return nil, fmt.Errorf("failed to get telegram IDs: %w", result.Error)
-	}
-	return ids, nil
-}
-
-// GetTelegramIDByUsername returns the Telegram ID for a given username.
-func GetTelegramIDByUsername(username string) (int64, error) {
-	if DB == nil {
-		return 0, fmt.Errorf("database not initialized")
-	}
-
-	var sub Subscription
-	result := DB.Where("username = ?", username).First(&sub)
-	if result.Error != nil {
-		return 0, fmt.Errorf("failed to find user by username: %w", result.Error)
-	}
-	return sub.TelegramID, nil
 }
 
 // GetTelegramIDsBatch returns a batch of unique Telegram IDs for broadcast.

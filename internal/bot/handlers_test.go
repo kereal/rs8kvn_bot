@@ -11,6 +11,7 @@ import (
 
 	"rs8kvn_bot/internal/config"
 	"rs8kvn_bot/internal/database"
+	"rs8kvn_bot/internal/ratelimiter"
 	"rs8kvn_bot/internal/testutil"
 	"rs8kvn_bot/internal/utils"
 	"rs8kvn_bot/internal/xui"
@@ -38,7 +39,7 @@ func TestNewHandler(t *testing.T) {
 	xuiClient, err := xui.NewClient(cfg.XUIHost, "admin", "password")
 	require.NoError(t, err, "Failed to create XUI client")
 	mockDB := testutil.NewMockDatabaseService()
-	handler := NewHandler(testutil.NewMockBotAPI(), cfg, mockDB, xuiClient, NewTestBotConfig())
+	handler := NewHandler(testutil.NewMockBotAPI(), cfg, mockDB, xuiClient, NewTestBotConfig(), nil)
 
 	require.NotNil(t, handler, "NewHandler returned nil")
 	assert.Equal(t, cfg, handler.cfg, "Config not set correctly")
@@ -96,7 +97,7 @@ func TestHandleBroadcast_MessageTooLong(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil)
 
 	longMessage := make([]byte, config.MaxTelegramMessageLen+1)
 	for i := range longMessage {
@@ -107,8 +108,8 @@ func TestHandleBroadcast_MessageTooLong(t *testing.T) {
 	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "admin"}, "/broadcast "+string(longMessage))
 	handler.HandleBroadcast(ctx, update)
 
-	assert.True(t, mockBot.SendCalled)
-	assert.Contains(t, mockBot.LastSentText, "слишком длинное")
+	assert.True(t, mockBot.SendCalledSafe())
+	assert.Contains(t, mockBot.LastSentTextSafe(), "слишком длинное")
 }
 
 func TestHandleSend_RateLimit(t *testing.T) {
@@ -119,7 +120,7 @@ func TestHandleSend_RateLimit(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil)
 
 	mockDB.GetTelegramIDByUsernameFunc = func(ctx context.Context, username string) (int64, error) {
 		return 999888777, nil
@@ -134,14 +135,14 @@ func TestHandleSend_RateLimit(t *testing.T) {
 	update2 := createCommandUpdate(adminID, &tgbotapi.User{ID: adminID, UserName: "admin"}, "/send @testuser Second message")
 	handler.HandleSend(ctx, update2)
 
-	assert.True(t, mockBot.SendCalled)
+	assert.True(t, mockBot.SendCalledSafe())
 }
 
 func TestHandleSend_NoArguments(t *testing.T) {
 	cfg := &config.Config{TelegramAdminID: 123456}
 	mockDB := testutil.NewMockDatabaseService()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewMockXUIClient(), NewTestBotConfig())
+	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewMockXUIClient(), NewTestBotConfig(), nil)
 
 	ctx := context.Background()
 	update := tgbotapi.Update{
@@ -155,14 +156,14 @@ func TestHandleSend_NoArguments(t *testing.T) {
 	handler.HandleSend(ctx, update)
 
 	assert.True(t, mockBot.SendCalledSafe(), "Should send usage message")
-	assert.Contains(t, mockBot.LastSentText, "Использование", "Should show usage instructions")
+	assert.Contains(t, mockBot.LastSentTextSafe(), "Использование", "Should show usage instructions")
 }
 
 func TestHandleSend_OnlyTarget(t *testing.T) {
 	cfg := &config.Config{TelegramAdminID: 123456}
 	mockDB := testutil.NewMockDatabaseService()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewMockXUIClient(), NewTestBotConfig())
+	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewMockXUIClient(), NewTestBotConfig(), nil)
 
 	ctx := context.Background()
 	update := tgbotapi.Update{
@@ -176,7 +177,7 @@ func TestHandleSend_OnlyTarget(t *testing.T) {
 	handler.HandleSend(ctx, update)
 
 	assert.True(t, mockBot.SendCalledSafe(), "Should send usage message")
-	assert.Contains(t, mockBot.LastSentText, "Использование", "Should show usage instructions")
+	assert.Contains(t, mockBot.LastSentTextSafe(), "Использование", "Should show usage instructions")
 }
 
 // sendInviteLink tests are now in keyboard_test.go
@@ -197,6 +198,8 @@ func TestSendInviteLink_Success(t *testing.T) {
 		bot:       mockBot,
 		botConfig: NewTestBotConfig(),
 		cache:     NewSubscriptionCache(100, 5*time.Minute),
+		keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, config.DonateCardNumber, config.DonateURL, cfg.SiteURL),
+		sender:    NewMessageSender(mockBot, ratelimiter.NewPerUserRateLimiter(float64(config.RateLimiterMaxTokens), float64(config.RateLimiterRefillRate))),
 	}
 
 	mockDB.GetOrCreateInviteFunc = func(ctx context.Context, referrerTGID int64, code string) (*database.Invite, error) {
@@ -206,9 +209,9 @@ func TestSendInviteLink_Success(t *testing.T) {
 	ctx := context.Background()
 	handler.sendInviteLink(ctx, 12345, 99)
 
-	assert.True(t, mockBot.SendCalled, "sendInviteLink should send a message")
-	assert.Contains(t, mockBot.LastSentText, "TESTCODE1", "Message should contain invite code")
-	assert.Contains(t, mockBot.LastSentText, "vpn.site", "Message should contain web link")
+	assert.True(t, mockBot.SendCalledSafe(), "sendInviteLink should send a message")
+	assert.Contains(t, mockBot.LastSentTextSafe(), "TESTCODE1", "Message should contain invite code")
+	assert.Contains(t, mockBot.LastSentTextSafe(), "vpn.site", "Message should contain web link")
 }
 
 func TestSendInviteLink_DatabaseError(t *testing.T) {
@@ -219,7 +222,7 @@ func TestSendInviteLink_DatabaseError(t *testing.T) {
 		TelegramAdminID: 12345,
 		TrafficLimitGB:  100,
 	}
-	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewMockXUIClient(), NewTestBotConfig())
+	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewMockXUIClient(), NewTestBotConfig(), nil)
 
 	mockDB.GetOrCreateInviteFunc = func(ctx context.Context, referrerTGID int64, code string) (*database.Invite, error) {
 		return nil, fmt.Errorf("database error")
@@ -229,7 +232,7 @@ func TestSendInviteLink_DatabaseError(t *testing.T) {
 	handler.sendInviteLink(ctx, 12345, 99)
 
 	assert.True(t, mockBot.SendCalledSafe(), "sendInviteLink should send error message on DB error")
-	assert.Contains(t, mockBot.LastSentText, "❌", "Error message should contain error emoji")
+	assert.Contains(t, mockBot.LastSentTextSafe(), "❌", "Error message should contain error emoji")
 }
 
 // === isAdmin edge cases ===
@@ -290,7 +293,7 @@ func TestHandler_CacheField(t *testing.T) {
 // === Rate limiter tests ===
 
 func TestHandler_RateLimiter(t *testing.T) {
-	handler := NewHandler(testutil.NewMockBotAPI(), &config.Config{}, testutil.NewMockDatabaseService(), nil, NewTestBotConfig())
+	handler := NewHandler(testutil.NewMockBotAPI(), &config.Config{}, testutil.NewMockDatabaseService(), nil, NewTestBotConfig(), nil)
 
 	assert.NotNil(t, handler.rateLimiter, "Rate limiter should be initialized")
 
@@ -376,12 +379,15 @@ func TestHandleCreateError_AllErrorTypes(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mockBot := testutil.NewMockBotAPI()
-			handler := &Handler{bot: mockBot}
+			handler := &Handler{
+				bot:    mockBot,
+				sender: NewMessageSender(mockBot, ratelimiter.NewPerUserRateLimiter(float64(config.RateLimiterMaxTokens), float64(config.RateLimiterRefillRate))),
+			}
 
 			handler.handleCreateError(context.Background(), 12345, 100, "testuser", tt.err)
 
-			assert.True(t, mockBot.SendCalled, "should send error message")
-			assert.Contains(t, mockBot.LastSentText, tt.wantContain, "message should contain expected text")
+			assert.True(t, mockBot.SendCalledSafe(), "should send error message")
+			assert.Contains(t, mockBot.LastSentTextSafe(), tt.wantContain, "message should contain expected text")
 		})
 	}
 }
@@ -464,11 +470,11 @@ func TestHandleUpdate_CommandRouting(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			mockBot := testutil.NewMockBotAPI()
 			mockDB := testutil.NewMockDatabaseService()
-			handler := NewHandler(mockBot, cfg, mockDB, xuiClient, NewTestBotConfig())
+			handler := NewHandler(mockBot, cfg, mockDB, xuiClient, NewTestBotConfig(), nil)
 
 			handler.HandleUpdate(context.Background(), tt.update)
 
-			assert.True(t, mockBot.SendCalled, "should send response")
+			assert.True(t, mockBot.SendCalledSafe(), "should send response")
 		})
 	}
 }
@@ -487,7 +493,7 @@ func TestHandleUpdate_NonCommandMessage(t *testing.T) {
 
 	mockBot := testutil.NewMockBotAPI()
 	mockDB := testutil.NewMockDatabaseService()
-	handler := NewHandler(mockBot, cfg, mockDB, xuiClient, NewTestBotConfig())
+	handler := NewHandler(mockBot, cfg, mockDB, xuiClient, NewTestBotConfig(), nil)
 
 	update := tgbotapi.Update{
 		Message: &tgbotapi.Message{
@@ -499,8 +505,8 @@ func TestHandleUpdate_NonCommandMessage(t *testing.T) {
 
 	handler.HandleUpdate(context.Background(), update)
 
-	assert.True(t, mockBot.SendCalled, "should send response for non-command message")
-	assert.Contains(t, mockBot.LastSentText, "/start", "should suggest /start command")
+	assert.True(t, mockBot.SendCalledSafe(), "should send response for non-command message")
+	assert.Contains(t, mockBot.LastSentTextSafe(), "/start", "should suggest /start command")
 }
 
 func TestHandleUpdate_CallbackQuery(t *testing.T) {
@@ -528,7 +534,7 @@ func TestHandleUpdate_CallbackQuery(t *testing.T) {
 			Status:         "active",
 		}, nil
 	}
-	handler := NewHandler(mockBot, cfg, mockDB, xuiClient, NewTestBotConfig())
+	handler := NewHandler(mockBot, cfg, mockDB, xuiClient, NewTestBotConfig(), nil)
 
 	update := tgbotapi.Update{
 		CallbackQuery: &tgbotapi.CallbackQuery{
@@ -543,5 +549,5 @@ func TestHandleUpdate_CallbackQuery(t *testing.T) {
 
 	handler.HandleUpdate(context.Background(), update)
 
-	assert.True(t, mockBot.SendCalled, "should handle callback query")
+	assert.True(t, mockBot.SendCalledSafe(), "should handle callback query")
 }

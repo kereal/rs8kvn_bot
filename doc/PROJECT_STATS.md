@@ -3,7 +3,7 @@
 <img src="logo_240_opt.png" alt="rs8kvn_bot logo" width="120" align="right">
 
 [![Go Version](https://img.shields.io/badge/Go-1.24%2B-00ADD8?logo=go)](https://go.dev/)
-[![Version](https://img.shields.io/badge/version-v2.1.2-blue)](https://github.com/kereal/rs8kvn_bot/releases)
+[![Version](https://img.shields.io/badge/version-v2.1.3-blue)](https://github.com/kereal/rs8kvn_bot/releases)
 [![Coverage](https://img.shields.io/badge/coverage-~75%25-green)]()
 [![Tests](https://img.shields.io/badge/tests-passing-brightgreen)]()
 [![Code Size](https://img.shields.io/badge/code%20size-33%20MB-informational)]()
@@ -69,16 +69,16 @@ Telegram бот для распространения VPN подписок 3x-ui
 |---------|----------|
 | **Всего коммитов** | 117 |
 | **Авторов** | 1 (kereal) |
-| **Веток** | 5 |
-| **Тегов/релизов** | 59 |
-| **Последний релиз** | v2.1.2 |
+| **Веток** | 2 (dev, main) |
+| **Тегов/релизов** | 1 (v2.1.3) |
+| **Последний релиз** | v2.1.3 |
 | **Коммитов после v2.1.0** | 34 |
 
 ### 🏷️ История релизов
 
 ```
 v0.0 → v1.9.11 (версия 1.x)
-v2.0.0 → v2.1.2 (версия 2.x)
+v2.0.0 → v2.1.3 (версия 2.x)
 ```
 
 ### 📊 Типы коммитов (Conventional Commits)
@@ -197,4 +197,4 @@ Production код:    ████████░░░░░░░░░░░�
 
 ---
 
-*Статистика собрана с помощью ИИ-ассистента Serena*
+*Статистика собрана: April 2026*

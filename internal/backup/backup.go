@@ -77,51 +77,40 @@ func isSQLiteFile(path string) (bool, error) {
 	return string(header[:15]) == "SQLite format 3", nil
 }
 
-// checkpointWAL executes a WAL checkpoint to ensure the database file
-// is consistent before copying. This flushes all WAL content into the
-// main database file. Returns nil if the file is not a valid SQLite database.
-func checkpointWAL(dbPath string) error {
-	isSQLite, err := isSQLiteFile(dbPath)
-	if err != nil {
-		return fmt.Errorf("failed to read file header: %w", err)
-	}
-	if !isSQLite {
-		return nil
-	}
-
-	db, err := sql.Open("sqlite3", dbPath)
+// checkpointWAL opens the database in read-only mode, checkpoints WAL, and closes it.
+// This ensures the main database file contains all committed data before file copy.
+func checkpointWAL(ctx context.Context, dbPath string) error {
+	// #nosec G304 -- dbPath is validated by the caller
+	dsn := fmt.Sprintf("file:%s?mode=ro", dbPath)
+	db, err := sql.Open("sqlite3", dsn)
 	if err != nil {
 		return fmt.Errorf("failed to open database for checkpoint: %w", err)
 	}
-	defer func() {
-		if closeErr := db.Close(); closeErr != nil {
-			logger.Warn("Failed to close checkpoint database connection",
-				zap.String("path", dbPath),
-				zap.Error(closeErr))
-		}
-	}()
+	defer db.Close()
 
-	_, err = db.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
-	if err != nil {
-		return fmt.Errorf("failed to checkpoint WAL: %w", err)
+	// WAL checkpoint: PASSIVE returns immediately, TRUNCATE tries to reset WAL file
+	// Using TRUNCATE to ensure all data is in the main database file
+	ctxWithTimeout, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if _, err := db.ExecContext(ctxWithTimeout, "PRAGMA wal_checkpoint(TRUNCATE)"); err != nil {
+		return fmt.Errorf("checkpoint failed: %w", err)
 	}
 
 	return nil
 }
 
 // BackupDatabase creates a backup of the SQLite database file.
-// It performs a WAL checkpoint before copying to ensure consistency,
-// then uses an atomic write pattern: write to temp file, sync, then rename.
-// The context allows cancellation of the backup operation.
+// It uses WAL checkpoint before copying to ensure a consistent snapshot,
+// then atomic write pattern (temp file + rename) for the copy itself.
 func BackupDatabase(ctx context.Context, dbPath string) error {
 	// Validate the database path to prevent directory traversal
 	if err := validatePath(dbPath); err != nil {
 		return fmt.Errorf("invalid database path: %w", err)
 	}
 
-	// Checkpoint WAL to ensure a consistent snapshot before copying
-	if err := checkpointWAL(dbPath); err != nil {
-		return fmt.Errorf("WAL checkpoint failed: %w", err)
+	// Checkpoint WAL to ensure the main database file contains all data
+	if err := checkpointWAL(ctx, dbPath); err != nil {
+		logger.Warn("WAL checkpoint failed, proceeding with raw copy", zap.Error(err))
 	}
 
 	backupPath := dbPath + ".backup"

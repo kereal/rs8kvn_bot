@@ -2,9 +2,10 @@ package testutil
 
 import (
 	"context"
-	"database/sql"
+	"os"
 	"path/filepath"
 	"sync"
+	"testing"
 	"time"
 
 	"rs8kvn_bot/internal/database"
@@ -29,53 +30,6 @@ func InitLogger(t any) error {
 	return err
 }
 
-type TestDatabase struct {
-	DB      *gorm.DB
-	SQLDB   *sql.DB
-	Path    string
-	Cleanup func()
-}
-
-func NewTestDatabase(t any) (*TestDatabase, error) {
-	type testInterface interface {
-		TempDir() string
-	}
-
-	var tmpDir string
-	if ti, ok := t.(testInterface); ok {
-		tmpDir = ti.TempDir()
-	} else {
-		tmpDir = "/tmp"
-	}
-
-	dbPath := filepath.Join(tmpDir, "test.db")
-
-	if err := database.Init(dbPath); err != nil {
-		return nil, err
-	}
-
-	sqlDB, err := database.DB.DB()
-	if err != nil {
-		_ = database.Close()
-		return nil, err
-	}
-
-	return &TestDatabase{
-		DB:    database.DB,
-		SQLDB: sqlDB,
-		Path:  dbPath,
-		Cleanup: func() {
-			_ = database.Close()
-		},
-	}, nil
-}
-
-func NewMockDatabaseService() *MockDatabaseService {
-	return &MockDatabaseService{
-		Subscriptions: make(map[int64]*database.Subscription),
-	}
-}
-
 func NewTestDatabaseService(t any) (*database.Service, error) {
 	type testInterface interface {
 		TempDir() string
@@ -90,6 +44,12 @@ func NewTestDatabaseService(t any) (*database.Service, error) {
 
 	dbPath := filepath.Join(tmpDir, "test_service.db")
 	return database.NewService(dbPath)
+}
+
+func NewMockDatabaseService() *MockDatabaseService {
+	return &MockDatabaseService{
+		Subscriptions: make(map[int64]*database.Subscription),
+	}
 }
 
 type MockDatabaseService struct {
@@ -705,5 +665,21 @@ func (m *MockBotAPI) Self() *tgbotapi.User {
 		CanJoinGroups:           false,
 		CanReadAllGroupMessages: false,
 		SupportsInlineQueries:   false,
+	}
+}
+
+// Setenv sets an environment variable and returns a cleanup function.
+func Setenv(t testing.TB, key, value string) func() {
+	t.Helper()
+	prev, ok := os.LookupEnv(key)
+	if err := os.Setenv(key, value); err != nil {
+		t.Fatalf("failed to set env %s: %v", key, err)
+	}
+	return func() {
+		if ok {
+			_ = os.Setenv(key, prev)
+		} else {
+			_ = os.Unsetenv(key)
+		}
 	}
 }

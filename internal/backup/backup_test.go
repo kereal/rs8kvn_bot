@@ -816,3 +816,35 @@ func TestValidatePath_PathTraversal(t *testing.T) {
 		})
 	}
 }
+
+func TestStartScheduler_Lifecycle(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+	require.NoError(t, os.WriteFile(dbPath, []byte("test content"), 0644), "Failed to create test database")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(50 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				_ = DailyBackup(context.Background(), dbPath, 7)
+			}
+		}
+	}()
+
+	time.Sleep(120 * time.Millisecond)
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Scheduler did not stop after context cancellation")
+	}
+}

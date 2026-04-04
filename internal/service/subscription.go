@@ -108,3 +108,68 @@ func (s *SubscriptionService) Delete(ctx context.Context, telegramID int64) erro
 
 	return nil
 }
+
+type TrialCreateResult struct {
+	Subscription    *database.Subscription
+	SubscriptionURL string
+	SubID           string
+	ClientID        string
+}
+
+func (s *SubscriptionService) CreateTrial(ctx context.Context, inviteCode string) (*TrialCreateResult, error) {
+	subID, err := utils.GenerateSubID()
+	if err != nil {
+		return nil, fmt.Errorf("generate sub id: %w", err)
+	}
+	clientID, err := utils.GenerateUUID()
+	if err != nil {
+		return nil, fmt.Errorf("generate client id: %w", err)
+	}
+
+	trafficBytes := calcTrialTraffic(s.cfg.TrialDurationHours)
+	expiryTime := time.Now().Add(time.Duration(s.cfg.TrialDurationHours) * time.Hour)
+
+	if err := s.xui.Login(ctx); err != nil {
+		return nil, fmt.Errorf("xui login: %w", err)
+	}
+
+	_, err = s.xui.AddClientWithID(ctx, s.cfg.XUIInboundID, "trial_"+subID, clientID, subID, trafficBytes, expiryTime, 0)
+	if err != nil {
+		return nil, fmt.Errorf("xui add client: %w", err)
+	}
+
+	subURL := s.xui.GetSubscriptionLink(s.xui.GetExternalURL(s.cfg.XUIHost), subID, s.cfg.XUISubPath)
+
+	sub, err := s.db.CreateTrialSubscription(ctx, inviteCode, subID, clientID, s.cfg.XUIInboundID, trafficBytes, expiryTime, subURL)
+	if err != nil {
+		if rollbackErr := s.xui.DeleteClient(ctx, s.cfg.XUIInboundID, clientID); rollbackErr != nil {
+			return nil, fmt.Errorf("create trial subscription: %w (rollback failed: %w)", err, rollbackErr)
+		}
+		return nil, fmt.Errorf("create trial subscription: %w", err)
+	}
+
+	return &TrialCreateResult{
+		Subscription:    sub,
+		SubscriptionURL: subURL,
+		SubID:           subID,
+		ClientID:        clientID,
+	}, nil
+}
+
+// calcTrialTraffic calculates trial traffic allocation based on trial duration.
+// Formula: trialHours * 1GiB / 12, where 12 = (24*365)/(30*24) = hours in year / hours in month.
+// This gives a proportional share of monthly traffic (100 GiB). Minimum 1 GiB.
+func calcTrialTraffic(trialHours int) int64 {
+	const (
+		gib        = 1024 * 1024 * 1024
+		minTraffic = gib
+		// hoursInYear / hoursInMonth ≈ 12.17, integer division gives 12
+		trafficDivisor = (24 * 365) / (30 * 24)
+	)
+
+	trafficBytes := int64(trialHours) * gib / trafficDivisor
+	if trafficBytes < minTraffic {
+		trafficBytes = minTraffic
+	}
+	return trafficBytes
+}
