@@ -23,8 +23,11 @@ import (
 	"go.uber.org/zap"
 )
 
-//go:embed templates/*.html
-var templateFS embed.FS
+//go:embed templates/*.html templates/logo.png
+var allFiles embed.FS
+
+var templateFS = allFiles
+var staticFiles = allFiles
 
 // TrialCreationResult holds the outcome of a successful trial creation.
 type TrialCreationResult struct {
@@ -91,6 +94,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/healthz", s.handleHealthz)
 	mux.HandleFunc("/readyz", s.handleReadyz)
 	mux.HandleFunc("/i/", s.handleInvite)
+	mux.HandleFunc("/static/logo.png", s.handleLogo)
 
 	s.server = &http.Server{
 		Addr:              s.addr,
@@ -153,6 +157,26 @@ func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 		w.Write([]byte("NOT READY"))
 	}
+}
+
+func (s *Server) handleLogo(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		w.Header().Set("Allow", "GET, HEAD")
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	data, err := staticFiles.ReadFile("templates/logo.png")
+	if err != nil {
+		http.Error(w, "logo not found", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	if r.Method == http.MethodHead {
+		return
+	}
+	w.Write(data)
 }
 
 type HealthResponse struct {
