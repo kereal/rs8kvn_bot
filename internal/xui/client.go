@@ -232,16 +232,19 @@ func (c *Client) verifySession(ctx context.Context) bool {
 	}
 	defer closeResponseBody(resp)
 
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, config.MaxResponseSize))
-		logger.Debug("XUI session verification failed",
-			zap.Int("status", resp.StatusCode),
-			zap.String("body", truncateString(string(body), 100)))
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, config.MaxResponseSize))
+	if err != nil {
 		atomic.AddInt64(&c.sessionFailCount, 1)
 		return false
 	}
 
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, config.MaxResponseSize))
+	if resp.StatusCode != http.StatusOK {
+		logger.Debug("XUI session verification failed",
+			zap.Int("status", resp.StatusCode),
+			zap.String("body", truncateString(string(respBody), 100)))
+		atomic.AddInt64(&c.sessionFailCount, 1)
+		return false
+	}
 	if err != nil {
 		atomic.AddInt64(&c.sessionFailCount, 1)
 		return false
@@ -354,29 +357,26 @@ func (c *Client) doHTTPRequest(ctx context.Context, method, url string, bodyFn f
 }
 
 // doRequestWithAuthRetry executes an HTTP request and automatically handles auth failures.
-// If the response status code is 401/302/307, it performs a re-login and retries the request once.
+// If the response status code is 401, it performs a re-login (through circuit breaker)
+// and retries the request once.
+// Note: 302/307 redirects are NOT checked here because Go's http.Client follows them
+// automatically — by the time we see the response, it's already the final destination.
 // The response body is always read and closed before returning.
 func (c *Client) doRequestWithAuthRetry(ctx context.Context, fn func() (statusCode int, body []byte, err error)) ([]byte, error) {
 	statusCode, body, err := fn()
 
 	// Check auth status code first — the closure returns both statusCode and error
 	// for non-200 responses, so we must check statusCode before err to catch auth failures.
-	if statusCode == http.StatusUnauthorized ||
-		statusCode == http.StatusFound ||
-		statusCode == http.StatusTemporaryRedirect {
+	if statusCode == http.StatusUnauthorized {
 		logger.Info("XUI auto-relogin triggered",
 			zap.Int("http_status", statusCode))
 
 		// Clear stale connections
 		c.transport.CloseIdleConnections()
 
-		// Re-login with mutex protection
-		c.mu.Lock()
-		c.lastLogin = time.Time{}
-		loginErr := c.doLogin(ctx)
-		c.mu.Unlock()
-
-		if loginErr != nil {
+		// Re-login through circuit breaker with proper mutex handling.
+		// ensureLoggedIn manages its own locking and goes through the breaker.
+		if loginErr := c.ensureLoggedIn(ctx, true); loginErr != nil {
 			return body, fmt.Errorf("auto-relogin failed: %w", loginErr)
 		}
 
@@ -732,7 +732,14 @@ func isRetryable(err error) bool {
 		return true
 	}
 	msg := strings.ToLower(err.Error())
-	return !strings.Contains(msg, "no such host")
+	// Common DNS error patterns across platforms and Go versions
+	if strings.Contains(msg, "no such host") ||
+		strings.Contains(msg, "temporary failure in name resolution") ||
+		strings.Contains(msg, "name or service not known") ||
+		strings.Contains(msg, "nodename nor servname provided") {
+		return false
+	}
+	return true
 }
 
 // RetryWithBackoff executes a function with exponential backoff retry.
