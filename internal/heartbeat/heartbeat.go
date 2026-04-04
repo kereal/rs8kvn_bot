@@ -13,14 +13,17 @@ import (
 )
 
 var (
-	httpClient     *http.Client
-	httpClientOnce sync.Once
+	httpClientMu sync.Mutex
+	httpClient   *http.Client
 )
 
 // getHTTPClient returns a shared HTTP client with optimized transport for minimal memory.
 // The client is created once and reused for all heartbeat requests.
 func getHTTPClient() *http.Client {
-	httpClientOnce.Do(func() {
+	httpClientMu.Lock()
+	defer httpClientMu.Unlock()
+
+	if httpClient == nil {
 		transport := &http.Transport{
 			MaxIdleConns:        config.MaxIdleConns,
 			MaxIdleConnsPerHost: config.MaxIdleConns,
@@ -32,8 +35,16 @@ func getHTTPClient() *http.Client {
 			Timeout:   config.DefaultHTTPTimeout,
 			Transport: transport,
 		}
-	})
+	}
 	return httpClient
+}
+
+// resetHTTPClient resets the shared HTTP client.
+// This function is intended for testing purposes only.
+func resetHTTPClient() {
+	httpClientMu.Lock()
+	defer httpClientMu.Unlock()
+	httpClient = nil
 }
 
 // Start begins sending periodic heartbeat POST requests to the specified URL.

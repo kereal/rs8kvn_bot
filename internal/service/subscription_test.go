@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"os"
 	"testing"
 	"time"
 
@@ -13,6 +14,11 @@ import (
 
 	"github.com/stretchr/testify/assert"
 )
+
+func TestMain(m *testing.M) {
+	testutil.InitLogger(m)
+	os.Exit(m.Run())
+}
 
 func TestSubscriptionService_Create_Success(t *testing.T) {
 	cfg := &config.Config{

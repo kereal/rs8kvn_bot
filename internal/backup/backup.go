@@ -2,6 +2,7 @@ package backup
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"io"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	_ "github.com/mattn/go-sqlite3"
 	"go.uber.org/zap"
 )
 
@@ -55,14 +57,71 @@ func validatePath(path string) error {
 	return nil
 }
 
+// isSQLiteFile checks if a file starts with the SQLite magic header.
+func isSQLiteFile(path string) (bool, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return false, err
+	}
+	defer f.Close()
+
+	header := make([]byte, 16)
+	n, err := f.Read(header)
+	if err != nil && err != io.EOF {
+		return false, err
+	}
+	if n < 16 {
+		return false, nil
+	}
+
+	return string(header[:15]) == "SQLite format 3", nil
+}
+
+// checkpointWAL executes a WAL checkpoint to ensure the database file
+// is consistent before copying. This flushes all WAL content into the
+// main database file. Returns nil if the file is not a valid SQLite database.
+func checkpointWAL(dbPath string) error {
+	isSQLite, err := isSQLiteFile(dbPath)
+	if err != nil {
+		return fmt.Errorf("failed to read file header: %w", err)
+	}
+	if !isSQLite {
+		return nil
+	}
+
+	db, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		return fmt.Errorf("failed to open database for checkpoint: %w", err)
+	}
+	defer func() {
+		if closeErr := db.Close(); closeErr != nil {
+			logger.Warn("Failed to close checkpoint database connection",
+				zap.String("path", dbPath),
+				zap.Error(closeErr))
+		}
+	}()
+
+	_, err = db.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
+	if err != nil {
+		return fmt.Errorf("failed to checkpoint WAL: %w", err)
+	}
+
+	return nil
+}
+
 // BackupDatabase creates a backup of the SQLite database file.
-// It uses atomic write pattern: write to temp file, sync, then rename.
-// This ensures the backup is always in a consistent state.
+// It performs a WAL checkpoint before copying to ensure consistency,
+// then uses an atomic write pattern: write to temp file, sync, then rename.
 // The context allows cancellation of the backup operation.
 func BackupDatabase(ctx context.Context, dbPath string) error {
 	// Validate the database path to prevent directory traversal
 	if err := validatePath(dbPath); err != nil {
 		return fmt.Errorf("invalid database path: %w", err)
+	}
+
+	// Checkpoint WAL to ensure a consistent snapshot before copying
+	if err := checkpointWAL(dbPath); err != nil {
+		return fmt.Errorf("WAL checkpoint failed: %w", err)
 	}
 
 	backupPath := dbPath + ".backup"

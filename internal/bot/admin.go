@@ -254,7 +254,7 @@ func (h *Handler) HandleBroadcast(ctx context.Context, update tgbotapi.Update) {
 			msg := tgbotapi.NewMessage(telegramID, escapedMessage)
 			msg.ParseMode = "MarkdownV2"
 			msg.DisableWebPagePreview = true
-			if _, err := h.bot.Send(msg); err != nil {
+			if err := h.sendWithError(ctx, msg); err != nil {
 				logger.Warn("Failed to send broadcast message",
 					zap.Int64("telegram_id", telegramID),
 					zap.Error(err))
@@ -411,10 +411,11 @@ func (h *Handler) notifyAdmin(ctx context.Context, username string, chatID int64
 	}
 
 	msg := tgbotapi.NewMessage(h.cfg.TelegramAdminID,
-		fmt.Sprintf("🔔 Новая подписка создана!\n\n👤 Пользователь: @%s\n🆔 ID: %d\n🔗 Подписка: `%s`",
+		fmt.Sprintf("🔔 Новая подписка создана!\n\n👤 Пользователь: @%s\n🆔 ID: %d\n🔗 Подписка: `%s`\n⏰ Истекает: %s",
 			username,
 			chatID,
 			subscriptionURL,
+			expiryTime.Format("02.01.2006 15:04:05"),
 		))
 	msg.ParseMode = "Markdown"
 
@@ -463,7 +464,7 @@ func (h *Handler) HandleRefstats(ctx context.Context, update tgbotapi.Update) {
 		count  int64
 	}
 	referrals := make([]referrer, 0, len(h.referrals))
-	
+
 	for chatID, count := range h.referrals {
 		referrals = append(referrals, referrer{chatID: chatID, count: count})
 	}

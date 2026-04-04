@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"rs8kvn_bot/internal/config"
@@ -331,22 +330,23 @@ func (h *Handler) createSubscription(ctx context.Context, chatID int64, username
 func (h *Handler) handleCreateError(ctx context.Context, chatID int64, messageID int, username string, err error) {
 	logger.Error("Failed to create subscription", zap.Error(err))
 
+	classified := classifyXUIError(err)
+
 	errMsg := "❌ Ошибка при создании подписки."
-	errStr := err.Error()
 	switch {
-	case strings.Contains(errStr, "connection refused") || strings.Contains(errStr, "timeout"):
+	case errors.Is(classified, ErrXUIConnection):
 		errMsg = "❌ Не удается подключиться к серверу. Попробуйте позже."
-	case strings.Contains(errStr, "authentication") || strings.Contains(errStr, "unauthorized"):
+	case errors.Is(classified, ErrXUIAuth):
 		errMsg = "❌ Ошибка авторизации на сервере. Свяжитесь с администратором."
-	case strings.Contains(errStr, "context canceled"):
+	case errors.Is(classified, ErrXUIContextCanceled):
 		errMsg = "❌ Запрос был прерван. Попробуйте снова."
-	case strings.Contains(errStr, "no such host") || strings.Contains(errStr, "dial tcp"):
+	case errors.Is(classified, ErrXUIDNS):
 		errMsg = "❌ Ошибка подключения к серверу. Проверьте настройки DNS."
-	case strings.Contains(errStr, "certificate") || strings.Contains(errStr, "TLS"):
+	case errors.Is(classified, ErrXUITLS):
 		errMsg = "❌ Ошибка SSL/TLS сертификата. Свяжитесь с администратором."
-	case strings.Contains(errStr, "inbound") || strings.Contains(errStr, "client"):
+	case errors.Is(classified, ErrXUIServer):
 		errMsg = "❌ Ошибка сервера при создании подписки. Попробуйте позже."
-	case strings.Contains(errStr, "rollback failed"):
+	case errors.Is(classified, ErrXUIRollbackFailed):
 		errMsg = "❌ Подписка создана в панели, но не сохранена в базе. Обратитесь к администратору."
 		h.notifyAdminError(ctx, fmt.Sprintf("⚠️ ORPHAN CLIENT WARNING: %v", err))
 	}

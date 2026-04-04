@@ -162,15 +162,6 @@ func main() {
 	// Create bot handler
 	handler := bot.NewHandler(botAPI, cfg, dbService, xuiClient, botConfig)
 
-	// Start cache cleanup goroutine to prevent memory leaks
-	handler.StartCacheCleanup(ctx, bot.CacheTTL/2)
-
-	// Start rate limiter cleanup goroutine to remove stale user buckets
-	handler.StartRateLimiterCleanup(ctx, bot.CacheTTL, bot.CacheTTL*2)
-
-	// Start referral cache sync goroutine to keep referral counts up-to-date
-	handler.StartReferralCacheSync(ctx)
-
 	// Initialize and start web server (health + trial pages)
 	webServer := web.NewServer(fmt.Sprintf(":%d", cfg.HealthCheckPort), dbService, xuiClient, cfg, botConfig)
 	webServer.RegisterChecker("database", func(ctx context.Context) web.ComponentHealth {
@@ -188,7 +179,6 @@ func main() {
 	if err := webServer.Start(context.Background()); err != nil {
 		logger.Fatal("Failed to start web server", zap.Error(err))
 	}
-	webServer.SetReady(true)
 	defer func() {
 		webServer.SetReady(false)
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -208,10 +198,18 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 	defer stop()
 
+	// Start background goroutines (using shutdown context for lifecycle management)
+	handler.StartCacheCleanup(ctx, bot.CacheTTL/2)
+	handler.StartRateLimiterCleanup(ctx, bot.CacheTTL, bot.CacheTTL*2)
+	handler.StartReferralCacheSync(ctx)
+
 	logger.Info("Bot started successfully")
 
+	// Mark web server as ready after all components are initialized
+	webServer.SetReady(true)
+
 	var wg sync.WaitGroup
-	wg.Add(2)
+	wg.Add(3)
 
 	// Channel to limit concurrent update handlers (worker pool)
 	// This prevents unbounded goroutine spawning
@@ -219,41 +217,22 @@ func main() {
 
 	// Start backup scheduler
 	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				sentry.CurrentHub().Recover(r)
-				sentry.Flush(logger.SentryPanicFlushTimeout)
-				logger.Error("Backup scheduler panicked", zap.Any("panic", r))
-			}
-			wg.Done()
-		}()
+		defer recoverAndReport("Backup scheduler")
+		wg.Done()
 		startBackupScheduler(ctx, cfg.DatabasePath)
 	}()
 
 	// Start heartbeat monitor
 	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				sentry.CurrentHub().Recover(r)
-				sentry.Flush(logger.SentryPanicFlushTimeout)
-				logger.Error("Heartbeat scheduler panicked", zap.Any("panic", r))
-			}
-			wg.Done()
-		}()
+		defer recoverAndReport("Heartbeat scheduler")
+		wg.Done()
 		heartbeat.Start(ctx, cfg.HeartbeatURL, cfg.HeartbeatInterval)
 	}()
 
 	// Start trial cleanup scheduler
-	wg.Add(1)
 	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				sentry.CurrentHub().Recover(r)
-				sentry.Flush(logger.SentryPanicFlushTimeout)
-				logger.Error("Trial cleanup scheduler panicked", zap.Any("panic", r))
-			}
-			wg.Done()
-		}()
+		defer recoverAndReport("Trial cleanup scheduler")
+		wg.Done()
 		startTrialCleanupScheduler(ctx, dbService, xuiClient, cfg.XUIInboundID, cfg.TrialDurationHours)
 	}()
 
@@ -261,6 +240,7 @@ func main() {
 	var updatesWg sync.WaitGroup
 
 	// Main event loop
+eventLoop:
 	for {
 		select {
 		case update := <-updates:
@@ -278,15 +258,14 @@ func main() {
 			case <-ctx.Done():
 				// Shutdown initiated while waiting for semaphore
 				logger.Info("Graceful shutdown initiated, draining updates...")
-				goto shutdown
+				break eventLoop
 			}
 
 		case <-ctx.Done():
-			goto shutdown
+			break eventLoop
 		}
 	}
 
-shutdown:
 	logger.Info("Graceful shutdown initiated")
 	botAPI.StopReceivingUpdates()
 
@@ -330,20 +309,23 @@ shutdown:
 	logger.Info("Bot stopped successfully")
 }
 
+// recoverAndReport recovers from panics, reports to Sentry, and logs the error.
+// Usage: defer recoverAndReport("Component name")
+func recoverAndReport(component string) {
+	if r := recover(); r != nil {
+		stack := debug.Stack()
+		sentry.CurrentHub().Recover(r)
+		sentry.Flush(logger.SentryPanicFlushTimeout)
+		logger.Error(component+" panicked",
+			zap.Any("panic", r),
+			zap.String("stack", string(stack)),
+		)
+	}
+}
+
 // handleUpdateSafely handles a Telegram update with panic recovery.
 func handleUpdateSafely(ctx context.Context, handler *bot.Handler, update tgbotapi.Update) {
-	defer func() {
-		if r := recover(); r != nil {
-			stack := debug.Stack()
-			sentry.CurrentHub().Recover(r)
-			sentry.Flush(logger.SentryPanicFlushTimeout)
-			logger.Error("Panic in update handler",
-				zap.Any("panic", r),
-				zap.String("stack", string(stack)),
-			)
-		}
-	}()
-
+	defer recoverAndReport("Update handler")
 	handler.HandleUpdate(ctx, update)
 }
 

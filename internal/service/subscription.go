@@ -8,6 +8,7 @@ import (
 	"rs8kvn_bot/internal/config"
 	"rs8kvn_bot/internal/database"
 	"rs8kvn_bot/internal/interfaces"
+	"rs8kvn_bot/internal/xui"
 
 	"rs8kvn_bot/internal/utils"
 )
@@ -34,12 +35,23 @@ func NewSubscriptionService(db interfaces.DatabaseService, xui interfaces.XUICli
 func (s *SubscriptionService) Create(ctx context.Context, chatID int64, username string) (*CreateResult, error) {
 	trafficBytes := int64(s.cfg.TrafficLimitGB) * 1024 * 1024 * 1024
 
-	clientID := utils.GenerateUUID()
-	subID := utils.GenerateSubID()
+	// Ensure XUI session is valid before making API calls
+	if err := s.xui.Login(ctx); err != nil {
+		return nil, fmt.Errorf("xui login: %w", err)
+	}
+
+	clientID, err := utils.GenerateUUID()
+	if err != nil {
+		return nil, fmt.Errorf("generate client id: %w", err)
+	}
+	subID, err := utils.GenerateSubID()
+	if err != nil {
+		return nil, fmt.Errorf("generate sub id: %w", err)
+	}
 
 	// Calculate expiry time for auto-reset (now + reset days)
 	expiryTime := time.Now().Add(time.Duration(config.SubscriptionResetDay) * 24 * time.Hour)
-	
+
 	client, err := s.xui.AddClientWithID(ctx, s.cfg.XUIInboundID, username, clientID, subID, trafficBytes, expiryTime, config.SubscriptionResetDay)
 	if err != nil {
 		return nil, fmt.Errorf("xui add client: %w", err)
@@ -60,7 +72,11 @@ func (s *SubscriptionService) Create(ctx context.Context, chatID int64, username
 	}
 
 	if err := s.db.CreateSubscription(ctx, sub); err != nil {
-		if rollbackErr := s.xui.DeleteClient(ctx, s.cfg.XUIInboundID, client.ID); rollbackErr != nil {
+		// Retry rollback with backoff to ensure client is deleted from XUI
+		rollbackErr := xui.RetryWithBackoff(ctx, config.XUIMaxRetries, config.XUIInitialRetryDelay, func() error {
+			return s.xui.DeleteClient(ctx, s.cfg.XUIInboundID, client.ID)
+		})
+		if rollbackErr != nil {
 			return nil, fmt.Errorf("create subscription: %w (rollback failed: %w)", err, rollbackErr)
 		}
 		return nil, fmt.Errorf("create subscription: %w", err)

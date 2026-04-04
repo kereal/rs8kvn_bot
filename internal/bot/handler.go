@@ -374,7 +374,15 @@ func (h *Handler) getHelpText(trafficLimitGB int, subscriptionURL string) string
 }
 
 func (h *Handler) sendInviteLink(ctx context.Context, chatID int64, messageID int) {
-	invite, err := h.db.GetOrCreateInvite(ctx, chatID, utils.GenerateInviteCode())
+	inviteCode, err := utils.GenerateInviteCode()
+	if err != nil {
+		logger.Error("Failed to generate invite code",
+			zap.Error(err),
+			zap.Int64("chat_id", chatID))
+		h.SendMessage(ctx, chatID, "❌ Не удалось создать пригласительную ссылку. Попробуйте позже.")
+		return
+	}
+	invite, err := h.db.GetOrCreateInvite(ctx, chatID, inviteCode)
 	if err != nil {
 		logger.Error("Failed to get or create invite",
 			zap.Error(err),

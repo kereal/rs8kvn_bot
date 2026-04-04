@@ -246,21 +246,27 @@ func NewService(logFilePath, level string) (*Service, error) {
 	cores = append(cores, zapcore.NewCore(encoder, zapcore.AddSync(os.Stdout), zapLevel))
 
 	// File output with rotation
-	fileWriter := &lumberjack.Logger{
+	fw := &lumberjack.Logger{
 		Filename:   logFilePath,
 		MaxSize:    LogMaxSizeMB,
 		MaxBackups: LogMaxBackups,
 		MaxAge:     LogMaxAgeDays,
 		Compress:   false,
 	}
-	cores = append(cores, zapcore.NewCore(encoder, zapcore.AddSync(fileWriter), zapLevel))
+	fileWriter = fw
+	cores = append(cores, zapcore.NewCore(encoder, zapcore.AddSync(fw), zapLevel))
 
 	core := zapcore.NewTee(cores...)
 	logger := zap.New(core, zap.AddCaller(), zap.AddCallerSkip(1))
 
+	logMu.Lock()
+	hub := sentryHub
+	logMu.Unlock()
+
 	return &Service{
-		log:  logger,
-		file: fileWriter,
+		log:       logger,
+		file:      fw,
+		sentryHub: hub,
 	}, nil
 }
 

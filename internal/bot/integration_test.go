@@ -161,10 +161,15 @@ func (f *IntegrationTestFixture) Close() {
 func CreateTestSubscriptionInDB(t *testing.T, db *database.Service, chatID int64, username string, status string, expiry time.Time) *database.Subscription {
 	t.Helper()
 
+	clientID, err := utils.GenerateUUID()
+	if err != nil {
+		t.Fatalf("Failed to generate client ID: %v", err)
+	}
+
 	sub := &database.Subscription{
 		TelegramID:      chatID,
 		Username:        username,
-		ClientID:        utils.GenerateUUID(),
+		ClientID:        clientID,
 		SubscriptionID:  "test-sub-id",
 		InboundID:       1,
 		TrafficLimit:    107374182400,
@@ -173,7 +178,7 @@ func CreateTestSubscriptionInDB(t *testing.T, db *database.Service, chatID int64
 		SubscriptionURL: "http://localhost/sub/" + username,
 	}
 
-	err := db.CreateSubscription(context.Background(), sub)
+	err = db.CreateSubscription(context.Background(), sub)
 	if err != nil {
 		t.Fatalf("Failed to create test subscription: %v", err)
 	}
@@ -238,10 +243,15 @@ func TestSubscriptionFlow_RevokeOldSubscription(t *testing.T) {
 
 	CreateTestSubscriptionInDB(t, f.DB, f.UserChatID, "testuser1", "active", time.Now().Add(30*24*time.Hour))
 
-	err := f.DB.CreateSubscription(ctx, &database.Subscription{
+	clientID, err := utils.GenerateUUID()
+	if err != nil {
+		t.Fatalf("Failed to generate client ID: %v", err)
+	}
+
+	err = f.DB.CreateSubscription(ctx, &database.Subscription{
 		TelegramID:      f.UserChatID,
 		Username:        "testuser2",
-		ClientID:        utils.GenerateUUID(),
+		ClientID:        clientID,
 		SubscriptionID:  "testuser2",
 		InboundID:       1,
 		TrafficLimit:    107374182400,
