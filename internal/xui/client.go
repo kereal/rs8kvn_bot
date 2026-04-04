@@ -180,29 +180,37 @@ func (c *Client) doEnsureLoggedIn(ctx context.Context, force bool) error {
 	}
 
 	// Slow path: need to re-authenticate
+	// Double-check with write lock, then release before entering singleflight
+	// to avoid blocking all other API calls during retry backoff.
 	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	// Double-check after acquiring write lock
 	if !force && time.Since(c.lastLogin) < c.sessionValidity {
+		c.mu.Unlock()
 		return nil
 	}
+	c.mu.Unlock()
 
-	// Use singleflight to deduplicate concurrent login attempts
+	// Use singleflight to deduplicate concurrent login attempts.
+	// Mutex is NOT held here — only lastLogin updates are protected.
 	_, err, _ := c.loginGroup.Do("login", func() (interface{}, error) {
 		// Try to verify existing session first before forcing re-login
 		verifyCtx, verifyCancel := context.WithTimeout(ctx, config.XUISessionVerifyTimeout)
 		defer verifyCancel()
 
 		if !force && c.verifySession(verifyCtx) {
+			c.mu.Lock()
 			c.lastLogin = time.Now()
+			c.mu.Unlock()
 			logger.Debug("XUI session verified successfully, no re-login needed")
 			return nil, nil
 		}
 
-		return nil, RetryWithBackoff(ctx, config.XUIMaxRetries, config.XUIInitialRetryDelay, func() error {
+		if err := RetryWithBackoff(ctx, config.XUIMaxRetries, config.XUIInitialRetryDelay, func() error {
 			return c.doLogin(ctx)
-		})
+		}); err != nil {
+			return nil, err
+		}
+
+		return nil, nil
 	})
 	return err
 }
@@ -249,7 +257,6 @@ func (c *Client) verifySession(ctx context.Context) bool {
 }
 
 // doLogin performs the actual login request.
-// Must be called with c.mu held.
 func (c *Client) doLogin(ctx context.Context) error {
 	// Clear stale connections before re-authentication
 	c.transport.CloseIdleConnections()
@@ -351,26 +358,26 @@ func (c *Client) doHTTPRequest(ctx context.Context, method, url string, bodyFn f
 // The response body is always read and closed before returning.
 func (c *Client) doRequestWithAuthRetry(ctx context.Context, fn func() (statusCode int, body []byte, err error)) ([]byte, error) {
 	statusCode, body, err := fn()
-	if err != nil {
-		return body, err
-	}
 
+	// Check auth status code first — the closure returns both statusCode and error
+	// for non-200 responses, so we must check statusCode before err to catch auth failures.
 	if statusCode == http.StatusUnauthorized ||
 		statusCode == http.StatusFound ||
 		statusCode == http.StatusTemporaryRedirect {
+
 		logger.Info("XUI auto-relogin triggered",
 			zap.Int("http_status", statusCode))
-
-		// Invalidate session
-		c.mu.Lock()
-		c.lastLogin = time.Time{}
-		c.mu.Unlock()
 
 		// Clear stale connections
 		c.transport.CloseIdleConnections()
 
-		// Re-login
-		if loginErr := c.doLogin(ctx); loginErr != nil {
+		// Re-login with mutex protection
+		c.mu.Lock()
+		c.lastLogin = time.Time{}
+		loginErr := c.doLogin(ctx)
+		c.mu.Unlock()
+
+		if loginErr != nil {
 			return body, fmt.Errorf("auto-relogin failed: %w", loginErr)
 		}
 
@@ -378,6 +385,10 @@ func (c *Client) doRequestWithAuthRetry(ctx context.Context, fn func() (statusCo
 
 		// Retry the request once
 		_, body, err = fn()
+		return body, err
+	}
+
+	if err != nil {
 		return body, err
 	}
 
@@ -500,7 +511,7 @@ func (c *Client) doAddClientWithID(ctx context.Context, inboundID int, email, cl
 		ExpiryTime: getExpiryTimeMillis(expiryTime),
 		Enable:     true,
 		SubID:      subID,
-		Reset:      config.SubscriptionResetDay,
+		Reset:      resetDays,
 	}, nil
 }
 

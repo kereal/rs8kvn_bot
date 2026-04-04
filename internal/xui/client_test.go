@@ -1645,10 +1645,10 @@ func TestClientSettings_ResetDayDefault(t *testing.T) {
 	require.NoError(t, err)
 	ctx := context.Background()
 
-	// resetDays = 0 should use default
+	// resetDays = 0 means no auto-renewal (reset: 0 sent to API)
 	result, err := client.AddClientWithID(ctx, 1, "testuser", "client-id", "sub-id", 1000, time.Now(), 0)
 	require.NoError(t, err)
-	assert.Equal(t, config.SubscriptionResetDay, result.Reset, "resetDays=0 should use default")
+	assert.Equal(t, 0, result.Reset, "resetDays=0 should return 0 (no auto-renewal)")
 }
 
 func TestAddClientWithID_NegativeResetDays(t *testing.T) {
