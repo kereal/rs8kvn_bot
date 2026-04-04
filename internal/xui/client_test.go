@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -1570,6 +1571,103 @@ func TestGetExternalURL_EmptyString(t *testing.T) {
 	result := GetExternalURL("")
 	// Empty string parses to "://" by url.Parse
 	assert.NotEmpty(t, result, "Empty string should return non-empty result")
+}
+
+// TestDoRequestWithAuthRetry_AutoReloginOn401 directly tests the auto-relogin path
+// in doRequestWithAuthRetry — the critical path that was previously dead code.
+func TestDoRequestWithAuthRetry_AutoReloginOn401(t *testing.T) {
+	loginCalls := 0
+	addCalls := 0
+	var mu sync.Mutex
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/panel/api/server/status":
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(APIResponse{Success: false})
+		case "/login":
+			mu.Lock()
+			loginCalls++
+			mu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(APIResponse{Success: true})
+		case "/panel/api/inbounds/addClient":
+			mu.Lock()
+			addCalls++
+			count := addCalls
+			mu.Unlock()
+			if count == 1 {
+				// First call: 401
+				w.WriteHeader(http.StatusUnauthorized)
+				json.NewEncoder(w).Encode(APIResponse{Success: false, Msg: "unauthorized"})
+				return
+			}
+			// Second call (after relogin): success
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(APIResponse{Success: true, Msg: "Client added"})
+		}
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, "admin", "password", 15*time.Minute)
+	require.NoError(t, err)
+	ctx := context.Background()
+
+	// Initial login
+	err = client.Login(ctx)
+	require.NoError(t, err)
+
+	// Force session expiry so ensureLoggedIn triggers relogin
+	client.TestForceSessionExpiry()
+
+	// Call doAddClientWithID directly — this goes through doRequestWithAuthRetry
+	result, err := client.doAddClientWithID(ctx, 1, "testuser", "client-id", "sub-id", 1000, time.Now(), 30)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, 2, addCalls, "addClient should be called twice (401 then retry after relogin)")
+	assert.Equal(t, 2, loginCalls, "Login should be called twice (initial + auto-relogin)")
+}
+
+// TestDoRequestWithAuthRetry_NoReloginOnSuccess verifies that successful requests
+// don't trigger unnecessary re-login.
+func TestDoRequestWithAuthRetry_NoReloginOnSuccess(t *testing.T) {
+	loginCalls := 0
+	var mu sync.Mutex
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/panel/api/server/status":
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(APIResponse{Success: true})
+		case "/login":
+			mu.Lock()
+			loginCalls++
+			mu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(APIResponse{Success: true})
+		case "/panel/api/inbounds/addClient":
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(APIResponse{Success: true, Msg: "Client added"})
+		}
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, "admin", "password", 15*time.Minute)
+	require.NoError(t, err)
+	ctx := context.Background()
+
+	err = client.Login(ctx)
+	require.NoError(t, err)
+	initialLogins := loginCalls
+
+	// Multiple successful calls — no relogin should occur
+	for i := 0; i < 5; i++ {
+		result, err := client.doAddClientWithID(ctx, 1, fmt.Sprintf("user%d", i), "client-id", "sub-id", 1000, time.Now(), 30)
+		require.NoError(t, err)
+		require.NotNil(t, result)
+	}
+
+	assert.Equal(t, initialLogins, loginCalls, "No re-login should occur for successful requests")
 }
 
 func TestGetExternalURL_InvalidURL(t *testing.T) {

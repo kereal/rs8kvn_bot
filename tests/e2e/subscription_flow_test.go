@@ -2556,11 +2556,11 @@ func TestE2E_RealClient_LoginHTTPError(t *testing.T) {
 	assert.Contains(t, err.Error(), "HTTP 502")
 }
 
-func TestE2E_RealClient_AutoReloginOnRedirect(t *testing.T) {
-	// Go's http.Client follows redirects automatically, so a 302 to /login
-	// results in the client receiving the login page HTML instead of JSON.
-	// This test verifies that the error is properly surfaced.
-	redirectCount := 0
+func TestE2E_RealClient_AutoReloginViaCircuitBreaker(t *testing.T) {
+	// This test verifies that auto-relogin goes through the circuit breaker.
+	// When the panel returns 401, doRequestWithAuthRetry calls ensureLoggedIn(true),
+	// which is wrapped in the circuit breaker.
+	loginAttempts := 0
 	var mu sync.Mutex
 
 	env := setupRealXUIEnv(t, map[string]http.HandlerFunc{
@@ -2568,18 +2568,23 @@ func TestE2E_RealClient_AutoReloginOnRedirect(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(xui.APIResponse{Success: false})
 		},
-		"/panel/api/inbounds/addClient": func(w http.ResponseWriter, r *http.Request) {
+		"/login": func(w http.ResponseWriter, r *http.Request) {
 			mu.Lock()
-			redirectCount++
-			count := redirectCount
+			loginAttempts++
 			mu.Unlock()
-
-			if count == 1 {
-				// First attempt: redirect to login
-				http.Redirect(w, r, "/login", http.StatusFound)
+			// Login fails once, then succeeds
+			mu.Lock()
+			count := loginAttempts
+			mu.Unlock()
+			if count <= 1 {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				json.NewEncoder(w).Encode(xui.APIResponse{Success: false, Msg: "unavailable"})
 				return
 			}
-			// After relogin: success
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(xui.APIResponse{Success: true, Msg: "Login successful"})
+		},
+		"/panel/api/inbounds/addClient": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(xui.APIResponse{Success: true, Msg: "Client added"})
 		},
@@ -2592,16 +2597,11 @@ func TestE2E_RealClient_AutoReloginOnRedirect(t *testing.T) {
 
 	env.xuiClient.TestForceSessionExpiry()
 
-	// The redirect is followed to /login which returns JSON success,
-	// so the first addClient call actually succeeds (via redirect chain).
-	// The important thing is that the client handles it gracefully.
-	result, err := env.subService.Create(ctx, 62345, "redirect_user")
-	// Either succeeds (redirect followed) or fails gracefully
-	if err != nil {
-		assert.Contains(t, strings.ToLower(err.Error()), "unauthorized", "Error should be auth-related")
-	} else {
-		require.NotNil(t, result)
-	}
+	// Trigger auto-relogin — login will fail once (retryable), then succeed
+	result, err := env.subService.Create(ctx, 62345, "cb_relogin_user")
+	require.NoError(t, err, "Create should succeed after auto-relogin retry")
+	require.NotNil(t, result)
+	assert.GreaterOrEqual(t, loginAttempts, 2, "Auto-relogin should have been attempted with retry")
 }
 
 func TestE2E_RealClient_MultipleOperationsNoRelogin(t *testing.T) {
