@@ -59,18 +59,14 @@ func (h *Handler) handleCreateSubscription(ctx context.Context, chatID int64, us
 			logger.Info("No existing subscription, creating new one", zap.String("username", username))
 		} else {
 			logger.Error("Failed to check subscription", zap.Error(err))
-			errMsg := "❌ Временная ошибка. Попробуйте позже."
+			errMsg := msg(MsgSubTempError)
 			editMsg := tgbotapi.NewEditMessageText(chatID, messageID, errMsg)
 			h.safeSend(editMsg)
 			return
 		}
 	} else if sub != nil {
 		// Return existing active subscription - edit the message
-		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, fmt.Sprintf(
-			"✅ Ваша подписка\n\n📊 Трафик: %d ГБ\n\n🔗 Ссылка\n`%s`",
-			h.cfg.TrafficLimitGB,
-			sub.SubscriptionURL,
-		))
+		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgSubCreatedSuccess, h.cfg.TrafficLimitGB, sub.SubscriptionURL))
 		editMsg.ParseMode = "Markdown"
 		editMsg.DisableWebPagePreview = true
 		kb := h.getQRKeyboard()
@@ -96,12 +92,12 @@ func (h *Handler) handleMySubscription(ctx context.Context, chatID int64, userna
 	sub, err := h.getSubscriptionWithCache(ctx, chatID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "❌ У вас нет активной подписки.\n\nНажмите «Получить подписку» для создания.")
+			editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgSubNoActive))
 			h.safeSend(editMsg)
 			return
 		} else {
 			logger.Error("Failed to get subscription", zap.Error(err))
-			editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "❌ Временная ошибка. Попробуйте позже.")
+			editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgSubTempError))
 			h.safeSend(editMsg)
 			return
 		}
@@ -180,7 +176,7 @@ func (h *Handler) handleQRCode(ctx context.Context, chatID int64, username strin
 	// Get subscription
 	sub, err := h.db.GetByTelegramID(ctx, chatID)
 	if err != nil || sub == nil {
-		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "❌ У вас нет активной подписки.")
+		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgSubNoActive))
 		h.safeSend(editMsg)
 		return
 	}
@@ -189,7 +185,7 @@ func (h *Handler) handleQRCode(ctx context.Context, chatID int64, username strin
 	pngBytes, err := utils.GenerateQRCodePNG(sub.SubscriptionURL)
 	if err != nil {
 		logger.Error("Failed to generate QR code", zap.Error(err))
-		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "❌ Ошибка генерации QR-кода. Попробуйте позже.")
+		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgQRCodeFailed))
 		h.safeSend(editMsg)
 		return
 	}
@@ -199,12 +195,12 @@ func (h *Handler) handleQRCode(ctx context.Context, chatID int64, username strin
 		Name:  "qr.png",
 		Bytes: pngBytes,
 	})
-	photo.Caption = "📱 QR-код с подпиской\n\nНаведите камеру телефона на код, чтобы импортировать подписку"
+	photo.Caption = msg(MsgQRCodeCaption)
 	photo.ParseMode = "Markdown"
 
 	backKeyboard := tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("⬅️ Назад", "back_to_subscription"),
+			tgbotapi.NewInlineKeyboardButtonData("⬅️ "+msg(MsgQRCodeBack), "back_to_subscription"),
 		),
 	)
 	photo.ReplyMarkup = &backKeyboard
@@ -234,7 +230,7 @@ func (h *Handler) sendQRCode(ctx context.Context, chatID int64, messageID int, u
 	pngBytes, err := utils.GenerateQRCodePNG(url)
 	if err != nil {
 		logger.Error("Failed to generate QR code", zap.Error(err))
-		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "❌ Ошибка генерации QR-кода. Попробуйте позже.")
+		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgQRCodeFailed))
 		h.safeSend(editMsg)
 		return
 	}
@@ -250,7 +246,7 @@ func (h *Handler) sendQRCode(ctx context.Context, chatID int64, messageID int, u
 	// Keyboard with back button
 	backKeyboard := tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("⬅️ Назад", "back_to_invite"),
+			tgbotapi.NewInlineKeyboardButtonData("⬅️ "+msg(MsgQRCodeBack), "back_to_invite"),
 		),
 	)
 	photo.ReplyMarkup = &backKeyboard
@@ -332,22 +328,22 @@ func (h *Handler) handleCreateError(ctx context.Context, chatID int64, messageID
 
 	classified := classifyXUIError(err)
 
-	errMsg := "❌ Ошибка при создании подписки."
+	errMsg := msg(MsgErrGeneric)
 	switch {
 	case errors.Is(classified, ErrXUIConnection):
-		errMsg = "❌ Не удается подключиться к серверу. Попробуйте позже."
+		errMsg = msg(MsgErrConnection)
 	case errors.Is(classified, ErrXUIAuth):
-		errMsg = "❌ Ошибка авторизации на сервере. Свяжитесь с администратором."
+		errMsg = msg(MsgErrAuth)
 	case errors.Is(classified, ErrXUIContextCanceled):
-		errMsg = "❌ Запрос был прерван. Попробуйте снова."
+		errMsg = msg(MsgErrRequestCanceled)
 	case errors.Is(classified, ErrXUIDNS):
-		errMsg = "❌ Ошибка подключения к серверу. Проверьте настройки DNS."
+		errMsg = msg(MsgErrDialTCP)
 	case errors.Is(classified, ErrXUITLS):
-		errMsg = "❌ Ошибка SSL/TLS сертификата. Свяжитесь с администратором."
+		errMsg = msg(MsgErrTLS)
 	case errors.Is(classified, ErrXUIServer):
-		errMsg = "❌ Ошибка сервера при создании подписки. Попробуйте позже."
+		errMsg = msg(MsgErrInboundNotFound)
 	case errors.Is(classified, ErrXUIRollbackFailed):
-		errMsg = "❌ Подписка создана в панели, но не сохранена в базе. Обратитесь к администратору."
+		errMsg = msg(MsgErrPartialSave)
 		h.notifyAdminError(ctx, fmt.Sprintf("⚠️ ORPHAN CLIENT WARNING: %v", err))
 	}
 

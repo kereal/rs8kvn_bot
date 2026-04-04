@@ -70,6 +70,9 @@ func (h *Handler) handleAdminLastReg(ctx context.Context, chatID int64, username
 // Deletes a subscription by database ID from both 3x-ui panel and database.
 // Usage: /del <id>
 func (h *Handler) HandleDel(ctx context.Context, update tgbotapi.Update) {
+	ctx, cancel := h.withTimeout(ctx)
+	defer cancel()
+
 	if update.Message == nil {
 		logger.Error("HandleDel called with nil Message")
 		return
@@ -177,6 +180,9 @@ func escapeMarkdown(text string) string {
 
 // HandleBroadcast handles the /broadcast command for admins to send messages to all users.
 func (h *Handler) HandleBroadcast(ctx context.Context, update tgbotapi.Update) {
+	ctx, cancel := h.withTimeout(ctx)
+	defer cancel()
+
 	if update.Message == nil {
 		logger.Error("HandleBroadcast called with nil Message")
 		return
@@ -284,6 +290,9 @@ func (h *Handler) HandleBroadcast(ctx context.Context, update tgbotapi.Update) {
 
 // HandleSend handles the /send command for admins to send a message to a specific user.
 func (h *Handler) HandleSend(ctx context.Context, update tgbotapi.Update) {
+	ctx, cancel := h.withTimeout(ctx)
+	defer cancel()
+
 	if update.Message == nil {
 		logger.Error("HandleSend called with nil Message")
 		return
