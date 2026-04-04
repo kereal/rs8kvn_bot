@@ -1678,3 +1678,241 @@ func TestAddClientWithID_NegativeResetDays(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, config.SubscriptionResetDay, result.Reset, "Negative resetDays should use default")
 }
+
+func TestVerifySession_Success(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/panel/api/server/status", r.URL.Path)
+		assert.Equal(t, "GET", r.Method)
+		resp := APIResponse{Success: true}
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, "admin", "password", 15*time.Minute)
+	require.NoError(t, err)
+
+	assert.True(t, client.verifySession(context.Background()), "verifySession should return true")
+}
+
+func TestVerifySession_Failure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, "admin", "password", 15*time.Minute)
+	require.NoError(t, err)
+
+	assert.False(t, client.verifySession(context.Background()), "verifySession should return false on 401")
+	assert.Equal(t, int64(1), client.SessionFailCount(), "sessionFailCount should increment")
+}
+
+func TestVerifySession_NetworkError(t *testing.T) {
+	client, err := NewClient("http://127.0.0.1:1", "admin", "password", 15*time.Minute)
+	require.NoError(t, err)
+
+	assert.False(t, client.verifySession(context.Background()), "verifySession should return false on network error")
+	assert.Equal(t, int64(1), client.SessionFailCount(), "sessionFailCount should increment on network error")
+}
+
+func TestAutoRelogin_On401(t *testing.T) {
+	loginCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/panel/api/server/status":
+			resp := APIResponse{Success: false}
+			json.NewEncoder(w).Encode(resp)
+		case "/login":
+			loginCount++
+			resp := APIResponse{Success: true}
+			json.NewEncoder(w).Encode(resp)
+		case "/panel/api/inbounds/addClient":
+			if loginCount == 0 {
+				// First request: return 401
+				w.WriteHeader(http.StatusUnauthorized)
+				json.NewEncoder(w).Encode(APIResponse{Success: false, Msg: "unauthorized"})
+				return
+			}
+			// After relogin: success
+			resp := APIResponse{Success: true, Msg: "Client added"}
+			json.NewEncoder(w).Encode(resp)
+		}
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, "admin", "password", 15*time.Minute)
+	require.NoError(t, err)
+	ctx := context.Background()
+
+	// First login to establish session
+	err = client.Login(ctx)
+	require.NoError(t, err)
+
+	// Force session expiry so ensureLoggedIn triggers
+	client.mu.Lock()
+	client.lastLogin = time.Time{}
+	client.mu.Unlock()
+
+	// AddClientWithID should auto-relogin on 401 and retry
+	result, err := client.AddClientWithID(ctx, 1, "testuser", "client-id", "sub-id", 1000, time.Now(), 30)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.GreaterOrEqual(t, loginCount, 2, "Should have relogged in after 401")
+}
+
+func TestAutoRelogin_OnRedirect(t *testing.T) {
+	loginCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/panel/api/server/status":
+			resp := APIResponse{Success: false}
+			json.NewEncoder(w).Encode(resp)
+		case "/login":
+			loginCount++
+			resp := APIResponse{Success: true}
+			json.NewEncoder(w).Encode(resp)
+		case "/panel/api/inbounds/addClient":
+			if loginCount == 0 {
+				http.Redirect(w, r, "/login", http.StatusFound)
+				return
+			}
+			resp := APIResponse{Success: true, Msg: "Client added"}
+			json.NewEncoder(w).Encode(resp)
+		}
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, "admin", "password", 15*time.Minute)
+	require.NoError(t, err)
+	ctx := context.Background()
+
+	err = client.Login(ctx)
+	require.NoError(t, err)
+
+	client.mu.Lock()
+	client.lastLogin = time.Time{}
+	client.mu.Unlock()
+
+	result, err := client.AddClientWithID(ctx, 1, "testuser", "client-id", "sub-id", 1000, time.Now(), 30)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.GreaterOrEqual(t, loginCount, 2, "Should have relogged in on redirect")
+}
+
+func TestIsRetryable(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      error
+		expected bool
+	}{
+		{"nil error", nil, true},
+		{"no such host", fmt.Errorf("dial tcp: lookup example.com: no such host"), false},
+		{"connection refused", fmt.Errorf("dial tcp 127.0.0.1:2053: connection refused"), true},
+		{"timeout", fmt.Errorf("context deadline exceeded (Client.Timeout exceeded)"), true},
+		{"no such host mixed case", fmt.Errorf("Dial TCP: Lookup EXAMPLE.COM: NO SUCH HOST"), false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, isRetryable(tt.err))
+		})
+	}
+}
+
+func TestLoginCount_Increments(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/login" {
+			json.NewEncoder(w).Encode(APIResponse{Success: true})
+		}
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, "admin", "password", 15*time.Minute)
+	require.NoError(t, err)
+	ctx := context.Background()
+
+	assert.Equal(t, int64(0), client.LoginCount())
+
+	err = client.Login(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), client.LoginCount())
+
+	err = client.Login(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), client.LoginCount())
+}
+
+func TestDoLogin_HTTPStatusCheck(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(`{"success":false,"msg":"internal error"}`))
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, "admin", "password", 15*time.Minute)
+	require.NoError(t, err)
+
+	err = client.doLogin(context.Background())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "HTTP 500")
+}
+
+func TestDoEnsureLoggedIn_VerifySessionSkipsLogin(t *testing.T) {
+	loginCalls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/panel/api/server/status":
+			json.NewEncoder(w).Encode(APIResponse{Success: true})
+		case "/login":
+			loginCalls++
+			json.NewEncoder(w).Encode(APIResponse{Success: true})
+		}
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, "admin", "password", 1*time.Minute)
+	require.NoError(t, err)
+	ctx := context.Background()
+
+	// Initial login
+	err = client.Login(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, 1, loginCalls)
+
+	// Wait for session to "expire" (1 minute is too long, force it)
+	client.mu.Lock()
+	client.lastLogin = time.Now().Add(-2 * time.Minute)
+	client.mu.Unlock()
+
+	// ensureLoggedIn should verify session instead of logging in
+	err = client.ensureLoggedIn(ctx, false)
+	require.NoError(t, err)
+	assert.Equal(t, 1, loginCalls, "Should NOT have called login again, verifySession succeeded")
+}
+
+func TestDoEnsureLoggedIn_ForceRelogin(t *testing.T) {
+	loginCalls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/panel/api/server/status":
+			json.NewEncoder(w).Encode(APIResponse{Success: false})
+		case "/login":
+			loginCalls++
+			json.NewEncoder(w).Encode(APIResponse{Success: true})
+		}
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, "admin", "password", 15*time.Minute)
+	require.NoError(t, err)
+	ctx := context.Background()
+
+	err = client.Login(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, 1, loginCalls)
+
+	// Force=true should always re-login regardless of session validity
+	err = client.ensureLoggedIn(ctx, true)
+	require.NoError(t, err)
+	assert.Equal(t, 2, loginCalls, "Force relogin should call login again")
+}
