@@ -1,0 +1,78 @@
+name: Update Project Statistics
+
+on:
+    push:
+        branches:
+            - main
+    workflow_dispatch:
+        inputs:
+            reason:
+                description: "Reason for manual run"
+                required: false
+                default: "manual trigger"
+
+permissions:
+    contents: write
+
+jobs:
+    update-stats:
+        runs-on: ubuntu-latest
+        # Don't run on commits made by this workflow (prevent infinite loop)
+        if: "!contains(github.event.head_commit.message, '[skip ci]')"
+
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0
+                  token: ${{ secrets.GITHUB_TOKEN }}
+
+            - name: Setup Go
+              uses: actions/setup-go@v5
+              with:
+                  go-version: "1.24"
+                  cache: true
+
+            - name: Make script executable
+              run: chmod +x update_stats.sh
+
+            - name: Run statistics script
+              run: ./update_stats.sh --update-doc
+              env:
+                  # Ensure git config for commits
+                  GIT_AUTHOR_NAME: github-actions[bot]
+                  GIT_AUTHOR_EMAIL: github-actions[bot]@users.noreply.github.com
+                  GIT_COMMITTER_NAME: github-actions[bot]
+                  GIT_COMMITTER_EMAIL: github-actions[bot]@users.noreply.github.com
+
+            - name: Check for changes
+              id: check_changes
+              run: |
+                  if git diff --quiet doc/PROJECT_STATS.md; then
+                    echo "has_changes=false" >> $GITHUB_OUTPUT
+                  else
+                    echo "has_changes=true" >> $GITHUB_OUTPUT
+                  fi
+
+            - name: Commit and push changes
+              if: steps.check_changes.outputs.has_changes == 'true'
+              run: |
+                  git config --local user.email "github-actions[bot]@users.noreply.github.com"
+                  git config --local user.name "github-actions[bot]"
+                  git add doc/PROJECT_STATS.md
+                  git commit -m "docs: update PROJECT_STATS.md [skip ci]"
+                  git push
+
+            - name: Summary
+              if: steps.check_changes.outputs.has_changes == 'true'
+              run: |
+                  echo "📊 Project statistics updated successfully!" >> $GITHUB_STEP_SUMMARY
+                  echo "" >> $GITHUB_STEP_SUMMARY
+                  echo "File: \`doc/PROJECT_STATS.md\`" >> $GITHUB_STEP_SUMMARY
+                  echo "" >> $GITHUB_STEP_SUMMARY
+                  echo "Statistics will be included in the next release." >> $GITHUB_STEP_SUMMARY
+
+            - name: No changes
+              if: steps.check_changes.outputs.has_changes != 'true'
+              run: |
+                  echo "📊 No changes in statistics" >> $GITHUB_STEP_SUMMARY
