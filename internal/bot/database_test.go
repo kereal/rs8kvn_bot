@@ -1,6 +1,7 @@
 package bot
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -12,18 +13,15 @@ import (
 )
 
 func TestHandleStart_WithDatabase(t *testing.T) {
-	tdb, err := testutil.NewTestDatabase(t)
-	if err != nil {
-		t.Fatalf("Failed to create test database: %v", err)
-	}
-	defer tdb.Cleanup()
+	db, err := testutil.NewTestDatabaseService(t)
+	require.NoError(t, err, "Failed to create test database service")
+
+	ctx := context.Background()
 
 	sub := testutil.CreateTestSubscription(123456789, "testuser", "active", time.Now().Add(24*time.Hour))
-	if err := database.CreateSubscription(sub); err != nil {
-		t.Fatalf("Failed to create subscription: %v", err)
-	}
+	require.NoError(t, db.CreateSubscription(ctx, sub), "Failed to create subscription")
 
-	got, err := database.GetByTelegramID(123456789)
+	got, err := db.GetByTelegramID(ctx, 123456789)
 	require.NoError(t, err, "GetByTelegramID() error")
 
 	assert.Equal(t, int64(123456789), got.TelegramID)
@@ -31,32 +29,35 @@ func TestHandleStart_WithDatabase(t *testing.T) {
 }
 
 func TestHandleStart_NoDatabase(t *testing.T) {
-	tdb, err := testutil.NewTestDatabase(t)
-	require.NoError(t, err, "Failed to create test database")
-	defer tdb.Cleanup()
+	db, err := testutil.NewTestDatabaseService(t)
+	require.NoError(t, err, "Failed to create test database service")
 
-	_, err = database.GetByTelegramID(999999999)
+	ctx := context.Background()
+
+	_, err = db.GetByTelegramID(ctx, 999999999)
 	assert.Error(t, err, "Expected error for non-existent user")
 }
 
 func TestHandleMySubscription_NoSubscription(t *testing.T) {
-	tdb, err := testutil.NewTestDatabase(t)
-	require.NoError(t, err, "Failed to create test database")
-	defer tdb.Cleanup()
+	db, err := testutil.NewTestDatabaseService(t)
+	require.NoError(t, err, "Failed to create test database service")
 
-	_, err = database.GetByTelegramID(999999999)
+	ctx := context.Background()
+
+	_, err = db.GetByTelegramID(ctx, 999999999)
 	assert.Error(t, err, "Expected error for non-existent user")
 }
 
 func TestHandleMySubscription_WithSubscription(t *testing.T) {
-	tdb, err := testutil.NewTestDatabase(t)
-	require.NoError(t, err, "Failed to create test database")
-	defer tdb.Cleanup()
+	db, err := testutil.NewTestDatabaseService(t)
+	require.NoError(t, err, "Failed to create test database service")
+
+	ctx := context.Background()
 
 	sub := testutil.CreateTestSubscription(123456789, "testuser", "active", time.Now().Add(24*time.Hour))
-	require.NoError(t, database.CreateSubscription(sub), "Failed to create subscription")
+	require.NoError(t, db.CreateSubscription(ctx, sub), "Failed to create subscription")
 
-	got, err := database.GetByTelegramID(123456789)
+	got, err := db.GetByTelegramID(ctx, 123456789)
 	require.NoError(t, err, "GetByTelegramID() error")
 
 	assert.Equal(t, sub.TelegramID, got.TelegramID)
@@ -64,80 +65,84 @@ func TestHandleMySubscription_WithSubscription(t *testing.T) {
 }
 
 func TestHandleMySubscription_ExpiredSubscription(t *testing.T) {
-	tdb, err := testutil.NewTestDatabase(t)
-	require.NoError(t, err, "Failed to create test database")
-	defer tdb.Cleanup()
+	db, err := testutil.NewTestDatabaseService(t)
+	require.NoError(t, err, "Failed to create test database service")
+
+	ctx := context.Background()
 
 	sub := testutil.CreateTestSubscription(123456789, "testuser", "active", time.Now().Add(-24*time.Hour))
-	require.NoError(t, database.CreateSubscription(sub), "Failed to create subscription")
+	require.NoError(t, db.CreateSubscription(ctx, sub), "Failed to create subscription")
 
-	got, err := database.GetByTelegramID(123456789)
+	got, err := db.GetByTelegramID(ctx, 123456789)
 	require.NoError(t, err, "GetByTelegramID() error")
 
 	assert.True(t, time.Now().After(got.ExpiryTime), "Expected subscription to be expired")
 }
 
 func TestHandleAdminStats(t *testing.T) {
-	tdb, err := testutil.NewTestDatabase(t)
-	if err != nil {
-		t.Fatalf("Failed to create test database: %v", err)
-	}
-	defer tdb.Cleanup()
+	db, err := testutil.NewTestDatabaseService(t)
+	require.NoError(t, err, "Failed to create test database service")
+
+	ctx := context.Background()
 
 	for i := 0; i < 5; i++ {
 		sub := testutil.CreateTestSubscription(int64(100000000+i), "user", "active", time.Now().Add(24*time.Hour))
-		require.NoError(t, database.CreateSubscription(sub), "Failed to create subscription")
+		require.NoError(t, db.CreateSubscription(ctx, sub), "Failed to create subscription")
 	}
 
-	var count int64
-	database.DB.Model(&database.Subscription{}).Count(&count)
+	count, err := db.CountAllSubscriptions(ctx)
+	require.NoError(t, err)
 	assert.Equal(t, int64(5), count)
 }
 
 func TestHandleDel_GetSubscriptionByID(t *testing.T) {
-	tdb, err := testutil.NewTestDatabase(t)
-	require.NoError(t, err, "Failed to create test database")
-	defer tdb.Cleanup()
+	db, err := testutil.NewTestDatabaseService(t)
+	require.NoError(t, err, "Failed to create test database service")
+
+	ctx := context.Background()
 
 	sub := testutil.CreateTestSubscription(123456789, "deltestuser", "active", time.Now().Add(24*time.Hour))
-	require.NoError(t, database.CreateSubscription(sub), "Failed to create subscription")
+	require.NoError(t, db.CreateSubscription(ctx, sub), "Failed to create subscription")
 
-	got, err := database.GetSubscriptionByID(sub.ID)
-	require.NoError(t, err, "GetSubscriptionByID() error")
+	got, err := db.GetByID(ctx, sub.ID)
+	require.NoError(t, err, "GetByID() error")
 	assert.Equal(t, sub.ID, got.ID)
 }
 
 func TestHandleDel_DeleteSubscriptionByID(t *testing.T) {
-	tdb, err := testutil.NewTestDatabase(t)
-	require.NoError(t, err, "Failed to create test database")
-	defer tdb.Cleanup()
+	db, err := testutil.NewTestDatabaseService(t)
+	require.NoError(t, err, "Failed to create test database service")
+
+	ctx := context.Background()
 
 	sub := testutil.CreateTestSubscription(999888777, "deletetest", "active", time.Now().Add(24*time.Hour))
-	require.NoError(t, database.CreateSubscription(sub), "Failed to create subscription")
+	require.NoError(t, db.CreateSubscription(ctx, sub), "Failed to create subscription")
 
 	id := sub.ID
 
-	deleted, err := database.DeleteSubscriptionByID(id)
+	deleted, err := db.DeleteSubscriptionByID(ctx, id)
 	require.NoError(t, err, "DeleteSubscriptionByID() error")
 	assert.Equal(t, id, deleted.ID, "DeleteSubscriptionByID() returned wrong ID")
 
-	_, err = database.GetSubscriptionByID(id)
-	assert.Error(t, err, "GetSubscriptionByID() should return error after deletion")
+	_, err = db.GetByID(ctx, id)
+	assert.Error(t, err, "GetByID() should return error after deletion")
 }
 
 func TestHandleDel_SubscriptionNotFound(t *testing.T) {
-	tdb, err := testutil.NewTestDatabase(t)
-	require.NoError(t, err, "Failed to create test database")
-	defer tdb.Cleanup()
+	db, err := testutil.NewTestDatabaseService(t)
+	require.NoError(t, err, "Failed to create test database service")
 
-	_, err = database.GetSubscriptionByID(99999)
-	assert.Error(t, err, "GetSubscriptionByID() should return error for non-existent ID")
+	ctx := context.Background()
+
+	_, err = db.GetByID(ctx, 99999)
+	assert.Error(t, err, "GetByID() should return error for non-existent ID")
 }
 
 func TestHandleBroadcast_DatabaseFunction(t *testing.T) {
-	tdb, err := testutil.NewTestDatabase(t)
-	require.NoError(t, err, "Failed to create test database")
-	defer tdb.Cleanup()
+	db, err := testutil.NewTestDatabaseService(t)
+	require.NoError(t, err, "Failed to create test database service")
+
+	ctx := context.Background()
 
 	subs := []*database.Subscription{
 		{TelegramID: 111111111, Username: "user1", ClientID: "client1", Status: "active", ExpiryTime: time.Now().Add(24 * time.Hour)},
@@ -145,99 +150,102 @@ func TestHandleBroadcast_DatabaseFunction(t *testing.T) {
 	}
 
 	for _, sub := range subs {
-		require.NoError(t, database.CreateSubscription(sub), "Failed to create subscription")
+		require.NoError(t, db.CreateSubscription(ctx, sub), "Failed to create subscription")
 	}
 
-	ids, err := database.GetAllTelegramIDs()
+	ids, err := db.GetAllTelegramIDs(ctx)
 	require.NoError(t, err, "GetAllTelegramIDs() error")
 	assert.Len(t, ids, 2)
 }
 
 func TestHandleSend_ByTelegramID(t *testing.T) {
-	tdb, err := testutil.NewTestDatabase(t)
-	require.NoError(t, err, "Failed to create test database")
-	defer tdb.Cleanup()
+	db, err := testutil.NewTestDatabaseService(t)
+	require.NoError(t, err, "Failed to create test database service")
+
+	ctx := context.Background()
 
 	sub := testutil.CreateTestSubscription(123456789, "testuser", "active", time.Now().Add(24*time.Hour))
-	require.NoError(t, database.CreateSubscription(sub), "Failed to create subscription")
+	require.NoError(t, db.CreateSubscription(ctx, sub), "Failed to create subscription")
 
-	got, err := database.GetByTelegramID(123456789)
+	got, err := db.GetByTelegramID(ctx, 123456789)
 	require.NoError(t, err, "GetByTelegramID() error")
 	assert.Equal(t, int64(123456789), got.TelegramID)
 }
 
 func TestHandleSend_ByUsername(t *testing.T) {
-	tdb, err := testutil.NewTestDatabase(t)
-	require.NoError(t, err, "Failed to create test database")
-	defer tdb.Cleanup()
+	db, err := testutil.NewTestDatabaseService(t)
+	require.NoError(t, err, "Failed to create test database service")
+
+	ctx := context.Background()
 
 	sub := testutil.CreateTestSubscription(123456789, "testuser", "active", time.Now().Add(24*time.Hour))
-	require.NoError(t, database.CreateSubscription(sub), "Failed to create subscription")
+	require.NoError(t, db.CreateSubscription(ctx, sub), "Failed to create subscription")
 
-	id, err := database.GetTelegramIDByUsername("testuser")
+	id, err := db.GetTelegramIDByUsername(ctx, "testuser")
 	require.NoError(t, err, "GetTelegramIDByUsername() error")
 	assert.Equal(t, int64(123456789), id)
 }
 
 func TestHandleSend_UserNotFound(t *testing.T) {
-	tdb, err := testutil.NewTestDatabase(t)
-	require.NoError(t, err, "Failed to create test database")
-	defer tdb.Cleanup()
+	db, err := testutil.NewTestDatabaseService(t)
+	require.NoError(t, err, "Failed to create test database service")
 
-	_, err = database.GetTelegramIDByUsername("nonexistent")
+	ctx := context.Background()
+
+	_, err = db.GetTelegramIDByUsername(ctx, "nonexistent")
 	assert.Error(t, err, "GetTelegramIDByUsername() should return error for non-existent username")
 }
 
 func TestGetLatestSubscriptions(t *testing.T) {
-	tdb, err := testutil.NewTestDatabase(t)
-	require.NoError(t, err, "Failed to create test database")
-	defer tdb.Cleanup()
+	db, err := testutil.NewTestDatabaseService(t)
+	require.NoError(t, err, "Failed to create test database service")
+
+	ctx := context.Background()
 
 	for i := 0; i < 15; i++ {
 		sub := testutil.CreateTestSubscription(int64(100000000+i), "user", "active", time.Now().Add(24*time.Hour))
-		require.NoError(t, database.CreateSubscription(sub), "Failed to create subscription")
+		require.NoError(t, db.CreateSubscription(ctx, sub), "Failed to create subscription")
 		time.Sleep(time.Millisecond * 10)
 	}
 
-	subs, err := database.GetLatestSubscriptions(10)
+	subs, err := db.GetLatestSubscriptions(ctx, 10)
 	require.NoError(t, err, "GetLatestSubscriptions() error")
 	assert.Len(t, subs, 10)
 }
 
 func TestGetLatestSubscriptions_Empty(t *testing.T) {
-	tdb, err := testutil.NewTestDatabase(t)
-	require.NoError(t, err, "Failed to create test database")
-	defer tdb.Cleanup()
+	db, err := testutil.NewTestDatabaseService(t)
+	require.NoError(t, err, "Failed to create test database service")
 
-	subs, err := database.GetLatestSubscriptions(10)
+	ctx := context.Background()
+
+	subs, err := db.GetLatestSubscriptions(ctx, 10)
 	require.NoError(t, err, "GetLatestSubscriptions() error")
 	assert.Empty(t, subs)
 }
 
 func TestGetLatestSubscriptions_OnlyActive(t *testing.T) {
-	tdb, err := testutil.NewTestDatabase(t)
-	require.NoError(t, err, "Failed to create test database")
-	defer tdb.Cleanup()
+	db, err := testutil.NewTestDatabaseService(t)
+	require.NoError(t, err, "Failed to create test database service")
+
+	ctx := context.Background()
 
 	sub1 := testutil.CreateTestSubscription(100000001, "active_user", "active", time.Now().Add(24*time.Hour))
-	if err := database.CreateSubscription(sub1); err != nil {
-		t.Fatalf("Failed to create active subscription: %v", err)
-	}
+	require.NoError(t, db.CreateSubscription(ctx, sub1), "Failed to create active subscription")
 
 	sub2 := testutil.CreateTestSubscription(100000002, "revoked_user", "revoked", time.Now().Add(24*time.Hour))
-	if err := database.DB.Create(sub2).Error; err != nil {
-		t.Fatalf("Failed to create revoked subscription: %v", err)
-	}
+	require.NoError(t, db.CreateSubscription(ctx, sub2), "Failed to create revoked subscription")
 
-	subs, err := database.GetLatestSubscriptions(10)
+	subs, err := db.GetLatestSubscriptions(ctx, 10)
 	require.NoError(t, err, "GetLatestSubscriptions() error")
 	assert.Len(t, subs, 1)
 }
 
 func TestGetAllTelegramIDs(t *testing.T) {
-	tdb, err := testutil.NewTestDatabase(t)
-	require.NoError(t, err, "Failed to create test database")
-	defer tdb.Cleanup()
+	db, err := testutil.NewTestDatabaseService(t)
+	require.NoError(t, err, "Failed to create test database service")
+
+	ctx := context.Background()
 
 	subs := []*database.Subscription{
 		{TelegramID: 111111111, Username: "user1", ClientID: "client1", Status: "active", ExpiryTime: time.Now().Add(24 * time.Hour)},
@@ -247,20 +255,21 @@ func TestGetAllTelegramIDs(t *testing.T) {
 	}
 
 	for _, sub := range subs {
-		require.NoError(t, database.CreateSubscription(sub), "Failed to create subscription")
+		require.NoError(t, db.CreateSubscription(ctx, sub), "Failed to create subscription")
 	}
 
-	ids, err := database.GetAllTelegramIDs()
+	ids, err := db.GetAllTelegramIDs(ctx)
 	require.NoError(t, err, "GetAllTelegramIDs() error")
 	assert.Len(t, ids, 3)
 }
 
 func TestGetAllTelegramIDs_Empty(t *testing.T) {
-	tdb, err := testutil.NewTestDatabase(t)
-	require.NoError(t, err, "Failed to create test database")
-	defer tdb.Cleanup()
+	db, err := testutil.NewTestDatabaseService(t)
+	require.NoError(t, err, "Failed to create test database service")
 
-	ids, err := database.GetAllTelegramIDs()
+	ctx := context.Background()
+
+	ids, err := db.GetAllTelegramIDs(ctx)
 	require.NoError(t, err, "GetAllTelegramIDs() error")
 	assert.Empty(t, ids)
 }

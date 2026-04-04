@@ -3,46 +3,25 @@ package bot
 import (
 	"context"
 
-	"rs8kvn_bot/internal/logger"
-
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
-	"go.uber.org/zap"
 )
 
-// send sends a message with rate limiting and saves the message ID for future editing.
+// send sends a message with rate limiting, swallowing errors.
 func (h *Handler) send(ctx context.Context, msg tgbotapi.MessageConfig) {
-	h.sendWithError(ctx, msg) // nolint:errcheck // send is intentionally void for non-critical paths
+	h.sender.Send(ctx, msg)
 }
 
 // sendWithError sends a message with rate limiting and returns any error.
-// Use this when caller needs to handle or propagate send failures.
 func (h *Handler) sendWithError(ctx context.Context, msg tgbotapi.MessageConfig) error {
-	msg.DisableWebPagePreview = true
-
-	if !h.rateLimiter.Wait(ctx, msg.ChatID) {
-		return ctx.Err()
-	}
-
-	_, err := h.bot.Send(msg)
-	if err != nil {
-		logger.Error("Failed to send message", zap.Error(err))
-		return err
-	}
-
-	return nil
+	return h.sender.SendWithError(ctx, msg)
 }
 
-// safeSend sends a message and logs any errors.
-// Use this for non-critical messages where you don't need to handle the error.
+// safeSend sends a message without rate limiting and logs errors.
 func (h *Handler) safeSend(chattable tgbotapi.Chattable) {
-	_, err := h.bot.Send(chattable)
-	if err != nil {
-		logger.Error("Failed to send message", zap.Error(err))
-	}
+	h.sender.SafeSend(chattable)
 }
 
 // SendMessage sends a plain text message to a chat.
 func (h *Handler) SendMessage(ctx context.Context, chatID int64, text string) {
-	msg := tgbotapi.NewMessage(chatID, text)
-	h.send(ctx, msg)
+	h.sender.SendMessage(ctx, chatID, text)
 }

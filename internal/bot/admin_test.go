@@ -3,6 +3,7 @@ package bot
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"rs8kvn_bot/internal/config"
@@ -61,7 +62,7 @@ func TestHandleDel_NonAdminUser(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil)
 
 	ctx := context.Background()
 	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "regularuser"}, "/del 5")
@@ -80,7 +81,7 @@ func TestHandleDel_ValidDeletion(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil)
 
 	sub := &database.Subscription{
 		ID:         5,
@@ -110,7 +111,7 @@ func TestHandleDel_ValidDeletion(t *testing.T) {
 	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "admin"}, "/del 5")
 
 	handler.HandleDel(ctx, update)
-	assert.True(t, mockBot.SendCalled)
+	assert.True(t, mockBot.SendCalledSafe())
 	assert.Contains(t, mockBot.LastSentTextSafe(), "удалена")
 	assert.True(t, mockXUI.DeleteClientCalled)
 }
@@ -123,7 +124,7 @@ func TestHandleDel_InvalidIDFormat(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil)
 
 	tests := []struct {
 		name    string
@@ -161,8 +162,8 @@ func TestHandleDel_InvalidIDFormat(t *testing.T) {
 			update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "admin"}, tt.text)
 
 			handler.HandleDel(ctx, update)
-			assert.True(t, mockBot.SendCalled)
-			assert.Contains(t, mockBot.LastSentText, tt.wantMsg)
+			assert.True(t, mockBot.SendCalledSafe())
+			assert.Contains(t, mockBot.LastSentTextSafe(), tt.wantMsg)
 		})
 	}
 }
@@ -175,7 +176,7 @@ func TestHandleDel_GetByIDError(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil)
 
 	mockDB.GetByIDFunc = func(ctx context.Context, id uint) (*database.Subscription, error) {
 		return nil, errors.New("not found")
@@ -185,8 +186,8 @@ func TestHandleDel_GetByIDError(t *testing.T) {
 	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "admin"}, "/del 999")
 
 	handler.HandleDel(ctx, update)
-	assert.True(t, mockBot.SendCalled)
-	assert.Contains(t, mockBot.LastSentText, "не найдена")
+	assert.True(t, mockBot.SendCalledSafe())
+	assert.Contains(t, mockBot.LastSentTextSafe(), "не найдена")
 }
 
 func TestHandleDel_XUIDeleteFailure(t *testing.T) {
@@ -198,7 +199,7 @@ func TestHandleDel_XUIDeleteFailure(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil)
 
 	mockDB.GetByIDFunc = func(ctx context.Context, id uint) (*database.Subscription, error) {
 		return &database.Subscription{
@@ -216,8 +217,8 @@ func TestHandleDel_XUIDeleteFailure(t *testing.T) {
 	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "admin"}, "/del 5")
 
 	handler.HandleDel(ctx, update)
-	assert.True(t, mockBot.SendCalled)
-	assert.Contains(t, mockBot.LastSentText, "Ошибка удаления")
+	assert.True(t, mockBot.SendCalledSafe())
+	assert.Contains(t, mockBot.LastSentTextSafe(), "Ошибка удаления")
 	// Database delete should not be called if XUI delete fails
 	assert.Nil(t, mockDB.DeleteSubscriptionByIDFunc)
 }
@@ -231,7 +232,7 @@ func TestHandleDel_DatabaseDeleteFailure(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil)
 
 	mockDB.GetByIDFunc = func(ctx context.Context, id uint) (*database.Subscription, error) {
 		return &database.Subscription{
@@ -253,8 +254,8 @@ func TestHandleDel_DatabaseDeleteFailure(t *testing.T) {
 	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "admin"}, "/del 5")
 
 	handler.HandleDel(ctx, update)
-	assert.True(t, mockBot.SendCalled)
-	assert.Contains(t, mockBot.LastSentText, "ошибка удаления из базы")
+	assert.True(t, mockBot.SendCalledSafe())
+	assert.Contains(t, mockBot.LastSentTextSafe(), "ошибка удаления из базы")
 }
 
 func TestHandleDel_CacheInvalidation(t *testing.T) {
@@ -266,7 +267,7 @@ func TestHandleDel_CacheInvalidation(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil)
 
 	telegramID := int64(789012)
 	sub := &database.Subscription{
@@ -312,7 +313,7 @@ func TestHandleBroadcast_NonAdminUser(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil)
 
 	ctx := context.Background()
 	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "regularuser"}, "/broadcast Hello everyone!")
@@ -330,7 +331,7 @@ func TestHandleBroadcast_ValidBroadcast(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil)
 
 	mockDB.GetTotalTelegramIDCountFunc = func(ctx context.Context) (int64, error) {
 		return 3, nil
@@ -349,7 +350,7 @@ func TestHandleBroadcast_ValidBroadcast(t *testing.T) {
 	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "admin"}, "/broadcast Test message")
 
 	handler.HandleBroadcast(ctx, update)
-	assert.True(t, mockBot.SendCalled)
+	assert.True(t, mockBot.SendCalledSafe())
 }
 
 func TestHandleBroadcast_NoMessage(t *testing.T) {
@@ -360,14 +361,14 @@ func TestHandleBroadcast_NoMessage(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil)
 
 	ctx := context.Background()
 	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "admin"}, "/broadcast")
 
 	handler.HandleBroadcast(ctx, update)
-	assert.True(t, mockBot.SendCalled)
-	assert.Contains(t, mockBot.LastSentText, "Использование")
+	assert.True(t, mockBot.SendCalledSafe())
+	assert.Contains(t, mockBot.LastSentTextSafe(), "Использование")
 }
 
 func TestHandleBroadcast_NoUsers(t *testing.T) {
@@ -378,7 +379,7 @@ func TestHandleBroadcast_NoUsers(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil)
 
 	mockDB.GetTotalTelegramIDCountFunc = func(ctx context.Context) (int64, error) {
 		return 0, nil
@@ -388,8 +389,8 @@ func TestHandleBroadcast_NoUsers(t *testing.T) {
 	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "admin"}, "/broadcast Test message")
 
 	handler.HandleBroadcast(ctx, update)
-	assert.True(t, mockBot.SendCalled)
-	assert.Contains(t, mockBot.LastSentText, "Нет пользователей")
+	assert.True(t, mockBot.SendCalledSafe())
+	assert.Contains(t, mockBot.LastSentTextSafe(), "Нет пользователей")
 }
 
 func TestHandleBroadcast_DatabaseError(t *testing.T) {
@@ -400,7 +401,7 @@ func TestHandleBroadcast_DatabaseError(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil)
 
 	mockDB.GetTotalTelegramIDCountFunc = func(ctx context.Context) (int64, error) {
 		return 0, errors.New("database error")
@@ -412,7 +413,7 @@ func TestHandleBroadcast_DatabaseError(t *testing.T) {
 	handler.HandleBroadcast(ctx, update)
 
 	// Should send some message (either error or result)
-	assert.True(t, mockBot.SendCalled)
+	assert.True(t, mockBot.SendCalledSafe())
 }
 
 func TestHandleBroadcast_SendFailure(t *testing.T) {
@@ -424,7 +425,7 @@ func TestHandleBroadcast_SendFailure(t *testing.T) {
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
 	mockBot.SendError = errors.New("send error")
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil)
 
 	mockDB.GetTotalTelegramIDCountFunc = func(ctx context.Context) (int64, error) {
 		return 2, nil
@@ -438,7 +439,7 @@ func TestHandleBroadcast_SendFailure(t *testing.T) {
 	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "admin"}, "/broadcast Test message")
 
 	handler.HandleBroadcast(ctx, update)
-	assert.True(t, mockBot.SendCalled)
+	assert.True(t, mockBot.SendCalledSafe())
 }
 
 func TestHandleBroadcast_ContextCancellation(t *testing.T) {
@@ -449,7 +450,7 @@ func TestHandleBroadcast_ContextCancellation(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil)
 
 	mockDB.GetTotalTelegramIDCountFunc = func(ctx context.Context) (int64, error) {
 		return 100, nil
@@ -467,7 +468,7 @@ func TestHandleBroadcast_ContextCancellation(t *testing.T) {
 
 	handler.HandleBroadcast(ctx, update)
 	// With cancelled context, no messages should be sent
-	assert.False(t, mockBot.SendCalled, "No messages should be sent when context is cancelled")
+	assert.False(t, mockBot.SendCalledSafe(), "No messages should be sent when context is cancelled")
 }
 
 // TestHandleBroadcast_MultipleBatches tests broadcast with multiple batches of users
@@ -479,7 +480,7 @@ func TestHandleBroadcast_MultipleBatches(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil)
 
 	// Set up 250 users to test multiple batches (batch size is 100)
 	mockDB.GetTotalTelegramIDCountFunc = func(ctx context.Context) (int64, error) {
@@ -520,7 +521,7 @@ func TestHandleBroadcast_MultipleBatches(t *testing.T) {
 	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "admin"}, "/broadcast Test message")
 
 	handler.HandleBroadcast(ctx, update)
-	assert.True(t, mockBot.SendCalled)
+	assert.True(t, mockBot.SendCalledSafe())
 	assert.Equal(t, 3, callCount, "Should call GetTelegramIDsBatch 3 times for 250 users")
 }
 
@@ -533,7 +534,7 @@ func TestHandleBroadcast_BatchError(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil)
 
 	mockDB.GetTotalTelegramIDCountFunc = func(ctx context.Context) (int64, error) {
 		return 200, nil
@@ -554,7 +555,7 @@ func TestHandleBroadcast_BatchError(t *testing.T) {
 	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "admin"}, "/broadcast Test message")
 
 	handler.HandleBroadcast(ctx, update)
-	assert.True(t, mockBot.SendCalled, "Should send at least some messages before error")
+	assert.True(t, mockBot.SendCalledSafe(), "Should send at least some messages before error")
 }
 
 // TestHandleBroadcast_EmptyBatchAfterFirst tests handling of empty subsequent batches
@@ -566,7 +567,7 @@ func TestHandleBroadcast_EmptyBatchAfterFirst(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil)
 
 	// Total count says 50, but only first batch returns users
 	mockDB.GetTotalTelegramIDCountFunc = func(ctx context.Context) (int64, error) {
@@ -587,7 +588,7 @@ func TestHandleBroadcast_EmptyBatchAfterFirst(t *testing.T) {
 	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "admin"}, "/broadcast Test message")
 
 	handler.HandleBroadcast(ctx, update)
-	assert.True(t, mockBot.SendCalled)
+	assert.True(t, mockBot.SendCalledSafe())
 }
 
 // TestHandleBroadcast_GetTelegramIDsBatchErrorOnFirstCall tests error on first batch call
@@ -599,7 +600,7 @@ func TestHandleBroadcast_GetTelegramIDsBatchErrorOnFirstCall(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil)
 
 	mockDB.GetTotalTelegramIDCountFunc = func(ctx context.Context) (int64, error) {
 		return 100, nil
@@ -614,7 +615,7 @@ func TestHandleBroadcast_GetTelegramIDsBatchErrorOnFirstCall(t *testing.T) {
 
 	handler.HandleBroadcast(ctx, update)
 	// Should send starting message but not complete broadcast
-	assert.True(t, mockBot.SendCalled, "Should send initial status message")
+	assert.True(t, mockBot.SendCalledSafe(), "Should send initial status message")
 }
 
 // TestHandleBroadcast_ConcurrentBroadcasts tests handling of concurrent broadcast attempts
@@ -626,7 +627,7 @@ func TestHandleBroadcast_ConcurrentBroadcasts(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil)
 
 	mockDB.GetTotalTelegramIDCountFunc = func(ctx context.Context) (int64, error) {
 		return 5, nil
@@ -669,7 +670,7 @@ func TestHandleSend_NonAdminUser(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil)
 
 	ctx := context.Background()
 	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "regularuser"}, "/send 789012 Hello!")
@@ -687,14 +688,14 @@ func TestHandleSend_ByNumericID(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil)
 
 	ctx := context.Background()
 	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "admin"}, "/send 789012 Hello user!")
 
 	handler.HandleSend(ctx, update)
-	assert.True(t, mockBot.SendCalled)
-	assert.Contains(t, mockBot.LastSentText, "отправлено")
+	assert.True(t, mockBot.SendCalledSafe())
+	assert.Contains(t, mockBot.LastSentTextSafe(), "отправлено")
 }
 
 func TestHandleSend_ByUsernameLookup(t *testing.T) {
@@ -705,7 +706,7 @@ func TestHandleSend_ByUsernameLookup(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil)
 
 	mockDB.GetTelegramIDByUsernameFunc = func(ctx context.Context, username string) (int64, error) {
 		assert.Equal(t, "testuser", username)
@@ -716,8 +717,8 @@ func TestHandleSend_ByUsernameLookup(t *testing.T) {
 	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "admin"}, "/send testuser Hello!")
 
 	handler.HandleSend(ctx, update)
-	assert.True(t, mockBot.SendCalled)
-	assert.Contains(t, mockBot.LastSentText, "отправлено")
+	assert.True(t, mockBot.SendCalledSafe())
+	assert.Contains(t, mockBot.LastSentTextSafe(), "отправлено")
 }
 
 func TestHandleSend_ByUsernameWithAt(t *testing.T) {
@@ -728,7 +729,7 @@ func TestHandleSend_ByUsernameWithAt(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil)
 
 	mockDB.GetTelegramIDByUsernameFunc = func(ctx context.Context, username string) (int64, error) {
 		assert.Equal(t, "testuser", username)
@@ -739,7 +740,7 @@ func TestHandleSend_ByUsernameWithAt(t *testing.T) {
 	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "admin"}, "/send @testuser Hello!")
 
 	handler.HandleSend(ctx, update)
-	assert.True(t, mockBot.SendCalled)
+	assert.True(t, mockBot.SendCalledSafe())
 }
 
 func TestHandleSend_InvalidFormat(t *testing.T) {
@@ -760,7 +761,7 @@ func TestHandleSend_InvalidFormat(t *testing.T) {
 			mockDB := testutil.NewMockDatabaseService()
 			mockXUI := testutil.NewMockXUIClient()
 			mockBot := testutil.NewMockBotAPI()
-			handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+			handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil)
 
 			mockBot.SendCalled = false
 			mockBot.LastSentText = ""
@@ -769,8 +770,8 @@ func TestHandleSend_InvalidFormat(t *testing.T) {
 			update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "admin"}, tt.text)
 
 			handler.HandleSend(ctx, update)
-			assert.True(t, mockBot.SendCalled)
-			assert.Contains(t, mockBot.LastSentText, "Использование")
+			assert.True(t, mockBot.SendCalledSafe())
+			assert.Contains(t, mockBot.LastSentTextSafe(), "Использование")
 		})
 	}
 }
@@ -783,7 +784,7 @@ func TestHandleSend_UsernameNotFound(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil)
 
 	mockDB.GetTelegramIDByUsernameFunc = func(ctx context.Context, username string) (int64, error) {
 		return 0, errors.New("not found")
@@ -793,8 +794,8 @@ func TestHandleSend_UsernameNotFound(t *testing.T) {
 	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "admin"}, "/send unknownuser Hello!")
 
 	handler.HandleSend(ctx, update)
-	assert.True(t, mockBot.SendCalled)
-	assert.Contains(t, mockBot.LastSentText, "не найден")
+	assert.True(t, mockBot.SendCalledSafe())
+	assert.Contains(t, mockBot.LastSentTextSafe(), "не найден")
 }
 
 func TestHandleSend_SendFailure(t *testing.T) {
@@ -806,14 +807,14 @@ func TestHandleSend_SendFailure(t *testing.T) {
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
 	mockBot.SendError = errors.New("send error")
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil)
 
 	ctx := context.Background()
 	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "admin"}, "/send 789012 Hello!")
 
 	handler.HandleSend(ctx, update)
-	assert.True(t, mockBot.SendCalled)
-	assert.Contains(t, mockBot.LastSentText, "Ошибка")
+	assert.True(t, mockBot.SendCalledSafe())
+	assert.Contains(t, mockBot.LastSentTextSafe(), "Ошибка")
 }
 
 func TestNotifyAdminError_WithAdminID(t *testing.T) {
@@ -824,14 +825,14 @@ func TestNotifyAdminError_WithAdminID(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil)
 
 	ctx := context.Background()
 	handler.notifyAdminError(ctx, "Test error message")
 
-	assert.True(t, mockBot.SendCalled)
+	assert.True(t, mockBot.SendCalledSafe())
 	assert.Equal(t, int64(999888), mockBot.LastChatID)
-	assert.Contains(t, mockBot.LastSentText, "Test error message")
+	assert.Contains(t, mockBot.LastSentTextSafe(), "Test error message")
 }
 
 func TestHandleAdminLastReg_NonAdminUser(t *testing.T) {
@@ -842,7 +843,7 @@ func TestHandleAdminLastReg_NonAdminUser(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil)
 
 	ctx := context.Background()
 	handler.handleAdminLastReg(ctx, 123456, "regularuser", 1)
@@ -859,7 +860,7 @@ func TestHandleAdminLastReg_EmptyList(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil)
 
 	mockDB.GetLatestSubscriptionsFunc = func(ctx context.Context, limit int) ([]database.Subscription, error) {
 		return []database.Subscription{}, nil
@@ -868,8 +869,8 @@ func TestHandleAdminLastReg_EmptyList(t *testing.T) {
 	ctx := context.Background()
 	handler.handleAdminLastReg(ctx, 123456, "admin", 1)
 
-	assert.True(t, mockBot.SendCalled)
-	assert.Contains(t, mockBot.LastSentText, "Нет активных")
+	assert.True(t, mockBot.SendCalledSafe())
+	assert.Contains(t, mockBot.LastSentTextSafe(), "Нет активных")
 }
 
 func TestHandleAdminLastReg_DatabaseError(t *testing.T) {
@@ -880,7 +881,7 @@ func TestHandleAdminLastReg_DatabaseError(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil)
 
 	mockDB.GetLatestSubscriptionsFunc = func(ctx context.Context, limit int) ([]database.Subscription, error) {
 		return nil, errors.New("database error")
@@ -889,8 +890,8 @@ func TestHandleAdminLastReg_DatabaseError(t *testing.T) {
 	ctx := context.Background()
 	handler.handleAdminLastReg(ctx, 123456, "admin", 1)
 
-	assert.True(t, mockBot.SendCalled)
-	assert.Contains(t, mockBot.LastSentText, "Ошибка")
+	assert.True(t, mockBot.SendCalledSafe())
+	assert.Contains(t, mockBot.LastSentTextSafe(), "Ошибка")
 }
 
 func TestHandleAdminLastReg_WithSubscriptions(t *testing.T) {
@@ -901,7 +902,7 @@ func TestHandleAdminLastReg_WithSubscriptions(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil)
 
 	subs := []database.Subscription{
 		{ID: 1, Username: "user1", TelegramID: 111},
@@ -917,11 +918,11 @@ func TestHandleAdminLastReg_WithSubscriptions(t *testing.T) {
 	ctx := context.Background()
 	handler.handleAdminLastReg(ctx, 123456, "admin", 1)
 
-	assert.True(t, mockBot.SendCalled)
-	assert.Contains(t, mockBot.LastSentText, "Последние регистрации")
-	assert.Contains(t, mockBot.LastSentText, "user1")
-	assert.Contains(t, mockBot.LastSentText, "user2")
-	assert.Contains(t, mockBot.LastSentText, "unknown")
+	assert.True(t, mockBot.SendCalledSafe())
+	assert.Contains(t, mockBot.LastSentTextSafe(), "Последние регистрации")
+	assert.Contains(t, mockBot.LastSentTextSafe(), "user1")
+	assert.Contains(t, mockBot.LastSentTextSafe(), "user2")
+	assert.Contains(t, mockBot.LastSentTextSafe(), "unknown")
 }
 
 func TestHandleAdminStats_NonAdminUser(t *testing.T) {
@@ -932,7 +933,7 @@ func TestHandleAdminStats_NonAdminUser(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil)
 
 	ctx := context.Background()
 	handler.handleAdminStats(ctx, 123456, "regularuser", 1)
@@ -949,7 +950,7 @@ func TestHandleAdminStats_DatabaseError(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil)
 
 	mockDB.CountAllSubscriptionsFunc = func(ctx context.Context) (int64, error) {
 		return 0, errors.New("database error")
@@ -958,8 +959,8 @@ func TestHandleAdminStats_DatabaseError(t *testing.T) {
 	ctx := context.Background()
 	handler.handleAdminStats(ctx, 123456, "admin", 1)
 
-	assert.True(t, mockBot.SendCalled)
-	assert.Contains(t, mockBot.LastSentText, "Ошибка")
+	assert.True(t, mockBot.SendCalledSafe())
+	assert.Contains(t, mockBot.LastSentTextSafe(), "Ошибка")
 }
 
 func TestHandleAdminStats_Success(t *testing.T) {
@@ -970,7 +971,7 @@ func TestHandleAdminStats_Success(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil)
 
 	mockDB.CountAllSubscriptionsFunc = func(ctx context.Context) (int64, error) {
 		return 100, nil
@@ -982,9 +983,9 @@ func TestHandleAdminStats_Success(t *testing.T) {
 	ctx := context.Background()
 	handler.handleAdminStats(ctx, 123456, "admin", 1)
 
-	assert.True(t, mockBot.SendCalled)
-	assert.Contains(t, mockBot.LastSentText, "100")
-	assert.Contains(t, mockBot.LastSentText, "80")
+	assert.True(t, mockBot.SendCalledSafe())
+	assert.Contains(t, mockBot.LastSentTextSafe(), "100")
+	assert.Contains(t, mockBot.LastSentTextSafe(), "80")
 }
 
 func TestHandleAdminStats_PartialDatabaseError(t *testing.T) {
@@ -995,7 +996,7 @@ func TestHandleAdminStats_PartialDatabaseError(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig())
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil)
 
 	mockDB.CountAllSubscriptionsFunc = func(ctx context.Context) (int64, error) {
 		return 100, nil
@@ -1010,8 +1011,119 @@ func TestHandleAdminStats_PartialDatabaseError(t *testing.T) {
 	ctx := context.Background()
 	handler.handleAdminStats(ctx, 123456, "admin", 1)
 
-	assert.True(t, mockBot.SendCalled)
-	assert.Contains(t, mockBot.LastSentText, "100")
+	assert.True(t, mockBot.SendCalledSafe())
+	assert.Contains(t, mockBot.LastSentTextSafe(), "100")
+}
+
+func TestHandleRefstats_NonAdminUser(t *testing.T) {
+	cfg := &config.Config{
+		TelegramAdminID: 999999,
+		TrafficLimitGB:  50,
+	}
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil)
+
+	ctx := context.Background()
+	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "regularuser"}, "/refstats")
+
+	handler.HandleRefstats(ctx, update)
+
+	assert.True(t, mockBot.SendCalledSafe())
+	assert.Contains(t, mockBot.LastSentTextSafe(), "только администратору")
+}
+
+func TestHandleRefstats_EmptyReferrals(t *testing.T) {
+	cfg := &config.Config{
+		TelegramAdminID: 123456,
+		TrafficLimitGB:  50,
+	}
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil)
+
+	ctx := context.Background()
+	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "admin"}, "/refstats")
+
+	handler.HandleRefstats(ctx, update)
+
+	assert.True(t, mockBot.SendCalledSafe())
+	assert.Contains(t, mockBot.LastSentTextSafe(), "Нет данных о рефералах")
+}
+
+func TestHandleRefstats_WithMultipleReferrers(t *testing.T) {
+	cfg := &config.Config{
+		TelegramAdminID: 123456,
+		TrafficLimitGB:  50,
+	}
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil)
+
+	// Populate referrals map directly
+	handler.referralCache.mu.Lock()
+	handler.referralCache.counts[111] = 10
+	handler.referralCache.counts[222] = 5
+	handler.referralCache.counts[333] = 20
+	handler.referralCache.mu.Unlock()
+
+	ctx := context.Background()
+	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "admin"}, "/refstats")
+
+	handler.HandleRefstats(ctx, update)
+
+	assert.True(t, mockBot.SendCalledSafe())
+	text := mockBot.LastSentTextSafe()
+	assert.Contains(t, text, "35")  // total referrals
+	assert.Contains(t, text, "3")   // unique referrers
+	assert.Contains(t, text, "333") // top referrer
+	assert.Contains(t, text, "111")
+	assert.Contains(t, text, "222")
+	// Verify ordering: 333 (20) should appear before 111 (10) before 222 (5)
+	idx333 := strings.Index(text, "333")
+	idx111 := strings.Index(text, "111")
+	idx222 := strings.Index(text, "222")
+	assert.Less(t, idx333, idx111, "333 should appear before 111")
+	assert.Less(t, idx111, idx222, "111 should appear before 222")
+}
+
+func TestHandleRefstats_Top10Limit(t *testing.T) {
+	cfg := &config.Config{
+		TelegramAdminID: 123456,
+		TrafficLimitGB:  50,
+	}
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil)
+
+	// Add 15 referrers
+	handler.referralCache.mu.Lock()
+	for i := 0; i < 15; i++ {
+		handler.referralCache.counts[int64(1000+i)] = int64(100 - i*5)
+	}
+	handler.referralCache.mu.Unlock()
+
+	ctx := context.Background()
+	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "admin"}, "/refstats")
+
+	handler.HandleRefstats(ctx, update)
+
+	assert.True(t, mockBot.SendCalledSafe())
+	text := mockBot.LastSentTextSafe()
+	assert.Contains(t, text, "15") // unique referrers count
+
+	// Count how many "ID" entries appear (should be exactly 10)
+	idCount := strings.Count(text, "ID ")
+	assert.Equal(t, 10, idCount, "Should only show top 10 referrers")
+
+	// Top referrer (1000 with 100 referrals) should be present
+	assert.Contains(t, text, "1000")
+	// 11th referrer (1010 with 50 referrals) should NOT be present
+	assert.NotContains(t, text, "1010")
 }
 
 func TestEscapeMarkdown(t *testing.T) {

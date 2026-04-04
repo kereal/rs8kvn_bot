@@ -10,12 +10,13 @@ import (
 	"syscall"
 	"time"
 
-	"rs8kvn_bot/internal/backup"
 	"rs8kvn_bot/internal/bot"
 	"rs8kvn_bot/internal/config"
 	"rs8kvn_bot/internal/database"
 	"rs8kvn_bot/internal/heartbeat"
 	"rs8kvn_bot/internal/logger"
+	"rs8kvn_bot/internal/scheduler"
+	"rs8kvn_bot/internal/service"
 	"rs8kvn_bot/internal/web"
 	"rs8kvn_bot/internal/xui"
 
@@ -159,11 +160,14 @@ func main() {
 	}
 	logger.Info("Telegram bot authorized", zap.String("username", botConfig.Username))
 
+	// Create subscription service (shared between bot handler and web server)
+	subService := service.NewSubscriptionService(dbService, xuiClient, cfg)
+
 	// Create bot handler
-	handler := bot.NewHandler(botAPI, cfg, dbService, xuiClient, botConfig)
+	handler := bot.NewHandler(botAPI, cfg, dbService, xuiClient, botConfig, subService)
 
 	// Initialize and start web server (health + trial pages)
-	webServer := web.NewServer(fmt.Sprintf(":%d", cfg.HealthCheckPort), dbService, xuiClient, cfg, botConfig)
+	webServer := web.NewServer(fmt.Sprintf(":%d", cfg.HealthCheckPort), dbService, xuiClient, cfg, botConfig, subService)
 	webServer.RegisterChecker("database", func(ctx context.Context) web.ComponentHealth {
 		if err := dbService.Ping(ctx); err != nil {
 			return web.ComponentHealth{Status: web.StatusDown, Message: err.Error()}
@@ -216,10 +220,11 @@ func main() {
 	updateSem := make(chan struct{}, config.MaxConcurrentHandlers)
 
 	// Start backup scheduler
+	backupSched := scheduler.NewBackupScheduler(cfg.DatabasePath, config.DefaultBackupHour, config.DefaultBackupRetention)
 	go func() {
 		defer recoverAndReport("Backup scheduler")
 		wg.Done()
-		startBackupScheduler(ctx, cfg.DatabasePath)
+		backupSched.Start(ctx)
 	}()
 
 	// Start heartbeat monitor
@@ -233,7 +238,8 @@ func main() {
 	go func() {
 		defer recoverAndReport("Trial cleanup scheduler")
 		wg.Done()
-		startTrialCleanupScheduler(ctx, dbService, xuiClient, cfg.XUIInboundID, cfg.TrialDurationHours)
+		trialSched := scheduler.NewTrialCleanupScheduler(dbService, xuiClient, cfg.XUIInboundID, cfg.TrialDurationHours)
+		trialSched.Start(ctx)
 	}()
 
 	// Track in-flight update handlers
@@ -327,60 +333,4 @@ func recoverAndReport(component string) {
 func handleUpdateSafely(ctx context.Context, handler *bot.Handler, update tgbotapi.Update) {
 	defer recoverAndReport("Update handler")
 	handler.HandleUpdate(ctx, update)
-}
-
-// startBackupScheduler runs the database backup scheduler.
-func startBackupScheduler(ctx context.Context, dbPath string) {
-	logger.Info("Backup scheduler started", zap.String("schedule", "daily at 03:00"))
-
-	for {
-		now := time.Now()
-		next := time.Date(now.Year(), now.Month(), now.Day(),
-			config.DefaultBackupHour, 0, 0, 0, now.Location())
-		if now.After(next) {
-			next = next.Add(24 * time.Hour)
-		}
-
-		sleepDuration := time.Until(next)
-		logger.Info("Next backup scheduled", zap.Duration("duration", sleepDuration.Round(time.Minute)))
-
-		select {
-		case <-time.After(sleepDuration):
-			logger.Info("Running scheduled database backup")
-			if err := backup.DailyBackup(ctx, dbPath, config.DefaultBackupRetention); err != nil {
-				logger.Error("Backup failed", zap.Error(err))
-			} else {
-				logger.Info("Database backup completed successfully")
-			}
-
-		case <-ctx.Done():
-			logger.Info("Backup scheduler stopped")
-			return
-		}
-	}
-}
-
-// startTrialCleanupScheduler runs the trial subscription cleanup scheduler.
-func startTrialCleanupScheduler(ctx context.Context, db *database.Service, xuiClient *xui.Client, inboundID int, trialHours int) {
-	logger.Info("Trial cleanup scheduler started", zap.String("schedule", "hourly"))
-
-	ticker := time.NewTicker(1 * time.Hour)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			logger.Info("Running trial cleanup")
-			deleted, err := db.CleanupExpiredTrials(ctx, trialHours, xuiClient, inboundID)
-			if err != nil {
-				logger.Error("Trial cleanup failed", zap.Error(err))
-			} else if deleted > 0 {
-				logger.Info("Trial cleanup completed", zap.Int64("deleted", deleted))
-			}
-
-		case <-ctx.Done():
-			logger.Info("Trial cleanup scheduler stopped")
-			return
-		}
-	}
 }

@@ -50,6 +50,10 @@ type Config struct {
 
 	// Contact configuration
 	ContactUsername string
+
+	// Donation configuration
+	DonateCardNumber string
+	DonateURL        string
 }
 
 // configFlags holds typed flag values for config fields.
@@ -73,6 +77,8 @@ type configFlags struct {
 	trialDurationHours *flag.IntValue
 	trialRateLimit     *flag.IntValue
 	contactUsername    *flag.StringValue
+	donateCardNumber   *flag.StringValue
+	donateURL          *flag.StringValue
 }
 
 // registerFlags creates a Registry with all config flags registered.
@@ -99,6 +105,8 @@ func registerFlags() (*flag.Registry, *configFlags) {
 		trialDurationHours: flag.NewInt(DefaultTrialDurationHours),
 		trialRateLimit:     flag.NewInt(DefaultTrialRateLimit),
 		contactUsername:    flag.NewString(ContactUsername),
+		donateCardNumber:   flag.NewString(DonateCardNumber),
+		donateURL:          flag.NewString(DonateURL),
 	}
 
 	r.Register("TELEGRAM_BOT_TOKEN", f.telegramBotToken)
@@ -120,6 +128,8 @@ func registerFlags() (*flag.Registry, *configFlags) {
 	r.Register("TRIAL_DURATION_HOURS", f.trialDurationHours)
 	r.Register("TRIAL_RATE_LIMIT", f.trialRateLimit)
 	r.Register("CONTACT_USERNAME", f.contactUsername)
+	r.Register("DONATE_CARD_NUMBER", f.donateCardNumber)
+	r.Register("DONATE_URL", f.donateURL)
 
 	return r, f
 }
@@ -153,6 +163,8 @@ func Load() (*Config, error) {
 		TrialDurationHours: f.trialDurationHours.Get(),
 		TrialRateLimit:     f.trialRateLimit.Get(),
 		ContactUsername:    f.contactUsername.Get(),
+		DonateCardNumber:   f.donateCardNumber.Get(),
+		DonateURL:          f.donateURL.Get(),
 	}
 
 	// Validate all required fields
@@ -332,11 +344,4 @@ func maskURL(urlStr string) string {
 
 	// Show scheme and host only
 	return fmt.Sprintf("%s://%s/***", u.Scheme, u.Host)
-}
-
-func maskAPIKey(key string) string {
-	if key == "" {
-		return "(not set)"
-	}
-	return "***"
 }

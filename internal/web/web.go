@@ -18,7 +18,7 @@ import (
 	"rs8kvn_bot/internal/database"
 	"rs8kvn_bot/internal/interfaces"
 	"rs8kvn_bot/internal/logger"
-	"rs8kvn_bot/internal/utils"
+	"rs8kvn_bot/internal/service"
 
 	"go.uber.org/zap"
 )
@@ -57,22 +57,40 @@ type Server struct {
 	xuiClient       interfaces.XUIClient
 	cfg             *config.Config
 	botConfig       *bot.BotConfig
+	subService      *service.SubscriptionService
 	server          *http.Server
 	mu              sync.RWMutex
 	ready           bool
 	checkers        map[string]func(context.Context) ComponentHealth
 	inviteCodeRegex *regexp.Regexp
+	startTime       time.Time
+	trialTemplate   *template.Template
+	errorTemplate   *template.Template
 }
 
-func NewServer(addr string, db interfaces.DatabaseService, xuiClient interfaces.XUIClient, cfg *config.Config, botConfig *bot.BotConfig) *Server {
+func NewServer(addr string, db interfaces.DatabaseService, xuiClient interfaces.XUIClient, cfg *config.Config, botConfig *bot.BotConfig, subService *service.SubscriptionService) *Server {
+	trialTmpl := template.Must(template.New("trial.html").Funcs(template.FuncMap{
+		"escape": func(s string) string {
+			var buf strings.Builder
+			template.HTMLEscape(&buf, []byte(s))
+			return buf.String()
+		},
+	}).ParseFS(allFiles, "templates/trial.html"))
+
+	errorTmpl := template.Must(template.New("error.html").ParseFS(allFiles, "templates/error.html"))
+
 	return &Server{
 		addr:            addr,
 		db:              db,
 		xuiClient:       xuiClient,
 		cfg:             cfg,
 		botConfig:       botConfig,
+		subService:      subService,
 		checkers:        make(map[string]func(context.Context) ComponentHealth),
 		inviteCodeRegex: regexp.MustCompile(`^[a-zA-Z0-9_-]+$`),
+		startTime:       time.Now(),
+		trialTemplate:   trialTmpl,
+		errorTemplate:   errorTmpl,
 	}
 }
 
@@ -183,6 +201,7 @@ type HealthResponse struct {
 	Status     string                     `json:"status"`
 	Components map[string]ComponentHealth `json:"components"`
 	Timestamp  time.Time                  `json:"timestamp"`
+	Uptime     string                     `json:"uptime"`
 }
 
 func (s *Server) checkHealth(ctx context.Context) HealthResponse {
@@ -197,6 +216,7 @@ func (s *Server) checkHealth(ctx context.Context) HealthResponse {
 		Status:     string(StatusOK),
 		Components: make(map[string]ComponentHealth),
 		Timestamp:  time.Now(),
+		Uptime:     time.Since(s.startTime).Round(time.Second).String(),
 	}
 
 	for name, checker := range checkers {
@@ -240,7 +260,7 @@ func (s *Server) HandleInvite(w http.ResponseWriter, r *http.Request) {
 	if !strings.HasPrefix(path, "/i/") {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusNotFound)
-		w.Write([]byte(s.renderErrorPage("Страница не найдена")))
+		s.renderErrorPage(w, "Страница не найдена")
 		return
 	}
 
@@ -248,7 +268,7 @@ func (s *Server) HandleInvite(w http.ResponseWriter, r *http.Request) {
 	if code == "" || strings.Contains(code, "/") || !s.inviteCodeRegex.MatchString(code) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusNotFound)
-		w.Write([]byte(s.renderErrorPage("Приглашение не найдено")))
+		s.renderErrorPage(w, "Приглашение не найдено")
 		return
 	}
 
@@ -257,7 +277,7 @@ func (s *Server) HandleInvite(w http.ResponseWriter, r *http.Request) {
 		logger.Warn("Invite not found", zap.String("code", code), zap.Error(err))
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusNotFound)
-		w.Write([]byte(s.renderErrorPage("Приглашение не найдено")))
+		s.renderErrorPage(w, "Приглашение не найдено")
 		return
 	}
 
@@ -269,7 +289,7 @@ func (s *Server) HandleInvite(w http.ResponseWriter, r *http.Request) {
 		telegramLink := "https://t.me/" + s.botConfig.Username + "?start=trial_" + existingSub.SubscriptionID
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(s.renderTrialPage(existingSub.SubscriptionID, existingSub.SubscriptionURL, telegramLink, s.cfg.TrialDurationHours)))
+		s.renderTrialPage(w, existingSub.SubscriptionID, existingSub.SubscriptionURL, telegramLink, s.cfg.TrialDurationHours)
 		return
 	}
 
@@ -280,14 +300,14 @@ func (s *Server) HandleInvite(w http.ResponseWriter, r *http.Request) {
 		logger.Error("Failed to check rate limit", zap.Error(err), zap.String("ip", ip))
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(s.renderErrorPage("Ошибка сервера. Попробуйте позже.")))
+		s.renderErrorPage(w, "Ошибка сервера. Попробуйте позже.")
 		return
 	}
 	if count >= s.cfg.TrialRateLimit {
 		logger.Warn("Rate limit exceeded", zap.String("ip", ip), zap.Int("count", count))
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusTooManyRequests)
-		w.Write([]byte(s.renderErrorPage("Слишком много запросов. Попробуйте позже.")))
+		s.renderErrorPage(w, "Слишком много запросов. Попробуйте позже.")
 		return
 	}
 
@@ -295,11 +315,20 @@ func (s *Server) HandleInvite(w http.ResponseWriter, r *http.Request) {
 		logger.Error("Failed to create trial request", zap.Error(err))
 	}
 
-	result, err := s.createTrialSubscription(ctx, code)
-	if err != nil {
+	if s.subService == nil {
+		logger.Error("Subscription service not initialized")
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(s.renderErrorPage("Ошибка сервера. Попробуйте позже.")))
+		s.renderErrorPage(w, "Ошибка сервера. Попробуйте позже.")
+		return
+	}
+
+	result, err := s.subService.CreateTrial(ctx, code)
+	if err != nil {
+		logger.Error("Failed to create trial subscription", zap.Error(err))
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusInternalServerError)
+		s.renderErrorPage(w, "Ошибка сервера. Попробуйте позже.")
 		return
 	}
 
@@ -322,75 +351,7 @@ func (s *Server) HandleInvite(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	telegramLink := "https://t.me/" + s.botConfig.Username + "?start=trial_" + result.SubID
-	w.Write([]byte(s.renderTrialPage(result.SubID, result.SubURL, telegramLink, s.cfg.TrialDurationHours)))
-}
-
-// createTrialSubscription creates a new trial subscription with full rollback on failure.
-// It handles XUI login, client creation, subscription URL generation, and DB persistence.
-func (s *Server) createTrialSubscription(ctx context.Context, inviteCode string) (*TrialCreationResult, error) {
-	subID, err := utils.GenerateSubID()
-	if err != nil {
-		return nil, fmt.Errorf("ошибка генерации идентификатора подписки")
-	}
-	clientID, err := utils.GenerateUUID()
-	if err != nil {
-		return nil, fmt.Errorf("ошибка генерации идентификатора клиента")
-	}
-	trafficBytes := int64(s.cfg.TrafficLimitGB) * 1024 * 1024 * 1024
-	expiryTime := time.Now().Add(time.Duration(s.cfg.TrialDurationHours) * time.Hour)
-
-	if err := s.xuiClient.Login(ctx); err != nil {
-		return nil, fmt.Errorf("ошибка авторизации на сервере")
-	}
-
-	_, err = s.xuiClient.AddClientWithID(
-		ctx,
-		s.cfg.XUIInboundID,
-		subID,
-		clientID,
-		subID,
-		trafficBytes,
-		expiryTime,
-		0,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("ошибка создания клиента на сервере")
-	}
-
-	subURL := s.xuiClient.GetSubscriptionLink(s.cfg.XUIHost, subID, s.cfg.XUISubPath)
-
-	sub, err := s.db.CreateTrialSubscription(
-		ctx,
-		inviteCode,
-		subID,
-		clientID,
-		s.cfg.XUIInboundID,
-		trafficBytes,
-		expiryTime,
-		subURL,
-	)
-	if err != nil {
-		logger.Error("Failed to create trial subscription in DB, rolling back",
-			zap.Error(err),
-			zap.String("sub_id", subID),
-			zap.String("client_id", clientID))
-
-		if delErr := s.xuiClient.DeleteClient(ctx, s.cfg.XUIInboundID, clientID); delErr != nil {
-			logger.Error("Failed to rollback XUI client",
-				zap.Error(delErr),
-				zap.String("client_id", clientID))
-		}
-
-		return nil, fmt.Errorf("ошибка создания подписки")
-	}
-
-	return &TrialCreationResult{
-		SubID:      sub.SubscriptionID,
-		ClientID:   sub.ClientID,
-		SubURL:     sub.SubscriptionURL,
-		InviteCode: inviteCode,
-		ExpiryTime: sub.ExpiryTime,
-	}, nil
+	s.renderTrialPage(w, result.SubID, result.SubscriptionURL, telegramLink, s.cfg.TrialDurationHours)
 }
 
 // getExistingTrialFromCookie проверяет куку и возвращает существующий trial
@@ -424,55 +385,34 @@ func (s *Server) getExistingTrialFromCookie(r *http.Request, ctx context.Context
 }
 
 type trialPageData struct {
-	SubURL       template.URL
 	HappLink     template.URL
+	SubURL       string
 	TelegramLink template.URL
 	TrialHours   int
 }
 
-func (s *Server) renderTrialPage(subID, subURL, telegramLink string, trialHours int) string {
-	tmpl, err := template.New("trial.html").ParseFS(templateFS, "templates/trial.html")
-	if err != nil {
-		logger.Error("Failed to parse trial template", zap.Error(err))
-		return "<h1>Error</h1>"
-	}
-
+func (s *Server) renderTrialPage(w http.ResponseWriter, subID, subURL, telegramLink string, trialHours int) {
+	happLink := "happ://add/" + subURL
 	data := trialPageData{
-		SubURL:       template.URL(subURL),
-		HappLink:     template.URL("happ://add/" + subURL),
+		HappLink:     template.URL(happLink),
+		SubURL:       subURL,
 		TelegramLink: template.URL(telegramLink),
 		TrialHours:   trialHours,
 	}
-
-	var buf strings.Builder
-	if err := tmpl.Execute(&buf, data); err != nil {
-		logger.Error("Failed to execute trial template", zap.Error(err))
-		return "<h1>Error</h1>"
+	if err := s.trialTemplate.Execute(w, data); err != nil {
+		logger.Error("Failed to render trial page", zap.Error(err))
 	}
-	return buf.String()
 }
 
 type errorPageData struct {
 	Message string
 }
 
-func (s *Server) renderErrorPage(message string) string {
-	tmpl, err := template.New("error.html").ParseFS(templateFS, "templates/error.html")
-	if err != nil {
-		logger.Error("Failed to parse error template", zap.Error(err))
-		return "<h1>Error</h1>"
+func (s *Server) renderErrorPage(w http.ResponseWriter, message string) {
+	data := errorPageData{Message: message}
+	if err := s.errorTemplate.Execute(w, data); err != nil {
+		logger.Error("Failed to render error page", zap.Error(err))
 	}
-
-	data := errorPageData{
-		Message: message,
-	}
-
-	var buf strings.Builder
-	if err := tmpl.Execute(&buf, data); err != nil {
-		logger.Error("Failed to execute error template", zap.Error(err))
-		return "<h1>Error</h1>"
-	}
-	return buf.String()
 }
 
 func getClientIP(r *http.Request) string {

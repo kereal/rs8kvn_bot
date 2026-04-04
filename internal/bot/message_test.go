@@ -29,12 +29,12 @@ func TestSend_Success(t *testing.T) {
 		TrafficLimitGB:   30,
 	}
 
-	handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig())
+	handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig(), nil)
 
 	msg := tgbotapi.NewMessage(12345, "test message")
 	handler.send(ctx, msg)
 
-	assert.Equal(t, 1, mockBot.SendCount, "Send should be called once")
+	assert.Equal(t, 1, mockBot.SendCountSafe(), "Send should be called once")
 	assert.NotNil(t, mockBot.LastChattableSafe(), "Message should be captured")
 }
 
@@ -55,13 +55,13 @@ func TestSend_RateLimitContext(t *testing.T) {
 		TrafficLimitGB:   30,
 	}
 
-	handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig())
+	handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig(), nil)
 
 	msg := tgbotapi.NewMessage(12345, "test message")
 	handler.send(ctx, msg)
 
 	// With cancelled context, the rate limiter should return false and not send
-	assert.Equal(t, 0, mockBot.SendCount, "Send should not be called with cancelled context")
+	assert.Equal(t, 0, mockBot.SendCountSafe(), "Send should not be called with cancelled context")
 }
 
 // TestSend_SendError tests the send function when bot.Send fails
@@ -80,14 +80,14 @@ func TestSend_SendError(t *testing.T) {
 		TrafficLimitGB:   30,
 	}
 
-	handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig())
+	handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig(), nil)
 
 	msg := tgbotapi.NewMessage(12345, "test message")
 
 	// Should not panic on send error
 	handler.send(ctx, msg)
 
-	assert.Equal(t, 1, mockBot.SendCount, "Send should be called once")
+	assert.Equal(t, 1, mockBot.SendCountSafe(), "Send should be called once")
 }
 
 // TestSend_DisablesWebPagePreview tests that send disables web page preview
@@ -110,7 +110,7 @@ func TestSend_DisablesWebPagePreview(t *testing.T) {
 		TrafficLimitGB:   30,
 	}
 
-	handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig())
+	handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig(), nil)
 
 	msg := tgbotapi.NewMessage(12345, "test message with link https://example.com")
 	handler.send(ctx, msg)
@@ -132,12 +132,12 @@ func TestSafeSend_Success(t *testing.T) {
 		TrafficLimitGB:   30,
 	}
 
-	handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig())
+	handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig(), nil)
 
 	msg := tgbotapi.NewMessage(12345, "safe message")
 	handler.safeSend(msg)
 
-	assert.Equal(t, 1, mockBot.SendCount, "Send should be called once")
+	assert.Equal(t, 1, mockBot.SendCountSafe(), "Send should be called once")
 }
 
 // TestSafeSend_SendError tests safeSend when bot.Send fails
@@ -154,14 +154,14 @@ func TestSafeSend_SendError(t *testing.T) {
 		TrafficLimitGB:   30,
 	}
 
-	handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig())
+	handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig(), nil)
 
 	msg := tgbotapi.NewMessage(12345, "safe message")
 
 	// Should not panic on send error
 	handler.safeSend(msg)
 
-	assert.Equal(t, 1, mockBot.SendCount, "Send should be called once")
+	assert.Equal(t, 1, mockBot.SendCountSafe(), "Send should be called once")
 }
 
 // TestSafeSend_WithEditMessage tests safeSend with EditMessageText
@@ -178,12 +178,12 @@ func TestSafeSend_WithEditMessage(t *testing.T) {
 		TrafficLimitGB:   30,
 	}
 
-	handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig())
+	handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig(), nil)
 
 	editMsg := tgbotapi.NewEditMessageText(12345, 100, "edited message")
 	handler.safeSend(editMsg)
 
-	assert.Equal(t, 1, mockBot.SendCount, "Send should be called once")
+	assert.Equal(t, 1, mockBot.SendCountSafe(), "Send should be called once")
 	_, ok := mockBot.LastChattableSafe().(tgbotapi.EditMessageTextConfig)
 	assert.True(t, ok, "Should be EditMessageTextConfig")
 }
@@ -204,11 +204,11 @@ func TestSendMessage_Success(t *testing.T) {
 		TrafficLimitGB:   30,
 	}
 
-	handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig())
+	handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig(), nil)
 
 	handler.SendMessage(ctx, 12345, "Hello, World!")
 
-	assert.Equal(t, 1, mockBot.SendCount, "Send should be called once")
+	assert.Equal(t, 1, mockBot.SendCountSafe(), "Send should be called once")
 
 	msg, ok := mockBot.LastChattableSafe().(tgbotapi.MessageConfig)
 	require.True(t, ok, "Should be MessageConfig")
@@ -233,11 +233,11 @@ func TestSendMessage_EmptyMessage(t *testing.T) {
 		TrafficLimitGB:   30,
 	}
 
-	handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig())
+	handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig(), nil)
 
 	handler.SendMessage(ctx, 12345, "")
 
-	assert.Equal(t, 1, mockBot.SendCount, "Send should be called even with empty message")
+	assert.Equal(t, 1, mockBot.SendCountSafe(), "Send should be called even with empty message")
 }
 
 // TestSendMessage_ContextCancellation tests SendMessage with context cancellation
@@ -257,12 +257,12 @@ func TestSendMessage_ContextCancellation(t *testing.T) {
 		TrafficLimitGB:   30,
 	}
 
-	handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig())
+	handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig(), nil)
 
 	handler.SendMessage(ctx, 12345, "test message")
 
 	// With cancelled context, the rate limiter should return false and not send
-	assert.Equal(t, 0, mockBot.SendCount, "Send should not be called with cancelled context")
+	assert.Equal(t, 0, mockBot.SendCountSafe(), "Send should not be called with cancelled context")
 }
 
 // TestSendMessage_SpecialCharacters tests SendMessage with special characters
@@ -285,7 +285,7 @@ func TestSendMessage_SpecialCharacters(t *testing.T) {
 		TrafficLimitGB:   30,
 	}
 
-	handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig())
+	handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig(), nil)
 
 	specialText := "Test with *markdown* and _formatting_ and `code`"
 	handler.SendMessage(ctx, 12345, specialText)
@@ -313,7 +313,7 @@ func TestSendMessage_Unicode(t *testing.T) {
 		TrafficLimitGB:   30,
 	}
 
-	handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig())
+	handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig(), nil)
 
 	unicodeText := "Привет мир! 世界你好! 🎉"
 	handler.SendMessage(ctx, 12345, unicodeText)
@@ -341,7 +341,7 @@ func TestSendMessage_LongMessage(t *testing.T) {
 		TrafficLimitGB:   30,
 	}
 
-	handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig())
+	handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig(), nil)
 
 	// Create a long message
 	longText := ""
@@ -370,14 +370,14 @@ func TestSendMessage_MultipleMessages(t *testing.T) {
 		TrafficLimitGB:   30,
 	}
 
-	handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig())
+	handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig(), nil)
 
 	// Send multiple messages
 	for i := 0; i < 5; i++ {
 		handler.SendMessage(ctx, 12345, "test message")
 	}
 
-	assert.Equal(t, 5, mockBot.SendCount, "Send should be called 5 times")
+	assert.Equal(t, 5, mockBot.SendCountSafe(), "Send should be called 5 times")
 }
 
 // TestSendMessage_DifferentChatIDs tests SendMessage with different chat IDs
@@ -412,7 +412,7 @@ func TestSendMessage_DifferentChatIDs(t *testing.T) {
 				TrafficLimitGB:   30,
 			}
 
-			handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig())
+			handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig(), nil)
 
 			handler.SendMessage(ctx, tc.chatID, "test message")
 
@@ -435,7 +435,7 @@ func TestSend_WithContextTimeout(t *testing.T) {
 		TrafficLimitGB:   30,
 	}
 
-	handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig())
+	handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig(), nil)
 
 	// Create a context that's already timed out
 	ctx, cancel := context.WithTimeout(context.Background(), 0)
@@ -445,7 +445,7 @@ func TestSend_WithContextTimeout(t *testing.T) {
 	handler.send(ctx, msg)
 
 	// With timed out context, the rate limiter should return false and not send
-	assert.Equal(t, 0, mockBot.SendCount, "Send should not be called with timed out context")
+	assert.Equal(t, 0, mockBot.SendCountSafe(), "Send should not be called with timed out context")
 }
 
 // TestSafeSend_WithVariousChattables tests safeSend with different Chattable types
@@ -495,11 +495,11 @@ func TestSafeSend_WithVariousChattables(t *testing.T) {
 				TrafficLimitGB:   30,
 			}
 
-			handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig())
+			handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig(), nil)
 
 			handler.safeSend(tc.chattable)
 
-			assert.Equal(t, 1, mockBot.SendCount, "Send should be called once")
+			assert.Equal(t, 1, mockBot.SendCountSafe(), "Send should be called once")
 			tc.checkFunc(t, mockBot.LastChattableSafe())
 		})
 	}
@@ -521,7 +521,7 @@ func TestSend_MultipleConcurrentSends(t *testing.T) {
 		TrafficLimitGB:   30,
 	}
 
-	handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig())
+	handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig(), nil)
 
 	// Send multiple messages concurrently
 	done := make(chan bool, 10)
@@ -538,7 +538,7 @@ func TestSend_MultipleConcurrentSends(t *testing.T) {
 		<-done
 	}
 
-	assert.Equal(t, 10, mockBot.SendCount, "Send should be called 10 times")
+	assert.Equal(t, 10, mockBot.SendCountSafe(), "Send should be called 10 times")
 }
 
 // TestSendMessage_NilHandler tests that SendMessage doesn't panic with proper initialization
@@ -557,12 +557,12 @@ func TestSendMessage_NilHandler(t *testing.T) {
 		TrafficLimitGB:   30,
 	}
 
-	handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig())
+	handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig(), nil)
 
 	// Should not panic
 	handler.SendMessage(ctx, 12345, "test message")
 
-	assert.Equal(t, 1, mockBot.SendCount, "Send should be called once")
+	assert.Equal(t, 1, mockBot.SendCountSafe(), "Send should be called once")
 }
 
 // TestSend_WithMarkdownText tests send with markdown formatted text
@@ -585,7 +585,7 @@ func TestSend_WithMarkdownText(t *testing.T) {
 		TrafficLimitGB:   30,
 	}
 
-	handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig())
+	handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig(), nil)
 
 	msg := tgbotapi.NewMessage(12345, "*bold* _italic_ `code`")
 	msg.ParseMode = "Markdown"

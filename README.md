@@ -29,7 +29,7 @@ Telegram bot for distributing VLESS+Reality+Vision proxy subscriptions from 3x-u
 - 🏥 Health check endpoint (/healthz, /readyz)
 - 📝 File logging with rotation (zap)
 - 🗄️ Daily database backups with rotation
-- 🔄 Database migrations system
+- 🔄 Database migrations system (embedded via go:embed)
 - 🐛 Sentry error tracking
 - 🛡️ Rate limiting per user (per-user token buckets, 30 tokens, 5/sec refill)
 - ⚡ Graceful shutdown with goroutine tracking
@@ -249,16 +249,17 @@ The bot exposes HTTP endpoints on port 8880:
 | `GET /healthz` | Basic health (process alive, DB and xui status) | 200/503 |
 | `GET /readyz` | Ready state (accepting requests after init) | 200/503 |
 | `GET /i/{code}` | Trial invite landing page | 200/404/429/500 |
+| `GET /static/logo.png` | Logo image (mobile-optimized PNG) | 200/404 |
 
 Example response:
 ```json
 {
   "status": "ok",
   "timestamp": "2026-03-24T12:00:00Z",
-  "uptime": "2h30m",
+  "uptime": "2h30m0s",
   "components": {
-    "database": {"status": "ok", "latency": "1.2ms"},
-    "xui": {"status": "ok", "latency": "45ms"}
+    "database": {"status": "ok"},
+    "xui": {"status": "ok"}
   }
 }
 ```
@@ -272,6 +273,7 @@ Each user can generate an invite code (`/start` → referral flow). The landing 
 2. IP-based rate limiting (429 if exceeded)
 3. Creates a trial subscription in 3x-ui
 4. Renders a mobile-friendly page with:
+   - Project logo
    - Happ app download links (Android / iOS)
    - One-click "Добавить в Happ" button (`happ://add/` deep-link)
    - Copy-to-clipboard subscription URL
@@ -313,8 +315,11 @@ rs8kvn_bot/
 │   │   ├── handler.go              # Handler struct, helper functions
 │   │   ├── handlers_test.go        # Handler tests
 │   │   ├── integration_test.go     # Integration tests
+│   │   ├── keyboard_builder.go     # Inline keyboard builder
 │   │   ├── menu.go                 # Menu handlers (back, donate, help)
 │   │   ├── message.go              # Message sending utilities
+│   │   ├── message_sender.go       # Rate-limited message sender
+│   │   ├── referral_cache.go       # Referral cache with persistence
 │   │   └── subscription.go         # Subscription logic, QR code handler
 │   ├── config/
 │   │   ├── config.go               # Environment configuration
@@ -340,6 +345,9 @@ rs8kvn_bot/
 │   ├── ratelimiter/
 │   │   ├── ratelimiter.go          # Token bucket rate limiter
 │   │   └── ratelimiter_test.go     # Rate limiter tests
+│   ├── scheduler/
+│   │   ├── backup.go               # Database backup scheduler
+│   │   └── trial_cleanup.go        # Trial subscription cleanup scheduler
 │   ├── testutil/
 │   │   └── testutil.go             # Test utilities and mocks
 │   ├── utils/
@@ -350,6 +358,10 @@ rs8kvn_bot/
 │   │   ├── uuid.go                 # UUID and SubID generators
 │   │   └── uuid_test.go            # UUID tests
 │   ├── web/
+│   │   ├── templates/              # HTML templates (embedded via go:embed)
+│   │   │   ├── trial.html          # Trial invite landing page
+│   │   │   ├── error.html          # Error page template
+│   │   │   └── logo.png            # Logo image served as static file
 │   │   ├── web.go                  # HTTP server, health + invite endpoints
 │   │   └── web_test.go             # Web endpoint tests
 │   └── xui/
@@ -458,6 +470,8 @@ rs8kvn_bot/
 | `SITE_URL` | Base URL for invite/trial landing pages | https://vpn.site | ❌ |
 | `TRIAL_DURATION_HOURS` | Trial subscription duration (hours) | 3 | ❌ |
 | `TRIAL_RATE_LIMIT` | Max trial requests per IP per hour | 3 | ❌ |
+| `DONATE_CARD_NUMBER` | Donation card number (T-Bank) | 2200702156780864 | ❌ |
+| `DONATE_URL` | Donation URL (T-Bank collection link) | https://tbank.ru/cf/9J6agHgWdNg | ❌ |
 
 **Note:** `XUI_USERNAME` and `XUI_PASSWORD` have no defaults - they must be set explicitly.
 
@@ -474,11 +488,12 @@ When a new subscription is created, the admin receives:
 - **Rate limiting**: Token bucket rate limiter (30 tokens, refill 5/sec)
 - **No default credentials**: XUI_USERNAME/XUI_PASSWORD must be explicitly set
 - **Input validation**: Markdown injection prevention, path traversal protection
+- **XSS prevention**: html/template for all web pages (automatic context-aware escaping)
 - **Graceful shutdown**: Waits for in-flight requests with 30s timeout
 
 ## Database Migrations
 
-The bot uses [golang-migrate](https://github.com/golang-migrate/migrate) for database migrations. Migration files are stored in the `internal/database/migrations/` directory.
+The bot uses [golang-migrate](https://github.com/golang-migrate/migrate) for database migrations. Migration files are stored in the `internal/database/migrations/` directory and embedded into the binary via `go:embed` — no need to ship migration files separately.
 
 ### How Migrations Work
 
