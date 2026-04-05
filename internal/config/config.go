@@ -55,6 +55,10 @@ type Config struct {
 	// Donation configuration
 	DonateCardNumber string
 	DonateURL        string
+
+	// Subscription proxy configuration
+	SubExtraServersEnabled bool
+	SubExtraServersFile    string
 }
 
 // configFlags holds typed flag values for config fields.
@@ -81,6 +85,8 @@ type configFlags struct {
 	contactUsername         *flag.StringValue
 	donateCardNumber        *flag.StringValue
 	donateURL               *flag.StringValue
+	subExtraServersEnabled  *flag.StringValue
+	subExtraServersFile     *flag.StringValue
 }
 
 // registerFlags creates a Registry with all config flags registered.
@@ -110,6 +116,8 @@ func registerFlags() (*flag.Registry, *configFlags) {
 		contactUsername:         flag.NewString(ContactUsername),
 		donateCardNumber:        flag.NewString(DonateCardNumber),
 		donateURL:               flag.NewString(DonateURL),
+		subExtraServersEnabled:  flag.NewString("true"),
+		subExtraServersFile:     flag.NewString(""),
 	}
 
 	r.Register("TELEGRAM_BOT_TOKEN", f.telegramBotToken)
@@ -134,6 +142,8 @@ func registerFlags() (*flag.Registry, *configFlags) {
 	r.Register("CONTACT_USERNAME", f.contactUsername)
 	r.Register("DONATE_CARD_NUMBER", f.donateCardNumber)
 	r.Register("DONATE_URL", f.donateURL)
+	r.Register("SUB_EXTRA_SERVERS_ENABLED", f.subExtraServersEnabled)
+	r.Register("SUB_EXTRA_SERVERS_FILE", f.subExtraServersFile)
 
 	return r, f
 }
@@ -170,6 +180,8 @@ func Load() (*Config, error) {
 		ContactUsername:         f.contactUsername.Get(),
 		DonateCardNumber:        f.donateCardNumber.Get(),
 		DonateURL:               f.donateURL.Get(),
+		SubExtraServersEnabled:  strings.ToLower(f.subExtraServersEnabled.Get()) == "true",
+		SubExtraServersFile:     f.subExtraServersFile.Get(),
 	}
 
 	// Validate all required fields
@@ -326,6 +338,8 @@ func (c *Config) String() string {
 		"HeartbeatURL=%s, "+
 		"HeartbeatInterval=%d, "+
 		"SentryDSN=***, "+
+		"SubExtraServersEnabled=%v, "+
+		"SubExtraServersFile=%s, "+
 		"}",
 		c.TelegramAdminID,
 		c.XUIHost,
@@ -339,6 +353,8 @@ func (c *Config) String() string {
 		c.TrafficLimitGB,
 		maskURL(c.HeartbeatURL),
 		c.HeartbeatInterval,
+		c.SubExtraServersEnabled,
+		c.SubExtraServersFile,
 	)
 }
 

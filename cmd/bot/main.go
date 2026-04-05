@@ -18,6 +18,7 @@ import (
 	"rs8kvn_bot/internal/logger"
 	"rs8kvn_bot/internal/scheduler"
 	"rs8kvn_bot/internal/service"
+	"rs8kvn_bot/internal/subproxy"
 	"rs8kvn_bot/internal/web"
 	"rs8kvn_bot/internal/xui"
 
@@ -178,11 +179,15 @@ func main() {
 	// Create subscription service (shared between bot handler and web server)
 	subService := service.NewSubscriptionService(dbService, xuiClient, cfg)
 
+	// Create subscription proxy service
+	subProxy := subproxy.NewService(cfg)
+	defer subProxy.Stop()
+
 	// Create bot handler
 	handler := bot.NewHandler(botAPI, cfg, dbService, xuiClient, botConfig, subService)
 
 	// Initialize and start web server (health + trial pages)
-	webServer := web.NewServer(fmt.Sprintf(":%d", cfg.HealthCheckPort), dbService, xuiClient, cfg, botConfig, subService)
+	webServer := web.NewServer(fmt.Sprintf(":%d", cfg.HealthCheckPort), dbService, xuiClient, cfg, botConfig, subService, subProxy)
 	webServer.RegisterChecker("database", func(ctx context.Context) web.ComponentHealth {
 		if err := dbService.Ping(ctx); err != nil {
 			return web.ComponentHealth{Status: web.StatusDown, Message: err.Error()}
@@ -221,6 +226,12 @@ func main() {
 	handler.StartCacheCleanup(ctx, bot.CacheTTL/2)
 	handler.StartRateLimiterCleanup(ctx, bot.CacheTTL, bot.CacheTTL*2)
 	handler.StartReferralCacheSync(ctx)
+
+	// Start subscription proxy extra servers reload loop (every 5 minutes)
+	go func() {
+		defer recoverAndReport("SubProxy server reload")
+		subProxy.StartReloadLoop(5*time.Minute, ctx.Done())
+	}()
 
 	logger.Info("Bot started successfully")
 

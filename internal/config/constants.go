@@ -92,6 +92,12 @@ const (
 	SubscriptionResetDay = 30
 )
 
+// Subscription Proxy Constants
+const (
+	// SubProxyCacheTTL is the TTL for cached subscription responses
+	SubProxyCacheTTL = 240 * time.Second
+)
+
 // Backup Constants
 const (
 	// DefaultBackupHour is the hour when daily backup runs (3 AM)
