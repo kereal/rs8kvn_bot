@@ -3,7 +3,6 @@ package bot
 import (
 	"context"
 	"fmt"
-	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -64,13 +63,12 @@ func (h *Handler) handleAdminLastReg(ctx context.Context, chatID int64, username
 	sb.WriteString("📋 *Последние регистрации*\n\n")
 
 	for _, sub := range subs {
-		// Column 1: ID, Column 2: Username (clickable link), Column 3: Date and time
 		username := sub.Username
 		if username == "" {
 			username = "unknown"
 		}
 		dateStr := sub.CreatedAt.Format("02.01.2006 15:04:05")
-		fmt.Fprintf(&sb, "%d │ [@%s](https://t.me/%s) │ %s\n", sub.ID, username, url.PathEscape(username), dateStr)
+		fmt.Fprintf(&sb, "%d │ [@%s](https://t.me/%s) │ %s\n", sub.ID, username, username, dateStr)
 	}
 
 	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, sb.String())
