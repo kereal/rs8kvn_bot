@@ -97,12 +97,7 @@ Project includes `.agents/skills/git-workflow-skill/` with best practices.
  
 ### Сессия 2026-04-02 — Документация и планирование
 
-#### Очистка IMPROVEMENTS.md
-- **Действие**: Удалены все выполненные и отменённые задачи
-- **Удалено**: P0 критические исправления (#1-5), отменённые (#11, #14), выполненные (#10, #16, #27, #33)
-- **Удалены Quick Wins**: Q1, Q2, Q4, Q6, Q8-Q10 (все выполнены)
-- **Обновлено**: План спринтов с новыми приоритетами
-- **Коммит**: `9a07fdf`
+
 
 #### Обновление документации
 - **Файлы**: `HANDOVER.md`, `README.md`, `.serena/memories/project_overview.md`
@@ -155,7 +150,7 @@ Project includes `.agents/skills/git-workflow-skill/` with best practices.
 
 ### Donate Improvements
 - **Card number added to config**: `DonateCardNumber = "REDACTED_CARD_NUMBER"` (T-Bank)
-- **Donate constants**: `DonateURL`, `DonateContactUsername` in `internal/config/constants.go`
+- **Donate constants**: `DonateCardNumber` in `internal/config/constants.go`
 - **Improved donate message text**:
   - Friendly and inviting tone (no pressure)
   - Emojis: 😊 (call to action), ❤️ (gratitude)
@@ -211,8 +206,8 @@ Project includes `.agents/skills/git-workflow-skill/` with best practices.
 
 ### Текущее состояние (2026-04-02)
 - **Активные пользователи**: ~10 клиентов
-- **Покрытие тестами**: ~75%
-- **Документация**: Полная (IMPROVEMENTS.md, HANDOVER.md, README.md, ideas.md)
+- **Покрытие тестами**: ~70.7%
+- **Документация**: Полная (PLAN.md, HANDOVER.md, README.md, ideas.md)
 - **Приоритет**: Монетизация и рост (интеграция платежей, промо, привлечение пользователей)
 
 ### Цели роста

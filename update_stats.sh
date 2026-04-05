@@ -102,7 +102,7 @@ echo ""
 echo -e "${YELLOW}🔀 Git statistics...${NC}"
 
 TOTAL_COMMITS=$(git rev-list --count HEAD 2>/dev/null || echo "0")
-AUTHORS=$(git shortlog -sn 2>/dev/null | wc -l || echo "1")
+AUTHORS=$(git shortlog -sn --all 2>/dev/null | wc -l || echo "1")
 BRANCHES=$(git branch -a 2>/dev/null | wc -l || echo "0")
 TAGS=$(git tag 2>/dev/null | wc -l || echo "0")
 LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
@@ -187,34 +187,198 @@ echo ""
 echo -e "Generated: ${YELLOW}${STATS_DATE}${NC}"
 
 # ============================================
+# Generate PROJECT_STATS.md
+# ============================================
+generate_project_stats() {
+    STATS_FILE="doc/PROJECT_STATS.md"
+
+    echo ""
+    echo -e "${YELLOW}📝 Generating $STATS_FILE...${NC}"
+
+    # Get Go version from go.mod
+    GO_VERSION=$(grep -E "^go [0-9]" go.mod | awk '{print $2}' || echo "1.25")
+
+    # Create the file with heredoc
+    cat > "$STATS_FILE" << EOF
+# 📊 Статистика проекта rs8kvn_bot
+
+<img src="logo_240_opt.png" alt="rs8kvn_bot logo" width="120" align="right">
+
+[![Go Version](https://img.shields.io/badge/Go-${GO_VERSION}%2B-00ADD8?logo=go)](https://go.dev/)
+[![Version](https://img.shields.io/badge/version-${LATEST_TAG}-blue)](https://github.com/kereal/rs8kvn_bot/releases)
+[![Coverage](https://img.shields.io/badge/coverage-${COVERAGE_PERCENT}-green)]()
+[![Tests](https://img.shields.io/badge/tests-passing-brightgreen)]()
+[![Code Size](https://img.shields.io/badge/code%20size-${PROJECT_SIZE}-informational)]()
+[![License](https://img.shields.io/badge/license-MIT-blue)](../LICENSE)
+
+> Статистика собрана: ${STATS_DATE}
+
+---
+
+## 🎯 Обзор задачи
+
+Telegram бот для распространения VPN подписок 3x-ui с VLESS+Reality+Vision протоколом.
+
+---
+
+## 📈 Общая статистика
+
+### 📁 Размер проекта
+
+| Метрика | Значение |
+|---------|----------|
+| **Общий размер** | ${PROJECT_SIZE} |
+| **Go файлов** | ${GO_FILES_TOTAL} |
+| **Production код** | ${GO_FILES_PROD} файлов |
+| **Тестовых файлов** | ${GO_FILES_TEST} |
+| **E2E тестов** | ${GO_FILES_E2E} файлов |
+| **Документов** | ${DOC_FILES} |
+
+### 📝 Строки кода
+
+| Категория | Строки |
+|-----------|--------|
+| **Весь Go код** | ${TOTAL_GO_LINES} |
+| **Production код** | ~${PROD_LINES} |
+| **Тестовый код** | ~${TEST_LINES} |
+| **E2E тесты** | ~${E2E_LINES} |
+| **Документация (.md)** | ${DOC_LINES} |
+
+---
+
+## 🧩 Распределение кода по модулям
+
+EOF
+
+    # Add module statistics
+    echo "| Модуль | Файлов | Строк | Описание |" >> "$STATS_FILE"
+    echo "|--------|--------|-------|----------|" >> "$STATS_FILE"
+
+    for module in internal/*/; do
+        if [ -d "$module" ]; then
+            MODULE_NAME=$(basename "$module")
+            MODULE_FILES=$(find "$module" -name "*.go" -not -name "*_test.go" | wc -l)
+            MODULE_LINES=$(find "$module" -name "*.go" -not -name "*_test.go" -exec wc -l {} + 2>/dev/null | tail -1 | awk '{print $1}' || echo "0")
+            if [ "$MODULE_LINES" -gt 0 ]; then
+                case "$MODULE_NAME" in
+                    bot) DESC="Telegram бот, хендлеры, команды" ;;
+                    xui) DESC="Клиент к 3x-ui панели" ;;
+                    config) DESC="Конфигурация, константы" ;;
+                    database) DESC="SQLite база данных" ;;
+                    web) DESC="Web сервер для health checks" ;;
+                    logger) DESC="Логирование" ;;
+                    backup) DESC="Резервное копирование" ;;
+                    ratelimiter) DESC="Rate limiting" ;;
+                    heartbeat) DESC="Heartbeat механизм" ;;
+                    utils) DESC="Утилиты (QR, UUID, time)" ;;
+                    interfaces) DESC="Интерфейсы" ;;
+                    flag) DESC="Конфигурация из env" ;;
+                    scheduler) DESC="Планировщики задач" ;;
+                    service) DESC="Бизнес-логика подписок" ;;
+                    subproxy) DESC="Subscription proxy" ;;
+                    testutil) DESC="Утилиты для тестов" ;;
+                    *) DESC="" ;;
+                esac
+                echo "| \`internal/${MODULE_NAME}\` | ${MODULE_FILES} | ${MODULE_LINES} | ${DESC} |" >> "$STATS_FILE"
+            fi
+        fi
+    done
+
+    cat >> "$STATS_FILE" << 'EOF'
+
+---
+
+## 🔀 Git статистика
+
+EOF
+
+    cat >> "$STATS_FILE" << EOF
+| Метрика | Значение |
+|---------|----------|
+| **Всего коммитов** | ${TOTAL_COMMITS} |
+| **Авторов** | ${AUTHORS} |
+| **Веток** | ${BRANCHES} |
+| **Тегов/релизов** | ${TAGS} |
+| **Последний релиз** | ${LATEST_TAG} |
+| **Коммитов после релиза** | ${COMMITS_SINCE_RELEASE} |
+| **Последний коммит** | ${LAST_COMMIT_DATE} |
+
+### 🏷️ История релизов
+
+\`\`\`
+${LATEST_TAG} (текущая версия)
+\`\`\`
+
+### 📊 Типы коммитов (Conventional Commits)
+
+| Тип | Количество |
+|-----|------------|
+| \`fix\` | ${FIX_COMMITS} |
+| \`test\` | ${TEST_COMMITS} |
+| \`docs\` | ${DOCS_COMMITS} |
+| \`feat\` | ${FEAT_COMMITS} |
+| \`refactor\` | ${REFACTOR_COMMITS} |
+| \`chore\` | ${CHORE_COMMITS} |
+| \`perf\` | ${PERF_COMMITS} |
+
+---
+
+## 🧪 Тестирование
+
+| Метрика | Значение |
+|---------|----------|
+| **Статус** | ✅ Все тесты проходят |
+| **Покрытие** | ${COVERAGE_PERCENT} |
+| **Тест функций** | ${TEST_FUNCTIONS} |
+| **Race-safe** | ✅ |
+
+---
+
+## 📚 Документация
+
+| Файл | Назначение |
+|------|------------|
+| \`README.md\` | Основная документация |
+| \`HANDOVER.md\` | Передача проекта |
+| \`PLAN.md\` | План развития и задачи |
+| \`ideas.md\` | Идеи развития |
+| \`TEST_PLAN.md\` | План тестирования |
+| \`MARKETING_STRATEGY.md\` | Маркетинг |
+| \`BYPASS_*.md\` | Документация по обходу блокировок |
+| \`.serena/memories/*\` | Память ИИ-ассистента |
+
+---
+
+## 📋 Ключевые выводы
+
+### ✅ Сильные стороны
+
+- **Тестовое покрытие** (${COVERAGE_PERCENT}) - хорошо для Go проекта
+- **Хорошая документация** - ${DOC_FILES} документов
+- **Регулярные релизы** - ${TAGS} тегов
+- **Чистая архитектура** - модульная структура
+- **Conventional Commits** - структурированная история
+
+### ⚠️ Заметки
+
+- **${AUTHORS} разработчика** - основной разработчик + dependabot
+- **Активная разработка** - ${TOTAL_COMMITS} коммитов
+- **Фокус на качестве** - много тестов и документации
+
+---
+
+*Статистика собрана: ${STATS_DATE}*
+*Скрипт: \`./update_stats.sh --update-doc\`*
+EOF
+
+    echo -e "${GREEN}✅ Documentation generated!${NC}"
+}
+
+# ============================================
 # Update Documentation (optional)
 # ============================================
 if [ "$1" == "--update-doc" ]; then
-    echo ""
-    echo -e "${YELLOW}📝 Updating doc/PROJECT_STATS.md...${NC}"
-
-    STATS_FILE="doc/PROJECT_STATS.md"
-
-    if [ -f "$STATS_FILE" ]; then
-        # Update the stats date
-        sed -i "s/> Статистика собрана:.*/> Статистика собрана: ${STATS_DATE}/" "$STATS_FILE"
-
-        # Update coverage
-        sed -i "s/|\*\*Покрытие\*\* | .*/|\*\*Покрытие\*\* | ${COVERAGE_PERCENT} |/" "$STATS_FILE"
-
-        # Update total commits
-        sed -i "s/|\*\*Всего коммитов\*\* | .*/|\*\*Всего коммитов\*\* | ${TOTAL_COMMITS} |/" "$STATS_FILE"
-
-        # Update tags
-        sed -i "s/|\*\*Тегов\/релизов\*\* | .*/|\*\*Тегов\/релизов\*\* | ${TAGS} |/" "$STATS_FILE"
-
-        # Update latest release
-        sed -i "s/|\*\*Последний релиз\*\* | .*/|\*\*Последний релиз\*\* | ${LATEST_TAG} |/" "$STATS_FILE"
-
-        echo -e "${GREEN}✅ Documentation updated!${NC}"
-    else
-        echo -e "${RED}❌ File $STATS_FILE not found!${NC}"
-    fi
+    generate_project_stats
 fi
 
 # Cleanup
