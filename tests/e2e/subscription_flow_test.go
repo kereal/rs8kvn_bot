@@ -103,7 +103,7 @@ func setupE2EEnv(t *testing.T) *e2eTestEnv {
 	}
 
 	subService := service.NewSubscriptionService(db, mockXUI, cfg)
-	handler := bot.NewHandler(mockBotAPI, cfg, db, mockXUI, botCfg, subService)
+	handler := bot.NewHandler(mockBotAPI, cfg, db, mockXUI, botCfg, subService, "")
 
 	return &e2eTestEnv{
 		t:          t,
@@ -3595,13 +3595,13 @@ func TestE2E_CreateSubscription_RetryAfterFailure(t *testing.T) {
 			return nil, fmt.Errorf("temporary error")
 		}
 		return &xui.ClientConfig{
-			ID:          "test-id",
-			Email:       email,
-			Enable:      true,
-			TotalGB:     trafficBytes,
-			ExpiryTime:  expiryTime.Unix(),
-			SubID:       subID,
-			Reset:       resetDays,
+			ID:         "test-id",
+			Email:      email,
+			Enable:     true,
+			TotalGB:    trafficBytes,
+			ExpiryTime: expiryTime.Unix(),
+			SubID:      subID,
+			Reset:      resetDays,
 		}, nil
 	}
 
@@ -3659,13 +3659,13 @@ func TestE2E_CreateSubscription_MultipleRetries(t *testing.T) {
 			return nil, fmt.Errorf("temporary error %d", callCount)
 		}
 		return &xui.ClientConfig{
-			ID:          "test-id",
-			Email:       email,
-			Enable:      true,
-			TotalGB:     trafficBytes,
-			ExpiryTime:  expiryTime.Unix(),
-			SubID:       subID,
-			Reset:       resetDays,
+			ID:         "test-id",
+			Email:      email,
+			Enable:     true,
+			TotalGB:    trafficBytes,
+			ExpiryTime: expiryTime.Unix(),
+			SubID:      subID,
+			Reset:      resetDays,
 		}, nil
 	}
 

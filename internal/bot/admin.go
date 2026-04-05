@@ -16,6 +16,21 @@ import (
 	"go.uber.org/zap"
 )
 
+func (h *Handler) HandleVersion(ctx context.Context, update tgbotapi.Update) {
+	if update.Message == nil {
+		logger.Error("HandleVersion called with nil Message")
+		return
+	}
+
+	chatID := update.Message.Chat.ID
+	if !h.isAdmin(chatID) {
+		return
+	}
+
+	logger.Info("Admin requesting version", zap.Int64("chat_id", chatID))
+	h.SendMessage(ctx, chatID, h.version)
+}
+
 func (h *Handler) handleAdminLastReg(ctx context.Context, chatID int64, username string, messageID int) {
 	logger.Info("Admin requesting last registrations", zap.String("username", username))
 
