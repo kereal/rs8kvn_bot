@@ -47,7 +47,8 @@ func TestE2E_HealthEndpoint(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
-	body, _ := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
 	assert.Contains(t, string(body), `"status":"ok"`)
 }
 
@@ -77,7 +78,8 @@ func TestE2E_HealthEndpoint_DBError(t *testing.T) {
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
 
 	assert.Equal(t, http.StatusServiceUnavailable, resp.StatusCode)
 	assert.Contains(t, string(body), "NOT READY")

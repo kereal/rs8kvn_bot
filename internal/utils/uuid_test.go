@@ -598,3 +598,82 @@ func TestGenerateInviteCode_Format(t *testing.T) {
 		assert.Len(t, codes, iterations, "All codes should be unique")
 	})
 }
+
+// Property-based tests: verify properties hold for random generated values
+func TestProperties_UUID(t *testing.T) {
+	t.Run("all characters are valid hex", func(t *testing.T) {
+		for i := 0; i < 1000; i++ {
+			uuid, err := GenerateUUID()
+			require.NoError(t, err)
+			// Remove dashes and check each character
+			clean := strings.ReplaceAll(uuid, "-", "")
+			for _, c := range clean {
+				assert.True(t, (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'),
+					"UUID contains non-hex character: %c", c)
+			}
+		}
+	})
+
+	t.Run("format is always valid UUID v4", func(t *testing.T) {
+		pattern := `^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`
+		for i := 0; i < 1000; i++ {
+			uuid, err := GenerateUUID()
+			require.NoError(t, err)
+			assert.Regexp(t, pattern, uuid)
+		}
+	})
+}
+
+func TestProperties_SubID(t *testing.T) {
+	t.Run("all characters are valid hex", func(t *testing.T) {
+		for i := 0; i < 1000; i++ {
+			subID, err := GenerateSubID()
+			require.NoError(t, err)
+			for _, c := range subID {
+				assert.True(t, (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'),
+					"SubID contains non-hex character: %c", c)
+			}
+		}
+	})
+
+	t.Run("length is always 10", func(t *testing.T) {
+		for i := 0; i < 1000; i++ {
+			subID, err := GenerateSubID()
+			require.NoError(t, err)
+			assert.Len(t, subID, 10)
+		}
+	})
+}
+
+func TestProperties_InviteCode(t *testing.T) {
+	t.Run("all characters are lowercase alphanumeric", func(t *testing.T) {
+		for i := 0; i < 1000; i++ {
+			code, err := GenerateInviteCode()
+			require.NoError(t, err)
+			for _, c := range code {
+				assert.True(t, (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z'),
+					"InviteCode contains invalid character: %c", c)
+			}
+		}
+	})
+
+	t.Run("length is always 8", func(t *testing.T) {
+		for i := 0; i < 1000; i++ {
+			code, err := GenerateInviteCode()
+			require.NoError(t, err)
+			assert.Len(t, code, 8)
+		}
+	})
+
+	t.Run("no duplicate in large batch", func(t *testing.T) {
+		const iterations = 10000
+		codes := make(map[string]struct{}, iterations)
+		for i := 0; i < iterations; i++ {
+			code, err := GenerateInviteCode()
+			require.NoError(t, err)
+			_, exists := codes[code]
+			assert.False(t, exists, "Duplicate at iteration %d: %s", i, code)
+			codes[code] = struct{}{}
+		}
+	})
+}

@@ -23,6 +23,8 @@ This is a Telegram bot for distributing VLESS+Reality+Vision proxy subscriptions
 - Circuit breaker for 3x-ui panel
 - Donate message with card number in config (constants.go)
 - Friendly and inviting donation message tone
+- **O(1) LRU subscription cache** (container/list)
+- **Merged referral cache** (counts + dirty in one map)
 
 ## Tech Stack
 - **Language**: Go 1.25.0
@@ -204,9 +206,9 @@ Project includes `.agents/skills/git-workflow-skill/` with best practices.
 
 ## Масштаб проекта
 
-### Текущее состояние (2026-04-02)
+### Текущее состояние (2026-04-05)
 - **Активные пользователи**: ~10 клиентов
-- **Покрытие тестами**: ~70.7%
+- **Покрытие тестами**: ~80%
 - **Документация**: Полная (PLAN.md, HANDOVER.md, README.md, ideas.md)
 - **Приоритет**: Монетизация и рост (интеграция платежей, промо, привлечение пользователей)
 

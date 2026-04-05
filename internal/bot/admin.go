@@ -479,18 +479,16 @@ func (h *Handler) HandleRefstats(ctx context.Context, update tgbotapi.Update) {
 
 	logger.Info("Admin requesting referral stats", zap.String("username", username))
 
-	// Get referral counts from cache
-	h.referralCache.mu.RLock()
+	allCounts := h.referralCache.GetAll()
 	type referrer struct {
 		chatID int64
 		count  int64
 	}
-	referrals := make([]referrer, 0, len(h.referralCache.counts))
+	referrals := make([]referrer, 0, len(allCounts))
 
-	for chatID, count := range h.referralCache.counts {
+	for chatID, count := range allCounts {
 		referrals = append(referrals, referrer{chatID: chatID, count: count})
 	}
-	h.referralCache.mu.RUnlock()
 
 	// Sort by count (descending)
 	sort.Slice(referrals, func(i, j int) bool {

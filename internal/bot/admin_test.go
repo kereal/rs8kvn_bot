@@ -1063,12 +1063,9 @@ func TestHandleRefstats_WithMultipleReferrers(t *testing.T) {
 	mockBot := testutil.NewMockBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
 
-	// Populate referrals map directly
-	handler.referralCache.mu.Lock()
-	handler.referralCache.counts[111] = 10
-	handler.referralCache.counts[222] = 5
-	handler.referralCache.counts[333] = 20
-	handler.referralCache.mu.Unlock()
+	handler.referralCache.SetForTest(111, 10)
+	handler.referralCache.SetForTest(222, 5)
+	handler.referralCache.SetForTest(333, 20)
 
 	ctx := context.Background()
 	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "admin"}, "/refstats")
@@ -1100,12 +1097,9 @@ func TestHandleRefstats_Top10Limit(t *testing.T) {
 	mockBot := testutil.NewMockBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
 
-	// Add 15 referrers
-	handler.referralCache.mu.Lock()
 	for i := 0; i < 15; i++ {
-		handler.referralCache.counts[int64(1000+i)] = int64(100 - i*5)
+		handler.referralCache.SetForTest(int64(1000+i), int64(100-i*5))
 	}
-	handler.referralCache.mu.Unlock()
 
 	ctx := context.Background()
 	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "admin"}, "/refstats")

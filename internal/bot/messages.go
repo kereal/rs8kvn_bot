@@ -117,7 +117,3 @@ var messages = map[MessageKey]string{
 func msg(key MessageKey, a ...interface{}) string {
 	return fmt.Sprintf(messages[key], a...)
 }
-
-func getMsg(key MessageKey) string {
-	return messages[key]
-}

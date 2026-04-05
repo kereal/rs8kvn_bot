@@ -1,8 +1,8 @@
 # Дорожная карта — rs8kvn_bot
 
 **Создано:** 2026-04-02  
-**Обновлено:** 2026-04-04  
-**Версия:** v2.1.5  
+**Обновлено:** 2026-04-05  
+**Версия:** v2.1.6  
 **Масштаб:** 10 клиентов → 100 клиентов
 
 ---
@@ -10,9 +10,10 @@
 ## Текущий статус
 
 - **Активные пользователи:** ~10 клиентов
-- **Покрытие тестами:** ~70.7%
+- **Покрытие тестами:** ~80%
 - **Архитектура:** 3x-ui один сервер
 - **Приоритет:** Монетизация и рост
+- **Оптимизация памяти:** O(1) LRU cache ✅
 
 ## Выполненные улучшения (P0-P2)
 
@@ -20,12 +21,16 @@
 - ✅ Удалён deprecated глобальный DB API (~350 строк)
 - ✅ Бэкапы с WAL checkpoint перед копированием
 - ✅ Trial creation вынесен в service layer
+- ✅ O(1) LRU cache (container/list) — оптимизация памяти
+- ✅ Merged referral cache (counts + dirty в одной map)
 
 ### P1 — Высокий приоритет
 - ✅ Handler разделён на ReferralCache, MessageSender, KeyboardBuilder
 - ✅ Миграции embedded через go:embed
 - ✅ HTML шаблоны в отдельных файлах (html/template, XSS prevention)
 - ✅ DatabaseService interface разделён (SubscriptionRepository, TrialRepository, InviteRepository)
+- ✅ Golden files для subproxy тестов
+- ✅ Property-based tests для uuid
 
 ### P2 — Средний приоритет
 - ✅ Schedulers вынесены в отдельный пакет (scheduler/)
