@@ -169,18 +169,41 @@ func main() {
 		}
 	}()
 
-	// Initialize Telegram bot
+	// Initialize Telegram bot with timeout to prevent blocking startup
 	logger.Info("Validating Telegram bot token")
-	botAPI, err := tgbotapi.NewBotAPI(cfg.TelegramBotToken)
-	if err != nil {
-		logger.Fatal("Invalid Telegram bot token", zap.Error(err))
-	}
 
-	botConfig, err := bot.NewBotConfig(botAPI)
-	if err != nil {
-		logger.Fatal("Failed to get bot config", zap.Error(err))
+	// Use a channel to get the result asynchronously
+	type botInitResult struct {
+		botAPI    *tgbotapi.BotAPI
+		botConfig *bot.BotConfig
+		err       error
 	}
-	logger.Info("Telegram bot authorized", zap.String("username", botConfig.Username))
+	botInitChan := make(chan botInitResult, 1)
+
+	go func() {
+		defer recoverAndReport("Telegram bot init")
+		api, err := tgbotapi.NewBotAPI(cfg.TelegramBotToken)
+		if err != nil {
+			botInitChan <- botInitResult{err: err}
+			return
+		}
+
+		cfg, err := bot.NewBotConfig(api)
+		botInitChan <- botInitResult{botAPI: api, botConfig: cfg, err: err}
+	}()
+
+	// Wait for bot initialization with timeout
+	select {
+	case result := <-botInitChan:
+		if result.err != nil {
+			logger.Fatal("Failed to initialize Telegram bot", zap.Error(result.err))
+		}
+		botAPI = result.botAPI
+		botConfig = result.botConfig
+		logger.Info("Telegram bot authorized", zap.String("username", botConfig.Username))
+	case <-time.After(10 * time.Second):
+		logger.Fatal("Timeout initializing Telegram bot (10s)")
+	}
 
 	// Create subscription service (shared between bot handler and web server)
 	subService := service.NewSubscriptionService(dbService, xuiClient, cfg)
@@ -206,8 +229,23 @@ func main() {
 		}
 		return web.ComponentHealth{Status: web.StatusOK}
 	})
-	if err := webServer.Start(context.Background()); err != nil {
+
+	// Start web server in background to prevent blocking startup
+	webServerStartErr := make(chan error, 1)
+	go func() {
+		defer recoverAndReport("Web server start")
+		if err := webServer.Start(context.Background()); err != nil {
+			webServerStartErr <- err
+		}
+	}()
+
+	// Wait briefly for web server to start or fail
+	select {
+	case err := <-webServerStartErr:
 		logger.Fatal("Failed to start web server", zap.Error(err))
+	case <-time.After(2 * time.Second):
+		// Web server started successfully in background
+		logger.Info("Web server started", zap.Int("port", cfg.HealthCheckPort))
 	}
 	defer func() {
 		webServer.SetReady(false)
