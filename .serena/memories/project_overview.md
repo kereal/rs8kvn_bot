@@ -46,7 +46,8 @@ This is a Telegram bot for distributing VLESS+Reality+Vision proxy subscriptions
 - `internal/heartbeat/` - Heartbeat monitoring
 - `internal/backup/` - Database backup functionality
 - `internal/ratelimiter/` - Rate limiting logic
-- `internal/web/` - Web endpoints (invite/trial pages)
+- `internal/web/` - Web endpoints (health, invite/trial, subscription proxy)
+- `internal/subproxy/` - Subscription proxy (cache, merge, extra config)
 - `internal/interfaces/` - Interface definitions
 - `internal/testutil/` - Test utilities and mocks
 
@@ -77,6 +78,20 @@ Project includes `.agents/skills/git-workflow-skill/` with best practices.
 - `gh` CLI (v2.46.0) - GitHub operations
 - `golangci-lint` - linting
 - `go` (v1.25.0) - Go toolchain
+
+## Последние изменения (v2.2.0)
+
+### Subscription Proxy (v2.2.0 — 2026-04-05)
+- **Feature**: `GET /sub/{subID}` endpoint — subscription proxy with extra servers and headers
+- **New package**: `internal/subproxy/` (cache, servers, proxy, service)
+- **Config file format**: headers section (Key: Value) → blank line → server links
+- **Headers**: Config headers override 3x-ui headers, all original headers preserved
+- **Cache**: 240s TTL, in-memory, background cleanup, stale cache fallback
+- **Singleflight**: Concurrent request deduplication per subID
+- **Hot reload**: Config file reloaded every 5 minutes
+- **Tests**: 50 new tests (82.5% subproxy coverage, 90.7% web coverage)
+- **Config vars**: `SUB_EXTRA_SERVERS_ENABLED`, `SUB_EXTRA_SERVERS_FILE`
+- **Commit**: `9c7d2e4`
 
 ## Последние изменения (v2.1.0)
  
