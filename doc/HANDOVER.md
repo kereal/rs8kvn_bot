@@ -20,13 +20,20 @@ tgvpn_go/
 │   │   ├── commands.go          # /start, /help, share/trial bind
 │   │   ├── subscription.go      # Subscription CRUD, QR code
 │   │   ├── menu.go              # back_to_start, donate, help
-│   │   ├── admin.go             # /del, /broadcast, /send, admin stats
+│   │   ├── admin.go             # /del, /broadcast, /send, /refstats
 │   │   ├── message.go           # Message sending with per-user rate limiting
 │   │   └── cache.go             # Subscription LRU cache (lastAccess eviction)
-│   ├── web/                      # HTTP server (health + invite/trial pages + subscription proxy)
-│   │   └── web.go               # /healthz, /readyz, /i/{code}, /sub/{subID}
+│   ├── web/                      # HTTP server (health + invite + subscription proxy)
+│   │   ├── web.go               # /healthz, /readyz, /i/{code}, /sub/{subID}
+│   │   ├── web_test.go          # Web endpoint tests
+│   │   └── subproxy_test.go     # Subscription proxy handler tests
+│   ├── subproxy/                 # Subscription proxy (NEW in v2.2.0)
+│   │   ├── cache.go             # In-memory cache with TTL cleanup (240s)
+│   │   ├── servers.go           # LoadExtraConfig: headers + servers from file
+│   │   ├── proxy.go             # FetchFromXUI, DetectFormat, MergeSubscriptions
+│   │   └── service.go           # Service struct, hot reload loop (5 min)
 │   ├── xui/                      # 3x-ui panel API client + circuit breaker
-│   │   ├── client.go            # Login, CreateClient, GetClientTraffic, retry+jitter
+│   │   ├── client.go            # Login, CreateClient, GetClientTraffic, retry+jitter, singleflight
 │   │   └── breaker.go           # Circuit breaker (5 failures → 30s open)
 │   ├── database/                 # GORM SQLite + migrations
 │   ├── config/                   # Env var loader + constants
@@ -34,17 +41,12 @@ tgvpn_go/
 │   ├── interfaces/               # Service interfaces for DI
 │   ├── utils/                    # UUID, SubID, QR, time helpers
 │   ├── ratelimiter/              # Token bucket + PerUserRateLimiter
-│   ├── subproxy/                 # Subscription proxy (cache, merge, extra config)
-│   │   ├── cache.go             # In-memory cache with TTL cleanup
-│   │   ├── servers.go           # Load extra headers + servers from file
-│   │   ├── proxy.go             # FetchFromXUI, DetectFormat, MergeSubscriptions
-│   │   └── service.go           # Service struct, reload loop
 │   ├── heartbeat/                # Periodic health pings
-│   ├── backup/                   # Daily SQLite backup rotation
-│   └── health/                   # Health checker (legacy, unused — web/ replaces it)
+│   ├── backup/                   # Daily SQLite backup rotation (14 days)
+│   └── health/                   # Health checker (legacy, unused)
 ├── tests/e2e/                    # E2E test suite (66+ scenarios)
-├── data/                         # Runtime: tgvpn.db, backups, bot.log
-├── doc/                          # PLAN.md, HANDOVER.md, IMPROVEMENTS.md
+├── data/                         # Runtime: tgvpn.db, backups, bot.log, extra_servers.txt
+├── doc/                          # PLAN.md, HANDOVER.md, ideas.md
 ├── Dockerfile, docker-compose.yml, .env.example
 └── .github/                      # CI: lint, gosec, test, Docker → GHCR
 ```
@@ -61,11 +63,9 @@ tgvpn_go/
 | QR Code | `piglig/go-qr` | v0.2.6 |
 | Logging | `go.uber.org/zap` + `lumberjack.v2` | v1.27.1 |
 | Error tracking | `getsentry/sentry-go` | v0.44.1 |
-| DI config | `joho/godotenv` | v1.5.1 |
+| Concurrency | `golang.org/x/sync/singleflight` | — |
 | Testing | `stretchr/testify` | v1.11.1 |
 | CI/CD | GitHub Actions → golangci-lint, gosec, test, Docker → GHCR | — |
-
-**Note:** `modernc.org/sqlite` is an indirect dependency from `golang-migrate`. It is not imported in code and does not affect the binary. Cannot be excluded (migrate pulls newer version).
 
 ## Current State
 
@@ -75,35 +75,26 @@ tgvpn_go/
 - ✅ `/start`, `/help` — start commands with inline keyboards
 - ✅ 📋 Subscription view — traffic usage, subscription link, QR code
 - ✅ ☕ Donate, ❓ Help — auxiliary menus
-- ✅ 🔗 Referral system — share links (`t.me/{bot}?start=share_{code}`) with in-memory cache + periodic DB sync
+- ✅ 🔗 Referral system — share links with in-memory cache + periodic DB sync
 - ✅ 🎁 Trial subscriptions via `/i/{code}` landing page with Happ deep-links
 
 **Admin Features:**
 - ✅ `/del <id>` — delete subscription by ID
 - ✅ `/broadcast <msg>` — send message to all users (detached context)
 - ✅ `/send <id|username> <msg>` — send private message
-- ✅ `/refstats` — referral statistics (count per user from cache)
+- ✅ `/refstats` — referral statistics
 - ✅ 📊 Stats — bot statistics
 
 **Infrastructure:**
-- ✅ 3x-ui integration — auto-login, client CRUD, traffic check, circuit breaker, retry with jitter
-- ✅ Health endpoints — `/healthz`, `/readyz` with component checkers (DB ping, XUI ping)
-- ✅ HTTP server timeouts — ReadHeaderTimeout 5s, ReadTimeout 10s, WriteTimeout 30s (slowloris protection)
-- ✅ Invite/trial landing — `/i/{code}` with IP rate limiting, trial creation, cookie dedup
-- ✅ Per-user rate limiting — each user gets own token bucket (30 tokens, 5/sec refill)
+- ✅ 3x-ui integration — auto-login, client CRUD, circuit breaker, retry with jitter, singleflight
+- ✅ Health endpoints — `/healthz`, `/readyz`
+- ✅ Invite/trial landing — `/i/{code}` with IP rate limiting, cookie dedup
+- ✅ Per-user rate limiting — per-chatID token bucket (30 tokens, 5/sec refill)
+- ✅ **Subscription proxy** — `GET /sub/{subID}` with extra servers + headers, cache, singleflight
 - ✅ Daily backups — 14 days retention
 - ✅ Sentry error tracking, Zap structured logging
 - ✅ Docker: multi-stage build, healthcheck, GHCR images
-- ✅ CI: lint, gosec, test, build, push (triggers: push to main, PR, tags)
-- ✅ Trial duplication prevention via HttpOnly cookie (3 hours)
-- ✅ IP spoofing protection — X-Forwarded-For trusted only from local/private addresses
-- ✅ Cache cleanup goroutine — prevents memory leaks from expired entries
-- ✅ Atomic trial cleanup — `DELETE ... RETURNING` eliminates race condition
-- ✅ Referral cache — in-memory map with periodic sync, `/refstats` admin command
-- ✅ Atomic trial rollback — retry with backoff on cleanup failure
-- ✅ Atomic subscription locking — `sync.Map` with `LoadOrStore` for race-safe creation
-- ✅ Singleflight for XUI login — deduplicates concurrent login attempts
-- ✅ SQLite connection pool — configured for single-writer reliability
+- ✅ CI: lint, gosec, test, build, push
 
 ### Test Coverage
 
@@ -111,131 +102,66 @@ tgvpn_go/
 |--------|----------|--------|
 | `internal/ratelimiter` | **97.5%** | ✅ Excellent |
 | `internal/bot` | **94.2%** | ✅ Excellent |
-| `internal/web` | **96.7%** | ✅ Excellent |
 | `internal/heartbeat` | **95.8%** | ✅ Excellent |
 | `internal/service` | **95.7%** | ✅ Excellent |
+| `internal/web` | **90.7%** | ✅ Excellent |
 | `internal/xui` | **91.1%** | ✅ Excellent |
+| `internal/subproxy` | **82.5%** | ✅ Good |
 | `internal/logger` | **87.6%** | ✅ Good |
 | `internal/config` | **87.3%** | ✅ Good |
 | `internal/database` | **82.9%** | ✅ Good |
 | `internal/backup` | **82.3%** | ✅ Good |
 | `internal/utils` | **75.0%** | ✅ Good |
 | `cmd/bot` | **14.9%** | 🟡 Low (main is integration) |
-| **Overall** | **~75%** | ✅ Good |
+| **Overall** | **~80%** | ✅ Good |
 
-All tests pass with `-race` detector (0 failures, 15 packages). golangci-lint: 0 issues.
-
-Test suite includes:
-- **66+ E2E tests** — full subscription lifecycle: invite→trial→bind, commands, callbacks, admin operations, concurrency, rollback scenarios
-- **Integration tests** — 7 tests (HandleStart, HandleHelp, HandleInvite, callbacks)
-- **Database migration tests** — 11 edge cases (corrupted SQL, partial, duplicate, concurrent)
-- **Fuzz tests** — config env vars, invite code regex, escapeMarkdown, xui truncate
-- **Per-user rate limiter tests** — 16 tests (isolation, cleanup, concurrency, context cancellation)
+All tests pass with `-race` detector. golangci-lint: 0 new issues (2 pre-existing).
 
 ---
 
-## Last Changes (v2.2.0 - Current Session)
+## Last Changes (v2.2.0 — 2026-04-05)
 
-### Subscription Proxy (GET /sub/{subID})
-- **Problem:** Need HTTP endpoint to serve subscriptions with extra servers and custom headers
-- **Solution:** Full subscription proxy implementation:
-  - `GET /sub/{subID}` — validates in DB, fetches from 3x-ui, merges extra config, caches
-  - Extra config file format: headers section → blank line → server links
-  - Headers from config file override 3x-ui headers
-  - In-memory cache with 240s TTL, background cleanup
-  - Singleflight for concurrent request deduplication
-  - Hot reload of config file every 5 minutes
-  - Stale cache fallback on 3x-ui error
-  - Format detection: base64 (decode → merge → re-encode) and plain text
-- **Files:** `internal/subproxy/` (new package), `internal/web/web.go`, `internal/config/`, `cmd/bot/main.go`
-- **Tests:** 50 tests (82.5% subproxy coverage, 90.7% web coverage)
-- **Config:** `SUB_EXTRA_SERVERS_ENABLED`, `SUB_EXTRA_SERVERS_FILE`
+### Subscription Proxy (`GET /sub/{subID}`)
+- **New package:** `internal/subproxy/` (cache, servers, proxy, service)
+- **Endpoint:** validates subID in DB → fetches from 3x-ui → merges extra config → caches → returns
+- **Extra config file format:**
+  ```
+  # Headers (Key: Value) — override 3x-ui headers
+  X-Custom-Header: value
+  Profile-Title: My VPN
 
-### Previous Sessions (v2.0.3 — v2.1.0)
-
-### Referral Cache System
-- **Problem:** Dead code `referrals` map existed but wasn't used
-- **Solution:** Implemented full referral cache system with:
-  - Database methods: `GetReferralCount`, `GetAllReferralCounts`
-  - Handler cache methods: `LoadReferralCache`, `GetReferralCount`, `IncrementReferralCount`, `DecrementReferralCount`
-  - Periodic sync: `StartReferralCacheSync` (every 5 minutes)
-  - Admin command: `/refstats` shows referral count per user
-- **Files:** `database/database.go`, `interfaces/interfaces.go`, `bot/handler.go`, `bot/subscription.go`, `bot/admin.go`, `testutil/testutil.go`, `cmd/bot/main.go`
-- **Commit:** `66f5d86`
-
-### Trial Atomic Rollback
-- **Problem:** Trial creation could leave orphaned client in 3x-ui if cleanup failed
-- **Solution:** Exported `RetryWithBackoff` from xui package, used for rollback with up to 3 retries
-- **Files:** `xui/client.go`, `web/web.go`
-- **Commit:** `d2d8c16`
-
-### Subscription Locking with sync.Map
-- **Problem:** Manual lock/unlock via map could deadlock on panic
-- **Solution:** Replaced `map + sync.Mutex` with `sync.Map` using `LoadOrStore` for atomic operations
-- **Files:** `bot/handler.go`, `bot/subscription.go`
-- **Commit:** `113f2bf`
-
-### Singleflight for XUI Login
-- **Problem:** Concurrent requests after session expiry could trigger multiple logins
-- **Solution:** Added `singleflight.Group` to deduplicate concurrent login attempts
-- **Files:** `xui/client.go`
-- **Commit:** `1857ae8`
-
-### Per-User Rate Limiter (Previous)
-- **Problem:** Global token bucket shared across all users — one active user can exhaust all 30 tokens, starving others
-- **Solution:** `PerUserRateLimiter` in `internal/ratelimiter/per_user.go` — separate bucket per `chatID`
-- **Files changed:** `ratelimiter/per_user.go` (new), `bot/handler.go`, `bot/message.go`, `cmd/bot/main.go`
-- **Cleanup:** Background goroutine removes stale buckets (interval = CacheTTL, maxIdle = 2×CacheTTL)
-- **Tests:** 16 new tests in `per_user_test.go`
-
-### Cache LRU Fix
-- **Problem:** Cache eviction was by `expiresAt` — frequently accessed entries could be evicted before rarely accessed ones
-- **Solution:** Added `lastAccess` field to `cacheEntry`, eviction now by least recently used
-- **Files changed:** `internal/bot/cache.go`
-- **Tests:** Existing cache tests pass (behavior unchanged externally)
-
-### modernc.org/sqlite Analysis
-- **Finding:** Indirect dependency from `golang-migrate`, not imported in code, does not affect binary
-- **Decision:** Keep as-is — cannot exclude without migrate pulling newer version
-
-### Auto-Reset Traffic Mechanism (v2.1.0)
-- **Research:** Investigated 3x-ui source code to understand `reset` field behavior
-- **Finding:** `reset` is interval in days from creation date, NOT day of month
-- **Key insight:** Auto-reset only works when `expiryTime > 0` (was zero before)
-- **Fix:** Changed subscription creation to set `expiryTime = now + 30 days`
-- **Rename:** `SubscriptionResetDay` → `SubscriptionResetIntervalDays` (clearer name)
-- **Sync:** Added ExpiryTime synchronization from 3x-ui on subscription view
-- **Tests:** 8 new tests for `daysUntilReset` function
-- **Docs:** Updated README.md with correct explanation + source link
+  # Server links (one per line, after blank line)
+  vless://user@server:443
+  trojan://pass@server:443
+  ```
+- **Cache:** 240s TTL, in-memory map + RWMutex, background cleanup every 120s
+- **Singleflight:** `singleflight.Group` deduplicates concurrent requests to same subID
+- **Hot reload:** Config file reloaded every 5 minutes via background goroutine
+- **Fallback:** Stale cache returned if 3x-ui unavailable
+- **Format:** Detects base64 (decode → merge → re-encode) or plain text
+- **Headers:** Config headers override 3x-ui headers; Content-Length removed after merge
+- **Error handling:** 404 (not in DB), 502 (3x-ui down, no cache), 405 (wrong method)
+- **Config:** `SUB_EXTRA_SERVERS_ENABLED` (bool, default true), `SUB_EXTRA_SERVERS_FILE` (path)
+- **Tests:** 50 new tests (18 handler, 5 service, 7 cache, 7 servers, 10 proxy, 3 format)
+- **Commits:** `9c7d2e4` (feat), `acaf15b` (docs)
 
 ### Previous Sessions (v2.0.3 — v2.1.0)
-- Command routing moved from `cmd/bot/main.go` to `bot.Handler.HandleUpdate()`
+- Referral cache system with `/refstats` admin command
+- Trial atomic rollback with `RetryWithBackoff`
+- Subscription locking with `sync.Map`
+- Singleflight for XUI login
+- Per-user rate limiter with cleanup goroutine
+- Cache LRU fix (lastAccess-based eviction)
+- Auto-reset traffic mechanism (expiryTime = now + 30 days)
+- Command routing moved to `bot.Handler.HandleUpdate()`
 - Atomic trial cleanup with `DELETE ... RETURNING`
-- `CONTACT_USERNAME` env var replaces hardcoded `@kereal`
-- CI PR trigger, docker-compose tag fix, HTTP timeouts, broadcast detached context
-- Health check uses `Ping()` instead of `Login()`
-- Jitter in retry backoff, constants immutability, dead code removal
-- Dependencies cleaned — `air` tool and `hugo` removed from go.mod
-- EXPOSE 0 → 8880 in Dockerfile, username escaping in `/lastreg`
+- CI PR trigger, docker-compose tag fix, HTTP timeouts
 
 ---
 
 ## Current Problem / Task
 
-**Status:** All tests passing, golangci-lint: 0 new issues.
-
-**Completed this session:**
-- ✅ Subscription Proxy feature (GET /sub/{subID})
-- ✅ Extra config file with headers + servers
-- ✅ In-memory cache with TTL cleanup
-- ✅ Singleflight for concurrent deduplication
-- ✅ Hot reload of config file every 5 minutes
-- ✅ Stale cache fallback on 3x-ui error
-- ✅ 50 tests (82.5% subproxy, 90.7% web coverage)
-- ✅ Logging throughout the proxy flow
-- ✅ Content-Length header fix after merge
-- ✅ Error differentiation (404 vs 502)
-- ✅ .env.example updated with new config vars
+**Status:** ✅ All tests passing, build clean, lint clean. Subscription proxy feature is **complete**.
 
 **Remaining tasks (prioritized):**
 1. **Re-enable linters** — errcheck, gosec in `.golangci.yml` (P1)
@@ -244,34 +170,41 @@ Test suite includes:
 4. **Traffic alerts** — 80%/95% usage notifications (P3)
 5. **Multi-admin** — list of admin IDs instead of single (P3)
 
-**Cancelled:**
-- ~~Expiry notifications~~ — subscriptions are permanent (`expiryTime = 0`), not needed
-- ~~Prometheus metrics~~ — out of scope for this project
-
 ---
 
 ## Critical Nuances
 
 ### 3x-ui Integration
-- **Session:** 15-minute validity, auto re-login with exponential backoff + jitter
+- **Session:** 12-hour validity (configurable via `XUI_SESSION_MAX_AGE_MINUTES`, default 720), verified via `/panel/api/server/status`
+- **Auto-relogin:** On HTTP 401/redirect, re-authenticates then retries failed request
+- **Connection pool cleanup:** Before re-auth to prevent dead connections
 - **Circuit breaker:** 5 failures → 30s open state
-- **Subscription:** `reset: 30` (last day of month), `expiryTime: 0` (no expiry)
+- **Subscription:** `reset: 30` (days from creation), `expiryTime: now + 30 days`
+- **Auto-reset:** Only works when `ExpiryTime > 0`. Traffic resets every 30 days, expiry extends.
 - **Client email:** `trial_{subID}` for trial, `{username}` for regular
 - **Ping vs Login:** Health checks use `Ping()` (calls `ensureLoggedIn(ctx, false)`) — no forced re-auth
+- **Singleflight:** Deduplicates concurrent login attempts
+- **DNS error fast-fail:** Non-retryable errors fail immediately
 
 ### Subscription Flow
 - **Trial:** `/i/{code}` → IP rate limit (3/hour) → xui client (1GB, 3h) → bind via `/start trial_{subID}`
 - **Regular:** `create_subscription` callback → xui client (30GB, expiryTime: now + 30 days, reset: 30)
-- **Auto-reset:** Traffic resets every 30 days, expiryTime extends automatically by 3x-ui
-- **ExpiryTime sync:** Updated from 3x-ui on subscription view (see task #34 in IMPROVEMENTS.md)
-- **Share referral:** `pendingInvites[chatID]` cached for 60 minutes, `referred_by` set on creation
-- **Trial cookie:** `rs8kvn_trial_{code}` prevents duplication for 3 hours
-- **Atomic cleanup:** `DELETE ... RETURNING` for expired trials (SQLite 3.35+, PostgreSQL)
+- **Trial cookie:** `rs8kvn_trial_{code}` prevents duplication for 3 hours (HttpOnly)
+- **Atomic cleanup:** `DELETE ... RETURNING` for expired trials
+- **Share referral:** `pendingInvites[chatID]` cached for 60 minutes
+
+### Subscription Proxy
+- **Endpoint:** `GET /sub/{subID}` — subID = SubscriptionID field from DB
+- **Extra config:** Headers section → blank line → server links. Headers override 3x-ui.
+- **Cache:** 240s TTL hardcoded (`config.SubProxyCacheTTL`), not configurable via env
+- **Reload:** Every 5 minutes, graceful — keeps old config if file read fails
+- **Singleflight:** First request fetches, others wait and get same result
+- **Content-Length:** Removed after merge (body size changes, Go uses chunked encoding)
+- **No rate limiting** on `/sub/` endpoint — 240s cache TTL mitigates abuse
 
 ### Database
-- **Soft deletes:** `deleted_at` column used (GORM)
+- **Soft deletes:** `deleted_at` column (GORM)
 - **Trial subscriptions:** `telegram_id = 0` (not NULL) until activated
-- **Cleanup scheduler:** Hourly, removes unactivated trials after `TRIAL_DURATION_HOURS`
 - **Migrations:** Auto-applied on startup from `internal/database/migrations/`
 
 ### Configuration
@@ -279,38 +212,22 @@ Test suite includes:
 - **Validation:** `XUI_SUB_PATH` — only `a-zA-Z0-9_-`, no `..` or `/`
 - **Web server:** Runs on `HEALTH_CHECK_PORT` (default 8880)
 - **Bot username:** Auto-populated from `botAPI.Self.UserName`
-- **Contact username:** `CONTACT_USERNAME` env var (default `kereal`)
 
 ### Rate Limiting
 - **Per-user:** Each `chatID` gets own token bucket (30 tokens, 5/sec refill)
 - **Cleanup:** Stale buckets removed every 5 minutes (maxIdle = 10 minutes)
-- **Admin rate limit:** Separate `sync.Map` tracking — 6s min interval between `/send` commands
-
-### Telegram Callbacks
-- `create_subscription`, `qr_code`, `back_to_subscription`, `menu_*`, `back_to_start`, `admin_*`, `share_invite`, `qr_telegram`, `qr_web`, `back_to_invite`
+- **Admin rate limit:** `sync.Map` tracking — 6s min interval between `/send` commands
 
 ### Security
-- **IP spoofing:** X-Forwarded-For trusted only from local/private addresses (127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16)
-- **No secrets in code:** `.env` only, `.env.example` provides template
+- **IP spoofing:** X-Forwarded-For trusted only from local/private addresses
+- **No secrets in code:** `.env` only
 - **Input validation:** Markdown injection prevention, path traversal protection
-- **Graceful shutdown:** Waits for in-flight requests with 30s timeout
 - **HTTP timeouts:** ReadHeaderTimeout 5s, ReadTimeout 10s, WriteTimeout 30s, IdleTimeout 60s
 
-### Subscription Proxy
-- **Endpoint:** `GET /sub/{subID}` where subID = SubscriptionID from DB
-- **Extra config file format:** headers (`Key: Value`) → blank line → server links
-- **Headers:** Config headers override 3x-ui headers, all original headers preserved
-- **Cache:** 240s TTL, in-memory, background cleanup every 120s
-- **Reload:** Config file reloaded every 5 minutes automatically
-- **Singleflight:** Concurrent requests to same subID deduplicated
-- **Fallback:** Stale cache returned if 3x-ui is unavailable
-- **Content-Length:** Removed after merge (body size changes)
-
 ### Docker
-- **Migrations:** Embedded in image via `COPY internal/database/migrations`
-- **Data volume:** `./data:/app/data` for persistence
+- **Migrations:** Embedded via `COPY internal/database/migrations`
+- **Data volume:** `./data:/app/data`
 - **Health check:** HTTP `/healthz` on port 8880
-- **Image tag:** `latest` in docker-compose.yml
 
 ---
 
@@ -337,5 +254,6 @@ go run ./cmd/bot
 ---
 
 **Generated:** 2026-04-05  
-**Session:** Subscription Proxy feature (GET /sub/{subID})  
-**Version:** v2.2.0
+**Session:** Subscription Proxy feature complete  
+**Version:** v2.2.0  
+**Commits:** `9c7d2e4` (feat), `acaf15b` (docs)
