@@ -35,9 +35,10 @@ Telegram bot for distributing VLESS+Reality+Vision proxy subscriptions from 3x-u
 - ⚡ Graceful shutdown with goroutine tracking
 - 🔒 Circuit breaker for 3x-ui panel with auto-relogin on session expiry
 - 🐳 Docker support with health checks
-- 🧪 Unit + E2E tests (~75% coverage, race-safe, fuzzing, 66+ E2E scenarios)
+- 🧪 Unit + E2E tests (~80% coverage, race-safe, fuzzing, 100+ scenarios)
 - ✅ golangci-lint and gosec for code quality
 - 🍪 Trial duplication prevention (3-hour cookie)
+- 🔗 Subscription proxy endpoint (`GET /sub/{subID}`) with extra servers and headers
 
 ## Requirements
 
@@ -248,7 +249,8 @@ The bot exposes HTTP endpoints on port 8880:
 |----------|-------------|--------------|
 | `GET /healthz` | Basic health (process alive, DB and xui status) | 200/503 |
 | `GET /readyz` | Ready state (accepting requests after init) | 200/503 |
-| `GET /i/{code}` | Trial invite landing page | 200/404/429/500 |
+| `GET /i/{code}` | Trial invites landing page | 200/404/429/500 |
+| `GET /sub/{subID}` | Subscription proxy (extra servers + headers) | 200/404/502/405 |
 | `GET /static/logo.png` | Logo image (mobile-optimized PNG) | 200/404 |
 
 Example response:
@@ -279,6 +281,32 @@ Each user can generate an invite code (`/start` → referral flow). The landing 
    - Copy-to-clipboard subscription URL
    - Telegram activation link
    - Trial duration info
+
+### Subscription Proxy (`GET /sub/{subID}`)
+
+The subscription proxy endpoint serves subscriptions with optional extra servers and custom headers:
+1. Validates `subID` against the database
+2. Checks cache (240s TTL)
+3. Fetches subscription from 3x-ui panel
+4. Merges extra servers and headers from config file
+5. Returns the combined response with original 3x-ui headers
+
+**Extra config file format** (`SUB_EXTRA_SERVERS_FILE`):
+```
+# Optional headers (Key: Value)
+X-Custom-Header: custom-value
+Profile-Title: My VPN
+
+# Server links (one per line, after blank line)
+vless://user@server1.example.com:443
+trojan://pass@server2.example.com:443
+```
+
+- Headers from config file override 3x-ui headers
+- Extra servers are appended to the subscription body
+- Both base64 and plain text formats are supported
+- Config file is reloaded automatically every 5 minutes
+- Stale cache is used as fallback if 3x-ui is unavailable
 
 ## CI/CD with GitHub Actions
 
@@ -362,8 +390,18 @@ rs8kvn_bot/
 │   │   │   ├── trial.html          # Trial invite landing page
 │   │   │   ├── error.html          # Error page template
 │   │   │   └── logo.png            # Logo image served as static file
-│   │   ├── web.go                  # HTTP server, health + invite endpoints
-│   │   └── web_test.go             # Web endpoint tests
+│   │   ├── web.go                  # HTTP server: health, invite, subscription proxy
+│   │   ├── web_test.go             # Web endpoint tests
+│   │   └── subproxy_test.go        # Subscription proxy tests
+│   ├── subproxy/
+│   │   ├── cache.go                # In-memory cache with TTL cleanup
+│   │   ├── cache_test.go           # Cache tests
+│   │   ├── proxy.go                # FetchFromXUI, DetectFormat, MergeSubscriptions
+│   │   ├── proxy_test.go           # Proxy logic tests
+│   │   ├── servers.go              # Load extra headers + servers from config file
+│   │   ├── servers_test.go         # Config loader tests
+│   │   ├── service.go              # Service struct, reload loop
+│   │   └── service_test.go         # Service tests
 │   └── xui/
 │       ├── breaker.go              # Circuit breaker for x-ui
 │       ├── breaker_test.go         # Circuit breaker tests
@@ -473,6 +511,8 @@ rs8kvn_bot/
 | `TRIAL_RATE_LIMIT` | Max trial requests per IP per hour | 3 | ❌ |
 | `DONATE_CARD_NUMBER` | Donation card number (T-Bank) | 2200702156780864 | ❌ |
 | `DONATE_URL` | Donation URL (T-Bank collection link) | https://tbank.ru/cf/9J6agHgWdNg | ❌ |
+| `SUB_EXTRA_SERVERS_ENABLED` | Enable extra servers in subscription proxy | true | ❌ |
+| `SUB_EXTRA_SERVERS_FILE` | Path to extra config file (headers + servers) | ./data/extra_servers.txt | ❌ |
 
 **Note:** `XUI_USERNAME` and `XUI_PASSWORD` have no defaults - they must be set explicitly.
 
@@ -572,11 +612,12 @@ go test ./internal/database/... -v
 
 | Package | Coverage |
 |---------|----------|
+| `internal/subproxy` | **82.5%** | ✅ Good |
 | `internal/ratelimiter` | **97.5%** | ✅ Excellent |
 | `internal/bot` | **94.2%** | ✅ Excellent |
 | `internal/heartbeat` | **95.8%** | ✅ Excellent |
 | `internal/service` | **95.7%** | ✅ Excellent |
-| `internal/web` | **96.7%** | ✅ Excellent |
+| `internal/web` | **90.7%** | ✅ Excellent |
 | `internal/xui` | **91.1%** | ✅ Excellent |
 | `internal/config` | **87.3%** | ✅ Good |
 | `internal/logger` | **87.6%** | ✅ Good |
@@ -584,7 +625,7 @@ go test ./internal/database/... -v
 | `internal/database` | **82.9%** | ✅ Good |
 | `internal/utils` | **75.0%** | ✅ Good |
 | `cmd/bot` | **14.9%** | 🟡 Low (main is integration) |
-| **Overall** | **~75%** | ✅ Good |
+| **Overall** | **~80%** | ✅ Good |
 
 All tests pass with `-race` detector (0 failures). Test suite includes:
 - **66 E2E tests** — full subscription lifecycle: invite→trial→bind, commands, callbacks, admin operations, concurrency, rollback scenarios
