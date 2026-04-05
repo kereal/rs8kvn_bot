@@ -2,8 +2,8 @@
 
 **Repo:** https://github.com/kereal/rs8kvn_bot  
 **Module:** `rs8kvn_bot` (Go 1.24+)  
-**Version:** v2.1.0  
-**Last Updated:** 2026-04-02  
+**Version:** v2.2.0  
+**Last Updated:** 2026-04-05  
 **Branch:** `dev` (GitFlow: `main` = production, `dev` = integration)
 
 ---
@@ -23,8 +23,8 @@ tgvpn_go/
 │   │   ├── admin.go             # /del, /broadcast, /send, admin stats
 │   │   ├── message.go           # Message sending with per-user rate limiting
 │   │   └── cache.go             # Subscription LRU cache (lastAccess eviction)
-│   ├── web/                      # HTTP server (health + invite/trial pages)
-│   │   └── web.go               # /healthz, /readyz, /i/{code} — trial landing
+│   ├── web/                      # HTTP server (health + invite/trial pages + subscription proxy)
+│   │   └── web.go               # /healthz, /readyz, /i/{code}, /sub/{subID}
 │   ├── xui/                      # 3x-ui panel API client + circuit breaker
 │   │   ├── client.go            # Login, CreateClient, GetClientTraffic, retry+jitter
 │   │   └── breaker.go           # Circuit breaker (5 failures → 30s open)
@@ -34,6 +34,11 @@ tgvpn_go/
 │   ├── interfaces/               # Service interfaces for DI
 │   ├── utils/                    # UUID, SubID, QR, time helpers
 │   ├── ratelimiter/              # Token bucket + PerUserRateLimiter
+│   ├── subproxy/                 # Subscription proxy (cache, merge, extra config)
+│   │   ├── cache.go             # In-memory cache with TTL cleanup
+│   │   ├── servers.go           # Load extra headers + servers from file
+│   │   ├── proxy.go             # FetchFromXUI, DetectFormat, MergeSubscriptions
+│   │   └── service.go           # Service struct, reload loop
 │   ├── heartbeat/                # Periodic health pings
 │   ├── backup/                   # Daily SQLite backup rotation
 │   └── health/                   # Health checker (legacy, unused — web/ replaces it)
@@ -129,7 +134,24 @@ Test suite includes:
 
 ---
 
-## Last Changes (v2.1.0 - Current Session)
+## Last Changes (v2.2.0 - Current Session)
+
+### Subscription Proxy (GET /sub/{subID})
+- **Problem:** Need HTTP endpoint to serve subscriptions with extra servers and custom headers
+- **Solution:** Full subscription proxy implementation:
+  - `GET /sub/{subID}` — validates in DB, fetches from 3x-ui, merges extra config, caches
+  - Extra config file format: headers section → blank line → server links
+  - Headers from config file override 3x-ui headers
+  - In-memory cache with 240s TTL, background cleanup
+  - Singleflight for concurrent request deduplication
+  - Hot reload of config file every 5 minutes
+  - Stale cache fallback on 3x-ui error
+  - Format detection: base64 (decode → merge → re-encode) and plain text
+- **Files:** `internal/subproxy/` (new package), `internal/web/web.go`, `internal/config/`, `cmd/bot/main.go`
+- **Tests:** 50 tests (82.5% subproxy coverage, 90.7% web coverage)
+- **Config:** `SUB_EXTRA_SERVERS_ENABLED`, `SUB_EXTRA_SERVERS_FILE`
+
+### Previous Sessions (v2.0.3 — v2.1.0)
 
 ### Referral Cache System
 - **Problem:** Dead code `referrals` map existed but wasn't used
@@ -200,25 +222,20 @@ Test suite includes:
 
 ## Current Problem / Task
 
-**Status:** All tests passing, golangci-lint: 0 issues.
+**Status:** All tests passing, golangci-lint: 0 new issues.
 
 **Completed this session:**
-- ✅ Referral cache system with `/refstats` admin command
-- ✅ Trial atomic rollback with retry
-- ✅ Atomic subscription locking with sync.Map
-- ✅ Singleflight for XUI login deduplication
-- ✅ SQLite connection pool configured
-- ✅ Per-user rate limiter with cleanup goroutine
-- ✅ Cache LRU fix (lastAccess-based eviction)
-- ✅ modernc.org/sqlite analysis
-- ✅ Cleaned IMPROVEMENTS.md from completed items
-- ✅ Documentation updates (README.md, HANDOVER.md, project_overview.md)
-- ✅ Created doc/ideas.md (40 ideas for development)
-- ✅ Created .serena/instructions.md (AI assistant guidelines)
-- ✅ Updated .serena/memories/ (architecture.md, roadmap.md, project_overview.md)
-- ✅ Architecture discussion: Remnawave vs 3x-ui
-- ✅ Decision: Stay on 3x-ui, implement custom subscription generator
-- ✅ Added README section "Работа с ИИ-ассистентом"
+- ✅ Subscription Proxy feature (GET /sub/{subID})
+- ✅ Extra config file with headers + servers
+- ✅ In-memory cache with TTL cleanup
+- ✅ Singleflight for concurrent deduplication
+- ✅ Hot reload of config file every 5 minutes
+- ✅ Stale cache fallback on 3x-ui error
+- ✅ 50 tests (82.5% subproxy, 90.7% web coverage)
+- ✅ Logging throughout the proxy flow
+- ✅ Content-Length header fix after merge
+- ✅ Error differentiation (404 vs 502)
+- ✅ .env.example updated with new config vars
 
 **Remaining tasks (prioritized):**
 1. **Re-enable linters** — errcheck, gosec in `.golangci.yml` (P1)
@@ -279,6 +296,16 @@ Test suite includes:
 - **Graceful shutdown:** Waits for in-flight requests with 30s timeout
 - **HTTP timeouts:** ReadHeaderTimeout 5s, ReadTimeout 10s, WriteTimeout 30s, IdleTimeout 60s
 
+### Subscription Proxy
+- **Endpoint:** `GET /sub/{subID}` where subID = SubscriptionID from DB
+- **Extra config file format:** headers (`Key: Value`) → blank line → server links
+- **Headers:** Config headers override 3x-ui headers, all original headers preserved
+- **Cache:** 240s TTL, in-memory, background cleanup every 120s
+- **Reload:** Config file reloaded every 5 minutes automatically
+- **Singleflight:** Concurrent requests to same subID deduplicated
+- **Fallback:** Stale cache returned if 3x-ui is unavailable
+- **Content-Length:** Removed after merge (body size changes)
+
 ### Docker
 - **Migrations:** Embedded in image via `COPY internal/database/migrations`
 - **Data volume:** `./data:/app/data` for persistence
@@ -309,6 +336,6 @@ go run ./cmd/bot
 
 ---
 
-**Generated:** 2026-04-02  
-**Session:** Referral cache, atomic rollback, sync.Map locking, singleflight, IMPROVEMENTS cleanup, documentation, Serena memory, architecture decisions  
-**Version:** v2.1.0
+**Generated:** 2026-04-05  
+**Session:** Subscription Proxy feature (GET /sub/{subID})  
+**Version:** v2.2.0

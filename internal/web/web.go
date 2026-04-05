@@ -4,6 +4,7 @@ import (
 	"context"
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"net"
@@ -19,8 +20,10 @@ import (
 	"rs8kvn_bot/internal/interfaces"
 	"rs8kvn_bot/internal/logger"
 	"rs8kvn_bot/internal/service"
+	"rs8kvn_bot/internal/subproxy"
 
 	"go.uber.org/zap"
+	"golang.org/x/sync/singleflight"
 )
 
 //go:embed templates/*.html templates/logo.png
@@ -58,6 +61,8 @@ type Server struct {
 	cfg             *config.Config
 	botConfig       *bot.BotConfig
 	subService      *service.SubscriptionService
+	subProxy        *subproxy.Service
+	subFetchGroup   singleflight.Group
 	server          *http.Server
 	mu              sync.RWMutex
 	ready           bool
@@ -68,7 +73,7 @@ type Server struct {
 	errorTemplate   *template.Template
 }
 
-func NewServer(addr string, db interfaces.DatabaseService, xuiClient interfaces.XUIClient, cfg *config.Config, botConfig *bot.BotConfig, subService *service.SubscriptionService) *Server {
+func NewServer(addr string, db interfaces.DatabaseService, xuiClient interfaces.XUIClient, cfg *config.Config, botConfig *bot.BotConfig, subService *service.SubscriptionService, subProxy *subproxy.Service) *Server {
 	trialTmpl := template.Must(template.New("trial.html").Funcs(template.FuncMap{
 		"escape": func(s string) string {
 			var buf strings.Builder
@@ -86,6 +91,7 @@ func NewServer(addr string, db interfaces.DatabaseService, xuiClient interfaces.
 		cfg:             cfg,
 		botConfig:       botConfig,
 		subService:      subService,
+		subProxy:        subProxy,
 		checkers:        make(map[string]func(context.Context) ComponentHealth),
 		inviteCodeRegex: regexp.MustCompile(`^[a-zA-Z0-9_-]+$`),
 		startTime:       time.Now(),
@@ -112,6 +118,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/healthz", s.handleHealthz)
 	mux.HandleFunc("/readyz", s.handleReadyz)
 	mux.HandleFunc("/i/", s.handleInvite)
+	mux.HandleFunc("/sub/", s.handleSubscription)
 	mux.HandleFunc("/static/logo.png", s.handleLogo)
 
 	s.server = &http.Server{
@@ -446,4 +453,153 @@ func isLocalAddress(host string) bool {
 		return false
 	}
 	return ip.IsLoopback() || ip.IsPrivate()
+}
+
+var subIDRegex = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+
+type subFetchResult struct {
+	body    []byte
+	headers map[string]string
+}
+
+type subFetchError struct {
+	err      error
+	notFound bool
+}
+
+func (e *subFetchError) Error() string {
+	return e.err.Error()
+}
+
+func (e *subFetchError) Unwrap() error {
+	return e.err
+}
+
+func (s *Server) handleSubscription(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", "GET")
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if s.subProxy == nil {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		w.Write([]byte("Subscription proxy is not available"))
+		return
+	}
+
+	path := r.URL.Path
+	if !strings.HasPrefix(path, "/sub/") {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte("Not found"))
+		return
+	}
+
+	subID := path[5:]
+	if subID == "" || strings.Contains(subID, "/") || !subIDRegex.MatchString(subID) {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte("Invalid subscription code"))
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+
+	if cachedBody, cachedHeaders, ok := s.subProxy.GetCache(subID); ok {
+		logger.Debug("Subscription proxy cache hit", zap.String("sub_id", subID))
+		s.writeSubscriptionResponse(w, cachedBody, cachedHeaders)
+		return
+	}
+
+	result, err, _ := s.subFetchGroup.Do(subID, func() (interface{}, error) {
+		if cachedBody, cachedHeaders, ok := s.subProxy.GetCache(subID); ok {
+			return &subFetchResult{body: cachedBody, headers: cachedHeaders}, nil
+		}
+
+		sub, err := s.db.GetSubscriptionBySubscriptionID(ctx, subID)
+		if err != nil {
+			logger.Warn("Subscription not found in DB", zap.String("sub_id", subID), zap.Error(err))
+			return nil, &subFetchError{err: err, notFound: true}
+		}
+
+		if sub.SubscriptionURL == "" {
+			logger.Warn("Subscription URL is empty", zap.String("sub_id", subID))
+			return nil, nil
+		}
+
+		xuiResp, fetchErr := subproxy.FetchFromXUI(sub.SubscriptionURL)
+		if fetchErr != nil {
+			logger.Warn("Failed to fetch from 3x-ui", zap.String("sub_id", subID), zap.Error(fetchErr))
+			if cachedBody, cachedHeaders, ok := s.subProxy.GetCache(subID); ok {
+				return &subFetchResult{body: cachedBody, headers: cachedHeaders}, nil
+			}
+			return nil, fetchErr
+		}
+
+		extraServers := s.subProxy.GetExtraServers()
+		extraHeaders := s.subProxy.GetExtraHeaders()
+		format := subproxy.DetectFormat(xuiResp.Body)
+		mergedBody := subproxy.MergeSubscriptions(xuiResp.Body, extraServers, format)
+
+		mergedHeaders := make(map[string]string, len(xuiResp.Headers)+len(extraHeaders))
+		for k, v := range xuiResp.Headers {
+			mergedHeaders[k] = v
+		}
+		for k, v := range extraHeaders {
+			mergedHeaders[k] = v
+		}
+
+		s.subProxy.SetCache(subID, mergedBody, mergedHeaders)
+
+		return &subFetchResult{body: mergedBody, headers: mergedHeaders}, nil
+	})
+
+	if err != nil {
+		var subErr *subFetchError
+		if errors.As(err, &subErr) && subErr.notFound {
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			w.WriteHeader(http.StatusNotFound)
+			w.Write([]byte("Subscription not found"))
+			return
+		}
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			w.WriteHeader(http.StatusGatewayTimeout)
+			w.Write([]byte("Request timeout"))
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusBadGateway)
+		w.Write([]byte("Failed to fetch subscription"))
+		return
+	}
+
+	if result == nil {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte("Subscription URL not available"))
+		return
+	}
+
+	res := result.(*subFetchResult)
+	logger.Info("Subscription proxy served",
+		zap.String("sub_id", subID),
+		zap.Int("extra_servers", len(s.subProxy.GetExtraServers())),
+		zap.Int("body_size", len(res.body)))
+
+	s.writeSubscriptionResponse(w, res.body, res.headers)
+}
+
+func (s *Server) writeSubscriptionResponse(w http.ResponseWriter, body []byte, headers map[string]string) {
+	for key, value := range headers {
+		w.Header().Set(key, value)
+	}
+	// Remove Content-Length since body size changed after merge.
+	// Go's http.ResponseWriter will use chunked encoding automatically.
+	w.Header().Del("Content-Length")
+	w.WriteHeader(http.StatusOK)
+	w.Write(body)
 }

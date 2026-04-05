@@ -1057,7 +1057,7 @@ func TestE2E_InviteLink_CreatesTrial(t *testing.T) {
 	env.cfg.TrialRateLimit = 100
 
 	subService := service.NewSubscriptionService(env.db, env.xui, env.cfg)
-	srv := web.NewServer("127.0.0.1:0", env.db, env.xui, env.cfg, env.botConfig, subService)
+	srv := web.NewServer("127.0.0.1:0", env.db, env.xui, env.cfg, env.botConfig, subService, nil)
 
 	req := httptest.NewRequest("GET", "/i/"+inviteCode, nil)
 	req.Header.Set("X-Forwarded-For", "10.1.1.1")
@@ -1090,7 +1090,7 @@ func TestE2E_InviteLink_InvalidCode(t *testing.T) {
 	env.cfg.TrialRateLimit = 100
 
 	subService := service.NewSubscriptionService(env.db, env.xui, env.cfg)
-	srv := web.NewServer("127.0.0.1:0", env.db, env.xui, env.cfg, env.botConfig, subService)
+	srv := web.NewServer("127.0.0.1:0", env.db, env.xui, env.cfg, env.botConfig, subService, nil)
 
 	req := httptest.NewRequest("GET", "/i/nonexistent_code", nil)
 	req.Header.Set("X-Forwarded-For", "10.1.2.1")
@@ -1121,7 +1121,7 @@ func TestE2E_InviteLink_XuiLoginFails(t *testing.T) {
 	}
 
 	subService := service.NewSubscriptionService(env.db, env.xui, env.cfg)
-	srv := web.NewServer("127.0.0.1:0", env.db, env.xui, env.cfg, env.botConfig, subService)
+	srv := web.NewServer("127.0.0.1:0", env.db, env.xui, env.cfg, env.botConfig, subService, nil)
 
 	req := httptest.NewRequest("GET", "/i/"+inviteCode, nil)
 	req.Header.Set("X-Forwarded-For", "10.1.3.1")
@@ -1160,7 +1160,7 @@ func TestE2E_AutoRelogin_On401(t *testing.T) {
 	}
 
 	subService := service.NewSubscriptionService(env.db, env.xui, env.cfg)
-	srv := web.NewServer("127.0.0.1:0", env.db, env.xui, env.cfg, env.botConfig, subService)
+	srv := web.NewServer("127.0.0.1:0", env.db, env.xui, env.cfg, env.botConfig, subService, nil)
 
 	req := httptest.NewRequest("GET", "/i/"+inviteCode, nil)
 	req.Header.Set("X-Forwarded-For", "10.2.1.1")
@@ -1186,7 +1186,7 @@ func TestE2E_InviteLink_RateLimitExceeded(t *testing.T) {
 	env.cfg.TrialRateLimit = 1
 
 	subService := service.NewSubscriptionService(env.db, env.xui, env.cfg)
-	srv := web.NewServer("127.0.0.1:0", env.db, env.xui, env.cfg, env.botConfig, subService)
+	srv := web.NewServer("127.0.0.1:0", env.db, env.xui, env.cfg, env.botConfig, subService, nil)
 
 	req1 := httptest.NewRequest("GET", "/i/"+inviteCode, nil)
 	req1.Header.Set("X-Forwarded-For", "10.1.4.1")
@@ -1216,7 +1216,7 @@ func TestE2E_InviteLink_FullFlow_BindTrial(t *testing.T) {
 	env.cfg.TrialRateLimit = 100
 
 	subService := service.NewSubscriptionService(env.db, env.xui, env.cfg)
-	srv := web.NewServer("127.0.0.1:0", env.db, env.xui, env.cfg, env.botConfig, subService)
+	srv := web.NewServer("127.0.0.1:0", env.db, env.xui, env.cfg, env.botConfig, subService, nil)
 
 	req := httptest.NewRequest("GET", "/i/"+inviteCode, nil)
 	req.Header.Set("X-Forwarded-For", "10.1.5.1")
@@ -1267,7 +1267,7 @@ func TestE2E_FullCycle_InviteToQR(t *testing.T) {
 	env.cfg.TrialRateLimit = 100
 
 	subService := service.NewSubscriptionService(env.db, env.xui, env.cfg)
-	srv := web.NewServer("127.0.0.1:0", env.db, env.xui, env.cfg, env.botConfig, subService)
+	srv := web.NewServer("127.0.0.1:0", env.db, env.xui, env.cfg, env.botConfig, subService, nil)
 
 	req := httptest.NewRequest("GET", "/i/"+inviteCode, nil)
 	req.Header.Set("X-Forwarded-For", "10.2.1.1")
@@ -1395,7 +1395,7 @@ func TestE2E_FullCycle_MultipleUsersViaInvite(t *testing.T) {
 	env.cfg.TrialRateLimit = 100
 
 	subService := service.NewSubscriptionService(env.db, env.xui, env.cfg)
-	srv := web.NewServer("127.0.0.1:0", env.db, env.xui, env.cfg, env.botConfig, subService)
+	srv := web.NewServer("127.0.0.1:0", env.db, env.xui, env.cfg, env.botConfig, subService, nil)
 
 	// Two different users access the same invite link
 	user1ChatID := int64(400001)
@@ -1453,7 +1453,7 @@ func TestE2E_FullCycle_InviteThenShare(t *testing.T) {
 	env.cfg.TrialRateLimit = 100
 
 	subService := service.NewSubscriptionService(env.db, env.xui, env.cfg)
-	srv := web.NewServer("127.0.0.1:0", env.db, env.xui, env.cfg, env.botConfig, subService)
+	srv := web.NewServer("127.0.0.1:0", env.db, env.xui, env.cfg, env.botConfig, subService, nil)
 
 	// User accesses web invite
 	req := httptest.NewRequest("GET", "/i/"+webInviteCode, nil)
@@ -1505,7 +1505,7 @@ func TestE2E_FullCycle_ConcurrentInviteAccess(t *testing.T) {
 	env.cfg.TrialRateLimit = 1000
 
 	subService := service.NewSubscriptionService(env.db, env.xui, env.cfg)
-	srv := web.NewServer("127.0.0.1:0", env.db, env.xui, env.cfg, env.botConfig, subService)
+	srv := web.NewServer("127.0.0.1:0", env.db, env.xui, env.cfg, env.botConfig, subService, nil)
 
 	var wg sync.WaitGroup
 	results := make(chan int, 10)
