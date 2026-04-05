@@ -264,7 +264,7 @@ func main() {
 	go func() {
 		defer recoverAndReport("Trial cleanup scheduler")
 		wg.Done()
-		trialSched := scheduler.NewTrialCleanupScheduler(dbService, xuiClient, cfg.XUIInboundID, cfg.TrialDurationHours)
+		trialSched := scheduler.NewTrialCleanupScheduler(dbService, xuiClient, cfg.TrialDurationHours)
 		trialSched.Start(ctx)
 	}()
 

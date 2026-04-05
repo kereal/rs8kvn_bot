@@ -19,16 +19,14 @@ type XUICleanupTarget interface {
 type TrialCleanupScheduler struct {
 	db         *database.Service
 	xuiClient  XUICleanupTarget
-	inboundID  int
 	trialHours int
 }
 
 // NewTrialCleanupScheduler creates a new TrialCleanupScheduler.
-func NewTrialCleanupScheduler(db *database.Service, xuiClient XUICleanupTarget, inboundID, trialHours int) *TrialCleanupScheduler {
+func NewTrialCleanupScheduler(db *database.Service, xuiClient XUICleanupTarget, trialHours int) *TrialCleanupScheduler {
 	return &TrialCleanupScheduler{
 		db:         db,
 		xuiClient:  xuiClient,
-		inboundID:  inboundID,
 		trialHours: trialHours,
 	}
 }
@@ -37,23 +35,30 @@ func NewTrialCleanupScheduler(db *database.Service, xuiClient XUICleanupTarget, 
 func (s *TrialCleanupScheduler) Start(ctx context.Context) {
 	logger.Info("Trial cleanup scheduler started", zap.String("schedule", "hourly"))
 
+	// Run cleanup immediately on startup
+	s.runCleanup(ctx)
+
 	ticker := time.NewTicker(1 * time.Hour)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ticker.C:
-			logger.Info("Running trial cleanup")
-			deleted, err := s.db.CleanupExpiredTrials(ctx, s.trialHours, s.xuiClient, s.inboundID)
-			if err != nil {
-				logger.Error("Trial cleanup failed", zap.Error(err))
-			} else if deleted > 0 {
-				logger.Info("Trial cleanup completed", zap.Int64("deleted", deleted))
-			}
+			s.runCleanup(ctx)
 
 		case <-ctx.Done():
 			logger.Info("Trial cleanup scheduler stopped")
 			return
 		}
+	}
+}
+
+func (s *TrialCleanupScheduler) runCleanup(ctx context.Context) {
+	logger.Info("Running trial cleanup")
+	deleted, err := s.db.CleanupExpiredTrials(ctx, s.trialHours, s.xuiClient)
+	if err != nil {
+		logger.Error("Trial cleanup failed", zap.Error(err))
+	} else if deleted > 0 {
+		logger.Info("Trial cleanup completed", zap.Int64("deleted", deleted))
 	}
 }

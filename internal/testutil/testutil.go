@@ -81,7 +81,7 @@ type MockDatabaseService struct {
 	CreateTrialRequestFunc              func(ctx context.Context, ip string) error
 	CleanupExpiredTrialsFunc            func(ctx context.Context, hours int, xuiClient interface {
 		DeleteClient(ctx context.Context, inboundID int, clientID string) error
-	}, inboundID int) (int64, error)
+	}) (int64, error)
 	GetPoolStatsFunc         func() (*database.PoolStats, error)
 	GetReferralCountFunc     func(ctx context.Context, referrerTGID int64) (int64, error)
 	GetAllReferralCountsFunc func(ctx context.Context) (map[int64]int64, error)
@@ -372,9 +372,9 @@ func (m *MockDatabaseService) CreateTrialRequest(ctx context.Context, ip string)
 
 func (m *MockDatabaseService) CleanupExpiredTrials(ctx context.Context, hours int, xuiClient interface {
 	DeleteClient(ctx context.Context, inboundID int, clientID string) error
-}, inboundID int) (int64, error) {
+}) (int64, error) {
 	if m.CleanupExpiredTrialsFunc != nil {
-		return m.CleanupExpiredTrialsFunc(ctx, hours, xuiClient, inboundID)
+		return m.CleanupExpiredTrialsFunc(ctx, hours, xuiClient)
 	}
 	return 0, nil
 }
