@@ -220,7 +220,7 @@ func (m *mockDatabaseService) CreateTrialRequest(ctx context.Context, ip string)
 
 func (m *mockDatabaseService) CleanupExpiredTrials(ctx context.Context, hours int, xuiClient interface {
 	DeleteClient(ctx context.Context, inboundID int, clientID string) error
-}, inboundID int) (int64, error) {
+}) (int64, error) {
 	return m.cleanupExpiredCount, nil
 }
 
@@ -522,7 +522,7 @@ func TestMockDatabaseService_TrialRequests(t *testing.T) {
 func TestMockDatabaseService_CleanupExpiredTrials(t *testing.T) {
 	svc := &mockDatabaseService{cleanupExpiredCount: 5}
 
-	count, err := svc.CleanupExpiredTrials(context.Background(), 24, nil, 1)
+	count, err := svc.CleanupExpiredTrials(context.Background(), 24, nil)
 	require.NoError(t, err, "CleanupExpiredTrials() error")
 	assert.Equal(t, int64(5), count, "CleanupExpiredTrials()")
 }

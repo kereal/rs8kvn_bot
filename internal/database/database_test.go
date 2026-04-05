@@ -1131,7 +1131,7 @@ func TestService_CountTrialRequestsByIPLastHour_None(t *testing.T) {
 func TestService_CleanupExpiredTrials(t *testing.T) {
 	svc := newTestService(t)
 
-	// Create old trial subscription
+	// Create old trial subscription on inbound 1
 	oldTrial := &Subscription{
 		TelegramID:      0,
 		ClientID:        "old-trial-client",
@@ -1175,7 +1175,7 @@ func TestService_CleanupExpiredTrials(t *testing.T) {
 
 	mockXUI := &mockXUIClient{}
 
-	deleted, err := svc.CleanupExpiredTrials(context.Background(), 24, mockXUI, 1)
+	deleted, err := svc.CleanupExpiredTrials(context.Background(), 24, mockXUI)
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), deleted)
 
@@ -1198,12 +1198,53 @@ func TestService_CleanupExpiredTrials(t *testing.T) {
 	var recentReqCount int64
 	svc.db.Model(&TrialRequest{}).Where("ip = ?", "10.0.0.2").Count(&recentReqCount)
 	assert.Equal(t, int64(1), recentReqCount)
+
+	// Verify DeleteClient was called with correct inboundID from subscription record
+	require.Len(t, mockXUI.deleteCalls, 1)
+	assert.Equal(t, 1, mockXUI.deleteCalls[0].inboundID)
+	assert.Equal(t, "old-trial-client", mockXUI.deleteCalls[0].clientID)
+}
+
+func TestService_CleanupExpiredTrials_UsesSubInboundID(t *testing.T) {
+	svc := newTestService(t)
+
+	// Create old trial on inbound 5
+	oldTrial := &Subscription{
+		TelegramID:      0,
+		ClientID:        "multi-inbound-client",
+		SubscriptionID:  "multi-inbound-sub",
+		InboundID:       5,
+		IsTrial:         true,
+		Status:          "active",
+		ExpiryTime:      time.Now().Add(24 * time.Hour),
+		SubscriptionURL: "http://localhost/sub/multi-inbound",
+		CreatedAt:       time.Now().Add(-48 * time.Hour),
+	}
+	require.NoError(t, svc.db.Create(oldTrial).Error)
+
+	mockXUI := &mockXUIClient{}
+
+	_, err := svc.CleanupExpiredTrials(context.Background(), 24, mockXUI)
+	require.NoError(t, err)
+
+	// Verify DeleteClient was called with the subscription's InboundID (5), not a hardcoded value
+	require.Len(t, mockXUI.deleteCalls, 1)
+	assert.Equal(t, 5, mockXUI.deleteCalls[0].inboundID)
+	assert.Equal(t, "multi-inbound-client", mockXUI.deleteCalls[0].clientID)
 }
 
 // mockXUIClient implements the minimal interface needed for CleanupExpiredTrials
-type mockXUIClient struct{}
+type mockXUIClient struct {
+	deleteCalls []deleteCall
+}
+
+type deleteCall struct {
+	inboundID int
+	clientID  string
+}
 
 func (m *mockXUIClient) DeleteClient(ctx context.Context, inboundID int, clientID string) error {
+	m.deleteCalls = append(m.deleteCalls, deleteCall{inboundID: inboundID, clientID: clientID})
 	return nil
 }
 

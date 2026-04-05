@@ -662,7 +662,7 @@ func (s *Service) CreateTrialRequest(ctx context.Context, ip string) error {
 // Uses atomic DELETE ... RETURNING to prevent race conditions with concurrent trial activation.
 func (s *Service) CleanupExpiredTrials(ctx context.Context, hours int, xuiClient interface {
 	DeleteClient(ctx context.Context, inboundID int, clientID string) error
-}, inboundID int) (int64, error) {
+}) (int64, error) {
 	cutoff := time.Now().Add(-time.Duration(hours) * time.Hour)
 
 	// Atomic delete with RETURNING prevents race condition where a trial
@@ -683,9 +683,10 @@ func (s *Service) CleanupExpiredTrials(ctx context.Context, hours int, xuiClient
 	// Delete orphaned clients from XUI panel
 	for _, sub := range subs {
 		if sub.ClientID != "" && xuiClient != nil {
-			if err := xuiClient.DeleteClient(ctx, inboundID, sub.ClientID); err != nil {
+			if err := xuiClient.DeleteClient(ctx, sub.InboundID, sub.ClientID); err != nil {
 				logger.Warn("Failed to delete trial client from xui",
 					zap.String("client_id", sub.ClientID),
+					zap.Int("inbound_id", sub.InboundID),
 					zap.Error(err))
 			}
 		}

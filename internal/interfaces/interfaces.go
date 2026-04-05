@@ -46,7 +46,7 @@ type TrialRepository interface {
 	CreateTrialRequest(ctx context.Context, ip string) error
 	CleanupExpiredTrials(ctx context.Context, hours int, xuiClient interface {
 		DeleteClient(ctx context.Context, inboundID int, clientID string) error
-	}, inboundID int) (int64, error)
+	}) (int64, error)
 }
 
 type InviteRepository interface {
