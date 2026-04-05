@@ -139,29 +139,35 @@ func main() {
 		}
 	}()
 
-	// Connect to 3x-ui panel with retry on startup
-	logger.Info("Connecting to 3x-ui panel")
-	const startupLoginMaxAttempts = 5
-	startupLoginDelay := 5 * time.Second
-	for i := 0; i < startupLoginMaxAttempts; i++ {
-		ctx, cancel := context.WithTimeout(context.Background(), config.XUILoginTimeout)
-		err = xuiClient.Login(ctx)
-		cancel()
-		if err == nil {
-			logger.Info("3x-ui panel connected")
-			break
+	// Connect to 3x-ui panel in background (non-blocking startup)
+	// This allows the bot to start even if the panel is temporarily unavailable
+	// The circuit breaker will handle reconnection attempts
+	go func() {
+		defer recoverAndReport("XUI login")
+		logger.Info("Connecting to 3x-ui panel (background)")
+		const startupLoginMaxAttempts = 5
+		startupLoginDelay := 5 * time.Second
+		for i := 0; i < startupLoginMaxAttempts; i++ {
+			ctx, cancel := context.WithTimeout(context.Background(), config.XUILoginTimeout)
+			err := xuiClient.Login(ctx)
+			cancel()
+			if err == nil {
+				logger.Info("3x-ui panel connected")
+				return
+			}
+			if i == startupLoginMaxAttempts-1 {
+				logger.Warn("Failed to connect to 3x-ui panel after max attempts, will retry via circuit breaker",
+					zap.Error(err),
+					zap.Int("attempts", startupLoginMaxAttempts))
+				return
+			}
+			logger.Warn("3x-ui login failed, retrying...",
+				zap.Int("attempt", i+1),
+				zap.Int("max_attempts", startupLoginMaxAttempts),
+				zap.Error(err))
+			time.Sleep(startupLoginDelay + time.Duration(rand.Int63n(int64(startupLoginDelay/2))))
 		}
-		if i == startupLoginMaxAttempts-1 {
-			logger.Fatal("Failed to connect to 3x-ui panel",
-				zap.Error(err),
-				zap.Int("attempts", startupLoginMaxAttempts))
-		}
-		logger.Warn("3x-ui login failed, retrying...",
-			zap.Int("attempt", i+1),
-			zap.Int("max_attempts", startupLoginMaxAttempts),
-			zap.Error(err))
-		time.Sleep(startupLoginDelay + time.Duration(rand.Int63n(int64(startupLoginDelay/2))))
-	}
+	}()
 
 	// Initialize Telegram bot
 	logger.Info("Validating Telegram bot token")
