@@ -184,7 +184,7 @@ func main() {
 	defer subProxy.Stop()
 
 	// Create bot handler
-	handler := bot.NewHandler(botAPI, cfg, dbService, xuiClient, botConfig, subService)
+	handler := bot.NewHandler(botAPI, cfg, dbService, xuiClient, botConfig, subService, getVersion())
 
 	// Initialize and start web server (health + trial pages)
 	webServer := web.NewServer(fmt.Sprintf(":%d", cfg.HealthCheckPort), dbService, xuiClient, cfg, botConfig, subService, subProxy)
