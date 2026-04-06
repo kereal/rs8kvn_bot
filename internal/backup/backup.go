@@ -57,26 +57,6 @@ func validatePath(path string) error {
 	return nil
 }
 
-// isSQLiteFile checks if a file starts with the SQLite magic header.
-func isSQLiteFile(path string) (bool, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return false, err
-	}
-	defer f.Close()
-
-	header := make([]byte, 16)
-	n, err := f.Read(header)
-	if err != nil && err != io.EOF {
-		return false, err
-	}
-	if n < 16 {
-		return false, nil
-	}
-
-	return string(header[:15]) == "SQLite format 3", nil
-}
-
 // checkpointWAL opens the database in read-only mode, checkpoints WAL, and closes it.
 // This ensures the main database file contains all committed data before file copy.
 func checkpointWAL(ctx context.Context, dbPath string) error {

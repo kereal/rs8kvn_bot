@@ -1,0 +1,79 @@
+{
+  "repository": "rs8kvn_bot",
+  "path": "/home/kereal/rs8kvn_bot",
+  "language": "Go 1.25.0",
+  "framework": "telegram-bot-api/v5, GORM SQLite",
+  "modules": [
+    {"name": "bot", "files": 25, "purpose": "Telegram bot handlers, commands, callbacks"},
+    {"name": "xui", "files": 5, "purpose": "3x-ui panel API client"},
+    {"name": "web", "files": 3, "purpose": "HTTP server for health/trial pages"},
+    {"name": "database", "files": 2, "purpose": "SQLite with GORM, migrations"},
+    {"name": "subproxy", "files": 6, "purpose": "Subscription proxy with caching"},
+    {"name": "service", "files": 2, "purpose": "Business logic layer"},
+    {"name": "scheduler", "files": 4, "purpose": "Background jobs (backup, trial cleanup)"},
+    {"name": "config", "files": 3, "purpose": "Configuration loading"},
+    {"name": "logger", "files": 2, "purpose": "Zap logging with rotation"},
+    {"name": "ratelimiter", "files": 4, "purpose": "Rate limiting per user"},
+    {"name": "heartbeat", "files": 2, "purpose": "External health checks"},
+    {"name": "backup", "files": 2, "purpose": "Database backups"},
+    {"name": "utils", "files": 4, "purpose": "UUID, QR code generation"}
+  ],
+  "components": {
+    "EntryPoint": "cmd/bot/main.go",
+    "BotHandlers": "internal/bot/handler.go",
+    "DatabaseService": "internal/database/database.go",
+    "XUIClient": "internal/xui/client.go",
+    "SubscriptionService": "internal/service/subscription.go",
+    "WebServer": "internal/web/web.go"
+  },
+  "apis": {
+    "TelegramBot": "github.com/go-telegram-bot-api/telegram-bot-api/v5",
+    "Database": "gorm.io/gorm",
+    "Migration": "github.com/golang-migrate/migrate/v4"
+  },
+  "dependencies": {
+    "direct": 11,
+    "total": 40
+  },
+  "flows": [
+    {
+      "name": "Subscription Creation",
+      "path": "User → /start → bot.NewHandler → service.CreateSubscription → xui.AddClient → DB.Save → URL"
+    },
+    {
+      "name": "Subscription Fetch",
+      "path": "User → /sub → bot.GetSubscription → cache.Get → DB.Get → subscription URL"
+    },
+    {
+      "name": "Referral Tracking",
+      "path": "User /start with ref → bot.IncrementReferral → referralCache.Increment → periodic sync to DB"
+    },
+    {
+      "name": "Trial Subscription",
+      "path": "User /trial → web.CreateTrial → xui.AddClient → DB.Save → trial landing page"
+    }
+  ],
+  "architecture": {
+    "type": "Layered",
+    "layers": ["cmd", "internal/bot", "internal/service", "internal/xui", "internal/database"],
+    "patterns": ["Dependency Injection", "Repository Pattern", "Circuit Breaker", "Worker Pool"]
+  },
+  "test_coverage": {
+    "overall": "~80%",
+    "best": ["flag 97.7%", "ratelimiter 97.4%", "heartbeat 96.2%"],
+    "worst": ["service 24.8%", "cmd 6.1%"]
+  },
+  "features": [
+    "Telegram bot with VLESS/VMess subscription distribution",
+    "Referral system with in-memory cache + periodic sync",
+    "QR code generation",
+    "Trial subscriptions",
+    "Health check endpoints (/healthz, /readyz)",
+    "Database migrations",
+    "Rate limiting per user",
+    "Circuit breaker for 3x-ui",
+    "Graceful shutdown",
+    "O(1) LRU cache"
+  ],
+  "discovered_at": "2026-04-06T00:32:00+03:00"
+}

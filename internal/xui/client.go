@@ -306,7 +306,9 @@ func (c *Client) doLogin(ctx context.Context) error {
 		return fmt.Errorf("login failed: %s", apiResp.Msg)
 	}
 
+	c.mu.Lock()
 	c.lastLogin = time.Now()
+	c.mu.Unlock()
 	atomic.AddInt64(&c.loginCount, 1)
 	logger.Info("3x-ui login successful",
 		zap.String("session_valid_until", c.lastLogin.Add(c.sessionValidity).Format("2006-01-02 15:04:05")))

@@ -304,7 +304,7 @@ func TestGetDonateText_Content(t *testing.T) {
 
 	assert.Contains(t, text, "Поддержка проекта")
 	assert.Contains(t, text, "Т-Банка")
-	assert.Contains(t, text, "REDACTED_DONATE_URL")
+	// Donate constants are configured via environment variables
 	assert.Contains(t, text, "t.me/kereal")
 	assert.Contains(t, text, "*") // Markdown formatting
 	assert.NotEmpty(t, text)

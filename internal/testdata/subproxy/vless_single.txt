@@ -1,0 +1,1 @@
+vless://b0504246-8d12-4f96-a1c4-e6e9c65a7d70@proxy.example.com:443?encryption=none&flow=xtls-rprx-vision&security=tls&sni=proxy.example.com&alpn=h2,http/1.1#VIP

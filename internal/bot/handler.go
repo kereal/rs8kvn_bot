@@ -46,9 +46,10 @@ type Handler struct {
 	referralCache       *ReferralCache
 	sender              *MessageSender
 	keyboards           *KeyboardBuilder
+	version             string
 }
 
-func NewHandler(bot interfaces.BotAPI, cfg *config.Config, db interfaces.DatabaseService, xuiClient interfaces.XUIClient, botConfig *BotConfig, subService *service.SubscriptionService) *Handler {
+func NewHandler(bot interfaces.BotAPI, cfg *config.Config, db interfaces.DatabaseService, xuiClient interfaces.XUIClient, botConfig *BotConfig, subService *service.SubscriptionService, version string) *Handler {
 	rl := ratelimiter.NewPerUserRateLimiter(float64(config.RateLimiterMaxTokens), float64(config.RateLimiterRefillRate))
 	kb := NewKeyboardBuilder(botConfig.Username, cfg.ContactUsername, config.DonateCardNumber, config.DonateURL, cfg.SiteURL)
 
@@ -67,6 +68,7 @@ func NewHandler(bot interfaces.BotAPI, cfg *config.Config, db interfaces.Databas
 		referralCache:       NewReferralCache(db),
 		sender:              NewMessageSender(bot, rl),
 		keyboards:           kb,
+		version:             version,
 	}
 }
 
@@ -93,6 +95,8 @@ func (h *Handler) HandleUpdate(ctx context.Context, update tgbotapi.Update) {
 				h.HandleSend(ctx, update)
 			case "refstats":
 				h.HandleRefstats(ctx, update)
+			case "v":
+				h.HandleVersion(ctx, update)
 			default:
 				h.SendMessage(ctx, update.Message.Chat.ID,
 					"Неизвестная команда. Используйте /start или /help")

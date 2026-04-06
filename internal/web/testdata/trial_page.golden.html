@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RS8 KVN</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }
+        .container { background: white; border-radius: 20px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); padding: 32px; max-width: 400px; width: 100%; text-align: center; }
+        h2 { color: #333; margin: 24px 0 12px; font-size: 18px; }
+        p { color: #666; line-height: 1.6; margin-bottom: 20px; }
+        .btn { display: block; width: 100%; padding: 14px 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 12px; font-size: 16px; font-weight: 600; cursor: pointer; text-decoration: none; margin-bottom: 10px; transition: transform 0.2s, box-shadow 0.2s; }
+        .btn:hover { transform: translateY(-2px); box-shadow: 0 10px 30px rgba(102, 126, 234, 0.4); }
+        .btn-secondary { background: #f0f0f0; color: #333; }
+        .btn-secondary:hover { background: #e0e0e0; box-shadow: none; }
+        .btn-row { display: flex; gap: 10px; }
+        .btn-row .btn { flex: 1; }
+        .info { background: #f8f9fa; border-radius: 12px; padding: 16px; margin-bottom: 20px; }
+        .info-row { display: flex; justify-content: space-between; padding: 8px 0; }
+        .info-label { color: #666; }
+        .info-value { color: #333; font-weight: 500; }
+        .note { font-size: 14px; color: #9b59b6; margin-top: 20px; font-weight: 500; }
+        .divider { height: 1px; background: #eee; margin: 20px 0; }
+        .copy-link { color: #666; text-decoration: underline; font-size: 14px; cursor: pointer; display: inline-block; margin-top: 8px; }
+        .logo { margin-bottom: 24px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <img class="logo" src="/static/logo.png">
+
+        <h2>📱 Скачайте Happ</h2>
+        <div class="btn-row">
+            <a href="https://play.google.com/store/apps/details?id=com.happproxy" target="_blank" class="btn btn-secondary">🤖 Android</a>
+            <a href="https://apps.apple.com/ru/app/happ-proxy-utility-plus/id6746188973" target="_blank" class="btn btn-secondary">🍎 iOS</a>
+        </div>
+
+        <h2>➕ Добавьте подписку</h2>
+        <a href="{{.HappLink}}" class="btn">📥 Добавить в Happ</a>
+        <a href="javascript:void(0)" onclick="copyToClipboard()" class="copy-link">📋 Скопировать ссылку</a>
+
+        <h2>🔌 Нажмите большую кнопку включения</h2>
+
+        <h2>📱 Активируйте в Telegram</h2>
+        <a href="{{.TelegramLink}}" class="btn">🚀 Активировать</a>
+
+        <div class="divider"></div>
+
+        <div class="info">
+            <div class="info-row"><span class="info-label">⏱ Срок действия</span><span class="info-value">{{.TrialHours}} часа</span></div>
+        </div>
+
+        <p class="note">💎 После активации вы получите подписку без ограничения по времени!</p>
+    </div>
+    <script>
+        function copyToClipboard() {
+            var text = '{{.SubURL}}';
+            if (navigator.clipboard && window.isSecureContext) {
+                navigator.clipboard.writeText(text).then(function() {
+                    alert('Скопировано!');
+                }, function(err) {
+                    fallbackCopy(text);
+                });
+            } else {
+                fallbackCopy(text);
+            }
+        }
+
+        function fallbackCopy(text) {
+            var textArea = document.createElement("textarea");
+            textArea.value = text;
+            textArea.style.position = "fixed";
+            textArea.style.left = "-9999px";
+            document.body.appendChild(textArea);
+            textArea.select();
+            try {
+                document.execCommand('copy');
+                alert('Скопировано!');
+            } catch (err) {
+                alert('Ошибка копирования. Скопируйте ссылку вручную.');
+            }
+            document.body.removeChild(textArea);
+        }
+    </script>
+</body>
+</html>

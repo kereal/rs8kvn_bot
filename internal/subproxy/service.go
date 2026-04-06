@@ -88,7 +88,7 @@ func (s *Service) ReloadConfig() {
 	s.servers = extra.Servers
 	s.mu.Unlock()
 
-	logger.Info("Subscription proxy: extra config reloaded",
+	logger.Debug("Subscription proxy: extra config reloaded",
 		zap.String("file", s.cfg.SubExtraServersFile),
 		zap.Int("old_headers", oldHeaders),
 		zap.Int("new_headers", len(extra.Headers)),

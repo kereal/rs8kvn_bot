@@ -191,11 +191,14 @@ const (
 // Donate Constants
 const (
 	// DonateCardNumber is the card number for donations (T-Bank)
-	DonateCardNumber = "REDACTED_CARD_NUMBER"
+	// Configure via DONATE_CARD_NUMBER environment variable
+	DonateCardNumber = ""
 
 	// DonateURL is the T-Bank collection link for donations
-	DonateURL = "REDACTED_DONATE_URL"
+	// Configure via DONATE_URL environment variable
+	DonateURL = ""
 
 	// ContactUsername is the Telegram username for contact/support
-	ContactUsername = "kereal"
+	// Configure via CONTACT_USERNAME environment variable
+	ContactUsername = ""
 )

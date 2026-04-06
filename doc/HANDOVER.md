@@ -100,20 +100,23 @@ tgvpn_go/
 
 | Module | Coverage | Status |
 |--------|----------|--------|
-| `internal/ratelimiter` | **97.5%** | ✅ Excellent |
-| `internal/bot` | **94.2%** | ✅ Excellent |
-| `internal/heartbeat` | **95.8%** | ✅ Excellent |
-| `internal/service` | **95.7%** | ✅ Excellent |
+| `internal/flag` | **97.7%** | ✅ Excellent |
+| `internal/ratelimiter` | **97.4%** | ✅ Excellent |
+| `internal/heartbeat` | **96.2%** | ✅ Excellent |
+| `internal/config` | **91.5%** | ✅ Excellent |
 | `internal/web` | **90.7%** | ✅ Excellent |
-| `internal/xui` | **91.1%** | ✅ Excellent |
+| `internal/xui` | **90.4%** | ✅ Excellent |
+| `internal/bot` | **87.8%** | ✅ Good |
+| `internal/utils` | **87.5%** | ✅ Good |
+| `internal/logger` | **88.9%** | ✅ Good |
 | `internal/subproxy` | **82.5%** | ✅ Good |
-| `internal/logger` | **87.6%** | ✅ Good |
-| `internal/config` | **87.3%** | ✅ Good |
-| `internal/database` | **82.9%** | ✅ Good |
-| `internal/backup` | **82.3%** | ✅ Good |
-| `internal/utils` | **75.0%** | ✅ Good |
-| `cmd/bot` | **14.9%** | 🟡 Low (main is integration) |
-| **Overall** | **~80%** | ✅ Good |
+| `internal/backup` | **76.5%** | ✅ Good |
+| `internal/database` | **59.5%** | 🟡 Moderate |
+| `internal/service` | **24.8%** | 🟡 Low |
+| `cmd/bot` | **6.1%** | 🟡 Low (main is integration) |
+| `internal/scheduler` | **0.0%** | 🔴 No tests |
+| `internal/testutil` | **0.0%** | 🔴 No tests |
+| **Overall** | **~70.7%** | ✅ Good |
 
 All tests pass with `-race` detector. golangci-lint: 0 new issues (2 pre-existing).
 

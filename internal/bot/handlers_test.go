@@ -39,7 +39,7 @@ func TestNewHandler(t *testing.T) {
 	xuiClient, err := xui.NewClient(cfg.XUIHost, "admin", "password", 15*time.Minute)
 	require.NoError(t, err, "Failed to create XUI client")
 	mockDB := testutil.NewMockDatabaseService()
-	handler := NewHandler(testutil.NewMockBotAPI(), cfg, mockDB, xuiClient, NewTestBotConfig(), nil)
+	handler := NewHandler(testutil.NewMockBotAPI(), cfg, mockDB, xuiClient, NewTestBotConfig(), nil, "")
 
 	require.NotNil(t, handler, "NewHandler returned nil")
 	assert.Equal(t, cfg, handler.cfg, "Config not set correctly")
@@ -97,7 +97,7 @@ func TestHandleBroadcast_MessageTooLong(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil)
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
 
 	longMessage := make([]byte, config.MaxTelegramMessageLen+1)
 	for i := range longMessage {
@@ -120,7 +120,7 @@ func TestHandleSend_RateLimit(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil)
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
 
 	mockDB.GetTelegramIDByUsernameFunc = func(ctx context.Context, username string) (int64, error) {
 		return 999888777, nil
@@ -142,7 +142,7 @@ func TestHandleSend_NoArguments(t *testing.T) {
 	cfg := &config.Config{TelegramAdminID: 123456}
 	mockDB := testutil.NewMockDatabaseService()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewMockXUIClient(), NewTestBotConfig(), nil)
+	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewMockXUIClient(), NewTestBotConfig(), nil, "")
 
 	ctx := context.Background()
 	update := tgbotapi.Update{
@@ -163,7 +163,7 @@ func TestHandleSend_OnlyTarget(t *testing.T) {
 	cfg := &config.Config{TelegramAdminID: 123456}
 	mockDB := testutil.NewMockDatabaseService()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewMockXUIClient(), NewTestBotConfig(), nil)
+	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewMockXUIClient(), NewTestBotConfig(), nil, "")
 
 	ctx := context.Background()
 	update := tgbotapi.Update{
@@ -222,7 +222,7 @@ func TestSendInviteLink_DatabaseError(t *testing.T) {
 		TelegramAdminID: 12345,
 		TrafficLimitGB:  100,
 	}
-	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewMockXUIClient(), NewTestBotConfig(), nil)
+	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewMockXUIClient(), NewTestBotConfig(), nil, "")
 
 	mockDB.GetOrCreateInviteFunc = func(ctx context.Context, referrerTGID int64, code string) (*database.Invite, error) {
 		return nil, fmt.Errorf("database error")
@@ -293,7 +293,7 @@ func TestHandler_CacheField(t *testing.T) {
 // === Rate limiter tests ===
 
 func TestHandler_RateLimiter(t *testing.T) {
-	handler := NewHandler(testutil.NewMockBotAPI(), &config.Config{}, testutil.NewMockDatabaseService(), nil, NewTestBotConfig(), nil)
+	handler := NewHandler(testutil.NewMockBotAPI(), &config.Config{}, testutil.NewMockDatabaseService(), nil, NewTestBotConfig(), nil, "")
 
 	assert.NotNil(t, handler.rateLimiter, "Rate limiter should be initialized")
 
@@ -470,7 +470,7 @@ func TestHandleUpdate_CommandRouting(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			mockBot := testutil.NewMockBotAPI()
 			mockDB := testutil.NewMockDatabaseService()
-			handler := NewHandler(mockBot, cfg, mockDB, xuiClient, NewTestBotConfig(), nil)
+			handler := NewHandler(mockBot, cfg, mockDB, xuiClient, NewTestBotConfig(), nil, "")
 
 			handler.HandleUpdate(context.Background(), tt.update)
 
@@ -493,7 +493,7 @@ func TestHandleUpdate_NonCommandMessage(t *testing.T) {
 
 	mockBot := testutil.NewMockBotAPI()
 	mockDB := testutil.NewMockDatabaseService()
-	handler := NewHandler(mockBot, cfg, mockDB, xuiClient, NewTestBotConfig(), nil)
+	handler := NewHandler(mockBot, cfg, mockDB, xuiClient, NewTestBotConfig(), nil, "")
 
 	update := tgbotapi.Update{
 		Message: &tgbotapi.Message{
@@ -534,7 +534,7 @@ func TestHandleUpdate_CallbackQuery(t *testing.T) {
 			Status:         "active",
 		}, nil
 	}
-	handler := NewHandler(mockBot, cfg, mockDB, xuiClient, NewTestBotConfig(), nil)
+	handler := NewHandler(mockBot, cfg, mockDB, xuiClient, NewTestBotConfig(), nil, "")
 
 	update := tgbotapi.Update{
 		CallbackQuery: &tgbotapi.CallbackQuery{

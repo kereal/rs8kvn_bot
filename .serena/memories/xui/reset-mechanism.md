@@ -58,4 +58,4 @@ func (s *InboundService) autoRenewClients(tx *gorm.DB) (bool, int64, error) {
 
 Если пользователь не просматривает подписку, данные в базе бота устаревают после авто-продления в 3x-ui.
 
-**Решение:** Фоновая синхронизация (cron job) - задача #34 в IMPROVEMENTS.md
+**Решение:** Фоновая синхронизация (cron job)

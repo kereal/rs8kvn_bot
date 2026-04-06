@@ -84,9 +84,11 @@ func TestConstants_AdminRateLimit(t *testing.T) {
 }
 
 func TestConstants_Donate(t *testing.T) {
-	assert.Equal(t, "REDACTED_CARD_NUMBER", DonateCardNumber)
-	assert.Contains(t, DonateURL, "tbank.ru")
-	assert.Equal(t, "kereal", ContactUsername)
+	// Donate constants should be configured via environment variables
+	// Default values are empty strings for privacy
+	assert.Equal(t, "", DonateCardNumber)
+	assert.Equal(t, "", DonateURL)
+	assert.Equal(t, "", ContactUsername)
 }
 
 func TestConstants_Backup(t *testing.T) {
