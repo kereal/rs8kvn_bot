@@ -174,10 +174,10 @@ func TestE2E_Concurrent_Handler_CreateSubscription(t *testing.T) {
 			},
 		})
 		mu.Lock()
-		if env.botAPI.SendCalled {
+		if env.botAPI.SendCalledSafe() {
 			sendCount++
 		}
-		env.botAPI.SendCalled = false
+		env.botAPI.SetSendCalled(false)
 		mu.Unlock()
 	}
 

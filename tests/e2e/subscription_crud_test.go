@@ -50,7 +50,7 @@ func TestE2E_CreateSubscription_Success(t *testing.T) {
 	assert.NotEmpty(t, sub.SubscriptionID, "SubscriptionID should be set")
 	assert.NotEmpty(t, sub.SubscriptionURL, "SubscriptionURL should be set")
 
-	assert.True(t, env.botAPI.SendCalled, "Confirmation message should be sent")
+	assert.True(t, env.botAPI.SendCalledSafe(), "Confirmation message should be sent")
 	assert.Contains(t, env.botAPI.LastSentText, "подписк", "Should mention subscription")
 
 	assert.GreaterOrEqual(t, env.botAPI.SendCount, 2, "Should send at least 2 messages: user confirmation + admin notification")
@@ -162,7 +162,7 @@ func TestE2E_CreateSubscription_XUIFailure(t *testing.T) {
 		},
 	})
 
-	assert.True(t, env.botAPI.SendCalled, "Error message should be sent")
+	assert.True(t, env.botAPI.SendCalledSafe(), "Error message should be sent")
 	assert.Contains(t, env.botAPI.LastSentText, "подключиться к серверу", "Should show connection error message")
 
 	_, err := env.db.GetByTelegramID(ctx, env.chatID)

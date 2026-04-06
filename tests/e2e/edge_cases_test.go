@@ -382,5 +382,5 @@ func TestE2E_RateLimit_ExactlyAtLimit(t *testing.T) {
 		env.handler.HandleSend(ctx, update)
 	}
 
-	assert.True(t, env.botAPI.SendCalled, "At least one message should be sent")
+	assert.True(t, env.botAPI.SendCalledSafe(), "At least one message should be sent")
 }

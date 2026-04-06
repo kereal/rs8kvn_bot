@@ -1521,3 +1521,61 @@ func TestHandleInvite_ParallelRequests(t *testing.T) {
 	assert.Equal(t, numParallel, successCount, "all parallel requests should complete successfully")
 	assert.Equal(t, numParallel, successCount+rateLimitedCount, "all requests should return a response")
 }
+
+func TestRenderTrialPage_Golden(t *testing.T) {
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	cfg := &config.Config{
+		XUIHost:            "http://localhost:2053",
+		XUIInboundID:       1,
+		XUISubPath:         "sub",
+		SiteURL:            "https://example.com",
+		TrialDurationHours: 24,
+	}
+
+	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig(), nil, nil)
+	defer srv.db.Close()
+
+	subID := "test_sub_123"
+	subURL := "https://example.com/sub/abc123"
+	telegramLink := "https://t.me/testbot?start=trial_abc123"
+	trialHours := 24
+
+	w := httptest.NewRecorder()
+	srv.renderTrialPage(w, subID, subURL, telegramLink, trialHours)
+
+	rendered := w.Body.String()
+
+	assert.Contains(t, rendered, "<!DOCTYPE html>", "Should have HTML doctype")
+	assert.Contains(t, rendered, "RS8 KVN", "Should have title")
+	assert.Contains(t, rendered, "Добавить в Happ", "Should have Add to Happ button")
+	assert.Contains(t, rendered, "Активировать", "Should have Activate button")
+	assert.Contains(t, rendered, "24 часа", "Should have trial hours")
+	assert.Contains(t, rendered, "Скопировать ссылку", "Should have copy link")
+}
+
+func TestRenderTrialPage_Structure(t *testing.T) {
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	cfg := &config.Config{
+		XUIHost:            "http://localhost:2053",
+		XUIInboundID:       1,
+		XUISubPath:         "sub",
+		SiteURL:            "https://example.com",
+		TrialDurationHours: 24,
+	}
+
+	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig(), nil, nil)
+	defer srv.db.Close()
+
+	w := httptest.NewRecorder()
+	srv.renderTrialPage(w, "test_sub_123", "https://example.com/sub/abc123", "https://t.me/testbot?start=trial_abc123", 24)
+
+	rendered := w.Body.String()
+
+	assert.Contains(t, rendered, "<!DOCTYPE html>", "Should have HTML doctype")
+	assert.Contains(t, rendered, "RS8 KVN", "Should have title")
+	assert.Contains(t, rendered, "Добавить в Happ", "Should have Add to Happ button")
+	assert.Contains(t, rendered, "Активировать", "Should have Activate button")
+	assert.Contains(t, rendered, "24 часа", "Should have trial hours")
+}

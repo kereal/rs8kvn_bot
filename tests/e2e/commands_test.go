@@ -33,7 +33,7 @@ func TestE2E_StartCommand_NoSubscription(t *testing.T) {
 		},
 	})
 
-	assert.True(t, env.botAPI.SendCalled, "Main menu should be sent")
+	assert.True(t, env.botAPI.SendCalledSafe(), "Main menu should be sent")
 	assert.Contains(t, env.botAPI.LastSentText, "Привет", "Should greet user")
 	assert.Contains(t, env.botAPI.LastSentText, "подписк", "Should mention subscription")
 }
@@ -70,7 +70,7 @@ func TestE2E_StartCommand_WithSubscription(t *testing.T) {
 		},
 	})
 
-	assert.True(t, env.botAPI.SendCalled, "Subscription menu should be sent")
+	assert.True(t, env.botAPI.SendCalledSafe(), "Subscription menu should be sent")
 	assert.Contains(t, env.botAPI.LastSentText, "кнопки ниже", "Should show menu with buttons")
 }
 
@@ -109,7 +109,7 @@ func TestE2E_MySubscription(t *testing.T) {
 		},
 	})
 
-	assert.True(t, env.botAPI.SendCalled, "Subscription info should be sent")
+	assert.True(t, env.botAPI.SendCalledSafe(), "Subscription info should be sent")
 	assert.Contains(t, env.botAPI.LastSentText, "подписк", "Should mention subscription")
 	assert.Contains(t, env.botAPI.LastSentText, "https://example.com/sub/test-sub-id", "Should contain subscription URL")
 }
@@ -132,7 +132,7 @@ func TestE2E_HelpCommand(t *testing.T) {
 		},
 	})
 
-	assert.True(t, env.botAPI.SendCalled, "Help text should be sent")
+	assert.True(t, env.botAPI.SendCalledSafe(), "Help text should be sent")
 	assert.Contains(t, env.botAPI.LastSentText, "Справка", "Should contain help text")
 }
 
@@ -154,7 +154,7 @@ func TestE2E_InviteCommand(t *testing.T) {
 		},
 	})
 
-	assert.True(t, env.botAPI.SendCalled, "Invite link should be sent")
+	assert.True(t, env.botAPI.SendCalledSafe(), "Invite link should be sent")
 	assert.Contains(t, env.botAPI.LastSentText, "пригласительная ссылка", "Should mention invite link")
 	assert.Contains(t, env.botAPI.LastSentText, "t.me/testbot?start=share_", "Should contain telegram invite URL")
 }
@@ -189,5 +189,5 @@ func TestE2E_StartCommand_AdminUser(t *testing.T) {
 		},
 	})
 
-	assert.True(t, mockBot.SendCalled, "Admin should get start menu")
+	assert.True(t, mockBot.SendCalledSafe(), "Admin should get start menu")
 }

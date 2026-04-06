@@ -35,7 +35,7 @@ func TestE2E_ShareLink_CachesPendingInvite(t *testing.T) {
 		Message: newCommandMessage(env.chatID, env.chatID, env.username, "/start share_sharecode123", 6),
 	})
 
-	assert.True(t, env.botAPI.SendCalled, "Invite message should be sent")
+	assert.True(t, env.botAPI.SendCalledSafe(), "Invite message should be sent")
 	assert.Contains(t, env.botAPI.LastSentText, "пригласили", "Should show invited message")
 	assert.Contains(t, env.botAPI.LastSentText, "реферальное", "Should mention referral")
 }
@@ -66,7 +66,7 @@ func TestE2E_ShareLink_ExistingSubscription_Ignored(t *testing.T) {
 		Message: newCommandMessage(env.chatID, env.chatID, env.username, "/start share_sharecode456", 6),
 	})
 
-	assert.True(t, env.botAPI.SendCalled, "Menu should be sent")
+	assert.True(t, env.botAPI.SendCalledSafe(), "Menu should be sent")
 	assert.Contains(t, env.botAPI.LastSentText, "кнопки ниже", "Should show normal menu, not invite message")
 }
 
@@ -82,7 +82,7 @@ func TestE2E_ShareLink_InvalidCode(t *testing.T) {
 		Message: newCommandMessage(env.chatID, env.chatID, env.username, "/start share_invalidcode", 6),
 	})
 
-	assert.True(t, env.botAPI.SendCalled, "Menu should be sent")
+	assert.True(t, env.botAPI.SendCalledSafe(), "Menu should be sent")
 	assert.Contains(t, env.botAPI.LastSentText, "Привет", "Should show normal menu for invalid code")
 }
 
@@ -278,7 +278,7 @@ func TestE2E_InviteLink_FullFlow_BindTrial(t *testing.T) {
 		Message: newCommandMessage(env.chatID, env.chatID, env.username, "/start trial_"+trialSubID, 6),
 	})
 
-	assert.True(t, env.botAPI.SendCalled, "Activation message should be sent")
+	assert.True(t, env.botAPI.SendCalledSafe(), "Activation message should be sent")
 	assert.Contains(t, env.botAPI.LastSentText, "подписк", "Should mention subscription")
 
 	sub, err := env.db.GetByTelegramID(ctx, env.chatID)
@@ -327,7 +327,7 @@ func TestE2E_FullCycle_InviteToQR(t *testing.T) {
 		Message: newCommandMessage(env.chatID, env.chatID, env.username, "/start trial_"+trialSubID, 6),
 	})
 
-	assert.True(t, env.botAPI.SendCalled, "Activation message should be sent")
+	assert.True(t, env.botAPI.SendCalledSafe(), "Activation message should be sent")
 	assert.Contains(t, env.botAPI.LastSentText, "подписк", "Should mention subscription")
 
 	sub, err := env.db.GetByTelegramID(ctx, env.chatID)
@@ -355,8 +355,8 @@ func TestE2E_FullCycle_InviteToQR(t *testing.T) {
 		},
 	})
 
-	assert.True(t, env.botAPI.SendCalled, "QR should be sent")
-	assert.True(t, env.botAPI.RequestCalled, "QR photo should be uploaded")
+	assert.True(t, env.botAPI.SendCalledSafe(), "QR should be sent")
+	assert.True(t, env.botAPI.RequestCalledSafe(), "QR photo should be uploaded")
 }
 
 func TestE2E_FullCycle_ShareToSubscription(t *testing.T) {
@@ -374,7 +374,7 @@ func TestE2E_FullCycle_ShareToSubscription(t *testing.T) {
 		Message: newCommandMessage(env.chatID, env.chatID, env.username, "/start share_"+inviteCode, 6),
 	})
 
-	assert.True(t, env.botAPI.SendCalled, "Should respond to share link")
+	assert.True(t, env.botAPI.SendCalledSafe(), "Should respond to share link")
 	assert.Contains(t, env.botAPI.LastSentText, "пригласил", "Should mention invitation")
 
 	resetMockBotAPI(env.botAPI)
@@ -397,7 +397,7 @@ func TestE2E_FullCycle_ShareToSubscription(t *testing.T) {
 		},
 	})
 
-	assert.True(t, env.botAPI.SendCalled, "Subscription confirmation should be sent")
+	assert.True(t, env.botAPI.SendCalledSafe(), "Subscription confirmation should be sent")
 	assert.Contains(t, env.botAPI.LastSentText, "подписк", "Should mention subscription")
 
 	sub, err := env.db.GetByTelegramID(ctx, env.chatID)
@@ -448,7 +448,7 @@ func TestE2E_FullCycle_MultipleUsersViaInvite(t *testing.T) {
 			Message: newCommandMessage(chatID, chatID, username, "/start trial_"+trialSubID, 6),
 		})
 
-		assert.True(t, env.botAPI.SendCalled, "User %d should get activation message", chatID)
+		assert.True(t, env.botAPI.SendCalledSafe(), "User %d should get activation message", chatID)
 
 		sub, err := env.db.GetByTelegramID(ctx, chatID)
 		require.NoError(t, err, "User %d should have subscription", chatID)
@@ -499,14 +499,14 @@ func TestE2E_FullCycle_InviteThenShare(t *testing.T) {
 		Message: newCommandMessage(env.chatID, env.chatID, env.username, "/start trial_"+trialSubID, 6),
 	})
 
-	assert.True(t, env.botAPI.SendCalled)
+	assert.True(t, env.botAPI.SendCalledSafe())
 
 	resetMockBotAPI(env.botAPI)
 	env.handler.HandleStart(ctx, tgbotapi.Update{
 		Message: newCommandMessage(env.chatID, env.chatID, env.username, "/start share_"+shareInviteCode, 6),
 	})
 
-	assert.True(t, env.botAPI.SendCalled)
+	assert.True(t, env.botAPI.SendCalledSafe())
 	assert.NotContains(t, env.botAPI.LastSentText, "пригласил", "Should not show invite message when user has subscription")
 }
 
@@ -617,7 +617,62 @@ func TestE2E_Referral_RefstatsShowsData(t *testing.T) {
 	}
 	env.handler.HandleRefstats(ctx, update)
 
-	assert.True(t, env.botAPI.SendCalled, "Refstats should send message")
+	assert.True(t, env.botAPI.SendCalledSafe(), "Refstats should send message")
 	assert.Contains(t, env.botAPI.LastSentText, "Статистика рефералов", "Should show referral stats")
 	assert.Contains(t, env.botAPI.LastSentText, "3", "Should show total referrals")
+}
+
+func TestE2E_InviteChain_ABC(t *testing.T) {
+	env := setupE2EEnv(t)
+	defer env.db.Close()
+
+	ctx := context.Background()
+
+	// User A creates subscription (referrer)
+	userA := int64(100000)
+	_, err := env.subService.Create(ctx, userA, "user_a")
+	require.NoError(t, err)
+
+	// Create invite for A
+	_, err = env.db.GetOrCreateInvite(ctx, userA, "invite_a")
+	require.NoError(t, err)
+
+	// User B creates subscription (referred by A)
+	userB := int64(200000)
+	_, err = env.subService.Create(ctx, userB, "user_b")
+	require.NoError(t, err)
+
+	subB, err := env.db.GetByTelegramID(ctx, userB)
+	require.NoError(t, err)
+	subB.ReferredBy = 100000
+	err = env.db.UpdateSubscription(ctx, subB)
+	require.NoError(t, err)
+
+	subB, err = env.db.GetByTelegramID(ctx, userB)
+	require.NoError(t, err)
+	assert.Equal(t, int64(100000), subB.ReferredBy, "B should have A as referrer")
+
+	// Create invite for B
+	_, err = env.db.GetOrCreateInvite(ctx, userB, "invite_b")
+	require.NoError(t, err)
+
+	// User C creates subscription (referred by B)
+	userC := int64(300000)
+	_, err = env.subService.Create(ctx, userC, "user_c")
+	require.NoError(t, err)
+
+	subC, err := env.db.GetByTelegramID(ctx, userC)
+	require.NoError(t, err)
+	subC.ReferredBy = 200000
+	err = env.db.UpdateSubscription(ctx, subC)
+	require.NoError(t, err)
+
+	subC, err = env.db.GetByTelegramID(ctx, userC)
+	require.NoError(t, err)
+	assert.Equal(t, int64(200000), subC.ReferredBy, "C should have B as referrer")
+
+	// Verify A has no referrer
+	subA, err := env.db.GetByTelegramID(ctx, 100000)
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), subA.ReferredBy, "A should have no referrer")
 }

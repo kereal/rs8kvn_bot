@@ -222,7 +222,7 @@ func TestCreateSubscription_XUIFailure(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mockBot.SendCalled = false
+			mockBot.SetSendCalled(false)
 			mockBot.LastSentText = ""
 
 			mockXUI.AddClientWithIDFunc = func(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
@@ -923,7 +923,7 @@ func TestHandleBackToInvite(t *testing.T) {
 		handler.handleBackToInvite(ctx, chatID, username, messageID)
 	})
 
-	assert.True(t, mockBot.RequestCalled, "Bot.Request should be called for delete message")
+	assert.True(t, mockBot.RequestCalledSafe(), "Bot.Request should be called for delete message")
 }
 
 func TestHandleCreateSubscription_ZeroMessageID(t *testing.T) {

@@ -45,7 +45,7 @@ func TestE2E_DelCommand_Success(t *testing.T) {
 	}
 	env.handler.HandleDel(ctx, update)
 
-	assert.True(t, env.botAPI.SendCalled)
+	assert.True(t, env.botAPI.SendCalledSafe())
 	assert.Contains(t, env.botAPI.LastSentText, "Подписка успешно удалена")
 	assert.Contains(t, env.botAPI.LastSentText, fmt.Sprintf("%d", subID))
 
@@ -78,7 +78,7 @@ func TestE2E_DelCommand_NoArgs(t *testing.T) {
 	}
 	env.handler.HandleDel(ctx, update)
 
-	assert.True(t, env.botAPI.SendCalled)
+	assert.True(t, env.botAPI.SendCalledSafe())
 	assert.Contains(t, env.botAPI.LastSentText, "Использование: /del")
 }
 
@@ -105,7 +105,7 @@ func TestE2E_DelCommand_InvalidID(t *testing.T) {
 	}
 	env.handler.HandleDel(ctx, update)
 
-	assert.True(t, env.botAPI.SendCalled)
+	assert.True(t, env.botAPI.SendCalledSafe())
 	assert.Contains(t, env.botAPI.LastSentText, "Неверный формат ID")
 }
 
@@ -132,7 +132,7 @@ func TestE2E_DelCommand_NegativeID(t *testing.T) {
 	}
 	env.handler.HandleDel(ctx, update)
 
-	assert.True(t, env.botAPI.SendCalled)
+	assert.True(t, env.botAPI.SendCalledSafe())
 	assert.Contains(t, env.botAPI.LastSentText, "положительным числом")
 }
 
@@ -159,7 +159,7 @@ func TestE2E_DelCommand_NotFound(t *testing.T) {
 	}
 	env.handler.HandleDel(ctx, update)
 
-	assert.True(t, env.botAPI.SendCalled)
+	assert.True(t, env.botAPI.SendCalledSafe())
 	assert.Contains(t, env.botAPI.LastSentText, "не найдена")
 }
 
@@ -197,7 +197,7 @@ func TestE2E_DelCommand_XUIFailure(t *testing.T) {
 	}
 	env.handler.HandleDel(ctx, update)
 
-	assert.True(t, env.botAPI.SendCalled)
+	assert.True(t, env.botAPI.SendCalledSafe())
 	assert.Contains(t, env.botAPI.LastSentText, "Ошибка удаления клиента")
 
 	_, err = env.db.GetByID(ctx, sub.ID)
@@ -234,7 +234,7 @@ func TestE2E_BroadcastCommand_Success(t *testing.T) {
 	}
 	env.handler.HandleBroadcast(ctx, update)
 
-	assert.True(t, env.botAPI.SendCalled)
+	assert.True(t, env.botAPI.SendCalledSafe())
 	assert.GreaterOrEqual(t, env.botAPI.SendCount, 3, "Should send to at least 3 users")
 
 	assert.Contains(t, env.botAPI.LastSentText, "Рассылка завершена")
@@ -262,7 +262,7 @@ func TestE2E_BroadcastCommand_NoArgs(t *testing.T) {
 	}
 	env.handler.HandleBroadcast(ctx, update)
 
-	assert.True(t, env.botAPI.SendCalled)
+	assert.True(t, env.botAPI.SendCalledSafe())
 	assert.Contains(t, env.botAPI.LastSentText, "Использование: /broadcast")
 }
 
@@ -288,7 +288,7 @@ func TestE2E_BroadcastCommand_NoUsers(t *testing.T) {
 	}
 	env.handler.HandleBroadcast(ctx, update)
 
-	assert.True(t, env.botAPI.SendCalled)
+	assert.True(t, env.botAPI.SendCalledSafe())
 	assert.Contains(t, env.botAPI.LastSentText, "Нет пользователей")
 }
 
@@ -322,7 +322,7 @@ func TestE2E_BroadcastCommand_SomeFailures(t *testing.T) {
 	}
 	env.handler.HandleBroadcast(ctx, update)
 
-	assert.True(t, env.botAPI.SendCalled)
+	assert.True(t, env.botAPI.SendCalledSafe())
 	assert.Contains(t, env.botAPI.LastSentText, "Рассылка завершена")
 }
 
@@ -351,7 +351,7 @@ func TestE2E_SendCommand_ByTelegramID(t *testing.T) {
 	}
 	env.handler.HandleSend(ctx, update)
 
-	assert.True(t, env.botAPI.SendCalled)
+	assert.True(t, env.botAPI.SendCalledSafe())
 	assert.Contains(t, env.botAPI.LastSentText, "Сообщение отправлено")
 }
 
@@ -380,7 +380,7 @@ func TestE2E_SendCommand_ByUsername(t *testing.T) {
 	}
 	env.handler.HandleSend(ctx, update)
 
-	assert.True(t, env.botAPI.SendCalled)
+	assert.True(t, env.botAPI.SendCalledSafe())
 	assert.Contains(t, env.botAPI.LastSentText, "Сообщение отправлено")
 }
 
@@ -405,7 +405,7 @@ func TestE2E_SendCommand_UserNotFound(t *testing.T) {
 	}
 	env.handler.HandleSend(ctx, update)
 
-	assert.True(t, env.botAPI.SendCalled)
+	assert.True(t, env.botAPI.SendCalledSafe())
 	assert.Contains(t, env.botAPI.LastSentText, "не найден в базе")
 }
 
@@ -430,7 +430,7 @@ func TestE2E_SendCommand_NoArgs(t *testing.T) {
 	}
 	env.handler.HandleSend(ctx, update)
 
-	assert.True(t, env.botAPI.SendCalled)
+	assert.True(t, env.botAPI.SendCalledSafe())
 	assert.Contains(t, env.botAPI.LastSentText, "Использование: /send")
 }
 
@@ -460,7 +460,7 @@ func TestE2E_SendCommand_SendFails(t *testing.T) {
 	}
 	env.handler.HandleSend(ctx, update)
 
-	assert.True(t, env.botAPI.SendCalled)
+	assert.True(t, env.botAPI.SendCalledSafe())
 	assert.Contains(t, env.botAPI.LastSentText, "Ошибка отправки")
 }
 
@@ -484,7 +484,7 @@ func TestE2E_SendCommand_WithAtPrefix(t *testing.T) {
 	}
 	env.handler.HandleSend(ctx, update)
 
-	assert.True(t, env.botAPI.SendCalled)
+	assert.True(t, env.botAPI.SendCalledSafe())
 	assert.Contains(t, env.botAPI.LastSentText, "Сообщение отправлено")
 }
 
@@ -507,7 +507,7 @@ func TestE2E_SendCommand_OnlyMessageNoTarget(t *testing.T) {
 	}
 	env.handler.HandleSend(ctx, update)
 
-	assert.True(t, env.botAPI.SendCalled)
+	assert.True(t, env.botAPI.SendCalledSafe())
 	assert.Contains(t, env.botAPI.LastSentText, "Использование")
 }
 
@@ -530,7 +530,7 @@ func TestE2E_SendCommand_OnlyTargetNoMessage(t *testing.T) {
 	}
 	env.handler.HandleSend(ctx, update)
 
-	assert.True(t, env.botAPI.SendCalled)
+	assert.True(t, env.botAPI.SendCalledSafe())
 	assert.Contains(t, env.botAPI.LastSentText, "Использование")
 }
 
@@ -553,7 +553,7 @@ func TestE2E_SendCommand_RateLimitBlocksExcess(t *testing.T) {
 		},
 	}
 	env.handler.HandleSend(ctx, update)
-	require.True(t, env.botAPI.SendCalled, "First send should succeed")
+	require.True(t, env.botAPI.SendCalledSafe(), "First send should succeed")
 
 	update2 := tgbotapi.Update{
 		Message: &tgbotapi.Message{
@@ -566,7 +566,7 @@ func TestE2E_SendCommand_RateLimitBlocksExcess(t *testing.T) {
 	resetMockBotAPI(env.botAPI)
 	env.handler.HandleSend(ctx, update2)
 
-	assert.True(t, env.botAPI.SendCalled, "Second send should succeed under normal rate")
+	assert.True(t, env.botAPI.SendCalledSafe(), "Second send should succeed under normal rate")
 }
 
 func TestE2E_BroadcastCommand_EscapesMarkdown(t *testing.T) {
@@ -589,7 +589,7 @@ func TestE2E_BroadcastCommand_EscapesMarkdown(t *testing.T) {
 	}
 	env.handler.HandleBroadcast(ctx, update)
 
-	assert.True(t, env.botAPI.SendCalled, "Broadcast should send")
+	assert.True(t, env.botAPI.SendCalledSafe(), "Broadcast should send")
 	assert.Contains(t, env.botAPI.LastSentText, "Рассылка завершена")
 }
 
@@ -613,7 +613,7 @@ func TestE2E_SendCommand_EscapesMarkdown(t *testing.T) {
 	}
 	env.handler.HandleSend(ctx, update)
 
-	assert.True(t, env.botAPI.SendCalled, "Send should succeed")
+	assert.True(t, env.botAPI.SendCalledSafe(), "Send should succeed")
 	assert.Contains(t, env.botAPI.LastSentText, "Сообщение отправлено")
 }
 
@@ -639,7 +639,7 @@ func TestE2E_NonAdmin_CannotUseDel(t *testing.T) {
 	}
 	env.handler.HandleDel(ctx, update)
 
-	assert.False(t, env.botAPI.SendCalled, "Non-admin should not receive response for /del")
+	assert.False(t, env.botAPI.SendCalledSafe(), "Non-admin should not receive response for /del")
 }
 
 func TestE2E_NonAdmin_CannotUseBroadcast(t *testing.T) {
@@ -664,7 +664,7 @@ func TestE2E_NonAdmin_CannotUseBroadcast(t *testing.T) {
 	}
 	env.handler.HandleBroadcast(ctx, update)
 
-	assert.False(t, env.botAPI.SendCalled, "Non-admin should not receive response for /broadcast")
+	assert.False(t, env.botAPI.SendCalledSafe(), "Non-admin should not receive response for /broadcast")
 }
 
 func TestE2E_NonAdmin_CannotUseSend(t *testing.T) {
@@ -689,7 +689,7 @@ func TestE2E_NonAdmin_CannotUseSend(t *testing.T) {
 	}
 	env.handler.HandleSend(ctx, update)
 
-	assert.False(t, env.botAPI.SendCalled, "Non-admin should not receive response for /send")
+	assert.False(t, env.botAPI.SendCalledSafe(), "Non-admin should not receive response for /send")
 }
 
 func TestE2E_NonAdmin_CannotUseRefstats(t *testing.T) {
@@ -714,7 +714,7 @@ func TestE2E_NonAdmin_CannotUseRefstats(t *testing.T) {
 	}
 	env.handler.HandleRefstats(ctx, update)
 
-	assert.True(t, env.botAPI.SendCalled, "Non-admin should receive error message for /refstats")
+	assert.True(t, env.botAPI.SendCalledSafe(), "Non-admin should receive error message for /refstats")
 	assert.Contains(t, env.botAPI.LastSentText, "только администратору", "Should show access denied message")
 }
 
@@ -741,7 +741,7 @@ func TestE2E_NonAdmin_CannotAccessAdminStats(t *testing.T) {
 		},
 	})
 
-	assert.False(t, env.botAPI.SendCalled, "Non-admin should not access admin_stats callback")
+	assert.False(t, env.botAPI.SendCalledSafe(), "Non-admin should not access admin_stats callback")
 }
 
 func TestE2E_NonAdmin_CannotAccessAdminLastreg(t *testing.T) {
@@ -767,7 +767,7 @@ func TestE2E_NonAdmin_CannotAccessAdminLastreg(t *testing.T) {
 		},
 	})
 
-	assert.False(t, env.botAPI.SendCalled, "Non-admin should not access admin_lastreg callback")
+	assert.False(t, env.botAPI.SendCalledSafe(), "Non-admin should not access admin_lastreg callback")
 }
 
 func TestE2E_AdminStats(t *testing.T) {
@@ -791,7 +791,7 @@ func TestE2E_AdminStats(t *testing.T) {
 		},
 	})
 
-	assert.True(t, env.botAPI.SendCalled, "Admin stats should be sent")
+	assert.True(t, env.botAPI.SendCalledSafe(), "Admin stats should be sent")
 	assert.Contains(t, env.botAPI.LastSentText, "Статистика", "Should contain stats")
 }
 
@@ -831,7 +831,7 @@ func TestE2E_AdminLastReg(t *testing.T) {
 		},
 	})
 
-	assert.True(t, env.botAPI.SendCalled, "Last registrations should be sent")
+	assert.True(t, env.botAPI.SendCalledSafe(), "Last registrations should be sent")
 	assert.Contains(t, env.botAPI.LastSentText, env.username, "Should show registered user")
 }
 
@@ -856,7 +856,7 @@ func TestE2E_VersionCommand_Admin(t *testing.T) {
 	}
 	env.handler.HandleVersion(ctx, update)
 
-	assert.True(t, env.botAPI.SendCalled, "Admin should receive version info")
+	assert.True(t, env.botAPI.SendCalledSafe(), "Admin should receive version info")
 }
 
 func TestE2E_VersionCommand_NonAdmin(t *testing.T) {
@@ -880,5 +880,5 @@ func TestE2E_VersionCommand_NonAdmin(t *testing.T) {
 	}
 	env.handler.HandleVersion(ctx, update)
 
-	assert.False(t, env.botAPI.SendCalled, "Non-admin should not receive version info")
+	assert.False(t, env.botAPI.SendCalledSafe(), "Non-admin should not receive version info")
 }

@@ -155,7 +155,7 @@ func TestHandleDel_InvalidIDFormat(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mockBot.SendCalled = false
+			mockBot.SetSendCalled(false)
 			mockBot.LastSentText = ""
 
 			ctx := context.Background()
@@ -763,7 +763,7 @@ func TestHandleSend_InvalidFormat(t *testing.T) {
 			mockBot := testutil.NewMockBotAPI()
 			handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
 
-			mockBot.SendCalled = false
+			mockBot.SetSendCalled(false)
 			mockBot.LastSentText = ""
 
 			ctx := context.Background()

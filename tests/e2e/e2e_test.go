@@ -113,8 +113,8 @@ func setupE2EEnv(t *testing.T) *e2eTestEnv {
 }
 
 func resetMockBotAPI(m *testutil.MockBotAPI) {
-	m.SendCalled = false
-	m.RequestCalled = false
+	m.SetSendCalled(false)
+	m.SetRequestCalled(false)
 	m.LastSentText = ""
 	m.LastChatID = 0
 	m.SendCount = 0

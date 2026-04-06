@@ -46,7 +46,7 @@ func TestE2E_QRCodeGeneration(t *testing.T) {
 		},
 	})
 
-	assert.True(t, env.botAPI.SendCalled, "QR code should be sent")
+	assert.True(t, env.botAPI.SendCalledSafe(), "QR code should be sent")
 }
 
 func TestE2E_BackToSubscription(t *testing.T) {
@@ -70,7 +70,7 @@ func TestE2E_BackToSubscription(t *testing.T) {
 		},
 	})
 
-	assert.True(t, env.botAPI.RequestCalled, "Should attempt to delete QR message")
+	assert.True(t, env.botAPI.RequestCalledSafe(), "Should attempt to delete QR message")
 }
 
 func TestE2E_MenuHelp(t *testing.T) {
@@ -108,7 +108,7 @@ func TestE2E_MenuHelp(t *testing.T) {
 		},
 	})
 
-	assert.True(t, env.botAPI.SendCalled, "Help should be sent")
+	assert.True(t, env.botAPI.SendCalledSafe(), "Help should be sent")
 	assert.Contains(t, env.botAPI.LastSentText, "Ваша подписка готова", "Should contain subscription help text")
 }
 
@@ -132,7 +132,7 @@ func TestE2E_MenuDonate(t *testing.T) {
 		},
 	})
 
-	assert.True(t, env.botAPI.SendCalled, "Donate info should be sent")
+	assert.True(t, env.botAPI.SendCalledSafe(), "Donate info should be sent")
 	assert.Contains(t, env.botAPI.LastSentText, "Поддержка", "Should contain donate info")
 }
 
@@ -170,7 +170,7 @@ func TestE2E_BackToStart(t *testing.T) {
 		},
 	})
 
-	assert.True(t, env.botAPI.SendCalled, "Main menu should be sent")
+	assert.True(t, env.botAPI.SendCalledSafe(), "Main menu should be sent")
 	assert.Contains(t, env.botAPI.LastSentText, "кнопки ниже", "Should show subscription menu")
 }
 
@@ -196,7 +196,7 @@ func TestE2E_Callback_ShareInvite(t *testing.T) {
 		},
 	})
 
-	assert.True(t, env.botAPI.SendCalled, "Invite link should be sent")
+	assert.True(t, env.botAPI.SendCalledSafe(), "Invite link should be sent")
 	assert.Contains(t, env.botAPI.LastSentText, "t.me", "Should contain Telegram invite link")
 }
 
@@ -222,7 +222,7 @@ func TestE2E_Callback_QRTelegram(t *testing.T) {
 		},
 	})
 
-	assert.True(t, env.botAPI.SendCalled, "QR code for Telegram link should be sent")
+	assert.True(t, env.botAPI.SendCalledSafe(), "QR code for Telegram link should be sent")
 }
 
 func TestE2E_Callback_QRWeb(t *testing.T) {
@@ -247,7 +247,7 @@ func TestE2E_Callback_QRWeb(t *testing.T) {
 		},
 	})
 
-	assert.True(t, env.botAPI.SendCalled, "QR code for web link should be sent")
+	assert.True(t, env.botAPI.SendCalledSafe(), "QR code for web link should be sent")
 }
 
 func TestE2E_Callback_BackToInvite(t *testing.T) {

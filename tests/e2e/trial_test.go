@@ -29,7 +29,7 @@ func TestE2E_TrialBind_Success(t *testing.T) {
 		Message: newCommandMessage(env.chatID, env.chatID, env.username, "/start trial_"+trialSubID, 6),
 	})
 
-	assert.True(t, env.botAPI.SendCalled, "Activation message should be sent")
+	assert.True(t, env.botAPI.SendCalledSafe(), "Activation message should be sent")
 	assert.Contains(t, env.botAPI.LastSentText, "Подписка активирована", "Should confirm activation")
 
 	bound, err := env.db.GetByTelegramID(ctx, env.chatID)
@@ -67,7 +67,7 @@ func TestE2E_TrialBind_AlreadyHasSubscription(t *testing.T) {
 		Message: newCommandMessage(env.chatID, env.chatID, env.username, "/start trial_"+trialSubID, 6),
 	})
 
-	assert.True(t, env.botAPI.SendCalled, "Error message should be sent")
+	assert.True(t, env.botAPI.SendCalledSafe(), "Error message should be sent")
 	assert.Contains(t, env.botAPI.LastSentText, "уже есть активная подписка", "Should reject with existing subscription message")
 }
 
@@ -84,7 +84,7 @@ func TestE2E_TrialBind_NotFound(t *testing.T) {
 		Message: newCommandMessage(env.chatID, env.chatID, env.username, "/start trial_nonexistent", 6),
 	})
 
-	assert.True(t, env.botAPI.SendCalled, "Error message should be sent")
+	assert.True(t, env.botAPI.SendCalledSafe(), "Error message should be sent")
 	assert.Contains(t, env.botAPI.LastSentText, "Не удалось активировать", "Should show activation error message")
 }
 
@@ -109,6 +109,6 @@ func TestE2E_TrialBind_AlreadyActivated(t *testing.T) {
 		Message: newCommandMessage(env.chatID, env.chatID, env.username, "/start trial_"+trialSubID, 6),
 	})
 
-	assert.True(t, env.botAPI.SendCalled, "Error message should be sent")
+	assert.True(t, env.botAPI.SendCalledSafe(), "Error message should be sent")
 	assert.Contains(t, env.botAPI.LastSentText, "уже есть активная подписка", "Should reject already-bound trial")
 }
