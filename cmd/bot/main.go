@@ -200,13 +200,14 @@ func main() {
 	select {
 	case result := <-botInitChan:
 		if result.err != nil {
-			logger.Fatal("Failed to initialize Telegram bot", zap.Error(result.err))
+			logger.Warn("Failed to initialize Telegram bot, continuing without bot", zap.Error(result.err))
+		} else {
+			botAPI = result.botAPI
+			botConfig = result.botConfig
+			logger.Info("Telegram bot authorized", zap.String("username", botConfig.Username))
 		}
-		botAPI = result.botAPI
-		botConfig = result.botConfig
-		logger.Info("Telegram bot authorized", zap.String("username", botConfig.Username))
 	case <-time.After(10 * time.Second):
-		logger.Fatal("Timeout initializing Telegram bot (10s)")
+		logger.Warn("Timeout initializing Telegram bot (10s), continuing without bot")
 	}
 
 	// Create subscription service (shared between bot handler and web server)
