@@ -151,7 +151,7 @@ Project includes `.agents/skills/git-workflow-skill/` with best practices.
 - **Purpose**: Prevents `database is locked` errors in SQLite
 
 ### Donate Improvements
-- **Card number added to config**: `DonateCardNumber = "REDACTED_CARD_NUMBER"` (T-Bank)
+- **Donation config**: Configure via environment variables (DONATE_CARD_NUMBER, DONATE_URL)
 - **Donate constants**: `DonateCardNumber` in `internal/config/constants.go`
 - **Improved donate message text**:
   - Friendly and inviting tone (no pressure)
