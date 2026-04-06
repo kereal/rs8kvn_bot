@@ -509,8 +509,8 @@ rs8kvn_bot/
 | `SITE_URL` | Base URL for invite/trial landing pages | https://vpn.site | ❌ |
 | `TRIAL_DURATION_HOURS` | Trial subscription duration (hours) | 3 | ❌ |
 | `TRIAL_RATE_LIMIT` | Max trial requests per IP per hour | 3 | ❌ |
-| `DONATE_CARD_NUMBER` | Donation card number (T-Bank) | REDACTED_CARD_NUMBER | ❌ |
-| `DONATE_URL` | Donation URL (T-Bank collection link) | REDACTED_DONATE_URL | ❌ |
+| `DONATE_CARD_NUMBER` | Donation card number (T-Bank) | (set your own) | ❌ |
+| `DONATE_URL` | Donation URL (T-Bank collection link) | (set your own) | ❌ |
 | `SUB_EXTRA_SERVERS_ENABLED` | Enable extra servers in subscription proxy | true | ❌ |
 | `SUB_EXTRA_SERVERS_FILE` | Path to extra config file (headers + servers) | ./data/extra_servers.txt | ❌ |
 
