@@ -119,7 +119,7 @@ func main() {
 	// Initialize database with Service pattern for dependency injection
 	dbService, err := database.NewService(cfg.DatabasePath)
 	if err != nil {
-		logger.Fatal("Failed to initialize database", zap.Error(err))
+		logger.Warn("Failed to initialize database, continuing without database", zap.Error(err))
 	}
 	defer func() {
 		if err := dbService.Close(); err != nil {
@@ -131,7 +131,7 @@ func main() {
 	// Initialize 3x-ui client
 	xuiClient, err := xui.NewClient(cfg.XUIHost, cfg.XUIUsername, cfg.XUIPassword, time.Duration(cfg.XUISessionMaxAgeMinutes)*time.Minute)
 	if err != nil {
-		logger.Fatal("Failed to initialize 3x-ui client", zap.Error(err))
+		logger.Warn("Failed to initialize 3x-ui client, continuing without XUI", zap.Error(err))
 	}
 	defer func() {
 		if err := xuiClient.Close(); err != nil {
@@ -247,7 +247,7 @@ func main() {
 	// Wait briefly for web server to start or fail
 	select {
 	case err := <-webServerStartErr:
-		logger.Fatal("Failed to start web server", zap.Error(err))
+		logger.Warn("Failed to start web server, continuing without web server", zap.Error(err))
 	case <-time.After(2 * time.Second):
 		// Web server started successfully in background
 		logger.Info("Web server started", zap.Int("port", cfg.HealthCheckPort))
