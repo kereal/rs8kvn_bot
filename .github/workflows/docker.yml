@@ -27,13 +27,18 @@ jobs:
               uses: actions/setup-go@v6
               with:
                   go-version: "1.25"
-                  cache: true
+                  cache: false
 
             - name: Download dependencies
               run: go mod download
 
+            - name: Clear Go cache
+              run: go clean -cache -modcache -i -r
+
             - name: Run tests
-              run: go test -v -race -coverprofile=coverage.out ./...
+              run: go test -v -race -coverprofile=coverage.out -timeout 5m ./...
+              env:
+                  RUN_SMOKE: "1"
 
             - name: Run gosec security scan
               uses: securego/gosec@master
