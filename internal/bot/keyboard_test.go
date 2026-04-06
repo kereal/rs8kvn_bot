@@ -87,7 +87,7 @@ func TestHandler_GetBackKeyboard_CallbackData(t *testing.T) {
 
 func TestGetQRKeyboard(t *testing.T) {
 	cfg := &config.Config{TelegramAdminID: 123}
-	handler := NewHandler(nil, cfg, nil, nil, NewTestBotConfig(), nil)
+	handler := NewHandler(nil, cfg, nil, nil, NewTestBotConfig(), nil, "")
 
 	keyboard := handler.getQRKeyboard()
 
@@ -108,7 +108,7 @@ func TestGetQRKeyboard(t *testing.T) {
 
 func TestGetQRKeyboard_PreservesHandlerState(t *testing.T) {
 	cfg := &config.Config{TelegramAdminID: 456}
-	handler := NewHandler(nil, cfg, nil, nil, NewTestBotConfig(), nil)
+	handler := NewHandler(nil, cfg, nil, nil, NewTestBotConfig(), nil, "")
 
 	keyboard1 := handler.getQRKeyboard()
 	keyboard2 := handler.getQRKeyboard()

@@ -2,9 +2,11 @@ package subproxy
 
 import (
 	"encoding/base64"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestDetectFormat_Plain(t *testing.T) {
@@ -12,10 +14,22 @@ func TestDetectFormat_Plain(t *testing.T) {
 	assert.Equal(t, FormatPlain, DetectFormat(body))
 }
 
+func TestDetectFormat_Plain_Golden(t *testing.T) {
+	data, err := os.ReadFile("../testdata/subproxy/vless_single.txt")
+	require.NoError(t, err)
+	assert.Equal(t, FormatPlain, DetectFormat(data))
+}
+
 func TestDetectFormat_Base64(t *testing.T) {
 	plain := "vless://abc@server.com:443\nvmess://data"
 	encoded := base64.StdEncoding.EncodeToString([]byte(plain))
 	assert.Equal(t, FormatBase64, DetectFormat([]byte(encoded)))
+}
+
+func TestDetectFormat_Base64_Golden(t *testing.T) {
+	data, err := os.ReadFile("../testdata/subproxy/base64_encoded.txt")
+	require.NoError(t, err)
+	assert.Equal(t, FormatBase64, DetectFormat(data))
 }
 
 func TestDetectFormat_InvalidBase64(t *testing.T) {
@@ -79,4 +93,15 @@ func TestMergeSubscriptions_EmptyOriginal(t *testing.T) {
 	result := MergeSubscriptions([]byte(""), extra, FormatPlain)
 	expected := "trojan://extra1"
 	assert.Equal(t, expected, string(result))
+}
+
+func TestMergeSubscriptions_GoldenFile(t *testing.T) {
+	original, err := os.ReadFile("../testdata/subproxy/vmess_multi.txt")
+	require.NoError(t, err)
+	extra := []string{"ss://new-server.example.com"}
+
+	result := MergeSubscriptions(original, extra, FormatPlain)
+	assert.Contains(t, string(result), "vmess://")
+	assert.Contains(t, string(result), "trojan://")
+	assert.Contains(t, string(result), "ss://new-server.example.com")
 }

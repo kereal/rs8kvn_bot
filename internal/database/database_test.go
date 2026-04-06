@@ -1056,6 +1056,7 @@ func TestService_GetReferralCount(t *testing.T) {
 			ExpiryTime:      time.Now().Add(24 * time.Hour),
 			SubscriptionURL: fmt.Sprintf("http://localhost/sub/ref/%d", i),
 			ReferredBy:      referrerID,
+			IsTrial:         false,
 		}
 		require.NoError(t, svc.db.Create(sub).Error)
 	}
@@ -1086,6 +1087,7 @@ func TestService_GetAllReferralCounts(t *testing.T) {
 			ExpiryTime:      time.Now().Add(24 * time.Hour),
 			SubscriptionURL: fmt.Sprintf("http://localhost/refall/%d", i),
 			ReferredBy:      referrerID,
+			IsTrial:         false,
 		}
 		require.NoError(t, svc.db.Create(sub).Error)
 	}
@@ -1093,6 +1095,41 @@ func TestService_GetAllReferralCounts(t *testing.T) {
 	counts, err := svc.GetAllReferralCounts(context.Background())
 	require.NoError(t, err)
 	assert.Equal(t, int64(2), counts[referrerID])
+}
+
+// ==================== GetTotalTelegramIDCount Tests ====================
+
+func TestService_GetTotalTelegramIDCount_WithData(t *testing.T) {
+	svc := newTestService(t)
+
+	// Create multiple subscriptions (some with same telegram_id to test distinct)
+	for i := 0; i < 3; i++ {
+		sub := &Subscription{
+			TelegramID:      int64(90000 + i),
+			Username:        fmt.Sprintf("countuser%d", i),
+			ClientID:        fmt.Sprintf("client-count-%d", i),
+			SubscriptionID:  fmt.Sprintf("sub-count-%d", i),
+			InboundID:       1,
+			TrafficLimit:    107374182400,
+			ExpiryTime:      time.Now().Add(24 * time.Hour),
+			Status:          "active",
+			SubscriptionURL: fmt.Sprintf("http://localhost/sub/count-%d", i),
+			IsTrial:         false,
+		}
+		require.NoError(t, svc.db.Create(sub).Error)
+	}
+
+	count, err := svc.GetTotalTelegramIDCount(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, int64(3), count, "Should count unique telegram IDs")
+}
+
+func TestService_GetTotalTelegramIDCount_Empty(t *testing.T) {
+	svc := newTestService(t)
+
+	count, err := svc.GetTotalTelegramIDCount(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), count, "Empty database should return 0")
 }
 
 // ==================== Trial Tests ====================
@@ -1246,6 +1283,261 @@ type deleteCall struct {
 func (m *mockXUIClient) DeleteClient(ctx context.Context, inboundID int, clientID string) error {
 	m.deleteCalls = append(m.deleteCalls, deleteCall{inboundID: inboundID, clientID: clientID})
 	return nil
+}
+
+// ==================== Trial Subscription Tests ====================
+
+func TestService_CreateTrialSubscription_Success(t *testing.T) {
+	svc := newTestService(t)
+
+	ctx := context.Background()
+	sub, err := svc.CreateTrialSubscription(
+		ctx,
+		"INVITE123",
+		"sub-trial-abc",
+		"client-xyz",
+		1,
+		1073741824, // 1GB
+		time.Now().Add(3*time.Hour),
+		"http://localhost/sub/trial-abc",
+	)
+
+	require.NoError(t, err, "CreateTrialSubscription should not error")
+	assert.NotNil(t, sub)
+	assert.Equal(t, "sub-trial-abc", sub.SubscriptionID)
+	assert.Equal(t, "client-xyz", sub.ClientID)
+	assert.True(t, sub.IsTrial, "Should be marked as trial")
+	assert.Equal(t, int64(0), sub.TelegramID, "Unbound trial should have telegram_id = 0")
+	assert.Equal(t, "INVITE123", sub.InviteCode)
+}
+
+func TestService_CreateTrialSubscription_AllowsSameSubID(t *testing.T) {
+	svc := newTestService(t)
+
+	ctx := context.Background()
+
+	// Create first trial subscription
+	_, err := svc.CreateTrialSubscription(
+		ctx,
+		"INVITE123",
+		"sub-same",
+		"client-1",
+		1,
+		1073741824,
+		time.Now().Add(3*time.Hour),
+		"http://localhost/sub/same1",
+	)
+	require.NoError(t, err)
+
+	// Create another with same subscription ID - SQLite allows this (no unique constraint)
+	_, err = svc.CreateTrialSubscription(
+		ctx,
+		"INVITE456",
+		"sub-same", // same subscription ID - allowed in SQLite
+		"client-2",
+		1,
+		1073741824,
+		time.Now().Add(3*time.Hour),
+		"http://localhost/sub/same2",
+	)
+	// No unique constraint in DB, so this succeeds
+	assert.NoError(t, err, "SQLite has no unique constraint on subscription_id")
+}
+
+func TestService_GetSubscriptionBySubscriptionID_Success(t *testing.T) {
+	svc := newTestService(t)
+
+	ctx := context.Background()
+
+	// Create a regular (non-trial) subscription
+	origSub := &Subscription{
+		TelegramID:      123456,
+		Username:        "testuser",
+		ClientID:        "client-abc",
+		SubscriptionID:  "sub-find-me",
+		InboundID:       1,
+		TrafficLimit:    107374182400,
+		ExpiryTime:      time.Now().Add(24 * time.Hour),
+		Status:          "active",
+		SubscriptionURL: "http://localhost/sub/find-me",
+	}
+	err := svc.db.Create(origSub).Error
+	require.NoError(t, err)
+
+	// Retrieve by subscription ID
+	found, err := svc.GetSubscriptionBySubscriptionID(ctx, "sub-find-me")
+
+	require.NoError(t, err)
+	assert.NotNil(t, found)
+	assert.Equal(t, int64(123456), found.TelegramID)
+	assert.Equal(t, "testuser", found.Username)
+}
+
+func TestService_GetSubscriptionBySubscriptionID_NotFound(t *testing.T) {
+	svc := newTestService(t)
+
+	ctx := context.Background()
+
+	_, err := svc.GetSubscriptionBySubscriptionID(ctx, "nonexistent-sub-id")
+
+	assert.Error(t, err, "Non-existent subscription ID should return error")
+}
+
+func TestService_GetSubscriptionBySubscriptionID_Trial(t *testing.T) {
+	svc := newTestService(t)
+
+	ctx := context.Background()
+
+	// Create a trial subscription
+	_, err := svc.CreateTrialSubscription(
+		ctx,
+		"INVITE789",
+		"sub-trial-find",
+		"client-trial",
+		1,
+		1073741824,
+		time.Now().Add(3*time.Hour),
+		"http://localhost/sub/trial-find",
+	)
+	require.NoError(t, err)
+
+	// Should be findable by subscription ID (even though it's a trial)
+	found, err := svc.GetSubscriptionBySubscriptionID(ctx, "sub-trial-find")
+
+	require.NoError(t, err)
+	assert.NotNil(t, found)
+	assert.True(t, found.IsTrial)
+}
+
+func TestService_GetTrialSubscriptionBySubID_Success(t *testing.T) {
+	svc := newTestService(t)
+
+	ctx := context.Background()
+
+	// Create trial subscription
+	sub, err := svc.CreateTrialSubscription(
+		ctx,
+		"INVITE999",
+		"sub-trial-only",
+		"client-trial-only",
+		1,
+		1073741824,
+		time.Now().Add(3*time.Hour),
+		"http://localhost/sub/trial-only",
+	)
+	require.NoError(t, err)
+
+	// Retrieve only trial subscriptions
+	found, err := svc.GetTrialSubscriptionBySubID(ctx, "sub-trial-only")
+
+	require.NoError(t, err)
+	assert.NotNil(t, found)
+	assert.True(t, found.IsTrial)
+	assert.Equal(t, sub.ID, found.ID)
+}
+
+func TestService_GetTrialSubscriptionBySubID_NonTrial(t *testing.T) {
+	svc := newTestService(t)
+
+	ctx := context.Background()
+
+	// Create a regular (non-trial) subscription
+	origSub := &Subscription{
+		TelegramID:      999999,
+		Username:        "regularuser",
+		ClientID:        "client-regular",
+		SubscriptionID:  "sub-regular",
+		InboundID:       1,
+		TrafficLimit:    107374182400,
+		ExpiryTime:      time.Now().Add(24 * time.Hour),
+		Status:          "active",
+		SubscriptionURL: "http://localhost/sub/regular",
+		IsTrial:         false,
+	}
+	err := svc.db.Create(origSub).Error
+	require.NoError(t, err)
+
+	// GetTrialSubscriptionBySubID should NOT return non-trial subscriptions
+	_, err = svc.GetTrialSubscriptionBySubID(ctx, "sub-regular")
+
+	assert.Error(t, err, "Non-trial subscription should not be returned by GetTrialSubscriptionBySubID")
+}
+
+func TestService_GetTrialSubscriptionBySubID_NotFound(t *testing.T) {
+	svc := newTestService(t)
+
+	ctx := context.Background()
+
+	_, err := svc.GetTrialSubscriptionBySubID(ctx, "nonexistent-trial")
+
+	assert.Error(t, err, "Non-existent trial subscription should return error")
+}
+
+func TestService_BindTrialSubscription_Success(t *testing.T) {
+	svc := newTestService(t)
+
+	ctx := context.Background()
+
+	// Create trial subscription (unbound - telegram_id = 0)
+	_, err := svc.CreateTrialSubscription(
+		ctx,
+		"INVITE000",
+		"sub-bind-test",
+		"client-bind",
+		1,
+		1073741824,
+		time.Now().Add(3*time.Hour),
+		"http://localhost/sub/bind-test",
+	)
+	require.NoError(t, err)
+
+	// Bind to a user
+	bound, err := svc.BindTrialSubscription(ctx, "sub-bind-test", 555555, "bounduser")
+
+	require.NoError(t, err)
+	assert.NotNil(t, bound)
+	assert.Equal(t, int64(555555), bound.TelegramID)
+	assert.Equal(t, "bounduser", bound.Username)
+	assert.False(t, bound.IsTrial, "Should no longer be marked as trial after binding")
+}
+
+func TestService_BindTrialSubscription_Concurrent(t *testing.T) {
+	svc := newTestService(t)
+
+	ctx := context.Background()
+
+	// Create trial subscription
+	_, err := svc.CreateTrialSubscription(
+		ctx,
+		"INVITE111",
+		"sub-concurrent",
+		"client-concurrent",
+		1,
+		1073741824,
+		time.Now().Add(3*time.Hour),
+		"http://localhost/sub/concurrent",
+	)
+	require.NoError(t, err)
+
+	// First bind should succeed
+	first, err := svc.BindTrialSubscription(ctx, "sub-concurrent", 111111, "firstuser")
+	require.NoError(t, err)
+	assert.Equal(t, int64(111111), first.TelegramID)
+
+	// Second bind should fail (already bound)
+	second, err := svc.BindTrialSubscription(ctx, "sub-concurrent", 222222, "seconduser")
+	assert.Error(t, err, "Second bind should fail when already bound")
+	assert.Nil(t, second)
+}
+
+func TestService_BindTrialSubscription_NotFound(t *testing.T) {
+	svc := newTestService(t)
+
+	ctx := context.Background()
+
+	_, err := svc.BindTrialSubscription(ctx, "nonexistent-sub", 123456, "test")
+
+	assert.Error(t, err, "Binding non-existent subscription should fail")
 }
 
 // ==================== Helper Functions ====================

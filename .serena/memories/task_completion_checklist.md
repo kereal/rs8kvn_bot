@@ -1,5 +1,12 @@
 # Task Completion Checklist
 
+## ⚠️ ПРИ СТАРТЕ РАБОТЫ (ОБЯЗАТЕЛЬНО)
+1. Активировать проект Serena: `activate_project("rs8kvn_bot")`
+2. Проверить onboarding: `check_onboarding_performed()`
+3. Прочитать памяти: `git-workflow`, `project_overview`, `code_style`
+
+---
+
 When a task is completed, follow these steps:
 
 1. **Run Tests**
@@ -35,6 +42,28 @@ When a task is completed, follow these steps:
    - Add/update tests for new code
    - Update documentation if needed
 
-7. **Commit Changes**
-   - Write clear commit messages
+7. **Git Workflow — Create Branch (если еще не создана)**
+   ```bash
+   git checkout -b fix/description  # или feature/description
+   ```
+   - ❌ НИКОГДА не коммить напрямую в main!
+
+8. **Commit Changes**
+   ```bash
+   git add <files>
+   git commit -m "fix: clear description"
+   ```
+   - Write clear commit messages (Conventional Commits)
    - Reference issues if applicable
+
+9. **Push Branch**
+   ```bash
+   git push origin <branch-name>
+   ```
+
+10. **Create Pull Request**
+    ```bash
+    gh pr create --title "fix: description" --body "..."
+    ```
+    - Ждать review и одобрения
+    - Только после одобрения мержить PR

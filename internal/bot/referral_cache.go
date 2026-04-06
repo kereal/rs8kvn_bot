@@ -12,25 +12,25 @@ import (
 	"go.uber.org/zap"
 )
 
-// ReferralCache manages in-memory referral counts backed by database persistence.
-type ReferralCache struct {
-	db     interfaces.DatabaseService
-	counts map[int64]int64
-	mu     sync.RWMutex
-	sendMu sync.Map // chatID -> lastSendTime
-	dirty  map[int64]bool
+type referralEntry struct {
+	count int64
+	dirty bool
 }
 
-// NewReferralCache creates a new ReferralCache.
+type ReferralCache struct {
+	db     interfaces.DatabaseService
+	data   map[int64]*referralEntry
+	mu     sync.RWMutex
+	sendMu sync.Map
+}
+
 func NewReferralCache(db interfaces.DatabaseService) *ReferralCache {
 	return &ReferralCache{
-		db:     db,
-		counts: make(map[int64]int64),
-		dirty:  make(map[int64]bool),
+		db:   db,
+		data: make(map[int64]*referralEntry),
 	}
 }
 
-// Load loads referral counts from database into memory.
 func (rc *ReferralCache) Load(ctx context.Context) error {
 	counts, err := rc.db.GetAllReferralCounts(ctx)
 	if err != nil {
@@ -40,44 +40,73 @@ func (rc *ReferralCache) Load(ctx context.Context) error {
 	rc.mu.Lock()
 	defer rc.mu.Unlock()
 
-	rc.counts = counts
+	rc.data = make(map[int64]*referralEntry, len(counts))
+	for id, count := range counts {
+		rc.data[id] = &referralEntry{count: count}
+	}
 	return nil
 }
 
-// Get returns the cached referral count for a user.
 func (rc *ReferralCache) Get(chatID int64) int64 {
 	rc.mu.RLock()
 	defer rc.mu.RUnlock()
 
-	return rc.counts[chatID]
+	if entry, ok := rc.data[chatID]; ok {
+		return entry.count
+	}
+	return 0
 }
 
-// Increment increments the referral count for a user in cache and marks it dirty for persistence.
+func (rc *ReferralCache) GetAll() map[int64]int64 {
+	rc.mu.RLock()
+	defer rc.mu.RUnlock()
+
+	result := make(map[int64]int64, len(rc.data))
+	for id, entry := range rc.data {
+		result[id] = entry.count
+	}
+	return result
+}
+
+func (rc *ReferralCache) SetForTest(chatID int64, count int64) {
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
+	rc.data[chatID] = &referralEntry{count: count}
+}
+
 func (rc *ReferralCache) Increment(chatID int64) {
 	rc.mu.Lock()
 	defer rc.mu.Unlock()
 
-	rc.counts[chatID]++
-	rc.dirty[chatID] = true
+	if entry, ok := rc.data[chatID]; ok {
+		entry.count++
+		entry.dirty = true
+	} else {
+		rc.data[chatID] = &referralEntry{count: 1, dirty: true}
+	}
 }
 
-// Decrement decrements the referral count for a user in cache and marks it dirty for persistence.
 func (rc *ReferralCache) Decrement(chatID int64) {
 	rc.mu.Lock()
 	defer rc.mu.Unlock()
 
-	if rc.counts[chatID] > 0 {
-		rc.counts[chatID]--
+	if entry, ok := rc.data[chatID]; ok {
+		if entry.count > 0 {
+			entry.count--
+		}
+		entry.dirty = true
+	} else {
+		rc.data[chatID] = &referralEntry{count: 0, dirty: true}
 	}
-	rc.dirty[chatID] = true
 }
 
-// Save persists dirty referral counts to the database.
 func (rc *ReferralCache) Save(ctx context.Context) error {
 	rc.mu.Lock()
-	dirtyIDs := make([]int64, 0, len(rc.dirty))
-	for id := range rc.dirty {
-		dirtyIDs = append(dirtyIDs, id)
+	dirtyIDs := make([]int64, 0, len(rc.data))
+	for id, entry := range rc.data {
+		if entry.dirty {
+			dirtyIDs = append(dirtyIDs, id)
+		}
 	}
 	rc.mu.Unlock()
 
@@ -85,7 +114,6 @@ func (rc *ReferralCache) Save(ctx context.Context) error {
 		return nil
 	}
 
-	// Reload fresh counts from DB and merge with cache
 	freshCounts, err := rc.db.GetAllReferralCounts(ctx)
 	if err != nil {
 		return err
@@ -95,19 +123,15 @@ func (rc *ReferralCache) Save(ctx context.Context) error {
 	defer rc.mu.Unlock()
 
 	for _, id := range dirtyIDs {
-		// Use cache value as authoritative (it was incremented/decremented at time of action)
-		freshCounts[id] = rc.counts[id]
-		delete(rc.dirty, id)
+		if entry, ok := rc.data[id]; ok {
+			freshCounts[id] = entry.count
+			entry.dirty = false
+		}
 	}
-
-	// Note: GetAllReferralCounts already returns authoritative DB counts.
-	// The dirty tracking ensures we don't lose in-flight increments on crash.
-	// The hourly sync will reconcile any remaining drift.
-	_ = freshCounts // counts are now consistent
+	_ = freshCounts
 	return nil
 }
 
-// Sync persists dirty entries and reloads the referral cache from database.
 func (rc *ReferralCache) Sync(ctx context.Context) error {
 	if err := rc.Save(ctx); err != nil {
 		logger.Warn("Failed to save dirty referral counts before sync", zap.Error(err))
@@ -115,13 +139,11 @@ func (rc *ReferralCache) Sync(ctx context.Context) error {
 	return rc.Load(ctx)
 }
 
-// StartSync starts periodic synchronization of referral cache.
 func (rc *ReferralCache) StartSync(ctx context.Context) {
 	go func() {
 		ticker := time.NewTicker(1 * time.Hour)
 		defer ticker.Stop()
 
-		// Load initial cache
 		if err := rc.Load(ctx); err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				logger.Info("Referral cache load skipped (context ending)")
@@ -143,7 +165,6 @@ func (rc *ReferralCache) StartSync(ctx context.Context) {
 	}()
 }
 
-// CheckAdminSendRateLimit checks if an admin send is rate-limited.
 func (rc *ReferralCache) CheckAdminSendRateLimit(chatID int64) bool {
 	now := time.Now()
 
@@ -159,7 +180,6 @@ func (rc *ReferralCache) CheckAdminSendRateLimit(chatID int64) bool {
 	return true
 }
 
-// ClearAdminSendRateLimit clears the rate limit for a chat.
 func (rc *ReferralCache) ClearAdminSendRateLimit(chatID int64) {
 	rc.sendMu.Delete(chatID)
 }

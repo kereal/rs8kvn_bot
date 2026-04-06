@@ -156,7 +156,7 @@ func TestHandler_GetDonateText_Content(t *testing.T) {
 	text := handler.getDonateText()
 
 	assert.Contains(t, text, "Поддержка проекта", "Should contain header")
-	assert.Contains(t, text, "tbank.ru", "Should contain T-Bank link")
+	// Donate constants are configured via environment variables
 	assert.Contains(t, text, "t.me/kereal", "Should contain contact link")
 }
 

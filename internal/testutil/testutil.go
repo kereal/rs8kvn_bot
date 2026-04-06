@@ -530,18 +530,16 @@ func NewMockXUIClient() *MockXUIClient {
 
 // MockBotAPI is a mock implementation of the Telegram Bot API for testing.
 type MockBotAPI struct {
-	mu            sync.RWMutex
-	SendCalled    bool
-	RequestCalled bool
-	LastSentText  string
-	LastChatID    int64
-	SendCount     int
-	SendError     error
-	RequestError  error
-	LastChattable tgbotapi.Chattable
-	// SendFunc allows custom behavior per test. If set, Send calls this instead of default logic.
-	SendFunc func(c tgbotapi.Chattable) (tgbotapi.Message, error)
-	// AllSentMessages captures all sent messages for verification
+	mu              sync.RWMutex
+	sendCalled      bool
+	requestCalled   bool
+	LastSentText    string
+	LastChatID      int64
+	SendCount       int
+	SendError       error
+	RequestError    error
+	LastChattable   tgbotapi.Chattable
+	SendFunc        func(c tgbotapi.Chattable) (tgbotapi.Message, error)
 	AllSentMessages []SentMessage
 }
 
@@ -558,7 +556,7 @@ func NewMockBotAPI() *MockBotAPI {
 func (m *MockBotAPI) Send(c tgbotapi.Chattable) (tgbotapi.Message, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.SendCalled = true
+	m.sendCalled = true
 	m.SendCount++
 	m.LastChattable = c
 
@@ -596,7 +594,7 @@ func (m *MockBotAPI) Send(c tgbotapi.Chattable) (tgbotapi.Message, error) {
 func (m *MockBotAPI) Request(c tgbotapi.Chattable) (*tgbotapi.APIResponse, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.RequestCalled = true
+	m.requestCalled = true
 
 	if m.RequestError != nil {
 		return nil, m.RequestError
@@ -615,14 +613,14 @@ func (m *MockBotAPI) SendCountSafe() int {
 func (m *MockBotAPI) SendCalledSafe() bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.SendCalled
+	return m.sendCalled
 }
 
 // RequestCalledSafe returns whether Request was called (thread-safe).
 func (m *MockBotAPI) RequestCalledSafe() bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.RequestCalled
+	return m.requestCalled
 }
 
 // LastSentTextSafe returns the last sent text (thread-safe).
@@ -644,6 +642,27 @@ func (m *MockBotAPI) GetAllSentMessages() []SentMessage {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.AllSentMessages
+}
+
+// SetSendCalled sets the sendCalled flag (thread-safe).
+func (m *MockBotAPI) SetSendCalled(b bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.sendCalled = b
+}
+
+// SetRequestCalled sets the requestCalled flag (thread-safe).
+func (m *MockBotAPI) SetRequestCalled(b bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.requestCalled = b
+}
+
+// SetSendCount sets the send count (thread-safe).
+func (m *MockBotAPI) SetSendCount(c int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.SendCount = c
 }
 
 func (m *MockBotAPI) GetUpdatesChan(config tgbotapi.UpdateConfig) tgbotapi.UpdatesChannel {

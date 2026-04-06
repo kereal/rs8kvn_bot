@@ -134,7 +134,7 @@ func NewTestFixture(t *testing.T) *IntegrationTestFixture {
 		DatabasePath:     ":memory:",
 	}
 
-	handler := NewHandler(testutil.NewMockBotAPI(), cfg, dbService, mockXUI.Client, NewTestBotConfig(), nil)
+	handler := NewHandler(testutil.NewMockBotAPI(), cfg, dbService, mockXUI.Client, NewTestBotConfig(), nil, "")
 	subService := service.NewSubscriptionService(dbService, mockXUI.Client, cfg)
 	handler.subscriptionService = subService
 
@@ -503,8 +503,8 @@ func TestMockXUIServer_ErrorResponses(t *testing.T) {
 }
 
 func resetMockBotAPI(m *testutil.MockBotAPI) {
-	m.SendCalled = false
-	m.RequestCalled = false
+	m.SetSendCalled(false)
+	m.SetRequestCalled(false)
 	m.LastSentText = ""
 	m.LastChatID = 0
 	m.SendCount = 0
@@ -534,7 +534,7 @@ func TestIntegration_HandleStart_NoSubscription(t *testing.T) {
 	}
 	f.Handler.HandleStart(ctx, update)
 
-	assert.True(t, f.Handler.bot.(*testutil.MockBotAPI).SendCalled)
+	assert.True(t, f.Handler.bot.(*testutil.MockBotAPI).SendCalledSafe())
 }
 
 func TestIntegration_HandleStart_WithSubscription(t *testing.T) {
@@ -558,7 +558,7 @@ func TestIntegration_HandleStart_WithSubscription(t *testing.T) {
 	}
 	f.Handler.HandleStart(ctx, update)
 
-	assert.True(t, f.Handler.bot.(*testutil.MockBotAPI).SendCalled)
+	assert.True(t, f.Handler.bot.(*testutil.MockBotAPI).SendCalledSafe())
 }
 
 func TestIntegration_HandleHelp(t *testing.T) {
@@ -581,7 +581,7 @@ func TestIntegration_HandleHelp(t *testing.T) {
 	}
 	f.Handler.HandleHelp(ctx, update)
 
-	assert.True(t, f.Handler.bot.(*testutil.MockBotAPI).SendCalled)
+	assert.True(t, f.Handler.bot.(*testutil.MockBotAPI).SendCalledSafe())
 }
 
 func TestIntegration_HandleInvite(t *testing.T) {
@@ -604,7 +604,7 @@ func TestIntegration_HandleInvite(t *testing.T) {
 	}
 	f.Handler.HandleInvite(ctx, update)
 
-	assert.True(t, f.Handler.bot.(*testutil.MockBotAPI).SendCalled)
+	assert.True(t, f.Handler.bot.(*testutil.MockBotAPI).SendCalledSafe())
 }
 
 func TestIntegration_Callback_CreateSubscription(t *testing.T) {
@@ -629,7 +629,7 @@ func TestIntegration_Callback_CreateSubscription(t *testing.T) {
 	}
 	f.Handler.HandleCallback(ctx, update)
 
-	assert.True(t, f.Handler.bot.(*testutil.MockBotAPI).SendCalled)
+	assert.True(t, f.Handler.bot.(*testutil.MockBotAPI).SendCalledSafe())
 }
 
 func TestIntegration_Callback_MenuSubscription(t *testing.T) {
@@ -655,7 +655,7 @@ func TestIntegration_Callback_MenuSubscription(t *testing.T) {
 	}
 	f.Handler.HandleCallback(ctx, update)
 
-	assert.True(t, f.Handler.bot.(*testutil.MockBotAPI).SendCalled)
+	assert.True(t, f.Handler.bot.(*testutil.MockBotAPI).SendCalledSafe())
 }
 
 func TestIntegration_Callback_QRCode(t *testing.T) {
@@ -681,5 +681,5 @@ func TestIntegration_Callback_QRCode(t *testing.T) {
 	}
 	f.Handler.HandleCallback(ctx, update)
 
-	assert.True(t, f.Handler.bot.(*testutil.MockBotAPI).SendCalled)
+	assert.True(t, f.Handler.bot.(*testutil.MockBotAPI).SendCalledSafe())
 }

@@ -4,9 +4,9 @@
 [![GitHub Release Date](https://img.shields.io/github/release-date/kereal/rs8kvn_bot?logo=github)](https://github.com/kereal/rs8kvn_bot/releases)
 [![GitHub commits](https://img.shields.io/github/commits-since/kereal/rs8kvn_bot/latest?logo=github)](https://github.com/kereal/rs8kvn_bot/commits/dev)
 [![GitHub last commit](https://img.shields.io/github/last-commit/kereal/rs8kvn_bot?logo=github)](https://github.com/kereal/rs8kvn_bot/commits/dev)
-[![Coverage](https://img.shields.io/badge/coverage-~75%25-green)]()
+[![Coverage](https://img.shields.io/badge/coverage-70.7%25-green)]()()
 [![Tests](https://img.shields.io/badge/tests-passing-brightgreen)]()
-[![Go](https://img.shields.io/badge/Go-1.24%2B-00ADD8?logo=go)](https://go.dev/)
+[![Go](https://img.shields.io/badge/Go-1.25%2B-00ADD8?logo=go)](https://go.dev/)(https://go.dev/)
 [![Go Report Card](https://goreportcard.com/badge/github.com/kereal/rs8kvn_bot)](https://goreportcard.com/report/github.com/kereal/rs8kvn_bot)
 [![GitHub stars](https://img.shields.io/github/stars/kereal/rs8kvn_bot?style=flat&logo=github)](https://github.com/kereal/rs8kvn_bot/stargazers)
 [![GitHub issues](https://img.shields.io/github/issues/kereal/rs8kvn_bot?logo=github)](https://github.com/kereal/rs8kvn_bot/issues)
@@ -509,8 +509,8 @@ rs8kvn_bot/
 | `SITE_URL` | Base URL for invite/trial landing pages | https://vpn.site | ❌ |
 | `TRIAL_DURATION_HOURS` | Trial subscription duration (hours) | 3 | ❌ |
 | `TRIAL_RATE_LIMIT` | Max trial requests per IP per hour | 3 | ❌ |
-| `DONATE_CARD_NUMBER` | Donation card number (T-Bank) | REDACTED_CARD_NUMBER | ❌ |
-| `DONATE_URL` | Donation URL (T-Bank collection link) | REDACTED_DONATE_URL | ❌ |
+| `DONATE_CARD_NUMBER` | Donation card number (T-Bank) | (set your own) | ❌ |
+| `DONATE_URL` | Donation URL (T-Bank collection link) | (set your own) | ❌ |
 | `SUB_EXTRA_SERVERS_ENABLED` | Enable extra servers in subscription proxy | true | ❌ |
 | `SUB_EXTRA_SERVERS_FILE` | Path to extra config file (headers + servers) | ./data/extra_servers.txt | ❌ |
 
@@ -658,32 +658,32 @@ See `doc/PLAN.md` for the unified development plan including:
 
 See `doc/HANDOVER.md` for a session handover summary with architecture, stack, current state, and critical nuances.
 
-### Работа с ИИ-ассистентом
+### Working with AI Assistant
 
-Проект использует память Serena (`.serena/memories/`) для хранения контекста между сессиями работы с ИИ-ассистентом.
+The project uses Serena memory (`.serena/memories/`) to store context between AI assistant sessions.
 
-**Перед началом работы:**
-1. Прочитайте `.serena/instructions.md` — инструкции для ИИ-ассистента
-2. Ознакомьтесь с `.serena/memories/project_overview.md`
-3. Проверьте `.serena/memories/roadmap.md` на актуальность
+**Before starting work:**
+1. Read `.serena/instructions.md` — instructions for AI assistant
+2. Review `.serena/memories/project_overview.md`
+3. Check `.serena/memories/roadmap.md` for current plans
 
-**После завершения работы:**
-1. Обновите соответствующий файл в `.serena/memories/`:
-   - Добавлена новая фича → обновите `project_overview.md`
-   - Изменена архитектура → обновите `architecture.md`
-   - Изменены планы → обновите `roadmap.md`
-2. Закоммитьте изменения в памяти: `git add .serena/memories/`
-3. Отправьте на GitHub: `git push origin dev`
+**After completing work:**
+1. Update the corresponding file in `.serena/memories/`:
+   - New feature added → update `project_overview.md`
+   - Architecture changed → update `architecture.md`
+   - Plans changed → update `roadmap.md`
+2. Commit memory changes: `git add .serena/memories/`
+3. Push to GitHub: `git push origin dev`
 
-**Структура памяти:**
+**Memory structure:**
 ```
 .serena/memories/
-├── instructions.md      # Инструкции для ИИ (читать первым)
-├── project_overview.md  # Общая информация о проекте
-├── architecture.md      # Архитектурные решения
-├── roadmap.md           # Планы развития
-├── code_style.md        # Стиль кода
-└── test-info.md         # Информация о тестах
+├── instructions.md      # AI instructions (read first)
+├── project_overview.md  # General project information
+├── architecture.md      # Architectural decisions
+├── roadmap.md           # Development plans
+├── code_style.md        # Code style guide
+└── test-info.md         # Testing information
 ```
 
-См. `.serena/instructions.md` для полного списка правил работы с ИИ-ассистентом.
+See `.serena/instructions.md` for the complete list of rules for working with AI assistant.

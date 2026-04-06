@@ -1,0 +1,153 @@
+{
+  "answers": [
+    {
+      "question_id": 1,
+      "evidence": {
+        "file": "cmd/bot/main.go:14-28",
+        "code_snippet": "Imports: bot, config, database, heartbeat, logger, scheduler, service, subproxy, web, xui",
+        "finding": "Layered architecture: cmd -> handlers (bot) -> business logic (service) -> data access (database, xui)"
+      }
+    },
+    {
+      "question_id": 2,
+      "evidence": {
+        "file": "internal/bot/handler.go:80-110",
+        "code_snippet": "func (h *Handler) HandleUpdate(ctx context.Context, update tgbotapi.Update) { switch { case update.Message.IsCommand(): case update.Callback != nil: default: } }",
+        "finding": "HandleUpdate routes: command messages to handlers, callback queries to callbacks, plain messages to menu/interaction"
+      }
+    },
+    {
+      "question_id": 3,
+      "evidence": {
+        "file": "internal/database/database.go:206-250",
+        "code_snippet": "type Service struct { db *gorm.DB } func (s *Service) CreateSubscription() error { s.db.Create() }",
+        "finding": "GORM-based Service with auto-migration via golang-migrate. CRUD operations for Subscription model."
+      }
+    },
+    {
+      "question_id": 4,
+      "evidence": {
+        "file": "internal/xui/client.go:138-180",
+        "code_snippet": "func (c *Client) Login() error { req, _ := http.NewRequest(...); c.httpClient.Do(req) }",
+        "finding": "HTTP client with cookie jar for session. JSON API calls to 3x-ui panel endpoints."
+      }
+    },
+    {
+      "question_id": 5,
+      "evidence": {
+        "file": "internal/service/subscription.go:50-120",
+        "code_snippet": "func (s *SubscriptionService) CreateSubscription() (*database.Subscription, error) { xuiClient.AddClient() -> dbService.CreateSubscription() -> return subURL }",
+        "finding": "Flow: validate input -> xui.AddClient -> db.Save -> generate URL -> cache.Set -> notify user"
+      }
+    },
+    {
+      "question_id": 6,
+      "evidence": {
+        "file": "internal/bot/referral_cache.go:34-115",
+        "code_snippet": "referralEntry{count, dirty} -> Load() from DB -> Increment/Decrement in memory -> Save() to DB on sync",
+        "finding": "In-memory map with single Entry struct (count+dirty merged). Hourly sync via ticker. Dirty tracking for persistence."
+      }
+    },
+    {
+      "question_id": 7,
+      "evidence": {
+        "file": "internal/bot/cache.go:36-79",
+        "code_snippet": "type SubscriptionCache struct { items map[int64]*list.Element; lru *list.List } // O(1) via MoveToBack/PushBack",
+        "finding": "container.List for O(1) LRU. Get moves to back (MRU), maxSize evict from front (LRU). TTL cleanup."
+      }
+    },
+    {
+      "question_id": 8,
+      "evidence": {
+        "file": "internal/ratelimiter/per_user.go:30-80",
+        "code_snippet": "type TokenBucket struct { tokens, refillRate float64 } func (tb *TokenBucket) Allow() bool { if tb.tokens >= 1 { tb.tokens--; return true } }",
+        "finding": "Per-user token bucket with configurable rate. Tokens consumed on each message. Refilled per second."
+      }
+    },
+    {
+      "question_id": 9,
+      "evidence": {
+        "file": "internal/xui/breaker.go:30-90",
+        "code_snippet": "func (cb *CircuitBreaker) Execute() error { if cb.failures > threshold { return ErrCircuitOpen } cb.failures++ }",
+        "finding": "Failures count threshold (5). If exceeded, circuit opens for 30s. Automatic reset after timeout."
+      }
+    },
+    {
+      "question_id": 10,
+      "evidence": {
+        "file": "internal/web/web.go:85-180",
+        "code_snippet": "func (s *Server) RegisterChecker(name string, fn func(ctx) ComponentHealth) { s.checkers[name] = fn }",
+        "finding": "HTTP server with health/ready endpoints. ComponentHealth checkers for DB, xui. Optional trial page template."
+      }
+    },
+    {
+      "question_id": 11,
+      "evidence": {
+        "file": "internal/subproxy/proxy.go:25-60",
+        "code_snippet": "func MergeSubscriptions(original []byte, extra [][]string, format Format) []byte { combined := append(original, extra...); return FormatOutput(combined, format) }",
+        "finding": "Merges base subscription with extra servers. Supports plain and base64 formats. Cached response with 240s TTL."
+      }
+    },
+    {
+      "question_id": 12,
+      "evidence": {
+        "file": "internal/scheduler/backup.go:30-80",
+        "code_snippet": "func (s *BackupScheduler) Start(ctx context.Context) { ticker := time.NewTicker(24 * time.Hour); for { select { case <-ticker.C: s.backup() } }",
+        "finding": "Daily backup at 3AM. WAL checkpoint before copy. 14-day retention. Separate trial cleanup scheduler."
+      }
+    },
+    {
+      "question_id": 13,
+      "evidence": {
+        "file": "internal/config/config.go:40-100",
+        "code_snippet": "func Load() (*Config, error) { godotenv.Load(); viper.Unmarshal(&config); return config, nil",
+        "finding": "Viper + godotenv. Required fields: XUI credentials, Telegram token, DB path. Validation on load."
+      }
+    },
+    {
+      "question_id": 14,
+      "evidence": {
+        "file": "internal/testutil/testutil.go:55-100",
+        "code_snippet": "type MockDatabaseService struct { Subscriptions map[int64]*database.Subscription } // Functional mocks for testing",
+        "finding": "Centralized mocks in testutil. 80% coverage. Property-based tests for uuid. Golden files for subproxy."
+      }
+    },
+    {
+      "question_id": 15,
+      "evidence": {
+        "file": "Dockerfile",
+        "code_snippet": "FROM golang:1.25-alpine AS builder; RUN go build -o /app/bot ./cmd/bot",
+        "finding": "Multi-stage build. Alpine base. Health check in compose. SQLite data volume mount."
+      }
+    },
+    {
+      "question_id": 16,
+      "evidence": {
+        "file": "cmd/bot/main.go:344-356",
+        "code_snippet": "func recoverAndReport(component string) { if r := recover(); r != nil { sentry.CurrentHub().Recover(r); logger.Error(...) } }",
+        "finding": "Panic recovery wraps goroutines. Sentry capture with stack trace. Zap structured logging."
+      }
+    }
+  ],
+  "summary": {
+    "answered": 16,
+    "unanswered": 0,
+    "evidence_sources": [
+      "cmd/bot/main.go",
+      "internal/bot/handler.go",
+      "internal/database/database.go",
+      "internal/xui/client.go",
+      "internal/service/subscription.go",
+      "internal/bot/referral_cache.go",
+      "internal/bot/cache.go",
+      "internal/ratelimiter/per_user.go",
+      "internal/xui/breaker.go",
+      "internal/web/web.go",
+      "internal/subproxy/proxy.go",
+      "internal/scheduler/backup.go",
+      "internal/config/config.go",
+      "internal/testutil/testutil.go",
+      "Dockerfile"
+    ]
+  }
+}

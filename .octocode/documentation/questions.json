@@ -1,0 +1,131 @@
+{
+  "questions": [
+    {
+      "id": 1,
+      "category": "Architecture",
+      "question": "What is the overall architecture pattern and how do layers communicate?",
+      "file_target": "architecture.md",
+      "importance": "high"
+    },
+    {
+      "id": 2,
+      "category": "Bot Handler",
+      "question": "How does bot.HandleUpdate process incoming Telegram updates?",
+      "file_target": "bot-handler.md",
+      "importance": "high"
+    },
+    {
+      "id": 3,
+      "category": "Database",
+      "question": "How does DatabaseService manage subscriptions and migrations?",
+      "file_target": "database.md",
+      "importance": "high"
+    },
+    {
+      "id": 4,
+      "category": "XUI Client",
+      "question": "How does XUIClient communicate with 3x-ui panel API?",
+      "file_target": "xui-client.md",
+      "importance": "high"
+    },
+    {
+      "id": 5,
+      "category": "Subscription Flow",
+      "question": "What is the complete flow for creating a new subscription?",
+      "file_target": "subscription-flow.md",
+      "importance": "high"
+    },
+    {
+      "id": 6,
+      "category": "Referral System",
+      "question": "How does the referral cache work and sync with database?",
+      "file_target": "referral-system.md",
+      "importance": "high"
+    },
+    {
+      "id": 7,
+      "category": "Cache",
+      "question": "How does the O(1) LRU subscription cache work?",
+      "file_target": "cache.md",
+      "importance": "medium"
+    },
+    {
+      "id": 8,
+      "category": "Rate Limiter",
+      "question": "How does per-user rate limiting work?",
+      "file_target": "rate-limiting.md",
+      "importance": "medium"
+    },
+    {
+      "id": 9,
+      "category": "Circuit Breaker",
+      "question": "How does circuit breaker protect 3x-ui API?",
+      "file_target": "circuit-breaker.md",
+      "importance": "medium"
+    },
+    {
+      "id": 10,
+      "category": "Web Server",
+      "question": "How does web server handle health checks and trial pages?",
+      "file_target": "web-server.md",
+      "importance": "medium"
+    },
+    {
+      "id": 11,
+      "category": "SubProxy",
+      "question": "How does subscription proxy merge and cache responses?",
+      "file_target": "subscription-proxy.md",
+      "importance": "medium"
+    },
+    {
+      "id": 12,
+      "category": "Scheduler",
+      "question": "What background jobs run and how are they scheduled?",
+      "file_target": "scheduler.md",
+      "importance": "low"
+    },
+    {
+      "id": 13,
+      "category": "Configuration",
+      "question": "How is configuration loaded and validated?",
+      "file_target": "configuration.md",
+      "importance": "medium"
+    },
+    {
+      "id": 14,
+      "category": "Testing",
+      "question": "What testing patterns and coverage exist?",
+      "file_target": "testing.md",
+      "importance": "medium"
+    },
+    {
+      "id": 15,
+      "category": "Deployment",
+      "question": "How is the application built and deployed?",
+      "file_target": "deployment.md",
+      "importance": "low"
+    },
+    {
+      "id": 16,
+      "category": "Error Handling",
+      "question": "How are errors handled and reported to Sentry?",
+      "file_target": "error-handling.md",
+      "importance": "medium"
+    }
+  ],
+  "summary": {
+    "total_questions": 16,
+    "by_category": {
+      "Architecture": 2,
+      "Flows": 3,
+      "Components": 6,
+      "Infrastructure": 3,
+      "Operations": 2
+    },
+    "by_importance": {
+      "high": 5,
+      "medium": 9,
+      "low": 2
+    }
+  }
+}

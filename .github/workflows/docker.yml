@@ -32,8 +32,13 @@ jobs:
             - name: Download dependencies
               run: go mod download
 
+            - name: Clear Go cache
+              run: go clean -cache -modcache -i -r
+
             - name: Run tests
-              run: go test -v -race -coverprofile=coverage.out ./...
+              run: go test -v -race -coverprofile=coverage.out -timeout 5m ./...
+              env:
+                  RUN_SMOKE: "1"
 
             - name: Run gosec security scan
               uses: securego/gosec@master
@@ -41,7 +46,7 @@ jobs:
                   args: -no-fail -quiet ./...
 
             - name: Upload coverage
-              uses: actions/upload-artifact@v6
+              uses: actions/upload-artifact@v7
               with:
                   name: coverage
                   path: coverage.out

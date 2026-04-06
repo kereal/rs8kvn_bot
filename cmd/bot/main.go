@@ -119,7 +119,7 @@ func main() {
 	// Initialize database with Service pattern for dependency injection
 	dbService, err := database.NewService(cfg.DatabasePath)
 	if err != nil {
-		logger.Fatal("Failed to initialize database", zap.Error(err))
+		logger.Warn("Failed to initialize database, continuing without database", zap.Error(err))
 	}
 	defer func() {
 		if err := dbService.Close(); err != nil {
@@ -131,7 +131,7 @@ func main() {
 	// Initialize 3x-ui client
 	xuiClient, err := xui.NewClient(cfg.XUIHost, cfg.XUIUsername, cfg.XUIPassword, time.Duration(cfg.XUISessionMaxAgeMinutes)*time.Minute)
 	if err != nil {
-		logger.Fatal("Failed to initialize 3x-ui client", zap.Error(err))
+		logger.Warn("Failed to initialize 3x-ui client, continuing without XUI", zap.Error(err))
 	}
 	defer func() {
 		if err := xuiClient.Close(); err != nil {
@@ -139,42 +139,76 @@ func main() {
 		}
 	}()
 
-	// Connect to 3x-ui panel with retry on startup
-	logger.Info("Connecting to 3x-ui panel")
-	const startupLoginMaxAttempts = 5
-	startupLoginDelay := 5 * time.Second
-	for i := 0; i < startupLoginMaxAttempts; i++ {
-		ctx, cancel := context.WithTimeout(context.Background(), config.XUILoginTimeout)
-		err = xuiClient.Login(ctx)
-		cancel()
-		if err == nil {
-			logger.Info("3x-ui panel connected")
-			break
+	// Connect to 3x-ui panel in background (non-blocking startup)
+	// This allows the bot to start even if the panel is temporarily unavailable
+	// The circuit breaker will handle reconnection attempts
+	go func() {
+		defer recoverAndReport("XUI login")
+		logger.Info("Connecting to 3x-ui panel (background)")
+		const startupLoginMaxAttempts = 5
+		startupLoginDelay := 5 * time.Second
+		for i := 0; i < startupLoginMaxAttempts; i++ {
+			ctx, cancel := context.WithTimeout(context.Background(), config.XUILoginTimeout)
+			err := xuiClient.Login(ctx)
+			cancel()
+			if err == nil {
+				logger.Info("3x-ui panel connected")
+				return
+			}
+			if i == startupLoginMaxAttempts-1 {
+				logger.Warn("Failed to connect to 3x-ui panel after max attempts, will retry via circuit breaker",
+					zap.Error(err),
+					zap.Int("attempts", startupLoginMaxAttempts))
+				return
+			}
+			logger.Warn("3x-ui login failed, retrying...",
+				zap.Int("attempt", i+1),
+				zap.Int("max_attempts", startupLoginMaxAttempts),
+				zap.Error(err))
+			time.Sleep(startupLoginDelay + time.Duration(rand.Int63n(int64(startupLoginDelay/2))))
 		}
-		if i == startupLoginMaxAttempts-1 {
-			logger.Fatal("Failed to connect to 3x-ui panel",
-				zap.Error(err),
-				zap.Int("attempts", startupLoginMaxAttempts))
-		}
-		logger.Warn("3x-ui login failed, retrying...",
-			zap.Int("attempt", i+1),
-			zap.Int("max_attempts", startupLoginMaxAttempts),
-			zap.Error(err))
-		time.Sleep(startupLoginDelay + time.Duration(rand.Int63n(int64(startupLoginDelay/2))))
-	}
+	}()
 
-	// Initialize Telegram bot
+	// Initialize Telegram bot with timeout to prevent blocking startup
 	logger.Info("Validating Telegram bot token")
-	botAPI, err := tgbotapi.NewBotAPI(cfg.TelegramBotToken)
-	if err != nil {
-		logger.Fatal("Invalid Telegram bot token", zap.Error(err))
-	}
 
-	botConfig, err := bot.NewBotConfig(botAPI)
-	if err != nil {
-		logger.Fatal("Failed to get bot config", zap.Error(err))
+	// Use a channel to get the result asynchronously
+	type botInitResult struct {
+		botAPI    *tgbotapi.BotAPI
+		botConfig *bot.BotConfig
+		err       error
 	}
-	logger.Info("Telegram bot authorized", zap.String("username", botConfig.Username))
+	botInitChan := make(chan botInitResult, 1)
+
+	go func() {
+		defer recoverAndReport("Telegram bot init")
+		api, err := tgbotapi.NewBotAPI(cfg.TelegramBotToken)
+		if err != nil {
+			botInitChan <- botInitResult{err: err}
+			return
+		}
+
+		cfg, err := bot.NewBotConfig(api)
+		botInitChan <- botInitResult{botAPI: api, botConfig: cfg, err: err}
+	}()
+
+	// Declare variables for bot API and config (needed for scope)
+	var botAPI *tgbotapi.BotAPI
+	var botConfig *bot.BotConfig
+
+	// Wait for bot initialization with timeout
+	select {
+	case result := <-botInitChan:
+		if result.err != nil {
+			logger.Warn("Failed to initialize Telegram bot, continuing without bot", zap.Error(result.err))
+		} else {
+			botAPI = result.botAPI
+			botConfig = result.botConfig
+			logger.Info("Telegram bot authorized", zap.String("username", botConfig.Username))
+		}
+	case <-time.After(10 * time.Second):
+		logger.Warn("Timeout initializing Telegram bot (10s), continuing without bot")
+	}
 
 	// Create subscription service (shared between bot handler and web server)
 	subService := service.NewSubscriptionService(dbService, xuiClient, cfg)
@@ -184,7 +218,7 @@ func main() {
 	defer subProxy.Stop()
 
 	// Create bot handler
-	handler := bot.NewHandler(botAPI, cfg, dbService, xuiClient, botConfig, subService)
+	handler := bot.NewHandler(botAPI, cfg, dbService, xuiClient, botConfig, subService, getVersion())
 
 	// Initialize and start web server (health + trial pages)
 	webServer := web.NewServer(fmt.Sprintf(":%d", cfg.HealthCheckPort), dbService, xuiClient, cfg, botConfig, subService, subProxy)
@@ -200,8 +234,23 @@ func main() {
 		}
 		return web.ComponentHealth{Status: web.StatusOK}
 	})
-	if err := webServer.Start(context.Background()); err != nil {
-		logger.Fatal("Failed to start web server", zap.Error(err))
+
+	// Start web server in background to prevent blocking startup
+	webServerStartErr := make(chan error, 1)
+	go func() {
+		defer recoverAndReport("Web server start")
+		if err := webServer.Start(context.Background()); err != nil {
+			webServerStartErr <- err
+		}
+	}()
+
+	// Wait briefly for web server to start or fail
+	select {
+	case err := <-webServerStartErr:
+		logger.Warn("Failed to start web server, continuing without web server", zap.Error(err))
+	case <-time.After(2 * time.Second):
+		// Web server started successfully in background
+		logger.Info("Web server started", zap.Int("port", cfg.HealthCheckPort))
 	}
 	defer func() {
 		webServer.SetReady(false)

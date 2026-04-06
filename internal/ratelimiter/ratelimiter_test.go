@@ -2,6 +2,7 @@ package ratelimiter
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -226,4 +227,74 @@ func TestTokenBucket_WaitN_Timeout(t *testing.T) {
 
 	// Should timeout
 	assert.False(t, tb.WaitN(ctx, 1), "WaitN() should timeout when no tokens available")
+}
+
+func TestTokenBucket_Burst_100Concurrent(t *testing.T) {
+	tb := NewTokenBucket(30, 5) // 30 tokens, 5/sec refill
+
+	var wg sync.WaitGroup
+	results := make(chan bool, 100)
+
+	// 100 concurrent requests
+	for i := 0; i < 100; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			allowed := tb.Allow()
+			results <- allowed
+		}()
+	}
+
+	wg.Wait()
+
+	allowed := 0
+	blocked := 0
+	for i := 0; i < 100; i++ {
+		if <-results {
+			allowed++
+		} else {
+			blocked++
+		}
+	}
+
+	t.Logf("Burst test: allowed=%d, blocked=%d", allowed, blocked)
+	assert.LessOrEqual(t, allowed, 30, "Should allow at most 30 (maxTokens)")
+	assert.Greater(t, blocked, 0, "Should block some requests when burst > capacity")
+}
+
+func TestTokenBucket_Burst_Boundary(t *testing.T) {
+	tb := NewTokenBucket(10, 10)
+
+	// Fill to capacity
+	for i := 0; i < 10; i++ {
+		assert.True(t, tb.Allow(), "Should allow first 10")
+	}
+
+	// 11th should be blocked
+	assert.False(t, tb.Allow(), "Should block 11th request (boundary)")
+
+	// Wait for refill
+	time.Sleep(200 * time.Millisecond)
+
+	// Should be allowed after refill
+	assert.True(t, tb.Allow(), "Should allow after refill")
+}
+
+func TestTokenBucket_PerUserIsolation(t *testing.T) {
+	tb1 := NewTokenBucket(5, 1)
+	tb2 := NewTokenBucket(5, 1)
+
+	// User 1: consume all tokens
+	for i := 0; i < 5; i++ {
+		assert.True(t, tb1.Allow(), "User 1 should consume tokens")
+	}
+
+	// User 2: should still have tokens (independent)
+	for i := 0; i < 3; i++ {
+		assert.True(t, tb2.Allow(), "User 2 should have independent limit")
+	}
+
+	// User 1 blocked, User 2 still allowed
+	assert.False(t, tb1.Allow(), "User 1 should be blocked")
+	assert.True(t, tb2.Allow(), "User 2 should still have tokens")
 }

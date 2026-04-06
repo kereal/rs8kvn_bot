@@ -20,7 +20,11 @@ import (
 func (h *Handler) getSubscriptionWithCache(ctx context.Context, chatID int64) (*database.Subscription, error) {
 	// Try cache first
 	if sub := h.cache.Get(chatID); sub != nil {
-		return sub, nil
+		if sub.Status == "active" {
+			return sub, nil
+		}
+		// Stale cache entry (non-active subscription) — invalidate and fall through to DB
+		h.invalidateCache(chatID)
 	}
 
 	// Cache miss, query database
@@ -29,8 +33,8 @@ func (h *Handler) getSubscriptionWithCache(ctx context.Context, chatID int64) (*
 		return nil, err
 	}
 
-	// Store in cache
-	if sub != nil {
+	// Store in cache only if active
+	if sub != nil && sub.Status == "active" {
 		h.cache.Set(chatID, sub)
 	}
 
@@ -101,6 +105,12 @@ func (h *Handler) handleMySubscription(ctx context.Context, chatID int64, userna
 			h.safeSend(editMsg)
 			return
 		}
+	}
+
+	if sub.Status != "active" {
+		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgSubNoActive))
+		h.safeSend(editMsg)
+		return
 	}
 
 	// Get traffic usage from 3x-ui panel

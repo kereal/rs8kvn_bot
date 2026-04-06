@@ -29,7 +29,6 @@ import (
 //go:embed templates/*.html templates/logo.png
 var allFiles embed.FS
 
-var templateFS = allFiles
 var staticFiles = allFiles
 
 // TrialCreationResult holds the outcome of a successful trial creation.
