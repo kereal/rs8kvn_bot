@@ -27,7 +27,7 @@ jobs:
               uses: actions/setup-go@v6
               with:
                   go-version: "1.25"
-                  cache: false
+                  cache: true
 
             - name: Download dependencies
               run: go mod download
