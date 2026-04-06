@@ -19,9 +19,6 @@ func TestSmoke_BinaryStartup(t *testing.T) {
 		t.Skip("Set RUN_SMOKE=1 to run smoke tests")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.env")
 
@@ -45,6 +42,10 @@ LOG_LEVEL=debug
 	build.Stdout = os.Stdout
 	build.Stderr = os.Stderr
 	require.NoError(t, build.Run(), "Failed to build binary")
+
+	// Create context after build to prevent timeout during compilation
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
 	cmd := exec.CommandContext(ctx, binPath, "-config", configPath)
 	cmd.Stdout = os.Stdout
@@ -137,11 +138,11 @@ XUI_INBOUND_ID=1
 
 			if cmd.Process != nil {
 				_ = cmd.Process.Kill()
-				cmd.Wait()
 			}
 
+			err = cmd.Wait()
 			if tt.wantErr {
-				if err := cmd.Wait(); err != nil {
+				if err != nil {
 					t.Logf("Expected error occurred: %v", err)
 				}
 			}
