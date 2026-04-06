@@ -192,6 +192,10 @@ func main() {
 		botInitChan <- botInitResult{botAPI: api, botConfig: cfg, err: err}
 	}()
 
+	// Declare variables for bot API and config (needed for scope)
+	var botAPI *tgbotapi.BotAPI
+	var botConfig *bot.BotConfig
+
 	// Wait for bot initialization with timeout
 	select {
 	case result := <-botInitChan:
