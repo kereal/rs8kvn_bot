@@ -13,6 +13,7 @@ import (
 	"rs8kvn_bot/internal/database"
 	"rs8kvn_bot/internal/service"
 	"rs8kvn_bot/internal/web"
+	"rs8kvn_bot/internal/webhook"
 	"rs8kvn_bot/internal/xui"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -98,7 +99,7 @@ func TestE2E_InviteLink_CreatesTrial(t *testing.T) {
 
 	env.cfg.TrialRateLimit = 100
 
-	subService := service.NewSubscriptionService(env.db, env.xui, env.cfg)
+	subService := service.NewSubscriptionService(env.db, env.xui, env.cfg, &webhook.NoopSender{})
 	srv := web.NewServer("127.0.0.1:0", env.db, env.xui, env.cfg, env.botConfig, subService, nil)
 
 	req := httptest.NewRequest("GET", "/i/"+inviteCode, nil)
@@ -131,7 +132,7 @@ func TestE2E_InviteLink_InvalidCode(t *testing.T) {
 
 	env.cfg.TrialRateLimit = 100
 
-	subService := service.NewSubscriptionService(env.db, env.xui, env.cfg)
+	subService := service.NewSubscriptionService(env.db, env.xui, env.cfg, &webhook.NoopSender{})
 	srv := web.NewServer("127.0.0.1:0", env.db, env.xui, env.cfg, env.botConfig, subService, nil)
 
 	req := httptest.NewRequest("GET", "/i/nonexistent_code", nil)
@@ -160,7 +161,7 @@ func TestE2E_InviteLink_XuiLoginFails(t *testing.T) {
 		return nil, fmt.Errorf("authentication failed")
 	}
 
-	subService := service.NewSubscriptionService(env.db, env.xui, env.cfg)
+	subService := service.NewSubscriptionService(env.db, env.xui, env.cfg, &webhook.NoopSender{})
 	srv := web.NewServer("127.0.0.1:0", env.db, env.xui, env.cfg, env.botConfig, subService, nil)
 
 	req := httptest.NewRequest("GET", "/i/"+inviteCode, nil)
@@ -198,7 +199,7 @@ func TestE2E_AutoRelogin_On401(t *testing.T) {
 		}, nil
 	}
 
-	subService := service.NewSubscriptionService(env.db, env.xui, env.cfg)
+	subService := service.NewSubscriptionService(env.db, env.xui, env.cfg, &webhook.NoopSender{})
 	srv := web.NewServer("127.0.0.1:0", env.db, env.xui, env.cfg, env.botConfig, subService, nil)
 
 	req := httptest.NewRequest("GET", "/i/"+inviteCode, nil)
@@ -222,7 +223,7 @@ func TestE2E_InviteLink_RateLimitExceeded(t *testing.T) {
 
 	env.cfg.TrialRateLimit = 1
 
-	subService := service.NewSubscriptionService(env.db, env.xui, env.cfg)
+	subService := service.NewSubscriptionService(env.db, env.xui, env.cfg, &webhook.NoopSender{})
 	srv := web.NewServer("127.0.0.1:0", env.db, env.xui, env.cfg, env.botConfig, subService, nil)
 
 	req1 := httptest.NewRequest("GET", "/i/"+inviteCode, nil)
@@ -252,7 +253,7 @@ func TestE2E_InviteLink_FullFlow_BindTrial(t *testing.T) {
 
 	env.cfg.TrialRateLimit = 100
 
-	subService := service.NewSubscriptionService(env.db, env.xui, env.cfg)
+	subService := service.NewSubscriptionService(env.db, env.xui, env.cfg, &webhook.NoopSender{})
 	srv := web.NewServer("127.0.0.1:0", env.db, env.xui, env.cfg, env.botConfig, subService, nil)
 
 	req := httptest.NewRequest("GET", "/i/"+inviteCode, nil)
@@ -300,7 +301,7 @@ func TestE2E_FullCycle_InviteToQR(t *testing.T) {
 
 	env.cfg.TrialRateLimit = 100
 
-	subService := service.NewSubscriptionService(env.db, env.xui, env.cfg)
+	subService := service.NewSubscriptionService(env.db, env.xui, env.cfg, &webhook.NoopSender{})
 	srv := web.NewServer("127.0.0.1:0", env.db, env.xui, env.cfg, env.botConfig, subService, nil)
 
 	req := httptest.NewRequest("GET", "/i/"+inviteCode, nil)
@@ -418,7 +419,7 @@ func TestE2E_FullCycle_MultipleUsersViaInvite(t *testing.T) {
 
 	env.cfg.TrialRateLimit = 100
 
-	subService := service.NewSubscriptionService(env.db, env.xui, env.cfg)
+	subService := service.NewSubscriptionService(env.db, env.xui, env.cfg, &webhook.NoopSender{})
 	srv := web.NewServer("127.0.0.1:0", env.db, env.xui, env.cfg, env.botConfig, subService, nil)
 
 	user1ChatID := int64(400001)
@@ -474,7 +475,7 @@ func TestE2E_FullCycle_InviteThenShare(t *testing.T) {
 
 	env.cfg.TrialRateLimit = 100
 
-	subService := service.NewSubscriptionService(env.db, env.xui, env.cfg)
+	subService := service.NewSubscriptionService(env.db, env.xui, env.cfg, &webhook.NoopSender{})
 	srv := web.NewServer("127.0.0.1:0", env.db, env.xui, env.cfg, env.botConfig, subService, nil)
 
 	req := httptest.NewRequest("GET", "/i/"+webInviteCode, nil)
@@ -522,7 +523,7 @@ func TestE2E_FullCycle_ConcurrentInviteAccess(t *testing.T) {
 
 	env.cfg.TrialRateLimit = 1000
 
-	subService := service.NewSubscriptionService(env.db, env.xui, env.cfg)
+	subService := service.NewSubscriptionService(env.db, env.xui, env.cfg, &webhook.NoopSender{})
 	srv := web.NewServer("127.0.0.1:0", env.db, env.xui, env.cfg, env.botConfig, subService, nil)
 
 	var wg sync.WaitGroup

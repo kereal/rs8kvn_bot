@@ -21,6 +21,7 @@ import (
 	"rs8kvn_bot/internal/service"
 	"rs8kvn_bot/internal/testutil"
 	"rs8kvn_bot/internal/utils"
+	"rs8kvn_bot/internal/webhook"
 	"rs8kvn_bot/internal/xui"
 
 	"gorm.io/gorm"
@@ -155,7 +156,7 @@ func TestHandleInvite_Success(t *testing.T) {
 		return host
 	}
 
-	subService := service.NewSubscriptionService(mockDB, mockXUI, cfg)
+	subService := service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
 	srv.subService = subService
 
 	req := httptest.NewRequest("GET", "/i/testcode", nil)
@@ -1004,7 +1005,7 @@ func TestHandleInvite_XUIAddClientFails(t *testing.T) {
 		return nil, fmt.Errorf("XUI add client error")
 	}
 
-	subService := service.NewSubscriptionService(mockDB, mockXUI, cfg)
+	subService := service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
 	srv.subService = subService
 
 	req := httptest.NewRequest("GET", "/i/testcode", nil)
@@ -1057,7 +1058,7 @@ func TestHandleInvite_CreateTrialSubscriptionFails(t *testing.T) {
 		return nil, fmt.Errorf("DB error")
 	}
 
-	subService := service.NewSubscriptionService(mockDB, mockXUI, cfg)
+	subService := service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
 	srv.subService = subService
 
 	req := httptest.NewRequest("GET", "/i/testcode", nil)
@@ -1468,7 +1469,7 @@ func TestHandleInvite_ParallelRequests(t *testing.T) {
 		XUIInboundID:       1,
 	}
 
-	subService := service.NewSubscriptionService(mockDB, mockXUI, cfg)
+	subService := service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
 	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig(), subService, nil)
 
 	mockDB.GetInviteByCodeFunc = func(ctx context.Context, code string) (*database.Invite, error) {

@@ -19,6 +19,7 @@ import (
 	"rs8kvn_bot/internal/scheduler"
 	"rs8kvn_bot/internal/service"
 	"rs8kvn_bot/internal/subproxy"
+	"rs8kvn_bot/internal/webhook"
 	"rs8kvn_bot/internal/web"
 	"rs8kvn_bot/internal/xui"
 
@@ -210,8 +211,11 @@ func main() {
 		logger.Warn("Timeout initializing Telegram bot (10s), continuing without bot")
 	}
 
+	// Create webhook sender for Proxy Manager notifications
+	webhookSender := webhook.NewSender(cfg.ProxyManagerWebhookURL, cfg.ProxyManagerWebhookSecret)
+
 	// Create subscription service (shared between bot handler and web server)
-	subService := service.NewSubscriptionService(dbService, xuiClient, cfg)
+	subService := service.NewSubscriptionService(dbService, xuiClient, cfg, webhookSender)
 
 	// Create subscription proxy service
 	subProxy := subproxy.NewService(cfg)

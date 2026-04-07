@@ -11,6 +11,7 @@ import (
 
 	"rs8kvn_bot/internal/config"
 	"rs8kvn_bot/internal/service"
+	"rs8kvn_bot/internal/webhook"
 	"rs8kvn_bot/internal/xui"
 
 	"github.com/stretchr/testify/assert"
@@ -142,7 +143,7 @@ func TestE2E_RealClient_DNSErrorFastFail(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
 
-	subService := service.NewSubscriptionService(db, xuiClient, cfg)
+	subService := service.NewSubscriptionService(db, xuiClient, cfg, &webhook.NoopSender{})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()

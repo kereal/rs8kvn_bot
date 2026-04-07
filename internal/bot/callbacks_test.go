@@ -10,6 +10,7 @@ import (
 	"rs8kvn_bot/internal/database"
 	"rs8kvn_bot/internal/service"
 	"rs8kvn_bot/internal/testutil"
+	"rs8kvn_bot/internal/webhook"
 	"rs8kvn_bot/internal/xui"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -74,7 +75,7 @@ func TestHandleCallback_CallbackDataRouting(t *testing.T) {
 				}
 			},
 			setupSubService: func(mockDB *testutil.MockDatabaseService, mockXUI *testutil.MockXUIClient, cfg *config.Config) *service.SubscriptionService {
-				return service.NewSubscriptionService(mockDB, mockXUI, cfg)
+				return service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
 			},
 			wantSend: true,
 			wantText: "Ваша подписка готова",

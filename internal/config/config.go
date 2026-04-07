@@ -59,34 +59,44 @@ type Config struct {
 	// Subscription proxy configuration
 	SubExtraServersEnabled bool
 	SubExtraServersFile    string
+
+	// API configuration
+	APIToken string
+
+	// Proxy Manager webhook configuration
+	ProxyManagerWebhookSecret string
+	ProxyManagerWebhookURL    string
 }
 
 // configFlags holds typed flag values for config fields.
 type configFlags struct {
-	telegramBotToken        *flag.StringValue
-	telegramAdminID         *flag.Int64Value
-	xuiHost                 *flag.StringValue
-	xuiUsername             *flag.StringValue
-	xuiPassword             *flag.StringValue
-	xuiInboundID            *flag.IntValue
-	xuiSubPath              *flag.StringValue
-	xuiSessionMaxAgeMinutes *flag.IntValue
-	databasePath            *flag.StringValue
-	logFilePath             *flag.StringValue
-	logLevel                *flag.StringValue
-	trafficLimitGB          *flag.IntValue
-	heartbeatURL            *flag.StringValue
-	heartbeatInterval       *flag.IntValue
-	sentryDSN               *flag.StringValue
-	healthCheckPort         *flag.IntValue
-	siteURL                 *flag.StringValue
-	trialDurationHours      *flag.IntValue
-	trialRateLimit          *flag.IntValue
-	contactUsername         *flag.StringValue
-	donateCardNumber        *flag.StringValue
-	donateURL               *flag.StringValue
-	subExtraServersEnabled  *flag.StringValue
-	subExtraServersFile     *flag.StringValue
+	telegramBotToken          *flag.StringValue
+	telegramAdminID           *flag.Int64Value
+	xuiHost                   *flag.StringValue
+	xuiUsername               *flag.StringValue
+	xuiPassword               *flag.StringValue
+	xuiInboundID              *flag.IntValue
+	xuiSubPath                *flag.StringValue
+	xuiSessionMaxAgeMinutes   *flag.IntValue
+	databasePath              *flag.StringValue
+	logFilePath               *flag.StringValue
+	logLevel                  *flag.StringValue
+	trafficLimitGB            *flag.IntValue
+	heartbeatURL              *flag.StringValue
+	heartbeatInterval         *flag.IntValue
+	sentryDSN                 *flag.StringValue
+	healthCheckPort           *flag.IntValue
+	siteURL                   *flag.StringValue
+	trialDurationHours        *flag.IntValue
+	trialRateLimit            *flag.IntValue
+	contactUsername           *flag.StringValue
+	donateCardNumber          *flag.StringValue
+	donateURL                 *flag.StringValue
+	subExtraServersEnabled    *flag.StringValue
+	subExtraServersFile       *flag.StringValue
+	apiToken                  *flag.StringValue
+	proxyManagerWebhookSecret *flag.StringValue
+	proxyManagerWebhookURL    *flag.StringValue
 }
 
 // registerFlags creates a Registry with all config flags registered.
@@ -94,30 +104,33 @@ func registerFlags() (*flag.Registry, *configFlags) {
 	r := flag.New()
 
 	f := &configFlags{
-		telegramBotToken:        flag.NewString(""),
-		telegramAdminID:         flag.NewInt64(0),
-		xuiHost:                 flag.NewString("http://localhost:2053"),
-		xuiUsername:             flag.NewString(""),
-		xuiPassword:             flag.NewString(""),
-		xuiInboundID:            flag.NewInt(1),
-		xuiSubPath:              flag.NewString(DefaultXUISubPath),
-		xuiSessionMaxAgeMinutes: flag.NewInt(DefaultXUISessionMaxAgeMinutes),
-		databasePath:            flag.NewString(DefaultDatabasePath),
-		logFilePath:             flag.NewString(DefaultLogFilePath),
-		logLevel:                flag.NewString(DefaultLogLevel),
-		trafficLimitGB:          flag.NewInt(DefaultTrafficLimitGB),
-		heartbeatURL:            flag.NewString(""),
-		heartbeatInterval:       flag.NewInt(DefaultHeartbeatInterval),
-		sentryDSN:               flag.NewString(""),
-		healthCheckPort:         flag.NewInt(DefaultHealthCheckPort),
-		siteURL:                 flag.NewString(DefaultSiteURL),
-		trialDurationHours:      flag.NewInt(DefaultTrialDurationHours),
-		trialRateLimit:          flag.NewInt(DefaultTrialRateLimit),
-		contactUsername:         flag.NewString(ContactUsername),
-		donateCardNumber:        flag.NewString(DonateCardNumber),
-		donateURL:               flag.NewString(DonateURL),
-		subExtraServersEnabled:  flag.NewString("true"),
-		subExtraServersFile:     flag.NewString(""),
+		telegramBotToken:          flag.NewString(""),
+		telegramAdminID:           flag.NewInt64(0),
+		xuiHost:                   flag.NewString("http://localhost:2053"),
+		xuiUsername:               flag.NewString(""),
+		xuiPassword:               flag.NewString(""),
+		xuiInboundID:              flag.NewInt(1),
+		xuiSubPath:                flag.NewString(DefaultXUISubPath),
+		xuiSessionMaxAgeMinutes:   flag.NewInt(DefaultXUISessionMaxAgeMinutes),
+		databasePath:              flag.NewString(DefaultDatabasePath),
+		logFilePath:               flag.NewString(DefaultLogFilePath),
+		logLevel:                  flag.NewString(DefaultLogLevel),
+		trafficLimitGB:            flag.NewInt(DefaultTrafficLimitGB),
+		heartbeatURL:              flag.NewString(""),
+		heartbeatInterval:         flag.NewInt(DefaultHeartbeatInterval),
+		sentryDSN:                 flag.NewString(""),
+		healthCheckPort:           flag.NewInt(DefaultHealthCheckPort),
+		siteURL:                   flag.NewString(DefaultSiteURL),
+		trialDurationHours:        flag.NewInt(DefaultTrialDurationHours),
+		trialRateLimit:            flag.NewInt(DefaultTrialRateLimit),
+		contactUsername:           flag.NewString(ContactUsername),
+		donateCardNumber:          flag.NewString(DonateCardNumber),
+		donateURL:                 flag.NewString(DonateURL),
+		subExtraServersEnabled:    flag.NewString("true"),
+		subExtraServersFile:       flag.NewString(""),
+		apiToken:                  flag.NewString(""),
+		proxyManagerWebhookSecret: flag.NewString(""),
+		proxyManagerWebhookURL:    flag.NewString(""),
 	}
 
 	r.Register("TELEGRAM_BOT_TOKEN", f.telegramBotToken)
@@ -144,6 +157,9 @@ func registerFlags() (*flag.Registry, *configFlags) {
 	r.Register("DONATE_URL", f.donateURL)
 	r.Register("SUB_EXTRA_SERVERS_ENABLED", f.subExtraServersEnabled)
 	r.Register("SUB_EXTRA_SERVERS_FILE", f.subExtraServersFile)
+	r.Register("API_TOKEN", f.apiToken)
+	r.Register("PROXY_MANAGER_WEBHOOK_SECRET", f.proxyManagerWebhookSecret)
+	r.Register("PROXY_MANAGER_WEBHOOK_URL", f.proxyManagerWebhookURL)
 
 	return r, f
 }
@@ -158,30 +174,33 @@ func Load() (*Config, error) {
 	}
 
 	cfg := &Config{
-		TelegramBotToken:        f.telegramBotToken.Get(),
-		TelegramAdminID:         f.telegramAdminID.Get(),
-		XUIHost:                 f.xuiHost.Get(),
-		XUIUsername:             f.xuiUsername.Get(),
-		XUIPassword:             f.xuiPassword.Get(),
-		XUIInboundID:            f.xuiInboundID.Get(),
-		XUISubPath:              f.xuiSubPath.Get(),
-		XUISessionMaxAgeMinutes: f.xuiSessionMaxAgeMinutes.Get(),
-		DatabasePath:            f.databasePath.Get(),
-		LogFilePath:             f.logFilePath.Get(),
-		LogLevel:                f.logLevel.Get(),
-		TrafficLimitGB:          f.trafficLimitGB.Get(),
-		HeartbeatURL:            f.heartbeatURL.Get(),
-		HeartbeatInterval:       f.heartbeatInterval.Get(),
-		SentryDSN:               f.sentryDSN.Get(),
-		HealthCheckPort:         f.healthCheckPort.Get(),
-		SiteURL:                 f.siteURL.Get(),
-		TrialDurationHours:      f.trialDurationHours.Get(),
-		TrialRateLimit:          f.trialRateLimit.Get(),
-		ContactUsername:         f.contactUsername.Get(),
-		DonateCardNumber:        f.donateCardNumber.Get(),
-		DonateURL:               f.donateURL.Get(),
-		SubExtraServersEnabled:  strings.ToLower(f.subExtraServersEnabled.Get()) == "true",
-		SubExtraServersFile:     f.subExtraServersFile.Get(),
+		TelegramBotToken:          f.telegramBotToken.Get(),
+		TelegramAdminID:           f.telegramAdminID.Get(),
+		XUIHost:                   f.xuiHost.Get(),
+		XUIUsername:               f.xuiUsername.Get(),
+		XUIPassword:               f.xuiPassword.Get(),
+		XUIInboundID:              f.xuiInboundID.Get(),
+		XUISubPath:                f.xuiSubPath.Get(),
+		XUISessionMaxAgeMinutes:   f.xuiSessionMaxAgeMinutes.Get(),
+		DatabasePath:              f.databasePath.Get(),
+		LogFilePath:               f.logFilePath.Get(),
+		LogLevel:                  f.logLevel.Get(),
+		TrafficLimitGB:            f.trafficLimitGB.Get(),
+		HeartbeatURL:              f.heartbeatURL.Get(),
+		HeartbeatInterval:         f.heartbeatInterval.Get(),
+		SentryDSN:                 f.sentryDSN.Get(),
+		HealthCheckPort:           f.healthCheckPort.Get(),
+		SiteURL:                   f.siteURL.Get(),
+		TrialDurationHours:        f.trialDurationHours.Get(),
+		TrialRateLimit:            f.trialRateLimit.Get(),
+		ContactUsername:           f.contactUsername.Get(),
+		DonateCardNumber:          f.donateCardNumber.Get(),
+		DonateURL:                 f.donateURL.Get(),
+		SubExtraServersEnabled:    strings.ToLower(f.subExtraServersEnabled.Get()) == "true",
+		SubExtraServersFile:       f.subExtraServersFile.Get(),
+		APIToken:                  f.apiToken.Get(),
+		ProxyManagerWebhookSecret: f.proxyManagerWebhookSecret.Get(),
+		ProxyManagerWebhookURL:    f.proxyManagerWebhookURL.Get(),
 	}
 
 	// Validate all required fields
