@@ -16,6 +16,7 @@ import (
 	"rs8kvn_bot/internal/logger"
 	"rs8kvn_bot/internal/service"
 	"rs8kvn_bot/internal/testutil"
+	"rs8kvn_bot/internal/webhook"
 	"rs8kvn_bot/internal/xui"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -95,7 +96,7 @@ func setupE2EEnv(t *testing.T) *e2eTestEnv {
 		IsBot:     true,
 	}
 
-	subService := service.NewSubscriptionService(db, mockXUI, cfg)
+	subService := service.NewSubscriptionService(db, mockXUI, cfg, &webhook.NoopSender{})
 	handler := bot.NewHandler(mockBotAPI, cfg, db, mockXUI, botCfg, subService, "")
 
 	return &e2eTestEnv{
@@ -219,7 +220,7 @@ func setupRealXUIEnv(t *testing.T, handlers map[string]http.HandlerFunc) *realXU
 	xuiClient, err := xui.NewClient(server.URL, "admin", "password", 15*time.Minute)
 	require.NoError(t, err)
 
-	subService := service.NewSubscriptionService(db, xuiClient, cfg)
+	subService := service.NewSubscriptionService(db, xuiClient, cfg, &webhook.NoopSender{})
 
 	return &realXUIEnv{
 		t:          t,

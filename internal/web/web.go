@@ -120,6 +120,11 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/sub/", s.handleSubscription)
 	mux.HandleFunc("/static/logo.png", s.handleLogo)
 
+	// API routes with Bearer token auth
+	apiMux := http.NewServeMux()
+	apiMux.HandleFunc("/api/v1/subscriptions", s.GetSubscriptions)
+	mux.Handle("/api/v1/subscriptions", BearerAuthMiddleware(s.cfg.APIToken)(apiMux))
+
 	s.server = &http.Server{
 		Addr:              s.addr,
 		Handler:           mux,

@@ -16,6 +16,7 @@ import (
 	"rs8kvn_bot/internal/service"
 	"rs8kvn_bot/internal/testutil"
 	"rs8kvn_bot/internal/utils"
+	"rs8kvn_bot/internal/webhook"
 	"rs8kvn_bot/internal/xui"
 )
 
@@ -135,7 +136,7 @@ func NewTestFixture(t *testing.T) *IntegrationTestFixture {
 	}
 
 	handler := NewHandler(testutil.NewMockBotAPI(), cfg, dbService, mockXUI.Client, NewTestBotConfig(), nil, "")
-	subService := service.NewSubscriptionService(dbService, mockXUI.Client, cfg)
+	subService := service.NewSubscriptionService(dbService, mockXUI.Client, cfg, &webhook.NoopSender{})
 	handler.subscriptionService = subService
 
 	return &IntegrationTestFixture{

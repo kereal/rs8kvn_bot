@@ -11,6 +11,7 @@ import (
 
 	"rs8kvn_bot/internal/service"
 	"rs8kvn_bot/internal/web"
+	"rs8kvn_bot/internal/webhook"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -21,7 +22,7 @@ func TestE2E_HealthEndpoint(t *testing.T) {
 	env := setupE2EEnv(t)
 	defer env.db.Close()
 
-	subService := service.NewSubscriptionService(env.db, env.xui, env.cfg)
+	subService := service.NewSubscriptionService(env.db, env.xui, env.cfg, &webhook.NoopSender{})
 	addr := getFreePort(t)
 	srv := web.NewServer(addr, env.db, env.xui, env.cfg, env.botConfig, subService, nil)
 
@@ -57,7 +58,7 @@ func TestE2E_HealthEndpoint_DBError(t *testing.T) {
 	env := setupE2EEnv(t)
 	defer env.db.Close()
 
-	subService := service.NewSubscriptionService(env.db, env.xui, env.cfg)
+	subService := service.NewSubscriptionService(env.db, env.xui, env.cfg, &webhook.NoopSender{})
 	addr := getFreePort(t)
 	srv := web.NewServer(addr, env.db, env.xui, env.cfg, env.botConfig, subService, nil)
 
@@ -90,7 +91,7 @@ func TestE2E_ReadyEndpoint(t *testing.T) {
 	env := setupE2EEnv(t)
 	defer env.db.Close()
 
-	subService := service.NewSubscriptionService(env.db, env.xui, env.cfg)
+	subService := service.NewSubscriptionService(env.db, env.xui, env.cfg, &webhook.NoopSender{})
 	addr := getFreePort(t)
 	srv := web.NewServer(addr, env.db, env.xui, env.cfg, env.botConfig, subService, nil)
 
