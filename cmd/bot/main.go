@@ -72,9 +72,16 @@ func getVersion() string {
 	return "rs8kvn_bot@" + version
 }
 
-// main is the program entry point. It initializes configuration, observability (Sentry), logging, and external services (database, 3x-ui client, Telegram bot, webhook sender), starts the web server and background schedulers, runs the Telegram update processing loop, and performs a coordinated graceful shutdown.
-//
-// On unrecoverable initialization failures (configuration or logger) it prints an error to stderr and exits.
+// main is the program entry point that initializes configuration and core services,
+// starts background schedulers and a health web server, runs the Telegram update
+// dispatch loop with concurrency limiting, and performs a graceful shutdown.
+ // 
+ // The function performs best-effort initialization for optional components (Sentry,
+ // database, 3x-ui client, Telegram bot) so the service can start even if some
+ // dependencies are unavailable. It also starts background maintenance tasks
+ // (backups, heartbeat, trial cleanup, subscription proxy reload), marks the web
+ // server readiness, and coordinates orderly shutdown of update handlers and
+ // background workers when a termination signal is received.
 func main() {
 	// Load configuration first
 	cfg, err := config.Load()

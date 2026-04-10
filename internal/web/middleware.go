@@ -16,6 +16,15 @@ import (
 func BearerAuthMiddleware(expectedToken string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Fail closed: reject all requests if expectedToken is empty/whitespace (misconfiguration)
+			if strings.TrimSpace(expectedToken) == "" {
+				logger.Error("BearerAuthMiddleware misconfigured: empty expectedToken",
+					zap.String("path", r.URL.Path),
+					zap.String("method", r.Method))
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+
 			// Skip auth for OPTIONS requests (CORS preflight)
 			if r.Method == http.MethodOptions {
 				next.ServeHTTP(w, r)
