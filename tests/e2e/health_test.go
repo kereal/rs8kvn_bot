@@ -40,7 +40,7 @@ func TestE2E_HealthEndpoint(t *testing.T) {
 	require.NoError(t, err)
 	defer srv.Stop(context.Background())
 
-	time.Sleep(50 * time.Millisecond)
+	waitForServerReady(t, addr, 2*time.Second)
 
 	resp, err := http.Get(fmt.Sprintf("http://%s/healthz", addr))
 	require.NoError(t, err)
@@ -73,7 +73,7 @@ func TestE2E_HealthEndpoint_DBError(t *testing.T) {
 	require.NoError(t, err)
 	defer srv.Stop(context.Background())
 
-	time.Sleep(50 * time.Millisecond)
+	waitForServerReady(t, addr, 2*time.Second)
 
 	resp, err := http.Get(fmt.Sprintf("http://%s/readyz", addr))
 	require.NoError(t, err)
@@ -109,7 +109,7 @@ func TestE2E_ReadyEndpoint(t *testing.T) {
 	require.NoError(t, err)
 	defer srv.Stop(context.Background())
 
-	time.Sleep(50 * time.Millisecond)
+	waitForServerReady(t, addr, 2*time.Second)
 
 	resp, err := http.Get(fmt.Sprintf("http://%s/readyz", addr))
 	require.NoError(t, err)

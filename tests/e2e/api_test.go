@@ -53,7 +53,7 @@ func TestE2E_APISubscriptions_Success(t *testing.T) {
 	require.NoError(t, err)
 	defer srv.Stop(context.Background())
 
-	time.Sleep(50 * time.Millisecond)
+	waitForServerReady(t, addr, 2*time.Second)
 
 	// Make authenticated request
 	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("http://%s/api/v1/subscriptions", addr), nil)
@@ -103,7 +103,7 @@ func TestE2E_APISubscriptions_EmptyList(t *testing.T) {
 	require.NoError(t, err)
 	defer srv.Stop(context.Background())
 
-	time.Sleep(50 * time.Millisecond)
+	waitForServerReady(t, addr, 2*time.Second)
 
 	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("http://%s/api/v1/subscriptions", addr), nil)
 	require.NoError(t, err)
@@ -145,7 +145,7 @@ func TestE2E_APISubscriptions_Unauthorized(t *testing.T) {
 	require.NoError(t, err)
 	defer srv.Stop(context.Background())
 
-	time.Sleep(50 * time.Millisecond)
+	waitForServerReady(t, addr, 2*time.Second)
 
 	tests := []struct {
 		name   string
@@ -192,7 +192,7 @@ func TestE2E_APISubscriptions_InvalidToken(t *testing.T) {
 	require.NoError(t, err)
 	defer srv.Stop(context.Background())
 
-	time.Sleep(50 * time.Millisecond)
+	waitForServerReady(t, addr, 2*time.Second)
 
 	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("http://%s/api/v1/subscriptions", addr), nil)
 	require.NoError(t, err)
@@ -223,7 +223,7 @@ func TestE2E_APISubscriptions_MethodNotAllowed(t *testing.T) {
 	require.NoError(t, err)
 	defer srv.Stop(context.Background())
 
-	time.Sleep(50 * time.Millisecond)
+	waitForServerReady(t, addr, 2*time.Second)
 
 	methods := []string{http.MethodPost, http.MethodPut, http.MethodDelete}
 
@@ -287,7 +287,7 @@ func TestE2E_APISubscriptions_FiltersInactive(t *testing.T) {
 	require.NoError(t, err)
 	defer srv.Stop(context.Background())
 
-	time.Sleep(50 * time.Millisecond)
+	waitForServerReady(t, addr, 2*time.Second)
 
 	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("http://%s/api/v1/subscriptions", addr), nil)
 	require.NoError(t, err)
@@ -333,8 +333,12 @@ func TestE2E_WebhookSender_DeliverySuccess(t *testing.T) {
 		}
 
 		mu.Lock()
-		json.Unmarshal(body, &receivedEvent)
-		mu.Unlock()
+		defer mu.Unlock()
+
+		if err := json.Unmarshal(body, &receivedEvent); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
 
 		received.Store(true)
 		w.WriteHeader(http.StatusOK)
@@ -506,7 +510,7 @@ func TestE2E_APISubscriptions_MultipleActive(t *testing.T) {
 	require.NoError(t, err)
 	defer srv.Stop(context.Background())
 
-	time.Sleep(50 * time.Millisecond)
+	waitForServerReady(t, addr, 2*time.Second)
 
 	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("http://%s/api/v1/subscriptions", addr), nil)
 	require.NoError(t, err)
@@ -558,7 +562,7 @@ func TestE2E_APISubscriptions_ResponseHeaders(t *testing.T) {
 	require.NoError(t, err)
 	defer srv.Stop(context.Background())
 
-	time.Sleep(50 * time.Millisecond)
+	waitForServerReady(t, addr, 2*time.Second)
 
 	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("http://%s/api/v1/subscriptions", addr), nil)
 	require.NoError(t, err)
@@ -570,5 +574,5 @@ func TestE2E_APISubscriptions_ResponseHeaders(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	assert.Equal(t, "application/json", resp.Header.Get("Content-Type"))
-	assert.Equal(t, "no-cache", resp.Header.Get("Cache-Control"))
+	assert.Equal(t, "no-store, private", resp.Header.Get("Cache-Control"))
 }

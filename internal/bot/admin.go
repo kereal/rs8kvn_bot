@@ -122,21 +122,11 @@ func (h *Handler) HandleDel(ctx context.Context, update tgbotapi.Update) {
 
 	id := uint(parsedID)
 
-	// Get the subscription
-	sub, err := h.db.GetByID(ctx, id)
+	// Delete subscription via service (includes webhook notification).
+	// DeleteByID returns the deleted record so we can use it for
+	// referral/cache updates only after a successful deletion.
+	deleted, err := h.subscriptionService.DeleteByID(ctx, id)
 	if err != nil {
-		logger.Error("Failed to get subscription", zap.Error(err), zap.Uint("id", id))
-		h.SendMessage(ctx, chatID, fmt.Sprintf("❌ Подписка с ID %d не найдена", id))
-		return
-	}
-
-	// Decrement referral cache if this subscription was referred
-	if sub.ReferredBy > 0 {
-		h.DecrementReferralCount(sub.ReferredBy)
-	}
-
-	// Delete subscription via service (includes webhook notification)
-	if _, err := h.subscriptionService.DeleteByID(ctx, id); err != nil {
 		logger.Error("Failed to delete subscription",
 			zap.Error(err),
 			zap.Uint("id", id))
@@ -144,17 +134,22 @@ func (h *Handler) HandleDel(ctx context.Context, update tgbotapi.Update) {
 		return
 	}
 
-	// Invalidate cache
-	if sub.TelegramID != 0 {
-		h.invalidateCache(sub.TelegramID)
+	// Decrement referral cache only after successful deletion
+	if deleted.ReferredBy > 0 {
+		h.DecrementReferralCount(deleted.ReferredBy)
+	}
+
+	// Invalidate cache only after successful deletion
+	if deleted.TelegramID != 0 {
+		h.invalidateCache(deleted.TelegramID)
 	}
 
 	// Success
 	logger.Info("Subscription deleted",
 		zap.Uint("id", id),
-		zap.String("username", sub.Username),
-		zap.Int64("telegram_id", sub.TelegramID),
-		zap.String("client_id", sub.ClientID))
+		zap.String("username", deleted.Username),
+		zap.Int64("telegram_id", deleted.TelegramID),
+		zap.String("client_id", deleted.ClientID))
 
 	h.SendMessage(ctx, chatID, fmt.Sprintf(
 		"✅ Подписка успешно удалена!\n\n"+
@@ -162,8 +157,8 @@ func (h *Handler) HandleDel(ctx context.Context, update tgbotapi.Update) {
 			"👤 Пользователь: @%s\n"+
 			"🆔 Telegram ID: %d",
 		id,
-		sub.Username,
-		sub.TelegramID,
+		deleted.Username,
+		deleted.TelegramID,
 	))
 }
 
