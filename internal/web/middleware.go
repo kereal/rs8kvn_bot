@@ -11,7 +11,10 @@ import (
 
 // BearerAuthMiddleware returns a middleware that validates Bearer token in Authorization header.
 // If the token is valid, the request is passed to the next handler.
-// If the token is invalid or missing, a 401 Unauthorized response is returned.
+// BearerAuthMiddleware constructs a middleware that enforces a specific Bearer token for incoming HTTP requests.
+// It skips authentication for OPTIONS requests. If `expectedToken` is empty, the Authorization header is missing,
+// not prefixed with "Bearer ", or does not equal `expectedToken`, the middleware responds with 401 Unauthorized and
+// does not call the next handler. When the token is valid, the request is forwarded to the next handler.
 func BearerAuthMiddleware(expectedToken string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
