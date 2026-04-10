@@ -8,15 +8,24 @@ import (
 	"rs8kvn_bot/internal/config"
 	"rs8kvn_bot/internal/database"
 	"rs8kvn_bot/internal/interfaces"
-	"rs8kvn_bot/internal/xui"
-
 	"rs8kvn_bot/internal/utils"
+	"rs8kvn_bot/internal/webhook"
+	"rs8kvn_bot/internal/xui"
 )
 
+// WebhookSender interface for sending webhook events (mockable for tests).
+type WebhookSender interface {
+	SendAsync(event Event)
+}
+
+// Event represents a webhook event (re-exported from webhook package).
+type Event = webhook.Event
+
 type SubscriptionService struct {
-	db  interfaces.DatabaseService
-	xui interfaces.XUIClient
-	cfg *config.Config
+	db      interfaces.DatabaseService
+	xui     interfaces.XUIClient
+	cfg     *config.Config
+	webhook WebhookSender
 }
 
 type CreateResult struct {
@@ -24,11 +33,14 @@ type CreateResult struct {
 	SubscriptionURL string
 }
 
-func NewSubscriptionService(db interfaces.DatabaseService, xui interfaces.XUIClient, cfg *config.Config) *SubscriptionService {
+// NewSubscriptionService creates a SubscriptionService configured with the given database, XUI client, configuration, and optional webhook sender.
+// If webhookSender is nil, webhook delivery will be disabled for the service.
+func NewSubscriptionService(db interfaces.DatabaseService, xui interfaces.XUIClient, cfg *config.Config, webhookSender WebhookSender) *SubscriptionService {
 	return &SubscriptionService{
-		db:  db,
-		xui: xui,
-		cfg: cfg,
+		db:      db,
+		xui:     xui,
+		cfg:     cfg,
+		webhook: webhookSender,
 	}
 }
 
@@ -77,6 +89,18 @@ func (s *SubscriptionService) Create(ctx context.Context, chatID int64, username
 		return nil, fmt.Errorf("create subscription: %w", err)
 	}
 
+		// Send webhook notification (async)
+	if s.webhook != nil {
+		eventID, _ := utils.GenerateUUID()
+		s.webhook.SendAsync(Event{
+			EventID:           "evt-" + eventID,
+			Event:             webhook.EventSubscriptionActivated,
+			UserID:            sub.ClientID,
+			Email:             sub.Username,
+			SubscriptionToken: sub.SubscriptionID,
+		})
+	}
+
 	return &CreateResult{
 		Subscription:    sub,
 		SubscriptionURL: subscriptionURL,
@@ -93,6 +117,11 @@ func (s *SubscriptionService) Delete(ctx context.Context, telegramID int64) erro
 		return err
 	}
 
+	// Store subscription data before deletion for webhook
+	clientID := sub.ClientID
+	username := sub.Username
+	subscriptionID := sub.SubscriptionID
+
 	if err := s.xui.DeleteClient(ctx, s.cfg.XUIInboundID, sub.ClientID); err != nil {
 		return fmt.Errorf("xui delete: %w", err)
 	}
@@ -101,7 +130,53 @@ func (s *SubscriptionService) Delete(ctx context.Context, telegramID int64) erro
 		return fmt.Errorf("db delete: %w", err)
 	}
 
+	// Send webhook notification (async)
+	if s.webhook != nil {
+		eventID, _ := utils.GenerateUUID()
+		s.webhook.SendAsync(Event{
+			EventID:           "evt-" + eventID,
+			Event:             webhook.EventSubscriptionExpired,
+			UserID:            clientID,
+			Email:             username,
+			SubscriptionToken: subscriptionID,
+		})
+	}
+
 	return nil
+}
+
+// DeleteByID deletes a subscription by database ID.
+// Used by admin /del command.
+func (s *SubscriptionService) DeleteByID(ctx context.Context, id uint) (*database.Subscription, error) {
+	sub, err := s.db.GetByID(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("get subscription: %w", err)
+	}
+
+	// Delete from 3x-ui panel
+	if err := s.xui.DeleteClient(ctx, sub.InboundID, sub.ClientID); err != nil {
+		return nil, fmt.Errorf("xui delete: %w", err)
+	}
+
+	// Delete from database
+	deleted, err := s.db.DeleteSubscriptionByID(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("db delete: %w", err)
+	}
+
+	// Send webhook notification (async)
+	if s.webhook != nil {
+		eventID, _ := utils.GenerateUUID()
+		s.webhook.SendAsync(Event{
+			EventID:           "evt-" + eventID,
+			Event:             webhook.EventSubscriptionExpired,
+			UserID:            sub.ClientID,
+			Email:             sub.Username,
+			SubscriptionToken: sub.SubscriptionID,
+		})
+	}
+
+	return deleted, nil
 }
 
 type TrafficInfo struct {

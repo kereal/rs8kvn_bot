@@ -135,25 +135,12 @@ func (h *Handler) HandleDel(ctx context.Context, update tgbotapi.Update) {
 		h.DecrementReferralCount(sub.ReferredBy)
 	}
 
-	// Delete from 3x-ui panel first
-	if err := h.xui.DeleteClient(ctx, sub.InboundID, sub.ClientID); err != nil {
-		logger.Error("Failed to delete client from 3x-ui",
-			zap.Error(err),
-			zap.String("client_id", sub.ClientID),
-			zap.Int("inbound_id", sub.InboundID))
-		h.SendMessage(ctx, chatID, "❌ Ошибка удаления клиента из панели 3x-ui")
-		return
-	}
-
-	// Delete from database
-	_, err = h.db.DeleteSubscriptionByID(ctx, id)
-	if err != nil {
-		logger.Error("Failed to delete subscription from database",
+	// Delete subscription via service (includes webhook notification)
+	if _, err := h.subscriptionService.DeleteByID(ctx, id); err != nil {
+		logger.Error("Failed to delete subscription",
 			zap.Error(err),
 			zap.Uint("id", id))
-		// Client already deleted from 3x-ui, but database delete failed
-		// This is a warning, not a critical error since the client is gone from the panel
-		h.SendMessage(ctx, chatID, "⚠️ Клиент удален из панели, но ошибка удаления из базы")
+		h.SendMessage(ctx, chatID, fmt.Sprintf("❌ Ошибка удаления подписки: %v", err))
 		return
 	}
 
