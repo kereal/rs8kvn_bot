@@ -92,7 +92,8 @@ func TestHandleDel_ValidDeletion(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
+	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
 
 	sub := &database.Subscription{
 		ID:         5,

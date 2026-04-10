@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"strconv"
 
 	flag "rs8kvn_bot/internal/flag"
 )
@@ -99,7 +100,9 @@ type configFlags struct {
 	proxyManagerWebhookURL    *flag.StringValue
 }
 
-// registerFlags creates a Registry with all config flags registered.
+// registerFlags creates a new flag.Registry and initializes a configFlags instance with defaults,
+// registering each configuration entry under its corresponding environment variable name.
+// It returns the registry and the populated configFlags.
 func registerFlags() (*flag.Registry, *configFlags) {
 	r := flag.New()
 
@@ -165,7 +168,8 @@ func registerFlags() (*flag.Registry, *configFlags) {
 }
 
 // Load reads configuration from environment variables and validates it.
-// Returns an error if any required field is missing or invalid.
+// Load loads configuration from environment variables, constructs a Config from the parsed flag values, and validates it.
+// It returns the validated Config on success or an error if environment loading or validation fails.
 func Load() (*Config, error) {
 	r, f := registerFlags()
 
@@ -173,6 +177,11 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("failed to load configuration: %w", err)
 	}
 
+	subExtraServersEnabled, err := strconv.ParseBool(strings.TrimSpace(f.subExtraServersEnabled.Get()))
+	if err != nil {
+		return nil, fmt.Errorf("invalid SUB_EXTRA_SERVERS_ENABLED: %w", err)
+	}
+	
 	cfg := &Config{
 		TelegramBotToken:          f.telegramBotToken.Get(),
 		TelegramAdminID:           f.telegramAdminID.Get(),
@@ -196,7 +205,7 @@ func Load() (*Config, error) {
 		ContactUsername:           f.contactUsername.Get(),
 		DonateCardNumber:          f.donateCardNumber.Get(),
 		DonateURL:                 f.donateURL.Get(),
-		SubExtraServersEnabled:    strings.ToLower(f.subExtraServersEnabled.Get()) == "true",
+		SubExtraServersEnabled:    subExtraServersEnabled,
 		SubExtraServersFile:       f.subExtraServersFile.Get(),
 		APIToken:                  f.apiToken.Get(),
 		ProxyManagerWebhookSecret: f.proxyManagerWebhookSecret.Get(),

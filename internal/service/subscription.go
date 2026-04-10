@@ -33,6 +33,8 @@ type CreateResult struct {
 	SubscriptionURL string
 }
 
+// NewSubscriptionService creates a SubscriptionService configured with the given database, XUI client, configuration, and optional webhook sender.
+// If webhookSender is nil, webhook delivery will be disabled for the service.
 func NewSubscriptionService(db interfaces.DatabaseService, xui interfaces.XUIClient, cfg *config.Config, webhookSender WebhookSender) *SubscriptionService {
 	return &SubscriptionService{
 		db:      db,
