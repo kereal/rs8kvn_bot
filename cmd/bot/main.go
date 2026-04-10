@@ -72,6 +72,8 @@ func getVersion() string {
 	return "rs8kvn_bot@" + version
 }
 
+// main bootstraps configuration, observability, core services (database, XUI client, subscription service, webhook sender), the Telegram bot and web server, starts schedulers and background loops, processes Telegram updates with concurrency limits, and performs a coordinated graceful shutdown on termination signals.
+// It initializes Sentry and logging, validates and constructs dependent clients and handlers, marks service readiness for health checks, and ensures all resources and background tasks are stopped or drained before exit.
 func main() {
 	// Load configuration first
 	cfg, err := config.Load()

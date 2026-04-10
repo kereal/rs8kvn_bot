@@ -165,7 +165,9 @@ func registerFlags() (*flag.Registry, *configFlags) {
 }
 
 // Load reads configuration from environment variables and validates it.
-// Returns an error if any required field is missing or invalid.
+// Load reads configuration from environment variables, constructs a Config value,
+// and validates required fields and constraints.
+// It returns the populated *Config, or an error if environment loading or validation fails.
 func Load() (*Config, error) {
 	r, f := registerFlags()
 
