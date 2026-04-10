@@ -56,11 +56,14 @@ func TestSender_SendAsync_Success(t *testing.T) {
 
 		// Read and verify body
 		body, err := io.ReadAll(r.Body)
-		require.NoError(t, err)
+		if !assert.NoError(t, err) {
+			return
+		}
 
 		var event Event
-		err = json.Unmarshal(body, &event)
-		require.NoError(t, err)
+		if !assert.NoError(t, json.Unmarshal(body, &event)) {
+			return
+		}
 
 		received.Store(event)
 
@@ -181,6 +184,85 @@ func TestSender_SendAsync_EmptyURL_NoOp(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 }
 
+func TestSender_SendAsync_PermanentError_NoRetry(t *testing.T) {
+	// Permanent client errors (4xx except 429) should NOT be retried.
+	permanentStatuses := []struct {
+		name       string
+		statusCode int
+	}{
+		{"400 Bad Request", http.StatusBadRequest},
+		{"401 Unauthorized", http.StatusUnauthorized},
+		{"403 Forbidden", http.StatusForbidden},
+		{"404 Not Found", http.StatusNotFound},
+	}
+
+	for _, tt := range permanentStatuses {
+		t.Run(tt.name, func(t *testing.T) {
+			var requestCount int64
+
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				atomic.AddInt64(&requestCount, 1)
+				w.WriteHeader(tt.statusCode)
+			}))
+			defer server.Close()
+
+			s := NewSender(server.URL, "secret")
+			s.client = server.Client()
+
+			s.SendAsync(Event{
+				EventID: "evt-perm-test",
+				Event:   EventSubscriptionActivated,
+				UserID:  "user-perm",
+				Email:   "perm@example.com",
+			})
+
+			// Wait for the single request
+			assert.Eventually(t, func() bool {
+				return atomic.LoadInt64(&requestCount) >= 1
+			}, 2*time.Second, 50*time.Millisecond)
+
+			// Give time for any potential retries to occur
+			time.Sleep(500 * time.Millisecond)
+
+			// Should only have been called once — no retries for permanent errors
+			assert.Equal(t, int64(1), atomic.LoadInt64(&requestCount),
+				"permanent error should not trigger retries")
+		})
+	}
+}
+
+func TestSender_SendAsync_TooManyRequests_Retried(t *testing.T) {
+	// 429 Too Many Requests is a transient error and should be retried.
+	var requestCount int64
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		count := atomic.AddInt64(&requestCount, 1)
+		if count < 3 {
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	s := NewSender(server.URL, "secret")
+	s.client = server.Client()
+
+	s.SendAsync(Event{
+		EventID: "evt-429-test",
+		Event:   EventSubscriptionActivated,
+		UserID:  "user-429",
+		Email:   "retry429@example.com",
+	})
+
+	// Should retry and eventually succeed on 3rd attempt
+	assert.Eventually(t, func() bool {
+		return atomic.LoadInt64(&requestCount) >= 3
+	}, 5*time.Second, 50*time.Millisecond, "429 should be retried until success")
+
+	assert.Equal(t, int64(3), atomic.LoadInt64(&requestCount))
+}
+
 func TestSender_SendAsync_ConnectionError(t *testing.T) {
 	// Create a server that immediately closes to simulate connection error
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -205,15 +287,16 @@ func TestSender_SendAsync_ConnectionError(t *testing.T) {
 
 func TestSender_SendAsync_Non2xxResponse(t *testing.T) {
 	tests := []struct {
-		name       string
-		statusCode int
-		shouldFail bool
+		name        string
+		statusCode  int
+		shouldRetry bool
 	}{
 		{"200 OK", http.StatusOK, false},
 		{"201 Created", http.StatusCreated, false},
 		{"204 No Content", http.StatusNoContent, false},
-		{"400 Bad Request", http.StatusBadRequest, true},
-		{"401 Unauthorized", http.StatusUnauthorized, true},
+		{"400 Bad Request", http.StatusBadRequest, false},           // permanent, no retry
+		{"401 Unauthorized", http.StatusUnauthorized, false},        // permanent, no retry
+		{"429 Too Many Requests", http.StatusTooManyRequests, true}, // transient, retry
 		{"500 Internal Server Error", http.StatusInternalServerError, true},
 		{"502 Bad Gateway", http.StatusBadGateway, true},
 		{"503 Service Unavailable", http.StatusServiceUnavailable, true},
@@ -226,7 +309,7 @@ func TestSender_SendAsync_Non2xxResponse(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				count := atomic.AddInt64(&requestCount, 1)
 				// Succeed on second attempt if it should retry
-				if tt.shouldFail && count == 2 {
+				if tt.shouldRetry && count == 2 {
 					w.WriteHeader(http.StatusOK)
 					return
 				}
@@ -244,16 +327,19 @@ func TestSender_SendAsync_Non2xxResponse(t *testing.T) {
 				Email:   "status@example.com",
 			})
 
-			if tt.shouldFail {
-				// Should retry and eventually succeed
+			if tt.shouldRetry {
+				// Transient errors (5xx, 429) should retry and eventually succeed
 				assert.Eventually(t, func() bool {
 					return atomic.LoadInt64(&requestCount) >= 2
 				}, 5*time.Second, 50*time.Millisecond)
 			} else {
-				// Should succeed on first attempt
+				// Success (2xx) or permanent errors (4xx except 429) — only one request
 				assert.Eventually(t, func() bool {
 					return atomic.LoadInt64(&requestCount) >= 1
 				}, 2*time.Second, 50*time.Millisecond)
+				// Give a small window to ensure no retries happen for permanent errors
+				time.Sleep(200 * time.Millisecond)
+				assert.Equal(t, int64(1), atomic.LoadInt64(&requestCount), "should not retry")
 			}
 		})
 	}
@@ -322,10 +408,14 @@ func TestSender_SendAsync_EventDataIntegrity(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(r.Body)
-		require.NoError(t, err)
+		if !assert.NoError(t, err) {
+			return
+		}
 
 		var event Event
-		require.NoError(t, json.Unmarshal(body, &event))
+		if !assert.NoError(t, json.Unmarshal(body, &event)) {
+			return
+		}
 
 		received.Store(event)
 		w.WriteHeader(http.StatusOK)

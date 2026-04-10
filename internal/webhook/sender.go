@@ -3,6 +3,7 @@ package webhook
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -26,6 +27,22 @@ type Event struct {
 	UserID            string `json:"user_id"`
 	Email             string `json:"email"`
 	SubscriptionToken string `json:"subscription_token"`
+}
+
+// PermanentError indicates a client-side HTTP error (4xx except 429) that
+// should not be retried. Transient failures (transport errors, 5xx, 429)
+// are returned as regular errors and will be retried.
+type PermanentError struct {
+	StatusCode int
+	Err        error
+}
+
+func (e *PermanentError) Error() string {
+	return fmt.Sprintf("permanent client error: status %d: %v", e.StatusCode, e.Err)
+}
+
+func (e *PermanentError) Unwrap() error {
+	return e.Err
 }
 
 // Sender sends webhook events to Proxy Manager with retry logic.
@@ -74,7 +91,19 @@ func (s *Sender) SendAsync(event Event) {
 					zap.String("event", e.Event),
 					zap.Int("attempt", i+1))
 			}
-			if s.send(e) == nil {
+			err := s.send(e)
+			if err == nil {
+				return
+			}
+			// Stop retrying on permanent client errors (4xx except 429).
+			// Transport errors, 5xx, and 429 are transient and will be retried.
+			var permErr *PermanentError
+			if errors.As(err, &permErr) {
+				logger.Error("Webhook delivery failed with permanent error, not retrying",
+					zap.String("event_id", e.EventID),
+					zap.String("event", e.Event),
+					zap.Int("status_code", permErr.StatusCode),
+					zap.String("url", s.url))
 				return
 			}
 		}
@@ -117,7 +146,22 @@ func (s *Sender) send(event Event) error {
 		return nil
 	}
 
-	logger.Warn("Webhook returned non-2xx status",
+	// Classify non-2xx responses as transient or permanent.
+	// 4xx (except 429 Too Many Requests) are permanent client errors —
+	// retrying won't fix a bad payload or missing auth.
+	// 5xx and 429 are transient — the server may recover or rate limits reset.
+	if resp.StatusCode >= 400 && resp.StatusCode < 500 && resp.StatusCode != http.StatusTooManyRequests {
+		logger.Warn("Webhook returned permanent client error",
+			zap.String("event_id", event.EventID),
+			zap.Int("status_code", resp.StatusCode))
+
+		return &PermanentError{
+			StatusCode: resp.StatusCode,
+			Err:        fmt.Errorf("webhook returned status %d", resp.StatusCode),
+		}
+	}
+
+	logger.Warn("Webhook returned transient error",
 		zap.String("event_id", event.EventID),
 		zap.Int("status_code", resp.StatusCode))
 
