@@ -99,7 +99,9 @@ type configFlags struct {
 	proxyManagerWebhookURL    *flag.StringValue
 }
 
-// registerFlags creates a Registry with all config flags registered.
+// registerFlags creates a new flag.Registry and initializes a configFlags instance with defaults,
+// registering each configuration entry under its corresponding environment variable name.
+// It returns the registry and the populated configFlags.
 func registerFlags() (*flag.Registry, *configFlags) {
 	r := flag.New()
 
@@ -165,9 +167,14 @@ func registerFlags() (*flag.Registry, *configFlags) {
 }
 
 // Load reads configuration from environment variables and validates it.
+<<<<<<< coderabbitai/docstrings/cd5175f
 // Load reads configuration from environment variables, constructs a Config value,
 // and validates required fields and constraints.
 // It returns the populated *Config, or an error if environment loading or validation fails.
+=======
+// Load loads configuration from environment variables, constructs a Config from the parsed flag values, and validates it.
+// It returns the validated Config on success or an error if environment loading or validation fails.
+>>>>>>> dev
 func Load() (*Config, error) {
 	r, f := registerFlags()
 

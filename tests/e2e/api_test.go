@@ -158,6 +158,7 @@ func TestE2E_APISubscriptions_Unauthorized(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("http://%s/api/v1/subscriptions", addr), nil)
 			require.NoError(t, err)
 			if tt.token != "" {
@@ -228,6 +229,7 @@ func TestE2E_APISubscriptions_MethodNotAllowed(t *testing.T) {
 
 	for _, method := range methods {
 		t.Run(method, func(t *testing.T) {
+			t.Parallel()
 			req, err := http.NewRequest(method, fmt.Sprintf("http://%s/api/v1/subscriptions", addr), nil)
 			require.NoError(t, err)
 			req.Header.Set("Authorization", "Bearer test-api-token")
@@ -570,4 +572,3 @@ func TestE2E_APISubscriptions_ResponseHeaders(t *testing.T) {
 	assert.Equal(t, "application/json", resp.Header.Get("Content-Type"))
 	assert.Equal(t, "no-cache", resp.Header.Get("Cache-Control"))
 }
-
