@@ -205,7 +205,33 @@ func Load() (*Config, error) {
 		ContactUsername:           f.contactUsername.Get(),
 		DonateCardNumber:          f.donateCardNumber.Get(),
 		DonateURL:                 f.donateURL.Get(),
-		SubExtraServersEnabled:    strings.ToLower(f.subExtraServersEnabled.Get()) == "true",
+import (
+	"fmt"
+	"net/url"
+	"regexp"
+	"strconv"
+	"strings"
+
+	flag "rs8kvn_bot/internal/flag"
+)
+
+func Load() (*Config, error) {
+	r, f := registerFlags()
+
+	if err := r.LoadEnv(); err != nil {
+		return nil, fmt.Errorf("failed to load configuration: %w", err)
+	}
+
+	subExtraServersEnabled, err := strconv.ParseBool(strings.TrimSpace(f.subExtraServersEnabled.Get()))
+	if err != nil {
+		return nil, fmt.Errorf("invalid SUB_EXTRA_SERVERS_ENABLED: %w", err)
+	}
+
+	cfg := &Config{
+		TelegramBotToken:          f.telegramBotToken.Get(),
+		TelegramAdminID:           f.telegramAdminID.Get(),
+		SubExtraServersEnabled:    subExtraServersEnabled,
+		SubExtraServersFile:       f.subExtraServersFile.Get(),
 		SubExtraServersFile:       f.subExtraServersFile.Get(),
 		APIToken:                  f.apiToken.Get(),
 		ProxyManagerWebhookSecret: f.proxyManagerWebhookSecret.Get(),
