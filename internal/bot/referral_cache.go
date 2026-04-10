@@ -12,9 +12,14 @@ import (
 	"go.uber.org/zap"
 )
 
+// referralEntry holds a cached referral count for a single referrer.
+// Note: referral counts are derived from the subscriptions table
+// (SELECT referred_by, COUNT(*) GROUP BY referred_by), so there is
+// no separate "dirty" state to persist — the DB is always the source
+// of truth. Increment/Decrement update the cache for real-time display
+// until the next Load/Sync refreshes from DB.
 type referralEntry struct {
 	count int64
-	dirty bool
 }
 
 type ReferralCache struct {
@@ -80,9 +85,8 @@ func (rc *ReferralCache) Increment(chatID int64) {
 
 	if entry, ok := rc.data[chatID]; ok {
 		entry.count++
-		entry.dirty = true
 	} else {
-		rc.data[chatID] = &referralEntry{count: 1, dirty: true}
+		rc.data[chatID] = &referralEntry{count: 1}
 	}
 }
 
@@ -94,48 +98,22 @@ func (rc *ReferralCache) Decrement(chatID int64) {
 		if entry.count > 0 {
 			entry.count--
 		}
-		entry.dirty = true
 	} else {
-		rc.data[chatID] = &referralEntry{count: 0, dirty: true}
+		rc.data[chatID] = &referralEntry{count: 0}
 	}
 }
 
-func (rc *ReferralCache) Save(ctx context.Context) error {
-	rc.mu.Lock()
-	dirtyIDs := make([]int64, 0, len(rc.data))
-	for id, entry := range rc.data {
-		if entry.dirty {
-			dirtyIDs = append(dirtyIDs, id)
-		}
-	}
-	rc.mu.Unlock()
-
-	if len(dirtyIDs) == 0 {
-		return nil
-	}
-
-	freshCounts, err := rc.db.GetAllReferralCounts(ctx)
-	if err != nil {
-		return err
-	}
-
-	rc.mu.Lock()
-	defer rc.mu.Unlock()
-
-	for _, id := range dirtyIDs {
-		if entry, ok := rc.data[id]; ok {
-			freshCounts[id] = entry.count
-			entry.dirty = false
-		}
-	}
-	_ = freshCounts
+// Save is a no-op. Referral counts are derived from the subscriptions
+// table, so there is nothing to persist — the DB already reflects the
+// correct count after each subscription is created or deleted.
+// Increment/Decrement update the in-memory cache for real-time display.
+func (rc *ReferralCache) Save(_ context.Context) error {
 	return nil
 }
 
+// Sync refreshes the cache from the database, replacing all in-memory
+// counts with the authoritative values computed from subscriptions.
 func (rc *ReferralCache) Sync(ctx context.Context) error {
-	if err := rc.Save(ctx); err != nil {
-		logger.Warn("Failed to save dirty referral counts before sync", zap.Error(err))
-	}
 	return rc.Load(ctx)
 }
 
@@ -170,8 +148,8 @@ func (rc *ReferralCache) CheckAdminSendRateLimit(chatID int64) bool {
 
 	lastSend, loaded := rc.sendMu.Load(chatID)
 	if loaded {
-		lastTime := lastSend.(time.Time)
-		if now.Sub(lastTime) < 30*time.Second {
+		lastTime, ok := lastSend.(time.Time)
+		if ok && now.Sub(lastTime) < 30*time.Second {
 			return false
 		}
 	}

@@ -245,10 +245,6 @@ func (c *Client) verifySession(ctx context.Context) bool {
 		atomic.AddInt64(&c.sessionFailCount, 1)
 		return false
 	}
-	if err != nil {
-		atomic.AddInt64(&c.sessionFailCount, 1)
-		return false
-	}
 
 	var apiResp APIResponse
 	if err := json.Unmarshal(respBody, &apiResp); err != nil {

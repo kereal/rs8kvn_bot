@@ -126,7 +126,7 @@ func main() {
 	// Initialize database with Service pattern for dependency injection
 	dbService, err := database.NewService(cfg.DatabasePath)
 	if err != nil {
-		logger.Warn("Failed to initialize database, continuing without database", zap.Error(err))
+		logger.Fatal("Failed to initialize database", zap.Error(err))
 	}
 	defer func() {
 		if err := dbService.Close(); err != nil {
@@ -138,7 +138,7 @@ func main() {
 	// Initialize 3x-ui client
 	xuiClient, err := xui.NewClient(cfg.XUIHost, cfg.XUIUsername, cfg.XUIPassword, time.Duration(cfg.XUISessionMaxAgeMinutes)*time.Minute)
 	if err != nil {
-		logger.Warn("Failed to initialize 3x-ui client, continuing without XUI", zap.Error(err))
+		logger.Fatal("Failed to initialize 3x-ui client", zap.Error(err))
 	}
 	defer func() {
 		if err := xuiClient.Close(); err != nil {
@@ -207,14 +207,13 @@ func main() {
 	select {
 	case result := <-botInitChan:
 		if result.err != nil {
-			logger.Warn("Failed to initialize Telegram bot, continuing without bot", zap.Error(result.err))
-		} else {
-			botAPI = result.botAPI
-			botConfig = result.botConfig
-			logger.Info("Telegram bot authorized", zap.String("username", botConfig.Username))
+			logger.Fatal("Failed to initialize Telegram bot", zap.Error(result.err))
 		}
+		botAPI = result.botAPI
+		botConfig = result.botConfig
+		logger.Info("Telegram bot authorized", zap.String("username", botConfig.Username))
 	case <-time.After(10 * time.Second):
-		logger.Warn("Timeout initializing Telegram bot (10s), continuing without bot")
+		logger.Fatal("Timeout initializing Telegram bot (10s)")
 	}
 
 	// Create webhook sender for Proxy Manager notifications
