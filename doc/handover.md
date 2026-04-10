@@ -303,4 +303,3 @@ go run ./cmd/bot
 **Generated:** 2026-04-10  
 **Session:** v2.3.0 refactoring complete (bugfixes, security, tests)  
 **Version:** v2.3.0  
-**Commit:** `58fdb1d` (refactor/v2.3.0-bugfixes-and-security)
