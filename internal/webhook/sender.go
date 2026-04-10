@@ -36,8 +36,14 @@ type Sender struct {
 }
 
 // NewSender creates a new webhook sender.
+<<<<<<< coderabbitai/docstrings/cd5175f
 // NewSender creates a Sender that delivers webhook events to the specified URL using the provided bearer secret.
 // If url is empty the returned Sender is disabled and SendAsync will be a no-op. The underlying HTTP client has a 10 second timeout.
+=======
+// NewSender creates a Sender that delivers webhook events to the provided URL using the given Bearer secret.
+// If url is empty the returned Sender is configured as a no-op and a warning is logged; otherwise it stores the URL and secret,
+// configures an HTTP client with a 10-second timeout, and logs that the sender is configured.
+>>>>>>> dev
 func NewSender(url, secret string) *Sender {
 	s := &Sender{
 		client: &http.Client{

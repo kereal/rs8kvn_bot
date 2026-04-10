@@ -113,9 +113,10 @@ Content-Type: application/json
 | 501 | `not implemented` | `subscription.expired` пока не реализован |
 
 **Retry:**
-- 3 попытки: **1s → 5s → 15s**
+- 4 попытки total: **immediate first attempt + 3 retries with delays 1s, 5s, 15s**
+- No sleep before the first immediate attempt; sleeps occur before retries only
 - Асинхронно (goroutine) — не блокирует основной flow
-- Все 3 провалились → лог ошибки (Proxy Manager подхватит через polling)
+- Все 4 провалились → лог ошибки (Proxy Manager подхватит через polling)
 - URL не настроен → warning при старте, отправка пропускается
 
 **Файлы:**
@@ -183,9 +184,10 @@ type Sender struct {
 func (s *Sender) SendAsync(event Event) {
     if s.url == "" { return }
     go func() {
-        delays := []time.Duration{1 * time.Second, 5 * time.Second, 15 * time.Second}
+        // Total 4 attempts: immediate first attempt + 3 retries with delays
+        delays := []time.Duration{0, 1 * time.Second, 5 * time.Second, 15 * time.Second}
         for i, delay := range delays {
-            if i > 0 { time.Sleep(delay) }
+            if i > 0 { time.Sleep(delay) } // No sleep before first immediate attempt
             if s.send(event) == nil { return }
         }
         log.Error("webhook delivery failed", "event_id", event.EventID)
