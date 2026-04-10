@@ -57,8 +57,8 @@ This is a Telegram bot for distributing VLESS+Reality+Vision proxy subscriptions
 
 ### Terminal Tool Usage
 **Important**: When using the `terminal` tool, use the basename of the root directory as `cd` parameter:
-- ✅ Correct: `cd: "tgvpn_go"` 
-- ❌ Wrong: `cd: "/home/kereal/tgvpn_go"` (causes worktree error)
+- ✅ Correct: `cd: "rs8kvn_bot"` 
+- ❌ Wrong: `cd: "/home/kereal/rs8kvn_bot"` (causes worktree error)
 
 ### Git Workflow
 **ВАЖНО: Всегда использовать Pull Requests!**
