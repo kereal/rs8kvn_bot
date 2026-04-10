@@ -160,7 +160,7 @@ func TestE2E_DelCommand_NotFound(t *testing.T) {
 	env.handler.HandleDel(ctx, update)
 
 	assert.True(t, env.botAPI.SendCalledSafe())
-	assert.Contains(t, env.botAPI.LastSentText, "не найдена")
+	assert.Contains(t, env.botAPI.LastSentText, "Ошибка удаления подписки")
 }
 
 func TestE2E_DelCommand_XUIFailure(t *testing.T) {

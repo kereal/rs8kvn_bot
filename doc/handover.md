@@ -11,7 +11,7 @@
 ## Architecture
 
 ```
-tgvpn_go/
+rs8kvn_bot/
 ├── cmd/bot/main.go              # Entry point, signal handling, goroutine lifecycle
 ├── internal/
 │   ├── bot/                      # Telegram bot handlers
