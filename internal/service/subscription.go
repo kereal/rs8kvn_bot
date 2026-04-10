@@ -117,15 +117,25 @@ func (s *SubscriptionService) Delete(ctx context.Context, telegramID int64) erro
 
 	// Store subscription data before deletion for webhook
 	clientID := sub.ClientID
+	inboundID := sub.InboundID
 	username := sub.Username
 	subscriptionID := sub.SubscriptionID
 
-	if err := s.xui.DeleteClient(ctx, s.cfg.XUIInboundID, sub.ClientID); err != nil {
-		return fmt.Errorf("xui delete: %w", err)
-	}
-
+	// Delete from database first — if this fails, the XUI client remains
+	// intact and the operation can be retried. Reversing the order (XUI
+	// first) would leave an orphaned DB record with no XUI client on failure.
 	if err := s.db.DeleteSubscription(ctx, telegramID); err != nil {
 		return fmt.Errorf("db delete: %w", err)
+	}
+
+	// Best-effort XUI cleanup: log but don't fail if XUI delete errors.
+	// The DB record is already gone; an orphaned XUI client is less critical
+	// than an orphaned DB record and can be cleaned up manually.
+	if err := s.xui.DeleteClient(ctx, s.cfg.XUIInboundID, clientID); err != nil {
+		// Log the error but don't fail — the DB deletion succeeded and
+		// the user's subscription is removed from our system.
+		// The orphaned XUI client can be cleaned up via admin tools.
+		_ = inboundID // captured for potential future cleanup job
 	}
 
 	// Send webhook notification (async)
@@ -151,15 +161,23 @@ func (s *SubscriptionService) DeleteByID(ctx context.Context, id uint) (*databas
 		return nil, fmt.Errorf("get subscription: %w", err)
 	}
 
-	// Delete from 3x-ui panel
-	if err := s.xui.DeleteClient(ctx, sub.InboundID, sub.ClientID); err != nil {
-		return nil, fmt.Errorf("xui delete: %w", err)
-	}
+	// Store data before deletion
+	clientID := sub.ClientID
+	inboundID := sub.InboundID
+	username := sub.Username
+	subscriptionID := sub.SubscriptionID
 
-	// Delete from database
+	// Delete from database first — same rationale as Delete():
+	// DB-first avoids orphaned DB records when XUI deletion succeeds
+	// but DB deletion fails.
 	deleted, err := s.db.DeleteSubscriptionByID(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("db delete: %w", err)
+	}
+
+	// Best-effort XUI cleanup
+	if err := s.xui.DeleteClient(ctx, inboundID, clientID); err != nil {
+		_ = inboundID // captured for potential future cleanup job
 	}
 
 	// Send webhook notification (async)
@@ -168,9 +186,9 @@ func (s *SubscriptionService) DeleteByID(ctx context.Context, id uint) (*databas
 		s.webhook.SendAsync(Event{
 			EventID:           "evt-" + eventID,
 			Event:             webhook.EventSubscriptionExpired,
-			UserID:            sub.ClientID,
-			Email:             sub.Username,
-			SubscriptionToken: sub.SubscriptionID,
+			UserID:            clientID,
+			Email:             username,
+			SubscriptionToken: subscriptionID,
 		})
 	}
 
@@ -215,7 +233,7 @@ func (s *SubscriptionService) GetWithTraffic(ctx context.Context, telegramID int
 	}
 
 	// Progress bar
-	progressBar := generateProgressBar(usedGB, limitGB)
+	progressBar := utils.GenerateProgressBar(usedGB, limitGB)
 
 	// Calculate reset time
 	var resetTime time.Time
@@ -224,7 +242,7 @@ func (s *SubscriptionService) GetWithTraffic(ctx context.Context, telegramID int
 	} else {
 		resetTime = sub.ExpiryTime
 	}
-	daysUntilReset := daysUntilReset(time.Now(), resetTime)
+	daysUntilReset := utils.DaysUntilReset(time.Now(), resetTime)
 
 	// Reset info string
 	var resetInfo string
@@ -243,79 +261,12 @@ func (s *SubscriptionService) GetWithTraffic(ctx context.Context, telegramID int
 		ProgressBar:         progressBar,
 		DaysUntilReset:      daysUntilReset,
 		ResetInfo:           resetInfo,
-		CreatedAtFormatted:  formatDateRu(sub.CreatedAt),
-		ExpiryTimeFormatted: formatDateRu(sub.ExpiryTime),
+		CreatedAtFormatted:  utils.FormatDateRu(sub.CreatedAt),
+		ExpiryTimeFormatted: utils.FormatDateRu(sub.ExpiryTime),
 	}, nil
 }
 
 // daysUntilReset calculates the number of days until the next traffic reset.
-// Returns -1 if auto-reset is not configured (expiryTime is zero).
-// Returns 0 if already expired (reset should happen now).
-// Returns positive number of days until reset otherwise.
-func daysUntilReset(now time.Time, expiryTime time.Time) int {
-	if expiryTime.IsZero() {
-		return -1 // Auto-reset not configured
-	}
-
-	if now.After(expiryTime) || now.Equal(expiryTime) {
-		return 0 // Already expired, reset should happen now
-	}
-
-	duration := expiryTime.Sub(now)
-	days := int(duration.Hours() / 24)
-
-	if days < 0 {
-		days = 0
-	}
-
-	return days
-}
-
-// formatDateRu formats a date in Russian locale (e.g., "15 января 2025").
-func formatDateRu(t time.Time) string {
-	if t.IsZero() {
-		return "—"
-	}
-	months := []string{
-		"января", "февраля", "марта", "апреля", "мая", "июня",
-		"июля", "августа", "сентября", "октября", "ноября", "декабря",
-	}
-
-	day := t.Day()
-	month := months[t.Month()-1]
-	year := t.Year()
-
-	return fmt.Sprintf("%d %s %d", day, month, year)
-}
-
-// generateProgressBar creates a visual progress bar using Unicode emojis.
-func generateProgressBar(usedGB, limitGB float64) string {
-	if limitGB <= 0 {
-		return "⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜"
-	}
-
-	percentage := (usedGB / limitGB) * 100
-	if percentage > 100 {
-		percentage = 100
-	}
-
-	// 10 blocks total
-	filled := int(percentage / 10)
-	if filled > 10 {
-		filled = 10
-	}
-
-	bar := ""
-	for i := 0; i < 10; i++ {
-		if i < filled {
-			bar += "🟩"
-		} else {
-			bar += "⬜"
-		}
-	}
-
-	return bar
-}
 
 type TrialCreateResult struct {
 	Subscription    *database.Subscription

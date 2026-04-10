@@ -1,6 +1,7 @@
 package web
 
 import (
+	"crypto/subtle"
 	"net/http"
 	"strings"
 
@@ -42,7 +43,8 @@ func BearerAuthMiddleware(expectedToken string) func(http.Handler) http.Handler 
 
 			// Extract token
 			token := strings.TrimPrefix(authHeader, "Bearer ")
-			if token != expectedToken {
+			// Use constant-time comparison to prevent timing attacks
+			if subtle.ConstantTimeCompare([]byte(token), []byte(expectedToken)) != 1 {
 				logger.Warn("Invalid Bearer token",
 					zap.String("path", r.URL.Path),
 					zap.String("method", r.Method))

@@ -134,8 +134,16 @@ func (s *Server) Start(ctx context.Context) error {
 		IdleTimeout:       60 * time.Second,
 	}
 
+	// Bind the port before starting the goroutine. This ensures that
+	// port-in-use errors are returned immediately rather than silently
+	// logged in a background goroutine.
+	listener, err := net.Listen("tcp", s.addr)
+	if err != nil {
+		return fmt.Errorf("failed to bind %s: %w", s.addr, err)
+	}
+
 	go func() {
-		if err := s.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := s.server.Serve(listener); err != nil && err != http.ErrServerClosed {
 			logger.Error("HTTP server error", zap.Error(err))
 		} else if err == http.ErrServerClosed {
 			logger.Info("HTTP server stopped gracefully")
@@ -246,7 +254,15 @@ func (s *Server) checkHealth(ctx context.Context) HealthResponse {
 
 func (s *Server) writeJSON(w http.ResponseWriter, resp HealthResponse) {
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
+
+	// Map health status to HTTP status code so that Kubernetes liveness
+	// probes correctly detect when the service is down.
+	switch resp.Status {
+	case string(StatusDown):
+		w.WriteHeader(http.StatusServiceUnavailable) // 503
+	default:
+		w.WriteHeader(http.StatusOK) // 200 for OK and Degraded
+	}
 
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		logger.Error("Failed to encode JSON response", zap.Error(err))
@@ -444,9 +460,16 @@ func getClientIP(r *http.Request) string {
 		}
 	}
 
-	// Fall back to the real remote address
+	// Fall back to the real remote address (host part only).
+	// If SplitHostPort failed on r.RemoteAddr, try once more as a fallback
+	// to strip the port — otherwise the IP with port (e.g., "1.2.3.4:54321")
+	// would bypass rate limiting since it looks unique each time.
 	if err != nil {
-		return r.RemoteAddr
+		fallbackHost, _, splitErr := net.SplitHostPort(r.RemoteAddr)
+		if splitErr == nil {
+			return fallbackHost
+		}
+		return r.RemoteAddr // last resort — may include port
 	}
 	return host
 }
@@ -456,7 +479,11 @@ func isLocalAddress(host string) bool {
 	if ip == nil {
 		return false
 	}
-	return ip.IsLoopback() || ip.IsPrivate()
+	// Only trust loopback addresses (reverse proxy on the same host).
+	// Do NOT trust all private IPs — in cloud environments (AWS, GCP),
+	// other VMs on the same VPC could spoof X-Forwarded-For and bypass
+	// IP-based rate limiting for trial subscriptions.
+	return ip.IsLoopback()
 }
 
 var subIDRegex = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
