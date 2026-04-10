@@ -72,21 +72,12 @@ func getVersion() string {
 	return "rs8kvn_bot@" + version
 }
 
-<<<<<<< coderabbitai/docstrings/cd5175f
-// main bootstraps configuration, observability, core services (database, XUI client, subscription service, webhook sender), the Telegram bot and web server, starts schedulers and background loops, processes Telegram updates with concurrency limits, and performs a coordinated graceful shutdown on termination signals.
-// It initializes Sentry and logging, validates and constructs dependent clients and handlers, marks service readiness for health checks, and ensures all resources and background tasks are stopped or drained before exit.
-=======
-// main is the program entry point that initializes configuration and core services,
-// starts background schedulers and a health web server, runs the Telegram update
-// dispatch loop with concurrency limiting, and performs a graceful shutdown.
- // 
  // The function performs best-effort initialization for optional components (Sentry,
  // database, 3x-ui client, Telegram bot) so the service can start even if some
  // dependencies are unavailable. It also starts background maintenance tasks
  // (backups, heartbeat, trial cleanup, subscription proxy reload), marks the web
  // server readiness, and coordinates orderly shutdown of update handlers and
  // background workers when a termination signal is received.
->>>>>>> dev
 func main() {
 	// Load configuration first
 	cfg, err := config.Load()
