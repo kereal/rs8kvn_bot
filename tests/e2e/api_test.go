@@ -43,8 +43,7 @@ func TestE2E_APISubscriptions_Success(t *testing.T) {
 
 	env.cfg.APIToken = "test-api-token-12345"
 	subService := service.NewSubscriptionService(env.db, env.xui, env.cfg, &webhook.NoopSender{})
-	addr := getFreePort(t)
-	srv := web.NewServer(addr, env.db, env.xui, env.cfg, env.botConfig, subService, nil)
+	srv := web.NewServer("127.0.0.1:0", env.db, env.xui, env.cfg, env.botConfig, subService, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -53,7 +52,7 @@ func TestE2E_APISubscriptions_Success(t *testing.T) {
 	require.NoError(t, err)
 	defer srv.Stop(context.Background())
 
-	waitForServerReady(t, addr, 2*time.Second)
+	addr := srv.Addr()
 
 	// Make authenticated request
 	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("http://%s/api/v1/subscriptions", addr), nil)
@@ -93,8 +92,7 @@ func TestE2E_APISubscriptions_EmptyList(t *testing.T) {
 
 	env.cfg.APIToken = "test-api-token"
 	subService := service.NewSubscriptionService(env.db, env.xui, env.cfg, &webhook.NoopSender{})
-	addr := getFreePort(t)
-	srv := web.NewServer(addr, env.db, env.xui, env.cfg, env.botConfig, subService, nil)
+	srv := web.NewServer("127.0.0.1:0", env.db, env.xui, env.cfg, env.botConfig, subService, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -103,7 +101,7 @@ func TestE2E_APISubscriptions_EmptyList(t *testing.T) {
 	require.NoError(t, err)
 	defer srv.Stop(context.Background())
 
-	waitForServerReady(t, addr, 2*time.Second)
+	addr := srv.Addr()
 
 	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("http://%s/api/v1/subscriptions", addr), nil)
 	require.NoError(t, err)
@@ -135,8 +133,7 @@ func TestE2E_APISubscriptions_Unauthorized(t *testing.T) {
 
 	env.cfg.APIToken = "secret-token"
 	subService := service.NewSubscriptionService(env.db, env.xui, env.cfg, &webhook.NoopSender{})
-	addr := getFreePort(t)
-	srv := web.NewServer(addr, env.db, env.xui, env.cfg, env.botConfig, subService, nil)
+	srv := web.NewServer("127.0.0.1:0", env.db, env.xui, env.cfg, env.botConfig, subService, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -145,7 +142,7 @@ func TestE2E_APISubscriptions_Unauthorized(t *testing.T) {
 	require.NoError(t, err)
 	defer srv.Stop(context.Background())
 
-	waitForServerReady(t, addr, 2*time.Second)
+	addr := srv.Addr()
 
 	tests := []struct {
 		name   string
@@ -158,7 +155,6 @@ func TestE2E_APISubscriptions_Unauthorized(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("http://%s/api/v1/subscriptions", addr), nil)
 			require.NoError(t, err)
 			if tt.token != "" {
@@ -182,8 +178,7 @@ func TestE2E_APISubscriptions_InvalidToken(t *testing.T) {
 
 	env.cfg.APIToken = "correct-token"
 	subService := service.NewSubscriptionService(env.db, env.xui, env.cfg, &webhook.NoopSender{})
-	addr := getFreePort(t)
-	srv := web.NewServer(addr, env.db, env.xui, env.cfg, env.botConfig, subService, nil)
+	srv := web.NewServer("127.0.0.1:0", env.db, env.xui, env.cfg, env.botConfig, subService, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -192,7 +187,7 @@ func TestE2E_APISubscriptions_InvalidToken(t *testing.T) {
 	require.NoError(t, err)
 	defer srv.Stop(context.Background())
 
-	waitForServerReady(t, addr, 2*time.Second)
+	addr := srv.Addr()
 
 	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("http://%s/api/v1/subscriptions", addr), nil)
 	require.NoError(t, err)
@@ -213,8 +208,7 @@ func TestE2E_APISubscriptions_MethodNotAllowed(t *testing.T) {
 
 	env.cfg.APIToken = "test-api-token"
 	subService := service.NewSubscriptionService(env.db, env.xui, env.cfg, &webhook.NoopSender{})
-	addr := getFreePort(t)
-	srv := web.NewServer(addr, env.db, env.xui, env.cfg, env.botConfig, subService, nil)
+	srv := web.NewServer("127.0.0.1:0", env.db, env.xui, env.cfg, env.botConfig, subService, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -223,13 +217,12 @@ func TestE2E_APISubscriptions_MethodNotAllowed(t *testing.T) {
 	require.NoError(t, err)
 	defer srv.Stop(context.Background())
 
-	waitForServerReady(t, addr, 2*time.Second)
+	addr := srv.Addr()
 
 	methods := []string{http.MethodPost, http.MethodPut, http.MethodDelete}
 
 	for _, method := range methods {
 		t.Run(method, func(t *testing.T) {
-			t.Parallel()
 			req, err := http.NewRequest(method, fmt.Sprintf("http://%s/api/v1/subscriptions", addr), nil)
 			require.NoError(t, err)
 			req.Header.Set("Authorization", "Bearer test-api-token")
@@ -277,8 +270,7 @@ func TestE2E_APISubscriptions_FiltersInactive(t *testing.T) {
 
 	env.cfg.APIToken = "test-api-token"
 	subService := service.NewSubscriptionService(env.db, env.xui, env.cfg, &webhook.NoopSender{})
-	addr := getFreePort(t)
-	srv := web.NewServer(addr, env.db, env.xui, env.cfg, env.botConfig, subService, nil)
+	srv := web.NewServer("127.0.0.1:0", env.db, env.xui, env.cfg, env.botConfig, subService, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -287,7 +279,7 @@ func TestE2E_APISubscriptions_FiltersInactive(t *testing.T) {
 	require.NoError(t, err)
 	defer srv.Stop(context.Background())
 
-	waitForServerReady(t, addr, 2*time.Second)
+	addr := srv.Addr()
 
 	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("http://%s/api/v1/subscriptions", addr), nil)
 	require.NoError(t, err)
@@ -500,8 +492,7 @@ func TestE2E_APISubscriptions_MultipleActive(t *testing.T) {
 
 	env.cfg.APIToken = "test-api-token"
 	subService := service.NewSubscriptionService(env.db, env.xui, env.cfg, &webhook.NoopSender{})
-	addr := getFreePort(t)
-	srv := web.NewServer(addr, env.db, env.xui, env.cfg, env.botConfig, subService, nil)
+	srv := web.NewServer("127.0.0.1:0", env.db, env.xui, env.cfg, env.botConfig, subService, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -510,7 +501,7 @@ func TestE2E_APISubscriptions_MultipleActive(t *testing.T) {
 	require.NoError(t, err)
 	defer srv.Stop(context.Background())
 
-	waitForServerReady(t, addr, 2*time.Second)
+	addr := srv.Addr()
 
 	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("http://%s/api/v1/subscriptions", addr), nil)
 	require.NoError(t, err)
@@ -552,8 +543,7 @@ func TestE2E_APISubscriptions_ResponseHeaders(t *testing.T) {
 
 	env.cfg.APIToken = "test-api-token"
 	subService := service.NewSubscriptionService(env.db, env.xui, env.cfg, &webhook.NoopSender{})
-	addr := getFreePort(t)
-	srv := web.NewServer(addr, env.db, env.xui, env.cfg, env.botConfig, subService, nil)
+	srv := web.NewServer("127.0.0.1:0", env.db, env.xui, env.cfg, env.botConfig, subService, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -562,7 +552,7 @@ func TestE2E_APISubscriptions_ResponseHeaders(t *testing.T) {
 	require.NoError(t, err)
 	defer srv.Stop(context.Background())
 
-	waitForServerReady(t, addr, 2*time.Second)
+	addr := srv.Addr()
 
 	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("http://%s/api/v1/subscriptions", addr), nil)
 	require.NoError(t, err)

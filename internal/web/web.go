@@ -63,6 +63,7 @@ type Server struct {
 	subProxy        *subproxy.Service
 	subFetchGroup   singleflight.Group
 	server          *http.Server
+	listenerAddr    string
 	mu              sync.RWMutex
 	ready           bool
 	checkers        map[string]func(context.Context) ComponentHealth
@@ -111,6 +112,16 @@ func (s *Server) SetReady(ready bool) {
 	s.ready = ready
 }
 
+// Addr returns the server's actual listening address. Only valid after Start
+// has been called. When the server is configured with port :0, this returns
+// the OS-assigned port.
+func (s *Server) Addr() string {
+	if s.listenerAddr != "" {
+		return s.listenerAddr
+	}
+	return s.addr
+}
+
 func (s *Server) Start(ctx context.Context) error {
 	mux := http.NewServeMux()
 
@@ -141,6 +152,7 @@ func (s *Server) Start(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to bind %s: %w", s.addr, err)
 	}
+	s.listenerAddr = listener.Addr().String()
 
 	go func() {
 		if err := s.server.Serve(listener); err != nil && err != http.ErrServerClosed {
