@@ -63,7 +63,8 @@ When a task is completed, follow these steps:
 
 10. **Create Pull Request**
     ```bash
-    gh pr create --title "fix: description" --body "..."
+    gh pr create --base dev --title "fix: description" --body "..."
     ```
+    - **Note:** PRs must target `dev` branch (not `main`) per git-workflow guidance
     - Ждать review и одобрения
     - Только после одобрения мержить PR
