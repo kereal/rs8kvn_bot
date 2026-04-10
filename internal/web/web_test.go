@@ -285,7 +285,7 @@ func TestGetClientIP_Direct(t *testing.T) {
 
 func TestGetClientIP_XForwardedFor(t *testing.T) {
 	req := httptest.NewRequest("GET", "/i/test", nil)
-	req.RemoteAddr = "10.0.0.1:12345"
+	req.RemoteAddr = "127.0.0.1:12345"
 	req.Header.Set("X-Forwarded-For", "203.0.113.50, 198.51.100.1")
 
 	ip := getClientIP(req)
@@ -688,7 +688,7 @@ func TestHealthResponse_Fields(t *testing.T) {
 
 func TestGetClientIP_XForwardedForMultiple(t *testing.T) {
 	req := httptest.NewRequest("GET", "/i/test", nil)
-	req.RemoteAddr = "10.0.0.1:12345"
+	req.RemoteAddr = "127.0.0.1:12345"
 	req.Header.Set("X-Forwarded-For", "203.0.113.50, 198.51.100.1, 192.0.2.1")
 
 	ip := getClientIP(req)
@@ -717,7 +717,7 @@ func TestGetClientIP_Localhost(t *testing.T) {
 	}{
 		{"localhost IPv4", "127.0.0.1:12345", "8.8.8.8", "8.8.8.8"},
 		{"localhost IPv6", "[::1]:12345", "", "::1"},
-		{"private network trusted", "192.168.1.1:12345", "10.0.0.5", "10.0.0.5"},
+		{"private network NOT trusted", "192.168.1.1:12345", "10.0.0.5", "192.168.1.1"},
 		{"public IP not trusted", "8.8.8.8:12345", "1.2.3.4", "8.8.8.8"},
 	}
 
@@ -737,17 +737,17 @@ func TestGetClientIP_Localhost(t *testing.T) {
 
 func TestGetClientIP_EmptyXForwardedFor(t *testing.T) {
 	req := httptest.NewRequest("GET", "/i/test", nil)
-	req.RemoteAddr = "10.0.0.1:12345"
+	req.RemoteAddr = "127.0.0.1:12345"
 	req.Header.Set("X-Forwarded-For", "") // Empty header
 
 	ip := getClientIP(req)
 
-	assert.Equal(t, "10.0.0.1", ip, "Should fall back to RemoteAddr when X-Forwarded-For is empty")
+	assert.Equal(t, "127.0.0.1", ip, "Should fall back to RemoteAddr when X-Forwarded-For is empty")
 }
 
 func TestGetClientIP_WhitespaceInXForwardedFor(t *testing.T) {
 	req := httptest.NewRequest("GET", "/i/test", nil)
-	req.RemoteAddr = "10.0.0.1:12345"
+	req.RemoteAddr = "127.0.0.1:12345"
 	req.Header.Set("X-Forwarded-For", "  192.0.2.1  ,  198.51.100.1  ") // Extra whitespace
 
 	ip := getClientIP(req)
@@ -1206,18 +1206,19 @@ func TestIsLocalAddress_Loopback(t *testing.T) {
 	}
 }
 
-func TestIsLocalAddress_Private(t *testing.T) {
+func TestIsLocalAddress_NonLoopback(t *testing.T) {
+	// Only loopback addresses are trusted as proxy sources.
+	// Private IPs (10.x, 172.16.x, 192.168.x) are NOT trusted because
+	// in cloud environments other VMs on the same VPC could spoof
+	// X-Forwarded-For to bypass IP-based rate limiting.
 	tests := []struct {
 		name     string
 		ip       string
 		expected bool
 	}{
-		{"10.x.x.x", "10.0.0.1", true},
-		{"10.x.x.x large", "10.255.255.255", true},
-		{"172.16.x.x", "172.16.0.1", true},
-		{"172.31.x.x", "172.31.255.255", true},
-		{"192.168.x.x", "192.168.1.1", true},
-		{"192.168.x.x max", "192.168.255.255", true},
+		{"10.x.x.x", "10.0.0.1", false},
+		{"172.16.x.x", "172.16.0.1", false},
+		{"192.168.x.x", "192.168.1.1", false},
 		{"public IP", "8.8.8.8", false},
 		{"public IP 2", "1.1.1.1", false},
 		{"invalid", "invalid", false},
@@ -1253,6 +1254,7 @@ func TestGetClientIP_InvalidRemoteAddr(t *testing.T) {
 func TestServer_Start_PortInUse(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err, "Failed to create listener")
+	defer listener.Close()
 
 	addr := listener.Addr().String()
 	port := strings.Split(addr, ":")[1]
@@ -1261,23 +1263,8 @@ func TestServer_Start_PortInUse(t *testing.T) {
 
 	ctx := context.Background()
 	err = srv.Start(ctx)
-	require.NoError(t, err, "Start() should not return error (server runs in goroutine)")
-
-	// Give the goroutine time to attempt binding and fail
-	time.Sleep(100 * time.Millisecond)
-
-	// Now close our listener
-	listener.Close()
-
-	// Give the OS time to release the port
-	time.Sleep(50 * time.Millisecond)
-
-	// The server should NOT be listening because it already failed to bind
-	conn, dialErr := net.DialTimeout("tcp", "127.0.0.1:"+port, 100*time.Millisecond)
-	if dialErr == nil {
-		conn.Close()
-		t.Fatal("Server should not be listening on a port that was already in use at start time")
-	}
+	require.Error(t, err, "Start() should return error when port is already in use")
+	assert.Contains(t, err.Error(), "failed to bind", "Error message should mention binding failure")
 }
 
 func TestGetClientIP_IPv6(t *testing.T) {
