@@ -31,6 +31,7 @@ func TestSubscription_IsExpired(t *testing.T) {
 		{"active", time.Now().Add(1 * time.Hour), false},
 		{"expires now", time.Now(), true},
 		{"expires in future", time.Now().Add(24 * time.Hour), false},
+		{"zero expiry time (no expiry set)", time.Time{}, false},
 	}
 
 	for _, tt := range tests {
@@ -50,8 +51,10 @@ func TestSubscription_IsActive(t *testing.T) {
 	}{
 		{"active and not expired", "active", time.Now().Add(1 * time.Hour), true},
 		{"active but expired", "active", time.Now().Add(-1 * time.Hour), false},
+		{"active with zero expiry (no expiry set)", "active", time.Time{}, true},
 		{"revoked", "revoked", time.Now().Add(1 * time.Hour), false},
 		{"expired status", "expired", time.Now().Add(1 * time.Hour), false},
+		{"revoked with zero expiry", "revoked", time.Time{}, false},
 	}
 
 	for _, tt := range tests {

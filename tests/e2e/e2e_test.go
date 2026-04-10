@@ -71,6 +71,28 @@ type e2eTestEnv struct {
 	subService *service.SubscriptionService
 }
 
+// waitForServerReady polls the server's /healthz endpoint until it responds
+// with HTTP 200 or the timeout expires. This is more reliable than a fixed
+// time.Sleep because it works correctly even under heavy CI load.
+func waitForServerReady(t *testing.T, addr string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	url := "http://" + addr + "/healthz"
+
+	for time.Now().Before(deadline) {
+		resp, err := http.Get(url)
+		if err == nil {
+			resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				return
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	t.Fatalf("server at %s did not become ready within %v", addr, timeout)
+}
+
 func setupE2EEnv(t *testing.T) *e2eTestEnv {
 	t.Helper()
 

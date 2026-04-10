@@ -53,7 +53,11 @@ func (Subscription) TableName() string {
 }
 
 // IsExpired returns true if the subscription has expired.
+// A zero ExpiryTime means no expiry is set, so it is not considered expired.
 func (s *Subscription) IsExpired() bool {
+	if s.ExpiryTime.IsZero() {
+		return false
+	}
 	return time.Now().After(s.ExpiryTime)
 }
 
@@ -122,7 +126,7 @@ func runMigrations(sqlDB *sql.DB) error {
 
 		// Update subscription_id from subscription_url (extract UUID after /s/)
 		_, err = sqlDB.Exec(`
-			UPDATE subscriptions 
+			UPDATE subscriptions
 			SET subscription_id = SUBSTR(subscription_url, INSTR(subscription_url, '/s/') + 3)
 			WHERE subscription_url LIKE '%/s/%';
 		`)

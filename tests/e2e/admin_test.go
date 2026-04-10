@@ -160,7 +160,7 @@ func TestE2E_DelCommand_NotFound(t *testing.T) {
 	env.handler.HandleDel(ctx, update)
 
 	assert.True(t, env.botAPI.SendCalledSafe())
-	assert.Contains(t, env.botAPI.LastSentText, "не найдена")
+	assert.Contains(t, env.botAPI.LastSentText, "Ошибка удаления подписки")
 }
 
 func TestE2E_DelCommand_XUIFailure(t *testing.T) {
@@ -198,10 +198,13 @@ func TestE2E_DelCommand_XUIFailure(t *testing.T) {
 	env.handler.HandleDel(ctx, update)
 
 	assert.True(t, env.botAPI.SendCalledSafe())
-	assert.Contains(t, env.botAPI.LastSentText, "Ошибка удаления подписки")
+	// With DB-first deletion, the subscription is removed from DB even when
+	// XUI deletion fails (best-effort XUI cleanup). The orphaned XUI client
+	// is less critical than an orphaned DB record.
+	assert.Contains(t, env.botAPI.LastSentText, "успешно удалена")
 
 	_, err = env.db.GetByID(ctx, sub.ID)
-	assert.NoError(t, err, "Subscription should still exist after XUI failure")
+	assert.Error(t, err, "Subscription should be deleted from DB even when XUI fails")
 }
 
 func TestE2E_BroadcastCommand_Success(t *testing.T) {

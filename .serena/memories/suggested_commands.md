@@ -40,14 +40,14 @@ docker-compose up -d
 
 ## Terminal Tool Usage (Important!)
 
-**When using terminal commands, use `cd: "tgvpn_go"` (basename), NOT absolute path!**
+**When using terminal commands, use `cd: "rs8kvn_bot"` (basename), NOT absolute path!**
 
 ```bash
 # ✅ CORRECT - use basename
-terminal(cd="tgvpn_go", command="git status")
+terminal(cd="rs8kvn_bot", command="git status")
 
 # ❌ WRONG - causes worktree error
-terminal(cd="/home/kereal/tgvpn_go", command="git status")
+terminal(cd="/home/kereal/rs8kvn_bot", command="git status")
 ```
 
 ## Git Workflow
