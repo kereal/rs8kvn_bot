@@ -99,7 +99,9 @@ type configFlags struct {
 	proxyManagerWebhookURL    *flag.StringValue
 }
 
-// registerFlags creates a flag.Registry, initializes a configFlags struct with default values for all configuration options, and registers each corresponding environment variable name in the registry. It returns the registry and the populated *configFlags.
+// registerFlags creates a new flag.Registry and initializes a configFlags instance with defaults,
+// registering each configuration entry under its corresponding environment variable name.
+// It returns the registry and the populated configFlags.
 func registerFlags() (*flag.Registry, *configFlags) {
 	r := flag.New()
 
