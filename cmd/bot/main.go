@@ -19,6 +19,7 @@ import (
 	"rs8kvn_bot/internal/scheduler"
 	"rs8kvn_bot/internal/service"
 	"rs8kvn_bot/internal/subproxy"
+	"rs8kvn_bot/internal/webhook"
 	"rs8kvn_bot/internal/web"
 	"rs8kvn_bot/internal/xui"
 
@@ -71,6 +72,12 @@ func getVersion() string {
 	return "rs8kvn_bot@" + version
 }
 
+ // The function performs best-effort initialization for optional components (Sentry,
+ // database, 3x-ui client, Telegram bot) so the service can start even if some
+ // dependencies are unavailable. It also starts background maintenance tasks
+ // (backups, heartbeat, trial cleanup, subscription proxy reload), marks the web
+ // server readiness, and coordinates orderly shutdown of update handlers and
+ // background workers when a termination signal is received.
 func main() {
 	// Load configuration first
 	cfg, err := config.Load()
@@ -210,8 +217,11 @@ func main() {
 		logger.Warn("Timeout initializing Telegram bot (10s), continuing without bot")
 	}
 
+	// Create webhook sender for Proxy Manager notifications
+	webhookSender := webhook.NewSender(cfg.ProxyManagerWebhookURL, cfg.ProxyManagerWebhookSecret)
+
 	// Create subscription service (shared between bot handler and web server)
-	subService := service.NewSubscriptionService(dbService, xuiClient, cfg)
+	subService := service.NewSubscriptionService(dbService, xuiClient, cfg, webhookSender)
 
 	// Create subscription proxy service
 	subProxy := subproxy.NewService(cfg)

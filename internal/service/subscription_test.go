@@ -11,6 +11,7 @@ import (
 	"rs8kvn_bot/internal/config"
 	"rs8kvn_bot/internal/database"
 	"rs8kvn_bot/internal/testutil"
+	"rs8kvn_bot/internal/webhook"
 	"rs8kvn_bot/internal/xui"
 
 	"github.com/stretchr/testify/assert"
@@ -36,7 +37,7 @@ func TestSubscriptionService_Create_Success(t *testing.T) {
 		},
 	}
 
-	svc := NewSubscriptionService(db, xuiClient, cfg)
+	svc := NewSubscriptionService(db, xuiClient, cfg, &webhook.NoopSender{})
 	result, err := svc.Create(context.Background(), 123456, "testuser")
 
 	assert.NoError(t, err)
@@ -61,7 +62,7 @@ func TestSubscriptionService_Create_XUIError(t *testing.T) {
 		},
 	}
 
-	svc := NewSubscriptionService(db, xuiClient, cfg)
+	svc := NewSubscriptionService(db, xuiClient, cfg, &webhook.NoopSender{})
 	result, err := svc.Create(context.Background(), 123456, "testuser")
 
 	assert.Error(t, err)
@@ -93,7 +94,7 @@ func TestSubscriptionService_Create_DBError_RollbackSuccess(t *testing.T) {
 		},
 	}
 
-	svc := NewSubscriptionService(db, xuiClient, cfg)
+	svc := NewSubscriptionService(db, xuiClient, cfg, &webhook.NoopSender{})
 	result, err := svc.Create(context.Background(), 123456, "testuser")
 
 	assert.Error(t, err)
@@ -124,7 +125,7 @@ func TestSubscriptionService_Create_DBError_RollbackFailed(t *testing.T) {
 		},
 	}
 
-	svc := NewSubscriptionService(db, xuiClient, cfg)
+	svc := NewSubscriptionService(db, xuiClient, cfg, &webhook.NoopSender{})
 	result, err := svc.Create(context.Background(), 123456, "testuser")
 
 	assert.Error(t, err)
@@ -148,7 +149,7 @@ func TestSubscriptionService_GetByTelegramID_Success(t *testing.T) {
 	}
 	xuiClient := &testutil.MockXUIClient{}
 
-	svc := NewSubscriptionService(db, xuiClient, cfg)
+	svc := NewSubscriptionService(db, xuiClient, cfg, &webhook.NoopSender{})
 	result, err := svc.GetByTelegramID(context.Background(), 123456)
 
 	assert.NoError(t, err)
@@ -165,7 +166,7 @@ func TestSubscriptionService_GetByTelegramID_NotFound(t *testing.T) {
 	}
 	xuiClient := &testutil.MockXUIClient{}
 
-	svc := NewSubscriptionService(db, xuiClient, cfg)
+	svc := NewSubscriptionService(db, xuiClient, cfg, &webhook.NoopSender{})
 	result, err := svc.GetByTelegramID(context.Background(), 999999)
 
 	assert.Error(t, err)
@@ -197,7 +198,7 @@ func TestSubscriptionService_Delete_Success(t *testing.T) {
 		},
 	}
 
-	svc := NewSubscriptionService(db, xuiClient, cfg)
+	svc := NewSubscriptionService(db, xuiClient, cfg, &webhook.NoopSender{})
 	err := svc.Delete(context.Background(), 123456)
 
 	assert.NoError(t, err)
@@ -214,7 +215,7 @@ func TestSubscriptionService_Delete_NotFound(t *testing.T) {
 	}
 	xuiClient := &testutil.MockXUIClient{}
 
-	svc := NewSubscriptionService(db, xuiClient, cfg)
+	svc := NewSubscriptionService(db, xuiClient, cfg, &webhook.NoopSender{})
 	err := svc.Delete(context.Background(), 999999)
 
 	assert.Error(t, err)
@@ -240,7 +241,7 @@ func TestSubscriptionService_Delete_XUIError(t *testing.T) {
 		},
 	}
 
-	svc := NewSubscriptionService(db, xuiClient, cfg)
+	svc := NewSubscriptionService(db, xuiClient, cfg, &webhook.NoopSender{})
 	err := svc.Delete(context.Background(), 123456)
 
 	assert.Error(t, err)
@@ -268,7 +269,7 @@ func TestSubscriptionService_Delete_DBError(t *testing.T) {
 		},
 	}
 
-	svc := NewSubscriptionService(db, xuiClient, cfg)
+	svc := NewSubscriptionService(db, xuiClient, cfg, &webhook.NoopSender{})
 	err := svc.Delete(context.Background(), 123456)
 
 	// Delete should return error because mockDB.DeleteSubscription is stub
@@ -389,7 +390,7 @@ func TestSubscriptionService_GetWithTraffic_Success(t *testing.T) {
 		},
 	}
 
-	svc := NewSubscriptionService(db, xuiClient, cfg)
+	svc := NewSubscriptionService(db, xuiClient, cfg, &webhook.NoopSender{})
 	resultSub, traffic, err := svc.GetWithTraffic(context.Background(), 123456)
 
 	assert.NoError(t, err)
@@ -423,7 +424,7 @@ func TestSubscriptionService_GetWithTraffic_XUIErrorFallback(t *testing.T) {
 		},
 	}
 
-	svc := NewSubscriptionService(db, xuiClient, cfg)
+	svc := NewSubscriptionService(db, xuiClient, cfg, &webhook.NoopSender{})
 	resultSub, traffic, err := svc.GetWithTraffic(context.Background(), 123456)
 
 	assert.NoError(t, err)
@@ -453,7 +454,7 @@ func TestSubscriptionService_CreateTrial_Success(t *testing.T) {
 		},
 	}
 
-	svc := NewSubscriptionService(db, xuiClient, cfg)
+	svc := NewSubscriptionService(db, xuiClient, cfg, &webhook.NoopSender{})
 	result, err := svc.CreateTrial(context.Background(), "testcode")
 
 	assert.NoError(t, err)
@@ -475,7 +476,7 @@ func TestSubscriptionService_CreateTrial_XUIError(t *testing.T) {
 		},
 	}
 
-	svc := NewSubscriptionService(db, xuiClient, cfg)
+	svc := NewSubscriptionService(db, xuiClient, cfg, &webhook.NoopSender{})
 	result, err := svc.CreateTrial(context.Background(), "testcode")
 
 	assert.Error(t, err)
@@ -513,7 +514,7 @@ func TestSubscriptionService_CreateTrial_DBError(t *testing.T) {
 		},
 	}
 
-	svc := NewSubscriptionService(db, xuiClient, cfg)
+	svc := NewSubscriptionService(db, xuiClient, cfg, &webhook.NoopSender{})
 	result, err := svc.CreateTrial(context.Background(), "testcode")
 
 	assert.Error(t, err)
