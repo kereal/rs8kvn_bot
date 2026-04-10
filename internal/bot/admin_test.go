@@ -17,6 +17,15 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// newTestAdminHandler creates a Handler with a stub SubscriptionService
+// wired to the provided mock objects. This eliminates the repeated two-line
+// pattern of NewHandler + subscriptionService assignment across all admin tests.
+func newTestAdminHandler(cfg *config.Config, mockDB *testutil.MockDatabaseService, mockXUI *testutil.MockXUIClient, mockBot *testutil.MockBotAPI) *Handler {
+	h := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
+	h.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	return h
+}
+
 // createCommandUpdate creates an Update with a command message.
 // This is needed because CommandArguments() requires the Message to have
 // a bot_command entity set.
@@ -64,8 +73,7 @@ func TestHandleDel_NonAdminUser(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
-handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	ctx := context.Background()
 	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "regularuser"}, "/del 5")
@@ -84,9 +92,7 @@ func TestHandleDel_ValidDeletion(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
-handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
-	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	sub := &database.Subscription{
 		ID:         5,
@@ -129,8 +135,7 @@ func TestHandleDel_InvalidIDFormat(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
-handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	tests := []struct {
 		name    string
@@ -182,8 +187,7 @@ func TestHandleDel_GetByIDError(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
-handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	mockDB.GetByIDFunc = func(ctx context.Context, id uint) (*database.Subscription, error) {
 		return nil, errors.New("not found")
@@ -194,7 +198,7 @@ handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cf
 
 	handler.HandleDel(ctx, update)
 	assert.True(t, mockBot.SendCalledSafe())
-	assert.Contains(t, mockBot.LastSentTextSafe(), "не найдена")
+	assert.Contains(t, mockBot.LastSentTextSafe(), "Ошибка удаления подписки")
 }
 
 func TestHandleDel_XUIDeleteFailure(t *testing.T) {
@@ -206,8 +210,7 @@ func TestHandleDel_XUIDeleteFailure(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
-handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	mockDB.GetByIDFunc = func(ctx context.Context, id uint) (*database.Subscription, error) {
 		return &database.Subscription{
@@ -238,8 +241,7 @@ func TestHandleDel_DatabaseDeleteFailure(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
-handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	mockDB.GetByIDFunc = func(ctx context.Context, id uint) (*database.Subscription, error) {
 		return &database.Subscription{
@@ -253,7 +255,9 @@ handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cf
 		return nil
 	}
 
+	var deleteByIDCalled bool
 	mockDB.DeleteSubscriptionByIDFunc = func(ctx context.Context, id uint) (*database.Subscription, error) {
+		deleteByIDCalled = true
 		return nil, errors.New("database error")
 	}
 
@@ -261,6 +265,7 @@ handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cf
 	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "admin"}, "/del 5")
 
 	handler.HandleDel(ctx, update)
+	assert.True(t, deleteByIDCalled, "DeleteSubscriptionByID should have been called")
 	assert.True(t, mockBot.SendCalledSafe())
 	assert.Contains(t, mockBot.LastSentTextSafe(), "Ошибка удаления")
 }
@@ -274,8 +279,7 @@ func TestHandleDel_CacheInvalidation(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
-handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	telegramID := int64(789012)
 	sub := &database.Subscription{
@@ -321,8 +325,7 @@ func TestHandleBroadcast_NonAdminUser(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
-handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	ctx := context.Background()
 	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "regularuser"}, "/broadcast Hello everyone!")
@@ -340,8 +343,7 @@ func TestHandleBroadcast_ValidBroadcast(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
-handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	mockDB.GetTotalTelegramIDCountFunc = func(ctx context.Context) (int64, error) {
 		return 3, nil
@@ -371,8 +373,7 @@ func TestHandleBroadcast_NoMessage(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
-handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	ctx := context.Background()
 	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "admin"}, "/broadcast")
@@ -390,8 +391,7 @@ func TestHandleBroadcast_NoUsers(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
-handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	mockDB.GetTotalTelegramIDCountFunc = func(ctx context.Context) (int64, error) {
 		return 0, nil
@@ -413,8 +413,7 @@ func TestHandleBroadcast_DatabaseError(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
-handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	mockDB.GetTotalTelegramIDCountFunc = func(ctx context.Context) (int64, error) {
 		return 0, errors.New("database error")
@@ -438,8 +437,7 @@ func TestHandleBroadcast_SendFailure(t *testing.T) {
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
 	mockBot.SendError = errors.New("send error")
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
-handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	mockDB.GetTotalTelegramIDCountFunc = func(ctx context.Context) (int64, error) {
 		return 2, nil
@@ -464,8 +462,7 @@ func TestHandleBroadcast_ContextCancellation(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
-handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	mockDB.GetTotalTelegramIDCountFunc = func(ctx context.Context) (int64, error) {
 		return 100, nil
@@ -495,8 +492,7 @@ func TestHandleBroadcast_MultipleBatches(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
-handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	// Set up 250 users to test multiple batches (batch size is 100)
 	mockDB.GetTotalTelegramIDCountFunc = func(ctx context.Context) (int64, error) {
@@ -550,8 +546,7 @@ func TestHandleBroadcast_BatchError(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
-handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	mockDB.GetTotalTelegramIDCountFunc = func(ctx context.Context) (int64, error) {
 		return 200, nil
@@ -584,8 +579,7 @@ func TestHandleBroadcast_EmptyBatchAfterFirst(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
-handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	// Total count says 50, but only first batch returns users
 	mockDB.GetTotalTelegramIDCountFunc = func(ctx context.Context) (int64, error) {
@@ -618,8 +612,7 @@ func TestHandleBroadcast_GetTelegramIDsBatchErrorOnFirstCall(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
-handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	mockDB.GetTotalTelegramIDCountFunc = func(ctx context.Context) (int64, error) {
 		return 100, nil
@@ -646,8 +639,7 @@ func TestHandleBroadcast_ConcurrentBroadcasts(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
-handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	mockDB.GetTotalTelegramIDCountFunc = func(ctx context.Context) (int64, error) {
 		return 5, nil
@@ -690,8 +682,7 @@ func TestHandleSend_NonAdminUser(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
-handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	ctx := context.Background()
 	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "regularuser"}, "/send 789012 Hello!")
@@ -709,8 +700,7 @@ func TestHandleSend_ByNumericID(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
-handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	ctx := context.Background()
 	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "admin"}, "/send 789012 Hello user!")
@@ -728,8 +718,7 @@ func TestHandleSend_ByUsernameLookup(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
-handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	mockDB.GetTelegramIDByUsernameFunc = func(ctx context.Context, username string) (int64, error) {
 		assert.Equal(t, "testuser", username)
@@ -752,8 +741,7 @@ func TestHandleSend_ByUsernameWithAt(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
-handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	mockDB.GetTelegramIDByUsernameFunc = func(ctx context.Context, username string) (int64, error) {
 		assert.Equal(t, "testuser", username)
@@ -785,8 +773,7 @@ func TestHandleSend_InvalidFormat(t *testing.T) {
 			mockDB := testutil.NewMockDatabaseService()
 			mockXUI := testutil.NewMockXUIClient()
 			mockBot := testutil.NewMockBotAPI()
-			handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
-handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+			handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 			mockBot.SetSendCalled(false)
 			mockBot.LastSentText = ""
@@ -809,8 +796,7 @@ func TestHandleSend_UsernameNotFound(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
-handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	mockDB.GetTelegramIDByUsernameFunc = func(ctx context.Context, username string) (int64, error) {
 		return 0, errors.New("not found")
@@ -833,8 +819,7 @@ func TestHandleSend_SendFailure(t *testing.T) {
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
 	mockBot.SendError = errors.New("send error")
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
-handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	ctx := context.Background()
 	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "admin"}, "/send 789012 Hello!")
@@ -852,8 +837,7 @@ func TestNotifyAdminError_WithAdminID(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
-handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	ctx := context.Background()
 	handler.notifyAdminError(ctx, "Test error message")
@@ -871,8 +855,7 @@ func TestHandleAdminLastReg_NonAdminUser(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
-handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	ctx := context.Background()
 	handler.handleAdminLastReg(ctx, 123456, "regularuser", 1)
@@ -889,8 +872,7 @@ func TestHandleAdminLastReg_EmptyList(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
-handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	mockDB.GetLatestSubscriptionsFunc = func(ctx context.Context, limit int) ([]database.Subscription, error) {
 		return []database.Subscription{}, nil
@@ -911,8 +893,7 @@ func TestHandleAdminLastReg_DatabaseError(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
-handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	mockDB.GetLatestSubscriptionsFunc = func(ctx context.Context, limit int) ([]database.Subscription, error) {
 		return nil, errors.New("database error")
@@ -933,8 +914,7 @@ func TestHandleAdminLastReg_WithSubscriptions(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
-handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	subs := []database.Subscription{
 		{ID: 1, Username: "user1", TelegramID: 111},
@@ -965,8 +945,7 @@ func TestHandleAdminStats_NonAdminUser(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
-handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	ctx := context.Background()
 	handler.handleAdminStats(ctx, 123456, "regularuser", 1)
@@ -983,8 +962,7 @@ func TestHandleAdminStats_DatabaseError(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
-handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	mockDB.CountAllSubscriptionsFunc = func(ctx context.Context) (int64, error) {
 		return 0, errors.New("database error")
@@ -1005,8 +983,7 @@ func TestHandleAdminStats_Success(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
-handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	mockDB.CountAllSubscriptionsFunc = func(ctx context.Context) (int64, error) {
 		return 100, nil
@@ -1031,8 +1008,7 @@ func TestHandleAdminStats_PartialDatabaseError(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
-handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	mockDB.CountAllSubscriptionsFunc = func(ctx context.Context) (int64, error) {
 		return 100, nil
@@ -1059,8 +1035,7 @@ func TestHandleRefstats_NonAdminUser(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
-handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	ctx := context.Background()
 	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "regularuser"}, "/refstats")
@@ -1079,8 +1054,7 @@ func TestHandleRefstats_EmptyReferrals(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
-handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	ctx := context.Background()
 	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "admin"}, "/refstats")
@@ -1099,8 +1073,7 @@ func TestHandleRefstats_WithMultipleReferrers(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
-handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	handler.referralCache.SetForTest(111, 10)
 	handler.referralCache.SetForTest(222, 5)
@@ -1134,8 +1107,7 @@ func TestHandleRefstats_Top10Limit(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
-handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	for i := 0; i < 15; i++ {
 		handler.referralCache.SetForTest(int64(1000+i), int64(100-i*5))

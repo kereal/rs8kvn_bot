@@ -152,7 +152,7 @@ func TestBearerAuthMiddleware_EmptyExpectedToken(t *testing.T) {
 		authHeader  string
 		shouldAllow bool
 	}{
-		{"empty bearer token", "Bearer ", true},
+		{"empty bearer token", "Bearer ", false},
 		{"no auth header", "", false},
 		{"non-empty token", "Bearer something", false},
 	}
