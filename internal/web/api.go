@@ -39,11 +39,11 @@ func (s *Server) GetSubscriptions(w http.ResponseWriter, r *http.Request) {
 	result := make([]SubscriptionResponse, 0, len(subs))
 	for _, sub := range subs {
 		// Only include active subscriptions that are not soft-deleted
-		if sub.Status == "active" && sub.DeletedAt.Valid == false {
+		if sub.IsActive() && !sub.DeletedAt.Valid {
 			result = append(result, SubscriptionResponse{
 				ID:                sub.ClientID,
 				Email:             sub.Username,
-				Enabled:           sub.Status == "active",
+				Enabled:           sub.IsActive(),
 				SubscriptionToken: sub.SubscriptionID,
 			})
 		}
@@ -51,7 +51,7 @@ func (s *Server) GetSubscriptions(w http.ResponseWriter, r *http.Request) {
 
 	// Set response headers
 	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Cache-Control", "no-store, private")
 
 	// Encode and send response
 	if err := json.NewEncoder(w).Encode(map[string]interface{}{
