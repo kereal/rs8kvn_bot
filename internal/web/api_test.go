@@ -80,7 +80,7 @@ func TestGetSubscriptions_Success(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.Equal(t, "application/json", rec.Header().Get("Content-Type"))
-	assert.Equal(t, "no-cache", rec.Header().Get("Cache-Control"))
+	assert.Equal(t, "no-store, private", rec.Header().Get("Cache-Control"))
 
 	var response map[string]interface{}
 	err := json.NewDecoder(rec.Body).Decode(&response)
@@ -387,7 +387,7 @@ func TestGetSubscriptions_ResponseFormat(t *testing.T) {
 	assert.Equal(t, "550e8400-e29b-41d4-a716-446655440000", sub["id"])
 	// email = Subscription.Username
 	assert.Equal(t, "user@example.com", sub["email"])
-	// enabled = Status == "active"
+	// enabled = IsActive()
 	assert.Equal(t, true, sub["enabled"])
 	// subscription_token = Subscription.SubscriptionID
 	assert.Equal(t, "abc123def456", sub["subscription_token"])

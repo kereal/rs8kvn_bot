@@ -1,6 +1,7 @@
 package web
 
 import (
+	"crypto/subtle"
 	"net/http"
 	"strings"
 
@@ -33,6 +34,17 @@ func BearerAuthMiddleware(expectedToken string) func(http.Handler) http.Handler 
 				return
 			}
 
+			// If no expected token is configured, reject all requests.
+			// An empty token is an invalid configuration — allowing access
+			// with an empty Bearer token would be a security hole.
+			if expectedToken == "" {
+				logger.Warn("No auth token configured, rejecting request",
+					zap.String("path", r.URL.Path),
+					zap.String("method", r.Method))
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+
 			// Get Authorization header
 			authHeader := r.Header.Get("Authorization")
 			if authHeader == "" {
@@ -54,7 +66,8 @@ func BearerAuthMiddleware(expectedToken string) func(http.Handler) http.Handler 
 
 			// Extract token
 			token := strings.TrimPrefix(authHeader, "Bearer ")
-			if token != expectedToken {
+			// Use constant-time comparison to prevent timing attacks
+			if subtle.ConstantTimeCompare([]byte(token), []byte(expectedToken)) != 1 {
 				logger.Warn("Invalid Bearer token",
 					zap.String("path", r.URL.Path),
 					zap.String("method", r.Method))
