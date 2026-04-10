@@ -137,10 +137,10 @@ func (h *Handler) handleMySubscription(ctx context.Context, chatID int64, userna
 
 	// Format traffic info
 	trafficInfo := fmt.Sprintf("%.2f из %d Гб (%.0f%%)", trafficUsedGB, h.cfg.TrafficLimitGB, percentage)
-	progressBar := generateProgressBar(trafficUsedGB, trafficLimitGB)
+	progressBar := utils.GenerateProgressBar(trafficUsedGB, trafficLimitGB)
 
 	// Format dates
-	createdAt := formatDateRu(sub.CreatedAt)
+	createdAt := utils.FormatDateRu(sub.CreatedAt)
 
 	// Calculate traffic reset: if ExpiryTime is set, use it; otherwise use CreatedAt + reset days
 	var resetTime time.Time
@@ -149,7 +149,7 @@ func (h *Handler) handleMySubscription(ctx context.Context, chatID int64, userna
 	} else {
 		resetTime = sub.ExpiryTime
 	}
-	daysUntilTrafficReset := daysUntilReset(time.Now(), resetTime)
+	daysUntilTrafficReset := utils.DaysUntilReset(time.Now(), resetTime)
 
 	// Build reset info string
 	var resetInfo string
@@ -362,69 +362,4 @@ func (h *Handler) handleCreateError(ctx context.Context, chatID int64, messageID
 	h.safeSend(editMsg)
 }
 
-// generateProgressBar creates a visual progress bar using Unicode emojis.
-// Returns a string like "🟩🟩🟩🟩🟩⬜⬜⬜⬜⬜" representing used/total ratio.
-func generateProgressBar(usedGB, limitGB float64) string {
-	if limitGB <= 0 {
-		return "⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜"
-	}
 
-	percentage := (usedGB / limitGB) * 100
-	if percentage > 100 {
-		percentage = 100
-	}
-
-	// 10 blocks total
-	filled := int(percentage / 10)
-	if filled > 10 {
-		filled = 10
-	}
-
-	bar := ""
-	for i := 0; i < 10; i++ {
-		if i < filled {
-			bar += "🟩"
-		} else {
-			bar += "⬜"
-		}
-	}
-
-	return bar
-}
-
-// daysUntilReset calculates the number of days until the next traffic reset.
-// Returns -1 if auto-reset is not configured (expiryTime is zero).
-// Returns 0 if already expired (reset should happen now).
-// Returns positive number of days until reset otherwise.
-func daysUntilReset(now time.Time, expiryTime time.Time) int {
-	if expiryTime.IsZero() {
-		return -1 // Auto-reset not configured
-	}
-
-	if now.After(expiryTime) || now.Equal(expiryTime) {
-		return 0 // Already expired, reset should happen now
-	}
-
-	duration := expiryTime.Sub(now)
-	days := int(duration.Hours() / 24)
-
-	if days < 0 {
-		days = 0
-	}
-
-	return days
-}
-
-// formatDateRu formats a date in Russian locale (e.g., "15 января 2025").
-func formatDateRu(t time.Time) string {
-	months := []string{
-		"января", "февраля", "марта", "апреля", "мая", "июня",
-		"июля", "августа", "сентября", "октября", "ноября", "декабря",
-	}
-
-	day := t.Day()
-	month := months[t.Month()-1]
-	year := t.Year()
-
-	return fmt.Sprintf("%d %s %d", day, month, year)
-}

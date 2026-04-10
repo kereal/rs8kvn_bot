@@ -94,6 +94,10 @@ func (h *Handler) handleBindTrial(ctx context.Context, chatID int64, username, s
 		zap.Int64("chat_id", chatID),
 		zap.String("subscription_id", subscriptionID))
 
+	// Invalidate subscription cache — user now has an active subscription
+	// but the cache may still contain a stale "no subscription" entry.
+	h.invalidateCache(chatID)
+
 	// Upgrade trial client in xui panel
 	var comment string
 	if invite, err := h.db.GetInviteByCode(ctx, sub.InviteCode); err == nil {

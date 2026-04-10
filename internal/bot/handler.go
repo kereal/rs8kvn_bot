@@ -90,7 +90,7 @@ func (h *Handler) HandleUpdate(ctx context.Context, update tgbotapi.Update) {
 			case "del":
 				h.HandleDel(ctx, update)
 			case "broadcast":
-				h.HandleBroadcast(context.WithoutCancel(ctx), update)
+				h.HandleBroadcast(ctx, update)
 			case "send":
 				h.HandleSend(ctx, update)
 			case "refstats":
