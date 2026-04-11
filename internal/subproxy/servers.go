@@ -29,6 +29,17 @@ type ExtraConfig struct {
 	Servers []string
 }
 
+// LoadExtraConfig loads and parses an extra configuration file at filePath.
+// It returns (nil, nil) when filePath is empty.
+// The file may contain a headers section followed by server entries. Header lines
+// are in the form "Key: Value" (both parts trimmed) and are collected into
+// ExtraConfig.Headers. The header section ends when a blank line is encountered
+// or when a server entry is seen. Lines that start with '#' are treated as
+// comments and ignored. Server entries are lines whose scheme matches the
+// package's recognised prefixes (for example: "vless://", "vmess://",
+// "trojan://", "ss://", "ssr://", "hysteria://", "hysteria2://", "hy2://",
+// "tuic://", "wg://", "wireguard://") and are collected into ExtraConfig.Servers.
+// Returns a non-nil error if the file cannot be opened or if a read/scan error occurs.
 func LoadExtraConfig(filePath string) (*ExtraConfig, error) {
 	if filePath == "" {
 		return nil, nil

@@ -90,6 +90,17 @@ func (TrialRequest) TableName() string {
 	return "trial_requests"
 }
 
+// runMigrations applies the embedded SQL schema migrations to the provided database,
+// handling legacy subscriptions-table adjustments and skipping newer referral migrations
+// when referral-related columns already exist.
+//
+// When an older subscriptions table is detected, it attempts legacy adjustments such as
+// adding a subscription_id column and migrating values from subscription_url. If any of
+// the referral columns (`invite_code`, `is_trial`, `referred_by`) are already present,
+// the function resets the migrations state to version 3 and skips applying embedded migrations.
+//
+// The function returns an error if creating migration drivers, reading or applying the
+// embedded migrations, or other migration setup steps fail.
 func runMigrations(sqlDB *sql.DB) error {
 	var err error
 
