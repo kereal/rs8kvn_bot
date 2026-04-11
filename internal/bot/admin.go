@@ -162,10 +162,14 @@ func (h *Handler) HandleDel(ctx context.Context, update tgbotapi.Update) {
 	))
 }
 
-// escapeMarkdown escapes special characters in Markdown V2 to prevent injection
+// escapeMarkdown escapes special characters in Markdown V2 to prevent injection.
+// Backslash MUST be first — escaping it before other chars prevents double-escaping
+// escapeMarkdown returns text with Telegram Markdown V2 special characters escaped by prefixing each with a backslash.
+// It escapes the backslash character first to prevent incorrect double-escaping (for example, input "\*" becomes "\\\*").
+// The characters escaped include: \ _ * [ ] ( ) ~ ` > # + - = | { } . !
 func escapeMarkdown(text string) string {
-	// Characters that need to be escaped in Markdown V2: _ * [ ] ( ) ~ ` > # + - = | { } . !
-	specialChars := []string{"_", "*", "[", "]", "(", ")", "~", "`", ">", "#", "+", "-", "=", "|", "{", "}", ".", "!"}
+	// Characters that need to be escaped in Markdown V2: \ _ * [ ] ( ) ~ ` > # + - = | { } . !
+	specialChars := []string{"\\", "_", "*", "[", "]", "(", ")", "~", "`", ">", "#", "+", "-", "=", "|", "{", "}", ".", "!"}
 	result := text
 	for _, char := range specialChars {
 		result = strings.ReplaceAll(result, char, "\\"+char)
@@ -175,7 +179,10 @@ func escapeMarkdown(text string) string {
 
 // HandleBroadcast handles the /broadcast command for admins to send messages to all users.
 func (h *Handler) HandleBroadcast(ctx context.Context, update tgbotapi.Update) {
-	ctx, cancel := h.withTimeout(ctx)
+	// Broadcast can run for minutes (50ms delay per user × thousands of users),
+	// so we use a longer timeout than the default 30s handlerTimeout.
+	const broadcastTimeout = 5 * time.Minute
+	ctx, cancel := context.WithTimeout(ctx, broadcastTimeout)
 	defer cancel()
 
 	if update.Message == nil {

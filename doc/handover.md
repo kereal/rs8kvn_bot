@@ -129,6 +129,24 @@ All tests pass with `-race` detector. golangci-lint: 0 new issues (pre-existing:
 
 ---
 
+## Last Changes (v2.3.2 — 2026-04-11)
+
+### Bugfixes & Refactoring
+
+1. **escapeMarkdown missing backslash** — `\` was not in the MarkdownV2 escape list, causing broken rendering when user input contained backslashes (e.g. `C:\Users`). Backslash must be escaped **first** to prevent double-escaping of subsequent chars.
+
+2. **HandleBroadcast 30s timeout** — `HandleBroadcast` used `withTimeout(ctx)` (30s), but broadcast iterates through users with 50ms delay. 1000 users = ~50s, causing early termination. Replaced with `context.WithTimeout(ctx, 5*time.Minute)`.
+
+3. **GetOrCreateInvite ignored INSERT error** — `s.db.Exec("INSERT OR IGNORE ...")` silently swallowed errors (including DB connection failures). Now checks `err` before the SELECT query.
+
+4. **pendingInvites memory leak** — `pendingInvites` map entries were only removed when a user created a subscription. Expired entries were never purged, causing unbounded memory growth. Added `cleanupPendingInvites()` method and periodic cleanup goroutine via `startPendingInvitesCleanup()`.
+
+5. **handleMySubscription duplicated GetWithTraffic logic** — `handleMySubscription` manually computed traffic percentage, progress bar, reset info — all of which already existed in `service.GetWithTraffic()`. Replaced ~40 lines of duplicated code with a single `GetWithTraffic()` call. This ensures a single source of truth for subscription display logic.
+
+6. **CleanupExpiredTrials used wrong cutoff for trial_requests** — `trial_requests` (rate-limit records, 1-hour window) were cleaned up with the same cutoff as trial subscriptions (3+ hours). This caused stale rate-limit entries to accumulate. Now uses a separate `rateLimitCutoff = now - 1h` matching the actual rate-limit window.
+
+---
+
 ## Last Changes (v2.3.1 — 2026-04-11)
 
 ### Test Optimization & Refactoring
@@ -205,14 +223,16 @@ All tests pass with `-race` detector. golangci-lint: 0 new issues (pre-existing:
 
 ## Current Problem / Task
 
-**Status:** ✅ All tests passing, build clean, lint clean. v2.3.0 refactoring is **complete**.
+**Status:** ✅ All tests passing (race-safe), build clean. v2.3.2 bugfixes **complete**.
 
 **Remaining tasks (prioritized):**
-1. **Re-enable linters** — errcheck, gosec in `.golangci.yml` (P1)
+1. **Re-enable linters** — errcheck, gosec in `.golangci.yml` (P1) — partially done, 73 issues remaining (mostly in tests)
 2. **Multi-arch Docker** — linux/amd64 + linux/arm64 (P2)
 3. **Docker image on push to main** — CI build `main`/`dev` tag (P2)
 4. **Traffic alerts** — 80%/95% usage notifications (P3)
 5. **Multi-admin** — list of admin IDs instead of single (P3)
+6. **ExpiryTime not stored in DB** — `service.Create()` sends expiry to XUI but stores `time.Time{}` in DB, causing inaccurate reset display and admin notifications (P1)
+7. **`/sub/{subID}` serves revoked subscriptions** — no status check in subscription proxy handler (P1)
 
 ---
 
@@ -235,7 +255,7 @@ All tests pass with `-race` detector. golangci-lint: 0 new issues (pre-existing:
 - **Regular:** `create_subscription` callback → xui client (30GB, expiryTime: now + 30 days, reset: 30)
 - **Trial cookie:** `rs8kvn_trial_{code}` prevents duplication for 3 hours (HttpOnly)
 - **Atomic cleanup:** `DELETE ... RETURNING` for expired trials
-- **Share referral:** `pendingInvites[chatID]` cached for 60 minutes (in-memory only, lost on restart — acceptable trade-off at current scale)
+- **Share referral:** `pendingInvites[chatID]` cached for 60 minutes (in-memory only, lost on restart — acceptable trade-off at current scale). Periodic cleanup via `startPendingInvitesCleanup()` prevents unbounded memory growth.
 
 ### Subscription Deletion (v2.3.0+)
 - **Order:** DB-first, then XUI-best-effort
@@ -264,6 +284,7 @@ All tests pass with `-race` detector. golangci-lint: 0 new issues (pre-existing:
 - **Soft deletes:** `deleted_at` column (GORM)
 - **Trial subscriptions:** `telegram_id = 0` (not NULL) until activated
 - **Migrations:** Auto-applied on startup from `internal/database/migrations/`
+- **trial_requests cleanup:** Uses 1-hour cutoff (matching `CountTrialRequestsByIPLastHour` window), separate from trial subscription cutoff (which may be 3+ hours)
 
 ### Configuration
 - **Required:** `XUI_USERNAME`, `XUI_PASSWORD` (NO defaults)
@@ -319,6 +340,6 @@ go run ./cmd/bot
 
 ---
 
-**Generated:** 2026-04-10  
-**Session:** v2.3.0 refactoring complete (bugfixes, security, tests)  
-**Version:** v2.3.0  
+**Generated:** 2026-04-11  
+**Session:** v2.3.2 bugfixes (escapeMarkdown, broadcast timeout, invite error, pendingInvites leak, GetWithTraffic dedup, trial_requests cutoff)  
+**Version:** v2.3.2  

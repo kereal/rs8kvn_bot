@@ -1,205 +1,121 @@
 #!/bin/bash
-
 # update_stats.sh - Automatic project statistics calculator for rs8kvn_bot
 # Usage: ./update_stats.sh [--update-doc]
-
 set -e
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+RED='\033[0;31m' GREEN='\033[0;32m' YELLOW='\033[1;33m' BLUE='\033[0;34m' NC='\033[0m'
 
-# Project root directory
-PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "${BASH_SOURCE[0]%/*}" && pwd)"
 cd "$PROJECT_ROOT"
 
-echo -e "${BLUE}📊 Calculating project statistics...${NC}"
-echo ""
+echo -e "${BLUE}📊 Calculating project statistics...${NC}\n"
 
-# ============================================
-# Go Files Statistics
-# ============================================
 echo -e "${YELLOW}📁 Counting Go files...${NC}"
+GO_FILES_TOTAL=$(find . -name '*.go' -path './.git/*' -prune -o -print | wc -l)
+GO_FILES_PROD=$(find . -name '*.go' -path './.git/*' -o -path './tests/*' -o -name '*_test.go' -prune -o -print | wc -l)
+GO_FILES_TEST=$(find . -name '*_test.go' -path './.git/*' -prune -o -print | wc -l)
+GO_FILES_E2E=$(find ./tests -name '*.go' 2>/dev/null | wc -l || echo 0)
 
-GO_FILES_TOTAL=$(find . -name "*.go" -not -path "./.git/*" | wc -l)
-GO_FILES_PROD=$(find . -name "*.go" -not -path "./.git/*" -not -path "./tests/*" -not -name "*_test.go" | wc -l)
-GO_FILES_TEST=$(find . -name "*_test.go" -not -path "./.git/*" | wc -l)
-GO_FILES_E2E=$(find ./tests -name "*.go" 2>/dev/null | wc -l || echo 0)
+printf "  Total Go files:      ${GREEN}%d${NC}\n  Production files:    ${GREEN}%d${NC}\n  Test files:          ${GREEN}%d${NC}\n  E2E test files:      ${GREEN}%d${NC}\n\n" \
+       "$GO_FILES_TOTAL" "$GO_FILES_PROD" "$GO_FILES_TEST" "$GO_FILES_E2E"
 
-echo -e "  Total Go files:      ${GREEN}${GO_FILES_TOTAL}${NC}"
-echo -e "  Production files:    ${GREEN}${GO_FILES_PROD}${NC}"
-echo -e "  Test files:          ${GREEN}${GO_FILES_TEST}${NC}"
-echo -e "  E2E test files:      ${GREEN}${GO_FILES_E2E}${NC}"
-
-# ============================================
-# Lines of Code
-# ============================================
-echo ""
 echo -e "${YELLOW}📝 Counting lines of code...${NC}"
 
-# Production code (excluding tests)
-PROD_LINES=$(find . -name "*.go" -not -path "./.git/*" -not -path "./tests/*" -not -name "*_test.go" -exec wc -l {} + 2>/dev/null | tail -1 | awk '{print $1}' || echo 0)
-if [ -z "$PROD_LINES" ] || [ "$PROD_LINES" -eq 0 ]; then
-    PROD_LINES=$(find . -name "*.go" -not -path "./.git/*" -not -path "./tests/*" -not -name "*_test.go" | xargs wc -l 2>/dev/null | tail -1 | awk '{print $1}')
-fi
+# count_lines counts lines of Go source files excluding .git, the tests directory, and files ending with _test.go, and echoes the total number of lines (prints 0 when none).
+count_lines() { find . -name '*.go' -path './.git/*' -o -path './tests/*' -o -name '*_test.go' -prune -o -exec wc -l {} + 2>/dev/null | awk 'END{print $1}'; }
+# test_lines counts the total number of lines across all Go test files (`*_test.go`) excluding the `./.git` directory and echoes the resulting line count.
+test_lines() { find . -name '*_test.go' -path './.git/*' -prune -o -exec wc -l {} + 2>/dev/null | awk 'END{print $1}'; }
+# e2e_lines counts the total number of lines in Go files under ./tests and echoes 0 if no matching files are found.
+e2e_lines() { find ./tests -name '*.go' -exec wc -l {} + 2>/dev/null | awk 'END{print $1}'; }
+# doc_lines counts the total number of lines across Markdown (.md) files under the repository root, excluding files inside .git, and echoes the resulting count (produces empty output if no Markdown files are found).
+doc_lines() { find . -name '*.md' -path './.git/*' -prune -o -exec wc -l {} + 2>/dev/null | awk 'END{print $1}'; }
 
-# Test code
-TEST_LINES=$(find . -name "*_test.go" -not -path "./.git/*" -exec wc -l {} + 2>/dev/null | tail -1 | awk '{print $1}' || echo 0)
-if [ -z "$TEST_LINES" ] || [ "$TEST_LINES" -eq 0 ]; then
-    TEST_LINES=$(find . -name "*_test.go" -not -path "./.git/*" | xargs wc -l 2>/dev/null | tail -1 | awk '{print $1}')
-fi
+PROD_LINES=$(count_lines)
+TEST_LINES=$(test_lines)
+E2E_LINES=$(e2e_lines)
+DOC_LINES=$(doc_lines)
+DOC_FILES=$(find . -name '*.md' -path './.git/*' -prune -o -print | wc -l)
 
-# E2E tests
-E2E_LINES=$(find ./tests -name "*.go" -exec wc -l {} + 2>/dev/null | tail -1 | awk '{print $1}' || echo 0)
-if [ -z "$E2E_LINES" ]; then
-    E2E_LINES=0
-fi
-
-# Documentation
-DOC_FILES=$(find . -name "*.md" -not -path "./.git/*" | wc -l)
-DOC_LINES=$(find . -name "*.md" -not -path "./.git/*" -exec wc -l {} + 2>/dev/null | tail -1 | awk '{print $1}' || echo 0)
-if [ -z "$DOC_LINES" ] || [ "$DOC_LINES" -eq 0 ]; then
-    DOC_LINES=$(find . -name "*.md" -not -path "./.git/*" | xargs wc -l 2>/dev/null | tail -1 | awk '{print $1}')
-fi
+[ -z "$PROD_LINES" ] && PROD_LINES=0
+[ -z "$TEST_LINES" ] && TEST_LINES=0
+[ -z "$E2E_LINES" ]  && E2E_LINES=0
+[ -z "$DOC_LINES" ]  && DOC_LINES=0
 
 TOTAL_GO_LINES=$((PROD_LINES + TEST_LINES + E2E_LINES))
 
-echo -e "  Production code:     ${GREEN}${PROD_LINES}${NC} lines"
-echo -e "  Test code:           ${GREEN}${TEST_LINES}${NC} lines"
-echo -e "  E2E test code:       ${GREEN}${E2E_LINES}${NC} lines"
-echo -e "  Total Go code:       ${GREEN}${TOTAL_GO_LINES}${NC} lines"
-echo -e "  Documentation:       ${GREEN}${DOC_LINES}${NC} lines (${DOC_FILES} files)"
+printf "  Production code:     ${GREEN}%d${NC} lines\n  Test code:           ${GREEN}%d${NC} lines\n  E2E test code:       ${GREEN}%d${NC} lines\n  Total Go code:       ${GREEN}%d${NC} lines\n  Documentation:       ${GREEN}%d${NC} lines (%d files)\n\n" \
+       "$PROD_LINES" "$TEST_LINES" "$E2E_LINES" "$TOTAL_GO_LINES" "$DOC_LINES" "$DOC_FILES"
 
-# ============================================
-# Test Coverage
-# ============================================
-echo ""
 echo -e "${YELLOW}🧪 Running tests for coverage...${NC}"
+COVERAGE_PERCENT="0"
+go test ./... -cover -coverprofile=coverage.out >/dev/null 2>&1 && \
+  COVERAGE_PERCENT=$(go tool cover -func=coverage.out 2>/dev/null | awk '/total:/{print substr($3,1,length($3)-1)}')
+[ -z "$COVERAGE_PERCENT" ] && COVERAGE_PERCENT="~75" || COVERAGE_PERCENT="${COVERAGE_PERCENT}%"
 
-# Run tests and get coverage
-COVERAGE_OUTPUT=$(go test ./... -cover -coverprofile=coverage.out 2>&1 || true)
-COVERAGE_PERCENT=$(go tool cover -func=coverage.out 2>/dev/null | grep "total:" | awk '{print $3}' | tr -d '%' || echo "0")
+TEST_FUNCTIONS=$(grep -r '^func Test' --include='*_test.go' . | wc -l)
 
-if [ -z "$COVERAGE_PERCENT" ] || [ "$COVERAGE_PERCENT" = "0" ]; then
-    COVERAGE_PERCENT="~75"
-else
-    COVERAGE_PERCENT="${COVERAGE_PERCENT}%"
-fi
+printf "  Test coverage:       ${GREEN}%s${NC}\n  Test functions:      ${GREEN}%d${NC}\n\n" "$COVERAGE_PERCENT" "$TEST_FUNCTIONS"
 
-# Count test functions
-TEST_FUNCTIONS=$(grep -r "^func Test" --include="*_test.go" . | wc -l)
-
-echo -e "  Test coverage:       ${GREEN}${COVERAGE_PERCENT}${NC}"
-echo -e "  Test functions:      ${GREEN}${TEST_FUNCTIONS}${NC}"
-
-# ============================================
-# Git Statistics
-# ============================================
-echo ""
 echo -e "${YELLOW}🔀 Git statistics...${NC}"
+git rev-parse --is-inside-work-tree >/dev/null 2>&1 && {
+  TOTAL_COMMITS=$(git rev-list --count HEAD 2>/dev/null || echo 0)
+  AUTHORS=$(git shortlog -sn --all 2>/dev/null | wc -l || echo 1)
+  BRANCHES=$(git branch -a 2>/dev/null | wc -l || echo 0)
+  TAGS=$(git tag 2>/dev/null | wc -l || echo 0)
+  LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo v0.0.0)
+  LAST_COMMIT_DATE=$(git log -1 --format=%cd --date=short 2>/dev/null || echo unknown)
+  [ "$LATEST_TAG" != v0.0.0 ] && COMMITS_SINCE_RELEASE=$(git rev-list ${LATEST_TAG}..HEAD --count 2>/dev/null || echo 0) || COMMITS_SINCE_RELEASE=$TOTAL_COMMITS
+} || {
+  TOTAL_COMMITS=0 AUTHORS=1 BRANCHES=0 TAGS=0 LATEST_TAG=v0.0.0 LAST_COMMIT_DATE=unknown COMMITS_SINCE_RELEASE=0
+}
 
-TOTAL_COMMITS=$(git rev-list --count HEAD 2>/dev/null || echo "0")
-AUTHORS=$(git shortlog -sn --all 2>/dev/null | wc -l || echo "1")
-BRANCHES=$(git branch -a 2>/dev/null | wc -l || echo "0")
-TAGS=$(git tag 2>/dev/null | wc -l || echo "0")
-LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
-LAST_COMMIT_DATE=$(git log -1 --format=%cd --date=short 2>/dev/null || echo "unknown")
+printf "  Total commits:       ${GREEN}%s${NC}\n  Authors:             ${GREEN}%s${NC}\n  Branches:            ${GREEN}%s${NC}\n  Tags/Releases:       ${GREEN}%s${NC}\n  Latest release:      ${GREEN}%s${NC}\n  Commits since:       ${GREEN}%s${NC}\n  Last commit:         ${GREEN}%s${NC}\n\n" \
+       "$TOTAL_COMMITS" "$AUTHORS" "$BRANCHES" "$TAGS" "$LATEST_TAG" "$COMMITS_SINCE_RELEASE" "$LAST_COMMIT_DATE"
 
-# Commits since last release
-if [ "$LATEST_TAG" != "v0.0.0" ]; then
-    COMMITS_SINCE_RELEASE=$(git rev-list ${LATEST_TAG}..HEAD --count 2>/dev/null || echo "0")
-else
-    COMMITS_SINCE_RELEASE=$TOTAL_COMMITS
-fi
-
-echo -e "  Total commits:       ${GREEN}${TOTAL_COMMITS}${NC}"
-echo -e "  Authors:             ${GREEN}${AUTHORS}${NC}"
-echo -e "  Branches:            ${GREEN}${BRANCHES}${NC}"
-echo -e "  Tags/Releases:       ${GREEN}${TAGS}${NC}"
-echo -e "  Latest release:      ${GREEN}${LATEST_TAG}${NC}"
-echo -e "  Commits since:       ${GREEN}${COMMITS_SINCE_RELEASE}${NC}"
-echo -e "  Last commit:         ${GREEN}${LAST_COMMIT_DATE}${NC}"
-
-# ============================================
-# Conventional Commits Breakdown
-# ============================================
-echo ""
 echo -e "${YELLOW}📊 Commit types (Conventional Commits)...${NC}"
 
-FIX_COMMITS=$(git log --oneline 2>/dev/null | grep -i "^.*fix:" | wc -l || echo 0)
-FEAT_COMMITS=$(git log --oneline 2>/dev/null | grep -i "^.*feat:" | wc -l || echo 0)
-TEST_COMMITS=$(git log --oneline 2>/dev/null | grep -i "^.*test:" | wc -l || echo 0)
-DOCS_COMMITS=$(git log --oneline 2>/dev/null | grep -i "^.*docs:" | wc -l || echo 0)
-REFACTOR_COMMITS=$(git log --oneline 2>/dev/null | grep -i "^.*refactor:" | wc -l || echo 0)
-CHORE_COMMITS=$(git log --oneline 2>/dev/null | grep -i "^.*chore:" | wc -l || echo 0)
-PERF_COMMITS=$(git log --oneline 2>/dev/null | grep -i "^.*perf:" | wc -l || echo 0)
+read FIX COMMITS FEAT_COMMITS TEST_COMMITS DOCS_COMMITS REFACTOR_COMMITS CHORE_COMMITS PERF_COMMITS < <(git log --oneline 2>/dev/null | awk '
+BEGIN{fix=feat=test=docs=ref=chore=perf=0}
+/^.*fix:/i      {fix++}
+/^.*feat:/i     {feat++}
+/^.*test:/i     {test++}
+/^.*docs:/i     {docs++}
+/^.*refactor:/i {ref++}
+/^.*chore:/i    {chore++}
+/^.*perf:/i     {perf++}
+END{print fix,feat,test,docs,ref,chore,perf}'
+)
 
-echo -e "  fix:       ${GREEN}${FIX_COMMITS}${NC}"
-echo -e "  feat:      ${GREEN}${FEAT_COMMITS}${NC}"
-echo -e "  test:      ${GREEN}${TEST_COMMITS}${NC}"
-echo -e "  docs:      ${GREEN}${DOCS_COMMITS}${NC}"
-echo -e "  refactor:  ${GREEN}${REFACTOR_COMMITS}${NC}"
-echo -e "  chore:     ${GREEN}${CHORE_COMMITS}${NC}"
-echo -e "  perf:      ${GREEN}${PERF_COMMITS}${NC}"
+printf "  fix:       ${GREEN}%s${NC}\n  feat:      ${GREEN}%s${NC}\n  test:      ${GREEN}%s${NC}\n  docs:      ${GREEN}%s${NC}\n  refactor:  ${GREEN}%s${NC}\n  chore:     ${GREEN}%s${NC}\n  perf:      ${GREEN}%s${NC}\n\n" \
+       "$FIX" "$FEAT_COMMITS" "$TEST_COMMITS" "$DOCS_COMMITS" "$REFACTOR_COMMITS" "$CHORE_COMMITS" "$PERF_COMMITS"
 
-# ============================================
-# Module Statistics
-# ============================================
-echo ""
 echo -e "${YELLOW}🧩 Module statistics...${NC}"
-
 for module in internal/*/; do
-    if [ -d "$module" ]; then
-        MODULE_NAME=$(basename "$module")
-        MODULE_FILES=$(find "$module" -name "*.go" -not -name "*_test.go" | wc -l)
-        MODULE_LINES=$(find "$module" -name "*.go" -not -name "*_test.go" -exec wc -l {} + 2>/dev/null | tail -1 | awk '{print $1}' || echo "0")
-        if [ "$MODULE_LINES" -gt 0 ]; then
-            echo -e "  ${MODULE_NAME}: ${GREEN}${MODULE_FILES}${NC} files, ${GREEN}${MODULE_LINES}${NC} lines"
-        fi
-    fi
+  [ -d "$module" ] || continue
+  m=$(basename "$module")
+  f=$(find "$module" -name '*.go' ! -name '*_test.go' | wc -l)
+  l=$(find "$module" -name '*.go' ! -name '*_test.go' -exec wc -l {} + 2>/dev/null | awk 'END{print $1}')
+  [ "$l" -gt 0 ] && printf "  %s: ${GREEN}%d${NC} files, ${GREEN}%d${NC} lines\n" "$m" "$f" "$l"
 done
 
-# ============================================
-# Project Size
-# ============================================
-echo ""
-echo -e "${YELLOW}📦 Project size...${NC}"
-
+echo -e "\n${YELLOW}📦 Project size...${NC}"
 PROJECT_SIZE=$(du -sh . 2>/dev/null | awk '{print $1}')
-echo -e "  Total size:          ${GREEN}${PROJECT_SIZE}${NC}"
+printf "  Total size:          ${GREEN}%s${NC}\n\n" "$PROJECT_SIZE"
 
-# ============================================
-# Generate Date
-# ============================================
 STATS_DATE=$(date +"%B %Y")
 
-# ============================================
-# Summary
-# ============================================
-echo ""
 echo -e "${BLUE}════════════════════════════════════════${NC}"
 echo -e "${GREEN}✅ Statistics calculated successfully!${NC}"
-echo -e "${BLUE}════════════════════════════════════════${NC}"
-echo ""
-echo -e "Generated: ${YELLOW}${STATS_DATE}${NC}"
+echo -e "${BLUE}════════════════════════════════════════${NC}\n"
+echo -e "Generated: ${YELLOW}${STATS_DATE}${NC}\n"
 
-# ============================================
-# Generate PROJECT_STATS.md
-# ============================================
+# generate_project_stats generates or updates doc/PROJECT_STATS.md with aggregated project metrics (Go file and line counts, module breakdown, git statistics, coverage and test metrics, conventional commit tallies, and status badges) and prints progress messages.
 generate_project_stats() {
-    STATS_FILE="doc/PROJECT_STATS.md"
+  STATS_FILE="doc/PROJECT_STATS.md"
+  echo -e "\n${YELLOW}📝 Generating $STATS_FILE...${NC}"
+  GO_VERSION=$(grep -E '^go [0-9]' go.mod | awk '{print $2}' || echo 1.25)
 
-    echo ""
-    echo -e "${YELLOW}📝 Generating $STATS_FILE...${NC}"
-
-    # Get Go version from go.mod
-    GO_VERSION=$(grep -E "^go [0-9]" go.mod | awk '{print $2}' || echo "1.25")
-
-    # Create the file with heredoc
-    cat > "$STATS_FILE" << EOF
+  cat > "$STATS_FILE" << 'EOF'
 # 📊 Статистика проекта rs8kvn_bot
 
 <img src="logo_240_opt.png" alt="rs8kvn_bot logo" width="120" align="right">
@@ -225,7 +141,7 @@ Telegram бот для распространения VPN подписок 3x-ui
 
 ### 📁 Размер проекта
 
-| Метрика | Значение |
+| Мет��ика | Значение |
 |---------|----------|
 | **Общий размер** | ${PROJECT_SIZE} |
 | **Go файлов** | ${GO_FILES_TOTAL} |
@@ -248,51 +164,44 @@ Telegram бот для распространения VPN подписок 3x-ui
 
 ## 🧩 Распределение кода по модулям
 
+| Модуль | Файлов | Строк | Описание |
+|--------|--------|-------|----------|
 EOF
 
-    # Add module statistics
-    echo "| Модуль | Файлов | Строк | Описание |" >> "$STATS_FILE"
-    echo "|--------|--------|-------|----------|" >> "$STATS_FILE"
+  for module in internal/*/; do
+    [ -d "$module" ] || continue
+    m=$(basename "$module")
+    f=$(find "$module" -name '*.go' ! -name '*_test.go' | wc -l)
+    l=$(find "$module" -name '*.go' ! -name '*_test.go' -exec wc -l {} + 2>/dev/null | awk 'END{print $1}')
+    [ "$l" -gt 0 ] || continue
+    case "$m" in
+      bot) DESC="Telegram бот, хендлеры, команды" ;;
+      xui) DESC="Клиент к 3x-ui панели" ;;
+      config) DESC="Конфигурация, константы" ;;
+      database) DESC="SQLite база данных" ;;
+      web) DESC="Web сервер для health checks" ;;
+      logger) DESC="Логирование" ;;
+      backup) DESC="Резервное копирование" ;;
+      ratelimiter) DESC="Rate limiting" ;;
+      heartbeat) DESC="Heartbeat механизм" ;;
+      utils) DESC="Утилиты (QR, UUID, time)" ;;
+      interfaces) DESC="Интерфейсы" ;;
+      flag) DESC="Конфигурация из env" ;;
+      scheduler) DESC="Планировщики задач" ;;
+      service) DESC="Бизнес-логика подписок" ;;
+      subproxy) DESC="Subscription proxy" ;;
+      testutil) DESC="Утилиты для тестов" ;;
+      *) DESC="" ;;
+    esac
+    echo "| \`internal/${m}\` | ${f} | ${l} | ${DESC} |" >> "$STATS_FILE"
+  done
 
-    for module in internal/*/; do
-        if [ -d "$module" ]; then
-            MODULE_NAME=$(basename "$module")
-            MODULE_FILES=$(find "$module" -name "*.go" -not -name "*_test.go" | wc -l)
-            MODULE_LINES=$(find "$module" -name "*.go" -not -name "*_test.go" -exec wc -l {} + 2>/dev/null | tail -1 | awk '{print $1}' || echo "0")
-            if [ "$MODULE_LINES" -gt 0 ]; then
-                case "$MODULE_NAME" in
-                    bot) DESC="Telegram бот, хендлеры, команды" ;;
-                    xui) DESC="Клиент к 3x-ui панели" ;;
-                    config) DESC="Конфигурация, константы" ;;
-                    database) DESC="SQLite база данных" ;;
-                    web) DESC="Web сервер для health checks" ;;
-                    logger) DESC="Логирование" ;;
-                    backup) DESC="Резервное копирование" ;;
-                    ratelimiter) DESC="Rate limiting" ;;
-                    heartbeat) DESC="Heartbeat механизм" ;;
-                    utils) DESC="Утилиты (QR, UUID, time)" ;;
-                    interfaces) DESC="Интерфейсы" ;;
-                    flag) DESC="Конфигурация из env" ;;
-                    scheduler) DESC="Планировщики задач" ;;
-                    service) DESC="Бизнес-логика подписок" ;;
-                    subproxy) DESC="Subscription proxy" ;;
-                    testutil) DESC="Утилиты для тестов" ;;
-                    *) DESC="" ;;
-                esac
-                echo "| \`internal/${MODULE_NAME}\` | ${MODULE_FILES} | ${MODULE_LINES} | ${DESC} |" >> "$STATS_FILE"
-            fi
-        fi
-    done
-
-    cat >> "$STATS_FILE" << 'EOF'
+  cat >> "$STATS_FILE" << EOF
 
 ---
 
 ## 🔀 Git статистика
 
-EOF
-
-    cat >> "$STATS_FILE" << EOF
 | Метрика | Значение |
 |---------|----------|
 | **Всего коммитов** | ${TOTAL_COMMITS} |
@@ -313,7 +222,7 @@ ${LATEST_TAG} (текущая версия)
 
 | Тип | Количество |
 |-----|------------|
-| \`fix\` | ${FIX_COMMITS} |
+| \`fix\` | ${FIX} |
 | \`test\` | ${TEST_COMMITS} |
 | \`docs\` | ${DOCS_COMMITS} |
 | \`feat\` | ${FEAT_COMMITS} |
@@ -371,18 +280,9 @@ ${LATEST_TAG} (текущая версия)
 *Скрипт: \`./update_stats.sh --update-doc\`*
 EOF
 
-    echo -e "${GREEN}✅ Documentation generated!${NC}"
+  echo -e "${GREEN}✅ Documentation generated!${NC}"
 }
 
-# ============================================
-# Update Documentation (optional)
-# ============================================
-if [ "$1" == "--update-doc" ]; then
-    generate_project_stats
-fi
-
-# Cleanup
-rm -f coverage.out 2>/dev/null || true
-
-echo ""
-echo -e "${BLUE}Tip: Run with --update-doc to update doc/PROJECT_STATS.md${NC}"
+[ "$1" = "--update-doc" ] && generate_project_stats
+rm -f coverage.out 2>/dev/null
+echo -e "\n${BLUE}Tip: Run with --update-doc to update doc/PROJECT_STATS.md${NC}"

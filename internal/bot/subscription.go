@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"time"
 
-	"rs8kvn_bot/internal/config"
 	"rs8kvn_bot/internal/database"
 	"rs8kvn_bot/internal/logger"
 	"rs8kvn_bot/internal/utils"
@@ -93,18 +92,17 @@ func (h *Handler) handleMySubscription(ctx context.Context, chatID int64, userna
 		return
 	}
 
-	sub, err := h.getSubscriptionWithCache(ctx, chatID)
+	sub, traffic, err := h.subscriptionService.GetWithTraffic(ctx, chatID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgSubNoActive))
 			h.safeSend(editMsg)
 			return
-		} else {
-			logger.Error("Failed to get subscription", zap.Error(err))
-			editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgSubTempError))
-			h.safeSend(editMsg)
-			return
 		}
+		logger.Error("Failed to get subscription", zap.Error(err))
+		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgSubTempError))
+		h.safeSend(editMsg)
+		return
 	}
 
 	if sub.Status != "active" {
@@ -113,62 +111,16 @@ func (h *Handler) handleMySubscription(ctx context.Context, chatID int64, userna
 		return
 	}
 
-	// Get traffic usage from 3x-ui panel
-	trafficUsedGB := float64(0)
-
-	traffic, err := h.xui.GetClientTraffic(ctx, sub.Username)
-	if err != nil {
-		logger.Warn("Failed to get client traffic from panel",
-			zap.String("username", sub.Username),
-			zap.Error(err))
-	} else {
-		trafficUsedGB = float64(traffic.Up+traffic.Down) / 1024 / 1024 / 1024
-	}
-
-	// Calculate percentage for progress bar
-	trafficLimitGB := float64(h.cfg.TrafficLimitGB)
-	percentage := 0.0
-	if trafficLimitGB > 0 {
-		percentage = (trafficUsedGB / trafficLimitGB) * 100
-		if percentage > 100 {
-			percentage = 100
-		}
-	}
-
-	// Format traffic info
-	trafficInfo := fmt.Sprintf("%.2f из %d Гб (%.0f%%)", trafficUsedGB, h.cfg.TrafficLimitGB, percentage)
-	progressBar := utils.GenerateProgressBar(trafficUsedGB, trafficLimitGB)
-
-	// Format dates
-	createdAt := utils.FormatDateRu(sub.CreatedAt)
-
-	// Calculate traffic reset: if ExpiryTime is set, use it; otherwise use CreatedAt + reset days
-	var resetTime time.Time
-	if sub.ExpiryTime.IsZero() {
-		resetTime = sub.CreatedAt.AddDate(0, 0, config.SubscriptionResetDay)
-	} else {
-		resetTime = sub.ExpiryTime
-	}
-	daysUntilTrafficReset := utils.DaysUntilReset(time.Now(), resetTime)
-
-	// Build reset info string
-	var resetInfo string
-	switch {
-	case daysUntilTrafficReset < 0:
-		resetInfo = "🔄 Сброс: отключен"
-	case daysUntilTrafficReset == 0:
-		resetInfo = "🔄 Сброс: сегодня"
-	default:
-		resetInfo = fmt.Sprintf("🔄 Сброс: через %d дн.", daysUntilTrafficReset)
-	}
+	// Format traffic info using data from service layer
+	trafficInfo := fmt.Sprintf("%.2f из %d Гб (%.0f%%)", traffic.UsedGB, traffic.LimitGB, traffic.Percentage)
 
 	// Build message
 	messageText := fmt.Sprintf(
 		"📋 *Ваша подписка*\n\n📊 Трафик: %s\n%s\n\n📅 Создана: %s\n%s\n\n🔗 Ссылка\n`%s`",
 		trafficInfo,
-		progressBar,
-		createdAt,
-		resetInfo,
+		traffic.ProgressBar,
+		traffic.CreatedAtFormatted,
+		traffic.ResetInfo,
 		sub.SubscriptionURL,
 	)
 
