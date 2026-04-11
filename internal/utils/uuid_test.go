@@ -551,7 +551,7 @@ func TestGenerateSubID_Format(t *testing.T) {
 	})
 }
 
-// TestGenerateInviteCode_Format - Kept for backwards compatibility (duplicate covered by Properties_InviteCode)
+// TestGenerateInviteCode_Format was removed; its coverage is now part of Properties_InviteCode
 
 // Property-based tests: verify properties hold for random generated values
 func TestProperties_UUID(t *testing.T) {
