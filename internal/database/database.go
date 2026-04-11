@@ -510,8 +510,10 @@ func (s *Service) GetTotalTelegramIDCount(ctx context.Context) (int64, error) {
 // GetOrCreateInvite returns an existing invite for the referrer or creates a new one.
 // Uses atomic INSERT ... ON CONFLICT DO NOTHING to prevent TOCTOU race conditions.
 func (s *Service) GetOrCreateInvite(ctx context.Context, referrerTGID int64, code string) (*Invite, error) {
-	s.db.WithContext(ctx).Exec("INSERT OR IGNORE INTO invites (code, referrer_tg_id, created_at) VALUES (?, ?, ?)",
-		code, referrerTGID, time.Now())
+	if err := s.db.WithContext(ctx).Exec("INSERT OR IGNORE INTO invites (code, referrer_tg_id, created_at) VALUES (?, ?, ?)",
+		code, referrerTGID, time.Now()).Error; err != nil {
+		return nil, fmt.Errorf("failed to upsert invite: %w", err)
+	}
 
 	var result Invite
 	if err := s.db.WithContext(ctx).Where("referrer_tg_id = ?", referrerTGID).First(&result).Error; err != nil {
@@ -713,9 +715,16 @@ func (s *Service) CleanupExpiredTrials(ctx context.Context, hours int, xuiClient
 		}
 	}
 
-	// Cleanup old trial_requests (rate limit records)
+	// Cleanup old trial_requests (rate limit records).
+	// These are only used for hourly rate limiting (CountTrialRequestsByIPLastHour),
+	// so records older than 1 hour are already irrelevant. Use a separate cutoff
+	// instead of the trial subscription cutoff (which may be 3+ hours) to avoid
+	// accumulating stale rate-limit entries. Add a small buffer to avoid deleting
+	// records that are right at the 1-hour boundary (time.Now() vs created_at can
+	// differ by microseconds depending on clock granularity).
+	rateLimitCutoff := time.Now().Add(-1*time.Hour + 1*time.Second)
 	s.db.WithContext(ctx).
-		Where("created_at < ?", cutoff).
+		Where("created_at < ?", rateLimitCutoff).
 		Delete(&TrialRequest{})
 
 	return deletedCount, nil

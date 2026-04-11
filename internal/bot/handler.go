@@ -126,9 +126,40 @@ func (h *Handler) HandleUpdate(ctx context.Context, update tgbotapi.Update) {
 	}
 }
 
-// StartCacheCleanup starts a background goroutine that periodically removes expired cache entries.
+// StartCacheCleanup starts a background goroutine that periodically removes expired cache entries
+// and cleans up stale pending invites.
 func (h *Handler) StartCacheCleanup(ctx context.Context, interval time.Duration) {
 	go h.cache.StartCleanup(ctx, interval)
+	go h.startPendingInvitesCleanup(ctx, interval)
+}
+
+// startPendingInvitesCleanup periodically removes expired entries from pendingInvites map
+// to prevent unbounded memory growth. Entries expire after PendingInviteTTL (60 minutes).
+func (h *Handler) startPendingInvitesCleanup(ctx context.Context, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			h.cleanupPendingInvites()
+		}
+	}
+}
+
+// cleanupPendingInvites removes expired entries from the pendingInvites map.
+func (h *Handler) cleanupPendingInvites() {
+	h.pendingMu.Lock()
+	defer h.pendingMu.Unlock()
+
+	now := time.Now()
+	for chatID, invite := range h.pendingInvites {
+		if now.After(invite.expiresAt) {
+			delete(h.pendingInvites, chatID)
+		}
+	}
 }
 
 // StartRateLimiterCleanup starts a background goroutine that removes stale user buckets.
