@@ -153,11 +153,12 @@ func (h *Handler) handleMySubscription(ctx context.Context, chatID int64, userna
 
 	// Build reset info string
 	var resetInfo string
-	if daysUntilTrafficReset < 0 {
+	switch {
+	case daysUntilTrafficReset < 0:
 		resetInfo = "🔄 Сброс: отключен"
-	} else if daysUntilTrafficReset == 0 {
+	case daysUntilTrafficReset == 0:
 		resetInfo = "🔄 Сброс: сегодня"
-	} else {
+	default:
 		resetInfo = fmt.Sprintf("🔄 Сброс: через %d дн.", daysUntilTrafficReset)
 	}
 
@@ -361,5 +362,3 @@ func (h *Handler) handleCreateError(ctx context.Context, chatID int64, messageID
 	editMsg.DisableWebPagePreview = true
 	h.safeSend(editMsg)
 }
-
-

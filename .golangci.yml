@@ -5,29 +5,81 @@ run:
 
 issues:
   exclude-rules:
-    # Test files: errcheck for os.Setenv/Unsetenv, Close, WriteFile, etc. is acceptable
-    - path: _test\.go
+    # Test files in internal/ directory
+    - path: internal/.+_test\.go$
       linters:
         - errcheck
-      text: "Error return value"
-    # Disable noisy linters for test files
-    - path: _test\.go
-      linters:
-        - dupl
-        - err113
         - gosec
-        - intrange
-        - nilnil
-        - perfsprint
-        - prealloc
-        - revive
-        - testifylint
-        - thelper
-        - unparam
-        - usetesting
-        - containedctx
+        - contextcheck
+        - errorlint
+        - forbidigo
+        - gocritic
         - staticcheck
-        - ineffassign
+        - tparallel
+        - unused
+    # Test files in cmd/ directory
+    - path: cmd/.+_test\.go$
+      linters:
+        - errcheck
+        - gosec
+        - contextcheck
+        - errorlint
+        - forbidigo
+        - gocritic
+        - staticcheck
+        - tparallel
+        - unused
+    # Test files in tests/ directory
+    - path: tests/.+_test\.go$
+      linters:
+        - errcheck
+        - gosec
+        - contextcheck
+        - errorlint
+        - forbidigo
+        - gocritic
+        - staticcheck
+        - tparallel
+        - unused
+    # Test files: gosec patterns that are acceptable in tests
+    - path: .+_test\.go$
+      linters:
+        - gosec
+      text: "G302"
+    - path: .+_test\.go$
+      linters:
+        - gosec
+      text: "G304"
+    - path: .+_test\.go$
+      linters:
+        - gosec
+      text: "G306"
+    - path: .+_test\.go$
+      linters:
+        - gosec
+      text: "G107"
+    - path: .+_test\.go$
+      linters:
+        - gosec
+      text: "G115"
+    - path: .+_test\.go$
+      linters:
+        - gosec
+      text: "G204"
+    # cmd/bot/main.go: gosec G404 for math/rand jitter
+    - path: cmd/bot/main\.go
+      linters:
+        - gosec
+      text: "G404"
+    # internal/xui/client.go: gosec G404 for math/rand jitter
+    - path: internal/xui/client\.go
+      linters:
+        - gosec
+      text: "G404"
+    # internal/flag/flag.go: inamedparam - interface from standard flag package
+    - path: internal/flag/flag\.go
+      linters:
+        - inamedparam
 
 linters:
   default: all
@@ -67,11 +119,9 @@ linters:
     - prealloc
     - recvcheck
     - revive
-    - gosec
     - intrange
     - nilnil
     - exhaustive
-    - errcheck
     - testifylint
     - thelper
     - unparam

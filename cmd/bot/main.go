@@ -19,8 +19,8 @@ import (
 	"rs8kvn_bot/internal/scheduler"
 	"rs8kvn_bot/internal/service"
 	"rs8kvn_bot/internal/subproxy"
-	"rs8kvn_bot/internal/webhook"
 	"rs8kvn_bot/internal/web"
+	"rs8kvn_bot/internal/webhook"
 	"rs8kvn_bot/internal/xui"
 
 	"github.com/getsentry/sentry-go"
@@ -35,7 +35,8 @@ var (
 	buildTime = "unknown"
 )
 
-// getVersion returns the current version from build info or git tag
+// getVersion returns the service version string prefixed with "rs8kvn_bot@".
+// It prefers a non-"dev" ldflag version, then a module tag from build info, then a short VCS revision from build info, then an ldflag commit, and finally falls back to the ldflag version.
 func getVersion() string {
 	// If version was set via ldflags and is not "dev", use it
 	if version != "dev" {
@@ -72,12 +73,20 @@ func getVersion() string {
 	return "rs8kvn_bot@" + version
 }
 
- // The function performs best-effort initialization for optional components (Sentry,
- // database, 3x-ui client, Telegram bot) so the service can start even if some
- // dependencies are unavailable. It also starts background maintenance tasks
- // (backups, heartbeat, trial cleanup, subscription proxy reload), marks the web
- // server readiness, and coordinates orderly shutdown of update handlers and
- // background workers when a termination signal is received.
+// The function performs best-effort initialization for optional components (Sentry,
+// database, 3x-ui client, Telegram bot) so the service can start even if some
+// dependencies are unavailable. It also starts background maintenance tasks
+// (backups, heartbeat, trial cleanup, subscription proxy reload), marks the web
+// server readiness, and coordinates orderly shutdown of update handlers and
+// main is the entry point that initializes configuration and services, starts background
+// workers and the web server, processes Telegram updates with bounded concurrency, and
+// coordinates a graceful shutdown when termination signals are received.
+//
+// It performs best-effort initialization of optional components (Sentry, 3x-ui, Telegram
+// bot), constructs shared services (database, subscription service, webhook sender),
+// registers health checks, starts scheduled background tasks, and marks the web server
+// readiness. On shutdown it stops receiving updates, drains channels, and waits for
+// in-flight update handlers and background tasks to complete within configured timeouts.
 func main() {
 	// Load configuration first
 	cfg, err := config.Load()
@@ -172,7 +181,7 @@ func main() {
 				zap.Int("attempt", i+1),
 				zap.Int("max_attempts", startupLoginMaxAttempts),
 				zap.Error(err))
-			time.Sleep(startupLoginDelay + time.Duration(rand.Int63n(int64(startupLoginDelay/2))))
+			time.Sleep(startupLoginDelay + time.Duration(rand.Int63n(int64(startupLoginDelay/2)))) //nolint:gosec // G404: math/rand is sufficient for jitter, crypto/rand overhead unnecessary
 		}
 	}()
 

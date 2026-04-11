@@ -90,6 +90,17 @@ func (TrialRequest) TableName() string {
 	return "trial_requests"
 }
 
+// runMigrations applies the embedded SQL schema migrations to the provided database,
+// handling legacy subscriptions-table adjustments and skipping newer referral migrations
+// when referral-related columns already exist.
+//
+// When an older subscriptions table is detected, it attempts legacy adjustments such as
+// adding a subscription_id column and migrating values from subscription_url. If any of
+// the referral columns (`invite_code`, `is_trial`, `referred_by`) are already present,
+// the function resets the migrations state to version 3 and skips applying embedded migrations.
+//
+// The function returns an error if creating migration drivers, reading or applying the
+// embedded migrations, or other migration setup steps fail.
 func runMigrations(sqlDB *sql.DB) error {
 	var err error
 
@@ -151,9 +162,15 @@ func runMigrations(sqlDB *sql.DB) error {
 	// Check if referral columns already exist
 	var hasInviteCode, hasIsTrial, hasReferredBy int
 	if tableExists > 0 {
-		sqlDB.QueryRow("SELECT COUNT(*) FROM pragma_table_info('subscriptions') WHERE name = 'invite_code'").Scan(&hasInviteCode)
-		sqlDB.QueryRow("SELECT COUNT(*) FROM pragma_table_info('subscriptions') WHERE name = 'is_trial'").Scan(&hasIsTrial)
-		sqlDB.QueryRow("SELECT COUNT(*) FROM pragma_table_info('subscriptions') WHERE name = 'referred_by'").Scan(&hasReferredBy)
+		if err := sqlDB.QueryRow("SELECT COUNT(*) FROM pragma_table_info('subscriptions') WHERE name = 'invite_code'").Scan(&hasInviteCode); err != nil {
+			logger.Warn("Failed to check invite_code column", zap.Error(err))
+		}
+		if err := sqlDB.QueryRow("SELECT COUNT(*) FROM pragma_table_info('subscriptions') WHERE name = 'is_trial'").Scan(&hasIsTrial); err != nil {
+			logger.Warn("Failed to check is_trial column", zap.Error(err))
+		}
+		if err := sqlDB.QueryRow("SELECT COUNT(*) FROM pragma_table_info('subscriptions') WHERE name = 'referred_by'").Scan(&hasReferredBy); err != nil {
+			logger.Warn("Failed to check referred_by column", zap.Error(err))
+		}
 	}
 
 	// If referral columns exist, we need to skip migration 003

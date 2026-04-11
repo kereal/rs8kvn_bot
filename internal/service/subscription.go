@@ -224,6 +224,7 @@ func (s *SubscriptionService) GetWithTraffic(ctx context.Context, telegramID int
 	// Get traffic from XUI
 	traffic, err := s.xui.GetClientTraffic(ctx, sub.Username)
 	if err != nil {
+		//nolint:nilerr // Intentionally return zero traffic when XUI fails - better UX than error
 		// Return subscription with zero traffic instead of failing
 		return sub, &TrafficInfo{
 			UsedGB:  0,
@@ -255,11 +256,12 @@ func (s *SubscriptionService) GetWithTraffic(ctx context.Context, telegramID int
 
 	// Reset info string
 	var resetInfo string
-	if daysUntilReset < 0 {
+	switch {
+	case daysUntilReset < 0:
 		resetInfo = "🔄 Сброс: отключен"
-	} else if daysUntilReset == 0 {
+	case daysUntilReset == 0:
 		resetInfo = "🔄 Сброс: сегодня"
-	} else {
+	default:
 		resetInfo = fmt.Sprintf("🔄 Сброс: через %d дн.", daysUntilReset)
 	}
 
