@@ -554,6 +554,20 @@ func (s *Server) handleSubscription(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	if cachedBody, cachedHeaders, ok := s.subProxy.GetCache(subID); ok {
+		// Verify subscription is still active even on cache hit
+		sub, err := s.db.GetSubscriptionBySubscriptionID(ctx, subID)
+		if err != nil || !sub.IsActive() {
+			s.subProxy.InvalidateCache(subID)
+			if err != nil {
+				logger.Warn("Subscription not found in DB on cache hit", zap.String("sub_id", subID), zap.Error(err))
+			} else {
+				logger.Info("Cached subscription is no longer active", zap.String("sub_id", subID), zap.String("status", sub.Status))
+			}
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			w.WriteHeader(http.StatusNotFound)
+			w.Write([]byte("Subscription not found"))
+			return
+		}
 		logger.Debug("Subscription proxy cache hit", zap.String("sub_id", subID))
 		s.writeSubscriptionResponse(w, cachedBody, cachedHeaders)
 		return
@@ -573,6 +587,11 @@ func (s *Server) handleSubscription(w http.ResponseWriter, r *http.Request) {
 		if sub.SubscriptionURL == "" {
 			logger.Warn("Subscription URL is empty", zap.String("sub_id", subID))
 			return nil, nil
+		}
+
+		if !sub.IsActive() {
+			logger.Info("Subscription is not active", zap.String("sub_id", subID), zap.String("status", sub.Status))
+			return nil, &subFetchError{err: nil, notFound: true}
 		}
 
 		xuiResp, fetchErr := subproxy.FetchFromXUI(sub.SubscriptionURL)
