@@ -104,6 +104,10 @@ func (s *Service) SetCache(key string, body []byte, headers map[string]string) {
 	s.cache.Set(key, body, headers)
 }
 
+func (s *Service) InvalidateCache(key string) {
+	s.cache.Delete(key)
+}
+
 func (s *Service) Stop() {
 	s.cache.Stop()
 }
