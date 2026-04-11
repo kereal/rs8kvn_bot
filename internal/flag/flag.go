@@ -17,6 +17,7 @@ import (
 // Compatible with the standard library's flag.Value interface.
 type Value interface {
 	String() string
+	//nolint:inamedparam // Must match flag.Value interface signature
 	Set(string) error
 }
 

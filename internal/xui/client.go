@@ -741,7 +741,12 @@ func isRetryable(err error) bool {
 }
 
 // RetryWithBackoff executes a function with exponential backoff retry.
-// Exported for use in other packages that need retry logic for XUI operations.
+// RetryWithBackoff retries the provided function up to maxRetries using exponential backoff with jitter.
+// 
+// It calls fn repeatedly until it succeeds or a non-retryable error is returned. Between attempts it waits,
+// starting from initialDelay and doubling the delay after each wait (with added jitter). The function respects
+// context cancellation and will return early if ctx is done. If all attempts fail, it returns an error wrapping
+// the last encountered error.
 func RetryWithBackoff(ctx context.Context, maxRetries int, initialDelay time.Duration, fn func() error) error {
 	var lastErr error
 	delay := initialDelay
@@ -767,7 +772,7 @@ func RetryWithBackoff(ctx context.Context, maxRetries int, initialDelay time.Dur
 				zap.Error(err))
 
 			select {
-			case <-time.After(delay + time.Duration(rand.Int63n(int64(delay/2)))):
+			case <-time.After(delay + time.Duration(rand.Int63n(int64(delay/2)))): //nolint:gosec // G404: math/rand is sufficient for jitter, crypto/rand overhead unnecessary
 				delay *= 2
 			case <-ctx.Done():
 				return fmt.Errorf("context cancelled: %w", ctx.Err())

@@ -4,9 +4,9 @@
 [![GitHub Release Date](https://img.shields.io/github/release-date/kereal/rs8kvn_bot?logo=github)](https://github.com/kereal/rs8kvn_bot/releases)
 [![GitHub commits](https://img.shields.io/github/commits-since/kereal/rs8kvn_bot/latest?logo=github)](https://github.com/kereal/rs8kvn_bot/commits/dev)
 [![GitHub last commit](https://img.shields.io/github/last-commit/kereal/rs8kvn_bot?logo=github)](https://github.com/kereal/rs8kvn_bot/commits/dev)
-[![Coverage](https://img.shields.io/badge/coverage-70.7%25-green)]()()
-[![Tests](https://img.shields.io/badge/tests-passing-brightgreen)]()
-[![Go](https://img.shields.io/badge/Go-1.25%2B-00ADD8?logo=go)](https://go.dev/)(https://go.dev/)
+![Coverage](https://img.shields.io/badge/coverage-85%25%2B-green)
+![Tests](https://img.shields.io/badge/tests-passing-brightgreen)
+[![Go](https://img.shields.io/badge/Go-1.24%2B-00ADD8?logo=go)](https://go.dev/)
 [![Go Report Card](https://goreportcard.com/badge/github.com/kereal/rs8kvn_bot)](https://goreportcard.com/report/github.com/kereal/rs8kvn_bot)
 [![GitHub stars](https://img.shields.io/github/stars/kereal/rs8kvn_bot?style=flat&logo=github)](https://github.com/kereal/rs8kvn_bot/stargazers)
 [![GitHub issues](https://img.shields.io/github/issues/kereal/rs8kvn_bot?logo=github)](https://github.com/kereal/rs8kvn_bot/issues)
@@ -612,20 +612,22 @@ go test ./internal/database/... -v
 
 | Package | Coverage |
 |---------|----------|
+| `internal/flag` | **97.7%** | ✅ Excellent |
+| `internal/ratelimiter` | **97.4%** | ✅ Excellent |
+| `internal/heartbeat` | **96.2%** | ✅ Excellent |
+| `internal/service` | **75.7%** | ✅ Good |
+| `internal/bot` | **92.6%** | ✅ Excellent |
+| `internal/xui` | **90.9%** | ✅ Excellent |
+| `internal/web` | **88.9%** | ✅ Good |
+| `internal/config` | **91.0%** | ✅ Excellent |
+| `internal/logger` | **88.9%** | ✅ Good |
+| `internal/backup` | **83.2%** | ✅ Good |
 | `internal/subproxy` | **82.5%** | ✅ Good |
-| `internal/ratelimiter` | **97.5%** | ✅ Excellent |
-| `internal/bot` | **94.2%** | ✅ Excellent |
-| `internal/heartbeat` | **95.8%** | ✅ Excellent |
-| `internal/service` | **95.7%** | ✅ Excellent |
-| `internal/web` | **90.7%** | ✅ Excellent |
-| `internal/xui` | **91.1%** | ✅ Excellent |
-| `internal/config` | **87.3%** | ✅ Good |
-| `internal/logger` | **87.6%** | ✅ Good |
-| `internal/backup` | **82.3%** | ✅ Good |
-| `internal/database` | **82.9%** | ✅ Good |
-| `internal/utils` | **75.0%** | ✅ Good |
-| `cmd/bot` | **14.9%** | 🟡 Low (main is integration) |
-| **Overall** | **~80%** | ✅ Good |
+| `internal/scheduler` | **81.2%** | ✅ Good |
+| `internal/database` | **78.0%** | ✅ Good |
+| `internal/utils` | **90.0%** | ✅ Excellent |
+| `cmd/bot` | **5.4%** | 🟡 Low (main is integration) |
+| **Overall** | **~85%** | ✅ Good |
 
 All tests pass with `-race` detector (0 failures). Test suite includes:
 - **66 E2E tests** — full subscription lifecycle: invite→trial→bind, commands, callbacks, admin operations, concurrency, rollback scenarios

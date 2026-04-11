@@ -58,7 +58,11 @@ func validatePath(path string) error {
 }
 
 // checkpointWAL opens the database in read-only mode, checkpoints WAL, and closes it.
-// This ensures the main database file contains all committed data before file copy.
+// checkpointWAL forces a WAL checkpoint (TRUNCATE) on the SQLite database at dbPath so the
+// main database file contains all committed data.
+// It opens the database in read-only mode and executes `PRAGMA wal_checkpoint(TRUNCATE)` with
+// a 5-second timeout; any error performing the checkpoint is returned. Closing the database is
+// logged on failure but does not change the returned error.
 func checkpointWAL(ctx context.Context, dbPath string) error {
 	// #nosec G304 -- dbPath is validated by the caller
 	dsn := fmt.Sprintf("file:%s?mode=ro", dbPath)
@@ -66,7 +70,11 @@ func checkpointWAL(ctx context.Context, dbPath string) error {
 	if err != nil {
 		return fmt.Errorf("failed to open database for checkpoint: %w", err)
 	}
-	defer db.Close()
+	defer func() {
+		if closeErr := db.Close(); closeErr != nil {
+			logger.Debug("Failed to close checkpoint database", zap.Error(closeErr))
+		}
+	}()
 
 	// WAL checkpoint: PASSIVE returns immediately, TRUNCATE tries to reset WAL file
 	// Using TRUNCATE to ensure all data is in the main database file

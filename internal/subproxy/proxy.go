@@ -6,6 +6,10 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"rs8kvn_bot/internal/logger"
+
+	"go.uber.org/zap"
 )
 
 var proxyHTTPClient = &http.Client{
@@ -23,6 +27,13 @@ type XUIResponse struct {
 	Headers map[string]string
 }
 
+// FetchFromXUI sends an HTTP GET to the provided URL and returns the response body and first-value headers.
+// 
+// FetchFromXUI sets the `User-Agent` to "v2rayN/6.31", executes the request via the package HTTP client,
+// and reads up to 10<<20 bytes from the response body. The returned XUIResponse contains the full read
+// payload and a map of response headers where each key maps to the first header value for that key.
+// 
+// It returns an error if request creation, execution, or reading the response body fails.
 func FetchFromXUI(url string) (*XUIResponse, error) {
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
@@ -35,7 +46,11 @@ func FetchFromXUI(url string) (*XUIResponse, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			logger.Debug("Failed to close response body", zap.Error(closeErr))
+		}
+	}()
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 10<<20))
 	if err != nil {
