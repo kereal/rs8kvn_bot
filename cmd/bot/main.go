@@ -19,8 +19,8 @@ import (
 	"rs8kvn_bot/internal/scheduler"
 	"rs8kvn_bot/internal/service"
 	"rs8kvn_bot/internal/subproxy"
-	"rs8kvn_bot/internal/webhook"
 	"rs8kvn_bot/internal/web"
+	"rs8kvn_bot/internal/webhook"
 	"rs8kvn_bot/internal/xui"
 
 	"github.com/getsentry/sentry-go"
@@ -72,12 +72,12 @@ func getVersion() string {
 	return "rs8kvn_bot@" + version
 }
 
- // The function performs best-effort initialization for optional components (Sentry,
- // database, 3x-ui client, Telegram bot) so the service can start even if some
- // dependencies are unavailable. It also starts background maintenance tasks
- // (backups, heartbeat, trial cleanup, subscription proxy reload), marks the web
- // server readiness, and coordinates orderly shutdown of update handlers and
- // background workers when a termination signal is received.
+// The function performs best-effort initialization for optional components (Sentry,
+// database, 3x-ui client, Telegram bot) so the service can start even if some
+// dependencies are unavailable. It also starts background maintenance tasks
+// (backups, heartbeat, trial cleanup, subscription proxy reload), marks the web
+// server readiness, and coordinates orderly shutdown of update handlers and
+// background workers when a termination signal is received.
 func main() {
 	// Load configuration first
 	cfg, err := config.Load()
@@ -172,7 +172,7 @@ func main() {
 				zap.Int("attempt", i+1),
 				zap.Int("max_attempts", startupLoginMaxAttempts),
 				zap.Error(err))
-			time.Sleep(startupLoginDelay + time.Duration(rand.Int63n(int64(startupLoginDelay/2))))
+			time.Sleep(startupLoginDelay + time.Duration(rand.Int63n(int64(startupLoginDelay/2)))) //nolint:gosec // G404: math/rand is sufficient for jitter, crypto/rand overhead unnecessary
 		}
 	}()
 

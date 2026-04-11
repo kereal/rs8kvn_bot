@@ -767,7 +767,7 @@ func RetryWithBackoff(ctx context.Context, maxRetries int, initialDelay time.Dur
 				zap.Error(err))
 
 			select {
-			case <-time.After(delay + time.Duration(rand.Int63n(int64(delay/2)))):
+			case <-time.After(delay + time.Duration(rand.Int63n(int64(delay/2)))): //nolint:gosec // G404: math/rand is sufficient for jitter, crypto/rand overhead unnecessary
 				delay *= 2
 			case <-ctx.Done():
 				return fmt.Errorf("context cancelled: %w", ctx.Err())

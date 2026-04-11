@@ -224,7 +224,7 @@ func (s *SubscriptionService) GetWithTraffic(ctx context.Context, telegramID int
 	// Get traffic from XUI
 	traffic, err := s.xui.GetClientTraffic(ctx, sub.Username)
 	if err != nil {
-		_ = err
+		//nolint:nilerr // Intentionally return zero traffic when XUI fails - better UX than error
 		// Return subscription with zero traffic instead of failing
 		return sub, &TrafficInfo{
 			UsedGB:  0,

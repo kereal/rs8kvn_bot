@@ -138,7 +138,11 @@ func (s *Sender) send(event Event) error {
 			zap.Error(err))
 		return fmt.Errorf("send request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			logger.Debug("Failed to close response body", zap.Error(closeErr))
+		}
+	}()
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		logger.Info("Webhook delivered successfully",
