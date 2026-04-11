@@ -8,9 +8,12 @@ import (
 	"rs8kvn_bot/internal/config"
 	"rs8kvn_bot/internal/database"
 	"rs8kvn_bot/internal/interfaces"
+	"rs8kvn_bot/internal/logger"
 	"rs8kvn_bot/internal/utils"
 	"rs8kvn_bot/internal/webhook"
 	"rs8kvn_bot/internal/xui"
+
+	"go.uber.org/zap"
 )
 
 // WebhookSender interface for sending webhook events (mockable for tests).
@@ -89,7 +92,7 @@ func (s *SubscriptionService) Create(ctx context.Context, chatID int64, username
 		return nil, fmt.Errorf("create subscription: %w", err)
 	}
 
-		// Send webhook notification (async)
+	// Send webhook notification (async)
 	if s.webhook != nil {
 		eventID, _ := utils.GenerateUUID()
 		s.webhook.SendAsync(Event{
@@ -123,6 +126,10 @@ func (s *SubscriptionService) Delete(ctx context.Context, telegramID int64) erro
 	username := sub.Username
 	subscriptionID := sub.SubscriptionID
 
+	if inboundID == 0 {
+		inboundID = s.cfg.XUIInboundID
+	}
+
 	// Delete from database first — if this fails, the XUI client remains
 	// intact and the operation can be retried. Reversing the order (XUI
 	// first) would leave an orphaned DB record with no XUI client on failure.
@@ -133,11 +140,11 @@ func (s *SubscriptionService) Delete(ctx context.Context, telegramID int64) erro
 	// Best-effort XUI cleanup: log but don't fail if XUI delete errors.
 	// The DB record is already gone; an orphaned XUI client is less critical
 	// than an orphaned DB record and can be cleaned up manually.
-	if err := s.xui.DeleteClient(ctx, s.cfg.XUIInboundID, clientID); err != nil {
-		// Log the error but don't fail — the DB deletion succeeded and
-		// the user's subscription is removed from our system.
-		// The orphaned XUI client can be cleaned up via admin tools.
-		_ = inboundID // captured for potential future cleanup job
+	if err := s.xui.DeleteClient(ctx, inboundID, clientID); err != nil {
+		logger.Error("Failed to delete XUI client (orphaned client may remain)",
+			zap.Int("inboundID", inboundID),
+			zap.String("clientID", clientID),
+			zap.Error(err))
 	}
 
 	// Send webhook notification (async)
