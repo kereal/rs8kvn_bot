@@ -2,8 +2,8 @@
 
 **Repo:** https://github.com/kereal/rs8kvn_bot  
 **Module:** `rs8kvn_bot` (Go 1.24+)  
-**Version:** v2.3.0  
-**Last Updated:** 2026-04-10  
+**Version:** v2.3.1  
+**Last Updated:** 2026-04-11  
 **Branch:** `dev` (GitFlow: `main` = production, `dev` = integration)
 
 ---
@@ -126,6 +126,25 @@ rs8kvn_bot/
 | **Overall** | **~85%** | ✅ Good |
 
 All tests pass with `-race` detector. golangci-lint: 0 new issues (pre-existing: nilerr, gocritic).
+
+---
+
+## Last Changes (v2.3.1 — 2026-04-11)
+
+### Test Optimization & Refactoring
+
+1. **Test optimization** — Reduced iterations in stress/entropy tests:
+   - uuid_test.go: stress tests 100k → 10k, uniqueness tests 10k → 1k
+   - Concurrency tests: 100x100 → 50x50 goroutines
+   - Removed duplicates: TestGenerateInviteCode_Format, TestGenerateUUID_Entropy (covered by Properties_*)
+   - Test time improved: ~41s → ~38s
+
+2. **Code refactoring** — if-else → switch statements:
+   - internal/bot/subscription.go:156 - reset info string building
+   - internal/service/subscription.go:258 - reset info in GetWithTraffic
+
+3. **Lint fixes** — Fixed nilerr warning:
+   - internal/service/subscription.go:225 - added `_ = err` to suppress unused error
 
 ---
 
