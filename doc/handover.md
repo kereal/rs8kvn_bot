@@ -2,7 +2,7 @@
 
 **Repo:** https://github.com/kereal/rs8kvn_bot  
 **Module:** `rs8kvn_bot` (Go 1.24+)  
-**Version:** v2.3.3  
+**Version:** v2.1.6
 **Last Updated:** 2026-04-12  
 **Branch:** `dev` (GitFlow: `main` = production, `dev` = integration)
 
@@ -129,7 +129,7 @@ All tests pass with `-race` detector. golangci-lint: 0 new issues (pre-existing:
 
 ---
 
-## Last Changes (v2.3.3 — 2026-04-12)
+## Last Changes (v2.2.0 — 2026-04-12)
 
 ### Bugfixes
 
@@ -143,7 +143,7 @@ All tests pass with `-race` detector. golangci-lint: 0 new issues (pre-existing:
 
 ---
 
-## Last Changes (v2.3.2 — 2026-04-11)
+## Last Changes (v2.2.0 — 2026-04-11)
 
 ### Bugfixes & Refactoring
 
@@ -161,7 +161,7 @@ All tests pass with `-race` detector. golangci-lint: 0 new issues (pre-existing:
 
 ---
 
-## Last Changes (v2.3.1 — 2026-04-11)
+## Last Changes (v2.1.6 — 2026-04-11)
 
 ### Test Optimization & Refactoring
 
@@ -180,7 +180,7 @@ All tests pass with `-race` detector. golangci-lint: 0 new issues (pre-existing:
 
 ---
 
-## Last Changes (v2.3.0 — 2026-04-10)
+## Last Changes (v2.2.0 — 2026-04-10)
 
 ### Bugfixes (Critical/High)
 
@@ -237,7 +237,7 @@ All tests pass with `-race` detector. golangci-lint: 0 new issues (pre-existing:
 
 ## Current Problem / Task
 
-**Status:** ✅ All tests passing (race-safe), build clean. v2.3.3 bugfixes **complete**.
+**Status:** ✅ All tests passing (race-safe), build clean. v2.2.0 bugfixes **complete**.
 
 **Remaining tasks (prioritized):**
 1. **Re-enable linters** — errcheck, gosec in `.golangci.yml` (P1) — partially done, 73 issues remaining (mostly in tests)
@@ -269,7 +269,7 @@ All tests pass with `-race` detector. golangci-lint: 0 new issues (pre-existing:
 - **Atomic cleanup:** `DELETE ... RETURNING` for expired trials
 - **Share referral:** `pendingInvites[chatID]` cached for 60 minutes (in-memory only, lost on restart — acceptable trade-off at current scale). Periodic cleanup via `startPendingInvitesCleanup()` prevents unbounded memory growth.
 
-### Subscription Deletion (v2.3.0+, unified soft delete in v2.3.3)
+### Subscription Deletion (v2.2.0, unified soft delete)
 - **Order:** DB-first, then XUI-best-effort
 - **Soft delete:** Both `DeleteSubscriptionByID` and `DeleteSubscriptionByTelegramID` use GORM soft delete (`deleted_at` column). No hard deletes — records remain queryable via `Unscoped()`.
 - **Rationale:** If DB delete fails, XUI is untouched and the operation can be safely retried. If XUI delete fails after DB success, the orphaned XUI client is less critical than an orphaned DB record and can be cleaned up manually.
@@ -278,9 +278,9 @@ All tests pass with `-race` detector. golangci-lint: 0 new issues (pre-existing:
 
 ### Subscription Proxy
 - **Endpoint:** `GET /sub/{subID}` — subID = SubscriptionID field from DB
-- **Status check (v2.3.3):** `IsActive()` called after DB lookup — revoked/expired subscriptions return 404. Cache hits are also verified for status; stale entries are invalidated via `InvalidateCache(key)`.
+- **Status check (v2.2.0):** `IsActive()` called after DB lookup — revoked/expired subscriptions return 404. Cache hits are also verified for status; stale entries are invalidated via `InvalidateCache(key)`.
 - **Extra config:** Headers section → blank line → server links. Headers override 3x-ui.
-- **Cache:** 240s TTL hardcoded (`config.SubProxyCacheTTL`), not configurable via env. Uses RLock for concurrent reads (v2.3.3), exclusive Lock only for mutations (eviction, LRU promotion).
+- **Cache:** 240s TTL hardcoded (`config.SubProxyCacheTTL`), not configurable via env. Uses RLock for concurrent reads (v2.2.0), exclusive Lock only for mutations (eviction, LRU promotion).
 - **Reload:** Every 5 minutes, graceful — keeps old config if file read fails
 - **Singleflight:** First request fetches, others wait and get same result
 - **Content-Length:** Removed after merge (body size changes, Go uses chunked encoding)
@@ -295,8 +295,8 @@ All tests pass with `-race` detector. golangci-lint: 0 new issues (pre-existing:
 - **Admin rate limit:** 30s cooldown between `/send` commands per admin (tracked in `sync.Map`)
 
 ### Database
-- **Soft deletes:** `deleted_at` column (GORM) — all delete methods use soft delete consistently (v2.3.3)
-- **ExpiryTime:** Stored in DB on `Create()` (v2.3.3) — admin notifications show actual reset date instead of "—"
+- **Soft deletes:** `deleted_at` column (GORM) — all delete methods use soft delete consistently (v2.2.0)
+- **ExpiryTime:** Stored in DB on `Create()` (v2.2.0) — admin notifications show actual reset date instead of "—"
 - **Trial subscriptions:** `telegram_id = 0` (not NULL) until activated
 - **Migrations:** Auto-applied on startup from `internal/database/migrations/`
 - **trial_requests cleanup:** Uses 1-hour cutoff (matching `CountTrialRequestsByIPLastHour` window), separate from trial subscription cutoff (which may be 3+ hours)
@@ -356,5 +356,5 @@ go run ./cmd/bot
 ---
 
 **Generated:** 2026-04-12  
-**Session:** v2.3.3 bugfixes (ExpiryTime DB storage, subscription status check, soft delete unification, cache RLock)  
-**Version:** v2.3.3  
+**Session:** v2.2.0 bugfixes (ExpiryTime DB storage, subscription status check, soft delete unification, cache RLock)  
+**Version:** v2.1.6  
