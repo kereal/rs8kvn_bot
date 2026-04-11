@@ -2,8 +2,8 @@
 
 **Repo:** https://github.com/kereal/rs8kvn_bot  
 **Module:** `rs8kvn_bot` (Go 1.24+)  
-**Version:** v2.3.1  
-**Last Updated:** 2026-04-11  
+**Version:** v2.2.0-dev
+**Last Updated:** 2026-04-12  
 **Branch:** `dev` (GitFlow: `main` = production, `dev` = integration)
 
 ---
@@ -50,7 +50,7 @@ rs8kvn_bot/
 │   ├── ratelimiter/              # Token bucket + PerUserRateLimiter
 │   ├── heartbeat/                # Periodic health pings
 │   ├── backup/                   # Daily SQLite backup rotation (14 days)
-│   └── health/                   # Health checker (legacy, unused)
+│   ├── webhook/                  # Proxy Manager webhook sender with retry
 ├── tests/e2e/                    # E2E test suite (66+ scenarios)
 ├── data/                         # Runtime: tgvpn.db, backups, bot.log, extra_servers.txt
 ├── doc/                          # handover.md, ideas.md, feature specs
@@ -62,7 +62,7 @@ rs8kvn_bot/
 
 | Component | Library/DB | Version |
 |-----------|------------|---------|
-| Go | `go` | 1.24+ |
+| Go | `go` | 1.25+ |
 | Telegram API | `go-telegram-bot-api/telegram-bot-api/v5` | v5.5.1 |
 | ORM | `gorm.io/gorm` + `gorm.io/driver/sqlite` | v1.31.1 |
 | DB engine | SQLite (mattn/go-sqlite3, CGO) | `./data/tgvpn.db` |
@@ -129,7 +129,35 @@ All tests pass with `-race` detector. golangci-lint: 0 new issues (pre-existing:
 
 ---
 
-## Last Changes (v2.3.2 — 2026-04-11)
+## Last Changes (v2.2.0 — 2026-04-12)
+
+### Bugfixes (Merged from pending PRs)
+
+1. **ExpiryTime not stored in DB** (P0) — `service.Create()` was sending the real `expiryTime` to 3x-ui but storing `time.Time{}` (zero) in the database, causing admin notifications to show "—" instead of the actual reset date. Fixed by storing the actual `expiryTime` value.
+
+2. **`/sub/{subID}` serves revoked subscriptions** (P1) — The subscription proxy endpoint returned content for revoked/expired subscriptions without checking status. Added `IsActive()` check after DB lookup. Cache hits also verified for status with `InvalidateCache(key)`.
+
+3. **Soft delete inconsistency** (P2) — `DeleteSubscriptionByID` used `Unscoped().Delete()` (hard delete) while `DeleteSubscription` used GORM soft delete. Removed `Unscoped()` — both methods now use soft delete consistently.
+
+4. **Cache uses exclusive Lock for reads** (P3) — `SubscriptionCache.Get()` used `c.mu.Lock()` (exclusive write lock) serializing all concurrent reads. Changed to RLock → Lock upgrade pattern. Fast path: `RLock` for concurrent reads. Slow path: upgrade to `Lock` only for mutations (eviction, LRU MoveToBack).
+
+### Project Cleanup
+
+5. **Removed AI agent directories from git** — Removed 33 tracked files from `.agents/`, `.kilo/`, `.octocode/`, `.qwen/`, `.serena/`. Added these directories to `.gitignore`.
+
+6. **Updated .gitignore** — Added `coverage.out`, `coverage.html`, `tmp/`, `temp/`, `.env.*`, `.DS_Store`, `Thumbs.db`, and AI agent tool directories.
+
+7. **Fixed Dockerfile** — Removed outdated "Go 1.25 is a future/unreleased version" comment. Updated Alpine to 3.21.
+
+8. **Fixed CI Go version** — Aligned `update-stats.yml` Go version from 1.24 to 1.25 (matching `docker.yml`).
+
+9. **Fixed docker-compose GOGC** — Aligned GOGC value from 50 to 40 (matching Dockerfile).
+
+10. **Version correction** — Fixed version numbers throughout documentation. The last git tag is v2.1.6; the next release is v2.2.0.
+
+---
+
+## Previous Changes (v2.3.2 — 2026-04-11)
 
 ### Bugfixes & Refactoring
 
@@ -223,16 +251,20 @@ All tests pass with `-race` detector. golangci-lint: 0 new issues (pre-existing:
 
 ## Current Problem / Task
 
-**Status:** ✅ All tests passing (race-safe), build clean. v2.3.2 bugfixes **complete**.
+**Status:** ✅ All tests passing (race-safe), build clean. v2.2.0 release prep **complete**.
+
+**Completed in v2.2.0:**
+1. ✅ **ExpiryTime stored in DB** — `service.Create()` now saves the actual ExpiryTime (was storing zero value)
+2. ✅ **`/sub/{subID}` status check** — Revoked/expired subscriptions are no longer served
+3. ✅ **Soft delete unified** — `DeleteSubscriptionByID` now uses soft delete consistently
+4. ✅ **Cache RLock** — `SubscriptionCache.Get()` uses RLock for concurrent reads
 
 **Remaining tasks (prioritized):**
-1. **Re-enable linters** — errcheck, gosec in `.golangci.yml` (P1) — partially done, 73 issues remaining (mostly in tests)
-2. **Multi-arch Docker** — linux/amd64 + linux/arm64 (P2)
-3. **Docker image on push to main** — CI build `main`/`dev` tag (P2)
-4. **Traffic alerts** — 80%/95% usage notifications (P3)
-5. **Multi-admin** — list of admin IDs instead of single (P3)
-6. **ExpiryTime not stored in DB** — `service.Create()` sends expiry to XUI but stores `time.Time{}` in DB, causing inaccurate reset display and admin notifications (P1)
-7. **`/sub/{subID}` serves revoked subscriptions** — no status check in subscription proxy handler (P1)
+1. **Multi-arch Docker** — linux/amd64 + linux/arm64 (P2)
+2. **Docker image on push to main** — CI build `main`/`dev` tag (P2)
+3. **Traffic alerts** — 80%/95% usage notifications (P3)
+4. **Multi-admin** — list of admin IDs instead of single (P3)
+5. **Re-enable linters** — errcheck, gosec in `.golangci.yml` (P1) — partially done, 73 issues remaining (mostly in tests)
 
 ---
 
@@ -340,6 +372,6 @@ go run ./cmd/bot
 
 ---
 
-**Generated:** 2026-04-11  
-**Session:** v2.3.2 bugfixes (escapeMarkdown, broadcast timeout, invite error, pendingInvites leak, GetWithTraffic dedup, trial_requests cutoff)  
-**Version:** v2.3.2  
+**Generated:** 2026-04-12  
+**Session:** v2.2.0 release prep (merge 4 pending PRs, cleanup .gitignore, remove agent dirs, fix Dockerfile/CI, version correction)  
+**Version:** v2.2.0-dev
