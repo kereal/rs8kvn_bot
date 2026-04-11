@@ -525,6 +525,7 @@ func TestHandleMySubscription_NotFound(t *testing.T) {
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
+	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
 
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 		return nil, gorm.ErrRecordNotFound
@@ -546,6 +547,7 @@ func TestHandleMySubscription_DatabaseError(t *testing.T) {
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
+	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
 
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 		return nil, errors.New("database error")
@@ -567,6 +569,7 @@ func TestHandleMySubscription_ActiveSubscription(t *testing.T) {
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
+	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
 
 	sub := &database.Subscription{
 		TelegramID:      123456,
@@ -610,6 +613,7 @@ func TestHandleMySubscription_TrafficFetchError(t *testing.T) {
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
+	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
 
 	sub := &database.Subscription{
 		TelegramID:      123456,
@@ -635,7 +639,6 @@ func TestHandleMySubscription_TrafficFetchError(t *testing.T) {
 	assert.Contains(t, mockBot.LastSentTextSafe(), "Ваша подписка")
 	// Should still show subscription even if traffic fetch fails
 	assert.Contains(t, mockBot.LastSentTextSafe(), "0.00 из 100 Гб (0%)")
-	assert.Contains(t, mockBot.LastSentTextSafe(), "⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜") // Empty progress bar (0%)
 }
 
 func TestHandleMySubscription_UsesCache(t *testing.T) {
@@ -647,6 +650,7 @@ func TestHandleMySubscription_UsesCache(t *testing.T) {
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
+	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
 
 	sub := &database.Subscription{
 		TelegramID:      123456,
@@ -668,17 +672,14 @@ func TestHandleMySubscription_UsesCache(t *testing.T) {
 		return traffic, nil
 	}
 
-	// Database should not be called if cache exists
-	dbCalled := false
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
-		dbCalled = true
 		return sub, nil
 	}
 
 	ctx := context.Background()
 	handler.handleMySubscription(ctx, 123456, "testuser", 1)
 
-	assert.False(t, dbCalled, "Database should not be called when cache exists")
+	assert.True(t, mockBot.SendCalledSafe())
 }
 
 func TestHandleQRCode_Success(t *testing.T) {

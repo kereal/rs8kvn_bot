@@ -163,6 +163,9 @@ func TestHandleCallback_CallbackDataRouting(t *testing.T) {
 					return &xui.ClientTraffic{Up: 1000, Down: 2000}, nil
 				}
 			},
+			setupSubService: func(mockDB *testutil.MockDatabaseService, mockXUI *testutil.MockXUIClient, cfg *config.Config) *service.SubscriptionService {
+				return service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+			},
 			wantSend: true,
 			wantText: "Ваша подписка",
 		},
@@ -419,6 +422,7 @@ func TestHandleCallback_MenuSubscription_NoSubscription(t *testing.T) {
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
+	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
 
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 		return nil, gorm.ErrRecordNotFound
