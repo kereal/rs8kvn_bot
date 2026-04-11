@@ -1,8 +1,8 @@
 # Дорожная карта — rs8kvn_bot
 
 **Создано:** 2026-04-02  
-**Обновлено:** 2026-04-11  
-**Версия:** v2.3.0  
+**Обновлено:** 2026-04-12  
+**Версия:** v2.1.6  
 **Масштаб:** 10 клиентов → 100 клиентов
 
 ---
@@ -15,7 +15,7 @@
 - **Приоритет:** Монетизация и рост
 - **Оптимизация памяти:** O(1) LRU cache ✅
 
-## Рефакторинг v2.2.0 → v2.3.0 (2026-04-10) ✅ ВСЕ ВЫПОЛНЕНО
+## Рефакторинг v2.2.0 (2026-04-10) ✅ ВСЕ ВЫПОЛНЕНО
 
 ### Фаза 1: Багфиксы ✅
 
@@ -105,7 +105,7 @@
 
 ---
 
-## v2.3.2 Bugfixes (2026-04-11) ✅ ВСЕ ВЫПОЛНЕНО
+## v2.2.0 Bugfixes (2026-04-11) ✅ ВСЕ ВЫПОЛНЕНО
 
 1. ✅ **escapeMarkdown missing backslash** — `\` добавлен первым в список экранирования MarkdownV2
 2. ✅ **HandleBroadcast 30s timeout** — заменён на 5 минут
@@ -116,11 +116,20 @@
 
 ---
 
+## v2.2.0 Bugfixes (2026-04-12) ✅ ВСЕ ВЫПОЛНЕНО
+
+1. ✅ **Fix #1+#2 (P0+P1): ExpiryTime not stored in DB** — `service.Create()` now stores `ExpiryTime: expiryTime` instead of `time.Time{}`. Admin notifications show actual reset date. `GetWithTraffic` fallback preserved for backward compatibility.
+2. ✅ **Fix #3 (P1): `/sub/{subID}` serves revoked subscriptions** — Added `IsActive()` check in `handleSubscription` after DB lookup. Cache hit status verification with `InvalidateCache(key)`. 4 new tests.
+3. ✅ **Fix #4 (P2): Hard vs soft delete inconsistency** — Removed `Unscoped()` from `DeleteSubscriptionByID`. Both delete methods now use GORM soft delete consistently.
+4. ✅ **Fix #6 (P3): `SubscriptionCache.Get` uses exclusive Lock** — Changed to RLock → Lock upgrade pattern. Fast path: RLock for concurrent reads. Slow path: Lock only for mutations.
+
+---
+
 ## Технический долг (оставшийся)
 
 1. ~~Pending invite codes — in-memory only, lost on restart~~ → теперь есть периодическая очистка
-2. ExpiryTime не сохраняется в БД при Create() — админ видит "—" вместо даты сброса
-3. `/sub/{subID}` не проверяет статус подписки — отдаёт контент даже для отозванных
+2. ~~ExpiryTime не сохраняется в БД при Create()~~ → исправлено в v2.2.0
+3. ~~`/sub/{subID}` не проверяет статус подписки~~ → исправлено в v2.2.0
 4. Circuit breaker cumulative failures → sliding window
 5. Вынести тексты сообщений — централизованный конфиг
 6. Типизированные ошибки — заменить сравнение строк
@@ -128,5 +137,5 @@
 
 ---
 
-**Последнее обновление:** 2026-04-10  
+**Последнее обновление:** 2026-04-12  
 **Следующий пересмотр:** Ежемесячно (первый понедельник)
