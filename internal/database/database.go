@@ -151,9 +151,15 @@ func runMigrations(sqlDB *sql.DB) error {
 	// Check if referral columns already exist
 	var hasInviteCode, hasIsTrial, hasReferredBy int
 	if tableExists > 0 {
-		sqlDB.QueryRow("SELECT COUNT(*) FROM pragma_table_info('subscriptions') WHERE name = 'invite_code'").Scan(&hasInviteCode)
-		sqlDB.QueryRow("SELECT COUNT(*) FROM pragma_table_info('subscriptions') WHERE name = 'is_trial'").Scan(&hasIsTrial)
-		sqlDB.QueryRow("SELECT COUNT(*) FROM pragma_table_info('subscriptions') WHERE name = 'referred_by'").Scan(&hasReferredBy)
+		if err := sqlDB.QueryRow("SELECT COUNT(*) FROM pragma_table_info('subscriptions') WHERE name = 'invite_code'").Scan(&hasInviteCode); err != nil {
+			logger.Warn("Failed to check invite_code column", zap.Error(err))
+		}
+		if err := sqlDB.QueryRow("SELECT COUNT(*) FROM pragma_table_info('subscriptions') WHERE name = 'is_trial'").Scan(&hasIsTrial); err != nil {
+			logger.Warn("Failed to check is_trial column", zap.Error(err))
+		}
+		if err := sqlDB.QueryRow("SELECT COUNT(*) FROM pragma_table_info('subscriptions') WHERE name = 'referred_by'").Scan(&hasReferredBy); err != nil {
+			logger.Warn("Failed to check referred_by column", zap.Error(err))
+		}
 	}
 
 	// If referral columns exist, we need to skip migration 003

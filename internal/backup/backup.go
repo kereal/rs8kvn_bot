@@ -66,7 +66,11 @@ func checkpointWAL(ctx context.Context, dbPath string) error {
 	if err != nil {
 		return fmt.Errorf("failed to open database for checkpoint: %w", err)
 	}
-	defer db.Close()
+	defer func() {
+		if closeErr := db.Close(); closeErr != nil {
+			logger.Debug("Failed to close checkpoint database", zap.Error(closeErr))
+		}
+	}()
 
 	// WAL checkpoint: PASSIVE returns immediately, TRUNCATE tries to reset WAL file
 	// Using TRUNCATE to ensure all data is in the main database file

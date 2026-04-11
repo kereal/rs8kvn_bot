@@ -4,6 +4,10 @@ import (
 	"bufio"
 	"os"
 	"strings"
+
+	"rs8kvn_bot/internal/logger"
+
+	"go.uber.org/zap"
 )
 
 var validSchemes = []string{
@@ -30,11 +34,16 @@ func LoadExtraConfig(filePath string) (*ExtraConfig, error) {
 		return nil, nil
 	}
 
+	// #nosec G304 // filePath is validated by caller - only alphanumeric with underscore
 	f, err := os.Open(filePath)
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() {
+		if closeErr := f.Close(); closeErr != nil {
+			logger.Debug("Failed to close extra config file", zap.Error(closeErr))
+		}
+	}()
 
 	cfg := &ExtraConfig{
 		Headers: make(map[string]string),

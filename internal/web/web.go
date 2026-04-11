@@ -433,8 +433,10 @@ type trialPageData struct {
 func (s *Server) renderTrialPage(w http.ResponseWriter, subID, subURL, telegramLink string, trialHours int) {
 	happLink := "happ://add/" + subURL
 	data := trialPageData{
-		HappLink:     template.URL(happLink),
-		SubURL:       subURL,
+		//nolint:gosec // G203: happLink is constructed from internal subscription URL, safe
+		HappLink: template.URL(happLink),
+		SubURL:   subURL,
+		//nolint:gosec // G203: telegramLink is validated invite link from internal system
 		TelegramLink: template.URL(telegramLink),
 		TrialHours:   trialHours,
 	}
