@@ -1265,6 +1265,8 @@ func TestServer_Start_PortInUse(t *testing.T) {
 	err = srv.Start(ctx)
 	require.Error(t, err, "Start() should return error when port is already in use")
 	assert.Contains(t, err.Error(), "failed to bind", "Error message should mention binding failure")
+
+	listener.Close()
 }
 
 func TestGetClientIP_IPv6(t *testing.T) {
