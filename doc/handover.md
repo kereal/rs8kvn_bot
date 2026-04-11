@@ -2,8 +2,8 @@
 
 **Repo:** https://github.com/kereal/rs8kvn_bot  
 **Module:** `rs8kvn_bot` (Go 1.24+)  
-**Version:** v2.3.1  
-**Last Updated:** 2026-04-11  
+**Version:** v2.3.3  
+**Last Updated:** 2026-04-12  
 **Branch:** `dev` (GitFlow: `main` = production, `dev` = integration)
 
 ---
@@ -129,6 +129,20 @@ All tests pass with `-race` detector. golangci-lint: 0 new issues (pre-existing:
 
 ---
 
+## Last Changes (v2.3.3 — 2026-04-12)
+
+### Bugfixes
+
+1. **Fix #1+#2 (P0+P1): ExpiryTime not stored in DB** (`fix/expiry-time-db`, `72f5d02`) — `service.Create()` sent `ExpiryTime: time.Time{}` to DB instead of the actual `expiryTime`. This caused admin notifications to show "—" instead of the real reset date, and inaccurate subscription display. Changed to `ExpiryTime: expiryTime`. Preserved `GetWithTraffic` fallback for backward compatibility with existing rows.
+
+2. **Fix #3 (P1): `/sub/{subID}` serves revoked subscriptions** (`fix/sub-status-check`, `e538906`) — The subscription proxy handler returned content for revoked/expired subscriptions without checking status. Added `IsActive()` check in `handleSubscription` after DB lookup. Added cache hit status verification with cache invalidation. Added `InvalidateCache(key)` method to subproxy Service. 4 new tests covering revoked, expired, revoked+cache, and expired-by-time+cache scenarios.
+
+3. **Fix #4 (P2): Hard vs soft delete inconsistency** (`fix/soft-delete-unify`, `27052ab`) — `DeleteSubscriptionByID` used `Unscoped()` (hard delete) while `DeleteSubscriptionByTelegramID` used soft delete. Removed `Unscoped()` so both methods now use GORM soft delete consistently. Updated test to verify soft delete behavior (`deleted_at` is set, record still queryable via `Unscoped`).
+
+4. **Fix #6 (P3): `SubscriptionCache.Get` uses exclusive Lock** (`fix/cache-rlock`, `e133eac`) — `Get()` used `c.mu.Lock()` (exclusive/writer lock) for all operations, blocking concurrent reads. Changed to RLock → Lock upgrade pattern: fast path uses `c.mu.RLock()` for concurrent reads; slow path upgrades to `c.mu.Lock()` only for mutations (eviction, LRU promotion). Re-check after lock upgrade ensures correctness.
+
+---
+
 ## Last Changes (v2.3.2 — 2026-04-11)
 
 ### Bugfixes & Refactoring
@@ -223,7 +237,7 @@ All tests pass with `-race` detector. golangci-lint: 0 new issues (pre-existing:
 
 ## Current Problem / Task
 
-**Status:** ✅ All tests passing (race-safe), build clean. v2.3.2 bugfixes **complete**.
+**Status:** ✅ All tests passing (race-safe), build clean. v2.3.3 bugfixes **complete**.
 
 **Remaining tasks (prioritized):**
 1. **Re-enable linters** — errcheck, gosec in `.golangci.yml` (P1) — partially done, 73 issues remaining (mostly in tests)
@@ -231,8 +245,6 @@ All tests pass with `-race` detector. golangci-lint: 0 new issues (pre-existing:
 3. **Docker image on push to main** — CI build `main`/`dev` tag (P2)
 4. **Traffic alerts** — 80%/95% usage notifications (P3)
 5. **Multi-admin** — list of admin IDs instead of single (P3)
-6. **ExpiryTime not stored in DB** — `service.Create()` sends expiry to XUI but stores `time.Time{}` in DB, causing inaccurate reset display and admin notifications (P1)
-7. **`/sub/{subID}` serves revoked subscriptions** — no status check in subscription proxy handler (P1)
 
 ---
 
@@ -257,16 +269,18 @@ All tests pass with `-race` detector. golangci-lint: 0 new issues (pre-existing:
 - **Atomic cleanup:** `DELETE ... RETURNING` for expired trials
 - **Share referral:** `pendingInvites[chatID]` cached for 60 minutes (in-memory only, lost on restart — acceptable trade-off at current scale). Periodic cleanup via `startPendingInvitesCleanup()` prevents unbounded memory growth.
 
-### Subscription Deletion (v2.3.0+)
+### Subscription Deletion (v2.3.0+, unified soft delete in v2.3.3)
 - **Order:** DB-first, then XUI-best-effort
+- **Soft delete:** Both `DeleteSubscriptionByID` and `DeleteSubscriptionByTelegramID` use GORM soft delete (`deleted_at` column). No hard deletes — records remain queryable via `Unscoped()`.
 - **Rationale:** If DB delete fails, XUI is untouched and the operation can be safely retried. If XUI delete fails after DB success, the orphaned XUI client is less critical than an orphaned DB record and can be cleaned up manually.
 - **Webhook:** Sent on successful DB deletion regardless of XUI outcome.
 - **Referral cache:** `DecrementReferralCount` called after successful deletion.
 
 ### Subscription Proxy
 - **Endpoint:** `GET /sub/{subID}` — subID = SubscriptionID field from DB
+- **Status check (v2.3.3):** `IsActive()` called after DB lookup — revoked/expired subscriptions return 404. Cache hits are also verified for status; stale entries are invalidated via `InvalidateCache(key)`.
 - **Extra config:** Headers section → blank line → server links. Headers override 3x-ui.
-- **Cache:** 240s TTL hardcoded (`config.SubProxyCacheTTL`), not configurable via env
+- **Cache:** 240s TTL hardcoded (`config.SubProxyCacheTTL`), not configurable via env. Uses RLock for concurrent reads (v2.3.3), exclusive Lock only for mutations (eviction, LRU promotion).
 - **Reload:** Every 5 minutes, graceful — keeps old config if file read fails
 - **Singleflight:** First request fetches, others wait and get same result
 - **Content-Length:** Removed after merge (body size changes, Go uses chunked encoding)
@@ -281,7 +295,8 @@ All tests pass with `-race` detector. golangci-lint: 0 new issues (pre-existing:
 - **Admin rate limit:** 30s cooldown between `/send` commands per admin (tracked in `sync.Map`)
 
 ### Database
-- **Soft deletes:** `deleted_at` column (GORM)
+- **Soft deletes:** `deleted_at` column (GORM) — all delete methods use soft delete consistently (v2.3.3)
+- **ExpiryTime:** Stored in DB on `Create()` (v2.3.3) — admin notifications show actual reset date instead of "—"
 - **Trial subscriptions:** `telegram_id = 0` (not NULL) until activated
 - **Migrations:** Auto-applied on startup from `internal/database/migrations/`
 - **trial_requests cleanup:** Uses 1-hour cutoff (matching `CountTrialRequestsByIPLastHour` window), separate from trial subscription cutoff (which may be 3+ hours)
@@ -340,6 +355,6 @@ go run ./cmd/bot
 
 ---
 
-**Generated:** 2026-04-11  
-**Session:** v2.3.2 bugfixes (escapeMarkdown, broadcast timeout, invite error, pendingInvites leak, GetWithTraffic dedup, trial_requests cutoff)  
-**Version:** v2.3.2  
+**Generated:** 2026-04-12  
+**Session:** v2.3.3 bugfixes (ExpiryTime DB storage, subscription status check, soft delete unification, cache RLock)  
+**Version:** v2.3.3  
