@@ -413,7 +413,7 @@ func (s *Service) GetTelegramIDByUsername(ctx context.Context, username string) 
 	return sub.TelegramID, nil
 }
 
-// DeleteSubscriptionByID hard-deletes a subscription by its database ID.
+// DeleteSubscriptionByID soft-deletes a subscription by its database ID.
 func (s *Service) DeleteSubscriptionByID(ctx context.Context, id uint) (*Subscription, error) {
 	var sub Subscription
 	result := s.db.WithContext(ctx).First(&sub, id)
@@ -421,7 +421,7 @@ func (s *Service) DeleteSubscriptionByID(ctx context.Context, id uint) (*Subscri
 		return nil, fmt.Errorf("failed to find subscription: %w", result.Error)
 	}
 
-	result = s.db.WithContext(ctx).Unscoped().Delete(&sub)
+	result = s.db.WithContext(ctx).Delete(&sub)
 	if result.Error != nil {
 		return nil, fmt.Errorf("failed to delete subscription: %w", result.Error)
 	}
