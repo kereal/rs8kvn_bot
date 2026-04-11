@@ -5,7 +5,7 @@ This is a Telegram bot for distributing VLESS+Reality+Vision proxy subscriptions
 
 ## Features
 - Get subscription on demand
-- View current subscription status  
+- View current subscription status (via service layer, single source of truth)
 - QR code for easy subscription import
 - Invite/trial landing page with one-click setup
 - Referral system with in-memory cache + periodic sync
@@ -25,6 +25,9 @@ This is a Telegram bot for distributing VLESS+Reality+Vision proxy subscriptions
 - Friendly and inviting donation message tone
 - **O(1) LRU subscription cache** (container/list)
 - **Merged referral cache** (counts + dirty in one map)
+- **pendingInvites periodic cleanup** — prevents memory leak from expired share-link entries
+- **MarkdownV2 proper escaping** — backslash-first escaping prevents double-escape and broken formatting
+- **Broadcast 5min timeout** — handles thousands of users without early termination
 
 ## Tech Stack
 - **Language**: Go 1.25.0
