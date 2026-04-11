@@ -24,7 +24,7 @@ services:
             # GOMEMLIMIT: 64MB soft limit (67108864 bytes)
             # GOGC: More aggressive GC (50 instead of default 100)
             - GOMEMLIMIT=67108864
-            - GOGC=50
+            - GOGC=40
 
         # Expose health check port for monitoring (optional)
         ports:
