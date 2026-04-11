@@ -1206,10 +1206,10 @@ func TestService_CleanupExpiredTrials(t *testing.T) {
 	}
 	require.NoError(t, svc.db.Create(oldRequest).Error)
 
-	// Create recent trial request
+	// Create recent trial request (30 min ago — within the 1-hour rate limit window)
 	recentRequest := &TrialRequest{
 		IP:        "10.0.0.2",
-		CreatedAt: time.Now().Add(-1 * time.Hour),
+		CreatedAt: time.Now().Add(-30 * time.Minute),
 	}
 	require.NoError(t, svc.db.Create(recentRequest).Error)
 

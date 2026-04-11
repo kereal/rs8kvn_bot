@@ -1,7 +1,7 @@
 # Дорожная карта — rs8kvn_bot
 
 **Создано:** 2026-04-02  
-**Обновлено:** 2026-04-10  
+**Обновлено:** 2026-04-11  
 **Версия:** v2.3.0  
 **Масштаб:** 10 клиентов → 100 клиентов
 
@@ -105,13 +105,26 @@
 
 ---
 
+## v2.3.2 Bugfixes (2026-04-11) ✅ ВСЕ ВЫПОЛНЕНО
+
+1. ✅ **escapeMarkdown missing backslash** — `\` добавлен первым в список экранирования MarkdownV2
+2. ✅ **HandleBroadcast 30s timeout** — заменён на 5 минут
+3. ✅ **GetOrCreateInvite игнорирует INSERT ошибку** — добавлена проверка err
+4. ✅ **pendingInvites утечка памяти** — добавлена периодическая очистка
+5. ✅ **handleMySubscription дублирует GetWithTraffic** — заменено на вызов service слоя
+6. ✅ **CleanupExpiredTrials wrong cutoff** — отдельный 1h cutoff для trial_requests
+
+---
+
 ## Технический долг (оставшийся)
 
-1. Pending invite codes — in-memory only, lost on restart (документировано)
-2. Circuit breaker cumulative failures → sliding window
-3. Вынести тексты сообщений — централизованный конфиг
-4. Типизированные ошибки — заменить сравнение строк
-5. `.down.sql` миграции — поддержка отката
+1. ~~Pending invite codes — in-memory only, lost on restart~~ → теперь есть периодическая очистка
+2. ExpiryTime не сохраняется в БД при Create() — админ видит "—" вместо даты сброса
+3. `/sub/{subID}` не проверяет статус подписки — отдаёт контент даже для отозванных
+4. Circuit breaker cumulative failures → sliding window
+5. Вынести тексты сообщений — централизованный конфиг
+6. Типизированные ошибки — заменить сравнение строк
+7. `.down.sql` миграции — поддержка отката
 
 ---
 

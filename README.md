@@ -340,7 +340,7 @@ rs8kvn_bot/
 │   │   ├── admin.go                # Admin handlers (/lastreg, /del, /broadcast)
 │   │   ├── callbacks.go            # Callback query routing
 │   │   ├── commands.go             # Command handlers (/start, /help)
-│   │   ├── handler.go              # Handler struct, helper functions
+│   │   ├── handler.go              # Handler struct, helpers, pendingInvites cleanup
 │   │   ├── handlers_test.go        # Handler tests
 │   │   ├── integration_test.go     # Integration tests
 │   │   ├── keyboard_builder.go     # Inline keyboard builder
@@ -533,7 +533,7 @@ When a new subscription is created, the admin receives:
 - **DNS error fast-fail**: Non-retryable errors (like "no such host") fail immediately instead of wasting time on retries
 - **Rate limiting**: Token bucket rate limiter (30 tokens, refill 5/sec)
 - **No default credentials**: XUI_USERNAME/XUI_PASSWORD must be explicitly set
-- **Input validation**: Markdown injection prevention, path traversal protection
+- **Input validation**: Markdown injection prevention (backslash-first escaping for MarkdownV2), path traversal protection
 - **XSS prevention**: html/template for all web pages (automatic context-aware escaping)
 - **Graceful shutdown**: Waits for in-flight requests with 30s timeout
 - **Startup retry**: Bot retries panel connection up to 5 times with jitter before failing
