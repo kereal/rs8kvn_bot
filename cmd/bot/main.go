@@ -185,45 +185,63 @@ func main() {
 		}
 	}()
 
-	// Initialize Telegram bot with timeout to prevent blocking startup
+	// Initialize Telegram bot with retry to handle transient network issues
 	logger.Info("Validating Telegram bot token")
 
-	// Use a channel to get the result asynchronously
-	type botInitResult struct {
-		botAPI    *tgbotapi.BotAPI
-		botConfig *bot.BotConfig
-		err       error
-	}
-	botInitChan := make(chan botInitResult, 1)
+	const botInitMaxAttempts = 5
+	botInitDelay := 2 * time.Second
 
-	go func() {
-		defer recoverAndReport("Telegram bot init")
-		api, err := tgbotapi.NewBotAPI(cfg.TelegramBotToken)
-		if err != nil {
-			botInitChan <- botInitResult{err: err}
-			return
-		}
-
-		cfg, err := bot.NewBotConfig(api)
-		botInitChan <- botInitResult{botAPI: api, botConfig: cfg, err: err}
-	}()
-
-	// Declare variables for bot API and config (needed for scope)
 	var botAPI *tgbotapi.BotAPI
 	var botConfig *bot.BotConfig
 
-	// Wait for bot initialization with timeout
-	select {
-	case result := <-botInitChan:
-		if result.err != nil {
-			logger.Fatal("Failed to initialize Telegram bot", zap.Error(result.err))
+	for i := 0; i < botInitMaxAttempts; i++ {
+		func() {
+			defer recoverAndReport("Telegram bot init")
+
+			api, err := tgbotapi.NewBotAPI(cfg.TelegramBotToken)
+			if err != nil {
+				if i == botInitMaxAttempts-1 {
+					logger.Fatal("Failed to initialize Telegram bot after max attempts",
+						zap.Error(err),
+						zap.Int("attempts", botInitMaxAttempts))
+				}
+				logger.Warn("Telegram bot init failed, retrying...",
+					zap.Int("attempt", i+1),
+					zap.Int("max_attempts", botInitMaxAttempts),
+					zap.Error(err))
+				time.Sleep(botInitDelay + time.Duration(rand.Int63n(int64(botInitDelay/2)))) //nolint:gosec // jitter
+				return
+			}
+
+			bc, err := bot.NewBotConfig(api)
+			if err != nil {
+				if i == botInitMaxAttempts-1 {
+					logger.Fatal("Failed to create bot config after max attempts",
+						zap.Error(err),
+						zap.Int("attempts", botInitMaxAttempts))
+				}
+				logger.Warn("Bot config creation failed, retrying...",
+					zap.Int("attempt", i+1),
+					zap.Int("max_attempts", botInitMaxAttempts),
+					zap.Error(err))
+				time.Sleep(botInitDelay + time.Duration(rand.Int63n(int64(botInitDelay/2)))) //nolint:gosec // jitter
+				return
+			}
+
+			botAPI = api
+			botConfig = bc
+		}()
+
+		if botAPI != nil {
+			break
 		}
-		botAPI = result.botAPI
-		botConfig = result.botConfig
-		logger.Info("Telegram bot authorized", zap.String("username", botConfig.Username))
-	case <-time.After(10 * time.Second):
-		logger.Fatal("Timeout initializing Telegram bot (10s)")
 	}
+
+	if botAPI == nil {
+		logger.Fatal("Failed to initialize Telegram bot after all attempts")
+	}
+
+	logger.Info("Telegram bot authorized", zap.String("username", botConfig.Username))
 
 	// Create webhook sender for Proxy Manager notifications
 	webhookSender := webhook.NewSender(cfg.ProxyManagerWebhookURL, cfg.ProxyManagerWebhookSecret)
