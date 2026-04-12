@@ -1,5 +1,4 @@
 # Build stage
-# Note: Go 1.25 is a future/unreleased version. For production, use 1.24 or latest stable.
 FROM golang:1.25-alpine AS builder
 
 # Build arguments for versioning
@@ -41,8 +40,7 @@ RUN CGO_ENABLED=1 GOOS=linux go build \
 RUN upx -9 rs8kvn_bot
 
 # Runtime stage - minimal Alpine for production
-# Using 3.20 for stability (3.23 is too new)
-FROM alpine:3.20
+FROM alpine:3.21
 
 # Install runtime dependencies only
 # - ca-certificates: HTTPS connections
