@@ -21,9 +21,13 @@ printf "  Total Go files:      ${GREEN}%d${NC}\n  Production files:    ${GREEN}%
 
 echo -e "${YELLOW}📝 Counting lines of code...${NC}"
 
+# count_lines counts lines of Go source files excluding .git, the tests directory, and files ending with _test.go, and echoes the total number of lines (prints 0 when none).
 count_lines() { find . -name '*.go' -path './.git/*' -o -path './tests/*' -o -name '*_test.go' -prune -o -exec wc -l {} + 2>/dev/null | awk 'END{print $1}'; }
+# test_lines counts the total number of lines across all Go test files (`*_test.go`) excluding the `./.git` directory and echoes the resulting line count.
 test_lines() { find . -name '*_test.go' -path './.git/*' -prune -o -exec wc -l {} + 2>/dev/null | awk 'END{print $1}'; }
+# e2e_lines counts the total number of lines in Go files under ./tests and echoes 0 if no matching files are found.
 e2e_lines() { find ./tests -name '*.go' -exec wc -l {} + 2>/dev/null | awk 'END{print $1}'; }
+# doc_lines counts the total number of lines across Markdown (.md) files under the repository root, excluding files inside .git, and echoes the resulting count (produces empty output if no Markdown files are found).
 doc_lines() { find . -name '*.md' -path './.git/*' -prune -o -exec wc -l {} + 2>/dev/null | awk 'END{print $1}'; }
 
 PROD_LINES=$(count_lines)
@@ -105,6 +109,7 @@ echo -e "${GREEN}✅ Statistics calculated successfully!${NC}"
 echo -e "${BLUE}════════════════════════════════════════${NC}\n"
 echo -e "Generated: ${YELLOW}${STATS_DATE}${NC}\n"
 
+# generate_project_stats generates or updates doc/PROJECT_STATS.md with aggregated project metrics (Go file and line counts, module breakdown, git statistics, coverage and test metrics, conventional commit tallies, and status badges) and prints progress messages.
 generate_project_stats() {
   STATS_FILE="doc/PROJECT_STATS.md"
   echo -e "\n${YELLOW}📝 Generating $STATS_FILE...${NC}"

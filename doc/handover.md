@@ -1,4 +1,4 @@
-# Handover Summary — TGVPN Go Bot
+# Handover Summary — rs8kvn_bot
 
 **Repo:** https://github.com/kereal/rs8kvn_bot  
 **Module:** `rs8kvn_bot` (Go 1.24+)  
@@ -185,67 +185,44 @@ All tests pass with `-race` detector. golangci-lint: 0 new issues (pre-existing:
    - Removed duplicates: TestGenerateInviteCode_Format, TestGenerateUUID_Entropy (covered by Properties_*)
    - Test time improved: ~41s → ~38s
 
-2. **Code refactoring** — if-else → switch statements:
-   - internal/bot/subscription.go:156 - reset info string building
-   - internal/service/subscription.go:258 - reset info in GetWithTraffic
+**Working:** /start /help, subscription view+QR, donate, referral system, trial via /i/{code}, admin /del /broadcast /send /refstats, subscription proxy /sub/{subID}, health endpoints, per-user rate limiting, daily backups, circuit breaker, graceful shutdown.
 
-3. **Lint fixes** — Fixed nilerr warning:
-   - internal/service/subscription.go:225 - added `_ = err` to suppress unused error
+**Tests:** ~85% coverage, all pass with `-race`. 21 packages.
 
 ---
 
-## Last Changes (v2.3.0 — 2026-04-10)
+## Last Changes (v2.2.0 — unmerged branches)
 
-### Bugfixes (Critical/High)
+### 2026-04-12 (4 bugfixes, not yet merged to dev)
 
-1. **ReferralCache.Save() noop** — Removed broken dirty tracking. Referral counts are derived from subscriptions table (`SELECT referred_by, COUNT(*) GROUP BY referred_by`), so there is nothing to persist. `Save()` is now a no-op, `Sync()` simply calls `Load()` to refresh from DB. `Increment/Decrement` update the in-memory cache for real-time display until the next sync.
+| # | Branch | Commit | Fix |
+|---|--------|--------|-----|
+| 1 | `fix/expiry-time-db` | `72f5d02` | `service.Create()` stored `ExpiryTime: time.Time{}` → now `expiryTime`. Admin sees real date. |
+| 2 | `fix/sub-status-check` | `e538906` | `/sub/{subID}` served revoked subs → added `IsActive()` check + cache invalidation. |
+| 3 | `fix/soft-delete-unify` | `27052ab` | `DeleteSubscriptionByID` used `Unscoped()` (hard) → removed, now soft delete like the rest. |
+| 4 | `fix/cache-rlock` | `e133eac` | `SubscriptionCache.Get` used exclusive Lock → RLock fast path, Lock only for mutations. |
+| — | `docs/update-v2.2.0` | `490c53b` | Updated handover.md, README.md, Serena memories. |
 
-2. **Nil pointer dereference on init failure** — `logger.Warn` → `logger.Fatal` for DB, XUI client, and Bot API initialization errors. Previously the app continued with nil pointers → guaranteed panic on first use.
+### 2026-04-11 (6 bugfixes, merged to dev)
 
-3. **Non-atomic deletion order** — Changed deletion order in `SubscriptionService.Delete()` and `DeleteByID()`: DB-first, then XUI-best-effort. If DB delete fails → XUI is untouched (safe to retry). If XUI delete fails after DB success → logged but not returned as error (orphaned XUI client is less critical than orphaned DB record).
+- `escapeMarkdown` — added `\` as first char in MarkdownV2 escape list
+- `HandleBroadcast` — 30s timeout → 5 min
+- `GetOrCreateInvite` — INSERT error was silently swallowed
+- `pendingInvites` — memory leak → periodic cleanup goroutine
+- `handleMySubscription` — 40 lines dedup → single `GetWithTraffic()` call
+- `CleanupExpiredTrials` — wrong cutoff for `trial_requests` → separate 1h window
 
-4. **context.WithoutCancel for broadcast** — Removed `context.WithoutCancel(ctx)` from broadcast dispatch. `HandleBroadcast` already handles `ctx.Done()` in its loop, so the detached context only prevented graceful shutdown during broadcast.
+### 2026-04-10 (refactoring + security)
 
-5. **Missing cache invalidation on trial bind** — Added `h.invalidateCache(chatID)` after successful trial subscription binding in `handleBindTrial`. Previously, stale "no subscription" cache entry caused incorrect UI state.
-
-6. **formatDateRu zero-time** — Added `if t.IsZero() { return "—" }` check. Previously showed "1 января 0001" for zero/nil time values.
-
-7. **Dead code in verifySession()** — Removed unreachable `if err != nil` block after successful `io.ReadAll` in `internal/xui/client.go`.
-
-8. **sync.Map unsafe type assertion** — Changed `lastSend.(time.Time)` to two-value form `lastSend, ok := lastSend.(time.Time)` in `ReferralCache.CheckAdminSendRateLimit`.
-
-### Security Hardening
-
-- **Timing-safe token comparison** — `BearerAuthMiddleware` now uses `crypto/subtle.ConstantTimeCompare` instead of `!=` to prevent timing side-channel attacks on API tokens.
-- **Loopback-only trusted proxies** — `isLocalAddress()` now only trusts loopback addresses (`127.0.0.1`, `::1`), not all private IPs. In cloud environments, other VMs on the same VPC could spoof `X-Forwarded-For` to bypass IP rate limiting.
-- **Web server port binding** — `Start()` now uses `net.Listen()` before `Serve()` to catch "port already in use" errors immediately instead of silently failing in a goroutine.
-- **getClientIP malformed fallback** — When `SplitHostPort` fails on `RemoteAddr`, tries once more to strip the port before falling back to raw address (which includes port and bypasses rate limiting).
-- **Health endpoint 503** — `writeJSON()` now returns HTTP 503 when health status is Down, allowing Kubernetes liveness probes to detect and restart unhealthy pods.
-
-### Code Deduplication
-
-- **Extracted shared format helpers** — `DaysUntilReset`, `FormatDateRu`, `GenerateProgressBar` moved from `internal/bot/subscription.go` and `internal/service/subscription.go` to `internal/utils/format.go`. Both packages now call `utils.DaysUntilReset()` etc. Associated tests moved to `internal/utils/format_test.go`.
-
-### Test Coverage Improvements
-
-- **Service layer** — Coverage improved from 24.8% → 95.2% (+30 new tests covering Create, Delete, DeleteByID, GetWithTraffic, CreateTrial, CalcTrialTraffic scenarios including DB-first deletion order, XUI best-effort, rollback failures).
-- **ReferralCache** — 15 new tests covering Get, GetAll, Increment, Decrement, Save noop, Sync refresh, concurrent safety, admin rate limiting.
-
-### Previous Sessions (v2.2.0 — 2026-04-05)
-- Subscription proxy feature (`GET /sub/{subID}`)
-- 50 new tests for subproxy
-
-### Previous Sessions (v2.0.3 — v2.1.0)
-- Referral cache system with `/refstats` admin command
-- Trial atomic rollback with `RetryWithBackoff`
-- Subscription locking with `sync.Map`
-- Singleflight for XUI login
-- Per-user rate limiter with cleanup goroutine
-- Cache LRU fix (lastAccess-based eviction)
-- Auto-reset traffic mechanism (expiryTime = now + 30 days)
-- Command routing moved to `bot.Handler.HandleUpdate()`
-- Atomic trial cleanup with `DELETE ... RETURNING`
-- CI PR trigger, docker-compose tag fix, HTTP timeouts
+- ReferralCache.Save() → no-op (DB is source of truth)
+- Nil pointer on init fail → logger.Fatal (was Warn)
+- Delete order → DB-first, XUI-best-effort
+- handleBindTrial → cache invalidation added
+- formatDateRu → zero-time returns "—"
+- Timing-safe token comparison, loopback-only trusted proxies
+- Health 503 on Down, port binding check, getClientIP fix
+- Shared format helpers → `internal/utils/format.go`
+- Service tests 24.8% → 95.2%, ReferralCache 15 tests
 
 ---
 
@@ -270,104 +247,58 @@ All tests pass with `-race` detector. golangci-lint: 0 new issues (pre-existing:
 
 ## Critical Nuances
 
-### 3x-ui Integration
-- **Session:** 12-hour validity (configurable via `XUI_SESSION_MAX_AGE_MINUTES`, default 720), verified via `/panel/api/server/status`
-- **Auto-relogin:** On HTTP 401/redirect, re-authenticates then retries failed request
-- **Connection pool cleanup:** Before re-auth to prevent dead connections
-- **Circuit breaker:** 5 failures → 30s open state
-- **Subscription:** `reset: 30` (days from creation), `expiryTime: now + 30 days`
-- **Auto-reset:** Only works when `ExpiryTime > 0`. Traffic resets every 30 days, expiry extends.
-- **Client email:** `trial_{subID}` for trial, `{username}` for regular
-- **Ping vs Login:** Health checks use `Ping()` (calls `ensureLoggedIn(ctx, false)`) — no forced re-auth
-- **Singleflight:** Deduplicates concurrent login attempts
-- **DNS error fast-fail:** Non-retryable errors fail immediately
+### 3x-ui Auto-Reset
+- `expiryTime > 0` AND `reset > 0` required — **both** must be set or auto-reset won't work
+- `reset = 30` means "every 30 days from creation", NOT "on the 30th"
+- Auto-renew: when `expiryTime ≤ now` → traffic resets to 0, expiry += reset×86400000ms, client re-enabled
+- Bot sends `expiryTime = now + 30d` and `reset = 30` to XUI — both are required
 
-### Subscription Flow
-- **Trial:** `/i/{code}` → IP rate limit (3/hour) → xui client (1GB, 3h) → bind via `/start trial_{subID}`
-- **Regular:** `create_subscription` callback → xui client (30GB, expiryTime: now + 30 days, reset: 30)
-- **Trial cookie:** `rs8kvn_trial_{code}` prevents duplication for 3 hours (HttpOnly)
-- **Atomic cleanup:** `DELETE ... RETURNING` for expired trials
-- **Share referral:** `pendingInvites[chatID]` cached for 60 minutes (in-memory only, lost on restart — acceptable trade-off at current scale). Periodic cleanup via `startPendingInvitesCleanup()` prevents unbounded memory growth.
-
-### Subscription Deletion (v2.3.0+)
-- **Order:** DB-first, then XUI-best-effort
-- **Rationale:** If DB delete fails, XUI is untouched and the operation can be safely retried. If XUI delete fails after DB success, the orphaned XUI client is less critical than an orphaned DB record and can be cleaned up manually.
-- **Webhook:** Sent on successful DB deletion regardless of XUI outcome.
-- **Referral cache:** `DecrementReferralCount` called after successful deletion.
+### Subscription Deletion
+- **Unified soft delete** (v2.2.0) — `deleted_at` column, no hard deletes
+- **Order:** DB-first, XUI-best-effort
+- If DB fails → XUI untouched (safe retry). If XUI fails → log only (orphaned client < orphaned DB record)
 
 ### Subscription Proxy
-- **Endpoint:** `GET /sub/{subID}` — subID = SubscriptionID field from DB
-- **Extra config:** Headers section → blank line → server links. Headers override 3x-ui.
-- **Cache:** 240s TTL hardcoded (`config.SubProxyCacheTTL`), not configurable via env
-- **Reload:** Every 5 minutes, graceful — keeps old config if file read fails
-- **Singleflight:** First request fetches, others wait and get same result
-- **Content-Length:** Removed after merge (body size changes, Go uses chunked encoding)
-- **No rate limiting** on `/sub/` endpoint — 240s cache TTL mitigates abuse
+- `/sub/{subID}` checks `IsActive()` after DB lookup (v2.2.0) — revoked/expired → 404
+- Cache hits also verified; stale entries invalidated via `InvalidateCache(key)`
+- Cache TTL: 240s. Extra servers/headers from `data/extra_servers.txt`
+- Singleflight deduplicates concurrent requests
+
+### ExpiryTime in DB
+- **v2.2.0:** `service.Create()` now stores real `expiryTime` (was `time.Time{}`)
+- `GetWithTraffic` has backward-compat fallback: `if sub.ExpiryTime.IsZero() { resetTime = sub.CreatedAt + reset }`
+- Old rows with zero ExpiryTime still work via fallback
 
 ### Referral Cache
-- **Source of truth:** The subscriptions table (`SELECT referred_by, COUNT(*) GROUP BY referred_by`)
-- **Cache purpose:** Read-through optimization for real-time display without hitting DB
-- **Increment/Decrement:** Update in-memory cache immediately when subscriptions are created/deleted
-- **Save() is no-op:** Nothing to persist — DB already reflects correct count after subscription changes
-- **Sync():** Calls `Load()` hourly to refresh from DB, overwriting any stale in-memory values
-- **Admin rate limit:** 30s cooldown between `/send` commands per admin (tracked in `sync.Map`)
+- **DB is source of truth** — `SELECT referred_by, COUNT(*) GROUP BY referred_by`
+- Cache = read-through optimization. `Save()` = no-op. `Sync()` = `Load()` from DB hourly
+- Increment/Decrement update in-memory only for real-time display
 
-### Database
-- **Soft deletes:** `deleted_at` column (GORM)
-- **Trial subscriptions:** `telegram_id = 0` (not NULL) until activated
-- **Migrations:** Auto-applied on startup from `internal/database/migrations/`
-- **trial_requests cleanup:** Uses 1-hour cutoff (matching `CountTrialRequestsByIPLastHour` window), separate from trial subscription cutoff (which may be 3+ hours)
-
-### Configuration
-- **Required:** `XUI_USERNAME`, `XUI_PASSWORD` (NO defaults)
-- **Validation:** `XUI_SUB_PATH` — only `a-zA-Z0-9_-`, no `..` or `/`
-- **Web server:** Runs on `HEALTH_CHECK_PORT` (default 8880)
-- **Bot username:** Auto-populated from `botAPI.Self.UserName`
-- **Init failure:** Fatal exit for DB, XUI, and Bot API init errors (no nil pointer continuation)
-
-### Rate Limiting
-- **Per-user:** Each `chatID` gets own token bucket (30 tokens, 5/sec refill)
-- **Cleanup:** Stale buckets removed every 5 minutes (maxIdle = 10 minutes)
-- **Admin rate limit:** `sync.Map` tracking — 30s min interval between `/send` commands
+### Trial Flow
+- `/i/{code}` → IP rate limit (3/hour) → XUI client (1GB, 3h) → bind via `/start trial_{subID}`
+- `trial_requests` cleanup uses 1h cutoff (matching rate-limit window), separate from subscription cleanup
+- Cookie `rs8kvn_trial_{code}` prevents duplication (3h, HttpOnly)
 
 ### Security
-- **IP spoofing:** X-Forwarded-For trusted only from **loopback** addresses (127.0.0.1, ::1). Private IPs (10.x, 172.16.x, 192.168.x) are NOT trusted — in cloud environments other VMs on the same VPC could spoof headers.
-- **API auth:** Timing-safe token comparison via `crypto/subtle.ConstantTimeCompare`
-- **No secrets in code:** `.env` only
-- **Input validation:** Markdown injection prevention, path traversal protection
-- **HTTP timeouts:** ReadHeaderTimeout 5s, ReadTimeout 10s, WriteTimeout 30s, IdleTimeout 60s
-- **Port binding:** Verified before goroutine launch — `net.Listen()` then `Serve()`
+- X-Forwarded-For trusted from **loopback only** (127.0.0.1, ::1) — not private IPs
+- API auth: `crypto/subtle.ConstantTimeCompare`
+- Init failure: `logger.Fatal` (no nil-pointer continuation)
+- MarkdownV2: escape `\` **first** to prevent double-escaping
 
-### Health Checks
-- **`/healthz`:** Returns 200 (OK/Degraded) or 503 (Down). Kubernetes can use this for liveness probes.
-- **`/readyz`:** Returns 200 when all components initialized and ready flag is set.
-- **Components:** `database` (Ping), `xui` (Ping → Degraded on failure)
-
-### Docker
-- **Migrations:** Embedded via `COPY internal/database/migrations`
-- **Data volume:** `./data:/app/data`
-- **Health check:** HTTP `/healthz` on port 8880
+### Config
+- Required: `XUI_USERNAME`, `XUI_PASSWORD` (no defaults)
+- Web port: `HEALTH_CHECK_PORT` (default 8880)
+- Session: 12h validity, auto-relogin on 401
 
 ---
 
 ## Quick Commands
 
 ```bash
-# Run all tests with race detector
-go test -race -count=1 ./...
-
-# Run with coverage
-go test -coverprofile=coverage.out ./...
-go tool cover -func=coverage.out
-
-# Build binary
+go test -race -count=1 ./...          # all tests
+go test -coverprofile=c.out ./...     # coverage
+golangci-lint run ./...               # linters
 go build -ldflags="-s -w" -o rs8kvn_bot ./cmd/bot
-
-# Run linters
-golangci-lint run ./...
-
-# Run locally
-go run ./cmd/bot
 ```
 
 ---
