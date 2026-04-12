@@ -6,7 +6,7 @@
 [![GitHub last commit](https://img.shields.io/github/last-commit/kereal/rs8kvn_bot?logo=github)](https://github.com/kereal/rs8kvn_bot/commits/dev)
 ![Coverage](https://img.shields.io/badge/coverage-85%25%2B-green)
 ![Tests](https://img.shields.io/badge/tests-passing-brightgreen)
-[![Go](https://img.shields.io/badge/Go-1.24%2B-00ADD8?logo=go)](https://go.dev/)
+[![Go](https://img.shields.io/badge/Go-1.25%2B-00ADD8?logo=go)](https://go.dev/)
 [![Go Report Card](https://goreportcard.com/badge/github.com/kereal/rs8kvn_bot)](https://goreportcard.com/report/github.com/kereal/rs8kvn_bot)
 [![GitHub stars](https://img.shields.io/github/stars/kereal/rs8kvn_bot?style=flat&logo=github)](https://github.com/kereal/rs8kvn_bot/stargazers)
 [![GitHub issues](https://img.shields.io/github/issues/kereal/rs8kvn_bot?logo=github)](https://github.com/kereal/rs8kvn_bot/issues)
@@ -43,7 +43,7 @@ Telegram bot for distributing VLESS+Reality+Vision proxy subscriptions from 3x-u
 ## Requirements
 
 - Docker & Docker Compose (recommended)
-- OR Go 1.24+
+- OR Go 1.25+
 - 3x-ui panel (https://github.com/MHSanaei/3x-ui)
 - Telegram Bot Token
 
@@ -250,7 +250,7 @@ The bot exposes HTTP endpoints on port 8880:
 | `GET /healthz` | Basic health (process alive, DB and xui status) | 200/503 |
 | `GET /readyz` | Ready state (accepting requests after init) | 200/503 |
 | `GET /i/{code}` | Trial invites landing page | 200/404/429/500 |
-| `GET /sub/{subID}` | Subscription proxy (extra servers + headers) | 200/404/502/405 |
+| `GET /sub/{subID}` | Subscription proxy (extra servers + headers, status checked) | 200/404/502/405 |
 | `GET /static/logo.png` | Logo image (mobile-optimized PNG) | 200/404 |
 
 Example response:
@@ -284,10 +284,11 @@ Each user can generate an invite code (`/start` → referral flow). The landing 
 
 ### Subscription Proxy (`GET /sub/{subID}`)
 
-The subscription proxy endpoint serves subscriptions with optional extra servers and custom headers:
+The subscription proxy endpoint serves active subscriptions with optional extra servers and custom headers:
 1. Validates `subID` against the database
-2. Checks cache (240s TTL)
-3. Fetches subscription from 3x-ui panel
+2. Verifies subscription status — revoked/expired subscriptions return 404
+3. Checks cache (240s TTL, RLock for concurrent reads)
+4. Fetches subscription from 3x-ui panel
 4. Merges extra servers and headers from config file
 5. Returns the combined response with original 3x-ui headers
 
@@ -520,7 +521,7 @@ rs8kvn_bot/
 
 When a new subscription is created, the admin receives:
 - User username and ID
-- Subscription expiry date
+- Subscription expiry date (actual reset date from DB)
 - Subscription link (full URL)
 
 ## Security Features

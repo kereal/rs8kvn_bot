@@ -164,7 +164,9 @@ func (h *Handler) HandleDel(ctx context.Context, update tgbotapi.Update) {
 
 // escapeMarkdown escapes special characters in Markdown V2 to prevent injection.
 // Backslash MUST be first — escaping it before other chars prevents double-escaping
-// (e.g. input "\*" must become "\\\*", not "\\*").
+// escapeMarkdown returns text with Telegram Markdown V2 special characters escaped by prefixing each with a backslash.
+// It escapes the backslash character first to prevent incorrect double-escaping (for example, input "\*" becomes "\\\*").
+// The characters escaped include: \ _ * [ ] ( ) ~ ` > # + - = | { } . !
 func escapeMarkdown(text string) string {
 	// Characters that need to be escaped in Markdown V2: \ _ * [ ] ( ) ~ ` > # + - = | { } . !
 	specialChars := []string{"\\", "_", "*", "[", "]", "(", ")", "~", "`", ">", "#", "+", "-", "=", "|", "{", "}", ".", "!"}

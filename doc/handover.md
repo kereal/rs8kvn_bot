@@ -1,4 +1,4 @@
-# Handover Summary — TGVPN Go Bot
+# Handover Summary — rs8kvn_bot
 
 **Repo:** https://github.com/kereal/rs8kvn_bot  
 **Module:** `rs8kvn_bot` (Go 1.24+)  
@@ -50,10 +50,11 @@ rs8kvn_bot/
 │   ├── ratelimiter/              # Token bucket + PerUserRateLimiter
 │   ├── heartbeat/                # Periodic health pings
 │   ├── backup/                   # Daily SQLite backup rotation (14 days)
-│   └── health/                   # Health checker (legacy, unused)
+│   ├── webhook/                  # Webhook sender for Proxy Manager
+│   └── scheduler/                # Cron: backup (03:00), trial cleanup (hourly)
 ├── tests/e2e/                    # E2E test suite (66+ scenarios)
 ├── data/                         # Runtime: tgvpn.db, backups, bot.log, extra_servers.txt
-├── doc/                          # handover.md, ideas.md, feature specs
+├── doc/                          # handover.md, feature specs, research
 ├── Dockerfile, docker-compose.yml, .env.example
 └── .github/                      # CI: lint, gosec, test, Docker → GHCR
 ```
@@ -79,29 +80,29 @@ rs8kvn_bot/
 ### Working Features
 
 **User Features:**
-- ✅ `/start`, `/help` — start commands with inline keyboards
-- ✅ 📋 Subscription view — traffic usage, subscription link, QR code
-- ✅ ☕ Donate, ❓ Help — auxiliary menus
-- ✅ 🔗 Referral system — share links with in-memory cache + periodic DB sync
-- ✅ 🎁 Trial subscriptions via `/i/{code}` landing page with Happ deep-links
+- `/start`, `/help` — start commands with inline keyboards
+- 📋 Subscription view — traffic usage, subscription link, QR code
+- ☕ Donate, ❓ Help — auxiliary menus
+- 🔗 Referral system — share links with in-memory cache + periodic DB sync
+- 🎁 Trial subscriptions via `/i/{code}` landing page with Happ deep-links
 
 **Admin Features:**
-- ✅ `/del <id>` — delete subscription by ID
-- ✅ `/broadcast <msg>` — send message to all users (respects shutdown context)
-- ✅ `/send <id|username> <msg>` — send private message
-- ✅ `/refstats` — referral statistics
-- ✅ 📊 Stats — bot statistics
+- `/del <id>` — delete subscription by ID
+- `/broadcast <msg>` — send message to all users (respects shutdown context)
+- `/send <id|username> <msg>` — send private message
+- `/refstats` — referral statistics
+- 📊 Stats — bot statistics
 
 **Infrastructure:**
-- ✅ 3x-ui integration — auto-login, client CRUD, circuit breaker, retry with jitter, singleflight
-- ✅ Health endpoints — `/healthz` (503 when Down), `/readyz`
-- ✅ Invite/trial landing — `/i/{code}` with IP rate limiting, cookie dedup
-- ✅ Per-user rate limiting — per-chatID token bucket (30 tokens, 5/sec refill)
-- ✅ **Subscription proxy** — `GET /sub/{subID}` with extra servers + headers, cache, singleflight
-- ✅ Daily backups — 14 days retention
-- ✅ Sentry error tracking, Zap structured logging
-- ✅ Docker: multi-stage build, healthcheck, GHCR images
-- ✅ CI: lint, gosec, test, build, push
+- 3x-ui integration — auto-login, client CRUD, circuit breaker, retry with jitter, singleflight
+- Health endpoints — `/healthz` (503 when Down), `/readyz`
+- Invite/trial landing — `/i/{code}` with IP rate limiting, cookie dedup
+- Per-user rate limiting — per-chatID token bucket (30 tokens, 5/sec refill)
+- Subscription proxy — `GET /sub/{subID}` with extra servers + headers, cache, singleflight
+- Daily backups — 14 days retention
+- Sentry error tracking, Zap structured logging
+- Docker: multi-stage build, healthcheck, GHCR images
+- CI: lint, gosec, test, build, push
 
 ### Test Coverage
 
@@ -235,14 +236,14 @@ All tests pass with `-race` detector. golangci-lint: 0 new issues (pre-existing:
 ## Critical Nuances
 
 ### 3x-ui Integration
-- **Session:** 12-hour validity (configurable via `XUI_SESSION_MAX_AGE_MINUTES`, default 720), verified via `/panel/api/server/status`
+- **Session:** 12h validity (configurable via `XUI_SESSION_MAX_AGE_MINUTES`, default 720), verified via `/panel/api/server/status`
 - **Auto-relogin:** On HTTP 401/redirect, re-authenticates then retries failed request
 - **Connection pool cleanup:** Before re-auth to prevent dead connections
 - **Circuit breaker:** 5 failures → 30s open state
 - **Subscription:** `reset: 30` (days from creation), `expiryTime: now + 30 days`
 - **Auto-reset:** Only works when `ExpiryTime > 0`. Traffic resets every 30 days, expiry extends.
 - **Client email:** `trial_{subID}` for trial, `{username}` for regular
-- **Ping vs Login:** Health checks use `Ping()` (calls `ensureLoggedIn(ctx, false)`) — no forced re-auth
+- **Ping vs Login:** Health checks use `Ping()` → `ensureLoggedIn(ctx, false)` — no forced re-auth
 - **Singleflight:** Deduplicates concurrent login attempts
 - **DNS error fast-fail:** Non-retryable errors fail immediately
 
@@ -251,61 +252,56 @@ All tests pass with `-race` detector. golangci-lint: 0 new issues (pre-existing:
 - **Regular:** `create_subscription` callback → xui client (30GB, expiryTime: now + 30 days, reset: 30)
 - **Trial cookie:** `rs8kvn_trial_{code}` prevents duplication for 3 hours (HttpOnly)
 - **Atomic cleanup:** `DELETE ... RETURNING` for expired trials
-- **Share referral:** `pendingInvites[chatID]` cached for 60 minutes (in-memory only, lost on restart — acceptable trade-off at current scale). Periodic cleanup via `startPendingInvitesCleanup()` prevents unbounded memory growth.
+- **Share referral:** `pendingInvites[chatID]` cached 60 min (in-memory, periodic cleanup prevents leak)
 
 ### Subscription Deletion (v2.2.0+)
 - **Order:** DB-first, then XUI-best-effort
-- **Rationale:** If DB delete fails, XUI is untouched and the operation can be safely retried. If XUI delete fails after DB success, the orphaned XUI client is less critical than an orphaned DB record and can be cleaned up manually.
+- **Rationale:** If DB delete fails → XUI untouched (safe to retry). If XUI fails after DB success → orphaned client (less critical, manual cleanup).
 - **Webhook:** Sent on successful DB deletion regardless of XUI outcome.
 - **Referral cache:** `DecrementReferralCount` called after successful deletion.
 
 ### Subscription Proxy
-- **Endpoint:** `GET /sub/{subID}` — subID = SubscriptionID field from DB
+- **Endpoint:** `GET /sub/{subID}` — subID = SubscriptionID from DB
 - **Extra config:** Headers section → blank line → server links. Headers override 3x-ui.
-- **Cache:** 240s TTL hardcoded (`config.SubProxyCacheTTL`), not configurable via env
+- **Cache:** 240s TTL hardcoded (`config.SubProxyCacheTTL`)
 - **Reload:** Every 5 minutes, graceful — keeps old config if file read fails
 - **Singleflight:** First request fetches, others wait and get same result
 - **Content-Length:** Removed after merge (body size changes, Go uses chunked encoding)
-- **No rate limiting** on `/sub/` endpoint — 240s cache TTL mitigates abuse
+- **No rate limiting** on `/sub/` — 240s cache TTL mitigates abuse
 
 ### Referral Cache
-- **Source of truth:** The subscriptions table (`SELECT referred_by, COUNT(*) GROUP BY referred_by`)
-- **Cache purpose:** Read-through optimization for real-time display without hitting DB
-- **Increment/Decrement:** Update in-memory cache immediately when subscriptions are created/deleted
-- **Save() is no-op:** Nothing to persist — DB already reflects correct count after subscription changes
-- **Sync():** Calls `Load()` hourly to refresh from DB, overwriting any stale in-memory values
-- **Admin rate limit:** 30s cooldown between `/send` commands per admin (tracked in `sync.Map`)
+- **Source of truth:** subscriptions table (`SELECT referred_by, COUNT(*) GROUP BY referred_by`)
+- **Cache purpose:** Read-through for real-time display without hitting DB
+- **Save() is no-op:** DB already reflects correct count after changes
+- **Sync():** Calls `Load()` hourly to refresh from DB
+- **Admin rate limit:** 30s cooldown between `/send` commands per admin (sync.Map)
 
 ### Database
 - **Soft deletes:** `deleted_at` column (GORM)
 - **Trial subscriptions:** `telegram_id = 0` (not NULL) until activated
 - **Migrations:** Auto-applied on startup from `internal/database/migrations/`
-- **trial_requests cleanup:** Uses 1-hour cutoff (matching `CountTrialRequestsByIPLastHour` window), separate from trial subscription cutoff (which may be 3+ hours)
+- **trial_requests cleanup:** 1-hour cutoff (matching rate-limit window)
 
 ### Configuration
 - **Required:** `XUI_USERNAME`, `XUI_PASSWORD` (NO defaults)
 - **Validation:** `XUI_SUB_PATH` — only `a-zA-Z0-9_-`, no `..` or `/`
 - **Web server:** Runs on `HEALTH_CHECK_PORT` (default 8880)
-- **Bot username:** Auto-populated from `botAPI.Self.UserName`
-- **Init failure:** Fatal exit for DB, XUI, and Bot API init errors (no nil pointer continuation)
+- **Init failure:** Fatal exit for DB, XUI, and Bot API init errors
 
 ### Rate Limiting
 - **Per-user:** Each `chatID` gets own token bucket (30 tokens, 5/sec refill)
 - **Cleanup:** Stale buckets removed every 5 minutes (maxIdle = 10 minutes)
-- **Admin rate limit:** `sync.Map` tracking — 30s min interval between `/send` commands
 
 ### Security
-- **IP spoofing:** X-Forwarded-For trusted only from **loopback** addresses (127.0.0.1, ::1). Private IPs (10.x, 172.16.x, 192.168.x) are NOT trusted — in cloud environments other VMs on the same VPC could spoof headers.
+- **IP spoofing:** X-Forwarded-For trusted only from **loopback** (127.0.0.1, ::1). Private IPs NOT trusted.
 - **API auth:** Timing-safe token comparison via `crypto/subtle.ConstantTimeCompare`
 - **No secrets in code:** `.env` only
-- **Input validation:** Markdown injection prevention, path traversal protection
 - **HTTP timeouts:** ReadHeaderTimeout 5s, ReadTimeout 10s, WriteTimeout 30s, IdleTimeout 60s
 - **Port binding:** Verified before goroutine launch — `net.Listen()` then `Serve()`
 
 ### Health Checks
-- **`/healthz`:** Returns 200 (OK/Degraded) or 503 (Down). Kubernetes can use this for liveness probes.
-- **`/readyz`:** Returns 200 when all components initialized and ready flag is set.
-- **Components:** `database` (Ping), `xui` (Ping → Degraded on failure)
+- **`/healthz`:** Returns 200 (OK/Degraded) or 503 (Down)
+- **`/readyz`:** Returns 200 when all components initialized and ready flag is set
 
 ### Docker
 - **Migrations:** Embedded via `COPY internal/database/migrations`
