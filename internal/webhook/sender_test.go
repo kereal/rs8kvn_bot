@@ -21,6 +21,8 @@ func TestMain(m *testing.M) {
 }
 
 func TestNewSender_WithURL(t *testing.T) {
+	t.Parallel()
+
 	s := NewSender("https://example.com/webhook", "secret123")
 	assert.Equal(t, "https://example.com/webhook", s.url)
 	assert.Equal(t, "secret123", s.secret)
@@ -28,6 +30,8 @@ func TestNewSender_WithURL(t *testing.T) {
 }
 
 func TestNewSender_EmptyURL(t *testing.T) {
+	t.Parallel()
+
 	s := NewSender("", "")
 	assert.Equal(t, "", s.url)
 	assert.Equal(t, "", s.secret)
@@ -35,6 +39,8 @@ func TestNewSender_EmptyURL(t *testing.T) {
 }
 
 func TestNoopSender(t *testing.T) {
+	t.Parallel()
+
 	n := &NoopSender{}
 	// Should not panic
 	n.SendAsync(Event{
@@ -44,6 +50,8 @@ func TestNoopSender(t *testing.T) {
 }
 
 func TestSender_SendAsync_Success(t *testing.T) {
+	t.Parallel()
+
 	var received atomic.Value
 	var requestCount int64
 
@@ -105,6 +113,8 @@ func TestSender_SendAsync_Success(t *testing.T) {
 }
 
 func TestSender_SendAsync_RetryOnFailure(t *testing.T) {
+	t.Parallel()
+
 	var requestCount int64
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -121,6 +131,7 @@ func TestSender_SendAsync_RetryOnFailure(t *testing.T) {
 
 	s := NewSender(server.URL, "secret")
 	s.client = server.Client()
+	s.WithRetryDelays([]time.Duration{0, 1 * time.Millisecond, 5 * time.Millisecond, 15 * time.Millisecond})
 
 	event := Event{
 		EventID: "evt-retry-test",
@@ -134,13 +145,15 @@ func TestSender_SendAsync_RetryOnFailure(t *testing.T) {
 	// Wait for all retries
 	assert.Eventually(t, func() bool {
 		return atomic.LoadInt64(&requestCount) >= 3
-	}, 15*time.Second, 100*time.Millisecond, "webhook should be retried and succeed on 3rd attempt")
+	}, 2*time.Second, 10*time.Millisecond, "webhook should be retried and succeed on 3rd attempt")
 
 	// Should have been called 3 times (2 failures + 1 success)
 	assert.Equal(t, int64(3), atomic.LoadInt64(&requestCount))
 }
 
 func TestSender_SendAsync_AllRetriesFail(t *testing.T) {
+	t.Parallel()
+
 	var requestCount int64
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -151,6 +164,7 @@ func TestSender_SendAsync_AllRetriesFail(t *testing.T) {
 
 	s := NewSender(server.URL, "secret")
 	s.client = server.Client()
+	s.WithRetryDelays([]time.Duration{0, 1 * time.Millisecond, 5 * time.Millisecond, 15 * time.Millisecond})
 
 	event := Event{
 		EventID: "evt-fail-test",
@@ -161,17 +175,18 @@ func TestSender_SendAsync_AllRetriesFail(t *testing.T) {
 
 	s.SendAsync(event)
 
-	// Wait for all retries (4 attempts: 0 + 1s + 5s + 15s)
-	// We use a shorter timeout since we just need to verify it tried
+	// Wait for all retries (4 attempts with ms-scale delays)
 	assert.Eventually(t, func() bool {
 		return atomic.LoadInt64(&requestCount) >= 4
-	}, 30*time.Second, 200*time.Millisecond, "webhook should be retried 4 times")
+	}, 2*time.Second, 10*time.Millisecond, "webhook should be retried 4 times")
 
 	// Should have been called 4 times (all failed)
 	assert.Equal(t, int64(4), atomic.LoadInt64(&requestCount))
 }
 
 func TestSender_SendAsync_EmptyURL_NoOp(t *testing.T) {
+	t.Parallel()
+
 	s := NewSender("", "")
 
 	// Should not panic and should return immediately
@@ -185,6 +200,8 @@ func TestSender_SendAsync_EmptyURL_NoOp(t *testing.T) {
 }
 
 func TestSender_SendAsync_PermanentError_NoRetry(t *testing.T) {
+	t.Parallel()
+
 	// Permanent client errors (4xx except 429) should NOT be retried.
 	permanentStatuses := []struct {
 		name       string
@@ -222,7 +239,7 @@ func TestSender_SendAsync_PermanentError_NoRetry(t *testing.T) {
 			}, 2*time.Second, 50*time.Millisecond)
 
 			// Give time for any potential retries to occur
-			time.Sleep(500 * time.Millisecond)
+			time.Sleep(50 * time.Millisecond)
 
 			// Should only have been called once — no retries for permanent errors
 			assert.Equal(t, int64(1), atomic.LoadInt64(&requestCount),
@@ -232,6 +249,8 @@ func TestSender_SendAsync_PermanentError_NoRetry(t *testing.T) {
 }
 
 func TestSender_SendAsync_TooManyRequests_Retried(t *testing.T) {
+	t.Parallel()
+
 	// 429 Too Many Requests is a transient error and should be retried.
 	var requestCount int64
 
@@ -247,6 +266,7 @@ func TestSender_SendAsync_TooManyRequests_Retried(t *testing.T) {
 
 	s := NewSender(server.URL, "secret")
 	s.client = server.Client()
+	s.WithRetryDelays([]time.Duration{0, 1 * time.Millisecond, 5 * time.Millisecond, 15 * time.Millisecond})
 
 	s.SendAsync(Event{
 		EventID: "evt-429-test",
@@ -258,12 +278,14 @@ func TestSender_SendAsync_TooManyRequests_Retried(t *testing.T) {
 	// Should retry and eventually succeed on 3rd attempt
 	assert.Eventually(t, func() bool {
 		return atomic.LoadInt64(&requestCount) >= 3
-	}, 5*time.Second, 50*time.Millisecond, "429 should be retried until success")
+	}, 2*time.Second, 10*time.Millisecond, "429 should be retried until success")
 
 	assert.Equal(t, int64(3), atomic.LoadInt64(&requestCount))
 }
 
 func TestSender_SendAsync_ConnectionError(t *testing.T) {
+	t.Parallel()
+
 	// Create a server that immediately closes to simulate connection error
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// This handler won't be reached because we'll close the server
@@ -273,7 +295,8 @@ func TestSender_SendAsync_ConnectionError(t *testing.T) {
 	s := NewSender(server.URL, "secret")
 
 	// Use fast client to speed up test
-	s.client = &http.Client{Timeout: 1 * time.Second}
+	s.client = &http.Client{Timeout: 100 * time.Millisecond}
+	s.WithRetryDelays([]time.Duration{0, 1 * time.Millisecond, 5 * time.Millisecond, 15 * time.Millisecond})
 
 	// After failures, all retries will fail since the server is closed
 	s.SendAsync(Event{
@@ -282,10 +305,12 @@ func TestSender_SendAsync_ConnectionError(t *testing.T) {
 	})
 
 	// Just verify it doesn't panic
-	time.Sleep(2 * time.Second)
+	time.Sleep(200 * time.Millisecond)
 }
 
 func TestSender_SendAsync_Non2xxResponse(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name        string
 		statusCode  int
@@ -319,6 +344,7 @@ func TestSender_SendAsync_Non2xxResponse(t *testing.T) {
 
 			s := NewSender(server.URL, "secret")
 			s.client = server.Client()
+			s.WithRetryDelays([]time.Duration{0, 1 * time.Millisecond, 5 * time.Millisecond, 15 * time.Millisecond})
 
 			s.SendAsync(Event{
 				EventID: "evt-status-test",
@@ -331,14 +357,14 @@ func TestSender_SendAsync_Non2xxResponse(t *testing.T) {
 				// Transient errors (5xx, 429) should retry and eventually succeed
 				assert.Eventually(t, func() bool {
 					return atomic.LoadInt64(&requestCount) >= 2
-				}, 5*time.Second, 50*time.Millisecond)
+				}, 2*time.Second, 10*time.Millisecond)
 			} else {
 				// Success (2xx) or permanent errors (4xx except 429) — only one request
 				assert.Eventually(t, func() bool {
 					return atomic.LoadInt64(&requestCount) >= 1
-				}, 2*time.Second, 50*time.Millisecond)
+				}, 2*time.Second, 10*time.Millisecond)
 				// Give a small window to ensure no retries happen for permanent errors
-				time.Sleep(200 * time.Millisecond)
+				time.Sleep(50 * time.Millisecond)
 				assert.Equal(t, int64(1), atomic.LoadInt64(&requestCount), "should not retry")
 			}
 		})
@@ -346,6 +372,8 @@ func TestSender_SendAsync_Non2xxResponse(t *testing.T) {
 }
 
 func TestSender_SendAsync_ConcurrentEvents(t *testing.T) {
+	t.Parallel()
+
 	var mu sync.Mutex
 	receivedEvents := make(map[string]int)
 
@@ -404,6 +432,8 @@ func TestSender_SendAsync_ConcurrentEvents(t *testing.T) {
 }
 
 func TestSender_SendAsync_EventDataIntegrity(t *testing.T) {
+	t.Parallel()
+
 	var received atomic.Value
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -451,6 +481,8 @@ func TestSender_SendAsync_EventDataIntegrity(t *testing.T) {
 }
 
 func TestSender_SendAsync_AuthHeader(t *testing.T) {
+	t.Parallel()
+
 	var authHeader atomic.Value
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -491,6 +523,8 @@ func TestSender_SendAsync_AuthHeader(t *testing.T) {
 }
 
 func TestSender_SendAsync_ContentTypeHeader(t *testing.T) {
+	t.Parallel()
+
 	var contentType atomic.Value
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -515,6 +549,8 @@ func TestSender_SendAsync_ContentTypeHeader(t *testing.T) {
 }
 
 func TestSender_SendAsync_DuplicateEvent(t *testing.T) {
+	t.Parallel()
+
 	// Test that the same event can be sent twice (server handles dedup)
 	var requestCount int64
 	var mu sync.Mutex
@@ -562,12 +598,16 @@ func TestSender_SendAsync_DuplicateEvent(t *testing.T) {
 }
 
 func TestEventTypes(t *testing.T) {
+	t.Parallel()
+
 	assert.Equal(t, "subscription.activated", EventSubscriptionActivated)
 	assert.Equal(t, "subscription.expired", EventSubscriptionExpired)
 	assert.Equal(t, "subscription.updated", EventSubscriptionUpdated)
 }
 
 func TestEvent_JSONMarshal(t *testing.T) {
+	t.Parallel()
+
 	event := Event{
 		EventID:           "evt-123",
 		Event:             EventSubscriptionActivated,
@@ -591,6 +631,8 @@ func TestEvent_JSONMarshal(t *testing.T) {
 }
 
 func TestEvent_JSONKeys(t *testing.T) {
+	t.Parallel()
+
 	event := Event{
 		EventID:           "evt-123",
 		Event:             EventSubscriptionActivated,

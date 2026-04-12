@@ -11,6 +11,8 @@ import (
 )
 
 func TestNewCircuitBreaker(t *testing.T) {
+	t.Parallel()
+
 	cb := NewCircuitBreaker(3, 10*time.Second)
 
 	assert.Equal(t, CircuitStateClosed, cb.state, "Initial state should be closed")
@@ -19,6 +21,8 @@ func TestNewCircuitBreaker(t *testing.T) {
 }
 
 func TestCircuitBreaker_Boundary_FailureThreshold_ExactlyAtThreshold(t *testing.T) {
+	t.Parallel()
+
 	cb := NewCircuitBreaker(2, 10*time.Second)
 
 	cb.recordResult(errors.New("failure"))
@@ -32,6 +36,8 @@ func TestCircuitBreaker_Boundary_FailureThreshold_ExactlyAtThreshold(t *testing.
 }
 
 func TestCircuitBreaker_Boundary_FailureThreshold_JustBelowThreshold(t *testing.T) {
+	t.Parallel()
+
 	cb := NewCircuitBreaker(2, 10*time.Second)
 
 	cb.recordResult(errors.New("failure"))
@@ -41,6 +47,8 @@ func TestCircuitBreaker_Boundary_FailureThreshold_JustBelowThreshold(t *testing.
 }
 
 func TestCircuitBreaker_AllowsRequestsWhenClosed(t *testing.T) {
+	t.Parallel()
+
 	cb := NewCircuitBreaker(3, 10*time.Second)
 
 	allowed := cb.allowRequest()
@@ -48,6 +56,8 @@ func TestCircuitBreaker_AllowsRequestsWhenClosed(t *testing.T) {
 }
 
 func TestCircuitBreaker_OpensAfterMaxFailures(t *testing.T) {
+	t.Parallel()
+
 	cb := NewCircuitBreaker(3, 10*time.Second)
 
 	// Record 3 failures
@@ -63,7 +73,9 @@ func TestCircuitBreaker_OpensAfterMaxFailures(t *testing.T) {
 }
 
 func TestCircuitBreaker_HalfOpenAfterTimeout(t *testing.T) {
-	cb := NewCircuitBreaker(2, 50*time.Millisecond)
+	t.Parallel()
+
+	cb := NewCircuitBreaker(2, 5*time.Millisecond)
 
 	// Record 2 failures to open the circuit
 	cb.recordResult(errors.New("failure"))
@@ -72,7 +84,7 @@ func TestCircuitBreaker_HalfOpenAfterTimeout(t *testing.T) {
 	assert.Equal(t, CircuitStateOpen, cb.state, "State should be open")
 
 	// Wait for timeout
-	time.Sleep(60 * time.Millisecond)
+	time.Sleep(10 * time.Millisecond)
 
 	// Next request should be allowed (half-open)
 	allowed := cb.allowRequest()
@@ -81,14 +93,16 @@ func TestCircuitBreaker_HalfOpenAfterTimeout(t *testing.T) {
 }
 
 func TestCircuitBreaker_ClosesAfterSuccesses(t *testing.T) {
-	cb := NewCircuitBreaker(2, 50*time.Millisecond)
+	t.Parallel()
+
+	cb := NewCircuitBreaker(2, 5*time.Millisecond)
 
 	// Open the circuit
 	cb.recordResult(errors.New("failure"))
 	cb.recordResult(errors.New("failure"))
 
 	// Wait and enter half-open
-	time.Sleep(60 * time.Millisecond)
+	time.Sleep(10 * time.Millisecond)
 	cb.allowRequest()
 
 	// Record 3 successes
@@ -100,6 +114,8 @@ func TestCircuitBreaker_ClosesAfterSuccesses(t *testing.T) {
 }
 
 func TestCircuitBreaker_Execute_Success(t *testing.T) {
+	t.Parallel()
+
 	cb := NewCircuitBreaker(3, 10*time.Second)
 
 	err := cb.Execute(context.Background(), func() error {
@@ -111,6 +127,8 @@ func TestCircuitBreaker_Execute_Success(t *testing.T) {
 }
 
 func TestCircuitBreaker_Execute_Failure(t *testing.T) {
+	t.Parallel()
+
 	testErr := errors.New("test error")
 	cb := NewCircuitBreaker(3, 10*time.Second)
 
@@ -123,6 +141,8 @@ func TestCircuitBreaker_Execute_Failure(t *testing.T) {
 }
 
 func TestCircuitBreaker_Execute_OpenCircuit(t *testing.T) {
+	t.Parallel()
+
 	cb := NewCircuitBreaker(2, 10*time.Second)
 
 	// Open the circuit
@@ -138,6 +158,8 @@ func TestCircuitBreaker_Execute_OpenCircuit(t *testing.T) {
 }
 
 func TestCircuitBreaker_Reset(t *testing.T) {
+	t.Parallel()
+
 	cb := NewCircuitBreaker(3, 10*time.Second)
 
 	// Open the circuit
@@ -152,6 +174,8 @@ func TestCircuitBreaker_Reset(t *testing.T) {
 }
 
 func TestCircuitBreaker_Getters(t *testing.T) {
+	t.Parallel()
+
 	cb := NewCircuitBreaker(5, 10*time.Second)
 
 	state := cb.State()
@@ -162,6 +186,8 @@ func TestCircuitBreaker_Getters(t *testing.T) {
 }
 
 func TestCircuitBreaker_Execute_ContextCancellation(t *testing.T) {
+	t.Parallel()
+
 	cb := NewCircuitBreaker(3, 10*time.Second)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -175,13 +201,15 @@ func TestCircuitBreaker_Execute_ContextCancellation(t *testing.T) {
 }
 
 func TestCircuitBreaker_Execute_ContextTimeout(t *testing.T) {
-	cb := NewCircuitBreaker(3, 10*time.Second)
+	t.Parallel()
+
+	cb := NewCircuitBreaker(3, 100*time.Millisecond)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Nanosecond)
 	defer cancel()
 
 	// Wait for context to expire
-	time.Sleep(10 * time.Millisecond)
+	time.Sleep(2 * time.Millisecond)
 
 	err := cb.Execute(ctx, func() error {
 		return nil
@@ -191,14 +219,16 @@ func TestCircuitBreaker_Execute_ContextTimeout(t *testing.T) {
 }
 
 func TestCircuitBreaker_HalfOpen_MaxAttempts(t *testing.T) {
-	cb := NewCircuitBreaker(2, 50*time.Millisecond)
+	t.Parallel()
+
+	cb := NewCircuitBreaker(2, 5*time.Millisecond)
 
 	// Open the circuit
 	cb.recordResult(errors.New("failure"))
 	cb.recordResult(errors.New("failure"))
 
 	// Wait for timeout to enter half-open
-	time.Sleep(60 * time.Millisecond)
+	time.Sleep(10 * time.Millisecond)
 
 	// First call transitions from Open to HalfOpen
 	// In HalfOpen state, halfOpenAttempts is set to 1 and returns true
@@ -219,14 +249,16 @@ func TestCircuitBreaker_HalfOpen_MaxAttempts(t *testing.T) {
 }
 
 func TestCircuitBreaker_HalfOpen_FailureReopens(t *testing.T) {
-	cb := NewCircuitBreaker(2, 50*time.Millisecond)
+	t.Parallel()
+
+	cb := NewCircuitBreaker(2, 5*time.Millisecond)
 
 	// Open the circuit
 	cb.recordResult(errors.New("failure"))
 	cb.recordResult(errors.New("failure"))
 
 	// Wait for timeout to enter half-open
-	time.Sleep(60 * time.Millisecond)
+	time.Sleep(10 * time.Millisecond)
 	cb.allowRequest()
 
 	assert.Equal(t, CircuitStateHalfOpen, cb.state, "State should be half-open")
@@ -238,6 +270,8 @@ func TestCircuitBreaker_HalfOpen_FailureReopens(t *testing.T) {
 }
 
 func TestCircuitBreaker_ConcurrentAccess(t *testing.T) {
+	t.Parallel()
+
 	cb := NewCircuitBreaker(100, 10*time.Second)
 
 	const goroutines = 50
@@ -277,6 +311,8 @@ func TestCircuitBreaker_ConcurrentAccess(t *testing.T) {
 }
 
 func TestCircuitBreaker_ConcurrentFailures(t *testing.T) {
+	t.Parallel()
+
 	cb := NewCircuitBreaker(10, 10*time.Second)
 
 	const goroutines = 20
@@ -304,7 +340,9 @@ func TestCircuitBreaker_ConcurrentFailures(t *testing.T) {
 }
 
 func TestCircuitBreaker_ResetClearsAllState(t *testing.T) {
-	cb := NewCircuitBreaker(2, 10*time.Second)
+	t.Parallel()
+
+	cb := NewCircuitBreaker(2, 100*time.Millisecond)
 
 	// Open the circuit
 	cb.recordResult(errors.New("failure"))
@@ -312,7 +350,7 @@ func TestCircuitBreaker_ResetClearsAllState(t *testing.T) {
 	cb.recordResult(errors.New("failure"))
 
 	// Wait and enter half-open
-	time.Sleep(60 * time.Millisecond)
+	time.Sleep(10 * time.Millisecond)
 	cb.allowRequest()
 
 	// Record some successes
@@ -329,6 +367,8 @@ func TestCircuitBreaker_ResetClearsAllState(t *testing.T) {
 }
 
 func TestCircuitBreaker_SuccessInClosedResetsFailures(t *testing.T) {
+	t.Parallel()
+
 	cb := NewCircuitBreaker(5, 10*time.Second)
 
 	// Record some failures
@@ -342,7 +382,9 @@ func TestCircuitBreaker_SuccessInClosedResetsFailures(t *testing.T) {
 }
 
 func TestCircuitBreaker_MultipleTransitions(t *testing.T) {
-	cb := NewCircuitBreaker(2, 30*time.Millisecond)
+	t.Parallel()
+
+	cb := NewCircuitBreaker(2, 5*time.Millisecond)
 
 	// First cycle: closed -> open
 	cb.recordResult(errors.New("failure"))
@@ -350,7 +392,7 @@ func TestCircuitBreaker_MultipleTransitions(t *testing.T) {
 	assert.Equal(t, CircuitStateOpen, cb.state, "First transition: should be open")
 
 	// Wait for timeout
-	time.Sleep(40 * time.Millisecond)
+	time.Sleep(10 * time.Millisecond)
 
 	// Open -> half-open
 	allowed := cb.allowRequest()
@@ -370,6 +412,8 @@ func TestCircuitBreaker_MultipleTransitions(t *testing.T) {
 }
 
 func TestCircuitBreaker_TimeoutNotReached(t *testing.T) {
+	t.Parallel()
+
 	cb := NewCircuitBreaker(2, 1*time.Second)
 
 	// Open the circuit
@@ -383,6 +427,8 @@ func TestCircuitBreaker_TimeoutNotReached(t *testing.T) {
 }
 
 func TestCircuitBreaker_StateString(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		state    CircuitState
 		expected int
@@ -398,6 +444,8 @@ func TestCircuitBreaker_StateString(t *testing.T) {
 }
 
 func TestCircuitBreaker_Execute_PanickingCallback(t *testing.T) {
+	t.Parallel()
+
 	cb := NewCircuitBreaker(3, 10*time.Second)
 
 	didPanic := false

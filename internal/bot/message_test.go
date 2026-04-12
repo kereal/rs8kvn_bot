@@ -15,6 +15,8 @@ import (
 
 // TestSend_Success tests the send function with successful message
 func TestSend_Success(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 
 	mockBot := &testutil.MockBotAPI{
@@ -40,6 +42,8 @@ func TestSend_Success(t *testing.T) {
 
 // TestSend_RateLimitContext tests the send function with context cancellation
 func TestSend_RateLimitContext(t *testing.T) {
+	t.Parallel()
+
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately
 
@@ -66,6 +70,8 @@ func TestSend_RateLimitContext(t *testing.T) {
 
 // TestSend_SendError tests the send function when bot.Send fails
 func TestSend_SendError(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 
 	mockBot := &testutil.MockBotAPI{
@@ -92,6 +98,8 @@ func TestSend_SendError(t *testing.T) {
 
 // TestSend_DisablesWebPagePreview tests that send disables web page preview
 func TestSend_DisablesWebPagePreview(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 
 	var capturedMsg tgbotapi.MessageConfig
@@ -120,6 +128,8 @@ func TestSend_DisablesWebPagePreview(t *testing.T) {
 
 // TestSafeSend_Success tests the safeSend function with successful message
 func TestSafeSend_Success(t *testing.T) {
+	t.Parallel()
+
 	mockBot := &testutil.MockBotAPI{
 		SendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
 			return tgbotapi.Message{MessageID: 456}, nil
@@ -142,6 +152,8 @@ func TestSafeSend_Success(t *testing.T) {
 
 // TestSafeSend_SendError tests safeSend when bot.Send fails
 func TestSafeSend_SendError(t *testing.T) {
+	t.Parallel()
+
 	mockBot := &testutil.MockBotAPI{
 		SendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
 			return tgbotapi.Message{}, errors.New("safe send failed")
@@ -166,6 +178,8 @@ func TestSafeSend_SendError(t *testing.T) {
 
 // TestSafeSend_WithEditMessage tests safeSend with EditMessageText
 func TestSafeSend_WithEditMessage(t *testing.T) {
+	t.Parallel()
+
 	mockBot := &testutil.MockBotAPI{
 		SendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
 			return tgbotapi.Message{MessageID: 789}, nil
@@ -190,6 +204,8 @@ func TestSafeSend_WithEditMessage(t *testing.T) {
 
 // TestSendMessage_Success tests the SendMessage function
 func TestSendMessage_Success(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 
 	mockBot := &testutil.MockBotAPI{
@@ -219,6 +235,8 @@ func TestSendMessage_Success(t *testing.T) {
 
 // TestSendMessage_EmptyMessage tests SendMessage with empty message
 func TestSendMessage_EmptyMessage(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 
 	mockBot := &testutil.MockBotAPI{
@@ -242,6 +260,8 @@ func TestSendMessage_EmptyMessage(t *testing.T) {
 
 // TestSendMessage_ContextCancellation tests SendMessage with context cancellation
 func TestSendMessage_ContextCancellation(t *testing.T) {
+	t.Parallel()
+
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately
 
@@ -267,6 +287,8 @@ func TestSendMessage_ContextCancellation(t *testing.T) {
 
 // TestSendMessage_SpecialCharacters tests SendMessage with special characters
 func TestSendMessage_SpecialCharacters(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 
 	var capturedMsg tgbotapi.MessageConfig
@@ -295,6 +317,8 @@ func TestSendMessage_SpecialCharacters(t *testing.T) {
 
 // TestSendMessage_Unicode tests SendMessage with unicode characters
 func TestSendMessage_Unicode(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 
 	var capturedMsg tgbotapi.MessageConfig
@@ -323,6 +347,8 @@ func TestSendMessage_Unicode(t *testing.T) {
 
 // TestSendMessage_LongMessage tests SendMessage with a long message
 func TestSendMessage_LongMessage(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 
 	var capturedMsg tgbotapi.MessageConfig
@@ -356,6 +382,8 @@ func TestSendMessage_LongMessage(t *testing.T) {
 
 // TestSendMessage_MultipleMessages tests sending multiple messages
 func TestSendMessage_MultipleMessages(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 
 	mockBot := &testutil.MockBotAPI{
@@ -382,6 +410,8 @@ func TestSendMessage_MultipleMessages(t *testing.T) {
 
 // TestSendMessage_DifferentChatIDs tests SendMessage with different chat IDs
 func TestSendMessage_DifferentChatIDs(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 
 	testCases := []struct {
@@ -423,6 +453,8 @@ func TestSendMessage_DifferentChatIDs(t *testing.T) {
 
 // TestSend_WithContextTimeout tests send with a context that times out
 func TestSend_WithContextTimeout(t *testing.T) {
+	t.Parallel()
+
 	mockBot := &testutil.MockBotAPI{
 		SendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
 			return tgbotapi.Message{MessageID: 123}, nil
@@ -450,6 +482,8 @@ func TestSend_WithContextTimeout(t *testing.T) {
 
 // TestSafeSend_WithVariousChattables tests safeSend with different Chattable types
 func TestSafeSend_WithVariousChattables(t *testing.T) {
+	t.Parallel()
+
 	testCases := []struct {
 		name      string
 		chattable tgbotapi.Chattable
@@ -507,6 +541,8 @@ func TestSafeSend_WithVariousChattables(t *testing.T) {
 
 // TestSend_MultipleConcurrentSends tests concurrent send operations
 func TestSend_MultipleConcurrentSends(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 
 	mockBot := &testutil.MockBotAPI{
@@ -543,6 +579,8 @@ func TestSend_MultipleConcurrentSends(t *testing.T) {
 
 // TestSendMessage_NilHandler tests that SendMessage doesn't panic with proper initialization
 func TestSendMessage_NilHandler(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 
 	mockBot := &testutil.MockBotAPI{
@@ -567,6 +605,8 @@ func TestSendMessage_NilHandler(t *testing.T) {
 
 // TestSend_WithMarkdownText tests send with markdown formatted text
 func TestSend_WithMarkdownText(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 
 	var capturedMsg tgbotapi.MessageConfig

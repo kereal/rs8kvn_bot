@@ -35,6 +35,8 @@ func (m *mockXUIClientForCleanup) DeleteClient(ctx context.Context, inboundID in
 }
 
 func TestTrialCleanupScheduler_New(t *testing.T) {
+	t.Parallel()
+
 	db, err := testutil.NewTestDatabaseService(t)
 	require.NoError(t, err)
 
@@ -45,6 +47,8 @@ func TestTrialCleanupScheduler_New(t *testing.T) {
 }
 
 func TestTrialCleanupScheduler_RunCleanup_NoExpiredTrials(t *testing.T) {
+	t.Parallel()
+
 	db, err := testutil.NewTestDatabaseService(t)
 	require.NoError(t, err)
 
@@ -58,6 +62,8 @@ func TestTrialCleanupScheduler_RunCleanup_NoExpiredTrials(t *testing.T) {
 }
 
 func TestTrialCleanupScheduler_RunCleanup_WithExpiredTrials(t *testing.T) {
+	t.Parallel()
+
 	db, err := testutil.NewTestDatabaseService(t)
 	require.NoError(t, err)
 
@@ -116,6 +122,8 @@ func TestTrialCleanupScheduler_RunCleanup_WithExpiredTrials(t *testing.T) {
 }
 
 func TestTrialCleanupScheduler_RunCleanup_XUIFailure(t *testing.T) {
+	t.Parallel()
+
 	db, err := testutil.NewTestDatabaseService(t)
 	require.NoError(t, err)
 
@@ -145,6 +153,8 @@ func TestTrialCleanupScheduler_RunCleanup_XUIFailure(t *testing.T) {
 }
 
 func TestTrialCleanupScheduler_Start_ContextCancel(t *testing.T) {
+	t.Parallel()
+
 	db, err := testutil.NewTestDatabaseService(t)
 	require.NoError(t, err)
 
@@ -159,7 +169,7 @@ func TestTrialCleanupScheduler_Start_ContextCancel(t *testing.T) {
 		close(done)
 	}()
 
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(20 * time.Millisecond)
 	cancel()
 
 	select {

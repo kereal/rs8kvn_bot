@@ -22,6 +22,8 @@ func TestMain(m *testing.M) {
 }
 
 func TestGetHTTPClient_Singleton(t *testing.T) {
+	t.Parallel()
+
 	// Reset the singleton for this test
 	resetHTTPClient()
 
@@ -34,6 +36,8 @@ func TestGetHTTPClient_Singleton(t *testing.T) {
 }
 
 func TestGetHTTPClient_ConcurrentAccess(t *testing.T) {
+	t.Parallel()
+
 	// Reset the singleton for this test
 	resetHTTPClient()
 
@@ -57,6 +61,8 @@ func TestGetHTTPClient_ConcurrentAccess(t *testing.T) {
 }
 
 func TestGetHTTPClient_Timeout(t *testing.T) {
+	t.Parallel()
+
 	// Reset the singleton for this test
 	resetHTTPClient()
 
@@ -66,6 +72,8 @@ func TestGetHTTPClient_Timeout(t *testing.T) {
 }
 
 func TestStart_EmptyURL(t *testing.T) {
+	t.Parallel()
+
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
 
@@ -85,6 +93,8 @@ func TestStart_EmptyURL(t *testing.T) {
 }
 
 func TestStart_ContextCancellation(t *testing.T) {
+	t.Parallel()
+
 	// Create a mock server that responds quickly
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -100,7 +110,7 @@ func TestStart_ContextCancellation(t *testing.T) {
 	}()
 
 	// Wait a bit for initial heartbeat
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(20 * time.Millisecond)
 
 	// Cancel the context
 	cancel()
@@ -114,6 +124,8 @@ func TestStart_ContextCancellation(t *testing.T) {
 }
 
 func TestStart_NegativeInterval(t *testing.T) {
+	t.Parallel()
+
 	// Create a mock server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -131,7 +143,7 @@ func TestStart_NegativeInterval(t *testing.T) {
 	}()
 
 	// Wait for initial heartbeat
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(20 * time.Millisecond)
 
 	// Cancel to stop the scheduler
 	cancel()
@@ -145,6 +157,8 @@ func TestStart_NegativeInterval(t *testing.T) {
 }
 
 func TestStart_ZeroInterval(t *testing.T) {
+	t.Parallel()
+
 	// Create a mock server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -162,7 +176,7 @@ func TestStart_ZeroInterval(t *testing.T) {
 	}()
 
 	// Wait for initial heartbeat
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(20 * time.Millisecond)
 
 	// Cancel to stop the scheduler
 	cancel()
@@ -176,6 +190,8 @@ func TestStart_ZeroInterval(t *testing.T) {
 }
 
 func TestSendHeartbeat_Success(t *testing.T) {
+	t.Parallel()
+
 	requestReceived := false
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestReceived = true
@@ -191,6 +207,8 @@ func TestSendHeartbeat_Success(t *testing.T) {
 }
 
 func TestSendHeartbeat_ServerError(t *testing.T) {
+	t.Parallel()
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
@@ -201,11 +219,15 @@ func TestSendHeartbeat_ServerError(t *testing.T) {
 }
 
 func TestSendHeartbeat_InvalidURL(t *testing.T) {
+	t.Parallel()
+
 	// Should not panic with invalid URL
 	sendHeartbeat("http://invalid-host-that-does-not-exist:12345/heartbeat")
 }
 
 func TestSendHeartbeat_MultipleRequests(t *testing.T) {
+	t.Parallel()
+
 	requestCount := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestCount++
@@ -222,6 +244,8 @@ func TestSendHeartbeat_MultipleRequests(t *testing.T) {
 }
 
 func TestStart_IntervalTiming(t *testing.T) {
+	t.Parallel()
+
 	var requestCount int64
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt64(&requestCount, 1)
@@ -236,7 +260,7 @@ func TestStart_IntervalTiming(t *testing.T) {
 	go Start(ctx, server.URL, 1)
 
 	// Wait for initial heartbeat
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(20 * time.Millisecond)
 
 	// Initial heartbeat should have been sent
 	assert.GreaterOrEqual(t, atomic.LoadInt64(&requestCount), int64(1), "Initial heartbeat was not sent")
@@ -246,6 +270,8 @@ func TestStart_IntervalTiming(t *testing.T) {
 }
 
 func TestMaskURL_Heartbeat(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name     string
 		url      string
@@ -270,6 +296,8 @@ func TestMaskURL_Heartbeat(t *testing.T) {
 }
 
 func TestStart_MultipleContexts(t *testing.T) {
+	t.Parallel()
+
 	ctx1, cancel1 := context.WithCancel(context.Background())
 	defer cancel1()
 	ctx2, cancel2 := context.WithCancel(context.Background())
@@ -285,6 +313,8 @@ func TestStart_MultipleContexts(t *testing.T) {
 }
 
 func TestSendHeartbeat_ContextTimeout(t *testing.T) {
+	t.Parallel()
+
 	// Test that sendHeartbeat handles context-like timeouts gracefully
 	// Use very short timeout by calling invalid URL
 	_ = maskURL("http://localhost:19999/heartbeat")

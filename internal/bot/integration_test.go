@@ -191,6 +191,8 @@ func CreateTestSubscriptionInDB(t *testing.T, db *database.Service, chatID int64
 }
 
 func TestSubscriptionFlow_CreateAndGet(t *testing.T) {
+	t.Parallel()
+
 	f := NewTestFixture(t)
 	defer f.Close()
 
@@ -218,6 +220,8 @@ func TestSubscriptionFlow_CreateAndGet(t *testing.T) {
 }
 
 func TestSubscriptionFlow_ExpiredSubscription(t *testing.T) {
+	t.Parallel()
+
 	f := NewTestFixture(t)
 	defer f.Close()
 
@@ -240,6 +244,8 @@ func TestSubscriptionFlow_ExpiredSubscription(t *testing.T) {
 }
 
 func TestSubscriptionFlow_RevokeOldSubscription(t *testing.T) {
+	t.Parallel()
+
 	f := NewTestFixture(t)
 	defer f.Close()
 
@@ -285,6 +291,8 @@ func TestSubscriptionFlow_RevokeOldSubscription(t *testing.T) {
 }
 
 func TestAdminStats(t *testing.T) {
+	t.Parallel()
+
 	f := NewTestFixture(t)
 	defer f.Close()
 
@@ -314,6 +322,8 @@ func TestAdminStats(t *testing.T) {
 }
 
 func TestDatabaseService_GetAllTelegramIDs(t *testing.T) {
+	t.Parallel()
+
 	f := NewTestFixture(t)
 	defer f.Close()
 
@@ -334,6 +344,8 @@ func TestDatabaseService_GetAllTelegramIDs(t *testing.T) {
 }
 
 func TestDatabaseService_GetByUsername(t *testing.T) {
+	t.Parallel()
+
 	f := NewTestFixture(t)
 	defer f.Close()
 
@@ -357,6 +369,8 @@ func TestDatabaseService_GetByUsername(t *testing.T) {
 }
 
 func TestHandler_GetMainMenuContent_Admin(t *testing.T) {
+	t.Parallel()
+
 	f := NewTestFixture(t)
 	defer f.Close()
 
@@ -367,6 +381,8 @@ func TestHandler_GetMainMenuContent_Admin(t *testing.T) {
 }
 
 func TestHandler_GetMainMenuContent_User(t *testing.T) {
+	t.Parallel()
+
 	f := NewTestFixture(t)
 	defer f.Close()
 
@@ -377,6 +393,8 @@ func TestHandler_GetMainMenuContent_User(t *testing.T) {
 }
 
 func TestHandler_GetDonateText(t *testing.T) {
+	t.Parallel()
+
 	f := NewTestFixture(t)
 	defer f.Close()
 
@@ -385,6 +403,8 @@ func TestHandler_GetDonateText(t *testing.T) {
 }
 
 func TestHandler_GetHelpText(t *testing.T) {
+	t.Parallel()
+
 	f := NewTestFixture(t)
 	defer f.Close()
 
@@ -394,6 +414,8 @@ func TestHandler_GetHelpText(t *testing.T) {
 }
 
 func TestHandler_GetUsername(t *testing.T) {
+	t.Parallel()
+
 	f := NewTestFixture(t)
 	defer f.Close()
 
@@ -418,6 +440,8 @@ func TestHandler_GetUsername(t *testing.T) {
 }
 
 func TestMockXUIServer_Endpoints(t *testing.T) {
+	t.Parallel()
+
 	mock := NewMockXUIServer(t)
 	defer mock.Close()
 
@@ -471,6 +495,8 @@ func TestMockXUIServer_Endpoints(t *testing.T) {
 }
 
 func TestMockXUIServer_ErrorResponses(t *testing.T) {
+	t.Parallel()
+
 	mock := NewMockXUIServer(t)
 	defer mock.Close()
 
@@ -516,6 +542,8 @@ func resetMockBotAPI(m *testutil.MockBotAPI) {
 // ==================== Additional Integration Tests ====================
 
 func TestIntegration_HandleStart_NoSubscription(t *testing.T) {
+	t.Parallel()
+
 	f := NewTestFixture(t)
 	defer f.Close()
 
@@ -539,6 +567,8 @@ func TestIntegration_HandleStart_NoSubscription(t *testing.T) {
 }
 
 func TestIntegration_HandleStart_WithSubscription(t *testing.T) {
+	t.Parallel()
+
 	f := NewTestFixture(t)
 	defer f.Close()
 
@@ -563,6 +593,8 @@ func TestIntegration_HandleStart_WithSubscription(t *testing.T) {
 }
 
 func TestIntegration_HandleHelp(t *testing.T) {
+	t.Parallel()
+
 	f := NewTestFixture(t)
 	defer f.Close()
 
@@ -586,6 +618,8 @@ func TestIntegration_HandleHelp(t *testing.T) {
 }
 
 func TestIntegration_HandleInvite(t *testing.T) {
+	t.Parallel()
+
 	f := NewTestFixture(t)
 	defer f.Close()
 
@@ -609,6 +643,8 @@ func TestIntegration_HandleInvite(t *testing.T) {
 }
 
 func TestIntegration_Callback_CreateSubscription(t *testing.T) {
+	t.Parallel()
+
 	f := NewTestFixture(t)
 	defer f.Close()
 
@@ -634,6 +670,8 @@ func TestIntegration_Callback_CreateSubscription(t *testing.T) {
 }
 
 func TestIntegration_Callback_MenuSubscription(t *testing.T) {
+	t.Parallel()
+
 	f := NewTestFixture(t)
 	defer f.Close()
 
@@ -660,6 +698,8 @@ func TestIntegration_Callback_MenuSubscription(t *testing.T) {
 }
 
 func TestIntegration_Callback_QRCode(t *testing.T) {
+	t.Parallel()
+
 	f := NewTestFixture(t)
 	defer f.Close()
 

@@ -18,6 +18,8 @@ func init() {
 }
 
 func TestBackupScheduler_New(t *testing.T) {
+	t.Parallel()
+
 	scheduler := NewBackupScheduler("/tmp/test.db", 2, 7)
 
 	assert.NotNil(t, scheduler)
@@ -27,6 +29,8 @@ func TestBackupScheduler_New(t *testing.T) {
 }
 
 func TestBackupScheduler_Start_ContextCancel(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
@@ -44,7 +48,7 @@ func TestBackupScheduler_Start_ContextCancel(t *testing.T) {
 		close(done)
 	}()
 
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(20 * time.Millisecond)
 	cancel()
 
 	select {
@@ -55,6 +59,8 @@ func TestBackupScheduler_Start_ContextCancel(t *testing.T) {
 }
 
 func TestBackupScheduler_CalculateNextBackup(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 

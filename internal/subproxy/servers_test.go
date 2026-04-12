@@ -10,12 +10,16 @@ import (
 )
 
 func TestLoadExtraConfig_EmptyPath(t *testing.T) {
+	t.Parallel()
+
 	cfg, err := LoadExtraConfig("")
 	assert.NoError(t, err)
 	assert.Nil(t, cfg)
 }
 
 func TestLoadExtraConfig_HeadersAndServers(t *testing.T) {
+	t.Parallel()
+
 	content := `X-Custom-Header: custom-value
 Profile-Title: My VPN
 # This is a comment
@@ -44,6 +48,8 @@ ss://base64@server3.example.com:8080
 }
 
 func TestLoadExtraConfig_OnlyHeaders(t *testing.T) {
+	t.Parallel()
+
 	content := `X-Custom: value
 # comment
 `
@@ -60,6 +66,8 @@ func TestLoadExtraConfig_OnlyHeaders(t *testing.T) {
 }
 
 func TestLoadExtraConfig_OnlyServers(t *testing.T) {
+	t.Parallel()
+
 	content := `
 vless://server@example.com:443
 trojan://pass@server2.com:443
@@ -77,11 +85,15 @@ trojan://pass@server2.com:443
 }
 
 func TestLoadExtraConfig_FileNotFound(t *testing.T) {
+	t.Parallel()
+
 	_, err := LoadExtraConfig("/nonexistent/path/config.txt")
 	assert.Error(t, err)
 }
 
 func TestLoadExtraConfig_InvalidLines(t *testing.T) {
+	t.Parallel()
+
 	content := `X-Valid: header
 not-a-valid-header-or-server
 vless://valid@server.com:443
@@ -101,6 +113,8 @@ http://not-a-proxy-link
 }
 
 func TestLoadExtraConfig_HeaderOverride(t *testing.T) {
+	t.Parallel()
+
 	content := `X-Duplicate: first
 X-Duplicate: second
 
