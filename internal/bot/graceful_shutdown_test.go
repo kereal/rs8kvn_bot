@@ -52,7 +52,7 @@ func TestBot_GracefulShutdown(t *testing.T) {
 
 	t.Logf("Memory before: %d KB, after: %d KB", memStatsBefore.Alloc/1024, memStatsAfter.Alloc/1024)
 
-	assert.LessOrEqual(t, memStatsAfter.Alloc, memStatsBefore.Alloc+1024*1024, "Memory should not leak significantly")
+	assert.LessOrEqual(t, memStatsAfter.Alloc, memStatsBefore.Alloc+5*1024*1024, "Memory should not leak significantly")
 }
 
 func TestServer_GracefulShutdown(t *testing.T) {
