@@ -6,7 +6,7 @@
 [![GitHub last commit](https://img.shields.io/github/last-commit/kereal/rs8kvn_bot?logo=github)](https://github.com/kereal/rs8kvn_bot/commits/dev)
 ![Coverage](https://img.shields.io/badge/coverage-85%25%2B-green)
 ![Tests](https://img.shields.io/badge/tests-passing-brightgreen)
-[![Go](https://img.shields.io/badge/Go-1.24%2B-00ADD8?logo=go)](https://go.dev/)
+[![Go](https://img.shields.io/badge/Go-1.25%2B-00ADD8?logo=go)](https://go.dev/)
 [![Go Report Card](https://goreportcard.com/badge/github.com/kereal/rs8kvn_bot)](https://goreportcard.com/report/github.com/kereal/rs8kvn_bot)
 [![GitHub stars](https://img.shields.io/github/stars/kereal/rs8kvn_bot?style=flat&logo=github)](https://github.com/kereal/rs8kvn_bot/stargazers)
 [![GitHub issues](https://img.shields.io/github/issues/kereal/rs8kvn_bot?logo=github)](https://github.com/kereal/rs8kvn_bot/issues)
@@ -43,7 +43,7 @@ Telegram bot for distributing VLESS+Reality+Vision proxy subscriptions from 3x-u
 ## Requirements
 
 - Docker & Docker Compose (recommended)
-- OR Go 1.24+
+- OR Go 1.25+
 - 3x-ui panel (https://github.com/MHSanaei/3x-ui)
 - Telegram Bot Token
 
