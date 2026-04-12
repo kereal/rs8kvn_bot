@@ -45,11 +45,15 @@ func (e *PermanentError) Unwrap() error {
 	return e.Err
 }
 
+// defaultRetryDelays defines the exponential backoff delays between retry attempts.
+var defaultRetryDelays = []time.Duration{0, 1 * time.Second, 5 * time.Second, 15 * time.Second}
+
 // Sender sends webhook events to Proxy Manager with retry logic.
 type Sender struct {
-	client *http.Client
-	url    string
-	secret string
+	client      *http.Client
+	url         string
+	secret      string
+	retryDelays []time.Duration
 }
 
 // NewSender creates a new webhook sender.
@@ -61,8 +65,9 @@ func NewSender(url, secret string) *Sender {
 		client: &http.Client{
 			Timeout: 10 * time.Second,
 		},
-		url:    url,
-		secret: secret,
+		url:         url,
+		secret:      secret,
+		retryDelays: defaultRetryDelays,
 	}
 
 	if url == "" {
@@ -84,8 +89,7 @@ func (s *Sender) SendAsync(event Event) {
 
 	// Capture event by value to avoid data races
 	go func(e Event) {
-		delays := []time.Duration{0, 1 * time.Second, 5 * time.Second, 15 * time.Second}
-		for i, delay := range delays {
+		for i, delay := range s.retryDelays {
 			if i > 0 {
 				time.Sleep(delay)
 				logger.Warn("Retrying webhook delivery",
@@ -172,6 +176,13 @@ func (s *Sender) send(event Event) error {
 		zap.Int("status_code", resp.StatusCode))
 
 	return fmt.Errorf("webhook returned status %d", resp.StatusCode)
+}
+
+// WithRetryDelays sets custom retry delays (mainly for testing).
+// The first delay should be 0 (immediate first attempt).
+func (s *Sender) WithRetryDelays(delays []time.Duration) *Sender {
+	s.retryDelays = delays
+	return s
 }
 
 // NoopSender is a webhook sender that does nothing (used for tests and when webhook is disabled).

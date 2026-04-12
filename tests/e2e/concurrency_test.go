@@ -240,7 +240,7 @@ func TestE2E_Concurrent_CreateDelete_SameUser(t *testing.T) {
 
 	go func() {
 		defer wg.Done()
-		time.Sleep(5 * time.Millisecond)
+		time.Sleep(1 * time.Millisecond)
 		deleteErr = env.subService.Delete(ctx, env.chatID)
 	}()
 

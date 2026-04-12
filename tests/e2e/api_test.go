@@ -410,7 +410,7 @@ func TestE2E_WebhookSender_EmptyURL(t *testing.T) {
 	})
 
 	// Give a small window to ensure no goroutine was started
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(20 * time.Millisecond)
 }
 
 // TestE2E_WebhookSender_ConcurrentEvents tests sending multiple webhooks concurrently.

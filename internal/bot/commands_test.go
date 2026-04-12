@@ -22,6 +22,8 @@ import (
 // are already defined in handlers_test.go and handlers_extended_test.go
 
 func TestHandleStart_WithTrialCode(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 
 	tests := []struct {
@@ -132,6 +134,8 @@ func TestHandleStart_WithTrialCode(t *testing.T) {
 }
 
 func TestHandleStart_NormalFlow(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123,
 		TrafficLimitGB:  50,
@@ -195,6 +199,8 @@ func TestHandleStart_NormalFlow(t *testing.T) {
 }
 
 func TestHandleStart_NilFrom(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{TelegramAdminID: 123}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -212,6 +218,8 @@ func TestHandleStart_NilFrom(t *testing.T) {
 }
 
 func TestHandleInvite_NilMessage(t *testing.T) {
+	t.Parallel()
+
 	handler := &Handler{}
 	ctx := context.Background()
 	update := tgbotapi.Update{}
@@ -221,6 +229,8 @@ func TestHandleInvite_NilMessage(t *testing.T) {
 }
 
 func TestHandleInvite_NilFrom(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -238,6 +248,8 @@ func TestHandleInvite_NilFrom(t *testing.T) {
 }
 
 func TestHandleInvite_Success(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		SiteURL: "https://example.com",
 	}
@@ -268,6 +280,8 @@ func TestHandleInvite_Success(t *testing.T) {
 }
 
 func TestHandleInvite_DatabaseError(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		SiteURL: "https://example.com",
 	}
@@ -295,6 +309,8 @@ func TestHandleInvite_DatabaseError(t *testing.T) {
 }
 
 func TestHandleHelp_Success(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TrafficLimitGB: 100,
 	}
@@ -318,6 +334,8 @@ func TestHandleHelp_Success(t *testing.T) {
 }
 
 func TestHandleHelp_VerifyHelpText(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TrafficLimitGB: 50,
 	}
@@ -336,6 +354,8 @@ func TestHandleHelp_VerifyHelpText(t *testing.T) {
 }
 
 func TestHandleBindTrial_AlreadyHasSubscription(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TrafficLimitGB: 50,
 		XUIInboundID:   1,
@@ -361,6 +381,8 @@ func TestHandleBindTrial_AlreadyHasSubscription(t *testing.T) {
 }
 
 func TestHandleBindTrial_DatabaseError(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TrafficLimitGB: 50,
 		XUIInboundID:   1,
@@ -385,6 +407,8 @@ func TestHandleBindTrial_DatabaseError(t *testing.T) {
 }
 
 func TestHandleBindTrial_WithReferrerNotification(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TrafficLimitGB:  50,
 		XUIInboundID:    1,
@@ -444,6 +468,8 @@ func TestHandleBindTrial_WithReferrerNotification(t *testing.T) {
 }
 
 func TestHandleStart_AdminUser(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  50,
@@ -473,6 +499,8 @@ func TestHandleStart_AdminUser(t *testing.T) {
 }
 
 func TestHandleBindTrial_Success(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TrafficLimitGB:  50,
 		XUIInboundID:    1,
@@ -508,6 +536,8 @@ func TestHandleBindTrial_Success(t *testing.T) {
 }
 
 func TestHandleShareStart_UserWithExistingSubscription(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  100,
@@ -534,6 +564,8 @@ func TestHandleShareStart_UserWithExistingSubscription(t *testing.T) {
 }
 
 func TestHandleShareStart_InvalidInviteCode(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  100,
@@ -562,6 +594,8 @@ func TestHandleShareStart_InvalidInviteCode(t *testing.T) {
 }
 
 func TestHandleShareStart_ValidInviteCode(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  100,
@@ -600,6 +634,8 @@ func TestHandleShareStart_ValidInviteCode(t *testing.T) {
 }
 
 func TestHandleStart_NilMessage(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{TelegramAdminID: 123456, TrafficLimitGB: 100}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -615,6 +651,8 @@ func TestHandleStart_NilMessage(t *testing.T) {
 }
 
 func TestHandleStart_ExistingSubscription(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{TelegramAdminID: 123456, TrafficLimitGB: 100}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -647,6 +685,8 @@ func TestHandleStart_ExistingSubscription(t *testing.T) {
 }
 
 func TestHandleHelp_NilMessage(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{TelegramAdminID: 123456, TrafficLimitGB: 100}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -662,6 +702,8 @@ func TestHandleHelp_NilMessage(t *testing.T) {
 }
 
 func TestHandleShareStart_WithExistingSubscription(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{TelegramAdminID: 123456, TrafficLimitGB: 100}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -689,6 +731,8 @@ func TestHandleShareStart_WithExistingSubscription(t *testing.T) {
 }
 
 func TestHandleStart_SharePrefix(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  100,
@@ -718,6 +762,8 @@ func TestHandleStart_SharePrefix(t *testing.T) {
 }
 
 func TestHandleBindTrial_UpdateClientError(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 0,
 		TrafficLimitGB:  100,
@@ -764,6 +810,8 @@ func TestHandleBindTrial_UpdateClientError(t *testing.T) {
 }
 
 func TestHandleBindTrial_GetInviteError(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  100,
@@ -799,6 +847,8 @@ func TestHandleBindTrial_GetInviteError(t *testing.T) {
 }
 
 func TestHandleMySubscription_ShowLoadingFails(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  100,

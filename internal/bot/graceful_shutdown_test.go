@@ -15,6 +15,8 @@ import (
 )
 
 func TestBot_GracefulShutdown(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID:  123456789,
 		TrafficLimitGB:   100,
@@ -33,8 +35,8 @@ func TestBot_GracefulShutdown(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	handler.StartCacheCleanup(ctx, 100*time.Millisecond)
-	handler.StartRateLimiterCleanup(ctx, 100*time.Millisecond, 500*time.Millisecond)
+	handler.StartCacheCleanup(ctx, 20*time.Millisecond)
+	handler.StartRateLimiterCleanup(ctx, 20*time.Millisecond, 100*time.Millisecond)
 
 	runtime.GC()
 	var memStatsBefore runtime.MemStats
@@ -42,7 +44,7 @@ func TestBot_GracefulShutdown(t *testing.T) {
 
 	cancel()
 
-	time.Sleep(200 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
 
 	runtime.GC()
 	var memStatsAfter runtime.MemStats
@@ -54,9 +56,11 @@ func TestBot_GracefulShutdown(t *testing.T) {
 }
 
 func TestServer_GracefulShutdown(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("Skipping in short mode")
 	}
+	t.Parallel()
 
 	cfg := &config.Config{
 		TrafficLimitGB:   10,
@@ -85,7 +89,7 @@ func TestServer_GracefulShutdown(t *testing.T) {
 		defer wg.Done()
 		select {
 		case <-ctx.Done():
-		case <-time.After(100 * time.Millisecond):
+		case <-time.After(20 * time.Millisecond):
 		}
 	}()
 
@@ -106,14 +110,16 @@ func TestServer_GracefulShutdown(t *testing.T) {
 }
 
 func TestHeartbeat_StopOnContextCancel(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("Skipping in short mode")
 	}
+	t.Parallel()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(20 * time.Millisecond)
 
 	select {
 	case <-ctx.Done():
@@ -131,9 +137,11 @@ func TestHeartbeat_StopOnContextCancel(t *testing.T) {
 }
 
 func TestGoroutineLeak(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("Skipping in short mode")
 	}
+	t.Parallel()
 
 	initialGoroutines := runtime.NumGoroutine()
 
@@ -143,16 +151,16 @@ func TestGoroutineLeak(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			time.Sleep(10 * time.Millisecond)
+			time.Sleep(2 * time.Millisecond)
 		}()
 	}
 
 	wg.Wait()
 
-	time.Sleep(50 * time.Millisecond)
+	time.Sleep(10 * time.Millisecond)
 
 	runtime.GC()
-	time.Sleep(50 * time.Millisecond)
+	time.Sleep(10 * time.Millisecond)
 
 	finalGoroutines := runtime.NumGoroutine()
 
@@ -162,6 +170,8 @@ func TestGoroutineLeak(t *testing.T) {
 }
 
 func TestGracefulShutdown_WithActiveUpdates(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID:  123456789,
 		TrafficLimitGB:   100,
@@ -180,20 +190,22 @@ func TestGracefulShutdown_WithActiveUpdates(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	handler.StartCacheCleanup(ctx, 50*time.Millisecond)
-	handler.StartRateLimiterCleanup(ctx, 50*time.Millisecond, 200*time.Millisecond)
+	handler.StartCacheCleanup(ctx, 10*time.Millisecond)
+	handler.StartRateLimiterCleanup(ctx, 10*time.Millisecond, 50*time.Millisecond)
 	handler.StartReferralCacheSync(ctx)
 
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(20 * time.Millisecond)
 
 	cancel()
 
-	time.Sleep(300 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
 
 	t.Log("Shutdown with active updates completed")
 }
 
 func TestGracefulShutdown_DatabaseClose(t *testing.T) {
+	t.Parallel()
+
 	mockDB := testutil.NewMockDatabaseService()
 
 	err := mockDB.Close()
@@ -204,6 +216,8 @@ func TestGracefulShutdown_DatabaseClose(t *testing.T) {
 }
 
 func TestGracefulShutdown_RateLimiterCleanup(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID:  123456789,
 		TrafficLimitGB:   100,
@@ -220,13 +234,13 @@ func TestGracefulShutdown_RateLimiterCleanup(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	handler.StartRateLimiterCleanup(ctx, 50*time.Millisecond, 200*time.Millisecond)
+	handler.StartRateLimiterCleanup(ctx, 10*time.Millisecond, 50*time.Millisecond)
 
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(20 * time.Millisecond)
 
 	cancel()
 
-	time.Sleep(300 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
 
 	t.Log("Rate limiter cleanup completed gracefully")
 }

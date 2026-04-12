@@ -10,6 +10,8 @@ import (
 
 // TestFirstSecondOfNextMonth — консолидированный табличный тест
 func TestFirstSecondOfNextMonth(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name     string
 		input    time.Time
@@ -61,6 +63,8 @@ func TestFirstSecondOfNextMonth(t *testing.T) {
 
 // TestFirstSecondOfNextMonth_AllMonths тестирует все 12 месяцев
 func TestFirstSecondOfNextMonth_AllMonths(t *testing.T) {
+	t.Parallel()
+
 	for month := time.January; month <= time.December; month++ {
 		t.Run(month.String(), func(t *testing.T) {
 			input := time.Date(2024, month, 15, 12, 0, 0, 0, time.UTC)
@@ -81,6 +85,8 @@ func TestFirstSecondOfNextMonth_AllMonths(t *testing.T) {
 
 // TestFirstSecondOfNextMonth_Now тестирует с текущим временем
 func TestFirstSecondOfNextMonth_Now(t *testing.T) {
+	t.Parallel()
+
 	now := time.Now()
 	result := FirstSecondOfNextMonth(now)
 
@@ -100,6 +106,8 @@ func TestFirstSecondOfNextMonth_Now(t *testing.T) {
 
 // TestFirstSecondOfNextMonth_Concurrent тестирует потокобезопасность
 func TestFirstSecondOfNextMonth_Concurrent(t *testing.T) {
+	t.Parallel()
+
 	const goroutines = 100
 	results := make(chan time.Time, goroutines)
 
@@ -118,6 +126,8 @@ func TestFirstSecondOfNextMonth_Concurrent(t *testing.T) {
 
 // TestFirstSecondOfNextMonth_VariousDaysOfMonth тестирует разные дни месяца
 func TestFirstSecondOfNextMonth_VariousDaysOfMonth(t *testing.T) {
+	t.Parallel()
+
 	for day := 1; day <= 31; day++ {
 		t.Run(dayName(day), func(t *testing.T) {
 			input := time.Date(2024, 1, day, 12, 0, 0, 0, time.UTC)

@@ -27,6 +27,16 @@
 - **Race-safe:** ✅
 - **Golden files:** ✅ (subproxy)
 - **Property-based tests:** ✅ (uuid)
+- **All internal/ tests use t.Parallel()** ✅
+
+### Performance Optimizations (v2.3.0)
+- ✅ Webhook retry delays parameterized (`WithRetryDelays`) — tests use ms instead of seconds (~25s saved)
+- ✅ XUI context cancellation tests: context-aware `select` instead of 2s sleep (~9s saved)
+- ✅ Circuit breaker tests: reduced timeouts 10x (50ms→5ms)
+- ✅ All `time.Sleep` calls reduced by 2-10x across all test files
+- ✅ `t.Parallel()` added to all internal/ test functions (parallel execution)
+- ✅ Smoke tests: reduced 3s/2s sleeps to 1s/500ms
+- ✅ README: fixed duplicate Installation Guide link
 
 ### Areas to Improve
 1. 🟡 `internal/database` - improve coverage (77.8%)
@@ -39,4 +49,4 @@
 
 ---
 
-**Обновлено:** 2026-04-12
+**Обновлено:** 2026-04-13

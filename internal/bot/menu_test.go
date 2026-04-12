@@ -16,6 +16,8 @@ import (
 )
 
 func TestHandleBackToStart_WithActiveSubscription(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 
 	mockBot := testutil.NewMockBotAPI()
@@ -48,6 +50,8 @@ func TestHandleBackToStart_WithActiveSubscription(t *testing.T) {
 }
 
 func TestHandleBackToStart_NoSubscription(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 
 	mockBot := testutil.NewMockBotAPI()
@@ -73,6 +77,8 @@ func TestHandleBackToStart_NoSubscription(t *testing.T) {
 }
 
 func TestHandleBackToStart_InactiveSubscription(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 
 	mockBot := testutil.NewMockBotAPI()
@@ -103,6 +109,8 @@ func TestHandleBackToStart_InactiveSubscription(t *testing.T) {
 }
 
 func TestHandleBackToStart_DatabaseError(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 
 	mockBot := testutil.NewMockBotAPI()
@@ -127,6 +135,8 @@ func TestHandleBackToStart_DatabaseError(t *testing.T) {
 }
 
 func TestHandleBackToStart_NilSubscription(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 
 	mockBot := testutil.NewMockBotAPI()
@@ -148,6 +158,8 @@ func TestHandleBackToStart_NilSubscription(t *testing.T) {
 }
 
 func TestHandleMenuDonate(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 
 	mockBot := testutil.NewMockBotAPI()
@@ -172,6 +184,8 @@ func TestHandleMenuDonate(t *testing.T) {
 }
 
 func TestHandleMenuDonate_WithDifferentUsernames(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 
 	mockBot := testutil.NewMockBotAPI()
@@ -204,6 +218,8 @@ func TestHandleMenuDonate_WithDifferentUsernames(t *testing.T) {
 }
 
 func TestHandleMenuHelp_WithSubscription(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 
 	mockBot := testutil.NewMockBotAPI()
@@ -238,6 +254,8 @@ func TestHandleMenuHelp_WithSubscription(t *testing.T) {
 }
 
 func TestHandleMenuHelp_NoSubscription(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 
 	mockBot := testutil.NewMockBotAPI()
@@ -262,6 +280,8 @@ func TestHandleMenuHelp_NoSubscription(t *testing.T) {
 }
 
 func TestHandleMenuHelp_DatabaseError(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 
 	mockBot := testutil.NewMockBotAPI()
@@ -286,6 +306,8 @@ func TestHandleMenuHelp_DatabaseError(t *testing.T) {
 }
 
 func TestHandleMenuHelp_VariousTrafficLimits(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 
 	testCases := []struct {
@@ -329,6 +351,8 @@ func TestHandleMenuHelp_VariousTrafficLimits(t *testing.T) {
 }
 
 func TestHandleBackToStart_VariousMessageIDs(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 
 	testCases := []struct {
@@ -370,6 +394,8 @@ func TestHandleBackToStart_VariousMessageIDs(t *testing.T) {
 }
 
 func TestHandleMenuHelp_ContextCancellation(t *testing.T) {
+	t.Parallel()
+
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
@@ -401,6 +427,8 @@ func TestHandleMenuHelp_ContextCancellation(t *testing.T) {
 }
 
 func TestHandleBackToStart_SendError(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 
 	mockBot := testutil.NewMockBotAPI()
@@ -427,6 +455,8 @@ func TestHandleBackToStart_SendError(t *testing.T) {
 }
 
 func TestHandleMenuDonate_SendError(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 
 	mockBot := testutil.NewMockBotAPI()
@@ -446,6 +476,8 @@ func TestHandleMenuDonate_SendError(t *testing.T) {
 }
 
 func TestHandleMenuHelp_SendError(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 
 	mockBot := testutil.NewMockBotAPI()
@@ -473,6 +505,8 @@ func TestHandleMenuHelp_SendError(t *testing.T) {
 }
 
 func TestHandleBackToStart_VariousChatIDs(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 
 	testCases := []struct {

@@ -10,12 +10,16 @@ import (
 )
 
 func TestNewPerUserRateLimiter(t *testing.T) {
+	t.Parallel()
+
 	rl := NewPerUserRateLimiter(10, 5)
 	require.NotNil(t, rl)
 	assert.Equal(t, 0, rl.BucketCount())
 }
 
 func TestPerUserRateLimiter_Allow_CreatesBucket(t *testing.T) {
+	t.Parallel()
+
 	rl := NewPerUserRateLimiter(5, 0)
 
 	assert.True(t, rl.Allow(1))
@@ -23,6 +27,8 @@ func TestPerUserRateLimiter_Allow_CreatesBucket(t *testing.T) {
 }
 
 func TestPerUserRateLimiter_Allow_DifferentUsers(t *testing.T) {
+	t.Parallel()
+
 	rl := NewPerUserRateLimiter(3, 0)
 
 	// Each user gets their own bucket
@@ -33,6 +39,8 @@ func TestPerUserRateLimiter_Allow_DifferentUsers(t *testing.T) {
 }
 
 func TestPerUserRateLimiter_Allow_SameUserDepletes(t *testing.T) {
+	t.Parallel()
+
 	rl := NewPerUserRateLimiter(2, 0)
 
 	assert.True(t, rl.Allow(1))
@@ -41,6 +49,8 @@ func TestPerUserRateLimiter_Allow_SameUserDepletes(t *testing.T) {
 }
 
 func TestPerUserRateLimiter_Allow_DoesNotCrossUsers(t *testing.T) {
+	t.Parallel()
+
 	rl := NewPerUserRateLimiter(1, 0)
 
 	assert.True(t, rl.Allow(1))
@@ -51,6 +61,8 @@ func TestPerUserRateLimiter_Allow_DoesNotCrossUsers(t *testing.T) {
 }
 
 func TestPerUserRateLimiter_Wait_Success(t *testing.T) {
+	t.Parallel()
+
 	rl := NewPerUserRateLimiter(1, 100) // fast refill
 	ctx := context.Background()
 
@@ -58,6 +70,8 @@ func TestPerUserRateLimiter_Wait_Success(t *testing.T) {
 }
 
 func TestPerUserRateLimiter_Wait_ContextCancelled(t *testing.T) {
+	t.Parallel()
+
 	rl := NewPerUserRateLimiter(1, 0) // no refill
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -68,6 +82,8 @@ func TestPerUserRateLimiter_Wait_ContextCancelled(t *testing.T) {
 }
 
 func TestPerUserRateLimiter_Wait_ContextTimeout(t *testing.T) {
+	t.Parallel()
+
 	rl := NewPerUserRateLimiter(1, 0.001) // very slow refill
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
@@ -83,6 +99,8 @@ func TestPerUserRateLimiter_Wait_ContextTimeout(t *testing.T) {
 }
 
 func TestPerUserRateLimiter_Cleanup_RemovesStale(t *testing.T) {
+	t.Parallel()
+
 	rl := NewPerUserRateLimiter(5, 100)
 
 	// Create buckets for 3 users
@@ -112,6 +130,8 @@ func TestPerUserRateLimiter_Cleanup_RemovesStale(t *testing.T) {
 }
 
 func TestPerUserRateLimiter_Cleanup_KeepsRecent(t *testing.T) {
+	t.Parallel()
+
 	rl := NewPerUserRateLimiter(5, 0)
 
 	rl.Allow(1)
@@ -124,6 +144,8 @@ func TestPerUserRateLimiter_Cleanup_KeepsRecent(t *testing.T) {
 }
 
 func TestPerUserRateLimiter_Cleanup_Empty(t *testing.T) {
+	t.Parallel()
+
 	rl := NewPerUserRateLimiter(5, 0)
 
 	removed := rl.Cleanup(1 * time.Hour)
@@ -131,6 +153,8 @@ func TestPerUserRateLimiter_Cleanup_Empty(t *testing.T) {
 }
 
 func TestPerUserRateLimiter_StartCleanup_ContextCancellation(t *testing.T) {
+	t.Parallel()
+
 	rl := NewPerUserRateLimiter(5, 0)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -152,6 +176,8 @@ func TestPerUserRateLimiter_StartCleanup_ContextCancellation(t *testing.T) {
 }
 
 func TestPerUserRateLimiter_ConcurrentAllow(t *testing.T) {
+	t.Parallel()
+
 	rl := NewPerUserRateLimiter(100, 0)
 
 	done := make(chan bool)
@@ -172,6 +198,8 @@ func TestPerUserRateLimiter_ConcurrentAllow(t *testing.T) {
 }
 
 func TestPerUserRateLimiter_GetOrCreateBucket_Deduplicates(t *testing.T) {
+	t.Parallel()
+
 	rl := NewPerUserRateLimiter(10, 0)
 
 	// Multiple calls for same user should return same bucket
@@ -182,6 +210,8 @@ func TestPerUserRateLimiter_GetOrCreateBucket_Deduplicates(t *testing.T) {
 }
 
 func TestPerUserRateLimiter_Refill_Isolated(t *testing.T) {
+	t.Parallel()
+
 	rl := NewPerUserRateLimiter(2, 100) // 100 tokens/sec
 
 	// Deplete user 1
@@ -195,6 +225,6 @@ func TestPerUserRateLimiter_Refill_Isolated(t *testing.T) {
 	assert.False(t, rl.Allow(2))
 
 	// Wait for user 1 refill
-	time.Sleep(30 * time.Millisecond)
+	time.Sleep(5 * time.Millisecond)
 	assert.True(t, rl.Allow(1))
 }
