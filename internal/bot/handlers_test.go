@@ -214,7 +214,7 @@ func TestSendInviteLink_Success(t *testing.T) {
 		bot:       mockBot,
 		botConfig: NewTestBotConfig(),
 		cache:     NewSubscriptionCache(100, 5*time.Minute),
-		keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, config.DonateCardNumber, config.DonateURL, cfg.SiteURL),
+		keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, cfg.DonateCardNumber, cfg.DonateURL, cfg.SiteURL),
 		sender:    NewMessageSender(mockBot, ratelimiter.NewPerUserRateLimiter(float64(config.RateLimiterMaxTokens), float64(config.RateLimiterRefillRate))),
 	}
 
