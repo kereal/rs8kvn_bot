@@ -39,8 +39,7 @@ func TestSentryLevelFromString(t *testing.T) {
 	}
 }
 
-func TestInit_CreatesDirectory(t *testing.T) {
-	t.Parallel()
+func Init_(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "subdir", "test.log")
@@ -55,8 +54,7 @@ func TestInit_CreatesDirectory(t *testing.T) {
 	Close()
 }
 
-func TestInit_InvalidLogLevel(t *testing.T) {
-	t.Parallel()
+func Init_(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
@@ -68,8 +66,7 @@ func TestInit_InvalidLogLevel(t *testing.T) {
 	Close()
 }
 
-func TestInfo(t *testing.T) {
-	t.Parallel()
+func Info(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
@@ -83,8 +80,7 @@ func TestInfo(t *testing.T) {
 	Info("test info message", zap.String("formatted", "formatted"))
 }
 
-func TestError(t *testing.T) {
-	t.Parallel()
+func Error(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
@@ -98,8 +94,7 @@ func TestError(t *testing.T) {
 	Error("test error message", zap.String("formatted", "formatted"))
 }
 
-func TestDebug(t *testing.T) {
-	t.Parallel()
+func Debug(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
@@ -113,8 +108,7 @@ func TestDebug(t *testing.T) {
 	Debug("test debug message", zap.String("formatted", "formatted"))
 }
 
-func TestWarn(t *testing.T) {
-	t.Parallel()
+func Warn(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
@@ -128,8 +122,7 @@ func TestWarn(t *testing.T) {
 	Warn("test warn message", zap.String("formatted", "formatted"))
 }
 
-func TestSync(t *testing.T) {
-	t.Parallel()
+func Sync(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
@@ -142,16 +135,14 @@ func TestSync(t *testing.T) {
 	_ = Sync()
 }
 
-func TestSync_NilLogger(t *testing.T) {
-	t.Parallel()
+func Sync_(t *testing.T) {
 	// This test verifies that Sync() handles edge cases gracefully.
 	// In production, the logger is always initialized before use.
 	// We skip this test as it tests deprecated nil-check behavior.
 	t.Skip("Testing nil logger behavior is deprecated; logger is always initialized in production")
 }
 
-func TestClose(t *testing.T) {
-	t.Parallel()
+func Close(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
@@ -163,8 +154,7 @@ func TestClose(t *testing.T) {
 	_ = Close()
 }
 
-func TestClose_NilLogger(t *testing.T) {
-	t.Parallel()
+func Close(t *testing.T) {
 
 	// This test verifies that Close() handles edge cases gracefully.
 	// In production, the logger is always initialized before use.
@@ -172,8 +162,7 @@ func TestClose_NilLogger(t *testing.T) {
 	t.Skip("Testing nil logger behavior is deprecated; logger is always initialized in production")
 }
 
-func TestClose_MultipleCalls(t *testing.T) {
-	t.Parallel()
+func Close(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
@@ -188,8 +177,7 @@ func TestClose_MultipleCalls(t *testing.T) {
 	_ = Close()
 }
 
-func TestLogFileWritten(t *testing.T) {
-	t.Parallel()
+func LogFileWritten(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
@@ -218,8 +206,7 @@ func TestLogFileWritten(t *testing.T) {
 
 // ==================== Service Tests ====================
 
-func TestNewService(t *testing.T) {
-	t.Parallel()
+func NewService(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
@@ -232,8 +219,7 @@ func TestNewService(t *testing.T) {
 	service.Close()
 }
 
-func TestNewService_CreatesDirectory(t *testing.T) {
-	t.Parallel()
+func NewService(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "subdir", "test.log")
@@ -248,8 +234,7 @@ func TestNewService_CreatesDirectory(t *testing.T) {
 	service.Close()
 }
 
-func TestService_Close(t *testing.T) {
-	t.Parallel()
+func Service_(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
@@ -261,8 +246,7 @@ func TestService_Close(t *testing.T) {
 	_ = service.Close()
 }
 
-func TestService_Info(t *testing.T) {
-	t.Parallel()
+func Service_(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
@@ -276,8 +260,7 @@ func TestService_Info(t *testing.T) {
 	service.Info("test info", zap.String("formatted", "formatted"))
 }
 
-func TestService_Debug(t *testing.T) {
-	t.Parallel()
+func Service_(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
@@ -290,8 +273,7 @@ func TestService_Debug(t *testing.T) {
 	service.Debug("test debug", zap.String("formatted", "formatted"))
 }
 
-func TestService_Warn(t *testing.T) {
-	t.Parallel()
+func Service_(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
@@ -304,8 +286,7 @@ func TestService_Warn(t *testing.T) {
 	service.Warn("test warn", zap.String("formatted", "formatted"))
 }
 
-func TestService_Error(t *testing.T) {
-	t.Parallel()
+func Service_(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
@@ -318,8 +299,7 @@ func TestService_Error(t *testing.T) {
 	service.Error("test error", zap.String("formatted", "formatted"))
 }
 
-func TestService_With(t *testing.T) {
-	t.Parallel()
+func Service_(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
@@ -334,8 +314,7 @@ func TestService_With(t *testing.T) {
 	newService.Info("test with field")
 }
 
-func TestService_WithFields(t *testing.T) {
-	t.Parallel()
+func Service_(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
@@ -353,8 +332,7 @@ func TestService_WithFields(t *testing.T) {
 	newService.Info("test with fields")
 }
 
-func TestService_SetSentryHub(t *testing.T) {
-	t.Parallel()
+func Service_(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
@@ -369,8 +347,7 @@ func TestService_SetSentryHub(t *testing.T) {
 
 // ==================== tgbotapiLogger Tests ====================
 
-func TestTgbotapiLogger_Println(t *testing.T) {
-	t.Parallel()
+func Tgbotapi(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
@@ -385,8 +362,7 @@ func TestTgbotapiLogger_Println(t *testing.T) {
 	logger.Println("test", "message")
 }
 
-func TestTgbotapiLogger_Printf(t *testing.T) {
-	t.Parallel()
+func Tgbotapi(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
@@ -403,8 +379,7 @@ func TestTgbotapiLogger_Printf(t *testing.T) {
 
 // ==================== stdLogWriter Tests ====================
 
-func TestStdLogWriter_Write(t *testing.T) {
-	t.Parallel()
+func StdLog(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
@@ -432,8 +407,7 @@ func TestStdLogWriter_Write(t *testing.T) {
 
 // ==================== SetSentryHub Tests ====================
 
-func TestSetSentryHub(t *testing.T) {
-	t.Parallel()
+func SetSentryHub(t *testing.T) {
 
 	// Should not panic with nil hub
 	SetSentryHub(nil)
@@ -441,8 +415,7 @@ func TestSetSentryHub(t *testing.T) {
 
 // ==================== Writer Tests ====================
 
-func TestWriter(t *testing.T) {
-	t.Parallel()
+func Writer(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
@@ -462,8 +435,7 @@ func TestWriter(t *testing.T) {
 
 // ==================== RedirectStdLog Tests ====================
 
-func TestRedirectStdLog_ActualRedirection(t *testing.T) {
-	t.Parallel()
+func RedirectStdLog(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
@@ -497,8 +469,7 @@ func TestRedirectStdLog_ActualRedirection(t *testing.T) {
 
 // ==================== Edge Cases ====================
 
-func TestNilLoggerSafety(t *testing.T) {
-	t.Parallel()
+func NilLogger(t *testing.T) {
 
 	// This test verifies that global functions handle nil logger gracefully.
 	// In production, the logger is always initialized before use.
@@ -506,8 +477,7 @@ func TestNilLoggerSafety(t *testing.T) {
 	t.Skip("Testing nil logger behavior is deprecated; logger is always initialized in production")
 }
 
-func TestFatal_NilLogger(t *testing.T) {
-	t.Parallel()
+func Fatal_(t *testing.T) {
 
 	// This test verifies that Fatal() handles nil logger gracefully.
 	// In production, the logger is always initialized before use.
@@ -515,15 +485,13 @@ func TestFatal_NilLogger(t *testing.T) {
 	t.Skip("Testing nil logger behavior is deprecated; logger is always initialized in production")
 }
 
-func TestFlushSentry(t *testing.T) {
-	t.Parallel()
+func FlushSentry(t *testing.T) {
 
 	// flushSentry should not panic with nil hub
 	flushSentry(0)
 }
 
-func TestCaptureToSentry(t *testing.T) {
-	t.Parallel()
+func CaptureToSentry(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
@@ -537,14 +505,12 @@ func TestCaptureToSentry(t *testing.T) {
 	captureToSentry("error message", "error")
 }
 
-func TestService_Fatal(t *testing.T) {
-	t.Parallel()
+func Service_(t *testing.T) {
 
 	t.Skip("Fatal calls os.Exit which kills the test process")
 }
 
-func TestService_WithError(t *testing.T) {
-	t.Parallel()
+func Service_(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
@@ -561,8 +527,7 @@ func TestService_WithError(t *testing.T) {
 	newService.Info("logged with error")
 }
 
-func TestService_WithError_NoSentry(t *testing.T) {
-	t.Parallel()
+func Service_(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
@@ -577,8 +542,7 @@ func TestService_WithError_NoSentry(t *testing.T) {
 	newService.Info("test")
 }
 
-func TestService_CaptureSentry_NoSentry(t *testing.T) {
-	t.Parallel()
+func Service_(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
@@ -590,8 +554,7 @@ func TestService_CaptureSentry_NoSentry(t *testing.T) {
 	service.captureSentry("test message", sentry.LevelInfo)
 }
 
-func TestService_FlushSentry_NoSentry(t *testing.T) {
-	t.Parallel()
+func Service_(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
@@ -631,8 +594,7 @@ func TestIsStdoutError_OtherError(t *testing.T) {
 
 // ==================== Service Sentry Tests ====================
 
-func TestService_CaptureSentry_WithHub(t *testing.T) {
-	t.Parallel()
+func Service_(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
@@ -652,8 +614,7 @@ func TestService_CaptureSentry_WithHub(t *testing.T) {
 	service.captureSentry("test message with hub", sentry.LevelError)
 }
 
-func TestService_FlushSentry_WithHub(t *testing.T) {
-	t.Parallel()
+func Service_(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
@@ -672,8 +633,7 @@ func TestService_FlushSentry_WithHub(t *testing.T) {
 	service.flushSentry(100 * time.Millisecond)
 }
 
-func TestService_WithError_WithHub(t *testing.T) {
-	t.Parallel()
+func Service_(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
@@ -695,8 +655,7 @@ func TestService_WithError_WithHub(t *testing.T) {
 
 // ==================== Close Error Aggregation Tests ====================
 
-func TestClose_BothErrors(t *testing.T) {
-	t.Parallel()
+func Close(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
