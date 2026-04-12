@@ -1,5 +1,7 @@
 # Environment
 .env
+.env.*
+!.env.example
 
 # Data
 *.db
@@ -23,6 +25,12 @@ rs8kvn_bot
 # Test
 *.test
 *.out
+coverage.out
+coverage.html
+
+# Temporary
+tmp/
+temp/
 
 # Go
 go.work
@@ -34,3 +42,8 @@ go.work.sum
 *.swp
 *.swo
 *~
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
