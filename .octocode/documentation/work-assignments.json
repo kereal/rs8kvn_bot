@@ -1,0 +1,102 @@
+{
+  "assignments": [
+    {
+      "writer_id": "writer-1",
+      "files": ["01-architecture.md"],
+      "questions": [1],
+      "title": "Architecture Overview",
+      "importance": "high"
+    },
+    {
+      "writer_id": "writer-1",
+      "files": ["02-bot-handler.md"],
+      "questions": [2],
+      "title": "Bot Handler",
+      "importance": "high"
+    },
+    {
+      "writer_id": "writer-2",
+      "files": ["03-database.md"],
+      "questions": [3],
+      "title": "Database & Migrations",
+      "importance": "high"
+    },
+    {
+      "writer_id": "writer-2",
+      "files": ["04-xui-client.md"],
+      "questions": [4],
+      "title": "XUI Client",
+      "importance": "high"
+    },
+    {
+      "writer_id": "writer-3",
+      "files": ["05-subscription-flow.md"],
+      "questions": [5],
+      "title": "Subscription Creation Flow",
+      "importance": "high"
+    },
+    {
+      "writer_id": "writer-3",
+      "files": ["06-referral-system.md"],
+      "questions": [6],
+      "title": "Referral System",
+      "importance": "high"
+    },
+    {
+      "writer_id": "writer-3",
+      "files": ["07-cache.md"],
+      "questions": [7],
+      "title": "LRU Cache",
+      "importance": "medium"
+    },
+    {
+      "writer_id": "writer-4",
+      "files": ["08-rate-limiting.md", "09-circuit-breaker.md"],
+      "questions": [8, 9],
+      "title": "Resilience Patterns",
+      "importance": "medium"
+    },
+    {
+      "writer_id": "writer-4",
+      "files": ["10-web-server.md"],
+      "questions": [10],
+      "title": "Web Server",
+      "importance": "medium"
+    },
+    {
+      "writer_id": "writer-4",
+      "files": ["11-subscription-proxy.md"],
+      "questions": [11],
+      "title": "Subscription Proxy",
+      "importance": "medium"
+    },
+    {
+      "writer_id": "writer-5",
+      "files": ["12-scheduler.md", "13-configuration.md"],
+      "questions": [12, 13],
+      "title": "Operations",
+      "importance": "medium"
+    },
+    {
+      "writer_id": "writer-5",
+      "files": ["14-testing.md", "15-deployment.md"],
+      "questions": [14, 15],
+      "title": "Testing & Deployment",
+      "importance": "low"
+    },
+    {
+      "writer_id": "writer-5",
+      "files": ["16-error-handling.md"],
+      "questions": [16],
+      "title": "Error Handling",
+      "importance": "medium"
+    }
+  ],
+  "writers": [
+    {"id": "writer-1", "name": "Architecture Writer", "files": 2, "questions": 2},
+    {"id": "writer-2", "name": "Data Layer Writer", "files": 2, "questions": 2},
+    {"id": "writer-3", "name": "Core Flow Writer", "files": 3, "questions": 3},
+    {"id": "writer-4", "name": "Infrastructure Writer", "files": 3, "questions": 3},
+    {"id": "writer-5", "name": "Ops Writer", "files": 4, "questions": 4}
+  ]
+}

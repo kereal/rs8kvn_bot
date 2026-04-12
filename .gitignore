@@ -43,14 +43,6 @@ go.work.sum
 *.swo
 *~
 
-# AI Agent Tools
-.agents/
-.kilo/
-.octocode/
-.opencode/
-.qwen/
-.serena/
-
 # OS
 .DS_Store
 Thumbs.db
