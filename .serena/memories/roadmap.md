@@ -15,7 +15,7 @@
 - **Приоритет:** Монетизация и рост
 - **Оптимизация памяти:** O(1) LRU cache ✅
 
-## Рефакторинг v2.2.0 → v2.3.0 (2026-04-10) ✅ ВСЕ ВЫПОЛНЕНО
+## Рефакторинг v2.2.0 (2026-04-10) ✅ ВСЕ ВЫПОЛНЕНО
 
 ### Фаза 1: Багфиксы ✅
 
@@ -105,7 +105,7 @@
 
 ---
 
-## v2.3.2 Bugfixes (2026-04-11) ✅ ВСЕ ВЫПОЛНЕНО
+## v2.2.0 Bugfixes (2026-04-11) ✅ ВСЕ ВЫПОЛНЕНО
 
 1. ✅ **escapeMarkdown missing backslash** — `\` добавлен первым в список экранирования MarkdownV2
 2. ✅ **HandleBroadcast 30s timeout** — заменён на 5 минут
@@ -113,6 +113,15 @@
 4. ✅ **pendingInvites утечка памяти** — добавлена периодическая очистка
 5. ✅ **handleMySubscription дублирует GetWithTraffic** — заменено на вызов service слоя
 6. ✅ **CleanupExpiredTrials wrong cutoff** — отдельный 1h cutoff для trial_requests
+
+---
+
+## v2.2.0 Bugfixes (2026-04-12) ✅ ВСЕ ВЫПОЛНЕНО
+
+1. ✅ **Fix #1+#2 (P0+P1): ExpiryTime not stored in DB** — `service.Create()` now stores `ExpiryTime: expiryTime` instead of `time.Time{}`. Admin notifications show actual reset date. `GetWithTraffic` fallback preserved for backward compatibility.
+2. ✅ **Fix #3 (P1): `/sub/{subID}` serves revoked subscriptions** — Added `IsActive()` check in `handleSubscription` after DB lookup. Cache hit status verification with `InvalidateCache(key)`. 4 new tests.
+3. ✅ **Fix #4 (P2): Hard vs soft delete inconsistency** — Removed `Unscoped()` from `DeleteSubscriptionByID`. Both delete methods now use GORM soft delete consistently.
+4. ✅ **Fix #6 (P3): `SubscriptionCache.Get` uses exclusive Lock** — Changed to RLock → Lock upgrade pattern. Fast path: RLock for concurrent reads. Slow path: Lock only for mutations.
 
 ---
 

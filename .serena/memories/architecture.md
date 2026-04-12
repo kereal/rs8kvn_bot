@@ -369,6 +369,13 @@ SIGTERM → Отмена контекста
 - 3x-ui HTTP API
 - Sentry (ошибки)
 
+### Важные архитектурные решения (v2.2.0)
+
+1. **Все удаления — soft delete** — `DeleteSubscriptionByID` и `DeleteSubscriptionByTelegramID` используют GORM soft delete (`deleted_at`). Записи остаются доступны через `Unscoped()`.
+2. **Проверка статуса подписки** — `/sub/{subID}` проверяет `IsActive()` после DB lookup. Отозванные/просроченные подписки возвращают 404. При cache hit — верификация статуса с инвалидацией через `InvalidateCache(key)`.
+3. **RLock в SubscriptionCache** — `Get()` использует RLock для конкурентного чтения, Lock только для мутаций (eviction, LRU promotion).
+4. **ExpiryTime сохраняется в БД** — `service.Create()` теперь сохраняет `ExpiryTime: expiryTime` в БД, а не `time.Time{}`.
+
 ### Планируемые
 
 - ЮKassa / Т-Банк Pay (платежи)
@@ -395,5 +402,5 @@ SIGTERM → Отмена контекста
 
 ---
 
-**Последнее обновление:** 2026-04-05  
+**Последнее обновление:** 2026-04-12  
 **Автор:** AI Assistant
