@@ -47,7 +47,7 @@ This is a Telegram bot for distributing VLESS+Reality+Vision proxy subscriptions
 - `internal/utils/` - Utility functions (time, UUID, QR codes)
 - `internal/config/` - Configuration management
 - `internal/logger/` - Logging setup
-- `internal/health/` - Health check endpoints
+- `internal/webhook/` - Webhook sender for Proxy Manager
 - `internal/heartbeat/` - Heartbeat monitoring
 - `internal/backup/` - Database backup functionality
 - `internal/ratelimiter/` - Rate limiting logic

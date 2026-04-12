@@ -76,7 +76,7 @@ Admins (specified in `TELEGRAM_ADMIN_ID`) have access to additional commands:
 | `/lastreg` | Show the last 10 registered users |
 | `/del <id>` | Delete a subscription by database ID |
 | `/broadcast <message>` | Send a message to all users who have a subscription |
-| `/send <id\|username> <message>` | Send a message to a specific user |
+| `/send <id|username> <message>` | Send a message to a specific user |
 | `/refstats` | Show referral statistics (count per user from cache) |
 
 **Examples:**
@@ -149,7 +149,6 @@ go build -ldflags="-s -w" -o rs8kvn_bot ./cmd/bot
 ### Project Documentation
 
 - **[Installation Guide](doc/installation.md)** — Full setup instructions and configuration
-- **[Development Plan](doc/PLAN.md)** — Bug fixes, improvements, roadmap
-- **[Handover](doc/HANDOVER.md)** — Architecture, stack, current state
-- **[.serena/instructions.md](.serena/instructions.md)** — AI assistant workflow and memory structure
+- **[Installation & Configuration](doc/installation.md)** — All setup methods and env vars
+- **[Handover](doc/handover.md)** — Architecture, stack, current state, nuances
 - **[.serena/instructions.md](.serena/instructions.md)** — AI assistant workflow and memory structure
