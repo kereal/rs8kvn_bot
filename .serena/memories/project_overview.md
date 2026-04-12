@@ -23,7 +23,10 @@ This is a Telegram bot for distributing VLESS+Reality+Vision proxy subscriptions
 - Circuit breaker for 3x-ui panel
 - Donate message with card number in config (constants.go)
 - Friendly and inviting donation message tone
-- **O(1) LRU subscription cache** (container/list)
+- **O(1) LRU subscription cache** (container/list, RLock for concurrent reads)
+- **Subscription status check in /sub/{subID}** — revoked/expired subscriptions return 404
+- **Unified soft delete for all subscription deletions** (GORM `deleted_at`)
+- **ExpiryTime saved in DB on Create** — admin sees actual reset date
 - **Merged referral cache** (counts + dirty in one map)
 - **pendingInvites periodic cleanup** — prevents memory leak from expired share-link entries
 - **MarkdownV2 proper escaping** — backslash-first escaping prevents double-escape and broken formatting
@@ -52,7 +55,7 @@ This is a Telegram bot for distributing VLESS+Reality+Vision proxy subscriptions
 - `internal/backup/` - Database backup functionality
 - `internal/ratelimiter/` - Rate limiting logic
 - `internal/web/` - Web endpoints (health, invite/trial, subscription proxy)
-- `internal/subproxy/` - Subscription proxy (cache, merge, extra config)
+- `internal/subproxy/` - Subscription proxy (cache, merge, extra config, InvalidateCache for status changes)
 - `internal/interfaces/` - Interface definitions
 - `internal/testutil/` - Test utilities and mocks
 

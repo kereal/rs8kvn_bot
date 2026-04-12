@@ -37,23 +37,42 @@ func NewSubscriptionCache(maxSize int, ttl time.Duration) *SubscriptionCache {
 }
 
 func (c *SubscriptionCache) Get(telegramID int64) *database.Subscription {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
+	// Fast path: read under RLock
+	c.mu.RLock()
 	elem, ok := c.items[telegramID]
 	if !ok {
+		c.mu.RUnlock()
 		return nil
 	}
-
 	item := elem.Value.(*lruItem)
-	if time.Now().After(item.entry.expiresAt) {
-		c.lru.Remove(elem)
-		delete(c.items, telegramID)
+	expired := time.Now().After(item.entry.expiresAt)
+	sub := item.entry.sub
+	c.mu.RUnlock()
+
+	if expired {
+		// Slow path: lazy eviction under exclusive Lock
+		c.mu.Lock()
+		// Re-check: another goroutine may have already evicted or updated it
+		if elem, ok = c.items[telegramID]; ok {
+			it := elem.Value.(*lruItem)
+			if time.Now().After(it.entry.expiresAt) {
+				c.lru.Remove(elem)
+				delete(c.items, telegramID)
+			}
+		}
+		c.mu.Unlock()
 		return nil
 	}
 
-	c.lru.MoveToBack(elem)
-	return item.entry.sub
+	// LRU promotion: MoveToBack under exclusive Lock
+	c.mu.Lock()
+	// Re-check: element may have been evicted between RUnlock and Lock
+	if elem, ok = c.items[telegramID]; ok {
+		c.lru.MoveToBack(elem)
+	}
+	c.mu.Unlock()
+
+	return sub
 }
 
 func (c *SubscriptionCache) Set(telegramID int64, sub *database.Subscription) {
