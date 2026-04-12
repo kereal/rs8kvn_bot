@@ -11,6 +11,8 @@ import (
 )
 
 func TestNewTokenBucket(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name       string
 		maxTokens  float64
@@ -33,6 +35,8 @@ func TestNewTokenBucket(t *testing.T) {
 }
 
 func TestTokenBucket_Allow_WhenTokensAvailable(t *testing.T) {
+	t.Parallel()
+
 	tb := NewTokenBucket(10, 1)
 
 	// Should allow when tokens available
@@ -45,6 +49,8 @@ func TestTokenBucket_Allow_WhenTokensAvailable(t *testing.T) {
 }
 
 func TestTokenBucket_Allow_ConsumesTokens(t *testing.T) {
+	t.Parallel()
+
 	tb := NewTokenBucket(5, 1)
 
 	// Consume all tokens
@@ -57,6 +63,8 @@ func TestTokenBucket_Allow_ConsumesTokens(t *testing.T) {
 }
 
 func TestTokenBucket_Allow_RefillsOverTime(t *testing.T) {
+	t.Parallel()
+
 	tb := NewTokenBucket(10, 100) // 100 tokens per second
 
 	// Consume all tokens
@@ -65,13 +73,15 @@ func TestTokenBucket_Allow_RefillsOverTime(t *testing.T) {
 	}
 
 	// Wait for refill (100 tokens/sec = 1 token per 10ms)
-	time.Sleep(50 * time.Millisecond)
+	time.Sleep(10 * time.Millisecond)
 
 	// Should have tokens again
 	assert.True(t, tb.Allow(), "Allow() after waiting for refill, expected true")
 }
 
 func TestTokenBucket_Wait_WhenTokenAvailable(t *testing.T) {
+	t.Parallel()
+
 	tb := NewTokenBucket(10, 1)
 	ctx := context.Background()
 
@@ -84,6 +94,8 @@ func TestTokenBucket_Wait_WhenTokenAvailable(t *testing.T) {
 }
 
 func TestTokenBucket_Wait_WhenNoTokenAvailable(t *testing.T) {
+	t.Parallel()
+
 	tb := NewTokenBucket(1, 100) // 100 tokens per second = 1 token per 10ms
 
 	// Consume the only token
@@ -99,6 +111,8 @@ func TestTokenBucket_Wait_WhenNoTokenAvailable(t *testing.T) {
 }
 
 func TestTokenBucket_Wait_ContextCancellation(t *testing.T) {
+	t.Parallel()
+
 	tb := NewTokenBucket(1, 0.001) // Very slow refill rate
 
 	// Consume the only token
@@ -112,6 +126,8 @@ func TestTokenBucket_Wait_ContextCancellation(t *testing.T) {
 }
 
 func TestTokenBucket_Wait_ContextTimeout(t *testing.T) {
+	t.Parallel()
+
 	tb := NewTokenBucket(1, 0.001) // Very slow refill rate
 
 	// Consume the only token
@@ -129,10 +145,12 @@ func TestTokenBucket_Wait_ContextTimeout(t *testing.T) {
 }
 
 func TestTokenBucket_Refill_DoesNotExceedMax(t *testing.T) {
+	t.Parallel()
+
 	tb := NewTokenBucket(10, 100)
 
 	// Wait for potential refill
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(20 * time.Millisecond)
 
 	tb.mu.Lock()
 	tokens := tb.tokens
@@ -142,6 +160,8 @@ func TestTokenBucket_Refill_DoesNotExceedMax(t *testing.T) {
 }
 
 func TestTokenBucket_ConcurrentAccess(t *testing.T) {
+	t.Parallel()
+
 	tb := NewTokenBucket(100, 100)
 	done := make(chan bool)
 
@@ -169,6 +189,8 @@ func TestTokenBucket_ConcurrentAccess(t *testing.T) {
 }
 
 func TestTokenBucket_ZeroRefillRate(t *testing.T) {
+	t.Parallel()
+
 	tb := NewTokenBucket(1, 0)
 
 	// Should allow first request
@@ -186,6 +208,8 @@ func TestTokenBucket_ZeroRefillRate(t *testing.T) {
 }
 
 func TestTokenBucket_AvailableTokens(t *testing.T) {
+	t.Parallel()
+
 	tb := NewTokenBucket(10, 5)
 
 	// Initial available tokens should be 10
@@ -200,6 +224,8 @@ func TestTokenBucket_AvailableTokens(t *testing.T) {
 }
 
 func TestTokenBucket_AllowN_MoreThanAvailable(t *testing.T) {
+	t.Parallel()
+
 	tb := NewTokenBucket(5, 0)
 
 	// Try to consume more than available
@@ -207,6 +233,8 @@ func TestTokenBucket_AllowN_MoreThanAvailable(t *testing.T) {
 }
 
 func TestTokenBucket_WaitN_Success(t *testing.T) {
+	t.Parallel()
+
 	tb := NewTokenBucket(10, 1000)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
@@ -217,6 +245,8 @@ func TestTokenBucket_WaitN_Success(t *testing.T) {
 }
 
 func TestTokenBucket_WaitN_Timeout(t *testing.T) {
+	t.Parallel()
+
 	tb := NewTokenBucket(1, 0)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
@@ -230,6 +260,8 @@ func TestTokenBucket_WaitN_Timeout(t *testing.T) {
 }
 
 func TestTokenBucket_Burst_100Concurrent(t *testing.T) {
+	t.Parallel()
+
 	tb := NewTokenBucket(30, 5) // 30 tokens, 5/sec refill
 
 	var wg sync.WaitGroup
@@ -263,6 +295,8 @@ func TestTokenBucket_Burst_100Concurrent(t *testing.T) {
 }
 
 func TestTokenBucket_Burst_Boundary(t *testing.T) {
+	t.Parallel()
+
 	tb := NewTokenBucket(10, 10)
 
 	// Fill to capacity
@@ -274,13 +308,15 @@ func TestTokenBucket_Burst_Boundary(t *testing.T) {
 	assert.False(t, tb.Allow(), "Should block 11th request (boundary)")
 
 	// Wait for refill
-	time.Sleep(200 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
 
 	// Should be allowed after refill
 	assert.True(t, tb.Allow(), "Should allow after refill")
 }
 
 func TestTokenBucket_PerUserIsolation(t *testing.T) {
+	t.Parallel()
+
 	tb1 := NewTokenBucket(5, 1)
 	tb2 := NewTokenBucket(5, 1)
 

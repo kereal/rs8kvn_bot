@@ -54,7 +54,7 @@ LOG_LEVEL=debug
 	err = cmd.Start()
 	require.NoError(t, err, "Failed to start binary")
 
-	time.Sleep(3 * time.Second)
+	time.Sleep(1 * time.Second)
 
 	processExited := false
 	exitCode := 0
@@ -134,7 +134,7 @@ XUI_INBOUND_ID=1
 				require.NoError(t, err)
 			}
 
-			time.Sleep(2 * time.Second)
+			time.Sleep(500 * time.Millisecond)
 
 			if cmd.Process != nil {
 				_ = cmd.Process.Kill()
@@ -190,7 +190,7 @@ XUI_INBOUND_ID=1
 			err = cmd.Start()
 			require.NoError(t, err)
 
-			time.Sleep(2 * time.Second)
+			time.Sleep(500 * time.Millisecond)
 
 			if cmd.Process != nil {
 				_ = cmd.Process.Kill()

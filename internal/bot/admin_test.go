@@ -66,6 +66,8 @@ func createCommandUpdate(chatID int64, from *tgbotapi.User, text string) tgbotap
 }
 
 func TestHandleDel_NonAdminUser(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 999999,
 		TrafficLimitGB:  50,
@@ -84,6 +86,8 @@ func TestHandleDel_NonAdminUser(t *testing.T) {
 }
 
 func TestHandleDel_ValidDeletion(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  50,
@@ -129,6 +133,8 @@ func TestHandleDel_ValidDeletion(t *testing.T) {
 }
 
 func TestHandleDel_InvalidIDFormat(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  50,
@@ -181,6 +187,8 @@ func TestHandleDel_InvalidIDFormat(t *testing.T) {
 }
 
 func TestHandleDel_GetByIDError(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  50,
@@ -203,6 +211,8 @@ func TestHandleDel_GetByIDError(t *testing.T) {
 }
 
 func TestHandleDel_XUIDeleteFailure(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  50,
@@ -234,6 +244,8 @@ func TestHandleDel_XUIDeleteFailure(t *testing.T) {
 }
 
 func TestHandleDel_DatabaseDeleteFailure(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  50,
@@ -272,6 +284,8 @@ func TestHandleDel_DatabaseDeleteFailure(t *testing.T) {
 }
 
 func TestHandleDel_CacheInvalidation(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  50,
@@ -319,6 +333,8 @@ func TestHandleDel_CacheInvalidation(t *testing.T) {
 }
 
 func TestHandleBroadcast_NonAdminUser(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 999999,
 		TrafficLimitGB:  50,
@@ -337,6 +353,8 @@ func TestHandleBroadcast_NonAdminUser(t *testing.T) {
 }
 
 func TestHandleBroadcast_ValidBroadcast(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  50,
@@ -367,6 +385,8 @@ func TestHandleBroadcast_ValidBroadcast(t *testing.T) {
 }
 
 func TestHandleBroadcast_NoMessage(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  50,
@@ -385,6 +405,8 @@ func TestHandleBroadcast_NoMessage(t *testing.T) {
 }
 
 func TestHandleBroadcast_NoUsers(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  50,
@@ -407,6 +429,8 @@ func TestHandleBroadcast_NoUsers(t *testing.T) {
 }
 
 func TestHandleBroadcast_DatabaseError(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  50,
@@ -430,6 +454,8 @@ func TestHandleBroadcast_DatabaseError(t *testing.T) {
 }
 
 func TestHandleBroadcast_SendFailure(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  50,
@@ -456,6 +482,8 @@ func TestHandleBroadcast_SendFailure(t *testing.T) {
 }
 
 func TestHandleBroadcast_ContextCancellation(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  50,
@@ -486,6 +514,8 @@ func TestHandleBroadcast_ContextCancellation(t *testing.T) {
 
 // TestHandleBroadcast_MultipleBatches tests broadcast with multiple batches of users
 func TestHandleBroadcast_MultipleBatches(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  50,
@@ -540,6 +570,8 @@ func TestHandleBroadcast_MultipleBatches(t *testing.T) {
 
 // TestHandleBroadcast_BatchError tests broadcast when GetTelegramIDsBatch fails
 func TestHandleBroadcast_BatchError(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  50,
@@ -573,6 +605,8 @@ func TestHandleBroadcast_BatchError(t *testing.T) {
 
 // TestHandleBroadcast_EmptyBatchAfterFirst tests handling of empty subsequent batches
 func TestHandleBroadcast_EmptyBatchAfterFirst(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  50,
@@ -606,6 +640,8 @@ func TestHandleBroadcast_EmptyBatchAfterFirst(t *testing.T) {
 
 // TestHandleBroadcast_GetTelegramIDsBatchErrorOnFirstCall tests error on first batch call
 func TestHandleBroadcast_GetTelegramIDsBatchErrorOnFirstCall(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  50,
@@ -633,6 +669,8 @@ func TestHandleBroadcast_GetTelegramIDsBatchErrorOnFirstCall(t *testing.T) {
 
 // TestHandleBroadcast_ConcurrentBroadcasts tests handling of concurrent broadcast attempts
 func TestHandleBroadcast_ConcurrentBroadcasts(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  50,
@@ -676,6 +714,8 @@ func TestHandleBroadcast_ConcurrentBroadcasts(t *testing.T) {
 }
 
 func TestHandleSend_NonAdminUser(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 999999,
 		TrafficLimitGB:  50,
@@ -694,6 +734,8 @@ func TestHandleSend_NonAdminUser(t *testing.T) {
 }
 
 func TestHandleSend_ByNumericID(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  50,
@@ -712,6 +754,8 @@ func TestHandleSend_ByNumericID(t *testing.T) {
 }
 
 func TestHandleSend_ByUsernameLookup(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  50,
@@ -735,6 +779,8 @@ func TestHandleSend_ByUsernameLookup(t *testing.T) {
 }
 
 func TestHandleSend_ByUsernameWithAt(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  50,
@@ -757,6 +803,8 @@ func TestHandleSend_ByUsernameWithAt(t *testing.T) {
 }
 
 func TestHandleSend_InvalidFormat(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name string
 		text string
@@ -790,6 +838,8 @@ func TestHandleSend_InvalidFormat(t *testing.T) {
 }
 
 func TestHandleSend_UsernameNotFound(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  50,
@@ -812,6 +862,8 @@ func TestHandleSend_UsernameNotFound(t *testing.T) {
 }
 
 func TestHandleSend_SendFailure(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  50,
@@ -831,6 +883,8 @@ func TestHandleSend_SendFailure(t *testing.T) {
 }
 
 func TestNotifyAdminError_WithAdminID(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 999888,
 		TrafficLimitGB:  50,
@@ -849,6 +903,8 @@ func TestNotifyAdminError_WithAdminID(t *testing.T) {
 }
 
 func TestHandleAdminLastReg_NonAdminUser(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 999999,
 		TrafficLimitGB:  50,
@@ -866,6 +922,8 @@ func TestHandleAdminLastReg_NonAdminUser(t *testing.T) {
 }
 
 func TestHandleAdminLastReg_EmptyList(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  50,
@@ -887,6 +945,8 @@ func TestHandleAdminLastReg_EmptyList(t *testing.T) {
 }
 
 func TestHandleAdminLastReg_DatabaseError(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  50,
@@ -908,6 +968,8 @@ func TestHandleAdminLastReg_DatabaseError(t *testing.T) {
 }
 
 func TestHandleAdminLastReg_WithSubscriptions(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  50,
@@ -939,6 +1001,8 @@ func TestHandleAdminLastReg_WithSubscriptions(t *testing.T) {
 }
 
 func TestHandleAdminStats_NonAdminUser(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 999999,
 		TrafficLimitGB:  50,
@@ -956,6 +1020,8 @@ func TestHandleAdminStats_NonAdminUser(t *testing.T) {
 }
 
 func TestHandleAdminStats_DatabaseError(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  50,
@@ -977,6 +1043,8 @@ func TestHandleAdminStats_DatabaseError(t *testing.T) {
 }
 
 func TestHandleAdminStats_Success(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  50,
@@ -1002,6 +1070,8 @@ func TestHandleAdminStats_Success(t *testing.T) {
 }
 
 func TestHandleAdminStats_PartialDatabaseError(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  50,
@@ -1029,6 +1099,8 @@ func TestHandleAdminStats_PartialDatabaseError(t *testing.T) {
 }
 
 func TestHandleRefstats_NonAdminUser(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 999999,
 		TrafficLimitGB:  50,
@@ -1048,6 +1120,8 @@ func TestHandleRefstats_NonAdminUser(t *testing.T) {
 }
 
 func TestHandleRefstats_EmptyReferrals(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  50,
@@ -1067,6 +1141,8 @@ func TestHandleRefstats_EmptyReferrals(t *testing.T) {
 }
 
 func TestHandleRefstats_WithMultipleReferrers(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  50,
@@ -1101,6 +1177,8 @@ func TestHandleRefstats_WithMultipleReferrers(t *testing.T) {
 }
 
 func TestHandleRefstats_Top10Limit(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  50,
@@ -1134,6 +1212,8 @@ func TestHandleRefstats_Top10Limit(t *testing.T) {
 }
 
 func TestEscapeMarkdown(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name     string
 		input    string

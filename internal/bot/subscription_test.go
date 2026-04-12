@@ -19,6 +19,8 @@ import (
 )
 
 func TestShowLoadingMessage_WithMessageID(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  50,
@@ -38,6 +40,8 @@ func TestShowLoadingMessage_WithMessageID(t *testing.T) {
 }
 
 func TestShowLoadingMessage_WithoutMessageID(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  50,
@@ -57,6 +61,8 @@ func TestShowLoadingMessage_WithoutMessageID(t *testing.T) {
 }
 
 func TestShowLoadingMessage_SendFails(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  50,
@@ -76,6 +82,8 @@ func TestShowLoadingMessage_SendFails(t *testing.T) {
 }
 
 func TestShowLoadingMessage_EditFails(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  50,
@@ -100,6 +108,8 @@ func TestShowLoadingMessage_EditFails(t *testing.T) {
 }
 
 func TestCreateSubscription_Success(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  100,
@@ -143,6 +153,8 @@ func TestCreateSubscription_Success(t *testing.T) {
 }
 
 func TestCreateSubscription_XUIFailure(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  100,
@@ -240,6 +252,8 @@ func TestCreateSubscription_XUIFailure(t *testing.T) {
 }
 
 func TestCreateSubscription_DatabaseFailure_RollbackSuccess(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  100,
@@ -279,6 +293,8 @@ func TestCreateSubscription_DatabaseFailure_RollbackSuccess(t *testing.T) {
 }
 
 func TestCreateSubscription_DatabaseFailure_RollbackFailure(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  100,
@@ -314,6 +330,8 @@ func TestCreateSubscription_DatabaseFailure_RollbackFailure(t *testing.T) {
 }
 
 func TestCreateSubscription_CacheUpdate(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  100,
@@ -358,6 +376,8 @@ func TestCreateSubscription_CacheUpdate(t *testing.T) {
 }
 
 func TestHandleCreateSubscription_AlreadyInProgress(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  100,
@@ -386,6 +406,8 @@ func TestHandleCreateSubscription_AlreadyInProgress(t *testing.T) {
 }
 
 func TestHandleCreateSubscription_ExistingActiveSubscription(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  100,
@@ -417,6 +439,8 @@ func TestHandleCreateSubscription_ExistingActiveSubscription(t *testing.T) {
 	assert.False(t, mockXUI.AddClientWithIDCalled, "Should not create new XUI client for existing active subscription")
 }
 func TestHandleCreateSubscription_ExpiredSubscription(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  100,
@@ -460,6 +484,8 @@ func TestHandleCreateSubscription_ExpiredSubscription(t *testing.T) {
 }
 
 func TestHandleCreateSubscription_DatabaseError(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  100,
@@ -482,6 +508,8 @@ func TestHandleCreateSubscription_DatabaseError(t *testing.T) {
 }
 
 func TestHandleCreateSubscription_NoSubscription(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  100,
@@ -517,6 +545,8 @@ func TestHandleCreateSubscription_NoSubscription(t *testing.T) {
 }
 
 func TestHandleMySubscription_NotFound(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  100,
@@ -539,6 +569,8 @@ func TestHandleMySubscription_NotFound(t *testing.T) {
 }
 
 func TestHandleMySubscription_DatabaseError(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  100,
@@ -561,6 +593,8 @@ func TestHandleMySubscription_DatabaseError(t *testing.T) {
 }
 
 func TestHandleMySubscription_ActiveSubscription(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  100,
@@ -605,6 +639,8 @@ func TestHandleMySubscription_ActiveSubscription(t *testing.T) {
 }
 
 func TestHandleMySubscription_TrafficFetchError(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  100,
@@ -642,6 +678,8 @@ func TestHandleMySubscription_TrafficFetchError(t *testing.T) {
 }
 
 func TestHandleMySubscription_UsesCache(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  100,
@@ -683,6 +721,8 @@ func TestHandleMySubscription_UsesCache(t *testing.T) {
 }
 
 func TestHandleQRCode_Success(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  100,
@@ -709,6 +749,8 @@ func TestHandleQRCode_Success(t *testing.T) {
 }
 
 func TestHandleQRCode_DatabaseError(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  100,
@@ -730,6 +772,8 @@ func TestHandleQRCode_DatabaseError(t *testing.T) {
 }
 
 func TestGetSubscriptionWithCache_CacheHit(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  100,
@@ -765,6 +809,8 @@ func TestGetSubscriptionWithCache_CacheHit(t *testing.T) {
 }
 
 func TestGetSubscriptionWithCache_CacheMiss(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  100,
@@ -797,6 +843,8 @@ func TestGetSubscriptionWithCache_CacheMiss(t *testing.T) {
 }
 
 func TestGetSubscriptionWithCache_DatabaseError(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  100,
@@ -820,6 +868,8 @@ func TestGetSubscriptionWithCache_DatabaseError(t *testing.T) {
 }
 
 func TestGetSubscriptionWithCache_StaleCacheNonActive(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  100,
@@ -853,6 +903,8 @@ func TestGetSubscriptionWithCache_StaleCacheNonActive(t *testing.T) {
 }
 
 func TestInvalidateCache(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  100,
@@ -880,6 +932,8 @@ func TestInvalidateCache(t *testing.T) {
 }
 
 func TestSendQRCode(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  100,
@@ -905,6 +959,8 @@ func TestSendQRCode(t *testing.T) {
 }
 
 func TestHandleBackToInvite(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  100,
@@ -929,6 +985,8 @@ func TestHandleBackToInvite(t *testing.T) {
 }
 
 func TestHandleCreateSubscription_ZeroMessageID(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  100,
@@ -965,6 +1023,8 @@ func TestHandleCreateSubscription_ZeroMessageID(t *testing.T) {
 }
 
 func TestHandleQRCode_WithSubscription(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  100,
@@ -990,6 +1050,8 @@ func TestHandleQRCode_WithSubscription(t *testing.T) {
 }
 
 func TestHandleQRCode_NoSubscription(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  100,
@@ -1011,6 +1073,8 @@ func TestHandleQRCode_NoSubscription(t *testing.T) {
 }
 
 func TestHandleBackToSubscription(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  100,
@@ -1028,6 +1092,8 @@ func TestHandleBackToSubscription(t *testing.T) {
 }
 
 func TestSendQRCode_Success(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  100,
@@ -1044,6 +1110,8 @@ func TestSendQRCode_Success(t *testing.T) {
 }
 
 func TestNotifyAdmin_Success(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  100,
@@ -1062,6 +1130,8 @@ func TestNotifyAdmin_Success(t *testing.T) {
 }
 
 func TestNotifyAdmin_ZeroAdminID(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 0,
 		TrafficLimitGB:  100,
@@ -1079,6 +1149,8 @@ func TestNotifyAdmin_ZeroAdminID(t *testing.T) {
 }
 
 func TestNotifyAdminError(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  100,
@@ -1096,6 +1168,8 @@ func TestNotifyAdminError(t *testing.T) {
 }
 
 func TestNotifyAdminError_ZeroAdminID(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 0,
 		TrafficLimitGB:  100,
@@ -1112,6 +1186,8 @@ func TestNotifyAdminError_ZeroAdminID(t *testing.T) {
 }
 
 func TestClearAdminSendRateLimit(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  100,
@@ -1129,6 +1205,8 @@ func TestClearAdminSendRateLimit(t *testing.T) {
 }
 
 func TestHandleCreateError_RollbackFailed(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  100,
@@ -1150,6 +1228,8 @@ func TestHandleCreateError_RollbackFailed(t *testing.T) {
 }
 
 func TestHandleCreateError_ConnectionRefused(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  100,
@@ -1170,6 +1250,8 @@ func TestHandleCreateError_ConnectionRefused(t *testing.T) {
 }
 
 func TestHandleCreateError_Authentication(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  100,
@@ -1190,6 +1272,8 @@ func TestHandleCreateError_Authentication(t *testing.T) {
 }
 
 func TestNotifyAdmin_SendError(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  100,
@@ -1208,6 +1292,8 @@ func TestNotifyAdmin_SendError(t *testing.T) {
 }
 
 func TestSendQRCode_QRGenerationError(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  100,
@@ -1225,6 +1311,8 @@ func TestSendQRCode_QRGenerationError(t *testing.T) {
 }
 
 func TestHandleQRCode_NilSubscription(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  100,
@@ -1246,6 +1334,8 @@ func TestHandleQRCode_NilSubscription(t *testing.T) {
 }
 
 func TestCreateSubscription_WithPendingInvite(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  100,
@@ -1301,6 +1391,8 @@ func TestCreateSubscription_WithPendingInvite(t *testing.T) {
 }
 
 func TestCreateSubscription_WithExpiredPendingInvite(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  100,
@@ -1343,6 +1435,8 @@ func TestCreateSubscription_WithExpiredPendingInvite(t *testing.T) {
 }
 
 func TestHandleBackToInvite_RequestError(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  100,
@@ -1361,6 +1455,8 @@ func TestHandleBackToInvite_RequestError(t *testing.T) {
 }
 
 func TestCreateSubscription_ShowLoadingMessageFails(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  100,
@@ -1386,6 +1482,8 @@ func TestCreateSubscription_ShowLoadingMessageFails(t *testing.T) {
 }
 
 func TestHandleQRCode_DatabaseErrorReturnsError(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  100,
@@ -1407,6 +1505,8 @@ func TestHandleQRCode_DatabaseErrorReturnsError(t *testing.T) {
 }
 
 func TestHandleBackToSubscription_DeleteFails(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  100,

@@ -9,6 +9,8 @@ import (
 )
 
 func TestBearerAuthMiddleware_ValidToken(t *testing.T) {
+	t.Parallel()
+
 	called := false
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		called = true
@@ -28,6 +30,8 @@ func TestBearerAuthMiddleware_ValidToken(t *testing.T) {
 }
 
 func TestBearerAuthMiddleware_InvalidToken(t *testing.T) {
+	t.Parallel()
+
 	called := false
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		called = true
@@ -48,6 +52,8 @@ func TestBearerAuthMiddleware_InvalidToken(t *testing.T) {
 }
 
 func TestBearerAuthMiddleware_MissingHeader(t *testing.T) {
+	t.Parallel()
+
 	called := false
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		called = true
@@ -67,6 +73,8 @@ func TestBearerAuthMiddleware_MissingHeader(t *testing.T) {
 }
 
 func TestBearerAuthMiddleware_EmptyHeader(t *testing.T) {
+	t.Parallel()
+
 	called := false
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		called = true
@@ -86,6 +94,8 @@ func TestBearerAuthMiddleware_EmptyHeader(t *testing.T) {
 }
 
 func TestBearerAuthMiddleware_WrongScheme(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name   string
 		header string
@@ -120,6 +130,8 @@ func TestBearerAuthMiddleware_WrongScheme(t *testing.T) {
 }
 
 func TestBearerAuthMiddleware_OptionsRequest(t *testing.T) {
+	t.Parallel()
+
 	called := false
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		called = true
@@ -139,6 +151,8 @@ func TestBearerAuthMiddleware_OptionsRequest(t *testing.T) {
 }
 
 func TestBearerAuthMiddleware_EmptyExpectedToken(t *testing.T) {
+	t.Parallel()
+
 	called := false
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		called = true
@@ -179,6 +193,8 @@ func TestBearerAuthMiddleware_EmptyExpectedToken(t *testing.T) {
 }
 
 func TestBearerAuthMiddleware_TokenWithSpecialChars(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name   string
 		token  string
@@ -213,6 +229,8 @@ func TestBearerAuthMiddleware_TokenWithSpecialChars(t *testing.T) {
 }
 
 func TestBearerAuthMiddleware_DifferentMethods(t *testing.T) {
+	t.Parallel()
+
 	token := "test-token"
 	handler := BearerAuthMiddleware(token)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -234,6 +252,8 @@ func TestBearerAuthMiddleware_DifferentMethods(t *testing.T) {
 }
 
 func TestBearerAuthMiddleware_MultipleRequests(t *testing.T) {
+	t.Parallel()
+
 	token := "shared-token"
 	callCount := 0
 
@@ -258,6 +278,8 @@ func TestBearerAuthMiddleware_MultipleRequests(t *testing.T) {
 }
 
 func TestBearerAuthMiddleware_RejectThenAllow(t *testing.T) {
+	t.Parallel()
+
 	token := "secret"
 	callCount := 0
 

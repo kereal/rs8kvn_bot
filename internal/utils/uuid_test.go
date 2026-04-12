@@ -9,6 +9,8 @@ import (
 )
 
 func TestGenerateUUID(t *testing.T) {
+	t.Parallel()
+
 	t.Run("generates non-empty UUID", func(t *testing.T) {
 		got, err := GenerateUUID()
 		require.NoError(t, err)
@@ -71,6 +73,8 @@ func TestGenerateUUID(t *testing.T) {
 }
 
 func TestGenerateSubID(t *testing.T) {
+	t.Parallel()
+
 	t.Run("generates non-empty SubID", func(t *testing.T) {
 		got, err := GenerateSubID()
 		require.NoError(t, err)
@@ -121,6 +125,8 @@ func TestGenerateSubID(t *testing.T) {
 }
 
 func TestGenerateInviteCode(t *testing.T) {
+	t.Parallel()
+
 	t.Run("generates non-empty code", func(t *testing.T) {
 		got, err := GenerateInviteCode()
 		require.NoError(t, err)
@@ -159,6 +165,8 @@ func TestGenerateInviteCode(t *testing.T) {
 }
 
 func TestGenerateUUID_Concurrency(t *testing.T) {
+	t.Parallel()
+
 	t.Run("concurrent generation is safe", func(t *testing.T) {
 		const goroutines = 50
 		const uuidsPerGoroutine = 50
@@ -189,6 +197,8 @@ func TestGenerateUUID_Concurrency(t *testing.T) {
 }
 
 func TestGenerateSubID_Concurrency(t *testing.T) {
+	t.Parallel()
+
 	t.Run("concurrent generation is safe", func(t *testing.T) {
 		const goroutines = 50
 		const idsPerGoroutine = 50
@@ -385,6 +395,8 @@ func BenchmarkAllGenerators(b *testing.B) {
 }
 
 func TestGenerateInviteCode_Concurrency(t *testing.T) {
+	t.Parallel()
+
 	t.Run("concurrent generation is safe", func(t *testing.T) {
 		const goroutines = 50
 		const codesPerGoroutine = 50
@@ -415,6 +427,8 @@ func TestGenerateInviteCode_Concurrency(t *testing.T) {
 }
 
 func TestGenerateInviteCode_Entropy(t *testing.T) {
+	t.Parallel()
+
 	t.Run("generates high entropy codes", func(t *testing.T) {
 		const iterations = 1000
 		charCounts := make(map[rune]int)
@@ -444,6 +458,8 @@ func TestGenerateInviteCode_Entropy(t *testing.T) {
 // TestGenerateUUID_Entropy removed - covered by Properties_UUID
 
 func TestGenerateSubID_Entropy(t *testing.T) {
+	t.Parallel()
+
 	t.Run("generates high entropy IDs", func(t *testing.T) {
 		const iterations = 1000
 		charCounts := make(map[rune]int)
@@ -470,6 +486,8 @@ func TestGenerateSubID_Entropy(t *testing.T) {
 }
 
 func TestGenerateUUID_Stress(t *testing.T) {
+	t.Parallel()
+
 	t.Run("stress test uniqueness", func(t *testing.T) {
 		const iterations = 10000
 		uuids := make(map[string]struct{}, iterations)
@@ -488,6 +506,8 @@ func TestGenerateUUID_Stress(t *testing.T) {
 }
 
 func TestGenerateSubID_Stress(t *testing.T) {
+	t.Parallel()
+
 	t.Run("stress test uniqueness", func(t *testing.T) {
 		const iterations = 10000
 		ids := make(map[string]struct{}, iterations)
@@ -506,6 +526,8 @@ func TestGenerateSubID_Stress(t *testing.T) {
 }
 
 func TestGenerateInviteCode_Stress(t *testing.T) {
+	t.Parallel()
+
 	t.Run("stress test uniqueness", func(t *testing.T) {
 		const iterations = 10000
 		codes := make(map[string]struct{}, iterations)
@@ -524,6 +546,8 @@ func TestGenerateInviteCode_Stress(t *testing.T) {
 }
 
 func TestGenerateUUID_DashesPosition(t *testing.T) {
+	t.Parallel()
+
 	t.Run("dashes are at correct positions", func(t *testing.T) {
 		for i := 0; i < 100; i++ {
 			uuid, err := GenerateUUID()
@@ -538,6 +562,8 @@ func TestGenerateUUID_DashesPosition(t *testing.T) {
 }
 
 func TestGenerateSubID_Format(t *testing.T) {
+	t.Parallel()
+
 	t.Run("contains only hex characters", func(t *testing.T) {
 		for i := 0; i < 100; i++ {
 			id, err := GenerateSubID()
@@ -555,6 +581,8 @@ func TestGenerateSubID_Format(t *testing.T) {
 
 // Property-based tests: verify properties hold for random generated values
 func TestProperties_UUID(t *testing.T) {
+	t.Parallel()
+
 	t.Run("all characters are valid hex", func(t *testing.T) {
 		for i := 0; i < 1000; i++ {
 			uuid, err := GenerateUUID()
@@ -579,6 +607,8 @@ func TestProperties_UUID(t *testing.T) {
 }
 
 func TestProperties_SubID(t *testing.T) {
+	t.Parallel()
+
 	t.Run("all characters are valid hex", func(t *testing.T) {
 		for i := 0; i < 1000; i++ {
 			subID, err := GenerateSubID()
@@ -600,6 +630,8 @@ func TestProperties_SubID(t *testing.T) {
 }
 
 func TestProperties_InviteCode(t *testing.T) {
+	t.Parallel()
+
 	t.Run("all characters are lowercase alphanumeric", func(t *testing.T) {
 		for i := 0; i < 1000; i++ {
 			code, err := GenerateInviteCode()

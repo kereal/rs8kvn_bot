@@ -13,6 +13,8 @@ import (
 )
 
 func TestService_NewService_LoadsConfig(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	serversFile := filepath.Join(tmpDir, "config.txt")
 	err := os.WriteFile(serversFile, []byte("X-Custom: value\n\nvless://server1@example.com:443\nvless://server2@example.com:443\n"), 0644)
@@ -36,6 +38,8 @@ func TestService_NewService_LoadsConfig(t *testing.T) {
 }
 
 func TestService_NewService_Disabled(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		SubExtraServersEnabled: false,
 		SubExtraServersFile:    "/some/path.txt",
@@ -52,6 +56,8 @@ func TestService_NewService_Disabled(t *testing.T) {
 }
 
 func TestService_ReloadConfig(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	serversFile := filepath.Join(tmpDir, "config.txt")
 	err := os.WriteFile(serversFile, []byte("X-Old: old\n\nvless://initial@example.com:443\n"), 0644)
@@ -86,6 +92,8 @@ func TestService_ReloadConfig(t *testing.T) {
 }
 
 func TestService_ReloadConfig_FileDeleted(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	serversFile := filepath.Join(tmpDir, "config.txt")
 	err := os.WriteFile(serversFile, []byte("X-Key: val\n\nvless://initial@example.com:443\n"), 0644)
@@ -113,6 +121,8 @@ func TestService_ReloadConfig_FileDeleted(t *testing.T) {
 }
 
 func TestService_StartReloadLoop(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	serversFile := filepath.Join(tmpDir, "config.txt")
 	err := os.WriteFile(serversFile, []byte("vless://v1@example.com:443\n"), 0644)
@@ -127,14 +137,14 @@ func TestService_StartReloadLoop(t *testing.T) {
 	defer svc.Stop()
 
 	stopCh := make(chan struct{})
-	go svc.StartReloadLoop(100*time.Millisecond, stopCh)
+	go svc.StartReloadLoop(20*time.Millisecond, stopCh)
 
-	time.Sleep(150 * time.Millisecond)
+	time.Sleep(30 * time.Millisecond)
 
 	err = os.WriteFile(serversFile, []byte("X-Dyn: dynamic\n\nvless://v2@example.com:443\nvless://v3@example.com:443\n"), 0644)
 	require.NoError(t, err)
 
-	time.Sleep(150 * time.Millisecond)
+	time.Sleep(30 * time.Millisecond)
 
 	servers := svc.GetExtraServers()
 	assert.Len(t, servers, 2)

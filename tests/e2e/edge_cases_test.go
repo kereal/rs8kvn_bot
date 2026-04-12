@@ -240,7 +240,7 @@ func TestE2E_CreateSubscription_XUITimeout(t *testing.T) {
 	ctx := context.Background()
 
 	env.xui.AddClientWithIDFunc = func(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
-		time.Sleep(2 * time.Second)
+		time.Sleep(200 * time.Millisecond)
 		return nil, context.DeadlineExceeded
 	}
 
@@ -273,7 +273,7 @@ func TestE2E_Service_Create_TimeoutContext(t *testing.T) {
 	defer cancel()
 
 	env.xui.AddClientWithIDFunc = func(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(20 * time.Millisecond)
 		return &xui.ClientConfig{ID: "test-id", Email: email, SubID: subID}, nil
 	}
 

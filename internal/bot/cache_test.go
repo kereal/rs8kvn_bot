@@ -12,6 +12,8 @@ import (
 )
 
 func TestSubscriptionCache_GetSet(t *testing.T) {
+	t.Parallel()
+
 	cache := NewSubscriptionCache(10, 5*time.Minute)
 
 	sub := &database.Subscription{
@@ -33,7 +35,9 @@ func TestSubscriptionCache_GetSet(t *testing.T) {
 }
 
 func TestSubscriptionCache_TTL(t *testing.T) {
-	cache := NewSubscriptionCache(10, 50*time.Millisecond)
+	t.Parallel()
+
+	cache := NewSubscriptionCache(10, 10*time.Millisecond)
 
 	sub := &database.Subscription{
 		TelegramID: 456,
@@ -46,13 +50,15 @@ func TestSubscriptionCache_TTL(t *testing.T) {
 	require.NotNil(t, cache.Get(456), "Get() returned nil immediately after Set")
 
 	// Wait for TTL to expire
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(20 * time.Millisecond)
 
 	// Should be expired now
 	assert.Nil(t, cache.Get(456), "Get() should return nil after TTL expired")
 }
 
 func TestSubscriptionCache_Invalidate(t *testing.T) {
+	t.Parallel()
+
 	cache := NewSubscriptionCache(10, 5*time.Minute)
 
 	sub := &database.Subscription{
@@ -68,6 +74,8 @@ func TestSubscriptionCache_Invalidate(t *testing.T) {
 }
 
 func TestSubscriptionCache_Clear(t *testing.T) {
+	t.Parallel()
+
 	cache := NewSubscriptionCache(10, 5*time.Minute)
 
 	// Add multiple entries
@@ -82,6 +90,8 @@ func TestSubscriptionCache_Clear(t *testing.T) {
 }
 
 func TestSubscriptionCache_MaxSize(t *testing.T) {
+	t.Parallel()
+
 	cache := NewSubscriptionCache(3, 5*time.Minute)
 
 	// Fill cache to max
@@ -93,7 +103,7 @@ func TestSubscriptionCache_MaxSize(t *testing.T) {
 
 	// Adding one more should evict the oldest entry (by expiresAt time)
 	// Sleep briefly to ensure the new entry has a later expiresAt
-	time.Sleep(10 * time.Millisecond)
+	time.Sleep(2 * time.Millisecond)
 	cache.Set(4, &database.Subscription{TelegramID: 4})
 
 	// Should still have 3 entries (maxSize), with entry 1 evicted
@@ -109,7 +119,9 @@ func TestSubscriptionCache_MaxSize(t *testing.T) {
 }
 
 func TestSubscriptionCache_Cleanup(t *testing.T) {
-	cache := NewSubscriptionCache(10, 50*time.Millisecond)
+	t.Parallel()
+
+	cache := NewSubscriptionCache(10, 10*time.Millisecond)
 
 	// Add entries
 	for i := int64(1); i <= 3; i++ {
@@ -117,7 +129,7 @@ func TestSubscriptionCache_Cleanup(t *testing.T) {
 	}
 
 	// Wait for entries to expire
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(20 * time.Millisecond)
 
 	// Add one more entry (not expired)
 	cache.Set(4, &database.Subscription{TelegramID: 4})
@@ -130,6 +142,8 @@ func TestSubscriptionCache_Cleanup(t *testing.T) {
 }
 
 func TestSubscriptionCache_Concurrent(t *testing.T) {
+	t.Parallel()
+
 	cache := NewSubscriptionCache(100, 5*time.Minute)
 
 	// Run concurrent writes and reads
@@ -156,12 +170,14 @@ func TestSubscriptionCache_Concurrent(t *testing.T) {
 }
 
 func TestSubscriptionCache_StartCleanup(t *testing.T) {
-	cache := NewSubscriptionCache(10, 20*time.Millisecond)
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	t.Parallel()
+
+	cache := NewSubscriptionCache(10, 5*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
 	// Start background cleanup
-	go cache.StartCleanup(ctx, 10*time.Millisecond)
+	go cache.StartCleanup(ctx, 2*time.Millisecond)
 
 	// Add entries with short TTL
 	for i := int64(1); i <= 3; i++ {
@@ -171,7 +187,7 @@ func TestSubscriptionCache_StartCleanup(t *testing.T) {
 	assert.Equal(t, 3, cache.Size(), "Size()")
 
 	// Wait for entries to expire and cleanup to run
-	time.Sleep(80 * time.Millisecond)
+	time.Sleep(20 * time.Millisecond)
 
 	// Expired entries should be removed by background cleanup
 	// Note: Size may be 0 or contain only non-expired entries
@@ -180,6 +196,8 @@ func TestSubscriptionCache_StartCleanup(t *testing.T) {
 }
 
 func TestSubscriptionCache_StartCleanup_Cancellation(t *testing.T) {
+	t.Parallel()
+
 	cache := NewSubscriptionCache(10, 5*time.Minute)
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -197,18 +215,20 @@ func TestSubscriptionCache_StartCleanup_Cancellation(t *testing.T) {
 	select {
 	case <-done:
 		// Goroutine exited successfully
-	case <-time.After(100 * time.Millisecond):
+	case <-time.After(20 * time.Millisecond):
 		t.Error("StartCleanup did not exit after context cancellation")
 	}
 }
 
 func TestSubscriptionCache_LRU_EvictionOrder(t *testing.T) {
-	cache := NewSubscriptionCache(3, 100*time.Millisecond)
+	t.Parallel()
+
+	cache := NewSubscriptionCache(3, 20*time.Millisecond)
 
 	// Add entries with delays to ensure different expiresAt times
 	for i := int64(1); i <= 3; i++ {
 		cache.Set(i, &database.Subscription{TelegramID: i})
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(2 * time.Millisecond)
 	}
 
 	// Entry 1 should be oldest, entry 3 should be newest
@@ -227,12 +247,14 @@ func TestSubscriptionCache_LRU_EvictionOrder(t *testing.T) {
 }
 
 func TestSubscriptionCache_LRU_MultipleEvictions(t *testing.T) {
+	t.Parallel()
+
 	cache := NewSubscriptionCache(2, 5*time.Minute) // Long TTL to avoid expiration
 
 	// Add entries and trigger multiple evictions
 	// With maxSize=2, after adding 5 entries, only the last 2 should remain
 	for i := int64(1); i <= 5; i++ {
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(2 * time.Millisecond)
 		cache.Set(i, &database.Subscription{TelegramID: i})
 	}
 

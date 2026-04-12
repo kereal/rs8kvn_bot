@@ -12,6 +12,8 @@ import (
 // === getMainMenuContent tests ===
 
 func TestGetMainMenuContent(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 12345,
 	}
@@ -49,6 +51,8 @@ func TestGetMainMenuContent(t *testing.T) {
 }
 
 func TestGetMainMenuContent_WithSubscription(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 0,
 	}
@@ -64,6 +68,8 @@ func TestGetMainMenuContent_WithSubscription(t *testing.T) {
 }
 
 func TestGetMainMenuContent_WithoutSubscription(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 0,
 	}
@@ -91,6 +97,8 @@ func TestGetMainMenuContent_WithoutSubscription(t *testing.T) {
 }
 
 func TestGetMainMenuContent_AdminButtons(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456789,
 	}
@@ -118,6 +126,8 @@ func TestGetMainMenuContent_AdminButtons(t *testing.T) {
 }
 
 func TestHandler_GetMainMenuContent_SpecialCharacters(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{TelegramAdminID: 12345}
 	handler := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, config.DonateCardNumber, config.DonateURL, cfg.SiteURL)}
 
@@ -127,6 +137,8 @@ func TestHandler_GetMainMenuContent_SpecialCharacters(t *testing.T) {
 }
 
 func TestHandler_GetMainMenuContent_AdminUser(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{TelegramAdminID: 12345}
 	handler := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, config.DonateCardNumber, config.DonateURL, cfg.SiteURL)}
 
@@ -138,6 +150,8 @@ func TestHandler_GetMainMenuContent_AdminUser(t *testing.T) {
 // === getDonateText tests ===
 
 func TestGetDonateText(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{}
 	handler := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, config.DonateCardNumber, config.DonateURL, cfg.SiteURL)}
 
@@ -151,6 +165,8 @@ func TestGetDonateText(t *testing.T) {
 }
 
 func TestHandler_GetDonateText_Content(t *testing.T) {
+	t.Parallel()
+
 	handler := &Handler{cfg: &config.Config{ContactUsername: "kereal"}, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", "kereal", config.DonateCardNumber, config.DonateURL, "")}
 
 	text := handler.getDonateText()
@@ -163,6 +179,8 @@ func TestHandler_GetDonateText_Content(t *testing.T) {
 // === getHelpText tests ===
 
 func TestGetHelpText(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{TrafficLimitGB: 100}
 	handler := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, config.DonateCardNumber, config.DonateURL, cfg.SiteURL)}
 
@@ -171,6 +189,8 @@ func TestGetHelpText(t *testing.T) {
 }
 
 func TestGetHelpText_DifferentTrafficLimits(t *testing.T) {
+	t.Parallel()
+
 	handler := &Handler{cfg: &config.Config{}, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", "", config.DonateCardNumber, config.DonateURL, "")}
 
 	tests := []struct {
@@ -191,6 +211,8 @@ func TestGetHelpText_DifferentTrafficLimits(t *testing.T) {
 }
 
 func TestHandler_GetHelpText_ZeroTraffic(t *testing.T) {
+	t.Parallel()
+
 	handler := &Handler{cfg: &config.Config{}, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", "", config.DonateCardNumber, config.DonateURL, "")}
 
 	text := handler.getHelpText(0, "http://test.url/sub")
@@ -200,6 +222,8 @@ func TestHandler_GetHelpText_ZeroTraffic(t *testing.T) {
 }
 
 func TestHandler_GetHelpText_LargeTraffic(t *testing.T) {
+	t.Parallel()
+
 	handler := &Handler{cfg: &config.Config{}, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", "", config.DonateCardNumber, config.DonateURL, "")}
 
 	text := handler.getHelpText(1000, "http://test.url/sub")
@@ -208,6 +232,8 @@ func TestHandler_GetHelpText_LargeTraffic(t *testing.T) {
 }
 
 func TestHandler_GetHelpText_SpecialCharacters(t *testing.T) {
+	t.Parallel()
+
 	handler := &Handler{cfg: &config.Config{}, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", "", config.DonateCardNumber, config.DonateURL, "")}
 
 	subURL := "http://test.url/sub/abc123?param=value&other=test"
