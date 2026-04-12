@@ -1168,4 +1168,3 @@ type ProtocolManager struct {
 
 > **Источник:** Консолидировано из bypass_methods.md, bypass_software_comparison.md, bypass_new_software_2024.md
 > **Дата консолидации:** Апрель 2026
-| WireGuard | 51820/UDP | Standard VPN (disabled

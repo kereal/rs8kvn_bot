@@ -1,9 +1,8 @@
 # Handover Summary — rs8kvn_bot
 
-**Repo:** https://github.com/kereal/rs8kvn_bot  
-**Module:** `rs8kvn_bot` (Go 1.24+)  
-**Version:** v2.2.0  
-**Last Updated:** 2026-04-11  
+**Repo:** https://github.com/kereal/rs8kvn_bot
+**Module:** `rs8kvn_bot` (Go 1.24+)
+**Version:** v2.2.0
 **Branch:** `dev` (GitFlow: `main` = production, `dev` = integration)
 
 ---
@@ -108,128 +107,24 @@ rs8kvn_bot/
 
 | Module | Coverage | Status |
 |--------|----------|--------|
-| `internal/flag` | **97.7%** | ✅ Excellent |
-| `internal/ratelimiter` | **97.4%** | ✅ Excellent |
-| `internal/heartbeat` | **96.2%** | ✅ Excellent |
-| `internal/service` | **95.2%** | ✅ Excellent |
-| `internal/config` | **91.8%** | ✅ Excellent |
-| `internal/xui` | **90.9%** | ✅ Excellent |
-| `internal/web` | **90.3%** | ✅ Excellent |
-| `internal/bot` | **92.6%** | ✅ Excellent |
-| `internal/utils` | **90.0%** | ✅ Excellent |
-| `internal/logger` | **88.9%** | ✅ Good |
-| `internal/backup` | **83.2%** | ✅ Good |
-| `internal/subproxy` | **82.5%** | ✅ Good |
-| `internal/scheduler` | **81.2%** | ✅ Good |
-| `internal/database` | **77.8%** | 🟡 Moderate |
-| `cmd/bot` | **5.4%** | 🟡 Low (main is integration) |
-| `internal/testutil` | **0.0%** | 🔴 No tests |
-| **Overall** | **~85%** | ✅ Good |
+| `internal/flag` | **97.7%** | ✅ |
+| `internal/ratelimiter` | **97.4%** | ✅ |
+| `internal/heartbeat` | **96.2%** | ✅ |
+| `internal/service` | **95.2%** | ✅ |
+| `internal/config` | **91.8%** | ✅ |
+| `internal/xui` | **90.9%** | ✅ |
+| `internal/web` | **90.3%** | ✅ |
+| `internal/bot` | **92.6%** | ✅ |
+| `internal/utils` | **90.0%** | ✅ |
+| `internal/logger` | **88.9%** | ✅ |
+| `internal/backup` | **83.2%** | ✅ |
+| `internal/subproxy` | **82.5%** | ✅ |
+| `internal/scheduler` | **81.2%** | ✅ |
+| `internal/database` | **77.8%** | 🟡 |
+| `cmd/bot` | **5.4%** | 🟡 (integration) |
+| **Overall** | **~85%** | ✅ |
 
-All tests pass with `-race` detector. golangci-lint: 0 new issues (pre-existing: nilerr, gocritic).
-
----
-
-## Last Changes (v2.2.0 — 2026-04-11)
-
-### Bugfixes & Refactoring
-
-1. **escapeMarkdown missing backslash** — `\` was not in the MarkdownV2 escape list, causing broken rendering when user input contained backslashes (e.g. `C:\Users`). Backslash must be escaped **first** to prevent double-escaping of subsequent chars.
-
-2. **HandleBroadcast 30s timeout** — `HandleBroadcast` used `withTimeout(ctx)` (30s), but broadcast iterates through users with 50ms delay. 1000 users = ~50s, causing early termination. Replaced with `context.WithTimeout(ctx, 5*time.Minute)`.
-
-3. **GetOrCreateInvite ignored INSERT error** — `s.db.Exec("INSERT OR IGNORE ...")` silently swallowed errors (including DB connection failures). Now checks `err` before the SELECT query.
-
-4. **pendingInvites memory leak** — `pendingInvites` map entries were only removed when a user created a subscription. Expired entries were never purged, causing unbounded memory growth. Added `cleanupPendingInvites()` method and periodic cleanup goroutine via `startPendingInvitesCleanup()`.
-
-5. **handleMySubscription duplicated GetWithTraffic logic** — `handleMySubscription` manually computed traffic percentage, progress bar, reset info — all of which already existed in `service.GetWithTraffic()`. Replaced ~40 lines of duplicated code with a single `GetWithTraffic()` call. This ensures a single source of truth for subscription display logic.
-
-6. **CleanupExpiredTrials used wrong cutoff for trial_requests** — `trial_requests` (rate-limit records, 1-hour window) were cleaned up with the same cutoff as trial subscriptions (3+ hours). This caused stale rate-limit entries to accumulate. Now uses a separate `rateLimitCutoff = now - 1h` matching the actual rate-limit window.
-
-### Test Optimization & Refactoring
-
-1. **Test optimization** — Reduced iterations in stress/entropy tests:
-   - uuid_test.go: stress tests 100k → 10k, uniqueness tests 10k → 1k
-   - Concurrency tests: 100x100 → 50x50 goroutines
-   - Removed duplicates: TestGenerateInviteCode_Format, TestGenerateUUID_Entropy (covered by Properties_*)
-   - Test time improved: ~41s → ~38s
-
-2. **Code refactoring** — if-else → switch statements:
-   - internal/bot/subscription.go:156 - reset info string building
-   - internal/service/subscription.go:258 - reset info in GetWithTraffic
-
-3. **Lint fixes** — Fixed nilerr warning:
-   - internal/service/subscription.go:225 - added `_ = err` to suppress unused error
-
----
-
-## Last Changes (v2.2.0 — 2026-04-10)
-
-### Bugfixes (Critical/High)
-
-1. **ReferralCache.Save() noop** — Removed broken dirty tracking. Referral counts are derived from subscriptions table (`SELECT referred_by, COUNT(*) GROUP BY referred_by`), so there is nothing to persist. `Save()` is now a no-op, `Sync()` simply calls `Load()` to refresh from DB. `Increment/Decrement` update the in-memory cache for real-time display until the next sync.
-
-2. **Nil pointer dereference on init failure** — `logger.Warn` → `logger.Fatal` for DB, XUI client, and Bot API initialization errors. Previously the app continued with nil pointers → guaranteed panic on first use.
-
-3. **Non-atomic deletion order** — Changed deletion order in `SubscriptionService.Delete()` and `DeleteByID()`: DB-first, then XUI-best-effort. If DB delete fails → XUI is untouched (safe to retry). If XUI delete fails after DB success → logged but not returned as error (orphaned XUI client is less critical than orphaned DB record).
-
-4. **context.WithoutCancel for broadcast** — Removed `context.WithoutCancel(ctx)` from broadcast dispatch. `HandleBroadcast` already handles `ctx.Done()` in its loop, so the detached context only prevented graceful shutdown during broadcast.
-
-5. **Missing cache invalidation on trial bind** — Added `h.invalidateCache(chatID)` after successful trial subscription binding in `handleBindTrial`. Previously, stale "no subscription" cache entry caused incorrect UI state.
-
-6. **formatDateRu zero-time** — Added `if t.IsZero() { return "—" }` check. Previously showed "1 января 0001" for zero/nil time values.
-
-7. **Dead code in verifySession()** — Removed unreachable `if err != nil` block after successful `io.ReadAll` in `internal/xui/client.go`.
-
-8. **sync.Map unsafe type assertion** — Changed `lastSend.(time.Time)` to two-value form `lastSend, ok := lastSend.(time.Time)` in `ReferralCache.CheckAdminSendRateLimit`.
-
-### Security Hardening
-
-- **Timing-safe token comparison** — `BearerAuthMiddleware` now uses `crypto/subtle.ConstantTimeCompare` instead of `!=` to prevent timing side-channel attacks on API tokens.
-- **Loopback-only trusted proxies** — `isLocalAddress()` now only trusts loopback addresses (`127.0.0.1`, `::1`), not all private IPs. In cloud environments, other VMs on the same VPC could spoof `X-Forwarded-For` to bypass IP rate limiting.
-- **Web server port binding** — `Start()` now uses `net.Listen()` before `Serve()` to catch "port already in use" errors immediately instead of silently failing in a goroutine.
-- **getClientIP malformed fallback** — When `SplitHostPort` fails on `RemoteAddr`, tries once more to strip the port before falling back to raw address (which includes port and bypasses rate limiting).
-- **Health endpoint 503** — `writeJSON()` now returns HTTP 503 when health status is Down, allowing Kubernetes liveness probes to detect and restart unhealthy pods.
-
-### Code Deduplication
-
-- **Extracted shared format helpers** — `DaysUntilReset`, `FormatDateRu`, `GenerateProgressBar` moved from `internal/bot/subscription.go` and `internal/service/subscription.go` to `internal/utils/format.go`. Both packages now call `utils.DaysUntilReset()` etc. Associated tests moved to `internal/utils/format_test.go`.
-
-### Test Coverage Improvements
-
-- **Service layer** — Coverage improved from 24.8% → 95.2% (+30 new tests covering Create, Delete, DeleteByID, GetWithTraffic, CreateTrial, CalcTrialTraffic scenarios including DB-first deletion order, XUI best-effort, rollback failures).
-- **ReferralCache** — 15 new tests covering Get, GetAll, Increment, Decrement, Save noop, Sync refresh, concurrent safety, admin rate limiting.
-
-### Previous Sessions (v2.2.0 — 2026-04-05)
-- Subscription proxy feature (`GET /sub/{subID}`)
-- 50 new tests for subproxy
-
-### Previous Sessions (v2.0.3 — v2.1.0)
-- Referral cache system with `/refstats` admin command
-- Trial atomic rollback with `RetryWithBackoff`
-- Subscription locking with `sync.Map`
-- Singleflight for XUI login
-- Per-user rate limiter with cleanup goroutine
-- Cache LRU fix (lastAccess-based eviction)
-- Auto-reset traffic mechanism (expiryTime = now + 30 days)
-- Command routing moved to `bot.Handler.HandleUpdate()`
-- Atomic trial cleanup with `DELETE ... RETURNING`
-- CI PR trigger, docker-compose tag fix, HTTP timeouts
-
----
-
-## Current Problem / Task
-
-**Status:** ✅ All tests passing (race-safe), build clean. v2.2.0 bugfixes **complete**.
-
-**Remaining tasks (prioritized):**
-1. **Re-enable linters** — errcheck, gosec in `.golangci.yml` (P1) — partially done, 73 issues remaining (mostly in tests)
-2. **Multi-arch Docker** — linux/amd64 + linux/arm64 (P2)
-3. **Docker image on push to main** — CI build `main`/`dev` tag (P2)
-4. **Traffic alerts** — 80%/95% usage notifications (P3)
-5. **Multi-admin** — list of admin IDs instead of single (P3)
-6. **ExpiryTime not stored in DB** — `service.Create()` sends expiry to XUI but stores `time.Time{}` in DB, causing inaccurate reset display and admin notifications (P1)
-7. **`/sub/{subID}` serves revoked subscriptions** — no status check in subscription proxy handler (P1)
+All tests pass with `-race` detector. golangci-lint: 0 issues in production code.
 
 ---
 
@@ -329,9 +224,3 @@ golangci-lint run ./...
 # Run locally
 go run ./cmd/bot
 ```
-
----
-
-**Generated:** 2026-04-11  
-**Session:** v2.2.0 bugfixes (escapeMarkdown, broadcast timeout, invite error, pendingInvites leak, GetWithTraffic dedup, trial_requests cutoff)  
-**Version:** v2.2.0  
