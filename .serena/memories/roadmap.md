@@ -58,16 +58,15 @@
 
 | # | Проблема | Приоритет |
 |---|---------|-----------|
-| 1 | ExpiryTime не сохраняется в БД при Create() | P1 |
-| 2 | `/sub/{subID}` не проверяет статус подписки | P1 |
-| 3 | Re-enable linters (errcheck, gosec) — 73 issues в тестах | P1 |
-| 4 | Circuit breaker: cumulative → sliding window | P2 |
-| 5 | Multi-arch Docker (amd64 + arm64) | P2 |
-| 6 | Docker image on push to main | P2 |
-| 7 | Multi-admin (список admin IDs) | P3 |
-| 8 | Вынести тексты сообщений — централизованный конфиг | P3 |
-| 9 | Типизированные ошибки — заменить сравнение строк | P3 |
-| 10 | `.down.sql` миграции — поддержка отката | P3 |
+
+| 1 | Re-enable linters (errcheck, gosec) — 73 issues в тестах | P1 |
+| 2 | Circuit breaker: cumulative → sliding window | P2 |
+| 3 | Multi-arch Docker (amd64 + arm64) | P2 |
+| 4 | Docker image on push to main | P2 |
+| 5 | Multi-admin (список admin IDs) | P3 |
+| 6 | Вынести тексты сообщений — централизованный конфиг | P3 |
+| 7 | Типизированные ошибки — заменить сравнение строк | P3 |
+| 8 | `.down.sql` миграции — поддержка отката | P3 |
 
 ---
 
