@@ -307,8 +307,8 @@ func TestTokenBucket_Burst_Boundary(t *testing.T) {
 	// 11th should be blocked
 	assert.False(t, tb.Allow(), "Should block 11th request (boundary)")
 
-	// Wait for refill
-	time.Sleep(50 * time.Millisecond)
+	// Wait for refill (150ms guarantees ≥1 token at 10 tokens/sec refill rate)
+	time.Sleep(150 * time.Millisecond)
 
 	// Should be allowed after refill
 	assert.True(t, tb.Allow(), "Should allow after refill")

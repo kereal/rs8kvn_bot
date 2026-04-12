@@ -575,7 +575,7 @@ func TestHandleUpdateSafely_RecoversFromPanic(t *testing.T) {
 // func TestConfigLoad_InvalidPort(t *testing.T) { ... }
 
 func TestConfigLoad_MissingRequiredFields(t *testing.T) {
-	t.Parallel()
+	// Not parallel: uses os.Unsetenv which modifies global process state
 
 	os.Unsetenv("TELEGRAM_BOT_TOKEN")
 	os.Unsetenv("XUI_HOST")
@@ -587,7 +587,7 @@ func TestConfigLoad_MissingRequiredFields(t *testing.T) {
 }
 
 func TestConfigLoad_InvalidNumericValues(t *testing.T) {
-	t.Parallel()
+	// Not parallel: t.Setenv cannot be used with t.Parallel
 
 	t.Setenv("TELEGRAM_BOT_TOKEN", "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11")
 	t.Setenv("TELEGRAM_ADMIN_ID", "not_a_number")
@@ -610,7 +610,7 @@ func TestConfigLoad_InvalidNumericValues(t *testing.T) {
 }
 
 func TestConfigLoad_InvalidURL(t *testing.T) {
-	t.Parallel()
+	// Not parallel: t.Setenv cannot be used with t.Parallel
 
 	t.Setenv("TELEGRAM_BOT_TOKEN", "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11")
 	t.Setenv("TELEGRAM_ADMIN_ID", "123456789")
@@ -633,7 +633,7 @@ func TestConfigLoad_InvalidURL(t *testing.T) {
 }
 
 func TestConfigLoad_InvalidPort(t *testing.T) {
-	t.Parallel()
+	// Not parallel: t.Setenv cannot be used with t.Parallel
 
 	t.Setenv("TELEGRAM_BOT_TOKEN", "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11")
 	t.Setenv("TELEGRAM_ADMIN_ID", "123456789")
