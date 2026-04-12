@@ -51,7 +51,7 @@ type Handler struct {
 
 func NewHandler(bot interfaces.BotAPI, cfg *config.Config, db interfaces.DatabaseService, xuiClient interfaces.XUIClient, botConfig *BotConfig, subService *service.SubscriptionService, version string) *Handler {
 	rl := ratelimiter.NewPerUserRateLimiter(float64(config.RateLimiterMaxTokens), float64(config.RateLimiterRefillRate))
-	kb := NewKeyboardBuilder(botConfig.Username, cfg.ContactUsername, config.DonateCardNumber, config.DonateURL, cfg.SiteURL)
+	kb := NewKeyboardBuilder(botConfig.Username, cfg.ContactUsername, cfg.DonateCardNumber, cfg.DonateURL, cfg.SiteURL)
 
 	return &Handler{
 		bot:                 bot,

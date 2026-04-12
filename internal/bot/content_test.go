@@ -17,7 +17,7 @@ func TestGetMainMenuContent(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 12345,
 	}
-	handler := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, config.DonateCardNumber, config.DonateURL, cfg.SiteURL)}
+	handler := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, cfg.DonateCardNumber, cfg.DonateURL, cfg.SiteURL)}
 
 	tests := []struct {
 		name            string
@@ -129,7 +129,7 @@ func TestHandler_GetMainMenuContent_SpecialCharacters(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{TelegramAdminID: 12345}
-	handler := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, config.DonateCardNumber, config.DonateURL, cfg.SiteURL)}
+	handler := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, cfg.DonateCardNumber, cfg.DonateURL, cfg.SiteURL)}
 
 	text, keyboard := handler.getMainMenuContent("test_user_123", true, 12345)
 	assert.Contains(t, text, "test_user_123", "Text should contain username")
@@ -140,7 +140,7 @@ func TestHandler_GetMainMenuContent_AdminUser(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{TelegramAdminID: 12345}
-	handler := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, config.DonateCardNumber, config.DonateURL, cfg.SiteURL)}
+	handler := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, cfg.DonateCardNumber, cfg.DonateURL, cfg.SiteURL)}
 
 	text, keyboard := handler.getMainMenuContent("admin", true, 12345)
 	assert.Contains(t, text, "admin", "Text should contain username")
@@ -153,7 +153,7 @@ func TestGetDonateText(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{}
-	handler := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, config.DonateCardNumber, config.DonateURL, cfg.SiteURL)}
+	handler := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, cfg.DonateCardNumber, cfg.DonateURL, cfg.SiteURL)}
 
 	text := handler.getDonateText()
 	assert.NotEmpty(t, text, "Donate text should not be empty")
@@ -167,13 +167,26 @@ func TestGetDonateText(t *testing.T) {
 func TestHandler_GetDonateText_Content(t *testing.T) {
 	t.Parallel()
 
-	handler := &Handler{cfg: &config.Config{ContactUsername: "kereal"}, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", "kereal", config.DonateCardNumber, config.DonateURL, "")}
+	cfg := &config.Config{ContactUsername: "kereal", DonateCardNumber: "2200110022334455", DonateURL: "https://www.tbank.ru/collection/abc"}
+	handler := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, cfg.DonateCardNumber, cfg.DonateURL, cfg.SiteURL)}
 
 	text := handler.getDonateText()
 
 	assert.Contains(t, text, "Поддержка проекта", "Should contain header")
-	// Donate constants are configured via environment variables
+	assert.Contains(t, text, "2200110022334455", "Should contain card number from config")
+	assert.Contains(t, text, "https://www.tbank.ru/collection/abc", "Should contain donate URL from config")
 	assert.Contains(t, text, "t.me/kereal", "Should contain contact link")
+}
+
+func TestHandler_GetDonateText_EmptyConfig(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{}
+	handler := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, cfg.DonateCardNumber, cfg.DonateURL, cfg.SiteURL)}
+
+	text := handler.getDonateText()
+	assert.Contains(t, text, "Поддержка проекта", "Should contain header even with empty config")
+	t.Logf("Donate text with empty config: %q", text)
 }
 
 // === getHelpText tests ===
@@ -182,7 +195,7 @@ func TestGetHelpText(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{TrafficLimitGB: 100}
-	handler := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, config.DonateCardNumber, config.DonateURL, cfg.SiteURL)}
+	handler := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, cfg.DonateCardNumber, cfg.DonateURL, cfg.SiteURL)}
 
 	text := handler.getHelpText(100, "http://localhost/sub/test")
 	assert.NotEmpty(t, text, "Help text should not be empty")
@@ -191,7 +204,8 @@ func TestGetHelpText(t *testing.T) {
 func TestGetHelpText_DifferentTrafficLimits(t *testing.T) {
 	t.Parallel()
 
-	handler := &Handler{cfg: &config.Config{}, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", "", config.DonateCardNumber, config.DonateURL, "")}
+	cfg := &config.Config{}
+	handler := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, cfg.DonateCardNumber, cfg.DonateURL, cfg.SiteURL)}
 
 	tests := []struct {
 		name           string
@@ -213,7 +227,8 @@ func TestGetHelpText_DifferentTrafficLimits(t *testing.T) {
 func TestHandler_GetHelpText_ZeroTraffic(t *testing.T) {
 	t.Parallel()
 
-	handler := &Handler{cfg: &config.Config{}, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", "", config.DonateCardNumber, config.DonateURL, "")}
+	cfg := &config.Config{}
+	handler := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, cfg.DonateCardNumber, cfg.DonateURL, cfg.SiteURL)}
 
 	text := handler.getHelpText(0, "http://test.url/sub")
 
@@ -224,7 +239,8 @@ func TestHandler_GetHelpText_ZeroTraffic(t *testing.T) {
 func TestHandler_GetHelpText_LargeTraffic(t *testing.T) {
 	t.Parallel()
 
-	handler := &Handler{cfg: &config.Config{}, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", "", config.DonateCardNumber, config.DonateURL, "")}
+	cfg := &config.Config{}
+	handler := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, cfg.DonateCardNumber, cfg.DonateURL, cfg.SiteURL)}
 
 	text := handler.getHelpText(1000, "http://test.url/sub")
 
@@ -234,7 +250,8 @@ func TestHandler_GetHelpText_LargeTraffic(t *testing.T) {
 func TestHandler_GetHelpText_SpecialCharacters(t *testing.T) {
 	t.Parallel()
 
-	handler := &Handler{cfg: &config.Config{}, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", "", config.DonateCardNumber, config.DonateURL, "")}
+	cfg := &config.Config{}
+	handler := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, cfg.DonateCardNumber, cfg.DonateURL, cfg.SiteURL)}
 
 	subURL := "http://test.url/sub/abc123?param=value&other=test"
 	text := handler.getHelpText(100, subURL)
