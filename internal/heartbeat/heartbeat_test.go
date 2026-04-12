@@ -222,7 +222,8 @@ func TestSendHeartbeat_InvalidURL(t *testing.T) {
 	t.Parallel()
 
 	// Should not panic with invalid URL
-	sendHeartbeat("http://invalid-host-that-does-not-exist:12345/heartbeat")
+	// Use localhost with unlikely port to avoid 10s DNS timeout on CI
+	sendHeartbeat("http://127.0.0.1:1/heartbeat")
 }
 
 func TestSendHeartbeat_MultipleRequests(t *testing.T) {

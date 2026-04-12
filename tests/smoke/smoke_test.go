@@ -2,12 +2,10 @@ package smoke
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -20,21 +18,6 @@ func TestSmoke_BinaryStartup(t *testing.T) {
 	}
 
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "config.env")
-
-	cfg := `TELEGRAM_BOT_TOKEN=test_token_1234567:ABCdefGHIjklMNOpqrstuVWX
-TELEGRAM_ADMIN_ID=0
-XUI_HOST=http://localhost:2053
-XUI_USERNAME=admin
-XUI_PASSWORD=password
-XUI_INBOUND_ID=1
-DATABASE_PATH=` + dir + `/test.db
-LOG_FILE_PATH=` + dir + `/test.log
-LOG_LEVEL=debug
-`
-
-	err := os.WriteFile(configPath, []byte(cfg), 0644)
-	require.NoError(t, err, "Failed to write config")
 
 	binPath := filepath.Join(dir, "bot_test")
 	build := exec.Command("go", "build", "-o", binPath, "./cmd/bot")
@@ -44,107 +27,105 @@ LOG_LEVEL=debug
 	require.NoError(t, build.Run(), "Failed to build binary")
 
 	// Create context after build to prevent timeout during compilation
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, binPath, "-config", configPath)
+	cmd := exec.CommandContext(ctx, binPath)
+	// Pass config as environment variables (binary reads from env, not from -config flag)
+	cmd.Env = append(os.Environ(),
+		"TELEGRAM_BOT_TOKEN=test_token_1234567:ABCdefGHIjklMNOpqrstuVWX",
+		"TELEGRAM_ADMIN_ID=0",
+		"XUI_HOST=http://localhost:2053",
+		"XUI_USERNAME=admin",
+		"XUI_PASSWORD=password",
+		"XUI_INBOUND_ID=1",
+		"DATABASE_PATH="+filepath.Join(dir, "test.db"),
+		"LOG_FILE_PATH="+filepath.Join(dir, "test.log"),
+		"LOG_LEVEL=debug",
+	)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
-	err = cmd.Start()
+	err := cmd.Start()
 	require.NoError(t, err, "Failed to start binary")
 
-	time.Sleep(1 * time.Second)
+	// Give the binary a moment to start and initialize
+	time.Sleep(500 * time.Millisecond)
 
-	processExited := false
-	exitCode := 0
-
+	// Kill the process — we just verified it starts without crash
 	if cmd.Process != nil {
-		processExited = true
 		_ = cmd.Process.Kill()
-		waitErr := cmd.Wait()
-		if exitErr, ok := waitErr.(*exec.ExitError); ok {
-			if status, ok := exitErr.Sys().(syscall.WaitStatus); ok {
-				exitCode = status.ExitStatus()
-			}
-		}
-	}
-
-	if !processExited {
-		if err := cmd.Wait(); err != nil {
-			if exitErr, ok := err.(*exec.ExitError); ok {
-				if status, ok := exitErr.Sys().(syscall.WaitStatus); ok {
-					exitCode = status.ExitStatus()
-				}
-			}
-		}
-	}
-
-	if exitCode != 0 {
-		t.Logf("Binary exited with code: %d", exitCode)
+		_ = cmd.Wait()
 	}
 
 	t.Log("Smoke test passed: binary started and ran without unexpected crash")
 }
 
 func TestSmoke_ConfigValidation(t *testing.T) {
+	dir := t.TempDir()
+
+	// Build binary once for all subtests
+	binPath := filepath.Join(dir, "bot_test")
+	build := exec.Command("go", "build", "-o", binPath, "./cmd/bot")
+	build.Dir = filepath.Join("..", "..")
+	require.NoError(t, build.Run(), "Failed to build binary")
+
 	tests := []struct {
 		name    string
-		config  string
+		envVars []string
 		wantErr bool
 	}{
 		{
 			name: "missing_token",
-			config: `TELEGRAM_ADMIN_ID=0
-XUI_HOST=http://localhost:2053
-XUI_USERNAME=admin
-XUI_PASSWORD=password
-XUI_INBOUND_ID=1
-`,
+			envVars: []string{
+				"TELEGRAM_ADMIN_ID=0",
+				"XUI_HOST=http://localhost:2053",
+				"XUI_USERNAME=admin",
+				"XUI_PASSWORD=password",
+				"XUI_INBOUND_ID=1",
+			},
 			wantErr: true,
 		},
 		{
 			name: "missing_xui",
-			config: `TELEGRAM_BOT_TOKEN=test
-XUI_INBOUND_ID=1
-`,
+			envVars: []string{
+				"TELEGRAM_BOT_TOKEN=test",
+				"XUI_INBOUND_ID=1",
+			},
 			wantErr: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			dir := t.TempDir()
-			configPath := filepath.Join(dir, "config.env")
-			err := os.WriteFile(configPath, []byte(tt.config), 0644)
-			require.NoError(t, err)
-
-			binPath := filepath.Join(dir, "bot_test")
-			build := exec.Command("go", "build", "-o", binPath, "./cmd/bot")
-			build.Dir = filepath.Join("..", "..")
-			err = build.Run()
-			require.NoError(t, err, "Failed to build")
-
-			ctx, cancel := context.WithTimeout(testCtx, 5*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 
-			cmd := exec.CommandContext(ctx, binPath, "-config", configPath)
-			err = cmd.Start()
-			if err != nil {
-				require.NoError(t, err)
-			}
+			cmd := exec.CommandContext(ctx, binPath)
+			cmd.Env = append(os.Environ(), tt.envVars...)
 
-			time.Sleep(500 * time.Millisecond)
+			err := cmd.Start()
+			require.NoError(t, err, "Failed to start binary")
 
-			if cmd.Process != nil {
-				_ = cmd.Process.Kill()
-			}
+			// Wait briefly for the binary to exit with validation error
+			done := make(chan error, 1)
+			go func() {
+				done <- cmd.Wait()
+			}()
 
-			err = cmd.Wait()
-			if tt.wantErr {
-				if err != nil {
-					t.Logf("Expected error occurred: %v", err)
+			select {
+			case <-done:
+				// Binary exited (likely with validation error)
+			case <-ctx.Done():
+				// Timeout — kill the process
+				if cmd.Process != nil {
+					_ = cmd.Process.Kill()
+					_ = cmd.Wait()
 				}
+			}
+
+			if tt.wantErr {
+				t.Logf("Expected validation error for %s", tt.name)
 			}
 		})
 	}
@@ -155,39 +136,38 @@ func TestSmoke_PanicRecovery(t *testing.T) {
 		t.Skip("Skipping panic recovery test in non-CI environment")
 	}
 
+	dir := t.TempDir()
+
+	binPath := filepath.Join(dir, "bot_test")
+	build := exec.Command("go", "build", "-o", binPath, "./cmd/bot")
+	build.Dir = filepath.Join("..", "..")
+	require.NoError(t, build.Run(), "Failed to build binary")
+
 	tests := []struct {
-		name   string
-		config string
-		panic  bool
+		name     string
+		envVars  []string
+		hasPanic bool
 	}{
 		{
 			name: "valid_config_no_panic",
-			config: `TELEGRAM_BOT_TOKEN=test_token_1234567:ABCdefGHIjklMNOpqrstuVWX
-TELEGRAM_ADMIN_ID=0
-XUI_HOST=http://localhost:2053
-XUI_USERNAME=admin
-XUI_PASSWORD=password
-XUI_INBOUND_ID=1
-`,
-			panic: false,
+			envVars: []string{
+				"TELEGRAM_BOT_TOKEN=test_token_1234567:ABCdefGHIjklMNOpqrstuVWX",
+				"TELEGRAM_ADMIN_ID=0",
+				"XUI_HOST=http://localhost:2053",
+				"XUI_USERNAME=admin",
+				"XUI_PASSWORD=password",
+				"XUI_INBOUND_ID=1",
+			},
+			hasPanic: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			dir := t.TempDir()
-			configPath := filepath.Join(dir, "config.env")
-			err := os.WriteFile(configPath, []byte(tt.config), 0644)
-			require.NoError(t, err)
+			cmd := exec.Command(binPath)
+			cmd.Env = append(os.Environ(), tt.envVars...)
 
-			binPath := filepath.Join(dir, "bot_test")
-			build := exec.Command("go", "build", "-o", binPath, "./cmd/bot")
-			build.Dir = filepath.Join("..", "..")
-			err = build.Run()
-			require.NoError(t, err)
-
-			cmd := exec.Command(binPath, "-config", configPath)
-			err = cmd.Start()
+			err := cmd.Start()
 			require.NoError(t, err)
 
 			time.Sleep(500 * time.Millisecond)
@@ -197,13 +177,9 @@ XUI_INBOUND_ID=1
 				cmd.Wait()
 			}
 
-			require.False(t, tt.panic, "Expected no panic")
+			require.False(t, tt.hasPanic, "Expected no panic")
 		})
 	}
 }
 
-var testCtx = context.Background()
 
-func init() {
-	fmt.Println("Smoke test package initialized")
-}

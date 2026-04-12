@@ -224,7 +224,7 @@ func TestPerUserRateLimiter_Refill_Isolated(t *testing.T) {
 	assert.True(t, rl.Allow(2))
 	assert.False(t, rl.Allow(2))
 
-	// Wait for user 1 refill
-	time.Sleep(5 * time.Millisecond)
+	// Wait for user 1 refill (20ms guarantees ≥1 token at 100 tokens/sec refill rate)
+	time.Sleep(20 * time.Millisecond)
 	assert.True(t, rl.Allow(1))
 }

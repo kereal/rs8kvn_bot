@@ -650,8 +650,8 @@ func TestRateLimiter_Integration(t *testing.T) {
 			rl.Allow()
 		}
 
-		// Wait for refill
-		time.Sleep(50 * time.Millisecond)
+		// Wait for refill (150ms guarantees ≥1 token at 10 tokens/sec refill rate)
+		time.Sleep(150 * time.Millisecond)
 
 		// Should have refilled some tokens
 		assert.True(t, rl.Allow(), "request after refill should be allowed")
