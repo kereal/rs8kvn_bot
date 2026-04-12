@@ -1,141 +1,104 @@
 # Дорожная карта — rs8kvn_bot
 
-**Создано:** 2026-04-02  
-**Обновлено:** 2026-04-11  
+**Обновлено:** 2026-04-12  
 **Версия:** v2.2.0  
-**Масштаб:** 10 клиентов → 100 клиентов
+**Масштаб:** 10 → 100 клиентов
 
 ---
 
 ## Текущий статус
 
-- **Активные пользователи:** ~10 клиентов
-- **Покрытие тестами:** ~85%
-- **Архитектура:** 3x-ui один сервер
+- **Пользователи:** ~10 клиентов
+- **Покрытие тестами:** ~85% (race-safe)
+- **Архитектура:** 3x-ui один сервер, SQLite
 - **Приоритет:** Монетизация и рост
-- **Оптимизация памяти:** O(1) LRU cache ✅
-
-## Рефакторинг v2.2.0 (2026-04-10) ✅ ВСЕ ВЫПОЛНЕНО
-
-### Фаза 1: Багфиксы ✅
-
-1. **ReferralCache.Save() — noop** ✅
-   - Удалён broken dirty tracking (referral counts — derived из subscriptions)
-   - Save() → no-op (DB — источник истины)
-   - Sync() → просто Load() (refresh from DB)
-   - Бонус: sync.Map type assertion → safe two-value form
-
-2. **Nil pointer dereference при init fail** ✅
-   - logger.Warn → logger.Fatal для критичных компонентов (DB, XUI, Bot API)
-   - Раньше: продолжал с nil → гарантированный panic
-
-3. **Неатомарное удаление подписки** ✅
-   - Порядок изменён: DB-first, XUI-best-effort
-   - Если DB delete падает → XUI не тронут (можно retry)
-   - Если XUI delete падает → DB уже удалён, orphaned XUI client — меньшее зло
-   - Обновлены тесты
-
-4. **context.WithoutCancel для broadcast** ✅
-   - Убран — broadcast уже обрабатывает ctx.Done() в loop
-
-5. **handleBindTrial не инвалидирует кэш** ✅
-   - Добавлен h.invalidateCache(chatID) после успешного bind
-
-6. **formatDateRu zero-time** ✅
-   - Добавлен if t.IsZero() { return "—" }
-
-### Фаза 2: Quick wins ✅
-
-- ✅ Dead code в verifySession() удалён
-- ✅ Doc files уже lowercase
-
-### Фаза 3: Security ✅
-
-- ✅ 3.1 Timing-safe token comparison (crypto/subtle.ConstantTimeCompare)
-- ✅ 3.2 isLocalAddress → loopback only (no IsPrivate)
-- ✅ 3.3 Web server port binding check (net.Listen → Serve)
-- ✅ 3.4 getClientIP malformed fallback
-- ✅ 3.5 Health endpoint 503 при Down
-
-### Фаза 3.6: Дедупликация ✅
-
-- ✅ daysUntilReset, formatDateRu, generateProgressBar → internal/utils/format.go
-- ✅ Оба пакета (bot, service) используют utils.DaysUntilReset и т.д.
-- ✅ Тесты перенесены в internal/utils/format_test.go
-
-### Фаза 4: Тесты ✅
-
-- ✅ 4.1 Service layer tests: 24.8% → 95.2% (30 тестов)
-- ✅ 4.2 ReferralCache tests: 15 тестов
+- **Сборка:** `go build ./...` ✅, `go vet ./...` ✅, `golangci-lint` ✅
 
 ---
 
-## Краткосрочные приоритеты (1-2 месяца)
+## Приоритеты (1-2 месяца)
 
 ### Цель: 50-100 платящих клиентов
 
-### Фаза 1: Монетизация (Неделя 1-2)
-**Приоритет:** ВЫСШИЙ
+### Фаза 1: Монетизация (Неделя 1-2) — ВЫСШИЙ
 
-1. **Интеграция платежей** (ЮKassa/Т-Банк Pay)
+1. **Интеграция платежей** (ЮKassa/Т-Банк Pay) — 4-6 ч
    - Автоматическое продление после оплаты
-   - Несколько тарифных планов
-   - Время: 4-6 часов
+   - Несколько тарифных планов (1/3/12 мес)
 
-2. **Система промокодов**
+2. **Система промокодов** — 2-3 ч
    - Админ: `/promo КОД 30% 2026-12-31`
    - Пользователь: `/promo КОД`
-   - Время: 2-3 часа
 
-3. **Уведомления о лимите трафика**
+3. **Уведомления о лимите трафика** — 2-3 ч
    - Алерт при 80%, 90%, 100% использования
-   - Время: 2-3 часа
+   - Cron-задача каждый час, флаг в БД
 
 ### Фаза 2: Фичи для роста (Неделя 3-4)
 
-4. **Система наград за рефералов**
-5. **Еженедельный отчёт админу**
-6. **Авто-напоминания неактивным**
+4. **Система наград за рефералов** — 3-4 ч
+   - Уровни: Бронза (1-3) → Серебро (4-10) → Золото (11-25) → Платина (26+)
+   - Награды: +трафик, продление, VIP
+
+5. **Еженедельный отчёт админу** — 1-2 ч
+   - Новые/активные пользователи, оплаты, топ реферер, рост
+
+6. **Авто-напоминания неактивным** — 1-2 ч
+   - 7 дней без визита → сообщение с бонусом
 
 ### Фаза 3: Пользовательский опыт (Месяц 2)
 
-7. **Генератор многосерверных подписок** 🔥
-8. **Пауза/возобновление подписки**
-9. **Сбор фидбека**
+7. **Генератор многосерверных подписок** 🔥 — 1-2 дня
+8. **Пауза/возобновление подписки** — 2-3 ч
+9. **Сбор фидбека** — 1 ч
 
 ---
 
-## v2.2.0 Bugfixes (2026-04-11) ✅ ВСЕ ВЫПОЛНЕНО
+## Технический долг
 
-1. ✅ **escapeMarkdown missing backslash** — `\` добавлен первым в список экранирования MarkdownV2
-2. ✅ **HandleBroadcast 30s timeout** — заменён на 5 минут
-3. ✅ **GetOrCreateInvite игнорирует INSERT ошибку** — добавлена проверка err
-4. ✅ **pendingInvites утечка памяти** — добавлена периодическая очистка
-5. ✅ **handleMySubscription дублирует GetWithTraffic** — заменено на вызов service слоя
-6. ✅ **CleanupExpiredTrials wrong cutoff** — отдельный 1h cutoff для trial_requests
-
----
-
-## v2.2.0 Bugfixes (2026-04-12) ✅ ВСЕ ВЫПОЛНЕНО
-
-1. ✅ **Fix #1+#2 (P0+P1): ExpiryTime not stored in DB** — `service.Create()` now stores `ExpiryTime: expiryTime` instead of `time.Time{}`. Admin notifications show actual reset date. `GetWithTraffic` fallback preserved for backward compatibility.
-2. ✅ **Fix #3 (P1): `/sub/{subID}` serves revoked subscriptions** — Added `IsActive()` check in `handleSubscription` after DB lookup. Cache hit status verification with `InvalidateCache(key)`. 4 new tests.
-3. ✅ **Fix #4 (P2): Hard vs soft delete inconsistency** — Removed `Unscoped()` from `DeleteSubscriptionByID`. Both delete methods now use GORM soft delete consistently.
-4. ✅ **Fix #6 (P3): `SubscriptionCache.Get` uses exclusive Lock** — Changed to RLock → Lock upgrade pattern. Fast path: RLock for concurrent reads. Slow path: Lock only for mutations.
+| # | Проблема | Приоритет |
+|---|---------|-----------|
+| 1 | ExpiryTime не сохраняется в БД при Create() | P1 |
+| 2 | `/sub/{subID}` не проверяет статус подписки | P1 |
+| 3 | Re-enable linters (errcheck, gosec) — 73 issues в тестах | P1 |
+| 4 | Circuit breaker: cumulative → sliding window | P2 |
+| 5 | Multi-arch Docker (amd64 + arm64) | P2 |
+| 6 | Docker image on push to main | P2 |
+| 7 | Multi-admin (список admin IDs) | P3 |
+| 8 | Вынести тексты сообщений — централизованный конфиг | P3 |
+| 9 | Типизированные ошибки — заменить сравнение строк | P3 |
+| 10 | `.down.sql` миграции — поддержка отката | P3 |
 
 ---
 
-## Технический долг (оставшийся)
+## Бэклог (идеи на будущее)
 
-1. ~~Pending invite codes — in-memory only, lost on restart~~ → теперь есть периодическая очистка
-2. ~~ExpiryTime не сохраняется в БД при Create()~~ → исправлено в v2.2.0
-3. ~~`/sub/{subID}` не проверяет статус подписки~~ → исправлено в v2.2.0
-4. Circuit breaker cumulative failures → sliding window
-5. Вынести тексты сообщений — централизованный конфиг
-6. Типизированные ошибки — заменить сравнение строк
-7. `.down.sql` миграции — поддержка отката
+### Простые (1-3 часа, сделать когда будет время)
+
+| Идея | Время | Зачем |
+|------|-------|-------|
+| Автоответы на FAQ («не работает» → инструкция) | 1-2 ч | Снижение нагрузки на поддержку |
+| Экспорт данных для бухгалтерии (CSV) | 1 ч | Финансовая отчётность |
+| QR-код с реферальной ссылкой для друзей | 1 ч | Оффлайн-приглашение |
+| Поздравления с ДР + скидка | 1-2 ч | Лояльность |
+
+### Средние (2-5 часов, когда будет 30+ клиентов)
+
+| Идея | Время | Зачем |
+|------|-------|-------|
+| Авто-балансировка между серверами | 4-5 ч | Нет единой точки отказа |
+| Автоматическая миграция при блокировках | 4-5 ч | Непрерывность без участия юзера |
+| Система тикетов/поддержки в боте | 4-5 ч | Поддержка без отдельного бота |
+| Резервное копирование конфигураций | 2-3 ч | Восстановление за 5 мин |
+
+### Когда будет 50+ клиентов
+
+| Идея | Зачем |
+|------|-------|
+| Авто-выбор протокола по стране/провайдеру | Разные сети = разные протоколы |
+| Партнёрская программа для админов ботов | Партнёрская сеть продаж |
+| A/B тестирование сообщений | Оптимизация конверсии |
 
 ---
 
-**Последнее обновление:** 2026-04-12  
 **Следующий пересмотр:** Ежемесячно (первый понедельник)
