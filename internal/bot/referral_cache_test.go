@@ -10,6 +10,8 @@ import (
 )
 
 func TestReferralCache_NewReferralCache(t *testing.T) {
+	t.Parallel()
+
 	rc := NewReferralCache(nil)
 	if rc == nil {
 		t.Fatal("expected non-nil ReferralCache")
@@ -23,6 +25,8 @@ func TestReferralCache_NewReferralCache(t *testing.T) {
 }
 
 func TestReferralCache_Get(t *testing.T) {
+	t.Parallel()
+
 	rc := NewReferralCache(nil)
 
 	// Unknown chatID returns 0
@@ -38,6 +42,8 @@ func TestReferralCache_Get(t *testing.T) {
 }
 
 func TestReferralCache_Get_All(t *testing.T) {
+	t.Parallel()
+
 	rc := NewReferralCache(nil)
 	rc.SetForTest(1, 10)
 	rc.SetForTest(2, 20)
@@ -62,6 +68,8 @@ func TestReferralCache_Get_All(t *testing.T) {
 }
 
 func TestReferralCache_SetForTest(t *testing.T) {
+	t.Parallel()
+
 	rc := NewReferralCache(nil)
 
 	rc.SetForTest(100, 7)
@@ -77,6 +85,8 @@ func TestReferralCache_SetForTest(t *testing.T) {
 }
 
 func TestReferralCache_Increment(t *testing.T) {
+	t.Parallel()
+
 	rc := NewReferralCache(nil)
 
 	// New entry creates count=1
@@ -93,6 +103,8 @@ func TestReferralCache_Increment(t *testing.T) {
 }
 
 func TestReferralCache_Increment_Multiple(t *testing.T) {
+	t.Parallel()
+
 	rc := NewReferralCache(nil)
 
 	for i := 0; i < 5; i++ {
@@ -114,6 +126,8 @@ func TestReferralCache_Increment_Multiple(t *testing.T) {
 }
 
 func TestReferralCache_Decrement(t *testing.T) {
+	t.Parallel()
+
 	rc := NewReferralCache(nil)
 
 	rc.SetForTest(10, 3)
@@ -124,6 +138,8 @@ func TestReferralCache_Decrement(t *testing.T) {
 }
 
 func TestReferralCache_Decrement_Unknown(t *testing.T) {
+	t.Parallel()
+
 	rc := NewReferralCache(nil)
 
 	// Decrement on unknown chatID creates entry with count=0
@@ -134,6 +150,8 @@ func TestReferralCache_Decrement_Unknown(t *testing.T) {
 }
 
 func TestReferralCache_Decrement_DoesNotGoNegative(t *testing.T) {
+	t.Parallel()
+
 	rc := NewReferralCache(nil)
 
 	rc.SetForTest(10, 1)
@@ -149,6 +167,8 @@ func TestReferralCache_Decrement_DoesNotGoNegative(t *testing.T) {
 }
 
 func TestReferralCache_Save_IsNoOp(t *testing.T) {
+	t.Parallel()
+
 	rc := NewReferralCache(nil)
 	rc.SetForTest(1, 5)
 
@@ -164,6 +184,8 @@ func TestReferralCache_Save_IsNoOp(t *testing.T) {
 }
 
 func TestReferralCache_Sync_RefreshesFromDB(t *testing.T) {
+	t.Parallel()
+
 	mockDB := testutil.NewMockDatabaseService()
 	mockDB.GetAllReferralCountsFunc = func(ctx context.Context) (map[int64]int64, error) {
 		return map[int64]int64{100: 10, 200: 20}, nil
@@ -190,6 +212,8 @@ func TestReferralCache_Sync_RefreshesFromDB(t *testing.T) {
 }
 
 func TestReferralCache_GetAll_ConcurrentSafe(t *testing.T) {
+	t.Parallel()
+
 	rc := NewReferralCache(nil)
 	rc.SetForTest(1, 10)
 	rc.SetForTest(2, 20)
@@ -209,6 +233,8 @@ func TestReferralCache_GetAll_ConcurrentSafe(t *testing.T) {
 }
 
 func TestReferralCache_CheckAdminSendRateLimit(t *testing.T) {
+	t.Parallel()
+
 	rc := NewReferralCache(nil)
 
 	// First call allows
@@ -223,6 +249,8 @@ func TestReferralCache_CheckAdminSendRateLimit(t *testing.T) {
 }
 
 func TestReferralCache_CheckAdminSendRateLimit_AfterWait(t *testing.T) {
+	t.Parallel()
+
 	rc := NewReferralCache(nil)
 
 	// First call
@@ -240,6 +268,8 @@ func TestReferralCache_CheckAdminSendRateLimit_AfterWait(t *testing.T) {
 }
 
 func TestReferralCache_ClearAdminSendRateLimit(t *testing.T) {
+	t.Parallel()
+
 	rc := NewReferralCache(nil)
 
 	// First call

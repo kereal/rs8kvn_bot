@@ -27,6 +27,8 @@ func TestMain(m *testing.M) {
 }
 
 func TestNewHandler(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID:  123456789,
 		TrafficLimitGB:   100,
@@ -47,6 +49,8 @@ func TestNewHandler(t *testing.T) {
 }
 
 func TestGenerateInviteCode(t *testing.T) {
+	t.Parallel()
+
 	code1, err := utils.GenerateInviteCode()
 	require.NoError(t, err)
 	code2, err := utils.GenerateInviteCode()
@@ -67,6 +71,8 @@ func TestGenerateInviteCode(t *testing.T) {
 // See integration_test.go for integration tests.
 
 func TestHandler_ConfigField(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramBotToken: "123456:test_token",
 		TelegramAdminID:  999888777,
@@ -90,6 +96,8 @@ func TestHandler_ConfigField(t *testing.T) {
 }
 
 func TestHandleBroadcast_MessageTooLong(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  50,
@@ -113,6 +121,8 @@ func TestHandleBroadcast_MessageTooLong(t *testing.T) {
 }
 
 func TestHandleSend_RateLimit(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  50,
@@ -139,6 +149,8 @@ func TestHandleSend_RateLimit(t *testing.T) {
 }
 
 func TestHandleSend_NoArguments(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{TelegramAdminID: 123456}
 	mockDB := testutil.NewMockDatabaseService()
 	mockBot := testutil.NewMockBotAPI()
@@ -160,6 +172,8 @@ func TestHandleSend_NoArguments(t *testing.T) {
 }
 
 func TestHandleSend_OnlyTarget(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{TelegramAdminID: 123456}
 	mockDB := testutil.NewMockDatabaseService()
 	mockBot := testutil.NewMockBotAPI()
@@ -185,6 +199,8 @@ func TestHandleSend_OnlyTarget(t *testing.T) {
 // === sendInviteLink tests ===
 
 func TestSendInviteLink_Success(t *testing.T) {
+	t.Parallel()
+
 	mockDB := testutil.NewMockDatabaseService()
 	mockBot := testutil.NewMockBotAPI()
 	cfg := &config.Config{
@@ -215,6 +231,8 @@ func TestSendInviteLink_Success(t *testing.T) {
 }
 
 func TestSendInviteLink_DatabaseError(t *testing.T) {
+	t.Parallel()
+
 	mockDB := testutil.NewMockDatabaseService()
 	mockBot := testutil.NewMockBotAPI()
 	cfg := &config.Config{
@@ -238,6 +256,8 @@ func TestSendInviteLink_DatabaseError(t *testing.T) {
 // === isAdmin edge cases ===
 
 func TestHandler_IsAdmin_NegativeID(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{TelegramAdminID: 12345}
 	handler := &Handler{cfg: cfg, botConfig: NewTestBotConfig()}
 
@@ -246,6 +266,8 @@ func TestHandler_IsAdmin_NegativeID(t *testing.T) {
 }
 
 func TestHandler_IsAdmin_ZeroAdminID(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{TelegramAdminID: 0}
 	handler := &Handler{cfg: cfg, botConfig: NewTestBotConfig()}
 
@@ -256,6 +278,8 @@ func TestHandler_IsAdmin_ZeroAdminID(t *testing.T) {
 // === getUsername edge cases ===
 
 func TestHandler_GetUsername_EmptyStrings(t *testing.T) {
+	t.Parallel()
+
 	handler := &Handler{}
 
 	// User with empty strings
@@ -271,6 +295,8 @@ func TestHandler_GetUsername_EmptyStrings(t *testing.T) {
 }
 
 func TestHandler_CacheField(t *testing.T) {
+	t.Parallel()
+
 	handler := &Handler{
 		cache: NewSubscriptionCache(100, 5*time.Minute),
 	}
@@ -293,6 +319,8 @@ func TestHandler_CacheField(t *testing.T) {
 // === Rate limiter tests ===
 
 func TestHandler_RateLimiter(t *testing.T) {
+	t.Parallel()
+
 	handler := NewHandler(testutil.NewMockBotAPI(), &config.Config{}, testutil.NewMockDatabaseService(), nil, NewTestBotConfig(), nil, "")
 
 	assert.NotNil(t, handler.rateLimiter, "Rate limiter should be initialized")
@@ -305,6 +333,8 @@ func TestHandler_RateLimiter(t *testing.T) {
 // === Subscription cache integration ===
 
 func TestHandler_CacheInvalidation(t *testing.T) {
+	t.Parallel()
+
 	handler := &Handler{
 		cache: NewSubscriptionCache(100, 5*time.Minute),
 	}
@@ -330,6 +360,8 @@ func TestHandler_CacheInvalidation(t *testing.T) {
 // === Multiple subscription creation prevention ===
 
 func TestHandler_SubscriptionCreationLock(t *testing.T) {
+	t.Parallel()
+
 	handler := &Handler{
 		inProgressSyncMap: sync.Map{},
 	}
@@ -357,6 +389,8 @@ func TestHandler_SubscriptionCreationLock(t *testing.T) {
 // === handleCreateError tests ===
 
 func TestHandleCreateError_AllErrorTypes(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name        string
 		err         error
@@ -393,6 +427,8 @@ func TestHandleCreateError_AllErrorTypes(t *testing.T) {
 }
 
 func TestHandleUpdate_CommandRouting(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID:  123456789,
 		TrafficLimitGB:   100,
@@ -480,6 +516,8 @@ func TestHandleUpdate_CommandRouting(t *testing.T) {
 }
 
 func TestHandleUpdate_NonCommandMessage(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID:  123456789,
 		TrafficLimitGB:   100,
@@ -510,6 +548,8 @@ func TestHandleUpdate_NonCommandMessage(t *testing.T) {
 }
 
 func TestHandleUpdate_CallbackQuery(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID:  123456789,
 		TrafficLimitGB:   100,

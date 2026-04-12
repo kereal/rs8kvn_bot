@@ -175,7 +175,7 @@ func TestE2E_RealClient_ConcurrentLoginDedup(t *testing.T) {
 			case loginStarted <- struct{}{}:
 			default:
 			}
-			time.Sleep(50 * time.Millisecond)
+			time.Sleep(10 * time.Millisecond)
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(xui.APIResponse{Success: true})
 		},
@@ -189,7 +189,7 @@ func TestE2E_RealClient_ConcurrentLoginDedup(t *testing.T) {
 	env.xuiClient.TestForceSessionExpiry()
 
 	<-loginStarted
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(20 * time.Millisecond)
 
 	var wg sync.WaitGroup
 	results := make([]error, 3)

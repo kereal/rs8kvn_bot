@@ -9,6 +9,8 @@ import (
 )
 
 func TestGenerateQRCodePNG(t *testing.T) {
+	t.Parallel()
+
 	t.Run("generates PNG for valid URL", func(t *testing.T) {
 		data := "https://example.com/vmess://abc123"
 		png, err := GenerateQRCodePNG(data)
@@ -101,6 +103,8 @@ func TestGenerateQRCodePNG(t *testing.T) {
 }
 
 func TestGenerateQRCodePNG_Concurrent(t *testing.T) {
+	t.Parallel()
+
 	t.Run("concurrent generation is safe", func(t *testing.T) {
 		const goroutines = 50
 		const qrPerGoroutine = 20
@@ -165,6 +169,8 @@ func TestGenerateQRCodePNG_Concurrent(t *testing.T) {
 }
 
 func TestGenerateQRCodePNG_EdgeCases(t *testing.T) {
+	t.Parallel()
+
 	t.Run("single character", func(t *testing.T) {
 		png, err := GenerateQRCodePNG("a")
 		require.NoError(t, err, "GenerateQRCodePNG() error for single character")

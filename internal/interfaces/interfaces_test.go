@@ -260,6 +260,8 @@ func (m *mockDatabaseService) GetAllReferralCounts(ctx context.Context) (map[int
 }
 
 func TestMockDatabaseService(t *testing.T) {
+	t.Parallel()
+
 	svc := &mockDatabaseService{
 		subscriptions: make(map[int64]*database.Subscription),
 	}
@@ -281,6 +283,8 @@ func TestMockDatabaseService(t *testing.T) {
 }
 
 func TestMockDatabaseService_GetByID(t *testing.T) {
+	t.Parallel()
+
 	svc := &mockDatabaseService{
 		subscriptions: make(map[int64]*database.Subscription),
 	}
@@ -343,6 +347,8 @@ func (m *mockXUIClient) Ping(ctx context.Context) error {
 }
 
 func TestMockXUIClient(t *testing.T) {
+	t.Parallel()
+
 	client := &mockXUIClient{
 		clientConfig: &xui.ClientConfig{
 			ID:    "test-id",
@@ -367,6 +373,8 @@ func TestMockXUIClient(t *testing.T) {
 }
 
 func TestMockXUIClient_GetSubscriptionLink(t *testing.T) {
+	t.Parallel()
+
 	client := &mockXUIClient{}
 	link := client.GetSubscriptionLink("http://localhost", "sub123", "sub")
 	expected := "http://localhost/sub/sub123"
@@ -374,6 +382,8 @@ func TestMockXUIClient_GetSubscriptionLink(t *testing.T) {
 }
 
 func TestMockDatabaseService_Ping(t *testing.T) {
+	t.Parallel()
+
 	t.Run("success", func(t *testing.T) {
 		svc := &mockDatabaseService{}
 		err := svc.Ping(context.Background())
@@ -388,6 +398,8 @@ func TestMockDatabaseService_Ping(t *testing.T) {
 }
 
 func TestMockDatabaseService_CountAllSubscriptions(t *testing.T) {
+	t.Parallel()
+
 	svc := &mockDatabaseService{
 		subscriptions: map[int64]*database.Subscription{
 			1: {TelegramID: 1},
@@ -401,6 +413,8 @@ func TestMockDatabaseService_CountAllSubscriptions(t *testing.T) {
 }
 
 func TestMockDatabaseService_GetOrCreateInvite(t *testing.T) {
+	t.Parallel()
+
 	t.Run("create new invite", func(t *testing.T) {
 		svc := &mockDatabaseService{}
 		invite, err := svc.GetOrCreateInvite(context.Background(), 123, "ABC12345")
@@ -422,6 +436,8 @@ func TestMockDatabaseService_GetOrCreateInvite(t *testing.T) {
 }
 
 func TestMockDatabaseService_GetInviteByCode(t *testing.T) {
+	t.Parallel()
+
 	t.Run("found", func(t *testing.T) {
 		svc := &mockDatabaseService{
 			invites: map[string]*database.Invite{
@@ -443,6 +459,8 @@ func TestMockDatabaseService_GetInviteByCode(t *testing.T) {
 }
 
 func TestMockDatabaseService_CreateTrialSubscription(t *testing.T) {
+	t.Parallel()
+
 	t.Run("success", func(t *testing.T) {
 		svc := &mockDatabaseService{}
 		sub, err := svc.CreateTrialSubscription(
@@ -478,6 +496,8 @@ func TestMockDatabaseService_CreateTrialSubscription(t *testing.T) {
 }
 
 func TestMockDatabaseService_BindTrialSubscription(t *testing.T) {
+	t.Parallel()
+
 	t.Run("success", func(t *testing.T) {
 		svc := &mockDatabaseService{
 			subscriptions: map[int64]*database.Subscription{
@@ -499,6 +519,8 @@ func TestMockDatabaseService_BindTrialSubscription(t *testing.T) {
 }
 
 func TestMockDatabaseService_TrialRequests(t *testing.T) {
+	t.Parallel()
+
 	svc := &mockDatabaseService{}
 
 	// Create trial requests
@@ -520,6 +542,8 @@ func TestMockDatabaseService_TrialRequests(t *testing.T) {
 }
 
 func TestMockDatabaseService_CleanupExpiredTrials(t *testing.T) {
+	t.Parallel()
+
 	svc := &mockDatabaseService{cleanupExpiredCount: 5}
 
 	count, err := svc.CleanupExpiredTrials(context.Background(), 24, nil)
@@ -528,6 +552,8 @@ func TestMockDatabaseService_CleanupExpiredTrials(t *testing.T) {
 }
 
 func TestMockXUIClient_Ping(t *testing.T) {
+	t.Parallel()
+
 	t.Run("success", func(t *testing.T) {
 		client := &mockXUIClient{}
 		err := client.Ping(context.Background())
@@ -542,6 +568,8 @@ func TestMockXUIClient_Ping(t *testing.T) {
 }
 
 func TestMockXUIClient_UpdateClient(t *testing.T) {
+	t.Parallel()
+
 	t.Run("success", func(t *testing.T) {
 		client := &mockXUIClient{}
 		err := client.UpdateClient(context.Background(), 1, "client123", "test@example.com", "sub123", 1000, time.Now(), 123, "comment")
@@ -556,6 +584,8 @@ func TestMockXUIClient_UpdateClient(t *testing.T) {
 }
 
 func TestMockDatabaseService_GetSubscriptionBySubscriptionID(t *testing.T) {
+	t.Parallel()
+
 	t.Run("found", func(t *testing.T) {
 		svc := &mockDatabaseService{
 			subscriptions: map[int64]*database.Subscription{
@@ -578,10 +608,14 @@ func TestMockDatabaseService_GetSubscriptionBySubscriptionID(t *testing.T) {
 
 // Test that mockDatabaseService implements DatabaseService interface
 func TestMockDatabaseService_ImplementsInterface(t *testing.T) {
+	t.Parallel()
+
 	var _ DatabaseService = (*mockDatabaseService)(nil)
 }
 
 // Test that mockXUIClient implements XUIClient interface
 func TestMockXUIClient_ImplementsInterface(t *testing.T) {
+	t.Parallel()
+
 	var _ XUIClient = (*mockXUIClient)(nil)
 }

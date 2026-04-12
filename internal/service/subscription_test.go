@@ -22,6 +22,8 @@ func TestMain(m *testing.M) {
 }
 
 func TestSubscriptionService_Create_Success(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TrafficLimitGB: 100,
 		XUIInboundID:   1,
@@ -47,6 +49,8 @@ func TestSubscriptionService_Create_Success(t *testing.T) {
 }
 
 func TestSubscriptionService_Create_XUIError(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TrafficLimitGB: 100,
 		XUIInboundID:   1,
@@ -70,6 +74,8 @@ func TestSubscriptionService_Create_XUIError(t *testing.T) {
 }
 
 func TestSubscriptionService_Create_DBError_RollbackSuccess(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TrafficLimitGB: 100,
 		XUIInboundID:   1,
@@ -103,6 +109,8 @@ func TestSubscriptionService_Create_DBError_RollbackSuccess(t *testing.T) {
 }
 
 func TestSubscriptionService_Create_DBError_RollbackFailed(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TrafficLimitGB: 100,
 		XUIInboundID:   1,
@@ -133,6 +141,8 @@ func TestSubscriptionService_Create_DBError_RollbackFailed(t *testing.T) {
 }
 
 func TestSubscriptionService_GetByTelegramID_Success(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{}
 	expected := &database.Subscription{
 		TelegramID: 123456,
@@ -156,6 +166,8 @@ func TestSubscriptionService_GetByTelegramID_Success(t *testing.T) {
 }
 
 func TestSubscriptionService_GetByTelegramID_NotFound(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{}
 
 	db := &testutil.MockDatabaseService{
@@ -174,6 +186,8 @@ func TestSubscriptionService_GetByTelegramID_NotFound(t *testing.T) {
 }
 
 func TestSubscriptionService_Delete_Success(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{XUIInboundID: 1}
 
 	sub := &database.Subscription{
@@ -208,6 +222,8 @@ func TestSubscriptionService_Delete_Success(t *testing.T) {
 }
 
 func TestSubscriptionService_Delete_NotFound(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{}
 
 	db := &testutil.MockDatabaseService{
@@ -225,6 +241,8 @@ func TestSubscriptionService_Delete_NotFound(t *testing.T) {
 }
 
 func TestSubscriptionService_Delete_XUIError(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{XUIInboundID: 1}
 
 	sub := &database.Subscription{
@@ -257,6 +275,8 @@ func TestSubscriptionService_Delete_XUIError(t *testing.T) {
 }
 
 func TestSubscriptionService_Delete_DBError(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{XUIInboundID: 1}
 
 	sub := &database.Subscription{
@@ -291,6 +311,8 @@ func TestSubscriptionService_Delete_DBError(t *testing.T) {
 }
 
 func TestSubscriptionService_Delete_UsesSubscriptionInboundID(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{XUIInboundID: 1}
 
 	// Subscription has a different InboundID than the config default
@@ -324,6 +346,8 @@ func TestSubscriptionService_Delete_UsesSubscriptionInboundID(t *testing.T) {
 }
 
 func TestSubscriptionService_Delete_FallsBackToConfigInboundID(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{XUIInboundID: 1}
 
 	// Subscription has zero InboundID (e.g., migrated from old data)
@@ -357,6 +381,8 @@ func TestSubscriptionService_Delete_FallsBackToConfigInboundID(t *testing.T) {
 }
 
 func TestCalcTrialTraffic(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name       string
 		trialHours int
@@ -377,6 +403,8 @@ func TestCalcTrialTraffic(t *testing.T) {
 }
 
 func TestSubscriptionService_GetWithTraffic_Success(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TrafficLimitGB: 100,
 		XUIInboundID:   1,
@@ -412,6 +440,8 @@ func TestSubscriptionService_GetWithTraffic_Success(t *testing.T) {
 }
 
 func TestSubscriptionService_GetWithTraffic_XUIErrorFallback(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TrafficLimitGB: 100,
 		XUIInboundID:   1,
@@ -446,6 +476,8 @@ func TestSubscriptionService_GetWithTraffic_XUIErrorFallback(t *testing.T) {
 }
 
 func TestSubscriptionService_CreateTrial_Success(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		XUIInboundID:       1,
 		XUIHost:            "http://localhost:2053",
@@ -476,6 +508,8 @@ func TestSubscriptionService_CreateTrial_Success(t *testing.T) {
 }
 
 func TestSubscriptionService_CreateTrial_XUIError(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		XUIInboundID:       1,
 		TrialDurationHours: 3,
@@ -497,6 +531,8 @@ func TestSubscriptionService_CreateTrial_XUIError(t *testing.T) {
 }
 
 func TestSubscriptionService_CreateTrial_DBError(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		XUIInboundID:       1,
 		XUIHost:            "http://localhost:2053",

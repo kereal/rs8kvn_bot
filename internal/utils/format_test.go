@@ -9,6 +9,8 @@ import (
 )
 
 func TestDaysUntilReset(t *testing.T) {
+	t.Parallel()
+
 	now := time.Now()
 
 	tests := []struct {
@@ -32,6 +34,8 @@ func TestDaysUntilReset(t *testing.T) {
 }
 
 func TestFormatDateRu(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name string
 		t    time.Time
@@ -51,6 +55,8 @@ func TestFormatDateRu(t *testing.T) {
 }
 
 func TestGenerateProgressBar(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name    string
 		usedGB  float64

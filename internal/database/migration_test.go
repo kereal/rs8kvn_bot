@@ -11,6 +11,8 @@ import (
 )
 
 func TestMigration_Idempotency(t *testing.T) {
+	t.Parallel()
+
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 
 	db1, err := NewService(dbPath)
@@ -42,6 +44,8 @@ func TestMigration_Idempotency(t *testing.T) {
 }
 
 func TestMigration_AddNewTable(t *testing.T) {
+	t.Parallel()
+
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 
 	db, err := NewService(dbPath)
@@ -66,6 +70,8 @@ func TestMigration_AddNewTable(t *testing.T) {
 }
 
 func TestMigration_PreserveDataOnUpgrade(t *testing.T) {
+	t.Parallel()
+
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 
 	db1, err := NewService(dbPath)
@@ -98,6 +104,8 @@ func TestMigration_PreserveDataOnUpgrade(t *testing.T) {
 }
 
 func TestMigration_RunMultipleTimes(t *testing.T) {
+	t.Parallel()
+
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 
 	for i := 0; i < 3; i++ {
@@ -108,6 +116,8 @@ func TestMigration_RunMultipleTimes(t *testing.T) {
 }
 
 func TestMigration_InvalidSchema(t *testing.T) {
+	t.Parallel()
+
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	f, err := os.Create(dbPath)
 	require.NoError(t, err)
@@ -119,6 +129,8 @@ func TestMigration_InvalidSchema(t *testing.T) {
 }
 
 func TestMigration_SchemaVersionTracking(t *testing.T) {
+	t.Parallel()
+
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 
 	db, err := NewService(dbPath)

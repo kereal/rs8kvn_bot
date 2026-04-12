@@ -20,6 +20,8 @@ func TestMain(m *testing.M) {
 }
 
 func TestGetVersion(t *testing.T) {
+	t.Parallel()
+
 	t.Run("returns non-empty string", func(t *testing.T) {
 		v := getVersion()
 		assert.NotEmpty(t, v, "getVersion() returned empty string")
@@ -38,6 +40,8 @@ func TestGetVersion(t *testing.T) {
 }
 
 func TestGetVersion_CommitVariable(t *testing.T) {
+	t.Parallel()
+
 	// Test that commit variable is accessible
 	t.Run("commit variable is defined", func(t *testing.T) {
 		if commit == "" {
@@ -47,6 +51,8 @@ func TestGetVersion_CommitVariable(t *testing.T) {
 }
 
 func TestGetVersion_BuildTimeVariable(t *testing.T) {
+	t.Parallel()
+
 	// Test that buildTime variable is accessible
 	t.Run("buildTime variable is defined", func(t *testing.T) {
 		if buildTime == "" {
@@ -56,6 +62,8 @@ func TestGetVersion_BuildTimeVariable(t *testing.T) {
 }
 
 func TestHandleUpdate_CommandRouting(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  50,
@@ -92,6 +100,8 @@ func TestHandleUpdate_CommandRouting(t *testing.T) {
 }
 
 func TestHandleUpdate_NonCommandMessage(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  50,
@@ -115,6 +125,8 @@ func TestHandleUpdate_NonCommandMessage(t *testing.T) {
 }
 
 func TestHandleUpdate_CallbackQuery(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  50,
@@ -142,6 +154,8 @@ func TestHandleUpdate_CallbackQuery(t *testing.T) {
 }
 
 func TestHandleUpdateSafely_PanicRecovery(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  50,
@@ -168,6 +182,8 @@ func TestHandleUpdateSafely_PanicRecovery(t *testing.T) {
 }
 
 func TestHandleUpdate_UnknownCommand(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  50,
@@ -193,6 +209,8 @@ func TestHandleUpdate_UnknownCommand(t *testing.T) {
 // TestStartBackupScheduler_ContextCancellation тестирует остановку scheduler при отмене контекста
 // TestHandleUpdateSafely_PanicInHandler tests panic recovery in handler
 func TestHandleUpdateSafely_PanicInHandler(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  50,
@@ -219,6 +237,8 @@ func TestHandleUpdateSafely_PanicInHandler(t *testing.T) {
 
 // TestGetVersion_WithLdflags тестирует getVersion при различных сценариях
 func TestGetVersion_WithLdflags(t *testing.T) {
+	t.Parallel()
+
 	t.Run("dev version", func(t *testing.T) {
 		v := getVersion()
 		assert.NotEmpty(t, v)
@@ -228,6 +248,8 @@ func TestGetVersion_WithLdflags(t *testing.T) {
 
 // TestHandleUpdate_NilMessage тестирует обработку update с nil Message
 func TestHandleUpdate_NilMessage(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  50,
@@ -247,6 +269,8 @@ func TestHandleUpdate_NilMessage(t *testing.T) {
 
 // TestGetVersion_WithBuildInfo тестирует getVersion с различными build info
 func TestGetVersion_WithBuildInfo(t *testing.T) {
+	t.Parallel()
+
 	t.Run("dev version returns valid format", func(t *testing.T) {
 		v := getVersion()
 		assert.NotEmpty(t, v)
@@ -261,6 +285,8 @@ func TestGetVersion_WithBuildInfo(t *testing.T) {
 
 // TestHandleUpdate_UnknownCommands тестирует обработку неизвестных команд
 func TestHandleUpdate_UnknownCommands(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  50,
@@ -299,6 +325,8 @@ func TestHandleUpdate_UnknownCommands(t *testing.T) {
 }
 
 func TestHandleUpdate_UnknownCommand_Text(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  50,
@@ -327,6 +355,8 @@ func TestHandleUpdate_UnknownCommand_Text(t *testing.T) {
 }
 
 func TestHandleUpdate_NonCommandMessage_Text(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  50,
@@ -352,6 +382,8 @@ func TestHandleUpdate_NonCommandMessage_Text(t *testing.T) {
 }
 
 func TestHandleUpdate_NonCommandMessage_UsernameFallback(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  50,
@@ -376,6 +408,8 @@ func TestHandleUpdate_NonCommandMessage_UsernameFallback(t *testing.T) {
 }
 
 func TestHandleUpdate_NonCommandMessage_NoUser(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  50,
@@ -399,6 +433,8 @@ func TestHandleUpdate_NonCommandMessage_NoUser(t *testing.T) {
 }
 
 func TestHandleUpdate_NonCommandMessage_LongText(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  50,
@@ -424,6 +460,8 @@ func TestHandleUpdate_NonCommandMessage_LongText(t *testing.T) {
 }
 
 func TestHandleUpdate_CallbackQuery_NoMessage(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  50,
@@ -448,6 +486,8 @@ func TestHandleUpdate_CallbackQuery_NoMessage(t *testing.T) {
 }
 
 func TestHandleUpdate_NilMessageAndNilCallback(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  50,
@@ -469,6 +509,8 @@ func TestHandleUpdate_NilMessageAndNilCallback(t *testing.T) {
 }
 
 func TestHandleUpdateSafely_DoesNotSwallowPanic(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  50,
@@ -493,12 +535,16 @@ func TestHandleUpdateSafely_DoesNotSwallowPanic(t *testing.T) {
 }
 
 func TestGetVersion_DevVersion(t *testing.T) {
+	t.Parallel()
+
 	v := getVersion()
 	assert.NotEmpty(t, v)
 	assert.Contains(t, v, "rs8kvn_bot@")
 }
 
 func TestHandleUpdateSafely_RecoversFromPanic(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  50,
@@ -529,6 +575,8 @@ func TestHandleUpdateSafely_RecoversFromPanic(t *testing.T) {
 // func TestConfigLoad_InvalidPort(t *testing.T) { ... }
 
 func TestConfigLoad_MissingRequiredFields(t *testing.T) {
+	t.Parallel()
+
 	os.Unsetenv("TELEGRAM_BOT_TOKEN")
 	os.Unsetenv("XUI_HOST")
 	os.Unsetenv("DATABASE_PATH")
@@ -539,6 +587,8 @@ func TestConfigLoad_MissingRequiredFields(t *testing.T) {
 }
 
 func TestConfigLoad_InvalidNumericValues(t *testing.T) {
+	t.Parallel()
+
 	t.Setenv("TELEGRAM_BOT_TOKEN", "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11")
 	t.Setenv("TELEGRAM_ADMIN_ID", "not_a_number")
 	t.Setenv("XUI_HOST", "http://localhost:2053")
@@ -560,6 +610,8 @@ func TestConfigLoad_InvalidNumericValues(t *testing.T) {
 }
 
 func TestConfigLoad_InvalidURL(t *testing.T) {
+	t.Parallel()
+
 	t.Setenv("TELEGRAM_BOT_TOKEN", "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11")
 	t.Setenv("TELEGRAM_ADMIN_ID", "123456789")
 	t.Setenv("XUI_HOST", "not-a-valid-url")
@@ -581,6 +633,8 @@ func TestConfigLoad_InvalidURL(t *testing.T) {
 }
 
 func TestConfigLoad_InvalidPort(t *testing.T) {
+	t.Parallel()
+
 	t.Setenv("TELEGRAM_BOT_TOKEN", "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11")
 	t.Setenv("TELEGRAM_ADMIN_ID", "123456789")
 	t.Setenv("XUI_HOST", "http://localhost:2053")

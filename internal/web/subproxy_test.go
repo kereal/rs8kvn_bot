@@ -24,6 +24,8 @@ import (
 )
 
 func TestHandleSubscription_MethodNotAllowed(t *testing.T) {
+	t.Parallel()
+
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	cfg := &config.Config{
@@ -43,6 +45,8 @@ func TestHandleSubscription_MethodNotAllowed(t *testing.T) {
 }
 
 func TestHandleSubscription_SubProxyNil(t *testing.T) {
+	t.Parallel()
+
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	cfg := &config.Config{}
@@ -58,6 +62,8 @@ func TestHandleSubscription_SubProxyNil(t *testing.T) {
 }
 
 func TestHandleSubscription_InvalidCode(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{SubExtraServersEnabled: true}
 	subProxy := subproxy.NewService(cfg)
 	defer subProxy.Stop()
@@ -86,6 +92,8 @@ func TestHandleSubscription_InvalidCode(t *testing.T) {
 }
 
 func TestHandleSubscription_NotFoundInDB(t *testing.T) {
+	t.Parallel()
+
 	mockDB := testutil.NewMockDatabaseService()
 	mockDB.GetSubscriptionBySubscriptionIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
 		return nil, gorm.ErrRecordNotFound
@@ -106,6 +114,8 @@ func TestHandleSubscription_NotFoundInDB(t *testing.T) {
 }
 
 func TestHandleSubscription_EmptySubscriptionURL(t *testing.T) {
+	t.Parallel()
+
 	mockDB := testutil.NewMockDatabaseService()
 	mockDB.GetSubscriptionBySubscriptionIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
 		return &database.Subscription{
@@ -130,6 +140,8 @@ func TestHandleSubscription_EmptySubscriptionURL(t *testing.T) {
 }
 
 func TestHandleSubscription_XUIError_NoCache(t *testing.T) {
+	t.Parallel()
+
 	mockDB := testutil.NewMockDatabaseService()
 	mockDB.GetSubscriptionBySubscriptionIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
 		return &database.Subscription{
@@ -154,6 +166,8 @@ func TestHandleSubscription_XUIError_NoCache(t *testing.T) {
 }
 
 func TestHandleSubscription_CacheHit(t *testing.T) {
+	t.Parallel()
+
 	mockDB := testutil.NewMockDatabaseService()
 	subID := "cached_sub_id"
 	mockDB.GetSubscriptionBySubscriptionIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
@@ -190,6 +204,8 @@ func TestHandleSubscription_CacheHit(t *testing.T) {
 }
 
 func TestHandleSubscription_CacheHitAfterXUIError(t *testing.T) {
+	t.Parallel()
+
 	mockDB := testutil.NewMockDatabaseService()
 	subID := "fallback_sub_id"
 	mockDB.GetSubscriptionBySubscriptionIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
@@ -222,6 +238,8 @@ func TestHandleSubscription_CacheHitAfterXUIError(t *testing.T) {
 }
 
 func TestHandleSubscription_ExtraServersAppended(t *testing.T) {
+	t.Parallel()
+
 	servers := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Subscription-Userinfo", "upload=0; download=0; total=10737418240; expire=1234567890")
 		w.Header().Set("Profile-Update-Interval", "60")
@@ -271,6 +289,8 @@ func TestHandleSubscription_ExtraServersAppended(t *testing.T) {
 }
 
 func TestHandleSubscription_Base64FormatPreserved(t *testing.T) {
+	t.Parallel()
+
 	originalPlain := "vless://original@original.example.com:443"
 	originalEncoded := base64.StdEncoding.EncodeToString([]byte(originalPlain))
 
@@ -321,8 +341,10 @@ func TestHandleSubscription_Base64FormatPreserved(t *testing.T) {
 }
 
 func TestHandleSubscription_ConcurrentRequests(t *testing.T) {
+	t.Parallel()
+
 	servers := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(10 * time.Millisecond)
 		w.Header().Set("Subscription-Userinfo", "upload=0; download=0; total=10737418240; expire=1234567890")
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("vless://concurrent@server.example.com:443"))
@@ -376,6 +398,8 @@ func TestHandleSubscription_ConcurrentRequests(t *testing.T) {
 }
 
 func TestHandleSubscription_ExtraServersFileMissing(t *testing.T) {
+	t.Parallel()
+
 	servers := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("vless://original@server.example.com:443"))
@@ -410,6 +434,8 @@ func TestHandleSubscription_ExtraServersFileMissing(t *testing.T) {
 }
 
 func TestHandleSubscription_NoExtraServersWhenDisabled(t *testing.T) {
+	t.Parallel()
+
 	servers := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("vless://original@server.example.com:443"))
@@ -450,6 +476,8 @@ func TestHandleSubscription_NoExtraServersWhenDisabled(t *testing.T) {
 }
 
 func TestHandleSubscription_CacheStoresMergedResult(t *testing.T) {
+	t.Parallel()
+
 	servers := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("vless://original@server.example.com:443"))
@@ -500,6 +528,8 @@ func TestHandleSubscription_CacheStoresMergedResult(t *testing.T) {
 }
 
 func TestHandleSubscription_EmptyBodyFromXUI(t *testing.T) {
+	t.Parallel()
+
 	servers := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(""))
@@ -530,6 +560,8 @@ func TestHandleSubscription_EmptyBodyFromXUI(t *testing.T) {
 }
 
 func TestHandleSubscription_CorruptDataFromXUI(t *testing.T) {
+	t.Parallel()
+
 	servers := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("this is not a valid subscription, just random text !!!"))
@@ -561,6 +593,8 @@ func TestHandleSubscription_CorruptDataFromXUI(t *testing.T) {
 }
 
 func TestHandleSubscription_CriticalHeadersPreserved(t *testing.T) {
+	t.Parallel()
+
 	servers := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Subscription-Userinfo", "upload=100; download=200; total=10737418240; expire=1700000000")
 		w.Header().Set("Profile-Update-Interval", "120")
@@ -601,6 +635,8 @@ func TestHandleSubscription_CriticalHeadersPreserved(t *testing.T) {
 }
 
 func TestHandleSubscription_CriticalHeadersPreservedFromCache(t *testing.T) {
+	t.Parallel()
+
 	mockDB := testutil.NewMockDatabaseService()
 	subID := "cached_headers_sub"
 	mockDB.GetSubscriptionBySubscriptionIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
@@ -636,6 +672,8 @@ func TestHandleSubscription_CriticalHeadersPreservedFromCache(t *testing.T) {
 }
 
 func TestHandleSubscription_ExtraHeadersOverrideXUI(t *testing.T) {
+	t.Parallel()
+
 	servers := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Subscription-Userinfo", "upload=0; download=0; total=10737418240; expire=1234567890")
 		w.Header().Set("Profile-Title", "xui-title")
@@ -679,6 +717,8 @@ func TestHandleSubscription_ExtraHeadersOverrideXUI(t *testing.T) {
 }
 
 func TestHandleSubscription_ConcurrentNotFound(t *testing.T) {
+	t.Parallel()
+
 	mockDB := testutil.NewMockDatabaseService()
 	callCount := 0
 	var mu sync.Mutex
@@ -686,7 +726,7 @@ func TestHandleSubscription_ConcurrentNotFound(t *testing.T) {
 		mu.Lock()
 		callCount++
 		mu.Unlock()
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(10 * time.Millisecond)
 		return nil, gorm.ErrRecordNotFound
 	}
 
@@ -725,6 +765,8 @@ func TestHandleSubscription_ConcurrentNotFound(t *testing.T) {
 }
 
 func TestHandleSubscription_RevokedSubscription(t *testing.T) {
+	t.Parallel()
+
 	mockDB := testutil.NewMockDatabaseService()
 	mockDB.GetSubscriptionBySubscriptionIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
 		return &database.Subscription{
@@ -749,6 +791,8 @@ func TestHandleSubscription_RevokedSubscription(t *testing.T) {
 }
 
 func TestHandleSubscription_ExpiredSubscription(t *testing.T) {
+	t.Parallel()
+
 	mockDB := testutil.NewMockDatabaseService()
 	mockDB.GetSubscriptionBySubscriptionIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
 		return &database.Subscription{
@@ -773,6 +817,8 @@ func TestHandleSubscription_ExpiredSubscription(t *testing.T) {
 }
 
 func TestHandleSubscription_RevokedSubscription_CacheHit(t *testing.T) {
+	t.Parallel()
+
 	mockDB := testutil.NewMockDatabaseService()
 	subID := "revoked_cached_sub"
 	mockDB.GetSubscriptionBySubscriptionIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
@@ -809,6 +855,8 @@ func TestHandleSubscription_RevokedSubscription_CacheHit(t *testing.T) {
 }
 
 func TestHandleSubscription_ExpiredByTime_CacheHit(t *testing.T) {
+	t.Parallel()
+
 	mockDB := testutil.NewMockDatabaseService()
 	subID := "time_expired_cached_sub"
 	pastTime := time.Now().Add(-24 * time.Hour)
