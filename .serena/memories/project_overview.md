@@ -37,7 +37,7 @@ This is a Telegram bot for distributing VLESS+Reality+Vision proxy subscriptions
 - **Cache RLock for reads** — concurrent cache reads don't block each other — handles thousands of users without early termination
 
 ## Tech Stack
-- **Language**: Go 1.25
+- **Language**: Go 1.25 (проект всегда был на Go, никогда не был на Python)
 - **Bot Framework**: telegram-bot-api/v5
 - **Database**: SQLite with GORM
 - **Logging**: Zap
