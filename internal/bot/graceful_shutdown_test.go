@@ -56,7 +56,6 @@ func TestBot_GracefulShutdown(t *testing.T) {
 }
 
 func TestServer_GracefulShutdown(t *testing.T) {
-	t.Parallel()
 	if testing.Short() {
 		t.Skip("Skipping in short mode")
 	}
@@ -110,7 +109,6 @@ func TestServer_GracefulShutdown(t *testing.T) {
 }
 
 func TestHeartbeat_StopOnContextCancel(t *testing.T) {
-	t.Parallel()
 	if testing.Short() {
 		t.Skip("Skipping in short mode")
 	}
@@ -137,7 +135,6 @@ func TestHeartbeat_StopOnContextCancel(t *testing.T) {
 }
 
 func TestGoroutineLeak(t *testing.T) {
-	t.Parallel()
 	if testing.Short() {
 		t.Skip("Skipping in short mode")
 	}
