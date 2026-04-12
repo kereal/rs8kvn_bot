@@ -76,7 +76,7 @@ Admins (specified in `TELEGRAM_ADMIN_ID`) have access to additional commands:
 | `/lastreg` | Show the last 10 registered users |
 | `/del <id>` | Delete a subscription by database ID |
 | `/broadcast <message>` | Send a message to all users who have a subscription |
-| `/send <id|username> <message>` | Send a message to a specific user |
+| `/send <id or @username> <message>` | Send a message to a specific user |
 | `/refstats` | Show referral statistics (count per user from cache) |
 
 **Examples:**
