@@ -83,10 +83,12 @@ docker-compose up -d
 ### СТРОГО ЗАПРЕЩЕНО
 - ❌ **НЕ коммитить напрямую в main**
 - ❌ **НЕ делать push в main**
+- ❌ **НЕ коммитить напрямую в dev** — ВСЕГДА через feature/fix ветку + PR
 
 ### Branch Strategy
 - **Main branch**: `main` — только через merge из dev, никаких прямых коммитов
-- **Dev branch**: `dev` — development ветка, можно коммитить напрямую (но лучше через feature ветки)
+- **Dev branch**: `dev` — интеграционная ветка, только через merge из PR
+- **Docs branches**: `docs/<description>` — для изменений документации
 - **Feature branches**: `feature/<description>` — для новых фич
 - **Fix branches**: `fix/<description>` — для багфиксов
 - **Remote**: `https://github.com/kereal/rs8kvn_bot.git`
@@ -113,18 +115,20 @@ release/1.2.0
 hotfix/1.2.1-security-patch
 ```
 
-### Правильный Workflow
-1. Создать feature/fix ветку: `git checkout -b fix/description` или `git checkout -b feature/description`
+### Правильный Workflow (ОБЯЗАТЕЛЬНО)
+1. Создать ветку: `git checkout -b docs/description` / `fix/description` / `feature/description`
 2. Внести изменения
 3. Протестировать (см. Pre-commit Checklist)
-4. Сделать коммит: `git commit -m "fix: description"`
+4. Сделать коммит: `git commit -m "type: description"`
 5. Запушить ветку: `git push origin <branch-name>`
-6. **Мержить в dev** (можно напрямую или через PR)
-7. Для релиза: merge dev → main
+6. Создать PR: `gh pr create --base dev --title "type: description" --body "..."`
+7. Ждать review → только после одобрения мержить
+8. Для релиза: merge dev → main
 
-### Коммиты напрямую в dev
-- ✅ Можно делать небольшие изменения напрямую в dev
-- ⚠️ Но лучше использовать feature ветки для всех изменений
+### Никаких прямых коммитов в dev
+- ❌ Даже «небольшие» изменения — через ветку + PR
+- ❌ Даже исправление опечатки — через ветку + PR
+- ✅ Это обеспечивает audit trail и возможность rollback
 
 ### Common Git Commands
 ```bash
@@ -153,29 +157,29 @@ gh release create v1.0.0
 
 ---
 
-## Пример правильного workflow
+## Пример правильного workflow (ОБЯЗАТЕЛЬНО)
 ```bash
-# 1. Активировать проект (ИИ должен сделать это первым делом)
+# 1. Активировать проект
 activate_project("rs8kvn_bot")
 
 # 2. Проверить onboarding
 check_onboarding_performed()
 
-# 3. Создать ветку
-git checkout -b fix/smoke-test-timeout
+# 3. Создать ветку (ВСЕГДА, без исключений!)
+git checkout -b docs/consolidate-documentation
 
 # 4. Внести изменения и протестировать
-go test ./tests/smoke/...
+go test ./...
 
 # 5. Коммит
 git add <files>
-git commit -m "fix: description"
+git commit -m "docs: description"
 
 # 6. Push
-git push origin fix/smoke-test-timeout
+git push origin docs/consolidate-documentation
 
-# 7. Создать PR
-gh pr create --title "fix: description" --body "..."
+# 7. Создать PR в dev (ВСЕГДА!)
+gh pr create --base dev --title "docs: description" --body "..."
 
-# 8. Ждать review
+# 8. НЕ МЕРЖИТЬ без review!
 ```
