@@ -12,6 +12,31 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// binPath holds the path to the pre-built binary (built once in TestMain).
+var binPath string
+
+func TestMain(m *testing.M) {
+	// Build binary once before all tests
+	dir, err := os.MkdirTemp("", "smoke-test-*")
+	if err != nil {
+		os.Stderr.WriteString("Failed to create temp dir: " + err.Error() + "\n")
+		os.Exit(1)
+	}
+	defer os.RemoveAll(dir)
+
+	binPath = filepath.Join(dir, "bot_test")
+	build := exec.Command("go", "build", "-o", binPath, "./cmd/bot")
+	build.Dir = filepath.Join("..", "..")
+	build.Stdout = os.Stderr
+	build.Stderr = os.Stderr
+	if err := build.Run(); err != nil {
+		os.Stderr.WriteString("Failed to build binary: " + err.Error() + "\n")
+		os.Exit(1)
+	}
+
+	os.Exit(m.Run())
+}
+
 func TestSmoke_BinaryStartup(t *testing.T) {
 	if os.Getenv("CI") == "" && !strings.Contains(os.Getenv("RUN_SMOKE")+"", "1") {
 		t.Skip("Set RUN_SMOKE=1 to run smoke tests")
@@ -19,19 +44,10 @@ func TestSmoke_BinaryStartup(t *testing.T) {
 
 	dir := t.TempDir()
 
-	binPath := filepath.Join(dir, "bot_test")
-	build := exec.Command("go", "build", "-o", binPath, "./cmd/bot")
-	build.Dir = filepath.Join("..", "..")
-	build.Stdout = os.Stdout
-	build.Stderr = os.Stderr
-	require.NoError(t, build.Run(), "Failed to build binary")
-
-	// Create context after build to prevent timeout during compilation
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, binPath)
-	// Pass config as environment variables (binary reads from env, not from -config flag)
 	cmd.Env = append(os.Environ(),
 		"TELEGRAM_BOT_TOKEN=test_token_1234567:ABCdefGHIjklMNOpqrstuVWX",
 		"TELEGRAM_ADMIN_ID=0",
@@ -62,14 +78,6 @@ func TestSmoke_BinaryStartup(t *testing.T) {
 }
 
 func TestSmoke_ConfigValidation(t *testing.T) {
-	dir := t.TempDir()
-
-	// Build binary once for all subtests
-	binPath := filepath.Join(dir, "bot_test")
-	build := exec.Command("go", "build", "-o", binPath, "./cmd/bot")
-	build.Dir = filepath.Join("..", "..")
-	require.NoError(t, build.Run(), "Failed to build binary")
-
 	tests := []struct {
 		name    string
 		envVars []string
@@ -136,13 +144,6 @@ func TestSmoke_PanicRecovery(t *testing.T) {
 		t.Skip("Skipping panic recovery test in non-CI environment")
 	}
 
-	dir := t.TempDir()
-
-	binPath := filepath.Join(dir, "bot_test")
-	build := exec.Command("go", "build", "-o", binPath, "./cmd/bot")
-	build.Dir = filepath.Join("..", "..")
-	require.NoError(t, build.Run(), "Failed to build binary")
-
 	tests := []struct {
 		name     string
 		envVars  []string
@@ -181,5 +182,3 @@ func TestSmoke_PanicRecovery(t *testing.T) {
 		})
 	}
 }
-
-
