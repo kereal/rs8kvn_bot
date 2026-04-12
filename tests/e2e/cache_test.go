@@ -81,7 +81,7 @@ func TestE2E_Cache_ExpiredEntry(t *testing.T) {
 	_, err := env.subService.Create(ctx, env.chatID, env.username)
 	require.NoError(t, err)
 
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(20 * time.Millisecond)
 
 	sub, err := env.db.GetByTelegramID(ctx, env.chatID)
 	require.NoError(t, err)

@@ -139,7 +139,6 @@ go build -ldflags="-s -w" -o rs8kvn_bot ./cmd/bot
 
 ### Project Documentation
 
-- **[Installation Guide](doc/installation.md)** — Full setup instructions and configuration
-- **[Installation & Configuration](doc/installation.md)** — All setup methods and env vars
+- **[Installation & Configuration](doc/installation.md)** — All setup methods, env vars, and 3x-ui instructions
 - **[Handover](doc/handover.md)** — Architecture, stack, current state, nuances
 - **[.serena/instructions.md](.serena/instructions.md)** — AI assistant workflow and memory structure

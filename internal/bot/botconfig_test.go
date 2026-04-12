@@ -9,6 +9,8 @@ import (
 )
 
 func TestSelf_ReturnsCorrectUser(t *testing.T) {
+	t.Parallel()
+
 	botConfig := &BotConfig{
 		Username:                "mybot",
 		ID:                      987654321,
@@ -32,6 +34,8 @@ func TestSelf_ReturnsCorrectUser(t *testing.T) {
 }
 
 func TestSelf_AllFieldsMapped(t *testing.T) {
+	t.Parallel()
+
 	botConfig := &BotConfig{
 		Username:                "fieldtest",
 		ID:                      111222333,
@@ -55,6 +59,8 @@ func TestSelf_AllFieldsMapped(t *testing.T) {
 }
 
 func TestSelf_DefaultValues(t *testing.T) {
+	t.Parallel()
+
 	botConfig := &BotConfig{}
 
 	user := botConfig.Self()
@@ -70,6 +76,8 @@ func TestSelf_DefaultValues(t *testing.T) {
 }
 
 func TestSelf_ReturnsNewInstance(t *testing.T) {
+	t.Parallel()
+
 	botConfig := &BotConfig{
 		ID:        123,
 		FirstName: "Test",
@@ -84,6 +92,8 @@ func TestSelf_ReturnsNewInstance(t *testing.T) {
 }
 
 func TestNewBotConfig_ReturnsValidConfig(t *testing.T) {
+	t.Parallel()
+
 	botConfig := NewTestBotConfig()
 
 	require.NotNil(t, botConfig)
@@ -98,6 +108,8 @@ func TestNewBotConfig_ReturnsValidConfig(t *testing.T) {
 }
 
 func TestNewBotConfig_SelfRoundTrip(t *testing.T) {
+	t.Parallel()
+
 	original := NewTestBotConfig()
 	user := original.Self()
 
@@ -111,6 +123,8 @@ func TestNewBotConfig_SelfRoundTrip(t *testing.T) {
 }
 
 func TestNewBotConfig_WithBotAPI(t *testing.T) {
+	t.Parallel()
+
 	botAPI := &tgbotapi.BotAPI{
 		Self: tgbotapi.User{
 			ID:                      999888777,

@@ -13,6 +13,8 @@ import (
 )
 
 func TestHandleStart_WithDatabase(t *testing.T) {
+	t.Parallel()
+
 	db, err := testutil.NewTestDatabaseService(t)
 	require.NoError(t, err, "Failed to create test database service")
 
@@ -29,6 +31,8 @@ func TestHandleStart_WithDatabase(t *testing.T) {
 }
 
 func TestHandleStart_NoDatabase(t *testing.T) {
+	t.Parallel()
+
 	db, err := testutil.NewTestDatabaseService(t)
 	require.NoError(t, err, "Failed to create test database service")
 
@@ -39,6 +43,8 @@ func TestHandleStart_NoDatabase(t *testing.T) {
 }
 
 func TestHandleMySubscription_NoSubscription(t *testing.T) {
+	t.Parallel()
+
 	db, err := testutil.NewTestDatabaseService(t)
 	require.NoError(t, err, "Failed to create test database service")
 
@@ -49,6 +55,8 @@ func TestHandleMySubscription_NoSubscription(t *testing.T) {
 }
 
 func TestHandleMySubscription_WithSubscription(t *testing.T) {
+	t.Parallel()
+
 	db, err := testutil.NewTestDatabaseService(t)
 	require.NoError(t, err, "Failed to create test database service")
 
@@ -65,6 +73,8 @@ func TestHandleMySubscription_WithSubscription(t *testing.T) {
 }
 
 func TestHandleMySubscription_ExpiredSubscription(t *testing.T) {
+	t.Parallel()
+
 	db, err := testutil.NewTestDatabaseService(t)
 	require.NoError(t, err, "Failed to create test database service")
 
@@ -80,6 +90,8 @@ func TestHandleMySubscription_ExpiredSubscription(t *testing.T) {
 }
 
 func TestHandleAdminStats(t *testing.T) {
+	t.Parallel()
+
 	db, err := testutil.NewTestDatabaseService(t)
 	require.NoError(t, err, "Failed to create test database service")
 
@@ -96,6 +108,8 @@ func TestHandleAdminStats(t *testing.T) {
 }
 
 func TestHandleDel_GetSubscriptionByID(t *testing.T) {
+	t.Parallel()
+
 	db, err := testutil.NewTestDatabaseService(t)
 	require.NoError(t, err, "Failed to create test database service")
 
@@ -110,6 +124,8 @@ func TestHandleDel_GetSubscriptionByID(t *testing.T) {
 }
 
 func TestHandleDel_DeleteSubscriptionByID(t *testing.T) {
+	t.Parallel()
+
 	db, err := testutil.NewTestDatabaseService(t)
 	require.NoError(t, err, "Failed to create test database service")
 
@@ -129,6 +145,8 @@ func TestHandleDel_DeleteSubscriptionByID(t *testing.T) {
 }
 
 func TestHandleDel_SubscriptionNotFound(t *testing.T) {
+	t.Parallel()
+
 	db, err := testutil.NewTestDatabaseService(t)
 	require.NoError(t, err, "Failed to create test database service")
 
@@ -139,6 +157,8 @@ func TestHandleDel_SubscriptionNotFound(t *testing.T) {
 }
 
 func TestHandleBroadcast_DatabaseFunction(t *testing.T) {
+	t.Parallel()
+
 	db, err := testutil.NewTestDatabaseService(t)
 	require.NoError(t, err, "Failed to create test database service")
 
@@ -159,6 +179,8 @@ func TestHandleBroadcast_DatabaseFunction(t *testing.T) {
 }
 
 func TestHandleSend_ByTelegramID(t *testing.T) {
+	t.Parallel()
+
 	db, err := testutil.NewTestDatabaseService(t)
 	require.NoError(t, err, "Failed to create test database service")
 
@@ -173,6 +195,8 @@ func TestHandleSend_ByTelegramID(t *testing.T) {
 }
 
 func TestHandleSend_ByUsername(t *testing.T) {
+	t.Parallel()
+
 	db, err := testutil.NewTestDatabaseService(t)
 	require.NoError(t, err, "Failed to create test database service")
 
@@ -187,6 +211,8 @@ func TestHandleSend_ByUsername(t *testing.T) {
 }
 
 func TestHandleSend_UserNotFound(t *testing.T) {
+	t.Parallel()
+
 	db, err := testutil.NewTestDatabaseService(t)
 	require.NoError(t, err, "Failed to create test database service")
 
@@ -197,6 +223,8 @@ func TestHandleSend_UserNotFound(t *testing.T) {
 }
 
 func TestGetLatestSubscriptions(t *testing.T) {
+	t.Parallel()
+
 	db, err := testutil.NewTestDatabaseService(t)
 	require.NoError(t, err, "Failed to create test database service")
 
@@ -205,7 +233,7 @@ func TestGetLatestSubscriptions(t *testing.T) {
 	for i := 0; i < 15; i++ {
 		sub := testutil.CreateTestSubscription(int64(100000000+i), "user", "active", time.Now().Add(24*time.Hour))
 		require.NoError(t, db.CreateSubscription(ctx, sub), "Failed to create subscription")
-		time.Sleep(time.Millisecond * 10)
+		time.Sleep(time.Millisecond * 2)
 	}
 
 	subs, err := db.GetLatestSubscriptions(ctx, 10)
@@ -214,6 +242,8 @@ func TestGetLatestSubscriptions(t *testing.T) {
 }
 
 func TestGetLatestSubscriptions_Empty(t *testing.T) {
+	t.Parallel()
+
 	db, err := testutil.NewTestDatabaseService(t)
 	require.NoError(t, err, "Failed to create test database service")
 
@@ -225,6 +255,8 @@ func TestGetLatestSubscriptions_Empty(t *testing.T) {
 }
 
 func TestGetLatestSubscriptions_OnlyActive(t *testing.T) {
+	t.Parallel()
+
 	db, err := testutil.NewTestDatabaseService(t)
 	require.NoError(t, err, "Failed to create test database service")
 
@@ -242,6 +274,8 @@ func TestGetLatestSubscriptions_OnlyActive(t *testing.T) {
 }
 
 func TestGetAllTelegramIDs(t *testing.T) {
+	t.Parallel()
+
 	db, err := testutil.NewTestDatabaseService(t)
 	require.NoError(t, err, "Failed to create test database service")
 
@@ -264,6 +298,8 @@ func TestGetAllTelegramIDs(t *testing.T) {
 }
 
 func TestGetAllTelegramIDs_Empty(t *testing.T) {
+	t.Parallel()
+
 	db, err := testutil.NewTestDatabaseService(t)
 	require.NoError(t, err, "Failed to create test database service")
 
