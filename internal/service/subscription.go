@@ -76,7 +76,7 @@ func (s *SubscriptionService) Create(ctx context.Context, chatID int64, username
 		SubscriptionID:  client.SubID,
 		InboundID:       s.cfg.XUIInboundID,
 		TrafficLimit:    trafficBytes,
-		ExpiryTime:      time.Time{},
+		ExpiryTime:      expiryTime,
 		Status:          "active",
 		SubscriptionURL: subscriptionURL,
 	}
