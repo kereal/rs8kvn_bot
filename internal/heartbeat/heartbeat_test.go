@@ -22,8 +22,6 @@ func TestMain(m *testing.M) {
 }
 
 func TestGetHTTPClient_Singleton(t *testing.T) {
-	t.Parallel()
-
 	// Reset the singleton for this test
 	resetHTTPClient()
 
@@ -36,8 +34,6 @@ func TestGetHTTPClient_Singleton(t *testing.T) {
 }
 
 func TestGetHTTPClient_ConcurrentAccess(t *testing.T) {
-	t.Parallel()
-
 	// Reset the singleton for this test
 	resetHTTPClient()
 
@@ -61,8 +57,6 @@ func TestGetHTTPClient_ConcurrentAccess(t *testing.T) {
 }
 
 func TestGetHTTPClient_Timeout(t *testing.T) {
-	t.Parallel()
-
 	// Reset the singleton for this test
 	resetHTTPClient()
 
