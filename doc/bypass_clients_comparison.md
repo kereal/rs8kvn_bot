@@ -1,6 +1,6 @@
 # 📱 Сравнение VPN-клиентов для Android и iOS
 
-> Продолжение: [BYPASS_SOFTWARE_COMPARISON.md](BYPASS_SOFTWARE_COMPARISON.md)
+> См. также: [Исследование методов обхода блокировок](bypass_research.md)
 
 ## 1. Критерии выбора клиента
 
@@ -572,4 +572,4 @@ func GenerateVLESSLink(cfg VLESSConfig) string {
 
 ---
 
-> 📚 **Основной документ:** [BYPASS_SOFTWARE_COMPARISON.md](BYPASS_SOFTWARE_COMPARISON.md)
+> 📚 **Полное исследование:** [bypass_research.md](bypass_research.md)
