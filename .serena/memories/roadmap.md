@@ -1,8 +1,9 @@
 # Дорожная карта — rs8kvn_bot
 
-**Обновлено:** 2026-04-12  
+**Создано:** 2026-04-02  
+**Обновлено:** 2026-04-11  
 **Версия:** v2.2.0  
-**Масштаб:** 10 → 100 клиентов
+**Масштаб:** 10 клиентов → 100 клиентов
 
 ---
 
@@ -12,7 +13,60 @@
 - **Покрытие тестами:** ~85% (race-safe)
 - **Архитектура:** 3x-ui один сервер, SQLite
 - **Приоритет:** Монетизация и рост
-- **Сборка:** `go build ./...` ✅, `go vet ./...` ✅, `golangci-lint` ✅
+- **Оптимизация памяти:** O(1) LRU cache ✅
+
+## Рефакторинг v2.2.0 (2026-04-10) ✅ ВСЕ ВЫПОЛНЕНО
+
+### Фаза 1: Багфиксы ✅
+
+1. **ReferralCache.Save() — noop** ✅
+   - Удалён broken dirty tracking (referral counts — derived из subscriptions)
+   - Save() → no-op (DB — источник истины)
+   - Sync() → просто Load() (refresh from DB)
+   - Бонус: sync.Map type assertion → safe two-value form
+
+2. **Nil pointer dereference при init fail** ✅
+   - logger.Warn → logger.Fatal для критичных компонентов (DB, XUI, Bot API)
+   - Раньше: продолжал с nil → гарантированный panic
+
+3. **Неатомарное удаление подписки** ✅
+   - Порядок изменён: DB-first, XUI-best-effort
+   - Если DB delete падает → XUI не тронут (можно retry)
+   - Если XUI delete падает → DB уже удалён, orphaned XUI client — меньшее зло
+   - Обновлены тесты
+
+4. **context.WithoutCancel для broadcast** ✅
+   - Убран — broadcast уже обрабатывает ctx.Done() в loop
+
+5. **handleBindTrial не инвалидирует кэш** ✅
+   - Добавлен h.invalidateCache(chatID) после успешного bind
+
+6. **formatDateRu zero-time** ✅
+   - Добавлен if t.IsZero() { return "—" }
+
+### Фаза 2: Quick wins ✅
+
+- ✅ Dead code в verifySession() удалён
+- ✅ Doc files уже lowercase
+
+### Фаза 3: Security ✅
+
+- ✅ 3.1 Timing-safe token comparison (crypto/subtle.ConstantTimeCompare)
+- ✅ 3.2 isLocalAddress → loopback only (no IsPrivate)
+- ✅ 3.3 Web server port binding check (net.Listen → Serve)
+- ✅ 3.4 getClientIP malformed fallback
+- ✅ 3.5 Health endpoint 503 при Down
+
+### Фаза 3.6: Дедупликация ✅
+
+- ✅ daysUntilReset, formatDateRu, generateProgressBar → internal/utils/format.go
+- ✅ Оба пакета (bot, service) используют utils.DaysUntilReset и т.д.
+- ✅ Тесты перенесены в internal/utils/format_test.go
+
+### Фаза 4: Тесты ✅
+
+- ✅ 4.1 Service layer tests: 24.8% → 95.2% (30 тестов)
+- ✅ 4.2 ReferralCache tests: 15 тестов
 
 ---
 
@@ -54,20 +108,14 @@
 
 ---
 
-## Технический долг
+### Bugfixes (2026-04-11) ✅
 
-| # | Проблема | Приоритет |
-|---|---------|-----------|
-| 1 | ExpiryTime не сохраняется в БД при Create() | P1 |
-| 2 | `/sub/{subID}` не проверяет статус подписки | P1 |
-| 3 | Re-enable linters (errcheck, gosec) — 73 issues в тестах | P1 |
-| 4 | Circuit breaker: cumulative → sliding window | P2 |
-| 5 | Multi-arch Docker (amd64 + arm64) | P2 |
-| 6 | Docker image on push to main | P2 |
-| 7 | Multi-admin (список admin IDs) | P3 |
-| 8 | Вынести тексты сообщений — централизованный конфиг | P3 |
-| 9 | Типизированные ошибки — заменить сравнение строк | P3 |
-| 10 | `.down.sql` миграции — поддержка отката | P3 |
+1. ✅ **escapeMarkdown missing backslash** — `\` добавлен первым в список экранирования MarkdownV2
+2. ✅ **HandleBroadcast 30s timeout** — заменён на 5 минут
+3. ✅ **GetOrCreateInvite игнорирует INSERT ошибку** — добавлена проверка err
+4. ✅ **pendingInvites утечка памяти** — добавлена периодическая очистка
+5. ✅ **handleMySubscription дублирует GetWithTraffic** — заменено на вызов service слоя
+6. ✅ **CleanupExpiredTrials wrong cutoff** — отдельный 1h cutoff для trial_requests
 
 ---
 
