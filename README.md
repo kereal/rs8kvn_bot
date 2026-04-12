@@ -1,16 +1,9 @@
 # rs8kvn_bot - Telegram Bot for 3x-ui VLESS Subscription Distribution
 
 [![GitHub release](https://img.shields.io/github/v/release/kereal/rs8kvn_bot?logo=github)](https://github.com/kereal/rs8kvn_bot/releases)
-[![GitHub Release Date](https://img.shields.io/github/release-date/kereal/rs8kvn_bot?logo=github)](https://github.com/kereal/rs8kvn_bot/releases)
-[![GitHub commits](https://img.shields.io/github/commits-since/kereal/rs8kvn_bot/latest?logo=github)](https://github.com/kereal/rs8kvn_bot/commits/dev)
-[![GitHub last commit](https://img.shields.io/github/last-commit/kereal/rs8kvn_bot?logo=github)](https://github.com/kereal/rs8kvn_bot/commits/dev)
-![Coverage](https://img.shields.io/badge/coverage-85%25%2B-green)
-![Tests](https://img.shields.io/badge/tests-passing-brightgreen)
+[![Coverage](https://img.shields.io/badge/coverage-85%25%2B-green)](https://github.com/kereal/rs8kvn_bot/actions)
 [![Go](https://img.shields.io/badge/Go-1.25%2B-00ADD8?logo=go)](https://go.dev/)
 [![Go Report Card](https://goreportcard.com/badge/github.com/kereal/rs8kvn_bot)](https://goreportcard.com/report/github.com/kereal/rs8kvn_bot)
-[![GitHub stars](https://img.shields.io/github/stars/kereal/rs8kvn_bot?style=flat&logo=github)](https://github.com/kereal/rs8kvn_bot/stargazers)
-[![GitHub issues](https://img.shields.io/github/issues/kereal/rs8kvn_bot?logo=github)](https://github.com/kereal/rs8kvn_bot/issues)
-[![Code size](https://img.shields.io/github/languages/code-size/kereal/rs8kvn_bot?logo=github)](https://github.com/kereal/rs8kvn_bot)
 [![License](https://img.shields.io/github/license/kereal/rs8kvn_bot)](LICENSE)
 
 Telegram bot for distributing VLESS+Reality+Vision proxy subscriptions from 3x-ui panel.
@@ -68,8 +61,6 @@ See **[Installation Guide](doc/installation.md)** for:
 > All menu buttons are inline (shown under the message). Each submenu has a "🏠 В начало" button to return.
 
 ## Admin Commands
-
-Admins (specified in `TELEGRAM_ADMIN_ID`) have access to additional commands:
 
 | Command | Description |
 |---------|-------------|
