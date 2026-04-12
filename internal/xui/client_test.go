@@ -32,6 +32,8 @@ func TestMain(m *testing.M) {
 }
 
 func TestNewClient(t *testing.T) {
+	t.Parallel()
+
 	client, err := NewClient("http://localhost:2053", "admin", "password", 15*time.Minute)
 	require.NoError(t, err, "NewClient() returned error")
 	require.NotNil(t, client, "NewClient() returned nil")
@@ -43,6 +45,8 @@ func TestNewClient(t *testing.T) {
 }
 
 func TestNewClient_HTTPClientConfig(t *testing.T) {
+	t.Parallel()
+
 	client, err := NewClient("http://localhost:2053", "admin", "password", 15*time.Minute)
 	require.NoError(t, err, "NewClient() returned error")
 
@@ -51,6 +55,8 @@ func TestNewClient_HTTPClientConfig(t *testing.T) {
 }
 
 func TestLogin_Success(t *testing.T) {
+	t.Parallel()
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "/login", r.URL.Path, "Expected /login path")
 		assert.Equal(t, "POST", r.Method, "Expected POST method")
@@ -73,6 +79,8 @@ func TestLogin_Success(t *testing.T) {
 }
 
 func TestLogin_Failure(t *testing.T) {
+	t.Parallel()
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		resp := APIResponse{
 			Success: false,
@@ -92,8 +100,14 @@ func TestLogin_Failure(t *testing.T) {
 }
 
 func TestLogin_ContextCancellation(t *testing.T) {
+	t.Parallel()
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		time.Sleep(2 * time.Second)
+		select {
+		case <-r.Context().Done():
+			return
+		case <-time.After(2 * time.Second):
+		}
 		resp := APIResponse{Success: true}
 		json.NewEncoder(w).Encode(resp)
 	}))
@@ -101,7 +115,7 @@ func TestLogin_ContextCancellation(t *testing.T) {
 
 	client, err := NewClient(server.URL, "admin", "password", 15*time.Minute)
 	require.NoError(t, err, "NewClient() returned error")
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
 	err = client.Login(ctx)
@@ -109,6 +123,8 @@ func TestLogin_ContextCancellation(t *testing.T) {
 }
 
 func TestAddClientWithID_Success(t *testing.T) {
+	t.Parallel()
+
 	loginCalled := false
 	addClientCalled := false
 
@@ -147,6 +163,8 @@ func TestAddClientWithID_Success(t *testing.T) {
 }
 
 func TestAddClientWithID_ServerError(t *testing.T) {
+	t.Parallel()
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/login" {
 			resp := APIResponse{Success: true}
@@ -168,6 +186,8 @@ func TestAddClientWithID_ServerError(t *testing.T) {
 }
 
 func TestGetSubscriptionLink(t *testing.T) {
+	t.Parallel()
+
 	client, err := NewClient("http://localhost:2053", "admin", "password", 15*time.Minute)
 	require.NoError(t, err, "NewClient() returned error")
 
@@ -177,6 +197,8 @@ func TestGetSubscriptionLink(t *testing.T) {
 }
 
 func TestGetSubscriptionLink_CustomPath(t *testing.T) {
+	t.Parallel()
+
 	client, err := NewClient("http://localhost:2053", "admin", "password", 15*time.Minute)
 	require.NoError(t, err, "NewClient() returned error")
 
@@ -186,6 +208,8 @@ func TestGetSubscriptionLink_CustomPath(t *testing.T) {
 }
 
 func TestAddClientWithID_InvalidInboundID(t *testing.T) {
+	t.Parallel()
+
 	client, err := NewClient("http://localhost:2053", "admin", "password", 15*time.Minute)
 	require.NoError(t, err, "NewClient() returned error")
 	ctx := context.Background()
@@ -195,6 +219,8 @@ func TestAddClientWithID_InvalidInboundID(t *testing.T) {
 }
 
 func TestAddClientWithID_EmptyClientID(t *testing.T) {
+	t.Parallel()
+
 	client, err := NewClient("http://localhost:2053", "admin", "password", 15*time.Minute)
 	require.NoError(t, err, "NewClient() returned error")
 	ctx := context.Background()
@@ -204,6 +230,8 @@ func TestAddClientWithID_EmptyClientID(t *testing.T) {
 }
 
 func TestMarshalJSON_Success(t *testing.T) {
+	t.Parallel()
+
 	data := map[string]string{
 		"key": "value",
 		"foo": "bar",
@@ -227,6 +255,8 @@ func TestMarshalJSON_Success(t *testing.T) {
 }
 
 func TestMarshalJSON_NilInput(t *testing.T) {
+	t.Parallel()
+
 	reader, err := marshalJSON(nil)
 	require.NoError(t, err, "marshalJSON() with nil should not error")
 	require.NotNil(t, reader, "marshalJSON() returned nil reader")
@@ -237,6 +267,8 @@ func TestMarshalJSON_NilInput(t *testing.T) {
 }
 
 func TestMarshalJSON_ComplexStruct(t *testing.T) {
+	t.Parallel()
+
 	type TestStruct struct {
 		Name   string `json:"name"`
 		Age    int    `json:"age"`
@@ -266,11 +298,15 @@ func TestMarshalJSON_ComplexStruct(t *testing.T) {
 }
 
 func TestCloseResponseBody_NilResponse(t *testing.T) {
+	t.Parallel()
+
 	// Should not panic with nil response
 	closeResponseBody(nil)
 }
 
 func TestCloseResponseBody_NilBody(t *testing.T) {
+	t.Parallel()
+
 	resp := &http.Response{
 		Body: nil,
 	}
@@ -279,6 +315,8 @@ func TestCloseResponseBody_NilBody(t *testing.T) {
 }
 
 func TestCloseResponseBody_Success(t *testing.T) {
+	t.Parallel()
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -292,6 +330,8 @@ func TestCloseResponseBody_Success(t *testing.T) {
 }
 
 func TestCloseResponseBody_AlreadyClosed(t *testing.T) {
+	t.Parallel()
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -309,6 +349,8 @@ func TestCloseResponseBody_AlreadyClosed(t *testing.T) {
 }
 
 func TestClient_LoginSession(t *testing.T) {
+	t.Parallel()
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/login" {
 			resp := APIResponse{Success: true}
@@ -333,6 +375,8 @@ func TestClient_LoginSession(t *testing.T) {
 }
 
 func TestClient_EnsureLoggedIn(t *testing.T) {
+	t.Parallel()
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/login" {
 			resp := APIResponse{Success: true}
@@ -352,6 +396,8 @@ func TestClient_EnsureLoggedIn(t *testing.T) {
 }
 
 func TestClient_Ping(t *testing.T) {
+	t.Parallel()
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/login" {
 			resp := APIResponse{Success: true}
@@ -370,6 +416,8 @@ func TestClient_Ping(t *testing.T) {
 }
 
 func TestAddClientWithID_EmptySubID(t *testing.T) {
+	t.Parallel()
+
 	client, err := NewClient("http://localhost:2053", "admin", "password", 15*time.Minute)
 	require.NoError(t, err, "NewClient() returned error")
 	ctx := context.Background()
@@ -379,11 +427,15 @@ func TestAddClientWithID_EmptySubID(t *testing.T) {
 }
 
 func TestGetExternalURL(t *testing.T) {
+	t.Parallel()
+
 	result := GetExternalURL("not a valid url")
 	assert.NotEmpty(t, result, "GetExternalURL() should return non-empty string")
 }
 
 func TestRetryWithBackoff_Success(t *testing.T) {
+	t.Parallel()
+
 	callCount := 0
 	ctx := context.Background()
 
@@ -397,6 +449,8 @@ func TestRetryWithBackoff_Success(t *testing.T) {
 }
 
 func TestRetryWithBackoff_Retries(t *testing.T) {
+	t.Parallel()
+
 	callCount := 0
 	ctx := context.Background()
 
@@ -413,6 +467,8 @@ func TestRetryWithBackoff_Retries(t *testing.T) {
 }
 
 func TestRetryWithBackoff_MaxRetries(t *testing.T) {
+	t.Parallel()
+
 	callCount := 0
 	ctx := context.Background()
 
@@ -426,6 +482,8 @@ func TestRetryWithBackoff_MaxRetries(t *testing.T) {
 }
 
 func TestRetryWithBackoff_ContextCancellation(t *testing.T) {
+	t.Parallel()
+
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
@@ -437,6 +495,8 @@ func TestRetryWithBackoff_ContextCancellation(t *testing.T) {
 }
 
 func TestAddClient_Success(t *testing.T) {
+	t.Parallel()
+
 	loginCalled := false
 	addClientCalled := false
 
@@ -476,6 +536,8 @@ func TestAddClient_Success(t *testing.T) {
 }
 
 func TestAddClient_LoginFailure(t *testing.T) {
+	t.Parallel()
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/panel/api/server/status" {
 			resp := APIResponse{Success: false}
@@ -500,6 +562,8 @@ func TestAddClient_LoginFailure(t *testing.T) {
 }
 
 func TestAddClientWithID_SuccessFalseButMessageIndicatesSuccess(t *testing.T) {
+	t.Parallel()
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/panel/api/server/status" {
 			resp := APIResponse{Success: false}
@@ -529,6 +593,8 @@ func TestAddClientWithID_SuccessFalseButMessageIndicatesSuccess(t *testing.T) {
 }
 
 func TestEnsureLoggedIn_CachedSession(t *testing.T) {
+	t.Parallel()
+
 	loginCount := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -561,6 +627,8 @@ func TestEnsureLoggedIn_CachedSession(t *testing.T) {
 }
 
 func TestDoLogin_InvalidJSONResponse(t *testing.T) {
+	t.Parallel()
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte("invalid json"))
@@ -576,6 +644,8 @@ func TestDoLogin_InvalidJSONResponse(t *testing.T) {
 }
 
 func TestGetExternalURL_VariousInputs(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		host     string
 		expected string
@@ -593,6 +663,8 @@ func TestGetExternalURL_VariousInputs(t *testing.T) {
 }
 
 func TestClientSettings_JSON(t *testing.T) {
+	t.Parallel()
+
 	config := &ClientConfig{
 		ID:         "test-uuid",
 		Email:      "test@example.com",
@@ -617,6 +689,8 @@ func TestClientSettings_JSON(t *testing.T) {
 }
 
 func TestGetClientTraffic_Success(t *testing.T) {
+	t.Parallel()
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/panel/api/server/status":
@@ -669,6 +743,8 @@ func TestGetClientTraffic_Success(t *testing.T) {
 }
 
 func TestGetClientTraffic_ClientNotFound(t *testing.T) {
+	t.Parallel()
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/panel/api/server/status":
@@ -699,6 +775,8 @@ func TestGetClientTraffic_ClientNotFound(t *testing.T) {
 }
 
 func TestGetClientTraffic_ServerError(t *testing.T) {
+	t.Parallel()
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/panel/api/server/status":
@@ -730,6 +808,8 @@ func TestGetClientTraffic_ServerError(t *testing.T) {
 }
 
 func TestGetClientTraffic_LoginFailure(t *testing.T) {
+	t.Parallel()
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/panel/api/server/status" {
 			resp := APIResponse{Success: false}
@@ -755,6 +835,8 @@ func TestGetClientTraffic_LoginFailure(t *testing.T) {
 }
 
 func TestGetClientTraffic_ContextCancellation(t *testing.T) {
+	t.Parallel()
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/panel/api/server/status":
@@ -764,7 +846,11 @@ func TestGetClientTraffic_ContextCancellation(t *testing.T) {
 			resp := APIResponse{Success: true}
 			json.NewEncoder(w).Encode(resp)
 		case "/panel/api/inbounds/getClientTraffics/testuser":
-			time.Sleep(2 * time.Second)
+			select {
+			case <-r.Context().Done():
+				return
+			case <-time.After(2 * time.Second):
+			}
 			traffics := []ClientTraffic{}
 			resp := APIResponse{Success: true}
 			resp.Obj, _ = json.Marshal(traffics)
@@ -777,7 +863,7 @@ func TestGetClientTraffic_ContextCancellation(t *testing.T) {
 
 	client, err := NewClient(server.URL, "admin", "password", 15*time.Minute)
 	require.NoError(t, err, "NewClient() returned error")
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
 	_, err = client.GetClientTraffic(ctx, "testuser")
@@ -785,6 +871,8 @@ func TestGetClientTraffic_ContextCancellation(t *testing.T) {
 }
 
 func TestGetClientTraffic_InvalidJSONResponse(t *testing.T) {
+	t.Parallel()
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/panel/api/server/status":
@@ -811,6 +899,8 @@ func TestGetClientTraffic_InvalidJSONResponse(t *testing.T) {
 }
 
 func TestClientTraffic_JSON(t *testing.T) {
+	t.Parallel()
+
 	traffic := &ClientTraffic{
 		ID:         1,
 		InboundID:  1,
@@ -841,6 +931,8 @@ func TestClientTraffic_JSON(t *testing.T) {
 }
 
 func TestClientTraffic_TrafficCalculation(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name       string
 		up         int64
@@ -866,6 +958,8 @@ func TestClientTraffic_TrafficCalculation(t *testing.T) {
 }
 
 func TestDeleteClient_Success(t *testing.T) {
+	t.Parallel()
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/panel/api/server/status":
@@ -894,6 +988,8 @@ func TestDeleteClient_Success(t *testing.T) {
 }
 
 func TestDeleteClient_ServerError(t *testing.T) {
+	t.Parallel()
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/panel/api/server/status":
@@ -922,6 +1018,8 @@ func TestDeleteClient_ServerError(t *testing.T) {
 }
 
 func TestDeleteClient_LoginFailure(t *testing.T) {
+	t.Parallel()
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/panel/api/server/status" {
 			resp := APIResponse{Success: false}
@@ -947,6 +1045,8 @@ func TestDeleteClient_LoginFailure(t *testing.T) {
 }
 
 func TestDeleteClient_ContextCancellation(t *testing.T) {
+	t.Parallel()
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/panel/api/server/status":
@@ -956,7 +1056,11 @@ func TestDeleteClient_ContextCancellation(t *testing.T) {
 			resp := APIResponse{Success: true}
 			json.NewEncoder(w).Encode(resp)
 		case "/panel/api/inbounds/1/delClient/test-client-id":
-			time.Sleep(2 * time.Second)
+			select {
+			case <-r.Context().Done():
+				return
+			case <-time.After(2 * time.Second):
+			}
 			resp := APIResponse{Success: true}
 			json.NewEncoder(w).Encode(resp)
 		default:
@@ -967,7 +1071,7 @@ func TestDeleteClient_ContextCancellation(t *testing.T) {
 
 	client, err := NewClient(server.URL, "admin", "password", 15*time.Minute)
 	require.NoError(t, err, "NewClient() returned error")
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
 	err = client.DeleteClient(ctx, 1, "test-client-id")
@@ -975,6 +1079,8 @@ func TestDeleteClient_ContextCancellation(t *testing.T) {
 }
 
 func TestDeleteClient_InvalidJSONResponse(t *testing.T) {
+	t.Parallel()
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/panel/api/server/status":
@@ -1001,6 +1107,8 @@ func TestDeleteClient_InvalidJSONResponse(t *testing.T) {
 }
 
 func TestDeleteClient_RequestCreationError(t *testing.T) {
+	t.Parallel()
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		resp := APIResponse{Success: true}
 		json.NewEncoder(w).Encode(resp)
@@ -1018,6 +1126,8 @@ func TestDeleteClient_RequestCreationError(t *testing.T) {
 }
 
 func TestGetClientTraffic_RequestCreationError(t *testing.T) {
+	t.Parallel()
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		resp := APIResponse{Success: true}
 		json.NewEncoder(w).Encode(resp)
@@ -1035,6 +1145,8 @@ func TestGetClientTraffic_RequestCreationError(t *testing.T) {
 }
 
 func TestGetSubscriptionLink_WithCustomPath(t *testing.T) {
+	t.Parallel()
+
 	client, err := NewClient("http://localhost:2053", "admin", "password", 15*time.Minute)
 	require.NoError(t, err, "NewClient() returned error")
 	link := client.GetSubscriptionLink("http://example.com", "abc123", "/custom")
@@ -1042,16 +1154,22 @@ func TestGetSubscriptionLink_WithCustomPath(t *testing.T) {
 }
 
 func TestGetExternalURL_IPAddress(t *testing.T) {
+	t.Parallel()
+
 	url := GetExternalURL("http://192.168.1.1:2053")
 	assert.Equal(t, "http://192.168.1.1:2053", url, "GetExternalURL()")
 }
 
 func TestGetExternalURL_Empty(t *testing.T) {
+	t.Parallel()
+
 	url := GetExternalURL("")
 	assert.NotEmpty(t, url, "GetExternalURL('') should return non-empty result")
 }
 
 func TestAddClientWithID_LoginError(t *testing.T) {
+	t.Parallel()
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/panel/api/server/status" {
 			resp := APIResponse{Success: false}
@@ -1076,6 +1194,8 @@ func TestAddClientWithID_LoginError(t *testing.T) {
 }
 
 func TestAddClientWithID_RequestCreationError(t *testing.T) {
+	t.Parallel()
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		resp := APIResponse{Success: true}
 		json.NewEncoder(w).Encode(resp)
@@ -1093,6 +1213,8 @@ func TestAddClientWithID_RequestCreationError(t *testing.T) {
 }
 
 func TestClient_CircuitBreakerState(t *testing.T) {
+	t.Parallel()
+
 	failingServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte("error"))
@@ -1115,6 +1237,8 @@ func TestClient_CircuitBreakerState(t *testing.T) {
 }
 
 func TestClient_GetExternalURL(t *testing.T) {
+	t.Parallel()
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -1142,6 +1266,8 @@ func TestClient_GetExternalURL(t *testing.T) {
 }
 
 func TestTruncateString(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name     string
 		input    string
@@ -1165,18 +1291,24 @@ func TestTruncateString(t *testing.T) {
 }
 
 func TestTruncateString_NoAllocationForShortStrings(t *testing.T) {
+	t.Parallel()
+
 	input := "short"
 	result := truncateString(input, 100)
 	assert.Equal(t, input, result, "truncateString should return original string when len <= maxLen")
 }
 
 func TestTruncateString_UnicodeMayBeSplit(t *testing.T) {
+	t.Parallel()
+
 	input := "привет"
 	result := truncateString(input, 3)
 	assert.LessOrEqual(t, len(result), 6, "truncateString result too long")
 }
 
 func TestUpdateClient_Success(t *testing.T) {
+	t.Parallel()
+
 	loginCalled := false
 	updateClientCalled := false
 
@@ -1212,6 +1344,8 @@ func TestUpdateClient_Success(t *testing.T) {
 }
 
 func TestUpdateClient_Error(t *testing.T) {
+	t.Parallel()
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/panel/api/server/status":
@@ -1237,6 +1371,8 @@ func TestUpdateClient_Error(t *testing.T) {
 }
 
 func TestUpdateClient_EmptyClientID(t *testing.T) {
+	t.Parallel()
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		resp := APIResponse{Success: true}
 		json.NewEncoder(w).Encode(resp)
@@ -1252,6 +1388,8 @@ func TestUpdateClient_EmptyClientID(t *testing.T) {
 }
 
 func TestPing_Success(t *testing.T) {
+	t.Parallel()
+
 	loginCalled := false
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -1283,6 +1421,8 @@ func TestPing_Success(t *testing.T) {
 }
 
 func TestPing_Failure(t *testing.T) {
+	t.Parallel()
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		resp := APIResponse{
 			Success: false,
@@ -1302,6 +1442,8 @@ func TestPing_Failure(t *testing.T) {
 }
 
 func TestClient_Close(t *testing.T) {
+	t.Parallel()
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		resp := APIResponse{Success: true}
 		json.NewEncoder(w).Encode(resp)
@@ -1317,6 +1459,8 @@ func TestClient_Close(t *testing.T) {
 }
 
 func TestClient_Close_MultipleTimes(t *testing.T) {
+	t.Parallel()
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		resp := APIResponse{Success: true}
 		json.NewEncoder(w).Encode(resp)
@@ -1334,29 +1478,39 @@ func TestClient_Close_MultipleTimes(t *testing.T) {
 }
 
 func TestGetExpiryTimeMillis_ZeroTime(t *testing.T) {
+	t.Parallel()
+
 	result := getExpiryTimeMillis(time.Time{})
 	assert.Equal(t, int64(0), result, "Zero time should return 0")
 }
 
 func TestGetExpiryTimeMillis_NonZeroTime(t *testing.T) {
+	t.Parallel()
+
 	fixedTime := time.Date(2026, 4, 1, 12, 0, 0, 0, time.UTC)
 	result := getExpiryTimeMillis(fixedTime)
 	assert.Equal(t, fixedTime.UnixMilli(), result, "Should return time in milliseconds")
 }
 
 func TestGetExpiryTimeMillis_FutureTime(t *testing.T) {
+	t.Parallel()
+
 	future := time.Now().Add(24 * time.Hour)
 	result := getExpiryTimeMillis(future)
 	assert.Greater(t, result, time.Now().UnixMilli(), "Future time should be greater than now")
 }
 
 func TestNewClient_TrailingSlashTrimmed(t *testing.T) {
+	t.Parallel()
+
 	client, err := NewClient("http://localhost:2053/", "admin", "password", 15*time.Minute)
 	require.NoError(t, err)
 	assert.Equal(t, "http://localhost:2053", client.host, "Trailing slash should be trimmed")
 }
 
 func TestNewClient_MultipleTrailingSlashes(t *testing.T) {
+	t.Parallel()
+
 	client, err := NewClient("http://localhost:2053///", "admin", "password", 15*time.Minute)
 	require.NoError(t, err)
 	// TrimSuffix only removes one trailing slash
@@ -1364,6 +1518,8 @@ func TestNewClient_MultipleTrailingSlashes(t *testing.T) {
 }
 
 func TestUpdateClient_LoginFailure(t *testing.T) {
+	t.Parallel()
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/panel/api/server/status" {
 			resp := APIResponse{Success: false}
@@ -1389,6 +1545,8 @@ func TestUpdateClient_LoginFailure(t *testing.T) {
 }
 
 func TestUpdateClient_ContextCancellation(t *testing.T) {
+	t.Parallel()
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/panel/api/server/status":
@@ -1398,7 +1556,11 @@ func TestUpdateClient_ContextCancellation(t *testing.T) {
 			resp := APIResponse{Success: true}
 			json.NewEncoder(w).Encode(resp)
 		case "/panel/api/inbounds/updateClient/test-client-uuid":
-			time.Sleep(2 * time.Second)
+			select {
+			case <-r.Context().Done():
+				return
+			case <-time.After(2 * time.Second):
+			}
 			resp := APIResponse{Success: true}
 			json.NewEncoder(w).Encode(resp)
 		default:
@@ -1409,7 +1571,7 @@ func TestUpdateClient_ContextCancellation(t *testing.T) {
 
 	client, err := NewClient(server.URL, "admin", "password", 15*time.Minute)
 	require.NoError(t, err)
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
 	err = client.UpdateClient(ctx, 1, "test-client-uuid", "testuser", "sub-id", 1000, time.Now(), 12345, "")
@@ -1417,6 +1579,8 @@ func TestUpdateClient_ContextCancellation(t *testing.T) {
 }
 
 func TestUpdateClient_InvalidJSONResponse(t *testing.T) {
+	t.Parallel()
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/panel/api/server/status":
@@ -1443,6 +1607,8 @@ func TestUpdateClient_InvalidJSONResponse(t *testing.T) {
 }
 
 func TestAddClientWithID_DefaultResetDays(t *testing.T) {
+	t.Parallel()
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/panel/api/server/status":
@@ -1473,6 +1639,8 @@ func TestAddClientWithID_DefaultResetDays(t *testing.T) {
 }
 
 func TestAddClientWithID_ContextCancellation(t *testing.T) {
+	t.Parallel()
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/panel/api/server/status":
@@ -1482,7 +1650,11 @@ func TestAddClientWithID_ContextCancellation(t *testing.T) {
 			resp := APIResponse{Success: true}
 			json.NewEncoder(w).Encode(resp)
 		case "/panel/api/inbounds/addClient":
-			time.Sleep(2 * time.Second)
+			select {
+			case <-r.Context().Done():
+				return
+			case <-time.After(2 * time.Second):
+			}
 			resp := APIResponse{Success: true}
 			json.NewEncoder(w).Encode(resp)
 		default:
@@ -1493,7 +1665,7 @@ func TestAddClientWithID_ContextCancellation(t *testing.T) {
 
 	client, err := NewClient(server.URL, "admin", "password", 15*time.Minute)
 	require.NoError(t, err)
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
 	_, err = client.AddClientWithID(ctx, 1, "testuser", "client-id", "sub-id", 1000, time.Now(), 31)
@@ -1501,6 +1673,8 @@ func TestAddClientWithID_ContextCancellation(t *testing.T) {
 }
 
 func TestAddClientWithID_InvalidJSONResponse(t *testing.T) {
+	t.Parallel()
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/panel/api/server/status":
@@ -1527,6 +1701,8 @@ func TestAddClientWithID_InvalidJSONResponse(t *testing.T) {
 }
 
 func TestGetClientTraffic_EmptyEmail(t *testing.T) {
+	t.Parallel()
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/panel/api/server/status" {
 			resp := APIResponse{Success: true}
@@ -1555,6 +1731,8 @@ func TestGetClientTraffic_EmptyEmail(t *testing.T) {
 }
 
 func TestGetSubscriptionLink_TrailingSlashInBaseURL(t *testing.T) {
+	t.Parallel()
+
 	client, err := NewClient("http://localhost:2053", "admin", "password", 15*time.Minute)
 	require.NoError(t, err)
 
@@ -1563,11 +1741,15 @@ func TestGetSubscriptionLink_TrailingSlashInBaseURL(t *testing.T) {
 }
 
 func TestGetExternalURL_URLWithPath(t *testing.T) {
+	t.Parallel()
+
 	result := GetExternalURL("http://example.com:2053/sub/abc123")
 	assert.Equal(t, "http://example.com:2053", result, "Should strip path from URL")
 }
 
 func TestGetExternalURL_EmptyString(t *testing.T) {
+	t.Parallel()
+
 	result := GetExternalURL("")
 	// Empty string parses to "://" by url.Parse
 	assert.NotEmpty(t, result, "Empty string should return non-empty result")
@@ -1576,6 +1758,8 @@ func TestGetExternalURL_EmptyString(t *testing.T) {
 // TestDoRequestWithAuthRetry_AutoReloginOn401 directly tests the auto-relogin path
 // in doRequestWithAuthRetry — the critical path that was previously dead code.
 func TestDoRequestWithAuthRetry_AutoReloginOn401(t *testing.T) {
+	t.Parallel()
+
 	loginCalls := 0
 	addCalls := 0
 	var mu sync.Mutex
@@ -1631,6 +1815,8 @@ func TestDoRequestWithAuthRetry_AutoReloginOn401(t *testing.T) {
 // TestDoRequestWithAuthRetry_NoReloginOnSuccess verifies that successful requests
 // don't trigger unnecessary re-login.
 func TestDoRequestWithAuthRetry_NoReloginOnSuccess(t *testing.T) {
+	t.Parallel()
+
 	loginCalls := 0
 	var mu sync.Mutex
 
@@ -1671,12 +1857,16 @@ func TestDoRequestWithAuthRetry_NoReloginOnSuccess(t *testing.T) {
 }
 
 func TestGetExternalURL_InvalidURL(t *testing.T) {
+	t.Parallel()
+
 	result := GetExternalURL("://invalid")
 	// Invalid URL should return original host
 	assert.Equal(t, "://invalid", result, "Invalid URL should return original")
 }
 
 func TestRetryWithBackoff_ContextCancellationDuringRetry(t *testing.T) {
+	t.Parallel()
+
 	callCount := 0
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -1693,6 +1883,8 @@ func TestRetryWithBackoff_ContextCancellationDuringRetry(t *testing.T) {
 }
 
 func TestTruncateString_VeryLongString(t *testing.T) {
+	t.Parallel()
+
 	longString := strings.Repeat("a", 10000)
 	result := truncateString(longString, 10)
 	assert.Equal(t, 13, len(result), "Should be maxLen + len('...')")
@@ -1700,6 +1892,8 @@ func TestTruncateString_VeryLongString(t *testing.T) {
 }
 
 func TestCloseResponseBody_WithValidResponse(t *testing.T) {
+	t.Parallel()
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -1714,6 +1908,8 @@ func TestCloseResponseBody_WithValidResponse(t *testing.T) {
 }
 
 func TestMarshalJSON_UnmarshalableData(t *testing.T) {
+	t.Parallel()
+
 	// chan cannot be marshaled to JSON
 	ch := make(chan int)
 	_, err := marshalJSON(ch)
@@ -1721,6 +1917,8 @@ func TestMarshalJSON_UnmarshalableData(t *testing.T) {
 }
 
 func TestClientSettings_ResetDayDefault(t *testing.T) {
+	t.Parallel()
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/panel/api/server/status":
@@ -1750,6 +1948,8 @@ func TestClientSettings_ResetDayDefault(t *testing.T) {
 }
 
 func TestAddClientWithID_NegativeResetDays(t *testing.T) {
+	t.Parallel()
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/panel/api/server/status":
@@ -1778,6 +1978,8 @@ func TestAddClientWithID_NegativeResetDays(t *testing.T) {
 }
 
 func TestVerifySession_Success(t *testing.T) {
+	t.Parallel()
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "/panel/api/server/status", r.URL.Path)
 		assert.Equal(t, "GET", r.Method)
@@ -1793,6 +1995,8 @@ func TestVerifySession_Success(t *testing.T) {
 }
 
 func TestVerifySession_Failure(t *testing.T) {
+	t.Parallel()
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 	}))
@@ -1806,6 +2010,8 @@ func TestVerifySession_Failure(t *testing.T) {
 }
 
 func TestVerifySession_NetworkError(t *testing.T) {
+	t.Parallel()
+
 	client, err := NewClient("http://127.0.0.1:1", "admin", "password", 15*time.Minute)
 	require.NoError(t, err)
 
@@ -1814,6 +2020,8 @@ func TestVerifySession_NetworkError(t *testing.T) {
 }
 
 func TestAutoRelogin_On401(t *testing.T) {
+	t.Parallel()
+
 	loginCount := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -1859,6 +2067,8 @@ func TestAutoRelogin_On401(t *testing.T) {
 }
 
 func TestAutoRelogin_OnRedirect(t *testing.T) {
+	t.Parallel()
+
 	loginCount := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -1898,6 +2108,8 @@ func TestAutoRelogin_OnRedirect(t *testing.T) {
 }
 
 func TestIsRetryable(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name     string
 		err      error
@@ -1918,6 +2130,8 @@ func TestIsRetryable(t *testing.T) {
 }
 
 func TestLoginCount_Increments(t *testing.T) {
+	t.Parallel()
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/login" {
 			json.NewEncoder(w).Encode(APIResponse{Success: true})
@@ -1941,6 +2155,8 @@ func TestLoginCount_Increments(t *testing.T) {
 }
 
 func TestDoLogin_HTTPStatusCheck(t *testing.T) {
+	t.Parallel()
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(`{"success":false,"msg":"internal error"}`))
@@ -1956,6 +2172,8 @@ func TestDoLogin_HTTPStatusCheck(t *testing.T) {
 }
 
 func TestDoEnsureLoggedIn_VerifySessionSkipsLogin(t *testing.T) {
+	t.Parallel()
+
 	loginCalls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -1989,6 +2207,8 @@ func TestDoEnsureLoggedIn_VerifySessionSkipsLogin(t *testing.T) {
 }
 
 func TestDoEnsureLoggedIn_ForceRelogin(t *testing.T) {
+	t.Parallel()
+
 	loginCalls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {

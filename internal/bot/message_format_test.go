@@ -7,6 +7,8 @@ import (
 )
 
 func TestMessageFormat_MarkdownV2Validation(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name    string
 		text    string
@@ -67,6 +69,8 @@ func TestMessageFormat_MarkdownV2Validation(t *testing.T) {
 }
 
 func TestMessageFormat_NoDoubleEscape(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name  string
 		input string
@@ -108,6 +112,8 @@ func TestMessageFormat_NoDoubleEscape(t *testing.T) {
 }
 
 func TestMessageFormat_EscapedMessageContent(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name  string
 		input string
@@ -149,6 +155,8 @@ func TestMessageFormat_EscapedMessageContent(t *testing.T) {
 }
 
 func TestMessageFormat_EscapeMarkdownComprehensive(t *testing.T) {
+	t.Parallel()
+
 	input := "user_name *bold* [link](url) ~strike~ `code` |pipe| +plus-equals"
 	result := escapeMarkdown(input)
 

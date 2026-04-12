@@ -85,7 +85,7 @@ func TestGoroutineLeak_SubscriptionService(t *testing.T) {
 	wg.Wait()
 
 	runtime.GC()
-	time.Sleep(50 * time.Millisecond)
+	time.Sleep(10 * time.Millisecond)
 
 	finalGoroutines := runtime.NumGoroutine()
 	t.Logf("Goroutine leak test: initial=%d, final=%d, delta=%d", initialGoroutines, finalGoroutines, finalGoroutines-initialGoroutines)

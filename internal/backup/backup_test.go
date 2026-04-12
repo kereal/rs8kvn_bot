@@ -20,6 +20,8 @@ func TestMain(m *testing.M) {
 }
 
 func TestBackupDatabase(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
@@ -43,6 +45,8 @@ func TestBackupDatabase(t *testing.T) {
 }
 
 func TestBackupDatabase_NonExistentFile(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "nonexistent.db")
 
@@ -51,6 +55,8 @@ func TestBackupDatabase_NonExistentFile(t *testing.T) {
 }
 
 func TestBackupDatabase_OverwritesExistingBackup(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 	backupPath := dbPath + ".backup"
@@ -75,6 +81,8 @@ func TestBackupDatabase_OverwritesExistingBackup(t *testing.T) {
 }
 
 func TestRotateBackups_NoBackup(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
@@ -84,6 +92,8 @@ func TestRotateBackups_NoBackup(t *testing.T) {
 }
 
 func TestRotateBackups_WithBackup(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 	backupPath := dbPath + ".backup"
@@ -100,6 +110,8 @@ func TestRotateBackups_WithBackup(t *testing.T) {
 }
 
 func TestRotateBackups_Cleanup(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
@@ -126,6 +138,8 @@ func TestRotateBackups_Cleanup(t *testing.T) {
 }
 
 func TestDailyBackup(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
@@ -145,6 +159,8 @@ func TestDailyBackup(t *testing.T) {
 }
 
 func TestDailyBackup_NonExistentDatabase(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "nonexistent.db")
 
@@ -153,6 +169,8 @@ func TestDailyBackup_NonExistentDatabase(t *testing.T) {
 }
 
 func TestDailyBackup_MultipleRuns(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
@@ -176,6 +194,8 @@ func TestDailyBackup_MultipleRuns(t *testing.T) {
 }
 
 func TestGetBackupInfo_Empty(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
@@ -186,6 +206,8 @@ func TestGetBackupInfo_Empty(t *testing.T) {
 }
 
 func TestGetBackupInfo_WithBackups(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
@@ -211,6 +233,8 @@ func TestGetBackupInfo_WithBackups(t *testing.T) {
 }
 
 func TestGetBackupInfo_SortedByTime(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
@@ -220,7 +244,7 @@ func TestGetBackupInfo_SortedByTime(t *testing.T) {
 	// Create multiple timed backups
 	for i := 0; i < 3; i++ {
 		require.NoError(t, DailyBackup(context.Background(), dbPath, 7), "DailyBackup() error")
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(2 * time.Millisecond)
 	}
 
 	infos, err := GetBackupInfo(dbPath)
@@ -234,6 +258,8 @@ func TestGetBackupInfo_SortedByTime(t *testing.T) {
 }
 
 func TestTotalBackupSize_Empty(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
@@ -244,6 +270,8 @@ func TestTotalBackupSize_Empty(t *testing.T) {
 }
 
 func TestTotalBackupSize_WithBackups(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
@@ -262,6 +290,8 @@ func TestTotalBackupSize_WithBackups(t *testing.T) {
 }
 
 func TestTotalBackupSize_MultipleBackups(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
@@ -280,6 +310,8 @@ func TestTotalBackupSize_MultipleBackups(t *testing.T) {
 }
 
 func TestValidatePath(t *testing.T) {
+	t.Parallel()
+
 	// Test that paths are validated
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
@@ -293,18 +325,24 @@ func TestValidatePath(t *testing.T) {
 }
 
 func TestValidatePath_Empty(t *testing.T) {
+	t.Parallel()
+
 	// Empty path should now be rejected for security
 	err := validatePath("")
 	assert.Error(t, err, "validatePath() should error on empty path")
 }
 
 func TestValidatePath_Whitespace(t *testing.T) {
+	t.Parallel()
+
 	// Whitespace will pass (get cleaned to ".")
 	err := validatePath("   ")
 	assert.NoError(t, err, "validatePath() on whitespace should not error")
 }
 
 func TestDailyBackup_KeepDaysZero(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
@@ -317,6 +355,8 @@ func TestDailyBackup_KeepDaysZero(t *testing.T) {
 }
 
 func TestDailyBackup_KeepDaysOne(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
@@ -334,6 +374,8 @@ func TestDailyBackup_KeepDaysOne(t *testing.T) {
 }
 
 func TestRotateBackups_NonExistent(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "nonexistent.db")
 
@@ -343,6 +385,8 @@ func TestRotateBackups_NonExistent(t *testing.T) {
 }
 
 func TestRotateBackups_KeepAll(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
@@ -352,7 +396,7 @@ func TestRotateBackups_KeepAll(t *testing.T) {
 	// Create multiple backups by modifying the file each time
 	for i := 0; i < 5; i++ {
 		os.WriteFile(dbPath, []byte(fmt.Sprintf("content-%d", i)), 0644)
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(2 * time.Millisecond)
 		require.NoError(t, BackupDatabase(context.Background(), dbPath), "BackupDatabase() error")
 	}
 
@@ -367,6 +411,8 @@ func TestRotateBackups_KeepAll(t *testing.T) {
 }
 
 func TestRotateBackups_KeepZero_UsesDefault(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
@@ -382,6 +428,8 @@ func TestRotateBackups_KeepZero_UsesDefault(t *testing.T) {
 }
 
 func TestRotateBackups_KeepNegative_UsesDefault(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
@@ -397,6 +445,8 @@ func TestRotateBackups_KeepNegative_UsesDefault(t *testing.T) {
 }
 
 func TestGetBackupInfo_SortByTime(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
@@ -405,12 +455,12 @@ func TestGetBackupInfo_SortByTime(t *testing.T) {
 
 	// Create initial backup
 	require.NoError(t, BackupDatabase(context.Background(), dbPath), "BackupDatabase() error")
-	time.Sleep(20 * time.Millisecond)
+	time.Sleep(5 * time.Millisecond)
 
 	// Modify and create another backup
 	os.WriteFile(dbPath, []byte("content2"), 0644)
 	require.NoError(t, BackupDatabase(context.Background(), dbPath), "BackupDatabase() error")
-	time.Sleep(20 * time.Millisecond)
+	time.Sleep(5 * time.Millisecond)
 
 	// Modify and create third backup
 	os.WriteFile(dbPath, []byte("content3"), 0644)
@@ -430,6 +480,8 @@ func TestGetBackupInfo_SortByTime(t *testing.T) {
 }
 
 func TestDailyBackup_KeepDaysNegative_UsesDefault(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
@@ -440,6 +492,8 @@ func TestDailyBackup_KeepDaysNegative_UsesDefault(t *testing.T) {
 }
 
 func TestBackupInfo_Path(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
@@ -458,6 +512,8 @@ func TestBackupInfo_Path(t *testing.T) {
 }
 
 func TestBackupInfo_FileNotFound(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "nonexistent.db")
 
@@ -468,13 +524,15 @@ func TestBackupInfo_FileNotFound(t *testing.T) {
 }
 
 func TestGetBackupInfo_Order(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
 	require.NoError(t, os.WriteFile(dbPath, []byte("content1"), 0644), "Failed to create test file")
 	require.NoError(t, BackupDatabase(context.Background(), dbPath), "BackupDatabase() error")
 
-	time.Sleep(20 * time.Millisecond)
+	time.Sleep(5 * time.Millisecond)
 	os.WriteFile(dbPath, []byte("content2"), 0644)
 	require.NoError(t, BackupDatabase(context.Background(), dbPath), "BackupDatabase() error")
 
@@ -487,6 +545,8 @@ func TestGetBackupInfo_Order(t *testing.T) {
 }
 
 func TestTotalBackupSize_Zero(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
@@ -497,37 +557,51 @@ func TestTotalBackupSize_Zero(t *testing.T) {
 }
 
 func TestValidatePath_RootDirectory(t *testing.T) {
+	t.Parallel()
+
 	err := validatePath("/")
 	assert.Error(t, err, "validatePath() should reject root directory")
 	assert.Contains(t, err.Error(), "root", "Error should mention root")
 }
 
 func TestValidatePath_DevDirectory(t *testing.T) {
+	t.Parallel()
+
 	err := validatePath("/dev/sda")
 	assert.Error(t, err, "validatePath() should reject /dev directory")
 }
 
 func TestValidatePath_VarRunDirectory(t *testing.T) {
+	t.Parallel()
+
 	err := validatePath("/var/run/docker.sock")
 	assert.Error(t, err, "validatePath() should reject /var/run directory")
 }
 
 func TestValidatePath_ValidRelativePath(t *testing.T) {
+	t.Parallel()
+
 	err := validatePath("data/database.db")
 	assert.NoError(t, err, "validatePath() should accept valid relative path")
 }
 
 func TestValidatePath_ValidAbsoluteHomePath(t *testing.T) {
+	t.Parallel()
+
 	err := validatePath("/home/user/data.db")
 	assert.NoError(t, err, "validatePath() should accept valid home path")
 }
 
 func TestValidatePath_ValidTmpPath(t *testing.T) {
+	t.Parallel()
+
 	err := validatePath("/tmp/test.db")
 	assert.NoError(t, err, "validatePath() should accept valid tmp path")
 }
 
 func TestValidatePath_DirectoryTraversal(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name    string
 		path    string
@@ -554,6 +628,8 @@ func TestValidatePath_DirectoryTraversal(t *testing.T) {
 }
 
 func TestValidatePath_SystemDirectories(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name    string
 		path    string
@@ -580,6 +656,8 @@ func TestValidatePath_SystemDirectories(t *testing.T) {
 }
 
 func TestBackupDatabase_ReadError(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "nonexistent.db")
 
@@ -588,6 +666,8 @@ func TestBackupDatabase_ReadError(t *testing.T) {
 }
 
 func TestBackupDatabase_FilePermission(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "readonly.db")
 
@@ -600,6 +680,8 @@ func TestBackupDatabase_FilePermission(t *testing.T) {
 }
 
 func TestBackupDatabase_WriteError(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
@@ -619,6 +701,8 @@ func TestBackupDatabase_WriteError(t *testing.T) {
 // ==================== Context Cancellation Tests ====================
 
 func TestBackupDatabase_ContextCancellation(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
@@ -644,6 +728,8 @@ func TestBackupDatabase_ContextCancellation(t *testing.T) {
 }
 
 func TestBackupDatabase_ContextTimeout(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
@@ -656,7 +742,7 @@ func TestBackupDatabase_ContextTimeout(t *testing.T) {
 	defer cancel()
 
 	// Give the context time to expire
-	time.Sleep(10 * time.Millisecond)
+	time.Sleep(2 * time.Millisecond)
 
 	err := BackupDatabase(ctx, dbPath)
 	require.Error(t, err, "BackupDatabase() should return error when context times out")
@@ -664,6 +750,8 @@ func TestBackupDatabase_ContextTimeout(t *testing.T) {
 }
 
 func TestDailyBackup_ContextCancellation(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
@@ -680,6 +768,8 @@ func TestDailyBackup_ContextCancellation(t *testing.T) {
 }
 
 func TestBackupDatabase_Success(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
@@ -707,6 +797,8 @@ func TestBackupDatabase_Success(t *testing.T) {
 // ==================== Additional Error Path Tests ====================
 
 func TestBackupDatabase_EmptyFile(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
@@ -722,6 +814,8 @@ func TestBackupDatabase_EmptyFile(t *testing.T) {
 }
 
 func TestBackupDatabase_LargeFile(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
@@ -743,6 +837,8 @@ func TestBackupDatabase_LargeFile(t *testing.T) {
 }
 
 func TestRotateBackups_ExceedsRetention(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
@@ -764,6 +860,8 @@ func TestRotateBackups_ExceedsRetention(t *testing.T) {
 }
 
 func TestRotateBackups_KeepsNewest(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
@@ -789,6 +887,8 @@ func TestRotateBackups_KeepsNewest(t *testing.T) {
 }
 
 func TestValidatePath_PathTraversal(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name    string
 		path    string
@@ -818,6 +918,8 @@ func TestValidatePath_PathTraversal(t *testing.T) {
 }
 
 func TestStartScheduler_Lifecycle(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 	require.NoError(t, os.WriteFile(dbPath, []byte("test content"), 0644), "Failed to create test database")
@@ -839,7 +941,7 @@ func TestStartScheduler_Lifecycle(t *testing.T) {
 		}
 	}()
 
-	time.Sleep(120 * time.Millisecond)
+	time.Sleep(20 * time.Millisecond)
 	cancel()
 
 	select {

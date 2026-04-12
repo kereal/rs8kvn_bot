@@ -33,6 +33,8 @@ func TestMain(m *testing.M) {
 }
 
 func TestHandleInvite_InvalidCode(t *testing.T) {
+	t.Parallel()
+
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 
@@ -62,6 +64,8 @@ func TestHandleInvite_InvalidCode(t *testing.T) {
 }
 
 func TestHandleInvite_RateLimitExceeded(t *testing.T) {
+	t.Parallel()
+
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 
@@ -97,6 +101,8 @@ func TestHandleInvite_RateLimitExceeded(t *testing.T) {
 }
 
 func TestHandleInvite_Success(t *testing.T) {
+	t.Parallel()
+
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 
@@ -184,6 +190,8 @@ func TestHandleInvite_Success(t *testing.T) {
 }
 
 func TestHandleInvite_XUIError(t *testing.T) {
+	t.Parallel()
+
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 
@@ -229,6 +237,8 @@ func TestHandleInvite_XUIError(t *testing.T) {
 }
 
 func TestRenderTrialPage(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		SiteURL:            "https://vpn.site",
 		TrialDurationHours: 3,
@@ -261,6 +271,8 @@ func TestRenderTrialPage(t *testing.T) {
 }
 
 func TestRenderErrorPage(t *testing.T) {
+	t.Parallel()
+
 	srv := NewServer(":8880", nil, nil, nil, bot.NewTestBotConfig(), nil, nil)
 
 	w := httptest.NewRecorder()
@@ -275,6 +287,8 @@ func TestRenderErrorPage(t *testing.T) {
 }
 
 func TestGetClientIP_Direct(t *testing.T) {
+	t.Parallel()
+
 	req := httptest.NewRequest("GET", "/i/test", nil)
 	req.RemoteAddr = "192.168.1.100:12345"
 
@@ -284,6 +298,8 @@ func TestGetClientIP_Direct(t *testing.T) {
 }
 
 func TestGetClientIP_XForwardedFor(t *testing.T) {
+	t.Parallel()
+
 	req := httptest.NewRequest("GET", "/i/test", nil)
 	req.RemoteAddr = "127.0.0.1:12345"
 	req.Header.Set("X-Forwarded-For", "203.0.113.50, 198.51.100.1")
@@ -295,6 +311,8 @@ func TestGetClientIP_XForwardedFor(t *testing.T) {
 }
 
 func TestGenerateSubID(t *testing.T) {
+	t.Parallel()
+
 	id1, err := utils.GenerateSubID()
 	require.NoError(t, err)
 	id2, err := utils.GenerateSubID()
@@ -317,6 +335,8 @@ func isHexDigit(c rune) bool {
 }
 
 func TestHandleInvite_EmptyCode(t *testing.T) {
+	t.Parallel()
+
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 
@@ -337,6 +357,8 @@ func TestHandleInvite_EmptyCode(t *testing.T) {
 }
 
 func TestHandleInvite_DatabaseError(t *testing.T) {
+	t.Parallel()
+
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 
@@ -362,6 +384,8 @@ func TestHandleInvite_DatabaseError(t *testing.T) {
 }
 
 func TestRenderTrialPage_HappLink(t *testing.T) {
+	t.Parallel()
+
 	srv := NewServer(":8880", nil, nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil)
 
 	subURL := "https://vpn.site/sub/abc123"
@@ -377,6 +401,8 @@ func TestRenderTrialPage_HappLink(t *testing.T) {
 // === Health endpoint tests ===
 
 func TestHandleHealthz(t *testing.T) {
+	t.Parallel()
+
 	srv := NewServer(":8880", nil, nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil)
 
 	req := httptest.NewRequest("GET", "/healthz", nil)
@@ -389,6 +415,8 @@ func TestHandleHealthz(t *testing.T) {
 }
 
 func TestHandleHealthz_MethodNotAllowed(t *testing.T) {
+	t.Parallel()
+
 	srv := NewServer(":8880", nil, nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil)
 
 	// Test POST method
@@ -418,6 +446,8 @@ func TestHandleHealthz_MethodNotAllowed(t *testing.T) {
 }
 
 func TestHandleHealthz_HeadMethod(t *testing.T) {
+	t.Parallel()
+
 	srv := NewServer(":8880", nil, nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil)
 
 	req := httptest.NewRequest("HEAD", "/healthz", nil)
@@ -429,6 +459,8 @@ func TestHandleHealthz_HeadMethod(t *testing.T) {
 }
 
 func TestHandleReadyz_MethodNotAllowed(t *testing.T) {
+	t.Parallel()
+
 	srv := NewServer(":8880", nil, nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil)
 
 	// Test POST method
@@ -458,6 +490,8 @@ func TestHandleReadyz_MethodNotAllowed(t *testing.T) {
 }
 
 func TestHandleReadyz_HeadMethod(t *testing.T) {
+	t.Parallel()
+
 	srv := NewServer(":8880", nil, nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil)
 	srv.SetReady(true)
 
@@ -470,6 +504,8 @@ func TestHandleReadyz_HeadMethod(t *testing.T) {
 }
 
 func TestHandleReadyz_NotReady(t *testing.T) {
+	t.Parallel()
+
 	srv := NewServer(":8880", nil, nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil)
 	// Register a failing checker to make health status not "ok"
 	srv.RegisterChecker("failing", func(ctx context.Context) ComponentHealth {
@@ -486,6 +522,8 @@ func TestHandleReadyz_NotReady(t *testing.T) {
 }
 
 func TestHandleReadyz_Ready(t *testing.T) {
+	t.Parallel()
+
 	srv := NewServer(":8880", nil, nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil)
 	// No checkers registered means health status will be "ok"
 
@@ -499,6 +537,8 @@ func TestHandleReadyz_Ready(t *testing.T) {
 }
 
 func TestHandleReadyz_WithChecker(t *testing.T) {
+	t.Parallel()
+
 	srv := NewServer(":8880", nil, nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil)
 
 	// Register a health checker that returns OK
@@ -517,6 +557,8 @@ func TestHandleReadyz_WithChecker(t *testing.T) {
 }
 
 func TestHandleReadyz_WithFailingChecker(t *testing.T) {
+	t.Parallel()
+
 	srv := NewServer(":8880", nil, nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil)
 
 	// Register a health checker that returns degraded
@@ -535,6 +577,8 @@ func TestHandleReadyz_WithFailingChecker(t *testing.T) {
 }
 
 func TestHandleReadyz_WithDownChecker(t *testing.T) {
+	t.Parallel()
+
 	srv := NewServer(":8880", nil, nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil)
 
 	// Register a health checker that returns down
@@ -552,6 +596,8 @@ func TestHandleReadyz_WithDownChecker(t *testing.T) {
 }
 
 func TestCheckHealth_NoCheckers(t *testing.T) {
+	t.Parallel()
+
 	srv := NewServer(":8880", nil, nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil)
 
 	health := srv.checkHealth(context.Background())
@@ -561,6 +607,8 @@ func TestCheckHealth_NoCheckers(t *testing.T) {
 }
 
 func TestCheckHealth_WithCheckers(t *testing.T) {
+	t.Parallel()
+
 	srv := NewServer(":8880", nil, nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil)
 
 	srv.RegisterChecker("comp1", func(ctx context.Context) ComponentHealth {
@@ -577,6 +625,8 @@ func TestCheckHealth_WithCheckers(t *testing.T) {
 }
 
 func TestCheckHealth_AllDown(t *testing.T) {
+	t.Parallel()
+
 	srv := NewServer(":8880", nil, nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil)
 
 	srv.RegisterChecker("comp1", func(ctx context.Context) ComponentHealth {
@@ -592,6 +642,8 @@ func TestCheckHealth_AllDown(t *testing.T) {
 }
 
 func TestWriteJSON(t *testing.T) {
+	t.Parallel()
+
 	srv := NewServer(":8880", nil, nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil)
 
 	rec := httptest.NewRecorder()
@@ -608,6 +660,8 @@ func TestWriteJSON(t *testing.T) {
 }
 
 func TestSetReady(t *testing.T) {
+	t.Parallel()
+
 	srv := NewServer(":8880", nil, nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil)
 
 	// Initially not ready
@@ -632,6 +686,8 @@ func TestSetReady(t *testing.T) {
 }
 
 func TestRegisterChecker(t *testing.T) {
+	t.Parallel()
+
 	srv := NewServer(":8880", nil, nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil)
 
 	// Register multiple checkers
@@ -652,6 +708,8 @@ func TestRegisterChecker(t *testing.T) {
 // === Status constant tests ===
 
 func TestStatusConstants(t *testing.T) {
+	t.Parallel()
+
 	assert.Equal(t, Status("ok"), StatusOK, "StatusOK constant")
 	assert.Equal(t, Status("degraded"), StatusDegraded, "StatusDegraded constant")
 	assert.Equal(t, Status("down"), StatusDown, "StatusDown constant")
@@ -660,6 +718,8 @@ func TestStatusConstants(t *testing.T) {
 // === ComponentHealth tests ===
 
 func TestComponentHealth_Fields(t *testing.T) {
+	t.Parallel()
+
 	health := ComponentHealth{
 		Status:  StatusOK,
 		Message: "test message",
@@ -672,6 +732,8 @@ func TestComponentHealth_Fields(t *testing.T) {
 // === HealthResponse tests ===
 
 func TestHealthResponse_Fields(t *testing.T) {
+	t.Parallel()
+
 	resp := HealthResponse{
 		Status:    string(StatusOK),
 		Timestamp: time.Now(),
@@ -687,6 +749,8 @@ func TestHealthResponse_Fields(t *testing.T) {
 // === GetClientIP edge cases ===
 
 func TestGetClientIP_XForwardedForMultiple(t *testing.T) {
+	t.Parallel()
+
 	req := httptest.NewRequest("GET", "/i/test", nil)
 	req.RemoteAddr = "127.0.0.1:12345"
 	req.Header.Set("X-Forwarded-For", "203.0.113.50, 198.51.100.1, 192.0.2.1")
@@ -700,6 +764,8 @@ func TestGetClientIP_XForwardedForMultiple(t *testing.T) {
 // Note: X-Real-IP is not checked by getClientIP - it only checks X-Forwarded-For
 
 func TestGetClientIP_NoPort(t *testing.T) {
+	t.Parallel()
+
 	req := httptest.NewRequest("GET", "/i/test", nil)
 	req.RemoteAddr = "192.168.1.100" // No port
 
@@ -709,6 +775,8 @@ func TestGetClientIP_NoPort(t *testing.T) {
 }
 
 func TestGetClientIP_Localhost(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name     string
 		remote   string
@@ -736,6 +804,8 @@ func TestGetClientIP_Localhost(t *testing.T) {
 }
 
 func TestGetClientIP_EmptyXForwardedFor(t *testing.T) {
+	t.Parallel()
+
 	req := httptest.NewRequest("GET", "/i/test", nil)
 	req.RemoteAddr = "127.0.0.1:12345"
 	req.Header.Set("X-Forwarded-For", "") // Empty header
@@ -746,6 +816,8 @@ func TestGetClientIP_EmptyXForwardedFor(t *testing.T) {
 }
 
 func TestGetClientIP_WhitespaceInXForwardedFor(t *testing.T) {
+	t.Parallel()
+
 	req := httptest.NewRequest("GET", "/i/test", nil)
 	req.RemoteAddr = "127.0.0.1:12345"
 	req.Header.Set("X-Forwarded-For", "  192.0.2.1  ,  198.51.100.1  ") // Extra whitespace
@@ -758,6 +830,8 @@ func TestGetClientIP_WhitespaceInXForwardedFor(t *testing.T) {
 // === Server Start/Stop tests ===
 
 func TestServer_StartAndStop(t *testing.T) {
+	t.Parallel()
+
 	srv := NewServer(":0", nil, nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil) // :0 for random port
 
 	ctx := context.Background()
@@ -775,6 +849,8 @@ func TestServer_StartAndStop(t *testing.T) {
 }
 
 func TestServer_StopWithoutStart(t *testing.T) {
+	t.Parallel()
+
 	srv := NewServer(":0", nil, nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil)
 
 	// Stop without start should not panic
@@ -788,6 +864,8 @@ func TestServer_StopWithoutStart(t *testing.T) {
 // === getExistingTrialFromCookie tests ===
 
 func TestGetExistingTrialFromCookie_NoCookie(t *testing.T) {
+	t.Parallel()
+
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	cfg := &config.Config{}
@@ -803,6 +881,8 @@ func TestGetExistingTrialFromCookie_NoCookie(t *testing.T) {
 }
 
 func TestGetExistingTrialFromCookie_InvalidSubID(t *testing.T) {
+	t.Parallel()
+
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	cfg := &config.Config{}
@@ -822,6 +902,8 @@ func TestGetExistingTrialFromCookie_InvalidSubID(t *testing.T) {
 }
 
 func TestGetExistingTrialFromCookie_NotTrial(t *testing.T) {
+	t.Parallel()
+
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	cfg := &config.Config{}
@@ -850,6 +932,8 @@ func TestGetExistingTrialFromCookie_NotTrial(t *testing.T) {
 }
 
 func TestGetExistingTrialFromCookie_AlreadyActivated(t *testing.T) {
+	t.Parallel()
+
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	cfg := &config.Config{}
@@ -878,6 +962,8 @@ func TestGetExistingTrialFromCookie_AlreadyActivated(t *testing.T) {
 }
 
 func TestGetExistingTrialFromCookie_Expired(t *testing.T) {
+	t.Parallel()
+
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	cfg := &config.Config{}
@@ -907,6 +993,8 @@ func TestGetExistingTrialFromCookie_Expired(t *testing.T) {
 }
 
 func TestGetExistingTrialFromCookie_Valid(t *testing.T) {
+	t.Parallel()
+
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	cfg := &config.Config{}
@@ -938,6 +1026,8 @@ func TestGetExistingTrialFromCookie_Valid(t *testing.T) {
 }
 
 func TestInviteCodeRegex(t *testing.T) {
+	t.Parallel()
+
 	srv := NewServer(":8880", nil, nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil)
 
 	tests := []struct {
@@ -976,6 +1066,8 @@ func TestInviteCodeRegex(t *testing.T) {
 // === Additional handleInvite error path tests ===
 
 func TestHandleInvite_XUIAddClientFails(t *testing.T) {
+	t.Parallel()
+
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 
@@ -1019,6 +1111,8 @@ func TestHandleInvite_XUIAddClientFails(t *testing.T) {
 }
 
 func TestHandleInvite_CreateTrialSubscriptionFails(t *testing.T) {
+	t.Parallel()
+
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 
@@ -1072,6 +1166,8 @@ func TestHandleInvite_CreateTrialSubscriptionFails(t *testing.T) {
 }
 
 func TestHandleInvite_ExistingTrialFromCookie(t *testing.T) {
+	t.Parallel()
+
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 
@@ -1113,6 +1209,8 @@ func TestHandleInvite_ExistingTrialFromCookie(t *testing.T) {
 }
 
 func TestHandleInvite_MethodNotAllowed(t *testing.T) {
+	t.Parallel()
+
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	cfg := &config.Config{}
@@ -1128,6 +1226,8 @@ func TestHandleInvite_MethodNotAllowed(t *testing.T) {
 }
 
 func TestHandleInvite_InvalidPath(t *testing.T) {
+	t.Parallel()
+
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	cfg := &config.Config{}
@@ -1143,6 +1243,8 @@ func TestHandleInvite_InvalidPath(t *testing.T) {
 }
 
 func TestHandleInvite_InvalidCodeChars(t *testing.T) {
+	t.Parallel()
+
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	cfg := &config.Config{}
@@ -1158,6 +1260,8 @@ func TestHandleInvite_InvalidCodeChars(t *testing.T) {
 }
 
 func TestHandleInvite_RateLimitCheckError(t *testing.T) {
+	t.Parallel()
+
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 
@@ -1188,6 +1292,8 @@ func TestHandleInvite_RateLimitCheckError(t *testing.T) {
 }
 
 func TestIsLocalAddress_Loopback(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name     string
 		ip       string
@@ -1207,6 +1313,8 @@ func TestIsLocalAddress_Loopback(t *testing.T) {
 }
 
 func TestIsLocalAddress_NonLoopback(t *testing.T) {
+	t.Parallel()
+
 	// Only loopback addresses are trusted as proxy sources.
 	// Private IPs (10.x, 172.16.x, 192.168.x) are NOT trusted because
 	// in cloud environments other VMs on the same VPC could spoof
@@ -1234,6 +1342,8 @@ func TestIsLocalAddress_NonLoopback(t *testing.T) {
 }
 
 func TestGetClientIP_NonLocalRemoteAddr(t *testing.T) {
+	t.Parallel()
+
 	req := httptest.NewRequest("GET", "/i/test", nil)
 	req.RemoteAddr = "8.8.8.8:12345"
 
@@ -1243,6 +1353,8 @@ func TestGetClientIP_NonLocalRemoteAddr(t *testing.T) {
 }
 
 func TestGetClientIP_InvalidRemoteAddr(t *testing.T) {
+	t.Parallel()
+
 	req := httptest.NewRequest("GET", "/i/test", nil)
 	req.RemoteAddr = "invalid"
 
@@ -1252,6 +1364,8 @@ func TestGetClientIP_InvalidRemoteAddr(t *testing.T) {
 }
 
 func TestServer_Start_PortInUse(t *testing.T) {
+	t.Parallel()
+
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err, "Failed to create listener")
 	defer listener.Close()
@@ -1270,6 +1384,8 @@ func TestServer_Start_PortInUse(t *testing.T) {
 }
 
 func TestGetClientIP_IPv6(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name     string
 		forward  string
@@ -1315,6 +1431,8 @@ func TestGetClientIP_IPv6(t *testing.T) {
 }
 
 func TestRenderTrialPage_XSSProtection(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		SiteURL:            "https://vpn.site",
 		TrialDurationHours: 3,
@@ -1387,6 +1505,8 @@ func TestRenderTrialPage_XSSProtection(t *testing.T) {
 // ==================== HandleLogo Tests ====================
 
 func TestHandleLogo_Success(t *testing.T) {
+	t.Parallel()
+
 	srv := NewServer(":8880", nil, nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil)
 
 	req := httptest.NewRequest("GET", "/static/logo.png", nil)
@@ -1405,6 +1525,8 @@ func TestHandleLogo_Success(t *testing.T) {
 }
 
 func TestHandleLogo_CacheHeaders(t *testing.T) {
+	t.Parallel()
+
 	srv := NewServer(":8880", nil, nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil)
 
 	req := httptest.NewRequest("GET", "/static/logo.png", nil)
@@ -1417,6 +1539,8 @@ func TestHandleLogo_CacheHeaders(t *testing.T) {
 }
 
 func TestHandleLogo_HEAD(t *testing.T) {
+	t.Parallel()
+
 	srv := NewServer(":8880", nil, nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil)
 
 	req := httptest.NewRequest("HEAD", "/static/logo.png", nil)
@@ -1430,6 +1554,8 @@ func TestHandleLogo_HEAD(t *testing.T) {
 }
 
 func TestRenderTrialPage_TemplateRendersLogo(t *testing.T) {
+	t.Parallel()
+
 	srv := NewServer(":8880", nil, nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil)
 
 	w := httptest.NewRecorder()
@@ -1439,6 +1565,8 @@ func TestRenderTrialPage_TemplateRendersLogo(t *testing.T) {
 }
 
 func TestRenderErrorPage_TemplateRendersLogo(t *testing.T) {
+	t.Parallel()
+
 	srv := NewServer(":8880", nil, nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil)
 
 	w := httptest.NewRecorder()
@@ -1448,6 +1576,8 @@ func TestRenderErrorPage_TemplateRendersLogo(t *testing.T) {
 }
 
 func TestHandleInvite_ParallelRequests(t *testing.T) {
+	t.Parallel()
+
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 
@@ -1513,6 +1643,8 @@ func TestHandleInvite_ParallelRequests(t *testing.T) {
 }
 
 func TestRenderTrialPage_Golden(t *testing.T) {
+	t.Parallel()
+
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	cfg := &config.Config{
@@ -1545,6 +1677,8 @@ func TestRenderTrialPage_Golden(t *testing.T) {
 }
 
 func TestRenderTrialPage_Structure(t *testing.T) {
+	t.Parallel()
+
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	cfg := &config.Config{

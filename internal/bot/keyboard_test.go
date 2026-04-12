@@ -13,6 +13,8 @@ import (
 // === getMainMenuKeyboard tests ===
 
 func TestGetMainMenuKeyboard(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{TelegramAdminID: 123}
 	handler := &Handler{cfg: cfg, botConfig: NewTestBotConfig()}
 
@@ -24,6 +26,8 @@ func TestGetMainMenuKeyboard(t *testing.T) {
 }
 
 func TestHandler_GetMainMenuKeyboard_ButtonLabels(t *testing.T) {
+	t.Parallel()
+
 	handler := &Handler{cfg: &config.Config{}, botConfig: NewTestBotConfig()}
 
 	keyboard := handler.getMainMenuKeyboard(true)
@@ -35,6 +39,8 @@ func TestHandler_GetMainMenuKeyboard_ButtonLabels(t *testing.T) {
 }
 
 func TestHandler_GetMainMenuKeyboard_CallbackData(t *testing.T) {
+	t.Parallel()
+
 	handler := &Handler{cfg: &config.Config{}, botConfig: NewTestBotConfig()}
 
 	keyboard := handler.getMainMenuKeyboard(true)
@@ -50,6 +56,8 @@ func TestHandler_GetMainMenuKeyboard_CallbackData(t *testing.T) {
 }
 
 func TestHandler_KeyboardConstruction_MultipleRows(t *testing.T) {
+	t.Parallel()
+
 	handler := &Handler{cfg: &config.Config{TelegramAdminID: 12345}}
 
 	keyboard := handler.getMainMenuKeyboard(true)
@@ -64,6 +72,8 @@ func TestHandler_KeyboardConstruction_MultipleRows(t *testing.T) {
 // === getBackKeyboard tests ===
 
 func TestGetBackKeyboard(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{}
 	handler := &Handler{cfg: cfg, botConfig: NewTestBotConfig()}
 
@@ -75,6 +85,8 @@ func TestGetBackKeyboard(t *testing.T) {
 }
 
 func TestHandler_GetBackKeyboard_CallbackData(t *testing.T) {
+	t.Parallel()
+
 	handler := &Handler{cfg: &config.Config{}, botConfig: NewTestBotConfig()}
 
 	keyboard := handler.getBackKeyboard()
@@ -86,6 +98,8 @@ func TestHandler_GetBackKeyboard_CallbackData(t *testing.T) {
 // === getQRKeyboard tests ===
 
 func TestGetQRKeyboard(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{TelegramAdminID: 123}
 	handler := NewHandler(nil, cfg, nil, nil, NewTestBotConfig(), nil, "")
 
@@ -107,6 +121,8 @@ func TestGetQRKeyboard(t *testing.T) {
 }
 
 func TestGetQRKeyboard_PreservesHandlerState(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{TelegramAdminID: 456}
 	handler := NewHandler(nil, cfg, nil, nil, NewTestBotConfig(), nil, "")
 
@@ -120,6 +136,8 @@ func TestGetQRKeyboard_PreservesHandlerState(t *testing.T) {
 // === addAdminButtons tests ===
 
 func TestAddAdminButtons(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name          string
 		adminID       int64
@@ -154,6 +172,8 @@ func TestAddAdminButtons(t *testing.T) {
 }
 
 func TestHandler_AddAdminButtons_ExistingKeyboard(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{TelegramAdminID: 12345}
 	handler := &Handler{cfg: cfg, botConfig: NewTestBotConfig()}
 
@@ -171,6 +191,8 @@ func TestHandler_AddAdminButtons_ExistingKeyboard(t *testing.T) {
 }
 
 func TestHandler_AddAdminButtons_NonAdmin(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{TelegramAdminID: 12345}
 	handler := &Handler{cfg: cfg, botConfig: NewTestBotConfig()}
 
@@ -190,6 +212,8 @@ func TestHandler_AddAdminButtons_NonAdmin(t *testing.T) {
 // === keyboard layout tests ===
 
 func TestSubscriptionKeyboardLayout(t *testing.T) {
+	t.Parallel()
+
 	keyboard := tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData("📱 QR-код", "qr_code"),
@@ -209,6 +233,8 @@ func TestSubscriptionKeyboardLayout(t *testing.T) {
 }
 
 func TestQRBackKeyboard(t *testing.T) {
+	t.Parallel()
+
 	keyboard := tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData("⬅️ Назад", "back_to_subscription"),

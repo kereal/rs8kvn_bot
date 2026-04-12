@@ -41,6 +41,8 @@ func newTestAPIServer(t *testing.T, cfg *config.Config, mockDB *testutil.MockDat
 }
 
 func TestGetSubscriptions_Success(t *testing.T) {
+	t.Parallel()
+
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	cfg := &config.Config{}
@@ -104,6 +106,8 @@ func TestGetSubscriptions_Success(t *testing.T) {
 }
 
 func TestGetSubscriptions_EmptyList(t *testing.T) {
+	t.Parallel()
+
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	cfg := &config.Config{}
@@ -132,6 +136,8 @@ func TestGetSubscriptions_EmptyList(t *testing.T) {
 }
 
 func TestGetSubscriptions_FiltersInactiveSubscriptions(t *testing.T) {
+	t.Parallel()
+
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	cfg := &config.Config{}
@@ -194,6 +200,8 @@ func TestGetSubscriptions_FiltersInactiveSubscriptions(t *testing.T) {
 }
 
 func TestGetSubscriptions_FiltersSoftDeleted(t *testing.T) {
+	t.Parallel()
+
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	cfg := &config.Config{}
@@ -248,6 +256,8 @@ func TestGetSubscriptions_FiltersSoftDeleted(t *testing.T) {
 }
 
 func TestGetSubscriptions_DatabaseError(t *testing.T) {
+	t.Parallel()
+
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	cfg := &config.Config{}
@@ -269,6 +279,8 @@ func TestGetSubscriptions_DatabaseError(t *testing.T) {
 }
 
 func TestGetSubscriptions_MethodNotAllowed(t *testing.T) {
+	t.Parallel()
+
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	cfg := &config.Config{}
@@ -292,6 +304,8 @@ func TestGetSubscriptions_MethodNotAllowed(t *testing.T) {
 }
 
 func TestGetSubscriptions_WithBearerAuth(t *testing.T) {
+	t.Parallel()
+
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	cfg := &config.Config{
@@ -336,6 +350,8 @@ func TestGetSubscriptions_WithBearerAuth(t *testing.T) {
 }
 
 func TestGetSubscriptions_ResponseFormat(t *testing.T) {
+	t.Parallel()
+
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	cfg := &config.Config{}
@@ -397,6 +413,8 @@ func TestGetSubscriptions_ResponseFormat(t *testing.T) {
 }
 
 func TestGetSubscriptions_MixedStatuses(t *testing.T) {
+	t.Parallel()
+
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	cfg := &config.Config{}
@@ -439,6 +457,8 @@ func TestGetSubscriptions_MixedStatuses(t *testing.T) {
 }
 
 func TestGetSubscriptions_ActiveButSoftDeleted(t *testing.T) {
+	t.Parallel()
+
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	cfg := &config.Config{}
@@ -490,6 +510,8 @@ func TestGetSubscriptions_ActiveButSoftDeleted(t *testing.T) {
 }
 
 func TestGetSubscriptions_LargeDataset(t *testing.T) {
+	t.Parallel()
+
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	cfg := &config.Config{}
@@ -532,6 +554,8 @@ func TestGetSubscriptions_LargeDataset(t *testing.T) {
 }
 
 func TestGetSubscriptions_HeadMethod(t *testing.T) {
+	t.Parallel()
+
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	cfg := &config.Config{}

@@ -16,6 +16,8 @@ func TestMain(m *testing.M) {
 }
 
 func TestCache_GetMiss(t *testing.T) {
+	t.Parallel()
+
 	cache := NewCache(time.Minute)
 	defer cache.Stop()
 
@@ -26,6 +28,8 @@ func TestCache_GetMiss(t *testing.T) {
 }
 
 func TestCache_SetAndGet(t *testing.T) {
+	t.Parallel()
+
 	cache := NewCache(time.Minute)
 	defer cache.Stop()
 
@@ -40,7 +44,9 @@ func TestCache_SetAndGet(t *testing.T) {
 }
 
 func TestCache_TTLExpiry(t *testing.T) {
-	cache := NewCache(50 * time.Millisecond)
+	t.Parallel()
+
+	cache := NewCache(10 * time.Millisecond)
 	defer cache.Stop()
 
 	cache.Set("key1", []byte("body"), map[string]string{"K": "V"})
@@ -48,20 +54,22 @@ func TestCache_TTLExpiry(t *testing.T) {
 	_, _, ok := cache.Get("key1")
 	assert.True(t, ok)
 
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(20 * time.Millisecond)
 
 	_, _, ok = cache.Get("key1")
 	assert.False(t, ok)
 }
 
 func TestCache_Cleanup(t *testing.T) {
-	cache := NewCache(50 * time.Millisecond)
+	t.Parallel()
+
+	cache := NewCache(10 * time.Millisecond)
 	defer cache.Stop()
 
 	cache.Set("key1", []byte("body1"), map[string]string{})
 	cache.Set("key2", []byte("body2"), map[string]string{})
 
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(20 * time.Millisecond)
 
 	cache.mu.RLock()
 	count := len(cache.entries)
@@ -71,6 +79,8 @@ func TestCache_Cleanup(t *testing.T) {
 }
 
 func TestCache_Isolation(t *testing.T) {
+	t.Parallel()
+
 	cache := NewCache(time.Minute)
 	defer cache.Stop()
 
@@ -89,6 +99,8 @@ func TestCache_Isolation(t *testing.T) {
 }
 
 func TestCache_Delete(t *testing.T) {
+	t.Parallel()
+
 	cache := NewCache(time.Minute)
 	defer cache.Stop()
 
@@ -100,6 +112,8 @@ func TestCache_Delete(t *testing.T) {
 }
 
 func TestCache_HeadersCopy(t *testing.T) {
+	t.Parallel()
+
 	cache := NewCache(time.Minute)
 	defer cache.Stop()
 

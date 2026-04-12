@@ -11,12 +11,16 @@ import (
 // --- StringValue Tests ---
 
 func TestStringValue_Default(t *testing.T) {
+	t.Parallel()
+
 	v := NewString("hello")
 	assert.Equal(t, "hello", v.Get())
 	assert.Equal(t, "hello", v.String())
 }
 
 func TestStringValue_Set(t *testing.T) {
+	t.Parallel()
+
 	v := NewString("default")
 	err := v.Set("world")
 	require.NoError(t, err)
@@ -24,6 +28,8 @@ func TestStringValue_Set(t *testing.T) {
 }
 
 func TestStringValue_SetEmpty(t *testing.T) {
+	t.Parallel()
+
 	v := NewString("default")
 	err := v.Set("")
 	require.NoError(t, err)
@@ -33,12 +39,16 @@ func TestStringValue_SetEmpty(t *testing.T) {
 // --- IntValue Tests ---
 
 func TestIntValue_Default(t *testing.T) {
+	t.Parallel()
+
 	v := NewInt(42)
 	assert.Equal(t, 42, v.Get())
 	assert.Equal(t, "42", v.String())
 }
 
 func TestIntValue_Set(t *testing.T) {
+	t.Parallel()
+
 	v := NewInt(0)
 	err := v.Set("100")
 	require.NoError(t, err)
@@ -46,6 +56,8 @@ func TestIntValue_Set(t *testing.T) {
 }
 
 func TestIntValue_SetNegative(t *testing.T) {
+	t.Parallel()
+
 	v := NewInt(0)
 	err := v.Set("-5")
 	require.NoError(t, err)
@@ -53,6 +65,8 @@ func TestIntValue_SetNegative(t *testing.T) {
 }
 
 func TestIntValue_SetInvalid(t *testing.T) {
+	t.Parallel()
+
 	v := NewInt(0)
 	err := v.Set("notanumber")
 	assert.Error(t, err)
@@ -61,6 +75,8 @@ func TestIntValue_SetInvalid(t *testing.T) {
 }
 
 func TestIntValue_SetFloat(t *testing.T) {
+	t.Parallel()
+
 	v := NewInt(0)
 	err := v.Set("3.14")
 	assert.Error(t, err)
@@ -69,12 +85,16 @@ func TestIntValue_SetFloat(t *testing.T) {
 // --- Int64Value Tests ---
 
 func TestInt64Value_Default(t *testing.T) {
+	t.Parallel()
+
 	v := NewInt64(9999999999)
 	assert.Equal(t, int64(9999999999), v.Get())
 	assert.Equal(t, "9999999999", v.String())
 }
 
 func TestInt64Value_Set(t *testing.T) {
+	t.Parallel()
+
 	v := NewInt64(0)
 	err := v.Set("1234567890123")
 	require.NoError(t, err)
@@ -82,6 +102,8 @@ func TestInt64Value_Set(t *testing.T) {
 }
 
 func TestInt64Value_SetInvalid(t *testing.T) {
+	t.Parallel()
+
 	v := NewInt64(0)
 	err := v.Set("abc")
 	assert.Error(t, err)
@@ -91,6 +113,8 @@ func TestInt64Value_SetInvalid(t *testing.T) {
 // --- Registry Tests ---
 
 func TestRegistry_RegisterAndGet(t *testing.T) {
+	t.Parallel()
+
 	r := New()
 	s := NewString("default")
 	r.Register("KEY", s)
@@ -101,11 +125,15 @@ func TestRegistry_RegisterAndGet(t *testing.T) {
 }
 
 func TestRegistry_ValueNotFound(t *testing.T) {
+	t.Parallel()
+
 	r := New()
 	assert.Nil(t, r.Value("MISSING"))
 }
 
 func TestRegistry_Names(t *testing.T) {
+	t.Parallel()
+
 	r := New()
 	r.Register("A", NewString("1"))
 	r.Register("B", NewString("2"))
@@ -121,6 +149,8 @@ func TestRegistry_Names(t *testing.T) {
 // --- LoadEnv Tests ---
 
 func TestRegistry_LoadEnv_FromEnv(t *testing.T) {
+	t.Parallel()
+
 	os.Setenv("TEST_FLAG_STRING", "from-env")
 	os.Setenv("TEST_FLAG_INT", "42")
 	defer func() {
@@ -142,6 +172,8 @@ func TestRegistry_LoadEnv_FromEnv(t *testing.T) {
 }
 
 func TestRegistry_LoadEnv_DefaultWhenUnset(t *testing.T) {
+	t.Parallel()
+
 	os.Unsetenv("TEST_UNSET_FLAG")
 
 	r := New()
@@ -154,6 +186,8 @@ func TestRegistry_LoadEnv_DefaultWhenUnset(t *testing.T) {
 }
 
 func TestRegistry_LoadEnv_WhitespaceTrimmed(t *testing.T) {
+	t.Parallel()
+
 	os.Setenv("TEST_TRIM_FLAG", "  trimmed  ")
 	defer os.Unsetenv("TEST_TRIM_FLAG")
 
@@ -167,6 +201,8 @@ func TestRegistry_LoadEnv_WhitespaceTrimmed(t *testing.T) {
 }
 
 func TestRegistry_LoadEnv_InvalidInt(t *testing.T) {
+	t.Parallel()
+
 	os.Setenv("TEST_BAD_INT", "notanint")
 	defer os.Unsetenv("TEST_BAD_INT")
 
@@ -180,6 +216,8 @@ func TestRegistry_LoadEnv_InvalidInt(t *testing.T) {
 }
 
 func TestRegistry_LoadEnv_IgnoresUnregistered(t *testing.T) {
+	t.Parallel()
+
 	os.Setenv("UNREGISTERED_VAR", "should-be-ignored")
 	defer os.Unsetenv("UNREGISTERED_VAR")
 

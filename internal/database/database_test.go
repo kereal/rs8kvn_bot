@@ -22,6 +22,8 @@ func TestMain(m *testing.M) {
 // ==================== Model Method Tests ====================
 
 func TestSubscription_IsExpired(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name       string
 		expiryTime time.Time
@@ -43,6 +45,8 @@ func TestSubscription_IsExpired(t *testing.T) {
 }
 
 func TestSubscription_IsActive(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name       string
 		status     string
@@ -66,20 +70,28 @@ func TestSubscription_IsActive(t *testing.T) {
 }
 
 func TestSubscription_TableName(t *testing.T) {
+	t.Parallel()
+
 	assert.Equal(t, "subscriptions", Subscription{}.TableName())
 }
 
 func TestInvite_TableName(t *testing.T) {
+	t.Parallel()
+
 	assert.Equal(t, "invites", Invite{}.TableName())
 }
 
 func TestTrialRequest_TableName(t *testing.T) {
+	t.Parallel()
+
 	assert.Equal(t, "trial_requests", TrialRequest{}.TableName())
 }
 
 // ==================== Service Lifecycle Tests ====================
 
 func TestNewService(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
@@ -92,6 +104,8 @@ func TestNewService(t *testing.T) {
 }
 
 func TestNewService_CreatesDirectory(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "subdir", "test.db")
 
@@ -104,6 +118,8 @@ func TestNewService_CreatesDirectory(t *testing.T) {
 }
 
 func TestNewService_InvalidPath(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "file.txt")
 
@@ -114,6 +130,8 @@ func TestNewService_InvalidPath(t *testing.T) {
 }
 
 func TestService_Close(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
@@ -124,6 +142,8 @@ func TestService_Close(t *testing.T) {
 }
 
 func TestService_Close_AlreadyClosed(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
@@ -135,6 +155,8 @@ func TestService_Close_AlreadyClosed(t *testing.T) {
 }
 
 func TestService_Ping(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
@@ -146,6 +168,8 @@ func TestService_Ping(t *testing.T) {
 }
 
 func TestService_GetPoolStats(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
@@ -162,6 +186,8 @@ func TestService_GetPoolStats(t *testing.T) {
 // ==================== Service Subscription CRUD Tests ====================
 
 func TestService_GetByTelegramID(t *testing.T) {
+	t.Parallel()
+
 	svc := newTestService(t)
 
 	sub := createTestSubscription(t, svc, 12345, "testuser", "client-1")
@@ -174,6 +200,8 @@ func TestService_GetByTelegramID(t *testing.T) {
 }
 
 func TestService_GetByTelegramID_NotFound(t *testing.T) {
+	t.Parallel()
+
 	svc := newTestService(t)
 
 	_, err := svc.GetByTelegramID(context.Background(), 999999)
@@ -181,6 +209,8 @@ func TestService_GetByTelegramID_NotFound(t *testing.T) {
 }
 
 func TestService_GetByTelegramID_ReturnsActiveOnly(t *testing.T) {
+	t.Parallel()
+
 	svc := newTestService(t)
 
 	// Create revoked subscription
@@ -211,6 +241,8 @@ func TestService_GetByTelegramID_ReturnsActiveOnly(t *testing.T) {
 }
 
 func TestService_GetByTelegramID_MultipleUsers(t *testing.T) {
+	t.Parallel()
+
 	svc := newTestService(t)
 
 	users := []struct {
@@ -234,6 +266,8 @@ func TestService_GetByTelegramID_MultipleUsers(t *testing.T) {
 }
 
 func TestService_CreateSubscription(t *testing.T) {
+	t.Parallel()
+
 	svc := newTestService(t)
 
 	sub := &Subscription{
@@ -256,6 +290,8 @@ func TestService_CreateSubscription(t *testing.T) {
 }
 
 func TestService_CreateSubscription_RevokesOldSubscription(t *testing.T) {
+	t.Parallel()
+
 	svc := newTestService(t)
 
 	telegramID := int64(123456789)
@@ -294,6 +330,8 @@ func TestService_CreateSubscription_RevokesOldSubscription(t *testing.T) {
 }
 
 func TestService_CreateSubscription_MultipleRevokes(t *testing.T) {
+	t.Parallel()
+
 	svc := newTestService(t)
 
 	telegramID := int64(123456789)
@@ -321,6 +359,8 @@ func TestService_CreateSubscription_MultipleRevokes(t *testing.T) {
 }
 
 func TestService_CreateSubscription_AllFields(t *testing.T) {
+	t.Parallel()
+
 	svc := newTestService(t)
 
 	now := time.Now()
@@ -352,6 +392,8 @@ func TestService_CreateSubscription_AllFields(t *testing.T) {
 }
 
 func TestService_CreateSubscription_Timestamps(t *testing.T) {
+	t.Parallel()
+
 	svc := newTestService(t)
 
 	before := time.Now()
@@ -373,6 +415,8 @@ func TestService_CreateSubscription_Timestamps(t *testing.T) {
 }
 
 func TestService_UpdateSubscription(t *testing.T) {
+	t.Parallel()
+
 	svc := newTestService(t)
 
 	sub := &Subscription{
@@ -400,6 +444,8 @@ func TestService_UpdateSubscription(t *testing.T) {
 }
 
 func TestService_UpdateSubscription_NotFound(t *testing.T) {
+	t.Parallel()
+
 	svc := newTestService(t)
 
 	sub := &Subscription{
@@ -415,6 +461,8 @@ func TestService_UpdateSubscription_NotFound(t *testing.T) {
 }
 
 func TestService_DeleteSubscription(t *testing.T) {
+	t.Parallel()
+
 	svc := newTestService(t)
 
 	sub := createTestSubscription(t, svc, 77777, "deleteuser", "client-delete")
@@ -431,6 +479,8 @@ func TestService_DeleteSubscription(t *testing.T) {
 }
 
 func TestService_DeleteSubscription_NotFound(t *testing.T) {
+	t.Parallel()
+
 	svc := newTestService(t)
 
 	err := svc.DeleteSubscription(context.Background(), 999999)
@@ -438,6 +488,8 @@ func TestService_DeleteSubscription_NotFound(t *testing.T) {
 }
 
 func TestService_SoftDelete(t *testing.T) {
+	t.Parallel()
+
 	svc := newTestService(t)
 
 	sub := &Subscription{
@@ -467,6 +519,8 @@ func TestService_SoftDelete(t *testing.T) {
 // ==================== Service GetByID Tests ====================
 
 func TestService_GetByID(t *testing.T) {
+	t.Parallel()
+
 	svc := newTestService(t)
 
 	sub := createTestSubscription(t, svc, 12345, "testuser", "client-1")
@@ -480,6 +534,8 @@ func TestService_GetByID(t *testing.T) {
 }
 
 func TestService_GetByID_NotFound(t *testing.T) {
+	t.Parallel()
+
 	svc := newTestService(t)
 
 	_, err := svc.GetByID(context.Background(), 99999)
@@ -489,6 +545,8 @@ func TestService_GetByID_NotFound(t *testing.T) {
 // ==================== Service DeleteSubscriptionByID Tests ====================
 
 func TestService_DeleteSubscriptionByID(t *testing.T) {
+	t.Parallel()
+
 	svc := newTestService(t)
 
 	sub := createTestSubscription(t, svc, 54321, "deleteuser", "client-delete")
@@ -512,6 +570,8 @@ func TestService_DeleteSubscriptionByID(t *testing.T) {
 }
 
 func TestService_DeleteSubscriptionByID_NotFound(t *testing.T) {
+	t.Parallel()
+
 	svc := newTestService(t)
 
 	_, err := svc.DeleteSubscriptionByID(context.Background(), 99999)
@@ -521,6 +581,8 @@ func TestService_DeleteSubscriptionByID_NotFound(t *testing.T) {
 // ==================== Service GetLatestSubscriptions Tests ====================
 
 func TestService_GetLatestSubscriptions(t *testing.T) {
+	t.Parallel()
+
 	svc := newTestService(t)
 
 	for i := 0; i < 5; i++ {
@@ -546,6 +608,8 @@ func TestService_GetLatestSubscriptions(t *testing.T) {
 }
 
 func TestService_GetLatestSubscriptions_Empty(t *testing.T) {
+	t.Parallel()
+
 	svc := newTestService(t)
 
 	subs, err := svc.GetLatestSubscriptions(context.Background(), 10)
@@ -554,6 +618,8 @@ func TestService_GetLatestSubscriptions_Empty(t *testing.T) {
 }
 
 func TestService_GetLatestSubscriptions_OnlyActive(t *testing.T) {
+	t.Parallel()
+
 	svc := newTestService(t)
 
 	activeSub := &Subscription{
@@ -589,6 +655,8 @@ func TestService_GetLatestSubscriptions_OnlyActive(t *testing.T) {
 }
 
 func TestService_GetLatestSubscriptions_LimitZero(t *testing.T) {
+	t.Parallel()
+
 	svc := newTestService(t)
 
 	for i := 0; i < 5; i++ {
@@ -601,6 +669,8 @@ func TestService_GetLatestSubscriptions_LimitZero(t *testing.T) {
 }
 
 func TestService_GetLatestSubscriptions_LimitOne(t *testing.T) {
+	t.Parallel()
+
 	svc := newTestService(t)
 
 	for i := 0; i < 5; i++ {
@@ -626,6 +696,8 @@ func TestService_GetLatestSubscriptions_LimitOne(t *testing.T) {
 }
 
 func TestService_GetLatestSubscriptions_LimitGreaterThanTotal(t *testing.T) {
+	t.Parallel()
+
 	svc := newTestService(t)
 
 	for i := 0; i < 3; i++ {
@@ -650,6 +722,8 @@ func TestService_GetLatestSubscriptions_LimitGreaterThanTotal(t *testing.T) {
 }
 
 func TestService_GetLatestSubscriptions_SpecialCharacters(t *testing.T) {
+	t.Parallel()
+
 	svc := newTestService(t)
 
 	specialUsernames := []string{"user_name", "user-name", "user.name", "user123", "User_Case"}
@@ -685,6 +759,8 @@ func TestService_GetLatestSubscriptions_SpecialCharacters(t *testing.T) {
 }
 
 func TestService_GetLatestSubscriptions_OrderingConsistency(t *testing.T) {
+	t.Parallel()
+
 	svc := newTestService(t)
 
 	baseTime := time.Date(2026, 3, 15, 12, 0, 0, 0, time.UTC)
@@ -719,6 +795,8 @@ func TestService_GetLatestSubscriptions_OrderingConsistency(t *testing.T) {
 }
 
 func TestService_GetLatestSubscriptions_MixedStatuses(t *testing.T) {
+	t.Parallel()
+
 	svc := newTestService(t)
 
 	statuses := []string{"active", "revoked", "expired", "active", "active"}
@@ -763,6 +841,8 @@ func TestService_GetLatestSubscriptions_MixedStatuses(t *testing.T) {
 // ==================== Service GetAllSubscriptions Tests ====================
 
 func TestService_GetAllSubscriptions(t *testing.T) {
+	t.Parallel()
+
 	svc := newTestService(t)
 
 	for i := 0; i < 5; i++ {
@@ -786,6 +866,8 @@ func TestService_GetAllSubscriptions(t *testing.T) {
 }
 
 func TestService_GetAllSubscriptions_Empty(t *testing.T) {
+	t.Parallel()
+
 	svc := newTestService(t)
 
 	subs, err := svc.GetAllSubscriptions(context.Background())
@@ -796,6 +878,8 @@ func TestService_GetAllSubscriptions_Empty(t *testing.T) {
 // ==================== Service Count Tests ====================
 
 func TestService_CountActiveSubscriptions(t *testing.T) {
+	t.Parallel()
+
 	svc := newTestService(t)
 
 	for i := 0; i < 3; i++ {
@@ -833,6 +917,8 @@ func TestService_CountActiveSubscriptions(t *testing.T) {
 }
 
 func TestService_CountExpiredSubscriptions(t *testing.T) {
+	t.Parallel()
+
 	svc := newTestService(t)
 
 	for i := 0; i < 2; i++ {
@@ -869,6 +955,8 @@ func TestService_CountExpiredSubscriptions(t *testing.T) {
 }
 
 func TestService_CountAllSubscriptions(t *testing.T) {
+	t.Parallel()
+
 	svc := newTestService(t)
 
 	for i := 0; i < 3; i++ {
@@ -891,6 +979,8 @@ func TestService_CountAllSubscriptions(t *testing.T) {
 // ==================== Service GetAllTelegramIDs Tests ====================
 
 func TestService_GetAllTelegramIDs(t *testing.T) {
+	t.Parallel()
+
 	svc := newTestService(t)
 
 	subs := []*Subscription{
@@ -919,6 +1009,8 @@ func TestService_GetAllTelegramIDs(t *testing.T) {
 }
 
 func TestService_GetAllTelegramIDs_Empty(t *testing.T) {
+	t.Parallel()
+
 	svc := newTestService(t)
 
 	ids, err := svc.GetAllTelegramIDs(context.Background())
@@ -927,6 +1019,8 @@ func TestService_GetAllTelegramIDs_Empty(t *testing.T) {
 }
 
 func TestService_GetAllTelegramIDs_Duplicates(t *testing.T) {
+	t.Parallel()
+
 	svc := newTestService(t)
 
 	for i := 0; i < 3; i++ {
@@ -949,6 +1043,8 @@ func TestService_GetAllTelegramIDs_Duplicates(t *testing.T) {
 // ==================== Service GetTelegramIDByUsername Tests ====================
 
 func TestService_GetTelegramIDByUsername(t *testing.T) {
+	t.Parallel()
+
 	svc := newTestService(t)
 
 	sub := &Subscription{
@@ -966,6 +1062,8 @@ func TestService_GetTelegramIDByUsername(t *testing.T) {
 }
 
 func TestService_GetTelegramIDByUsername_NotFound(t *testing.T) {
+	t.Parallel()
+
 	svc := newTestService(t)
 
 	_, err := svc.GetTelegramIDByUsername(context.Background(), "nonexistent")
@@ -975,6 +1073,8 @@ func TestService_GetTelegramIDByUsername_NotFound(t *testing.T) {
 // ==================== Service GetTelegramIDsBatch Tests ====================
 
 func TestService_GetTelegramIDsBatch(t *testing.T) {
+	t.Parallel()
+
 	svc := newTestService(t)
 
 	for i := 0; i < 10; i++ {
@@ -999,6 +1099,8 @@ func TestService_GetTelegramIDsBatch(t *testing.T) {
 }
 
 func TestService_GetTelegramIDsBatch_OffsetBeyondTotal(t *testing.T) {
+	t.Parallel()
+
 	svc := newTestService(t)
 
 	for i := 0; i < 3; i++ {
@@ -1021,6 +1123,8 @@ func TestService_GetTelegramIDsBatch_OffsetBeyondTotal(t *testing.T) {
 // ==================== Invite Tests ====================
 
 func TestService_GetOrCreateInvite(t *testing.T) {
+	t.Parallel()
+
 	svc := newTestService(t)
 
 	invite, err := svc.GetOrCreateInvite(context.Background(), 12345, "TESTCODE123")
@@ -1035,6 +1139,8 @@ func TestService_GetOrCreateInvite(t *testing.T) {
 }
 
 func TestService_GetInviteByCode(t *testing.T) {
+	t.Parallel()
+
 	svc := newTestService(t)
 
 	_, err := svc.GetOrCreateInvite(context.Background(), 54321, "GETCODE456")
@@ -1047,6 +1153,8 @@ func TestService_GetInviteByCode(t *testing.T) {
 }
 
 func TestService_GetInviteByCode_NotFound(t *testing.T) {
+	t.Parallel()
+
 	svc := newTestService(t)
 
 	_, err := svc.GetInviteByCode(context.Background(), "NONEXISTENT")
@@ -1054,6 +1162,8 @@ func TestService_GetInviteByCode_NotFound(t *testing.T) {
 }
 
 func TestService_GetReferralCount(t *testing.T) {
+	t.Parallel()
+
 	svc := newTestService(t)
 
 	referrerID := int64(22222)
@@ -1077,6 +1187,8 @@ func TestService_GetReferralCount(t *testing.T) {
 }
 
 func TestService_GetReferralCount_None(t *testing.T) {
+	t.Parallel()
+
 	svc := newTestService(t)
 
 	count, err := svc.GetReferralCount(context.Background(), 99999)
@@ -1085,6 +1197,8 @@ func TestService_GetReferralCount_None(t *testing.T) {
 }
 
 func TestService_GetAllReferralCounts(t *testing.T) {
+	t.Parallel()
+
 	svc := newTestService(t)
 
 	referrerID := int64(33333)
@@ -1110,6 +1224,8 @@ func TestService_GetAllReferralCounts(t *testing.T) {
 // ==================== GetTotalTelegramIDCount Tests ====================
 
 func TestService_GetTotalTelegramIDCount_WithData(t *testing.T) {
+	t.Parallel()
+
 	svc := newTestService(t)
 
 	// Create multiple subscriptions (some with same telegram_id to test distinct)
@@ -1135,6 +1251,8 @@ func TestService_GetTotalTelegramIDCount_WithData(t *testing.T) {
 }
 
 func TestService_GetTotalTelegramIDCount_Empty(t *testing.T) {
+	t.Parallel()
+
 	svc := newTestService(t)
 
 	count, err := svc.GetTotalTelegramIDCount(context.Background())
@@ -1145,6 +1263,8 @@ func TestService_GetTotalTelegramIDCount_Empty(t *testing.T) {
 // ==================== Trial Tests ====================
 
 func TestService_CreateTrialRequest(t *testing.T) {
+	t.Parallel()
+
 	svc := newTestService(t)
 
 	require.NoError(t, svc.CreateTrialRequest(context.Background(), "192.168.1.1"))
@@ -1155,6 +1275,8 @@ func TestService_CreateTrialRequest(t *testing.T) {
 }
 
 func TestService_CountTrialRequestsByIPLastHour(t *testing.T) {
+	t.Parallel()
+
 	svc := newTestService(t)
 
 	ip := "10.0.0.1"
@@ -1168,6 +1290,8 @@ func TestService_CountTrialRequestsByIPLastHour(t *testing.T) {
 }
 
 func TestService_CountTrialRequestsByIPLastHour_None(t *testing.T) {
+	t.Parallel()
+
 	svc := newTestService(t)
 
 	count, err := svc.CountTrialRequestsByIPLastHour(context.Background(), "10.0.0.99")
@@ -1176,6 +1300,8 @@ func TestService_CountTrialRequestsByIPLastHour_None(t *testing.T) {
 }
 
 func TestService_CleanupExpiredTrials(t *testing.T) {
+	t.Parallel()
+
 	svc := newTestService(t)
 
 	// Create old trial subscription on inbound 1
@@ -1253,6 +1379,8 @@ func TestService_CleanupExpiredTrials(t *testing.T) {
 }
 
 func TestService_CleanupExpiredTrials_UsesSubInboundID(t *testing.T) {
+	t.Parallel()
+
 	svc := newTestService(t)
 
 	// Create old trial on inbound 5
@@ -1298,6 +1426,8 @@ func (m *mockXUIClient) DeleteClient(ctx context.Context, inboundID int, clientI
 // ==================== Trial Subscription Tests ====================
 
 func TestService_CreateTrialSubscription_Success(t *testing.T) {
+	t.Parallel()
+
 	svc := newTestService(t)
 
 	ctx := context.Background()
@@ -1322,6 +1452,8 @@ func TestService_CreateTrialSubscription_Success(t *testing.T) {
 }
 
 func TestService_CreateTrialSubscription_AllowsSameSubID(t *testing.T) {
+	t.Parallel()
+
 	svc := newTestService(t)
 
 	ctx := context.Background()
@@ -1355,6 +1487,8 @@ func TestService_CreateTrialSubscription_AllowsSameSubID(t *testing.T) {
 }
 
 func TestService_GetSubscriptionBySubscriptionID_Success(t *testing.T) {
+	t.Parallel()
+
 	svc := newTestService(t)
 
 	ctx := context.Background()
@@ -1384,6 +1518,8 @@ func TestService_GetSubscriptionBySubscriptionID_Success(t *testing.T) {
 }
 
 func TestService_GetSubscriptionBySubscriptionID_NotFound(t *testing.T) {
+	t.Parallel()
+
 	svc := newTestService(t)
 
 	ctx := context.Background()
@@ -1394,6 +1530,8 @@ func TestService_GetSubscriptionBySubscriptionID_NotFound(t *testing.T) {
 }
 
 func TestService_GetSubscriptionBySubscriptionID_Trial(t *testing.T) {
+	t.Parallel()
+
 	svc := newTestService(t)
 
 	ctx := context.Background()
@@ -1420,6 +1558,8 @@ func TestService_GetSubscriptionBySubscriptionID_Trial(t *testing.T) {
 }
 
 func TestService_GetTrialSubscriptionBySubID_Success(t *testing.T) {
+	t.Parallel()
+
 	svc := newTestService(t)
 
 	ctx := context.Background()
@@ -1447,6 +1587,8 @@ func TestService_GetTrialSubscriptionBySubID_Success(t *testing.T) {
 }
 
 func TestService_GetTrialSubscriptionBySubID_NonTrial(t *testing.T) {
+	t.Parallel()
+
 	svc := newTestService(t)
 
 	ctx := context.Background()
@@ -1474,6 +1616,8 @@ func TestService_GetTrialSubscriptionBySubID_NonTrial(t *testing.T) {
 }
 
 func TestService_GetTrialSubscriptionBySubID_NotFound(t *testing.T) {
+	t.Parallel()
+
 	svc := newTestService(t)
 
 	ctx := context.Background()
@@ -1484,6 +1628,8 @@ func TestService_GetTrialSubscriptionBySubID_NotFound(t *testing.T) {
 }
 
 func TestService_BindTrialSubscription_Success(t *testing.T) {
+	t.Parallel()
+
 	svc := newTestService(t)
 
 	ctx := context.Background()
@@ -1512,6 +1658,8 @@ func TestService_BindTrialSubscription_Success(t *testing.T) {
 }
 
 func TestService_BindTrialSubscription_Concurrent(t *testing.T) {
+	t.Parallel()
+
 	svc := newTestService(t)
 
 	ctx := context.Background()
@@ -1541,6 +1689,8 @@ func TestService_BindTrialSubscription_Concurrent(t *testing.T) {
 }
 
 func TestService_BindTrialSubscription_NotFound(t *testing.T) {
+	t.Parallel()
+
 	svc := newTestService(t)
 
 	ctx := context.Background()

@@ -20,6 +20,8 @@ import (
 
 // TestGetUsername_EdgeCases tests edge cases for username extraction
 func TestGetUsername_EdgeCases(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{TelegramAdminID: 123}
 	h := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, config.DonateCardNumber, config.DonateURL, cfg.SiteURL)}
 
@@ -181,6 +183,8 @@ func TestGetUsername_EdgeCases(t *testing.T) {
 
 // TestIsAdmin_EdgeCases tests admin checking edge cases
 func TestIsAdmin_EdgeCases(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name     string
 		adminID  int64
@@ -249,6 +253,8 @@ func TestIsAdmin_EdgeCases(t *testing.T) {
 
 // TestGetMainMenuKeyboard_ButtonCounts tests keyboard structure
 func TestGetMainMenuKeyboard_ButtonCounts(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{TelegramAdminID: 123}
 	h := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, config.DonateCardNumber, config.DonateURL, cfg.SiteURL)}
 
@@ -282,6 +288,8 @@ func TestGetMainMenuKeyboard_ButtonCounts(t *testing.T) {
 
 // TestGetBackKeyboard_Structure tests back keyboard structure
 func TestGetBackKeyboard_Structure(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{TelegramAdminID: 123}
 	h := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, config.DonateCardNumber, config.DonateURL, cfg.SiteURL)}
 
@@ -297,6 +305,8 @@ func TestGetBackKeyboard_Structure(t *testing.T) {
 
 // TestGetDonateText_Content tests donation message content
 func TestGetDonateText_Content(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{TelegramAdminID: 123, ContactUsername: "kereal"}
 	h := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, config.DonateCardNumber, config.DonateURL, cfg.SiteURL)}
 
@@ -312,6 +322,8 @@ func TestGetDonateText_Content(t *testing.T) {
 
 // TestGetHelpText_EdgeCases tests help text with various traffic limits
 func TestGetHelpText_EdgeCases(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{TelegramAdminID: 123}
 	h := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, config.DonateCardNumber, config.DonateURL, cfg.SiteURL)}
 
@@ -372,6 +384,8 @@ func TestGetHelpText_EdgeCases(t *testing.T) {
 
 // TestGetMainMenuContent_Scenarios tests main menu content scenarios
 func TestGetMainMenuContent_Scenarios(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{TelegramAdminID: 123456}
 	h := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, config.DonateCardNumber, config.DonateURL, cfg.SiteURL)}
 
@@ -440,6 +454,8 @@ func TestGetMainMenuContent_Scenarios(t *testing.T) {
 
 // TestAddAdminButtons_Scenarios tests admin button addition scenarios
 func TestAddAdminButtons_Scenarios(t *testing.T) {
+	t.Parallel()
+
 	t.Run("adds buttons for admin", func(t *testing.T) {
 		cfg := &config.Config{TelegramAdminID: 123456}
 		h := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, config.DonateCardNumber, config.DonateURL, cfg.SiteURL)}
@@ -491,6 +507,8 @@ func TestAddAdminButtons_Scenarios(t *testing.T) {
 
 // TestSubscriptionCache_EdgeCases tests cache edge cases
 func TestSubscriptionCache_EdgeCases(t *testing.T) {
+	t.Parallel()
+
 	t.Run("Set with nil subscription", func(t *testing.T) {
 		cache := NewSubscriptionCache(10, 5*time.Minute)
 		cache.Set(123, nil)
@@ -542,7 +560,7 @@ func TestSubscriptionCache_EdgeCases(t *testing.T) {
 		cache.Set(123, sub)
 
 		// Should expire almost immediately
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(2 * time.Millisecond)
 		result := cache.Get(123)
 		assert.Nil(t, result)
 	})
@@ -561,6 +579,8 @@ func TestSubscriptionCache_EdgeCases(t *testing.T) {
 
 // TestSubscriptionCache_ConcurrentStress tests cache under heavy concurrent load
 func TestSubscriptionCache_ConcurrentStress(t *testing.T) {
+	t.Parallel()
+
 	cache := NewSubscriptionCache(1000, 5*time.Minute)
 
 	const numGoroutines = 100
@@ -608,6 +628,8 @@ func TestSubscriptionCache_ConcurrentStress(t *testing.T) {
 
 // TestRateLimiter_Integration tests rate limiter integration with handler
 func TestRateLimiter_Integration(t *testing.T) {
+	t.Parallel()
+
 	t.Run("rate limiter allows requests", func(t *testing.T) {
 		rl := ratelimiter.NewTokenBucket(10, 1.0)
 
@@ -629,7 +651,7 @@ func TestRateLimiter_Integration(t *testing.T) {
 		}
 
 		// Wait for refill
-		time.Sleep(200 * time.Millisecond)
+		time.Sleep(50 * time.Millisecond)
 
 		// Should have refilled some tokens
 		assert.True(t, rl.Allow(), "request after refill should be allowed")
@@ -663,6 +685,8 @@ func TestRateLimiter_Integration(t *testing.T) {
 
 // TestKeyboard_CallbackDataValidation tests callback data format
 func TestKeyboard_CallbackDataValidation(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{TelegramAdminID: 123}
 	h := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, config.DonateCardNumber, config.DonateURL, cfg.SiteURL)}
 
@@ -703,6 +727,8 @@ func TestKeyboard_CallbackDataValidation(t *testing.T) {
 
 // TestMessageFormat_Validation tests message format validation
 func TestMessageFormat_Validation(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{TelegramAdminID: 123, TrafficLimitGB: 50}
 	h := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, config.DonateCardNumber, config.DonateURL, cfg.SiteURL)}
 
@@ -728,6 +754,8 @@ func TestMessageFormat_Validation(t *testing.T) {
 
 // TestCache_IntegrationWithHandler tests cache integration
 func TestCache_IntegrationWithHandler(t *testing.T) {
+	t.Parallel()
+
 	t.Run("cache cleanup stops on context cancel", func(t *testing.T) {
 		cache := NewSubscriptionCache(10, 5*time.Minute)
 		ctx, cancel := context.WithCancel(context.Background())
@@ -752,6 +780,8 @@ func TestCache_IntegrationWithHandler(t *testing.T) {
 
 // TestErrorHandling_Scenarios tests error handling scenarios
 func TestErrorHandling_Scenarios(t *testing.T) {
+	t.Parallel()
+
 	t.Run("getUsername handles all empty fields", func(t *testing.T) {
 		cfg := &config.Config{TelegramAdminID: 123, ContactUsername: "kereal"}
 		h := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, config.DonateCardNumber, config.DonateURL, cfg.SiteURL)}
@@ -765,6 +795,8 @@ func TestErrorHandling_Scenarios(t *testing.T) {
 
 // TestGetMainMenuContent_SpecialUsernameChars tests usernames with special chars
 func TestGetMainMenuContent_SpecialUsernameChars(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{TelegramAdminID: 123}
 	h := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, config.DonateCardNumber, config.DonateURL, cfg.SiteURL)}
 
@@ -787,6 +819,8 @@ func TestGetMainMenuContent_SpecialUsernameChars(t *testing.T) {
 
 // TestHelpText_InjectionSafety tests that subscription URL is safely included
 func TestHelpText_InjectionSafety(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{TelegramAdminID: 123}
 	h := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, config.DonateCardNumber, config.DonateURL, cfg.SiteURL)}
 
@@ -807,16 +841,18 @@ func TestHelpText_InjectionSafety(t *testing.T) {
 
 // TestCache_EvictionPolicy tests LRU eviction behavior
 func TestCache_EvictionPolicy(t *testing.T) {
+	t.Parallel()
+
 	t.Run("evicts oldest entries first", func(t *testing.T) {
 		cache := NewSubscriptionCache(3, 5*time.Minute)
 
 		// Add entries with delays to ensure different expiration times
 		cache.Set(1, &database.Subscription{TelegramID: 1})
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(2 * time.Millisecond)
 		cache.Set(2, &database.Subscription{TelegramID: 2})
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(2 * time.Millisecond)
 		cache.Set(3, &database.Subscription{TelegramID: 3})
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(2 * time.Millisecond)
 		cache.Set(4, &database.Subscription{TelegramID: 4}) // Should evict 1
 
 		assert.Nil(t, cache.Get(1), "entry 1 should be evicted")
@@ -828,6 +864,8 @@ func TestCache_EvictionPolicy(t *testing.T) {
 
 // TestRateLimiter_WaitWithContextCancellation tests context cancellation during wait
 func TestRateLimiter_WaitWithContextCancellation(t *testing.T) {
+	t.Parallel()
+
 	rl := ratelimiter.NewTokenBucket(1, 0.01) // Very slow refill
 
 	// Use the only token
