@@ -110,6 +110,7 @@ func TestHandleSubscription_EmptySubscriptionURL(t *testing.T) {
 	mockDB.GetSubscriptionBySubscriptionIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
 		return &database.Subscription{
 			SubscriptionID:  subscriptionID,
+			Status:          "active",
 			SubscriptionURL: "",
 		}, nil
 	}
@@ -133,6 +134,7 @@ func TestHandleSubscription_XUIError_NoCache(t *testing.T) {
 	mockDB.GetSubscriptionBySubscriptionIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
 		return &database.Subscription{
 			SubscriptionID:  subscriptionID,
+			Status:          "active",
 			SubscriptionURL: "http://localhost:2053/sub/abc123",
 		}, nil
 	}
@@ -153,11 +155,18 @@ func TestHandleSubscription_XUIError_NoCache(t *testing.T) {
 
 func TestHandleSubscription_CacheHit(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
+	subID := "cached_sub_id"
+	mockDB.GetSubscriptionBySubscriptionIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
+		return &database.Subscription{
+			SubscriptionID: subscriptionID,
+			Status:         "active",
+		}, nil
+	}
+
 	cfg := &config.Config{SubExtraServersEnabled: true}
 	subProxy := subproxy.NewService(cfg)
 	defer subProxy.Stop()
 
-	subID := "cached_sub_id"
 	cachedBody := []byte("vless://cached-server@cache.example.com:443")
 	cachedHeaders := map[string]string{
 		"Subscription-Userinfo":   "upload=0; download=0; total=10737418240; expire=1234567890",
@@ -182,11 +191,18 @@ func TestHandleSubscription_CacheHit(t *testing.T) {
 
 func TestHandleSubscription_CacheHitAfterXUIError(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
+	subID := "fallback_sub_id"
+	mockDB.GetSubscriptionBySubscriptionIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
+		return &database.Subscription{
+			SubscriptionID: subscriptionID,
+			Status:         "active",
+		}, nil
+	}
+
 	cfg := &config.Config{SubExtraServersEnabled: true}
 	subProxy := subproxy.NewService(cfg)
 	defer subProxy.Stop()
 
-	subID := "fallback_sub_id"
 	cachedBody := []byte("vless://fallback-server@example.com:443")
 	cachedHeaders := map[string]string{
 		"Subscription-Userinfo": "upload=0; download=0; total=10737418240; expire=1234567890",
@@ -224,6 +240,7 @@ func TestHandleSubscription_ExtraServersAppended(t *testing.T) {
 	mockDB.GetSubscriptionBySubscriptionIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
 		return &database.Subscription{
 			SubscriptionID:  subscriptionID,
+			Status:          "active",
 			SubscriptionURL: servers.URL + "/sub/" + subscriptionID,
 		}, nil
 	}
@@ -275,6 +292,7 @@ func TestHandleSubscription_Base64FormatPreserved(t *testing.T) {
 	mockDB.GetSubscriptionBySubscriptionIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
 		return &database.Subscription{
 			SubscriptionID:  subscriptionID,
+			Status:          "active",
 			SubscriptionURL: servers.URL + "/sub/" + subscriptionID,
 		}, nil
 	}
@@ -316,6 +334,7 @@ func TestHandleSubscription_ConcurrentRequests(t *testing.T) {
 	mockDB.GetSubscriptionBySubscriptionIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
 		return &database.Subscription{
 			SubscriptionID:  subscriptionID,
+			Status:          "active",
 			SubscriptionURL: servers.URL + "/sub/" + subscriptionID,
 		}, nil
 	}
@@ -368,6 +387,7 @@ func TestHandleSubscription_ExtraServersFileMissing(t *testing.T) {
 	mockDB.GetSubscriptionBySubscriptionIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
 		return &database.Subscription{
 			SubscriptionID:  subscriptionID,
+			Status:          "active",
 			SubscriptionURL: servers.URL + "/sub/" + subscriptionID,
 		}, nil
 	}
@@ -406,6 +426,7 @@ func TestHandleSubscription_NoExtraServersWhenDisabled(t *testing.T) {
 	mockDB.GetSubscriptionBySubscriptionIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
 		return &database.Subscription{
 			SubscriptionID:  subscriptionID,
+			Status:          "active",
 			SubscriptionURL: servers.URL + "/sub/" + subscriptionID,
 		}, nil
 	}
@@ -445,6 +466,7 @@ func TestHandleSubscription_CacheStoresMergedResult(t *testing.T) {
 	mockDB.GetSubscriptionBySubscriptionIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
 		return &database.Subscription{
 			SubscriptionID:  subscriptionID,
+			Status:          "active",
 			SubscriptionURL: servers.URL + "/sub/" + subscriptionID,
 		}, nil
 	}
@@ -489,6 +511,7 @@ func TestHandleSubscription_EmptyBodyFromXUI(t *testing.T) {
 	mockDB.GetSubscriptionBySubscriptionIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
 		return &database.Subscription{
 			SubscriptionID:  subscriptionID,
+			Status:          "active",
 			SubscriptionURL: servers.URL + "/sub/" + subscriptionID,
 		}, nil
 	}
@@ -518,6 +541,7 @@ func TestHandleSubscription_CorruptDataFromXUI(t *testing.T) {
 	mockDB.GetSubscriptionBySubscriptionIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
 		return &database.Subscription{
 			SubscriptionID:  subscriptionID,
+			Status:          "active",
 			SubscriptionURL: servers.URL + "/sub/" + subscriptionID,
 		}, nil
 	}
@@ -553,6 +577,7 @@ func TestHandleSubscription_CriticalHeadersPreserved(t *testing.T) {
 	mockDB.GetSubscriptionBySubscriptionIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
 		return &database.Subscription{
 			SubscriptionID:  subscriptionID,
+			Status:          "active",
 			SubscriptionURL: servers.URL + "/sub/" + subscriptionID,
 		}, nil
 	}
@@ -577,11 +602,18 @@ func TestHandleSubscription_CriticalHeadersPreserved(t *testing.T) {
 
 func TestHandleSubscription_CriticalHeadersPreservedFromCache(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
+	subID := "cached_headers_sub"
+	mockDB.GetSubscriptionBySubscriptionIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
+		return &database.Subscription{
+			SubscriptionID: subscriptionID,
+			Status:         "active",
+		}, nil
+	}
+
 	cfg := &config.Config{SubExtraServersEnabled: true}
 	subProxy := subproxy.NewService(cfg)
 	defer subProxy.Stop()
 
-	subID := "cached_headers_sub"
 	cachedBody := []byte("vless://cached@example.com:443")
 	cachedHeaders := map[string]string{
 		"Subscription-Userinfo":   "upload=0; download=0; total=5368709120; expire=1800000000",
@@ -622,6 +654,7 @@ func TestHandleSubscription_ExtraHeadersOverrideXUI(t *testing.T) {
 	mockDB.GetSubscriptionBySubscriptionIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
 		return &database.Subscription{
 			SubscriptionID:  subscriptionID,
+			Status:          "active",
 			SubscriptionURL: servers.URL + "/sub/" + subscriptionID,
 		}, nil
 	}
@@ -689,4 +722,126 @@ func TestHandleSubscription_ConcurrentNotFound(t *testing.T) {
 	count := callCount
 	mu.Unlock()
 	assert.Equal(t, 1, count, "singleflight should deduplicate DB queries for same subID")
+}
+
+func TestHandleSubscription_RevokedSubscription(t *testing.T) {
+	mockDB := testutil.NewMockDatabaseService()
+	mockDB.GetSubscriptionBySubscriptionIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
+		return &database.Subscription{
+			SubscriptionID:  subscriptionID,
+			Status:          "revoked",
+			SubscriptionURL: "http://localhost:2053/sub/abc123",
+		}, nil
+	}
+
+	cfg := &config.Config{SubExtraServersEnabled: true}
+	subProxy := subproxy.NewService(cfg)
+	defer subProxy.Stop()
+
+	srv := NewServer(":8880", mockDB, nil, cfg, bot.NewTestBotConfig(), nil, subProxy)
+
+	req := httptest.NewRequest("GET", "/sub/abc123", nil)
+	rec := httptest.NewRecorder()
+	srv.handleSubscription(rec, req)
+
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+	assert.Contains(t, rec.Body.String(), "not found")
+}
+
+func TestHandleSubscription_ExpiredSubscription(t *testing.T) {
+	mockDB := testutil.NewMockDatabaseService()
+	mockDB.GetSubscriptionBySubscriptionIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
+		return &database.Subscription{
+			SubscriptionID:  subscriptionID,
+			Status:          "expired",
+			SubscriptionURL: "http://localhost:2053/sub/abc123",
+		}, nil
+	}
+
+	cfg := &config.Config{SubExtraServersEnabled: true}
+	subProxy := subproxy.NewService(cfg)
+	defer subProxy.Stop()
+
+	srv := NewServer(":8880", mockDB, nil, cfg, bot.NewTestBotConfig(), nil, subProxy)
+
+	req := httptest.NewRequest("GET", "/sub/abc123", nil)
+	rec := httptest.NewRecorder()
+	srv.handleSubscription(rec, req)
+
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+	assert.Contains(t, rec.Body.String(), "not found")
+}
+
+func TestHandleSubscription_RevokedSubscription_CacheHit(t *testing.T) {
+	mockDB := testutil.NewMockDatabaseService()
+	subID := "revoked_cached_sub"
+	mockDB.GetSubscriptionBySubscriptionIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
+		return &database.Subscription{
+			SubscriptionID: subscriptionID,
+			Status:         "revoked",
+		}, nil
+	}
+
+	cfg := &config.Config{SubExtraServersEnabled: true}
+	subProxy := subproxy.NewService(cfg)
+	defer subProxy.Stop()
+
+	// Simulate stale cache entry from when subscription was active
+	cachedBody := []byte("vless://cached-server@cache.example.com:443")
+	cachedHeaders := map[string]string{
+		"Content-Type": "text/plain; charset=utf-8",
+	}
+	subProxy.SetCache(subID, cachedBody, cachedHeaders)
+
+	srv := NewServer(":8880", mockDB, nil, cfg, bot.NewTestBotConfig(), nil, subProxy)
+
+	req := httptest.NewRequest("GET", "/sub/"+subID, nil)
+	rec := httptest.NewRecorder()
+	srv.handleSubscription(rec, req)
+
+	// Should return 404 even though cache has data, because subscription is revoked
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+	assert.Contains(t, rec.Body.String(), "not found")
+
+	// Verify cache was invalidated
+	_, _, ok := subProxy.GetCache(subID)
+	assert.False(t, ok, "cache should be invalidated for revoked subscription")
+}
+
+func TestHandleSubscription_ExpiredByTime_CacheHit(t *testing.T) {
+	mockDB := testutil.NewMockDatabaseService()
+	subID := "time_expired_cached_sub"
+	pastTime := time.Now().Add(-24 * time.Hour)
+	mockDB.GetSubscriptionBySubscriptionIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
+		return &database.Subscription{
+			SubscriptionID: subscriptionID,
+			Status:        "active",
+			ExpiryTime:    pastTime,
+		}, nil
+	}
+
+	cfg := &config.Config{SubExtraServersEnabled: true}
+	subProxy := subproxy.NewService(cfg)
+	defer subProxy.Stop()
+
+	// Simulate stale cache entry
+	cachedBody := []byte("vless://cached-server@cache.example.com:443")
+	cachedHeaders := map[string]string{
+		"Content-Type": "text/plain; charset=utf-8",
+	}
+	subProxy.SetCache(subID, cachedBody, cachedHeaders)
+
+	srv := NewServer(":8880", mockDB, nil, cfg, bot.NewTestBotConfig(), nil, subProxy)
+
+	req := httptest.NewRequest("GET", "/sub/"+subID, nil)
+	rec := httptest.NewRecorder()
+	srv.handleSubscription(rec, req)
+
+	// Should return 404 because subscription has expired by time
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+	assert.Contains(t, rec.Body.String(), "not found")
+
+	// Verify cache was invalidated
+	_, _, ok := subProxy.GetCache(subID)
+	assert.False(t, ok, "cache should be invalidated for expired subscription")
 }

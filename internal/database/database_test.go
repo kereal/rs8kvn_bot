@@ -498,10 +498,17 @@ func TestService_DeleteSubscriptionByID(t *testing.T) {
 	assert.Equal(t, sub.ID, deleted.ID)
 	assert.Equal(t, sub.TelegramID, deleted.TelegramID)
 
-	// Verify it's hard deleted
-	var count int64
-	svc.db.Model(&Subscription{}).Unscoped().Where("id = ?", sub.ID).Count(&count)
-	assert.Equal(t, int64(0), count)
+	// Verify GetByID returns error (soft deleted, not visible in normal queries)
+	_, err = svc.GetByID(context.Background(), sub.ID)
+	assert.Error(t, err)
+
+	// Verify the record still exists when queried with Unscoped()
+	var deletedSub Subscription
+	require.NoError(t, svc.db.Unscoped().First(&deletedSub, sub.ID).Error)
+	assert.Equal(t, sub.ID, deletedSub.ID)
+
+	// Verify DeletedAt is set
+	assert.False(t, deletedSub.DeletedAt.Time.IsZero())
 }
 
 func TestService_DeleteSubscriptionByID_NotFound(t *testing.T) {

@@ -250,7 +250,7 @@ The bot exposes HTTP endpoints on port 8880:
 | `GET /healthz` | Basic health (process alive, DB and xui status) | 200/503 |
 | `GET /readyz` | Ready state (accepting requests after init) | 200/503 |
 | `GET /i/{code}` | Trial invites landing page | 200/404/429/500 |
-| `GET /sub/{subID}` | Subscription proxy (extra servers + headers) | 200/404/502/405 |
+| `GET /sub/{subID}` | Subscription proxy (extra servers + headers, status checked) | 200/404/502/405 |
 | `GET /static/logo.png` | Logo image (mobile-optimized PNG) | 200/404 |
 
 Example response:
@@ -284,10 +284,11 @@ Each user can generate an invite code (`/start` → referral flow). The landing 
 
 ### Subscription Proxy (`GET /sub/{subID}`)
 
-The subscription proxy endpoint serves subscriptions with optional extra servers and custom headers:
+The subscription proxy endpoint serves active subscriptions with optional extra servers and custom headers:
 1. Validates `subID` against the database
-2. Checks cache (240s TTL)
-3. Fetches subscription from 3x-ui panel
+2. Verifies subscription status — revoked/expired subscriptions return 404
+3. Checks cache (240s TTL, RLock for concurrent reads)
+4. Fetches subscription from 3x-ui panel
 4. Merges extra servers and headers from config file
 5. Returns the combined response with original 3x-ui headers
 
@@ -520,7 +521,7 @@ rs8kvn_bot/
 
 When a new subscription is created, the admin receives:
 - User username and ID
-- Subscription expiry date
+- Subscription expiry date (actual reset date from DB)
 - Subscription link (full URL)
 
 ## Security Features
