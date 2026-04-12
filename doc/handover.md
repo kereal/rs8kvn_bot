@@ -2,7 +2,7 @@
 
 **Repo:** https://github.com/kereal/rs8kvn_bot  
 **Module:** `rs8kvn_bot` (Go 1.24+)  
-**Version:** v2.3.1  
+**Version:** v2.2.0  
 **Last Updated:** 2026-04-11  
 **Branch:** `dev` (GitFlow: `main` = production, `dev` = integration)
 
@@ -129,7 +129,7 @@ All tests pass with `-race` detector. golangci-lint: 0 new issues (pre-existing:
 
 ---
 
-## Last Changes (v2.3.2 — 2026-04-11)
+## Last Changes (v2.2.0 — 2026-04-11)
 
 ### Bugfixes & Refactoring
 
@@ -144,10 +144,6 @@ All tests pass with `-race` detector. golangci-lint: 0 new issues (pre-existing:
 5. **handleMySubscription duplicated GetWithTraffic logic** — `handleMySubscription` manually computed traffic percentage, progress bar, reset info — all of which already existed in `service.GetWithTraffic()`. Replaced ~40 lines of duplicated code with a single `GetWithTraffic()` call. This ensures a single source of truth for subscription display logic.
 
 6. **CleanupExpiredTrials used wrong cutoff for trial_requests** — `trial_requests` (rate-limit records, 1-hour window) were cleaned up with the same cutoff as trial subscriptions (3+ hours). This caused stale rate-limit entries to accumulate. Now uses a separate `rateLimitCutoff = now - 1h` matching the actual rate-limit window.
-
----
-
-## Last Changes (v2.3.1 — 2026-04-11)
 
 ### Test Optimization & Refactoring
 
@@ -166,7 +162,7 @@ All tests pass with `-race` detector. golangci-lint: 0 new issues (pre-existing:
 
 ---
 
-## Last Changes (v2.3.0 — 2026-04-10)
+## Last Changes (v2.2.0 — 2026-04-10)
 
 ### Bugfixes (Critical/High)
 
@@ -223,7 +219,7 @@ All tests pass with `-race` detector. golangci-lint: 0 new issues (pre-existing:
 
 ## Current Problem / Task
 
-**Status:** ✅ All tests passing (race-safe), build clean. v2.3.2 bugfixes **complete**.
+**Status:** ✅ All tests passing (race-safe), build clean. v2.2.0 bugfixes **complete**.
 
 **Remaining tasks (prioritized):**
 1. **Re-enable linters** — errcheck, gosec in `.golangci.yml` (P1) — partially done, 73 issues remaining (mostly in tests)
@@ -257,7 +253,7 @@ All tests pass with `-race` detector. golangci-lint: 0 new issues (pre-existing:
 - **Atomic cleanup:** `DELETE ... RETURNING` for expired trials
 - **Share referral:** `pendingInvites[chatID]` cached for 60 minutes (in-memory only, lost on restart — acceptable trade-off at current scale). Periodic cleanup via `startPendingInvitesCleanup()` prevents unbounded memory growth.
 
-### Subscription Deletion (v2.3.0+)
+### Subscription Deletion (v2.2.0+)
 - **Order:** DB-first, then XUI-best-effort
 - **Rationale:** If DB delete fails, XUI is untouched and the operation can be safely retried. If XUI delete fails after DB success, the orphaned XUI client is less critical than an orphaned DB record and can be cleaned up manually.
 - **Webhook:** Sent on successful DB deletion regardless of XUI outcome.
@@ -341,5 +337,5 @@ go run ./cmd/bot
 ---
 
 **Generated:** 2026-04-11  
-**Session:** v2.3.2 bugfixes (escapeMarkdown, broadcast timeout, invite error, pendingInvites leak, GetWithTraffic dedup, trial_requests cutoff)  
-**Version:** v2.3.2  
+**Session:** v2.2.0 bugfixes (escapeMarkdown, broadcast timeout, invite error, pendingInvites leak, GetWithTraffic dedup, trial_requests cutoff)  
+**Version:** v2.2.0  
