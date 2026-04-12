@@ -112,9 +112,11 @@
 ├── architecture.md       # Архитектурные решения и ограничения
 ├── roadmap.md           # Планы развития
 ├── code_style.md        # Стиль кода
-├── test-info.md        # Информация о тестах
-├── terminal_usage.md   # Как использовать terminal tool
-└── instructions.md   # ЭТОТ ФАЙЛ — читать первым
+├── git-workflow.md      # Git workflow, команды, terminal usage
+├── test-info.md         # Информация о тестах
+├── xui/auth-mechanism.md  # Аутентификация XUI
+├── xui/reset-mechanism.md  # Автосброс трафика XUI
+└── instructions.md      # ЭТОТ ФАЙЛ — читать первым
 ```
 
 ---
