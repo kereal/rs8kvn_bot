@@ -106,11 +106,11 @@ func (s *SubscriptionService) Create(ctx context.Context, chatID int64, username
 	if s.webhook != nil {
 		eventID, _ := utils.GenerateUUID()
 		s.webhook.SendAsync(Event{
-			EventID:           "evt-" + eventID,
-			Event:             webhook.EventSubscriptionActivated,
-			UserID:            sub.ClientID,
-			Email:             XUIEmail(sub.Username, chatID),
-			SubscriptionToken: sub.SubscriptionID,
+			EventID:        "evt-" + eventID,
+			Event:          webhook.EventSubscriptionActivated,
+			UserID:         sub.ClientID,
+			Email:          XUIEmail(sub.Username, chatID),
+			SubscriptionID: sub.SubscriptionID,
 		})
 	}
 
@@ -161,11 +161,11 @@ func (s *SubscriptionService) Delete(ctx context.Context, telegramID int64) erro
 	if s.webhook != nil {
 		eventID, _ := utils.GenerateUUID()
 		s.webhook.SendAsync(Event{
-			EventID:           "evt-" + eventID,
-			Event:             webhook.EventSubscriptionExpired,
-			UserID:            clientID,
-			Email:             XUIEmail(username, telegramID),
-			SubscriptionToken: subscriptionID,
+			EventID:        "evt-" + eventID,
+			Event:          webhook.EventSubscriptionExpired,
+			UserID:         clientID,
+			Email:          XUIEmail(sub.Username, telegramID),
+			SubscriptionID: subscriptionID,
 		})
 	}
 
@@ -210,11 +210,11 @@ func (s *SubscriptionService) DeleteByID(ctx context.Context, id uint) (*databas
 	if s.webhook != nil {
 		eventID, _ := utils.GenerateUUID()
 		s.webhook.SendAsync(Event{
-			EventID:           "evt-" + eventID,
-			Event:             webhook.EventSubscriptionExpired,
-			UserID:            clientID,
-			Email:             XUIEmail(username, deleted.TelegramID),
-			SubscriptionToken: subscriptionID,
+			EventID:        "evt-" + eventID,
+			Event:          webhook.EventSubscriptionExpired,
+			UserID:         clientID,
+			Email:          XUIEmail(username, clientID),
+			SubscriptionID: subscriptionID,
 		})
 	}
 

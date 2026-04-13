@@ -346,7 +346,7 @@ func TestE2E_WebhookSender_DeliverySuccess(t *testing.T) {
 		Event:             webhook.EventSubscriptionActivated,
 		UserID:            "user-uuid-123",
 		Email:             "e2e@example.com",
-		SubscriptionToken: "sub-token-xyz",
+		SubscriptionID: "sub-token-xyz",
 	}
 
 	sender.SendAsync(event)
@@ -361,7 +361,7 @@ func TestE2E_WebhookSender_DeliverySuccess(t *testing.T) {
 	assert.Equal(t, webhook.EventSubscriptionActivated, receivedEvent.Event)
 	assert.Equal(t, "user-uuid-123", receivedEvent.UserID)
 	assert.Equal(t, "e2e@example.com", receivedEvent.Email)
-	assert.Equal(t, "sub-token-xyz", receivedEvent.SubscriptionToken)
+	assert.Equal(t, "sub-token-xyz", receivedEvent.SubscriptionID)
 }
 
 // TestE2E_WebhookSender_RetryOnFailure tests that webhook sender retries on server error.
@@ -450,7 +450,7 @@ func TestE2E_WebhookSender_ConcurrentEvents(t *testing.T) {
 			Event:             webhook.EventSubscriptionActivated,
 			UserID:            fmt.Sprintf("user-%d", i),
 			Email:             fmt.Sprintf("user%d@example.com", i),
-			SubscriptionToken: fmt.Sprintf("token-%d", i),
+			SubscriptionID: fmt.Sprintf("token-%d", i),
 		})
 	}
 
