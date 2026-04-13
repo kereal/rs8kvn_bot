@@ -3,7 +3,6 @@ package bot
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"strings"
 
 	"rs8kvn_bot/internal/database"
@@ -14,8 +13,8 @@ import (
 )
 
 // HandlePlan handles the /plan command for admins.
-// Changes the subscription plan for a user by Telegram ID.
-// Usage: /plan <telegram_id> <plan>
+// Changes the subscription plan for a user by username.
+// Usage: /plan @username <plan>
 // Allowed plans: free, basic, premium, vip
 func (h *Handler) HandlePlan(ctx context.Context, update tgbotapi.Update) {
 	ctx, cancel := h.withTimeout(ctx)
@@ -34,26 +33,31 @@ func (h *Handler) HandlePlan(ctx context.Context, update tgbotapi.Update) {
 		return
 	}
 
-	// Parse the command arguments: /plan <telegram_id> <plan>
+	// Parse the command arguments: /plan @username <plan>
 	args := strings.TrimSpace(update.Message.CommandArguments())
 	parts := strings.Fields(args)
 	if len(parts) != 2 {
-		h.SendMessage(ctx, chatID, "❌ Использование: /plan <telegram_id> <plan>\n\nДоступные планы: free, basic, premium, vip\n\nПример: /plan 123456 premium")
+		h.SendMessage(ctx, chatID, "❌ Использование: /plan @username <plan>\n\nДоступные планы: free, basic, premium, vip\n\nПример: /plan @user premium")
 		return
 	}
 
-	// Parse Telegram ID
-	var telegramID int64
-	var err error
-	if telegramID, err = strconv.ParseInt(parts[0], 10, 64); err != nil {
-		h.SendMessage(ctx, chatID, "❌ Неверный формат Telegram ID. Использование: /plan <telegram_id> <plan>")
-		return
-	}
+	// Parse username (strip @ prefix)
+	username := strings.TrimPrefix(parts[0], "@")
 
 	// Validate plan
 	plan := strings.ToLower(parts[1])
 	if !database.ValidPlans[plan] {
 		h.SendMessage(ctx, chatID, fmt.Sprintf("❌ Неизвестный план: %s\n\nДоступные планы: free, basic, premium, vip", parts[1]))
+		return
+	}
+
+	// Look up telegram ID by username
+	telegramID, err := h.db.GetTelegramIDByUsername(ctx, username)
+	if err != nil {
+		logger.Error("Failed to find user by username",
+			zap.String("username", username),
+			zap.Error(err))
+		h.SendMessage(ctx, chatID, fmt.Sprintf("❌ Пользователь @%s не найден", username))
 		return
 	}
 
@@ -71,10 +75,11 @@ func (h *Handler) HandlePlan(ctx context.Context, update tgbotapi.Update) {
 	h.invalidateCache(telegramID)
 
 	logger.Info("Plan updated",
+		zap.String("username", username),
 		zap.Int64("telegram_id", telegramID),
 		zap.String("plan", plan),
 		zap.Int64("admin_id", chatID))
 
 	h.SendMessage(ctx, chatID, fmt.Sprintf(
-		"✅ План обновлён!\n\n🆔 Telegram ID: %d\n📦 План: %s", telegramID, plan))
+		"✅ План обновлён!\n\n👤 @%s\n📦 План: %s", username, plan))
 }
