@@ -30,7 +30,9 @@ func TestGetHTTPClient_Singleton(t *testing.T) {
 
 	require.NotNil(t, client1, "getHTTPClient() returned nil")
 	require.NotNil(t, client2, "getHTTPClient() returned nil on second call")
-	assert.Equal(t, client1, client2, "getHTTPClient() should return the same client instance")
+	// Use pointer comparison to avoid reflect.DeepEqual on *http.Client
+	// which races with Transport's lazy HTTP/2 initialization
+	assert.Same(t, client1, client2, "getHTTPClient() should return the same client instance")
 }
 
 func TestGetHTTPClient_ConcurrentAccess(t *testing.T) {
@@ -50,9 +52,12 @@ func TestGetHTTPClient_ConcurrentAccess(t *testing.T) {
 
 	wg.Wait()
 
-	// All clients should be the same instance
+	// All clients should be the same pointer instance.
+	// Use pointer comparison (assert.Same) instead of assert.Equal
+	// because reflect.DeepEqual on *http.Client reads Transport fields
+	// concurrently with HTTP/2 lazy initialization, causing DATA RACE.
 	for i := 1; i < 10; i++ {
-		assert.Equal(t, clients[0], clients[i], "Client %d is not the same as client 0", i)
+		assert.Same(t, clients[0], clients[i], "Client %d should be the same pointer as client 0", i)
 	}
 }
 
@@ -66,7 +71,6 @@ func TestGetHTTPClient_Timeout(t *testing.T) {
 }
 
 func TestStart_EmptyURL(t *testing.T) {
-	t.Parallel()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
@@ -87,7 +91,6 @@ func TestStart_EmptyURL(t *testing.T) {
 }
 
 func TestStart_ContextCancellation(t *testing.T) {
-	t.Parallel()
 
 	// Create a mock server that responds quickly
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -118,7 +121,6 @@ func TestStart_ContextCancellation(t *testing.T) {
 }
 
 func TestStart_NegativeInterval(t *testing.T) {
-	t.Parallel()
 
 	// Create a mock server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -151,7 +153,6 @@ func TestStart_NegativeInterval(t *testing.T) {
 }
 
 func TestStart_ZeroInterval(t *testing.T) {
-	t.Parallel()
 
 	// Create a mock server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -184,7 +185,6 @@ func TestStart_ZeroInterval(t *testing.T) {
 }
 
 func TestSendHeartbeat_Success(t *testing.T) {
-	t.Parallel()
 
 	requestReceived := false
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -201,7 +201,6 @@ func TestSendHeartbeat_Success(t *testing.T) {
 }
 
 func TestSendHeartbeat_ServerError(t *testing.T) {
-	t.Parallel()
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -213,7 +212,6 @@ func TestSendHeartbeat_ServerError(t *testing.T) {
 }
 
 func TestSendHeartbeat_InvalidURL(t *testing.T) {
-	t.Parallel()
 
 	// Should not panic with invalid URL
 	// Use localhost with unlikely port to avoid 10s DNS timeout on CI
@@ -221,7 +219,6 @@ func TestSendHeartbeat_InvalidURL(t *testing.T) {
 }
 
 func TestSendHeartbeat_MultipleRequests(t *testing.T) {
-	t.Parallel()
 
 	requestCount := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -239,7 +236,6 @@ func TestSendHeartbeat_MultipleRequests(t *testing.T) {
 }
 
 func TestStart_IntervalTiming(t *testing.T) {
-	t.Parallel()
 
 	var requestCount int64
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -291,7 +287,6 @@ func TestMaskURL_Heartbeat(t *testing.T) {
 }
 
 func TestStart_MultipleContexts(t *testing.T) {
-	t.Parallel()
 
 	ctx1, cancel1 := context.WithCancel(context.Background())
 	defer cancel1()
@@ -308,7 +303,6 @@ func TestStart_MultipleContexts(t *testing.T) {
 }
 
 func TestSendHeartbeat_ContextTimeout(t *testing.T) {
-	t.Parallel()
 
 	// Test that sendHeartbeat handles context-like timeouts gracefully
 	// Use very short timeout by calling invalid URL
