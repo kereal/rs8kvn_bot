@@ -259,6 +259,10 @@ func (m *mockDatabaseService) GetAllReferralCounts(ctx context.Context) (map[int
 	return make(map[int64]int64), nil
 }
 
+func (m *mockDatabaseService) UpdatePlan(ctx context.Context, telegramID int64, plan string) error {
+	return nil
+}
+
 func TestMockDatabaseService(t *testing.T) {
 	t.Parallel()
 

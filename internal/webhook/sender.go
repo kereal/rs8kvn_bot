@@ -27,6 +27,7 @@ type Event struct {
 	UserID            string `json:"user_id"`
 	Email             string `json:"email"`
 	SubscriptionToken string `json:"subscription_token"`
+	Plan              string `json:"plan"`
 }
 
 // PermanentError indicates a client-side HTTP error (4xx except 429) that

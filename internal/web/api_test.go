@@ -369,6 +369,7 @@ func TestGetSubscriptions_ResponseFormat(t *testing.T) {
 				ClientID:       "550e8400-e29b-41d4-a716-446655440000",
 				SubscriptionID: "abc123def456",
 				Status:         "active",
+				Plan:           "free",
 				CreatedAt:      now,
 			},
 		}, nil
@@ -408,8 +409,11 @@ func TestGetSubscriptions_ResponseFormat(t *testing.T) {
 	// subscription_token = Subscription.SubscriptionID
 	assert.Equal(t, "abc123def456", sub["subscription_token"])
 
+	// plan = Subscription.Plan
+	assert.Equal(t, "free", sub["plan"])
+
 	// Verify no extra fields
-	assert.Len(t, sub, 4)
+	assert.Len(t, sub, 5)
 }
 
 func TestGetSubscriptions_MixedStatuses(t *testing.T) {

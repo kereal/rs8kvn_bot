@@ -95,6 +95,8 @@ func (h *Handler) HandleUpdate(ctx context.Context, update tgbotapi.Update) {
 				h.HandleSend(ctx, update)
 			case "refstats":
 				h.HandleRefstats(ctx, update)
+			case "plan":
+				h.HandlePlan(ctx, update)
 			case "v":
 				h.HandleVersion(ctx, update)
 			default:
