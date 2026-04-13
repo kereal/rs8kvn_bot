@@ -1,7 +1,7 @@
 # Дорожная карта — rs8kvn_bot
 
-**Обновлено:** 2026-04-12  
-**Версия:** v2.2.0  
+**Обновлено:** 2026-04-13  
+**Версия:** v2.3.0-dev  
 **Масштаб:** 10 → 100 клиентов
 
 ---
@@ -12,7 +12,18 @@
 - **Покрытие тестами:** ~85% (race-safe)
 - **Архитектура:** 3x-ui один сервер, SQLite
 - **Приоритет:** Монетизация и рост
-- **Сборка:** `go build ./...` ✅, `go vet ./...` ✅, `golangci-lint` ✅
+- **Сборка:** `go build ./...` ✅, `go vet ./...` ✅
+
+---
+
+## Выполнено (v2.2.0 → v2.3.0)
+
+- ✅ CI DATA RACE fix (heartbeat tests: assert.Same, removed t.Parallel)
+- ✅ CI flaky TestGoroutineLeak fix (removed t.Parallel, increased tolerance)
+- ✅ **Subscription Plan field** — `plan` column (free/basic/premium/vip)
+- ✅ **Admin /plan command** — `/plan @username <plan>` (поиск по username)
+- ✅ **Plan в API** — `GET /api/v1/subscriptions` возвращает `plan`
+- ✅ **Plan в Webhook** — все event'ы содержат `plan`
 
 ---
 
@@ -25,6 +36,7 @@
 1. **Интеграция платежей** (ЮKassa/Т-Банк Pay) — 4-6 ч
    - Автоматическое продление после оплаты
    - Несколько тарифных планов (1/3/12 мес)
+   - Plan auto-set при оплате (free → basic/premium/vip)
 
 2. **Система промокодов** — 2-3 ч
    - Админ: `/promo КОД 30% 2026-12-31`
@@ -38,7 +50,7 @@
 
 4. **Система наград за рефералов** — 3-4 ч
    - Уровни: Бронза (1-3) → Серебро (4-10) → Золото (11-25) → Платина (26+)
-   - Награды: +трафик, продление, VIP
+   - Награды: +трафик, продление, VIP plan
 
 5. **Еженедельный отчёт админу** — 1-2 ч
    - Новые/активные пользователи, оплаты, топ реферер, рост
@@ -58,7 +70,6 @@
 
 | # | Проблема | Приоритет |
 |---|---------|-----------|
-
 | 1 | Re-enable linters (errcheck, gosec) — 73 issues в тестах | P1 |
 | 2 | Circuit breaker: cumulative → sliding window | P2 |
 | 3 | Multi-arch Docker (amd64 + arm64) | P2 |
@@ -67,6 +78,7 @@
 | 6 | Вынести тексты сообщений — централизованный конфиг | P3 |
 | 7 | Типизированные ошибки — заменить сравнение строк | P3 |
 | 8 | `.down.sql` миграции — поддержка отката | P3 |
+| 9 | `.gitignore` pattern `bot` blocks `internal/bot/` — fix pattern | P3 |
 
 ---
 
