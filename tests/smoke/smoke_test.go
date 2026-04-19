@@ -2,6 +2,7 @@ package smoke
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -24,7 +25,11 @@ func TestMain(m *testing.M) {
 	}
 	cleanup := func() {
 		if err := os.RemoveAll(dir); err != nil {
-			os.Stderr.WriteString("Failed to cleanup temp dir: " + err.Error() + "\n")
+			_, werr := os.Stderr.WriteString("Failed to cleanup temp dir: " + err.Error() + "\n")
+			if werr != nil {
+				// Fallback to stdout if stderr is unavailable
+				fmt.Fprintln(os.Stdout, "Failed to cleanup temp dir:", err.Error())
+			}
 		}
 	}
 
