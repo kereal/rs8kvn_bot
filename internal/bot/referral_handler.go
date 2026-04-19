@@ -44,22 +44,22 @@ func NewReferralHandler(
 }
 
 // HandleInvite handles the /invite command.
-func (rh *ReferralHandler) HandleInvite(ctx context.Context, chatID int64, username string, messageID int) {
+func (rh *ReferralHandler) HandleInvite(ctx context.Context, chatID int64, username string, messageID int) error {
 	logger.Info("User requesting invite link",
 		zap.Int64("chat_id", chatID),
 		zap.String("username", username))
-	rh.sendInviteLink(ctx, chatID, messageID)
+	return rh.sendInviteLink(ctx, chatID, messageID)
 }
 
 // sendInviteLink generates a new invite code and sends the invite links to the user.
-func (rh *ReferralHandler) sendInviteLink(ctx context.Context, chatID int64, messageID int) {
+func (rh *ReferralHandler) sendInviteLink(ctx context.Context, chatID int64, messageID int) error {
 	inviteCode, err := utils.GenerateInviteCode()
 	if err != nil {
 		logger.Error("Failed to generate invite code",
 			zap.Error(err),
 			zap.Int64("chat_id", chatID))
 		rh.sender.SendMessage(ctx, chatID, msg(MsgInviteCreateFailed))
-		return
+		return fmt.Errorf("generate invite code: %w", err)
 	}
 	invite, err := rh.db.GetOrCreateInvite(ctx, chatID, inviteCode)
 	if err != nil {
@@ -67,7 +67,7 @@ func (rh *ReferralHandler) sendInviteLink(ctx context.Context, chatID int64, mes
 			zap.Error(err),
 			zap.Int64("chat_id", chatID))
 		rh.sender.SendMessage(ctx, chatID, msg(MsgInviteCreateFailed))
-		return
+		return fmt.Errorf("get or create invite: %w", err)
 	}
 
 	telegramLink := fmt.Sprintf("https://t.me/%s?start=share_%s", rh.botConfig.Username, invite.Code)
@@ -88,6 +88,7 @@ func (rh *ReferralHandler) sendInviteLink(ctx context.Context, chatID int64, mes
 		msg.ReplyMarkup = &keyboard
 		rh.sender.Send(ctx, msg)
 	}
+	return nil
 }
 
 // generateInviteLink returns a Telegram or web invite link for the given user.

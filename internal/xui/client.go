@@ -776,8 +776,19 @@ func truncateString(s string, maxLen int) string {
 // isRetryable checks if an error is worth retrying.
 // DNS errors (no such host, name resolution failures) are not retryable
 // as they indicate a configuration problem that won't resolve on its own.
+// 4xx HTTP errors (client errors) are non-retryable; 5xx errors are retryable.
 func isRetryable(err error) bool {
 	if err == nil {
+		return true
+	}
+	// Check typed XUI errors first
+	switch {
+	case errors.Is(err, ErrBadRequest),
+		errors.Is(err, ErrForbidden),
+		errors.Is(err, ErrNotFound),
+		errors.Is(err, ErrUnauthorized):
+		return false
+	case errors.Is(err, ErrServerError):
 		return true
 	}
 	var dnsErr *net.DNSError

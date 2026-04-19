@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -23,12 +24,17 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+var chdirMu sync.Mutex
+
 func init() {
 	_, _ = logger.Init("", "error")
 }
 
 func setupTestDB(t *testing.T) *database.Service {
 	t.Helper()
+
+	chdirMu.Lock()
+	defer chdirMu.Unlock()
 
 	origWd, err := os.Getwd()
 	if err != nil {
