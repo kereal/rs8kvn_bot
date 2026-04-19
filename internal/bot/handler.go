@@ -29,6 +29,17 @@ const (
 	HandlerTimeout = 30 * time.Second
 )
 
+// normalizeCommand normalizes a raw command string to a fixed set of metric
+// label values. Known commands are returned as-is; anything else becomes "unknown".
+func normalizeCommand(cmd string) string {
+	switch cmd {
+	case "start", "help", "invite", "del", "broadcast", "send", "refstats", "v":
+		return cmd
+	default:
+		return "unknown"
+	}
+}
+
 // pendingInvite stores pending invite code with TTL
 type pendingInvite struct {
 	code      string
@@ -469,7 +480,9 @@ func (h *Handler) HandleUpdate(ctx context.Context, update tgbotapi.Update) {
 	if update.Message != nil {
 		chatID = update.Message.Chat.ID
 		if update.Message.IsCommand() {
-			command = update.Message.Command()
+			command = normalizeCommand(update.Message.Command())
+		} else {
+			command = "text"
 		}
 	} else if update.CallbackQuery != nil {
 		if update.CallbackQuery.Message != nil {
