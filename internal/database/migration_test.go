@@ -31,9 +31,7 @@ func TestMigration_Idempotency(t *testing.T) {
 	err = db1.CreateSubscription(ctx, sub)
 	require.NoError(t, err)
 
-	if err := db1.Close(); err != nil {
-		t.Logf("Warning: failed to close database: %v", err)
-	}
+	require.NoError(t, db1.Close())
 
 	db2, err := NewService(dbPath)
 	require.NoError(t, err)
@@ -42,9 +40,7 @@ func TestMigration_Idempotency(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "testuser", retrieved.Username)
 
-	if err := db2.Close(); err != nil {
-		t.Logf("Warning: failed to close database: %v", err)
-	}
+	require.NoError(t, db2.Close())
 }
 
 func TestMigration_AddNewTable(t *testing.T) {
@@ -70,9 +66,7 @@ func TestMigration_AddNewTable(t *testing.T) {
 
 	assert.Equal(t, 0, count)
 
-	if err := db.Close(); err != nil {
-		t.Logf("Warning: failed to close database: %v", err)
-	}
+	require.NoError(t, db.Close())
 }
 
 func TestMigration_PreserveDataOnUpgrade(t *testing.T) {
@@ -96,9 +90,7 @@ func TestMigration_PreserveDataOnUpgrade(t *testing.T) {
 	err = db1.CreateSubscription(ctx, sub)
 	require.NoError(t, err)
 
-	if err := db1.Close(); err != nil {
-		t.Logf("Warning: failed to close database: %v", err)
-	}
+	require.NoError(t, db1.Close())
 
 	db2, err := NewService(dbPath)
 	require.NoError(t, err)
@@ -108,9 +100,7 @@ func TestMigration_PreserveDataOnUpgrade(t *testing.T) {
 	assert.Equal(t, "existing_user", retrieved.Username)
 	assert.Equal(t, "active", retrieved.Status)
 
-	if err := db2.Close(); err != nil {
-		t.Logf("Warning: failed to close database: %v", err)
-	}
+	require.NoError(t, db2.Close())
 }
 
 func TestMigration_RunMultipleTimes(t *testing.T) {
@@ -121,9 +111,7 @@ func TestMigration_RunMultipleTimes(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		db, err := NewService(dbPath)
 		require.NoError(t, err, "Migration should succeed on attempt %d", i+1)
-		if err := db.Close(); err != nil {
-			t.Logf("Warning: failed to close database on iteration %d: %v", i+1, err)
-		}
+		require.NoError(t, db.Close())
 	}
 }
 
@@ -136,9 +124,7 @@ func TestMigration_InvalidSchema(t *testing.T) {
 	if _, err := f.WriteString("invalid sqlite content"); err != nil {
 		t.Logf("Warning: failed to write to file: %v", err)
 	}
-	if err := f.Close(); err != nil {
-		t.Logf("Warning: failed to close file: %v", err)
-	}
+	require.NoError(t, f.Close())
 
 	_, err = NewService(dbPath)
 	assert.Error(t, err)
@@ -164,5 +150,5 @@ func TestMigration_SchemaVersionTracking(t *testing.T) {
 
 	assert.GreaterOrEqual(t, version, 0)
 
-	db.Close()
+	require.NoError(t, db.Close())
 }
