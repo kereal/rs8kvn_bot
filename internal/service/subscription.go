@@ -375,8 +375,15 @@ func (s *SubscriptionService) BindTrial(ctx context.Context, subscriptionID stri
 	}
 
 	if err := s.xui.UpdateClient(ctx, s.cfg.XUIInboundID, sub.ClientID, username, sub.SubscriptionID, trafficBytes, time.UnixMilli(0), chatID, comment); err != nil {
-		logger.Warn("Failed to upgrade trial client in xui", zap.Error(err))
-		// Non-fatal: subscription is bound in DB, XUI update is best-effort
+		logger.Warn("XUI UpdateClient failed, rolling back DB bind", zap.Error(err))
+
+		// Attempt to rollback the database bind to maintain consistency
+		if _, rollbackErr := s.db.DeleteSubscriptionByID(ctx, sub.ID); rollbackErr != nil {
+			// Both XUI and rollback failed — combine errors
+			return nil, fmt.Errorf("xui update failed: %w; rollback failed: %w", err, rollbackErr)
+		}
+		// Rollback succeeded, but XUI update failed — return XUI error
+		return nil, fmt.Errorf("xui update failed: %w", err)
 	}
 
 	return sub, nil
