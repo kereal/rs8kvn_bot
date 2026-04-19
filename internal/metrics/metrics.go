@@ -161,12 +161,7 @@ func InstrumentHTTP(next http.Handler) http.Handler {
 // normalizePath reduces cardinality by replacing dynamic path segments
 // (such as invite codes, subscription IDs, UUIDs) with placeholders.
 func normalizePath(p string) string {
-	// Dynamic invite code: /i/<code> -> /i/:code
-	if len(p) > 3 && p[:2] == "/i" && p[2] != '/' {
-		// e.g., /iABC123 without slash - treat as /i with code
-		return "/i/:code"
-	}
-	// Known dynamic routes with slash separator
+	// Dynamic routes with slash separator
 	if strings.HasPrefix(p, "/i/") {
 		return "/i/:code"
 	}

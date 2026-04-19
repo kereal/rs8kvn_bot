@@ -2,7 +2,12 @@ package web
 
 import (
 	"context"
+	"fmt"
 	"sync"
+
+	"go.uber.org/zap"
+
+	"rs8kvn_bot/internal/logger"
 )
 
 // singleFlightCall represents an in-flight or completed single flight call.
@@ -54,6 +59,13 @@ func (s *SingleFlight) Do(ctx context.Context, key string, fn func(ctx context.C
 	// Execute fn in a goroutine
 	go func() {
 		defer func() {
+			if r := recover(); r != nil {
+				// Convert panic to error
+				call.err = fmt.Errorf("panic in singleflight function: %v", r)
+				logger.Error("singleflight goroutine panic",
+					zap.Any("panic", r),
+					zap.String("key", key))
+			}
 			s.mu.Lock()
 			delete(s.calls, key)
 			s.mu.Unlock()
