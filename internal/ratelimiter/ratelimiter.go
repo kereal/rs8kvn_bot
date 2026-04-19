@@ -104,6 +104,14 @@ func (tb *TokenBucket) AvailableTokens() float64 {
 	return tb.tokens
 }
 
+// Reset resets the token bucket to full capacity and updates lastRefill to now.
+func (tb *TokenBucket) Reset() {
+	tb.mu.Lock()
+	defer tb.mu.Unlock()
+	tb.tokens = tb.maxTokens
+	tb.lastRefill = time.Now()
+}
+
 // refill adds tokens based on elapsed time since last refill.
 // Must be called with tb.mu held.
 func (tb *TokenBucket) refill() {

@@ -151,11 +151,15 @@ func TestRegistry_Names(t *testing.T) {
 func TestRegistry_LoadEnv_FromEnv(t *testing.T) {
 	t.Parallel()
 
-	os.Setenv("TEST_FLAG_STRING", "from-env")
-	os.Setenv("TEST_FLAG_INT", "42")
+	require.NoError(t, os.Setenv("TEST_FLAG_STRING", "from-env"))
+	require.NoError(t, os.Setenv("TEST_FLAG_INT", "42"))
 	defer func() {
-		os.Unsetenv("TEST_FLAG_STRING")
-		os.Unsetenv("TEST_FLAG_INT")
+		if err := os.Unsetenv("TEST_FLAG_STRING"); err != nil {
+			t.Logf("Warning: failed to unset TEST_FLAG_STRING: %v", err)
+		}
+		if err := os.Unsetenv("TEST_FLAG_INT"); err != nil {
+			t.Logf("Warning: failed to unset TEST_FLAG_INT: %v", err)
+		}
 	}()
 
 	r := New()
@@ -174,7 +178,7 @@ func TestRegistry_LoadEnv_FromEnv(t *testing.T) {
 func TestRegistry_LoadEnv_DefaultWhenUnset(t *testing.T) {
 	t.Parallel()
 
-	os.Unsetenv("TEST_UNSET_FLAG")
+	require.NoError(t, os.Unsetenv("TEST_UNSET_FLAG"))
 
 	r := New()
 	s := NewString("fallback")
@@ -188,8 +192,12 @@ func TestRegistry_LoadEnv_DefaultWhenUnset(t *testing.T) {
 func TestRegistry_LoadEnv_WhitespaceTrimmed(t *testing.T) {
 	t.Parallel()
 
-	os.Setenv("TEST_TRIM_FLAG", "  trimmed  ")
-	defer os.Unsetenv("TEST_TRIM_FLAG")
+	require.NoError(t, os.Setenv("TEST_TRIM_FLAG", "  trimmed  "))
+	defer func() {
+		if err := os.Unsetenv("TEST_TRIM_FLAG"); err != nil {
+			t.Logf("Warning: failed to unset TEST_TRIM_FLAG: %v", err)
+		}
+	}()
 
 	r := New()
 	s := NewString("")

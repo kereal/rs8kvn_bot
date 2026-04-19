@@ -1,6 +1,7 @@
 package subproxy
 
 import (
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -11,7 +12,10 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	testutil.InitLogger(m)
+	if err := testutil.InitLogger(m); err != nil {
+		fmt.Fprintln(os.Stderr, "Failed to initialize logger:", err)
+		os.Exit(1)
+	}
 	os.Exit(m.Run())
 }
 

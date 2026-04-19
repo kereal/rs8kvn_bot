@@ -16,7 +16,11 @@ import (
 func TestE2E_DelCommand_Success(t *testing.T) {
 	t.Parallel()
 	env := setupE2EEnv(t)
-	defer env.db.Close()
+	defer func() {
+		if err := env.db.Close(); err != nil {
+			t.Logf("Warning: failed to close database: %v", err)
+		}
+	}()
 
 	ctx := context.Background()
 	adminID := env.cfg.TelegramAdminID
@@ -59,7 +63,11 @@ func TestE2E_DelCommand_NoArgs(t *testing.T) {
 	t.Parallel()
 
 	env := setupE2EEnv(t)
-	defer env.db.Close()
+	defer func() {
+		if err := env.db.Close(); err != nil {
+			t.Logf("Warning: failed to close database: %v", err)
+		}
+	}()
 
 	ctx := context.Background()
 	adminID := env.cfg.TelegramAdminID
@@ -86,7 +94,11 @@ func TestE2E_DelCommand_InvalidID(t *testing.T) {
 	t.Parallel()
 
 	env := setupE2EEnv(t)
-	defer env.db.Close()
+	defer func() {
+		if err := env.db.Close(); err != nil {
+			t.Logf("Warning: failed to close database: %v", err)
+		}
+	}()
 
 	ctx := context.Background()
 	adminID := env.cfg.TelegramAdminID
@@ -113,7 +125,11 @@ func TestE2E_DelCommand_NegativeID(t *testing.T) {
 	t.Parallel()
 
 	env := setupE2EEnv(t)
-	defer env.db.Close()
+	defer func() {
+		if err := env.db.Close(); err != nil {
+			t.Logf("Warning: failed to close database: %v", err)
+		}
+	}()
 
 	ctx := context.Background()
 	adminID := env.cfg.TelegramAdminID
@@ -140,7 +156,11 @@ func TestE2E_DelCommand_NotFound(t *testing.T) {
 	t.Parallel()
 
 	env := setupE2EEnv(t)
-	defer env.db.Close()
+	defer func() {
+		if err := env.db.Close(); err != nil {
+			t.Logf("Warning: failed to close database: %v", err)
+		}
+	}()
 
 	ctx := context.Background()
 	adminID := env.cfg.TelegramAdminID
@@ -167,7 +187,11 @@ func TestE2E_DelCommand_XUIFailure(t *testing.T) {
 	t.Parallel()
 
 	env := setupE2EEnv(t)
-	defer env.db.Close()
+	defer func() {
+		if err := env.db.Close(); err != nil {
+			t.Logf("Warning: failed to close database: %v", err)
+		}
+	}()
 
 	ctx := context.Background()
 	adminID := env.cfg.TelegramAdminID
@@ -211,7 +235,11 @@ func TestE2E_BroadcastCommand_Success(t *testing.T) {
 	t.Parallel()
 
 	env := setupE2EEnv(t)
-	defer env.db.Close()
+	defer func() {
+		if err := env.db.Close(); err != nil {
+			t.Logf("Warning: failed to close database: %v", err)
+		}
+	}()
 
 	ctx := context.Background()
 	adminID := env.cfg.TelegramAdminID
@@ -246,7 +274,11 @@ func TestE2E_BroadcastCommand_Success(t *testing.T) {
 func TestE2E_BroadcastCommand_NoArgs(t *testing.T) {
 	t.Parallel()
 	env := setupE2EEnv(t)
-	defer env.db.Close()
+	defer func() {
+		if err := env.db.Close(); err != nil {
+			t.Logf("Warning: failed to close database: %v", err)
+		}
+	}()
 
 	ctx := context.Background()
 	adminID := env.cfg.TelegramAdminID
@@ -272,7 +304,11 @@ func TestE2E_BroadcastCommand_NoArgs(t *testing.T) {
 func TestE2E_BroadcastCommand_NoUsers(t *testing.T) {
 	t.Parallel()
 	env := setupE2EEnv(t)
-	defer env.db.Close()
+	defer func() {
+		if err := env.db.Close(); err != nil {
+			t.Logf("Warning: failed to close database: %v", err)
+		}
+	}()
 
 	ctx := context.Background()
 	adminID := env.cfg.TelegramAdminID
@@ -298,7 +334,11 @@ func TestE2E_BroadcastCommand_NoUsers(t *testing.T) {
 func TestE2E_BroadcastCommand_SomeFailures(t *testing.T) {
 	t.Parallel()
 	env := setupE2EEnv(t)
-	defer env.db.Close()
+	defer func() {
+		if err := env.db.Close(); err != nil {
+			t.Logf("Warning: failed to close database: %v", err)
+		}
+	}()
 
 	ctx := context.Background()
 	adminID := env.cfg.TelegramAdminID
@@ -331,7 +371,11 @@ func TestE2E_BroadcastCommand_SomeFailures(t *testing.T) {
 
 func TestE2E_SendCommand_ByTelegramID(t *testing.T) {
 	env := setupE2EEnv(t)
-	defer env.db.Close()
+	defer func() {
+		if err := env.db.Close(); err != nil {
+			t.Logf("Warning: failed to close database: %v", err)
+		}
+	}()
 
 	ctx := context.Background()
 	adminID := env.cfg.TelegramAdminID
@@ -360,7 +404,11 @@ func TestE2E_SendCommand_ByTelegramID(t *testing.T) {
 
 func TestE2E_SendCommand_ByUsername(t *testing.T) {
 	env := setupE2EEnv(t)
-	defer env.db.Close()
+	defer func() {
+		if err := env.db.Close(); err != nil {
+			t.Logf("Warning: failed to close database: %v", err)
+		}
+	}()
 
 	ctx := context.Background()
 	adminID := env.cfg.TelegramAdminID
@@ -389,7 +437,11 @@ func TestE2E_SendCommand_ByUsername(t *testing.T) {
 
 func TestE2E_SendCommand_UserNotFound(t *testing.T) {
 	env := setupE2EEnv(t)
-	defer env.db.Close()
+	defer func() {
+		if err := env.db.Close(); err != nil {
+			t.Logf("Warning: failed to close database: %v", err)
+		}
+	}()
 
 	ctx := context.Background()
 	adminID := env.cfg.TelegramAdminID
@@ -414,7 +466,11 @@ func TestE2E_SendCommand_UserNotFound(t *testing.T) {
 
 func TestE2E_SendCommand_NoArgs(t *testing.T) {
 	env := setupE2EEnv(t)
-	defer env.db.Close()
+	defer func() {
+		if err := env.db.Close(); err != nil {
+			t.Logf("Warning: failed to close database: %v", err)
+		}
+	}()
 
 	ctx := context.Background()
 	adminID := env.cfg.TelegramAdminID
@@ -439,7 +495,11 @@ func TestE2E_SendCommand_NoArgs(t *testing.T) {
 
 func TestE2E_SendCommand_SendFails(t *testing.T) {
 	env := setupE2EEnv(t)
-	defer env.db.Close()
+	defer func() {
+		if err := env.db.Close(); err != nil {
+			t.Logf("Warning: failed to close database: %v", err)
+		}
+	}()
 
 	ctx := context.Background()
 	adminID := env.cfg.TelegramAdminID
@@ -469,7 +529,11 @@ func TestE2E_SendCommand_SendFails(t *testing.T) {
 
 func TestE2E_SendCommand_WithAtPrefix(t *testing.T) {
 	env := setupE2EEnv(t)
-	defer env.db.Close()
+	defer func() {
+		if err := env.db.Close(); err != nil {
+			t.Logf("Warning: failed to close database: %v", err)
+		}
+	}()
 
 	ctx := context.Background()
 	adminID := env.cfg.TelegramAdminID
@@ -493,7 +557,11 @@ func TestE2E_SendCommand_WithAtPrefix(t *testing.T) {
 
 func TestE2E_SendCommand_OnlyMessageNoTarget(t *testing.T) {
 	env := setupE2EEnv(t)
-	defer env.db.Close()
+	defer func() {
+		if err := env.db.Close(); err != nil {
+			t.Logf("Warning: failed to close database: %v", err)
+		}
+	}()
 
 	ctx := context.Background()
 	adminID := env.cfg.TelegramAdminID
@@ -516,7 +584,11 @@ func TestE2E_SendCommand_OnlyMessageNoTarget(t *testing.T) {
 
 func TestE2E_SendCommand_OnlyTargetNoMessage(t *testing.T) {
 	env := setupE2EEnv(t)
-	defer env.db.Close()
+	defer func() {
+		if err := env.db.Close(); err != nil {
+			t.Logf("Warning: failed to close database: %v", err)
+		}
+	}()
 
 	ctx := context.Background()
 	adminID := env.cfg.TelegramAdminID
@@ -539,7 +611,11 @@ func TestE2E_SendCommand_OnlyTargetNoMessage(t *testing.T) {
 
 func TestE2E_SendCommand_RateLimitBlocksExcess(t *testing.T) {
 	env := setupE2EEnv(t)
-	defer env.db.Close()
+	defer func() {
+		if err := env.db.Close(); err != nil {
+			t.Logf("Warning: failed to close database: %v", err)
+		}
+	}()
 
 	ctx := context.Background()
 	adminID := env.cfg.TelegramAdminID
@@ -574,7 +650,11 @@ func TestE2E_SendCommand_RateLimitBlocksExcess(t *testing.T) {
 
 func TestE2E_BroadcastCommand_EscapesMarkdown(t *testing.T) {
 	env := setupE2EEnv(t)
-	defer env.db.Close()
+	defer func() {
+		if err := env.db.Close(); err != nil {
+			t.Logf("Warning: failed to close database: %v", err)
+		}
+	}()
 
 	ctx := context.Background()
 	adminID := env.cfg.TelegramAdminID
@@ -598,7 +678,11 @@ func TestE2E_BroadcastCommand_EscapesMarkdown(t *testing.T) {
 
 func TestE2E_SendCommand_EscapesMarkdown(t *testing.T) {
 	env := setupE2EEnv(t)
-	defer env.db.Close()
+	defer func() {
+		if err := env.db.Close(); err != nil {
+			t.Logf("Warning: failed to close database: %v", err)
+		}
+	}()
 
 	ctx := context.Background()
 	adminID := env.cfg.TelegramAdminID
@@ -622,7 +706,11 @@ func TestE2E_SendCommand_EscapesMarkdown(t *testing.T) {
 
 func TestE2E_NonAdmin_CannotUseDel(t *testing.T) {
 	env := setupE2EEnv(t)
-	defer env.db.Close()
+	defer func() {
+		if err := env.db.Close(); err != nil {
+			t.Logf("Warning: failed to close database: %v", err)
+		}
+	}()
 
 	ctx := context.Background()
 	nonAdminID := int64(999999)
@@ -647,7 +735,11 @@ func TestE2E_NonAdmin_CannotUseDel(t *testing.T) {
 
 func TestE2E_NonAdmin_CannotUseBroadcast(t *testing.T) {
 	env := setupE2EEnv(t)
-	defer env.db.Close()
+	defer func() {
+		if err := env.db.Close(); err != nil {
+			t.Logf("Warning: failed to close database: %v", err)
+		}
+	}()
 
 	ctx := context.Background()
 	nonAdminID := int64(999999)
@@ -672,7 +764,11 @@ func TestE2E_NonAdmin_CannotUseBroadcast(t *testing.T) {
 
 func TestE2E_NonAdmin_CannotUseSend(t *testing.T) {
 	env := setupE2EEnv(t)
-	defer env.db.Close()
+	defer func() {
+		if err := env.db.Close(); err != nil {
+			t.Logf("Warning: failed to close database: %v", err)
+		}
+	}()
 
 	ctx := context.Background()
 	nonAdminID := int64(999999)
@@ -697,7 +793,11 @@ func TestE2E_NonAdmin_CannotUseSend(t *testing.T) {
 
 func TestE2E_NonAdmin_CannotUseRefstats(t *testing.T) {
 	env := setupE2EEnv(t)
-	defer env.db.Close()
+	defer func() {
+		if err := env.db.Close(); err != nil {
+			t.Logf("Warning: failed to close database: %v", err)
+		}
+	}()
 
 	ctx := context.Background()
 	nonAdminID := int64(999999)
@@ -723,7 +823,11 @@ func TestE2E_NonAdmin_CannotUseRefstats(t *testing.T) {
 
 func TestE2E_NonAdmin_CannotAccessAdminStats(t *testing.T) {
 	env := setupE2EEnv(t)
-	defer env.db.Close()
+	defer func() {
+		if err := env.db.Close(); err != nil {
+			t.Logf("Warning: failed to close database: %v", err)
+		}
+	}()
 
 	ctx := context.Background()
 	nonAdminID := int64(999999)
@@ -749,7 +853,11 @@ func TestE2E_NonAdmin_CannotAccessAdminStats(t *testing.T) {
 
 func TestE2E_NonAdmin_CannotAccessAdminLastreg(t *testing.T) {
 	env := setupE2EEnv(t)
-	defer env.db.Close()
+	defer func() {
+		if err := env.db.Close(); err != nil {
+			t.Logf("Warning: failed to close database: %v", err)
+		}
+	}()
 
 	ctx := context.Background()
 	nonAdminID := int64(999999)
@@ -776,7 +884,11 @@ func TestE2E_NonAdmin_CannotAccessAdminLastreg(t *testing.T) {
 func TestE2E_AdminStats(t *testing.T) {
 	t.Parallel()
 	env := setupE2EEnv(t)
-	defer env.db.Close()
+	defer func() {
+		if err := env.db.Close(); err != nil {
+			t.Logf("Warning: failed to close database: %v", err)
+		}
+	}()
 
 	ctx := context.Background()
 
@@ -801,7 +913,11 @@ func TestE2E_AdminStats(t *testing.T) {
 func TestE2E_AdminLastReg(t *testing.T) {
 	t.Parallel()
 	env := setupE2EEnv(t)
-	defer env.db.Close()
+	defer func() {
+		if err := env.db.Close(); err != nil {
+			t.Logf("Warning: failed to close database: %v", err)
+		}
+	}()
 
 	ctx := context.Background()
 
@@ -840,7 +956,11 @@ func TestE2E_AdminLastReg(t *testing.T) {
 
 func TestE2E_VersionCommand_Admin(t *testing.T) {
 	env := setupE2EEnv(t)
-	defer env.db.Close()
+	defer func() {
+		if err := env.db.Close(); err != nil {
+			t.Logf("Warning: failed to close database: %v", err)
+		}
+	}()
 
 	ctx := context.Background()
 	adminID := env.cfg.TelegramAdminID
@@ -864,7 +984,11 @@ func TestE2E_VersionCommand_Admin(t *testing.T) {
 
 func TestE2E_VersionCommand_NonAdmin(t *testing.T) {
 	env := setupE2EEnv(t)
-	defer env.db.Close()
+	defer func() {
+		if err := env.db.Close(); err != nil {
+			t.Logf("Warning: failed to close database: %v", err)
+		}
+	}()
 
 	ctx := context.Background()
 	nonAdminID := int64(999999)

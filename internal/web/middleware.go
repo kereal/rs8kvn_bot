@@ -10,7 +10,6 @@ import (
 	"go.uber.org/zap"
 )
 
-
 // BearerAuthMiddleware returns an HTTP middleware that enforces a Bearer token equal to expectedToken.
 // It bypasses authentication for OPTIONS requests. If the Authorization header is missing, does not start
 // with "Bearer ", or the extracted token does not match expectedToken, the middleware logs a warning with

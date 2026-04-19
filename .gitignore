@@ -16,7 +16,7 @@ logs/
 # Binary
 tgvpn_bot
 rs8kvn_bot
-bot
+# bot (removed to allow internal/bot package files)
 *.exe
 *.exe~
 *.dll

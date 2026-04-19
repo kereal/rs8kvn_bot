@@ -122,6 +122,8 @@ func TestCreateSubscription_Success(t *testing.T) {
 	mockBot := testutil.NewMockBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
 	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
+	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
 
 	clientConfig := &xui.ClientConfig{
 		ID:    "client-uuid-123",
@@ -165,6 +167,8 @@ func TestCreateSubscription_XUIFailure(t *testing.T) {
 	mockBot := testutil.NewMockBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
 	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
+	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
 
 	tests := []struct {
 		name          string
@@ -264,6 +268,8 @@ func TestCreateSubscription_DatabaseFailure_RollbackSuccess(t *testing.T) {
 	mockBot := testutil.NewMockBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
 	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
+	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
 
 	clientConfig := &xui.ClientConfig{
 		ID:    "client-uuid-123",
@@ -305,6 +311,8 @@ func TestCreateSubscription_DatabaseFailure_RollbackFailure(t *testing.T) {
 	mockBot := testutil.NewMockBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
 	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
+	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
 
 	clientConfig := &xui.ClientConfig{
 		ID:    "client-uuid-123",
@@ -344,6 +352,8 @@ func TestCreateSubscription_CacheUpdate(t *testing.T) {
 	mockBot := testutil.NewMockBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
 	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
+	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
 
 	clientConfig := &xui.ClientConfig{
 		ID:    "client-uuid-123",
@@ -520,6 +530,8 @@ func TestHandleCreateSubscription_NoSubscription(t *testing.T) {
 	mockBot := testutil.NewMockBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
 	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
+	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
 
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 		return nil, gorm.ErrRecordNotFound
@@ -556,6 +568,8 @@ func TestHandleMySubscription_NotFound(t *testing.T) {
 	mockBot := testutil.NewMockBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
 	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
+	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
 
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 		return nil, gorm.ErrRecordNotFound
@@ -580,6 +594,8 @@ func TestHandleMySubscription_DatabaseError(t *testing.T) {
 	mockBot := testutil.NewMockBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
 	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
+	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
 
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 		return nil, errors.New("database error")
@@ -604,6 +620,8 @@ func TestHandleMySubscription_ActiveSubscription(t *testing.T) {
 	mockBot := testutil.NewMockBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
 	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
+	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
 
 	sub := &database.Subscription{
 		TelegramID:      123456,
@@ -650,6 +668,8 @@ func TestHandleMySubscription_TrafficFetchError(t *testing.T) {
 	mockBot := testutil.NewMockBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
 	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
+	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
 
 	sub := &database.Subscription{
 		TelegramID:      123456,
@@ -689,6 +709,8 @@ func TestHandleMySubscription_UsesCache(t *testing.T) {
 	mockBot := testutil.NewMockBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
 	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
+	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
 
 	sub := &database.Subscription{
 		TelegramID:      123456,
@@ -997,6 +1019,8 @@ func TestHandleCreateSubscription_ZeroMessageID(t *testing.T) {
 	mockBot := testutil.NewMockBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
 	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
+	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
 
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 		return nil, gorm.ErrRecordNotFound
@@ -1348,6 +1372,8 @@ func TestCreateSubscription_WithPendingInvite(t *testing.T) {
 	mockBot := testutil.NewMockBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
 	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
+	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
 
 	clientConfig := &xui.ClientConfig{
 		ID:    "client-uuid-123",
@@ -1405,6 +1431,8 @@ func TestCreateSubscription_WithExpiredPendingInvite(t *testing.T) {
 	mockBot := testutil.NewMockBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
 	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
+	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
 
 	clientConfig := &xui.ClientConfig{
 		ID:    "client-uuid-123",
@@ -1466,6 +1494,8 @@ func TestCreateSubscription_ShowLoadingMessageFails(t *testing.T) {
 	mockBot := testutil.NewMockBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
 	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
+	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
 
 	mockBot.SendError = errors.New("send failed")
 

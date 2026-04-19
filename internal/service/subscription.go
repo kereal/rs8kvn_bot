@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"rs8kvn_bot/internal/config"
@@ -29,6 +30,9 @@ type SubscriptionService struct {
 	xui     interfaces.XUIClient
 	cfg     *config.Config
 	webhook WebhookSender
+	// invalidate is a callback to clear the subscription cache.
+	// Set by the bot handler to point to h.cache.Invalidate.
+	invalidate func(telegramID int64)
 }
 
 type CreateResult struct {
@@ -87,6 +91,13 @@ func (s *SubscriptionService) Create(ctx context.Context, chatID int64, username
 			return s.xui.DeleteClient(ctx, s.cfg.XUIInboundID, client.ID)
 		})
 		if rollbackErr != nil {
+			// CRITICAL: Orphaned XUI client - log to Sentry with high severity for manual intervention
+			logger.Error("orphaned XUI client detected - manual cleanup required",
+				zap.String("client_id", client.ID),
+				zap.Int("inbound_id", s.cfg.XUIInboundID),
+				zap.Error(rollbackErr),
+				zap.Stack("stack"),
+				zap.String("username", username))
 			return nil, fmt.Errorf("create subscription: %w (rollback failed: %w)", err, rollbackErr)
 		}
 		return nil, fmt.Errorf("create subscription: %w", err)
@@ -144,7 +155,8 @@ func (s *SubscriptionService) Delete(ctx context.Context, telegramID int64) erro
 		logger.Error("Failed to delete XUI client (orphaned client may remain)",
 			zap.Int("inboundID", inboundID),
 			zap.String("clientID", clientID),
-			zap.Error(err))
+			zap.Error(err),
+			zap.Stack("stack"))
 	}
 
 	// Send webhook notification (async)
@@ -309,6 +321,11 @@ func (s *SubscriptionService) CreateTrial(ctx context.Context, inviteCode string
 	sub, err := s.db.CreateTrialSubscription(ctx, inviteCode, subID, clientID, s.cfg.XUIInboundID, trafficBytes, expiryTime, subURL)
 	if err != nil {
 		if rollbackErr := s.xui.DeleteClient(ctx, s.cfg.XUIInboundID, clientID); rollbackErr != nil {
+			logger.Error("failed to rollback trial XUI client",
+				zap.String("client_id", clientID),
+				zap.Int("inbound_id", s.cfg.XUIInboundID),
+				zap.Error(rollbackErr),
+				zap.Stack("stack"))
 			return nil, fmt.Errorf("create trial subscription: %w (rollback failed: %w)", err, rollbackErr)
 		}
 		return nil, fmt.Errorf("create trial subscription: %w", err)
@@ -320,6 +337,148 @@ func (s *SubscriptionService) CreateTrial(ctx context.Context, inviteCode string
 		SubID:           subID,
 		ClientID:        clientID,
 	}, nil
+}
+
+// GetByID retrieves a subscription by database ID.
+func (s *SubscriptionService) GetByID(ctx context.Context, id uint) (*database.Subscription, error) {
+	return s.db.GetByID(ctx, id)
+}
+
+// GetOrCreateInvite gets an existing invite or creates a new one for the given referrer.
+func (s *SubscriptionService) GetOrCreateInvite(ctx context.Context, referrerTGID int64, code string) (*database.Invite, error) {
+	return s.db.GetOrCreateInvite(ctx, referrerTGID, code)
+}
+
+// GetInviteByCode retrieves an invite by its code.
+func (s *SubscriptionService) GetInviteByCode(ctx context.Context, code string) (*database.Invite, error) {
+	return s.db.GetInviteByCode(ctx, code)
+}
+
+// BindTrialSubscription binds a trial subscription to a Telegram user.
+// It updates the trial in the database, then upgrades the client in the
+// 3x-ui panel with proper traffic limits and expiry settings.
+func (s *SubscriptionService) BindTrial(ctx context.Context, subscriptionID string, chatID int64, username string) (*database.Subscription, error) {
+	sub, err := s.db.BindTrialSubscription(ctx, subscriptionID, chatID, username)
+	if err != nil {
+		return nil, fmt.Errorf("bind trial subscription: %w", err)
+	}
+
+	// Upgrade trial client in xui panel: set full traffic limit, remove expiry (time.UnixMilli(0))
+	trafficBytes := int64(s.cfg.TrafficLimitGB) * 1024 * 1024 * 1024
+
+	// Build comment from referrer info
+	var comment string
+	if invite, err := s.db.GetInviteByCode(ctx, sub.InviteCode); err == nil {
+		if referrerSub, err := s.db.GetByTelegramID(ctx, invite.ReferrerTGID); err == nil {
+			comment = fmt.Sprintf("from: @%s", referrerSub.Username)
+		}
+	}
+
+	if err := s.xui.UpdateClient(ctx, s.cfg.XUIInboundID, sub.ClientID, username, sub.SubscriptionID, trafficBytes, time.UnixMilli(0), chatID, comment); err != nil {
+		logger.Warn("Failed to upgrade trial client in xui", zap.Error(err))
+		// Non-fatal: subscription is bound in DB, XUI update is best-effort
+	}
+
+	return sub, nil
+}
+
+// CountAll returns the total number of subscriptions.
+func (s *SubscriptionService) CountAll(ctx context.Context) (int64, error) {
+	return s.db.CountAllSubscriptions(ctx)
+}
+
+// CountActive returns the number of active subscriptions.
+func (s *SubscriptionService) CountActive(ctx context.Context) (int64, error) {
+	return s.db.CountActiveSubscriptions(ctx)
+}
+
+// GetLatest returns the most recent subscriptions up to the given limit.
+func (s *SubscriptionService) GetLatest(ctx context.Context, limit int) ([]database.Subscription, error) {
+	return s.db.GetLatestSubscriptions(ctx, limit)
+}
+
+// GetTelegramIDByUsername looks up a Telegram ID by username.
+func (s *SubscriptionService) GetTelegramIDByUsername(ctx context.Context, username string) (int64, error) {
+	return s.db.GetTelegramIDByUsername(ctx, username)
+}
+
+// SetInvalidateFunc sets the cache invalidation callback.
+func (s *SubscriptionService) SetInvalidateFunc(fn func(telegramID int64)) {
+	s.invalidate = fn
+}
+
+// InvalidateSubscription clears cached subscription data for the given Telegram ID.
+// It is safe to call from any goroutine.
+func (s *SubscriptionService) InvalidateSubscription(ctx context.Context, telegramID int64) error {
+	if s.invalidate != nil {
+		s.invalidate(telegramID)
+	}
+	// No error needed; cache invalidation is best-effort.
+	return nil
+}
+
+// ReconcileOrphanedClients scans all active subscriptions and removes those whose
+// client no longer exists in the XUI panel. It returns the number of removed subscriptions.
+// This is a best-effort background cleanup; errors are logged but do not stop the scan.
+func (s *SubscriptionService) ReconcileOrphanedClients(ctx context.Context) (int, error) {
+	// Fetch all subscriptions (this is a background task; memory usage is acceptable)
+	allSubs, err := s.db.GetAllSubscriptions(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("failed to fetch subscriptions: %w", err)
+	}
+
+	removed := 0
+	for _, sub := range allSubs {
+		// Only consider active subscriptions
+		if sub.Status != "active" {
+			continue
+		}
+
+		// Probe XUI: lightweight GetClientTraffic to check existence
+		_, err := s.xui.GetClientTraffic(ctx, sub.Username)
+		if err != nil {
+			errMsg := strings.ToLower(err.Error())
+			if strings.Contains(errMsg, "client not found") {
+				// Client missing in XUI → orphaned DB record; delete it
+				if delErr := s.db.DeleteSubscription(ctx, sub.TelegramID); delErr != nil {
+					logger.Warn("Failed to delete orphaned subscription",
+						zap.Error(delErr),
+						zap.Int64("telegram_id", sub.TelegramID))
+				} else {
+					removed++
+					logger.Info("Removed orphaned subscription (XUI client missing)",
+						zap.Int64("telegram_id", sub.TelegramID),
+						zap.String("username", sub.Username))
+				}
+			} else {
+				// Other error (network, auth, etc.) — log and continue
+				logger.Debug("Error checking XUI client, skipping",
+					zap.Error(err),
+					zap.Int64("telegram_id", sub.TelegramID))
+			}
+		}
+
+		// Respect context cancellation
+		if ctx.Err() != nil {
+			return removed, ctx.Err()
+		}
+	}
+	return removed, nil
+}
+
+// GetTotalTelegramIDCount returns the total number of unique Telegram IDs.
+func (s *SubscriptionService) GetTotalTelegramIDCount(ctx context.Context) (int64, error) {
+	return s.db.GetTotalTelegramIDCount(ctx)
+}
+
+// GetTelegramIDsBatch returns a batch of Telegram IDs for pagination.
+func (s *SubscriptionService) GetTelegramIDsBatch(ctx context.Context, offset, limit int) ([]int64, error) {
+	return s.db.GetTelegramIDsBatch(ctx, offset, limit)
+}
+
+// GetAllReferralCounts returns referral counts for all users.
+func (s *SubscriptionService) GetAllReferralCounts(ctx context.Context) (map[int64]int64, error) {
+	return s.db.GetAllReferralCounts(ctx)
 }
 
 // calcTrialTraffic calculates trial traffic allocation based on trial duration.

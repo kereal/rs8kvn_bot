@@ -55,7 +55,7 @@ func TestE2E_RealClient_AutoReloginOn401(t *testing.T) {
 	env := setupRealXUIEnv(t, map[string]http.HandlerFunc{
 		"/panel/api/server/status": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(xui.APIResponse{Success: false})
+			_ = json.NewEncoder(w).Encode(xui.APIResponse{Success: false})
 		},
 		"/panel/api/inbounds/addClient": func(w http.ResponseWriter, r *http.Request) {
 			mu.Lock()
@@ -65,11 +65,11 @@ func TestE2E_RealClient_AutoReloginOn401(t *testing.T) {
 
 			if attempt == 1 {
 				w.WriteHeader(http.StatusUnauthorized)
-				json.NewEncoder(w).Encode(xui.APIResponse{Success: false, Msg: "unauthorized"})
+				_ = json.NewEncoder(w).Encode(xui.APIResponse{Success: false, Msg: "unauthorized"})
 				return
 			}
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(xui.APIResponse{Success: true, Msg: "Client added"})
+			_ = json.NewEncoder(w).Encode(xui.APIResponse{Success: true, Msg: "Client added"})
 		},
 	})
 	defer env.Close()
@@ -138,10 +138,18 @@ func TestE2E_RealClient_DNSErrorFastFail(t *testing.T) {
 
 	xuiClient, err := xui.NewClient("http://nonexistent.invalid.host:9999", "admin", "password", 15*time.Minute)
 	require.NoError(t, err)
-	defer xuiClient.Close()
+	defer func() {
+		if err := xuiClient.Close(); err != nil {
+			t.Logf("Warning: failed to close XUI client: %v", err)
+		}
+	}()
 
 	db := setupTestDB(t)
-	defer db.Close()
+	defer func() {
+		if err := db.Close(); err != nil {
+			t.Logf("Warning: failed to close database: %v", err)
+		}
+	}()
 
 	subService := service.NewSubscriptionService(db, xuiClient, cfg, &webhook.NoopSender{})
 
@@ -164,7 +172,7 @@ func TestE2E_RealClient_ConcurrentLoginDedup(t *testing.T) {
 	env := setupRealXUIEnv(t, map[string]http.HandlerFunc{
 		"/panel/api/server/status": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(xui.APIResponse{Success: false})
+			_ = json.NewEncoder(w).Encode(xui.APIResponse{Success: false})
 		},
 		"/login": func(w http.ResponseWriter, r *http.Request) {
 			mu.Lock()
@@ -231,7 +239,7 @@ func TestE2E_RealClient_AutoReloginViaCircuitBreaker(t *testing.T) {
 	env := setupRealXUIEnv(t, map[string]http.HandlerFunc{
 		"/panel/api/server/status": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(xui.APIResponse{Success: false})
+			_ = json.NewEncoder(w).Encode(xui.APIResponse{Success: false})
 		},
 		"/login": func(w http.ResponseWriter, r *http.Request) {
 			mu.Lock()
