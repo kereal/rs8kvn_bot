@@ -62,15 +62,35 @@ func (s *SingleFlight) Do(ctx context.Context, key string, fn func(ctx context.C
 			if r := recover(); r != nil {
 				// Convert panic to error
 				call.err = fmt.Errorf("panic in singleflight function: %v", r)
-				logger.Error("singleflight goroutine panic",
-					zap.Any("panic", r),
-					zap.String("key", key))
+
+				// Critical cleanup FIRST to unblock waiters
+				s.mu.Lock()
+				delete(s.calls, key)
+				s.mu.Unlock()
+				close(call.done)
+
+				// Log the panic in a protected wrapper so logging failures
+				// cannot interfere with cleanup
+				func() {
+					defer func() {
+						if p := recover(); p != nil {
+							// If logging itself panics, suppress — cleanup is done
+						}
+					}()
+					logger.Error("singleflight goroutine panic",
+						zap.Any("panic", r),
+						zap.String("key", key))
+				}()
+				return
 			}
+
+			// Normal cleanup (no panic)
 			s.mu.Lock()
 			delete(s.calls, key)
 			s.mu.Unlock()
 			close(call.done)
 		}()
+
 		call.result, call.err = fn(ctx)
 	}()
 
