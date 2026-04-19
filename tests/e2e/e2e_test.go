@@ -192,15 +192,21 @@ func setupRealXUIEnv(t *testing.T, handlers map[string]http.HandlerFunc) *realXU
 	defaults := map[string]http.HandlerFunc{
 		"/login": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(xui.APIResponse{Success: true, Msg: "Login successful"})
+			if err := json.NewEncoder(w).Encode(xui.APIResponse{Success: true, Msg: "Login successful"}); err != nil {
+				t.Fatalf("encode %s response: %v", "/login", err)
+			}
 		},
 		"/panel/api/server/status": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(xui.APIResponse{Success: true})
+			if err := json.NewEncoder(w).Encode(xui.APIResponse{Success: true}); err != nil {
+				t.Fatalf("encode %s response: %v", "/panel/api/server/status", err)
+			}
 		},
 		"/panel/api/inbounds/addClient": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(xui.APIResponse{Success: true, Msg: "Client added"})
+			if err := json.NewEncoder(w).Encode(xui.APIResponse{Success: true, Msg: "Client added"}); err != nil {
+				t.Fatalf("encode %s response: %v", "/panel/api/inbounds/addClient", err)
+			}
 		},
 	}
 
