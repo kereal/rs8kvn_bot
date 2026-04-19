@@ -116,92 +116,101 @@ func (h *Handler) withTimeout(ctx context.Context) (context.Context, context.Can
 }
 
 // Command delegates
-func (h *Handler) HandleStart(ctx context.Context, update tgbotapi.Update) {
+func (h *Handler) HandleStart(ctx context.Context, update tgbotapi.Update) error {
 	if h.cmdHandler != nil {
-		h.cmdHandler.HandleStart(ctx, update)
+		return h.cmdHandler.HandleStart(ctx, update)
 	}
+	return nil
 }
 
-func (h *Handler) HandleHelp(ctx context.Context, update tgbotapi.Update) {
+func (h *Handler) HandleHelp(ctx context.Context, update tgbotapi.Update) error {
 	if h.cmdHandler != nil {
-		h.cmdHandler.HandleHelp(ctx, update)
+		return h.cmdHandler.HandleHelp(ctx, update)
 	}
+	return nil
 }
 
-func (h *Handler) HandleInvite(ctx context.Context, update tgbotapi.Update) {
+func (h *Handler) HandleInvite(ctx context.Context, update tgbotapi.Update) error {
 	if h.cmdHandler != nil {
-		h.cmdHandler.HandleInvite(ctx, update)
+		return h.cmdHandler.HandleInvite(ctx, update)
 	}
+	return nil
 }
 
 // Command private delegates
-func (h *Handler) handleBindTrial(ctx context.Context, chatID int64, username, subscriptionID string) {
+func (h *Handler) handleBindTrial(ctx context.Context, chatID int64, username, subscriptionID string) error {
 	if h.cmdHandler != nil {
-		h.cmdHandler.handleBindTrial(ctx, chatID, username, subscriptionID)
+		return h.cmdHandler.handleBindTrial(ctx, chatID, username, subscriptionID)
 	}
+	return nil
 }
 
-func (h *Handler) handleShareStart(ctx context.Context, chatID int64, username, inviteCode string) {
+func (h *Handler) handleShareStart(ctx context.Context, chatID int64, username, inviteCode string) error {
 	if h.cmdHandler != nil {
-		h.cmdHandler.handleShareStart(ctx, chatID, username, inviteCode)
+		return h.cmdHandler.handleShareStart(ctx, chatID, username, inviteCode)
 	}
+	return nil
 }
 
 // Callback delegate
-func (h *Handler) HandleCallback(ctx context.Context, update tgbotapi.Update) {
+func (h *Handler) HandleCallback(ctx context.Context, update tgbotapi.Update) error {
 	if h.cbHandler != nil {
-		h.cbHandler.HandleCallback(ctx, update)
+		return h.cbHandler.HandleCallback(ctx, update)
 	}
+	return nil
 }
 
 // Callback private delegates
-func (h *Handler) handleShareInvite(ctx context.Context, chatID int64, username string, messageID int) {
+func (h *Handler) handleShareInvite(ctx context.Context, chatID int64, username string, messageID int) error {
 	if h.cbHandler != nil {
-		h.cbHandler.handleShareInvite(ctx, chatID, username, messageID)
+		return h.cbHandler.handleShareInvite(ctx, chatID, username, messageID)
 	}
+	return nil
 }
 
-func (h *Handler) handleQRTelegram(ctx context.Context, chatID int64, username string, messageID int) {
+func (h *Handler) handleQRTelegram(ctx context.Context, chatID int64, username string, messageID int) error {
 	if h.cbHandler != nil {
-		h.cbHandler.handleQRTelegram(ctx, chatID, username, messageID)
+		return h.cbHandler.handleQRTelegram(ctx, chatID, username, messageID)
 	}
+	return nil
 }
 
-func (h *Handler) handleQRWeb(ctx context.Context, chatID int64, username string, messageID int) {
+func (h *Handler) handleQRWeb(ctx context.Context, chatID int64, username string, messageID int) error {
 	if h.cbHandler != nil {
-		h.cbHandler.handleQRWeb(ctx, chatID, username, messageID)
+		return h.cbHandler.handleQRWeb(ctx, chatID, username, messageID)
 	}
+	return nil
 }
 
 // Subscription delegates
-func (h *Handler) handleCreateSubscription(ctx context.Context, chatID int64, username string, messageID int) {
+func (h *Handler) handleCreateSubscription(ctx context.Context, chatID int64, username string, messageID int) error {
 	h.subHandlerOnce.Do(func() { h.subHandler = NewSubscriptionHandler(h) })
-	h.subHandler.handleCreateSubscription(ctx, chatID, username, messageID)
+	return h.subHandler.handleCreateSubscription(ctx, chatID, username, messageID)
 }
 
-func (h *Handler) handleMySubscription(ctx context.Context, chatID int64, username string, messageID int) {
+func (h *Handler) handleMySubscription(ctx context.Context, chatID int64, username string, messageID int) error {
 	h.subHandlerOnce.Do(func() { h.subHandler = NewSubscriptionHandler(h) })
-	h.subHandler.handleMySubscription(ctx, chatID, username, messageID)
+	return h.subHandler.handleMySubscription(ctx, chatID, username, messageID)
 }
 
-func (h *Handler) handleQRCode(ctx context.Context, chatID int64, username string, messageID int) {
+func (h *Handler) handleQRCode(ctx context.Context, chatID int64, username string, messageID int) error {
 	h.subHandlerOnce.Do(func() { h.subHandler = NewSubscriptionHandler(h) })
-	h.subHandler.handleQRCode(ctx, chatID, username, messageID)
+	return h.subHandler.handleQRCode(ctx, chatID, username, messageID)
 }
 
-func (h *Handler) handleBackToSubscription(ctx context.Context, chatID int64, username string, messageID int) {
+func (h *Handler) handleBackToSubscription(ctx context.Context, chatID int64, username string, messageID int) error {
 	h.subHandlerOnce.Do(func() { h.subHandler = NewSubscriptionHandler(h) })
-	h.subHandler.handleBackToSubscription(ctx, chatID, username, messageID)
+	return h.subHandler.handleBackToSubscription(ctx, chatID, username, messageID)
 }
 
-func (h *Handler) sendQRCode(ctx context.Context, chatID int64, messageID int, url string, caption string) {
+func (h *Handler) sendQRCode(ctx context.Context, chatID int64, messageID int, url string, caption string) error {
 	h.subHandlerOnce.Do(func() { h.subHandler = NewSubscriptionHandler(h) })
-	h.subHandler.sendQRCode(ctx, chatID, messageID, url, caption)
+	return h.subHandler.sendQRCode(ctx, chatID, messageID, url, caption)
 }
 
-func (h *Handler) handleBackToInvite(ctx context.Context, chatID int64, username string, messageID int) {
+func (h *Handler) handleBackToInvite(ctx context.Context, chatID int64, username string, messageID int) error {
 	h.subHandlerOnce.Do(func() { h.subHandler = NewSubscriptionHandler(h) })
-	h.subHandler.handleBackToInvite(ctx, chatID, username, messageID)
+	return h.subHandler.handleBackToInvite(ctx, chatID, username, messageID)
 }
 
 func (h *Handler) getSubscriptionWithCache(ctx context.Context, chatID int64) (*database.Subscription, error) {
@@ -220,14 +229,14 @@ func (h *Handler) invalidateCache(chatID int64) {
 }
 
 // Subscription direct delegates (used by tests and internal flows)
-func (h *Handler) createSubscription(ctx context.Context, chatID int64, username string, messageID int) {
+func (h *Handler) createSubscription(ctx context.Context, chatID int64, username string, messageID int) error {
 	h.subHandlerOnce.Do(func() { h.subHandler = NewSubscriptionHandler(h) })
-	h.subHandler.createSubscription(ctx, chatID, username, messageID)
+	return h.subHandler.createSubscription(ctx, chatID, username, messageID)
 }
 
-func (h *Handler) handleCreateError(ctx context.Context, chatID int64, messageID int, username string, err error) {
+func (h *Handler) handleCreateError(ctx context.Context, chatID int64, messageID int, username string, err error) error {
 	h.subHandlerOnce.Do(func() { h.subHandler = NewSubscriptionHandler(h) })
-	h.subHandler.handleCreateError(ctx, chatID, messageID, username, err)
+	return h.subHandler.handleCreateError(ctx, chatID, messageID, username, err)
 }
 
 // Referral delegates
@@ -238,11 +247,11 @@ func (h *Handler) generateInviteLink(ctx context.Context, chatID int64, lt linkT
 	return h.referral.generateInviteLink(ctx, chatID, lt)
 }
 
-func (h *Handler) sendInviteLink(ctx context.Context, chatID int64, messageID int) {
+func (h *Handler) sendInviteLink(ctx context.Context, chatID int64, messageID int) error {
 	h.referralOnce.Do(func() {
 		h.referral = NewReferralHandler(h.db, h.cfg, h.bot, h.botConfig, h.sender, h.keyboards)
 	})
-	h.referral.sendInviteLink(ctx, chatID, messageID)
+	return h.referral.sendInviteLink(ctx, chatID, messageID)
 }
 
 // Utility methods
@@ -482,30 +491,30 @@ func (h *Handler) HandleUpdate(ctx context.Context, update tgbotapi.Update) {
 		if update.Message.IsCommand() {
 			switch update.Message.Command() {
 			case "start":
-				h.HandleStart(ctx, update)
+				err = h.HandleStart(ctx, update)
 			case "help":
-				h.HandleHelp(ctx, update)
+				err = h.HandleHelp(ctx, update)
 			case "invite":
-				h.HandleInvite(ctx, update)
+				err = h.HandleInvite(ctx, update)
 			case "del":
-				h.HandleDel(ctx, update)
+				err = h.HandleDel(ctx, update)
 			case "broadcast":
-				h.HandleBroadcast(ctx, update)
+				err = h.HandleBroadcast(ctx, update)
 			case "send":
-				h.HandleSend(ctx, update)
+				err = h.HandleSend(ctx, update)
 			case "refstats":
-				h.HandleRefstats(ctx, update)
+				err = h.HandleRefstats(ctx, update)
 			case "v":
-				h.HandleVersion(ctx, update)
+				err = h.HandleVersion(ctx, update)
 			default:
 				h.SendMessage(ctx, update.Message.Chat.ID,
 					"Неизвестная команда. Используйте /start или /help")
 			}
 		} else {
 			// Non-command message: send help hint
-			h.HandleHelp(ctx, update)
+			err = h.HandleHelp(ctx, update)
 		}
 	} else if update.CallbackQuery != nil {
-		h.HandleCallback(ctx, update)
+		err = h.HandleCallback(ctx, update)
 	}
 }

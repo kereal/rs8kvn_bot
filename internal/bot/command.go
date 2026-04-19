@@ -23,19 +23,19 @@ func NewCommandHandler(parent *Handler) *CommandHandler {
 }
 
 // HandleStart processes /start command.
-func (c *CommandHandler) HandleStart(ctx context.Context, update tgbotapi.Update) {
+func (c *CommandHandler) HandleStart(ctx context.Context, update tgbotapi.Update) error {
 	ctxWithTimeout, cancel := c.h.withTimeout(ctx)
 	defer cancel()
 	ctx = ctxWithTimeout
 
 	if update.Message == nil {
 		logger.Error("HandleStart called with nil Message")
-		return
+		return fmt.Errorf("nil message")
 	}
 	if update.Message.From == nil {
 		logger.Error("HandleStart: Message.From is nil",
 			zap.Int64("chat_id", update.Message.Chat.ID))
-		return
+		return fmt.Errorf("nil from")
 	}
 
 	chatID := update.Message.Chat.ID
@@ -43,12 +43,10 @@ func (c *CommandHandler) HandleStart(ctx context.Context, update tgbotapi.Update
 
 	args := update.Message.CommandArguments()
 	if strings.HasPrefix(args, "trial_") {
-		c.handleBindTrial(ctx, chatID, username, strings.TrimPrefix(args, "trial_"))
-		return
+		return c.handleBindTrial(ctx, chatID, username, strings.TrimPrefix(args, "trial_"))
 	}
 	if strings.HasPrefix(args, "share_") {
-		c.handleShareStart(ctx, chatID, username, strings.TrimPrefix(args, "share_"))
-		return
+		return c.handleShareStart(ctx, chatID, username, strings.TrimPrefix(args, "share_"))
 	}
 
 	logger.Info("User started bot",
@@ -62,17 +60,18 @@ func (c *CommandHandler) HandleStart(ctx context.Context, update tgbotapi.Update
 	msg := tgbotapi.NewMessage(chatID, text)
 	msg.ReplyMarkup = &keyboard
 	c.h.send(ctx, msg)
+	return nil
 }
 
 // HandleHelp sends help message.
-func (c *CommandHandler) HandleHelp(ctx context.Context, update tgbotapi.Update) {
+func (c *CommandHandler) HandleHelp(ctx context.Context, update tgbotapi.Update) error {
 	ctxWithTimeout, cancel := c.h.withTimeout(ctx)
 	defer cancel()
 	ctx = ctxWithTimeout
 
 	if update.Message == nil {
 		logger.Error("HandleHelp called with nil Message")
-		return
+		return fmt.Errorf("nil message")
 	}
 	chatID := update.Message.Chat.ID
 
@@ -109,21 +108,22 @@ func (c *CommandHandler) HandleHelp(ctx context.Context, update tgbotapi.Update)
 	msg := tgbotapi.NewMessage(chatID, helpText)
 	msg.ParseMode = "Markdown"
 	c.h.send(ctx, msg)
+	return nil
 }
 
 // HandleInvite processes /invite command.
-func (c *CommandHandler) HandleInvite(ctx context.Context, update tgbotapi.Update) {
+func (c *CommandHandler) HandleInvite(ctx context.Context, update tgbotapi.Update) error {
 	ctxWithTimeout, cancel := c.h.withTimeout(ctx)
 	defer cancel()
 	ctx = ctxWithTimeout
 
 	if update.Message == nil {
 		logger.Error("HandleInvite called with nil Message")
-		return
+		return fmt.Errorf("nil message")
 	}
 	if update.Message.From == nil {
 		logger.Error("HandleInvite called with nil From")
-		return
+		return fmt.Errorf("nil from")
 	}
 
 	chatID := update.Message.Chat.ID
@@ -134,11 +134,14 @@ func (c *CommandHandler) HandleInvite(ctx context.Context, update tgbotapi.Updat
 		zap.String("username", username))
 
 	// Delegate to referral handler (no rate limit here)
-	c.h.referral.HandleInvite(ctx, chatID, username, 0)
+	if err := c.h.referral.HandleInvite(ctx, chatID, username, 0); err != nil {
+		return err
+	}
+	return nil
 }
 
 // handleShareStart processes deep links: t.me/{bot}?start=share_{invite_code}
-func (c *CommandHandler) handleShareStart(ctx context.Context, chatID int64, username, inviteCode string) {
+func (c *CommandHandler) handleShareStart(ctx context.Context, chatID int64, username, inviteCode string) error {
 	logger.Info("User clicked share link",
 		zap.Int64("chat_id", chatID),
 		zap.String("username", username),
@@ -157,7 +160,7 @@ func (c *CommandHandler) handleShareStart(ctx context.Context, chatID int64, use
 		msg := tgbotapi.NewMessage(chatID, text)
 		msg.ReplyMarkup = &keyboard
 		c.h.send(ctx, msg)
-		return
+		return nil
 	}
 
 	// Validate invite code
@@ -171,7 +174,7 @@ func (c *CommandHandler) handleShareStart(ctx context.Context, chatID int64, use
 		msg := tgbotapi.NewMessage(chatID, text)
 		msg.ReplyMarkup = &keyboard
 		c.h.send(ctx, msg)
-		return
+		return nil
 	}
 
 	// Cache invite code for 60 minutes for later reward
@@ -199,10 +202,11 @@ func (c *CommandHandler) handleShareStart(ctx context.Context, chatID int64, use
 	msg := tgbotapi.NewMessage(chatID, text)
 	msg.ReplyMarkup = &keyboard
 	c.h.send(ctx, msg)
+	return nil
 }
 
 // handleBindTrial binds a trial subscription from a deep link.
-func (c *CommandHandler) handleBindTrial(ctx context.Context, chatID int64, username, subscriptionID string) {
+func (c *CommandHandler) handleBindTrial(ctx context.Context, chatID int64, username, subscriptionID string) error {
 	ctxWithTimeout, cancel := c.h.withTimeout(ctx)
 	defer cancel()
 	ctx = ctxWithTimeout
@@ -218,7 +222,7 @@ func (c *CommandHandler) handleBindTrial(ctx context.Context, chatID int64, user
 			zap.Int64("chat_id", chatID),
 			zap.String("existing_sub_id", existing.SubscriptionID))
 		c.h.SendMessage(ctx, chatID, "❌ У вас уже есть активная подписка. Используйте /start для управления.")
-		return
+		return nil
 	}
 
 	sub, err := c.h.db.BindTrialSubscription(ctx, subscriptionID, chatID, username)
@@ -227,7 +231,7 @@ func (c *CommandHandler) handleBindTrial(ctx context.Context, chatID int64, user
 			zap.Error(err),
 			zap.Int64("chat_id", chatID))
 		c.h.SendMessage(ctx, chatID, "❌ Не удалось активировать подписку. Возможно, ссылка уже была использована.")
-		return
+		return fmt.Errorf("bind trial: %w", err)
 	}
 
 	logger.Info("Trial subscription bound successfully",
@@ -259,7 +263,7 @@ func (c *CommandHandler) handleBindTrial(ctx context.Context, chatID int64, user
 			logger.Warn("Failed to get invite for admin notification", zap.Error(err))
 		} else if invite != nil {
 			c.h.SendMessage(ctx, c.h.cfg.TelegramAdminID,
-				fmt.Sprintf("🔔 Новый пользователь активировал подписку по реферальной ссылке!\n\n- Username: @%s\n- Telegram ID: %d\n- Пригласил: %d",
+				fmt.Sprintf("🔔 Новый пользователь активировал подписку по реферационной ссылке!\n\n- Username: @%s\n- Telegram ID: %d\n- Пригласил: %d",
 					username, chatID, invite.ReferrerTGID))
 		}
 	}
@@ -274,4 +278,6 @@ func (c *CommandHandler) handleBindTrial(ctx context.Context, chatID int64, user
 			logger.Info("Referrer notified", zap.Int64("referrer_id", sub.ReferredBy))
 		}
 	}
+
+	return nil
 }
