@@ -72,6 +72,8 @@ func TestGoroutineLeak_SubscriptionService(t *testing.T) {
 
 	var wg sync.WaitGroup
 	var closeOnce sync.Once
+	closeErrChan := make(chan error, 10) // buffered for 10 goroutines
+
 	for i := 0; i < 10; i++ {
 		wg.Add(1)
 		go func() {
@@ -80,7 +82,8 @@ func TestGoroutineLeak_SubscriptionService(t *testing.T) {
 			if db != nil {
 				if err := db.Close(); err != nil {
 					closeOnce.Do(func() {
-						t.Fatalf("failed to close database: %v", err)
+						// Send error to channel instead of calling t.Fatalf directly
+						closeErrChan <- err
 					})
 				}
 			}
@@ -88,6 +91,16 @@ func TestGoroutineLeak_SubscriptionService(t *testing.T) {
 	}
 
 	wg.Wait()
+
+	// Check if any goroutine reported a close error
+	select {
+	case err := <-closeErrChan:
+		t.Fatalf("failed to close database: %v", err)
+	default:
+		// No error
+	}
+
+	close(closeErrChan)
 
 	runtime.GC()
 	time.Sleep(10 * time.Millisecond)
