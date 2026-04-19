@@ -2,75 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
 ### Added
-- Path traversal validation in `extra_servers.txt` parser (SEC-01)
-- HTTPS enforcement for sensitive URLs (XUI_HOST, webhook URLs)
-- Full security audit report: `docs/review-sf35.md`
+- Centralized cache invalidation via `SubscriptionService.InvalidateSubscription()` (P1-2)
+- Background orphan reconciler for XUI clients (P1-3): periodic scan & cleanup of DB entries whose clients are missing in XUI
+- Context-aware singleflight for subscription proxy (P1-4): `SingleFlight.Do(ctx, key, fn)` respects context cancellation, preventing goroutine leaks on shutdown
 
 ### Changed
-- Subscription proxy extra servers path validation
+- **Architecture: Handler decomposition (P1-1):** Split monolithic `Handler` (331 lines) into `CommandHandler`, `CallbackHandler`, `SubscriptionHandler`. `Handler` now acts as a facade. Removed dead files: `internal/bot/commands.go`, `internal/bot/message.go`, `internal/bot/subscription.go`, `internal/bot/callbacks.go`, `internal/bot/admin_handler.go`. Full backward compatibility.
+- Fixed data race in `HandleBroadcast` by switching to `int64` + `sync/atomic` (P1-1)
+- Implemented `StartCacheCleanup` (was a no-op) (P1-1)
+- Removed unused `loadReferralCacheIfNeeded` (P1-1)
 
 ### Fixed
-- Security: Prevent directory traversal via `SUB_EXTRA_SERVERS_FILE`
+- Race condition in admin broadcast that could duplicate cancellation messages and corrupt counters under concurrency
+- Cache invalidation inconsistencies: all invalidations now flow through `SubscriptionService.InvalidateSubscription`
+- Potential nil map write in `checkAdminSendRateLimit` for handlers constructed without `NewHandler` (lazy init added)
+- Goroutine leak in subscription proxy when request context is cancelled (P1-4): now uses context-aware singleflight that releases waiters immediately on cancellation
 
-## [v2.3.0] - 2026-04-10
+### Security
+- Broadcast cancellation message is now sent exactly once, preventing duplicate messages due to concurrent goroutine exits
 
-### Added
-- Subscription plan field (free/basic/premium/vip) with `/plan` admin command
-- Extra servers and headers support in subscription proxy
-- Configurable trial duration and rate limiting
-- In-memory referral cache with periodic sync
-- Admin command rate limiting (`/send` cooldown 30s)
-
-### Changed
-- Increased broadcast delay to reduce Telegram flood risk
-- Improved circuit breaker for 3x-ui client
-- Enhanced error classification and recovery
-
-### Fixed
-- Trial subscription binding race condition
-- Cache invalidation on subscription deletion
-
-## [v2.2.0] - 2026-02-15
-
-### Added
-- Trial landing page (`/i/{code}`) with Happ deep-links
-- QR code generation for subscription import
-- Rate limiting per user (token bucket)
-- Circuit breaker for 3x-ui API calls
-- Daily database backups with 14-day retention
-- Health check endpoints (`/healthz`, `/readyz`)
-
-### Changed
-- Migrated from custom HTTP client to telegram-bot-api/v5
-- Improved graceful shutdown coordination
-
-### Fixed
-- Subscription race condition on concurrent creation
-- Memory leak in pending invites cache
-
-## [v2.1.0] - 2025-12-01
-
-### Added
-- Referral system with invite codes
-- Admin broadcast functionality
-- Subscription proxy endpoint (`/sub/{subID}`)
-- Sentry error tracking integration
-
-### Changed
-- Switched from `mapstructure` to custom flag package for config
-- Improved logging structure with Zap
-
-## [v2.0.0] - 2025-10-01
-
-### Added
-- Initial public release
-- Full 3x-ui integration with auto-login
-- SQLite database with GORM
-- Docker support with multi-stage builds
-- Comprehensive test suite (85%+ coverage)

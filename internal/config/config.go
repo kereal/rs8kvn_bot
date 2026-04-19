@@ -325,6 +325,14 @@ func (c *Config) validate() error {
 		return fmt.Errorf("TRIAL_RATE_LIMIT must be between 1 and 100")
 	}
 
+	// SubExtraServersFile validation (only if file provided)
+	if c.SubExtraServersFile != "" {
+		// Path traversal protection
+		if strings.Contains(c.SubExtraServersFile, "..") {
+			return fmt.Errorf("SUB_EXTRA_SERVERS_FILE cannot contain '..' (path traversal)")
+		}
+	}
+
 	return nil
 }
 

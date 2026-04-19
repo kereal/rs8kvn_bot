@@ -10,21 +10,35 @@ import (
 
 func TestLoad_DefaultValues(t *testing.T) {
 
-	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
-	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
-	os.Setenv("XUI_HOST", "http://localhost:2053")
-	os.Setenv("XUI_USERNAME", "admin")
-	os.Setenv("XUI_PASSWORD", "password")
-	os.Setenv("XUI_INBOUND_ID", "1")
-	os.Setenv("LOG_LEVEL", "info")
+	require.NoError(t, os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz"))
+	require.NoError(t, os.Setenv("TELEGRAM_ADMIN_ID", "123456"))
+	require.NoError(t, os.Setenv("XUI_HOST", "http://localhost:2053"))
+	require.NoError(t, os.Setenv("XUI_USERNAME", "admin"))
+	require.NoError(t, os.Setenv("XUI_PASSWORD", "password"))
+	require.NoError(t, os.Setenv("XUI_INBOUND_ID", "1"))
+	require.NoError(t, os.Setenv("LOG_LEVEL", "info"))
 	defer func() {
-		os.Unsetenv("TELEGRAM_BOT_TOKEN")
-		os.Unsetenv("TELEGRAM_ADMIN_ID")
-		os.Unsetenv("XUI_HOST")
-		os.Unsetenv("XUI_USERNAME")
-		os.Unsetenv("XUI_PASSWORD")
-		os.Unsetenv("XUI_INBOUND_ID")
-		os.Unsetenv("LOG_LEVEL")
+		if err := os.Unsetenv("TELEGRAM_BOT_TOKEN"); err != nil {
+			t.Logf("Warning: Unsetenv failed: %v", err)
+		}
+		if err := os.Unsetenv("TELEGRAM_ADMIN_ID"); err != nil {
+			t.Logf("Warning: Unsetenv failed: %v", err)
+		}
+		if err := os.Unsetenv("XUI_HOST"); err != nil {
+			t.Logf("Warning: Unsetenv failed: %v", err)
+		}
+		if err := os.Unsetenv("XUI_USERNAME"); err != nil {
+			t.Logf("Warning: Unsetenv failed: %v", err)
+		}
+		if err := os.Unsetenv("XUI_PASSWORD"); err != nil {
+			t.Logf("Warning: Unsetenv failed: %v", err)
+		}
+		if err := os.Unsetenv("XUI_INBOUND_ID"); err != nil {
+			t.Logf("Warning: Unsetenv failed: %v", err)
+		}
+		if err := os.Unsetenv("LOG_LEVEL"); err != nil {
+			t.Logf("Warning: Unsetenv failed: %v", err)
+		}
 	}()
 
 	cfg, err := Load()

@@ -858,6 +858,7 @@ func TestHandleMySubscription_ShowLoadingFails(t *testing.T) {
 	mockBot := testutil.NewMockBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
 	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
 
 	mockBot.SendError = errors.New("send failed")
 

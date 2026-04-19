@@ -31,7 +31,7 @@ func TestMigration_Idempotency(t *testing.T) {
 	err = db1.CreateSubscription(ctx, sub)
 	require.NoError(t, err)
 
-	db1.Close()
+	require.NoError(t, db1.Close())
 
 	db2, err := NewService(dbPath)
 	require.NoError(t, err)
@@ -40,7 +40,7 @@ func TestMigration_Idempotency(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "testuser", retrieved.Username)
 
-	db2.Close()
+	require.NoError(t, db2.Close())
 }
 
 func TestMigration_AddNewTable(t *testing.T) {
@@ -66,7 +66,7 @@ func TestMigration_AddNewTable(t *testing.T) {
 
 	assert.Equal(t, 0, count)
 
-	db.Close()
+	require.NoError(t, db.Close())
 }
 
 func TestMigration_PreserveDataOnUpgrade(t *testing.T) {
@@ -90,7 +90,7 @@ func TestMigration_PreserveDataOnUpgrade(t *testing.T) {
 	err = db1.CreateSubscription(ctx, sub)
 	require.NoError(t, err)
 
-	db1.Close()
+	require.NoError(t, db1.Close())
 
 	db2, err := NewService(dbPath)
 	require.NoError(t, err)
@@ -100,7 +100,7 @@ func TestMigration_PreserveDataOnUpgrade(t *testing.T) {
 	assert.Equal(t, "existing_user", retrieved.Username)
 	assert.Equal(t, "active", retrieved.Status)
 
-	db2.Close()
+	require.NoError(t, db2.Close())
 }
 
 func TestMigration_RunMultipleTimes(t *testing.T) {
@@ -111,7 +111,7 @@ func TestMigration_RunMultipleTimes(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		db, err := NewService(dbPath)
 		require.NoError(t, err, "Migration should succeed on attempt %d", i+1)
-		db.Close()
+		require.NoError(t, db.Close())
 	}
 }
 
@@ -121,8 +121,10 @@ func TestMigration_InvalidSchema(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	f, err := os.Create(dbPath)
 	require.NoError(t, err)
-	f.WriteString("invalid sqlite content")
-	f.Close()
+	if _, err := f.WriteString("invalid sqlite content"); err != nil {
+		t.Logf("Warning: failed to write to file: %v", err)
+	}
+	require.NoError(t, f.Close())
 
 	_, err = NewService(dbPath)
 	assert.Error(t, err)
@@ -148,5 +150,5 @@ func TestMigration_SchemaVersionTracking(t *testing.T) {
 
 	assert.GreaterOrEqual(t, version, 0)
 
-	db.Close()
+	require.NoError(t, db.Close())
 }

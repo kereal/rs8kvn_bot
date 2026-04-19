@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"rs8kvn_bot/internal/config"
@@ -179,8 +181,6 @@ func escapeMarkdown(text string) string {
 
 // HandleBroadcast handles the /broadcast command for admins to send messages to all users.
 func (h *Handler) HandleBroadcast(ctx context.Context, update tgbotapi.Update) {
-	// Broadcast can run for minutes (50ms delay per user × thousands of users),
-	// so we use a longer timeout than the default 30s handlerTimeout.
 	const broadcastTimeout = 5 * time.Minute
 	ctx, cancel := context.WithTimeout(ctx, broadcastTimeout)
 	defer cancel()
@@ -192,35 +192,27 @@ func (h *Handler) HandleBroadcast(ctx context.Context, update tgbotapi.Update) {
 
 	chatID := update.Message.Chat.ID
 
-	// Verify admin access
 	if !h.isAdmin(chatID) {
 		logger.Warn("Non-admin user attempted to access /broadcast", zap.Int64("chat_id", chatID))
 		return
 	}
 
-	// Get the message to broadcast
 	message := update.Message.CommandArguments()
 	if message == "" {
 		h.SendMessage(ctx, chatID, "❌ Использование: /broadcast <сообщение>\n\nПример: /broadcast Привет всем!")
 		return
 	}
-
 	if len(message) > config.MaxTelegramMessageLen {
-		h.SendMessage(ctx, chatID, fmt.Sprintf(
-			"❌ Сообщение слишком длинное (%d символов).\n\nМаксимум: %d символов.",
-			len(message), config.MaxTelegramMessageLen,
-		))
+		h.SendMessage(ctx, chatID, fmt.Sprintf("❌ Сообщение слишком длинное (%d символов).\n\nМаксимум: %d символов.", len(message), config.MaxTelegramMessageLen))
 		return
 	}
 
-	// Get total count for progress reporting
 	totalCount, err := h.db.GetTotalTelegramIDCount(ctx)
 	if err != nil {
 		logger.Error("Failed to count telegram IDs", zap.Error(err))
 		h.SendMessage(ctx, chatID, "❌ Ошибка получения списка пользователей")
 		return
 	}
-
 	if totalCount == 0 {
 		h.SendMessage(ctx, chatID, "❌ Нет пользователей для рассылки")
 		return
@@ -228,65 +220,144 @@ func (h *Handler) HandleBroadcast(ctx context.Context, update tgbotapi.Update) {
 
 	h.SendMessage(ctx, chatID, fmt.Sprintf("📤 Начинаю рассылку для %d пользователей...", totalCount))
 
-	// Process in batches to avoid loading all IDs into memory
-	const batchSize = 100
-	successCount := 0
-	failCount := 0
-	offset := 0
+	const (
+		batchSize            = 100
+		broadcastConcurrency = 10 // max concurrent sends per batch
+	)
 
+	var (
+		successCount int64 = 0
+		failCount    int64 = 0
+		batchErr     error
+		cancelled    bool
+	)
+	offset := 0
+forLoop:
 	for offset < int(totalCount) {
-		// Get batch of IDs
+		// Check cancellation before fetching next batch
+		select {
+		case <-ctx.Done():
+			cancelled = true
+			break forLoop
+		default:
+		}
+
 		ids, err := h.db.GetTelegramIDsBatch(ctx, offset, batchSize)
 		if err != nil {
-			logger.Error("Failed to get telegram IDs batch", zap.Error(err), zap.Int("offset", offset))
-			break
+			logger.Error("Failed to get telegram IDs batch", zap.Error(err))
+			batchErr = err
+			break forLoop
 		}
+
+		// Process batch with bounded concurrency
+		var wg sync.WaitGroup
+		sem := make(chan struct{}, broadcastConcurrency)
 
 		for _, telegramID := range ids {
-			// Check context cancellation to allow graceful shutdown
+			// Attempt to acquire semaphore with cancellation support
 			select {
-			case <-ctx.Done():
-				logger.Warn("Broadcast cancelled due to shutdown")
-				h.SendMessage(ctx, chatID, fmt.Sprintf(
-					"⚠️ Рассылка прервана!\n\n📤 Отправлено: %d\n❌ Ошибок: %d\n👥 Осталось: %d",
-					successCount,
-					failCount,
-					int(totalCount)-successCount-failCount,
-				))
-				return
-			default:
-			}
+			case sem <- struct{}{}: // acquired
+				wg.Add(1)
+				go func(tg int64) {
+					defer wg.Done()
+					defer func() { <-sem }() // release
 
-			// Escape markdown to prevent injection
-			escapedMessage := escapeMarkdown(message)
-			msg := tgbotapi.NewMessage(telegramID, escapedMessage)
-			msg.ParseMode = "MarkdownV2"
-			msg.DisableWebPagePreview = true
-			if err := h.sendWithError(ctx, msg); err != nil {
-				logger.Warn("Failed to send broadcast message",
-					zap.Int64("telegram_id", telegramID),
-					zap.Error(err))
-				failCount++
-			} else {
-				successCount++
+					// Check context inside goroutine before sending
+					select {
+					case <-ctx.Done():
+						return
+					default:
+					}
+
+					escapedMessage := escapeMarkdown(message)
+					msg := tgbotapi.NewMessage(tg, escapedMessage)
+					msg.ParseMode = "MarkdownV2"
+					msg.DisableWebPagePreview = true
+					if err := h.sendWithError(ctx, msg); err != nil {
+						atomic.AddInt64(&failCount, 1)
+					} else {
+						atomic.AddInt64(&successCount, 1)
+					}
+					time.Sleep(50 * time.Millisecond)
+				}(telegramID)
+			case <-ctx.Done():
+				// Cancelled while waiting for semaphore; stop launching new tasks
+				cancelled = true
+				break forLoop
 			}
-			// Small delay to avoid rate limiting
-			time.Sleep(50 * time.Millisecond)
 		}
 
+		wg.Wait() // wait for batch to complete
 		offset += batchSize
 	}
 
-	h.SendMessage(ctx, chatID, fmt.Sprintf(
-		"✅ Рассылка завершена!\n\n📤 Отправлено: %d\n❌ Ошибок: %d\n👥 Всего пользователей: %d",
-		successCount,
-		failCount,
+	// If we exited the loop due to cancellation or batch error, handle accordingly
+	if cancelled {
+		h.SendMessage(ctx, chatID, fmt.Sprintf(`⚠️ Рассылка прервана!
+
+📤 Отправлено: %d
+❌ Ошибок: %d
+👥 Осталось: %d`,
+			atomic.LoadInt64(&successCount),
+			atomic.LoadInt64(&failCount),
+			int(totalCount)-int(atomic.LoadInt64(&successCount)+atomic.LoadInt64(&failCount))))
+		return
+	}
+	if batchErr != nil {
+		h.SendMessage(ctx, chatID, fmt.Sprintf(`❌ Рассылка прервана из-за ошибки!
+
+📤 Отправлено: %d
+❌ Ошибок отправки: %d
+👥 Всего пользователей: %d
+
+Ошибка: %v`,
+			atomic.LoadInt64(&successCount),
+			atomic.LoadInt64(&failCount),
+			totalCount,
+			batchErr,
+		))
+		logger.Error("Broadcast failed due to batch retrieval error",
+			zap.Error(batchErr),
+			zap.Int64("success", atomic.LoadInt64(&successCount)),
+			zap.Int64("failed", atomic.LoadInt64(&failCount)),
+			zap.Int64("total", totalCount))
+		return
+	}
+
+	if batchErr != nil {
+		// Batch retrieval failed — report partial/failure with error details
+		h.SendMessage(ctx, chatID, fmt.Sprintf(`❌ Рассылка прервана из-за ошибки!
+
+📤 Отправлено: %d
+❌ Ошибок отправки: %d
+👥 Всего пользователей: %d
+
+Ошибка: %v`,
+			atomic.LoadInt64(&successCount),
+			atomic.LoadInt64(&failCount),
+			totalCount,
+			batchErr,
+		))
+		logger.Error("Broadcast failed due to batch retrieval error",
+			zap.Error(batchErr),
+			zap.Int64("success", atomic.LoadInt64(&successCount)),
+			zap.Int64("failed", atomic.LoadInt64(&failCount)),
+			zap.Int64("total", totalCount))
+		return
+	}
+
+	h.SendMessage(ctx, chatID, fmt.Sprintf(`✅ Рассылка завершена!
+
+📤 Отправлено: %d
+❌ Ошибок: %d
+👥 Всего пользователей: %d`,
+		atomic.LoadInt64(&successCount),
+		atomic.LoadInt64(&failCount),
 		totalCount,
 	))
-
 	logger.Info("Broadcast completed",
-		zap.Int("success", successCount),
-		zap.Int("failed", failCount),
+		zap.Int64("success", atomic.LoadInt64(&successCount)),
+		zap.Int64("failed", atomic.LoadInt64(&failCount)),
 		zap.Int64("total", totalCount))
 }
 

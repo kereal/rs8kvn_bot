@@ -71,13 +71,18 @@ func TestGoroutineLeak_SubscriptionService(t *testing.T) {
 	initialGoroutines := runtime.NumGoroutine()
 
 	var wg sync.WaitGroup
+	var closeOnce sync.Once
 	for i := 0; i < 10; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			db, _ := database.NewService(t.TempDir() + "/test_goroutine_leak.db")
 			if db != nil {
-				db.Close()
+				if err := db.Close(); err != nil {
+					closeOnce.Do(func() {
+						t.Fatalf("failed to close database: %v", err)
+					})
+				}
 			}
 		}()
 	}

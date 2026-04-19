@@ -30,11 +30,20 @@ func init() {
 func setupTestDB(t *testing.T) *database.Service {
 	t.Helper()
 
-	origWd, _ := os.Getwd()
-	defer os.Chdir(origWd)
+	origWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Failed to get working directory: %v", err)
+	}
+	defer func() {
+		if err := os.Chdir(origWd); err != nil {
+			t.Logf("Warning: failed to chdir back to %s: %v", origWd, err)
+		}
+	}()
 
 	projectRoot := findProjectRoot()
-	os.Chdir(projectRoot)
+	if err := os.Chdir(projectRoot); err != nil {
+		t.Fatalf("Failed to change to project root %s: %v", projectRoot, err)
+	}
 
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	db, err := database.NewService(dbPath)
@@ -82,7 +91,9 @@ func waitForServerReady(t *testing.T, addr string, timeout time.Duration) {
 	for time.Now().Before(deadline) {
 		resp, err := http.Get(url)
 		if err == nil {
-			resp.Body.Close()
+			if err := resp.Body.Close(); err != nil {
+				t.Logf("Warning: failed to close health check body: %v", err)
+			}
 			if resp.StatusCode == http.StatusOK {
 				return
 			}
@@ -175,15 +186,15 @@ func setupRealXUIEnv(t *testing.T, handlers map[string]http.HandlerFunc) *realXU
 	defaults := map[string]http.HandlerFunc{
 		"/login": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(xui.APIResponse{Success: true, Msg: "Login successful"})
+			_ = json.NewEncoder(w).Encode(xui.APIResponse{Success: true, Msg: "Login successful"})
 		},
 		"/panel/api/server/status": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(xui.APIResponse{Success: true})
+			_ = json.NewEncoder(w).Encode(xui.APIResponse{Success: true})
 		},
 		"/panel/api/inbounds/addClient": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(xui.APIResponse{Success: true, Msg: "Client added"})
+			_ = json.NewEncoder(w).Encode(xui.APIResponse{Success: true, Msg: "Client added"})
 		},
 	}
 
@@ -256,5 +267,7 @@ func setupRealXUIEnv(t *testing.T, handlers map[string]http.HandlerFunc) *realXU
 
 func (e *realXUIEnv) Close() {
 	e.server.Close()
-	e.db.Close()
+	if err := e.db.Close(); err != nil {
+		e.t.Logf("Warning: failed to close database: %v", err)
+	}
 }
