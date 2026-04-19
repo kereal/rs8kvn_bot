@@ -15,48 +15,53 @@ import (
 	"gorm.io/gorm"
 )
 
+// SubscriptionHandler groups subscription-related business logic.
+type SubscriptionHandler struct {
+	h *Handler // parent
+}
+
+// NewSubscriptionHandler creates a new SubscriptionHandler.
+func NewSubscriptionHandler(parent *Handler) *SubscriptionHandler {
+	return &SubscriptionHandler{h: parent}
+}
+
 // getSubscriptionWithCache retrieves a subscription using cache first, then DB.
-func (h *Handler) getSubscriptionWithCache(ctx context.Context, chatID int64) (*database.Subscription, error) {
+func (sh *SubscriptionHandler) getSubscriptionWithCache(ctx context.Context, chatID int64) (*database.Subscription, error) {
 	// Try cache first
-	if sub := h.cache.Get(chatID); sub != nil {
+	if sub := sh.h.cache.Get(chatID); sub != nil {
 		if sub.Status == "active" {
 			return sub, nil
 		}
-		// Stale cache entry (non-active subscription) — invalidate and fall through to DB
-		h.invalidateCache(chatID)
+		// Stale cache entry (non-active) — invalidate and fall through
+		sh.h.invalidateCache(chatID)
 	}
 
 	// Cache miss, query database
-	sub, err := h.db.GetByTelegramID(ctx, chatID)
+	sub, err := sh.h.db.GetByTelegramID(ctx, chatID)
 	if err != nil {
 		return nil, err
 	}
 
 	// Store in cache only if active
 	if sub != nil && sub.Status == "active" {
-		h.cache.Set(chatID, sub)
+		sh.h.cache.Set(chatID, sub)
 	}
 
 	return sub, nil
 }
 
-// invalidateCache removes a subscription from cache (call after updates/deletes).
-func (h *Handler) invalidateCache(chatID int64) {
-	h.cache.Invalidate(chatID)
-}
-
-// Create subscription
-func (h *Handler) handleCreateSubscription(ctx context.Context, chatID int64, username string, messageID int) {
+// handleCreateSubscription handles the "create_subscription" callback or deep link flow.
+func (sh *SubscriptionHandler) handleCreateSubscription(ctx context.Context, chatID int64, username string, messageID int) {
 	logger.Info("User requesting subscription", zap.String("username", username))
 
-	// Prevent duplicate subscription creation (double-click protection)
-	if _, loaded := h.inProgressSyncMap.LoadOrStore(chatID, true); loaded {
+	// Prevent duplicate creation
+	if _, loaded := sh.h.inProgressSyncMap.LoadOrStore(chatID, true); loaded {
 		logger.Info("Subscription creation already in progress", zap.Int64("chat_id", chatID))
 		return
 	}
-	defer h.inProgressSyncMap.Delete(chatID)
+	defer sh.h.inProgressSyncMap.Delete(chatID)
 
-	sub, err := h.getSubscriptionWithCache(ctx, chatID)
+	sub, err := sh.getSubscriptionWithCache(ctx, chatID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			logger.Info("No existing subscription, creating new one", zap.String("username", username))
@@ -64,57 +69,54 @@ func (h *Handler) handleCreateSubscription(ctx context.Context, chatID int64, us
 			logger.Error("Failed to check subscription", zap.Error(err))
 			errMsg := msg(MsgSubTempError)
 			editMsg := tgbotapi.NewEditMessageText(chatID, messageID, errMsg)
-			h.safeSend(editMsg)
+			sh.h.safeSend(editMsg)
 			return
 		}
 	} else if sub != nil {
-		// Return existing active subscription - edit the message
-		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgSubCreatedSuccess, h.cfg.TrafficLimitGB, sub.SubscriptionURL))
+		// Existing active subscription
+		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgSubCreatedSuccess, sh.h.cfg.TrafficLimitGB, sub.SubscriptionURL))
 		editMsg.ParseMode = "Markdown"
 		editMsg.DisableWebPagePreview = true
-		kb := h.getQRKeyboard()
+		kb := sh.h.getQRKeyboard()
 		editMsg.ReplyMarkup = &kb
-		h.safeSend(editMsg)
+		sh.h.safeSend(editMsg)
 		return
 	}
 
-	// No existing subscription, create new one
-	h.createSubscription(ctx, chatID, username, messageID)
+	// No existing, create new
+	sh.createSubscription(ctx, chatID, username, messageID)
 }
 
-// handleMySubscription handles the "my subscription" callback.
-func (h *Handler) handleMySubscription(ctx context.Context, chatID int64, username string, messageID int) {
+// handleMySubscription displays user's subscription details.
+func (sh *SubscriptionHandler) handleMySubscription(ctx context.Context, chatID int64, username string, messageID int) {
 	logger.Info("User checking subscription status", zap.String("username", username))
 
-	// Show loading message
-	messageID = h.showLoadingMessage(chatID, messageID)
+	messageID = sh.h.showLoadingMessage(chatID, messageID)
 	if messageID == 0 {
 		return
 	}
 
-	sub, traffic, err := h.subscriptionService.GetWithTraffic(ctx, chatID)
+	sub, traffic, err := sh.h.subscriptionService.GetWithTraffic(ctx, chatID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgSubNoActive))
-			h.safeSend(editMsg)
+			sh.h.safeSend(editMsg)
 			return
 		}
 		logger.Error("Failed to get subscription", zap.Error(err))
 		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgSubTempError))
-		h.safeSend(editMsg)
+		sh.h.safeSend(editMsg)
 		return
 	}
 
 	if sub.Status != "active" {
 		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgSubNoActive))
-		h.safeSend(editMsg)
+		sh.h.safeSend(editMsg)
 		return
 	}
 
-	// Format traffic info using data from service layer
 	trafficInfo := fmt.Sprintf("%.2f из %d Гб (%.0f%%)", traffic.UsedGB, traffic.LimitGB, traffic.Percentage)
 
-	// Build message
 	messageText := fmt.Sprintf(
 		"📋 *Ваша подписка*\n\n📊 Трафик: %s\n%s\n\n📅 Создана: %s\n%s\n\n🔗 Ссылка\n`%s`",
 		trafficInfo,
@@ -127,33 +129,30 @@ func (h *Handler) handleMySubscription(ctx context.Context, chatID int64, userna
 	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, messageText)
 	editMsg.ParseMode = "Markdown"
 	editMsg.DisableWebPagePreview = true
-	kb := h.getQRKeyboard()
+	kb := sh.h.getQRKeyboard()
 	editMsg.ReplyMarkup = &kb
-	h.safeSend(editMsg)
+	sh.h.safeSend(editMsg)
 }
 
-// handleQRCode handles the "qr_code" callback - generates and sends QR code image.
-func (h *Handler) handleQRCode(ctx context.Context, chatID int64, username string, messageID int) {
+// handleQRCode generates and sends QR code for subscription.
+func (sh *SubscriptionHandler) handleQRCode(ctx context.Context, chatID int64, username string, messageID int) {
 	logger.Info("User requesting QR code", zap.String("username", username))
 
-	// Get subscription
-	sub, err := h.db.GetByTelegramID(ctx, chatID)
+	sub, err := sh.h.db.GetByTelegramID(ctx, chatID)
 	if err != nil || sub == nil {
 		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgSubNoActive))
-		h.safeSend(editMsg)
+		sh.h.safeSend(editMsg)
 		return
 	}
 
-	// Generate QR code
 	pngBytes, err := utils.GenerateQRCodePNG(sub.SubscriptionURL)
 	if err != nil {
 		logger.Error("Failed to generate QR code", zap.Error(err))
 		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgQRCodeFailed))
-		h.safeSend(editMsg)
+		sh.h.safeSend(editMsg)
 		return
 	}
 
-	// Send QR code as photo (instant, no delete)
 	photo := tgbotapi.NewPhoto(chatID, tgbotapi.FileBytes{
 		Name:  "qr.png",
 		Bytes: pngBytes,
@@ -168,37 +167,30 @@ func (h *Handler) handleQRCode(ctx context.Context, chatID int64, username strin
 	)
 	photo.ReplyMarkup = &backKeyboard
 
-	if _, err := h.bot.Send(photo); err != nil {
+	if _, err := sh.h.bot.Send(photo); err != nil {
 		logger.Error("Failed to send QR photo", zap.Error(err))
 	}
 }
 
-// handleBackToSubscription handles the "back_to_subscription" callback.
-// Deletes the QR photo message - the subscription message remains visible above.
-func (h *Handler) handleBackToSubscription(_ context.Context, chatID int64, username string, messageID int) {
+// handleBackToSubscription deletes the QR photo message.
+func (sh *SubscriptionHandler) handleBackToSubscription(_ context.Context, chatID int64, username string, messageID int) {
 	logger.Info("User closing QR code", zap.String("username", username))
-
-	// Delete the QR photo message
 	deleteMsg := tgbotapi.NewDeleteMessage(chatID, messageID)
-	if _, err := h.bot.Request(deleteMsg); err != nil {
+	if _, err := sh.h.bot.Request(deleteMsg); err != nil {
 		logger.Warn("Failed to delete QR message", zap.Error(err))
 	}
-	// Subscription message is already visible above, no need to send anything
 }
 
 // sendQRCode generates and sends a QR code for the given URL.
-// Used for both subscription and invite link QR codes.
-func (h *Handler) sendQRCode(ctx context.Context, chatID int64, messageID int, url string, caption string) {
-	// Generate QR code
+func (sh *SubscriptionHandler) sendQRCode(ctx context.Context, chatID int64, messageID int, url string, caption string) {
 	pngBytes, err := utils.GenerateQRCodePNG(url)
 	if err != nil {
 		logger.Error("Failed to generate QR code", zap.Error(err))
 		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgQRCodeFailed))
-		h.safeSend(editMsg)
+		sh.h.safeSend(editMsg)
 		return
 	}
 
-	// Send QR code as photo
 	photo := tgbotapi.NewPhoto(chatID, tgbotapi.FileBytes{
 		Name:  "qr.png",
 		Bytes: pngBytes,
@@ -206,7 +198,6 @@ func (h *Handler) sendQRCode(ctx context.Context, chatID int64, messageID int, u
 	photo.Caption = caption
 	photo.ParseMode = "Markdown"
 
-	// Keyboard with back button
 	backKeyboard := tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData("⬅️ "+msg(MsgQRCodeBack), "back_to_invite"),
@@ -214,59 +205,52 @@ func (h *Handler) sendQRCode(ctx context.Context, chatID int64, messageID int, u
 	)
 	photo.ReplyMarkup = &backKeyboard
 
-	if _, err := h.bot.Send(photo); err != nil {
+	if _, err := sh.h.bot.Send(photo); err != nil {
 		logger.Error("Failed to send QR photo", zap.Error(err))
 	}
 }
 
-// handleBackToInvite handles the "back_to_invite" callback.
-// Deletes the QR photo message and returns to invite link message.
-func (h *Handler) handleBackToInvite(_ context.Context, chatID int64, username string, messageID int) {
+// handleBackToInvite deletes the QR photo and returns to invite.
+func (sh *SubscriptionHandler) handleBackToInvite(_ context.Context, chatID int64, username string, messageID int) {
 	logger.Info("User closing QR code", zap.String("username", username))
-
-	// Delete the QR photo message
 	deleteMsg := tgbotapi.NewDeleteMessage(chatID, messageID)
-	if _, err := h.bot.Request(deleteMsg); err != nil {
+	if _, err := sh.h.bot.Request(deleteMsg); err != nil {
 		logger.Warn("Failed to delete QR message", zap.Error(err))
 	}
-	// Invite message is already visible above, no need to send anything
 }
 
-// createSubscription creates a new subscription for the user.
-// This operation is atomic with rollback: if database save fails,
-// the client is removed from the 3x-ui panel to prevent orphan records.
-func (h *Handler) createSubscription(ctx context.Context, chatID int64, username string, messageID int) {
-	messageID = h.showLoadingMessage(chatID, messageID)
+// createSubscription creates a new subscription (atomic with rollback).
+func (sh *SubscriptionHandler) createSubscription(ctx context.Context, chatID int64, username string, messageID int) {
+	messageID = sh.h.showLoadingMessage(chatID, messageID)
 	if messageID == 0 {
 		return
 	}
 
 	logger.Info("Creating subscription",
 		zap.String("username", username),
-		zap.Int("traffic_gb", h.cfg.TrafficLimitGB))
+		zap.Int("traffic_gb", sh.h.cfg.TrafficLimitGB))
 
-	result, err := h.subscriptionService.Create(ctx, chatID, username)
+	result, err := sh.h.subscriptionService.Create(ctx, chatID, username)
 	if err != nil {
-		h.handleCreateError(ctx, chatID, messageID, username, err)
+		sh.handleCreateError(ctx, chatID, messageID, username, err)
 		return
 	}
 
-	h.pendingMu.Lock()
-	if pending, ok := h.pendingInvites[chatID]; ok {
+	sh.h.pendingMu.Lock()
+	if pending, ok := sh.h.pendingInvites[chatID]; ok {
 		if time.Now().Before(pending.expiresAt) {
-			invite, _ := h.db.GetInviteByCode(ctx, pending.code)
+			invite, _ := sh.h.db.GetInviteByCode(ctx, pending.code)
 			if invite != nil && invite.ReferrerTGID > 0 {
 				result.Subscription.ReferredBy = invite.ReferrerTGID
-				// Increment referral cache
-				h.IncrementReferralCount(invite.ReferrerTGID)
+				sh.h.IncrementReferralCount(invite.ReferrerTGID)
 			}
 		}
-		delete(h.pendingInvites, chatID)
+		delete(sh.h.pendingInvites, chatID)
 	}
-	h.pendingMu.Unlock()
+	sh.h.pendingMu.Unlock()
 
-	h.cache.Set(chatID, result.Subscription)
-	if err := h.notifyAdmin(ctx, username, chatID, result.SubscriptionURL, time.Time{}); err != nil {
+	sh.h.cache.Set(chatID, result.Subscription)
+	if err := sh.h.notifyAdmin(ctx, username, chatID, result.SubscriptionURL, time.Time{}); err != nil {
 		logger.Warn("Failed to notify admin of new subscription", zap.Error(err))
 	}
 
@@ -275,18 +259,19 @@ func (h *Handler) createSubscription(ctx context.Context, chatID int64, username
 			tgbotapi.NewInlineKeyboardButtonData("🏠 В начало", "back_to_start"),
 		),
 	)
-	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, h.getHelpText(h.cfg.TrafficLimitGB, result.SubscriptionURL))
+	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, sh.h.getHelpText(sh.h.cfg.TrafficLimitGB, result.SubscriptionURL))
 	editMsg.ParseMode = "Markdown"
 	editMsg.DisableWebPagePreview = true
 	editMsg.ReplyMarkup = &backKeyboard
-	h.safeSend(editMsg)
+	sh.h.safeSend(editMsg)
 
 	logger.Info("Subscription created successfully",
 		zap.String("username", username),
 		zap.Int64("chat_id", chatID))
 }
 
-func (h *Handler) handleCreateError(ctx context.Context, chatID int64, messageID int, username string, err error) {
+// handleCreateError handles errors from createSubscription.
+func (sh *SubscriptionHandler) handleCreateError(ctx context.Context, chatID int64, messageID int, username string, err error) {
 	logger.Error("Failed to create subscription", zap.Error(err))
 
 	classified := classifyXUIError(err)
@@ -307,10 +292,10 @@ func (h *Handler) handleCreateError(ctx context.Context, chatID int64, messageID
 		errMsg = msg(MsgErrInboundNotFound)
 	case errors.Is(classified, ErrXUIRollbackFailed):
 		errMsg = msg(MsgErrPartialSave)
-		h.notifyAdminError(ctx, fmt.Sprintf("⚠️ ORPHAN CLIENT WARNING: %v", err))
+		sh.h.notifyAdminError(ctx, fmt.Sprintf("⚠️ ORPHAN CLIENT WARNING: %v", err))
 	}
 
 	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, errMsg)
 	editMsg.DisableWebPagePreview = true
-	h.safeSend(editMsg)
+	sh.h.safeSend(editMsg)
 }

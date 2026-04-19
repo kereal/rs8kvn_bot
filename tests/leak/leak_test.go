@@ -77,7 +77,9 @@ func TestGoroutineLeak_SubscriptionService(t *testing.T) {
 			defer wg.Done()
 			db, _ := database.NewService(t.TempDir() + "/test_goroutine_leak.db")
 			if db != nil {
-				db.Close()
+				if err := db.Close(); err != nil {
+					t.Logf("Warning: failed to close database: %v", err)
+				}
 			}
 		}()
 	}

@@ -138,6 +138,7 @@ func NewTestFixture(t *testing.T) *IntegrationTestFixture {
 	handler := NewHandler(testutil.NewMockBotAPI(), cfg, dbService, mockXUI.Client, NewTestBotConfig(), nil, "")
 	subService := service.NewSubscriptionService(dbService, mockXUI.Client, cfg, &webhook.NoopSender{})
 	handler.subscriptionService = subService
+	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
 
 	return &IntegrationTestFixture{
 		DB:          dbService,

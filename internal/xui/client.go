@@ -19,8 +19,10 @@ import (
 
 	"go.uber.org/zap"
 	"golang.org/x/sync/singleflight"
+
 	"rs8kvn_bot/internal/config"
 	"rs8kvn_bot/internal/logger"
+	"rs8kvn_bot/internal/metrics"
 	"rs8kvn_bot/internal/utils"
 )
 
@@ -347,7 +349,22 @@ func (c *Client) doHTTPRequest(ctx context.Context, method, url string, bodyFn f
 		}
 
 		if resp.StatusCode != http.StatusOK {
-			return resp.StatusCode, respBody, fmt.Errorf("server returned HTTP %d: %s", resp.StatusCode, truncateString(string(respBody), 200))
+			var err error
+			switch resp.StatusCode {
+			case http.StatusUnauthorized:
+				err = fmt.Errorf("%w: HTTP %d: %s", ErrUnauthorized, resp.StatusCode, truncateString(string(respBody), 200))
+			case http.StatusForbidden:
+				err = fmt.Errorf("%w: HTTP %d: %s", ErrForbidden, resp.StatusCode, truncateString(string(respBody), 200))
+			case http.StatusNotFound:
+				err = fmt.Errorf("%w: HTTP %d: %s", ErrNotFound, resp.StatusCode, truncateString(string(respBody), 200))
+			case http.StatusBadRequest:
+				err = fmt.Errorf("%w: HTTP %d: %s", ErrBadRequest, resp.StatusCode, truncateString(string(respBody), 200))
+			case 500, 502, 503, 504:
+				err = fmt.Errorf("%w: HTTP %d: %s", ErrServerError, resp.StatusCode, truncateString(string(respBody), 200))
+			default:
+				err = fmt.Errorf("server returned HTTP %d: %s", resp.StatusCode, truncateString(string(respBody), 200))
+			}
+			return resp.StatusCode, respBody, err
 		}
 
 		return resp.StatusCode, respBody, nil
@@ -418,6 +435,11 @@ func (c *Client) AddClient(ctx context.Context, inboundID int, email string, tra
 //   - expiryTime: Subscription expiry time
 //   - resetDays: Day of month for traffic reset (0 = no auto-renewal)
 func (c *Client) AddClientWithID(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*ClientConfig, error) {
+	start := time.Now()
+	defer func() {
+		metrics.XUIRequestDuration.WithLabelValues("AddClientWithID").Observe(time.Since(start).Seconds())
+	}()
+
 	if err := c.ensureLoggedIn(ctx, false); err != nil {
 		return nil, fmt.Errorf("authentication required: %w", err)
 	}
@@ -443,6 +465,11 @@ func (c *Client) AddClientWithID(ctx context.Context, inboundID int, email, clie
 		result, err = c.doAddClientWithID(ctx, inboundID, email, clientID, subID, trafficBytes, expiryTime, resetDays)
 		return err
 	})
+	if err != nil {
+		metrics.XUIRequestsTotal.WithLabelValues("AddClientWithID", "error").Inc()
+	} else {
+		metrics.XUIRequestsTotal.WithLabelValues("AddClientWithID", "success").Inc()
+	}
 	return result, err
 }
 
@@ -514,13 +541,24 @@ func (c *Client) doAddClientWithID(ctx context.Context, inboundID int, email, cl
 
 // DeleteClient removes a client from the 3x-ui panel.
 func (c *Client) DeleteClient(ctx context.Context, inboundID int, clientID string) error {
+	start := time.Now()
+	defer func() {
+		metrics.XUIRequestDuration.WithLabelValues("DeleteClient").Observe(time.Since(start).Seconds())
+	}()
+
 	if err := c.ensureLoggedIn(ctx, false); err != nil {
 		return fmt.Errorf("authentication required: %w", err)
 	}
 
-	return RetryWithBackoff(ctx, config.XUIMaxRetries, config.XUIInitialRetryDelay, func() error {
+	err := RetryWithBackoff(ctx, config.XUIMaxRetries, config.XUIInitialRetryDelay, func() error {
 		return c.doDeleteClient(ctx, inboundID, clientID)
 	})
+	if err != nil {
+		metrics.XUIRequestsTotal.WithLabelValues("DeleteClient", "error").Inc()
+	} else {
+		metrics.XUIRequestsTotal.WithLabelValues("DeleteClient", "success").Inc()
+	}
+	return err
 }
 
 // doDeleteClient performs the actual delete client request.
@@ -549,6 +587,11 @@ func (c *Client) doDeleteClient(ctx context.Context, inboundID int, clientID str
 
 // UpdateClient updates an existing client in the 3x-ui panel.
 func (c *Client) UpdateClient(ctx context.Context, inboundID int, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, tgID int64, comment string) error {
+	start := time.Now()
+	defer func() {
+		metrics.XUIRequestDuration.WithLabelValues("UpdateClient").Observe(time.Since(start).Seconds())
+	}()
+
 	if err := c.ensureLoggedIn(ctx, false); err != nil {
 		return fmt.Errorf("authentication required: %w", err)
 	}
@@ -557,9 +600,15 @@ func (c *Client) UpdateClient(ctx context.Context, inboundID int, clientID, emai
 		return fmt.Errorf("client ID cannot be empty")
 	}
 
-	return RetryWithBackoff(ctx, config.XUIMaxRetries, config.XUIInitialRetryDelay, func() error {
+	err := RetryWithBackoff(ctx, config.XUIMaxRetries, config.XUIInitialRetryDelay, func() error {
 		return c.doUpdateClient(ctx, inboundID, clientID, email, subID, trafficBytes, expiryTime, tgID, comment)
 	})
+	if err != nil {
+		metrics.XUIRequestsTotal.WithLabelValues("UpdateClient", "error").Inc()
+	} else {
+		metrics.XUIRequestsTotal.WithLabelValues("UpdateClient", "success").Inc()
+	}
+	return err
 }
 
 // doUpdateClient performs the actual update client request.
@@ -615,6 +664,11 @@ func (c *Client) doUpdateClient(ctx context.Context, inboundID int, clientID, em
 
 // GetClientTraffic retrieves traffic statistics for a client by email.
 func (c *Client) GetClientTraffic(ctx context.Context, email string) (*ClientTraffic, error) {
+	start := time.Now()
+	defer func() {
+		metrics.XUIRequestDuration.WithLabelValues("GetClientTraffic").Observe(time.Since(start).Seconds())
+	}()
+
 	if err := c.ensureLoggedIn(ctx, false); err != nil {
 		return nil, fmt.Errorf("authentication required: %w", err)
 	}
@@ -625,6 +679,11 @@ func (c *Client) GetClientTraffic(ctx context.Context, email string) (*ClientTra
 		result, err = c.doGetClientTraffic(ctx, email)
 		return err
 	})
+	if err != nil {
+		metrics.XUIRequestsTotal.WithLabelValues("GetClientTraffic", "error").Inc()
+	} else {
+		metrics.XUIRequestsTotal.WithLabelValues("GetClientTraffic", "success").Inc()
+	}
 	return result, err
 }
 
@@ -742,7 +801,7 @@ func isRetryable(err error) bool {
 
 // RetryWithBackoff executes a function with exponential backoff retry.
 // RetryWithBackoff retries the provided function up to maxRetries using exponential backoff with jitter.
-// 
+//
 // It calls fn repeatedly until it succeeds or a non-retryable error is returned. Between attempts it waits,
 // starting from initialDelay and doubling the delay after each wait (with added jitter). The function respects
 // context cancellation and will return early if ctx is done. If all attempts fail, it returns an error wrapping

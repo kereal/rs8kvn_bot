@@ -15,7 +15,10 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	testutil.InitLogger(m)
+	if err := testutil.InitLogger(m); err != nil {
+		os.Stderr.WriteString("Failed to initialize logger: " + err.Error() + "\n")
+		os.Exit(1)
+	}
 	os.Exit(m.Run())
 }
 
@@ -27,7 +30,7 @@ func TestBackupDatabase(t *testing.T) {
 
 	// Create a test database file
 	content := []byte("test database content")
-	require.NoError(t, os.WriteFile(dbPath, content, 0644), "Failed to create test database")
+	require.NoError(t, os.WriteFile(dbPath, content, 0600), "Failed to create test database")
 
 	err := BackupDatabase(context.Background(), dbPath)
 	require.NoError(t, err, "BackupDatabase() error")
@@ -62,13 +65,13 @@ func TestBackupDatabase_OverwritesExistingBackup(t *testing.T) {
 	backupPath := dbPath + ".backup"
 
 	// Create initial database
-	require.NoError(t, os.WriteFile(dbPath, []byte("initial content"), 0644), "Failed to create test database")
+	require.NoError(t, os.WriteFile(dbPath, []byte("initial content"), 0600), "Failed to create test database")
 
 	// Create first backup
 	require.NoError(t, BackupDatabase(context.Background(), dbPath), "First BackupDatabase() error")
 
 	// Modify database
-	require.NoError(t, os.WriteFile(dbPath, []byte("modified content"), 0644), "Failed to modify test database")
+	require.NoError(t, os.WriteFile(dbPath, []byte("modified content"), 0600), "Failed to modify test database")
 
 	// Create second backup
 	require.NoError(t, BackupDatabase(context.Background(), dbPath), "Second BackupDatabase() error")
@@ -99,7 +102,7 @@ func TestRotateBackups_WithBackup(t *testing.T) {
 	backupPath := dbPath + ".backup"
 
 	// Create backup file
-	require.NoError(t, os.WriteFile(backupPath, []byte("backup content"), 0644), "Failed to create backup")
+	require.NoError(t, os.WriteFile(backupPath, []byte("backup content"), 0600), "Failed to create backup")
 
 	err := RotateBackups(dbPath, 5)
 	require.NoError(t, err, "RotateBackups() error")
@@ -118,12 +121,12 @@ func TestRotateBackups_Cleanup(t *testing.T) {
 	// Create multiple timed backups
 	for i := 0; i < 7; i++ {
 		timedPath := dbPath + ".backup." + "20060102_15040" + string(rune('0'+i))
-		require.NoError(t, os.WriteFile(timedPath, []byte("backup"), 0644), "Failed to create timed backup")
+		require.NoError(t, os.WriteFile(timedPath, []byte("backup"), 0600), "Failed to create timed backup")
 	}
 
 	// Create current backup
 	backupPath := dbPath + ".backup"
-	require.NoError(t, os.WriteFile(backupPath, []byte("current"), 0644), "Failed to create backup")
+	require.NoError(t, os.WriteFile(backupPath, []byte("current"), 0600), "Failed to create backup")
 
 	// Rotate and keep only 3
 	err := RotateBackups(dbPath, 3)
@@ -145,7 +148,7 @@ func TestDailyBackup(t *testing.T) {
 
 	// Create test database
 	content := []byte("test database content")
-	require.NoError(t, os.WriteFile(dbPath, content, 0644), "Failed to create test database")
+	require.NoError(t, os.WriteFile(dbPath, content, 0600), "Failed to create test database")
 
 	err := DailyBackup(context.Background(), dbPath, 7)
 	require.NoError(t, err, "DailyBackup() error")
@@ -175,7 +178,7 @@ func TestDailyBackup_MultipleRuns(t *testing.T) {
 	dbPath := filepath.Join(tmpDir, "test.db")
 
 	// Create test database
-	require.NoError(t, os.WriteFile(dbPath, []byte("content"), 0644), "Failed to create test database")
+	require.NoError(t, os.WriteFile(dbPath, []byte("content"), 0600), "Failed to create test database")
 
 	// Run daily backup twice
 	require.NoError(t, DailyBackup(context.Background(), dbPath, 5), "First DailyBackup() error")
@@ -212,7 +215,7 @@ func TestGetBackupInfo_WithBackups(t *testing.T) {
 	dbPath := filepath.Join(tmpDir, "test.db")
 
 	// Create database and backups
-	require.NoError(t, os.WriteFile(dbPath, []byte("content"), 0644), "Failed to create database")
+	require.NoError(t, os.WriteFile(dbPath, []byte("content"), 0600), "Failed to create database")
 
 	// Create current backup
 	require.NoError(t, BackupDatabase(context.Background(), dbPath), "BackupDatabase() error")
@@ -239,7 +242,7 @@ func TestGetBackupInfo_SortedByTime(t *testing.T) {
 	dbPath := filepath.Join(tmpDir, "test.db")
 
 	// Create database
-	require.NoError(t, os.WriteFile(dbPath, []byte("content"), 0644), "Failed to create database")
+	require.NoError(t, os.WriteFile(dbPath, []byte("content"), 0600), "Failed to create database")
 
 	// Create multiple timed backups
 	for i := 0; i < 3; i++ {
@@ -277,7 +280,7 @@ func TestTotalBackupSize_WithBackups(t *testing.T) {
 
 	// Create database
 	content := []byte("test database content")
-	require.NoError(t, os.WriteFile(dbPath, content, 0644), "Failed to create database")
+	require.NoError(t, os.WriteFile(dbPath, content, 0600), "Failed to create database")
 
 	// Create backup
 	require.NoError(t, BackupDatabase(context.Background(), dbPath), "BackupDatabase() error")
@@ -297,7 +300,7 @@ func TestTotalBackupSize_MultipleBackups(t *testing.T) {
 
 	// Create database
 	content := []byte("test content")
-	require.NoError(t, os.WriteFile(dbPath, content, 0644), "Failed to create database")
+	require.NoError(t, os.WriteFile(dbPath, content, 0600), "Failed to create database")
 
 	// Create first backup
 	require.NoError(t, BackupDatabase(context.Background(), dbPath), "BackupDatabase() error")
@@ -317,7 +320,7 @@ func TestValidatePath(t *testing.T) {
 	dbPath := filepath.Join(tmpDir, "test.db")
 
 	// Create a database file
-	require.NoError(t, os.WriteFile(dbPath, []byte("test"), 0644), "Failed to create test file")
+	require.NoError(t, os.WriteFile(dbPath, []byte("test"), 0600), "Failed to create test file")
 
 	// ValidatePath should work for existing files
 	err := BackupDatabase(context.Background(), dbPath)
@@ -347,7 +350,7 @@ func TestDailyBackup_KeepDaysZero(t *testing.T) {
 	dbPath := filepath.Join(tmpDir, "test.db")
 
 	// Create a database file
-	require.NoError(t, os.WriteFile(dbPath, []byte("test content"), 0644), "Failed to create test file")
+	require.NoError(t, os.WriteFile(dbPath, []byte("test content"), 0600), "Failed to create test file")
 
 	// With keepDays=0, should still work (keep all)
 	err := DailyBackup(context.Background(), dbPath, 0)
@@ -361,7 +364,7 @@ func TestDailyBackup_KeepDaysOne(t *testing.T) {
 	dbPath := filepath.Join(tmpDir, "test.db")
 
 	// Create a database file
-	require.NoError(t, os.WriteFile(dbPath, []byte("test content"), 0644), "Failed to create test file")
+	require.NoError(t, os.WriteFile(dbPath, []byte("test content"), 0600), "Failed to create test file")
 
 	// With keepDays=1, should only keep latest
 	err := DailyBackup(context.Background(), dbPath, 1)
@@ -391,11 +394,11 @@ func TestRotateBackups_KeepAll(t *testing.T) {
 	dbPath := filepath.Join(tmpDir, "test.db")
 
 	// Create database
-	require.NoError(t, os.WriteFile(dbPath, []byte("content"), 0644), "Failed to create database")
+	require.NoError(t, os.WriteFile(dbPath, []byte("content"), 0600), "Failed to create database")
 
 	// Create multiple backups by modifying the file each time
 	for i := 0; i < 5; i++ {
-		os.WriteFile(dbPath, []byte(fmt.Sprintf("content-%d", i)), 0644)
+		require.NoError(t, os.WriteFile(dbPath, []byte(fmt.Sprintf("content-%d", i)), 0600))
 		time.Sleep(2 * time.Millisecond)
 		require.NoError(t, BackupDatabase(context.Background(), dbPath), "BackupDatabase() error")
 	}
@@ -417,7 +420,7 @@ func TestRotateBackups_KeepZero_UsesDefault(t *testing.T) {
 	dbPath := filepath.Join(tmpDir, "test.db")
 
 	// Create database
-	require.NoError(t, os.WriteFile(dbPath, []byte("content"), 0644), "Failed to create database")
+	require.NoError(t, os.WriteFile(dbPath, []byte("content"), 0600), "Failed to create database")
 
 	// Create backup
 	require.NoError(t, BackupDatabase(context.Background(), dbPath), "BackupDatabase() error")
@@ -434,7 +437,7 @@ func TestRotateBackups_KeepNegative_UsesDefault(t *testing.T) {
 	dbPath := filepath.Join(tmpDir, "test.db")
 
 	// Create database
-	require.NoError(t, os.WriteFile(dbPath, []byte("content"), 0644), "Failed to create database")
+	require.NoError(t, os.WriteFile(dbPath, []byte("content"), 0600), "Failed to create database")
 
 	// Create backup
 	require.NoError(t, BackupDatabase(context.Background(), dbPath), "BackupDatabase() error")
@@ -451,19 +454,19 @@ func TestGetBackupInfo_SortByTime(t *testing.T) {
 	dbPath := filepath.Join(tmpDir, "test.db")
 
 	// Create database
-	require.NoError(t, os.WriteFile(dbPath, []byte("content"), 0644), "Failed to create database")
+	require.NoError(t, os.WriteFile(dbPath, []byte("content"), 0600), "Failed to create database")
 
 	// Create initial backup
 	require.NoError(t, BackupDatabase(context.Background(), dbPath), "BackupDatabase() error")
 	time.Sleep(5 * time.Millisecond)
 
 	// Modify and create another backup
-	os.WriteFile(dbPath, []byte("content2"), 0644)
+	require.NoError(t, os.WriteFile(dbPath, []byte("content2"), 0600))
 	require.NoError(t, BackupDatabase(context.Background(), dbPath), "BackupDatabase() error")
 	time.Sleep(5 * time.Millisecond)
 
 	// Modify and create third backup
-	os.WriteFile(dbPath, []byte("content3"), 0644)
+	require.NoError(t, os.WriteFile(dbPath, []byte("content3"), 0600))
 	require.NoError(t, BackupDatabase(context.Background(), dbPath), "BackupDatabase() error")
 
 	infos, err := GetBackupInfo(dbPath)
@@ -485,7 +488,7 @@ func TestDailyBackup_KeepDaysNegative_UsesDefault(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
-	require.NoError(t, os.WriteFile(dbPath, []byte("test"), 0644), "Failed to create test file")
+	require.NoError(t, os.WriteFile(dbPath, []byte("test"), 0600), "Failed to create test file")
 
 	err := DailyBackup(context.Background(), dbPath, -5)
 	assert.NoError(t, err, "DailyBackup() with negative keepDays should not error")
@@ -497,7 +500,7 @@ func TestBackupInfo_Path(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
-	require.NoError(t, os.WriteFile(dbPath, []byte("test"), 0644), "Failed to create test file")
+	require.NoError(t, os.WriteFile(dbPath, []byte("test"), 0600), "Failed to create test file")
 	require.NoError(t, BackupDatabase(context.Background(), dbPath), "BackupDatabase() error")
 
 	infos, err := GetBackupInfo(dbPath)
@@ -529,11 +532,11 @@ func TestGetBackupInfo_Order(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
-	require.NoError(t, os.WriteFile(dbPath, []byte("content1"), 0644), "Failed to create test file")
+	require.NoError(t, os.WriteFile(dbPath, []byte("content1"), 0600), "Failed to create test file")
 	require.NoError(t, BackupDatabase(context.Background(), dbPath), "BackupDatabase() error")
 
 	time.Sleep(5 * time.Millisecond)
-	os.WriteFile(dbPath, []byte("content2"), 0644)
+	require.NoError(t, os.WriteFile(dbPath, []byte("content2"), 0600), "Failed to modify test file")
 	require.NoError(t, BackupDatabase(context.Background(), dbPath), "BackupDatabase() error")
 
 	infos, err := GetBackupInfo(dbPath)
@@ -685,14 +688,18 @@ func TestBackupDatabase_WriteError(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
-	require.NoError(t, os.WriteFile(dbPath, []byte("test content"), 0644), "Failed to create test file")
+	require.NoError(t, os.WriteFile(dbPath, []byte("test content"), 0600), "Failed to create test file")
 
 	// Make the directory read-only to cause write error
 	parentDir := tmpDir
 	if err := os.Chmod(parentDir, 0555); err != nil {
 		t.Skipf("Skipping test: cannot change directory permissions: %v", err)
 	}
-	defer os.Chmod(parentDir, 0755)
+	defer func() {
+		if err := os.Chmod(parentDir, 0755); err != nil {
+			t.Logf("Warning: failed to restore directory permissions: %v", err)
+		}
+	}()
 
 	err := BackupDatabase(context.Background(), dbPath)
 	assert.Error(t, err, "BackupDatabase() should return error when directory is not writable")
@@ -711,7 +718,7 @@ func TestBackupDatabase_ContextCancellation(t *testing.T) {
 	for i := range content {
 		content[i] = byte(i % 256)
 	}
-	require.NoError(t, os.WriteFile(dbPath, content, 0644), "Failed to create test database")
+	require.NoError(t, os.WriteFile(dbPath, content, 0600), "Failed to create test database")
 
 	// Create a context that will be cancelled immediately
 	ctx, cancel := context.WithCancel(context.Background())
@@ -735,7 +742,7 @@ func TestBackupDatabase_ContextTimeout(t *testing.T) {
 
 	// Create a test database file
 	content := make([]byte, 100*1024) // 100KB file
-	require.NoError(t, os.WriteFile(dbPath, content, 0644), "Failed to create test database")
+	require.NoError(t, os.WriteFile(dbPath, content, 0600), "Failed to create test database")
 
 	// Create a context with a very short timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Nanosecond)
@@ -757,7 +764,7 @@ func TestDailyBackup_ContextCancellation(t *testing.T) {
 
 	// Create a test database file
 	content := []byte("test database content")
-	require.NoError(t, os.WriteFile(dbPath, content, 0644), "Failed to create test database")
+	require.NoError(t, os.WriteFile(dbPath, content, 0600), "Failed to create test database")
 
 	// Create a context that will be cancelled
 	ctx, cancel := context.WithCancel(context.Background())
@@ -775,7 +782,7 @@ func TestBackupDatabase_Success(t *testing.T) {
 
 	// Create a test database file
 	content := []byte("test database content for success")
-	require.NoError(t, os.WriteFile(dbPath, content, 0644), "Failed to create test database")
+	require.NoError(t, os.WriteFile(dbPath, content, 0600), "Failed to create test database")
 
 	// Use a valid context
 	ctx := context.Background()
@@ -803,7 +810,7 @@ func TestBackupDatabase_EmptyFile(t *testing.T) {
 	dbPath := filepath.Join(tmpDir, "test.db")
 
 	// Create an empty file
-	require.NoError(t, os.WriteFile(dbPath, []byte{}, 0644), "Failed to create empty test file")
+	require.NoError(t, os.WriteFile(dbPath, []byte{}, 0600), "Failed to create empty test file")
 
 	err := BackupDatabase(context.Background(), dbPath)
 	require.NoError(t, err, "BackupDatabase() should succeed with empty file")
@@ -824,7 +831,7 @@ func TestBackupDatabase_LargeFile(t *testing.T) {
 	for i := range content {
 		content[i] = byte(i % 256)
 	}
-	require.NoError(t, os.WriteFile(dbPath, content, 0644), "Failed to create large test file")
+	require.NoError(t, os.WriteFile(dbPath, content, 0600), "Failed to create large test file")
 
 	ctx := context.Background()
 	err := BackupDatabase(ctx, dbPath)
@@ -845,11 +852,11 @@ func TestRotateBackups_ExceedsRetention(t *testing.T) {
 	// Create multiple old backups
 	for i := 0; i < 5; i++ {
 		backupName := fmt.Sprintf("%s.backup.2024010%d_120000", dbPath, i)
-		require.NoError(t, os.WriteFile(backupName, []byte(fmt.Sprintf("backup %d", i)), 0644))
+		require.NoError(t, os.WriteFile(backupName, []byte(fmt.Sprintf("backup %d", i)), 0600))
 	}
 
 	// Create current backup
-	require.NoError(t, os.WriteFile(dbPath+".backup", []byte("current backup"), 0644))
+	require.NoError(t, os.WriteFile(dbPath+".backup", []byte("current backup"), 0600))
 
 	err := RotateBackups(dbPath, 3)
 	require.NoError(t, err, "RotateBackups() error")
@@ -873,11 +880,11 @@ func TestRotateBackups_KeepsNewest(t *testing.T) {
 	}
 	for _, ts := range timestamps {
 		backupName := fmt.Sprintf("%s.backup.%s", dbPath, ts)
-		require.NoError(t, os.WriteFile(backupName, []byte(ts), 0644))
+		require.NoError(t, os.WriteFile(backupName, []byte(ts), 0600))
 	}
 
 	// Create current backup
-	require.NoError(t, os.WriteFile(dbPath+".backup", []byte("current"), 0644))
+	require.NoError(t, os.WriteFile(dbPath+".backup", []byte("current"), 0600))
 
 	err := RotateBackups(dbPath, 2)
 	require.NoError(t, err, "RotateBackups() error")
@@ -922,7 +929,7 @@ func TestStartScheduler_Lifecycle(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
-	require.NoError(t, os.WriteFile(dbPath, []byte("test content"), 0644), "Failed to create test database")
+	require.NoError(t, os.WriteFile(dbPath, []byte("test content"), 0600), "Failed to create test database")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})

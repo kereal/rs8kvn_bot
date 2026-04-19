@@ -66,7 +66,7 @@ func TestLogin_Success(t *testing.T) {
 			Msg:     "Login successful",
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 
@@ -87,7 +87,7 @@ func TestLogin_Failure(t *testing.T) {
 			Msg:     "Invalid credentials",
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 
@@ -109,7 +109,7 @@ func TestLogin_ContextCancellation(t *testing.T) {
 		case <-time.After(2 * time.Second):
 		}
 		resp := APIResponse{Success: true}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 
@@ -132,16 +132,16 @@ func TestAddClientWithID_Success(t *testing.T) {
 		switch r.URL.Path {
 		case "/panel/api/server/status":
 			resp := APIResponse{Success: false}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		case "/login":
 			loginCalled = true
 			resp := APIResponse{Success: true}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		case "/panel/api/inbounds/addClient":
 			addClientCalled = true
 			resp := APIResponse{Success: true, Msg: "Client added successfully"}
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		default:
 			t.Errorf("Unexpected path: %s", r.URL.Path)
 		}
@@ -168,13 +168,13 @@ func TestAddClientWithID_ServerError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/login" {
 			resp := APIResponse{Success: true}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 			return
 		}
 
 		w.WriteHeader(http.StatusInternalServerError)
 		resp := APIResponse{Success: false, Msg: "Internal server error"}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 
@@ -354,7 +354,7 @@ func TestClient_LoginSession(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/login" {
 			resp := APIResponse{Success: true}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 			return
 		}
 		w.WriteHeader(http.StatusNotFound)
@@ -380,7 +380,7 @@ func TestClient_EnsureLoggedIn(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/login" {
 			resp := APIResponse{Success: true}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 			return
 		}
 		w.WriteHeader(http.StatusNotFound)
@@ -401,7 +401,7 @@ func TestClient_Ping(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/login" {
 			resp := APIResponse{Success: true}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 			return
 		}
 	}))
@@ -504,16 +504,16 @@ func TestAddClient_Success(t *testing.T) {
 		switch r.URL.Path {
 		case "/panel/api/server/status":
 			resp := APIResponse{Success: false}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		case "/login":
 			loginCalled = true
 			resp := APIResponse{Success: true}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		case "/panel/api/inbounds/addClient":
 			addClientCalled = true
 			resp := APIResponse{Success: true, Msg: "Client added successfully"}
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		default:
 			t.Errorf("Unexpected path: %s", r.URL.Path)
 		}
@@ -541,12 +541,12 @@ func TestAddClient_LoginFailure(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/panel/api/server/status" {
 			resp := APIResponse{Success: false}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 			return
 		}
 		if r.URL.Path == "/login" {
 			resp := APIResponse{Success: false, Msg: "Invalid credentials"}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 			return
 		}
 		t.Errorf("Unexpected path: %s", r.URL.Path)
@@ -567,18 +567,18 @@ func TestAddClientWithID_SuccessFalseButMessageIndicatesSuccess(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/panel/api/server/status" {
 			resp := APIResponse{Success: false}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 			return
 		}
 		if r.URL.Path == "/login" {
 			resp := APIResponse{Success: true}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 			return
 		}
 
 		resp := APIResponse{Success: false, Msg: "Client added successfully"}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 
@@ -600,15 +600,15 @@ func TestEnsureLoggedIn_CachedSession(t *testing.T) {
 		switch r.URL.Path {
 		case "/panel/api/server/status":
 			resp := APIResponse{Success: false}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		case "/login":
 			loginCount++
 			resp := APIResponse{Success: true}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		case "/panel/api/inbounds/addClient":
 			resp := APIResponse{Success: true, Msg: "Client added successfully"}
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		}
 	}))
 	defer server.Close()
@@ -695,10 +695,10 @@ func TestGetClientTraffic_Success(t *testing.T) {
 		switch r.URL.Path {
 		case "/panel/api/server/status":
 			resp := APIResponse{Success: false}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		case "/login":
 			resp := APIResponse{Success: true}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		case "/panel/api/inbounds/getClientTraffics/testuser":
 			assert.Equal(t, "GET", r.Method, "Expected GET method")
 			traffic := ClientTraffic{
@@ -722,7 +722,7 @@ func TestGetClientTraffic_Success(t *testing.T) {
 			}
 			resp.Obj, _ = json.Marshal(traffic)
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		default:
 			t.Errorf("Unexpected path: %s", r.URL.Path)
 		}
@@ -749,17 +749,17 @@ func TestGetClientTraffic_ClientNotFound(t *testing.T) {
 		switch r.URL.Path {
 		case "/panel/api/server/status":
 			resp := APIResponse{Success: false}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		case "/login":
 			resp := APIResponse{Success: true}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		case "/panel/api/inbounds/getClientTraffics/nonexistent":
 			resp := APIResponse{
 				Success: false,
 				Msg:     "client not found",
 			}
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		default:
 			t.Errorf("Unexpected path: %s", r.URL.Path)
 		}
@@ -781,17 +781,17 @@ func TestGetClientTraffic_ServerError(t *testing.T) {
 		switch r.URL.Path {
 		case "/panel/api/server/status":
 			resp := APIResponse{Success: false}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		case "/login":
 			resp := APIResponse{Success: true}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		case "/panel/api/inbounds/getClientTraffics/testuser":
 			resp := APIResponse{
 				Success: false,
 				Msg:     "Internal server error",
 			}
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		default:
 			t.Errorf("Unexpected path: %s", r.URL.Path)
 		}
@@ -813,12 +813,12 @@ func TestGetClientTraffic_LoginFailure(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/panel/api/server/status" {
 			resp := APIResponse{Success: false}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 			return
 		}
 		if r.URL.Path == "/login" {
 			resp := APIResponse{Success: false, Msg: "Invalid credentials"}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 			return
 		}
 		t.Errorf("Unexpected path: %s", r.URL.Path)
@@ -841,10 +841,10 @@ func TestGetClientTraffic_ContextCancellation(t *testing.T) {
 		switch r.URL.Path {
 		case "/panel/api/server/status":
 			resp := APIResponse{Success: false}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		case "/login":
 			resp := APIResponse{Success: true}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		case "/panel/api/inbounds/getClientTraffics/testuser":
 			select {
 			case <-r.Context().Done():
@@ -854,7 +854,7 @@ func TestGetClientTraffic_ContextCancellation(t *testing.T) {
 			traffics := []ClientTraffic{}
 			resp := APIResponse{Success: true}
 			resp.Obj, _ = json.Marshal(traffics)
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		default:
 			t.Errorf("Unexpected path: %s", r.URL.Path)
 		}
@@ -877,10 +877,10 @@ func TestGetClientTraffic_InvalidJSONResponse(t *testing.T) {
 		switch r.URL.Path {
 		case "/panel/api/server/status":
 			resp := APIResponse{Success: false}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		case "/login":
 			resp := APIResponse{Success: true}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		case "/panel/api/inbounds/getClientTraffics/testuser":
 			w.Header().Set("Content-Type", "application/json")
 			w.Write([]byte("invalid json"))
@@ -964,15 +964,15 @@ func TestDeleteClient_Success(t *testing.T) {
 		switch r.URL.Path {
 		case "/panel/api/server/status":
 			resp := APIResponse{Success: false}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		case "/login":
 			resp := APIResponse{Success: true}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		case "/panel/api/inbounds/1/delClient/test-client-id":
 			assert.Equal(t, "POST", r.Method, "Expected POST method")
 			resp := APIResponse{Success: true, Msg: "Client deleted successfully"}
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		default:
 			t.Errorf("Unexpected path: %s", r.URL.Path)
 		}
@@ -994,14 +994,14 @@ func TestDeleteClient_ServerError(t *testing.T) {
 		switch r.URL.Path {
 		case "/panel/api/server/status":
 			resp := APIResponse{Success: false}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		case "/login":
 			resp := APIResponse{Success: true}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		case "/panel/api/inbounds/1/delClient/test-client-id":
 			resp := APIResponse{Success: false, Msg: "Client not found"}
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		default:
 			t.Errorf("Unexpected path: %s", r.URL.Path)
 		}
@@ -1023,12 +1023,12 @@ func TestDeleteClient_LoginFailure(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/panel/api/server/status" {
 			resp := APIResponse{Success: false}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 			return
 		}
 		if r.URL.Path == "/login" {
 			resp := APIResponse{Success: false, Msg: "Invalid credentials"}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 			return
 		}
 		t.Errorf("Unexpected path: %s", r.URL.Path)
@@ -1051,10 +1051,10 @@ func TestDeleteClient_ContextCancellation(t *testing.T) {
 		switch r.URL.Path {
 		case "/panel/api/server/status":
 			resp := APIResponse{Success: false}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		case "/login":
 			resp := APIResponse{Success: true}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		case "/panel/api/inbounds/1/delClient/test-client-id":
 			select {
 			case <-r.Context().Done():
@@ -1062,7 +1062,7 @@ func TestDeleteClient_ContextCancellation(t *testing.T) {
 			case <-time.After(2 * time.Second):
 			}
 			resp := APIResponse{Success: true}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		default:
 			t.Errorf("Unexpected path: %s", r.URL.Path)
 		}
@@ -1085,10 +1085,10 @@ func TestDeleteClient_InvalidJSONResponse(t *testing.T) {
 		switch r.URL.Path {
 		case "/panel/api/server/status":
 			resp := APIResponse{Success: false}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		case "/login":
 			resp := APIResponse{Success: true}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		case "/panel/api/inbounds/1/delClient/test-client-id":
 			w.Header().Set("Content-Type", "application/json")
 			w.Write([]byte("invalid json"))
@@ -1111,7 +1111,7 @@ func TestDeleteClient_RequestCreationError(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		resp := APIResponse{Success: true}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 
@@ -1130,7 +1130,7 @@ func TestGetClientTraffic_RequestCreationError(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		resp := APIResponse{Success: true}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 
@@ -1173,7 +1173,7 @@ func TestAddClientWithID_LoginError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/panel/api/server/status" {
 			resp := APIResponse{Success: false}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 			return
 		}
 		if r.URL.Path == "/login" {
@@ -1198,7 +1198,7 @@ func TestAddClientWithID_RequestCreationError(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		resp := APIResponse{Success: true}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 
@@ -1229,7 +1229,9 @@ func TestClient_CircuitBreakerState(t *testing.T) {
 	assert.Equal(t, CircuitStateClosed, state, "CircuitBreakerState() initially should be closed")
 
 	for i := 0; i < 10; i++ {
-		client.Login(ctx)
+		if err := client.Login(ctx); err == nil {
+			t.Fatal("expected Login to fail with circuit breaker closed and server failing")
+		}
 	}
 
 	state = client.CircuitBreakerState()
@@ -1316,16 +1318,16 @@ func TestUpdateClient_Success(t *testing.T) {
 		switch r.URL.Path {
 		case "/panel/api/server/status":
 			resp := APIResponse{Success: false}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		case "/login":
 			loginCalled = true
 			resp := APIResponse{Success: true}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		case "/panel/api/inbounds/updateClient/test-client-uuid":
 			updateClientCalled = true
 			resp := APIResponse{Success: true, Msg: "Inbound client has been updated."}
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		default:
 			t.Errorf("Unexpected path: %s", r.URL.Path)
 		}
@@ -1350,14 +1352,14 @@ func TestUpdateClient_Error(t *testing.T) {
 		switch r.URL.Path {
 		case "/panel/api/server/status":
 			resp := APIResponse{Success: false}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		case "/login":
 			resp := APIResponse{Success: true}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		case "/panel/api/inbounds/updateClient/test-client-uuid":
 			resp := APIResponse{Success: false, Msg: "Something went wrong"}
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		}
 	}))
 	defer server.Close()
@@ -1375,7 +1377,7 @@ func TestUpdateClient_EmptyClientID(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		resp := APIResponse{Success: true}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 
@@ -1395,7 +1397,7 @@ func TestPing_Success(t *testing.T) {
 		switch r.URL.Path {
 		case "/panel/api/server/status":
 			resp := APIResponse{Success: false}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		case "/login":
 			loginCalled = true
 			assert.Equal(t, "POST", r.Method, "Expected POST method")
@@ -1404,7 +1406,7 @@ func TestPing_Success(t *testing.T) {
 				Msg:     "Login successful",
 			}
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		default:
 			t.Errorf("Unexpected path: %s", r.URL.Path)
 		}
@@ -1429,7 +1431,7 @@ func TestPing_Failure(t *testing.T) {
 			Msg:     "Connection failed",
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 
@@ -1446,7 +1448,7 @@ func TestClient_Close(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		resp := APIResponse{Success: true}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 
@@ -1463,7 +1465,7 @@ func TestClient_Close_MultipleTimes(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		resp := APIResponse{Success: true}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 
@@ -1523,12 +1525,12 @@ func TestUpdateClient_LoginFailure(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/panel/api/server/status" {
 			resp := APIResponse{Success: false}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 			return
 		}
 		if r.URL.Path == "/login" {
 			resp := APIResponse{Success: false, Msg: "Invalid credentials"}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 			return
 		}
 		t.Errorf("Unexpected path: %s", r.URL.Path)
@@ -1551,10 +1553,10 @@ func TestUpdateClient_ContextCancellation(t *testing.T) {
 		switch r.URL.Path {
 		case "/panel/api/server/status":
 			resp := APIResponse{Success: false}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		case "/login":
 			resp := APIResponse{Success: true}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		case "/panel/api/inbounds/updateClient/test-client-uuid":
 			select {
 			case <-r.Context().Done():
@@ -1562,7 +1564,7 @@ func TestUpdateClient_ContextCancellation(t *testing.T) {
 			case <-time.After(2 * time.Second):
 			}
 			resp := APIResponse{Success: true}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		default:
 			t.Errorf("Unexpected path: %s", r.URL.Path)
 		}
@@ -1585,10 +1587,10 @@ func TestUpdateClient_InvalidJSONResponse(t *testing.T) {
 		switch r.URL.Path {
 		case "/panel/api/server/status":
 			resp := APIResponse{Success: false}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		case "/login":
 			resp := APIResponse{Success: true}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		case "/panel/api/inbounds/updateClient/test-client-uuid":
 			w.Header().Set("Content-Type", "application/json")
 			w.Write([]byte("invalid json"))
@@ -1613,14 +1615,14 @@ func TestAddClientWithID_DefaultResetDays(t *testing.T) {
 		switch r.URL.Path {
 		case "/panel/api/server/status":
 			resp := APIResponse{Success: false}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		case "/login":
 			resp := APIResponse{Success: true}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		case "/panel/api/inbounds/addClient":
 			resp := APIResponse{Success: true, Msg: "Client added"}
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		default:
 			t.Errorf("Unexpected path: %s", r.URL.Path)
 		}
@@ -1645,10 +1647,10 @@ func TestAddClientWithID_ContextCancellation(t *testing.T) {
 		switch r.URL.Path {
 		case "/panel/api/server/status":
 			resp := APIResponse{Success: false}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		case "/login":
 			resp := APIResponse{Success: true}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		case "/panel/api/inbounds/addClient":
 			select {
 			case <-r.Context().Done():
@@ -1656,7 +1658,7 @@ func TestAddClientWithID_ContextCancellation(t *testing.T) {
 			case <-time.After(2 * time.Second):
 			}
 			resp := APIResponse{Success: true}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		default:
 			t.Errorf("Unexpected path: %s", r.URL.Path)
 		}
@@ -1679,10 +1681,10 @@ func TestAddClientWithID_InvalidJSONResponse(t *testing.T) {
 		switch r.URL.Path {
 		case "/panel/api/server/status":
 			resp := APIResponse{Success: false}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		case "/login":
 			resp := APIResponse{Success: true}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		case "/panel/api/inbounds/addClient":
 			w.Header().Set("Content-Type", "application/json")
 			w.Write([]byte("invalid json"))
@@ -1706,18 +1708,18 @@ func TestGetClientTraffic_EmptyEmail(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/panel/api/server/status" {
 			resp := APIResponse{Success: true}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 			return
 		}
 		if r.URL.Path == "/login" {
 			resp := APIResponse{Success: true}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 			return
 		}
 		// Empty email results in URL like /panel/api/inbounds/getClientTraffics/
 		resp := APIResponse{Success: false, Msg: "client not found"}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 
@@ -1923,14 +1925,14 @@ func TestClientSettings_ResetDayDefault(t *testing.T) {
 		switch r.URL.Path {
 		case "/panel/api/server/status":
 			resp := APIResponse{Success: false}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		case "/login":
 			resp := APIResponse{Success: true}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		case "/panel/api/inbounds/addClient":
 			resp := APIResponse{Success: true, Msg: "Client added"}
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		default:
 			t.Errorf("Unexpected path: %s", r.URL.Path)
 		}
@@ -1954,14 +1956,14 @@ func TestAddClientWithID_NegativeResetDays(t *testing.T) {
 		switch r.URL.Path {
 		case "/panel/api/server/status":
 			resp := APIResponse{Success: false}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		case "/login":
 			resp := APIResponse{Success: true}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		case "/panel/api/inbounds/addClient":
 			resp := APIResponse{Success: true, Msg: "Client added"}
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		default:
 			t.Errorf("Unexpected path: %s", r.URL.Path)
 		}
@@ -1984,7 +1986,7 @@ func TestVerifySession_Success(t *testing.T) {
 		assert.Equal(t, "/panel/api/server/status", r.URL.Path)
 		assert.Equal(t, "GET", r.Method)
 		resp := APIResponse{Success: true}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 
@@ -2027,11 +2029,11 @@ func TestAutoRelogin_On401(t *testing.T) {
 		switch r.URL.Path {
 		case "/panel/api/server/status":
 			resp := APIResponse{Success: false}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		case "/login":
 			loginCount++
 			resp := APIResponse{Success: true}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		case "/panel/api/inbounds/addClient":
 			if loginCount == 0 {
 				// First request: return 401
@@ -2041,7 +2043,7 @@ func TestAutoRelogin_On401(t *testing.T) {
 			}
 			// After relogin: success
 			resp := APIResponse{Success: true, Msg: "Client added"}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		}
 	}))
 	defer server.Close()
@@ -2074,18 +2076,18 @@ func TestAutoRelogin_OnRedirect(t *testing.T) {
 		switch r.URL.Path {
 		case "/panel/api/server/status":
 			resp := APIResponse{Success: false}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		case "/login":
 			loginCount++
 			resp := APIResponse{Success: true}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		case "/panel/api/inbounds/addClient":
 			if loginCount == 0 {
 				http.Redirect(w, r, "/login", http.StatusFound)
 				return
 			}
 			resp := APIResponse{Success: true, Msg: "Client added"}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		}
 	}))
 	defer server.Close()

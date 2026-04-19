@@ -16,7 +16,6 @@ import (
 
 func TestSentryLevelFromString(t *testing.T) {
 
-
 	tests := []struct {
 		name     string
 		input    string
@@ -41,7 +40,6 @@ func TestSentryLevelFromString(t *testing.T) {
 
 func TestInit_CreatesDirectory(t *testing.T) {
 
-
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "subdir", "test.log")
 
@@ -52,11 +50,12 @@ func TestInit_CreatesDirectory(t *testing.T) {
 	_, err = os.Stat(filepath.Dir(logPath))
 	assert.NoError(t, err, "Init() did not create parent directory")
 
-	Close()
+	if err := Close(); err != nil {
+		t.Logf("Warning: failed to close logger: %v", err)
+	}
 }
 
 func TestInit_InvalidLogLevel(t *testing.T) {
-
 
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
@@ -65,18 +64,23 @@ func TestInit_InvalidLogLevel(t *testing.T) {
 	_, err := Init(logPath, "invalid")
 	require.NoError(t, err, "Init() with invalid level should not error")
 
-	Close()
+	if err := Close(); err != nil {
+		t.Logf("Warning: failed to close logger: %v", err)
+	}
 }
 
 func TestInfo(t *testing.T) {
-
 
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
 
 	_, err := Init(logPath, "info")
 	require.NoError(t, err, "Init() error")
-	defer Close()
+	t.Cleanup(func() {
+		if err := Close(); err != nil {
+			t.Logf("Warning: failed to close logger: %v", err)
+		}
+	})
 
 	// Should not panic
 	Info("test info message")
@@ -84,7 +88,6 @@ func TestInfo(t *testing.T) {
 }
 
 func TestError(t *testing.T) {
-
 
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
@@ -100,7 +103,6 @@ func TestError(t *testing.T) {
 
 func TestDebug(t *testing.T) {
 
-
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
 
@@ -115,7 +117,6 @@ func TestDebug(t *testing.T) {
 
 func TestWarn(t *testing.T) {
 
-
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
 
@@ -129,7 +130,6 @@ func TestWarn(t *testing.T) {
 }
 
 func TestSync(t *testing.T) {
-
 
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
@@ -152,7 +152,6 @@ func TestSync_NilLogger(t *testing.T) {
 
 func TestClose(t *testing.T) {
 
-
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
 
@@ -165,7 +164,6 @@ func TestClose(t *testing.T) {
 
 func TestClose_NilLogger(t *testing.T) {
 
-
 	// This test verifies that Close() handles edge cases gracefully.
 	// In production, the logger is always initialized before use.
 	// We skip this test as it tests deprecated nil-check behavior.
@@ -173,7 +171,6 @@ func TestClose_NilLogger(t *testing.T) {
 }
 
 func TestClose_MultipleCalls(t *testing.T) {
-
 
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
@@ -189,7 +186,6 @@ func TestClose_MultipleCalls(t *testing.T) {
 }
 
 func TestLogFileWritten(t *testing.T) {
-
 
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
@@ -220,7 +216,6 @@ func TestLogFileWritten(t *testing.T) {
 
 func TestNewService(t *testing.T) {
 
-
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
 
@@ -233,7 +228,6 @@ func TestNewService(t *testing.T) {
 }
 
 func TestNewService_CreatesDirectory(t *testing.T) {
-
 
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "subdir", "test.log")
@@ -250,7 +244,6 @@ func TestNewService_CreatesDirectory(t *testing.T) {
 
 func TestService_Close(t *testing.T) {
 
-
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
 
@@ -262,7 +255,6 @@ func TestService_Close(t *testing.T) {
 }
 
 func TestService_Info(t *testing.T) {
-
 
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
@@ -278,7 +270,6 @@ func TestService_Info(t *testing.T) {
 
 func TestService_Debug(t *testing.T) {
 
-
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
 
@@ -291,7 +282,6 @@ func TestService_Debug(t *testing.T) {
 }
 
 func TestService_Warn(t *testing.T) {
-
 
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
@@ -306,7 +296,6 @@ func TestService_Warn(t *testing.T) {
 
 func TestService_Error(t *testing.T) {
 
-
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
 
@@ -319,7 +308,6 @@ func TestService_Error(t *testing.T) {
 }
 
 func TestService_With(t *testing.T) {
-
 
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
@@ -335,7 +323,6 @@ func TestService_With(t *testing.T) {
 }
 
 func TestService_WithFields(t *testing.T) {
-
 
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
@@ -355,7 +342,6 @@ func TestService_WithFields(t *testing.T) {
 
 func TestService_SetSentryHub(t *testing.T) {
 
-
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
 
@@ -371,7 +357,6 @@ func TestService_SetSentryHub(t *testing.T) {
 
 func TestTgbotapiLogger_Println(t *testing.T) {
 
-
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
 
@@ -386,7 +371,6 @@ func TestTgbotapiLogger_Println(t *testing.T) {
 }
 
 func TestTgbotapiLogger_Printf(t *testing.T) {
-
 
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
@@ -404,7 +388,6 @@ func TestTgbotapiLogger_Printf(t *testing.T) {
 // ==================== stdLogWriter Tests ====================
 
 func TestStdLogWriter_Write(t *testing.T) {
-
 
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
@@ -434,7 +417,6 @@ func TestStdLogWriter_Write(t *testing.T) {
 
 func TestSetSentryHub(t *testing.T) {
 
-
 	// Should not panic with nil hub
 	SetSentryHub(nil)
 }
@@ -442,7 +424,6 @@ func TestSetSentryHub(t *testing.T) {
 // ==================== Writer Tests ====================
 
 func TestWriter(t *testing.T) {
-
 
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
@@ -463,7 +444,6 @@ func TestWriter(t *testing.T) {
 // ==================== RedirectStdLog Tests ====================
 
 func TestRedirectStdLog_ActualRedirection(t *testing.T) {
-
 
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
@@ -499,7 +479,6 @@ func TestRedirectStdLog_ActualRedirection(t *testing.T) {
 
 func TestNilLoggerSafety(t *testing.T) {
 
-
 	// This test verifies that global functions handle nil logger gracefully.
 	// In production, the logger is always initialized before use.
 	// We skip this test as it tests deprecated nil-check behavior.
@@ -507,7 +486,6 @@ func TestNilLoggerSafety(t *testing.T) {
 }
 
 func TestFatal_NilLogger(t *testing.T) {
-
 
 	// This test verifies that Fatal() handles nil logger gracefully.
 	// In production, the logger is always initialized before use.
@@ -517,13 +495,11 @@ func TestFatal_NilLogger(t *testing.T) {
 
 func TestFlushSentry(t *testing.T) {
 
-
 	// flushSentry should not panic with nil hub
 	flushSentry(0)
 }
 
 func TestCaptureToSentry(t *testing.T) {
-
 
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
@@ -539,12 +515,10 @@ func TestCaptureToSentry(t *testing.T) {
 
 func TestService_Fatal(t *testing.T) {
 
-
 	t.Skip("Fatal calls os.Exit which kills the test process")
 }
 
 func TestService_WithError(t *testing.T) {
-
 
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
@@ -563,7 +537,6 @@ func TestService_WithError(t *testing.T) {
 
 func TestService_WithError_NoSentry(t *testing.T) {
 
-
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
 
@@ -579,7 +552,6 @@ func TestService_WithError_NoSentry(t *testing.T) {
 
 func TestService_CaptureSentry_NoSentry(t *testing.T) {
 
-
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
 
@@ -591,7 +563,6 @@ func TestService_CaptureSentry_NoSentry(t *testing.T) {
 }
 
 func TestService_FlushSentry_NoSentry(t *testing.T) {
-
 
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
@@ -607,24 +578,20 @@ func TestService_FlushSentry_NoSentry(t *testing.T) {
 
 func TestIsStdoutError_NilError(t *testing.T) {
 
-
 	assert.False(t, isStdoutError(nil), "nil error should not be stdout error")
 }
 
 func TestIsStdoutError_InvalidArgument(t *testing.T) {
-
 
 	assert.True(t, isStdoutError(fmt.Errorf("invalid argument")), "invalid argument should be stdout error")
 }
 
 func TestIsStdoutError_BadFileDescriptor(t *testing.T) {
 
-
 	assert.True(t, isStdoutError(fmt.Errorf("bad file descriptor")), "bad file descriptor should be stdout error")
 }
 
 func TestIsStdoutError_OtherError(t *testing.T) {
-
 
 	assert.False(t, isStdoutError(fmt.Errorf("some other error")), "other error should not be stdout error")
 }
@@ -632,7 +599,6 @@ func TestIsStdoutError_OtherError(t *testing.T) {
 // ==================== Service Sentry Tests ====================
 
 func TestService_CaptureSentry_WithHub(t *testing.T) {
-
 
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
@@ -654,7 +620,6 @@ func TestService_CaptureSentry_WithHub(t *testing.T) {
 
 func TestService_FlushSentry_WithHub(t *testing.T) {
 
-
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
 
@@ -673,7 +638,6 @@ func TestService_FlushSentry_WithHub(t *testing.T) {
 }
 
 func TestService_WithError_WithHub(t *testing.T) {
-
 
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
@@ -696,7 +660,6 @@ func TestService_WithError_WithHub(t *testing.T) {
 // ==================== Close Error Aggregation Tests ====================
 
 func TestClose_BothErrors(t *testing.T) {
-
 
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"rs8kvn_bot/internal/database"
+	"rs8kvn_bot/internal/metrics"
 )
 
 type cacheEntry struct {
@@ -42,6 +43,7 @@ func (c *SubscriptionCache) Get(telegramID int64) *database.Subscription {
 	elem, ok := c.items[telegramID]
 	if !ok {
 		c.mu.RUnlock()
+		metrics.CacheMissesTotal.WithLabelValues("subscription").Inc()
 		return nil
 	}
 	item := elem.Value.(*lruItem)
@@ -61,6 +63,7 @@ func (c *SubscriptionCache) Get(telegramID int64) *database.Subscription {
 			}
 		}
 		c.mu.Unlock()
+		metrics.CacheMissesTotal.WithLabelValues("subscription").Inc()
 		return nil
 	}
 
@@ -72,6 +75,7 @@ func (c *SubscriptionCache) Get(telegramID int64) *database.Subscription {
 	}
 	c.mu.Unlock()
 
+	metrics.CacheHitsTotal.WithLabelValues("subscription").Inc()
 	return sub
 }
 

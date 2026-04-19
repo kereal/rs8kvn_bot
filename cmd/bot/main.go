@@ -318,6 +318,41 @@ func main() {
 		subProxy.StartReloadLoop(5*time.Minute, ctx.Done())
 	}()
 
+	// Start orphaned XUI client reconciler (every 6 hours)
+	go func() {
+		defer recoverAndReport("Orphan reconciler")
+		// Initial run after 30 seconds to let XUI settle
+		select {
+		case <-time.After(30 * time.Second):
+		case <-ctx.Done():
+			return
+		}
+		svc := handler.GetSubscriptionService()
+		if svc == nil {
+			logger.Warn("SubscriptionService not available, skipping orphan reconciliation")
+			return
+		}
+		if count, err := svc.ReconcileOrphanedClients(ctx); err != nil {
+			logger.Warn("Initial orphan reconciliation failed", zap.Error(err))
+		} else {
+			logger.Info("Orphan reconciliation completed", zap.Int("removed", count))
+		}
+		ticker := time.NewTicker(6 * time.Hour)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if count, err := svc.ReconcileOrphanedClients(ctx); err != nil {
+					logger.Warn("Orphan reconciliation failed", zap.Error(err))
+				} else {
+					logger.Info("Orphan reconciliation completed", zap.Int("removed", count))
+				}
+			}
+		}
+	}()
+
 	logger.Info("Bot started successfully")
 
 	// Mark web server as ready after all components are initialized
