@@ -372,13 +372,13 @@ func (h *Handler) checkRateLimit(chatID int64) bool {
 	return h.rateLimiter.Allow(chatID)
 }
 
-func (h *Handler) handleRateLimitExceeded(chatID int64, messageID int) {
+func (h *Handler) handleRateLimitExceeded(ctx context.Context, chatID int64, messageID int) {
 	msgText := "❌ Слишком много запросов. Пожалуйста, подождите минуту."
 	if messageID > 0 {
 		edit := tgbotapi.NewEditMessageText(chatID, messageID, msgText)
 		h.safeSend(edit)
 	} else {
-		h.sender.SendMessage(context.Background(), chatID, msgText)
+		h.sender.SendMessage(ctx, chatID, msgText)
 	}
 }
 
@@ -482,7 +482,7 @@ func (h *Handler) HandleUpdate(ctx context.Context, update tgbotapi.Update) {
 
 	var err error
 	if chatID != 0 && !h.isAdmin(chatID) && !h.checkRateLimit(chatID) {
-		h.handleRateLimitExceeded(chatID, 0)
+		h.handleRateLimitExceeded(ctx, chatID, 0)
 		metrics.BotUpdatesTotal.WithLabelValues(command, "rate_limited").Inc()
 		err = ErrRateLimited
 		return
