@@ -121,6 +121,10 @@ func (c *CommandHandler) HandleInvite(ctx context.Context, update tgbotapi.Updat
 		logger.Error("HandleInvite called with nil Message")
 		return
 	}
+	if update.Message.From == nil {
+		logger.Error("HandleInvite called with nil From")
+		return
+	}
 
 	chatID := update.Message.Chat.ID
 	username := c.h.getUsername(update.Message.From)
