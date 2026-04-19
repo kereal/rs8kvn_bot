@@ -135,21 +135,21 @@ func (h *Handler) HandleStart(ctx context.Context, update tgbotapi.Update) error
 	if h.cmdHandler != nil {
 		return h.cmdHandler.HandleStart(ctx, update)
 	}
-	return nil
+	return errors.New("handler: cmdHandler is nil, cannot handle Start")
 }
 
 func (h *Handler) HandleHelp(ctx context.Context, update tgbotapi.Update) error {
 	if h.cmdHandler != nil {
 		return h.cmdHandler.HandleHelp(ctx, update)
 	}
-	return nil
+	return errors.New("handler: cmdHandler is nil, cannot handle Help")
 }
 
 func (h *Handler) HandleInvite(ctx context.Context, update tgbotapi.Update) error {
 	if h.cmdHandler != nil {
 		return h.cmdHandler.HandleInvite(ctx, update)
 	}
-	return nil
+	return errors.New("handler: cmdHandler is nil, cannot handle Invite")
 }
 
 // Command private delegates
@@ -157,14 +157,14 @@ func (h *Handler) handleBindTrial(ctx context.Context, chatID int64, username, s
 	if h.cmdHandler != nil {
 		return h.cmdHandler.handleBindTrial(ctx, chatID, username, subscriptionID)
 	}
-	return nil
+	return errors.New("handler: cmdHandler is nil, cannot handle BindTrial")
 }
 
 func (h *Handler) handleShareStart(ctx context.Context, chatID int64, username, inviteCode string) error {
 	if h.cmdHandler != nil {
 		return h.cmdHandler.handleShareStart(ctx, chatID, username, inviteCode)
 	}
-	return nil
+	return errors.New("handler: cmdHandler is nil, cannot handle ShareStart")
 }
 
 // Callback delegate
@@ -172,7 +172,7 @@ func (h *Handler) HandleCallback(ctx context.Context, update tgbotapi.Update) er
 	if h.cbHandler != nil {
 		return h.cbHandler.HandleCallback(ctx, update)
 	}
-	return nil
+	return errors.New("handler: cbHandler is nil, cannot handle Callback")
 }
 
 // Callback private delegates
