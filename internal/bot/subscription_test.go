@@ -787,10 +787,13 @@ func TestHandleQRCode_DatabaseError(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	handler.handleQRCode(ctx, 123456, "testuser", 1)
+	err := handler.handleQRCode(ctx, 123456, "testuser", 1)
 
-	assert.True(t, mockBot.SendCalledSafe())
-	assert.Contains(t, mockBot.LastSentTextSafe(), "нет активной подписки")
+	// Real DB errors should be returned, not masked with a user message.
+	require.Error(t, err, "handleQRCode should return an error for DB failure")
+	require.Contains(t, err.Error(), "database error", "error should wrap DB error")
+	// No user-facing message should be sent for internal errors.
+	assert.False(t, mockBot.SendCalledSafe(), "should not send user message on DB error")
 }
 
 func TestGetSubscriptionWithCache_CacheHit(t *testing.T) {
@@ -1528,10 +1531,11 @@ func TestHandleQRCode_DatabaseErrorReturnsError(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	handler.handleQRCode(ctx, 123456, "testuser", 100)
+	err := handler.handleQRCode(ctx, 123456, "testuser", 100)
 
-	assert.True(t, mockBot.SendCalledSafe(), "Bot.Send should be called with error message")
-	assert.Contains(t, mockBot.LastSentTextSafe(), "нет активной подписки")
+	require.Error(t, err, "handleQRCode should return an error for DB connection failure")
+	require.Contains(t, err.Error(), "database connection failed")
+	assert.False(t, mockBot.SendCalledSafe(), "should not send user message on DB error")
 }
 
 func TestHandleBackToSubscription_DeleteFails(t *testing.T) {

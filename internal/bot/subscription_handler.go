@@ -140,7 +140,18 @@ func (sh *SubscriptionHandler) handleQRCode(ctx context.Context, chatID int64, u
 	logger.Info("User requesting QR code", zap.String("username", username))
 
 	sub, err := sh.h.db.GetByTelegramID(ctx, chatID)
-	if err != nil || sub == nil {
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			// No active subscription — user-friendly message
+			editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgSubNoActive))
+			sh.h.safeSend(editMsg)
+			return nil
+		}
+		logger.Error("Failed to get subscription for QR", zap.Error(err), zap.Int64("chat_id", chatID))
+		return fmt.Errorf("get subscription: %w", err)
+	}
+	if sub == nil {
+		// Safety net: sub nil with no error
 		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgSubNoActive))
 		sh.h.safeSend(editMsg)
 		return nil
