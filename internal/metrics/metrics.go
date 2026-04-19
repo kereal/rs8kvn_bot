@@ -2,6 +2,7 @@ package metrics
 
 import (
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -141,7 +142,7 @@ var (
 // InstrumentHTTP middleware records metrics for HTTP requests.
 func InstrumentHTTP(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		path := r.URL.Path
+		path := normalizePath(r.URL.Path)
 		method := r.Method
 
 		HTTPRequestsInFlight.WithLabelValues(method, path).Inc()
@@ -155,6 +156,25 @@ func InstrumentHTTP(next http.Handler) http.Handler {
 		HTTPRequestDuration.WithLabelValues(method, path).Observe(duration)
 		HTTPRequestsTotal.WithLabelValues(method, path, rr.statusCodeString()).Inc()
 	})
+}
+
+// normalizePath reduces cardinality by replacing dynamic path segments
+// (such as invite codes, subscription IDs, UUIDs) with placeholders.
+func normalizePath(p string) string {
+	// Dynamic invite code: /i/<code> -> /i/:code
+	if len(p) > 3 && p[:2] == "/i" && p[2] != '/' {
+		// e.g., /iABC123 without slash - treat as /i with code
+		return "/i/:code"
+	}
+	// Known dynamic routes with slash separator
+	if strings.HasPrefix(p, "/i/") {
+		return "/i/:code"
+	}
+	if strings.HasPrefix(p, "/sub/") {
+		return "/sub/:id"
+	}
+	// Static/known paths pass through unchanged
+	return p
 }
 
 // responseRecorder wraps ResponseWriter to capture status code.
