@@ -229,21 +229,16 @@ func (h *Handler) HandleBroadcast(ctx context.Context, update tgbotapi.Update) {
 		successCount int64 = 0
 		failCount    int64 = 0
 		batchErr     error
+		cancelled    bool
 	)
 	offset := 0
+forLoop:
 	for offset < int(totalCount) {
 		// Check cancellation before fetching next batch
 		select {
 		case <-ctx.Done():
-			h.SendMessage(ctx, chatID, fmt.Sprintf(`⚠️ Рассылка прервана!
-
-📤 Отправлено: %d
-❌ Ошибок: %d
-👥 Осталось: %d`,
-				atomic.LoadInt64(&successCount),
-				atomic.LoadInt64(&failCount),
-				int(totalCount)-int(atomic.LoadInt64(&successCount)+atomic.LoadInt64(&failCount))))
-			return
+			cancelled = true
+			break forLoop
 		default:
 		}
 
@@ -251,7 +246,7 @@ func (h *Handler) HandleBroadcast(ctx context.Context, update tgbotapi.Update) {
 		if err != nil {
 			logger.Error("Failed to get telegram IDs batch", zap.Error(err))
 			batchErr = err
-			break
+			break forLoop
 		}
 
 		// Process batch with bounded concurrency
@@ -259,49 +254,74 @@ func (h *Handler) HandleBroadcast(ctx context.Context, update tgbotapi.Update) {
 		sem := make(chan struct{}, broadcastConcurrency)
 
 		for _, telegramID := range ids {
-			// Check context before spawning goroutine
+			// Attempt to acquire semaphore with cancellation support
 			select {
+			case sem <- struct{}{}: // acquired
+				wg.Add(1)
+				go func(tg int64) {
+					defer wg.Done()
+					defer func() { <-sem }() // release
+
+					// Check context inside goroutine before sending
+					select {
+					case <-ctx.Done():
+						return
+					default:
+					}
+
+					escapedMessage := escapeMarkdown(message)
+					msg := tgbotapi.NewMessage(tg, escapedMessage)
+					msg.ParseMode = "MarkdownV2"
+					msg.DisableWebPagePreview = true
+					if err := h.sendWithError(ctx, msg); err != nil {
+						atomic.AddInt64(&failCount, 1)
+					} else {
+						atomic.AddInt64(&successCount, 1)
+					}
+					time.Sleep(50 * time.Millisecond)
+				}(telegramID)
 			case <-ctx.Done():
-				h.SendMessage(ctx, chatID, fmt.Sprintf(`⚠️ Рассылка прервана!
-
-📤 Отправлено: %d
-❌ Ошибок: %d
-👥 Осталось: %d`,
-					atomic.LoadInt64(&successCount),
-					atomic.LoadInt64(&failCount),
-					int(totalCount)-int(atomic.LoadInt64(&successCount)+atomic.LoadInt64(&failCount))))
-				return
-			default:
+				// Cancelled while waiting for semaphore; stop launching new tasks
+				cancelled = true
+				break forLoop
 			}
-
-			sem <- struct{}{} // acquire semaphore slot
-			wg.Add(1)
-			go func(tg int64) {
-				defer wg.Done()
-				defer func() { <-sem }() // release
-
-				// Check context again inside goroutine
-				select {
-				case <-ctx.Done():
-					return
-				default:
-				}
-
-				escapedMessage := escapeMarkdown(message)
-				msg := tgbotapi.NewMessage(tg, escapedMessage)
-				msg.ParseMode = "MarkdownV2"
-				msg.DisableWebPagePreview = true
-				if err := h.sendWithError(ctx, msg); err != nil {
-					atomic.AddInt64(&failCount, 1)
-				} else {
-					atomic.AddInt64(&successCount, 1)
-				}
-				time.Sleep(50 * time.Millisecond)
-			}(telegramID)
 		}
 
 		wg.Wait() // wait for batch to complete
 		offset += batchSize
+	}
+
+	// If we exited the loop due to cancellation or batch error, handle accordingly
+	if cancelled {
+		h.SendMessage(ctx, chatID, fmt.Sprintf(`⚠️ Рассылка прервана!
+
+📤 Отправлено: %d
+❌ Ошибок: %d
+👥 Осталось: %d`,
+			atomic.LoadInt64(&successCount),
+			atomic.LoadInt64(&failCount),
+			int(totalCount)-int(atomic.LoadInt64(&successCount)+atomic.LoadInt64(&failCount))))
+		return
+	}
+	if batchErr != nil {
+		h.SendMessage(ctx, chatID, fmt.Sprintf(`❌ Рассылка прервана из-за ошибки!
+
+📤 Отправлено: %d
+❌ Ошибок отправки: %d
+👥 Всего пользователей: %d
+
+Ошибка: %v`,
+			atomic.LoadInt64(&successCount),
+			atomic.LoadInt64(&failCount),
+			totalCount,
+			batchErr,
+		))
+		logger.Error("Broadcast failed due to batch retrieval error",
+			zap.Error(batchErr),
+			zap.Int64("success", atomic.LoadInt64(&successCount)),
+			zap.Int64("failed", atomic.LoadInt64(&failCount)),
+			zap.Int64("total", totalCount))
+		return
 	}
 
 	if batchErr != nil {
