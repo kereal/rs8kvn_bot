@@ -2,6 +2,7 @@ package bot
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -17,6 +18,9 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"go.uber.org/zap"
 )
+
+// ErrRateLimited indicates the update was rate-limited.
+var ErrRateLimited = errors.New("rate limited")
 
 // Cache constants
 const (
@@ -423,7 +427,11 @@ func (h *Handler) StartRateLimiterCleanup(ctx context.Context, interval, maxIdle
 func (h *Handler) checkAdminSendRateLimit(chatID int64) bool {
 	if h.adminRateLimiters == nil {
 		// Handler created without NewHandler (e.g., in tests); initialize lazily
-		h.adminRateLimiters = make(map[int64]*ratelimiter.TokenBucket)
+		h.adminRateLimitMu.Lock()
+		if h.adminRateLimiters == nil {
+			h.adminRateLimiters = make(map[int64]*ratelimiter.TokenBucket)
+		}
+		h.adminRateLimitMu.Unlock()
 	}
 	h.adminRateLimitMu.Lock()
 	bucket, ok := h.adminRateLimiters[chatID]
@@ -471,13 +479,14 @@ func (h *Handler) HandleUpdate(ctx context.Context, update tgbotapi.Update) {
 		}
 		command = "callback"
 	}
+
+	var err error
 	if chatID != 0 && !h.isAdmin(chatID) && !h.checkRateLimit(chatID) {
 		h.handleRateLimitExceeded(chatID, 0)
 		metrics.BotUpdatesTotal.WithLabelValues(command, "rate_limited").Inc()
+		err = ErrRateLimited
 		return
 	}
-
-	var err error
 	defer func() {
 		if err != nil {
 			metrics.BotUpdateErrorsTotal.WithLabelValues(command).Inc()

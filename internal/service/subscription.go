@@ -449,6 +449,10 @@ func (s *SubscriptionService) ReconcileOrphanedClients(ctx context.Context) (int
 					logger.Info("Removed orphaned subscription (XUI client missing)",
 						zap.Int64("telegram_id", sub.TelegramID),
 						zap.String("username", sub.Username))
+					// Invalidate cache so subsequent reads don't return stale data
+					if s.invalidate != nil {
+						s.invalidate(sub.TelegramID)
+					}
 				}
 			} else {
 				// Other error (network, auth, etc.) — log and continue
