@@ -65,11 +65,8 @@ func (s *SingleFlight) Do(ctx context.Context, key string, fn func(ctx context.C
 	// Wait for completion or context cancellation
 	select {
 	case <-ctx.Done():
-		// Remove ourselves from the map; the goroutine will still run
-		// but its result will be discarded.
-		s.mu.Lock()
-		delete(s.calls, key)
-		s.mu.Unlock()
+		// Do NOT delete s.calls[key] or close call.done here — the goroutine's
+		// deferred cleanup is the sole owner of that mutation. Just bail out.
 		return nil, ctx.Err()
 	case <-call.done:
 		return call.result, call.err
