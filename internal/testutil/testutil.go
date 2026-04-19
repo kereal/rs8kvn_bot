@@ -85,6 +85,7 @@ type MockDatabaseService struct {
 	GetPoolStatsFunc         func() (*database.PoolStats, error)
 	GetReferralCountFunc     func(ctx context.Context, referrerTGID int64) (int64, error)
 	GetAllReferralCountsFunc func(ctx context.Context) (map[int64]int64, error)
+	UpdatePlanFunc           func(ctx context.Context, telegramID int64, plan string) error
 }
 
 func (m *MockDatabaseService) Ping(ctx context.Context) error {
@@ -323,6 +324,13 @@ func (m *MockDatabaseService) GetSubscriptionBySubscriptionID(ctx context.Contex
 		}
 	}
 	return nil, gorm.ErrRecordNotFound
+}
+
+func (m *MockDatabaseService) UpdatePlan(ctx context.Context, telegramID int64, plan string) error {
+	if m.UpdatePlanFunc != nil {
+		return m.UpdatePlanFunc(ctx, telegramID, plan)
+	}
+	return nil
 }
 
 func (m *MockDatabaseService) GetTrialSubscriptionBySubID(ctx context.Context, subscriptionID string) (*database.Subscription, error) {

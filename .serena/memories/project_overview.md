@@ -31,10 +31,8 @@ This is a Telegram bot for distributing VLESS+Reality+Vision proxy subscriptions
 - **pendingInvites periodic cleanup** — prevents memory leak from expired share-link entries
 - **MarkdownV2 proper escaping** — backslash-first escaping prevents double-escape and broken formatting
 - **Broadcast 5min timeout** — handles thousands of users without early termination
-- **Subscription status check in /sub/{subID}** — revoked/expired subs are not served
-- **ExpiryTime stored in DB on Create** — admin sees actual reset date, not "—"
-- **Soft delete unified** — all delete methods use GORM soft delete consistently
-- **Cache RLock for reads** — concurrent cache reads don't block each other — handles thousands of users without early termination
+- **Subscription plan field** — `plan` column on subscriptions (free/basic/premium/vip), exposed in API and webhooks
+- **Admin /plan command** — `/plan @username <plan>` to change user's plan (looks up by username)
 
 ## Tech Stack
 - **Language**: Go 1.25 (проект всегда был на Go, никогда не был на Python)
@@ -58,10 +56,29 @@ This is a Telegram bot for distributing VLESS+Reality+Vision proxy subscriptions
 - `internal/heartbeat/` - Heartbeat monitoring
 - `internal/backup/` - Database backup functionality
 - `internal/ratelimiter/` - Rate limiting logic
-- `internal/web/` - Web endpoints (health, invite/trial, subscription proxy)
+- `internal/web/` - Web endpoints (health, invite/trial, subscription proxy, API)
 - `internal/subproxy/` - Subscription proxy (cache, merge, extra config, InvalidateCache for status changes)
 - `internal/interfaces/` - Interface definitions
 - `internal/testutil/` - Test utilities and mocks
+
+## Subscription Plan System (v2.3.0)
+
+### Plan Field
+- **Field**: `plan TEXT NOT NULL DEFAULT 'free'` on `subscriptions` table
+- **Migration**: `005_add_plan_column.up.sql`
+- **Constants**: `database.PlanFree`, `database.PlanBasic`, `database.PlanPremium`, `database.PlanVIP`
+- **Validation**: `database.ValidPlans` map
+
+### API
+- `GET /api/v1/subscriptions` — returns `plan` field per subscription
+
+### Webhook Events
+- All events (`subscription.activated`, `subscription.expired`) include `plan` field
+
+### Admin Command
+- `/plan @username <plan>` — changes plan by username lookup, invalidates cache
+- Example: `/plan @user premium`, `/plan @testuser vip`
+- Strips @ prefix automatically, both `/plan user premium` and `/plan @user premium` work
 
 ## Development Workflow
 
@@ -81,3 +98,8 @@ This is a Telegram bot for distributing VLESS+Reality+Vision proxy subscriptions
 1. Активировать проект Serena: `activate_project("rs8kvn_bot")`
 2. Проверить onboarding: `check_onboarding_performed()`
 3. Прочитать памяти: `git-workflow`, `project_overview`, `code_style`
+
+### ⚠️ .gitignore Issue
+The `.gitignore` has `bot` pattern that matches `internal/bot/` directory.
+When adding new files to `internal/bot/`, use `git add -f internal/bot/newfile.go`
+Some Serena tools (replace_content, insert_after_symbol) cannot access files in `internal/bot/` — use `edit_file` or `terminal` instead.

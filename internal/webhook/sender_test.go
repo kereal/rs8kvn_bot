@@ -89,7 +89,7 @@ func TestSender_SendAsync_Success(t *testing.T) {
 		Event:             EventSubscriptionActivated,
 		UserID:            "user-123",
 		Email:             "test@example.com",
-		SubscriptionToken: "token-abc",
+		SubscriptionID: "token-abc",
 	}
 
 	s.SendAsync(event)
@@ -106,7 +106,7 @@ func TestSender_SendAsync_Success(t *testing.T) {
 	assert.Equal(t, event.Event, receivedEvent.Event)
 	assert.Equal(t, event.UserID, receivedEvent.UserID)
 	assert.Equal(t, event.Email, receivedEvent.Email)
-	assert.Equal(t, event.SubscriptionToken, receivedEvent.SubscriptionToken)
+	assert.Equal(t, event.SubscriptionID, receivedEvent.SubscriptionID)
 
 	// Should only be called once (no retries on success)
 	assert.Equal(t, int64(1), atomic.LoadInt64(&requestCount))
@@ -410,7 +410,7 @@ func TestSender_SendAsync_ConcurrentEvents(t *testing.T) {
 			Event:             EventSubscriptionActivated,
 			UserID:            "user-concurrent",
 			Email:             "concurrent@example.com",
-			SubscriptionToken: "token-concurrent",
+			SubscriptionID: "token-concurrent",
 		})
 	}
 
@@ -460,7 +460,7 @@ func TestSender_SendAsync_EventDataIntegrity(t *testing.T) {
 		Event:             EventSubscriptionUpdated,
 		UserID:            "550e8400-e29b-41d4-a716-446655440000",
 		Email:             "user@example.com",
-		SubscriptionToken: "abc123def456",
+		SubscriptionID: "abc123def456",
 	}
 
 	s.SendAsync(event)
@@ -477,7 +477,7 @@ func TestSender_SendAsync_EventDataIntegrity(t *testing.T) {
 	assert.Equal(t, event.Event, receivedEvent.Event)
 	assert.Equal(t, event.UserID, receivedEvent.UserID)
 	assert.Equal(t, event.Email, receivedEvent.Email)
-	assert.Equal(t, event.SubscriptionToken, receivedEvent.SubscriptionToken)
+	assert.Equal(t, event.SubscriptionID, receivedEvent.SubscriptionID)
 }
 
 func TestSender_SendAsync_AuthHeader(t *testing.T) {
@@ -613,7 +613,7 @@ func TestEvent_JSONMarshal(t *testing.T) {
 		Event:             EventSubscriptionActivated,
 		UserID:            "user-456",
 		Email:             "test@example.com",
-		SubscriptionToken: "token-789",
+		SubscriptionID: "token-789",
 	}
 
 	data, err := json.Marshal(event)
@@ -627,7 +627,7 @@ func TestEvent_JSONMarshal(t *testing.T) {
 	assert.Equal(t, event.Event, unmarshaled.Event)
 	assert.Equal(t, event.UserID, unmarshaled.UserID)
 	assert.Equal(t, event.Email, unmarshaled.Email)
-	assert.Equal(t, event.SubscriptionToken, unmarshaled.SubscriptionToken)
+	assert.Equal(t, event.SubscriptionID, unmarshaled.SubscriptionID)
 }
 
 func TestEvent_JSONKeys(t *testing.T) {
@@ -638,7 +638,7 @@ func TestEvent_JSONKeys(t *testing.T) {
 		Event:             EventSubscriptionActivated,
 		UserID:            "user-456",
 		Email:             "test@example.com",
-		SubscriptionToken: "token-789",
+		SubscriptionID: "token-789",
 	}
 
 	data, err := json.Marshal(event)

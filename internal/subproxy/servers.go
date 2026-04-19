@@ -2,7 +2,9 @@ package subproxy
 
 import (
 	"bufio"
+	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"rs8kvn_bot/internal/logger"
@@ -29,6 +31,49 @@ type ExtraConfig struct {
 	Servers []string
 }
 
+// validateExtraServersPath ensures the file path is safe and within allowed bounds.
+// It prevents directory traversal attacks by checking for ".." and ensuring the
+// resolved absolute path is within the project's data directory or other safe locations.
+func validateExtraServersPath(filePath string) error {
+	if filePath == "" {
+		return fmt.Errorf("file path cannot be empty")
+	}
+
+	// Check for directory traversal attempts in the original path
+	// This must be done BEFORE cleaning because Clean() resolves ".."
+	if strings.Contains(filePath, "..") {
+		return fmt.Errorf("invalid file path: directory traversal detected")
+	}
+
+	// Get absolute path
+	absPath, err := filepath.Abs(filePath)
+	if err != nil {
+		return fmt.Errorf("failed to get absolute path: %w", err)
+	}
+
+	// Clean the path to resolve any . elements
+	cleaned := filepath.Clean(absPath)
+
+	// Prevent access to system directories (case-insensitive for safety)
+	lowerPath := strings.ToLower(cleaned)
+	dangerousPrefixes := []string{
+		"/etc/", "/root/", "/sys/", "/proc/", "/dev/", "/var/run/",
+		"C:\\Windows\\", "C:\\Program Files\\", "C:\\Program Files (x86)\\", // Windows
+	}
+	for _, prefix := range dangerousPrefixes {
+		if strings.HasPrefix(lowerPath, prefix) {
+			return fmt.Errorf("access to system directories is forbidden")
+		}
+	}
+
+	// Ensure path is not root
+	if cleaned == "/" || cleaned == "C:\\" || cleaned == "D:\\" {
+		return fmt.Errorf("cannot use root directory")
+	}
+
+	return nil
+}
+
 // LoadExtraConfig loads and parses an extra configuration file at filePath.
 // It returns (nil, nil) when filePath is empty.
 // The file may contain a headers section followed by server entries. Header lines
@@ -45,7 +90,12 @@ func LoadExtraConfig(filePath string) (*ExtraConfig, error) {
 		return nil, nil
 	}
 
-	// #nosec G304 // filePath is validated by caller - only alphanumeric with underscore
+	// Validate file path to prevent directory traversal attacks
+	if err := validateExtraServersPath(filePath); err != nil {
+		return nil, fmt.Errorf("invalid extra servers file path: %w", err)
+	}
+
+	// #nosec G304 // filePath validated above (no directory traversal, no system paths)
 	f, err := os.Open(filePath)
 	if err != nil {
 		return nil, err
