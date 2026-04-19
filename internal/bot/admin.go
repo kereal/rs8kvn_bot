@@ -228,6 +228,7 @@ func (h *Handler) HandleBroadcast(ctx context.Context, update tgbotapi.Update) {
 	var (
 		successCount int64 = 0
 		failCount    int64 = 0
+		batchErr     error
 	)
 	offset := 0
 	for offset < int(totalCount) {
@@ -249,6 +250,7 @@ func (h *Handler) HandleBroadcast(ctx context.Context, update tgbotapi.Update) {
 		ids, err := h.db.GetTelegramIDsBatch(ctx, offset, batchSize)
 		if err != nil {
 			logger.Error("Failed to get telegram IDs batch", zap.Error(err))
+			batchErr = err
 			break
 		}
 
@@ -300,6 +302,28 @@ func (h *Handler) HandleBroadcast(ctx context.Context, update tgbotapi.Update) {
 
 		wg.Wait() // wait for batch to complete
 		offset += batchSize
+	}
+
+	if batchErr != nil {
+		// Batch retrieval failed — report partial/failure with error details
+		h.SendMessage(ctx, chatID, fmt.Sprintf(`❌ Рассылка прервана из-за ошибки!
+
+📤 Отправлено: %d
+❌ Ошибок отправки: %d
+👥 Всего пользователей: %d
+
+Ошибка: %v`,
+			atomic.LoadInt64(&successCount),
+			atomic.LoadInt64(&failCount),
+			totalCount,
+			batchErr,
+		))
+		logger.Error("Broadcast failed due to batch retrieval error",
+			zap.Error(batchErr),
+			zap.Int64("success", atomic.LoadInt64(&successCount)),
+			zap.Int64("failed", atomic.LoadInt64(&failCount)),
+			zap.Int64("total", totalCount))
+		return
 	}
 
 	h.SendMessage(ctx, chatID, fmt.Sprintf(`✅ Рассылка завершена!
