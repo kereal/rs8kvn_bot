@@ -457,11 +457,12 @@ func (h *Handler) checkAdminSendRateLimit(chatID int64) bool {
 
 // ClearAdminSendRateLimit resets the rate limit for an admin, allowing immediate send.
 func (h *Handler) ClearAdminSendRateLimit(chatID int64) {
+	h.adminRateLimitMu.Lock()
+	defer h.adminRateLimitMu.Unlock()
+
 	if h.adminRateLimiters == nil {
 		return
 	}
-	h.adminRateLimitMu.Lock()
-	defer h.adminRateLimitMu.Unlock()
 	if bucket, ok := h.adminRateLimiters[chatID]; ok {
 		bucket.Reset()
 	}
