@@ -264,12 +264,13 @@ All tests pass with `-race` detector. Fuzzing enabled for critical functions.
 - **Auto-relogin:** On HTTP 401/redirect, re-authenticates then retries failed request
 - **Connection pool cleanup:** Before re-auth to prevent dead connections
 - **Circuit breaker:** 5 failures → 30s open state, then half-open (3 attempts) before full close
-- **Subscription defaults:** `reset: 30` (days from creation), `expiryTime: now + 30 days`, `flow: "xtls-rprx-vision"`
+- **Subscription defaults:** `reset: 30` (days from creation), `expiryTime: now + 30 days`
 - **Auto-reset:** Only works when `ExpiryTime > 0`. Traffic resets every 30 days, expiry extends (3x-ui auto-renew logic)
 - **Client email:** `trial_{subID}` for trial, `{username}` for regular, `plan_{subID}` for plan-based (future)
 - **Ping vs Login:** Health checks use `Ping()` → `ensureLoggedIn(ctx, false)` — no forced re-auth if session valid
 - **Singleflight:** Deduplicates concurrent login attempts and subscription fetches
 - **DNS error fast-fail:** Non-retryable errors fail immediately (no retry spam)
+- **Flow detection (v2.4.0+):** When creating/updating clients, fetches inbound config via `GET /panel/api/inbounds/get/{id}` to determine transport type. Flow is set based on transport: `tcp` → `"xtls-rprx-vision"`, `xhttp/h2/ws/grpc` → `""` (empty). Falls back to `"xtls-rprx-vision"` if inbound cannot be fetched.
 
 ### Subscription Flow
 - **Trial:** `/i/{code}` → IP rate limit (3/hour) → DB trial record (telegram_id=0) → user clicks link in Telegram → `BindTrialSubscription` sets telegram_id, removes is_trial, sets referred_by if from invite
