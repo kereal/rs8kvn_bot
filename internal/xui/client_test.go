@@ -235,6 +235,68 @@ func TestAddClientWithID_EmptyClientID(t *testing.T) {
 	require.Error(t, err, "AddClientWithID() should return error for empty client ID")
 }
 
+func TestInbound_GetTransport_TCP(t *testing.T) {
+	t.Parallel()
+
+	in := Inbound{
+		StreamSettings: `{"network": "tcp"}`,
+	}
+	assert.Equal(t, "tcp", in.GetTransport(), "GetTransport() should return tcp")
+}
+
+func TestInbound_GetTransport_XHTTP(t *testing.T) {
+	t.Parallel()
+
+	in := Inbound{
+		StreamSettings: `{"network": "xhttp"}`,
+	}
+	assert.Equal(t, "xhttp", in.GetTransport(), "GetTransport() should return xhttp")
+}
+
+func TestInbound_GetTransport_Empty(t *testing.T) {
+	t.Parallel()
+
+	in := Inbound{}
+	assert.Equal(t, "", in.GetTransport(), "GetTransport() should return empty for nil StreamSettings")
+}
+
+func TestInbound_GetTransport_WithNewlines(t *testing.T) {
+	t.Parallel()
+
+	in := Inbound{
+		StreamSettings: "{\n  \"network\": \"tcp\",\n  \"security\": \"none\"\n}",
+	}
+	assert.Equal(t, "tcp", in.GetTransport(), "GetTransport() should handle newlines")
+}
+
+func TestInbound_GetRequiredFlow_TCP(t *testing.T) {
+	t.Parallel()
+
+	in := Inbound{StreamSettings: `{"network": "tcp"}`}
+	assert.Equal(t, "xtls-rprx-vision", in.GetRequiredFlow(), "TCP should require xtls-rprx-vision")
+}
+
+func TestInbound_GetRequiredFlow_XHTTP(t *testing.T) {
+	t.Parallel()
+
+	in := Inbound{StreamSettings: `{"network": "xhttp"}`}
+	assert.Equal(t, "", in.GetRequiredFlow(), "XHTTP should use empty flow")
+}
+
+func TestInbound_GetRequiredFlow_GRPC(t *testing.T) {
+	t.Parallel()
+
+	in := Inbound{StreamSettings: `{"network": "grpc"}`}
+	assert.Equal(t, "", in.GetRequiredFlow(), "GRPC should use empty flow")
+}
+
+func TestInbound_GetRequiredFlow_WS(t *testing.T) {
+	t.Parallel()
+
+	in := Inbound{StreamSettings: `{"network": "ws"}`}
+	assert.Equal(t, "", in.GetRequiredFlow(), "WS should use empty flow")
+}
+
 func TestMarshalJSON_Success(t *testing.T) {
 	t.Parallel()
 
