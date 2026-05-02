@@ -1,6 +1,6 @@
 module rs8kvn_bot
 
-go 1.25
+go 1.25.0
 
 require (
 	github.com/getsentry/sentry-go v0.45.0
@@ -8,7 +8,7 @@ require (
 	github.com/golang-migrate/migrate/v4 v4.19.1
 	github.com/joho/godotenv v1.5.1
 	github.com/mattn/go-sqlite3 v1.14.42
-	github.com/piglig/go-qr v0.2.6
+	github.com/piglig/go-qr v1.0.0
 	github.com/stretchr/testify v1.11.1
 	go.uber.org/zap v1.27.1
 	golang.org/x/sync v0.20.0
