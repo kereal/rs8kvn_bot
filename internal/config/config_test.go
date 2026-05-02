@@ -197,7 +197,7 @@ func TestLoad_InvalidHeartbeatInterval_Zero(t *testing.T) {
 	os.Setenv("XUI_PASSWORD", "password")
 	os.Setenv("XUI_INBOUND_ID", "1")
 	os.Setenv("HEARTBEAT_INTERVAL", "0")
-	os.Setenv("HEARTBEAT_URL", "http://example.com/heartbeat")
+	os.Setenv("HEARTBEAT_URL", "https://example.com/heartbeat")
 	os.Setenv("LOG_LEVEL", "info")
 	defer func() {
 		os.Unsetenv("TELEGRAM_BOT_TOKEN")
@@ -224,7 +224,7 @@ func TestLoad_ValidHeartbeatInterval_MinValue(t *testing.T) {
 	os.Setenv("XUI_PASSWORD", "password")
 	os.Setenv("XUI_INBOUND_ID", "1")
 	os.Setenv("HEARTBEAT_INTERVAL", "60")
-	os.Setenv("HEARTBEAT_URL", "http://example.com/heartbeat")
+	os.Setenv("HEARTBEAT_URL", "https://example.com/heartbeat")
 	os.Setenv("LOG_LEVEL", "info")
 	defer func() {
 		os.Unsetenv("TELEGRAM_BOT_TOKEN")
