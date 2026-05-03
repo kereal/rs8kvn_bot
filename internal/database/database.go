@@ -27,6 +27,23 @@ import (
 //go:embed migrations/*.sql
 var migrationFiles embed.FS
 
+// Plan constants define the subscription plan names.
+// These are stored in the Subscription.Plan field.
+const (
+	PlanFree    = "free"
+	PlanBasic   = "basic"
+	PlanPremium = "premium"
+	PlanVIP     = "vip"
+)
+
+// ValidPlans is the set of allowed plan values.
+var ValidPlans = map[string]bool{
+	PlanFree:    true,
+	PlanBasic:   true,
+	PlanPremium: true,
+	PlanVIP:     true,
+}
+
 // Subscription represents a user's VPN subscription.
 type Subscription struct {
 	ID              uint           `gorm:"primaryKey"`
@@ -38,6 +55,7 @@ type Subscription struct {
 	TrafficLimit    int64          `gorm:"default:107374182400"`
 	ExpiryTime      time.Time      `gorm:"index:idx_expiry"`
 	Status          string         `gorm:"default:active;size:50;index"`
+	Plan            string         `gorm:"default:free;size:50;index"`
 	SubscriptionURL string         `gorm:"size:512;column:subscription_url"`
 	InviteCode      string         `gorm:"size:16;index"`
 	IsTrial         bool           `gorm:"default:false;index"`
@@ -360,10 +378,24 @@ func (s *Service) CreateSubscription(ctx context.Context, sub *Subscription) err
 func (s *Service) UpdateSubscription(ctx context.Context, sub *Subscription) error {
 	result := s.db.WithContext(ctx).Model(&Subscription{}).
 		Where("id = ?", sub.ID).
-		Select("telegram_id", "username", "client_id", "subscription_id", "inbound_id", "traffic_limit", "expiry_time", "status", "subscription_url", "invite_code", "is_trial", "referred_by").
+		Select("telegram_id", "username", "client_id", "subscription_id", "inbound_id", "traffic_limit", "expiry_time", "status", "plan", "subscription_url", "invite_code", "is_trial", "referred_by").
 		Updates(sub)
 	if result.Error != nil {
 		return fmt.Errorf("failed to update subscription: %w", result.Error)
+	}
+	return nil
+}
+
+// UpdatePlan updates the plan field for a subscription by Telegram ID.
+func (s *Service) UpdatePlan(ctx context.Context, telegramID int64, plan string) error {
+	result := s.db.WithContext(ctx).Model(&Subscription{}).
+		Where("telegram_id = ? AND status = ?", telegramID, "active").
+		Update("plan", plan)
+	if result.Error != nil {
+		return fmt.Errorf("failed to update plan: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("no active subscription found for telegram_id %d", telegramID)
 	}
 	return nil
 }

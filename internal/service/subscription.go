@@ -111,7 +111,8 @@ func (s *SubscriptionService) Create(ctx context.Context, chatID int64, username
 			Event:             webhook.EventSubscriptionActivated,
 			UserID:            sub.ClientID,
 			Email:             sub.Username,
-			SubscriptionToken: sub.SubscriptionID,
+			SubscriptionID: sub.SubscriptionID,
+			Plan:              sub.Plan,
 		})
 	}
 
@@ -136,6 +137,7 @@ func (s *SubscriptionService) Delete(ctx context.Context, telegramID int64) erro
 	inboundID := sub.InboundID
 	username := sub.Username
 	subscriptionID := sub.SubscriptionID
+	plan := sub.Plan
 
 	if inboundID == 0 {
 		inboundID = s.cfg.XUIInboundID
@@ -167,7 +169,8 @@ func (s *SubscriptionService) Delete(ctx context.Context, telegramID int64) erro
 			Event:             webhook.EventSubscriptionExpired,
 			UserID:            clientID,
 			Email:             username,
-			SubscriptionToken: subscriptionID,
+			SubscriptionID: subscriptionID,
+			Plan:              plan,
 		})
 	}
 
@@ -187,6 +190,7 @@ func (s *SubscriptionService) DeleteByID(ctx context.Context, id uint) (*databas
 	inboundID := sub.InboundID
 	username := sub.Username
 	subscriptionID := sub.SubscriptionID
+	plan := sub.Plan
 
 	// Delete from database first — same rationale as Delete():
 	// DB-first avoids orphaned DB records when XUI deletion succeeds
@@ -209,7 +213,8 @@ func (s *SubscriptionService) DeleteByID(ctx context.Context, id uint) (*databas
 			Event:             webhook.EventSubscriptionExpired,
 			UserID:            clientID,
 			Email:             username,
-			SubscriptionToken: subscriptionID,
+			SubscriptionID: subscriptionID,
+			Plan:              plan,
 		})
 	}
 

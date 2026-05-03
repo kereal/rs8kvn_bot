@@ -125,15 +125,55 @@ func (h *Handler) isAdmin(chatID int64) bool {
 	return h.cfg.TelegramAdminID > 0 && chatID == h.cfg.TelegramAdminID
 }
 
-// withTimeout returns a context with the standard handler timeout.
-func (h *Handler) withTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
-	return context.WithTimeout(ctx, HandlerTimeout)
-}
-
-// Command delegates
-func (h *Handler) HandleStart(ctx context.Context, update tgbotapi.Update) error {
-	if h.cmdHandler != nil {
-		return h.cmdHandler.HandleStart(ctx, update)
+// HandleUpdate routes a Telegram update to the appropriate handler method.
+func (h *Handler) HandleUpdate(ctx context.Context, update tgbotapi.Update) {
+	if update.Message != nil {
+		if update.Message.IsCommand() {
+			switch update.Message.Command() {
+			case "start":
+				h.HandleStart(ctx, update)
+			case "help":
+				h.HandleHelp(ctx, update)
+			case "invite":
+				h.HandleInvite(ctx, update)
+			case "del":
+				h.HandleDel(ctx, update)
+			case "broadcast":
+				h.HandleBroadcast(ctx, update)
+			case "send":
+				h.HandleSend(ctx, update)
+			case "refstats":
+				h.HandleRefstats(ctx, update)
+			case "plan":
+				h.HandlePlan(ctx, update)
+			case "v":
+				h.HandleVersion(ctx, update)
+			default:
+				h.SendMessage(ctx, update.Message.Chat.ID,
+					"Неизвестная команда. Используйте /start или /help")
+			}
+		} else {
+			username := "unknown"
+			if update.Message.From != nil {
+				if update.Message.From.UserName != "" {
+					username = update.Message.From.UserName
+				} else if update.Message.From.FirstName != "" {
+					username = update.Message.From.FirstName
+				}
+			}
+			textPreview := update.Message.Text
+			if len(textPreview) > 50 {
+				textPreview = textPreview[:50] + "..."
+			}
+			logger.Info("Received non-command message",
+				zap.Int64("chat_id", update.Message.Chat.ID),
+				zap.String("username", username),
+				zap.String("text_preview", textPreview))
+			h.SendMessage(ctx, update.Message.Chat.ID,
+				"Используйте /start для начала работы с ботом.")
+		}
+	} else if update.CallbackQuery != nil {
+		h.HandleCallback(ctx, update)
 	}
 	return errors.New("handler: cmdHandler is nil, cannot handle Start")
 }

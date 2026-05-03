@@ -106,6 +106,54 @@ type ClientTraffic struct {
 	LastOnline int64  `json:"lastOnline"`
 }
 
+// Inbound represents an inbound configuration in 3x-ui.
+type Inbound struct {
+	ID             int    `json:"id"`
+	Up             int    `json:"up"`
+	Down           int    `json:"down"`
+	Total          int    `json:"total"`
+	Remark        string `json:"remark"`
+	Enable        bool   `json:"enable"`
+	ExpiryTime    int64  `json:"expiryTime"`
+	Listen        string `json:"listen"`
+	Port         int    `json:"port"`
+	Protocol     string `json:"protocol"`
+	Settings     string `json:"settings"`
+	StreamSettings string `json:"streamSettings"`
+	Tag          string `json:"tag"`
+	Sniffing      string `json:"sniffing"`
+}
+
+// GetTransport returns the transport type from streamSettings.
+// Returns empty string if not available or on error.
+func (in *Inbound) GetTransport() string {
+	if in.StreamSettings == "" {
+		return ""
+	}
+	// 3x-ui returns JSON with literal \n characters - need to unescape them
+	cleaned := strings.ReplaceAll(in.StreamSettings, "\\n", "\n")
+	var settings struct {
+		Network string `json:"network"`
+	}
+	if err := json.Unmarshal([]byte(cleaned), &settings); err != nil {
+		return ""
+	}
+	return settings.Network
+}
+
+// GetRequiredFlow returns the required flow based on the transport type.
+// - XHTTP, H2, WS, GRPC: empty flow (no flow needed)
+// - TCP (with TLS/Reality): xtls-rprx-vision
+func (in *Inbound) GetRequiredFlow() string {
+	transport := in.GetTransport()
+	switch transport {
+	case "xhttp", "h2", "ws", "grpc", "grpcs":
+		return ""
+	default:
+		return "xtls-rprx-vision"
+	}
+}
+
 // NewClient creates a new 3x-ui API client.
 // sessionMaxAge specifies how long the panel session remains valid (must match panel settings).
 func NewClient(host, username, password string, sessionMaxAge time.Duration) (*Client, error) {
@@ -459,22 +507,23 @@ func (c *Client) AddClientWithID(ctx context.Context, inboundID int, email, clie
 		resetDays = config.SubscriptionResetDay
 	}
 
-	var result *ClientConfig
-	err := RetryWithBackoff(ctx, config.XUIMaxRetries, config.XUIInitialRetryDelay, func() error {
-		var err error
-		result, err = c.doAddClientWithID(ctx, inboundID, email, clientID, subID, trafficBytes, expiryTime, resetDays)
-		return err
-	})
-	if err != nil {
-		metrics.XUIRequestsTotal.WithLabelValues("AddClientWithID", "error").Inc()
-	} else {
-		metrics.XUIRequestsTotal.WithLabelValues("AddClientWithID", "success").Inc()
+	// Determine required flow based on inbound transport
+	flow, flowErr := c.getRequiredFlow(ctx, inboundID)
+	if flowErr != nil {
+		return nil, fmt.Errorf("failed to determine flow: %w", flowErr)
 	}
-	return result, err
+
+	var result *ClientConfig
+	errRetry := RetryWithBackoff(ctx, config.XUIMaxRetries, config.XUIInitialRetryDelay, func() error {
+		var innerErr error
+		result, innerErr = c.doAddClientWithID(ctx, inboundID, email, clientID, subID, trafficBytes, expiryTime, resetDays, flow)
+		return innerErr
+	})
+	return result, errRetry
 }
 
 // doAddClientWithID performs the actual add client request.
-func (c *Client) doAddClientWithID(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*ClientConfig, error) {
+func (c *Client) doAddClientWithID(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int, flow string) (*ClientConfig, error) {
 	clientSettings := map[string]interface{}{
 		"clients": []map[string]interface{}{
 			{
@@ -484,7 +533,7 @@ func (c *Client) doAddClientWithID(ctx context.Context, inboundID int, email, cl
 				"totalGB":    trafficBytes,
 				"expiryTime": getExpiryTimeMillis(expiryTime),
 				"enable":     true,
-				"flow":       "xtls-rprx-vision",
+				"flow":       flow,
 				"subId":      subID,
 				"reset":      resetDays,
 			},
@@ -600,8 +649,14 @@ func (c *Client) UpdateClient(ctx context.Context, inboundID int, clientID, emai
 		return fmt.Errorf("client ID cannot be empty")
 	}
 
-	err := RetryWithBackoff(ctx, config.XUIMaxRetries, config.XUIInitialRetryDelay, func() error {
-		return c.doUpdateClient(ctx, inboundID, clientID, email, subID, trafficBytes, expiryTime, tgID, comment)
+	// Determine required flow based on inbound transport
+	flow, err := c.getRequiredFlow(ctx, inboundID)
+	if err != nil {
+		return fmt.Errorf("failed to determine flow: %w", err)
+	}
+
+	return RetryWithBackoff(ctx, config.XUIMaxRetries, config.XUIInitialRetryDelay, func() error {
+		return c.doUpdateClient(ctx, inboundID, clientID, email, subID, trafficBytes, expiryTime, tgID, comment, flow)
 	})
 	if err != nil {
 		metrics.XUIRequestsTotal.WithLabelValues("UpdateClient", "error").Inc()
@@ -612,7 +667,7 @@ func (c *Client) UpdateClient(ctx context.Context, inboundID int, clientID, emai
 }
 
 // doUpdateClient performs the actual update client request.
-func (c *Client) doUpdateClient(ctx context.Context, inboundID int, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, tgID int64, comment string) error {
+func (c *Client) doUpdateClient(ctx context.Context, inboundID int, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, tgID int64, comment string, flow string) error {
 	clientSettings := map[string]interface{}{
 		"clients": []map[string]interface{}{
 			{
@@ -622,7 +677,7 @@ func (c *Client) doUpdateClient(ctx context.Context, inboundID int, clientID, em
 				"totalGB":    trafficBytes,
 				"expiryTime": getExpiryTimeMillis(expiryTime),
 				"enable":     true,
-				"flow":       "xtls-rprx-vision",
+				"flow":       flow,
 				"subId":      subID,
 				"reset":      config.SubscriptionResetDay,
 				"tgId":       fmt.Sprintf("%d", tgID),
@@ -711,6 +766,55 @@ func (c *Client) doGetClientTraffic(ctx context.Context, email string) (*ClientT
 	}
 
 	return &traffic, nil
+}
+
+// GetInbound retrieves an inbound configuration by ID.
+func (c *Client) GetInbound(ctx context.Context, inboundID int) (*Inbound, error) {
+	if err := c.ensureLoggedIn(ctx, false); err != nil {
+		return nil, fmt.Errorf("authentication required: %w", err)
+	}
+
+	return c.doGetInbound(ctx, inboundID)
+}
+
+// doGetInbound performs the actual get inbound request.
+func (c *Client) doGetInbound(ctx context.Context, inboundID int) (*Inbound, error) {
+	inboundURL := fmt.Sprintf("%s/panel/api/inbounds/get/%d", c.host, inboundID)
+
+	respBody, err := c.doHTTPRequest(ctx, http.MethodGet, inboundURL, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var apiResp APIResponse
+	if err := json.Unmarshal(respBody, &apiResp); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	if !apiResp.Success {
+		return nil, fmt.Errorf("failed to get inbound: %s", apiResp.Msg)
+	}
+
+	var inbound Inbound
+	if err := json.Unmarshal(apiResp.Obj, &inbound); err != nil {
+		return nil, fmt.Errorf("failed to parse inbound data: %w", err)
+	}
+
+	return &inbound, nil
+}
+
+// getRequiredFlow determines the required flow for a given inbound ID.
+// If inbound cannot be fetched, defaults to xtls-rprx-vision.
+func (c *Client) getRequiredFlow(ctx context.Context, inboundID int) (string, error) {
+	// Try to get inbound; fall back to default on any error (including 404 for missing mock endpoints)
+	inbound, err := c.doGetInbound(ctx, inboundID)
+	if err != nil {
+		logger.Debug("Failed to get inbound for flow, using default",
+			zap.Error(err))
+		return "xtls-rprx-vision", nil
+	}
+
+	return inbound.GetRequiredFlow(), nil
 }
 
 // GetSubscriptionLink generates a subscription URL for the given subID.

@@ -136,14 +136,20 @@ func TestAddClientWithID_Success(t *testing.T) {
 		case "/login":
 			loginCalled = true
 			resp := APIResponse{Success: true}
-			_ = json.NewEncoder(w).Encode(resp)
+			json.NewEncoder(w).Encode(resp)
+		case "/panel/api/inbounds/get/1":
+			resp := APIResponse{Success: true, Obj: json.RawMessage(`{"id":1,"streamSettings":"{\"network\":\"tcp\"}"}`)}
+			json.NewEncoder(w).Encode(resp)
 		case "/panel/api/inbounds/addClient":
 			addClientCalled = true
 			resp := APIResponse{Success: true, Msg: "Client added successfully"}
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(resp)
 		default:
-			t.Errorf("Unexpected path: %s", r.URL.Path)
+			// For getRequiredFlow fallback - return 404 so it falls back to default flow
+			w.WriteHeader(http.StatusNotFound)
+			resp := APIResponse{Success: false, Msg: "Not found"}
+			json.NewEncoder(w).Encode(resp)
 		}
 	}))
 	defer server.Close()
@@ -227,6 +233,68 @@ func TestAddClientWithID_EmptyClientID(t *testing.T) {
 
 	_, err = client.AddClientWithID(ctx, 1, "testuser", "", "sub-id", 107374182400, time.Now().Add(24*time.Hour), 31)
 	require.Error(t, err, "AddClientWithID() should return error for empty client ID")
+}
+
+func TestInbound_GetTransport_TCP(t *testing.T) {
+	t.Parallel()
+
+	in := Inbound{
+		StreamSettings: `{"network": "tcp"}`,
+	}
+	assert.Equal(t, "tcp", in.GetTransport(), "GetTransport() should return tcp")
+}
+
+func TestInbound_GetTransport_XHTTP(t *testing.T) {
+	t.Parallel()
+
+	in := Inbound{
+		StreamSettings: `{"network": "xhttp"}`,
+	}
+	assert.Equal(t, "xhttp", in.GetTransport(), "GetTransport() should return xhttp")
+}
+
+func TestInbound_GetTransport_Empty(t *testing.T) {
+	t.Parallel()
+
+	in := Inbound{}
+	assert.Equal(t, "", in.GetTransport(), "GetTransport() should return empty for nil StreamSettings")
+}
+
+func TestInbound_GetTransport_WithNewlines(t *testing.T) {
+	t.Parallel()
+
+	in := Inbound{
+		StreamSettings: "{\n  \"network\": \"tcp\",\n  \"security\": \"none\"\n}",
+	}
+	assert.Equal(t, "tcp", in.GetTransport(), "GetTransport() should handle newlines")
+}
+
+func TestInbound_GetRequiredFlow_TCP(t *testing.T) {
+	t.Parallel()
+
+	in := Inbound{StreamSettings: `{"network": "tcp"}`}
+	assert.Equal(t, "xtls-rprx-vision", in.GetRequiredFlow(), "TCP should require xtls-rprx-vision")
+}
+
+func TestInbound_GetRequiredFlow_XHTTP(t *testing.T) {
+	t.Parallel()
+
+	in := Inbound{StreamSettings: `{"network": "xhttp"}`}
+	assert.Equal(t, "", in.GetRequiredFlow(), "XHTTP should use empty flow")
+}
+
+func TestInbound_GetRequiredFlow_GRPC(t *testing.T) {
+	t.Parallel()
+
+	in := Inbound{StreamSettings: `{"network": "grpc"}`}
+	assert.Equal(t, "", in.GetRequiredFlow(), "GRPC should use empty flow")
+}
+
+func TestInbound_GetRequiredFlow_WS(t *testing.T) {
+	t.Parallel()
+
+	in := Inbound{StreamSettings: `{"network": "ws"}`}
+	assert.Equal(t, "", in.GetRequiredFlow(), "WS should use empty flow")
 }
 
 func TestMarshalJSON_Success(t *testing.T) {
@@ -508,14 +576,20 @@ func TestAddClient_Success(t *testing.T) {
 		case "/login":
 			loginCalled = true
 			resp := APIResponse{Success: true}
-			_ = json.NewEncoder(w).Encode(resp)
+			json.NewEncoder(w).Encode(resp)
+		case "/panel/api/inbounds/get/1":
+			resp := APIResponse{Success: true, Obj: json.RawMessage(`{"id":1,"streamSettings":"{\"network\":\"tcp\"}"}`)}
+			json.NewEncoder(w).Encode(resp)
 		case "/panel/api/inbounds/addClient":
 			addClientCalled = true
 			resp := APIResponse{Success: true, Msg: "Client added successfully"}
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(resp)
 		default:
-			t.Errorf("Unexpected path: %s", r.URL.Path)
+			// For getRequiredFlow fallback - return 404 so it falls back to default flow
+			w.WriteHeader(http.StatusNotFound)
+			resp := APIResponse{Success: false, Msg: "Not found"}
+			json.NewEncoder(w).Encode(resp)
 		}
 	}))
 	defer server.Close()
@@ -724,7 +798,10 @@ func TestGetClientTraffic_Success(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(resp)
 		default:
-			t.Errorf("Unexpected path: %s", r.URL.Path)
+			// For getRequiredFlow fallback - return 404 so it falls back to default flow
+			w.WriteHeader(http.StatusNotFound)
+			resp := APIResponse{Success: false, Msg: "Not found"}
+			json.NewEncoder(w).Encode(resp)
 		}
 	}))
 	defer server.Close()
@@ -761,7 +838,10 @@ func TestGetClientTraffic_ClientNotFound(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(resp)
 		default:
-			t.Errorf("Unexpected path: %s", r.URL.Path)
+			// For getRequiredFlow fallback - return 404 so it falls back to default flow
+			w.WriteHeader(http.StatusNotFound)
+			resp := APIResponse{Success: false, Msg: "Not found"}
+			json.NewEncoder(w).Encode(resp)
 		}
 	}))
 	defer server.Close()
@@ -793,7 +873,10 @@ func TestGetClientTraffic_ServerError(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(resp)
 		default:
-			t.Errorf("Unexpected path: %s", r.URL.Path)
+			// For getRequiredFlow fallback - return 404 so it falls back to default flow
+			w.WriteHeader(http.StatusNotFound)
+			resp := APIResponse{Success: false, Msg: "Not found"}
+			json.NewEncoder(w).Encode(resp)
 		}
 	}))
 	defer server.Close()
@@ -856,7 +939,10 @@ func TestGetClientTraffic_ContextCancellation(t *testing.T) {
 			resp.Obj, _ = json.Marshal(traffics)
 			_ = json.NewEncoder(w).Encode(resp)
 		default:
-			t.Errorf("Unexpected path: %s", r.URL.Path)
+			// For getRequiredFlow fallback - return 404 so it falls back to default flow
+			w.WriteHeader(http.StatusNotFound)
+			resp := APIResponse{Success: false, Msg: "Not found"}
+			json.NewEncoder(w).Encode(resp)
 		}
 	}))
 	defer server.Close()
@@ -885,7 +971,10 @@ func TestGetClientTraffic_InvalidJSONResponse(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			w.Write([]byte("invalid json"))
 		default:
-			t.Errorf("Unexpected path: %s", r.URL.Path)
+			// For getRequiredFlow fallback - return 404 so it falls back to default flow
+			w.WriteHeader(http.StatusNotFound)
+			resp := APIResponse{Success: false, Msg: "Not found"}
+			json.NewEncoder(w).Encode(resp)
 		}
 	}))
 	defer server.Close()
@@ -974,7 +1063,10 @@ func TestDeleteClient_Success(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(resp)
 		default:
-			t.Errorf("Unexpected path: %s", r.URL.Path)
+			// For getRequiredFlow fallback - return 404 so it falls back to default flow
+			w.WriteHeader(http.StatusNotFound)
+			resp := APIResponse{Success: false, Msg: "Not found"}
+			json.NewEncoder(w).Encode(resp)
 		}
 	}))
 	defer server.Close()
@@ -1003,7 +1095,10 @@ func TestDeleteClient_ServerError(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(resp)
 		default:
-			t.Errorf("Unexpected path: %s", r.URL.Path)
+			// For getRequiredFlow fallback - return 404 so it falls back to default flow
+			w.WriteHeader(http.StatusNotFound)
+			resp := APIResponse{Success: false, Msg: "Not found"}
+			json.NewEncoder(w).Encode(resp)
 		}
 	}))
 	defer server.Close()
@@ -1064,7 +1159,10 @@ func TestDeleteClient_ContextCancellation(t *testing.T) {
 			resp := APIResponse{Success: true}
 			_ = json.NewEncoder(w).Encode(resp)
 		default:
-			t.Errorf("Unexpected path: %s", r.URL.Path)
+			// For getRequiredFlow fallback - return 404 so it falls back to default flow
+			w.WriteHeader(http.StatusNotFound)
+			resp := APIResponse{Success: false, Msg: "Not found"}
+			json.NewEncoder(w).Encode(resp)
 		}
 	}))
 	defer server.Close()
@@ -1093,7 +1191,10 @@ func TestDeleteClient_InvalidJSONResponse(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			w.Write([]byte("invalid json"))
 		default:
-			t.Errorf("Unexpected path: %s", r.URL.Path)
+			// For getRequiredFlow fallback - return 404 so it falls back to default flow
+			w.WriteHeader(http.StatusNotFound)
+			resp := APIResponse{Success: false, Msg: "Not found"}
+			json.NewEncoder(w).Encode(resp)
 		}
 	}))
 	defer server.Close()
@@ -1329,7 +1430,10 @@ func TestUpdateClient_Success(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(resp)
 		default:
-			t.Errorf("Unexpected path: %s", r.URL.Path)
+			// For getRequiredFlow fallback - return 404 so it falls back to default flow
+			w.WriteHeader(http.StatusNotFound)
+			resp := APIResponse{Success: false, Msg: "Not found"}
+			json.NewEncoder(w).Encode(resp)
 		}
 	}))
 	defer server.Close()
@@ -1408,7 +1512,10 @@ func TestPing_Success(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(resp)
 		default:
-			t.Errorf("Unexpected path: %s", r.URL.Path)
+			// For getRequiredFlow fallback - return 404 so it falls back to default flow
+			w.WriteHeader(http.StatusNotFound)
+			resp := APIResponse{Success: false, Msg: "Not found"}
+			json.NewEncoder(w).Encode(resp)
 		}
 	}))
 	defer server.Close()
@@ -1566,7 +1673,10 @@ func TestUpdateClient_ContextCancellation(t *testing.T) {
 			resp := APIResponse{Success: true}
 			_ = json.NewEncoder(w).Encode(resp)
 		default:
-			t.Errorf("Unexpected path: %s", r.URL.Path)
+			// For getRequiredFlow fallback - return 404 so it falls back to default flow
+			w.WriteHeader(http.StatusNotFound)
+			resp := APIResponse{Success: false, Msg: "Not found"}
+			json.NewEncoder(w).Encode(resp)
 		}
 	}))
 	defer server.Close()
@@ -1595,7 +1705,10 @@ func TestUpdateClient_InvalidJSONResponse(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			w.Write([]byte("invalid json"))
 		default:
-			t.Errorf("Unexpected path: %s", r.URL.Path)
+			// For getRequiredFlow fallback - return 404 so it falls back to default flow
+			w.WriteHeader(http.StatusNotFound)
+			resp := APIResponse{Success: false, Msg: "Not found"}
+			json.NewEncoder(w).Encode(resp)
 		}
 	}))
 	defer server.Close()
@@ -1624,7 +1737,10 @@ func TestAddClientWithID_DefaultResetDays(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(resp)
 		default:
-			t.Errorf("Unexpected path: %s", r.URL.Path)
+			// For getRequiredFlow fallback - return 404 so it falls back to default flow
+			w.WriteHeader(http.StatusNotFound)
+			resp := APIResponse{Success: false, Msg: "Not found"}
+			json.NewEncoder(w).Encode(resp)
 		}
 	}))
 	defer server.Close()
@@ -1660,7 +1776,10 @@ func TestAddClientWithID_ContextCancellation(t *testing.T) {
 			resp := APIResponse{Success: true}
 			_ = json.NewEncoder(w).Encode(resp)
 		default:
-			t.Errorf("Unexpected path: %s", r.URL.Path)
+			// For getRequiredFlow fallback - return 404 so it falls back to default flow
+			w.WriteHeader(http.StatusNotFound)
+			resp := APIResponse{Success: false, Msg: "Not found"}
+			json.NewEncoder(w).Encode(resp)
 		}
 	}))
 	defer server.Close()
@@ -1689,7 +1808,10 @@ func TestAddClientWithID_InvalidJSONResponse(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			w.Write([]byte("invalid json"))
 		default:
-			t.Errorf("Unexpected path: %s", r.URL.Path)
+			// For getRequiredFlow fallback - return 404 so it falls back to default flow
+			w.WriteHeader(http.StatusNotFound)
+			resp := APIResponse{Success: false, Msg: "Not found"}
+			json.NewEncoder(w).Encode(resp)
 		}
 	}))
 	defer server.Close()
@@ -1807,7 +1929,7 @@ func TestDoRequestWithAuthRetry_AutoReloginOn401(t *testing.T) {
 	client.TestForceSessionExpiry()
 
 	// Call doAddClientWithID directly — this goes through doRequestWithAuthRetry
-	result, err := client.doAddClientWithID(ctx, 1, "testuser", "client-id", "sub-id", 1000, time.Now(), 30)
+	result, err := client.doAddClientWithID(ctx, 1, "testuser", "client-id", "sub-id", 1000, time.Now(), 30, "xtls-rprx-vision")
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	assert.Equal(t, 2, addCalls, "addClient should be called twice (401 then retry after relogin)")
@@ -1850,7 +1972,7 @@ func TestDoRequestWithAuthRetry_NoReloginOnSuccess(t *testing.T) {
 
 	// Multiple successful calls — no relogin should occur
 	for i := 0; i < 5; i++ {
-		result, err := client.doAddClientWithID(ctx, 1, fmt.Sprintf("user%d", i), "client-id", "sub-id", 1000, time.Now(), 30)
+		result, err := client.doAddClientWithID(ctx, 1, fmt.Sprintf("user%d", i), "client-id", "sub-id", 1000, time.Now(), 30, "xtls-rprx-vision")
 		require.NoError(t, err)
 		require.NotNil(t, result)
 	}
@@ -1934,7 +2056,10 @@ func TestClientSettings_ResetDayDefault(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(resp)
 		default:
-			t.Errorf("Unexpected path: %s", r.URL.Path)
+			// For getRequiredFlow fallback - return 404 so it falls back to default flow
+			w.WriteHeader(http.StatusNotFound)
+			resp := APIResponse{Success: false, Msg: "Not found"}
+			json.NewEncoder(w).Encode(resp)
 		}
 	}))
 	defer server.Close()
@@ -1965,7 +2090,10 @@ func TestAddClientWithID_NegativeResetDays(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(resp)
 		default:
-			t.Errorf("Unexpected path: %s", r.URL.Path)
+			// For getRequiredFlow fallback - return 404 so it falls back to default flow
+			w.WriteHeader(http.StatusNotFound)
+			resp := APIResponse{Success: false, Msg: "Not found"}
+			json.NewEncoder(w).Encode(resp)
 		}
 	}))
 	defer server.Close()

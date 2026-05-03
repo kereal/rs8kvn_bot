@@ -15,6 +15,7 @@ type SubscriptionResponse struct {
 	Email             string `json:"email"`
 	Enabled           bool   `json:"enabled"`
 	SubscriptionToken string `json:"subscription_token"`
+	Plan              string `json:"plan"`
 }
 
 // GetSubscriptions handles GET /api/v1/subscriptions.
@@ -45,6 +46,7 @@ func (s *Server) GetSubscriptions(w http.ResponseWriter, r *http.Request) {
 				Email:             sub.Username,
 				Enabled:           sub.IsActive(),
 				SubscriptionToken: sub.SubscriptionID,
+				Plan:              sub.Plan,
 			})
 		}
 	}

@@ -336,7 +336,9 @@ func (c *Config) validate() error {
 	return nil
 }
 
-// validateURL checks if a URL string is valid.
+// validateURL checks if a URL string is valid and uses HTTPS (except for localhost).
+// It enforces HTTPS for all URLs unless the host is localhost, 127.0.0.1, or [::1].
+// This prevents accidental exposure of credentials over unencrypted channels.
 func (c *Config) validateURL(name, value string) error {
 	u, err := url.Parse(value)
 	if err != nil {
@@ -353,7 +355,21 @@ func (c *Config) validateURL(name, value string) error {
 		return fmt.Errorf("%s must include a host", name)
 	}
 
+	// Enforce HTTPS for non-localhost hosts to protect credentials in transit
+	host := u.Hostname()
+	if u.Scheme != "https" && !isLocalhost(host) {
+		return fmt.Errorf("%s must use HTTPS (found scheme: %s)", name, u.Scheme)
+	}
+
 	return nil
+}
+
+// isLocalhost returns true if host is a loopback address (localhost, 127.0.0.1, ::1).
+func isLocalhost(host string) bool {
+	return host == "localhost" ||
+		host == "127.0.0.1" ||
+		host == "[::1]" ||
+		host == "::1"
 }
 
 // String returns a safe string representation of the config (without sensitive data).
