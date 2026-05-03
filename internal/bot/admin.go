@@ -422,7 +422,8 @@ func (h *Handler) notifyAdmin(ctx context.Context, username string, chatID int64
 	}
 
 	msg := tgbotapi.NewMessage(h.cfg.TelegramAdminID,
-		fmt.Sprintf("🔔 Новая подписка создана!\n\n👤 Пользователь: @%s\n🆔 ID: %d\n🔗 Подписка: `%s`\n⏰ Истекает: %s",
+		fmt.Sprintf("🔔 Новая подписка создана!\n\n👤 Пользователь: [@%s](https://t.me/%s)\n🆔 ID: %d\n🔗 Подписка: `%s`\n⏰ Истекает: %s",
+			username,
 			username,
 			chatID,
 			subscriptionURL,
