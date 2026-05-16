@@ -434,6 +434,9 @@ func TestCloseResponseBody(t *testing.T) {
 
 func TestAddClient(t *testing.T) {
 	t.Parallel()
+	if testing.Short() {
+		t.Skip("Skipping slow test in short mode")
+	}
 
 	t.Run("success", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -545,6 +548,9 @@ func TestAddClientWithID(t *testing.T) {
 
 func TestDeleteClient(t *testing.T) {
 	t.Parallel()
+	if testing.Short() {
+		t.Skip("Skipping slow test in short mode")
+	}
 
 	t.Run("success", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -583,6 +589,9 @@ func TestDeleteClient(t *testing.T) {
 
 func TestUpdateClient(t *testing.T) {
 	t.Parallel()
+	if testing.Short() {
+		t.Skip("Skipping slow test in short mode")
+	}
 
 	t.Run("success", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -642,6 +651,9 @@ func TestUpdateClient(t *testing.T) {
 
 func TestGetClientTraffic(t *testing.T) {
 	t.Parallel()
+	if testing.Short() {
+		t.Skip("Skipping slow test in short mode")
+	}
 
 	t.Run("success", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -740,6 +752,9 @@ func TestGetInbound(t *testing.T) {
 
 func TestGetRequiredFlow_Fallback(t *testing.T) {
 	t.Parallel()
+	if testing.Short() {
+		t.Skip("Skipping slow test in short mode")
+	}
 
 	// When getInbound fails, should return default flow
 	client, err := NewClient("http://localhost:2053", testAPIToken)

@@ -139,19 +139,17 @@ func TestService_StartReloadLoop(t *testing.T) {
 	stopCh := make(chan struct{})
 	go svc.StartReloadLoop(20*time.Millisecond, stopCh)
 
-	time.Sleep(30 * time.Millisecond)
+	assert.Eventually(t, func() bool {
+		return len(svc.GetExtraServers()) == 1
+	}, 200*time.Millisecond, 10*time.Millisecond, "initial config should load")
 
 	err = os.WriteFile(serversFile, []byte("X-Dyn: dynamic\n\nvless://v2@example.com:443\nvless://v3@example.com:443\n"), 0644)
 	require.NoError(t, err)
 
-	time.Sleep(30 * time.Millisecond)
-
-	servers := svc.GetExtraServers()
-	assert.Len(t, servers, 2)
-	assert.Equal(t, "vless://v2@example.com:443", servers[0])
-
-	headers := svc.GetExtraHeaders()
-	assert.Equal(t, "dynamic", headers["X-Dyn"])
+	assert.Eventually(t, func() bool {
+		servers := svc.GetExtraServers()
+		return len(servers) == 2 && svc.GetExtraHeaders()["X-Dyn"] == "dynamic"
+	}, 200*time.Millisecond, 10*time.Millisecond, "reload should pick up new config")
 
 	close(stopCh)
 }

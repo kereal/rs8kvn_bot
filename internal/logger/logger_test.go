@@ -142,13 +142,7 @@ func TestSync(t *testing.T) {
 	_ = Sync()
 }
 
-func TestSync_NilLogger(t *testing.T) {
 
-	// This test verifies that Sync() handles edge cases gracefully.
-	// In production, the logger is always initialized before use.
-	// We skip this test as it tests deprecated nil-check behavior.
-	t.Skip("Testing nil logger behavior is deprecated; logger is always initialized in production")
-}
 
 func TestClose(t *testing.T) {
 
@@ -161,15 +155,6 @@ func TestClose(t *testing.T) {
 
 	// Close may return sync error for stdout on some systems, that's acceptable
 	_ = Close()
-}
-
-func TestClose_NilLogger(t *testing.T) {
-
-
-	// This test verifies that Close() handles edge cases gracefully.
-	// In production, the logger is always initialized before use.
-	// We skip this test as it tests deprecated nil-check behavior.
-	t.Skip("Testing nil logger behavior is deprecated; logger is always initialized in production")
 }
 
 func TestClose_MultipleCalls(t *testing.T) {
@@ -495,26 +480,6 @@ func TestRedirectStdLog_ActualRedirection(t *testing.T) {
 	assert.Contains(t, contentStr, "redirected stdlog test message", "Std log output should be redirected to zap logger")
 }
 
-// ==================== Edge Cases ====================
-
-func TestNilLoggerSafety(t *testing.T) {
-
-
-	// This test verifies that global functions handle nil logger gracefully.
-	// In production, the logger is always initialized before use.
-	// We skip this test as it tests deprecated nil-check behavior.
-	t.Skip("Testing nil logger behavior is deprecated; logger is always initialized in production")
-}
-
-func TestFatal_NilLogger(t *testing.T) {
-
-
-	// This test verifies that Fatal() handles nil logger gracefully.
-	// In production, the logger is always initialized before use.
-	// We skip this test as it tests deprecated nil-check behavior.
-	t.Skip("Testing nil logger behavior is deprecated; logger is always initialized in production")
-}
-
 func TestFlushSentry(t *testing.T) {
 
 
@@ -535,12 +500,6 @@ func TestCaptureToSentry(t *testing.T) {
 	// Should not panic
 	captureToSentry("test message", "info")
 	captureToSentry("error message", "error")
-}
-
-func TestService_Fatal(t *testing.T) {
-
-
-	t.Skip("Fatal calls os.Exit which kills the test process")
 }
 
 func TestService_WithError(t *testing.T) {
