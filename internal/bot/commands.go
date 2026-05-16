@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"rs8kvn_bot/internal/logger"
+	"rs8kvn_bot/internal/service"
 	"rs8kvn_bot/internal/utils"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -102,12 +103,12 @@ func (h *Handler) handleBindTrial(ctx context.Context, chatID int64, username, s
 	var comment string
 	if invite, err := h.db.GetInviteByCode(ctx, sub.InviteCode); err == nil {
 		if referrerSub, err := h.db.GetByTelegramID(ctx, invite.ReferrerTGID); err == nil {
-			comment = fmt.Sprintf("from: @%s", referrerSub.Username)
+			comment = fmt.Sprintf("from: %s", formatUserDisplay(referrerSub.Username))
 		}
 	}
 
 	trafficBytes := int64(h.cfg.TrafficLimitGB) * 1024 * 1024 * 1024
-	if err := h.xui.UpdateClient(ctx, h.cfg.XUIInboundID, sub.ClientID, username, sub.SubscriptionID, trafficBytes, time.UnixMilli(0), chatID, comment); err != nil {
+	if err := h.xui.UpdateClient(ctx, h.cfg.XUIInboundID, sub.ClientID, service.XUIEmail(username, chatID), sub.SubscriptionID, trafficBytes, time.UnixMilli(0), chatID, comment); err != nil {
 		logger.Warn("Failed to upgrade trial client in xui", zap.Error(err))
 	}
 
@@ -118,13 +119,13 @@ func (h *Handler) handleBindTrial(ctx context.Context, chatID int64, username, s
 		if err != nil {
 			logger.Warn("Failed to get invite for admin notification", zap.Error(err))
 		} else if invite != nil {
-			h.SendMessage(ctx, h.cfg.TelegramAdminID, fmt.Sprintf("🔔 Новый пользователь активировал подписку по реферальной ссылке!\n\n- Username: @%s\n- Telegram ID: %d\n- Пригласил: %d", username, chatID, invite.ReferrerTGID))
+			h.SendMessage(ctx, h.cfg.TelegramAdminID, fmt.Sprintf("🔔 Новый пользователь активировал подписку по реферальной ссылке!\n\n- Username: %s\n- Telegram ID: %d\n- Пригласил: %d", formatUserDisplay(username), chatID, invite.ReferrerTGID))
 		}
 	}
 
 	// Notify referrer about new referral activation
 	if sub.ReferredBy > 0 {
-		referrerMsg := fmt.Sprintf("🎉 По вашей ссылке новый пользователь @%s активировал подписку!", username)
+		referrerMsg := fmt.Sprintf("🎉 По вашей ссылке новый пользователь %s активировал подписку!", formatUserDisplay(username))
 		msg := tgbotapi.NewMessage(sub.ReferredBy, referrerMsg)
 		if err := h.sendWithError(ctx, msg); err != nil {
 			logger.Warn("Failed to notify referrer", zap.Int64("referrer_id", sub.ReferredBy), zap.Error(err))

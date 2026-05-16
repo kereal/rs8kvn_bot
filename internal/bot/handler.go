@@ -11,6 +11,7 @@ import (
 	"rs8kvn_bot/internal/logger"
 	"rs8kvn_bot/internal/ratelimiter"
 	"rs8kvn_bot/internal/service"
+	"rs8kvn_bot/internal/utils"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"go.uber.org/zap"
@@ -221,20 +222,44 @@ func (h *Handler) getQRKeyboard() tgbotapi.InlineKeyboardMarkup {
 }
 
 // getUsername extracts a username from a Telegram user.
+// Returns only the real Telegram username (user.UserName), or empty if not set.
 func (h *Handler) getUsername(user *tgbotapi.User) string {
 	if user == nil {
 		return "unknown"
 	}
 
-	if user.UserName != "" {
-		return user.UserName
-	}
+	return user.UserName
+}
 
-	if user.FirstName != "" {
-		return user.FirstName
-	}
 
-	return fmt.Sprintf("user_%d", user.ID)
+// formatUserLink returns a Markdown-formatted clickable user link for Telegram.
+// If the username is not a real Telegram username, returns "unknown".
+func formatUserLink(username string) string {
+	if !utils.IsRealUsername(username) {
+		return "unknown"
+	}
+	return fmt.Sprintf("[@%s](https://t.me/%s)", username, username)
+}
+
+// formatUserDisplay returns a display string suitable for showing a user reference.
+// For real usernames returns "@username", otherwise returns the raw identifier.
+func formatUserDisplay(username string) string {
+	if !utils.IsRealUsername(username) {
+		if username == "" {
+			return "unknown"
+		}
+		return username
+	}
+	return "@" + username
+}
+
+// displayUsername formats a username for display in Telegram messages.
+// Returns ", @username" if non-empty, or empty string for missing usernames.
+func displayUsername(username string) string {
+	if username == "" {
+		return ""
+	}
+	return ", @" + username
 }
 
 // getMainMenuContent returns the text and keyboard for the main menu.
@@ -244,14 +269,14 @@ func (h *Handler) getMainMenuContent(username string, hasSubscription bool, chat
 
 	if hasSubscription {
 		text = fmt.Sprintf(
-			"👋 Привет, %s!\n\nЯ бот для выдачи подписок на прокси VLESS+Reality+Vision.\n\nИспользуйте кнопки ниже для взаимодействия с ботом.",
-			username,
+			"👋 Привет!%s\n\nЯ бот для выдачи подписок на прокси VLESS+Reality+Vision.\n\nИспользуйте кнопки ниже для взаимодействия с ботом.",
+			displayUsername(username),
 		)
 		keyboard = h.getMainMenuKeyboard(true)
 	} else {
 		text = fmt.Sprintf(
-			"👋 Привет, %s!\n\nЯ бот для выдачи подписок на прокси VLESS+Reality+Vision.\n\nНажмите кнопку ниже, чтобы получить подписку",
-			username,
+			"👋 Привет!%s\n\nЯ бот для выдачи подписок на прокси VLESS+Reality+Vision.\n\nНажмите кнопку ниже, чтобы получить подписку",
+			displayUsername(username),
 		)
 		keyboard = tgbotapi.NewInlineKeyboardMarkup(
 			tgbotapi.NewInlineKeyboardRow(
