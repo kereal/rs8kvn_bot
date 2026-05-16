@@ -54,10 +54,10 @@ func TestCache_TTLExpiry(t *testing.T) {
 	_, _, ok := cache.Get("key1")
 	assert.True(t, ok)
 
-	time.Sleep(20 * time.Millisecond)
-
-	_, _, ok = cache.Get("key1")
-	assert.False(t, ok)
+	assert.Eventually(t, func() bool {
+		_, _, ok := cache.Get("key1")
+		return !ok
+	}, 200*time.Millisecond, 5*time.Millisecond, "entry should expire after TTL")
 }
 
 func TestCache_Cleanup(t *testing.T) {
@@ -69,13 +69,12 @@ func TestCache_Cleanup(t *testing.T) {
 	cache.Set("key1", []byte("body1"), map[string]string{})
 	cache.Set("key2", []byte("body2"), map[string]string{})
 
-	time.Sleep(20 * time.Millisecond)
-
-	cache.mu.RLock()
-	count := len(cache.entries)
-	cache.mu.RUnlock()
-
-	assert.Equal(t, 0, count)
+	assert.Eventually(t, func() bool {
+		cache.mu.RLock()
+		count := len(cache.entries)
+		cache.mu.RUnlock()
+		return count == 0
+	}, 200*time.Millisecond, 5*time.Millisecond, "all entries should be cleaned up after TTL")
 }
 
 func TestCache_Isolation(t *testing.T) {

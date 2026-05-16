@@ -71,6 +71,7 @@ func TestGetHTTPClient_Timeout(t *testing.T) {
 }
 
 func TestStart_EmptyURL(t *testing.T) {
+	t.Parallel()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
@@ -85,12 +86,13 @@ func TestStart_EmptyURL(t *testing.T) {
 	select {
 	case <-done:
 		// Good, returned immediately
-	case <-time.After(2 * time.Second):
+	case <-time.After(200 * time.Millisecond):
 		t.Fatal("Start() with empty URL should return immediately")
 	}
 }
 
 func TestStart_ContextCancellation(t *testing.T) {
+	t.Parallel()
 
 	// Create a mock server that responds quickly
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -115,12 +117,13 @@ func TestStart_ContextCancellation(t *testing.T) {
 	select {
 	case <-done:
 		// Good, stopped after context cancellation
-	case <-time.After(2 * time.Second):
+	case <-time.After(200 * time.Millisecond):
 		t.Fatal("Start() should stop after context cancellation")
 	}
 }
 
 func TestStart_NegativeInterval(t *testing.T) {
+	t.Parallel()
 
 	// Create a mock server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -147,12 +150,13 @@ func TestStart_NegativeInterval(t *testing.T) {
 	select {
 	case <-done:
 		// Good
-	case <-time.After(2 * time.Second):
+	case <-time.After(200 * time.Millisecond):
 		t.Fatal("Start() should handle negative interval")
 	}
 }
 
 func TestStart_ZeroInterval(t *testing.T) {
+	t.Parallel()
 
 	// Create a mock server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -179,16 +183,17 @@ func TestStart_ZeroInterval(t *testing.T) {
 	select {
 	case <-done:
 		// Good
-	case <-time.After(2 * time.Second):
+	case <-time.After(200 * time.Millisecond):
 		t.Fatal("Start() should handle zero interval")
 	}
 }
 
 func TestSendHeartbeat_Success(t *testing.T) {
+	t.Parallel()
 
-	requestReceived := false
+	var requestReceived atomic.Bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requestReceived = true
+		requestReceived.Store(true)
 		assert.Equal(t, "POST", r.Method, "Expected POST request")
 		assert.Equal(t, "application/json", r.Header.Get("Content-Type"), "Content-Type header")
 		w.WriteHeader(http.StatusOK)
@@ -197,10 +202,11 @@ func TestSendHeartbeat_Success(t *testing.T) {
 
 	sendHeartbeat(server.URL)
 
-	assert.True(t, requestReceived, "sendHeartbeat() did not send request to server")
+	assert.True(t, requestReceived.Load(), "sendHeartbeat() did not send request to server")
 }
 
 func TestSendHeartbeat_ServerError(t *testing.T) {
+	t.Parallel()
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -212,13 +218,17 @@ func TestSendHeartbeat_ServerError(t *testing.T) {
 }
 
 func TestSendHeartbeat_InvalidURL(t *testing.T) {
+	t.Parallel()
+	if testing.Short() {
+		t.Skip("Skipping slow network test in short mode")
+	}
 
-	// Should not panic with invalid URL
-	// Use localhost with unlikely port to avoid 10s DNS timeout on CI
+	// Should not panic with invalid URL — will timeout after HTTP client timeout (10s)
 	sendHeartbeat("http://127.0.0.1:1/heartbeat")
 }
 
 func TestSendHeartbeat_MultipleRequests(t *testing.T) {
+	t.Parallel()
 
 	requestCount := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -287,6 +297,7 @@ func TestMaskURL_Heartbeat(t *testing.T) {
 }
 
 func TestStart_MultipleContexts(t *testing.T) {
+	t.Parallel()
 
 	ctx1, cancel1 := context.WithCancel(context.Background())
 	defer cancel1()
@@ -303,6 +314,7 @@ func TestStart_MultipleContexts(t *testing.T) {
 }
 
 func TestSendHeartbeat_ContextTimeout(t *testing.T) {
+	t.Parallel()
 
 	// Test that sendHeartbeat handles context-like timeouts gracefully
 	// Use very short timeout by calling invalid URL
