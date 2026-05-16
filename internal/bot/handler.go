@@ -233,12 +233,17 @@ func (h *Handler) getUsername(user *tgbotapi.User) string {
 
 
 // formatUserLink returns a Markdown-formatted clickable user link for Telegram.
-// If the username is not a real Telegram username, returns "unknown".
-func formatUserLink(username string) string {
-	if !utils.IsRealUsername(username) {
-		return "unknown"
+// If the username is a real Telegram username, links to https://t.me/username.
+// If not, falls back to the tg://user?id=TelegramID deep link so "unknown"
+// is always clickable and leads to the user profile.
+func formatUserLink(username string, telegramID int64) string {
+	if utils.IsRealUsername(username) {
+		return fmt.Sprintf("[@%s](https://t.me/%s)", username, username)
 	}
-	return fmt.Sprintf("[@%s](https://t.me/%s)", username, username)
+	if telegramID != 0 {
+		return fmt.Sprintf("[unknown](tg://user?id=%d)", telegramID)
+	}
+	return "[unknown](#)"
 }
 
 // formatUserDisplay returns a display string suitable for showing a user reference.

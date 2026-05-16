@@ -63,7 +63,7 @@ func (h *Handler) handleAdminLastReg(ctx context.Context, chatID int64, username
 	sb.WriteString("📋 *Последние регистрации*\n\n")
 
 	for _, sub := range subs {
-		username := formatUserLink(sub.Username)
+		username := formatUserLink(sub.Username, sub.TelegramID)
 		dateStr := sub.CreatedAt.Format("02.01.2006 15:04:05")
 		fmt.Fprintf(&sb, "%d │ %s │ %s\n", sub.ID, username, dateStr)
 	}
@@ -420,7 +420,7 @@ func (h *Handler) notifyAdmin(ctx context.Context, username string, chatID int64
 
 	msg := tgbotapi.NewMessage(h.cfg.TelegramAdminID,
 		fmt.Sprintf("🔔 Новая подписка создана!\n\n👤 Пользователь: %s\n🆔 ID: %d\n🔗 Подписка: `%s`\n⏰ Истекает: %s",
-			formatUserLink(username),
+			formatUserLink(username, chatID),
 			chatID,
 			subscriptionURL,
 			expiryTime.Format("02.01.2006 15:04:05"),
