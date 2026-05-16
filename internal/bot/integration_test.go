@@ -51,6 +51,17 @@ func NewMockXUIServer(t *testing.T) *MockXUIServer {
 		t.Fatalf("Failed to create XUI client: %v", err)
 	}
 
+	expectedToken := "Bearer test-api-token"
+	requireAuth := func(w http.ResponseWriter, r *http.Request) bool {
+		if r.Header.Get("Authorization") != expectedToken {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(map[string]any{"success": false, "msg": "unauthorized"})
+			return false
+		}
+		return true
+	}
+
 	mock := &MockXUIServer{
 		Server: server,
 		Client: client,
@@ -66,17 +77,9 @@ func NewMockXUIServer(t *testing.T) *MockXUIServer {
 	})
 
 	mux.HandleFunc("/panel/api/inbounds/addClient", func(w http.ResponseWriter, r *http.Request) {
-		// Check Authorization header
-		if r.Header.Get("Authorization") != "Bearer test-api-token" {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusUnauthorized)
-			json.NewEncoder(w).Encode(map[string]any{
-				"success": false,
-				"msg":     "unauthorized",
-			})
+		if !requireAuth(w, r) {
 			return
 		}
-
 		if mock.AddClientErr != nil {
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]any{
@@ -93,6 +96,9 @@ func NewMockXUIServer(t *testing.T) *MockXUIServer {
 	})
 
 	mux.HandleFunc("/panel/api/inbounds/getClientTraffics/", func(w http.ResponseWriter, r *http.Request) {
+		if !requireAuth(w, r) {
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]any{
 			"success": true,
@@ -101,6 +107,9 @@ func NewMockXUIServer(t *testing.T) *MockXUIServer {
 	})
 
 	mux.HandleFunc("/panel/api/inbounds/delClient/", func(w http.ResponseWriter, r *http.Request) {
+		if !requireAuth(w, r) {
+			return
+		}
 		if mock.DeleteErr != nil {
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]any{
@@ -455,6 +464,8 @@ func TestMockXUIServer_Endpoints(t *testing.T) {
 	mock := NewMockXUIServer(t)
 	defer mock.Close()
 
+	authHeader := "Bearer test-api-token"
+
 	t.Run("login", func(t *testing.T) {
 		resp, err := http.Get(mock.Server.URL + "/login")
 		require.NoError(t, err)
@@ -467,7 +478,11 @@ func TestMockXUIServer_Endpoints(t *testing.T) {
 	})
 
 	t.Run("addClient", func(t *testing.T) {
-		resp, err := http.Post(mock.Server.URL+"/panel/api/inbounds/addClient", "application/json", nil)
+		req, err := http.NewRequest("POST", mock.Server.URL+"/panel/api/inbounds/addClient", nil)
+		require.NoError(t, err)
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", authHeader)
+		resp, err := http.DefaultClient.Do(req)
 		require.NoError(t, err)
 		defer func() { _ = resp.Body.Close() }()
 
@@ -478,7 +493,10 @@ func TestMockXUIServer_Endpoints(t *testing.T) {
 	})
 
 	t.Run("getClientTraffics", func(t *testing.T) {
-		resp, err := http.Get(mock.Server.URL + "/panel/api/inbounds/getClientTraffics/testuser")
+		req, err := http.NewRequest("GET", mock.Server.URL+"/panel/api/inbounds/getClientTraffics/testuser", nil)
+		require.NoError(t, err)
+		req.Header.Set("Authorization", authHeader)
+		resp, err := http.DefaultClient.Do(req)
 		require.NoError(t, err)
 		defer func() { _ = resp.Body.Close() }()
 
@@ -493,7 +511,11 @@ func TestMockXUIServer_Endpoints(t *testing.T) {
 	})
 
 	t.Run("delClient", func(t *testing.T) {
-		resp, err := http.Post(mock.Server.URL+"/panel/api/inbounds/delClient/test-id", "application/json", nil)
+		req, err := http.NewRequest("POST", mock.Server.URL+"/panel/api/inbounds/delClient/test-id", nil)
+		require.NoError(t, err)
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", authHeader)
+		resp, err := http.DefaultClient.Do(req)
 		require.NoError(t, err)
 		defer resp.Body.Close()
 
@@ -510,10 +532,16 @@ func TestMockXUIServer_ErrorResponses(t *testing.T) {
 	mock := NewMockXUIServer(t)
 	defer mock.Close()
 
+	authHeader := "Bearer test-api-token"
+
 	t.Run("addClient error", func(t *testing.T) {
 		mock.AddClientErr = assert.AnError
 
-		resp, err := http.Post(mock.Server.URL+"/panel/api/inbounds/addClient", "application/json", nil)
+		req, err := http.NewRequest("POST", mock.Server.URL+"/panel/api/inbounds/addClient", nil)
+		require.NoError(t, err)
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", authHeader)
+		resp, err := http.DefaultClient.Do(req)
 		require.NoError(t, err)
 		defer resp.Body.Close()
 
@@ -527,7 +555,11 @@ func TestMockXUIServer_ErrorResponses(t *testing.T) {
 	t.Run("delClient error", func(t *testing.T) {
 		mock.DeleteErr = assert.AnError
 
-		resp, err := http.Post(mock.Server.URL+"/panel/api/inbounds/delClient/test-id", "application/json", nil)
+		req, err := http.NewRequest("POST", mock.Server.URL+"/panel/api/inbounds/delClient/test-id", nil)
+		require.NoError(t, err)
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", authHeader)
+		resp, err := http.DefaultClient.Do(req)
 		require.NoError(t, err)
 		defer resp.Body.Close()
 
