@@ -22,7 +22,7 @@ func TestDaysUntilReset(t *testing.T) {
 		{"future expiry", now.Add(24 * time.Hour), 1},
 		{"past expiry", now.Add(-1 * time.Hour), 0},
 		{"exactly now", now, 0},
-		{"3 days", now.Add(3 * 24 * time.Hour), 3},
+		{"3 days', now.Add(3 * 24 * time.Hour), 3},
 	}
 
 	for _, tt := range tests {
@@ -66,15 +66,70 @@ func TestGenerateProgressBar(t *testing.T) {
 		{"zero limit", 0, 0, 10},
 		{"negative limit", 5, -1, 10},
 		{"empty bar", 0, 10, 10},
-		{"full bar", 10, 10, 10},
+		{"full bar', 10, 10, 10},
 		{"half way", 5, 10, 10},
-		{"over 100%", 15, 10, 10},
+		{"over 100%', 15, 10, 10},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := GenerateProgressBar(tt.usedGB, tt.limitGB)
 			assert.Equal(t, tt.wantLen, utf8.RuneCountInString(got))
+		})
+	}
+}
+
+func TestIsRealUsername(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		username string
+		want     bool
+	}{
+		{"empty string", "", false},
+		{"simple ascii", "user", true},
+		{"with underscore", "user_name", true},
+		{"with digits", "user123", true},
+		{"mixed", "User_Name_123", true},
+		{"only digits", "11", true},
+		{"with spaces", "user name", false},
+		{"with dash', "user-name", false},
+		{"with dot", "user.name", false},
+		{"with emoji", "user🎉", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := IsRealUsername(tt.username)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestIsNumericUsername(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		username string
+		want     bool
+	}{
+		{"empty string", "", false},
+		{"single digit", "7", true},
+		{"double digit", "11", true},
+		{"large number", "1234567890", true},
+		{"mixed alphanumeric', "user11", false},
+		{"alphabetic", "user", false},
+		{"with underscore", "user_11", false},
+		{"with spaces", "11 22", false},
+		{"with hyphen', "11-22", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := IsNumericUsername(tt.username)
+			assert.Equal(t, tt.want, got)
 		})
 	}
 }

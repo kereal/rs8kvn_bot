@@ -640,3 +640,28 @@ func TestHelpText_InjectionSafety(t *testing.T) {
 
 
 
+// TestFormatUserLink_NumericUsername verifies that purely numeric usernames
+// (e.g. 11) use tg://user?id= fallback instead of an unresolvable t.me/11 link.
+func TestFormatUserLink_NumericUsername(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		username string
+		id       int64
+		want     string
+	}{
+		{"numeric username with id", "11", 11, "[11](tg://user?id=11)"},
+		{"numeric username different id", "99", 11, "[99](tg://user?id=11)"},
+		{"empty username with id", "", 11, "[unknown](tg://user?id=11)"},
+		{"alphabetic username", "user11", 11, "[@user11](https://t.me/user11)"},
+		{"zero id empty username", "", 0, "[unknown](#)"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := formatUserLink(tt.username, tt.id)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}

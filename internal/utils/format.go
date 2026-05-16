@@ -19,6 +19,21 @@ func IsRealUsername(username string) bool {
 	return true
 }
 
+// IsNumericUsername checks if the username is purely numeric (e.g. "11", "123").
+// Telegram does not support purely numeric usernames -- t.me/11 will not resolve.
+// Use tg://user?id=<id> deep link instead to ensure the profile opens correctly.
+func IsNumericUsername(username string) bool {
+	if username == "" {
+		return false
+	}
+	for _, r := range username {
+		if !(r >= '0' && r <= '9') {
+			return false
+		}
+	}
+	return true
+}
+
 // GenerateProgressBar creates a 10-block emoji progress bar representing
 // traffic usage. Returns empty blocks when limitGB is zero or negative.
 func GenerateProgressBar(usedGB, limitGB float64) string {
@@ -73,7 +88,7 @@ func DaysUntilReset(now, expiryTime time.Time) int {
 }
 
 // FormatDateRu formats a date in Russian locale (e.g., "15 января 2025").
-// Returns "—" for zero time.
+// Returns "--" for zero time.
 func FormatDateRu(t time.Time) string {
 	if t.IsZero() {
 		return "—"
