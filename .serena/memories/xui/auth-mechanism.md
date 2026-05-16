@@ -1,45 +1,45 @@
 ## XUI Authentication Mechanism
 
 ### Architecture
-- **Configurable session lifetime**: `XUI_SESSION_MAX_AGE_MINUTES` env var (default 720, production .env = 1440)
-- **Session verification**: `verifySession()` makes real GET `/panel/api/server/status` call instead of relying on timers
-- **Auto-relogin**: `doRequestWithAuthRetry()` detects HTTP 401/302/307, clears connection pool, re-logins, and retries request once
-- **Singleflight**: `loginGroup.Do("login")` deduplicates concurrent login attempts
-- **Circuit breaker**: 5 failures → 30s open, half-open allows 3 attempts
+- **API Token auth**: Bearer token via `Authorization` header, no session/login/CSRF
+- **Token config**: `XUI_API_TOKEN` env var → `Config.XUIAPIToken`
+- **Every request** includes `Authorization: Bearer <token>` header via `doHTTPRequest()`
+- **No session state**: No login, no cookie jar, no session expiry tracking, no singleflight dedup
+- **No circuit breaker**: Removed; all retry logic is in `RetryWithBackoff()`
 
 ### Key Methods
-- `ensureLoggedIn(ctx, force)` — fast path (timer check) → slow path (verifySession → login with retry)
-- `verifySession(ctx) bool` — real API call to check session validity
-- `doLogin(ctx)` — POST `/login`, clears idle connections first, updates `lastLogin` and `loginCount`
-- `doHTTPRequest(ctx, method, url, bodyFn)` — shared HTTP helper with auth retry; bodyFn recreates body on each retry
-- `doRequestWithAuthRetry(ctx, fn)` — checks statusCode BEFORE err (closure returns both for non-200)
+- `NewClient(host, apiToken)` — 2-param constructor (was 4-param with username/password/sessionMaxAge)
+- `doHTTPRequest(ctx, method, url, bodyFn)` — shared HTTP helper, sets Bearer token header
+- `RetryWithBackoff(ctx, maxRetries, initialDelay, fn)` — exponential backoff with jitter
+- `isRetryable(err)` — `net.DNSError` → false (fast-fail), timeout → true, "no such host" string → false
+- `Ping(ctx)` — GET `/panel/api/server/status` (replaces `verifySession`)
 
 ### Thread Safety
-- `lastLogin` protected by `c.mu` (RWMutex)
-- Mutex released BEFORE entering singleflight to avoid blocking all API calls during retry backoff
-- Mutex held during `doLogin` call in auto-relogin path (prevents race on `lastLogin` write)
-- Counters (`loginCount`, `sessionFailCount`) use `atomic.AddInt64`
+- No shared mutable state — all fields immutable after construction
+- No mutexes, no atomics
+- `http.Transport` is goroutine-safe (from `net/http` stdlib)
 
 ### Retry Behavior
-- `isRetryable(err)` — `net.DNSError` → false (fast-fail), timeout → true, "no such host" string → false
-- `RetryWithBackoff` — 3 retries, 2s initial delay, exponential backoff with jitter
-- DNS errors fail immediately without retry
-- Intermediate retries logged at DEBUG, final failure at WARN
+- `isRetryable(err)` — DNS errors → false (fast-fail), network timeouts → true
+- `RetryWithBackoff` — configurable retries (default 3), configurable initial delay (default 1s), exponential backoff with jitter
+- Non-retryable errors fail immediately
+- HTTP 5xx errors are retried (the response body is returned with error, and `isRetryable` treats non-DNS errors as retryable)
 
 ### Startup
-- 5 attempts with 5s + jitter delay, 5s timeout per attempt
-- Fatal only after all attempts exhausted
+- No background login goroutine — client is ready immediately after construction
+- No startup retry loop needed
+
+### Flow Detection
+- `getRequiredFlow(ctx, inboundID)` — fetches inbound settings, detects transport, returns appropriate flow
+- Transport `xhttp`/`h2`/`ws`/`grpc`/`grpcs` → flow empty (not needed)
+- Transport `tcp` or unknown → flow `xtls-rprx-vision`
 
 ### Files
 - `internal/xui/client.go` — main client
-- `internal/xui/breaker.go` — circuit breaker
-- `internal/config/constants.go` — timeouts, defaults
-- `internal/config/config.go` — `XUISessionMaxAgeMinutes` field
-- `cmd/bot/main.go` — startup retry logic
-- `internal/bot/errors.go` — error classification (ErrXUIAuth, ErrXUICircuitOpen, etc.)
-- `internal/service/subscription.go` — NO explicit Login() calls (relies on ensureLoggedIn)
+- `internal/config/constants.go` — timeouts, defaults, `XUIRequestTimeout`
+- `internal/config/config.go` — `XUIAPIToken` field (replaces `XUIUsername`/`XUIPassword`/`XUISessionMaxAgeMinutes`)
+- `internal/interfaces/interfaces.go` — `XUIClient` interface without `Login(ctx)` method
 
 ### Testing
-- Unit tests: `internal/xui/client_test.go` — verifySession, auto-relogin, isRetryable, counters, concurrent dedup
-- E2E tests: `tests/e2e/subscription_flow_test.go` — `TestE2E_RealClient_*` with real httptest.Server
-- `TestForceSessionExpiry()` helper for forcing session expiration in tests
+- Unit tests: `internal/xui/client_test.go` — doHTTPRequest, CRUD methods, RetryWithBackoff, isRetryable, Inbound flow detection, HTTP error handling (401/403/500)
+- E2E tests: `tests/e2e/real_client_test.go` — FullSubscriptionLifecycle, DNSErrorFastFail

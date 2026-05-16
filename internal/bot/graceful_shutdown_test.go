@@ -24,8 +24,7 @@ func TestBot_GracefulShutdown(t *testing.T) {
 		XUIInboundID:     1,
 		XUISubPath:       "sub",
 		TelegramBotToken: "test_token",
-		XUIUsername:      "admin",
-		XUIPassword:      "password",
+		XUIAPIToken:      "test-api-token",
 	}
 
 	mockBot := testutil.NewMockBotAPI()
@@ -43,8 +42,7 @@ func TestBot_GracefulShutdown(t *testing.T) {
 	runtime.ReadMemStats(&memStatsBefore)
 
 	cancel()
-
-	time.Sleep(50 * time.Millisecond)
+	runtime.Gosched()
 
 	runtime.GC()
 	var memStatsAfter runtime.MemStats
@@ -86,10 +84,7 @@ func TestServer_GracefulShutdown(t *testing.T) {
 
 	go func() {
 		defer wg.Done()
-		select {
-		case <-ctx.Done():
-		case <-time.After(20 * time.Millisecond):
-		}
+		<-ctx.Done()
 	}()
 
 	cancel()
@@ -117,20 +112,6 @@ func TestHeartbeat_StopOnContextCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	time.Sleep(20 * time.Millisecond)
-
-	select {
-	case <-ctx.Done():
-		t.Log("Context cancelled as expected")
-	default:
-	}
-
-	select {
-	case <-ctx.Done():
-	default:
-		t.Error("Context should be done after cancel")
-	}
-
 	require.Equal(t, context.Canceled, ctx.Err())
 }
 
@@ -144,7 +125,7 @@ func TestGoroutineLeak(t *testing.T) {
 
 	// Give the runtime time to settle any leftover goroutines from prior tests
 	runtime.GC()
-	time.Sleep(50 * time.Millisecond)
+	runtime.Gosched()
 
 	initialGoroutines := runtime.NumGoroutine()
 
@@ -161,9 +142,9 @@ func TestGoroutineLeak(t *testing.T) {
 	wg.Wait()
 
 	// Allow spawned goroutines to fully exit and be reaped
-	time.Sleep(50 * time.Millisecond)
+	runtime.Gosched()
 	runtime.GC()
-	time.Sleep(20 * time.Millisecond)
+	runtime.Gosched()
 
 	finalGoroutines := runtime.NumGoroutine()
 
@@ -184,8 +165,7 @@ func TestGracefulShutdown_WithActiveUpdates(t *testing.T) {
 		XUIInboundID:     1,
 		XUISubPath:       "sub",
 		TelegramBotToken: "test_token",
-		XUIUsername:      "admin",
-		XUIPassword:      "password",
+		XUIAPIToken:      "test-api-token",
 	}
 
 	mockBot := testutil.NewMockBotAPI()
@@ -199,11 +179,7 @@ func TestGracefulShutdown_WithActiveUpdates(t *testing.T) {
 	handler.StartRateLimiterCleanup(ctx, 10*time.Millisecond, 50*time.Millisecond)
 	handler.StartReferralCacheSync(ctx)
 
-	time.Sleep(20 * time.Millisecond)
-
 	cancel()
-
-	time.Sleep(50 * time.Millisecond)
 
 	t.Log("Shutdown with active updates completed")
 }
@@ -241,11 +217,7 @@ func TestGracefulShutdown_RateLimiterCleanup(t *testing.T) {
 
 	handler.StartRateLimiterCleanup(ctx, 10*time.Millisecond, 50*time.Millisecond)
 
-	time.Sleep(20 * time.Millisecond)
-
 	cancel()
-
-	time.Sleep(50 * time.Millisecond)
 
 	t.Log("Rate limiter cleanup completed gracefully")
 }

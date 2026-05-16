@@ -186,6 +186,10 @@ func (s *SubscriptionService) DeleteByID(ctx context.Context, id uint) (*databas
 	username := sub.Username
 	subscriptionID := sub.SubscriptionID
 
+	if inboundID == 0 {
+		inboundID = s.cfg.XUIInboundID
+	}
+
 	// Delete from database first — same rationale as Delete():
 	// DB-first avoids orphaned DB records when XUI deletion succeeds
 	// but DB deletion fails.
@@ -196,7 +200,10 @@ func (s *SubscriptionService) DeleteByID(ctx context.Context, id uint) (*databas
 
 	// Best-effort XUI cleanup
 	if err := s.xui.DeleteClient(ctx, inboundID, clientID); err != nil {
-		_ = inboundID // captured for potential future cleanup job
+		logger.Error("Failed to delete XUI client in DeleteByID (orphaned client may remain)",
+			zap.Int("inboundID", inboundID),
+			zap.String("clientID", clientID),
+			zap.Error(err))
 	}
 
 	// Send webhook notification (async)

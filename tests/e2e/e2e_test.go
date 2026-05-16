@@ -236,10 +236,9 @@ func setupRealXUIEnv(t *testing.T, handlers map[string]http.HandlerFunc) *realXU
 		XUISubPath:              "sub",
 		SiteURL:                 "https://example.com",
 		TelegramBotToken:        "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11",
-		XUISessionMaxAgeMinutes: 15,
 	}
 
-	xuiClient, err := xui.NewClient(server.URL, "admin", "password", 15*time.Minute)
+	xuiClient, err := xui.NewClient(server.URL, "test-api-token")
 	require.NoError(t, err)
 
 	subService := service.NewSubscriptionService(db, xuiClient, cfg, &webhook.NoopSender{})

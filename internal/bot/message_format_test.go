@@ -6,68 +6,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestMessageFormat_MarkdownV2Validation(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name    string
-		text    string
-		wantErr bool
-	}{
-		{
-			name:    "valid_simple_text",
-			text:    "Hello World",
-			wantErr: false,
-		},
-		{
-			name:    "valid_with_underscore",
-			text:    "test_user",
-			wantErr: false,
-		},
-		{
-			name:    "valid_escaped_underscore",
-			text:    "test\\_user",
-			wantErr: false,
-		},
-		{
-			name:    "valid_link_format",
-			text:    "[text](url)",
-			wantErr: false,
-		},
-		{
-			name:    "valid_bold",
-			text:    "*bold*",
-			wantErr: false,
-		},
-		{
-			name:    "valid_italic",
-			text:    "_italic_",
-			wantErr: false,
-		},
-		{
-			name:    "valid_code",
-			text:    "`code`",
-			wantErr: false,
-		},
-		{
-			name:    "valid_strike",
-			text:    "~strike~",
-			wantErr: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := validateMarkdownV2(tt.text)
-			if tt.wantErr {
-				assert.Error(t, err, "Should fail for invalid Markdown")
-			} else {
-				assert.NoError(t, err, "Should pass for valid Markdown")
-			}
-		})
-	}
-}
-
 func TestMessageFormat_NoDoubleEscape(t *testing.T) {
 	t.Parallel()
 
@@ -173,6 +111,4 @@ func TestMessageFormat_EscapeMarkdownComprehensive(t *testing.T) {
 	assert.Contains(t, result, "\\-", "Minus should be escaped")
 }
 
-func validateMarkdownV2(text string) error {
-	return nil
-}
+
