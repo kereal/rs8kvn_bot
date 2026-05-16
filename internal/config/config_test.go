@@ -295,10 +295,10 @@ func TestLoad_ValidHealthCheckPort_Max(t *testing.T) {
 	assert.Equal(t, 65535, cfg.HealthCheckPort)
 }
 
-func TestLoad_ValidAdminID_Zero(t *testing.T) {
+func TestLoad_ValidTelegramAdminID(t *testing.T) {
 
 	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
-	os.Setenv("TELEGRAM_ADMIN_ID", "0")
+	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
 	os.Setenv("XUI_HOST", "https://localhost:2053")
 	os.Setenv("XUI_API_TOKEN", "some-test-token")
 	os.Setenv("XUI_INBOUND_ID", "1")
@@ -313,8 +313,8 @@ func TestLoad_ValidAdminID_Zero(t *testing.T) {
 	}()
 
 	cfg, err := Load()
-	assert.NoError(t, err, "Load() should allow ADMIN_ID=0")
-	assert.Equal(t, int64(0), cfg.TelegramAdminID)
+	assert.NoError(t, err, "Load() should allow valid ADMIN_ID")
+	assert.Equal(t, int64(123456), cfg.TelegramAdminID)
 }
 
 func TestLoad_InvalidTrialDurationHours_Zero(t *testing.T) {
@@ -658,11 +658,13 @@ func TestConfig_Validate_InvalidAdminID_Zero(t *testing.T) {
 		TelegramBotToken: "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 		TelegramAdminID:  0,
 		XUIHost:          "https://localhost:2053",
+		XUIAPIToken:      "valid-token",
 		XUIInboundID:     1,
 	}
 
 	err := cfg.validate()
 	assert.Error(t, err, "validate() should error")
+	assert.Contains(t, err.Error(), "TELEGRAM_ADMIN_ID", "error should mention TELEGRAM_ADMIN_ID")
 }
 
 func TestConfig_Validate_InvalidInboundID_Zero(t *testing.T) {

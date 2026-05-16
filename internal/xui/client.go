@@ -523,6 +523,13 @@ func isRetryable(err error) bool {
 }
 
 func RetryWithBackoff(ctx context.Context, maxRetries int, initialDelay time.Duration, fn func() error) error {
+	if maxRetries <= 0 {
+		return errors.New("maxRetries must be positive")
+	}
+	if initialDelay <= 0 {
+		return errors.New("initialDelay must be positive")
+	}
+
 	var lastErr error
 	delay := initialDelay
 

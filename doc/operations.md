@@ -1,6 +1,6 @@
 # Operations Guide — rs8kvn_bot
 
-**Version:** 2.3.0  
+**Version:** 3.0.0  
 **Last updated:** 2026-04-17
 
 ---
