@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"encoding/base64"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -142,12 +143,25 @@ func TestHandleSubscription_EmptySubscriptionURL(t *testing.T) {
 func TestHandleSubscription_XUIError_NoCache(t *testing.T) {
 	t.Parallel()
 
+	listener, err := net.Listen("tcp", "localhost:0")
+	require.NoError(t, err)
+	t.Cleanup(func() { listener.Close() })
+	go func() {
+		for {
+			conn, lErr := listener.Accept()
+			if lErr != nil {
+				return
+			}
+			conn.Close()
+		}
+	}()
+
 	mockDB := testutil.NewMockDatabaseService()
 	mockDB.GetSubscriptionBySubscriptionIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
 		return &database.Subscription{
 			SubscriptionID:  subscriptionID,
 			Status:          "active",
-			SubscriptionURL: "http://localhost:2053/sub/abc123",
+			SubscriptionURL: "http://" + listener.Addr().String() + "/sub/abc123",
 		}, nil
 	}
 
