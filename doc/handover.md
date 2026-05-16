@@ -2,7 +2,7 @@
 
 **Repo:** https://github.com/kereal/rs8kvn_bot
 **Module:** `rs8kvn_bot` (Go 1.25+)
-**Version:** v2.3.0
+**Version:** v2.2.2
 **Branch:** `dev` (GitFlow: `main` = production, `dev` = integration)
 
 ---
@@ -51,7 +51,7 @@
 │ • Subscriptions│   │ • AddClient   │    │ • Telegram    │
 │ • Invites      │   │ • GetTraffic  │    │ • Sentry      │
 │ • TrialReqs    │   │ • Delete      │    │ • Heartbeat   │
-│ • Indexes      │   │ • CircuitBrkr │    │   endpoint    │
+│ • Indexes      │   │ • RetryWithBk │    │   endpoint    │
 └───────────────┘    └───────────────┘    └───────────────┘
 ```
 
@@ -83,7 +83,7 @@ SubscriptionService.Create(ctx, telegramID)
         ▼
 XUI Client: AddClientWithID(...)
         │
-        ├─ Ensure logged in (circuit breaker check)
+        ├─ Authorize via Bearer token (no session needed)
         ├─ POST /panel/api/inbounds/addClient
         └─ Return client ID (UUID)
         │
@@ -196,12 +196,12 @@ Write response:
 | Migrations | `golang-migrate/migrate/v4` | v4.19.1 |
 | QR Code | `piglig/go-qr` | v0.2.6 |
 | Logging | `go.uber.org/zap` + `lumberjack.v2` | v1.27.1 |
-| Error tracking | `getsentry/sentry-go` | v0.44.1 |
+| Error tracking | `getsentry/sentry-go` | v0.45.0 |
 | Concurrency | `golang.org/x/sync/singleflight` | — |
 | Testing | `stretchr/testify` | v1.11.1 |
 | CI/CD | GitHub Actions → golangci-lint, gosec, test, Docker → GHCR | — |
 
-## Current State (v2.3.0)
+## Current State (v2.2.2)
 
 ### Working Features
 
@@ -222,7 +222,7 @@ Write response:
 - 📊 Stats — bot statistics
 
 **Infrastructure:**
-- 3x-ui integration — auto-login, client CRUD, circuit breaker (5-fail/30s), retry with jitter, singleflight dedup
+- 3x-ui integration — Bearer token auth (no session/login/CSRF), client CRUD, RetryWithBackoff (3 retries, jitter), flow detection
 - Health endpoints — `/healthz` (503 when Down), `/readyz` (503 during init)
 - Invite/trial landing — `/i/{code}` with IP rate limit (3/hour), cookie dedup (3h)
 - Per-user rate limiting — chatID token bucket (30 tokens, 5/sec refill, 10-min idle cleanup)
@@ -337,7 +337,7 @@ All tests pass with `-race` detector. Fuzzing enabled for critical functions.
 - **HTTP timeouts:** ReadHeaderTimeout 5s, ReadTimeout 10s, WriteTimeout 30s, IdleTimeout 60s
 - **Port binding:** Verified before goroutine launch — `net.Listen()` then `Serve()` in separate goroutine
 - **Non-root Docker:** UID 1000, `no-new-privileges:true`
-- **Circuit breaker:** XUI client protected — 5 failures → 30s open, then half-open (3 attempts)
+- **RetryWithBackoff:** 3 retries with exponential backoff + jitter; DNS errors fast-fail
 
 ### Health Checks
 - **`/healthz`:** Composite: DB ping + XUI status check → 200 (ok|degraded) or 503 (down)
@@ -365,7 +365,7 @@ go test -coverprofile=coverage.out ./...
 go tool cover -func=coverage.out
 
 # Build binary
-go build -ldflags="-s -w -X main.version=v2.3.0 -X main.commit=$(git rev-parse --short HEAD 2>/dev/null || echo unknown) -X main.buildTime=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" -o rs8kvn_bot ./cmd/bot
+go build -ldflags="-s -w -X main.version=v3.0.0 -X main.commit=$(git rev-parse --short HEAD 2>/dev/null || echo unknown) -X main.buildTime=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" -o rs8kvn_bot ./cmd/bot
 
 # Run linters
 golangci-lint run ./...
