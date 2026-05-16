@@ -169,12 +169,11 @@ func TestTrialCleanupScheduler_Start_ContextCancel(t *testing.T) {
 		close(done)
 	}()
 
-	time.Sleep(20 * time.Millisecond)
 	cancel()
 
 	select {
 	case <-done:
-	case <-time.After(time.Second):
+	case <-time.After(200 * time.Millisecond):
 		t.Fatal("Scheduler should stop after context cancel")
 	}
 }

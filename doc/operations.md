@@ -1,6 +1,6 @@
 # Operations Guide — rs8kvn_bot
 
-**Version:** 2.3.0  
+**Version:** 3.0.0  
 **Last updated:** 2026-04-17
 
 ---
@@ -345,7 +345,7 @@ cat .env | grep -v '^#'
 sqlite3 ./data/tgvpn.db "SELECT 1;"
 
 # Test XUI panel
-curl -u "$XUI_USERNAME:$XUI_PASSWORD" "$XUI_HOST/panel/api/server/status"
+curl -H "Authorization: Bearer $XUI_API_TOKEN" "$XUI_HOST/panel/api/server/status"
 
 # Check port
 lsof -i :8880
@@ -394,7 +394,7 @@ docker restart rs8kvn_bot
 **Debug steps:**
 ```bash
 # Check XUI directly
-curl -u admin:pass http://localhost:2053/panel/api/inbounds/list
+curl -H "Authorization: Bearer $XUI_API_TOKEN" "$XUI_HOST/panel/api/inbounds/list"
 
 # Check DB state
 sqlite3 ./data/tgvpn.db "SELECT * FROM subscriptions WHERE telegram_id = <user_id> ORDER BY created_at DESC LIMIT 5;"
@@ -499,21 +499,22 @@ sqlite3 ./data/tgvpn.db "PRAGMA journal_mode=WAL;"
 
 ---
 
-### 5.8 XUI circuit breaker open
+### 5.8 XUI API errors (retry with backoff)
 
-**Symptom:** XUI calls failing repeatedly, then circuit breaker opens (30s timeout).
+**Symptom:** XUI API calls failing with transient errors.
 
-**Log:** `"circuit breaker opened"`
+**Log:** `"XUI API error"`, `"retrying after backoff"`, or similar.
 
-**Cause:** 5 consecutive failures (HTTP non-2xx, network error).
+**Note:** The circuit breaker has been removed. The system uses `RetryWithBackoff` with exponential backoff + jitter (up to 3 retries).
 
 **Fix:**
-1. Check 3x-ui panel is up: `curl $XUI_HOST/panel/api/server/status`
-2. Verify credentials in `.env`
+1. Check 3x-ui panel is up: `curl -H "Authorization: Bearer $XUI_API_TOKEN" "$XUI_HOST/panel/api/server/status"`
+2. Verify `XUI_API_TOKEN` in `.env` is correct (generate new token in panel Security settings if needed)
 3. Check panel logs for errors
-4. Circuit breaker auto-recovers after 30s → just wait
+4. Retries happen automatically — check logs after ~30s for recovery
+5. DNS errors will fast-fail without retries
 
-**Manual reset:** Restart bot (breaker state in memory).
+**For persistent issues:** Restart bot to clear any cached state.
 
 ---
 
@@ -604,11 +605,11 @@ deploy:
 **Do NOT:**
 - Commit `.env` to git (in `.gitignore`)
 - Share secrets in logs
-- Use default passwords
+- Use default credentials or tokens
 
 **Do:**
 - Use secrets manager (HashiCorp Vault, AWS Secrets Manager)
-- Rotate XUI password every 90 days
+- Rotate XUI API token every 90 days
 - Rotate Telegram bot token if exposed
 
 ### 7.3 Network Security

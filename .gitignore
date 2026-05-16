@@ -14,9 +14,9 @@ data/
 logs/
 
 # Binary
-tgvpn_bot
-rs8kvn_bot
-bot
+/tgvpn_bot
+/rs8kvn_bot
+/bot
 *.exe
 *.exe~
 *.dll
@@ -48,3 +48,4 @@ go.work.sum
 .DS_Store
 Thumbs.db
 Desktop.ini
+.kilo/

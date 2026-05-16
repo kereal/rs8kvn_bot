@@ -2,7 +2,7 @@
 
 **Repo:** https://github.com/kereal/rs8kvn_bot
 **Module:** `rs8kvn_bot` (Go 1.25+)
-**Version:** v2.3.0
+**Version:** v3.0.0
 **Branch:** `dev` (GitFlow: `main` = production, `dev` = integration)
 
 ---
@@ -51,7 +51,7 @@
 │ • Subscriptions│   │ • AddClient   │    │ • Telegram    │
 │ • Invites      │   │ • GetTraffic  │    │ • Sentry      │
 │ • TrialReqs    │   │ • Delete      │    │ • Heartbeat   │
-│ • Indexes      │   │ • CircuitBrkr │    │   endpoint    │
+│ • Indexes      │   │ • RetryWithBk │    │   endpoint    │
 └───────────────┘    └───────────────┘    └───────────────┘
 ```
 
@@ -83,7 +83,7 @@ SubscriptionService.Create(ctx, telegramID)
         ▼
 XUI Client: AddClientWithID(...)
         │
-        ├─ Ensure logged in (circuit breaker check)
+        ├─ Authorize via Bearer token (no session needed)
         ├─ POST /panel/api/inbounds/addClient
         └─ Return client ID (UUID)
         │
@@ -196,12 +196,12 @@ Write response:
 | Migrations | `golang-migrate/migrate/v4` | v4.19.1 |
 | QR Code | `piglig/go-qr` | v0.2.6 |
 | Logging | `go.uber.org/zap` + `lumberjack.v2` | v1.27.1 |
-| Error tracking | `getsentry/sentry-go` | v0.44.1 |
+| Error tracking | `getsentry/sentry-go` | v0.45.0 |
 | Concurrency | `golang.org/x/sync/singleflight` | — |
 | Testing | `stretchr/testify` | v1.11.1 |
 | CI/CD | GitHub Actions → golangci-lint, gosec, test, Docker → GHCR | — |
 
-## Current State (v2.3.0)
+## Current State (v3.0.0)
 
 ### Working Features
 
@@ -222,7 +222,7 @@ Write response:
 - 📊 Stats — bot statistics
 
 **Infrastructure:**
-- 3x-ui integration — auto-login, client CRUD, circuit breaker (5-fail/30s), retry with jitter, singleflight dedup
+- 3x-ui integration — Bearer token auth (no session/login/CSRF), client CRUD, RetryWithBackoff (3 retries, jitter), flow detection
 - Health endpoints — `/healthz` (503 when Down), `/readyz` (503 during init)
 - Invite/trial landing — `/i/{code}` with IP rate limit (3/hour), cookie dedup (3h)
 - Per-user rate limiting — chatID token bucket (30 tokens, 5/sec refill, 10-min idle cleanup)
@@ -260,17 +260,17 @@ All tests pass with `-race` detector. Fuzzing enabled for critical functions.
 ## Critical Nuances
 
 ### 3x-ui Integration
-- **Session:** 12h validity (configurable via `XUI_SESSION_MAX_AGE_MINUTES`, default 720), verified via `/panel/api/server/status`
-- **Auto-relogin:** On HTTP 401/redirect, re-authenticates then retries failed request
-- **Connection pool cleanup:** Before re-auth to prevent dead connections
-- **Circuit breaker:** 5 failures → 30s open state, then half-open (3 attempts) before full close
+- **API Token auth:** Bearer token via `Authorization` header (no session/login/CSRF/cookiejar)
+- **Token configuration:** `XUI_API_TOKEN` env var — no username, password, or session age needed
+- **No connection pool cleanup needed:** No session state to invalidate
+- **No circuit breaker:** Removed in favor of simple `RetryWithBackoff` with exponential backoff + jitter
 - **Subscription defaults:** `reset: 30` (days from creation), `expiryTime: now + 30 days`
 - **Auto-reset:** Only works when `ExpiryTime > 0`. Traffic resets every 30 days, expiry extends (3x-ui auto-renew logic)
 - **Client email:** `trial_{subID}` for trial, `{username}` for regular, `plan_{subID}` for plan-based (future)
-- **Ping vs Login:** Health checks use `Ping()` → `ensureLoggedIn(ctx, false)` — no forced re-auth if session valid
-- **Singleflight:** Deduplicates concurrent login attempts and subscription fetches
+- **Ping:** `Ping()` sends GET `/panel/api/server/status` with Bearer token — no session verification needed
+- **No singleflight:** Deduplication removed (no concurrent login to deduplicate)
 - **DNS error fast-fail:** Non-retryable errors fail immediately (no retry spam)
-- **Flow detection (v2.4.0+):** When creating/updating clients, fetches inbound config via `GET /panel/api/inbounds/get/{id}` to determine transport type. Flow is set based on transport: `tcp` → `"xtls-rprx-vision"`, `xhttp/h2/ws/grpc` → `""` (empty). Falls back to `"xtls-rprx-vision"` if inbound cannot be fetched.
+- **Flow detection:** When creating/updating clients, fetches inbound config via `GET /panel/api/inbounds/get/{id}` to determine transport type. Flow is set based on transport: `tcp` → `"xtls-rprx-vision"`, `xhttp/h2/ws/grpc` → `""` (empty). Falls back to `"xtls-rprx-vision"` if inbound cannot be fetched.
 
 ### Subscription Flow
 - **Trial:** `/i/{code}` → IP rate limit (3/hour) → DB trial record (telegram_id=0) → user clicks link in Telegram → `BindTrialSubscription` sets telegram_id, removes is_trial, sets referred_by if from invite
@@ -313,7 +313,7 @@ All tests pass with `-race` detector. Fuzzing enabled for critical functions.
 - **Connection pool:** `MaxOpenConns=1` (SQLite single-writer), `MaxIdle=1`, `ConnMaxLifetime=5m`
 
 ### Configuration
-- **Required:** `TELEGRAM_BOT_TOKEN`, `XUI_USERNAME`, `XUI_PASSWORD` (NO defaults)
+- **Required:** `TELEGRAM_BOT_TOKEN`, `XUI_API_TOKEN` (NO defaults)
 - **Validated:** 
   - `XUI_SUB_PATH` — only `a-zA-Z0-9_-`, no `..` or `/`
   - `XUI_HOST` — must be valid URL, **HTTPS enforced** (except localhost)
@@ -337,7 +337,7 @@ All tests pass with `-race` detector. Fuzzing enabled for critical functions.
 - **HTTP timeouts:** ReadHeaderTimeout 5s, ReadTimeout 10s, WriteTimeout 30s, IdleTimeout 60s
 - **Port binding:** Verified before goroutine launch — `net.Listen()` then `Serve()` in separate goroutine
 - **Non-root Docker:** UID 1000, `no-new-privileges:true`
-- **Circuit breaker:** XUI client protected — 5 failures → 30s open, then half-open (3 attempts)
+- **RetryWithBackoff:** 3 retries with exponential backoff + jitter; DNS errors fast-fail
 
 ### Health Checks
 - **`/healthz`:** Composite: DB ping + XUI status check → 200 (ok|degraded) or 503 (down)
@@ -365,7 +365,7 @@ go test -coverprofile=coverage.out ./...
 go tool cover -func=coverage.out
 
 # Build binary
-go build -ldflags="-s -w -X main.version=v2.3.0 -X main.commit=$(git rev-parse --short HEAD 2>/dev/null || echo unknown) -X main.buildTime=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" -o rs8kvn_bot ./cmd/bot
+go build -ldflags="-s -w -X main.version=v3.0.0 -X main.commit=$(git rev-parse --short HEAD 2>/dev/null || echo unknown) -X main.buildTime=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" -o rs8kvn_bot ./cmd/bot
 
 # Run linters
 golangci-lint run ./...
