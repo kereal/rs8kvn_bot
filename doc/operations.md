@@ -345,7 +345,7 @@ cat .env | grep -v '^#'
 sqlite3 ./data/tgvpn.db "SELECT 1;"
 
 # Test XUI panel
-curl -u "$XUI_USERNAME:$XUI_PASSWORD" "$XUI_HOST/panel/api/server/status"
+curl -H "Authorization: Bearer $XUI_API_TOKEN" "$XUI_HOST/panel/api/server/status"
 
 # Check port
 lsof -i :8880
