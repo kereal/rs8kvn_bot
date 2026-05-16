@@ -194,8 +194,7 @@ TELEGRAM_ADMIN_ID=123456789
 
 # 3x-ui (HTTPS mandatory!)
 XUI_HOST=https://vpn.example.com:2053
-XUI_USERNAME=bot_admin
-XUI_PASSWORD=${XUI_PASSWORD_FROM_VAULT}  # Use secret manager
+XUI_API_TOKEN=${XUI_API_TOKEN}  # API token from panel Security settings
 XUI_INBOUND_ID=1
 XUI_SUB_PATH=rs8vn4876  # Random string, not "sub"
 

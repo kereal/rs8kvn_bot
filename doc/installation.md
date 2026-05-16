@@ -45,8 +45,7 @@ nano .env  # or use your editor
 TELEGRAM_BOT_TOKEN=your_bot_token_here
 TELEGRAM_ADMIN_ID=123456789
 XUI_HOST=http://your-panel-ip:2053
-XUI_USERNAME=admin
-XUI_PASSWORD=your_panel_password
+XUI_API_TOKEN=your_panel_api_token
 XUI_INBOUND_ID=1
 ```
 
@@ -214,11 +213,9 @@ Air will automatically rebuild and restart the bot when you save changes to Go f
 | `CONTACT_USERNAME` | Support Telegram username | `kereal` | ❌ | Without `@` |
 | **3x-ui Panel** |
 | `XUI_HOST` | Panel URL | `http://localhost:2053` | ✅ | Must be reachable from bot |
-| `XUI_USERNAME` | Admin username | — | ✅ | Panel login |
-| `XUI_PASSWORD` | Admin password | — | ✅ | Panel login |
+| `XUI_API_TOKEN` | Panel API token | — | ✅ | Generated in panel Security settings |
 | `XUI_INBOUND_ID` | VLESS inbound ID | `1` | ✅ | Integer |
 | `XUI_SUB_PATH` | Subscription URL path segment | `sub` | ❌ | Alphanumeric, `_`, `-` only |
-| `XUI_SESSION_MAX_AGE_MINUTES` | Panel session lifetime | `720` (12h) | ❌ | Must match panel setting |
 | **Database** |
 | `DATABASE_PATH` | SQLite database file path | `./data/tgvpn.db` | ❌ | Directory must exist |
 | **Logging** |

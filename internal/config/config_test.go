@@ -112,8 +112,7 @@ func TestLoad_InvalidXUIInboundID(t *testing.T) {
 	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
 	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
 	os.Setenv("XUI_HOST", "https://localhost:2053")
-	os.Setenv("XUI_USERNAME", "admin")
-	os.Setenv("XUI_PASSWORD", "password")
+	os.Setenv("XUI_API_TOKEN", "some-token")
 	os.Setenv("XUI_INBOUND_ID", "invalid")
 	os.Setenv("LOG_LEVEL", "info")
 	defer func() {
@@ -502,8 +501,7 @@ func TestLoad_InvalidXUIInboundID_Negative(t *testing.T) {
 	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
 	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
 	os.Setenv("XUI_HOST", "https://localhost:2053")
-	os.Setenv("XUI_USERNAME", "admin")
-	os.Setenv("XUI_PASSWORD", "password")
+	os.Setenv("XUI_API_TOKEN", "some-token")
 	os.Setenv("XUI_INBOUND_ID", "-1")
 	os.Setenv("LOG_LEVEL", "info")
 	defer func() {
