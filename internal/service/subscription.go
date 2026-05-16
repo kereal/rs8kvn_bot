@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"rs8kvn_bot/internal/config"
@@ -36,6 +37,16 @@ type CreateResult struct {
 	SubscriptionURL string
 }
 
+// XUIEmail returns an email suitable for use as XUI client email.
+// Uses the Telegram username directly if it's a real username,
+// otherwise falls back to "tgId_{telegramID}" format.
+func XUIEmail(username string, telegramID int64) string {
+	if username != "" && !strings.HasPrefix(username, "user_") {
+		return username
+	}
+	return fmt.Sprintf("tgId_%d", telegramID)
+}
+
 // NewSubscriptionService creates a SubscriptionService configured with the given database, XUI client, configuration, and optional webhook sender.
 // If webhookSender is nil, webhook delivery will be disabled for the service.
 func NewSubscriptionService(db interfaces.DatabaseService, xui interfaces.XUIClient, cfg *config.Config, webhookSender WebhookSender) *SubscriptionService {
@@ -62,7 +73,7 @@ func (s *SubscriptionService) Create(ctx context.Context, chatID int64, username
 	// Calculate expiry time for auto-reset (now + reset days)
 	expiryTime := time.Now().Add(time.Duration(config.SubscriptionResetDay) * 24 * time.Hour)
 
-	client, err := s.xui.AddClientWithID(ctx, s.cfg.XUIInboundID, username, clientID, subID, trafficBytes, expiryTime, config.SubscriptionResetDay)
+	client, err := s.xui.AddClientWithID(ctx, s.cfg.XUIInboundID, XUIEmail(username, chatID), clientID, subID, trafficBytes, expiryTime, config.SubscriptionResetDay)
 	if err != nil {
 		return nil, fmt.Errorf("xui add client: %w", err)
 	}
@@ -99,7 +110,7 @@ func (s *SubscriptionService) Create(ctx context.Context, chatID int64, username
 			EventID:           "evt-" + eventID,
 			Event:             webhook.EventSubscriptionActivated,
 			UserID:            sub.ClientID,
-			Email:             sub.Username,
+			Email:             XUIEmail(sub.Username, chatID),
 			SubscriptionToken: sub.SubscriptionID,
 		})
 	}
@@ -154,7 +165,7 @@ func (s *SubscriptionService) Delete(ctx context.Context, telegramID int64) erro
 			EventID:           "evt-" + eventID,
 			Event:             webhook.EventSubscriptionExpired,
 			UserID:            clientID,
-			Email:             username,
+			Email:             XUIEmail(username, telegramID),
 			SubscriptionToken: subscriptionID,
 		})
 	}
@@ -196,7 +207,7 @@ func (s *SubscriptionService) DeleteByID(ctx context.Context, id uint) (*databas
 			EventID:           "evt-" + eventID,
 			Event:             webhook.EventSubscriptionExpired,
 			UserID:            clientID,
-			Email:             username,
+			Email:             XUIEmail(username, deleted.TelegramID),
 			SubscriptionToken: subscriptionID,
 		})
 	}
