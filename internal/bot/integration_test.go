@@ -425,9 +425,9 @@ func TestHandler_GetUsername(t *testing.T) {
 		want string
 	}{
 		{"with username", &tgbotapi.User{UserName: "testuser"}, "testuser"},
-		{"first name only", &tgbotapi.User{ID: 0, FirstName: "Test"}, "user_0"},
+		{"first name only", &tgbotapi.User{ID: 0, FirstName: "Test"}, ""},
 		{"both username and first", &tgbotapi.User{UserName: "testuser", FirstName: "Test"}, "testuser"},
-		{"empty user", &tgbotapi.User{ID: 0}, "user_0"},
+		{"empty user", &tgbotapi.User{ID: 0}, ""},
 		{"nil user", nil, "unknown"},
 	}
 
