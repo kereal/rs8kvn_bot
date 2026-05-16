@@ -49,7 +49,7 @@ Instead, contact us privately:
 | Telegram bot | User identification via `chat_id`; admin commands check `TELEGRAM_ADMIN_ID` |
 | API endpoint | Bearer token (`API_TOKEN`) with constant-time comparison |
 | Webhook | Bearer secret (`PROXY_MANAGER_WEBHOOK_SECRET`) |
-| 3x-ui panel | Bearer token (`XUI_API_TOKEN`) over HTTPS (enforced) |
+| 3x-ui panel | API token (`XUI_API_TOKEN`) via Bearer header over HTTPS |
 
 ### 2. Input Validation
 
@@ -65,7 +65,7 @@ Instead, contact us privately:
 - **`no-new-privileges:true`** — prevents privilege escalation
 - **Read-only config volume** (`/.env:ro`)
 - **Health checks** exposed only on localhost by default
-- **Circuit breaker** on 3x-ui client prevents DoS on upstream
+- **RetryWithBackoff** on 3x-ui client handles transient failures
 - **Rate limiting** per Telegram user (30 tokens, 5/sec refill)
 - **IP rate limiting** on trial endpoint (3/hour per IP)
 
@@ -74,15 +74,14 @@ Instead, contact us privately:
 - **Database:** SQLite with WAL mode (atomic commits)
 - **Migrations:** Embedded, no external files at runtime
 - **Backups:** Daily rotation (14 days), same directory (consider off-site)
-- **Logging:** Sensitive data masked in `Config.String()`; no passwords in logs
+- **Logging:** Sensitive data masked in `Config.String()`; no secrets in logs
 - **Secrets:** Stored in `.env` (not in code), file permissions recommended `600`
 
 ### 5. Error Handling
 
 - **Panic recovery** in all goroutines (`recoverAndReport`)
 - **Graceful shutdown** — in-flight requests allowed to complete
-- **Circuit breaker** opens after 5 consecutive XUI failures
-- **Retry with exponential backoff** on transient XUI errors
+- **RetryWithBackoff** retries XUI calls on transient errors (exponential backoff + jitter, up to 3 retries)
 - **Stale cache fallback** for subscription proxy if XUI down
 
 ### 6. Code Quality
@@ -92,6 +91,32 @@ Instead, contact us privately:
 - **Fuzzing:** Markdown sanitization fuzz tests
 - **Leak detection:** Goroutine leak tests in `tests/leak/`
 - **Test coverage:** ~85%
+
+### 7. XUI API Token Management
+
+#### Token Lifecycle
+
+1. **Creation:** Generate token in 3x-ui panel → Security settings → API Token. Copy immediately — token is shown only once.
+2. **Storage:** Store in `.env` as `XUI_API_TOKEN`. File permissions must be `600`.
+3. **Usage:** Sent as `Authorization: Bearer $XUI_API_TOKEN` header on every API call.
+4. **Rotation:** Rotate every 90 days. Generate new token in panel, update `.env`, restart bot.
+5. **Revocation:** Generate a new token in panel — the old token is immediately invalidated.
+
+#### Audit & Monitoring
+
+- Enable panel access logs (Security settings → Logging) to record all API actions
+- Monitor bot logs for `XUI API error` or `401 Unauthorized` responses
+- If a token is suspected compromised:
+  1. Generate new token in panel immediately (old one stops working)
+  2. Update `.env` and restart bot
+  3. Check panel access logs for unauthorized activity
+  4. Review the time window between compromise and revocation
+
+#### Least Privilege
+
+- XUI API token grants full panel API access — no scope/restriction mechanism exists in 3x-ui
+- Mitigation: restrict network access to XUI panel (firewall, private VLAN) so token can only be used from bot host
+- Future: if panel adds scoped tokens, use the most restrictive scope needed
 
 ---
 
@@ -112,9 +137,10 @@ Instead, contact us privately:
 
 ### Operational Security
 
-- [ ] **Rotate secrets** every 90 days (XUI password, API tokens)
+- [ ] **Rotate secrets** every 90 days (XUI API token, API_TOKEN, webhook secrets)
 - [ ] Monitor `/healthz` with external service (UptimeRobot, healthchecks.io)
 - [ ] Review logs daily for `error`/`warn` level
+- [ ] Watch for `401` / `XUI API error` patterns indicating token issues
 - [ ] Backup verification: monthly restore test
 - [ ] OS security updates: at least monthly
 - [ ] Enable audit logging on 3x-ui panel
@@ -170,12 +196,11 @@ Instead, contact us privately:
 ### If XUI Panel Compromised
 
 1. XUI panel is separate system — follow its security procedures
-2. Rotate XUI API token (`XUI_API_TOKEN`) immediately
-3. Generate new token in panel Security settings
-4. Update bot `.env` file with new token
-5. Restart bot to use new token
-6. Check panel logs for unauthorized client modifications
-7. Review panel audit logs for suspicious API calls
+2. **Revoke the XUI API token** immediately in panel Security settings → generate a new one
+3. Update `XUI_API_TOKEN` in `.env` and restart the bot
+4. Check panel logs for unauthorized client modifications
+5. Audit all recent changes made via the compromised token (panel access logs)
+6. If shared/leaked token is suspected, also rotate `API_TOKEN` and `PROXY_MANAGER_WEBHOOK_SECRET`
 
 ### Data Breach Notification
 

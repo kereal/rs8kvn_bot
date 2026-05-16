@@ -394,7 +394,7 @@ docker restart rs8kvn_bot
 **Debug steps:**
 ```bash
 # Check XUI directly
-curl -H "Authorization: Bearer $XUI_API_TOKEN" "$XUI_HOST/panel/api/server/status"
+curl -H "Authorization: Bearer $XUI_API_TOKEN" "$XUI_HOST/panel/api/inbounds/list"
 
 # Check DB state
 sqlite3 ./data/tgvpn.db "SELECT * FROM subscriptions WHERE telegram_id = <user_id> ORDER BY created_at DESC LIMIT 5;"
@@ -499,15 +499,19 @@ sqlite3 ./data/tgvpn.db "PRAGMA journal_mode=WAL;"
 
 ---
 
-### 5.8 XUI circuit breaker (removed)
+### 5.8 XUI API errors (retry with backoff)
 
-**Note:** The circuit breaker has been removed in the current version. The system now uses `RetryWithBackoff` with exponential backoff and jitter for XUI API calls.
+**Symptom:** XUI API calls failing with transient errors.
 
-**If XUI calls are failing:**
+**Log:** `"XUI API error"`, `"retrying after backoff"`, or similar.
+
+**Note:** The circuit breaker has been removed. The system uses `RetryWithBackoff` with exponential backoff + jitter (up to 3 retries).
+
+**Fix:**
 1. Check 3x-ui panel is up: `curl -H "Authorization: Bearer $XUI_API_TOKEN" "$XUI_HOST/panel/api/server/status"`
-2. Verify `XUI_API_TOKEN` in `.env`
+2. Verify `XUI_API_TOKEN` in `.env` is correct (generate new token in panel Security settings if needed)
 3. Check panel logs for errors
-4. Review retry logs in `data/bot.log` for transient vs permanent errors
+4. Retries happen automatically — check logs after ~30s for recovery
 5. DNS errors will fast-fail without retries
 
 **For persistent issues:** Restart bot to clear any cached state.
@@ -601,11 +605,11 @@ deploy:
 **Do NOT:**
 - Commit `.env` to git (in `.gitignore`)
 - Share secrets in logs
-- Use default passwords
+- Use default credentials or tokens
 
 **Do:**
 - Use secrets manager (HashiCorp Vault, AWS Secrets Manager)
-- Rotate XUI password every 90 days
+- Rotate XUI API token every 90 days
 - Rotate Telegram bot token if exposed
 
 ### 7.3 Network Security
