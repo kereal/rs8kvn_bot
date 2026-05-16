@@ -79,7 +79,7 @@ var messages = map[MessageKey]string{
 	MsgAdminDelNotFound:  "❌ Подписка с ID %d не найдена",
 	MsgAdminDelXUIFailed: "❌ Ошибка удаления клиента из панели 3x-ui",
 	MsgAdminDelPartial:   "⚠️ Клиент удален из панели, но ошибка удаления из базы",
-	MsgAdminDelSuccess:   "✅ Подписка успешно удалена!\n\n👤 Пользователь: @%s\n🆔 Telegram ID: %d",
+	MsgAdminDelSuccess:   "✅ Подписка успешно удалена!\n\n👤 Пользователь: %s\n🆔 Telegram ID: %d",
 
 	MsgAdminBroadcastUsage:   "❌ Использование: /broadcast <сообщение>\n\nПример: /broadcast Привет всем!",
 	MsgAdminBroadcastLong:    "❌ Сообщение слишком длинное (%d символов).\n\nМаксимум: %d символов.",

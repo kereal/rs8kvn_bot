@@ -285,7 +285,7 @@ func TestHandler_GetUsername_EmptyStrings(t *testing.T) {
 	// User with empty strings
 	user := &tgbotapi.User{ID: 12345, UserName: "", FirstName: ""}
 	result := handler.getUsername(user)
-	assert.Equal(t, "user_12345", result, "getUsername() should use user_ID format when no names")
+	assert.Equal(t, "", result, "getUsername() should return empty when no username")
 
 	// User with whitespace username
 	user2 := &tgbotapi.User{ID: 67890, UserName: "  ", FirstName: "Test"}

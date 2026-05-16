@@ -43,7 +43,7 @@ func TestGetUsername_EdgeCases(t *testing.T) {
 				FirstName: "",
 				LastName:  "",
 			},
-			expected: "user_12345",
+			expected: "",
 		},
 		{
 			name: "unicode username",
@@ -91,13 +91,13 @@ func TestGetUsername_EdgeCases(t *testing.T) {
 			expected: "preferred_username",
 		},
 		{
-			name: "firstname fallback when no username",
+			name: "empty username returns empty",
 			user: &tgbotapi.User{
 				ID:        12345,
 				UserName:  "",
 				FirstName: "John",
 			},
-			expected: "John",
+			expected: "",
 		},
 		{
 			name: "very long username",
@@ -136,13 +136,13 @@ func TestGetUsername_EdgeCases(t *testing.T) {
 			expected: "user\x00name",
 		},
 		{
-			name: "newline in firstname",
+			name: "newline in firstname ignored",
 			user: &tgbotapi.User{
 				ID:        12345,
 				UserName:  "",
 				FirstName: "First\nName",
 			},
-			expected: "First\nName",
+			expected: "",
 		},
 		{
 			name: "negative user ID",
@@ -151,7 +151,7 @@ func TestGetUsername_EdgeCases(t *testing.T) {
 				UserName:  "",
 				FirstName: "",
 			},
-			expected: "user_-12345",
+			expected: "",
 		},
 		{
 			name: "zero user ID",
@@ -160,7 +160,7 @@ func TestGetUsername_EdgeCases(t *testing.T) {
 				UserName:  "",
 				FirstName: "",
 			},
-			expected: "user_0",
+			expected: "",
 		},
 		{
 			name: "max int64 user ID",
@@ -169,7 +169,7 @@ func TestGetUsername_EdgeCases(t *testing.T) {
 				UserName:  "",
 				FirstName: "",
 			},
-			expected: "user_9223372036854775807",
+			expected: "",
 		},
 	}
 
@@ -782,14 +782,14 @@ func TestCache_IntegrationWithHandler(t *testing.T) {
 func TestErrorHandling_Scenarios(t *testing.T) {
 	t.Parallel()
 
-	t.Run("getUsername handles all empty fields", func(t *testing.T) {
+	t.Run("getUsername returns empty when no username", func(t *testing.T) {
 		cfg := &config.Config{TelegramAdminID: 123, ContactUsername: "kereal"}
 		h := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, cfg.DonateCardNumber, cfg.DonateURL, cfg.SiteURL)}
 
 		user := &tgbotapi.User{ID: 999}
 		result := h.getUsername(user)
 
-		assert.Equal(t, "user_999", result)
+		assert.Equal(t, "", result)
 	})
 }
 
