@@ -1,4 +1,4 @@
-## Test Coverage (April 2026)
+## Test Coverage (May 2026)
 
 **Overall Coverage:** ~85%
 
@@ -6,12 +6,12 @@
 - `internal/flag`: 97.7% ✅
 - `internal/ratelimiter`: 97.4% ✅
 - `internal/heartbeat`: 96.2% ✅
-- `internal/service`: 95.2% ✅ (was 24.8% — +30 tests in v2.3.0)
+- `internal/service`: 95.2% ✅
 - `internal/config`: 91.8% ✅
 - `internal/xui`: 90.9% ✅
 - `internal/web`: 90.3% ✅
-- `internal/bot`: 92.6% ✅ (was 87.8% — +15 ReferralCache tests in v2.3.0)
-- `internal/utils`: 90.0% ✅ (was 87.5% — added format.go shared tests)
+- `internal/bot`: 92.6% ✅
+- `internal/utils`: 90.0% ✅
 - `internal/logger`: 88.9% ✅
 - `internal/backup`: 83.2% ✅
 - `internal/subproxy`: 82.5% ✅
@@ -21,32 +21,43 @@
 - `internal/testutil`: 0.0% 🔴 (mock helpers, no direct tests needed)
 
 ### Test Statistics
-- **Total test functions:** 1,100+
-- **Test files:** 54
+- **Total test functions:** ~911
+- **Test files:** 48
 - **E2E test files:** 12
 - **Race-safe:** ✅
 - **Golden files:** ✅ (subproxy)
-- **Property-based tests:** ✅ (uuid)
-- **All internal/ tests use t.Parallel()** ✅
 
-### Performance Optimizations (v2.3.0)
-- ✅ Webhook retry delays parameterized (`WithRetryDelays`) — tests use ms instead of seconds (~25s saved)
-- ✅ XUI context cancellation tests: context-aware `select` instead of 2s sleep (~9s saved)
-- ✅ Circuit breaker tests: reduced timeouts 10x (50ms→5ms)
-- ✅ All `time.Sleep` calls reduced by 2-10x across all test files
-- ✅ `t.Parallel()` added to all internal/ test functions (parallel execution)
-- ✅ Smoke tests: reduced 3s/2s sleeps to 1s/500ms
-- ✅ README: fixed duplicate Installation Guide link
+### Test Architecture Notes
+- `web_test.go` split into 3 files: `web_test.go` (583 lines), `web_health_test.go` (363), `web_invite_test.go` (784)
+- `handlers_extended_test.go`: 8 duplicate/redundant tests removed
+- `cmd/bot/main_test.go`: TestGetVersion (5→1) and TestHandleUpdateSafely (4→1) merged into table-driven
+- `backup_test.go`: ValidatePath (11→1), RotateBackups (9→1), GetBackupInfo sort (3→1) consolidated
+- `message_format_test.go`: removed dead validateMarkdownV2 function
+- `test_helpers.go`: removed dead NewTestHandler function
+- `logger_test.go`: removed 3 dead nil-logger skipped tests
+- `interfaces/interfaces_test.go`: deleted (empty stub)
+
+### Performance Optimizations (v2.3.1)
+- **`-short` mode support:**
+  - xui: 5 slow tests (AddClient, DeleteClient, UpdateClient, GetClientTraffic, GetRequiredFlow_Fallback) skip in short mode — saves ~47s
+  - heartbeat: TestSendHeartbeat_InvalidURL skip in short — saves ~10s
+  - All fast tests run with: `go test -short ./...`
+- **time.Sleep → assert.Eventually/runtime.Gosched:**
+  - graceful_shutdown_test.go: 8 Sleeps replaced, ~300ms saved
+  - subproxy/service_test.go: 2× Sleep(30ms) → assert.Eventually
+  - subproxy/cache_test.go: 2× Sleep(20ms) → assert.Eventually
+  - scheduler: Sleep(20ms)+After(1s) → After(200ms)
+  - heartbeat: After(2s)→After(200ms) in 4 places
+- **t.Parallel() usage:** added to 11 heartbeat test functions (was 1)
+- **Race fix:** `requestReceived` in heartbeat_test changed from global variable to `atomic.Bool`
+- **Total `-short` runtime:** ~15s (was ~60-70s)
 
 ### Areas to Improve
-1. 🟡 `internal/database` - improve coverage (77.8%)
-2. 🟡 `cmd/bot` - main is integration (5.4% is acceptable)
-
-### v2.3.0 Test Additions
-- Service layer: 30 new tests (Create, Delete, DeleteByID, GetWithTraffic, CreateTrial, CalcTrialTraffic)
-- ReferralCache: 15 new tests (Get, GetAll, Increment, Decrement, Save, Sync, concurrent safety, admin rate limit)
-- Shared format: 3 tests moved from service/bot to utils/format_test.go
+1. 🟡 `internal/database` — improve coverage (77.8%)
+2. 🟡 `cmd/bot` — main is integration (5.4% is acceptable)
+3. 🟡 xui tests use real retry backoff even with mock servers — 45s in non-short mode. Consider mocking clock/timeout for faster execution.
+4. 🔵 e2e tests (`tests/e2e/`) use 30s timeouts — should be excluded from `go test ./...`, run separately before release
 
 ---
 
-**Обновлено:** 2026-04-13
+**Updated:** 2026-05-16
