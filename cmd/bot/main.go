@@ -145,43 +145,13 @@ func main() {
 	logger.Info("Database initialized successfully")
 
 	// Initialize 3x-ui client
-	xuiClient, err := xui.NewClient(cfg.XUIHost, cfg.XUIUsername, cfg.XUIPassword, time.Duration(cfg.XUISessionMaxAgeMinutes)*time.Minute)
+	xuiClient, err := xui.NewClient(cfg.XUIHost, cfg.XUIAPIToken)
 	if err != nil {
 		logger.Fatal("Failed to initialize 3x-ui client", zap.Error(err))
 	}
 	defer func() {
 		if err := xuiClient.Close(); err != nil {
 			logger.Error("Failed to close 3x-ui client", zap.Error(err))
-		}
-	}()
-
-	// Connect to 3x-ui panel in background (non-blocking startup)
-	// This allows the bot to start even if the panel is temporarily unavailable
-	// The circuit breaker will handle reconnection attempts
-	go func() {
-		defer recoverAndReport("XUI login")
-		logger.Info("Connecting to 3x-ui panel (background)")
-		const startupLoginMaxAttempts = 5
-		startupLoginDelay := 5 * time.Second
-		for i := 0; i < startupLoginMaxAttempts; i++ {
-			ctx, cancel := context.WithTimeout(context.Background(), config.XUILoginTimeout)
-			err := xuiClient.Login(ctx)
-			cancel()
-			if err == nil {
-				logger.Info("3x-ui panel connected")
-				return
-			}
-			if i == startupLoginMaxAttempts-1 {
-				logger.Warn("Failed to connect to 3x-ui panel after max attempts, will retry via circuit breaker",
-					zap.Error(err),
-					zap.Int("attempts", startupLoginMaxAttempts))
-				return
-			}
-			logger.Warn("3x-ui login failed, retrying...",
-				zap.Int("attempt", i+1),
-				zap.Int("max_attempts", startupLoginMaxAttempts),
-				zap.Error(err))
-			time.Sleep(startupLoginDelay + time.Duration(rand.Int63n(int64(startupLoginDelay/2)))) //nolint:gosec // G404: math/rand is sufficient for jitter, crypto/rand overhead unnecessary
 		}
 	}()
 

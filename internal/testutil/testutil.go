@@ -417,7 +417,6 @@ func CreateTestSubscription(telegramID int64, username string, status string, ex
 type MockXUIClient struct {
 	mu                      sync.Mutex
 	PingFunc                func(ctx context.Context) error
-	LoginFunc               func(ctx context.Context) error
 	AddClientFunc           func(ctx context.Context, inboundID int, email string, trafficBytes int64, expiryTime time.Time) (*xui.ClientConfig, error)
 	AddClientWithIDFunc     func(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error)
 	UpdateClientFunc        func(ctx context.Context, inboundID int, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, tgID int64, comment string) error
@@ -436,13 +435,6 @@ type MockXUIClient struct {
 func (m *MockXUIClient) Ping(ctx context.Context) error {
 	if m.PingFunc != nil {
 		return m.PingFunc(ctx)
-	}
-	return nil
-}
-
-func (m *MockXUIClient) Login(ctx context.Context) error {
-	if m.LoginFunc != nil {
-		return m.LoginFunc(ctx)
 	}
 	return nil
 }

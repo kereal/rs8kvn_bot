@@ -46,7 +46,7 @@ func NewMockXUIServer(t *testing.T) *MockXUIServer {
 	mux := http.NewServeMux()
 	server := httptest.NewServer(mux)
 
-	client, err := xui.NewClient(server.URL, "admin", "password", 15*time.Minute)
+	client, err := xui.NewClient(server.URL, "test-api-token")
 	if err != nil {
 		t.Fatalf("Failed to create XUI client: %v", err)
 	}
@@ -126,8 +126,7 @@ func NewTestFixture(t *testing.T) *IntegrationTestFixture {
 		XUIHost:          mockXUI.Server.URL,
 		XUIInboundID:     1,
 		XUISubPath:       "sub",
-		XUIUsername:      "admin",
-		XUIPassword:      "password",
+		XUIAPIToken:      "test-api-token",
 		TelegramAdminID:  123456789,
 		TelegramBotToken: "test_token",
 		LogFilePath:      "/dev/null",

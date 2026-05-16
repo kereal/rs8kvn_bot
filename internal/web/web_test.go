@@ -142,11 +142,6 @@ func TestHandleInvite_Success(t *testing.T) {
 		}, nil
 	}
 
-	// Mock: XUI login
-	mockXUI.LoginFunc = func(ctx context.Context) error {
-		return nil
-	}
-
 	// Mock: XUI add client
 	mockXUI.AddClientWithIDFunc = func(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
 		return &xui.ClientConfig{ID: clientID, SubID: subID}, nil
@@ -217,11 +212,6 @@ func TestHandleInvite_XUIError(t *testing.T) {
 	// Mock: create trial request
 	mockDB.CreateTrialRequestFunc = func(ctx context.Context, ip string) error {
 		return nil
-	}
-
-	// Mock: XUI login fails
-	mockXUI.LoginFunc = func(ctx context.Context) error {
-		return fmt.Errorf("unauthorized")
 	}
 
 	req := httptest.NewRequest("GET", "/i/testcode", nil)
@@ -1090,9 +1080,6 @@ func TestHandleInvite_XUIAddClientFails(t *testing.T) {
 	mockDB.CreateTrialRequestFunc = func(ctx context.Context, ip string) error {
 		return nil
 	}
-	mockXUI.LoginFunc = func(ctx context.Context) error {
-		return fmt.Errorf("XUI error")
-	}
 	mockXUI.AddClientWithIDFunc = func(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
 		return nil, fmt.Errorf("XUI add client error")
 	}
@@ -1134,9 +1121,6 @@ func TestHandleInvite_CreateTrialSubscriptionFails(t *testing.T) {
 		return 0, nil
 	}
 	mockDB.CreateTrialRequestFunc = func(ctx context.Context, ip string) error {
-		return nil
-	}
-	mockXUI.LoginFunc = func(ctx context.Context) error {
 		return nil
 	}
 	mockXUI.AddClientWithIDFunc = func(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {

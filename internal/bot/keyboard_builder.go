@@ -108,7 +108,7 @@ func (kb *KeyboardBuilder) WithAdminButtons(keyboard *tgbotapi.InlineKeyboardMar
 func (kb *KeyboardBuilder) DonateText() string {
 	return `☕ *Поддержка проекта*
 
-Любой помощи важна для стабильной работы сервиса.
+Любая помощь важна для стабильной работы сервиса.
 
 😊 Сделайте свой вклад — переведите любую сумму.
 Буду очень благодарен! ❤️
