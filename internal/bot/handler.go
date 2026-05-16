@@ -3,7 +3,6 @@ package bot
 import (
 	"context"
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 
@@ -12,6 +11,7 @@ import (
 	"rs8kvn_bot/internal/logger"
 	"rs8kvn_bot/internal/ratelimiter"
 	"rs8kvn_bot/internal/service"
+	"rs8kvn_bot/internal/utils"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"go.uber.org/zap"
@@ -236,24 +236,11 @@ func (h *Handler) getUsername(user *tgbotapi.User) string {
 	return fmt.Sprintf("user_%d", user.ID)
 }
 
-// isRealUsername checks if the given identifier is a real Telegram username
-// (not a fallback like "user_<id>") that can be used in t.me links and @ mentions.
-func isRealUsername(username string) bool {
-	if username == "" || strings.HasPrefix(username, "user_") {
-		return false
-	}
-	for _, r := range username {
-		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_') {
-			return false
-		}
-	}
-	return true
-}
 
 // formatUserLink returns a Markdown-formatted clickable user link for Telegram.
 // If the username is not a real Telegram username, returns "unknown".
 func formatUserLink(username string) string {
-	if !isRealUsername(username) {
+	if !utils.IsRealUsername(username) {
 		return "unknown"
 	}
 	return fmt.Sprintf("[@%s](https://t.me/%s)", username, username)
@@ -262,7 +249,7 @@ func formatUserLink(username string) string {
 // formatUserDisplay returns a display string suitable for showing a user reference.
 // For real usernames returns "@username", otherwise returns the raw identifier.
 func formatUserDisplay(username string) string {
-	if !isRealUsername(username) {
+	if !utils.IsRealUsername(username) {
 		if username == "" {
 			return "unknown"
 		}
