@@ -186,6 +186,10 @@ func (s *SubscriptionService) DeleteByID(ctx context.Context, id uint) (*databas
 	username := sub.Username
 	subscriptionID := sub.SubscriptionID
 
+	if inboundID == 0 {
+		inboundID = s.cfg.XUIInboundID
+	}
+
 	// Delete from database first — same rationale as Delete():
 	// DB-first avoids orphaned DB records when XUI deletion succeeds
 	// but DB deletion fails.

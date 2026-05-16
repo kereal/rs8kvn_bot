@@ -398,8 +398,8 @@ rm .env
 1. Check logs: `docker logs rs8kvn_bot`
 2. Verify `.env` settings
 3. Test 3x-ui connectivity: `curl $XUI_HOST/panel/api/server/status`
-4. Include bot version from logs (`rs8kvn_bot@v2.3.0`)
+4. Include bot version from logs (`rs8kvn_bot@v3.0.0`)
 
 ---
 
-*This document covers installation up to v2.3.0. For architecture details, see [handover.md](../handover.md).*
+*This document covers installation up to v3.0.0. For architecture details, see [handover.md](../handover.md).*

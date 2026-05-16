@@ -220,8 +220,8 @@ func (c *Config) validate() error {
 		return fmt.Errorf("TELEGRAM_BOT_TOKEN appears to be invalid (expected format: 'number:token')")
 	}
 
-	if c.TelegramAdminID < 0 {
-		return fmt.Errorf("TELEGRAM_ADMIN_ID must be non-negative")
+	if c.TelegramAdminID <= 0 {
+		return fmt.Errorf("TELEGRAM_ADMIN_ID must be positive")
 	}
 
 	// 3x-ui validation
