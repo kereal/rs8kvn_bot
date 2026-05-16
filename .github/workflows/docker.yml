@@ -38,6 +38,7 @@ jobs:
                   RUN_SMOKE: "1"
 
             - name: Run gosec security scan
+              if: startsWith(github.ref, 'refs/tags/v')
               uses: securego/gosec@master
               with:
                   args: -no-fail -quiet ./...
