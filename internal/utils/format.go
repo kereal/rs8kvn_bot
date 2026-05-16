@@ -2,8 +2,23 @@ package utils
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
+
+// IsRealUsername checks if the given identifier is a real Telegram username
+// (not a fallback like "user_<id>") that can be used in t.me links and @ mentions.
+func IsRealUsername(username string) bool {
+	if username == "" || strings.HasPrefix(username, "user_") {
+		return false
+	}
+	for _, r := range username {
+		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_') {
+			return false
+		}
+	}
+	return true
+}
 
 // GenerateProgressBar creates a 10-block emoji progress bar representing
 // traffic usage. Returns empty blocks when limitGB is zero or negative.

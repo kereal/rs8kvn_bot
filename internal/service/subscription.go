@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"rs8kvn_bot/internal/config"
@@ -41,7 +40,7 @@ type CreateResult struct {
 // Uses the Telegram username directly if it's a real username,
 // otherwise falls back to "tgId_{telegramID}" format.
 func XUIEmail(username string, telegramID int64) string {
-	if username != "" && !strings.HasPrefix(username, "user_") {
+	if utils.IsRealUsername(username) {
 		return username
 	}
 	return fmt.Sprintf("tgId_%d", telegramID)
