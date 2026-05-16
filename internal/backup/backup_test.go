@@ -110,6 +110,10 @@ func TestRotateBackups(t *testing.T) {
 					assert.NoError(t, RotateBackups(dbPath, 5))
 					_, err := os.Stat(dbPath + ".backup")
 					assert.True(t, os.IsNotExist(err), "original backup should be renamed")
+
+					// Verify at least one rotated backup file was created
+					matches, _ := filepath.Glob(dbPath + ".backup.*")
+					assert.True(t, len(matches) > 0, "should have at least one rotated backup file")
 				},
 			},
 			{

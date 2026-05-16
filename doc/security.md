@@ -49,7 +49,7 @@ Instead, contact us privately:
 | Telegram bot | User identification via `chat_id`; admin commands check `TELEGRAM_ADMIN_ID` |
 | API endpoint | Bearer token (`API_TOKEN`) with constant-time comparison |
 | Webhook | Bearer secret (`PROXY_MANAGER_WEBHOOK_SECRET`) |
-| 3x-ui panel | Basic auth (username/password) over HTTPS (enforced) |
+| 3x-ui panel | Bearer token (`XUI_API_TOKEN`) over HTTPS (enforced) |
 
 ### 2. Input Validation
 
@@ -170,9 +170,12 @@ Instead, contact us privately:
 ### If XUI Panel Compromised
 
 1. XUI panel is separate system — follow its security procedures
-2. Rotate all panel admin passwords
-3. Check panel logs for unauthorized client modifications
-4. Bot will auto-relogin on next request (session invalidated)
+2. Rotate XUI API token (`XUI_API_TOKEN`) immediately
+3. Generate new token in panel Security settings
+4. Update bot `.env` file with new token
+5. Restart bot to use new token
+6. Check panel logs for unauthorized client modifications
+7. Review panel audit logs for suspicious API calls
 
 ### Data Breach Notification
 
