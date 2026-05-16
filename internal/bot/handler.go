@@ -222,18 +222,13 @@ func (h *Handler) getQRKeyboard() tgbotapi.InlineKeyboardMarkup {
 }
 
 // getUsername extracts a username from a Telegram user.
-// Returns only the real Telegram username (user.UserName) if set,
-// or a fallback "user_<id>" identifier if the user has no username.
+// Returns only the real Telegram username (user.UserName), or empty if not set.
 func (h *Handler) getUsername(user *tgbotapi.User) string {
 	if user == nil {
 		return "unknown"
 	}
 
-	if user.UserName != "" {
-		return user.UserName
-	}
-
-	return fmt.Sprintf("user_%d", user.ID)
+	return user.UserName
 }
 
 
@@ -258,6 +253,15 @@ func formatUserDisplay(username string) string {
 	return "@" + username
 }
 
+// displayUsername formats a username for display in Telegram messages.
+// Returns ", @username" if non-empty, or empty string for missing usernames.
+func displayUsername(username string) string {
+	if username == "" {
+		return ""
+	}
+	return ", @" + username
+}
+
 // getMainMenuContent returns the text and keyboard for the main menu.
 func (h *Handler) getMainMenuContent(username string, hasSubscription bool, chatID int64) (string, tgbotapi.InlineKeyboardMarkup) {
 	var text string
@@ -265,14 +269,14 @@ func (h *Handler) getMainMenuContent(username string, hasSubscription bool, chat
 
 	if hasSubscription {
 		text = fmt.Sprintf(
-			"👋 Привет, %s!\n\nЯ бот для выдачи подписок на прокси VLESS+Reality+Vision.\n\nИспользуйте кнопки ниже для взаимодействия с ботом.",
-			username,
+			"👋 Привет!%s\n\nЯ бот для выдачи подписок на прокси VLESS+Reality+Vision.\n\nИспользуйте кнопки ниже для взаимодействия с ботом.",
+			displayUsername(username),
 		)
 		keyboard = h.getMainMenuKeyboard(true)
 	} else {
 		text = fmt.Sprintf(
-			"👋 Привет, %s!\n\nЯ бот для выдачи подписок на прокси VLESS+Reality+Vision.\n\nНажмите кнопку ниже, чтобы получить подписку",
-			username,
+			"👋 Привет!%s\n\nЯ бот для выдачи подписок на прокси VLESS+Reality+Vision.\n\nНажмите кнопку ниже, чтобы получить подписку",
+			displayUsername(username),
 		)
 		keyboard = tgbotapi.NewInlineKeyboardMarkup(
 			tgbotapi.NewInlineKeyboardRow(

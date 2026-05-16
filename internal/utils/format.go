@@ -2,14 +2,13 @@ package utils
 
 import (
 	"fmt"
-	"strings"
 	"time"
 )
 
 // IsRealUsername checks if the given identifier is a real Telegram username
 // (not a fallback like "user_<id>") that can be used in t.me links and @ mentions.
 func IsRealUsername(username string) bool {
-	if username == "" || strings.HasPrefix(username, "user_") {
+	if username == "" {
 		return false
 	}
 	for _, r := range username {
