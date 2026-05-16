@@ -63,12 +63,9 @@ func (h *Handler) handleAdminLastReg(ctx context.Context, chatID int64, username
 	sb.WriteString("📋 *Последние регистрации*\n\n")
 
 	for _, sub := range subs {
-		username := sub.Username
-		if username == "" {
-			username = "unknown"
-		}
+		username := formatUserLink(sub.Username)
 		dateStr := sub.CreatedAt.Format("02.01.2006 15:04:05")
-		fmt.Fprintf(&sb, "%d │ [@%s](https://t.me/%s) │ %s\n", sub.ID, username, username, dateStr)
+		fmt.Fprintf(&sb, "%d │ %s │ %s\n", sub.ID, username, dateStr)
 	}
 
 	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, sb.String())
@@ -154,10 +151,10 @@ func (h *Handler) HandleDel(ctx context.Context, update tgbotapi.Update) {
 	h.SendMessage(ctx, chatID, fmt.Sprintf(
 		"✅ Подписка успешно удалена!\n\n"+
 			"🆔 ID: %d\n"+
-			"👤 Пользователь: @%s\n"+
+			"👤 Пользователь: %s\n"+
 			"🆔 Telegram ID: %d",
 		id,
-		deleted.Username,
+		formatUserDisplay(deleted.Username),
 		deleted.TelegramID,
 	))
 }
@@ -422,9 +419,8 @@ func (h *Handler) notifyAdmin(ctx context.Context, username string, chatID int64
 	}
 
 	msg := tgbotapi.NewMessage(h.cfg.TelegramAdminID,
-		fmt.Sprintf("🔔 Новая подписка создана!\n\n👤 Пользователь: [@%s](https://t.me/%s)\n🆔 ID: %d\n🔗 Подписка: `%s`\n⏰ Истекает: %s",
-			username,
-			username,
+		fmt.Sprintf("🔔 Новая подписка создана!\n\n👤 Пользователь: %s\n🆔 ID: %d\n🔗 Подписка: `%s`\n⏰ Истекает: %s",
+			formatUserLink(username),
 			chatID,
 			subscriptionURL,
 			expiryTime.Format("02.01.2006 15:04:05"),

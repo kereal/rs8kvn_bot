@@ -91,13 +91,13 @@ func TestGetUsername_EdgeCases(t *testing.T) {
 			expected: "preferred_username",
 		},
 		{
-			name: "firstname fallback when no username",
+			name: "no username fallback to user_id",
 			user: &tgbotapi.User{
 				ID:        12345,
 				UserName:  "",
 				FirstName: "John",
 			},
-			expected: "John",
+			expected: "user_12345",
 		},
 		{
 			name: "very long username",
@@ -136,13 +136,13 @@ func TestGetUsername_EdgeCases(t *testing.T) {
 			expected: "user\x00name",
 		},
 		{
-			name: "newline in firstname",
+			name: "newline in firstname ignored",
 			user: &tgbotapi.User{
 				ID:        12345,
 				UserName:  "",
 				FirstName: "First\nName",
 			},
-			expected: "First\nName",
+			expected: "user_12345",
 		},
 		{
 			name: "negative user ID",

@@ -3,6 +3,7 @@ package bot
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -221,6 +222,8 @@ func (h *Handler) getQRKeyboard() tgbotapi.InlineKeyboardMarkup {
 }
 
 // getUsername extracts a username from a Telegram user.
+// Returns only the real Telegram username (user.UserName) if set,
+// or a fallback "user_<id>" identifier if the user has no username.
 func (h *Handler) getUsername(user *tgbotapi.User) string {
 	if user == nil {
 		return "unknown"
@@ -230,11 +233,42 @@ func (h *Handler) getUsername(user *tgbotapi.User) string {
 		return user.UserName
 	}
 
-	if user.FirstName != "" {
-		return user.FirstName
-	}
-
 	return fmt.Sprintf("user_%d", user.ID)
+}
+
+// isRealUsername checks if the given identifier is a real Telegram username
+// (not a fallback like "user_<id>") that can be used in t.me links and @ mentions.
+func isRealUsername(username string) bool {
+	if username == "" || strings.HasPrefix(username, "user_") {
+		return false
+	}
+	for _, r := range username {
+		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_') {
+			return false
+		}
+	}
+	return true
+}
+
+// formatUserLink returns a Markdown-formatted clickable user link for Telegram.
+// If the username is not a real Telegram username, returns "unknown".
+func formatUserLink(username string) string {
+	if !isRealUsername(username) {
+		return "unknown"
+	}
+	return fmt.Sprintf("[@%s](https://t.me/%s)", username, username)
+}
+
+// formatUserDisplay returns a display string suitable for showing a user reference.
+// For real usernames returns "@username", otherwise returns the raw identifier.
+func formatUserDisplay(username string) string {
+	if !isRealUsername(username) {
+		if username == "" {
+			return "unknown"
+		}
+		return username
+	}
+	return "@" + username
 }
 
 // getMainMenuContent returns the text and keyboard for the main menu.
