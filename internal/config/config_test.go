@@ -240,7 +240,7 @@ func TestLoad_InvalidHealthCheckPort_Zero(t *testing.T) {
 		os.Unsetenv("XUI_HOST")
 	os.Unsetenv("XUI_API_TOKEN")
 	os.Unsetenv("XUI_INBOUND_ID")
-		os.Unsetenv("HEARTBEAT_PORT")
+		os.Unsetenv("HEALTH_CHECK_PORT")
 		os.Unsetenv("LOG_LEVEL")
 	}()
 
