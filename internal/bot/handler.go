@@ -29,7 +29,7 @@ type pendingInvite struct {
 	expiresAt time.Time
 }
 
-// PendingInviteTTL — время жизни pending invite в кэше
+// PendingInviteTTL -- время жизни pending invite в кэше
 const PendingInviteTTL = 60 * time.Minute
 
 type Handler struct {
@@ -233,10 +233,15 @@ func (h *Handler) getUsername(user *tgbotapi.User) string {
 
 
 // formatUserLink returns a Markdown-formatted clickable user link for Telegram.
-// If the username is a real Telegram username, links to https://t.me/username.
-// If not, falls back to the tg://user?id=TelegramID deep link so "unknown"
-// is always clickable and leads to the user profile.
+// For alphabetic usernames, links to https://t.me/username.
+// For purely numeric usernames (e.g. "11"), uses tg://user?id=ID deep link,
+// because Telegram does not resolve t.me/123 as a profile.
+// For empty/unsupported usernames, falls back to tg://user?id=TelegramID deep link
+// with "unknown" display text.
 func formatUserLink(username string, telegramID int64) string {
+	if utils.IsNumericUsername(username) && telegramID != 0 {
+		return fmt.Sprintf("[%s](tg://user?id=%d)", username, telegramID)
+	}
 	if utils.IsRealUsername(username) {
 		return fmt.Sprintf("[@%s](https://t.me/%s)", username, username)
 	}
