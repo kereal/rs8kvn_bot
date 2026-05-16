@@ -66,6 +66,17 @@ func NewMockXUIServer(t *testing.T) *MockXUIServer {
 	})
 
 	mux.HandleFunc("/panel/api/inbounds/addClient", func(w http.ResponseWriter, r *http.Request) {
+		// Check Authorization header
+		if r.Header.Get("Authorization") != "Bearer test-api-token" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(map[string]any{
+				"success": false,
+				"msg":     "unauthorized",
+			})
+			return
+		}
+
 		if mock.AddClientErr != nil {
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]any{

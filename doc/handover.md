@@ -2,7 +2,7 @@
 
 **Repo:** https://github.com/kereal/rs8kvn_bot
 **Module:** `rs8kvn_bot` (Go 1.25+)
-**Version:** v2.2.2
+**Version:** v3.0.0
 **Branch:** `dev` (GitFlow: `main` = production, `dev` = integration)
 
 ---
@@ -201,7 +201,7 @@ Write response:
 | Testing | `stretchr/testify` | v1.11.1 |
 | CI/CD | GitHub Actions → golangci-lint, gosec, test, Docker → GHCR | — |
 
-## Current State (v2.2.2)
+## Current State (v3.0.0)
 
 ### Working Features
 

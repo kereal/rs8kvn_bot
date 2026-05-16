@@ -757,7 +757,8 @@ func TestGetRequiredFlow_Fallback(t *testing.T) {
 	}
 
 	// When getInbound fails, should return default flow
-	client, err := NewClient("http://localhost:2053", testAPIToken)
+	// Use guaranteed-unresolvable host to trigger error path
+	client, err := NewClient("http://nonexistent.invalid:2053", testAPIToken)
 	require.NoError(t, err)
 	defer client.Close()
 

@@ -1192,7 +1192,10 @@ func FuzzLoad_InvalidEnvValues(f *testing.F) {
 			os.Setenv(k, v)
 		}
 		defer func() {
-			for _, key := range []string{"TELEGRAM_ADMIN_ID", "XUI_INBOUND_ID", "TRAFFIC_LIMIT_GB", "HEARTBEAT_INTERVAL", "TRIAL_DURATION_HOURS", "TRIAL_RATE_LIMIT", "HEALTH_CHECK_PORT", "TELEGRAM_BOT_TOKEN", "TELEGRAM_ADMIN_ID", "XUI_HOST", "XUI_INBOUND_ID", "LOG_LEVEL"} {
+			for k := range baseEnvs {
+				os.Unsetenv(k)
+			}
+			for _, key := range []string{"TRAFFIC_LIMIT_GB", "HEARTBEAT_INTERVAL", "TRIAL_DURATION_HOURS", "TRIAL_RATE_LIMIT", "HEALTH_CHECK_PORT"} {
 				os.Unsetenv(key)
 			}
 		}()

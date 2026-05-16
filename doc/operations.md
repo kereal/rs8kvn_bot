@@ -394,7 +394,7 @@ docker restart rs8kvn_bot
 **Debug steps:**
 ```bash
 # Check XUI directly
-curl -u admin:pass http://localhost:2053/panel/api/inbounds/list
+curl -H "Authorization: Bearer $XUI_API_TOKEN" "$XUI_HOST/panel/api/server/status"
 
 # Check DB state
 sqlite3 ./data/tgvpn.db "SELECT * FROM subscriptions WHERE telegram_id = <user_id> ORDER BY created_at DESC LIMIT 5;"
@@ -499,21 +499,18 @@ sqlite3 ./data/tgvpn.db "PRAGMA journal_mode=WAL;"
 
 ---
 
-### 5.8 XUI circuit breaker open
+### 5.8 XUI circuit breaker (removed)
 
-**Symptom:** XUI calls failing repeatedly, then circuit breaker opens (30s timeout).
+**Note:** The circuit breaker has been removed in the current version. The system now uses `RetryWithBackoff` with exponential backoff and jitter for XUI API calls.
 
-**Log:** `"circuit breaker opened"`
-
-**Cause:** 5 consecutive failures (HTTP non-2xx, network error).
-
-**Fix:**
-1. Check 3x-ui panel is up: `curl $XUI_HOST/panel/api/server/status`
-2. Verify credentials in `.env`
+**If XUI calls are failing:**
+1. Check 3x-ui panel is up: `curl -H "Authorization: Bearer $XUI_API_TOKEN" "$XUI_HOST/panel/api/server/status"`
+2. Verify `XUI_API_TOKEN` in `.env`
 3. Check panel logs for errors
-4. Circuit breaker auto-recovers after 30s → just wait
+4. Review retry logs in `data/bot.log` for transient vs permanent errors
+5. DNS errors will fast-fail without retries
 
-**Manual reset:** Restart bot (breaker state in memory).
+**For persistent issues:** Restart bot to clear any cached state.
 
 ---
 

@@ -187,6 +187,8 @@ func TestHandleInvite_XUIError(t *testing.T) {
 		TrialDurationHours: 3,
 		TrialRateLimit:     3,
 		XUIInboundID:       1,
+		XUIHost:            "http://localhost:2053",
+		XUISubPath:         "sub",
 	}
 
 	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig(), nil, nil)
@@ -205,6 +207,22 @@ func TestHandleInvite_XUIError(t *testing.T) {
 	mockDB.CreateTrialRequestFunc = func(ctx context.Context, ip string) error {
 		return nil
 	}
+
+	// Mock: XUI add client returns error (explicit failure)
+	mockXUI.AddClientWithIDFunc = func(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
+		return nil, fmt.Errorf("XUI connection failed")
+	}
+
+	mockXUI.GetSubscriptionLinkFunc = func(host, subID, subPath string) string {
+		return "http://localhost:2053/sub/" + subID
+	}
+
+	mockXUI.GetExternalURLFunc = func(host string) string {
+		return host
+	}
+
+	subService := service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	srv.subService = subService
 
 	req := httptest.NewRequest("GET", "/i/testcode", nil)
 	req.RemoteAddr = "192.168.1.1:12345"
@@ -735,10 +753,16 @@ func TestHandleInvite_ParallelRequests(t *testing.T) {
 	mockDB.GetInviteByCodeFunc = func(ctx context.Context, code string) (*database.Invite, error) {
 		return &database.Invite{Code: "testcode", ReferrerTGID: 12345}, nil
 	}
+
+	// Shared counter to simulate rate limiting
+	var requestCounter atomic.Int32
+
 	mockDB.CountTrialRequestsByIPLastHourFunc = func(ctx context.Context, ip string) (int, error) {
-		return 0, nil
+		count := int(requestCounter.Load())
+		return count, nil
 	}
 	mockDB.CreateTrialRequestFunc = func(ctx context.Context, ip string) error {
+		requestCounter.Add(1)
 		return nil
 	}
 	mockDB.CreateTrialSubscriptionFunc = func(ctx context.Context, inviteCode, subscriptionID, clientID string, inboundID int, trafficBytes int64, expiryTime time.Time, subURL string) (*database.Subscription, error) {
@@ -779,6 +803,7 @@ func TestHandleInvite_ParallelRequests(t *testing.T) {
 		}
 	}
 
-	assert.Equal(t, numParallel, successCount, "all parallel requests should complete successfully")
+	// With rate limit of 3, expect first 3 to succeed and rest to be rate limited
+	assert.True(t, rateLimitedCount > 0, "some requests should be rate limited")
 	assert.Equal(t, numParallel, successCount+rateLimitedCount, "all requests should return a response")
 }

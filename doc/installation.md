@@ -17,7 +17,8 @@ Send a message to [@userinfobot](https://t.me/userinfobot) on Telegram to get yo
 2. Note the **inbound ID** (shown in the inbounds list, usually `1`)
 3. Make sure the panel API is accessible from the bot host:
    ```bash
-   curl -u admin:password http://your-panel-ip:2053/panel/api/server/status
+   export XUI_API_TOKEN=your_panel_api_token
+   curl -H "Authorization: Bearer $XUI_API_TOKEN" http://your-panel-ip:2053/panel/api/server/status
    ```
    Should return JSON with `success: true`.
 

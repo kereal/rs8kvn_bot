@@ -229,7 +229,7 @@ func (c *Config) validate() error {
 		return err
 	}
 
-	if c.XUIAPIToken == "" {
+	if strings.TrimSpace(c.XUIAPIToken) == "" {
 		return fmt.Errorf("XUI_API_TOKEN is required")
 	}
 
