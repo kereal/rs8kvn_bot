@@ -18,12 +18,10 @@ type Config struct {
 	TelegramAdminID  int64
 
 	// 3x-ui panel configuration
-	XUIHost                 string
-	XUIUsername             string
-	XUIPassword             string
-	XUIInboundID            int
-	XUISubPath              string
-	XUISessionMaxAgeMinutes int
+	XUIHost      string
+	XUIAPIToken  string
+	XUIInboundID int
+	XUISubPath   string
 
 	// Database configuration
 	DatabasePath string
@@ -73,12 +71,10 @@ type Config struct {
 type configFlags struct {
 	telegramBotToken          *flag.StringValue
 	telegramAdminID           *flag.Int64Value
-	xuiHost                   *flag.StringValue
-	xuiUsername               *flag.StringValue
-	xuiPassword               *flag.StringValue
-	xuiInboundID              *flag.IntValue
-	xuiSubPath                *flag.StringValue
-	xuiSessionMaxAgeMinutes   *flag.IntValue
+	xuiHost       *flag.StringValue
+	xuiAPIToken   *flag.StringValue
+	xuiInboundID  *flag.IntValue
+	xuiSubPath    *flag.StringValue
 	databasePath              *flag.StringValue
 	logFilePath               *flag.StringValue
 	logLevel                  *flag.StringValue
@@ -109,12 +105,10 @@ func registerFlags() (*flag.Registry, *configFlags) {
 	f := &configFlags{
 		telegramBotToken:          flag.NewString(""),
 		telegramAdminID:           flag.NewInt64(0),
-		xuiHost:                   flag.NewString("http://localhost:2053"),
-		xuiUsername:               flag.NewString(""),
-		xuiPassword:               flag.NewString(""),
-		xuiInboundID:              flag.NewInt(1),
-		xuiSubPath:                flag.NewString(DefaultXUISubPath),
-		xuiSessionMaxAgeMinutes:   flag.NewInt(DefaultXUISessionMaxAgeMinutes),
+		xuiHost:      flag.NewString("http://localhost:2053"),
+		xuiAPIToken:  flag.NewString(""),
+		xuiInboundID: flag.NewInt(1),
+		xuiSubPath:   flag.NewString(DefaultXUISubPath),
 		databasePath:              flag.NewString(DefaultDatabasePath),
 		logFilePath:               flag.NewString(DefaultLogFilePath),
 		logLevel:                  flag.NewString(DefaultLogLevel),
@@ -139,11 +133,9 @@ func registerFlags() (*flag.Registry, *configFlags) {
 	r.Register("TELEGRAM_BOT_TOKEN", f.telegramBotToken)
 	r.Register("TELEGRAM_ADMIN_ID", f.telegramAdminID)
 	r.Register("XUI_HOST", f.xuiHost)
-	r.Register("XUI_USERNAME", f.xuiUsername)
-	r.Register("XUI_PASSWORD", f.xuiPassword)
+	r.Register("XUI_API_TOKEN", f.xuiAPIToken)
 	r.Register("XUI_INBOUND_ID", f.xuiInboundID)
 	r.Register("XUI_SUB_PATH", f.xuiSubPath)
-	r.Register("XUI_SESSION_MAX_AGE_MINUTES", f.xuiSessionMaxAgeMinutes)
 	r.Register("DATABASE_PATH", f.databasePath)
 	r.Register("LOG_FILE_PATH", f.logFilePath)
 	r.Register("LOG_LEVEL", f.logLevel)
@@ -185,12 +177,10 @@ func Load() (*Config, error) {
 	cfg := &Config{
 		TelegramBotToken:          f.telegramBotToken.Get(),
 		TelegramAdminID:           f.telegramAdminID.Get(),
-		XUIHost:                   f.xuiHost.Get(),
-		XUIUsername:               f.xuiUsername.Get(),
-		XUIPassword:               f.xuiPassword.Get(),
-		XUIInboundID:              f.xuiInboundID.Get(),
-		XUISubPath:                f.xuiSubPath.Get(),
-		XUISessionMaxAgeMinutes:   f.xuiSessionMaxAgeMinutes.Get(),
+		XUIHost:      f.xuiHost.Get(),
+		XUIAPIToken:  f.xuiAPIToken.Get(),
+		XUIInboundID: f.xuiInboundID.Get(),
+		XUISubPath:   f.xuiSubPath.Get(),
 		DatabasePath:              f.databasePath.Get(),
 		LogFilePath:               f.logFilePath.Get(),
 		LogLevel:                  f.logLevel.Get(),
@@ -239,12 +229,8 @@ func (c *Config) validate() error {
 		return err
 	}
 
-	if c.XUIUsername == "" {
-		return fmt.Errorf("XUI_USERNAME is required")
-	}
-
-	if c.XUIPassword == "" {
-		return fmt.Errorf("XUI_PASSWORD is required")
+	if c.XUIAPIToken == "" {
+		return fmt.Errorf("XUI_API_TOKEN is required")
 	}
 
 	if c.XUIInboundID < MinInboundID {
@@ -253,10 +239,6 @@ func (c *Config) validate() error {
 
 	if c.XUISubPath == "" {
 		return fmt.Errorf("XUI_SUB_PATH cannot be empty")
-	}
-
-	if c.XUISessionMaxAgeMinutes <= 0 {
-		return fmt.Errorf("XUI_SESSION_MAX_AGE_MINUTES must be positive")
 	}
 
 	// Проверка на path traversal (защита от ../../../etc/passwd)
@@ -354,11 +336,9 @@ func (c *Config) String() string {
 		"TelegramBotToken=***, "+
 		"TelegramAdminID=%d, "+
 		"XUIHost=%s, "+
-		"XUIUsername=%s, "+
-		"XUIPassword=***, "+
+		"XUIAPIToken=***, "+
 		"XUIInboundID=%d, "+
 		"XUISubPath=%s, "+
-		"XUISessionMaxAgeMinutes=%d, "+
 		"DatabasePath=%s, "+
 		"LogFilePath=%s, "+
 		"LogLevel=%s, "+
@@ -371,10 +351,8 @@ func (c *Config) String() string {
 		"}",
 		c.TelegramAdminID,
 		c.XUIHost,
-		c.XUIUsername,
 		c.XUIInboundID,
 		c.XUISubPath,
-		c.XUISessionMaxAgeMinutes,
 		c.DatabasePath,
 		c.LogFilePath,
 		c.LogLevel,

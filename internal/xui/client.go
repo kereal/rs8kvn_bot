@@ -10,22 +10,16 @@ import (
 	"math/rand"
 	"net"
 	"net/http"
-	"net/http/cookiejar"
 	"net/url"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
-	"golang.org/x/sync/singleflight"
 	"rs8kvn_bot/internal/config"
 	"rs8kvn_bot/internal/logger"
 	"rs8kvn_bot/internal/utils"
 )
 
-// marshalJSON marshals data to JSON and returns a reader.
-// The returned reader must be consumed before calling this function again.
 func marshalJSON(v interface{}) (*bytes.Reader, error) {
 	body, err := json.Marshal(v)
 	if err != nil {
@@ -34,8 +28,6 @@ func marshalJSON(v interface{}) (*bytes.Reader, error) {
 	return bytes.NewReader(body), nil
 }
 
-// closeResponseBody closes the response body and logs any error.
-// This prevents resource leaks while still logging potential issues.
 func closeResponseBody(resp *http.Response) {
 	if resp == nil || resp.Body == nil {
 		return
@@ -47,33 +39,19 @@ func closeResponseBody(resp *http.Response) {
 	}
 }
 
-// Client manages communication with a 3x-ui panel.
-// It handles authentication, session management, and API requests.
 type Client struct {
-	host            string
-	username        string
-	password        string
-	httpClient      *http.Client
-	transport       *http.Transport
-	mu              sync.RWMutex
-	lastLogin       time.Time
-	sessionValidity time.Duration
-	breaker         *CircuitBreaker
-	loginGroup      singleflight.Group // Deduplicates concurrent login attempts
-
-	// Observability counters
-	loginCount       int64
-	sessionFailCount int64
+	host       string
+	apiToken   string
+	httpClient *http.Client
+	transport  *http.Transport
 }
 
-// APIResponse represents a generic response from the 3x-ui API.
 type APIResponse struct {
 	Success bool            `json:"success"`
 	Msg     string          `json:"msg"`
 	Obj     json.RawMessage `json:"obj,omitempty"`
 }
 
-// ClientConfig represents a client configuration in 3x-ui.
 type ClientConfig struct {
 	ID         string `json:"id"`
 	Email      string `json:"email"`
@@ -87,7 +65,6 @@ type ClientConfig struct {
 	Reset      int    `json:"reset,omitempty"`
 }
 
-// ClientTraffic represents traffic statistics for a client in 3x-ui.
 type ClientTraffic struct {
 	ID         int    `json:"id"`
 	InboundID  int    `json:"inboundId"`
@@ -104,7 +81,6 @@ type ClientTraffic struct {
 	LastOnline int64  `json:"lastOnline"`
 }
 
-// Inbound represents an inbound configuration in 3x-ui.
 type Inbound struct {
 	ID             int    `json:"id"`
 	Up             int    `json:"up"`
@@ -122,13 +98,10 @@ type Inbound struct {
 	Sniffing      string `json:"sniffing"`
 }
 
-// GetTransport returns the transport type from streamSettings.
-// Returns empty string if not available or on error.
 func (in *Inbound) GetTransport() string {
 	if in.StreamSettings == "" {
 		return ""
 	}
-	// 3x-ui returns JSON with literal \n characters - need to unescape them
 	cleaned := strings.ReplaceAll(in.StreamSettings, "\\n", "\n")
 	var settings struct {
 		Network string `json:"network"`
@@ -139,9 +112,6 @@ func (in *Inbound) GetTransport() string {
 	return settings.Network
 }
 
-// GetRequiredFlow returns the required flow based on the transport type.
-// - XHTTP, H2, WS, GRPC: empty flow (no flow needed)
-// - TCP (with TLS/Reality): xtls-rprx-vision
 func (in *Inbound) GetRequiredFlow() string {
 	transport := in.GetTransport()
 	switch transport {
@@ -152,14 +122,7 @@ func (in *Inbound) GetRequiredFlow() string {
 	}
 }
 
-// NewClient creates a new 3x-ui API client.
-// sessionMaxAge specifies how long the panel session remains valid (must match panel settings).
-func NewClient(host, username, password string, sessionMaxAge time.Duration) (*Client, error) {
-	jar, err := cookiejar.New(nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create cookie jar: %w", err)
-	}
-
+func NewClient(host, apiToken string) (*Client, error) {
 	transport := &http.Transport{
 		MaxIdleConns:        config.MaxIdleConns,
 		MaxIdleConnsPerHost: config.MaxIdleConns,
@@ -169,278 +132,61 @@ func NewClient(host, username, password string, sessionMaxAge time.Duration) (*C
 	}
 
 	return &Client{
-		host:            strings.TrimSuffix(host, "/"),
-		username:        username,
-		password:        password,
-		sessionValidity: sessionMaxAge,
+		host:     strings.TrimRight(host, "/"),
+		apiToken: apiToken,
 		httpClient: &http.Client{
 			Timeout:   config.DefaultHTTPTimeout,
-			Jar:       jar,
 			Transport: transport,
 		},
 		transport: transport,
-		breaker:   NewCircuitBreaker(config.CircuitBreakerMaxFailures, config.CircuitBreakerTimeout),
 	}, nil
 }
 
-// Login authenticates with the 3x-ui panel.
-func (c *Client) Login(ctx context.Context) error {
-	return c.ensureLoggedIn(ctx, true)
-}
-
-// Ping checks if the 3x-ui panel is reachable by verifying the session with a real request.
 func (c *Client) Ping(ctx context.Context) error {
-	c.mu.RLock()
-	hasRecentLogin := time.Since(c.lastLogin) < c.sessionValidity
-	c.mu.RUnlock()
-
-	if !hasRecentLogin {
-		return c.ensureLoggedIn(ctx, false)
-	}
-
-	ctx, cancel := context.WithTimeout(ctx, config.XUISessionVerifyTimeout)
-	defer cancel()
-	if !c.verifySession(ctx) {
-		return c.ensureLoggedIn(ctx, false)
-	}
-	return nil
-}
-
-// ensureLoggedIn checks if the session is valid and re-authenticates if necessary.
-// If force is true, it will always re-authenticate.
-func (c *Client) ensureLoggedIn(ctx context.Context, force bool) error {
-	if err := c.breaker.Execute(ctx, func() error {
-		return c.doEnsureLoggedIn(ctx, force)
-	}); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (c *Client) doEnsureLoggedIn(ctx context.Context, force bool) error {
-	// Fast path: check if we have a valid session without locking
-	c.mu.RLock()
-	validSession := !force && time.Since(c.lastLogin) < c.sessionValidity
-	c.mu.RUnlock()
-
-	if validSession {
-		return nil
-	}
-
-	// Slow path: need to re-authenticate
-	// Double-check with write lock, then release before entering singleflight
-	// to avoid blocking all other API calls during retry backoff.
-	c.mu.Lock()
-	if !force && time.Since(c.lastLogin) < c.sessionValidity {
-		c.mu.Unlock()
-		return nil
-	}
-	c.mu.Unlock()
-
-	// Use singleflight to deduplicate concurrent login attempts.
-	// Mutex is NOT held here — only lastLogin updates are protected.
-	_, err, _ := c.loginGroup.Do("login", func() (interface{}, error) {
-		// Try to verify existing session first before forcing re-login
-		verifyCtx, verifyCancel := context.WithTimeout(ctx, config.XUISessionVerifyTimeout)
-		defer verifyCancel()
-
-		if !force && c.verifySession(verifyCtx) {
-			c.mu.Lock()
-			c.lastLogin = time.Now()
-			c.mu.Unlock()
-			logger.Debug("XUI session verified successfully, no re-login needed")
-			return nil, nil
-		}
-
-		if err := RetryWithBackoff(ctx, config.XUIMaxRetries, config.XUIInitialRetryDelay, func() error {
-			return c.doLogin(ctx)
-		}); err != nil {
-			return nil, err
-		}
-
-		return nil, nil
-	})
+	statusURL := fmt.Sprintf("%s/panel/api/server/status", c.host)
+	_, err := c.doHTTPRequest(ctx, http.MethodGet, statusURL, nil)
 	return err
 }
 
-// verifySession checks if the current session is still valid by making a real API request.
-// Returns true if the session is valid, false otherwise.
-func (c *Client) verifySession(ctx context.Context) bool {
-	statusURL := fmt.Sprintf("%s/panel/api/server/status", c.host)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, statusURL, nil)
-	if err != nil {
-		return false
-	}
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		atomic.AddInt64(&c.sessionFailCount, 1)
-		return false
-	}
-	defer closeResponseBody(resp)
-
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, config.MaxResponseSize))
-	if err != nil {
-		atomic.AddInt64(&c.sessionFailCount, 1)
-		return false
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		logger.Debug("XUI session verification failed",
-			zap.Int("status", resp.StatusCode),
-			zap.String("body", truncateString(string(respBody), 100)))
-		atomic.AddInt64(&c.sessionFailCount, 1)
-		return false
-	}
-
-	var apiResp APIResponse
-	if err := json.Unmarshal(respBody, &apiResp); err != nil {
-		atomic.AddInt64(&c.sessionFailCount, 1)
-		return false
-	}
-
-	return apiResp.Success
-}
-
-// doLogin performs the actual login request.
-func (c *Client) doLogin(ctx context.Context) error {
-	// Clear stale connections before re-authentication
-	c.transport.CloseIdleConnections()
-
-	loginURL := fmt.Sprintf("%s/login", c.host)
-
-	reader, err := marshalJSON(map[string]string{
-		"username": c.username,
-		"password": c.password,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to marshal login request: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, loginURL, reader)
-	if err != nil {
-		return fmt.Errorf("failed to create login request: %w", err)
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("login request failed: %w", err)
-	}
-	defer closeResponseBody(resp)
-
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, config.MaxResponseSize))
-	if err != nil {
-		return fmt.Errorf("failed to read login response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("login returned HTTP %d: %s", resp.StatusCode, truncateString(string(respBody), 200))
-	}
-
-	var apiResp APIResponse
-	if err := json.Unmarshal(respBody, &apiResp); err != nil {
-		return fmt.Errorf("failed to parse login response: %w", err)
-	}
-
-	if !apiResp.Success {
-		return fmt.Errorf("login failed: %s", apiResp.Msg)
-	}
-
-	c.mu.Lock()
-	c.lastLogin = time.Now()
-	c.mu.Unlock()
-	atomic.AddInt64(&c.loginCount, 1)
-	logger.Info("3x-ui login successful",
-		zap.String("session_valid_until", c.lastLogin.Add(c.sessionValidity).Format("2006-01-02 15:04:05")))
-
-	return nil
-}
-
-// doHTTPRequest creates and executes an HTTP request with standard headers and response handling.
-// It is safe for use with doRequestWithAuthRetry — the request is recreated on each retry,
-// avoiding issues with consumed request bodies (e.g., bytes.Reader at EOF).
 func (c *Client) doHTTPRequest(ctx context.Context, method, url string, bodyFn func() (io.Reader, error)) ([]byte, error) {
-	return c.doRequestWithAuthRetry(ctx, func() (int, []byte, error) {
-		var body io.Reader
-		if bodyFn != nil {
-			var err error
-			body, err = bodyFn()
-			if err != nil {
-				return 0, nil, err
-			}
-		}
-
-		req, err := http.NewRequestWithContext(ctx, method, url, body)
+	var body io.Reader
+	if bodyFn != nil {
+		var err error
+		body, err = bodyFn()
 		if err != nil {
-			return 0, nil, fmt.Errorf("failed to create request: %w", err)
+			return nil, err
 		}
-		req.Header.Set("Accept", "application/json")
-		if body != nil {
-			req.Header.Set("Content-Type", "application/json")
-		}
-
-		resp, err := c.httpClient.Do(req)
-		if err != nil {
-			return 0, nil, fmt.Errorf("request failed: %w", err)
-		}
-		defer closeResponseBody(resp)
-
-		respBody, err := io.ReadAll(io.LimitReader(resp.Body, config.MaxResponseSize))
-		if err != nil {
-			return 0, nil, fmt.Errorf("failed to read response: %w", err)
-		}
-
-		if resp.StatusCode != http.StatusOK {
-			return resp.StatusCode, respBody, fmt.Errorf("server returned HTTP %d: %s", resp.StatusCode, truncateString(string(respBody), 200))
-		}
-
-		return resp.StatusCode, respBody, nil
-	})
-}
-
-// doRequestWithAuthRetry executes an HTTP request and automatically handles auth failures.
-// If the response status code is 401, it performs a re-login (through circuit breaker)
-// and retries the request once.
-// Note: 302/307 redirects are NOT checked here because Go's http.Client follows them
-// automatically — by the time we see the response, it's already the final destination.
-// The response body is always read and closed before returning.
-func (c *Client) doRequestWithAuthRetry(ctx context.Context, fn func() (statusCode int, body []byte, err error)) ([]byte, error) {
-	statusCode, body, err := fn()
-
-	// Check auth status code first — the closure returns both statusCode and error
-	// for non-200 responses, so we must check statusCode before err to catch auth failures.
-	if statusCode == http.StatusUnauthorized {
-		logger.Info("XUI auto-relogin triggered",
-			zap.Int("http_status", statusCode))
-
-		// Clear stale connections
-		c.transport.CloseIdleConnections()
-
-		// Re-login through circuit breaker with proper mutex handling.
-		// ensureLoggedIn manages its own locking and goes through the breaker.
-		if loginErr := c.ensureLoggedIn(ctx, true); loginErr != nil {
-			return body, fmt.Errorf("auto-relogin failed: %w", loginErr)
-		}
-
-		logger.Debug("XUI auto-relogin succeeded, request retried")
-
-		// Retry the request once
-		_, body, err = fn()
-		return body, err
 	}
 
+	req, err := http.NewRequestWithContext(ctx, method, url, body)
 	if err != nil {
-		return body, err
+		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	return body, nil
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Authorization", "Bearer "+c.apiToken)
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer closeResponseBody(resp)
+
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, config.MaxResponseSize))
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return respBody, fmt.Errorf("server returned HTTP %d: %s", resp.StatusCode, truncateString(string(respBody), 200))
+	}
+
+	return respBody, nil
 }
 
-// AddClient creates a new client in the 3x-ui panel with auto-generated IDs.
 func (c *Client) AddClient(ctx context.Context, inboundID int, email string, trafficBytes int64, expiryTime time.Time) (*ClientConfig, error) {
 	clientID, err := utils.GenerateUUID()
 	if err != nil {
@@ -454,23 +200,7 @@ func (c *Client) AddClient(ctx context.Context, inboundID int, email string, tra
 	return c.AddClientWithID(ctx, inboundID, email, clientID, subID, trafficBytes, expiryTime, -1)
 }
 
-// AddClientWithID creates a new client in the 3x-ui panel with specified IDs.
-// This is useful for atomic operations where the IDs are generated before the API call.
-//
-// Parameters:
-//   - inboundID: The inbound ID in 3x-ui panel
-//   - email: User identifier (usually Telegram username)
-//   - clientID: UUID for the client
-//   - subID: Subscription ID for URL generation
-//   - trafficBytes: Traffic limit in bytes
-//   - expiryTime: Subscription expiry time
-//   - resetDays: Day of month for traffic reset (0 = no auto-renewal)
 func (c *Client) AddClientWithID(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*ClientConfig, error) {
-	if err := c.ensureLoggedIn(ctx, false); err != nil {
-		return nil, fmt.Errorf("authentication required: %w", err)
-	}
-
-	// Validate inputs
 	if inboundID < 1 {
 		return nil, fmt.Errorf("invalid inbound ID: %d", inboundID)
 	}
@@ -485,7 +215,6 @@ func (c *Client) AddClientWithID(ctx context.Context, inboundID int, email, clie
 		resetDays = config.SubscriptionResetDay
 	}
 
-	// Determine required flow based on inbound transport
 	flow, flowErr := c.getRequiredFlow(ctx, inboundID)
 	if flowErr != nil {
 		return nil, fmt.Errorf("failed to determine flow: %w", flowErr)
@@ -500,7 +229,6 @@ func (c *Client) AddClientWithID(ctx context.Context, inboundID int, email, clie
 	return result, errRetry
 }
 
-// doAddClientWithID performs the actual add client request.
 func (c *Client) doAddClientWithID(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int, flow string) (*ClientConfig, error) {
 	clientSettings := map[string]interface{}{
 		"clients": []map[string]interface{}{
@@ -566,18 +294,12 @@ func (c *Client) doAddClientWithID(ctx context.Context, inboundID int, email, cl
 	}, nil
 }
 
-// DeleteClient removes a client from the 3x-ui panel.
 func (c *Client) DeleteClient(ctx context.Context, inboundID int, clientID string) error {
-	if err := c.ensureLoggedIn(ctx, false); err != nil {
-		return fmt.Errorf("authentication required: %w", err)
-	}
-
 	return RetryWithBackoff(ctx, config.XUIMaxRetries, config.XUIInitialRetryDelay, func() error {
 		return c.doDeleteClient(ctx, inboundID, clientID)
 	})
 }
 
-// doDeleteClient performs the actual delete client request.
 func (c *Client) doDeleteClient(ctx context.Context, inboundID int, clientID string) error {
 	deleteURL := fmt.Sprintf("%s/panel/api/inbounds/%d/delClient/%s", c.host, inboundID, clientID)
 
@@ -601,17 +323,11 @@ func (c *Client) doDeleteClient(ctx context.Context, inboundID int, clientID str
 	return nil
 }
 
-// UpdateClient updates an existing client in the 3x-ui panel.
 func (c *Client) UpdateClient(ctx context.Context, inboundID int, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, tgID int64, comment string) error {
-	if err := c.ensureLoggedIn(ctx, false); err != nil {
-		return fmt.Errorf("authentication required: %w", err)
-	}
-
 	if clientID == "" {
 		return fmt.Errorf("client ID cannot be empty")
 	}
 
-	// Determine required flow based on inbound transport
 	flow, err := c.getRequiredFlow(ctx, inboundID)
 	if err != nil {
 		return fmt.Errorf("failed to determine flow: %w", err)
@@ -622,7 +338,6 @@ func (c *Client) UpdateClient(ctx context.Context, inboundID int, clientID, emai
 	})
 }
 
-// doUpdateClient performs the actual update client request.
 func (c *Client) doUpdateClient(ctx context.Context, inboundID int, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, tgID int64, comment string, flow string) error {
 	clientSettings := map[string]interface{}{
 		"clients": []map[string]interface{}{
@@ -673,12 +388,7 @@ func (c *Client) doUpdateClient(ctx context.Context, inboundID int, clientID, em
 	return nil
 }
 
-// GetClientTraffic retrieves traffic statistics for a client by email.
 func (c *Client) GetClientTraffic(ctx context.Context, email string) (*ClientTraffic, error) {
-	if err := c.ensureLoggedIn(ctx, false); err != nil {
-		return nil, fmt.Errorf("authentication required: %w", err)
-	}
-
 	var result *ClientTraffic
 	err := RetryWithBackoff(ctx, config.XUIMaxRetries, config.XUIInitialRetryDelay, func() error {
 		var err error
@@ -688,7 +398,6 @@ func (c *Client) GetClientTraffic(ctx context.Context, email string) (*ClientTra
 	return result, err
 }
 
-// doGetClientTraffic performs the actual get client traffic request.
 func (c *Client) doGetClientTraffic(ctx context.Context, email string) (*ClientTraffic, error) {
 	trafficURL := fmt.Sprintf("%s/panel/api/inbounds/getClientTraffics/%s", c.host, url.PathEscape(email))
 
@@ -714,16 +423,10 @@ func (c *Client) doGetClientTraffic(ctx context.Context, email string) (*ClientT
 	return &traffic, nil
 }
 
-// GetInbound retrieves an inbound configuration by ID.
 func (c *Client) GetInbound(ctx context.Context, inboundID int) (*Inbound, error) {
-	if err := c.ensureLoggedIn(ctx, false); err != nil {
-		return nil, fmt.Errorf("authentication required: %w", err)
-	}
-
 	return c.doGetInbound(ctx, inboundID)
 }
 
-// doGetInbound performs the actual get inbound request.
 func (c *Client) doGetInbound(ctx context.Context, inboundID int) (*Inbound, error) {
 	inboundURL := fmt.Sprintf("%s/panel/api/inbounds/get/%d", c.host, inboundID)
 
@@ -749,10 +452,7 @@ func (c *Client) doGetInbound(ctx context.Context, inboundID int) (*Inbound, err
 	return &inbound, nil
 }
 
-// getRequiredFlow determines the required flow for a given inbound ID.
-// If inbound cannot be fetched, defaults to xtls-rprx-vision.
 func (c *Client) getRequiredFlow(ctx context.Context, inboundID int) (string, error) {
-	// Try to get inbound; fall back to default on any error (including 404 for missing mock endpoints)
 	inbound, err := c.doGetInbound(ctx, inboundID)
 	if err != nil {
 		logger.Debug("Failed to get inbound for flow, using default",
@@ -763,51 +463,29 @@ func (c *Client) getRequiredFlow(ctx context.Context, inboundID int) (string, er
 	return inbound.GetRequiredFlow(), nil
 }
 
-// GetSubscriptionLink generates a subscription URL for the given subID.
 func (c *Client) GetSubscriptionLink(baseURL, subID, subPath string) string {
 	return fmt.Sprintf("%s/%s/%s", strings.TrimSuffix(baseURL, "/"), subPath, subID)
 }
 
-// GetExternalURL extracts the base URL (scheme + host) from a full URL.
 func (c *Client) GetExternalURL(host string) string {
 	return GetExternalURL(host)
 }
 
-func (c *Client) CircuitBreakerState() CircuitState {
-	return c.breaker.State()
+func (c *Client) Close() error {
+	if c.transport != nil {
+		c.transport.CloseIdleConnections()
+	}
+	return nil
 }
 
-// LoginCount returns the number of successful logins performed.
-func (c *Client) LoginCount() int64 {
-	return atomic.LoadInt64(&c.loginCount)
-}
-
-// SessionFailCount returns the number of session verification failures.
-func (c *Client) SessionFailCount() int64 {
-	return atomic.LoadInt64(&c.sessionFailCount)
-}
-
-// TestForceSessionExpiry sets lastLogin to the past to force re-authentication.
-// This is only for testing purposes.
-func (c *Client) TestForceSessionExpiry() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.lastLogin = time.Time{}
-}
-
-// GetExternalURL extracts the base URL (scheme + host) from a full URL.
-// Returns the original host if URL parsing fails.
-// Example: "http://example.com:2053/sub/abc123" -> "http://example.com:2053"
 func GetExternalURL(host string) string {
 	u, err := url.Parse(host)
-	if err != nil {
+	if err != nil || u.Scheme == "" || u.Host == "" {
 		return host
 	}
 	return fmt.Sprintf("%s://%s", u.Scheme, u.Host)
 }
 
-// getExpiryTimeMillis returns expiry time in milliseconds.
-// Returns 0 for zero time values (no expiry).
 func getExpiryTimeMillis(expiryTime time.Time) int64 {
 	if expiryTime.IsZero() {
 		return 0
@@ -815,7 +493,6 @@ func getExpiryTimeMillis(expiryTime time.Time) int64 {
 	return expiryTime.UnixMilli()
 }
 
-// truncateString returns a truncated version of s with ellipsis if it exceeds maxLen.
 func truncateString(s string, maxLen int) string {
 	if len(s) <= maxLen {
 		return s
@@ -823,9 +500,6 @@ func truncateString(s string, maxLen int) string {
 	return s[:maxLen] + "..."
 }
 
-// isRetryable checks if an error is worth retrying.
-// DNS errors (no such host, name resolution failures) are not retryable
-// as they indicate a configuration problem that won't resolve on its own.
 func isRetryable(err error) bool {
 	if err == nil {
 		return true
@@ -839,7 +513,6 @@ func isRetryable(err error) bool {
 		return true
 	}
 	msg := strings.ToLower(err.Error())
-	// Common DNS error patterns across platforms and Go versions
 	if strings.Contains(msg, "no such host") ||
 		strings.Contains(msg, "temporary failure in name resolution") ||
 		strings.Contains(msg, "name or service not known") ||
@@ -849,13 +522,6 @@ func isRetryable(err error) bool {
 	return true
 }
 
-// RetryWithBackoff executes a function with exponential backoff retry.
-// RetryWithBackoff retries the provided function up to maxRetries using exponential backoff with jitter.
-// 
-// It calls fn repeatedly until it succeeds or a non-retryable error is returned. Between attempts it waits,
-// starting from initialDelay and doubling the delay after each wait (with added jitter). The function respects
-// context cancellation and will return early if ctx is done. If all attempts fail, it returns an error wrapping
-// the last encountered error.
 func RetryWithBackoff(ctx context.Context, maxRetries int, initialDelay time.Duration, fn func() error) error {
 	var lastErr error
 	delay := initialDelay
@@ -881,7 +547,7 @@ func RetryWithBackoff(ctx context.Context, maxRetries int, initialDelay time.Dur
 				zap.Error(err))
 
 			select {
-			case <-time.After(delay + time.Duration(rand.Int63n(int64(delay/2)))): //nolint:gosec // G404: math/rand is sufficient for jitter, crypto/rand overhead unnecessary
+			case <-time.After(delay + time.Duration(rand.Int63n(int64(delay/2)))): //nolint:gosec
 				delay *= 2
 			case <-ctx.Done():
 				return fmt.Errorf("context cancelled: %w", ctx.Err())
@@ -894,11 +560,4 @@ func RetryWithBackoff(ctx context.Context, maxRetries int, initialDelay time.Dur
 		zap.Error(lastErr))
 
 	return fmt.Errorf("after %d retries: %w", maxRetries, lastErr)
-}
-
-func (c *Client) Close() error {
-	if c.transport != nil {
-		c.transport.CloseIdleConnections()
-	}
-	return nil
 }

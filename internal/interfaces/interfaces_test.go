@@ -294,7 +294,6 @@ func TestMockDatabaseService_GetByID(t *testing.T) {
 }
 
 type mockXUIClient struct {
-	loginErr        error
 	addClientErr    error
 	deleteClientErr error
 	getTrafficErr   error
@@ -302,10 +301,6 @@ type mockXUIClient struct {
 	pingErr         error
 	clientConfig    *xui.ClientConfig
 	clientTraffic   *xui.ClientTraffic
-}
-
-func (m *mockXUIClient) Login(ctx context.Context) error {
-	return m.loginErr
 }
 
 func (m *mockXUIClient) AddClient(ctx context.Context, inboundID int, email string, trafficBytes int64, expiryTime time.Time) (*xui.ClientConfig, error) {
@@ -359,9 +354,6 @@ func TestMockXUIClient(t *testing.T) {
 			Down: 2000,
 		},
 	}
-
-	err := client.Login(context.Background())
-	require.NoError(t, err, "Login() error")
 
 	config, err := client.AddClient(context.Background(), 1, "test", 1000, time.Now())
 	require.NoError(t, err, "AddClient() error")

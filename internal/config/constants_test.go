@@ -18,12 +18,10 @@ func TestConstants_HTTPTimeouts(t *testing.T) {
 	assert.Equal(t, 2, MaxIdleConns, "MaxIdleConns should be 2 for low memory")
 }
 
-func TestConstants_XUISession(t *testing.T) {
+func TestConstants_XUIRequestTimeout(t *testing.T) {
 	t.Parallel()
 
-	assert.Equal(t, 720, DefaultXUISessionMaxAgeMinutes, "DefaultXUISessionMaxAgeMinutes should be 720 (12h)")
-	assert.Equal(t, 5*time.Second, XUISessionVerifyTimeout, "XUISessionVerifyTimeout")
-	assert.Equal(t, 5*time.Second, XUILoginTimeout, "XUILoginTimeout")
+	assert.Equal(t, 10*time.Second, XUIRequestTimeout, "XUIRequestTimeout")
 }
 
 func TestConstants_RateLimiter(t *testing.T) {

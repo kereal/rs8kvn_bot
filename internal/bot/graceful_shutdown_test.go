@@ -24,8 +24,7 @@ func TestBot_GracefulShutdown(t *testing.T) {
 		XUIInboundID:     1,
 		XUISubPath:       "sub",
 		TelegramBotToken: "test_token",
-		XUIUsername:      "admin",
-		XUIPassword:      "password",
+		XUIAPIToken:      "test-api-token",
 	}
 
 	mockBot := testutil.NewMockBotAPI()
@@ -184,8 +183,7 @@ func TestGracefulShutdown_WithActiveUpdates(t *testing.T) {
 		XUIInboundID:     1,
 		XUISubPath:       "sub",
 		TelegramBotToken: "test_token",
-		XUIUsername:      "admin",
-		XUIPassword:      "password",
+		XUIAPIToken:      "test-api-token",
 	}
 
 	mockBot := testutil.NewMockBotAPI()
