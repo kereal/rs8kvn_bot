@@ -83,15 +83,6 @@ func (kb *KeyboardBuilder) Invite() tgbotapi.InlineKeyboardMarkup {
 	)
 }
 
-// CreateSubscription returns the keyboard for users without a subscription.
-func (kb *KeyboardBuilder) CreateSubscription() tgbotapi.InlineKeyboardMarkup {
-	return tgbotapi.NewInlineKeyboardMarkup(
-		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("📥 Получить подписку", "create_subscription"),
-		),
-	)
-}
-
 // WithAdminButtons adds admin buttons to the keyboard if the user is an admin.
 func (kb *KeyboardBuilder) WithAdminButtons(keyboard *tgbotapi.InlineKeyboardMarkup, isAdmin bool) {
 	if isAdmin {

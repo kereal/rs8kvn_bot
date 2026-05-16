@@ -196,7 +196,10 @@ func (s *SubscriptionService) DeleteByID(ctx context.Context, id uint) (*databas
 
 	// Best-effort XUI cleanup
 	if err := s.xui.DeleteClient(ctx, inboundID, clientID); err != nil {
-		_ = inboundID // captured for potential future cleanup job
+		logger.Error("Failed to delete XUI client in DeleteByID (orphaned client may remain)",
+			zap.Int("inboundID", inboundID),
+			zap.String("clientID", clientID),
+			zap.Error(err))
 	}
 
 	// Send webhook notification (async)
