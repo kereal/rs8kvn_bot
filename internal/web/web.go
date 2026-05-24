@@ -19,11 +19,12 @@ import (
 	"rs8kvn_bot/internal/database"
 	"rs8kvn_bot/internal/interfaces"
 	"rs8kvn_bot/internal/logger"
+	"rs8kvn_bot/internal/metrics"
 	"rs8kvn_bot/internal/service"
 	"rs8kvn_bot/internal/subproxy"
 
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
-	"golang.org/x/sync/singleflight"
 )
 
 //go:embed templates/*.html templates/logo.png
@@ -61,7 +62,7 @@ type Server struct {
 	botConfig       *bot.BotConfig
 	subService      *service.SubscriptionService
 	subProxy        *subproxy.Service
-	subFetchGroup   singleflight.Group
+	subFetchGroup   *SingleFlight
 	server          *http.Server
 	listenerAddr    string
 	mu              sync.RWMutex
@@ -92,6 +93,7 @@ func NewServer(addr string, db interfaces.DatabaseService, xuiClient interfaces.
 		botConfig:       botConfig,
 		subService:      subService,
 		subProxy:        subProxy,
+		subFetchGroup:   NewSingleFlight(),
 		checkers:        make(map[string]func(context.Context) ComponentHealth),
 		inviteCodeRegex: regexp.MustCompile(`^[a-zA-Z0-9_-]+$`),
 		startTime:       time.Now(),
@@ -136,18 +138,22 @@ func (s *Server) Start(ctx context.Context) error {
 	apiMux.HandleFunc("/api/v1/subscriptions", s.GetSubscriptions)
 	mux.Handle("/api/v1/subscriptions", BearerAuthMiddleware(s.cfg.APIToken)(apiMux))
 
+	// Prometheus metrics endpoint
+	mux.Handle("/metrics", promhttp.Handler())
+
+	// Wrap with metrics middleware
+	instrumentedHandler := metrics.InstrumentHTTP(mux)
+
 	s.server = &http.Server{
 		Addr:              s.addr,
-		Handler:           mux,
+		Handler:           instrumentedHandler,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      30 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
 
-	// Bind the port before starting the goroutine. This ensures that
-	// port-in-use errors are returned immediately rather than silently
-	// logged in a background goroutine.
+	// Bind the port before starting the goroutine.
 	listener, err := net.Listen("tcp", s.addr)
 	if err != nil {
 		return fmt.Errorf("failed to bind %s: %w", s.addr, err)
@@ -573,7 +579,7 @@ func (s *Server) handleSubscription(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err, _ := s.subFetchGroup.Do(subID, func() (interface{}, error) {
+	result, err := s.subFetchGroup.Do(ctx, subID, func(ctx context.Context) (interface{}, error) {
 		if cachedBody, cachedHeaders, ok := s.subProxy.GetCache(subID); ok {
 			return &subFetchResult{body: cachedBody, headers: cachedHeaders}, nil
 		}

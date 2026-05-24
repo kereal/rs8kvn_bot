@@ -50,7 +50,11 @@ func TestE2E_APISubscriptions_Success(t *testing.T) {
 
 	err = srv.Start(ctx)
 	require.NoError(t, err)
-	defer srv.Stop(context.Background())
+	defer func() {
+		if err := srv.Stop(context.Background()); err != nil {
+			t.Logf("Warning: failed to stop server: %v", err)
+		}
+	}()
 
 	addr := srv.Addr()
 
@@ -61,7 +65,11 @@ func TestE2E_APISubscriptions_Success(t *testing.T) {
 
 	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Logf("Warning: failed to close response body: %v", err)
+		}
+	}()
 
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	assert.Equal(t, "application/json", resp.Header.Get("Content-Type"))
@@ -99,7 +107,11 @@ func TestE2E_APISubscriptions_EmptyList(t *testing.T) {
 
 	err := srv.Start(ctx)
 	require.NoError(t, err)
-	defer srv.Stop(context.Background())
+	defer func() {
+		if err := srv.Stop(context.Background()); err != nil {
+			t.Logf("Warning: failed to stop server: %v", err)
+		}
+	}()
 
 	addr := srv.Addr()
 
@@ -109,7 +121,11 @@ func TestE2E_APISubscriptions_EmptyList(t *testing.T) {
 
 	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Logf("Warning: failed to close response body: %v", err)
+		}
+	}()
 
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
@@ -140,13 +156,17 @@ func TestE2E_APISubscriptions_Unauthorized(t *testing.T) {
 
 	err := srv.Start(ctx)
 	require.NoError(t, err)
-	defer srv.Stop(context.Background())
+	defer func() {
+		if err := srv.Stop(context.Background()); err != nil {
+			t.Logf("Warning: failed to stop server: %v", err)
+		}
+	}()
 
 	addr := srv.Addr()
 
 	tests := []struct {
-		name   string
-		token  string
+		name  string
+		token string
 	}{
 		{"no auth header", ""},
 		{"wrong token", "Bearer wrong-token"},
@@ -163,7 +183,11 @@ func TestE2E_APISubscriptions_Unauthorized(t *testing.T) {
 
 			resp, err := http.DefaultClient.Do(req)
 			require.NoError(t, err)
-			defer resp.Body.Close()
+			defer func() {
+				if err := resp.Body.Close(); err != nil {
+					t.Logf("Warning: failed to close response body: %v", err)
+				}
+			}()
 
 			assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
 		})
@@ -185,7 +209,11 @@ func TestE2E_APISubscriptions_InvalidToken(t *testing.T) {
 
 	err := srv.Start(ctx)
 	require.NoError(t, err)
-	defer srv.Stop(context.Background())
+	defer func() {
+		if err := srv.Stop(context.Background()); err != nil {
+			t.Logf("Warning: failed to stop server: %v", err)
+		}
+	}()
 
 	addr := srv.Addr()
 
@@ -195,7 +223,11 @@ func TestE2E_APISubscriptions_InvalidToken(t *testing.T) {
 
 	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Logf("Warning: failed to close response body: %v", err)
+		}
+	}()
 
 	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
 }
@@ -215,7 +247,11 @@ func TestE2E_APISubscriptions_MethodNotAllowed(t *testing.T) {
 
 	err := srv.Start(ctx)
 	require.NoError(t, err)
-	defer srv.Stop(context.Background())
+	defer func() {
+		if err := srv.Stop(context.Background()); err != nil {
+			t.Logf("Warning: failed to stop server: %v", err)
+		}
+	}()
 
 	addr := srv.Addr()
 
@@ -229,7 +265,11 @@ func TestE2E_APISubscriptions_MethodNotAllowed(t *testing.T) {
 
 			resp, err := http.DefaultClient.Do(req)
 			require.NoError(t, err)
-			defer resp.Body.Close()
+			defer func() {
+				if err := resp.Body.Close(); err != nil {
+					t.Logf("Warning: failed to close response body: %v", err)
+				}
+			}()
 
 			assert.Equal(t, http.StatusMethodNotAllowed, resp.StatusCode)
 		})
@@ -277,7 +317,11 @@ func TestE2E_APISubscriptions_FiltersInactive(t *testing.T) {
 
 	err = srv.Start(ctx)
 	require.NoError(t, err)
-	defer srv.Stop(context.Background())
+	defer func() {
+		if err := srv.Stop(context.Background()); err != nil {
+			t.Logf("Warning: failed to stop server: %v", err)
+		}
+	}()
 
 	addr := srv.Addr()
 
@@ -287,7 +331,11 @@ func TestE2E_APISubscriptions_FiltersInactive(t *testing.T) {
 
 	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Logf("Warning: failed to close response body: %v", err)
+		}
+	}()
 
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
@@ -339,7 +387,6 @@ func TestE2E_WebhookSender_DeliverySuccess(t *testing.T) {
 	defer server.Close()
 
 	sender := webhook.NewSender(server.URL, "webhook-secret-123")
-	
 
 	event := webhook.Event{
 		EventID:           "evt-e2e-test-001",
@@ -381,7 +428,6 @@ func TestE2E_WebhookSender_RetryOnFailure(t *testing.T) {
 	defer server.Close()
 
 	sender := webhook.NewSender(server.URL, "test-secret")
-	
 
 	event := webhook.Event{
 		EventID: "evt-retry-e2e",
@@ -441,7 +487,6 @@ func TestE2E_WebhookSender_ConcurrentEvents(t *testing.T) {
 	defer server.Close()
 
 	sender := webhook.NewSender(server.URL, "concurrent-secret")
-	
 
 	eventCount := 5
 	for i := 0; i < eventCount; i++ {
@@ -499,7 +544,11 @@ func TestE2E_APISubscriptions_MultipleActive(t *testing.T) {
 
 	err := srv.Start(ctx)
 	require.NoError(t, err)
-	defer srv.Stop(context.Background())
+	defer func() {
+		if err := srv.Stop(context.Background()); err != nil {
+			t.Logf("Warning: failed to stop server: %v", err)
+		}
+	}()
 
 	addr := srv.Addr()
 
@@ -509,7 +558,11 @@ func TestE2E_APISubscriptions_MultipleActive(t *testing.T) {
 
 	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Logf("Warning: failed to close response body: %v", err)
+		}
+	}()
 
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
@@ -550,7 +603,11 @@ func TestE2E_APISubscriptions_ResponseHeaders(t *testing.T) {
 
 	err := srv.Start(ctx)
 	require.NoError(t, err)
-	defer srv.Stop(context.Background())
+	defer func() {
+		if err := srv.Stop(context.Background()); err != nil {
+			t.Logf("Warning: failed to stop server: %v", err)
+		}
+	}()
 
 	addr := srv.Addr()
 
@@ -560,7 +617,11 @@ func TestE2E_APISubscriptions_ResponseHeaders(t *testing.T) {
 
 	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Logf("Warning: failed to close response body: %v", err)
+		}
+	}()
 
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	assert.Equal(t, "application/json", resp.Header.Get("Content-Type"))

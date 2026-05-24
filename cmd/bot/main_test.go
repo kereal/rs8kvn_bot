@@ -8,6 +8,7 @@ import (
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"rs8kvn_bot/internal/bot"
 	"rs8kvn_bot/internal/config"
 	"rs8kvn_bot/internal/logger"
@@ -444,9 +445,9 @@ func TestHandleUpdate_NilMessageAndNilCallback(t *testing.T) {
 func TestConfigLoad_MissingRequiredFields(t *testing.T) {
 	// Not parallel: uses os.Unsetenv which modifies global process state
 
-	os.Unsetenv("TELEGRAM_BOT_TOKEN")
-	os.Unsetenv("XUI_HOST")
-	os.Unsetenv("DATABASE_PATH")
+	require.NoError(t, os.Unsetenv("TELEGRAM_BOT_TOKEN"))
+	require.NoError(t, os.Unsetenv("XUI_HOST"))
+	require.NoError(t, os.Unsetenv("DATABASE_PATH"))
 
 	_, err := config.Load()
 	assert.Error(t, err)

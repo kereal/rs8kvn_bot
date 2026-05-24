@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -23,6 +24,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+var chdirMu sync.Mutex
+
 func init() {
 	_, _ = logger.Init("", "error")
 }
@@ -30,11 +33,23 @@ func init() {
 func setupTestDB(t *testing.T) *database.Service {
 	t.Helper()
 
-	origWd, _ := os.Getwd()
-	defer os.Chdir(origWd)
+	chdirMu.Lock()
+	defer chdirMu.Unlock()
+
+	origWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Failed to get working directory: %v", err)
+	}
+	defer func() {
+		if err := os.Chdir(origWd); err != nil {
+			t.Logf("Warning: failed to chdir back to %s: %v", origWd, err)
+		}
+	}()
 
 	projectRoot := findProjectRoot()
-	os.Chdir(projectRoot)
+	if err := os.Chdir(projectRoot); err != nil {
+		t.Fatalf("Failed to change to project root %s: %v", projectRoot, err)
+	}
 
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	db, err := database.NewService(dbPath)
@@ -82,7 +97,9 @@ func waitForServerReady(t *testing.T, addr string, timeout time.Duration) {
 	for time.Now().Before(deadline) {
 		resp, err := http.Get(url)
 		if err == nil {
-			resp.Body.Close()
+			if err := resp.Body.Close(); err != nil {
+				t.Logf("Warning: failed to close health check body: %v", err)
+			}
 			if resp.StatusCode == http.StatusOK {
 				return
 			}
@@ -175,15 +192,21 @@ func setupRealXUIEnv(t *testing.T, handlers map[string]http.HandlerFunc) *realXU
 	defaults := map[string]http.HandlerFunc{
 		"/login": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(xui.APIResponse{Success: true, Msg: "Login successful"})
+			if err := json.NewEncoder(w).Encode(xui.APIResponse{Success: true, Msg: "Login successful"}); err != nil {
+				t.Fatalf("encode %s response: %v", "/login", err)
+			}
 		},
 		"/panel/api/server/status": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(xui.APIResponse{Success: true})
+			if err := json.NewEncoder(w).Encode(xui.APIResponse{Success: true}); err != nil {
+				t.Fatalf("encode %s response: %v", "/panel/api/server/status", err)
+			}
 		},
 		"/panel/api/inbounds/addClient": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(xui.APIResponse{Success: true, Msg: "Client added"})
+			if err := json.NewEncoder(w).Encode(xui.APIResponse{Success: true, Msg: "Client added"}); err != nil {
+				t.Fatalf("encode %s response: %v", "/panel/api/inbounds/addClient", err)
+			}
 		},
 	}
 
@@ -255,5 +278,7 @@ func setupRealXUIEnv(t *testing.T, handlers map[string]http.HandlerFunc) *realXU
 
 func (e *realXUIEnv) Close() {
 	e.server.Close()
-	e.db.Close()
+	if err := e.db.Close(); err != nil {
+		e.t.Logf("Warning: failed to close database: %v", err)
+	}
 }

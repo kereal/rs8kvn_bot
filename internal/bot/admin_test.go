@@ -23,6 +23,8 @@ import (
 func newTestAdminHandler(cfg *config.Config, mockDB *testutil.MockDatabaseService, mockXUI *testutil.MockXUIClient, mockBot *testutil.MockBotAPI) *Handler {
 	h := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
 	h.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	// Wire cache invalidation for tests that manually set subscriptionService
+	h.subscriptionService.SetInvalidateFunc(h.cache.Invalidate)
 	return h
 }
 

@@ -322,7 +322,7 @@ func (s *Service) GetByTelegramID(ctx context.Context, telegramID int64) (*Subsc
 		Order("created_at DESC").
 		First(&sub)
 	if result.Error != nil {
-		return nil, result.Error
+		return nil, fmt.Errorf("failed to get subscription by telegram ID: %w", result.Error)
 	}
 	return &sub, nil
 }
