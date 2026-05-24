@@ -16,6 +16,7 @@ func TestLoad_DefaultValues(t *testing.T) {
 	require.NoError(t, os.Setenv("XUI_USERNAME", "admin"))
 	require.NoError(t, os.Setenv("XUI_PASSWORD", "password"))
 	require.NoError(t, os.Setenv("XUI_INBOUND_ID", "1"))
+	require.NoError(t, os.Setenv("XUI_API_TOKEN", "test-token-for-defaults"))
 	require.NoError(t, os.Setenv("LOG_LEVEL", "info"))
 	defer func() {
 		if err := os.Unsetenv("TELEGRAM_BOT_TOKEN"); err != nil {
@@ -34,6 +35,9 @@ func TestLoad_DefaultValues(t *testing.T) {
 			t.Logf("Warning: Unsetenv failed: %v", err)
 		}
 		if err := os.Unsetenv("XUI_INBOUND_ID"); err != nil {
+			t.Logf("Warning: Unsetenv failed: %v", err)
+		}
+		if err := os.Unsetenv("XUI_API_TOKEN"); err != nil {
 			t.Logf("Warning: Unsetenv failed: %v", err)
 		}
 		if err := os.Unsetenv("LOG_LEVEL"); err != nil {
