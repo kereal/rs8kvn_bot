@@ -624,7 +624,7 @@ func TestUpdateClient(t *testing.T) {
 		require.NoError(t, err)
 		defer client.Close()
 
-		err = client.UpdateClient(context.Background(), "old-email", "test-uuid", "new@email.com", "sub-456", 1<<30, time.Now().Add(48*time.Hour), 12345, "test comment")
+		err = client.UpdateClient(context.Background(), 1, "old-email", "test-uuid", "new@email.com", "sub-456", 1<<30, time.Now().Add(48*time.Hour), 12345, "test comment")
 		assert.NoError(t, err)
 	})
 
@@ -633,7 +633,7 @@ func TestUpdateClient(t *testing.T) {
 		require.NoError(t, err)
 		defer client.Close()
 
-		err = client.UpdateClient(context.Background(), "current-email", "", "email", "sub", 0, time.Time{}, 0, "")
+		err = client.UpdateClient(context.Background(), 1, "current-email", "", "email", "sub", 0, time.Time{}, 0, "")
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "client ID cannot be empty")
 	})
@@ -656,7 +656,7 @@ func TestUpdateClient(t *testing.T) {
 		require.NoError(t, err)
 		defer client.Close()
 
-		err = client.UpdateClient(context.Background(), "current-email", "test-uuid", "email", "sub", 0, time.Time{}, 0, "")
+		err = client.UpdateClient(context.Background(), 1, "current-email", "test-uuid", "email", "sub", 0, time.Time{}, 0, "")
 		assert.Error(t, err)
 	})
 }

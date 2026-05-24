@@ -264,7 +264,7 @@ func (c *CommandHandler) handleBindTrial(ctx context.Context, chatID int64, user
 
 	trafficBytes := int64(c.h.cfg.TrafficLimitGB) * 1024 * 1024 * 1024
 	currentEmail := "trial_" + subscriptionID
-	if err := c.h.xui.UpdateClient(ctx, currentEmail, sub.ClientID, username, sub.SubscriptionID, trafficBytes, time.UnixMilli(0), chatID, comment); err != nil {
+	if err := c.h.xui.UpdateClient(ctx, sub.InboundID, currentEmail, sub.ClientID, username, sub.SubscriptionID, trafficBytes, time.UnixMilli(0), chatID, comment); err != nil {
 		logger.Warn("Failed to upgrade trial client in xui", zap.Error(err))
 	}
 

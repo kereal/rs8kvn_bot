@@ -320,23 +320,30 @@ func (c *Client) doDeleteClient(ctx context.Context, email string) error {
 	return nil
 }
 
-func (c *Client) UpdateClient(ctx context.Context, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, tgID int64, comment string) error {
+func (c *Client) UpdateClient(ctx context.Context, inboundID int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, tgID int64, comment string) error {
 	if clientID == "" {
 		return fmt.Errorf("client ID cannot be empty")
 	}
 	if currentEmail == "" {
 		return fmt.Errorf("current email cannot be empty")
 	}
+	if inboundID < 1 {
+		return fmt.Errorf("invalid inbound ID: %d", inboundID)
+	}
 
 	return RetryWithBackoff(ctx, config.XUIMaxRetries, config.XUIInitialRetryDelay, func() error {
-		return c.doUpdateClient(ctx, currentEmail, clientID, email, subID, trafficBytes, expiryTime, tgID, comment)
+		return c.doUpdateClient(ctx, inboundID, currentEmail, clientID, email, subID, trafficBytes, expiryTime, tgID, comment)
 	})
 }
 
-func (c *Client) doUpdateClient(ctx context.Context, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, tgID int64, comment string) error {
-	// Use fallback flow (same as getRequiredFlow error path) to avoid clearing
-	// protocol settings during full row replace on /clients/update.
-	flow := "xtls-rprx-vision"
+func (c *Client) doUpdateClient(ctx context.Context, inboundID int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, tgID int64, comment string) error {
+	// Determine flow based on the actual inbound transport (tcp vs xhttp etc.)
+	// This prevents sending wrong flow value during full-row replace on /clients/update.
+	flow, flowErr := c.getRequiredFlow(ctx, inboundID)
+	if flowErr != nil {
+		logger.Debug("Failed to get required flow for update, using default xtls-rprx-vision", zap.Error(flowErr))
+		flow = "xtls-rprx-vision"
+	}
 
 	clientObj := map[string]interface{}{
 		"id":         clientID,

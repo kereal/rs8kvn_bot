@@ -11,7 +11,7 @@ Migration:
 - Internal: doDeleteClient uses the new /clients/del/{email} (url.PathEscape)
 - All callers updated to pass email (XUIEmail(username, tgID) or "trial_"+subID for trials)
 - DB cleanup for trials now RETURNING subscription_id and constructs "trial_"+subID email
-- Updated: interfaces, testutil.Mock*, all *_test.go (bot, database, scheduler, xui, e2e), integration mocks, real handler prefixes
+- Updated: interfaces, `testutil.Mock*`, all *_test.go (bot, database, scheduler, xui, e2e), integration mocks, real handler prefixes
 - Scheduler XUICleanupTarget and anonymous interfaces in TrialRepository aligned to email-only DeleteClient
 
 Behavior:
