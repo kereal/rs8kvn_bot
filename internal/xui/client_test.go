@@ -371,17 +371,17 @@ func TestInbound_GetTransport(t *testing.T) {
 	t.Parallel()
 
 	t.Run("empty stream settings", func(t *testing.T) {
-		in := &Inbound{StreamSettings: ""}
+		in := &Inbound{StreamSettings: nil}
 		assert.Equal(t, "", in.GetTransport())
 	})
 
 	t.Run("valid stream settings", func(t *testing.T) {
-		in := &Inbound{StreamSettings: `{"network":"ws"}`}
+		in := &Inbound{StreamSettings: json.RawMessage(`{"network":"ws"}`)}
 		assert.Equal(t, "ws", in.GetTransport())
 	})
 
 	t.Run("invalid JSON", func(t *testing.T) {
-		in := &Inbound{StreamSettings: `{invalid`}
+		in := &Inbound{StreamSettings: json.RawMessage(`{invalid`)}
 		assert.Equal(t, "", in.GetTransport())
 	})
 }
@@ -406,7 +406,7 @@ func TestInbound_GetRequiredFlow(t *testing.T) {
 		t.Run(tt.transport, func(t *testing.T) {
 			in := &Inbound{}
 			if tt.transport != "" {
-				in.StreamSettings = fmt.Sprintf(`{"network":"%s"}`, tt.transport)
+				in.StreamSettings = json.RawMessage(fmt.Sprintf(`{"network":"%s"}`, tt.transport))
 			}
 			assert.Equal(t, tt.expected, in.GetRequiredFlow())
 		})
