@@ -111,10 +111,16 @@ func (in *Inbound) GetTransport() string {
 		return netSettings.Network
 	}
 
-	// Fallback for old format: StreamSettings is a JSON string with escaped content
-	cleaned := strings.ReplaceAll(string(in.StreamSettings), "\\n", "\n")
+	// Fallback for old format: StreamSettings is a JSON-encoded string (legacy panel)
+	var rawStr string
+	if err := json.Unmarshal(in.StreamSettings, &rawStr); err != nil {
+		logger.Debug("GetTransport: failed to unmarshal legacy streamSettings string",
+			zap.Error(err))
+		return ""
+	}
+	cleaned := strings.ReplaceAll(rawStr, "\\n", "\n")
 	if err := json.Unmarshal([]byte(cleaned), &netSettings); err != nil {
-		logger.Debug("GetTransport: failed to parse StreamSettings",
+		logger.Debug("GetTransport: failed to parse legacy streamSettings JSON",
 			zap.Error(err))
 		return ""
 	}
