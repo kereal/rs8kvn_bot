@@ -125,7 +125,7 @@ internal/
 │   ├── handler.go           # Main router, update loop
 │   ├── commands.go          # /start, /help, /invite
 │   ├── callbacks.go         # Inline keyboard callbacks
-│   ├── admin.go             # /del, /broadcast, /send, /refstats, /plan
+│   ├── admin.go             # /del, /broadcast, /send, /refstats
 │   ├── subscription.go      # Create/view/QR subscription
 │   ├── menu.go              # Navigation: donate, help, back
 │   ├── cache.go             # LRU cache (1000 entries, 5min TTL)
@@ -312,7 +312,6 @@ if !rateLimiter.Allow(chatID) {
 **Cache invalidation points:**
 - Subscription created → `invalidateCache(telegramID)`
 - Subscription deleted → `invalidateCache(telegramID)`
-- Plan updated → `invalidateCache(telegramID)`
 - Trial bound → `invalidateCache(telegramID)`
 - SubProxy reload → entire cache cleared on config change
 
@@ -492,7 +491,6 @@ SIGQUIT (kill -3) → core dump (not handled by us)
 │ traffic_limit        int64    default: 107374182400 (100GB)  │
 │ expiry_time          time     INDEX                         │
 │ status               string   default: "active"  INDEX       │
-│ plan                 string   default: "free"    INDEX       │
 │ subscription_url     string                                  │
 │ invite_code          string   INDEX                         │
 │ is_trial             bool     default: false  INDEX         │
