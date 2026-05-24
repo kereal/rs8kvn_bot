@@ -30,8 +30,12 @@ func (m *mockXUIClientForCleanup) DeleteClient(ctx context.Context, email string
 	if m.deleteErr != nil {
 		return m.deleteErr
 	}
+	if m.deletedClients == nil {
+		m.deletedClients = make(map[string]bool)
+	}
 	m.deletedClients[email] = true
 	return nil
+}
 }
 
 
