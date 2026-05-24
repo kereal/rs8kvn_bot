@@ -133,7 +133,6 @@ func (s *SubscriptionService) Delete(ctx context.Context, telegramID int64) erro
 	// Store subscription data before deletion for webhook
 	clientID := sub.ClientID
 	inboundID := sub.InboundID
-	username := sub.Username
 	subscriptionID := sub.SubscriptionID
 
 	if inboundID == 0 {
@@ -213,7 +212,7 @@ func (s *SubscriptionService) DeleteByID(ctx context.Context, id uint) (*databas
 			EventID:        "evt-" + eventID,
 			Event:          webhook.EventSubscriptionExpired,
 			UserID:         clientID,
-			Email:          XUIEmail(username, clientID),
+			Email:          XUIEmail(username, deleted.TelegramID),
 			SubscriptionID: subscriptionID,
 		})
 	}
