@@ -669,7 +669,8 @@ func TestGetClientTraffic(t *testing.T) {
 
 	t.Run("success", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			assert.Equal(t, "/panel/api/clients/traffic/test%40example.com", r.URL.Path)
+			// Note: r.URL.Path is decoded by Go's http server (test@example.com, not %40)
+			assert.Equal(t, "/panel/api/clients/traffic/test@example.com", r.URL.Path)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
 			fmt.Fprint(w, `{"success":true,"obj":{"id":1,"inboundId":1,"enable":true,"email":"test@example.com","up":1000,"down":2000,"total":1073741824,"expiryTime":1893456000000}}`)
