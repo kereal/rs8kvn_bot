@@ -36,8 +36,6 @@ func (m *mockXUIClientForCleanup) DeleteClient(ctx context.Context, email string
 	m.deletedClients[email] = true
 	return nil
 }
-}
-
 
 
 func TestTrialCleanupScheduler_New(t *testing.T) {
