@@ -468,17 +468,16 @@ func (h *Handler) handleAdminStats(ctx context.Context, chatID int64, username s
 }
 
 // notifyAdmin sends a notification to the admin about a new subscription.
-func (h *Handler) notifyAdmin(ctx context.Context, username string, chatID int64, subscriptionURL string, expiryTime time.Time) error {
+func (h *Handler) notifyAdmin(ctx context.Context, username string, chatID int64, subscriptionURL string) error {
 	if h.cfg.TelegramAdminID == 0 {
 		return nil
 	}
 
 	msg := tgbotapi.NewMessage(h.cfg.TelegramAdminID,
-		fmt.Sprintf("🔔 Новая подписка создана!\n\n👤 Пользователь: %s\n🆔 ID: %d\n🔗 Подписка: `%s`\n⏰ Истекает: %s",
+		fmt.Sprintf("🔔 Новая подписка создана!\n\n👤 Пользователь: %s\n🆔 ID: %d\n🔗 Подписка: `%s`",
 			formatUserLink(username, chatID),
 			chatID,
 			subscriptionURL,
-			expiryTime.Format("02.01.2006 15:04:05"),
 		))
 	msg.ParseMode = "Markdown"
 

@@ -445,8 +445,12 @@ func TestAddClient(t *testing.T) {
 				fmt.Fprint(w, `{"success":true,"obj":{"id":1,"streamSettings":"{\"network\":\"tcp\"}"}}`)
 				return
 			}
-			assert.Equal(t, "/panel/api/inbounds/addClient", r.URL.Path)
+			assert.Equal(t, "/panel/api/clients/add", r.URL.Path)
 			assert.Equal(t, "Bearer "+testAPIToken, r.Header.Get("Authorization"))
+			body, _ := io.ReadAll(r.Body)
+			assert.Contains(t, string(body), `"client"`)
+			assert.Contains(t, string(body), `"inboundIds"`)
+			assert.Contains(t, string(body), `"email":"test@example.com"`)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
 			fmt.Fprint(w, `{"success":true,"msg":"ok"}`)
@@ -526,7 +530,11 @@ func TestAddClientWithID(t *testing.T) {
 				return
 			}
 
-			assert.Equal(t, "/panel/api/inbounds/addClient", r.URL.Path)
+			assert.Equal(t, "/panel/api/clients/add", r.URL.Path)
+			body, _ := io.ReadAll(r.Body)
+			assert.Contains(t, string(body), `"client"`)
+			assert.Contains(t, string(body), `"inboundIds":[1]`)
+			assert.Contains(t, string(body), `"id":"some-uuid"`)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
 			fmt.Fprint(w, `{"success":true,"msg":"ok"}`)
@@ -553,7 +561,7 @@ func TestDeleteClient(t *testing.T) {
 
 	t.Run("success", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			assert.Equal(t, "/panel/api/inbounds/1/delClient/test-uuid", r.URL.Path)
+			assert.Equal(t, "/panel/api/clients/del/test-email", r.URL.Path)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
 			fmt.Fprint(w, `{"success":true,"msg":"ok"}`)
@@ -564,7 +572,7 @@ func TestDeleteClient(t *testing.T) {
 		require.NoError(t, err)
 		defer client.Close()
 
-		err = client.DeleteClient(context.Background(), 1, "test-uuid")
+		err = client.DeleteClient(context.Background(), "test-email")
 		assert.NoError(t, err)
 	})
 
@@ -580,7 +588,7 @@ func TestDeleteClient(t *testing.T) {
 		require.NoError(t, err)
 		defer client.Close()
 
-		err = client.DeleteClient(context.Background(), 1, "nonexistent")
+		err = client.DeleteClient(context.Background(), "nonexistent")
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "client not found")
 	})
@@ -600,7 +608,12 @@ func TestUpdateClient(t *testing.T) {
 				fmt.Fprint(w, `{"success":true,"obj":{"id":1}}`)
 				return
 			}
-			assert.Equal(t, "/panel/api/inbounds/updateClient/test-uuid", r.URL.Path)
+			assert.Contains(t, r.URL.Path, "/panel/api/clients/update/old-email")
+			body, _ := io.ReadAll(r.Body)
+			assert.Contains(t, string(body), `"email":"new@email.com"`)
+			assert.Contains(t, string(body), `"totalGB"`)
+			assert.Contains(t, string(body), `"tgId":"12345"`)
+			assert.NotContains(t, string(body), `"clients"`) // no old nested wrapper
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
 			fmt.Fprint(w, `{"success":true,"msg":"ok"}`)
@@ -611,7 +624,7 @@ func TestUpdateClient(t *testing.T) {
 		require.NoError(t, err)
 		defer client.Close()
 
-		err = client.UpdateClient(context.Background(), 1, "test-uuid", "new@email.com", "sub-456", 1<<30, time.Now().Add(48*time.Hour), 12345, "test comment")
+		err = client.UpdateClient(context.Background(), "old-email", "test-uuid", "new@email.com", "sub-456", 1<<30, time.Now().Add(48*time.Hour), 12345, "test comment")
 		assert.NoError(t, err)
 	})
 
@@ -620,7 +633,7 @@ func TestUpdateClient(t *testing.T) {
 		require.NoError(t, err)
 		defer client.Close()
 
-		err = client.UpdateClient(context.Background(), 1, "", "email", "sub", 0, time.Time{}, 0, "")
+		err = client.UpdateClient(context.Background(), "current-email", "", "email", "sub", 0, time.Time{}, 0, "")
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "client ID cannot be empty")
 	})
@@ -643,7 +656,7 @@ func TestUpdateClient(t *testing.T) {
 		require.NoError(t, err)
 		defer client.Close()
 
-		err = client.UpdateClient(context.Background(), 1, "test-uuid", "email", "sub", 0, time.Time{}, 0, "")
+		err = client.UpdateClient(context.Background(), "current-email", "test-uuid", "email", "sub", 0, time.Time{}, 0, "")
 		assert.Error(t, err)
 	})
 }
@@ -656,7 +669,7 @@ func TestGetClientTraffic(t *testing.T) {
 
 	t.Run("success", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			assert.Contains(t, r.URL.Path, "test@example.com")
+			assert.Equal(t, "/panel/api/clients/traffic/test%40example.com", r.URL.Path)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
 			fmt.Fprint(w, `{"success":true,"obj":{"id":1,"inboundId":1,"enable":true,"email":"test@example.com","up":1000,"down":2000,"total":1073741824,"expiryTime":1893456000000}}`)

@@ -230,33 +230,24 @@ func (c *Client) AddClientWithID(ctx context.Context, inboundID int, email, clie
 }
 
 func (c *Client) doAddClientWithID(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int, flow string) (*ClientConfig, error) {
-	clientSettings := map[string]interface{}{
-		"clients": []map[string]interface{}{
-			{
-				"id":         clientID,
-				"email":      email,
-				"limitIp":    0,
-				"totalGB":    trafficBytes,
-				"expiryTime": getExpiryTimeMillis(expiryTime),
-				"enable":     true,
-				"flow":       flow,
-				"subId":      subID,
-				"reset":      resetDays,
-			},
-		},
-	}
-
-	settingsJSON, err := json.Marshal(clientSettings)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal client settings: %w", err)
+	clientObj := map[string]interface{}{
+		"id":         clientID,
+		"email":      email,
+		"limitIp":    0,
+		"totalGB":    trafficBytes,
+		"expiryTime": getExpiryTimeMillis(expiryTime),
+		"enable":     true,
+		"flow":       flow,
+		"subId":      subID,
+		"reset":      resetDays,
 	}
 
 	requestData := map[string]interface{}{
-		"id":       inboundID,
-		"settings": string(settingsJSON),
+		"client":     clientObj,
+		"inboundIds": []int{inboundID},
 	}
 
-	addURL := fmt.Sprintf("%s/panel/api/inbounds/addClient", c.host)
+	addURL := fmt.Sprintf("%s/panel/api/clients/add", c.host)
 
 	respBody, err := c.doHTTPRequest(ctx, http.MethodPost, addURL, func() (io.Reader, error) {
 		return marshalJSON(requestData)
@@ -265,7 +256,7 @@ func (c *Client) doAddClientWithID(ctx context.Context, inboundID int, email, cl
 		return nil, err
 	}
 
-	logger.Debug("3x-ui addClient response",
+	logger.Debug("3x-ui clients/add response",
 		zap.Int("body_length", len(respBody)),
 		zap.String("response_preview", truncateString(string(respBody), 200)))
 
@@ -294,16 +285,23 @@ func (c *Client) doAddClientWithID(ctx context.Context, inboundID int, email, cl
 	}, nil
 }
 
-func (c *Client) DeleteClient(ctx context.Context, inboundID int, clientID string) error {
+func (c *Client) DeleteClient(ctx context.Context, email string) error {
+	if email == "" {
+		return fmt.Errorf("email cannot be empty")
+	}
 	return RetryWithBackoff(ctx, config.XUIMaxRetries, config.XUIInitialRetryDelay, func() error {
-		return c.doDeleteClient(ctx, inboundID, clientID)
+		return c.doDeleteClient(ctx, email)
 	})
 }
 
-func (c *Client) doDeleteClient(ctx context.Context, inboundID int, clientID string) error {
-	deleteURL := fmt.Sprintf("%s/panel/api/inbounds/%d/delClient/%s", c.host, inboundID, clientID)
+func (c *Client) doDeleteClient(ctx context.Context, email string) error {
+	if email == "" {
+		return fmt.Errorf("email cannot be empty")
+	}
 
-	respBody, err := c.doHTTPRequest(ctx, http.MethodPost, deleteURL, nil)
+	delURL := fmt.Sprintf("%s/panel/api/clients/del/%s", c.host, url.PathEscape(email))
+
+	respBody, err := c.doHTTPRequest(ctx, http.MethodPost, delURL, nil)
 	if err != nil {
 		return err
 	}
@@ -318,59 +316,46 @@ func (c *Client) doDeleteClient(ctx context.Context, inboundID int, clientID str
 	}
 
 	logger.Info("Successfully deleted client",
-		zap.String("client_id", clientID),
-		zap.Int("inbound_id", inboundID))
+		zap.String("email", email))
 	return nil
 }
 
-func (c *Client) UpdateClient(ctx context.Context, inboundID int, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, tgID int64, comment string) error {
+func (c *Client) UpdateClient(ctx context.Context, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, tgID int64, comment string) error {
 	if clientID == "" {
 		return fmt.Errorf("client ID cannot be empty")
 	}
-
-	flow, err := c.getRequiredFlow(ctx, inboundID)
-	if err != nil {
-		return fmt.Errorf("failed to determine flow: %w", err)
+	if currentEmail == "" {
+		return fmt.Errorf("current email cannot be empty")
 	}
 
 	return RetryWithBackoff(ctx, config.XUIMaxRetries, config.XUIInitialRetryDelay, func() error {
-		return c.doUpdateClient(ctx, inboundID, clientID, email, subID, trafficBytes, expiryTime, tgID, comment, flow)
+		return c.doUpdateClient(ctx, currentEmail, clientID, email, subID, trafficBytes, expiryTime, tgID, comment)
 	})
 }
 
-func (c *Client) doUpdateClient(ctx context.Context, inboundID int, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, tgID int64, comment string, flow string) error {
-	clientSettings := map[string]interface{}{
-		"clients": []map[string]interface{}{
-			{
-				"id":         clientID,
-				"email":      email,
-				"limitIp":    0,
-				"totalGB":    trafficBytes,
-				"expiryTime": getExpiryTimeMillis(expiryTime),
-				"enable":     true,
-				"flow":       flow,
-				"subId":      subID,
-				"reset":      config.SubscriptionResetDay,
-				"tgId":       fmt.Sprintf("%d", tgID),
-				"comment":    comment,
-			},
-		},
+func (c *Client) doUpdateClient(ctx context.Context, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, tgID int64, comment string) error {
+	// Use fallback flow (same as getRequiredFlow error path) to avoid clearing
+	// protocol settings during full row replace on /clients/update.
+	flow := "xtls-rprx-vision"
+
+	clientObj := map[string]interface{}{
+		"id":         clientID,
+		"email":      email,
+		"limitIp":    0,
+		"totalGB":    trafficBytes,
+		"expiryTime": getExpiryTimeMillis(expiryTime),
+		"enable":     true,
+		"flow":       flow,
+		"subId":      subID,
+		"reset":      config.SubscriptionResetDay,
+		"tgId":       fmt.Sprintf("%d", tgID),
+		"comment":    comment,
 	}
 
-	settingsJSON, err := json.Marshal(clientSettings)
-	if err != nil {
-		return fmt.Errorf("failed to marshal client settings: %w", err)
-	}
-
-	requestData := map[string]interface{}{
-		"id":       inboundID,
-		"settings": string(settingsJSON),
-	}
-
-	updateURL := fmt.Sprintf("%s/panel/api/inbounds/updateClient/%s", c.host, clientID)
+	updateURL := fmt.Sprintf("%s/panel/api/clients/update/%s", c.host, url.PathEscape(currentEmail))
 
 	respBody, err := c.doHTTPRequest(ctx, http.MethodPost, updateURL, func() (io.Reader, error) {
-		return marshalJSON(requestData)
+		return marshalJSON(clientObj)
 	})
 	if err != nil {
 		return err
@@ -384,6 +369,10 @@ func (c *Client) doUpdateClient(ctx context.Context, inboundID int, clientID, em
 	if !apiResp.Success {
 		return fmt.Errorf("failed to update client: %s", apiResp.Msg)
 	}
+
+	logger.Info("Successfully updated client via new API",
+		zap.String("current_email", currentEmail),
+		zap.String("new_email", email))
 
 	return nil
 }
@@ -399,7 +388,7 @@ func (c *Client) GetClientTraffic(ctx context.Context, email string) (*ClientTra
 }
 
 func (c *Client) doGetClientTraffic(ctx context.Context, email string) (*ClientTraffic, error) {
-	trafficURL := fmt.Sprintf("%s/panel/api/inbounds/getClientTraffics/%s", c.host, url.PathEscape(email))
+	trafficURL := fmt.Sprintf("%s/panel/api/clients/traffic/%s", c.host, url.PathEscape(email))
 
 	respBody, err := c.doHTTPRequest(ctx, http.MethodGet, trafficURL, nil)
 	if err != nil {

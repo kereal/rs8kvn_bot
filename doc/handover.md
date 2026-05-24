@@ -84,7 +84,7 @@ SubscriptionService.Create(ctx, telegramID)
 XUI Client: AddClientWithID(...)
         │
         ├─ Authorize via Bearer token (no session needed)
-        ├─ POST /panel/api/inbounds/addClient
+        ├─ POST /panel/api/clients/add (client + inboundIds)
         └─ Return client ID (UUID)
         │
         ▼ (on success)
