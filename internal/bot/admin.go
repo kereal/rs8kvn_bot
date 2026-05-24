@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"rs8kvn_bot/internal/config"
@@ -15,27 +17,28 @@ import (
 	"go.uber.org/zap"
 )
 
-func (h *Handler) HandleVersion(ctx context.Context, update tgbotapi.Update) {
+func (h *Handler) HandleVersion(ctx context.Context, update tgbotapi.Update) error {
 	if update.Message == nil {
 		logger.Error("HandleVersion called with nil Message")
-		return
+		return fmt.Errorf("nil message")
 	}
 
 	chatID := update.Message.Chat.ID
 	if !h.isAdmin(chatID) {
-		return
+		return nil
 	}
 
 	logger.Info("Admin requesting version", zap.Int64("chat_id", chatID))
 	h.SendMessage(ctx, chatID, h.version)
+	return nil
 }
 
-func (h *Handler) handleAdminLastReg(ctx context.Context, chatID int64, username string, messageID int) {
+func (h *Handler) handleAdminLastReg(ctx context.Context, chatID int64, username string, messageID int) error {
 	logger.Info("Admin requesting last registrations", zap.String("username", username))
 
 	if !h.isAdmin(chatID) {
 		logger.Warn("Non-admin user attempted to access last registrations", zap.Int64("chat_id", chatID))
-		return
+		return nil
 	}
 
 	subs, err := h.db.GetLatestSubscriptions(ctx, 10)
@@ -46,7 +49,7 @@ func (h *Handler) handleAdminLastReg(ctx context.Context, chatID int64, username
 		keyboard := h.getBackKeyboard()
 		editMsg.ReplyMarkup = &keyboard
 		h.safeSend(editMsg)
-		return
+		return fmt.Errorf("get latest subscriptions: %w", err)
 	}
 
 	if len(subs) == 0 {
@@ -55,7 +58,7 @@ func (h *Handler) handleAdminLastReg(ctx context.Context, chatID int64, username
 		keyboard := h.getBackKeyboard()
 		editMsg.ReplyMarkup = &keyboard
 		h.safeSend(editMsg)
-		return
+		return nil
 	}
 
 	// Format the message as a table with 3 columns
@@ -63,7 +66,7 @@ func (h *Handler) handleAdminLastReg(ctx context.Context, chatID int64, username
 	sb.WriteString("📋 *Последние регистрации*\n\n")
 
 	for _, sub := range subs {
-		username := formatUserLink(sub.Username)
+		username := formatUserLink(sub.Username, sub.TelegramID)
 		dateStr := sub.CreatedAt.Format("02.01.2006 15:04:05")
 		fmt.Fprintf(&sb, "%d │ %s │ %s\n", sub.ID, username, dateStr)
 	}
@@ -74,18 +77,19 @@ func (h *Handler) handleAdminLastReg(ctx context.Context, chatID int64, username
 	keyboard := h.getBackKeyboard()
 	editMsg.ReplyMarkup = &keyboard
 	h.safeSend(editMsg)
+	return nil
 }
 
 // HandleDel handles the /del command for admins.
 // Deletes a subscription by database ID from both 3x-ui panel and database.
 // Usage: /del <id>
-func (h *Handler) HandleDel(ctx context.Context, update tgbotapi.Update) {
+func (h *Handler) HandleDel(ctx context.Context, update tgbotapi.Update) error {
 	ctx, cancel := h.withTimeout(ctx)
 	defer cancel()
 
 	if update.Message == nil {
 		logger.Error("HandleDel called with nil Message")
-		return
+		return fmt.Errorf("nil message")
 	}
 
 	chatID := update.Message.Chat.ID
@@ -93,14 +97,14 @@ func (h *Handler) HandleDel(ctx context.Context, update tgbotapi.Update) {
 	// Verify admin access
 	if !h.isAdmin(chatID) {
 		logger.Warn("Non-admin user attempted to access /del", zap.Int64("chat_id", chatID))
-		return
+		return nil
 	}
 
 	// Parse the command arguments
 	args := update.Message.CommandArguments()
 	if args == "" {
 		h.SendMessage(ctx, chatID, "❌ Использование: /del <id>\n\nПример: /del 5")
-		return
+		return nil
 	}
 
 	// Parse the ID - use int64 to properly detect negative numbers
@@ -108,13 +112,13 @@ func (h *Handler) HandleDel(ctx context.Context, update tgbotapi.Update) {
 	var err error
 	if parsedID, err = strconv.ParseInt(strings.TrimSpace(args), 10, 64); err != nil {
 		h.SendMessage(ctx, chatID, "❌ Неверный формат ID. Использование: /del <id>\n\nПример: /del 5")
-		return
+		return nil
 	}
 
 	// Validate ID is positive
 	if parsedID <= 0 {
 		h.SendMessage(ctx, chatID, "❌ ID должен быть положительным числом")
-		return
+		return nil
 	}
 
 	id := uint(parsedID)
@@ -128,7 +132,7 @@ func (h *Handler) HandleDel(ctx context.Context, update tgbotapi.Update) {
 			zap.Error(err),
 			zap.Uint("id", id))
 		h.SendMessage(ctx, chatID, fmt.Sprintf("❌ Ошибка удаления подписки: %v", err))
-		return
+		return fmt.Errorf("delete subscription: %w", err)
 	}
 
 	// Decrement referral cache only after successful deletion
@@ -157,6 +161,7 @@ func (h *Handler) HandleDel(ctx context.Context, update tgbotapi.Update) {
 		formatUserDisplay(deleted.Username),
 		deleted.TelegramID,
 	))
+	return nil
 }
 
 // escapeMarkdown escapes special characters in Markdown V2 to prevent injection.
@@ -175,126 +180,174 @@ func escapeMarkdown(text string) string {
 }
 
 // HandleBroadcast handles the /broadcast command for admins to send messages to all users.
-func (h *Handler) HandleBroadcast(ctx context.Context, update tgbotapi.Update) {
-	// Broadcast can run for minutes (50ms delay per user × thousands of users),
-	// so we use a longer timeout than the default 30s handlerTimeout.
+func (h *Handler) HandleBroadcast(ctx context.Context, update tgbotapi.Update) error {
 	const broadcastTimeout = 5 * time.Minute
 	ctx, cancel := context.WithTimeout(ctx, broadcastTimeout)
 	defer cancel()
 
 	if update.Message == nil {
 		logger.Error("HandleBroadcast called with nil Message")
-		return
+		return fmt.Errorf("nil message")
 	}
 
 	chatID := update.Message.Chat.ID
 
-	// Verify admin access
 	if !h.isAdmin(chatID) {
 		logger.Warn("Non-admin user attempted to access /broadcast", zap.Int64("chat_id", chatID))
-		return
+		return nil
 	}
 
-	// Get the message to broadcast
 	message := update.Message.CommandArguments()
 	if message == "" {
 		h.SendMessage(ctx, chatID, "❌ Использование: /broadcast <сообщение>\n\nПример: /broadcast Привет всем!")
-		return
+		return nil
 	}
-
 	if len(message) > config.MaxTelegramMessageLen {
-		h.SendMessage(ctx, chatID, fmt.Sprintf(
-			"❌ Сообщение слишком длинное (%d символов).\n\nМаксимум: %d символов.",
-			len(message), config.MaxTelegramMessageLen,
-		))
-		return
+		h.SendMessage(ctx, chatID, fmt.Sprintf("❌ Сообщение слишком длинное (%d символов).\n\nМаксимум: %d символов.", len(message), config.MaxTelegramMessageLen))
+		return nil
 	}
 
-	// Get total count for progress reporting
 	totalCount, err := h.db.GetTotalTelegramIDCount(ctx)
 	if err != nil {
 		logger.Error("Failed to count telegram IDs", zap.Error(err))
 		h.SendMessage(ctx, chatID, "❌ Ошибка получения списка пользователей")
-		return
+		return fmt.Errorf("count telegram ids: %w", err)
 	}
-
 	if totalCount == 0 {
 		h.SendMessage(ctx, chatID, "❌ Нет пользователей для рассылки")
-		return
+		return nil
 	}
 
 	h.SendMessage(ctx, chatID, fmt.Sprintf("📤 Начинаю рассылку для %d пользователей...", totalCount))
 
-	// Process in batches to avoid loading all IDs into memory
-	const batchSize = 100
-	successCount := 0
-	failCount := 0
-	offset := 0
+	const (
+		batchSize            = 100
+		broadcastConcurrency = 10 // max concurrent sends per batch
+	)
 
+	var (
+		successCount      int64 = 0
+		failCount         int64 = 0
+		batchErr          error
+		broadcastCancelled bool // set when ctx is cancelled mid-broadcast; guarantees we always reach wg.Wait() + final report
+	)
+	offset := 0
 	for offset < int(totalCount) {
-		// Get batch of IDs
-		ids, err := h.db.GetTelegramIDsBatch(ctx, offset, batchSize)
-		if err != nil {
-			logger.Error("Failed to get telegram IDs batch", zap.Error(err), zap.Int("offset", offset))
+		select {
+		case <-ctx.Done():
+			broadcastCancelled = true
+		default:
+		}
+		if broadcastCancelled {
 			break
 		}
 
-		for _, telegramID := range ids {
-			// Check context cancellation to allow graceful shutdown
-			select {
-			case <-ctx.Done():
-				logger.Warn("Broadcast cancelled due to shutdown")
-				h.SendMessage(ctx, chatID, fmt.Sprintf(
-					"⚠️ Рассылка прервана!\n\n📤 Отправлено: %d\n❌ Ошибок: %d\n👥 Осталось: %d",
-					successCount,
-					failCount,
-					int(totalCount)-successCount-failCount,
-				))
-				return
-			default:
-			}
-
-			// Escape markdown to prevent injection
-			escapedMessage := escapeMarkdown(message)
-			msg := tgbotapi.NewMessage(telegramID, escapedMessage)
-			msg.ParseMode = "MarkdownV2"
-			msg.DisableWebPagePreview = true
-			if err := h.sendWithError(ctx, msg); err != nil {
-				logger.Warn("Failed to send broadcast message",
-					zap.Int64("telegram_id", telegramID),
-					zap.Error(err))
-				failCount++
-			} else {
-				successCount++
-			}
-			// Small delay to avoid rate limiting
-			time.Sleep(50 * time.Millisecond)
+		ids, err := h.db.GetTelegramIDsBatch(ctx, offset, batchSize)
+		if err != nil {
+			logger.Error("Failed to get telegram IDs batch", zap.Error(err))
+			batchErr = err
+			break
 		}
 
+		var wg sync.WaitGroup
+		sem := make(chan struct{}, broadcastConcurrency)
+
+		for _, telegramID := range ids {
+			if broadcastCancelled {
+				break
+			}
+			select {
+			case sem <- struct{}{}:
+				wg.Add(1)
+				go func(tg int64) {
+					defer wg.Done()
+					defer func() { <-sem }()
+
+					select {
+					case <-ctx.Done():
+						return
+					default:
+					}
+
+					escapedMessage := escapeMarkdown(message)
+					msg := tgbotapi.NewMessage(tg, escapedMessage)
+					msg.ParseMode = "MarkdownV2"
+					msg.DisableWebPagePreview = true
+					if err := h.sendWithError(ctx, msg); err != nil {
+						atomic.AddInt64(&failCount, 1)
+					} else {
+						atomic.AddInt64(&successCount, 1)
+					}
+					time.Sleep(50 * time.Millisecond)
+				}(telegramID)
+			case <-ctx.Done():
+				broadcastCancelled = true
+			}
+		}
+
+		wg.Wait()
+		if broadcastCancelled {
+			break
+		}
 		offset += batchSize
 	}
 
-	h.SendMessage(ctx, chatID, fmt.Sprintf(
-		"✅ Рассылка завершена!\n\n📤 Отправлено: %d\n❌ Ошибок: %d\n👥 Всего пользователей: %d",
-		successCount,
-		failCount,
+	if broadcastCancelled {
+		h.SendMessage(context.Background(), chatID, fmt.Sprintf(`⚠️ Рассылка прервана!
+
+📤 Отправлено: %d
+❌ Ошибок: %d
+👥 Осталось: %d`,
+			atomic.LoadInt64(&successCount),
+			atomic.LoadInt64(&failCount),
+			int(totalCount)-int(atomic.LoadInt64(&successCount)+atomic.LoadInt64(&failCount))))
+		return fmt.Errorf("broadcast cancelled")
+	}
+	if batchErr != nil {
+		h.SendMessage(context.Background(), chatID, fmt.Sprintf(`❌ Рассылка прервана из-за ошибки!
+
+📤 Отправлено: %d
+❌ Ошибок отправки: %d
+👥 Всего пользователей: %d
+
+Ошибка: %v`,
+			atomic.LoadInt64(&successCount),
+			atomic.LoadInt64(&failCount),
+			totalCount,
+			batchErr,
+		))
+		logger.Error("Broadcast failed due to batch retrieval error",
+			zap.Error(batchErr),
+			zap.Int64("success", atomic.LoadInt64(&successCount)),
+			zap.Int64("failed", atomic.LoadInt64(&failCount)),
+			zap.Int64("total", totalCount))
+		return fmt.Errorf("broadcast batch error: %w", batchErr)
+	}
+
+	h.SendMessage(context.Background(), chatID, fmt.Sprintf(`✅ Рассылка завершена!
+
+📤 Отправлено: %d
+❌ Ошибок: %d
+👥 Всего пользователей: %d`,
+		atomic.LoadInt64(&successCount),
+		atomic.LoadInt64(&failCount),
 		totalCount,
 	))
-
 	logger.Info("Broadcast completed",
-		zap.Int("success", successCount),
-		zap.Int("failed", failCount),
+		zap.Int64("success", atomic.LoadInt64(&successCount)),
+		zap.Int64("failed", atomic.LoadInt64(&failCount)),
 		zap.Int64("total", totalCount))
+	return nil
 }
 
 // HandleSend handles the /send command for admins to send a message to a specific user.
-func (h *Handler) HandleSend(ctx context.Context, update tgbotapi.Update) {
+func (h *Handler) HandleSend(ctx context.Context, update tgbotapi.Update) error {
 	ctx, cancel := h.withTimeout(ctx)
 	defer cancel()
 
 	if update.Message == nil {
 		logger.Error("HandleSend called with nil Message")
-		return
+		return fmt.Errorf("nil message")
 	}
 
 	chatID := update.Message.Chat.ID
@@ -302,27 +355,27 @@ func (h *Handler) HandleSend(ctx context.Context, update tgbotapi.Update) {
 	// Verify admin access
 	if !h.isAdmin(chatID) {
 		logger.Warn("Non-admin user attempted to access /send", zap.Int64("chat_id", chatID))
-		return
+		return nil
 	}
 
 	// Rate limiting check
 	if !h.checkAdminSendRateLimit(chatID) {
 		h.SendMessage(ctx, chatID, "⚠️ Слишком много сообщений. Подождите минуту.")
-		return
+		return nil
 	}
 
 	// Parse the command arguments
 	args := update.Message.CommandArguments()
 	if args == "" {
 		h.SendMessage(ctx, chatID, "❌ Использование: /send <telegram_id|username> <сообщение>\n\nПримеры:\n/send 123456789 Привет!\n/send @username Привет!")
-		return
+		return nil
 	}
 
 	// Split args into target and message
 	parts := strings.SplitN(args, " ", 2)
 	if len(parts) < 2 {
 		h.SendMessage(ctx, chatID, "❌ Использование: /send <telegram_id|username> <сообщение>\n\nПримеры:\n/send 123456789 Привет!\n/send @username Привет!")
-		return
+		return nil
 	}
 
 	target := strings.TrimPrefix(parts[0], "@")
@@ -340,12 +393,11 @@ func (h *Handler) HandleSend(ctx context.Context, update tgbotapi.Update) {
 		telegramID, err = h.db.GetTelegramIDByUsername(ctx, target)
 		if err != nil {
 			h.SendMessage(ctx, chatID, fmt.Sprintf("❌ Пользователь @%s не найден в базе", target))
-			return
+			return fmt.Errorf("get telegram id by username: %w", err)
 		}
 	}
 
 	// Send the message
-	// Escape markdown to prevent injection
 	escapedMessage := escapeMarkdown(message)
 	msg := tgbotapi.NewMessage(telegramID, escapedMessage)
 	msg.ParseMode = "MarkdownV2"
@@ -356,7 +408,7 @@ func (h *Handler) HandleSend(ctx context.Context, update tgbotapi.Update) {
 			zap.Int64("telegram_id", telegramID),
 			zap.Error(err))
 		h.SendMessage(ctx, chatID, fmt.Sprintf("❌ Ошибка отправки сообщения: %v", err))
-		return
+		return fmt.Errorf("send admin message: %w", err)
 	}
 
 	h.SendMessage(ctx, chatID, fmt.Sprintf(
@@ -368,16 +420,17 @@ func (h *Handler) HandleSend(ctx context.Context, update tgbotapi.Update) {
 	logger.Info("Message sent via /send command",
 		zap.Int64("telegram_id", telegramID),
 		zap.Int64("admin_id", chatID))
+	return nil
 }
 
 // handleAdminStats handles the "admin stats" callback.
-func (h *Handler) handleAdminStats(ctx context.Context, chatID int64, username string, messageID int) {
+func (h *Handler) handleAdminStats(ctx context.Context, chatID int64, username string, messageID int) error {
 	logger.Info("Admin requesting stats", zap.String("username", username))
 
 	// Verify admin access
 	if !h.isAdmin(chatID) {
 		logger.Warn("Non-admin user attempted to access admin stats", zap.Int64("chat_id", chatID))
-		return
+		return nil
 	}
 
 	// Get counts efficiently using SQL COUNT queries
@@ -389,13 +442,14 @@ func (h *Handler) handleAdminStats(ctx context.Context, chatID int64, username s
 		keyboard := h.getBackKeyboard()
 		editMsg.ReplyMarkup = &keyboard
 		h.safeSend(editMsg)
-		return
+		return fmt.Errorf("count all subscriptions: %w", err)
 	}
 
 	activeCount, err := h.db.CountActiveSubscriptions(ctx)
 	if err != nil {
 		logger.Error("Failed to count active subscriptions", zap.Error(err))
 		activeCount = 0
+		// Continue with partial stats; not a fatal error
 	}
 
 	text := fmt.Sprintf(
@@ -410,6 +464,7 @@ func (h *Handler) handleAdminStats(ctx context.Context, chatID int64, username s
 	keyboard := h.getBackKeyboard()
 	editMsg.ReplyMarkup = &keyboard
 	h.safeSend(editMsg)
+	return nil
 }
 
 // notifyAdmin sends a notification to the admin about a new subscription.
@@ -420,7 +475,7 @@ func (h *Handler) notifyAdmin(ctx context.Context, username string, chatID int64
 
 	msg := tgbotapi.NewMessage(h.cfg.TelegramAdminID,
 		fmt.Sprintf("🔔 Новая подписка создана!\n\n👤 Пользователь: %s\n🆔 ID: %d\n🔗 Подписка: `%s`\n⏰ Истекает: %s",
-			formatUserLink(username),
+			formatUserLink(username, chatID),
 			chatID,
 			subscriptionURL,
 			expiryTime.Format("02.01.2006 15:04:05"),
@@ -449,18 +504,21 @@ func (h *Handler) notifyAdminError(ctx context.Context, message string) {
 }
 
 // HandleRefstats handles the /refstats command to show referral statistics.
-func (h *Handler) HandleRefstats(ctx context.Context, update tgbotapi.Update) {
+func (h *Handler) HandleRefstats(ctx context.Context, update tgbotapi.Update) error {
+	if update.Message == nil {
+		logger.Error("HandleRefstats called with nil Message")
+		return fmt.Errorf("nil message")
+	}
+
 	chatID := update.Message.Chat.ID
 	username := "unknown"
-	if update.Message.From != nil {
-		if update.Message.From.UserName != "" {
-			username = update.Message.From.UserName
-		}
+	if update.Message.From != nil && update.Message.From.UserName != "" {
+		username = update.Message.From.UserName
 	}
 
 	if !h.isAdmin(chatID) {
 		h.SendMessage(ctx, chatID, "❌ Эта команда доступна только администратору")
-		return
+		return nil
 	}
 
 	logger.Info("Admin requesting referral stats", zap.String("username", username))
@@ -510,4 +568,5 @@ func (h *Handler) HandleRefstats(ctx context.Context, update tgbotapi.Update) {
 	msg := tgbotapi.NewMessage(chatID, sb.String())
 	msg.ParseMode = "MarkdownV2"
 	h.send(ctx, msg)
+	return nil
 }

@@ -100,7 +100,9 @@ func TestNewService(t *testing.T) {
 	require.NotNil(t, svc)
 	require.NotNil(t, svc.db)
 
-	svc.Close()
+	if err := svc.Close(); err != nil {
+		t.Logf("Warning: failed to close database service: %v", err)
+	}
 }
 
 func TestNewService_CreatesDirectory(t *testing.T) {
@@ -111,7 +113,11 @@ func TestNewService_CreatesDirectory(t *testing.T) {
 
 	svc, err := NewService(dbPath)
 	require.NoError(t, err)
-	defer svc.Close()
+	defer func() {
+		if err := svc.Close(); err != nil {
+			t.Logf("Warning: failed to close database service: %v", err)
+		}
+	}()
 
 	_, err = os.Stat(filepath.Dir(dbPath))
 	assert.NoError(t, err)
@@ -123,7 +129,7 @@ func TestNewService_InvalidPath(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "file.txt")
 
-	require.NoError(t, os.WriteFile(dbPath, []byte("file"), 0644))
+	require.NoError(t, os.WriteFile(dbPath, []byte("file"), 0600))
 
 	_, err := NewService(dbPath)
 	assert.Error(t, err)
@@ -150,8 +156,10 @@ func TestService_Close_AlreadyClosed(t *testing.T) {
 	svc, err := NewService(dbPath)
 	require.NoError(t, err)
 
-	svc.Close()
-	assert.NoError(t, svc.Close())
+	if err := svc.Close(); err != nil {
+		t.Logf("Warning: failed to close database service: %v", err)
+	}
+	assert.NoError(t, svc.Close(), "Second Close should return no error")
 }
 
 func TestService_Ping(t *testing.T) {
@@ -162,7 +170,11 @@ func TestService_Ping(t *testing.T) {
 
 	svc, err := NewService(dbPath)
 	require.NoError(t, err)
-	defer svc.Close()
+	defer func() {
+		if err := svc.Close(); err != nil {
+			t.Logf("Warning: failed to close database service: %v", err)
+		}
+	}()
 
 	assert.NoError(t, svc.Ping(context.Background()))
 }
@@ -175,7 +187,11 @@ func TestService_GetPoolStats(t *testing.T) {
 
 	svc, err := NewService(dbPath)
 	require.NoError(t, err)
-	defer svc.Close()
+	defer func() {
+		if err := svc.Close(); err != nil {
+			t.Logf("Warning: failed to close database service: %v", err)
+		}
+	}()
 
 	stats, err := svc.GetPoolStats()
 	require.NoError(t, err)
@@ -814,11 +830,7 @@ func TestService_GetLatestSubscriptions_MixedStatuses(t *testing.T) {
 			SubscriptionURL: fmt.Sprintf("http://localhost/sub/%d", i),
 			CreatedAt:       time.Now().Add(-time.Duration(len(statuses)-i) * time.Minute),
 		}
-		if status == "active" {
-			require.NoError(t, svc.db.Create(sub).Error)
-		} else {
-			require.NoError(t, svc.db.Create(sub).Error)
-		}
+		require.NoError(t, svc.db.Create(sub).Error)
 	}
 
 	subs, err := svc.GetLatestSubscriptions(context.Background(), 10)
@@ -1709,7 +1721,11 @@ func newTestService(t *testing.T) *Service {
 
 	svc, err := NewService(dbPath)
 	require.NoError(t, err)
-	t.Cleanup(func() { svc.Close() })
+	t.Cleanup(func() {
+		if err := svc.Close(); err != nil {
+			t.Logf("Warning: failed to close database service: %v", err)
+		}
+	})
 
 	return svc
 }

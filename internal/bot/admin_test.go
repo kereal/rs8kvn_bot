@@ -23,6 +23,8 @@ import (
 func newTestAdminHandler(cfg *config.Config, mockDB *testutil.MockDatabaseService, mockXUI *testutil.MockXUIClient, mockBot *testutil.MockBotAPI) *Handler {
 	h := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
 	h.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	// Wire cache invalidation for tests that manually set subscriptionService
+	h.subscriptionService.SetInvalidateFunc(h.cache.Invalidate)
 	return h
 }
 
@@ -508,8 +510,9 @@ func TestHandleBroadcast_ContextCancellation(t *testing.T) {
 	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "admin"}, "/broadcast Test message")
 
 	handler.HandleBroadcast(ctx, update)
-	// With cancelled context, no messages should be sent
-	assert.False(t, mockBot.SendCalledSafe(), "No messages should be sent when context is cancelled")
+	// Admin must reliably receive the cancellation report (uses background ctx per fix)
+	// even if broadcast was cancelled before any work.
+	assert.True(t, mockBot.SendCalledSafe(), "Cancellation report must be sent to admin even on ctx cancel")
 }
 
 // TestHandleBroadcast_MultipleBatches tests broadcast with multiple batches of users

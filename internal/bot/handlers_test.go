@@ -208,15 +208,7 @@ func TestSendInviteLink_Success(t *testing.T) {
 		TelegramAdminID: 12345,
 		TrafficLimitGB:  100,
 	}
-	handler := &Handler{
-		cfg:       cfg,
-		db:        mockDB,
-		bot:       mockBot,
-		botConfig: NewTestBotConfig(),
-		cache:     NewSubscriptionCache(100, 5*time.Minute),
-		keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, cfg.DonateCardNumber, cfg.DonateURL, cfg.SiteURL),
-		sender:    NewMessageSender(mockBot, ratelimiter.NewPerUserRateLimiter(float64(config.RateLimiterMaxTokens), float64(config.RateLimiterRefillRate))),
-	}
+	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewMockXUIClient(), NewTestBotConfig(), nil, "")
 
 	mockDB.GetOrCreateInviteFunc = func(ctx context.Context, referrerTGID int64, code string) (*database.Invite, error) {
 		return &database.Invite{Code: "TESTCODE1", ReferrerTGID: referrerTGID}, nil

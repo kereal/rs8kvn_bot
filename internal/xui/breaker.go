@@ -5,6 +5,8 @@ import (
 	"errors"
 	"sync"
 	"time"
+
+	"rs8kvn_bot/internal/metrics"
 )
 
 var ErrCircuitOpen = errors.New("circuit breaker is open")
@@ -31,12 +33,14 @@ type CircuitBreaker struct {
 }
 
 func NewCircuitBreaker(maxFailures int, timeout time.Duration) *CircuitBreaker {
-	return &CircuitBreaker{
+	cb := &CircuitBreaker{
 		state:       CircuitStateClosed,
 		maxFailures: maxFailures,
 		timeout:     timeout,
 		halfOpenMax: 3,
 	}
+	metrics.CircuitBreakerState.WithLabelValues("xui").Set(0)
+	return cb
 }
 
 func (cb *CircuitBreaker) Execute(ctx context.Context, fn func() error) error {
@@ -71,12 +75,14 @@ func (cb *CircuitBreaker) allowRequest() bool {
 			cb.state = CircuitStateHalfOpen
 			cb.successes = 0
 			cb.halfOpenAttempts = 1 // Count this transition as the first half-open attempt
+			metrics.CircuitBreakerState.WithLabelValues("xui").Set(2)
 			return true
 		}
 		return false
 
 	case CircuitStateHalfOpen:
 		if cb.halfOpenAttempts < cb.halfOpenMax {
+			// Atomic increment protected by cb.mu.
 			cb.halfOpenAttempts++
 			return true
 		}
@@ -95,8 +101,9 @@ func (cb *CircuitBreaker) recordResult(err error) {
 		cb.failures++
 		cb.lastFailure = time.Now()
 
-		if cb.failures >= cb.maxFailures {
+		if cb.failures >= cb.maxFailures && cb.state != CircuitStateOpen {
 			cb.state = CircuitStateOpen
+			metrics.CircuitBreakerState.WithLabelValues("xui").Set(1)
 		}
 		return
 	}
@@ -112,6 +119,7 @@ func (cb *CircuitBreaker) recordResult(err error) {
 			cb.failures = 0
 			cb.successes = 0
 			cb.halfOpenAttempts = 0
+			metrics.CircuitBreakerState.WithLabelValues("xui").Set(0)
 		}
 	}
 }

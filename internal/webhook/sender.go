@@ -2,6 +2,7 @@ package webhook
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,15 +19,17 @@ const (
 	EventSubscriptionActivated = "subscription.activated"
 	EventSubscriptionExpired   = "subscription.expired"
 	EventSubscriptionUpdated   = "subscription.updated"
+
+	webhookTimeout = 30 * time.Second
 )
 
 // Event represents a webhook event payload.
 type Event struct {
-	EventID           string `json:"event_id"`
-	Event             string `json:"event"`
-	UserID            string `json:"user_id"`
-	Email             string `json:"email"`
-	SubscriptionToken string `json:"subscription_token"`
+	EventID        string `json:"event_id"`
+	Event          string `json:"event"`
+	ClientID       string `json:"client_id"`
+	Email          string `json:"email"`
+	SubscriptionID string `json:"subscription_id"`
 }
 
 // PermanentError indicates a client-side HTTP error (4xx except 429) that
@@ -87,7 +90,6 @@ func (s *Sender) SendAsync(event Event) {
 		return
 	}
 
-	// Capture event by value to avoid data races
 	go func(e Event) {
 		for i, delay := range s.retryDelays {
 			if i > 0 {
@@ -122,12 +124,15 @@ func (s *Sender) SendAsync(event Event) {
 
 // send makes a single attempt to deliver the webhook event.
 func (s *Sender) send(event Event) error {
+	ctx, cancel := context.WithTimeout(context.Background(), webhookTimeout)
+	defer cancel()
+
 	body, err := json.Marshal(event)
 	if err != nil {
 		return fmt.Errorf("marshal event: %w", err)
 	}
 
-	req, err := http.NewRequest(http.MethodPost, s.url, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.url, bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("create request: %w", err)
 	}
