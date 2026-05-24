@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -523,8 +524,13 @@ func TestGetSubscriptions_LargeDataset(t *testing.T) {
 	mockDB.GetAllSubscriptionsFunc = func(ctx context.Context) ([]database.Subscription, error) {
 		subs := make([]database.Subscription, 100)
 		for i := 0; i < 100; i++ {
+			id := i + 1
+			// Safe: i is always 0-99, but explicit check for 32-bit systems
+			if id < 0 {
+				return nil, fmt.Errorf("integer overflow in test data")
+			}
 			subs[i] = database.Subscription{
-				ID:             uint(i + 1),
+				ID:             uint(id),
 				TelegramID:     int64(100000 + i),
 				Username:       "user" + string(rune('A'+i%26)),
 				ClientID:       "client-uuid-" + string(rune('A'+i%26)),
