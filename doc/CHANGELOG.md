@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-05-24
+
 ### Added
 - Centralized cache invalidation via `SubscriptionService.InvalidateSubscription()` (P1-2)
 - Background orphan reconciler for XUI clients (P1-3): periodic scan & cleanup of DB entries whose clients are missing in XUI
@@ -17,13 +19,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed data race in `HandleBroadcast` by switching to `int64` + `sync/atomic` (P1-1)
 - Implemented `StartCacheCleanup` (was a no-op) (P1-1)
 - Removed unused `loadReferralCacheIfNeeded` (P1-1)
+- Улучшено форматирование ссылок на пользователей (numeric usernames, кликабельные никнеймы в таблицах последних регистраций)
 
 ### Fixed
 - Race condition in admin broadcast that could duplicate cancellation messages and corrupt counters under concurrency
 - Cache invalidation inconsistencies: all invalidations now flow through `SubscriptionService.InvalidateSubscription`
 - Potential nil map write in `checkAdminSendRateLimit` for handlers constructed without `NewHandler` (lazy init added)
 - Goroutine leak in subscription proxy when request context is cancelled (P1-4): now uses context-aware singleflight that releases waiters immediately on cancellation
+- Множество исправлений после рефактора: ошибки в delegate handlers, rollback в BindTrial, singleflight cleanup, broadcast semaphore и GetTelegramIDsBatch, метрики (нормализация путей и команд), контексты в rate limit, nil checks и т.д.
+- Исправлена грамматика в donate-сообщении
 
 ### Security
 - Broadcast cancellation message is now sent exactly once, preventing duplicate messages due to concurrent goroutine exits
+
+### Notes
+- Полный аудит dev перед релизом (24.05.2026): build + vet чистые, 1450+ тестов прошли, 0 TODO/FIXME в коде, golangci-lint без ошибок.
+- Рекомендуемый следующий шаг: PR dev → main, затем `git tag v2.3.0`.
 
