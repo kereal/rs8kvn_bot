@@ -633,7 +633,9 @@ func (m *MockBotAPI) LastChattableSafe() tgbotapi.Chattable {
 func (m *MockBotAPI) GetAllSentMessages() []SentMessage {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.AllSentMessages
+	out := make([]SentMessage, len(m.AllSentMessages))
+	copy(out, m.AllSentMessages)
+	return out
 }
 
 // SetSendCalled sets the sendCalled flag (thread-safe).
