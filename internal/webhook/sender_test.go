@@ -87,7 +87,7 @@ func TestSender_SendAsync_Success(t *testing.T) {
 	event := Event{
 		EventID:           "evt-550e8400-e29b-41d4-a716-446655440000",
 		Event:             EventSubscriptionActivated,
-		UserID:            "user-123",
+		ClientID:          "user-123",
 		Email:             "test@example.com",
 		SubscriptionID: "token-abc",
 	}
@@ -104,7 +104,7 @@ func TestSender_SendAsync_Success(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, event.EventID, receivedEvent.EventID)
 	assert.Equal(t, event.Event, receivedEvent.Event)
-	assert.Equal(t, event.UserID, receivedEvent.UserID)
+	assert.Equal(t, event.ClientID, receivedEvent.ClientID)
 	assert.Equal(t, event.Email, receivedEvent.Email)
 	assert.Equal(t, event.SubscriptionID, receivedEvent.SubscriptionID)
 
@@ -136,7 +136,7 @@ func TestSender_SendAsync_RetryOnFailure(t *testing.T) {
 	event := Event{
 		EventID: "evt-retry-test",
 		Event:   EventSubscriptionExpired,
-		UserID:  "user-456",
+		ClientID:  "user-456",
 		Email:   "retry@example.com",
 	}
 
@@ -169,7 +169,7 @@ func TestSender_SendAsync_AllRetriesFail(t *testing.T) {
 	event := Event{
 		EventID: "evt-fail-test",
 		Event:   EventSubscriptionActivated,
-		UserID:  "user-789",
+		ClientID:  "user-789",
 		Email:   "fail@example.com",
 	}
 
@@ -229,7 +229,7 @@ func TestSender_SendAsync_PermanentError_NoRetry(t *testing.T) {
 			s.SendAsync(Event{
 				EventID: "evt-perm-test",
 				Event:   EventSubscriptionActivated,
-				UserID:  "user-perm",
+				ClientID:  "user-perm",
 				Email:   "perm@example.com",
 			})
 
@@ -271,7 +271,7 @@ func TestSender_SendAsync_TooManyRequests_Retried(t *testing.T) {
 	s.SendAsync(Event{
 		EventID: "evt-429-test",
 		Event:   EventSubscriptionActivated,
-		UserID:  "user-429",
+		ClientID:  "user-429",
 		Email:   "retry429@example.com",
 	})
 
@@ -349,7 +349,7 @@ func TestSender_SendAsync_Non2xxResponse(t *testing.T) {
 			s.SendAsync(Event{
 				EventID: "evt-status-test",
 				Event:   EventSubscriptionActivated,
-				UserID:  "user-test",
+				ClientID:  "user-test",
 				Email:   "status@example.com",
 			})
 
@@ -408,7 +408,7 @@ func TestSender_SendAsync_ConcurrentEvents(t *testing.T) {
 		s.SendAsync(Event{
 			EventID:           "evt-concurrent-" + string(rune('A'+i)),
 			Event:             EventSubscriptionActivated,
-			UserID:            "user-concurrent",
+			ClientID:            "user-concurrent",
 			Email:             "concurrent@example.com",
 			SubscriptionID: "token-concurrent",
 		})
@@ -458,7 +458,7 @@ func TestSender_SendAsync_EventDataIntegrity(t *testing.T) {
 	event := Event{
 		EventID:           "evt-550e8400-e29b-41d4-a716-446655440000",
 		Event:             EventSubscriptionUpdated,
-		UserID:            "550e8400-e29b-41d4-a716-446655440000",
+		ClientID:            "550e8400-e29b-41d4-a716-446655440000",
 		Email:             "user@example.com",
 		SubscriptionID: "abc123def456",
 	}
@@ -475,7 +475,7 @@ func TestSender_SendAsync_EventDataIntegrity(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, event.EventID, receivedEvent.EventID)
 	assert.Equal(t, event.Event, receivedEvent.Event)
-	assert.Equal(t, event.UserID, receivedEvent.UserID)
+	assert.Equal(t, event.ClientID, receivedEvent.ClientID)
 	assert.Equal(t, event.Email, receivedEvent.Email)
 	assert.Equal(t, event.SubscriptionID, receivedEvent.SubscriptionID)
 }
@@ -578,7 +578,7 @@ func TestSender_SendAsync_DuplicateEvent(t *testing.T) {
 	event := Event{
 		EventID: "evt-duplicate-test",
 		Event:   EventSubscriptionActivated,
-		UserID:  "user-dup",
+		ClientID:  "user-dup",
 	}
 
 	// Send the same event twice
@@ -611,7 +611,7 @@ func TestEvent_JSONMarshal(t *testing.T) {
 	event := Event{
 		EventID:           "evt-123",
 		Event:             EventSubscriptionActivated,
-		UserID:            "user-456",
+		ClientID:            "user-456",
 		Email:             "test@example.com",
 		SubscriptionID: "token-789",
 	}
@@ -625,7 +625,7 @@ func TestEvent_JSONMarshal(t *testing.T) {
 
 	assert.Equal(t, event.EventID, unmarshaled.EventID)
 	assert.Equal(t, event.Event, unmarshaled.Event)
-	assert.Equal(t, event.UserID, unmarshaled.UserID)
+	assert.Equal(t, event.ClientID, unmarshaled.ClientID)
 	assert.Equal(t, event.Email, unmarshaled.Email)
 	assert.Equal(t, event.SubscriptionID, unmarshaled.SubscriptionID)
 }
@@ -636,7 +636,7 @@ func TestEvent_JSONKeys(t *testing.T) {
 	event := Event{
 		EventID:           "evt-123",
 		Event:             EventSubscriptionActivated,
-		UserID:            "user-456",
+		ClientID:            "user-456",
 		Email:             "test@example.com",
 		SubscriptionID: "token-789",
 	}
@@ -651,7 +651,7 @@ func TestEvent_JSONKeys(t *testing.T) {
 
 	assert.Contains(t, raw, "event_id")
 	assert.Contains(t, raw, "event")
-	assert.Contains(t, raw, "user_id")
+	assert.Contains(t, raw, "client_id")
 	assert.Contains(t, raw, "email")
-	assert.Contains(t, raw, "subscription_token")
+	assert.Contains(t, raw, "subscription_id")
 }

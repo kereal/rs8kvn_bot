@@ -119,7 +119,7 @@ func (s *SubscriptionService) Create(ctx context.Context, chatID int64, username
 		s.webhook.SendAsync(Event{
 			EventID:        "evt-" + eventID,
 			Event:          webhook.EventSubscriptionActivated,
-			UserID:         sub.ClientID,
+			ClientID:       sub.ClientID,
 			Email:          XUIEmail(sub.Username, chatID),
 			SubscriptionID: sub.SubscriptionID,
 		})
@@ -174,7 +174,7 @@ func (s *SubscriptionService) Delete(ctx context.Context, telegramID int64) erro
 		s.webhook.SendAsync(Event{
 			EventID:        "evt-" + eventID,
 			Event:          webhook.EventSubscriptionExpired,
-			UserID:         clientID,
+			ClientID:       clientID,
 			Email:          XUIEmail(sub.Username, telegramID),
 			SubscriptionID: subscriptionID,
 		})
@@ -223,7 +223,7 @@ func (s *SubscriptionService) DeleteByID(ctx context.Context, id uint) (*databas
 		s.webhook.SendAsync(Event{
 			EventID:        "evt-" + eventID,
 			Event:          webhook.EventSubscriptionExpired,
-			UserID:         clientID,
+			ClientID:       clientID,
 			Email:          XUIEmail(username, deleted.TelegramID),
 			SubscriptionID: subscriptionID,
 		})
