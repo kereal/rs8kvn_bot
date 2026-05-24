@@ -37,8 +37,9 @@ func TestBackupDatabase(t *testing.T) {
 
 	// Check backup file exists
 	backupPath := dbPath + ".backup"
-	_, err = os.Stat(backupPath)
+	fi, err := os.Stat(backupPath)
 	require.NoError(t, err, "Backup file was not created")
+	assert.Equal(t, os.FileMode(0o600), fi.Mode().Perm(), "backup file mode should be 0600")
 
 	// Check backup content matches original
 	backupContent, err := os.ReadFile(backupPath)
