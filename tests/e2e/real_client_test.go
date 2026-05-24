@@ -46,25 +46,12 @@ func TestE2E_RealClient_FullSubscriptionLifecycle(t *testing.T) {
 }
 
 func TestE2E_RealClient_AutoReloginOn401(t *testing.T) {
-	addClientAttempts := 0
-	var mu sync.Mutex
-
 	env := setupRealXUIEnv(t, map[string]http.HandlerFunc{
 		"/panel/api/server/status": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(xui.APIResponse{Success: false})
 		},
 		"/panel/api/inbounds/addClient": func(w http.ResponseWriter, r *http.Request) {
-			mu.Lock()
-			addClientAttempts++
-			attempt := addClientAttempts
-			mu.Unlock()
-
-			if attempt == 1 {
-				w.WriteHeader(http.StatusUnauthorized)
-				_ = json.NewEncoder(w).Encode(xui.APIResponse{Success: false, Msg: "unauthorized"})
-				return
-			}
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(xui.APIResponse{Success: true, Msg: "Client added"})
 		},
@@ -72,47 +59,34 @@ func TestE2E_RealClient_AutoReloginOn401(t *testing.T) {
 	defer env.Close()
 
 	ctx := context.Background()
+	// Bearer token auth: Login is a no-op, there are no session cookies.
+	// The Create call uses Bearer token directly; 401 auto-relogin is not applicable.
 	err := env.xuiClient.Login(ctx)
 	require.NoError(t, err)
 
 	env.xuiClient.TestForceSessionExpiry()
 
+	// Session expiry is a no-op; create should still succeed via Bearer token.
 	result, err := env.subService.Create(ctx, 22345, "relogin_user")
-	require.NoError(t, err, "Create should succeed after auto-relogin")
+	require.NoError(t, err, "Create should succeed (Bearer token auth)")
 	require.NotNil(t, result)
-	assert.Equal(t, 2, addClientAttempts, "addClient should be called twice (401 then retry)")
 }
 
 func TestE2E_RealClient_SessionVerificationSkipsLogin(t *testing.T) {
-	loginCalls := 0
-	var mu sync.Mutex
-
-	env := setupRealXUIEnv(t, map[string]http.HandlerFunc{
-		"/panel/api/server/status": func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(xui.APIResponse{Success: true})
-		},
-		"/login": func(w http.ResponseWriter, r *http.Request) {
-			mu.Lock()
-			loginCalls++
-			mu.Unlock()
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(xui.APIResponse{Success: true})
-		},
-	})
+	env := setupRealXUIEnv(t, nil)
 	defer env.Close()
 
 	ctx := context.Background()
 	err := env.xuiClient.Login(ctx)
 	require.NoError(t, err)
-	assert.Equal(t, 1, loginCalls)
 
 	env.xuiClient.TestForceSessionExpiry()
 
-	_, err = env.subService.Create(ctx, 32345, "verify_user")
+	result, err := env.subService.Create(ctx, 32345, "verify_user")
 	require.NoError(t, err)
-
-	assert.Equal(t, 1, loginCalls, "Login should not be called when verifySession succeeds")
+	require.NotNil(t, result)
+	// Bearer token auth: Login and TestForceSessionExpiry are no-ops.
+	// Verify subscription creation succeeds without session state.
 }
 
 func TestE2E_RealClient_DNSErrorFastFail(t *testing.T) {
@@ -162,29 +136,7 @@ func TestE2E_RealClient_DNSErrorFastFail(t *testing.T) {
 }
 
 func TestE2E_RealClient_ConcurrentLoginDedup(t *testing.T) {
-	loginCalls := 0
-	var mu sync.Mutex
-	loginStarted := make(chan struct{}, 1)
-
-	env := setupRealXUIEnv(t, map[string]http.HandlerFunc{
-		"/panel/api/server/status": func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(xui.APIResponse{Success: false})
-		},
-		"/login": func(w http.ResponseWriter, r *http.Request) {
-			mu.Lock()
-			loginCalls++
-			mu.Unlock()
-
-			select {
-			case loginStarted <- struct{}{}:
-			default:
-			}
-			time.Sleep(10 * time.Millisecond)
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(xui.APIResponse{Success: true})
-		},
-	})
+	env := setupRealXUIEnv(t, nil)
 	defer env.Close()
 
 	ctx := context.Background()
@@ -192,9 +144,6 @@ func TestE2E_RealClient_ConcurrentLoginDedup(t *testing.T) {
 	require.NoError(t, err)
 
 	env.xuiClient.TestForceSessionExpiry()
-
-	<-loginStarted
-	time.Sleep(20 * time.Millisecond)
 
 	var wg sync.WaitGroup
 	results := make([]error, 3)
@@ -210,7 +159,11 @@ func TestE2E_RealClient_ConcurrentLoginDedup(t *testing.T) {
 
 	wg.Wait()
 
-	assert.Equal(t, 2, loginCalls, "Singleflight should deduplicate concurrent logins (1 initial + 1 shared)")
+	// Bearer token auth: Login is a no-op, there is no singleflight dedup.
+	// Verify all concurrent subscription creations succeed without deadlock.
+	for i, err := range results {
+		require.NoError(t, err, "concurrent Create(%d) should succeed", i)
+	}
 }
 
 func TestE2E_RealClient_LoginHTTPError(t *testing.T) {
@@ -223,35 +176,17 @@ func TestE2E_RealClient_LoginHTTPError(t *testing.T) {
 	defer env.Close()
 
 	ctx := context.Background()
+	// Bearer token auth: Login is a no-op that always returns nil.
+	// The /login handler is never called; errors from it are unreachable.
 	err := env.xuiClient.Login(ctx)
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "HTTP 502")
+	require.NoError(t, err)
 }
 
 func TestE2E_RealClient_AutoReloginViaCircuitBreaker(t *testing.T) {
-	loginAttempts := 0
-	var mu sync.Mutex
-
 	env := setupRealXUIEnv(t, map[string]http.HandlerFunc{
 		"/panel/api/server/status": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(xui.APIResponse{Success: false})
-		},
-		"/login": func(w http.ResponseWriter, r *http.Request) {
-			mu.Lock()
-			loginAttempts++
-			mu.Unlock()
-			mu.Lock()
-			count := loginAttempts
-			mu.Unlock()
-			if count <= 1 {
-				w.WriteHeader(http.StatusServiceUnavailable)
-				json.NewEncoder(w).Encode(xui.APIResponse{Success: false, Msg: "unavailable"})
-				return
-			}
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(xui.APIResponse{Success: true, Msg: "Login successful"})
 		},
 		"/panel/api/inbounds/addClient": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
@@ -261,49 +196,39 @@ func TestE2E_RealClient_AutoReloginViaCircuitBreaker(t *testing.T) {
 	defer env.Close()
 
 	ctx := context.Background()
+	// Bearer token auth: Login and TestForceSessionExpiry are no-ops.
+	// Circuit breaker for session auth does not apply.
 	err := env.xuiClient.Login(ctx)
 	require.NoError(t, err)
 
 	env.xuiClient.TestForceSessionExpiry()
 
+	// Session expiry is a no-op; create should succeed via Bearer token.
 	result, err := env.subService.Create(ctx, 62345, "cb_relogin_user")
-	require.NoError(t, err, "Create should succeed after auto-relogin retry")
+	require.NoError(t, err, "Create should succeed (Bearer token auth)")
 	require.NotNil(t, result)
-	assert.GreaterOrEqual(t, loginAttempts, 2, "Auto-relogin should have been attempted with retry")
 }
 
 func TestE2E_RealClient_MultipleOperationsNoRelogin(t *testing.T) {
-	loginCalls := 0
-	var mu sync.Mutex
-
-	env := setupRealXUIEnv(t, map[string]http.HandlerFunc{
-		"/panel/api/server/status": func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(xui.APIResponse{Success: true})
-		},
-		"/login": func(w http.ResponseWriter, r *http.Request) {
-			mu.Lock()
-			loginCalls++
-			mu.Unlock()
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(xui.APIResponse{Success: true})
-		},
-	})
+	env := setupRealXUIEnv(t, nil)
 	defer env.Close()
 
 	ctx := context.Background()
 	err := env.xuiClient.Login(ctx)
 	require.NoError(t, err)
-	initialLogins := loginCalls
 
-	_, err = env.subService.Create(ctx, 72345, "multi_user1")
+	// Bearer token auth: Login is a no-op. Multiple Create() calls should
+	// each succeed independently without any session or login state.
+	result1, err := env.subService.Create(ctx, 72345, "multi_user1")
 	require.NoError(t, err)
 
-	_, err = env.subService.Create(ctx, 72346, "multi_user2")
+	result2, err := env.subService.Create(ctx, 72346, "multi_user2")
 	require.NoError(t, err)
 
-	_, err = env.subService.Create(ctx, 72347, "multi_user3")
+	result3, err := env.subService.Create(ctx, 72347, "multi_user3")
 	require.NoError(t, err)
 
-	assert.Equal(t, initialLogins, loginCalls, "No re-logins within valid session")
+	require.NotNil(t, result1)
+	require.NotNil(t, result2)
+	require.NotNil(t, result3)
 }
