@@ -24,6 +24,11 @@ import (
 	gormlogger "gorm.io/gorm/logger"
 )
 
+// ErrInviteNotFound is the sentinel returned (via errors.Is) by GetInviteByCode
+// when the invite code does not exist. Allows callers (e.g. handlers) to
+// distinguish "invalid code" (not found) from infrastructure/DB errors.
+var ErrInviteNotFound = errors.New("invite not found")
+
 //go:embed migrations/*.sql
 var migrationFiles embed.FS
 
@@ -523,10 +528,15 @@ func (s *Service) GetOrCreateInvite(ctx context.Context, referrerTGID int64, cod
 }
 
 // GetInviteByCode returns an invite by its code.
+// Returns ErrInviteNotFound (such that errors.Is(err, ErrInviteNotFound) is true)
+// when the code does not exist. Other errors are infrastructure failures (DB, etc).
 func (s *Service) GetInviteByCode(ctx context.Context, code string) (*Invite, error) {
 	var invite Invite
 	result := s.db.WithContext(ctx).Where("code = ?", code).First(&invite)
 	if result.Error != nil {
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return nil, ErrInviteNotFound
+		}
 		return nil, fmt.Errorf("failed to get invite by code: %w", result.Error)
 	}
 	return &invite, nil

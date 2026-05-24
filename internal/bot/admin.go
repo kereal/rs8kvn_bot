@@ -226,32 +226,36 @@ func (h *Handler) HandleBroadcast(ctx context.Context, update tgbotapi.Update) e
 	)
 
 	var (
-		successCount int64 = 0
-		failCount    int64 = 0
-		batchErr     error
-		cancelled    bool
+		successCount      int64 = 0
+		failCount         int64 = 0
+		batchErr          error
+		broadcastCancelled bool // set when ctx is cancelled mid-broadcast; guarantees we always reach wg.Wait() + final report
 	)
 	offset := 0
-forLoop:
 	for offset < int(totalCount) {
 		select {
 		case <-ctx.Done():
-			cancelled = true
-			break forLoop
+			broadcastCancelled = true
 		default:
+		}
+		if broadcastCancelled {
+			break
 		}
 
 		ids, err := h.db.GetTelegramIDsBatch(ctx, offset, batchSize)
 		if err != nil {
 			logger.Error("Failed to get telegram IDs batch", zap.Error(err))
 			batchErr = err
-			break forLoop
+			break
 		}
 
 		var wg sync.WaitGroup
 		sem := make(chan struct{}, broadcastConcurrency)
 
 		for _, telegramID := range ids {
+			if broadcastCancelled {
+				break
+			}
 			select {
 			case sem <- struct{}{}:
 				wg.Add(1)
@@ -277,17 +281,19 @@ forLoop:
 					time.Sleep(50 * time.Millisecond)
 				}(telegramID)
 			case <-ctx.Done():
-				cancelled = true
-				break forLoop
+				broadcastCancelled = true
 			}
 		}
 
 		wg.Wait()
+		if broadcastCancelled {
+			break
+		}
 		offset += batchSize
 	}
 
-	if cancelled {
-		h.SendMessage(ctx, chatID, fmt.Sprintf(`⚠️ Рассылка прервана!
+	if broadcastCancelled {
+		h.SendMessage(context.Background(), chatID, fmt.Sprintf(`⚠️ Рассылка прервана!
 
 📤 Отправлено: %d
 ❌ Ошибок: %d
@@ -298,7 +304,7 @@ forLoop:
 		return fmt.Errorf("broadcast cancelled")
 	}
 	if batchErr != nil {
-		h.SendMessage(ctx, chatID, fmt.Sprintf(`❌ Рассылка прервана из-за ошибки!
+		h.SendMessage(context.Background(), chatID, fmt.Sprintf(`❌ Рассылка прервана из-за ошибки!
 
 📤 Отправлено: %d
 ❌ Ошибок отправки: %d
@@ -318,7 +324,7 @@ forLoop:
 		return fmt.Errorf("broadcast batch error: %w", batchErr)
 	}
 
-	h.SendMessage(ctx, chatID, fmt.Sprintf(`✅ Рассылка завершена!
+	h.SendMessage(context.Background(), chatID, fmt.Sprintf(`✅ Рассылка завершена!
 
 📤 Отправлено: %d
 ❌ Ошибок: %d

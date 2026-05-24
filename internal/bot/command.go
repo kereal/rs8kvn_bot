@@ -2,6 +2,7 @@ package bot
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -9,6 +10,7 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"go.uber.org/zap"
 
+	"rs8kvn_bot/internal/database"
 	"rs8kvn_bot/internal/logger"
 )
 
@@ -166,15 +168,26 @@ func (c *CommandHandler) handleShareStart(ctx context.Context, chatID int64, use
 	// Validate invite code
 	invite, err := c.h.db.GetInviteByCode(ctx, inviteCode)
 	if err != nil {
-		logger.Warn("Invalid invite code in share link",
+		if errors.Is(err, database.ErrInviteNotFound) {
+			logger.Warn("Invalid invite code in share link",
+				zap.String("invite_code", inviteCode),
+				zap.Error(err))
+
+			text, keyboard := c.h.getMainMenuContent(username, false, chatID)
+			msg := tgbotapi.NewMessage(chatID, text)
+			msg.ReplyMarkup = &keyboard
+			c.h.send(ctx, msg)
+			return nil
+		}
+		// Infra error (DB down, etc) — log full, do not treat as "invalid code"
+		logger.Error("Failed to validate invite code (infrastructure error)",
 			zap.String("invite_code", inviteCode),
 			zap.Error(err))
-
 		text, keyboard := c.h.getMainMenuContent(username, false, chatID)
 		msg := tgbotapi.NewMessage(chatID, text)
 		msg.ReplyMarkup = &keyboard
 		c.h.send(ctx, msg)
-		return nil
+		return fmt.Errorf("get invite by code: %w", err)
 	}
 
 	// Cache invite code for 60 minutes for later reward
@@ -216,8 +229,8 @@ func (c *CommandHandler) handleBindTrial(ctx context.Context, chatID int64, user
 		zap.String("username", username),
 		zap.String("subscription_id", subscriptionID))
 
-	// Check existing subscription
-	if existing, err := c.h.db.GetByTelegramID(ctx, chatID); err == nil && existing != nil {
+	// Check existing subscription — only truly active ones block trial bind (expired/cancelled allow re-trial)
+	if existing, err := c.h.db.GetByTelegramID(ctx, chatID); err == nil && existing != nil && existing.IsActive() {
 		logger.Warn("User already has active subscription, skipping trial bind",
 			zap.Int64("chat_id", chatID),
 			zap.String("existing_sub_id", existing.SubscriptionID))

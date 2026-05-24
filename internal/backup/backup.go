@@ -102,7 +102,6 @@ func BackupDatabase(ctx context.Context, dbPath string) error {
 	}
 
 	backupPath := dbPath + ".backup"
-	tempPath := backupPath + ".tmp"
 
 	// Open source database
 	// #nosec G304 -- File path is validated by validatePath() above to prevent directory traversal
@@ -118,12 +117,15 @@ func BackupDatabase(ctx context.Context, dbPath string) error {
 		}
 	}()
 
-	// Create temp backup file with secure permissions (0600 - owner only)
-	// #nosec G304 -- tempPath is derived from validated dbPath and is safe
-	dst, err := os.OpenFile(tempPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+	// Create unpredictable temp file in same dir via CreateTemp (O_EXCL, no predictable name)
+	// to close symlink/hardlink TOCTOU race window that existed with fixed tempPath + OpenFile(O_CREATE|TRUNC).
+	// #nosec G304 -- dir derived from validated dbPath
+	tmpDir := filepath.Dir(backupPath)
+	dst, err := os.CreateTemp(tmpDir, "db-*.backup.tmp")
 	if err != nil {
 		return fmt.Errorf("failed to create temp backup: %w", err)
 	}
+	tempPath := dst.Name()
 	defer func() {
 		if closeErr := dst.Close(); closeErr != nil {
 			logger.Error("Failed to close backup file",

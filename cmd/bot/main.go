@@ -282,15 +282,23 @@ func main() {
 	handler.StartRateLimiterCleanup(ctx, bot.CacheTTL, bot.CacheTTL*2)
 	handler.StartReferralCacheSync(ctx)
 
+	// wg tracks exactly these 5 long-lived background workers.
+	// All of them must exit (via ctx cancellation) before main returns,
+	// so we wait on wg at the end of graceful shutdown.
+	var wg sync.WaitGroup
+	wg.Add(5)
+
 	// Start subscription proxy extra servers reload loop (every 5 minutes)
 	go func() {
 		defer recoverAndReport("SubProxy server reload")
+		defer wg.Done()
 		subProxy.StartReloadLoop(5*time.Minute, ctx.Done())
 	}()
 
 	// Start orphaned XUI client reconciler (every 6 hours)
 	go func() {
 		defer recoverAndReport("Orphan reconciler")
+		defer wg.Done()
 		// Initial run after 30 seconds to let XUI settle
 		select {
 		case <-time.After(30 * time.Second):
@@ -328,9 +336,6 @@ func main() {
 	// Mark web server as ready after all components are initialized
 	webServer.SetReady(true)
 
-	var wg sync.WaitGroup
-	wg.Add(3)
-
 	// Channel to limit concurrent update handlers (worker pool)
 	// This prevents unbounded goroutine spawning
 	updateSem := make(chan struct{}, config.MaxConcurrentHandlers)
@@ -339,21 +344,21 @@ func main() {
 	backupSched := scheduler.NewBackupScheduler(cfg.DatabasePath, config.DefaultBackupHour, config.DefaultBackupRetention)
 	go func() {
 		defer recoverAndReport("Backup scheduler")
-		wg.Done()
+		defer wg.Done()
 		backupSched.Start(ctx)
 	}()
 
 	// Start heartbeat monitor
 	go func() {
 		defer recoverAndReport("Heartbeat scheduler")
-		wg.Done()
+		defer wg.Done()
 		heartbeat.Start(ctx, cfg.HeartbeatURL, cfg.HeartbeatInterval)
 	}()
 
 	// Start trial cleanup scheduler
 	go func() {
 		defer recoverAndReport("Trial cleanup scheduler")
-		wg.Done()
+		defer wg.Done()
 		trialSched := scheduler.NewTrialCleanupScheduler(dbService, xuiClient, cfg.TrialDurationHours)
 		trialSched.Start(ctx)
 	}()

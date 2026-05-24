@@ -260,35 +260,25 @@ Authorization: Bearer secret-token-here
 **Response 200 OK:**
 
 ```json
-[
-  {
-    "id": "uuid-1234-5678",           // Client ID (UUID)
-    "subscription_token": "sub_abc123...", // Subscription ID
-    "username": "john_doe",
-    "telegram_id": 123456789,
-    "traffic_limit_bytes": 32212254720,  // 30 GB
-    "traffic_used_bytes": 104857600,     // 100 MB
-    "expiry_time": "2026-05-17T00:00:00Z",
-    "status": "active",
-    "is_trial": false,
-    "created_at": "2026-04-10T12:00:00Z"
-  }
-]
+{
+  "subscriptions": [
+    {
+      "id": "uuid-1234-5678",
+      "email": "user@example.com",
+      "enabled": true,
+      "subscription_token": "sub_abc123..."
+    }
+  ]
+}
 ```
 
 **Fields:**
 | Field | Type | Description |
 |-------|------|-------------|
-| `id` | string | Client UUID (from 3x-ui) |
-| `subscription_token` | string | Subscription ID (for `/sub/` endpoint) |
-| `username` | string | Telegram username (without `@`) |
-| `telegram_id` | int64 | Telegram user ID |
-| `traffic_limit_bytes` | int64 | Monthly limit |
-| `traffic_used_bytes` | int64 | Currently used |
-| `expiry_time` | string (ISO 8601) | Expiry timestamp |
-| `status` | string | `active`, `revoked`, `expired` |
-| `is_trial` | bool | Trial flag |
-| `created_at` | string (ISO 8601) | Creation time |
+| `id` | string | Client ID (UUID from 3x-ui / ClientID field) |
+| `email` | string | Username (email-like identifier, maps to Username) |
+| `enabled` | bool | Whether subscription is active (matches IsActive()) |
+| `subscription_token` | string | Subscription ID (for `/sub/` endpoint / SubscriptionID) |
 
 **Response 401 Unauthorized:**
 
@@ -379,7 +369,7 @@ curl -s http://localhost:8880/healthz | jq
 **Get subscription (with token):**
 ```bash
 curl -H "Authorization: Bearer my-secret-token" \
-  http://localhost:8880/api/v1/subscriptions | jq '.[0] | {username, status}'
+  http://localhost:8880/api/v1/subscriptions | jq '.subscriptions[0] | {email, enabled}'
 ```
 
 **Trial page:**
