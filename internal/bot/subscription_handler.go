@@ -269,7 +269,7 @@ func (sh *SubscriptionHandler) createSubscription(ctx context.Context, chatID in
 	sh.h.pendingMu.Unlock()
 
 	sh.h.cache.Set(chatID, result.Subscription)
-	if err := sh.h.notifyAdmin(ctx, username, chatID, result.SubscriptionURL, time.Time{}); err != nil {
+	if err := sh.h.notifyAdmin(ctx, username, chatID, result.SubscriptionURL); err != nil {
 		logger.Warn("Failed to notify admin of new subscription", zap.Error(err))
 	}
 
