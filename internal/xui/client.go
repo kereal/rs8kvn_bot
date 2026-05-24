@@ -92,24 +92,33 @@ type Inbound struct {
 	Listen        string `json:"listen"`
 	Port         int    `json:"port"`
 	Protocol     string `json:"protocol"`
-	Settings     string `json:"settings"`
-	StreamSettings string `json:"streamSettings"`
+	Settings       json.RawMessage `json:"settings"`
+	StreamSettings json.RawMessage `json:"streamSettings"`
 	Tag          string `json:"tag"`
-	Sniffing      string `json:"sniffing"`
+	Sniffing     json.RawMessage `json:"sniffing"`
 }
 
 func (in *Inbound) GetTransport() string {
-	if in.StreamSettings == "" {
+	if len(in.StreamSettings) == 0 {
 		return ""
 	}
-	cleaned := strings.ReplaceAll(in.StreamSettings, "\\n", "\n")
-	var settings struct {
+
+	// Try modern format: StreamSettings is already a JSON object
+	var netSettings struct {
 		Network string `json:"network"`
 	}
-	if err := json.Unmarshal([]byte(cleaned), &settings); err != nil {
+	if err := json.Unmarshal(in.StreamSettings, &netSettings); err == nil && netSettings.Network != "" {
+		return netSettings.Network
+	}
+
+	// Fallback for old format: StreamSettings is a JSON string with escaped content
+	cleaned := strings.ReplaceAll(string(in.StreamSettings), "\\n", "\n")
+	if err := json.Unmarshal([]byte(cleaned), &netSettings); err != nil {
+		logger.Debug("GetTransport: failed to parse StreamSettings",
+			zap.Error(err))
 		return ""
 	}
-	return settings.Network
+	return netSettings.Network
 }
 
 func (in *Inbound) GetRequiredFlow() string {
