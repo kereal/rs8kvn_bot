@@ -365,7 +365,8 @@ func (s *SubscriptionService) BindTrial(ctx context.Context, subscriptionID stri
 	}
 
 	currentEmail := "trial_" + subscriptionID
-	if err := s.xui.UpdateClient(ctx, currentEmail, sub.ClientID, username, sub.SubscriptionID, trafficBytes, time.UnixMilli(0), chatID, comment); err != nil {
+	newEmail := XUIEmail(username, chatID)
+	if err := s.xui.UpdateClient(ctx, currentEmail, sub.ClientID, newEmail, sub.SubscriptionID, trafficBytes, time.UnixMilli(0), chatID, comment); err != nil {
 		logger.Warn("XUI UpdateClient failed, rolling back DB bind", zap.Error(err))
 
 		// Attempt to rollback the database bind to maintain consistency
