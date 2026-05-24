@@ -133,7 +133,7 @@ func (h *Handler) withTimeout(ctx context.Context) (context.Context, context.Can
 	return context.WithTimeout(ctx, HandlerTimeout)
 }
 
-// Command delegates
+// Command delegates (implemented in command.go after handler split)
 func (h *Handler) HandleStart(ctx context.Context, update tgbotapi.Update) error {
 	if h.cmdHandler != nil {
 		return h.cmdHandler.HandleStart(ctx, update)
@@ -155,19 +155,26 @@ func (h *Handler) HandleInvite(ctx context.Context, update tgbotapi.Update) erro
 	return errors.New("handler: cmdHandler is nil, cannot handle Invite")
 }
 
-// Command private delegates
+// Private delegations kept for test compatibility after handler split
 func (h *Handler) handleBindTrial(ctx context.Context, chatID int64, username, subscriptionID string) error {
 	if h.cmdHandler != nil {
 		return h.cmdHandler.handleBindTrial(ctx, chatID, username, subscriptionID)
 	}
-	return errors.New("handler: cmdHandler is nil, cannot handle BindTrial")
+	return errors.New("handler: cmdHandler is nil")
 }
 
 func (h *Handler) handleShareStart(ctx context.Context, chatID int64, username, inviteCode string) error {
 	if h.cmdHandler != nil {
 		return h.cmdHandler.handleShareStart(ctx, chatID, username, inviteCode)
 	}
-	return errors.New("handler: cmdHandler is nil, cannot handle ShareStart")
+	return errors.New("handler: cmdHandler is nil")
+}
+
+func (h *Handler) sendInviteLink(ctx context.Context, chatID int64, messageID int) error {
+	if h.referral != nil {
+		return h.referral.sendInviteLink(ctx, chatID, messageID)
+	}
+	return errors.New("handler: referral is nil")
 }
 
 // Callback delegate
@@ -265,12 +272,7 @@ func (h *Handler) generateInviteLink(ctx context.Context, chatID int64, lt linkT
 	return h.referral.generateInviteLink(ctx, chatID, lt)
 }
 
-func (h *Handler) sendInviteLink(ctx context.Context, chatID int64, messageID int) error {
-	h.referralOnce.Do(func() {
-		h.referral = NewReferralHandler(h.db, h.cfg, h.bot, h.botConfig, h.sender, h.keyboards)
-	})
-	return h.referral.sendInviteLink(ctx, chatID, messageID)
-}
+// sendInviteLink moved to command.go after handler split
 
 // Utility methods
 func (h *Handler) getUsername(user *tgbotapi.User) string {
@@ -328,32 +330,25 @@ func (h *Handler) getMainMenuContent(username string, hasSubscription bool, chat
 			h.keyboards = NewKeyboardBuilder("", "", "", "", "")
 		}
 	})
+
+	var text string
 	var keyboard tgbotapi.InlineKeyboardMarkup
+
 	if hasSubscription {
-		text = fmt.Sprintf(
-			"👋 Привет!%s\n\nЯ бот для выдачи подписок на прокси VLESS+Reality+Vision.\n\nИспользуйте кнопки ниже для взаимодействия с ботом.",
-			displayUsername(username),
-		)
+		text = msg(MsgStartGreeting, username)
 		keyboard = h.getMainMenuKeyboard(true)
 	} else {
-		text = fmt.Sprintf(
-			"👋 Привет!%s\n\nЯ бот для выдачи подписок на прокси VLESS+Reality+Vision.\n\nНажмите кнопку ниже, чтобы получить подписку",
-			displayUsername(username),
-		)
+		text = msg(MsgStartGreetingNoSub, username)
 		keyboard = tgbotapi.NewInlineKeyboardMarkup(
 			tgbotapi.NewInlineKeyboardRow(
 				tgbotapi.NewInlineKeyboardButtonData("📥 Получить подписку", "create_subscription"),
 			),
 		)
 	}
+
 	// Add admin buttons if the user is an admin
 	h.addAdminButtons(&keyboard, chatID)
-	var text string
-	if hasSubscription {
-		text = msg(MsgStartGreeting, username)
-	} else {
-		text = msg(MsgStartGreetingNoSub, username)
-	}
+
 	return text, keyboard
 }
 
@@ -564,11 +559,11 @@ func (h *Handler) HandleUpdate(ctx context.Context, update tgbotapi.Update) {
 		if update.Message.IsCommand() {
 			switch update.Message.Command() {
 			case "start":
-				err = h.HandleStart(ctx, update)
+				h.HandleStart(ctx, update)
 			case "help":
-				err = h.HandleHelp(ctx, update)
+				h.HandleHelp(ctx, update)
 			case "invite":
-				err = h.HandleInvite(ctx, update)
+				h.HandleInvite(ctx, update)
 			case "del":
 				err = h.HandleDel(ctx, update)
 			case "broadcast":
@@ -585,7 +580,7 @@ func (h *Handler) HandleUpdate(ctx context.Context, update tgbotapi.Update) {
 			}
 		} else {
 			// Non-command message: send help hint
-			err = h.HandleHelp(ctx, update)
+			h.HandleHelp(ctx, update)
 		}
 	} else if update.CallbackQuery != nil {
 		err = h.HandleCallback(ctx, update)
