@@ -202,10 +202,10 @@ func setupRealXUIEnv(t *testing.T, handlers map[string]http.HandlerFunc) *realXU
 				t.Fatalf("encode %s response: %v", "/panel/api/server/status", err)
 			}
 		},
-		"/panel/api/inbounds/addClient": func(w http.ResponseWriter, r *http.Request) {
+		"/panel/api/clients/add": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			if err := json.NewEncoder(w).Encode(xui.APIResponse{Success: true, Msg: "Client added"}); err != nil {
-				t.Fatalf("encode %s response: %v", "/panel/api/inbounds/addClient", err)
+				t.Fatalf("encode %s response: %v", "/panel/api/clients/add", err)
 			}
 		},
 	}
@@ -227,17 +227,12 @@ func setupRealXUIEnv(t *testing.T, handlers map[string]http.HandlerFunc) *realXU
 			return
 		}
 
-		if strings.HasPrefix(path, "/panel/api/inbounds/") && strings.Contains(path, "/delClient/") {
+		if strings.HasPrefix(path, "/panel/api/clients/del/") {
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(xui.APIResponse{Success: true, Msg: "Client deleted"})
 			return
 		}
-		if strings.HasPrefix(path, "/panel/api/inbounds/") && strings.Contains(path, "/updateClient/") {
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(xui.APIResponse{Success: true, Msg: "Client updated"})
-			return
-		}
-		if strings.HasPrefix(path, "/panel/api/inbounds/getClientTraffics/") {
+		if strings.HasPrefix(path, "/panel/api/clients/traffic/") {
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(xui.APIResponse{
 				Success: true,

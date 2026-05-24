@@ -430,7 +430,7 @@ func TestE2E_Service_Create_RollbackXUIOnDBError(t *testing.T) {
 		}, nil
 	}
 
-	env.xui.DeleteClientFunc = func(ctx context.Context, inboundID int, clientID string) error {
+	env.xui.DeleteClientFunc = func(ctx context.Context, email string) error {
 		return nil
 	}
 
@@ -464,7 +464,7 @@ func TestE2E_Service_Create_RollbackFailure_ReturnsError(t *testing.T) {
 		}, nil
 	}
 
-	env.xui.DeleteClientFunc = func(ctx context.Context, inboundID int, clientID string) error {
+	env.xui.DeleteClientFunc = func(ctx context.Context, email string) error {
 		return fmt.Errorf("rollback failed: connection refused")
 	}
 
