@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -97,8 +98,9 @@ func TestSubscriptionService_Create_DBError_RollbackSuccess(t *testing.T) {
 		AddClientWithIDFunc: func(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
 			return &xui.ClientConfig{ID: "client-123", SubID: "sub-456"}, nil
 		},
-		DeleteClientFunc: func(ctx context.Context, inboundID int, clientID string) error {
+		DeleteClientFunc: func(ctx context.Context, email string) error {
 			deleteCalled = true
+			assert.Equal(t, "testuser", email)
 			return nil
 		},
 	}
@@ -131,7 +133,7 @@ func TestSubscriptionService_Create_DBError_RollbackFailed(t *testing.T) {
 		AddClientWithIDFunc: func(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
 			return &xui.ClientConfig{ID: "client-123", SubID: "sub-456"}, nil
 		},
-		DeleteClientFunc: func(ctx context.Context, inboundID int, clientID string) error {
+		DeleteClientFunc: func(ctx context.Context, email string) error {
 			return errors.New("rollback failed")
 		},
 	}
@@ -210,10 +212,9 @@ func TestSubscriptionService_Delete_Success(t *testing.T) {
 		},
 	}
 	xuiClient := &testutil.MockXUIClient{
-		DeleteClientFunc: func(ctx context.Context, inboundID int, clientID string) error {
+		DeleteClientFunc: func(ctx context.Context, email string) error {
 			xuiDeleteCalled = true
-			assert.Equal(t, 1, inboundID)
-			assert.Equal(t, "client-123", clientID)
+			assert.Equal(t, "testuser", email)
 			return nil
 		},
 	}
@@ -264,8 +265,9 @@ func TestSubscriptionService_Delete_XUIError(t *testing.T) {
 		},
 	}
 	xuiClient := &testutil.MockXUIClient{
-		DeleteClientFunc: func(ctx context.Context, inboundID int, clientID string) error {
+		DeleteClientFunc: func(ctx context.Context, email string) error {
 			xuiDeleteCalled = true
+			assert.Equal(t, "tgId_123456", email)
 			return errors.New("xui connection refused")
 		},
 	}
@@ -298,7 +300,7 @@ func TestSubscriptionService_Delete_DBError(t *testing.T) {
 		},
 	}
 	xuiClient := &testutil.MockXUIClient{
-		DeleteClientFunc: func(ctx context.Context, inboundID int, clientID string) error {
+		DeleteClientFunc: func(ctx context.Context, email string) error {
 			xuiDeleteCalled = true
 			return nil
 		},
@@ -314,19 +316,18 @@ func TestSubscriptionService_Delete_DBError(t *testing.T) {
 	assert.False(t, xuiDeleteCalled, "XUI DeleteClient should not be called when DB delete fails")
 }
 
-func TestSubscriptionService_Delete_UsesSubscriptionInboundID(t *testing.T) {
+func TestSubscriptionService_Delete_UsesCorrectEmail(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{XUIInboundID: 1}
 
-	// Subscription has a different InboundID than the config default
 	sub := &database.Subscription{
 		TelegramID: 123456,
+		Username:   "testuser",
 		ClientID:   "client-456",
-		InboundID:  5, // different from cfg.XUIInboundID
 	}
 
-	var receivedInboundID int
+	var receivedEmail string
 	db := &testutil.MockDatabaseService{
 		GetByTelegramIDFunc: func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 			return sub, nil
@@ -336,8 +337,8 @@ func TestSubscriptionService_Delete_UsesSubscriptionInboundID(t *testing.T) {
 		},
 	}
 	xuiClient := &testutil.MockXUIClient{
-		DeleteClientFunc: func(ctx context.Context, inboundID int, clientID string) error {
-			receivedInboundID = inboundID
+		DeleteClientFunc: func(ctx context.Context, email string) error {
+			receivedEmail = email
 			return nil
 		},
 	}
@@ -346,22 +347,22 @@ func TestSubscriptionService_Delete_UsesSubscriptionInboundID(t *testing.T) {
 	err := svc.Delete(context.Background(), 123456)
 
 	assert.NoError(t, err)
-	assert.Equal(t, sub.InboundID, receivedInboundID, "DeleteClient should be called with subscription's InboundID, not cfg.XUIInboundID")
+	assert.Equal(t, "testuser", receivedEmail, "DeleteClient should receive XUIEmail(username, id) when username is real")
 }
 
-func TestSubscriptionService_Delete_FallsBackToConfigInboundID(t *testing.T) {
+func TestSubscriptionService_Delete_FallsBackToTgIdEmail(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{XUIInboundID: 1}
 
-	// Subscription has zero InboundID (e.g., migrated from old data)
+	// No real username → email must be tgId_ format
 	sub := &database.Subscription{
 		TelegramID: 123456,
 		ClientID:   "client-789",
-		InboundID:  0, // zero — should fall back to cfg.XUIInboundID
+		// Username empty on purpose
 	}
 
-	var receivedInboundID int
+	var receivedEmail string
 	db := &testutil.MockDatabaseService{
 		GetByTelegramIDFunc: func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 			return sub, nil
@@ -371,8 +372,8 @@ func TestSubscriptionService_Delete_FallsBackToConfigInboundID(t *testing.T) {
 		},
 	}
 	xuiClient := &testutil.MockXUIClient{
-		DeleteClientFunc: func(ctx context.Context, inboundID int, clientID string) error {
-			receivedInboundID = inboundID
+		DeleteClientFunc: func(ctx context.Context, email string) error {
+			receivedEmail = email
 			return nil
 		},
 	}
@@ -381,7 +382,7 @@ func TestSubscriptionService_Delete_FallsBackToConfigInboundID(t *testing.T) {
 	err := svc.Delete(context.Background(), 123456)
 
 	assert.NoError(t, err)
-	assert.Equal(t, cfg.XUIInboundID, receivedInboundID, "DeleteClient should fall back to cfg.XUIInboundID when sub.InboundID is zero")
+	assert.Equal(t, "tgId_123456", receivedEmail, "DeleteClient should receive tgId_ email when no real username")
 }
 
 func TestCalcTrialTraffic(t *testing.T) {
@@ -554,8 +555,9 @@ func TestSubscriptionService_CreateTrial_DBError(t *testing.T) {
 		AddClientWithIDFunc: func(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
 			return &xui.ClientConfig{ID: clientID, SubID: subID}, nil
 		},
-		DeleteClientFunc: func(ctx context.Context, inboundID int, clientID string) error {
+		DeleteClientFunc: func(ctx context.Context, email string) error {
 			deleteCalled = true
+			assert.True(t, strings.HasPrefix(email, "trial_"), "trial rollback must use trial_ email")
 			return nil
 		},
 		GetSubscriptionLinkFunc: func(host, subID, subPath string) string {

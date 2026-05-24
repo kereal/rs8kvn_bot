@@ -12,7 +12,8 @@
 - `doHTTPRequest(ctx, method, url, bodyFn)` — shared HTTP helper, sets Bearer token header
 - `RetryWithBackoff(ctx, maxRetries, initialDelay, fn)` — exponential backoff with jitter
 - `isRetryable(err)` — `net.DNSError` → false (fast-fail), timeout → true, "no such host" string → false
-- `Ping(ctx)` — GET `/panel/api/server/status` (replaces `verifySession`)
+- `Ping(ctx)` — GET `/panel/api/server/status`
+- Client creation migrated to new `/panel/api/clients/add` (2026-05): payload `{client: {id, email, subId, totalGB, expiryTime, ...}, inboundIds: [N]}` instead of legacy `/inbounds/addClient` + escaped settings string. AddClient* signatures and single-inbound-per-sub semantics unchanged for backward compat with bot service layer.
 
 ### Thread Safety
 - No shared mutable state — all fields immutable after construction
