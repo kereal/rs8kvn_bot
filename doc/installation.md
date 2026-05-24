@@ -345,7 +345,6 @@ Admin-only commands:
 - `/broadcast <msg>` — message all users
 - `/send <id|@username> <msg>` — private message
 - `/refstats` — referral statistics
-- `/plan` — set user plan
 
 ---
 

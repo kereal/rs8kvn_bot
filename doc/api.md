@@ -266,7 +266,6 @@ Authorization: Bearer secret-token-here
     "subscription_token": "sub_abc123...", // Subscription ID
     "username": "john_doe",
     "telegram_id": 123456789,
-    "plan": "basic",
     "traffic_limit_bytes": 32212254720,  // 30 GB
     "traffic_used_bytes": 104857600,     // 100 MB
     "expiry_time": "2026-05-17T00:00:00Z",
@@ -284,7 +283,6 @@ Authorization: Bearer secret-token-here
 | `subscription_token` | string | Subscription ID (for `/sub/` endpoint) |
 | `username` | string | Telegram username (without `@`) |
 | `telegram_id` | int64 | Telegram user ID |
-| `plan` | string | `free`, `basic`, `premium`, `vip` |
 | `traffic_limit_bytes` | int64 | Monthly limit |
 | `traffic_used_bytes` | int64 | Currently used |
 | `expiry_time` | string (ISO 8601) | Expiry timestamp |
@@ -381,7 +379,7 @@ curl -s http://localhost:8880/healthz | jq
 **Get subscription (with token):**
 ```bash
 curl -H "Authorization: Bearer my-secret-token" \
-  http://localhost:8880/api/v1/subscriptions | jq '.[0] | {username, plan}'
+  http://localhost:8880/api/v1/subscriptions | jq '.[0] | {username, status}'
 ```
 
 **Trial page:**
