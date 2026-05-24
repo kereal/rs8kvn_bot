@@ -211,14 +211,13 @@ Write response:
 - ☕ Donate, ❓ Help — auxiliary menus
 - 🔗 Referral system — share links with in-memory cache + periodic DB sync
 - 🎁 Trial subscriptions via `/i/{code}` landing page with Happ deep-links
-- 📊 Plan display (basic/premium/vip) per user (admin-settable via `/plan`)
+
 
 **Admin Features:**
 - `/del <id>` — delete subscription by ID
 - `/broadcast <msg>` — send message to all users (respects shutdown context)
 - `/send <id|username> <msg>` — private message (30s cooldown per admin)
 - `/refstats` — referral statistics (top 10 from cache)
-- `/plan` — set subscription plan for user
 - 📊 Stats — bot statistics
 
 **Infrastructure:**
@@ -266,7 +265,7 @@ All tests pass with `-race` detector. Fuzzing enabled for critical functions.
 - **No circuit breaker:** Removed in favor of simple `RetryWithBackoff` with exponential backoff + jitter
 - **Subscription defaults:** `reset: 30` (days from creation), `expiryTime: now + 30 days`
 - **Auto-reset:** Only works when `ExpiryTime > 0`. Traffic resets every 30 days, expiry extends (3x-ui auto-renew logic)
-- **Client email:** `trial_{subID}` for trial, `{username}` for regular, `plan_{subID}` for plan-based (future)
+- **Client email:** `trial_{subID}` for trial, `{username}` for regular
 - **Ping:** `Ping()` sends GET `/panel/api/server/status` with Bearer token — no session verification needed
 - **No singleflight:** Deduplication removed (no concurrent login to deduplicate)
 - **DNS error fast-fail:** Non-retryable errors fail immediately (no retry spam)
@@ -278,7 +277,6 @@ All tests pass with `-race` detector. Fuzzing enabled for critical functions.
 - **Trial cookie:** `rs8kvn_trial_{code}` prevents duplication for 3 hours (HttpOnly, Secure, SameSite=Strict)
 - **Atomic cleanup:** `DELETE ... RETURNING` for expired trials (prevent race with bind)
 - **Share referral:** `pendingInvites[chatID]` cached 60 min (in-memory, periodic cleanup prevents leak)
-- **Plan management:** Admin `/plan <username> <plan>` updates user plan (free/basic/premium/vip)
 
 ### Subscription Deletion (v2.2.0+)
 - **Order:** DB-first, then XUI-best-effort

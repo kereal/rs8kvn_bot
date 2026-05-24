@@ -15,9 +15,10 @@ import (
 	"testing"
 	"time"
 
+	"rs8kvn_bot/internal/logger"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"rs8kvn_bot/internal/logger"
 )
 
 func TestMain(m *testing.M) {
@@ -128,8 +129,8 @@ func TestGetExternalURL(t *testing.T) {
 		{"https://example.com:2053/path", "https://example.com:2053"},
 		{"http://localhost:2053", "http://localhost:2053"},
 		{"invalid-url", "invalid-url"},
-	{"https://example.com", "https://example.com"},
-	{"", ""},
+		{"https://example.com", "https://example.com"},
+		{"", ""},
 	}
 
 	for _, tt := range tests {
@@ -161,8 +162,8 @@ func TestIsRetryable(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name     string
-		err      error
+		name      string
+		err       error
 		retryable bool
 	}{
 		{"nil", nil, true},
@@ -179,8 +180,6 @@ func TestIsRetryable(t *testing.T) {
 		})
 	}
 }
-
-
 
 func TestRetryWithBackoff_Success(t *testing.T) {
 	t.Parallel()

@@ -32,7 +32,7 @@ ss://base64@server3.example.com:8080
 `
 	tmpDir := t.TempDir()
 	filePath := filepath.Join(tmpDir, "config.txt")
-	err := os.WriteFile(filePath, []byte(content), 0644)
+	err := os.WriteFile(filePath, []byte(content), 0600)
 	require.NoError(t, err)
 
 	cfg, err := LoadExtraConfig(filePath)
@@ -55,7 +55,7 @@ func TestLoadExtraConfig_OnlyHeaders(t *testing.T) {
 `
 	tmpDir := t.TempDir()
 	filePath := filepath.Join(tmpDir, "config.txt")
-	err := os.WriteFile(filePath, []byte(content), 0644)
+	err := os.WriteFile(filePath, []byte(content), 0600)
 	require.NoError(t, err)
 
 	cfg, err := LoadExtraConfig(filePath)
@@ -74,7 +74,7 @@ trojan://pass@server2.com:443
 `
 	tmpDir := t.TempDir()
 	filePath := filepath.Join(tmpDir, "config.txt")
-	err := os.WriteFile(filePath, []byte(content), 0644)
+	err := os.WriteFile(filePath, []byte(content), 0600)
 	require.NoError(t, err)
 
 	cfg, err := LoadExtraConfig(filePath)
@@ -101,7 +101,7 @@ http://not-a-proxy-link
 `
 	tmpDir := t.TempDir()
 	filePath := filepath.Join(tmpDir, "config.txt")
-	err := os.WriteFile(filePath, []byte(content), 0644)
+	err := os.WriteFile(filePath, []byte(content), 0600)
 	require.NoError(t, err)
 
 	cfg, err := LoadExtraConfig(filePath)
@@ -122,7 +122,7 @@ vless://server@example.com:443
 `
 	tmpDir := t.TempDir()
 	filePath := filepath.Join(tmpDir, "config.txt")
-	err := os.WriteFile(filePath, []byte(content), 0644)
+	err := os.WriteFile(filePath, []byte(content), 0600)
 	require.NoError(t, err)
 
 	cfg, err := LoadExtraConfig(filePath)

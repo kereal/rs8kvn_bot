@@ -568,3 +568,14 @@ func RetryWithBackoff(ctx context.Context, maxRetries int, initialDelay time.Dur
 
 	return fmt.Errorf("after %d retries: %w", maxRetries, lastErr)
 }
+
+// Login and TestForceSessionExpiry are no-op stubs kept temporarily
+// for e2e test compatibility after the move to Bearer token auth.
+// They can be removed once the e2e tests are updated to the new auth model.
+func (c *Client) Login(ctx context.Context) error {
+	return nil
+}
+
+func (c *Client) TestForceSessionExpiry() {
+	// no-op in the new token-based client
+}

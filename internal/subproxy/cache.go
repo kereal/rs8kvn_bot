@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"sync"
 	"time"
+
+	"rs8kvn_bot/internal/metrics"
 )
 
 type cacheEntry struct {
@@ -35,9 +37,11 @@ func (c *Cache) Get(key string) ([]byte, map[string]string, bool) {
 
 	entry, ok := c.entries[key]
 	if !ok {
+		metrics.CacheMissesTotal.WithLabelValues("subproxy").Inc()
 		return nil, nil, false
 	}
 	if time.Now().After(entry.expiresAt) {
+		metrics.CacheMissesTotal.WithLabelValues("subproxy").Inc()
 		return nil, nil, false
 	}
 
@@ -45,6 +49,7 @@ func (c *Cache) Get(key string) ([]byte, map[string]string, bool) {
 	for k, v := range entry.headers {
 		headersCopy[k] = v
 	}
+	metrics.CacheHitsTotal.WithLabelValues("subproxy").Inc()
 	return entry.body, headersCopy, true
 }
 

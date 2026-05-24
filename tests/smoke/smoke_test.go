@@ -2,6 +2,7 @@ package smoke
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -22,7 +23,15 @@ func TestMain(m *testing.M) {
 		os.Stderr.WriteString("Failed to create temp dir: " + err.Error() + "\n")
 		os.Exit(1)
 	}
-	defer os.RemoveAll(dir)
+	cleanup := func() {
+		if err := os.RemoveAll(dir); err != nil {
+			_, werr := os.Stderr.WriteString("Failed to cleanup temp dir: " + err.Error() + "\n")
+			if werr != nil {
+				// Fallback to stdout if stderr is unavailable
+				fmt.Fprintln(os.Stdout, "Failed to cleanup temp dir:", err.Error())
+			}
+		}
+	}
 
 	binPath = filepath.Join(dir, "bot_test")
 	build := exec.Command("go", "build", "-o", binPath, "./cmd/bot")
@@ -31,10 +40,13 @@ func TestMain(m *testing.M) {
 	build.Stderr = os.Stderr
 	if err := build.Run(); err != nil {
 		os.Stderr.WriteString("Failed to build binary: " + err.Error() + "\n")
+		cleanup()
 		os.Exit(1)
 	}
 
-	os.Exit(m.Run())
+	code := m.Run()
+	cleanup()
+	os.Exit(code)
 }
 
 func TestSmoke_BinaryStartup(t *testing.T) {

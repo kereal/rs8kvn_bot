@@ -102,7 +102,6 @@ func BackupDatabase(ctx context.Context, dbPath string) error {
 	}
 
 	backupPath := dbPath + ".backup"
-	tempPath := backupPath + ".tmp"
 
 	// Open source database
 	// #nosec G304 -- File path is validated by validatePath() above to prevent directory traversal
@@ -118,12 +117,15 @@ func BackupDatabase(ctx context.Context, dbPath string) error {
 		}
 	}()
 
-	// Create temp backup file
-	// #nosec G304 -- tempPath is derived from validated dbPath and is safe
-	dst, err := os.Create(tempPath)
+	// Create unpredictable temp file in same dir via CreateTemp (O_EXCL, no predictable name)
+	// to close symlink/hardlink TOCTOU race window that existed with fixed tempPath + OpenFile(O_CREATE|TRUNC).
+	// #nosec G304 -- dir derived from validated dbPath
+	tmpDir := filepath.Dir(backupPath)
+	dst, err := os.CreateTemp(tmpDir, "db-*.backup.tmp")
 	if err != nil {
 		return fmt.Errorf("failed to create temp backup: %w", err)
 	}
+	tempPath := dst.Name()
 	defer func() {
 		if closeErr := dst.Close(); closeErr != nil {
 			logger.Error("Failed to close backup file",
@@ -170,6 +172,14 @@ func BackupDatabase(ctx context.Context, dbPath string) error {
 		return fmt.Errorf("failed to rename backup: %w", err)
 	}
 
+	// Ensure backup file has secure permissions (0600)
+	if err := os.Chmod(backupPath, 0600); err != nil {
+		logger.Error("Failed to set backup file permissions",
+			zap.String("path", backupPath),
+			zap.Error(err))
+		return fmt.Errorf("failed to set secure permissions on backup: %w", err)
+	}
+
 	logger.Info("Database backup created", zap.String("path", backupPath))
 	return nil
 }
@@ -194,6 +204,14 @@ func RotateBackups(dbPath string, keep int) error {
 
 	if err := os.Rename(basePath, timedBackupPath); err != nil {
 		return fmt.Errorf("failed to rename backup: %w", err)
+	}
+
+	// Ensure rotated backup has secure permissions
+	if err := os.Chmod(timedBackupPath, 0600); err != nil {
+		logger.Error("Failed to set rotated backup file permissions",
+			zap.String("path", timedBackupPath),
+			zap.Error(err))
+		return fmt.Errorf("failed to set secure permissions on rotated backup: %w", err)
 	}
 
 	logger.Info("Rotated backup", zap.String("path", timedBackupPath))
