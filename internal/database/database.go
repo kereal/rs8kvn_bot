@@ -544,7 +544,7 @@ func (s *Service) GetInviteByReferrer(ctx context.Context, referrerTGID int64) (
 	var invite Invite
 	result := s.db.WithContext(ctx).
 		Where("referrer_tg_id = ?", referrerTGID).
-		Order("created_at ASC").
+		Order("created_at ASC, id ASC").
 		First(&invite)
 	if result.Error != nil {
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {

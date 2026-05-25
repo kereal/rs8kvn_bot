@@ -183,9 +183,11 @@ func normalizePath(p string) string {
 	if strings.HasPrefix(p, "/i/") {
 		return "/i/:code"
 	}
+
 	if strings.HasPrefix(p, "/sub/") {
 		return "/sub/:id"
 	}
+
 	// Static/known paths pass through unchanged
 	return p
 }
@@ -193,6 +195,7 @@ func normalizePath(p string) string {
 // responseRecorder wraps ResponseWriter to capture status code.
 type responseRecorder struct {
 	http.ResponseWriter
+
 	statusCode int
 }
 

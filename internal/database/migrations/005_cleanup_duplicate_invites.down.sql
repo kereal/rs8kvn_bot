@@ -1,7 +1,5 @@
 -- 005_cleanup_duplicate_invites.down.sql
--- Reversible part: drop the unique index.
--- The data cleanup (deletion of duplicate codes) is intentionally NOT reversed —
--- once old codes are gone they stay gone. Re-creating duplicates would re-introduce
--- the original bug.
-
-DROP INDEX IF EXISTS idx_invites_referrer_unique;
+-- Since migration 005 is a no-op (all deduplication + unique index creation
+-- was moved to migration 004), rolling back 005 should also be a no-op.
+-- The unique index idx_invites_referrer_unique is owned by migration 004,
+-- not 005, so dropping it here would violate the versioning contract.
