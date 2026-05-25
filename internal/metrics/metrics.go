@@ -143,11 +143,16 @@ var (
 		},
 	)
 
-	// TrialConversionsTotal is a counter of trial conversions to paid subscriptions.
 	TrialConversionsTotal = promauto.NewCounter(
 		prometheus.CounterOpts{
 			Name: "trial_conversions_total",
 			Help: "Total number of trial conversions to paid subscriptions",
+		},
+	)
+	OrphanedClientsRemovedTotal = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "bot_orphaned_clients_removed_total",
+			Help: "Total number of orphaned XUI clients/subscriptions removed during reconciliation",
 		},
 	)
 )

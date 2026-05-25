@@ -10,6 +10,7 @@ import (
 	"rs8kvn_bot/internal/database"
 	"rs8kvn_bot/internal/interfaces"
 	"rs8kvn_bot/internal/logger"
+	"rs8kvn_bot/internal/metrics"
 	"rs8kvn_bot/internal/utils"
 	"rs8kvn_bot/internal/webhook"
 	"rs8kvn_bot/internal/xui"
@@ -223,8 +224,8 @@ func (s *SubscriptionService) GetWithTraffic(ctx context.Context, telegramID int
 		return nil, nil, err
 	}
 
-	// Get traffic from XUI
-	traffic, err := s.xui.GetClientTraffic(ctx, sub.Username)
+	email := XUIEmail(sub.Username, sub.TelegramID)
+	traffic, err := s.xui.GetClientTraffic(ctx, email)
 	if err != nil {
 		//nolint:nilerr // Intentionally return zero traffic when XUI fails - better UX than error
 		// Return subscription with zero traffic instead of failing
@@ -420,7 +421,6 @@ func (s *SubscriptionService) InvalidateSubscription(ctx context.Context, telegr
 // client no longer exists in the XUI panel. It returns the number of removed subscriptions.
 // This is a best-effort background cleanup; errors are logged but do not stop the scan.
 func (s *SubscriptionService) ReconcileOrphanedClients(ctx context.Context) (int, error) {
-	// Fetch all subscriptions (this is a background task; memory usage is acceptable)
 	allSubs, err := s.db.GetAllSubscriptions(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("failed to fetch subscriptions: %w", err)
@@ -428,40 +428,53 @@ func (s *SubscriptionService) ReconcileOrphanedClients(ctx context.Context) (int
 
 	removed := 0
 	for _, sub := range allSubs {
-		// Only consider active subscriptions
 		if sub.Status != "active" {
 			continue
 		}
 
-		// Probe XUI: lightweight GetClientTraffic to check existence
-		_, err := s.xui.GetClientTraffic(ctx, sub.Username)
+		var xuiEmail string
+		if sub.IsTrial || sub.TelegramID == 0 {
+			if sub.SubscriptionID == "" {
+				continue
+			}
+			xuiEmail = "trial_" + sub.SubscriptionID
+		} else {
+			xuiEmail = XUIEmail(sub.Username, sub.TelegramID)
+		}
+		if xuiEmail == "" {
+			continue
+		}
+
+		_, err := s.xui.GetClientTraffic(ctx, xuiEmail)
 		if err != nil {
 			errMsg := strings.ToLower(err.Error())
 			if strings.Contains(errMsg, "client not found") {
-				// Client missing in XUI → orphaned DB record; delete it
-				if delErr := s.db.DeleteSubscription(ctx, sub.TelegramID); delErr != nil {
+				if _, delErr := s.db.DeleteSubscriptionByID(ctx, sub.ID); delErr != nil {
 					logger.Warn("Failed to delete orphaned subscription",
 						zap.Error(delErr),
-						zap.Int64("telegram_id", sub.TelegramID))
+						zap.Uint("id", sub.ID),
+						zap.Int64("telegram_id", sub.TelegramID),
+						zap.String("subscription_id", sub.SubscriptionID),
+						zap.Bool("is_trial", sub.IsTrial))
 				} else {
 					removed++
 					logger.Info("Removed orphaned subscription (XUI client missing)",
+						zap.Uint("id", sub.ID),
 						zap.Int64("telegram_id", sub.TelegramID),
-						zap.String("username", sub.Username))
-					// Invalidate cache so subsequent reads don't return stale data
-					if s.invalidate != nil {
+						zap.String("username", sub.Username),
+						zap.String("subscription_id", sub.SubscriptionID))
+					if s.invalidate != nil && !sub.IsTrial && sub.TelegramID != 0 {
 						s.invalidate(sub.TelegramID)
 					}
+					metrics.OrphanedClientsRemovedTotal.Inc()
 				}
 			} else {
-				// Other error (network, auth, etc.) — log and continue
 				logger.Debug("Error checking XUI client, skipping",
 					zap.Error(err),
 					zap.Int64("telegram_id", sub.TelegramID))
 			}
 		}
 
-		// Respect context cancellation
 		if ctx.Err() != nil {
 			return removed, ctx.Err()
 		}

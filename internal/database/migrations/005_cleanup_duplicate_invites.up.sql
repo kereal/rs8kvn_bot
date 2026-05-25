@@ -1,0 +1,11 @@
+-- 005_cleanup_duplicate_invites.up.sql
+--
+-- HISTORICAL NOTE:
+-- Deduplication of duplicate invite codes and creation of the unique index
+-- on referrer_tg_id were moved into migration 004 (for safety on legacy DBs).
+--
+-- This migration (005) is now a no-op placeholder.
+-- It exists only to keep the migration history linear for databases that
+-- may have partially applied older versions of 004/005 during the fix period.
+--
+-- All future databases will get correct deduplication + unique index from 004.
