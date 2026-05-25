@@ -255,8 +255,7 @@ func main() {
 	case err := <-webServerStartErr:
 		logger.Warn("Failed to start web server, continuing without web server", zap.Error(err))
 	case <-time.After(2 * time.Second):
-		// Web server started successfully in background
-		logger.Info("Web server started", zap.Int("port", cfg.HealthCheckPort))
+		logger.Info("Web server started", zap.String("addr", webServer.Addr()), zap.Int("port", cfg.HealthCheckPort))
 	}
 	defer func() {
 		webServer.SetReady(false)
