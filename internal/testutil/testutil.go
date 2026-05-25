@@ -72,7 +72,10 @@ type MockDatabaseService struct {
 	GetTelegramIDsBatchFunc             func(ctx context.Context, offset, limit int) ([]int64, error)
 	GetTotalTelegramIDCountFunc         func(ctx context.Context) (int64, error)
 	GetOrCreateInviteFunc               func(ctx context.Context, referrerTGID int64, code string) (*database.Invite, error)
+	GetInviteByReferrerFunc             func(ctx context.Context, referrerTGID int64) (*database.Invite, error)
 	GetInviteByCodeFunc                 func(ctx context.Context, code string) (*database.Invite, error)
+	GetReferralCountFunc                func(ctx context.Context, referrerTGID int64) (int64, error)
+	GetAllReferralCountsFunc            func(ctx context.Context) (map[int64]int64, error)
 	CreateTrialSubscriptionFunc         func(ctx context.Context, inviteCode, subscriptionID, clientID string, inboundID int, trafficBytes int64, expiryTime time.Time, subURL string) (*database.Subscription, error)
 	GetSubscriptionBySubscriptionIDFunc func(ctx context.Context, subscriptionID string) (*database.Subscription, error)
 	GetTrialSubscriptionBySubIDFunc     func(ctx context.Context, subscriptionID string) (*database.Subscription, error)
@@ -82,9 +85,7 @@ type MockDatabaseService struct {
 	CleanupExpiredTrialsFunc            func(ctx context.Context, hours int, xuiClient interface {
 		DeleteClient(ctx context.Context, email string) error
 	}) (int64, error)
-	GetPoolStatsFunc         func() (*database.PoolStats, error)
-	GetReferralCountFunc     func(ctx context.Context, referrerTGID int64) (int64, error)
-	GetAllReferralCountsFunc func(ctx context.Context) (map[int64]int64, error)
+	GetPoolStatsFunc                    func() (*database.PoolStats, error)
 }
 
 func (m *MockDatabaseService) Ping(ctx context.Context) error {
@@ -302,6 +303,13 @@ func (m *MockDatabaseService) GetInviteByCode(ctx context.Context, code string) 
 		return m.GetInviteByCodeFunc(ctx, code)
 	}
 	return nil, gorm.ErrRecordNotFound
+}
+
+func (m *MockDatabaseService) GetInviteByReferrer(ctx context.Context, referrerTGID int64) (*database.Invite, error) {
+	if m.GetInviteByReferrerFunc != nil {
+		return m.GetInviteByReferrerFunc(ctx, referrerTGID)
+	}
+	return nil, database.ErrInviteNotFound
 }
 
 func (m *MockDatabaseService) CreateTrialSubscription(ctx context.Context, inviteCode, subscriptionID, clientID string, inboundID int, trafficBytes int64, expiryTime time.Time, subURL string) (*database.Subscription, error) {

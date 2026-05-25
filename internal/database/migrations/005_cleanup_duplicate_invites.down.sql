@@ -1,0 +1,5 @@
+-- 005_cleanup_duplicate_invites.down.sql
+-- Since migration 005 is a no-op (all deduplication + unique index creation
+-- was moved to migration 004), rolling back 005 should also be a no-op.
+-- The unique index idx_invites_referrer_unique is owned by migration 004,
+-- not 005, so dropping it here would violate the versioning contract.

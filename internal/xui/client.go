@@ -196,7 +196,7 @@ func (c *Client) doHTTPRequest(ctx context.Context, method, url string, bodyFn f
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return respBody, fmt.Errorf("server returned HTTP %d: %s", resp.StatusCode, truncateString(string(respBody), 200))
+		return respBody, fmt.Errorf("server returned HTTP %d: %s (url: %s)", resp.StatusCode, truncateString(string(respBody), 200), url)
 	}
 
 	return respBody, nil
