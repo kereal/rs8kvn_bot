@@ -1150,6 +1150,47 @@ func TestService_GetOrCreateInvite(t *testing.T) {
 	assert.Equal(t, "TESTCODE123", invite2.Code)
 }
 
+func TestService_GetInviteByReferrer(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	// Normal case: first creation
+	invite, err := svc.GetOrCreateInvite(ctx, 77777, "FIRSTCODE")
+	require.NoError(t, err)
+	assert.Equal(t, "FIRSTCODE", invite.Code)
+
+	// GetInviteByReferrer should return it
+	found, err := svc.GetInviteByReferrer(ctx, 77777)
+	require.NoError(t, err)
+	assert.Equal(t, "FIRSTCODE", found.Code)
+	assert.Equal(t, int64(77777), found.ReferrerTGID)
+
+	// Simulate historical duplicates (pre-005 situation) by raw insert after temporarily dropping the unique constraint
+	sqlDB, err := svc.db.DB()
+	require.NoError(t, err)
+
+	// Drop unique index if it exists (migration 005 creates it)
+	_, _ = sqlDB.Exec(`DROP INDEX IF EXISTS idx_invites_referrer_unique`)
+
+	// Insert two older codes for the same referrer (different created_at)
+	_, err = sqlDB.Exec(`
+		INSERT INTO invites (code, referrer_tg_id, created_at) VALUES 
+		('OLDCODE1', 77777, '2024-01-01 00:00:00'),
+		('OLDCODE2', 77777, '2024-06-01 00:00:00')
+	`)
+	require.NoError(t, err)
+
+	// Even with duplicates present, GetInviteByReferrer must return the oldest one
+	oldest, err := svc.GetInviteByReferrer(ctx, 77777)
+	require.NoError(t, err)
+	assert.Equal(t, "OLDCODE1", oldest.Code, "GetInviteByReferrer must return the oldest code by created_at")
+
+	// Restore the index for other tests (not strictly necessary in this isolated test DB, but good hygiene)
+	_, _ = sqlDB.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_invites_referrer_unique ON invites(referrer_tg_id)`)
+}
+
 func TestService_GetInviteByCode(t *testing.T) {
 	t.Parallel()
 

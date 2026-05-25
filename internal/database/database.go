@@ -96,16 +96,15 @@ func (TrialRequest) TableName() string {
 }
 
 // runMigrations applies the embedded SQL schema migrations to the provided database,
-// handling legacy subscriptions-table adjustments and skipping newer referral migrations
-// when referral-related columns already exist.
+// handling legacy subscriptions-table adjustments and one-time referral bootstrap.
 //
-// When an older subscriptions table is detected, it attempts legacy adjustments such as
-// adding a subscription_id column and migrating values from subscription_url. If any of
-// the referral columns (`invite_code`, `is_trial`, `referred_by`) are already present,
-// the function resets the migrations state to version 3 and skips applying embedded migrations.
+// When an older subscriptions table is detected, it performs manual legacy adjustments
+// (e.g. adding subscription_id). If referral columns (`invite_code`, `is_trial`, `referred_by`)
+// were added outside of migrations (before 003 existed), it performs a one-time m.Force(3)
+// bootstrap. Unlike the previous hack, it does NOT early-return — this ensures that
+// all subsequent embedded migrations (004, 005, ...) are still applied on legacy DBs.
 //
-// The function returns an error if creating migration drivers, reading or applying the
-// embedded migrations, or other migration setup steps fail.
+// The function returns an error if creating migration drivers or applying migrations fails.
 func runMigrations(sqlDB *sql.DB) error {
 	var err error
 
@@ -164,7 +163,7 @@ func runMigrations(sqlDB *sql.DB) error {
 		logger.Info("No legacy migration needed - fresh database")
 	}
 
-	// Check if referral columns already exist
+	// Check if referral columns already exist (used only for legacy bootstrap detection)
 	var hasInviteCode, hasIsTrial, hasReferredBy int
 	if tableExists > 0 {
 		if err := sqlDB.QueryRow("SELECT COUNT(*) FROM pragma_table_info('subscriptions') WHERE name = 'invite_code'").Scan(&hasInviteCode); err != nil {
@@ -178,17 +177,43 @@ func runMigrations(sqlDB *sql.DB) error {
 		}
 	}
 
-	// If referral columns exist, we need to skip migration 003
-	if hasInviteCode > 0 || hasIsTrial > 0 || hasReferredBy > 0 {
-		// Drop old migrations table and create new one with correct version
-		_, _ = sqlDB.Exec(`DROP TABLE IF EXISTS schema_migrations`)
-		_, _ = sqlDB.Exec(`CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, dirty INTEGER)`)
-		_, _ = sqlDB.Exec(`INSERT INTO schema_migrations (version, dirty) VALUES (3, 0)`)
-		return nil
+	// Legacy referral bootstrap (IMPROVED):
+	// If referral columns exist (added outside migrations before 003) but schema_migrations
+	// is missing or version < 3, we do a one-time m.Force(3).
+	// CRITICAL: unlike the old hack, we do NOT early-return here.
+	// This allows golang-migrate to continue and apply all later migrations (004, 005, ...).
+	referralColumnsPresent := hasInviteCode > 0 || hasIsTrial > 0 || hasReferredBy > 0
+
+	currentVersion := 0
+	hasSchemaTable := false
+	if err := sqlDB.QueryRow(`SELECT COALESCE(MAX(version), 0) FROM schema_migrations`).Scan(&currentVersion); err == nil {
+		hasSchemaTable = true
 	}
 
-	// Drop old migrations table if exists (to ensure correct schema)
-	_, _ = sqlDB.Exec(`DROP TABLE IF EXISTS schema_migrations`)
+	if referralColumnsPresent && (!hasSchemaTable || currentVersion < 3) {
+		logger.Info("Legacy referral columns detected with outdated migration version — one-time bootstrap to version 3 (future migrations 004+ will now apply)",
+			zap.Int("detected_version", currentVersion))
+
+		// Create a temporary migrate instance solely to perform Force(3).
+		// Errors here are non-fatal — we still attempt normal Up() below.
+		if src, srcErr := iofs.New(migrationFiles, "migrations"); srcErr == nil {
+			if drv, drvErr := sqlite.WithInstance(sqlDB, &sqlite.Config{}); drvErr == nil {
+				if mForce, mErr := migrate.NewWithInstance("iofs", src, "sqlite", drv); mErr == nil && mForce != nil {
+					if fErr := mForce.Force(3); fErr != nil {
+						logger.Warn("m.Force(3) during referral bootstrap failed (will still try normal Up)", zap.Error(fErr))
+					} else {
+						logger.Info("Referral bootstrap: forced schema_migrations to version 3")
+					}
+				}
+			}
+		}
+		// Fall through intentionally — do not return. Normal migration path below will run m.Up().
+	}
+
+	// Do NOT drop schema_migrations here.
+	// golang-migrate manages this table. Dropping it on every start would make
+	// it re-apply all migrations from 000 (including 003 "ADD COLUMN" which fails
+	// on already-migrated DBs). We only ever use m.Force when needed for legacy bootstrap.
 
 	// Create embedded source driver from migrationFiles
 	sourceDriver, err := iofs.New(migrationFiles, "migrations")
@@ -499,7 +524,7 @@ func (s *Service) GetTelegramIDsBatch(ctx context.Context, offset, limit int) ([
 	return ids, nil
 }
 
-// GetTotalTelegramIDCount returns the total count of unique Telegram IDs.
+	// GetTotalTelegramIDCount returns the total count of unique Telegram IDs.
 func (s *Service) GetTotalTelegramIDCount(ctx context.Context) (int64, error) {
 	var count int64
 	result := s.db.WithContext(ctx).
@@ -512,19 +537,53 @@ func (s *Service) GetTotalTelegramIDCount(ctx context.Context) (int64, error) {
 	return count, nil
 }
 
+// GetInviteByReferrer returns the canonical (oldest) invite code for the given referrer.
+// If the user has multiple historical codes (pre-005 duplicates), returns the one with the smallest created_at.
+// Returns ErrInviteNotFound when no invite exists for this referrer.
+func (s *Service) GetInviteByReferrer(ctx context.Context, referrerTGID int64) (*Invite, error) {
+	var invite Invite
+	result := s.db.WithContext(ctx).
+		Where("referrer_tg_id = ?", referrerTGID).
+		Order("created_at ASC, code ASC").
+		First(&invite)
+	if result.Error != nil {
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return nil, ErrInviteNotFound
+		}
+		return nil, fmt.Errorf("failed to get invite by referrer: %w", result.Error)
+	}
+	return &invite, nil
+}
+
 // GetOrCreateInvite returns an existing invite for the referrer or creates a new one.
-// Uses atomic INSERT ... ON CONFLICT DO NOTHING to prevent TOCTOU race conditions.
+// It always returns the oldest (canonical) code for the user.
+// After migration 005 the unique constraint guarantees at most one row per referrer_tg_id.
 func (s *Service) GetOrCreateInvite(ctx context.Context, referrerTGID int64, code string) (*Invite, error) {
-	if err := s.db.WithContext(ctx).Exec("INSERT OR IGNORE INTO invites (code, referrer_tg_id, created_at) VALUES (?, ?, ?)",
-		code, referrerTGID, time.Now()).Error; err != nil {
-		return nil, fmt.Errorf("failed to upsert invite: %w", err)
+	// First try to return existing canonical code (oldest)
+	if existing, err := s.GetInviteByReferrer(ctx, referrerTGID); err == nil {
+		return existing, nil
+	} else if !errors.Is(err, ErrInviteNotFound) {
+		return nil, err
 	}
 
-	var result Invite
-	if err := s.db.WithContext(ctx).Where("referrer_tg_id = ?", referrerTGID).First(&result).Error; err != nil {
-		return nil, fmt.Errorf("failed to get invite: %w", err)
+	// No invite yet — create one with the proposed code
+	now := time.Now()
+	if err := s.db.WithContext(ctx).Exec(
+		"INSERT INTO invites (code, referrer_tg_id, created_at) VALUES (?, ?, ?)",
+		code, referrerTGID, now,
+	).Error; err != nil {
+		// Race: someone else just created it — read the canonical one
+		if existing, err2 := s.GetInviteByReferrer(ctx, referrerTGID); err2 == nil {
+			return existing, nil
+		}
+		return nil, fmt.Errorf("failed to create invite after race: %w", err)
 	}
-	return &result, nil
+
+	return &Invite{
+		Code:         code,
+		ReferrerTGID: referrerTGID,
+		CreatedAt:    now,
+	}, nil
 }
 
 // GetInviteByCode returns an invite by its code.

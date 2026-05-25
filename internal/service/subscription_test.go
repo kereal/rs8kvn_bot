@@ -575,3 +575,66 @@ func TestSubscriptionService_CreateTrial_DBError(t *testing.T) {
 	assert.Nil(t, result)
 	assert.True(t, deleteCalled)
 }
+
+func TestSubscriptionService_ReconcileOrphanedClients_RemovesMissing(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{}
+
+	normal := &database.Subscription{ID: 10, TelegramID: 100, Username: "realuser", Status: "active"}
+	trial := &database.Subscription{ID: 20, TelegramID: 0, SubscriptionID: "orphan123", Status: "active", IsTrial: true}
+	good := &database.Subscription{ID: 30, TelegramID: 300, Username: "gooduser", Status: "active"}
+	inactive := &database.Subscription{ID: 40, TelegramID: 400, Username: "bad", Status: "revoked"}
+
+	deleted := []uint{}
+	db := &testutil.MockDatabaseService{
+		GetAllSubscriptionsFunc: func(ctx context.Context) ([]database.Subscription, error) {
+			return []database.Subscription{*normal, *trial, *good, *inactive}, nil
+		},
+		DeleteSubscriptionByIDFunc: func(ctx context.Context, id uint) (*database.Subscription, error) {
+			deleted = append(deleted, id)
+			return &database.Subscription{ID: id}, nil
+		},
+	}
+
+	xui := &testutil.MockXUIClient{
+		GetClientTrafficFunc: func(ctx context.Context, email string) (*xui.ClientTraffic, error) {
+			if email == "realuser" || email == "trial_orphan123" {
+				return nil, fmt.Errorf("client not found")
+			}
+			if email == "gooduser" {
+				return &xui.ClientTraffic{}, nil
+			}
+			return nil, fmt.Errorf("other error")
+		},
+	}
+
+	svc := NewSubscriptionService(db, xui, cfg, &webhook.NoopSender{})
+
+	invoked := []int64{}
+	svc.SetInvalidateFunc(func(id int64) { invoked = append(invoked, id) })
+
+	count, err := svc.ReconcileOrphanedClients(context.Background())
+
+	assert.NoError(t, err)
+	assert.Equal(t, 2, count)
+	assert.ElementsMatch(t, []uint{10, 20}, deleted)
+	assert.Equal(t, []int64{100}, invoked)
+}
+
+func TestSubscriptionService_ReconcileOrphanedClients_NoActive(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{}
+	db := &testutil.MockDatabaseService{
+		GetAllSubscriptionsFunc: func(ctx context.Context) ([]database.Subscription, error) {
+			return []database.Subscription{{ID: 1, Status: "revoked"}}, nil
+		},
+	}
+	xui := &testutil.MockXUIClient{}
+	svc := NewSubscriptionService(db, xui, cfg, &webhook.NoopSender{})
+
+	count, err := svc.ReconcileOrphanedClients(context.Background())
+	assert.NoError(t, err)
+	assert.Equal(t, 0, count)
+}

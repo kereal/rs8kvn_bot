@@ -351,7 +351,12 @@ CREATE INDEX idx_trial_requests_ip             ON trial_requests(ip);
 **Race-safe patterns:**
 - `BindTrialSubscription`: `UPDATE WHERE telegram_id=0 AND is_trial=true` + `RowsAffected` check
 - `CleanupExpiredTrials`: `DELETE ... RETURNING` to atomically fetch deleted rows
-- `GetOrCreateInvite`: `INSERT OR IGNORE` + `SELECT` (unique index on referrer_tg_id)
+- `GetOrCreateInvite`: always returns the oldest (canonical) code for the referrer.
+  The UNIQUE constraint + "one code per referrer" guarantee is enforced by migration 004
+  (aggressive deduplication of historical duplicates that accumulated because 004 was
+  never applied on legacy DBs due to the old runMigrations hack). Migration 005 is now
+  a no-op placeholder to maintain linear migration history. Old codes deleted by 004
+  are gone forever (old shared links using them will 404).
 
 ---
 

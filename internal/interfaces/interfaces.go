@@ -51,6 +51,7 @@ type TrialRepository interface {
 
 type InviteRepository interface {
 	GetOrCreateInvite(ctx context.Context, referrerTGID int64, code string) (*database.Invite, error)
+	GetInviteByReferrer(ctx context.Context, referrerTGID int64) (*database.Invite, error)
 	GetInviteByCode(ctx context.Context, code string) (*database.Invite, error)
 	GetReferralCount(ctx context.Context, referrerTGID int64) (int64, error)
 	GetAllReferralCounts(ctx context.Context) (map[int64]int64, error)
