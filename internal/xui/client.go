@@ -82,20 +82,20 @@ type ClientTraffic struct {
 }
 
 type Inbound struct {
-	ID             int    `json:"id"`
-	Up             int    `json:"up"`
-	Down           int    `json:"down"`
-	Total          int    `json:"total"`
-	Remark        string `json:"remark"`
-	Enable        bool   `json:"enable"`
-	ExpiryTime    int64  `json:"expiryTime"`
-	Listen        string `json:"listen"`
-	Port         int    `json:"port"`
-	Protocol     string `json:"protocol"`
+	ID             int             `json:"id"`
+	Up             int             `json:"up"`
+	Down           int             `json:"down"`
+	Total          int             `json:"total"`
+	Remark         string          `json:"remark"`
+	Enable         bool            `json:"enable"`
+	ExpiryTime     int64           `json:"expiryTime"`
+	Listen         string          `json:"listen"`
+	Port           int             `json:"port"`
+	Protocol       string          `json:"protocol"`
 	Settings       json.RawMessage `json:"settings"`
 	StreamSettings json.RawMessage `json:"streamSettings"`
-	Tag          string `json:"tag"`
-	Sniffing     json.RawMessage `json:"sniffing"`
+	Tag            string          `json:"tag"`
+	Sniffing       json.RawMessage `json:"sniffing"`
 }
 
 func (in *Inbound) GetTransport() string {
@@ -474,27 +474,11 @@ func (c *Client) getRequiredFlow(ctx context.Context, inboundID int) (string, er
 	return inbound.GetRequiredFlow(), nil
 }
 
-func (c *Client) GetSubscriptionLink(baseURL, subID, subPath string) string {
-	return fmt.Sprintf("%s/%s/%s", strings.TrimSuffix(baseURL, "/"), subPath, subID)
-}
-
-func (c *Client) GetExternalURL(host string) string {
-	return GetExternalURL(host)
-}
-
 func (c *Client) Close() error {
 	if c.transport != nil {
 		c.transport.CloseIdleConnections()
 	}
 	return nil
-}
-
-func GetExternalURL(host string) string {
-	u, err := url.Parse(host)
-	if err != nil || u.Scheme == "" || u.Host == "" {
-		return host
-	}
-	return fmt.Sprintf("%s://%s", u.Scheme, u.Host)
 }
 
 func getExpiryTimeMillis(expiryTime time.Time) int64 {

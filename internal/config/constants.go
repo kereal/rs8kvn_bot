@@ -138,17 +138,8 @@ const (
 	DefaultHealthCheckPort = 8880
 )
 
-// 3x-ui Subscription Path Constants
-const (
-	// DefaultXUISubPath is the default subscription path segment
-	DefaultXUISubPath = "sub"
-)
-
 // Validation Constants
 const (
-	// MinInboundID is the minimum valid inbound ID
-	MinInboundID = 1
-
 	// SubIDLengthBytes is the number of random bytes for subscription ID (28 hex chars)
 	SubIDLengthBytes = 14
 )

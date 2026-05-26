@@ -28,14 +28,13 @@ func TestHandleSubscription_MethodNotAllowed(t *testing.T) {
 	t.Parallel()
 
 	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
 	cfg := &config.Config{
 		SubExtraServersEnabled: true,
 	}
 	subProxy := subproxy.NewService(cfg)
 	defer subProxy.Stop()
 
-	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig(), nil, subProxy)
+	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subProxy)
 
 	req := httptest.NewRequest("POST", "/sub/abc123", nil)
 	rec := httptest.NewRecorder()
@@ -49,10 +48,9 @@ func TestHandleSubscription_SubProxyNil(t *testing.T) {
 	t.Parallel()
 
 	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
 	cfg := &config.Config{}
 
-	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, nil)
 
 	req := httptest.NewRequest("GET", "/sub/abc123", nil)
 	rec := httptest.NewRecorder()
@@ -69,7 +67,7 @@ func TestHandleSubscription_InvalidCode(t *testing.T) {
 	subProxy := subproxy.NewService(cfg)
 	defer subProxy.Stop()
 
-	srv := NewServer(":8880", nil, nil, cfg, bot.NewTestBotConfig(), nil, subProxy)
+	srv := NewServer(":8880", nil, cfg, bot.NewTestBotConfig(), nil, subProxy)
 
 	tests := []struct {
 		path       string
@@ -104,7 +102,7 @@ func TestHandleSubscription_NotFoundInDB(t *testing.T) {
 	subProxy := subproxy.NewService(cfg)
 	defer subProxy.Stop()
 
-	srv := NewServer(":8880", mockDB, nil, cfg, bot.NewTestBotConfig(), nil, subProxy)
+	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subProxy)
 
 	req := httptest.NewRequest("GET", "/sub/nonexistent", nil)
 	rec := httptest.NewRecorder()
@@ -118,11 +116,13 @@ func TestHandleSubscription_EmptySubscriptionURL(t *testing.T) {
 	t.Parallel()
 
 	mockDB := testutil.NewMockDatabaseService()
+	mockDB.ListSourcesFunc = func(ctx context.Context) ([]database.Source, error) {
+		return nil, nil
+	}
 	mockDB.GetSubscriptionBySubscriptionIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
 		return &database.Subscription{
-			SubscriptionID:  subscriptionID,
-			Status:          "active",
-			SubscriptionURL: "",
+			SubscriptionID: subscriptionID,
+			Status:         "active",
 		}, nil
 	}
 
@@ -130,7 +130,7 @@ func TestHandleSubscription_EmptySubscriptionURL(t *testing.T) {
 	subProxy := subproxy.NewService(cfg)
 	defer subProxy.Stop()
 
-	srv := NewServer(":8880", mockDB, nil, cfg, bot.NewTestBotConfig(), nil, subProxy)
+	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subProxy)
 
 	req := httptest.NewRequest("GET", "/sub/abc123", nil)
 	rec := httptest.NewRecorder()
@@ -157,19 +157,25 @@ func TestHandleSubscription_XUIError_NoCache(t *testing.T) {
 	}()
 
 	mockDB := testutil.NewMockDatabaseService()
+	mockDB.ListSourcesFunc = func(ctx context.Context) ([]database.Source, error) {
+		return []database.Source{
+			{ID: 1, Name: "test", Active: true, SubURL: "http://" + listener.Addr().String() + "/sub/"},
+		}, nil
+	}
 	mockDB.GetSubscriptionBySubscriptionIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
 		return &database.Subscription{
-			SubscriptionID:  subscriptionID,
-			Status:          "active",
-			SubscriptionURL: "http://" + listener.Addr().String() + "/sub/abc123",
+			SubscriptionID: subscriptionID,
+			Status:         "active",
 		}, nil
 	}
 
-	cfg := &config.Config{SubExtraServersEnabled: true}
+	cfg := &config.Config{
+		SubExtraServersEnabled: true,
+	}
 	subProxy := subproxy.NewService(cfg)
 	defer subProxy.Stop()
 
-	srv := NewServer(":8880", mockDB, nil, cfg, bot.NewTestBotConfig(), nil, subProxy)
+	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subProxy)
 
 	req := httptest.NewRequest("GET", "/sub/abc123", nil)
 	rec := httptest.NewRecorder()
@@ -183,7 +189,7 @@ func TestHandleSubscription_CacheHit(t *testing.T) {
 	t.Parallel()
 
 	mockDB := testutil.NewMockDatabaseService()
-	subID := "cached_sub_id"
+	subID := "concurrent_sub"
 	mockDB.GetSubscriptionBySubscriptionIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
 		return &database.Subscription{
 			SubscriptionID: subscriptionID,
@@ -191,7 +197,10 @@ func TestHandleSubscription_CacheHit(t *testing.T) {
 		}, nil
 	}
 
-	cfg := &config.Config{SubExtraServersEnabled: true}
+	cfg := &config.Config{
+		SubExtraServersEnabled: true,
+		GlobalSubURL:           "http://localhost:0/sub/",
+	}
 	subProxy := subproxy.NewService(cfg)
 	defer subProxy.Stop()
 
@@ -204,7 +213,7 @@ func TestHandleSubscription_CacheHit(t *testing.T) {
 
 	subProxy.SetCache(subID, cachedBody, cachedHeaders)
 
-	srv := NewServer(":8880", mockDB, nil, cfg, bot.NewTestBotConfig(), nil, subProxy)
+	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subProxy)
 
 	req := httptest.NewRequest("GET", "/sub/"+subID, nil)
 	rec := httptest.NewRecorder()
@@ -240,7 +249,7 @@ func TestHandleSubscription_CacheHitAfterXUIError(t *testing.T) {
 
 	subProxy.SetCache(subID, cachedBody, cachedHeaders)
 
-	srv := NewServer(":8880", mockDB, nil, cfg, bot.NewTestBotConfig(), nil, subProxy)
+	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subProxy)
 
 	req := httptest.NewRequest("GET", "/sub/"+subID, nil)
 	rec := httptest.NewRecorder()
@@ -270,22 +279,27 @@ func TestHandleSubscription_ExtraServersAppended(t *testing.T) {
 
 	mockDB := testutil.NewMockDatabaseService()
 	subID := "extra_test_sub"
+	mockDB.ListSourcesFunc = func(ctx context.Context) ([]database.Source, error) {
+		return []database.Source{
+			{ID: 1, Name: "test", Active: true, SubURL: servers.URL + "/sub/"},
+		}, nil
+	}
 	mockDB.GetSubscriptionBySubscriptionIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
 		return &database.Subscription{
-			SubscriptionID:  subscriptionID,
-			Status:          "active",
-			SubscriptionURL: servers.URL + "/sub/" + subscriptionID,
+			SubscriptionID: subscriptionID,
+			Status:         "active",
 		}, nil
 	}
 
 	cfg := &config.Config{
+		GlobalSubURL:           servers.URL + "/sub/",
 		SubExtraServersEnabled: true,
 		SubExtraServersFile:    serversFile,
 	}
 	subProxy := subproxy.NewService(cfg)
 	defer subProxy.Stop()
 
-	srv := NewServer(":8880", mockDB, nil, cfg, bot.NewTestBotConfig(), nil, subProxy)
+	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subProxy)
 
 	req := httptest.NewRequest("GET", "/sub/"+subID, nil)
 	rec := httptest.NewRecorder()
@@ -325,22 +339,27 @@ func TestHandleSubscription_Base64FormatPreserved(t *testing.T) {
 
 	mockDB := testutil.NewMockDatabaseService()
 	subID := "base64_test_sub"
+	mockDB.ListSourcesFunc = func(ctx context.Context) ([]database.Source, error) {
+		return []database.Source{
+			{ID: 1, Name: "test", Active: true, SubURL: servers.URL + "/sub/"},
+		}, nil
+	}
 	mockDB.GetSubscriptionBySubscriptionIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
 		return &database.Subscription{
-			SubscriptionID:  subscriptionID,
-			Status:          "active",
-			SubscriptionURL: servers.URL + "/sub/" + subscriptionID,
+			SubscriptionID: subscriptionID,
+			Status:         "active",
 		}, nil
 	}
 
 	cfg := &config.Config{
+		GlobalSubURL:           servers.URL + "/sub/",
 		SubExtraServersEnabled: true,
 		SubExtraServersFile:    serversFile,
 	}
 	subProxy := subproxy.NewService(cfg)
 	defer subProxy.Stop()
 
-	srv := NewServer(":8880", mockDB, nil, cfg, bot.NewTestBotConfig(), nil, subProxy)
+	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subProxy)
 
 	req := httptest.NewRequest("GET", "/sub/"+subID, nil)
 	rec := httptest.NewRecorder()
@@ -370,11 +389,15 @@ func TestHandleSubscription_ConcurrentRequests(t *testing.T) {
 
 	mockDB := testutil.NewMockDatabaseService()
 	subID := "concurrent_sub"
+	mockDB.ListSourcesFunc = func(ctx context.Context) ([]database.Source, error) {
+		return []database.Source{
+			{ID: 1, Name: "test", Active: true, SubURL: servers.URL + "/sub/"},
+		}, nil
+	}
 	mockDB.GetSubscriptionBySubscriptionIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
 		return &database.Subscription{
-			SubscriptionID:  subscriptionID,
-			Status:          "active",
-			SubscriptionURL: servers.URL + "/sub/" + subscriptionID,
+			SubscriptionID: subscriptionID,
+			Status:         "active",
 		}, nil
 	}
 
@@ -382,7 +405,7 @@ func TestHandleSubscription_ConcurrentRequests(t *testing.T) {
 	subProxy := subproxy.NewService(cfg)
 	defer subProxy.Stop()
 
-	srv := NewServer(":8880", mockDB, nil, cfg, bot.NewTestBotConfig(), nil, subProxy)
+	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subProxy)
 
 	const numRequests = 5
 	var wg sync.WaitGroup
@@ -424,12 +447,16 @@ func TestHandleSubscription_ExtraServersFileMissing(t *testing.T) {
 	defer servers.Close()
 
 	mockDB := testutil.NewMockDatabaseService()
-	subID := "missing_file_sub"
+	subID := "disabled_extra_sub"
+	mockDB.ListSourcesFunc = func(ctx context.Context) ([]database.Source, error) {
+		return []database.Source{
+			{ID: 1, Name: "test", Active: true, SubURL: servers.URL + "/sub/"},
+		}, nil
+	}
 	mockDB.GetSubscriptionBySubscriptionIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
 		return &database.Subscription{
-			SubscriptionID:  subscriptionID,
-			Status:          "active",
-			SubscriptionURL: servers.URL + "/sub/" + subscriptionID,
+			SubscriptionID: subscriptionID,
+			Status:         "active",
 		}, nil
 	}
 
@@ -440,7 +467,7 @@ func TestHandleSubscription_ExtraServersFileMissing(t *testing.T) {
 	subProxy := subproxy.NewService(cfg)
 	defer subProxy.Stop()
 
-	srv := NewServer(":8880", mockDB, nil, cfg, bot.NewTestBotConfig(), nil, subProxy)
+	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subProxy)
 
 	req := httptest.NewRequest("GET", "/sub/"+subID, nil)
 	rec := httptest.NewRecorder()
@@ -466,11 +493,15 @@ func TestHandleSubscription_NoExtraServersWhenDisabled(t *testing.T) {
 
 	mockDB := testutil.NewMockDatabaseService()
 	subID := "disabled_extra_sub"
+	mockDB.ListSourcesFunc = func(ctx context.Context) ([]database.Source, error) {
+		return []database.Source{
+			{ID: 1, Name: "test", Active: true, SubURL: servers.URL + "/sub/"},
+		}, nil
+	}
 	mockDB.GetSubscriptionBySubscriptionIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
 		return &database.Subscription{
-			SubscriptionID:  subscriptionID,
-			Status:          "active",
-			SubscriptionURL: servers.URL + "/sub/" + subscriptionID,
+			SubscriptionID: subscriptionID,
+			Status:         "active",
 		}, nil
 	}
 
@@ -481,7 +512,7 @@ func TestHandleSubscription_NoExtraServersWhenDisabled(t *testing.T) {
 	subProxy := subproxy.NewService(cfg)
 	defer subProxy.Stop()
 
-	srv := NewServer(":8880", mockDB, nil, cfg, bot.NewTestBotConfig(), nil, subProxy)
+	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subProxy)
 
 	req := httptest.NewRequest("GET", "/sub/"+subID, nil)
 	rec := httptest.NewRecorder()
@@ -509,11 +540,15 @@ func TestHandleSubscription_CacheStoresMergedResult(t *testing.T) {
 
 	mockDB := testutil.NewMockDatabaseService()
 	subID := "cache_merge_sub"
+	mockDB.ListSourcesFunc = func(ctx context.Context) ([]database.Source, error) {
+		return []database.Source{
+			{ID: 1, Name: "test", Active: true, SubURL: servers.URL + "/sub/"},
+		}, nil
+	}
 	mockDB.GetSubscriptionBySubscriptionIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
 		return &database.Subscription{
-			SubscriptionID:  subscriptionID,
-			Status:          "active",
-			SubscriptionURL: servers.URL + "/sub/" + subscriptionID,
+			SubscriptionID: subscriptionID,
+			Status:         "active",
 		}, nil
 	}
 
@@ -524,7 +559,7 @@ func TestHandleSubscription_CacheStoresMergedResult(t *testing.T) {
 	subProxy := subproxy.NewService(cfg)
 	defer subProxy.Stop()
 
-	srv := NewServer(":8880", mockDB, nil, cfg, bot.NewTestBotConfig(), nil, subProxy)
+	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subProxy)
 
 	req := httptest.NewRequest("GET", "/sub/"+subID, nil)
 	rec := httptest.NewRecorder()
@@ -557,11 +592,15 @@ func TestHandleSubscription_EmptyBodyFromXUI(t *testing.T) {
 
 	mockDB := testutil.NewMockDatabaseService()
 	subID := "empty_body_sub"
+	mockDB.ListSourcesFunc = func(ctx context.Context) ([]database.Source, error) {
+		return []database.Source{
+			{ID: 1, Name: "test", Active: true, SubURL: servers.URL + "/sub/"},
+		}, nil
+	}
 	mockDB.GetSubscriptionBySubscriptionIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
 		return &database.Subscription{
-			SubscriptionID:  subscriptionID,
-			Status:          "active",
-			SubscriptionURL: servers.URL + "/sub/" + subscriptionID,
+			SubscriptionID: subscriptionID,
+			Status:         "active",
 		}, nil
 	}
 
@@ -569,7 +608,7 @@ func TestHandleSubscription_EmptyBodyFromXUI(t *testing.T) {
 	subProxy := subproxy.NewService(cfg)
 	defer subProxy.Stop()
 
-	srv := NewServer(":8880", mockDB, nil, cfg, bot.NewTestBotConfig(), nil, subProxy)
+	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subProxy)
 
 	req := httptest.NewRequest("GET", "/sub/"+subID, nil)
 	rec := httptest.NewRecorder()
@@ -592,11 +631,15 @@ func TestHandleSubscription_CorruptDataFromXUI(t *testing.T) {
 
 	mockDB := testutil.NewMockDatabaseService()
 	subID := "corrupt_data_sub"
+	mockDB.ListSourcesFunc = func(ctx context.Context) ([]database.Source, error) {
+		return []database.Source{
+			{ID: 1, Name: "test", Active: true, SubURL: servers.URL + "/sub/"},
+		}, nil
+	}
 	mockDB.GetSubscriptionBySubscriptionIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
 		return &database.Subscription{
-			SubscriptionID:  subscriptionID,
-			Status:          "active",
-			SubscriptionURL: servers.URL + "/sub/" + subscriptionID,
+			SubscriptionID: subscriptionID,
+			Status:         "active",
 		}, nil
 	}
 
@@ -604,7 +647,7 @@ func TestHandleSubscription_CorruptDataFromXUI(t *testing.T) {
 	subProxy := subproxy.NewService(cfg)
 	defer subProxy.Stop()
 
-	srv := NewServer(":8880", mockDB, nil, cfg, bot.NewTestBotConfig(), nil, subProxy)
+	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subProxy)
 
 	req := httptest.NewRequest("GET", "/sub/"+subID, nil)
 	rec := httptest.NewRecorder()
@@ -632,11 +675,15 @@ func TestHandleSubscription_CriticalHeadersPreserved(t *testing.T) {
 
 	mockDB := testutil.NewMockDatabaseService()
 	subID := "headers_test_sub"
+	mockDB.ListSourcesFunc = func(ctx context.Context) ([]database.Source, error) {
+		return []database.Source{
+			{ID: 1, Name: "test", Active: true, SubURL: servers.URL + "/sub/"},
+		}, nil
+	}
 	mockDB.GetSubscriptionBySubscriptionIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
 		return &database.Subscription{
-			SubscriptionID:  subscriptionID,
-			Status:          "active",
-			SubscriptionURL: servers.URL + "/sub/" + subscriptionID,
+			SubscriptionID: subscriptionID,
+			Status:         "active",
 		}, nil
 	}
 
@@ -644,7 +691,7 @@ func TestHandleSubscription_CriticalHeadersPreserved(t *testing.T) {
 	subProxy := subproxy.NewService(cfg)
 	defer subProxy.Stop()
 
-	srv := NewServer(":8880", mockDB, nil, cfg, bot.NewTestBotConfig(), nil, subProxy)
+	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subProxy)
 
 	req := httptest.NewRequest("GET", "/sub/"+subID, nil)
 	rec := httptest.NewRecorder()
@@ -662,7 +709,7 @@ func TestHandleSubscription_CriticalHeadersPreservedFromCache(t *testing.T) {
 	t.Parallel()
 
 	mockDB := testutil.NewMockDatabaseService()
-	subID := "cached_headers_sub"
+	subID := "empty_body_sub"
 	mockDB.GetSubscriptionBySubscriptionIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
 		return &database.Subscription{
 			SubscriptionID: subscriptionID,
@@ -670,7 +717,10 @@ func TestHandleSubscription_CriticalHeadersPreservedFromCache(t *testing.T) {
 		}, nil
 	}
 
-	cfg := &config.Config{SubExtraServersEnabled: true}
+	cfg := &config.Config{
+		SubExtraServersEnabled: true,
+		GlobalSubURL:           "http://localhost:0/sub/",
+	}
 	subProxy := subproxy.NewService(cfg)
 	defer subProxy.Stop()
 
@@ -683,7 +733,7 @@ func TestHandleSubscription_CriticalHeadersPreservedFromCache(t *testing.T) {
 
 	subProxy.SetCache(subID, cachedBody, cachedHeaders)
 
-	srv := NewServer(":8880", mockDB, nil, cfg, bot.NewTestBotConfig(), nil, subProxy)
+	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subProxy)
 
 	req := httptest.NewRequest("GET", "/sub/"+subID, nil)
 	rec := httptest.NewRecorder()
@@ -714,11 +764,15 @@ func TestHandleSubscription_ExtraHeadersOverrideXUI(t *testing.T) {
 
 	mockDB := testutil.NewMockDatabaseService()
 	subID := "header_override_sub"
+	mockDB.ListSourcesFunc = func(ctx context.Context) ([]database.Source, error) {
+		return []database.Source{
+			{ID: 1, Name: "test", Active: true, SubURL: servers.URL + "/sub/"},
+		}, nil
+	}
 	mockDB.GetSubscriptionBySubscriptionIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
 		return &database.Subscription{
-			SubscriptionID:  subscriptionID,
-			Status:          "active",
-			SubscriptionURL: servers.URL + "/sub/" + subscriptionID,
+			SubscriptionID: subscriptionID,
+			Status:         "active",
 		}, nil
 	}
 
@@ -729,7 +783,7 @@ func TestHandleSubscription_ExtraHeadersOverrideXUI(t *testing.T) {
 	subProxy := subproxy.NewService(cfg)
 	defer subProxy.Stop()
 
-	srv := NewServer(":8880", mockDB, nil, cfg, bot.NewTestBotConfig(), nil, subProxy)
+	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subProxy)
 
 	req := httptest.NewRequest("GET", "/sub/"+subID, nil)
 	rec := httptest.NewRecorder()
@@ -759,7 +813,7 @@ func TestHandleSubscription_ConcurrentNotFound(t *testing.T) {
 	subProxy := subproxy.NewService(cfg)
 	defer subProxy.Stop()
 
-	srv := NewServer(":8880", mockDB, nil, cfg, bot.NewTestBotConfig(), nil, subProxy)
+	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subProxy)
 
 	const numRequests = 5
 	var wg sync.WaitGroup
@@ -802,9 +856,8 @@ func TestHandleSubscription_RevokedSubscription(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockDB.GetSubscriptionBySubscriptionIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
 		return &database.Subscription{
-			SubscriptionID:  subscriptionID,
-			Status:          "revoked",
-			SubscriptionURL: "http://localhost:2053/sub/abc123",
+			SubscriptionID: subscriptionID,
+			Status:         "revoked",
 		}, nil
 	}
 
@@ -812,7 +865,7 @@ func TestHandleSubscription_RevokedSubscription(t *testing.T) {
 	subProxy := subproxy.NewService(cfg)
 	defer subProxy.Stop()
 
-	srv := NewServer(":8880", mockDB, nil, cfg, bot.NewTestBotConfig(), nil, subProxy)
+	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subProxy)
 
 	req := httptest.NewRequest("GET", "/sub/abc123", nil)
 	rec := httptest.NewRecorder()
@@ -828,9 +881,8 @@ func TestHandleSubscription_ExpiredSubscription(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockDB.GetSubscriptionBySubscriptionIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
 		return &database.Subscription{
-			SubscriptionID:  subscriptionID,
-			Status:          "expired",
-			SubscriptionURL: "http://localhost:2053/sub/abc123",
+			SubscriptionID: subscriptionID,
+			Status:         "expired",
 		}, nil
 	}
 
@@ -838,7 +890,7 @@ func TestHandleSubscription_ExpiredSubscription(t *testing.T) {
 	subProxy := subproxy.NewService(cfg)
 	defer subProxy.Stop()
 
-	srv := NewServer(":8880", mockDB, nil, cfg, bot.NewTestBotConfig(), nil, subProxy)
+	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subProxy)
 
 	req := httptest.NewRequest("GET", "/sub/abc123", nil)
 	rec := httptest.NewRecorder()
@@ -871,7 +923,7 @@ func TestHandleSubscription_RevokedSubscription_CacheHit(t *testing.T) {
 	}
 	subProxy.SetCache(subID, cachedBody, cachedHeaders)
 
-	srv := NewServer(":8880", mockDB, nil, cfg, bot.NewTestBotConfig(), nil, subProxy)
+	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subProxy)
 
 	req := httptest.NewRequest("GET", "/sub/"+subID, nil)
 	rec := httptest.NewRecorder()
@@ -911,7 +963,7 @@ func TestHandleSubscription_ExpiredByTime_CacheHit(t *testing.T) {
 	}
 	subProxy.SetCache(subID, cachedBody, cachedHeaders)
 
-	srv := NewServer(":8880", mockDB, nil, cfg, bot.NewTestBotConfig(), nil, subProxy)
+	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subProxy)
 
 	req := httptest.NewRequest("GET", "/sub/"+subID, nil)
 	rec := httptest.NewRecorder()

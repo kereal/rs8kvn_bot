@@ -23,6 +23,7 @@ This is a Telegram bot for distributing VLESS+Reality+Vision proxy subscriptions
 - Circuit breaker for 3x-ui panel
 - Donate message with card number in config (constants.go)
 - Friendly and inviting donation message tone
+- **Multi-source 3x-ui panels** (v2.4.0) — поддержка множества 3x-ui панелей через `config.Source` + `map[uint]interfaces.XUIClient`. Trial-подписки создаются на всех источниках, BindTrial — первый успешный, ReconcileOrphanedClients — проверка всех источников
 - **O(1) LRU subscription cache** (container/list, RLock for concurrent reads)
 - **Subscription status check in /sub/{subID}** — revoked/expired subscriptions return 404
 - **Unified soft delete for all subscription deletions** (GORM `deleted_at`)
@@ -50,7 +51,9 @@ This is a Telegram bot for distributing VLESS+Reality+Vision proxy subscriptions
 - `cmd/bot/` - Main application entry point
 - `internal/bot/` - Bot logic (handlers, commands, callbacks, menus)
 - `internal/database/` - Database operations and migrations
-- `internal/xui/` - 3x-ui panel client with circuit breaker
+- `internal/xui/` - 3x-ui panel client with circuit breaker (multi-source via `map[uint]XUIClient`)
+- `internal/interfaces/` - Interface definitions (XUIClient, SubscriptionService, etc.)
+- `internal/testutil/` - Test utilities and mocks
 - `internal/utils/` - Utility functions (time, UUID, QR codes)
 - `internal/config/` - Configuration management
 - `internal/logger/` - Logging setup
@@ -60,8 +63,7 @@ This is a Telegram bot for distributing VLESS+Reality+Vision proxy subscriptions
 - `internal/ratelimiter/` - Rate limiting logic
 - `internal/web/` - Web endpoints (health, invite/trial, subscription proxy)
 - `internal/subproxy/` - Subscription proxy (cache, merge, extra config, InvalidateCache for status changes)
-- `internal/interfaces/` - Interface definitions
-- `internal/testutil/` - Test utilities and mocks
+
 
 ## Development Workflow
 

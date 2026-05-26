@@ -17,11 +17,10 @@ func TestSubscriptionCache_GetSet(t *testing.T) {
 	cache := NewSubscriptionCache(10, 5*time.Minute)
 
 	sub := &database.Subscription{
-		TelegramID:      123,
-		Username:        "testuser",
-		ClientID:        "client-1",
-		SubscriptionURL: "http://test.url/sub",
-		Status:          "active",
+		TelegramID: 123,
+		Username:   "testuser",
+		ClientID:   "client-1",
+		Status:     "active",
 	}
 
 	// Get should return nil for missing key

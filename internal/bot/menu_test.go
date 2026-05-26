@@ -226,12 +226,11 @@ func TestHandleMenuHelp_WithSubscription(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 		return &database.Subscription{
-			ID:              1,
-			TelegramID:      12345,
-			Username:        "testuser",
-			Status:          "active",
-			SubscriptionID:  "abc123",
-			SubscriptionURL: "https://example.com/sub/abc123",
+			ID:             1,
+			TelegramID:     12345,
+			Username:       "testuser",
+			Status:         "active",
+			SubscriptionID: "abc123",
 		}, nil
 	}
 
@@ -327,12 +326,11 @@ func TestHandleMenuHelp_VariousTrafficLimits(t *testing.T) {
 			mockDB := testutil.NewMockDatabaseService()
 			mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 				return &database.Subscription{
-					ID:              1,
-					TelegramID:      12345,
-					Username:        "testuser",
-					Status:          "active",
-					SubscriptionID:  "abc123",
-					SubscriptionURL: "https://example.com/sub/abc123",
+					ID:             1,
+					TelegramID:     12345,
+					Username:       "testuser",
+					Status:         "active",
+					SubscriptionID: "abc123",
 				}, nil
 			}
 
@@ -403,10 +401,9 @@ func TestHandleMenuHelp_ContextCancellation(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 		return &database.Subscription{
-			ID:              1,
-			TelegramID:      12345,
-			Status:          "active",
-			SubscriptionURL: "https://example.com/sub/abc123",
+			ID:         1,
+			TelegramID: 12345,
+			Status:     "active",
 		}, nil
 	}
 
@@ -485,10 +482,9 @@ func TestHandleMenuHelp_SendError(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 		return &database.Subscription{
-			ID:              1,
-			TelegramID:      12345,
-			Status:          "active",
-			SubscriptionURL: "https://example.com/sub/abc123",
+			ID:         1,
+			TelegramID: 12345,
+			Status:     "active",
 		}, nil
 	}
 

@@ -1,6 +1,6 @@
 ## Test Coverage (May 2026)
 
-**Overall Coverage:** ~85%
+**Overall Coverage:** ~85% (модули с мульти-сорс миграцией переписаны, покрытие восстановлено)
 
 ### By Module
 - `internal/flag`: 97.7% ✅
@@ -27,7 +27,25 @@
 - **Race-safe:** ✅
 - **Golden files:** ✅ (subproxy)
 
-### Test Architecture Notes
+### Multi-Source Migration (2026-05-26)
+
+**Config changes:**
+- `XUIHost`, `XUIAPIToken`, `XUIInboundID`, `XUISubPath` → `Sources []Source` (каждый с URL, Token, InboundID, Active, Trial)
+- `SubscriptionURL` → вычисляется из `GlobalSubURL + SubID`
+- Добавлен `GLOBAL_SUB_URL` и `DEFAULT_SOURCE_SUB_URL`
+
+**Service changes:**
+- `NewSubscriptionService(xuiClients map[uint]interfaces.XUIClient, sources []database.Source, db interfaces.SubscriptionDatabase, cfg *config.Config, cache *cache.SubscriptionCache, invalidate cache.InvalidateFunc)`
+- `CreateTrial()` — итерация trial-источников, best-effort
+- `BindTrial()` — первый успешный источник
+- `ReconcileOrphanedClients()` — проверка всех источников
+
+**Test patterns:**
+- Source-литералы обязаны иметь `Trial:true, Active:true, ID:1`
+- `mockXUIClients := map[uint]interfaces.XUIClient{1: mockClient}`
+- Удалены поля: `InboundID`, `TrafficLimit`, `SubscriptionURL`, `DeletedAt` из Subscription
+
+## Test Architecture Notes
 - `web_test.go` split into 3 files: `web_test.go` (583 lines), `web_health_test.go` (363), `web_invite_test.go` (784)
 - `handlers_extended_test.go`: 8 duplicate/redundant tests removed
 - `cmd/bot/main_test.go`: TestGetVersion (5→1) and TestHandleUpdateSafely (4→1) merged into table-driven

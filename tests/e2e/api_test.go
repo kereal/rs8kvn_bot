@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"rs8kvn_bot/internal/database"
+	"rs8kvn_bot/internal/interfaces"
 	"rs8kvn_bot/internal/service"
 	"rs8kvn_bot/internal/web"
 	"rs8kvn_bot/internal/webhook"
@@ -34,16 +35,16 @@ func TestE2E_APISubscriptions_Success(t *testing.T) {
 		Username:       "testuser",
 		ClientID:       "550e8400-e29b-41d4-a716-446655440000",
 		SubscriptionID: "sub-token-abc123",
-		InboundID:      1,
-		TrafficLimit:   30 * 1024 * 1024 * 1024,
 		Status:         "active",
 	}
 	err := env.db.CreateSubscription(context.Background(), sub)
 	require.NoError(t, err)
 
 	env.cfg.APIToken = "test-api-token-12345"
-	subService := service.NewSubscriptionService(env.db, env.xui, env.cfg, &webhook.NoopSender{})
-	srv := web.NewServer("127.0.0.1:0", env.db, env.xui, env.cfg, env.botConfig, subService, nil)
+	xuiClients := map[uint]interfaces.XUIClient{1: env.xui}
+	sources := []database.Source{{Name: "main", XUIHost: "https://panel.example.com", XUIAPIToken: "test-api-token", XUIInboundID: 1, Active: true}}
+	subService := service.NewSubscriptionService(env.db, xuiClients, sources, env.cfg, env.cfg.GlobalSubURL, &webhook.NoopSender{})
+	srv := web.NewServer("127.0.0.1:0", env.db, env.cfg, env.botConfig, subService, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -99,8 +100,10 @@ func TestE2E_APISubscriptions_EmptyList(t *testing.T) {
 	defer env.db.Close()
 
 	env.cfg.APIToken = "test-api-token"
-	subService := service.NewSubscriptionService(env.db, env.xui, env.cfg, &webhook.NoopSender{})
-	srv := web.NewServer("127.0.0.1:0", env.db, env.xui, env.cfg, env.botConfig, subService, nil)
+	xuiClients := map[uint]interfaces.XUIClient{1: env.xui}
+	sources := []database.Source{{Name: "main", XUIHost: "https://panel.example.com", XUIAPIToken: "test-api-token", XUIInboundID: 1, Active: true}}
+	subService := service.NewSubscriptionService(env.db, xuiClients, sources, env.cfg, env.cfg.GlobalSubURL, &webhook.NoopSender{})
+	srv := web.NewServer("127.0.0.1:0", env.db, env.cfg, env.botConfig, subService, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -148,8 +151,10 @@ func TestE2E_APISubscriptions_Unauthorized(t *testing.T) {
 	defer env.db.Close()
 
 	env.cfg.APIToken = "secret-token"
-	subService := service.NewSubscriptionService(env.db, env.xui, env.cfg, &webhook.NoopSender{})
-	srv := web.NewServer("127.0.0.1:0", env.db, env.xui, env.cfg, env.botConfig, subService, nil)
+	xuiClients := map[uint]interfaces.XUIClient{1: env.xui}
+	sources := []database.Source{{Name: "main", XUIHost: "https://panel.example.com", XUIAPIToken: "test-api-token", XUIInboundID: 1, Active: true}}
+	subService := service.NewSubscriptionService(env.db, xuiClients, sources, env.cfg, env.cfg.GlobalSubURL, &webhook.NoopSender{})
+	srv := web.NewServer("127.0.0.1:0", env.db, env.cfg, env.botConfig, subService, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -201,8 +206,10 @@ func TestE2E_APISubscriptions_InvalidToken(t *testing.T) {
 	defer env.db.Close()
 
 	env.cfg.APIToken = "correct-token"
-	subService := service.NewSubscriptionService(env.db, env.xui, env.cfg, &webhook.NoopSender{})
-	srv := web.NewServer("127.0.0.1:0", env.db, env.xui, env.cfg, env.botConfig, subService, nil)
+	xuiClients := map[uint]interfaces.XUIClient{1: env.xui}
+	sources := []database.Source{{Name: "main", XUIHost: "https://panel.example.com", XUIAPIToken: "test-api-token", XUIInboundID: 1, Active: true}}
+	subService := service.NewSubscriptionService(env.db, xuiClients, sources, env.cfg, env.cfg.GlobalSubURL, &webhook.NoopSender{})
+	srv := web.NewServer("127.0.0.1:0", env.db, env.cfg, env.botConfig, subService, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -239,8 +246,10 @@ func TestE2E_APISubscriptions_MethodNotAllowed(t *testing.T) {
 	defer env.db.Close()
 
 	env.cfg.APIToken = "test-api-token"
-	subService := service.NewSubscriptionService(env.db, env.xui, env.cfg, &webhook.NoopSender{})
-	srv := web.NewServer("127.0.0.1:0", env.db, env.xui, env.cfg, env.botConfig, subService, nil)
+	xuiClients := map[uint]interfaces.XUIClient{1: env.xui}
+	sources := []database.Source{{Name: "main", XUIHost: "https://panel.example.com", XUIAPIToken: "test-api-token", XUIInboundID: 1, Active: true}}
+	subService := service.NewSubscriptionService(env.db, xuiClients, sources, env.cfg, env.cfg.GlobalSubURL, &webhook.NoopSender{})
+	srv := web.NewServer("127.0.0.1:0", env.db, env.cfg, env.botConfig, subService, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -288,8 +297,6 @@ func TestE2E_APISubscriptions_FiltersInactive(t *testing.T) {
 		Username:       "active_user",
 		ClientID:       "active-client-uuid",
 		SubscriptionID: "active-token",
-		InboundID:      1,
-		TrafficLimit:   30 * 1024 * 1024 * 1024,
 		Status:         "active",
 	}
 	err := env.db.CreateSubscription(context.Background(), activeSub)
@@ -301,16 +308,16 @@ func TestE2E_APISubscriptions_FiltersInactive(t *testing.T) {
 		Username:       "revoked_user",
 		ClientID:       "revoked-client-uuid",
 		SubscriptionID: "revoked-token",
-		InboundID:      1,
-		TrafficLimit:   30 * 1024 * 1024 * 1024,
 		Status:         "revoked",
 	}
 	err = env.db.CreateSubscription(context.Background(), revokedSub)
 	require.NoError(t, err)
 
 	env.cfg.APIToken = "test-api-token"
-	subService := service.NewSubscriptionService(env.db, env.xui, env.cfg, &webhook.NoopSender{})
-	srv := web.NewServer("127.0.0.1:0", env.db, env.xui, env.cfg, env.botConfig, subService, nil)
+	xuiClients := map[uint]interfaces.XUIClient{1: env.xui}
+	sources := []database.Source{{Name: "main", XUIHost: "https://panel.example.com", XUIAPIToken: "test-api-token", XUIInboundID: 1, Active: true}}
+	subService := service.NewSubscriptionService(env.db, xuiClients, sources, env.cfg, env.cfg.GlobalSubURL, &webhook.NoopSender{})
+	srv := web.NewServer("127.0.0.1:0", env.db, env.cfg, env.botConfig, subService, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -389,10 +396,10 @@ func TestE2E_WebhookSender_DeliverySuccess(t *testing.T) {
 	sender := webhook.NewSender(server.URL, "webhook-secret-123")
 
 	event := webhook.Event{
-		EventID:           "evt-e2e-test-001",
-		Event:             webhook.EventSubscriptionActivated,
-		ClientID:          "user-uuid-123",
-		Email:             "e2e@example.com",
+		EventID:        "evt-e2e-test-001",
+		Event:          webhook.EventSubscriptionActivated,
+		ClientID:       "user-uuid-123",
+		Email:          "e2e@example.com",
 		SubscriptionID: "sub-token-xyz",
 	}
 
@@ -430,10 +437,10 @@ func TestE2E_WebhookSender_RetryOnFailure(t *testing.T) {
 	sender := webhook.NewSender(server.URL, "test-secret")
 
 	event := webhook.Event{
-		EventID: "evt-retry-e2e",
-		Event:   webhook.EventSubscriptionExpired,
-		ClientID:  "user-retry",
-		Email:   "retry@example.com",
+		EventID:  "evt-retry-e2e",
+		Event:    webhook.EventSubscriptionExpired,
+		ClientID: "user-retry",
+		Email:    "retry@example.com",
 	}
 
 	sender.SendAsync(event)
@@ -491,10 +498,10 @@ func TestE2E_WebhookSender_ConcurrentEvents(t *testing.T) {
 	eventCount := 5
 	for i := 0; i < eventCount; i++ {
 		sender.SendAsync(webhook.Event{
-			EventID:           fmt.Sprintf("evt-concurrent-%d", i),
-			Event:             webhook.EventSubscriptionActivated,
-			ClientID:          fmt.Sprintf("user-%d", i),
-			Email:             fmt.Sprintf("user%d@example.com", i),
+			EventID:        fmt.Sprintf("evt-concurrent-%d", i),
+			Event:          webhook.EventSubscriptionActivated,
+			ClientID:       fmt.Sprintf("user-%d", i),
+			Email:          fmt.Sprintf("user%d@example.com", i),
 			SubscriptionID: fmt.Sprintf("token-%d", i),
 		})
 	}
@@ -527,8 +534,6 @@ func TestE2E_APISubscriptions_MultipleActive(t *testing.T) {
 			Username:       fmt.Sprintf("user%d", i),
 			ClientID:       fmt.Sprintf("client-uuid-%d", i),
 			SubscriptionID: fmt.Sprintf("token-%d", i),
-			InboundID:      1,
-			TrafficLimit:   30 * 1024 * 1024 * 1024,
 			Status:         "active",
 		}
 		err := env.db.CreateSubscription(context.Background(), sub)
@@ -536,8 +541,10 @@ func TestE2E_APISubscriptions_MultipleActive(t *testing.T) {
 	}
 
 	env.cfg.APIToken = "test-api-token"
-	subService := service.NewSubscriptionService(env.db, env.xui, env.cfg, &webhook.NoopSender{})
-	srv := web.NewServer("127.0.0.1:0", env.db, env.xui, env.cfg, env.botConfig, subService, nil)
+	xuiClients := map[uint]interfaces.XUIClient{1: env.xui}
+	sources := []database.Source{{Name: "main", XUIHost: "https://panel.example.com", XUIAPIToken: "test-api-token", XUIInboundID: 1, Active: true}}
+	subService := service.NewSubscriptionService(env.db, xuiClients, sources, env.cfg, env.cfg.GlobalSubURL, &webhook.NoopSender{})
+	srv := web.NewServer("127.0.0.1:0", env.db, env.cfg, env.botConfig, subService, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -595,8 +602,10 @@ func TestE2E_APISubscriptions_ResponseHeaders(t *testing.T) {
 	defer env.db.Close()
 
 	env.cfg.APIToken = "test-api-token"
-	subService := service.NewSubscriptionService(env.db, env.xui, env.cfg, &webhook.NoopSender{})
-	srv := web.NewServer("127.0.0.1:0", env.db, env.xui, env.cfg, env.botConfig, subService, nil)
+	xuiClients := map[uint]interfaces.XUIClient{1: env.xui}
+	sources := []database.Source{{Name: "main", XUIHost: "https://panel.example.com", XUIAPIToken: "test-api-token", XUIInboundID: 1, Active: true}}
+	subService := service.NewSubscriptionService(env.db, xuiClients, sources, env.cfg, env.cfg.GlobalSubURL, &webhook.NoopSender{})
+	srv := web.NewServer("127.0.0.1:0", env.db, env.cfg, env.botConfig, subService, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

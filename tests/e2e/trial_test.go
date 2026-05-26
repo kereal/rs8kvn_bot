@@ -20,7 +20,7 @@ func TestE2E_TrialBind_Success(t *testing.T) {
 	ctx := context.Background()
 
 	trialSubID := "trial-abc-123"
-	_, err := env.db.CreateTrialSubscription(ctx, "test_invite_code", trialSubID, "trial-client-id", 1, 1073741824, time.Now().Add(24*time.Hour), "https://example.com/sub/trial-abc-123")
+	_, err := env.db.CreateTrialSubscription(ctx, "test_invite_code", trialSubID, "trial-client-id", time.Now().Add(24*time.Hour))
 	require.NoError(t, err)
 
 	resetMockBotAPI(env.botAPI)
@@ -51,14 +51,12 @@ func TestE2E_TrialBind_AlreadyHasSubscription(t *testing.T) {
 		Username:       env.username,
 		ClientID:       "existing-client",
 		SubscriptionID: "existing-sub",
-		InboundID:      1,
-		TrafficLimit:   107374182400,
 		Status:         "active",
 	}
 	require.NoError(t, env.db.CreateSubscription(ctx, existingSub))
 
 	trialSubID := "trial-xyz-789"
-	_, err := env.db.CreateTrialSubscription(ctx, "test_invite_code", trialSubID, "trial-client-id", 1, 1073741824, time.Now().Add(24*time.Hour), "https://example.com/sub/trial-xyz-789")
+	_, err := env.db.CreateTrialSubscription(ctx, "test_invite_code", trialSubID, "trial-client-id", time.Now().Add(24*time.Hour))
 	require.NoError(t, err)
 
 	resetMockBotAPI(env.botAPI)
@@ -96,7 +94,7 @@ func TestE2E_TrialBind_AlreadyActivated(t *testing.T) {
 	ctx := context.Background()
 
 	trialSubID := "trial-double-123"
-	_, err := env.db.CreateTrialSubscription(ctx, "test_invite_code", trialSubID, "trial-client-id", 1, 1073741824, time.Now().Add(24*time.Hour), "https://example.com/sub/trial-double-123")
+	_, err := env.db.CreateTrialSubscription(ctx, "test_invite_code", trialSubID, "trial-client-id", time.Now().Add(24*time.Hour))
 	require.NoError(t, err)
 
 	env.handler.HandleStart(ctx, tgbotapi.Update{

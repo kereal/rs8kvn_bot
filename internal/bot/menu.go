@@ -73,7 +73,7 @@ func (h *Handler) handleMenuHelp(ctx context.Context, chatID int64, username str
 		return nil
 	}
 
-	text := h.getHelpText(h.cfg.TrafficLimitGB, sub.SubscriptionURL)
+	text := h.getHelpText(h.cfg.TrafficLimitGB, h.cfg.GlobalSubURL+sub.SubscriptionID)
 	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, text)
 	editMsg.ParseMode = "Markdown"
 	editMsg.DisableWebPagePreview = true

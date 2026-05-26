@@ -57,50 +57,6 @@ func TestE2E_CreateSubscription_ZeroChatID(t *testing.T) {
 	}
 }
 
-func TestE2E_Subscription_MaxTrafficLimit(t *testing.T) {
-	env := setupE2EEnv(t)
-	defer env.db.Close()
-
-	ctx := context.Background()
-
-	maxTraffic := int64(1073741824000)
-	_, err := env.subService.Create(ctx, env.chatID, env.username)
-	require.NoError(t, err)
-
-	sub, err := env.db.GetByTelegramID(ctx, env.chatID)
-	require.NoError(t, err)
-	sub.TrafficLimit = maxTraffic
-	require.NoError(t, env.db.UpdateSubscription(ctx, sub))
-
-	storedSub, err := env.db.GetByTelegramID(ctx, env.chatID)
-	require.NoError(t, err)
-	assert.Equal(t, maxTraffic, storedSub.TrafficLimit, "Should handle max traffic limit")
-}
-
-func TestE2E_Subscription_MinTrafficLimit(t *testing.T) {
-	env := setupE2EEnv(t)
-	defer env.db.Close()
-
-	ctx := context.Background()
-
-	minTraffic := int64(1073741824)
-	sub := &database.Subscription{
-		TelegramID:      env.chatID,
-		Username:        env.username,
-		ClientID:        "test-client-id",
-		SubscriptionID:  "test-sub-id",
-		InboundID:       1,
-		TrafficLimit:    minTraffic,
-		Status:          "active",
-		SubscriptionURL: "https://example.com/sub/test-sub-id",
-	}
-	require.NoError(t, env.db.CreateSubscription(ctx, sub))
-
-	storedSub, err := env.db.GetByTelegramID(ctx, env.chatID)
-	require.NoError(t, err)
-	assert.Equal(t, minTraffic, storedSub.TrafficLimit, "Should handle min traffic limit")
-}
-
 func TestE2E_Subscription_LongUsername(t *testing.T) {
 	env := setupE2EEnv(t)
 	defer env.db.Close()
@@ -295,14 +251,11 @@ func TestE2E_GetSubscription_DatabaseClosed(t *testing.T) {
 
 	ctx := context.Background()
 	sub := &database.Subscription{
-		TelegramID:      env.chatID,
-		Username:        env.username,
-		ClientID:        "test-client-id",
-		SubscriptionID:  "test-sub-id",
-		InboundID:       1,
-		TrafficLimit:    107374182400,
-		Status:          "active",
-		SubscriptionURL: "https://example.com/sub/test-sub-id",
+		TelegramID:     env.chatID,
+		Username:       env.username,
+		ClientID:       "test-client-id",
+		SubscriptionID: "test-sub-id",
+		Status:         "active",
 	}
 	env.db.CreateSubscription(ctx, sub)
 	env.db.Close()
@@ -318,15 +271,12 @@ func TestE2E_Subscription_Expired(t *testing.T) {
 	ctx := context.Background()
 
 	sub := &database.Subscription{
-		TelegramID:      env.chatID,
-		Username:        env.username,
-		ClientID:        "test-client-id",
-		SubscriptionID:  "test-sub-id",
-		InboundID:       1,
-		TrafficLimit:    107374182400,
-		Status:          "expired",
-		SubscriptionURL: "https://example.com/sub/test-sub-id",
-		ExpiryTime:      time.Now().Add(-1 * time.Hour),
+		TelegramID:     env.chatID,
+		Username:       env.username,
+		ClientID:       "test-client-id",
+		SubscriptionID: "test-sub-id",
+		Status:         "expired",
+		ExpiryTime:     time.Now().Add(-1 * time.Hour),
 	}
 	require.NoError(t, env.db.CreateSubscription(ctx, sub))
 
@@ -342,15 +292,12 @@ func TestE2E_Subscription_AboutToExpire(t *testing.T) {
 	ctx := context.Background()
 
 	sub := &database.Subscription{
-		TelegramID:      env.chatID,
-		Username:        env.username,
-		ClientID:        "test-client-id",
-		SubscriptionID:  "test-sub-id",
-		InboundID:       1,
-		TrafficLimit:    107374182400,
-		Status:          "active",
-		SubscriptionURL: "https://example.com/sub/test-sub-id",
-		ExpiryTime:      time.Now().Add(1 * time.Hour),
+		TelegramID:     env.chatID,
+		Username:       env.username,
+		ClientID:       "test-client-id",
+		SubscriptionID: "test-sub-id",
+		Status:         "active",
+		ExpiryTime:     time.Now().Add(1 * time.Hour),
 	}
 	require.NoError(t, env.db.CreateSubscription(ctx, sub))
 

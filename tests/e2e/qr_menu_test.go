@@ -19,14 +19,11 @@ func TestE2E_QRCodeGeneration(t *testing.T) {
 	ctx := context.Background()
 
 	sub := &database.Subscription{
-		TelegramID:      env.chatID,
-		Username:        env.username,
-		ClientID:        "test-client-id",
-		SubscriptionID:  "test-sub-id",
-		InboundID:       1,
-		TrafficLimit:    107374182400,
-		Status:          "active",
-		SubscriptionURL: "https://example.com/sub/test-sub-id",
+		TelegramID:     env.chatID,
+		Username:       env.username,
+		ClientID:       "test-client-id",
+		SubscriptionID: "test-sub-id",
+		Status:         "active",
 	}
 	require.NoError(t, env.db.CreateSubscription(ctx, sub))
 
@@ -81,14 +78,11 @@ func TestE2E_MenuHelp(t *testing.T) {
 	ctx := context.Background()
 
 	sub := &database.Subscription{
-		TelegramID:      env.chatID,
-		Username:        env.username,
-		ClientID:        "test-client-id",
-		SubscriptionID:  "test-sub-id",
-		InboundID:       1,
-		TrafficLimit:    107374182400,
-		Status:          "active",
-		SubscriptionURL: "https://example.com/sub/test-sub-id",
+		TelegramID:     env.chatID,
+		Username:       env.username,
+		ClientID:       "test-client-id",
+		SubscriptionID: "test-sub-id",
+		Status:         "active",
 	}
 	require.NoError(t, env.db.CreateSubscription(ctx, sub))
 
@@ -143,14 +137,11 @@ func TestE2E_BackToStart(t *testing.T) {
 	ctx := context.Background()
 
 	sub := &database.Subscription{
-		TelegramID:      env.chatID,
-		Username:        env.username,
-		ClientID:        "test-client-id",
-		SubscriptionID:  "test-sub-id",
-		InboundID:       1,
-		TrafficLimit:    107374182400,
-		Status:          "active",
-		SubscriptionURL: "https://example.com/sub/test-sub-id",
+		TelegramID:     env.chatID,
+		Username:       env.username,
+		ClientID:       "test-client-id",
+		SubscriptionID: "test-sub-id",
+		Status:         "active",
 	}
 	require.NoError(t, env.db.CreateSubscription(ctx, sub))
 

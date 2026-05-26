@@ -922,15 +922,12 @@ func TestE2E_AdminLastReg(t *testing.T) {
 	ctx := context.Background()
 
 	sub := &database.Subscription{
-		TelegramID:      env.chatID,
-		Username:        env.username,
-		ClientID:        "test-client-id",
-		SubscriptionID:  "test-sub-id",
-		InboundID:       1,
-		TrafficLimit:    107374182400,
-		Status:          "active",
-		SubscriptionURL: "https://example.com/sub/test-sub-id",
-		CreatedAt:       time.Now(),
+		TelegramID:     env.chatID,
+		Username:       env.username,
+		ClientID:       "test-client-id",
+		SubscriptionID: "test-sub-id",
+		Status:         "active",
+		CreatedAt:      time.Now(),
 	}
 	require.NoError(t, env.db.CreateSubscription(ctx, sub))
 

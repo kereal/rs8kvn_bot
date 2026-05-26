@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Добавлена валидация полей `Sources` в `config.validate()`: проверка `XUIHost`, `XUIAPIToken`, `XUIInboundID` для каждого источника
+- Исправлены 3 теста валидации (`TestConfig_Validate_EmptyXUIHost`, `EmptyXUIAPIToken`, `InvalidInboundID_Zero`)
+- Удалён дублирующийся assert в `subscription_crud_test.go`, переименован тест `SubscriptionURLFormat` → `SubscriptionID_Set`
+- Удалён мёртвый параметр `xuiClient` из `web.NewServer()` — структурное поле, сигнатура и все 160+ вызовов обновлены
+
 ## [2.3.0] - 2026-05-24
 
 ### Added

@@ -20,13 +20,11 @@ func TestE2E_Cache_SetAndGet(t *testing.T) {
 	chatID := int64(900001)
 
 	sub := &database.Subscription{
-		TelegramID:      chatID,
-		Username:        "cacheduser",
-		ClientID:        "client-123",
-		SubscriptionID:  "sub-123",
-		TrafficLimit:    107374182400,
-		Status:          "active",
-		SubscriptionURL: "https://example.com/sub/123",
+		TelegramID:     chatID,
+		Username:       "cacheduser",
+		ClientID:       "client-123",
+		SubscriptionID: "sub-123",
+		Status:         "active",
 	}
 	require.NoError(t, env.db.CreateSubscription(ctx, sub))
 
@@ -56,13 +54,11 @@ func TestE2E_Cache_DbHitOnCacheMiss(t *testing.T) {
 	chatID := int64(900003)
 
 	sub := &database.Subscription{
-		TelegramID:      chatID,
-		Username:        "dbuser",
-		ClientID:        "client-789",
-		SubscriptionID:  "sub-789",
-		TrafficLimit:    107374182400,
-		Status:          "active",
-		SubscriptionURL: "https://example.com/sub/789",
+		TelegramID:     chatID,
+		Username:       "dbuser",
+		ClientID:       "client-789",
+		SubscriptionID: "sub-789",
+		Status:         "active",
 	}
 	require.NoError(t, env.db.CreateSubscription(ctx, sub))
 
