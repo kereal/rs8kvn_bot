@@ -1,7 +1,6 @@
 package database
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
 	"embed"
