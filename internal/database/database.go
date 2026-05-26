@@ -384,7 +384,7 @@ func (s *Service) ListSources(ctx context.Context) ([]Source, error) {
 func (s *Service) ListTrialSources(ctx context.Context) ([]Source, error) {
 	var sources []Source
 	result := s.db.WithContext(ctx).
-		Where("trial = ? AND active = ? AND xui_host IS NOT NULL AND xui_host != ''", true, true).
+		Where("trial = ? AND active = ? AND x_ui_host IS NOT NULL AND x_ui_host != ''", true, true).
 		Find(&sources)
 	if result.Error != nil {
 		return nil, fmt.Errorf("failed to list trial sources: %w", result.Error)
