@@ -8,6 +8,7 @@ import (
 
 	"rs8kvn_bot/internal/config"
 	"rs8kvn_bot/internal/database"
+	"rs8kvn_bot/internal/interfaces"
 	"rs8kvn_bot/internal/service"
 	"rs8kvn_bot/internal/testutil"
 	"rs8kvn_bot/internal/webhook"
@@ -73,15 +74,11 @@ func TestHandleCallback_CallbackDataRouting(t *testing.T) {
 				mockXUI.AddClientWithIDFunc = func(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
 					return &xui.ClientConfig{ID: "test-client-id", SubID: "test-sub-id"}, nil
 				}
-				mockXUI.GetSubscriptionLinkFunc = func(host, subID, subPath string) string {
-					return "https://test.url/sub/test-sub-id"
-				}
-				mockXUI.GetExternalURLFunc = func(host string) string {
-					return host
-				}
 			},
 			setupSubService: func(mockDB *testutil.MockDatabaseService, mockXUI *testutil.MockXUIClient, cfg *config.Config) *service.SubscriptionService {
-				return service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+				mockXUIClients := map[uint]interfaces.XUIClient{1: mockXUI}
+				sources := []database.Source{{ID: 1, Name: "main", Active: true, Trial: true, XUIHost: "http://example.com", XUIAPIToken: "token", XUIInboundID: 1}}
+				return service.NewSubscriptionService(mockDB, mockXUIClients, sources, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
 			},
 			wantSend: true,
 			wantText: "Ваша подписка готова",
@@ -92,10 +89,9 @@ func TestHandleCallback_CallbackDataRouting(t *testing.T) {
 			setupMock: func(mockDB *testutil.MockDatabaseService, mockXUI *testutil.MockXUIClient) {
 				mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 					return &database.Subscription{
-						TelegramID:      telegramID,
-						Username:        "testuser",
-						SubscriptionURL: "https://test.url/sub",
-						Status:          "active",
+						TelegramID: telegramID,
+						Username:   "testuser",
+						Status:     "active",
 					}, nil
 				}
 			},
@@ -159,10 +155,9 @@ func TestHandleCallback_CallbackDataRouting(t *testing.T) {
 			setupMock: func(mockDB *testutil.MockDatabaseService, mockXUI *testutil.MockXUIClient) {
 				mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 					return &database.Subscription{
-						TelegramID:      telegramID,
-						Username:        "testuser",
-						SubscriptionURL: "https://test.url/sub",
-						Status:          "active",
+						TelegramID: telegramID,
+						Username:   "testuser",
+						Status:     "active",
 					}, nil
 				}
 				mockXUI.GetClientTrafficFunc = func(ctx context.Context, username string) (*xui.ClientTraffic, error) {
@@ -170,7 +165,9 @@ func TestHandleCallback_CallbackDataRouting(t *testing.T) {
 				}
 			},
 			setupSubService: func(mockDB *testutil.MockDatabaseService, mockXUI *testutil.MockXUIClient, cfg *config.Config) *service.SubscriptionService {
-				return service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+				mockXUIClients := map[uint]interfaces.XUIClient{1: mockXUI}
+				sources := []database.Source{{ID: 1, Name: "main", Active: true, Trial: true, XUIHost: "http://example.com", XUIAPIToken: "token", XUIInboundID: 1}}
+				return service.NewSubscriptionService(mockDB, mockXUIClients, sources, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
 			},
 			wantSend: true,
 			wantText: "Ваша подписка",
@@ -190,10 +187,9 @@ func TestHandleCallback_CallbackDataRouting(t *testing.T) {
 			setupMock: func(mockDB *testutil.MockDatabaseService, mockXUI *testutil.MockXUIClient) {
 				mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 					return &database.Subscription{
-						TelegramID:      telegramID,
-						Username:        "testuser",
-						SubscriptionURL: "https://test.url/sub",
-						Status:          "active",
+						TelegramID: telegramID,
+						Username:   "testuser",
+						Status:     "active",
 					}, nil
 				}
 			},
@@ -228,7 +224,7 @@ func TestHandleCallback_CallbackDataRouting(t *testing.T) {
 				TelegramAdminID: 123456,
 				TrafficLimitGB:  50,
 				SiteURL:         "https://example.com",
-				XUIInboundID:    1,
+				Sources:         []config.Source{{Name: "main", XUIHost: "http://example.com", XUIAPIToken: "token", XUIInboundID: 1}},
 			}
 			mockDB := testutil.NewMockDatabaseService()
 			mockXUI := testutil.NewMockXUIClient()
@@ -440,7 +436,9 @@ func TestHandleCallback_MenuSubscription_NoSubscription(t *testing.T) {
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
-	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	mockXUIClients := map[uint]interfaces.XUIClient{1: mockXUI}
+	sources := []database.Source{{ID: 1, Name: "main", Active: true, Trial: true, XUIHost: "http://example.com", XUIAPIToken: "token", XUIInboundID: 1}}
+	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUIClients, sources, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
 	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
 
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
@@ -509,10 +507,9 @@ func TestHandleCallback_QRCode_WithSubscription(t *testing.T) {
 
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 		return &database.Subscription{
-			TelegramID:      telegramID,
-			Username:        "testuser",
-			SubscriptionURL: "vless://test@url:443?mode=vpn",
-			Status:          "active",
+			TelegramID: telegramID,
+			Username:   "testuser",
+			Status:     "active",
 		}, nil
 	}
 
@@ -586,7 +583,7 @@ func TestHandleCallback_CreateSubscription_DatabaseError(t *testing.T) {
 
 	cfg := &config.Config{
 		TrafficLimitGB: 50,
-		XUIInboundID:   1,
+		Sources:        []config.Source{{Name: "main", XUIHost: "http://example.com", XUIAPIToken: "token", XUIInboundID: 1}},
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -1010,9 +1007,8 @@ func TestHandleQRCode_QRError(t *testing.T) {
 
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 		return &database.Subscription{
-			TelegramID:      telegramID,
-			Username:        "testuser",
-			SubscriptionURL: "invalid://bad-url",
+			TelegramID: telegramID,
+			Username:   "testuser",
 		}, nil
 	}
 

@@ -107,7 +107,7 @@ func TestE2E_Concurrent_TrialBind_SameTrial(t *testing.T) {
 	ctx := context.Background()
 
 	trialSubID := "concurrent_trial_bind"
-	_, err := env.db.CreateTrialSubscription(ctx, "test_invite", trialSubID, "test-client-id", 1, 1024*1024*1024, time.Now().Add(24*time.Hour), "https://example.com/sub/test")
+	_, err := env.db.CreateTrialSubscription(ctx, "test_invite", trialSubID, "test-client-id", time.Now().Add(24*time.Hour))
 	require.NoError(t, err)
 
 	var wg sync.WaitGroup

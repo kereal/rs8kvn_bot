@@ -4,30 +4,21 @@ import (
 	"context"
 	"time"
 
-	"rs8kvn_bot/internal/database"
 	"rs8kvn_bot/internal/logger"
+	"rs8kvn_bot/internal/service"
 
 	"go.uber.org/zap"
 )
 
-// XUICleanupTarget defines the interface needed for trial cleanup.
-type XUICleanupTarget interface {
-	DeleteClient(ctx context.Context, email string) error
-}
-
 // TrialCleanupScheduler runs periodic expired trial cleanup.
 type TrialCleanupScheduler struct {
-	db         *database.Service
-	xuiClient  XUICleanupTarget
-	trialHours int
+	subService *service.SubscriptionService
 }
 
 // NewTrialCleanupScheduler creates a new TrialCleanupScheduler.
-func NewTrialCleanupScheduler(db *database.Service, xuiClient XUICleanupTarget, trialHours int) *TrialCleanupScheduler {
+func NewTrialCleanupScheduler(subService *service.SubscriptionService) *TrialCleanupScheduler {
 	return &TrialCleanupScheduler{
-		db:         db,
-		xuiClient:  xuiClient,
-		trialHours: trialHours,
+		subService: subService,
 	}
 }
 
@@ -55,7 +46,7 @@ func (s *TrialCleanupScheduler) Start(ctx context.Context) {
 
 func (s *TrialCleanupScheduler) runCleanup(ctx context.Context) {
 	logger.Info("Running trial cleanup")
-	deleted, err := s.db.CleanupExpiredTrials(ctx, s.trialHours, s.xuiClient)
+	deleted, err := s.subService.CleanupExpiredTrials(ctx)
 	if err != nil {
 		logger.Error("Trial cleanup failed", zap.Error(err))
 	} else if deleted > 0 {

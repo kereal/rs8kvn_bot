@@ -48,7 +48,6 @@ func TestE2E_CreateSubscription_Success(t *testing.T) {
 	assert.Equal(t, "active", sub.Status)
 	assert.NotEmpty(t, sub.ClientID, "ClientID should be set")
 	assert.NotEmpty(t, sub.SubscriptionID, "SubscriptionID should be set")
-	assert.NotEmpty(t, sub.SubscriptionURL, "SubscriptionURL should be set")
 
 	assert.True(t, env.botAPI.SendCalledSafe(), "Confirmation message should be sent")
 	assert.Contains(t, env.botAPI.LastSentText, "подписк", "Should mention subscription")
@@ -203,7 +202,7 @@ func TestE2E_CreateSubscription_TrafficLimitCorrect(t *testing.T) {
 	assert.Equal(t, expectedTraffic, capturedTraffic, "Traffic limit should match config")
 }
 
-func TestE2E_CreateSubscription_SubscriptionURLFormat(t *testing.T) {
+func TestE2E_CreateSubscription_SubscriptionID_Set(t *testing.T) {
 	t.Parallel()
 	env := setupE2EEnv(t)
 	defer env.db.Close()
@@ -227,9 +226,7 @@ func TestE2E_CreateSubscription_SubscriptionURLFormat(t *testing.T) {
 	sub, err := env.db.GetByTelegramID(ctx, env.chatID)
 	require.NoError(t, err)
 
-	assert.Contains(t, sub.SubscriptionURL, env.cfg.XUIHost, "URL should contain XUI host")
-	assert.Contains(t, sub.SubscriptionURL, env.cfg.XUISubPath, "URL should contain sub path")
-	assert.Contains(t, sub.SubscriptionURL, sub.SubscriptionID, "URL should contain subscription ID")
+	assert.NotEmpty(t, sub.SubscriptionID, "SubscriptionID should be set")
 }
 
 func TestE2E_CreateSubscription_UsernameStored(t *testing.T) {
@@ -309,14 +306,11 @@ func TestE2E_Subscription_ReplacesOldActive(t *testing.T) {
 	ctx := context.Background()
 
 	oldSub := &database.Subscription{
-		TelegramID:      env.chatID,
-		Username:        env.username,
-		ClientID:        "old-client-id",
-		SubscriptionID:  "old-sub-id",
-		InboundID:       1,
-		TrafficLimit:    107374182400,
-		Status:          "active",
-		SubscriptionURL: "https://example.com/sub/old",
+		TelegramID:     env.chatID,
+		Username:       env.username,
+		ClientID:       "old-client-id",
+		SubscriptionID: "old-sub-id",
+		Status:         "active",
 	}
 	require.NoError(t, env.db.CreateSubscription(ctx, oldSub))
 
@@ -349,14 +343,11 @@ func TestE2E_CreateSubscription_RevokesOnlyActive(t *testing.T) {
 	ctx := context.Background()
 
 	oldSub := &database.Subscription{
-		TelegramID:      env.chatID,
-		Username:        env.username,
-		ClientID:        "old-client-id",
-		SubscriptionID:  "old-sub-id",
-		InboundID:       1,
-		TrafficLimit:    107374182400,
-		Status:          "expired",
-		SubscriptionURL: "https://example.com/sub/old",
+		TelegramID:     env.chatID,
+		Username:       env.username,
+		ClientID:       "old-client-id",
+		SubscriptionID: "old-sub-id",
+		Status:         "expired",
 	}
 	require.NoError(t, env.db.CreateSubscription(ctx, oldSub))
 

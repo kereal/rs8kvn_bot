@@ -14,6 +14,7 @@ import (
 	"rs8kvn_bot/internal/bot"
 	"rs8kvn_bot/internal/config"
 	"rs8kvn_bot/internal/database"
+	"rs8kvn_bot/internal/interfaces"
 	"rs8kvn_bot/internal/logger"
 	"rs8kvn_bot/internal/service"
 	"rs8kvn_bot/internal/testutil"
@@ -118,11 +119,9 @@ func setupE2EEnv(t *testing.T) *e2eTestEnv {
 	cfg := &config.Config{
 		TelegramAdminID:  123456,
 		TrafficLimitGB:   100,
-		XUIInboundID:     1,
-		XUIHost:          "https://panel.example.com",
-		XUISubPath:       "/sub",
 		SiteURL:          "https://example.com",
 		TelegramBotToken: "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11",
+		GlobalSubURL:     "https://example.com/sub/",
 	}
 
 	mockXUI := testutil.NewMockXUIClient()
@@ -135,7 +134,9 @@ func setupE2EEnv(t *testing.T) *e2eTestEnv {
 		IsBot:     true,
 	}
 
-	subService := service.NewSubscriptionService(db, mockXUI, cfg, &webhook.NoopSender{})
+	xuiClients := map[uint]interfaces.XUIClient{1: mockXUI}
+	sources := []database.Source{{ID: 1, Name: "main", Active: true, Trial: true, XUIHost: "https://panel.example.com", XUIAPIToken: "test-api-token", XUIInboundID: 1}}
+	subService := service.NewSubscriptionService(db, xuiClients, sources, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
 	handler := bot.NewHandler(mockBotAPI, cfg, db, mockXUI, botCfg, subService, "")
 
 	return &e2eTestEnv{
@@ -247,19 +248,22 @@ func setupRealXUIEnv(t *testing.T, handlers map[string]http.HandlerFunc) *realXU
 	server := httptest.NewServer(mux)
 
 	cfg := &config.Config{
-		TelegramAdminID:         123456,
-		TrafficLimitGB:          100,
-		XUIInboundID:            1,
-		XUIHost:                 server.URL,
-		XUISubPath:              "sub",
-		SiteURL:                 "https://example.com",
-		TelegramBotToken:        "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11",
+		TelegramAdminID:  123456,
+		TrafficLimitGB:   100,
+		SiteURL:          "https://example.com",
+		TelegramBotToken: "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11",
+		GlobalSubURL:     "",
+		Sources: []config.Source{
+			{Name: "main", XUIHost: server.URL, XUIAPIToken: "test-api-token", XUIInboundID: 1, Active: true},
+		},
 	}
 
 	xuiClient, err := xui.NewClient(server.URL, "test-api-token")
 	require.NoError(t, err)
 
-	subService := service.NewSubscriptionService(db, xuiClient, cfg, &webhook.NoopSender{})
+	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
+	sources := []database.Source{{ID: 1, Name: "main", Active: true, Trial: true, XUIHost: server.URL, XUIAPIToken: "test-api-token", XUIInboundID: 1}}
+	subService := service.NewSubscriptionService(db, xuiClients, sources, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
 
 	return &realXUIEnv{
 		t:          t,

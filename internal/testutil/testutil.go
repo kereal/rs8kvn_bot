@@ -76,15 +76,17 @@ type MockDatabaseService struct {
 	GetInviteByCodeFunc                 func(ctx context.Context, code string) (*database.Invite, error)
 	GetReferralCountFunc                func(ctx context.Context, referrerTGID int64) (int64, error)
 	GetAllReferralCountsFunc            func(ctx context.Context) (map[int64]int64, error)
-	CreateTrialSubscriptionFunc         func(ctx context.Context, inviteCode, subscriptionID, clientID string, inboundID int, trafficBytes int64, expiryTime time.Time, subURL string) (*database.Subscription, error)
+	CreateTrialSubscriptionFunc         func(ctx context.Context, inviteCode, subscriptionID, clientID string, expiryTime time.Time) (*database.Subscription, error)
+	ListSourcesFunc                     func(ctx context.Context) ([]database.Source, error)
+	ListTrialSourcesFunc                func(ctx context.Context) ([]database.Source, error)
+	IsSourcesEmptyFunc                  func(ctx context.Context) (bool, error)
+	SeedDefaultSourceFunc               func(ctx context.Context, name, xuiHost, xuiAPIToken string, xuiInboundID int, subURL string) error
 	GetSubscriptionBySubscriptionIDFunc func(ctx context.Context, subscriptionID string) (*database.Subscription, error)
 	GetTrialSubscriptionBySubIDFunc     func(ctx context.Context, subscriptionID string) (*database.Subscription, error)
 	BindTrialSubscriptionFunc           func(ctx context.Context, subscriptionID string, telegramID int64, username string) (*database.Subscription, error)
 	CountTrialRequestsByIPLastHourFunc  func(ctx context.Context, ip string) (int, error)
 	CreateTrialRequestFunc              func(ctx context.Context, ip string) error
-	CleanupExpiredTrialsFunc            func(ctx context.Context, hours int, xuiClient interface {
-		DeleteClient(ctx context.Context, email string) error
-	}) (int64, error)
+	CleanupExpiredTrialsFunc            func(ctx context.Context, hours int) ([]database.Subscription, error)
 	GetPoolStatsFunc                    func() (*database.PoolStats, error)
 }
 
@@ -312,11 +314,43 @@ func (m *MockDatabaseService) GetInviteByReferrer(ctx context.Context, referrerT
 	return nil, database.ErrInviteNotFound
 }
 
-func (m *MockDatabaseService) CreateTrialSubscription(ctx context.Context, inviteCode, subscriptionID, clientID string, inboundID int, trafficBytes int64, expiryTime time.Time, subURL string) (*database.Subscription, error) {
+func (m *MockDatabaseService) CreateTrialSubscription(ctx context.Context, inviteCode, subscriptionID, clientID string, expiryTime time.Time) (*database.Subscription, error) {
 	if m.CreateTrialSubscriptionFunc != nil {
-		return m.CreateTrialSubscriptionFunc(ctx, inviteCode, subscriptionID, clientID, inboundID, trafficBytes, expiryTime, subURL)
+		return m.CreateTrialSubscriptionFunc(ctx, inviteCode, subscriptionID, clientID, expiryTime)
 	}
 	return &database.Subscription{InviteCode: inviteCode, SubscriptionID: subscriptionID, ClientID: clientID, IsTrial: true}, nil
+}
+
+func (m *MockDatabaseService) ListSources(ctx context.Context) ([]database.Source, error) {
+	if m.ListSourcesFunc != nil {
+		return m.ListSourcesFunc(ctx)
+	}
+	return []database.Source{
+		{ID: 1, Name: "default", Active: true, Trial: true, XUIHost: "http://localhost:2053", XUIAPIToken: "test-token", XUIInboundID: 1, SubURL: "http://example.com/sub/"},
+	}, nil
+}
+
+func (m *MockDatabaseService) ListTrialSources(ctx context.Context) ([]database.Source, error) {
+	if m.ListTrialSourcesFunc != nil {
+		return m.ListTrialSourcesFunc(ctx)
+	}
+	return []database.Source{
+		{ID: 1, Name: "default", Active: true, Trial: true, XUIHost: "http://localhost:2053", XUIAPIToken: "test-token", XUIInboundID: 1, SubURL: "http://example.com/sub/"},
+	}, nil
+}
+
+func (m *MockDatabaseService) IsSourcesEmpty(ctx context.Context) (bool, error) {
+	if m.IsSourcesEmptyFunc != nil {
+		return m.IsSourcesEmptyFunc(ctx)
+	}
+	return false, nil
+}
+
+func (m *MockDatabaseService) SeedDefaultSource(ctx context.Context, name, xuiHost, xuiAPIToken string, xuiInboundID int, subURL string) error {
+	if m.SeedDefaultSourceFunc != nil {
+		return m.SeedDefaultSourceFunc(ctx, name, xuiHost, xuiAPIToken, xuiInboundID, subURL)
+	}
+	return nil
 }
 
 func (m *MockDatabaseService) GetSubscriptionBySubscriptionID(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
@@ -378,13 +412,11 @@ func (m *MockDatabaseService) CreateTrialRequest(ctx context.Context, ip string)
 	return nil
 }
 
-func (m *MockDatabaseService) CleanupExpiredTrials(ctx context.Context, hours int, xuiClient interface {
-	DeleteClient(ctx context.Context, email string) error
-}) (int64, error) {
+func (m *MockDatabaseService) CleanupExpiredTrials(ctx context.Context, hours int) ([]database.Subscription, error) {
 	if m.CleanupExpiredTrialsFunc != nil {
-		return m.CleanupExpiredTrialsFunc(ctx, hours, xuiClient)
+		return m.CleanupExpiredTrialsFunc(ctx, hours)
 	}
-	return 0, nil
+	return nil, nil
 }
 
 func (m *MockDatabaseService) GetPoolStats() (*database.PoolStats, error) {
@@ -410,28 +442,23 @@ func (m *MockDatabaseService) GetAllReferralCounts(ctx context.Context) (map[int
 
 func CreateTestSubscription(telegramID int64, username string, status string, expiry time.Time) *database.Subscription {
 	return &database.Subscription{
-		TelegramID:      telegramID,
-		Username:        username,
-		ClientID:        "test-client-id-" + username,
-		SubscriptionID:  username,
-		InboundID:       1,
-		TrafficLimit:    107374182400,
-		ExpiryTime:      expiry,
-		Status:          status,
-		SubscriptionURL: "http://localhost/sub/" + username,
+		TelegramID:     telegramID,
+		Username:       username,
+		ClientID:       "test-client-id-" + username,
+		SubscriptionID: username,
+		ExpiryTime:     expiry,
+		Status:         status,
 	}
 }
 
 type MockXUIClient struct {
-	mu                      sync.Mutex
-	PingFunc                func(ctx context.Context) error
-	AddClientFunc           func(ctx context.Context, inboundID int, email string, trafficBytes int64, expiryTime time.Time) (*xui.ClientConfig, error)
-	AddClientWithIDFunc     func(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error)
-	UpdateClientFunc        func(ctx context.Context, inboundID int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, tgID int64, comment string) error
-	DeleteClientFunc        func(ctx context.Context, email string) error
-	GetClientTrafficFunc    func(ctx context.Context, email string) (*xui.ClientTraffic, error)
-	GetSubscriptionLinkFunc func(baseURL, subID, subPath string) string
-	GetExternalURLFunc      func(host string) string
+	mu                   sync.Mutex
+	PingFunc             func(ctx context.Context) error
+	AddClientFunc        func(ctx context.Context, inboundID int, email string, trafficBytes int64, expiryTime time.Time) (*xui.ClientConfig, error)
+	AddClientWithIDFunc  func(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error)
+	UpdateClientFunc     func(ctx context.Context, inboundID int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, tgID int64, comment string) error
+	DeleteClientFunc     func(ctx context.Context, email string) error
+	GetClientTrafficFunc func(ctx context.Context, email string) (*xui.ClientTraffic, error)
 
 	// Call tracking
 	AddClientCalled       bool
@@ -510,18 +537,8 @@ func (m *MockXUIClient) GetClientTraffic(ctx context.Context, email string) (*xu
 	}, nil
 }
 
-func (m *MockXUIClient) GetSubscriptionLink(baseURL, subID, subPath string) string {
-	if m.GetSubscriptionLinkFunc != nil {
-		return m.GetSubscriptionLinkFunc(baseURL, subID, subPath)
-	}
-	return baseURL + "/" + subPath + "/" + subID
-}
-
-func (m *MockXUIClient) GetExternalURL(host string) string {
-	if m.GetExternalURLFunc != nil {
-		return m.GetExternalURLFunc(host)
-	}
-	return host
+func (m *MockXUIClient) Close() error {
+	return nil
 }
 
 func NewMockXUIClient() *MockXUIClient {

@@ -8,6 +8,7 @@ import (
 
 	"rs8kvn_bot/internal/config"
 	"rs8kvn_bot/internal/database"
+	"rs8kvn_bot/internal/interfaces"
 	"rs8kvn_bot/internal/service"
 	"rs8kvn_bot/internal/testutil"
 	"rs8kvn_bot/internal/webhook"
@@ -113,15 +114,15 @@ func TestCreateSubscription_Success(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  100,
-		XUIInboundID:    1,
-		XUIHost:         "https://panel.example.com",
-		XUISubPath:      "/sub",
+		Sources:         []config.Source{{Name: "main", XUIHost: "https://panel.example.com", XUIAPIToken: "token", XUIInboundID: 1}},
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
-	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	mockXUIClients := map[uint]interfaces.XUIClient{1: mockXUI}
+	sources := []database.Source{{ID: 1, Name: "main", Active: true, Trial: true, XUIHost: "https://panel.example.com", XUIAPIToken: "token", XUIInboundID: 1}}
+	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUIClients, sources, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
 	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
 	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
 
@@ -160,13 +161,15 @@ func TestCreateSubscription_XUIFailure(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  100,
-		XUIInboundID:    1,
+		Sources:         []config.Source{{Name: "main", XUIHost: "http://example.com", XUIAPIToken: "token", XUIInboundID: 1}},
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
-	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	mockXUIClients := map[uint]interfaces.XUIClient{1: mockXUI}
+	sources := []database.Source{{ID: 1, Name: "main", Active: true, Trial: true, XUIHost: "https://panel.example.com", XUIAPIToken: "token", XUIInboundID: 1}}
+	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUIClients, sources, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
 	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
 	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
 
@@ -261,13 +264,15 @@ func TestCreateSubscription_DatabaseFailure_RollbackSuccess(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  100,
-		XUIInboundID:    1,
+		Sources:         []config.Source{{Name: "main", XUIHost: "http://example.com", XUIAPIToken: "token", XUIInboundID: 1}},
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
-	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	mockXUIClients := map[uint]interfaces.XUIClient{1: mockXUI}
+	sources := []database.Source{{ID: 1, Name: "main", Active: true, Trial: true, XUIHost: "https://panel.example.com", XUIAPIToken: "token", XUIInboundID: 1}}
+	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUIClients, sources, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
 	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
 	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
 
@@ -304,13 +309,15 @@ func TestCreateSubscription_DatabaseFailure_RollbackFailure(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  100,
-		XUIInboundID:    1,
+		Sources:         []config.Source{{Name: "main", XUIHost: "http://example.com", XUIAPIToken: "token", XUIInboundID: 1}},
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
-	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	mockXUIClients := map[uint]interfaces.XUIClient{1: mockXUI}
+	sources := []database.Source{{ID: 1, Name: "main", Active: true, Trial: true, XUIHost: "https://panel.example.com", XUIAPIToken: "token", XUIInboundID: 1}}
+	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUIClients, sources, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
 	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
 	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
 
@@ -343,15 +350,15 @@ func TestCreateSubscription_CacheUpdate(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  100,
-		XUIInboundID:    1,
-		XUIHost:         "https://panel.example.com",
-		XUISubPath:      "/sub",
+		Sources:         []config.Source{{Name: "main", XUIHost: "https://panel.example.com", XUIAPIToken: "token", XUIInboundID: 1}},
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
-	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	mockXUIClients := map[uint]interfaces.XUIClient{1: mockXUI}
+	sources := []database.Source{{ID: 1, Name: "main", Active: true, Trial: true, XUIHost: "https://panel.example.com", XUIAPIToken: "token", XUIInboundID: 1}}
+	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUIClients, sources, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
 	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
 	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
 
@@ -391,7 +398,7 @@ func TestHandleCreateSubscription_AlreadyInProgress(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  100,
-		XUIInboundID:    1,
+		Sources:         []config.Source{{Name: "main", XUIHost: "http://example.com", XUIAPIToken: "token", XUIInboundID: 1}},
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -421,7 +428,7 @@ func TestHandleCreateSubscription_ExistingActiveSubscription(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  100,
-		XUIInboundID:    1,
+		Sources:         []config.Source{{Name: "main", XUIHost: "http://example.com", XUIAPIToken: "token", XUIInboundID: 1}},
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -429,11 +436,11 @@ func TestHandleCreateSubscription_ExistingActiveSubscription(t *testing.T) {
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
 
 	sub := &database.Subscription{
-		TelegramID:      123456,
-		Username:        "testuser",
-		SubscriptionURL: "https://test.url/sub",
-		ExpiryTime:      time.Now().Add(30 * 24 * time.Hour), // Not expired
-		Status:          "active",
+		TelegramID: 123456,
+		Username:   "testuser",
+
+		ExpiryTime: time.Now().Add(30 * 24 * time.Hour), // Not expired
+		Status:     "active",
 	}
 
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
@@ -454,7 +461,7 @@ func TestHandleCreateSubscription_ExpiredSubscription(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  100,
-		XUIInboundID:    1,
+		Sources:         []config.Source{{Name: "main", XUIHost: "http://example.com", XUIAPIToken: "token", XUIInboundID: 1}},
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -462,11 +469,11 @@ func TestHandleCreateSubscription_ExpiredSubscription(t *testing.T) {
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
 
 	sub := &database.Subscription{
-		TelegramID:      123456,
-		Username:        "testuser",
-		SubscriptionURL: "https://test.url/sub",
-		ExpiryTime:      time.Now().Add(-24 * time.Hour), // Expired
-		Status:          "expired",
+		TelegramID: 123456,
+		Username:   "testuser",
+
+		ExpiryTime: time.Now().Add(-24 * time.Hour), // Expired
+		Status:     "expired",
 	}
 
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
@@ -499,7 +506,7 @@ func TestHandleCreateSubscription_DatabaseError(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  100,
-		XUIInboundID:    1,
+		Sources:         []config.Source{{Name: "main", XUIHost: "http://example.com", XUIAPIToken: "token", XUIInboundID: 1}},
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -523,13 +530,15 @@ func TestHandleCreateSubscription_NoSubscription(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  100,
-		XUIInboundID:    1,
+		Sources:         []config.Source{{Name: "main", XUIHost: "http://example.com", XUIAPIToken: "token", XUIInboundID: 1}},
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
-	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	mockXUIClients := map[uint]interfaces.XUIClient{1: mockXUI}
+	sources := []database.Source{{ID: 1, Name: "main", Active: true, Trial: true, XUIHost: "https://panel.example.com", XUIAPIToken: "token", XUIInboundID: 1}}
+	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUIClients, sources, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
 	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
 	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
 
@@ -567,7 +576,9 @@ func TestHandleMySubscription_NotFound(t *testing.T) {
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
-	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	mockXUIClients := map[uint]interfaces.XUIClient{1: mockXUI}
+	sources := []database.Source{{ID: 1, Name: "main", Active: true, Trial: true, XUIHost: "https://panel.example.com", XUIAPIToken: "token", XUIInboundID: 1}}
+	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUIClients, sources, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
 	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
 	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
 
@@ -593,7 +604,9 @@ func TestHandleMySubscription_DatabaseError(t *testing.T) {
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
-	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	mockXUIClients := map[uint]interfaces.XUIClient{1: mockXUI}
+	sources := []database.Source{{ID: 1, Name: "main", Active: true, Trial: true, XUIHost: "https://panel.example.com", XUIAPIToken: "token", XUIInboundID: 1}}
+	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUIClients, sources, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
 	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
 	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
 
@@ -619,17 +632,19 @@ func TestHandleMySubscription_ActiveSubscription(t *testing.T) {
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
-	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	mockXUIClients := map[uint]interfaces.XUIClient{1: mockXUI}
+	sources := []database.Source{{ID: 1, Name: "main", Active: true, Trial: true, XUIHost: "https://panel.example.com", XUIAPIToken: "token", XUIInboundID: 1}}
+	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUIClients, sources, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
 	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
 	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
 
 	sub := &database.Subscription{
-		TelegramID:      123456,
-		Username:        "testuser",
-		SubscriptionURL: "https://test.url/sub",
-		ExpiryTime:      time.Now().Add(30 * 24 * time.Hour),
-		Status:          "active",
-		CreatedAt:       time.Now().Add(-7 * 24 * time.Hour), // Created 7 days ago
+		TelegramID: 123456,
+		Username:   "testuser",
+
+		ExpiryTime: time.Now().Add(30 * 24 * time.Hour),
+		Status:     "active",
+		CreatedAt:  time.Now().Add(-7 * 24 * time.Hour), // Created 7 days ago
 	}
 
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
@@ -667,17 +682,19 @@ func TestHandleMySubscription_TrafficFetchError(t *testing.T) {
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
-	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	mockXUIClients := map[uint]interfaces.XUIClient{1: mockXUI}
+	sources := []database.Source{{ID: 1, Name: "main", Active: true, Trial: true, XUIHost: "https://panel.example.com", XUIAPIToken: "token", XUIInboundID: 1}}
+	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUIClients, sources, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
 	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
 	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
 
 	sub := &database.Subscription{
-		TelegramID:      123456,
-		Username:        "testuser",
-		SubscriptionURL: "https://test.url/sub",
-		ExpiryTime:      time.Now().Add(30 * 24 * time.Hour),
-		Status:          "active",
-		CreatedAt:       time.Now().Add(-7 * 24 * time.Hour), // Created 7 days ago
+		TelegramID: 123456,
+		Username:   "testuser",
+
+		ExpiryTime: time.Now().Add(30 * 24 * time.Hour),
+		Status:     "active",
+		CreatedAt:  time.Now().Add(-7 * 24 * time.Hour), // Created 7 days ago
 	}
 
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
@@ -708,16 +725,18 @@ func TestHandleMySubscription_UsesCache(t *testing.T) {
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
-	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	mockXUIClients := map[uint]interfaces.XUIClient{1: mockXUI}
+	sources := []database.Source{{ID: 1, Name: "main", Active: true, Trial: true, XUIHost: "https://panel.example.com", XUIAPIToken: "token", XUIInboundID: 1}}
+	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUIClients, sources, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
 	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
 	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
 
 	sub := &database.Subscription{
-		TelegramID:      123456,
-		Username:        "testuser",
-		SubscriptionURL: "https://test.url/sub",
-		ExpiryTime:      time.Now().Add(30 * 24 * time.Hour),
-		Status:          "active",
+		TelegramID: 123456,
+		Username:   "testuser",
+
+		ExpiryTime: time.Now().Add(30 * 24 * time.Hour),
+		Status:     "active",
 	}
 
 	// Set cache
@@ -755,9 +774,8 @@ func TestHandleQRCode_Success(t *testing.T) {
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
 
 	sub := &database.Subscription{
-		TelegramID:      123456,
-		Username:        "testuser",
-		SubscriptionURL: "https://test.url/sub",
+		TelegramID: 123456,
+		Username:   "testuser",
 	}
 
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
@@ -1015,13 +1033,15 @@ func TestHandleCreateSubscription_ZeroMessageID(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  100,
-		XUIInboundID:    1,
+		Sources:         []config.Source{{Name: "main", XUIHost: "http://example.com", XUIAPIToken: "token", XUIInboundID: 1}},
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
-	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	mockXUIClients := map[uint]interfaces.XUIClient{1: mockXUI}
+	sources := []database.Source{{ID: 1, Name: "main", Active: true, Trial: true, XUIHost: "https://panel.example.com", XUIAPIToken: "token", XUIInboundID: 1}}
+	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUIClients, sources, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
 	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
 	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
 
@@ -1063,10 +1083,9 @@ func TestHandleQRCode_WithSubscription(t *testing.T) {
 
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 		return &database.Subscription{
-			TelegramID:      telegramID,
-			Username:        "testuser",
-			SubscriptionURL: "vless://test@url:443?mode=vpn",
-			Status:          "active",
+			TelegramID: telegramID,
+			Username:   "testuser",
+			Status:     "active",
 		}, nil
 	}
 
@@ -1238,7 +1257,7 @@ func TestHandleCreateError_RollbackFailed(t *testing.T) {
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  100,
 		SiteURL:         "https://vpn.site",
-		XUIInboundID:    1,
+		Sources:         []config.Source{{Name: "main", XUIHost: "http://example.com", XUIAPIToken: "token", XUIInboundID: 1}},
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -1261,7 +1280,7 @@ func TestHandleCreateError_ConnectionRefused(t *testing.T) {
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  100,
 		SiteURL:         "https://vpn.site",
-		XUIInboundID:    1,
+		Sources:         []config.Source{{Name: "main", XUIHost: "http://example.com", XUIAPIToken: "token", XUIInboundID: 1}},
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -1283,7 +1302,7 @@ func TestHandleCreateError_Authentication(t *testing.T) {
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  100,
 		SiteURL:         "https://vpn.site",
-		XUIInboundID:    1,
+		Sources:         []config.Source{{Name: "main", XUIHost: "http://example.com", XUIAPIToken: "token", XUIInboundID: 1}},
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -1366,15 +1385,15 @@ func TestCreateSubscription_WithPendingInvite(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  100,
-		XUIInboundID:    1,
-		XUIHost:         "https://panel.example.com",
-		XUISubPath:      "/sub",
+		Sources:         []config.Source{{Name: "main", XUIHost: "https://panel.example.com", XUIAPIToken: "token", XUIInboundID: 1}},
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
-	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	mockXUIClients := map[uint]interfaces.XUIClient{1: mockXUI}
+	sources := []database.Source{{ID: 1, Name: "main", Active: true, Trial: true, XUIHost: "https://panel.example.com", XUIAPIToken: "token", XUIInboundID: 1}}
+	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUIClients, sources, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
 	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
 	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
 
@@ -1425,15 +1444,15 @@ func TestCreateSubscription_WithExpiredPendingInvite(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		TrafficLimitGB:  100,
-		XUIInboundID:    1,
-		XUIHost:         "https://panel.example.com",
-		XUISubPath:      "/sub",
+		Sources:         []config.Source{{Name: "main", XUIHost: "https://panel.example.com", XUIAPIToken: "token", XUIInboundID: 1}},
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
-	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	mockXUIClients := map[uint]interfaces.XUIClient{1: mockXUI}
+	sources := []database.Source{{ID: 1, Name: "main", Active: true, Trial: true, XUIHost: "https://panel.example.com", XUIAPIToken: "token", XUIInboundID: 1}}
+	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUIClients, sources, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
 	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
 	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
 
@@ -1496,7 +1515,9 @@ func TestCreateSubscription_ShowLoadingMessageFails(t *testing.T) {
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
-	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	mockXUIClients := map[uint]interfaces.XUIClient{1: mockXUI}
+	sources := []database.Source{{ID: 1, Name: "main", Active: true, Trial: true, XUIHost: "https://panel.example.com", XUIAPIToken: "token", XUIInboundID: 1}}
+	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUIClients, sources, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
 	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
 	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
 

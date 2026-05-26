@@ -77,7 +77,6 @@ func TestConstants_TelegramLimits(t *testing.T) {
 func TestConstants_Validation(t *testing.T) {
 	t.Parallel()
 
-	assert.Equal(t, 1, MinInboundID)
 	assert.Equal(t, 14, SubIDLengthBytes)
 	assert.Equal(t, 1<<20, MaxResponseSize)
 }

@@ -188,8 +188,6 @@ func TestHandleUpdate_UnknownCommand(t *testing.T) {
 	handler.HandleUpdate(ctx, update)
 }
 
-
-
 // TestHandleUpdate_NilMessage тестирует обработку update с nil Message
 func TestHandleUpdate_NilMessage(t *testing.T) {
 	t.Parallel()

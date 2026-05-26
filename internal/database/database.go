@@ -50,16 +50,16 @@ type Subscription struct {
 
 // Source represents a configured 3x-ui panel source.
 type Source struct {
-	ID            uint      `gorm:"primaryKey;column:id"`
-	Name          string    `gorm:"size:255;column:name"`
-	Active        bool      `gorm:"default:true;column:active"`
-	Trial         bool      `gorm:"default:false;column:trial"`
-	XUIHost       string    `gorm:"size:255;column:x_ui_host"`
-	XUIAPIToken   string    `gorm:"size:255;column:x_ui_api_token"`
-	XUIInboundID  int       `gorm:"not null;column:x_ui_inbound_id"`
-	SubURL        string    `gorm:"size:512;column:sub_url"`
-	CreatedAt     time.Time `gorm:"autoCreateTime;column:created_at"`
-	UpdatedAt     time.Time `gorm:"autoUpdateTime;column:updated_at"`
+	ID           uint      `gorm:"primaryKey;column:id"`
+	Name         string    `gorm:"size:255;column:name"`
+	Active       bool      `gorm:"default:true;column:active"`
+	Trial        bool      `gorm:"default:false;column:trial"`
+	XUIHost      string    `gorm:"size:255;column:x_ui_host"`
+	XUIAPIToken  string    `gorm:"size:255;column:x_ui_api_token"`
+	XUIInboundID int       `gorm:"not null;column:x_ui_inbound_id"`
+	SubURL       string    `gorm:"size:512;column:sub_url"`
+	CreatedAt    time.Time `gorm:"autoCreateTime;column:created_at"`
+	UpdatedAt    time.Time `gorm:"autoUpdateTime;column:updated_at"`
 }
 
 // TableName returns the table name for Source.
@@ -532,7 +532,7 @@ func (s *Service) GetTelegramIDsBatch(ctx context.Context, offset, limit int) ([
 	return ids, nil
 }
 
-	// GetTotalTelegramIDCount returns the total count of unique Telegram IDs.
+// GetTotalTelegramIDCount returns the total count of unique Telegram IDs.
 func (s *Service) GetTotalTelegramIDCount(ctx context.Context) (int64, error) {
 	var count int64
 	result := s.db.WithContext(ctx).

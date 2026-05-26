@@ -2,12 +2,13 @@ package scheduler
 
 import (
 	"context"
-	"sync"
 	"testing"
 	"time"
 
+	"rs8kvn_bot/internal/config"
 	"rs8kvn_bot/internal/database"
 	"rs8kvn_bot/internal/logger"
+	"rs8kvn_bot/internal/service"
 	"rs8kvn_bot/internal/testutil"
 
 	"github.com/stretchr/testify/assert"
@@ -18,36 +19,23 @@ func init() {
 	_, _ = logger.Init("", "error")
 }
 
-type mockXUIClientForCleanup struct {
-	deletedClients map[string]bool // email -> deleted
-	deleteErr      error
-	mu             sync.Mutex
-}
-
-func (m *mockXUIClientForCleanup) DeleteClient(ctx context.Context, email string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.deleteErr != nil {
-		return m.deleteErr
+func newTestSubService(t testing.TB, db *database.Service) *service.SubscriptionService {
+	t.Helper()
+	cfg := &config.Config{
+		TrialDurationHours: 1,
 	}
-	if m.deletedClients == nil {
-		m.deletedClients = make(map[string]bool)
-	}
-	m.deletedClients[email] = true
-	return nil
+	return service.NewSubscriptionService(db, nil, nil, cfg, "", nil)
 }
-
 
 func TestTrialCleanupScheduler_New(t *testing.T) {
 	t.Parallel()
 
 	db, err := testutil.NewTestDatabaseService(t)
 	require.NoError(t, err)
-
-	scheduler := NewTrialCleanupScheduler(db, &mockXUIClientForCleanup{}, 3)
+	subService := newTestSubService(t, db)
+	scheduler := NewTrialCleanupScheduler(subService)
 
 	assert.NotNil(t, scheduler)
-	assert.Equal(t, 3, scheduler.trialHours)
 }
 
 func TestTrialCleanupScheduler_RunCleanup_NoExpiredTrials(t *testing.T) {
@@ -55,14 +43,11 @@ func TestTrialCleanupScheduler_RunCleanup_NoExpiredTrials(t *testing.T) {
 
 	db, err := testutil.NewTestDatabaseService(t)
 	require.NoError(t, err)
-
-	mockXUI := &mockXUIClientForCleanup{deletedClients: make(map[string]bool)}
-	scheduler := NewTrialCleanupScheduler(db, mockXUI, 3)
+	subService := newTestSubService(t, db)
+	scheduler := NewTrialCleanupScheduler(subService)
 
 	ctx := context.Background()
 	scheduler.runCleanup(ctx)
-
-	assert.Empty(t, mockXUI.deletedClients)
 }
 
 func TestTrialCleanupScheduler_RunCleanup_WithExpiredTrials(t *testing.T) {
@@ -74,55 +59,52 @@ func TestTrialCleanupScheduler_RunCleanup_WithExpiredTrials(t *testing.T) {
 	ctx := context.Background()
 
 	expiredSub := &database.Subscription{
-		TelegramID:     0, // unbound trial
+		TelegramID:     0,
 		ClientID:       "expired-client-1",
 		SubscriptionID: "expired-sub-1",
-		InboundID:      1,
 		IsTrial:        true,
 		ExpiryTime:     time.Now().Add(-1 * time.Hour),
 		Status:         "active",
-		CreatedAt:      time.Now().Add(-2 * time.Hour), // old created_at - will be cleaned
+		CreatedAt:      time.Now().Add(-2 * time.Hour),
 	}
 	err = db.CreateSubscription(ctx, expiredSub)
 	require.NoError(t, err)
 
 	expiredSub2 := &database.Subscription{
-		TelegramID:     0, // unbound trial
+		TelegramID:     0,
 		ClientID:       "expired-client-2",
 		SubscriptionID: "expired-sub-2",
-		InboundID:      1,
 		IsTrial:        true,
 		ExpiryTime:     time.Now().Add(-1 * time.Hour),
 		Status:         "active",
-		CreatedAt:      time.Now().Add(-3 * time.Hour), // old created_at - will be cleaned
+		CreatedAt:      time.Now().Add(-3 * time.Hour),
 	}
 	err = db.CreateSubscription(ctx, expiredSub2)
 	require.NoError(t, err)
 
 	activeSub := &database.Subscription{
-		TelegramID:     0, // unbound trial
+		TelegramID:     0,
 		ClientID:       "active-client",
 		SubscriptionID: "active-sub",
-		InboundID:      1,
 		IsTrial:        true,
 		ExpiryTime:     time.Now().Add(1 * time.Hour),
 		Status:         "active",
-		CreatedAt:      time.Now().Add(-30 * time.Minute), // recent - won't be cleaned
+		CreatedAt:      time.Now().Add(-30 * time.Minute),
 	}
 	err = db.CreateSubscription(ctx, activeSub)
 	require.NoError(t, err)
 
-	mockXUI := &mockXUIClientForCleanup{deletedClients: make(map[string]bool)}
-	scheduler := NewTrialCleanupScheduler(db, mockXUI, 1) // 1 hour cutoff
+	subService := newTestSubService(t, db)
+	scheduler := NewTrialCleanupScheduler(subService)
 
 	scheduler.runCleanup(ctx)
 
-	assert.Len(t, mockXUI.deletedClients, 2, "Should delete both old trials (created > 1h ago)")
-	assert.Contains(t, mockXUI.deletedClients, "trial_expired-sub-1")
-	assert.Contains(t, mockXUI.deletedClients, "trial_expired-sub-2")
-
-	_, err = db.GetByTelegramID(ctx, 111111)
-	assert.Error(t, err, "Unbound trial with telegram_id != 0 won't be found by GetByTelegramID")
+	remaining, err := db.GetAllSubscriptions(ctx)
+	require.NoError(t, err)
+	assert.Len(t, remaining, 1, "Only the active trial should remain")
+	if len(remaining) > 0 {
+		assert.Equal(t, "active-sub", remaining[0].SubscriptionID)
+	}
 }
 
 func TestTrialCleanupScheduler_RunCleanup_XUIFailure(t *testing.T) {
@@ -134,26 +116,24 @@ func TestTrialCleanupScheduler_RunCleanup_XUIFailure(t *testing.T) {
 	ctx := context.Background()
 
 	expiredSub := &database.Subscription{
-		TelegramID:     0, // unbound trial
+		TelegramID:     0,
 		ClientID:       "client-xui-fail",
 		SubscriptionID: "sub-xui-fail",
-		InboundID:      1,
 		IsTrial:        true,
 		Status:         "active",
-		CreatedAt:      time.Now().Add(-2 * time.Hour), // old enough to be cleaned
+		CreatedAt:      time.Now().Add(-2 * time.Hour),
 	}
 	err = db.CreateSubscription(ctx, expiredSub)
 	require.NoError(t, err)
 
-	mockXUI := &mockXUIClientForCleanup{
-		deletedClients: make(map[string]bool),
-		deleteErr:      assert.AnError,
-	}
-	scheduler := NewTrialCleanupScheduler(db, mockXUI, 1)
+	subService := newTestSubService(t, db)
+	scheduler := NewTrialCleanupScheduler(subService)
 
 	scheduler.runCleanup(ctx)
 
-	assert.Empty(t, mockXUI.deletedClients, "Should not delete when XUI fails")
+	remaining, err := db.GetAllSubscriptions(ctx)
+	require.NoError(t, err)
+	assert.Empty(t, remaining)
 }
 
 func TestTrialCleanupScheduler_Start_ContextCancel(t *testing.T) {
@@ -162,8 +142,8 @@ func TestTrialCleanupScheduler_Start_ContextCancel(t *testing.T) {
 	db, err := testutil.NewTestDatabaseService(t)
 	require.NoError(t, err)
 
-	mockXUI := &mockXUIClientForCleanup{deletedClients: make(map[string]bool)}
-	scheduler := NewTrialCleanupScheduler(db, mockXUI, 1)
+	subService := newTestSubService(t, db)
+	scheduler := NewTrialCleanupScheduler(subService)
 
 	ctx, cancel := context.WithCancel(context.Background())
 

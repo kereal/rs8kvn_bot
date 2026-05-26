@@ -127,27 +127,6 @@ func TestLoad_InvalidTelegramAdminID(t *testing.T) {
 	assert.Contains(t, err.Error(), "TELEGRAM_ADMIN_ID", "Error should mention TELEGRAM_ADMIN_ID")
 }
 
-func TestLoad_InvalidXUIInboundID(t *testing.T) {
-
-	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
-	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
-	os.Setenv("XUI_HOST", "https://localhost:2053")
-	os.Setenv("XUI_API_TOKEN", "some-token")
-	os.Setenv("XUI_INBOUND_ID", "invalid")
-	os.Setenv("LOG_LEVEL", "info")
-	defer func() {
-		os.Unsetenv("TELEGRAM_BOT_TOKEN")
-		os.Unsetenv("TELEGRAM_ADMIN_ID")
-		os.Unsetenv("XUI_HOST")
-		os.Unsetenv("XUI_API_TOKEN")
-		os.Unsetenv("LOG_LEVEL")
-	}()
-
-	_, err := Load()
-	require.Error(t, err, "Load() should error for invalid XUI_INBOUND_ID")
-	assert.Contains(t, err.Error(), "XUI_INBOUND_ID", "Error should mention XUI_INBOUND_ID")
-}
-
 func TestLoad_InvalidTrafficLimitGB_TooLow(t *testing.T) {
 
 	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
@@ -516,27 +495,6 @@ func TestLoad_ValidTrialRateLimit_Max(t *testing.T) {
 	assert.Equal(t, 100, cfg.TrialRateLimit)
 }
 
-func TestLoad_InvalidXUIInboundID_Negative(t *testing.T) {
-
-	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
-	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
-	os.Setenv("XUI_HOST", "https://localhost:2053")
-	os.Setenv("XUI_API_TOKEN", "some-token")
-	os.Setenv("XUI_INBOUND_ID", "-1")
-	os.Setenv("LOG_LEVEL", "info")
-	defer func() {
-		os.Unsetenv("TELEGRAM_BOT_TOKEN")
-		os.Unsetenv("TELEGRAM_ADMIN_ID")
-		os.Unsetenv("XUI_HOST")
-		os.Unsetenv("XUI_API_TOKEN")
-		os.Unsetenv("XUI_INBOUND_ID")
-		os.Unsetenv("LOG_LEVEL")
-	}()
-
-	_, err := Load()
-	assert.Error(t, err, "Load() should error for negative XUI_INBOUND_ID")
-}
-
 func TestLoad_InvalidHeartbeatInterval(t *testing.T) {
 
 	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
@@ -601,10 +559,10 @@ func TestConfig_String(t *testing.T) {
 	cfg := &Config{
 		TelegramBotToken: "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 		TelegramAdminID:  123456,
-		XUIHost:          "https://localhost:2053",
-		XUIAPIToken:      "some-token",
-		XUIInboundID:     1,
-		TrafficLimitGB:   100,
+		Sources: []Source{
+			{Name: "default", Active: true, XUIHost: "https://localhost:2053", XUIAPIToken: "some-token", XUIInboundID: 1},
+		},
+		TrafficLimitGB: 100,
 	}
 
 	str := cfg.String()
@@ -649,8 +607,9 @@ func TestConfig_Validate_EmptyXUIHost(t *testing.T) {
 	cfg := &Config{
 		TelegramBotToken: "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 		TelegramAdminID:  123456,
-		XUIHost:          "",
-		XUIAPIToken:      "some-token",
+		Sources: []Source{
+			{Name: "default", Active: true, XUIHost: "", XUIAPIToken: "some-token"},
+		},
 	}
 
 	err := cfg.validate()
@@ -663,8 +622,9 @@ func TestConfig_Validate_EmptyXUIAPIToken(t *testing.T) {
 	cfg := &Config{
 		TelegramBotToken: "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 		TelegramAdminID:  123456,
-		XUIHost:          "https://localhost:2053",
-		XUIAPIToken:      "",
+		Sources: []Source{
+			{Name: "default", Active: true, XUIHost: "https://localhost:2053", XUIAPIToken: ""},
+		},
 	}
 
 	err := cfg.validate()
@@ -677,9 +637,9 @@ func TestConfig_Validate_InvalidAdminID_Zero(t *testing.T) {
 	cfg := &Config{
 		TelegramBotToken: "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 		TelegramAdminID:  0,
-		XUIHost:          "https://localhost:2053",
-		XUIAPIToken:      "valid-token",
-		XUIInboundID:     1,
+		Sources: []Source{
+			{Name: "default", Active: true, XUIHost: "https://localhost:2053", XUIAPIToken: "valid-token", XUIInboundID: 1},
+		},
 	}
 
 	err := cfg.validate()
@@ -693,9 +653,9 @@ func TestConfig_Validate_InvalidInboundID_Zero(t *testing.T) {
 	cfg := &Config{
 		TelegramBotToken: "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 		TelegramAdminID:  123456,
-		XUIHost:          "https://localhost:2053",
-		XUIAPIToken:      "some-token",
-		XUIInboundID:     0,
+		Sources: []Source{
+			{Name: "default", Active: true, XUIHost: "https://localhost:2053", XUIAPIToken: "some-token", XUIInboundID: 0},
+		},
 	}
 
 	err := cfg.validate()
@@ -706,12 +666,11 @@ func TestConfig_Validate_Valid(t *testing.T) {
 	t.Parallel()
 
 	cfg := &Config{
-		TelegramBotToken:   "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
-		TelegramAdminID:    123456,
-		XUIHost:            "https://localhost:2053",
-		XUIAPIToken:        "some-token",
-		XUIInboundID:       1,
-		XUISubPath:         "xui",
+		TelegramBotToken: "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
+		TelegramAdminID:  123456,
+		Sources: []Source{
+			{Name: "default", Active: true, XUIHost: "https://localhost:2053", XUIAPIToken: "some-token", XUIInboundID: 1},
+		},
 		TrafficLimitGB:     100,
 		HeartbeatInterval:  60,
 		LogLevel:           "info",
@@ -729,12 +688,11 @@ func TestConfig_Validate_SentryDSN_Valid(t *testing.T) {
 	t.Parallel()
 
 	cfg := &Config{
-		TelegramBotToken:   "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
-		TelegramAdminID:    123456,
-		XUIHost:            "https://localhost:2053",
-		XUIAPIToken:        "some-token",
-		XUIInboundID:       1,
-		XUISubPath:         "xui",
+		TelegramBotToken: "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
+		TelegramAdminID:  123456,
+		Sources: []Source{
+			{Name: "default", Active: true, XUIHost: "https://localhost:2053", XUIAPIToken: "some-token", XUIInboundID: 1},
+		},
 		TrafficLimitGB:     100,
 		HeartbeatInterval:  60,
 		LogLevel:           "info",
@@ -755,11 +713,10 @@ func TestConfig_Validate_SentryDSN_Invalid(t *testing.T) {
 	cfg := &Config{
 		TelegramBotToken: "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 		TelegramAdminID:  123456,
-		XUIHost:          "https://localhost:2053",
-		XUIAPIToken:      "some-token",
-		XUIInboundID:     1,
-		XUISubPath:       "xui",
-		SentryDSN:        "invalid-dsn",
+		Sources: []Source{
+			{Name: "default", Active: true, XUIHost: "https://localhost:2053", XUIAPIToken: "some-token", XUIInboundID: 1},
+		},
+		SentryDSN: "invalid-dsn",
 	}
 
 	err := cfg.validate()
@@ -770,12 +727,11 @@ func TestConfig_Validate_WithSubPath(t *testing.T) {
 	t.Parallel()
 
 	cfg := &Config{
-		TelegramBotToken:   "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
-		TelegramAdminID:    123456,
-		XUIHost:            "https://localhost:2053",
-		XUIAPIToken:        "some-token",
-		XUIInboundID:       1,
-		XUISubPath:         "custom",
+		TelegramBotToken: "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
+		TelegramAdminID:  123456,
+		Sources: []Source{
+			{Name: "default", Active: true, XUIHost: "https://localhost:2053", XUIAPIToken: "some-token", XUIInboundID: 1},
+		},
 		TrafficLimitGB:     100,
 		HeartbeatInterval:  60,
 		LogLevel:           "info",
@@ -793,12 +749,11 @@ func TestConfig_Validate_WithHeartbeatURL(t *testing.T) {
 	t.Parallel()
 
 	cfg := &Config{
-		TelegramBotToken:   "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
-		TelegramAdminID:    123456,
-		XUIHost:            "https://localhost:2053",
-		XUIAPIToken:        "some-token",
-		XUIInboundID:       1,
-		XUISubPath:         "xui",
+		TelegramBotToken: "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
+		TelegramAdminID:  123456,
+		Sources: []Source{
+			{Name: "default", Active: true, XUIHost: "https://localhost:2053", XUIAPIToken: "some-token", XUIInboundID: 1},
+		},
 		TrafficLimitGB:     100,
 		HeartbeatInterval:  60,
 		LogLevel:           "info",
@@ -819,10 +774,9 @@ func TestConfig_Validate_InvalidTokenFormat(t *testing.T) {
 	cfg := &Config{
 		TelegramBotToken: "invalid-token-without-colon",
 		TelegramAdminID:  123456,
-		XUIHost:          "https://localhost:2053",
-		XUIAPIToken:      "some-token",
-		XUIInboundID:     1,
-		XUISubPath:       "/xui",
+		Sources: []Source{
+			{Name: "default", Active: true, XUIHost: "https://localhost:2053", XUIAPIToken: "some-token", XUIInboundID: 1},
+		},
 	}
 
 	err := cfg.validate()
@@ -835,10 +789,9 @@ func TestConfig_Validate_NegativeAdminID(t *testing.T) {
 	cfg := &Config{
 		TelegramBotToken: "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 		TelegramAdminID:  -1,
-		XUIHost:          "https://localhost:2053",
-		XUIAPIToken:      "some-token",
-		XUIInboundID:     1,
-		XUISubPath:       "/xui",
+		Sources: []Source{
+			{Name: "default", Active: true, XUIHost: "https://localhost:2053", XUIAPIToken: "some-token", XUIInboundID: 1},
+		},
 	}
 
 	err := cfg.validate()
@@ -851,11 +804,10 @@ func TestConfig_Validate_InvalidLogLevel(t *testing.T) {
 	cfg := &Config{
 		TelegramBotToken: "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 		TelegramAdminID:  123456,
-		XUIHost:          "https://localhost:2053",
-		XUIAPIToken:      "some-token",
-		XUIInboundID:     1,
-		XUISubPath:       "/xui",
-		LogLevel:         "invalid",
+		Sources: []Source{
+			{Name: "default", Active: true, XUIHost: "https://localhost:2053", XUIAPIToken: "some-token", XUIInboundID: 1},
+		},
+		LogLevel: "invalid",
 	}
 
 	err := cfg.validate()
@@ -866,12 +818,11 @@ func TestConfig_Validate_InvalidHealthCheckPort_TooLow(t *testing.T) {
 	t.Parallel()
 
 	cfg := &Config{
-		TelegramBotToken:  "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
-		TelegramAdminID:   123456,
-		XUIHost:           "https://localhost:2053",
-		XUIAPIToken:       "some-token",
-		XUIInboundID:      1,
-		XUISubPath:        "/xui",
+		TelegramBotToken: "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
+		TelegramAdminID:  123456,
+		Sources: []Source{
+			{Name: "default", Active: true, XUIHost: "https://localhost:2053", XUIAPIToken: "some-token", XUIInboundID: 1},
+		},
 		TrafficLimitGB:    100,
 		HeartbeatInterval: 60,
 		LogLevel:          "info",
@@ -886,12 +837,11 @@ func TestConfig_Validate_InvalidHealthCheckPort_TooHigh(t *testing.T) {
 	t.Parallel()
 
 	cfg := &Config{
-		TelegramBotToken:  "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
-		TelegramAdminID:   123456,
-		XUIHost:           "https://localhost:2053",
-		XUIAPIToken:       "some-token",
-		XUIInboundID:      1,
-		XUISubPath:        "/xui",
+		TelegramBotToken: "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
+		TelegramAdminID:  123456,
+		Sources: []Source{
+			{Name: "default", Active: true, XUIHost: "https://localhost:2053", XUIAPIToken: "some-token", XUIInboundID: 1},
+		},
 		TrafficLimitGB:    100,
 		HeartbeatInterval: 60,
 		LogLevel:          "info",

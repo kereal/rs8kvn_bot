@@ -39,14 +39,19 @@ type SubscriptionRepository interface {
 }
 
 type TrialRepository interface {
-	CreateTrialSubscription(ctx context.Context, inviteCode, subscriptionID, clientID string, inboundID int, trafficBytes int64, expiryTime time.Time, subURL string) (*database.Subscription, error)
+	CreateTrialSubscription(ctx context.Context, inviteCode, subscriptionID, clientID string, expiryTime time.Time) (*database.Subscription, error)
 	GetTrialSubscriptionBySubID(ctx context.Context, subscriptionID string) (*database.Subscription, error)
 	BindTrialSubscription(ctx context.Context, subscriptionID string, telegramID int64, username string) (*database.Subscription, error)
 	CountTrialRequestsByIPLastHour(ctx context.Context, ip string) (int, error)
 	CreateTrialRequest(ctx context.Context, ip string) error
-	CleanupExpiredTrials(ctx context.Context, hours int, xuiClient interface {
-		DeleteClient(ctx context.Context, email string) error
-	}) (int64, error)
+	CleanupExpiredTrials(ctx context.Context, hours int) ([]database.Subscription, error)
+}
+
+type SourceRepository interface {
+	ListSources(ctx context.Context) ([]database.Source, error)
+	ListTrialSources(ctx context.Context) ([]database.Source, error)
+	IsSourcesEmpty(ctx context.Context) (bool, error)
+	SeedDefaultSource(ctx context.Context, name, xuiHost, xuiAPIToken string, xuiInboundID int, subURL string) error
 }
 
 type InviteRepository interface {
@@ -61,6 +66,7 @@ type DatabaseService interface {
 	SubscriptionRepository
 	TrialRepository
 	InviteRepository
+	SourceRepository
 	Ping(ctx context.Context) error
 	Close() error
 	GetPoolStats() (*database.PoolStats, error)
@@ -73,8 +79,7 @@ type XUIClient interface {
 	UpdateClient(ctx context.Context, inboundID int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, tgID int64, comment string) error
 	DeleteClient(ctx context.Context, email string) error
 	GetClientTraffic(ctx context.Context, email string) (*xui.ClientTraffic, error)
-	GetSubscriptionLink(baseURL, subID, subPath string) string
-	GetExternalURL(host string) string
+	Close() error
 }
 
 // BotAPI defines the interface for Telegram Bot API operations

@@ -284,8 +284,6 @@ func TestGetMainMenuKeyboard_ButtonCounts(t *testing.T) {
 	})
 }
 
-
-
 // TestGetHelpText_EdgeCases tests help text with various traffic limits
 func TestGetHelpText_EdgeCases(t *testing.T) {
 	t.Parallel()
@@ -637,8 +635,6 @@ func TestHelpText_InjectionSafety(t *testing.T) {
 		})
 	}
 }
-
-
 
 // TestFormatUserLink_NumericUsername verifies that purely numeric usernames
 // (e.g. 11) use tg://user?id= fallback instead of an unresolvable t.me/11 link.

@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"rs8kvn_bot/internal/config"
+	"rs8kvn_bot/internal/database"
+	"rs8kvn_bot/internal/interfaces"
 	"rs8kvn_bot/internal/service"
 	"rs8kvn_bot/internal/webhook"
 	"rs8kvn_bot/internal/xui"
@@ -99,12 +101,12 @@ func TestE2E_RealClient_DNSErrorFastFail(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID:  123456,
 		TrafficLimitGB:   100,
-		XUIInboundID:     1,
-		XUIHost:          "http://nonexistent.invalid.host:9999",
-		XUISubPath:       "sub",
 		SiteURL:          "https://example.com",
 		TelegramBotToken: "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11",
-		XUIAPIToken:      "test-api-token",
+		GlobalSubURL:     "",
+		Sources: []config.Source{
+			{Name: "main", XUIHost: "http://nonexistent.invalid.host:9999", XUIAPIToken: "test-api-token", XUIInboundID: 1, Active: true},
+		},
 	}
 
 	xuiClient, err := xui.NewClient("http://nonexistent.invalid.host:9999", "test-api-token")
@@ -122,7 +124,9 @@ func TestE2E_RealClient_DNSErrorFastFail(t *testing.T) {
 		}
 	}()
 
-	subService := service.NewSubscriptionService(db, xuiClient, cfg, &webhook.NoopSender{})
+	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
+	sources := []database.Source{{Name: "main", XUIHost: "http://nonexistent.invalid.host:9999", XUIAPIToken: "test-api-token", XUIInboundID: 1, Active: true}}
+	subService := service.NewSubscriptionService(db, xuiClients, sources, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()

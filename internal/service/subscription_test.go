@@ -11,6 +11,7 @@ import (
 
 	"rs8kvn_bot/internal/config"
 	"rs8kvn_bot/internal/database"
+	"rs8kvn_bot/internal/interfaces"
 	"rs8kvn_bot/internal/testutil"
 	"rs8kvn_bot/internal/webhook"
 	"rs8kvn_bot/internal/xui"
@@ -31,9 +32,6 @@ func TestSubscriptionService_Create_Success(t *testing.T) {
 
 	cfg := &config.Config{
 		TrafficLimitGB: 100,
-		XUIInboundID:   1,
-		XUIHost:        "http://localhost:2053",
-		XUISubPath:     "sub",
 	}
 
 	db := &testutil.MockDatabaseService{}
@@ -42,15 +40,18 @@ func TestSubscriptionService_Create_Success(t *testing.T) {
 			return &xui.ClientConfig{ID: "client-123", SubID: "sub-456"}, nil
 		},
 	}
+	sources := []database.Source{
+		{ID: 1, Active: true, XUIHost: "http://localhost:2053", XUIInboundID: 1},
+	}
+	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
 
-	svc := NewSubscriptionService(db, xuiClient, cfg, &webhook.NoopSender{})
+	svc := NewSubscriptionService(db, xuiClients, sources, cfg, "", &webhook.NoopSender{})
 	result, err := svc.Create(context.Background(), 123456, "testuser")
 
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
 	assert.Equal(t, "client-123", result.Subscription.ClientID)
 	assert.Equal(t, "sub-456", result.Subscription.SubscriptionID)
-	assert.Equal(t, int64(100*1024*1024*1024), result.Subscription.TrafficLimit)
 }
 
 func TestSubscriptionService_Create_XUIError(t *testing.T) {
@@ -58,9 +59,6 @@ func TestSubscriptionService_Create_XUIError(t *testing.T) {
 
 	cfg := &config.Config{
 		TrafficLimitGB: 100,
-		XUIInboundID:   1,
-		XUIHost:        "http://localhost:2053",
-		XUISubPath:     "sub",
 	}
 
 	db := &testutil.MockDatabaseService{}
@@ -69,13 +67,17 @@ func TestSubscriptionService_Create_XUIError(t *testing.T) {
 			return nil, errors.New("connection refused")
 		},
 	}
+	sources := []database.Source{
+		{ID: 1, Active: true, XUIHost: "http://localhost:2053", XUIInboundID: 1},
+	}
+	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
 
-	svc := NewSubscriptionService(db, xuiClient, cfg, &webhook.NoopSender{})
+	svc := NewSubscriptionService(db, xuiClients, sources, cfg, "", &webhook.NoopSender{})
 	result, err := svc.Create(context.Background(), 123456, "testuser")
 
 	assert.Error(t, err)
 	assert.Nil(t, result)
-	assert.Contains(t, err.Error(), "xui add client")
+	assert.Contains(t, err.Error(), "connection refused")
 }
 
 func TestSubscriptionService_Create_DBError_RollbackSuccess(t *testing.T) {
@@ -83,9 +85,6 @@ func TestSubscriptionService_Create_DBError_RollbackSuccess(t *testing.T) {
 
 	cfg := &config.Config{
 		TrafficLimitGB: 100,
-		XUIInboundID:   1,
-		XUIHost:        "http://localhost:2053",
-		XUISubPath:     "sub",
 	}
 
 	deleteCalled := false
@@ -104,8 +103,12 @@ func TestSubscriptionService_Create_DBError_RollbackSuccess(t *testing.T) {
 			return nil
 		},
 	}
+	sources := []database.Source{
+		{ID: 1, Active: true, XUIHost: "http://localhost:2053", XUIInboundID: 1},
+	}
+	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
 
-	svc := NewSubscriptionService(db, xuiClient, cfg, &webhook.NoopSender{})
+	svc := NewSubscriptionService(db, xuiClients, sources, cfg, "", &webhook.NoopSender{})
 	result, err := svc.Create(context.Background(), 123456, "testuser")
 
 	assert.Error(t, err)
@@ -119,9 +122,6 @@ func TestSubscriptionService_Create_DBError_RollbackFailed(t *testing.T) {
 
 	cfg := &config.Config{
 		TrafficLimitGB: 100,
-		XUIInboundID:   1,
-		XUIHost:        "http://localhost:2053",
-		XUISubPath:     "sub",
 	}
 
 	db := &testutil.MockDatabaseService{
@@ -137,13 +137,17 @@ func TestSubscriptionService_Create_DBError_RollbackFailed(t *testing.T) {
 			return errors.New("rollback failed")
 		},
 	}
+	sources := []database.Source{
+		{ID: 1, Active: true, XUIHost: "http://localhost:2053", XUIInboundID: 1},
+	}
+	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
 
-	svc := NewSubscriptionService(db, xuiClient, cfg, &webhook.NoopSender{})
+	svc := NewSubscriptionService(db, xuiClients, sources, cfg, "", &webhook.NoopSender{})
 	result, err := svc.Create(context.Background(), 123456, "testuser")
 
 	assert.Error(t, err)
 	assert.Nil(t, result)
-	assert.Contains(t, err.Error(), "rollback failed")
+	assert.Contains(t, err.Error(), "create subscription")
 }
 
 func TestSubscriptionService_GetByTelegramID_Success(t *testing.T) {
@@ -162,9 +166,7 @@ func TestSubscriptionService_GetByTelegramID_Success(t *testing.T) {
 			return expected, nil
 		},
 	}
-	xuiClient := &testutil.MockXUIClient{}
-
-	svc := NewSubscriptionService(db, xuiClient, cfg, &webhook.NoopSender{})
+	svc := NewSubscriptionService(db, nil, nil, cfg, "", &webhook.NoopSender{})
 	result, err := svc.GetByTelegramID(context.Background(), 123456)
 
 	assert.NoError(t, err)
@@ -181,9 +183,7 @@ func TestSubscriptionService_GetByTelegramID_NotFound(t *testing.T) {
 			return nil, errors.New("not found")
 		},
 	}
-	xuiClient := &testutil.MockXUIClient{}
-
-	svc := NewSubscriptionService(db, xuiClient, cfg, &webhook.NoopSender{})
+	svc := NewSubscriptionService(db, nil, nil, cfg, "", &webhook.NoopSender{})
 	result, err := svc.GetByTelegramID(context.Background(), 999999)
 
 	assert.Error(t, err)
@@ -194,7 +194,7 @@ func TestSubscriptionService_GetByTelegramID_NotFound(t *testing.T) {
 func TestSubscriptionService_Delete_Success(t *testing.T) {
 	t.Parallel()
 
-	cfg := &config.Config{XUIInboundID: 1}
+	cfg := &config.Config{}
 
 	sub := &database.Subscription{
 		TelegramID: 123456,
@@ -218,8 +218,12 @@ func TestSubscriptionService_Delete_Success(t *testing.T) {
 			return nil
 		},
 	}
+	sources := []database.Source{
+		{ID: 1, Active: true, XUIHost: "http://localhost:2053", XUIInboundID: 1},
+	}
+	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
 
-	svc := NewSubscriptionService(db, xuiClient, cfg, &webhook.NoopSender{})
+	svc := NewSubscriptionService(db, xuiClients, sources, cfg, "", &webhook.NoopSender{})
 	err := svc.Delete(context.Background(), 123456)
 
 	assert.NoError(t, err)
@@ -236,9 +240,7 @@ func TestSubscriptionService_Delete_NotFound(t *testing.T) {
 			return nil, errors.New("not found")
 		},
 	}
-	xuiClient := &testutil.MockXUIClient{}
-
-	svc := NewSubscriptionService(db, xuiClient, cfg, &webhook.NoopSender{})
+	svc := NewSubscriptionService(db, nil, nil, cfg, "", &webhook.NoopSender{})
 	err := svc.Delete(context.Background(), 999999)
 
 	assert.Error(t, err)
@@ -248,7 +250,7 @@ func TestSubscriptionService_Delete_NotFound(t *testing.T) {
 func TestSubscriptionService_Delete_XUIError(t *testing.T) {
 	t.Parallel()
 
-	cfg := &config.Config{XUIInboundID: 1}
+	cfg := &config.Config{}
 
 	sub := &database.Subscription{
 		TelegramID: 123456,
@@ -271,8 +273,12 @@ func TestSubscriptionService_Delete_XUIError(t *testing.T) {
 			return errors.New("xui connection refused")
 		},
 	}
+	sources := []database.Source{
+		{ID: 1, Active: true, XUIHost: "http://localhost:2053", XUIInboundID: 1},
+	}
+	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
 
-	svc := NewSubscriptionService(db, xuiClient, cfg, &webhook.NoopSender{})
+	svc := NewSubscriptionService(db, xuiClients, sources, cfg, "", &webhook.NoopSender{})
 	err := svc.Delete(context.Background(), 123456)
 
 	// XUI errors are best-effort — Delete should succeed even if XUI cleanup fails
@@ -283,7 +289,7 @@ func TestSubscriptionService_Delete_XUIError(t *testing.T) {
 func TestSubscriptionService_Delete_DBError(t *testing.T) {
 	t.Parallel()
 
-	cfg := &config.Config{XUIInboundID: 1}
+	cfg := &config.Config{}
 
 	sub := &database.Subscription{
 		TelegramID: 123456,
@@ -299,14 +305,7 @@ func TestSubscriptionService_Delete_DBError(t *testing.T) {
 			return errors.New("db connection refused")
 		},
 	}
-	xuiClient := &testutil.MockXUIClient{
-		DeleteClientFunc: func(ctx context.Context, email string) error {
-			xuiDeleteCalled = true
-			return nil
-		},
-	}
-
-	svc := NewSubscriptionService(db, xuiClient, cfg, &webhook.NoopSender{})
+	svc := NewSubscriptionService(db, nil, nil, cfg, "", &webhook.NoopSender{})
 	err := svc.Delete(context.Background(), 123456)
 
 	// DB errors should still be returned since DB is deleted first
@@ -319,7 +318,7 @@ func TestSubscriptionService_Delete_DBError(t *testing.T) {
 func TestSubscriptionService_Delete_UsesCorrectEmail(t *testing.T) {
 	t.Parallel()
 
-	cfg := &config.Config{XUIInboundID: 1}
+	cfg := &config.Config{}
 
 	sub := &database.Subscription{
 		TelegramID: 123456,
@@ -342,8 +341,12 @@ func TestSubscriptionService_Delete_UsesCorrectEmail(t *testing.T) {
 			return nil
 		},
 	}
+	sources := []database.Source{
+		{ID: 1, Active: true, XUIHost: "http://localhost:2053", XUIInboundID: 1},
+	}
+	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
 
-	svc := NewSubscriptionService(db, xuiClient, cfg, &webhook.NoopSender{})
+	svc := NewSubscriptionService(db, xuiClients, sources, cfg, "", &webhook.NoopSender{})
 	err := svc.Delete(context.Background(), 123456)
 
 	assert.NoError(t, err)
@@ -353,7 +356,7 @@ func TestSubscriptionService_Delete_UsesCorrectEmail(t *testing.T) {
 func TestSubscriptionService_Delete_FallsBackToTgIdEmail(t *testing.T) {
 	t.Parallel()
 
-	cfg := &config.Config{XUIInboundID: 1}
+	cfg := &config.Config{}
 
 	// No real username → email must be tgId_ format
 	sub := &database.Subscription{
@@ -377,8 +380,12 @@ func TestSubscriptionService_Delete_FallsBackToTgIdEmail(t *testing.T) {
 			return nil
 		},
 	}
+	sources := []database.Source{
+		{ID: 1, Active: true, XUIHost: "http://localhost:2053", XUIInboundID: 1},
+	}
+	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
 
-	svc := NewSubscriptionService(db, xuiClient, cfg, &webhook.NoopSender{})
+	svc := NewSubscriptionService(db, xuiClients, sources, cfg, "", &webhook.NoopSender{})
 	err := svc.Delete(context.Background(), 123456)
 
 	assert.NoError(t, err)
@@ -412,15 +419,13 @@ func TestSubscriptionService_GetWithTraffic_Success(t *testing.T) {
 
 	cfg := &config.Config{
 		TrafficLimitGB: 100,
-		XUIInboundID:   1,
 	}
 
 	sub := &database.Subscription{
-		TelegramID:   123456,
-		Username:     "testuser",
-		TrafficLimit: 100 * 1024 * 1024 * 1024,
-		CreatedAt:    time.Now(),
-		ExpiryTime:   time.Now().Add(7 * 24 * time.Hour),
+		TelegramID: 123456,
+		Username:   "testuser",
+		CreatedAt:  time.Now(),
+		ExpiryTime: time.Now().Add(7 * 24 * time.Hour),
 	}
 
 	db := &testutil.MockDatabaseService{
@@ -434,8 +439,12 @@ func TestSubscriptionService_GetWithTraffic_Success(t *testing.T) {
 			return &xui.ClientTraffic{Up: 1024 * 1024 * 1024, Down: 2 * 1024 * 1024 * 1024}, nil
 		},
 	}
+	sources := []database.Source{
+		{ID: 1, Active: true, XUIHost: "http://localhost:2053", XUIInboundID: 1},
+	}
+	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
 
-	svc := NewSubscriptionService(db, xuiClient, cfg, &webhook.NoopSender{})
+	svc := NewSubscriptionService(db, xuiClients, sources, cfg, "", &webhook.NoopSender{})
 	resultSub, traffic, err := svc.GetWithTraffic(context.Background(), 123456)
 
 	assert.NoError(t, err)
@@ -449,14 +458,12 @@ func TestSubscriptionService_GetWithTraffic_XUIErrorFallback(t *testing.T) {
 
 	cfg := &config.Config{
 		TrafficLimitGB: 100,
-		XUIInboundID:   1,
 	}
 
 	sub := &database.Subscription{
-		TelegramID:   123456,
-		Username:     "testuser",
-		TrafficLimit: 100 * 1024 * 1024 * 1024,
-		CreatedAt:    time.Now(),
+		TelegramID: 123456,
+		Username:   "testuser",
+		CreatedAt:  time.Now(),
 	}
 
 	db := &testutil.MockDatabaseService{
@@ -470,8 +477,12 @@ func TestSubscriptionService_GetWithTraffic_XUIErrorFallback(t *testing.T) {
 			return nil, errors.New("connection refused")
 		},
 	}
+	sources := []database.Source{
+		{ID: 1, Active: true, XUIHost: "http://localhost:2053", XUIInboundID: 1},
+	}
+	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
 
-	svc := NewSubscriptionService(db, xuiClient, cfg, &webhook.NoopSender{})
+	svc := NewSubscriptionService(db, xuiClients, sources, cfg, "", &webhook.NoopSender{})
 	resultSub, traffic, err := svc.GetWithTraffic(context.Background(), 123456)
 
 	assert.NoError(t, err)
@@ -484,9 +495,6 @@ func TestSubscriptionService_CreateTrial_Success(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{
-		XUIInboundID:       1,
-		XUIHost:            "http://localhost:2053",
-		XUISubPath:         "sub",
 		TrialDurationHours: 3,
 	}
 
@@ -495,15 +503,13 @@ func TestSubscriptionService_CreateTrial_Success(t *testing.T) {
 		AddClientWithIDFunc: func(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
 			return &xui.ClientConfig{ID: clientID, SubID: subID}, nil
 		},
-		GetSubscriptionLinkFunc: func(host, subID, subPath string) string {
-			return host + "/" + subPath + "/" + subID
-		},
-		GetExternalURLFunc: func(host string) string {
-			return host
-		},
 	}
+	sources := []database.Source{
+		{ID: 1, Active: true, Trial: true, XUIHost: "http://localhost:2053", XUIInboundID: 1},
+	}
+	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
 
-	svc := NewSubscriptionService(db, xuiClient, cfg, &webhook.NoopSender{})
+	svc := NewSubscriptionService(db, xuiClients, sources, cfg, "", &webhook.NoopSender{})
 	result, err := svc.CreateTrial(context.Background(), "testcode")
 
 	assert.NoError(t, err)
@@ -516,7 +522,6 @@ func TestSubscriptionService_CreateTrial_XUIError(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{
-		XUIInboundID:       1,
 		TrialDurationHours: 3,
 	}
 
@@ -526,28 +531,29 @@ func TestSubscriptionService_CreateTrial_XUIError(t *testing.T) {
 			return nil, errors.New("xui error")
 		},
 	}
+	sources := []database.Source{
+		{ID: 1, Active: true, Trial: true, XUIHost: "http://localhost:2053", XUIInboundID: 1},
+	}
+	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
 
-	svc := NewSubscriptionService(db, xuiClient, cfg, &webhook.NoopSender{})
+	svc := NewSubscriptionService(db, xuiClients, sources, cfg, "", &webhook.NoopSender{})
 	result, err := svc.CreateTrial(context.Background(), "testcode")
 
 	assert.Error(t, err)
 	assert.Nil(t, result)
-	assert.Contains(t, err.Error(), "xui add client")
+	assert.Contains(t, err.Error(), "xui error")
 }
 
 func TestSubscriptionService_CreateTrial_DBError(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{
-		XUIInboundID:       1,
-		XUIHost:            "http://localhost:2053",
-		XUISubPath:         "sub",
 		TrialDurationHours: 3,
 	}
 
 	deleteCalled := false
 	db := &testutil.MockDatabaseService{
-		CreateTrialSubscriptionFunc: func(ctx context.Context, inviteCode, subscriptionID, clientID string, inboundID int, trafficBytes int64, expiryTime time.Time, subURL string) (*database.Subscription, error) {
+		CreateTrialSubscriptionFunc: func(ctx context.Context, inviteCode, subscriptionID, clientID string, expiryTime time.Time) (*database.Subscription, error) {
 			return nil, errors.New("db error")
 		},
 	}
@@ -560,15 +566,13 @@ func TestSubscriptionService_CreateTrial_DBError(t *testing.T) {
 			assert.True(t, strings.HasPrefix(email, "trial_"), "trial rollback must use trial_ email")
 			return nil
 		},
-		GetSubscriptionLinkFunc: func(host, subID, subPath string) string {
-			return host + "/" + subPath + "/" + subID
-		},
-		GetExternalURLFunc: func(host string) string {
-			return host
-		},
 	}
+	sources := []database.Source{
+		{ID: 1, Active: true, Trial: true, XUIHost: "http://localhost:2053", XUIInboundID: 1},
+	}
+	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
 
-	svc := NewSubscriptionService(db, xuiClient, cfg, &webhook.NoopSender{})
+	svc := NewSubscriptionService(db, xuiClients, sources, cfg, "", &webhook.NoopSender{})
 	result, err := svc.CreateTrial(context.Background(), "testcode")
 
 	assert.Error(t, err)
@@ -597,19 +601,17 @@ func TestSubscriptionService_ReconcileOrphanedClients_RemovesMissing(t *testing.
 		},
 	}
 
-	xui := &testutil.MockXUIClient{
+	xuiClient := &testutil.MockXUIClient{
 		GetClientTrafficFunc: func(ctx context.Context, email string) (*xui.ClientTraffic, error) {
-			if email == "realuser" || email == "trial_orphan123" {
-				return nil, fmt.Errorf("client not found")
-			}
 			if email == "gooduser" {
 				return &xui.ClientTraffic{}, nil
 			}
-			return nil, fmt.Errorf("other error")
+			return nil, fmt.Errorf("client not found")
 		},
 	}
-
-	svc := NewSubscriptionService(db, xui, cfg, &webhook.NoopSender{})
+	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
+	sources := []database.Source{{ID: 1, Active: true, XUIHost: "http://localhost:2053", XUIInboundID: 1}}
+	svc := NewSubscriptionService(db, xuiClients, sources, cfg, "", &webhook.NoopSender{})
 
 	invoked := []int64{}
 	svc.SetInvalidateFunc(func(id int64) { invoked = append(invoked, id) })
@@ -631,8 +633,7 @@ func TestSubscriptionService_ReconcileOrphanedClients_NoActive(t *testing.T) {
 			return []database.Subscription{{ID: 1, Status: "revoked"}}, nil
 		},
 	}
-	xui := &testutil.MockXUIClient{}
-	svc := NewSubscriptionService(db, xui, cfg, &webhook.NoopSender{})
+	svc := NewSubscriptionService(db, nil, nil, cfg, "", &webhook.NoopSender{})
 
 	count, err := svc.ReconcileOrphanedClients(context.Background())
 	assert.NoError(t, err)

@@ -37,7 +37,7 @@ func TestHandleInvite_InvalidCode(t *testing.T) {
 		XUIInboundID:       1,
 	}
 
-	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, nil)
 
 	// Mock: invite not found
 	mockDB.GetInviteByCodeFunc = func(ctx context.Context, code string) (*database.Invite, error) {
@@ -68,7 +68,7 @@ func TestHandleInvite_RateLimitExceeded(t *testing.T) {
 		XUIInboundID:       1,
 	}
 
-	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, nil)
 
 	// Mock: invite exists
 	mockDB.GetInviteByCodeFunc = func(ctx context.Context, code string) (*database.Invite, error) {
@@ -107,7 +107,7 @@ func TestHandleInvite_Success(t *testing.T) {
 		XUISubPath:         "sub",
 	}
 
-	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, nil)
 
 	// Mock: invite exists
 	mockDB.GetInviteByCodeFunc = func(ctx context.Context, code string) (*database.Invite, error) {
@@ -192,7 +192,7 @@ func TestHandleInvite_XUIError(t *testing.T) {
 	}
 
 	subService := service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
-	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig(), subService, nil)
+	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), subService, nil)
 
 	mockDB.GetInviteByCodeFunc = func(ctx context.Context, code string) (*database.Invite, error) {
 		return &database.Invite{Code: "testcode", ReferrerTGID: 12345}, nil
@@ -241,7 +241,6 @@ func TestGenerateSubID(t *testing.T) {
 	}
 }
 
-
 func isHexDigit(c rune) bool {
 	return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')
 }
@@ -258,7 +257,7 @@ func TestHandleInvite_EmptyCode(t *testing.T) {
 		TrialRateLimit:     3,
 	}
 
-	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, nil)
 
 	req := httptest.NewRequest("GET", "/i/", nil)
 	rec := httptest.NewRecorder()
@@ -280,7 +279,7 @@ func TestHandleInvite_DatabaseError(t *testing.T) {
 		TrialRateLimit:     3,
 	}
 
-	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, nil)
 
 	// Mock: database error
 	mockDB.GetInviteByCodeFunc = func(ctx context.Context, code string) (*database.Invite, error) {
@@ -303,7 +302,7 @@ func TestGetExistingTrialFromCookie_NoCookie(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	cfg := &config.Config{}
-	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, nil)
 
 	req := httptest.NewRequest("GET", "/i/test", nil)
 
@@ -320,7 +319,7 @@ func TestGetExistingTrialFromCookie_InvalidSubID(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	cfg := &config.Config{}
-	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, nil)
 
 	req := httptest.NewRequest("GET", "/i/test", nil)
 	req.AddCookie(&http.Cookie{
@@ -341,7 +340,7 @@ func TestGetExistingTrialFromCookie_NotTrial(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	cfg := &config.Config{}
-	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, nil)
 
 	// Mock: subscription exists but is not trial
 	mockDB.GetTrialSubscriptionBySubIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
@@ -371,7 +370,7 @@ func TestGetExistingTrialFromCookie_AlreadyActivated(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	cfg := &config.Config{}
-	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, nil)
 
 	// Mock: trial subscription but already activated (telegram_id != 0)
 	mockDB.GetTrialSubscriptionBySubIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
@@ -401,7 +400,7 @@ func TestGetExistingTrialFromCookie_Expired(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	cfg := &config.Config{}
-	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, nil)
 
 	// Mock: expired trial subscription
 	mockDB.GetTrialSubscriptionBySubIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
@@ -432,7 +431,7 @@ func TestGetExistingTrialFromCookie_Valid(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	cfg := &config.Config{}
-	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, nil)
 
 	// Mock: valid unactivated trial subscription
 	mockDB.GetTrialSubscriptionBySubIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
@@ -462,7 +461,7 @@ func TestGetExistingTrialFromCookie_Valid(t *testing.T) {
 func TestInviteCodeRegex(t *testing.T) {
 	t.Parallel()
 
-	srv := NewServer(":8880", nil, nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil)
 
 	tests := []struct {
 		name  string
@@ -513,7 +512,7 @@ func TestHandleInvite_XUIAddClientFails(t *testing.T) {
 		XUIHost:            "http://localhost:2053",
 	}
 
-	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, nil)
 
 	mockDB.GetInviteByCodeFunc = func(ctx context.Context, code string) (*database.Invite, error) {
 		return &database.Invite{Code: "testcode", ReferrerTGID: 12345}, nil
@@ -556,7 +555,7 @@ func TestHandleInvite_CreateTrialSubscriptionFails(t *testing.T) {
 		XUISubPath:         "sub",
 	}
 
-	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, nil)
 
 	mockDB.GetInviteByCodeFunc = func(ctx context.Context, code string) (*database.Invite, error) {
 		return &database.Invite{Code: "testcode", ReferrerTGID: 12345}, nil
@@ -606,7 +605,7 @@ func TestHandleInvite_ExistingTrialFromCookie(t *testing.T) {
 		XUIInboundID:       1,
 	}
 
-	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, nil)
 
 	mockDB.GetInviteByCodeFunc = func(ctx context.Context, code string) (*database.Invite, error) {
 		return &database.Invite{Code: "testcode", ReferrerTGID: 12345}, nil
@@ -642,7 +641,7 @@ func TestHandleInvite_MethodNotAllowed(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	cfg := &config.Config{}
-	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, nil)
 
 	req := httptest.NewRequest("POST", "/i/testcode", nil)
 	rec := httptest.NewRecorder()
@@ -659,7 +658,7 @@ func TestHandleInvite_InvalidPath(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	cfg := &config.Config{}
-	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, nil)
 
 	req := httptest.NewRequest("GET", "/not-invite/testcode", nil)
 	rec := httptest.NewRecorder()
@@ -676,7 +675,7 @@ func TestHandleInvite_InvalidCodeChars(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	cfg := &config.Config{}
-	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, nil)
 
 	req := httptest.NewRequest("GET", "/i/invalid@code!", nil)
 	rec := httptest.NewRecorder()
@@ -700,7 +699,7 @@ func TestHandleInvite_RateLimitCheckError(t *testing.T) {
 		XUIInboundID:       1,
 	}
 
-	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, nil)
 
 	mockDB.GetInviteByCodeFunc = func(ctx context.Context, code string) (*database.Invite, error) {
 		return &database.Invite{Code: "testcode", ReferrerTGID: 12345}, nil
@@ -733,7 +732,7 @@ func TestHandleInvite_ParallelRequests(t *testing.T) {
 	}
 
 	subService := service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
-	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig(), subService, nil)
+	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), subService, nil)
 
 	var (
 		mu    sync.Mutex

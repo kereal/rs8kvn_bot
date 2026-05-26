@@ -46,14 +46,11 @@ func TestE2E_StartCommand_WithSubscription(t *testing.T) {
 	ctx := context.Background()
 
 	sub := &database.Subscription{
-		TelegramID:      env.chatID,
-		Username:        env.username,
-		ClientID:        "test-client-id",
-		SubscriptionID:  "test-sub-id",
-		InboundID:       1,
-		TrafficLimit:    107374182400,
-		Status:          "active",
-		SubscriptionURL: "https://example.com/sub/test-sub-id",
+		TelegramID:     env.chatID,
+		Username:       env.username,
+		ClientID:       "test-client-id",
+		SubscriptionID: "test-sub-id",
+		Status:         "active",
 	}
 	require.NoError(t, env.db.CreateSubscription(ctx, sub))
 
@@ -82,14 +79,11 @@ func TestE2E_MySubscription(t *testing.T) {
 	ctx := context.Background()
 
 	sub := &database.Subscription{
-		TelegramID:      env.chatID,
-		Username:        env.username,
-		ClientID:        "test-client-id",
-		SubscriptionID:  "test-sub-id",
-		InboundID:       1,
-		TrafficLimit:    107374182400,
-		Status:          "active",
-		SubscriptionURL: "https://example.com/sub/test-sub-id",
+		TelegramID:     env.chatID,
+		Username:       env.username,
+		ClientID:       "test-client-id",
+		SubscriptionID: "test-sub-id",
+		Status:         "active",
 	}
 	require.NoError(t, env.db.CreateSubscription(ctx, sub))
 
