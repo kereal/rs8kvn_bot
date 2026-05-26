@@ -519,6 +519,12 @@ func (s *SubscriptionService) ReconcileOrphanedClients(ctx context.Context) (int
 				notFoundOnAll = false
 				break
 			}
+			// Prefer sentinel error matching from xui client when possible
+			if errors.Is(err, xui.ErrClientNotFound) {
+				// client not found on this source — continue checking others
+				continue
+			}
+			// Otherwise if error is non-retryable or unexpected, skip marking as notFoundOnAll and log
 			errMsg := strings.ToLower(err.Error())
 			if !strings.Contains(errMsg, "client not found") {
 				notFoundOnAll = false
@@ -527,6 +533,7 @@ func (s *SubscriptionService) ReconcileOrphanedClients(ctx context.Context) (int
 					zap.Int64("telegram_id", sub.TelegramID))
 				break
 			}
+
 		}
 
 		if notFoundOnAll {
