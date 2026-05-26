@@ -452,13 +452,15 @@ func CreateTestSubscription(telegramID int64, username string, status string, ex
 }
 
 type MockXUIClient struct {
-	mu                   sync.Mutex
-	PingFunc             func(ctx context.Context) error
-	AddClientFunc        func(ctx context.Context, inboundID int, email string, trafficBytes int64, expiryTime time.Time) (*xui.ClientConfig, error)
-	AddClientWithIDFunc  func(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error)
-	UpdateClientFunc     func(ctx context.Context, inboundID int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, tgID int64, comment string) error
-	DeleteClientFunc     func(ctx context.Context, email string) error
-	GetClientTrafficFunc func(ctx context.Context, email string) (*xui.ClientTraffic, error)
+	mu                      sync.Mutex
+	PingFunc                func(ctx context.Context) error
+	AddClientFunc           func(ctx context.Context, inboundID int, email string, trafficBytes int64, expiryTime time.Time) (*xui.ClientConfig, error)
+	AddClientWithIDFunc     func(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error)
+	UpdateClientFunc        func(ctx context.Context, inboundID int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, tgID int64, comment string) error
+	DeleteClientFunc        func(ctx context.Context, email string) error
+	GetClientTrafficFunc    func(ctx context.Context, email string) (*xui.ClientTraffic, error)
+	GetSubscriptionLinkFunc func(host, subID, subPath string) string
+	GetExternalURLFunc      func(host string) string
 
 	// Call tracking
 	AddClientCalled       bool
@@ -535,6 +537,20 @@ func (m *MockXUIClient) GetClientTraffic(ctx context.Context, email string) (*xu
 		Up:   1024 * 1024 * 100,
 		Down: 1024 * 1024 * 200,
 	}, nil
+}
+
+func (m *MockXUIClient) GetSubscriptionLink(host, subID, subPath string) string {
+	if m.GetSubscriptionLinkFunc != nil {
+		return m.GetSubscriptionLinkFunc(host, subID, subPath)
+	}
+	return host + "/" + subPath + "/" + subID
+}
+
+func (m *MockXUIClient) GetExternalURL(host string) string {
+	if m.GetExternalURLFunc != nil {
+		return m.GetExternalURLFunc(host)
+	}
+	return host
 }
 
 func (m *MockXUIClient) Close() error {
