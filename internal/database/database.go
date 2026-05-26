@@ -34,22 +34,37 @@ var migrationFiles embed.FS
 
 // Subscription represents a user's VPN subscription.
 type Subscription struct {
-	ID              uint           `gorm:"primaryKey"`
-	TelegramID      int64          `gorm:"index"`
-	Username        string         `gorm:"size:255;index"`
-	ClientID        string         `gorm:"size:255"`
-	SubscriptionID  string         `gorm:"size:255;index"`
-	InboundID       int            `gorm:"index"`
-	TrafficLimit    int64          `gorm:"default:107374182400"`
-	ExpiryTime      time.Time      `gorm:"index:idx_expiry"`
-	Status          string         `gorm:"default:active;size:50;index"`
-	SubscriptionURL string         `gorm:"size:512;column:subscription_url"`
-	InviteCode      string         `gorm:"size:16;index"`
-	IsTrial         bool           `gorm:"default:false;index"`
-	ReferredBy      int64          `gorm:"index"`
-	CreatedAt       time.Time      `gorm:"autoCreateTime"`
-	UpdatedAt       time.Time      `gorm:"autoUpdateTime"`
-	DeletedAt       gorm.DeletedAt `gorm:"index"`
+	ID             uint      `gorm:"primaryKey"`
+	TelegramID     int64     `gorm:"index"`
+	Username       string    `gorm:"size:255;index"`
+	ClientID       string    `gorm:"size:255"`
+	SubscriptionID string    `gorm:"size:255;index"`
+	ExpiryTime     time.Time `gorm:"index:idx_expiry"`
+	Status         string    `gorm:"default:active;size:50;index"`
+	InviteCode     string    `gorm:"size:16;index"`
+	IsTrial        bool      `gorm:"default:false;index"`
+	ReferredBy     int64     `gorm:"index"`
+	CreatedAt      time.Time `gorm:"autoCreateTime"`
+	UpdatedAt      time.Time `gorm:"autoUpdateTime"`
+}
+
+// Source represents a configured 3x-ui panel source.
+type Source struct {
+	ID            uint      `gorm:"primaryKey;column:id"`
+	Name          string    `gorm:"size:255;column:name"`
+	Active        bool      `gorm:"default:true;column:active"`
+	Trial         bool      `gorm:"default:false;column:trial"`
+	XUIHost       string    `gorm:"size:255;column:x_ui_host"`
+	XUIAPIToken   string    `gorm:"size:255;column:x_ui_api_token"`
+	XUIInboundID  int       `gorm:"not null;column:x_ui_inbound_id"`
+	SubURL        string    `gorm:"size:512;column:sub_url"`
+	CreatedAt     time.Time `gorm:"autoCreateTime;column:created_at"`
+	UpdatedAt     time.Time `gorm:"autoUpdateTime;column:updated_at"`
+}
+
+// TableName returns the table name for Source.
+func (Source) TableName() string {
+	return "sources"
 }
 
 // TableName returns the table name for Subscription.
@@ -162,58 +177,6 @@ func runMigrations(sqlDB *sql.DB) error {
 		// Fresh database - will be created by migration 000
 		logger.Info("No legacy migration needed - fresh database")
 	}
-
-	// Check if referral columns already exist (used only for legacy bootstrap detection)
-	var hasInviteCode, hasIsTrial, hasReferredBy int
-	if tableExists > 0 {
-		if err := sqlDB.QueryRow("SELECT COUNT(*) FROM pragma_table_info('subscriptions') WHERE name = 'invite_code'").Scan(&hasInviteCode); err != nil {
-			logger.Warn("Failed to check invite_code column", zap.Error(err))
-		}
-		if err := sqlDB.QueryRow("SELECT COUNT(*) FROM pragma_table_info('subscriptions') WHERE name = 'is_trial'").Scan(&hasIsTrial); err != nil {
-			logger.Warn("Failed to check is_trial column", zap.Error(err))
-		}
-		if err := sqlDB.QueryRow("SELECT COUNT(*) FROM pragma_table_info('subscriptions') WHERE name = 'referred_by'").Scan(&hasReferredBy); err != nil {
-			logger.Warn("Failed to check referred_by column", zap.Error(err))
-		}
-	}
-
-	// Legacy referral bootstrap (IMPROVED):
-	// If referral columns exist (added outside migrations before 003) but schema_migrations
-	// is missing or version < 3, we do a one-time m.Force(3).
-	// CRITICAL: unlike the old hack, we do NOT early-return here.
-	// This allows golang-migrate to continue and apply all later migrations (004, 005, ...).
-	referralColumnsPresent := hasInviteCode > 0 || hasIsTrial > 0 || hasReferredBy > 0
-
-	currentVersion := 0
-	hasSchemaTable := false
-	if err := sqlDB.QueryRow(`SELECT COALESCE(MAX(version), 0) FROM schema_migrations`).Scan(&currentVersion); err == nil {
-		hasSchemaTable = true
-	}
-
-	if referralColumnsPresent && (!hasSchemaTable || currentVersion < 3) {
-		logger.Info("Legacy referral columns detected with outdated migration version — one-time bootstrap to version 3 (future migrations 004+ will now apply)",
-			zap.Int("detected_version", currentVersion))
-
-		// Create a temporary migrate instance solely to perform Force(3).
-		// Errors here are non-fatal — we still attempt normal Up() below.
-		if src, srcErr := iofs.New(migrationFiles, "migrations"); srcErr == nil {
-			if drv, drvErr := sqlite.WithInstance(sqlDB, &sqlite.Config{}); drvErr == nil {
-				if mForce, mErr := migrate.NewWithInstance("iofs", src, "sqlite", drv); mErr == nil && mForce != nil {
-					if fErr := mForce.Force(3); fErr != nil {
-						logger.Warn("m.Force(3) during referral bootstrap failed (will still try normal Up)", zap.Error(fErr))
-					} else {
-						logger.Info("Referral bootstrap: forced schema_migrations to version 3")
-					}
-				}
-			}
-		}
-		// Fall through intentionally — do not return. Normal migration path below will run m.Up().
-	}
-
-	// Do NOT drop schema_migrations here.
-	// golang-migrate manages this table. Dropping it on every start would make
-	// it re-apply all migrations from 000 (including 003 "ADD COLUMN" which fails
-	// on already-migrated DBs). We only ever use m.Force when needed for legacy bootstrap.
 
 	// Create embedded source driver from migrationFiles
 	sourceDriver, err := iofs.New(migrationFiles, "migrations")
@@ -390,7 +353,7 @@ func (s *Service) CreateSubscription(ctx context.Context, sub *Subscription) err
 func (s *Service) UpdateSubscription(ctx context.Context, sub *Subscription) error {
 	result := s.db.WithContext(ctx).Model(&Subscription{}).
 		Where("id = ?", sub.ID).
-		Select("telegram_id", "username", "client_id", "subscription_id", "inbound_id", "traffic_limit", "expiry_time", "status", "subscription_url", "invite_code", "is_trial", "referred_by").
+		Select("telegram_id", "username", "client_id", "subscription_id", "expiry_time", "status", "invite_code", "is_trial", "referred_by").
 		Updates(sub)
 	if result.Error != nil {
 		return fmt.Errorf("failed to update subscription: %w", result.Error)
@@ -405,6 +368,51 @@ func (s *Service) DeleteSubscription(ctx context.Context, telegramID int64) erro
 		return fmt.Errorf("failed to delete subscription: %w", result.Error)
 	}
 	return nil
+}
+
+// ListSources returns all configured sources.
+func (s *Service) ListSources(ctx context.Context) ([]Source, error) {
+	var sources []Source
+	result := s.db.WithContext(ctx).Find(&sources)
+	if result.Error != nil {
+		return nil, fmt.Errorf("failed to list sources: %w", result.Error)
+	}
+	return sources, nil
+}
+
+// ListTrialSources returns all trial-enabled active sources with XUI configured.
+func (s *Service) ListTrialSources(ctx context.Context) ([]Source, error) {
+	var sources []Source
+	result := s.db.WithContext(ctx).
+		Where("trial = ? AND active = ? AND xui_host IS NOT NULL AND xui_host != ''", true, true).
+		Find(&sources)
+	if result.Error != nil {
+		return nil, fmt.Errorf("failed to list trial sources: %w", result.Error)
+	}
+	return sources, nil
+}
+
+// IsSourcesEmpty returns true if no sources exist in the database.
+func (s *Service) IsSourcesEmpty(ctx context.Context) (bool, error) {
+	var count int64
+	result := s.db.WithContext(ctx).Model(&Source{}).Count(&count)
+	if result.Error != nil {
+		return false, fmt.Errorf("failed to count sources: %w", result.Error)
+	}
+	return count == 0, nil
+}
+
+// SeedDefaultSource inserts the default source from environment variables if the sources table is empty.
+func (s *Service) SeedDefaultSource(ctx context.Context, name, xuiHost, xuiAPIToken string, xuiInboundID int, subURL string) error {
+	return s.db.WithContext(ctx).Create(&Source{
+		Name:         name,
+		Active:       true,
+		Trial:        true,
+		XUIHost:      xuiHost,
+		XUIAPIToken:  xuiAPIToken,
+		XUIInboundID: xuiInboundID,
+		SubURL:       subURL,
+	}).Error
 }
 
 // GetLatestSubscriptions retrieves the latest N subscriptions ordered by creation date.
@@ -636,18 +644,15 @@ func (s *Service) GetAllReferralCounts(ctx context.Context) (map[int64]int64, er
 }
 
 // CreateTrialSubscription creates a new trial subscription.
-func (s *Service) CreateTrialSubscription(ctx context.Context, inviteCode, subscriptionID, clientID string, inboundID int, trafficBytes int64, expiryTime time.Time, subURL string) (*Subscription, error) {
+func (s *Service) CreateTrialSubscription(ctx context.Context, inviteCode, subscriptionID, clientID string, expiryTime time.Time) (*Subscription, error) {
 	sub := &Subscription{
-		TelegramID:      0,
-		SubscriptionID:  subscriptionID,
-		ClientID:        clientID,
-		InviteCode:      inviteCode,
-		InboundID:       inboundID,
-		TrafficLimit:    trafficBytes,
-		ExpiryTime:      expiryTime,
-		SubscriptionURL: subURL,
-		IsTrial:         true,
-		Status:          "active",
+		TelegramID:     0,
+		SubscriptionID: subscriptionID,
+		ClientID:       clientID,
+		InviteCode:     inviteCode,
+		ExpiryTime:     expiryTime,
+		IsTrial:        true,
+		Status:         "active",
 	}
 	if err := s.db.WithContext(ctx).Create(sub).Error; err != nil {
 		return nil, fmt.Errorf("failed to create trial subscription: %w", err)
@@ -752,11 +757,7 @@ func (s *Service) CreateTrialRequest(ctx context.Context, ip string) error {
 
 // CleanupExpiredTrials deletes trial subscriptions that have expired without being activated.
 // Uses atomic DELETE ... RETURNING to prevent race conditions with concurrent trial activation.
-// CleanupExpiredTrials deletes trial subscriptions that have expired without being activated.
-// Uses atomic DELETE ... RETURNING to prevent race conditions with concurrent trial activation.
-func (s *Service) CleanupExpiredTrials(ctx context.Context, hours int, xuiClient interface {
-	DeleteClient(ctx context.Context, email string) error
-}) (int64, error) {
+func (s *Service) CleanupExpiredTrials(ctx context.Context, hours int) ([]Subscription, error) {
 	cutoff := time.Now().Add(-time.Duration(hours) * time.Hour)
 
 	// Atomic delete with RETURNING prevents race condition where a trial
@@ -765,38 +766,18 @@ func (s *Service) CleanupExpiredTrials(ctx context.Context, hours int, xuiClient
 	result := s.db.WithContext(ctx).Raw(
 		`DELETE FROM subscriptions
 		 WHERE is_trial = ? AND telegram_id = ? AND created_at < ?
-		 RETURNING id, client_id, inbound_id, subscription_id`,
+		 RETURNING id, client_id, subscription_id`,
 		true, 0, cutoff,
 	).Scan(&subs)
 	if result.Error != nil {
-		return 0, fmt.Errorf("failed to cleanup expired trials: %w", result.Error)
-	}
-
-	deletedCount := int64(len(subs))
-
-	// Delete orphaned clients from XUI panel (trials use "trial_{subID}" email)
-	for _, sub := range subs {
-		if sub.SubscriptionID != "" && xuiClient != nil {
-			email := "trial_" + sub.SubscriptionID
-			if err := xuiClient.DeleteClient(ctx, email); err != nil {
-				logger.Warn("Failed to delete trial client from xui",
-					zap.String("email", email),
-					zap.Error(err))
-			}
-		}
+		return nil, fmt.Errorf("failed to cleanup expired trials: %w", result.Error)
 	}
 
 	// Cleanup old trial_requests (rate limit records).
-	// These are only used for hourly rate limiting (CountTrialRequestsByIPLastHour),
-	// so records older than 1 hour are already irrelevant. Use a separate cutoff
-	// instead of the trial subscription cutoff (which may be 3+ hours) to avoid
-	// accumulating stale rate-limit entries. Add a small buffer to avoid deleting
-	// records that are right at the 1-hour boundary (time.Now() vs created_at can
-	// differ by microseconds depending on clock granularity).
 	rateLimitCutoff := time.Now().Add(-1*time.Hour + 1*time.Second)
 	s.db.WithContext(ctx).
 		Where("created_at < ?", rateLimitCutoff).
 		Delete(&TrialRequest{})
 
-	return deletedCount, nil
+	return subs, nil
 }
