@@ -1,6 +1,31 @@
 package database
 
 import (
+	"bytes"
+	"context"
+	"database/sql"
+	"embed"
+	"errors"
+	"fmt"
+	"io"
+	"log"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"rs8kvn_bot/internal/config"
+	"rs8kvn_bot/internal/logger"
+
+	migrate "github.com/golang-migrate/migrate/v4"
+	"github.com/golang-migrate/migrate/v4/database/sqlite"
+	"github.com/golang-migrate/migrate/v4/source/iofs"
+	"go.uber.org/zap"
+	gormsqlite "gorm.io/driver/sqlite"
+	"gorm.io/gorm"
+	gormlogger "gorm.io/gorm/logger"
+)
+
 	"context"
 	"database/sql"
 	"embed"
@@ -121,6 +146,36 @@ func (TrialRequest) TableName() string {
 //
 // The function returns an error if creating migration drivers or applying migrations fails.
 func runMigrations(sqlDB *sql.DB) error {
+	// Determine SQLite version to verify features (DROP COLUMN, RETURNING) availability
+	var sqliteVersion string
+	if err := sqlDB.QueryRow("select sqlite_version()").Scan(&sqliteVersion); err == nil {
+		logger.Info("SQLite version detected", zap.String("version", sqliteVersion))
+	} else {
+		logger.Warn("Failed to detect SQLite version", zap.Error(err))
+	}
+
+	const minSQLiteForDropAndReturning = "3.35.0"
+	// If embedded migrations contain potentially incompatible SQL, fail early on older SQLite
+	if sqliteVersion != "" {
+		// simple semver compare: major.minor.patch
+		parse := func(v string) (int, int, int) {
+			var a, b, c int
+			fmt.Sscanf(v, "%d.%d.%d", &a, &b, &c)
+			return a, b, c
+		}
+		va, vb, vc := parse(sqliteVersion)
+		ma, mb, mc := parse(minSQLiteForDropAndReturning)
+		if va < ma || (va == ma && vb < mb) || (va == ma && vb == mb && vc < mc) {
+			// scan embedded migrations for DROP COLUMN or RETURNING usage
+			if bytes, _ := migrationFiles.ReadFile("migrations/006_create_sources.up.sql"); bytes != nil {
+				content := string(bytes)
+				if strings.Contains(strings.ToUpper(content), "DROP COLUMN") || strings.Contains(strings.ToUpper(content), "RETURNING") {
+					return fmt.Errorf("SQLite version %s does not support required SQL features (DROP COLUMN/RETURNING). Upgrade SQLite to >= %s or run compatible migrations manually", sqliteVersion, minSQLiteForDropAndReturning)
+				}
+			}
+		}
+	}
+
 	var err error
 
 	// Check if subscriptions table exists and its structure
