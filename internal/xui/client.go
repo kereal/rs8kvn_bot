@@ -409,6 +409,8 @@ func (c *Client) GetClientTraffic(ctx context.Context, email string) (*ClientTra
 	return result, err
 }
 
+var ErrClientNotFound = errors.New("client not found")
+
 func (c *Client) doGetClientTraffic(ctx context.Context, email string) (*ClientTraffic, error) {
 	trafficURL := fmt.Sprintf("%s/panel/api/clients/traffic/%s", c.host, url.PathEscape(email))
 
@@ -423,6 +425,9 @@ func (c *Client) doGetClientTraffic(ctx context.Context, email string) (*ClientT
 	}
 
 	if !apiResp.Success {
+		if strings.Contains(strings.ToLower(apiResp.Msg), "client not found") {
+			return nil, ErrClientNotFound
+		}
 		return nil, fmt.Errorf("failed to get client traffic: %s", apiResp.Msg)
 	}
 
