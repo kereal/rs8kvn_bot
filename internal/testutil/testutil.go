@@ -76,7 +76,7 @@ type MockDatabaseService struct {
 	GetInviteByCodeFunc                 func(ctx context.Context, code string) (*database.Invite, error)
 	GetReferralCountFunc                func(ctx context.Context, referrerTGID int64) (int64, error)
 	GetAllReferralCountsFunc            func(ctx context.Context) (map[int64]int64, error)
-	CreateTrialSubscriptionFunc         func(ctx context.Context, inviteCode, subscriptionID, clientID string, inboundID int, trafficBytes int64, expiryTime time.Time, subURL string) (*database.Subscription, error)
+	CreateTrialSubscriptionFunc         func(ctx context.Context, inviteCode, subscriptionID, clientID string, expiryTime time.Time) (*database.Subscription, error)
 	ListSourcesFunc                     func(ctx context.Context) ([]database.Source, error)
 	ListTrialSourcesFunc                func(ctx context.Context) ([]database.Source, error)
 	IsSourcesEmptyFunc                  func(ctx context.Context) (bool, error)
@@ -314,11 +314,11 @@ func (m *MockDatabaseService) GetInviteByReferrer(ctx context.Context, referrerT
 	return nil, database.ErrInviteNotFound
 }
 
-func (m *MockDatabaseService) CreateTrialSubscription(ctx context.Context, inviteCode, subscriptionID, clientID string, inboundID int, trafficBytes int64, expiryTime time.Time, subURL string) (*database.Subscription, error) {
+func (m *MockDatabaseService) CreateTrialSubscription(ctx context.Context, inviteCode, subscriptionID, clientID string, expiryTime time.Time) (*database.Subscription, error) {
 	if m.CreateTrialSubscriptionFunc != nil {
-		return m.CreateTrialSubscriptionFunc(ctx, inviteCode, subscriptionID, clientID, inboundID, trafficBytes, expiryTime, subURL)
+		return m.CreateTrialSubscriptionFunc(ctx, inviteCode, subscriptionID, clientID, expiryTime)
 	}
-	return &database.Subscription{InviteCode: inviteCode, SubscriptionID: subscriptionID, ClientID: clientID, IsTrial: true, SubscriptionID: subscriptionID}, nil
+	return &database.Subscription{InviteCode: inviteCode, SubscriptionID: subscriptionID, ClientID: clientID, IsTrial: true}, nil
 }
 
 func (m *MockDatabaseService) ListSources(ctx context.Context) ([]database.Source, error) {
