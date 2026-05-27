@@ -168,12 +168,10 @@ func main() {
 		if defaultSubURL == "" && xuiHost != "" {
 			defaultSubURL = strings.TrimRight(xuiHost, "/") + "/sub/"
 		}
-		if xuiHost != "" && xuiAPIToken != "" {
-			if err := dbService.SeedDefaultSource(context.Background(), "default", xuiHost, xuiAPIToken, xuiInboundID, defaultSubURL); err != nil {
-				logger.Fatal("Failed to seed default source", zap.Error(err))
-			}
-			logger.Info("Default source seeded", zap.String("host", xuiHost))
+		if err := dbService.SeedDefaultSource(seedCtx, "default", xuiHost, xuiAPIToken, xuiInboundID, defaultSubURL); err != nil {
+			logger.Fatal("Failed to seed default source", zap.Error(err))
 		}
+		logger.Info("Default source seeded", zap.String("host", xuiHost))
 	}
 
 	// Load sources and create XUI clients
