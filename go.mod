@@ -8,7 +8,7 @@ require (
 	github.com/golang-migrate/migrate/v4 v4.19.1
 	github.com/joho/godotenv v1.5.1
 	github.com/mattn/go-sqlite3 v1.14.44
-	github.com/piglig/go-qr v1.0.0
+	github.com/piglig/go-qr v1.1.0
 	github.com/prometheus/client_golang v1.20.5
 	github.com/stretchr/testify v1.11.1
 	go.uber.org/zap v1.28.0
