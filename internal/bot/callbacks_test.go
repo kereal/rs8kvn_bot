@@ -222,7 +222,6 @@ func TestHandleCallback_CallbackDataRouting(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := &config.Config{
 				TelegramAdminID: 123456,
-				TrafficLimitGB:  50,
 				SiteURL:         "https://example.com",
 				Sources:         []config.Source{{Name: "main", XUIHost: "http://example.com", XUIAPIToken: "token", XUIInboundID: 1}},
 			}
@@ -266,7 +265,6 @@ func TestHandleCallback_AdminStats_NonAdmin(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 999999, // Different from chat ID
-		TrafficLimitGB:  50,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -328,7 +326,6 @@ func TestHandleCallback_AdminStats_DatabaseError(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  50,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -430,7 +427,6 @@ func TestHandleCallback_MenuSubscription_NoSubscription(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{
-		TrafficLimitGB: 50,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -582,7 +578,6 @@ func TestHandleCallback_CreateSubscription_DatabaseError(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{
-		TrafficLimitGB: 50,
 		Sources:        []config.Source{{Name: "main", XUIHost: "http://example.com", XUIAPIToken: "token", XUIInboundID: 1}},
 	}
 	mockDB := testutil.NewMockDatabaseService()
@@ -617,7 +612,6 @@ func TestHandleCallback_MenuHelp_NoSubscription(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{
-		TrafficLimitGB: 50,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -651,7 +645,6 @@ func TestHandleCallback_MenuHelp_DatabaseError(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{
-		TrafficLimitGB: 50,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -713,7 +706,6 @@ func TestHandleQRTelegram(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  100,
 		SiteURL:         "https://vpn.site",
 	}
 	mockDB := testutil.NewMockDatabaseService()
@@ -743,7 +735,6 @@ func TestHandleQRTelegram_DatabaseError(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  100,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -770,7 +761,6 @@ func TestHandleQRWeb(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  100,
 		SiteURL:         "https://vpn.site",
 	}
 	mockDB := testutil.NewMockDatabaseService()
@@ -800,7 +790,6 @@ func TestHandleQRWeb_DatabaseError(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  100,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -827,7 +816,6 @@ func TestGenerateInviteLink_Telegram(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  100,
 		SiteURL:         "https://vpn.site",
 	}
 	mockDB := testutil.NewMockDatabaseService()
@@ -856,7 +844,6 @@ func TestGenerateInviteLink_Web(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  100,
 		SiteURL:         "https://vpn.site",
 	}
 	mockDB := testutil.NewMockDatabaseService()
@@ -885,7 +872,6 @@ func TestGenerateInviteLink_DatabaseError(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  100,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -910,7 +896,6 @@ func TestHandleCallback_NilMessage(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  100,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -938,7 +923,6 @@ func TestHandleCallback_UnknownCallback(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  100,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -967,7 +951,9 @@ func TestHandleCallback_UnknownCallback(t *testing.T) {
 func TestGenerateInviteLink_UnknownType(t *testing.T) {
 	t.Parallel()
 
-	cfg := &config.Config{TelegramAdminID: 123456, TrafficLimitGB: 100}
+	cfg := &config.Config{
+		TelegramAdminID: 123456,
+	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
@@ -983,7 +969,9 @@ func TestGenerateInviteLink_UnknownType(t *testing.T) {
 func TestSendQRCode_SendError(t *testing.T) {
 	t.Parallel()
 
-	cfg := &config.Config{TelegramAdminID: 123456, TrafficLimitGB: 100}
+	cfg := &config.Config{
+		TelegramAdminID: 123456,
+	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
@@ -999,7 +987,9 @@ func TestSendQRCode_SendError(t *testing.T) {
 func TestHandleQRCode_QRError(t *testing.T) {
 	t.Parallel()
 
-	cfg := &config.Config{TelegramAdminID: 123456, TrafficLimitGB: 100}
+	cfg := &config.Config{
+		TelegramAdminID: 123456,
+	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
@@ -1021,7 +1011,9 @@ func TestHandleQRCode_QRError(t *testing.T) {
 func TestHandleBackToSubscription_RequestError(t *testing.T) {
 	t.Parallel()
 
-	cfg := &config.Config{TelegramAdminID: 123456, TrafficLimitGB: 100}
+	cfg := &config.Config{
+		TelegramAdminID: 123456,
+	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
@@ -1037,7 +1029,9 @@ func TestHandleBackToSubscription_RequestError(t *testing.T) {
 func TestHandleCallback_NilMessage_RequestError(t *testing.T) {
 	t.Parallel()
 
-	cfg := &config.Config{TelegramAdminID: 123456, TrafficLimitGB: 100}
+	cfg := &config.Config{
+		TelegramAdminID: 123456,
+	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
@@ -1062,11 +1056,11 @@ func TestHandleCallback_NilMessage_RequestError(t *testing.T) {
 func TestHandleCallback_RequestError(t *testing.T) {
 	t.Parallel()
 
-	cfg := &config.Config{TelegramAdminID: 123456, TrafficLimitGB: 100}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
 	mockBot.RequestError = errors.New("request failed")
+	cfg := &config.Config{TelegramAdminID: 123456}
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
 
 	ctx := context.Background()
@@ -1090,7 +1084,9 @@ func TestHandleCallback_RequestError(t *testing.T) {
 func TestHandleCallback_QRTelegram(t *testing.T) {
 	t.Parallel()
 
-	cfg := &config.Config{TelegramAdminID: 123456, TrafficLimitGB: 100}
+	cfg := &config.Config{
+		TelegramAdminID: 123456,
+	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
@@ -1117,9 +1113,9 @@ func TestHandleCallback_QRTelegram(t *testing.T) {
 func TestHandleCallback_QRWeb(t *testing.T) {
 	t.Parallel()
 
-	cfg := &config.Config{TelegramAdminID: 123456, TrafficLimitGB: 100}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
+	cfg := &config.Config{TelegramAdminID: 123456}
 	mockBot := testutil.NewMockBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
 
@@ -1144,8 +1140,8 @@ func TestHandleCallback_QRWeb(t *testing.T) {
 func TestHandleCallback_BackToInvite(t *testing.T) {
 	t.Parallel()
 
-	cfg := &config.Config{TelegramAdminID: 123456, TrafficLimitGB: 100}
 	mockDB := testutil.NewMockDatabaseService()
+	cfg := &config.Config{TelegramAdminID: 123456}
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")

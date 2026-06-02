@@ -35,8 +35,6 @@ type Config struct {
 	LogFilePath string
 	LogLevel    string
 
-	// Subscription configuration
-	TrafficLimitGB int
 
 	// Monitoring configuration
 	HeartbeatURL      string
@@ -83,7 +81,6 @@ type configFlags struct {
 	databasePath              *flag.StringValue
 	logFilePath               *flag.StringValue
 	logLevel                  *flag.StringValue
-	trafficLimitGB            *flag.IntValue
 	heartbeatURL              *flag.StringValue
 	heartbeatInterval         *flag.IntValue
 	sentryDSN                 *flag.StringValue
@@ -114,7 +111,6 @@ func registerFlags() (*flag.Registry, *configFlags) {
 		databasePath:              flag.NewString(DefaultDatabasePath),
 		logFilePath:               flag.NewString(DefaultLogFilePath),
 		logLevel:                  flag.NewString(DefaultLogLevel),
-		trafficLimitGB:            flag.NewInt(DefaultTrafficLimitGB),
 		heartbeatURL:              flag.NewString(""),
 		heartbeatInterval:         flag.NewInt(DefaultHeartbeatInterval),
 		sentryDSN:                 flag.NewString(""),
@@ -139,7 +135,6 @@ func registerFlags() (*flag.Registry, *configFlags) {
 	r.Register("DATABASE_PATH", f.databasePath)
 	r.Register("LOG_FILE_PATH", f.logFilePath)
 	r.Register("LOG_LEVEL", f.logLevel)
-	r.Register("TRAFFIC_LIMIT_GB", f.trafficLimitGB)
 	r.Register("HEARTBEAT_URL", f.heartbeatURL)
 	r.Register("HEARTBEAT_INTERVAL", f.heartbeatInterval)
 	r.Register("SENTRY_DSN", f.sentryDSN)
@@ -180,7 +175,6 @@ func Load() (*Config, error) {
 		DatabasePath:              f.databasePath.Get(),
 		LogFilePath:               f.logFilePath.Get(),
 		LogLevel:                  f.logLevel.Get(),
-		TrafficLimitGB:            f.trafficLimitGB.Get(),
 		HeartbeatURL:              f.heartbeatURL.Get(),
 		HeartbeatInterval:         f.heartbeatInterval.Get(),
 		SentryDSN:                 f.sentryDSN.Get(),
@@ -219,11 +213,6 @@ func (c *Config) validate() error {
 
 	if c.TelegramAdminID <= 0 {
 		return fmt.Errorf("TELEGRAM_ADMIN_ID must be positive")
-	}
-
-	// Traffic limit validation
-	if c.TrafficLimitGB < MinTrafficLimitGB || c.TrafficLimitGB > MaxTrafficLimitGB {
-		return fmt.Errorf("TRAFFIC_LIMIT_GB must be between %d and %d", MinTrafficLimitGB, MaxTrafficLimitGB)
 	}
 
 	// Heartbeat validation
@@ -275,6 +264,7 @@ func (c *Config) validate() error {
 	if c.TrialRateLimit < 1 || c.TrialRateLimit > 100 {
 		return fmt.Errorf("TRIAL_RATE_LIMIT must be between 1 and 100")
 	}
+
 
 	// SubExtraServersFile validation (only if file provided)
 	if c.SubExtraServersFile != "" {
@@ -328,7 +318,6 @@ func (c *Config) String() string {
 		"DatabasePath=%s, "+
 		"LogFilePath=%s, "+
 		"LogLevel=%s, "+
-		"TrafficLimitGB=%d, "+
 		"HeartbeatURL=%s, "+
 		"HeartbeatInterval=%d, "+
 		"GlobalSubURL=%s, "+
@@ -340,7 +329,6 @@ func (c *Config) String() string {
 		c.DatabasePath,
 		c.LogFilePath,
 		c.LogLevel,
-		c.TrafficLimitGB,
 		maskURL(c.HeartbeatURL),
 		c.HeartbeatInterval,
 		maskURL(c.GlobalSubURL),

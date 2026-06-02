@@ -105,7 +105,7 @@ Serves subscriptions with optional extra servers and custom headers. Validates `
 
 ## Traffic and Expiry
 
-- **Traffic**: Configurable via `TRAFFIC_LIMIT_GB` (default: 30GB)
+
 - **Auto-reset**: Every 30 days from creation date — 3x-ui resets traffic to 0 and extends `ExpiryTime` by 30 days automatically when `ExpiryTime > 0`
 - **Source**: [3x-ui inbound.go - autoRenewClients()](https://github.com/mhsanaei/3x-ui/blob/main/web/service/inbound.go#L888-L912)
 

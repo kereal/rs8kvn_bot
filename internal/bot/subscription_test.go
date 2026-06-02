@@ -24,7 +24,6 @@ func TestShowLoadingMessage_WithMessageID(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  50,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -45,7 +44,6 @@ func TestShowLoadingMessage_WithoutMessageID(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  50,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -66,7 +64,6 @@ func TestShowLoadingMessage_SendFails(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  50,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -87,7 +84,6 @@ func TestShowLoadingMessage_EditFails(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  50,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -113,7 +109,6 @@ func TestCreateSubscription_Success(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  100,
 		Sources:         []config.Source{{Name: "main", XUIHost: "https://panel.example.com", XUIAPIToken: "token", XUIInboundID: 1}},
 	}
 	mockDB := testutil.NewMockDatabaseService()
@@ -160,7 +155,6 @@ func TestCreateSubscription_XUIFailure(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  100,
 		Sources:         []config.Source{{Name: "main", XUIHost: "http://example.com", XUIAPIToken: "token", XUIInboundID: 1}},
 	}
 	mockDB := testutil.NewMockDatabaseService()
@@ -263,7 +257,6 @@ func TestCreateSubscription_DatabaseFailure_RollbackSuccess(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  100,
 		Sources:         []config.Source{{Name: "main", XUIHost: "http://example.com", XUIAPIToken: "token", XUIInboundID: 1}},
 	}
 	mockDB := testutil.NewMockDatabaseService()
@@ -308,7 +301,6 @@ func TestCreateSubscription_DatabaseFailure_RollbackFailure(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  100,
 		Sources:         []config.Source{{Name: "main", XUIHost: "http://example.com", XUIAPIToken: "token", XUIInboundID: 1}},
 	}
 	mockDB := testutil.NewMockDatabaseService()
@@ -349,7 +341,6 @@ func TestCreateSubscription_CacheUpdate(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  100,
 		Sources:         []config.Source{{Name: "main", XUIHost: "https://panel.example.com", XUIAPIToken: "token", XUIInboundID: 1}},
 	}
 	mockDB := testutil.NewMockDatabaseService()
@@ -397,7 +388,6 @@ func TestHandleCreateSubscription_AlreadyInProgress(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  100,
 		Sources:         []config.Source{{Name: "main", XUIHost: "http://example.com", XUIAPIToken: "token", XUIInboundID: 1}},
 	}
 	mockDB := testutil.NewMockDatabaseService()
@@ -427,7 +417,6 @@ func TestHandleCreateSubscription_ExistingActiveSubscription(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  100,
 		Sources:         []config.Source{{Name: "main", XUIHost: "http://example.com", XUIAPIToken: "token", XUIInboundID: 1}},
 	}
 	mockDB := testutil.NewMockDatabaseService()
@@ -460,7 +449,6 @@ func TestHandleCreateSubscription_ExpiredSubscription(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  100,
 		Sources:         []config.Source{{Name: "main", XUIHost: "http://example.com", XUIAPIToken: "token", XUIInboundID: 1}},
 	}
 	mockDB := testutil.NewMockDatabaseService()
@@ -505,7 +493,6 @@ func TestHandleCreateSubscription_DatabaseError(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  100,
 		Sources:         []config.Source{{Name: "main", XUIHost: "http://example.com", XUIAPIToken: "token", XUIInboundID: 1}},
 	}
 	mockDB := testutil.NewMockDatabaseService()
@@ -529,7 +516,6 @@ func TestHandleCreateSubscription_NoSubscription(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  100,
 		Sources:         []config.Source{{Name: "main", XUIHost: "http://example.com", XUIAPIToken: "token", XUIInboundID: 1}},
 	}
 	mockDB := testutil.NewMockDatabaseService()
@@ -570,7 +556,6 @@ func TestHandleMySubscription_NotFound(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  100,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -598,7 +583,6 @@ func TestHandleMySubscription_DatabaseError(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  100,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -626,7 +610,6 @@ func TestHandleMySubscription_ActiveSubscription(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  100,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -640,7 +623,8 @@ func TestHandleMySubscription_ActiveSubscription(t *testing.T) {
 
 	sub := &database.Subscription{
 		TelegramID: 123456,
-		Username:   "testuser",
+		Username:  "testuser",
+		PlanID:    1,
 
 		ExpiryTime: time.Now().Add(30 * 24 * time.Hour),
 		Status:     "active",
@@ -649,6 +633,13 @@ func TestHandleMySubscription_ActiveSubscription(t *testing.T) {
 
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 		return sub, nil
+	}
+	mockDB.GetPlanByIDFunc = func(ctx context.Context, planID uint) (*database.Plan, error) {
+		return &database.Plan{
+			ID:          planID,
+			Name:        "test",
+			TrafficLimit: 100 * 1024 * 1024 * 1024,
+		}, nil
 	}
 
 	traffic := &xui.ClientTraffic{
@@ -676,7 +667,6 @@ func TestHandleMySubscription_TrafficFetchError(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  100,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -701,6 +691,10 @@ func TestHandleMySubscription_TrafficFetchError(t *testing.T) {
 		return sub, nil
 	}
 
+	mockDB.GetPlanByIDFunc = func(ctx context.Context, planID uint) (*database.Plan, error) {
+		return &database.Plan{TrafficLimit: 107374182400}, nil // 100GB in bytes
+	}
+
 	mockXUI.GetClientTrafficFunc = func(ctx context.Context, email string) (*xui.ClientTraffic, error) {
 		return nil, errors.New("traffic error")
 	}
@@ -719,7 +713,6 @@ func TestHandleMySubscription_UsesCache(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  100,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -766,7 +759,6 @@ func TestHandleQRCode_Success(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  100,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -793,7 +785,6 @@ func TestHandleQRCode_DatabaseError(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  100,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -819,7 +810,6 @@ func TestGetSubscriptionWithCache_CacheHit(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  100,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -856,7 +846,6 @@ func TestGetSubscriptionWithCache_CacheMiss(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  100,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -890,7 +879,6 @@ func TestGetSubscriptionWithCache_DatabaseError(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  100,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -915,7 +903,6 @@ func TestGetSubscriptionWithCache_StaleCacheNonActive(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  100,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -950,7 +937,6 @@ func TestInvalidateCache(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  100,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -979,7 +965,6 @@ func TestSendQRCode(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  100,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -1006,7 +991,6 @@ func TestHandleBackToInvite(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  100,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -1032,7 +1016,6 @@ func TestHandleCreateSubscription_ZeroMessageID(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  100,
 		Sources:         []config.Source{{Name: "main", XUIHost: "http://example.com", XUIAPIToken: "token", XUIInboundID: 1}},
 	}
 	mockDB := testutil.NewMockDatabaseService()
@@ -1074,7 +1057,6 @@ func TestHandleQRCode_WithSubscription(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  100,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -1100,7 +1082,6 @@ func TestHandleQRCode_NoSubscription(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  100,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -1123,7 +1104,6 @@ func TestHandleBackToSubscription(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  100,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -1142,7 +1122,6 @@ func TestSendQRCode_Success(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  100,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -1160,7 +1139,6 @@ func TestNotifyAdmin_Success(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  100,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -1180,7 +1158,6 @@ func TestNotifyAdmin_ZeroAdminID(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 0,
-		TrafficLimitGB:  100,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -1199,7 +1176,6 @@ func TestNotifyAdminError(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  100,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -1218,7 +1194,6 @@ func TestNotifyAdminError_ZeroAdminID(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 0,
-		TrafficLimitGB:  100,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -1236,7 +1211,6 @@ func TestClearAdminSendRateLimit(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  100,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -1255,7 +1229,6 @@ func TestHandleCreateError_RollbackFailed(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  100,
 		SiteURL:         "https://vpn.site",
 		Sources:         []config.Source{{Name: "main", XUIHost: "http://example.com", XUIAPIToken: "token", XUIInboundID: 1}},
 	}
@@ -1278,7 +1251,6 @@ func TestHandleCreateError_ConnectionRefused(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  100,
 		SiteURL:         "https://vpn.site",
 		Sources:         []config.Source{{Name: "main", XUIHost: "http://example.com", XUIAPIToken: "token", XUIInboundID: 1}},
 	}
@@ -1300,7 +1272,6 @@ func TestHandleCreateError_Authentication(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  100,
 		SiteURL:         "https://vpn.site",
 		Sources:         []config.Source{{Name: "main", XUIHost: "http://example.com", XUIAPIToken: "token", XUIInboundID: 1}},
 	}
@@ -1322,7 +1293,6 @@ func TestNotifyAdmin_SendError(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  100,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -1342,7 +1312,6 @@ func TestSendQRCode_QRGenerationError(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  100,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -1361,7 +1330,6 @@ func TestHandleQRCode_NilSubscription(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  100,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -1384,7 +1352,6 @@ func TestCreateSubscription_WithPendingInvite(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  100,
 		Sources:         []config.Source{{Name: "main", XUIHost: "https://panel.example.com", XUIAPIToken: "token", XUIInboundID: 1}},
 	}
 	mockDB := testutil.NewMockDatabaseService()
@@ -1443,7 +1410,6 @@ func TestCreateSubscription_WithExpiredPendingInvite(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  100,
 		Sources:         []config.Source{{Name: "main", XUIHost: "https://panel.example.com", XUIAPIToken: "token", XUIInboundID: 1}},
 	}
 	mockDB := testutil.NewMockDatabaseService()
@@ -1489,7 +1455,6 @@ func TestHandleBackToInvite_RequestError(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  100,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -1509,7 +1474,6 @@ func TestCreateSubscription_ShowLoadingMessageFails(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  100,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -1540,7 +1504,6 @@ func TestHandleQRCode_DatabaseErrorReturnsError(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  100,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -1564,7 +1527,6 @@ func TestHandleBackToSubscription_DeleteFails(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  100,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()

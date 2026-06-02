@@ -31,7 +31,6 @@ func TestSubscriptionService_Create_Success(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{
-		TrafficLimitGB: 100,
 	}
 
 	db := &testutil.MockDatabaseService{}
@@ -58,7 +57,6 @@ func TestSubscriptionService_Create_XUIError(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{
-		TrafficLimitGB: 100,
 	}
 
 	db := &testutil.MockDatabaseService{}
@@ -84,7 +82,6 @@ func TestSubscriptionService_Create_DBError_RollbackSuccess(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{
-		TrafficLimitGB: 100,
 	}
 
 	deleteCalled := false
@@ -121,7 +118,6 @@ func TestSubscriptionService_Create_DBError_RollbackFailed(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{
-		TrafficLimitGB: 100,
 	}
 
 	db := &testutil.MockDatabaseService{
@@ -418,19 +414,22 @@ func TestSubscriptionService_GetWithTraffic_Success(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{
-		TrafficLimitGB: 100,
 	}
 
 	sub := &database.Subscription{
-		TelegramID: 123456,
-		Username:   "testuser",
-		CreatedAt:  time.Now(),
-		ExpiryTime: time.Now().Add(7 * 24 * time.Hour),
+		TelegramID:    123456,
+		Username:      "testuser",
+		PlanID:        1,
+		CreatedAt:     time.Now(),
+		ExpiryTime:    time.Now().Add(7 * 24 * time.Hour),
 	}
 
 	db := &testutil.MockDatabaseService{
 		GetByTelegramIDFunc: func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 			return sub, nil
+		},
+		GetPlanByIDFunc: func(ctx context.Context, planID uint) (*database.Plan, error) {
+			return &database.Plan{ID: 1, TrafficLimit: 100 * 1024 * 1024 * 1024}, nil
 		},
 	}
 
@@ -457,7 +456,6 @@ func TestSubscriptionService_GetWithTraffic_XUIErrorFallback(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{
-		TrafficLimitGB: 100,
 	}
 
 	sub := &database.Subscription{

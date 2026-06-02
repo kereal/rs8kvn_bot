@@ -73,8 +73,11 @@ func (sh *SubscriptionHandler) handleCreateSubscription(ctx context.Context, cha
 			return fmt.Errorf("check subscription: %w", err)
 		}
 	} else if sub != nil {
-		// Existing active subscription
-		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgSubCreatedSuccess, sh.h.cfg.TrafficLimitGB, sh.h.cfg.GlobalSubURL+sub.SubscriptionID))
+	trafficLimit := 0
+	if sh.h.subscriptionService != nil {
+		trafficLimit = sh.h.subscriptionService.PlanTrafficLimitGB(ctx, chatID)
+	}
+		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgSubCreatedSuccess, trafficLimit, sh.h.cfg.GlobalSubURL+sub.SubscriptionID))
 		editMsg.ParseMode = "Markdown"
 		editMsg.DisableWebPagePreview = true
 		kb := sh.h.getQRKeyboard()
@@ -245,15 +248,16 @@ func (sh *SubscriptionHandler) createSubscription(ctx context.Context, chatID in
 		return fmt.Errorf("failed to show loading message")
 	}
 
-	logger.Info("Creating subscription",
-		zap.String("username", username),
-		zap.Int("traffic_gb", sh.h.cfg.TrafficLimitGB))
+	sh.h.pendingMu.Lock()
 
 	result, err := sh.h.subscriptionService.Create(ctx, chatID, username)
 	if err != nil {
+		sh.h.pendingMu.Unlock()
 		sh.handleCreateError(ctx, chatID, messageID, username, err)
 		return fmt.Errorf("create subscription: %w", err)
 	}
+
+	sh.h.pendingMu.Unlock()
 
 	sh.h.pendingMu.Lock()
 	if pending, ok := sh.h.pendingInvites[chatID]; ok {
@@ -278,7 +282,7 @@ func (sh *SubscriptionHandler) createSubscription(ctx context.Context, chatID in
 			tgbotapi.NewInlineKeyboardButtonData("🏠 В начало", "back_to_start"),
 		),
 	)
-	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, sh.h.getHelpText(sh.h.cfg.TrafficLimitGB, result.SubscriptionURL))
+	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, sh.h.getHelpText(sh.h.subscriptionService.PlanTrafficLimitGB(ctx, result.Subscription.TelegramID), result.SubscriptionURL))
 	editMsg.ParseMode = "Markdown"
 	editMsg.DisableWebPagePreview = true
 	editMsg.ReplyMarkup = &backKeyboard

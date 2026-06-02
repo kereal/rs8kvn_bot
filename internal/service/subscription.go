@@ -266,13 +266,32 @@ type TrafficInfo struct {
 	ExpiryTimeFormatted string
 }
 
+func (s *SubscriptionService) PlanTrafficLimitGB(ctx context.Context, telegramID int64) int {
+	sub, err := s.db.GetByTelegramID(ctx, telegramID)
+	if err != nil {
+		return 0
+	}
+	plan, planErr := s.db.GetPlanByID(ctx, sub.PlanID)
+	if planErr != nil {
+		return 0
+	}
+	return int(float64(plan.TrafficLimit) / 1024 / 1024 / 1024)
+}
+
+// Получаем данные подписки, содержащие информацию о трафике
 func (s *SubscriptionService) GetWithTraffic(ctx context.Context, telegramID int64) (*database.Subscription, *TrafficInfo, error) {
+
+	// получили подписку
 	sub, err := s.db.GetByTelegramID(ctx, telegramID)
 	if err != nil {
 		return nil, nil, err
 	}
 
+	limitGB := s.PlanTrafficLimitGB(ctx, telegramID)
+
 	email := XUIEmail(sub.Username, sub.TelegramID)
+
+	// обходим серверы
 	var totalUp, totalDown int64
 	var anySuccess bool
 	for _, src := range s.activeSources() {
@@ -292,25 +311,26 @@ func (s *SubscriptionService) GetWithTraffic(ctx context.Context, telegramID int
 		anySuccess = true
 	}
 
+	// не получилось опросить серверы
 	if !anySuccess {
 		return sub, &TrafficInfo{
 			UsedGB:  0,
-			LimitGB: s.cfg.TrafficLimitGB,
+			LimitGB: limitGB,
 		}, nil
 	}
 
 	usedGB := float64(totalUp+totalDown) / 1024 / 1024 / 1024
 	percentage := 0.0
-	limitGB := float64(s.cfg.TrafficLimitGB)
+
 	if limitGB > 0 {
-		percentage = (usedGB / limitGB) * 100
+		percentage = (usedGB / float64(limitGB)) * 100
 		if percentage > 100 {
 			percentage = 100
 		}
 	}
 
 	// Progress bar
-	progressBar := utils.GenerateProgressBar(usedGB, limitGB)
+	progressBar := utils.GenerateProgressBar(usedGB, float64(limitGB))
 
 	// Calculate reset time
 	var resetTime time.Time
@@ -334,7 +354,7 @@ func (s *SubscriptionService) GetWithTraffic(ctx context.Context, telegramID int
 
 	return sub, &TrafficInfo{
 		UsedGB:              usedGB,
-		LimitGB:             s.cfg.TrafficLimitGB,
+		LimitGB:             int(limitGB),
 		Percentage:          percentage,
 		ProgressBar:         progressBar,
 		DaysUntilReset:      daysUntilReset,

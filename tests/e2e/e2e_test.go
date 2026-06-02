@@ -118,7 +118,6 @@ func setupE2EEnv(t *testing.T) *e2eTestEnv {
 
 	cfg := &config.Config{
 		TelegramAdminID:  123456,
-		TrafficLimitGB:   100,
 		SiteURL:          "https://example.com",
 		TelegramBotToken: "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11",
 		GlobalSubURL:     "https://example.com/sub/",
@@ -249,7 +248,6 @@ func setupRealXUIEnv(t *testing.T, handlers map[string]http.HandlerFunc) *realXU
 
 	cfg := &config.Config{
 		TelegramAdminID:  123456,
-		TrafficLimitGB:   100,
 		SiteURL:          "https://example.com",
 		TelegramBotToken: "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11",
 		GlobalSubURL:     "",

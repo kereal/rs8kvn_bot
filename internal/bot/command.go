@@ -88,9 +88,6 @@ func (c *CommandHandler) HandleHelp(ctx context.Context, update tgbotapi.Update)
 📥 *Получить подписку* - Создать новую подписку или получить существующую
 📋 *Подписка* - Посмотреть информацию о текущей подписке
 
-*Параметры подписки:*
-📊 Трафик: %d ГБ в месяц
-
 *Технические детали:*
 🔐 Протокол: VLESS+Reality+Vision
 📱 Совместимость: V2Ray, Xray, и другие клиенты
@@ -102,7 +99,6 @@ func (c *CommandHandler) HandleHelp(ctx context.Context, update tgbotapi.Update)
 - Подписка автоматически обновляется в конце месяца
 - Не передавайте ссылку на подписку третьим лицам
 - При истечении трафика подписка перестанет работать до следующего месяца`,
-		c.h.cfg.TrafficLimitGB,
 		c.h.cfg.ContactUsername,
 		c.h.cfg.ContactUsername,
 	)
@@ -252,7 +248,7 @@ func (c *CommandHandler) handleBindTrial(ctx context.Context, chatID int64, user
 		zap.String("subscription_id", subscriptionID))
 
 	c.h.invalidateCache(chatID)
-	c.h.SendMessage(ctx, chatID, fmt.Sprintf("✅ Подписка активирована!\n\nДобро пожаловать!\n\nВам доступно: %dГб\n\nИспользуйте /start для работы с ботом.", c.h.cfg.TrafficLimitGB))
+	c.h.SendMessage(ctx, chatID, fmt.Sprintf("✅ Подписка активирована!\n\nДобро пожаловать!\n\nВам доступно: %dГб\n\nИспользуйте /start для работы с ботом.", c.h.subscriptionService.PlanTrafficLimitGB(ctx, sub.TelegramID)))
 
 	// Admin notification
 	if c.h.cfg.TelegramAdminID > 0 {
