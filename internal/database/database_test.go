@@ -1662,6 +1662,58 @@ func TestService_BindTrialSubscription_NotFound(t *testing.T) {
 	assert.Error(t, err, "Binding non-existent subscription should fail")
 }
 
+// TestService_BindTrialSubscription_RevokesExistingActiveSub verifies that
+// binding a trial revokes any pre-existing active subscription the user may
+// have (fix #7: race between Create and BindTrial). Without the revoke, the
+// user could end up with two active subscriptions.
+func TestService_BindTrialSubscription_RevokesExistingActiveSub(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	// Resolve the free plan id (BindTrial promotes trial→free).
+	var freePlan Plan
+	require.NoError(t, svc.db.Where("name = ?", FreePlanName).First(&freePlan).Error)
+
+	// 1) Pre-existing active free-plan subscription for the same user.
+	preExisting := &Subscription{
+		TelegramID:     999000,
+		Username:       "olduser",
+		ClientID:       "client-old",
+		SubscriptionID: "sub-old",
+		ExpiryTime:     time.Now().Add(24 * time.Hour),
+		Status:         "active",
+		PlanID:         freePlan.ID,
+	}
+	require.NoError(t, svc.CreateSubscription(ctx, preExisting, ""))
+
+	// 2) Create a trial (unbound) for a different subscription id.
+	_, err := svc.CreateTrialSubscription(
+		ctx, "INVITE000", "sub-bind-revoke", "client-trial", time.Now().Add(3*time.Hour),
+	)
+	require.NoError(t, err)
+
+	// 3) Bind the trial to the same user.
+	bound, err := svc.BindTrialSubscription(ctx, "sub-bind-revoke", 999000, "newuser")
+	require.NoError(t, err)
+	require.NotNil(t, bound)
+	assert.Equal(t, int64(999000), bound.TelegramID)
+	assert.Equal(t, "active", bound.Status)
+
+	// 4) The pre-existing sub must be revoked.
+	var pre Subscription
+	require.NoError(t, svc.db.First(&pre, preExisting.ID).Error)
+	assert.Equal(t, "revoked", pre.Status, "pre-existing active sub must be revoked by BindTrial")
+
+	// 5) Only ONE active subscription for the user must remain.
+	var activeCount int64
+	require.NoError(t, svc.db.Model(&Subscription{}).
+		Where("telegram_id = ? AND status = ?", 999000, "active").
+		Count(&activeCount).Error)
+	assert.Equal(t, int64(1), activeCount, "user must end up with exactly one active sub")
+}
+
 // ==================== Helper Functions ====================
 
 func newTestService(t *testing.T) *Service {
