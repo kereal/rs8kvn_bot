@@ -78,8 +78,19 @@ type MockDatabaseService struct {
 	GetAllReferralCountsFunc            func(ctx context.Context) (map[int64]int64, error)
 	CreateTrialSubscriptionFunc         func(ctx context.Context, inviteCode, subscriptionID, clientID string, expiryTime time.Time) (*database.Subscription, error)
 	ListSourcesFunc                     func(ctx context.Context) ([]database.Source, error)
-	ListTrialSourcesFunc                func(ctx context.Context) ([]database.Source, error)
 	IsSourcesEmptyFunc                  func(ctx context.Context) (bool, error)
+	GetSourcesByPlanIDFunc              func(ctx context.Context, planID uint) ([]database.Source, error)
+	GetSourcesByPlanNameFunc            func(ctx context.Context, planName string) ([]database.Source, error)
+	GetPlansBySourceIDFunc              func(ctx context.Context, sourceID uint) ([]database.Plan, error)
+	GetPlanByNameFunc                   func(ctx context.Context, name string) (*database.Plan, error)
+	GetPlanByIDFunc                     func(ctx context.Context, planID uint) (*database.Plan, error)
+	GetAllPlansFunc                     func(ctx context.Context) ([]database.Plan, error)
+	CreatePlanFunc                      func(ctx context.Context, plan *database.Plan) error
+	UpdatePlanFunc                      func(ctx context.Context, plan *database.Plan) error
+	DeletePlanFunc                      func(ctx context.Context, planID uint) error
+	AddSourceToPlanFunc                 func(ctx context.Context, planID, sourceID uint) error
+	RemoveSourceFromPlanFunc            func(ctx context.Context, planID, sourceID uint) error
+	SeedDefaultDataFunc                 func(ctx context.Context) error
 	SeedDefaultSourceFunc               func(ctx context.Context, name, xuiHost, xuiAPIToken string, xuiInboundID int, subURL string) error
 	GetSubscriptionBySubscriptionIDFunc func(ctx context.Context, subscriptionID string) (*database.Subscription, error)
 	GetTrialSubscriptionBySubIDFunc     func(ctx context.Context, subscriptionID string) (*database.Subscription, error)
@@ -318,7 +329,7 @@ func (m *MockDatabaseService) CreateTrialSubscription(ctx context.Context, invit
 	if m.CreateTrialSubscriptionFunc != nil {
 		return m.CreateTrialSubscriptionFunc(ctx, inviteCode, subscriptionID, clientID, expiryTime)
 	}
-	return &database.Subscription{InviteCode: inviteCode, SubscriptionID: subscriptionID, ClientID: clientID, IsTrial: true}, nil
+	return &database.Subscription{InviteCode: inviteCode, SubscriptionID: subscriptionID, ClientID: clientID, PlanID: 1}, nil
 }
 
 func (m *MockDatabaseService) ListSources(ctx context.Context) ([]database.Source, error) {
@@ -326,18 +337,10 @@ func (m *MockDatabaseService) ListSources(ctx context.Context) ([]database.Sourc
 		return m.ListSourcesFunc(ctx)
 	}
 	return []database.Source{
-		{ID: 1, Name: "default", Active: true, Trial: true, XUIHost: "http://localhost:2053", XUIAPIToken: "test-token", XUIInboundID: 1, SubURL: "http://example.com/sub/"},
+		{ID: 1, Name: "default", Active: true, XUIHost: "http://localhost:2053", XUIAPIToken: "test-token", XUIInboundID: 1, SubURL: "http://example.com/sub/"},
 	}, nil
 }
 
-func (m *MockDatabaseService) ListTrialSources(ctx context.Context) ([]database.Source, error) {
-	if m.ListTrialSourcesFunc != nil {
-		return m.ListTrialSourcesFunc(ctx)
-	}
-	return []database.Source{
-		{ID: 1, Name: "default", Active: true, Trial: true, XUIHost: "http://localhost:2053", XUIAPIToken: "test-token", XUIInboundID: 1, SubURL: "http://example.com/sub/"},
-	}, nil
-}
 
 func (m *MockDatabaseService) IsSourcesEmpty(ctx context.Context) (bool, error) {
 	if m.IsSourcesEmptyFunc != nil {
@@ -347,8 +350,104 @@ func (m *MockDatabaseService) IsSourcesEmpty(ctx context.Context) (bool, error) 
 }
 
 func (m *MockDatabaseService) SeedDefaultSource(ctx context.Context, name, xuiHost, xuiAPIToken string, xuiInboundID int, subURL string) error {
+	if m.SeedDefaultDataFunc != nil {
+		return m.SeedDefaultDataFunc(ctx)
+	}
 	if m.SeedDefaultSourceFunc != nil {
 		return m.SeedDefaultSourceFunc(ctx, name, xuiHost, xuiAPIToken, xuiInboundID, subURL)
+	}
+	return nil
+}
+
+func (m *MockDatabaseService) SeedDefaultData(ctx context.Context) error {
+	if m.SeedDefaultDataFunc != nil {
+		return m.SeedDefaultDataFunc(ctx)
+	}
+	return nil
+}
+
+func (m *MockDatabaseService) GetPlanByName(ctx context.Context, name string) (*database.Plan, error) {
+	if m.GetPlanByNameFunc != nil {
+		return m.GetPlanByNameFunc(ctx, name)
+	}
+	if name == database.FreePlanName {
+		return &database.Plan{ID: 2, Name: name, DevicesLimit: 1, TrafficLimit: 1073741824, Duration: 168}, nil
+	}
+	if name == database.TrialPlanName {
+		return &database.Plan{ID: 1, Name: name, DevicesLimit: 1, TrafficLimit: 1073741824, Duration: 3}, nil
+	}
+	return nil, gorm.ErrRecordNotFound
+}
+
+func (m *MockDatabaseService) GetPlanByID(ctx context.Context, planID uint) (*database.Plan, error) {
+	if m.GetPlanByIDFunc != nil {
+		return m.GetPlanByIDFunc(ctx, planID)
+	}
+	return nil, gorm.ErrRecordNotFound
+}
+
+func (m *MockDatabaseService) GetAllPlans(ctx context.Context) ([]database.Plan, error) {
+	if m.GetAllPlansFunc != nil {
+		return m.GetAllPlansFunc(ctx)
+	}
+	return nil, nil
+}
+
+func (m *MockDatabaseService) CreatePlan(ctx context.Context, plan *database.Plan) error {
+	if m.CreatePlanFunc != nil {
+		return m.CreatePlanFunc(ctx, plan)
+	}
+	return nil
+}
+
+func (m *MockDatabaseService) UpdatePlan(ctx context.Context, plan *database.Plan) error {
+	if m.UpdatePlanFunc != nil {
+		return m.UpdatePlanFunc(ctx, plan)
+	}
+	return nil
+}
+
+func (m *MockDatabaseService) DeletePlan(ctx context.Context, planID uint) error {
+	if m.DeletePlanFunc != nil {
+		return m.DeletePlanFunc(ctx, planID)
+	}
+	return nil
+}
+
+func (m *MockDatabaseService) GetSourcesByPlanID(ctx context.Context, planID uint) ([]database.Source, error) {
+	if m.GetSourcesByPlanIDFunc != nil {
+		return m.GetSourcesByPlanIDFunc(ctx, planID)
+	}
+	return nil, nil
+}
+
+func (m *MockDatabaseService) GetSourcesByPlanName(ctx context.Context, planName string) ([]database.Source, error) {
+	if m.GetSourcesByPlanNameFunc != nil {
+		return m.GetSourcesByPlanNameFunc(ctx, planName)
+	}
+	if planName == database.TrialPlanName {
+		return []database.Source{{ID: 1, Active: true, XUIHost: "http://localhost:2053", XUIInboundID: 1}}, nil
+	}
+	return nil, nil
+}
+
+func (m *MockDatabaseService) GetPlansBySourceID(ctx context.Context, sourceID uint) ([]database.Plan, error) {
+	if m.GetPlansBySourceIDFunc != nil {
+		return m.GetPlansBySourceIDFunc(ctx, sourceID)
+	}
+	return nil, nil
+}
+
+func (m *MockDatabaseService) AddSourceToPlan(ctx context.Context, planID, sourceID uint) error {
+	if m.AddSourceToPlanFunc != nil {
+		return m.AddSourceToPlanFunc(ctx, planID, sourceID)
+	}
+	return nil
+}
+
+func (m *MockDatabaseService) RemoveSourceFromPlan(ctx context.Context, planID, sourceID uint) error {
+	if m.RemoveSourceFromPlanFunc != nil {
+		return m.RemoveSourceFromPlanFunc(ctx, planID, sourceID)
 	}
 	return nil
 }
@@ -374,7 +473,7 @@ func (m *MockDatabaseService) GetTrialSubscriptionBySubID(ctx context.Context, s
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	for _, sub := range m.Subscriptions {
-		if sub.SubscriptionID == subscriptionID && sub.IsTrial {
+		if sub.SubscriptionID == subscriptionID && sub.PlanID == 1 {
 			return sub, nil
 		}
 	}
@@ -391,7 +490,7 @@ func (m *MockDatabaseService) BindTrialSubscription(ctx context.Context, subscri
 		if sub.SubscriptionID == subscriptionID {
 			sub.TelegramID = telegramID
 			sub.Username = username
-			sub.IsTrial = false
+			sub.PlanID = 0
 			return sub, nil
 		}
 	}

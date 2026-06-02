@@ -36,7 +36,7 @@ func TestE2E_TrialBind_Success(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, env.chatID, bound.TelegramID, "TelegramID should be set")
 	assert.Equal(t, env.username, bound.Username, "Username should be set")
-	assert.False(t, bound.IsTrial, "IsTrial should be false after bind")
+	assert.Equal(t, uint(2), bound.PlanID, "IsTrial should be false after bind")
 }
 
 func TestE2E_TrialBind_AlreadyHasSubscription(t *testing.T) {

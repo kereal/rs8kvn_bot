@@ -41,9 +41,7 @@ func newTestAPIServer(t *testing.T, cfg *config.Config, mockDB *testutil.MockDat
 		dbSources[i] = database.Source{
 			ID:           s.ID,
 			Name:         s.Name,
-			Active:       s.Active,
-			Trial:        s.Trial,
-			XUIHost:      s.XUIHost,
+			Active:       s.Active,XUIHost:      s.XUIHost,
 			XUIAPIToken:  s.XUIAPIToken,
 			XUIInboundID: s.XUIInboundID,
 			SubURL:       s.SubURL,

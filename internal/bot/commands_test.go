@@ -178,7 +178,7 @@ func TestHandleStart_NormalFlow(t *testing.T) {
 			mockXUI := testutil.NewMockXUIClient()
 			mockBot := testutil.NewMockBotAPI()
 			xuiClients := map[uint]interfaces.XUIClient{1: mockXUI}
-			sources := []database.Source{{ID: 1, Name: "main", Active: true, Trial: true, XUIHost: "http://example.com", XUIAPIToken: "token", XUIInboundID: 1}}
+			sources := []database.Source{{ID: 1, Name: "main", Active: true,XUIHost: "http://example.com", XUIAPIToken: "token", XUIInboundID: 1}}
 			subService := service.NewSubscriptionService(mockDB, xuiClients, sources, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
 			handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), subService, "")
 			tt.setupMock(mockDB)
@@ -509,8 +509,7 @@ func TestHandleBindTrial_Success(t *testing.T) {
 
 	dbSources := []database.Source{{
 		ID: 1, Name: "main", XUIHost: "http://example.com",
-		XUIAPIToken: "token", XUIInboundID: 1, Active: true, Trial: true,
-	}}
+		XUIAPIToken: "token", XUIInboundID: 1, Active: true,}}
 	mockXUI := testutil.NewMockXUIClient()
 	mockXUI.UpdateClientFunc = func(ctx context.Context, inboundID int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, tgID int64, comment string) error {
 		return nil
@@ -870,7 +869,7 @@ func TestHandleMySubscription_ShowLoadingFails(t *testing.T) {
 	mockBot := testutil.NewMockBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
 	mockXUIClients := map[uint]interfaces.XUIClient{1: mockXUI}
-	sources := []database.Source{{ID: 1, Name: "main", Active: true, Trial: true, XUIHost: "http://example.com", XUIAPIToken: "token", XUIInboundID: 1}}
+	sources := []database.Source{{ID: 1, Name: "main", Active: true,XUIHost: "http://example.com", XUIAPIToken: "token", XUIInboundID: 1}}
 	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUIClients, sources, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
 	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
 
@@ -904,8 +903,7 @@ func newTestHandlerWithSubService(t *testing.T, cfg *config.Config, mockDB *test
 	}
 	dbSources := []database.Source{{
 		ID: 1, Name: "main", XUIHost: "http://example.com",
-		XUIAPIToken: "token", XUIInboundID: 1, Active: true, Trial: true,
-	}}
+		XUIAPIToken: "token", XUIInboundID: 1, Active: true,}}
 	subService := service.NewSubscriptionService(
 		mockDB,
 		map[uint]interfaces.XUIClient{1: mockXUI},

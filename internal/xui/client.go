@@ -244,6 +244,36 @@ func (c *Client) AddClientWithID(ctx context.Context, inboundID int, email, clie
 	return result, errRetry
 }
 
+// AddTrialClient adds a trial client to a single source and returns the created client.
+func (c *Client) AddTrialClient(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*ClientConfig, error) {
+	if inboundID < 1 {
+		return nil, fmt.Errorf("invalid inbound ID: %d", inboundID)
+	}
+	if clientID == "" {
+		return nil, fmt.Errorf("client ID cannot be empty")
+	}
+	if subID == "" {
+		return nil, fmt.Errorf("subscription ID cannot be empty")
+	}
+
+	if resetDays < 0 {
+		resetDays = config.SubscriptionResetDay
+	}
+
+	flow, flowErr := c.getRequiredFlow(ctx, inboundID)
+	if flowErr != nil {
+		return nil, fmt.Errorf("failed to determine flow: %w", flowErr)
+	}
+
+	var result *ClientConfig
+	errRetry := RetryWithBackoff(ctx, config.XUIMaxRetries, config.XUIInitialRetryDelay, func() error {
+		var innerErr error
+		result, innerErr = c.doAddClientWithID(ctx, inboundID, email, clientID, subID, trafficBytes, expiryTime, resetDays, flow)
+		return innerErr
+	})
+	return result, errRetry
+}
+
 func (c *Client) doAddClientWithID(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int, flow string) (*ClientConfig, error) {
 	clientObj := map[string]interface{}{
 		"id":         clientID,

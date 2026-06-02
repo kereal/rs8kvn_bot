@@ -1123,7 +1123,7 @@ func TestService_GetReferralCount(t *testing.T) {
 			Status:     "active",
 			ExpiryTime: time.Now().Add(24 * time.Hour),
 			ReferredBy: referrerID,
-			IsTrial:    false,
+			PlanID: 0,
 		}
 		require.NoError(t, svc.db.Create(sub).Error)
 	}
@@ -1157,7 +1157,7 @@ func TestService_GetAllReferralCounts(t *testing.T) {
 			Status:     "active",
 			ExpiryTime: time.Now().Add(24 * time.Hour),
 			ReferredBy: referrerID,
-			IsTrial:    false,
+			PlanID: 0,
 		}
 		require.NoError(t, svc.db.Create(sub).Error)
 	}
@@ -1183,7 +1183,7 @@ func TestService_GetTotalTelegramIDCount_WithData(t *testing.T) {
 			SubscriptionID: fmt.Sprintf("sub-count-%d", i),
 			ExpiryTime:     time.Now().Add(24 * time.Hour),
 			Status:         "active",
-			IsTrial:        false,
+			PlanID: 0,
 		}
 		require.NoError(t, svc.db.Create(sub).Error)
 	}
@@ -1252,7 +1252,7 @@ func TestService_CleanupExpiredTrials(t *testing.T) {
 		TelegramID:     0,
 		ClientID:       "old-trial-client",
 		SubscriptionID: "old-trial-sub",
-		IsTrial:        true,
+		PlanID: 1,
 		Status:         "active",
 		ExpiryTime:     time.Now().Add(24 * time.Hour),
 		CreatedAt:      time.Now().Add(-48 * time.Hour),
@@ -1264,7 +1264,7 @@ func TestService_CleanupExpiredTrials(t *testing.T) {
 		TelegramID:     0,
 		ClientID:       "recent-trial-client",
 		SubscriptionID: "recent-trial-sub",
-		IsTrial:        true,
+		PlanID: 1,
 		Status:         "active",
 		ExpiryTime:     time.Now().Add(24 * time.Hour),
 		CreatedAt:      time.Now().Add(-1 * time.Hour),
@@ -1320,7 +1320,7 @@ func TestService_CleanupExpiredTrials_UsesSubInboundID(t *testing.T) {
 		TelegramID:     0,
 		ClientID:       "multi-inbound-client",
 		SubscriptionID: "multi-inbound-sub",
-		IsTrial:        true,
+		PlanID: 1,
 		Status:         "active",
 		ExpiryTime:     time.Now().Add(24 * time.Hour),
 		CreatedAt:      time.Now().Add(-48 * time.Hour),
@@ -1353,7 +1353,7 @@ func TestService_CreateTrialSubscription_Success(t *testing.T) {
 	assert.NotNil(t, sub)
 	assert.Equal(t, "sub-trial-abc", sub.SubscriptionID)
 	assert.Equal(t, "client-xyz", sub.ClientID)
-	assert.True(t, sub.IsTrial, "Should be marked as trial")
+	assert.Equal(t, uint(1), sub.PlanID, "Should be marked as trial")
 	assert.Equal(t, int64(0), sub.TelegramID, "Unbound trial should have telegram_id = 0")
 	assert.Equal(t, "INVITE123", sub.InviteCode)
 }
@@ -1449,7 +1449,7 @@ func TestService_GetSubscriptionBySubscriptionID_Trial(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.NotNil(t, found)
-	assert.True(t, found.IsTrial)
+	assert.True(t, found.PlanID == 1)
 }
 
 func TestService_GetTrialSubscriptionBySubID_Success(t *testing.T) {
@@ -1474,7 +1474,7 @@ func TestService_GetTrialSubscriptionBySubID_Success(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.NotNil(t, found)
-	assert.True(t, found.IsTrial)
+	assert.True(t, found.PlanID == 1)
 	assert.Equal(t, sub.ID, found.ID)
 }
 
@@ -1493,7 +1493,7 @@ func TestService_GetTrialSubscriptionBySubID_NonTrial(t *testing.T) {
 		SubscriptionID: "sub-regular",
 		ExpiryTime:     time.Now().Add(24 * time.Hour),
 		Status:         "active",
-		IsTrial:        false,
+		PlanID: 0,
 	}
 	err := svc.db.Create(origSub).Error
 	require.NoError(t, err)
@@ -1540,7 +1540,7 @@ func TestService_BindTrialSubscription_Success(t *testing.T) {
 	assert.NotNil(t, bound)
 	assert.Equal(t, int64(555555), bound.TelegramID)
 	assert.Equal(t, "bounduser", bound.Username)
-	assert.False(t, bound.IsTrial, "Should no longer be marked as trial after binding")
+	assert.Equal(t, uint(2), bound.PlanID, "Should be switched to free plan after binding")
 }
 
 func TestService_BindTrialSubscription_Concurrent(t *testing.T) {
