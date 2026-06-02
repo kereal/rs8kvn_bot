@@ -97,7 +97,7 @@ func (s *SubscriptionService) Create(ctx context.Context, chatID int64, username
 	var resetday int
 	if plan.Duration > 0 {
 		expiryTime = time.Now().Add(time.Duration(plan.Duration) * time.Hour)
-		resetday = 0
+		resetday = config.SubscriptionResetDay
 	} else {
 		expiryTime = time.Time{}
 		resetday = 0
