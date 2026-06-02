@@ -292,17 +292,30 @@ Migrations are applied automatically on startup. If migration fails, bot exits w
 
 | Version | Description |
 |---------|-------------|
-| `000_create_subscriptions.up.sql` | Initial subscriptions table |
+| `000_create_subscriptions.up.sql` | Initial subscriptions table (legacy schema) |
 | `001_replace_xuihost_with_subscription_id.up.sql` | Replaces `x_ui_host` column with `subscription_id` |
 | `002_add_invites_and_trials.up.sql` | Adds `invites` and `trial_requests` tables |
 | `003_add_referral_columns.up.sql` | Adds `invite_code`, `is_trial`, `referred_by` columns |
+| `004_add_unique_referrer_tg_id.up.sql` | Adds UNIQUE constraint on `invites.referrer_tg_id` (one canonical code per user) |
+| `005_cleanup_duplicate_invites.up.sql` | No-op placeholder after 004 dedup |
+| `006_create_sources.up.sql` | Creates `sources` table (3x-ui panel registry, `x_ui_*` columns) |
+| `007_create_plans.up.sql` | Creates `plans` table (free/trial with traffic_limit, duration) |
+| `008_create_plan_sources.up.sql` | Creates `plan_sources` M:N join |
+| `009_add_plan_id_to_subscriptions.up.sql` | Adds `plan_id` FK to subscriptions |
+| `010_remove_subscription_idx.up.sql` | Drops legacy index no longer needed |
+| `011_remove_subscription_columns.up.sql` | Drops `inbound_id`, `traffic_limit`, `subscription_url`, `is_trial`, `deleted_at` from subscriptions |
+
+**Schema after migration 011:**
+- `subscriptions`: `telegram_id`, `username`, `client_id`, `subscription_id`, `expiry_time`, `status`, `invite_code`, `plan_id`, `referred_by`, `created_at`, `updated_at`
+- New tables: `sources`, `plans`, `plan_sources` (see `doc/architecture.md` for full schema)
+- `is_trial` is now derived: `plan.name = 'trial'` (single source of truth)
 
 ### Adding a New Migration
 
 ```bash
-# Create migration files
-touch internal/database/migrations/004_add_new_column.up.sql
-touch internal/database/migrations/004_add_new_column.down.sql
+# Create migration files (next number is 012)
+touch internal/database/migrations/012_add_new_column.up.sql
+touch internal/database/migrations/012_add_new_column.down.sql
 
 # Write SQL in files, then rebuild:
 go build -o rs8kvn_bot ./cmd/bot
