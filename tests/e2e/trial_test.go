@@ -53,7 +53,7 @@ func TestE2E_TrialBind_AlreadyHasSubscription(t *testing.T) {
 		SubscriptionID: "existing-sub",
 		Status:         "active",
 	}
-	require.NoError(t, env.db.CreateSubscription(ctx, existingSub))
+	require.NoError(t, env.db.CreateSubscription(ctx, existingSub, ""))
 
 	trialSubID := "trial-xyz-789"
 	_, err := env.db.CreateTrialSubscription(ctx, "test_invite_code", trialSubID, "trial-client-id", time.Now().Add(24*time.Hour))

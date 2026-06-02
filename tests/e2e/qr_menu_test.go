@@ -25,7 +25,7 @@ func TestE2E_QRCodeGeneration(t *testing.T) {
 		SubscriptionID: "test-sub-id",
 		Status:         "active",
 	}
-	require.NoError(t, env.db.CreateSubscription(ctx, sub))
+	require.NoError(t, env.db.CreateSubscription(ctx, sub, ""))
 
 	resetMockBotAPI(env.botAPI)
 
@@ -84,7 +84,7 @@ func TestE2E_MenuHelp(t *testing.T) {
 		SubscriptionID: "test-sub-id",
 		Status:         "active",
 	}
-	require.NoError(t, env.db.CreateSubscription(ctx, sub))
+	require.NoError(t, env.db.CreateSubscription(ctx, sub, ""))
 
 	resetMockBotAPI(env.botAPI)
 
@@ -143,7 +143,7 @@ func TestE2E_BackToStart(t *testing.T) {
 		SubscriptionID: "test-sub-id",
 		Status:         "active",
 	}
-	require.NoError(t, env.db.CreateSubscription(ctx, sub))
+	require.NoError(t, env.db.CreateSubscription(ctx, sub, ""))
 
 	resetMockBotAPI(env.botAPI)
 

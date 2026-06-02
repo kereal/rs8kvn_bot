@@ -41,6 +41,9 @@ type SubscriptionService struct {
 type CreateResult struct {
 	Subscription    *database.Subscription
 	SubscriptionURL string
+	// ReferrerTGID is the resolved referrer (from inviteCode) when the subscription
+	// was created with a valid pending invite. 0 means no referral attribution.
+	ReferrerTGID int64
 }
 
 // XUIEmail returns an email suitable for use as XUI client email.
@@ -77,9 +80,11 @@ func (s *SubscriptionService) trialSources(ctx context.Context) ([]database.Sour
 	return s.db.GetSourcesByPlanName(ctx, database.TrialPlanName)
 }
 
-// Создание подписки
-// По умолчанию присваиваем free plan
-func (s *SubscriptionService) Create(ctx context.Context, chatID int64, username string) (*CreateResult, error) {
+// Create provisions a new free-plan subscription. inviteCode, when non-empty,
+// is resolved atomically inside the DB transaction and persisted in
+// sub.InviteCode / sub.ReferredBy. The resolved ReferrerTGID (0 if unset) is
+// returned in CreateResult so callers can update aggregate referral state.
+func (s *SubscriptionService) Create(ctx context.Context, chatID int64, username, inviteCode string) (*CreateResult, error) {
 
 	plan, err := s.db.GetPlanByName(ctx, database.FreePlanName)
 	if err != nil {
@@ -146,7 +151,7 @@ func (s *SubscriptionService) Create(ctx context.Context, chatID int64, username
 		Status:         "active",
 	}
 
-	if err := s.db.CreateSubscription(ctx, sub); err != nil {
+	if err := s.db.CreateSubscription(ctx, sub, inviteCode); err != nil {
 		s.deleteClientFromAllSources(ctx, email)
 		return nil, fmt.Errorf("create subscription: %w", err)
 	}
@@ -164,6 +169,7 @@ func (s *SubscriptionService) Create(ctx context.Context, chatID int64, username
 	return &CreateResult{
 		Subscription:    sub,
 		SubscriptionURL: subscriptionURL,
+		ReferrerTGID:    sub.ReferredBy,
 	}, nil
 }
 

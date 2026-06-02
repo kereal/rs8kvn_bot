@@ -22,7 +22,7 @@ type Logger interface {
 type SubscriptionRepository interface {
 	GetByTelegramID(ctx context.Context, telegramID int64) (*database.Subscription, error)
 	GetByID(ctx context.Context, id uint) (*database.Subscription, error)
-	CreateSubscription(ctx context.Context, sub *database.Subscription) error
+	CreateSubscription(ctx context.Context, sub *database.Subscription, inviteCode string) error
 	UpdateSubscription(ctx context.Context, sub *database.Subscription) error
 	DeleteSubscription(ctx context.Context, telegramID int64) error
 	GetLatestSubscriptions(ctx context.Context, limit int) ([]database.Subscription, error)

@@ -248,29 +248,30 @@ func (sh *SubscriptionHandler) createSubscription(ctx context.Context, chatID in
 		return fmt.Errorf("failed to show loading message")
 	}
 
+	// Capture the pending invite code under a brief lock, then release it
+	// before the (potentially slow) HTTP call into the XUI panel.
 	sh.h.pendingMu.Lock()
+	var inviteCode string
+	if p, ok := sh.h.pendingInvites[chatID]; ok && time.Now().Before(p.expiresAt) {
+		inviteCode = p.code
+	}
+	sh.h.pendingMu.Unlock()
 
-	result, err := sh.h.subscriptionService.Create(ctx, chatID, username)
+	result, err := sh.h.subscriptionService.Create(ctx, chatID, username, inviteCode)
 	if err != nil {
-		sh.h.pendingMu.Unlock()
 		sh.handleCreateError(ctx, chatID, messageID, username, err)
 		return fmt.Errorf("create subscription: %w", err)
 	}
 
+	// Consume the pending invite (best-effort). Always clear, regardless of
+	// whether the invite resolved to a referrer.
+	sh.h.pendingMu.Lock()
+	delete(sh.h.pendingInvites, chatID)
 	sh.h.pendingMu.Unlock()
 
-	sh.h.pendingMu.Lock()
-	if pending, ok := sh.h.pendingInvites[chatID]; ok {
-		if time.Now().Before(pending.expiresAt) {
-			invite, _ := sh.h.db.GetInviteByCode(ctx, pending.code)
-			if invite != nil && invite.ReferrerTGID > 0 {
-				result.Subscription.ReferredBy = invite.ReferrerTGID
-				sh.h.IncrementReferralCount(invite.ReferrerTGID)
-			}
-		}
-		delete(sh.h.pendingInvites, chatID)
+	if result.ReferrerTGID > 0 {
+		sh.h.IncrementReferralCount(result.ReferrerTGID)
 	}
-	sh.h.pendingMu.Unlock()
 
 	sh.h.cache.Set(chatID, result.Subscription)
 	if err := sh.h.notifyAdmin(ctx, username, chatID, result.SubscriptionURL); err != nil {

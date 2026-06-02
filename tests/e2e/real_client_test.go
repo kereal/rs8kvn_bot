@@ -26,7 +26,7 @@ func TestE2E_RealClient_FullSubscriptionLifecycle(t *testing.T) {
 
 	ctx := context.Background()
 
-	result, err := env.subService.Create(ctx, 12345, "testuser")
+	result, err := env.subService.Create(ctx, 12345, "testuser", "")
 	require.NoError(t, err, "Create subscription should succeed")
 	require.NotNil(t, result)
 	assert.NotEmpty(t, result.SubscriptionURL)
@@ -69,7 +69,7 @@ func TestE2E_RealClient_AutoReloginOn401(t *testing.T) {
 	env.xuiClient.TestForceSessionExpiry()
 
 	// Session expiry is a no-op; create should still succeed via Bearer token.
-	result, err := env.subService.Create(ctx, 22345, "relogin_user")
+	result, err := env.subService.Create(ctx, 22345, "relogin_user", "")
 	require.NoError(t, err, "Create should succeed (Bearer token auth)")
 	require.NotNil(t, result)
 }
@@ -84,7 +84,7 @@ func TestE2E_RealClient_SessionVerificationSkipsLogin(t *testing.T) {
 
 	env.xuiClient.TestForceSessionExpiry()
 
-	result, err := env.subService.Create(ctx, 32345, "verify_user")
+	result, err := env.subService.Create(ctx, 32345, "verify_user", "")
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	// Bearer token auth: Login and TestForceSessionExpiry are no-ops.
@@ -131,7 +131,7 @@ func TestE2E_RealClient_DNSErrorFastFail(t *testing.T) {
 	defer cancel()
 
 	start := time.Now()
-	_, err = subService.Create(ctx, 42345, "dns_fail_user")
+	_, err = subService.Create(ctx, 42345, "dns_fail_user", "")
 	elapsed := time.Since(start)
 
 	require.Error(t, err)
@@ -156,7 +156,7 @@ func TestE2E_RealClient_ConcurrentLoginDedup(t *testing.T) {
 			defer wg.Done()
 			ctx2, cancel := context.WithTimeout(ctx, 15*time.Second)
 			defer cancel()
-			_, results[idx] = env.subService.Create(ctx2, int64(50000+idx), fmt.Sprintf("concurrent_user_%d", idx))
+			_, results[idx] = env.subService.Create(ctx2, int64(50000+idx), fmt.Sprintf("concurrent_user_%d", idx), "")
 		}(i)
 	}
 
@@ -207,7 +207,7 @@ func TestE2E_RealClient_AutoReloginViaCircuitBreaker(t *testing.T) {
 	env.xuiClient.TestForceSessionExpiry()
 
 	// Session expiry is a no-op; create should succeed via Bearer token.
-	result, err := env.subService.Create(ctx, 62345, "cb_relogin_user")
+	result, err := env.subService.Create(ctx, 62345, "cb_relogin_user", "")
 	require.NoError(t, err, "Create should succeed (Bearer token auth)")
 	require.NotNil(t, result)
 }
@@ -222,13 +222,13 @@ func TestE2E_RealClient_MultipleOperationsNoRelogin(t *testing.T) {
 
 	// Bearer token auth: Login is a no-op. Multiple Create() calls should
 	// each succeed independently without any session or login state.
-	result1, err := env.subService.Create(ctx, 72345, "multi_user1")
+	result1, err := env.subService.Create(ctx, 72345, "multi_user1", "")
 	require.NoError(t, err)
 
-	result2, err := env.subService.Create(ctx, 72346, "multi_user2")
+	result2, err := env.subService.Create(ctx, 72346, "multi_user2", "")
 	require.NoError(t, err)
 
-	result3, err := env.subService.Create(ctx, 72347, "multi_user3")
+	result3, err := env.subService.Create(ctx, 72347, "multi_user3", "")
 	require.NoError(t, err)
 
 	require.NotNil(t, result1)

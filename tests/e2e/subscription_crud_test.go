@@ -312,9 +312,9 @@ func TestE2E_Subscription_ReplacesOldActive(t *testing.T) {
 		SubscriptionID: "old-sub-id",
 		Status:         "active",
 	}
-	require.NoError(t, env.db.CreateSubscription(ctx, oldSub))
+	require.NoError(t, env.db.CreateSubscription(ctx, oldSub, ""))
 
-	result, err := env.subService.Create(ctx, env.chatID, env.username)
+	result, err := env.subService.Create(ctx, env.chatID, env.username, "")
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
@@ -349,7 +349,7 @@ func TestE2E_CreateSubscription_RevokesOnlyActive(t *testing.T) {
 		SubscriptionID: "old-sub-id",
 		Status:         "expired",
 	}
-	require.NoError(t, env.db.CreateSubscription(ctx, oldSub))
+	require.NoError(t, env.db.CreateSubscription(ctx, oldSub, ""))
 
 	resetMockBotAPI(env.botAPI)
 	env.xui.AddClientWithIDCalled = false
@@ -391,7 +391,7 @@ func TestE2E_Service_Create_XUIFailure_NoDBRecord(t *testing.T) {
 		return nil, fmt.Errorf("xui add client: connection refused")
 	}
 
-	_, err := env.subService.Create(ctx, env.chatID, env.username)
+	_, err := env.subService.Create(ctx, env.chatID, env.username, "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "connection refused")
 
@@ -425,14 +425,14 @@ func TestE2E_Service_Create_RollbackXUIOnDBError(t *testing.T) {
 		return nil
 	}
 
-	_, err := env.subService.Create(ctx, env.chatID, env.username)
+	_, err := env.subService.Create(ctx, env.chatID, env.username, "")
 	require.NoError(t, err)
 
 	sub1, err := env.db.GetByTelegramID(ctx, env.chatID)
 	require.NoError(t, err)
 	assert.Equal(t, "active", sub1.Status)
 
-	_, err = env.subService.Create(ctx, env.chatID, env.username)
+	_, err = env.subService.Create(ctx, env.chatID, env.username, "")
 	require.NoError(t, err)
 
 	sub2, err := env.db.GetByTelegramID(ctx, env.chatID)
@@ -459,9 +459,9 @@ func TestE2E_Service_Create_RollbackFailure_ReturnsError(t *testing.T) {
 		return fmt.Errorf("rollback failed: connection refused")
 	}
 
-	_, err := env.subService.Create(ctx, env.chatID, env.username)
+	_, err := env.subService.Create(ctx, env.chatID, env.username, "")
 	require.NoError(t, err)
 
-	_, err = env.subService.Create(ctx, env.chatID, env.username)
+	_, err = env.subService.Create(ctx, env.chatID, env.username, "")
 	require.NoError(t, err, "Second creation should succeed (rollback not triggered when DB succeeds)")
 }

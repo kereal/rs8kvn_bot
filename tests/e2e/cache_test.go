@@ -26,7 +26,7 @@ func TestE2E_Cache_SetAndGet(t *testing.T) {
 		SubscriptionID: "sub-123",
 		Status:         "active",
 	}
-	require.NoError(t, env.db.CreateSubscription(ctx, sub))
+	require.NoError(t, env.db.CreateSubscription(ctx, sub, ""))
 
 	fetched, err := env.db.GetByTelegramID(ctx, chatID)
 	require.NoError(t, err)
@@ -60,7 +60,7 @@ func TestE2E_Cache_DbHitOnCacheMiss(t *testing.T) {
 		SubscriptionID: "sub-789",
 		Status:         "active",
 	}
-	require.NoError(t, env.db.CreateSubscription(ctx, sub))
+	require.NoError(t, env.db.CreateSubscription(ctx, sub, ""))
 
 	fetched, err := env.db.GetByTelegramID(ctx, chatID)
 	require.NoError(t, err)
@@ -74,7 +74,7 @@ func TestE2E_Cache_ExpiredEntry(t *testing.T) {
 
 	ctx := context.Background()
 
-	_, err := env.subService.Create(ctx, env.chatID, env.username)
+	_, err := env.subService.Create(ctx, env.chatID, env.username, "")
 	require.NoError(t, err)
 
 	time.Sleep(20 * time.Millisecond)
@@ -91,7 +91,7 @@ func TestE2E_Cache_CacheInvalidation(t *testing.T) {
 
 	ctx := context.Background()
 
-	_, err := env.subService.Create(ctx, env.chatID, env.username)
+	_, err := env.subService.Create(ctx, env.chatID, env.username, "")
 	require.NoError(t, err)
 
 	sub1, err := env.db.GetByTelegramID(ctx, env.chatID)

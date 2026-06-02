@@ -134,7 +134,7 @@ func TestCreateSubscription_Success(t *testing.T) {
 		return clientConfig, nil
 	}
 
-	mockDB.CreateSubscriptionFunc = func(ctx context.Context, sub *database.Subscription) error {
+	mockDB.CreateSubscriptionFunc = func(ctx context.Context, sub *database.Subscription, inviteCode string) error {
 		assert.Equal(t, int64(123456), sub.TelegramID)
 		assert.Equal(t, "testuser", sub.Username)
 		assert.Equal(t, "client-uuid-123", sub.ClientID)
@@ -278,7 +278,7 @@ func TestCreateSubscription_DatabaseFailure_RollbackSuccess(t *testing.T) {
 		return clientConfig, nil
 	}
 
-	mockDB.CreateSubscriptionFunc = func(ctx context.Context, sub *database.Subscription) error {
+	mockDB.CreateSubscriptionFunc = func(ctx context.Context, sub *database.Subscription, inviteCode string) error {
 		return errors.New("database error")
 	}
 
@@ -322,7 +322,7 @@ func TestCreateSubscription_DatabaseFailure_RollbackFailure(t *testing.T) {
 		return clientConfig, nil
 	}
 
-	mockDB.CreateSubscriptionFunc = func(ctx context.Context, sub *database.Subscription) error {
+	mockDB.CreateSubscriptionFunc = func(ctx context.Context, sub *database.Subscription, inviteCode string) error {
 		return errors.New("database error")
 	}
 
@@ -363,7 +363,7 @@ func TestCreateSubscription_CacheUpdate(t *testing.T) {
 	}
 
 	var savedSub *database.Subscription
-	mockDB.CreateSubscriptionFunc = func(ctx context.Context, sub *database.Subscription) error {
+	mockDB.CreateSubscriptionFunc = func(ctx context.Context, sub *database.Subscription, inviteCode string) error {
 		savedSub = sub
 		return nil
 	}
@@ -477,7 +477,7 @@ func TestHandleCreateSubscription_ExpiredSubscription(t *testing.T) {
 		return clientConfig, nil
 	}
 
-	mockDB.CreateSubscriptionFunc = func(ctx context.Context, sub *database.Subscription) error {
+	mockDB.CreateSubscriptionFunc = func(ctx context.Context, sub *database.Subscription, inviteCode string) error {
 		return nil
 	}
 
@@ -541,7 +541,7 @@ func TestHandleCreateSubscription_NoSubscription(t *testing.T) {
 		return clientConfig, nil
 	}
 
-	mockDB.CreateSubscriptionFunc = func(ctx context.Context, sub *database.Subscription) error {
+	mockDB.CreateSubscriptionFunc = func(ctx context.Context, sub *database.Subscription, inviteCode string) error {
 		return nil
 	}
 
@@ -1041,7 +1041,7 @@ func TestHandleCreateSubscription_ZeroMessageID(t *testing.T) {
 		return clientConfig, nil
 	}
 
-	mockDB.CreateSubscriptionFunc = func(ctx context.Context, sub *database.Subscription) error {
+	mockDB.CreateSubscriptionFunc = func(ctx context.Context, sub *database.Subscription, inviteCode string) error {
 		return nil
 	}
 
@@ -1373,9 +1373,19 @@ func TestCreateSubscription_WithPendingInvite(t *testing.T) {
 		return clientConfig, nil
 	}
 
+	// Simulate production DB behavior: resolve invite → set InviteCode + ReferredBy.
+	// This is what real db.Service.CreateSubscription does inside the tx.
 	var savedSub *database.Subscription
-	mockDB.CreateSubscriptionFunc = func(ctx context.Context, sub *database.Subscription) error {
-		savedSub = sub
+	var gotInviteCode string
+	mockDB.CreateSubscriptionFunc = func(ctx context.Context, sub *database.Subscription, inviteCode string) error {
+		gotInviteCode = inviteCode
+		if inviteCode == "ABC123" {
+			sub.InviteCode = inviteCode
+			sub.ReferredBy = 999999
+		}
+		// Store a value copy so assertions see a stable snapshot.
+		stored := *sub
+		savedSub = &stored
 		return nil
 	}
 
@@ -1387,22 +1397,21 @@ func TestCreateSubscription_WithPendingInvite(t *testing.T) {
 	}
 	handler.pendingMu.Unlock()
 
-	mockDB.GetInviteByCodeFunc = func(ctx context.Context, code string) (*database.Invite, error) {
-		return &database.Invite{
-			Code:         inviteCode,
-			ReferrerTGID: 999999,
-		}, nil
-	}
-
 	ctx := context.Background()
-	handler.createSubscription(ctx, 123456, "testuser", 1)
+	result := handler.createSubscription(ctx, 123456, "testuser", 1)
 
-	assert.Equal(t, int64(999999), savedSub.ReferredBy, "ReferredBy should be set from pending invite")
+	require.NoError(t, result)
+	assert.Equal(t, "ABC123", gotInviteCode, "handler must forward inviteCode to db.CreateSubscription")
+	require.NotNil(t, savedSub)
+	assert.Equal(t, "ABC123", savedSub.InviteCode, "InviteCode must be persisted on the sub")
+	assert.Equal(t, int64(999999), savedSub.ReferredBy, "ReferredBy must be persisted on the sub")
 
+	// handler must consume the pending invite and bump the referral cache.
 	handler.pendingMu.Lock()
 	_, exists := handler.pendingInvites[123456]
 	handler.pendingMu.Unlock()
 	assert.False(t, exists, "Pending invite should be removed after use")
+	assert.Equal(t, int64(1), handler.GetReferralCount(999999), "IncrementReferralCount should fire when invite resolved")
 }
 
 func TestCreateSubscription_WithExpiredPendingInvite(t *testing.T) {
@@ -1431,9 +1440,9 @@ func TestCreateSubscription_WithExpiredPendingInvite(t *testing.T) {
 		return clientConfig, nil
 	}
 
-	var savedSub *database.Subscription
-	mockDB.CreateSubscriptionFunc = func(ctx context.Context, sub *database.Subscription) error {
-		savedSub = sub
+	var gotInviteCode string = "NON_EMPTY_DEFAULT"
+	mockDB.CreateSubscriptionFunc = func(ctx context.Context, sub *database.Subscription, inviteCode string) error {
+		gotInviteCode = inviteCode
 		return nil
 	}
 
@@ -1447,7 +1456,7 @@ func TestCreateSubscription_WithExpiredPendingInvite(t *testing.T) {
 	ctx := context.Background()
 	handler.createSubscription(ctx, 123456, "testuser", 1)
 
-	assert.Equal(t, int64(0), savedSub.ReferredBy, "ReferredBy should be zero for expired pending invite")
+	assert.Equal(t, "", gotInviteCode, "expired pending invite must not be forwarded to db")
 }
 
 func TestHandleBackToInvite_RequestError(t *testing.T) {

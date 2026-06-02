@@ -198,7 +198,7 @@ func CreateTestSubscriptionInDB(t *testing.T, db *database.Service, chatID int64
 		Status:         status,
 	}
 
-	err = db.CreateSubscription(context.Background(), sub)
+	err = db.CreateSubscription(context.Background(), sub, "")
 	if err != nil {
 		t.Fatalf("Failed to create test subscription: %v", err)
 	}
@@ -281,7 +281,7 @@ func TestSubscriptionFlow_RevokeOldSubscription(t *testing.T) {
 		SubscriptionID: "testuser2",
 		ExpiryTime:     time.Now().Add(30 * 24 * time.Hour),
 		Status:         "active",
-	})
+	}, "")
 	if err != nil {
 		t.Fatalf("Failed to create new subscription: %v", err)
 	}

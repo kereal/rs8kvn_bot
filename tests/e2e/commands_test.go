@@ -52,7 +52,7 @@ func TestE2E_StartCommand_WithSubscription(t *testing.T) {
 		SubscriptionID: "test-sub-id",
 		Status:         "active",
 	}
-	require.NoError(t, env.db.CreateSubscription(ctx, sub))
+	require.NoError(t, env.db.CreateSubscription(ctx, sub, ""))
 
 	resetMockBotAPI(env.botAPI)
 
@@ -85,7 +85,7 @@ func TestE2E_MySubscription(t *testing.T) {
 		SubscriptionID: "test-sub-id",
 		Status:         "active",
 	}
-	require.NoError(t, env.db.CreateSubscription(ctx, sub))
+	require.NoError(t, env.db.CreateSubscription(ctx, sub, ""))
 
 	resetMockBotAPI(env.botAPI)
 

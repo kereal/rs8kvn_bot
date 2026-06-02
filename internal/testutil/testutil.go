@@ -57,7 +57,7 @@ type MockDatabaseService struct {
 	Subscriptions                       map[int64]*database.Subscription
 	PingFunc                            func(ctx context.Context) error
 	GetByTelegramIDFunc                 func(ctx context.Context, telegramID int64) (*database.Subscription, error)
-	CreateSubscriptionFunc              func(ctx context.Context, sub *database.Subscription) error
+	CreateSubscriptionFunc              func(ctx context.Context, sub *database.Subscription, inviteCode string) error
 	UpdateSubscriptionFunc              func(ctx context.Context, sub *database.Subscription) error
 	DeleteSubscriptionFunc              func(ctx context.Context, telegramID int64) error
 	GetLatestSubscriptionsFunc          func(ctx context.Context, limit int) ([]database.Subscription, error)
@@ -127,9 +127,9 @@ func (m *MockDatabaseService) GetByID(ctx context.Context, id uint) (*database.S
 	return nil, gorm.ErrRecordNotFound
 }
 
-func (m *MockDatabaseService) CreateSubscription(ctx context.Context, sub *database.Subscription) error {
+func (m *MockDatabaseService) CreateSubscription(ctx context.Context, sub *database.Subscription, inviteCode string) error {
 	if m.CreateSubscriptionFunc != nil {
-		return m.CreateSubscriptionFunc(ctx, sub)
+		return m.CreateSubscriptionFunc(ctx, sub, inviteCode)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -137,7 +137,9 @@ func (m *MockDatabaseService) CreateSubscription(ctx context.Context, sub *datab
 		m.Subscriptions = make(map[int64]*database.Subscription)
 	}
 	if sub.TelegramID != 0 {
-		m.Subscriptions[sub.TelegramID] = sub
+		// Deep-copy so test assertions don't observe post-call mutations.
+		stored := *sub
+		m.Subscriptions[sub.TelegramID] = &stored
 	}
 	return nil
 }
