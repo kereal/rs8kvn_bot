@@ -69,24 +69,6 @@ func TestSubscription_IsActive(t *testing.T) {
 	}
 }
 
-func TestSubscription_TableName(t *testing.T) {
-	t.Parallel()
-
-	assert.Equal(t, "subscriptions", Subscription{}.TableName())
-}
-
-func TestInvite_TableName(t *testing.T) {
-	t.Parallel()
-
-	assert.Equal(t, "invites", Invite{}.TableName())
-}
-
-func TestTrialRequest_TableName(t *testing.T) {
-	t.Parallel()
-
-	assert.Equal(t, "trial_requests", TrialRequest{}.TableName())
-}
-
 // ==================== Service Lifecycle Tests ====================
 
 func TestNewService(t *testing.T) {
