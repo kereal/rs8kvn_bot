@@ -72,18 +72,30 @@ func (s *SubscriptionService) activeSources() []database.Source {
 	return result
 }
 
-func (s *SubscriptionService) trialSources() []database.Source {
-	var result []database.Source
-	for _, src := range s.sources {
-		if src.Trial && src.Active && src.XUIHost != "" {
-			result = append(result, src)
-		}
-	}
-	return result
+func (s *SubscriptionService) trialSources(ctx context.Context) ([]database.Source, error) {
+	return s.db.GetSourcesByPlanName(ctx, database.TrialPlanName)
 }
 
+// Создание подписки
+// По умолчанию присваиваем free plan
 func (s *SubscriptionService) Create(ctx context.Context, chatID int64, username string) (*CreateResult, error) {
-	trafficBytes := int64(s.cfg.TrafficLimitGB) * 1024 * 1024 * 1024
+
+	plan, err := s.db.GetPlanByName(ctx, database.FreePlanName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve free plan: %w", err)
+	}
+
+	trafficBytes := plan.TrafficLimit
+
+	var expiryTime time.Time
+	var resetday int
+	if plan.Duration > 0 {
+		expiryTime = time.Now().Add(time.Duration(plan.Duration) * time.Hour)
+		resetday = 0
+	} else {
+		expiryTime = time.Now().Add(time.Duration(config.SubscriptionResetDay) * 24 * time.Hour)
+		resetday = config.SubscriptionResetDay
+	}
 
 	clientID, err := utils.GenerateUUID()
 	if err != nil {
@@ -94,7 +106,6 @@ func (s *SubscriptionService) Create(ctx context.Context, chatID int64, username
 		return nil, fmt.Errorf("generate sub id: %w", err)
 	}
 
-	expiryTime := time.Now().Add(time.Duration(config.SubscriptionResetDay) * 24 * time.Hour)
 	email := XUIEmail(username, chatID)
 
 	var firstClient *xui.ClientConfig
@@ -105,7 +116,7 @@ func (s *SubscriptionService) Create(ctx context.Context, chatID int64, username
 		if !ok {
 			continue
 		}
-		c, err := client.AddClientWithID(ctx, src.XUIInboundID, email, clientID, subID, trafficBytes, expiryTime, config.SubscriptionResetDay)
+		c, err := client.AddClientWithID(ctx, src.XUIInboundID, email, clientID, subID, trafficBytes, expiryTime, resetday)
 		if err != nil {
 			if firstErr == nil {
 				firstErr = err
@@ -130,6 +141,7 @@ func (s *SubscriptionService) Create(ctx context.Context, chatID int64, username
 		ClientID:       firstClient.ID,
 		SubscriptionID: firstClient.SubID,
 		ExpiryTime:     expiryTime,
+		PlanID:         plan.ID,
 		Status:         "active",
 	}
 
@@ -355,8 +367,17 @@ func (s *SubscriptionService) CreateTrial(ctx context.Context, inviteCode string
 	expiryTime := time.Now().Add(time.Duration(s.cfg.TrialDurationHours) * time.Hour)
 	email := "trial_" + subID
 
+	trialSources, err := s.trialSources(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("load trial sources: %w", err)
+	}
+	sources := trialSources
+	if len(sources) == 0 {
+		sources = s.activeSources()
+	}
+
 	var firstErr error
-	sources := s.trialSources()
+	var anySuccess bool
 	for _, src := range sources {
 		client, ok := s.xuiClients[src.ID]
 		if !ok {
@@ -370,10 +391,12 @@ func (s *SubscriptionService) CreateTrial(ctx context.Context, inviteCode string
 			logger.Warn("failed to add trial client on source",
 				zap.Uint("source_id", src.ID),
 				zap.Error(err))
+		} else {
+			anySuccess = true
 		}
 	}
 
-	if firstErr != nil {
+	if !anySuccess && firstErr != nil {
 		return nil, fmt.Errorf("failed to create trial client on any source: %w", firstErr)
 	}
 
@@ -416,7 +439,18 @@ func (s *SubscriptionService) BindTrial(ctx context.Context, subscriptionID stri
 		return nil, fmt.Errorf("bind trial subscription: %w", err)
 	}
 
-	trafficBytes := int64(s.cfg.TrafficLimitGB) * 1024 * 1024 * 1024
+	freePlan, err := s.db.GetPlanByName(ctx, database.FreePlanName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve free plan: %w", err)
+	}
+	trafficBytes := freePlan.TrafficLimit
+
+	var expiryTime time.Time
+	if freePlan.Duration > 0 {
+		expiryTime = time.Now().Add(time.Duration(freePlan.Duration) * time.Hour)
+	} else {
+		expiryTime = time.UnixMilli(0)
+	}
 
 	var comment string
 	if invite, err := s.db.GetInviteByCode(ctx, sub.InviteCode); err == nil {
@@ -428,12 +462,16 @@ func (s *SubscriptionService) BindTrial(ctx context.Context, subscriptionID stri
 	currentEmail := "trial_" + subscriptionID
 	email := XUIEmail(username, chatID)
 
-	for _, src := range s.trialSources() {
+	sources, err := s.trialSources(ctx)
+	if err != nil {
+		return sub, fmt.Errorf("load trial sources: %w", err)
+	}
+	for _, src := range sources {
 		client, ok := s.xuiClients[src.ID]
 		if !ok {
 			continue
 		}
-		if err := client.UpdateClient(ctx, src.XUIInboundID, currentEmail, sub.ClientID, email, sub.SubscriptionID, trafficBytes, time.UnixMilli(0), chatID, comment); err != nil {
+		if err := client.UpdateClient(ctx, src.XUIInboundID, currentEmail, sub.ClientID, email, sub.SubscriptionID, trafficBytes, expiryTime, chatID, comment); err != nil {
 			logger.Warn("UpdateClient failed on trial source",
 				zap.Uint("source_id", src.ID),
 				zap.Error(err))
@@ -496,7 +534,7 @@ func (s *SubscriptionService) ReconcileOrphanedClients(ctx context.Context) (int
 		}
 
 		var xuiEmail string
-		if sub.IsTrial || sub.TelegramID == 0 {
+		if sub.TelegramID == 0 {
 			if sub.SubscriptionID == "" {
 				continue
 			}
@@ -508,7 +546,6 @@ func (s *SubscriptionService) ReconcileOrphanedClients(ctx context.Context) (int
 			continue
 		}
 
-		// Check all sources — subscription is orphaned only if client is not found on EVERY source
 		notFoundOnAll := true
 		for _, src := range s.activeSources() {
 			client, ok := s.xuiClients[src.ID]
@@ -520,12 +557,9 @@ func (s *SubscriptionService) ReconcileOrphanedClients(ctx context.Context) (int
 				notFoundOnAll = false
 				break
 			}
-			// Prefer sentinel error matching from xui client when possible
 			if errors.Is(err, xui.ErrClientNotFound) {
-				// client not found on this source — continue checking others
 				continue
 			}
-			// Otherwise if error is non-retryable or unexpected, skip marking as notFoundOnAll and log
 			errMsg := strings.ToLower(err.Error())
 			if !strings.Contains(errMsg, "client not found") {
 				notFoundOnAll = false
@@ -534,7 +568,6 @@ func (s *SubscriptionService) ReconcileOrphanedClients(ctx context.Context) (int
 					zap.Int64("telegram_id", sub.TelegramID))
 				break
 			}
-
 		}
 
 		if notFoundOnAll {
@@ -543,8 +576,7 @@ func (s *SubscriptionService) ReconcileOrphanedClients(ctx context.Context) (int
 					zap.Error(delErr),
 					zap.Uint("id", sub.ID),
 					zap.Int64("telegram_id", sub.TelegramID),
-					zap.String("subscription_id", sub.SubscriptionID),
-					zap.Bool("is_trial", sub.IsTrial))
+					zap.String("subscription_id", sub.SubscriptionID))
 			} else {
 				removed++
 				logger.Info("Removed orphaned subscription (XUI client missing on all sources)",
@@ -552,7 +584,7 @@ func (s *SubscriptionService) ReconcileOrphanedClients(ctx context.Context) (int
 					zap.Int64("telegram_id", sub.TelegramID),
 					zap.String("username", sub.Username),
 					zap.String("subscription_id", sub.SubscriptionID))
-				if s.invalidate != nil && !sub.IsTrial && sub.TelegramID != 0 {
+				if s.invalidate != nil && sub.TelegramID != 0 {
 					s.invalidate(sub.TelegramID)
 				}
 				metrics.OrphanedClientsRemovedTotal.Inc()

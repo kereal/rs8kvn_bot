@@ -41,7 +41,7 @@ func TestSubscriptionService_Create_Success(t *testing.T) {
 		},
 	}
 	sources := []database.Source{
-		{ID: 1, Active: true, XUIHost: "http://localhost:2053", XUIInboundID: 1},
+		{ID: 1, Active: true,  XUIHost: "http://localhost:2053", XUIInboundID: 1},
 	}
 	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
 
@@ -68,7 +68,7 @@ func TestSubscriptionService_Create_XUIError(t *testing.T) {
 		},
 	}
 	sources := []database.Source{
-		{ID: 1, Active: true, XUIHost: "http://localhost:2053", XUIInboundID: 1},
+		{ID: 1, Active: true,  XUIHost: "http://localhost:2053", XUIInboundID: 1},
 	}
 	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
 
@@ -104,7 +104,7 @@ func TestSubscriptionService_Create_DBError_RollbackSuccess(t *testing.T) {
 		},
 	}
 	sources := []database.Source{
-		{ID: 1, Active: true, XUIHost: "http://localhost:2053", XUIInboundID: 1},
+		{ID: 1, Active: true,  XUIHost: "http://localhost:2053", XUIInboundID: 1},
 	}
 	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
 
@@ -138,7 +138,7 @@ func TestSubscriptionService_Create_DBError_RollbackFailed(t *testing.T) {
 		},
 	}
 	sources := []database.Source{
-		{ID: 1, Active: true, XUIHost: "http://localhost:2053", XUIInboundID: 1},
+		{ID: 1, Active: true,  XUIHost: "http://localhost:2053", XUIInboundID: 1},
 	}
 	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
 
@@ -219,7 +219,7 @@ func TestSubscriptionService_Delete_Success(t *testing.T) {
 		},
 	}
 	sources := []database.Source{
-		{ID: 1, Active: true, XUIHost: "http://localhost:2053", XUIInboundID: 1},
+		{ID: 1, Active: true,  XUIHost: "http://localhost:2053", XUIInboundID: 1},
 	}
 	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
 
@@ -274,7 +274,7 @@ func TestSubscriptionService_Delete_XUIError(t *testing.T) {
 		},
 	}
 	sources := []database.Source{
-		{ID: 1, Active: true, XUIHost: "http://localhost:2053", XUIInboundID: 1},
+		{ID: 1, Active: true,  XUIHost: "http://localhost:2053", XUIInboundID: 1},
 	}
 	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
 
@@ -342,7 +342,7 @@ func TestSubscriptionService_Delete_UsesCorrectEmail(t *testing.T) {
 		},
 	}
 	sources := []database.Source{
-		{ID: 1, Active: true, XUIHost: "http://localhost:2053", XUIInboundID: 1},
+		{ID: 1, Active: true,  XUIHost: "http://localhost:2053", XUIInboundID: 1},
 	}
 	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
 
@@ -381,7 +381,7 @@ func TestSubscriptionService_Delete_FallsBackToTgIdEmail(t *testing.T) {
 		},
 	}
 	sources := []database.Source{
-		{ID: 1, Active: true, XUIHost: "http://localhost:2053", XUIInboundID: 1},
+		{ID: 1, Active: true,  XUIHost: "http://localhost:2053", XUIInboundID: 1},
 	}
 	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
 
@@ -440,7 +440,7 @@ func TestSubscriptionService_GetWithTraffic_Success(t *testing.T) {
 		},
 	}
 	sources := []database.Source{
-		{ID: 1, Active: true, XUIHost: "http://localhost:2053", XUIInboundID: 1},
+		{ID: 1, Active: true,  XUIHost: "http://localhost:2053", XUIInboundID: 1},
 	}
 	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
 
@@ -478,7 +478,7 @@ func TestSubscriptionService_GetWithTraffic_XUIErrorFallback(t *testing.T) {
 		},
 	}
 	sources := []database.Source{
-		{ID: 1, Active: true, XUIHost: "http://localhost:2053", XUIInboundID: 1},
+		{ID: 1, Active: true,  XUIHost: "http://localhost:2053", XUIInboundID: 1},
 	}
 	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
 
@@ -505,7 +505,7 @@ func TestSubscriptionService_CreateTrial_Success(t *testing.T) {
 		},
 	}
 	sources := []database.Source{
-		{ID: 1, Active: true, Trial: true, XUIHost: "http://localhost:2053", XUIInboundID: 1},
+		{ID: 1, Active: true,  XUIHost: "http://localhost:2053", XUIInboundID: 1},
 	}
 	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
 
@@ -525,14 +525,24 @@ func TestSubscriptionService_CreateTrial_XUIError(t *testing.T) {
 		TrialDurationHours: 3,
 	}
 
-	db := &testutil.MockDatabaseService{}
+	db := &testutil.MockDatabaseService{
+		GetPlanByNameFunc: func(ctx context.Context, name string) (*database.Plan, error) {
+			return &database.Plan{ID: 1, Name: "trial", DevicesLimit: 1, TrafficLimit: 1073741824, Duration: 3}, nil
+		},
+		GetSourcesByPlanNameFunc: func(ctx context.Context, planName string) ([]database.Source, error) {
+			return []database.Source{{ID: 1, Active: true,  XUIHost: "http://localhost:2053", XUIInboundID: 1}}, nil
+		},
+		CreateTrialSubscriptionFunc: func(ctx context.Context, inviteCode, subscriptionID, clientID string, expiryTime time.Time) (*database.Subscription, error) {
+			return &database.Subscription{InviteCode: inviteCode, SubscriptionID: subscriptionID, ClientID: clientID}, nil
+		},
+	}
 	xuiClient := &testutil.MockXUIClient{
 		AddClientWithIDFunc: func(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
 			return nil, errors.New("xui error")
 		},
 	}
 	sources := []database.Source{
-		{ID: 1, Active: true, Trial: true, XUIHost: "http://localhost:2053", XUIInboundID: 1},
+		{ID: 1, Active: true,  XUIHost: "http://localhost:2053", XUIInboundID: 1},
 	}
 	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
 
@@ -568,7 +578,7 @@ func TestSubscriptionService_CreateTrial_DBError(t *testing.T) {
 		},
 	}
 	sources := []database.Source{
-		{ID: 1, Active: true, Trial: true, XUIHost: "http://localhost:2053", XUIInboundID: 1},
+		{ID: 1, Active: true,  XUIHost: "http://localhost:2053", XUIInboundID: 1},
 	}
 	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
 
@@ -586,7 +596,7 @@ func TestSubscriptionService_ReconcileOrphanedClients_RemovesMissing(t *testing.
 	cfg := &config.Config{}
 
 	normal := &database.Subscription{ID: 10, TelegramID: 100, Username: "realuser", Status: "active"}
-	trial := &database.Subscription{ID: 20, TelegramID: 0, SubscriptionID: "orphan123", Status: "active", IsTrial: true}
+	trial := &database.Subscription{ID: 20, TelegramID: 0, SubscriptionID: "orphan123", Status: "active", PlanID: 1}
 	good := &database.Subscription{ID: 30, TelegramID: 300, Username: "gooduser", Status: "active"}
 	inactive := &database.Subscription{ID: 40, TelegramID: 400, Username: "bad", Status: "revoked"}
 

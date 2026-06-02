@@ -150,8 +150,8 @@ func main() {
 	// Seed default source from env vars if sources table is empty
 	seedCtx, seedCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	isEmpty, err := dbService.IsSourcesEmpty(seedCtx)
-	seedCancel()
 	if err != nil {
+		seedCancel()
 		logger.Fatal("Failed to check sources table", zap.Error(err))
 	}
 	if isEmpty {
@@ -169,10 +169,15 @@ func main() {
 			defaultSubURL = strings.TrimRight(xuiHost, "/") + "/sub/"
 		}
 		if err := dbService.SeedDefaultSource(seedCtx, "default", xuiHost, xuiAPIToken, xuiInboundID, defaultSubURL); err != nil {
+			seedCancel()
 			logger.Fatal("Failed to seed default source", zap.Error(err))
 		}
+		seedCancel()
 		logger.Info("Default source seeded", zap.String("host", xuiHost))
+	} else {
+		seedCancel()
 	}
+	seedCancel()
 
 	// Load sources and create XUI clients
 	sources, err := dbService.ListSources(context.Background())

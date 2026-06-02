@@ -34,7 +34,7 @@ func TestE2E_RealClient_FullSubscriptionLifecycle(t *testing.T) {
 	sub, err := env.db.GetByTelegramID(ctx, 12345)
 	require.NoError(t, err)
 	assert.Equal(t, "testuser", sub.Username)
-	assert.False(t, sub.IsTrial)
+	assert.False(t, sub.PlanID == 1)
 
 	_, traffic, err := env.subService.GetWithTraffic(ctx, 12345)
 	require.NoError(t, err)

@@ -49,7 +49,7 @@ type TrialRepository interface {
 
 type SourceRepository interface {
 	ListSources(ctx context.Context) ([]database.Source, error)
-	ListTrialSources(ctx context.Context) ([]database.Source, error)
+	GetSourcesByPlanName(ctx context.Context, planName string) ([]database.Source, error)
 	IsSourcesEmpty(ctx context.Context) (bool, error)
 	SeedDefaultSource(ctx context.Context, name, xuiHost, xuiAPIToken string, xuiInboundID int, subURL string) error
 }
@@ -62,11 +62,16 @@ type InviteRepository interface {
 	GetAllReferralCounts(ctx context.Context) (map[int64]int64, error)
 }
 
+type PlanRepository interface {
+	GetPlanByName(ctx context.Context, name string) (*database.Plan, error)
+}
+
 type DatabaseService interface {
 	SubscriptionRepository
 	TrialRepository
 	InviteRepository
 	SourceRepository
+	PlanRepository
 	Ping(ctx context.Context) error
 	Close() error
 	GetPoolStats() (*database.PoolStats, error)

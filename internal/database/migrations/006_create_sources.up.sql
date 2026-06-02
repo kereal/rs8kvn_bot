@@ -2,7 +2,6 @@ CREATE TABLE IF NOT EXISTS sources (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name VARCHAR(255) NOT NULL,
     active INTEGER DEFAULT 1,
-    trial INTEGER DEFAULT 0,
     x_ui_host VARCHAR(255),
     x_ui_api_token VARCHAR(255),
     x_ui_inbound_id INTEGER NOT NULL,

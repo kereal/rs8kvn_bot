@@ -414,8 +414,8 @@ func (s *Server) getExistingTrialFromCookie(r *http.Request, ctx context.Context
 		return nil, err
 	}
 
-	// Проверяем, что это всё ещё trial и не активирован
-	if !sub.IsTrial || sub.TelegramID != 0 {
+	// Проверяем, что это trial и не активирован
+	if sub.TelegramID != 0 {
 		return nil, fmt.Errorf("not a valid trial")
 	}
 
