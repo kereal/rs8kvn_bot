@@ -539,6 +539,110 @@ func TestHandleBindTrial_Success(t *testing.T) {
 	assert.Contains(t, mockBot.LastSentTextSafe(), "Подписка активирована", "Should contain activation message")
 }
 
+func TestHandleBindTrial_IncrementsReferrerCacheCount(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{
+		TelegramAdminID: 999999,
+	}
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewMockBotAPI()
+
+	dbSources := []database.Source{{
+		ID: 1, Name: "main", XUIHost: "http://example.com",
+		XUIAPIToken: "token", XUIInboundID: 1, Active: true,
+	}}
+	subService := service.NewSubscriptionService(
+		mockDB,
+		map[uint]interfaces.XUIClient{1: mockXUI},
+		dbSources,
+		cfg,
+		"http://example.com/sub/",
+		nil,
+	)
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), subService, "")
+
+	referrerTGID := int64(888777)
+
+	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
+		return nil, gorm.ErrRecordNotFound
+	}
+	mockDB.BindTrialSubscriptionFunc = func(ctx context.Context, subscriptionID string, telegramID int64, username string) (*database.Subscription, error) {
+		return &database.Subscription{
+			TelegramID:     telegramID,
+			Username:       username,
+			SubscriptionID: subscriptionID,
+			ClientID:       "client-123",
+			InviteCode:     "invite-code",
+			ReferredBy:     referrerTGID,
+			Status:         "active",
+		}, nil
+	}
+	mockDB.GetInviteByCodeFunc = func(ctx context.Context, code string) (*database.Invite, error) {
+		return &database.Invite{Code: code, ReferrerTGID: referrerTGID}, nil
+	}
+
+	ctx := context.Background()
+	handler.handleBindTrial(ctx, 123456, "testuser", "trial-code-123")
+
+	assert.Equal(t, int64(1), handler.GetReferralCount(referrerTGID),
+		"IncrementReferralCount should fire on trial bind when invite resolves to a referrer")
+}
+
+func TestHandleBindTrial_NoReferrerLeavesCacheUntouched(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{
+		TelegramAdminID: 999999,
+	}
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewMockBotAPI()
+
+	dbSources := []database.Source{{
+		ID: 1, Name: "main", XUIHost: "http://example.com",
+		XUIAPIToken: "token", XUIInboundID: 1, Active: true,
+	}}
+	subService := service.NewSubscriptionService(
+		mockDB,
+		map[uint]interfaces.XUIClient{1: mockXUI},
+		dbSources,
+		cfg,
+		"http://example.com/sub/",
+		nil,
+	)
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), subService, "")
+
+	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
+		return nil, gorm.ErrRecordNotFound
+	}
+	mockDB.BindTrialSubscriptionFunc = func(ctx context.Context, subscriptionID string, telegramID int64, username string) (*database.Subscription, error) {
+		return &database.Subscription{
+			TelegramID:     telegramID,
+			Username:       username,
+			SubscriptionID: subscriptionID,
+			ClientID:       "client-123",
+			InviteCode:     "",
+			ReferredBy:     0,
+			Status:         "active",
+		}, nil
+	}
+	mockDB.GetInviteByCodeFunc = func(ctx context.Context, code string) (*database.Invite, error) {
+		return nil, database.ErrInviteNotFound
+	}
+
+	ctx := context.Background()
+	handler.handleBindTrial(ctx, 123456, "testuser", "trial-code-123")
+
+	allCounts := handler.referralCache.GetAll()
+	for tgID, count := range allCounts {
+		if count != 0 {
+			t.Errorf("expected zero counts in cache, but %d = %d", tgID, count)
+		}
+	}
+}
+
 func TestHandleShareStart_UserWithExistingSubscription(t *testing.T) {
 	t.Parallel()
 

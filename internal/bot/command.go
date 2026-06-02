@@ -271,6 +271,7 @@ func (c *CommandHandler) handleBindTrial(ctx context.Context, chatID int64, user
 		} else {
 			logger.Info("Referrer notified", zap.Int64("referrer_id", sub.ReferredBy))
 		}
+		c.h.IncrementReferralCount(sub.ReferredBy)
 	}
 
 	return nil
