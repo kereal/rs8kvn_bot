@@ -146,9 +146,15 @@ func TestGetSourcesByPlanName_NoLinks(t *testing.T) {
 	t.Parallel()
 
 	svc := newTestService(t)
-	sources, err := svc.GetSourcesByPlanName(context.Background(), "trial")
+	sources, err := svc.GetSourcesByPlanName(context.Background(), "nonexistent_plan")
 	assert.NoError(t, err)
 	assert.Empty(t, sources)
+
+	// Seed migration 012 links the default source to both 'trial' and 'free' plans,
+	// so a real plan name returns the default source rather than empty.
+	trialSources, err := svc.GetSourcesByPlanName(context.Background(), TrialPlanName)
+	assert.NoError(t, err)
+	assert.Len(t, trialSources, 1, "seed links default source to trial plan")
 }
 
 func TestGetSourcesByPlanName_ReturnsLinkedSources(t *testing.T) {
@@ -160,10 +166,8 @@ func TestGetSourcesByPlanName_ReturnsLinkedSources(t *testing.T) {
 	var trialPlan Plan
 	require.NoError(t, svc.db.WithContext(ctx).Where("name = ?", TrialPlanName).First(&trialPlan).Error)
 
-	// Re-link default source to trial plan
-	require.NoError(t, svc.db.WithContext(ctx).Create(&PlanSource{PlanID: trialPlan.ID, SourceID: 1}).Error)
-
-	// Add another source and link it too
+	// Seed migration 012 already links the default source to the trial plan,
+	// so we only need to add a second source and link it.
 	require.NoError(t, svc.SeedDefaultSource(ctx, "backup", "http://x2", "t2", 1, ""))
 	allSources, err := svc.ListSources(ctx)
 	require.NoError(t, err)
@@ -188,19 +192,17 @@ func TestGetSourcesByPlanName_FilterByName(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
 
-	var trialPlan, freePlan Plan
-	require.NoError(t, svc.db.WithContext(ctx).Where("name = ?", TrialPlanName).First(&trialPlan).Error)
-	require.NoError(t, svc.db.WithContext(ctx).Where("name = ?", FreePlanName).First(&freePlan).Error)
-
-	require.NoError(t, svc.db.WithContext(ctx).Create(&PlanSource{PlanID: trialPlan.ID, SourceID: 1}).Error)
-
+	// Seed migration 012 links the default source to BOTH trial and free plans,
+	// so both lookups should return that single source.
 	trialSources, err := svc.GetSourcesByPlanName(ctx, "trial")
 	require.NoError(t, err)
 	assert.Len(t, trialSources, 1)
+	assert.Equal(t, "default", trialSources[0].Name)
 
 	freeSources, err := svc.GetSourcesByPlanName(ctx, "free")
 	require.NoError(t, err)
-	assert.Empty(t, freeSources, "free plan has no source links")
+	assert.Len(t, freeSources, 1)
+	assert.Equal(t, "default", freeSources[0].Name)
 }
 
 // ==================== Subscription Active Check (model) ====================
