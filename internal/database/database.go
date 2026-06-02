@@ -506,6 +506,16 @@ func (s *Service) GetPlanByName(ctx context.Context, name string) (*Plan, error)
 	return &plan, nil
 }
 
+// GetPlanByID returns a plan by its ID.
+func (s *Service) GetPlanByID(ctx context.Context, id uint) (*Plan, error) {
+	var plan Plan
+	result := s.db.WithContext(ctx).First(&plan, id)
+	if result.Error != nil {
+		return nil, fmt.Errorf("failed to get plan by id: %w", result.Error)
+	}
+	return &plan, nil
+}
+
 // IsSourcesEmpty returns true if no sources exist in the database.
 func (s *Service) IsSourcesEmpty(ctx context.Context) (bool, error) {
 	var count int64

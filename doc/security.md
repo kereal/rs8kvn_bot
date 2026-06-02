@@ -234,7 +234,6 @@ LOG_LEVEL=warn  # Less verbose in prod
 LOG_FILE_PATH=/app/data/bot.log
 
 # Subscription
-TRAFFIC_LIMIT_GB=30
 
 # Monitoring
 HEARTBEAT_URL=https://healthchecks.io/ping/your-uuid

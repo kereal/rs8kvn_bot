@@ -198,7 +198,7 @@ func TestE2E_CreateSubscription_TrafficLimitCorrect(t *testing.T) {
 		},
 	})
 
-	expectedTraffic := int64(env.cfg.TrafficLimitGB) * 1024 * 1024 * 1024
+	expectedTraffic := int64(100) * 1024 * 1024 * 1024
 	assert.Equal(t, expectedTraffic, capturedTraffic, "Traffic limit should match config")
 }
 

@@ -19,7 +19,6 @@ func TestBot_GracefulShutdown(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID:  123456789,
-		TrafficLimitGB:   100,
 		TelegramBotToken: "test_token",
 		Sources:          []config.Source{{Name: "main", XUIHost: "http://localhost:2053", XUIAPIToken: "test-api-token", XUIInboundID: 1}},
 	}
@@ -57,7 +56,6 @@ func TestServer_GracefulShutdown(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{
-		TrafficLimitGB:   10,
 		TelegramBotToken: "test_token",
 		HealthCheckPort:  18880,
 		Sources:          []config.Source{{Name: "main", XUIHost: "http://localhost:2053", XUIAPIToken: "token", XUIInboundID: 1}},
@@ -155,7 +153,6 @@ func TestGracefulShutdown_WithActiveUpdates(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID:  123456789,
-		TrafficLimitGB:   100,
 		TelegramBotToken: "test_token",
 		Sources:          []config.Source{{Name: "main", XUIHost: "http://localhost:2053", XUIAPIToken: "test-api-token", XUIInboundID: 1}},
 	}
@@ -193,7 +190,6 @@ func TestGracefulShutdown_RateLimiterCleanup(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID:  123456789,
-		TrafficLimitGB:   100,
 		TelegramBotToken: "test_token",
 		Sources:          []config.Source{{Name: "main", XUIHost: "http://localhost:2053", XUIAPIToken: "token", XUIInboundID: 1}},
 	}

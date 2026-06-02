@@ -64,6 +64,7 @@ type InviteRepository interface {
 
 type PlanRepository interface {
 	GetPlanByName(ctx context.Context, name string) (*database.Plan, error)
+	GetPlanByID(ctx context.Context, id uint) (*database.Plan, error)
 }
 
 type DatabaseService interface {

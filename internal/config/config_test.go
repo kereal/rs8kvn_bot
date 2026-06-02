@@ -59,7 +59,7 @@ func TestLoad_CustomValues(t *testing.T) {
 	os.Setenv("XUI_HOST", "https://custom:2053")
 	os.Setenv("XUI_API_TOKEN", "custom-token")
 	os.Setenv("XUI_INBOUND_ID", "5")
-	os.Setenv("TRAFFIC_LIMIT_GB", "500")
+
 	os.Setenv("HEARTBEAT_INTERVAL", "120")
 	os.Setenv("DATABASE_PATH", "/custom/path/db.db")
 	os.Setenv("LOG_LEVEL", "debug")
@@ -70,7 +70,6 @@ func TestLoad_CustomValues(t *testing.T) {
 		os.Unsetenv("XUI_HOST")
 		os.Unsetenv("XUI_API_TOKEN")
 		os.Unsetenv("XUI_INBOUND_ID")
-		os.Unsetenv("TRAFFIC_LIMIT_GB")
 		os.Unsetenv("HEARTBEAT_INTERVAL")
 		os.Unsetenv("DATABASE_PATH")
 		os.Unsetenv("LOG_LEVEL")
@@ -80,7 +79,6 @@ func TestLoad_CustomValues(t *testing.T) {
 	cfg, err := Load()
 	require.NoError(t, err, "Load() error")
 
-	assert.Equal(t, 500, cfg.TrafficLimitGB, "TrafficLimitGB")
 	assert.Equal(t, 120, cfg.HeartbeatInterval, "HeartbeatInterval")
 	assert.Equal(t, 9090, cfg.HealthCheckPort, "HealthCheckPort")
 }
@@ -125,52 +123,6 @@ func TestLoad_InvalidTelegramAdminID(t *testing.T) {
 	_, err := Load()
 	require.Error(t, err, "Load() should error for invalid TELEGRAM_ADMIN_ID")
 	assert.Contains(t, err.Error(), "TELEGRAM_ADMIN_ID", "Error should mention TELEGRAM_ADMIN_ID")
-}
-
-func TestLoad_InvalidTrafficLimitGB_TooLow(t *testing.T) {
-
-	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
-	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
-	os.Setenv("XUI_HOST", "https://localhost:2053")
-	os.Setenv("XUI_API_TOKEN", "some-test-token")
-	os.Setenv("XUI_INBOUND_ID", "1")
-	os.Setenv("TRAFFIC_LIMIT_GB", "0")
-	os.Setenv("LOG_LEVEL", "info")
-	defer func() {
-		os.Unsetenv("TELEGRAM_BOT_TOKEN")
-		os.Unsetenv("TELEGRAM_ADMIN_ID")
-		os.Unsetenv("XUI_HOST")
-		os.Unsetenv("XUI_API_TOKEN")
-		os.Unsetenv("XUI_INBOUND_ID")
-		os.Unsetenv("TRAFFIC_LIMIT_GB")
-		os.Unsetenv("LOG_LEVEL")
-	}()
-
-	_, err := Load()
-	assert.Error(t, err, "Load() should error for TRAFFIC_LIMIT_GB = 0")
-}
-
-func TestLoad_InvalidTrafficLimitGB_TooHigh(t *testing.T) {
-
-	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
-	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
-	os.Setenv("XUI_HOST", "https://localhost:2053")
-	os.Setenv("XUI_API_TOKEN", "some-test-token")
-	os.Setenv("XUI_INBOUND_ID", "1")
-	os.Setenv("TRAFFIC_LIMIT_GB", "10001")
-	os.Setenv("LOG_LEVEL", "info")
-	defer func() {
-		os.Unsetenv("TELEGRAM_BOT_TOKEN")
-		os.Unsetenv("TELEGRAM_ADMIN_ID")
-		os.Unsetenv("XUI_HOST")
-		os.Unsetenv("XUI_API_TOKEN")
-		os.Unsetenv("XUI_INBOUND_ID")
-		os.Unsetenv("TRAFFIC_LIMIT_GB")
-		os.Unsetenv("LOG_LEVEL")
-	}()
-
-	_, err := Load()
-	assert.Error(t, err, "Load() should error for TRAFFIC_LIMIT_GB > 10000")
 }
 
 func TestLoad_InvalidHeartbeatInterval_Zero(t *testing.T) {
@@ -562,7 +514,6 @@ func TestConfig_String(t *testing.T) {
 		Sources: []Source{
 			{Name: "default", Active: true, XUIHost: "https://localhost:2053", XUIAPIToken: "some-token", XUIInboundID: 1},
 		},
-		TrafficLimitGB: 100,
 	}
 
 	str := cfg.String()
@@ -671,7 +622,6 @@ func TestConfig_Validate_Valid(t *testing.T) {
 		Sources: []Source{
 			{Name: "default", Active: true, XUIHost: "https://localhost:2053", XUIAPIToken: "some-token", XUIInboundID: 1},
 		},
-		TrafficLimitGB:     100,
 		HeartbeatInterval:  60,
 		LogLevel:           "info",
 		HealthCheckPort:    DefaultHealthCheckPort,
@@ -693,7 +643,6 @@ func TestConfig_Validate_SentryDSN_Valid(t *testing.T) {
 		Sources: []Source{
 			{Name: "default", Active: true, XUIHost: "https://localhost:2053", XUIAPIToken: "some-token", XUIInboundID: 1},
 		},
-		TrafficLimitGB:     100,
 		HeartbeatInterval:  60,
 		LogLevel:           "info",
 		SentryDSN:          "https://abc@sentry.io/123",
@@ -732,7 +681,6 @@ func TestConfig_Validate_WithSubPath(t *testing.T) {
 		Sources: []Source{
 			{Name: "default", Active: true, XUIHost: "https://localhost:2053", XUIAPIToken: "some-token", XUIInboundID: 1},
 		},
-		TrafficLimitGB:     100,
 		HeartbeatInterval:  60,
 		LogLevel:           "info",
 		HealthCheckPort:    DefaultHealthCheckPort,
@@ -754,7 +702,6 @@ func TestConfig_Validate_WithHeartbeatURL(t *testing.T) {
 		Sources: []Source{
 			{Name: "default", Active: true, XUIHost: "https://localhost:2053", XUIAPIToken: "some-token", XUIInboundID: 1},
 		},
-		TrafficLimitGB:     100,
 		HeartbeatInterval:  60,
 		LogLevel:           "info",
 		HeartbeatURL:       "https://health.example.com",
@@ -823,7 +770,6 @@ func TestConfig_Validate_InvalidHealthCheckPort_TooLow(t *testing.T) {
 		Sources: []Source{
 			{Name: "default", Active: true, XUIHost: "https://localhost:2053", XUIAPIToken: "some-token", XUIInboundID: 1},
 		},
-		TrafficLimitGB:    100,
 		HeartbeatInterval: 60,
 		LogLevel:          "info",
 		HealthCheckPort:   0,
@@ -842,7 +788,6 @@ func TestConfig_Validate_InvalidHealthCheckPort_TooHigh(t *testing.T) {
 		Sources: []Source{
 			{Name: "default", Active: true, XUIHost: "https://localhost:2053", XUIAPIToken: "some-token", XUIInboundID: 1},
 		},
-		TrafficLimitGB:    100,
 		HeartbeatInterval: 60,
 		LogLevel:          "info",
 		HealthCheckPort:   70000,
@@ -1157,7 +1102,7 @@ func FuzzLoad_InvalidEnvValues(f *testing.F) {
 	}
 
 	f.Fuzz(func(t *testing.T, invalidVal string) {
-		for _, key := range []string{"TELEGRAM_ADMIN_ID", "XUI_INBOUND_ID", "TRAFFIC_LIMIT_GB", "HEARTBEAT_INTERVAL", "TRIAL_DURATION_HOURS", "TRIAL_RATE_LIMIT", "HEALTH_CHECK_PORT"} {
+		for _, key := range []string{"TELEGRAM_ADMIN_ID", "XUI_INBOUND_ID", "HEARTBEAT_INTERVAL", "TRIAL_DURATION_HOURS", "TRIAL_RATE_LIMIT", "HEALTH_CHECK_PORT"} {
 			os.Setenv(key, invalidVal)
 		}
 		for k, v := range baseEnvs {
@@ -1167,7 +1112,7 @@ func FuzzLoad_InvalidEnvValues(f *testing.F) {
 			for key := range baseEnvs {
 				os.Unsetenv(key)
 			}
-			for _, key := range []string{"TRAFFIC_LIMIT_GB", "HEARTBEAT_INTERVAL", "TRIAL_DURATION_HOURS", "TRIAL_RATE_LIMIT", "HEALTH_CHECK_PORT"} {
+			for _, key := range []string{"HEARTBEAT_INTERVAL", "TRIAL_DURATION_HOURS", "TRIAL_RATE_LIMIT", "HEALTH_CHECK_PORT"} {
 				os.Unsetenv(key)
 			}
 		}()

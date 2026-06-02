@@ -100,7 +100,6 @@ func TestE2E_RealClient_DNSErrorFastFail(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID:  123456,
-		TrafficLimitGB:   100,
 		SiteURL:          "https://example.com",
 		TelegramBotToken: "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11",
 		GlobalSubURL:     "",

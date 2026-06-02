@@ -143,7 +143,6 @@ func NewTestFixture(t *testing.T) *IntegrationTestFixture {
 	mockXUI := NewMockXUIServer(t)
 
 	cfg := &config.Config{
-		TrafficLimitGB:   100,
 		Sources:          []config.Source{{Name: "main", XUIHost: mockXUI.Server.URL, XUIAPIToken: "test-api-token", XUIInboundID: 1}},
 		TelegramAdminID:  123456789,
 		TelegramBotToken: "test_token",

@@ -223,7 +223,6 @@ Air will automatically rebuild and restart the bot when you save changes to Go f
 | `LOG_FILE_PATH` | Log file path | `./data/bot.log` | ❌ | Rotated automatically |
 | `LOG_LEVEL` | Log level | `info` | ❌ | `debug`, `info`, `warn`, `error` |
 | **Subscription** |
-| `TRAFFIC_LIMIT_GB` | Monthly traffic limit (GB) | `30` | ❌ | 1–1000 GB |
 | **Health & Monitoring** |
 | `HEARTBEAT_URL` | URL for heartbeat POST (optional) | — | ❌ | Receives `{}` every 5 min |
 | `HEARTBEAT_INTERVAL` | Heartbeat interval (seconds) | `300` | ❌ | Min 10s |
@@ -365,7 +364,7 @@ Admin-only commands:
 2. Pull new image — migrations run automatically
 3. Update `.env`:
    - New required: `XUI_INBOUND_ID`
-   - New optional: `TRAFFIC_LIMIT_GB`, `TRIAL_DURATION_HOURS`
+   - New optional: `TRIAL_DURATION_HOURS`
 4. Restart bot
 
 ---
