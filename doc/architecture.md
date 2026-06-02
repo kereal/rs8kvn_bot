@@ -497,9 +497,9 @@ SIGQUIT (kill -3) → core dump (not handled by us)
 │ telegram_id          int64    INDEX                         │
 │ username             string   INDEX                         │
 │ client_id            string                                 │
-│ subscription_id      string   INDEX (unique)                 │
+│ subscription_id      string   INDEX (unique)                │
 │ expiry_time          time     INDEX                         │
-│ status               string   default: "active"  INDEX       │
+│ status               string   default: "active"  INDEX      │
 │ invite_code          string   INDEX                         │
 │ plan_id              uint     INDEX   (FK → plans)          │
 │ referred_by          int64    INDEX                         │

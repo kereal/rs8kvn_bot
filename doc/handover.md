@@ -13,17 +13,17 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                         Telegram Bot API                             │
+│                         Telegram Bot API                            │
 └─────────────────────────────┬───────────────────────────────────────┘
                               │ GetUpdates (long polling)
                               ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│                     cmd/bot/main.go (Entry Point)                    │
+│                     cmd/bot/main.go (Entry Point)                   │
 │  ┌────────────────────────────────────────────────────────────────┐ │
-│  │ • Config loading                                                │ │
-│  │ • Service initialization (DB, XUI, Bot, Web, SubProxy)          │ │
-│  │ • Graceful shutdown coordination (signal handling)              │ │
-│  │ • Worker pool semaphore (10 concurrent handlers)                │ │
+│  │ • Config loading                                               │ │
+│  │ • Service initialization (DB, XUI, Bot, Web, SubProxy)         │ │
+│  │ • Graceful shutdown coordination (signal handling)             │ │
+│  │ • Worker pool semaphore (10 concurrent handlers)               │ │
 │  └────────────────────────────────────────────────────────────────┘ │
 └─────────────────────────────┬───────────────────────────────────────┘
                               │
