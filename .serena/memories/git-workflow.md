@@ -1,24 +1,21 @@
-## Git Workflow — rs8kvn_bot
+# Git Workflow — rs8kvn_bot
 
-### Terminal Tool
-
-Инструмент `terminal` выполняет shell-команды в контексте проекта.
-
-**Параметр `cd`:** Всегда используй `cd: "."` — это корень активного проекта.
+## Terminal tool (opencode)
+Параметр `cd`: используй `.` (корень активного проекта) или `workdir` в bash.
 
 **Правила:**
-- `.` = корень проекта (правильно)
-- Абсолютные пути (`/home/kereal/rs8kvn_bot`) НЕ работают — вызывают worktree error
-- Каждый вызов = новый shell-процесс, состояние между вызовами НЕ сохраняется
-- Для долгих команд (build, test, lint) указывай `timeout_ms` (например: `timeout_ms: 120000`)
-- НЕ запускай серверы без `timeout_ms` — зависнут
-- НЕ используй shell-подстановки (`$VAR`, `$(...)`) — подставляй значения вручную
-- НЕ делай `cd` внутри команды — используй параметр `cd`
+- `.` или `workdir` = корень проекта ✅
+- Абсолютные пути (`/home/kereal/rs8kvn_bot`) — **НЕ** используй в `cd`, вызывают worktree error. В `workdir` — ок.
+- Каждый вызов = новый shell, состояние не сохраняется.
+- Для долгих команд указывай `timeout_ms` (например `120000`).
+- **НЕ** запускай серверы без `timeout_ms` — зависнут.
+- **НЕ** используй shell-подстановки (`$VAR`, `$(...)`).
+- **НЕ** делай `cd` внутри команды.
 
-### Стандартный рабочий процесс
+## Стандартный workflow
 
 ```bash
-# 1. Перед началом — пульнуть изменения
+# 1. Перед началом
 git stash              # если есть локальные изменения
 git pull --ff-only     # пульнуть без мерджа
 git stash pop          # вернуть локальные изменения
@@ -26,52 +23,68 @@ git stash pop          # вернуть локальные изменения
 # 2. Создать ветку
 git checkout -b <type>/<short-description>
 
-# 3. Закоммитить
+# 3. Коммит
 git add -A
 git commit -m "<type>: <description>"
 
-# 4. Запушить
+# 4. Push
 git push -u origin <branch-name>
 ```
 
-### Ветвление
-- `main` — продакшн (только через merge из dev)
-- `dev` — основная ветка разработки
-- Фича-ветки: `<type>/<description>` (например: `perf/test-speed-optimization`, `docs/fix-readme`, `feat/payments`)
-- Типы: `feat`, `fix`, `perf`, `docs`, `refactor`, `test`, `chore`
+## Ветвление
+- **`main`** — продакшн. Только через PR.
+- **`dev`** — основная ветка разработки (опционально).
+- **Фича-ветки**: `<type>/<description>`, например:
+  - `feature/sources-table` (текущая)
+  - `fix/trial-referrer-cache-increment`
+  - `perf/test-speed-optimization`
+  - `docs/fix-readme`
+  - `refactor/handler-decomposition`
+- **Типы**: `feat`, `fix`, `perf`, `docs`, `refactor`, `test`, `chore`, `audit`.
 
-### Коммит-сообщения
-- Формат: `<type>: <description>` (lowercase)
-- Подробные списки изменений через `-` в теле коммита
+## Коммит-сообщения
+- Формат: `<type>: <description>` (lowercase).
+- Conventional Commits.
+- Подробные bullet lists через `-` в теле.
+- Пример:
+  ```
+  fix: increment referrer cache on trial bind (was stale up to 1h)
+  
+  - internal/bot/command.go (handleBindTrial): добавлен
+    c.h.IncrementReferralCount(sub.ReferredBy) внутри
+    if sub.ReferredBy > 0 после уведомления
+  - internal/bot/commands_test.go: TestHandleBindTrial_IncrementsReferrerCacheCount
+    (падал до, passing после) + regression guard
+  ```
 
-### Pull Requests
-- После пуша GitHub предложит создать PR по ссылке из вывода
-- Влить в `dev` → потом `dev` в `main`
+## Pull Requests
+- После push GitHub предложит создать PR по ссылке из вывода.
+- Влить в `main` (или `dev` → `main`).
 
-### Stash при конфликтах
-Если `git pull` конфликтует с локальными изменениями:
+## Stash при конфликтах
 ```bash
 git stash
 git pull --ff-only
 git stash pop    # auto-merges если возможно
 ```
 
-### Полезные команды
+## Полезные команды
 ```bash
 git status                    # состояние
 git diff --stat               # список изменённых файлов
 git log --oneline -10         # последние коммиты
 git branch -a                 # все ветки
-git checkout dev              # переключиться на dev
-git branch -d <name>         # удалить локальную ветку
+git branch -d <name>          # удалить локальную ветку
 git push origin --delete <name>  # удалить удалённую ветку
 ```
 
-### Примечания
-- В проекте только `dev` и `main` ветки (остальные удалены)
-- SSH ключ настроен для GitHub
-- Remote: `origin` → `https://github.com/kereal/rs8kvn_bot.git`
+## Remote
+- `origin` → `https://github.com/kereal/rs8kvn_bot.git`
+- SSH ключ настроен.
+
+## Текущая активная ветка
+- `feature/sources-table` (на 2026-06-03).
 
 ---
 
-**Обновлено:** 2026-04-13
+**Обновлено:** 2026-06-03

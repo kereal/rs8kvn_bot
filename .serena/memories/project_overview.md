@@ -1,85 +1,71 @@
-# rs8kvn_bot - Telegram Bot for 3x-ui VLESS Subscription Distribution
+# rs8kvn_bot — Telegram Bot для раздачи VLESS-подписок
 
-## Project Purpose
-This is a Telegram bot for distributing VLESS+Reality+Vision proxy subscriptions from 3x-ui panel.
+## Назначение
+Telegram-бот для продажи и управления VLESS+Reality+Vision подписками через панели 3x-ui.
+Production-grade: миграции, мониторинг, rate-limiting, circuit breaker, graceful shutdown.
 
-## Features
-- Get subscription on demand
-- View current subscription status (via service layer, single source of truth)
-- QR code for easy subscription import
-- Invite/trial landing page with one-click setup
-- Referral system with in-memory cache + periodic sync
-- Configurable traffic limit (default 30GB/month)
-- Auto-renewal on the last day of each month
-- Admin notifications on new subscriptions
-- Heartbeat monitoring support
-- Health check endpoint (/healthz, /readyz)
-- File logging with rotation (zap)
-- Daily database backups with rotation
-- Database migrations system
-- Sentry error tracking
-- Rate limiting per user
-- Graceful shutdown with goroutine tracking
-- Circuit breaker for 3x-ui panel
-- Donate message with card number in config (constants.go)
-- Friendly and inviting donation message tone
-- **Multi-source 3x-ui panels** (v2.4.0) — поддержка множества 3x-ui панелей через `config.Source` + `map[uint]interfaces.XUIClient`. Trial-подписки создаются на всех источниках, BindTrial — первый успешный, ReconcileOrphanedClients — проверка всех источников
-- **O(1) LRU subscription cache** (container/list, RLock for concurrent reads)
-- **Subscription status check in /sub/{subID}** — revoked/expired subscriptions return 404
-- **Unified soft delete for all subscription deletions** (GORM `deleted_at`)
-- **ExpiryTime saved in DB on Create** — admin sees actual reset date
-- **Merged referral cache** (counts + dirty in one map)
-- **pendingInvites periodic cleanup** — prevents memory leak from expired share-link entries
-- **MarkdownV2 proper escaping** — backslash-first escaping prevents double-escape and broken formatting
-- **Broadcast 5min timeout** — handles thousands of users without early termination
-- **Subscription status check in /sub/{subID}** — revoked/expired subs are not served
-- **ExpiryTime stored in DB on Create** — admin sees actual reset date, not "—"
-- **Soft delete unified** — all delete methods use GORM soft delete consistently
-- **Cache RLock for reads** — concurrent cache reads don't block each other — handles thousands of users without early termination
+## Текущая версия
+**v2.4.0** — мульти-источник 3x-ui (sources/plans/plan_sources), план-based подписки, миграции 000-011.
 
-## Tech Stack
-- **Language**: Go 1.25 (проект всегда был на Go, никогда не был на Python)
-- **Bot Framework**: telegram-bot-api/v5
-- **Database**: SQLite with GORM
-- **Logging**: Zap
-- **Testing**: testify
-- **Migration**: golang-migrate/migrate/v4
-- **QR Codes**: piglig/go-qr
-- **Error Tracking**: getsentry/sentry-go
+## Ключевые фичи
+- Запрос подписки по требованию, QR-код
+- Invite/trial landing с one-click биндингом
+- Реферальная система: in-memory cache + периодический sync
+- Планы (trial, free, paid) с M:N связью к источникам через `plan_sources`
+- Мульти-источник 3x-ui: trial-подписки создаются на всех trial-источниках, BindTrial — первый успешный, Reconcile — все источники
+- Авто-продление на 30-й день (через `SubscriptionResetDay` в x-ui)
+- Админ-уведомления, heartbeat, health endpoints (`/healthz`, `/readyz`)
+- Ротация логов (zap), ежедневные бэкапы БД
+- Sentry, rate-limiting per-user, circuit breaker для x-ui
+- O(1) LRU кэш подписок (RLock для concurrent reads)
+- Subscription status check в `/sub/{subID}` — revoked/expired → 404
+- Subscription expiration хранится в БД на момент Create (не "—")
 
-## Code Structure
-- `cmd/bot/` - Main application entry point
-- `internal/bot/` - Bot logic (handlers, commands, callbacks, menus)
-- `internal/database/` - Database operations and migrations
-- `internal/xui/` - 3x-ui panel client with circuit breaker (multi-source via `map[uint]XUIClient`)
-- `internal/interfaces/` - Interface definitions (XUIClient, SubscriptionService, etc.)
-- `internal/testutil/` - Test utilities and mocks
-- `internal/utils/` - Utility functions (time, UUID, QR codes)
-- `internal/config/` - Configuration management
-- `internal/logger/` - Logging setup
-- `internal/webhook/` - Webhook sender for Proxy Manager
-- `internal/heartbeat/` - Heartbeat monitoring
-- `internal/backup/` - Database backup functionality
-- `internal/ratelimiter/` - Rate limiting logic
-- `internal/web/` - Web endpoints (health, invite/trial, subscription proxy)
-- `internal/subproxy/` - Subscription proxy (cache, merge, extra config, InvalidateCache for status changes)
+## Стек
+- **Go 1.25** (go.mod)
+- **Bot**: telegram-bot-api/v5
+- **DB**: SQLite + GORM + golang-migrate (embedded)
+- **Logging**: Zap (с ротацией)
+- **Tests**: testify
+- **QR**: piglig/go-qr
+- **Errors**: getsentry/sentry-go
 
+## Структура
+```
+cmd/bot/                     — точка входа, graceful shutdown
+internal/bot/                 — handlers, commands, callbacks, referral cache
+internal/database/           — GORM-модели, миграции 000-011, transactions
+internal/service/            — SubscriptionService (Create, BindTrial, CreateTrial, ReconcileOrphanedClients)
+internal/xui/                — 3x-ui HTTP-клиент + circuit breaker, multi-source map
+internal/interfaces/         — контракты (XUIClient, SubscriptionDatabase, SubscriptionService)
+internal/testutil/           — моки (MockDatabaseService, MockXUIClient, MockBotAPI)
+internal/utils/              — time, UUID, QR
+internal/config/             — загрузка, валидация
+internal/logger/             — zap setup
+internal/heartbeat/          — мониторинг
+internal/backup/             — ежедневные бэкапы с WAL checkpoint
+internal/scheduler/          — backup + trial cleanup
+internal/ratelimiter/        — per-user token bucket
+internal/web/                — /healthz, /readyz, /i/{code}, /sub/{subID} + singleflight
+internal/subproxy/           — кэш + merge подписок
+internal/metrics/            — Prometheus (обёрнутый zap-логом, не реальный Prometheus)
+```
 
-## Development Workflow
+## Bootstrap для AI-агента
+При старте сессии **обязательно**:
+1. `activate_project("rs8kvn_bot")`
+2. Прочитать памяти: `project_overview` (этот), `git-workflow`, `architecture`, `code_style`
+3. При работе с x-ui API — прочитать `xui/auth-mechanism` + `xui/client-crud`
+4. При работе с trial/referral flows — прочитать `fixes/2026-06-03-*`
+5. **Отвечать на русском** (AGENTS.md)
+6. **Не удалять** legacy-код без явного запроса (см. `roadmap`)
 
-### Terminal Tool Usage
-**Important**: When using the `terminal` tool, use the basename of the root directory as `cd` parameter:
-- ✅ Correct: `cd: "rs8kvn_bot"` 
-- ❌ Wrong: `cd: "/home/kereal/rs8kvn_bot"` (causes worktree error)
-
-### Git Workflow
-**ВАЖНО: Всегда использовать Pull Requests!**
-- **Main branch**: Только через PR, никаких прямых коммитов в main
-- **Feature branches**: `feature/description`, `fix/description`
-- **Workflow**: Создать ветку → Изменения → Push → PR → Review → Merge
-- **Подробности**: См. память `git-workflow`
-
-**При старте работы ИИ агент ДОЛЖЕН:**
-1. Активировать проект Serena: `activate_project("rs8kvn_bot")`
-2. Проверить onboarding: `check_onboarding_performed()`
-3. Прочитать памяти: `git-workflow`, `project_overview`, `code_style`
+## Подробности
+- Архитектура: см. `architecture`
+- Стиль кода: см. `code_style`
+- Git workflow: см. `git-workflow`
+- Дорожная карта: см. `roadmap`
+- Тесты: см. `test-info`
+- Аудиты: см. `audit/*`
+- Исторические фиксы: см. `fixes/*`
+- x-ui протокол: см. `xui/*`
