@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
@@ -93,8 +94,8 @@ func (s *SubscriptionService) Create(ctx context.Context, chatID int64, username
 		expiryTime = time.Now().Add(time.Duration(plan.Duration) * time.Hour)
 		resetday = 0
 	} else {
-		expiryTime = time.Now().Add(time.Duration(config.SubscriptionResetDay) * 24 * time.Hour)
-		resetday = config.SubscriptionResetDay
+		expiryTime = time.Time{}
+		resetday = 0
 	}
 
 	clientID, err := utils.GenerateUUID()
@@ -146,27 +147,20 @@ func (s *SubscriptionService) Create(ctx context.Context, chatID int64, username
 	}
 
 	if err := s.db.CreateSubscription(ctx, sub); err != nil {
-		// Rollback: delete client from all sources
-		for _, src := range sources {
-			client, ok := s.xuiClients[src.ID]
-			if !ok {
-				continue
-			}
-			rollbackErr := xui.RetryWithBackoff(ctx, config.XUIMaxRetries, config.XUIInitialRetryDelay, func() error {
-				return client.DeleteClient(ctx, email)
-			})
-			if rollbackErr != nil {
-				logger.Error("orphaned XUI client detected - manual cleanup required",
-					zap.String("email", email),
-					zap.Uint("source_id", src.ID),
-					zap.Error(rollbackErr),
-					zap.String("username", username))
-			}
-		}
+		s.deleteClientFromAllSources(ctx, email)
 		return nil, fmt.Errorf("create subscription: %w", err)
 	}
 
-	subscriptionURL := s.globalSubURL + firstClient.SubID
+	if firstClient.SubID == "" {
+		return nil, fmt.Errorf("xui client returned empty subscription id: missing subID on client %s", firstClient.ID)
+	}
+
+	// формируем URL подписки
+	joinedURL, err := url.JoinPath(s.globalSubURL, firstClient.SubID)
+	if err != nil {
+		return nil, fmt.Errorf("build subscription url: %w", err)
+	}
+	subscriptionURL := joinedURL
 	return &CreateResult{
 		Subscription:    sub,
 		SubscriptionURL: subscriptionURL,
@@ -239,7 +233,7 @@ func (s *SubscriptionService) DeleteByID(ctx context.Context, id uint) (*databas
 
 func (s *SubscriptionService) deleteClientFromAllSources(ctx context.Context, email string) {
 	for _, src := range s.sources {
-		if src.XUIHost == "" {
+		if !src.Active || src.XUIHost == "" {
 			continue
 		}
 		client, ok := s.xuiClients[src.ID]

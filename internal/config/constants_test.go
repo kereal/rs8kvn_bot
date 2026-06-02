@@ -111,7 +111,7 @@ func TestConstants_Backup(t *testing.T) {
 	t.Parallel()
 
 	assert.Equal(t, 3, DefaultBackupHour)
-	assert.Equal(t, 14, DefaultBackupRetention)
+	assert.Equal(t, 30, DefaultBackupRetention)
 }
 
 func TestConstants_Shutdown(t *testing.T) {
