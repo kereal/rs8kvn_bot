@@ -367,11 +367,16 @@ func TestGetExistingTrialFromCookie_Valid(t *testing.T) {
 
 	mockDB.GetTrialSubscriptionBySubIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
 		return &database.Subscription{
-			SubscriptionID:  subscriptionID,
-			PlanID: 1,
-			TelegramID:      0,
-			ExpiryTime:      time.Now().Add(2 * time.Hour),
-			
+			SubscriptionID: subscriptionID,
+			PlanID:         1,
+			TelegramID:     0,
+			ExpiryTime:     time.Now().Add(2 * time.Hour),
+		}, nil
+	}
+	mockDB.GetPlanByIDFunc = func(ctx context.Context, planID uint) (*database.Plan, error) {
+		return &database.Plan{
+			ID:   planID,
+			Name: database.TrialPlanName,
 		}, nil
 	}
 
@@ -527,11 +532,13 @@ cfg := &config.Config{
 	mockDB.GetTrialSubscriptionBySubIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
 		return &database.Subscription{
 			SubscriptionID:  "existing-sub-id",
-			
-			PlanID: 1,
+			PlanID:          1,
 			TelegramID:      0,
 			ExpiryTime:      time.Now().Add(2 * time.Hour),
 		}, nil
+	}
+	mockDB.GetPlanByIDFunc = func(ctx context.Context, planID uint) (*database.Plan, error) {
+		return &database.Plan{ID: planID, Name: database.TrialPlanName}, nil
 	}
 
 	req := httptest.NewRequest("GET", "/i/testcode", nil)

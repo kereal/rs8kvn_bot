@@ -419,6 +419,11 @@ func (s *Server) getExistingTrialFromCookie(r *http.Request, ctx context.Context
 		return nil, fmt.Errorf("not a valid trial")
 	}
 
+	plan, planErr := s.db.GetPlanByID(ctx, sub.PlanID)
+	if planErr != nil || plan.Name != database.TrialPlanName {
+		return nil, fmt.Errorf("not a valid trial")
+	}
+
 	// Проверяем, что не истёк
 	if time.Now().After(sub.ExpiryTime) {
 		return nil, fmt.Errorf("trial expired")
