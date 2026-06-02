@@ -396,7 +396,7 @@ func (s *SubscriptionService) CreateTrial(ctx context.Context, inviteCode string
 		sources = s.activeSources()
 	}
 
-	var firstErr error
+	var xuiErrs []error
 	var anySuccess bool
 	for _, src := range sources {
 		client, ok := s.xuiClients[src.ID]
@@ -405,9 +405,7 @@ func (s *SubscriptionService) CreateTrial(ctx context.Context, inviteCode string
 		}
 		_, err = client.AddClientWithID(ctx, src.XUIInboundID, email, clientID, subID, trafficBytes, expiryTime, 0)
 		if err != nil {
-			if firstErr == nil {
-				firstErr = err
-			}
+			xuiErrs = append(xuiErrs, fmt.Errorf("source %d: %w", src.ID, err))
 			logger.Warn("failed to add trial client on source",
 				zap.Uint("source_id", src.ID),
 				zap.Error(err))
@@ -415,9 +413,12 @@ func (s *SubscriptionService) CreateTrial(ctx context.Context, inviteCode string
 			anySuccess = true
 		}
 	}
-
-	if !anySuccess && firstErr != nil {
-		return nil, fmt.Errorf("failed to create trial client on any source: %w", firstErr)
+	if !anySuccess {
+		logger.Error("trial XUI: all sources failed", zap.Int("failed", len(xuiErrs)))
+		return nil, fmt.Errorf("failed to create trial client on any source: %w", errors.Join(xuiErrs...))
+	}
+	if len(xuiErrs) > 0 {
+		logger.Warn("trial XUI: partial failures (continuing)", zap.Int("failed", len(xuiErrs)), zap.Int("sources", len(sources)))
 	}
 
 	sub, err := s.db.CreateTrialSubscription(ctx, inviteCode, subID, clientID, expiryTime)
@@ -497,7 +498,6 @@ func (s *SubscriptionService) BindTrial(ctx context.Context, subscriptionID stri
 				zap.Error(err))
 			continue
 		}
-		break
 	}
 
 	return sub, nil

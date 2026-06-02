@@ -885,6 +885,15 @@ func (s *Service) BindTrialSubscription(ctx context.Context, subscriptionID stri
 			return fmt.Errorf("trial subscription not found or already activated")
 		}
 
+		// Defensive: revoke any other active subscription the user may already have
+		// (e.g. a free-plan sub created concurrently via /start). Without this, the
+		// user could end up with two active subscriptions.
+		if err := tx.Model(&Subscription{}).
+			Where("telegram_id = ? AND status = ? AND id <> ?", telegramID, "active", sub.ID).
+			Update("status", "revoked").Error; err != nil {
+			return fmt.Errorf("failed to revoke pre-existing active subscriptions: %w", err)
+		}
+
 		return nil
 	})
 	if err != nil {
