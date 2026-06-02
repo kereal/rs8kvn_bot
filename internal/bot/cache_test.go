@@ -49,10 +49,9 @@ func TestSubscriptionCache_TTL(t *testing.T) {
 	require.NotNil(t, cache.Get(456), "Get() returned nil immediately after Set")
 
 	// Wait for TTL to expire
-	time.Sleep(20 * time.Millisecond)
-
-	// Should be expired now
-	assert.Nil(t, cache.Get(456), "Get() should return nil after TTL expired")
+	assert.Eventually(t, func() bool {
+		return cache.Get(456) == nil
+	}, 100*time.Millisecond, 1*time.Millisecond, "Get() should return nil after TTL expired")
 }
 
 func TestSubscriptionCache_Invalidate(t *testing.T) {
@@ -128,7 +127,9 @@ func TestSubscriptionCache_Cleanup(t *testing.T) {
 	}
 
 	// Wait for entries to expire
-	time.Sleep(20 * time.Millisecond)
+	assert.Eventually(t, func() bool {
+		return cache.Get(1) == nil
+	}, 100*time.Millisecond, 1*time.Millisecond, "entries should expire")
 
 	// Add one more entry (not expired)
 	cache.Set(4, &database.Subscription{TelegramID: 4})
@@ -185,8 +186,10 @@ func TestSubscriptionCache_StartCleanup(t *testing.T) {
 
 	assert.Equal(t, 3, cache.Size(), "Size()")
 
-	// Wait for entries to expire and cleanup to run
-	time.Sleep(20 * time.Millisecond)
+	// Wait for entries to expire
+	assert.Eventually(t, func() bool {
+		return cache.Get(1) == nil
+	}, 100*time.Millisecond, 1*time.Millisecond, "entries should expire")
 
 	// Expired entries should be removed by background cleanup
 	// Note: Size may be 0 or contain only non-expired entries
