@@ -40,7 +40,7 @@ func TestMemoryLeak_CreateDeleteCycle(t *testing.T) {
 			SubscriptionID: "sub-leak",
 			Status:         "active",
 		}
-		err = db.CreateSubscription(ctx, sub)
+		err = db.CreateSubscription(ctx, sub, "")
 		require.NoError(t, err)
 
 		err = db.Close()

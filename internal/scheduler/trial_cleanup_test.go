@@ -67,7 +67,7 @@ func TestTrialCleanupScheduler_RunCleanup_WithExpiredTrials(t *testing.T) {
 		Status:         "active",
 		CreatedAt:      time.Now().Add(-2 * time.Hour),
 	}
-	err = db.CreateSubscription(ctx, expiredSub)
+	err = db.CreateSubscription(ctx, expiredSub, "")
 	require.NoError(t, err)
 
 	expiredSub2 := &database.Subscription{
@@ -79,7 +79,7 @@ func TestTrialCleanupScheduler_RunCleanup_WithExpiredTrials(t *testing.T) {
 		Status:         "active",
 		CreatedAt:      time.Now().Add(-3 * time.Hour),
 	}
-	err = db.CreateSubscription(ctx, expiredSub2)
+	err = db.CreateSubscription(ctx, expiredSub2, "")
 	require.NoError(t, err)
 
 	activeSub := &database.Subscription{
@@ -91,7 +91,7 @@ func TestTrialCleanupScheduler_RunCleanup_WithExpiredTrials(t *testing.T) {
 		Status:         "active",
 		CreatedAt:      time.Now().Add(-30 * time.Minute),
 	}
-	err = db.CreateSubscription(ctx, activeSub)
+	err = db.CreateSubscription(ctx, activeSub, "")
 	require.NoError(t, err)
 
 	subService := newTestSubService(t, db)
@@ -123,7 +123,7 @@ func TestTrialCleanupScheduler_RunCleanup_XUIFailure(t *testing.T) {
 		Status:         "active",
 		CreatedAt:      time.Now().Add(-2 * time.Hour),
 	}
-	err = db.CreateSubscription(ctx, expiredSub)
+	err = db.CreateSubscription(ctx, expiredSub, "")
 	require.NoError(t, err)
 
 	subService := newTestSubService(t, db)

@@ -17,6 +17,7 @@ import (
 	"rs8kvn_bot/internal/xui"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestMain(m *testing.M) {
@@ -45,7 +46,7 @@ func TestSubscriptionService_Create_Success(t *testing.T) {
 	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
 
 	svc := NewSubscriptionService(db, xuiClients, sources, cfg, "", &webhook.NoopSender{})
-	result, err := svc.Create(context.Background(), 123456, "testuser")
+	result, err := svc.Create(context.Background(), 123456, "testuser", "")
 
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
@@ -71,7 +72,7 @@ func TestSubscriptionService_Create_XUIError(t *testing.T) {
 	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
 
 	svc := NewSubscriptionService(db, xuiClients, sources, cfg, "", &webhook.NoopSender{})
-	result, err := svc.Create(context.Background(), 123456, "testuser")
+	result, err := svc.Create(context.Background(), 123456, "testuser", "")
 
 	assert.Error(t, err)
 	assert.Nil(t, result)
@@ -86,7 +87,7 @@ func TestSubscriptionService_Create_DBError_RollbackSuccess(t *testing.T) {
 
 	deleteCalled := false
 	db := &testutil.MockDatabaseService{
-		CreateSubscriptionFunc: func(ctx context.Context, sub *database.Subscription) error {
+		CreateSubscriptionFunc: func(ctx context.Context, sub *database.Subscription, inviteCode string) error {
 			return errors.New("database error")
 		},
 	}
@@ -106,7 +107,7 @@ func TestSubscriptionService_Create_DBError_RollbackSuccess(t *testing.T) {
 	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
 
 	svc := NewSubscriptionService(db, xuiClients, sources, cfg, "", &webhook.NoopSender{})
-	result, err := svc.Create(context.Background(), 123456, "testuser")
+	result, err := svc.Create(context.Background(), 123456, "testuser", "")
 
 	assert.Error(t, err)
 	assert.Nil(t, result)
@@ -121,7 +122,7 @@ func TestSubscriptionService_Create_DBError_RollbackFailed(t *testing.T) {
 	}
 
 	db := &testutil.MockDatabaseService{
-		CreateSubscriptionFunc: func(ctx context.Context, sub *database.Subscription) error {
+		CreateSubscriptionFunc: func(ctx context.Context, sub *database.Subscription, inviteCode string) error {
 			return errors.New("database error")
 		},
 	}
@@ -139,11 +140,75 @@ func TestSubscriptionService_Create_DBError_RollbackFailed(t *testing.T) {
 	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
 
 	svc := NewSubscriptionService(db, xuiClients, sources, cfg, "", &webhook.NoopSender{})
-	result, err := svc.Create(context.Background(), 123456, "testuser")
+	result, err := svc.Create(context.Background(), 123456, "testuser", "")
 
 	assert.Error(t, err)
 	assert.Nil(t, result)
 	assert.Contains(t, err.Error(), "create subscription")
+}
+
+func TestSubscriptionService_Create_PropagatesInviteCodeToDB(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{}
+
+	var gotSub *database.Subscription
+	var gotInviteCode string
+	db := &testutil.MockDatabaseService{
+		CreateSubscriptionFunc: func(ctx context.Context, sub *database.Subscription, inviteCode string) error {
+			gotSub = sub
+			gotInviteCode = inviteCode
+			return nil
+		},
+	}
+	xuiClient := &testutil.MockXUIClient{
+		AddClientWithIDFunc: func(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
+			return &xui.ClientConfig{ID: "client-123", SubID: "sub-456"}, nil
+		},
+	}
+	sources := []database.Source{{ID: 1, Active: true, XUIHost: "http://localhost:2053", XUIInboundID: 1}}
+	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
+
+	svc := NewSubscriptionService(db, xuiClients, sources, cfg, "", &webhook.NoopSender{})
+	result, err := svc.Create(context.Background(), 123456, "testuser", "INV-ABC")
+
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.Equal(t, "INV-ABC", gotInviteCode, "inviteCode must be forwarded to db.CreateSubscription")
+	require.NotNil(t, gotSub)
+	assert.Equal(t, int64(123456), gotSub.TelegramID)
+	// Mock does not simulate invite resolution; the real DB layer would set
+	// sub.InviteCode/sub.ReferredBy. We only assert the parameter was passed.
+	assert.Equal(t, int64(0), result.ReferrerTGID)
+}
+
+func TestSubscriptionService_Create_EmptyInviteCodeIsNoop(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{}
+
+	var gotInviteCode string
+	db := &testutil.MockDatabaseService{
+		CreateSubscriptionFunc: func(ctx context.Context, sub *database.Subscription, inviteCode string) error {
+			gotInviteCode = inviteCode
+			return nil
+		},
+	}
+	xuiClient := &testutil.MockXUIClient{
+		AddClientWithIDFunc: func(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
+			return &xui.ClientConfig{ID: "client-123", SubID: "sub-456"}, nil
+		},
+	}
+	sources := []database.Source{{ID: 1, Active: true, XUIHost: "http://localhost:2053", XUIInboundID: 1}}
+	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
+
+	svc := NewSubscriptionService(db, xuiClients, sources, cfg, "", &webhook.NoopSender{})
+	result, err := svc.Create(context.Background(), 123456, "testuser", "")
+
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.Equal(t, "", gotInviteCode)
+	assert.Equal(t, int64(0), result.ReferrerTGID)
 }
 
 func TestSubscriptionService_GetByTelegramID_Success(t *testing.T) {

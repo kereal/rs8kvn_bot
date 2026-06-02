@@ -26,7 +26,7 @@ func TestMigration_Idempotency(t *testing.T) {
 		SubscriptionID: "sub-123",
 		Status:         "active",
 	}
-	err = db1.CreateSubscription(ctx, sub)
+	err = db1.CreateSubscription(ctx, sub, "")
 	require.NoError(t, err)
 
 	require.NoError(t, db1.Close())
@@ -83,7 +83,7 @@ func TestMigration_PreserveDataOnUpgrade(t *testing.T) {
 		SubscriptionID: "sub-999",
 		Status:         "active",
 	}
-	err = db1.CreateSubscription(ctx, sub)
+	err = db1.CreateSubscription(ctx, sub, "")
 	require.NoError(t, err)
 
 	require.NoError(t, db1.Close())

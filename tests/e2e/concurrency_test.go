@@ -27,7 +27,7 @@ func TestE2E_Concurrent_CreateSubscription_SameUser(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, err := env.subService.Create(ctx, env.chatID, env.username)
+			_, err := env.subService.Create(ctx, env.chatID, env.username, "")
 			results <- err
 		}()
 	}
@@ -71,7 +71,7 @@ func TestE2E_Concurrent_CreateSubscription_DifferentUsers(t *testing.T) {
 			defer wg.Done()
 			chatID := int64(500000 + idx)
 			username := fmt.Sprintf("user_%d", idx)
-			_, err := env.subService.Create(ctx, chatID, username)
+			_, err := env.subService.Create(ctx, chatID, username, "")
 			results <- struct {
 				chatID int64
 				err    error
@@ -194,7 +194,7 @@ func TestE2E_Concurrent_GetSubscription_SameUser(t *testing.T) {
 
 	ctx := context.Background()
 
-	_, err := env.subService.Create(ctx, env.chatID, env.username)
+	_, err := env.subService.Create(ctx, env.chatID, env.username, "")
 	require.NoError(t, err)
 
 	var wg sync.WaitGroup
@@ -235,7 +235,7 @@ func TestE2E_Concurrent_CreateDelete_SameUser(t *testing.T) {
 
 	go func() {
 		defer wg.Done()
-		_, createErr = env.subService.Create(ctx, env.chatID, env.username)
+		_, createErr = env.subService.Create(ctx, env.chatID, env.username, "")
 	}()
 
 	go func() {

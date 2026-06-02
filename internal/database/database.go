@@ -431,13 +431,25 @@ func (s *Service) GetByID(ctx context.Context, id uint) (*Subscription, error) {
 }
 
 // CreateSubscription creates a new subscription and revokes any existing active subscriptions.
-func (s *Service) CreateSubscription(ctx context.Context, sub *Subscription) error {
+// If inviteCode is non-empty and resolves to a valid Invite, sub.InviteCode and sub.ReferredBy
+// are populated atomically inside the same transaction.
+func (s *Service) CreateSubscription(ctx context.Context, sub *Subscription, inviteCode string) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// Revoke any existing active subscriptions for this user
 		if err := tx.Model(&Subscription{}).
 			Where("telegram_id = ? AND status = ?", sub.TelegramID, "active").
 			Update("status", "revoked").Error; err != nil {
 			return fmt.Errorf("failed to revoke old subscription: %w", err)
+		}
+
+		// Resolve referral invite atomically. A missing invite is non-fatal:
+		// the subscription is still created without referral attribution.
+		if inviteCode != "" {
+			var inv Invite
+			if err := tx.Where("code = ?", inviteCode).First(&inv).Error; err == nil {
+				sub.InviteCode = inviteCode
+				sub.ReferredBy = inv.ReferrerTGID
+			}
 		}
 
 		// Create the new subscription

@@ -55,7 +55,7 @@ func TestE2E_ShareLink_ExistingSubscription_Ignored(t *testing.T) {
 		SubscriptionID: "existing-sub",
 		Status:         "active",
 	}
-	require.NoError(t, env.db.CreateSubscription(ctx, existingSub))
+	require.NoError(t, env.db.CreateSubscription(ctx, existingSub, ""))
 
 	_, err := env.db.GetOrCreateInvite(ctx, 111222, "sharecode456")
 	require.NoError(t, err)
@@ -650,7 +650,7 @@ func TestE2E_InviteChain_ABC(t *testing.T) {
 
 	// User A creates subscription (referrer)
 	userA := int64(100000)
-	_, err := env.subService.Create(ctx, userA, "user_a")
+	_, err := env.subService.Create(ctx, userA, "user_a", "")
 	require.NoError(t, err)
 
 	// Create invite for A
@@ -659,7 +659,7 @@ func TestE2E_InviteChain_ABC(t *testing.T) {
 
 	// User B creates subscription (referred by A)
 	userB := int64(200000)
-	_, err = env.subService.Create(ctx, userB, "user_b")
+	_, err = env.subService.Create(ctx, userB, "user_b", "")
 	require.NoError(t, err)
 
 	subB, err := env.db.GetByTelegramID(ctx, userB)
@@ -678,7 +678,7 @@ func TestE2E_InviteChain_ABC(t *testing.T) {
 
 	// User C creates subscription (referred by B)
 	userC := int64(300000)
-	_, err = env.subService.Create(ctx, userC, "user_c")
+	_, err = env.subService.Create(ctx, userC, "user_c", "")
 	require.NoError(t, err)
 
 	subC, err := env.db.GetByTelegramID(ctx, userC)

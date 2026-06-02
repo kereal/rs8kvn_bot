@@ -21,7 +21,7 @@ func TestE2E_CreateSubscription_EmptyUsername(t *testing.T) {
 
 	ctx := context.Background()
 
-	_, err := env.subService.Create(ctx, env.chatID, "")
+	_, err := env.subService.Create(ctx, env.chatID, "", "")
 	if err == nil {
 		sub, err := env.db.GetByTelegramID(ctx, env.chatID)
 		require.NoError(t, err)
@@ -35,7 +35,7 @@ func TestE2E_CreateSubscription_InvalidChatID(t *testing.T) {
 
 	ctx := context.Background()
 
-	_, err := env.subService.Create(ctx, -123, "testuser")
+	_, err := env.subService.Create(ctx, -123, "testuser", "")
 	if err == nil {
 		sub, err := env.db.GetByTelegramID(ctx, -123)
 		require.NoError(t, err)
@@ -49,7 +49,7 @@ func TestE2E_CreateSubscription_ZeroChatID(t *testing.T) {
 
 	ctx := context.Background()
 
-	_, err := env.subService.Create(ctx, 0, "testuser")
+	_, err := env.subService.Create(ctx, 0, "testuser", "")
 	if err == nil {
 		sub, err := env.db.GetByTelegramID(ctx, 0)
 		require.NoError(t, err)
@@ -64,7 +64,7 @@ func TestE2E_Subscription_LongUsername(t *testing.T) {
 	ctx := context.Background()
 
 	longUsername := strings.Repeat("a", 1000)
-	_, err := env.subService.Create(ctx, env.chatID, longUsername)
+	_, err := env.subService.Create(ctx, env.chatID, longUsername, "")
 	if err == nil {
 		sub, err := env.db.GetByTelegramID(ctx, env.chatID)
 		require.NoError(t, err)
@@ -79,7 +79,7 @@ func TestE2E_Subscription_SpecialCharactersInUsername(t *testing.T) {
 	ctx := context.Background()
 
 	specialUsername := "test@user#123!"
-	_, err := env.subService.Create(ctx, env.chatID, specialUsername)
+	_, err := env.subService.Create(ctx, env.chatID, specialUsername, "")
 	if err != nil {
 		assert.Contains(t, err.Error(), "invalid", "Error should mention invalid characters")
 	}
@@ -233,7 +233,7 @@ func TestE2E_Service_Create_TimeoutContext(t *testing.T) {
 		return &xui.ClientConfig{ID: "test-id", Email: email, SubID: subID}, nil
 	}
 
-	_, err := env.subService.Create(ctx, env.chatID, env.username)
+	_, err := env.subService.Create(ctx, env.chatID, env.username, "")
 	assert.Error(t, err, "Should fail with timeout")
 }
 
@@ -242,7 +242,7 @@ func TestE2E_Service_Create_DatabaseClosed(t *testing.T) {
 	env.db.Close()
 
 	ctx := context.Background()
-	_, err := env.subService.Create(ctx, env.chatID, env.username)
+	_, err := env.subService.Create(ctx, env.chatID, env.username, "")
 	assert.Error(t, err, "Should fail with closed database")
 }
 
@@ -257,7 +257,7 @@ func TestE2E_GetSubscription_DatabaseClosed(t *testing.T) {
 		SubscriptionID: "test-sub-id",
 		Status:         "active",
 	}
-	env.db.CreateSubscription(ctx, sub)
+	env.db.CreateSubscription(ctx, sub, "")
 	env.db.Close()
 
 	_, err := env.db.GetByTelegramID(ctx, env.chatID)
@@ -278,7 +278,7 @@ func TestE2E_Subscription_Expired(t *testing.T) {
 		Status:         "expired",
 		ExpiryTime:     time.Now().Add(-1 * time.Hour),
 	}
-	require.NoError(t, env.db.CreateSubscription(ctx, sub))
+	require.NoError(t, env.db.CreateSubscription(ctx, sub, ""))
 
 	fetched, err := env.db.GetByTelegramID(ctx, env.chatID)
 	assert.Error(t, err, "Expired subscription should not be returned by GetByTelegramID")
@@ -299,7 +299,7 @@ func TestE2E_Subscription_AboutToExpire(t *testing.T) {
 		Status:         "active",
 		ExpiryTime:     time.Now().Add(1 * time.Hour),
 	}
-	require.NoError(t, env.db.CreateSubscription(ctx, sub))
+	require.NoError(t, env.db.CreateSubscription(ctx, sub, ""))
 
 	storedSub, err := env.db.GetByTelegramID(ctx, env.chatID)
 	require.NoError(t, err)
@@ -313,7 +313,7 @@ func TestE2E_RateLimit_ExactlyAtLimit(t *testing.T) {
 	ctx := context.Background()
 	adminID := env.cfg.TelegramAdminID
 
-	_, err := env.subService.Create(ctx, env.chatID, env.username)
+	_, err := env.subService.Create(ctx, env.chatID, env.username, "")
 	require.NoError(t, err)
 
 	for i := 0; i < 3; i++ {

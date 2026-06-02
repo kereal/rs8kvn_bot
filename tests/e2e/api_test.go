@@ -37,7 +37,7 @@ func TestE2E_APISubscriptions_Success(t *testing.T) {
 		SubscriptionID: "sub-token-abc123",
 		Status:         "active",
 	}
-	err := env.db.CreateSubscription(context.Background(), sub)
+	err := env.db.CreateSubscription(context.Background(), sub, "")
 	require.NoError(t, err)
 
 	env.cfg.APIToken = "test-api-token-12345"
@@ -299,7 +299,7 @@ func TestE2E_APISubscriptions_FiltersInactive(t *testing.T) {
 		SubscriptionID: "active-token",
 		Status:         "active",
 	}
-	err := env.db.CreateSubscription(context.Background(), activeSub)
+	err := env.db.CreateSubscription(context.Background(), activeSub, "")
 	require.NoError(t, err)
 
 	// Create a revoked subscription
@@ -310,7 +310,7 @@ func TestE2E_APISubscriptions_FiltersInactive(t *testing.T) {
 		SubscriptionID: "revoked-token",
 		Status:         "revoked",
 	}
-	err = env.db.CreateSubscription(context.Background(), revokedSub)
+	err = env.db.CreateSubscription(context.Background(), revokedSub, "")
 	require.NoError(t, err)
 
 	env.cfg.APIToken = "test-api-token"
@@ -536,7 +536,7 @@ func TestE2E_APISubscriptions_MultipleActive(t *testing.T) {
 			SubscriptionID: fmt.Sprintf("token-%d", i),
 			Status:         "active",
 		}
-		err := env.db.CreateSubscription(context.Background(), sub)
+		err := env.db.CreateSubscription(context.Background(), sub, "")
 		require.NoError(t, err)
 	}
 

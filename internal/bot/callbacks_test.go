@@ -68,7 +68,7 @@ func TestHandleCallback_CallbackDataRouting(t *testing.T) {
 				mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 					return nil, gorm.ErrRecordNotFound
 				}
-				mockDB.CreateSubscriptionFunc = func(ctx context.Context, sub *database.Subscription) error {
+				mockDB.CreateSubscriptionFunc = func(ctx context.Context, sub *database.Subscription, inviteCode string) error {
 					return nil
 				}
 				mockXUI.AddClientWithIDFunc = func(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {

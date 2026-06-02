@@ -246,7 +246,7 @@ func TestService_GetByTelegramID_ReturnsActiveOnly(t *testing.T) {
 		Status:     "active",
 		ExpiryTime: time.Now().Add(24 * time.Hour),
 	}
-	require.NoError(t, svc.CreateSubscription(context.Background(), activeSub))
+	require.NoError(t, svc.CreateSubscription(context.Background(), activeSub, ""))
 
 	retrieved, err := svc.GetByTelegramID(context.Background(), 12345)
 	require.NoError(t, err)
@@ -293,11 +293,90 @@ func TestService_CreateSubscription(t *testing.T) {
 		Status:         "active",
 	}
 
-	require.NoError(t, svc.CreateSubscription(context.Background(), sub))
+	require.NoError(t, svc.CreateSubscription(context.Background(), sub, ""))
 
 	retrieved, err := svc.GetByTelegramID(context.Background(), 54321)
 	require.NoError(t, err)
 	assert.Equal(t, "client-456", retrieved.ClientID)
+}
+
+func TestService_CreateSubscription_PersistsInviteCodeAndReferredBy(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	// Pre-create a referral invite for the referrer.
+	_, err := svc.GetOrCreateInvite(ctx, 777777, "REFER123")
+	require.NoError(t, err)
+
+	sub := &Subscription{
+		TelegramID:     888888,
+		Username:       "refby",
+		ClientID:       "c1",
+		SubscriptionID: "s1",
+		ExpiryTime:     time.Now().Add(24 * time.Hour),
+		Status:         "active",
+	}
+
+	require.NoError(t, svc.CreateSubscription(ctx, sub, "REFER123"))
+
+	retrieved, err := svc.GetByTelegramID(ctx, 888888)
+	require.NoError(t, err)
+	assert.Equal(t, "REFER123", retrieved.InviteCode, "InviteCode must be persisted on the subscription row")
+	assert.Equal(t, int64(777777), retrieved.ReferredBy, "ReferredBy must be resolved and persisted")
+
+	// Referral counts must reflect the new attribution.
+	count, err := svc.GetReferralCount(ctx, 777777)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), count)
+}
+
+func TestService_CreateSubscription_EmptyInviteCodeLeavesFieldsEmpty(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	sub := &Subscription{
+		TelegramID:     888889,
+		Username:       "noinvite",
+		ClientID:       "c2",
+		SubscriptionID: "s2",
+		ExpiryTime:     time.Now().Add(24 * time.Hour),
+		Status:         "active",
+	}
+
+	require.NoError(t, svc.CreateSubscription(ctx, sub, ""))
+
+	retrieved, err := svc.GetByTelegramID(ctx, 888889)
+	require.NoError(t, err)
+	assert.Empty(t, retrieved.InviteCode)
+	assert.Equal(t, int64(0), retrieved.ReferredBy)
+}
+
+func TestService_CreateSubscription_UnknownInviteCodeDoesNotFail(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	sub := &Subscription{
+		TelegramID:     888890,
+		Username:       "missinginvite",
+		ClientID:       "c3",
+		SubscriptionID: "s3",
+		ExpiryTime:     time.Now().Add(24 * time.Hour),
+		Status:         "active",
+	}
+
+	// An unknown invite code must not abort subscription creation.
+	require.NoError(t, svc.CreateSubscription(ctx, sub, "DOES_NOT_EXIST"))
+
+	retrieved, err := svc.GetByTelegramID(ctx, 888890)
+	require.NoError(t, err)
+	assert.Empty(t, retrieved.InviteCode)
+	assert.Equal(t, int64(0), retrieved.ReferredBy)
 }
 
 func TestService_CreateSubscription_RevokesOldSubscription(t *testing.T) {
@@ -315,7 +394,7 @@ func TestService_CreateSubscription_RevokesOldSubscription(t *testing.T) {
 		Status:     "active",
 		ExpiryTime: time.Now().Add(24 * time.Hour),
 	}
-	require.NoError(t, svc.CreateSubscription(context.Background(), oldSub))
+	require.NoError(t, svc.CreateSubscription(context.Background(), oldSub, ""))
 
 	// Create new subscription
 	newSub := &Subscription{
@@ -325,7 +404,7 @@ func TestService_CreateSubscription_RevokesOldSubscription(t *testing.T) {
 		Status:     "active",
 		ExpiryTime: time.Now().Add(48 * time.Hour),
 	}
-	require.NoError(t, svc.CreateSubscription(context.Background(), newSub))
+	require.NoError(t, svc.CreateSubscription(context.Background(), newSub, ""))
 
 	// Verify old subscription was revoked
 	var oldSubCheck Subscription
@@ -354,7 +433,7 @@ func TestService_CreateSubscription_MultipleRevokes(t *testing.T) {
 			ExpiryTime: time.Now().Add(time.Duration(i+1) * 24 * time.Hour),
 			CreatedAt:  time.Now().Add(-time.Duration(3-i) * time.Minute),
 		}
-		require.NoError(t, svc.CreateSubscription(context.Background(), sub), "iteration %d", i)
+		require.NoError(t, svc.CreateSubscription(context.Background(), sub, ""), "iteration %d", i)
 	}
 
 	var activeCount int64
@@ -381,7 +460,7 @@ func TestService_CreateSubscription_AllFields(t *testing.T) {
 		Status:         "active",
 	}
 
-	require.NoError(t, svc.CreateSubscription(context.Background(), sub))
+	require.NoError(t, svc.CreateSubscription(context.Background(), sub, ""))
 
 	var retrieved Subscription
 	require.NoError(t, svc.db.First(&retrieved, sub.ID).Error)
@@ -406,7 +485,7 @@ func TestService_CreateSubscription_Timestamps(t *testing.T) {
 		Status:     "active",
 		ExpiryTime: time.Now().Add(24 * time.Hour),
 	}
-	require.NoError(t, svc.CreateSubscription(context.Background(), sub))
+	require.NoError(t, svc.CreateSubscription(context.Background(), sub, ""))
 	after := time.Now()
 
 	assert.True(t, sub.CreatedAt.After(before) || sub.CreatedAt.Equal(before))
@@ -428,7 +507,7 @@ func TestService_UpdateSubscription(t *testing.T) {
 		ExpiryTime:     time.Now().Add(24 * time.Hour),
 		Status:         "active",
 	}
-	require.NoError(t, svc.CreateSubscription(context.Background(), sub))
+	require.NoError(t, svc.CreateSubscription(context.Background(), sub, ""))
 
 	sub.Username = "updateduser"
 
@@ -780,7 +859,7 @@ func TestService_GetAllSubscriptions(t *testing.T) {
 			ExpiryTime:     time.Now().Add(24 * time.Hour),
 			Status:         "active",
 		}
-		require.NoError(t, svc.CreateSubscription(context.Background(), sub))
+		require.NoError(t, svc.CreateSubscription(context.Background(), sub, ""))
 	}
 
 	subs, err := svc.GetAllSubscriptions(context.Background())
@@ -814,7 +893,7 @@ func TestService_CountActiveSubscriptions(t *testing.T) {
 			ExpiryTime:     time.Now().Add(24 * time.Hour),
 			Status:         "active",
 		}
-		require.NoError(t, svc.CreateSubscription(context.Background(), sub))
+		require.NoError(t, svc.CreateSubscription(context.Background(), sub, ""))
 	}
 
 	// Create expired subscription (status=active but expiry in past)
@@ -826,7 +905,7 @@ func TestService_CountActiveSubscriptions(t *testing.T) {
 		ExpiryTime:     time.Now().Add(-1 * time.Hour),
 		Status:         "active",
 	}
-	require.NoError(t, svc.CreateSubscription(context.Background(), expiredSub))
+	require.NoError(t, svc.CreateSubscription(context.Background(), expiredSub, ""))
 
 	count, err := svc.CountActiveSubscriptions(context.Background())
 	require.NoError(t, err)
@@ -1611,6 +1690,6 @@ func createTestSubscription(t *testing.T, svc *Service, telegramID int64, userna
 		ExpiryTime:     time.Now().Add(24 * time.Hour),
 		Status:         "active",
 	}
-	require.NoError(t, svc.CreateSubscription(context.Background(), sub))
+	require.NoError(t, svc.CreateSubscription(context.Background(), sub, ""))
 	return sub
 }
