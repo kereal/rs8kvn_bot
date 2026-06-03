@@ -346,6 +346,15 @@ func (c *Config) String() string {
 	)
 }
 
+// SubURL builds a full subscription URL from a subscription ID.
+func (c *Config) SubURL(subID string) string {
+	u, err := url.JoinPath(c.GlobalSubURL, subID)
+	if err != nil {
+		return c.GlobalSubURL + subID
+	}
+	return u
+}
+
 // maskURL returns a masked version of a URL for logging purposes.
 func maskURL(urlStr string) string {
 	if urlStr == "" {
