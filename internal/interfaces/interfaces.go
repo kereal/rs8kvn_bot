@@ -22,7 +22,7 @@ type Logger interface {
 type SubscriptionRepository interface {
 	GetByTelegramID(ctx context.Context, telegramID int64) (*database.Subscription, error)
 	GetByID(ctx context.Context, id uint) (*database.Subscription, error)
-	CreateSubscription(ctx context.Context, sub *database.Subscription) error
+	CreateSubscription(ctx context.Context, sub *database.Subscription, inviteCode string) error
 	UpdateSubscription(ctx context.Context, sub *database.Subscription) error
 	DeleteSubscription(ctx context.Context, telegramID int64) error
 	GetLatestSubscriptions(ctx context.Context, limit int) ([]database.Subscription, error)
@@ -39,14 +39,19 @@ type SubscriptionRepository interface {
 }
 
 type TrialRepository interface {
-	CreateTrialSubscription(ctx context.Context, inviteCode, subscriptionID, clientID string, inboundID int, trafficBytes int64, expiryTime time.Time, subURL string) (*database.Subscription, error)
+	CreateTrialSubscription(ctx context.Context, inviteCode, subscriptionID, clientID string, expiryTime time.Time) (*database.Subscription, error)
 	GetTrialSubscriptionBySubID(ctx context.Context, subscriptionID string) (*database.Subscription, error)
 	BindTrialSubscription(ctx context.Context, subscriptionID string, telegramID int64, username string) (*database.Subscription, error)
 	CountTrialRequestsByIPLastHour(ctx context.Context, ip string) (int, error)
 	CreateTrialRequest(ctx context.Context, ip string) error
-	CleanupExpiredTrials(ctx context.Context, hours int, xuiClient interface {
-		DeleteClient(ctx context.Context, email string) error
-	}) (int64, error)
+	CleanupExpiredTrials(ctx context.Context, hours int) ([]database.Subscription, error)
+}
+
+type SourceRepository interface {
+	ListSources(ctx context.Context) ([]database.Source, error)
+	GetSourcesByPlanName(ctx context.Context, planName string) ([]database.Source, error)
+	IsSourcesEmpty(ctx context.Context) (bool, error)
+	SeedDefaultSource(ctx context.Context, name, xuiHost, xuiAPIToken string, xuiInboundID int, subURL string) error
 }
 
 type InviteRepository interface {
@@ -57,10 +62,17 @@ type InviteRepository interface {
 	GetAllReferralCounts(ctx context.Context) (map[int64]int64, error)
 }
 
+type PlanRepository interface {
+	GetPlanByName(ctx context.Context, name string) (*database.Plan, error)
+	GetPlanByID(ctx context.Context, id uint) (*database.Plan, error)
+}
+
 type DatabaseService interface {
 	SubscriptionRepository
 	TrialRepository
 	InviteRepository
+	SourceRepository
+	PlanRepository
 	Ping(ctx context.Context) error
 	Close() error
 	GetPoolStats() (*database.PoolStats, error)
@@ -73,8 +85,7 @@ type XUIClient interface {
 	UpdateClient(ctx context.Context, inboundID int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, tgID int64, comment string) error
 	DeleteClient(ctx context.Context, email string) error
 	GetClientTraffic(ctx context.Context, email string) (*xui.ClientTraffic, error)
-	GetSubscriptionLink(baseURL, subID, subPath string) string
-	GetExternalURL(host string) string
+	Close() error
 }
 
 // BotAPI defines the interface for Telegram Bot API operations

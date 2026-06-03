@@ -12,7 +12,6 @@ import (
 
 	"rs8kvn_bot/internal/database"
 	"rs8kvn_bot/internal/logger"
-	"rs8kvn_bot/internal/service"
 )
 
 // CommandHandler handles command updates: /start, /help, /invite and share_ links.
@@ -89,9 +88,6 @@ func (c *CommandHandler) HandleHelp(ctx context.Context, update tgbotapi.Update)
 📥 *Получить подписку* - Создать новую подписку или получить существующую
 📋 *Подписка* - Посмотреть информацию о текущей подписке
 
-*Параметры подписки:*
-📊 Трафик: %d ГБ в месяц
-
 *Технические детали:*
 🔐 Протокол: VLESS+Reality+Vision
 📱 Совместимость: V2Ray, Xray, и другие клиенты
@@ -103,7 +99,6 @@ func (c *CommandHandler) HandleHelp(ctx context.Context, update tgbotapi.Update)
 - Подписка автоматически обновляется в конце месяца
 - Не передавайте ссылку на подписку третьим лицам
 - При истечении трафика подписка перестанет работать до следующего месяца`,
-		c.h.cfg.TrafficLimitGB,
 		c.h.cfg.ContactUsername,
 		c.h.cfg.ContactUsername,
 	)
@@ -239,7 +234,7 @@ func (c *CommandHandler) handleBindTrial(ctx context.Context, chatID int64, user
 		return nil
 	}
 
-	sub, err := c.h.db.BindTrialSubscription(ctx, subscriptionID, chatID, username)
+	sub, err := c.h.subscriptionService.BindTrial(ctx, subscriptionID, chatID, username)
 	if err != nil {
 		logger.Error("Failed to bind trial subscription",
 			zap.Error(err),
@@ -252,28 +247,8 @@ func (c *CommandHandler) handleBindTrial(ctx context.Context, chatID int64, user
 		zap.Int64("chat_id", chatID),
 		zap.String("subscription_id", subscriptionID))
 
-	// Invalidate cache
 	c.h.invalidateCache(chatID)
-
-	// Upgrade trial client in 3x-ui
-	var comment string
-	if invite, err := c.h.db.GetInviteByCode(ctx, sub.InviteCode); err == nil {
-		if referrerSub, err := c.h.db.GetByTelegramID(ctx, invite.ReferrerTGID); err == nil {
-			comment = fmt.Sprintf("from: @%s", referrerSub.Username)
-		}
-	}
-
-	trafficBytes := int64(c.h.cfg.TrafficLimitGB) * 1024 * 1024 * 1024
-	currentEmail := "trial_" + subscriptionID
-
-	// Use the shared normalized email helper (username or tgId_ fallback)
-	normalizedEmail := service.XUIEmail(username, chatID)
-
-	if err := c.h.xui.UpdateClient(ctx, sub.InboundID, currentEmail, sub.ClientID, normalizedEmail, sub.SubscriptionID, trafficBytes, time.UnixMilli(0), chatID, comment); err != nil {
-		logger.Warn("Failed to upgrade trial client in xui", zap.Error(err))
-	}
-
-	c.h.SendMessage(ctx, chatID, fmt.Sprintf("✅ Подписка активирована!\n\nДобро пожаловать!\n\nВам доступно: %dГб\n\nИспользуйте /start для работы с ботом.", c.h.cfg.TrafficLimitGB))
+	c.h.SendMessage(ctx, chatID, fmt.Sprintf("✅ Подписка активирована!\n\nДобро пожаловать!\n\nВам доступно: %dГб\n\nИспользуйте /start для работы с ботом.", c.h.subscriptionService.PlanTrafficLimitGB(ctx, sub.TelegramID)))
 
 	// Admin notification
 	if c.h.cfg.TelegramAdminID > 0 {
@@ -296,6 +271,7 @@ func (c *CommandHandler) handleBindTrial(ctx context.Context, chatID int64, user
 		} else {
 			logger.Info("Referrer notified", zap.Int64("referrer_id", sub.ReferredBy))
 		}
+		c.h.IncrementReferralCount(sub.ReferredBy)
 	}
 
 	return nil

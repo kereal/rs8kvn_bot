@@ -3,12 +3,23 @@ package config
 import (
 	"fmt"
 	"net/url"
-	"regexp"
 	"strconv"
 	"strings"
 
 	flag "rs8kvn_bot/internal/flag"
 )
+
+// Source represents a configured 3x-ui panel source.
+type Source struct {
+	ID           uint
+	Name         string
+	Active       bool
+	Trial        bool
+	XUIHost      string
+	XUIAPIToken  string
+	XUIInboundID int
+	SubURL       string
+}
 
 // Config holds all configuration for the application.
 // All fields are validated before use.
@@ -17,12 +28,6 @@ type Config struct {
 	TelegramBotToken string
 	TelegramAdminID  int64
 
-	// 3x-ui panel configuration
-	XUIHost      string
-	XUIAPIToken  string
-	XUIInboundID int
-	XUISubPath   string
-
 	// Database configuration
 	DatabasePath string
 
@@ -30,8 +35,6 @@ type Config struct {
 	LogFilePath string
 	LogLevel    string
 
-	// Subscription configuration
-	TrafficLimitGB int
 
 	// Monitoring configuration
 	HeartbeatURL      string
@@ -56,8 +59,12 @@ type Config struct {
 	DonateURL        string
 
 	// Subscription proxy configuration
+	GlobalSubURL           string
 	SubExtraServersEnabled bool
 	SubExtraServersFile    string
+
+	// Sources configuration
+	Sources []Source
 
 	// API configuration
 	APIToken string
@@ -71,14 +78,9 @@ type Config struct {
 type configFlags struct {
 	telegramBotToken          *flag.StringValue
 	telegramAdminID           *flag.Int64Value
-	xuiHost       *flag.StringValue
-	xuiAPIToken   *flag.StringValue
-	xuiInboundID  *flag.IntValue
-	xuiSubPath    *flag.StringValue
 	databasePath              *flag.StringValue
 	logFilePath               *flag.StringValue
 	logLevel                  *flag.StringValue
-	trafficLimitGB            *flag.IntValue
 	heartbeatURL              *flag.StringValue
 	heartbeatInterval         *flag.IntValue
 	sentryDSN                 *flag.StringValue
@@ -89,6 +91,7 @@ type configFlags struct {
 	contactUsername           *flag.StringValue
 	donateCardNumber          *flag.StringValue
 	donateURL                 *flag.StringValue
+	globalSubURL              *flag.StringValue
 	subExtraServersEnabled    *flag.StringValue
 	subExtraServersFile       *flag.StringValue
 	apiToken                  *flag.StringValue
@@ -105,14 +108,9 @@ func registerFlags() (*flag.Registry, *configFlags) {
 	f := &configFlags{
 		telegramBotToken:          flag.NewString(""),
 		telegramAdminID:           flag.NewInt64(0),
-		xuiHost:      flag.NewString("http://localhost:2053"),
-		xuiAPIToken:  flag.NewString(""),
-		xuiInboundID: flag.NewInt(1),
-		xuiSubPath:   flag.NewString(DefaultXUISubPath),
 		databasePath:              flag.NewString(DefaultDatabasePath),
 		logFilePath:               flag.NewString(DefaultLogFilePath),
 		logLevel:                  flag.NewString(DefaultLogLevel),
-		trafficLimitGB:            flag.NewInt(DefaultTrafficLimitGB),
 		heartbeatURL:              flag.NewString(""),
 		heartbeatInterval:         flag.NewInt(DefaultHeartbeatInterval),
 		sentryDSN:                 flag.NewString(""),
@@ -123,6 +121,7 @@ func registerFlags() (*flag.Registry, *configFlags) {
 		contactUsername:           flag.NewString(ContactUsername),
 		donateCardNumber:          flag.NewString(DonateCardNumber),
 		donateURL:                 flag.NewString(DonateURL),
+		globalSubURL:              flag.NewString(""),
 		subExtraServersEnabled:    flag.NewString("true"),
 		subExtraServersFile:       flag.NewString(""),
 		apiToken:                  flag.NewString(""),
@@ -132,14 +131,10 @@ func registerFlags() (*flag.Registry, *configFlags) {
 
 	r.Register("TELEGRAM_BOT_TOKEN", f.telegramBotToken)
 	r.Register("TELEGRAM_ADMIN_ID", f.telegramAdminID)
-	r.Register("XUI_HOST", f.xuiHost)
-	r.Register("XUI_API_TOKEN", f.xuiAPIToken)
-	r.Register("XUI_INBOUND_ID", f.xuiInboundID)
-	r.Register("XUI_SUB_PATH", f.xuiSubPath)
+	r.Register("GLOBAL_SUB_URL", f.globalSubURL)
 	r.Register("DATABASE_PATH", f.databasePath)
 	r.Register("LOG_FILE_PATH", f.logFilePath)
 	r.Register("LOG_LEVEL", f.logLevel)
-	r.Register("TRAFFIC_LIMIT_GB", f.trafficLimitGB)
 	r.Register("HEARTBEAT_URL", f.heartbeatURL)
 	r.Register("HEARTBEAT_INTERVAL", f.heartbeatInterval)
 	r.Register("SENTRY_DSN", f.sentryDSN)
@@ -177,14 +172,9 @@ func Load() (*Config, error) {
 	cfg := &Config{
 		TelegramBotToken:          f.telegramBotToken.Get(),
 		TelegramAdminID:           f.telegramAdminID.Get(),
-		XUIHost:      f.xuiHost.Get(),
-		XUIAPIToken:  f.xuiAPIToken.Get(),
-		XUIInboundID: f.xuiInboundID.Get(),
-		XUISubPath:   f.xuiSubPath.Get(),
 		DatabasePath:              f.databasePath.Get(),
 		LogFilePath:               f.logFilePath.Get(),
 		LogLevel:                  f.logLevel.Get(),
-		TrafficLimitGB:            f.trafficLimitGB.Get(),
 		HeartbeatURL:              f.heartbeatURL.Get(),
 		HeartbeatInterval:         f.heartbeatInterval.Get(),
 		SentryDSN:                 f.sentryDSN.Get(),
@@ -195,6 +185,7 @@ func Load() (*Config, error) {
 		ContactUsername:           f.contactUsername.Get(),
 		DonateCardNumber:          f.donateCardNumber.Get(),
 		DonateURL:                 f.donateURL.Get(),
+		GlobalSubURL:              f.globalSubURL.Get(),
 		SubExtraServersEnabled:    subExtraServersEnabled,
 		SubExtraServersFile:       f.subExtraServersFile.Get(),
 		APIToken:                  f.apiToken.Get(),
@@ -222,39 +213,6 @@ func (c *Config) validate() error {
 
 	if c.TelegramAdminID <= 0 {
 		return fmt.Errorf("TELEGRAM_ADMIN_ID must be positive")
-	}
-
-	// 3x-ui validation
-	if err := c.validateURL("XUI_HOST", c.XUIHost); err != nil {
-		return err
-	}
-
-	if strings.TrimSpace(c.XUIAPIToken) == "" {
-		return fmt.Errorf("XUI_API_TOKEN is required")
-	}
-
-	if c.XUIInboundID < MinInboundID {
-		return fmt.Errorf("XUI_INBOUND_ID must be at least %d", MinInboundID)
-	}
-
-	if c.XUISubPath == "" {
-		return fmt.Errorf("XUI_SUB_PATH cannot be empty")
-	}
-
-	// Проверка на path traversal (защита от ../../../etc/passwd)
-	if strings.Contains(c.XUISubPath, "..") || strings.Contains(c.XUISubPath, "/") {
-		return fmt.Errorf("XUI_SUB_PATH cannot contain '..' or '/'")
-	}
-
-	// Проверка на допустимые символы (только буквы, цифры, дефис, подчеркивание)
-	validSubPath := regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
-	if !validSubPath.MatchString(c.XUISubPath) {
-		return fmt.Errorf("XUI_SUB_PATH can only contain letters, numbers, underscore, and hyphen")
-	}
-
-	// Traffic limit validation
-	if c.TrafficLimitGB < MinTrafficLimitGB || c.TrafficLimitGB > MaxTrafficLimitGB {
-		return fmt.Errorf("TRAFFIC_LIMIT_GB must be between %d and %d", MinTrafficLimitGB, MaxTrafficLimitGB)
 	}
 
 	// Heartbeat validation
@@ -292,6 +250,15 @@ func (c *Config) validate() error {
 		}
 	}
 
+	// Global subscription URL validation (required)
+	if c.GlobalSubURL == "" {
+		return fmt.Errorf("GLOBAL_SUB_URL is required")
+	}
+	if err := c.validateURL("GLOBAL_SUB_URL", c.GlobalSubURL); err != nil {
+		return err
+	}
+	c.GlobalSubURL = strings.TrimRight(c.GlobalSubURL, "/") + "/"
+
 	// Site URL validation
 	if err := c.validateURL("SITE_URL", c.SiteURL); err != nil {
 		return err
@@ -307,11 +274,25 @@ func (c *Config) validate() error {
 		return fmt.Errorf("TRIAL_RATE_LIMIT must be between 1 and 100")
 	}
 
+
 	// SubExtraServersFile validation (only if file provided)
 	if c.SubExtraServersFile != "" {
 		// Path traversal protection
 		if strings.Contains(c.SubExtraServersFile, "..") {
 			return fmt.Errorf("SUB_EXTRA_SERVERS_FILE cannot contain '..' (path traversal)")
+		}
+	}
+
+	// Sources validation (validate individual source fields if sources are configured)
+	for i, src := range c.Sources {
+		if src.XUIHost == "" {
+			return fmt.Errorf("source %d: XUI_HOST is required", i)
+		}
+		if src.XUIAPIToken == "" {
+			return fmt.Errorf("source %d: XUI_API_TOKEN is required", i)
+		}
+		if src.XUIInboundID <= 0 {
+			return fmt.Errorf("source %d: XUI_INBOUND_ID must be positive", i)
 		}
 	}
 
@@ -343,33 +324,35 @@ func (c *Config) String() string {
 	return fmt.Sprintf("Config{"+
 		"TelegramBotToken=***, "+
 		"TelegramAdminID=%d, "+
-		"XUIHost=%s, "+
-		"XUIAPIToken=***, "+
-		"XUIInboundID=%d, "+
-		"XUISubPath=%s, "+
 		"DatabasePath=%s, "+
 		"LogFilePath=%s, "+
 		"LogLevel=%s, "+
-		"TrafficLimitGB=%d, "+
 		"HeartbeatURL=%s, "+
 		"HeartbeatInterval=%d, "+
+		"GlobalSubURL=%s, "+
 		"SentryDSN=***, "+
 		"SubExtraServersEnabled=%v, "+
 		"SubExtraServersFile=%s, "+
 		"}",
 		c.TelegramAdminID,
-		c.XUIHost,
-		c.XUIInboundID,
-		c.XUISubPath,
 		c.DatabasePath,
 		c.LogFilePath,
 		c.LogLevel,
-		c.TrafficLimitGB,
 		maskURL(c.HeartbeatURL),
 		c.HeartbeatInterval,
+		maskURL(c.GlobalSubURL),
 		c.SubExtraServersEnabled,
 		c.SubExtraServersFile,
 	)
+}
+
+// SubURL builds a full subscription URL from a subscription ID.
+func (c *Config) SubURL(subID string) string {
+	u, err := url.JoinPath(c.GlobalSubURL, subID)
+	if err != nil {
+		return c.GlobalSubURL + subID
+	}
+	return u
 }
 
 // maskURL returns a masked version of a URL for logging purposes.

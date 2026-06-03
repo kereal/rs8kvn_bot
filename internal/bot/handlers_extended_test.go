@@ -284,8 +284,6 @@ func TestGetMainMenuKeyboard_ButtonCounts(t *testing.T) {
 	})
 }
 
-
-
 // TestGetHelpText_EdgeCases tests help text with various traffic limits
 func TestGetHelpText_EdgeCases(t *testing.T) {
 	t.Parallel()
@@ -295,51 +293,51 @@ func TestGetHelpText_EdgeCases(t *testing.T) {
 
 	tests := []struct {
 		name            string
-		trafficLimitGB  int
+		trafficLimit    int
 		subscriptionURL string
 	}{
 		{
 			name:            "zero traffic limit",
-			trafficLimitGB:  0,
+			trafficLimit:    0,
 			subscriptionURL: "https://example.com/sub",
 		},
 		{
 			name:            "one GB traffic limit",
-			trafficLimitGB:  1,
+			trafficLimit:    1,
 			subscriptionURL: "https://example.com/sub",
 		},
 		{
 			name:            "large traffic limit",
-			trafficLimitGB:  1000,
+			trafficLimit:    1000,
 			subscriptionURL: "https://example.com/sub",
 		},
 		{
 			name:            "empty subscription URL",
-			trafficLimitGB:  10,
+			trafficLimit:    10,
 			subscriptionURL: "",
 		},
 		{
 			name:            "very long subscription URL",
-			trafficLimitGB:  10,
+			trafficLimit:    10,
 			subscriptionURL: "https://example.com/" + strings.Repeat("a", 500),
 		},
 		{
 			name:            "subscription URL with special chars",
-			trafficLimitGB:  10,
+			trafficLimit:    10,
 			subscriptionURL: "https://example.com/sub?key=value&other=123",
 		},
 		{
 			name:            "unicode in URL",
-			trafficLimitGB:  10,
+			trafficLimit:    10,
 			subscriptionURL: "https://example.com/подписка",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			text := h.getHelpText(tt.trafficLimitGB, tt.subscriptionURL)
+			text := h.getHelpText(tt.trafficLimit, tt.subscriptionURL)
 
-			assert.Contains(t, text, fmt.Sprintf("%dГб", tt.trafficLimitGB))
+			assert.Contains(t, text, fmt.Sprintf("%dГб", tt.trafficLimit))
 			assert.Contains(t, text, tt.subscriptionURL)
 			assert.Contains(t, text, "Happ")
 			assert.Contains(t, text, "iOS")
@@ -637,8 +635,6 @@ func TestHelpText_InjectionSafety(t *testing.T) {
 		})
 	}
 }
-
-
 
 // TestFormatUserLink_NumericUsername verifies that purely numeric usernames
 // (e.g. 11) use tg://user?id= fallback instead of an unresolvable t.me/11 link.

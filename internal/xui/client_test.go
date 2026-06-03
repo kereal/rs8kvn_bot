@@ -119,35 +119,6 @@ func TestTruncateString(t *testing.T) {
 	assert.Equal(t, "", truncateString("", 5))
 }
 
-func TestGetExternalURL(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		input    string
-		expected string
-	}{
-		{"https://example.com:2053/path", "https://example.com:2053"},
-		{"http://localhost:2053", "http://localhost:2053"},
-		{"invalid-url", "invalid-url"},
-		{"https://example.com", "https://example.com"},
-		{"", ""},
-	}
-
-	for _, tt := range tests {
-		assert.Equal(t, tt.expected, GetExternalURL(tt.input))
-	}
-}
-
-func TestGetSubscriptionLink(t *testing.T) {
-	t.Parallel()
-
-	client, err := NewClient("https://example.com", testAPIToken)
-	require.NoError(t, err)
-
-	result := client.GetSubscriptionLink("https://example.com", "sub123", "sub")
-	assert.Equal(t, "https://example.com/sub/sub123", result)
-}
-
 func TestClientClose(t *testing.T) {
 	t.Parallel()
 

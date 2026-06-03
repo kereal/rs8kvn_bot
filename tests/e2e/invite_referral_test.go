@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"rs8kvn_bot/internal/database"
+	"rs8kvn_bot/internal/interfaces"
 	"rs8kvn_bot/internal/service"
 	"rs8kvn_bot/internal/web"
 	"rs8kvn_bot/internal/webhook"
@@ -52,11 +53,9 @@ func TestE2E_ShareLink_ExistingSubscription_Ignored(t *testing.T) {
 		Username:       env.username,
 		ClientID:       "existing-client",
 		SubscriptionID: "existing-sub",
-		InboundID:      1,
-		TrafficLimit:   107374182400,
 		Status:         "active",
 	}
-	require.NoError(t, env.db.CreateSubscription(ctx, existingSub))
+	require.NoError(t, env.db.CreateSubscription(ctx, existingSub, ""))
 
 	_, err := env.db.GetOrCreateInvite(ctx, 111222, "sharecode456")
 	require.NoError(t, err)
@@ -99,8 +98,10 @@ func TestE2E_InviteLink_CreatesTrial(t *testing.T) {
 
 	env.cfg.TrialRateLimit = 100
 
-	subService := service.NewSubscriptionService(env.db, env.xui, env.cfg, &webhook.NoopSender{})
-	srv := web.NewServer("127.0.0.1:0", env.db, env.xui, env.cfg, env.botConfig, subService, nil)
+	xuiClients := map[uint]interfaces.XUIClient{1: env.xui}
+	sources := []database.Source{{Name: "main", XUIHost: "https://panel.example.com", XUIAPIToken: "test-api-token", XUIInboundID: 1, Active: true,  ID: 1}}
+	subService := service.NewSubscriptionService(env.db, xuiClients, sources, env.cfg, env.cfg.GlobalSubURL, &webhook.NoopSender{})
+	srv := web.NewServer("127.0.0.1:0", env.db, env.cfg, env.botConfig, subService, nil)
 
 	req := httptest.NewRequest("GET", "/i/"+inviteCode, nil)
 	req.Header.Set("X-Forwarded-For", "10.1.1.1")
@@ -118,7 +119,7 @@ func TestE2E_InviteLink_CreatesTrial(t *testing.T) {
 	require.NoError(t, err)
 	trialCount := 0
 	for _, sub := range allSubs {
-		if sub.IsTrial {
+		if sub.PlanID == 1 {
 			trialCount++
 		}
 	}
@@ -132,8 +133,10 @@ func TestE2E_InviteLink_InvalidCode(t *testing.T) {
 
 	env.cfg.TrialRateLimit = 100
 
-	subService := service.NewSubscriptionService(env.db, env.xui, env.cfg, &webhook.NoopSender{})
-	srv := web.NewServer("127.0.0.1:0", env.db, env.xui, env.cfg, env.botConfig, subService, nil)
+	xuiClients := map[uint]interfaces.XUIClient{1: env.xui}
+	sources := []database.Source{{Name: "main", XUIHost: "https://panel.example.com", XUIAPIToken: "test-api-token", XUIInboundID: 1, Active: true,  ID: 1}}
+	subService := service.NewSubscriptionService(env.db, xuiClients, sources, env.cfg, env.cfg.GlobalSubURL, &webhook.NoopSender{})
+	srv := web.NewServer("127.0.0.1:0", env.db, env.cfg, env.botConfig, subService, nil)
 
 	req := httptest.NewRequest("GET", "/i/nonexistent_code", nil)
 	req.Header.Set("X-Forwarded-For", "10.1.2.1")
@@ -161,8 +164,10 @@ func TestE2E_InviteLink_XuiLoginFails(t *testing.T) {
 		return nil, fmt.Errorf("authentication failed")
 	}
 
-	subService := service.NewSubscriptionService(env.db, env.xui, env.cfg, &webhook.NoopSender{})
-	srv := web.NewServer("127.0.0.1:0", env.db, env.xui, env.cfg, env.botConfig, subService, nil)
+	xuiClients := map[uint]interfaces.XUIClient{1: env.xui}
+	sources := []database.Source{{Name: "main", XUIHost: "https://panel.example.com", XUIAPIToken: "test-api-token", XUIInboundID: 1, Active: true,  ID: 1}}
+	subService := service.NewSubscriptionService(env.db, xuiClients, sources, env.cfg, env.cfg.GlobalSubURL, &webhook.NoopSender{})
+	srv := web.NewServer("127.0.0.1:0", env.db, env.cfg, env.botConfig, subService, nil)
 
 	req := httptest.NewRequest("GET", "/i/"+inviteCode, nil)
 	req.Header.Set("X-Forwarded-For", "10.1.3.1")
@@ -199,8 +204,10 @@ func TestE2E_AutoRelogin_On401(t *testing.T) {
 		}, nil
 	}
 
-	subService := service.NewSubscriptionService(env.db, env.xui, env.cfg, &webhook.NoopSender{})
-	srv := web.NewServer("127.0.0.1:0", env.db, env.xui, env.cfg, env.botConfig, subService, nil)
+	xuiClients := map[uint]interfaces.XUIClient{1: env.xui}
+	sources := []database.Source{{Name: "main", XUIHost: "https://panel.example.com", XUIAPIToken: "test-api-token", XUIInboundID: 1, Active: true,  ID: 1}}
+	subService := service.NewSubscriptionService(env.db, xuiClients, sources, env.cfg, env.cfg.GlobalSubURL, &webhook.NoopSender{})
+	srv := web.NewServer("127.0.0.1:0", env.db, env.cfg, env.botConfig, subService, nil)
 
 	req := httptest.NewRequest("GET", "/i/"+inviteCode, nil)
 	req.Header.Set("X-Forwarded-For", "10.2.1.1")
@@ -223,8 +230,10 @@ func TestE2E_InviteLink_RateLimitExceeded(t *testing.T) {
 
 	env.cfg.TrialRateLimit = 1
 
-	subService := service.NewSubscriptionService(env.db, env.xui, env.cfg, &webhook.NoopSender{})
-	srv := web.NewServer("127.0.0.1:0", env.db, env.xui, env.cfg, env.botConfig, subService, nil)
+	xuiClients := map[uint]interfaces.XUIClient{1: env.xui}
+	sources := []database.Source{{Name: "main", XUIHost: "https://panel.example.com", XUIAPIToken: "test-api-token", XUIInboundID: 1, Active: true,  ID: 1}}
+	subService := service.NewSubscriptionService(env.db, xuiClients, sources, env.cfg, env.cfg.GlobalSubURL, &webhook.NoopSender{})
+	srv := web.NewServer("127.0.0.1:0", env.db, env.cfg, env.botConfig, subService, nil)
 
 	req1 := httptest.NewRequest("GET", "/i/"+inviteCode, nil)
 	req1.Header.Set("X-Forwarded-For", "10.1.4.1")
@@ -253,8 +262,10 @@ func TestE2E_InviteLink_FullFlow_BindTrial(t *testing.T) {
 
 	env.cfg.TrialRateLimit = 100
 
-	subService := service.NewSubscriptionService(env.db, env.xui, env.cfg, &webhook.NoopSender{})
-	srv := web.NewServer("127.0.0.1:0", env.db, env.xui, env.cfg, env.botConfig, subService, nil)
+	xuiClients := map[uint]interfaces.XUIClient{1: env.xui}
+	sources := []database.Source{{Name: "main", XUIHost: "https://panel.example.com", XUIAPIToken: "test-api-token", XUIInboundID: 1, Active: true,  ID: 1}}
+	subService := service.NewSubscriptionService(env.db, xuiClients, sources, env.cfg, env.cfg.GlobalSubURL, &webhook.NoopSender{})
+	srv := web.NewServer("127.0.0.1:0", env.db, env.cfg, env.botConfig, subService, nil)
 
 	req := httptest.NewRequest("GET", "/i/"+inviteCode, nil)
 	req.Header.Set("X-Forwarded-For", "10.1.5.1")
@@ -286,7 +297,7 @@ func TestE2E_InviteLink_FullFlow_BindTrial(t *testing.T) {
 	require.NoError(t, err, "Subscription should be bound to Telegram ID")
 	assert.Equal(t, env.chatID, sub.TelegramID)
 	assert.Equal(t, env.username, sub.Username)
-	assert.False(t, sub.IsTrial, "Should no longer be marked as trial")
+	assert.False(t, sub.PlanID == 1, "Should no longer be marked as trial")
 }
 
 func TestE2E_FullCycle_InviteToQR(t *testing.T) {
@@ -301,8 +312,10 @@ func TestE2E_FullCycle_InviteToQR(t *testing.T) {
 
 	env.cfg.TrialRateLimit = 100
 
-	subService := service.NewSubscriptionService(env.db, env.xui, env.cfg, &webhook.NoopSender{})
-	srv := web.NewServer("127.0.0.1:0", env.db, env.xui, env.cfg, env.botConfig, subService, nil)
+	xuiClients := map[uint]interfaces.XUIClient{1: env.xui}
+	sources := []database.Source{{Name: "main", XUIHost: "https://panel.example.com", XUIAPIToken: "test-api-token", XUIInboundID: 1, Active: true,  ID: 1}}
+	subService := service.NewSubscriptionService(env.db, xuiClients, sources, env.cfg, env.cfg.GlobalSubURL, &webhook.NoopSender{})
+	srv := web.NewServer("127.0.0.1:0", env.db, env.cfg, env.botConfig, subService, nil)
 
 	req := httptest.NewRequest("GET", "/i/"+inviteCode, nil)
 	req.Header.Set("X-Forwarded-For", "10.2.1.1")
@@ -334,7 +347,7 @@ func TestE2E_FullCycle_InviteToQR(t *testing.T) {
 	sub, err := env.db.GetByTelegramID(ctx, env.chatID)
 	require.NoError(t, err)
 	assert.Equal(t, env.chatID, sub.TelegramID)
-	assert.False(t, sub.IsTrial, "Should be converted from trial")
+	assert.False(t, sub.PlanID == 1, "Should be converted from trial")
 	assert.NotEmpty(t, sub.Username, "Username should be stored")
 
 	resetMockBotAPI(env.botAPI)
@@ -419,8 +432,10 @@ func TestE2E_FullCycle_MultipleUsersViaInvite(t *testing.T) {
 
 	env.cfg.TrialRateLimit = 100
 
-	subService := service.NewSubscriptionService(env.db, env.xui, env.cfg, &webhook.NoopSender{})
-	srv := web.NewServer("127.0.0.1:0", env.db, env.xui, env.cfg, env.botConfig, subService, nil)
+	xuiClients := map[uint]interfaces.XUIClient{1: env.xui}
+	sources := []database.Source{{Name: "main", XUIHost: "https://panel.example.com", XUIAPIToken: "test-api-token", XUIInboundID: 1, Active: true,  ID: 1}}
+	subService := service.NewSubscriptionService(env.db, xuiClients, sources, env.cfg, env.cfg.GlobalSubURL, &webhook.NoopSender{})
+	srv := web.NewServer("127.0.0.1:0", env.db, env.cfg, env.botConfig, subService, nil)
 
 	user1ChatID := int64(400001)
 	user2ChatID := int64(400002)
@@ -454,7 +469,7 @@ func TestE2E_FullCycle_MultipleUsersViaInvite(t *testing.T) {
 		sub, err := env.db.GetByTelegramID(ctx, chatID)
 		require.NoError(t, err, "User %d should have subscription", chatID)
 		assert.Equal(t, chatID, sub.TelegramID)
-		assert.False(t, sub.IsTrial)
+		assert.False(t, sub.PlanID == 1)
 		assert.Equal(t, referrerID, sub.ReferredBy, "User %d should have correct referrer", chatID)
 	}
 }
@@ -475,8 +490,10 @@ func TestE2E_FullCycle_InviteThenShare(t *testing.T) {
 
 	env.cfg.TrialRateLimit = 100
 
-	subService := service.NewSubscriptionService(env.db, env.xui, env.cfg, &webhook.NoopSender{})
-	srv := web.NewServer("127.0.0.1:0", env.db, env.xui, env.cfg, env.botConfig, subService, nil)
+	xuiClients := map[uint]interfaces.XUIClient{1: env.xui}
+	sources := []database.Source{{Name: "main", XUIHost: "https://panel.example.com", XUIAPIToken: "test-api-token", XUIInboundID: 1, Active: true,  ID: 1}}
+	subService := service.NewSubscriptionService(env.db, xuiClients, sources, env.cfg, env.cfg.GlobalSubURL, &webhook.NoopSender{})
+	srv := web.NewServer("127.0.0.1:0", env.db, env.cfg, env.botConfig, subService, nil)
 
 	req := httptest.NewRequest("GET", "/i/"+webInviteCode, nil)
 	req.Header.Set("X-Forwarded-For", "10.4.1.1")
@@ -523,8 +540,10 @@ func TestE2E_FullCycle_ConcurrentInviteAccess(t *testing.T) {
 
 	env.cfg.TrialRateLimit = 1000
 
-	subService := service.NewSubscriptionService(env.db, env.xui, env.cfg, &webhook.NoopSender{})
-	srv := web.NewServer("127.0.0.1:0", env.db, env.xui, env.cfg, env.botConfig, subService, nil)
+	xuiClients := map[uint]interfaces.XUIClient{1: env.xui}
+	sources := []database.Source{{Name: "main", XUIHost: "https://panel.example.com", XUIAPIToken: "test-api-token", XUIInboundID: 1, Active: true,  ID: 1}}
+	subService := service.NewSubscriptionService(env.db, xuiClients, sources, env.cfg, env.cfg.GlobalSubURL, &webhook.NoopSender{})
+	srv := web.NewServer("127.0.0.1:0", env.db, env.cfg, env.botConfig, subService, nil)
 
 	var wg sync.WaitGroup
 	results := make(chan int, 10)
@@ -559,7 +578,7 @@ func TestE2E_FullCycle_ConcurrentInviteAccess(t *testing.T) {
 	require.NoError(t, err)
 	trialCount := 0
 	for _, sub := range allSubs {
-		if sub.IsTrial && sub.TelegramID == 0 {
+		if sub.PlanID == 1 && sub.TelegramID == 0 {
 			trialCount++
 		}
 	}
@@ -631,7 +650,7 @@ func TestE2E_InviteChain_ABC(t *testing.T) {
 
 	// User A creates subscription (referrer)
 	userA := int64(100000)
-	_, err := env.subService.Create(ctx, userA, "user_a")
+	_, err := env.subService.Create(ctx, userA, "user_a", "")
 	require.NoError(t, err)
 
 	// Create invite for A
@@ -640,7 +659,7 @@ func TestE2E_InviteChain_ABC(t *testing.T) {
 
 	// User B creates subscription (referred by A)
 	userB := int64(200000)
-	_, err = env.subService.Create(ctx, userB, "user_b")
+	_, err = env.subService.Create(ctx, userB, "user_b", "")
 	require.NoError(t, err)
 
 	subB, err := env.db.GetByTelegramID(ctx, userB)
@@ -659,7 +678,7 @@ func TestE2E_InviteChain_ABC(t *testing.T) {
 
 	// User C creates subscription (referred by B)
 	userC := int64(300000)
-	_, err = env.subService.Create(ctx, userC, "user_c")
+	_, err = env.subService.Create(ctx, userC, "user_c", "")
 	require.NoError(t, err)
 
 	subC, err := env.db.GetByTelegramID(ctx, userC)

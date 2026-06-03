@@ -110,5 +110,3 @@ func TestMessageFormat_EscapeMarkdownComprehensive(t *testing.T) {
 	assert.Contains(t, result, "\\+", "Plus should be escaped")
 	assert.Contains(t, result, "\\-", "Minus should be escaped")
 }
-
-

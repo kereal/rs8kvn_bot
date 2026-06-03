@@ -38,11 +38,9 @@ func TestMemoryLeak_CreateDeleteCycle(t *testing.T) {
 			Username:       "leaktest",
 			ClientID:       "client-leak",
 			SubscriptionID: "sub-leak",
-			InboundID:      1,
-			TrafficLimit:   10737418240,
 			Status:         "active",
 		}
-		err = db.CreateSubscription(ctx, sub)
+		err = db.CreateSubscription(ctx, sub, "")
 		require.NoError(t, err)
 
 		err = db.Close()

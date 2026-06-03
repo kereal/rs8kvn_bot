@@ -7,6 +7,8 @@ import (
 	"os"
 	"os/signal"
 	"runtime/debug"
+	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -15,6 +17,7 @@ import (
 	"rs8kvn_bot/internal/config"
 	"rs8kvn_bot/internal/database"
 	"rs8kvn_bot/internal/heartbeat"
+	"rs8kvn_bot/internal/interfaces"
 	"rs8kvn_bot/internal/logger"
 	"rs8kvn_bot/internal/scheduler"
 	"rs8kvn_bot/internal/service"
@@ -144,16 +147,82 @@ func main() {
 	}()
 	logger.Info("Database initialized successfully")
 
-	// Initialize 3x-ui client
-	xuiClient, err := xui.NewClient(cfg.XUIHost, cfg.XUIAPIToken)
+	// Seed default source from env vars if sources table is empty
+	seedCtx, seedCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer seedCancel()
+	isEmpty, err := dbService.IsSourcesEmpty(seedCtx)
 	if err != nil {
-		logger.Fatal("Failed to initialize 3x-ui client", zap.Error(err))
+		logger.Fatal("Failed to check sources table", zap.Error(err))
 	}
+	if isEmpty {
+		xuiHost := os.Getenv("XUI_HOST")
+		xuiAPIToken := os.Getenv("XUI_API_TOKEN")
+		xuiInboundIDStr := os.Getenv("XUI_INBOUND_ID")
+		var xuiInboundID int
+		if xuiInboundIDStr != "" {
+			if parsed, convErr := strconv.Atoi(xuiInboundIDStr); convErr == nil {
+				xuiInboundID = parsed
+			} else {
+				logger.Warn("Invalid XUI_INBOUND_ID",
+					zap.String("raw_value", xuiInboundIDStr),
+					zap.Error(convErr))
+			}
+		}
+		defaultSubURL := os.Getenv("DEFAULT_SOURCE_SUB_URL")
+		if defaultSubURL == "" && xuiHost != "" {
+			defaultSubURL = strings.TrimRight(xuiHost, "/") + "/sub/"
+		}
+		if err := dbService.SeedDefaultSource(seedCtx, "default", xuiHost, xuiAPIToken, xuiInboundID, defaultSubURL); err != nil {
+			logger.Fatal("Failed to seed default source", zap.Error(err))
+		}
+		logger.Info("Default source seeded", zap.String("host", xuiHost))
+	} else {
+		seedCancel()
+	}
+	seedCancel()
+
+	// Load sources and create XUI clients
+	sources, err := dbService.ListSources(context.Background())
+	if err != nil {
+		logger.Fatal("Failed to list sources", zap.Error(err))
+	}
+	if len(sources) == 0 {
+		logger.Fatal("No sources configured")
+	}
+
+	xuiClients := make(map[uint]interfaces.XUIClient)
+	for _, src := range sources {
+		client, initErr := xui.NewClient(src.XUIHost, src.XUIAPIToken)
+		if initErr != nil {
+			logger.Fatal("Failed to initialize 3x-ui client",
+				zap.Uint("source_id", src.ID),
+				zap.Error(initErr))
+		}
+		xuiClients[src.ID] = client
+	}
+
+	// Close all XUI clients on shutdown
 	defer func() {
-		if err := xuiClient.Close(); err != nil {
-			logger.Error("Failed to close 3x-ui client", zap.Error(err))
+		for id, client := range xuiClients {
+			if err := client.Close(); err != nil {
+				logger.Error("Failed to close 3x-ui client",
+					zap.Uint("source_id", id),
+					zap.Error(err))
+			}
 		}
 	}()
+
+	// For legacy health check — use the first active XUI client
+	var legacyXUIClient interfaces.XUIClient
+	for _, src := range sources {
+		if src.Active {
+			legacyXUIClient = xuiClients[src.ID]
+			break
+		}
+	}
+	if legacyXUIClient == nil {
+		logger.Warn("No active source found — legacy XUI client will be nil; health check on /ping will be skipped")
+	}
 
 	// Initialize Telegram bot with retry to handle transient network issues
 	logger.Info("Validating Telegram bot token")
@@ -217,17 +286,17 @@ func main() {
 	webhookSender := webhook.NewSender(cfg.ProxyManagerWebhookURL, cfg.ProxyManagerWebhookSecret)
 
 	// Create subscription service (shared between bot handler and web server)
-	subService := service.NewSubscriptionService(dbService, xuiClient, cfg, webhookSender)
+	subService := service.NewSubscriptionService(dbService, xuiClients, sources, cfg, cfg.GlobalSubURL, webhookSender)
 
 	// Create subscription proxy service
 	subProxy := subproxy.NewService(cfg)
 	defer subProxy.Stop()
 
 	// Create bot handler
-	handler := bot.NewHandler(botAPI, cfg, dbService, xuiClient, botConfig, subService, getVersion())
+	handler := bot.NewHandler(botAPI, cfg, dbService, legacyXUIClient, botConfig, subService, getVersion())
 
 	// Initialize and start web server (health + trial pages)
-	webServer := web.NewServer(fmt.Sprintf(":%d", cfg.HealthCheckPort), dbService, xuiClient, cfg, botConfig, subService, subProxy)
+	webServer := web.NewServer(fmt.Sprintf(":%d", cfg.HealthCheckPort), dbService, cfg, botConfig, subService, subProxy)
 	webServer.RegisterChecker("database", func(ctx context.Context) web.ComponentHealth {
 		if err := dbService.Ping(ctx); err != nil {
 			return web.ComponentHealth{Status: web.StatusDown, Message: err.Error()}
@@ -235,7 +304,10 @@ func main() {
 		return web.ComponentHealth{Status: web.StatusOK}
 	})
 	webServer.RegisterChecker("xui", func(ctx context.Context) web.ComponentHealth {
-		if err := xuiClient.Ping(ctx); err != nil {
+		if legacyXUIClient == nil {
+			return web.ComponentHealth{Status: web.StatusDegraded, Message: "no active XUI client"}
+		}
+		if err := legacyXUIClient.Ping(ctx); err != nil {
 			return web.ComponentHealth{Status: web.StatusDegraded, Message: err.Error()}
 		}
 		return web.ComponentHealth{Status: web.StatusOK}
@@ -358,7 +430,7 @@ func main() {
 	go func() {
 		defer recoverAndReport("Trial cleanup scheduler")
 		defer wg.Done()
-		trialSched := scheduler.NewTrialCleanupScheduler(dbService, xuiClient, cfg.TrialDurationHours)
+		trialSched := scheduler.NewTrialCleanupScheduler(subService)
 		trialSched.Start(ctx)
 	}()
 

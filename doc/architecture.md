@@ -151,7 +151,7 @@ internal/
 │   └── breaker.go           # Circuit breaker (5/30s/3-half-open)
 ├── database/         # Persistence
 │   ├── database.go          # GORM service + migrations
-│   └── migrations/          # 000..003 SQL files (embedded)
+│   └── migrations/          # 000..011 SQL files (embedded)
 ├── config/           # Configuration
 │   ├── config.go            # Load + validate
 │   └── constants.go         # All defaults & limits
@@ -349,8 +349,14 @@ CREATE INDEX idx_trial_requests_ip             ON trial_requests(ip);
 ```
 
 **Race-safe patterns:**
-- `BindTrialSubscription`: `UPDATE WHERE telegram_id=0 AND is_trial=true` + `RowsAffected` check
+- `BindTrialSubscription`: `UPDATE WHERE telegram_id=0 AND plan_id=trialPlanID` + `RowsAffected` check,
+  plus defensive revoke of any pre-existing active subscriptions for the same
+  `telegram_id` (prevents double-active race when a free sub and a trial sub
+  are created concurrently for the same user)
 - `CleanupExpiredTrials`: `DELETE ... RETURNING` to atomically fetch deleted rows
+- `CreateTrial` (service layer): iterates over all trial sources, aggregates
+  errors via `errors.Join`, continues on partial success (first `succeeded` ≥ 1
+  ⇒ return success with `logger.Warn("partial failures")`)
 - `GetOrCreateInvite`: always returns the oldest (canonical) code for the referrer.
   The UNIQUE constraint + "one code per referrer" guarantee is enforced by migration 004
   (aggressive deduplication of historical duplicates that accumulated because 004 was
@@ -491,33 +497,64 @@ SIGQUIT (kill -3) → core dump (not handled by us)
 │ telegram_id          int64    INDEX                         │
 │ username             string   INDEX                         │
 │ client_id            string                                 │
-│ subscription_id      string   INDEX (unique)                 │
-│ inbound_id           int      INDEX                         │
-│ traffic_limit        int64    default: 107374182400 (100GB)  │
+│ subscription_id      string   INDEX (unique)                │
 │ expiry_time          time     INDEX                         │
-│ status               string   default: "active"  INDEX       │
-│ subscription_url     string                                  │
+│ status               string   default: "active"  INDEX      │
 │ invite_code          string   INDEX                         │
-│ is_trial             bool     default: false  INDEX         │
+│ plan_id              uint     INDEX   (FK → plans)          │
 │ referred_by          int64    INDEX                         │
 │ created_at           time     autoCreate                    │
 │ updated_at           time     autoUpdate                    │
-│ deleted_at           gorm.DeletedAt  INDEX (soft delete)    │
 └─────────────────────────────────────────────────────────────┘
-                              │
-                              │ referred_by
+                              │  plan_id
                               ▼
+                    ┌─────────────────────┐
+                    │       plans         │
+                    ├─────────────────────┤
+                    │ id (PK)             │
+                    │ name (UNIQUE)       │   e.g. "free", "trial"
+                    │ price               │   (cents)
+                    │ devices_limit       │
+                    │ traffic_limit       │   bytes (was 107374182400)
+                    │ duration            │   hours (0 = no expiry)
+                    │ created_at          │
+                    │ updated_at          │
+                    └──────────┬──────────┘
+                               │  M:N
+                               ▼
+                    ┌─────────────────────┐
+                    │    plan_sources     │
+                    ├─────────────────────┤
+                    │ plan_id    (PK,FK)  │
+                    │ source_id  (PK,FK)  │
+                    └──────────┬──────────┘
+                               │  M:N
+                               ▼
+                    ┌─────────────────────┐
+                    │      sources        │
+                    ├─────────────────────┤
+                    │ id (PK)             │
+                    │ name                │
+                    │ active              │   default: true
+                    │ x_ui_host           │   3x-ui panel URL
+                    │ x_ui_api_token      │
+                    │ x_ui_inbound_id     │
+                    │ sub_url             │   per-source subscription URL
+                    │ created_at          │
+                    │ updated_at          │
+                    └─────────────────────┘
+
                     ┌─────────────────────┐
                     │      invites        │
                     ├─────────────────────┤
                     │ code (PK)           │
-                    │ referrer_tg_id (FK) │
+                    │ referrer_tg_id (UNIQUE)│ one canonical code per user
                     │ created_at          │
                     └─────────────────────┘
                               │
-                              │ 1:N (referrer → referrals)
+                              │ subscriptions.referred_by → referrer_tg_id
                               ▼
-                    (subscriptions.referred_by points here)
+                    (referral attribution, see GetAllReferralCounts)
 
                     ┌─────────────────────┐
                     │   trial_requests    │
@@ -527,10 +564,19 @@ SIGQUIT (kill -3) → core dump (not handled by us)
                     │ created_at          │
                     └─────────────────────┘
                               │
-                              │ IP-based rate limit
+                              │ IP-based rate limit (1h window)
                               ▼
                     (checked before trial creation)
 ```
+
+**Schema changes (v2.4.0, feature/sources-table):**
+- Removed from `subscriptions`: `inbound_id`, `traffic_limit`, `subscription_url`, `is_trial`, `deleted_at` (soft delete replaced by `status='revoked'`)
+- New tables: `sources` (3x-ui panel registry), `plans` (free/trial), `plan_sources` (M:N)
+- `subscriptions.plan_id` foreign key to `plans` (replaces `is_trial` boolean)
+- `Source.Trial` field removed; trial sources now resolved dynamically by
+  `sources` JOINed with `plan_sources` JOIN `plans WHERE plans.name='trial'`
+- `TRAFFIC_LIMIT_GB` config removed; traffic limit fetched from plan (`plan.traffic_limit`)
+- Source columns renamed to `x_ui_host`, `x_ui_api_token`, `x_ui_inbound_id` (snake_case aligned with GORM tags)
 
 **Indexes rationale:**
 - `telegram_id + status` → fast lookup of user's active subscription

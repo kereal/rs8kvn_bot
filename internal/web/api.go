@@ -38,8 +38,7 @@ func (s *Server) GetSubscriptions(w http.ResponseWriter, r *http.Request) {
 	// Filter active subscriptions and convert to response format
 	result := make([]SubscriptionResponse, 0, len(subs))
 	for _, sub := range subs {
-		// Only include active subscriptions that are not soft-deleted
-		if sub.IsActive() && !sub.DeletedAt.Valid {
+		if sub.IsActive() {
 			result = append(result, SubscriptionResponse{
 				ID:                sub.ClientID,
 				Email:             sub.Username,

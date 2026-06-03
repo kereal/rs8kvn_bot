@@ -4,16 +4,15 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
 	"rs8kvn_bot/internal/bot"
 	"rs8kvn_bot/internal/config"
 	"rs8kvn_bot/internal/database"
+	"rs8kvn_bot/internal/interfaces"
 	"rs8kvn_bot/internal/logger"
 	"rs8kvn_bot/internal/service"
 	"rs8kvn_bot/internal/testutil"
@@ -24,8 +23,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-var chdirMu sync.Mutex
-
 func init() {
 	_, _ = logger.Init("", "error")
 }
@@ -33,44 +30,17 @@ func init() {
 func setupTestDB(t *testing.T) *database.Service {
 	t.Helper()
 
-	chdirMu.Lock()
-	defer chdirMu.Unlock()
-
-	origWd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Failed to get working directory: %v", err)
-	}
-	defer func() {
-		if err := os.Chdir(origWd); err != nil {
-			t.Logf("Warning: failed to chdir back to %s: %v", origWd, err)
-		}
-	}()
-
-	projectRoot := findProjectRoot()
-	if err := os.Chdir(projectRoot); err != nil {
-		t.Fatalf("Failed to change to project root %s: %v", projectRoot, err)
-	}
-
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	db, err := database.NewService(dbPath)
 	require.NoError(t, err, "Failed to create database service")
 
-	return db
-}
+	t.Cleanup(func() {
+		if err := db.Close(); err != nil {
+			t.Logf("Warning: failed to close database: %v", err)
+		}
+	})
 
-func findProjectRoot() string {
-	dir, _ := os.Getwd()
-	for i := 0; i < 10; i++ {
-		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-			return dir
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			break
-		}
-		dir = parent
-	}
-	return dir
+	return db
 }
 
 type e2eTestEnv struct {
@@ -117,12 +87,9 @@ func setupE2EEnv(t *testing.T) *e2eTestEnv {
 
 	cfg := &config.Config{
 		TelegramAdminID:  123456,
-		TrafficLimitGB:   100,
-		XUIInboundID:     1,
-		XUIHost:          "https://panel.example.com",
-		XUISubPath:       "/sub",
 		SiteURL:          "https://example.com",
 		TelegramBotToken: "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11",
+		GlobalSubURL:     "https://example.com/sub/",
 	}
 
 	mockXUI := testutil.NewMockXUIClient()
@@ -135,7 +102,9 @@ func setupE2EEnv(t *testing.T) *e2eTestEnv {
 		IsBot:     true,
 	}
 
-	subService := service.NewSubscriptionService(db, mockXUI, cfg, &webhook.NoopSender{})
+	xuiClients := map[uint]interfaces.XUIClient{1: mockXUI}
+	sources := []database.Source{{ID: 1, Name: "main", Active: true,  XUIHost: "https://panel.example.com", XUIAPIToken: "test-api-token", XUIInboundID: 1}}
+	subService := service.NewSubscriptionService(db, xuiClients, sources, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
 	handler := bot.NewHandler(mockBotAPI, cfg, db, mockXUI, botCfg, subService, "")
 
 	return &e2eTestEnv{
@@ -247,19 +216,21 @@ func setupRealXUIEnv(t *testing.T, handlers map[string]http.HandlerFunc) *realXU
 	server := httptest.NewServer(mux)
 
 	cfg := &config.Config{
-		TelegramAdminID:         123456,
-		TrafficLimitGB:          100,
-		XUIInboundID:            1,
-		XUIHost:                 server.URL,
-		XUISubPath:              "sub",
-		SiteURL:                 "https://example.com",
-		TelegramBotToken:        "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11",
+		TelegramAdminID:  123456,
+		SiteURL:          "https://example.com",
+		TelegramBotToken: "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11",
+		GlobalSubURL:     "",
+		Sources: []config.Source{
+			{Name: "main", XUIHost: server.URL, XUIAPIToken: "test-api-token", XUIInboundID: 1, Active: true},
+		},
 	}
 
 	xuiClient, err := xui.NewClient(server.URL, "test-api-token")
 	require.NoError(t, err)
 
-	subService := service.NewSubscriptionService(db, xuiClient, cfg, &webhook.NoopSender{})
+	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
+	sources := []database.Source{{ID: 1, Name: "main", Active: true,  XUIHost: server.URL, XUIAPIToken: "test-api-token", XUIInboundID: 1}}
+	subService := service.NewSubscriptionService(db, xuiClients, sources, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
 
 	return &realXUIEnv{
 		t:          t,
