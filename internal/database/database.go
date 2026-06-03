@@ -381,6 +381,8 @@ func (s *Service) CreateSubscription(ctx context.Context, sub *Subscription, inv
 			if err := tx.Where("code = ?", inviteCode).First(&inv).Error; err == nil {
 				sub.InviteCode = inviteCode
 				sub.ReferredBy = inv.ReferrerTGID
+			} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return fmt.Errorf("failed to resolve invite: %w", err)
 			}
 		}
 
@@ -473,31 +475,33 @@ func (s *Service) IsSourcesEmpty(ctx context.Context) (bool, error) {
 // SeedDefaultSource inserts the default source from environment variables if the sources table is empty.
 // It also links all existing plans to the new source and assigns the free plan to legacy subscriptions.
 func (s *Service) SeedDefaultSource(ctx context.Context, name, xuiHost, xuiAPIToken string, xuiInboundID int, subURL string) error {
-	source := Source{
-		Name:         name,
-		Active:       true,
-		XUIHost:      xuiHost,
-		XUIAPIToken:  xuiAPIToken,
-		XUIInboundID: xuiInboundID,
-		SubURL:       subURL,
-	}
-	if err := s.db.WithContext(ctx).Create(&source).Error; err != nil {
-		return err
-	}
-	var plans []Plan
-	if err := s.db.WithContext(ctx).Find(&plans).Error; err != nil {
-		return err
-	}
-	for _, p := range plans {
-		ps := PlanSource{PlanID: p.ID, SourceID: source.ID}
-		if err := s.db.WithContext(ctx).Create(&ps).Error; err != nil {
-			return fmt.Errorf("failed to link plan %d to source %d: %w", p.ID, source.ID, err)
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		source := Source{
+			Name:         name,
+			Active:       true,
+			XUIHost:      xuiHost,
+			XUIAPIToken:  xuiAPIToken,
+			XUIInboundID: xuiInboundID,
+			SubURL:       subURL,
 		}
-	}
-	return s.db.WithContext(ctx).Exec(
-		`UPDATE subscriptions SET plan_id = (SELECT id FROM plans WHERE name = ?) WHERE plan_id IS NULL`,
-		FreePlanName,
-	).Error
+		if err := tx.Create(&source).Error; err != nil {
+			return err
+		}
+		var plans []Plan
+		if err := tx.Find(&plans).Error; err != nil {
+			return err
+		}
+		for _, p := range plans {
+			ps := PlanSource{PlanID: p.ID, SourceID: source.ID}
+			if err := tx.Create(&ps).Error; err != nil {
+				return fmt.Errorf("failed to link plan %d to source %d: %w", p.ID, source.ID, err)
+			}
+		}
+		return tx.Exec(
+			`UPDATE subscriptions SET plan_id = (SELECT id FROM plans WHERE name = ?) WHERE plan_id IS NULL`,
+			FreePlanName,
+		).Error
+	})
 }
 
 // GetLatestSubscriptions retrieves the latest N subscriptions ordered by creation date.
@@ -822,7 +826,7 @@ func (s *Service) BindTrialSubscription(ctx context.Context, subscriptionID stri
 		freePlanID = freePlan.ID
 		result := tx.Model(&Subscription{}).
 			Where("id = ? AND telegram_id = ? AND plan_id = ?", sub.ID, 0, planID).
-			Updates(map[string]interface{}{
+			Updates(map[string]any{
 				"telegram_id": telegramID,
 				"username":    username,
 				"plan_id":     freePlanID,
