@@ -198,8 +198,8 @@ func TestE2E_CreateSubscription_TrafficLimitCorrect(t *testing.T) {
 		},
 	})
 
-	expectedTraffic := int64(10) * 1024 * 1024 * 1024
-	assert.Equal(t, expectedTraffic, capturedTraffic, "Traffic limit should match free plan from seed migration 012")
+	expectedTraffic := int64(50) * 1024 * 1024 * 1024
+	assert.Equal(t, expectedTraffic, capturedTraffic, "Traffic limit should match free plan (50GB)")
 }
 
 func TestE2E_CreateSubscription_SubscriptionID_Set(t *testing.T) {
