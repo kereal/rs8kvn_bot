@@ -1,4 +1,4 @@
-package subproxy
+package subserver
 
 import (
 	"bytes"
@@ -37,11 +37,11 @@ func (c *Cache) Get(key string) ([]byte, map[string]string, bool) {
 
 	entry, ok := c.entries[key]
 	if !ok {
-		metrics.CacheMissesTotal.WithLabelValues("subproxy").Inc()
+		metrics.CacheMissesTotal.WithLabelValues("subserver").Inc()
 		return nil, nil, false
 	}
 	if time.Now().After(entry.expiresAt) {
-		metrics.CacheMissesTotal.WithLabelValues("subproxy").Inc()
+		metrics.CacheMissesTotal.WithLabelValues("subserver").Inc()
 		return nil, nil, false
 	}
 
@@ -49,7 +49,7 @@ func (c *Cache) Get(key string) ([]byte, map[string]string, bool) {
 	for k, v := range entry.headers {
 		headersCopy[k] = v
 	}
-	metrics.CacheHitsTotal.WithLabelValues("subproxy").Inc()
+	metrics.CacheHitsTotal.WithLabelValues("subserver").Inc()
 	return entry.body, headersCopy, true
 }
 

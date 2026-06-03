@@ -76,7 +76,7 @@ const (
 	SubscriptionResetDay = 30
 )
 
-// Subscription Proxy Constants
+// Subscription server Constants
 const (
 	// SubProxyCacheTTL is the TTL for cached subscription responses
 	SubProxyCacheTTL = 240 * time.Second

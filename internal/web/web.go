@@ -21,7 +21,7 @@ import (
 	"rs8kvn_bot/internal/logger"
 	"rs8kvn_bot/internal/metrics"
 	"rs8kvn_bot/internal/service"
-	"rs8kvn_bot/internal/subproxy"
+	"rs8kvn_bot/internal/subserver"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
@@ -60,7 +60,7 @@ type Server struct {
 	cfg             *config.Config
 	botConfig       *bot.BotConfig
 	subService      *service.SubscriptionService
-	subProxy        *subproxy.Service
+	subServer        *subserver.Service
 	subFetchGroup   *SingleFlight
 	server          *http.Server
 	listenerAddr    string
@@ -73,7 +73,7 @@ type Server struct {
 	errorTemplate   *template.Template
 }
 
-func NewServer(addr string, db interfaces.DatabaseService, cfg *config.Config, botConfig *bot.BotConfig, subService *service.SubscriptionService, subProxy *subproxy.Service) *Server {
+func NewServer(addr string, db interfaces.DatabaseService, cfg *config.Config, botConfig *bot.BotConfig, subService *service.SubscriptionService, subServer *subserver.Service) *Server {
 	trialTmpl := template.Must(template.New("trial.html").Funcs(template.FuncMap{
 		"escape": func(s string) string {
 			var buf strings.Builder
@@ -90,7 +90,7 @@ func NewServer(addr string, db interfaces.DatabaseService, cfg *config.Config, b
 		cfg:             cfg,
 		botConfig:       botConfig,
 		subService:      subService,
-		subProxy:        subProxy,
+		subServer:        subServer,
 		subFetchGroup:   NewSingleFlight(),
 		checkers:        make(map[string]func(context.Context) ComponentHealth),
 		inviteCodeRegex: regexp.MustCompile(`^[a-zA-Z0-9_-]+$`),
@@ -550,10 +550,10 @@ func (s *Server) handleSubscription(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if s.subProxy == nil {
+	if s.subServer == nil {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(http.StatusServiceUnavailable)
-		w.Write([]byte("Subscription proxy is not available"))
+		w.Write([]byte("Subscription server is not available"))
 		return
 	}
 
@@ -576,11 +576,11 @@ func (s *Server) handleSubscription(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 
-	if cachedBody, cachedHeaders, ok := s.subProxy.GetCache(subID); ok {
+	if cachedBody, cachedHeaders, ok := s.subServer.GetCache(subID); ok {
 		// Verify subscription is still active even on cache hit
 		sub, err := s.db.GetSubscriptionBySubscriptionID(ctx, subID)
 		if err != nil || !sub.IsActive() {
-			s.subProxy.InvalidateCache(subID)
+			s.subServer.InvalidateCache(subID)
 			if err != nil {
 				logger.Warn("Subscription not found in DB on cache hit", zap.String("sub_id", subID), zap.Error(err))
 			} else {
@@ -591,13 +591,13 @@ func (s *Server) handleSubscription(w http.ResponseWriter, r *http.Request) {
 			w.Write([]byte("Subscription not found"))
 			return
 		}
-		logger.Debug("Subscription proxy cache hit", zap.String("sub_id", subID))
+		logger.Debug("Subscription server cache hit", zap.String("sub_id", subID))
 		s.writeSubscriptionResponse(w, cachedBody, cachedHeaders)
 		return
 	}
 
 	result, err := s.subFetchGroup.Do(ctx, subID, func(ctx context.Context) (interface{}, error) {
-		if cachedBody, cachedHeaders, ok := s.subProxy.GetCache(subID); ok {
+		if cachedBody, cachedHeaders, ok := s.subServer.GetCache(subID); ok {
 			return &subFetchResult{body: cachedBody, headers: cachedHeaders}, nil
 		}
 
@@ -612,25 +612,25 @@ func (s *Server) handleSubscription(w http.ResponseWriter, r *http.Request) {
 			return nil, &subFetchError{err: nil, notFound: true}
 		}
 
-		subproxyURL, err := s.getSubproxyURL(ctx, subID)
+		subServerURL, err := s.getSubproxyURL(ctx, subID)
 		if err != nil {
-			logger.Warn("Failed to build subproxy URL", zap.String("sub_id", subID), zap.Error(err))
+			logger.Warn("Failed to build subServer URL", zap.String("sub_id", subID), zap.Error(err))
 			return nil, nil
 		}
 
-		xuiResp, fetchErr := subproxy.FetchFromXUI(subproxyURL)
+		xuiResp, fetchErr := subserver.FetchFromXUI(subServerURL)
 		if fetchErr != nil {
 			logger.Warn("Failed to fetch from 3x-ui", zap.String("sub_id", subID), zap.Error(fetchErr))
-			if cachedBody, cachedHeaders, ok := s.subProxy.GetCache(subID); ok {
+			if cachedBody, cachedHeaders, ok := s.subServer.GetCache(subID); ok {
 				return &subFetchResult{body: cachedBody, headers: cachedHeaders}, nil
 			}
 			return nil, fetchErr
 		}
 
-		extraServers := s.subProxy.GetExtraServers()
-		extraHeaders := s.subProxy.GetExtraHeaders()
-		format := subproxy.DetectFormat(xuiResp.Body)
-		mergedBody := subproxy.MergeSubscriptions(xuiResp.Body, extraServers, format)
+		extraServers := s.subServer.GetExtraServers()
+		extraHeaders := s.subServer.GetExtraHeaders()
+		format := subserver.DetectFormat(xuiResp.Body)
+		mergedBody := subserver.MergeSubscriptions(xuiResp.Body, extraServers, format)
 
 		mergedHeaders := make(map[string]string, len(xuiResp.Headers)+len(extraHeaders))
 		for k, v := range xuiResp.Headers {
@@ -640,7 +640,7 @@ func (s *Server) handleSubscription(w http.ResponseWriter, r *http.Request) {
 			mergedHeaders[k] = v
 		}
 
-		s.subProxy.SetCache(subID, mergedBody, mergedHeaders)
+		s.subServer.SetCache(subID, mergedBody, mergedHeaders)
 
 		return &subFetchResult{body: mergedBody, headers: mergedHeaders}, nil
 	})
@@ -673,9 +673,9 @@ func (s *Server) handleSubscription(w http.ResponseWriter, r *http.Request) {
 	}
 
 	res := result.(*subFetchResult)
-	logger.Info("Subscription proxy served",
+	logger.Info("Subscription server served",
 		zap.String("sub_id", subID),
-		zap.Int("extra_servers", len(s.subProxy.GetExtraServers())),
+		zap.Int("extra_servers", len(s.subServer.GetExtraServers())),
 		zap.Int("body_size", len(res.body)))
 
 	s.writeSubscriptionResponse(w, res.body, res.headers)

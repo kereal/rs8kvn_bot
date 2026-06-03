@@ -18,7 +18,7 @@ import (
 	"rs8kvn_bot/internal/bot"
 	"rs8kvn_bot/internal/config"
 	"rs8kvn_bot/internal/database"
-	"rs8kvn_bot/internal/subproxy"
+	"rs8kvn_bot/internal/subserver"
 	"rs8kvn_bot/internal/testutil"
 
 	"gorm.io/gorm"
@@ -31,10 +31,10 @@ func TestHandleSubscription_MethodNotAllowed(t *testing.T) {
 	cfg := &config.Config{
 		SubExtraServersEnabled: true,
 	}
-	subProxy := subproxy.NewService(cfg)
-	defer subProxy.Stop()
+	subServer := subserver.NewService(cfg)
+	defer subServer.Stop()
 
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subProxy)
+	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subServer)
 
 	req := httptest.NewRequest("POST", "/sub/abc123", nil)
 	rec := httptest.NewRecorder()
@@ -64,10 +64,10 @@ func TestHandleSubscription_InvalidCode(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{SubExtraServersEnabled: true}
-	subProxy := subproxy.NewService(cfg)
-	defer subProxy.Stop()
+	subServer := subserver.NewService(cfg)
+	defer subServer.Stop()
 
-	srv := NewServer(":8880", nil, cfg, bot.NewTestBotConfig(), nil, subProxy)
+	srv := NewServer(":8880", nil, cfg, bot.NewTestBotConfig(), nil, subServer)
 
 	tests := []struct {
 		path       string
@@ -99,10 +99,10 @@ func TestHandleSubscription_NotFoundInDB(t *testing.T) {
 	}
 
 	cfg := &config.Config{SubExtraServersEnabled: true}
-	subProxy := subproxy.NewService(cfg)
-	defer subProxy.Stop()
+	subServer := subserver.NewService(cfg)
+	defer subServer.Stop()
 
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subProxy)
+	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subServer)
 
 	req := httptest.NewRequest("GET", "/sub/nonexistent", nil)
 	rec := httptest.NewRecorder()
@@ -127,10 +127,10 @@ func TestHandleSubscription_EmptySubscriptionURL(t *testing.T) {
 	}
 
 	cfg := &config.Config{SubExtraServersEnabled: true}
-	subProxy := subproxy.NewService(cfg)
-	defer subProxy.Stop()
+	subServer := subserver.NewService(cfg)
+	defer subServer.Stop()
 
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subProxy)
+	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subServer)
 
 	req := httptest.NewRequest("GET", "/sub/abc123", nil)
 	rec := httptest.NewRecorder()
@@ -172,10 +172,10 @@ func TestHandleSubscription_XUIError_NoCache(t *testing.T) {
 	cfg := &config.Config{
 		SubExtraServersEnabled: true,
 	}
-	subProxy := subproxy.NewService(cfg)
-	defer subProxy.Stop()
+	subServer := subserver.NewService(cfg)
+	defer subServer.Stop()
 
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subProxy)
+	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subServer)
 
 	req := httptest.NewRequest("GET", "/sub/abc123", nil)
 	rec := httptest.NewRecorder()
@@ -201,8 +201,8 @@ func TestHandleSubscription_CacheHit(t *testing.T) {
 		SubExtraServersEnabled: true,
 		GlobalSubURL:           "http://localhost:0/sub/",
 	}
-	subProxy := subproxy.NewService(cfg)
-	defer subProxy.Stop()
+	subServer := subserver.NewService(cfg)
+	defer subServer.Stop()
 
 	cachedBody := []byte("vless://cached-server@cache.example.com:443")
 	cachedHeaders := map[string]string{
@@ -211,9 +211,9 @@ func TestHandleSubscription_CacheHit(t *testing.T) {
 		"Content-Type":            "text/plain; charset=utf-8",
 	}
 
-	subProxy.SetCache(subID, cachedBody, cachedHeaders)
+	subServer.SetCache(subID, cachedBody, cachedHeaders)
 
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subProxy)
+	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subServer)
 
 	req := httptest.NewRequest("GET", "/sub/"+subID, nil)
 	rec := httptest.NewRecorder()
@@ -239,17 +239,17 @@ func TestHandleSubscription_CacheHitAfterXUIError(t *testing.T) {
 	}
 
 	cfg := &config.Config{SubExtraServersEnabled: true}
-	subProxy := subproxy.NewService(cfg)
-	defer subProxy.Stop()
+	subServer := subserver.NewService(cfg)
+	defer subServer.Stop()
 
 	cachedBody := []byte("vless://fallback-server@example.com:443")
 	cachedHeaders := map[string]string{
 		"Subscription-Userinfo": "upload=0; download=0; total=10737418240; expire=1234567890",
 	}
 
-	subProxy.SetCache(subID, cachedBody, cachedHeaders)
+	subServer.SetCache(subID, cachedBody, cachedHeaders)
 
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subProxy)
+	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subServer)
 
 	req := httptest.NewRequest("GET", "/sub/"+subID, nil)
 	rec := httptest.NewRecorder()
@@ -296,10 +296,10 @@ func TestHandleSubscription_ExtraServersAppended(t *testing.T) {
 		SubExtraServersEnabled: true,
 		SubExtraServersFile:    serversFile,
 	}
-	subProxy := subproxy.NewService(cfg)
-	defer subProxy.Stop()
+	subServer := subserver.NewService(cfg)
+	defer subServer.Stop()
 
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subProxy)
+	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subServer)
 
 	req := httptest.NewRequest("GET", "/sub/"+subID, nil)
 	rec := httptest.NewRecorder()
@@ -356,10 +356,10 @@ func TestHandleSubscription_Base64FormatPreserved(t *testing.T) {
 		SubExtraServersEnabled: true,
 		SubExtraServersFile:    serversFile,
 	}
-	subProxy := subproxy.NewService(cfg)
-	defer subProxy.Stop()
+	subServer := subserver.NewService(cfg)
+	defer subServer.Stop()
 
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subProxy)
+	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subServer)
 
 	req := httptest.NewRequest("GET", "/sub/"+subID, nil)
 	rec := httptest.NewRecorder()
@@ -402,10 +402,10 @@ func TestHandleSubscription_ConcurrentRequests(t *testing.T) {
 	}
 
 	cfg := &config.Config{SubExtraServersEnabled: true}
-	subProxy := subproxy.NewService(cfg)
-	defer subProxy.Stop()
+	subServer := subserver.NewService(cfg)
+	defer subServer.Stop()
 
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subProxy)
+	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subServer)
 
 	const numRequests = 5
 	var wg sync.WaitGroup
@@ -464,10 +464,10 @@ func TestHandleSubscription_ExtraServersFileMissing(t *testing.T) {
 		SubExtraServersEnabled: true,
 		SubExtraServersFile:    "/nonexistent/path/to/servers.txt",
 	}
-	subProxy := subproxy.NewService(cfg)
-	defer subProxy.Stop()
+	subServer := subserver.NewService(cfg)
+	defer subServer.Stop()
 
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subProxy)
+	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subServer)
 
 	req := httptest.NewRequest("GET", "/sub/"+subID, nil)
 	rec := httptest.NewRecorder()
@@ -509,10 +509,10 @@ func TestHandleSubscription_NoExtraServersWhenDisabled(t *testing.T) {
 		SubExtraServersEnabled: false,
 		SubExtraServersFile:    serversFile,
 	}
-	subProxy := subproxy.NewService(cfg)
-	defer subProxy.Stop()
+	subServer := subserver.NewService(cfg)
+	defer subServer.Stop()
 
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subProxy)
+	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subServer)
 
 	req := httptest.NewRequest("GET", "/sub/"+subID, nil)
 	rec := httptest.NewRecorder()
@@ -556,10 +556,10 @@ func TestHandleSubscription_CacheStoresMergedResult(t *testing.T) {
 		SubExtraServersEnabled: true,
 		SubExtraServersFile:    serversFile,
 	}
-	subProxy := subproxy.NewService(cfg)
-	defer subProxy.Stop()
+	subServer := subserver.NewService(cfg)
+	defer subServer.Stop()
 
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subProxy)
+	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subServer)
 
 	req := httptest.NewRequest("GET", "/sub/"+subID, nil)
 	rec := httptest.NewRecorder()
@@ -605,10 +605,10 @@ func TestHandleSubscription_EmptyBodyFromXUI(t *testing.T) {
 	}
 
 	cfg := &config.Config{SubExtraServersEnabled: true}
-	subProxy := subproxy.NewService(cfg)
-	defer subProxy.Stop()
+	subServer := subserver.NewService(cfg)
+	defer subServer.Stop()
 
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subProxy)
+	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subServer)
 
 	req := httptest.NewRequest("GET", "/sub/"+subID, nil)
 	rec := httptest.NewRecorder()
@@ -644,10 +644,10 @@ func TestHandleSubscription_CorruptDataFromXUI(t *testing.T) {
 	}
 
 	cfg := &config.Config{SubExtraServersEnabled: false}
-	subProxy := subproxy.NewService(cfg)
-	defer subProxy.Stop()
+	subServer := subserver.NewService(cfg)
+	defer subServer.Stop()
 
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subProxy)
+	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subServer)
 
 	req := httptest.NewRequest("GET", "/sub/"+subID, nil)
 	rec := httptest.NewRecorder()
@@ -688,10 +688,10 @@ func TestHandleSubscription_CriticalHeadersPreserved(t *testing.T) {
 	}
 
 	cfg := &config.Config{SubExtraServersEnabled: true}
-	subProxy := subproxy.NewService(cfg)
-	defer subProxy.Stop()
+	subServer := subserver.NewService(cfg)
+	defer subServer.Stop()
 
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subProxy)
+	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subServer)
 
 	req := httptest.NewRequest("GET", "/sub/"+subID, nil)
 	rec := httptest.NewRecorder()
@@ -721,8 +721,8 @@ func TestHandleSubscription_CriticalHeadersPreservedFromCache(t *testing.T) {
 		SubExtraServersEnabled: true,
 		GlobalSubURL:           "http://localhost:0/sub/",
 	}
-	subProxy := subproxy.NewService(cfg)
-	defer subProxy.Stop()
+	subServer := subserver.NewService(cfg)
+	defer subServer.Stop()
 
 	cachedBody := []byte("vless://cached@example.com:443")
 	cachedHeaders := map[string]string{
@@ -731,9 +731,9 @@ func TestHandleSubscription_CriticalHeadersPreservedFromCache(t *testing.T) {
 		"Content-Disposition":     "attachment; filename=vpn.txt",
 	}
 
-	subProxy.SetCache(subID, cachedBody, cachedHeaders)
+	subServer.SetCache(subID, cachedBody, cachedHeaders)
 
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subProxy)
+	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subServer)
 
 	req := httptest.NewRequest("GET", "/sub/"+subID, nil)
 	rec := httptest.NewRecorder()
@@ -780,10 +780,10 @@ func TestHandleSubscription_ExtraHeadersOverrideXUI(t *testing.T) {
 		SubExtraServersEnabled: true,
 		SubExtraServersFile:    serversFile,
 	}
-	subProxy := subproxy.NewService(cfg)
-	defer subProxy.Stop()
+	subServer := subserver.NewService(cfg)
+	defer subServer.Stop()
 
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subProxy)
+	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subServer)
 
 	req := httptest.NewRequest("GET", "/sub/"+subID, nil)
 	rec := httptest.NewRecorder()
@@ -810,10 +810,10 @@ func TestHandleSubscription_ConcurrentNotFound(t *testing.T) {
 	}
 
 	cfg := &config.Config{SubExtraServersEnabled: true}
-	subProxy := subproxy.NewService(cfg)
-	defer subProxy.Stop()
+	subServer := subserver.NewService(cfg)
+	defer subServer.Stop()
 
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subProxy)
+	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subServer)
 
 	const numRequests = 5
 	var wg sync.WaitGroup
@@ -862,10 +862,10 @@ func TestHandleSubscription_RevokedSubscription(t *testing.T) {
 	}
 
 	cfg := &config.Config{SubExtraServersEnabled: true}
-	subProxy := subproxy.NewService(cfg)
-	defer subProxy.Stop()
+	subServer := subserver.NewService(cfg)
+	defer subServer.Stop()
 
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subProxy)
+	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subServer)
 
 	req := httptest.NewRequest("GET", "/sub/abc123", nil)
 	rec := httptest.NewRecorder()
@@ -887,10 +887,10 @@ func TestHandleSubscription_ExpiredSubscription(t *testing.T) {
 	}
 
 	cfg := &config.Config{SubExtraServersEnabled: true}
-	subProxy := subproxy.NewService(cfg)
-	defer subProxy.Stop()
+	subServer := subserver.NewService(cfg)
+	defer subServer.Stop()
 
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subProxy)
+	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subServer)
 
 	req := httptest.NewRequest("GET", "/sub/abc123", nil)
 	rec := httptest.NewRecorder()
@@ -913,17 +913,17 @@ func TestHandleSubscription_RevokedSubscription_CacheHit(t *testing.T) {
 	}
 
 	cfg := &config.Config{SubExtraServersEnabled: true}
-	subProxy := subproxy.NewService(cfg)
-	defer subProxy.Stop()
+	subServer := subserver.NewService(cfg)
+	defer subServer.Stop()
 
 	// Simulate stale cache entry from when subscription was active
 	cachedBody := []byte("vless://cached-server@cache.example.com:443")
 	cachedHeaders := map[string]string{
 		"Content-Type": "text/plain; charset=utf-8",
 	}
-	subProxy.SetCache(subID, cachedBody, cachedHeaders)
+	subServer.SetCache(subID, cachedBody, cachedHeaders)
 
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subProxy)
+	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subServer)
 
 	req := httptest.NewRequest("GET", "/sub/"+subID, nil)
 	rec := httptest.NewRecorder()
@@ -934,7 +934,7 @@ func TestHandleSubscription_RevokedSubscription_CacheHit(t *testing.T) {
 	assert.Contains(t, rec.Body.String(), "not found")
 
 	// Verify cache was invalidated
-	_, _, ok := subProxy.GetCache(subID)
+	_, _, ok := subServer.GetCache(subID)
 	assert.False(t, ok, "cache should be invalidated for revoked subscription")
 }
 
@@ -953,17 +953,17 @@ func TestHandleSubscription_ExpiredByTime_CacheHit(t *testing.T) {
 	}
 
 	cfg := &config.Config{SubExtraServersEnabled: true}
-	subProxy := subproxy.NewService(cfg)
-	defer subProxy.Stop()
+	subServer := subserver.NewService(cfg)
+	defer subServer.Stop()
 
 	// Simulate stale cache entry
 	cachedBody := []byte("vless://cached-server@cache.example.com:443")
 	cachedHeaders := map[string]string{
 		"Content-Type": "text/plain; charset=utf-8",
 	}
-	subProxy.SetCache(subID, cachedBody, cachedHeaders)
+	subServer.SetCache(subID, cachedBody, cachedHeaders)
 
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subProxy)
+	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subServer)
 
 	req := httptest.NewRequest("GET", "/sub/"+subID, nil)
 	rec := httptest.NewRecorder()
@@ -974,6 +974,6 @@ func TestHandleSubscription_ExpiredByTime_CacheHit(t *testing.T) {
 	assert.Contains(t, rec.Body.String(), "not found")
 
 	// Verify cache was invalidated
-	_, _, ok := subProxy.GetCache(subID)
+	_, _, ok := subServer.GetCache(subID)
 	assert.False(t, ok, "cache should be invalidated for expired subscription")
 }

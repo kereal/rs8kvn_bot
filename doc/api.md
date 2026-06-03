@@ -9,7 +9,7 @@
 
 1. [Health Checks](#1-health-checks)
 2. [Trial Landing Page](#2-trial-landing-page)
-3. [Subscription Proxy](#3-subscription-proxy)
+3. [Subscription server](#3-subscription-proxy)
 4. [Admin API](#4-admin-api)
 5. [Static Files](#5-static-files)
 6. [Error Codes](#6-error-codes)
@@ -172,7 +172,7 @@ X-Frame-Options: DENY
 
 ---
 
-## 3. Subscription Proxy
+## 3. Subscription server
 
 ### `GET /sub/{subID}`
 
@@ -377,7 +377,7 @@ curl -H "Authorization: Bearer my-secret-token" \
 curl -i http://localhost:8880/i/ABC123def
 ```
 
-**Check subscription proxy:**
+**Check Subscription server:**
 ```bash
 curl -s http://localhost:8880/sub/abc123def456 | base64 -d | head -20
 ```

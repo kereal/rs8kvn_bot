@@ -136,9 +136,9 @@ internal/
 │   ├── web.go               # Server struct, routes, health
 │   ├── middleware.go        # Bearer auth
 │   ├── api.go               # /api/v1/subscriptions
-│   ├── subproxy_test.go     # Proxy handler tests
+│   ├── subserver_test.go     # Proxy handler tests
 │   └── templates/           # trial.html, error.html
-├── subproxy/         # Subscription proxy
+├── subserver/         # Subscription server
 │   ├── service.go           # Hot reload loop (5 min)
 │   ├── proxy.go             # Fetch+XUI+merge logic
 │   ├── cache.go             # TTL cache (240s)
@@ -307,7 +307,7 @@ if !rateLimiter.Allow(chatID) {
 |-------|---------|-----|----------|----------|
 | `SubscriptionCache` (bot/cache.go) | Cached subscriptions by `telegramID` | 5 min | 1000 entries | LRU + periodic cleanup |
 | `ReferralCache` (bot/referral_cache.go) | Referral counts per referrer | 1 hour sync | unlimited (bounded by users) | N/A (full reload) |
-| `SubProxyCache` (subproxy/cache.go) | Merged subscription bodies by `subID` | 240s (4 min) | 1000 entries | TTL expiration |
+| `SubProxyCache` (subserver/cache.go) | Merged subscription bodies by `subID` | 240s (4 min) | 1000 entries | TTL expiration |
 
 **Cache invalidation points:**
 - Subscription created → `invalidateCache(telegramID)`
@@ -410,7 +410,7 @@ type CircuitBreaker struct {
 
 ---
 
-### 7. Subscription Proxy Extra Servers
+### 7. Subscription server Extra Servers
 
 **Config format** (`extra_servers.txt`):
 
@@ -702,9 +702,9 @@ User           Telegram       Bot (main)     Handler      XUI Panel       DB
 | 2026-01 | In-memory caches vs Redis | No external dependency; cache sizes bounded (1000 entries) |
 | 2026-02 | Long polling vs Webhook | Easier deployment (no public HTTPS needed), single instance ok |
 | 2026-02 | GORM vs sqlx | Faster dev, migrations built-in, relationship support |
-| 2026-03 | Separate subproxy package | Reusable subscription proxy logic, clean separation |
+| 2026-03 | Separate subserver package | Reusable Subscription server logic, clean separation |
 | 2026-03 | Circuit breaker on XUI | Prevent cascade failures if panel down |
-| 2026-04 | 5-min subproxy reload | Balance between config freshness and file I/O |
+| 2026-04 | 5-min subserver reload | Balance between config freshness and file I/O |
 | 2026-04 | Token bucket rate limiting | Standard algorithm, per-user isolation, tunable |
 | 2026-04 | Daily backup at 03:00 | Low-traffic period, WAL checkpoint ensures consistency |
 

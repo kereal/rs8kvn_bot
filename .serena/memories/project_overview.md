@@ -47,7 +47,7 @@ internal/backup/             — ежедневные бэкапы с WAL checkp
 internal/scheduler/          — backup + trial cleanup
 internal/ratelimiter/        — per-user token bucket
 internal/web/                — /healthz, /readyz, /i/{code}, /sub/{subID} + singleflight
-internal/subproxy/           — кэш + merge подписок
+internal/subserver/           — кэш + merge подписок
 internal/metrics/            — Prometheus (обёрнутый zap-логом, не реальный Prometheus)
 ```
 

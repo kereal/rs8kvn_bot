@@ -8,7 +8,7 @@
 
 ## Singleflight
 - **НЕ для логина** (логина нет).
-- Используется в `internal/web/singleflight.go` для дедупликации одновременных DB queries (subproxy cache misses).
+- Используется в `internal/web/singleflight.go` для дедупликации одновременных DB queries (subserver cache misses).
 
 ## Circuit Breaker ✅ ЕСТЬ
 - `internal/xui/breaker.go` — НЕ удалён.

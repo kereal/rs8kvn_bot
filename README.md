@@ -18,7 +18,7 @@ Telegram bot for distributing VLESS+Reality+Vision proxy subscriptions from 3x-u
 - 🔔 Admin notifications on new subscriptions
 - 🛡️ Rate limiting, circuit breaker for 3x-ui, auto-relogin on session expiry
 - 🏥 Health check endpoints (/healthz, /readyz)
-- 🔗 Subscription proxy endpoint (`/sub/{subID}`) with extra servers and headers
+- 🔗 Subscription server endpoint (`/sub/{subID}`) with extra servers and headers
 - 🗄️ Daily database backups with rotation, embedded migrations
 - 🐛 Sentry error tracking
 - 🐳 Docker support with health checks
@@ -88,7 +88,7 @@ The bot exposes HTTP endpoints on port 8880:
 | `GET /healthz` | Basic health (process alive, DB and xui status) | 200/503 |
 | `GET /readyz` | Ready state (accepting requests after init) | 200/503 |
 | `GET /i/{code}` | Trial invites landing page | 200/404/429/500 |
-| `GET /sub/{subID}` | Subscription proxy (extra servers + headers, status checked) | 200/404/502/405 |
+| `GET /sub/{subID}` | Subscription server (extra servers + headers, status checked) | 200/404/502/405 |
 | `GET /static/logo.png` | Logo image (mobile-optimized PNG) | 200/404 |
 
 ### Invite/Trial Landing Page (`/i/{code}`)
@@ -99,7 +99,7 @@ Each user can generate an invite code via the referral flow. The landing page va
 - Copy-to-clipboard subscription URL
 - Telegram activation link
 
-### Subscription Proxy (`/sub/{subID}`)
+### Subscription server (`/sub/{subID}`)
 
 Serves subscriptions with optional extra servers and custom headers. Validates `subID`, checks cache (240s TTL), fetches from 3x-ui, merges extra servers/headers from config file, returns combined response. Stale cache is used as fallback if 3x-ui is unavailable.
 

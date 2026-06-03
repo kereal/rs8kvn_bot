@@ -60,7 +60,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Centralized cache invalidation via `SubscriptionService.InvalidateSubscription()` (P1-2)
 - Background orphan reconciler for XUI clients (P1-3): periodic scan & cleanup of DB entries whose clients are missing in XUI
-- Context-aware singleflight for subscription proxy (P1-4): `SingleFlight.Do(ctx, key, fn)` respects context cancellation, preventing goroutine leaks on shutdown
+- Context-aware singleflight for Subscription server (P1-4): `SingleFlight.Do(ctx, key, fn)` respects context cancellation, preventing goroutine leaks on shutdown
 
 ### Changed
 - **Architecture: Handler decomposition (P1-1):** Split monolithic `Handler` (331 lines) into `CommandHandler`, `CallbackHandler`, `SubscriptionHandler`. `Handler` now acts as a facade. Removed dead files: `internal/bot/commands.go`, `internal/bot/message.go`, `internal/bot/subscription.go`, `internal/bot/callbacks.go`, `internal/bot/admin_handler.go`. Full backward compatibility.
@@ -73,7 +73,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Race condition in admin broadcast that could duplicate cancellation messages and corrupt counters under concurrency
 - Cache invalidation inconsistencies: all invalidations now flow through `SubscriptionService.InvalidateSubscription`
 - Potential nil map write in `checkAdminSendRateLimit` for handlers constructed without `NewHandler` (lazy init added)
-- Goroutine leak in subscription proxy when request context is cancelled (P1-4): now uses context-aware singleflight that releases waiters immediately on cancellation
+- Goroutine leak in Subscription server when request context is cancelled (P1-4): now uses context-aware singleflight that releases waiters immediately on cancellation
 - Множество исправлений после рефактора: ошибки в delegate handlers, rollback в BindTrial, singleflight cleanup, broadcast semaphore и GetTelegramIDsBatch, метрики (нормализация путей и команд), контексты в rate limit, nil checks и т.д.
 - Исправлена грамматика в donate-сообщении
 
