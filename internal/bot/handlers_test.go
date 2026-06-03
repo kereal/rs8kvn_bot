@@ -394,6 +394,7 @@ func TestHandleCreateError_AllErrorTypes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			mockBot := testutil.NewMockBotAPI()
 			handler := &Handler{
 				bot:    mockBot,
