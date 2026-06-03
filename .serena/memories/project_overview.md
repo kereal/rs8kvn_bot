@@ -5,7 +5,7 @@ Telegram-бот для продажи и управления VLESS+Reality+Visi
 Production-grade: миграции, мониторинг, rate-limiting, circuit breaker, graceful shutdown.
 
 ## Текущая версия
-**v2.4.0** — мульти-источник 3x-ui (sources/plans/plan_sources), план-based подписки, миграции 000-011.
+**v2.4.0** — мульти-источник 3x-ui (sources/plans/plan_sources), план-based подписки, миграции 000-012.
 
 ## Ключевые фичи
 - Запрос подписки по требованию, QR-код
