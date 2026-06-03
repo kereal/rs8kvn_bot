@@ -51,7 +51,7 @@ func TestE2E_RealClient_AutoReloginOn401(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(xui.APIResponse{Success: false})
 		},
-		"/panel/api/inbounds/addClient": func(w http.ResponseWriter, r *http.Request) {
+		"/panel/api/clients/add": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(xui.APIResponse{Success: true, Msg: "Client added"})
 		},
@@ -188,7 +188,7 @@ func TestE2E_RealClient_AutoReloginViaCircuitBreaker(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(xui.APIResponse{Success: false})
 		},
-		"/panel/api/inbounds/addClient": func(w http.ResponseWriter, r *http.Request) {
+		"/panel/api/clients/add": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(xui.APIResponse{Success: true, Msg: "Client added"})
 		},

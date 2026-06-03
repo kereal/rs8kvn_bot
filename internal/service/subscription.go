@@ -10,6 +10,7 @@ import (
 	"rs8kvn_bot/internal/database"
 	"rs8kvn_bot/internal/interfaces"
 	"rs8kvn_bot/internal/logger"
+	"rs8kvn_bot/internal/metrics"
 	"rs8kvn_bot/internal/utils"
 	"rs8kvn_bot/internal/webhook"
 	"rs8kvn_bot/internal/xui"
@@ -76,7 +77,8 @@ func (s *SubscriptionService) Create(ctx context.Context, chatID int64, username
 	// Calculate expiry time for auto-reset (now + reset days)
 	expiryTime := time.Now().Add(time.Duration(config.SubscriptionResetDay) * 24 * time.Hour)
 
-	client, err := s.xui.AddClientWithID(ctx, s.cfg.XUIInboundID, XUIEmail(username, chatID), clientID, subID, trafficBytes, expiryTime, config.SubscriptionResetDay)
+	email := XUIEmail(username, chatID)
+	client, err := s.xui.AddClientWithID(ctx, s.cfg.XUIInboundID, email, clientID, subID, trafficBytes, expiryTime, config.SubscriptionResetDay)
 	if err != nil {
 		return nil, fmt.Errorf("xui add client: %w", err)
 	}
@@ -98,31 +100,19 @@ func (s *SubscriptionService) Create(ctx context.Context, chatID int64, username
 	if err := s.db.CreateSubscription(ctx, sub); err != nil {
 		// Retry rollback with backoff to ensure client is deleted from XUI
 		rollbackErr := xui.RetryWithBackoff(ctx, config.XUIMaxRetries, config.XUIInitialRetryDelay, func() error {
-			return s.xui.DeleteClient(ctx, s.cfg.XUIInboundID, client.ID)
+			return s.xui.DeleteClient(ctx, email)
 		})
 		if rollbackErr != nil {
 			// CRITICAL: Orphaned XUI client - log to Sentry with high severity for manual intervention
 			logger.Error("orphaned XUI client detected - manual cleanup required",
+				zap.String("email", email),
 				zap.String("client_id", client.ID),
-				zap.Int("inbound_id", s.cfg.XUIInboundID),
 				zap.Error(rollbackErr),
 				zap.Stack("stack"),
 				zap.String("username", username))
 			return nil, fmt.Errorf("create subscription: %w (rollback failed: %w)", err, rollbackErr)
 		}
 		return nil, fmt.Errorf("create subscription: %w", err)
-	}
-
-	// Send webhook notification (async)
-	if s.webhook != nil {
-		eventID, _ := utils.GenerateUUID()
-		s.webhook.SendAsync(Event{
-			EventID:        "evt-" + eventID,
-			Event:          webhook.EventSubscriptionActivated,
-			ClientID:       sub.ClientID,
-			Email:          XUIEmail(sub.Username, chatID),
-			SubscriptionID: sub.SubscriptionID,
-		})
 	}
 
 	return &CreateResult{
@@ -141,15 +131,6 @@ func (s *SubscriptionService) Delete(ctx context.Context, telegramID int64) erro
 		return err
 	}
 
-	// Store subscription data before deletion for webhook
-	clientID := sub.ClientID
-	inboundID := sub.InboundID
-	subscriptionID := sub.SubscriptionID
-
-	if inboundID == 0 {
-		inboundID = s.cfg.XUIInboundID
-	}
-
 	// Delete from database first — if this fails, the XUI client remains
 	// intact and the operation can be retried. Reversing the order (XUI
 	// first) would leave an orphaned DB record with no XUI client on failure.
@@ -160,10 +141,10 @@ func (s *SubscriptionService) Delete(ctx context.Context, telegramID int64) erro
 	// Best-effort XUI cleanup: log but don't fail if XUI delete errors.
 	// The DB record is already gone; an orphaned XUI client is less critical
 	// than an orphaned DB record and can be cleaned up manually.
-	if err := s.xui.DeleteClient(ctx, inboundID, clientID); err != nil {
+	email := XUIEmail(sub.Username, telegramID)
+	if err := s.xui.DeleteClient(ctx, email); err != nil {
 		logger.Error("Failed to delete XUI client (orphaned client may remain)",
-			zap.Int("inboundID", inboundID),
-			zap.String("clientID", clientID),
+			zap.String("email", email),
 			zap.Error(err),
 			zap.Stack("stack"))
 	}
@@ -174,9 +155,9 @@ func (s *SubscriptionService) Delete(ctx context.Context, telegramID int64) erro
 		s.webhook.SendAsync(Event{
 			EventID:        "evt-" + eventID,
 			Event:          webhook.EventSubscriptionExpired,
-			ClientID:       clientID,
-			Email:          XUIEmail(sub.Username, telegramID),
-			SubscriptionID: subscriptionID,
+			ClientID:       sub.ClientID,
+			Email:          email,
+			SubscriptionID: sub.SubscriptionID,
 		})
 	}
 
@@ -191,15 +172,9 @@ func (s *SubscriptionService) DeleteByID(ctx context.Context, id uint) (*databas
 		return nil, fmt.Errorf("get subscription: %w", err)
 	}
 
-	// Store data before deletion
-	clientID := sub.ClientID
-	inboundID := sub.InboundID
 	username := sub.Username
+	clientID := sub.ClientID
 	subscriptionID := sub.SubscriptionID
-
-	if inboundID == 0 {
-		inboundID = s.cfg.XUIInboundID
-	}
 
 	// Delete from database first — same rationale as Delete():
 	// DB-first avoids orphaned DB records when XUI deletion succeeds
@@ -210,10 +185,10 @@ func (s *SubscriptionService) DeleteByID(ctx context.Context, id uint) (*databas
 	}
 
 	// Best-effort XUI cleanup
-	if err := s.xui.DeleteClient(ctx, inboundID, clientID); err != nil {
+	email := XUIEmail(username, deleted.TelegramID)
+	if err := s.xui.DeleteClient(ctx, email); err != nil {
 		logger.Error("Failed to delete XUI client in DeleteByID (orphaned client may remain)",
-			zap.Int("inboundID", inboundID),
-			zap.String("clientID", clientID),
+			zap.String("email", email),
 			zap.Error(err))
 	}
 
@@ -224,7 +199,7 @@ func (s *SubscriptionService) DeleteByID(ctx context.Context, id uint) (*databas
 			EventID:        "evt-" + eventID,
 			Event:          webhook.EventSubscriptionExpired,
 			ClientID:       clientID,
-			Email:          XUIEmail(username, deleted.TelegramID),
+			Email:          email,
 			SubscriptionID: subscriptionID,
 		})
 	}
@@ -249,8 +224,8 @@ func (s *SubscriptionService) GetWithTraffic(ctx context.Context, telegramID int
 		return nil, nil, err
 	}
 
-	// Get traffic from XUI
-	traffic, err := s.xui.GetClientTraffic(ctx, sub.Username)
+	email := XUIEmail(sub.Username, sub.TelegramID)
+	traffic, err := s.xui.GetClientTraffic(ctx, email)
 	if err != nil {
 		//nolint:nilerr // Intentionally return zero traffic when XUI fails - better UX than error
 		// Return subscription with zero traffic instead of failing
@@ -327,7 +302,8 @@ func (s *SubscriptionService) CreateTrial(ctx context.Context, inviteCode string
 	trafficBytes := calcTrialTraffic(s.cfg.TrialDurationHours)
 	expiryTime := time.Now().Add(time.Duration(s.cfg.TrialDurationHours) * time.Hour)
 
-	_, err = s.xui.AddClientWithID(ctx, s.cfg.XUIInboundID, "trial_"+subID, clientID, subID, trafficBytes, expiryTime, 0)
+	email := "trial_" + subID
+	_, err = s.xui.AddClientWithID(ctx, s.cfg.XUIInboundID, email, clientID, subID, trafficBytes, expiryTime, 0)
 	if err != nil {
 		return nil, fmt.Errorf("xui add client: %w", err)
 	}
@@ -336,10 +312,9 @@ func (s *SubscriptionService) CreateTrial(ctx context.Context, inviteCode string
 
 	sub, err := s.db.CreateTrialSubscription(ctx, inviteCode, subID, clientID, s.cfg.XUIInboundID, trafficBytes, expiryTime, subURL)
 	if err != nil {
-		if rollbackErr := s.xui.DeleteClient(ctx, s.cfg.XUIInboundID, clientID); rollbackErr != nil {
+		if rollbackErr := s.xui.DeleteClient(ctx, email); rollbackErr != nil {
 			logger.Error("failed to rollback trial XUI client",
-				zap.String("client_id", clientID),
-				zap.Int("inbound_id", s.cfg.XUIInboundID),
+				zap.String("email", email),
 				zap.Error(rollbackErr),
 				zap.Stack("stack"))
 			return nil, fmt.Errorf("create trial subscription: %w (rollback failed: %w)", err, rollbackErr)
@@ -390,7 +365,9 @@ func (s *SubscriptionService) BindTrial(ctx context.Context, subscriptionID stri
 		}
 	}
 
-	if err := s.xui.UpdateClient(ctx, s.cfg.XUIInboundID, sub.ClientID, username, sub.SubscriptionID, trafficBytes, time.UnixMilli(0), chatID, comment); err != nil {
+	currentEmail := "trial_" + subscriptionID
+	email := XUIEmail(username, chatID)
+	if err := s.xui.UpdateClient(ctx, sub.InboundID, currentEmail, sub.ClientID, email, sub.SubscriptionID, trafficBytes, time.UnixMilli(0), chatID, comment); err != nil {
 		logger.Warn("XUI UpdateClient failed, rolling back DB bind", zap.Error(err))
 
 		// Attempt to rollback the database bind to maintain consistency
@@ -444,7 +421,6 @@ func (s *SubscriptionService) InvalidateSubscription(ctx context.Context, telegr
 // client no longer exists in the XUI panel. It returns the number of removed subscriptions.
 // This is a best-effort background cleanup; errors are logged but do not stop the scan.
 func (s *SubscriptionService) ReconcileOrphanedClients(ctx context.Context) (int, error) {
-	// Fetch all subscriptions (this is a background task; memory usage is acceptable)
 	allSubs, err := s.db.GetAllSubscriptions(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("failed to fetch subscriptions: %w", err)
@@ -452,40 +428,53 @@ func (s *SubscriptionService) ReconcileOrphanedClients(ctx context.Context) (int
 
 	removed := 0
 	for _, sub := range allSubs {
-		// Only consider active subscriptions
 		if sub.Status != "active" {
 			continue
 		}
 
-		// Probe XUI: lightweight GetClientTraffic to check existence
-		_, err := s.xui.GetClientTraffic(ctx, sub.Username)
+		var xuiEmail string
+		if sub.IsTrial || sub.TelegramID == 0 {
+			if sub.SubscriptionID == "" {
+				continue
+			}
+			xuiEmail = "trial_" + sub.SubscriptionID
+		} else {
+			xuiEmail = XUIEmail(sub.Username, sub.TelegramID)
+		}
+		if xuiEmail == "" {
+			continue
+		}
+
+		_, err := s.xui.GetClientTraffic(ctx, xuiEmail)
 		if err != nil {
 			errMsg := strings.ToLower(err.Error())
 			if strings.Contains(errMsg, "client not found") {
-				// Client missing in XUI → orphaned DB record; delete it
-				if delErr := s.db.DeleteSubscription(ctx, sub.TelegramID); delErr != nil {
+				if _, delErr := s.db.DeleteSubscriptionByID(ctx, sub.ID); delErr != nil {
 					logger.Warn("Failed to delete orphaned subscription",
 						zap.Error(delErr),
-						zap.Int64("telegram_id", sub.TelegramID))
+						zap.Uint("id", sub.ID),
+						zap.Int64("telegram_id", sub.TelegramID),
+						zap.String("subscription_id", sub.SubscriptionID),
+						zap.Bool("is_trial", sub.IsTrial))
 				} else {
 					removed++
 					logger.Info("Removed orphaned subscription (XUI client missing)",
+						zap.Uint("id", sub.ID),
 						zap.Int64("telegram_id", sub.TelegramID),
-						zap.String("username", sub.Username))
-					// Invalidate cache so subsequent reads don't return stale data
-					if s.invalidate != nil {
+						zap.String("username", sub.Username),
+						zap.String("subscription_id", sub.SubscriptionID))
+					if s.invalidate != nil && !sub.IsTrial && sub.TelegramID != 0 {
 						s.invalidate(sub.TelegramID)
 					}
+					metrics.OrphanedClientsRemovedTotal.Inc()
 				}
 			} else {
-				// Other error (network, auth, etc.) — log and continue
 				logger.Debug("Error checking XUI client, skipping",
 					zap.Error(err),
 					zap.Int64("telegram_id", sub.TelegramID))
 			}
 		}
 
-		// Respect context cancellation
 		if ctx.Err() != nil {
 			return removed, ctx.Err()
 		}
