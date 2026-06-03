@@ -306,10 +306,11 @@ func main() {
 		return web.ComponentHealth{Status: web.StatusOK}
 	})
 	webServer.RegisterChecker("xui", func(ctx context.Context) web.ComponentHealth {
-		if legacyXUIClient != nil {
-			if err := legacyXUIClient.Ping(ctx); err != nil {
-				return web.ComponentHealth{Status: web.StatusDegraded, Message: err.Error()}
-			}
+		if legacyXUIClient == nil {
+			return web.ComponentHealth{Status: web.StatusDegraded, Message: "no active XUI client"}
+		}
+		if err := legacyXUIClient.Ping(ctx); err != nil {
+			return web.ComponentHealth{Status: web.StatusDegraded, Message: err.Error()}
 		}
 		return web.ComponentHealth{Status: web.StatusOK}
 	})
