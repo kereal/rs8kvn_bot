@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"time"
 
 	"rs8kvn_bot/internal/database"
@@ -120,13 +121,20 @@ func (sh *SubscriptionHandler) handleMySubscription(ctx context.Context, chatID 
 
 	trafficInfo := fmt.Sprintf("%.2f из %d Гб (%.0f%%)", traffic.UsedGB, traffic.LimitGB, traffic.Percentage)
 
+	subURL, joinErr := url.JoinPath(sh.h.cfg.GlobalSubURL, sub.SubscriptionID)
+	if joinErr != nil {
+		logger.Warn("Failed to build subscription URL with url.JoinPath, falling back to concatenation",
+			zap.Error(joinErr))
+		subURL = sh.h.cfg.GlobalSubURL + sub.SubscriptionID
+	}
+
 	messageText := fmt.Sprintf(
 		"📋 *Ваша подписка*\n\n📊 Трафик: %s\n%s\n\n📅 Создана: %s\n%s\n\n🔗 Ссылка\n`%s`",
 		trafficInfo,
 		traffic.ProgressBar,
 		traffic.CreatedAtFormatted,
 		traffic.ResetInfo,
-		sh.h.cfg.GlobalSubURL+sub.SubscriptionID,
+		subURL,
 	)
 
 	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, messageText)
