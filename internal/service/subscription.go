@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/url"
 	"strings"
 	"time"
 
@@ -161,12 +160,7 @@ func (s *SubscriptionService) Create(ctx context.Context, chatID int64, username
 		return nil, fmt.Errorf("create subscription: %w", err)
 	}
 
-	// формируем URL подписки
-	joinedURL, err := url.JoinPath(s.globalSubURL, firstClient.SubID)
-	if err != nil {
-		return nil, fmt.Errorf("build subscription url: %w", err)
-	}
-	subscriptionURL := joinedURL
+	subscriptionURL := s.cfg.SubURL(firstClient.SubID)
 	return &CreateResult{
 		Subscription:    sub,
 		SubscriptionURL: subscriptionURL,
@@ -428,12 +422,7 @@ func (s *SubscriptionService) CreateTrial(ctx context.Context, inviteCode string
 		return nil, fmt.Errorf("create trial subscription: %w", err)
 	}
 
-	subURL, joinErr := url.JoinPath(s.globalSubURL, subID)
-	if joinErr != nil {
-		logger.Warn("Failed to build trial subscription URL with url.JoinPath, falling back to concatenation",
-			zap.Error(joinErr))
-		subURL = s.globalSubURL + subID
-	}
+	subURL := s.cfg.SubURL(subID)
 	return &TrialCreateResult{
 		Subscription:    sub,
 		SubscriptionURL: subURL,
