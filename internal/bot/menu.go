@@ -3,6 +3,7 @@ package bot
 import (
 	"context"
 	"errors"
+	"net/url"
 
 	"rs8kvn_bot/internal/logger"
 
@@ -77,7 +78,15 @@ func (h *Handler) handleMenuHelp(ctx context.Context, chatID int64, username str
 	if h.subscriptionService != nil {
 		trafficLimit = h.subscriptionService.PlanTrafficLimitGB(ctx, sub.TelegramID)
 	}
-	text := h.getHelpText(trafficLimit, h.cfg.GlobalSubURL+sub.SubscriptionID)
+	subURL, joinErr := url.JoinPath(h.cfg.GlobalSubURL, sub.SubscriptionID)
+	if joinErr != nil {
+		logger.Warn("Failed to build subscription URL with url.JoinPath, falling back to concatenation",
+			zap.String("global_sub_url", h.cfg.GlobalSubURL),
+			zap.String("subscription_id", sub.SubscriptionID),
+			zap.Error(joinErr))
+		subURL = h.cfg.GlobalSubURL + sub.SubscriptionID
+	}
+	text := h.getHelpText(trafficLimit, subURL)
 	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, text)
 	editMsg.ParseMode = "Markdown"
 	editMsg.DisableWebPagePreview = true

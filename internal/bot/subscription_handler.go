@@ -283,7 +283,11 @@ func (sh *SubscriptionHandler) createSubscription(ctx context.Context, chatID in
 			tgbotapi.NewInlineKeyboardButtonData("🏠 В начало", "back_to_start"),
 		),
 	)
-	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, sh.h.getHelpText(sh.h.subscriptionService.PlanTrafficLimitGB(ctx, result.Subscription.TelegramID), result.SubscriptionURL))
+	trafficLimit := 0
+	if sh.h.subscriptionService != nil {
+		trafficLimit = sh.h.subscriptionService.PlanTrafficLimitGB(ctx, result.Subscription.TelegramID)
+	}
+	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, sh.h.getHelpText(trafficLimit, result.SubscriptionURL))
 	editMsg.ParseMode = "Markdown"
 	editMsg.DisableWebPagePreview = true
 	editMsg.ReplyMarkup = &backKeyboard

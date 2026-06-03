@@ -162,6 +162,10 @@ func main() {
 		if xuiInboundIDStr != "" {
 			if parsed, convErr := strconv.Atoi(xuiInboundIDStr); convErr == nil {
 				xuiInboundID = parsed
+			} else {
+				logger.Warn("Invalid XUI_INBOUND_ID",
+					zap.String("raw_value", xuiInboundIDStr),
+					zap.Error(convErr))
 			}
 		}
 		defaultSubURL := os.Getenv("DEFAULT_SOURCE_SUB_URL")
@@ -217,6 +221,9 @@ func main() {
 			legacyXUIClient = xuiClients[src.ID]
 			break
 		}
+	}
+	if legacyXUIClient == nil {
+		logger.Warn("No active source found — legacy XUI client will be nil; health check on /ping will be skipped")
 	}
 
 	// Initialize Telegram bot with retry to handle transient network issues

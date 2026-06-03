@@ -45,6 +45,9 @@ func TestLoad_DefaultValues(t *testing.T) {
 		}
 	}()
 
+	require.NoError(t, os.Setenv("GLOBAL_SUB_URL", "https://vpn.example.com/sub/"))
+	defer os.Unsetenv("GLOBAL_SUB_URL")
+
 	cfg, err := Load()
 	require.NoError(t, err, "Load() error")
 
@@ -64,6 +67,8 @@ func TestLoad_CustomValues(t *testing.T) {
 	os.Setenv("DATABASE_PATH", "/custom/path/db.db")
 	os.Setenv("LOG_LEVEL", "debug")
 	os.Setenv("HEALTH_CHECK_PORT", "9090")
+	os.Setenv("GLOBAL_SUB_URL", "https://vpn.example.com/sub/")
+	
 	defer func() {
 		os.Unsetenv("TELEGRAM_BOT_TOKEN")
 		os.Unsetenv("TELEGRAM_ADMIN_ID")
@@ -74,6 +79,7 @@ func TestLoad_CustomValues(t *testing.T) {
 		os.Unsetenv("DATABASE_PATH")
 		os.Unsetenv("LOG_LEVEL")
 		os.Unsetenv("HEALTH_CHECK_PORT")
+		os.Unsetenv("GLOBAL_SUB_URL")
 	}()
 
 	cfg, err := Load()
@@ -135,7 +141,9 @@ func TestLoad_InvalidHeartbeatInterval_Zero(t *testing.T) {
 	os.Setenv("HEARTBEAT_INTERVAL", "0")
 	os.Setenv("HEARTBEAT_URL", "https://example.com/heartbeat")
 	os.Setenv("LOG_LEVEL", "info")
-	defer func() {
+
+	os.Setenv("GLOBAL_SUB_URL", "https://vpn.example.com/sub/")
+		defer func() {
 		os.Unsetenv("TELEGRAM_BOT_TOKEN")
 		os.Unsetenv("TELEGRAM_ADMIN_ID")
 		os.Unsetenv("XUI_HOST")
@@ -144,7 +152,8 @@ func TestLoad_InvalidHeartbeatInterval_Zero(t *testing.T) {
 		os.Unsetenv("HEARTBEAT_INTERVAL")
 		os.Unsetenv("HEARTBEAT_URL")
 		os.Unsetenv("LOG_LEVEL")
-	}()
+		os.Unsetenv("GLOBAL_SUB_URL")
+		}()
 
 	_, err := Load()
 	assert.Error(t, err, "Load() should error for HEARTBEAT_INTERVAL=0")
@@ -160,6 +169,8 @@ func TestLoad_ValidHeartbeatInterval_MinValue(t *testing.T) {
 	os.Setenv("HEARTBEAT_INTERVAL", "60")
 	os.Setenv("HEARTBEAT_URL", "https://example.com/heartbeat")
 	os.Setenv("LOG_LEVEL", "info")
+	os.Setenv("GLOBAL_SUB_URL", "https://vpn.example.com/sub/")
+	
 	defer func() {
 		os.Unsetenv("TELEGRAM_BOT_TOKEN")
 		os.Unsetenv("TELEGRAM_ADMIN_ID")
@@ -169,6 +180,7 @@ func TestLoad_ValidHeartbeatInterval_MinValue(t *testing.T) {
 		os.Unsetenv("HEARTBEAT_INTERVAL")
 		os.Unsetenv("HEARTBEAT_URL")
 		os.Unsetenv("LOG_LEVEL")
+		os.Unsetenv("GLOBAL_SUB_URL")
 	}()
 
 	cfg, err := Load()
@@ -231,7 +243,9 @@ func TestLoad_ValidHealthCheckPort_Max(t *testing.T) {
 	os.Setenv("XUI_INBOUND_ID", "1")
 	os.Setenv("HEALTH_CHECK_PORT", "65535")
 	os.Setenv("LOG_LEVEL", "info")
-	defer func() {
+
+	os.Setenv("GLOBAL_SUB_URL", "https://vpn.example.com/sub/")
+		defer func() {
 		os.Unsetenv("TELEGRAM_BOT_TOKEN")
 		os.Unsetenv("TELEGRAM_ADMIN_ID")
 		os.Unsetenv("XUI_HOST")
@@ -239,7 +253,8 @@ func TestLoad_ValidHealthCheckPort_Max(t *testing.T) {
 		os.Unsetenv("XUI_INBOUND_ID")
 		os.Unsetenv("HEALTH_CHECK_PORT")
 		os.Unsetenv("LOG_LEVEL")
-	}()
+		os.Unsetenv("GLOBAL_SUB_URL")
+		}()
 
 	cfg, err := Load()
 	assert.NoError(t, err)
@@ -254,14 +269,17 @@ func TestLoad_ValidTelegramAdminID(t *testing.T) {
 	os.Setenv("XUI_API_TOKEN", "some-test-token")
 	os.Setenv("XUI_INBOUND_ID", "1")
 	os.Setenv("LOG_LEVEL", "info")
-	defer func() {
+
+	os.Setenv("GLOBAL_SUB_URL", "https://vpn.example.com/sub/")
+		defer func() {
 		os.Unsetenv("TELEGRAM_BOT_TOKEN")
 		os.Unsetenv("TELEGRAM_ADMIN_ID")
 		os.Unsetenv("XUI_HOST")
 		os.Unsetenv("XUI_API_TOKEN")
 		os.Unsetenv("XUI_INBOUND_ID")
 		os.Unsetenv("LOG_LEVEL")
-	}()
+		os.Unsetenv("GLOBAL_SUB_URL")
+		}()
 
 	cfg, err := Load()
 	assert.NoError(t, err, "Load() should allow valid ADMIN_ID")
@@ -278,6 +296,8 @@ func TestLoad_InvalidTrialDurationHours_Zero(t *testing.T) {
 	os.Setenv("TRIAL_DURATION_HOURS", "0")
 	os.Setenv("SITE_URL", "https://example.com")
 	os.Setenv("LOG_LEVEL", "info")
+	os.Setenv("GLOBAL_SUB_URL", "https://vpn.example.com/sub/")
+	
 	defer func() {
 		os.Unsetenv("TELEGRAM_BOT_TOKEN")
 		os.Unsetenv("TELEGRAM_ADMIN_ID")
@@ -287,6 +307,7 @@ func TestLoad_InvalidTrialDurationHours_Zero(t *testing.T) {
 		os.Unsetenv("TRIAL_DURATION_HOURS")
 		os.Unsetenv("SITE_URL")
 		os.Unsetenv("LOG_LEVEL")
+		os.Unsetenv("GLOBAL_SUB_URL")
 	}()
 
 	_, err := Load()
@@ -303,7 +324,9 @@ func TestLoad_ValidTrialDurationHours_Min(t *testing.T) {
 	os.Setenv("TRIAL_DURATION_HOURS", "1")
 	os.Setenv("SITE_URL", "https://example.com")
 	os.Setenv("LOG_LEVEL", "info")
-	defer func() {
+
+	os.Setenv("GLOBAL_SUB_URL", "https://vpn.example.com/sub/")
+		defer func() {
 		os.Unsetenv("TELEGRAM_BOT_TOKEN")
 		os.Unsetenv("TELEGRAM_ADMIN_ID")
 		os.Unsetenv("XUI_HOST")
@@ -312,7 +335,8 @@ func TestLoad_ValidTrialDurationHours_Min(t *testing.T) {
 		os.Unsetenv("TRIAL_DURATION_HOURS")
 		os.Unsetenv("SITE_URL")
 		os.Unsetenv("LOG_LEVEL")
-	}()
+		os.Unsetenv("GLOBAL_SUB_URL")
+		}()
 
 	cfg, err := Load()
 	assert.NoError(t, err)
@@ -329,6 +353,8 @@ func TestLoad_ValidTrialDurationHours_Max(t *testing.T) {
 	os.Setenv("TRIAL_DURATION_HOURS", "168")
 	os.Setenv("SITE_URL", "https://example.com")
 	os.Setenv("LOG_LEVEL", "info")
+	os.Setenv("GLOBAL_SUB_URL", "https://vpn.example.com/sub/")
+	
 	defer func() {
 		os.Unsetenv("TELEGRAM_BOT_TOKEN")
 		os.Unsetenv("TELEGRAM_ADMIN_ID")
@@ -338,6 +364,7 @@ func TestLoad_ValidTrialDurationHours_Max(t *testing.T) {
 		os.Unsetenv("TRIAL_DURATION_HOURS")
 		os.Unsetenv("SITE_URL")
 		os.Unsetenv("LOG_LEVEL")
+		os.Unsetenv("GLOBAL_SUB_URL")
 	}()
 
 	cfg, err := Load()
@@ -380,7 +407,9 @@ func TestLoad_InvalidTrialRateLimit_Zero(t *testing.T) {
 	os.Setenv("TRIAL_RATE_LIMIT", "0")
 	os.Setenv("SITE_URL", "https://example.com")
 	os.Setenv("LOG_LEVEL", "info")
-	defer func() {
+
+	os.Setenv("GLOBAL_SUB_URL", "https://vpn.example.com/sub/")
+		defer func() {
 		os.Unsetenv("TELEGRAM_BOT_TOKEN")
 		os.Unsetenv("TELEGRAM_ADMIN_ID")
 		os.Unsetenv("XUI_HOST")
@@ -389,7 +418,8 @@ func TestLoad_InvalidTrialRateLimit_Zero(t *testing.T) {
 		os.Unsetenv("TRIAL_RATE_LIMIT")
 		os.Unsetenv("SITE_URL")
 		os.Unsetenv("LOG_LEVEL")
-	}()
+		os.Unsetenv("GLOBAL_SUB_URL")
+		}()
 
 	_, err := Load()
 	assert.Error(t, err, "Load() should error for TRIAL_RATE_LIMIT=0")
@@ -405,7 +435,9 @@ func TestLoad_ValidTrialRateLimit_Min(t *testing.T) {
 	os.Setenv("TRIAL_RATE_LIMIT", "1")
 	os.Setenv("SITE_URL", "https://example.com")
 	os.Setenv("LOG_LEVEL", "info")
-	defer func() {
+
+	os.Setenv("GLOBAL_SUB_URL", "https://vpn.example.com/sub/")
+		defer func() {
 		os.Unsetenv("TELEGRAM_BOT_TOKEN")
 		os.Unsetenv("TELEGRAM_ADMIN_ID")
 		os.Unsetenv("XUI_HOST")
@@ -414,7 +446,8 @@ func TestLoad_ValidTrialRateLimit_Min(t *testing.T) {
 		os.Unsetenv("TRIAL_RATE_LIMIT")
 		os.Unsetenv("SITE_URL")
 		os.Unsetenv("LOG_LEVEL")
-	}()
+		os.Unsetenv("GLOBAL_SUB_URL")
+		}()
 
 	cfg, err := Load()
 	assert.NoError(t, err)
@@ -431,7 +464,9 @@ func TestLoad_ValidTrialRateLimit_Max(t *testing.T) {
 	os.Setenv("TRIAL_RATE_LIMIT", "100")
 	os.Setenv("SITE_URL", "https://example.com")
 	os.Setenv("LOG_LEVEL", "info")
-	defer func() {
+
+	os.Setenv("GLOBAL_SUB_URL", "https://vpn.example.com/sub/")
+		defer func() {
 		os.Unsetenv("TELEGRAM_BOT_TOKEN")
 		os.Unsetenv("TELEGRAM_ADMIN_ID")
 		os.Unsetenv("XUI_HOST")
@@ -440,7 +475,8 @@ func TestLoad_ValidTrialRateLimit_Max(t *testing.T) {
 		os.Unsetenv("TRIAL_RATE_LIMIT")
 		os.Unsetenv("SITE_URL")
 		os.Unsetenv("LOG_LEVEL")
-	}()
+		os.Unsetenv("GLOBAL_SUB_URL")
+		}()
 
 	cfg, err := Load()
 	assert.NoError(t, err)
@@ -628,6 +664,7 @@ func TestConfig_Validate_Valid(t *testing.T) {
 		SiteURL:            "https://vpn.site",
 		TrialDurationHours: 3,
 		TrialRateLimit:     3,
+		GlobalSubURL: "https://vpn.example.com/sub/",
 	}
 
 	err := cfg.validate()
@@ -650,6 +687,7 @@ func TestConfig_Validate_SentryDSN_Valid(t *testing.T) {
 		SiteURL:            "https://vpn.site",
 		TrialDurationHours: 3,
 		TrialRateLimit:     3,
+		GlobalSubURL: "https://vpn.example.com/sub/",
 	}
 
 	err := cfg.validate()
@@ -687,6 +725,7 @@ func TestConfig_Validate_WithSubPath(t *testing.T) {
 		SiteURL:            "https://vpn.site",
 		TrialDurationHours: 3,
 		TrialRateLimit:     3,
+		GlobalSubURL: "https://vpn.example.com/sub/",
 	}
 
 	err := cfg.validate()
@@ -709,6 +748,7 @@ func TestConfig_Validate_WithHeartbeatURL(t *testing.T) {
 		SiteURL:            "https://vpn.site",
 		TrialDurationHours: 3,
 		TrialRateLimit:     3,
+		GlobalSubURL: "https://vpn.example.com/sub/",
 	}
 
 	err := cfg.validate()
@@ -834,6 +874,8 @@ func TestLoad_TrialDurationHours_TooLow(t *testing.T) {
 	os.Setenv("XUI_INBOUND_ID", "1")
 	os.Setenv("LOG_LEVEL", "info")
 	os.Setenv("TRIAL_DURATION_HOURS", "0")
+	os.Setenv("GLOBAL_SUB_URL", "https://vpn.example.com/sub/")
+	
 	defer func() {
 		os.Unsetenv("TELEGRAM_BOT_TOKEN")
 		os.Unsetenv("TELEGRAM_ADMIN_ID")
@@ -842,7 +884,8 @@ func TestLoad_TrialDurationHours_TooLow(t *testing.T) {
 		os.Unsetenv("XUI_INBOUND_ID")
 		os.Unsetenv("LOG_LEVEL")
 		os.Unsetenv("TRIAL_DURATION_HOURS")
-	}()
+		os.Unsetenv("GLOBAL_SUB_URL")
+		}()
 
 	_, err := Load()
 	assert.Error(t, err, "Load() should error when TRIAL_DURATION_HOURS is too low")
@@ -858,6 +901,8 @@ func TestLoad_TrialDurationHours_TooHigh(t *testing.T) {
 	os.Setenv("XUI_INBOUND_ID", "1")
 	os.Setenv("LOG_LEVEL", "info")
 	os.Setenv("TRIAL_DURATION_HOURS", "200")
+	os.Setenv("GLOBAL_SUB_URL", "https://vpn.example.com/sub/")
+	
 	defer func() {
 		os.Unsetenv("TELEGRAM_BOT_TOKEN")
 		os.Unsetenv("TELEGRAM_ADMIN_ID")
@@ -866,7 +911,8 @@ func TestLoad_TrialDurationHours_TooHigh(t *testing.T) {
 		os.Unsetenv("XUI_INBOUND_ID")
 		os.Unsetenv("LOG_LEVEL")
 		os.Unsetenv("TRIAL_DURATION_HOURS")
-	}()
+		os.Unsetenv("GLOBAL_SUB_URL")
+		}()
 
 	_, err := Load()
 	assert.Error(t, err, "Load() should error when TRIAL_DURATION_HOURS is too high")
@@ -882,6 +928,8 @@ func TestLoad_TrialDurationHours_Valid(t *testing.T) {
 	os.Setenv("XUI_INBOUND_ID", "1")
 	os.Setenv("LOG_LEVEL", "info")
 	os.Setenv("TRIAL_DURATION_HOURS", "24")
+	os.Setenv("GLOBAL_SUB_URL", "https://vpn.example.com/sub/")
+	
 	defer func() {
 		os.Unsetenv("TELEGRAM_BOT_TOKEN")
 		os.Unsetenv("TELEGRAM_ADMIN_ID")
@@ -890,7 +938,8 @@ func TestLoad_TrialDurationHours_Valid(t *testing.T) {
 		os.Unsetenv("XUI_INBOUND_ID")
 		os.Unsetenv("LOG_LEVEL")
 		os.Unsetenv("TRIAL_DURATION_HOURS")
-	}()
+		os.Unsetenv("GLOBAL_SUB_URL")
+		}()
 
 	cfg, err := Load()
 	require.NoError(t, err, "Load() should not error with valid TRIAL_DURATION_HOURS")
@@ -906,6 +955,8 @@ func TestLoad_TrialRateLimit_TooLow(t *testing.T) {
 	os.Setenv("XUI_INBOUND_ID", "1")
 	os.Setenv("LOG_LEVEL", "info")
 	os.Setenv("TRIAL_RATE_LIMIT", "0")
+	os.Setenv("GLOBAL_SUB_URL", "https://vpn.example.com/sub/")
+	
 	defer func() {
 		os.Unsetenv("TELEGRAM_BOT_TOKEN")
 		os.Unsetenv("TELEGRAM_ADMIN_ID")
@@ -914,7 +965,8 @@ func TestLoad_TrialRateLimit_TooLow(t *testing.T) {
 		os.Unsetenv("XUI_INBOUND_ID")
 		os.Unsetenv("LOG_LEVEL")
 		os.Unsetenv("TRIAL_RATE_LIMIT")
-	}()
+		os.Unsetenv("GLOBAL_SUB_URL")
+		}()
 
 	_, err := Load()
 	assert.Error(t, err, "Load() should error when TRIAL_RATE_LIMIT is too low")
@@ -930,6 +982,8 @@ func TestLoad_TrialRateLimit_TooHigh(t *testing.T) {
 	os.Setenv("XUI_INBOUND_ID", "1")
 	os.Setenv("LOG_LEVEL", "info")
 	os.Setenv("TRIAL_RATE_LIMIT", "150")
+	os.Setenv("GLOBAL_SUB_URL", "https://vpn.example.com/sub/")
+	
 	defer func() {
 		os.Unsetenv("TELEGRAM_BOT_TOKEN")
 		os.Unsetenv("TELEGRAM_ADMIN_ID")
@@ -938,7 +992,8 @@ func TestLoad_TrialRateLimit_TooHigh(t *testing.T) {
 		os.Unsetenv("XUI_INBOUND_ID")
 		os.Unsetenv("LOG_LEVEL")
 		os.Unsetenv("TRIAL_RATE_LIMIT")
-	}()
+		os.Unsetenv("GLOBAL_SUB_URL")
+		}()
 
 	_, err := Load()
 	assert.Error(t, err, "Load() should error when TRIAL_RATE_LIMIT is too high")
@@ -954,6 +1009,8 @@ func TestLoad_TrialRateLimit_Valid(t *testing.T) {
 	os.Setenv("XUI_INBOUND_ID", "1")
 	os.Setenv("LOG_LEVEL", "info")
 	os.Setenv("TRIAL_RATE_LIMIT", "5")
+	os.Setenv("GLOBAL_SUB_URL", "https://vpn.example.com/sub/")
+	
 	defer func() {
 		os.Unsetenv("TELEGRAM_BOT_TOKEN")
 		os.Unsetenv("TELEGRAM_ADMIN_ID")
@@ -962,7 +1019,8 @@ func TestLoad_TrialRateLimit_Valid(t *testing.T) {
 		os.Unsetenv("XUI_INBOUND_ID")
 		os.Unsetenv("LOG_LEVEL")
 		os.Unsetenv("TRIAL_RATE_LIMIT")
-	}()
+		os.Unsetenv("GLOBAL_SUB_URL")
+		}()
 
 	cfg, err := Load()
 	require.NoError(t, err, "Load() should not error with valid TRIAL_RATE_LIMIT")
@@ -978,6 +1036,8 @@ func TestLoad_SiteURL_Invalid(t *testing.T) {
 	os.Setenv("XUI_INBOUND_ID", "1")
 	os.Setenv("LOG_LEVEL", "info")
 	os.Setenv("SITE_URL", "not-a-valid-url")
+	os.Setenv("GLOBAL_SUB_URL", "https://vpn.example.com/sub/")
+	
 	defer func() {
 		os.Unsetenv("TELEGRAM_BOT_TOKEN")
 		os.Unsetenv("TELEGRAM_ADMIN_ID")
@@ -986,7 +1046,8 @@ func TestLoad_SiteURL_Invalid(t *testing.T) {
 		os.Unsetenv("XUI_INBOUND_ID")
 		os.Unsetenv("LOG_LEVEL")
 		os.Unsetenv("SITE_URL")
-	}()
+		os.Unsetenv("GLOBAL_SUB_URL")
+		}()
 
 	_, err := Load()
 	assert.Error(t, err, "Load() should error with invalid SITE_URL")
@@ -1002,6 +1063,8 @@ func TestLoad_SiteURL_MissingScheme(t *testing.T) {
 	os.Setenv("XUI_INBOUND_ID", "1")
 	os.Setenv("LOG_LEVEL", "info")
 	os.Setenv("SITE_URL", "example.com")
+	os.Setenv("GLOBAL_SUB_URL", "https://vpn.example.com/sub/")
+	
 	defer func() {
 		os.Unsetenv("TELEGRAM_BOT_TOKEN")
 		os.Unsetenv("TELEGRAM_ADMIN_ID")
@@ -1010,7 +1073,8 @@ func TestLoad_SiteURL_MissingScheme(t *testing.T) {
 		os.Unsetenv("XUI_INBOUND_ID")
 		os.Unsetenv("LOG_LEVEL")
 		os.Unsetenv("SITE_URL")
-	}()
+		os.Unsetenv("GLOBAL_SUB_URL")
+		}()
 
 	_, err := Load()
 	assert.Error(t, err, "Load() should error when SITE_URL is missing scheme")
@@ -1026,6 +1090,8 @@ func TestLoad_SiteURL_Valid(t *testing.T) {
 	os.Setenv("XUI_INBOUND_ID", "1")
 	os.Setenv("LOG_LEVEL", "info")
 	os.Setenv("SITE_URL", "https://vpn.example.com")
+	os.Setenv("GLOBAL_SUB_URL", "https://vpn.example.com/sub/")
+	
 	defer func() {
 		os.Unsetenv("TELEGRAM_BOT_TOKEN")
 		os.Unsetenv("TELEGRAM_ADMIN_ID")
@@ -1034,7 +1100,8 @@ func TestLoad_SiteURL_Valid(t *testing.T) {
 		os.Unsetenv("XUI_INBOUND_ID")
 		os.Unsetenv("LOG_LEVEL")
 		os.Unsetenv("SITE_URL")
-	}()
+		os.Unsetenv("GLOBAL_SUB_URL")
+		}()
 
 	cfg, err := Load()
 	require.NoError(t, err, "Load() should not error with valid SITE_URL")
@@ -1052,6 +1119,8 @@ func TestLoad_AllTrialSettings(t *testing.T) {
 	os.Setenv("TRIAL_DURATION_HOURS", "48")
 	os.Setenv("TRIAL_RATE_LIMIT", "10")
 	os.Setenv("SITE_URL", "https://trial.example.com")
+	os.Setenv("GLOBAL_SUB_URL", "https://vpn.example.com/sub/")
+	
 	defer func() {
 		os.Unsetenv("TELEGRAM_BOT_TOKEN")
 		os.Unsetenv("TELEGRAM_ADMIN_ID")
@@ -1062,7 +1131,8 @@ func TestLoad_AllTrialSettings(t *testing.T) {
 		os.Unsetenv("TRIAL_DURATION_HOURS")
 		os.Unsetenv("TRIAL_RATE_LIMIT")
 		os.Unsetenv("SITE_URL")
-	}()
+		os.Unsetenv("GLOBAL_SUB_URL")
+		}()
 
 	cfg, err := Load()
 	require.NoError(t, err, "Load() should not error with all valid settings")
@@ -1081,7 +1151,8 @@ func FuzzLoad_InvalidEnvValues(f *testing.F) {
 		"XUI_API_TOKEN":      "some-token",
 		"XUI_INBOUND_ID":     "1",
 		"LOG_LEVEL":          "info",
-	}
+			"GLOBAL_SUB_URL": "https://vpn.example.com/sub/",
+}
 
 	invalidValues := []string{
 		"invalid",

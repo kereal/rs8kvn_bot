@@ -67,11 +67,6 @@ type Source struct {
 	UpdatedAt    time.Time `gorm:"autoUpdateTime;column:updated_at"`
 }
 
-// TableName returns the table name for Source.
-func (Source) TableName() string {
-	return "sources"
-}
-
 // Plan represents a subscription plan.
 type Plan struct {
 	ID           uint      `gorm:"primaryKey;column:id"`
@@ -84,15 +79,34 @@ type Plan struct {
 	UpdatedAt    time.Time `gorm:"autoUpdateTime;column:updated_at"`
 }
 
-// TableName returns the table name for Plan.
-func (Plan) TableName() string {
-	return "plans"
-}
-
 // PlanSource is the join model for M2M between Plan and Source.
 type PlanSource struct {
 	PlanID   uint `gorm:"primaryKey;column:plan_id"`
 	SourceID uint `gorm:"primaryKey;column:source_id"`
+}
+
+// Invite represents a referral invite code.
+type Invite struct {
+	Code         string    `gorm:"primaryKey;size:16"`
+	ReferrerTGID int64     `gorm:"index;not null"`
+	CreatedAt    time.Time `gorm:"autoCreateTime"`
+}
+
+// TrialRequest tracks trial requests for rate limiting.
+type TrialRequest struct {
+	ID        uint      `gorm:"primaryKey"`
+	IP        string    `gorm:"size:45;index"`
+	CreatedAt time.Time `gorm:"autoCreateTime"`
+}
+
+// TableName returns the table name for Source.
+func (Source) TableName() string {
+	return "sources"
+}
+
+// TableName returns the table name for Plan.
+func (Plan) TableName() string {
+	return "plans"
 }
 
 // TableName returns the table name for PlanSource.
@@ -103,6 +117,16 @@ func (PlanSource) TableName() string {
 // TableName returns the table name for Subscription.
 func (Subscription) TableName() string {
 	return "subscriptions"
+}
+
+// TableName returns the table name for Invite.
+func (Invite) TableName() string {
+	return "invites"
+}
+
+// TableName returns the table name for TrialRequest.
+func (TrialRequest) TableName() string {
+	return "trial_requests"
 }
 
 // IsExpired returns true if the subscription has expired.
@@ -117,30 +141,6 @@ func (s *Subscription) IsExpired() bool {
 // IsActive returns true if the subscription is active and not expired.
 func (s *Subscription) IsActive() bool {
 	return s.Status == "active" && !s.IsExpired()
-}
-
-// Invite represents a referral invite code.
-type Invite struct {
-	Code         string    `gorm:"primaryKey;size:16"`
-	ReferrerTGID int64     `gorm:"index;not null"`
-	CreatedAt    time.Time `gorm:"autoCreateTime"`
-}
-
-// TableName returns the table name for Invite.
-func (Invite) TableName() string {
-	return "invites"
-}
-
-// TrialRequest tracks trial requests for rate limiting.
-type TrialRequest struct {
-	ID        uint      `gorm:"primaryKey"`
-	IP        string    `gorm:"size:45;index"`
-	CreatedAt time.Time `gorm:"autoCreateTime"`
-}
-
-// TableName returns the table name for TrialRequest.
-func (TrialRequest) TableName() string {
-	return "trial_requests"
 }
 
 // runMigrations applies the embedded SQL schema migrations to the provided database,
@@ -182,57 +182,6 @@ func runMigrations(sqlDB *sql.DB) error {
 				}
 			}
 		}
-	}
-
-	var err error
-
-	// Check if subscriptions table exists and its structure
-	var tableExists int
-	if err := sqlDB.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='subscriptions'").Scan(&tableExists); err != nil {
-		logger.Warn("Failed to check subscriptions table", zap.Error(err))
-		tableExists = 0
-	}
-
-	var xuiHostExists, subIDExists int
-	if tableExists > 0 {
-		if err := sqlDB.QueryRow("SELECT COUNT(*) FROM pragma_table_info('subscriptions') WHERE name = 'x_ui_host'").Scan(&xuiHostExists); err != nil {
-			logger.Warn("Failed to check x_ui_host column", zap.Error(err))
-			xuiHostExists = 0
-		}
-		if err := sqlDB.QueryRow("SELECT COUNT(*) FROM pragma_table_info('subscriptions') WHERE name = 'subscription_id'").Scan(&subIDExists); err != nil {
-			logger.Warn("Failed to check subscription_id column", zap.Error(err))
-			subIDExists = 0
-		}
-	}
-
-	// Legacy database: has subscriptions table but missing subscription_id column
-	if tableExists > 0 && subIDExists == 0 {
-		logger.Info("Running legacy migration 001 (old subscriptions table found)")
-
-		// Add subscription_id column if not exists
-		if subIDExists == 0 {
-			_, err = sqlDB.Exec("ALTER TABLE subscriptions ADD COLUMN subscription_id VARCHAR(255)")
-			if err != nil {
-				logger.Warn("Migration 001 ADD COLUMN failed", zap.String("error", err.Error()))
-			}
-		}
-
-		// Remove is_trial if present
-		var isTrialExists int
-		err = sqlDB.QueryRow("SELECT COUNT(*) FROM pragma_table_info('subscriptions') WHERE name = 'is_trial'").Scan(&isTrialExists)
-		if err == nil && isTrialExists > 0 {
-			if _, err = sqlDB.Exec("DROP INDEX IF EXISTS idx_subscriptions_is_trial"); err != nil {
-				logger.Warn("Migration 010 drop index failed", zap.String("error", err.Error()))
-			}
-			if _, err = sqlDB.Exec("ALTER TABLE subscriptions DROP COLUMN is_trial"); err != nil {
-				logger.Warn("Migration 010 drop column failed", zap.String("error", err.Error()))
-			}
-		}
-
-		logger.Info("Legacy migration 001 applied")
-	} else if tableExists == 0 {
-		// Fresh database - will be created by migration 000
-		logger.Info("No legacy migration needed - fresh database")
 	}
 
 	// Create embedded source driver from migrationFiles
@@ -332,29 +281,12 @@ func NewService(dbPath string) (*Service, error) {
 			Name:         FreePlanName,
 			Price:        0,
 			DevicesLimit: 1,
-			TrafficLimit: 107374182400,
-			Duration:     168,
+			TrafficLimit: 53687091200,
+			Duration:     0,
 		}).Error; err != nil {
 			return nil, fmt.Errorf("failed to seed default free plan: %w", err)
 		}
 		logger.Info("Inserted default trial/free plans")
-	}
-	var sourceCount int64
-	if err := db.WithContext(context.Background()).Model(&Source{}).Count(&sourceCount).Error; err != nil {
-		return nil, fmt.Errorf("failed to count default sources: %w", err)
-	}
-	if sourceCount == 0 {
-		if err := db.WithContext(context.Background()).Create(&Source{
-			Name:         "default",
-			Active:       true,
-			XUIHost:      "http://localhost:2053",
-			XUIAPIToken:  "test-token",
-			XUIInboundID: 1,
-			SubURL:       "http://localhost:2053/sub/",
-		}).Error; err != nil {
-			return nil, fmt.Errorf("failed to seed default source: %w", err)
-		}
-		logger.Info("Inserted default source")
 	}
 	return &Service{db: db}, nil
 }
@@ -539,15 +471,33 @@ func (s *Service) IsSourcesEmpty(ctx context.Context) (bool, error) {
 }
 
 // SeedDefaultSource inserts the default source from environment variables if the sources table is empty.
+// It also links all existing plans to the new source and assigns the free plan to legacy subscriptions.
 func (s *Service) SeedDefaultSource(ctx context.Context, name, xuiHost, xuiAPIToken string, xuiInboundID int, subURL string) error {
-	return s.db.WithContext(ctx).Create(&Source{
+	source := Source{
 		Name:         name,
 		Active:       true,
 		XUIHost:      xuiHost,
 		XUIAPIToken:  xuiAPIToken,
 		XUIInboundID: xuiInboundID,
 		SubURL:       subURL,
-	}).Error
+	}
+	if err := s.db.WithContext(ctx).Create(&source).Error; err != nil {
+		return err
+	}
+	var plans []Plan
+	if err := s.db.WithContext(ctx).Find(&plans).Error; err != nil {
+		return err
+	}
+	for _, p := range plans {
+		ps := PlanSource{PlanID: p.ID, SourceID: source.ID}
+		if err := s.db.WithContext(ctx).Create(&ps).Error; err != nil {
+			return fmt.Errorf("failed to link plan %d to source %d: %w", p.ID, source.ID, err)
+		}
+	}
+	return s.db.WithContext(ctx).Exec(
+		`UPDATE subscriptions SET plan_id = (SELECT id FROM plans WHERE name = ?) WHERE plan_id IS NULL`,
+		FreePlanName,
+	).Error
 }
 
 // GetLatestSubscriptions retrieves the latest N subscriptions ordered by creation date.
