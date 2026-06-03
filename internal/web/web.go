@@ -57,7 +57,6 @@ type ComponentHealth struct {
 type Server struct {
 	addr            string
 	db              interfaces.DatabaseService
-	xuiClient       interfaces.XUIClient
 	cfg             *config.Config
 	botConfig       *bot.BotConfig
 	subService      *service.SubscriptionService
@@ -74,7 +73,7 @@ type Server struct {
 	errorTemplate   *template.Template
 }
 
-func NewServer(addr string, db interfaces.DatabaseService, xuiClient interfaces.XUIClient, cfg *config.Config, botConfig *bot.BotConfig, subService *service.SubscriptionService, subProxy *subproxy.Service) *Server {
+func NewServer(addr string, db interfaces.DatabaseService, cfg *config.Config, botConfig *bot.BotConfig, subService *service.SubscriptionService, subProxy *subproxy.Service) *Server {
 	trialTmpl := template.Must(template.New("trial.html").Funcs(template.FuncMap{
 		"escape": func(s string) string {
 			var buf strings.Builder
@@ -88,7 +87,6 @@ func NewServer(addr string, db interfaces.DatabaseService, xuiClient interfaces.
 	return &Server{
 		addr:            addr,
 		db:              db,
-		xuiClient:       xuiClient,
 		cfg:             cfg,
 		botConfig:       botConfig,
 		subService:      subService,
@@ -333,7 +331,8 @@ func (s *Server) HandleInvite(w http.ResponseWriter, r *http.Request) {
 		telegramLink := "https://t.me/" + s.botConfig.Username + "?start=trial_" + existingSub.SubscriptionID
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
-		s.renderTrialPage(w, existingSub.SubscriptionID, existingSub.SubscriptionURL, telegramLink, s.cfg.TrialDurationHours)
+		subURL := s.cfg.GlobalSubURL + existingSub.SubscriptionID
+		s.renderTrialPage(w, existingSub.SubscriptionID, subURL, telegramLink, s.cfg.TrialDurationHours)
 		return
 	}
 
@@ -415,8 +414,13 @@ func (s *Server) getExistingTrialFromCookie(r *http.Request, ctx context.Context
 		return nil, err
 	}
 
-	// Проверяем, что это всё ещё trial и не активирован
-	if !sub.IsTrial || sub.TelegramID != 0 {
+	// Проверяем, что это trial и не активирован
+	if sub.TelegramID != 0 {
+		return nil, fmt.Errorf("not a valid trial")
+	}
+
+	plan, planErr := s.db.GetPlanByID(ctx, sub.PlanID)
+	if planErr != nil || plan.Name != database.TrialPlanName {
 		return nil, fmt.Errorf("not a valid trial")
 	}
 
@@ -433,6 +437,20 @@ type trialPageData struct {
 	SubURL       string
 	TelegramLink template.URL
 	TrialHours   int
+}
+
+func (s *Server) getSubproxyURL(ctx context.Context, subID string) (string, error) {
+	sources, err := s.db.ListSources(ctx)
+	if err != nil {
+		return "", fmt.Errorf("list sources: %w", err)
+	}
+	for _, src := range sources {
+		if !src.Active || src.SubURL == "" {
+			continue
+		}
+		return src.SubURL + subID, nil
+	}
+	return "", fmt.Errorf("no active source with sub_url found")
 }
 
 func (s *Server) renderTrialPage(w http.ResponseWriter, subID, subURL, telegramLink string, trialHours int) {
@@ -589,17 +607,18 @@ func (s *Server) handleSubscription(w http.ResponseWriter, r *http.Request) {
 			return nil, &subFetchError{err: err, notFound: true}
 		}
 
-		if sub.SubscriptionURL == "" {
-			logger.Warn("Subscription URL is empty", zap.String("sub_id", subID))
-			return nil, nil
-		}
-
 		if !sub.IsActive() {
 			logger.Info("Subscription is not active", zap.String("sub_id", subID), zap.String("status", sub.Status))
 			return nil, &subFetchError{err: nil, notFound: true}
 		}
 
-		xuiResp, fetchErr := subproxy.FetchFromXUI(sub.SubscriptionURL)
+		subproxyURL, err := s.getSubproxyURL(ctx, subID)
+		if err != nil {
+			logger.Warn("Failed to build subproxy URL", zap.String("sub_id", subID), zap.Error(err))
+			return nil, nil
+		}
+
+		xuiResp, fetchErr := subproxy.FetchFromXUI(subproxyURL)
 		if fetchErr != nil {
 			logger.Warn("Failed to fetch from 3x-ui", zap.String("sub_id", subID), zap.Error(fetchErr))
 			if cachedBody, cachedHeaders, ok := s.subProxy.GetCache(subID); ok {

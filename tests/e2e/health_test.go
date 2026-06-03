@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"rs8kvn_bot/internal/database"
+	"rs8kvn_bot/internal/interfaces"
 	"rs8kvn_bot/internal/service"
 	"rs8kvn_bot/internal/web"
 	"rs8kvn_bot/internal/webhook"
@@ -21,8 +23,10 @@ func TestE2E_HealthEndpoint(t *testing.T) {
 	env := setupE2EEnv(t)
 	defer env.db.Close()
 
-	subService := service.NewSubscriptionService(env.db, env.xui, env.cfg, &webhook.NoopSender{})
-	srv := web.NewServer("127.0.0.1:0", env.db, env.xui, env.cfg, env.botConfig, subService, nil)
+	xuiClients := map[uint]interfaces.XUIClient{1: env.xui}
+	sources := []database.Source{{Name: "main", XUIHost: "https://panel.example.com", XUIAPIToken: "test-api-token", XUIInboundID: 1, Active: true}}
+	subService := service.NewSubscriptionService(env.db, xuiClients, sources, env.cfg, env.cfg.GlobalSubURL, &webhook.NoopSender{})
+	srv := web.NewServer("127.0.0.1:0", env.db, env.cfg, env.botConfig, subService, nil)
 
 	srv.RegisterChecker("database", func(ctx context.Context) web.ComponentHealth {
 		if err := env.db.Ping(ctx); err != nil {
@@ -56,8 +60,10 @@ func TestE2E_HealthEndpoint_DBError(t *testing.T) {
 	env := setupE2EEnv(t)
 	defer env.db.Close()
 
-	subService := service.NewSubscriptionService(env.db, env.xui, env.cfg, &webhook.NoopSender{})
-	srv := web.NewServer("127.0.0.1:0", env.db, env.xui, env.cfg, env.botConfig, subService, nil)
+	xuiClients := map[uint]interfaces.XUIClient{1: env.xui}
+	sources := []database.Source{{Name: "main", XUIHost: "https://panel.example.com", XUIAPIToken: "test-api-token", XUIInboundID: 1, Active: true}}
+	subService := service.NewSubscriptionService(env.db, xuiClients, sources, env.cfg, env.cfg.GlobalSubURL, &webhook.NoopSender{})
+	srv := web.NewServer("127.0.0.1:0", env.db, env.cfg, env.botConfig, subService, nil)
 
 	srv.RegisterChecker("database", func(ctx context.Context) web.ComponentHealth {
 		return web.ComponentHealth{Status: web.StatusDown, Message: "database connection failed"}
@@ -88,8 +94,10 @@ func TestE2E_ReadyEndpoint(t *testing.T) {
 	env := setupE2EEnv(t)
 	defer env.db.Close()
 
-	subService := service.NewSubscriptionService(env.db, env.xui, env.cfg, &webhook.NoopSender{})
-	srv := web.NewServer("127.0.0.1:0", env.db, env.xui, env.cfg, env.botConfig, subService, nil)
+	xuiClients := map[uint]interfaces.XUIClient{1: env.xui}
+	sources := []database.Source{{Name: "main", XUIHost: "https://panel.example.com", XUIAPIToken: "test-api-token", XUIInboundID: 1, Active: true}}
+	subService := service.NewSubscriptionService(env.db, xuiClients, sources, env.cfg, env.cfg.GlobalSubURL, &webhook.NoopSender{})
+	srv := web.NewServer("127.0.0.1:0", env.db, env.cfg, env.botConfig, subService, nil)
 
 	srv.RegisterChecker("database", func(ctx context.Context) web.ComponentHealth {
 		if err := env.db.Ping(ctx); err != nil {

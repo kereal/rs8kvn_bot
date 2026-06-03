@@ -16,5 +16,3 @@ func NewTestBotConfig() *BotConfig {
 		loadedAt:                time.Now(),
 	}
 }
-
-

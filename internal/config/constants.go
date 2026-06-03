@@ -51,7 +51,7 @@ const (
 // Database Constants
 const (
 	// DefaultDatabasePath is the default path to the SQLite database
-	DefaultDatabasePath = "./data/tgvpn.db"
+	DefaultDatabasePath = "./data/rs8kvn.db"
 
 	// ConnMaxLifetime is the maximum time a connection can be reused
 	ConnMaxLifetime = 5 * time.Minute
@@ -68,15 +68,6 @@ const (
 
 // Subscription Constants
 const (
-	// MinTrafficLimitGB is the minimum traffic limit in GB
-	MinTrafficLimitGB = 1
-
-	// MaxTrafficLimitGB is the maximum traffic limit in GB
-	MaxTrafficLimitGB = 1000
-
-	// DefaultTrafficLimitGB is the default traffic limit in GB
-	DefaultTrafficLimitGB = 30
-
 	// SubscriptionResetDay is the interval in days for automatic traffic reset.
 	// When combined with ExpiryTime > 0, traffic resets every N days and expiry extends.
 	// Example: reset=30 means traffic resets every 30 days from creation date.
@@ -97,7 +88,7 @@ const (
 	DefaultBackupHour = 3
 
 	// DefaultBackupRetention is the number of days to keep backups
-	DefaultBackupRetention = 14
+	DefaultBackupRetention = 30
 )
 
 // Heartbeat Constants
@@ -138,17 +129,8 @@ const (
 	DefaultHealthCheckPort = 8880
 )
 
-// 3x-ui Subscription Path Constants
-const (
-	// DefaultXUISubPath is the default subscription path segment
-	DefaultXUISubPath = "sub"
-)
-
 // Validation Constants
 const (
-	// MinInboundID is the minimum valid inbound ID
-	MinInboundID = 1
-
 	// SubIDLengthBytes is the number of random bytes for subscription ID (28 hex chars)
 	SubIDLengthBytes = 14
 )

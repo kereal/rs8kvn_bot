@@ -154,14 +154,6 @@ func TestClose(t *testing.T) {
 	_ = Close()
 }
 
-func TestClose_NilLogger(t *testing.T) {
-
-	// This test verifies that Close() handles edge cases gracefully.
-	// In production, the logger is always initialized before use.
-	// We skip this test as it tests deprecated nil-check behavior.
-	t.Skip("Testing nil logger behavior is deprecated; logger is always initialized in production")
-}
-
 func TestClose_MultipleCalls(t *testing.T) {
 
 	tmpDir := t.TempDir()
@@ -405,14 +397,6 @@ func TestStdLogWriter_Write(t *testing.T) {
 	assert.NoError(t, err, "Write() error")
 }
 
-// ==================== SetSentryHub Tests ====================
-
-func TestSetSentryHub(t *testing.T) {
-
-	// Should not panic with nil hub
-	SetSentryHub(nil)
-}
-
 // ==================== Writer Tests ====================
 
 func TestWriter(t *testing.T) {
@@ -469,28 +453,6 @@ func TestRedirectStdLog_ActualRedirection(t *testing.T) {
 
 // ==================== Edge Cases ====================
 
-func TestNilLoggerSafety(t *testing.T) {
-
-	// This test verifies that global functions handle nil logger gracefully.
-	// In production, the logger is always initialized before use.
-	// We skip this test as it tests deprecated nil-check behavior.
-	t.Skip("Testing nil logger behavior is deprecated; logger is always initialized in production")
-}
-
-func TestFatal_NilLogger(t *testing.T) {
-
-	// This test verifies that Fatal() handles nil logger gracefully.
-	// In production, the logger is always initialized before use.
-	// We skip this test as it tests deprecated nil-check behavior.
-	t.Skip("Testing nil logger behavior is deprecated; logger is always initialized in production")
-}
-
-func TestFlushSentry(t *testing.T) {
-
-	// flushSentry should not panic with nil hub
-	flushSentry(0)
-}
-
 func TestCaptureToSentry(t *testing.T) {
 
 	tmpDir := t.TempDir()
@@ -503,11 +465,6 @@ func TestCaptureToSentry(t *testing.T) {
 	// Should not panic
 	captureToSentry("test message", "info")
 	captureToSentry("error message", "error")
-}
-
-func TestService_Fatal(t *testing.T) {
-
-	t.Skip("Fatal calls os.Exit which kills the test process")
 }
 
 func TestService_WithError(t *testing.T) {
@@ -568,24 +525,25 @@ func TestService_FlushSentry_NoSentry(t *testing.T) {
 
 // ==================== isStdoutError Tests ====================
 
-func TestIsStdoutError_NilError(t *testing.T) {
+func TestIsStdoutError(t *testing.T) {
+	t.Parallel()
 
-	assert.False(t, isStdoutError(nil), "nil error should not be stdout error")
-}
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil error", nil, false},
+		{"invalid argument", fmt.Errorf("invalid argument"), true},
+		{"bad file descriptor", fmt.Errorf("bad file descriptor"), true},
+		{"other error", fmt.Errorf("some other error"), false},
+	}
 
-func TestIsStdoutError_InvalidArgument(t *testing.T) {
-
-	assert.True(t, isStdoutError(fmt.Errorf("invalid argument")), "invalid argument should be stdout error")
-}
-
-func TestIsStdoutError_BadFileDescriptor(t *testing.T) {
-
-	assert.True(t, isStdoutError(fmt.Errorf("bad file descriptor")), "bad file descriptor should be stdout error")
-}
-
-func TestIsStdoutError_OtherError(t *testing.T) {
-
-	assert.False(t, isStdoutError(fmt.Errorf("some other error")), "other error should not be stdout error")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, isStdoutError(tt.err))
+		})
+	}
 }
 
 // ==================== Service Sentry Tests ====================

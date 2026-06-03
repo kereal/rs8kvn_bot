@@ -8,6 +8,7 @@ import (
 
 	"rs8kvn_bot/internal/config"
 	"rs8kvn_bot/internal/database"
+	"rs8kvn_bot/internal/interfaces"
 	"rs8kvn_bot/internal/service"
 	"rs8kvn_bot/internal/testutil"
 	"rs8kvn_bot/internal/webhook"
@@ -22,7 +23,9 @@ import (
 // pattern of NewHandler + subscriptionService assignment across all admin tests.
 func newTestAdminHandler(cfg *config.Config, mockDB *testutil.MockDatabaseService, mockXUI *testutil.MockXUIClient, mockBot *testutil.MockBotAPI) *Handler {
 	h := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
-	h.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	xuiClients := map[uint]interfaces.XUIClient{1: mockXUI}
+	sources := []database.Source{{ID: 1, Active: true,  XUIHost: "http://localhost:2053", XUIAPIToken: "test-token", XUIInboundID: 1, SubURL: "http://example.com/sub/"}}
+	h.subscriptionService = service.NewSubscriptionService(mockDB, xuiClients, sources, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
 	// Wire cache invalidation for tests that manually set subscriptionService
 	h.subscriptionService.SetInvalidateFunc(h.cache.Invalidate)
 	return h
@@ -72,7 +75,6 @@ func TestHandleDel_NonAdminUser(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 999999,
-		TrafficLimitGB:  50,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -92,21 +94,20 @@ func TestHandleDel_ValidDeletion(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  50,
-		XUIInboundID:    1,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
-	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
+	xuiClients := map[uint]interfaces.XUIClient{1: mockXUI}
+	sources := []database.Source{{ID: 1, Active: true,  XUIHost: "http://localhost:2053", XUIAPIToken: "test-token", XUIInboundID: 1, SubURL: "http://example.com/sub/"}}
+	handler.subscriptionService = service.NewSubscriptionService(mockDB, xuiClients, sources, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
 
 	sub := &database.Subscription{
 		ID:         5,
 		TelegramID: 789012,
 		Username:   "testuser",
 		ClientID:   "client-123",
-		InboundID:  1,
 	}
 
 	mockDB.GetByIDFunc = func(ctx context.Context, id uint) (*database.Subscription, error) {
@@ -138,7 +139,6 @@ func TestHandleDel_InvalidIDFormat(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  50,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -192,7 +192,6 @@ func TestHandleDel_GetByIDError(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  50,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -216,8 +215,6 @@ func TestHandleDel_XUIDeleteFailure(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  50,
-		XUIInboundID:    1,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -226,9 +223,8 @@ func TestHandleDel_XUIDeleteFailure(t *testing.T) {
 
 	mockDB.GetByIDFunc = func(ctx context.Context, id uint) (*database.Subscription, error) {
 		return &database.Subscription{
-			ID:        5,
-			ClientID:  "client-123",
-			InboundID: 1,
+			ID:       5,
+			ClientID: "client-123",
 		}, nil
 	}
 
@@ -249,8 +245,6 @@ func TestHandleDel_DatabaseDeleteFailure(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  50,
-		XUIInboundID:    1,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -259,9 +253,8 @@ func TestHandleDel_DatabaseDeleteFailure(t *testing.T) {
 
 	mockDB.GetByIDFunc = func(ctx context.Context, id uint) (*database.Subscription, error) {
 		return &database.Subscription{
-			ID:        5,
-			ClientID:  "client-123",
-			InboundID: 1,
+			ID:       5,
+			ClientID: "client-123",
 		}, nil
 	}
 
@@ -289,8 +282,6 @@ func TestHandleDel_CacheInvalidation(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  50,
-		XUIInboundID:    1,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -303,7 +294,6 @@ func TestHandleDel_CacheInvalidation(t *testing.T) {
 		TelegramID: telegramID,
 		Username:   "testuser",
 		ClientID:   "client-123",
-		InboundID:  1,
 	}
 
 	// Set up cache
@@ -338,7 +328,6 @@ func TestHandleBroadcast_NonAdminUser(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 999999,
-		TrafficLimitGB:  50,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -358,7 +347,6 @@ func TestHandleBroadcast_ValidBroadcast(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  50,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -390,7 +378,6 @@ func TestHandleBroadcast_NoMessage(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  50,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -410,7 +397,6 @@ func TestHandleBroadcast_NoUsers(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  50,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -434,7 +420,6 @@ func TestHandleBroadcast_DatabaseError(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  50,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -459,7 +444,6 @@ func TestHandleBroadcast_SendFailure(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  50,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -487,7 +471,6 @@ func TestHandleBroadcast_ContextCancellation(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  50,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -520,7 +503,6 @@ func TestHandleBroadcast_MultipleBatches(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  50,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -576,7 +558,6 @@ func TestHandleBroadcast_BatchError(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  50,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -611,7 +592,6 @@ func TestHandleBroadcast_EmptyBatchAfterFirst(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  50,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -646,7 +626,6 @@ func TestHandleBroadcast_GetTelegramIDsBatchErrorOnFirstCall(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  50,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -675,7 +654,6 @@ func TestHandleBroadcast_ConcurrentBroadcasts(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  50,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -720,7 +698,6 @@ func TestHandleSend_NonAdminUser(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 999999,
-		TrafficLimitGB:  50,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -740,7 +717,6 @@ func TestHandleSend_ByNumericID(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  50,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -760,7 +736,6 @@ func TestHandleSend_ByUsernameLookup(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  50,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -785,7 +760,6 @@ func TestHandleSend_ByUsernameWithAt(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  50,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -819,7 +793,6 @@ func TestHandleSend_InvalidFormat(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := &config.Config{
 				TelegramAdminID: 123456,
-				TrafficLimitGB:  50,
 			}
 			mockDB := testutil.NewMockDatabaseService()
 			mockXUI := testutil.NewMockXUIClient()
@@ -844,7 +817,6 @@ func TestHandleSend_UsernameNotFound(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  50,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -868,7 +840,6 @@ func TestHandleSend_SendFailure(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  50,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -889,7 +860,6 @@ func TestNotifyAdminError_WithAdminID(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 999888,
-		TrafficLimitGB:  50,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -909,7 +879,6 @@ func TestHandleAdminLastReg_NonAdminUser(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 999999,
-		TrafficLimitGB:  50,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -928,7 +897,6 @@ func TestHandleAdminLastReg_EmptyList(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  50,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -951,7 +919,6 @@ func TestHandleAdminLastReg_DatabaseError(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  50,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -974,7 +941,6 @@ func TestHandleAdminLastReg_WithSubscriptions(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  50,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -1007,7 +973,6 @@ func TestHandleAdminStats_NonAdminUser(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 999999,
-		TrafficLimitGB:  50,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -1026,7 +991,6 @@ func TestHandleAdminStats_DatabaseError(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  50,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -1049,7 +1013,6 @@ func TestHandleAdminStats_Success(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  50,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -1076,7 +1039,6 @@ func TestHandleAdminStats_PartialDatabaseError(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  50,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -1105,7 +1067,6 @@ func TestHandleRefstats_NonAdminUser(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 999999,
-		TrafficLimitGB:  50,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -1126,7 +1087,6 @@ func TestHandleRefstats_EmptyReferrals(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  50,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -1147,7 +1107,6 @@ func TestHandleRefstats_WithMultipleReferrers(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  50,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -1183,7 +1142,6 @@ func TestHandleRefstats_Top10Limit(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  50,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()

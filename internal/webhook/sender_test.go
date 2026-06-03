@@ -85,10 +85,10 @@ func TestSender_SendAsync_Success(t *testing.T) {
 	s.client = server.Client()
 
 	event := Event{
-		EventID:           "evt-550e8400-e29b-41d4-a716-446655440000",
-		Event:             EventSubscriptionActivated,
-		ClientID:          "user-123",
-		Email:             "test@example.com",
+		EventID:        "evt-550e8400-e29b-41d4-a716-446655440000",
+		Event:          EventSubscriptionActivated,
+		ClientID:       "user-123",
+		Email:          "test@example.com",
 		SubscriptionID: "token-abc",
 	}
 
@@ -134,10 +134,10 @@ func TestSender_SendAsync_RetryOnFailure(t *testing.T) {
 	s.WithRetryDelays([]time.Duration{0, 1 * time.Millisecond, 5 * time.Millisecond, 15 * time.Millisecond})
 
 	event := Event{
-		EventID: "evt-retry-test",
-		Event:   EventSubscriptionExpired,
-		ClientID:  "user-456",
-		Email:   "retry@example.com",
+		EventID:  "evt-retry-test",
+		Event:    EventSubscriptionExpired,
+		ClientID: "user-456",
+		Email:    "retry@example.com",
 	}
 
 	s.SendAsync(event)
@@ -167,10 +167,10 @@ func TestSender_SendAsync_AllRetriesFail(t *testing.T) {
 	s.WithRetryDelays([]time.Duration{0, 1 * time.Millisecond, 5 * time.Millisecond, 15 * time.Millisecond})
 
 	event := Event{
-		EventID: "evt-fail-test",
-		Event:   EventSubscriptionActivated,
-		ClientID:  "user-789",
-		Email:   "fail@example.com",
+		EventID:  "evt-fail-test",
+		Event:    EventSubscriptionActivated,
+		ClientID: "user-789",
+		Email:    "fail@example.com",
 	}
 
 	s.SendAsync(event)
@@ -227,10 +227,10 @@ func TestSender_SendAsync_PermanentError_NoRetry(t *testing.T) {
 			s.client = server.Client()
 
 			s.SendAsync(Event{
-				EventID: "evt-perm-test",
-				Event:   EventSubscriptionActivated,
-				ClientID:  "user-perm",
-				Email:   "perm@example.com",
+				EventID:  "evt-perm-test",
+				Event:    EventSubscriptionActivated,
+				ClientID: "user-perm",
+				Email:    "perm@example.com",
 			})
 
 			// Wait for the single request
@@ -269,10 +269,10 @@ func TestSender_SendAsync_TooManyRequests_Retried(t *testing.T) {
 	s.WithRetryDelays([]time.Duration{0, 1 * time.Millisecond, 5 * time.Millisecond, 15 * time.Millisecond})
 
 	s.SendAsync(Event{
-		EventID: "evt-429-test",
-		Event:   EventSubscriptionActivated,
-		ClientID:  "user-429",
-		Email:   "retry429@example.com",
+		EventID:  "evt-429-test",
+		Event:    EventSubscriptionActivated,
+		ClientID: "user-429",
+		Email:    "retry429@example.com",
 	})
 
 	// Should retry and eventually succeed on 3rd attempt
@@ -347,10 +347,10 @@ func TestSender_SendAsync_Non2xxResponse(t *testing.T) {
 			s.WithRetryDelays([]time.Duration{0, 1 * time.Millisecond, 5 * time.Millisecond, 15 * time.Millisecond})
 
 			s.SendAsync(Event{
-				EventID: "evt-status-test",
-				Event:   EventSubscriptionActivated,
-				ClientID:  "user-test",
-				Email:   "status@example.com",
+				EventID:  "evt-status-test",
+				Event:    EventSubscriptionActivated,
+				ClientID: "user-test",
+				Email:    "status@example.com",
 			})
 
 			if tt.shouldRetry {
@@ -406,10 +406,10 @@ func TestSender_SendAsync_ConcurrentEvents(t *testing.T) {
 	eventCount := 5
 	for i := 0; i < eventCount; i++ {
 		s.SendAsync(Event{
-			EventID:           "evt-concurrent-" + string(rune('A'+i)),
-			Event:             EventSubscriptionActivated,
-			ClientID:            "user-concurrent",
-			Email:             "concurrent@example.com",
+			EventID:        "evt-concurrent-" + string(rune('A'+i)),
+			Event:          EventSubscriptionActivated,
+			ClientID:       "user-concurrent",
+			Email:          "concurrent@example.com",
 			SubscriptionID: "token-concurrent",
 		})
 	}
@@ -456,10 +456,10 @@ func TestSender_SendAsync_EventDataIntegrity(t *testing.T) {
 	s.client = server.Client()
 
 	event := Event{
-		EventID:           "evt-550e8400-e29b-41d4-a716-446655440000",
-		Event:             EventSubscriptionUpdated,
-		ClientID:            "550e8400-e29b-41d4-a716-446655440000",
-		Email:             "user@example.com",
+		EventID:        "evt-550e8400-e29b-41d4-a716-446655440000",
+		Event:          EventSubscriptionUpdated,
+		ClientID:       "550e8400-e29b-41d4-a716-446655440000",
+		Email:          "user@example.com",
 		SubscriptionID: "abc123def456",
 	}
 
@@ -576,9 +576,9 @@ func TestSender_SendAsync_DuplicateEvent(t *testing.T) {
 	s.client = server.Client()
 
 	event := Event{
-		EventID: "evt-duplicate-test",
-		Event:   EventSubscriptionActivated,
-		ClientID:  "user-dup",
+		EventID:  "evt-duplicate-test",
+		Event:    EventSubscriptionActivated,
+		ClientID: "user-dup",
 	}
 
 	// Send the same event twice
@@ -609,10 +609,10 @@ func TestEvent_JSONMarshal(t *testing.T) {
 	t.Parallel()
 
 	event := Event{
-		EventID:           "evt-123",
-		Event:             EventSubscriptionActivated,
-		ClientID:            "user-456",
-		Email:             "test@example.com",
+		EventID:        "evt-123",
+		Event:          EventSubscriptionActivated,
+		ClientID:       "user-456",
+		Email:          "test@example.com",
 		SubscriptionID: "token-789",
 	}
 
@@ -634,10 +634,10 @@ func TestEvent_JSONKeys(t *testing.T) {
 	t.Parallel()
 
 	event := Event{
-		EventID:           "evt-123",
-		Event:             EventSubscriptionActivated,
-		ClientID:            "user-456",
-		Email:             "test@example.com",
+		EventID:        "evt-123",
+		Event:          EventSubscriptionActivated,
+		ClientID:       "user-456",
+		Email:          "test@example.com",
 		SubscriptionID: "token-789",
 	}
 
