@@ -146,7 +146,7 @@ User clicks "Добавить в Happ" → opens Happ app with subscription
 User clicks "Активировать" → opens Telegram bot, binds trial to account
 ```
 
-### Subscription Proxy Flow
+### Subscription server Flow
 
 ```
 User opens subscription link in client
@@ -225,7 +225,7 @@ Write response:
 - Health endpoints — `/healthz` (503 when Down), `/readyz` (503 during init)
 - Invite/trial landing — `/i/{code}` with IP rate limit (3/hour), cookie dedup (3h)
 - Per-user rate limiting — chatID token bucket (30 tokens, 5/sec refill, 10-min idle cleanup)
-- Subscription proxy — `GET /sub/{subID}` with extra servers + headers, 240s TTL cache, singleflight
+- Subscription server — `GET /sub/{subID}` with extra servers + headers, 240s TTL cache, singleflight
 - Daily backups — WAL checkpoint, atomic copy, 14-day rotation
 - Sentry error tracking (+ traces), Zap structured JSON logging with rotation
 - Docker: multi-stage build (UPX compression), non-root user, healthcheck, GHCR images
@@ -246,7 +246,7 @@ Write response:
 | `internal/utils` | **90.0%** | ✅ |
 | `internal/logger` | **88.9%** | ✅ |
 | `internal/backup` | **83.2%** | ✅ |
-| `internal/subproxy` | **82.5%** | ✅ |
+| `internal/subserver` | **82.5%** | ✅ |
 | `internal/scheduler` | **81.2%** | ✅ |
 | `internal/database` | **77.8%** | 🟡 |
 | `cmd/bot` | **5.4%** | 🟡 (integration tests cover indirectly) |
@@ -284,7 +284,7 @@ All tests pass with `-race` detector. Fuzzing enabled for critical functions.
 - **Webhook:** Sent on successful DB deletion regardless of XUI outcome.
 - **Referral cache:** `DecrementReferralCount` called after successful deletion.
 
-### Subscription Proxy (v2.3.0+)
+### Subscription server (v2.3.0+)
 - **Endpoint:** `GET /sub/{subID}` — subID = SubscriptionID from DB (14 random bytes → 28 hex chars)
 - **Extra config:** Headers section → blank line → server links. Headers override 3x-ui.
 - **Cache:** 240s TTL hardcoded (`config.SubProxyCacheTTL`)

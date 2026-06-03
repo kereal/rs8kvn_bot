@@ -189,7 +189,7 @@ EOF
       flag) DESC="Конфигурация из env" ;;
       scheduler) DESC="Планировщики задач" ;;
       service) DESC="Бизнес-логика подписок" ;;
-      subproxy) DESC="Subscription proxy" ;;
+      subserver) DESC="Subscription server" ;;
       testutil) DESC="Утилиты для тестов" ;;
       *) DESC="" ;;
     esac

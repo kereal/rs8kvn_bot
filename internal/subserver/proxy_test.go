@@ -1,4 +1,4 @@
-package subproxy
+package subserver
 
 import (
 	"encoding/base64"
@@ -19,7 +19,7 @@ func TestDetectFormat_Plain(t *testing.T) {
 func TestDetectFormat_Plain_Golden(t *testing.T) {
 	t.Parallel()
 
-	data, err := os.ReadFile("../testdata/subproxy/vless_single.txt")
+	data, err := os.ReadFile("../testdata/subserver/vless_single.txt")
 	require.NoError(t, err)
 	assert.Equal(t, FormatPlain, DetectFormat(data))
 }
@@ -35,7 +35,7 @@ func TestDetectFormat_Base64(t *testing.T) {
 func TestDetectFormat_Base64_Golden(t *testing.T) {
 	t.Parallel()
 
-	data, err := os.ReadFile("../testdata/subproxy/base64_encoded.txt")
+	data, err := os.ReadFile("../testdata/subserver/base64_encoded.txt")
 	require.NoError(t, err)
 	assert.Equal(t, FormatBase64, DetectFormat(data))
 }
@@ -120,7 +120,7 @@ func TestMergeSubscriptions_EmptyOriginal(t *testing.T) {
 func TestMergeSubscriptions_GoldenFile(t *testing.T) {
 	t.Parallel()
 
-	original, err := os.ReadFile("../testdata/subproxy/vmess_multi.txt")
+	original, err := os.ReadFile("../testdata/subserver/vmess_multi.txt")
 	require.NoError(t, err)
 	extra := []string{"ss://new-server.example.com"}
 

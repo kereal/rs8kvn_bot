@@ -446,7 +446,7 @@ sqlite3 ./data/tgvpn.db "SELECT subscription_id, status, expiry_time FROM subscr
 docker restart rs8kvn_bot
 
 # Check proxy logs
-docker logs rs8kvn_bot | grep "subproxy"
+docker logs rs8kvn_bot | grep "subserver"
 ```
 
 ---

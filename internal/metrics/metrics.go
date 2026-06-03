@@ -108,7 +108,7 @@ var (
 	)
 
 	// CacheHitsTotal is a counter of cache hits with label: cache.
-	// cache values: subscription, referral, subproxy
+	// cache values: subscription, referral, subserver
 	CacheHitsTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "cache_hits_total",

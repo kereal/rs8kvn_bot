@@ -1,4 +1,4 @@
-package subproxy
+package subserver
 
 import (
 	"sync"
@@ -28,19 +28,19 @@ func NewService(cfg *config.Config) *Service {
 	if cfg.SubExtraServersEnabled && cfg.SubExtraServersFile != "" {
 		extra, err := LoadExtraConfig(cfg.SubExtraServersFile)
 		if err != nil {
-			logger.Warn("Subscription proxy: failed to load extra config file",
+			logger.Warn("Subscription server: failed to load extra config file",
 				zap.String("file", cfg.SubExtraServersFile),
 				zap.Error(err))
 		} else {
 			svc.headers = extra.Headers
 			svc.servers = extra.Servers
-			logger.Info("Subscription proxy: extra config loaded",
+			logger.Info("Subscription server: extra config loaded",
 				zap.String("file", cfg.SubExtraServersFile),
 				zap.Int("headers", len(extra.Headers)),
 				zap.Int("servers", len(extra.Servers)))
 		}
 	} else {
-		logger.Info("Subscription proxy: extra config disabled or no file configured")
+		logger.Info("Subscription server: extra config disabled or no file configured")
 	}
 
 	return svc
@@ -75,7 +75,7 @@ func (s *Service) ReloadConfig() {
 
 	extra, err := LoadExtraConfig(s.cfg.SubExtraServersFile)
 	if err != nil {
-		logger.Warn("Subscription proxy: failed to reload extra config",
+		logger.Warn("Subscription server: failed to reload extra config",
 			zap.String("file", s.cfg.SubExtraServersFile),
 			zap.Error(err))
 		return
@@ -88,7 +88,7 @@ func (s *Service) ReloadConfig() {
 	s.servers = extra.Servers
 	s.mu.Unlock()
 
-	logger.Debug("Subscription proxy: extra config reloaded",
+	logger.Debug("Subscription server: extra config reloaded",
 		zap.String("file", s.cfg.SubExtraServersFile),
 		zap.Int("old_headers", oldHeaders),
 		zap.Int("new_headers", len(extra.Headers)),

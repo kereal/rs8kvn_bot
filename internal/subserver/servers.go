@@ -1,4 +1,4 @@
-package subproxy
+package subserver
 
 import (
 	"bufio"

@@ -46,8 +46,8 @@ github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 h1:C3w9PqII01/Oq
 github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822/go.mod h1:+n7T8mK8HuQTcFwEeznm/DIxMOiR9yIdICNftLE1DvQ=
 github.com/ncruces/go-strftime v1.0.0 h1:HMFp8mLCTPp341M/ZnA4qaf7ZlsbTc+miZjCLOFAw7w=
 github.com/ncruces/go-strftime v1.0.0/go.mod h1:Fwc5htZGVVkseilnfgOVb9mKy6w1naJmn9CehxcKcls=
-github.com/piglig/go-qr v1.1.0 h1:awmlkMeSKfrXDm7OlxrOM6LMgL9LOYjPRSdCCYemNyA=
-github.com/piglig/go-qr v1.1.0/go.mod h1:z3s7Yw5eBZ4dVz8bmXG7Uo2+Xm8lTYUE0rTeSvfuykM=
+github.com/piglig/go-qr v1.0.0 h1:VCHCTvf5xOiP1oTZ0gqdjcaFaOXx0TFTSnEebXSKWcM=
+github.com/piglig/go-qr v1.0.0/go.mod h1:funyXL4IdgMPcbICoVm1XweMtZy7Px3kyITTENkmA5w=
 github.com/pingcap/errors v0.11.4 h1:lFuQV/oaUMGcD2tqt+01ROSmJs75VG1ToEOkZIZ4nE4=
 github.com/pingcap/errors v0.11.4/go.mod h1:Oi8TUi2kEtXXLMJk9l1cGmz20kV3TaQ0usTwv5KuLY8=
 github.com/pkg/errors v0.9.1 h1:FEBLx1zS214owpjy7qsBeixbURkuhQAwrK5UwLGTwt4=

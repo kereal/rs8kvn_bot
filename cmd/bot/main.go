@@ -21,7 +21,7 @@ import (
 	"rs8kvn_bot/internal/logger"
 	"rs8kvn_bot/internal/scheduler"
 	"rs8kvn_bot/internal/service"
-	"rs8kvn_bot/internal/subproxy"
+	"rs8kvn_bot/internal/subserver"
 	"rs8kvn_bot/internal/web"
 	"rs8kvn_bot/internal/webhook"
 	"rs8kvn_bot/internal/xui"
@@ -79,7 +79,7 @@ func getVersion() string {
 // The function performs best-effort initialization for optional components (Sentry,
 // database, 3x-ui client, Telegram bot) so the service can start even if some
 // dependencies are unavailable. It also starts background maintenance tasks
-// (backups, heartbeat, trial cleanup, subscription proxy reload), marks the web
+// (backups, heartbeat, trial cleanup, Subscription server reload), marks the web
 // server readiness, and coordinates orderly shutdown of update handlers and
 // main is the entry point that initializes configuration and services, starts background
 // workers and the web server, processes Telegram updates with bounded concurrency, and
@@ -288,15 +288,15 @@ func main() {
 	// Create subscription service (shared between bot handler and web server)
 	subService := service.NewSubscriptionService(dbService, xuiClients, sources, cfg, cfg.GlobalSubURL, webhookSender)
 
-	// Create subscription proxy service
-	subProxy := subproxy.NewService(cfg)
-	defer subProxy.Stop()
+	// Create Subscription server service
+	subServer := subserver.NewService(cfg)
+	defer subServer.Stop()
 
 	// Create bot handler
 	handler := bot.NewHandler(botAPI, cfg, dbService, legacyXUIClient, botConfig, subService, getVersion())
 
 	// Initialize and start web server (health + trial pages)
-	webServer := web.NewServer(fmt.Sprintf(":%d", cfg.HealthCheckPort), dbService, cfg, botConfig, subService, subProxy)
+	webServer := web.NewServer(fmt.Sprintf(":%d", cfg.HealthCheckPort), dbService, cfg, botConfig, subService, subServer)
 	webServer.RegisterChecker("database", func(ctx context.Context) web.ComponentHealth {
 		if err := dbService.Ping(ctx); err != nil {
 			return web.ComponentHealth{Status: web.StatusDown, Message: err.Error()}
@@ -359,11 +359,11 @@ func main() {
 	var wg sync.WaitGroup
 	wg.Add(5)
 
-	// Start subscription proxy extra servers reload loop (every 5 minutes)
+	// Start Subscription server extra servers reload loop (every 5 minutes)
 	go func() {
-		defer recoverAndReport("SubProxy server reload")
+		defer recoverAndReport("SubServer server reload")
 		defer wg.Done()
-		subProxy.StartReloadLoop(5*time.Minute, ctx.Done())
+		subServer.StartReloadLoop(5*time.Minute, ctx.Done())
 	}()
 
 	// Start orphaned XUI client reconciler (every 6 hours)

@@ -58,7 +58,7 @@ type Config struct {
 	DonateCardNumber string
 	DonateURL        string
 
-	// Subscription proxy configuration
+	// Subscription server configuration
 	GlobalSubURL           string
 	SubExtraServersEnabled bool
 	SubExtraServersFile    string

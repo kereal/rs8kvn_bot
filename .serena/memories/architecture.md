@@ -12,7 +12,7 @@ Telegram Bot (Go, single binary)
   ├── internal/service/       — SubscriptionService (orchestration)
   ├── internal/database/      — SQLite + GORM + migrations 000-011
   ├── internal/xui/           — multi-source 3x-ui client + circuit breaker
-  ├── internal/subproxy/      — LRU cache, merge, /sub/{id} endpoint
+  ├── internal/subserver/      — LRU cache, merge, /sub/{id} endpoint
   ├── internal/web/           — /healthz, /readyz, /i/{code}, /sub/{id}
   ├── internal/scheduler/     — backup (daily 03:00) + trial cleanup (hourly)
   ├── internal/backup/        — SQLite backup with WAL checkpoint
