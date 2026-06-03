@@ -202,9 +202,29 @@ func runMigrations(sqlDB *sql.DB) error {
 	}
 
 	// Get current version before migration
-	versionBefore, _, _ := m.Version()
+	versionBefore, dirtyBefore, _ := m.Version()
+
+	if dirtyBefore {
+		currentVer := int(versionBefore)
+		logger.Warn("Database is in dirty state, forcing migration back",
+			zap.Int("current_version", currentVer))
+		if err := m.Force(currentVer - 1); err != nil {
+			return fmt.Errorf("failed to force migration version: %w", err)
+		}
+	}
 
 	if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
+		if strings.Contains(err.Error(), "file does not exist") || strings.Contains(err.Error(), "read down for version") {
+			forceVer := int(versionBefore) - 1
+			logger.Warn("Missing migration file detected, forcing version to last known good state",
+				zap.Int("forced_version", forceVer))
+			if forceErr := m.Force(forceVer); forceErr != nil {
+				return fmt.Errorf("migration failed: %w; additionally failed to force version: %w", err, forceErr)
+			}
+			logger.Info("Database version forced due to missing migration files",
+				zap.Int("forced_version", forceVer))
+			return nil
+		}
 		return fmt.Errorf("migration failed: %w", err)
 	}
 
