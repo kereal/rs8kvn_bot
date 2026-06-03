@@ -78,7 +78,13 @@ func (sh *SubscriptionHandler) handleCreateSubscription(ctx context.Context, cha
 	if sh.h.subscriptionService != nil {
 		trafficLimit = sh.h.subscriptionService.PlanTrafficLimitGB(ctx, chatID)
 	}
-		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgSubCreatedSuccess, trafficLimit, sh.h.cfg.GlobalSubURL+sub.SubscriptionID))
+		subURL, joinErr := url.JoinPath(sh.h.cfg.GlobalSubURL, sub.SubscriptionID)
+		if joinErr != nil {
+			logger.Warn("Failed to build subscription URL with url.JoinPath, falling back to concatenation",
+				zap.Error(joinErr))
+			subURL = sh.h.cfg.GlobalSubURL + sub.SubscriptionID
+		}
+		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgSubCreatedSuccess, trafficLimit, subURL))
 		editMsg.ParseMode = "Markdown"
 		editMsg.DisableWebPagePreview = true
 		kb := sh.h.getQRKeyboard()
@@ -168,7 +174,13 @@ func (sh *SubscriptionHandler) handleQRCode(ctx context.Context, chatID int64, u
 		return nil
 	}
 
-	pngBytes, err := utils.GenerateQRCodePNG(sh.h.cfg.GlobalSubURL + sub.SubscriptionID)
+	subURL, joinErr := url.JoinPath(sh.h.cfg.GlobalSubURL, sub.SubscriptionID)
+	if joinErr != nil {
+		logger.Warn("Failed to build subscription URL with url.JoinPath, falling back to concatenation",
+			zap.Error(joinErr))
+		subURL = sh.h.cfg.GlobalSubURL + sub.SubscriptionID
+	}
+	pngBytes, err := utils.GenerateQRCodePNG(subURL)
 	if err != nil {
 		logger.Error("Failed to generate QR code", zap.Error(err))
 		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgQRCodeFailed))

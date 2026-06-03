@@ -151,13 +151,14 @@ func (s *SubscriptionService) Create(ctx context.Context, chatID int64, username
 		Status:         "active",
 	}
 
+	if firstClient.SubID == "" {
+		s.deleteClientFromAllSources(ctx, email)
+		return nil, fmt.Errorf("xui client returned empty subscription id: missing subID on client %s", firstClient.ID)
+	}
+
 	if err := s.db.CreateSubscription(ctx, sub, inviteCode); err != nil {
 		s.deleteClientFromAllSources(ctx, email)
 		return nil, fmt.Errorf("create subscription: %w", err)
-	}
-
-	if firstClient.SubID == "" {
-		return nil, fmt.Errorf("xui client returned empty subscription id: missing subID on client %s", firstClient.ID)
 	}
 
 	// формируем URL подписки
@@ -427,7 +428,12 @@ func (s *SubscriptionService) CreateTrial(ctx context.Context, inviteCode string
 		return nil, fmt.Errorf("create trial subscription: %w", err)
 	}
 
-	subURL := s.globalSubURL + subID
+	subURL, joinErr := url.JoinPath(s.globalSubURL, subID)
+	if joinErr != nil {
+		logger.Warn("Failed to build trial subscription URL with url.JoinPath, falling back to concatenation",
+			zap.Error(joinErr))
+		subURL = s.globalSubURL + subID
+	}
 	return &TrialCreateResult{
 		Subscription:    sub,
 		SubscriptionURL: subURL,
