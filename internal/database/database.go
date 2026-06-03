@@ -857,15 +857,6 @@ func (s *Service) BindTrialSubscription(ctx context.Context, subscriptionID stri
 	return &sub, nil
 }
 
-// resolveFreePlanID returns the ID of the "free" plan.
-func (s *Service) resolveFreePlanID(ctx context.Context) (uint, error) {
-	var plan Plan
-	if err := s.db.WithContext(ctx).Where("name = ?", FreePlanName).First(&plan).Error; err != nil {
-		return 0, fmt.Errorf("failed to resolve free plan: %w", err)
-	}
-	return plan.ID, nil
-}
-
 // CountTrialRequestsByIPLastHour returns the number of trial requests from an IP in the last hour.
 func (s *Service) CountTrialRequestsByIPLastHour(ctx context.Context, ip string) (int, error) {
 	var count int64
