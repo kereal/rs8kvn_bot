@@ -17,9 +17,8 @@ func TestListSources_Empty(t *testing.T) {
 	svc := newTestService(t)
 	sources, err := svc.ListSources(context.Background())
 	assert.NoError(t, err)
-	// NewService seeds one default source
-	assert.Len(t, sources, 1)
-	assert.Equal(t, "default", sources[0].Name)
+	// NewService no longer seeds a default source
+	assert.Len(t, sources, 0)
 }
 
 func TestSeedDefaultSource_Success(t *testing.T) {
@@ -33,16 +32,10 @@ func TestSeedDefaultSource_Success(t *testing.T) {
 
 	sources, err := svc.ListSources(ctx)
 	require.NoError(t, err)
-	require.Len(t, sources, 2)
+	require.Len(t, sources, 1)
 
-	var mainSrc *Source
-	for i := range sources {
-		if sources[i].Name == "main" {
-			mainSrc = &sources[i]
-			break
-		}
-	}
-	require.NotNil(t, mainSrc, "main source must exist after SeedDefaultSource")
+	mainSrc := &sources[0]
+	assert.Equal(t, "main", mainSrc.Name)
 	assert.Equal(t, "http://xui:2053", mainSrc.XUIHost)
 	assert.Equal(t, "token-abc", mainSrc.XUIAPIToken)
 	assert.Equal(t, 1, mainSrc.XUIInboundID)
@@ -56,10 +49,10 @@ func TestIsSourcesEmpty_TrueAndFalse(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
 
-	// NewService seeds a default source, so not empty
+	// NewService no longer seeds a default source
 	empty, err := svc.IsSourcesEmpty(ctx)
 	require.NoError(t, err)
-	assert.False(t, empty, "default source should be present after NewService")
+	assert.True(t, empty, "no source seeded after NewService")
 }
 
 // ==================== Plan Tests ====================
@@ -150,11 +143,10 @@ func TestGetSourcesByPlanName_NoLinks(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Empty(t, sources)
 
-	// Seed migration 012 links the default source to both 'trial' and 'free' plans,
-	// so a real plan name returns the default source rather than empty.
+	// No source seeded yet, so even a real plan name returns empty
 	trialSources, err := svc.GetSourcesByPlanName(context.Background(), TrialPlanName)
 	assert.NoError(t, err)
-	assert.Len(t, trialSources, 1, "seed links default source to trial plan")
+	assert.Empty(t, trialSources)
 }
 
 func TestGetSourcesByPlanName_ReturnsLinkedSources(t *testing.T) {
@@ -163,26 +155,16 @@ func TestGetSourcesByPlanName_ReturnsLinkedSources(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
 
-	var trialPlan Plan
-	require.NoError(t, svc.db.WithContext(ctx).Where("name = ?", TrialPlanName).First(&trialPlan).Error)
-
-	// Seed migration 012 already links the default source to the trial plan,
-	// so we only need to add a second source and link it.
+	// Create two sources — SeedDefaultSource auto-links all plans to each
+	require.NoError(t, svc.SeedDefaultSource(ctx, "primary", "http://x1", "t1", 1, ""))
 	require.NoError(t, svc.SeedDefaultSource(ctx, "backup", "http://x2", "t2", 1, ""))
-	allSources, err := svc.ListSources(ctx)
-	require.NoError(t, err)
-	for _, src := range allSources {
-		if src.Name == "backup" {
-			require.NoError(t, svc.db.WithContext(ctx).Create(&PlanSource{PlanID: trialPlan.ID, SourceID: src.ID}).Error)
-		}
-	}
 
 	linked, err := svc.GetSourcesByPlanName(ctx, "trial")
 	require.NoError(t, err)
 	assert.Len(t, linked, 2)
 
 	names := []string{linked[0].Name, linked[1].Name}
-	assert.Contains(t, names, "default")
+	assert.Contains(t, names, "primary")
 	assert.Contains(t, names, "backup")
 }
 
@@ -192,8 +174,9 @@ func TestGetSourcesByPlanName_FilterByName(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
 
-	// Seed migration 012 links the default source to BOTH trial and free plans,
-	// so both lookups should return that single source.
+	// Seed a source — SeedDefaultSource auto-links it to both trial and free plans
+	require.NoError(t, svc.SeedDefaultSource(ctx, "default", "http://x1", "t1", 1, ""))
+
 	trialSources, err := svc.GetSourcesByPlanName(ctx, "trial")
 	require.NoError(t, err)
 	assert.Len(t, trialSources, 1)

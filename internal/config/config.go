@@ -250,6 +250,15 @@ func (c *Config) validate() error {
 		}
 	}
 
+	// Global subscription URL validation (required)
+	if c.GlobalSubURL == "" {
+		return fmt.Errorf("GLOBAL_SUB_URL is required")
+	}
+	if err := c.validateURL("GLOBAL_SUB_URL", c.GlobalSubURL); err != nil {
+		return err
+	}
+	c.GlobalSubURL = strings.TrimRight(c.GlobalSubURL, "/") + "/"
+
 	// Site URL validation
 	if err := c.validateURL("SITE_URL", c.SiteURL); err != nil {
 		return err

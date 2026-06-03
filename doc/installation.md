@@ -304,8 +304,9 @@ Migrations are applied automatically on startup. If migration fails, bot exits w
 | `009_add_plan_id_to_subscriptions.up.sql` | Adds `plan_id` FK to subscriptions |
 | `010_remove_subscription_idx.up.sql` | Drops legacy index no longer needed |
 | `011_remove_subscription_columns.up.sql` | Drops `inbound_id`, `traffic_limit`, `subscription_url`, `is_trial`, `deleted_at` from subscriptions |
+| `012_seed_data.up.sql` | Seeds default source, trial/free plans, and plan_sources |
 
-**Schema after migration 011:**
+**Schema after migration 012:**
 - `subscriptions`: `telegram_id`, `username`, `client_id`, `subscription_id`, `expiry_time`, `status`, `invite_code`, `plan_id`, `referred_by`, `created_at`, `updated_at`
 - New tables: `sources`, `plans`, `plan_sources` (see `doc/architecture.md` for full schema)
 - `is_trial` is now derived: `plan.name = 'trial'` (single source of truth)
@@ -313,9 +314,9 @@ Migrations are applied automatically on startup. If migration fails, bot exits w
 ### Adding a New Migration
 
 ```bash
-# Create migration files (next number is 012)
-touch internal/database/migrations/012_add_new_column.up.sql
-touch internal/database/migrations/012_add_new_column.down.sql
+# Create migration files (next number is 013)
+touch internal/database/migrations/013_add_new_column.up.sql
+touch internal/database/migrations/013_add_new_column.down.sql
 
 # Write SQL in files, then rebuild:
 go build -o rs8kvn_bot ./cmd/bot
