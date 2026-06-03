@@ -19,20 +19,24 @@ func init() {
 }
 
 type mockXUIClientForCleanup struct {
-	deletedClients map[string]int
+	deletedClients map[string]bool // email -> deleted
 	deleteErr      error
 	mu             sync.Mutex
 }
 
-func (m *mockXUIClientForCleanup) DeleteClient(ctx context.Context, inboundID int, clientID string) error {
+func (m *mockXUIClientForCleanup) DeleteClient(ctx context.Context, email string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.deleteErr != nil {
 		return m.deleteErr
 	}
-	m.deletedClients[clientID] = inboundID
+	if m.deletedClients == nil {
+		m.deletedClients = make(map[string]bool)
+	}
+	m.deletedClients[email] = true
 	return nil
 }
+
 
 func TestTrialCleanupScheduler_New(t *testing.T) {
 	t.Parallel()
@@ -52,7 +56,7 @@ func TestTrialCleanupScheduler_RunCleanup_NoExpiredTrials(t *testing.T) {
 	db, err := testutil.NewTestDatabaseService(t)
 	require.NoError(t, err)
 
-	mockXUI := &mockXUIClientForCleanup{deletedClients: make(map[string]int)}
+	mockXUI := &mockXUIClientForCleanup{deletedClients: make(map[string]bool)}
 	scheduler := NewTrialCleanupScheduler(db, mockXUI, 3)
 
 	ctx := context.Background()
@@ -108,14 +112,14 @@ func TestTrialCleanupScheduler_RunCleanup_WithExpiredTrials(t *testing.T) {
 	err = db.CreateSubscription(ctx, activeSub)
 	require.NoError(t, err)
 
-	mockXUI := &mockXUIClientForCleanup{deletedClients: make(map[string]int)}
+	mockXUI := &mockXUIClientForCleanup{deletedClients: make(map[string]bool)}
 	scheduler := NewTrialCleanupScheduler(db, mockXUI, 1) // 1 hour cutoff
 
 	scheduler.runCleanup(ctx)
 
 	assert.Len(t, mockXUI.deletedClients, 2, "Should delete both old trials (created > 1h ago)")
-	assert.Contains(t, mockXUI.deletedClients, "expired-client-1")
-	assert.Contains(t, mockXUI.deletedClients, "expired-client-2")
+	assert.Contains(t, mockXUI.deletedClients, "trial_expired-sub-1")
+	assert.Contains(t, mockXUI.deletedClients, "trial_expired-sub-2")
 
 	_, err = db.GetByTelegramID(ctx, 111111)
 	assert.Error(t, err, "Unbound trial with telegram_id != 0 won't be found by GetByTelegramID")
@@ -142,7 +146,7 @@ func TestTrialCleanupScheduler_RunCleanup_XUIFailure(t *testing.T) {
 	require.NoError(t, err)
 
 	mockXUI := &mockXUIClientForCleanup{
-		deletedClients: make(map[string]int),
+		deletedClients: make(map[string]bool),
 		deleteErr:      assert.AnError,
 	}
 	scheduler := NewTrialCleanupScheduler(db, mockXUI, 1)
@@ -158,7 +162,7 @@ func TestTrialCleanupScheduler_Start_ContextCancel(t *testing.T) {
 	db, err := testutil.NewTestDatabaseService(t)
 	require.NoError(t, err)
 
-	mockXUI := &mockXUIClientForCleanup{deletedClients: make(map[string]int)}
+	mockXUI := &mockXUIClientForCleanup{deletedClients: make(map[string]bool)}
 	scheduler := NewTrialCleanupScheduler(db, mockXUI, 1)
 
 	ctx, cancel := context.WithCancel(context.Background())

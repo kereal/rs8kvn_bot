@@ -2,9 +2,11 @@ package bot
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"rs8kvn_bot/internal/config"
+	"rs8kvn_bot/internal/database"
 	"rs8kvn_bot/internal/interfaces"
 	"rs8kvn_bot/internal/logger"
 	"rs8kvn_bot/internal/utils"
@@ -51,17 +53,22 @@ func (rh *ReferralHandler) HandleInvite(ctx context.Context, chatID int64, usern
 	return rh.sendInviteLink(ctx, chatID, messageID)
 }
 
-// sendInviteLink generates a new invite code and sends the invite links to the user.
+// sendInviteLink returns (or creates on first use) the user's canonical invite code
+// and sends the invite links. After migration 005 every referrer has at most one code.
 func (rh *ReferralHandler) sendInviteLink(ctx context.Context, chatID int64, messageID int) error {
-	inviteCode, err := utils.GenerateInviteCode()
-	if err != nil {
-		logger.Error("Failed to generate invite code",
-			zap.Error(err),
-			zap.Int64("chat_id", chatID))
-		rh.sender.SendMessage(ctx, chatID, msg(MsgInviteCreateFailed))
-		return fmt.Errorf("generate invite code: %w", err)
+	invite, err := rh.db.GetInviteByReferrer(ctx, chatID)
+	if errors.Is(err, database.ErrInviteNotFound) {
+		// First time — generate a fresh code
+		inviteCode, genErr := utils.GenerateInviteCode()
+		if genErr != nil {
+			logger.Error("Failed to generate invite code",
+				zap.Error(genErr),
+				zap.Int64("chat_id", chatID))
+			rh.sender.SendMessage(ctx, chatID, msg(MsgInviteCreateFailed))
+			return fmt.Errorf("generate invite code: %w", genErr)
+		}
+		invite, err = rh.db.GetOrCreateInvite(ctx, chatID, inviteCode)
 	}
-	invite, err := rh.db.GetOrCreateInvite(ctx, chatID, inviteCode)
 	if err != nil {
 		logger.Error("Failed to get or create invite",
 			zap.Error(err),
@@ -91,13 +98,17 @@ func (rh *ReferralHandler) sendInviteLink(ctx context.Context, chatID int64, mes
 	return nil
 }
 
-// generateInviteLink returns a Telegram or web invite link for the given user.
+// generateInviteLink returns a Telegram or web invite link for the given user
+// using the user's canonical (oldest) invite code. Generates a code only on first use.
 func (rh *ReferralHandler) generateInviteLink(ctx context.Context, chatID int64, lt linkType) (string, error) {
-	inviteCode, err := utils.GenerateInviteCode()
-	if err != nil {
-		return "", fmt.Errorf("generate invite code: %w", err)
+	invite, err := rh.db.GetInviteByReferrer(ctx, chatID)
+	if errors.Is(err, database.ErrInviteNotFound) {
+		inviteCode, genErr := utils.GenerateInviteCode()
+		if genErr != nil {
+			return "", fmt.Errorf("generate invite code: %w", genErr)
+		}
+		invite, err = rh.db.GetOrCreateInvite(ctx, chatID, inviteCode)
 	}
-	invite, err := rh.db.GetOrCreateInvite(ctx, chatID, inviteCode)
 	if err != nil {
 		return "", fmt.Errorf("get or create invite: %w", err)
 	}

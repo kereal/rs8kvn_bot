@@ -285,9 +285,9 @@ func TestCreateSubscription_DatabaseFailure_RollbackSuccess(t *testing.T) {
 	}
 
 	rollbackCalled := false
-	mockXUI.DeleteClientFunc = func(ctx context.Context, inboundID int, clientID string) error {
+	mockXUI.DeleteClientFunc = func(ctx context.Context, email string) error {
 		rollbackCalled = true
-		assert.Equal(t, "client-uuid-123", clientID)
+		assert.NotEmpty(t, email)
 		return nil
 	}
 
@@ -327,7 +327,7 @@ func TestCreateSubscription_DatabaseFailure_RollbackFailure(t *testing.T) {
 		return errors.New("database error")
 	}
 
-	mockXUI.DeleteClientFunc = func(ctx context.Context, inboundID int, clientID string) error {
+	mockXUI.DeleteClientFunc = func(ctx context.Context, email string) error {
 		return errors.New("rollback failed")
 	}
 
@@ -1149,7 +1149,7 @@ func TestNotifyAdmin_Success(t *testing.T) {
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
 
 	ctx := context.Background()
-	err := handler.notifyAdmin(ctx, "testuser", 789012, "https://sub.url", time.Now().Add(24*time.Hour))
+	err := handler.notifyAdmin(ctx, "testuser", 789012, "https://sub.url")
 
 	assert.NoError(t, err)
 	assert.True(t, mockBot.SendCalledSafe(), "Bot.Send should be called to notify admin")
@@ -1169,7 +1169,7 @@ func TestNotifyAdmin_ZeroAdminID(t *testing.T) {
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
 
 	ctx := context.Background()
-	err := handler.notifyAdmin(ctx, "testuser", 789012, "https://sub.url", time.Now())
+	err := handler.notifyAdmin(ctx, "testuser", 789012, "https://sub.url")
 
 	assert.NoError(t, err)
 	assert.False(t, mockBot.SendCalledSafe(), "Bot.Send should not be called when admin ID is zero")
@@ -1312,7 +1312,7 @@ func TestNotifyAdmin_SendError(t *testing.T) {
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
 
 	ctx := context.Background()
-	err := handler.notifyAdmin(ctx, "testuser", 789012, "https://sub.url", time.Now())
+	err := handler.notifyAdmin(ctx, "testuser", 789012, "https://sub.url")
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "notify admin")

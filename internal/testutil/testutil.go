@@ -72,7 +72,10 @@ type MockDatabaseService struct {
 	GetTelegramIDsBatchFunc             func(ctx context.Context, offset, limit int) ([]int64, error)
 	GetTotalTelegramIDCountFunc         func(ctx context.Context) (int64, error)
 	GetOrCreateInviteFunc               func(ctx context.Context, referrerTGID int64, code string) (*database.Invite, error)
+	GetInviteByReferrerFunc             func(ctx context.Context, referrerTGID int64) (*database.Invite, error)
 	GetInviteByCodeFunc                 func(ctx context.Context, code string) (*database.Invite, error)
+	GetReferralCountFunc                func(ctx context.Context, referrerTGID int64) (int64, error)
+	GetAllReferralCountsFunc            func(ctx context.Context) (map[int64]int64, error)
 	CreateTrialSubscriptionFunc         func(ctx context.Context, inviteCode, subscriptionID, clientID string, inboundID int, trafficBytes int64, expiryTime time.Time, subURL string) (*database.Subscription, error)
 	GetSubscriptionBySubscriptionIDFunc func(ctx context.Context, subscriptionID string) (*database.Subscription, error)
 	GetTrialSubscriptionBySubIDFunc     func(ctx context.Context, subscriptionID string) (*database.Subscription, error)
@@ -80,11 +83,9 @@ type MockDatabaseService struct {
 	CountTrialRequestsByIPLastHourFunc  func(ctx context.Context, ip string) (int, error)
 	CreateTrialRequestFunc              func(ctx context.Context, ip string) error
 	CleanupExpiredTrialsFunc            func(ctx context.Context, hours int, xuiClient interface {
-		DeleteClient(ctx context.Context, inboundID int, clientID string) error
+		DeleteClient(ctx context.Context, email string) error
 	}) (int64, error)
-	GetPoolStatsFunc         func() (*database.PoolStats, error)
-	GetReferralCountFunc     func(ctx context.Context, referrerTGID int64) (int64, error)
-	GetAllReferralCountsFunc func(ctx context.Context) (map[int64]int64, error)
+	GetPoolStatsFunc                    func() (*database.PoolStats, error)
 }
 
 func (m *MockDatabaseService) Ping(ctx context.Context) error {
@@ -304,6 +305,13 @@ func (m *MockDatabaseService) GetInviteByCode(ctx context.Context, code string) 
 	return nil, gorm.ErrRecordNotFound
 }
 
+func (m *MockDatabaseService) GetInviteByReferrer(ctx context.Context, referrerTGID int64) (*database.Invite, error) {
+	if m.GetInviteByReferrerFunc != nil {
+		return m.GetInviteByReferrerFunc(ctx, referrerTGID)
+	}
+	return nil, database.ErrInviteNotFound
+}
+
 func (m *MockDatabaseService) CreateTrialSubscription(ctx context.Context, inviteCode, subscriptionID, clientID string, inboundID int, trafficBytes int64, expiryTime time.Time, subURL string) (*database.Subscription, error) {
 	if m.CreateTrialSubscriptionFunc != nil {
 		return m.CreateTrialSubscriptionFunc(ctx, inviteCode, subscriptionID, clientID, inboundID, trafficBytes, expiryTime, subURL)
@@ -371,7 +379,7 @@ func (m *MockDatabaseService) CreateTrialRequest(ctx context.Context, ip string)
 }
 
 func (m *MockDatabaseService) CleanupExpiredTrials(ctx context.Context, hours int, xuiClient interface {
-	DeleteClient(ctx context.Context, inboundID int, clientID string) error
+	DeleteClient(ctx context.Context, email string) error
 }) (int64, error) {
 	if m.CleanupExpiredTrialsFunc != nil {
 		return m.CleanupExpiredTrialsFunc(ctx, hours, xuiClient)
@@ -419,8 +427,8 @@ type MockXUIClient struct {
 	PingFunc                func(ctx context.Context) error
 	AddClientFunc           func(ctx context.Context, inboundID int, email string, trafficBytes int64, expiryTime time.Time) (*xui.ClientConfig, error)
 	AddClientWithIDFunc     func(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error)
-	UpdateClientFunc        func(ctx context.Context, inboundID int, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, tgID int64, comment string) error
-	DeleteClientFunc        func(ctx context.Context, inboundID int, clientID string) error
+	UpdateClientFunc        func(ctx context.Context, inboundID int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, tgID int64, comment string) error
+	DeleteClientFunc        func(ctx context.Context, email string) error
 	GetClientTrafficFunc    func(ctx context.Context, email string) (*xui.ClientTraffic, error)
 	GetSubscriptionLinkFunc func(baseURL, subID, subPath string) string
 	GetExternalURLFunc      func(host string) string
@@ -472,22 +480,22 @@ func (m *MockXUIClient) AddClientWithID(ctx context.Context, inboundID int, emai
 	}, nil
 }
 
-func (m *MockXUIClient) UpdateClient(ctx context.Context, inboundID int, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, tgID int64, comment string) error {
+func (m *MockXUIClient) UpdateClient(ctx context.Context, inboundID int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, tgID int64, comment string) error {
 	m.mu.Lock()
 	m.UpdateClientCalled = true
 	m.mu.Unlock()
 	if m.UpdateClientFunc != nil {
-		return m.UpdateClientFunc(ctx, inboundID, clientID, email, subID, trafficBytes, expiryTime, tgID, comment)
+		return m.UpdateClientFunc(ctx, inboundID, currentEmail, clientID, email, subID, trafficBytes, expiryTime, tgID, comment)
 	}
 	return nil
 }
 
-func (m *MockXUIClient) DeleteClient(ctx context.Context, inboundID int, clientID string) error {
+func (m *MockXUIClient) DeleteClient(ctx context.Context, email string) error {
 	m.mu.Lock()
 	m.DeleteClientCalled = true
 	m.mu.Unlock()
 	if m.DeleteClientFunc != nil {
-		return m.DeleteClientFunc(ctx, inboundID, clientID)
+		return m.DeleteClientFunc(ctx, email)
 	}
 	return nil
 }
@@ -633,7 +641,9 @@ func (m *MockBotAPI) LastChattableSafe() tgbotapi.Chattable {
 func (m *MockBotAPI) GetAllSentMessages() []SentMessage {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.AllSentMessages
+	out := make([]SentMessage, len(m.AllSentMessages))
+	copy(out, m.AllSentMessages)
+	return out
 }
 
 // SetSendCalled sets the sendCalled flag (thread-safe).

@@ -12,6 +12,7 @@ import (
 
 	"rs8kvn_bot/internal/database"
 	"rs8kvn_bot/internal/logger"
+	"rs8kvn_bot/internal/service"
 )
 
 // CommandHandler handles command updates: /start, /help, /invite and share_ links.
@@ -263,7 +264,12 @@ func (c *CommandHandler) handleBindTrial(ctx context.Context, chatID int64, user
 	}
 
 	trafficBytes := int64(c.h.cfg.TrafficLimitGB) * 1024 * 1024 * 1024
-	if err := c.h.xui.UpdateClient(ctx, c.h.cfg.XUIInboundID, sub.ClientID, username, sub.SubscriptionID, trafficBytes, time.UnixMilli(0), chatID, comment); err != nil {
+	currentEmail := "trial_" + subscriptionID
+
+	// Use the shared normalized email helper (username or tgId_ fallback)
+	normalizedEmail := service.XUIEmail(username, chatID)
+
+	if err := c.h.xui.UpdateClient(ctx, sub.InboundID, currentEmail, sub.ClientID, normalizedEmail, sub.SubscriptionID, trafficBytes, time.UnixMilli(0), chatID, comment); err != nil {
 		logger.Warn("Failed to upgrade trial client in xui", zap.Error(err))
 	}
 

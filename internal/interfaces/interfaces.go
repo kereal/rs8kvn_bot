@@ -45,12 +45,13 @@ type TrialRepository interface {
 	CountTrialRequestsByIPLastHour(ctx context.Context, ip string) (int, error)
 	CreateTrialRequest(ctx context.Context, ip string) error
 	CleanupExpiredTrials(ctx context.Context, hours int, xuiClient interface {
-		DeleteClient(ctx context.Context, inboundID int, clientID string) error
+		DeleteClient(ctx context.Context, email string) error
 	}) (int64, error)
 }
 
 type InviteRepository interface {
 	GetOrCreateInvite(ctx context.Context, referrerTGID int64, code string) (*database.Invite, error)
+	GetInviteByReferrer(ctx context.Context, referrerTGID int64) (*database.Invite, error)
 	GetInviteByCode(ctx context.Context, code string) (*database.Invite, error)
 	GetReferralCount(ctx context.Context, referrerTGID int64) (int64, error)
 	GetAllReferralCounts(ctx context.Context) (map[int64]int64, error)
@@ -69,8 +70,8 @@ type XUIClient interface {
 	Ping(ctx context.Context) error
 	AddClient(ctx context.Context, inboundID int, email string, trafficBytes int64, expiryTime time.Time) (*xui.ClientConfig, error)
 	AddClientWithID(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error)
-	UpdateClient(ctx context.Context, inboundID int, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, tgID int64, comment string) error
-	DeleteClient(ctx context.Context, inboundID int, clientID string) error
+	UpdateClient(ctx context.Context, inboundID int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, tgID int64, comment string) error
+	DeleteClient(ctx context.Context, email string) error
 	GetClientTraffic(ctx context.Context, email string) (*xui.ClientTraffic, error)
 	GetSubscriptionLink(baseURL, subID, subPath string) string
 	GetExternalURL(host string) string

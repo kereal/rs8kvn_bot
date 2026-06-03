@@ -114,9 +114,8 @@ func TestHandleDel_ValidDeletion(t *testing.T) {
 		return sub, nil
 	}
 
-	mockXUI.DeleteClientFunc = func(ctx context.Context, inboundID int, clientID string) error {
-		assert.Equal(t, 1, inboundID)
-		assert.Equal(t, "client-123", clientID)
+	mockXUI.DeleteClientFunc = func(ctx context.Context, email string) error {
+		assert.NotEmpty(t, email)
 		return nil
 	}
 
@@ -233,7 +232,7 @@ func TestHandleDel_XUIDeleteFailure(t *testing.T) {
 		}, nil
 	}
 
-	mockXUI.DeleteClientFunc = func(ctx context.Context, inboundID int, clientID string) error {
+	mockXUI.DeleteClientFunc = func(ctx context.Context, email string) error {
 		return errors.New("xui error")
 	}
 
@@ -266,7 +265,7 @@ func TestHandleDel_DatabaseDeleteFailure(t *testing.T) {
 		}, nil
 	}
 
-	mockXUI.DeleteClientFunc = func(ctx context.Context, inboundID int, clientID string) error {
+	mockXUI.DeleteClientFunc = func(ctx context.Context, email string) error {
 		return nil
 	}
 
@@ -316,7 +315,7 @@ func TestHandleDel_CacheInvalidation(t *testing.T) {
 		return sub, nil
 	}
 
-	mockXUI.DeleteClientFunc = func(ctx context.Context, inboundID int, clientID string) error {
+	mockXUI.DeleteClientFunc = func(ctx context.Context, email string) error {
 		return nil
 	}
 

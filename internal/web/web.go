@@ -168,7 +168,6 @@ func (s *Server) Start(ctx context.Context) error {
 		}
 	}()
 
-	logger.Info("Web server started", zap.String("addr", s.addr))
 	return nil
 }
 

@@ -12,7 +12,7 @@ import (
 
 // XUICleanupTarget defines the interface needed for trial cleanup.
 type XUICleanupTarget interface {
-	DeleteClient(ctx context.Context, inboundID int, clientID string) error
+	DeleteClient(ctx context.Context, email string) error
 }
 
 // TrialCleanupScheduler runs periodic expired trial cleanup.

@@ -202,7 +202,7 @@ func TestE2E_DelCommand_XUIFailure(t *testing.T) {
 	sub, err := env.db.GetByTelegramID(ctx, env.chatID)
 	require.NoError(t, err)
 
-	env.xui.DeleteClientFunc = func(ctx context.Context, inboundID int, clientID string) error {
+	env.xui.DeleteClientFunc = func(ctx context.Context, email string) error {
 		return fmt.Errorf("xui delete: connection refused")
 	}
 
