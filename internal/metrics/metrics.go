@@ -155,6 +155,14 @@ var (
 			Help: "Total number of orphaned XUI clients/subscriptions removed during reconciliation",
 		},
 	)
+
+	SubserverPartialSourcesTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "subserver_partial_sources_total",
+			Help: "Total number of subscription requests where at least one source failed",
+		},
+		[]string{"sub_id"},
+	)
 )
 
 // InstrumentHTTP middleware records metrics for HTTP requests.

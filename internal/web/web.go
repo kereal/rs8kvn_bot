@@ -575,13 +575,23 @@ func (s *Server) handleSubscription(w http.ResponseWriter, r *http.Request) {
 	// we use a cheap status+expiry lookup instead of the full JOIN.
 	if cachedBody, cachedHeaders, ok := s.subServer.GetCache(subID); ok {
 		status, expiryTime, err := s.db.GetSubscriptionStatus(ctx, subID)
-		if err != nil || status != "active" || (expiryTime.IsZero() == false && time.Now().After(expiryTime)) {
-			// Subscription no longer valid — purge cache and return 404.
+		if err != nil {
+			logDebug("cache status check failed, serving stale cache",
+				zap.Error(err),
+			)
+			for k, v := range cachedHeaders {
+				w.Header().Set(k, v)
+			}
+			w.Header().Del("Content-Length")
+			w.WriteHeader(http.StatusOK)
+			w.Write(cachedBody)
+			return
+		}
+		if status != "active" || (!expiryTime.IsZero() && time.Now().After(expiryTime)) {
 			s.subServer.InvalidateCache(subID)
 			logDebug("cache invalidated: subscription no longer active",
 				zap.String("status", status),
 				zap.Time("expiry_time", expiryTime),
-				zap.Error(err),
 			)
 			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 			w.WriteHeader(http.StatusNotFound)
@@ -644,6 +654,9 @@ func (s *Server) handleSubscription(w http.ResponseWriter, r *http.Request) {
 	allJSON := true
 	var firstSourceHeaders map[string]string
 
+	// Track partial source failures for observability.
+	var failedSources int
+
 	for _, src := range subFull.Sources {
 		// Skip sources without a subscription URL.
 		if src.SubURL == "" {
@@ -651,7 +664,11 @@ func (s *Server) handleSubscription(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		sourceURL := src.SubURL + subID
+		srcSubURL := src.SubURL
+		if srcSubURL != "" && !strings.HasSuffix(srcSubURL, "/") {
+			srcSubURL += "/"
+		}
+		sourceURL := srcSubURL + subID
 		logDebug("fetching from source",
 			zap.String("source", src.Name),
 			zap.String("url_host", sourceHost(sourceURL)),
@@ -664,6 +681,7 @@ func (s *Server) handleSubscription(w http.ResponseWriter, r *http.Request) {
 				zap.String("source", src.Name),
 				zap.Error(err),
 			)
+			failedSources++
 			continue
 		}
 
@@ -725,6 +743,10 @@ func (s *Server) handleSubscription(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
+	}
+
+	if failedSources > 0 && len(allItems)+len(allJSONConfigs) > 0 {
+		metrics.SubserverPartialSourcesTotal.WithLabelValues(subID).Inc()
 	}
 
 	// Build the aggregated Subscription-UserInfo header.

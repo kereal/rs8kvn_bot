@@ -47,11 +47,13 @@ func FetchFromXUI(url string) (*XUIResponse, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer func() {
-		if closeErr := resp.Body.Close(); closeErr != nil {
-			logger.Debug("Failed to close response body", zap.Error(closeErr))
-		}
-	}()
+	if resp != nil && resp.Body != nil {
+		defer func() {
+			if closeErr := resp.Body.Close(); closeErr != nil {
+				logger.Debug("Failed to close response body", zap.Error(closeErr))
+			}
+		}()
+	}
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 10<<20))
 	if err != nil {

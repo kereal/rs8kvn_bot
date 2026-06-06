@@ -168,7 +168,7 @@ func main() {
 					zap.Error(convErr))
 			}
 		}
-		defaultSubURL := os.Getenv("DEFAULT_SOURCE_SUB_URL")
+		defaultSubURL := cfg.GlobalSubURL
 		if defaultSubURL == "" && xuiHost != "" {
 			defaultSubURL = strings.TrimRight(xuiHost, "/") + "/sub/"
 		}

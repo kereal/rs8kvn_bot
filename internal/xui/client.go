@@ -532,7 +532,7 @@ func truncateString(s string, maxLen int) string {
 
 func isRetryable(err error) bool {
 	if err == nil {
-		return true
+		return false
 	}
 	var dnsErr *net.DNSError
 	if errors.As(err, &dnsErr) {

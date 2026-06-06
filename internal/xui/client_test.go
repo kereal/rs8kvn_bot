@@ -137,7 +137,7 @@ func TestIsRetryable(t *testing.T) {
 		err       error
 		retryable bool
 	}{
-		{"nil", nil, true},
+		{"nil", nil, false},
 		{"timeout", http.ErrHandlerTimeout, true},
 		{"dns error", &net.DNSError{Err: "dns", Name: "example.com"}, false},
 		{"no such host", fmt.Errorf("no such host"), false},

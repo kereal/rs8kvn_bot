@@ -1,6 +1,7 @@
 package subserver
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -107,11 +108,17 @@ func ConvertJSONToShareLinks(body []byte) ([]string, error) {
 	switch v := raw.(type) {
 	case []interface{}:
 		for _, item := range v {
-			rawItem, _ := json.Marshal(item)
+			rawItem, err := json.Marshal(item)
+			if err != nil {
+				return nil, fmt.Errorf("marshal JSON array item: %w", err)
+			}
 			items = append(items, rawItem)
 		}
 	case map[string]interface{}:
-		rawMarshalled, _ := json.Marshal(v)
+		rawMarshalled, err := json.Marshal(v)
+		if err != nil {
+			return nil, fmt.Errorf("marshal JSON object: %w", err)
+		}
 		items = append(items, rawMarshalled)
 	default:
 		return nil, fmt.Errorf("unexpected JSON type: %T", raw)
@@ -141,11 +148,17 @@ func ExtractJSONConfigs(body []byte) ([]json.RawMessage, error) {
 	switch v := raw.(type) {
 	case []interface{}:
 		for _, item := range v {
-			rawItem, _ := json.Marshal(item)
+			rawItem, err := json.Marshal(item)
+			if err != nil {
+				return nil, fmt.Errorf("marshal JSON array item: %w", err)
+			}
 			items = append(items, rawItem)
 		}
 	case map[string]interface{}:
-		rawMarshalled, _ := json.Marshal(v)
+		rawMarshalled, err := json.Marshal(v)
+		if err != nil {
+			return nil, fmt.Errorf("marshal JSON object: %w", err)
+		}
 		items = append(items, rawMarshalled)
 	default:
 		return nil, fmt.Errorf("unexpected JSON type: %T", raw)
@@ -233,54 +246,68 @@ func buildVLESSServerLink(cfg *serverConfig) (string, error) {
 
 // buildVMessServerLink builds a vmess:// share URI (base64-encoded JSON object) from a parsed server config.
 func buildVMessServerLink(cfg *serverConfig) (string, error) {
-	vmessObj := map[string]interface{}{
-		"v":    "2",
-		"ps":   cfg.Remark,
-		"add":  cfg.Address,
-		"port": cfg.Port,
-		"id":   cfg.UUID,
-		"aid":  "0",
-		"scy":  cfg.Scy,
-		"net":  cfg.Network,
-		"type": cfg.HeaderType,
-		"host": cfg.Host,
-		"path": cfg.Path,
-		"tls":  cfg.TLS,
-		"sni":  cfg.SNI,
-		"alpn": cfg.Alpn,
-		"fp":   cfg.Fingerprint,
+	type vmessObj struct {
+		V    string `json:"v"`
+		PS   string `json:"ps"`
+		Add  string `json:"add"`
+		Port int    `json:"port"`
+		ID   string `json:"id"`
+		Aid  string `json:"aid"`
+		Scy  string `json:"scy"`
+		Net  string `json:"net"`
+		Type string `json:"type"`
+		Host string `json:"host"`
+		Path string `json:"path"`
+		TLS  string `json:"tls"`
+		SNI  string `json:"sni"`
+		ALPN string `json:"alpn"`
+		FP   string `json:"fp"`
 	}
 
-	if vmessObj["scy"].(string) == "" {
-		vmessObj["scy"] = "auto"
-	}
-	if vmessObj["net"].(string) == "" {
-		vmessObj["net"] = "tcp"
-	}
-	if vmessObj["tls"].(string) == "" {
-		delete(vmessObj, "tls")
-	}
-	if vmessObj["sni"].(string) == "" {
-		delete(vmessObj, "sni")
-	}
-	if vmessObj["alpn"].(string) == "" {
-		delete(vmessObj, "alpn")
-	}
-	if vmessObj["fp"].(string) == "" {
-		delete(vmessObj, "fp")
-	}
-	if vmessObj["host"].(string) == "" {
-		delete(vmessObj, "host")
-	}
-	if vmessObj["path"].(string) == "" {
-		delete(vmessObj, "path")
-	}
-	if vmessObj["type"].(string) == "" {
-		delete(vmessObj, "type")
+	obj := vmessObj{
+		V:    "2",
+		PS:   cfg.Remark,
+		Add:  cfg.Address,
+		Port: cfg.Port,
+		ID:   cfg.UUID,
+		Aid:  "0",
+		Scy:  cfg.Scy,
+		Net:  cfg.Network,
+		Type: cfg.HeaderType,
+		Host: cfg.Host,
+		Path: cfg.Path,
+		TLS:  cfg.TLS,
+		SNI:  cfg.SNI,
+		ALPN: cfg.Alpn,
+		FP:   cfg.Fingerprint,
 	}
 
-	raw, _ := json.Marshal(vmessObj)
-	return "vmess://" + base64StdEncode(raw), nil
+	if obj.Scy == "" {
+		obj.Scy = "auto"
+	}
+	if obj.Net == "" {
+		obj.Net = "tcp"
+	}
+	drop := func(field *string) {
+		if *field == "" {
+			*field = "__OMIT__"
+		}
+	}
+	drop(&obj.TLS)
+	drop(&obj.SNI)
+	drop(&obj.ALPN)
+	drop(&obj.FP)
+	drop(&obj.Host)
+	drop(&obj.Path)
+	drop(&obj.Type)
+
+	data, err := json.Marshal(obj)
+	if err != nil {
+		return "", fmt.Errorf("marshal vmess object: %w", err)
+	}
+	encoded := base64.StdEncoding.EncodeToString(data)
+	encoded = strings.ReplaceAll(encoded, "__OMIT__", "")
+	return "vmess://" + encoded, nil
 }
 
 // buildTrojanServerLink builds a trojan:// share URI from a parsed server config.

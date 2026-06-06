@@ -3,6 +3,7 @@ package subserver
 import (
 	"bytes"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"rs8kvn_bot/internal/metrics"
@@ -25,6 +26,7 @@ type Cache struct {
 	entries map[string]*cacheEntry
 	ttl     time.Duration
 	stopCh  chan struct{}
+	stopped atomic.Bool
 }
 
 // NewCache creates a new Cache with the given TTL and starts the cleanup loop.
@@ -105,18 +107,34 @@ func (c *Cache) cleanupLoop() {
 
 // cleanup removes all expired entries from the cache.
 func (c *Cache) cleanup() {
+	now := time.Now()
+
+	c.mu.RLock()
+	keys := make([]string, 0, len(c.entries))
+	for k, e := range c.entries {
+		if now.After(e.expiresAt) {
+			keys = append(keys, k)
+		}
+	}
+	c.mu.RUnlock()
+
+	if len(keys) == 0 {
+		return
+	}
+
 	c.mu.Lock()
 	defer c.mu.Unlock()
-
-	now := time.Now()
-	for key, entry := range c.entries {
-		if now.After(entry.expiresAt) {
-			delete(c.entries, key)
+	for _, k := range keys {
+		if e, ok := c.entries[k]; ok && now.After(e.expiresAt) {
+			delete(c.entries, k)
 		}
 	}
 }
 
-// Stop shuts down the background cleanup loop.
+// Stop shuts down the background cleanup loop. Safe to call multiple times.
 func (c *Cache) Stop() {
+	if c.stopped.Swap(true) {
+		return
+	}
 	close(c.stopCh)
 }
