@@ -927,10 +927,16 @@ func (s *Service) GetTrialSubscriptionBySubID(ctx context.Context, subscriptionI
 	}
 
 	var plan Plan
-	if err := s.db.WithContext(ctx).Where("id = ?", sub.PlanID).First(&plan).Error; err == nil && plan.Name == TrialPlanName {
-		return &sub, nil
+	if err := s.db.WithContext(ctx).Where("id = ?", sub.PlanID).First(&plan).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("subscription is not a trial")
+		}
+		return nil, fmt.Errorf("failed to get plan for trial check: %w", err)
 	}
-	return nil, fmt.Errorf("subscription is not a trial")
+	if plan.Name != TrialPlanName {
+		return nil, fmt.Errorf("subscription is not a trial")
+	}
+	return &sub, nil
 }
 
 // BindTrialSubscription binds a trial subscription to a Telegram user.
