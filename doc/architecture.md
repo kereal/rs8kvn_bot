@@ -410,52 +410,7 @@ type CircuitBreaker struct {
 
 ---
 
-### 7. Subscription server Extra Servers
-
-**Config format** (`extra_servers.txt`):
-
-```
-# Headers section (optional)
-X-Custom-Header: my-value
-X-Server-Name: RS8-KVN Backup
-
-# End of headers (blank line required)
-
-# Server lines (one per line)
-vless://uuid@backup1.example.com:443?security=reality&...
-trojan://password@backup2.example.com:443?...
-vmess://another-uuid@backup3.com:443?...
-```
-
-**Parsing rules:**
-- Lines starting with `#` are comments (ignored)
-- Blank line ends header section
-- Header lines require `Key: Value` format
-- Server lines recognized by scheme prefix (case-insensitive)
-- Headers override 3x-ui headers (last-wins)
-- Servers appended after 3x-ui servers (client selects first working)
-
-**Supported schemes:**
-`vless://`, `vmess://`, `trojan://`, `ss://`, `ssr://`, `hysteria://`, `hysteria2://`, `hy2://`, `tuic://`, `wg://`, `wireguard://`
-
-**Security:** Path validated before `os.Open` — no `..`, no system dirs, must be absolute within allowed base.
-
-**Reload loop:**
-```go
-ticker := time.NewTicker(5 * time.Minute)
-for {
-    select {
-    case <-ticker.C:
-        svc.ReloadConfig() // keeps old config on error
-    case <-stopCh:
-        return
-    }
-}
-```
-
----
-
-### 8. Graceful Shutdown
+### 7. Graceful Shutdown
 
 **Signal handling:**
 ```bash
@@ -616,10 +571,10 @@ subscription:
   trial_rate_limit: "int 1-100 (default 3)"
 
 proxy:
-  extra_servers_enabled: "bool (default true)"
-  extra_servers_file: "string (default ./data/extra_servers.txt)"
+  global_sub_url: "string (required, HTTPS or localhost)"
 
 monitoring:
+  # Removed extra_servers config — feature was dropped in v2.3.0
   heartbeat_url: "URL (optional, must be HTTPS)"
   heartbeat_interval: "int seconds, min 10 (default 300)"
   sentry_dsn: "URL (optional, must be HTTPS)"

@@ -846,6 +846,30 @@ func (s *Service) GetSubscriptionBySubscriptionID(ctx context.Context, subscript
 	return &sub, nil
 }
 
+// GetSubscriptionStatus returns only the status and expiry time for a subscription
+// by its subscription_id. It is intended for cheap cache-hit checks in the
+// subscription server (since v2.3.0) — it avoids the full JOIN with plans and
+// sources required by GetSubscriptionWithPlanAndSources. Returns
+// gorm.ErrRecordNotFound if no row matches.
+func (s *Service) GetSubscriptionStatus(ctx context.Context, subscriptionID string) (string, time.Time, error) {
+	var row struct {
+		Status     string
+		ExpiryTime time.Time
+	}
+	result := s.db.WithContext(ctx).
+		Table("subscriptions").
+		Select("status, expiry_time").
+		Where("subscription_id = ?", subscriptionID).
+		Scan(&row)
+	if result.Error != nil {
+		return "", time.Time{}, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return "", time.Time{}, gorm.ErrRecordNotFound
+	}
+	return row.Status, row.ExpiryTime, nil
+}
+
 // GetSubscriptionWithPlanAndSources returns a subscription (status=active) by subscription ID
 // together with its plan and active sources, via JOINs through plan_sources.
 func (s *Service) GetSubscriptionWithPlanAndSources(ctx context.Context, subscriptionID string) (*SubscriptionFull, error) {

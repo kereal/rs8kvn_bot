@@ -235,9 +235,6 @@ Air will automatically rebuild and restart the bot when you save changes to Go f
 | **Donation** |
 | `DONATE_CARD_NUMBER` | Donation card (T-Bank) | *(empty)* | ❌ | Shown in donate menu |
 | `DONATE_URL` | Donation collection link | *(empty)* | ❌ | T-Bank or other |
-| **Subscription Proxy** |
-| `SUB_EXTRA_SERVERS_ENABLED` | Enable extra servers in proxy | `true` | ❌ | `true`/`false` |
-| `SUB_EXTRA_SERVERS_FILE` | Path to extra servers config | `./data/extra_servers.txt` | ❌ | See below |
 | **API** |
 | `API_TOKEN` | Bearer token for `/api/v1/subscriptions` | — | ✅ if endpoint used | Random string |
 | **Webhook** |
