@@ -7,7 +7,6 @@ func SubIDRegex() *regexp.Regexp {
 }
 
 const MaxIPEntries = 100
-const MaxDeviceEntries = 100
 
 // SubscriptionResult represents the outcome of a subscription request.
 // It carries the final body, response headers, and an optional status code
