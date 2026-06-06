@@ -13,12 +13,13 @@ Telegram bot for distributing VLESS+Reality+Vision proxy subscriptions from 3x-u
 - 📥 Get subscription on demand with QR code import
 - 🔗 Invite/trial landing page (`/i/{code}`) with one-click Happ setup
 - 👥 Referral system — users generate invite codes with in-memory cache + periodic sync
-- 📊 Configurable traffic limit (default 30GB/month)
-- 🔄 Monthly auto-renewal (last day of month, no expiry)
-- 🔔 Admin notifications on new subscriptions
+- 📊 Plan-based traffic limits (sources/plans/plan_sources schema)
+- 🔗 Subscription server endpoint (`/sub/{subID}`) with multi-source aggregation, devices/IPs tracking, and profile headers
+- 🗄️ Daily database backups with rotation, embedded migrations (000–012)
+- 🧪 Unit + E2E tests (~85% coverage, race-safe, fuzzing)
 - 🛡️ Rate limiting, circuit breaker for 3x-ui, auto-relogin on session expiry
 - 🏥 Health check endpoints (/healthz, /readyz)
-- 🔗 Subscription server endpoint (`/sub/{subID}`) with extra servers and headers
+- 🔗 Subscription proxy endpoint (`/sub/{subID}`) with extra servers and headers
 - 🗄️ Daily database backups with rotation, embedded migrations
 - 🐛 Sentry error tracking
 - 🐳 Docker support with health checks
@@ -88,7 +89,7 @@ The bot exposes HTTP endpoints on port 8880:
 | `GET /healthz` | Basic health (process alive, DB and xui status) | 200/503 |
 | `GET /readyz` | Ready state (accepting requests after init) | 200/503 |
 | `GET /i/{code}` | Trial invites landing page | 200/404/429/500 |
-| `GET /sub/{subID}` | Subscription server (extra servers + headers, status checked) | 200/404/502/405 |
+| `GET /sub/{subID}` | Subscription proxy (extra servers + headers, status checked) | 200/404/502/405 |
 | `GET /static/logo.png` | Logo image (mobile-optimized PNG) | 200/404 |
 
 ### Invite/Trial Landing Page (`/i/{code}`)
@@ -99,13 +100,13 @@ Each user can generate an invite code via the referral flow. The landing page va
 - Copy-to-clipboard subscription URL
 - Telegram activation link
 
-### Subscription server (`/sub/{subID}`)
+### Subscription Proxy (`/sub/{subID}`)
 
 Serves subscriptions with optional extra servers and custom headers. Validates `subID`, checks cache (240s TTL), fetches from 3x-ui, merges extra servers/headers from config file, returns combined response. Stale cache is used as fallback if 3x-ui is unavailable.
 
 ## Traffic and Expiry
 
-
+- **Traffic**: Configurable via `TRAFFIC_LIMIT_GB` (default: 30GB)
 - **Auto-reset**: Every 30 days from creation date — 3x-ui resets traffic to 0 and extends `ExpiryTime` by 30 days automatically when `ExpiryTime > 0`
 - **Source**: [3x-ui inbound.go - autoRenewClients()](https://github.com/mhsanaei/3x-ui/blob/main/web/service/inbound.go#L888-L912)
 
