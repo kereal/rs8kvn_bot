@@ -13,17 +13,17 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                         Telegram Bot API                            │
+│                         Telegram Bot API                             │
 └─────────────────────────────┬───────────────────────────────────────┘
                               │ GetUpdates (long polling)
                               ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│                     cmd/bot/main.go (Entry Point)                   │
+│                     cmd/bot/main.go (Entry Point)                    │
 │  ┌────────────────────────────────────────────────────────────────┐ │
-│  │ • Config loading                                               │ │
- │  │ • Service initialization (DB, XUI, Bot, Web, SubServer)        │ │
-│  │ • Graceful shutdown coordination (signal handling)             │ │
-│  │ • Worker pool semaphore (10 concurrent handlers)               │ │
+│  │ • Config loading                                                │ │
+│  │ • Service initialization (DB, XUI, Bot, Web, Subserver)          │ │
+│  │ • Graceful shutdown coordination (signal handling)              │ │
+│  │ • Worker pool semaphore (10 concurrent handlers)                │ │
 │  └────────────────────────────────────────────────────────────────┘ │
 └─────────────────────────────┬───────────────────────────────────────┘
                               │
@@ -146,7 +146,7 @@ User clicks "Добавить в Happ" → opens Happ app with subscription
 User clicks "Активировать" → opens Telegram bot, binds trial to account
 ```
 
-### Subscription server Flow (v2.3.0+)
+### Subscription Proxy Flow
 
 ```
 User opens subscription link in client
@@ -154,49 +154,35 @@ User opens subscription link in client
         ▼
 GET /sub/{subID}
         │
-        ├─ 1. Validate subID via regex ^[a-zA-Z0-9_-]+$
-        ├─ 2. Check per-subID cache (Cache.Get, TTL 240s)
-        │      └─ Hit → writeSubscriptionResponse (200)
+        ├─ Validate subID format (regex: ^[a-zA-Z0-9_-]+$, no '/')
+        ├─ Check cache (Cache.Get, TTL 240s)
         │
-        └─ 3. Miss → DB: GetSubscriptionWithPlanAndSources (JOIN)
-        │      Returns SubscriptionFull — Subscription + Plan + []Source
+        ├─ Cache hit?
+        │   ├─ Yes → validate subscription still active in DB (optional but done)
+        │   │         If inactive → fetch from XUI
+        │   └─ No  → fetch from XUI
         │
-        ├─ 4. Filter request headers:
-        │      Exclude X-Forwarded-Proto, X-Forwarded-For, X-Real-Ip
-        │      Lowercase keys+values → device entry
+        ▼
+Fetch from XUI (singleflight.Do — dedup concurrent requests)
         │
-        ├─ 5. Update Devices (x-hwid rotation):
-        │      Parse Devices JSON → find by x-hwid → remove → append new
+        ├─ GET /panel/api/subscriptions/:subID?...
+        └─ Parse format (VLESS/VMESS/Trojan/etc.)
         │
-        ├─ 6. Update IPs ({ip: timestamp} array):
-        │      Parse Ips JSON → find by IP → remove → append {ip: now}
-        │      Max 100 entries, oldest evicted
+        ▼
+Merge:
+  1. XUI subscription lines
+  2. Extra servers from SUB_EXTRA_SERVERS_FILE (if enabled)
+  3. Headers: extra headers override XUI headers
         │
-         └─ 7. Fetch each active Source with SubURL:
-               └─ subserver.FetchFromXUI(url) (no per-URL cache)
-              ├─ Detect format: JSON / Base64 / Plain / Unknown
-              └─ Accumulate userinfo across sources
-                    • upload += source_upload
-                    • download += source_download
-                    • expire = min(existing_expire, source_expire)
-                    • total = Plan.TrafficLimit
-
-        └─ 8. Format & output
-              ├─ All JSON sources → json.Marshal(configs) → JSON response
-              │
-              └─ Mixed / Base64 / Plain:
-                    ├─ JSON configs → share links (ConvertSingleJSONToLink)
-                    └─ All items → base64.StdEncoding → base64 response
-
-        └─ 9. Forward source headers (profile-title, routing-*, etc.)
-              Skip: content-length, content-encoding, transfer-encoding
-
-        └─10. Set response headers:
-              ├─ Subscription-UserInfo: upload=X; download=Y; total=Z; expire=W
-              ├─ Content-Type (application/json or text/plain)
-              └─ Forwarded headers from step 9
-
-        └─11. Cache.Set(subID, body) + write 200 (chunked)
+        ▼
+Cache.Set(240s)
+        │
+        ▼
+Write response:
+  • Content-Type based on format (usually text/plain)
+  • Extra headers (X-Custom-*, Profile-Title)
+  • No Content-Length (chunked)
+  • Body: merged subscription lines
 ```
 
 ## Stack
@@ -239,7 +225,7 @@ GET /sub/{subID}
 - Health endpoints — `/healthz` (503 when Down), `/readyz` (503 during init)
 - Invite/trial landing — `/i/{code}` with IP rate limit (3/hour), cookie dedup (3h)
 - Per-user rate limiting — chatID token bucket (30 tokens, 5/sec refill, 10-min idle cleanup)
-- Subscription server — `GET /sub/{subID}` multi-source aggregation, JSON→share-link, devices/IPs tracking, 240s TTL cache
+- Subscription proxy — `GET /sub/{subID}` with extra servers + headers, 240s TTL cache, singleflight
 - Daily backups — WAL checkpoint, atomic copy, 14-day rotation
 - Sentry error tracking (+ traces), Zap structured JSON logging with rotation
 - Docker: multi-stage build (UPX compression), non-root user, healthcheck, GHCR images
@@ -298,21 +284,15 @@ All tests pass with `-race` detector. Fuzzing enabled for critical functions.
 - **Webhook:** Sent on successful DB deletion regardless of XUI outcome.
 - **Referral cache:** `DecrementReferralCount` called after successful deletion.
 
-### Subscription server (v2.3.0+)
-- **Endpoint:** `GET /sub/{subID}` — subID = SubscriptionID from DB
-- **DB fetch:** `GetSubscriptionWithPlanAndSources` — JOIN subscriptions+plans+plan_sources+sources
-- **Cache-hit lookup:** `GetSubscriptionStatus` — cheap `SELECT status, expiry_time` (no JOIN); used to validate cached responses
-- **Multi-source:** Each active Source with non-empty SubURL is fetched independently; results aggregated
-- **Per-subID cache:** Raw source responses not cached; only final merged response cached 240s (`config.SubServerCacheTTL`) with response headers (Content-Type, Subscription-UserInfo, forwarded source headers) replayed verbatim
-- **JSON config conversion:** Server configs from 3x-ui JSON are converted to share links via `ConvertJSONToShareLinks` (vless, vmess, trojan, ss, socks, hysteria, tuic). Pure-JSON mode returns raw objects as JSON array
-- **Devices:** `Subscription.devices` — JSON array of `[{header_map}, ...]`, rotated by x-hwid value
-- **IPs:** `Subscription.ips` — JSON array of `{"ip": "timestamp"}`, max 100 entries, LRU eviction
-- **Userinfo aggregation:** `upload`/`download` summed across sources, `total` = `Plan.TrafficLimit`, `expire` = minimum across sources
-- **Cache freshness:** `Plan.TrafficLimit` and the `Sources` list are baked into the cached response — changes to a subscription's plan or source set take up to TTL (240s) to propagate to clients. Status/expiry are re-checked on every hit
-- **Cache:** 240s TTL (`config.SubServerCacheTTL`), per-subID (merged response with headers). Singleflight removed
-- **Security:** All error responses return generic 404 "Subscription not found" (no info leakage). DB errors on cache-hit path also return 404 (sub likely deleted)
-- **Headers forwarded:** Original response headers from first source (profile-title, profile-update-interval, routing-*) forwarded except transport headers (content-*, transfer-encoding). Subscription-UserInfo always overrides
-- **Rate limiting:** None — 240s cache TTL mitigates abuse
+### Subscription Proxy (v2.3.0+)
+- **Endpoint:** `GET /sub/{subID}` — subID = SubscriptionID from DB (14 random bytes → 28 hex chars)
+- **Extra config:** Headers section → blank line → server links. Headers override 3x-ui.
+- **Cache:** 240s TTL hardcoded (`config.SubServerCacheTTL`)
+- **Reload:** Every 5 minutes, graceful — keeps old config if file read fails
+- **Singleflight:** First request fetches, others wait and get same result (prevents thundering herd)
+- **Content-Length:** Removed after merge (body size changes, Go uses chunked encoding)
+- **Rate limiting:** Currently none — 240s cache TTL mitigates abuse; future: per-IP limit
+- **Path traversal protection:** `extra_servers.txt` path validated before opening (no `..`, no system dirs)
 
 ### Referral Cache
 - **Source of truth:** subscriptions table (`SELECT referred_by, COUNT(*) GROUP BY referred_by`)
@@ -332,9 +312,10 @@ All tests pass with `-race` detector. Fuzzing enabled for critical functions.
 
 ### Configuration
 - **Required:** `TELEGRAM_BOT_TOKEN`, `XUI_API_TOKEN` (NO defaults)
-- **Validated:**
+- **Validated:** 
   - `XUI_SUB_PATH` — only `a-zA-Z0-9_-`, no `..` or `/`
   - `XUI_HOST` — must be valid URL, **HTTPS enforced** (except localhost)
+  - `SUB_EXTRA_SERVERS_FILE` — path traversal check
 - **Web server:** Runs on `HEALTH_CHECK_PORT` (default 8880), bound to all interfaces
 - **Init failure:** Fatal exit for DB, XUI, and Bot API init errors (cannot operate without them)
 
@@ -347,7 +328,7 @@ All tests pass with `-race` detector. Fuzzing enabled for critical functions.
 - **Broadcast:** 50ms delay between messages (~20 msg/sec, respects Telegram limits)
 
 ### Security
-- **Input validation:** Path traversal checks (XUI_SUB_PATH), regex invite codes
+- **Input validation:** Path traversal checks (XUI_SUB_PATH, extra_servers.txt), regex invite codes
 - **IP spoofing:** X-Forwarded-For trusted only from loopback (127.0.0.1, ::1). Private IPs NOT trusted.
 - **API auth:** Timing-safe token comparison via `crypto/subtle.ConstantTimeCompare`
 - **No secrets in code:** `.env` only, `.env.example` has placeholders

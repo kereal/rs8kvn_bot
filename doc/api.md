@@ -1,6 +1,6 @@
 # API Reference — rs8kvn_bot
 
-**Version:** 2.3.0  
+**Version:** 2.5.0  
 **Base URL:** `http://localhost:8880` (configurable via `HEALTH_CHECK_PORT`)
 
 ---
@@ -9,7 +9,7 @@
 
 1. [Health Checks](#1-health-checks)
 2. [Trial Landing Page](#2-trial-landing-page)
-3. [Subscription server](#3-subscription-proxy)
+3. [Subscription Proxy](#3-subscription-proxy)
 4. [Admin API](#4-admin-api)
 5. [Static Files](#5-static-files)
 6. [Error Codes](#6-error-codes)
@@ -172,7 +172,7 @@ X-Frame-Options: DENY
 
 ---
 
-## 3. Subscription server
+## 3. Subscription Proxy
 
 ### `GET /sub/{subID}`
 
@@ -198,7 +198,7 @@ vless://uuid@backup2.com:443?security=reality&ps=Backup+2&...                   
 
 **Headers added:**
 - `X-Subscription-Proxy: rs8kvn_bot`
-- Forwarded headers from the first source (profile-title, profile-update-interval, routing-*)
+- Any custom headers from `extra_servers.txt` (if enabled)
 
 **Cache:** 240 seconds (4 minutes) — subsequent requests served from memory.
 
@@ -377,7 +377,7 @@ curl -H "Authorization: Bearer my-secret-token" \
 curl -i http://localhost:8880/i/ABC123def
 ```
 
-**Check Subscription server:**
+**Check subscription proxy:**
 ```bash
 curl -s http://localhost:8880/sub/abc123def456 | base64 -d | head -20
 ```
@@ -390,7 +390,7 @@ API version is implicit in endpoint paths:
 - `/api/v1/subscriptions` — v1 (current)
 - No breaking changes expected without major version bump
 
-Bot version in logs: `rs8kvn_bot@v2.3.0`
+Bot version in logs: `rs8kvn_bot@v2.5.0`
 
 ---
 
