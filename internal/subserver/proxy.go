@@ -32,7 +32,7 @@ type XUIResponse struct {
 	Headers map[string]string
 }
 
-// FetchFromXUI sends an HTTP GET to url with a v2rayN User-Agent and returns
+// FetchFromXUI sends an HTTP GET to url with a custom User-Agent and returns
 // the response body (up to 10 MB) together with all response headers stored
 // under lowercased keys. Header values are taken from the first value for each key.
 func FetchFromXUI(url string) (*XUIResponse, error) {
@@ -41,7 +41,7 @@ func FetchFromXUI(url string) (*XUIResponse, error) {
 		return nil, err
 	}
 
-	req.Header.Set("User-Agent", "v2rayN/6.31")
+	req.Header.Set("User-Agent", "RS8 KVN Subserver")
 
 	resp, err := proxyHTTPClient.Do(req)
 	if err != nil {
