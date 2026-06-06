@@ -16,7 +16,7 @@
 - `internal/utils`: 90.0% ✅
 - `internal/logger`: 88.9% ✅
 - `internal/backup`: 83.2% ✅
-- `internal/subproxy`: 82.5% ✅
+- `internal/subserver`: 82.5% ✅
 - `internal/scheduler`: 81.2% ✅
 - `internal/database`: ~82% 🟡 (было 69.5% — U2: sources_test.go)
 - `internal/metrics`: ~30% 🟡 (было 0% — R5: metrics_test.go)
@@ -26,7 +26,7 @@
 ### Test stats
 - **~67 test files**, **~1079 test funcs**, **~29565 lines** (baseline до аудита)
 - **Race-safe:** ✅
-- **Golden files:** ✅ (subproxy)
+- **Golden files:** ✅ (subserver)
 
 ## Test patterns (v2.4.0)
 
@@ -59,8 +59,8 @@
 
 ### time.Sleep → assert.Eventually
 - `graceful_shutdown_test.go`: 8 Sleeps replaced, ~300ms saved
-- `subproxy/service_test.go`: 2× Sleep(30ms) → Eventually
-- `subproxy/cache_test.go`: 2× Sleep(20ms) → Eventually
+- `subserver/service_test.go`: 2× Sleep(30ms) → Eventually
+- `subserver/cache_test.go`: 2× Sleep(20ms) → Eventually
 - `scheduler`: Sleep(20ms)+After(1s) → After(200ms)
 - `heartbeat`: After(2s) → After(200ms) in 4 places
 - **Исключение**: breaker_test оставлен с `time.Sleep(2-10ms)` — точно соответствует таймаутам, Eventually — overhead без выигрыша.

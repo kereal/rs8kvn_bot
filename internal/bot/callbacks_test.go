@@ -255,6 +255,8 @@ func TestHandleCallback_CallbackDataRouting(t *testing.T) {
 				if tt.wantText != "" {
 					assert.Contains(t, mockBot.LastSentTextSafe(), tt.wantText, "message should contain %q", tt.wantText)
 				}
+			} else {
+				assert.False(t, mockBot.SendCalledSafe(), "Bot.Send should not be called for %s", tt.name)
 			}
 		})
 	}

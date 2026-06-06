@@ -1,7 +1,7 @@
 # Architecture — rs8kvn_bot
 
-**Version:** 2.3.0  
-**Date:** 2026-04-17
+**Version:** 2.5.0  
+**Date:** 2026-06-06
 
 ---
 
@@ -49,7 +49,7 @@ rs8kvn_bot — production-ready Telegram bot for distributing VLESS+Reality+Visi
 │       ┌────────────────────────────┼────────────────────────────┐   │
 │       ▼                            ▼                            ▼   │
 │  ┌──────────┐              ┌──────────────┐              ┌──────────┐│
-│  │ Bot API  │              │  Web Server  │              │ SubProxy ││
+│  │ Bot API  │              │  Web Server  │  │ Subserver ││
 │  │ Layer    │              │  (port 8880) │              │ Service  ││
 │  │          │              │              │              │          ││
 │  │ Handler  │              │ /healthz     │              │ cache    ││
@@ -136,9 +136,9 @@ internal/
 │   ├── web.go               # Server struct, routes, health
 │   ├── middleware.go        # Bearer auth
 │   ├── api.go               # /api/v1/subscriptions
-│   ├── subproxy_test.go     # Proxy handler tests
+│   ├── subserver_test.go     # Proxy handler tests
 │   └── templates/           # trial.html, error.html
-├── subproxy/         # Subscription proxy
+├── subserver/         # Subscription server (aggregation + proxy)
 │   ├── service.go           # Hot reload loop (5 min)
 │   ├── proxy.go             # Fetch+XUI+merge logic
 │   ├── cache.go             # TTL cache (240s)
@@ -151,7 +151,7 @@ internal/
 │   └── breaker.go           # Circuit breaker (5/30s/3-half-open)
 ├── database/         # Persistence
 │   ├── database.go          # GORM service + migrations
-│   └── migrations/          # 000..011 SQL files (embedded)
+│   └── migrations/          # 000..003 SQL files (embedded)
 ├── config/           # Configuration
 │   ├── config.go            # Load + validate
 │   └── constants.go         # All defaults & limits
@@ -307,13 +307,13 @@ if !rateLimiter.Allow(chatID) {
 |-------|---------|-----|----------|----------|
 | `SubscriptionCache` (bot/cache.go) | Cached subscriptions by `telegramID` | 5 min | 1000 entries | LRU + periodic cleanup |
 | `ReferralCache` (bot/referral_cache.go) | Referral counts per referrer | 1 hour sync | unlimited (bounded by users) | N/A (full reload) |
-| `SubProxyCache` (subproxy/cache.go) | Merged subscription bodies by `subID` | 240s (4 min) | 1000 entries | TTL expiration |
+| `SubserverCache` (subserver/cache.go) | Merged subscription bodies by `subID` | 240s (4 min) | 1000 entries | TTL expiration |
 
 **Cache invalidation points:**
 - Subscription created → `invalidateCache(telegramID)`
 - Subscription deleted → `invalidateCache(telegramID)`
 - Trial bound → `invalidateCache(telegramID)`
-- SubProxy reload → entire cache cleared on config change
+- Subserver reload → entire cache cleared on config change
 
 **Pattern:** Cache-Aside with stale-as-fallback (proxy returns stale if XUI down).
 
@@ -349,14 +349,8 @@ CREATE INDEX idx_trial_requests_ip             ON trial_requests(ip);
 ```
 
 **Race-safe patterns:**
-- `BindTrialSubscription`: `UPDATE WHERE telegram_id=0 AND plan_id=trialPlanID` + `RowsAffected` check,
-  plus defensive revoke of any pre-existing active subscriptions for the same
-  `telegram_id` (prevents double-active race when a free sub and a trial sub
-  are created concurrently for the same user)
+- `BindTrialSubscription`: `UPDATE WHERE telegram_id=0 AND is_trial=true` + `RowsAffected` check
 - `CleanupExpiredTrials`: `DELETE ... RETURNING` to atomically fetch deleted rows
-- `CreateTrial` (service layer): iterates over all trial sources, aggregates
-  errors via `errors.Join`, continues on partial success (first `succeeded` ≥ 1
-  ⇒ return success with `logger.Warn("partial failures")`)
 - `GetOrCreateInvite`: always returns the oldest (canonical) code for the referrer.
   The UNIQUE constraint + "one code per referrer" guarantee is enforced by migration 004
   (aggressive deduplication of historical duplicates that accumulated because 004 was
@@ -497,64 +491,33 @@ SIGQUIT (kill -3) → core dump (not handled by us)
 │ telegram_id          int64    INDEX                         │
 │ username             string   INDEX                         │
 │ client_id            string                                 │
-│ subscription_id      string   INDEX (unique)                │
+│ subscription_id      string   INDEX (unique)                 │
+│ inbound_id           int      INDEX                         │
+│ traffic_limit        int64    default: 107374182400 (100GB)  │
 │ expiry_time          time     INDEX                         │
-│ status               string   default: "active"  INDEX      │
+│ status               string   default: "active"  INDEX       │
+│ subscription_url     string                                  │
 │ invite_code          string   INDEX                         │
-│ plan_id              uint     INDEX   (FK → plans)          │
+│ is_trial             bool     default: false  INDEX         │
 │ referred_by          int64    INDEX                         │
 │ created_at           time     autoCreate                    │
 │ updated_at           time     autoUpdate                    │
+│ deleted_at           gorm.DeletedAt  INDEX (soft delete)    │
 └─────────────────────────────────────────────────────────────┘
-                              │  plan_id
+                              │
+                              │ referred_by
                               ▼
-                    ┌─────────────────────┐
-                    │       plans         │
-                    ├─────────────────────┤
-                    │ id (PK)             │
-                    │ name (UNIQUE)       │   e.g. "free", "trial"
-                    │ price               │   (cents)
-                    │ devices_limit       │
-                    │ traffic_limit       │   bytes (was 107374182400)
-                    │ duration            │   hours (0 = no expiry)
-                    │ created_at          │
-                    │ updated_at          │
-                    └──────────┬──────────┘
-                               │  M:N
-                               ▼
-                    ┌─────────────────────┐
-                    │    plan_sources     │
-                    ├─────────────────────┤
-                    │ plan_id    (PK,FK)  │
-                    │ source_id  (PK,FK)  │
-                    └──────────┬──────────┘
-                               │  M:N
-                               ▼
-                    ┌─────────────────────┐
-                    │      sources        │
-                    ├─────────────────────┤
-                    │ id (PK)             │
-                    │ name                │
-                    │ active              │   default: true
-                    │ x_ui_host           │   3x-ui panel URL
-                    │ x_ui_api_token      │
-                    │ x_ui_inbound_id     │
-                    │ sub_url             │   per-source subscription URL
-                    │ created_at          │
-                    │ updated_at          │
-                    └─────────────────────┘
-
                     ┌─────────────────────┐
                     │      invites        │
                     ├─────────────────────┤
                     │ code (PK)           │
-                    │ referrer_tg_id (UNIQUE)│ one canonical code per user
+                    │ referrer_tg_id (FK) │
                     │ created_at          │
                     └─────────────────────┘
                               │
-                              │ subscriptions.referred_by → referrer_tg_id
+                              │ 1:N (referrer → referrals)
                               ▼
-                    (referral attribution, see GetAllReferralCounts)
+                    (subscriptions.referred_by points here)
 
                     ┌─────────────────────┐
                     │   trial_requests    │
@@ -564,19 +527,10 @@ SIGQUIT (kill -3) → core dump (not handled by us)
                     │ created_at          │
                     └─────────────────────┘
                               │
-                              │ IP-based rate limit (1h window)
+                              │ IP-based rate limit
                               ▼
                     (checked before trial creation)
 ```
-
-**Schema changes (v2.4.0, feature/sources-table):**
-- Removed from `subscriptions`: `inbound_id`, `traffic_limit`, `subscription_url`, `is_trial`, `deleted_at` (soft delete replaced by `status='revoked'`)
-- New tables: `sources` (3x-ui panel registry), `plans` (free/trial), `plan_sources` (M:N)
-- `subscriptions.plan_id` foreign key to `plans` (replaces `is_trial` boolean)
-- `Source.Trial` field removed; trial sources now resolved dynamically by
-  `sources` JOINed with `plan_sources` JOIN `plans WHERE plans.name='trial'`
-- `TRAFFIC_LIMIT_GB` config removed; traffic limit fetched from plan (`plan.traffic_limit`)
-- Source columns renamed to `x_ui_host`, `x_ui_api_token`, `x_ui_inbound_id` (snake_case aligned with GORM tags)
 
 **Indexes rationale:**
 - `telegram_id + status` → fast lookup of user's active subscription
@@ -702,9 +656,9 @@ User           Telegram       Bot (main)     Handler      XUI Panel       DB
 | 2026-01 | In-memory caches vs Redis | No external dependency; cache sizes bounded (1000 entries) |
 | 2026-02 | Long polling vs Webhook | Easier deployment (no public HTTPS needed), single instance ok |
 | 2026-02 | GORM vs sqlx | Faster dev, migrations built-in, relationship support |
-| 2026-03 | Separate subproxy package | Reusable subscription proxy logic, clean separation |
+| 2026-03 | Separate subserver package | Reusable subscription server logic, clean separation |
 | 2026-03 | Circuit breaker on XUI | Prevent cascade failures if panel down |
-| 2026-04 | 5-min subproxy reload | Balance between config freshness and file I/O |
+| 2026-04 | 5-min subserver reload | Balance between config freshness and file I/O |
 | 2026-04 | Token bucket rate limiting | Standard algorithm, per-user isolation, tunable |
 | 2026-04 | Daily backup at 03:00 | Low-traffic period, WAL checkpoint ensures consistency |
 

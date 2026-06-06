@@ -82,7 +82,7 @@ Instead, contact us privately:
 - **Panic recovery** in all goroutines (`recoverAndReport`)
 - **Graceful shutdown** — in-flight requests allowed to complete
 - **RetryWithBackoff** retries XUI calls on transient errors (exponential backoff + jitter, up to 3 retries)
-- **Stale cache fallback** for subscription proxy if XUI down
+- **Stale cache fallback** for Subscription server if XUI down
 
 ### 6. Code Quality
 

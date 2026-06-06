@@ -1,7 +1,21 @@
 # Архитектура — rs8kvn_bot
 
-**Версия:** v2.4.0  
-**Обновлено:** 2026-06-03
+**Версия:** v2.5.0  
+**Обновлено:** 2026-06-06
+
+## Branch: feature/sub-http-server
+
+Эта память описывает ветку `feature/sub-http-server`, которая включает:
+- Переименование `internal/subproxy/` → `internal/subserver/` (BREAKING)
+- Multi-source агрегация подписок (devices, IPs tracking, multi-protocol share links)
+- Новые таблицы: `sources`, `plans`, `plan_sources` (migrations 006-012)
+- Refactor Plan system (Trial → Plan, traffic limit из plans)
+- `SeedDefaultSource` / `ReconcileOrphanedClients` / `CleanupExpiredTrials`
+- xui retry классификация (DNS = non-retryable)
+- Referral cache инкремент при trial bind
+- Удаление `DEFAULT_SOURCE_SUB_URL`
+- `url.JoinPath` fixes
+- SQLite version gate в migrations
 
 ## Общая схема
 
@@ -10,10 +24,10 @@ Telegram Bot (Go, single binary)
   ├── cmd/bot/main.go         — entry point, graceful shutdown
   ├── internal/bot/           — handlers, referral cache, singleflight
   ├── internal/service/       — SubscriptionService (orchestration)
-  ├── internal/database/      — SQLite + GORM + migrations 000-011
+  ├── internal/database/      — SQLite + GORM + migrations 000-012
   ├── internal/xui/           — multi-source 3x-ui client + circuit breaker
-  ├── internal/subproxy/      — LRU cache, merge, /sub/{id} endpoint
-  ├── internal/web/           — /healthz, /readyz, /i/{code}, /sub/{id}
+  ├── internal/subserver/      — LRU cache, merge, /sub/{id} endpoint, proxy, servers
+  ├── internal/web/           — /healthz, /readyz, /i/{code}, /sub/{subID}
   ├── internal/scheduler/     — backup (daily 03:00) + trial cleanup (hourly)
   ├── internal/backup/        — SQLite backup with WAL checkpoint
   ├── internal/heartbeat/     — monitoring pings
@@ -29,9 +43,10 @@ Telegram Bot (Go, single binary)
    Client (Happ, V2RayNG, etc.)
 ```
 
-## Схема БД (v2.4.0, после migration 011)
 
-### `subscriptions` (заменяет старую soft-delete модель)
+## Схема БД (v2.5.0, после migration 012)
+
+### `subscriptions`
 ```
 telegram_id          int64    INDEX
 username             string   INDEX
@@ -42,11 +57,14 @@ status               string   default: "active"  INDEX  (active|revoked|expired)
 invite_code          string   INDEX
 plan_id              uint     INDEX   (FK → plans)
 referred_by          int64    INDEX
+devices              json     devices list with hwid rotation
+ips                  json     ip:timestamp history (max 100)
 created_at           time
 updated_at           time
 ```
 **Удалено** в migration 011: `is_trial`, `traffic_limit`, `inbound_id`, `subscription_url`, `deleted_at`.
 **Soft delete заменён** на `status='revoked'`.
+**Добавлено** в migration 012: `devices`, `ips` (JSON поля для трекинга устройств и IP).
 
 ### `sources` (multi-source 3x-ui панели)
 ```
@@ -65,7 +83,7 @@ plan_id, source_id  (composite PK)
 
 ### `invites`, `broadcast_*`, `metrics_counters` — без изменений.
 
-Миграции лежат в `internal/database/migrations/000-011_*.up.sql` (embedded через go:embed). Новая миграция: `012_*.up.sql`.
+Миграции лежат в `internal/database/migrations/000-012_*.up.sql` (embedded через go:embed).
 
 ## Ключевые компоненты
 

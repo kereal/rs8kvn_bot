@@ -21,7 +21,7 @@ import (
 	"rs8kvn_bot/internal/logger"
 	"rs8kvn_bot/internal/scheduler"
 	"rs8kvn_bot/internal/service"
-	"rs8kvn_bot/internal/subproxy"
+	"rs8kvn_bot/internal/subserver"
 	"rs8kvn_bot/internal/web"
 	"rs8kvn_bot/internal/webhook"
 	"rs8kvn_bot/internal/xui"
@@ -79,7 +79,7 @@ func getVersion() string {
 // The function performs best-effort initialization for optional components (Sentry,
 // database, 3x-ui client, Telegram bot) so the service can start even if some
 // dependencies are unavailable. It also starts background maintenance tasks
-// (backups, heartbeat, trial cleanup, subscription proxy reload), marks the web
+// (backups, heartbeat, trial cleanup, Subscription server reload), marks the web
 // server readiness, and coordinates orderly shutdown of update handlers and
 // main is the entry point that initializes configuration and services, starts background
 // workers and the web server, processes Telegram updates with bounded concurrency, and
@@ -168,7 +168,7 @@ func main() {
 					zap.Error(convErr))
 			}
 		}
-		defaultSubURL := os.Getenv("DEFAULT_SOURCE_SUB_URL")
+		defaultSubURL := cfg.GlobalSubURL
 		if defaultSubURL == "" && xuiHost != "" {
 			defaultSubURL = strings.TrimRight(xuiHost, "/") + "/sub/"
 		}
@@ -288,15 +288,15 @@ func main() {
 	// Create subscription service (shared between bot handler and web server)
 	subService := service.NewSubscriptionService(dbService, xuiClients, sources, cfg, cfg.GlobalSubURL, webhookSender)
 
-	// Create subscription proxy service
-	subProxy := subproxy.NewService(cfg)
-	defer subProxy.Stop()
+	// Create Subscription server service
+	subServer := subserver.NewService(config.SubServerCacheTTL)
+	defer subServer.Stop()
 
 	// Create bot handler
 	handler := bot.NewHandler(botAPI, cfg, dbService, legacyXUIClient, botConfig, subService, getVersion())
 
 	// Initialize and start web server (health + trial pages)
-	webServer := web.NewServer(fmt.Sprintf(":%d", cfg.HealthCheckPort), dbService, cfg, botConfig, subService, subProxy)
+	webServer := web.NewServer(fmt.Sprintf(":%d", cfg.HealthCheckPort), dbService, cfg, botConfig, subService, subServer)
 	webServer.RegisterChecker("database", func(ctx context.Context) web.ComponentHealth {
 		if err := dbService.Ping(ctx); err != nil {
 			return web.ComponentHealth{Status: web.StatusDown, Message: err.Error()}
@@ -353,18 +353,11 @@ func main() {
 	handler.StartRateLimiterCleanup(ctx, bot.CacheTTL, bot.CacheTTL*2)
 	handler.StartReferralCacheSync(ctx)
 
-	// wg tracks exactly these 5 long-lived background workers.
+	// wg tracks exactly these 4 long-lived background workers.
 	// All of them must exit (via ctx cancellation) before main returns,
 	// so we wait on wg at the end of graceful shutdown.
 	var wg sync.WaitGroup
-	wg.Add(5)
-
-	// Start subscription proxy extra servers reload loop (every 5 minutes)
-	go func() {
-		defer recoverAndReport("SubProxy server reload")
-		defer wg.Done()
-		subProxy.StartReloadLoop(5*time.Minute, ctx.Done())
-	}()
+	wg.Add(4)
 
 	// Start orphaned XUI client reconciler (every 6 hours)
 	go func() {

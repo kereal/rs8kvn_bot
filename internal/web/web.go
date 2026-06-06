@@ -3,13 +3,16 @@ package web
 import (
 	"context"
 	"embed"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"html/template"
 	"net"
 	"net/http"
+	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -21,10 +24,11 @@ import (
 	"rs8kvn_bot/internal/logger"
 	"rs8kvn_bot/internal/metrics"
 	"rs8kvn_bot/internal/service"
-	"rs8kvn_bot/internal/subproxy"
+	"rs8kvn_bot/internal/subserver"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
+	"gorm.io/gorm"
 )
 
 //go:embed templates/*.html templates/logo.png
@@ -60,8 +64,7 @@ type Server struct {
 	cfg             *config.Config
 	botConfig       *bot.BotConfig
 	subService      *service.SubscriptionService
-	subProxy        *subproxy.Service
-	subFetchGroup   *SingleFlight
+	subServer       *subserver.Service
 	server          *http.Server
 	listenerAddr    string
 	mu              sync.RWMutex
@@ -73,7 +76,7 @@ type Server struct {
 	errorTemplate   *template.Template
 }
 
-func NewServer(addr string, db interfaces.DatabaseService, cfg *config.Config, botConfig *bot.BotConfig, subService *service.SubscriptionService, subProxy *subproxy.Service) *Server {
+func NewServer(addr string, db interfaces.DatabaseService, cfg *config.Config, botConfig *bot.BotConfig, subService *service.SubscriptionService, subServer *subserver.Service) *Server {
 	trialTmpl := template.Must(template.New("trial.html").Funcs(template.FuncMap{
 		"escape": func(s string) string {
 			var buf strings.Builder
@@ -90,8 +93,7 @@ func NewServer(addr string, db interfaces.DatabaseService, cfg *config.Config, b
 		cfg:             cfg,
 		botConfig:       botConfig,
 		subService:      subService,
-		subProxy:        subProxy,
-		subFetchGroup:   NewSingleFlight(),
+		subServer:       subServer,
 		checkers:        make(map[string]func(context.Context) ComponentHealth),
 		inviteCodeRegex: regexp.MustCompile(`^[a-zA-Z0-9_-]+$`),
 		startTime:       time.Now(),
@@ -112,9 +114,6 @@ func (s *Server) SetReady(ready bool) {
 	s.ready = ready
 }
 
-// Addr returns the server's actual listening address. Only valid after Start
-// has been called. When the server is configured with port :0, this returns
-// the OS-assigned port.
 func (s *Server) Addr() string {
 	if s.listenerAddr != "" {
 		return s.listenerAddr
@@ -131,15 +130,12 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/sub/", s.handleSubscription)
 	mux.HandleFunc("/static/logo.png", s.handleLogo)
 
-	// API routes with Bearer token auth
 	apiMux := http.NewServeMux()
 	apiMux.HandleFunc("/api/v1/subscriptions", s.GetSubscriptions)
 	mux.Handle("/api/v1/subscriptions", BearerAuthMiddleware(s.cfg.APIToken)(apiMux))
 
-	// Prometheus metrics endpoint
 	mux.Handle("/metrics", promhttp.Handler())
 
-	// Wrap with metrics middleware
 	instrumentedHandler := metrics.InstrumentHTTP(mux)
 
 	s.server = &http.Server{
@@ -151,7 +147,6 @@ func (s *Server) Start(ctx context.Context) error {
 		IdleTimeout:       60 * time.Second,
 	}
 
-	// Bind the port before starting the goroutine.
 	listener, err := net.Listen("tcp", s.addr)
 	if err != nil {
 		return fmt.Errorf("failed to bind %s: %w", s.addr, err)
@@ -270,13 +265,11 @@ func (s *Server) checkHealth(ctx context.Context) HealthResponse {
 func (s *Server) writeJSON(w http.ResponseWriter, resp HealthResponse) {
 	w.Header().Set("Content-Type", "application/json")
 
-	// Map health status to HTTP status code so that Kubernetes liveness
-	// probes correctly detect when the service is down.
 	switch resp.Status {
 	case string(StatusDown):
-		w.WriteHeader(http.StatusServiceUnavailable) // 503
+		w.WriteHeader(http.StatusServiceUnavailable)
 	default:
-		w.WriteHeader(http.StatusOK) // 200 for OK and Degraded
+		w.WriteHeader(http.StatusOK)
 	}
 
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
@@ -288,7 +281,6 @@ func (s *Server) handleInvite(w http.ResponseWriter, r *http.Request) {
 	s.HandleInvite(w, r)
 }
 
-// HandleInvite is the exported version of handleInvite for E2E testing.
 func (s *Server) HandleInvite(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", "GET")
@@ -439,27 +431,11 @@ type trialPageData struct {
 	TrialHours   int
 }
 
-func (s *Server) getSubproxyURL(ctx context.Context, subID string) (string, error) {
-	sources, err := s.db.ListSources(ctx)
-	if err != nil {
-		return "", fmt.Errorf("list sources: %w", err)
-	}
-	for _, src := range sources {
-		if !src.Active || src.SubURL == "" {
-			continue
-		}
-		return src.SubURL + subID, nil
-	}
-	return "", fmt.Errorf("no active source with sub_url found")
-}
-
 func (s *Server) renderTrialPage(w http.ResponseWriter, subID, subURL, telegramLink string, trialHours int) {
 	happLink := "happ://add/" + subURL
 	data := trialPageData{
-		//nolint:gosec // G203: happLink is constructed from internal subscription URL, safe
-		HappLink: template.URL(happLink),
-		SubURL:   subURL,
-		//nolint:gosec // G203: telegramLink is validated invite link from internal system
+		HappLink:     template.URL(happLink),
+		SubURL:       subURL,
 		TelegramLink: template.URL(telegramLink),
 		TrialHours:   trialHours,
 	}
@@ -480,9 +456,6 @@ func (s *Server) renderErrorPage(w http.ResponseWriter, message string) {
 }
 
 func getClientIP(r *http.Request) string {
-	// Only trust X-Forwarded-For if the connection comes from a local address
-	// (i.e., behind a reverse proxy like nginx/caddy). Direct connections cannot
-	// be trusted to set this header correctly.
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err == nil && isLocalAddress(host) {
 		forwarded := r.Header.Get("X-Forwarded-For")
@@ -523,170 +496,558 @@ func isLocalAddress(host string) bool {
 	return ip.IsLoopback()
 }
 
+// sourceHost returns the host part of a URL for logging (no path / subID).
+func sourceHost(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Host == "" {
+		return rawURL
+	}
+	return u.Host
+}
+
+// subIDRegex validates subscription IDs: alphanumeric, underscore, hyphen.
 var subIDRegex = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
-type subFetchResult struct {
-	body    []byte
-	headers map[string]string
-}
+// maxIPEntries limits the number of tracked IP addresses per subscription.
+const maxIPEntries = 100
 
-type subFetchError struct {
-	err      error
-	notFound bool
-}
-
-func (e *subFetchError) Error() string {
-	return e.err.Error()
-}
-
-func (e *subFetchError) Unwrap() error {
-	return e.err
-}
-
+// handleSubscription is the HTTP handler for GET /sub/{subID}.
+// It first checks the per-subID response cache (added in v2.3.0) and, on
+// hit, verifies the subscription is still active via a cheap status lookup
+// before replaying the cached body and headers. On miss it fetches the
+// subscription together with its plan and active sources from the database,
+// tracks the request device and IP, fetches each source URL, detects the
+// response format (JSON / Base64 / plain), converts JSON server configs to
+// share links, aggregates subscription-userinfo headers across sources,
+// caches the result, and writes the final response.
 func (s *Server) handleSubscription(w http.ResponseWriter, r *http.Request) {
+	// Only GET is allowed.
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", "GET")
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	if s.subProxy == nil {
+	// Subscription server must be initialized.
+	if s.subServer == nil {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(http.StatusServiceUnavailable)
-		w.Write([]byte("Subscription proxy is not available"))
+		w.Write([]byte("Subscription server is not available"))
 		return
 	}
 
+	// Extract and validate the subscription ID from the path.
 	path := r.URL.Path
 	if !strings.HasPrefix(path, "/sub/") {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(http.StatusNotFound)
-		w.Write([]byte("Not found"))
+		w.Write([]byte("Subscription not found"))
 		return
 	}
 
 	subID := path[5:]
 	if subID == "" || strings.Contains(subID, "/") || !subIDRegex.MatchString(subID) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte("Invalid subscription code"))
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte("Subscription not found"))
 		return
 	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 
-	if cachedBody, cachedHeaders, ok := s.subProxy.GetCache(subID); ok {
-		// Verify subscription is still active even on cache hit
-		sub, err := s.db.GetSubscriptionBySubscriptionID(ctx, subID)
-		if err != nil || !sub.IsActive() {
-			s.subProxy.InvalidateCache(subID)
-			if err != nil {
-				logger.Warn("Subscription not found in DB on cache hit", zap.String("sub_id", subID), zap.Error(err))
-			} else {
-				logger.Info("Cached subscription is no longer active", zap.String("sub_id", subID), zap.String("status", sub.Status))
+	// From this point on, log a debug trace of the request lifecycle.
+	start := time.Now()
+	clientIP := getClientIP(r)
+	logDebug := func(msg string, fields ...zap.Field) {
+		logger.Debug(msg, append([]zap.Field{zap.String("sub_id", subID), zap.String("client_ip", clientIP)}, fields...)...)
+	}
+	logger.Info("subscription request received",
+		zap.String("sub_id", subID),
+		zap.String("client_ip", clientIP),
+		zap.String("method", r.Method),
+		zap.String("path", r.URL.Path),
+	)
+
+	// Cache check: if we have a fresh cached response for this subID,
+	// verify the subscription is still active in the database and
+	// serve the cached body with cached headers directly. Since v2.3.0
+	// we use a cheap status+expiry lookup instead of the full JOIN.
+	if cachedBody, cachedHeaders, ok := s.subServer.GetCache(subID); ok {
+		status, expiryTime, err := s.db.GetSubscriptionStatus(ctx, subID)
+		if err != nil {
+			logDebug("cache status check failed, serving stale cache",
+				zap.Error(err),
+			)
+			for k, v := range cachedHeaders {
+				w.Header().Set(k, v)
 			}
+			w.Header().Del("Content-Length")
+			w.WriteHeader(http.StatusOK)
+			w.Write(cachedBody)
+			return
+		}
+		if status != "active" || (!expiryTime.IsZero() && time.Now().After(expiryTime)) {
+			s.subServer.InvalidateCache(subID)
+			logDebug("cache invalidated: subscription no longer active",
+				zap.String("status", status),
+				zap.Time("expiry_time", expiryTime),
+			)
 			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 			w.WriteHeader(http.StatusNotFound)
 			w.Write([]byte("Subscription not found"))
 			return
 		}
-		logger.Debug("Subscription proxy cache hit", zap.String("sub_id", subID))
-		s.writeSubscriptionResponse(w, cachedBody, cachedHeaders)
+		logDebug("cache hit, serving cached response",
+			zap.Int("body_size", len(cachedBody)),
+			zap.Int("cached_headers", len(cachedHeaders)),
+		)
+		for k, v := range cachedHeaders {
+			w.Header().Set(k, v)
+		}
+		w.Header().Del("Content-Length")
+		w.WriteHeader(http.StatusOK)
+		w.Write(cachedBody)
+		logDebug("response served from cache",
+			zap.Int("status", http.StatusOK),
+			zap.Int("body_size", len(cachedBody)),
+			zap.Duration("elapsed", time.Since(start)),
+		)
 		return
 	}
 
-	result, err := s.subFetchGroup.Do(ctx, subID, func(ctx context.Context) (interface{}, error) {
-		if cachedBody, cachedHeaders, ok := s.subProxy.GetCache(subID); ok {
-			return &subFetchResult{body: cachedBody, headers: cachedHeaders}, nil
-		}
+	logDebug("cache miss, fetching subscription")
 
-		sub, err := s.db.GetSubscriptionBySubscriptionID(ctx, subID)
-		if err != nil {
-			logger.Warn("Subscription not found in DB", zap.String("sub_id", subID), zap.Error(err))
-			return nil, &subFetchError{err: err, notFound: true}
-		}
-
-		if !sub.IsActive() {
-			logger.Info("Subscription is not active", zap.String("sub_id", subID), zap.String("status", sub.Status))
-			return nil, &subFetchError{err: nil, notFound: true}
-		}
-
-		subproxyURL, err := s.getSubproxyURL(ctx, subID)
-		if err != nil {
-			logger.Warn("Failed to build subproxy URL", zap.String("sub_id", subID), zap.Error(err))
-			return nil, nil
-		}
-
-		xuiResp, fetchErr := subproxy.FetchFromXUI(subproxyURL)
-		if fetchErr != nil {
-			logger.Warn("Failed to fetch from 3x-ui", zap.String("sub_id", subID), zap.Error(fetchErr))
-			if cachedBody, cachedHeaders, ok := s.subProxy.GetCache(subID); ok {
-				return &subFetchResult{body: cachedBody, headers: cachedHeaders}, nil
-			}
-			return nil, fetchErr
-		}
-
-		extraServers := s.subProxy.GetExtraServers()
-		extraHeaders := s.subProxy.GetExtraHeaders()
-		format := subproxy.DetectFormat(xuiResp.Body)
-		mergedBody := subproxy.MergeSubscriptions(xuiResp.Body, extraServers, format)
-
-		mergedHeaders := make(map[string]string, len(xuiResp.Headers)+len(extraHeaders))
-		for k, v := range xuiResp.Headers {
-			mergedHeaders[k] = v
-		}
-		for k, v := range extraHeaders {
-			mergedHeaders[k] = v
-		}
-
-		s.subProxy.SetCache(subID, mergedBody, mergedHeaders)
-
-		return &subFetchResult{body: mergedBody, headers: mergedHeaders}, nil
-	})
-
+	// Fetch the full subscription record (plan + active sources).
+	subFull, err := s.db.GetSubscriptionWithPlanAndSources(ctx, subID)
 	if err != nil {
-		var subErr *subFetchError
-		if errors.As(err, &subErr) && subErr.notFound {
-			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-			w.WriteHeader(http.StatusNotFound)
-			w.Write([]byte("Subscription not found"))
-			return
-		}
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-			w.WriteHeader(http.StatusGatewayTimeout)
-			w.Write([]byte("Request timeout"))
-			return
-		}
+		logDebug("subscription lookup failed", zap.Error(err))
+		logger.Warn("Failed to get subscription", zap.String("sub_id", subID), zap.Error(err))
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.WriteHeader(http.StatusBadGateway)
-		w.Write([]byte("Failed to fetch subscription"))
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			w.WriteHeader(http.StatusNotFound)
+		} else {
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+		w.Write([]byte("Subscription not found"))
 		return
 	}
 
-	if result == nil {
+	// Track device info and IP address for this request.
+	logDebug("subscription loaded from database",
+		zap.Uint("sub_pk", subFull.ID),
+		zap.String("status", subFull.Subscription.Status),
+		zap.Time("expiry_time", subFull.ExpiryTime),
+		zap.Int64("plan_traffic_limit", subFull.Plan.TrafficLimit),
+		zap.Int("sources_count", len(subFull.Sources)),
+	)
+
+	requestHeaders := filterHeaders(r.Header)
+	s.updateDevices(ctx, subFull, requestHeaders)
+	s.updateIPs(ctx, subFull, clientIP)
+
+	// Aggregate results across all active sources.
+	var allItems []string
+	var allJSONConfigs []json.RawMessage
+	var firstExpire string
+	var totalUpload, totalDownload int64
+	allJSON := true
+	var firstSourceHeaders map[string]string
+
+	// Track partial source failures for observability.
+	var failedSources int
+
+	for _, src := range subFull.Sources {
+		// Skip sources without a subscription URL.
+		if src.SubURL == "" {
+			logDebug("skipping source without sub_url", zap.String("source", src.Name))
+			continue
+		}
+
+		srcSubURL := src.SubURL
+		if srcSubURL != "" && !strings.HasSuffix(srcSubURL, "/") {
+			srcSubURL += "/"
+		}
+		sourceURL := srcSubURL + subID
+		logDebug("fetching from source",
+			zap.String("source", src.Name),
+			zap.String("url_host", sourceHost(sourceURL)),
+		)
+
+		body, xuiHeaders, err := s.fetchSource(sourceURL)
+		if err != nil {
+			logger.Warn("Failed to fetch from source", zap.String("source", src.Name), zap.Error(err))
+			logDebug("source fetch failed",
+				zap.String("source", src.Name),
+				zap.Error(err),
+			)
+			failedSources++
+			continue
+		}
+
+		format := subserver.DetectFormat(body)
+		logDebug("source response received",
+			zap.String("source", src.Name),
+			zap.String("format", format.String()),
+			zap.Int("body_size", len(body)),
+			zap.Int("headers_count", len(xuiHeaders)),
+			zap.Int64("upload", parseUserInfoValue(xuiHeaders, "upload")),
+			zap.Int64("download", parseUserInfoValue(xuiHeaders, "download")),
+		)
+
+		// Aggregate subscription-userinfo: pick the earliest expire.
+		if xuiHeaders != nil {
+			if firstSourceHeaders == nil {
+				firstSourceHeaders = xuiHeaders
+			}
+			if expireVal, ok := xuiHeaders["subscription-userinfo"]; ok {
+				expire := parseExpireFromUserInfo(expireVal)
+				if expire != "" && (firstExpire == "" || expire < firstExpire) {
+					firstExpire = expire
+				}
+			}
+		}
+
+		// Sum upload/download across all sources.
+		totalUpload += parseUserInfoValue(xuiHeaders, "upload")
+		totalDownload += parseUserInfoValue(xuiHeaders, "download")
+
+		switch format {
+		case subserver.FormatJSON:
+			// JSON configs are kept as raw messages for pure-JSON output
+			// or converted to share links in mixed mode.
+			configs, parseErr := subserver.ExtractJSONConfigs(body)
+			if parseErr != nil {
+				logger.Warn("Failed to parse JSON configs",
+					zap.String("source", src.Name),
+					zap.Error(parseErr))
+				allJSON = false
+				continue
+			}
+			allJSONConfigs = append(allJSONConfigs, configs...)
+		case subserver.FormatBase64:
+			allJSON = false
+			decoded, decErr := base64.StdEncoding.DecodeString(strings.TrimSpace(string(body)))
+			if decErr != nil {
+				allItems = append(allItems, strings.TrimSpace(string(body)))
+			} else {
+				allItems = append(allItems, strings.TrimSpace(string(decoded)))
+			}
+		case subserver.FormatPlain:
+			allJSON = false
+			lines := strings.Split(string(body), "\n")
+			for _, line := range lines {
+				line = strings.TrimSpace(line)
+				if line != "" {
+					allItems = append(allItems, line)
+				}
+			}
+		}
+	}
+
+	if failedSources > 0 && len(allItems)+len(allJSONConfigs) > 0 {
+		metrics.SubserverPartialSourcesTotal.WithLabelValues(subID).Inc()
+	}
+
+	// Build the aggregated Subscription-UserInfo header.
+	userInfo := buildUserInfoHeader(totalUpload, totalDownload, subFull.Plan.TrafficLimit, firstExpire)
+
+	logDebug("sources aggregated",
+		zap.Int("sources_with_suburl", len(subFull.Sources)),
+		zap.Int("json_configs", len(allJSONConfigs)),
+		zap.Int("plain_items", len(allItems)),
+		zap.Bool("pure_json", allJSON),
+		zap.Int64("total_upload", totalUpload),
+		zap.Int64("total_download", totalDownload),
+		zap.String("first_expire", firstExpire),
+	)
+
+	// If we are in mixed mode (some sources returned non-JSON),
+	// convert any collected JSON configs to share links and merge into allItems.
+	if !allJSON && len(allJSONConfigs) > 0 {
+		for _, rawConfig := range allJSONConfigs {
+			link, convErr := subserver.ConvertSingleJSONToLink(rawConfig)
+			if convErr != nil {
+				logger.Debug("Failed to convert JSON config to share link", zap.Error(convErr))
+				continue
+			}
+			allItems = append(allItems, link)
+		}
+	}
+
+	// Pure-JSON output: marshal all raw configs into a JSON array response.
+	if allJSON && len(allJSONConfigs) > 0 {
+		responseBody, _ := json.Marshal(allJSONConfigs)
+		cacheHeaders := responseHeaders(firstSourceHeaders, "application/json; charset=utf-8", userInfo)
+		s.subServer.SetCache(subID, responseBody, cacheHeaders)
+		applySourceHeaders(w.Header(), firstSourceHeaders)
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.Header().Set("Subscription-UserInfo", userInfo)
+		w.WriteHeader(http.StatusOK)
+		w.Write(responseBody)
+		logDebug("response served (pure JSON)",
+			zap.String("mode", "json"),
+			zap.Int("status", http.StatusOK),
+			zap.Int("body_size", len(responseBody)),
+			zap.Int("cached_headers", len(cacheHeaders)),
+			zap.Duration("elapsed", time.Since(start)),
+		)
+		return
+	}
+
+	// No servers collected from any source.
+	if len(allItems) == 0 {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(http.StatusNotFound)
-		w.Write([]byte("Subscription URL not available"))
+		w.Write([]byte("Subscription not found"))
+		logDebug("response served (no items)",
+			zap.String("mode", "empty"),
+			zap.Int("status", http.StatusNotFound),
+			zap.Duration("elapsed", time.Since(start)),
+		)
 		return
 	}
 
-	res := result.(*subFetchResult)
-	logger.Info("Subscription proxy served",
-		zap.String("sub_id", subID),
-		zap.Int("extra_servers", len(s.subProxy.GetExtraServers())),
-		zap.Int("body_size", len(res.body)))
+	// Mixed or plain-text output: join all share links and encode to base64.
+	var responseBody []byte
 
-	s.writeSubscriptionResponse(w, res.body, res.headers)
+	combined := strings.Join(allItems, "\n")
+	responseBody = []byte(base64.StdEncoding.EncodeToString([]byte(combined)))
+
+	ct := "text/plain; charset=utf-8; profile=base64"
+	cacheHeaders := responseHeaders(firstSourceHeaders, ct, userInfo)
+	s.subServer.SetCache(subID, responseBody, cacheHeaders)
+
+	s.writeSubscriptionResponse(w, responseBody, userInfo, firstSourceHeaders)
+	logDebug("response served (base64)",
+		zap.String("mode", "base64"),
+		zap.Int("status", http.StatusOK),
+		zap.Int("body_size", len(responseBody)),
+		zap.Int("raw_items", len(allItems)),
+		zap.Int("cached_headers", len(cacheHeaders)),
+		zap.Duration("elapsed", time.Since(start)),
+	)
 }
 
-func (s *Server) writeSubscriptionResponse(w http.ResponseWriter, body []byte, headers map[string]string) {
-	for key, value := range headers {
-		w.Header().Set(key, value)
+// fetchSource retrieves a subscription response from a source URL via HTTP GET.
+func (s *Server) fetchSource(sourceURL string) ([]byte, map[string]string, error) {
+	xuiResp, err := subserver.FetchFromXUI(sourceURL)
+	if err != nil {
+		return nil, nil, err
 	}
-	// Remove Content-Length since body size changed after merge.
-	// Go's http.ResponseWriter will use chunked encoding automatically.
+
+	body := xuiResp.Body
+	headers := xuiResp.Headers
+
+	if headers == nil {
+		headers = make(map[string]string)
+	}
+
+	return body, headers, nil
+}
+
+// filterHeaders extracts request headers into a lowercased map, excluding
+// X-Forwarded-Proto, X-Forwarded-For, and X-Real-Ip. Values are also lowercased.
+func filterHeaders(h http.Header) map[string]string {
+	result := make(map[string]string)
+	excluded := map[string]bool{
+		"x-forwarded-proto": true,
+		"x-forwarded-for":   true,
+		"x-real-ip":         true,
+	}
+
+	for key, values := range h {
+		lowerKey := strings.ToLower(key)
+		if excluded[lowerKey] {
+			continue
+		}
+		if len(values) > 0 {
+			result[lowerKey] = strings.ToLower(values[0])
+		}
+	}
+	return result
+}
+
+// updateDevices records the current request headers as a device entry in the
+// subscription's Devices JSON field. Each entry includes a "timestamp" key
+// (UTC RFC3339) marking when the device was last seen. If an existing entry
+// has the same x-hwid value it is replaced (rotated to the end). The updated
+// list is persisted to DB.
+func (s *Server) updateDevices(ctx context.Context, subFull *database.SubscriptionFull, headers map[string]string) {
+	devices, err := subFull.GetDevices()
+	if err != nil {
+		logger.Warn("Failed to parse devices JSON", zap.Error(err))
+		devices = []map[string]string{}
+	}
+
+	currentHWID := headers["x-hwid"]
+	nowStr := time.Now().UTC().Format(time.RFC3339)
+
+	for i, dev := range devices {
+		if dev["x-hwid"] == currentHWID {
+			devices = append(devices[:i], devices[i+1:]...)
+			break
+		}
+	}
+
+	entry := make(map[string]string, len(headers)+1)
+	for k, v := range headers {
+		entry[k] = v
+	}
+	entry["timestamp"] = nowStr
+	devices = append(devices, entry)
+
+	if err := subFull.SetDevices(devices); err != nil {
+		logger.Warn("Failed to set devices", zap.Error(err))
+		return
+	}
+
+	if err := s.db.UpdateSubscriptionDevices(ctx, subFull.ID, subFull.Devices); err != nil {
+		logger.Warn("Failed to save devices", zap.Error(err))
+	}
+}
+
+// updateIPs records the current client IP with a UTC timestamp in the
+// subscription's Ips JSON field. Duplicate IPs are rotated to the end.
+// The list is capped at maxIPEntries (oldest entries are dropped).
+func (s *Server) updateIPs(ctx context.Context, subFull *database.SubscriptionFull, ip string) {
+	ips, err := subFull.GetIPs()
+	if err != nil {
+		logger.Warn("Failed to parse ips JSON", zap.Error(err))
+		ips = []map[string]string{}
+	}
+
+	nowStr := time.Now().UTC().Format(time.RFC3339)
+
+	for i, entry := range ips {
+		if _, exists := entry[ip]; exists {
+			ips = append(ips[:i], ips[i+1:]...)
+			break
+		}
+	}
+
+	newEntry := map[string]string{ip: nowStr}
+	ips = append(ips, newEntry)
+
+	if len(ips) > maxIPEntries {
+		ips = ips[len(ips)-maxIPEntries:]
+	}
+
+	if err := subFull.SetIPs(ips); err != nil {
+		logger.Warn("Failed to set IPs", zap.Error(err))
+		return
+	}
+
+	if err := s.db.UpdateSubscriptionIPs(ctx, subFull.ID, subFull.Ips); err != nil {
+		logger.Warn("Failed to save IPs", zap.Error(err))
+	}
+}
+
+// parseUserInfoValue extracts a numeric value (upload/download/total) from a
+// subscription-userinfo header string (format: "key=N; key2=N2").
+func parseUserInfoValue(headers map[string]string, key string) int64 {
+	if headers == nil {
+		return 0
+	}
+	userInfo, ok := headers["subscription-userinfo"]
+	if !ok {
+		return 0
+	}
+	prefix := key + "="
+	parts := strings.Split(userInfo, ";")
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if strings.HasPrefix(part, prefix) {
+			val := strings.TrimPrefix(part, prefix)
+			n, err := strconv.ParseInt(val, 10, 64)
+			if err != nil {
+				return 0
+			}
+			return n
+		}
+	}
+	return 0
+}
+
+// parseExpireFromUserInfo extracts the "expire=" value from a subscription-userinfo header string.
+func parseExpireFromUserInfo(userInfo string) string {
+	parts := strings.Split(userInfo, ";")
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if strings.HasPrefix(part, "expire=") {
+			return strings.TrimPrefix(part, "expire=")
+		}
+	}
+	return ""
+}
+
+// buildUserInfoHeader constructs a subscription-userinfo header value from
+// aggregated upload/download/total bytes and an optional expire timestamp.
+func buildUserInfoHeader(upload, download, total int64, expire string) string {
+	parts := []string{
+		"upload=" + strconv.FormatInt(upload, 10),
+		"download=" + strconv.FormatInt(download, 10),
+		"total=" + strconv.FormatInt(total, 10),
+	}
+	if expire != "" {
+		parts = append(parts, "expire="+expire)
+	}
+	return strings.Join(parts, "; ")
+}
+
+// skipTransportHeader returns true for headers that should NOT be forwarded
+// from the upstream (3x-ui) response to the subscription client.
+func skipTransportHeader(key string) bool {
+	switch strings.ToLower(key) {
+	case "content-length", "content-type", "content-encoding",
+		"transfer-encoding", "connection", "date", "server",
+		"alt-svc", "trailer", "subscription-userinfo":
+		return true
+	default:
+		return false
+	}
+}
+
+// applySourceHeaders copies non-transport headers from the first source's
+// response into the target http.Header. Our Content-Type and Subscription-UserInfo
+// are set separately afterwards to overwrite any upstream values.
+func applySourceHeaders(target http.Header, source map[string]string) {
+	if source == nil {
+		return
+	}
+	for k, v := range source {
+		if !skipTransportHeader(k) {
+			target.Set(k, v)
+		}
+	}
+}
+
+// responseHeaders builds the full set of response headers to cache alongside the body.
+// It collects forwarded source headers (profile-title, routing-*, etc.) via
+// applySourceHeaders and adds the Content-Type and Subscription-UserInfo headers
+// that must be present on every cached response.
+func responseHeaders(sourceHeaders map[string]string, contentType, userInfo string) map[string]string {
+	h := http.Header{}
+	applySourceHeaders(h, sourceHeaders)
+	out := make(map[string]string, len(h)+2)
+	for k, v := range h {
+		out[k] = v[0]
+	}
+	out["content-type"] = contentType
+	out["subscription-userinfo"] = userInfo
+	return out
+}
+
+// writeSubscriptionResponse writes the final subscription response.
+// It sets Content-Type to text/plain with base64 profile, Subscription-UserInfo
+// header, and removes Content-Length since body size may vary after aggregation.
+// Go's http.ResponseWriter will use chunked encoding automatically.
+// Source headers from the first source (profile-title, profile-update-interval, etc.)
+// are copied over, while our Content-Type and Subscription-UserInfo overwrite them.
+func (s *Server) writeSubscriptionResponse(w http.ResponseWriter, body []byte, userInfo string, sourceHeaders map[string]string) {
+	applySourceHeaders(w.Header(), sourceHeaders)
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8; profile=base64")
+	w.Header().Set("Subscription-UserInfo", userInfo)
 	w.Header().Del("Content-Length")
 	w.WriteHeader(http.StatusOK)
 	w.Write(body)
