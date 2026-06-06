@@ -198,7 +198,7 @@ vless://uuid@backup2.com:443?security=reality&ps=Backup+2&...                   
 
 **Headers added:**
 - `X-Subscription-Proxy: rs8kvn_bot`
-- Any custom headers from `extra_servers.txt` (if enabled)
+- Forwarded headers from the first source (profile-title, profile-update-interval, routing-*)
 
 **Cache:** 240 seconds (4 minutes) — subsequent requests served from memory.
 

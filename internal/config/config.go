@@ -3,7 +3,6 @@ package config
 import (
 	"fmt"
 	"net/url"
-	"strconv"
 	"strings"
 
 	flag "rs8kvn_bot/internal/flag"
@@ -59,9 +58,7 @@ type Config struct {
 	DonateURL        string
 
 	// Subscription server configuration
-	GlobalSubURL           string
-	SubExtraServersEnabled bool
-	SubExtraServersFile    string
+	GlobalSubURL string
 
 	// Sources configuration
 	Sources []Source
@@ -92,8 +89,6 @@ type configFlags struct {
 	donateCardNumber          *flag.StringValue
 	donateURL                 *flag.StringValue
 	globalSubURL              *flag.StringValue
-	subExtraServersEnabled    *flag.StringValue
-	subExtraServersFile       *flag.StringValue
 	apiToken                  *flag.StringValue
 	proxyManagerWebhookSecret *flag.StringValue
 	proxyManagerWebhookURL    *flag.StringValue
@@ -122,8 +117,6 @@ func registerFlags() (*flag.Registry, *configFlags) {
 		donateCardNumber:          flag.NewString(DonateCardNumber),
 		donateURL:                 flag.NewString(DonateURL),
 		globalSubURL:              flag.NewString(""),
-		subExtraServersEnabled:    flag.NewString("true"),
-		subExtraServersFile:       flag.NewString(""),
 		apiToken:                  flag.NewString(""),
 		proxyManagerWebhookSecret: flag.NewString(""),
 		proxyManagerWebhookURL:    flag.NewString(""),
@@ -145,8 +138,6 @@ func registerFlags() (*flag.Registry, *configFlags) {
 	r.Register("CONTACT_USERNAME", f.contactUsername)
 	r.Register("DONATE_CARD_NUMBER", f.donateCardNumber)
 	r.Register("DONATE_URL", f.donateURL)
-	r.Register("SUB_EXTRA_SERVERS_ENABLED", f.subExtraServersEnabled)
-	r.Register("SUB_EXTRA_SERVERS_FILE", f.subExtraServersFile)
 	r.Register("API_TOKEN", f.apiToken)
 	r.Register("PROXY_MANAGER_WEBHOOK_SECRET", f.proxyManagerWebhookSecret)
 	r.Register("PROXY_MANAGER_WEBHOOK_URL", f.proxyManagerWebhookURL)
@@ -162,11 +153,6 @@ func Load() (*Config, error) {
 
 	if err := r.LoadEnv(); err != nil {
 		return nil, fmt.Errorf("failed to load configuration: %w", err)
-	}
-
-	subExtraServersEnabled, err := strconv.ParseBool(strings.TrimSpace(f.subExtraServersEnabled.Get()))
-	if err != nil {
-		return nil, fmt.Errorf("invalid SUB_EXTRA_SERVERS_ENABLED: %w", err)
 	}
 
 	cfg := &Config{
@@ -186,8 +172,6 @@ func Load() (*Config, error) {
 		DonateCardNumber:          f.donateCardNumber.Get(),
 		DonateURL:                 f.donateURL.Get(),
 		GlobalSubURL:              f.globalSubURL.Get(),
-		SubExtraServersEnabled:    subExtraServersEnabled,
-		SubExtraServersFile:       f.subExtraServersFile.Get(),
 		APIToken:                  f.apiToken.Get(),
 		ProxyManagerWebhookSecret: f.proxyManagerWebhookSecret.Get(),
 		ProxyManagerWebhookURL:    f.proxyManagerWebhookURL.Get(),
@@ -274,15 +258,6 @@ func (c *Config) validate() error {
 		return fmt.Errorf("TRIAL_RATE_LIMIT must be between 1 and 100")
 	}
 
-
-	// SubExtraServersFile validation (only if file provided)
-	if c.SubExtraServersFile != "" {
-		// Path traversal protection
-		if strings.Contains(c.SubExtraServersFile, "..") {
-			return fmt.Errorf("SUB_EXTRA_SERVERS_FILE cannot contain '..' (path traversal)")
-		}
-	}
-
 	// Sources validation (validate individual source fields if sources are configured)
 	for i, src := range c.Sources {
 		if src.XUIHost == "" {
@@ -331,8 +306,6 @@ func (c *Config) String() string {
 		"HeartbeatInterval=%d, "+
 		"GlobalSubURL=%s, "+
 		"SentryDSN=***, "+
-		"SubExtraServersEnabled=%v, "+
-		"SubExtraServersFile=%s, "+
 		"}",
 		c.TelegramAdminID,
 		c.DatabasePath,
@@ -341,8 +314,6 @@ func (c *Config) String() string {
 		maskURL(c.HeartbeatURL),
 		c.HeartbeatInterval,
 		maskURL(c.GlobalSubURL),
-		c.SubExtraServersEnabled,
-		c.SubExtraServersFile,
 	)
 }
 

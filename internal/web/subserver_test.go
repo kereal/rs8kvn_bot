@@ -10,6 +10,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -353,6 +354,9 @@ func TestHandleSubscription_CacheSubscriptionResult(t *testing.T) {
 			},
 		}, nil
 	}
+	db.GetSubscriptionStatusFunc = func(ctx context.Context, _ string) (string, time.Time, error) {
+		return "active", time.Time{}, nil
+	}
 	srv := testServer(t, db, &config.Config{})
 
 	w1 := httptest.NewRecorder()
@@ -365,7 +369,7 @@ func TestHandleSubscription_CacheSubscriptionResult(t *testing.T) {
 	srv.handleSubscription(w2, r2)
 	assert.Equal(t, http.StatusOK, w2.Code)
 
-	assert.Equal(t, 1, callCount, "backend should only be called once (cached per source URL)")
+	assert.Equal(t, 1, callCount, "second request served from per-subID cache")
 }
 
 func TestHandleSubscription_DevicesTracking(t *testing.T) {
@@ -408,6 +412,8 @@ func TestHandleSubscription_DevicesTracking(t *testing.T) {
 	require.Len(t, devices, 1)
 	assert.Equal(t, "device1", devices[0]["x-hwid"])
 	assert.Equal(t, "v2rayn/1.0", devices[0]["user-agent"])
+	_, err = time.Parse(time.RFC3339, devices[0]["timestamp"])
+	assert.NoError(t, err, "timestamp should be RFC3339")
 }
 
 func TestHandleSubscription_SourceWithoutSubURL(t *testing.T) {

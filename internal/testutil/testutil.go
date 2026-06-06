@@ -100,6 +100,7 @@ type MockDatabaseService struct {
 	CleanupExpiredTrialsFunc            func(ctx context.Context, hours int) ([]database.Subscription, error)
 	GetPoolStatsFunc                    func() (*database.PoolStats, error)
 	GetSubscriptionWithPlanAndSourcesFunc func(ctx context.Context, subscriptionID string) (*database.SubscriptionFull, error)
+	GetSubscriptionStatusFunc                func(ctx context.Context, subscriptionID string) (string, time.Time, error)
 	UpdateSubscriptionDevicesFunc          func(ctx context.Context, id uint, devicesJSON string) error
 	UpdateSubscriptionIPsFunc              func(ctx context.Context, id uint, ipsJSON string) error
 }
@@ -535,6 +536,13 @@ func (m *MockDatabaseService) GetSubscriptionWithPlanAndSources(ctx context.Cont
 		return m.GetSubscriptionWithPlanAndSourcesFunc(ctx, subscriptionID)
 	}
 	return nil, gorm.ErrRecordNotFound
+}
+
+func (m *MockDatabaseService) GetSubscriptionStatus(ctx context.Context, subscriptionID string) (string, time.Time, error) {
+	if m.GetSubscriptionStatusFunc != nil {
+		return m.GetSubscriptionStatusFunc(ctx, subscriptionID)
+	}
+	return "", time.Time{}, gorm.ErrRecordNotFound
 }
 
 func (m *MockDatabaseService) UpdateSubscriptionDevices(ctx context.Context, id uint, devicesJSON string) error {

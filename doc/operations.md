@@ -56,7 +56,6 @@ go run ./cmd/bot
 | `.env` | Environment variables (secrets) |
 | `data/tgvpn.db` | SQLite database |
 | `data/bot.log` | Application logs (rotated) |
-| `data/extra_servers.txt` | Extra subscription servers (optional) |
 | `internal/database/migrations/` | DB migration SQL files |
 
 ---

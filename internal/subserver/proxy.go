@@ -85,6 +85,20 @@ const (
 	FormatPlain
 )
 
+// String returns the human-readable name of the format.
+func (f Format) String() string {
+	switch f {
+	case FormatJSON:
+		return "json"
+	case FormatBase64:
+		return "base64"
+	case FormatPlain:
+		return "plain"
+	default:
+		return "unknown"
+	}
+}
+
 // DetectFormat examines body and returns its format: JSON, Base64, Plain, or Unknown.
 func DetectFormat(body []byte) Format {
 	trimmed := strings.TrimSpace(string(body))

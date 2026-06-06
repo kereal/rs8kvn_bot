@@ -37,6 +37,7 @@ type SubscriptionRepository interface {
 	GetTotalTelegramIDCount(ctx context.Context) (int64, error)
 	GetSubscriptionBySubscriptionID(ctx context.Context, subscriptionID string) (*database.Subscription, error)
 	GetSubscriptionWithPlanAndSources(ctx context.Context, subscriptionID string) (*database.SubscriptionFull, error)
+	GetSubscriptionStatus(ctx context.Context, subscriptionID string) (string, time.Time, error)
 	UpdateSubscriptionDevices(ctx context.Context, id uint, devicesJSON string) error
 	UpdateSubscriptionIPs(ctx context.Context, id uint, ipsJSON string) error
 }
