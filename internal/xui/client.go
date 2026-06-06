@@ -570,7 +570,7 @@ func RetryWithBackoff(ctx context.Context, maxRetries int, initialDelay time.Dur
 		}
 
 		if !isRetryable(err) {
-			logger.Warn("Non-retryable XUI error, failing immediately",
+			logger.Error("Non-retryable XUI error, failing immediately",
 				zap.Error(err))
 			return err
 		}
@@ -592,7 +592,7 @@ func RetryWithBackoff(ctx context.Context, maxRetries int, initialDelay time.Dur
 		}
 	}
 
-	logger.Warn("XUI operation failed after retries",
+	logger.Error("XUI operation failed after retries",
 		zap.Int("retries", maxRetries),
 		zap.Error(lastErr))
 

@@ -38,6 +38,9 @@ type XUIResponse struct {
 func FetchFromXUI(url string) (*XUIResponse, error) {
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
+		logger.Error("Failed to create HTTP request for XUI fetch",
+			zap.String("url", url),
+			zap.Error(err))
 		return nil, err
 	}
 
@@ -45,18 +48,26 @@ func FetchFromXUI(url string) (*XUIResponse, error) {
 
 	resp, err := proxyHTTPClient.Do(req)
 	if err != nil {
+		logger.Error("XUI fetch request failed",
+			zap.String("url", url),
+			zap.Error(err))
 		return nil, err
 	}
 	if resp != nil && resp.Body != nil {
 		defer func() {
 			if closeErr := resp.Body.Close(); closeErr != nil {
-				logger.Debug("Failed to close response body", zap.Error(closeErr))
+				logger.Error("Failed to close XUI response body",
+					zap.String("url", url),
+					zap.Error(closeErr))
 			}
 		}()
 	}
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 10<<20))
 	if err != nil {
+		logger.Error("Failed to read XUI response body",
+			zap.String("url", url),
+			zap.Error(err))
 		return nil, err
 	}
 
