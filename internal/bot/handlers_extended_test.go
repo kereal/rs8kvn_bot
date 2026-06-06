@@ -421,6 +421,8 @@ func TestAddAdminButtons_Scenarios(t *testing.T) {
 	t.Parallel()
 
 	t.Run("adds buttons for admin", func(t *testing.T) {
+		t.Parallel()
+
 		cfg := &config.Config{TelegramAdminID: 123456}
 		h := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, cfg.DonateCardNumber, cfg.DonateURL, cfg.SiteURL)}
 
@@ -437,6 +439,8 @@ func TestAddAdminButtons_Scenarios(t *testing.T) {
 	})
 
 	t.Run("does not add buttons for non-admin", func(t *testing.T) {
+		t.Parallel()
+
 		cfg := &config.Config{TelegramAdminID: 123456}
 		h := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, cfg.DonateCardNumber, cfg.DonateURL, cfg.SiteURL)}
 
@@ -453,6 +457,8 @@ func TestAddAdminButtons_Scenarios(t *testing.T) {
 	})
 
 	t.Run("does not add buttons when admin ID is zero", func(t *testing.T) {
+		t.Parallel()
+
 		cfg := &config.Config{TelegramAdminID: 0}
 		h := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, cfg.DonateCardNumber, cfg.DonateURL, cfg.SiteURL)}
 

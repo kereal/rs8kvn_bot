@@ -72,6 +72,14 @@ func (h *Handler) handleMenuHelp(ctx context.Context, chatID int64, username str
 		h.safeSend(editMsg)
 		return nil
 	}
+	if sub == nil {
+		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "❌ У вас нет активной подписки.\n\nНажмите «Получить подписку» для создания.")
+		editMsg.DisableWebPagePreview = true
+		keyboard := h.getBackKeyboard()
+		editMsg.ReplyMarkup = &keyboard
+		h.safeSend(editMsg)
+		return nil
+	}
 
 	trafficLimit := 0
 	if h.subscriptionService != nil {
