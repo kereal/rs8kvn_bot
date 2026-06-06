@@ -7,6 +7,10 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+
+	"rs8kvn_bot/internal/logger"
+
+	"go.uber.org/zap"
 )
 
 // validSchemes lists all proxy URI schemes recognised by isValidServer.
@@ -78,6 +82,9 @@ type serverConfig struct {
 func toServerConfig(raw json.RawMessage) (*serverConfig, error) {
 	var cfg serverConfig
 	if err := json.Unmarshal(raw, &cfg); err != nil {
+		logger.Error("Failed to parse server config JSON",
+			zap.Error(err),
+			zap.String("raw_preview", truncateString(string(raw), 200)))
 		return nil, err
 	}
 	if cfg.Address == "" {
@@ -101,6 +108,9 @@ func toServerConfig(raw json.RawMessage) (*serverConfig, error) {
 func ConvertJSONToShareLinks(body []byte) ([]string, error) {
 	var raw interface{}
 	if err := json.Unmarshal(body, &raw); err != nil {
+		logger.Error("Failed to unmarshal subscription JSON",
+			zap.Error(err),
+			zap.String("body_preview", truncateString(string(body), 200)))
 		return nil, fmt.Errorf("invalid JSON: %w", err)
 	}
 
@@ -110,6 +120,9 @@ func ConvertJSONToShareLinks(body []byte) ([]string, error) {
 		for _, item := range v {
 			rawItem, err := json.Marshal(item)
 			if err != nil {
+				logger.Error("Failed to marshal JSON array item",
+					zap.Error(err),
+					zap.String("item_preview", truncateString(fmt.Sprintf("%v", item), 200)))
 				return nil, fmt.Errorf("marshal JSON array item: %w", err)
 			}
 			items = append(items, rawItem)
@@ -117,10 +130,16 @@ func ConvertJSONToShareLinks(body []byte) ([]string, error) {
 	case map[string]interface{}:
 		rawMarshalled, err := json.Marshal(v)
 		if err != nil {
+			logger.Error("Failed to marshal JSON object",
+				zap.Error(err),
+				zap.String("object_preview", truncateString(fmt.Sprintf("%v", v), 200)))
 			return nil, fmt.Errorf("marshal JSON object: %w", err)
 		}
 		items = append(items, rawMarshalled)
 	default:
+		logger.Error("Unexpected JSON type in subscription body",
+			zap.String("type", fmt.Sprintf("%T", raw)),
+			zap.String("body_preview", truncateString(string(body), 200)))
 		return nil, fmt.Errorf("unexpected JSON type: %T", raw)
 	}
 
@@ -141,6 +160,9 @@ func ConvertJSONToShareLinks(body []byte) ([]string, error) {
 func ExtractJSONConfigs(body []byte) ([]json.RawMessage, error) {
 	var raw interface{}
 	if err := json.Unmarshal(body, &raw); err != nil {
+		logger.Error("Failed to unmarshal subscription JSON for config extraction",
+			zap.Error(err),
+			zap.String("body_preview", truncateString(string(body), 200)))
 		return nil, fmt.Errorf("invalid JSON: %w", err)
 	}
 
@@ -150,6 +172,9 @@ func ExtractJSONConfigs(body []byte) ([]json.RawMessage, error) {
 		for _, item := range v {
 			rawItem, err := json.Marshal(item)
 			if err != nil {
+				logger.Error("Failed to marshal JSON array item for config extraction",
+					zap.Error(err),
+					zap.String("item_preview", truncateString(fmt.Sprintf("%v", item), 200)))
 				return nil, fmt.Errorf("marshal JSON array item: %w", err)
 			}
 			items = append(items, rawItem)
@@ -157,10 +182,16 @@ func ExtractJSONConfigs(body []byte) ([]json.RawMessage, error) {
 	case map[string]interface{}:
 		rawMarshalled, err := json.Marshal(v)
 		if err != nil {
+			logger.Error("Failed to marshal JSON object for config extraction",
+				zap.Error(err),
+				zap.String("object_preview", truncateString(fmt.Sprintf("%v", v), 200)))
 			return nil, fmt.Errorf("marshal JSON object: %w", err)
 		}
 		items = append(items, rawMarshalled)
 	default:
+		logger.Error("Unexpected JSON type in subscription body for config extraction",
+			zap.String("type", fmt.Sprintf("%T", raw)),
+			zap.String("body_preview", truncateString(string(body), 200)))
 		return nil, fmt.Errorf("unexpected JSON type: %T", raw)
 	}
 	return items, nil
@@ -171,7 +202,10 @@ func ExtractJSONConfigs(body []byte) ([]json.RawMessage, error) {
 func ConvertSingleJSONToLink(raw json.RawMessage) (string, error) {
 	cfg, err := toServerConfig(raw)
 	if err != nil {
-		return "", fmt.Errorf("parse config: %w", err)
+		logger.Error("Failed to convert JSON config to share link",
+			zap.Error(err),
+			zap.String("raw_preview", truncateString(string(raw), 200)))
+		return "", err
 	}
 
 	switch strings.ToLower(cfg.Type) {
@@ -465,4 +499,11 @@ func buildTUICServerLink(cfg *serverConfig) (string, error) {
 	}
 	base += "#" + url.QueryEscape(remark)
 	return base, nil
+}
+
+func truncateString(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
 }

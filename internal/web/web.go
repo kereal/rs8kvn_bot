@@ -308,7 +308,10 @@ func (s *Server) HandleInvite(w http.ResponseWriter, r *http.Request) {
 
 	invite, err := s.db.GetInviteByCode(ctx, code)
 	if err != nil {
-		logger.Warn("Invite not found", zap.String("code", code), zap.Error(err))
+		logger.Error("Invite not found",
+			zap.String("code", code),
+			zap.String("client_ip", getClientIP(r)),
+			zap.Error(err))
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusNotFound)
 		s.renderErrorPage(w, "Приглашение не найдено")
@@ -317,7 +320,12 @@ func (s *Server) HandleInvite(w http.ResponseWriter, r *http.Request) {
 
 	// Проверяем куку на существующий trial
 	existingSub, err := s.getExistingTrialFromCookie(r, ctx, code)
-	if err == nil && existingSub != nil {
+	if err != nil {
+		logger.Error("Failed to check existing trial from cookie",
+			zap.String("code", code),
+			zap.String("client_ip", getClientIP(r)),
+			zap.Error(err))
+	} else if existingSub != nil {
 		// Trial уже создан — показываем существующий
 		logger.Info("Existing trial found via cookie", zap.String("sub_id", existingSub.SubscriptionID))
 		telegramLink := "https://t.me/" + s.botConfig.Username + "?start=trial_" + existingSub.SubscriptionID
@@ -576,9 +584,10 @@ func (s *Server) handleSubscription(w http.ResponseWriter, r *http.Request) {
 	if cachedBody, cachedHeaders, ok := s.subServer.GetCache(subID); ok {
 		status, expiryTime, err := s.db.GetSubscriptionStatus(ctx, subID)
 		if err != nil {
-			logDebug("cache status check failed, serving stale cache",
-				zap.Error(err),
-			)
+			logger.Error("Cache status check failed, serving stale cache",
+				zap.String("sub_id", subID),
+				zap.String("client_ip", clientIP),
+				zap.Error(err))
 			for k, v := range cachedHeaders {
 				w.Header().Set(k, v)
 			}
@@ -621,10 +630,15 @@ func (s *Server) handleSubscription(w http.ResponseWriter, r *http.Request) {
 	// Fetch the full subscription record (plan + active sources).
 	subFull, err := s.db.GetSubscriptionWithPlanAndSources(ctx, subID)
 	if err != nil {
-		logDebug("subscription lookup failed", zap.Error(err))
-		logger.Warn("Failed to get subscription", zap.String("sub_id", subID), zap.Error(err))
+		logger.Error("Failed to get subscription with plan and sources",
+			zap.String("sub_id", subID),
+			zap.String("client_ip", clientIP),
+			zap.Error(err))
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		if errors.Is(err, gorm.ErrRecordNotFound) {
+			logger.Error("Subscription not found in database",
+				zap.String("sub_id", subID),
+				zap.String("client_ip", clientIP))
 			w.WriteHeader(http.StatusNotFound)
 		} else {
 			w.WriteHeader(http.StatusInternalServerError)
@@ -676,7 +690,12 @@ func (s *Server) handleSubscription(w http.ResponseWriter, r *http.Request) {
 
 		body, xuiHeaders, err := s.fetchSource(sourceURL)
 		if err != nil {
-			logger.Warn("Failed to fetch from source", zap.String("source", src.Name), zap.Error(err))
+			logger.Error("Failed to fetch from source",
+				zap.String("sub_id", subID),
+				zap.String("client_ip", clientIP),
+				zap.String("source", src.Name),
+				zap.String("source_url", sourceHost(sourceURL)),
+				zap.Error(err))
 			logDebug("source fetch failed",
 				zap.String("source", src.Name),
 				zap.Error(err),
@@ -718,8 +737,11 @@ func (s *Server) handleSubscription(w http.ResponseWriter, r *http.Request) {
 			// or converted to share links in mixed mode.
 			configs, parseErr := subserver.ExtractJSONConfigs(body)
 			if parseErr != nil {
-				logger.Warn("Failed to parse JSON configs",
+				logger.Error("Failed to parse JSON configs from source",
+					zap.String("sub_id", subID),
+					zap.String("client_ip", clientIP),
 					zap.String("source", src.Name),
+					zap.String("source_url", sourceHost(sourceURL)),
 					zap.Error(parseErr))
 				allJSON = false
 				continue
@@ -768,7 +790,10 @@ func (s *Server) handleSubscription(w http.ResponseWriter, r *http.Request) {
 		for _, rawConfig := range allJSONConfigs {
 			link, convErr := subserver.ConvertSingleJSONToLink(rawConfig)
 			if convErr != nil {
-				logger.Debug("Failed to convert JSON config to share link", zap.Error(convErr))
+				logger.Error("Failed to convert JSON config to share link",
+					zap.String("sub_id", subID),
+					zap.String("client_ip", clientIP),
+					zap.Error(convErr))
 				continue
 			}
 			allItems = append(allItems, link)
@@ -876,7 +901,10 @@ func filterHeaders(h http.Header) map[string]string {
 func (s *Server) updateDevices(ctx context.Context, subFull *database.SubscriptionFull, headers map[string]string) {
 	devices, err := subFull.GetDevices()
 	if err != nil {
-		logger.Warn("Failed to parse devices JSON", zap.Error(err))
+		logger.Error("Failed to parse devices JSON",
+			zap.Uint("sub_pk", subFull.ID),
+			zap.String("sub_id", subFull.Subscription.SubscriptionID),
+			zap.Error(err))
 		devices = []map[string]string{}
 	}
 
@@ -898,12 +926,18 @@ func (s *Server) updateDevices(ctx context.Context, subFull *database.Subscripti
 	devices = append(devices, entry)
 
 	if err := subFull.SetDevices(devices); err != nil {
-		logger.Warn("Failed to set devices", zap.Error(err))
+		logger.Error("Failed to set devices JSON",
+			zap.Uint("sub_pk", subFull.ID),
+			zap.String("sub_id", subFull.Subscription.SubscriptionID),
+			zap.Error(err))
 		return
 	}
 
 	if err := s.db.UpdateSubscriptionDevices(ctx, subFull.ID, subFull.Devices); err != nil {
-		logger.Warn("Failed to save devices", zap.Error(err))
+		logger.Error("Failed to save devices to database",
+			zap.Uint("sub_pk", subFull.ID),
+			zap.String("sub_id", subFull.Subscription.SubscriptionID),
+			zap.Error(err))
 	}
 }
 
@@ -913,7 +947,10 @@ func (s *Server) updateDevices(ctx context.Context, subFull *database.Subscripti
 func (s *Server) updateIPs(ctx context.Context, subFull *database.SubscriptionFull, ip string) {
 	ips, err := subFull.GetIPs()
 	if err != nil {
-		logger.Warn("Failed to parse ips JSON", zap.Error(err))
+		logger.Error("Failed to parse ips JSON",
+			zap.Uint("sub_pk", subFull.ID),
+			zap.String("sub_id", subFull.Subscription.SubscriptionID),
+			zap.Error(err))
 		ips = []map[string]string{}
 	}
 
@@ -934,12 +971,18 @@ func (s *Server) updateIPs(ctx context.Context, subFull *database.SubscriptionFu
 	}
 
 	if err := subFull.SetIPs(ips); err != nil {
-		logger.Warn("Failed to set IPs", zap.Error(err))
+		logger.Error("Failed to set ips JSON",
+			zap.Uint("sub_pk", subFull.ID),
+			zap.String("sub_id", subFull.Subscription.SubscriptionID),
+			zap.Error(err))
 		return
 	}
 
 	if err := s.db.UpdateSubscriptionIPs(ctx, subFull.ID, subFull.Ips); err != nil {
-		logger.Warn("Failed to save IPs", zap.Error(err))
+		logger.Error("Failed to save ips to database",
+			zap.Uint("sub_pk", subFull.ID),
+			zap.String("sub_id", subFull.Subscription.SubscriptionID),
+			zap.Error(err))
 	}
 }
 
