@@ -1,4 +1,4 @@
-package subproxy
+package subserver
 
 import (
 	"fmt"
@@ -38,13 +38,13 @@ func TestCache_SetAndGet(t *testing.T) {
 	defer cache.Stop()
 
 	body := []byte("test-body")
-	headers := map[string]string{"Content-Type": "text/plain"}
+	headers := map[string]string{"content-type": "text/plain"}
 	cache.Set("key1", body, headers)
 
 	gotBody, gotHeaders, ok := cache.Get("key1")
 	assert.True(t, ok)
 	assert.Equal(t, body, gotBody)
-	assert.Equal(t, "text/plain", gotHeaders["Content-Type"])
+	assert.Equal(t, headers, gotHeaders)
 }
 
 func TestCache_TTLExpiry(t *testing.T) {
@@ -53,7 +53,7 @@ func TestCache_TTLExpiry(t *testing.T) {
 	cache := NewCache(10 * time.Millisecond)
 	defer cache.Stop()
 
-	cache.Set("key1", []byte("body"), map[string]string{"K": "V"})
+	cache.Set("key1", []byte("body"), nil)
 
 	_, _, ok := cache.Get("key1")
 	assert.True(t, ok)
@@ -70,8 +70,8 @@ func TestCache_Cleanup(t *testing.T) {
 	cache := NewCache(10 * time.Millisecond)
 	defer cache.Stop()
 
-	cache.Set("key1", []byte("body1"), map[string]string{})
-	cache.Set("key2", []byte("body2"), map[string]string{})
+	cache.Set("key1", []byte("body1"), nil)
+	cache.Set("key2", []byte("body2"), nil)
 
 	assert.Eventually(t, func() bool {
 		cache.mu.RLock()
@@ -87,18 +87,16 @@ func TestCache_Isolation(t *testing.T) {
 	cache := NewCache(time.Minute)
 	defer cache.Stop()
 
-	cache.Set("key1", []byte("body1"), map[string]string{"H": "1"})
-	cache.Set("key2", []byte("body2"), map[string]string{"H": "2"})
+	cache.Set("key1", []byte("body1"), nil)
+	cache.Set("key2", []byte("body2"), nil)
 
-	body1, h1, ok1 := cache.Get("key1")
-	body2, h2, ok2 := cache.Get("key2")
+	body1, _, ok1 := cache.Get("key1")
+	body2, _, ok2 := cache.Get("key2")
 
 	assert.True(t, ok1)
 	assert.True(t, ok2)
 	assert.Equal(t, []byte("body1"), body1)
 	assert.Equal(t, []byte("body2"), body2)
-	assert.Equal(t, "1", h1["H"])
-	assert.Equal(t, "2", h2["H"])
 }
 
 func TestCache_Delete(t *testing.T) {
@@ -107,11 +105,26 @@ func TestCache_Delete(t *testing.T) {
 	cache := NewCache(time.Minute)
 	defer cache.Stop()
 
-	cache.Set("key1", []byte("body"), map[string]string{})
+	cache.Set("key1", []byte("body"), nil)
 	cache.Delete("key1")
 
 	_, _, ok := cache.Get("key1")
 	assert.False(t, ok)
+}
+
+func TestCache_BodyCopy(t *testing.T) {
+	t.Parallel()
+
+	cache := NewCache(time.Minute)
+	defer cache.Stop()
+
+	original := []byte("original-body")
+	cache.Set("key1", original, nil)
+
+	original[0] = 'X'
+
+	gotBody, _, _ := cache.Get("key1")
+	assert.Equal(t, []byte("original-body"), gotBody)
 }
 
 func TestCache_HeadersCopy(t *testing.T) {
@@ -120,11 +133,17 @@ func TestCache_HeadersCopy(t *testing.T) {
 	cache := NewCache(time.Minute)
 	defer cache.Stop()
 
-	original := map[string]string{"K": "V"}
-	cache.Set("key1", []byte("body"), original)
+	headers := map[string]string{"content-type": "text/plain", "x-custom": "value"}
+	cache.Set("key1", []byte("body"), headers)
 
-	original["K"] = "modified"
+	headers["content-type"] = "MUTATED"
+	headers["x-new"] = "added"
 
-	_, gotHeaders, _ := cache.Get("key1")
-	assert.Equal(t, "V", gotHeaders["K"])
+	gotBody, gotHeaders, ok := cache.Get("key1")
+	assert.True(t, ok)
+	assert.Equal(t, []byte("body"), gotBody)
+	assert.Equal(t, "text/plain", gotHeaders["content-type"])
+	assert.Equal(t, "value", gotHeaders["x-custom"])
+	_, hasNew := gotHeaders["x-new"]
+	assert.False(t, hasNew, "headers map should be cloned on Set")
 }
