@@ -40,92 +40,47 @@ func TestDetectFormat_Base64_Golden(t *testing.T) {
 	assert.Equal(t, FormatBase64, DetectFormat(data))
 }
 
+func TestDetectFormat_JSON(t *testing.T) {
+	t.Parallel()
+
+	body := []byte(`{"type":"vless","address":"x.com","port":443,"uuid":"abc","encryption":"none"}`)
+	assert.Equal(t, FormatJSON, DetectFormat(body))
+}
+
+func TestDetectFormat_JSONArray(t *testing.T) {
+	t.Parallel()
+
+	body := []byte(`[{"type":"vless","address":"x.com","port":443,"uuid":"abc","encryption":"none"}]`)
+	assert.Equal(t, FormatJSON, DetectFormat(body))
+}
+
 func TestDetectFormat_InvalidBase64(t *testing.T) {
 	t.Parallel()
 
-	assert.Equal(t, FormatPlain, DetectFormat([]byte("not-valid-base64!!!")))
+	assert.Equal(t, FormatUnknown, DetectFormat([]byte("not-valid-base64!!!")))
 }
 
-func TestMergeSubscriptions_NoExtraServers(t *testing.T) {
+func TestDetectFormat_Empty(t *testing.T) {
 	t.Parallel()
 
-	original := []byte("vless://original\nvmess://original2")
-	result := MergeSubscriptions(original, nil, FormatPlain)
-	assert.Equal(t, original, result)
+	assert.Equal(t, FormatUnknown, DetectFormat([]byte("")))
+	assert.Equal(t, FormatUnknown, DetectFormat([]byte("  ")))
 }
 
-func TestMergeSubscriptions_PlainText(t *testing.T) {
+func TestBase64StdEncode(t *testing.T) {
 	t.Parallel()
 
-	original := []byte("vless://original\nvmess://original2")
-	extra := []string{"trojan://extra1", "ss://extra2"}
-
-	result := MergeSubscriptions(original, extra, FormatPlain)
-	expected := "vless://original\nvmess://original2\ntrojan://extra1\nss://extra2"
-	assert.Equal(t, expected, string(result))
+	input := []byte("hello world")
+	expected := base64.StdEncoding.EncodeToString(input)
+	assert.Equal(t, expected, base64StdEncode(input))
 }
 
-func TestMergeSubscriptions_Base64(t *testing.T) {
+func TestConvertJSONToShareLinks_VLESS_ThroughProxy(t *testing.T) {
 	t.Parallel()
 
-	plain := "vless://original\nvmess://original2"
-	original := []byte(base64.StdEncoding.EncodeToString([]byte(plain)))
-	extra := []string{"trojan://extra1", "ss://extra2"}
-
-	result := MergeSubscriptions(original, extra, FormatBase64)
-
-	decoded, err := base64.StdEncoding.DecodeString(string(result))
-	assert.NoError(t, err)
-
-	expected := "vless://original\nvmess://original2\ntrojan://extra1\nss://extra2"
-	assert.Equal(t, expected, string(decoded))
-}
-
-func TestMergeSubscriptions_Base64WithNewlines(t *testing.T) {
-	t.Parallel()
-
-	plain := "vless://original\nvmess://original2\n"
-	original := []byte(base64.StdEncoding.EncodeToString([]byte(plain)))
-	extra := []string{"trojan://extra1"}
-
-	result := MergeSubscriptions(original, extra, FormatBase64)
-
-	decoded, err := base64.StdEncoding.DecodeString(string(result))
-	assert.NoError(t, err)
-
-	expected := "vless://original\nvmess://original2\ntrojan://extra1"
-	assert.Equal(t, expected, string(decoded))
-}
-
-func TestMergeSubscriptions_InvalidBase64FallsBack(t *testing.T) {
-	t.Parallel()
-
-	original := []byte("not-valid-base64")
-	extra := []string{"trojan://extra1"}
-
-	result := MergeSubscriptions(original, extra, FormatBase64)
-	assert.Equal(t, original, result)
-}
-
-func TestMergeSubscriptions_EmptyOriginal(t *testing.T) {
-	t.Parallel()
-
-	extra := []string{"trojan://extra1"}
-
-	result := MergeSubscriptions([]byte(""), extra, FormatPlain)
-	expected := "trojan://extra1"
-	assert.Equal(t, expected, string(result))
-}
-
-func TestMergeSubscriptions_GoldenFile(t *testing.T) {
-	t.Parallel()
-
-	original, err := os.ReadFile("../testdata/subserver/vmess_multi.txt")
+	body := []byte(`{"type":"vless","address":"x.com","port":443,"uuid":"abc","encryption":"none","remark":"Test"}`)
+	links, err := ConvertJSONToShareLinks(body)
 	require.NoError(t, err)
-	extra := []string{"ss://new-server.example.com"}
-
-	result := MergeSubscriptions(original, extra, FormatPlain)
-	assert.Contains(t, string(result), "vmess://")
-	assert.Contains(t, string(result), "trojan://")
-	assert.Contains(t, string(result), "ss://new-server.example.com")
+	require.Len(t, links, 1)
+	assert.Contains(t, links[0], "vless://abc@x.com:443")
 }

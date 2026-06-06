@@ -99,6 +99,9 @@ type MockDatabaseService struct {
 	CreateTrialRequestFunc              func(ctx context.Context, ip string) error
 	CleanupExpiredTrialsFunc            func(ctx context.Context, hours int) ([]database.Subscription, error)
 	GetPoolStatsFunc                    func() (*database.PoolStats, error)
+	GetSubscriptionWithPlanAndSourcesFunc func(ctx context.Context, subscriptionID string) (*database.SubscriptionFull, error)
+	UpdateSubscriptionDevicesFunc          func(ctx context.Context, id uint, devicesJSON string) error
+	UpdateSubscriptionIPsFunc              func(ctx context.Context, id uint, ipsJSON string) error
 }
 
 func (m *MockDatabaseService) Ping(ctx context.Context) error {
@@ -525,6 +528,27 @@ func (m *MockDatabaseService) GetPoolStats() (*database.PoolStats, error) {
 		return m.GetPoolStatsFunc()
 	}
 	return &database.PoolStats{}, nil
+}
+
+func (m *MockDatabaseService) GetSubscriptionWithPlanAndSources(ctx context.Context, subscriptionID string) (*database.SubscriptionFull, error) {
+	if m.GetSubscriptionWithPlanAndSourcesFunc != nil {
+		return m.GetSubscriptionWithPlanAndSourcesFunc(ctx, subscriptionID)
+	}
+	return nil, gorm.ErrRecordNotFound
+}
+
+func (m *MockDatabaseService) UpdateSubscriptionDevices(ctx context.Context, id uint, devicesJSON string) error {
+	if m.UpdateSubscriptionDevicesFunc != nil {
+		return m.UpdateSubscriptionDevicesFunc(ctx, id, devicesJSON)
+	}
+	return nil
+}
+
+func (m *MockDatabaseService) UpdateSubscriptionIPs(ctx context.Context, id uint, ipsJSON string) error {
+	if m.UpdateSubscriptionIPsFunc != nil {
+		return m.UpdateSubscriptionIPsFunc(ctx, id, ipsJSON)
+	}
+	return nil
 }
 
 func (m *MockDatabaseService) GetReferralCount(ctx context.Context, referrerTGID int64) (int64, error) {

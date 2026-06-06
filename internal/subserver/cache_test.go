@@ -25,10 +25,9 @@ func TestCache_GetMiss(t *testing.T) {
 	cache := NewCache(time.Minute)
 	defer cache.Stop()
 
-	body, headers, ok := cache.Get("nonexistent")
+	body, ok := cache.Get("nonexistent")
 	assert.False(t, ok)
 	assert.Nil(t, body)
-	assert.Nil(t, headers)
 }
 
 func TestCache_SetAndGet(t *testing.T) {
@@ -38,13 +37,11 @@ func TestCache_SetAndGet(t *testing.T) {
 	defer cache.Stop()
 
 	body := []byte("test-body")
-	headers := map[string]string{"Content-Type": "text/plain"}
-	cache.Set("key1", body, headers)
+	cache.Set("key1", body)
 
-	gotBody, gotHeaders, ok := cache.Get("key1")
+	gotBody, ok := cache.Get("key1")
 	assert.True(t, ok)
 	assert.Equal(t, body, gotBody)
-	assert.Equal(t, "text/plain", gotHeaders["Content-Type"])
 }
 
 func TestCache_TTLExpiry(t *testing.T) {
@@ -53,13 +50,13 @@ func TestCache_TTLExpiry(t *testing.T) {
 	cache := NewCache(10 * time.Millisecond)
 	defer cache.Stop()
 
-	cache.Set("key1", []byte("body"), map[string]string{"K": "V"})
+	cache.Set("key1", []byte("body"))
 
-	_, _, ok := cache.Get("key1")
+	_, ok := cache.Get("key1")
 	assert.True(t, ok)
 
 	assert.Eventually(t, func() bool {
-		_, _, ok := cache.Get("key1")
+		_, ok := cache.Get("key1")
 		return !ok
 	}, 200*time.Millisecond, 5*time.Millisecond, "entry should expire after TTL")
 }
@@ -70,8 +67,8 @@ func TestCache_Cleanup(t *testing.T) {
 	cache := NewCache(10 * time.Millisecond)
 	defer cache.Stop()
 
-	cache.Set("key1", []byte("body1"), map[string]string{})
-	cache.Set("key2", []byte("body2"), map[string]string{})
+	cache.Set("key1", []byte("body1"))
+	cache.Set("key2", []byte("body2"))
 
 	assert.Eventually(t, func() bool {
 		cache.mu.RLock()
@@ -87,18 +84,16 @@ func TestCache_Isolation(t *testing.T) {
 	cache := NewCache(time.Minute)
 	defer cache.Stop()
 
-	cache.Set("key1", []byte("body1"), map[string]string{"H": "1"})
-	cache.Set("key2", []byte("body2"), map[string]string{"H": "2"})
+	cache.Set("key1", []byte("body1"))
+	cache.Set("key2", []byte("body2"))
 
-	body1, h1, ok1 := cache.Get("key1")
-	body2, h2, ok2 := cache.Get("key2")
+	body1, ok1 := cache.Get("key1")
+	body2, ok2 := cache.Get("key2")
 
 	assert.True(t, ok1)
 	assert.True(t, ok2)
 	assert.Equal(t, []byte("body1"), body1)
 	assert.Equal(t, []byte("body2"), body2)
-	assert.Equal(t, "1", h1["H"])
-	assert.Equal(t, "2", h2["H"])
 }
 
 func TestCache_Delete(t *testing.T) {
@@ -107,24 +102,24 @@ func TestCache_Delete(t *testing.T) {
 	cache := NewCache(time.Minute)
 	defer cache.Stop()
 
-	cache.Set("key1", []byte("body"), map[string]string{})
+	cache.Set("key1", []byte("body"))
 	cache.Delete("key1")
 
-	_, _, ok := cache.Get("key1")
+	_, ok := cache.Get("key1")
 	assert.False(t, ok)
 }
 
-func TestCache_HeadersCopy(t *testing.T) {
+func TestCache_BodyCopy(t *testing.T) {
 	t.Parallel()
 
 	cache := NewCache(time.Minute)
 	defer cache.Stop()
 
-	original := map[string]string{"K": "V"}
-	cache.Set("key1", []byte("body"), original)
+	original := []byte("original-body")
+	cache.Set("key1", original)
 
-	original["K"] = "modified"
+	original[0] = 'X'
 
-	_, gotHeaders, _ := cache.Get("key1")
-	assert.Equal(t, "V", gotHeaders["K"])
+	gotBody, _ := cache.Get("key1")
+	assert.Equal(t, []byte("original-body"), gotBody)
 }

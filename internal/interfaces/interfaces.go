@@ -36,6 +36,9 @@ type SubscriptionRepository interface {
 	GetTelegramIDsBatch(ctx context.Context, offset, limit int) ([]int64, error)
 	GetTotalTelegramIDCount(ctx context.Context) (int64, error)
 	GetSubscriptionBySubscriptionID(ctx context.Context, subscriptionID string) (*database.Subscription, error)
+	GetSubscriptionWithPlanAndSources(ctx context.Context, subscriptionID string) (*database.SubscriptionFull, error)
+	UpdateSubscriptionDevices(ctx context.Context, id uint, devicesJSON string) error
+	UpdateSubscriptionIPs(ctx context.Context, id uint, ipsJSON string) error
 }
 
 type TrialRepository interface {

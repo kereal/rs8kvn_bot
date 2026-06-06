@@ -3,14 +3,13 @@ package web
 import (
 	"context"
 	"encoding/base64"
-	"net"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"path/filepath"
-	"sync"
+	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -18,962 +17,461 @@ import (
 	"rs8kvn_bot/internal/bot"
 	"rs8kvn_bot/internal/config"
 	"rs8kvn_bot/internal/database"
+	"rs8kvn_bot/internal/interfaces"
+	"rs8kvn_bot/internal/service"
 	"rs8kvn_bot/internal/subserver"
 	"rs8kvn_bot/internal/testutil"
 
 	"gorm.io/gorm"
 )
 
+func testServer(t *testing.T, db interfaces.DatabaseService, cfg *config.Config) *Server {
+	botCfg := &bot.BotConfig{Username: "testbot"}
+	subSvc := service.NewSubscriptionService(db, nil, nil, cfg, "", nil)
+		srv := NewServer(":0", db, cfg, botCfg, subSvc, subserver.NewService(config.SubServerCacheTTL))
+	return srv
+}
+
 func TestHandleSubscription_MethodNotAllowed(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewMockDatabaseService()
-	cfg := &config.Config{
-		SubExtraServersEnabled: true,
-	}
-	subServer := subserver.NewService(cfg)
-	defer subServer.Stop()
+	db := testutil.NewMockDatabaseService()
+	srv := testServer(t, db, &config.Config{})
 
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subServer)
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/sub/test123", nil)
+	srv.handleSubscription(w, r)
 
-	req := httptest.NewRequest("POST", "/sub/abc123", nil)
-	rec := httptest.NewRecorder()
-	srv.handleSubscription(rec, req)
-
-	assert.Equal(t, http.StatusMethodNotAllowed, rec.Code)
-	assert.Equal(t, "GET", rec.Header().Get("Allow"))
+	assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
+	assert.Equal(t, "GET", w.Header().Get("Allow"))
 }
 
-func TestHandleSubscription_SubProxyNil(t *testing.T) {
+func TestHandleSubscription_SubServerNil(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewMockDatabaseService()
-	cfg := &config.Config{}
+	srv := &Server{}
 
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, nil)
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/sub/test123", nil)
+	srv.handleSubscription(w, r)
 
-	req := httptest.NewRequest("GET", "/sub/abc123", nil)
-	rec := httptest.NewRecorder()
-	srv.handleSubscription(rec, req)
-
-	assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
-	assert.Contains(t, rec.Body.String(), "not available")
+	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+	assert.Equal(t, "text/plain; charset=utf-8", w.Header().Get("Content-Type"))
+	assert.Equal(t, "Subscription server is not available", w.Body.String())
 }
 
 func TestHandleSubscription_InvalidCode(t *testing.T) {
 	t.Parallel()
 
-	cfg := &config.Config{SubExtraServersEnabled: true}
-	subServer := subserver.NewService(cfg)
-	defer subServer.Stop()
+	db := testutil.NewMockDatabaseService()
+	srv := testServer(t, db, &config.Config{})
 
-	srv := NewServer(":8880", nil, cfg, bot.NewTestBotConfig(), nil, subServer)
-
-	tests := []struct {
-		path       string
-		expectCode int
-	}{
-		{"/sub/", http.StatusBadRequest},
-		{"/sub/abc/def", http.StatusBadRequest},
-		{"/sub/code%20with%20spaces", http.StatusBadRequest},
-		{"/sub/code%3Cscript%3E", http.StatusBadRequest},
-		{"/sub/code/../../../etc", http.StatusBadRequest},
+	tests := []string{
+		"/sub/",
+		"/sub/with/path",
+		"/sub/special@char",
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.path, func(t *testing.T) {
-			req := httptest.NewRequest("GET", tt.path, nil)
-			rec := httptest.NewRecorder()
-			srv.handleSubscription(rec, req)
-			assert.Equal(t, tt.expectCode, rec.Code)
-		})
+	for _, path := range tests {
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodGet, path, nil)
+		srv.handleSubscription(w, r)
+		assert.Equal(t, http.StatusNotFound, w.Code, "path: %s", path)
+		assert.Equal(t, "Subscription not found", w.Body.String(), "path: %s", path)
 	}
 }
 
-func TestHandleSubscription_NotFoundInDB(t *testing.T) {
+func TestHandleSubscription_SubscriptionNotFound(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewMockDatabaseService()
-	mockDB.GetSubscriptionBySubscriptionIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
+	db := testutil.NewMockDatabaseService()
+	db.GetSubscriptionWithPlanAndSourcesFunc = func(ctx context.Context, _ string) (*database.SubscriptionFull, error) {
 		return nil, gorm.ErrRecordNotFound
 	}
+	srv := testServer(t, db, &config.Config{})
 
-	cfg := &config.Config{SubExtraServersEnabled: true}
-	subServer := subserver.NewService(cfg)
-	defer subServer.Stop()
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/sub/unknown", nil)
+	srv.handleSubscription(w, r)
 
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subServer)
-
-	req := httptest.NewRequest("GET", "/sub/nonexistent", nil)
-	rec := httptest.NewRecorder()
-	srv.handleSubscription(rec, req)
-
-	assert.Equal(t, http.StatusNotFound, rec.Code)
-	assert.Contains(t, rec.Body.String(), "not found")
+	assert.Equal(t, http.StatusNotFound, w.Code)
+	assert.Equal(t, "Subscription not found", w.Body.String())
 }
 
-func TestHandleSubscription_EmptySubscriptionURL(t *testing.T) {
+func TestHandleSubscription_NoServersAvailable(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewMockDatabaseService()
-	mockDB.ListSourcesFunc = func(ctx context.Context) ([]database.Source, error) {
-		return nil, nil
-	}
-	mockDB.GetSubscriptionBySubscriptionIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
-		return &database.Subscription{
-			SubscriptionID: subscriptionID,
-			Status:         "active",
+	db := testutil.NewMockDatabaseService()
+	db.GetSubscriptionWithPlanAndSourcesFunc = func(ctx context.Context, _ string) (*database.SubscriptionFull, error) {
+		return &database.SubscriptionFull{
+			Subscription: database.Subscription{ID: 1, Status: "active"},
+			Plan:         database.Plan{TrafficLimit: 1 << 30},
+			Sources:      []database.Source{},
 		}, nil
 	}
+	srv := testServer(t, db, &config.Config{})
 
-	cfg := &config.Config{SubExtraServersEnabled: true}
-	subServer := subserver.NewService(cfg)
-	defer subServer.Stop()
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/sub/test123", nil)
+	srv.handleSubscription(w, r)
 
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subServer)
-
-	req := httptest.NewRequest("GET", "/sub/abc123", nil)
-	rec := httptest.NewRecorder()
-	srv.handleSubscription(rec, req)
-
-	assert.Equal(t, http.StatusNotFound, rec.Code)
-	assert.Contains(t, rec.Body.String(), "not available")
+	assert.Equal(t, http.StatusNotFound, w.Code)
+	assert.Equal(t, "Subscription not found", w.Body.String())
 }
 
-func TestHandleSubscription_XUIError_NoCache(t *testing.T) {
+func TestHandleSubscription_PlainSource(t *testing.T) {
 	t.Parallel()
 
-	listener, err := net.Listen("tcp", "localhost:0")
+	plainContent := "vless://abc@x.com:443\nvmess://def@y.com:8443"
+
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Subscription-UserInfo", "upload=100; download=200; total=1000; expire=1234567890")
+		w.Write([]byte(plainContent))
+	}))
+	defer backend.Close()
+
+	db := testutil.NewMockDatabaseService()
+	db.GetSubscriptionWithPlanAndSourcesFunc = func(ctx context.Context, _ string) (*database.SubscriptionFull, error) {
+		return &database.SubscriptionFull{
+			Subscription: database.Subscription{ID: 1, Status: "active"},
+			Plan:         database.Plan{TrafficLimit: 1 << 30},
+			Sources: []database.Source{
+				{ID: 1, Name: "src1", Active: true, SubURL: backend.URL + "/sub/"},
+			},
+		}, nil
+	}
+	srv := testServer(t, db, &config.Config{})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/sub/test123", nil)
+	srv.handleSubscription(w, r)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(w.Body.String()))
 	require.NoError(t, err)
-	t.Cleanup(func() { listener.Close() })
-	go func() {
-		for {
-			conn, lErr := listener.Accept()
-			if lErr != nil {
-				return
-			}
-			conn.Close()
-		}
-	}()
+	body := string(decoded)
 
-	mockDB := testutil.NewMockDatabaseService()
-	mockDB.ListSourcesFunc = func(ctx context.Context) ([]database.Source, error) {
-		return []database.Source{
-			{ID: 1, Name: "test", Active: true, SubURL: "http://" + listener.Addr().String() + "/sub/"},
-		}, nil
-	}
-	mockDB.GetSubscriptionBySubscriptionIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
-		return &database.Subscription{
-			SubscriptionID: subscriptionID,
-			Status:         "active",
-		}, nil
-	}
+	assert.Contains(t, body, "vless://abc@x.com:443")
+	assert.Contains(t, body, "vmess://def@y.com:8443")
 
-	cfg := &config.Config{
-		SubExtraServersEnabled: true,
-	}
-	subServer := subserver.NewService(cfg)
-	defer subServer.Stop()
-
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subServer)
-
-	req := httptest.NewRequest("GET", "/sub/abc123", nil)
-	rec := httptest.NewRecorder()
-	srv.handleSubscription(rec, req)
-
-	assert.Equal(t, http.StatusBadGateway, rec.Code)
-	assert.Contains(t, rec.Body.String(), "Failed to fetch")
+	userInfo := w.Header().Get("Subscription-UserInfo")
+	assert.Contains(t, userInfo, "upload=100")
+	assert.Contains(t, userInfo, "download=200")
+	assert.Contains(t, userInfo, "total="+fmt.Sprintf("%d", 1<<30))
+	assert.Contains(t, userInfo, "expire=1234567890")
 }
 
-func TestHandleSubscription_CacheHit(t *testing.T) {
+func TestHandleSubscription_JSONSource(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewMockDatabaseService()
-	subID := "concurrent_sub"
-	mockDB.GetSubscriptionBySubscriptionIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
-		return &database.Subscription{
-			SubscriptionID: subscriptionID,
-			Status:         "active",
-		}, nil
-	}
+	jsonContent := `[{"type":"vless","address":"x.com","port":443,"uuid":"abc123","encryption":"none","remark":"S1"}]`
 
-	cfg := &config.Config{
-		SubExtraServersEnabled: true,
-		GlobalSubURL:           "http://localhost:0/sub/",
-	}
-	subServer := subserver.NewService(cfg)
-	defer subServer.Stop()
-
-	cachedBody := []byte("vless://cached-server@cache.example.com:443")
-	cachedHeaders := map[string]string{
-		"Subscription-Userinfo":   "upload=0; download=0; total=10737418240; expire=1234567890",
-		"Profile-Update-Interval": "60",
-		"Content-Type":            "text/plain; charset=utf-8",
-	}
-
-	subServer.SetCache(subID, cachedBody, cachedHeaders)
-
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subServer)
-
-	req := httptest.NewRequest("GET", "/sub/"+subID, nil)
-	rec := httptest.NewRecorder()
-	srv.handleSubscription(rec, req)
-
-	assert.Equal(t, http.StatusOK, rec.Code)
-	assert.Equal(t, string(cachedBody), rec.Body.String())
-	assert.Equal(t, "upload=0; download=0; total=10737418240; expire=1234567890", rec.Header().Get("Subscription-Userinfo"))
-	assert.Equal(t, "60", rec.Header().Get("Profile-Update-Interval"))
-	assert.Equal(t, "text/plain; charset=utf-8", rec.Header().Get("Content-Type"))
-}
-
-func TestHandleSubscription_CacheHitAfterXUIError(t *testing.T) {
-	t.Parallel()
-
-	mockDB := testutil.NewMockDatabaseService()
-	subID := "fallback_sub_id"
-	mockDB.GetSubscriptionBySubscriptionIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
-		return &database.Subscription{
-			SubscriptionID: subscriptionID,
-			Status:         "active",
-		}, nil
-	}
-
-	cfg := &config.Config{SubExtraServersEnabled: true}
-	subServer := subserver.NewService(cfg)
-	defer subServer.Stop()
-
-	cachedBody := []byte("vless://fallback-server@example.com:443")
-	cachedHeaders := map[string]string{
-		"Subscription-Userinfo": "upload=0; download=0; total=10737418240; expire=1234567890",
-	}
-
-	subServer.SetCache(subID, cachedBody, cachedHeaders)
-
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subServer)
-
-	req := httptest.NewRequest("GET", "/sub/"+subID, nil)
-	rec := httptest.NewRecorder()
-	srv.handleSubscription(rec, req)
-
-	assert.Equal(t, http.StatusOK, rec.Code)
-	assert.Equal(t, string(cachedBody), rec.Body.String())
-	assert.Equal(t, "upload=0; download=0; total=10737418240; expire=1234567890", rec.Header().Get("Subscription-Userinfo"))
-}
-
-func TestHandleSubscription_ExtraServersAppended(t *testing.T) {
-	t.Parallel()
-
-	servers := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Subscription-Userinfo", "upload=0; download=0; total=10737418240; expire=1234567890")
-		w.Header().Set("Profile-Update-Interval", "60")
-		w.WriteHeader(http.StatusOK)
-		_, err := w.Write([]byte("vless://original-server@original.example.com:443"))
-		require.NoError(t, err)
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Subscription-UserInfo", "upload=50; download=75; total=500; expire=9999")
+		w.Write([]byte(jsonContent))
 	}))
-	defer servers.Close()
+	defer backend.Close()
 
-	tmpDir := t.TempDir()
-	serversFile := filepath.Join(tmpDir, "extra.txt")
-	err := os.WriteFile(serversFile, []byte("X-Custom: custom-value\n\nvless://extra1@extra1.example.com:443\ntrojan://extra2@extra2.example.com:443\n"), 0600)
+	db := testutil.NewMockDatabaseService()
+	db.GetSubscriptionWithPlanAndSourcesFunc = func(ctx context.Context, _ string) (*database.SubscriptionFull, error) {
+		return &database.SubscriptionFull{
+			Subscription: database.Subscription{ID: 1, Status: "active"},
+			Plan:         database.Plan{TrafficLimit: 2 << 30},
+			Sources: []database.Source{
+				{ID: 1, Name: "src1", Active: true, SubURL: backend.URL + "/sub/"},
+			},
+		}, nil
+	}
+	srv := testServer(t, db, &config.Config{})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/sub/test123", nil)
+	srv.handleSubscription(w, r)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	assert.Equal(t, "application/json; charset=utf-8", w.Header().Get("Content-Type"))
+
+	var items []json.RawMessage
+	err := json.Unmarshal(w.Body.Bytes(), &items)
 	require.NoError(t, err)
+	require.Len(t, items, 1)
 
-	mockDB := testutil.NewMockDatabaseService()
-	subID := "extra_test_sub"
-	mockDB.ListSourcesFunc = func(ctx context.Context) ([]database.Source, error) {
-		return []database.Source{
-			{ID: 1, Name: "test", Active: true, SubURL: servers.URL + "/sub/"},
-		}, nil
-	}
-	mockDB.GetSubscriptionBySubscriptionIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
-		return &database.Subscription{
-			SubscriptionID: subscriptionID,
-			Status:         "active",
-		}, nil
-	}
+	var parsed map[string]interface{}
+	require.NoError(t, json.Unmarshal(items[0], &parsed))
+	assert.Equal(t, "vless", parsed["type"])
+	assert.Equal(t, "x.com", parsed["address"])
 
-	cfg := &config.Config{
-		GlobalSubURL:           servers.URL + "/sub/",
-		SubExtraServersEnabled: true,
-		SubExtraServersFile:    serversFile,
-	}
-	subServer := subserver.NewService(cfg)
-	defer subServer.Stop()
-
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subServer)
-
-	req := httptest.NewRequest("GET", "/sub/"+subID, nil)
-	rec := httptest.NewRecorder()
-	srv.handleSubscription(rec, req)
-
-	assert.Equal(t, http.StatusOK, rec.Code)
-
-	body := rec.Body.String()
-	assert.Contains(t, body, "vless://original-server@original.example.com:443")
-	assert.Contains(t, body, "vless://extra1@extra1.example.com:443")
-	assert.Contains(t, body, "trojan://extra2@extra2.example.com:443")
-
-	assert.Equal(t, "upload=0; download=0; total=10737418240; expire=1234567890", rec.Header().Get("Subscription-Userinfo"))
-	assert.Equal(t, "60", rec.Header().Get("Profile-Update-Interval"))
-	assert.Equal(t, "custom-value", rec.Header().Get("X-Custom"))
+	userInfo := w.Header().Get("Subscription-UserInfo")
+	assert.Contains(t, userInfo, "upload=50")
+	assert.Contains(t, userInfo, "download=75")
+	assert.Contains(t, userInfo, "total="+fmt.Sprintf("%d", 2<<30))
 }
 
-func TestHandleSubscription_Base64FormatPreserved(t *testing.T) {
+func TestHandleSubscription_MultipleSources(t *testing.T) {
 	t.Parallel()
 
-	originalPlain := "vless://original@original.example.com:443"
-	originalEncoded := base64.StdEncoding.EncodeToString([]byte(originalPlain))
+	s1Content := "vless://a@x.com:443"
+	s2Content := "trojan://b@y.com:8443"
 
-	servers := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Subscription-Userinfo", "upload=0; download=0; total=10737418240; expire=1234567890")
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.WriteHeader(http.StatusOK)
-		_, err := w.Write([]byte(originalEncoded))
-		require.NoError(t, err)
+	b1 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Subscription-UserInfo", "upload=100; download=200; total=500; expire=111")
+		w.Write([]byte(s1Content))
 	}))
-	defer servers.Close()
+	defer b1.Close()
 
-	tmpDir := t.TempDir()
-	serversFile := filepath.Join(tmpDir, "extra.txt")
-	err := os.WriteFile(serversFile, []byte("vless://extra@extra.example.com:443\n"), 0600)
+	b2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Subscription-UserInfo", "upload=300; download=400; total=500; expire=222")
+		w.Write([]byte(s2Content))
+	}))
+	defer b2.Close()
+
+	db := testutil.NewMockDatabaseService()
+	db.GetSubscriptionWithPlanAndSourcesFunc = func(ctx context.Context, _ string) (*database.SubscriptionFull, error) {
+		return &database.SubscriptionFull{
+			Subscription: database.Subscription{ID: 1, Status: "active"},
+			Plan:         database.Plan{TrafficLimit: 10 << 30},
+			Sources: []database.Source{
+				{ID: 1, Name: "s1", Active: true, SubURL: b1.URL + "/sub/"},
+				{ID: 2, Name: "s2", Active: true, SubURL: b2.URL + "/sub/"},
+			},
+		}, nil
+	}
+	srv := testServer(t, db, &config.Config{})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/sub/test123", nil)
+	srv.handleSubscription(w, r)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(w.Body.String()))
 	require.NoError(t, err)
+	body := string(decoded)
 
-	mockDB := testutil.NewMockDatabaseService()
-	subID := "base64_test_sub"
-	mockDB.ListSourcesFunc = func(ctx context.Context) ([]database.Source, error) {
-		return []database.Source{
-			{ID: 1, Name: "test", Active: true, SubURL: servers.URL + "/sub/"},
+	assert.Contains(t, body, "vless://a@x.com:443")
+	assert.Contains(t, body, "trojan://b@y.com:8443")
+
+	userInfo := w.Header().Get("Subscription-UserInfo")
+	assert.Contains(t, userInfo, "upload=400")
+	assert.Contains(t, userInfo, "download=600")
+	assert.Contains(t, userInfo, "total="+fmt.Sprintf("%d", 10<<30))
+	assert.Contains(t, userInfo, "expire=111")
+}
+
+func TestHandleSubscription_MixedJSONAndPlain(t *testing.T) {
+	t.Parallel()
+
+	jsonContent := `{"type":"vless","address":"j.com","port":443,"uuid":"abc","encryption":"none","remark":"J"}`
+	plainContent := "vless://p@plain.com:443"
+
+	b1 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(jsonContent))
+	}))
+	defer b1.Close()
+
+	b2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(plainContent))
+	}))
+	defer b2.Close()
+
+	db := testutil.NewMockDatabaseService()
+	db.GetSubscriptionWithPlanAndSourcesFunc = func(ctx context.Context, _ string) (*database.SubscriptionFull, error) {
+		return &database.SubscriptionFull{
+			Subscription: database.Subscription{ID: 1, Status: "active"},
+			Plan:         database.Plan{TrafficLimit: 1 << 30},
+			Sources: []database.Source{
+				{ID: 1, Name: "json", Active: true, SubURL: b1.URL + "/sub/"},
+				{ID: 2, Name: "plain", Active: true, SubURL: b2.URL + "/sub/"},
+			},
 		}, nil
 	}
-	mockDB.GetSubscriptionBySubscriptionIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
-		return &database.Subscription{
-			SubscriptionID: subscriptionID,
-			Status:         "active",
-		}, nil
-	}
+	srv := testServer(t, db, &config.Config{})
 
-	cfg := &config.Config{
-		GlobalSubURL:           servers.URL + "/sub/",
-		SubExtraServersEnabled: true,
-		SubExtraServersFile:    serversFile,
-	}
-	subServer := subserver.NewService(cfg)
-	defer subServer.Stop()
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/sub/test123", nil)
+	srv.handleSubscription(w, r)
 
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subServer)
+	assert.Equal(t, http.StatusOK, w.Code)
 
-	req := httptest.NewRequest("GET", "/sub/"+subID, nil)
-	rec := httptest.NewRecorder()
-	srv.handleSubscription(rec, req)
-
-	assert.Equal(t, http.StatusOK, rec.Code)
-
-	decoded, err := base64.StdEncoding.DecodeString(rec.Body.String())
+	decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(w.Body.String()))
 	require.NoError(t, err)
+	body := string(decoded)
 
-	mergedBody := string(decoded)
-	assert.Contains(t, mergedBody, "vless://original@original.example.com:443")
-	assert.Contains(t, mergedBody, "vless://extra@extra.example.com:443")
+	assert.Contains(t, body, "vless://abc@j.com:443")
+	assert.Contains(t, body, "vless://p@plain.com:443")
 }
 
-func TestHandleSubscription_ConcurrentRequests(t *testing.T) {
+func TestHandleSubscription_SourceFetchError(t *testing.T) {
 	t.Parallel()
 
-	servers := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		time.Sleep(10 * time.Millisecond)
-		w.Header().Set("Subscription-Userinfo", "upload=0; download=0; total=10737418240; expire=1234567890")
-		w.WriteHeader(http.StatusOK)
-		_, err := w.Write([]byte("vless://concurrent@server.example.com:443"))
-		require.NoError(t, err)
+	b := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
 	}))
-	defer servers.Close()
+	defer b.Close()
 
-	mockDB := testutil.NewMockDatabaseService()
-	subID := "concurrent_sub"
-	mockDB.ListSourcesFunc = func(ctx context.Context) ([]database.Source, error) {
-		return []database.Source{
-			{ID: 1, Name: "test", Active: true, SubURL: servers.URL + "/sub/"},
+	db := testutil.NewMockDatabaseService()
+	db.GetSubscriptionWithPlanAndSourcesFunc = func(ctx context.Context, _ string) (*database.SubscriptionFull, error) {
+		return &database.SubscriptionFull{
+			Subscription: database.Subscription{ID: 1, Status: "active"},
+			Plan:         database.Plan{TrafficLimit: 1 << 30},
+			Sources: []database.Source{
+				{ID: 1, Name: "bad", Active: true, SubURL: b.URL + "/sub/"},
+			},
 		}, nil
 	}
-	mockDB.GetSubscriptionBySubscriptionIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
-		return &database.Subscription{
-			SubscriptionID: subscriptionID,
-			Status:         "active",
-		}, nil
-	}
+	srv := testServer(t, db, &config.Config{})
 
-	cfg := &config.Config{SubExtraServersEnabled: true}
-	subServer := subserver.NewService(cfg)
-	defer subServer.Stop()
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/sub/test123", nil)
+	srv.handleSubscription(w, r)
 
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subServer)
-
-	const numRequests = 5
-	var wg sync.WaitGroup
-	results := make(chan *httptest.ResponseRecorder, numRequests)
-
-	for i := 0; i < numRequests; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			req := httptest.NewRequest("GET", "/sub/"+subID, nil)
-			rec := httptest.NewRecorder()
-			srv.handleSubscription(rec, req)
-			results <- rec
-		}()
-	}
-
-	wg.Wait()
-	close(results)
-
-	successCount := 0
-	for rec := range results {
-		if rec.Code == http.StatusOK {
-			successCount++
-			assert.Contains(t, rec.Body.String(), "vless://concurrent@server.example.com:443")
-			assert.Equal(t, "upload=0; download=0; total=10737418240; expire=1234567890", rec.Header().Get("Subscription-Userinfo"))
-		}
-	}
-
-	assert.Equal(t, numRequests, successCount, "All concurrent requests should succeed")
+	assert.Equal(t, http.StatusNotFound, w.Code)
+	assert.Equal(t, "Subscription not found", w.Body.String())
 }
 
-func TestHandleSubscription_ExtraServersFileMissing(t *testing.T) {
+func TestHandleSubscription_CacheSubscriptionResult(t *testing.T) {
 	t.Parallel()
 
-	servers := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("vless://original@server.example.com:443"))
-	}))
-	defer servers.Close()
+	plainContent := "vless://cached@x.com:443"
 
-	mockDB := testutil.NewMockDatabaseService()
-	subID := "disabled_extra_sub"
-	mockDB.ListSourcesFunc = func(ctx context.Context) ([]database.Source, error) {
-		return []database.Source{
-			{ID: 1, Name: "test", Active: true, SubURL: servers.URL + "/sub/"},
-		}, nil
-	}
-	mockDB.GetSubscriptionBySubscriptionIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
-		return &database.Subscription{
-			SubscriptionID: subscriptionID,
-			Status:         "active",
-		}, nil
-	}
-
-	cfg := &config.Config{
-		SubExtraServersEnabled: true,
-		SubExtraServersFile:    "/nonexistent/path/to/servers.txt",
-	}
-	subServer := subserver.NewService(cfg)
-	defer subServer.Stop()
-
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subServer)
-
-	req := httptest.NewRequest("GET", "/sub/"+subID, nil)
-	rec := httptest.NewRecorder()
-	srv.handleSubscription(rec, req)
-
-	assert.Equal(t, http.StatusOK, rec.Code)
-	assert.Equal(t, "vless://original@server.example.com:443", rec.Body.String())
-}
-
-func TestHandleSubscription_NoExtraServersWhenDisabled(t *testing.T) {
-	t.Parallel()
-
-	servers := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("vless://original@server.example.com:443"))
-	}))
-	defer servers.Close()
-
-	tmpDir := t.TempDir()
-	serversFile := filepath.Join(tmpDir, "extra.txt")
-	err := os.WriteFile(serversFile, []byte("vless://extra@extra.example.com:443\n"), 0600)
-	require.NoError(t, err)
-
-	mockDB := testutil.NewMockDatabaseService()
-	subID := "disabled_extra_sub"
-	mockDB.ListSourcesFunc = func(ctx context.Context) ([]database.Source, error) {
-		return []database.Source{
-			{ID: 1, Name: "test", Active: true, SubURL: servers.URL + "/sub/"},
-		}, nil
-	}
-	mockDB.GetSubscriptionBySubscriptionIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
-		return &database.Subscription{
-			SubscriptionID: subscriptionID,
-			Status:         "active",
-		}, nil
-	}
-
-	cfg := &config.Config{
-		SubExtraServersEnabled: false,
-		SubExtraServersFile:    serversFile,
-	}
-	subServer := subserver.NewService(cfg)
-	defer subServer.Stop()
-
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subServer)
-
-	req := httptest.NewRequest("GET", "/sub/"+subID, nil)
-	rec := httptest.NewRecorder()
-	srv.handleSubscription(rec, req)
-
-	assert.Equal(t, http.StatusOK, rec.Code)
-	assert.Equal(t, "vless://original@server.example.com:443", rec.Body.String())
-	assert.NotContains(t, rec.Body.String(), "vless://extra@extra.example.com:443")
-}
-
-func TestHandleSubscription_CacheStoresMergedResult(t *testing.T) {
-	t.Parallel()
-
-	servers := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, err := w.Write([]byte("vless://original@server.example.com:443"))
-		require.NoError(t, err)
-	}))
-	defer servers.Close()
-
-	tmpDir := t.TempDir()
-	serversFile := filepath.Join(tmpDir, "extra.txt")
-	err := os.WriteFile(serversFile, []byte("vless://extra@extra.example.com:443\n"), 0600)
-	require.NoError(t, err)
-
-	mockDB := testutil.NewMockDatabaseService()
-	subID := "cache_merge_sub"
-	mockDB.ListSourcesFunc = func(ctx context.Context) ([]database.Source, error) {
-		return []database.Source{
-			{ID: 1, Name: "test", Active: true, SubURL: servers.URL + "/sub/"},
-		}, nil
-	}
-	mockDB.GetSubscriptionBySubscriptionIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
-		return &database.Subscription{
-			SubscriptionID: subscriptionID,
-			Status:         "active",
-		}, nil
-	}
-
-	cfg := &config.Config{
-		SubExtraServersEnabled: true,
-		SubExtraServersFile:    serversFile,
-	}
-	subServer := subserver.NewService(cfg)
-	defer subServer.Stop()
-
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subServer)
-
-	req := httptest.NewRequest("GET", "/sub/"+subID, nil)
-	rec := httptest.NewRecorder()
-	srv.handleSubscription(rec, req)
-
-	assert.Equal(t, http.StatusOK, rec.Code)
-	assert.Contains(t, rec.Body.String(), "vless://original@server.example.com:443")
-	assert.Contains(t, rec.Body.String(), "vless://extra@extra.example.com:443")
-
-	servers.Close()
-
-	req2 := httptest.NewRequest("GET", "/sub/"+subID, nil)
-	rec2 := httptest.NewRecorder()
-	srv.handleSubscription(rec2, req2)
-
-	assert.Equal(t, http.StatusOK, rec2.Code)
-	assert.Contains(t, rec2.Body.String(), "vless://original@server.example.com:443")
-	assert.Contains(t, rec2.Body.String(), "vless://extra@extra.example.com:443")
-}
-
-func TestHandleSubscription_EmptyBodyFromXUI(t *testing.T) {
-	t.Parallel()
-
-	servers := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, err := w.Write([]byte("vless://original@server.example.com:443"))
-		require.NoError(t, err)
-	}))
-	defer servers.Close()
-
-	mockDB := testutil.NewMockDatabaseService()
-	subID := "empty_body_sub"
-	mockDB.ListSourcesFunc = func(ctx context.Context) ([]database.Source, error) {
-		return []database.Source{
-			{ID: 1, Name: "test", Active: true, SubURL: servers.URL + "/sub/"},
-		}, nil
-	}
-	mockDB.GetSubscriptionBySubscriptionIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
-		return &database.Subscription{
-			SubscriptionID: subscriptionID,
-			Status:         "active",
-		}, nil
-	}
-
-	cfg := &config.Config{SubExtraServersEnabled: true}
-	subServer := subserver.NewService(cfg)
-	defer subServer.Stop()
-
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subServer)
-
-	req := httptest.NewRequest("GET", "/sub/"+subID, nil)
-	rec := httptest.NewRecorder()
-	srv.handleSubscription(rec, req)
-
-	assert.Equal(t, http.StatusOK, rec.Code)
-}
-
-func TestHandleSubscription_CorruptDataFromXUI(t *testing.T) {
-	t.Parallel()
-
-	// Simulate XUI returning corrupt/invalid subscription data
-	corruptBody := "this is not a valid subscription, just random text !!!"
-	servers := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, err := w.Write([]byte(corruptBody))
-		require.NoError(t, err)
-	}))
-	defer servers.Close()
-
-	mockDB := testutil.NewMockDatabaseService()
-	subID := "corrupt_data_sub"
-	mockDB.ListSourcesFunc = func(ctx context.Context) ([]database.Source, error) {
-		return []database.Source{
-			{ID: 1, Name: "test", Active: true, SubURL: servers.URL + "/sub/"},
-		}, nil
-	}
-	mockDB.GetSubscriptionBySubscriptionIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
-		return &database.Subscription{
-			SubscriptionID: subscriptionID,
-			Status:         "active",
-		}, nil
-	}
-
-	cfg := &config.Config{SubExtraServersEnabled: false}
-	subServer := subserver.NewService(cfg)
-	defer subServer.Stop()
-
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subServer)
-
-	req := httptest.NewRequest("GET", "/sub/"+subID, nil)
-	rec := httptest.NewRecorder()
-	srv.handleSubscription(rec, req)
-
-	// The proxy should pass through whatever XUI returns, even if corrupt
-	assert.Equal(t, http.StatusOK, rec.Code)
-	assert.Equal(t, corruptBody, rec.Body.String())
-}
-
-func TestHandleSubscription_CriticalHeadersPreserved(t *testing.T) {
-	t.Parallel()
-
-	servers := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Subscription-Userinfo", "upload=100; download=200; total=10737418240; expire=1700000000")
-		w.Header().Set("Profile-Update-Interval", "120")
-		w.Header().Set("Content-Disposition", "attachment; filename=sub.txt")
-		w.Header().Set("Profile-Title", "base64:TXkgVlBO")
-		w.Header().Set("Support-Url", "https://support.example.com")
-		w.WriteHeader(http.StatusOK)
-		_, err := w.Write([]byte("vless://server@example.com:443"))
-		require.NoError(t, err)
-	}))
-	defer servers.Close()
-
-	mockDB := testutil.NewMockDatabaseService()
-	subID := "headers_test_sub"
-	mockDB.ListSourcesFunc = func(ctx context.Context) ([]database.Source, error) {
-		return []database.Source{
-			{ID: 1, Name: "test", Active: true, SubURL: servers.URL + "/sub/"},
-		}, nil
-	}
-	mockDB.GetSubscriptionBySubscriptionIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
-		return &database.Subscription{
-			SubscriptionID: subscriptionID,
-			Status:         "active",
-		}, nil
-	}
-
-	cfg := &config.Config{SubExtraServersEnabled: true}
-	subServer := subserver.NewService(cfg)
-	defer subServer.Stop()
-
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subServer)
-
-	req := httptest.NewRequest("GET", "/sub/"+subID, nil)
-	rec := httptest.NewRecorder()
-	srv.handleSubscription(rec, req)
-
-	assert.Equal(t, http.StatusOK, rec.Code)
-	assert.Equal(t, "upload=100; download=200; total=10737418240; expire=1700000000", rec.Header().Get("Subscription-Userinfo"))
-	assert.Equal(t, "120", rec.Header().Get("Profile-Update-Interval"))
-	assert.Equal(t, "attachment; filename=sub.txt", rec.Header().Get("Content-Disposition"))
-	assert.Equal(t, "base64:TXkgVlBO", rec.Header().Get("Profile-Title"))
-	assert.Equal(t, "https://support.example.com", rec.Header().Get("Support-Url"))
-}
-
-func TestHandleSubscription_CriticalHeadersPreservedFromCache(t *testing.T) {
-	t.Parallel()
-
-	mockDB := testutil.NewMockDatabaseService()
-	subID := "empty_body_sub"
-	mockDB.GetSubscriptionBySubscriptionIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
-		return &database.Subscription{
-			SubscriptionID: subscriptionID,
-			Status:         "active",
-		}, nil
-	}
-
-	cfg := &config.Config{
-		SubExtraServersEnabled: true,
-		GlobalSubURL:           "http://localhost:0/sub/",
-	}
-	subServer := subserver.NewService(cfg)
-	defer subServer.Stop()
-
-	cachedBody := []byte("vless://cached@example.com:443")
-	cachedHeaders := map[string]string{
-		"Subscription-Userinfo":   "upload=0; download=0; total=5368709120; expire=1800000000",
-		"Profile-Update-Interval": "60",
-		"Content-Disposition":     "attachment; filename=vpn.txt",
-	}
-
-	subServer.SetCache(subID, cachedBody, cachedHeaders)
-
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subServer)
-
-	req := httptest.NewRequest("GET", "/sub/"+subID, nil)
-	rec := httptest.NewRecorder()
-	srv.handleSubscription(rec, req)
-
-	assert.Equal(t, http.StatusOK, rec.Code)
-	assert.Equal(t, "upload=0; download=0; total=5368709120; expire=1800000000", rec.Header().Get("Subscription-Userinfo"))
-	assert.Equal(t, "60", rec.Header().Get("Profile-Update-Interval"))
-	assert.Equal(t, "attachment; filename=vpn.txt", rec.Header().Get("Content-Disposition"))
-}
-
-func TestHandleSubscription_ExtraHeadersOverrideXUI(t *testing.T) {
-	t.Parallel()
-
-	servers := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Subscription-Userinfo", "upload=0; download=0; total=10737418240; expire=1234567890")
-		w.Header().Set("Profile-Title", "xui-title")
-		w.WriteHeader(http.StatusOK)
-		_, err := w.Write([]byte("vless://original@server.example.com:443"))
-		require.NoError(t, err)
-	}))
-	defer servers.Close()
-
-	tmpDir := t.TempDir()
-	serversFile := filepath.Join(tmpDir, "extra.txt")
-	err := os.WriteFile(serversFile, []byte("Profile-Title: custom-title\nX-Extra: extra-value\n\nvless://extra@extra.example.com:443\n"), 0600)
-	require.NoError(t, err)
-
-	mockDB := testutil.NewMockDatabaseService()
-	subID := "header_override_sub"
-	mockDB.ListSourcesFunc = func(ctx context.Context) ([]database.Source, error) {
-		return []database.Source{
-			{ID: 1, Name: "test", Active: true, SubURL: servers.URL + "/sub/"},
-		}, nil
-	}
-	mockDB.GetSubscriptionBySubscriptionIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
-		return &database.Subscription{
-			SubscriptionID: subscriptionID,
-			Status:         "active",
-		}, nil
-	}
-
-	cfg := &config.Config{
-		SubExtraServersEnabled: true,
-		SubExtraServersFile:    serversFile,
-	}
-	subServer := subserver.NewService(cfg)
-	defer subServer.Stop()
-
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subServer)
-
-	req := httptest.NewRequest("GET", "/sub/"+subID, nil)
-	rec := httptest.NewRecorder()
-	srv.handleSubscription(rec, req)
-
-	assert.Equal(t, http.StatusOK, rec.Code)
-	assert.Equal(t, "custom-title", rec.Header().Get("Profile-Title"))
-	assert.Equal(t, "extra-value", rec.Header().Get("X-Extra"))
-	assert.Equal(t, "upload=0; download=0; total=10737418240; expire=1234567890", rec.Header().Get("Subscription-Userinfo"))
-}
-
-func TestHandleSubscription_ConcurrentNotFound(t *testing.T) {
-	t.Parallel()
-
-	mockDB := testutil.NewMockDatabaseService()
 	callCount := 0
-	var mu sync.Mutex
-	mockDB.GetSubscriptionBySubscriptionIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
-		mu.Lock()
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		callCount++
-		mu.Unlock()
-		time.Sleep(10 * time.Millisecond)
-		return nil, gorm.ErrRecordNotFound
-	}
+		w.Write([]byte(plainContent))
+	}))
+	defer backend.Close()
 
-	cfg := &config.Config{SubExtraServersEnabled: true}
-	subServer := subserver.NewService(cfg)
-	defer subServer.Stop()
-
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subServer)
-
-	const numRequests = 5
-	var wg sync.WaitGroup
-	results := make(chan *httptest.ResponseRecorder, numRequests)
-
-	for i := 0; i < numRequests; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			req := httptest.NewRequest("GET", "/sub/nonexistent_sub", nil)
-			rec := httptest.NewRecorder()
-			srv.handleSubscription(rec, req)
-			results <- rec
-		}()
-	}
-
-	wg.Wait()
-	close(results)
-
-	for rec := range results {
-		assert.Equal(t, http.StatusNotFound, rec.Code)
-	}
-
-	mu.Lock()
-	count := callCount
-	mu.Unlock()
-	// singleflight should deduplicate: expect 1 call in ideal case,
-	// but allow up to numRequests in race conditions (no dedup at all)
-	assert.LessOrEqual(t, count, numRequests, "DB calls should not exceed number of requests")
-	if count == 1 {
-		t.Log("singleflight deduplicated all DB queries (optimal)")
-	} else {
-		t.Logf("singleflight partial dedup: %d/%d DB calls", count, numRequests)
-	}
-}
-
-func TestHandleSubscription_RevokedSubscription(t *testing.T) {
-	t.Parallel()
-
-	mockDB := testutil.NewMockDatabaseService()
-	mockDB.GetSubscriptionBySubscriptionIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
-		return &database.Subscription{
-			SubscriptionID: subscriptionID,
-			Status:         "revoked",
+	db := testutil.NewMockDatabaseService()
+	db.GetSubscriptionWithPlanAndSourcesFunc = func(ctx context.Context, _ string) (*database.SubscriptionFull, error) {
+		return &database.SubscriptionFull{
+			Subscription: database.Subscription{ID: 1, Status: "active"},
+			Plan:         database.Plan{TrafficLimit: 1 << 30},
+			Sources: []database.Source{
+				{ID: 1, Name: "src", Active: true, SubURL: backend.URL + "/sub/"},
+			},
 		}, nil
 	}
+	srv := testServer(t, db, &config.Config{})
 
-	cfg := &config.Config{SubExtraServersEnabled: true}
-	subServer := subserver.NewService(cfg)
-	defer subServer.Stop()
+	w1 := httptest.NewRecorder()
+	r1 := httptest.NewRequest(http.MethodGet, "/sub/test123", nil)
+	srv.handleSubscription(w1, r1)
+	assert.Equal(t, http.StatusOK, w1.Code)
 
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subServer)
+	w2 := httptest.NewRecorder()
+	r2 := httptest.NewRequest(http.MethodGet, "/sub/test123", nil)
+	srv.handleSubscription(w2, r2)
+	assert.Equal(t, http.StatusOK, w2.Code)
 
-	req := httptest.NewRequest("GET", "/sub/abc123", nil)
-	rec := httptest.NewRecorder()
-	srv.handleSubscription(rec, req)
-
-	assert.Equal(t, http.StatusNotFound, rec.Code)
-	assert.Contains(t, rec.Body.String(), "not found")
+	assert.Equal(t, 1, callCount, "backend should only be called once (cached per source URL)")
 }
 
-func TestHandleSubscription_ExpiredSubscription(t *testing.T) {
+func TestHandleSubscription_DevicesTracking(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewMockDatabaseService()
-	mockDB.GetSubscriptionBySubscriptionIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
-		return &database.Subscription{
-			SubscriptionID: subscriptionID,
-			Status:         "expired",
+	plainContent := "vless://dev@x.com:443"
+
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(plainContent))
+	}))
+	defer backend.Close()
+
+	var savedDevices string
+	db := testutil.NewMockDatabaseService()
+	db.GetSubscriptionWithPlanAndSourcesFunc = func(ctx context.Context, _ string) (*database.SubscriptionFull, error) {
+		return &database.SubscriptionFull{
+			Subscription: database.Subscription{ID: 1, Status: "active"},
+			Plan:         database.Plan{TrafficLimit: 1 << 30},
+			Sources: []database.Source{
+				{ID: 1, Name: "src", Active: true, SubURL: backend.URL + "/sub/"},
+			},
 		}, nil
 	}
+	db.UpdateSubscriptionDevicesFunc = func(ctx context.Context, id uint, devicesJSON string) error {
+		savedDevices = devicesJSON
+		return nil
+	}
+	srv := testServer(t, db, &config.Config{})
 
-	cfg := &config.Config{SubExtraServersEnabled: true}
-	subServer := subserver.NewService(cfg)
-	defer subServer.Stop()
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/sub/test123", nil)
+	r.Header.Set("X-HWID", "device1")
+	r.Header.Set("User-Agent", "v2rayN/1.0")
+	srv.handleSubscription(w, r)
 
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subServer)
-
-	req := httptest.NewRequest("GET", "/sub/abc123", nil)
-	rec := httptest.NewRecorder()
-	srv.handleSubscription(rec, req)
-
-	assert.Equal(t, http.StatusNotFound, rec.Code)
-	assert.Contains(t, rec.Body.String(), "not found")
+	require.NotEmpty(t, savedDevices, "devices should have been saved")
+	var devices []map[string]string
+	err := json.Unmarshal([]byte(savedDevices), &devices)
+	require.NoError(t, err)
+	require.Len(t, devices, 1)
+	assert.Equal(t, "device1", devices[0]["x-hwid"])
+	assert.Equal(t, "v2rayn/1.0", devices[0]["user-agent"])
 }
 
-func TestHandleSubscription_RevokedSubscription_CacheHit(t *testing.T) {
+func TestHandleSubscription_SourceWithoutSubURL(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewMockDatabaseService()
-	subID := "revoked_cached_sub"
-	mockDB.GetSubscriptionBySubscriptionIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
-		return &database.Subscription{
-			SubscriptionID: subscriptionID,
-			Status:         "revoked",
+	db := testutil.NewMockDatabaseService()
+	db.GetSubscriptionWithPlanAndSourcesFunc = func(ctx context.Context, _ string) (*database.SubscriptionFull, error) {
+		return &database.SubscriptionFull{
+			Subscription: database.Subscription{ID: 1, Status: "active"},
+			Plan:         database.Plan{TrafficLimit: 1 << 30},
+			Sources: []database.Source{
+				{ID: 1, Name: "nosuburl", Active: true, SubURL: ""},
+			},
 		}, nil
 	}
+	srv := testServer(t, db, &config.Config{})
 
-	cfg := &config.Config{SubExtraServersEnabled: true}
-	subServer := subserver.NewService(cfg)
-	defer subServer.Stop()
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/sub/test123", nil)
+	srv.handleSubscription(w, r)
 
-	// Simulate stale cache entry from when subscription was active
-	cachedBody := []byte("vless://cached-server@cache.example.com:443")
-	cachedHeaders := map[string]string{
-		"Content-Type": "text/plain; charset=utf-8",
-	}
-	subServer.SetCache(subID, cachedBody, cachedHeaders)
-
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subServer)
-
-	req := httptest.NewRequest("GET", "/sub/"+subID, nil)
-	rec := httptest.NewRecorder()
-	srv.handleSubscription(rec, req)
-
-	// Should return 404 even though cache has data, because subscription is revoked
-	assert.Equal(t, http.StatusNotFound, rec.Code)
-	assert.Contains(t, rec.Body.String(), "not found")
-
-	// Verify cache was invalidated
-	_, _, ok := subServer.GetCache(subID)
-	assert.False(t, ok, "cache should be invalidated for revoked subscription")
+	assert.Equal(t, http.StatusNotFound, w.Code)
+	assert.Equal(t, "Subscription not found", w.Body.String())
 }
 
-func TestHandleSubscription_ExpiredByTime_CacheHit(t *testing.T) {
+func TestHandleSubscription_Base64EncodedSource(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewMockDatabaseService()
-	subID := "time_expired_cached_sub"
-	pastTime := time.Now().Add(-24 * time.Hour)
-	mockDB.GetSubscriptionBySubscriptionIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
-		return &database.Subscription{
-			SubscriptionID: subscriptionID,
-			Status:         "active",
-			ExpiryTime:     pastTime,
+	encoded := base64.StdEncoding.EncodeToString([]byte("vless://b64@x.com:443\nvmess://b64@y.com:443"))
+
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Subscription-UserInfo", "upload=10; download=20; total=100; expire=555")
+		w.Write([]byte(encoded))
+	}))
+	defer backend.Close()
+
+	db := testutil.NewMockDatabaseService()
+	db.GetSubscriptionWithPlanAndSourcesFunc = func(ctx context.Context, _ string) (*database.SubscriptionFull, error) {
+		return &database.SubscriptionFull{
+			Subscription: database.Subscription{ID: 1, Status: "active"},
+			Plan:         database.Plan{TrafficLimit: 1 << 30},
+			Sources: []database.Source{
+				{ID: 1, Name: "b64src", Active: true, SubURL: backend.URL + "/sub/"},
+			},
 		}, nil
 	}
+	srv := testServer(t, db, &config.Config{})
 
-	cfg := &config.Config{SubExtraServersEnabled: true}
-	subServer := subserver.NewService(cfg)
-	defer subServer.Stop()
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/sub/test123", nil)
+	srv.handleSubscription(w, r)
 
-	// Simulate stale cache entry
-	cachedBody := []byte("vless://cached-server@cache.example.com:443")
-	cachedHeaders := map[string]string{
-		"Content-Type": "text/plain; charset=utf-8",
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(w.Body.String()))
+	require.NoError(t, err)
+	body := string(decoded)
+
+	assert.Contains(t, body, "vless://b64@x.com:443")
+	assert.Contains(t, body, "vmess://b64@y.com:443")
+}
+
+func init() {
+	if err := testutil.InitLogger(nil); err != nil {
+		fmt.Fprintln(os.Stderr, "Failed to initialize logger:", err)
 	}
-	subServer.SetCache(subID, cachedBody, cachedHeaders)
-
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, subServer)
-
-	req := httptest.NewRequest("GET", "/sub/"+subID, nil)
-	rec := httptest.NewRecorder()
-	srv.handleSubscription(rec, req)
-
-	// Should return 404 because subscription has expired by time
-	assert.Equal(t, http.StatusNotFound, rec.Code)
-	assert.Contains(t, rec.Body.String(), "not found")
-
-	// Verify cache was invalidated
-	_, _, ok := subServer.GetCache(subID)
-	assert.False(t, ok, "cache should be invalidated for expired subscription")
 }

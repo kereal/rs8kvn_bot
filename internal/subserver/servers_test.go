@@ -1,132 +1,143 @@
 package subserver
 
 import (
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func TestLoadExtraConfig_EmptyPath(t *testing.T) {
+func TestConvertJSONToShareLinks_VLESS(t *testing.T) {
 	t.Parallel()
 
-	cfg, err := LoadExtraConfig("")
-	assert.NoError(t, err)
-	assert.Nil(t, cfg)
+	body := []byte(`{
+		"type": "vless",
+		"address": "server.example.com",
+		"port": 443,
+		"uuid": "b0504246-8d12-4f96-a1c4-e6e9c65a7d70",
+		"encryption": "none",
+		"flow": "xtls-rprx-vision",
+		"security": "tls",
+		"sni": "proxy.example.com",
+		"network": "tcp",
+		"remark": "VIP"
+	}`)
+
+	links, err := ConvertJSONToShareLinks(body)
+	require.NoError(t, err)
+	require.Len(t, links, 1)
+	assert.Contains(t, links[0], "vless://b0504246-8d12-4f96-a1c4-e6e9c65a7d70@server.example.com:443")
+	assert.Contains(t, links[0], "flow=xtls-rprx-vision")
+	assert.Contains(t, links[0], "security=tls")
+	assert.Contains(t, links[0], "sni=proxy.example.com")
+	assert.Contains(t, links[0], "encryption=none")
+	assert.Contains(t, links[0], "#VIP")
 }
 
-func TestLoadExtraConfig_HeadersAndServers(t *testing.T) {
+func TestConvertJSONToShareLinks_VMess(t *testing.T) {
 	t.Parallel()
 
-	content := `X-Custom-Header: custom-value
-Profile-Title: My VPN
-# This is a comment
+	body := []byte(`{
+		"type": "vmess",
+		"address": "vmess.example.com",
+		"port": 8443,
+		"uuid": "cf7d6e8a-e7f3-4c96-b1a2-d8e9f0a1b2c3",
+		"network": "ws",
+		"host": "cdn.example.com",
+		"path": "/ws",
+		"tls": "tls",
+		"remark": "VMess-Node"
+	}`)
 
-vless://abc123@server1.example.com:443
-vmess://base64data
-trojan://password@server2.example.com:443
-
-ss://base64@server3.example.com:8080
-`
-	tmpDir := t.TempDir()
-	filePath := filepath.Join(tmpDir, "config.txt")
-	err := os.WriteFile(filePath, []byte(content), 0600)
+	links, err := ConvertJSONToShareLinks(body)
 	require.NoError(t, err)
-
-	cfg, err := LoadExtraConfig(filePath)
-	require.NoError(t, err)
-
-	assert.Equal(t, "custom-value", cfg.Headers["X-Custom-Header"])
-	assert.Equal(t, "My VPN", cfg.Headers["Profile-Title"])
-	assert.Len(t, cfg.Servers, 4)
-	assert.Equal(t, "vless://abc123@server1.example.com:443", cfg.Servers[0])
-	assert.Equal(t, "vmess://base64data", cfg.Servers[1])
-	assert.Equal(t, "trojan://password@server2.example.com:443", cfg.Servers[2])
-	assert.Equal(t, "ss://base64@server3.example.com:8080", cfg.Servers[3])
+	require.Len(t, links, 1)
+	assert.Contains(t, links[0], "vmess://")
 }
 
-func TestLoadExtraConfig_OnlyHeaders(t *testing.T) {
+func TestConvertJSONToShareLinks_Trojan(t *testing.T) {
 	t.Parallel()
 
-	content := `X-Custom: value
-# comment
-`
-	tmpDir := t.TempDir()
-	filePath := filepath.Join(tmpDir, "config.txt")
-	err := os.WriteFile(filePath, []byte(content), 0600)
-	require.NoError(t, err)
+	body := []byte(`{
+		"type": "trojan",
+		"address": "trojan.example.com",
+		"port": 443,
+		"password": "trojan-pass",
+		"sni": "real.example.com",
+		"remark": "Trojan"
+	}`)
 
-	cfg, err := LoadExtraConfig(filePath)
+	links, err := ConvertJSONToShareLinks(body)
 	require.NoError(t, err)
-
-	assert.Equal(t, "value", cfg.Headers["X-Custom"])
-	assert.Empty(t, cfg.Servers)
+	require.Len(t, links, 1)
+	assert.Contains(t, links[0], "trojan://trojan-pass@trojan.example.com:443")
+	assert.Contains(t, links[0], "sni=real.example.com")
+	assert.Contains(t, links[0], "#Trojan")
 }
 
-func TestLoadExtraConfig_OnlyServers(t *testing.T) {
+func TestConvertJSONToShareLinks_Shadowsocks(t *testing.T) {
 	t.Parallel()
 
-	content := `
-vless://server@example.com:443
-trojan://pass@server2.com:443
-`
-	tmpDir := t.TempDir()
-	filePath := filepath.Join(tmpDir, "config.txt")
-	err := os.WriteFile(filePath, []byte(content), 0600)
-	require.NoError(t, err)
+	body := []byte(`{
+		"type": "ss",
+		"address": "ss.example.com",
+		"port": 8388,
+		"method": "chacha20-ietf-poly1305",
+		"password": "ss-password",
+		"remark": "SS-Node"
+	}`)
 
-	cfg, err := LoadExtraConfig(filePath)
+	links, err := ConvertJSONToShareLinks(body)
 	require.NoError(t, err)
-
-	assert.Empty(t, cfg.Headers)
-	assert.Len(t, cfg.Servers, 2)
+	require.Len(t, links, 1)
+	assert.Contains(t, links[0], "ss://")
 }
 
-func TestLoadExtraConfig_FileNotFound(t *testing.T) {
+func TestConvertJSONToShareLinks_JSONArray(t *testing.T) {
 	t.Parallel()
 
-	_, err := LoadExtraConfig("/nonexistent/path/config.txt")
+	body := []byte(`[
+		{
+			"type": "vless",
+			"address": "s1.example.com",
+			"port": 443,
+			"uuid": "11111111-1111-1111-1111-111111111111",
+			"encryption": "none",
+			"remark": "Server1"
+		},
+		{
+			"type": "trojan",
+			"address": "s2.example.com",
+			"port": 8443,
+			"password": "pass2",
+			"remark": "Server2"
+		}
+	]`)
+
+	links, err := ConvertJSONToShareLinks(body)
+	require.NoError(t, err)
+	require.Len(t, links, 2)
+	assert.Contains(t, links[0], "vless://")
+	assert.Contains(t, links[1], "trojan://")
+}
+
+func TestConvertJSONToShareLinks_InvalidJSON(t *testing.T) {
+	t.Parallel()
+
+	_, err := ConvertJSONToShareLinks([]byte("not-json"))
 	assert.Error(t, err)
 }
 
-func TestLoadExtraConfig_InvalidLines(t *testing.T) {
+func TestConvertJSONToShareLinks_UnsupportedType(t *testing.T) {
 	t.Parallel()
 
-	content := `X-Valid: header
-not-a-valid-header-or-server
-vless://valid@server.com:443
-http://not-a-proxy-link
-`
-	tmpDir := t.TempDir()
-	filePath := filepath.Join(tmpDir, "config.txt")
-	err := os.WriteFile(filePath, []byte(content), 0600)
+	body := []byte(`{
+		"type": "unknown-proto",
+		"address": "x.example.com",
+		"port": 1234
+	}`)
+
+	links, err := ConvertJSONToShareLinks(body)
 	require.NoError(t, err)
-
-	cfg, err := LoadExtraConfig(filePath)
-	require.NoError(t, err)
-
-	assert.Equal(t, "header", cfg.Headers["X-Valid"])
-	assert.Len(t, cfg.Servers, 1)
-	assert.Equal(t, "vless://valid@server.com:443", cfg.Servers[0])
-}
-
-func TestLoadExtraConfig_HeaderOverride(t *testing.T) {
-	t.Parallel()
-
-	content := `X-Duplicate: first
-X-Duplicate: second
-
-vless://server@example.com:443
-`
-	tmpDir := t.TempDir()
-	filePath := filepath.Join(tmpDir, "config.txt")
-	err := os.WriteFile(filePath, []byte(content), 0600)
-	require.NoError(t, err)
-
-	cfg, err := LoadExtraConfig(filePath)
-	require.NoError(t, err)
-
-	assert.Equal(t, "second", cfg.Headers["X-Duplicate"])
+	assert.Empty(t, links)
 }
