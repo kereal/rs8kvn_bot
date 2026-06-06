@@ -8,12 +8,15 @@ import (
 	"rs8kvn_bot/internal/metrics"
 )
 
+// cacheEntry holds a cached response body with its expiry time.
 type cacheEntry struct {
 	body      []byte
-	headers   map[string]string
 	expiresAt time.Time
 }
 
+// Cache is an in-memory TTL cache for subscription responses.
+// It provides concurrent-safe Get/Set/Delete and runs a background goroutine
+// that evicts expired entries at half-TTL intervals.
 type Cache struct {
 	mu      sync.RWMutex
 	entries map[string]*cacheEntry
@@ -21,6 +24,7 @@ type Cache struct {
 	stopCh  chan struct{}
 }
 
+// NewCache creates a new Cache with the given TTL and starts the cleanup loop.
 func NewCache(ttl time.Duration) *Cache {
 	c := &Cache{
 		entries: make(map[string]*cacheEntry),
@@ -31,50 +35,44 @@ func NewCache(ttl time.Duration) *Cache {
 	return c
 }
 
-func (c *Cache) Get(key string) ([]byte, map[string]string, bool) {
+// Get returns the cached body for key and true, or nil and false on miss/expiry.
+func (c *Cache) Get(key string) ([]byte, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
 	entry, ok := c.entries[key]
 	if !ok {
 		metrics.CacheMissesTotal.WithLabelValues("subserver").Inc()
-		return nil, nil, false
+		return nil, false
 	}
 	if time.Now().After(entry.expiresAt) {
 		metrics.CacheMissesTotal.WithLabelValues("subserver").Inc()
-		return nil, nil, false
+		return nil, false
 	}
 
-	headersCopy := make(map[string]string, len(entry.headers))
-	for k, v := range entry.headers {
-		headersCopy[k] = v
-	}
 	metrics.CacheHitsTotal.WithLabelValues("subserver").Inc()
-	return entry.body, headersCopy, true
+	return bytes.Clone(entry.body), true
 }
 
-func (c *Cache) Set(key string, body []byte, headers map[string]string) {
+// Set stores body under key with the cache TTL.
+func (c *Cache) Set(key string, body []byte) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	headersCopy := make(map[string]string, len(headers))
-	for k, v := range headers {
-		headersCopy[k] = v
-	}
-
 	c.entries[key] = &cacheEntry{
 		body:      bytes.Clone(body),
-		headers:   headersCopy,
 		expiresAt: time.Now().Add(c.ttl),
 	}
 }
 
+// Delete removes the entry for key from the cache.
 func (c *Cache) Delete(key string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	delete(c.entries, key)
 }
 
+// cleanupLoop periodically evicts expired entries every TTL/2.
 func (c *Cache) cleanupLoop() {
 	ticker := time.NewTicker(c.ttl / 2)
 	defer ticker.Stop()
@@ -89,6 +87,7 @@ func (c *Cache) cleanupLoop() {
 	}
 }
 
+// cleanup removes all expired entries from the cache.
 func (c *Cache) cleanup() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -101,6 +100,7 @@ func (c *Cache) cleanup() {
 	}
 }
 
+// Stop shuts down the background cleanup loop.
 func (c *Cache) Stop() {
 	close(c.stopCh)
 }

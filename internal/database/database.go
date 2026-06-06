@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"embed"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -50,6 +51,8 @@ type Subscription struct {
 	InviteCode     string    `gorm:"size:16;index"`
 	PlanID         uint      `gorm:"index"`
 	ReferredBy     int64     `gorm:"index"`
+	Devices        string    `gorm:"type:text;default:'[]'"` // JSON array of {header_key: value} device entries
+	Ips            string    `gorm:"type:text;default:'[]'"` // JSON array of {ip: timestamp} entries
 	CreatedAt      time.Time `gorm:"autoCreateTime"`
 	UpdatedAt      time.Time `gorm:"autoUpdateTime"`
 }
@@ -141,6 +144,57 @@ func (s *Subscription) IsExpired() bool {
 // IsActive returns true if the subscription is active and not expired.
 func (s *Subscription) IsActive() bool {
 	return s.Status == "active" && !s.IsExpired()
+}
+
+// GetDevices parses the Devices JSON string into a slice of header maps.
+func (s *Subscription) GetDevices() ([]map[string]string, error) {
+	if s.Devices == "" {
+		return []map[string]string{}, nil
+	}
+	var devices []map[string]string
+	if err := json.Unmarshal([]byte(s.Devices), &devices); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal devices: %w", err)
+	}
+	return devices, nil
+}
+
+// SetDevices serializes a slice of header maps into the Devices JSON string.
+func (s *Subscription) SetDevices(devices []map[string]string) error {
+	data, err := json.Marshal(devices)
+	if err != nil {
+		return fmt.Errorf("failed to marshal devices: %w", err)
+	}
+	s.Devices = string(data)
+	return nil
+}
+
+// GetIPs parses the Ips JSON string into a slice of ip->timestamp maps.
+func (s *Subscription) GetIPs() ([]map[string]string, error) {
+	if s.Ips == "" {
+		return []map[string]string{}, nil
+	}
+	var ips []map[string]string
+	if err := json.Unmarshal([]byte(s.Ips), &ips); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal ips: %w", err)
+	}
+	return ips, nil
+}
+
+// SetIPs serializes a slice of ip->timestamp maps into the Ips JSON string.
+func (s *Subscription) SetIPs(ips []map[string]string) error {
+	data, err := json.Marshal(ips)
+	if err != nil {
+		return fmt.Errorf("failed to marshal ips: %w", err)
+	}
+	s.Ips = string(data)
+	return nil
+}
+
+// SubscriptionFull holds a subscription together with its plan and active sources.
+type SubscriptionFull struct {
+	Subscription
+	Plan    Plan
+	Sources []Source
 }
 
 // runMigrations applies the embedded SQL schema migrations to the provided database,
@@ -419,7 +473,7 @@ func (s *Service) CreateSubscription(ctx context.Context, sub *Subscription, inv
 func (s *Service) UpdateSubscription(ctx context.Context, sub *Subscription) error {
 	result := s.db.WithContext(ctx).Model(&Subscription{}).
 		Where("id = ?", sub.ID).
-		Select("telegram_id", "username", "client_id", "subscription_id", "expiry_time", "status", "invite_code", "plan_id", "referred_by").
+		Select("telegram_id", "username", "client_id", "subscription_id", "expiry_time", "status", "invite_code", "plan_id", "referred_by", "devices", "ips").
 		Updates(sub)
 	if result.Error != nil {
 		return fmt.Errorf("failed to update subscription: %w", result.Error)
@@ -427,7 +481,7 @@ func (s *Service) UpdateSubscription(ctx context.Context, sub *Subscription) err
 	return nil
 }
 
-// DeleteSubscription soft-deletes a subscription.
+// DeleteSubscription deletes a subscription.
 func (s *Service) DeleteSubscription(ctx context.Context, telegramID int64) error {
 	result := s.db.WithContext(ctx).Where("telegram_id = ?", telegramID).Delete(&Subscription{})
 	if result.Error != nil {
@@ -790,6 +844,51 @@ func (s *Service) GetSubscriptionBySubscriptionID(ctx context.Context, subscript
 		return nil, fmt.Errorf("failed to get subscription by subscription_id: %w", result.Error)
 	}
 	return &sub, nil
+}
+
+// GetSubscriptionWithPlanAndSources returns a subscription (status=active) by subscription ID
+// together with its plan and active sources, via JOINs through plan_sources.
+func (s *Service) GetSubscriptionWithPlanAndSources(ctx context.Context, subscriptionID string) (*SubscriptionFull, error) {
+	var result SubscriptionFull
+
+	subQuery := s.db.WithContext(ctx).Where("subscription_id = ? AND status = ?", subscriptionID, "active")
+
+	if err := subQuery.First(&result.Subscription).Error; err != nil {
+		return nil, fmt.Errorf("failed to get subscription: %w", err)
+	}
+
+	if err := s.db.WithContext(ctx).First(&result.Plan, result.Subscription.PlanID).Error; err != nil {
+		return nil, fmt.Errorf("failed to get plan: %w", err)
+	}
+
+	if err := s.db.WithContext(ctx).
+		Table("sources").
+		Select("sources.*").
+		Joins("JOIN plan_sources ON plan_sources.source_id = sources.id").
+		Where("plan_sources.plan_id = ? AND sources.active = ?", result.Plan.ID, true).
+		Find(&result.Sources).Error; err != nil {
+		return nil, fmt.Errorf("failed to get sources: %w", err)
+	}
+
+	return &result, nil
+}
+
+// UpdateSubscriptionDevices updates only the devices JSON column for a subscription.
+func (s *Service) UpdateSubscriptionDevices(ctx context.Context, id uint, devicesJSON string) error {
+	result := s.db.WithContext(ctx).Model(&Subscription{}).Where("id = ?", id).Update("devices", devicesJSON)
+	if result.Error != nil {
+		return fmt.Errorf("failed to update subscription devices: %w", result.Error)
+	}
+	return nil
+}
+
+// UpdateSubscriptionIPs updates only the ips JSON column for a subscription.
+func (s *Service) UpdateSubscriptionIPs(ctx context.Context, id uint, ipsJSON string) error {
+	result := s.db.WithContext(ctx).Model(&Subscription{}).Where("id = ?", id).Update("ips", ipsJSON)
+	if result.Error != nil {
+		return fmt.Errorf("failed to update subscription ips: %w", result.Error)
+	}
+	return nil
 }
 
 // GetTrialSubscriptionBySubID returns a trial subscription by its subscription ID.

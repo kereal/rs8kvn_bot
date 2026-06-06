@@ -78,8 +78,9 @@ const (
 
 // Subscription server Constants
 const (
-	// SubProxyCacheTTL is the TTL for cached subscription responses
-	SubProxyCacheTTL = 240 * time.Second
+	// SubServerCacheTTL is the TTL for cached subscription responses (4 minutes).
+	// This applies to both per-subscription and per-source-URL cache entries.
+	SubServerCacheTTL = 240 * time.Second
 )
 
 // Backup Constants

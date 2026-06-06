@@ -289,7 +289,7 @@ func main() {
 	subService := service.NewSubscriptionService(dbService, xuiClients, sources, cfg, cfg.GlobalSubURL, webhookSender)
 
 	// Create Subscription server service
-	subServer := subserver.NewService(cfg)
+	subServer := subserver.NewService(config.SubServerCacheTTL)
 	defer subServer.Stop()
 
 	// Create bot handler
@@ -353,18 +353,11 @@ func main() {
 	handler.StartRateLimiterCleanup(ctx, bot.CacheTTL, bot.CacheTTL*2)
 	handler.StartReferralCacheSync(ctx)
 
-	// wg tracks exactly these 5 long-lived background workers.
+	// wg tracks exactly these 4 long-lived background workers.
 	// All of them must exit (via ctx cancellation) before main returns,
 	// so we wait on wg at the end of graceful shutdown.
 	var wg sync.WaitGroup
-	wg.Add(5)
-
-	// Start Subscription server extra servers reload loop (every 5 minutes)
-	go func() {
-		defer recoverAndReport("SubServer server reload")
-		defer wg.Done()
-		subServer.StartReloadLoop(5*time.Minute, ctx.Done())
-	}()
+	wg.Add(4)
 
 	// Start orphaned XUI client reconciler (every 6 hours)
 	go func() {
