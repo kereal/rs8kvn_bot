@@ -275,10 +275,6 @@ func UpdateDevices(ctx context.Context, db interfaces.DatabaseService, subFull *
 		}
 		entry["timestamp"] = nowStr
 		devices = append(devices, entry)
-
-		if len(devices) > MaxDeviceEntries {
-			devices = devices[len(devices)-MaxDeviceEntries:]
-		}
 	}
 
 	if err := subFull.SetDevices(devices); err != nil {
