@@ -11,6 +11,7 @@ import (
 	"rs8kvn_bot/internal/interfaces"
 	"rs8kvn_bot/internal/service"
 	"rs8kvn_bot/internal/testutil"
+	"rs8kvn_bot/internal/utils"
 	"rs8kvn_bot/internal/webhook"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -24,7 +25,7 @@ import (
 func newTestAdminHandler(cfg *config.Config, mockDB *testutil.MockDatabaseService, mockXUI *testutil.MockXUIClient, mockBot *testutil.MockBotAPI) *Handler {
 	h := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
 	xuiClients := map[uint]interfaces.XUIClient{1: mockXUI}
-	sources := []database.Node{{ID: 1, IsActive: true,  Host: "http://localhost:2053", APIToken: "test-token", InboundID: 1, SubscriptionURL: "http://example.com/sub/"}}
+	sources := []database.Node{{ID: 1, IsActive: true, Host: "http://localhost:2053", APIToken: "test-token", InboundID: 1, SubscriptionURL: "http://example.com/sub/"}}
 	h.subscriptionService = service.NewSubscriptionService(mockDB, xuiClients, sources, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
 	// Wire cache invalidation for tests that manually set subscriptionService
 	h.subscriptionService.SetInvalidateFunc(h.cache.Invalidate)
@@ -100,7 +101,7 @@ func TestHandleDel_ValidDeletion(t *testing.T) {
 	mockBot := testutil.NewMockBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
 	xuiClients := map[uint]interfaces.XUIClient{1: mockXUI}
-	sources := []database.Node{{ID: 1, IsActive: true,  Host: "http://localhost:2053", APIToken: "test-token", InboundID: 1, SubscriptionURL: "http://example.com/sub/"}}
+	sources := []database.Node{{ID: 1, IsActive: true, Host: "http://localhost:2053", APIToken: "test-token", InboundID: 1, SubscriptionURL: "http://example.com/sub/"}}
 	handler.subscriptionService = service.NewSubscriptionService(mockDB, xuiClients, sources, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
 
 	sub := &database.Subscription{
@@ -1203,7 +1204,7 @@ func TestEscapeMarkdown(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := escapeMarkdown(tt.input)
+			result := utils.EscapeMarkdown(tt.input)
 			assert.Equal(t, tt.expected, result)
 		})
 	}

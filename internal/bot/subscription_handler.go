@@ -73,10 +73,10 @@ func (sh *SubscriptionHandler) handleCreateSubscription(ctx context.Context, cha
 			return fmt.Errorf("check subscription: %w", err)
 		}
 	} else if sub != nil {
-	trafficLimit := 0
-	if sh.h.subscriptionService != nil {
-		trafficLimit = sh.h.subscriptionService.PlanTrafficLimitGB(ctx, chatID)
-	}
+		trafficLimit := 0
+		if sh.h.subscriptionService != nil {
+			trafficLimit = sh.h.subscriptionService.PlanTrafficLimitGB(ctx, chatID)
+		}
 		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgSubCreatedSuccess, trafficLimit, sh.h.cfg.SubURL(sub.SubscriptionID)))
 		editMsg.ParseMode = "Markdown"
 		editMsg.DisableWebPagePreview = true

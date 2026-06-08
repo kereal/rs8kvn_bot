@@ -77,7 +77,7 @@ func TestHandleCallback_CallbackDataRouting(t *testing.T) {
 			},
 			setupSubService: func(mockDB *testutil.MockDatabaseService, mockXUI *testutil.MockXUIClient, cfg *config.Config) *service.SubscriptionService {
 				mockXUIClients := map[uint]interfaces.XUIClient{1: mockXUI}
-				sources := []database.Node{{ID: 1, Name: "main", IsActive: true,  Host: "http://example.com", APIToken: "token", InboundID: 1}}
+				sources := []database.Node{{ID: 1, Name: "main", IsActive: true, Host: "http://example.com", APIToken: "token", InboundID: 1}}
 				return service.NewSubscriptionService(mockDB, mockXUIClients, sources, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
 			},
 			wantSend: true,
@@ -166,7 +166,7 @@ func TestHandleCallback_CallbackDataRouting(t *testing.T) {
 			},
 			setupSubService: func(mockDB *testutil.MockDatabaseService, mockXUI *testutil.MockXUIClient, cfg *config.Config) *service.SubscriptionService {
 				mockXUIClients := map[uint]interfaces.XUIClient{1: mockXUI}
-				sources := []database.Node{{ID: 1, Name: "main", IsActive: true,  Host: "http://example.com", APIToken: "token", InboundID: 1}}
+				sources := []database.Node{{ID: 1, Name: "main", IsActive: true, Host: "http://example.com", APIToken: "token", InboundID: 1}}
 				return service.NewSubscriptionService(mockDB, mockXUIClients, sources, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
 			},
 			wantSend: true,
@@ -428,14 +428,13 @@ func TestHandleCallback_AdminLastReg_DatabaseError(t *testing.T) {
 func TestHandleCallback_MenuSubscription_NoSubscription(t *testing.T) {
 	t.Parallel()
 
-	cfg := &config.Config{
-	}
+	cfg := &config.Config{}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
 	mockXUIClients := map[uint]interfaces.XUIClient{1: mockXUI}
-	sources := []database.Node{{ID: 1, Name: "main", IsActive: true,  Host: "http://example.com", APIToken: "token", InboundID: 1}}
+	sources := []database.Node{{ID: 1, Name: "main", IsActive: true, Host: "http://example.com", APIToken: "token", InboundID: 1}}
 	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUIClients, sources, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
 	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
 
@@ -580,7 +579,7 @@ func TestHandleCallback_CreateSubscription_DatabaseError(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{
-		Sources:        []config.Source{{Name: "main", XUIHost: "http://example.com", XUIAPIToken: "token", XUIInboundID: 1}},
+		Sources: []config.Source{{Name: "main", XUIHost: "http://example.com", XUIAPIToken: "token", XUIInboundID: 1}},
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -613,8 +612,7 @@ func TestHandleCallback_CreateSubscription_DatabaseError(t *testing.T) {
 func TestHandleCallback_MenuHelp_NoSubscription(t *testing.T) {
 	t.Parallel()
 
-	cfg := &config.Config{
-	}
+	cfg := &config.Config{}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
@@ -646,8 +644,7 @@ func TestHandleCallback_MenuHelp_NoSubscription(t *testing.T) {
 func TestHandleCallback_MenuHelp_DatabaseError(t *testing.T) {
 	t.Parallel()
 
-	cfg := &config.Config{
-	}
+	cfg := &config.Config{}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()

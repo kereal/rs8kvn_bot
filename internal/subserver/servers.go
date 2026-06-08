@@ -102,61 +102,8 @@ func toServerConfig(raw json.RawMessage) (*serverConfig, error) {
 	return &cfg, nil
 }
 
-// ConvertJSONToShareLinks parses a JSON object or array of server configs
-// from body and returns a slice of share-link URIs (vless://, vmess://, etc.).
-// Unrecognised or invalid entries are silently skipped.
-func ConvertJSONToShareLinks(body []byte) ([]string, error) {
-	var raw interface{}
-	if err := json.Unmarshal(body, &raw); err != nil {
-		logger.Error("Failed to unmarshal subscription JSON",
-			zap.Error(err),
-			zap.String("body_preview", truncateString(string(body), 200)))
-		return nil, fmt.Errorf("invalid JSON: %w", err)
-	}
-
-	var items []json.RawMessage
-	switch v := raw.(type) {
-	case []interface{}:
-		for _, item := range v {
-			rawItem, err := json.Marshal(item)
-			if err != nil {
-				logger.Error("Failed to marshal JSON array item",
-					zap.Error(err),
-					zap.String("item_preview", truncateString(fmt.Sprintf("%v", item), 200)))
-				return nil, fmt.Errorf("marshal JSON array item: %w", err)
-			}
-			items = append(items, rawItem)
-		}
-	case map[string]interface{}:
-		rawMarshalled, err := json.Marshal(v)
-		if err != nil {
-			logger.Error("Failed to marshal JSON object",
-				zap.Error(err),
-				zap.String("object_preview", truncateString(fmt.Sprintf("%v", v), 200)))
-			return nil, fmt.Errorf("marshal JSON object: %w", err)
-		}
-		items = append(items, rawMarshalled)
-	default:
-		logger.Error("Unexpected JSON type in subscription body",
-			zap.String("type", fmt.Sprintf("%T", raw)),
-			zap.String("body_preview", truncateString(string(body), 200)))
-		return nil, fmt.Errorf("unexpected JSON type: %T", raw)
-	}
-
-	var links []string
-	for _, item := range items {
-		link, err := ConvertSingleJSONToLink(item)
-		if err != nil {
-			continue
-		}
-		links = append(links, link)
-	}
-	return links, nil
-}
-
 // ExtractJSONConfigs parses a JSON object or array of server configs from body
 // and returns the raw config objects as json.RawMessage slice.
-// Unlike ConvertJSONToShareLinks it does NOT convert to share-link URIs.
 func ExtractJSONConfigs(body []byte) ([]json.RawMessage, error) {
 	var raw interface{}
 	if err := json.Unmarshal(body, &raw); err != nil {

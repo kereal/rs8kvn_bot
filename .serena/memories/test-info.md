@@ -1,6 +1,6 @@
 # Test Info — rs8kvn_bot
 
-**Обновлено:** 2026-06-03 (после Variant C аудита)
+**Обновлено:** 2026-06-08 (после рефакторинга database.go split, escapeMarkdown → internal/utils, удаления мёртвого кода)
 
 ## Coverage (~85% overall, -short)
 
@@ -46,6 +46,7 @@
 - Тест на race: создать active sub напрямую в БД → вызвать `BindTrialSubscription` → проверить, что первая sub revoked.
 
 ### Test helpers
+- `convert_test_helpers_test.go` в `internal/subserver/` — `ConvertJSONToShareLinks` (только для тестов, production использует `ExtractJSONConfigs` + `ConvertSingleJSONToLink`)
 - `testutil.NewMockDatabaseService`, `testutil.NewMockXUIClient`, `testutil.NewMockBotAPI` с `*Func` полями.
 - `t.Cleanup` для `db.Close()`.
 - `t.TempDir()` для временных файлов.

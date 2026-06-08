@@ -153,7 +153,7 @@ func NewTestFixture(t *testing.T) *IntegrationTestFixture {
 
 	handler := NewHandler(testutil.NewMockBotAPI(), cfg, dbService, mockXUI.Client, NewTestBotConfig(), nil, "")
 	mockXUIClients := map[uint]interfaces.XUIClient{1: mockXUI.Client}
-	sources := []database.Node{{ID: 1, Name: "main", IsActive: true,Host: mockXUI.Server.URL, APIToken: "test-api-token", InboundID: 1}}
+	sources := []database.Node{{ID: 1, Name: "main", IsActive: true, Host: mockXUI.Server.URL, APIToken: "test-api-token", InboundID: 1}}
 	subService := service.NewSubscriptionService(dbService, mockXUIClients, sources, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
 	handler.subscriptionService = subService
 	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
@@ -194,7 +194,7 @@ func CreateTestSubscriptionInDB(t *testing.T, db *database.Service, chatID int64
 		Username:       username,
 		ClientID:       clientID,
 		SubscriptionID: "test-sub-id",
-		ExpiresAt:     expiry,
+		ExpiresAt:      expiry,
 		Status:         status,
 	}
 
@@ -279,7 +279,7 @@ func TestSubscriptionFlow_RevokeOldSubscription(t *testing.T) {
 		Username:       "testuser2",
 		ClientID:       clientID,
 		SubscriptionID: "testuser2",
-		ExpiresAt:     time.Now().Add(30 * 24 * time.Hour),
+		ExpiresAt:      time.Now().Add(30 * 24 * time.Hour),
 		Status:         "active",
 	}, "")
 	if err != nil {

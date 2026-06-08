@@ -98,13 +98,13 @@ func TestE2E_CreateSubscription_RetryAfterFailure(t *testing.T) {
 			return nil, fmt.Errorf("temporary error")
 		}
 		return &xui.ClientConfig{
-			ID:         "test-id",
-			Email:      email,
-			Enable:     true,
-			TotalGB:    trafficBytes,
+			ID:        "test-id",
+			Email:     email,
+			Enable:    true,
+			TotalGB:   trafficBytes,
 			ExpiresAt: expiryTime.Unix(),
-			SubID:      subID,
-			Reset:      resetDays,
+			SubID:     subID,
+			Reset:     resetDays,
 		}, nil
 	}
 
@@ -157,13 +157,13 @@ func TestE2E_CreateSubscription_MultipleRetries(t *testing.T) {
 			return nil, fmt.Errorf("temporary error %d", callCount)
 		}
 		return &xui.ClientConfig{
-			ID:         "test-id",
-			Email:      email,
-			Enable:     true,
-			TotalGB:    trafficBytes,
+			ID:        "test-id",
+			Email:     email,
+			Enable:    true,
+			TotalGB:   trafficBytes,
 			ExpiresAt: expiryTime.Unix(),
-			SubID:      subID,
-			Reset:      resetDays,
+			SubID:     subID,
+			Reset:     resetDays,
 		}, nil
 	}
 
@@ -276,7 +276,7 @@ func TestE2E_Subscription_Expired(t *testing.T) {
 		ClientID:       "test-client-id",
 		SubscriptionID: "test-sub-id",
 		Status:         "expired",
-		ExpiresAt:     time.Now().Add(-1 * time.Hour),
+		ExpiresAt:      time.Now().Add(-1 * time.Hour),
 	}
 	require.NoError(t, env.db.CreateSubscription(ctx, sub, ""))
 
@@ -297,7 +297,7 @@ func TestE2E_Subscription_AboutToExpire(t *testing.T) {
 		ClientID:       "test-client-id",
 		SubscriptionID: "test-sub-id",
 		Status:         "active",
-		ExpiresAt:     time.Now().Add(1 * time.Hour),
+		ExpiresAt:      time.Now().Add(1 * time.Hour),
 	}
 	require.NoError(t, env.db.CreateSubscription(ctx, sub, ""))
 

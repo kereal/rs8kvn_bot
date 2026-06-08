@@ -217,7 +217,7 @@ func TestService_GetByTelegramID_ReturnsActiveOnly(t *testing.T) {
 		Username:   "revoked_user",
 		ClientID:   "client-revoked",
 		Status:     "revoked",
-		ExpiresAt: time.Now().Add(24 * time.Hour),
+		ExpiresAt:  time.Now().Add(24 * time.Hour),
 	})
 
 	// Create active subscription
@@ -226,7 +226,7 @@ func TestService_GetByTelegramID_ReturnsActiveOnly(t *testing.T) {
 		Username:   "active_user",
 		ClientID:   "client-active",
 		Status:     "active",
-		ExpiresAt: time.Now().Add(24 * time.Hour),
+		ExpiresAt:  time.Now().Add(24 * time.Hour),
 	}
 	require.NoError(t, svc.CreateSubscription(context.Background(), activeSub, ""))
 
@@ -271,7 +271,7 @@ func TestService_CreateSubscription(t *testing.T) {
 		Username:       "newuser",
 		ClientID:       "client-456",
 		SubscriptionID: "test-sub-id",
-		ExpiresAt:     time.Now().Add(24 * time.Hour),
+		ExpiresAt:      time.Now().Add(24 * time.Hour),
 		Status:         "active",
 	}
 
@@ -297,7 +297,7 @@ func TestService_CreateSubscription_PersistsInviteCodeAndReferredBy(t *testing.T
 		Username:       "refby",
 		ClientID:       "c1",
 		SubscriptionID: "s1",
-		ExpiresAt:     time.Now().Add(24 * time.Hour),
+		ExpiresAt:      time.Now().Add(24 * time.Hour),
 		Status:         "active",
 	}
 
@@ -325,7 +325,7 @@ func TestService_CreateSubscription_EmptyInviteCodeLeavesFieldsEmpty(t *testing.
 		Username:       "noinvite",
 		ClientID:       "c2",
 		SubscriptionID: "s2",
-		ExpiresAt:     time.Now().Add(24 * time.Hour),
+		ExpiresAt:      time.Now().Add(24 * time.Hour),
 		Status:         "active",
 	}
 
@@ -348,7 +348,7 @@ func TestService_CreateSubscription_UnknownInviteCodeDoesNotFail(t *testing.T) {
 		Username:       "missinginvite",
 		ClientID:       "c3",
 		SubscriptionID: "s3",
-		ExpiresAt:     time.Now().Add(24 * time.Hour),
+		ExpiresAt:      time.Now().Add(24 * time.Hour),
 		Status:         "active",
 	}
 
@@ -374,7 +374,7 @@ func TestService_CreateSubscription_RevokesOldSubscription(t *testing.T) {
 		Username:   "olduser",
 		ClientID:   "old-client",
 		Status:     "active",
-		ExpiresAt: time.Now().Add(24 * time.Hour),
+		ExpiresAt:  time.Now().Add(24 * time.Hour),
 	}
 	require.NoError(t, svc.CreateSubscription(context.Background(), oldSub, ""))
 
@@ -384,7 +384,7 @@ func TestService_CreateSubscription_RevokesOldSubscription(t *testing.T) {
 		Username:   "newuser",
 		ClientID:   "new-client",
 		Status:     "active",
-		ExpiresAt: time.Now().Add(48 * time.Hour),
+		ExpiresAt:  time.Now().Add(48 * time.Hour),
 	}
 	require.NoError(t, svc.CreateSubscription(context.Background(), newSub, ""))
 
@@ -412,7 +412,7 @@ func TestService_CreateSubscription_MultipleRevokes(t *testing.T) {
 			Username:   fmt.Sprintf("user%d", i),
 			ClientID:   fmt.Sprintf("client-%d", i),
 			Status:     "active",
-			ExpiresAt: time.Now().Add(time.Duration(i+1) * 24 * time.Hour),
+			ExpiresAt:  time.Now().Add(time.Duration(i+1) * 24 * time.Hour),
 			CreatedAt:  time.Now().Add(-time.Duration(3-i) * time.Minute),
 		}
 		require.NoError(t, svc.CreateSubscription(context.Background(), sub, ""), "iteration %d", i)
@@ -438,7 +438,7 @@ func TestService_CreateSubscription_AllFields(t *testing.T) {
 		Username:       "testuser",
 		ClientID:       "test-client-id",
 		SubscriptionID: "test-sub-id",
-		ExpiresAt:     now.Add(24 * time.Hour),
+		ExpiresAt:      now.Add(24 * time.Hour),
 		Status:         "active",
 	}
 
@@ -465,7 +465,7 @@ func TestService_CreateSubscription_Timestamps(t *testing.T) {
 		Username:   "testuser",
 		ClientID:   "test-client-id",
 		Status:     "active",
-		ExpiresAt: time.Now().Add(24 * time.Hour),
+		ExpiresAt:  time.Now().Add(24 * time.Hour),
 	}
 	require.NoError(t, svc.CreateSubscription(context.Background(), sub, ""))
 	after := time.Now()
@@ -486,7 +486,7 @@ func TestService_UpdateSubscription(t *testing.T) {
 		Username:       "updateuser",
 		ClientID:       "client-789",
 		SubscriptionID: "test-sub-id",
-		ExpiresAt:     time.Now().Add(24 * time.Hour),
+		ExpiresAt:      time.Now().Add(24 * time.Hour),
 		Status:         "active",
 	}
 	require.NoError(t, svc.CreateSubscription(context.Background(), sub, ""))
@@ -606,7 +606,7 @@ func TestService_GetLatestSubscriptions(t *testing.T) {
 			Username:       fmt.Sprintf("service_user%d", i),
 			ClientID:       fmt.Sprintf("client-%d", i),
 			SubscriptionID: fmt.Sprintf("sub-%d", i),
-			ExpiresAt:     time.Now().Add(24 * time.Hour),
+			ExpiresAt:      time.Now().Add(24 * time.Hour),
 			Status:         "active",
 			CreatedAt:      time.Now().Add(-time.Duration(5-i) * time.Minute),
 		}
@@ -639,7 +639,7 @@ func TestService_GetLatestSubscriptions_OnlyActive(t *testing.T) {
 		Username:       "active_user",
 		ClientID:       "client-active",
 		SubscriptionID: "sub-active",
-		ExpiresAt:     time.Now().Add(24 * time.Hour),
+		ExpiresAt:      time.Now().Add(24 * time.Hour),
 		Status:         "active",
 	}
 	require.NoError(t, svc.db.Create(activeSub).Error)
@@ -649,7 +649,7 @@ func TestService_GetLatestSubscriptions_OnlyActive(t *testing.T) {
 		Username:       "revoked_user",
 		ClientID:       "client-revoked",
 		SubscriptionID: "sub-revoked",
-		ExpiresAt:     time.Now().Add(24 * time.Hour),
+		ExpiresAt:      time.Now().Add(24 * time.Hour),
 		Status:         "revoked",
 	}
 	require.NoError(t, svc.db.Create(revokedSub).Error)
@@ -685,7 +685,7 @@ func TestService_GetLatestSubscriptions_LimitOne(t *testing.T) {
 			Username:       fmt.Sprintf("user%d", i),
 			ClientID:       fmt.Sprintf("client-%d", i),
 			SubscriptionID: fmt.Sprintf("sub-%d", i),
-			ExpiresAt:     time.Now().Add(24 * time.Hour),
+			ExpiresAt:      time.Now().Add(24 * time.Hour),
 			Status:         "active",
 			CreatedAt:      time.Now().Add(-time.Duration(5-i) * time.Minute),
 		}
@@ -709,7 +709,7 @@ func TestService_GetLatestSubscriptions_LimitGreaterThanTotal(t *testing.T) {
 			Username:       fmt.Sprintf("user%d", i),
 			ClientID:       fmt.Sprintf("client-%d", i),
 			SubscriptionID: fmt.Sprintf("sub-%d", i),
-			ExpiresAt:     time.Now().Add(24 * time.Hour),
+			ExpiresAt:      time.Now().Add(24 * time.Hour),
 			Status:         "active",
 			CreatedAt:      time.Now().Add(-time.Duration(3-i) * time.Minute),
 		}
@@ -734,7 +734,7 @@ func TestService_GetLatestSubscriptions_SpecialCharacters(t *testing.T) {
 			Username:       username,
 			ClientID:       fmt.Sprintf("client-%d", i),
 			SubscriptionID: fmt.Sprintf("sub-%d", i),
-			ExpiresAt:     time.Now().Add(24 * time.Hour),
+			ExpiresAt:      time.Now().Add(24 * time.Hour),
 			Status:         "active",
 			CreatedAt:      time.Now().Add(-time.Duration(len(specialUsernames)-i) * time.Minute),
 		}
@@ -768,7 +768,7 @@ func TestService_GetLatestSubscriptions_OrderingConsistency(t *testing.T) {
 			Username:       fmt.Sprintf("ordered_user%d", i),
 			ClientID:       fmt.Sprintf("client-%d", i),
 			SubscriptionID: fmt.Sprintf("sub-%d", i),
-			ExpiresAt:     time.Now().Add(24 * time.Hour),
+			ExpiresAt:      time.Now().Add(24 * time.Hour),
 			Status:         "active",
 			CreatedAt:      baseTime.Add(time.Duration(i) * time.Hour),
 		}
@@ -801,7 +801,7 @@ func TestService_GetLatestSubscriptions_MixedStatuses(t *testing.T) {
 			Username:       fmt.Sprintf("status_user%d", i),
 			ClientID:       fmt.Sprintf("client-%d", i),
 			SubscriptionID: fmt.Sprintf("sub-%d", i),
-			ExpiresAt:     time.Now().Add(24 * time.Hour),
+			ExpiresAt:      time.Now().Add(24 * time.Hour),
 			Status:         status,
 			CreatedAt:      time.Now().Add(-time.Duration(len(statuses)-i) * time.Minute),
 		}
@@ -838,7 +838,7 @@ func TestService_GetAllSubscriptions(t *testing.T) {
 			Username:       fmt.Sprintf("user%d", i),
 			ClientID:       fmt.Sprintf("client-%d", i),
 			SubscriptionID: fmt.Sprintf("sub-%d", i),
-			ExpiresAt:     time.Now().Add(24 * time.Hour),
+			ExpiresAt:      time.Now().Add(24 * time.Hour),
 			Status:         "active",
 		}
 		require.NoError(t, svc.CreateSubscription(context.Background(), sub, ""))
@@ -872,7 +872,7 @@ func TestService_CountActiveSubscriptions(t *testing.T) {
 			Username:       fmt.Sprintf("active%d", i),
 			ClientID:       fmt.Sprintf("client-active-%d", i),
 			SubscriptionID: fmt.Sprintf("sub-active-%d", i),
-			ExpiresAt:     time.Now().Add(24 * time.Hour),
+			ExpiresAt:      time.Now().Add(24 * time.Hour),
 			Status:         "active",
 		}
 		require.NoError(t, svc.CreateSubscription(context.Background(), sub, ""))
@@ -884,7 +884,7 @@ func TestService_CountActiveSubscriptions(t *testing.T) {
 		Username:       "expired",
 		ClientID:       "client-expired",
 		SubscriptionID: "sub-expired",
-		ExpiresAt:     time.Now().Add(-1 * time.Hour),
+		ExpiresAt:      time.Now().Add(-1 * time.Hour),
 		Status:         "active",
 	}
 	require.NoError(t, svc.CreateSubscription(context.Background(), expiredSub, ""))
@@ -905,7 +905,7 @@ func TestService_CountExpiredSubscriptions(t *testing.T) {
 			Username:       fmt.Sprintf("expired%d", i),
 			ClientID:       fmt.Sprintf("client-expired-%d", i),
 			SubscriptionID: fmt.Sprintf("sub-expired-%d", i),
-			ExpiresAt:     time.Now().Add(-1 * time.Hour),
+			ExpiresAt:      time.Now().Add(-1 * time.Hour),
 			Status:         "active",
 		}
 		require.NoError(t, svc.db.Create(sub).Error)
@@ -916,7 +916,7 @@ func TestService_CountExpiredSubscriptions(t *testing.T) {
 		Username:       "active",
 		ClientID:       "client-active",
 		SubscriptionID: "sub-active-final",
-		ExpiresAt:     time.Now().Add(1 * time.Hour),
+		ExpiresAt:      time.Now().Add(1 * time.Hour),
 		Status:         "active",
 	}
 	require.NoError(t, svc.db.Create(activeSub).Error)
@@ -937,7 +937,7 @@ func TestService_CountAllSubscriptions(t *testing.T) {
 			Username:   fmt.Sprintf("countuser%d", i),
 			ClientID:   fmt.Sprintf("client-count-%d", i),
 			Status:     "active",
-			ExpiresAt: time.Now().Add(24 * time.Hour),
+			ExpiresAt:  time.Now().Add(24 * time.Hour),
 		}
 		require.NoError(t, svc.db.Create(sub).Error)
 	}
@@ -1000,7 +1000,7 @@ func TestService_GetAllTelegramIDs_Duplicates(t *testing.T) {
 			Username:   fmt.Sprintf("user%d", i),
 			ClientID:   fmt.Sprintf("client-%d", i),
 			Status:     "active",
-			ExpiresAt: time.Now().Add(24 * time.Hour),
+			ExpiresAt:  time.Now().Add(24 * time.Hour),
 		}
 		require.NoError(t, svc.db.Create(sub).Error)
 	}
@@ -1022,7 +1022,7 @@ func TestService_GetTelegramIDByUsername(t *testing.T) {
 		Username:   "testuser",
 		ClientID:   "client-id",
 		Status:     "active",
-		ExpiresAt: time.Now().Add(24 * time.Hour),
+		ExpiresAt:  time.Now().Add(24 * time.Hour),
 	}
 	require.NoError(t, svc.db.Create(sub).Error)
 
@@ -1053,7 +1053,7 @@ func TestService_GetTelegramIDsBatch(t *testing.T) {
 			Username:   fmt.Sprintf("batchuser%d", i),
 			ClientID:   fmt.Sprintf("client-batch-%d", i),
 			Status:     "active",
-			ExpiresAt: time.Now().Add(24 * time.Hour),
+			ExpiresAt:  time.Now().Add(24 * time.Hour),
 		}
 		require.NoError(t, svc.db.Create(sub).Error)
 	}
@@ -1078,7 +1078,7 @@ func TestService_GetTelegramIDsBatch_OffsetBeyondTotal(t *testing.T) {
 			Username:   fmt.Sprintf("offsetuser%d", i),
 			ClientID:   fmt.Sprintf("client-offset-%d", i),
 			Status:     "active",
-			ExpiresAt: time.Now().Add(24 * time.Hour),
+			ExpiresAt:  time.Now().Add(24 * time.Hour),
 		}
 		require.NoError(t, svc.db.Create(sub).Error)
 	}
@@ -1182,9 +1182,9 @@ func TestService_GetReferralCount(t *testing.T) {
 			Username:   fmt.Sprintf("referral%d", i),
 			ClientID:   fmt.Sprintf("client-ref-%d", i),
 			Status:     "active",
-			ExpiresAt: time.Now().Add(24 * time.Hour),
+			ExpiresAt:  time.Now().Add(24 * time.Hour),
 			ReferredBy: referrerID,
-			PlanID: 0,
+			PlanID:     0,
 		}
 		require.NoError(t, svc.db.Create(sub).Error)
 	}
@@ -1216,9 +1216,9 @@ func TestService_GetAllReferralCounts(t *testing.T) {
 			Username:   fmt.Sprintf("refuser%d", i),
 			ClientID:   fmt.Sprintf("client-refall-%d", i),
 			Status:     "active",
-			ExpiresAt: time.Now().Add(24 * time.Hour),
+			ExpiresAt:  time.Now().Add(24 * time.Hour),
 			ReferredBy: referrerID,
-			PlanID: 0,
+			PlanID:     0,
 		}
 		require.NoError(t, svc.db.Create(sub).Error)
 	}
@@ -1242,9 +1242,9 @@ func TestService_GetTotalTelegramIDCount_WithData(t *testing.T) {
 			Username:       fmt.Sprintf("countuser%d", i),
 			ClientID:       fmt.Sprintf("client-count-%d", i),
 			SubscriptionID: fmt.Sprintf("sub-count-%d", i),
-			ExpiresAt:     time.Now().Add(24 * time.Hour),
+			ExpiresAt:      time.Now().Add(24 * time.Hour),
 			Status:         "active",
-			PlanID: 0,
+			PlanID:         0,
 		}
 		require.NoError(t, svc.db.Create(sub).Error)
 	}
@@ -1313,9 +1313,9 @@ func TestService_CleanupExpiredTrials(t *testing.T) {
 		TelegramID:     0,
 		ClientID:       "old-trial-client",
 		SubscriptionID: "old-trial-sub",
-		PlanID: 1,
+		PlanID:         1,
 		Status:         "active",
-		ExpiresAt:     time.Now().Add(24 * time.Hour),
+		ExpiresAt:      time.Now().Add(24 * time.Hour),
 		CreatedAt:      time.Now().Add(-48 * time.Hour),
 	}
 	require.NoError(t, svc.db.Create(oldTrial).Error)
@@ -1325,9 +1325,9 @@ func TestService_CleanupExpiredTrials(t *testing.T) {
 		TelegramID:     0,
 		ClientID:       "recent-trial-client",
 		SubscriptionID: "recent-trial-sub",
-		PlanID: 1,
+		PlanID:         1,
 		Status:         "active",
-		ExpiresAt:     time.Now().Add(24 * time.Hour),
+		ExpiresAt:      time.Now().Add(24 * time.Hour),
 		CreatedAt:      time.Now().Add(-1 * time.Hour),
 	}
 	require.NoError(t, svc.db.Create(recentTrial).Error)
@@ -1381,9 +1381,9 @@ func TestService_CleanupExpiredTrials_UsesSubInboundID(t *testing.T) {
 		TelegramID:     0,
 		ClientID:       "multi-inbound-client",
 		SubscriptionID: "multi-inbound-sub",
-		PlanID: 1,
+		PlanID:         1,
 		Status:         "active",
-		ExpiresAt:     time.Now().Add(24 * time.Hour),
+		ExpiresAt:      time.Now().Add(24 * time.Hour),
 		CreatedAt:      time.Now().Add(-48 * time.Hour),
 	}
 	require.NoError(t, svc.db.Create(oldTrial).Error)
@@ -1461,7 +1461,7 @@ func TestService_GetSubscriptionBySubscriptionID_Success(t *testing.T) {
 		Username:       "testuser",
 		ClientID:       "client-abc",
 		SubscriptionID: "sub-find-me",
-		ExpiresAt:     time.Now().Add(24 * time.Hour),
+		ExpiresAt:      time.Now().Add(24 * time.Hour),
 		Status:         "active",
 	}
 	err := svc.db.Create(origSub).Error
@@ -1552,9 +1552,9 @@ func TestService_GetTrialSubscriptionBySubID_NonTrial(t *testing.T) {
 		Username:       "regularuser",
 		ClientID:       "client-regular",
 		SubscriptionID: "sub-regular",
-		ExpiresAt:     time.Now().Add(24 * time.Hour),
+		ExpiresAt:      time.Now().Add(24 * time.Hour),
 		Status:         "active",
-		PlanID: 0,
+		PlanID:         0,
 	}
 	err := svc.db.Create(origSub).Error
 	require.NoError(t, err)
@@ -1664,7 +1664,7 @@ func TestService_BindTrialSubscription_RevokesExistingActiveSub(t *testing.T) {
 		Username:       "olduser",
 		ClientID:       "client-old",
 		SubscriptionID: "sub-old",
-		ExpiresAt:     time.Now().Add(24 * time.Hour),
+		ExpiresAt:      time.Now().Add(24 * time.Hour),
 		Status:         "active",
 		PlanID:         freePlan.ID,
 	}
@@ -1721,7 +1721,7 @@ func createTestSubscription(t *testing.T, svc *Service, telegramID int64, userna
 		Username:       username,
 		ClientID:       clientID,
 		SubscriptionID: fmt.Sprintf("sub-%s", clientID),
-		ExpiresAt:     time.Now().Add(24 * time.Hour),
+		ExpiresAt:      time.Now().Add(24 * time.Hour),
 		Status:         "active",
 	}
 	require.NoError(t, svc.CreateSubscription(context.Background(), sub, ""))
