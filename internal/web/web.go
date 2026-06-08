@@ -588,7 +588,6 @@ func (s *Server) handleSubscription(w http.ResponseWriter, r *http.Request) {
 	for k, v := range result.Headers {
 		w.Header().Set(k, v)
 	}
-	w.Header().Del("Content-Length")
 
 	if result.StatusCode != 0 {
 		w.WriteHeader(result.StatusCode)
