@@ -60,9 +60,10 @@ type Subscription struct {
 	CreatedAt      time.Time `gorm:"autoCreateTime"`
 	UpdatedAt      time.Time `gorm:"autoUpdateTime"`
 
-	Plan      *Plan      `gorm:"foreignKey:PlanID"`
-	Product   *Product   `gorm:"foreignKey:ProductID"`
-	Orders    []Order    `gorm:"foreignKey:SubscriptionID"`
+	Plan    *Plan              `gorm:"foreignKey:PlanID"`
+	Product *Product           `gorm:"foreignKey:ProductID"`
+	Orders  []Order            `gorm:"foreignKey:SubscriptionID"`
+	Nodes   []SubscriptionNode `gorm:"foreignKey:SubscriptionID"`
 }
 
 // Node represents a configured 3x-ui panel source.
@@ -115,7 +116,7 @@ type Product struct {
 	CreatedAt    time.Time `gorm:"autoCreateTime;column:created_at"`
 	UpdatedAt    time.Time `gorm:"autoUpdateTime;column:updated_at"`
 
-	Plan  *Plan  `gorm:"foreignKey:PlanID"`
+	Plan   *Plan   `gorm:"foreignKey:PlanID"`
 	Orders []Order `gorm:"foreignKey:ProductID"`
 }
 
@@ -152,6 +153,33 @@ type Invite struct {
 	CreatedAt    time.Time `gorm:"autoCreateTime"`
 
 	Subscriptions []Subscription `gorm:"foreignKey:InviteCode"`
+}
+
+// SubscriptionNodeStatus represents the synchronization status of a subscription on a VPN node.
+// Statuses: active | pending_add | pending_remove.
+//
+// Values:
+//   - active — нода добавлена и последняя синхронизация прошла успешно.
+//   - pending_add — запрошено добавление ноды, операция ещё не выполнена на панели.
+//   - pending_remove — запрошено удаление ноды, операция ещё не выполнена на панели.
+type SubscriptionNodeStatus string
+
+const (
+	SubscriptionNodeStatusActive        SubscriptionNodeStatus = "active"
+	SubscriptionNodeStatusPendingAdd    SubscriptionNodeStatus = "pending_add"
+	SubscriptionNodeStatusPendingRemove SubscriptionNodeStatus = "pending_remove"
+)
+
+// SubscriptionNode represents the actual synchronization state of a specific
+// subscription with a specific VPN node (not plan-level, but concrete pair).
+type SubscriptionNode struct {
+	SubscriptionID uint                   `gorm:"primaryKey;column:subscription_id"`
+	NodeID         uint                   `gorm:"primaryKey;column:node_id"`
+	Status         SubscriptionNodeStatus `gorm:"not null;size:16;column:status"`
+	RetryCount     int                    `gorm:"not null;default:0;column:retry_count"`
+	RetryAt        *time.Time             `gorm:"column:retry_at"`
+	LastError      *string                `gorm:"type:text;column:last_error"`
+	UpdatedAt      time.Time              `gorm:"not null;autoUpdateTime;column:updated_at"`
 }
 
 // TrialRequest tracks trial requests for rate limiting.
@@ -198,6 +226,10 @@ func (Invite) TableName() string {
 
 func (TrialRequest) TableName() string {
 	return "trial_requests"
+}
+
+func (SubscriptionNode) TableName() string {
+	return "subscription_nodes"
 }
 
 // IsExpired returns true if the subscription has expired.
