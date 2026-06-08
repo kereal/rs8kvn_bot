@@ -390,7 +390,7 @@ API version is implicit in endpoint paths:
 - `/api/v1/subscriptions` — v1 (current)
 - No breaking changes expected without major version bump
 
-Bot version in logs: `rs8kvn_bot@v2.5.0`
+Bot version in logs: `rs8kvn_bot@v2.6.0`
 
 ---
 

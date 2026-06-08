@@ -153,7 +153,7 @@ internal/
 │   └── breaker.go           # Circuit breaker (5/30s/3-half-open)
 ├── database/         # Persistence
 │   ├── database.go          # GORM service + migrations
-│   ├── migrations/          # 000..017 SQL files (embedded)
+│   ├── migrations/          # 000..019 SQL files (embedded; 018 adds subscription_nodes)
 │   └── models:               # Subscription, Plan, Node, Product, Order, Invite
 ├── config/           # Configuration
 │   ├── config.go            # Load + validate
