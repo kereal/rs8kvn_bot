@@ -29,7 +29,7 @@ import (
 func testServer(t *testing.T, db interfaces.DatabaseService, cfg *config.Config) *Server {
 	botCfg := &bot.BotConfig{Username: "testbot"}
 	subSvc := service.NewSubscriptionService(db, nil, nil, cfg, "", nil)
-		srv := NewServer(":0", db, cfg, botCfg, subSvc, subserver.NewService(config.SubServerCacheTTL))
+	srv := NewServer(":0", db, cfg, botCfg, subSvc, subserver.NewService(config.SubServerCacheTTL))
 	return srv
 }
 
@@ -107,7 +107,7 @@ func TestHandleSubscription_NoServersAvailable(t *testing.T) {
 		return &database.SubscriptionFull{
 			Subscription: database.Subscription{ID: 1, Status: "active"},
 			Plan:         database.Plan{TrafficLimit: 1 << 30},
-			Nodes:      []database.Node{},
+			Nodes:        []database.Node{},
 		}, nil
 	}
 	srv := testServer(t, db, &config.Config{})

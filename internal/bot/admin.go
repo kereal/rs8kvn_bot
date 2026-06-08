@@ -12,6 +12,7 @@ import (
 
 	"rs8kvn_bot/internal/config"
 	"rs8kvn_bot/internal/logger"
+	"rs8kvn_bot/internal/utils"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"go.uber.org/zap"
@@ -164,20 +165,6 @@ func (h *Handler) HandleDel(ctx context.Context, update tgbotapi.Update) error {
 	return nil
 }
 
-// escapeMarkdown escapes special characters in Telegram Markdown V2 text.
-// Characters escaped: \ _ * [ ] ( ) ~ ` > # + - = | { } . !
-func escapeMarkdown(text string) string {
-	var b strings.Builder
-	b.Grow(len(text) * 2)
-	for _, r := range text {
-		if strings.ContainsRune(`\_*[]()~`+"`"+">#+-=|{}.!", r) {
-			b.WriteRune('\\')
-		}
-		b.WriteRune(r)
-	}
-	return b.String()
-}
-
 // HandleBroadcast handles the /broadcast command for admins to send messages to all users.
 func (h *Handler) HandleBroadcast(ctx context.Context, update tgbotapi.Update) error {
 	const broadcastTimeout = 5 * time.Minute
@@ -268,7 +255,7 @@ func (h *Handler) HandleBroadcast(ctx context.Context, update tgbotapi.Update) e
 					default:
 					}
 
-					escapedMessage := escapeMarkdown(message)
+					escapedMessage := utils.EscapeMarkdown(message)
 					msg := tgbotapi.NewMessage(tg, escapedMessage)
 					msg.ParseMode = "MarkdownV2"
 					msg.DisableWebPagePreview = true
@@ -397,7 +384,7 @@ func (h *Handler) HandleSend(ctx context.Context, update tgbotapi.Update) error 
 	}
 
 	// Send the message
-	escapedMessage := escapeMarkdown(message)
+	escapedMessage := utils.EscapeMarkdown(message)
 	msg := tgbotapi.NewMessage(telegramID, escapedMessage)
 	msg.ParseMode = "MarkdownV2"
 	msg.DisableWebPagePreview = true

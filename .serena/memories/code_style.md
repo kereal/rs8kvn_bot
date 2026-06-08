@@ -9,6 +9,8 @@
 ## Code Organization
 - Use internal packages to hide implementation details
 - Group related functionality in packages
+- Для пакетов с >500 строк — разбивать на несколько файлов по доменам (см. `internal/database/` — 9 файлов)
+- Общие утилиты выносить в `internal/utils/` (см. `markdown.go` с `EscapeMarkdown`)
 - Use interfaces for testability (see `internal/interfaces/`)
 - Mock implementations in `internal/testutil/`
 

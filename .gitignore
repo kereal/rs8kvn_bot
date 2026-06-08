@@ -17,11 +17,7 @@ logs/
 /tgvpn_bot
 /rs8kvn_bot
 /bot
-*.exe
-*.exe~
-*.dll
 *.so
-*.dylib
 
 # Test
 *.test
@@ -40,12 +36,14 @@ go.work.sum
 # IDE
 .idea/
 .vscode/
-*.swp
-*.swo
 *~
 
 # OS
 .DS_Store
 Thumbs.db
 Desktop.ini
+
 .kilo/
+.kilocode/
+.agents/
+/skills-lock.json

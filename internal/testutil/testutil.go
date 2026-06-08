@@ -107,9 +107,9 @@ type MockDatabaseService struct {
 	CleanupExpiredTrialsFunc            func(ctx context.Context, hours int) ([]database.Subscription, error)
 	GetPoolStatsFunc                    func() (*database.PoolStats, error)
 	GetSubscriptionWithPlanAndNodesFunc func(ctx context.Context, subscriptionID string) (*database.SubscriptionFull, error)
-	GetSubscriptionStatusFunc                func(ctx context.Context, subscriptionID string) (string, time.Time, error)
-	UpdateSubscriptionDevicesFunc          func(ctx context.Context, id uint, devicesJSON string) error
-	UpdateSubscriptionIPsFunc              func(ctx context.Context, id uint, ipsJSON string) error
+	GetSubscriptionStatusFunc           func(ctx context.Context, subscriptionID string) (string, time.Time, error)
+	UpdateSubscriptionDevicesFunc       func(ctx context.Context, id uint, devicesJSON string) error
+	UpdateSubscriptionIPsFunc           func(ctx context.Context, id uint, ipsJSON string) error
 }
 
 func (m *MockDatabaseService) Ping(ctx context.Context) error {
@@ -357,7 +357,6 @@ func (m *MockDatabaseService) ListNodes(ctx context.Context) ([]database.Node, e
 		{ID: 1, Name: "default", IsActive: true, Host: "http://localhost:2053", APIToken: "test-token", InboundID: 1, SubscriptionURL: "http://example.com/sub/"},
 	}, nil
 }
-
 
 func (m *MockDatabaseService) IsNodesEmpty(ctx context.Context) (bool, error) {
 	if m.IsNodesEmptyFunc != nil {
@@ -657,7 +656,7 @@ func CreateTestSubscription(telegramID int64, username string, status string, ex
 		Username:       username,
 		ClientID:       "test-client-id-" + username,
 		SubscriptionID: username,
-		ExpiresAt:     expiry,
+		ExpiresAt:      expiry,
 		Status:         status,
 	}
 }
@@ -695,11 +694,11 @@ func (m *MockXUIClient) AddClient(ctx context.Context, inboundID int, email stri
 		return m.AddClientFunc(ctx, inboundID, email, trafficBytes, expiryTime)
 	}
 	return &xui.ClientConfig{
-		ID:         "test-client-id",
-		Email:      email,
-		TotalGB:    trafficBytes,
+		ID:        "test-client-id",
+		Email:     email,
+		TotalGB:   trafficBytes,
 		ExpiresAt: expiryTime.UnixMilli(),
-		Enable:     true,
+		Enable:    true,
 	}, nil
 }
 
@@ -711,12 +710,12 @@ func (m *MockXUIClient) AddClientWithID(ctx context.Context, inboundID int, emai
 		return m.AddClientWithIDFunc(ctx, inboundID, email, clientID, subID, trafficBytes, expiryTime, resetDays)
 	}
 	return &xui.ClientConfig{
-		ID:         clientID,
-		Email:      email,
-		TotalGB:    trafficBytes,
+		ID:        clientID,
+		Email:     email,
+		TotalGB:   trafficBytes,
 		ExpiresAt: expiryTime.UnixMilli(),
-		Enable:     true,
-		SubID:      subID,
+		Enable:    true,
+		SubID:     subID,
 	}, nil
 }
 

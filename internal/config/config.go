@@ -34,7 +34,6 @@ type Config struct {
 	LogFilePath string
 	LogLevel    string
 
-
 	// Monitoring configuration
 	HeartbeatURL      string
 	HeartbeatInterval int

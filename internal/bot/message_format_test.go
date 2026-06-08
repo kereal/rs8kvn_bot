@@ -3,6 +3,8 @@ package bot
 import (
 	"testing"
 
+	"rs8kvn_bot/internal/utils"
+
 	"github.com/stretchr/testify/assert"
 )
 
@@ -43,7 +45,7 @@ func TestMessageFormat_NoDoubleEscape(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := escapeMarkdown(tt.input)
+			result := utils.EscapeMarkdown(tt.input)
 			assert.Equal(t, tt.want, result, "Should escape special chars")
 		})
 	}
@@ -86,7 +88,7 @@ func TestMessageFormat_EscapedMessageContent(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := escapeMarkdown(tt.input)
+			result := utils.EscapeMarkdown(tt.input)
 			assert.Equal(t, tt.want, result)
 		})
 	}
@@ -96,7 +98,7 @@ func TestMessageFormat_EscapeMarkdownComprehensive(t *testing.T) {
 	t.Parallel()
 
 	input := "user_name *bold* [link](url) ~strike~ `code` |pipe| +plus-equals"
-	result := escapeMarkdown(input)
+	result := utils.EscapeMarkdown(input)
 
 	assert.Contains(t, result, "\\_", "Underscores should be escaped")
 	assert.Contains(t, result, "\\*", "Asterisks should be escaped")

@@ -62,8 +62,8 @@ func TestTrialCleanupScheduler_RunCleanup_WithExpiredTrials(t *testing.T) {
 		TelegramID:     0,
 		ClientID:       "expired-client-1",
 		SubscriptionID: "expired-sub-1",
-		PlanID: 1,
-		ExpiresAt:     time.Now().Add(-1 * time.Hour),
+		PlanID:         1,
+		ExpiresAt:      time.Now().Add(-1 * time.Hour),
 		Status:         "active",
 		CreatedAt:      time.Now().Add(-2 * time.Hour),
 	}
@@ -74,8 +74,8 @@ func TestTrialCleanupScheduler_RunCleanup_WithExpiredTrials(t *testing.T) {
 		TelegramID:     0,
 		ClientID:       "expired-client-2",
 		SubscriptionID: "expired-sub-2",
-		PlanID: 1,
-		ExpiresAt:     time.Now().Add(-1 * time.Hour),
+		PlanID:         1,
+		ExpiresAt:      time.Now().Add(-1 * time.Hour),
 		Status:         "active",
 		CreatedAt:      time.Now().Add(-3 * time.Hour),
 	}
@@ -86,8 +86,8 @@ func TestTrialCleanupScheduler_RunCleanup_WithExpiredTrials(t *testing.T) {
 		TelegramID:     0,
 		ClientID:       "active-client",
 		SubscriptionID: "active-sub",
-		PlanID: 1,
-		ExpiresAt:     time.Now().Add(1 * time.Hour),
+		PlanID:         1,
+		ExpiresAt:      time.Now().Add(1 * time.Hour),
 		Status:         "active",
 		CreatedAt:      time.Now().Add(-30 * time.Minute),
 	}
@@ -119,7 +119,7 @@ func TestTrialCleanupScheduler_RunCleanup_XUIFailure(t *testing.T) {
 		TelegramID:     0,
 		ClientID:       "client-xui-fail",
 		SubscriptionID: "sub-xui-fail",
-		PlanID: 1,
+		PlanID:         1,
 		Status:         "active",
 		CreatedAt:      time.Now().Add(-2 * time.Hour),
 	}

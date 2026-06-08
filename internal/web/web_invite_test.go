@@ -27,7 +27,7 @@ import (
 
 func makeTestSubService(mockDB *testutil.MockDatabaseService) (*config.Config, *service.SubscriptionService, *testutil.MockXUIClient) {
 	mockXUI := testutil.NewMockXUIClient()
-cfg := &config.Config{
+	cfg := &config.Config{
 		SiteURL:            "https://vpn.site",
 		TrialDurationHours: 3,
 		TrialRateLimit:     3,
@@ -35,14 +35,14 @@ cfg := &config.Config{
 	}
 
 	mockDB.GetPlanByNameFunc = func(ctx context.Context, name string) (*database.Plan, error) {
-		return &database.Plan{ID: 1, Name: "trial", DevicesLimit: 1, TrafficLimit: 1073741824, }, nil
+		return &database.Plan{ID: 1, Name: "trial", DevicesLimit: 1, TrafficLimit: 1073741824}, nil
 	}
 	mockDB.GetNodesByPlanNameFunc = func(ctx context.Context, planName string) ([]database.Node, error) {
 		return []database.Node{{ID: 1, IsActive: true, Host: "http://localhost:2053", InboundID: 1}}, nil
 	}
 
 	xuiClients := map[uint]interfaces.XUIClient{1: mockXUI}
-	sources := []database.Node{{ID: 1, Name: "default",  IsActive: true, Host: "http://localhost:2053", APIToken: "test-token", InboundID: 1, SubscriptionURL: cfg.GlobalSubURL}}
+	sources := []database.Node{{ID: 1, Name: "default", IsActive: true, Host: "http://localhost:2053", APIToken: "test-token", InboundID: 1, SubscriptionURL: cfg.GlobalSubURL}}
 	subService := service.NewSubscriptionService(mockDB, xuiClients, sources, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
 	return cfg, subService, mockXUI
 }
@@ -51,14 +51,13 @@ func TestHandleInvite_InvalidCode(t *testing.T) {
 	t.Parallel()
 
 	mockDB := testutil.NewMockDatabaseService()
-mockDB.GetPlanByNameFunc = func(ctx context.Context, name string) (*database.Plan, error) {
-    return &database.Plan{ID: 1, Name: "trial", DevicesLimit: 1, TrafficLimit: 1073741824, }, nil
-}
-mockDB.GetNodesByPlanNameFunc = func(ctx context.Context, planName string) ([]database.Node, error) {
-    return []database.Node{{ID: 1, IsActive: true, Host: "http://localhost:2053", InboundID: 1}}, nil
-}
-cfg, subService, mockXUI := makeTestSubService(mockDB)
-
+	mockDB.GetPlanByNameFunc = func(ctx context.Context, name string) (*database.Plan, error) {
+		return &database.Plan{ID: 1, Name: "trial", DevicesLimit: 1, TrafficLimit: 1073741824}, nil
+	}
+	mockDB.GetNodesByPlanNameFunc = func(ctx context.Context, planName string) ([]database.Node, error) {
+		return []database.Node{{ID: 1, IsActive: true, Host: "http://localhost:2053", InboundID: 1}}, nil
+	}
+	cfg, subService, mockXUI := makeTestSubService(mockDB)
 
 	// Override rate limit to 3
 	cfg.TrialRateLimit = 3
@@ -78,9 +77,9 @@ cfg, subService, mockXUI := makeTestSubService(mockDB)
 
 	mockDB.CreateTrialSubscriptionFunc = func(ctx context.Context, inviteCode, subscriptionID, clientID string, expiryTime time.Time) (*database.Subscription, error) {
 		return &database.Subscription{
-			SubscriptionID:  subscriptionID,
-			ClientID:        clientID,
-			InviteCode:      inviteCode,
+			SubscriptionID: subscriptionID,
+			ClientID:       clientID,
+			InviteCode:     inviteCode,
 		}, nil
 	}
 
@@ -181,14 +180,14 @@ func TestHandleInvite_EmptyCode(t *testing.T) {
 	t.Parallel()
 
 	mockDB := testutil.NewMockDatabaseService()
-mockDB.GetPlanByNameFunc = func(ctx context.Context, name string) (*database.Plan, error) {
-    return &database.Plan{ID: 1, Name: "trial", DevicesLimit: 1, TrafficLimit: 1073741824, }, nil
-}
-mockDB.GetNodesByPlanNameFunc = func(ctx context.Context, planName string) ([]database.Node, error) {
-    return []database.Node{{ID: 1, IsActive: true, Host: "http://localhost:2053", InboundID: 1}}, nil
-}
+	mockDB.GetPlanByNameFunc = func(ctx context.Context, name string) (*database.Plan, error) {
+		return &database.Plan{ID: 1, Name: "trial", DevicesLimit: 1, TrafficLimit: 1073741824}, nil
+	}
+	mockDB.GetNodesByPlanNameFunc = func(ctx context.Context, planName string) ([]database.Node, error) {
+		return []database.Node{{ID: 1, IsActive: true, Host: "http://localhost:2053", InboundID: 1}}, nil
+	}
 
-cfg := &config.Config{
+	cfg := &config.Config{
 		SiteURL:            "https://vpn.site",
 		TrialDurationHours: 3,
 		TrialRateLimit:     3,
@@ -208,14 +207,14 @@ func TestHandleInvite_DatabaseError(t *testing.T) {
 	t.Parallel()
 
 	mockDB := testutil.NewMockDatabaseService()
-mockDB.GetPlanByNameFunc = func(ctx context.Context, name string) (*database.Plan, error) {
-    return &database.Plan{ID: 1, Name: "trial", DevicesLimit: 1, TrafficLimit: 1073741824, }, nil
-}
-mockDB.GetNodesByPlanNameFunc = func(ctx context.Context, planName string) ([]database.Node, error) {
-    return []database.Node{{ID: 1, IsActive: true, Host: "http://localhost:2053", InboundID: 1}}, nil
-}
+	mockDB.GetPlanByNameFunc = func(ctx context.Context, name string) (*database.Plan, error) {
+		return &database.Plan{ID: 1, Name: "trial", DevicesLimit: 1, TrafficLimit: 1073741824}, nil
+	}
+	mockDB.GetNodesByPlanNameFunc = func(ctx context.Context, planName string) ([]database.Node, error) {
+		return []database.Node{{ID: 1, IsActive: true, Host: "http://localhost:2053", InboundID: 1}}, nil
+	}
 
-cfg := &config.Config{
+	cfg := &config.Config{
 		SiteURL:            "https://vpn.site",
 		TrialDurationHours: 3,
 		TrialRateLimit:     3,
@@ -283,7 +282,7 @@ func TestGetExistingTrialFromCookie_NotTrial(t *testing.T) {
 	mockDB.GetTrialSubscriptionBySubIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
 		return &database.Subscription{
 			SubscriptionID: subscriptionID,
-			PlanID: 0,
+			PlanID:         0,
 			TelegramID:     123456,
 		}, nil
 	}
@@ -311,7 +310,7 @@ func TestGetExistingTrialFromCookie_AlreadyActivated(t *testing.T) {
 	mockDB.GetTrialSubscriptionBySubIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
 		return &database.Subscription{
 			SubscriptionID: subscriptionID,
-			PlanID: 1,
+			PlanID:         1,
 			TelegramID:     123456, // Activated
 		}, nil
 	}
@@ -339,9 +338,9 @@ func TestGetExistingTrialFromCookie_Expired(t *testing.T) {
 	mockDB.GetTrialSubscriptionBySubIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
 		return &database.Subscription{
 			SubscriptionID: subscriptionID,
-			PlanID: 1,
+			PlanID:         1,
 			TelegramID:     0,
-			ExpiresAt:     time.Now().Add(-1 * time.Hour), // Expired
+			ExpiresAt:      time.Now().Add(-1 * time.Hour), // Expired
 		}, nil
 	}
 
@@ -370,7 +369,7 @@ func TestGetExistingTrialFromCookie_Valid(t *testing.T) {
 			SubscriptionID: subscriptionID,
 			PlanID:         1,
 			TelegramID:     0,
-			ExpiresAt:     time.Now().Add(2 * time.Hour),
+			ExpiresAt:      time.Now().Add(2 * time.Hour),
 		}, nil
 	}
 	mockDB.GetPlanByIDFunc = func(ctx context.Context, planID uint) (*database.Plan, error) {
@@ -511,14 +510,14 @@ func TestHandleInvite_ExistingTrialFromCookie(t *testing.T) {
 	t.Parallel()
 
 	mockDB := testutil.NewMockDatabaseService()
-mockDB.GetPlanByNameFunc = func(ctx context.Context, name string) (*database.Plan, error) {
-    return &database.Plan{ID: 1, Name: "trial", DevicesLimit: 1, TrafficLimit: 1073741824, }, nil
-}
-mockDB.GetNodesByPlanNameFunc = func(ctx context.Context, planName string) ([]database.Node, error) {
-    return []database.Node{{ID: 1, IsActive: true, Host: "http://localhost:2053", InboundID: 1}}, nil
-}
+	mockDB.GetPlanByNameFunc = func(ctx context.Context, name string) (*database.Plan, error) {
+		return &database.Plan{ID: 1, Name: "trial", DevicesLimit: 1, TrafficLimit: 1073741824}, nil
+	}
+	mockDB.GetNodesByPlanNameFunc = func(ctx context.Context, planName string) ([]database.Node, error) {
+		return []database.Node{{ID: 1, IsActive: true, Host: "http://localhost:2053", InboundID: 1}}, nil
+	}
 
-cfg := &config.Config{
+	cfg := &config.Config{
 		SiteURL:            "https://vpn.site",
 		TrialDurationHours: 3,
 		TrialRateLimit:     3,
@@ -531,9 +530,9 @@ cfg := &config.Config{
 	}
 	mockDB.GetTrialSubscriptionBySubIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
 		return &database.Subscription{
-			SubscriptionID:  "existing-sub-id",
-			PlanID:          1,
-			TelegramID:      0,
+			SubscriptionID: "existing-sub-id",
+			PlanID:         1,
+			TelegramID:     0,
 			ExpiresAt:      time.Now().Add(2 * time.Hour),
 		}, nil
 	}
@@ -609,14 +608,14 @@ func TestHandleInvite_RateLimitCheckError(t *testing.T) {
 	t.Parallel()
 
 	mockDB := testutil.NewMockDatabaseService()
-mockDB.GetPlanByNameFunc = func(ctx context.Context, name string) (*database.Plan, error) {
-    return &database.Plan{ID: 1, Name: "trial", DevicesLimit: 1, TrafficLimit: 1073741824, }, nil
-}
-mockDB.GetNodesByPlanNameFunc = func(ctx context.Context, planName string) ([]database.Node, error) {
-    return []database.Node{{ID: 1, IsActive: true, Host: "http://localhost:2053", InboundID: 1}}, nil
-}
+	mockDB.GetPlanByNameFunc = func(ctx context.Context, name string) (*database.Plan, error) {
+		return &database.Plan{ID: 1, Name: "trial", DevicesLimit: 1, TrafficLimit: 1073741824}, nil
+	}
+	mockDB.GetNodesByPlanNameFunc = func(ctx context.Context, planName string) ([]database.Node, error) {
+		return []database.Node{{ID: 1, IsActive: true, Host: "http://localhost:2053", InboundID: 1}}, nil
+	}
 
-cfg := &config.Config{
+	cfg := &config.Config{
 		SiteURL:            "https://vpn.site",
 		TrialDurationHours: 3,
 		TrialRateLimit:     3,
@@ -645,14 +644,14 @@ func TestHandleInvite_ParallelRequests(t *testing.T) {
 	t.Parallel()
 
 	mockDB := testutil.NewMockDatabaseService()
-mockDB.GetPlanByNameFunc = func(ctx context.Context, name string) (*database.Plan, error) {
-    return &database.Plan{ID: 1, Name: "trial", DevicesLimit: 1, TrafficLimit: 1073741824, }, nil
-}
-mockDB.GetNodesByPlanNameFunc = func(ctx context.Context, planName string) ([]database.Node, error) {
-    return []database.Node{{ID: 1, IsActive: true, Host: "http://localhost:2053", InboundID: 1}}, nil
-}
+	mockDB.GetPlanByNameFunc = func(ctx context.Context, name string) (*database.Plan, error) {
+		return &database.Plan{ID: 1, Name: "trial", DevicesLimit: 1, TrafficLimit: 1073741824}, nil
+	}
+	mockDB.GetNodesByPlanNameFunc = func(ctx context.Context, planName string) ([]database.Node, error) {
+		return []database.Node{{ID: 1, IsActive: true, Host: "http://localhost:2053", InboundID: 1}}, nil
+	}
 
-cfg := &config.Config{
+	cfg := &config.Config{
 		SiteURL:            "https://vpn.site",
 		TrialDurationHours: 3,
 		TrialRateLimit:     3,
@@ -680,9 +679,9 @@ cfg := &config.Config{
 	}
 	mockDB.CreateTrialSubscriptionFunc = func(ctx context.Context, inviteCode, subscriptionID, clientID string, expiryTime time.Time) (*database.Subscription, error) {
 		return &database.Subscription{
-			SubscriptionID:  subscriptionID,
-			PlanID: 1,
-			InviteCode:      inviteCode,
+			SubscriptionID: subscriptionID,
+			PlanID:         1,
+			InviteCode:     inviteCode,
 		}, nil
 	}
 

@@ -5,7 +5,7 @@ Telegram-бот для продажи и управления VLESS+Reality+Visi
 Production-grade: миграции, мониторинг, rate-limiting, circuit breaker, graceful shutdown.
 
 ## Текущая версия
-**v2.3.0** — план-based подписки, удаление `duration` из plans (migration 019), products/orders, nodes/plan_nodes, subscription_nodes.
+**v2.3.0** — рефакторинг, разбивка database.go на 9 доменных файлов, вынос escapeMarkdown в internal/utils, удаление мёртвого кода подписки, удаление `duration` из plans (migration 019), products/orders, nodes/plan_nodes, subscription_nodes.
 
 ## Ключевые фичи
 - Планы (trial/free/paid) без `duration`, без `price` (duration/price вынесены в products)
@@ -33,12 +33,12 @@ Production-grade: миграции, мониторинг, rate-limiting, circuit
 ```
 cmd/bot/                     — точка входа, graceful shutdown
 internal/bot/                 — handlers, commands, callbacks, referral cache
-internal/database/           — GORM-модели, миграции 000-019, transactions
+internal/database/           — GORM-модели, миграции 000-019, транзакции (9 файлов: models, migrations, service, subscriptions, nodes, invites, trials, orders, products)
 internal/service/            — SubscriptionService (Create, BindTrial, CreateTrial, ReconcileOrphanedClients)
 internal/xui/                — 3x-ui HTTP-клиент + circuit breaker, multi-source map
 internal/interfaces/         — контракты (XUIClient, SubscriptionDatabase, SubscriptionService)
 internal/testutil/           — моки (MockDatabaseService, MockXUIClient, MockBotAPI)
-internal/utils/              — time, UUID, QR
+internal/utils/              — time, UUID, QR, Markdown (EscapeMarkdown)
 internal/config/             — загрузка, валидация
 internal/logger/             — zap setup
 internal/heartbeat/          — мониторинг

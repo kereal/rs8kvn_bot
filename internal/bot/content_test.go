@@ -208,7 +208,7 @@ func TestGetHelpText_DifferentTrafficLimits(t *testing.T) {
 	handler := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, cfg.DonateCardNumber, cfg.DonateURL, cfg.SiteURL)}
 
 	tests := []struct {
-		name           string
+		name         string
 		trafficLimit int
 	}{
 		{"50 GB", 50},

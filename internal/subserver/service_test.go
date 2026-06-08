@@ -44,5 +44,3 @@ func TestService_InvalidateCache(t *testing.T) {
 	assert.False(t, ok)
 	assert.Nil(t, body)
 }
-
-

@@ -9,7 +9,6 @@ import (
 	"html/template"
 	"net"
 	"net/http"
-	"net/url"
 	"regexp"
 	"strings"
 	"sync"
@@ -40,7 +39,7 @@ type TrialCreationResult struct {
 	ClientID   string
 	SubURL     string
 	InviteCode string
-	ExpiresAt time.Time
+	ExpiresAt  time.Time
 }
 
 type Status string
@@ -496,15 +495,6 @@ func isLocalAddress(host string) bool {
 		return false
 	}
 	return ip.IsLoopback()
-}
-
-// sourceHost returns the host part of a URL for logging (no path / subID).
-func sourceHost(rawURL string) string {
-	u, err := url.Parse(rawURL)
-	if err != nil || u.Host == "" {
-		return rawURL
-	}
-	return u.Host
 }
 
 // handleSubscription is the HTTP handler for GET /sub/{subID}.

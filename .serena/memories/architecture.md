@@ -3,6 +3,14 @@
 **Версия:** v2.3.0  
 **Обновлено:** 2026-06-08
 
+## Рефакторинг 2026-06-08 (коммит 2a1e0fe)
+- Монолит `database.go` разбит на 9 файлов по доменам
+- `escapeMarkdown` перемещён в `internal/utils/markdown.go` (экспортирован как `EscapeMarkdown`)
+- Удалён мёртвый код: `AddTrialClient`, `Login`, `TestForceSessionExpiry` (xui), `sourceHost` (web)
+- `ConvertJSONToShareLinks` перенесён в `convert_test_helpers_test.go`
+- Убран избыточный `if xuiHeaders != nil` в `subscription_handler.go`
+- Проведён `go fmt` по 20 файлам
+
 ## Branch: plan-mechanics
 
 Эта память описывает ветку `plan-mechanics`, которая включает:
@@ -131,7 +139,18 @@ id, name UNIQUE, devices_limit, traffic_limit
 - **`ReconcileOrphanedClients(ctx)`** — проверяет ВСЕ источники, удаляет только если клиент не найден НИГДЕ.
 - **`LinkNodeToPlan(ctx, planName, nodeID)`** — создаёт план-ноду в `plan_nodes`.
 
-### Database (`internal/database/database.go`)
+### Database (`internal/database/` — 9 файлов)
+
+Монолитный `database.go` (1216 строк) разбит на файлы по доменам (2026-06-08, коммит 2a1e0fe):
+- `models.go` — все GORM-модели, `TableName()`, хелперы `Subscription`, `PoolStats`, константы `TrialPlanName`/`FreePlanName`
+- `migrations.go` — `//go:embed`, `runMigrations()`
+- `service.go` — `Service` struct, `NewService()`, `Close()`, `Ping()`, `GetPoolStats()`
+- `subscriptions.go` — Subscription/TelegramID CRUD (19 функций)
+- `nodes.go` — Node/Plan CRUD + `LinkNodeToPlan`
+- `invites.go` — Invite/Referral CRUD (5 функций)
+- `trials.go` — Trial CRUD (7 функций), включая `BindTrialSubscription`
+- `orders.go` — Order CRUD (4 функции)
+- `products.go` — `GetActiveByPlanID()`
 - **`CreateSubscription(ctx, sub, inviteCode string)`** — атомарная транзакция: revoke всех active subs для telegram_id + resolve invite → заполнение `sub.InviteCode` и `sub.ReferredBy` + insert.
 - **`BindTrialSubscription(ctx, sub, telegramID, username)`** — UPDATE trial-row WHERE telegram_id=0 AND plan_id=trial → revoke других active subs для этого telegram_id в той же транзакции. Динамический поиск trial/free plans по имени (`TrialPlanName`/`FreePlanName`).
 - **`CleanupExpiredTrials(ctx)`** — DELETE WHERE expiry_time < now() RETURNING subscription_id (SQLite ≥ 3.35).

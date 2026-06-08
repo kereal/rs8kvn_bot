@@ -3,6 +3,8 @@ package bot
 import (
 	"strings"
 	"testing"
+
+	"rs8kvn_bot/internal/utils"
 )
 
 func FuzzEscapeMarkdown(f *testing.F) {
@@ -37,7 +39,7 @@ func FuzzEscapeMarkdown(f *testing.F) {
 	}
 
 	f.Fuzz(func(t *testing.T, input string) {
-		result := escapeMarkdown(input)
+		result := utils.EscapeMarkdown(input)
 		if len(result) == 0 && len(input) == 0 {
 			return
 		}
