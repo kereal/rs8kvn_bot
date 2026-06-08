@@ -71,12 +71,25 @@ type PlanRepository interface {
 	GetPlanByID(ctx context.Context, id uint) (*database.Plan, error)
 }
 
+type ProductRepository interface {
+	GetActiveByPlanID(ctx context.Context, planID uint) ([]database.Product, error)
+}
+
+type OrderRepository interface {
+	CreateOrder(ctx context.Context, order *database.Order) error
+	GetOrderByID(ctx context.Context, id uint) (*database.Order, error)
+	GetOrdersBySubscriptionID(ctx context.Context, subscriptionID uint) ([]database.Order, error)
+	UpdateOrderStatus(ctx context.Context, id uint, status string) error
+}
+
 type DatabaseService interface {
 	SubscriptionRepository
 	TrialRepository
 	InviteRepository
 	NodeRepository
 	PlanRepository
+	ProductRepository
+	OrderRepository
 	Ping(ctx context.Context) error
 	Close() error
 	GetPoolStats() (*database.PoolStats, error)

@@ -88,6 +88,50 @@ type PlanNode struct {
 	NodeID uint `gorm:"primaryKey;column:node_id"`
 }
 
+// Product represents a purchasable subscription product bound to a plan.
+type Product struct {
+	ID             uint      `gorm:"primaryKey;column:id"`
+	PlanID         uint      `gorm:"not null;column:plan_id"`
+	DurationDays   int       `gorm:"not null;column:duration_days"`
+	PriceCents     int64     `gorm:"not null;column:price_cents"`
+	Currency       string    `gorm:"size:3;not null;default:RUB;column:currency"`
+	IsActive       bool      `gorm:"not null;default:true;column:is_active"`
+	CreatedAt      time.Time `gorm:"autoCreateTime;column:created_at"`
+	UpdatedAt      time.Time `gorm:"autoUpdateTime;column:updated_at"`
+}
+
+// Order represents a recorded purchase event for a subscription.
+// Statuses: pending | paid | expired | canceled.
+type Order struct {
+	ID                 uint      `gorm:"primaryKey;column:id"`
+	SubscriptionID     uint      `gorm:"not null;column:subscription_id"`
+	ProductID          uint      `gorm:"not null;column:product_id"`
+	Status             string    `gorm:"not null;size:16;column:status"`
+	AmountCents        int64     `gorm:"not null;column:amount_cents"`
+	Currency           string    `gorm:"size:3;not null;default:RUB;column:currency"`
+	PaymentProvider    string    `gorm:"column:payment_provider"`
+	ProviderPaymentID  string    `gorm:"column:provider_payment_id"`
+	CreatedAt          time.Time `gorm:"not null;column:created_at"`
+	PaidAt             time.Time `gorm:"column:paid_at"`
+	ActivatedAt        time.Time `gorm:"column:activated_at"`
+	ExpiresAt          time.Time `gorm:"column:expires_at"`
+}
+
+// TableName returns the table name for PlanNode.
+func (PlanNode) TableName() string {
+	return "plan_nodes"
+}
+
+// TableName returns the table name for Product.
+func (Product) TableName() string {
+	return "products"
+}
+
+// TableName returns the table name for Order.
+func (Order) TableName() string {
+	return "orders"
+}
+
 // Invite represents a referral invite code.
 type Invite struct {
 	Code         string    `gorm:"primaryKey;size:16"`
@@ -110,11 +154,6 @@ func (Node) TableName() string {
 // TableName returns the table name for Plan.
 func (Plan) TableName() string {
 	return "plans"
-}
-
-// TableName returns the table name for PlanNode.
-func (PlanNode) TableName() string {
-	return "plan_nodes"
 }
 
 // TableName returns the table name for Subscription.
@@ -1061,4 +1100,56 @@ func (s *Service) CleanupExpiredTrials(ctx context.Context, hours int) ([]Subscr
 		Delete(&TrialRequest{})
 
 	return subs, nil
+}
+
+// CreateOrder inserts a new order record.
+func (s *Service) CreateOrder(ctx context.Context, order *Order) error {
+	if err := s.db.WithContext(ctx).Create(order).Error; err != nil {
+		return fmt.Errorf("failed to create order: %w", err)
+	}
+	return nil
+}
+
+// GetOrderByID retrieves an order by its ID.
+func (s *Service) GetOrderByID(ctx context.Context, id uint) (*Order, error) {
+	var order Order
+	result := s.db.WithContext(ctx).First(&order, id)
+	if result.Error != nil {
+		return nil, fmt.Errorf("failed to get order: %w", result.Error)
+	}
+	return &order, nil
+}
+
+// GetOrdersBySubscriptionID returns orders for the given subscription.
+func (s *Service) GetOrdersBySubscriptionID(ctx context.Context, subscriptionID uint) ([]Order, error) {
+	var orders []Order
+	result := s.db.WithContext(ctx).
+		Where("subscription_id = ?", subscriptionID).
+		Order("created_at DESC").
+		Find(&orders)
+	if result.Error != nil {
+		return nil, fmt.Errorf("failed to list orders: %w", result.Error)
+	}
+	return orders, nil
+}
+
+// UpdateOrderStatus updates the status of an order by ID.
+func (s *Service) UpdateOrderStatus(ctx context.Context, id uint, status string) error {
+	result := s.db.WithContext(ctx).Model(&Order{}).Where("id = ?", id).Update("status", status)
+	if result.Error != nil {
+		return fmt.Errorf("failed to update order status: %w", result.Error)
+	}
+	return nil
+}
+
+// GetActiveByPlanID returns active products for the given plan.
+func (s *Service) GetActiveByPlanID(ctx context.Context, planID uint) ([]Product, error) {
+	var products []Product
+	result := s.db.WithContext(ctx).
+		Where("plan_id = ? AND is_active = ?", planID, true).
+		Find(&products)
+	if result.Error != nil {
+		return nil, fmt.Errorf("failed to get products: %w", result.Error)
+	}
+	return products, nil
 }
