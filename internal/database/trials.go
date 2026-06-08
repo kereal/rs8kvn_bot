@@ -182,9 +182,11 @@ func (s *Service) CleanupExpiredTrials(ctx context.Context, hours int) ([]Subscr
 	}
 
 	rateLimitCutoff := time.Now().Add(-1*time.Hour + 1*time.Second)
-	s.db.WithContext(ctx).
+	if err := s.db.WithContext(ctx).
 		Where("created_at < ?", rateLimitCutoff).
-		Delete(&TrialRequest{})
+		Delete(&TrialRequest{}).Error; err != nil {
+		return nil, fmt.Errorf("failed to cleanup expired trial requests: %w", err)
+	}
 
 	return subs, nil
 }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	"gorm.io/gorm"
 )
@@ -31,31 +30,24 @@ func (s *Service) GetInviteByReferrer(ctx context.Context, referrerTGID int64) (
 // It always returns the oldest (canonical) code for the user.
 // After migration 005 the unique constraint guarantees at most one row per referrer_tg_id.
 func (s *Service) GetOrCreateInvite(ctx context.Context, referrerTGID int64, code string) (*Invite, error) {
-	// First try to return existing canonical code (oldest)
-	if existing, err := s.GetInviteByReferrer(ctx, referrerTGID); err == nil {
-		return existing, nil
-	} else if !errors.Is(err, ErrInviteNotFound) {
-		return nil, err
+	var invite Invite
+	if err := s.db.WithContext(ctx).
+		Exec(
+			"INSERT INTO invites (code, referrer_tg_id) VALUES (?, ?) ON CONFLICT(referrer_tg_id) DO NOTHING",
+			code, referrerTGID,
+		).Error; err != nil {
+		return nil, fmt.Errorf("failed to upsert invite: %w", err)
 	}
-
-	// No invite yet — create one with the proposed code
-	now := time.Now()
-	if err := s.db.WithContext(ctx).Exec(
-		"INSERT INTO invites (code, referrer_tg_id, created_at) VALUES (?, ?, ?)",
-		code, referrerTGID, now,
-	).Error; err != nil {
-		// Race: someone else just created it — read the canonical one
-		if existing, err2 := s.GetInviteByReferrer(ctx, referrerTGID); err2 == nil {
-			return existing, nil
+	if err := s.db.WithContext(ctx).
+		Where("referrer_tg_id = ?", referrerTGID).
+		Order("created_at ASC, code ASC").
+		First(&invite).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrInviteNotFound
 		}
-		return nil, fmt.Errorf("failed to create invite after race: %w", err)
+		return nil, fmt.Errorf("failed to resolve invite: %w", err)
 	}
-
-	return &Invite{
-		Code:         code,
-		ReferrerTGID: referrerTGID,
-		CreatedAt:    now,
-	}, nil
+	return &invite, nil
 }
 
 // GetInviteByCode returns an invite by its code.

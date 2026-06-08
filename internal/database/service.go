@@ -97,7 +97,7 @@ func (s *Service) Ping(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	return sqlDB.Ping()
+	return sqlDB.PingContext(ctx)
 }
 
 // GetPoolStats returns current database connection pool statistics.

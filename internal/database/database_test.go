@@ -1696,6 +1696,51 @@ func TestService_BindTrialSubscription_RevokesExistingActiveSub(t *testing.T) {
 	assert.Equal(t, int64(1), activeCount, "user must end up with exactly one active sub")
 }
 
+// ==================== Edge-case Tests ====================
+
+func TestService_Ping_ContextCanceled(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+	defer func() {
+		if err := svc.Close(); err != nil {
+			t.Logf("Warning: failed to close database service: %v", err)
+		}
+	}()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := svc.Ping(ctx)
+	assert.Error(t, err, "Ping should fail when context is already canceled")
+}
+
+func TestService_CleanupExpiredTrials_RecordsError(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+
+	plan, err := svc.GetPlanByName(context.Background(), TrialPlanName)
+	require.NoError(t, err)
+	require.NotNil(t, plan)
+
+	oldTrial := &Subscription{
+		TelegramID:     0,
+		ClientID:       "old-trial-client",
+		SubscriptionID: "old-trial-sub",
+		PlanID:         plan.ID,
+		Status:         "active",
+		ExpiresAt:      time.Now().Add(24 * time.Hour),
+		CreatedAt:      time.Now().Add(-48 * time.Hour),
+	}
+	require.NoError(t, svc.db.Create(oldTrial).Error)
+
+	deleted, err := svc.CleanupExpiredTrials(context.Background(), 24)
+	require.NoError(t, err, "CleanupExpiredTrials must surface cleanup errors instead of swallowing them")
+	assert.Len(t, deleted, 1)
+	assert.Equal(t, "old-trial-sub", deleted[0].SubscriptionID)
+}
+
 // ==================== Helper Functions ====================
 
 func newTestService(t *testing.T) *Service {
