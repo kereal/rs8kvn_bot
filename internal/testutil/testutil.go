@@ -82,7 +82,6 @@ type MockDatabaseService struct {
 	CreateTrialSubscriptionFunc         func(ctx context.Context, inviteCode, subscriptionID, clientID string, expiryTime time.Time) (*database.Subscription, error)
 	ListNodesFunc                       func(ctx context.Context) ([]database.Node, error)
 	IsNodesEmptyFunc                    func(ctx context.Context) (bool, error)
-	GetSourcesByPlanIDFunc              func(ctx context.Context, planID uint) ([]database.Node, error)
 	GetNodesByPlanNameFunc              func(ctx context.Context, planName string) ([]database.Node, error)
 	GetPlansBySourceIDFunc              func(ctx context.Context, sourceID uint) ([]database.Plan, error)
 	GetPlanByNameFunc                   func(ctx context.Context, name string) (*database.Plan, error)
@@ -430,13 +429,6 @@ func (m *MockDatabaseService) DeletePlan(ctx context.Context, planID uint) error
 		return m.DeletePlanFunc(ctx, planID)
 	}
 	return nil
-}
-
-func (m *MockDatabaseService) GetSourcesByPlanID(ctx context.Context, planID uint) ([]database.Node, error) {
-	if m.GetSourcesByPlanIDFunc != nil {
-		return m.GetSourcesByPlanIDFunc(ctx, planID)
-	}
-	return nil, nil
 }
 
 func (m *MockDatabaseService) GetNodesByPlanName(ctx context.Context, planName string) ([]database.Node, error) {

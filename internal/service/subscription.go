@@ -139,7 +139,7 @@ func (s *SubscriptionService) Create(ctx context.Context, chatID int64, username
 	}
 
 	if firstClient == nil {
-		return nil, fmt.Errorf("failed to create client on any source: %w", firstErr)
+		return nil, fmt.Errorf("failed to create client on any node: %w", firstErr)
 	}
 
 	sub := &database.Subscription{
@@ -465,11 +465,11 @@ func (s *SubscriptionService) BindTrial(ctx context.Context, subscriptionID stri
 	currentEmail := "trial_" + subscriptionID
 	email := XUIEmail(username, chatID)
 
-	sources, err := s.trialNodes(ctx)
+	nodes, err := s.trialNodes(ctx)
 	if err != nil {
-		return sub, fmt.Errorf("load trial sources: %w", err)
+		return sub, fmt.Errorf("load trial nodes: %w", err)
 	}
-	for _, node := range sources {
+	for _, node := range nodes {
 		client, ok := s.xuiClients[node.ID]
 		if !ok {
 			continue
@@ -581,7 +581,7 @@ func (s *SubscriptionService) ReconcileOrphanedClients(ctx context.Context) (int
 					zap.String("subscription_id", sub.SubscriptionID))
 			} else {
 				removed++
-				logger.Info("Removed orphaned subscription (XUI client missing on all sources)",
+				logger.Info("Removed orphaned subscription (XUI client missing on all nodes)",
 					zap.Uint("id", sub.ID),
 					zap.Int64("telegram_id", sub.TelegramID),
 					zap.String("username", sub.Username),

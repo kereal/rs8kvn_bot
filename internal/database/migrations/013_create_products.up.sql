@@ -10,5 +10,4 @@ CREATE TABLE IF NOT EXISTS products (
     UNIQUE (plan_id, duration_days)
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_products_plan_duration ON products(plan_id, duration_days);
 CREATE INDEX IF NOT EXISTS idx_products_plan ON products(plan_id);
