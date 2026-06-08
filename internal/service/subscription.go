@@ -145,7 +145,7 @@ func (s *SubscriptionService) Create(ctx context.Context, chatID int64, username
 		Username:       username,
 		ClientID:       firstClient.ID,
 		SubscriptionID: firstClient.SubID,
-		ExpiryTime:     expiryTime,
+		ExpiresAt:     expiryTime,
 		PlanID:         plan.ID,
 		Status:         "active",
 	}
@@ -258,7 +258,7 @@ type TrafficInfo struct {
 	DaysUntilReset      int
 	ResetInfo           string
 	CreatedAtFormatted  string
-	ExpiryTimeFormatted string
+	ExpiresAtFormatted string
 }
 
 func (s *SubscriptionService) PlanTrafficLimitGB(ctx context.Context, telegramID int64) int {
@@ -329,10 +329,10 @@ func (s *SubscriptionService) GetWithTraffic(ctx context.Context, telegramID int
 
 	// Calculate reset time
 	var resetTime time.Time
-	if sub.ExpiryTime.IsZero() {
+	if sub.ExpiresAt.IsZero() {
 		resetTime = sub.CreatedAt.AddDate(0, 0, config.SubscriptionResetDay)
 	} else {
-		resetTime = sub.ExpiryTime
+		resetTime = sub.ExpiresAt
 	}
 	daysUntilReset := utils.DaysUntilReset(time.Now(), resetTime)
 
@@ -355,7 +355,7 @@ func (s *SubscriptionService) GetWithTraffic(ctx context.Context, telegramID int
 		DaysUntilReset:      daysUntilReset,
 		ResetInfo:           resetInfo,
 		CreatedAtFormatted:  utils.FormatDateRu(sub.CreatedAt),
-		ExpiryTimeFormatted: utils.FormatDateRu(sub.ExpiryTime),
+		ExpiresAtFormatted: utils.FormatDateRu(sub.ExpiresAt),
 	}, nil
 }
 

@@ -341,7 +341,7 @@ func TestGetExistingTrialFromCookie_Expired(t *testing.T) {
 			SubscriptionID: subscriptionID,
 			PlanID: 1,
 			TelegramID:     0,
-			ExpiryTime:     time.Now().Add(-1 * time.Hour), // Expired
+			ExpiresAt:     time.Now().Add(-1 * time.Hour), // Expired
 		}, nil
 	}
 
@@ -370,7 +370,7 @@ func TestGetExistingTrialFromCookie_Valid(t *testing.T) {
 			SubscriptionID: subscriptionID,
 			PlanID:         1,
 			TelegramID:     0,
-			ExpiryTime:     time.Now().Add(2 * time.Hour),
+			ExpiresAt:     time.Now().Add(2 * time.Hour),
 		}, nil
 	}
 	mockDB.GetPlanByIDFunc = func(ctx context.Context, planID uint) (*database.Plan, error) {
@@ -534,7 +534,7 @@ cfg := &config.Config{
 			SubscriptionID:  "existing-sub-id",
 			PlanID:          1,
 			TelegramID:      0,
-			ExpiryTime:      time.Now().Add(2 * time.Hour),
+			ExpiresAt:      time.Now().Add(2 * time.Hour),
 		}, nil
 	}
 	mockDB.GetPlanByIDFunc = func(ctx context.Context, planID uint) (*database.Plan, error) {

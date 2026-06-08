@@ -212,7 +212,7 @@ func TestSubscription_IsActive_StatusCases(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			sub := &Subscription{Status: tt.status, ExpiryTime: tt.expiryTime}
+			sub := &Subscription{Status: tt.status, ExpiresAt: tt.expiryTime}
 			assert.Equal(t, tt.want, sub.IsActive())
 		})
 	}

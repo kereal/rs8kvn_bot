@@ -308,7 +308,7 @@ Migrations are applied automatically on startup. If migration fails, bot exits w
 | `012_add_devices_ips_to_subscriptions.up.sql` | Adds `devices` and `ips` JSON columns for HWID/IP tracking |
 
 **Schema after migration 012:**
-- `subscriptions`: `telegram_id`, `username`, `client_id`, `subscription_id`, `expiry_time`, `status`, `invite_code`, `plan_id`, `referred_by`, `devices`, `ips`, `created_at`, `updated_at`
+- `subscriptions`: `telegram_id`, `username`, `client_id`, `subscription_id`, `expires_at`, `status`, `invite_code`, `plan_id`, `referred_by`, `devices`, `ips`, `created_at`, `updated_at`
 - New tables: `sources`, `plans`, `plan_sources` (see `doc/architecture.md` for full schema)
 - `is_trial` is now derived: `plan.name = 'trial'` (single source of truth)
 

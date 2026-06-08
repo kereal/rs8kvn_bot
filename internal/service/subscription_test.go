@@ -486,7 +486,7 @@ func TestSubscriptionService_GetWithTraffic_Success(t *testing.T) {
 		Username:      "testuser",
 		PlanID:        1,
 		CreatedAt:     time.Now(),
-		ExpiryTime:    time.Now().Add(7 * 24 * time.Hour),
+		ExpiresAt:    time.Now().Add(7 * 24 * time.Hour),
 	}
 
 	db := &testutil.MockDatabaseService{

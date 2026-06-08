@@ -341,7 +341,7 @@ ConnMaxIdleTime = 2m
 ```sql
 CREATE INDEX idx_subscriptions_telegram_id    ON subscriptions(telegram_id);
 CREATE INDEX idx_subscriptions_subscription_id ON subscriptions(subscription_id);
-CREATE INDEX idx_subscriptions_expiry          ON subscriptions(expiry_time);
+CREATE INDEX idx_subscriptions_expiry          ON subscriptions(expires_at);
 CREATE INDEX idx_subscriptions_invite_code     ON subscriptions(invite_code);
 CREATE INDEX idx_subscriptions_referred_by     ON subscriptions(referred_by);
 CREATE UNIQUE INDEX idx_invites_referrer_unique ON invites(referrer_tg_id);
@@ -494,7 +494,7 @@ SIGQUIT (kill -3) → core dump (not handled by us)
 │ subscription_id      string   INDEX (unique)                 │
 │ inbound_id           int      INDEX                         │
 │ traffic_limit        int64    default: 107374182400 (100GB)  │
-│ expiry_time          time     INDEX                         │
+│ expires_at          time     INDEX                         │
 │ status               string   default: "active"  INDEX       │
 │ subscription_url     string                                  │
 │ invite_code          string   INDEX                         │
@@ -535,7 +535,7 @@ SIGQUIT (kill -3) → core dump (not handled by us)
 **Indexes rationale:**
 - `telegram_id + status` → fast lookup of user's active subscription
 - `subscription_id` → fast `/sub/{subID}` lookup
-- `expiry_time` → cleanup of expired subs
+- `expires_at` → cleanup of expired subs
 - `invite_code` → trial activation via invite
 - `referred_by` → referral stats query
 
