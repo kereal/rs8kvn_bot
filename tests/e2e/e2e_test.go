@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -102,6 +103,8 @@ func setupE2EEnv(t *testing.T) *e2eTestEnv {
 		IsBot:     true,
 	}
 
+	ctx := context.Background()
+	require.NoError(t, db.SeedDefaultNode(ctx, "main", "https://panel.example.com", "test-api-token", 1, ""), "seed test node")
 	xuiClients := map[uint]interfaces.XUIClient{1: mockXUI}
 	sources := []database.Node{{ID: 1, Name: "main", IsActive: true,  Host: "https://panel.example.com", APIToken: "test-api-token", InboundID: 1}}
 	subService := service.NewSubscriptionService(db, xuiClients, sources, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})

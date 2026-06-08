@@ -75,8 +75,17 @@ func (s *SubscriptionService) activeNodes() []database.Node {
 	return result
 }
 
+// trialNodes returns nodes linked to the trial plan.
+// Returns an error if the trial plan has no linked nodes (fail-fast).
 func (s *SubscriptionService) trialNodes(ctx context.Context) ([]database.Node, error) {
-	return s.db.GetNodesByPlanName(ctx, database.TrialPlanName)
+	nodes, err := s.db.GetNodesByPlanName(ctx, database.TrialPlanName)
+	if err != nil {
+		return nil, fmt.Errorf("load trial nodes: %w", err)
+	}
+	if len(nodes) == 0 {
+		return nil, fmt.Errorf("trial plan has no linked nodes")
+	}
+	return nodes, nil
 }
 
 // Create provisions a new free-plan subscription. inviteCode, when non-empty,
@@ -354,6 +363,7 @@ func (s *SubscriptionService) GetWithTraffic(ctx context.Context, telegramID int
 
 // daysUntilReset calculates the number of days until the next traffic reset.
 
+// TrialCreateResult holds the outcome of a trial creation.
 type TrialCreateResult struct {
 	Subscription    *database.Subscription
 	SubscriptionURL string
@@ -361,6 +371,10 @@ type TrialCreateResult struct {
 	ClientID        string
 }
 
+// CreateTrial provisions a new anonymous trial subscription.
+// It resolves the trial plan, picks the first trial node,
+// creates a client on that node via XUI, and persists the subscription
+// in the database with telegram_id = 0 (unactivated).
 func (s *SubscriptionService) CreateTrial(ctx context.Context, inviteCode string) (*TrialCreateResult, error) {
 	subID, err := utils.GenerateSubID()
 	if err != nil {
@@ -382,13 +396,7 @@ func (s *SubscriptionService) CreateTrial(ctx context.Context, inviteCode string
 
 	trialNodes, err := s.trialNodes(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("load trial sources: %w", err)
-	}
-	if len(trialNodes) == 0 {
-		trialNodes = s.activeNodes()
-	}
-	if len(trialNodes) == 0 {
-		return nil, fmt.Errorf("no nodes available for trial")
+		return nil, err
 	}
 
 	node := trialNodes[0]
