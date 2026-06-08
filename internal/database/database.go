@@ -917,6 +917,7 @@ func (s *Service) CreateTrialSubscription(ctx context.Context, inviteCode, subsc
 	return sub, nil
 }
 
+// resolveTrialPlanID looks up the trial plan by name and returns its ID.
 func (s *Service) resolveTrialPlanID(ctx context.Context) (uint, error) {
 	var plan Plan
 	if err := s.db.WithContext(ctx).Where("name = ?", TrialPlanName).First(&plan).Error; err != nil {
@@ -1191,6 +1192,15 @@ func (s *Service) UpdateOrderStatus(ctx context.Context, id uint, status string)
 		return fmt.Errorf("failed to update order status: %w", result.Error)
 	}
 	return nil
+}
+
+// LinkNodeToPlan creates a link between a node and a plan (plan_nodes entry).
+func (s *Service) LinkNodeToPlan(ctx context.Context, planName string, nodeID uint) error {
+	var plan Plan
+	if err := s.db.WithContext(ctx).Where("name = ?", planName).First(&plan).Error; err != nil {
+		return fmt.Errorf("plan %q not found: %w", planName, err)
+	}
+	return s.db.WithContext(ctx).Create(&PlanNode{PlanID: plan.ID, NodeID: nodeID}).Error
 }
 
 // GetActiveByPlanID returns active products for the given plan.

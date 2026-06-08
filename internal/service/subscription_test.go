@@ -640,6 +640,39 @@ func TestSubscriptionService_CreateTrial_DBError(t *testing.T) {
 	assert.True(t, deleteCalled)
 }
 
+func TestSubscriptionService_CreateTrial_NoTrialNodes(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{
+		TrialDurationHours: 3,
+	}
+
+	db := &testutil.MockDatabaseService{
+		GetPlanByNameFunc: func(ctx context.Context, name string) (*database.Plan, error) {
+			return &database.Plan{ID: 1, Name: name, TrafficLimit: 1073741824}, nil
+		},
+		GetNodesByPlanNameFunc: func(ctx context.Context, planName string) ([]database.Node, error) {
+			return nil, nil
+		},
+	}
+	xuiClient := &testutil.MockXUIClient{
+		AddClientWithIDFunc: func(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
+			return &xui.ClientConfig{ID: clientID, SubID: subID}, nil
+		},
+	}
+	sources := []database.Node{
+		{ID: 1, IsActive: true, Host: "http://localhost:2053", InboundID: 1},
+	}
+	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
+
+	svc := NewSubscriptionService(db, xuiClients, sources, cfg, "", &webhook.NoopSender{})
+	result, err := svc.CreateTrial(context.Background(), "testcode")
+
+	assert.Error(t, err)
+	assert.Nil(t, result)
+	assert.Contains(t, err.Error(), "no linked nodes")
+}
+
 func TestSubscriptionService_ReconcileOrphanedClients_RemovesMissing(t *testing.T) {
 	t.Parallel()
 
