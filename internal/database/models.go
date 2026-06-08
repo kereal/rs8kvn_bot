@@ -115,9 +115,9 @@ type Order struct {
 	PaymentProvider   string    `gorm:"column:payment_provider"`
 	ProviderPaymentID string    `gorm:"column:provider_payment_id"`
 	CreatedAt         time.Time `gorm:"not null;column:created_at"`
-	PaidAt            time.Time `gorm:"column:paid_at"`
-	ActivatedAt       time.Time `gorm:"column:activated_at"`
-	ExpiresAt         time.Time `gorm:"column:expires_at"`
+	PaidAt            *time.Time `gorm:"column:paid_at"`
+	ActivatedAt       *time.Time `gorm:"column:activated_at"`
+	ExpiresAt         *time.Time `gorm:"column:expires_at"`
 
 	Subscription *Subscription `gorm:"foreignKey:SubscriptionID"`
 	Product      *Product      `gorm:"foreignKey:ProductID"`
