@@ -88,7 +88,6 @@ type Plan struct {
 	Name         string    `gorm:"size:50;uniqueIndex;column:name"`
 	DevicesLimit int       `gorm:"default:1;column:devices_limit"`
 	TrafficLimit int64     `gorm:"default:0;column:traffic_limit"`
-	Duration     int       `gorm:"default:0;column:duration"` // hours, 0=unlimited
 	CreatedAt    time.Time `gorm:"autoCreateTime;column:created_at"`
 	UpdatedAt    time.Time `gorm:"autoUpdateTime;column:updated_at"`
 
@@ -439,7 +438,6 @@ func NewService(dbPath string) (*Service, error) {
 			Name:         TrialPlanName,
 			DevicesLimit: 1,
 			TrafficLimit: 1073741824,
-			Duration:     3,
 		}).Error; err != nil {
 			return nil, fmt.Errorf("failed to seed default trial plan: %w", err)
 		}
@@ -447,7 +445,6 @@ func NewService(dbPath string) (*Service, error) {
 			Name:         FreePlanName,
 			DevicesLimit: 1,
 			TrafficLimit: 53687091200,
-			Duration:     0,
 		}).Error; err != nil {
 			return nil, fmt.Errorf("failed to seed default free plan: %w", err)
 		}
