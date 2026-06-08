@@ -41,20 +41,24 @@ const (
 
 // Subscription represents a user's VPN subscription.
 type Subscription struct {
-	ID             uint      `gorm:"primaryKey"`
-	TelegramID     int64     `gorm:"index"`
-	Username       string    `gorm:"size:255;index"`
-	ClientID       string    `gorm:"size:255"`
-	SubscriptionID string    `gorm:"size:255;index"`
-	ExpiresAt      time.Time `gorm:"index:idx_expiry"`
-	Status         string    `gorm:"default:active;size:50;index"`
-	InviteCode     string    `gorm:"size:16;index"`
-	PlanID         uint      `gorm:"index"`
-	ReferredBy     int64     `gorm:"index"`
-	Devices        string    `gorm:"type:text;default:'[]'"` // JSON array of {header_key: value} device entries
-	Ips            string    `gorm:"type:text;default:'[]'"` // JSON array of {ip: timestamp} entries
-	CreatedAt      time.Time `gorm:"autoCreateTime"`
-	UpdatedAt      time.Time `gorm:"autoUpdateTime"`
+	ID               uint      `gorm:"primaryKey"`
+	TelegramID       int64     `gorm:"index"`
+	Username         string    `gorm:"size:255;index"`
+	ClientID         string    `gorm:"size:255"`
+	SubscriptionID   string    `gorm:"size:255;index"`
+	ExpiresAt        time.Time `gorm:"index:idx_expiry"`
+	Status           string    `gorm:"default:active;size:50;index"`
+	InviteCode       string    `gorm:"size:16;index"`
+	PlanID           uint      `gorm:"index"`
+	ReferredBy       int64     `gorm:"index"`
+	ProductID        uint      `gorm:"index"`
+	StartedAt        time.Time
+	PricePaidCents   int64     `gorm:"default:0"`
+	Currency         string    `gorm:"size:3"`
+	Devices          string    `gorm:"type:text;default:'[]'"` // JSON array of {header_key: value} device entries
+	Ips              string    `gorm:"type:text;default:'[]'"` // JSON array of {ip: timestamp} entries
+	CreatedAt        time.Time `gorm:"autoCreateTime"`
+	UpdatedAt        time.Time `gorm:"autoUpdateTime"`
 }
 
 // Node represents a configured 3x-ui panel source.
