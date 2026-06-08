@@ -53,6 +53,11 @@ func TestIsNodesEmpty_TrueAndFalse(t *testing.T) {
 	empty, err := svc.IsNodesEmpty(ctx)
 	require.NoError(t, err)
 	assert.True(t, empty, "no node seeded after NewService")
+
+	require.NoError(t, svc.SeedDefaultNode(ctx, "main", "http://xui:2053", "token-abc", 1, "https://sub.example.com"))
+	empty, err = svc.IsNodesEmpty(ctx)
+	require.NoError(t, err)
+	assert.False(t, empty, "nodes should not be empty after seeding")
 }
 
 // ==================== Plan Tests ====================
