@@ -645,7 +645,7 @@ func TestEvent_JSONKeys(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify JSON keys match the spec
-	var raw map[string]interface{}
+	var raw map[string]any
 	err = json.Unmarshal(data, &raw)
 	require.NoError(t, err)
 

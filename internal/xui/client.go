@@ -21,7 +21,7 @@ import (
 	"go.uber.org/zap"
 )
 
-func marshalJSON(v interface{}) (*bytes.Reader, error) {
+func marshalJSON(v any) (*bytes.Reader, error) {
 	body, err := json.Marshal(v)
 	if err != nil {
 		return nil, err
@@ -246,7 +246,7 @@ func (c *Client) AddClientWithID(ctx context.Context, inboundID int, email, clie
 }
 
 func (c *Client) doAddClientWithID(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int, flow string) (*ClientConfig, error) {
-	clientObj := map[string]interface{}{
+	clientObj := map[string]any{
 		"id":         clientID,
 		"email":      email,
 		"limitIp":    0,
@@ -258,7 +258,7 @@ func (c *Client) doAddClientWithID(ctx context.Context, inboundID int, email, cl
 		"reset":      resetDays,
 	}
 
-	requestData := map[string]interface{}{
+	requestData := map[string]any{
 		"client":     clientObj,
 		"inboundIds": []int{inboundID},
 	}
@@ -279,7 +279,7 @@ func (c *Client) doAddClientWithID(ctx context.Context, inboundID int, email, cl
 	var simpleResp struct {
 		Success bool        `json:"success"`
 		Msg     string      `json:"msg"`
-		Obj     interface{} `json:"obj,omitempty"`
+		Obj     any `json:"obj,omitempty"`
 	}
 
 	if err := json.Unmarshal(respBody, &simpleResp); err != nil {
@@ -361,7 +361,7 @@ func (c *Client) doUpdateClient(ctx context.Context, inboundID int, currentEmail
 		flow = "xtls-rprx-vision"
 	}
 
-	clientObj := map[string]interface{}{
+	clientObj := map[string]any{
 		"id":         clientID,
 		"email":      email,
 		"limitIp":    0,
@@ -534,7 +534,7 @@ func RetryWithBackoff(ctx context.Context, maxRetries int, initialDelay time.Dur
 	var lastErr error
 	delay := initialDelay
 
-	for i := 0; i < maxRetries; i++ {
+	for attempt := range maxRetries {
 		err := fn()
 		if err == nil {
 			return nil
@@ -548,9 +548,9 @@ func RetryWithBackoff(ctx context.Context, maxRetries int, initialDelay time.Dur
 
 		lastErr = err
 
-		if i < maxRetries-1 {
+		if attempt < maxRetries-1 {
 			logger.Debug("Retry after error",
-				zap.Int("attempt", i+1),
+				zap.Int("attempt", attempt+1),
 				zap.Int("max_retries", maxRetries),
 				zap.Error(err))
 

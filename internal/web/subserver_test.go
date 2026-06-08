@@ -199,7 +199,7 @@ func TestHandleSubscription_JSONSource(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, items, 1)
 
-	var parsed map[string]interface{}
+	var parsed map[string]any
 	require.NoError(t, json.Unmarshal(items[0], &parsed))
 	assert.Equal(t, "vless", parsed["type"])
 	assert.Equal(t, "x.com", parsed["address"])

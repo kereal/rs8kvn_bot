@@ -105,7 +105,7 @@ func toServerConfig(raw json.RawMessage) (*serverConfig, error) {
 // ExtractJSONConfigs parses a JSON object or array of server configs from body
 // and returns the raw config objects as json.RawMessage slice.
 func ExtractJSONConfigs(body []byte) ([]json.RawMessage, error) {
-	var raw interface{}
+	var raw any
 	if err := json.Unmarshal(body, &raw); err != nil {
 		logger.Error("Failed to unmarshal subscription JSON for config extraction",
 			zap.Error(err),
@@ -115,7 +115,7 @@ func ExtractJSONConfigs(body []byte) ([]json.RawMessage, error) {
 
 	var items []json.RawMessage
 	switch v := raw.(type) {
-	case []interface{}:
+	case []any:
 		for _, item := range v {
 			rawItem, err := json.Marshal(item)
 			if err != nil {
@@ -126,7 +126,7 @@ func ExtractJSONConfigs(body []byte) ([]json.RawMessage, error) {
 			}
 			items = append(items, rawItem)
 		}
-	case map[string]interface{}:
+	case map[string]any:
 		rawMarshalled, err := json.Marshal(v)
 		if err != nil {
 			logger.Error("Failed to marshal JSON object for config extraction",

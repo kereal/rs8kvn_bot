@@ -53,7 +53,7 @@ func (s *Server) GetSubscriptions(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store, private")
 
 	// Encode and send response
-	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]any{
 		"subscriptions": result,
 	}); err != nil {
 		logger.Error("Failed to encode subscriptions response", zap.Error(err))

@@ -10,7 +10,7 @@ import (
 )
 
 func ConvertJSONToShareLinks(body []byte) ([]string, error) {
-	var raw interface{}
+	var raw any
 	if err := json.Unmarshal(body, &raw); err != nil {
 		logger.Error("Failed to unmarshal subscription JSON",
 			zap.Error(err),
@@ -20,7 +20,7 @@ func ConvertJSONToShareLinks(body []byte) ([]string, error) {
 
 	var items []json.RawMessage
 	switch v := raw.(type) {
-	case []interface{}:
+	case []any:
 		for _, item := range v {
 			rawItem, err := json.Marshal(item)
 			if err != nil {
@@ -31,7 +31,7 @@ func ConvertJSONToShareLinks(body []byte) ([]string, error) {
 			}
 			items = append(items, rawItem)
 		}
-	case map[string]interface{}:
+	case map[string]any:
 		rawMarshalled, err := json.Marshal(v)
 		if err != nil {
 			logger.Error("Failed to marshal JSON object",

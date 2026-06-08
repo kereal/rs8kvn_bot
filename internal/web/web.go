@@ -460,6 +460,12 @@ func (s *Server) renderErrorPage(w http.ResponseWriter, message string) {
 	}
 }
 
+
+	var (
+		ErrSubscriptionNotFound   = errors.New("subscription not found")
+		ErrSubscriptionNoItems    = errors.New("no subscription items found")
+	)
+
 func getClientIP(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err == nil && isLocalAddress(host) {
@@ -555,7 +561,9 @@ func (s *Server) handleSubscription(w http.ResponseWriter, r *http.Request) {
 			zap.String("client_ip", clientIP),
 			zap.Error(err))
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		if errors.Is(err, gorm.ErrRecordNotFound) || err.Error() == "subscription not found" || err.Error() == "no subscription items found" {
+		if errors.Is(err, gorm.ErrRecordNotFound) ||
+			errors.Is(err, subserver.ErrSubscriptionNotFound) ||
+			errors.Is(err, subserver.ErrNoSubscriptionItems) {
 			w.WriteHeader(http.StatusNotFound)
 			w.Write([]byte("Subscription not found"))
 			return
