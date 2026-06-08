@@ -44,34 +44,22 @@ Telegram Bot (Go, single binary)
 ```
 
 
-## Схема БД (v2.6.0, после migration 017)
+Версия схемы: after migration 019  
+**Ревизия:** 2026-06-08
 
-### Таблицы подписок (существующие)
-- `subscriptions`, `invites`, `trial_requests`, `sources`, `plans`, `plan_sources` — без структурных изменений после migration 012.
+### Таблицы подписок (существующие, без структурных изменений после migration 012)
+- `subscriptions`, `invites`, `trial_requests` — без структурных изменений после migration 012.
 
-### Новая таблица: `products` (migration 016)
-Покупаемые продукты, привязанные к планам.
-- `id`, `plan_id` (FK → plans), `duration_days`, `price_cents`, `currency`, `is_active`, `created_at`, `updated_at`.
+### УСТАРЕВШИЕ таблицы (заменены в migration 014 `sources_to_nodes`)
+- `sources`, `plan_sources` — заменены на `nodes` и `plan_nodes`. Остаются в БД для обратной совместимости, но не используются в новом коде.
 
-### Новая таблица: `orders` (migration 017)
-Факт покупки подписки и процесс обработки платежа.
-- `id`, `subscription_id` (FK → subscriptions), `product_id` (FK → products), `status` (CHECK: `pending|paid|expired|canceled`), `amount_cents`, `currency`, `payment_provider`, `provider_payment_id`, `created_at`, `paid_at`, `activated_at`, `expires_at`.
-- Индексы: `idx_orders_subscription_id`, `idx_orders_status`, `idx_orders_created_at`.
-
-Статусы заказов:
-- `pending` — платёж создан, ожидает подтверждения
-- `paid` — платёж подтверждён, подписка активирована
-- `expired` — истекло время оплаты (например, 30 минут)
-- `canceled` — отменено пользователем или системой
-
-Поля:
-- `provider_payment_id` — внешний идентификатор платежа в системе провайдера
-- `paid_at` — момент подтверждения оплаты
-- `activated_at` — момент фактической активации подписки
-- `expires_at` — срок действия счёта на стороне платёжного провайдера (дедлайн оплаты)
-
-### Миграции
-`internal/database/migrations/000-017_*.up.sql` (embedded через go:embed).
+### Текущие активные таблицы
+- `plans` — тарифные планы.
+- `products` (migration 013) — покупаемые продукты, привязанные к планам.
+- `orders` (migration 017) — факт покупки подписки и обработка платежа.
+- `nodes` (введены migration 014 `sources_to_nodes`) — замена `sources`, настраиваемые VLESS+Reality серверы.
+- `plan_nodes` (M:N: plan → nodes, migration 014) — привязка серверов к тарифным планам.
+- `subscription_nodes` (M:N: subscription → nodes, migration 014) — серверы, выданные конкретной подписке.
 
 ### `subscriptions`
 ```
@@ -93,24 +81,35 @@ updated_at           time
 **Soft delete заменён** на `status='revoked'`.
 **Добавлено** в migration 012: `devices`, `ips` (JSON поля для трекинга устройств и IP).
 
-### `sources` (multi-source 3x-ui панели)
+### `nodes` (замена `sources`, migration 014)
 ```
-id, x_ui_host, x_ui_api_token, x_ui_inbound_id, sub_url, active
+id, x_ui_host, x_ui_api_token, x_ui_inbound_id, sub_url, is_active
 ```
+Замена таблицы `sources`. Настраиваемые VLESS+Reality серверы (3x-ui панели).
+
+### `plan_nodes` (M:N: plan → nodes, migration 014)
+```
+plan_id, node_id  (composite PK)
+```
+Замена таблицы `plan_sources`. Привязка серверов к тарифным планам.
 
 ### `plans` (тарифные планы)
 ```
-id, name UNIQUE, price, devices_limit, traffic_limit, duration
+id, name UNIQUE, duration, devices_limit, traffic_limit
 ```
 
-### `plan_sources` (M:N: план → источники)
-```
-plan_id, source_id  (composite PK)
-```
+### `products` (migration 013)
+Покупаемые продукты, привязанные к планам.
+- `id`, `plan_id` (FK → plans), `duration_days`, `price_cents`, `currency`, `is_active`, `created_at`, `updated_at`.
+
+### `orders` (migration 017)
+Факт покупки подписки и процесс обработки платежа.
+- `id`, `subscription_id` (FK → subscriptions), `product_id` (FK → products), `status` (CHECK: `pending|paid|expired|canceled`), `amount_cents`, `currency`, `payment_provider`, `provider_payment_id`, `created_at`, `paid_at`, `activated_at`, `expires_at`.
+- Индексы: `idx_orders_subscription_id`, `idx_orders_status`, `idx_orders_created_at`.
 
 ### `invites`, `broadcast_*`, `metrics_counters` — без изменений.
 
-Миграции лежат в `internal/database/migrations/000-012_*.up.sql` (embedded через go:embed).
+Миграции лежат в `internal/database/migrations/000-019_*.up.sql` (embedded через go:embed).
 
 ## Ключевые компоненты
 
