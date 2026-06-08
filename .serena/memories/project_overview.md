@@ -5,21 +5,20 @@ Telegram-бот для продажи и управления VLESS+Reality+Visi
 Production-grade: миграции, мониторинг, rate-limiting, circuit breaker, graceful shutdown.
 
 ## Текущая версия
-**v2.4.0** — мульти-источник 3x-ui (sources/plans/plan_sources), план-based подписки, миграции 000-012.
+**v2.3.0** — план-based подписки, удаление `duration` из plans (migration 019), products/orders, nodes/plan_nodes, subscription_nodes.
 
 ## Ключевые фичи
-- Запрос подписки по требованию, QR-код
-- Invite/trial landing с one-click биндингом
-- Реферальная система: in-memory cache + периодический sync
-- Планы (trial, free, paid) с M:N связью к источникам через `plan_sources`
-- Мульти-источник 3x-ui: trial-подписки создаются на всех trial-источниках, BindTrial — первый успешный, Reconcile — все источники
+- Планы (trial/free/paid) без `duration`, без `price` (duration/price вынесены в products)
+- Мульти-источник 3x-ui: trial-подписки создаются на всех trial-нодах, BindTrial — первый успешный, Reconcile — все
+- Таблица `subscription_nodes` — очередь реальной синхронизации подписки×нода (`active|pending_add|pending_remove`)
 - Авто-продление на 30-й день (через `SubscriptionResetDay` в x-ui)
+- Реферальная система: in-memory cache + периодический sync
 - Админ-уведомления, heartbeat, health endpoints (`/healthz`, `/readyz`)
 - Ротация логов (zap), ежедневные бэкапы БД
 - Sentry, rate-limiting per-user, circuit breaker для x-ui
 - O(1) LRU кэш подписок (RLock для concurrent reads)
 - Subscription status check в `/sub/{subID}` — revoked/expired → 404
-- Subscription expiration хранится в БД на момент Create (не "—")
+- Subscription expiration хранится в БД на момент Create
 
 ## Стек
 - **Go 1.25** (go.mod)
@@ -34,7 +33,7 @@ Production-grade: миграции, мониторинг, rate-limiting, circuit
 ```
 cmd/bot/                     — точка входа, graceful shutdown
 internal/bot/                 — handlers, commands, callbacks, referral cache
-internal/database/           — GORM-модели, миграции 000-011, transactions
+internal/database/           — GORM-модели, миграции 000-019, transactions
 internal/service/            — SubscriptionService (Create, BindTrial, CreateTrial, ReconcileOrphanedClients)
 internal/xui/                — 3x-ui HTTP-клиент + circuit breaker, multi-source map
 internal/interfaces/         — контракты (XUIClient, SubscriptionDatabase, SubscriptionService)
@@ -56,7 +55,7 @@ internal/metrics/            — Prometheus (обёрнутый zap-логом, 
 1. `activate_project("rs8kvn_bot")`
 2. Прочитать памяти: `project_overview` (этот), `git-workflow`, `architecture`, `code_style`
 3. При работе с x-ui API — прочитать `xui/auth-mechanism` + `xui/client-crud`
-4. При работе с trial/referral flows — прочитать `fixes/2026-06-03-*`
+4. При работе с trial/referral/subscription-nodes flows — прочитать `fixes/2026-06-03-*` + `subscription-nodes/state-machine`
 5. **Отвечать на русском** (AGENTS.md)
 6. **Не удалять** legacy-код без явного запроса (см. `roadmap`)
 
@@ -69,3 +68,4 @@ internal/metrics/            — Prometheus (обёрнутый zap-логом, 
 - Аудиты: см. `audit/*`
 - Исторические фиксы: см. `fixes/*`
 - x-ui протокол: см. `xui/*`
+- Subscription Nodes: см. `subscription-nodes/state-machine` + `subscription-nodes/orders-table`
