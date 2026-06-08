@@ -174,7 +174,7 @@ func TestHandleStart_NormalFlow(t *testing.T) {
 			mockXUI := testutil.NewMockXUIClient()
 			mockBot := testutil.NewMockBotAPI()
 			xuiClients := map[uint]interfaces.XUIClient{1: mockXUI}
-			sources := []database.Source{{ID: 1, Name: "main", Active: true,XUIHost: "http://example.com", XUIAPIToken: "token", XUIInboundID: 1}}
+			sources := []database.Node{{ID: 1, Name: "main", IsActive: true,Host: "http://example.com", APIToken: "token", InboundID: 1}}
 			subService := service.NewSubscriptionService(mockDB, xuiClients, sources, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
 			handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), subService, "")
 			tt.setupMock(mockDB)
@@ -497,9 +497,9 @@ func TestHandleBindTrial_Success(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockBot := testutil.NewMockBotAPI()
 
-	dbSources := []database.Source{{
-		ID: 1, Name: "main", XUIHost: "http://example.com",
-		XUIAPIToken: "token", XUIInboundID: 1, Active: true,}}
+	dbSources := []database.Node{{
+		ID: 1, Name: "main", Host: "http://example.com",
+		APIToken: "token", InboundID: 1, IsActive: true,}}
 	mockXUI := testutil.NewMockXUIClient()
 	mockXUI.UpdateClientFunc = func(ctx context.Context, inboundID int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, tgID int64, comment string) error {
 		return nil
@@ -549,9 +549,9 @@ func TestHandleBindTrial_IncrementsReferrerCacheCount(t *testing.T) {
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
 
-	dbSources := []database.Source{{
-		ID: 1, Name: "main", XUIHost: "http://example.com",
-		XUIAPIToken: "token", XUIInboundID: 1, Active: true,
+	dbSources := []database.Node{{
+		ID: 1, Name: "main", Host: "http://example.com",
+		APIToken: "token", InboundID: 1, IsActive: true,
 	}}
 	subService := service.NewSubscriptionService(
 		mockDB,
@@ -600,9 +600,9 @@ func TestHandleBindTrial_NoReferrerLeavesCacheUntouched(t *testing.T) {
 	mockXUI := testutil.NewMockXUIClient()
 	mockBot := testutil.NewMockBotAPI()
 
-	dbSources := []database.Source{{
-		ID: 1, Name: "main", XUIHost: "http://example.com",
-		XUIAPIToken: "token", XUIInboundID: 1, Active: true,
+	dbSources := []database.Node{{
+		ID: 1, Name: "main", Host: "http://example.com",
+		APIToken: "token", InboundID: 1, IsActive: true,
 	}}
 	subService := service.NewSubscriptionService(
 		mockDB,
@@ -958,7 +958,7 @@ func TestHandleMySubscription_ShowLoadingFails(t *testing.T) {
 	mockBot := testutil.NewMockBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
 	mockXUIClients := map[uint]interfaces.XUIClient{1: mockXUI}
-	sources := []database.Source{{ID: 1, Name: "main", Active: true,XUIHost: "http://example.com", XUIAPIToken: "token", XUIInboundID: 1}}
+	sources := []database.Node{{ID: 1, Name: "main", IsActive: true,Host: "http://example.com", APIToken: "token", InboundID: 1}}
 	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUIClients, sources, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
 	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
 
@@ -990,9 +990,9 @@ func newTestHandlerWithSubService(t *testing.T, cfg *config.Config, mockDB *test
 	if mockBot == nil {
 		mockBot = testutil.NewMockBotAPI()
 	}
-	dbSources := []database.Source{{
-		ID: 1, Name: "main", XUIHost: "http://example.com",
-		XUIAPIToken: "token", XUIInboundID: 1, Active: true,}}
+	dbSources := []database.Node{{
+		ID: 1, Name: "main", Host: "http://example.com",
+		APIToken: "token", InboundID: 1, IsActive: true,}}
 	subService := service.NewSubscriptionService(
 		mockDB,
 		map[uint]interfaces.XUIClient{1: mockXUI},

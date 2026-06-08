@@ -147,12 +147,12 @@ func main() {
 	}()
 	logger.Info("Database initialized successfully")
 
-	// Seed default source from env vars if sources table is empty
+	// Seed default node from env vars if nodes table is empty
 	seedCtx, seedCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer seedCancel()
-	isEmpty, err := dbService.IsSourcesEmpty(seedCtx)
+	isEmpty, err := dbService.IsNodesEmpty(seedCtx)
 	if err != nil {
-		logger.Fatal("Failed to check sources table", zap.Error(err))
+		logger.Fatal("Failed to check nodes table", zap.Error(err))
 	}
 	if isEmpty {
 		xuiHost := os.Getenv("XUI_HOST")
@@ -172,33 +172,33 @@ func main() {
 		if defaultSubURL == "" && xuiHost != "" {
 			defaultSubURL = strings.TrimRight(xuiHost, "/") + "/sub/"
 		}
-		if err := dbService.SeedDefaultSource(seedCtx, "default", xuiHost, xuiAPIToken, xuiInboundID, defaultSubURL); err != nil {
-			logger.Fatal("Failed to seed default source", zap.Error(err))
+		if err := dbService.SeedDefaultNode(seedCtx, "default", xuiHost, xuiAPIToken, xuiInboundID, defaultSubURL); err != nil {
+			logger.Fatal("Failed to seed default node", zap.Error(err))
 		}
-		logger.Info("Default source seeded", zap.String("host", xuiHost))
+		logger.Info("Default node seeded", zap.String("host", xuiHost))
 	} else {
 		seedCancel()
 	}
 	seedCancel()
 
-	// Load sources and create XUI clients
-	sources, err := dbService.ListSources(context.Background())
+	// Load nodes and create XUI clients
+	nodes, err := dbService.ListNodes(context.Background())
 	if err != nil {
-		logger.Fatal("Failed to list sources", zap.Error(err))
+		logger.Fatal("Failed to list nodes", zap.Error(err))
 	}
-	if len(sources) == 0 {
-		logger.Fatal("No sources configured")
+	if len(nodes) == 0 {
+		logger.Fatal("No nodes configured")
 	}
 
 	xuiClients := make(map[uint]interfaces.XUIClient)
-	for _, src := range sources {
-		client, initErr := xui.NewClient(src.XUIHost, src.XUIAPIToken)
+	for _, node := range nodes {
+		client, initErr := xui.NewClient(node.Host, node.APIToken)
 		if initErr != nil {
 			logger.Fatal("Failed to initialize 3x-ui client",
-				zap.Uint("source_id", src.ID),
+				zap.Uint("node_id", node.ID),
 				zap.Error(initErr))
 		}
-		xuiClients[src.ID] = client
+		xuiClients[node.ID] = client
 	}
 
 	// Close all XUI clients on shutdown
@@ -206,7 +206,7 @@ func main() {
 		for id, client := range xuiClients {
 			if err := client.Close(); err != nil {
 				logger.Error("Failed to close 3x-ui client",
-					zap.Uint("source_id", id),
+					zap.Uint("node_id", id),
 					zap.Error(err))
 			}
 		}
@@ -214,14 +214,14 @@ func main() {
 
 	// For legacy health check — use the first active XUI client
 	var legacyXUIClient interfaces.XUIClient
-	for _, src := range sources {
-		if src.Active {
-			legacyXUIClient = xuiClients[src.ID]
+	for _, node := range nodes {
+		if node.IsActive {
+			legacyXUIClient = xuiClients[node.ID]
 			break
 		}
 	}
 	if legacyXUIClient == nil {
-		logger.Warn("No active source found — legacy XUI client will be nil; health check on /ping will be skipped")
+		logger.Warn("No active node found — legacy XUI client will be nil; health check on /ping will be skipped")
 	}
 
 	// Initialize Telegram bot with retry to handle transient network issues
@@ -286,7 +286,7 @@ func main() {
 	webhookSender := webhook.NewSender(cfg.ProxyManagerWebhookURL, cfg.ProxyManagerWebhookSecret)
 
 	// Create subscription service (shared between bot handler and web server)
-	subService := service.NewSubscriptionService(dbService, xuiClients, sources, cfg, cfg.GlobalSubURL, webhookSender)
+	subService := service.NewSubscriptionService(dbService, xuiClients, nodes, cfg, cfg.GlobalSubURL, webhookSender)
 
 	// Create Subscription server service
 	subServer := subserver.NewService(config.SubServerCacheTTL)

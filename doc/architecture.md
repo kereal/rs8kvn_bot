@@ -1,9 +1,7 @@
 # Architecture — rs8kvn_bot
 
-**Version:** 2.5.0  
-**Date:** 2026-06-06
-
----
+**Version:** 2.3.0  
+**Date:** 2026-06-08
 
 ## Overview
 
@@ -15,6 +13,11 @@ rs8kvn_bot — production-ready Telegram bot for distributing VLESS+Reality+Visi
 - Comprehensive caching (in-memory LRU, TTL)
 - Graceful shutdown with coordinated cleanup
 - 85%+ test coverage (unit, e2e, fuzz, leak detection)
+- Payment/order tracking for subscription purchases
+- Node-based subscription synchronization with state machine (`subscription_nodes`)
+- Dynamic plan resolution by name (no hardcoded IDs)
+- Node-based subscription synchronization with state machine (`subscription_nodes`)
+- Dynamic plan resolution by name (no hardcoded IDs)
 
 ---
 
@@ -85,6 +88,7 @@ rs8kvn_bot — production-ready Telegram bot for distributing VLESS+Reality+Visi
 │  │  │ • CRUD           │ • Migrations (golang-migrate)           │ │
 │  │  │ • Queries        │ • Connection pool (1 writer)             │ │
 │  │  │ • Transactions   │ • Soft deletes                           │ │
+│  │  │ • Orders         │ • Subscription purchase tracking         │ │
 │  │  └──────────────────┘                                         │ │
 │  └─────────────────────────────────────────────────────────────────┘ │
 │                                 │                                   │
@@ -151,7 +155,8 @@ internal/
 │   └── breaker.go           # Circuit breaker (5/30s/3-half-open)
 ├── database/         # Persistence
 │   ├── database.go          # GORM service + migrations
-│   └── migrations/          # 000..003 SQL files (embedded)
+│   ├── migrations/          # 000..019 SQL files (embedded; 018 adds subscription_nodes)
+│   └── models:               # Subscription, Plan, Node, Product, Order, Invite
 ├── config/           # Configuration
 │   ├── config.go            # Load + validate
 │   └── constants.go         # All defaults & limits
@@ -337,15 +342,25 @@ ConnMaxIdleTime = 2m
 - `CreateSubscription`: revoke old + create new (atomic)
 - `BindTrialSubscription`: check telegram_id=0 → update (race-safe)
 
+**Orders/Products support:**
+- `Product` — purchasable subscription product bound to a plan (price, duration)
+- `Order` — purchase event with payment tracking (pending/paid/expired/canceled)
+- `UpdateOrderStatus`, `GetActiveByPlanID`, `GetOrdersBySubscriptionID`
+- Migration 017: `orders` table with CHECK constraint on status
+
 **Indexes:**
 ```sql
 CREATE INDEX idx_subscriptions_telegram_id    ON subscriptions(telegram_id);
 CREATE INDEX idx_subscriptions_subscription_id ON subscriptions(subscription_id);
-CREATE INDEX idx_subscriptions_expiry          ON subscriptions(expiry_time);
+CREATE INDEX idx_subscriptions_expiry          ON subscriptions(expires_at);
 CREATE INDEX idx_subscriptions_invite_code     ON subscriptions(invite_code);
 CREATE INDEX idx_subscriptions_referred_by     ON subscriptions(referred_by);
 CREATE UNIQUE INDEX idx_invites_referrer_unique ON invites(referrer_tg_id);
 CREATE INDEX idx_trial_requests_ip             ON trial_requests(ip);
+CREATE INDEX idx_products_plan_id              ON products(plan_id);
+CREATE INDEX idx_orders_subscription_id        ON orders(subscription_id);
+CREATE INDEX idx_orders_status                 ON orders(status);
+CREATE INDEX idx_orders_created_at             ON orders(created_at);
 ```
 
 **Race-safe patterns:**
@@ -494,7 +509,7 @@ SIGQUIT (kill -3) → core dump (not handled by us)
 │ subscription_id      string   INDEX (unique)                 │
 │ inbound_id           int      INDEX                         │
 │ traffic_limit        int64    default: 107374182400 (100GB)  │
-│ expiry_time          time     INDEX                         │
+│ expires_at          time     INDEX                         │
 │ status               string   default: "active"  INDEX       │
 │ subscription_url     string                                  │
 │ invite_code          string   INDEX                         │
@@ -504,38 +519,84 @@ SIGQUIT (kill -3) → core dump (not handled by us)
 │ updated_at           time     autoUpdate                    │
 │ deleted_at           gorm.DeletedAt  INDEX (soft delete)    │
 └─────────────────────────────────────────────────────────────┘
-                              │
-                              │ referred_by
-                              ▼
-                    ┌─────────────────────┐
-                    │      invites        │
-                    ├─────────────────────┤
-                    │ code (PK)           │
-                    │ referrer_tg_id (FK) │
-                    │ created_at          │
-                    └─────────────────────┘
-                              │
-                              │ 1:N (referrer → referrals)
-                              ▼
-                    (subscriptions.referred_by points here)
+                               │
+                               │ referred_by
+                               ▼
+                     ┌─────────────────────┐
+                     │      invites        │
+                     ├─────────────────────┤
+                     │ code (PK)           │
+                     │ referrer_tg_id (FK) │
+                     │ created_at          │
+                     └─────────────────────┘
+                               │
+                               │ 1:N (referrer → referrals)
+                               ▼
+                     (subscriptions.referred_by points here)
 
-                    ┌─────────────────────┐
-                    │   trial_requests    │
-                    ├─────────────────────┤
-                    │ id (PK)             │
-                    │ ip (INDEX)          │
-                    │ created_at          │
-                    └─────────────────────┘
-                              │
-                              │ IP-based rate limit
-                              ▼
-                    (checked before trial creation)
+                     ┌─────────────────────┐
+                     │   trial_requests    │
+                     ├─────────────────────┤
+                     │ id (PK)             │
+                     │ ip (INDEX)          │
+                     │ created_at          │
+                     └─────────────────────┘
+                               │
+                               │ IP-based rate limit
+                               ▼
+                     (checked before trial creation)
+
+┌─────────────────────────────────────────────────────────────┐
+│                       products                              │
+├─────────────────────────────────────────────────────────────┤
+│ id (PK)              uint                                   │
+│ plan_id              uint     INDEX  (FK → plans)           │
+│ duration_days        int      NOT NULL                      │
+│ price_cents          int64    NOT NULL                      │
+│ currency             char(3)  DEFAULT 'RUB'                 │
+│ is_active            bool     DEFAULT true                  │
+│ created_at           time     autoCreate                    │
+│ updated_at           time     autoUpdate                    │
+└─────────────────────────────────────────────────────────────┘
+                               │
+                               │ 1:N (product → orders)
+                               ▼
+┌─────────────────────────────────────────────────────────────┐
+│                       orders                                │
+├─────────────────────────────────────────────────────────────┤
+│ id (PK)              uint                                   │
+│ subscription_id      uint     NOT NULL  (FK → subscriptions)│
+│ product_id           uint     NOT NULL  (FK → products)     │
+│ status               text     NOT NULL                      │
+│                     CHECK (status IN                       │
+│                       'pending','paid','expired','canceled')│
+│ amount_cents         int64    NOT NULL                      │
+│ currency             char(3)  DEFAULT 'RUB'                 │
+│ payment_provider     text                                  │
+│ provider_payment_id  text     External payment ID          │
+│ created_at           datetime NOT NULL                      │
+│ paid_at              datetime  When payment confirmed       │
+│ activated_at         datetime  When subscription activated  │
+│ expires_at           datetime  Payment expiry (e.g. 30 min) │
+└─────────────────────────────────────────────────────────────┘
+
+**Order statuses:**
+- `pending` — payment initiated, awaiting confirmation
+- `paid` — payment confirmed, subscription activated
+- `expired` — payment window expired (e.g. 30 min unpaid)
+- `canceled` — user or system canceled
+
+**Indexes:**
+- `idx_orders_subscription_id` — fast lookup of orders by subscription
+- `idx_orders_status` — filter by status
+- `idx_orders_created_at` — chronological ordering
+- `idx_products_plan_id` — fast lookup of products by plan
 ```
 
 **Indexes rationale:**
 - `telegram_id + status` → fast lookup of user's active subscription
 - `subscription_id` → fast `/sub/{subID}` lookup
-- `expiry_time` → cleanup of expired subs
+- `expires_at` → cleanup of expired subs
 - `invite_code` → trial activation via invite
 - `referred_by` → referral stats query
 
@@ -599,6 +660,58 @@ webhook:
 
 ### User gets subscription
 
+```
+User           Telegram       Bot (main)     Handler      XUI Panel       DB
+  │                │              │              │             │             │
+  │ /start         │              │              │             │             │
+  │───────────────►│              │              │             │             │
+  │                │ update       │              │             │             │
+  │                │─────────────►│              │             │             │
+  │                │              │ route        │             │             │
+  │                │              │─────────────►│             │             │
+  │                │              │              │ HandleStart │             │
+  │                │              │              │────────────►│             │
+  │                │              │              │            SendMessage  │
+  │                │              │              │ (main menu) │           │
+  │                │              │              │◄────────────┤             │
+  │                │              │              │             │             │
+  │ Click "Get sub"│              │              │             │             │
+  │                │ callback     │              │             │             │
+  │───────────────►│              │              │             │             │
+  │                │ cb query     │              │             │             │
+  │                │─────────────►│              │             │             │
+  │                │              │ HandleCallback│             │             │
+  │                │              │─────────────►│             │             │
+  │                │              │              │ createSub   │             │
+  │                │              │              │────────────►│             │
+  │                │              │              │            GenerateUUID │
+  │                │              │              │            ┌───────────┘
+  │                │              │              │            │ Resolve Plan/Nodes
+  │                │              │              │            │───────────►
+  │                │              │              │            │   Plan + Nodes
+  │                │              │              │            │◄───────────
+  │                │              │              │ BuildURLs  │
+  │                │              │              │            │ XUI.AddClient (per node)
+  │                │              │              │            │───────────►
+  │                │              │              │            │  201 Created
+  │                │              │              │            │◄───────────
+  │                │              │              │ Create subscription_nodes (pending_add)
+  │                │              │              │            │ DB Create
+  │                │              │              │            │───────────►
+  │                │              │              │            │  INSERT OK
+  │                │              │              │            │◄───────────
+  │                │              │              │ Cache Set  │
+  │                │              │              │ Webhook ↑  │
+  │                │              │              │ Notify ↓   │
+  │                │              │              │◄───────────┤
+  │                │              │ SendMessage  │             │
+  │                │              │ (with URL+QR)│             │
+  │                │              │◄─────────────┤             │
+  │                │              │              │             │
+  │                │ Message      │              │             │
+  │◄───────────────│              │              │             │
+  │
+  │ (Background queue workers sync subscription_nodes -> active)
 ```
 User           Telegram       Bot (main)     Handler      XUI Panel       DB
   │                │              │              │             │             │

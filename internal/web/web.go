@@ -40,7 +40,7 @@ type TrialCreationResult struct {
 	ClientID   string
 	SubURL     string
 	InviteCode string
-	ExpiryTime time.Time
+	ExpiresAt time.Time
 }
 
 type Status string
@@ -423,7 +423,7 @@ func (s *Server) getExistingTrialFromCookie(r *http.Request, ctx context.Context
 	}
 
 	// Проверяем, что не истёк
-	if time.Now().After(sub.ExpiryTime) {
+	if time.Now().After(sub.ExpiresAt) {
 		return nil, fmt.Errorf("trial expired")
 	}
 

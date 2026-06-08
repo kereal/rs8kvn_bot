@@ -36,15 +36,16 @@ func newTestAPIServer(t *testing.T, cfg *config.Config, mockDB *testutil.MockDat
 
 	botConfig := &bot.BotConfig{Username: "testbot"}
 
-	dbSources := make([]database.Source, len(cfg.Sources))
+	dbSources := make([]database.Node, len(cfg.Sources))
 	for i, s := range cfg.Sources {
-		dbSources[i] = database.Source{
-			ID:           s.ID,
-			Name:         s.Name,
-			Active:       s.Active,XUIHost:      s.XUIHost,
-			XUIAPIToken:  s.XUIAPIToken,
-			XUIInboundID: s.XUIInboundID,
-			SubURL:       s.SubURL,
+		dbSources[i] = database.Node{
+			ID:              s.ID,
+			Name:            s.Name,
+			IsActive:        s.Active,
+			Host:            s.XUIHost,
+			APIToken:        s.XUIAPIToken,
+			InboundID:       s.XUIInboundID,
+			SubscriptionURL: s.SubURL,
 		}
 	}
 

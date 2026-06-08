@@ -46,46 +46,103 @@ type Subscription struct {
 	Username       string    `gorm:"size:255;index"`
 	ClientID       string    `gorm:"size:255"`
 	SubscriptionID string    `gorm:"size:255;index"`
-	ExpiryTime     time.Time `gorm:"index:idx_expiry"`
+	ExpiresAt      time.Time `gorm:"index:idx_expiry"`
 	Status         string    `gorm:"default:active;size:50;index"`
 	InviteCode     string    `gorm:"size:16;index"`
 	PlanID         uint      `gorm:"index"`
 	ReferredBy     int64     `gorm:"index"`
+	ProductID      uint      `gorm:"index"`
+	StartedAt      time.Time
+	PricePaidCents int64     `gorm:"default:0"`
+	Currency       string    `gorm:"size:3"`
 	Devices        string    `gorm:"type:text;default:'[]'"` // JSON array of {header_key: value} device entries
 	Ips            string    `gorm:"type:text;default:'[]'"` // JSON array of {ip: timestamp} entries
 	CreatedAt      time.Time `gorm:"autoCreateTime"`
 	UpdatedAt      time.Time `gorm:"autoUpdateTime"`
+
+	Plan    *Plan              `gorm:"foreignKey:PlanID"`
+	Product *Product           `gorm:"foreignKey:ProductID"`
+	Orders  []Order            `gorm:"foreignKey:SubscriptionID"`
+	Nodes   []SubscriptionNode `gorm:"foreignKey:SubscriptionID"`
 }
 
-// Source represents a configured 3x-ui panel source.
-type Source struct {
-	ID           uint      `gorm:"primaryKey;column:id"`
-	Name         string    `gorm:"size:255;column:name"`
-	Active       bool      `gorm:"default:true;column:active"`
-	XUIHost      string    `gorm:"size:255;column:x_ui_host"`
-	XUIAPIToken  string    `gorm:"size:255;column:x_ui_api_token"`
-	XUIInboundID int       `gorm:"not null;column:x_ui_inbound_id"`
-	SubURL       string    `gorm:"size:512;column:sub_url"`
-	CreatedAt    time.Time `gorm:"autoCreateTime;column:created_at"`
-	UpdatedAt    time.Time `gorm:"autoUpdateTime;column:updated_at"`
+// Node represents a configured 3x-ui panel source.
+type Node struct {
+	ID              uint      `gorm:"primaryKey;column:id"`
+	Name            string    `gorm:"size:255;column:name"`
+	IsActive        bool      `gorm:"default:true;column:is_active"`
+	Host            string    `gorm:"size:255;column:host"`
+	APIToken        string    `gorm:"size:255;column:api_token"`
+	InboundID       int       `gorm:"not null;column:inbound_id"`
+	SubscriptionURL string    `gorm:"size:512;column:subscription_url"`
+	Type            string    `gorm:"type:varchar(10);not null;default: x-ui;column:type" json:"type"`
+	CreatedAt       time.Time `gorm:"autoCreateTime;column:created_at"`
+	UpdatedAt       time.Time `gorm:"autoUpdateTime;column:updated_at"`
+
+	PlanNodes []PlanNode `gorm:"foreignKey:NodeID"`
 }
 
 // Plan represents a subscription plan.
 type Plan struct {
 	ID           uint      `gorm:"primaryKey;column:id"`
 	Name         string    `gorm:"size:50;uniqueIndex;column:name"`
-	Price        float64   `gorm:"default:0;column:price"`
 	DevicesLimit int       `gorm:"default:1;column:devices_limit"`
 	TrafficLimit int64     `gorm:"default:0;column:traffic_limit"`
-	Duration     int       `gorm:"default:0;column:duration"` // hours, 0=unlimited
 	CreatedAt    time.Time `gorm:"autoCreateTime;column:created_at"`
 	UpdatedAt    time.Time `gorm:"autoUpdateTime;column:updated_at"`
+
+	Products  []Product  `gorm:"foreignKey:PlanID"`
+	PlanNodes []PlanNode `gorm:"foreignKey:PlanID"`
 }
 
-// PlanSource is the join model for M2M between Plan and Source.
-type PlanSource struct {
-	PlanID   uint `gorm:"primaryKey;column:plan_id"`
-	SourceID uint `gorm:"primaryKey;column:source_id"`
+// PlanNode is the join model for M2M between Plan and Node.
+type PlanNode struct {
+	PlanID uint `gorm:"primaryKey;column:plan_id"`
+	NodeID uint `gorm:"primaryKey;column:node_id"`
+
+	Plan *Plan `gorm:"foreignKey:PlanID"`
+	Node *Node `gorm:"foreignKey:NodeID"`
+}
+
+// Product represents a purchasable subscription product bound to a plan.
+type Product struct {
+	ID           uint      `gorm:"primaryKey;column:id"`
+	PlanID       uint      `gorm:"not null;column:plan_id"`
+	DurationDays int       `gorm:"not null;column:duration_days"`
+	PriceCents   int64     `gorm:"not null;column:price_cents"`
+	Currency     string    `gorm:"size:3;not null;default:RUB;column:currency"`
+	IsActive     bool      `gorm:"not null;default:true;column:is_active"`
+	CreatedAt    time.Time `gorm:"autoCreateTime;column:created_at"`
+	UpdatedAt    time.Time `gorm:"autoUpdateTime;column:updated_at"`
+
+	Plan   *Plan   `gorm:"foreignKey:PlanID"`
+	Orders []Order `gorm:"foreignKey:ProductID"`
+}
+
+// Order represents a recorded purchase event for a subscription.
+// Statuses: pending | paid | expired | canceled.
+//
+// Fields:
+//   - provider_payment_id — external payment ID from provider.
+//   - paid_at — payment confirmation timestamp.
+//   - activated_at — subscription activation timestamp.
+//   - expires_at — payment invoice expiry (e.g. 30 minutes from creation).
+type Order struct {
+	ID                uint      `gorm:"primaryKey;column:id"`
+	SubscriptionID    uint      `gorm:"not null;column:subscription_id"`
+	ProductID         uint      `gorm:"not null;column:product_id"`
+	Status            string    `gorm:"not null;size:16;column:status"`
+	AmountCents       int64     `gorm:"not null;column:amount_cents"`
+	Currency          string    `gorm:"size:3;not null;default:RUB;column:currency"`
+	PaymentProvider   string    `gorm:"column:payment_provider"`
+	ProviderPaymentID string    `gorm:"column:provider_payment_id"`
+	CreatedAt         time.Time `gorm:"not null;column:created_at"`
+	PaidAt            time.Time `gorm:"column:paid_at"`
+	ActivatedAt       time.Time `gorm:"column:activated_at"`
+	ExpiresAt         time.Time `gorm:"column:expires_at"`
+
+	Subscription *Subscription `gorm:"foreignKey:SubscriptionID"`
+	Product      *Product      `gorm:"foreignKey:ProductID"`
 }
 
 // Invite represents a referral invite code.
@@ -93,6 +150,35 @@ type Invite struct {
 	Code         string    `gorm:"primaryKey;size:16"`
 	ReferrerTGID int64     `gorm:"index;not null"`
 	CreatedAt    time.Time `gorm:"autoCreateTime"`
+
+	Subscriptions []Subscription `gorm:"foreignKey:InviteCode"`
+}
+
+// SubscriptionNodeStatus represents the synchronization status of a subscription on a VPN node.
+// Statuses: active | pending_add | pending_remove.
+//
+// Values:
+//   - active — нода добавлена и последняя синхронизация прошла успешно.
+//   - pending_add — запрошено добавление ноды, операция ещё не выполнена на панели.
+//   - pending_remove — запрошено удаление ноды, операция ещё не выполнена на панели.
+type SubscriptionNodeStatus string
+
+const (
+	SubscriptionNodeStatusActive        SubscriptionNodeStatus = "active"
+	SubscriptionNodeStatusPendingAdd    SubscriptionNodeStatus = "pending_add"
+	SubscriptionNodeStatusPendingRemove SubscriptionNodeStatus = "pending_remove"
+)
+
+// SubscriptionNode represents the actual synchronization state of a specific
+// subscription with a specific VPN node (not plan-level, but concrete pair).
+type SubscriptionNode struct {
+	SubscriptionID uint                   `gorm:"primaryKey;column:subscription_id"`
+	NodeID         uint                   `gorm:"primaryKey;column:node_id"`
+	Status         SubscriptionNodeStatus `gorm:"not null;size:16;column:status"`
+	RetryCount     int                    `gorm:"not null;default:0;column:retry_count"`
+	RetryAt        *time.Time             `gorm:"column:retry_at"`
+	LastError      *string                `gorm:"type:text;column:last_error"`
+	UpdatedAt      time.Time              `gorm:"not null;autoUpdateTime;column:updated_at"`
 }
 
 // TrialRequest tracks trial requests for rate limiting.
@@ -102,43 +188,56 @@ type TrialRequest struct {
 	CreatedAt time.Time `gorm:"autoCreateTime"`
 }
 
-// TableName returns the table name for Source.
-func (Source) TableName() string {
-	return "sources"
+// SubscriptionFull holds a subscription together with its plan and active nodes.
+type SubscriptionFull struct {
+	Subscription
+	Plan  Plan
+	Nodes []Node
 }
 
-// TableName returns the table name for Plan.
+func (PlanNode) TableName() string {
+	return "plan_nodes"
+}
+
+func (Product) TableName() string {
+	return "products"
+}
+
+func (Order) TableName() string {
+	return "orders"
+}
+
+func (Node) TableName() string {
+	return "nodes"
+}
+
 func (Plan) TableName() string {
 	return "plans"
 }
 
-// TableName returns the table name for PlanSource.
-func (PlanSource) TableName() string {
-	return "plan_sources"
-}
-
-// TableName returns the table name for Subscription.
 func (Subscription) TableName() string {
 	return "subscriptions"
 }
 
-// TableName returns the table name for Invite.
 func (Invite) TableName() string {
 	return "invites"
 }
 
-// TableName returns the table name for TrialRequest.
 func (TrialRequest) TableName() string {
 	return "trial_requests"
 }
 
+func (SubscriptionNode) TableName() string {
+	return "subscription_nodes"
+}
+
 // IsExpired returns true if the subscription has expired.
-// A zero ExpiryTime means no expiry is set, so it is not considered expired.
+// A zero ExpiresAt means no expiry is set, so it is not considered expired.
 func (s *Subscription) IsExpired() bool {
-	if s.ExpiryTime.IsZero() {
+	if s.ExpiresAt.IsZero() {
 		return false
 	}
-	return time.Now().After(s.ExpiryTime)
+	return time.Now().After(s.ExpiresAt)
 }
 
 // IsActive returns true if the subscription is active and not expired.
@@ -188,13 +287,6 @@ func (s *Subscription) SetIPs(ips []map[string]string) error {
 	}
 	s.Ips = string(data)
 	return nil
-}
-
-// SubscriptionFull holds a subscription together with its plan and active sources.
-type SubscriptionFull struct {
-	Subscription
-	Plan    Plan
-	Sources []Source
 }
 
 // runMigrations applies the embedded SQL schema migrations to the provided database,
@@ -344,19 +436,15 @@ func NewService(dbPath string) (*Service, error) {
 	if count == 0 {
 		if err := db.WithContext(context.Background()).Create(&Plan{
 			Name:         TrialPlanName,
-			Price:        0,
 			DevicesLimit: 1,
 			TrafficLimit: 1073741824,
-			Duration:     3,
 		}).Error; err != nil {
 			return nil, fmt.Errorf("failed to seed default trial plan: %w", err)
 		}
 		if err := db.WithContext(context.Background()).Create(&Plan{
 			Name:         FreePlanName,
-			Price:        0,
 			DevicesLimit: 1,
 			TrafficLimit: 53687091200,
-			Duration:     0,
 		}).Error; err != nil {
 			return nil, fmt.Errorf("failed to seed default free plan: %w", err)
 		}
@@ -473,7 +561,7 @@ func (s *Service) CreateSubscription(ctx context.Context, sub *Subscription, inv
 func (s *Service) UpdateSubscription(ctx context.Context, sub *Subscription) error {
 	result := s.db.WithContext(ctx).Model(&Subscription{}).
 		Where("id = ?", sub.ID).
-		Select("telegram_id", "username", "client_id", "subscription_id", "expiry_time", "status", "invite_code", "plan_id", "referred_by", "devices", "ips").
+		Select("telegram_id", "username", "client_id", "subscription_id", "expires_at", "status", "invite_code", "plan_id", "referred_by", "devices", "ips", "product_id", "started_at", "price_paid_cents", "currency").
 		Updates(sub)
 	if result.Error != nil {
 		return fmt.Errorf("failed to update subscription: %w", result.Error)
@@ -490,30 +578,30 @@ func (s *Service) DeleteSubscription(ctx context.Context, telegramID int64) erro
 	return nil
 }
 
-// ListSources returns all configured sources.
-func (s *Service) ListSources(ctx context.Context) ([]Source, error) {
-	var sources []Source
-	result := s.db.WithContext(ctx).Find(&sources)
+// ListNodes returns all configured nodes.
+func (s *Service) ListNodes(ctx context.Context) ([]Node, error) {
+	var nodes []Node
+	result := s.db.WithContext(ctx).Find(&nodes)
 	if result.Error != nil {
-		return nil, fmt.Errorf("failed to list sources: %w", result.Error)
+		return nil, fmt.Errorf("failed to list nodes: %w", result.Error)
 	}
-	return sources, nil
+	return nodes, nil
 }
 
-// GetSourcesByPlanName returns sources for the plan with the given name.
-func (s *Service) GetSourcesByPlanName(ctx context.Context, planName string) ([]Source, error) {
-	var sources []Source
+// GetNodesByPlanName returns nodes for the plan with the given name.
+func (s *Service) GetNodesByPlanName(ctx context.Context, planName string) ([]Node, error) {
+	var nodes []Node
 	result := s.db.WithContext(ctx).
-		Table("sources").
-		Select("sources.*").
-		Joins("JOIN plan_sources ON plan_sources.source_id = sources.id").
-		Joins("JOIN plans ON plans.id = plan_sources.plan_id").
+		Table("nodes").
+		Select("nodes.*").
+		Joins("JOIN plan_nodes ON plan_nodes.node_id = nodes.id").
+		Joins("JOIN plans ON plans.id = plan_nodes.plan_id").
 		Where("plans.name = ?", planName).
-		Find(&sources)
+		Find(&nodes)
 	if result.Error != nil {
-		return nil, fmt.Errorf("failed to get sources by plan name: %w", result.Error)
+		return nil, fmt.Errorf("failed to get nodes by plan name: %w", result.Error)
 	}
-	return sources, nil
+	return nodes, nil
 }
 
 // GetPlanByName returns a plan by its name.
@@ -536,29 +624,30 @@ func (s *Service) GetPlanByID(ctx context.Context, id uint) (*Plan, error) {
 	return &plan, nil
 }
 
-// IsSourcesEmpty returns true if no sources exist in the database.
-func (s *Service) IsSourcesEmpty(ctx context.Context) (bool, error) {
+// IsNodesEmpty returns true if no nodes exist in the database.
+func (s *Service) IsNodesEmpty(ctx context.Context) (bool, error) {
 	var count int64
-	result := s.db.WithContext(ctx).Model(&Source{}).Count(&count)
+	result := s.db.WithContext(ctx).Model(&Node{}).Count(&count)
 	if result.Error != nil {
-		return false, fmt.Errorf("failed to count sources: %w", result.Error)
+		return false, fmt.Errorf("failed to count nodes: %w", result.Error)
 	}
 	return count == 0, nil
 }
 
-// SeedDefaultSource inserts the default source from environment variables if the sources table is empty.
-// It also links all existing plans to the new source and assigns the free plan to legacy subscriptions.
-func (s *Service) SeedDefaultSource(ctx context.Context, name, xuiHost, xuiAPIToken string, xuiInboundID int, subURL string) error {
+// SeedDefaultNode inserts the default node from environment variables if the nodes table is empty.
+// It also links all existing plans to the new node and assigns the free plan to legacy subscriptions.
+func (s *Service) SeedDefaultNode(ctx context.Context, name, host, apiToken string, inboundID int, subscriptionURL string) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		source := Source{
-			Name:         name,
-			Active:       true,
-			XUIHost:      xuiHost,
-			XUIAPIToken:  xuiAPIToken,
-			XUIInboundID: xuiInboundID,
-			SubURL:       subURL,
+		node := Node{
+			Name:            name,
+			IsActive:        true,
+			Host:            host,
+			APIToken:        apiToken,
+			InboundID:       inboundID,
+			SubscriptionURL: subscriptionURL,
+			Type:            "x-ui",
 		}
-		if err := tx.Create(&source).Error; err != nil {
+		if err := tx.Create(&node).Error; err != nil {
 			return err
 		}
 		var plans []Plan
@@ -566,9 +655,9 @@ func (s *Service) SeedDefaultSource(ctx context.Context, name, xuiHost, xuiAPITo
 			return err
 		}
 		for _, p := range plans {
-			ps := PlanSource{PlanID: p.ID, SourceID: source.ID}
-			if err := tx.Create(&ps).Error; err != nil {
-				return fmt.Errorf("failed to link plan %d to source %d: %w", p.ID, source.ID, err)
+			pn := PlanNode{PlanID: p.ID, NodeID: node.ID}
+			if err := tx.Create(&pn).Error; err != nil {
+				return fmt.Errorf("failed to link plan %d to node %d: %w", p.ID, node.ID, err)
 			}
 		}
 		return tx.Exec(
@@ -670,7 +759,7 @@ func (s *Service) CountExpiredSubscriptions(ctx context.Context) (int64, error) 
 	var count int64
 	result := s.db.WithContext(ctx).
 		Model(&Subscription{}).
-		Where("expiry_time <= ?", time.Now()).
+		Where("expires_at <= ?", time.Now()).
 		Count(&count)
 	if result.Error != nil {
 		return 0, fmt.Errorf("failed to count expired subscriptions: %w", result.Error)
@@ -818,7 +907,7 @@ func (s *Service) CreateTrialSubscription(ctx context.Context, inviteCode, subsc
 		SubscriptionID: subscriptionID,
 		ClientID:       clientID,
 		InviteCode:     inviteCode,
-		ExpiryTime:     expiryTime,
+		ExpiresAt:      expiryTime,
 		PlanID:         planID,
 		Status:         "active",
 	}
@@ -828,6 +917,7 @@ func (s *Service) CreateTrialSubscription(ctx context.Context, inviteCode, subsc
 	return sub, nil
 }
 
+// resolveTrialPlanID looks up the trial plan by name and returns its ID.
 func (s *Service) resolveTrialPlanID(ctx context.Context) (uint, error) {
 	var plan Plan
 	if err := s.db.WithContext(ctx).Where("name = ?", TrialPlanName).First(&plan).Error; err != nil {
@@ -853,12 +943,12 @@ func (s *Service) GetSubscriptionBySubscriptionID(ctx context.Context, subscript
 // gorm.ErrRecordNotFound if no row matches.
 func (s *Service) GetSubscriptionStatus(ctx context.Context, subscriptionID string) (string, time.Time, error) {
 	var row struct {
-		Status     string
-		ExpiryTime time.Time
+		Status    string
+		ExpiresAt time.Time
 	}
 	result := s.db.WithContext(ctx).
 		Table("subscriptions").
-		Select("status, expiry_time").
+		Select("status, expires_at").
 		Where("subscription_id = ?", subscriptionID).
 		Scan(&row)
 	if result.Error != nil {
@@ -867,12 +957,12 @@ func (s *Service) GetSubscriptionStatus(ctx context.Context, subscriptionID stri
 	if result.RowsAffected == 0 {
 		return "", time.Time{}, gorm.ErrRecordNotFound
 	}
-	return row.Status, row.ExpiryTime, nil
+	return row.Status, row.ExpiresAt, nil
 }
 
-// GetSubscriptionWithPlanAndSources returns a subscription (status=active) by subscription ID
-// together with its plan and active sources, via JOINs through plan_sources.
-func (s *Service) GetSubscriptionWithPlanAndSources(ctx context.Context, subscriptionID string) (*SubscriptionFull, error) {
+// GetSubscriptionWithPlanAndNodes returns a subscription (status=active) by subscription ID
+// together with its plan and active nodes, via JOINs through plan_nodes.
+func (s *Service) GetSubscriptionWithPlanAndNodes(ctx context.Context, subscriptionID string) (*SubscriptionFull, error) {
 	var result SubscriptionFull
 
 	subQuery := s.db.WithContext(ctx).Where("subscription_id = ? AND status = ?", subscriptionID, "active")
@@ -886,12 +976,12 @@ func (s *Service) GetSubscriptionWithPlanAndSources(ctx context.Context, subscri
 	}
 
 	if err := s.db.WithContext(ctx).
-		Table("sources").
-		Select("sources.*").
-		Joins("JOIN plan_sources ON plan_sources.source_id = sources.id").
-		Where("plan_sources.plan_id = ? AND sources.active = ?", result.Plan.ID, true).
-		Find(&result.Sources).Error; err != nil {
-		return nil, fmt.Errorf("failed to get sources: %w", err)
+		Table("nodes").
+		Select("nodes.*").
+		Joins("JOIN plan_nodes ON plan_nodes.node_id = nodes.id").
+		Where("plan_nodes.plan_id = ? AND nodes.is_active = ?", result.Plan.ID, true).
+		Find(&result.Nodes).Error; err != nil {
+		return nil, fmt.Errorf("failed to get nodes: %w", err)
 	}
 
 	return &result, nil
@@ -1062,4 +1152,65 @@ func (s *Service) CleanupExpiredTrials(ctx context.Context, hours int) ([]Subscr
 		Delete(&TrialRequest{})
 
 	return subs, nil
+}
+
+// CreateOrder inserts a new order record.
+func (s *Service) CreateOrder(ctx context.Context, order *Order) error {
+	if err := s.db.WithContext(ctx).Create(order).Error; err != nil {
+		return fmt.Errorf("failed to create order: %w", err)
+	}
+	return nil
+}
+
+// GetOrderByID retrieves an order by its ID.
+func (s *Service) GetOrderByID(ctx context.Context, id uint) (*Order, error) {
+	var order Order
+	result := s.db.WithContext(ctx).First(&order, id)
+	if result.Error != nil {
+		return nil, fmt.Errorf("failed to get order: %w", result.Error)
+	}
+	return &order, nil
+}
+
+// GetOrdersBySubscriptionID returns orders for the given subscription.
+func (s *Service) GetOrdersBySubscriptionID(ctx context.Context, subscriptionID uint) ([]Order, error) {
+	var orders []Order
+	result := s.db.WithContext(ctx).
+		Where("subscription_id = ?", subscriptionID).
+		Order("created_at DESC").
+		Find(&orders)
+	if result.Error != nil {
+		return nil, fmt.Errorf("failed to list orders: %w", result.Error)
+	}
+	return orders, nil
+}
+
+// UpdateOrderStatus updates the status of an order by ID.
+func (s *Service) UpdateOrderStatus(ctx context.Context, id uint, status string) error {
+	result := s.db.WithContext(ctx).Model(&Order{}).Where("id = ?", id).Update("status", status)
+	if result.Error != nil {
+		return fmt.Errorf("failed to update order status: %w", result.Error)
+	}
+	return nil
+}
+
+// LinkNodeToPlan creates a link between a node and a plan (plan_nodes entry).
+func (s *Service) LinkNodeToPlan(ctx context.Context, planName string, nodeID uint) error {
+	var plan Plan
+	if err := s.db.WithContext(ctx).Where("name = ?", planName).First(&plan).Error; err != nil {
+		return fmt.Errorf("plan %q not found: %w", planName, err)
+	}
+	return s.db.WithContext(ctx).Create(&PlanNode{PlanID: plan.ID, NodeID: nodeID}).Error
+}
+
+// GetActiveByPlanID returns active products for the given plan.
+func (s *Service) GetActiveByPlanID(ctx context.Context, planID uint) ([]Product, error) {
+	var products []Product
+	result := s.db.WithContext(ctx).
+		Where("plan_id = ? AND is_active = ?", planID, true).
+		Find(&products)
+	if result.Error != nil {
+		return nil, fmt.Errorf("failed to get products: %w", result.Error)
+	}
+	return products, nil
 }

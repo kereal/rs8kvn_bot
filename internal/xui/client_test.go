@@ -218,14 +218,14 @@ func TestRetryWithBackoff_NonRetryable(t *testing.T) {
 	assert.Equal(t, int32(1), calls.Load())
 }
 
-func TestGetExpiryTimeMillis(t *testing.T) {
+func TestGetExpiresAtMillis(t *testing.T) {
 	t.Parallel()
 
-	assert.Equal(t, int64(0), getExpiryTimeMillis(time.Time{}))
-	assert.Equal(t, int64(0), getExpiryTimeMillis(time.Time{}))
+	assert.Equal(t, int64(0), getExpiresAtMillis(time.Time{}))
+	assert.Equal(t, int64(0), getExpiresAtMillis(time.Time{}))
 
 	now := time.Now()
-	result := getExpiryTimeMillis(now)
+	result := getExpiresAtMillis(now)
 	assert.InDelta(t, now.UnixMilli(), result, 1000)
 }
 
