@@ -21,7 +21,7 @@
 │                     cmd/bot/main.go (Entry Point)                    │
 │  ┌────────────────────────────────────────────────────────────────┐ │
 │  │ • Config loading                                                │ │
-│  │ • Service initialization (DB, XUI, Bot, Web, SubProxy)          │ │
+│  │ • Service initialization (DB, XUI, Bot, Web, Subserver)          │ │
 │  │ • Graceful shutdown coordination (signal handling)              │ │
 │  │ • Worker pool semaphore (10 concurrent handlers)                │ │
 │  └────────────────────────────────────────────────────────────────┘ │
@@ -246,7 +246,7 @@ Write response:
 | `internal/utils` | **90.0%** | ✅ |
 | `internal/logger` | **88.9%** | ✅ |
 | `internal/backup` | **83.2%** | ✅ |
-| `internal/subproxy` | **82.5%** | ✅ |
+| `internal/subserver` | **82.5%** | ✅ |
 | `internal/scheduler` | **81.2%** | ✅ |
 | `internal/database` | **77.8%** | 🟡 |
 | `cmd/bot` | **5.4%** | 🟡 (integration tests cover indirectly) |
@@ -287,7 +287,7 @@ All tests pass with `-race` detector. Fuzzing enabled for critical functions.
 ### Subscription Proxy (v2.3.0+)
 - **Endpoint:** `GET /sub/{subID}` — subID = SubscriptionID from DB (14 random bytes → 28 hex chars)
 - **Extra config:** Headers section → blank line → server links. Headers override 3x-ui.
-- **Cache:** 240s TTL hardcoded (`config.SubProxyCacheTTL`)
+- **Cache:** 240s TTL hardcoded (`config.SubServerCacheTTL`)
 - **Reload:** Every 5 minutes, graceful — keeps old config if file read fails
 - **Singleflight:** First request fetches, others wait and get same result (prevents thundering herd)
 - **Content-Length:** Removed after merge (body size changes, Go uses chunked encoding)

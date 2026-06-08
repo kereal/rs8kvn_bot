@@ -352,9 +352,9 @@ func (h *Handler) getMainMenuContent(username string, hasSubscription bool, chat
 	return text, keyboard
 }
 
-func (h *Handler) getHelpText(trafficLimitGB int, subscriptionURL string) string {
+func (h *Handler) getHelpText(trafficLimit int, subscriptionURL string) string {
 	// Use the detailed help from KeyboardBuilder which includes setup instructions.
-	return h.keyboards.HelpText(trafficLimitGB, subscriptionURL)
+	return h.keyboards.HelpText(trafficLimit, subscriptionURL)
 }
 
 func (h *Handler) getDonateText() string {

@@ -35,7 +35,6 @@ func TestHandleBackToStart_WithActiveSubscription(t *testing.T) {
 	cfg := &config.Config{
 		TelegramBotToken: "test:token",
 		TelegramAdminID:  0,
-		TrafficLimitGB:   30,
 	}
 
 	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewMockXUIClient(), NewTestBotConfig(), nil, "")
@@ -63,7 +62,6 @@ func TestHandleBackToStart_NoSubscription(t *testing.T) {
 	cfg := &config.Config{
 		TelegramBotToken: "test:token",
 		TelegramAdminID:  0,
-		TrafficLimitGB:   30,
 	}
 
 	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewMockXUIClient(), NewTestBotConfig(), nil, "")
@@ -95,7 +93,6 @@ func TestHandleBackToStart_InactiveSubscription(t *testing.T) {
 	cfg := &config.Config{
 		TelegramBotToken: "test:token",
 		TelegramAdminID:  0,
-		TrafficLimitGB:   30,
 	}
 
 	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewMockXUIClient(), NewTestBotConfig(), nil, "")
@@ -122,7 +119,6 @@ func TestHandleBackToStart_DatabaseError(t *testing.T) {
 	cfg := &config.Config{
 		TelegramBotToken: "test:token",
 		TelegramAdminID:  0,
-		TrafficLimitGB:   30,
 	}
 
 	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewMockXUIClient(), NewTestBotConfig(), nil, "")
@@ -148,7 +144,6 @@ func TestHandleBackToStart_NilSubscription(t *testing.T) {
 	cfg := &config.Config{
 		TelegramBotToken: "test:token",
 		TelegramAdminID:  0,
-		TrafficLimitGB:   30,
 	}
 
 	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewMockXUIClient(), NewTestBotConfig(), nil, "")
@@ -168,7 +163,6 @@ func TestHandleMenuDonate(t *testing.T) {
 	cfg := &config.Config{
 		TelegramBotToken: "test:token",
 		TelegramAdminID:  0,
-		TrafficLimitGB:   30,
 	}
 
 	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewMockXUIClient(), NewTestBotConfig(), nil, "")
@@ -194,7 +188,6 @@ func TestHandleMenuDonate_WithDifferentUsernames(t *testing.T) {
 	cfg := &config.Config{
 		TelegramBotToken: "test:token",
 		TelegramAdminID:  0,
-		TrafficLimitGB:   30,
 	}
 
 	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewMockXUIClient(), NewTestBotConfig(), nil, "")
@@ -226,19 +219,17 @@ func TestHandleMenuHelp_WithSubscription(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 		return &database.Subscription{
-			ID:              1,
-			TelegramID:      12345,
-			Username:        "testuser",
-			Status:          "active",
-			SubscriptionID:  "abc123",
-			SubscriptionURL: "https://example.com/sub/abc123",
+			ID:             1,
+			TelegramID:     12345,
+			Username:       "testuser",
+			Status:         "active",
+			SubscriptionID: "abc123",
 		}, nil
 	}
 
 	cfg := &config.Config{
 		TelegramBotToken: "test:token",
 		TelegramAdminID:  0,
-		TrafficLimitGB:   30,
 	}
 
 	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewMockXUIClient(), NewTestBotConfig(), nil, "")
@@ -267,7 +258,6 @@ func TestHandleMenuHelp_NoSubscription(t *testing.T) {
 	cfg := &config.Config{
 		TelegramBotToken: "test:token",
 		TelegramAdminID:  0,
-		TrafficLimitGB:   30,
 	}
 
 	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewMockXUIClient(), NewTestBotConfig(), nil, "")
@@ -293,7 +283,6 @@ func TestHandleMenuHelp_DatabaseError(t *testing.T) {
 	cfg := &config.Config{
 		TelegramBotToken: "test:token",
 		TelegramAdminID:  0,
-		TrafficLimitGB:   30,
 	}
 
 	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewMockXUIClient(), NewTestBotConfig(), nil, "")
@@ -327,19 +316,17 @@ func TestHandleMenuHelp_VariousTrafficLimits(t *testing.T) {
 			mockDB := testutil.NewMockDatabaseService()
 			mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 				return &database.Subscription{
-					ID:              1,
-					TelegramID:      12345,
-					Username:        "testuser",
-					Status:          "active",
-					SubscriptionID:  "abc123",
-					SubscriptionURL: "https://example.com/sub/abc123",
+					ID:             1,
+					TelegramID:     12345,
+					Username:       "testuser",
+					Status:         "active",
+					SubscriptionID: "abc123",
 				}, nil
 			}
 
 			cfg := &config.Config{
 				TelegramBotToken: "test:token",
 				TelegramAdminID:  0,
-				TrafficLimitGB:   tc.trafficGB,
 			}
 
 			handler := NewHandler(mockBot, cfg, mockDB, testutil.NewMockXUIClient(), NewTestBotConfig(), nil, "")
@@ -379,7 +366,6 @@ func TestHandleBackToStart_VariousMessageIDs(t *testing.T) {
 			cfg := &config.Config{
 				TelegramBotToken: "test:token",
 				TelegramAdminID:  0,
-				TrafficLimitGB:   30,
 			}
 
 			handler := NewHandler(mockBot, cfg, mockDB, testutil.NewMockXUIClient(), NewTestBotConfig(), nil, "")
@@ -403,17 +389,15 @@ func TestHandleMenuHelp_ContextCancellation(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 		return &database.Subscription{
-			ID:              1,
-			TelegramID:      12345,
-			Status:          "active",
-			SubscriptionURL: "https://example.com/sub/abc123",
+			ID:         1,
+			TelegramID: 12345,
+			Status:     "active",
 		}, nil
 	}
 
 	cfg := &config.Config{
 		TelegramBotToken: "test:token",
 		TelegramAdminID:  0,
-		TrafficLimitGB:   30,
 	}
 
 	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewMockXUIClient(), NewTestBotConfig(), nil, "")
@@ -445,7 +429,6 @@ func TestHandleBackToStart_SendError(t *testing.T) {
 	cfg := &config.Config{
 		TelegramBotToken: "test:token",
 		TelegramAdminID:  0,
-		TrafficLimitGB:   30,
 	}
 
 	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewMockXUIClient(), NewTestBotConfig(), nil, "")
@@ -466,7 +449,6 @@ func TestHandleMenuDonate_SendError(t *testing.T) {
 	cfg := &config.Config{
 		TelegramBotToken: "test:token",
 		TelegramAdminID:  0,
-		TrafficLimitGB:   30,
 	}
 
 	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewMockXUIClient(), NewTestBotConfig(), nil, "")
@@ -485,17 +467,15 @@ func TestHandleMenuHelp_SendError(t *testing.T) {
 	mockDB := testutil.NewMockDatabaseService()
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 		return &database.Subscription{
-			ID:              1,
-			TelegramID:      12345,
-			Status:          "active",
-			SubscriptionURL: "https://example.com/sub/abc123",
+			ID:         1,
+			TelegramID: 12345,
+			Status:     "active",
 		}, nil
 	}
 
 	cfg := &config.Config{
 		TelegramBotToken: "test:token",
 		TelegramAdminID:  0,
-		TrafficLimitGB:   30,
 	}
 
 	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewMockXUIClient(), NewTestBotConfig(), nil, "")
@@ -529,7 +509,6 @@ func TestHandleBackToStart_VariousChatIDs(t *testing.T) {
 			cfg := &config.Config{
 				TelegramBotToken: "test:token",
 				TelegramAdminID:  0,
-				TrafficLimitGB:   30,
 			}
 
 			handler := NewHandler(mockBot, cfg, mockDB, testutil.NewMockXUIClient(), NewTestBotConfig(), nil, "")

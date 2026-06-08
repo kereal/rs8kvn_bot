@@ -1,7 +1,7 @@
 # Architecture — rs8kvn_bot
 
-**Version:** 2.3.0  
-**Date:** 2026-04-17
+**Version:** 2.5.0  
+**Date:** 2026-06-06
 
 ---
 
@@ -49,7 +49,7 @@ rs8kvn_bot — production-ready Telegram bot for distributing VLESS+Reality+Visi
 │       ┌────────────────────────────┼────────────────────────────┐   │
 │       ▼                            ▼                            ▼   │
 │  ┌──────────┐              ┌──────────────┐              ┌──────────┐│
-│  │ Bot API  │              │  Web Server  │              │ SubProxy ││
+│  │ Bot API  │              │  Web Server  │  │ Subserver ││
 │  │ Layer    │              │  (port 8880) │              │ Service  ││
 │  │          │              │              │              │          ││
 │  │ Handler  │              │ /healthz     │              │ cache    ││
@@ -136,9 +136,9 @@ internal/
 │   ├── web.go               # Server struct, routes, health
 │   ├── middleware.go        # Bearer auth
 │   ├── api.go               # /api/v1/subscriptions
-│   ├── subproxy_test.go     # Proxy handler tests
+│   ├── subserver_test.go     # Proxy handler tests
 │   └── templates/           # trial.html, error.html
-├── subproxy/         # Subscription proxy
+├── subserver/         # Subscription server (aggregation + proxy)
 │   ├── service.go           # Hot reload loop (5 min)
 │   ├── proxy.go             # Fetch+XUI+merge logic
 │   ├── cache.go             # TTL cache (240s)
@@ -307,13 +307,13 @@ if !rateLimiter.Allow(chatID) {
 |-------|---------|-----|----------|----------|
 | `SubscriptionCache` (bot/cache.go) | Cached subscriptions by `telegramID` | 5 min | 1000 entries | LRU + periodic cleanup |
 | `ReferralCache` (bot/referral_cache.go) | Referral counts per referrer | 1 hour sync | unlimited (bounded by users) | N/A (full reload) |
-| `SubProxyCache` (subproxy/cache.go) | Merged subscription bodies by `subID` | 240s (4 min) | 1000 entries | TTL expiration |
+| `SubserverCache` (subserver/cache.go) | Merged subscription bodies by `subID` | 240s (4 min) | 1000 entries | TTL expiration |
 
 **Cache invalidation points:**
 - Subscription created → `invalidateCache(telegramID)`
 - Subscription deleted → `invalidateCache(telegramID)`
 - Trial bound → `invalidateCache(telegramID)`
-- SubProxy reload → entire cache cleared on config change
+- Subserver reload → entire cache cleared on config change
 
 **Pattern:** Cache-Aside with stale-as-fallback (proxy returns stale if XUI down).
 
@@ -656,9 +656,9 @@ User           Telegram       Bot (main)     Handler      XUI Panel       DB
 | 2026-01 | In-memory caches vs Redis | No external dependency; cache sizes bounded (1000 entries) |
 | 2026-02 | Long polling vs Webhook | Easier deployment (no public HTTPS needed), single instance ok |
 | 2026-02 | GORM vs sqlx | Faster dev, migrations built-in, relationship support |
-| 2026-03 | Separate subproxy package | Reusable subscription proxy logic, clean separation |
+| 2026-03 | Separate subserver package | Reusable subscription server logic, clean separation |
 | 2026-03 | Circuit breaker on XUI | Prevent cascade failures if panel down |
-| 2026-04 | 5-min subproxy reload | Balance between config freshness and file I/O |
+| 2026-04 | 5-min subserver reload | Balance between config freshness and file I/O |
 | 2026-04 | Token bucket rate limiting | Standard algorithm, per-user isolation, tunable |
 | 2026-04 | Daily backup at 03:00 | Low-traffic period, WAL checkpoint ensures consistency |
 

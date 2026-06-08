@@ -73,8 +73,11 @@ func (sh *SubscriptionHandler) handleCreateSubscription(ctx context.Context, cha
 			return fmt.Errorf("check subscription: %w", err)
 		}
 	} else if sub != nil {
-		// Existing active subscription
-		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgSubCreatedSuccess, sh.h.cfg.TrafficLimitGB, sub.SubscriptionURL))
+	trafficLimit := 0
+	if sh.h.subscriptionService != nil {
+		trafficLimit = sh.h.subscriptionService.PlanTrafficLimitGB(ctx, chatID)
+	}
+		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgSubCreatedSuccess, trafficLimit, sh.h.cfg.SubURL(sub.SubscriptionID)))
 		editMsg.ParseMode = "Markdown"
 		editMsg.DisableWebPagePreview = true
 		kb := sh.h.getQRKeyboard()
@@ -123,7 +126,7 @@ func (sh *SubscriptionHandler) handleMySubscription(ctx context.Context, chatID 
 		traffic.ProgressBar,
 		traffic.CreatedAtFormatted,
 		traffic.ResetInfo,
-		sub.SubscriptionURL,
+		sh.h.cfg.SubURL(sub.SubscriptionID),
 	)
 
 	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, messageText)
@@ -157,7 +160,7 @@ func (sh *SubscriptionHandler) handleQRCode(ctx context.Context, chatID int64, u
 		return nil
 	}
 
-	pngBytes, err := utils.GenerateQRCodePNG(sub.SubscriptionURL)
+	pngBytes, err := utils.GenerateQRCodePNG(sh.h.cfg.SubURL(sub.SubscriptionID))
 	if err != nil {
 		logger.Error("Failed to generate QR code", zap.Error(err))
 		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgQRCodeFailed))
@@ -245,28 +248,30 @@ func (sh *SubscriptionHandler) createSubscription(ctx context.Context, chatID in
 		return fmt.Errorf("failed to show loading message")
 	}
 
-	logger.Info("Creating subscription",
-		zap.String("username", username),
-		zap.Int("traffic_gb", sh.h.cfg.TrafficLimitGB))
+	// Capture the pending invite code under a brief lock, then release it
+	// before the (potentially slow) HTTP call into the XUI panel.
+	sh.h.pendingMu.Lock()
+	var inviteCode string
+	if p, ok := sh.h.pendingInvites[chatID]; ok && time.Now().Before(p.expiresAt) {
+		inviteCode = p.code
+	}
+	sh.h.pendingMu.Unlock()
 
-	result, err := sh.h.subscriptionService.Create(ctx, chatID, username)
+	result, err := sh.h.subscriptionService.Create(ctx, chatID, username, inviteCode)
 	if err != nil {
 		sh.handleCreateError(ctx, chatID, messageID, username, err)
 		return fmt.Errorf("create subscription: %w", err)
 	}
 
+	// Consume the pending invite (best-effort). Always clear, regardless of
+	// whether the invite resolved to a referrer.
 	sh.h.pendingMu.Lock()
-	if pending, ok := sh.h.pendingInvites[chatID]; ok {
-		if time.Now().Before(pending.expiresAt) {
-			invite, _ := sh.h.db.GetInviteByCode(ctx, pending.code)
-			if invite != nil && invite.ReferrerTGID > 0 {
-				result.Subscription.ReferredBy = invite.ReferrerTGID
-				sh.h.IncrementReferralCount(invite.ReferrerTGID)
-			}
-		}
-		delete(sh.h.pendingInvites, chatID)
-	}
+	delete(sh.h.pendingInvites, chatID)
 	sh.h.pendingMu.Unlock()
+
+	if result.ReferrerTGID > 0 {
+		sh.h.IncrementReferralCount(result.ReferrerTGID)
+	}
 
 	sh.h.cache.Set(chatID, result.Subscription)
 	if err := sh.h.notifyAdmin(ctx, username, chatID, result.SubscriptionURL); err != nil {
@@ -278,7 +283,11 @@ func (sh *SubscriptionHandler) createSubscription(ctx context.Context, chatID in
 			tgbotapi.NewInlineKeyboardButtonData("🏠 В начало", "back_to_start"),
 		),
 	)
-	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, sh.h.getHelpText(sh.h.cfg.TrafficLimitGB, result.SubscriptionURL))
+	trafficLimit := 0
+	if sh.h.subscriptionService != nil {
+		trafficLimit = sh.h.subscriptionService.PlanTrafficLimitGB(ctx, result.Subscription.TelegramID)
+	}
+	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, sh.h.getHelpText(trafficLimit, result.SubscriptionURL))
 	editMsg.ParseMode = "Markdown"
 	editMsg.DisableWebPagePreview = true
 	editMsg.ReplyMarkup = &backKeyboard

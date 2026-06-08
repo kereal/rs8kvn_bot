@@ -1,46 +1,57 @@
-## XUI Authentication Mechanism
+# 3x-ui Authentication & HTTP
 
-### Architecture
-- **API Token auth**: Bearer token via `Authorization` header, no session/login/CSRF
-- **Token config**: `XUI_API_TOKEN` env var → `Config.XUIAPIToken`
-- **Every request** includes `Authorization: Bearer <token>` header via `doHTTPRequest()`
-- **No session state**: No login, no cookie jar, no session expiry tracking, no singleflight dedup
-- **No circuit breaker**: Removed; all retry logic is in `RetryWithBackoff()`
+## Auth
+- **Bearer token** через `Authorization` header, **нет** сессии/логина/CSRF/cookie jar.
+- Token: `XUI_API_TOKEN` env → `Config.XUIAPIToken`.
+- Каждый запрос: `Authorization: Bearer <token>` через `doHTTPRequest()`.
+- **Нет session expiry tracking** — клиент готов сразу после конструкции.
 
-### Key Methods
-- `NewClient(host, apiToken)` — 2-param constructor (was 4-param with username/password/sessionMaxAge)
-- `doHTTPRequest(ctx, method, url, bodyFn)` — shared HTTP helper, sets Bearer token header
-- `RetryWithBackoff(ctx, maxRetries, initialDelay, fn)` — exponential backoff with jitter
-- `isRetryable(err)` — `net.DNSError` → false (fast-fail), timeout → true, "no such host" string → false
-- `Ping(ctx)` — GET `/panel/api/server/status`
-- Client creation migrated to new `/panel/api/clients/add` (2026-05): payload `{client: {id, email, subId, totalGB, expiryTime, ...}, inboundIds: [N]}` instead of legacy `/inbounds/addClient` + escaped settings string. AddClient* signatures and single-inbound-per-sub semantics unchanged for backward compat with bot service layer.
+## Singleflight
+- **НЕ для логина** (логина нет).
+- Используется в `internal/web/singleflight.go` для дедупликации одновременных DB queries (subserver cache misses).
 
-### Thread Safety
-- No shared mutable state — all fields immutable after construction
-- No mutexes, no atomics
-- `http.Transport` is goroutine-safe (from `net/http` stdlib)
+## Circuit Breaker ✅ ЕСТЬ
+- `internal/xui/breaker.go` — НЕ удалён.
+- 5 failures → 30s Open → Half-Open → Closed.
+- `metrics.CircuitBreakerState` (Prometheus-метрика).
+- **Не** в xui/auth-mechanism ранее было написано "No circuit breaker: Removed" — это была ошибка, исправлено.
 
-### Retry Behavior
-- `isRetryable(err)` — DNS errors → false (fast-fail), network timeouts → true
-- `RetryWithBackoff` — configurable retries (default 3), configurable initial delay (default 1s), exponential backoff with jitter
-- Non-retryable errors fail immediately
-- HTTP 5xx errors are retried (the response body is returned with error, and `isRetryable` treats non-DNS errors as retryable)
+## Retry
+- `RetryWithBackoff(ctx, maxRetries, initialDelay, fn)` — exponential + jitter.
+- `isRetryable(err)`:
+  - `net.DNSError` → **false** (fast-fail)
+  - timeout → **true**
+  - "no such host" в строке ошибки → **false**
+- HTTP 5xx → retried (response body возвращается с error).
 
-### Startup
-- No background login goroutine — client is ready immediately after construction
-- No startup retry loop needed
+## Thread safety
+- Нет shared mutable state — все поля immutable после конструкции.
+- Нет mutex/atomic.
+- `http.Transport` goroutine-safe (stdlib).
 
-### Flow Detection
-- `getRequiredFlow(ctx, inboundID)` — fetches inbound settings, detects transport, returns appropriate flow
-- Transport `xhttp`/`h2`/`ws`/`grpc`/`grpcs` → flow empty (not needed)
-- Transport `tcp` or unknown → flow `xtls-rprx-vision`
+## Ключевые методы
+- `NewClient(host, apiToken)` — 2-param конструктор (был 4-param с username/password/sessionMaxAge).
+- `doHTTPRequest(ctx, method, url, bodyFn)` — общий HTTP helper, ставит Bearer header.
+- `Ping(ctx)` — `GET /panel/api/server/status` (liveness check).
+- `getRequiredFlow(ctx, inboundID)` — детектит transport (`xhttp`/`h2`/`ws`/`grpc`/`grpcs` → flow empty; `tcp`/unknown → `xtls-rprx-vision`).
 
-### Files
-- `internal/xui/client.go` — main client
-- `internal/config/constants.go` — timeouts, defaults, `XUIRequestTimeout`
-- `internal/config/config.go` — `XUIAPIToken` field (replaces `XUIUsername`/`XUIPassword`/`XUISessionMaxAgeMinutes`)
-- `internal/interfaces/interfaces.go` — `XUIClient` interface without `Login(ctx)` method
+## Flow detection
+- Transport `xhttp`/`h2`/`ws`/`grpc`/`grpcs` → flow пустой (не нужен).
+- Transport `tcp` или unknown → flow `xtls-rprx-vision`.
 
-### Testing
-- Unit tests: `internal/xui/client_test.go` — doHTTPRequest, CRUD methods, RetryWithBackoff, isRetryable, Inbound flow detection, HTTP error handling (401/403/500)
-- E2E tests: `tests/e2e/real_client_test.go` — FullSubscriptionLifecycle, DNSErrorFastFail
+## Files
+- `internal/xui/client.go` — main client + retry
+- `internal/xui/breaker.go` — circuit breaker
+- `internal/config/constants.go` — `XUIRequestTimeout` и др. defaults
+- `internal/config/config.go` — `XUIAPIToken` field
+- `internal/interfaces/interfaces.go` — `XUIClient` interface (без `Login(ctx)`)
+- `internal/web/singleflight.go` — singleflight (НЕ в xui/)
+
+## Tests
+- `internal/xui/client_test.go` — doHTTPRequest, CRUD, RetryWithBackoff, isRetryable, flow detection, 401/403/500 errors.
+- `internal/xui/breaker_test.go` — circuit breaker state machine.
+- E2E: см. `tests/e2e/`.
+
+## См. также
+- CRUD: `xui/client-crud.md`
+- Reset: `xui/reset-mechanism.md`

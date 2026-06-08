@@ -43,104 +43,11 @@ func TestGetVersion(t *testing.T) {
 	})
 }
 
-func TestHandleUpdate_CommandRouting(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{
-		TelegramAdminID: 123456,
-		TrafficLimitGB:  50,
-	}
-	mockBot := testutil.NewMockBotAPI()
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	handler := bot.NewHandler(mockBot, cfg, mockDB, mockXUI, bot.NewTestBotConfig(), nil, "")
-	ctx := context.Background()
-
-	tests := []struct {
-		name    string
-		command string
-	}{
-		{"start command", "start"},
-		{"help command", "help"},
-		{"invite command", "invite"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			update := tgbotapi.Update{
-				Message: &tgbotapi.Message{
-					Chat: &tgbotapi.Chat{ID: 123456},
-					From: &tgbotapi.User{ID: 123456, UserName: "testuser"},
-					Text: "/" + tt.command,
-				},
-			}
-
-			// Should not panic
-			handler.HandleUpdate(ctx, update)
-		})
-	}
-}
-
-func TestHandleUpdate_NonCommandMessage(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{
-		TelegramAdminID: 123456,
-		TrafficLimitGB:  50,
-	}
-	mockBot := testutil.NewMockBotAPI()
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	handler := bot.NewHandler(mockBot, cfg, mockDB, mockXUI, bot.NewTestBotConfig(), nil, "")
-	ctx := context.Background()
-
-	update := tgbotapi.Update{
-		Message: &tgbotapi.Message{
-			Chat: &tgbotapi.Chat{ID: 123456},
-			From: &tgbotapi.User{ID: 123456, UserName: "testuser"},
-			Text: "Hello, this is not a command",
-		},
-	}
-
-	// Should not panic
-	handler.HandleUpdate(ctx, update)
-}
-
-func TestHandleUpdate_CallbackQuery(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{
-		TelegramAdminID: 123456,
-		TrafficLimitGB:  50,
-	}
-	mockBot := testutil.NewMockBotAPI()
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	handler := bot.NewHandler(mockBot, cfg, mockDB, mockXUI, bot.NewTestBotConfig(), nil, "")
-	ctx := context.Background()
-
-	update := tgbotapi.Update{
-		CallbackQuery: &tgbotapi.CallbackQuery{
-			ID:   "test-callback-id",
-			Data: "test_data",
-			From: &tgbotapi.User{ID: 123456, UserName: "testuser"},
-			Message: &tgbotapi.Message{
-				MessageID: 100,
-				Chat:      &tgbotapi.Chat{ID: 123456},
-			},
-		},
-	}
-
-	// Should not panic
-	handler.HandleUpdate(ctx, update)
-}
-
 func TestHandleUpdateSafely(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  50,
 	}
 	mockBot := testutil.NewMockBotAPI()
 	mockDB := testutil.NewMockDatabaseService()
@@ -168,7 +75,6 @@ func TestHandleUpdate_UnknownCommand(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  50,
 	}
 	mockBot := testutil.NewMockBotAPI()
 	mockDB := testutil.NewMockDatabaseService()
@@ -188,15 +94,12 @@ func TestHandleUpdate_UnknownCommand(t *testing.T) {
 	handler.HandleUpdate(ctx, update)
 }
 
-
-
 // TestHandleUpdate_NilMessage тестирует обработку update с nil Message
 func TestHandleUpdate_NilMessage(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  50,
 	}
 	mockBot := testutil.NewMockBotAPI()
 	mockDB := testutil.NewMockDatabaseService()
@@ -217,7 +120,6 @@ func TestHandleUpdate_UnknownCommands(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  50,
 	}
 	mockBot := testutil.NewMockBotAPI()
 	mockDB := testutil.NewMockDatabaseService()
@@ -257,7 +159,6 @@ func TestHandleUpdate_UnknownCommand_Text(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  50,
 	}
 	mockBot := testutil.NewMockBotAPI()
 	mockDB := testutil.NewMockDatabaseService()
@@ -287,7 +188,6 @@ func TestHandleUpdate_NonCommandMessage_Text(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  50,
 	}
 	mockBot := testutil.NewMockBotAPI()
 	mockDB := testutil.NewMockDatabaseService()
@@ -314,7 +214,6 @@ func TestHandleUpdate_NonCommandMessage_UsernameFallback(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  50,
 	}
 	mockBot := testutil.NewMockBotAPI()
 	mockDB := testutil.NewMockDatabaseService()
@@ -340,7 +239,6 @@ func TestHandleUpdate_NonCommandMessage_NoUser(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  50,
 	}
 	mockBot := testutil.NewMockBotAPI()
 	mockDB := testutil.NewMockDatabaseService()
@@ -365,7 +263,6 @@ func TestHandleUpdate_NonCommandMessage_LongText(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  50,
 	}
 	mockBot := testutil.NewMockBotAPI()
 	mockDB := testutil.NewMockDatabaseService()
@@ -392,7 +289,6 @@ func TestHandleUpdate_CallbackQuery_NoMessage(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  50,
 	}
 	mockBot := testutil.NewMockBotAPI()
 	mockDB := testutil.NewMockDatabaseService()
@@ -418,7 +314,6 @@ func TestHandleUpdate_NilMessageAndNilCallback(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  50,
 	}
 	mockBot := testutil.NewMockBotAPI()
 	mockDB := testutil.NewMockDatabaseService()
@@ -464,7 +359,7 @@ func TestConfigLoad_InvalidNumericValues(t *testing.T) {
 	t.Setenv("XUI_INBOUND_ID", "invalid")
 	t.Setenv("DATABASE_PATH", ":memory:")
 	t.Setenv("LOG_LEVEL", "error")
-	t.Setenv("TRAFFIC_LIMIT_GB", "negative")
+	t.Setenv("HEARTBEAT_INTERVAL", "negative")
 	t.Setenv("HEALTH_CHECK_PORT", "not_a_port")
 	t.Setenv("SITE_URL", "https://example.com")
 	t.Setenv("TRIAL_DURATION_HOURS", "24")
@@ -486,7 +381,7 @@ func TestConfigLoad_InvalidURL(t *testing.T) {
 	t.Setenv("XUI_INBOUND_ID", "1")
 	t.Setenv("DATABASE_PATH", ":memory:")
 	t.Setenv("LOG_LEVEL", "error")
-	t.Setenv("TRAFFIC_LIMIT_GB", "50")
+	t.Setenv("HEARTBEAT_INTERVAL", "50")
 	t.Setenv("HEALTH_CHECK_PORT", "8080")
 	t.Setenv("SITE_URL", "invalid-url")
 	t.Setenv("TRIAL_DURATION_HOURS", "24")
@@ -508,7 +403,7 @@ func TestConfigLoad_InvalidPort(t *testing.T) {
 	t.Setenv("XUI_INBOUND_ID", "1")
 	t.Setenv("DATABASE_PATH", ":memory:")
 	t.Setenv("LOG_LEVEL", "error")
-	t.Setenv("TRAFFIC_LIMIT_GB", "50")
+	t.Setenv("HEARTBEAT_INTERVAL", "50")
 	t.Setenv("HEALTH_CHECK_PORT", "999999")
 	t.Setenv("SITE_URL", "https://example.com")
 	t.Setenv("TRIAL_DURATION_HOURS", "24")

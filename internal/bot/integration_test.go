@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"rs8kvn_bot/internal/config"
 	"rs8kvn_bot/internal/database"
+	"rs8kvn_bot/internal/interfaces"
 	"rs8kvn_bot/internal/service"
 	"rs8kvn_bot/internal/testutil"
 	"rs8kvn_bot/internal/utils"
@@ -142,11 +143,7 @@ func NewTestFixture(t *testing.T) *IntegrationTestFixture {
 	mockXUI := NewMockXUIServer(t)
 
 	cfg := &config.Config{
-		TrafficLimitGB:   100,
-		XUIHost:          mockXUI.Server.URL,
-		XUIInboundID:     1,
-		XUISubPath:       "sub",
-		XUIAPIToken:      "test-api-token",
+		Sources:          []config.Source{{Name: "main", XUIHost: mockXUI.Server.URL, XUIAPIToken: "test-api-token", XUIInboundID: 1}},
 		TelegramAdminID:  123456789,
 		TelegramBotToken: "test_token",
 		LogFilePath:      "/dev/null",
@@ -155,7 +152,9 @@ func NewTestFixture(t *testing.T) *IntegrationTestFixture {
 	}
 
 	handler := NewHandler(testutil.NewMockBotAPI(), cfg, dbService, mockXUI.Client, NewTestBotConfig(), nil, "")
-	subService := service.NewSubscriptionService(dbService, mockXUI.Client, cfg, &webhook.NoopSender{})
+	mockXUIClients := map[uint]interfaces.XUIClient{1: mockXUI.Client}
+	sources := []database.Source{{ID: 1, Name: "main", Active: true,XUIHost: mockXUI.Server.URL, XUIAPIToken: "test-api-token", XUIInboundID: 1}}
+	subService := service.NewSubscriptionService(dbService, mockXUIClients, sources, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
 	handler.subscriptionService = subService
 	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
 
@@ -191,18 +190,15 @@ func CreateTestSubscriptionInDB(t *testing.T, db *database.Service, chatID int64
 	}
 
 	sub := &database.Subscription{
-		TelegramID:      chatID,
-		Username:        username,
-		ClientID:        clientID,
-		SubscriptionID:  "test-sub-id",
-		InboundID:       1,
-		TrafficLimit:    107374182400,
-		ExpiryTime:      expiry,
-		Status:          status,
-		SubscriptionURL: "http://localhost/sub/" + username,
+		TelegramID:     chatID,
+		Username:       username,
+		ClientID:       clientID,
+		SubscriptionID: "test-sub-id",
+		ExpiryTime:     expiry,
+		Status:         status,
 	}
 
-	err = db.CreateSubscription(context.Background(), sub)
+	err = db.CreateSubscription(context.Background(), sub, "")
 	if err != nil {
 		t.Fatalf("Failed to create test subscription: %v", err)
 	}
@@ -279,16 +275,13 @@ func TestSubscriptionFlow_RevokeOldSubscription(t *testing.T) {
 	}
 
 	err = f.DB.CreateSubscription(ctx, &database.Subscription{
-		TelegramID:      f.UserChatID,
-		Username:        "testuser2",
-		ClientID:        clientID,
-		SubscriptionID:  "testuser2",
-		InboundID:       1,
-		TrafficLimit:    107374182400,
-		ExpiryTime:      time.Now().Add(30 * 24 * time.Hour),
-		Status:          "active",
-		SubscriptionURL: "http://localhost/sub/testuser2",
-	})
+		TelegramID:     f.UserChatID,
+		Username:       "testuser2",
+		ClientID:       clientID,
+		SubscriptionID: "testuser2",
+		ExpiryTime:     time.Now().Add(30 * 24 * time.Hour),
+		Status:         "active",
+	}, "")
 	if err != nil {
 		t.Fatalf("Failed to create new subscription: %v", err)
 	}

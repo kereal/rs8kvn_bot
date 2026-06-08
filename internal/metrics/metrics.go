@@ -108,7 +108,7 @@ var (
 	)
 
 	// CacheHitsTotal is a counter of cache hits with label: cache.
-	// cache values: subscription, referral, subproxy
+	// cache values: subscription, referral, subserver
 	CacheHitsTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "cache_hits_total",
@@ -154,6 +154,14 @@ var (
 			Name: "bot_orphaned_clients_removed_total",
 			Help: "Total number of orphaned XUI clients/subscriptions removed during reconciliation",
 		},
+	)
+
+	SubserverPartialSourcesTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "subserver_partial_sources_total",
+			Help: "Total number of subscription requests where at least one source failed",
+		},
+		[]string{"sub_id"},
 	)
 )
 

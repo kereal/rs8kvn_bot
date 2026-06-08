@@ -57,7 +57,7 @@ type MockDatabaseService struct {
 	Subscriptions                       map[int64]*database.Subscription
 	PingFunc                            func(ctx context.Context) error
 	GetByTelegramIDFunc                 func(ctx context.Context, telegramID int64) (*database.Subscription, error)
-	CreateSubscriptionFunc              func(ctx context.Context, sub *database.Subscription) error
+	CreateSubscriptionFunc              func(ctx context.Context, sub *database.Subscription, inviteCode string) error
 	UpdateSubscriptionFunc              func(ctx context.Context, sub *database.Subscription) error
 	DeleteSubscriptionFunc              func(ctx context.Context, telegramID int64) error
 	GetLatestSubscriptionsFunc          func(ctx context.Context, limit int) ([]database.Subscription, error)
@@ -76,16 +76,33 @@ type MockDatabaseService struct {
 	GetInviteByCodeFunc                 func(ctx context.Context, code string) (*database.Invite, error)
 	GetReferralCountFunc                func(ctx context.Context, referrerTGID int64) (int64, error)
 	GetAllReferralCountsFunc            func(ctx context.Context) (map[int64]int64, error)
-	CreateTrialSubscriptionFunc         func(ctx context.Context, inviteCode, subscriptionID, clientID string, inboundID int, trafficBytes int64, expiryTime time.Time, subURL string) (*database.Subscription, error)
+	CreateTrialSubscriptionFunc         func(ctx context.Context, inviteCode, subscriptionID, clientID string, expiryTime time.Time) (*database.Subscription, error)
+	ListSourcesFunc                     func(ctx context.Context) ([]database.Source, error)
+	IsSourcesEmptyFunc                  func(ctx context.Context) (bool, error)
+	GetSourcesByPlanIDFunc              func(ctx context.Context, planID uint) ([]database.Source, error)
+	GetSourcesByPlanNameFunc            func(ctx context.Context, planName string) ([]database.Source, error)
+	GetPlansBySourceIDFunc              func(ctx context.Context, sourceID uint) ([]database.Plan, error)
+	GetPlanByNameFunc                   func(ctx context.Context, name string) (*database.Plan, error)
+	GetPlanByIDFunc                     func(ctx context.Context, planID uint) (*database.Plan, error)
+	GetAllPlansFunc                     func(ctx context.Context) ([]database.Plan, error)
+	CreatePlanFunc                      func(ctx context.Context, plan *database.Plan) error
+	UpdatePlanFunc                      func(ctx context.Context, plan *database.Plan) error
+	DeletePlanFunc                      func(ctx context.Context, planID uint) error
+	AddSourceToPlanFunc                 func(ctx context.Context, planID, sourceID uint) error
+	RemoveSourceFromPlanFunc            func(ctx context.Context, planID, sourceID uint) error
+	SeedDefaultDataFunc                 func(ctx context.Context) error
+	SeedDefaultSourceFunc               func(ctx context.Context, name, xuiHost, xuiAPIToken string, xuiInboundID int, subURL string) error
 	GetSubscriptionBySubscriptionIDFunc func(ctx context.Context, subscriptionID string) (*database.Subscription, error)
 	GetTrialSubscriptionBySubIDFunc     func(ctx context.Context, subscriptionID string) (*database.Subscription, error)
 	BindTrialSubscriptionFunc           func(ctx context.Context, subscriptionID string, telegramID int64, username string) (*database.Subscription, error)
 	CountTrialRequestsByIPLastHourFunc  func(ctx context.Context, ip string) (int, error)
 	CreateTrialRequestFunc              func(ctx context.Context, ip string) error
-	CleanupExpiredTrialsFunc            func(ctx context.Context, hours int, xuiClient interface {
-		DeleteClient(ctx context.Context, email string) error
-	}) (int64, error)
+	CleanupExpiredTrialsFunc            func(ctx context.Context, hours int) ([]database.Subscription, error)
 	GetPoolStatsFunc                    func() (*database.PoolStats, error)
+	GetSubscriptionWithPlanAndSourcesFunc func(ctx context.Context, subscriptionID string) (*database.SubscriptionFull, error)
+	GetSubscriptionStatusFunc                func(ctx context.Context, subscriptionID string) (string, time.Time, error)
+	UpdateSubscriptionDevicesFunc          func(ctx context.Context, id uint, devicesJSON string) error
+	UpdateSubscriptionIPsFunc              func(ctx context.Context, id uint, ipsJSON string) error
 }
 
 func (m *MockDatabaseService) Ping(ctx context.Context) error {
@@ -114,9 +131,9 @@ func (m *MockDatabaseService) GetByID(ctx context.Context, id uint) (*database.S
 	return nil, gorm.ErrRecordNotFound
 }
 
-func (m *MockDatabaseService) CreateSubscription(ctx context.Context, sub *database.Subscription) error {
+func (m *MockDatabaseService) CreateSubscription(ctx context.Context, sub *database.Subscription, inviteCode string) error {
 	if m.CreateSubscriptionFunc != nil {
-		return m.CreateSubscriptionFunc(ctx, sub)
+		return m.CreateSubscriptionFunc(ctx, sub, inviteCode)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -124,7 +141,9 @@ func (m *MockDatabaseService) CreateSubscription(ctx context.Context, sub *datab
 		m.Subscriptions = make(map[int64]*database.Subscription)
 	}
 	if sub.TelegramID != 0 {
-		m.Subscriptions[sub.TelegramID] = sub
+		// Deep-copy so test assertions don't observe post-call mutations.
+		stored := *sub
+		m.Subscriptions[sub.TelegramID] = &stored
 	}
 	return nil
 }
@@ -312,11 +331,131 @@ func (m *MockDatabaseService) GetInviteByReferrer(ctx context.Context, referrerT
 	return nil, database.ErrInviteNotFound
 }
 
-func (m *MockDatabaseService) CreateTrialSubscription(ctx context.Context, inviteCode, subscriptionID, clientID string, inboundID int, trafficBytes int64, expiryTime time.Time, subURL string) (*database.Subscription, error) {
+func (m *MockDatabaseService) CreateTrialSubscription(ctx context.Context, inviteCode, subscriptionID, clientID string, expiryTime time.Time) (*database.Subscription, error) {
 	if m.CreateTrialSubscriptionFunc != nil {
-		return m.CreateTrialSubscriptionFunc(ctx, inviteCode, subscriptionID, clientID, inboundID, trafficBytes, expiryTime, subURL)
+		return m.CreateTrialSubscriptionFunc(ctx, inviteCode, subscriptionID, clientID, expiryTime)
 	}
-	return &database.Subscription{InviteCode: inviteCode, SubscriptionID: subscriptionID, ClientID: clientID, IsTrial: true}, nil
+	return &database.Subscription{InviteCode: inviteCode, SubscriptionID: subscriptionID, ClientID: clientID, PlanID: 1}, nil
+}
+
+func (m *MockDatabaseService) ListSources(ctx context.Context) ([]database.Source, error) {
+	if m.ListSourcesFunc != nil {
+		return m.ListSourcesFunc(ctx)
+	}
+	return []database.Source{
+		{ID: 1, Name: "default", Active: true, XUIHost: "http://localhost:2053", XUIAPIToken: "test-token", XUIInboundID: 1, SubURL: "http://example.com/sub/"},
+	}, nil
+}
+
+
+func (m *MockDatabaseService) IsSourcesEmpty(ctx context.Context) (bool, error) {
+	if m.IsSourcesEmptyFunc != nil {
+		return m.IsSourcesEmptyFunc(ctx)
+	}
+	return false, nil
+}
+
+func (m *MockDatabaseService) SeedDefaultSource(ctx context.Context, name, xuiHost, xuiAPIToken string, xuiInboundID int, subURL string) error {
+	if m.SeedDefaultDataFunc != nil {
+		return m.SeedDefaultDataFunc(ctx)
+	}
+	if m.SeedDefaultSourceFunc != nil {
+		return m.SeedDefaultSourceFunc(ctx, name, xuiHost, xuiAPIToken, xuiInboundID, subURL)
+	}
+	return nil
+}
+
+func (m *MockDatabaseService) SeedDefaultData(ctx context.Context) error {
+	if m.SeedDefaultDataFunc != nil {
+		return m.SeedDefaultDataFunc(ctx)
+	}
+	return nil
+}
+
+func (m *MockDatabaseService) GetPlanByName(ctx context.Context, name string) (*database.Plan, error) {
+	if m.GetPlanByNameFunc != nil {
+		return m.GetPlanByNameFunc(ctx, name)
+	}
+	if name == database.FreePlanName {
+		return &database.Plan{ID: 2, Name: name, DevicesLimit: 1, TrafficLimit: 1073741824, Duration: 168}, nil
+	}
+	if name == database.TrialPlanName {
+		return &database.Plan{ID: 1, Name: name, DevicesLimit: 1, TrafficLimit: 1073741824, Duration: 3}, nil
+	}
+	return nil, gorm.ErrRecordNotFound
+}
+
+func (m *MockDatabaseService) GetPlanByID(ctx context.Context, planID uint) (*database.Plan, error) {
+	if m.GetPlanByIDFunc != nil {
+		return m.GetPlanByIDFunc(ctx, planID)
+	}
+	return nil, gorm.ErrRecordNotFound
+}
+
+func (m *MockDatabaseService) GetAllPlans(ctx context.Context) ([]database.Plan, error) {
+	if m.GetAllPlansFunc != nil {
+		return m.GetAllPlansFunc(ctx)
+	}
+	return nil, nil
+}
+
+func (m *MockDatabaseService) CreatePlan(ctx context.Context, plan *database.Plan) error {
+	if m.CreatePlanFunc != nil {
+		return m.CreatePlanFunc(ctx, plan)
+	}
+	return nil
+}
+
+func (m *MockDatabaseService) UpdatePlan(ctx context.Context, plan *database.Plan) error {
+	if m.UpdatePlanFunc != nil {
+		return m.UpdatePlanFunc(ctx, plan)
+	}
+	return nil
+}
+
+func (m *MockDatabaseService) DeletePlan(ctx context.Context, planID uint) error {
+	if m.DeletePlanFunc != nil {
+		return m.DeletePlanFunc(ctx, planID)
+	}
+	return nil
+}
+
+func (m *MockDatabaseService) GetSourcesByPlanID(ctx context.Context, planID uint) ([]database.Source, error) {
+	if m.GetSourcesByPlanIDFunc != nil {
+		return m.GetSourcesByPlanIDFunc(ctx, planID)
+	}
+	return nil, nil
+}
+
+func (m *MockDatabaseService) GetSourcesByPlanName(ctx context.Context, planName string) ([]database.Source, error) {
+	if m.GetSourcesByPlanNameFunc != nil {
+		return m.GetSourcesByPlanNameFunc(ctx, planName)
+	}
+	if planName == database.TrialPlanName {
+		return []database.Source{{ID: 1, Active: true, XUIHost: "http://localhost:2053", XUIInboundID: 1}}, nil
+	}
+	return nil, nil
+}
+
+func (m *MockDatabaseService) GetPlansBySourceID(ctx context.Context, sourceID uint) ([]database.Plan, error) {
+	if m.GetPlansBySourceIDFunc != nil {
+		return m.GetPlansBySourceIDFunc(ctx, sourceID)
+	}
+	return nil, nil
+}
+
+func (m *MockDatabaseService) AddSourceToPlan(ctx context.Context, planID, sourceID uint) error {
+	if m.AddSourceToPlanFunc != nil {
+		return m.AddSourceToPlanFunc(ctx, planID, sourceID)
+	}
+	return nil
+}
+
+func (m *MockDatabaseService) RemoveSourceFromPlan(ctx context.Context, planID, sourceID uint) error {
+	if m.RemoveSourceFromPlanFunc != nil {
+		return m.RemoveSourceFromPlanFunc(ctx, planID, sourceID)
+	}
+	return nil
 }
 
 func (m *MockDatabaseService) GetSubscriptionBySubscriptionID(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
@@ -340,7 +479,7 @@ func (m *MockDatabaseService) GetTrialSubscriptionBySubID(ctx context.Context, s
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	for _, sub := range m.Subscriptions {
-		if sub.SubscriptionID == subscriptionID && sub.IsTrial {
+		if sub.SubscriptionID == subscriptionID && sub.PlanID == 1 {
 			return sub, nil
 		}
 	}
@@ -357,7 +496,7 @@ func (m *MockDatabaseService) BindTrialSubscription(ctx context.Context, subscri
 		if sub.SubscriptionID == subscriptionID {
 			sub.TelegramID = telegramID
 			sub.Username = username
-			sub.IsTrial = false
+			sub.PlanID = 0
 			return sub, nil
 		}
 	}
@@ -378,13 +517,11 @@ func (m *MockDatabaseService) CreateTrialRequest(ctx context.Context, ip string)
 	return nil
 }
 
-func (m *MockDatabaseService) CleanupExpiredTrials(ctx context.Context, hours int, xuiClient interface {
-	DeleteClient(ctx context.Context, email string) error
-}) (int64, error) {
+func (m *MockDatabaseService) CleanupExpiredTrials(ctx context.Context, hours int) ([]database.Subscription, error) {
 	if m.CleanupExpiredTrialsFunc != nil {
-		return m.CleanupExpiredTrialsFunc(ctx, hours, xuiClient)
+		return m.CleanupExpiredTrialsFunc(ctx, hours)
 	}
-	return 0, nil
+	return nil, nil
 }
 
 func (m *MockDatabaseService) GetPoolStats() (*database.PoolStats, error) {
@@ -392,6 +529,34 @@ func (m *MockDatabaseService) GetPoolStats() (*database.PoolStats, error) {
 		return m.GetPoolStatsFunc()
 	}
 	return &database.PoolStats{}, nil
+}
+
+func (m *MockDatabaseService) GetSubscriptionWithPlanAndSources(ctx context.Context, subscriptionID string) (*database.SubscriptionFull, error) {
+	if m.GetSubscriptionWithPlanAndSourcesFunc != nil {
+		return m.GetSubscriptionWithPlanAndSourcesFunc(ctx, subscriptionID)
+	}
+	return nil, gorm.ErrRecordNotFound
+}
+
+func (m *MockDatabaseService) GetSubscriptionStatus(ctx context.Context, subscriptionID string) (string, time.Time, error) {
+	if m.GetSubscriptionStatusFunc != nil {
+		return m.GetSubscriptionStatusFunc(ctx, subscriptionID)
+	}
+	return "", time.Time{}, gorm.ErrRecordNotFound
+}
+
+func (m *MockDatabaseService) UpdateSubscriptionDevices(ctx context.Context, id uint, devicesJSON string) error {
+	if m.UpdateSubscriptionDevicesFunc != nil {
+		return m.UpdateSubscriptionDevicesFunc(ctx, id, devicesJSON)
+	}
+	return nil
+}
+
+func (m *MockDatabaseService) UpdateSubscriptionIPs(ctx context.Context, id uint, ipsJSON string) error {
+	if m.UpdateSubscriptionIPsFunc != nil {
+		return m.UpdateSubscriptionIPsFunc(ctx, id, ipsJSON)
+	}
+	return nil
 }
 
 func (m *MockDatabaseService) GetReferralCount(ctx context.Context, referrerTGID int64) (int64, error) {
@@ -410,15 +575,12 @@ func (m *MockDatabaseService) GetAllReferralCounts(ctx context.Context) (map[int
 
 func CreateTestSubscription(telegramID int64, username string, status string, expiry time.Time) *database.Subscription {
 	return &database.Subscription{
-		TelegramID:      telegramID,
-		Username:        username,
-		ClientID:        "test-client-id-" + username,
-		SubscriptionID:  username,
-		InboundID:       1,
-		TrafficLimit:    107374182400,
-		ExpiryTime:      expiry,
-		Status:          status,
-		SubscriptionURL: "http://localhost/sub/" + username,
+		TelegramID:     telegramID,
+		Username:       username,
+		ClientID:       "test-client-id-" + username,
+		SubscriptionID: username,
+		ExpiryTime:     expiry,
+		Status:         status,
 	}
 }
 
@@ -430,7 +592,7 @@ type MockXUIClient struct {
 	UpdateClientFunc        func(ctx context.Context, inboundID int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, tgID int64, comment string) error
 	DeleteClientFunc        func(ctx context.Context, email string) error
 	GetClientTrafficFunc    func(ctx context.Context, email string) (*xui.ClientTraffic, error)
-	GetSubscriptionLinkFunc func(baseURL, subID, subPath string) string
+	GetSubscriptionLinkFunc func(host, subID, subPath string) string
 	GetExternalURLFunc      func(host string) string
 
 	// Call tracking
@@ -510,11 +672,11 @@ func (m *MockXUIClient) GetClientTraffic(ctx context.Context, email string) (*xu
 	}, nil
 }
 
-func (m *MockXUIClient) GetSubscriptionLink(baseURL, subID, subPath string) string {
+func (m *MockXUIClient) GetSubscriptionLink(host, subID, subPath string) string {
 	if m.GetSubscriptionLinkFunc != nil {
-		return m.GetSubscriptionLinkFunc(baseURL, subID, subPath)
+		return m.GetSubscriptionLinkFunc(host, subID, subPath)
 	}
-	return baseURL + "/" + subPath + "/" + subID
+	return host + "/" + subPath + "/" + subID
 }
 
 func (m *MockXUIClient) GetExternalURL(host string) string {
@@ -522,6 +684,10 @@ func (m *MockXUIClient) GetExternalURL(host string) string {
 		return m.GetExternalURLFunc(host)
 	}
 	return host
+}
+
+func (m *MockXUIClient) Close() error {
+	return nil
 }
 
 func NewMockXUIClient() *MockXUIClient {

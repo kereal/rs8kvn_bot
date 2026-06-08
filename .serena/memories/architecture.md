@@ -1,406 +1,176 @@
-# Архитектурные решения — rs8kvn_bot
+# Архитектура — rs8kvn_bot
 
-**Создано:** 2026-04-02  
-**Обновлено:** 2026-04-12  
-**Версия:** v2.2.0  
-**Статус:** Актуально
+**Версия:** v2.5.0  
+**Обновлено:** 2026-06-06
 
----
+## Branch: feature/sub-http-server
 
-## Текущая архитектура
+Эта память описывает ветку `feature/sub-http-server`, которая включает:
+- Переименование `internal/subproxy/` → `internal/subserver/` (BREAKING)
+- Multi-source агрегация подписок (devices, IPs tracking, multi-protocol share links)
+- Новые таблицы: `sources`, `plans`, `plan_sources` (migrations 006-012)
+- Refactor Plan system (Trial → Plan, traffic limit из plans)
+- `SeedDefaultSource` / `ReconcileOrphanedClients` / `CleanupExpiredTrials`
+- xui retry классификация (DNS = non-retryable)
+- Referral cache инкремент при trial bind
+- Удаление `DEFAULT_SOURCE_SUB_URL`
+- `url.JoinPath` fixes
+- SQLite version gate в migrations
 
-### Общая схема
-
-```
-Telegram Bot (Go)
-     ↓
-  3x-ui Panel (HTTP API)
-     ↓
-VLESS/VMess Server
-     ↓
-   Клиент (Happ, V2RayNG)
-```
-
-### Компоненты
-
-1. **Telegram Bot** (`cmd/bot/main.go`)
-   - Обработка команд и callback'ов
-   - Генерация QR-кодов
-   - Реферальная система
-   - Админ-команды
-   - Выделенные типы: `ReferralCache`, `MessageSender`, `KeyboardBuilder`
-
-2. **3x-ui Client** (`internal/xui/client.go`)
-   - HTTP API клиент
-   - Circuit breaker (5 failures → 30s open)
-   - Singleflight для логина
-   - Retry with jitter
-
-3. **Web Server** (`internal/web/web.go`)
-   - Health endpoints (`/healthz`, `/readyz`)
-   - Invite/Trial landing (`/i/{code}`)
-   - Static files (`/static/logo.png`)
-   - IP rate limiting
-   - Cookie deduplication
-   - HTML templates (embedded via go:embed, html/template для XSS prevention)
-
-4. **Database** (`internal/database/`)
-   - SQLite + GORM
-   - Миграции (golang-migrate, embedded via go:embed)
-   - Ежедневные бэкапы с WAL checkpoint
-
-5. **Scheduler** (`internal/scheduler/`)
-   - `BackupScheduler` — ежедневные бэкапы в 03:00
-   - `TrialCleanupScheduler` — hourly очистка просроченных trial
-
-6. **Service Layer** (`internal/service/`)
-   - `SubscriptionService` — оркестрация создания trial/подписок
-   - `CreateTrial` — создание trial через XUI + DB с rollback
-
----
-
-## Ключевые ограничения
-
-### 🔴 Ограничение #1: 3x-ui = 1 сервер
-
-**Проблема:**
-- 1 установка 3x-ui = 1 физический сервер
-- 1 inbound = 1 протокол на 1 порту
-- Клиент привязан к ОДНОМУ inbound
-
-**Влияние:**
-- Нельзя дать пользователю подписку с несколькими серверами
-- Нет встроенной балансировки нагрузки
-- Нет автоматического failover
-
-**Требование бизнеса:**
-```
-Подписка пользователя должна включать:
-├─ Сервер 1: Москва (VLESS+Reality) — низкий ping для РФ
-├─ Сервер 2: Германия (VLESS+Reality) — доступ к EU контенту
-└─ Сервер 3: Нидерланды (VMess+WS) — резерв
-```
-
----
-
-### 🟡 Ограничение #2: Нет веб-интерфейса
-
-**Проблема:**
-- Весь UI через Telegram inline-кнопки
-- Ограниченные возможности для оплаты
-- Нет визуализации данных (графики, статистика)
-
-**Влияние:**
-- Сложнее продавать (нужен Telegram)
-- Нет классического e-commerce опыта
-
----
-
-### 🟡 Ограничение #3: SQLite
-
-**Проблема:**
-- Один файл БД — не масштабируется горизонтонтально
-- `database is locked` при высокой нагрузке
-
-**Влияние:**
-- Окей до ~500-1000 пользователей
-- Потом нужна миграция на PostgreSQL
-
----
-
-## Принятые решения
-
-### Решение #1: Остаться на 3x-ui (пока)
-
-**Статус:** ✅ ПРИНЯТО  
-**Дата:** 2026-04-02
-
-**Обоснование:**
-- Интеграция готова (~2000 строк кода)
-- Покрытие тестами 91.1% для xui пакета
-- Стабильное решение, нет критичных багов
-- Огромное комьюнити и документация
-
-**Альтернатива:** Миграция на Remnawave
-- Стоимость: 2-4 дня полной переработки
-- Риск: Меньшее комьюнити, меньше проверен
-- Выгода: Возможна нативная поддержка кластера (?)
-
-**Пересмотреть когда:**
-- Управление множеством серверов станет болезненным
-- База клиентов > 200 пользователей
-- Remnawave докажет стабильность (6+ месяцев)
-
----
-
-### Решение #2: Кастомный генератор подписок
-
-**Статус:** ✅ ПРИНЯТО  
-**Дата:** 2026-04-02
-
-**Обоснование:**
-- VLESS поддерживает массив серверов нативно
-- Клиенты (Happ, V2RayNG) умеют переключаться автоматически
-- Не нужно переписывать бота
-- Время: 1-2 дня против 2-4 дней миграции
-
-**Реализация:**
-```
-Новый сервис: internal/subscription/generator.go
-
-Функции:
-- GetServerConfigs(userID) — получить конфиги всех серверов
-- GenerateVLESSConfig(servers[]) — создать многосерверный конфиг
-- ServeHTTP(/sub/{userID}) — отдать конфиг пользователю
-
-Формат конфига:
-{
-  "servers": [
-    {"address": "server1.com", "port": 443, ...},
-    {"address": "server2.com", "port": 443, ...},
-    {"address": "server3.com", "port": 443, ...}
-  ]
-}
-```
-
----
-
-### Решение #3: SQLite для старта
-
-**Статус:** ✅ ПРИНЯТО  
-**Дата:** Начало проекта
-
-**Обоснование:**
-- Простой деплой (один файл)
-- Не нужен отдельный сервер БД
-- Окей для 10-1000 пользователей
-
-**Пересмотреть когда:**
-- База клиентов > 500
-- Частые `database is locked` ошибки
-- Нужна репликация/бэкапы в реальном времени
-
-**Миграция на PostgreSQL:**
-- Заменить драйвер в `database/database.go`
-- Обновить миграции (совместимые с PG)
-- Добавить пул соединений
-- Время: 2-4 часа
-
----
-
-## Обсуждение: Remnawave vs 3x-ui
-
-### Сравнение
-
-| Критерий | 3x-ui | Remnawave |
-|----------|-------|-----------|
-| **Комьюнити** | Огромное (годы развития) | Малое (новый проект) |
-| **Документация** | Полная, гайды | Может быть неполной |
-| **Стабильность** | Проверен временем | Меньше проверен |
-| **UI/UX** | Устаревший | Современный |
-| **API** | Документирован | Нужно изучать |
-| **Кластер** | Нет | Возможно есть (?) |
-| **Риск заброса** | Низкий | Средний |
-
-### Критерии миграции на Remnawave
-
-**Мигрировать ЕСЛИ:**
-1. Remnawive поддерживает кластер из коробки
-2. API проще и документированнее
-3. Стабильность доказана (6+ месяцев продакшена)
-4. База клиентов > 200 и 3x-ui не справляется
-
-**НЕ мигрировать ЕСЛИ:**
-1. Текущее решение работает
-2. Нет критичных проблем
-3. Нет времени на переработку (2-4 дня)
-4. < 100 клиентов
-
----
-
-## Архитектурные паттерны
-
-### Паттерн #1: Circuit Breaker
-
-**Используется для:** 3x-ui API вызовы  
-**Реализация:** `internal/xui/breaker.go`
+## Общая схема
 
 ```
-State: Closed → Open → Half-Open → Closed
-       (норма)  (5 ошибок)  (30s)   (успех)
+Telegram Bot (Go, single binary)
+  ├── cmd/bot/main.go         — entry point, graceful shutdown
+  ├── internal/bot/           — handlers, referral cache, singleflight
+  ├── internal/service/       — SubscriptionService (orchestration)
+  ├── internal/database/      — SQLite + GORM + migrations 000-012
+  ├── internal/xui/           — multi-source 3x-ui client + circuit breaker
+  ├── internal/subserver/      — LRU cache, merge, /sub/{id} endpoint, proxy, servers
+  ├── internal/web/           — /healthz, /readyz, /i/{code}, /sub/{subID}
+  ├── internal/scheduler/     — backup (daily 03:00) + trial cleanup (hourly)
+  ├── internal/backup/        — SQLite backup with WAL checkpoint
+  ├── internal/heartbeat/     — monitoring pings
+  ├── internal/metrics/       — Prometheus (через zap-обёртку)
+  ├── internal/ratelimiter/   — per-user token bucket
+  ├── internal/logger/        — zap setup
+  └── internal/config/        — env loading + validation
+        ↓
+   3x-ui Panels (1..N, map[uint]XUIClient)
+        ↓
+   VLESS+Reality Servers
+        ↓
+   Client (Happ, V2RayNG, etc.)
 ```
 
-**Зачем:**
-- Не DDOS'ить упавший сервер
-- Быстрый fail вместо таймаута
-- Автоматическое восстановление
 
----
+## Схема БД (v2.5.0, после migration 012)
 
-### Паттерн #2: Singleflight
-
-**Используется для:** Логин в 3x-ui  
-**Реализация:** `internal/xui/client.go`
-
+### `subscriptions`
 ```
-Запрос 1 ─┐
-Запрос 2 ─┼─> Single Login ─> Результат всем
-Запрос 3 ─┘
+telegram_id          int64    INDEX
+username             string   INDEX
+client_id            string
+subscription_id      string   INDEX (unique)
+expiry_time          time     INDEX
+status               string   default: "active"  INDEX  (active|revoked|expired)
+invite_code          string   INDEX
+plan_id              uint     INDEX   (FK → plans)
+referred_by          int64    INDEX
+devices              json     devices list with hwid rotation
+ips                  json     ip:timestamp history (max 100)
+created_at           time
+updated_at           time
 ```
+**Удалено** в migration 011: `is_trial`, `traffic_limit`, `inbound_id`, `subscription_url`, `deleted_at`.
+**Soft delete заменён** на `status='revoked'`.
+**Добавлено** в migration 012: `devices`, `ips` (JSON поля для трекинга устройств и IP).
 
-**Зачем:**
-- Дедупликация одновременных запросов
-- Снижение нагрузки на 3x-ui
-- Предотвращение race conditions
-
----
-
-### Паттерн #3: Per-User Rate Limiting
-
-**Используется для:** Сообщения бота  
-**Реализация:** `internal/ratelimiter/per_user.go`
-
+### `sources` (multi-source 3x-ui панели)
 ```
-Пользователь 1: [██████████] 30 токенов, +5/сек
-Пользователь 2: [██████████] 30 токенов, +5/сек
-Пользователь 3: [██████████] 30 токенов, +5/сек
+id, x_ui_host, x_ui_api_token, x_ui_inbound_id, sub_url, active
 ```
 
-**Зачем:**
-- Один пользователь не может заблокировать бота
-- Справедливое распределение ресурсов
-- Защита от спама
-
----
-
-### Паттерн #4: Graceful Shutdown
-
-**Используется для:** Остановка бота  
-**Реализация:** `cmd/bot/main.go`
-
+### `plans` (тарифные планы)
 ```
-SIGTERM → Отмена контекста
-         → Остановка HTTP сервера (30s timeout)
-         → Остановка cron-задач
-         → Ожидание goroutines (sync.WaitGroup)
-         → Flush логов
-         → Exit(0)
+id, name UNIQUE, price, devices_limit, traffic_limit, duration
 ```
 
-**Зачем:**
-- Не терять данные при деплое
-- Корректное завершение соединений
-- Нет "connection reset" ошибок у клиентов
+### `plan_sources` (M:N: план → источники)
+```
+plan_id, source_id  (composite PK)
+```
 
----
+### `invites`, `broadcast_*`, `metrics_counters` — без изменений.
 
-## Масштабирование
+Миграции лежат в `internal/database/migrations/000-012_*.up.sql` (embedded через go:embed).
 
-### Горизонтальное (нужно реализовать)
+## Ключевые компоненты
 
-**Проблема:** Один сервер = одна точка отказа
+### Service Layer (`internal/service/subscription.go`)
+- **`Create(ctx, chatID, username, inviteCode string)`** — создание free/paid подписки. Параметр `inviteCode` пробрасывается в `db.CreateSubscription` для резолва referrer.
+- **`CreateTrial(ctx, chatID, username, inviteCode string)`** — итерация по `trialSources`, **errors.Join** агрегация, partial success → Warn, all-fail → Error + return.
+- **`BindTrial(ctx, subID, telegramID, username, inviteCode string)`** — обновляет ВСЕ trial-источники (`xui.UpdateClient`), в `db.BindTrialSubscription` — defensive revoke всех active subs для telegram_id (защита double-active race).
+- **`ReconcileOrphanedClients(ctx)`** — проверяет ВСЕ источники, удаляет только если клиент не найден НИГДЕ.
 
-**Решение:**
-1. Кастомный генератор подписок (1-2 дня)
-2. Несколько серверов 3x-ui
-3. VLESS конфиг с массивом серверов
-4. Автоматический failover на клиенте
+### Database (`internal/database/database.go`)
+- **`CreateSubscription(ctx, sub, inviteCode string)`** — атомарная транзакция: revoke всех active subs для telegram_id + resolve invite → заполнение `sub.InviteCode` и `sub.ReferredBy` + insert. Если inviteCode не найден — не фатально.
+- **`BindTrialSubscription(ctx, sub, telegramID, username)`** — UPDATE trial-row WHERE telegram_id=0 AND plan_id=trial → revoke других active subs для этого telegram_id в той же транзакции. Возвращает `ErrAlreadyActivated` если RowsAffected=0.
+- **`CleanupExpiredTrials(ctx)`** — DELETE WHERE expiry_time < now() RETURNING subscription_id (SQLite ≥ 3.35).
+- **Sentinel errors**: `xui.ErrClientNotFound` (для `errors.Is` в Reconcile).
 
----
+### X-UI Client (`internal/xui/client.go`)
+- **Multi-source**: `xuiClients map[uint]interfaces.XUIClient` (key = source ID).
+- **Circuit breaker**: `internal/xui/breaker.go` — 5 failures → 30s open → half-open. Метрика `metrics.CircuitBreakerState`.
+- **Retry**: `RetryWithBackoff` (3 retries, exponential + jitter). DNS errors fast-fail.
+- **Auth**: Bearer token, без сессий, без singleflight (singleflight перенесён в `internal/web/singleflight.go`).
+- См. `xui/auth-mechanism` + `xui/client-crud`.
 
-### Вертикальное (уже работает)
+### Bot (`internal/bot/`)
+- **Referral cache** (`referral_cache.go`): in-memory map[tgID]int, `Increment`/`Decrement`/`Sync` (1h interval из БД).
+- **Rate limiter** (`internal/ratelimiter/`): per-user token bucket.
+- **Singleflight** (`internal/web/singleflight.go`): дедупликация одновременных DB queries.
 
-**Текущая емкость:**
-- ~10 активных пользователей
-- SQLite легко держит 100-500
-- Один сервер 3x-ui держит 1000+ клиентов
+## Race-safe patterns
 
-**Узкие места:**
-- 3x-ui сервер (CPU, RAM, сеть)
-- SQLite при > 500 concurrent writes
-- Telegram API rate limits (30 msg/sec)
+### Trial bind (защита double-active)
+1. Web-биндинг: `UPDATE trial-row WHERE telegram_id=0 AND plan_id=trial` (атомарно через `RowsAffected`).
+2. **Defensive revoke**: после успешного UPDATE — revoke всех `active` subs для этого telegram_id (кроме только что забинденной).
+3. Если параллельный `service.Create` для того же telegram_id выиграет гонку: он ревоукит trial-бинденную sub ДО bind. BindTrial получит `ErrAlreadyActivated` (RowsAffected=0, т.к. telegram_id уже не 0).
 
----
+### Create vs BindTrial TOCTOU
+- Узкое окно: `BindTrialSubscription find → CleanupExpiredTrials delete`. Cleanup может удалить trial-row, который Bind собирается обновить. Bind получит `ErrAlreadyActivated`. Юзер может запросить trial снова. **Не критично** (узкое окно).
+
+## Технические ограничения
+
+### 🟡 SQLite scale
+- Окей до 500-1000 пользователей. `database is locked` при >500 concurrent writes.
+- Миграция на PostgreSQL: 2-4 часа (заменить драйвер, проверить миграции).
+
+### 🟡 Multi-server config
+- Сейчас одна подписка = один источник. Multi-server VLESS-конфиг (массив серверов) — отложено (см. `roadmap`).
+
+### 🟡 Web UI
+- Весь UI через Telegram inline-кнопки. Нет классического e-commerce, нет графиков.
+
+## Паттерны
+
+### Circuit Breaker (`internal/xui/breaker.go`)
+- State: Closed → Open (5 fails) → Half-Open (30s) → Closed
+- Защита от DDOS упавшего x-ui, быстрый fail вместо таймаута.
+
+### Graceful Shutdown (`cmd/bot/main.go`)
+- SIGTERM → cancel context → stop HTTP server (30s) → stop cron → WaitGroup goroutines → flush logs → exit 0.
+
+### Race-safe Bind (см. выше)
+
+## Решения
+
+### ✅ Multi-source 3x-ui (v2.4.0, реализовано)
+- `config.Source` (URL, token, inbound_id, Active, Trial) → `map[uint]XUIClient` + `[]database.Source`.
+- Trial — на всех trial-источниках. BindTrial — первый успешный. Reconcile — все.
+
+### ⏸ Кастомный генератор подписок (отложено)
+- VLESS поддерживает массив серверов нативно. Клиенты (Happ, V2RayNG) переключаются автоматически. Не нужно переписывать бота.
+
+### ✅ SQLite для старта
+- Простой деплой, ок для 10-1000 юзеров. Пересмотреть при >500.
 
 ## Безопасность
 
 ### Реализовано
+- Circuit breaker, rate limiting, input validation, no hardcoded secrets (.env only), graceful shutdown, HTTP timeouts, X-Forwarded-For validation, html/template (XSS prevention).
 
-1. **Circuit Breaker** — защита от каскадных ошибок
-2. **Rate Limiting** — защита от спама
-3. **Input Validation** — защита от инъекций
-4. **No Hardcoded Secrets** — всё через .env
-5. **Graceful Shutdown** — нет потерянных данных
-6. **HTTP Timeouts** — защита от slowloris
-7. **IP Spoofing Protection** — X-Forwarded-For валидация
-
-### Нужно добавить
-
-1. **Encryption at rest** — шифрование БД (сейчас plaintext)
-2. **Audit logs** — логирование админ-действий
-3. **2FA for admin** — двухфакторная аутентификация
-4. **Backup encryption** — шифрование бэкапов
-
----
+### Нужно добавить (см. `roadmap`)
+- Encryption at rest, audit logs, 2FA для админа, backup encryption.
 
 ## Мониторинг
 
 ### Текущий
-
-- Health endpoints: `/healthz`, `/readyz`
-- Sentry для ошибок
-- Zap для логов
-- Еженедельные отчёты админу (план)
+- `/healthz` (liveness), `/readyz` (DB ready), Sentry, zap, heartbeat scheduler.
 
 ### Нужно добавить
+- Prometheus, Grafana, алерты, real-time активность.
 
-- Prometheus metrics
-- Grafana dashboards
-- Алерты при аномалиях
-- Real-time активность пользователей
-
----
-
-## Интеграции
-
-### Текущие
-
-- Telegram Bot API
-- 3x-ui HTTP API
-- Sentry (ошибки)
-
-### Важные архитектурные решения (v2.2.0)
-
-1. **Все удаления — soft delete** — `DeleteSubscriptionByID` и `DeleteSubscriptionByTelegramID` используют GORM soft delete (`deleted_at`). Записи остаются доступны через `Unscoped()`.
-2. **Проверка статуса подписки** — `/sub/{subID}` проверяет `IsActive()` после DB lookup. Отозванные/просроченные подписки возвращают 404. При cache hit — верификация статуса с инвалидацией через `InvalidateCache(key)`.
-3. **RLock в SubscriptionCache** — `Get()` использует RLock для конкурентного чтения, Lock только для мутаций (eviction, LRU promotion).
-4. **ExpiryTime сохраняется в БД** — `service.Create()` теперь сохраняет `ExpiryTime: expiryTime` в БД, а не `time.Time{}`.
-
-### Планируемые
-
-- ЮKassa / Т-Банк Pay (платежи)
-- Telegram Login Widget (веб-авторизация)
-- WebSocket (real-time дашборд)
-
----
-
-## Следующие шаги
-
-1. **Реализовать генератор подписок** (1-2 дня)
-   - Добавить поддержку нескольких серверов
-   - VLESS multi-server конфиги
-   - Автоматический failover
-
-2. **Изучить Remnawave** (1-2 часа)
-   - Проверить поддержку кластера
-   - Оценить API
-   - Посмотреть активность разработки
-
-3. **Принять решение** (через 1-2 месяца)
-   - Если Remnawave подходит — мигрировать
-   - Если нет — остаться и улучшать текущее
-
----
-
-**Последнее обновление:** 2026-04-12  
-**Автор:** AI Assistant
+## Remnawave (out of scope, отложено)
+- 3x-ui выбран как проверенный (годы развития, огромное комьюнити). Remnawave — молодой, рискованно. **Критерий пересмотра**: >200 клиентов И Remnawave доказал стабильность 6+ мес.

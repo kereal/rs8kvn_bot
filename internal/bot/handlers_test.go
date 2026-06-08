@@ -31,14 +31,11 @@ func TestNewHandler(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID:  123456789,
-		TrafficLimitGB:   100,
-		XUIHost:          "http://localhost:2053",
-		XUIInboundID:     1,
-		XUISubPath:       "sub",
 		TelegramBotToken: "test_token",
+		Sources:          []config.Source{{Name: "main", XUIHost: "http://localhost:2053", XUIAPIToken: "test-api-token", XUIInboundID: 1}},
 	}
 
-	xuiClient, err := xui.NewClient(cfg.XUIHost, "test-api-token")
+	xuiClient, err := xui.NewClient(cfg.Sources[0].XUIHost, cfg.Sources[0].XUIAPIToken)
 	require.NoError(t, err, "Failed to create XUI client")
 	mockDB := testutil.NewMockDatabaseService()
 	handler := NewHandler(testutil.NewMockBotAPI(), cfg, mockDB, xuiClient, NewTestBotConfig(), nil, "")
@@ -76,13 +73,10 @@ func TestHandler_ConfigField(t *testing.T) {
 	cfg := &config.Config{
 		TelegramBotToken: "123456:test_token",
 		TelegramAdminID:  999888777,
-		TrafficLimitGB:   50,
-		XUIHost:          "http://test.local:8080",
-		XUIInboundID:     5,
-		XUISubPath:       "mysub",
+		Sources:          []config.Source{{Name: "main", XUIHost: "http://test.local:8080", XUIAPIToken: "test-api-token", XUIInboundID: 5}},
 	}
 
-	xuiClient, err := xui.NewClient(cfg.XUIHost, "test-api-token")
+	xuiClient, err := xui.NewClient(cfg.Sources[0].XUIHost, cfg.Sources[0].XUIAPIToken)
 	require.NoError(t, err, "Failed to create XUI client")
 
 	handler := &Handler{
@@ -92,7 +86,7 @@ func TestHandler_ConfigField(t *testing.T) {
 
 	assert.Equal(t, cfg, handler.cfg, "Handler.cfg not set correctly")
 	assert.Equal(t, int64(999888777), handler.cfg.TelegramAdminID)
-	assert.Equal(t, 50, handler.cfg.TrafficLimitGB)
+	assert.Equal(t, int64(999888777), handler.cfg.TelegramAdminID)
 }
 
 func TestHandleBroadcast_MessageTooLong(t *testing.T) {
@@ -100,7 +94,6 @@ func TestHandleBroadcast_MessageTooLong(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  50,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -125,7 +118,6 @@ func TestHandleSend_RateLimit(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		TrafficLimitGB:  50,
 	}
 	mockDB := testutil.NewMockDatabaseService()
 	mockXUI := testutil.NewMockXUIClient()
@@ -206,7 +198,6 @@ func TestSendInviteLink_Success(t *testing.T) {
 	cfg := &config.Config{
 		SiteURL:         "https://vpn.site",
 		TelegramAdminID: 12345,
-		TrafficLimitGB:  100,
 	}
 	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewMockXUIClient(), NewTestBotConfig(), nil, "")
 
@@ -230,7 +221,6 @@ func TestSendInviteLink_DatabaseError(t *testing.T) {
 	cfg := &config.Config{
 		SiteURL:         "https://vpn.site",
 		TelegramAdminID: 12345,
-		TrafficLimitGB:  100,
 	}
 	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewMockXUIClient(), NewTestBotConfig(), nil, "")
 
@@ -404,6 +394,7 @@ func TestHandleCreateError_AllErrorTypes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			mockBot := testutil.NewMockBotAPI()
 			handler := &Handler{
 				bot:    mockBot,
@@ -423,13 +414,11 @@ func TestHandleUpdate_CommandRouting(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID:  123456789,
-		TrafficLimitGB:   100,
-		XUIHost:          "http://localhost:2053",
-		XUIInboundID:     1,
 		TelegramBotToken: "test_token",
+		Sources:          []config.Source{{Name: "main", XUIHost: "http://localhost:2053", XUIAPIToken: "test-api-token", XUIInboundID: 1}},
 	}
 
-	xuiClient, err := xui.NewClient(cfg.XUIHost, "test-api-token")
+	xuiClient, err := xui.NewClient(cfg.Sources[0].XUIHost, cfg.Sources[0].XUIAPIToken)
 	require.NoError(t, err)
 
 	tests := []struct {
@@ -495,7 +484,10 @@ func TestHandleUpdate_CommandRouting(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
 			mockBot := testutil.NewMockBotAPI()
 			mockDB := testutil.NewMockDatabaseService()
 			handler := NewHandler(mockBot, cfg, mockDB, xuiClient, NewTestBotConfig(), nil, "")
@@ -512,13 +504,11 @@ func TestHandleUpdate_NonCommandMessage(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID:  123456789,
-		TrafficLimitGB:   100,
-		XUIHost:          "http://localhost:2053",
-		XUIInboundID:     1,
 		TelegramBotToken: "test_token",
+		Sources:          []config.Source{{Name: "main", XUIHost: "http://localhost:2053", XUIAPIToken: "test-api-token", XUIInboundID: 1}},
 	}
 
-	xuiClient, err := xui.NewClient(cfg.XUIHost, "test-api-token")
+	xuiClient, err := xui.NewClient(cfg.Sources[0].XUIHost, cfg.Sources[0].XUIAPIToken)
 	require.NoError(t, err)
 
 	mockBot := testutil.NewMockBotAPI()
@@ -544,13 +534,11 @@ func TestHandleUpdate_CallbackQuery(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID:  123456789,
-		TrafficLimitGB:   100,
-		XUIHost:          "http://localhost:2053",
-		XUIInboundID:     1,
 		TelegramBotToken: "test_token",
+		Sources:          []config.Source{{Name: "main", XUIHost: "http://localhost:2053", XUIAPIToken: "test-api-token", XUIInboundID: 1}},
 	}
 
-	xuiClient, err := xui.NewClient(cfg.XUIHost, "test-api-token")
+	xuiClient, err := xui.NewClient(cfg.Sources[0].XUIHost, cfg.Sources[0].XUIAPIToken)
 	require.NoError(t, err)
 
 	mockBot := testutil.NewMockBotAPI()
@@ -561,7 +549,6 @@ func TestHandleUpdate_CallbackQuery(t *testing.T) {
 			TelegramID:     111,
 			Username:       "testuser",
 			SubscriptionID: "test-sub-id",
-			TrafficLimit:   100,
 			ExpiryTime:     time.Now().Add(24 * time.Hour),
 			Status:         "active",
 		}, nil
