@@ -40,8 +40,8 @@ func TestSubscriptionService_Create_Success(t *testing.T) {
 			return &xui.ClientConfig{ID: "client-123", SubID: "sub-456"}, nil
 		},
 	}
-	sources := []database.Source{
-		{ID: 1, Active: true,  XUIHost: "http://localhost:2053", XUIInboundID: 1},
+	sources := []database.Node{
+		{ID: 1, IsActive: true,  Host: "http://localhost:2053", InboundID: 1},
 	}
 	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
 
@@ -66,8 +66,8 @@ func TestSubscriptionService_Create_XUIError(t *testing.T) {
 			return nil, errors.New("connection refused")
 		},
 	}
-	sources := []database.Source{
-		{ID: 1, Active: true,  XUIHost: "http://localhost:2053", XUIInboundID: 1},
+	sources := []database.Node{
+		{ID: 1, IsActive: true,  Host: "http://localhost:2053", InboundID: 1},
 	}
 	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
 
@@ -101,8 +101,8 @@ func TestSubscriptionService_Create_DBError_RollbackSuccess(t *testing.T) {
 			return nil
 		},
 	}
-	sources := []database.Source{
-		{ID: 1, Active: true,  XUIHost: "http://localhost:2053", XUIInboundID: 1},
+	sources := []database.Node{
+		{ID: 1, IsActive: true,  Host: "http://localhost:2053", InboundID: 1},
 	}
 	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
 
@@ -134,8 +134,8 @@ func TestSubscriptionService_Create_DBError_RollbackFailed(t *testing.T) {
 			return errors.New("rollback failed")
 		},
 	}
-	sources := []database.Source{
-		{ID: 1, Active: true,  XUIHost: "http://localhost:2053", XUIInboundID: 1},
+	sources := []database.Node{
+		{ID: 1, IsActive: true,  Host: "http://localhost:2053", InboundID: 1},
 	}
 	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
 
@@ -166,7 +166,7 @@ func TestSubscriptionService_Create_PropagatesInviteCodeToDB(t *testing.T) {
 			return &xui.ClientConfig{ID: "client-123", SubID: "sub-456"}, nil
 		},
 	}
-	sources := []database.Source{{ID: 1, Active: true, XUIHost: "http://localhost:2053", XUIInboundID: 1}}
+	sources := []database.Node{{ID: 1, IsActive: true, Host: "http://localhost:2053", InboundID: 1}}
 	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
 
 	svc := NewSubscriptionService(db, xuiClients, sources, cfg, "", &webhook.NoopSender{})
@@ -199,7 +199,7 @@ func TestSubscriptionService_Create_EmptyInviteCodeIsNoop(t *testing.T) {
 			return &xui.ClientConfig{ID: "client-123", SubID: "sub-456"}, nil
 		},
 	}
-	sources := []database.Source{{ID: 1, Active: true, XUIHost: "http://localhost:2053", XUIInboundID: 1}}
+	sources := []database.Node{{ID: 1, IsActive: true, Host: "http://localhost:2053", InboundID: 1}}
 	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
 
 	svc := NewSubscriptionService(db, xuiClients, sources, cfg, "", &webhook.NoopSender{})
@@ -279,8 +279,8 @@ func TestSubscriptionService_Delete_Success(t *testing.T) {
 			return nil
 		},
 	}
-	sources := []database.Source{
-		{ID: 1, Active: true,  XUIHost: "http://localhost:2053", XUIInboundID: 1},
+	sources := []database.Node{
+		{ID: 1, IsActive: true,  Host: "http://localhost:2053", InboundID: 1},
 	}
 	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
 
@@ -334,8 +334,8 @@ func TestSubscriptionService_Delete_XUIError(t *testing.T) {
 			return errors.New("xui connection refused")
 		},
 	}
-	sources := []database.Source{
-		{ID: 1, Active: true,  XUIHost: "http://localhost:2053", XUIInboundID: 1},
+	sources := []database.Node{
+		{ID: 1, IsActive: true,  Host: "http://localhost:2053", InboundID: 1},
 	}
 	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
 
@@ -402,8 +402,8 @@ func TestSubscriptionService_Delete_UsesCorrectEmail(t *testing.T) {
 			return nil
 		},
 	}
-	sources := []database.Source{
-		{ID: 1, Active: true,  XUIHost: "http://localhost:2053", XUIInboundID: 1},
+	sources := []database.Node{
+		{ID: 1, IsActive: true,  Host: "http://localhost:2053", InboundID: 1},
 	}
 	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
 
@@ -441,8 +441,8 @@ func TestSubscriptionService_Delete_FallsBackToTgIdEmail(t *testing.T) {
 			return nil
 		},
 	}
-	sources := []database.Source{
-		{ID: 1, Active: true,  XUIHost: "http://localhost:2053", XUIInboundID: 1},
+	sources := []database.Node{
+		{ID: 1, IsActive: true,  Host: "http://localhost:2053", InboundID: 1},
 	}
 	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
 
@@ -503,8 +503,8 @@ func TestSubscriptionService_GetWithTraffic_Success(t *testing.T) {
 			return &xui.ClientTraffic{Up: 1024 * 1024 * 1024, Down: 2 * 1024 * 1024 * 1024}, nil
 		},
 	}
-	sources := []database.Source{
-		{ID: 1, Active: true,  XUIHost: "http://localhost:2053", XUIInboundID: 1},
+	sources := []database.Node{
+		{ID: 1, IsActive: true,  Host: "http://localhost:2053", InboundID: 1},
 	}
 	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
 
@@ -540,8 +540,8 @@ func TestSubscriptionService_GetWithTraffic_XUIErrorFallback(t *testing.T) {
 			return nil, errors.New("connection refused")
 		},
 	}
-	sources := []database.Source{
-		{ID: 1, Active: true,  XUIHost: "http://localhost:2053", XUIInboundID: 1},
+	sources := []database.Node{
+		{ID: 1, IsActive: true,  Host: "http://localhost:2053", InboundID: 1},
 	}
 	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
 
@@ -567,8 +567,8 @@ func TestSubscriptionService_CreateTrial_Success(t *testing.T) {
 			return &xui.ClientConfig{ID: clientID, SubID: subID}, nil
 		},
 	}
-	sources := []database.Source{
-		{ID: 1, Active: true,  XUIHost: "http://localhost:2053", XUIInboundID: 1},
+	sources := []database.Node{
+		{ID: 1, IsActive: true,  Host: "http://localhost:2053", InboundID: 1},
 	}
 	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
 
@@ -592,8 +592,8 @@ func TestSubscriptionService_CreateTrial_XUIError(t *testing.T) {
 		GetPlanByNameFunc: func(ctx context.Context, name string) (*database.Plan, error) {
 			return &database.Plan{ID: 1, Name: "trial", DevicesLimit: 1, TrafficLimit: 1073741824, Duration: 3}, nil
 		},
-		GetSourcesByPlanNameFunc: func(ctx context.Context, planName string) ([]database.Source, error) {
-			return []database.Source{{ID: 1, Active: true,  XUIHost: "http://localhost:2053", XUIInboundID: 1}}, nil
+		GetNodesByPlanNameFunc: func(ctx context.Context, planName string) ([]database.Node, error) {
+			return []database.Node{{ID: 1, IsActive: true,  Host: "http://localhost:2053", InboundID: 1}}, nil
 		},
 		CreateTrialSubscriptionFunc: func(ctx context.Context, inviteCode, subscriptionID, clientID string, expiryTime time.Time) (*database.Subscription, error) {
 			return &database.Subscription{InviteCode: inviteCode, SubscriptionID: subscriptionID, ClientID: clientID}, nil
@@ -604,8 +604,8 @@ func TestSubscriptionService_CreateTrial_XUIError(t *testing.T) {
 			return nil, errors.New("xui error")
 		},
 	}
-	sources := []database.Source{
-		{ID: 1, Active: true,  XUIHost: "http://localhost:2053", XUIInboundID: 1},
+	sources := []database.Node{
+		{ID: 1, IsActive: true,  Host: "http://localhost:2053", InboundID: 1},
 	}
 	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
 
@@ -640,8 +640,8 @@ func TestSubscriptionService_CreateTrial_DBError(t *testing.T) {
 			return nil
 		},
 	}
-	sources := []database.Source{
-		{ID: 1, Active: true,  XUIHost: "http://localhost:2053", XUIInboundID: 1},
+	sources := []database.Node{
+		{ID: 1, IsActive: true,  Host: "http://localhost:2053", InboundID: 1},
 	}
 	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
 
@@ -683,7 +683,7 @@ func TestSubscriptionService_ReconcileOrphanedClients_RemovesMissing(t *testing.
 		},
 	}
 	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
-	sources := []database.Source{{ID: 1, Active: true, XUIHost: "http://localhost:2053", XUIInboundID: 1}}
+	sources := []database.Node{{ID: 1, IsActive: true, Host: "http://localhost:2053", InboundID: 1}}
 	svc := NewSubscriptionService(db, xuiClients, sources, cfg, "", &webhook.NoopSender{})
 
 	invoked := []int64{}
@@ -738,11 +738,11 @@ func TestSubscriptionService_BindTrial_UpdatesAllSources(t *testing.T) {
 		GetPlanByNameFunc: func(ctx context.Context, name string) (*database.Plan, error) {
 			return &database.Plan{ID: 2, Name: database.FreePlanName, TrafficLimit: 1024 * 1024 * 1024, Duration: 168}, nil
 		},
-		GetSourcesByPlanNameFunc: func(ctx context.Context, planName string) ([]database.Source, error) {
+		GetNodesByPlanNameFunc: func(ctx context.Context, planName string) ([]database.Node, error) {
 			if planName == database.TrialPlanName {
-				return []database.Source{
-					{ID: 1, Active: true, XUIHost: "http://x1", XUIInboundID: 1},
-					{ID: 2, Active: true, XUIHost: "http://x2", XUIInboundID: 1},
+				return []database.Node{
+					{ID: 1, IsActive: true, Host: "http://x1", InboundID: 1},
+					{ID: 2, IsActive: true, Host: "http://x2", InboundID: 1},
 				}, nil
 			}
 			return nil, nil
@@ -761,9 +761,9 @@ func TestSubscriptionService_BindTrial_UpdatesAllSources(t *testing.T) {
 	}
 
 	xuiClients := map[uint]interfaces.XUIClient{1: xui1, 2: xui2}
-	sources := []database.Source{
-		{ID: 1, Active: true, XUIHost: "http://x1", XUIInboundID: 1},
-		{ID: 2, Active: true, XUIHost: "http://x2", XUIInboundID: 1},
+	sources := []database.Node{
+		{ID: 1, IsActive: true, Host: "http://x1", InboundID: 1},
+		{ID: 2, IsActive: true, Host: "http://x2", InboundID: 1},
 	}
 
 	svc := NewSubscriptionService(db, xuiClients, sources, cfg, "", &webhook.NoopSender{})
@@ -802,21 +802,21 @@ func TestSubscriptionService_CreateTrial_PartialFailuresSucceed(t *testing.T) {
 		CreateTrialSubscriptionFunc: func(ctx context.Context, inviteCode, subscriptionID, clientID string, expiryTime time.Time) (*database.Subscription, error) {
 			return &database.Subscription{InviteCode: inviteCode, SubscriptionID: subscriptionID, ClientID: clientID, PlanID: 1}, nil
 		},
-		GetSourcesByPlanNameFunc: func(ctx context.Context, planName string) ([]database.Source, error) {
+		GetNodesByPlanNameFunc: func(ctx context.Context, planName string) ([]database.Node, error) {
 			if planName == database.TrialPlanName {
-				return []database.Source{
-					{ID: 1, Active: true, XUIHost: "http://x1", XUIInboundID: 1},
-					{ID: 2, Active: true, XUIHost: "http://x2", XUIInboundID: 1},
-					{ID: 3, Active: true, XUIHost: "http://x3", XUIInboundID: 1},
+				return []database.Node{
+					{ID: 1, IsActive: true, Host: "http://x1", InboundID: 1},
+					{ID: 2, IsActive: true, Host: "http://x2", InboundID: 1},
+					{ID: 3, IsActive: true, Host: "http://x3", InboundID: 1},
 				}, nil
 			}
 			return nil, nil
 		},
 	}
-	sources := []database.Source{
-		{ID: 1, Active: true, XUIHost: "http://x1", XUIInboundID: 1},
-		{ID: 2, Active: true, XUIHost: "http://x2", XUIInboundID: 1},
-		{ID: 3, Active: true, XUIHost: "http://x3", XUIInboundID: 1},
+	sources := []database.Node{
+		{ID: 1, IsActive: true, Host: "http://x1", InboundID: 1},
+		{ID: 2, IsActive: true, Host: "http://x2", InboundID: 1},
+		{ID: 3, IsActive: true, Host: "http://x3", InboundID: 1},
 	}
 	xuiClients := map[uint]interfaces.XUIClient{1: xui1, 2: xui2, 3: xui3}
 
@@ -848,18 +848,18 @@ func TestSubscriptionService_CreateTrial_AllFailsAggregatesErrors(t *testing.T) 
 			return nil, errB
 		},
 	}
-	sources := []database.Source{
-		{ID: 1, Active: true, XUIHost: "http://x1", XUIInboundID: 1},
-		{ID: 2, Active: true, XUIHost: "http://x2", XUIInboundID: 1},
+	sources := []database.Node{
+		{ID: 1, IsActive: true, Host: "http://x1", InboundID: 1},
+		{ID: 2, IsActive: true, Host: "http://x2", InboundID: 1},
 	}
 	xuiClients := map[uint]interfaces.XUIClient{1: xui1, 2: xui2}
 
 	db := &testutil.MockDatabaseService{
-		GetSourcesByPlanNameFunc: func(ctx context.Context, planName string) ([]database.Source, error) {
+		GetNodesByPlanNameFunc: func(ctx context.Context, planName string) ([]database.Node, error) {
 			if planName == database.TrialPlanName {
-				return []database.Source{
-					{ID: 1, Active: true, XUIHost: "http://x1", XUIInboundID: 1},
-					{ID: 2, Active: true, XUIHost: "http://x2", XUIInboundID: 1},
+				return []database.Node{
+					{ID: 1, IsActive: true, Host: "http://x1", InboundID: 1},
+					{ID: 2, IsActive: true, Host: "http://x2", InboundID: 1},
 				}, nil
 			}
 			return nil, nil
@@ -896,7 +896,7 @@ func TestSubscriptionService_DeleteByID_Success(t *testing.T) {
 		},
 	}
 	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
-	sources := []database.Source{{ID: 1, Active: true, XUIHost: "http://x", XUIInboundID: 1}}
+	sources := []database.Node{{ID: 1, IsActive: true, Host: "http://x", InboundID: 1}}
 
 	svc := NewSubscriptionService(db, xuiClients, sources, cfg, "", &webhook.NoopSender{})
 	deleted, err := svc.DeleteByID(context.Background(), 7)
@@ -916,7 +916,7 @@ func TestSubscriptionService_DeleteByID_GetError(t *testing.T) {
 		},
 	}
 	xuiClients := map[uint]interfaces.XUIClient{1: &testutil.MockXUIClient{}}
-	sources := []database.Source{{ID: 1, Active: true, XUIHost: "http://x", XUIInboundID: 1}}
+	sources := []database.Node{{ID: 1, IsActive: true, Host: "http://x", InboundID: 1}}
 
 	svc := NewSubscriptionService(db, xuiClients, sources, cfg, "", &webhook.NoopSender{})
 	deleted, err := svc.DeleteByID(context.Background(), 1)
@@ -939,7 +939,7 @@ func TestSubscriptionService_DeleteByID_DBError(t *testing.T) {
 		},
 	}
 	xuiClients := map[uint]interfaces.XUIClient{1: &testutil.MockXUIClient{}}
-	sources := []database.Source{{ID: 1, Active: true, XUIHost: "http://x", XUIInboundID: 1}}
+	sources := []database.Node{{ID: 1, IsActive: true, Host: "http://x", InboundID: 1}}
 
 	svc := NewSubscriptionService(db, xuiClients, sources, cfg, "", &webhook.NoopSender{})
 	deleted, err := svc.DeleteByID(context.Background(), 1)
@@ -962,7 +962,7 @@ func TestSubscriptionService_GetByID_Success(t *testing.T) {
 		},
 	}
 	xuiClients := map[uint]interfaces.XUIClient{1: &testutil.MockXUIClient{}}
-	sources := []database.Source{{ID: 1, Active: true, XUIHost: "http://x", XUIInboundID: 1}}
+	sources := []database.Node{{ID: 1, IsActive: true, Host: "http://x", InboundID: 1}}
 
 	svc := NewSubscriptionService(db, xuiClients, sources, &config.Config{}, "", &webhook.NoopSender{})
 	got, err := svc.GetByID(context.Background(), 99)
@@ -980,7 +980,7 @@ func TestSubscriptionService_GetByID_NotFound(t *testing.T) {
 		},
 	}
 	xuiClients := map[uint]interfaces.XUIClient{1: &testutil.MockXUIClient{}}
-	sources := []database.Source{{ID: 1, Active: true, XUIHost: "http://x", XUIInboundID: 1}}
+	sources := []database.Node{{ID: 1, IsActive: true, Host: "http://x", InboundID: 1}}
 
 	svc := NewSubscriptionService(db, xuiClients, sources, &config.Config{}, "", &webhook.NoopSender{})
 	got, err := svc.GetByID(context.Background(), 1)
@@ -1003,7 +1003,7 @@ func TestSubscriptionService_GetOrCreateInvite_Delegates(t *testing.T) {
 		},
 	}
 	xuiClients := map[uint]interfaces.XUIClient{1: &testutil.MockXUIClient{}}
-	sources := []database.Source{{ID: 1, Active: true, XUIHost: "http://x", XUIInboundID: 1}}
+	sources := []database.Node{{ID: 1, IsActive: true, Host: "http://x", InboundID: 1}}
 
 	svc := NewSubscriptionService(db, xuiClients, sources, &config.Config{}, "", &webhook.NoopSender{})
 	got, err := svc.GetOrCreateInvite(context.Background(), 111, "ABC")
@@ -1023,7 +1023,7 @@ func TestSubscriptionService_GetInviteByCode_Delegates(t *testing.T) {
 		},
 	}
 	xuiClients := map[uint]interfaces.XUIClient{1: &testutil.MockXUIClient{}}
-	sources := []database.Source{{ID: 1, Active: true, XUIHost: "http://x", XUIInboundID: 1}}
+	sources := []database.Node{{ID: 1, IsActive: true, Host: "http://x", InboundID: 1}}
 
 	svc := NewSubscriptionService(db, xuiClients, sources, &config.Config{}, "", &webhook.NoopSender{})
 	got, err := svc.GetInviteByCode(context.Background(), "XYZ")
@@ -1043,7 +1043,7 @@ func TestSubscriptionService_CountAll_Delegates(t *testing.T) {
 		},
 	}
 	xuiClients := map[uint]interfaces.XUIClient{1: &testutil.MockXUIClient{}}
-	sources := []database.Source{{ID: 1, Active: true, XUIHost: "http://x", XUIInboundID: 1}}
+	sources := []database.Node{{ID: 1, IsActive: true, Host: "http://x", InboundID: 1}}
 
 	svc := NewSubscriptionService(db, xuiClients, sources, &config.Config{}, "", &webhook.NoopSender{})
 	got, err := svc.CountAll(context.Background())
@@ -1061,7 +1061,7 @@ func TestSubscriptionService_CountActive_Delegates(t *testing.T) {
 		},
 	}
 	xuiClients := map[uint]interfaces.XUIClient{1: &testutil.MockXUIClient{}}
-	sources := []database.Source{{ID: 1, Active: true, XUIHost: "http://x", XUIInboundID: 1}}
+	sources := []database.Node{{ID: 1, IsActive: true, Host: "http://x", InboundID: 1}}
 
 	svc := NewSubscriptionService(db, xuiClients, sources, &config.Config{}, "", &webhook.NoopSender{})
 	got, err := svc.CountActive(context.Background())
@@ -1081,7 +1081,7 @@ func TestSubscriptionService_GetLatest_Delegates(t *testing.T) {
 		},
 	}
 	xuiClients := map[uint]interfaces.XUIClient{1: &testutil.MockXUIClient{}}
-	sources := []database.Source{{ID: 1, Active: true, XUIHost: "http://x", XUIInboundID: 1}}
+	sources := []database.Node{{ID: 1, IsActive: true, Host: "http://x", InboundID: 1}}
 
 	svc := NewSubscriptionService(db, xuiClients, sources, &config.Config{}, "", &webhook.NoopSender{})
 	got, err := svc.GetLatest(context.Background(), 5)
@@ -1100,7 +1100,7 @@ func TestSubscriptionService_GetTelegramIDByUsername_Delegates(t *testing.T) {
 		},
 	}
 	xuiClients := map[uint]interfaces.XUIClient{1: &testutil.MockXUIClient{}}
-	sources := []database.Source{{ID: 1, Active: true, XUIHost: "http://x", XUIInboundID: 1}}
+	sources := []database.Node{{ID: 1, IsActive: true, Host: "http://x", InboundID: 1}}
 
 	svc := NewSubscriptionService(db, xuiClients, sources, &config.Config{}, "", &webhook.NoopSender{})
 	got, err := svc.GetTelegramIDByUsername(context.Background(), "alice")
@@ -1116,7 +1116,7 @@ func TestSubscriptionService_InvalidateSubscription_CallsCallback(t *testing.T) 
 
 	cfg := &config.Config{}
 	xuiClients := map[uint]interfaces.XUIClient{1: &testutil.MockXUIClient{}}
-	sources := []database.Source{{ID: 1, Active: true, XUIHost: "http://x", XUIInboundID: 1}}
+	sources := []database.Node{{ID: 1, IsActive: true, Host: "http://x", InboundID: 1}}
 
 	svc := NewSubscriptionService(&testutil.MockDatabaseService{}, xuiClients, sources, cfg, "", &webhook.NoopSender{})
 
@@ -1134,7 +1134,7 @@ func TestSubscriptionService_InvalidateSubscription_NoCallback(t *testing.T) {
 	t.Parallel()
 
 	xuiClients := map[uint]interfaces.XUIClient{1: &testutil.MockXUIClient{}}
-	sources := []database.Source{{ID: 1, Active: true, XUIHost: "http://x", XUIInboundID: 1}}
+	sources := []database.Node{{ID: 1, IsActive: true, Host: "http://x", InboundID: 1}}
 
 	svc := NewSubscriptionService(&testutil.MockDatabaseService{}, xuiClients, sources, &config.Config{}, "", &webhook.NoopSender{})
 
@@ -1166,7 +1166,7 @@ func TestSubscriptionService_CleanupExpiredTrials_Success(t *testing.T) {
 		},
 	}
 	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
-	sources := []database.Source{{ID: 1, Active: true, XUIHost: "http://x", XUIInboundID: 1}}
+	sources := []database.Node{{ID: 1, IsActive: true, Host: "http://x", InboundID: 1}}
 
 	svc := NewSubscriptionService(db, xuiClients, sources, cfg, "", &webhook.NoopSender{})
 	n, err := svc.CleanupExpiredTrials(context.Background())
@@ -1185,7 +1185,7 @@ func TestSubscriptionService_CleanupExpiredTrials_DBError(t *testing.T) {
 		},
 	}
 	xuiClients := map[uint]interfaces.XUIClient{1: &testutil.MockXUIClient{}}
-	sources := []database.Source{{ID: 1, Active: true, XUIHost: "http://x", XUIInboundID: 1}}
+	sources := []database.Node{{ID: 1, IsActive: true, Host: "http://x", InboundID: 1}}
 
 	svc := NewSubscriptionService(db, xuiClients, sources, cfg, "", &webhook.NoopSender{})
 	n, err := svc.CleanupExpiredTrials(context.Background())
@@ -1205,7 +1205,7 @@ func TestSubscriptionService_GetTotalTelegramIDCount_Delegates(t *testing.T) {
 		},
 	}
 	xuiClients := map[uint]interfaces.XUIClient{1: &testutil.MockXUIClient{}}
-	sources := []database.Source{{ID: 1, Active: true, XUIHost: "http://x", XUIInboundID: 1}}
+	sources := []database.Node{{ID: 1, IsActive: true, Host: "http://x", InboundID: 1}}
 
 	svc := NewSubscriptionService(db, xuiClients, sources, &config.Config{}, "", &webhook.NoopSender{})
 	got, err := svc.GetTotalTelegramIDCount(context.Background())
@@ -1226,7 +1226,7 @@ func TestSubscriptionService_GetTelegramIDsBatch_Delegates(t *testing.T) {
 		},
 	}
 	xuiClients := map[uint]interfaces.XUIClient{1: &testutil.MockXUIClient{}}
-	sources := []database.Source{{ID: 1, Active: true, XUIHost: "http://x", XUIInboundID: 1}}
+	sources := []database.Node{{ID: 1, IsActive: true, Host: "http://x", InboundID: 1}}
 
 	svc := NewSubscriptionService(db, xuiClients, sources, &config.Config{}, "", &webhook.NoopSender{})
 	got, err := svc.GetTelegramIDsBatch(context.Background(), 10, 5)
@@ -1245,7 +1245,7 @@ func TestSubscriptionService_GetAllReferralCounts_Delegates(t *testing.T) {
 		},
 	}
 	xuiClients := map[uint]interfaces.XUIClient{1: &testutil.MockXUIClient{}}
-	sources := []database.Source{{ID: 1, Active: true, XUIHost: "http://x", XUIInboundID: 1}}
+	sources := []database.Node{{ID: 1, IsActive: true, Host: "http://x", InboundID: 1}}
 
 	svc := NewSubscriptionService(db, xuiClients, sources, &config.Config{}, "", &webhook.NoopSender{})
 	got, err := svc.GetAllReferralCounts(context.Background())

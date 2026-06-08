@@ -30,7 +30,7 @@ type Event = webhook.Event
 type SubscriptionService struct {
 	db           interfaces.DatabaseService
 	xuiClients   map[uint]interfaces.XUIClient
-	sources      []database.Source
+	nodes       []database.Node
 	cfg          *config.Config
 	globalSubURL string
 	webhook      WebhookSender
@@ -54,29 +54,29 @@ func XUIEmail(username string, telegramID int64) string {
 }
 
 // NewSubscriptionService creates a SubscriptionService configured with the given database, XUI clients map, sources, configuration, global subscription URL prefix, and optional webhook sender.
-func NewSubscriptionService(db interfaces.DatabaseService, xuiClients map[uint]interfaces.XUIClient, sources []database.Source, cfg *config.Config, globalSubURL string, webhookSender WebhookSender) *SubscriptionService {
+func NewSubscriptionService(db interfaces.DatabaseService, xuiClients map[uint]interfaces.XUIClient, nodes []database.Node, cfg *config.Config, globalSubURL string, webhookSender WebhookSender) *SubscriptionService {
 	return &SubscriptionService{
 		db:           db,
 		xuiClients:   xuiClients,
-		sources:      sources,
+		nodes:       nodes,
 		cfg:          cfg,
 		globalSubURL: globalSubURL,
 		webhook:      webhookSender,
 	}
 }
 
-func (s *SubscriptionService) activeSources() []database.Source {
-	var result []database.Source
-	for _, src := range s.sources {
-		if src.Active && src.XUIHost != "" {
-			result = append(result, src)
+func (s *SubscriptionService) activeNodes() []database.Node {
+	var result []database.Node
+	for _, node := range s.nodes {
+		if node.IsActive && node.Host != "" {
+			result = append(result, node)
 		}
 	}
 	return result
 }
 
-func (s *SubscriptionService) trialSources(ctx context.Context) ([]database.Source, error) {
-	return s.db.GetSourcesByPlanName(ctx, database.TrialPlanName)
+func (s *SubscriptionService) trialNodes(ctx context.Context) ([]database.Node, error) {
+	return s.db.GetNodesByPlanName(ctx, database.TrialPlanName)
 }
 
 // Create provisions a new free-plan subscription. inviteCode, when non-empty,
@@ -115,19 +115,19 @@ func (s *SubscriptionService) Create(ctx context.Context, chatID int64, username
 
 	var firstClient *xui.ClientConfig
 	var firstErr error
-	sources := s.activeSources()
-	for _, src := range sources {
-		client, ok := s.xuiClients[src.ID]
+	nodes := s.activeNodes()
+	for _, node := range nodes {
+		client, ok := s.xuiClients[node.ID]
 		if !ok {
 			continue
 		}
-		c, err := client.AddClientWithID(ctx, src.XUIInboundID, email, clientID, subID, trafficBytes, expiryTime, resetday)
+		c, err := client.AddClientWithID(ctx, node.InboundID, email, clientID, subID, trafficBytes, expiryTime, resetday)
 		if err != nil {
 			if firstErr == nil {
 				firstErr = err
 			}
-			logger.Warn("failed to add client on source",
-				zap.Uint("source_id", src.ID),
+			logger.Warn("failed to add client on node",
+				zap.Uint("node_id", node.ID),
 				zap.Error(err))
 			continue
 		}
@@ -151,12 +151,12 @@ func (s *SubscriptionService) Create(ctx context.Context, chatID int64, username
 	}
 
 	if firstClient.SubID == "" {
-		s.deleteClientFromAllSources(ctx, email)
+		s.deleteClientFromAllNodes(ctx, email)
 		return nil, fmt.Errorf("xui client returned empty subscription id: missing subID on client %s", firstClient.ID)
 	}
 
 	if err := s.db.CreateSubscription(ctx, sub, inviteCode); err != nil {
-		s.deleteClientFromAllSources(ctx, email)
+		s.deleteClientFromAllNodes(ctx, email)
 		return nil, fmt.Errorf("create subscription: %w", err)
 	}
 
@@ -183,7 +183,7 @@ func (s *SubscriptionService) Delete(ctx context.Context, telegramID int64) erro
 	}
 
 	email := XUIEmail(sub.Username, telegramID)
-	s.deleteClientFromAllSources(ctx, email)
+	s.deleteClientFromAllNodes(ctx, email)
 
 	if s.webhook != nil {
 		eventID, _ := utils.GenerateUUID()
@@ -216,7 +216,7 @@ func (s *SubscriptionService) DeleteByID(ctx context.Context, id uint) (*databas
 	}
 
 	email := XUIEmail(sub.Username, deleted.TelegramID)
-	s.deleteClientFromAllSources(ctx, email)
+	s.deleteClientFromAllNodes(ctx, email)
 
 	if s.webhook != nil {
 		eventID, _ := utils.GenerateUUID()
@@ -232,19 +232,19 @@ func (s *SubscriptionService) DeleteByID(ctx context.Context, id uint) (*databas
 	return deleted, nil
 }
 
-func (s *SubscriptionService) deleteClientFromAllSources(ctx context.Context, email string) {
-	for _, src := range s.sources {
-		if !src.Active || src.XUIHost == "" {
+func (s *SubscriptionService) deleteClientFromAllNodes(ctx context.Context, email string) {
+	for _, node := range s.nodes {
+		if !node.IsActive || node.Host == "" {
 			continue
 		}
-		client, ok := s.xuiClients[src.ID]
+		client, ok := s.xuiClients[node.ID]
 		if !ok {
 			continue
 		}
 		if err := client.DeleteClient(ctx, email); err != nil {
 			logger.Warn("failed to delete XUI client on source",
 				zap.String("email", email),
-				zap.Uint("source_id", src.ID),
+				zap.Uint("node_id", node.ID),
 				zap.Error(err))
 		}
 	}
@@ -289,15 +289,15 @@ func (s *SubscriptionService) GetWithTraffic(ctx context.Context, telegramID int
 	// обходим серверы
 	var totalUp, totalDown int64
 	var anySuccess bool
-	for _, src := range s.activeSources() {
-		client, ok := s.xuiClients[src.ID]
+	for _, node := range s.activeNodes() {
+		client, ok := s.xuiClients[node.ID]
 		if !ok {
 			continue
 		}
 		traffic, err := client.GetClientTraffic(ctx, email)
 		if err != nil {
 			logger.Debug("GetClientTraffic failed on source",
-				zap.Uint("source_id", src.ID),
+				zap.Uint("node_id", node.ID),
 				zap.Error(err))
 			continue
 		}
@@ -382,35 +382,35 @@ func (s *SubscriptionService) CreateTrial(ctx context.Context, inviteCode string
 	expiryTime := time.Now().Add(time.Duration(s.cfg.TrialDurationHours) * time.Hour)
 	email := "trial_" + subID
 
-	trialSources, err := s.trialSources(ctx)
+	trialNodes, err := s.trialNodes(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("load trial sources: %w", err)
 	}
-	sources := trialSources
+	sources := trialNodes
 	if len(sources) == 0 {
-		sources = s.activeSources()
+		sources = s.activeNodes()
 	}
 
 	var xuiErrs []error
 	var anySuccess bool
-	for _, src := range sources {
-		client, ok := s.xuiClients[src.ID]
+	for _, node := range sources {
+		client, ok := s.xuiClients[node.ID]
 		if !ok {
 			continue
 		}
-		_, err = client.AddClientWithID(ctx, src.XUIInboundID, email, clientID, subID, trafficBytes, expiryTime, 0)
+		_, err = client.AddClientWithID(ctx, node.InboundID, email, clientID, subID, trafficBytes, expiryTime, 0)
 		if err != nil {
-			xuiErrs = append(xuiErrs, fmt.Errorf("source %d: %w", src.ID, err))
-			logger.Warn("failed to add trial client on source",
-				zap.Uint("source_id", src.ID),
+			xuiErrs = append(xuiErrs, fmt.Errorf("node %d: %w", node.ID, err))
+			logger.Warn("failed to add trial client on node",
+				zap.Uint("node_id", node.ID),
 				zap.Error(err))
 		} else {
 			anySuccess = true
 		}
 	}
 	if !anySuccess {
-		logger.Error("trial XUI: all sources failed", zap.Int("failed", len(xuiErrs)))
-		return nil, fmt.Errorf("failed to create trial client on any source: %w", errors.Join(xuiErrs...))
+		logger.Error("trial XUI: all nodes failed", zap.Int("failed", len(xuiErrs)))
+		return nil, fmt.Errorf("failed to create trial client on any node: %w", errors.Join(xuiErrs...))
 	}
 	if len(xuiErrs) > 0 {
 		logger.Warn("trial XUI: partial failures (continuing)", zap.Int("failed", len(xuiErrs)), zap.Int("sources", len(sources)))
@@ -418,7 +418,7 @@ func (s *SubscriptionService) CreateTrial(ctx context.Context, inviteCode string
 
 	sub, err := s.db.CreateTrialSubscription(ctx, inviteCode, subID, clientID, expiryTime)
 	if err != nil {
-		s.deleteClientFromAllSources(ctx, email)
+		s.deleteClientFromAllNodes(ctx, email)
 		return nil, fmt.Errorf("create trial subscription: %w", err)
 	}
 
@@ -478,18 +478,18 @@ func (s *SubscriptionService) BindTrial(ctx context.Context, subscriptionID stri
 	currentEmail := "trial_" + subscriptionID
 	email := XUIEmail(username, chatID)
 
-	sources, err := s.trialSources(ctx)
+	sources, err := s.trialNodes(ctx)
 	if err != nil {
 		return sub, fmt.Errorf("load trial sources: %w", err)
 	}
-	for _, src := range sources {
-		client, ok := s.xuiClients[src.ID]
+	for _, node := range sources {
+		client, ok := s.xuiClients[node.ID]
 		if !ok {
 			continue
 		}
-		if err := client.UpdateClient(ctx, src.XUIInboundID, currentEmail, sub.ClientID, email, sub.SubscriptionID, trafficBytes, expiryTime, chatID, comment); err != nil {
-			logger.Warn("UpdateClient failed on trial source",
-				zap.Uint("source_id", src.ID),
+		if err := client.UpdateClient(ctx, node.InboundID, currentEmail, sub.ClientID, email, sub.SubscriptionID, trafficBytes, expiryTime, chatID, comment); err != nil {
+			logger.Warn("UpdateClient failed on trial node",
+				zap.Uint("node_id", node.ID),
 				zap.Error(err))
 			continue
 		}
@@ -562,8 +562,8 @@ func (s *SubscriptionService) ReconcileOrphanedClients(ctx context.Context) (int
 		}
 
 		notFoundOnAll := true
-		for _, src := range s.activeSources() {
-			client, ok := s.xuiClients[src.ID]
+		for _, node := range s.activeNodes() {
+			client, ok := s.xuiClients[node.ID]
 			if !ok {
 				continue
 			}
@@ -624,7 +624,7 @@ func (s *SubscriptionService) CleanupExpiredTrials(ctx context.Context) (int64, 
 	for _, sub := range subs {
 		if sub.SubscriptionID != "" {
 			email := "trial_" + sub.SubscriptionID
-			s.deleteClientFromAllSources(ctx, email)
+			s.deleteClientFromAllNodes(ctx, email)
 		}
 	}
 

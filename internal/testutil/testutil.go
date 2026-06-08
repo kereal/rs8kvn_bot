@@ -77,10 +77,10 @@ type MockDatabaseService struct {
 	GetReferralCountFunc                func(ctx context.Context, referrerTGID int64) (int64, error)
 	GetAllReferralCountsFunc            func(ctx context.Context) (map[int64]int64, error)
 	CreateTrialSubscriptionFunc         func(ctx context.Context, inviteCode, subscriptionID, clientID string, expiryTime time.Time) (*database.Subscription, error)
-	ListSourcesFunc                     func(ctx context.Context) ([]database.Source, error)
-	IsSourcesEmptyFunc                  func(ctx context.Context) (bool, error)
-	GetSourcesByPlanIDFunc              func(ctx context.Context, planID uint) ([]database.Source, error)
-	GetSourcesByPlanNameFunc            func(ctx context.Context, planName string) ([]database.Source, error)
+	ListNodesFunc                     func(ctx context.Context) ([]database.Node, error)
+	IsNodesEmptyFunc                  func(ctx context.Context) (bool, error)
+	GetSourcesByPlanIDFunc              func(ctx context.Context, planID uint) ([]database.Node, error)
+	GetNodesByPlanNameFunc            func(ctx context.Context, planName string) ([]database.Node, error)
 	GetPlansBySourceIDFunc              func(ctx context.Context, sourceID uint) ([]database.Plan, error)
 	GetPlanByNameFunc                   func(ctx context.Context, name string) (*database.Plan, error)
 	GetPlanByIDFunc                     func(ctx context.Context, planID uint) (*database.Plan, error)
@@ -91,7 +91,7 @@ type MockDatabaseService struct {
 	AddSourceToPlanFunc                 func(ctx context.Context, planID, sourceID uint) error
 	RemoveSourceFromPlanFunc            func(ctx context.Context, planID, sourceID uint) error
 	SeedDefaultDataFunc                 func(ctx context.Context) error
-	SeedDefaultSourceFunc               func(ctx context.Context, name, xuiHost, xuiAPIToken string, xuiInboundID int, subURL string) error
+	SeedDefaultNodeFunc               func(ctx context.Context, name, xuiHost, xuiAPIToken string, xuiInboundID int, subURL string) error
 	GetSubscriptionBySubscriptionIDFunc func(ctx context.Context, subscriptionID string) (*database.Subscription, error)
 	GetTrialSubscriptionBySubIDFunc     func(ctx context.Context, subscriptionID string) (*database.Subscription, error)
 	BindTrialSubscriptionFunc           func(ctx context.Context, subscriptionID string, telegramID int64, username string) (*database.Subscription, error)
@@ -99,7 +99,7 @@ type MockDatabaseService struct {
 	CreateTrialRequestFunc              func(ctx context.Context, ip string) error
 	CleanupExpiredTrialsFunc            func(ctx context.Context, hours int) ([]database.Subscription, error)
 	GetPoolStatsFunc                    func() (*database.PoolStats, error)
-	GetSubscriptionWithPlanAndSourcesFunc func(ctx context.Context, subscriptionID string) (*database.SubscriptionFull, error)
+	GetSubscriptionWithPlanAndNodesFunc func(ctx context.Context, subscriptionID string) (*database.SubscriptionFull, error)
 	GetSubscriptionStatusFunc                func(ctx context.Context, subscriptionID string) (string, time.Time, error)
 	UpdateSubscriptionDevicesFunc          func(ctx context.Context, id uint, devicesJSON string) error
 	UpdateSubscriptionIPsFunc              func(ctx context.Context, id uint, ipsJSON string) error
@@ -338,29 +338,29 @@ func (m *MockDatabaseService) CreateTrialSubscription(ctx context.Context, invit
 	return &database.Subscription{InviteCode: inviteCode, SubscriptionID: subscriptionID, ClientID: clientID, PlanID: 1}, nil
 }
 
-func (m *MockDatabaseService) ListSources(ctx context.Context) ([]database.Source, error) {
-	if m.ListSourcesFunc != nil {
-		return m.ListSourcesFunc(ctx)
+func (m *MockDatabaseService) ListNodes(ctx context.Context) ([]database.Node, error) {
+	if m.ListNodesFunc != nil {
+		return m.ListNodesFunc(ctx)
 	}
-	return []database.Source{
-		{ID: 1, Name: "default", Active: true, XUIHost: "http://localhost:2053", XUIAPIToken: "test-token", XUIInboundID: 1, SubURL: "http://example.com/sub/"},
+	return []database.Node{
+		{ID: 1, Name: "default", IsActive: true, Host: "http://localhost:2053", APIToken: "test-token", InboundID: 1, SubscriptionURL: "http://example.com/sub/"},
 	}, nil
 }
 
 
-func (m *MockDatabaseService) IsSourcesEmpty(ctx context.Context) (bool, error) {
-	if m.IsSourcesEmptyFunc != nil {
-		return m.IsSourcesEmptyFunc(ctx)
+func (m *MockDatabaseService) IsNodesEmpty(ctx context.Context) (bool, error) {
+	if m.IsNodesEmptyFunc != nil {
+		return m.IsNodesEmptyFunc(ctx)
 	}
 	return false, nil
 }
 
-func (m *MockDatabaseService) SeedDefaultSource(ctx context.Context, name, xuiHost, xuiAPIToken string, xuiInboundID int, subURL string) error {
+func (m *MockDatabaseService) SeedDefaultNode(ctx context.Context, name, xuiHost, xuiAPIToken string, xuiInboundID int, subURL string) error {
 	if m.SeedDefaultDataFunc != nil {
 		return m.SeedDefaultDataFunc(ctx)
 	}
-	if m.SeedDefaultSourceFunc != nil {
-		return m.SeedDefaultSourceFunc(ctx, name, xuiHost, xuiAPIToken, xuiInboundID, subURL)
+	if m.SeedDefaultNodeFunc != nil {
+		return m.SeedDefaultNodeFunc(ctx, name, xuiHost, xuiAPIToken, xuiInboundID, subURL)
 	}
 	return nil
 }
@@ -420,19 +420,19 @@ func (m *MockDatabaseService) DeletePlan(ctx context.Context, planID uint) error
 	return nil
 }
 
-func (m *MockDatabaseService) GetSourcesByPlanID(ctx context.Context, planID uint) ([]database.Source, error) {
+func (m *MockDatabaseService) GetSourcesByPlanID(ctx context.Context, planID uint) ([]database.Node, error) {
 	if m.GetSourcesByPlanIDFunc != nil {
 		return m.GetSourcesByPlanIDFunc(ctx, planID)
 	}
 	return nil, nil
 }
 
-func (m *MockDatabaseService) GetSourcesByPlanName(ctx context.Context, planName string) ([]database.Source, error) {
-	if m.GetSourcesByPlanNameFunc != nil {
-		return m.GetSourcesByPlanNameFunc(ctx, planName)
+func (m *MockDatabaseService) GetNodesByPlanName(ctx context.Context, planName string) ([]database.Node, error) {
+	if m.GetNodesByPlanNameFunc != nil {
+		return m.GetNodesByPlanNameFunc(ctx, planName)
 	}
 	if planName == database.TrialPlanName {
-		return []database.Source{{ID: 1, Active: true, XUIHost: "http://localhost:2053", XUIInboundID: 1}}, nil
+		return []database.Node{{ID: 1, IsActive: true, Host: "http://localhost:2053", InboundID: 1}}, nil
 	}
 	return nil, nil
 }
@@ -531,9 +531,9 @@ func (m *MockDatabaseService) GetPoolStats() (*database.PoolStats, error) {
 	return &database.PoolStats{}, nil
 }
 
-func (m *MockDatabaseService) GetSubscriptionWithPlanAndSources(ctx context.Context, subscriptionID string) (*database.SubscriptionFull, error) {
-	if m.GetSubscriptionWithPlanAndSourcesFunc != nil {
-		return m.GetSubscriptionWithPlanAndSourcesFunc(ctx, subscriptionID)
+func (m *MockDatabaseService) GetSubscriptionWithPlanAndNodes(ctx context.Context, subscriptionID string) (*database.SubscriptionFull, error) {
+	if m.GetSubscriptionWithPlanAndNodesFunc != nil {
+		return m.GetSubscriptionWithPlanAndNodesFunc(ctx, subscriptionID)
 	}
 	return nil, gorm.ErrRecordNotFound
 }
