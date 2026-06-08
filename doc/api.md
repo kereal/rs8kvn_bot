@@ -1,6 +1,6 @@
 # API Reference — rs8kvn_bot
 
-**Version:** 2.5.0  
+**Version:** 2.6.0  
 **Base URL:** `http://localhost:8880` (configurable via `HEALTH_CHECK_PORT`)
 
 ---

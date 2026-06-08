@@ -44,7 +44,34 @@ Telegram Bot (Go, single binary)
 ```
 
 
-## Схема БД (v2.5.0, после migration 012)
+## Схема БД (v2.6.0, после migration 017)
+
+### Таблицы подписок (существующие)
+- `subscriptions`, `invites`, `trial_requests`, `sources`, `plans`, `plan_sources` — без структурных изменений после migration 012.
+
+### Новая таблица: `products` (migration 016)
+Покупаемые продукты, привязанные к планам.
+- `id`, `plan_id` (FK → plans), `duration_days`, `price_cents`, `currency`, `is_active`, `created_at`, `updated_at`.
+
+### Новая таблица: `orders` (migration 017)
+Факт покупки подписки и процесс обработки платежа.
+- `id`, `subscription_id` (FK → subscriptions), `product_id` (FK → products), `status` (CHECK: `pending|paid|expired|canceled`), `amount_cents`, `currency`, `payment_provider`, `provider_payment_id`, `created_at`, `paid_at`, `activated_at`, `expires_at`.
+- Индексы: `idx_orders_subscription_id`, `idx_orders_status`, `idx_orders_created_at`.
+
+Статусы заказов:
+- `pending` — платёж создан, ожидает подтверждения
+- `paid` — платёж подтверждён, подписка активирована
+- `expired` — истекло время оплаты (например, 30 минут)
+- `canceled` — отменено пользователем или системой
+
+Поля:
+- `provider_payment_id` — внешний идентификатор платежа в системе провайдера
+- `paid_at` — момент подтверждения оплаты
+- `activated_at` — момент фактической активации подписки
+- `expires_at` — срок действия счёта на стороне платёжного провайдера (дедлайн оплаты)
+
+### Миграции
+`internal/database/migrations/000-017_*.up.sql` (embedded через go:embed).
 
 ### `subscriptions`
 ```
