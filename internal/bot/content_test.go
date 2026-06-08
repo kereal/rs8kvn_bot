@@ -194,7 +194,7 @@ func TestHandler_GetDonateText_EmptyConfig(t *testing.T) {
 func TestGetHelpText(t *testing.T) {
 	t.Parallel()
 
-	cfg := &config.Config{TrafficLimitGB: 100}
+	cfg := &config.Config{}
 	handler := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, cfg.DonateCardNumber, cfg.DonateURL, cfg.SiteURL)}
 
 	text := handler.getHelpText(100, "http://localhost/sub/test")
@@ -209,7 +209,7 @@ func TestGetHelpText_DifferentTrafficLimits(t *testing.T) {
 
 	tests := []struct {
 		name           string
-		trafficLimitGB int
+		trafficLimit int
 	}{
 		{"50 GB", 50},
 		{"100 GB", 100},
@@ -218,7 +218,7 @@ func TestGetHelpText_DifferentTrafficLimits(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			text := handler.getHelpText(tt.trafficLimitGB, "http://test.url/sub")
+			text := handler.getHelpText(tt.trafficLimit, "http://test.url/sub")
 			assert.NotEmpty(t, text, "text should not be empty")
 		})
 	}

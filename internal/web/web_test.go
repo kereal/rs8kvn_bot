@@ -18,10 +18,6 @@ import (
 	"rs8kvn_bot/internal/testutil"
 )
 
-
-
-
-
 func TestMain(m *testing.M) {
 	testutil.InitLogger(m)
 	os.Exit(m.Run())
@@ -35,7 +31,7 @@ func TestRenderTrialPage(t *testing.T) {
 		TrialDurationHours: 3,
 	}
 
-	srv := NewServer(":8880", nil, nil, cfg, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", nil, cfg, bot.NewTestBotConfig(), nil, nil)
 
 	w := httptest.NewRecorder()
 	srv.renderTrialPage(w, "sub123", "https://vpn.site/sub/sub123", "https://t.me/testbot?start=trial_sub123", 3)
@@ -64,7 +60,7 @@ func TestRenderTrialPage(t *testing.T) {
 func TestRenderErrorPage(t *testing.T) {
 	t.Parallel()
 
-	srv := NewServer(":8880", nil, nil, nil, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", nil, nil, bot.NewTestBotConfig(), nil, nil)
 
 	w := httptest.NewRecorder()
 	srv.renderErrorPage(w, "Тестовая ошибка")
@@ -104,7 +100,7 @@ func TestGetClientIP_XForwardedFor(t *testing.T) {
 func TestRenderTrialPage_HappLink(t *testing.T) {
 	t.Parallel()
 
-	srv := NewServer(":8880", nil, nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil)
 
 	subURL := "https://vpn.site/sub/abc123"
 	w := httptest.NewRecorder()
@@ -202,7 +198,7 @@ func TestGetClientIP_WhitespaceInXForwardedFor(t *testing.T) {
 func TestServer_StartAndStop(t *testing.T) {
 	t.Parallel()
 
-	srv := NewServer(":0", nil, nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil) // :0 for random port
+	srv := NewServer(":0", nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil) // :0 for random port
 
 	ctx := context.Background()
 
@@ -221,7 +217,7 @@ func TestServer_StartAndStop(t *testing.T) {
 func TestServer_StopWithoutStart(t *testing.T) {
 	t.Parallel()
 
-	srv := NewServer(":0", nil, nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":0", nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil)
 
 	// Stop without start should not panic
 	stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -313,7 +309,7 @@ func TestServer_Start_PortInUse(t *testing.T) {
 	addr := listener.Addr().String()
 	port := strings.Split(addr, ":")[1]
 
-	srv := NewServer(":"+port, nil, nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":"+port, nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil)
 
 	ctx := context.Background()
 	err = srv.Start(ctx)
@@ -377,10 +373,9 @@ func TestRenderTrialPage_XSSProtection(t *testing.T) {
 		SiteURL:            "https://vpn.site",
 		TrialDurationHours: 3,
 		TrialRateLimit:     3,
-		XUIInboundID:       1,
 	}
 
-	srv := NewServer(":8880", testutil.NewMockDatabaseService(), testutil.NewMockXUIClient(), cfg, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", testutil.NewMockDatabaseService(), cfg, bot.NewTestBotConfig(), nil, nil)
 
 	tests := []struct {
 		name         string
@@ -447,7 +442,7 @@ func TestRenderTrialPage_XSSProtection(t *testing.T) {
 func TestHandleLogo_Success(t *testing.T) {
 	t.Parallel()
 
-	srv := NewServer(":8880", nil, nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil)
 
 	req := httptest.NewRequest("GET", "/static/logo.png", nil)
 	w := httptest.NewRecorder()
@@ -467,7 +462,7 @@ func TestHandleLogo_Success(t *testing.T) {
 func TestHandleLogo_CacheHeaders(t *testing.T) {
 	t.Parallel()
 
-	srv := NewServer(":8880", nil, nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil)
 
 	req := httptest.NewRequest("GET", "/static/logo.png", nil)
 	w := httptest.NewRecorder()
@@ -481,7 +476,7 @@ func TestHandleLogo_CacheHeaders(t *testing.T) {
 func TestHandleLogo_HEAD(t *testing.T) {
 	t.Parallel()
 
-	srv := NewServer(":8880", nil, nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil)
 
 	req := httptest.NewRequest("HEAD", "/static/logo.png", nil)
 	w := httptest.NewRecorder()
@@ -496,7 +491,7 @@ func TestHandleLogo_HEAD(t *testing.T) {
 func TestRenderTrialPage_TemplateRendersLogo(t *testing.T) {
 	t.Parallel()
 
-	srv := NewServer(":8880", nil, nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil)
 
 	w := httptest.NewRecorder()
 	srv.renderTrialPage(w, "sub1", "https://example.com/sub", "https://t.me/testbot?start=trial_sub1", 3)
@@ -507,7 +502,7 @@ func TestRenderTrialPage_TemplateRendersLogo(t *testing.T) {
 func TestRenderErrorPage_TemplateRendersLogo(t *testing.T) {
 	t.Parallel()
 
-	srv := NewServer(":8880", nil, nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil)
 
 	w := httptest.NewRecorder()
 	srv.renderErrorPage(w, "Test error")
@@ -519,16 +514,12 @@ func TestRenderTrialPage_Golden(t *testing.T) {
 	t.Parallel()
 
 	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
 	cfg := &config.Config{
-		XUIHost:            "http://localhost:2053",
-		XUIInboundID:       1,
-		XUISubPath:         "sub",
 		SiteURL:            "https://example.com",
 		TrialDurationHours: 24,
 	}
 
-	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, nil)
 	defer srv.db.Close()
 
 	subID := "test_sub_123"
@@ -553,16 +544,12 @@ func TestRenderTrialPage_Structure(t *testing.T) {
 	t.Parallel()
 
 	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
 	cfg := &config.Config{
-		XUIHost:            "http://localhost:2053",
-		XUIInboundID:       1,
-		XUISubPath:         "sub",
 		SiteURL:            "https://example.com",
 		TrialDurationHours: 24,
 	}
 
-	srv := NewServer(":8880", mockDB, mockXUI, cfg, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, nil)
 	defer srv.db.Close()
 
 	w := httptest.NewRecorder()

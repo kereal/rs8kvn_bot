@@ -1,0 +1,2 @@
+ALTER TABLE subscriptions ADD COLUMN devices TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE subscriptions ADD COLUMN ips TEXT NOT NULL DEFAULT '[]';

@@ -28,7 +28,6 @@ func TestSend_Success(t *testing.T) {
 	cfg := &config.Config{
 		TelegramBotToken: "test:token",
 		TelegramAdminID:  0,
-		TrafficLimitGB:   30,
 	}
 
 	handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig(), nil, "")
@@ -56,7 +55,6 @@ func TestSend_RateLimitContext(t *testing.T) {
 	cfg := &config.Config{
 		TelegramBotToken: "test:token",
 		TelegramAdminID:  0,
-		TrafficLimitGB:   30,
 	}
 
 	handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig(), nil, "")
@@ -83,7 +81,6 @@ func TestSend_SendError(t *testing.T) {
 	cfg := &config.Config{
 		TelegramBotToken: "test:token",
 		TelegramAdminID:  0,
-		TrafficLimitGB:   30,
 	}
 
 	handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig(), nil, "")
@@ -115,7 +112,6 @@ func TestSend_DisablesWebPagePreview(t *testing.T) {
 	cfg := &config.Config{
 		TelegramBotToken: "test:token",
 		TelegramAdminID:  0,
-		TrafficLimitGB:   30,
 	}
 
 	handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig(), nil, "")
@@ -139,7 +135,6 @@ func TestSafeSend_Success(t *testing.T) {
 	cfg := &config.Config{
 		TelegramBotToken: "test:token",
 		TelegramAdminID:  0,
-		TrafficLimitGB:   30,
 	}
 
 	handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig(), nil, "")
@@ -163,7 +158,6 @@ func TestSafeSend_SendError(t *testing.T) {
 	cfg := &config.Config{
 		TelegramBotToken: "test:token",
 		TelegramAdminID:  0,
-		TrafficLimitGB:   30,
 	}
 
 	handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig(), nil, "")
@@ -189,7 +183,6 @@ func TestSafeSend_WithEditMessage(t *testing.T) {
 	cfg := &config.Config{
 		TelegramBotToken: "test:token",
 		TelegramAdminID:  0,
-		TrafficLimitGB:   30,
 	}
 
 	handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig(), nil, "")
@@ -217,7 +210,6 @@ func TestSendMessage_Success(t *testing.T) {
 	cfg := &config.Config{
 		TelegramBotToken: "test:token",
 		TelegramAdminID:  0,
-		TrafficLimitGB:   30,
 	}
 
 	handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig(), nil, "")
@@ -248,7 +240,6 @@ func TestSendMessage_EmptyMessage(t *testing.T) {
 	cfg := &config.Config{
 		TelegramBotToken: "test:token",
 		TelegramAdminID:  0,
-		TrafficLimitGB:   30,
 	}
 
 	handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig(), nil, "")
@@ -274,7 +265,6 @@ func TestSendMessage_ContextCancellation(t *testing.T) {
 	cfg := &config.Config{
 		TelegramBotToken: "test:token",
 		TelegramAdminID:  0,
-		TrafficLimitGB:   30,
 	}
 
 	handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig(), nil, "")
@@ -304,7 +294,6 @@ func TestSendMessage_SpecialCharacters(t *testing.T) {
 	cfg := &config.Config{
 		TelegramBotToken: "test:token",
 		TelegramAdminID:  0,
-		TrafficLimitGB:   30,
 	}
 
 	handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig(), nil, "")
@@ -334,7 +323,6 @@ func TestSendMessage_Unicode(t *testing.T) {
 	cfg := &config.Config{
 		TelegramBotToken: "test:token",
 		TelegramAdminID:  0,
-		TrafficLimitGB:   30,
 	}
 
 	handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig(), nil, "")
@@ -364,7 +352,6 @@ func TestSendMessage_LongMessage(t *testing.T) {
 	cfg := &config.Config{
 		TelegramBotToken: "test:token",
 		TelegramAdminID:  0,
-		TrafficLimitGB:   30,
 	}
 
 	handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig(), nil, "")
@@ -395,7 +382,6 @@ func TestSendMessage_MultipleMessages(t *testing.T) {
 	cfg := &config.Config{
 		TelegramBotToken: "test:token",
 		TelegramAdminID:  0,
-		TrafficLimitGB:   30,
 	}
 
 	handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig(), nil, "")
@@ -439,7 +425,6 @@ func TestSendMessage_DifferentChatIDs(t *testing.T) {
 			cfg := &config.Config{
 				TelegramBotToken: "test:token",
 				TelegramAdminID:  0,
-				TrafficLimitGB:   30,
 			}
 
 			handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig(), nil, "")
@@ -464,7 +449,6 @@ func TestSend_WithContextTimeout(t *testing.T) {
 	cfg := &config.Config{
 		TelegramBotToken: "test:token",
 		TelegramAdminID:  0,
-		TrafficLimitGB:   30,
 	}
 
 	handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig(), nil, "")
@@ -526,7 +510,6 @@ func TestSafeSend_WithVariousChattables(t *testing.T) {
 			cfg := &config.Config{
 				TelegramBotToken: "test:token",
 				TelegramAdminID:  0,
-				TrafficLimitGB:   30,
 			}
 
 			handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig(), nil, "")
@@ -554,7 +537,6 @@ func TestSend_MultipleConcurrentSends(t *testing.T) {
 	cfg := &config.Config{
 		TelegramBotToken: "test:token",
 		TelegramAdminID:  0,
-		TrafficLimitGB:   30,
 	}
 
 	handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig(), nil, "")
@@ -592,7 +574,6 @@ func TestSendMessage_NilHandler(t *testing.T) {
 	cfg := &config.Config{
 		TelegramBotToken: "test:token",
 		TelegramAdminID:  0,
-		TrafficLimitGB:   30,
 	}
 
 	handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig(), nil, "")
@@ -622,7 +603,6 @@ func TestSend_WithMarkdownText(t *testing.T) {
 	cfg := &config.Config{
 		TelegramBotToken: "test:token",
 		TelegramAdminID:  0,
-		TrafficLimitGB:   30,
 	}
 
 	handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig(), nil, "")

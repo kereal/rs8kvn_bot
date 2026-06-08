@@ -226,9 +226,9 @@ func (h *Handler) HandleBroadcast(ctx context.Context, update tgbotapi.Update) e
 	)
 
 	var (
-		successCount      int64 = 0
-		failCount         int64 = 0
-		batchErr          error
+		successCount       int64 = 0
+		failCount          int64 = 0
+		batchErr           error
 		broadcastCancelled bool // set when ctx is cancelled mid-broadcast; guarantees we always reach wg.Wait() + final report
 	)
 	offset := 0

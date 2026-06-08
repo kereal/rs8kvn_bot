@@ -1,0 +1,11 @@
+CREATE TABLE IF NOT EXISTS sources (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name VARCHAR(255) NOT NULL,
+    active INTEGER DEFAULT 1,
+    x_ui_host VARCHAR(255),
+    x_ui_api_token VARCHAR(255),
+    x_ui_inbound_id INTEGER NOT NULL,
+    sub_url VARCHAR(512) NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);

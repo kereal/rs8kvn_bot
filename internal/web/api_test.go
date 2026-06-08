@@ -11,11 +11,11 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"gorm.io/gorm"
 
 	"rs8kvn_bot/internal/bot"
 	"rs8kvn_bot/internal/config"
 	"rs8kvn_bot/internal/database"
+	"rs8kvn_bot/internal/interfaces"
 	"rs8kvn_bot/internal/service"
 	"rs8kvn_bot/internal/testutil"
 	"rs8kvn_bot/internal/webhook"
@@ -28,17 +28,30 @@ func newTestAPIServer(t *testing.T, cfg *config.Config, mockDB *testutil.MockDat
 	if cfg.APIToken == "" {
 		cfg.APIToken = "test-api-token"
 	}
-	if cfg.XUIHost == "" {
-		cfg.XUIHost = "http://localhost:2053"
-	}
-	if cfg.XUIInboundID == 0 {
-		cfg.XUIInboundID = 1
+	if len(cfg.Sources) == 0 {
+		cfg.Sources = []config.Source{
+			{ID: 1, Name: "test", XUIHost: "http://localhost:2053", XUIInboundID: 1, Active: true},
+		}
 	}
 
 	botConfig := &bot.BotConfig{Username: "testbot"}
-	subService := service.NewSubscriptionService(mockDB, mockXUI, cfg, &webhook.NoopSender{})
 
-	return NewServer(":0", mockDB, mockXUI, cfg, botConfig, subService, nil)
+	dbSources := make([]database.Source, len(cfg.Sources))
+	for i, s := range cfg.Sources {
+		dbSources[i] = database.Source{
+			ID:           s.ID,
+			Name:         s.Name,
+			Active:       s.Active,XUIHost:      s.XUIHost,
+			XUIAPIToken:  s.XUIAPIToken,
+			XUIInboundID: s.XUIInboundID,
+			SubURL:       s.SubURL,
+		}
+	}
+
+	xuiClients := map[uint]interfaces.XUIClient{1: mockXUI}
+	subService := service.NewSubscriptionService(mockDB, xuiClients, dbSources, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
+
+	return NewServer(":0", mockDB, cfg, botConfig, subService, nil)
 }
 
 func TestGetSubscriptions_Success(t *testing.T) {
@@ -198,62 +211,6 @@ func TestGetSubscriptions_FiltersInactiveSubscriptions(t *testing.T) {
 	sub := subs[0].(map[string]interface{})
 	assert.Equal(t, "client-active", sub["id"])
 	assert.Equal(t, "active_user", sub["email"])
-}
-
-func TestGetSubscriptions_FiltersSoftDeleted(t *testing.T) {
-	t.Parallel()
-
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	cfg := &config.Config{}
-
-	s := newTestAPIServer(t, cfg, mockDB, mockXUI)
-
-	now := time.Now().Truncate(time.Second)
-	deletedAt := now.Add(-1 * time.Hour)
-
-	mockDB.GetAllSubscriptionsFunc = func(ctx context.Context) ([]database.Subscription, error) {
-		return []database.Subscription{
-			{
-				ID:             1,
-				TelegramID:     123456,
-				Username:       "active_user",
-				ClientID:       "client-active",
-				SubscriptionID: "token-active",
-				Status:         "active",
-				CreatedAt:      now,
-			},
-			{
-				ID:             2,
-				TelegramID:     789012,
-				Username:       "deleted_user",
-				ClientID:       "client-deleted",
-				SubscriptionID: "token-deleted",
-				Status:         "active",
-				CreatedAt:      now,
-				DeletedAt:      gorm.DeletedAt{Time: deletedAt, Valid: true},
-			},
-		}, nil
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/subscriptions", nil)
-	req.Header.Set("Authorization", "Bearer test-api-token")
-	rec := httptest.NewRecorder()
-
-	s.GetSubscriptions(rec, req)
-
-	assert.Equal(t, http.StatusOK, rec.Code)
-
-	var response map[string]interface{}
-	err := json.NewDecoder(rec.Body).Decode(&response)
-	require.NoError(t, err)
-
-	subs, ok := response["subscriptions"].([]interface{})
-	require.True(t, ok)
-	assert.Len(t, subs, 1, "soft-deleted subscription should be filtered out")
-
-	sub := subs[0].(map[string]interface{})
-	assert.Equal(t, "client-active", sub["id"])
 }
 
 func TestGetSubscriptions_DatabaseError(t *testing.T) {
@@ -455,59 +412,6 @@ func TestGetSubscriptions_MixedStatuses(t *testing.T) {
 		subMap := sub.(map[string]interface{})
 		assert.Equal(t, true, subMap["enabled"], "subscription %d should have enabled=true", i)
 	}
-}
-
-func TestGetSubscriptions_ActiveButSoftDeleted(t *testing.T) {
-	t.Parallel()
-
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	cfg := &config.Config{}
-
-	s := newTestAPIServer(t, cfg, mockDB, mockXUI)
-
-	now := time.Now().Truncate(time.Second)
-
-	mockDB.GetAllSubscriptionsFunc = func(ctx context.Context) ([]database.Subscription, error) {
-		return []database.Subscription{
-			{
-				ID:             1,
-				ClientID:       "active-not-deleted",
-				Username:       "user1",
-				SubscriptionID: "token1",
-				Status:         "active",
-				CreatedAt:      now,
-			},
-			{
-				ID:             2,
-				ClientID:       "active-but-deleted",
-				Username:       "user2",
-				SubscriptionID: "token2",
-				Status:         "active",
-				CreatedAt:      now,
-				DeletedAt:      gorm.DeletedAt{Time: now, Valid: true},
-			},
-		}, nil
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/subscriptions", nil)
-	req.Header.Set("Authorization", "Bearer test-api-token")
-	rec := httptest.NewRecorder()
-
-	s.GetSubscriptions(rec, req)
-
-	assert.Equal(t, http.StatusOK, rec.Code)
-
-	var response map[string]interface{}
-	err := json.NewDecoder(rec.Body).Decode(&response)
-	require.NoError(t, err)
-
-	subs, ok := response["subscriptions"].([]interface{})
-	require.True(t, ok)
-	assert.Len(t, subs, 1)
-
-	sub := subs[0].(map[string]interface{})
-	assert.Equal(t, "active-not-deleted", sub["id"])
 }
 
 func TestGetSubscriptions_LargeDataset(t *testing.T) {

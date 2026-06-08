@@ -82,20 +82,20 @@ type ClientTraffic struct {
 }
 
 type Inbound struct {
-	ID             int    `json:"id"`
-	Up             int    `json:"up"`
-	Down           int    `json:"down"`
-	Total          int    `json:"total"`
-	Remark        string `json:"remark"`
-	Enable        bool   `json:"enable"`
-	ExpiryTime    int64  `json:"expiryTime"`
-	Listen        string `json:"listen"`
-	Port         int    `json:"port"`
-	Protocol     string `json:"protocol"`
+	ID             int             `json:"id"`
+	Up             int             `json:"up"`
+	Down           int             `json:"down"`
+	Total          int             `json:"total"`
+	Remark         string          `json:"remark"`
+	Enable         bool            `json:"enable"`
+	ExpiryTime     int64           `json:"expiryTime"`
+	Listen         string          `json:"listen"`
+	Port           int             `json:"port"`
+	Protocol       string          `json:"protocol"`
 	Settings       json.RawMessage `json:"settings"`
 	StreamSettings json.RawMessage `json:"streamSettings"`
-	Tag          string `json:"tag"`
-	Sniffing     json.RawMessage `json:"sniffing"`
+	Tag            string          `json:"tag"`
+	Sniffing       json.RawMessage `json:"sniffing"`
 }
 
 func (in *Inbound) GetTransport() string {
@@ -216,6 +216,36 @@ func (c *Client) AddClient(ctx context.Context, inboundID int, email string, tra
 }
 
 func (c *Client) AddClientWithID(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*ClientConfig, error) {
+	if inboundID < 1 {
+		return nil, fmt.Errorf("invalid inbound ID: %d", inboundID)
+	}
+	if clientID == "" {
+		return nil, fmt.Errorf("client ID cannot be empty")
+	}
+	if subID == "" {
+		return nil, fmt.Errorf("subscription ID cannot be empty")
+	}
+
+	if resetDays < 0 {
+		resetDays = config.SubscriptionResetDay
+	}
+
+	flow, flowErr := c.getRequiredFlow(ctx, inboundID)
+	if flowErr != nil {
+		return nil, fmt.Errorf("failed to determine flow: %w", flowErr)
+	}
+
+	var result *ClientConfig
+	errRetry := RetryWithBackoff(ctx, config.XUIMaxRetries, config.XUIInitialRetryDelay, func() error {
+		var innerErr error
+		result, innerErr = c.doAddClientWithID(ctx, inboundID, email, clientID, subID, trafficBytes, expiryTime, resetDays, flow)
+		return innerErr
+	})
+	return result, errRetry
+}
+
+// AddTrialClient adds a trial client to a single source and returns the created client.
+func (c *Client) AddTrialClient(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*ClientConfig, error) {
 	if inboundID < 1 {
 		return nil, fmt.Errorf("invalid inbound ID: %d", inboundID)
 	}
@@ -409,6 +439,8 @@ func (c *Client) GetClientTraffic(ctx context.Context, email string) (*ClientTra
 	return result, err
 }
 
+var ErrClientNotFound = errors.New("client not found")
+
 func (c *Client) doGetClientTraffic(ctx context.Context, email string) (*ClientTraffic, error) {
 	trafficURL := fmt.Sprintf("%s/panel/api/clients/traffic/%s", c.host, url.PathEscape(email))
 
@@ -423,6 +455,9 @@ func (c *Client) doGetClientTraffic(ctx context.Context, email string) (*ClientT
 	}
 
 	if !apiResp.Success {
+		if strings.Contains(strings.ToLower(apiResp.Msg), "client not found") {
+			return nil, ErrClientNotFound
+		}
 		return nil, fmt.Errorf("failed to get client traffic: %s", apiResp.Msg)
 	}
 
@@ -474,27 +509,11 @@ func (c *Client) getRequiredFlow(ctx context.Context, inboundID int) (string, er
 	return inbound.GetRequiredFlow(), nil
 }
 
-func (c *Client) GetSubscriptionLink(baseURL, subID, subPath string) string {
-	return fmt.Sprintf("%s/%s/%s", strings.TrimSuffix(baseURL, "/"), subPath, subID)
-}
-
-func (c *Client) GetExternalURL(host string) string {
-	return GetExternalURL(host)
-}
-
 func (c *Client) Close() error {
 	if c.transport != nil {
 		c.transport.CloseIdleConnections()
 	}
 	return nil
-}
-
-func GetExternalURL(host string) string {
-	u, err := url.Parse(host)
-	if err != nil || u.Scheme == "" || u.Host == "" {
-		return host
-	}
-	return fmt.Sprintf("%s://%s", u.Scheme, u.Host)
 }
 
 func getExpiryTimeMillis(expiryTime time.Time) int64 {
@@ -513,7 +532,7 @@ func truncateString(s string, maxLen int) string {
 
 func isRetryable(err error) bool {
 	if err == nil {
-		return true
+		return false
 	}
 	var dnsErr *net.DNSError
 	if errors.As(err, &dnsErr) {
@@ -551,7 +570,7 @@ func RetryWithBackoff(ctx context.Context, maxRetries int, initialDelay time.Dur
 		}
 
 		if !isRetryable(err) {
-			logger.Warn("Non-retryable XUI error, failing immediately",
+			logger.Error("Non-retryable XUI error, failing immediately",
 				zap.Error(err))
 			return err
 		}
@@ -573,7 +592,7 @@ func RetryWithBackoff(ctx context.Context, maxRetries int, initialDelay time.Dur
 		}
 	}
 
-	logger.Warn("XUI operation failed after retries",
+	logger.Error("XUI operation failed after retries",
 		zap.Int("retries", maxRetries),
 		zap.Error(lastErr))
 

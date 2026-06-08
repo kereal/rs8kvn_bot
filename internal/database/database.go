@@ -4,12 +4,14 @@ import (
 	"context"
 	"database/sql"
 	"embed"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"rs8kvn_bot/internal/config"
@@ -32,29 +34,102 @@ var ErrInviteNotFound = errors.New("invite not found")
 //go:embed migrations/*.sql
 var migrationFiles embed.FS
 
+const (
+	TrialPlanName = "trial"
+	FreePlanName  = "free"
+)
+
 // Subscription represents a user's VPN subscription.
 type Subscription struct {
-	ID              uint           `gorm:"primaryKey"`
-	TelegramID      int64          `gorm:"index"`
-	Username        string         `gorm:"size:255;index"`
-	ClientID        string         `gorm:"size:255"`
-	SubscriptionID  string         `gorm:"size:255;index"`
-	InboundID       int            `gorm:"index"`
-	TrafficLimit    int64          `gorm:"default:107374182400"`
-	ExpiryTime      time.Time      `gorm:"index:idx_expiry"`
-	Status          string         `gorm:"default:active;size:50;index"`
-	SubscriptionURL string         `gorm:"size:512;column:subscription_url"`
-	InviteCode      string         `gorm:"size:16;index"`
-	IsTrial         bool           `gorm:"default:false;index"`
-	ReferredBy      int64          `gorm:"index"`
-	CreatedAt       time.Time      `gorm:"autoCreateTime"`
-	UpdatedAt       time.Time      `gorm:"autoUpdateTime"`
-	DeletedAt       gorm.DeletedAt `gorm:"index"`
+	ID             uint      `gorm:"primaryKey"`
+	TelegramID     int64     `gorm:"index"`
+	Username       string    `gorm:"size:255;index"`
+	ClientID       string    `gorm:"size:255"`
+	SubscriptionID string    `gorm:"size:255;index"`
+	ExpiryTime     time.Time `gorm:"index:idx_expiry"`
+	Status         string    `gorm:"default:active;size:50;index"`
+	InviteCode     string    `gorm:"size:16;index"`
+	PlanID         uint      `gorm:"index"`
+	ReferredBy     int64     `gorm:"index"`
+	Devices        string    `gorm:"type:text;default:'[]'"` // JSON array of {header_key: value} device entries
+	Ips            string    `gorm:"type:text;default:'[]'"` // JSON array of {ip: timestamp} entries
+	CreatedAt      time.Time `gorm:"autoCreateTime"`
+	UpdatedAt      time.Time `gorm:"autoUpdateTime"`
+}
+
+// Source represents a configured 3x-ui panel source.
+type Source struct {
+	ID           uint      `gorm:"primaryKey;column:id"`
+	Name         string    `gorm:"size:255;column:name"`
+	Active       bool      `gorm:"default:true;column:active"`
+	XUIHost      string    `gorm:"size:255;column:x_ui_host"`
+	XUIAPIToken  string    `gorm:"size:255;column:x_ui_api_token"`
+	XUIInboundID int       `gorm:"not null;column:x_ui_inbound_id"`
+	SubURL       string    `gorm:"size:512;column:sub_url"`
+	CreatedAt    time.Time `gorm:"autoCreateTime;column:created_at"`
+	UpdatedAt    time.Time `gorm:"autoUpdateTime;column:updated_at"`
+}
+
+// Plan represents a subscription plan.
+type Plan struct {
+	ID           uint      `gorm:"primaryKey;column:id"`
+	Name         string    `gorm:"size:50;uniqueIndex;column:name"`
+	Price        float64   `gorm:"default:0;column:price"`
+	DevicesLimit int       `gorm:"default:1;column:devices_limit"`
+	TrafficLimit int64     `gorm:"default:0;column:traffic_limit"`
+	Duration     int       `gorm:"default:0;column:duration"` // hours, 0=unlimited
+	CreatedAt    time.Time `gorm:"autoCreateTime;column:created_at"`
+	UpdatedAt    time.Time `gorm:"autoUpdateTime;column:updated_at"`
+}
+
+// PlanSource is the join model for M2M between Plan and Source.
+type PlanSource struct {
+	PlanID   uint `gorm:"primaryKey;column:plan_id"`
+	SourceID uint `gorm:"primaryKey;column:source_id"`
+}
+
+// Invite represents a referral invite code.
+type Invite struct {
+	Code         string    `gorm:"primaryKey;size:16"`
+	ReferrerTGID int64     `gorm:"index;not null"`
+	CreatedAt    time.Time `gorm:"autoCreateTime"`
+}
+
+// TrialRequest tracks trial requests for rate limiting.
+type TrialRequest struct {
+	ID        uint      `gorm:"primaryKey"`
+	IP        string    `gorm:"size:45;index"`
+	CreatedAt time.Time `gorm:"autoCreateTime"`
+}
+
+// TableName returns the table name for Source.
+func (Source) TableName() string {
+	return "sources"
+}
+
+// TableName returns the table name for Plan.
+func (Plan) TableName() string {
+	return "plans"
+}
+
+// TableName returns the table name for PlanSource.
+func (PlanSource) TableName() string {
+	return "plan_sources"
 }
 
 // TableName returns the table name for Subscription.
 func (Subscription) TableName() string {
 	return "subscriptions"
+}
+
+// TableName returns the table name for Invite.
+func (Invite) TableName() string {
+	return "invites"
+}
+
+// TableName returns the table name for TrialRequest.
+func (TrialRequest) TableName() string {
+	return "trial_requests"
 }
 
 // IsExpired returns true if the subscription has expired.
@@ -71,28 +146,55 @@ func (s *Subscription) IsActive() bool {
 	return s.Status == "active" && !s.IsExpired()
 }
 
-// Invite represents a referral invite code.
-type Invite struct {
-	Code         string    `gorm:"primaryKey;size:16"`
-	ReferrerTGID int64     `gorm:"index;not null"`
-	CreatedAt    time.Time `gorm:"autoCreateTime"`
+// GetDevices parses the Devices JSON string into a slice of header maps.
+func (s *Subscription) GetDevices() ([]map[string]string, error) {
+	if s.Devices == "" {
+		return []map[string]string{}, nil
+	}
+	var devices []map[string]string
+	if err := json.Unmarshal([]byte(s.Devices), &devices); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal devices: %w", err)
+	}
+	return devices, nil
 }
 
-// TableName returns the table name for Invite.
-func (Invite) TableName() string {
-	return "invites"
+// SetDevices serializes a slice of header maps into the Devices JSON string.
+func (s *Subscription) SetDevices(devices []map[string]string) error {
+	data, err := json.Marshal(devices)
+	if err != nil {
+		return fmt.Errorf("failed to marshal devices: %w", err)
+	}
+	s.Devices = string(data)
+	return nil
 }
 
-// TrialRequest tracks trial requests for rate limiting.
-type TrialRequest struct {
-	ID        uint      `gorm:"primaryKey"`
-	IP        string    `gorm:"size:45;index"`
-	CreatedAt time.Time `gorm:"autoCreateTime"`
+// GetIPs parses the Ips JSON string into a slice of ip->timestamp maps.
+func (s *Subscription) GetIPs() ([]map[string]string, error) {
+	if s.Ips == "" {
+		return []map[string]string{}, nil
+	}
+	var ips []map[string]string
+	if err := json.Unmarshal([]byte(s.Ips), &ips); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal ips: %w", err)
+	}
+	return ips, nil
 }
 
-// TableName returns the table name for TrialRequest.
-func (TrialRequest) TableName() string {
-	return "trial_requests"
+// SetIPs serializes a slice of ip->timestamp maps into the Ips JSON string.
+func (s *Subscription) SetIPs(ips []map[string]string) error {
+	data, err := json.Marshal(ips)
+	if err != nil {
+		return fmt.Errorf("failed to marshal ips: %w", err)
+	}
+	s.Ips = string(data)
+	return nil
+}
+
+// SubscriptionFull holds a subscription together with its plan and active sources.
+type SubscriptionFull struct {
+	Subscription
+	Plan    Plan
+	Sources []Source
 }
 
 // runMigrations applies the embedded SQL schema migrations to the provided database,
@@ -106,114 +208,35 @@ func (TrialRequest) TableName() string {
 //
 // The function returns an error if creating migration drivers or applying migrations fails.
 func runMigrations(sqlDB *sql.DB) error {
-	var err error
-
-	// Check if subscriptions table exists and its structure
-	var tableExists int
-	if err := sqlDB.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='subscriptions'").Scan(&tableExists); err != nil {
-		logger.Warn("Failed to check subscriptions table", zap.Error(err))
-		tableExists = 0
+	// Determine SQLite version to verify features (DROP COLUMN, RETURNING) availability
+	var sqliteVersion string
+	if err := sqlDB.QueryRow("select sqlite_version()").Scan(&sqliteVersion); err == nil {
+		logger.Info("SQLite version detected", zap.String("version", sqliteVersion))
+	} else {
+		logger.Warn("Failed to detect SQLite version", zap.Error(err))
 	}
 
-	var xuiHostExists, subIDExists int
-	if tableExists > 0 {
-		if err := sqlDB.QueryRow("SELECT COUNT(*) FROM pragma_table_info('subscriptions') WHERE name = 'x_ui_host'").Scan(&xuiHostExists); err != nil {
-			logger.Warn("Failed to check x_ui_host column", zap.Error(err))
-			xuiHostExists = 0
+	const minSQLiteForDropAndReturning = "3.35.0"
+	// If embedded migrations contain potentially incompatible SQL, fail early on older SQLite
+	if sqliteVersion != "" {
+		// simple semver compare: major.minor.patch
+		parse := func(v string) (int, int, int) {
+			var a, b, c int
+			fmt.Sscanf(v, "%d.%d.%d", &a, &b, &c)
+			return a, b, c
 		}
-		if err := sqlDB.QueryRow("SELECT COUNT(*) FROM pragma_table_info('subscriptions') WHERE name = 'subscription_id'").Scan(&subIDExists); err != nil {
-			logger.Warn("Failed to check subscription_id column", zap.Error(err))
-			subIDExists = 0
-		}
-	}
-
-	// Legacy database: has subscriptions table but missing subscription_id column
-	if tableExists > 0 && subIDExists == 0 {
-		logger.Info("Running legacy migration 001 (old subscriptions table found)")
-
-		// Add subscription_id column if not exists
-		if subIDExists == 0 {
-			_, err = sqlDB.Exec("ALTER TABLE subscriptions ADD COLUMN subscription_id VARCHAR(255)")
-			if err != nil {
-				logger.Warn("Migration 001 ADD COLUMN failed", zap.String("error", err.Error()))
-			}
-		}
-
-		// Update subscription_id from subscription_url (extract UUID after /s/)
-		_, err = sqlDB.Exec(`
-			UPDATE subscriptions
-			SET subscription_id = SUBSTR(subscription_url, INSTR(subscription_url, '/s/') + 3)
-			WHERE subscription_url LIKE '%/s/%';
-		`)
-		if err != nil {
-			logger.Warn("Migration 001 UPDATE subscription_id failed", zap.String("error", err.Error()))
-		}
-
-		// Drop x_ui_host column if exists
-		if xuiHostExists > 0 {
-			_, err = sqlDB.Exec("ALTER TABLE subscriptions DROP COLUMN x_ui_host")
-			if err != nil {
-				logger.Warn("Migration 001 DROP COLUMN x_ui_host failed", zap.String("error", err.Error()))
-			}
-		}
-
-		logger.Info("Legacy migration 001 applied")
-	} else if tableExists == 0 {
-		// Fresh database - will be created by migration 000
-		logger.Info("No legacy migration needed - fresh database")
-	}
-
-	// Check if referral columns already exist (used only for legacy bootstrap detection)
-	var hasInviteCode, hasIsTrial, hasReferredBy int
-	if tableExists > 0 {
-		if err := sqlDB.QueryRow("SELECT COUNT(*) FROM pragma_table_info('subscriptions') WHERE name = 'invite_code'").Scan(&hasInviteCode); err != nil {
-			logger.Warn("Failed to check invite_code column", zap.Error(err))
-		}
-		if err := sqlDB.QueryRow("SELECT COUNT(*) FROM pragma_table_info('subscriptions') WHERE name = 'is_trial'").Scan(&hasIsTrial); err != nil {
-			logger.Warn("Failed to check is_trial column", zap.Error(err))
-		}
-		if err := sqlDB.QueryRow("SELECT COUNT(*) FROM pragma_table_info('subscriptions') WHERE name = 'referred_by'").Scan(&hasReferredBy); err != nil {
-			logger.Warn("Failed to check referred_by column", zap.Error(err))
-		}
-	}
-
-	// Legacy referral bootstrap (IMPROVED):
-	// If referral columns exist (added outside migrations before 003) but schema_migrations
-	// is missing or version < 3, we do a one-time m.Force(3).
-	// CRITICAL: unlike the old hack, we do NOT early-return here.
-	// This allows golang-migrate to continue and apply all later migrations (004, 005, ...).
-	referralColumnsPresent := hasInviteCode > 0 || hasIsTrial > 0 || hasReferredBy > 0
-
-	currentVersion := 0
-	hasSchemaTable := false
-	if err := sqlDB.QueryRow(`SELECT COALESCE(MAX(version), 0) FROM schema_migrations`).Scan(&currentVersion); err == nil {
-		hasSchemaTable = true
-	}
-
-	if referralColumnsPresent && (!hasSchemaTable || currentVersion < 3) {
-		logger.Info("Legacy referral columns detected with outdated migration version — one-time bootstrap to version 3 (future migrations 004+ will now apply)",
-			zap.Int("detected_version", currentVersion))
-
-		// Create a temporary migrate instance solely to perform Force(3).
-		// Errors here are non-fatal — we still attempt normal Up() below.
-		if src, srcErr := iofs.New(migrationFiles, "migrations"); srcErr == nil {
-			if drv, drvErr := sqlite.WithInstance(sqlDB, &sqlite.Config{}); drvErr == nil {
-				if mForce, mErr := migrate.NewWithInstance("iofs", src, "sqlite", drv); mErr == nil && mForce != nil {
-					if fErr := mForce.Force(3); fErr != nil {
-						logger.Warn("m.Force(3) during referral bootstrap failed (will still try normal Up)", zap.Error(fErr))
-					} else {
-						logger.Info("Referral bootstrap: forced schema_migrations to version 3")
-					}
+		va, vb, vc := parse(sqliteVersion)
+		ma, mb, mc := parse(minSQLiteForDropAndReturning)
+		if va < ma || (va == ma && vb < mb) || (va == ma && vb == mb && vc < mc) {
+			// scan embedded migrations for DROP COLUMN or RETURNING usage
+			if bytes, _ := migrationFiles.ReadFile("migrations/006_create_sources.up.sql"); bytes != nil {
+				content := string(bytes)
+				if strings.Contains(strings.ToUpper(content), "DROP COLUMN") || strings.Contains(strings.ToUpper(content), "RETURNING") {
+					return fmt.Errorf("SQLite version %s does not support required SQL features (DROP COLUMN/RETURNING). Upgrade SQLite to >= %s or run compatible migrations manually", sqliteVersion, minSQLiteForDropAndReturning)
 				}
 			}
 		}
-		// Fall through intentionally — do not return. Normal migration path below will run m.Up().
 	}
-
-	// Do NOT drop schema_migrations here.
-	// golang-migrate manages this table. Dropping it on every start would make
-	// it re-apply all migrations from 000 (including 003 "ADD COLUMN" which fails
-	// on already-migrated DBs). We only ever use m.Force when needed for legacy bootstrap.
 
 	// Create embedded source driver from migrationFiles
 	sourceDriver, err := iofs.New(migrationFiles, "migrations")
@@ -233,9 +256,29 @@ func runMigrations(sqlDB *sql.DB) error {
 	}
 
 	// Get current version before migration
-	versionBefore, _, _ := m.Version()
+	versionBefore, dirtyBefore, _ := m.Version()
+
+	if dirtyBefore {
+		currentVer := int(versionBefore)
+		logger.Warn("Database is in dirty state, forcing migration back",
+			zap.Int("current_version", currentVer))
+		if err := m.Force(currentVer - 1); err != nil {
+			return fmt.Errorf("failed to force migration version: %w", err)
+		}
+	}
 
 	if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
+		if strings.Contains(err.Error(), "file does not exist") || strings.Contains(err.Error(), "read down for version") {
+			forceVer := int(versionBefore) - 1
+			logger.Warn("Missing migration file detected, forcing version to last known good state",
+				zap.Int("forced_version", forceVer))
+			if forceErr := m.Force(forceVer); forceErr != nil {
+				return fmt.Errorf("migration failed: %w; additionally failed to force version: %w", err, forceErr)
+			}
+			logger.Info("Database version forced due to missing migration files",
+				zap.Int("forced_version", forceVer))
+			return nil
+		}
 		return fmt.Errorf("migration failed: %w", err)
 	}
 
@@ -293,6 +336,32 @@ func NewService(dbPath string) (*Service, error) {
 		return nil, fmt.Errorf("database connection test failed: %w", err)
 	}
 
+	// Seed default plans if none exist
+	var count int64
+	if err := db.WithContext(context.Background()).Model(&Plan{}).Count(&count).Error; err != nil {
+		return nil, fmt.Errorf("failed to count default plans: %w", err)
+	}
+	if count == 0 {
+		if err := db.WithContext(context.Background()).Create(&Plan{
+			Name:         TrialPlanName,
+			Price:        0,
+			DevicesLimit: 1,
+			TrafficLimit: 1073741824,
+			Duration:     3,
+		}).Error; err != nil {
+			return nil, fmt.Errorf("failed to seed default trial plan: %w", err)
+		}
+		if err := db.WithContext(context.Background()).Create(&Plan{
+			Name:         FreePlanName,
+			Price:        0,
+			DevicesLimit: 1,
+			TrafficLimit: 53687091200,
+			Duration:     0,
+		}).Error; err != nil {
+			return nil, fmt.Errorf("failed to seed default free plan: %w", err)
+		}
+		logger.Info("Inserted default trial/free plans")
+	}
 	return &Service{db: db}, nil
 }
 
@@ -368,13 +437,27 @@ func (s *Service) GetByID(ctx context.Context, id uint) (*Subscription, error) {
 }
 
 // CreateSubscription creates a new subscription and revokes any existing active subscriptions.
-func (s *Service) CreateSubscription(ctx context.Context, sub *Subscription) error {
+// If inviteCode is non-empty and resolves to a valid Invite, sub.InviteCode and sub.ReferredBy
+// are populated atomically inside the same transaction.
+func (s *Service) CreateSubscription(ctx context.Context, sub *Subscription, inviteCode string) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// Revoke any existing active subscriptions for this user
 		if err := tx.Model(&Subscription{}).
 			Where("telegram_id = ? AND status = ?", sub.TelegramID, "active").
 			Update("status", "revoked").Error; err != nil {
 			return fmt.Errorf("failed to revoke old subscription: %w", err)
+		}
+
+		// Resolve referral invite atomically. A missing invite is non-fatal:
+		// the subscription is still created without referral attribution.
+		if inviteCode != "" {
+			var inv Invite
+			if err := tx.Where("code = ?", inviteCode).First(&inv).Error; err == nil {
+				sub.InviteCode = inviteCode
+				sub.ReferredBy = inv.ReferrerTGID
+			} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return fmt.Errorf("failed to resolve invite: %w", err)
+			}
 		}
 
 		// Create the new subscription
@@ -390,7 +473,7 @@ func (s *Service) CreateSubscription(ctx context.Context, sub *Subscription) err
 func (s *Service) UpdateSubscription(ctx context.Context, sub *Subscription) error {
 	result := s.db.WithContext(ctx).Model(&Subscription{}).
 		Where("id = ?", sub.ID).
-		Select("telegram_id", "username", "client_id", "subscription_id", "inbound_id", "traffic_limit", "expiry_time", "status", "subscription_url", "invite_code", "is_trial", "referred_by").
+		Select("telegram_id", "username", "client_id", "subscription_id", "expiry_time", "status", "invite_code", "plan_id", "referred_by", "devices", "ips").
 		Updates(sub)
 	if result.Error != nil {
 		return fmt.Errorf("failed to update subscription: %w", result.Error)
@@ -398,13 +481,101 @@ func (s *Service) UpdateSubscription(ctx context.Context, sub *Subscription) err
 	return nil
 }
 
-// DeleteSubscription soft-deletes a subscription.
+// DeleteSubscription deletes a subscription.
 func (s *Service) DeleteSubscription(ctx context.Context, telegramID int64) error {
 	result := s.db.WithContext(ctx).Where("telegram_id = ?", telegramID).Delete(&Subscription{})
 	if result.Error != nil {
 		return fmt.Errorf("failed to delete subscription: %w", result.Error)
 	}
 	return nil
+}
+
+// ListSources returns all configured sources.
+func (s *Service) ListSources(ctx context.Context) ([]Source, error) {
+	var sources []Source
+	result := s.db.WithContext(ctx).Find(&sources)
+	if result.Error != nil {
+		return nil, fmt.Errorf("failed to list sources: %w", result.Error)
+	}
+	return sources, nil
+}
+
+// GetSourcesByPlanName returns sources for the plan with the given name.
+func (s *Service) GetSourcesByPlanName(ctx context.Context, planName string) ([]Source, error) {
+	var sources []Source
+	result := s.db.WithContext(ctx).
+		Table("sources").
+		Select("sources.*").
+		Joins("JOIN plan_sources ON plan_sources.source_id = sources.id").
+		Joins("JOIN plans ON plans.id = plan_sources.plan_id").
+		Where("plans.name = ?", planName).
+		Find(&sources)
+	if result.Error != nil {
+		return nil, fmt.Errorf("failed to get sources by plan name: %w", result.Error)
+	}
+	return sources, nil
+}
+
+// GetPlanByName returns a plan by its name.
+func (s *Service) GetPlanByName(ctx context.Context, name string) (*Plan, error) {
+	var plan Plan
+	result := s.db.WithContext(ctx).Where("name = ?", name).First(&plan)
+	if result.Error != nil {
+		return nil, fmt.Errorf("failed to get plan by name: %w", result.Error)
+	}
+	return &plan, nil
+}
+
+// GetPlanByID returns a plan by its ID.
+func (s *Service) GetPlanByID(ctx context.Context, id uint) (*Plan, error) {
+	var plan Plan
+	result := s.db.WithContext(ctx).First(&plan, id)
+	if result.Error != nil {
+		return nil, fmt.Errorf("failed to get plan by id: %w", result.Error)
+	}
+	return &plan, nil
+}
+
+// IsSourcesEmpty returns true if no sources exist in the database.
+func (s *Service) IsSourcesEmpty(ctx context.Context) (bool, error) {
+	var count int64
+	result := s.db.WithContext(ctx).Model(&Source{}).Count(&count)
+	if result.Error != nil {
+		return false, fmt.Errorf("failed to count sources: %w", result.Error)
+	}
+	return count == 0, nil
+}
+
+// SeedDefaultSource inserts the default source from environment variables if the sources table is empty.
+// It also links all existing plans to the new source and assigns the free plan to legacy subscriptions.
+func (s *Service) SeedDefaultSource(ctx context.Context, name, xuiHost, xuiAPIToken string, xuiInboundID int, subURL string) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		source := Source{
+			Name:         name,
+			Active:       true,
+			XUIHost:      xuiHost,
+			XUIAPIToken:  xuiAPIToken,
+			XUIInboundID: xuiInboundID,
+			SubURL:       subURL,
+		}
+		if err := tx.Create(&source).Error; err != nil {
+			return err
+		}
+		var plans []Plan
+		if err := tx.Find(&plans).Error; err != nil {
+			return err
+		}
+		for _, p := range plans {
+			ps := PlanSource{PlanID: p.ID, SourceID: source.ID}
+			if err := tx.Create(&ps).Error; err != nil {
+				return fmt.Errorf("failed to link plan %d to source %d: %w", p.ID, source.ID, err)
+			}
+		}
+		return tx.Exec(
+			`UPDATE subscriptions SET plan_id = (SELECT id FROM plans WHERE name = ?) WHERE plan_id IS NULL`,
+			FreePlanName,
+		).Error
+	})
 }
 
 // GetLatestSubscriptions retrieves the latest N subscriptions ordered by creation date.
@@ -524,7 +695,7 @@ func (s *Service) GetTelegramIDsBatch(ctx context.Context, offset, limit int) ([
 	return ids, nil
 }
 
-	// GetTotalTelegramIDCount returns the total count of unique Telegram IDs.
+// GetTotalTelegramIDCount returns the total count of unique Telegram IDs.
 func (s *Service) GetTotalTelegramIDCount(ctx context.Context) (int64, error) {
 	var count int64
 	result := s.db.WithContext(ctx).
@@ -636,23 +807,33 @@ func (s *Service) GetAllReferralCounts(ctx context.Context) (map[int64]int64, er
 }
 
 // CreateTrialSubscription creates a new trial subscription.
-func (s *Service) CreateTrialSubscription(ctx context.Context, inviteCode, subscriptionID, clientID string, inboundID int, trafficBytes int64, expiryTime time.Time, subURL string) (*Subscription, error) {
+func (s *Service) CreateTrialSubscription(ctx context.Context, inviteCode, subscriptionID, clientID string, expiryTime time.Time) (*Subscription, error) {
+	planID, err := s.resolveTrialPlanID(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	sub := &Subscription{
-		TelegramID:      0,
-		SubscriptionID:  subscriptionID,
-		ClientID:        clientID,
-		InviteCode:      inviteCode,
-		InboundID:       inboundID,
-		TrafficLimit:    trafficBytes,
-		ExpiryTime:      expiryTime,
-		SubscriptionURL: subURL,
-		IsTrial:         true,
-		Status:          "active",
+		TelegramID:     0,
+		SubscriptionID: subscriptionID,
+		ClientID:       clientID,
+		InviteCode:     inviteCode,
+		ExpiryTime:     expiryTime,
+		PlanID:         planID,
+		Status:         "active",
 	}
 	if err := s.db.WithContext(ctx).Create(sub).Error; err != nil {
 		return nil, fmt.Errorf("failed to create trial subscription: %w", err)
 	}
 	return sub, nil
+}
+
+func (s *Service) resolveTrialPlanID(ctx context.Context) (uint, error) {
+	var plan Plan
+	if err := s.db.WithContext(ctx).Where("name = ?", TrialPlanName).First(&plan).Error; err != nil {
+		return 0, fmt.Errorf("trial plan not found: %w", err)
+	}
+	return plan.ID, nil
 }
 
 // GetSubscriptionBySubscriptionID returns a subscription by its subscription ID.
@@ -665,12 +846,95 @@ func (s *Service) GetSubscriptionBySubscriptionID(ctx context.Context, subscript
 	return &sub, nil
 }
 
+// GetSubscriptionStatus returns only the status and expiry time for a subscription
+// by its subscription_id. It is intended for cheap cache-hit checks in the
+// subscription server (since v2.3.0) — it avoids the full JOIN with plans and
+// sources required by GetSubscriptionWithPlanAndSources. Returns
+// gorm.ErrRecordNotFound if no row matches.
+func (s *Service) GetSubscriptionStatus(ctx context.Context, subscriptionID string) (string, time.Time, error) {
+	var row struct {
+		Status     string
+		ExpiryTime time.Time
+	}
+	result := s.db.WithContext(ctx).
+		Table("subscriptions").
+		Select("status, expiry_time").
+		Where("subscription_id = ?", subscriptionID).
+		Scan(&row)
+	if result.Error != nil {
+		return "", time.Time{}, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return "", time.Time{}, gorm.ErrRecordNotFound
+	}
+	return row.Status, row.ExpiryTime, nil
+}
+
+// GetSubscriptionWithPlanAndSources returns a subscription (status=active) by subscription ID
+// together with its plan and active sources, via JOINs through plan_sources.
+func (s *Service) GetSubscriptionWithPlanAndSources(ctx context.Context, subscriptionID string) (*SubscriptionFull, error) {
+	var result SubscriptionFull
+
+	subQuery := s.db.WithContext(ctx).Where("subscription_id = ? AND status = ?", subscriptionID, "active")
+
+	if err := subQuery.First(&result.Subscription).Error; err != nil {
+		return nil, fmt.Errorf("failed to get subscription: %w", err)
+	}
+
+	if err := s.db.WithContext(ctx).First(&result.Plan, result.Subscription.PlanID).Error; err != nil {
+		return nil, fmt.Errorf("failed to get plan: %w", err)
+	}
+
+	if err := s.db.WithContext(ctx).
+		Table("sources").
+		Select("sources.*").
+		Joins("JOIN plan_sources ON plan_sources.source_id = sources.id").
+		Where("plan_sources.plan_id = ? AND sources.active = ?", result.Plan.ID, true).
+		Find(&result.Sources).Error; err != nil {
+		return nil, fmt.Errorf("failed to get sources: %w", err)
+	}
+
+	return &result, nil
+}
+
+// UpdateSubscriptionDevices updates only the devices JSON column for a subscription.
+func (s *Service) UpdateSubscriptionDevices(ctx context.Context, id uint, devicesJSON string) error {
+	result := s.db.WithContext(ctx).Model(&Subscription{}).Where("id = ?", id).Update("devices", devicesJSON)
+	if result.Error != nil {
+		return fmt.Errorf("failed to update subscription devices: %w", result.Error)
+	}
+	return nil
+}
+
+// UpdateSubscriptionIPs updates only the ips JSON column for a subscription.
+func (s *Service) UpdateSubscriptionIPs(ctx context.Context, id uint, ipsJSON string) error {
+	result := s.db.WithContext(ctx).Model(&Subscription{}).Where("id = ?", id).Update("ips", ipsJSON)
+	if result.Error != nil {
+		return fmt.Errorf("failed to update subscription ips: %w", result.Error)
+	}
+	return nil
+}
+
 // GetTrialSubscriptionBySubID returns a trial subscription by its subscription ID.
+// A subscription is considered trial if its plan has name 'trial'.
 func (s *Service) GetTrialSubscriptionBySubID(ctx context.Context, subscriptionID string) (*Subscription, error) {
 	var sub Subscription
-	result := s.db.WithContext(ctx).Where("subscription_id = ? AND is_trial = ?", subscriptionID, true).First(&sub)
+	result := s.db.WithContext(ctx).
+		Where("subscription_id = ?", subscriptionID).
+		First(&sub)
 	if result.Error != nil {
 		return nil, fmt.Errorf("failed to get trial subscription by subscription_id: %w", result.Error)
+	}
+
+	var plan Plan
+	if err := s.db.WithContext(ctx).Where("id = ?", sub.PlanID).First(&plan).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("subscription is not a trial")
+		}
+		return nil, fmt.Errorf("failed to get plan for trial check: %w", err)
+	}
+	if plan.Name != TrialPlanName {
+		return nil, fmt.Errorf("subscription is not a trial")
 	}
 	return &sub, nil
 }
@@ -681,9 +945,16 @@ func (s *Service) GetTrialSubscriptionBySubID(ctx context.Context, subscriptionI
 func (s *Service) BindTrialSubscription(ctx context.Context, subscriptionID string, telegramID int64, username string) (*Subscription, error) {
 	var sub Subscription
 	var referredBy int64
+	var freePlanID uint
 
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("subscription_id = ? AND is_trial = ? AND telegram_id = ?", subscriptionID, true, 0).First(&sub).Error; err != nil {
+		var trialPlan Plan
+		if err := tx.Where("name = ?", TrialPlanName).First(&trialPlan).Error; err != nil {
+			return fmt.Errorf("failed to resolve trial plan: %w", err)
+		}
+		planID := trialPlan.ID
+
+		if err := tx.Where("subscription_id = ? AND plan_id = ? AND telegram_id = ?", subscriptionID, planID, 0).First(&sub).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return fmt.Errorf("trial subscription not found or already activated")
 			}
@@ -697,12 +968,17 @@ func (s *Service) BindTrialSubscription(ctx context.Context, subscriptionID stri
 			}
 		}
 
+		var freePlan Plan
+		if err := tx.Where("name = ?", FreePlanName).First(&freePlan).Error; err != nil {
+			return fmt.Errorf("failed to resolve free plan: %w", err)
+		}
+		freePlanID = freePlan.ID
 		result := tx.Model(&Subscription{}).
-			Where("id = ? AND telegram_id = ? AND is_trial = ?", sub.ID, 0, true).
-			Updates(map[string]interface{}{
+			Where("id = ? AND telegram_id = ? AND plan_id = ?", sub.ID, 0, planID).
+			Updates(map[string]any{
 				"telegram_id": telegramID,
 				"username":    username,
-				"is_trial":    false,
+				"plan_id":     freePlanID,
 				"referred_by": referredBy,
 			})
 		if result.Error != nil {
@@ -710,6 +986,15 @@ func (s *Service) BindTrialSubscription(ctx context.Context, subscriptionID stri
 		}
 		if result.RowsAffected == 0 {
 			return fmt.Errorf("trial subscription not found or already activated")
+		}
+
+		// Defensive: revoke any other active subscription the user may already have
+		// (e.g. a free-plan sub created concurrently via /start). Without this, the
+		// user could end up with two active subscriptions.
+		if err := tx.Model(&Subscription{}).
+			Where("telegram_id = ? AND status = ? AND id <> ?", telegramID, "active", sub.ID).
+			Update("status", "revoked").Error; err != nil {
+			return fmt.Errorf("failed to revoke pre-existing active subscriptions: %w", err)
 		}
 
 		return nil
@@ -720,7 +1005,7 @@ func (s *Service) BindTrialSubscription(ctx context.Context, subscriptionID stri
 
 	sub.TelegramID = telegramID
 	sub.Username = username
-	sub.IsTrial = false
+	sub.PlanID = freePlanID
 	sub.ReferredBy = referredBy
 	return &sub, nil
 }
@@ -752,51 +1037,29 @@ func (s *Service) CreateTrialRequest(ctx context.Context, ip string) error {
 
 // CleanupExpiredTrials deletes trial subscriptions that have expired without being activated.
 // Uses atomic DELETE ... RETURNING to prevent race conditions with concurrent trial activation.
-// CleanupExpiredTrials deletes trial subscriptions that have expired without being activated.
-// Uses atomic DELETE ... RETURNING to prevent race conditions with concurrent trial activation.
-func (s *Service) CleanupExpiredTrials(ctx context.Context, hours int, xuiClient interface {
-	DeleteClient(ctx context.Context, email string) error
-}) (int64, error) {
+func (s *Service) CleanupExpiredTrials(ctx context.Context, hours int) ([]Subscription, error) {
+	var trialPlan Plan
+	if err := s.db.WithContext(ctx).Where("name = ?", TrialPlanName).First(&trialPlan).Error; err != nil {
+		return nil, fmt.Errorf("failed to resolve trial plan: %w", err)
+	}
+
 	cutoff := time.Now().Add(-time.Duration(hours) * time.Hour)
 
-	// Atomic delete with RETURNING prevents race condition where a trial
-	// is activated (BindTrialSubscription) between SELECT and DELETE.
 	var subs []Subscription
 	result := s.db.WithContext(ctx).Raw(
 		`DELETE FROM subscriptions
-		 WHERE is_trial = ? AND telegram_id = ? AND created_at < ?
-		 RETURNING id, client_id, inbound_id, subscription_id`,
-		true, 0, cutoff,
+		 WHERE plan_id = ? AND telegram_id = ? AND created_at < ?
+		 RETURNING id, client_id, subscription_id`,
+		trialPlan.ID, 0, cutoff,
 	).Scan(&subs)
 	if result.Error != nil {
-		return 0, fmt.Errorf("failed to cleanup expired trials: %w", result.Error)
+		return nil, fmt.Errorf("failed to cleanup expired trials: %w", result.Error)
 	}
 
-	deletedCount := int64(len(subs))
-
-	// Delete orphaned clients from XUI panel (trials use "trial_{subID}" email)
-	for _, sub := range subs {
-		if sub.SubscriptionID != "" && xuiClient != nil {
-			email := "trial_" + sub.SubscriptionID
-			if err := xuiClient.DeleteClient(ctx, email); err != nil {
-				logger.Warn("Failed to delete trial client from xui",
-					zap.String("email", email),
-					zap.Error(err))
-			}
-		}
-	}
-
-	// Cleanup old trial_requests (rate limit records).
-	// These are only used for hourly rate limiting (CountTrialRequestsByIPLastHour),
-	// so records older than 1 hour are already irrelevant. Use a separate cutoff
-	// instead of the trial subscription cutoff (which may be 3+ hours) to avoid
-	// accumulating stale rate-limit entries. Add a small buffer to avoid deleting
-	// records that are right at the 1-hour boundary (time.Now() vs created_at can
-	// differ by microseconds depending on clock granularity).
 	rateLimitCutoff := time.Now().Add(-1*time.Hour + 1*time.Second)
 	s.db.WithContext(ctx).
 		Where("created_at < ?", rateLimitCutoff).
 		Delete(&TrialRequest{})
 
-	return deletedCount, nil
+	return subs, nil
 }

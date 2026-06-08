@@ -1,6 +1,6 @@
 # API Reference — rs8kvn_bot
 
-**Version:** 2.3.0  
+**Version:** 2.5.0  
 **Base URL:** `http://localhost:8880` (configurable via `HEALTH_CHECK_PORT`)
 
 ---
@@ -390,7 +390,7 @@ API version is implicit in endpoint paths:
 - `/api/v1/subscriptions` — v1 (current)
 - No breaking changes expected without major version bump
 
-Bot version in logs: `rs8kvn_bot@v2.3.0`
+Bot version in logs: `rs8kvn_bot@v2.5.0`
 
 ---
 

@@ -9,6 +9,7 @@ import (
 	"html/template"
 	"net"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 	"sync"
@@ -21,10 +22,11 @@ import (
 	"rs8kvn_bot/internal/logger"
 	"rs8kvn_bot/internal/metrics"
 	"rs8kvn_bot/internal/service"
-	"rs8kvn_bot/internal/subproxy"
+	"rs8kvn_bot/internal/subserver"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
+	"gorm.io/gorm"
 )
 
 //go:embed templates/*.html templates/logo.png
@@ -57,12 +59,10 @@ type ComponentHealth struct {
 type Server struct {
 	addr            string
 	db              interfaces.DatabaseService
-	xuiClient       interfaces.XUIClient
 	cfg             *config.Config
 	botConfig       *bot.BotConfig
 	subService      *service.SubscriptionService
-	subProxy        *subproxy.Service
-	subFetchGroup   *SingleFlight
+	subServer       *subserver.Service
 	server          *http.Server
 	listenerAddr    string
 	mu              sync.RWMutex
@@ -74,7 +74,7 @@ type Server struct {
 	errorTemplate   *template.Template
 }
 
-func NewServer(addr string, db interfaces.DatabaseService, xuiClient interfaces.XUIClient, cfg *config.Config, botConfig *bot.BotConfig, subService *service.SubscriptionService, subProxy *subproxy.Service) *Server {
+func NewServer(addr string, db interfaces.DatabaseService, cfg *config.Config, botConfig *bot.BotConfig, subService *service.SubscriptionService, subServer *subserver.Service) *Server {
 	trialTmpl := template.Must(template.New("trial.html").Funcs(template.FuncMap{
 		"escape": func(s string) string {
 			var buf strings.Builder
@@ -88,12 +88,10 @@ func NewServer(addr string, db interfaces.DatabaseService, xuiClient interfaces.
 	return &Server{
 		addr:            addr,
 		db:              db,
-		xuiClient:       xuiClient,
 		cfg:             cfg,
 		botConfig:       botConfig,
 		subService:      subService,
-		subProxy:        subProxy,
-		subFetchGroup:   NewSingleFlight(),
+		subServer:       subServer,
 		checkers:        make(map[string]func(context.Context) ComponentHealth),
 		inviteCodeRegex: regexp.MustCompile(`^[a-zA-Z0-9_-]+$`),
 		startTime:       time.Now(),
@@ -114,9 +112,6 @@ func (s *Server) SetReady(ready bool) {
 	s.ready = ready
 }
 
-// Addr returns the server's actual listening address. Only valid after Start
-// has been called. When the server is configured with port :0, this returns
-// the OS-assigned port.
 func (s *Server) Addr() string {
 	if s.listenerAddr != "" {
 		return s.listenerAddr
@@ -133,15 +128,12 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/sub/", s.handleSubscription)
 	mux.HandleFunc("/static/logo.png", s.handleLogo)
 
-	// API routes with Bearer token auth
 	apiMux := http.NewServeMux()
 	apiMux.HandleFunc("/api/v1/subscriptions", s.GetSubscriptions)
 	mux.Handle("/api/v1/subscriptions", BearerAuthMiddleware(s.cfg.APIToken)(apiMux))
 
-	// Prometheus metrics endpoint
 	mux.Handle("/metrics", promhttp.Handler())
 
-	// Wrap with metrics middleware
 	instrumentedHandler := metrics.InstrumentHTTP(mux)
 
 	s.server = &http.Server{
@@ -153,7 +145,6 @@ func (s *Server) Start(ctx context.Context) error {
 		IdleTimeout:       60 * time.Second,
 	}
 
-	// Bind the port before starting the goroutine.
 	listener, err := net.Listen("tcp", s.addr)
 	if err != nil {
 		return fmt.Errorf("failed to bind %s: %w", s.addr, err)
@@ -272,13 +263,11 @@ func (s *Server) checkHealth(ctx context.Context) HealthResponse {
 func (s *Server) writeJSON(w http.ResponseWriter, resp HealthResponse) {
 	w.Header().Set("Content-Type", "application/json")
 
-	// Map health status to HTTP status code so that Kubernetes liveness
-	// probes correctly detect when the service is down.
 	switch resp.Status {
 	case string(StatusDown):
-		w.WriteHeader(http.StatusServiceUnavailable) // 503
+		w.WriteHeader(http.StatusServiceUnavailable)
 	default:
-		w.WriteHeader(http.StatusOK) // 200 for OK and Degraded
+		w.WriteHeader(http.StatusOK)
 	}
 
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
@@ -290,7 +279,6 @@ func (s *Server) handleInvite(w http.ResponseWriter, r *http.Request) {
 	s.HandleInvite(w, r)
 }
 
-// HandleInvite is the exported version of handleInvite for E2E testing.
 func (s *Server) HandleInvite(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", "GET")
@@ -318,7 +306,10 @@ func (s *Server) HandleInvite(w http.ResponseWriter, r *http.Request) {
 
 	invite, err := s.db.GetInviteByCode(ctx, code)
 	if err != nil {
-		logger.Warn("Invite not found", zap.String("code", code), zap.Error(err))
+		logger.Error("Invite not found",
+			zap.String("code", code),
+			zap.String("client_ip", getClientIP(r)),
+			zap.Error(err))
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusNotFound)
 		s.renderErrorPage(w, "Приглашение не найдено")
@@ -327,13 +318,19 @@ func (s *Server) HandleInvite(w http.ResponseWriter, r *http.Request) {
 
 	// Проверяем куку на существующий trial
 	existingSub, err := s.getExistingTrialFromCookie(r, ctx, code)
-	if err == nil && existingSub != nil {
+	if err != nil {
+		logger.Error("Failed to check existing trial from cookie",
+			zap.String("code", code),
+			zap.String("client_ip", getClientIP(r)),
+			zap.Error(err))
+	} else if existingSub != nil {
 		// Trial уже создан — показываем существующий
 		logger.Info("Existing trial found via cookie", zap.String("sub_id", existingSub.SubscriptionID))
 		telegramLink := "https://t.me/" + s.botConfig.Username + "?start=trial_" + existingSub.SubscriptionID
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
-		s.renderTrialPage(w, existingSub.SubscriptionID, existingSub.SubscriptionURL, telegramLink, s.cfg.TrialDurationHours)
+		subURL := s.cfg.GlobalSubURL + existingSub.SubscriptionID
+		s.renderTrialPage(w, existingSub.SubscriptionID, subURL, telegramLink, s.cfg.TrialDurationHours)
 		return
 	}
 
@@ -415,8 +412,13 @@ func (s *Server) getExistingTrialFromCookie(r *http.Request, ctx context.Context
 		return nil, err
 	}
 
-	// Проверяем, что это всё ещё trial и не активирован
-	if !sub.IsTrial || sub.TelegramID != 0 {
+	// Проверяем, что это trial и не активирован
+	if sub.TelegramID != 0 {
+		return nil, fmt.Errorf("not a valid trial")
+	}
+
+	plan, planErr := s.db.GetPlanByID(ctx, sub.PlanID)
+	if planErr != nil || plan.Name != database.TrialPlanName {
 		return nil, fmt.Errorf("not a valid trial")
 	}
 
@@ -438,10 +440,8 @@ type trialPageData struct {
 func (s *Server) renderTrialPage(w http.ResponseWriter, subID, subURL, telegramLink string, trialHours int) {
 	happLink := "happ://add/" + subURL
 	data := trialPageData{
-		//nolint:gosec // G203: happLink is constructed from internal subscription URL, safe
-		HappLink: template.URL(happLink),
-		SubURL:   subURL,
-		//nolint:gosec // G203: telegramLink is validated invite link from internal system
+		HappLink:     template.URL(happLink),
+		SubURL:       subURL,
 		TelegramLink: template.URL(telegramLink),
 		TrialHours:   trialHours,
 	}
@@ -462,9 +462,6 @@ func (s *Server) renderErrorPage(w http.ResponseWriter, message string) {
 }
 
 func getClientIP(r *http.Request) string {
-	// Only trust X-Forwarded-For if the connection comes from a local address
-	// (i.e., behind a reverse proxy like nginx/caddy). Direct connections cannot
-	// be trusted to set this header correctly.
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err == nil && isLocalAddress(host) {
 		forwarded := r.Header.Get("X-Forwarded-For")
@@ -488,7 +485,7 @@ func getClientIP(r *http.Request) string {
 		if splitErr == nil {
 			return fallbackHost
 		}
-		return r.RemoteAddr // last resort — may include port
+		return r.RemoteAddr
 	}
 	return host
 }
@@ -498,33 +495,27 @@ func isLocalAddress(host string) bool {
 	if ip == nil {
 		return false
 	}
-	// Only trust loopback addresses (reverse proxy on the same host).
-	// Do NOT trust all private IPs — in cloud environments (AWS, GCP),
-	// other VMs on the same VPC could spoof X-Forwarded-For and bypass
-	// IP-based rate limiting for trial subscriptions.
 	return ip.IsLoopback()
 }
 
-var subIDRegex = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
-
-type subFetchResult struct {
-	body    []byte
-	headers map[string]string
+// sourceHost returns the host part of a URL for logging (no path / subID).
+func sourceHost(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Host == "" {
+		return rawURL
+	}
+	return u.Host
 }
 
-type subFetchError struct {
-	err      error
-	notFound bool
-}
-
-func (e *subFetchError) Error() string {
-	return e.err.Error()
-}
-
-func (e *subFetchError) Unwrap() error {
-	return e.err
-}
-
+// handleSubscription is the HTTP handler for GET /sub/{subID}.
+// It first checks the per-subID response cache (added in v2.3.0) and, on
+// hit, verifies the subscription is still active via a cheap status lookup
+// before replaying the cached body and headers. On miss it fetches the
+// subscription together with its plan and active sources from the database,
+// tracks the request device and IP, fetches each source URL, detects the
+// response format (JSON / Base64 / plain), converts JSON server configs to
+// share links, aggregates subscription-userinfo headers across sources,
+// caches the result, and writes the final response.
 func (s *Server) handleSubscription(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", "GET")
@@ -532,10 +523,10 @@ func (s *Server) handleSubscription(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if s.subProxy == nil {
+	if s.subServer == nil {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(http.StatusServiceUnavailable)
-		w.Write([]byte("Subscription proxy is not available"))
+		w.Write([]byte("Subscription server is not available"))
 		return
 	}
 
@@ -543,132 +534,66 @@ func (s *Server) handleSubscription(w http.ResponseWriter, r *http.Request) {
 	if !strings.HasPrefix(path, "/sub/") {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(http.StatusNotFound)
-		w.Write([]byte("Not found"))
+		w.Write([]byte("Subscription not found"))
 		return
 	}
 
 	subID := path[5:]
-	if subID == "" || strings.Contains(subID, "/") || !subIDRegex.MatchString(subID) {
+	if subID == "" || strings.Contains(subID, "/") || !subserver.SubIDRegex().MatchString(subID) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte("Invalid subscription code"))
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte("Subscription not found"))
 		return
 	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 
-	if cachedBody, cachedHeaders, ok := s.subProxy.GetCache(subID); ok {
-		// Verify subscription is still active even on cache hit
-		sub, err := s.db.GetSubscriptionBySubscriptionID(ctx, subID)
-		if err != nil || !sub.IsActive() {
-			s.subProxy.InvalidateCache(subID)
-			if err != nil {
-				logger.Warn("Subscription not found in DB on cache hit", zap.String("sub_id", subID), zap.Error(err))
-			} else {
-				logger.Info("Cached subscription is no longer active", zap.String("sub_id", subID), zap.String("status", sub.Status))
-			}
-			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-			w.WriteHeader(http.StatusNotFound)
-			w.Write([]byte("Subscription not found"))
-			return
-		}
-		logger.Debug("Subscription proxy cache hit", zap.String("sub_id", subID))
-		s.writeSubscriptionResponse(w, cachedBody, cachedHeaders)
-		return
-	}
+	clientIP := getClientIP(r)
+	logger.Info("subscription request received",
+		zap.String("sub_id", subID),
+		zap.String("client_ip", clientIP),
+		zap.String("method", r.Method),
+		zap.String("path", r.URL.Path),
+	)
 
-	result, err := s.subFetchGroup.Do(ctx, subID, func(ctx context.Context) (interface{}, error) {
-		if cachedBody, cachedHeaders, ok := s.subProxy.GetCache(subID); ok {
-			return &subFetchResult{body: cachedBody, headers: cachedHeaders}, nil
-		}
-
-		sub, err := s.db.GetSubscriptionBySubscriptionID(ctx, subID)
-		if err != nil {
-			logger.Warn("Subscription not found in DB", zap.String("sub_id", subID), zap.Error(err))
-			return nil, &subFetchError{err: err, notFound: true}
-		}
-
-		if sub.SubscriptionURL == "" {
-			logger.Warn("Subscription URL is empty", zap.String("sub_id", subID))
-			return nil, nil
-		}
-
-		if !sub.IsActive() {
-			logger.Info("Subscription is not active", zap.String("sub_id", subID), zap.String("status", sub.Status))
-			return nil, &subFetchError{err: nil, notFound: true}
-		}
-
-		xuiResp, fetchErr := subproxy.FetchFromXUI(sub.SubscriptionURL)
-		if fetchErr != nil {
-			logger.Warn("Failed to fetch from 3x-ui", zap.String("sub_id", subID), zap.Error(fetchErr))
-			if cachedBody, cachedHeaders, ok := s.subProxy.GetCache(subID); ok {
-				return &subFetchResult{body: cachedBody, headers: cachedHeaders}, nil
-			}
-			return nil, fetchErr
-		}
-
-		extraServers := s.subProxy.GetExtraServers()
-		extraHeaders := s.subProxy.GetExtraHeaders()
-		format := subproxy.DetectFormat(xuiResp.Body)
-		mergedBody := subproxy.MergeSubscriptions(xuiResp.Body, extraServers, format)
-
-		mergedHeaders := make(map[string]string, len(xuiResp.Headers)+len(extraHeaders))
-		for k, v := range xuiResp.Headers {
-			mergedHeaders[k] = v
-		}
-		for k, v := range extraHeaders {
-			mergedHeaders[k] = v
-		}
-
-		s.subProxy.SetCache(subID, mergedBody, mergedHeaders)
-
-		return &subFetchResult{body: mergedBody, headers: mergedHeaders}, nil
-	})
-
+	requestHeaders := subserver.FilterHeaders(r.Header)
+	result, err := subserver.HandleSubscription(ctx, s.db, s.subServer, subID, clientIP, requestHeaders)
 	if err != nil {
-		var subErr *subFetchError
-		if errors.As(err, &subErr) && subErr.notFound {
-			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		logger.Error("Failed to process subscription",
+			zap.String("sub_id", subID),
+			zap.String("client_ip", clientIP),
+			zap.Error(err))
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		if errors.Is(err, gorm.ErrRecordNotFound) || err.Error() == "subscription not found" || err.Error() == "no subscription items found" {
 			w.WriteHeader(http.StatusNotFound)
 			w.Write([]byte("Subscription not found"))
 			return
 		}
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-			w.WriteHeader(http.StatusGatewayTimeout)
-			w.Write([]byte("Request timeout"))
-			return
-		}
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.WriteHeader(http.StatusBadGateway)
-		w.Write([]byte("Failed to fetch subscription"))
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("Subscription not found"))
 		return
 	}
 
 	if result == nil {
+		logger.Error("Empty subscription result",
+			zap.String("sub_id", subID),
+			zap.String("client_ip", clientIP))
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.WriteHeader(http.StatusNotFound)
-		w.Write([]byte("Subscription URL not available"))
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("Subscription not found"))
 		return
 	}
 
-	res := result.(*subFetchResult)
-	logger.Info("Subscription proxy served",
-		zap.String("sub_id", subID),
-		zap.Int("extra_servers", len(s.subProxy.GetExtraServers())),
-		zap.Int("body_size", len(res.body)))
-
-	s.writeSubscriptionResponse(w, res.body, res.headers)
-}
-
-func (s *Server) writeSubscriptionResponse(w http.ResponseWriter, body []byte, headers map[string]string) {
-	for key, value := range headers {
-		w.Header().Set(key, value)
+	for k, v := range result.Headers {
+		w.Header().Set(k, v)
 	}
-	// Remove Content-Length since body size changed after merge.
-	// Go's http.ResponseWriter will use chunked encoding automatically.
 	w.Header().Del("Content-Length")
-	w.WriteHeader(http.StatusOK)
-	w.Write(body)
+
+	if result.StatusCode != 0 {
+		w.WriteHeader(result.StatusCode)
+	} else {
+		w.WriteHeader(http.StatusOK)
+	}
+	w.Write(result.Body)
 }

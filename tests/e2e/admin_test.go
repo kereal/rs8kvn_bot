@@ -25,7 +25,7 @@ func TestE2E_DelCommand_Success(t *testing.T) {
 	ctx := context.Background()
 	adminID := env.cfg.TelegramAdminID
 
-	_, err := env.subService.Create(ctx, env.chatID, env.username)
+	_, err := env.subService.Create(ctx, env.chatID, env.username, "")
 	require.NoError(t, err)
 
 	sub, err := env.db.GetByTelegramID(ctx, env.chatID)
@@ -196,7 +196,7 @@ func TestE2E_DelCommand_XUIFailure(t *testing.T) {
 	ctx := context.Background()
 	adminID := env.cfg.TelegramAdminID
 
-	_, err := env.subService.Create(ctx, env.chatID, env.username)
+	_, err := env.subService.Create(ctx, env.chatID, env.username, "")
 	require.NoError(t, err)
 
 	sub, err := env.db.GetByTelegramID(ctx, env.chatID)
@@ -246,7 +246,7 @@ func TestE2E_BroadcastCommand_Success(t *testing.T) {
 
 	for i := 0; i < 3; i++ {
 		chatID := int64(300000 + i)
-		_, err := env.subService.Create(ctx, chatID, fmt.Sprintf("user%d", i))
+		_, err := env.subService.Create(ctx, chatID, fmt.Sprintf("user%d", i), "")
 		require.NoError(t, err)
 	}
 
@@ -345,7 +345,7 @@ func TestE2E_BroadcastCommand_SomeFailures(t *testing.T) {
 
 	for i := 0; i < 3; i++ {
 		chatID := int64(400000 + i)
-		_, err := env.subService.Create(ctx, chatID, fmt.Sprintf("user%d", i))
+		_, err := env.subService.Create(ctx, chatID, fmt.Sprintf("user%d", i), "")
 		require.NoError(t, err)
 	}
 
@@ -380,7 +380,7 @@ func TestE2E_SendCommand_ByTelegramID(t *testing.T) {
 	ctx := context.Background()
 	adminID := env.cfg.TelegramAdminID
 
-	_, err := env.subService.Create(ctx, env.chatID, env.username)
+	_, err := env.subService.Create(ctx, env.chatID, env.username, "")
 	require.NoError(t, err)
 
 	resetMockBotAPI(env.botAPI)
@@ -413,7 +413,7 @@ func TestE2E_SendCommand_ByUsername(t *testing.T) {
 	ctx := context.Background()
 	adminID := env.cfg.TelegramAdminID
 
-	_, err := env.subService.Create(ctx, env.chatID, env.username)
+	_, err := env.subService.Create(ctx, env.chatID, env.username, "")
 	require.NoError(t, err)
 
 	resetMockBotAPI(env.botAPI)
@@ -504,7 +504,7 @@ func TestE2E_SendCommand_SendFails(t *testing.T) {
 	ctx := context.Background()
 	adminID := env.cfg.TelegramAdminID
 
-	_, err := env.subService.Create(ctx, env.chatID, env.username)
+	_, err := env.subService.Create(ctx, env.chatID, env.username, "")
 	require.NoError(t, err)
 
 	resetMockBotAPI(env.botAPI)
@@ -538,7 +538,7 @@ func TestE2E_SendCommand_WithAtPrefix(t *testing.T) {
 	ctx := context.Background()
 	adminID := env.cfg.TelegramAdminID
 
-	_, err := env.subService.Create(ctx, env.chatID, env.username)
+	_, err := env.subService.Create(ctx, env.chatID, env.username, "")
 	require.NoError(t, err)
 
 	update := tgbotapi.Update{
@@ -620,7 +620,7 @@ func TestE2E_SendCommand_RateLimitBlocksExcess(t *testing.T) {
 	ctx := context.Background()
 	adminID := env.cfg.TelegramAdminID
 
-	_, err := env.subService.Create(ctx, env.chatID, env.username)
+	_, err := env.subService.Create(ctx, env.chatID, env.username, "")
 	require.NoError(t, err)
 
 	update := tgbotapi.Update{
@@ -659,7 +659,7 @@ func TestE2E_BroadcastCommand_EscapesMarkdown(t *testing.T) {
 	ctx := context.Background()
 	adminID := env.cfg.TelegramAdminID
 
-	_, err := env.subService.Create(ctx, int64(950001), "testuser")
+	_, err := env.subService.Create(ctx, int64(950001), "testuser", "")
 	require.NoError(t, err)
 
 	update := tgbotapi.Update{
@@ -687,7 +687,7 @@ func TestE2E_SendCommand_EscapesMarkdown(t *testing.T) {
 	ctx := context.Background()
 	adminID := env.cfg.TelegramAdminID
 
-	_, err := env.subService.Create(ctx, env.chatID, env.username)
+	_, err := env.subService.Create(ctx, env.chatID, env.username, "")
 	require.NoError(t, err)
 
 	update := tgbotapi.Update{
@@ -922,17 +922,14 @@ func TestE2E_AdminLastReg(t *testing.T) {
 	ctx := context.Background()
 
 	sub := &database.Subscription{
-		TelegramID:      env.chatID,
-		Username:        env.username,
-		ClientID:        "test-client-id",
-		SubscriptionID:  "test-sub-id",
-		InboundID:       1,
-		TrafficLimit:    107374182400,
-		Status:          "active",
-		SubscriptionURL: "https://example.com/sub/test-sub-id",
-		CreatedAt:       time.Now(),
+		TelegramID:     env.chatID,
+		Username:       env.username,
+		ClientID:       "test-client-id",
+		SubscriptionID: "test-sub-id",
+		Status:         "active",
+		CreatedAt:      time.Now(),
 	}
-	require.NoError(t, env.db.CreateSubscription(ctx, sub))
+	require.NoError(t, env.db.CreateSubscription(ctx, sub, ""))
 
 	resetMockBotAPI(env.botAPI)
 

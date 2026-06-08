@@ -1,0 +1,2 @@
+DROP TABLE IF EXISTS plans;
+DROP INDEX IF EXISTS idx_plans_name;
