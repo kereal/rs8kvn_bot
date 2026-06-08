@@ -99,21 +99,21 @@ func TestGetSubscriptions_Success(t *testing.T) {
 	assert.Equal(t, "application/json", rec.Header().Get("Content-Type"))
 	assert.Equal(t, "no-store, private", rec.Header().Get("Cache-Control"))
 
-	var response map[string]interface{}
+	var response map[string]any
 	err := json.NewDecoder(rec.Body).Decode(&response)
 	require.NoError(t, err)
 
-	subs, ok := response["subscriptions"].([]interface{})
+	subs, ok := response["subscriptions"].([]any)
 	require.True(t, ok)
 	assert.Len(t, subs, 2)
 
-	sub1 := subs[0].(map[string]interface{})
+	sub1 := subs[0].(map[string]any)
 	assert.Equal(t, "client-uuid-1", sub1["id"])
 	assert.Equal(t, "user1", sub1["email"])
 	assert.Equal(t, true, sub1["enabled"])
 	assert.Equal(t, "sub-token-1", sub1["subscription_token"])
 
-	sub2 := subs[1].(map[string]interface{})
+	sub2 := subs[1].(map[string]any)
 	assert.Equal(t, "client-uuid-2", sub2["id"])
 	assert.Equal(t, "user2", sub2["email"])
 	assert.Equal(t, true, sub2["enabled"])
@@ -141,11 +141,11 @@ func TestGetSubscriptions_EmptyList(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, rec.Code)
 
-	var response map[string]interface{}
+	var response map[string]any
 	err := json.NewDecoder(rec.Body).Decode(&response)
 	require.NoError(t, err)
 
-	subs, ok := response["subscriptions"].([]interface{})
+	subs, ok := response["subscriptions"].([]any)
 	require.True(t, ok)
 	assert.Len(t, subs, 0)
 }
@@ -201,15 +201,15 @@ func TestGetSubscriptions_FiltersInactiveSubscriptions(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, rec.Code)
 
-	var response map[string]interface{}
+	var response map[string]any
 	err := json.NewDecoder(rec.Body).Decode(&response)
 	require.NoError(t, err)
 
-	subs, ok := response["subscriptions"].([]interface{})
+	subs, ok := response["subscriptions"].([]any)
 	require.True(t, ok)
 	assert.Len(t, subs, 1, "only active subscription should be returned")
 
-	sub := subs[0].(map[string]interface{})
+	sub := subs[0].(map[string]any)
 	assert.Equal(t, "client-active", sub["id"])
 	assert.Equal(t, "active_user", sub["email"])
 }
@@ -341,15 +341,15 @@ func TestGetSubscriptions_ResponseFormat(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, rec.Code)
 
-	var response map[string]interface{}
+	var response map[string]any
 	err := json.NewDecoder(rec.Body).Decode(&response)
 	require.NoError(t, err)
 
-	subs, ok := response["subscriptions"].([]interface{})
+	subs, ok := response["subscriptions"].([]any)
 	require.True(t, ok)
 	require.Len(t, subs, 1)
 
-	sub := subs[0].(map[string]interface{})
+	sub := subs[0].(map[string]any)
 
 	// Verify exact field names match the spec from task-bot-integration.md
 	assert.Contains(t, sub, "id")
@@ -401,16 +401,16 @@ func TestGetSubscriptions_MixedStatuses(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, rec.Code)
 
-	var response map[string]interface{}
+	var response map[string]any
 	err := json.NewDecoder(rec.Body).Decode(&response)
 	require.NoError(t, err)
 
-	subs, ok := response["subscriptions"].([]interface{})
+	subs, ok := response["subscriptions"].([]any)
 	require.True(t, ok)
 	assert.Len(t, subs, 3, "only active subscriptions should be returned")
 
 	for i, sub := range subs {
-		subMap := sub.(map[string]interface{})
+		subMap := sub.(map[string]any)
 		assert.Equal(t, true, subMap["enabled"], "subscription %d should have enabled=true", i)
 	}
 }
@@ -455,11 +455,11 @@ func TestGetSubscriptions_LargeDataset(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, rec.Code)
 
-	var response map[string]interface{}
+	var response map[string]any
 	err := json.NewDecoder(rec.Body).Decode(&response)
 	require.NoError(t, err)
 
-	subs, ok := response["subscriptions"].([]interface{})
+	subs, ok := response["subscriptions"].([]any)
 	require.True(t, ok)
 	assert.Len(t, subs, 100)
 }

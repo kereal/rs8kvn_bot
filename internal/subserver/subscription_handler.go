@@ -69,7 +69,7 @@ func HandleSubscription(ctx context.Context, db interfaces.DatabaseService, subS
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			logger.Error("Subscription not found in database",
 				zap.String("sub_id", subID))
-			return nil, fmt.Errorf("subscription not found")
+			return nil, ErrSubscriptionNotFound
 		}
 		logger.Error("Failed to get subscription with plan and sources",
 			zap.String("sub_id", subID),
@@ -226,9 +226,9 @@ func HandleSubscription(ctx context.Context, db interfaces.DatabaseService, subS
 	}
 
 	// No servers collected from any source.
-	if len(allItems) == 0 {
-		return nil, fmt.Errorf("no subscription items found")
-	}
+		if len(allItems) == 0 {
+			return nil, ErrNoSubscriptionItems
+		}
 
 	// Mixed or plain-text output: join all share links and encode to base64.
 	combined := strings.Join(allItems, "\n")

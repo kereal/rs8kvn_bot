@@ -104,7 +104,7 @@ func TestMarshalJSON(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, reader)
 
-		var decoded interface{}
+		var decoded any
 		err = json.NewDecoder(reader).Decode(&decoded)
 		require.NoError(t, err)
 		assert.Nil(t, decoded)

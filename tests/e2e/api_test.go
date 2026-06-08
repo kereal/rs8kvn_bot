@@ -78,15 +78,15 @@ func TestE2E_APISubscriptions_Success(t *testing.T) {
 	body, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
 
-	var response map[string]interface{}
+	var response map[string]any
 	err = json.Unmarshal(body, &response)
 	require.NoError(t, err)
 
-	subs, ok := response["subscriptions"].([]interface{})
+	subs, ok := response["subscriptions"].([]any)
 	require.True(t, ok)
 	assert.Len(t, subs, 1)
 
-	subMap := subs[0].(map[string]interface{})
+	subMap := subs[0].(map[string]any)
 	assert.Equal(t, "550e8400-e29b-41d4-a716-446655440000", subMap["id"])
 	assert.Equal(t, "testuser", subMap["email"])
 	assert.Equal(t, true, subMap["enabled"])
@@ -135,11 +135,11 @@ func TestE2E_APISubscriptions_EmptyList(t *testing.T) {
 	body, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
 
-	var response map[string]interface{}
+	var response map[string]any
 	err = json.Unmarshal(body, &response)
 	require.NoError(t, err)
 
-	subs, ok := response["subscriptions"].([]interface{})
+	subs, ok := response["subscriptions"].([]any)
 	require.True(t, ok)
 	assert.Len(t, subs, 0)
 }
@@ -349,15 +349,15 @@ func TestE2E_APISubscriptions_FiltersInactive(t *testing.T) {
 	body, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
 
-	var response map[string]interface{}
+	var response map[string]any
 	err = json.Unmarshal(body, &response)
 	require.NoError(t, err)
 
-	subs, ok := response["subscriptions"].([]interface{})
+	subs, ok := response["subscriptions"].([]any)
 	require.True(t, ok)
 	assert.Len(t, subs, 1, "only active subscription should be returned")
 
-	subMap := subs[0].(map[string]interface{})
+	subMap := subs[0].(map[string]any)
 	assert.Equal(t, "active-client-uuid", subMap["id"])
 	assert.Equal(t, "active_user", subMap["email"])
 	assert.Equal(t, true, subMap["enabled"])
@@ -576,17 +576,17 @@ func TestE2E_APISubscriptions_MultipleActive(t *testing.T) {
 	body, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
 
-	var response map[string]interface{}
+	var response map[string]any
 	err = json.Unmarshal(body, &response)
 	require.NoError(t, err)
 
-	subs, ok := response["subscriptions"].([]interface{})
+	subs, ok := response["subscriptions"].([]any)
 	require.True(t, ok)
 	assert.Len(t, subs, 3)
 
 	// Verify each subscription has correct fields
 	for i, sub := range subs {
-		subMap := sub.(map[string]interface{})
+		subMap := sub.(map[string]any)
 		assert.Contains(t, subMap, "id")
 		assert.Contains(t, subMap, "email")
 		assert.Contains(t, subMap, "enabled")
