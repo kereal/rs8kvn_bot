@@ -57,17 +57,18 @@ type Subscription struct {
 	UpdatedAt      time.Time `gorm:"autoUpdateTime"`
 }
 
-// Source represents a configured 3x-ui panel source.
-type Source struct {
-	ID           uint      `gorm:"primaryKey;column:id"`
-	Name         string    `gorm:"size:255;column:name"`
-	Active       bool      `gorm:"default:true;column:active"`
-	XUIHost      string    `gorm:"size:255;column:x_ui_host"`
-	XUIAPIToken  string    `gorm:"size:255;column:x_ui_api_token"`
-	XUIInboundID int       `gorm:"not null;column:x_ui_inbound_id"`
-	SubURL       string    `gorm:"size:512;column:sub_url"`
-	CreatedAt    time.Time `gorm:"autoCreateTime;column:created_at"`
-	UpdatedAt    time.Time `gorm:"autoUpdateTime;column:updated_at"`
+// Node represents a configured 3x-ui panel source.
+type Node struct {
+	ID              uint      `gorm:"primaryKey;column:id"`
+	Name            string    `gorm:"size:255;column:name"`
+	IsActive        bool      `gorm:"default:true;column:is_active"`
+	Host            string    `gorm:"size:255;column:host"`
+	APIToken        string    `gorm:"size:255;column:api_token"`
+	InboundID       int       `gorm:"not null;column:inbound_id"`
+	SubscriptionURL string    `gorm:"size:512;column:subscription_url"`
+	Type            string    `gorm:"type:varchar(10);not null;default: x-ui;column:type" json:"type"`
+	CreatedAt       time.Time `gorm:"autoCreateTime;column:created_at"`
+	UpdatedAt       time.Time `gorm:"autoUpdateTime;column:updated_at"`
 }
 
 // Plan represents a subscription plan.
@@ -82,10 +83,10 @@ type Plan struct {
 	UpdatedAt    time.Time `gorm:"autoUpdateTime;column:updated_at"`
 }
 
-// PlanSource is the join model for M2M between Plan and Source.
-type PlanSource struct {
-	PlanID   uint `gorm:"primaryKey;column:plan_id"`
-	SourceID uint `gorm:"primaryKey;column:source_id"`
+// PlanNode is the join model for M2M between Plan and Node.
+type PlanNode struct {
+	PlanID uint `gorm:"primaryKey;column:plan_id"`
+	NodeID uint `gorm:"primaryKey;column:node_id"`
 }
 
 // Invite represents a referral invite code.
@@ -102,9 +103,9 @@ type TrialRequest struct {
 	CreatedAt time.Time `gorm:"autoCreateTime"`
 }
 
-// TableName returns the table name for Source.
-func (Source) TableName() string {
-	return "sources"
+// TableName returns the table name for Node.
+func (Node) TableName() string {
+	return "nodes"
 }
 
 // TableName returns the table name for Plan.
@@ -112,9 +113,9 @@ func (Plan) TableName() string {
 	return "plans"
 }
 
-// TableName returns the table name for PlanSource.
-func (PlanSource) TableName() string {
-	return "plan_sources"
+// TableName returns the table name for PlanNode.
+func (PlanNode) TableName() string {
+	return "plan_nodes"
 }
 
 // TableName returns the table name for Subscription.
@@ -190,11 +191,11 @@ func (s *Subscription) SetIPs(ips []map[string]string) error {
 	return nil
 }
 
-// SubscriptionFull holds a subscription together with its plan and active sources.
+// SubscriptionFull holds a subscription together with its plan and active nodes.
 type SubscriptionFull struct {
 	Subscription
-	Plan    Plan
-	Sources []Source
+	Plan  Plan
+	Nodes []Node
 }
 
 // runMigrations applies the embedded SQL schema migrations to the provided database,
@@ -490,30 +491,30 @@ func (s *Service) DeleteSubscription(ctx context.Context, telegramID int64) erro
 	return nil
 }
 
-// ListSources returns all configured sources.
-func (s *Service) ListSources(ctx context.Context) ([]Source, error) {
-	var sources []Source
-	result := s.db.WithContext(ctx).Find(&sources)
+// ListNodes returns all configured nodes.
+func (s *Service) ListNodes(ctx context.Context) ([]Node, error) {
+	var nodes []Node
+	result := s.db.WithContext(ctx).Find(&nodes)
 	if result.Error != nil {
-		return nil, fmt.Errorf("failed to list sources: %w", result.Error)
+		return nil, fmt.Errorf("failed to list nodes: %w", result.Error)
 	}
-	return sources, nil
+	return nodes, nil
 }
 
-// GetSourcesByPlanName returns sources for the plan with the given name.
-func (s *Service) GetSourcesByPlanName(ctx context.Context, planName string) ([]Source, error) {
-	var sources []Source
+// GetNodesByPlanName returns nodes for the plan with the given name.
+func (s *Service) GetNodesByPlanName(ctx context.Context, planName string) ([]Node, error) {
+	var nodes []Node
 	result := s.db.WithContext(ctx).
-		Table("sources").
-		Select("sources.*").
-		Joins("JOIN plan_sources ON plan_sources.source_id = sources.id").
-		Joins("JOIN plans ON plans.id = plan_sources.plan_id").
+		Table("nodes").
+		Select("nodes.*").
+		Joins("JOIN plan_nodes ON plan_nodes.node_id = nodes.id").
+		Joins("JOIN plans ON plans.id = plan_nodes.plan_id").
 		Where("plans.name = ?", planName).
-		Find(&sources)
+		Find(&nodes)
 	if result.Error != nil {
-		return nil, fmt.Errorf("failed to get sources by plan name: %w", result.Error)
+		return nil, fmt.Errorf("failed to get nodes by plan name: %w", result.Error)
 	}
-	return sources, nil
+	return nodes, nil
 }
 
 // GetPlanByName returns a plan by its name.
@@ -536,29 +537,30 @@ func (s *Service) GetPlanByID(ctx context.Context, id uint) (*Plan, error) {
 	return &plan, nil
 }
 
-// IsSourcesEmpty returns true if no sources exist in the database.
-func (s *Service) IsSourcesEmpty(ctx context.Context) (bool, error) {
+// IsNodesEmpty returns true if no nodes exist in the database.
+func (s *Service) IsNodesEmpty(ctx context.Context) (bool, error) {
 	var count int64
-	result := s.db.WithContext(ctx).Model(&Source{}).Count(&count)
+	result := s.db.WithContext(ctx).Model(&Node{}).Count(&count)
 	if result.Error != nil {
-		return false, fmt.Errorf("failed to count sources: %w", result.Error)
+		return false, fmt.Errorf("failed to count nodes: %w", result.Error)
 	}
 	return count == 0, nil
 }
 
-// SeedDefaultSource inserts the default source from environment variables if the sources table is empty.
-// It also links all existing plans to the new source and assigns the free plan to legacy subscriptions.
-func (s *Service) SeedDefaultSource(ctx context.Context, name, xuiHost, xuiAPIToken string, xuiInboundID int, subURL string) error {
+// SeedDefaultNode inserts the default node from environment variables if the nodes table is empty.
+// It also links all existing plans to the new node and assigns the free plan to legacy subscriptions.
+func (s *Service) SeedDefaultNode(ctx context.Context, name, host, apiToken string, inboundID int, subscriptionURL string) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		source := Source{
-			Name:         name,
-			Active:       true,
-			XUIHost:      xuiHost,
-			XUIAPIToken:  xuiAPIToken,
-			XUIInboundID: xuiInboundID,
-			SubURL:       subURL,
+		node := Node{
+			Name:            name,
+			IsActive:        true,
+			Host:            host,
+			APIToken:        apiToken,
+			InboundID:       inboundID,
+			SubscriptionURL: subscriptionURL,
+			Type:            "x-ui",
 		}
-		if err := tx.Create(&source).Error; err != nil {
+		if err := tx.Create(&node).Error; err != nil {
 			return err
 		}
 		var plans []Plan
@@ -566,9 +568,9 @@ func (s *Service) SeedDefaultSource(ctx context.Context, name, xuiHost, xuiAPITo
 			return err
 		}
 		for _, p := range plans {
-			ps := PlanSource{PlanID: p.ID, SourceID: source.ID}
-			if err := tx.Create(&ps).Error; err != nil {
-				return fmt.Errorf("failed to link plan %d to source %d: %w", p.ID, source.ID, err)
+			pn := PlanNode{PlanID: p.ID, NodeID: node.ID}
+			if err := tx.Create(&pn).Error; err != nil {
+				return fmt.Errorf("failed to link plan %d to node %d: %w", p.ID, node.ID, err)
 			}
 		}
 		return tx.Exec(
@@ -870,9 +872,9 @@ func (s *Service) GetSubscriptionStatus(ctx context.Context, subscriptionID stri
 	return row.Status, row.ExpiryTime, nil
 }
 
-// GetSubscriptionWithPlanAndSources returns a subscription (status=active) by subscription ID
-// together with its plan and active sources, via JOINs through plan_sources.
-func (s *Service) GetSubscriptionWithPlanAndSources(ctx context.Context, subscriptionID string) (*SubscriptionFull, error) {
+// GetSubscriptionWithPlanAndNodes returns a subscription (status=active) by subscription ID
+// together with its plan and active nodes, via JOINs through plan_nodes.
+func (s *Service) GetSubscriptionWithPlanAndNodes(ctx context.Context, subscriptionID string) (*SubscriptionFull, error) {
 	var result SubscriptionFull
 
 	subQuery := s.db.WithContext(ctx).Where("subscription_id = ? AND status = ?", subscriptionID, "active")
@@ -886,12 +888,12 @@ func (s *Service) GetSubscriptionWithPlanAndSources(ctx context.Context, subscri
 	}
 
 	if err := s.db.WithContext(ctx).
-		Table("sources").
-		Select("sources.*").
-		Joins("JOIN plan_sources ON plan_sources.source_id = sources.id").
-		Where("plan_sources.plan_id = ? AND sources.active = ?", result.Plan.ID, true).
-		Find(&result.Sources).Error; err != nil {
-		return nil, fmt.Errorf("failed to get sources: %w", err)
+		Table("nodes").
+		Select("nodes.*").
+		Joins("JOIN plan_nodes ON plan_nodes.node_id = nodes.id").
+		Where("plan_nodes.plan_id = ? AND nodes.is_active = ?", result.Plan.ID, true).
+		Find(&result.Nodes).Error; err != nil {
+		return nil, fmt.Errorf("failed to get nodes: %w", err)
 	}
 
 	return &result, nil

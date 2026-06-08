@@ -37,12 +37,12 @@ cfg := &config.Config{
 	mockDB.GetPlanByNameFunc = func(ctx context.Context, name string) (*database.Plan, error) {
 		return &database.Plan{ID: 1, Name: "trial", DevicesLimit: 1, TrafficLimit: 1073741824, Duration: 3}, nil
 	}
-	mockDB.GetSourcesByPlanNameFunc = func(ctx context.Context, planName string) ([]database.Source, error) {
-		return []database.Source{{ID: 1, Active: true, XUIHost: "http://localhost:2053", XUIInboundID: 1}}, nil
+	mockDB.GetNodesByPlanNameFunc = func(ctx context.Context, planName string) ([]database.Node, error) {
+		return []database.Node{{ID: 1, IsActive: true, Host: "http://localhost:2053", InboundID: 1}}, nil
 	}
 
 	xuiClients := map[uint]interfaces.XUIClient{1: mockXUI}
-	sources := []database.Source{{ID: 1, Name: "default",  Active: true, XUIHost: "http://localhost:2053", XUIAPIToken: "test-token", XUIInboundID: 1, SubURL: cfg.GlobalSubURL}}
+	sources := []database.Node{{ID: 1, Name: "default",  IsActive: true, Host: "http://localhost:2053", APIToken: "test-token", InboundID: 1, SubscriptionURL: cfg.GlobalSubURL}}
 	subService := service.NewSubscriptionService(mockDB, xuiClients, sources, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
 	return cfg, subService, mockXUI
 }
@@ -54,8 +54,8 @@ func TestHandleInvite_InvalidCode(t *testing.T) {
 mockDB.GetPlanByNameFunc = func(ctx context.Context, name string) (*database.Plan, error) {
     return &database.Plan{ID: 1, Name: "trial", DevicesLimit: 1, TrafficLimit: 1073741824, Duration: 3}, nil
 }
-mockDB.GetSourcesByPlanNameFunc = func(ctx context.Context, planName string) ([]database.Source, error) {
-    return []database.Source{{ID: 1, Active: true, XUIHost: "http://localhost:2053", XUIInboundID: 1}}, nil
+mockDB.GetNodesByPlanNameFunc = func(ctx context.Context, planName string) ([]database.Node, error) {
+    return []database.Node{{ID: 1, IsActive: true, Host: "http://localhost:2053", InboundID: 1}}, nil
 }
 cfg, subService, mockXUI := makeTestSubService(mockDB)
 
@@ -184,8 +184,8 @@ func TestHandleInvite_EmptyCode(t *testing.T) {
 mockDB.GetPlanByNameFunc = func(ctx context.Context, name string) (*database.Plan, error) {
     return &database.Plan{ID: 1, Name: "trial", DevicesLimit: 1, TrafficLimit: 1073741824, Duration: 3}, nil
 }
-mockDB.GetSourcesByPlanNameFunc = func(ctx context.Context, planName string) ([]database.Source, error) {
-    return []database.Source{{ID: 1, Active: true, XUIHost: "http://localhost:2053", XUIInboundID: 1}}, nil
+mockDB.GetNodesByPlanNameFunc = func(ctx context.Context, planName string) ([]database.Node, error) {
+    return []database.Node{{ID: 1, IsActive: true, Host: "http://localhost:2053", InboundID: 1}}, nil
 }
 
 cfg := &config.Config{
@@ -211,8 +211,8 @@ func TestHandleInvite_DatabaseError(t *testing.T) {
 mockDB.GetPlanByNameFunc = func(ctx context.Context, name string) (*database.Plan, error) {
     return &database.Plan{ID: 1, Name: "trial", DevicesLimit: 1, TrafficLimit: 1073741824, Duration: 3}, nil
 }
-mockDB.GetSourcesByPlanNameFunc = func(ctx context.Context, planName string) ([]database.Source, error) {
-    return []database.Source{{ID: 1, Active: true, XUIHost: "http://localhost:2053", XUIInboundID: 1}}, nil
+mockDB.GetNodesByPlanNameFunc = func(ctx context.Context, planName string) ([]database.Node, error) {
+    return []database.Node{{ID: 1, IsActive: true, Host: "http://localhost:2053", InboundID: 1}}, nil
 }
 
 cfg := &config.Config{
@@ -514,8 +514,8 @@ func TestHandleInvite_ExistingTrialFromCookie(t *testing.T) {
 mockDB.GetPlanByNameFunc = func(ctx context.Context, name string) (*database.Plan, error) {
     return &database.Plan{ID: 1, Name: "trial", DevicesLimit: 1, TrafficLimit: 1073741824, Duration: 3}, nil
 }
-mockDB.GetSourcesByPlanNameFunc = func(ctx context.Context, planName string) ([]database.Source, error) {
-    return []database.Source{{ID: 1, Active: true, XUIHost: "http://localhost:2053", XUIInboundID: 1}}, nil
+mockDB.GetNodesByPlanNameFunc = func(ctx context.Context, planName string) ([]database.Node, error) {
+    return []database.Node{{ID: 1, IsActive: true, Host: "http://localhost:2053", InboundID: 1}}, nil
 }
 
 cfg := &config.Config{
@@ -612,8 +612,8 @@ func TestHandleInvite_RateLimitCheckError(t *testing.T) {
 mockDB.GetPlanByNameFunc = func(ctx context.Context, name string) (*database.Plan, error) {
     return &database.Plan{ID: 1, Name: "trial", DevicesLimit: 1, TrafficLimit: 1073741824, Duration: 3}, nil
 }
-mockDB.GetSourcesByPlanNameFunc = func(ctx context.Context, planName string) ([]database.Source, error) {
-    return []database.Source{{ID: 1, Active: true, XUIHost: "http://localhost:2053", XUIInboundID: 1}}, nil
+mockDB.GetNodesByPlanNameFunc = func(ctx context.Context, planName string) ([]database.Node, error) {
+    return []database.Node{{ID: 1, IsActive: true, Host: "http://localhost:2053", InboundID: 1}}, nil
 }
 
 cfg := &config.Config{
@@ -648,8 +648,8 @@ func TestHandleInvite_ParallelRequests(t *testing.T) {
 mockDB.GetPlanByNameFunc = func(ctx context.Context, name string) (*database.Plan, error) {
     return &database.Plan{ID: 1, Name: "trial", DevicesLimit: 1, TrafficLimit: 1073741824, Duration: 3}, nil
 }
-mockDB.GetSourcesByPlanNameFunc = func(ctx context.Context, planName string) ([]database.Source, error) {
-    return []database.Source{{ID: 1, Active: true, XUIHost: "http://localhost:2053", XUIInboundID: 1}}, nil
+mockDB.GetNodesByPlanNameFunc = func(ctx context.Context, planName string) ([]database.Node, error) {
+    return []database.Node{{ID: 1, IsActive: true, Host: "http://localhost:2053", InboundID: 1}}, nil
 }
 
 cfg := &config.Config{

@@ -9,50 +9,50 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// ==================== Source Lifecycle Tests ====================
+// ==================== Node Lifecycle Tests ====================
 
-func TestListSources_Empty(t *testing.T) {
+func TestListNodes_Empty(t *testing.T) {
 	t.Parallel()
 
 	svc := newTestService(t)
-	sources, err := svc.ListSources(context.Background())
+	sources, err := svc.ListNodes(context.Background())
 	assert.NoError(t, err)
 	// NewService no longer seeds a default source
 	assert.Len(t, sources, 0)
 }
 
-func TestSeedDefaultSource_Success(t *testing.T) {
+func TestSeedDefaultNode_Success(t *testing.T) {
 	t.Parallel()
 
 	svc := newTestService(t)
 	ctx := context.Background()
 
-	err := svc.SeedDefaultSource(ctx, "main", "http://xui:2053", "token-abc", 1, "https://sub.example.com")
+	err := svc.SeedDefaultNode(ctx, "main", "http://xui:2053", "token-abc", 1, "https://sub.example.com")
 	require.NoError(t, err)
 
-	sources, err := svc.ListSources(ctx)
+	sources, err := svc.ListNodes(ctx)
 	require.NoError(t, err)
 	require.Len(t, sources, 1)
 
 	mainSrc := &sources[0]
 	assert.Equal(t, "main", mainSrc.Name)
-	assert.Equal(t, "http://xui:2053", mainSrc.XUIHost)
-	assert.Equal(t, "token-abc", mainSrc.XUIAPIToken)
-	assert.Equal(t, 1, mainSrc.XUIInboundID)
-	assert.Equal(t, "https://sub.example.com", mainSrc.SubURL)
-	assert.True(t, mainSrc.Active)
+	assert.Equal(t, "http://xui:2053", mainSrc.Host)
+	assert.Equal(t, "token-abc", mainSrc.APIToken)
+	assert.Equal(t, 1, mainSrc.InboundID)
+	assert.Equal(t, "https://sub.example.com", mainSrc.SubscriptionURL)
+	assert.True(t, mainSrc.IsActive)
 }
 
-func TestIsSourcesEmpty_TrueAndFalse(t *testing.T) {
+func TestIsNodesEmpty_TrueAndFalse(t *testing.T) {
 	t.Parallel()
 
 	svc := newTestService(t)
 	ctx := context.Background()
 
 	// NewService no longer seeds a default source
-	empty, err := svc.IsSourcesEmpty(ctx)
+	empty, err := svc.IsNodesEmpty(ctx)
 	require.NoError(t, err)
-	assert.True(t, empty, "no source seeded after NewService")
+	assert.True(t, empty, "no node seeded after NewService")
 }
 
 // ==================== Plan Tests ====================
@@ -133,33 +133,33 @@ func TestGetPlanByName_DefaultFreePlan(t *testing.T) {
 	assert.Equal(t, FreePlanName, got.Name)
 }
 
-// ==================== GetSourcesByPlanName Tests ====================
+// ==================== GetNodesByPlanName Tests ====================
 
-func TestGetSourcesByPlanName_NoLinks(t *testing.T) {
+func TestGetNodesByPlanName_NoLinks(t *testing.T) {
 	t.Parallel()
 
 	svc := newTestService(t)
-	sources, err := svc.GetSourcesByPlanName(context.Background(), "nonexistent_plan")
+	sources, err := svc.GetNodesByPlanName(context.Background(), "nonexistent_plan")
 	assert.NoError(t, err)
 	assert.Empty(t, sources)
 
 	// No source seeded yet, so even a real plan name returns empty
-	trialSources, err := svc.GetSourcesByPlanName(context.Background(), TrialPlanName)
+	trialNodes, err := svc.GetNodesByPlanName(context.Background(), TrialPlanName)
 	assert.NoError(t, err)
-	assert.Empty(t, trialSources)
+	assert.Empty(t, trialNodes)
 }
 
-func TestGetSourcesByPlanName_ReturnsLinkedSources(t *testing.T) {
+func TestGetNodesByPlanName_ReturnsLinkedNodes(t *testing.T) {
 	t.Parallel()
 
 	svc := newTestService(t)
 	ctx := context.Background()
 
-	// Create two sources — SeedDefaultSource auto-links all plans to each
-	require.NoError(t, svc.SeedDefaultSource(ctx, "primary", "http://x1", "t1", 1, ""))
-	require.NoError(t, svc.SeedDefaultSource(ctx, "backup", "http://x2", "t2", 1, ""))
+	// Create two sources — SeedDefaultNode auto-links all plans to each
+	require.NoError(t, svc.SeedDefaultNode(ctx, "primary", "http://x1", "t1", 1, ""))
+	require.NoError(t, svc.SeedDefaultNode(ctx, "backup", "http://x2", "t2", 1, ""))
 
-	linked, err := svc.GetSourcesByPlanName(ctx, "trial")
+	linked, err := svc.GetNodesByPlanName(ctx, "trial")
 	require.NoError(t, err)
 	assert.Len(t, linked, 2)
 
@@ -168,24 +168,24 @@ func TestGetSourcesByPlanName_ReturnsLinkedSources(t *testing.T) {
 	assert.Contains(t, names, "backup")
 }
 
-func TestGetSourcesByPlanName_FilterByName(t *testing.T) {
+func TestGetNodesByPlanName_FilterByName(t *testing.T) {
 	t.Parallel()
 
 	svc := newTestService(t)
 	ctx := context.Background()
 
-	// Seed a source — SeedDefaultSource auto-links it to both trial and free plans
-	require.NoError(t, svc.SeedDefaultSource(ctx, "default", "http://x1", "t1", 1, ""))
+	// Seed a source — SeedDefaultNode auto-links it to both trial and free plans
+	require.NoError(t, svc.SeedDefaultNode(ctx, "default", "http://x1", "t1", 1, ""))
 
-	trialSources, err := svc.GetSourcesByPlanName(ctx, "trial")
+	trialNodes, err := svc.GetNodesByPlanName(ctx, "trial")
 	require.NoError(t, err)
-	assert.Len(t, trialSources, 1)
-	assert.Equal(t, "default", trialSources[0].Name)
+	assert.Len(t, trialNodes, 1)
+	assert.Equal(t, "default", trialNodes[0].Name)
 
-	freeSources, err := svc.GetSourcesByPlanName(ctx, "free")
+	freeNodes, err := svc.GetNodesByPlanName(ctx, "free")
 	require.NoError(t, err)
-	assert.Len(t, freeSources, 1)
-	assert.Equal(t, "default", freeSources[0].Name)
+	assert.Len(t, freeNodes, 1)
+	assert.Equal(t, "default", freeNodes[0].Name)
 }
 
 // ==================== Subscription Active Check (model) ====================
