@@ -343,7 +343,11 @@ func (m *MockDatabaseService) CreateTrialSubscription(ctx context.Context, invit
 	if m.CreateTrialSubscriptionFunc != nil {
 		return m.CreateTrialSubscriptionFunc(ctx, inviteCode, subscriptionID, clientID, expiryTime)
 	}
-	return &database.Subscription{InviteCode: inviteCode, SubscriptionID: subscriptionID, ClientID: clientID, PlanID: 1}, nil
+	trialPlan, err := m.GetPlanByName(ctx, database.TrialPlanName)
+	if err != nil {
+		return nil, err
+	}
+	return &database.Subscription{InviteCode: inviteCode, SubscriptionID: subscriptionID, ClientID: clientID, PlanID: trialPlan.ID}, nil
 }
 
 func (m *MockDatabaseService) ListNodes(ctx context.Context) ([]database.Node, error) {
@@ -486,8 +490,12 @@ func (m *MockDatabaseService) GetTrialSubscriptionBySubID(ctx context.Context, s
 	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+	trialPlan, err := m.GetPlanByName(ctx, database.TrialPlanName)
+	if err != nil {
+		return nil, err
+	}
 	for _, sub := range m.Subscriptions {
-		if sub.SubscriptionID == subscriptionID && sub.PlanID == 1 {
+		if sub.SubscriptionID == subscriptionID && sub.PlanID == trialPlan.ID {
 			return sub, nil
 		}
 	}

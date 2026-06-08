@@ -679,7 +679,7 @@ func TestSubscriptionService_ReconcileOrphanedClients_RemovesMissing(t *testing.
 	cfg := &config.Config{}
 
 	normal := &database.Subscription{ID: 10, TelegramID: 100, Username: "realuser", Status: "active"}
-	trial := &database.Subscription{ID: 20, TelegramID: 0, SubscriptionID: "orphan123", Status: "active", PlanID: 1}
+	trial := &database.Subscription{ID: 20, TelegramID: 0, SubscriptionID: "orphan123", Status: "active", PlanID:    1}
 	good := &database.Subscription{ID: 30, TelegramID: 300, Username: "gooduser", Status: "active"}
 	inactive := &database.Subscription{ID: 40, TelegramID: 400, Username: "bad", Status: "revoked"}
 
