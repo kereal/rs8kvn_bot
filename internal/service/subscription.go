@@ -30,7 +30,7 @@ type Event = webhook.Event
 type SubscriptionService struct {
 	db           interfaces.DatabaseService
 	xuiClients   map[uint]interfaces.XUIClient
-	nodes       []database.Node
+	nodes        []database.Node
 	cfg          *config.Config
 	globalSubURL string
 	webhook      WebhookSender
@@ -58,7 +58,7 @@ func NewSubscriptionService(db interfaces.DatabaseService, xuiClients map[uint]i
 	return &SubscriptionService{
 		db:           db,
 		xuiClients:   xuiClients,
-		nodes:       nodes,
+		nodes:        nodes,
 		cfg:          cfg,
 		globalSubURL: globalSubURL,
 		webhook:      webhookSender,
@@ -147,7 +147,7 @@ func (s *SubscriptionService) Create(ctx context.Context, chatID int64, username
 		Username:       username,
 		ClientID:       firstClient.ID,
 		SubscriptionID: firstClient.SubID,
-		ExpiresAt:     expiryTime,
+		ExpiresAt:      expiryTime,
 		PlanID:         plan.ID,
 		Status:         "active",
 	}
@@ -253,13 +253,13 @@ func (s *SubscriptionService) deleteClientFromAllNodes(ctx context.Context, emai
 }
 
 type TrafficInfo struct {
-	UsedGB              float64
-	LimitGB             int
-	Percentage          float64
-	ProgressBar         string
-	DaysUntilReset      int
-	ResetInfo           string
-	CreatedAtFormatted  string
+	UsedGB             float64
+	LimitGB            int
+	Percentage         float64
+	ProgressBar        string
+	DaysUntilReset     int
+	ResetInfo          string
+	CreatedAtFormatted string
 	ExpiresAtFormatted string
 }
 
@@ -350,13 +350,13 @@ func (s *SubscriptionService) GetWithTraffic(ctx context.Context, telegramID int
 	}
 
 	return sub, &TrafficInfo{
-		UsedGB:              usedGB,
-		LimitGB:             int(limitGB),
-		Percentage:          percentage,
-		ProgressBar:         progressBar,
-		DaysUntilReset:      daysUntilReset,
-		ResetInfo:           resetInfo,
-		CreatedAtFormatted:  utils.FormatDateRu(sub.CreatedAt),
+		UsedGB:             usedGB,
+		LimitGB:            int(limitGB),
+		Percentage:         percentage,
+		ProgressBar:        progressBar,
+		DaysUntilReset:     daysUntilReset,
+		ResetInfo:          resetInfo,
+		CreatedAtFormatted: utils.FormatDateRu(sub.CreatedAt),
 		ExpiresAtFormatted: utils.FormatDateRu(sub.ExpiresAt),
 	}, nil
 }
@@ -632,5 +632,3 @@ func (s *SubscriptionService) GetTelegramIDsBatch(ctx context.Context, offset, l
 func (s *SubscriptionService) GetAllReferralCounts(ctx context.Context) (map[int64]int64, error) {
 	return s.db.GetAllReferralCounts(ctx)
 }
-
-

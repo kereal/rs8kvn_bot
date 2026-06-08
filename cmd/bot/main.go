@@ -176,10 +176,7 @@ func main() {
 			logger.Fatal("Failed to seed default node", zap.Error(err))
 		}
 		logger.Info("Default node seeded", zap.String("host", xuiHost))
-	} else {
-		seedCancel()
 	}
-	seedCancel()
 
 	// Load nodes and create XUI clients
 	nodes, err := dbService.ListNodes(context.Background())

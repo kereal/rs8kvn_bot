@@ -164,19 +164,18 @@ func (h *Handler) HandleDel(ctx context.Context, update tgbotapi.Update) error {
 	return nil
 }
 
-// escapeMarkdown escapes special characters in Markdown V2 to prevent injection.
-// Backslash MUST be first — escaping it before other chars prevents double-escaping
-// escapeMarkdown returns text with Telegram Markdown V2 special characters escaped by prefixing each with a backslash.
-// It escapes the backslash character first to prevent incorrect double-escaping (for example, input "\*" becomes "\\\*").
-// The characters escaped include: \ _ * [ ] ( ) ~ ` > # + - = | { } . !
+// escapeMarkdown escapes special characters in Telegram Markdown V2 text.
+// Characters escaped: \ _ * [ ] ( ) ~ ` > # + - = | { } . !
 func escapeMarkdown(text string) string {
-	// Characters that need to be escaped in Markdown V2: \ _ * [ ] ( ) ~ ` > # + - = | { } . !
-	specialChars := []string{"\\", "_", "*", "[", "]", "(", ")", "~", "`", ">", "#", "+", "-", "=", "|", "{", "}", ".", "!"}
-	result := text
-	for _, char := range specialChars {
-		result = strings.ReplaceAll(result, char, "\\"+char)
+	var b strings.Builder
+	b.Grow(len(text) * 2)
+	for _, r := range text {
+		if strings.ContainsRune(`\_*[]()~`+"`"+">#+-=|{}.!", r) {
+			b.WriteRune('\\')
+		}
+		b.WriteRune(r)
 	}
-	return result
+	return b.String()
 }
 
 // HandleBroadcast handles the /broadcast command for admins to send messages to all users.

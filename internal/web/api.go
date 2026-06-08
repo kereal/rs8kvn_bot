@@ -38,11 +38,11 @@ func (s *Server) GetSubscriptions(w http.ResponseWriter, r *http.Request) {
 	// Filter active subscriptions and convert to response format
 	result := make([]SubscriptionResponse, 0, len(subs))
 	for _, sub := range subs {
-		if sub.IsActive() {
+		if active := sub.IsActive(); active {
 			result = append(result, SubscriptionResponse{
 				ID:                sub.ClientID,
 				Email:             sub.Username,
-				Enabled:           sub.IsActive(),
+				Enabled:           active,
 				SubscriptionToken: sub.SubscriptionID,
 			})
 		}
