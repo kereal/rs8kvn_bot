@@ -46,7 +46,7 @@ type Subscription struct {
 	Username       string    `gorm:"size:255;index"`
 	ClientID       string    `gorm:"size:255"`
 	SubscriptionID string    `gorm:"size:255;index"`
-	ExpiryTime     time.Time `gorm:"index:idx_expiry"`
+	ExpiresAt      time.Time `gorm:"index:idx_expiry"`
 	Status         string    `gorm:"default:active;size:50;index"`
 	InviteCode     string    `gorm:"size:16;index"`
 	PlanID         uint      `gorm:"index"`
@@ -134,12 +134,12 @@ func (TrialRequest) TableName() string {
 }
 
 // IsExpired returns true if the subscription has expired.
-// A zero ExpiryTime means no expiry is set, so it is not considered expired.
+// A zero ExpiresAt means no expiry is set, so it is not considered expired.
 func (s *Subscription) IsExpired() bool {
-	if s.ExpiryTime.IsZero() {
+	if s.ExpiresAt.IsZero() {
 		return false
 	}
-	return time.Now().After(s.ExpiryTime)
+	return time.Now().After(s.ExpiresAt)
 }
 
 // IsActive returns true if the subscription is active and not expired.
@@ -474,7 +474,7 @@ func (s *Service) CreateSubscription(ctx context.Context, sub *Subscription, inv
 func (s *Service) UpdateSubscription(ctx context.Context, sub *Subscription) error {
 	result := s.db.WithContext(ctx).Model(&Subscription{}).
 		Where("id = ?", sub.ID).
-		Select("telegram_id", "username", "client_id", "subscription_id", "expiry_time", "status", "invite_code", "plan_id", "referred_by", "devices", "ips").
+		Select("telegram_id", "username", "client_id", "subscription_id", "expires_at", "status", "invite_code", "plan_id", "referred_by", "devices", "ips").
 		Updates(sub)
 	if result.Error != nil {
 		return fmt.Errorf("failed to update subscription: %w", result.Error)
@@ -672,7 +672,7 @@ func (s *Service) CountExpiredSubscriptions(ctx context.Context) (int64, error) 
 	var count int64
 	result := s.db.WithContext(ctx).
 		Model(&Subscription{}).
-		Where("expiry_time <= ?", time.Now()).
+		Where("expires_at <= ?", time.Now()).
 		Count(&count)
 	if result.Error != nil {
 		return 0, fmt.Errorf("failed to count expired subscriptions: %w", result.Error)
@@ -820,7 +820,7 @@ func (s *Service) CreateTrialSubscription(ctx context.Context, inviteCode, subsc
 		SubscriptionID: subscriptionID,
 		ClientID:       clientID,
 		InviteCode:     inviteCode,
-		ExpiryTime:     expiryTime,
+		ExpiresAt:      expiryTime,
 		PlanID:         planID,
 		Status:         "active",
 	}
@@ -855,12 +855,12 @@ func (s *Service) GetSubscriptionBySubscriptionID(ctx context.Context, subscript
 // gorm.ErrRecordNotFound if no row matches.
 func (s *Service) GetSubscriptionStatus(ctx context.Context, subscriptionID string) (string, time.Time, error) {
 	var row struct {
-		Status     string
-		ExpiryTime time.Time
+		Status    string
+		ExpiresAt time.Time
 	}
 	result := s.db.WithContext(ctx).
 		Table("subscriptions").
-		Select("status, expiry_time").
+		Select("status, expires_at").
 		Where("subscription_id = ?", subscriptionID).
 		Scan(&row)
 	if result.Error != nil {
@@ -869,7 +869,7 @@ func (s *Service) GetSubscriptionStatus(ctx context.Context, subscriptionID stri
 	if result.RowsAffected == 0 {
 		return "", time.Time{}, gorm.ErrRecordNotFound
 	}
-	return row.Status, row.ExpiryTime, nil
+	return row.Status, row.ExpiresAt, nil
 }
 
 // GetSubscriptionWithPlanAndNodes returns a subscription (status=active) by subscription ID

@@ -263,8 +263,8 @@ All tests pass with `-race` detector. Fuzzing enabled for critical functions.
 - **Token configuration:** `XUI_API_TOKEN` env var — no username, password, or session age needed
 - **No connection pool cleanup needed:** No session state to invalidate
 - **No circuit breaker:** Removed in favor of simple `RetryWithBackoff` with exponential backoff + jitter
-- **Subscription defaults:** `reset: 30` (days from creation), `expiryTime: now + 30 days`
-- **Auto-reset:** Only works when `ExpiryTime > 0`. Traffic resets every 30 days, expiry extends (3x-ui auto-renew logic)
+- **Subscription defaults:** `reset: 30` (days from creation), `expiresAt: now + 30 days`
+- **Auto-reset:** Only works when `expiresAt` > 0. Traffic resets every 30 days, expiry extends (3x-ui auto-renew logic)
 - **Client email:** `trial_{subID}` for trial, `{username}` for regular
 - **Ping:** `Ping()` sends GET `/panel/api/server/status` with Bearer token — no session verification needed
 - **No singleflight:** Deduplication removed (no concurrent login to deduplicate)

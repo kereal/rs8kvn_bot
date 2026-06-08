@@ -102,7 +102,7 @@ func TestE2E_CreateSubscription_RetryAfterFailure(t *testing.T) {
 			Email:      email,
 			Enable:     true,
 			TotalGB:    trafficBytes,
-			ExpiryTime: expiryTime.Unix(),
+			ExpiresAt: expiryTime.Unix(),
 			SubID:      subID,
 			Reset:      resetDays,
 		}, nil
@@ -161,7 +161,7 @@ func TestE2E_CreateSubscription_MultipleRetries(t *testing.T) {
 			Email:      email,
 			Enable:     true,
 			TotalGB:    trafficBytes,
-			ExpiryTime: expiryTime.Unix(),
+			ExpiresAt: expiryTime.Unix(),
 			SubID:      subID,
 			Reset:      resetDays,
 		}, nil
@@ -276,7 +276,7 @@ func TestE2E_Subscription_Expired(t *testing.T) {
 		ClientID:       "test-client-id",
 		SubscriptionID: "test-sub-id",
 		Status:         "expired",
-		ExpiryTime:     time.Now().Add(-1 * time.Hour),
+		ExpiresAt:     time.Now().Add(-1 * time.Hour),
 	}
 	require.NoError(t, env.db.CreateSubscription(ctx, sub, ""))
 
@@ -297,13 +297,13 @@ func TestE2E_Subscription_AboutToExpire(t *testing.T) {
 		ClientID:       "test-client-id",
 		SubscriptionID: "test-sub-id",
 		Status:         "active",
-		ExpiryTime:     time.Now().Add(1 * time.Hour),
+		ExpiresAt:     time.Now().Add(1 * time.Hour),
 	}
 	require.NoError(t, env.db.CreateSubscription(ctx, sub, ""))
 
 	storedSub, err := env.db.GetByTelegramID(ctx, env.chatID)
 	require.NoError(t, err)
-	assert.True(t, storedSub.ExpiryTime.Before(time.Now().Add(2*time.Hour)), "Should expire within 2 hours")
+	assert.True(t, storedSub.ExpiresAt.Before(time.Now().Add(2*time.Hour)), "Should expire within 2 hours")
 }
 
 func TestE2E_RateLimit_ExactlyAtLimit(t *testing.T) {

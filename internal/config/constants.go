@@ -69,9 +69,9 @@ const (
 // Subscription Constants
 const (
 	// SubscriptionResetDay is the interval in days for automatic traffic reset.
-	// When combined with ExpiryTime > 0, traffic resets every N days and expiry extends.
+	// When combined with ExpiresAt > 0, traffic resets every N days and expiry extends.
 	// Example: reset=30 means traffic resets every 30 days from creation date.
-	// IMPORTANT: Auto-reset only works when ExpiryTime is set (not zero).
+	// IMPORTANT: Auto-reset only works when ExpiresAt is set (not zero).
 	// Source: https://github.com/mhsanaei/3x-ui/blob/main/web/service/inbound.go#L888-L912
 	SubscriptionResetDay = 30
 )

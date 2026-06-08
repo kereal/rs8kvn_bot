@@ -63,7 +63,7 @@ func TestTrialCleanupScheduler_RunCleanup_WithExpiredTrials(t *testing.T) {
 		ClientID:       "expired-client-1",
 		SubscriptionID: "expired-sub-1",
 		PlanID: 1,
-		ExpiryTime:     time.Now().Add(-1 * time.Hour),
+		ExpiresAt:     time.Now().Add(-1 * time.Hour),
 		Status:         "active",
 		CreatedAt:      time.Now().Add(-2 * time.Hour),
 	}
@@ -75,7 +75,7 @@ func TestTrialCleanupScheduler_RunCleanup_WithExpiredTrials(t *testing.T) {
 		ClientID:       "expired-client-2",
 		SubscriptionID: "expired-sub-2",
 		PlanID: 1,
-		ExpiryTime:     time.Now().Add(-1 * time.Hour),
+		ExpiresAt:     time.Now().Add(-1 * time.Hour),
 		Status:         "active",
 		CreatedAt:      time.Now().Add(-3 * time.Hour),
 	}
@@ -87,7 +87,7 @@ func TestTrialCleanupScheduler_RunCleanup_WithExpiredTrials(t *testing.T) {
 		ClientID:       "active-client",
 		SubscriptionID: "active-sub",
 		PlanID: 1,
-		ExpiryTime:     time.Now().Add(1 * time.Hour),
+		ExpiresAt:     time.Now().Add(1 * time.Hour),
 		Status:         "active",
 		CreatedAt:      time.Now().Add(-30 * time.Minute),
 	}

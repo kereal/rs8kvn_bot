@@ -579,7 +579,7 @@ func CreateTestSubscription(telegramID int64, username string, status string, ex
 		Username:       username,
 		ClientID:       "test-client-id-" + username,
 		SubscriptionID: username,
-		ExpiryTime:     expiry,
+		ExpiresAt:     expiry,
 		Status:         status,
 	}
 }
@@ -620,7 +620,7 @@ func (m *MockXUIClient) AddClient(ctx context.Context, inboundID int, email stri
 		ID:         "test-client-id",
 		Email:      email,
 		TotalGB:    trafficBytes,
-		ExpiryTime: expiryTime.UnixMilli(),
+		ExpiresAt: expiryTime.UnixMilli(),
 		Enable:     true,
 	}, nil
 }
@@ -636,7 +636,7 @@ func (m *MockXUIClient) AddClientWithID(ctx context.Context, inboundID int, emai
 		ID:         clientID,
 		Email:      email,
 		TotalGB:    trafficBytes,
-		ExpiryTime: expiryTime.UnixMilli(),
+		ExpiresAt: expiryTime.UnixMilli(),
 		Enable:     true,
 		SubID:      subID,
 	}, nil

@@ -194,7 +194,7 @@ func CreateTestSubscriptionInDB(t *testing.T, db *database.Service, chatID int64
 		Username:       username,
 		ClientID:       clientID,
 		SubscriptionID: "test-sub-id",
-		ExpiryTime:     expiry,
+		ExpiresAt:     expiry,
 		Status:         status,
 	}
 
@@ -279,7 +279,7 @@ func TestSubscriptionFlow_RevokeOldSubscription(t *testing.T) {
 		Username:       "testuser2",
 		ClientID:       clientID,
 		SubscriptionID: "testuser2",
-		ExpiryTime:     time.Now().Add(30 * 24 * time.Hour),
+		ExpiresAt:     time.Now().Add(30 * 24 * time.Hour),
 		Status:         "active",
 	}, "")
 	if err != nil {

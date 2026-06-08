@@ -86,7 +86,7 @@ func TestHandleMySubscription_ExpiredSubscription(t *testing.T) {
 	got, err := db.GetByTelegramID(ctx, 123456789)
 	require.NoError(t, err, "GetByTelegramID() error")
 
-	assert.True(t, time.Now().After(got.ExpiryTime), "Expected subscription to be expired")
+	assert.True(t, time.Now().After(got.ExpiresAt), "Expected subscription to be expired")
 }
 
 func TestHandleAdminStats(t *testing.T) {
@@ -165,8 +165,8 @@ func TestHandleBroadcast_DatabaseFunction(t *testing.T) {
 	ctx := context.Background()
 
 	subs := []*database.Subscription{
-		{TelegramID: 111111111, Username: "user1", ClientID: "client1", Status: "active", ExpiryTime: time.Now().Add(24 * time.Hour)},
-		{TelegramID: 222222222, Username: "user2", ClientID: "client2", Status: "active", ExpiryTime: time.Now().Add(24 * time.Hour)},
+		{TelegramID: 111111111, Username: "user1", ClientID: "client1", Status: "active", ExpiresAt: time.Now().Add(24 * time.Hour)},
+		{TelegramID: 222222222, Username: "user2", ClientID: "client2", Status: "active", ExpiresAt: time.Now().Add(24 * time.Hour)},
 	}
 
 	for _, sub := range subs {
@@ -282,10 +282,10 @@ func TestGetAllTelegramIDs(t *testing.T) {
 	ctx := context.Background()
 
 	subs := []*database.Subscription{
-		{TelegramID: 111111111, Username: "user1", ClientID: "client1", Status: "active", ExpiryTime: time.Now().Add(24 * time.Hour)},
-		{TelegramID: 222222222, Username: "user2", ClientID: "client2", Status: "active", ExpiryTime: time.Now().Add(24 * time.Hour)},
-		{TelegramID: 333333333, Username: "user3", ClientID: "client3", Status: "active", ExpiryTime: time.Now().Add(24 * time.Hour)},
-		{TelegramID: 111111111, Username: "user1_alt", ClientID: "client4", Status: "active", ExpiryTime: time.Now().Add(24 * time.Hour)},
+		{TelegramID: 111111111, Username: "user1", ClientID: "client1", Status: "active", ExpiresAt: time.Now().Add(24 * time.Hour)},
+		{TelegramID: 222222222, Username: "user2", ClientID: "client2", Status: "active", ExpiresAt: time.Now().Add(24 * time.Hour)},
+		{TelegramID: 333333333, Username: "user3", ClientID: "client3", Status: "active", ExpiresAt: time.Now().Add(24 * time.Hour)},
+		{TelegramID: 111111111, Username: "user1_alt", ClientID: "client4", Status: "active", ExpiresAt: time.Now().Add(24 * time.Hour)},
 	}
 
 	for _, sub := range subs {

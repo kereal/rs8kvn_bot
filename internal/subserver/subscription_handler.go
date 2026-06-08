@@ -52,7 +52,7 @@ func HandleSubscription(ctx context.Context, db interfaces.DatabaseService, subS
 			logger.Warn("Cache invalidated: subscription no longer active",
 				zap.String("sub_id", subID),
 				zap.String("status", status),
-				zap.Time("expiry_time", expiryTime),
+				zap.Time("expires_at", expiryTime),
 			)
 			return nil, fmt.Errorf("subscription not active")
 		}
@@ -80,7 +80,7 @@ func HandleSubscription(ctx context.Context, db interfaces.DatabaseService, subS
 	logger.Debug("Subscription loaded from database",
 		zap.Uint("sub_pk", subFull.ID),
 		zap.String("status", subFull.Subscription.Status),
-		zap.Time("expiry_time", subFull.ExpiryTime),
+		zap.Time("expires_at", subFull.ExpiresAt),
 		zap.Int64("plan_traffic_limit", subFull.Plan.TrafficLimit),
 		zap.Int("nodes_count", len(subFull.Nodes)),
 	)
