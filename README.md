@@ -1,4 +1,4 @@
-# rs8kvn_bot - Telegram Bot for 3x-ui VLESS Subscription Distribution
+# Telegram Bot for 3x-ui VLESS Subscription Distribution
 
 [![GitHub release](https://img.shields.io/github/v/release/kereal/rs8kvn_bot?logo=github)](https://github.com/kereal/rs8kvn_bot/releases)
 [![Coverage](https://img.shields.io/badge/coverage-85%25%2B-green)](https://github.com/kereal/rs8kvn_bot/actions)
@@ -100,13 +100,12 @@ Each user can generate an invite code via the referral flow. The landing page va
 - Copy-to-clipboard subscription URL
 - Telegram activation link
 
-### Subscription Proxy (`/sub/{subID}`)
+### Subscription Server (`/sub/{subID}`)
 
 Serves subscriptions with optional extra servers and custom headers. Validates `subID`, checks cache (240s TTL), fetches from 3x-ui, merges extra servers/headers from config file, returns combined response. Stale cache is used as fallback if 3x-ui is unavailable.
 
 ## Traffic and Expiry
 
-- **Traffic**: Configurable via `TRAFFIC_LIMIT_GB` (default: 30GB)
 - **Auto-reset**: Every 30 days from creation date — 3x-ui resets traffic to 0 and extends `expiresAt` by 30 days automatically when `expiresAt` > 0
 - **Source**: [3x-ui inbound.go - autoRenewClients()](https://github.com/mhsanaei/3x-ui/blob/main/web/service/inbound.go#L888-L912)
 
