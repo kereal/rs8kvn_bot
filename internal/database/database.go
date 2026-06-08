@@ -41,24 +41,28 @@ const (
 
 // Subscription represents a user's VPN subscription.
 type Subscription struct {
-	ID               uint      `gorm:"primaryKey"`
-	TelegramID       int64     `gorm:"index"`
-	Username         string    `gorm:"size:255;index"`
-	ClientID         string    `gorm:"size:255"`
-	SubscriptionID   string    `gorm:"size:255;index"`
-	ExpiresAt        time.Time `gorm:"index:idx_expiry"`
-	Status           string    `gorm:"default:active;size:50;index"`
-	InviteCode       string    `gorm:"size:16;index"`
-	PlanID           uint      `gorm:"index"`
-	ReferredBy       int64     `gorm:"index"`
-	ProductID        uint      `gorm:"index"`
-	StartedAt        time.Time
-	PricePaidCents   int64     `gorm:"default:0"`
-	Currency         string    `gorm:"size:3"`
-	Devices          string    `gorm:"type:text;default:'[]'"` // JSON array of {header_key: value} device entries
-	Ips              string    `gorm:"type:text;default:'[]'"` // JSON array of {ip: timestamp} entries
-	CreatedAt        time.Time `gorm:"autoCreateTime"`
-	UpdatedAt        time.Time `gorm:"autoUpdateTime"`
+	ID             uint      `gorm:"primaryKey"`
+	TelegramID     int64     `gorm:"index"`
+	Username       string    `gorm:"size:255;index"`
+	ClientID       string    `gorm:"size:255"`
+	SubscriptionID string    `gorm:"size:255;index"`
+	ExpiresAt      time.Time `gorm:"index:idx_expiry"`
+	Status         string    `gorm:"default:active;size:50;index"`
+	InviteCode     string    `gorm:"size:16;index"`
+	PlanID         uint      `gorm:"index"`
+	ReferredBy     int64     `gorm:"index"`
+	ProductID      uint      `gorm:"index"`
+	StartedAt      time.Time
+	PricePaidCents int64     `gorm:"default:0"`
+	Currency       string    `gorm:"size:3"`
+	Devices        string    `gorm:"type:text;default:'[]'"` // JSON array of {header_key: value} device entries
+	Ips            string    `gorm:"type:text;default:'[]'"` // JSON array of {ip: timestamp} entries
+	CreatedAt      time.Time `gorm:"autoCreateTime"`
+	UpdatedAt      time.Time `gorm:"autoUpdateTime"`
+
+	Plan      *Plan      `gorm:"foreignKey:PlanID"`
+	Product   *Product   `gorm:"foreignKey:ProductID"`
+	Orders    []Order    `gorm:"foreignKey:SubscriptionID"`
 }
 
 // Node represents a configured 3x-ui panel source.
@@ -73,6 +77,8 @@ type Node struct {
 	Type            string    `gorm:"type:varchar(10);not null;default: x-ui;column:type" json:"type"`
 	CreatedAt       time.Time `gorm:"autoCreateTime;column:created_at"`
 	UpdatedAt       time.Time `gorm:"autoUpdateTime;column:updated_at"`
+
+	PlanNodes []PlanNode `gorm:"foreignKey:NodeID"`
 }
 
 // Plan represents a subscription plan.
@@ -84,56 +90,59 @@ type Plan struct {
 	Duration     int       `gorm:"default:0;column:duration"` // hours, 0=unlimited
 	CreatedAt    time.Time `gorm:"autoCreateTime;column:created_at"`
 	UpdatedAt    time.Time `gorm:"autoUpdateTime;column:updated_at"`
+
+	Products  []Product  `gorm:"foreignKey:PlanID"`
+	PlanNodes []PlanNode `gorm:"foreignKey:PlanID"`
 }
 
 // PlanNode is the join model for M2M between Plan and Node.
 type PlanNode struct {
 	PlanID uint `gorm:"primaryKey;column:plan_id"`
 	NodeID uint `gorm:"primaryKey;column:node_id"`
+
+	Plan *Plan `gorm:"foreignKey:PlanID"`
+	Node *Node `gorm:"foreignKey:NodeID"`
 }
 
 // Product represents a purchasable subscription product bound to a plan.
 type Product struct {
-	ID             uint      `gorm:"primaryKey;column:id"`
-	PlanID         uint      `gorm:"not null;column:plan_id"`
-	DurationDays   int       `gorm:"not null;column:duration_days"`
-	PriceCents     int64     `gorm:"not null;column:price_cents"`
-	Currency       string    `gorm:"size:3;not null;default:RUB;column:currency"`
-	IsActive       bool      `gorm:"not null;default:true;column:is_active"`
-	CreatedAt      time.Time `gorm:"autoCreateTime;column:created_at"`
-	UpdatedAt      time.Time `gorm:"autoUpdateTime;column:updated_at"`
+	ID           uint      `gorm:"primaryKey;column:id"`
+	PlanID       uint      `gorm:"not null;column:plan_id"`
+	DurationDays int       `gorm:"not null;column:duration_days"`
+	PriceCents   int64     `gorm:"not null;column:price_cents"`
+	Currency     string    `gorm:"size:3;not null;default:RUB;column:currency"`
+	IsActive     bool      `gorm:"not null;default:true;column:is_active"`
+	CreatedAt    time.Time `gorm:"autoCreateTime;column:created_at"`
+	UpdatedAt    time.Time `gorm:"autoUpdateTime;column:updated_at"`
+
+	Plan  *Plan  `gorm:"foreignKey:PlanID"`
+	Orders []Order `gorm:"foreignKey:ProductID"`
 }
 
 // Order represents a recorded purchase event for a subscription.
 // Statuses: pending | paid | expired | canceled.
+//
+// Fields:
+//   - provider_payment_id — external payment ID from provider.
+//   - paid_at — payment confirmation timestamp.
+//   - activated_at — subscription activation timestamp.
+//   - expires_at — payment invoice expiry (e.g. 30 minutes from creation).
 type Order struct {
-	ID                 uint      `gorm:"primaryKey;column:id"`
-	SubscriptionID     uint      `gorm:"not null;column:subscription_id"`
-	ProductID          uint      `gorm:"not null;column:product_id"`
-	Status             string    `gorm:"not null;size:16;column:status"`
-	AmountCents        int64     `gorm:"not null;column:amount_cents"`
-	Currency           string    `gorm:"size:3;not null;default:RUB;column:currency"`
-	PaymentProvider    string    `gorm:"column:payment_provider"`
-	ProviderPaymentID  string    `gorm:"column:provider_payment_id"`
-	CreatedAt          time.Time `gorm:"not null;column:created_at"`
-	PaidAt             time.Time `gorm:"column:paid_at"`
-	ActivatedAt        time.Time `gorm:"column:activated_at"`
-	ExpiresAt          time.Time `gorm:"column:expires_at"`
-}
+	ID                uint      `gorm:"primaryKey;column:id"`
+	SubscriptionID    uint      `gorm:"not null;column:subscription_id"`
+	ProductID         uint      `gorm:"not null;column:product_id"`
+	Status            string    `gorm:"not null;size:16;column:status"`
+	AmountCents       int64     `gorm:"not null;column:amount_cents"`
+	Currency          string    `gorm:"size:3;not null;default:RUB;column:currency"`
+	PaymentProvider   string    `gorm:"column:payment_provider"`
+	ProviderPaymentID string    `gorm:"column:provider_payment_id"`
+	CreatedAt         time.Time `gorm:"not null;column:created_at"`
+	PaidAt            time.Time `gorm:"column:paid_at"`
+	ActivatedAt       time.Time `gorm:"column:activated_at"`
+	ExpiresAt         time.Time `gorm:"column:expires_at"`
 
-// TableName returns the table name for PlanNode.
-func (PlanNode) TableName() string {
-	return "plan_nodes"
-}
-
-// TableName returns the table name for Product.
-func (Product) TableName() string {
-	return "products"
-}
-
-// TableName returns the table name for Order.
-func (Order) TableName() string {
-	return "orders"
+	Subscription *Subscription `gorm:"foreignKey:SubscriptionID"`
+	Product      *Product      `gorm:"foreignKey:ProductID"`
 }
 
 // Invite represents a referral invite code.
@@ -141,6 +150,8 @@ type Invite struct {
 	Code         string    `gorm:"primaryKey;size:16"`
 	ReferrerTGID int64     `gorm:"index;not null"`
 	CreatedAt    time.Time `gorm:"autoCreateTime"`
+
+	Subscriptions []Subscription `gorm:"foreignKey:InviteCode"`
 }
 
 // TrialRequest tracks trial requests for rate limiting.
@@ -150,27 +161,41 @@ type TrialRequest struct {
 	CreatedAt time.Time `gorm:"autoCreateTime"`
 }
 
-// TableName returns the table name for Node.
+// SubscriptionFull holds a subscription together with its plan and active nodes.
+type SubscriptionFull struct {
+	Subscription
+	Plan  Plan
+	Nodes []Node
+}
+
+func (PlanNode) TableName() string {
+	return "plan_nodes"
+}
+
+func (Product) TableName() string {
+	return "products"
+}
+
+func (Order) TableName() string {
+	return "orders"
+}
+
 func (Node) TableName() string {
 	return "nodes"
 }
 
-// TableName returns the table name for Plan.
 func (Plan) TableName() string {
 	return "plans"
 }
 
-// TableName returns the table name for Subscription.
 func (Subscription) TableName() string {
 	return "subscriptions"
 }
 
-// TableName returns the table name for Invite.
 func (Invite) TableName() string {
 	return "invites"
 }
 
-// TableName returns the table name for TrialRequest.
 func (TrialRequest) TableName() string {
 	return "trial_requests"
 }
@@ -231,13 +256,6 @@ func (s *Subscription) SetIPs(ips []map[string]string) error {
 	}
 	s.Ips = string(data)
 	return nil
-}
-
-// SubscriptionFull holds a subscription together with its plan and active nodes.
-type SubscriptionFull struct {
-	Subscription
-	Plan  Plan
-	Nodes []Node
 }
 
 // runMigrations applies the embedded SQL schema migrations to the provided database,

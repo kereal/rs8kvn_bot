@@ -5,6 +5,12 @@
 --   paid      — оплата подтверждена
 --   expired   — истек срок ожидания оплаты
 --   canceled  — отменён
+--
+-- Поля:
+--   provider_payment_id  — внешний идентификатор платежа из платёжного провайдера.
+--   paid_at              — момент подтверждения оплаты.
+--   activated_at         — момент фактической активации подписки.
+--   expires_at           — срок действияinvoice (например, 30 минут с момента создания).
 
 CREATE TABLE orders (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
