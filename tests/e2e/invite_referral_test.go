@@ -99,7 +99,7 @@ func TestE2E_InviteLink_CreatesTrial(t *testing.T) {
 	env.cfg.TrialRateLimit = 100
 
 	xuiClients := map[uint]interfaces.XUIClient{1: env.xui}
-	sources := []database.Source{{Name: "main", XUIHost: "https://panel.example.com", XUIAPIToken: "test-api-token", XUIInboundID: 1, Active: true,  ID: 1}}
+	sources := []database.Node{{Name: "main", Host: "https://panel.example.com", APIToken: "test-api-token", InboundID: 1, IsActive: true,  ID: 1}}
 	subService := service.NewSubscriptionService(env.db, xuiClients, sources, env.cfg, env.cfg.GlobalSubURL, &webhook.NoopSender{})
 	srv := web.NewServer("127.0.0.1:0", env.db, env.cfg, env.botConfig, subService, nil)
 
@@ -117,9 +117,11 @@ func TestE2E_InviteLink_CreatesTrial(t *testing.T) {
 
 	allSubs, err := env.db.GetAllSubscriptions(ctx)
 	require.NoError(t, err)
+	trialPlan, err := env.db.GetPlanByName(ctx, database.TrialPlanName)
+	require.NoError(t, err)
 	trialCount := 0
 	for _, sub := range allSubs {
-		if sub.PlanID == 1 {
+		if sub.PlanID == trialPlan.ID {
 			trialCount++
 		}
 	}
@@ -134,7 +136,7 @@ func TestE2E_InviteLink_InvalidCode(t *testing.T) {
 	env.cfg.TrialRateLimit = 100
 
 	xuiClients := map[uint]interfaces.XUIClient{1: env.xui}
-	sources := []database.Source{{Name: "main", XUIHost: "https://panel.example.com", XUIAPIToken: "test-api-token", XUIInboundID: 1, Active: true,  ID: 1}}
+	sources := []database.Node{{Name: "main", Host: "https://panel.example.com", APIToken: "test-api-token", InboundID: 1, IsActive: true,  ID: 1}}
 	subService := service.NewSubscriptionService(env.db, xuiClients, sources, env.cfg, env.cfg.GlobalSubURL, &webhook.NoopSender{})
 	srv := web.NewServer("127.0.0.1:0", env.db, env.cfg, env.botConfig, subService, nil)
 
@@ -165,7 +167,7 @@ func TestE2E_InviteLink_XuiLoginFails(t *testing.T) {
 	}
 
 	xuiClients := map[uint]interfaces.XUIClient{1: env.xui}
-	sources := []database.Source{{Name: "main", XUIHost: "https://panel.example.com", XUIAPIToken: "test-api-token", XUIInboundID: 1, Active: true,  ID: 1}}
+	sources := []database.Node{{Name: "main", Host: "https://panel.example.com", APIToken: "test-api-token", InboundID: 1, IsActive: true,  ID: 1}}
 	subService := service.NewSubscriptionService(env.db, xuiClients, sources, env.cfg, env.cfg.GlobalSubURL, &webhook.NoopSender{})
 	srv := web.NewServer("127.0.0.1:0", env.db, env.cfg, env.botConfig, subService, nil)
 
@@ -205,7 +207,7 @@ func TestE2E_AutoRelogin_On401(t *testing.T) {
 	}
 
 	xuiClients := map[uint]interfaces.XUIClient{1: env.xui}
-	sources := []database.Source{{Name: "main", XUIHost: "https://panel.example.com", XUIAPIToken: "test-api-token", XUIInboundID: 1, Active: true,  ID: 1}}
+	sources := []database.Node{{Name: "main", Host: "https://panel.example.com", APIToken: "test-api-token", InboundID: 1, IsActive: true,  ID: 1}}
 	subService := service.NewSubscriptionService(env.db, xuiClients, sources, env.cfg, env.cfg.GlobalSubURL, &webhook.NoopSender{})
 	srv := web.NewServer("127.0.0.1:0", env.db, env.cfg, env.botConfig, subService, nil)
 
@@ -231,7 +233,7 @@ func TestE2E_InviteLink_RateLimitExceeded(t *testing.T) {
 	env.cfg.TrialRateLimit = 1
 
 	xuiClients := map[uint]interfaces.XUIClient{1: env.xui}
-	sources := []database.Source{{Name: "main", XUIHost: "https://panel.example.com", XUIAPIToken: "test-api-token", XUIInboundID: 1, Active: true,  ID: 1}}
+	sources := []database.Node{{Name: "main", Host: "https://panel.example.com", APIToken: "test-api-token", InboundID: 1, IsActive: true,  ID: 1}}
 	subService := service.NewSubscriptionService(env.db, xuiClients, sources, env.cfg, env.cfg.GlobalSubURL, &webhook.NoopSender{})
 	srv := web.NewServer("127.0.0.1:0", env.db, env.cfg, env.botConfig, subService, nil)
 
@@ -263,7 +265,7 @@ func TestE2E_InviteLink_FullFlow_BindTrial(t *testing.T) {
 	env.cfg.TrialRateLimit = 100
 
 	xuiClients := map[uint]interfaces.XUIClient{1: env.xui}
-	sources := []database.Source{{Name: "main", XUIHost: "https://panel.example.com", XUIAPIToken: "test-api-token", XUIInboundID: 1, Active: true,  ID: 1}}
+	sources := []database.Node{{Name: "main", Host: "https://panel.example.com", APIToken: "test-api-token", InboundID: 1, IsActive: true,  ID: 1}}
 	subService := service.NewSubscriptionService(env.db, xuiClients, sources, env.cfg, env.cfg.GlobalSubURL, &webhook.NoopSender{})
 	srv := web.NewServer("127.0.0.1:0", env.db, env.cfg, env.botConfig, subService, nil)
 
@@ -297,7 +299,9 @@ func TestE2E_InviteLink_FullFlow_BindTrial(t *testing.T) {
 	require.NoError(t, err, "Subscription should be bound to Telegram ID")
 	assert.Equal(t, env.chatID, sub.TelegramID)
 	assert.Equal(t, env.username, sub.Username)
-	assert.False(t, sub.PlanID == 1, "Should no longer be marked as trial")
+	trialPlan, err := env.db.GetPlanByName(ctx, database.TrialPlanName)
+	require.NoError(t, err)
+	assert.False(t, sub.PlanID == trialPlan.ID, "Should no longer be marked as trial")
 }
 
 func TestE2E_FullCycle_InviteToQR(t *testing.T) {
@@ -313,7 +317,7 @@ func TestE2E_FullCycle_InviteToQR(t *testing.T) {
 	env.cfg.TrialRateLimit = 100
 
 	xuiClients := map[uint]interfaces.XUIClient{1: env.xui}
-	sources := []database.Source{{Name: "main", XUIHost: "https://panel.example.com", XUIAPIToken: "test-api-token", XUIInboundID: 1, Active: true,  ID: 1}}
+	sources := []database.Node{{Name: "main", Host: "https://panel.example.com", APIToken: "test-api-token", InboundID: 1, IsActive: true,  ID: 1}}
 	subService := service.NewSubscriptionService(env.db, xuiClients, sources, env.cfg, env.cfg.GlobalSubURL, &webhook.NoopSender{})
 	srv := web.NewServer("127.0.0.1:0", env.db, env.cfg, env.botConfig, subService, nil)
 
@@ -347,7 +351,10 @@ func TestE2E_FullCycle_InviteToQR(t *testing.T) {
 	sub, err := env.db.GetByTelegramID(ctx, env.chatID)
 	require.NoError(t, err)
 	assert.Equal(t, env.chatID, sub.TelegramID)
-	assert.False(t, sub.PlanID == 1, "Should be converted from trial")
+	assert.Equal(t, env.username, sub.Username)
+	trialPlan, err := env.db.GetPlanByName(ctx, database.TrialPlanName)
+	require.NoError(t, err)
+	assert.False(t, sub.PlanID == trialPlan.ID, "Should be converted from trial")
 	assert.NotEmpty(t, sub.Username, "Username should be stored")
 
 	resetMockBotAPI(env.botAPI)
@@ -433,7 +440,7 @@ func TestE2E_FullCycle_MultipleUsersViaInvite(t *testing.T) {
 	env.cfg.TrialRateLimit = 100
 
 	xuiClients := map[uint]interfaces.XUIClient{1: env.xui}
-	sources := []database.Source{{Name: "main", XUIHost: "https://panel.example.com", XUIAPIToken: "test-api-token", XUIInboundID: 1, Active: true,  ID: 1}}
+	sources := []database.Node{{Name: "main", Host: "https://panel.example.com", APIToken: "test-api-token", InboundID: 1, IsActive: true,  ID: 1}}
 	subService := service.NewSubscriptionService(env.db, xuiClients, sources, env.cfg, env.cfg.GlobalSubURL, &webhook.NoopSender{})
 	srv := web.NewServer("127.0.0.1:0", env.db, env.cfg, env.botConfig, subService, nil)
 
@@ -469,7 +476,9 @@ func TestE2E_FullCycle_MultipleUsersViaInvite(t *testing.T) {
 		sub, err := env.db.GetByTelegramID(ctx, chatID)
 		require.NoError(t, err, "User %d should have subscription", chatID)
 		assert.Equal(t, chatID, sub.TelegramID)
-		assert.False(t, sub.PlanID == 1)
+		trialPlan, err := env.db.GetPlanByName(ctx, database.TrialPlanName)
+		require.NoError(t, err)
+		assert.False(t, sub.PlanID == trialPlan.ID)
 		assert.Equal(t, referrerID, sub.ReferredBy, "User %d should have correct referrer", chatID)
 	}
 }
@@ -491,7 +500,7 @@ func TestE2E_FullCycle_InviteThenShare(t *testing.T) {
 	env.cfg.TrialRateLimit = 100
 
 	xuiClients := map[uint]interfaces.XUIClient{1: env.xui}
-	sources := []database.Source{{Name: "main", XUIHost: "https://panel.example.com", XUIAPIToken: "test-api-token", XUIInboundID: 1, Active: true,  ID: 1}}
+	sources := []database.Node{{Name: "main", Host: "https://panel.example.com", APIToken: "test-api-token", InboundID: 1, IsActive: true,  ID: 1}}
 	subService := service.NewSubscriptionService(env.db, xuiClients, sources, env.cfg, env.cfg.GlobalSubURL, &webhook.NoopSender{})
 	srv := web.NewServer("127.0.0.1:0", env.db, env.cfg, env.botConfig, subService, nil)
 
@@ -541,7 +550,7 @@ func TestE2E_FullCycle_ConcurrentInviteAccess(t *testing.T) {
 	env.cfg.TrialRateLimit = 1000
 
 	xuiClients := map[uint]interfaces.XUIClient{1: env.xui}
-	sources := []database.Source{{Name: "main", XUIHost: "https://panel.example.com", XUIAPIToken: "test-api-token", XUIInboundID: 1, Active: true,  ID: 1}}
+	sources := []database.Node{{Name: "main", Host: "https://panel.example.com", APIToken: "test-api-token", InboundID: 1, IsActive: true,  ID: 1}}
 	subService := service.NewSubscriptionService(env.db, xuiClients, sources, env.cfg, env.cfg.GlobalSubURL, &webhook.NoopSender{})
 	srv := web.NewServer("127.0.0.1:0", env.db, env.cfg, env.botConfig, subService, nil)
 
@@ -576,9 +585,11 @@ func TestE2E_FullCycle_ConcurrentInviteAccess(t *testing.T) {
 
 	allSubs, err := env.db.GetAllSubscriptions(ctx)
 	require.NoError(t, err)
+	trialPlan, err := env.db.GetPlanByName(ctx, database.TrialPlanName)
+	require.NoError(t, err)
 	trialCount := 0
 	for _, sub := range allSubs {
-		if sub.PlanID == 1 && sub.TelegramID == 0 {
+		if sub.PlanID == trialPlan.ID && sub.TelegramID == 0 {
 			trialCount++
 		}
 	}

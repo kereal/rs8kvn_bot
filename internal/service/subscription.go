@@ -30,7 +30,7 @@ type Event = webhook.Event
 type SubscriptionService struct {
 	db           interfaces.DatabaseService
 	xuiClients   map[uint]interfaces.XUIClient
-	sources      []database.Source
+	nodes       []database.Node
 	cfg          *config.Config
 	globalSubURL string
 	webhook      WebhookSender
@@ -54,29 +54,38 @@ func XUIEmail(username string, telegramID int64) string {
 }
 
 // NewSubscriptionService creates a SubscriptionService configured with the given database, XUI clients map, sources, configuration, global subscription URL prefix, and optional webhook sender.
-func NewSubscriptionService(db interfaces.DatabaseService, xuiClients map[uint]interfaces.XUIClient, sources []database.Source, cfg *config.Config, globalSubURL string, webhookSender WebhookSender) *SubscriptionService {
+func NewSubscriptionService(db interfaces.DatabaseService, xuiClients map[uint]interfaces.XUIClient, nodes []database.Node, cfg *config.Config, globalSubURL string, webhookSender WebhookSender) *SubscriptionService {
 	return &SubscriptionService{
 		db:           db,
 		xuiClients:   xuiClients,
-		sources:      sources,
+		nodes:       nodes,
 		cfg:          cfg,
 		globalSubURL: globalSubURL,
 		webhook:      webhookSender,
 	}
 }
 
-func (s *SubscriptionService) activeSources() []database.Source {
-	var result []database.Source
-	for _, src := range s.sources {
-		if src.Active && src.XUIHost != "" {
-			result = append(result, src)
+func (s *SubscriptionService) activeNodes() []database.Node {
+	var result []database.Node
+	for _, node := range s.nodes {
+		if node.IsActive && node.Host != "" {
+			result = append(result, node)
 		}
 	}
 	return result
 }
 
-func (s *SubscriptionService) trialSources(ctx context.Context) ([]database.Source, error) {
-	return s.db.GetSourcesByPlanName(ctx, database.TrialPlanName)
+// trialNodes returns nodes linked to the trial plan.
+// Returns an error if the trial plan has no linked nodes (fail-fast).
+func (s *SubscriptionService) trialNodes(ctx context.Context) ([]database.Node, error) {
+	nodes, err := s.db.GetNodesByPlanName(ctx, database.TrialPlanName)
+	if err != nil {
+		return nil, fmt.Errorf("load trial nodes: %w", err)
+	}
+	if len(nodes) == 0 {
+		return nil, fmt.Errorf("trial plan has no linked nodes")
+	}
+	return nodes, nil
 }
 
 // Create provisions a new free-plan subscription. inviteCode, when non-empty,
@@ -94,13 +103,6 @@ func (s *SubscriptionService) Create(ctx context.Context, chatID int64, username
 
 	var expiryTime time.Time
 	var resetday int
-	if plan.Duration > 0 {
-		expiryTime = time.Now().Add(time.Duration(plan.Duration) * time.Hour)
-		resetday = config.SubscriptionResetDay
-	} else {
-		expiryTime = time.Time{}
-		resetday = 0
-	}
 
 	clientID, err := utils.GenerateUUID()
 	if err != nil {
@@ -115,19 +117,19 @@ func (s *SubscriptionService) Create(ctx context.Context, chatID int64, username
 
 	var firstClient *xui.ClientConfig
 	var firstErr error
-	sources := s.activeSources()
-	for _, src := range sources {
-		client, ok := s.xuiClients[src.ID]
+	nodes := s.activeNodes()
+	for _, node := range nodes {
+		client, ok := s.xuiClients[node.ID]
 		if !ok {
 			continue
 		}
-		c, err := client.AddClientWithID(ctx, src.XUIInboundID, email, clientID, subID, trafficBytes, expiryTime, resetday)
+		c, err := client.AddClientWithID(ctx, node.InboundID, email, clientID, subID, trafficBytes, expiryTime, resetday)
 		if err != nil {
 			if firstErr == nil {
 				firstErr = err
 			}
-			logger.Warn("failed to add client on source",
-				zap.Uint("source_id", src.ID),
+			logger.Warn("failed to add client on node",
+				zap.Uint("node_id", node.ID),
 				zap.Error(err))
 			continue
 		}
@@ -137,7 +139,7 @@ func (s *SubscriptionService) Create(ctx context.Context, chatID int64, username
 	}
 
 	if firstClient == nil {
-		return nil, fmt.Errorf("failed to create client on any source: %w", firstErr)
+		return nil, fmt.Errorf("failed to create client on any node: %w", firstErr)
 	}
 
 	sub := &database.Subscription{
@@ -145,18 +147,18 @@ func (s *SubscriptionService) Create(ctx context.Context, chatID int64, username
 		Username:       username,
 		ClientID:       firstClient.ID,
 		SubscriptionID: firstClient.SubID,
-		ExpiryTime:     expiryTime,
+		ExpiresAt:     expiryTime,
 		PlanID:         plan.ID,
 		Status:         "active",
 	}
 
 	if firstClient.SubID == "" {
-		s.deleteClientFromAllSources(ctx, email)
+		s.deleteClientFromAllNodes(ctx, email)
 		return nil, fmt.Errorf("xui client returned empty subscription id: missing subID on client %s", firstClient.ID)
 	}
 
 	if err := s.db.CreateSubscription(ctx, sub, inviteCode); err != nil {
-		s.deleteClientFromAllSources(ctx, email)
+		s.deleteClientFromAllNodes(ctx, email)
 		return nil, fmt.Errorf("create subscription: %w", err)
 	}
 
@@ -183,7 +185,7 @@ func (s *SubscriptionService) Delete(ctx context.Context, telegramID int64) erro
 	}
 
 	email := XUIEmail(sub.Username, telegramID)
-	s.deleteClientFromAllSources(ctx, email)
+	s.deleteClientFromAllNodes(ctx, email)
 
 	if s.webhook != nil {
 		eventID, _ := utils.GenerateUUID()
@@ -216,7 +218,7 @@ func (s *SubscriptionService) DeleteByID(ctx context.Context, id uint) (*databas
 	}
 
 	email := XUIEmail(sub.Username, deleted.TelegramID)
-	s.deleteClientFromAllSources(ctx, email)
+	s.deleteClientFromAllNodes(ctx, email)
 
 	if s.webhook != nil {
 		eventID, _ := utils.GenerateUUID()
@@ -232,19 +234,19 @@ func (s *SubscriptionService) DeleteByID(ctx context.Context, id uint) (*databas
 	return deleted, nil
 }
 
-func (s *SubscriptionService) deleteClientFromAllSources(ctx context.Context, email string) {
-	for _, src := range s.sources {
-		if !src.Active || src.XUIHost == "" {
+func (s *SubscriptionService) deleteClientFromAllNodes(ctx context.Context, email string) {
+	for _, node := range s.nodes {
+		if !node.IsActive || node.Host == "" {
 			continue
 		}
-		client, ok := s.xuiClients[src.ID]
+		client, ok := s.xuiClients[node.ID]
 		if !ok {
 			continue
 		}
 		if err := client.DeleteClient(ctx, email); err != nil {
 			logger.Warn("failed to delete XUI client on source",
 				zap.String("email", email),
-				zap.Uint("source_id", src.ID),
+				zap.Uint("node_id", node.ID),
 				zap.Error(err))
 		}
 	}
@@ -258,7 +260,7 @@ type TrafficInfo struct {
 	DaysUntilReset      int
 	ResetInfo           string
 	CreatedAtFormatted  string
-	ExpiryTimeFormatted string
+	ExpiresAtFormatted string
 }
 
 func (s *SubscriptionService) PlanTrafficLimitGB(ctx context.Context, telegramID int64) int {
@@ -289,15 +291,15 @@ func (s *SubscriptionService) GetWithTraffic(ctx context.Context, telegramID int
 	// обходим серверы
 	var totalUp, totalDown int64
 	var anySuccess bool
-	for _, src := range s.activeSources() {
-		client, ok := s.xuiClients[src.ID]
+	for _, node := range s.activeNodes() {
+		client, ok := s.xuiClients[node.ID]
 		if !ok {
 			continue
 		}
 		traffic, err := client.GetClientTraffic(ctx, email)
 		if err != nil {
 			logger.Debug("GetClientTraffic failed on source",
-				zap.Uint("source_id", src.ID),
+				zap.Uint("node_id", node.ID),
 				zap.Error(err))
 			continue
 		}
@@ -329,10 +331,10 @@ func (s *SubscriptionService) GetWithTraffic(ctx context.Context, telegramID int
 
 	// Calculate reset time
 	var resetTime time.Time
-	if sub.ExpiryTime.IsZero() {
+	if sub.ExpiresAt.IsZero() {
 		resetTime = sub.CreatedAt.AddDate(0, 0, config.SubscriptionResetDay)
 	} else {
-		resetTime = sub.ExpiryTime
+		resetTime = sub.ExpiresAt
 	}
 	daysUntilReset := utils.DaysUntilReset(time.Now(), resetTime)
 
@@ -355,12 +357,13 @@ func (s *SubscriptionService) GetWithTraffic(ctx context.Context, telegramID int
 		DaysUntilReset:      daysUntilReset,
 		ResetInfo:           resetInfo,
 		CreatedAtFormatted:  utils.FormatDateRu(sub.CreatedAt),
-		ExpiryTimeFormatted: utils.FormatDateRu(sub.ExpiryTime),
+		ExpiresAtFormatted: utils.FormatDateRu(sub.ExpiresAt),
 	}, nil
 }
 
 // daysUntilReset calculates the number of days until the next traffic reset.
 
+// TrialCreateResult holds the outcome of a trial creation.
 type TrialCreateResult struct {
 	Subscription    *database.Subscription
 	SubscriptionURL string
@@ -368,6 +371,10 @@ type TrialCreateResult struct {
 	ClientID        string
 }
 
+// CreateTrial provisions a new anonymous trial subscription.
+// It resolves the trial plan, picks the first trial node,
+// creates a client on that node via XUI, and persists the subscription
+// in the database with telegram_id = 0 (unactivated).
 func (s *SubscriptionService) CreateTrial(ctx context.Context, inviteCode string) (*TrialCreateResult, error) {
 	subID, err := utils.GenerateSubID()
 	if err != nil {
@@ -378,47 +385,32 @@ func (s *SubscriptionService) CreateTrial(ctx context.Context, inviteCode string
 		return nil, fmt.Errorf("generate client id: %w", err)
 	}
 
-	trafficBytes := calcTrialTraffic(s.cfg.TrialDurationHours)
+	trialPlan, err := s.db.GetPlanByName(ctx, database.TrialPlanName)
+	if err != nil {
+		return nil, fmt.Errorf("resolve trial plan: %w", err)
+	}
+
+	trafficBytes := trialPlan.TrafficLimit
 	expiryTime := time.Now().Add(time.Duration(s.cfg.TrialDurationHours) * time.Hour)
 	email := "trial_" + subID
 
-	trialSources, err := s.trialSources(ctx)
+	trialNodes, err := s.trialNodes(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("load trial sources: %w", err)
-	}
-	sources := trialSources
-	if len(sources) == 0 {
-		sources = s.activeSources()
+		return nil, err
 	}
 
-	var xuiErrs []error
-	var anySuccess bool
-	for _, src := range sources {
-		client, ok := s.xuiClients[src.ID]
-		if !ok {
-			continue
-		}
-		_, err = client.AddClientWithID(ctx, src.XUIInboundID, email, clientID, subID, trafficBytes, expiryTime, 0)
-		if err != nil {
-			xuiErrs = append(xuiErrs, fmt.Errorf("source %d: %w", src.ID, err))
-			logger.Warn("failed to add trial client on source",
-				zap.Uint("source_id", src.ID),
-				zap.Error(err))
-		} else {
-			anySuccess = true
-		}
+	node := trialNodes[0]
+	client, ok := s.xuiClients[node.ID]
+	if !ok {
+		return nil, fmt.Errorf("xui client not found for node %d", node.ID)
 	}
-	if !anySuccess {
-		logger.Error("trial XUI: all sources failed", zap.Int("failed", len(xuiErrs)))
-		return nil, fmt.Errorf("failed to create trial client on any source: %w", errors.Join(xuiErrs...))
-	}
-	if len(xuiErrs) > 0 {
-		logger.Warn("trial XUI: partial failures (continuing)", zap.Int("failed", len(xuiErrs)), zap.Int("sources", len(sources)))
+	if _, err = client.AddClientWithID(ctx, node.InboundID, email, clientID, subID, trafficBytes, expiryTime, 0); err != nil {
+		return nil, fmt.Errorf("add trial client on node %d: %w", node.ID, err)
 	}
 
 	sub, err := s.db.CreateTrialSubscription(ctx, inviteCode, subID, clientID, expiryTime)
 	if err != nil {
-		s.deleteClientFromAllSources(ctx, email)
+		s.deleteClientFromAllNodes(ctx, email)
 		return nil, fmt.Errorf("create trial subscription: %w", err)
 	}
 
@@ -461,12 +453,7 @@ func (s *SubscriptionService) BindTrial(ctx context.Context, subscriptionID stri
 	}
 	trafficBytes := freePlan.TrafficLimit
 
-	var expiryTime time.Time
-	if freePlan.Duration > 0 {
-		expiryTime = time.Now().Add(time.Duration(freePlan.Duration) * time.Hour)
-	} else {
-		expiryTime = time.UnixMilli(0)
-	}
+	expiryTime := time.UnixMilli(0)
 
 	var comment string
 	if invite, err := s.db.GetInviteByCode(ctx, sub.InviteCode); err == nil {
@@ -478,18 +465,18 @@ func (s *SubscriptionService) BindTrial(ctx context.Context, subscriptionID stri
 	currentEmail := "trial_" + subscriptionID
 	email := XUIEmail(username, chatID)
 
-	sources, err := s.trialSources(ctx)
+	nodes, err := s.trialNodes(ctx)
 	if err != nil {
-		return sub, fmt.Errorf("load trial sources: %w", err)
+		return sub, fmt.Errorf("load trial nodes: %w", err)
 	}
-	for _, src := range sources {
-		client, ok := s.xuiClients[src.ID]
+	for _, node := range nodes {
+		client, ok := s.xuiClients[node.ID]
 		if !ok {
 			continue
 		}
-		if err := client.UpdateClient(ctx, src.XUIInboundID, currentEmail, sub.ClientID, email, sub.SubscriptionID, trafficBytes, expiryTime, chatID, comment); err != nil {
-			logger.Warn("UpdateClient failed on trial source",
-				zap.Uint("source_id", src.ID),
+		if err := client.UpdateClient(ctx, node.InboundID, currentEmail, sub.ClientID, email, sub.SubscriptionID, trafficBytes, expiryTime, chatID, comment); err != nil {
+			logger.Warn("UpdateClient failed on trial node",
+				zap.Uint("node_id", node.ID),
 				zap.Error(err))
 			continue
 		}
@@ -562,8 +549,8 @@ func (s *SubscriptionService) ReconcileOrphanedClients(ctx context.Context) (int
 		}
 
 		notFoundOnAll := true
-		for _, src := range s.activeSources() {
-			client, ok := s.xuiClients[src.ID]
+		for _, node := range s.activeNodes() {
+			client, ok := s.xuiClients[node.ID]
 			if !ok {
 				continue
 			}
@@ -594,7 +581,7 @@ func (s *SubscriptionService) ReconcileOrphanedClients(ctx context.Context) (int
 					zap.String("subscription_id", sub.SubscriptionID))
 			} else {
 				removed++
-				logger.Info("Removed orphaned subscription (XUI client missing on all sources)",
+				logger.Info("Removed orphaned subscription (XUI client missing on all nodes)",
 					zap.Uint("id", sub.ID),
 					zap.Int64("telegram_id", sub.TelegramID),
 					zap.String("username", sub.Username),
@@ -624,7 +611,7 @@ func (s *SubscriptionService) CleanupExpiredTrials(ctx context.Context) (int64, 
 	for _, sub := range subs {
 		if sub.SubscriptionID != "" {
 			email := "trial_" + sub.SubscriptionID
-			s.deleteClientFromAllSources(ctx, email)
+			s.deleteClientFromAllNodes(ctx, email)
 		}
 	}
 
@@ -646,20 +633,4 @@ func (s *SubscriptionService) GetAllReferralCounts(ctx context.Context) (map[int
 	return s.db.GetAllReferralCounts(ctx)
 }
 
-// calcTrialTraffic calculates trial traffic allocation based on trial duration.
-// Formula: trialHours * 1GiB / 12, where 12 = (24*365)/(30*24) = hours in year / hours in month.
-// This gives a proportional share of monthly traffic (100 GiB). Minimum 1 GiB.
-func calcTrialTraffic(trialHours int) int64 {
-	const (
-		gib        = 1024 * 1024 * 1024
-		minTraffic = gib
-		// hoursInYear / hoursInMonth ≈ 12.17, integer division gives 12
-		trafficDivisor = (24 * 365) / (30 * 24)
-	)
 
-	trafficBytes := int64(trialHours) * gib / trafficDivisor
-	if trafficBytes < minTraffic {
-		trafficBytes = minTraffic
-	}
-	return trafficBytes
-}

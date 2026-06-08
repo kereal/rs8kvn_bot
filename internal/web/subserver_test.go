@@ -86,7 +86,7 @@ func TestHandleSubscription_SubscriptionNotFound(t *testing.T) {
 	t.Parallel()
 
 	db := testutil.NewMockDatabaseService()
-	db.GetSubscriptionWithPlanAndSourcesFunc = func(ctx context.Context, _ string) (*database.SubscriptionFull, error) {
+	db.GetSubscriptionWithPlanAndNodesFunc = func(ctx context.Context, _ string) (*database.SubscriptionFull, error) {
 		return nil, gorm.ErrRecordNotFound
 	}
 	srv := testServer(t, db, &config.Config{})
@@ -103,11 +103,11 @@ func TestHandleSubscription_NoServersAvailable(t *testing.T) {
 	t.Parallel()
 
 	db := testutil.NewMockDatabaseService()
-	db.GetSubscriptionWithPlanAndSourcesFunc = func(ctx context.Context, _ string) (*database.SubscriptionFull, error) {
+	db.GetSubscriptionWithPlanAndNodesFunc = func(ctx context.Context, _ string) (*database.SubscriptionFull, error) {
 		return &database.SubscriptionFull{
 			Subscription: database.Subscription{ID: 1, Status: "active"},
 			Plan:         database.Plan{TrafficLimit: 1 << 30},
-			Sources:      []database.Source{},
+			Nodes:      []database.Node{},
 		}, nil
 	}
 	srv := testServer(t, db, &config.Config{})
@@ -132,12 +132,12 @@ func TestHandleSubscription_PlainSource(t *testing.T) {
 	defer backend.Close()
 
 	db := testutil.NewMockDatabaseService()
-	db.GetSubscriptionWithPlanAndSourcesFunc = func(ctx context.Context, _ string) (*database.SubscriptionFull, error) {
+	db.GetSubscriptionWithPlanAndNodesFunc = func(ctx context.Context, _ string) (*database.SubscriptionFull, error) {
 		return &database.SubscriptionFull{
 			Subscription: database.Subscription{ID: 1, Status: "active"},
 			Plan:         database.Plan{TrafficLimit: 1 << 30},
-			Sources: []database.Source{
-				{ID: 1, Name: "src1", Active: true, SubURL: backend.URL + "/sub/"},
+			Nodes: []database.Node{
+				{ID: 1, Name: "src1", IsActive: true, SubscriptionURL: backend.URL + "/sub/"},
 			},
 		}, nil
 	}
@@ -175,12 +175,12 @@ func TestHandleSubscription_JSONSource(t *testing.T) {
 	defer backend.Close()
 
 	db := testutil.NewMockDatabaseService()
-	db.GetSubscriptionWithPlanAndSourcesFunc = func(ctx context.Context, _ string) (*database.SubscriptionFull, error) {
+	db.GetSubscriptionWithPlanAndNodesFunc = func(ctx context.Context, _ string) (*database.SubscriptionFull, error) {
 		return &database.SubscriptionFull{
 			Subscription: database.Subscription{ID: 1, Status: "active"},
 			Plan:         database.Plan{TrafficLimit: 2 << 30},
-			Sources: []database.Source{
-				{ID: 1, Name: "src1", Active: true, SubURL: backend.URL + "/sub/"},
+			Nodes: []database.Node{
+				{ID: 1, Name: "src1", IsActive: true, SubscriptionURL: backend.URL + "/sub/"},
 			},
 		}, nil
 	}
@@ -229,13 +229,13 @@ func TestHandleSubscription_MultipleSources(t *testing.T) {
 	defer b2.Close()
 
 	db := testutil.NewMockDatabaseService()
-	db.GetSubscriptionWithPlanAndSourcesFunc = func(ctx context.Context, _ string) (*database.SubscriptionFull, error) {
+	db.GetSubscriptionWithPlanAndNodesFunc = func(ctx context.Context, _ string) (*database.SubscriptionFull, error) {
 		return &database.SubscriptionFull{
 			Subscription: database.Subscription{ID: 1, Status: "active"},
 			Plan:         database.Plan{TrafficLimit: 10 << 30},
-			Sources: []database.Source{
-				{ID: 1, Name: "s1", Active: true, SubURL: b1.URL + "/sub/"},
-				{ID: 2, Name: "s2", Active: true, SubURL: b2.URL + "/sub/"},
+			Nodes: []database.Node{
+				{ID: 1, Name: "s1", IsActive: true, SubscriptionURL: b1.URL + "/sub/"},
+				{ID: 2, Name: "s2", IsActive: true, SubscriptionURL: b2.URL + "/sub/"},
 			},
 		}, nil
 	}
@@ -278,13 +278,13 @@ func TestHandleSubscription_MixedJSONAndPlain(t *testing.T) {
 	defer b2.Close()
 
 	db := testutil.NewMockDatabaseService()
-	db.GetSubscriptionWithPlanAndSourcesFunc = func(ctx context.Context, _ string) (*database.SubscriptionFull, error) {
+	db.GetSubscriptionWithPlanAndNodesFunc = func(ctx context.Context, _ string) (*database.SubscriptionFull, error) {
 		return &database.SubscriptionFull{
 			Subscription: database.Subscription{ID: 1, Status: "active"},
 			Plan:         database.Plan{TrafficLimit: 1 << 30},
-			Sources: []database.Source{
-				{ID: 1, Name: "json", Active: true, SubURL: b1.URL + "/sub/"},
-				{ID: 2, Name: "plain", Active: true, SubURL: b2.URL + "/sub/"},
+			Nodes: []database.Node{
+				{ID: 1, Name: "json", IsActive: true, SubscriptionURL: b1.URL + "/sub/"},
+				{ID: 2, Name: "plain", IsActive: true, SubscriptionURL: b2.URL + "/sub/"},
 			},
 		}, nil
 	}
@@ -313,12 +313,12 @@ func TestHandleSubscription_SourceFetchError(t *testing.T) {
 	defer b.Close()
 
 	db := testutil.NewMockDatabaseService()
-	db.GetSubscriptionWithPlanAndSourcesFunc = func(ctx context.Context, _ string) (*database.SubscriptionFull, error) {
+	db.GetSubscriptionWithPlanAndNodesFunc = func(ctx context.Context, _ string) (*database.SubscriptionFull, error) {
 		return &database.SubscriptionFull{
 			Subscription: database.Subscription{ID: 1, Status: "active"},
 			Plan:         database.Plan{TrafficLimit: 1 << 30},
-			Sources: []database.Source{
-				{ID: 1, Name: "bad", Active: true, SubURL: b.URL + "/sub/"},
+			Nodes: []database.Node{
+				{ID: 1, Name: "bad", IsActive: true, SubscriptionURL: b.URL + "/sub/"},
 			},
 		}, nil
 	}
@@ -345,12 +345,12 @@ func TestHandleSubscription_CacheSubscriptionResult(t *testing.T) {
 	defer backend.Close()
 
 	db := testutil.NewMockDatabaseService()
-	db.GetSubscriptionWithPlanAndSourcesFunc = func(ctx context.Context, _ string) (*database.SubscriptionFull, error) {
+	db.GetSubscriptionWithPlanAndNodesFunc = func(ctx context.Context, _ string) (*database.SubscriptionFull, error) {
 		return &database.SubscriptionFull{
 			Subscription: database.Subscription{ID: 1, Status: "active"},
 			Plan:         database.Plan{TrafficLimit: 1 << 30},
-			Sources: []database.Source{
-				{ID: 1, Name: "src", Active: true, SubURL: backend.URL + "/sub/"},
+			Nodes: []database.Node{
+				{ID: 1, Name: "src", IsActive: true, SubscriptionURL: backend.URL + "/sub/"},
 			},
 		}, nil
 	}
@@ -384,12 +384,12 @@ func TestHandleSubscription_DevicesTracking(t *testing.T) {
 
 	var savedDevices string
 	db := testutil.NewMockDatabaseService()
-	db.GetSubscriptionWithPlanAndSourcesFunc = func(ctx context.Context, _ string) (*database.SubscriptionFull, error) {
+	db.GetSubscriptionWithPlanAndNodesFunc = func(ctx context.Context, _ string) (*database.SubscriptionFull, error) {
 		return &database.SubscriptionFull{
 			Subscription: database.Subscription{ID: 1, Status: "active"},
 			Plan:         database.Plan{TrafficLimit: 1 << 30},
-			Sources: []database.Source{
-				{ID: 1, Name: "src", Active: true, SubURL: backend.URL + "/sub/"},
+			Nodes: []database.Node{
+				{ID: 1, Name: "src", IsActive: true, SubscriptionURL: backend.URL + "/sub/"},
 			},
 		}, nil
 	}
@@ -420,12 +420,12 @@ func TestHandleSubscription_SourceWithoutSubURL(t *testing.T) {
 	t.Parallel()
 
 	db := testutil.NewMockDatabaseService()
-	db.GetSubscriptionWithPlanAndSourcesFunc = func(ctx context.Context, _ string) (*database.SubscriptionFull, error) {
+	db.GetSubscriptionWithPlanAndNodesFunc = func(ctx context.Context, _ string) (*database.SubscriptionFull, error) {
 		return &database.SubscriptionFull{
 			Subscription: database.Subscription{ID: 1, Status: "active"},
 			Plan:         database.Plan{TrafficLimit: 1 << 30},
-			Sources: []database.Source{
-				{ID: 1, Name: "nosuburl", Active: true, SubURL: ""},
+			Nodes: []database.Node{
+				{ID: 1, Name: "nosuburl", IsActive: true, SubscriptionURL: ""},
 			},
 		}, nil
 	}
@@ -451,12 +451,12 @@ func TestHandleSubscription_Base64EncodedSource(t *testing.T) {
 	defer backend.Close()
 
 	db := testutil.NewMockDatabaseService()
-	db.GetSubscriptionWithPlanAndSourcesFunc = func(ctx context.Context, _ string) (*database.SubscriptionFull, error) {
+	db.GetSubscriptionWithPlanAndNodesFunc = func(ctx context.Context, _ string) (*database.SubscriptionFull, error) {
 		return &database.SubscriptionFull{
 			Subscription: database.Subscription{ID: 1, Status: "active"},
 			Plan:         database.Plan{TrafficLimit: 1 << 30},
-			Sources: []database.Source{
-				{ID: 1, Name: "b64src", Active: true, SubURL: backend.URL + "/sub/"},
+			Nodes: []database.Node{
+				{ID: 1, Name: "b64src", IsActive: true, SubscriptionURL: backend.URL + "/sub/"},
 			},
 		}, nil
 	}

@@ -439,7 +439,7 @@ grep "trial" ./data/bot.log | tail -50
 **Fix:**
 ```bash
 # Check subID in DB
-sqlite3 ./data/tgvpn.db "SELECT subscription_id, status, expiry_time FROM subscriptions WHERE subscription_id = 'abc123';"
+sqlite3 ./data/tgvpn.db "SELECT subscription_id, status, expires_at FROM subscriptions WHERE subscription_id = 'abc123';"
 
 # Invalidate cache (restart bot)
 docker restart rs8kvn_bot

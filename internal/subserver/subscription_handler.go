@@ -52,7 +52,7 @@ func HandleSubscription(ctx context.Context, db interfaces.DatabaseService, subS
 			logger.Warn("Cache invalidated: subscription no longer active",
 				zap.String("sub_id", subID),
 				zap.String("status", status),
-				zap.Time("expiry_time", expiryTime),
+				zap.Time("expires_at", expiryTime),
 			)
 			return nil, fmt.Errorf("subscription not active")
 		}
@@ -64,7 +64,7 @@ func HandleSubscription(ctx context.Context, db interfaces.DatabaseService, subS
 	}
 
 	// Cache miss: load the subscription with plan and active sources.
-	subFull, err := db.GetSubscriptionWithPlanAndSources(ctx, subID)
+	subFull, err := db.GetSubscriptionWithPlanAndNodes(ctx, subID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			logger.Error("Subscription not found in database",
@@ -80,9 +80,9 @@ func HandleSubscription(ctx context.Context, db interfaces.DatabaseService, subS
 	logger.Debug("Subscription loaded from database",
 		zap.Uint("sub_pk", subFull.ID),
 		zap.String("status", subFull.Subscription.Status),
-		zap.Time("expiry_time", subFull.ExpiryTime),
+		zap.Time("expires_at", subFull.ExpiresAt),
 		zap.Int64("plan_traffic_limit", subFull.Plan.TrafficLimit),
-		zap.Int("sources_count", len(subFull.Sources)),
+		zap.Int("nodes_count", len(subFull.Nodes)),
 	)
 
 	// Track the requesting device and IP for analytics/audit.
@@ -97,16 +97,16 @@ func HandleSubscription(ctx context.Context, db interfaces.DatabaseService, subS
 	var firstSourceHeaders map[string]string
 
 	// Iterate over all active sources and collect subscription items.
-	for _, src := range subFull.Sources {
-		if src.SubURL == "" {
-			logger.Warn("Skipping source without sub_url",
+	for _, src := range subFull.Nodes {
+		if src.SubscriptionURL == "" {
+			logger.Warn("Skipping node without subscription_url",
 				zap.String("sub_id", subID),
 				zap.String("source", src.Name),
 			)
 			continue
 		}
 
-		srcSubURL := src.SubURL
+		srcSubURL := src.SubscriptionURL
 		if srcSubURL != "" && !strings.HasSuffix(srcSubURL, "/") {
 			srcSubURL += "/"
 		}
@@ -115,10 +115,10 @@ func HandleSubscription(ctx context.Context, db interfaces.DatabaseService, subS
 		// Fetch the upstream subscription response from the source.
 		xuiResp, err := FetchFromXUI(sourceURL)
 		if err != nil {
-			logger.Error("Failed to fetch from source",
+			logger.Error("Failed to fetch from node",
 				zap.String("sub_id", subID),
 				zap.String("source", src.Name),
-				zap.String("source_url", sourceURL),
+				zap.String("node_url", sourceURL),
 				zap.Error(err))
 			continue
 		}
@@ -131,7 +131,7 @@ func HandleSubscription(ctx context.Context, db interfaces.DatabaseService, subS
 
 		// Detect response format and log source details.
 		format := DetectFormat(body)
-		logger.Debug("Source response received",
+		logger.Debug("Node response received",
 			zap.String("sub_id", subID),
 			zap.String("source", src.Name),
 			zap.String("format", format.String()),
@@ -162,7 +162,7 @@ func HandleSubscription(ctx context.Context, db interfaces.DatabaseService, subS
 			// or converted to share links in mixed mode.
 			configs, parseErr := ExtractJSONConfigs(body)
 			if parseErr != nil {
-				logger.Error("Failed to parse JSON configs from source",
+				logger.Error("Failed to parse JSON configs from node",
 					zap.String("sub_id", subID),
 					zap.String("source", src.Name),
 					zap.Error(parseErr))

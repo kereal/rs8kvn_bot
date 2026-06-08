@@ -14,10 +14,11 @@ import (
 	"strings"
 	"time"
 
-	"go.uber.org/zap"
 	"rs8kvn_bot/internal/config"
 	"rs8kvn_bot/internal/logger"
 	"rs8kvn_bot/internal/utils"
+
+	"go.uber.org/zap"
 )
 
 func marshalJSON(v interface{}) (*bytes.Reader, error) {
@@ -53,16 +54,16 @@ type APIResponse struct {
 }
 
 type ClientConfig struct {
-	ID         string `json:"id"`
-	Email      string `json:"email"`
-	LimitIP    int    `json:"limitIp"`
-	TotalGB    int64  `json:"totalGB"`
-	ExpiryTime int64  `json:"expiryTime"`
-	Enable     bool   `json:"enable"`
-	TgID       int64  `json:"tgId"`
-	SubID      string `json:"subId"`
-	Flow       string `json:"flow,omitempty"`
-	Reset      int    `json:"reset,omitempty"`
+	ID        string `json:"id"`
+	Email     string `json:"email"`
+	LimitIP   int    `json:"limitIp"`
+	TotalGB   int64  `json:"totalGB"`
+	ExpiresAt int64  `json:"expiryTime"`
+	Enable    bool   `json:"enable"`
+	TgID      int64  `json:"tgId"`
+	SubID     string `json:"subId"`
+	Flow      string `json:"flow,omitempty"`
+	Reset     int    `json:"reset,omitempty"`
 }
 
 type ClientTraffic struct {
@@ -75,7 +76,7 @@ type ClientTraffic struct {
 	Up         int64  `json:"up"`
 	Down       int64  `json:"down"`
 	AllTime    int64  `json:"allTime"`
-	ExpiryTime int64  `json:"expiryTime"`
+	ExpiresAt  int64  `json:"expiryTime"`
 	Total      int64  `json:"total"`
 	Reset      int    `json:"reset"`
 	LastOnline int64  `json:"lastOnline"`
@@ -88,7 +89,7 @@ type Inbound struct {
 	Total          int             `json:"total"`
 	Remark         string          `json:"remark"`
 	Enable         bool            `json:"enable"`
-	ExpiryTime     int64           `json:"expiryTime"`
+	ExpiresAt      int64           `json:"expiryTime"`
 	Listen         string          `json:"listen"`
 	Port           int             `json:"port"`
 	Protocol       string          `json:"protocol"`
@@ -280,7 +281,7 @@ func (c *Client) doAddClientWithID(ctx context.Context, inboundID int, email, cl
 		"email":      email,
 		"limitIp":    0,
 		"totalGB":    trafficBytes,
-		"expiryTime": getExpiryTimeMillis(expiryTime),
+		"expiryTime": getExpiresAtMillis(expiryTime),
 		"enable":     true,
 		"flow":       flow,
 		"subId":      subID,
@@ -320,13 +321,13 @@ func (c *Client) doAddClientWithID(ctx context.Context, inboundID int, email, cl
 	}
 
 	return &ClientConfig{
-		ID:         clientID,
-		Email:      email,
-		TotalGB:    trafficBytes,
-		ExpiryTime: getExpiryTimeMillis(expiryTime),
-		Enable:     true,
-		SubID:      subID,
-		Reset:      resetDays,
+		ID:        clientID,
+		Email:     email,
+		TotalGB:   trafficBytes,
+		ExpiresAt: getExpiresAtMillis(expiryTime),
+		Enable:    true,
+		SubID:     subID,
+		Reset:     resetDays,
 	}, nil
 }
 
@@ -395,7 +396,7 @@ func (c *Client) doUpdateClient(ctx context.Context, inboundID int, currentEmail
 		"email":      email,
 		"limitIp":    0,
 		"totalGB":    trafficBytes,
-		"expiryTime": getExpiryTimeMillis(expiryTime),
+		"expiryTime": getExpiresAtMillis(expiryTime),
 		"enable":     true,
 		"flow":       flow,
 		"subId":      subID,
@@ -516,7 +517,7 @@ func (c *Client) Close() error {
 	return nil
 }
 
-func getExpiryTimeMillis(expiryTime time.Time) int64 {
+func getExpiresAtMillis(expiryTime time.Time) int64 {
 	if expiryTime.IsZero() {
 		return 0
 	}

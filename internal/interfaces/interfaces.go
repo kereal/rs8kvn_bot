@@ -36,7 +36,7 @@ type SubscriptionRepository interface {
 	GetTelegramIDsBatch(ctx context.Context, offset, limit int) ([]int64, error)
 	GetTotalTelegramIDCount(ctx context.Context) (int64, error)
 	GetSubscriptionBySubscriptionID(ctx context.Context, subscriptionID string) (*database.Subscription, error)
-	GetSubscriptionWithPlanAndSources(ctx context.Context, subscriptionID string) (*database.SubscriptionFull, error)
+	GetSubscriptionWithPlanAndNodes(ctx context.Context, subscriptionID string) (*database.SubscriptionFull, error)
 	GetSubscriptionStatus(ctx context.Context, subscriptionID string) (string, time.Time, error)
 	UpdateSubscriptionDevices(ctx context.Context, id uint, devicesJSON string) error
 	UpdateSubscriptionIPs(ctx context.Context, id uint, ipsJSON string) error
@@ -51,11 +51,11 @@ type TrialRepository interface {
 	CleanupExpiredTrials(ctx context.Context, hours int) ([]database.Subscription, error)
 }
 
-type SourceRepository interface {
-	ListSources(ctx context.Context) ([]database.Source, error)
-	GetSourcesByPlanName(ctx context.Context, planName string) ([]database.Source, error)
-	IsSourcesEmpty(ctx context.Context) (bool, error)
-	SeedDefaultSource(ctx context.Context, name, xuiHost, xuiAPIToken string, xuiInboundID int, subURL string) error
+type NodeRepository interface {
+	ListNodes(ctx context.Context) ([]database.Node, error)
+	GetNodesByPlanName(ctx context.Context, planName string) ([]database.Node, error)
+	IsNodesEmpty(ctx context.Context) (bool, error)
+	SeedDefaultNode(ctx context.Context, name, host, apiToken string, inboundID int, subscriptionURL string) error
 }
 
 type InviteRepository interface {
@@ -71,12 +71,25 @@ type PlanRepository interface {
 	GetPlanByID(ctx context.Context, id uint) (*database.Plan, error)
 }
 
+type ProductRepository interface {
+	GetActiveByPlanID(ctx context.Context, planID uint) ([]database.Product, error)
+}
+
+type OrderRepository interface {
+	CreateOrder(ctx context.Context, order *database.Order) error
+	GetOrderByID(ctx context.Context, id uint) (*database.Order, error)
+	GetOrdersBySubscriptionID(ctx context.Context, subscriptionID uint) ([]database.Order, error)
+	UpdateOrderStatus(ctx context.Context, id uint, status string) error
+}
+
 type DatabaseService interface {
 	SubscriptionRepository
 	TrialRepository
 	InviteRepository
-	SourceRepository
+	NodeRepository
 	PlanRepository
+	ProductRepository
+	OrderRepository
 	Ping(ctx context.Context) error
 	Close() error
 	GetPoolStats() (*database.PoolStats, error)

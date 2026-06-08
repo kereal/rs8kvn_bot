@@ -228,6 +228,7 @@ Write response:
 - Subscription proxy — `GET /sub/{subID}` with extra servers + headers, 240s TTL cache, singleflight
 - Daily backups — WAL checkpoint, atomic copy, 14-day rotation
 - Sentry error tracking (+ traces), Zap structured JSON logging with rotation
+- Order/Product tracking — payment lifecycle (pending/paid/expired/canceled) with 30-min payment window
 - Docker: multi-stage build (UPX compression), non-root user, healthcheck, GHCR images
 - CI/CD: GitHub Actions — golangci-lint, gosec, tests (race), Docker build/push
 
@@ -263,8 +264,8 @@ All tests pass with `-race` detector. Fuzzing enabled for critical functions.
 - **Token configuration:** `XUI_API_TOKEN` env var — no username, password, or session age needed
 - **No connection pool cleanup needed:** No session state to invalidate
 - **No circuit breaker:** Removed in favor of simple `RetryWithBackoff` with exponential backoff + jitter
-- **Subscription defaults:** `reset: 30` (days from creation), `expiryTime: now + 30 days`
-- **Auto-reset:** Only works when `ExpiryTime > 0`. Traffic resets every 30 days, expiry extends (3x-ui auto-renew logic)
+- **Subscription defaults:** `reset: 30` (days from creation), `expiresAt: now + 30 days`
+- **Auto-reset:** Only works when `expiresAt` > 0. Traffic resets every 30 days, expiry extends (3x-ui auto-renew logic)
 - **Client email:** `trial_{subID}` for trial, `{username}` for regular
 - **Ping:** `Ping()` sends GET `/panel/api/server/status` with Bearer token — no session verification needed
 - **No singleflight:** Deduplication removed (no concurrent login to deduplicate)
@@ -309,6 +310,7 @@ All tests pass with `-race` detector. Fuzzing enabled for critical functions.
 - **Legacy support:** Auto-migration for pre-embedded databases (adds `subscription_id` column, drops `x_ui_host`)
 - **trial_requests cleanup:** 1-hour cutoff (matching rate-limit window) + 1s buffer to avoid boundary race
 - **Connection pool:** `MaxOpenConns=1` (SQLite single-writer), `MaxIdle=1`, `ConnMaxLifetime=5m`
+- **Orders:** `orders` table tracks payment lifecycle: pending → paid → expired/canceled. Statuses enforced via CHECK constraint. 30-minute expiry window for unpaid invoices.
 
 ### Configuration
 - **Required:** `TELEGRAM_BOT_TOKEN`, `XUI_API_TOKEN` (NO defaults)
