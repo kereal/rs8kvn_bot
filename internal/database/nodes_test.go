@@ -83,7 +83,6 @@ func TestGetPlanByID_AfterCreate(t *testing.T) {
 
 	plan := &Plan{
 		Name:         "pro",
-		Price:        9.99,
 		DevicesLimit: 3,
 		TrafficLimit: 50 * 1024 * 1024 * 1024,
 		Duration:     720,
@@ -94,7 +93,6 @@ func TestGetPlanByID_AfterCreate(t *testing.T) {
 	got, err := svc.GetPlanByID(ctx, plan.ID)
 	require.NoError(t, err)
 	assert.Equal(t, "pro", got.Name)
-	assert.Equal(t, 9.99, got.Price)
 	assert.Equal(t, 3, got.DevicesLimit)
 }
 
@@ -104,7 +102,7 @@ func TestGetPlanByName_AfterCreate(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
 
-	plan := &Plan{Name: "vip", Price: 19.99, DevicesLimit: 5, TrafficLimit: 100 * 1024 * 1024 * 1024}
+	plan := &Plan{Name: "vip", DevicesLimit: 5, TrafficLimit: 100 * 1024 * 1024 * 1024}
 	require.NoError(t, svc.db.WithContext(ctx).Create(plan).Error)
 
 	got, err := svc.GetPlanByName(ctx, "vip")

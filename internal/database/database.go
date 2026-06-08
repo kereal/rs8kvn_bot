@@ -75,7 +75,6 @@ type Node struct {
 type Plan struct {
 	ID           uint      `gorm:"primaryKey;column:id"`
 	Name         string    `gorm:"size:50;uniqueIndex;column:name"`
-	Price        float64   `gorm:"default:0;column:price"`
 	DevicesLimit int       `gorm:"default:1;column:devices_limit"`
 	TrafficLimit int64     `gorm:"default:0;column:traffic_limit"`
 	Duration     int       `gorm:"default:0;column:duration"` // hours, 0=unlimited
@@ -345,7 +344,6 @@ func NewService(dbPath string) (*Service, error) {
 	if count == 0 {
 		if err := db.WithContext(context.Background()).Create(&Plan{
 			Name:         TrialPlanName,
-			Price:        0,
 			DevicesLimit: 1,
 			TrafficLimit: 1073741824,
 			Duration:     3,
@@ -354,7 +352,6 @@ func NewService(dbPath string) (*Service, error) {
 		}
 		if err := db.WithContext(context.Background()).Create(&Plan{
 			Name:         FreePlanName,
-			Price:        0,
 			DevicesLimit: 1,
 			TrafficLimit: 53687091200,
 			Duration:     0,
