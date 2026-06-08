@@ -1,21 +1,18 @@
-# Архитектура — rs8kvn_bot
+# Architecture — rs8kvn_bot
 
-**Версия:** v2.5.0  
-**Обновлено:** 2026-06-06
+**Версия:** v2.3.0  
+**Обновлено:** 2026-06-08
 
-## Branch: feature/sub-http-server
+## Branch: plan-mechanics
 
-Эта память описывает ветку `feature/sub-http-server`, которая включает:
-- Переименование `internal/subproxy/` → `internal/subserver/` (BREAKING)
-- Multi-source агрегация подписок (devices, IPs tracking, multi-protocol share links)
-- Новые таблицы: `sources`, `plans`, `plan_sources` (migrations 006-012)
-- Refactor Plan system (Trial → Plan, traffic limit из plans)
-- `SeedDefaultSource` / `ReconcileOrphanedClients` / `CleanupExpiredTrials`
-- xui retry классификация (DNS = non-retryable)
-- Referral cache инкремент при trial bind
-- Удаление `DEFAULT_SOURCE_SUB_URL`
-- `url.JoinPath` fixes
-- SQLite version gate в migrations
+Эта память описывает ветку `plan-mechanics`, которая включает:
+- Удаление `duration` из `plans` (migration 019), trial = single-node
+- Добавление `products`/`orders` + ORM-связи
+- Таблица `subscription_nodes` как очередь синхронизации подписки×нода
+- Замена `sources/plan_sources` → `nodes/plan_nodes` (migration 014)
+- Динамический поиск trial-plan по имени вместо хардкода PlanID==1
+- `LinkNodeToPlan` для явной привязки нод к планам
+- Очистка терминологии, вынужденная миграция legacy схемы
 
 ## Общая схема
 
@@ -24,7 +21,7 @@ Telegram Bot (Go, single binary)
   ├── cmd/bot/main.go         — entry point, graceful shutdown
   ├── internal/bot/           — handlers, referral cache, singleflight
   ├── internal/service/       — SubscriptionService (orchestration)
-  ├── internal/database/      — SQLite + GORM + migrations 000-012
+  ├── internal/database/      — SQLite + GORM + migrations 000-019
   ├── internal/xui/           — multi-source 3x-ui client + circuit breaker
   ├── internal/subserver/      — LRU cache, merge, /sub/{id} endpoint, proxy, servers
   ├── internal/web/           — /healthz, /readyz, /i/{code}, /sub/{subID}
@@ -47,56 +44,70 @@ Telegram Bot (Go, single binary)
 Версия схемы: after migration 019  
 **Ревизия:** 2026-06-08
 
-### Таблицы подписок (существующие, без структурных изменений после migration 012)
-- `subscriptions`, `invites`, `trial_requests` — без структурных изменений после migration 012.
+### Tab Subscription Nodes — состояние синхронизации
 
-### УСТАРЕВШИЕ таблицы (заменены в migration 014 `sources_to_nodes`)
-- `sources`, `plan_sources` — заменены на `nodes` и `plan_nodes`. Остаются в БД для обратной совместимости, но не используются в новом коде.
+Подробности: см. память `subscription-nodes/state-machine`.
+
+```sql
+CREATE TABLE subscription_nodes (
+    subscription_id INTEGER NOT NULL,
+    node_id INTEGER NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('active','pending_add','pending_remove')),
+    retry_count INTEGER NOT NULL DEFAULT 0,
+    retry_at DATETIME,
+    last_error TEXT,
+    updated_at DATETIME NOT NULL,
+    PRIMARY KEY (subscription_id, node_id)
+);
+```
+
+Go-модель: `database.SubscriptionNode` с typed status `SubscriptionNodeStatus`.  
+Статусы: `active`, `pending_add`, `pending_remove`.
+
+### Таблицы подписок (существующие, без структурных изменений после migration 019)
+- `subscriptions`, `invites`, `trial_requests` — без структурных изменений после migration 019.
+
+### УСТАРЕВШИЕ таблицы
+- `sources`, `plan_sources` — заменены на `nodes` и `plan_nodes` (migration 014). Остаются в БД для обратной совместимости, но не используются в новом коде.
 
 ### Текущие активные таблицы
-- `plans` — тарифные планы.
+- `plans` — тарифные планы (без `duration`, без `price`).
 - `products` (migration 013) — покупаемые продукты, привязанные к планам.
-- `orders` (migration 017) — факт покупки подписки и обработка платежа.
-- `nodes` (введены migration 014 `sources_to_nodes`) — замена `sources`, настраиваемые VLESS+Reality серверы.
-- `plan_nodes` (M:N: plan → nodes, migration 014) — привязка серверов к тарифным планам.
-- `subscription_nodes` (M:N: subscription → nodes, migration 014) — серверы, выданные конкретной подписке.
+- `orders` (migration 017) — факт покупки и обработка платежа.
+- `nodes` (migration 014) — замена `sources`, VLESS+Reality серверы.
+- `plan_nodes` (M:N: plan → nodes) — привязка серверов к тарифным планам.
+- `subscription_nodes` (M:N: subscription → nodes) — серверы, выданные конкретной подписке.
 
-### `subscriptions`
+### `subscriptions` (версия после migration 015/019)
 ```
 telegram_id          int64    INDEX
 username             string   INDEX
 client_id            string
 subscription_id      string   INDEX (unique)
-expiry_time          time     INDEX
+expires_at          time     INDEX
 status               string   default: "active"  INDEX  (active|revoked|expired)
 invite_code          string   INDEX
 plan_id              uint     INDEX   (FK → plans)
 referred_by          int64    INDEX
+product_id           uint     INDEX   (FK → products)
+started_at           time
+price_paid_cents     int64    default: 0
+currency             string   size:3
 devices              json     devices list with hwid rotation
 ips                  json     ip:timestamp history (max 100)
 created_at           time
 updated_at           time
 ```
-**Удалено** в migration 011: `is_trial`, `traffic_limit`, `inbound_id`, `subscription_url`, `deleted_at`.
-**Soft delete заменён** на `status='revoked'`.
-**Добавлено** в migration 012: `devices`, `ips` (JSON поля для трекинга устройств и IP).
+**Удалено:** `is_trial`, `traffic_limit`, `inbound_id`, `subscription_url`, `deleted_at`.  
+**Soft delete заменён** на `status='revoked'`.  
+**Добавлено:** `devices`, `ips`, `plan_id`, `product_id`, `started_at`, `price_paid_cents`, `currency`.
 
-### `nodes` (замена `sources`, migration 014)
+### `plans`
 ```
-id, x_ui_host, x_ui_api_token, x_ui_inbound_id, sub_url, is_active
+id, name UNIQUE, devices_limit, traffic_limit
 ```
-Замена таблицы `sources`. Настраиваемые VLESS+Reality серверы (3x-ui панели).
-
-### `plan_nodes` (M:N: plan → nodes, migration 014)
-```
-plan_id, node_id  (composite PK)
-```
-Замена таблицы `plan_sources`. Привязка серверов к тарифным планам.
-
-### `plans` (тарифные планы)
-```
-id, name UNIQUE, duration, devices_limit, traffic_limit
-```
+**Удалено в migration 019:** `duration`.  
+**Удалено в migration 016:** `price`.
 
 ### `products` (migration 013)
 Покупаемые продукты, привязанные к планам.
@@ -105,32 +116,33 @@ id, name UNIQUE, duration, devices_limit, traffic_limit
 ### `orders` (migration 017)
 Факт покупки подписки и процесс обработки платежа.
 - `id`, `subscription_id` (FK → subscriptions), `product_id` (FK → products), `status` (CHECK: `pending|paid|expired|canceled`), `amount_cents`, `currency`, `payment_provider`, `provider_payment_id`, `created_at`, `paid_at`, `activated_at`, `expires_at`.
-- Индексы: `idx_orders_subscription_id`, `idx_orders_status`, `idx_orders_created_at`.
 
-### `invites`, `broadcast_*`, `metrics_counters` — без изменений.
+### `invites`, `trial_requests`, `metrics_counters` — без изменений.
 
-Миграции лежат в `internal/database/migrations/000-019_*.up.sql` (embedded через go:embed).
+Миграции лежат в `internal/database/migrations/000-019_*.up.sql` (embedded через go:embed).  
+Версия схемы: **after migration 019**.
 
 ## Ключевые компоненты
 
 ### Service Layer (`internal/service/subscription.go`)
 - **`Create(ctx, chatID, username, inviteCode string)`** — создание free/paid подписки. Параметр `inviteCode` пробрасывается в `db.CreateSubscription` для резолва referrer.
-- **`CreateTrial(ctx, chatID, username, inviteCode string)`** — итерация по `trialSources`, **errors.Join** агрегация, partial success → Warn, all-fail → Error + return.
+- **`CreateTrial(ctx, chatID, username, inviteCode string)`** — итерация по trial-источникам, **errors.Join** агрегация, partial success → Warn, all-fail → Error + return.
 - **`BindTrial(ctx, subID, telegramID, username, inviteCode string)`** — обновляет ВСЕ trial-источники (`xui.UpdateClient`), в `db.BindTrialSubscription` — defensive revoke всех active subs для telegram_id (защита double-active race).
 - **`ReconcileOrphanedClients(ctx)`** — проверяет ВСЕ источники, удаляет только если клиент не найден НИГДЕ.
+- **`LinkNodeToPlan(ctx, planName, nodeID)`** — создаёт план-ноду в `plan_nodes`.
 
 ### Database (`internal/database/database.go`)
-- **`CreateSubscription(ctx, sub, inviteCode string)`** — атомарная транзакция: revoke всех active subs для telegram_id + resolve invite → заполнение `sub.InviteCode` и `sub.ReferredBy` + insert. Если inviteCode не найден — не фатально.
-- **`BindTrialSubscription(ctx, sub, telegramID, username)`** — UPDATE trial-row WHERE telegram_id=0 AND plan_id=trial → revoke других active subs для этого telegram_id в той же транзакции. Возвращает `ErrAlreadyActivated` если RowsAffected=0.
+- **`CreateSubscription(ctx, sub, inviteCode string)`** — атомарная транзакция: revoke всех active subs для telegram_id + resolve invite → заполнение `sub.InviteCode` и `sub.ReferredBy` + insert.
+- **`BindTrialSubscription(ctx, sub, telegramID, username)`** — UPDATE trial-row WHERE telegram_id=0 AND plan_id=trial → revoke других active subs для этого telegram_id в той же транзакции. Динамический поиск trial/free plans по имени (`TrialPlanName`/`FreePlanName`).
 - **`CleanupExpiredTrials(ctx)`** — DELETE WHERE expiry_time < now() RETURNING subscription_id (SQLite ≥ 3.35).
 - **Sentinel errors**: `xui.ErrClientNotFound` (для `errors.Is` в Reconcile).
+- **`SeedDefaultNode`**: если nodes пуста, создаёт ноду из env и привязывает ко всем планам.
 
 ### X-UI Client (`internal/xui/client.go`)
-- **Multi-source**: `xuiClients map[uint]interfaces.XUIClient` (key = source ID).
+- **Multi-source**: `xuiClients map[uint]interfaces.XUIClient` (key = source/node ID).
 - **Circuit breaker**: `internal/xui/breaker.go` — 5 failures → 30s open → half-open. Метрика `metrics.CircuitBreakerState`.
 - **Retry**: `RetryWithBackoff` (3 retries, exponential + jitter). DNS errors fast-fail.
 - **Auth**: Bearer token, без сессий, без singleflight (singleflight перенесён в `internal/web/singleflight.go`).
-- См. `xui/auth-mechanism` + `xui/client-crud`.
 
 ### Bot (`internal/bot/`)
 - **Referral cache** (`referral_cache.go`): in-memory map[tgID]int, `Increment`/`Decrement`/`Sync` (1h interval из БД).
@@ -140,7 +152,7 @@ id, name UNIQUE, duration, devices_limit, traffic_limit
 ## Race-safe patterns
 
 ### Trial bind (защита double-active)
-1. Web-биндинг: `UPDATE trial-row WHERE telegram_id=0 AND plan_id=trial` (атомарно через `RowsAffected`).
+1. Web-биндинг: `UPDATE trial-row WHERE telegram_id=0 AND plan_id=<trial_plan_id>` (атомарно через `RowsAffected`).
 2. **Defensive revoke**: после успешного UPDATE — revoke всех `active` subs для этого telegram_id (кроме только что забинденной).
 3. Если параллельный `service.Create` для того же telegram_id выиграет гонку: он ревоукит trial-бинденную sub ДО bind. BindTrial получит `ErrAlreadyActivated` (RowsAffected=0, т.к. telegram_id уже не 0).
 
@@ -173,8 +185,19 @@ id, name UNIQUE, duration, devices_limit, traffic_limit
 ## Решения
 
 ### ✅ Multi-source 3x-ui (v2.4.0, реализовано)
-- `config.Source` (URL, token, inbound_id, Active, Trial) → `map[uint]XUIClient` + `[]database.Source`.
-- Trial — на всех trial-источниках. BindTrial — первый успешный. Reconcile — все.
+- `config.Source` (URL, token, inbound_id, Active, Trial) → `map[uint]XUIClient` + `[]database.Node`.
+- Trial — на всех trial-нодах. BindTrial — первый успешный. Reconcile — все.
+
+### ✅ Orders + Products (migration 013/017, реализовано)
+- `Product` — покупаемый продукт, привязанный к плану.
+- `Order` — факт покупки, статусы `pending|paid|expired|canceled` (CHECK constraint).
+- ORM-связи: `Plan.Products`, `Product.Orders`, `Subscription.Orders`.
+
+### ✅ Subscription Nodes state machine (migration 018, реализовано)
+- `subscription_nodes(subscription_id, node_id, status, retry_count, retry_at, last_error, updated_at)`.
+- Статусы: `active|pending_add|pending_remove`.
+- Хранит реальное состояние синхронизации, а не желаемое состояние тарифа.
+- Восстанавливаемость после падения нод/рестартов/ошибок сети.
 
 ### ⏸ Кастомный генератор подписок (отложено)
 - VLESS поддерживает массив серверов нативно. Клиенты (Happ, V2RayNG) переключаются автоматически. Не нужно переписывать бота.

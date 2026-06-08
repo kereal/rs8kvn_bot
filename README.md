@@ -13,14 +13,14 @@ Telegram bot for distributing VLESS+Reality+Vision proxy subscriptions from 3x-u
 - 📥 Get subscription on demand with QR code import
 - 🔗 Invite/trial landing page (`/i/{code}`) with one-click Happ setup
 - 👥 Referral system — users generate invite codes with in-memory cache + periodic sync
-- 📊 Plan-based traffic limits (sources/plans/plan_sources schema)
+- 📊 Plan-based traffic limits (nodes/plan_nodes schema)
 - 🔗 Subscription server endpoint (`/sub/{subID}`) with multi-source aggregation, devices/IPs tracking, and profile headers
 - 🗄️ Daily database backups with rotation, embedded migrations (000–012)
 - 🧪 Unit + E2E tests (~85% coverage, race-safe, fuzzing)
 - 🛡️ Rate limiting, circuit breaker for 3x-ui, auto-relogin on session expiry
 - 🏥 Health check endpoints (/healthz, /readyz)
-- 🔗 Subscription proxy endpoint (`/sub/{subID}`) with extra servers and headers
-- 🗄️ Daily database backups with rotation, embedded migrations
+- 🔗 Subscription proxy endpoint (`/sub/{subID}`) with node-state synchronization, extra servers and headers
+- 🗄️ Daily database backups with rotation, embedded migrations (000–019)
 - 🐛 Sentry error tracking
 - 🐳 Docker support with health checks
 - 🧪 Unit + E2E tests (~85% coverage, race-safe, fuzzing)

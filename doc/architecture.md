@@ -1,9 +1,7 @@
 # Architecture — rs8kvn_bot
 
-**Version:** 2.6.0  
+**Version:** 2.3.0  
 **Date:** 2026-06-08
-
----
 
 ## Overview
 
@@ -16,6 +14,10 @@ rs8kvn_bot — production-ready Telegram bot for distributing VLESS+Reality+Visi
 - Graceful shutdown with coordinated cleanup
 - 85%+ test coverage (unit, e2e, fuzz, leak detection)
 - Payment/order tracking for subscription purchases
+- Node-based subscription synchronization with state machine (`subscription_nodes`)
+- Dynamic plan resolution by name (no hardcoded IDs)
+- Node-based subscription synchronization with state machine (`subscription_nodes`)
+- Dynamic plan resolution by name (no hardcoded IDs)
 
 ---
 
@@ -658,6 +660,58 @@ webhook:
 
 ### User gets subscription
 
+```
+User           Telegram       Bot (main)     Handler      XUI Panel       DB
+  │                │              │              │             │             │
+  │ /start         │              │              │             │             │
+  │───────────────►│              │              │             │             │
+  │                │ update       │              │             │             │
+  │                │─────────────►│              │             │             │
+  │                │              │ route        │             │             │
+  │                │              │─────────────►│             │             │
+  │                │              │              │ HandleStart │             │
+  │                │              │              │────────────►│             │
+  │                │              │              │            SendMessage  │
+  │                │              │              │ (main menu) │           │
+  │                │              │              │◄────────────┤             │
+  │                │              │              │             │             │
+  │ Click "Get sub"│              │              │             │             │
+  │                │ callback     │              │             │             │
+  │───────────────►│              │              │             │             │
+  │                │ cb query     │              │             │             │
+  │                │─────────────►│              │             │             │
+  │                │              │ HandleCallback│             │             │
+  │                │              │─────────────►│             │             │
+  │                │              │              │ createSub   │             │
+  │                │              │              │────────────►│             │
+  │                │              │              │            GenerateUUID │
+  │                │              │              │            ┌───────────┘
+  │                │              │              │            │ Resolve Plan/Nodes
+  │                │              │              │            │───────────►
+  │                │              │              │            │   Plan + Nodes
+  │                │              │              │            │◄───────────
+  │                │              │              │ BuildURLs  │
+  │                │              │              │            │ XUI.AddClient (per node)
+  │                │              │              │            │───────────►
+  │                │              │              │            │  201 Created
+  │                │              │              │            │◄───────────
+  │                │              │              │ Create subscription_nodes (pending_add)
+  │                │              │              │            │ DB Create
+  │                │              │              │            │───────────►
+  │                │              │              │            │  INSERT OK
+  │                │              │              │            │◄───────────
+  │                │              │              │ Cache Set  │
+  │                │              │              │ Webhook ↑  │
+  │                │              │              │ Notify ↓   │
+  │                │              │              │◄───────────┤
+  │                │              │ SendMessage  │             │
+  │                │              │ (with URL+QR)│             │
+  │                │              │◄─────────────┤             │
+  │                │              │              │             │
+  │                │ Message      │              │             │
+  │◄───────────────│              │              │             │
+  │
+  │ (Background queue workers sync subscription_nodes -> active)
 ```
 User           Telegram       Bot (main)     Handler      XUI Panel       DB
   │                │              │              │             │             │

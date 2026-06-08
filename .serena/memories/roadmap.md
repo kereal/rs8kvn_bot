@@ -1,14 +1,28 @@
 # Roadmap — rs8kvn_bot
 
-**Версия:** v2.4.0  
-**Обновлено:** 2026-06-03
+**Версия:** v2.3.0  
+**Обновлено:** 2026-06-08
 
 ## Текущий статус
+- **Ветка:** `plan-mechanics`
 - **Пользователи:** ~10 клиентов
 - **Покрытие тестами:** ~85% (см. `test-info` для деталей)
-- **Архитектура:** multi-source 3x-ui (sources/plans/plan_sources), SQLite
+- **Архитектура:** plan-based, nodes/plan_nodes, products/orders, subscription_nodes, SQLite
 - **Сборка:** `go build ./...` ✅, `go vet ./...` ✅, `golangci-lint` ✅
-- **Приоритет:** стабильность trial/referral flows (миграция завершена в v2.4.0)
+- **Приоритет:** стабильность flows (миграция завершена в v2.3.0)
+
+## Выполнено (v2.3.0)
+- [x] Удаление `duration` из plans (migration 019) — duration вынесен в `products`
+- [x] Удаление `price` из plans (migration 016) — price вынесен в `products`
+- [x] Добавление `products`/`orders` (migrations 013/017) — покупки, статусы pending/paid/expired/canceled
+- [x] ORM-связи: Plan↔Product↔Order, Subscription↔Order, Subscription↔Node
+- [x] Замена `sources/plan_sources` на `nodes/plan_nodes` (migration 014)
+- [x] Динамический поиск trial-plan по имени вместо хардкода PlanID==1
+- [x] `LinkNodeToPlan` для явной привязки нод к планам
+- [x] Таблица `subscription_nodes` — state machine realtime-синхронизации подписки×нода
+- [x] `SeedDefaultNode` — автоматическая инициализация первой ноды из env
+- [x] Subscription model: удалены `is_trial/traffic_limit/inbound_id/subscription_url/deleted_at` (migration 011-015)
+- [x] Добавлены `plan_id/product_id/started_at/price_paid_cents/currency` (migration 013-017)
 
 ## Ближайшие приоритеты (1-2 мес)
 
