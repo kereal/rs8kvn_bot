@@ -385,10 +385,10 @@ func (m *MockDatabaseService) GetPlanByName(ctx context.Context, name string) (*
 		return m.GetPlanByNameFunc(ctx, name)
 	}
 	if name == database.FreePlanName {
-		return &database.Plan{ID: 2, Name: name, DevicesLimit: 1, TrafficLimit: 1073741824, Duration: 168}, nil
+		return &database.Plan{ID: 2, Name: name, DevicesLimit: 1, TrafficLimit: 1073741824}, nil
 	}
 	if name == database.TrialPlanName {
-		return &database.Plan{ID: 1, Name: name, DevicesLimit: 1, TrafficLimit: 1073741824, Duration: 3}, nil
+		return &database.Plan{ID: 1, Name: name, DevicesLimit: 1, TrafficLimit: 1073741824}, nil
 	}
 	return nil, gorm.ErrRecordNotFound
 }

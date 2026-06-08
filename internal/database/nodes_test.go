@@ -85,7 +85,6 @@ func TestGetPlanByID_AfterCreate(t *testing.T) {
 		Name:         "pro",
 		DevicesLimit: 3,
 		TrafficLimit: 50 * 1024 * 1024 * 1024,
-		Duration:     720,
 	}
 	require.NoError(t, svc.db.WithContext(ctx).Create(plan).Error)
 	require.NotZero(t, plan.ID)
@@ -119,7 +118,6 @@ func TestGetPlanByName_DefaultTrialPlan(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, TrialPlanName, got.Name)
 	assert.Equal(t, 1, got.DevicesLimit)
-	assert.Equal(t, 3, got.Duration)
 }
 
 func TestGetPlanByName_DefaultFreePlan(t *testing.T) {

@@ -94,13 +94,6 @@ func (s *SubscriptionService) Create(ctx context.Context, chatID int64, username
 
 	var expiryTime time.Time
 	var resetday int
-	if plan.Duration > 0 {
-		expiryTime = time.Now().Add(time.Duration(plan.Duration) * time.Hour)
-		resetday = config.SubscriptionResetDay
-	} else {
-		expiryTime = time.Time{}
-		resetday = 0
-	}
 
 	clientID, err := utils.GenerateUUID()
 	if err != nil {
@@ -378,7 +371,12 @@ func (s *SubscriptionService) CreateTrial(ctx context.Context, inviteCode string
 		return nil, fmt.Errorf("generate client id: %w", err)
 	}
 
-	trafficBytes := calcTrialTraffic(s.cfg.TrialDurationHours)
+	trialPlan, err := s.db.GetPlanByName(ctx, database.TrialPlanName)
+	if err != nil {
+		return nil, fmt.Errorf("resolve trial plan: %w", err)
+	}
+
+	trafficBytes := trialPlan.TrafficLimit
 	expiryTime := time.Now().Add(time.Duration(s.cfg.TrialDurationHours) * time.Hour)
 	email := "trial_" + subID
 
@@ -386,34 +384,20 @@ func (s *SubscriptionService) CreateTrial(ctx context.Context, inviteCode string
 	if err != nil {
 		return nil, fmt.Errorf("load trial sources: %w", err)
 	}
-	sources := trialNodes
-	if len(sources) == 0 {
-		sources = s.activeNodes()
+	if len(trialNodes) == 0 {
+		trialNodes = s.activeNodes()
+	}
+	if len(trialNodes) == 0 {
+		return nil, fmt.Errorf("no nodes available for trial")
 	}
 
-	var xuiErrs []error
-	var anySuccess bool
-	for _, node := range sources {
-		client, ok := s.xuiClients[node.ID]
-		if !ok {
-			continue
-		}
-		_, err = client.AddClientWithID(ctx, node.InboundID, email, clientID, subID, trafficBytes, expiryTime, 0)
-		if err != nil {
-			xuiErrs = append(xuiErrs, fmt.Errorf("node %d: %w", node.ID, err))
-			logger.Warn("failed to add trial client on node",
-				zap.Uint("node_id", node.ID),
-				zap.Error(err))
-		} else {
-			anySuccess = true
-		}
+	node := trialNodes[0]
+	client, ok := s.xuiClients[node.ID]
+	if !ok {
+		return nil, fmt.Errorf("xui client not found for node %d", node.ID)
 	}
-	if !anySuccess {
-		logger.Error("trial XUI: all nodes failed", zap.Int("failed", len(xuiErrs)))
-		return nil, fmt.Errorf("failed to create trial client on any node: %w", errors.Join(xuiErrs...))
-	}
-	if len(xuiErrs) > 0 {
-		logger.Warn("trial XUI: partial failures (continuing)", zap.Int("failed", len(xuiErrs)), zap.Int("sources", len(sources)))
+	if _, err = client.AddClientWithID(ctx, node.InboundID, email, clientID, subID, trafficBytes, expiryTime, 0); err != nil {
+		return nil, fmt.Errorf("add trial client on node %d: %w", node.ID, err)
 	}
 
 	sub, err := s.db.CreateTrialSubscription(ctx, inviteCode, subID, clientID, expiryTime)
@@ -461,12 +445,7 @@ func (s *SubscriptionService) BindTrial(ctx context.Context, subscriptionID stri
 	}
 	trafficBytes := freePlan.TrafficLimit
 
-	var expiryTime time.Time
-	if freePlan.Duration > 0 {
-		expiryTime = time.Now().Add(time.Duration(freePlan.Duration) * time.Hour)
-	} else {
-		expiryTime = time.UnixMilli(0)
-	}
+	expiryTime := time.UnixMilli(0)
 
 	var comment string
 	if invite, err := s.db.GetInviteByCode(ctx, sub.InviteCode); err == nil {
@@ -646,20 +625,4 @@ func (s *SubscriptionService) GetAllReferralCounts(ctx context.Context) (map[int
 	return s.db.GetAllReferralCounts(ctx)
 }
 
-// calcTrialTraffic calculates trial traffic allocation based on trial duration.
-// Formula: trialHours * 1GiB / 12, where 12 = (24*365)/(30*24) = hours in year / hours in month.
-// This gives a proportional share of monthly traffic (100 GiB). Minimum 1 GiB.
-func calcTrialTraffic(trialHours int) int64 {
-	const (
-		gib        = 1024 * 1024 * 1024
-		minTraffic = gib
-		// hoursInYear / hoursInMonth ≈ 12.17, integer division gives 12
-		trafficDivisor = (24 * 365) / (30 * 24)
-	)
 
-	trafficBytes := int64(trialHours) * gib / trafficDivisor
-	if trafficBytes < minTraffic {
-		trafficBytes = minTraffic
-	}
-	return trafficBytes
-}

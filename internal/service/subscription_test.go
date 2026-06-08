@@ -453,27 +453,7 @@ func TestSubscriptionService_Delete_FallsBackToTgIdEmail(t *testing.T) {
 	assert.Equal(t, "tgId_123456", receivedEmail, "DeleteClient should receive tgId_ email when no real username")
 }
 
-func TestCalcTrialTraffic(t *testing.T) {
-	t.Parallel()
 
-	tests := []struct {
-		name       string
-		trialHours int
-		minWant    int64
-	}{
-		{"1 hour", 1, 1024 * 1024 * 1024},
-		{"3 hours", 3, 3 * 1024 * 1024 * 1024 / 12},
-		{"24 hours", 24, 24 * 1024 * 1024 * 1024 / 12},
-		{"100 hours", 100, 100 * 1024 * 1024 * 1024 / 12},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := calcTrialTraffic(tt.trialHours)
-			assert.GreaterOrEqual(t, got, tt.minWant)
-		})
-	}
-}
 
 func TestSubscriptionService_GetWithTraffic_Success(t *testing.T) {
 	t.Parallel()
@@ -561,7 +541,11 @@ func TestSubscriptionService_CreateTrial_Success(t *testing.T) {
 		TrialDurationHours: 3,
 	}
 
-	db := &testutil.MockDatabaseService{}
+	db := &testutil.MockDatabaseService{
+		GetPlanByNameFunc: func(ctx context.Context, name string) (*database.Plan, error) {
+			return &database.Plan{ID: 1, Name: name, TrafficLimit: 1073741824}, nil
+		},
+	}
 	xuiClient := &testutil.MockXUIClient{
 		AddClientWithIDFunc: func(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
 			return &xui.ClientConfig{ID: clientID, SubID: subID}, nil
@@ -590,7 +574,7 @@ func TestSubscriptionService_CreateTrial_XUIError(t *testing.T) {
 
 	db := &testutil.MockDatabaseService{
 		GetPlanByNameFunc: func(ctx context.Context, name string) (*database.Plan, error) {
-			return &database.Plan{ID: 1, Name: "trial", DevicesLimit: 1, TrafficLimit: 1073741824, Duration: 3}, nil
+			return &database.Plan{ID: 1, Name: "trial", TrafficLimit: 1073741824}, nil
 		},
 		GetNodesByPlanNameFunc: func(ctx context.Context, planName string) ([]database.Node, error) {
 			return []database.Node{{ID: 1, IsActive: true,  Host: "http://localhost:2053", InboundID: 1}}, nil
@@ -626,6 +610,9 @@ func TestSubscriptionService_CreateTrial_DBError(t *testing.T) {
 
 	deleteCalled := false
 	db := &testutil.MockDatabaseService{
+		GetPlanByNameFunc: func(ctx context.Context, name string) (*database.Plan, error) {
+			return &database.Plan{ID: 1, Name: name, TrafficLimit: 1073741824}, nil
+		},
 		CreateTrialSubscriptionFunc: func(ctx context.Context, inviteCode, subscriptionID, clientID string, expiryTime time.Time) (*database.Subscription, error) {
 			return nil, errors.New("db error")
 		},
@@ -736,7 +723,7 @@ func TestSubscriptionService_BindTrial_UpdatesAllSources(t *testing.T) {
 			return bound, nil
 		},
 		GetPlanByNameFunc: func(ctx context.Context, name string) (*database.Plan, error) {
-			return &database.Plan{ID: 2, Name: database.FreePlanName, TrafficLimit: 1024 * 1024 * 1024, Duration: 168}, nil
+			return &database.Plan{ID: 2, Name: database.FreePlanName, TrafficLimit: 1024 * 1024 * 1024}, nil
 		},
 		GetNodesByPlanNameFunc: func(ctx context.Context, planName string) ([]database.Node, error) {
 			if planName == database.TrialPlanName {
@@ -774,105 +761,7 @@ func TestSubscriptionService_BindTrial_UpdatesAllSources(t *testing.T) {
 	assert.Equal(t, uint(42), got.ID)
 }
 
-// TestSubscriptionService_CreateTrial_PartialFailuresSucceed verifies that if
-// at least one trial source succeeds, CreateTrial proceeds (fix #5: aggregated
-// error reporting must NOT swallow partial success).
-func TestSubscriptionService_CreateTrial_PartialFailuresSucceed(t *testing.T) {
-	t.Parallel()
 
-	cfg := &config.Config{TrialDurationHours: 3}
-
-	xui1 := &testutil.MockXUIClient{
-		AddClientWithIDFunc: func(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
-			return nil, errors.New("source 1 down")
-		},
-	}
-	xui2 := &testutil.MockXUIClient{
-		AddClientWithIDFunc: func(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
-			return nil, errors.New("source 2 down")
-		},
-	}
-	xui3 := &testutil.MockXUIClient{
-		AddClientWithIDFunc: func(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
-			return &xui.ClientConfig{ID: clientID, SubID: subID}, nil
-		},
-	}
-
-	db := &testutil.MockDatabaseService{
-		CreateTrialSubscriptionFunc: func(ctx context.Context, inviteCode, subscriptionID, clientID string, expiryTime time.Time) (*database.Subscription, error) {
-			return &database.Subscription{InviteCode: inviteCode, SubscriptionID: subscriptionID, ClientID: clientID, PlanID: 1}, nil
-		},
-		GetNodesByPlanNameFunc: func(ctx context.Context, planName string) ([]database.Node, error) {
-			if planName == database.TrialPlanName {
-				return []database.Node{
-					{ID: 1, IsActive: true, Host: "http://x1", InboundID: 1},
-					{ID: 2, IsActive: true, Host: "http://x2", InboundID: 1},
-					{ID: 3, IsActive: true, Host: "http://x3", InboundID: 1},
-				}, nil
-			}
-			return nil, nil
-		},
-	}
-	sources := []database.Node{
-		{ID: 1, IsActive: true, Host: "http://x1", InboundID: 1},
-		{ID: 2, IsActive: true, Host: "http://x2", InboundID: 1},
-		{ID: 3, IsActive: true, Host: "http://x3", InboundID: 1},
-	}
-	xuiClients := map[uint]interfaces.XUIClient{1: xui1, 2: xui2, 3: xui3}
-
-	svc := NewSubscriptionService(db, xuiClients, sources, cfg, "", &webhook.NoopSender{})
-
-	result, err := svc.CreateTrial(context.Background(), "INV")
-	assert.NoError(t, err, "partial failures should not fail the whole trial create")
-	require.NotNil(t, result)
-	assert.NotEmpty(t, result.SubID)
-}
-
-// TestSubscriptionService_CreateTrial_AllFailsAggregatesErrors verifies that
-// when all sources fail, CreateTrial returns an aggregated error containing
-// every per-source error (fix #5: errors.Join instead of only first error).
-func TestSubscriptionService_CreateTrial_AllFailsAggregatesErrors(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{TrialDurationHours: 3}
-
-	errA := errors.New("source 1 down")
-	errB := errors.New("source 2 down")
-	xui1 := &testutil.MockXUIClient{
-		AddClientWithIDFunc: func(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
-			return nil, errA
-		},
-	}
-	xui2 := &testutil.MockXUIClient{
-		AddClientWithIDFunc: func(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
-			return nil, errB
-		},
-	}
-	sources := []database.Node{
-		{ID: 1, IsActive: true, Host: "http://x1", InboundID: 1},
-		{ID: 2, IsActive: true, Host: "http://x2", InboundID: 1},
-	}
-	xuiClients := map[uint]interfaces.XUIClient{1: xui1, 2: xui2}
-
-	db := &testutil.MockDatabaseService{
-		GetNodesByPlanNameFunc: func(ctx context.Context, planName string) ([]database.Node, error) {
-			if planName == database.TrialPlanName {
-				return []database.Node{
-					{ID: 1, IsActive: true, Host: "http://x1", InboundID: 1},
-					{ID: 2, IsActive: true, Host: "http://x2", InboundID: 1},
-				}, nil
-			}
-			return nil, nil
-		},
-	}
-	svc := NewSubscriptionService(db, xuiClients, sources, cfg, "", &webhook.NoopSender{})
-
-	result, err := svc.CreateTrial(context.Background(), "INV")
-	assert.Error(t, err)
-	assert.Nil(t, result)
-	assert.True(t, errors.Is(err, errA), "aggregated error must wrap source-1 error")
-	assert.True(t, errors.Is(err, errB), "aggregated error must wrap source-2 error")
-}
 
 // ==================== DeleteByID Tests ====================
 
