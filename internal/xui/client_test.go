@@ -282,7 +282,7 @@ func TestDoHTTPRequest(t *testing.T) {
 
 		body, err := client.doHTTPRequest(context.Background(), http.MethodGet, server.URL+"/test", nil)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "HTTP 500")
+		assert.Contains(t, err.Error(), "upstream returned non-200")
 		assert.Contains(t, string(body), "internal error")
 	})
 
@@ -783,7 +783,7 @@ func TestHTTPStatusHandling(t *testing.T) {
 
 		_, err = client.GetInbound(context.Background(), 1)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "HTTP 401")
+		assert.Contains(t, err.Error(), "upstream returned non-200")
 	})
 
 	t.Run("403 forbidden", func(t *testing.T) {
@@ -799,7 +799,7 @@ func TestHTTPStatusHandling(t *testing.T) {
 
 		_, err = client.GetInbound(context.Background(), 1)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "HTTP 403")
+		assert.Contains(t, err.Error(), "upstream returned non-200")
 	})
 
 	t.Run("500 server error", func(t *testing.T) {
@@ -815,6 +815,6 @@ func TestHTTPStatusHandling(t *testing.T) {
 
 		_, err = client.GetInbound(context.Background(), 1)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "HTTP 500")
+		assert.Contains(t, err.Error(), "upstream returned non-200")
 	})
 }

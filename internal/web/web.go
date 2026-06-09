@@ -151,6 +151,7 @@ func (s *Server) Start(ctx context.Context) error {
 	s.listenerAddr = listener.Addr().String()
 
 	go func() {
+		defer logger.Recover("HTTP server")
 		if err := s.server.Serve(listener); err != nil && err != http.ErrServerClosed {
 			logger.Error("HTTP server error", zap.Error(err))
 		} else if err == http.ErrServerClosed {

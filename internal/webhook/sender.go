@@ -91,6 +91,7 @@ func (s *Sender) SendAsync(event Event) {
 	}
 
 	go func(e Event) {
+		defer logger.Recover("Webhook delivery")
 		for i, delay := range s.retryDelays {
 			if i > 0 {
 				time.Sleep(delay)

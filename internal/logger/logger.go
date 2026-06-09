@@ -1,11 +1,13 @@
 package logger
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -159,7 +161,7 @@ func Close() error {
 	}
 
 	if len(errs) > 0 {
-		return fmt.Errorf("errors closing logger: %v", errs)
+		return fmt.Errorf("errors closing logger: %w", errors.Join(errs...))
 	}
 	return nil
 }
@@ -294,7 +296,7 @@ func (s *Service) Close() error {
 	}
 
 	if len(errs) > 0 {
-		return fmt.Errorf("errors closing logger: %v", errs)
+		return fmt.Errorf("errors closing logger: %w", errors.Join(errs...))
 	}
 	return nil
 }
@@ -305,6 +307,20 @@ func isStdoutError(err error) bool {
 	}
 	errStr := err.Error()
 	return strings.Contains(errStr, "invalid argument") || strings.Contains(errStr, "bad file descriptor")
+}
+
+// Recover recovers from panics, reports to Sentry, and logs the error.
+// Usage: defer logger.Recover("Component name")
+func Recover(component string) {
+	if r := recover(); r != nil {
+		stack := debug.Stack()
+		sentry.CurrentHub().Recover(r)
+		sentry.Flush(SentryPanicFlushTimeout)
+		Log.Error(component+" panicked",
+			zap.Any("panic", r),
+			zap.String("stack", string(stack)),
+		)
+	}
 }
 
 // Info logs at INFO level.

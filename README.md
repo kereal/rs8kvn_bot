@@ -6,8 +6,6 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/kereal/rs8kvn_bot)](https://goreportcard.com/report/github.com/kereal/rs8kvn_bot)
 [![License](https://img.shields.io/github/license/kereal/rs8kvn_bot)](LICENSE)
 
-Telegram bot for distributing VLESS+Reality+Vision proxy subscriptions from 3x-ui panel.
-
 ## Features
 
 - 📥 Get subscription on demand with QR code import
@@ -89,7 +87,7 @@ The bot exposes HTTP endpoints on port 8880:
 | `GET /healthz` | Basic health (process alive, DB and xui status) | 200/503 |
 | `GET /readyz` | Ready state (accepting requests after init) | 200/503 |
 | `GET /i/{code}` | Trial invites landing page | 200/404/429/500 |
-| `GET /sub/{subID}` | Subscription proxy (extra servers + headers, status checked) | 200/404/502/405 |
+| `GET /sub/{subID}` | Subscription server | 200/404/502/405 |
 | `GET /static/logo.png` | Logo image (mobile-optimized PNG) | 200/404 |
 
 ### Invite/Trial Landing Page (`/i/{code}`)
