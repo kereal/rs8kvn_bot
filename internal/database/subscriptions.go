@@ -37,15 +37,12 @@ func (s *Service) GetByID(ctx context.Context, id uint) (*Subscription, error) {
 // are populated atomically inside the same transaction.
 func (s *Service) CreateSubscription(ctx context.Context, sub *Subscription, inviteCode string) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// Revoke any existing active subscriptions for this user
 		if err := tx.Model(&Subscription{}).
 			Where("telegram_id = ? AND status = ?", sub.TelegramID, "active").
 			Update("status", "revoked").Error; err != nil {
 			return fmt.Errorf("failed to revoke old subscription: %w", err)
 		}
 
-		// Resolve referral invite atomically. A missing invite is non-fatal:
-		// the subscription is still created without referral attribution.
 		if inviteCode != "" {
 			var inv Invite
 			if err := tx.Where("code = ?", inviteCode).First(&inv).Error; err == nil {
@@ -56,7 +53,6 @@ func (s *Service) CreateSubscription(ctx context.Context, sub *Subscription, inv
 			}
 		}
 
-		// Create the new subscription
 		if err := tx.Create(sub).Error; err != nil {
 			return fmt.Errorf("failed to create new subscription: %w", err)
 		}
@@ -88,18 +84,32 @@ func (s *Service) DeleteSubscription(ctx context.Context, telegramID int64) erro
 
 // DeleteSubscriptionByID soft-deletes a subscription by its database ID.
 func (s *Service) DeleteSubscriptionByID(ctx context.Context, id uint) (*Subscription, error) {
-	var sub Subscription
-	result := s.db.WithContext(ctx).First(&sub, id)
-	if result.Error != nil {
-		return nil, fmt.Errorf("failed to find subscription: %w", result.Error)
+	var deleted Subscription
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.First(&deleted, id)
+		if result.Error != nil {
+			return result.Error
+		}
+
+		result = tx.Delete(&deleted)
+		if result.Error != nil {
+			return result.Error
+		}
+
+		if result.RowsAffected == 0 {
+			return gorm.ErrRecordNotFound
+		}
+
+		return nil
+	})
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("failed to find subscription: %w", err)
+		}
+		return nil, fmt.Errorf("failed to delete subscription: %w", err)
 	}
 
-	result = s.db.WithContext(ctx).Delete(&sub)
-	if result.Error != nil {
-		return nil, fmt.Errorf("failed to delete subscription: %w", result.Error)
-	}
-
-	return &sub, nil
+	return &deleted, nil
 }
 
 // GetLatestSubscriptions retrieves the latest N subscriptions ordered by creation date.
@@ -116,7 +126,7 @@ func (s *Service) GetLatestSubscriptions(ctx context.Context, limit int) ([]Subs
 	return subs, nil
 }
 
-// GetAllSubscriptions retrieves all subscriptions (for admin stats).
+// GetAllSubscriptions retrieves all subscriptions (for admin stats and reconciliation).
 func (s *Service) GetAllSubscriptions(ctx context.Context) ([]Subscription, error) {
 	var subs []Subscription
 	result := s.db.WithContext(ctx).Find(&subs)
@@ -177,7 +187,7 @@ func (s *Service) GetSubscriptionBySubscriptionID(ctx context.Context, subscript
 // GetSubscriptionStatus returns only the status and expiry time for a subscription
 // by its subscription_id. It is intended for cheap cache-hit checks in the
 // subscription server (since v2.3.0) — it avoids the full JOIN with plans and
-// sources required by GetSubscriptionWithPlanAndSources. Returns
+// sources required by GetSubscriptionWithPlanAndNodes. Returns
 // gorm.ErrRecordNotFound if no row matches.
 func (s *Service) GetSubscriptionStatus(ctx context.Context, subscriptionID string) (string, time.Time, error) {
 	var row struct {

@@ -17,16 +17,14 @@ type cacheEntry struct {
 }
 
 // Cache is an in-memory TTL cache for subscription responses.
-// It provides concurrent-safe Get/Set/Delete and runs a background goroutine
-// that evicts expired entries at half-TTL intervals. Since v2.3.0 the cache
-// stores response headers alongside the body so cache hits can be served
-// without re-issuing the request to the upstream 3x-ui panel.
 type Cache struct {
-	mu      sync.RWMutex
-	entries map[string]*cacheEntry
-	ttl     time.Duration
-	stopCh  chan struct{}
-	stopped atomic.Bool
+	mu          sync.RWMutex
+	entries     map[string]*cacheEntry
+	ttl         time.Duration
+	stopCh      chan struct{}
+	stopped     atomic.Bool
+	hits        atomic.Int64
+	misses      atomic.Int64
 }
 
 // NewCache creates a new Cache with the given TTL and starts the cleanup loop.
@@ -43,18 +41,17 @@ func NewCache(ttl time.Duration) *Cache {
 // Get returns the cached body and headers for key, or nil,nil,false on miss/expiry.
 func (c *Cache) Get(key string) ([]byte, map[string]string, bool) {
 	c.mu.RLock()
-	defer c.mu.RUnlock()
-
 	entry, ok := c.entries[key]
-	if !ok {
-		metrics.CacheMissesTotal.WithLabelValues("subserver").Inc()
-		return nil, nil, false
-	}
-	if time.Now().After(entry.expiresAt) {
+	expired := ok && time.Now().After(entry.expiresAt)
+	c.mu.RUnlock()
+
+	if !ok || expired {
+		c.misses.Add(1)
 		metrics.CacheMissesTotal.WithLabelValues("subserver").Inc()
 		return nil, nil, false
 	}
 
+	c.hits.Add(1)
 	metrics.CacheHitsTotal.WithLabelValues("subserver").Inc()
 	return bytes.Clone(entry.body), cloneHeaders(entry.headers), true
 }

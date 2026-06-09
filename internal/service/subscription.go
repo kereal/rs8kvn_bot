@@ -40,9 +40,7 @@ type SubscriptionService struct {
 type CreateResult struct {
 	Subscription    *database.Subscription
 	SubscriptionURL string
-	// ReferrerTGID is the resolved referrer (from inviteCode) when the subscription
-	// was created with a valid pending invite. 0 means no referral attribution.
-	ReferrerTGID int64
+	ReferrerTGID    int64
 }
 
 // XUIEmail returns an email suitable for use as XUI client email.
@@ -217,7 +215,7 @@ func (s *SubscriptionService) DeleteByID(ctx context.Context, id uint) (*databas
 		return nil, fmt.Errorf("db delete: %w", err)
 	}
 
-	email := XUIEmail(sub.Username, deleted.TelegramID)
+	email := XUIEmail(deleted.Username, deleted.TelegramID)
 	s.deleteClientFromAllNodes(ctx, email)
 
 	if s.webhook != nil {
@@ -524,17 +522,34 @@ func (s *SubscriptionService) InvalidateSubscription(ctx context.Context, telegr
 // client no longer exists in the XUI panel. It returns the number of removed subscriptions.
 // This is a best-effort background cleanup; errors are logged but do not stop the scan.
 func (s *SubscriptionService) ReconcileOrphanedClients(ctx context.Context) (int, error) {
-	allSubs, err := s.db.GetAllSubscriptions(ctx)
+	type activeOnly struct {
+		ID             uint
+		TelegramID      int64
+		Username        string
+		SubscriptionID  string
+		ClientID        string
+	}
+
+	rows, err := s.db.GetAllSubscriptions(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("failed to fetch subscriptions: %w", err)
 	}
 
-	removed := 0
-	for _, sub := range allSubs {
-		if sub.Status != "active" {
-			continue
+	activeSubs := make([]activeOnly, 0, len(rows))
+	for _, sub := range rows {
+		if sub.Status == "active" {
+			activeSubs = append(activeSubs, activeOnly{
+				ID:             sub.ID,
+				TelegramID:     sub.TelegramID,
+				Username:       sub.Username,
+				SubscriptionID: sub.SubscriptionID,
+				ClientID:       sub.ClientID,
+			})
 		}
+	}
 
+	removed := 0
+	for _, sub := range activeSubs {
 		var xuiEmail string
 		if sub.TelegramID == 0 {
 			if sub.SubscriptionID == "" {
