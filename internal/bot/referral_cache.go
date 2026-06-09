@@ -119,6 +119,7 @@ func (rc *ReferralCache) Sync(ctx context.Context) error {
 
 func (rc *ReferralCache) StartSync(ctx context.Context) {
 	go func() {
+		defer logger.Recover("ReferralCache sync")
 		ticker := time.NewTicker(1 * time.Hour)
 		defer ticker.Stop()
 

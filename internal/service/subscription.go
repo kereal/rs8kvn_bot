@@ -154,7 +154,7 @@ func (s *SubscriptionService) Create(ctx context.Context, chatID int64, username
 
 	if firstClient.SubID == "" {
 		s.deleteClientFromAllNodes(ctx, email)
-		return nil, fmt.Errorf("xui client returned empty subscription id: missing subID on client %s", firstClient.ID)
+		return nil, fmt.Errorf("xui client returned empty subscription id")
 	}
 
 	if err := s.db.CreateSubscription(ctx, sub, inviteCode); err != nil {

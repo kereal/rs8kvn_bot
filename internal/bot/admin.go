@@ -246,6 +246,7 @@ func (h *Handler) HandleBroadcast(ctx context.Context, update tgbotapi.Update) e
 			case sem <- struct{}{}:
 				wg.Add(1)
 				go func(tg int64) {
+					defer logger.Recover("Broadcast worker")
 					defer wg.Done()
 					defer func() { <-sem }()
 

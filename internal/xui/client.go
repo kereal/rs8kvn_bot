@@ -197,7 +197,7 @@ func (c *Client) doHTTPRequest(ctx context.Context, method, url string, bodyFn f
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return respBody, fmt.Errorf("server returned HTTP %d: %s (url: %s)", resp.StatusCode, truncateString(string(respBody), 200), url)
+		return respBody, fmt.Errorf("upstream returned non-200")
 	}
 
 	return respBody, nil
@@ -287,7 +287,7 @@ func (c *Client) doAddClientWithID(ctx context.Context, inboundID int, email, cl
 	}
 
 	if !simpleResp.Success {
-		return nil, fmt.Errorf("failed to add client: %s", simpleResp.Msg)
+		return nil, fmt.Errorf("add client failed")
 	}
 
 	return &ClientConfig{
