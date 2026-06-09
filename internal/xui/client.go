@@ -14,9 +14,9 @@ import (
 	"strings"
 	"time"
 
-	"rs8kvn_bot/internal/config"
-	"rs8kvn_bot/internal/logger"
-	"rs8kvn_bot/internal/utils"
+	"github.com/kereal/rs8kvn_bot/internal/config"
+	"github.com/kereal/rs8kvn_bot/internal/logger"
+	"github.com/kereal/rs8kvn_bot/internal/utils"
 
 	"go.uber.org/zap"
 )
@@ -277,9 +277,9 @@ func (c *Client) doAddClientWithID(ctx context.Context, inboundID int, email, cl
 		zap.String("response_preview", truncateString(string(respBody), 200)))
 
 	var simpleResp struct {
-		Success bool        `json:"success"`
-		Msg     string      `json:"msg"`
-		Obj     any `json:"obj,omitempty"`
+		Success bool   `json:"success"`
+		Msg     string `json:"msg"`
+		Obj     any    `json:"obj,omitempty"`
 	}
 
 	if err := json.Unmarshal(respBody, &simpleResp); err != nil {

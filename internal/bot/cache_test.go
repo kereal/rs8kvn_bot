@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"rs8kvn_bot/internal/database"
+	"github.com/kereal/rs8kvn_bot/internal/database"
 )
 
 func TestSubscriptionCache_GetSet(t *testing.T) {

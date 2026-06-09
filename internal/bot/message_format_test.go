@@ -3,7 +3,7 @@ package bot
 import (
 	"testing"
 
-	"rs8kvn_bot/internal/utils"
+	"github.com/kereal/rs8kvn_bot/internal/utils"
 
 	"github.com/stretchr/testify/assert"
 )

@@ -7,7 +7,7 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"go.uber.org/zap"
 
-	"rs8kvn_bot/internal/logger"
+	"github.com/kereal/rs8kvn_bot/internal/logger"
 )
 
 // CallbackHandler processes callback queries from inline keyboards.

@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	"rs8kvn_bot/internal/logger"
+	"github.com/kereal/rs8kvn_bot/internal/logger"
 
 	migrate "github.com/golang-migrate/migrate/v4"
 	"github.com/golang-migrate/migrate/v4/database/sqlite"

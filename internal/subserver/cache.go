@@ -6,7 +6,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"rs8kvn_bot/internal/metrics"
+	"github.com/kereal/rs8kvn_bot/internal/metrics"
 )
 
 // cacheEntry holds a cached response body and headers with its expiry time.

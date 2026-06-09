@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"rs8kvn_bot/internal/testutil"
+	"github.com/kereal/rs8kvn_bot/internal/testutil"
 )
 
 func TestReferralCache_NewReferralCache(t *testing.T) {

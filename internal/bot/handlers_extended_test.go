@@ -10,8 +10,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"rs8kvn_bot/internal/config"
-	"rs8kvn_bot/internal/database"
+	"github.com/kereal/rs8kvn_bot/internal/config"
+	"github.com/kereal/rs8kvn_bot/internal/database"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )

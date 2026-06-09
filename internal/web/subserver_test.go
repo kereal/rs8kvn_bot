@@ -15,13 +15,13 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"rs8kvn_bot/internal/bot"
-	"rs8kvn_bot/internal/config"
-	"rs8kvn_bot/internal/database"
-	"rs8kvn_bot/internal/interfaces"
-	"rs8kvn_bot/internal/service"
-	"rs8kvn_bot/internal/subserver"
-	"rs8kvn_bot/internal/testutil"
+	"github.com/kereal/rs8kvn_bot/internal/bot"
+	"github.com/kereal/rs8kvn_bot/internal/config"
+	"github.com/kereal/rs8kvn_bot/internal/database"
+	"github.com/kereal/rs8kvn_bot/internal/interfaces"
+	"github.com/kereal/rs8kvn_bot/internal/service"
+	"github.com/kereal/rs8kvn_bot/internal/subserver"
+	"github.com/kereal/rs8kvn_bot/internal/testutil"
 
 	"gorm.io/gorm"
 )

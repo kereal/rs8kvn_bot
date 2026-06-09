@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"rs8kvn_bot/internal/backup"
-	"rs8kvn_bot/internal/logger"
+	"github.com/kereal/rs8kvn_bot/internal/backup"
+	"github.com/kereal/rs8kvn_bot/internal/logger"
 
 	"go.uber.org/zap"
 )

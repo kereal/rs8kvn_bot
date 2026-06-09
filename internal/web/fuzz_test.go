@@ -4,8 +4,8 @@ import (
 	"regexp"
 	"testing"
 
-	"rs8kvn_bot/internal/bot"
-	"rs8kvn_bot/internal/config"
+	"github.com/kereal/rs8kvn_bot/internal/bot"
+	"github.com/kereal/rs8kvn_bot/internal/config"
 )
 
 func FuzzInviteCodeRegex(f *testing.F) {

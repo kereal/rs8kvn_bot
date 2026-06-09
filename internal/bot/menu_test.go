@@ -5,9 +5,9 @@ import (
 	"errors"
 	"testing"
 
-	"rs8kvn_bot/internal/config"
-	"rs8kvn_bot/internal/database"
-	"rs8kvn_bot/internal/testutil"
+	"github.com/kereal/rs8kvn_bot/internal/config"
+	"github.com/kereal/rs8kvn_bot/internal/database"
+	"github.com/kereal/rs8kvn_bot/internal/testutil"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/stretchr/testify/assert"

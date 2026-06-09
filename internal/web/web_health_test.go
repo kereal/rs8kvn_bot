@@ -9,8 +9,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"rs8kvn_bot/internal/bot"
-	"rs8kvn_bot/internal/config"
+	"github.com/kereal/rs8kvn_bot/internal/bot"
+	"github.com/kereal/rs8kvn_bot/internal/config"
 )
 
 // === Health endpoint tests ===

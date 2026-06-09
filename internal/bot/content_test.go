@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"rs8kvn_bot/internal/config"
+	"github.com/kereal/rs8kvn_bot/internal/config"
 
 	"github.com/stretchr/testify/assert"
 )

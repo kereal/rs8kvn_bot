@@ -10,12 +10,12 @@ import (
 	"testing"
 	"time"
 
-	"rs8kvn_bot/internal/database"
-	"rs8kvn_bot/internal/interfaces"
-	"rs8kvn_bot/internal/service"
-	"rs8kvn_bot/internal/web"
-	"rs8kvn_bot/internal/webhook"
-	"rs8kvn_bot/internal/xui"
+	"github.com/kereal/rs8kvn_bot/internal/database"
+	"github.com/kereal/rs8kvn_bot/internal/interfaces"
+	"github.com/kereal/rs8kvn_bot/internal/service"
+	"github.com/kereal/rs8kvn_bot/internal/web"
+	"github.com/kereal/rs8kvn_bot/internal/webhook"
+	"github.com/kereal/rs8kvn_bot/internal/xui"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/stretchr/testify/assert"

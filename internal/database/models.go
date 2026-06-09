@@ -106,15 +106,15 @@ type Product struct {
 //   - activated_at — subscription activation timestamp.
 //   - expires_at — payment invoice expiry (e.g. 30 minutes from creation).
 type Order struct {
-	ID                uint      `gorm:"primaryKey;column:id"`
-	SubscriptionID    uint      `gorm:"not null;column:subscription_id"`
-	ProductID         uint      `gorm:"not null;column:product_id"`
-	Status            string    `gorm:"not null;size:16;column:status"`
-	AmountCents       int64     `gorm:"not null;column:amount_cents"`
-	Currency          string    `gorm:"size:3;not null;default:RUB;column:currency"`
-	PaymentProvider   string    `gorm:"column:payment_provider"`
-	ProviderPaymentID string    `gorm:"column:provider_payment_id"`
-	CreatedAt         time.Time `gorm:"not null;column:created_at"`
+	ID                uint       `gorm:"primaryKey;column:id"`
+	SubscriptionID    uint       `gorm:"not null;column:subscription_id"`
+	ProductID         uint       `gorm:"not null;column:product_id"`
+	Status            string     `gorm:"not null;size:16;column:status"`
+	AmountCents       int64      `gorm:"not null;column:amount_cents"`
+	Currency          string     `gorm:"size:3;not null;default:RUB;column:currency"`
+	PaymentProvider   string     `gorm:"column:payment_provider"`
+	ProviderPaymentID string     `gorm:"column:provider_payment_id"`
+	CreatedAt         time.Time  `gorm:"not null;column:created_at"`
 	PaidAt            *time.Time `gorm:"column:paid_at"`
 	ActivatedAt       *time.Time `gorm:"column:activated_at"`
 	ExpiresAt         *time.Time `gorm:"column:expires_at"`

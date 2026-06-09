@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"rs8kvn_bot/internal/config"
-	"rs8kvn_bot/internal/logger"
+	"github.com/kereal/rs8kvn_bot/internal/config"
+	"github.com/kereal/rs8kvn_bot/internal/logger"
 
 	gormsqlite "gorm.io/driver/sqlite"
 	"gorm.io/gorm"

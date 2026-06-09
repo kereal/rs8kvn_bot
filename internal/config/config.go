@@ -5,7 +5,7 @@ import (
 	"net/url"
 	"strings"
 
-	flag "rs8kvn_bot/internal/flag"
+	flag "github.com/kereal/rs8kvn_bot/internal/flag"
 )
 
 // Source represents a configured 3x-ui panel source.

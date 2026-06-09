@@ -10,8 +10,8 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"go.uber.org/zap"
 
-	"rs8kvn_bot/internal/database"
-	"rs8kvn_bot/internal/logger"
+	"github.com/kereal/rs8kvn_bot/internal/database"
+	"github.com/kereal/rs8kvn_bot/internal/logger"
 )
 
 // CommandHandler handles command updates: /start, /help, /invite and share_ links.

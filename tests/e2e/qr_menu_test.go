@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"rs8kvn_bot/internal/database"
+	"github.com/kereal/rs8kvn_bot/internal/database"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/stretchr/testify/assert"

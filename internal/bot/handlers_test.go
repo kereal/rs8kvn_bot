@@ -9,12 +9,12 @@ import (
 	"testing"
 	"time"
 
-	"rs8kvn_bot/internal/config"
-	"rs8kvn_bot/internal/database"
-	"rs8kvn_bot/internal/ratelimiter"
-	"rs8kvn_bot/internal/testutil"
-	"rs8kvn_bot/internal/utils"
-	"rs8kvn_bot/internal/xui"
+	"github.com/kereal/rs8kvn_bot/internal/config"
+	"github.com/kereal/rs8kvn_bot/internal/database"
+	"github.com/kereal/rs8kvn_bot/internal/ratelimiter"
+	"github.com/kereal/rs8kvn_bot/internal/testutil"
+	"github.com/kereal/rs8kvn_bot/internal/utils"
+	"github.com/kereal/rs8kvn_bot/internal/xui"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/stretchr/testify/assert"
