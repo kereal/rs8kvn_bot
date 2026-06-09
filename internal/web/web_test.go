@@ -13,9 +13,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"rs8kvn_bot/internal/bot"
-	"rs8kvn_bot/internal/config"
-	"rs8kvn_bot/internal/testutil"
+	"github.com/kereal/rs8kvn_bot/internal/bot"
+	"github.com/kereal/rs8kvn_bot/internal/config"
+	"github.com/kereal/rs8kvn_bot/internal/testutil"
 )
 
 func TestMain(m *testing.M) {

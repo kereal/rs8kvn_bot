@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"rs8kvn_bot/internal/utils"
+	"github.com/kereal/rs8kvn_bot/internal/utils"
 )
 
 func BenchmarkEscapeMarkdown(b *testing.B) {

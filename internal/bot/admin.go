@@ -10,9 +10,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"rs8kvn_bot/internal/config"
-	"rs8kvn_bot/internal/logger"
-	"rs8kvn_bot/internal/utils"
+	"github.com/kereal/rs8kvn_bot/internal/config"
+	"github.com/kereal/rs8kvn_bot/internal/logger"
+	"github.com/kereal/rs8kvn_bot/internal/utils"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"go.uber.org/zap"

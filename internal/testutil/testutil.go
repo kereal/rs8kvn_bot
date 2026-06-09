@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"rs8kvn_bot/internal/database"
-	"rs8kvn_bot/internal/logger"
-	"rs8kvn_bot/internal/xui"
+	"github.com/kereal/rs8kvn_bot/internal/database"
+	"github.com/kereal/rs8kvn_bot/internal/logger"
+	"github.com/kereal/rs8kvn_bot/internal/xui"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"gorm.io/gorm"

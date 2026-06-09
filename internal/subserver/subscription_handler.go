@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"rs8kvn_bot/internal/database"
-	"rs8kvn_bot/internal/interfaces"
-	"rs8kvn_bot/internal/logger"
+	"github.com/kereal/rs8kvn_bot/internal/database"
+	"github.com/kereal/rs8kvn_bot/internal/interfaces"
+	"github.com/kereal/rs8kvn_bot/internal/logger"
 
 	"go.uber.org/zap"
 	"gorm.io/gorm"
@@ -226,9 +226,9 @@ func HandleSubscription(ctx context.Context, db interfaces.DatabaseService, subS
 	}
 
 	// No servers collected from any source.
-		if len(allItems) == 0 {
-			return nil, ErrNoSubscriptionItems
-		}
+	if len(allItems) == 0 {
+		return nil, ErrNoSubscriptionItems
+	}
 
 	// Mixed or plain-text output: join all share links and encode to base64.
 	combined := strings.Join(allItems, "\n")

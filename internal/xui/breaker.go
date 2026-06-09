@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"rs8kvn_bot/internal/metrics"
+	"github.com/kereal/rs8kvn_bot/internal/metrics"
 )
 
 var ErrCircuitOpen = errors.New("circuit breaker is open")

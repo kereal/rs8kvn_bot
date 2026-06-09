@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"rs8kvn_bot/internal/database"
+	"github.com/kereal/rs8kvn_bot/internal/database"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

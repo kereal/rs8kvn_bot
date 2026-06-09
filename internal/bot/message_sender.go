@@ -3,9 +3,9 @@ package bot
 import (
 	"context"
 
-	"rs8kvn_bot/internal/interfaces"
-	"rs8kvn_bot/internal/logger"
-	"rs8kvn_bot/internal/ratelimiter"
+	"github.com/kereal/rs8kvn_bot/internal/interfaces"
+	"github.com/kereal/rs8kvn_bot/internal/logger"
+	"github.com/kereal/rs8kvn_bot/internal/ratelimiter"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"go.uber.org/zap"

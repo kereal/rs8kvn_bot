@@ -5,7 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"rs8kvn_bot/internal/config"
+	"github.com/kereal/rs8kvn_bot/internal/config"
 )
 
 func TestService_CacheThroughService(t *testing.T) {

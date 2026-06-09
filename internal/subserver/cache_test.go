@@ -8,7 +8,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"rs8kvn_bot/internal/testutil"
+	"github.com/kereal/rs8kvn_bot/internal/testutil"
 )
 
 func TestMain(m *testing.M) {

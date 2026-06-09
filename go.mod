@@ -1,4 +1,4 @@
-module rs8kvn_bot
+module github.com/kereal/rs8kvn_bot
 
 go 1.25.0
 

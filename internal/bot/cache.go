@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"rs8kvn_bot/internal/database"
-	"rs8kvn_bot/internal/metrics"
+	"github.com/kereal/rs8kvn_bot/internal/database"
+	"github.com/kereal/rs8kvn_bot/internal/metrics"
 )
 
 type cacheEntry struct {

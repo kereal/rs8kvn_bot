@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"rs8kvn_bot/internal/logger"
+	"github.com/kereal/rs8kvn_bot/internal/logger"
 
 	"go.uber.org/zap"
 )
