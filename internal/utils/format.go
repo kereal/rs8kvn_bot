@@ -12,7 +12,7 @@ func IsRealUsername(username string) bool {
 		return false
 	}
 	for _, r := range username {
-		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_') {
+		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_') { //nolint:staticcheck // QF1001 suppressed: negation of combined range check is clearer than expanded De Morgan form
 			return false
 		}
 	}
