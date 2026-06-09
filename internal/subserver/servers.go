@@ -14,6 +14,12 @@ import (
 	"go.uber.org/zap"
 )
 
+var excludedHeaders = map[string]struct{}{
+	"x-forwarded-proto": {},
+	"x-forwarded-for":   {},
+	"x-real-ip":         {},
+}
+
 // validSchemes lists all proxy URI schemes recognised by isValidServer.
 var validSchemes = []string{
 	"vless://",
@@ -103,44 +109,24 @@ func toServerConfig(raw json.RawMessage) (*serverConfig, error) {
 	return &cfg, nil
 }
 
-// ExtractJSONConfigs parses a JSON object or array of server configs from body
-// and returns the raw config objects as json.RawMessage slice.
+// ExtractJSONConfigs parses a JSON object or array of server configs from body.
+// It returns the raw config objects as json.RawMessage slice, avoiding the
+// reflect/unmarshal round-trip that the old implementation performed on every
+// array element. Arrays are unmarshaled directly into []json.RawMessage, which
+// preserves the original bytes and reuses the backing array, while single
+// objects are wrapped in a one-element slice.
 func ExtractJSONConfigs(body []byte) ([]json.RawMessage, error) {
-	var raw any
-	if err := json.Unmarshal(body, &raw); err != nil {
-		logger.Error("Failed to unmarshal subscription JSON for config extraction",
+	var items []json.RawMessage
+	if err := json.Unmarshal(body, &items); err != nil {
+		if len(body) > 0 && body[0] == '{' {
+			items = make([]json.RawMessage, 0, 1)
+			items = append(items, body)
+			return items, nil
+		}
+		logger.Error("Failed to extract JSON configs",
 			zap.Error(err),
 			zap.String("body_preview", truncateString(string(body), 200)))
-		return nil, fmt.Errorf("invalid JSON: %w", err)
-	}
-
-	var items []json.RawMessage
-	switch v := raw.(type) {
-	case []any:
-		for _, item := range v {
-			rawItem, err := json.Marshal(item)
-			if err != nil {
-				logger.Error("Failed to marshal JSON array item for config extraction",
-					zap.Error(err),
-					zap.String("item_preview", truncateString(fmt.Sprintf("%v", item), 200)))
-				return nil, fmt.Errorf("marshal JSON array item: %w", err)
-			}
-			items = append(items, rawItem)
-		}
-	case map[string]any:
-		rawMarshalled, err := json.Marshal(v)
-		if err != nil {
-			logger.Error("Failed to marshal JSON object for config extraction",
-				zap.Error(err),
-				zap.String("object_preview", truncateString(fmt.Sprintf("%v", v), 200)))
-			return nil, fmt.Errorf("marshal JSON object: %w", err)
-		}
-		items = append(items, rawMarshalled)
-	default:
-		logger.Error("Unexpected JSON type in subscription body for config extraction",
-			zap.String("type", fmt.Sprintf("%T", raw)),
-			zap.String("body_preview", truncateString(string(body), 200)))
-		return nil, fmt.Errorf("unexpected JSON type: %T", raw)
+		return nil, fmt.Errorf("extract JSON configs: %w", err)
 	}
 	return items, nil
 }
