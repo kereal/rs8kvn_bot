@@ -351,7 +351,7 @@ func (s *SubscriptionService) GetWithTraffic(ctx context.Context, telegramID int
 
 	return sub, &TrafficInfo{
 		UsedGB:             usedGB,
-		LimitGB:            int(limitGB),
+		LimitGB:            limitGB,
 		Percentage:         percentage,
 		ProgressBar:        progressBar,
 		DaysUntilReset:     daysUntilReset,

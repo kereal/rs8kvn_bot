@@ -43,7 +43,9 @@ func runMigrations(sqlDB *sql.DB) error {
 		// simple semver compare: major.minor.patch
 		parse := func(v string) (int, int, int) {
 			var a, b, c int
-			fmt.Sscanf(v, "%d.%d.%d", &a, &b, &c)
+			if _, err := fmt.Sscanf(v, "%d.%d.%d", &a, &b, &c); err != nil {
+				return 0, 0, 0
+			}
 			return a, b, c
 		}
 		va, vb, vc := parse(sqliteVersion)
@@ -80,7 +82,7 @@ func runMigrations(sqlDB *sql.DB) error {
 	versionBefore, dirtyBefore, _ := m.Version()
 
 	if dirtyBefore {
-		currentVer := int(versionBefore)
+		currentVer := int(versionBefore) //nolint:gosec // migration versions are small and safe for int conversion
 		logger.Warn("Database is in dirty state, forcing migration back",
 			zap.Int("current_version", currentVer))
 		if err := m.Force(currentVer - 1); err != nil {
@@ -90,7 +92,7 @@ func runMigrations(sqlDB *sql.DB) error {
 
 	if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
 		if strings.Contains(err.Error(), "file does not exist") || strings.Contains(err.Error(), "read down for version") {
-			forceVer := int(versionBefore) - 1
+			forceVer := int(versionBefore) - 1 //nolint:gosec // same as above
 			logger.Warn("Missing migration file detected, forcing version to last known good state",
 				zap.Int("forced_version", forceVer))
 			if forceErr := m.Force(forceVer); forceErr != nil {

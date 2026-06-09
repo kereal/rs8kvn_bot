@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/url"
 	"strconv"
 	"strings"
@@ -221,8 +222,7 @@ func buildVLESSServerLink(cfg *serverConfig) (string, error) {
 		remark = cfg.Ps
 	}
 
-	return fmt.Sprintf("vless://%s@%s:%d?%s#%s",
-		cfg.UUID, cfg.Address, cfg.Port, params.Encode(), url.QueryEscape(remark)), nil
+	return fmt.Sprintf("vless://%s@%s?%s#%s", cfg.UUID, net.JoinHostPort(cfg.Address, strconv.Itoa(cfg.Port)), params.Encode(), url.QueryEscape(remark)), nil
 }
 
 // buildVMessServerLink builds a vmess:// share URI (base64-encoded JSON object) from a parsed server config.
@@ -329,7 +329,7 @@ func buildTrojanServerLink(cfg *serverConfig) (string, error) {
 		remark = cfg.Ps
 	}
 
-	base := fmt.Sprintf("trojan://%s@%s:%d", password, cfg.Address, cfg.Port)
+	base := fmt.Sprintf("trojan://%s@%s", password, net.JoinHostPort(cfg.Address, strconv.Itoa(cfg.Port)))
 	if params.Encode() != "" {
 		base += "?" + params.Encode()
 	}
@@ -380,7 +380,7 @@ func buildSOCKSServerLink(cfg *serverConfig) (string, error) {
 		userInfo = cfg.UUID
 	}
 
-	base := fmt.Sprintf("socks://%s@%s:%d", userInfo, cfg.Address, cfg.Port)
+	base := fmt.Sprintf("socks://%s@%s", userInfo, net.JoinHostPort(cfg.Address, strconv.Itoa(cfg.Port)))
 	if params.Encode() != "" {
 		base += "?" + params.Encode()
 	}
