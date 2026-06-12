@@ -3,8 +3,6 @@ package bot
 import (
 	"fmt"
 
-	"github.com/kereal/rs8kvn_bot/internal/config"
-
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
@@ -141,18 +139,3 @@ _нажмите и держите → копировать_
 💎 За каждого приглашенного активного пользователя вы получите бонус.`, kb.botUsername, telegramLink, webLink, webLink)
 }
 
-// Config holds configuration for creating bot components.
-type Config struct {
-	BotUsername     string
-	ContactUsername string
-	SiteURL         string
-}
-
-// FromConfig creates a Config from the application config.
-func FromConfig(cfg *config.Config, botUsername string) *Config {
-	return &Config{
-		BotUsername:     botUsername,
-		ContactUsername: cfg.ContactUsername,
-		SiteURL:         cfg.SiteURL,
-	}
-}

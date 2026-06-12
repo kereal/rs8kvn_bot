@@ -100,7 +100,7 @@ func TestMarshalJSON(t *testing.T) {
 	})
 
 	t.Run("nil input", func(t *testing.T) {
-		reader, err := marshalJSON(nil)
+		reader, err := marshalJSON[any](nil)
 		require.NoError(t, err)
 		assert.NotNil(t, reader)
 

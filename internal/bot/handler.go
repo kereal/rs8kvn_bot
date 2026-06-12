@@ -20,6 +20,8 @@ import (
 	"go.uber.org/zap"
 )
 
+var _ interfaces.BotAPI = (*tgbotapi.BotAPI)(nil)
+
 // ErrRateLimited indicates the update was rate-limited.
 var ErrRateLimited = errors.New("rate limited")
 

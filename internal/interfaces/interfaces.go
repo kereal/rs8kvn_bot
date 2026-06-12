@@ -8,16 +8,10 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/xui"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
-	"go.uber.org/zap"
 )
 
-type Logger interface {
-	Info(msg string, fields ...zap.Field)
-	Warn(msg string, fields ...zap.Field)
-	Error(msg string, fields ...zap.Field)
-	Debug(msg string, fields ...zap.Field)
-	Fatal(msg string, fields ...zap.Field)
-}
+var _ DatabaseService = (*database.Service)(nil)
+var _ XUIClient = (*xui.Client)(nil)
 
 type SubscriptionRepository interface {
 	GetByTelegramID(ctx context.Context, telegramID int64) (*database.Subscription, error)

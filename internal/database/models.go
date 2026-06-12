@@ -168,9 +168,9 @@ type TrialRequest struct {
 
 // SubscriptionFull holds a subscription together with its plan and active nodes.
 type SubscriptionFull struct {
-	Subscription
-	Plan  Plan
-	Nodes []Node
+	Subscription Subscription
+	Plan        Plan
+	Nodes       []Node
 }
 
 func (PlanNode) TableName() string {
