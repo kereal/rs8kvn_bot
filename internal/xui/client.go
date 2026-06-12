@@ -21,7 +21,7 @@ import (
 	"go.uber.org/zap"
 )
 
-func marshalJSON(v any) (*bytes.Reader, error) {
+func marshalJSON[T any](v T) (*bytes.Reader, error) {
 	body, err := json.Marshal(v)
 	if err != nil {
 		return nil, err

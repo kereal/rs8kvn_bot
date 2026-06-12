@@ -19,21 +19,13 @@ import (
 	"go.uber.org/zap"
 )
 
-// WebhookSender interface for sending webhook events (mockable for tests).
-type WebhookSender interface {
-	SendAsync(event Event)
-}
-
-// Event represents a webhook event (re-exported from webhook package).
-type Event = webhook.Event
-
 type SubscriptionService struct {
 	db           interfaces.DatabaseService
 	xuiClients   map[uint]interfaces.XUIClient
 	nodes        []database.Node
 	cfg          *config.Config
 	globalSubURL string
-	webhook      WebhookSender
+	webhook      webhook.WebhookSender
 	invalidate   func(telegramID int64)
 }
 
@@ -52,7 +44,7 @@ func XUIEmail(username string, telegramID int64) string {
 }
 
 // NewSubscriptionService creates a SubscriptionService configured with the given database, XUI clients map, sources, configuration, global subscription URL prefix, and optional webhook sender.
-func NewSubscriptionService(db interfaces.DatabaseService, xuiClients map[uint]interfaces.XUIClient, nodes []database.Node, cfg *config.Config, globalSubURL string, webhookSender WebhookSender) *SubscriptionService {
+func NewSubscriptionService(db interfaces.DatabaseService, xuiClients map[uint]interfaces.XUIClient, nodes []database.Node, cfg *config.Config, globalSubURL string, webhookSender webhook.WebhookSender) *SubscriptionService {
 	return &SubscriptionService{
 		db:           db,
 		xuiClients:   xuiClients,
@@ -187,7 +179,7 @@ func (s *SubscriptionService) Delete(ctx context.Context, telegramID int64) erro
 
 	if s.webhook != nil {
 		eventID, _ := utils.GenerateUUID()
-		s.webhook.SendAsync(Event{
+		s.webhook.SendAsync(webhook.Event{
 			EventID:        "evt-" + eventID,
 			Event:          webhook.EventSubscriptionExpired,
 			ClientID:       sub.ClientID,
@@ -220,7 +212,7 @@ func (s *SubscriptionService) DeleteByID(ctx context.Context, id uint) (*databas
 
 	if s.webhook != nil {
 		eventID, _ := utils.GenerateUUID()
-		s.webhook.SendAsync(Event{
+		s.webhook.SendAsync(webhook.Event{
 			EventID:        "evt-" + eventID,
 			Event:          webhook.EventSubscriptionExpired,
 			ClientID:       clientID,

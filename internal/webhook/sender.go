@@ -14,6 +14,9 @@ import (
 	"go.uber.org/zap"
 )
 
+var _ WebhookSender = (*Sender)(nil)
+var _ WebhookSender = (*NoopSender)(nil)
+
 // Event types for webhook notifications.
 const (
 	EventSubscriptionActivated = "subscription.activated"
@@ -30,6 +33,11 @@ type Event struct {
 	ClientID       string `json:"client_id"`
 	Email          string `json:"email"`
 	SubscriptionID string `json:"subscription_id"`
+}
+
+// WebhookSender interface for sending webhook events (mockable for tests).
+type WebhookSender interface {
+	SendAsync(event Event)
 }
 
 // PermanentError indicates a client-side HTTP error (4xx except 429) that

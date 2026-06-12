@@ -19,7 +19,14 @@ const (
 	CircuitStateHalfOpen
 )
 
+type noCopy struct{}
+
+func (*noCopy) Lock()   {}
+func (*noCopy) Unlock() {}
+
 type CircuitBreaker struct {
+	noCopy
+
 	mu               sync.RWMutex
 	state            CircuitState
 	failures         int

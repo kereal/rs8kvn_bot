@@ -78,9 +78,9 @@ func HandleSubscription(ctx context.Context, db interfaces.DatabaseService, subS
 	}
 
 	logger.Debug("Subscription loaded from database",
-		zap.Uint("sub_pk", subFull.ID),
+		zap.Uint("sub_pk", subFull.Subscription.ID),
 		zap.String("status", subFull.Subscription.Status),
-		zap.Time("expires_at", subFull.ExpiresAt),
+		zap.Time("expires_at", subFull.Subscription.ExpiresAt),
 		zap.Int64("plan_traffic_limit", subFull.Plan.TrafficLimit),
 		zap.Int("nodes_count", len(subFull.Nodes)),
 	)
@@ -249,10 +249,10 @@ func HandleSubscription(ctx context.Context, db interfaces.DatabaseService, subS
 // has the same x-hwid value it is replaced (rotated to the end). The updated
 // list is persisted to DB.
 func UpdateDevices(ctx context.Context, db interfaces.DatabaseService, subFull *database.SubscriptionFull, headers map[string]string) {
-	devices, err := subFull.GetDevices()
+	devices, err := subFull.Subscription.GetDevices()
 	if err != nil {
 		logger.Error("Failed to parse devices JSON",
-			zap.Uint("sub_pk", subFull.ID),
+			zap.Uint("sub_pk", subFull.Subscription.ID),
 			zap.String("sub_id", subFull.Subscription.SubscriptionID),
 			zap.Error(err))
 		devices = []map[string]string{}
@@ -281,17 +281,17 @@ func UpdateDevices(ctx context.Context, db interfaces.DatabaseService, subFull *
 		}
 	}
 
-	if err := subFull.SetDevices(devices); err != nil {
+	if err := subFull.Subscription.SetDevices(devices); err != nil {
 		logger.Error("Failed to set devices JSON",
-			zap.Uint("sub_pk", subFull.ID),
+			zap.Uint("sub_pk", subFull.Subscription.ID),
 			zap.String("sub_id", subFull.Subscription.SubscriptionID),
 			zap.Error(err))
 		return
 	}
 
-	if err := db.UpdateSubscriptionDevices(ctx, subFull.ID, subFull.Devices); err != nil {
+	if err := db.UpdateSubscriptionDevices(ctx, subFull.Subscription.ID, subFull.Subscription.Devices); err != nil {
 		logger.Error("Failed to save devices to database",
-			zap.Uint("sub_pk", subFull.ID),
+			zap.Uint("sub_pk", subFull.Subscription.ID),
 			zap.String("sub_id", subFull.Subscription.SubscriptionID),
 			zap.Error(err))
 	}
@@ -301,10 +301,10 @@ func UpdateDevices(ctx context.Context, db interfaces.DatabaseService, subFull *
 // subscription's Ips JSON field. Duplicate IPs are rotated to the end.
 // The list is capped at maxIPEntries (oldest entries are dropped).
 func UpdateIPs(ctx context.Context, db interfaces.DatabaseService, subFull *database.SubscriptionFull, ip string) {
-	ips, err := subFull.GetIPs()
+	ips, err := subFull.Subscription.GetIPs()
 	if err != nil {
 		logger.Error("Failed to parse ips JSON",
-			zap.Uint("sub_pk", subFull.ID),
+			zap.Uint("sub_pk", subFull.Subscription.ID),
 			zap.String("sub_id", subFull.Subscription.SubscriptionID),
 			zap.Error(err))
 		ips = []map[string]string{}
@@ -328,17 +328,17 @@ func UpdateIPs(ctx context.Context, db interfaces.DatabaseService, subFull *data
 		}
 	}
 
-	if err := subFull.SetIPs(ips); err != nil {
+	if err := subFull.Subscription.SetIPs(ips); err != nil {
 		logger.Error("Failed to set ips JSON",
-			zap.Uint("sub_pk", subFull.ID),
+			zap.Uint("sub_pk", subFull.Subscription.ID),
 			zap.String("sub_id", subFull.Subscription.SubscriptionID),
 			zap.Error(err))
 		return
 	}
 
-	if err := db.UpdateSubscriptionIPs(ctx, subFull.ID, subFull.Ips); err != nil {
+	if err := db.UpdateSubscriptionIPs(ctx, subFull.Subscription.ID, subFull.Subscription.Ips); err != nil {
 		logger.Error("Failed to save ips to database",
-			zap.Uint("sub_pk", subFull.ID),
+			zap.Uint("sub_pk", subFull.Subscription.ID),
 			zap.String("sub_id", subFull.Subscription.SubscriptionID),
 			zap.Error(err))
 	}
