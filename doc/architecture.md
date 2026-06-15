@@ -146,6 +146,7 @@ internal/
 │   ├── service.go           # Hot reload loop (5 min)
 │   ├── proxy.go             # Fetch+XUI+merge logic
 │   ├── cache.go             # TTL cache (240s)
+│   ├── access_log.go        # Optional async /sub/{id} access log
 │   ├── servers.go           # Load extra config file
 │   └── servers_test.go      # Parser tests
 ├── service/          # Business logic

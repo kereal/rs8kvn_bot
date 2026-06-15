@@ -52,6 +52,7 @@ func TestLoad_DefaultValues(t *testing.T) {
 
 	assert.Equal(t, "123456789:ABCdefGHIjklMNOpqrsTUVwxyz", cfg.TelegramBotToken, "TelegramBotToken")
 	assert.Equal(t, int64(123456), cfg.TelegramAdminID, "TelegramAdminID")
+	assert.Empty(t, cfg.SubServerAccessLogPath, "SubServerAccessLogPath")
 }
 
 func TestLoad_CustomValues(t *testing.T) {
@@ -66,6 +67,7 @@ func TestLoad_CustomValues(t *testing.T) {
 	os.Setenv("LOG_LEVEL", "debug")
 	os.Setenv("HEALTH_CHECK_PORT", "9090")
 	os.Setenv("GLOBAL_SUB_URL", "https://vpn.example.com/sub/")
+	os.Setenv("SUBSERVER_ACCESS_LOG", "./data/subserver-test.log")
 
 	defer func() {
 		os.Unsetenv("TELEGRAM_BOT_TOKEN")
@@ -78,6 +80,7 @@ func TestLoad_CustomValues(t *testing.T) {
 		os.Unsetenv("LOG_LEVEL")
 		os.Unsetenv("HEALTH_CHECK_PORT")
 		os.Unsetenv("GLOBAL_SUB_URL")
+		os.Unsetenv("SUBSERVER_ACCESS_LOG")
 	}()
 
 	cfg, err := Load()
@@ -85,6 +88,7 @@ func TestLoad_CustomValues(t *testing.T) {
 
 	assert.Equal(t, 120, cfg.HeartbeatInterval, "HeartbeatInterval")
 	assert.Equal(t, 9090, cfg.HealthCheckPort, "HealthCheckPort")
+	assert.Equal(t, "./data/subserver-test.log", cfg.SubServerAccessLogPath, "SubServerAccessLogPath")
 }
 
 func TestLoad_MissingBotToken(t *testing.T) {

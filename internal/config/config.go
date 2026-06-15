@@ -57,7 +57,8 @@ type Config struct {
 	DonateURL        string
 
 	// Subscription server configuration
-	GlobalSubURL string
+	GlobalSubURL           string
+	SubServerAccessLogPath string
 
 	// Sources configuration
 	Sources []Source
@@ -88,6 +89,7 @@ type configFlags struct {
 	donateCardNumber          *flag.StringValue
 	donateURL                 *flag.StringValue
 	globalSubURL              *flag.StringValue
+	subServerAccessLogPath    *flag.StringValue
 	apiToken                  *flag.StringValue
 	proxyManagerWebhookSecret *flag.StringValue
 	proxyManagerWebhookURL    *flag.StringValue
@@ -116,6 +118,7 @@ func registerFlags() (*flag.Registry, *configFlags) {
 		donateCardNumber:          flag.NewString(DonateCardNumber),
 		donateURL:                 flag.NewString(DonateURL),
 		globalSubURL:              flag.NewString(""),
+		subServerAccessLogPath:    flag.NewString(""),
 		apiToken:                  flag.NewString(""),
 		proxyManagerWebhookSecret: flag.NewString(""),
 		proxyManagerWebhookURL:    flag.NewString(""),
@@ -137,6 +140,7 @@ func registerFlags() (*flag.Registry, *configFlags) {
 	r.Register("CONTACT_USERNAME", f.contactUsername)
 	r.Register("DONATE_CARD_NUMBER", f.donateCardNumber)
 	r.Register("DONATE_URL", f.donateURL)
+	r.Register("SUBSERVER_ACCESS_LOG", f.subServerAccessLogPath)
 	r.Register("API_TOKEN", f.apiToken)
 	r.Register("PROXY_MANAGER_WEBHOOK_SECRET", f.proxyManagerWebhookSecret)
 	r.Register("PROXY_MANAGER_WEBHOOK_URL", f.proxyManagerWebhookURL)
@@ -171,6 +175,7 @@ func Load() (*Config, error) {
 		DonateCardNumber:          f.donateCardNumber.Get(),
 		DonateURL:                 f.donateURL.Get(),
 		GlobalSubURL:              f.globalSubURL.Get(),
+		SubServerAccessLogPath:    f.subServerAccessLogPath.Get(),
 		APIToken:                  f.apiToken.Get(),
 		ProxyManagerWebhookSecret: f.proxyManagerWebhookSecret.Get(),
 		ProxyManagerWebhookURL:    f.proxyManagerWebhookURL.Get(),

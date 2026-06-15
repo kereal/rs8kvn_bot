@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -212,6 +213,45 @@ func TestServer_StartAndStop(t *testing.T) {
 
 	err = srv.Stop(stopCtx)
 	assert.NoError(t, err, "Stop() should not return error")
+}
+
+func TestServer_StartWithInvalidSubserverAccessLog(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{
+		SubServerAccessLogPath: t.TempDir(),
+	}
+	srv := NewServer(":0", nil, cfg, bot.NewTestBotConfig(), nil, nil)
+
+	ctx := context.Background()
+	err := srv.Start(ctx)
+	require.NoError(t, err, "Start() should not fail when optional subserver access log cannot be opened")
+
+	stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	err = srv.Stop(stopCtx)
+	assert.NoError(t, err, "Stop() should not return error")
+}
+
+func TestServer_StartPortInUseDoesNotCreateSubserverAccessLog(t *testing.T) {
+	t.Parallel()
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err, "Failed to create listener")
+	defer listener.Close()
+
+	logPath := filepath.Join(t.TempDir(), "subserver.log")
+	srv := NewServer(listener.Addr().String(), nil, &config.Config{
+		SubServerAccessLogPath: logPath,
+	}, bot.NewTestBotConfig(), nil, nil)
+
+	err = srv.Start(context.Background())
+	require.Error(t, err, "Start() should return error when port is already in use")
+	assert.Contains(t, err.Error(), "failed to bind")
+
+	_, err = os.Stat(logPath)
+	assert.True(t, os.IsNotExist(err), "access log should not be created before successful bind")
 }
 
 func TestServer_StopWithoutStart(t *testing.T) {
