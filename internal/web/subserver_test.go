@@ -112,16 +112,36 @@ func TestHandleSubscription_AccessLog(t *testing.T) {
 	line := strings.TrimSpace(string(content))
 	assert.Regexp(t, regexp.MustCompile(`\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}`), line)
 	assert.Contains(t, line, "\tINFO\t")
-	assert.Contains(t, line, "\tSUBSERVER_ACCESS\t")
-	assert.Contains(t, line, `"method": "GET"`)
-	assert.Contains(t, line, `"url": "/sub/unknown?debug=1"`)
-	assert.Contains(t, line, `"status_code": 404`)
-	assert.Contains(t, line, `"ip": "203.0.113.10"`)
-	assert.Contains(t, line, `"x_hwid": "hw-1"`)
-	assert.Contains(t, line, `"x_device_os": "iOS"`)
-	assert.Contains(t, line, `"x_ver_os": "17.0"`)
-	assert.Contains(t, line, `"x_device_model": "iPhone 15"`)
-	assert.Contains(t, line, `"user_agent": "V2Ray/1.0"`)
+	assert.NotContains(t, line, "\nGET")
+	assert.NotContains(t, line, "SUBSERVER_ACCESS")
+	assert.NotContains(t, line, `"method"`)
+	assert.NotContains(t, line, `"status_code"`)
+	assert.NotContains(t, line, `"url"`)
+	assert.Contains(t, line, "GET /sub/unknown?debug=1 404 203.0.113.10 hw-1 iOS 17.0 \"iPhone 15\" V2Ray/1.0")
+}
+
+func TestHandleSubscription_AccessLogMissingOptionalHeaders(t *testing.T) {
+	t.Parallel()
+
+	db := testutil.NewMockDatabaseService()
+	srv := testServer(t, db, &config.Config{})
+	logPath := filepath.Join(t.TempDir(), "subserver.log")
+	accessLogger, err := subserver.NewAccessLogger(logPath)
+	require.NoError(t, err)
+
+	srv.subserverLogger = accessLogger
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/sub/unknown", nil)
+	r.RemoteAddr = "203.0.113.10:1234"
+	srv.handleSubscription(w, r)
+
+	require.NoError(t, accessLogger.Close())
+	content, err := os.ReadFile(logPath)
+	require.NoError(t, err)
+
+	line := strings.TrimSpace(string(content))
+	assert.Contains(t, line, "GET /sub/unknown 404 203.0.113.10 - - - - -")
 }
 
 func TestHandleSubscription_SubscriptionNotFound(t *testing.T) {
