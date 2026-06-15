@@ -222,6 +222,7 @@ Air will automatically rebuild and restart the bot when you save changes to Go f
 | **Logging** |
 | `LOG_FILE_PATH` | Log file path | `./data/bot.log` | ❌ | Rotated automatically |
 | `LOG_LEVEL` | Log level | `info` | ❌ | `debug`, `info`, `warn`, `error` |
+| `SUBSERVER_ACCESS_LOG` | `/sub/{id}` access log file path | `./data/subserver.log` | ❌ | Set empty to disable; uses the same structured zap-console format as the main log; startup continues if the file cannot be opened |
 | **Trial & Referral** |
 | `HEARTBEAT_URL` | URL for heartbeat POST (optional) | — | ❌ | Receives `{}` every 5 min |
 | `HEARTBEAT_INTERVAL` | Heartbeat interval (seconds) | `300` | ❌ | Min 10s |

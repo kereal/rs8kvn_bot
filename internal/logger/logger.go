@@ -224,6 +224,14 @@ type Service struct {
 	sentryHub *sentry.Hub
 }
 
+func NewConsoleEncoderConfig() zapcore.EncoderConfig {
+	encoderConfig := zap.NewProductionEncoderConfig()
+	encoderConfig.TimeKey = "timestamp"
+	encoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
+	encoderConfig.EncodeLevel = zapcore.CapitalLevelEncoder
+	return encoderConfig
+}
+
 // NewService creates a new logger service with file and console output.
 func NewService(logFilePath, level string) (*Service, error) {
 	logDir := filepath.Dir(logFilePath)
@@ -236,11 +244,7 @@ func NewService(logFilePath, level string) (*Service, error) {
 		zapLevel = zapcore.InfoLevel
 	}
 
-	encoderConfig := zap.NewProductionEncoderConfig()
-	encoderConfig.TimeKey = "timestamp"
-	encoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
-	encoderConfig.EncodeLevel = zapcore.CapitalLevelEncoder
-	encoder := zapcore.NewConsoleEncoder(encoderConfig)
+	encoder := zapcore.NewConsoleEncoder(NewConsoleEncoderConfig())
 
 	var cores []zapcore.Core
 

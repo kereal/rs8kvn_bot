@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -80,6 +82,46 @@ func TestHandleSubscription_InvalidCode(t *testing.T) {
 		assert.Equal(t, http.StatusNotFound, w.Code, "path: %s", path)
 		assert.Equal(t, "Subscription not found", w.Body.String(), "path: %s", path)
 	}
+}
+
+func TestHandleSubscription_AccessLog(t *testing.T) {
+	t.Parallel()
+
+	db := testutil.NewMockDatabaseService()
+	srv := testServer(t, db, &config.Config{})
+	logPath := filepath.Join(t.TempDir(), "subserver.log")
+	accessLogger, err := subserver.NewAccessLogger(logPath)
+	require.NoError(t, err)
+
+	srv.subserverLogger = accessLogger
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/sub/unknown?debug=1", nil)
+	r.RemoteAddr = "203.0.113.10:1234"
+	r.Header.Set("X-HWID", "hw-1")
+	r.Header.Set("X-Device-Os", "iOS")
+	r.Header.Set("X-Ver-Os", "17.0")
+	r.Header.Set("X-Device-Model", "iPhone 15")
+	r.Header.Set("User-Agent", "V2Ray/1.0")
+	srv.handleSubscription(w, r)
+
+	require.NoError(t, accessLogger.Close())
+	content, err := os.ReadFile(logPath)
+	require.NoError(t, err)
+
+	line := strings.TrimSpace(string(content))
+	assert.Regexp(t, regexp.MustCompile(`\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}`), line)
+	assert.Contains(t, line, "\tINFO\t")
+	assert.Contains(t, line, "\tSUBSERVER_ACCESS\t")
+	assert.Contains(t, line, `"method": "GET"`)
+	assert.Contains(t, line, `"url": "/sub/unknown?debug=1"`)
+	assert.Contains(t, line, `"status_code": 404`)
+	assert.Contains(t, line, `"ip": "203.0.113.10"`)
+	assert.Contains(t, line, `"x_hwid": "hw-1"`)
+	assert.Contains(t, line, `"x_device_os": "iOS"`)
+	assert.Contains(t, line, `"x_ver_os": "17.0"`)
+	assert.Contains(t, line, `"x_device_model": "iPhone 15"`)
+	assert.Contains(t, line, `"user_agent": "V2Ray/1.0"`)
 }
 
 func TestHandleSubscription_SubscriptionNotFound(t *testing.T) {

@@ -102,6 +102,8 @@ Each user can generate an invite code via the referral flow. The landing page va
 
 Serves subscriptions with optional extra servers and custom headers. Validates `subID`, checks cache (240s TTL), fetches from 3x-ui, merges extra servers/headers from config file, returns combined response. Stale cache is used as fallback if 3x-ui is unavailable.
 
+When `SUBSERVER_ACCESS_LOG` is set, each `/sub/{id}` request is appended to the configured access log file in the same structured zap-console format as the main log. The record includes timestamp, level, caller, message, method, URL, response status, client IP, device headers, and User-Agent. The main log also records an INFO message when access logging is enabled. Access log writes are buffered asynchronously; if the file cannot be opened, the bot continues without the access log and writes an error to the main log.
+
 ## Traffic and Expiry
 
 - **Auto-reset**: Every 30 days from creation date — 3x-ui resets traffic to 0 and extends `expiresAt` by 30 days automatically when `expiresAt` > 0
