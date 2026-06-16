@@ -638,6 +638,7 @@ func writeSubscriptionText(rec *statusRecorder, statusCode int, body string) {
 
 type statusRecorder struct {
 	http.ResponseWriter
+
 	statusCode int
 }
 
