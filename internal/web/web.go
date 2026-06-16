@@ -549,30 +549,36 @@ func isLocalAddress(host string) bool {
 // share links, aggregates subscription-userinfo headers across sources,
 // caches the result, and writes the final response.
 func (s *Server) handleSubscription(w http.ResponseWriter, r *http.Request) {
-	rec := &statusRecorder{ResponseWriter: w}
 	clientIP := getClientIP(r)
-	defer s.logSubscriptionAccess(rec, r, clientIP)
+
+	var rec *statusRecorder
+	var response http.ResponseWriter = w
+	if s.subserverLogger != nil && s.subserverLogger.Enabled() {
+		rec = &statusRecorder{ResponseWriter: w}
+		response = rec
+		defer s.logSubscriptionAccess(rec, r, clientIP)
+	}
 
 	if r.Method != http.MethodGet {
-		rec.Header().Set("Allow", "GET")
-		writeSubscriptionText(rec, http.StatusMethodNotAllowed, "Method Not Allowed")
+		response.Header().Set("Allow", "GET")
+		writeSubscriptionText(response, http.StatusMethodNotAllowed, "Method Not Allowed")
 		return
 	}
 
 	if s.subServer == nil {
-		writeSubscriptionText(rec, http.StatusServiceUnavailable, "Subscription server is not available")
+		writeSubscriptionText(response, http.StatusServiceUnavailable, "Subscription server is not available")
 		return
 	}
 
 	path := r.URL.Path
 	if !strings.HasPrefix(path, "/sub/") {
-		writeSubscriptionText(rec, http.StatusNotFound, "Subscription not found")
+		writeSubscriptionText(response, http.StatusNotFound, "Subscription not found")
 		return
 	}
 
 	subID := path[5:]
 	if subID == "" || strings.Contains(subID, "/") || !subserver.SubIDRegex().MatchString(subID) {
-		writeSubscriptionText(rec, http.StatusNotFound, "Subscription not found")
+		writeSubscriptionText(response, http.StatusNotFound, "Subscription not found")
 		return
 	}
 
@@ -596,10 +602,10 @@ func (s *Server) handleSubscription(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, gorm.ErrRecordNotFound) ||
 			errors.Is(err, subserver.ErrSubscriptionNotFound) ||
 			errors.Is(err, subserver.ErrNoSubscriptionItems) {
-			writeSubscriptionText(rec, http.StatusNotFound, "Subscription not found")
+			writeSubscriptionText(response, http.StatusNotFound, "Subscription not found")
 			return
 		}
-		writeSubscriptionText(rec, http.StatusInternalServerError, "Subscription not found")
+		writeSubscriptionText(response, http.StatusInternalServerError, "Subscription not found")
 		return
 	}
 
@@ -607,20 +613,20 @@ func (s *Server) handleSubscription(w http.ResponseWriter, r *http.Request) {
 		logger.Error("Empty subscription result",
 			zap.String("sub_id", subID),
 			zap.String("client_ip", clientIP))
-		writeSubscriptionText(rec, http.StatusInternalServerError, "Subscription not found")
+		writeSubscriptionText(response, http.StatusInternalServerError, "Subscription not found")
 		return
 	}
 
 	for k, v := range result.Headers {
-		rec.Header().Set(k, v)
+		response.Header().Set(k, v)
 	}
 
 	if result.StatusCode != 0 {
-		rec.WriteHeader(result.StatusCode)
+		response.WriteHeader(result.StatusCode)
 	} else {
-		rec.WriteHeader(http.StatusOK)
+		response.WriteHeader(http.StatusOK)
 	}
-	rec.Write(result.Body)
+	response.Write(result.Body)
 }
 
 func (s *Server) logSubscriptionAccess(rec *statusRecorder, r *http.Request, clientIP string) {
@@ -630,10 +636,10 @@ func (s *Server) logSubscriptionAccess(rec *statusRecorder, r *http.Request, cli
 	s.subserverLogger.Log(r, rec.StatusCode(), clientIP)
 }
 
-func writeSubscriptionText(rec *statusRecorder, statusCode int, body string) {
-	rec.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	rec.WriteHeader(statusCode)
-	rec.Write([]byte(body))
+func writeSubscriptionText(w http.ResponseWriter, statusCode int, body string) {
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(statusCode)
+	w.Write([]byte(body))
 }
 
 type statusRecorder struct {
