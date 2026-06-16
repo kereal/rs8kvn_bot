@@ -27,7 +27,7 @@ func TestSeedDefaultNode_Success(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
 
-	err := svc.SeedDefaultNode(ctx, "main", "http://xui:2053", "token-abc", 1, "https://sub.example.com")
+	err := svc.SeedDefaultNode(ctx, "main", "http://xui:2053", "token-abc", []int{1}, "https://sub.example.com")
 	require.NoError(t, err)
 
 	sources, err := svc.ListNodes(ctx)
@@ -38,7 +38,9 @@ func TestSeedDefaultNode_Success(t *testing.T) {
 	assert.Equal(t, "main", mainSrc.Name)
 	assert.Equal(t, "http://xui:2053", mainSrc.Host)
 	assert.Equal(t, "token-abc", mainSrc.APIToken)
-	assert.Equal(t, 1, mainSrc.InboundID)
+	inboundIDs, parseErr := mainSrc.GetInboundIDs()
+	require.NoError(t, parseErr)
+	assert.Equal(t, []int{1}, inboundIDs)
 	assert.Equal(t, "https://sub.example.com", mainSrc.SubscriptionURL)
 	assert.True(t, mainSrc.IsActive)
 }
@@ -54,7 +56,7 @@ func TestIsNodesEmpty_TrueAndFalse(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, empty, "no node seeded after NewService")
 
-	require.NoError(t, svc.SeedDefaultNode(ctx, "main", "http://xui:2053", "token-abc", 1, "https://sub.example.com"))
+	require.NoError(t, svc.SeedDefaultNode(ctx, "main", "http://xui:2053", "token-abc", []int{1}, "https://sub.example.com"))
 	empty, err = svc.IsNodesEmpty(ctx)
 	require.NoError(t, err)
 	assert.False(t, empty, "nodes should not be empty after seeding")
@@ -157,8 +159,8 @@ func TestGetNodesByPlanName_ReturnsLinkedNodes(t *testing.T) {
 	ctx := context.Background()
 
 	// Create two sources — SeedDefaultNode auto-links all plans to each
-	require.NoError(t, svc.SeedDefaultNode(ctx, "primary", "http://x1", "t1", 1, ""))
-	require.NoError(t, svc.SeedDefaultNode(ctx, "backup", "http://x2", "t2", 1, ""))
+	require.NoError(t, svc.SeedDefaultNode(ctx, "primary", "http://x1", "t1", []int{1}, ""))
+	require.NoError(t, svc.SeedDefaultNode(ctx, "backup", "http://x2", "t2", []int{1}, ""))
 
 	linked, err := svc.GetNodesByPlanName(ctx, "trial")
 	require.NoError(t, err)
@@ -176,7 +178,7 @@ func TestGetNodesByPlanName_FilterByName(t *testing.T) {
 	ctx := context.Background()
 
 	// Seed a source — SeedDefaultNode auto-links it to both trial and free plans
-	require.NoError(t, svc.SeedDefaultNode(ctx, "default", "http://x1", "t1", 1, ""))
+	require.NoError(t, svc.SeedDefaultNode(ctx, "default", "http://x1", "t1", []int{1}, ""))
 
 	trialNodes, err := svc.GetNodesByPlanName(ctx, "trial")
 	require.NoError(t, err)

@@ -143,7 +143,7 @@ func NewTestFixture(t *testing.T) *IntegrationTestFixture {
 	mockXUI := NewMockXUIServer(t)
 
 	cfg := &config.Config{
-		Sources:          []config.Source{{Name: "main", XUIHost: mockXUI.Server.URL, XUIAPIToken: "test-api-token", XUIInboundID: 1}},
+		Sources:          []config.Source{{Name: "main", XUIHost: mockXUI.Server.URL, XUIAPIToken: "test-api-token", XUIInboundIDs: "[1]"}},
 		TelegramAdminID:  123456789,
 		TelegramBotToken: "test_token",
 		LogFilePath:      "/dev/null",
@@ -153,8 +153,8 @@ func NewTestFixture(t *testing.T) *IntegrationTestFixture {
 
 	handler := NewHandler(testutil.NewMockBotAPI(), cfg, dbService, mockXUI.Client, NewTestBotConfig(), nil, "")
 	mockXUIClients := map[uint]interfaces.XUIClient{1: mockXUI.Client}
-	sources := []database.Node{{ID: 1, Name: "main", IsActive: true, Host: mockXUI.Server.URL, APIToken: "test-api-token", InboundID: 1}}
-	subService := service.NewSubscriptionService(dbService, mockXUIClients, sources, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
+	nodes := []database.Node{{ID: 1, Name: "main", IsActive: true, Host: mockXUI.Server.URL, APIToken: "test-api-token", InboundIDs: "[1]"}}
+	subService := service.NewSubscriptionService(dbService, mockXUIClients, nodes, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
 	handler.subscriptionService = subService
 	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
 

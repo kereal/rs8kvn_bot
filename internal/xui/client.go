@@ -21,25 +21,6 @@ import (
 	"go.uber.org/zap"
 )
 
-func marshalJSON[T any](v T) (*bytes.Reader, error) {
-	body, err := json.Marshal(v)
-	if err != nil {
-		return nil, err
-	}
-	return bytes.NewReader(body), nil
-}
-
-func closeResponseBody(resp *http.Response) {
-	if resp == nil || resp.Body == nil {
-		return
-	}
-	if err := resp.Body.Close(); err != nil {
-		logger.Debug("Failed to close response body",
-			zap.Error(err),
-			zap.String("url", resp.Request.URL.String()))
-	}
-}
-
 type Client struct {
 	host       string
 	apiToken   string
@@ -97,6 +78,35 @@ type Inbound struct {
 	StreamSettings json.RawMessage `json:"streamSettings"`
 	Tag            string          `json:"tag"`
 	Sniffing       json.RawMessage `json:"sniffing"`
+}
+
+func marshalJSON[T any](v T) (*bytes.Reader, error) {
+	body, err := json.Marshal(v)
+	if err != nil {
+		return nil, err
+	}
+	return bytes.NewReader(body), nil
+}
+
+func (c *Client) buildClientBody(clientObj map[string]any, inboundIDs []int) func() (io.Reader, error) {
+	return func() (io.Reader, error) {
+		requestData := map[string]any{
+			"client":     clientObj,
+			"inboundIds": inboundIDs,
+		}
+		return marshalJSON(requestData)
+	}
+}
+
+func closeResponseBody(resp *http.Response) {
+	if resp == nil || resp.Body == nil {
+		return
+	}
+	if err := resp.Body.Close(); err != nil {
+		logger.Debug("Failed to close response body",
+			zap.Error(err),
+			zap.String("url", resp.Request.URL.String()))
+	}
 }
 
 func (in *Inbound) GetTransport() string {
@@ -203,7 +213,7 @@ func (c *Client) doHTTPRequest(ctx context.Context, method, url string, bodyFn f
 	return respBody, nil
 }
 
-func (c *Client) AddClient(ctx context.Context, inboundID int, email string, trafficBytes int64, expiryTime time.Time) (*ClientConfig, error) {
+func (c *Client) AddClient(ctx context.Context, inboundIDs []int, email string, trafficBytes int64, expiryTime time.Time) (*ClientConfig, error) {
 	clientID, err := utils.GenerateUUID()
 	if err != nil {
 		return nil, fmt.Errorf("generate client id: %w", err)
@@ -213,12 +223,12 @@ func (c *Client) AddClient(ctx context.Context, inboundID int, email string, tra
 		return nil, fmt.Errorf("generate sub id: %w", err)
 	}
 
-	return c.AddClientWithID(ctx, inboundID, email, clientID, subID, trafficBytes, expiryTime, -1)
+	return c.AddClientWithID(ctx, inboundIDs, email, clientID, subID, trafficBytes, expiryTime, -1)
 }
 
-func (c *Client) AddClientWithID(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*ClientConfig, error) {
-	if inboundID < 1 {
-		return nil, fmt.Errorf("invalid inbound ID: %d", inboundID)
+func (c *Client) AddClientWithID(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*ClientConfig, error) {
+	if len(inboundIDs) == 0 {
+		return nil, fmt.Errorf("inbound IDs cannot be empty")
 	}
 	if clientID == "" {
 		return nil, fmt.Errorf("client ID cannot be empty")
@@ -231,7 +241,7 @@ func (c *Client) AddClientWithID(ctx context.Context, inboundID int, email, clie
 		resetDays = config.SubscriptionResetDay
 	}
 
-	flow, flowErr := c.getRequiredFlow(ctx, inboundID)
+	flow, flowErr := c.getRequiredFlow(ctx, inboundIDs[0])
 	if flowErr != nil {
 		return nil, fmt.Errorf("failed to determine flow: %w", flowErr)
 	}
@@ -239,13 +249,13 @@ func (c *Client) AddClientWithID(ctx context.Context, inboundID int, email, clie
 	var result *ClientConfig
 	errRetry := RetryWithBackoff(ctx, config.XUIMaxRetries, config.XUIInitialRetryDelay, func() error {
 		var innerErr error
-		result, innerErr = c.doAddClientWithID(ctx, inboundID, email, clientID, subID, trafficBytes, expiryTime, resetDays, flow)
+		result, innerErr = c.doAddClientWithID(ctx, inboundIDs, email, clientID, subID, trafficBytes, expiryTime, resetDays, flow)
 		return innerErr
 	})
 	return result, errRetry
 }
 
-func (c *Client) doAddClientWithID(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int, flow string) (*ClientConfig, error) {
+func (c *Client) doAddClientWithID(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int, flow string) (*ClientConfig, error) {
 	clientObj := map[string]any{
 		"id":         clientID,
 		"email":      email,
@@ -258,16 +268,9 @@ func (c *Client) doAddClientWithID(ctx context.Context, inboundID int, email, cl
 		"reset":      resetDays,
 	}
 
-	requestData := map[string]any{
-		"client":     clientObj,
-		"inboundIds": []int{inboundID},
-	}
-
 	addURL := fmt.Sprintf("%s/panel/api/clients/add", c.host)
 
-	respBody, err := c.doHTTPRequest(ctx, http.MethodPost, addURL, func() (io.Reader, error) {
-		return marshalJSON(requestData)
-	})
+	respBody, err := c.doHTTPRequest(ctx, http.MethodPost, addURL, c.buildClientBody(clientObj, inboundIDs))
 	if err != nil {
 		return nil, err
 	}
@@ -336,26 +339,24 @@ func (c *Client) doDeleteClient(ctx context.Context, email string) error {
 	return nil
 }
 
-func (c *Client) UpdateClient(ctx context.Context, inboundID int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, tgID int64, comment string) error {
+func (c *Client) UpdateClient(ctx context.Context, inboundIDs []int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, tgID int64, comment string) error {
 	if clientID == "" {
 		return fmt.Errorf("client ID cannot be empty")
 	}
 	if currentEmail == "" {
 		return fmt.Errorf("current email cannot be empty")
 	}
-	if inboundID < 1 {
-		return fmt.Errorf("invalid inbound ID: %d", inboundID)
+	if len(inboundIDs) == 0 {
+		return fmt.Errorf("inbound IDs cannot be empty")
 	}
 
 	return RetryWithBackoff(ctx, config.XUIMaxRetries, config.XUIInitialRetryDelay, func() error {
-		return c.doUpdateClient(ctx, inboundID, currentEmail, clientID, email, subID, trafficBytes, expiryTime, tgID, comment)
+		return c.doUpdateClient(ctx, inboundIDs, currentEmail, clientID, email, subID, trafficBytes, expiryTime, tgID, comment)
 	})
 }
 
-func (c *Client) doUpdateClient(ctx context.Context, inboundID int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, tgID int64, comment string) error {
-	// Determine flow based on the actual inbound transport (tcp vs xhttp etc.)
-	// This prevents sending wrong flow value during full-row replace on /clients/update.
-	flow, flowErr := c.getRequiredFlow(ctx, inboundID)
+func (c *Client) doUpdateClient(ctx context.Context, inboundIDs []int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, tgID int64, comment string) error {
+	flow, flowErr := c.getRequiredFlow(ctx, inboundIDs[0])
 	if flowErr != nil {
 		logger.Debug("Failed to get required flow for update, using default xtls-rprx-vision", zap.Error(flowErr))
 		flow = "xtls-rprx-vision"
@@ -377,9 +378,7 @@ func (c *Client) doUpdateClient(ctx context.Context, inboundID int, currentEmail
 
 	updateURL := fmt.Sprintf("%s/panel/api/clients/update/%s", c.host, url.PathEscape(currentEmail))
 
-	respBody, err := c.doHTTPRequest(ctx, http.MethodPost, updateURL, func() (io.Reader, error) {
-		return marshalJSON(clientObj)
-	})
+	respBody, err := c.doHTTPRequest(ctx, http.MethodPost, updateURL, c.buildClientBody(clientObj, inboundIDs))
 	if err != nil {
 		return err
 	}

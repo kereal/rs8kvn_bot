@@ -2,6 +2,7 @@ package testutil
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"sync"
@@ -93,7 +94,7 @@ type MockDatabaseService struct {
 	AddSourceToPlanFunc                 func(ctx context.Context, planID, sourceID uint) error
 	RemoveSourceFromPlanFunc            func(ctx context.Context, planID, sourceID uint) error
 	SeedDefaultDataFunc                 func(ctx context.Context) error
-	SeedDefaultNodeFunc                 func(ctx context.Context, name, xuiHost, xuiAPIToken string, xuiInboundID int, subURL string) error
+	SeedDefaultNodeFunc                 func(ctx context.Context, name, xuiHost, xuiAPIToken string, xuiInboundIDs []int, subURL string) error
 	GetActiveByPlanIDFunc               func(ctx context.Context, planID uint) ([]database.Product, error)
 	CreateOrderFunc                     func(ctx context.Context, order *database.Order) error
 	GetOrderByIDFunc                    func(ctx context.Context, id uint) (*database.Order, error)
@@ -354,7 +355,7 @@ func (m *MockDatabaseService) ListNodes(ctx context.Context) ([]database.Node, e
 		return m.ListNodesFunc(ctx)
 	}
 	return []database.Node{
-		{ID: 1, Name: "default", IsActive: true, Host: "http://localhost:2053", APIToken: "test-token", InboundID: 1, SubscriptionURL: "http://example.com/sub/"},
+		{ID: 1, Name: "default", IsActive: true, Host: "http://localhost:2053", APIToken: "test-token", InboundIDs: `[1]`, SubscriptionURL: "http://example.com/sub/"},
 	}, nil
 }
 
@@ -365,12 +366,12 @@ func (m *MockDatabaseService) IsNodesEmpty(ctx context.Context) (bool, error) {
 	return false, nil
 }
 
-func (m *MockDatabaseService) SeedDefaultNode(ctx context.Context, name, xuiHost, xuiAPIToken string, xuiInboundID int, subURL string) error {
+func (m *MockDatabaseService) SeedDefaultNode(ctx context.Context, name, xuiHost, xuiAPIToken string, xuiInboundIDs []int, subURL string) error {
 	if m.SeedDefaultDataFunc != nil {
 		return m.SeedDefaultDataFunc(ctx)
 	}
 	if m.SeedDefaultNodeFunc != nil {
-		return m.SeedDefaultNodeFunc(ctx, name, xuiHost, xuiAPIToken, xuiInboundID, subURL)
+		return m.SeedDefaultNodeFunc(ctx, name, xuiHost, xuiAPIToken, xuiInboundIDs, subURL)
 	}
 	return nil
 }
@@ -435,7 +436,8 @@ func (m *MockDatabaseService) GetNodesByPlanName(ctx context.Context, planName s
 		return m.GetNodesByPlanNameFunc(ctx, planName)
 	}
 	if planName == database.TrialPlanName {
-		return []database.Node{{ID: 1, IsActive: true, Host: "http://localhost:2053", InboundID: 1}}, nil
+		inboundIDs, _ := json.Marshal([]int{1})
+		return []database.Node{{ID: 1, IsActive: true, Host: "http://localhost:2053", InboundIDs: string(inboundIDs)}}, nil
 	}
 	return nil, nil
 }
@@ -664,9 +666,9 @@ func CreateTestSubscription(telegramID int64, username string, status string, ex
 type MockXUIClient struct {
 	mu                      sync.Mutex
 	PingFunc                func(ctx context.Context) error
-	AddClientFunc           func(ctx context.Context, inboundID int, email string, trafficBytes int64, expiryTime time.Time) (*xui.ClientConfig, error)
-	AddClientWithIDFunc     func(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error)
-	UpdateClientFunc        func(ctx context.Context, inboundID int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, tgID int64, comment string) error
+	AddClientFunc           func(ctx context.Context, inboundIDs []int, email string, trafficBytes int64, expiryTime time.Time) (*xui.ClientConfig, error)
+	AddClientWithIDFunc     func(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error)
+	UpdateClientFunc        func(ctx context.Context, inboundIDs []int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, tgID int64, comment string) error
 	DeleteClientFunc        func(ctx context.Context, email string) error
 	GetClientTrafficFunc    func(ctx context.Context, email string) (*xui.ClientTraffic, error)
 	GetSubscriptionLinkFunc func(host, subID, subPath string) string
@@ -686,12 +688,12 @@ func (m *MockXUIClient) Ping(ctx context.Context) error {
 	return nil
 }
 
-func (m *MockXUIClient) AddClient(ctx context.Context, inboundID int, email string, trafficBytes int64, expiryTime time.Time) (*xui.ClientConfig, error) {
+func (m *MockXUIClient) AddClient(ctx context.Context, inboundIDs []int, email string, trafficBytes int64, expiryTime time.Time) (*xui.ClientConfig, error) {
 	m.mu.Lock()
 	m.AddClientCalled = true
 	m.mu.Unlock()
 	if m.AddClientFunc != nil {
-		return m.AddClientFunc(ctx, inboundID, email, trafficBytes, expiryTime)
+		return m.AddClientFunc(ctx, inboundIDs, email, trafficBytes, expiryTime)
 	}
 	return &xui.ClientConfig{
 		ID:        "test-client-id",
@@ -702,12 +704,12 @@ func (m *MockXUIClient) AddClient(ctx context.Context, inboundID int, email stri
 	}, nil
 }
 
-func (m *MockXUIClient) AddClientWithID(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
+func (m *MockXUIClient) AddClientWithID(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
 	m.mu.Lock()
 	m.AddClientWithIDCalled = true
 	m.mu.Unlock()
 	if m.AddClientWithIDFunc != nil {
-		return m.AddClientWithIDFunc(ctx, inboundID, email, clientID, subID, trafficBytes, expiryTime, resetDays)
+		return m.AddClientWithIDFunc(ctx, inboundIDs, email, clientID, subID, trafficBytes, expiryTime, resetDays)
 	}
 	return &xui.ClientConfig{
 		ID:        clientID,
@@ -719,12 +721,12 @@ func (m *MockXUIClient) AddClientWithID(ctx context.Context, inboundID int, emai
 	}, nil
 }
 
-func (m *MockXUIClient) UpdateClient(ctx context.Context, inboundID int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, tgID int64, comment string) error {
+func (m *MockXUIClient) UpdateClient(ctx context.Context, inboundIDs []int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, tgID int64, comment string) error {
 	m.mu.Lock()
 	m.UpdateClientCalled = true
 	m.mu.Unlock()
 	if m.UpdateClientFunc != nil {
-		return m.UpdateClientFunc(ctx, inboundID, currentEmail, clientID, email, subID, trafficBytes, expiryTime, tgID, comment)
+		return m.UpdateClientFunc(ctx, inboundIDs, currentEmail, clientID, email, subID, trafficBytes, expiryTime, tgID, comment)
 	}
 	return nil
 }
