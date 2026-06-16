@@ -1,9 +1,11 @@
 # Architecture — rs8kvn_bot
 
-**Version:** 2.3.0  
-**Date:** 2026-06-08
+**Version:** 2.6.0
+**Date:** 2026-06-16
 
-## Overview
+## Multi-outbounds per node
+
+A single 3x-ui node can now expose multiple inbounds. Inbound IDs are stored as a JSON array in `nodes.inbound_ids` and sent to the panel as `inboundIds` during client creation/update.
 
 rs8kvn_bot — production-ready Telegram bot for distributing VLESS+Reality+Vision VPN subscriptions via 3x-ui panel. Built with Go, following Clean Architecture principles.
 

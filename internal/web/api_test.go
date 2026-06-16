@@ -28,23 +28,23 @@ func newTestAPIServer(t *testing.T, cfg *config.Config, mockDB *testutil.MockDat
 	if cfg.APIToken == "" {
 		cfg.APIToken = "test-api-token"
 	}
-	if len(cfg.Sources) == 0 {
-		cfg.Sources = []config.Source{
-			{ID: 1, Name: "test", XUIHost: "http://localhost:2053", XUIInboundID: 1, Active: true},
+	if len(cfg.Nodes) == 0 {
+		cfg.Nodes = []config.Node{
+			{ID: 1, Name: "test", XUIHost: "http://localhost:2053", XUIInboundIDs: "[1]", Active: true},
 		}
 	}
 
 	botConfig := &bot.BotConfig{Username: "testbot"}
 
-	dbSources := make([]database.Node, len(cfg.Sources))
-	for i, s := range cfg.Sources {
+	dbSources := make([]database.Node, len(cfg.Nodes))
+	for i, s := range cfg.Nodes {
 		dbSources[i] = database.Node{
 			ID:              s.ID,
 			Name:            s.Name,
 			IsActive:        s.Active,
 			Host:            s.XUIHost,
 			APIToken:        s.XUIAPIToken,
-			InboundID:       s.XUIInboundID,
+			InboundIDs:      s.XUIInboundIDs,
 			SubscriptionURL: s.SubURL,
 		}
 	}

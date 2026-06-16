@@ -45,7 +45,7 @@ func setupTestDB(t *testing.T) *database.Service {
 }
 
 func e2eNodes(host string) []database.Node {
-	return []database.Node{{ID: 1, Name: "main", IsActive: true, Host: host, APIToken: "test-api-token", InboundID: 1}}
+	return []database.Node{{ID: 1, Name: "main", IsActive: true, Host: host, APIToken: "test-api-token", InboundIDs: "[1]"}}
 }
 
 type e2eTestEnv struct {
@@ -108,7 +108,7 @@ func setupE2EEnv(t *testing.T) *e2eTestEnv {
 	}
 
 	ctx := context.Background()
-	require.NoError(t, db.SeedDefaultNode(ctx, "main", "https://panel.example.com", "test-api-token", 1, ""), "seed test node")
+	require.NoError(t, db.SeedDefaultNode(ctx, "main", "https://panel.example.com", "test-api-token", []int{1}, ""), "seed test node")
 	xuiClients := map[uint]interfaces.XUIClient{1: mockXUI}
 	nodes := e2eNodes("https://panel.example.com")
 	subService := service.NewSubscriptionService(db, xuiClients, nodes, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
@@ -228,7 +228,7 @@ func setupRealXUIEnv(t *testing.T, handlers map[string]http.HandlerFunc) *realXU
 		TelegramBotToken: "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11",
 		GlobalSubURL:     "",
 		Sources: []config.Source{
-			{Name: "main", XUIHost: server.URL, XUIAPIToken: "test-api-token", XUIInboundID: 1, Active: true},
+			{Name: "main", XUIHost: server.URL, XUIAPIToken: "test-api-token", XUIInboundIDs: "[1]", Active: true},
 		},
 	}
 

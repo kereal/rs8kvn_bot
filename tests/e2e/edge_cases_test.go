@@ -92,7 +92,7 @@ func TestE2E_CreateSubscription_RetryAfterFailure(t *testing.T) {
 	ctx := context.Background()
 
 	callCount := 0
-	env.xui.AddClientWithIDFunc = func(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
+	env.xui.AddClientWithIDFunc = func(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
 		callCount++
 		if callCount == 1 {
 			return nil, fmt.Errorf("temporary error")
@@ -151,7 +151,7 @@ func TestE2E_CreateSubscription_MultipleRetries(t *testing.T) {
 	ctx := context.Background()
 
 	callCount := 0
-	env.xui.AddClientWithIDFunc = func(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
+	env.xui.AddClientWithIDFunc = func(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
 		callCount++
 		if callCount < 3 {
 			return nil, fmt.Errorf("temporary error %d", callCount)
@@ -195,7 +195,7 @@ func TestE2E_CreateSubscription_XUITimeout(t *testing.T) {
 
 	ctx := context.Background()
 
-	env.xui.AddClientWithIDFunc = func(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
+	env.xui.AddClientWithIDFunc = func(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
 		time.Sleep(200 * time.Millisecond)
 		return nil, context.DeadlineExceeded
 	}
@@ -228,7 +228,7 @@ func TestE2E_Service_Create_TimeoutContext(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
 	defer cancel()
 
-	env.xui.AddClientWithIDFunc = func(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
+	env.xui.AddClientWithIDFunc = func(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
 		time.Sleep(20 * time.Millisecond)
 		return &xui.ClientConfig{ID: "test-id", Email: email, SubID: subID}, nil
 	}
