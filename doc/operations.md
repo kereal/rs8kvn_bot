@@ -56,6 +56,7 @@ go run ./cmd/bot
 | `.env` | Environment variables (secrets) |
 | `data/tgvpn.db` | SQLite database |
 | `data/bot.log` | Application logs (rotated) |
+| `data/subserver.log` | Optional `/sub/{id}` access log |
 | `internal/database/migrations/` | DB migration SQL files |
 
 ---
@@ -258,7 +259,16 @@ docker logs rs8kvn_bot 2>&1 | grep "Heartbeat sent"
 # Provide URL: http://your-host:8880/healthz
 ```
 
-### 4.3 Logs
+### 4.3 Subscription Access Log
+
+If `SUBSERVER_ACCESS_LOG` is set, the bot appends every `/sub/{id}` request to that file as a zap-console line without a message, caller, or field keys. Access log writes are buffered asynchronously so disk I/O does not block subscription responses. If the file cannot be opened, the bot continues without the access log and writes an error to the main application log. Each line contains:
+
+- timestamp and log level separated by tabs
+- method, request URL, response status code, client IP, `X-HWID`, `X-Device-Os`, `X-Ver-Os`, `X-Device-Model`, and `User-Agent` as space-separated values; values containing spaces are quoted, and empty optional values are written as `-`
+
+The main application log records an INFO message when this access log is enabled. To disable it, set `SUBSERVER_ACCESS_LOG` to an empty value and restart the bot.
+
+### 4.4 Logs
 
 **Location:** `./data/bot.log` (rotated: max 100MB × 3 files)
 
@@ -293,7 +303,7 @@ grep '"level":"error"' ./data/bot.log
 tail -n 100 ./data/bot.log
 ```
 
-### 4.4 Sentry
+### 4.5 Sentry
 
 If `SENTRY_DSN` configured, errors and panics are reported automatically.
 
@@ -309,7 +319,7 @@ kill -ABRT <pid>
 # Check Sentry dashboard for new issue
 ```
 
-### 4.5 Metrics (future)
+### 4.6 Metrics (future)
 
 Currently no Prometheus metrics. To add:
 
