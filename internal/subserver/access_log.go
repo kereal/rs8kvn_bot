@@ -42,7 +42,7 @@ func NewAccessLogger(path string) (*AccessLogger, error) {
 		return nil, fmt.Errorf("create access log directory: %w", err)
 	}
 
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o640)
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("open access log file: %w", err)
 	}
