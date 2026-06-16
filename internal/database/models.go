@@ -169,8 +169,19 @@ type TrialRequest struct {
 // SubscriptionFull holds a subscription together with its plan and active nodes.
 type SubscriptionFull struct {
 	Subscription Subscription
-	Plan        Plan
-	Nodes       []Node
+	Plan         Plan
+	Nodes        []Node
+}
+
+// PoolStats contains database connection pool statistics.
+type PoolStats struct {
+	MaxOpen       int
+	Open          int
+	InUse         int
+	Idle          int
+	WaitCount     int64
+	WaitDuration  time.Duration
+	MaxIdleClosed int64
 }
 
 func (PlanNode) TableName() string {
@@ -300,18 +311,11 @@ var DefaultInboundIDs = []int{1}
 func (n *Node) ResolveInboundIDs() []int {
 	ids, err := n.GetInboundIDs()
 	if err != nil || len(ids) == 0 {
-		return DefaultInboundIDs
+		out := make([]int, len(DefaultInboundIDs))
+		copy(out, DefaultInboundIDs)
+		return out
 	}
-	return ids
-}
-
-// PoolStats contains database connection pool statistics.
-type PoolStats struct {
-	MaxOpen       int
-	Open          int
-	InUse         int
-	Idle          int
-	WaitCount     int64
-	WaitDuration  time.Duration
-	MaxIdleClosed int64
+	out := make([]int, len(ids))
+	copy(out, ids)
+	return out
 }
