@@ -114,7 +114,7 @@ func (s *SubscriptionService) Create(ctx context.Context, chatID int64, username
 			continue
 		}
 		inboundIDs := node.ResolveInboundIDs()
-		c, err := client.AddClientWithID(ctx, inboundIDs, email, clientID, subID, trafficBytes, expiryTime, resetday)
+		c, err := client.AddClientWithID(xui.WithTgID(ctx, chatID), inboundIDs, email, clientID, subID, trafficBytes, expiryTime, resetday)
 		if err != nil {
 			if firstErr == nil {
 				firstErr = err

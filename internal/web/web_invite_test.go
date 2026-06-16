@@ -84,6 +84,7 @@ func TestHandleInvite_InvalidCode(t *testing.T) {
 	}
 
 	mockXUI.AddClientWithIDFunc = func(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
+		assert.Equal(t, []int{1}, inboundIDs, "inboundIDs should resolve to expected value")
 		return &xui.ClientConfig{ID: clientID, SubID: subID}, nil
 	}
 

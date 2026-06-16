@@ -227,7 +227,7 @@ func setupRealXUIEnv(t *testing.T, handlers map[string]http.HandlerFunc) *realXU
 		SiteURL:          "https://example.com",
 		TelegramBotToken: "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11",
 		GlobalSubURL:     "",
-		Sources: []config.Source{
+		Nodes: []config.Node{
 			{Name: "main", XUIHost: server.URL, XUIAPIToken: "test-api-token", XUIInboundIDs: "[1]", Active: true},
 		},
 	}
