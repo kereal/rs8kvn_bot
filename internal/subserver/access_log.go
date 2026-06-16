@@ -312,7 +312,6 @@ func (w *asyncAccessLogWriter) Sync(ctx context.Context) error {
 	w.mu.Unlock()
 
 	select {
-	case <-w.done:
 	case <-ctx.Done():
 		w.mu.Lock()
 		if w.file != nil && !w.fileClosed {
@@ -323,6 +322,7 @@ func (w *asyncAccessLogWriter) Sync(ctx context.Context) error {
 		<-w.done
 		w.logDroppedRecords()
 		return ctx.Err()
+	case <-w.done:
 	}
 
 	err := w.closeFile()
