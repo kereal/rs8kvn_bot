@@ -1,9 +1,13 @@
 package subserver
 
 import (
+	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/kereal/rs8kvn_bot/internal/config"
 )
@@ -43,4 +47,21 @@ func TestService_InvalidateCache(t *testing.T) {
 	body, _, ok := svc.GetCache("key1")
 	assert.False(t, ok)
 	assert.Nil(t, body)
+}
+
+func TestAccessLogger_CloseWithContextCanceled(t *testing.T) {
+	t.Parallel()
+
+	logPath := filepath.Join(t.TempDir(), "subserver.log")
+	accessLogger, err := NewAccessLogger(logPath)
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err = accessLogger.CloseWithContext(ctx)
+	assert.ErrorIs(t, err, context.Canceled)
+
+	_, err = os.Stat(logPath)
+	assert.NoError(t, err)
 }

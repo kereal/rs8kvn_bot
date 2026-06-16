@@ -55,6 +55,8 @@ type ComponentHealth struct {
 	Message string `json:"message,omitempty"`
 }
 
+const subserverAccessLogCloseTimeout = 5 * time.Second
+
 type Server struct {
 	addr            string
 	db              interfaces.DatabaseService
@@ -62,6 +64,7 @@ type Server struct {
 	botConfig       *bot.BotConfig
 	subService      *service.SubscriptionService
 	subServer       *subserver.Service
+	subserverLogger *subserver.AccessLogger
 	server          *http.Server
 	listenerAddr    string
 	mu              sync.RWMutex
@@ -149,6 +152,7 @@ func (s *Server) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to bind %s: %w", s.addr, err)
 	}
 	s.listenerAddr = listener.Addr().String()
+	s.initSubserverAccessLogger()
 
 	go func() {
 		defer logger.Recover("HTTP server")
@@ -162,11 +166,43 @@ func (s *Server) Start(ctx context.Context) error {
 	return nil
 }
 
-func (s *Server) Stop(ctx context.Context) error {
-	if s.server != nil {
-		return s.server.Shutdown(ctx)
+func (s *Server) initSubserverAccessLogger() {
+	if s.cfg == nil || s.cfg.SubServerAccessLogPath == "" {
+		return
 	}
-	return nil
+
+	accessLogger, err := subserver.NewAccessLogger(s.cfg.SubServerAccessLogPath)
+	if err != nil {
+		logger.Error("Subserver access logging disabled",
+			zap.String("path", s.cfg.SubServerAccessLogPath),
+			zap.Error(err))
+		return
+	}
+
+	s.subserverLogger = accessLogger
+	if accessLogger.Enabled() {
+		logger.Info("Subserver access logging is enabled and working", zap.String("path", s.cfg.SubServerAccessLogPath))
+	}
+}
+
+func (s *Server) Stop(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	var err error
+	if s.server != nil {
+		err = s.server.Shutdown(ctx)
+	}
+	if s.subserverLogger != nil {
+		closeCtx, cancel := context.WithTimeout(ctx, subserverAccessLogCloseTimeout)
+		defer cancel()
+
+		if closeErr := s.subserverLogger.CloseWithContext(closeCtx); err == nil {
+			err = closeErr
+		}
+	}
+	return err
 }
 
 func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
@@ -513,39 +549,42 @@ func isLocalAddress(host string) bool {
 // share links, aggregates subscription-userinfo headers across sources,
 // caches the result, and writes the final response.
 func (s *Server) handleSubscription(w http.ResponseWriter, r *http.Request) {
+	clientIP := getClientIP(r)
+
+	var rec *statusRecorder
+	var response http.ResponseWriter = w
+	if s.subserverLogger != nil && s.subserverLogger.Enabled() {
+		rec = &statusRecorder{ResponseWriter: w}
+		response = rec
+		defer s.logSubscriptionAccess(rec, r, clientIP)
+	}
+
 	if r.Method != http.MethodGet {
-		w.Header().Set("Allow", "GET")
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		response.Header().Set("Allow", "GET")
+		writeSubscriptionText(response, http.StatusMethodNotAllowed, "Method Not Allowed")
 		return
 	}
 
 	if s.subServer == nil {
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.WriteHeader(http.StatusServiceUnavailable)
-		w.Write([]byte("Subscription server is not available"))
+		writeSubscriptionText(response, http.StatusServiceUnavailable, "Subscription server is not available")
 		return
 	}
 
 	path := r.URL.Path
 	if !strings.HasPrefix(path, "/sub/") {
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.WriteHeader(http.StatusNotFound)
-		w.Write([]byte("Subscription not found"))
+		writeSubscriptionText(response, http.StatusNotFound, "Subscription not found")
 		return
 	}
 
 	subID := path[5:]
 	if subID == "" || strings.Contains(subID, "/") || !subserver.SubIDRegex().MatchString(subID) {
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.WriteHeader(http.StatusNotFound)
-		w.Write([]byte("Subscription not found"))
+		writeSubscriptionText(response, http.StatusNotFound, "Subscription not found")
 		return
 	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 
-	clientIP := getClientIP(r)
 	logger.Info("subscription request received",
 		zap.String("sub_id", subID),
 		zap.String("client_ip", clientIP),
@@ -560,16 +599,13 @@ func (s *Server) handleSubscription(w http.ResponseWriter, r *http.Request) {
 			zap.String("sub_id", subID),
 			zap.String("client_ip", clientIP),
 			zap.Error(err))
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		if errors.Is(err, gorm.ErrRecordNotFound) ||
 			errors.Is(err, subserver.ErrSubscriptionNotFound) ||
 			errors.Is(err, subserver.ErrNoSubscriptionItems) {
-			w.WriteHeader(http.StatusNotFound)
-			w.Write([]byte("Subscription not found"))
+			writeSubscriptionText(response, http.StatusNotFound, "Subscription not found")
 			return
 		}
-		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte("Subscription not found"))
+		writeSubscriptionText(response, http.StatusInternalServerError, "Subscription not found")
 		return
 	}
 
@@ -577,20 +613,58 @@ func (s *Server) handleSubscription(w http.ResponseWriter, r *http.Request) {
 		logger.Error("Empty subscription result",
 			zap.String("sub_id", subID),
 			zap.String("client_ip", clientIP))
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte("Subscription not found"))
+		writeSubscriptionText(response, http.StatusInternalServerError, "Subscription not found")
 		return
 	}
 
 	for k, v := range result.Headers {
-		w.Header().Set(k, v)
+		response.Header().Set(k, v)
 	}
 
 	if result.StatusCode != 0 {
-		w.WriteHeader(result.StatusCode)
+		response.WriteHeader(result.StatusCode)
 	} else {
-		w.WriteHeader(http.StatusOK)
+		response.WriteHeader(http.StatusOK)
 	}
-	w.Write(result.Body)
+	response.Write(result.Body)
+}
+
+func (s *Server) logSubscriptionAccess(rec *statusRecorder, r *http.Request, clientIP string) {
+	if s == nil || s.subserverLogger == nil || rec == nil {
+		return
+	}
+	s.subserverLogger.Log(r, rec.StatusCode(), clientIP)
+}
+
+func writeSubscriptionText(w http.ResponseWriter, statusCode int, body string) {
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(statusCode)
+	w.Write([]byte(body))
+}
+
+type statusRecorder struct {
+	http.ResponseWriter
+
+	statusCode int
+}
+
+func (r *statusRecorder) WriteHeader(statusCode int) {
+	if r.statusCode == 0 {
+		r.statusCode = statusCode
+	}
+	r.ResponseWriter.WriteHeader(statusCode)
+}
+
+func (r *statusRecorder) Write(b []byte) (int, error) {
+	if r.statusCode == 0 {
+		r.statusCode = http.StatusOK
+	}
+	return r.ResponseWriter.Write(b)
+}
+
+func (r *statusRecorder) StatusCode() int {
+	if r.statusCode == 0 {
+		return http.StatusOK
+	}
+	return r.statusCode
 }
