@@ -24,8 +24,8 @@ func TestE2E_HealthEndpoint(t *testing.T) {
 	defer env.db.Close()
 
 	xuiClients := map[uint]interfaces.XUIClient{1: env.xui}
-	sources := []database.Node{{Name: "main", Host: "https://panel.example.com", APIToken: "test-api-token", InboundID: 1, IsActive: true}}
-	subService := service.NewSubscriptionService(env.db, xuiClients, sources, env.cfg, env.cfg.GlobalSubURL, &webhook.NoopSender{})
+	nodes := []database.Node{{Name: "main", Host: "https://panel.example.com", APIToken: "test-api-token", InboundIDs: "[1]", IsActive: true}}
+	subService := service.NewSubscriptionService(env.db, xuiClients, nodes, env.cfg, env.cfg.GlobalSubURL, &webhook.NoopSender{})
 	srv := web.NewServer("127.0.0.1:0", env.db, env.cfg, env.botConfig, subService, nil)
 
 	srv.RegisterChecker("database", func(ctx context.Context) web.ComponentHealth {
@@ -61,8 +61,8 @@ func TestE2E_HealthEndpoint_DBError(t *testing.T) {
 	defer env.db.Close()
 
 	xuiClients := map[uint]interfaces.XUIClient{1: env.xui}
-	sources := []database.Node{{Name: "main", Host: "https://panel.example.com", APIToken: "test-api-token", InboundID: 1, IsActive: true}}
-	subService := service.NewSubscriptionService(env.db, xuiClients, sources, env.cfg, env.cfg.GlobalSubURL, &webhook.NoopSender{})
+	nodes := []database.Node{{Name: "main", Host: "https://panel.example.com", APIToken: "test-api-token", InboundIDs: "[1]", IsActive: true}}
+	subService := service.NewSubscriptionService(env.db, xuiClients, nodes, env.cfg, env.cfg.GlobalSubURL, &webhook.NoopSender{})
 	srv := web.NewServer("127.0.0.1:0", env.db, env.cfg, env.botConfig, subService, nil)
 
 	srv.RegisterChecker("database", func(ctx context.Context) web.ComponentHealth {
@@ -95,8 +95,8 @@ func TestE2E_ReadyEndpoint(t *testing.T) {
 	defer env.db.Close()
 
 	xuiClients := map[uint]interfaces.XUIClient{1: env.xui}
-	sources := []database.Node{{Name: "main", Host: "https://panel.example.com", APIToken: "test-api-token", InboundID: 1, IsActive: true}}
-	subService := service.NewSubscriptionService(env.db, xuiClients, sources, env.cfg, env.cfg.GlobalSubURL, &webhook.NoopSender{})
+	nodes := []database.Node{{Name: "main", Host: "https://panel.example.com", APIToken: "test-api-token", InboundIDs: "[1]", IsActive: true}}
+	subService := service.NewSubscriptionService(env.db, xuiClients, nodes, env.cfg, env.cfg.GlobalSubURL, &webhook.NoopSender{})
 	srv := web.NewServer("127.0.0.1:0", env.db, env.cfg, env.botConfig, subService, nil)
 
 	srv.RegisterChecker("database", func(ctx context.Context) web.ComponentHealth {

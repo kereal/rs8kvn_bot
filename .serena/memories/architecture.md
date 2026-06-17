@@ -1,7 +1,8 @@
 # Architecture — rs8kvn_bot
 
-**Версия:** v2.3.0  
-**Обновлено:** 2026-06-08
+**Версия:** v2.4.0  
+**Обновлено:** 2026-06-17  
+**Ветка:** `multi-outbounds` (merge candidate)
 
 ## Рефакторинг 2026-06-08 (коммит 2a1e0fe)
 - Монолит `database.go` разбит на 9 файлов по доменам
@@ -11,16 +12,15 @@
 - Убран избыточный `if xuiHeaders != nil` в `subscription_handler.go`
 - Проведён `go fmt` по 20 файлам
 
-## Branch: plan-mechanics
+## Branch: multi-outbounds
 
-Эта память описывает ветку `plan-mechanics`, которая включает:
-- Удаление `duration` из `plans` (migration 019), trial = single-node
-- Добавление `products`/`orders` + ORM-связи
-- Таблица `subscription_nodes` как очередь синхронизации подписки×нода
-- Замена `sources/plan_sources` → `nodes/plan_nodes` (migration 014)
-- Динамический поиск trial-plan по имени вместо хардкода PlanID==1
-- `LinkNodeToPlan` для явной привязки нод к планам
-- Очистка терминологии, вынужденная миграция legacy схемы
+Эта память описывает текущую ветку `multi-outbounds`, которая включает:
+- Multi-outbound flow: группировка inboundIDs по совместимому flow для панели 3x-ui
+- Миграция конфига `config.Source` → `config.Node`/`Nodes`
+- Defensive copy в `Node.ResolveInboundIDs` (защита от мутации слайса)
+- Валидация inbound-ID positivity в `xui/client.go`
+- TgID через контекст (`WithTgID`/`TgIDFromContext`) при создании/обновлении клиентов в панель
+- Актуализация roadmap и архитектурной памяти
 
 ## Общая схема
 
@@ -158,7 +158,7 @@ id, name UNIQUE, devices_limit, traffic_limit
 - **`SeedDefaultNode`**: если nodes пуста, создаёт ноду из env и привязывает ко всем планам.
 
 ### X-UI Client (`internal/xui/client.go`)
-- **Multi-source**: `xuiClients map[uint]interfaces.XUIClient` (key = source/node ID).
+- **Multi-source**: `xuiClients map[uint]interfaces.XUIClient` (key = node ID).
 - **Circuit breaker**: `internal/xui/breaker.go` — 5 failures → 30s open → half-open. Метрика `metrics.CircuitBreakerState`.
 - **Retry**: `RetryWithBackoff` (3 retries, exponential + jitter). DNS errors fast-fail.
 - **Auth**: Bearer token, без сессий, без singleflight (singleflight перенесён в `internal/web/singleflight.go`).
@@ -185,7 +185,7 @@ id, name UNIQUE, devices_limit, traffic_limit
 - Миграция на PostgreSQL: 2-4 часа (заменить драйвер, проверить миграции).
 
 ### 🟡 Multi-server config
-- Сейчас одна подписка = один источник. Multi-server VLESS-конфиг (массив серверов) — отложено (см. `roadmap`).
+- Сейчас одна подписка = несколько нод, но каждому клиенту выдаётся свой inbound на каждой ноде. Multi-server VLESS-конфиг (массив серверов в одном профиле) — отложено (см. `roadmap`).
 
 ### 🟡 Web UI
 - Весь UI через Telegram inline-кнопки. Нет классического e-commerce, нет графиков.
@@ -204,7 +204,7 @@ id, name UNIQUE, devices_limit, traffic_limit
 ## Решения
 
 ### ✅ Multi-source 3x-ui (v2.4.0, реализовано)
-- `config.Source` (URL, token, inbound_id, Active, Trial) → `map[uint]XUIClient` + `[]database.Node`.
+- Конфиг переведён на `config.Node` + `[]config.Node` (`config.Source` удалён).
 - Trial — на всех trial-нодах. BindTrial — первый успешный. Reconcile — все.
 
 ### ✅ Orders + Products (migration 013/017, реализовано)

@@ -432,7 +432,7 @@ func TestAddClient(t *testing.T) {
 		require.NoError(t, err)
 		defer client.Close()
 
-		result, err := client.AddClient(context.Background(), 1, "test@example.com", 1<<30, time.Now().Add(24*time.Hour))
+		result, err := client.AddClient(context.Background(), []int{1}, "test@example.com", 1<<30, time.Now().Add(24*time.Hour))
 		require.NoError(t, err)
 		require.NotNil(t, result)
 		assert.Equal(t, "test@example.com", result.Email)
@@ -457,7 +457,7 @@ func TestAddClient(t *testing.T) {
 		require.NoError(t, err)
 		defer client.Close()
 
-		_, err = client.AddClient(context.Background(), 1, "test@example.com", 1<<30, time.Now().Add(24*time.Hour))
+		_, err = client.AddClient(context.Background(), []int{1}, "test@example.com", 1<<30, time.Now().Add(24*time.Hour))
 		assert.Error(t, err)
 	})
 }
@@ -471,18 +471,18 @@ func TestAddClientWithID_Validation(t *testing.T) {
 
 	ctx := context.Background()
 
-	t.Run("invalid inbound ID", func(t *testing.T) {
-		_, err := client.AddClientWithID(ctx, 0, "test@example.com", "uuid", "subid", 100, time.Now(), -1)
+	t.Run("empty inbound IDs", func(t *testing.T) {
+		_, err := client.AddClientWithID(ctx, []int{}, "test@example.com", "uuid", "subid", 100, time.Now(), -1)
 		assert.Error(t, err)
 	})
 
 	t.Run("empty client ID", func(t *testing.T) {
-		_, err := client.AddClientWithID(ctx, 1, "test@example.com", "", "subid", 100, time.Now(), -1)
+		_, err := client.AddClientWithID(ctx, []int{1}, "test@example.com", "", "subid", 100, time.Now(), -1)
 		assert.Error(t, err)
 	})
 
 	t.Run("empty sub ID", func(t *testing.T) {
-		_, err := client.AddClientWithID(ctx, 1, "test@example.com", "uuid", "", 100, time.Now(), -1)
+		_, err := client.AddClientWithID(ctx, []int{1}, "test@example.com", "uuid", "", 100, time.Now(), -1)
 		assert.Error(t, err)
 	})
 }
@@ -516,7 +516,7 @@ func TestAddClientWithID(t *testing.T) {
 		require.NoError(t, err)
 		defer client.Close()
 
-		result, err := client.AddClientWithID(context.Background(), 1, "test@example.com", "some-uuid", "sub-123", 1<<30, time.Now().Add(24*time.Hour), 0)
+		result, err := client.AddClientWithID(context.Background(), []int{1}, "test@example.com", "some-uuid", "sub-123", 1<<30, time.Now().Add(24*time.Hour), 0)
 		require.NoError(t, err)
 		assert.Equal(t, "test@example.com", result.Email)
 		assert.Equal(t, "some-uuid", result.ID)
@@ -595,7 +595,7 @@ func TestUpdateClient(t *testing.T) {
 		require.NoError(t, err)
 		defer client.Close()
 
-		err = client.UpdateClient(context.Background(), 1, "old-email", "test-uuid", "new@email.com", "sub-456", 1<<30, time.Now().Add(48*time.Hour), 12345, "test comment")
+		err = client.UpdateClient(context.Background(), []int{1}, "old-email", "test-uuid", "new@email.com", "sub-456", 1<<30, time.Now().Add(48*time.Hour), 12345, "test comment")
 		assert.NoError(t, err)
 	})
 
@@ -604,7 +604,7 @@ func TestUpdateClient(t *testing.T) {
 		require.NoError(t, err)
 		defer client.Close()
 
-		err = client.UpdateClient(context.Background(), 1, "current-email", "", "email", "sub", 0, time.Time{}, 0, "")
+		err = client.UpdateClient(context.Background(), []int{1}, "current-email", "", "email", "sub", 0, time.Time{}, 0, "")
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "client ID cannot be empty")
 	})
@@ -627,7 +627,7 @@ func TestUpdateClient(t *testing.T) {
 		require.NoError(t, err)
 		defer client.Close()
 
-		err = client.UpdateClient(context.Background(), 1, "current-email", "test-uuid", "email", "sub", 0, time.Time{}, 0, "")
+		err = client.UpdateClient(context.Background(), []int{1}, "current-email", "test-uuid", "email", "sub", 0, time.Time{}, 0, "")
 		assert.Error(t, err)
 	})
 }

@@ -291,7 +291,7 @@ func TestIsLocalAddress_Loopback(t *testing.T) {
 func TestIsLocalAddress_NonLoopback(t *testing.T) {
 	t.Parallel()
 
-	// Only loopback addresses are trusted as proxy sources.
+	// Only loopback addresses are trusted as proxy nodes.
 	// Private IPs (10.x, 172.16.x, 192.168.x) are NOT trusted because
 	// in cloud environments other VMs on the same VPC could spoof
 	// X-Forwarded-For to bypass IP-based rate limiting.

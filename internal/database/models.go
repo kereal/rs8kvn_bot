@@ -51,7 +51,7 @@ type Node struct {
 	IsActive        bool      `gorm:"default:true;column:is_active"`
 	Host            string    `gorm:"size:255;column:host"`
 	APIToken        string    `gorm:"size:255;column:api_token"`
-	InboundID       int       `gorm:"not null;column:inbound_id"`
+	InboundIDs      string    `gorm:"type:text;not null;default:'[]';column:inbound_ids"`
 	SubscriptionURL string    `gorm:"size:512;column:subscription_url"`
 	Type            string    `gorm:"type:varchar(10);not null;default: x-ui;column:type" json:"type"`
 	CreatedAt       time.Time `gorm:"autoCreateTime;column:created_at"`
@@ -169,8 +169,19 @@ type TrialRequest struct {
 // SubscriptionFull holds a subscription together with its plan and active nodes.
 type SubscriptionFull struct {
 	Subscription Subscription
-	Plan        Plan
-	Nodes       []Node
+	Plan         Plan
+	Nodes        []Node
+}
+
+// PoolStats contains database connection pool statistics.
+type PoolStats struct {
+	MaxOpen       int
+	Open          int
+	InUse         int
+	Idle          int
+	WaitCount     int64
+	WaitDuration  time.Duration
+	MaxIdleClosed int64
 }
 
 func (PlanNode) TableName() string {
@@ -267,13 +278,44 @@ func (s *Subscription) SetIPs(ips []map[string]string) error {
 	return nil
 }
 
-// PoolStats contains database connection pool statistics.
-type PoolStats struct {
-	MaxOpen       int
-	Open          int
-	InUse         int
-	Idle          int
-	WaitCount     int64
-	WaitDuration  time.Duration
-	MaxIdleClosed int64
+func (n *Node) GetInboundIDs() ([]int, error) {
+	if n.InboundIDs == "" {
+		return []int{}, nil
+	}
+	var ids []int
+	if err := json.Unmarshal([]byte(n.InboundIDs), &ids); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal inbound_ids: %w", err)
+	}
+	return ids, nil
+}
+
+func (n *Node) SetInboundIDs(ids []int) error {
+	if len(ids) == 0 {
+		n.InboundIDs = "[]"
+		return nil
+	}
+	data, err := json.Marshal(ids)
+	if err != nil {
+		return fmt.Errorf("failed to marshal inbound_ids: %w", err)
+	}
+	n.InboundIDs = string(data)
+	return nil
+}
+
+// DefaultInboundIDs is used when a node has no inbound IDs configured.
+// Changing this value in one place updates all fallback paths.
+var DefaultInboundIDs = []int{1}
+
+// ResolveInboundIDs returns the node's inbound IDs, falling back to DefaultInboundIDs
+// when the stored list is empty or malformed. Callers must not repeat this fallback.
+func (n *Node) ResolveInboundIDs() []int {
+	ids, err := n.GetInboundIDs()
+	if err != nil || len(ids) == 0 {
+		out := make([]int, len(DefaultInboundIDs))
+		copy(out, DefaultInboundIDs)
+		return out
+	}
+	out := make([]int, len(ids))
+	copy(out, ids)
+	return out
 }
