@@ -2,7 +2,10 @@ package database
 
 import (
 	"context"
+	"errors"
 	"fmt"
+
+	"gorm.io/gorm"
 )
 
 // CreateOrder inserts a new order record.
@@ -18,6 +21,9 @@ func (s *Service) GetOrderByID(ctx context.Context, id uint) (*Order, error) {
 	var order Order
 	result := s.db.WithContext(ctx).First(&order, id)
 	if result.Error != nil {
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return nil, ErrOrderNotFound
+		}
 		return nil, fmt.Errorf("failed to get order: %w", result.Error)
 	}
 	return &order, nil

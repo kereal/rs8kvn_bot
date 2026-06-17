@@ -7,10 +7,14 @@ import (
 	"time"
 )
 
-// ErrInviteNotFound is the sentinel returned (via errors.Is) by GetInviteByCode
-// when the invite code does not exist. Allows callers (e.g. handlers) to
-// distinguish "invalid code" (not found) from infrastructure/DB errors.
-var ErrInviteNotFound = errors.New("invite not found")
+// Sentinel errors returned by Get* functions when a record is not found.
+// Callers should use errors.Is to distinguish "not found" from infrastructure/DB errors.
+var (
+	ErrInviteNotFound      = errors.New("invite not found")
+	ErrSubscriptionNotFound = errors.New("subscription not found")
+	ErrPlanNotFound        = errors.New("plan not found")
+	ErrOrderNotFound       = errors.New("order not found")
+)
 
 const (
 	TrialPlanName = "trial"

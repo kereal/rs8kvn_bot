@@ -17,6 +17,9 @@ func (s *Service) GetByTelegramID(ctx context.Context, telegramID int64) (*Subsc
 		Order("created_at DESC").
 		First(&sub)
 	if result.Error != nil {
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return nil, ErrSubscriptionNotFound
+		}
 		return nil, fmt.Errorf("failed to get subscription by telegram ID: %w", result.Error)
 	}
 	return &sub, nil
@@ -27,6 +30,9 @@ func (s *Service) GetByID(ctx context.Context, id uint) (*Subscription, error) {
 	var sub Subscription
 	result := s.db.WithContext(ctx).First(&sub, id)
 	if result.Error != nil {
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return nil, ErrSubscriptionNotFound
+		}
 		return nil, fmt.Errorf("failed to get subscription: %w", result.Error)
 	}
 	return &sub, nil
@@ -182,6 +188,9 @@ func (s *Service) GetSubscriptionBySubscriptionID(ctx context.Context, subscript
 	var sub Subscription
 	result := s.db.WithContext(ctx).Where("subscription_id = ?", subscriptionID).First(&sub)
 	if result.Error != nil {
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return nil, ErrSubscriptionNotFound
+		}
 		return nil, fmt.Errorf("failed to get subscription by subscription_id: %w", result.Error)
 	}
 	return &sub, nil
@@ -219,10 +228,16 @@ func (s *Service) GetSubscriptionWithPlanAndNodes(ctx context.Context, subscript
 	subQuery := s.db.WithContext(ctx).Where("subscription_id = ? AND status = ?", subscriptionID, "active")
 
 	if err := subQuery.First(&result.Subscription).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrSubscriptionNotFound
+		}
 		return nil, fmt.Errorf("failed to get subscription: %w", err)
 	}
 
 	if err := s.db.WithContext(ctx).First(&result.Plan, result.Subscription.PlanID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrPlanNotFound
+		}
 		return nil, fmt.Errorf("failed to get plan: %w", err)
 	}
 
@@ -273,6 +288,9 @@ func (s *Service) GetTelegramIDByUsername(ctx context.Context, username string) 
 	var sub Subscription
 	result := s.db.WithContext(ctx).Where("username = ?", username).First(&sub)
 	if result.Error != nil {
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return 0, ErrSubscriptionNotFound
+		}
 		return 0, fmt.Errorf("failed to find user by username: %w", result.Error)
 	}
 	return sub.TelegramID, nil

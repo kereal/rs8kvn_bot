@@ -35,7 +35,10 @@ func (s *Service) CreateTrialSubscription(ctx context.Context, inviteCode, subsc
 func (s *Service) resolveTrialPlanID(ctx context.Context) (uint, error) {
 	var plan Plan
 	if err := s.db.WithContext(ctx).Where("name = ?", TrialPlanName).First(&plan).Error; err != nil {
-		return 0, fmt.Errorf("trial plan not found: %w", err)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return 0, ErrPlanNotFound
+		}
+		return 0, fmt.Errorf("failed to get trial plan: %w", err)
 	}
 	return plan.ID, nil
 }
@@ -48,6 +51,9 @@ func (s *Service) GetTrialSubscriptionBySubID(ctx context.Context, subscriptionI
 		Where("subscription_id = ?", subscriptionID).
 		First(&sub)
 	if result.Error != nil {
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return nil, ErrSubscriptionNotFound
+		}
 		return nil, fmt.Errorf("failed to get trial subscription by subscription_id: %w", result.Error)
 	}
 
