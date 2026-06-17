@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"strings"
@@ -8,16 +9,16 @@ import (
 	flag "github.com/kereal/rs8kvn_bot/internal/flag"
 )
 
-// Source represents a configured 3x-ui panel source.
-type Source struct {
-	ID           uint
-	Name         string
-	Active       bool
-	Trial        bool
-	XUIHost      string
-	XUIAPIToken  string
-	XUIInboundID int
-	SubURL       string
+// Node represents a configured 3x-ui panel source.
+type Node struct {
+	ID            uint
+	Name          string
+	Active        bool
+	Trial         bool
+	XUIHost       string
+	XUIAPIToken   string
+	XUIInboundIDs string
+	SubURL        string
 }
 
 // Config holds all configuration for the application.
@@ -60,8 +61,8 @@ type Config struct {
 	GlobalSubURL           string
 	SubServerAccessLogPath string
 
-	// Sources configuration
-	Sources []Source
+	// Nodes configuration
+	Nodes []Node
 
 	// API configuration
 	APIToken string
@@ -262,16 +263,23 @@ func (c *Config) validate() error {
 		return fmt.Errorf("TRIAL_RATE_LIMIT must be between 1 and 100")
 	}
 
-	// Sources validation (validate individual source fields if sources are configured)
-	for i, src := range c.Sources {
-		if src.XUIHost == "" {
-			return fmt.Errorf("source %d: XUI_HOST is required", i)
+	// Nodes validation (validate individual node fields if nodes are configured)
+	for i, node := range c.Nodes {
+		if node.XUIHost == "" {
+			return fmt.Errorf("node %d: XUI_HOST is required", i)
 		}
-		if src.XUIAPIToken == "" {
-			return fmt.Errorf("source %d: XUI_API_TOKEN is required", i)
+		if node.XUIAPIToken == "" {
+			return fmt.Errorf("node %d: XUI_API_TOKEN is required", i)
 		}
-		if src.XUIInboundID <= 0 {
-			return fmt.Errorf("source %d: XUI_INBOUND_ID must be positive", i)
+		if node.XUIInboundIDs == "" {
+			return fmt.Errorf("node %d: XUI_INBOUND_IDS must not be empty", i)
+		}
+		var ids []int
+		if err := json.Unmarshal([]byte(node.XUIInboundIDs), &ids); err != nil {
+			return fmt.Errorf("node %d: XUI_INBOUND_IDS must be a JSON array of ints", i)
+		}
+		if len(ids) == 0 {
+			return fmt.Errorf("node %d: XUI_INBOUND_IDS must contain at least one inbound ID", i)
 		}
 	}
 

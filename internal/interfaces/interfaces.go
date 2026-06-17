@@ -49,7 +49,7 @@ type NodeRepository interface {
 	ListNodes(ctx context.Context) ([]database.Node, error)
 	GetNodesByPlanName(ctx context.Context, planName string) ([]database.Node, error)
 	IsNodesEmpty(ctx context.Context) (bool, error)
-	SeedDefaultNode(ctx context.Context, name, host, apiToken string, inboundID int, subscriptionURL string) error
+	SeedDefaultNode(ctx context.Context, name, host, apiToken string, inboundIDs []int, subscriptionURL string) error
 }
 
 type InviteRepository interface {
@@ -91,9 +91,9 @@ type DatabaseService interface {
 
 type XUIClient interface {
 	Ping(ctx context.Context) error
-	AddClient(ctx context.Context, inboundID int, email string, trafficBytes int64, expiryTime time.Time) (*xui.ClientConfig, error)
-	AddClientWithID(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error)
-	UpdateClient(ctx context.Context, inboundID int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, tgID int64, comment string) error
+	AddClient(ctx context.Context, inboundIDs []int, email string, trafficBytes int64, expiryTime time.Time) (*xui.ClientConfig, error)
+	AddClientWithID(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error)
+	UpdateClient(ctx context.Context, inboundIDs []int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, tgID int64, comment string) error
 	DeleteClient(ctx context.Context, email string) error
 	GetClientTraffic(ctx context.Context, email string) (*xui.ClientTraffic, error)
 	Close() error

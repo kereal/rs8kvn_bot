@@ -143,7 +143,7 @@ func TestE2E_CreateSubscription_XUIFailure(t *testing.T) {
 
 	ctx := context.Background()
 
-	env.xui.AddClientWithIDFunc = func(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
+	env.xui.AddClientWithIDFunc = func(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
 		return nil, fmt.Errorf("connection refused")
 	}
 
@@ -176,7 +176,7 @@ func TestE2E_CreateSubscription_TrafficLimitCorrect(t *testing.T) {
 	ctx := context.Background()
 
 	var capturedTraffic int64
-	env.xui.AddClientWithIDFunc = func(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
+	env.xui.AddClientWithIDFunc = func(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
 		capturedTraffic = trafficBytes
 		return &xui.ClientConfig{
 			ID:    "client-uuid-123",
@@ -387,7 +387,7 @@ func TestE2E_Service_Create_XUIFailure_NoDBRecord(t *testing.T) {
 
 	ctx := context.Background()
 
-	env.xui.AddClientWithIDFunc = func(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
+	env.xui.AddClientWithIDFunc = func(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
 		return nil, fmt.Errorf("xui add client: connection refused")
 	}
 
@@ -413,7 +413,7 @@ func TestE2E_Service_Create_RollbackXUIOnDBError(t *testing.T) {
 
 	ctx := context.Background()
 
-	env.xui.AddClientWithIDFunc = func(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
+	env.xui.AddClientWithIDFunc = func(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
 		return &xui.ClientConfig{
 			ID:    clientID,
 			Email: email,
@@ -447,7 +447,7 @@ func TestE2E_Service_Create_RollbackFailure_ReturnsError(t *testing.T) {
 
 	ctx := context.Background()
 
-	env.xui.AddClientWithIDFunc = func(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
+	env.xui.AddClientWithIDFunc = func(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
 		return &xui.ClientConfig{
 			ID:    clientID,
 			Email: email,

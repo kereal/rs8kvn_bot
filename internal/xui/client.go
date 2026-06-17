@@ -21,25 +21,7 @@ import (
 	"go.uber.org/zap"
 )
 
-func marshalJSON[T any](v T) (*bytes.Reader, error) {
-	body, err := json.Marshal(v)
-	if err != nil {
-		return nil, err
-	}
-	return bytes.NewReader(body), nil
-}
-
-func closeResponseBody(resp *http.Response) {
-	if resp == nil || resp.Body == nil {
-		return
-	}
-	if err := resp.Body.Close(); err != nil {
-		logger.Debug("Failed to close response body",
-			zap.Error(err),
-			zap.String("url", resp.Request.URL.String()))
-	}
-}
-
+// Client — HTTP-клиент для взаимодействия с панелью 3x-ui.
 type Client struct {
 	host       string
 	apiToken   string
@@ -47,12 +29,14 @@ type Client struct {
 	transport  *http.Transport
 }
 
+// APIResponse — универсальный контейнер ответа от панели 3x-ui.
 type APIResponse struct {
 	Success bool            `json:"success"`
 	Msg     string          `json:"msg"`
 	Obj     json.RawMessage `json:"obj,omitempty"`
 }
 
+// ClientConfig — DTO клиента, используемое при создании/обновлении в панели.
 type ClientConfig struct {
 	ID        string `json:"id"`
 	Email     string `json:"email"`
@@ -64,8 +48,15 @@ type ClientConfig struct {
 	SubID     string `json:"subId"`
 	Flow      string `json:"flow,omitempty"`
 	Reset     int    `json:"reset,omitempty"`
+
+	UUID string `json:"uuid"`
+	Group string `json:"group"`
+
+	CreatedAt int64 `json:"-"`
+	UpdatedAt int64 `json:"-"`
 }
 
+// ClientTraffic — DTO трафика клиента, возвращаемого панелью.
 type ClientTraffic struct {
 	ID         int    `json:"id"`
 	InboundID  int    `json:"inboundId"`
@@ -82,6 +73,7 @@ type ClientTraffic struct {
 	LastOnline int64  `json:"lastOnline"`
 }
 
+// Inbound — DTO inbound-записи из панели 3x-ui.
 type Inbound struct {
 	ID             int             `json:"id"`
 	Up             int             `json:"up"`
@@ -99,6 +91,41 @@ type Inbound struct {
 	Sniffing       json.RawMessage `json:"sniffing"`
 }
 
+// marshalJSON сериализует значение в bytes.Reader для HTTP-запроса.
+func marshalJSON[T any](v T) (*bytes.Reader, error) {
+	body, err := json.Marshal(v)
+	if err != nil {
+		return nil, err
+	}
+	return bytes.NewReader(body), nil
+}
+
+// buildClientBody формирует замыкание, сериализующее тело запроса
+// с полем client и массивом inboundIds.
+func (c *Client) buildClientBody(clientObj map[string]any, inboundIDs []int) func() (io.Reader, error) {
+	return func() (io.Reader, error) {
+		requestData := map[string]any{
+			"client":     clientObj,
+			"inboundIds": inboundIDs,
+		}
+		return marshalJSON(requestData)
+	}
+}
+
+// closeResponseBody безопасно закрывает тело ответа, избегая nil-панике.
+func closeResponseBody(resp *http.Response) {
+	if resp == nil || resp.Body == nil {
+		return
+	}
+	if err := resp.Body.Close(); err != nil {
+		logger.Debug("Failed to close response body",
+			zap.Error(err),
+			zap.String("url", resp.Request.URL.String()))
+	}
+}
+
+// GetTransport извлекает тип транспортного слоя (network) из StreamSettings.
+// Поддерживает современный формат (JSON-объект) и legacy (двойная кодировка).
 func (in *Inbound) GetTransport() string {
 	if len(in.StreamSettings) == 0 {
 		return ""
@@ -128,6 +155,9 @@ func (in *Inbound) GetTransport() string {
 	return netSettings.Network
 }
 
+// GetRequiredFlow возвращает значение flow, необходимое для данного inbound.
+// Для xhttp/h2/ws/grpc/grpcs flow не требуется ("");
+// для всех остальных транспортов используется xtls-rprx-vision.
 func (in *Inbound) GetRequiredFlow() string {
 	transport := in.GetTransport()
 	switch transport {
@@ -138,6 +168,7 @@ func (in *Inbound) GetRequiredFlow() string {
 	}
 }
 
+// NewClient создаёт и инициализирует HTTP-клиент для работы с панелью.
 func NewClient(host, apiToken string) (*Client, error) {
 	transport := &http.Transport{
 		MaxIdleConns:        config.MaxIdleConns,
@@ -158,12 +189,14 @@ func NewClient(host, apiToken string) (*Client, error) {
 	}, nil
 }
 
+// Ping проверяет доступность панели через /panel/api/server/status.
 func (c *Client) Ping(ctx context.Context) error {
 	statusURL := fmt.Sprintf("%s/panel/api/server/status", c.host)
 	_, err := c.doHTTPRequest(ctx, http.MethodGet, statusURL, nil)
 	return err
 }
 
+// doHTTPRequest выполняет HTTP-запрос к панели и возвращает сырой ответ.
 func (c *Client) doHTTPRequest(ctx context.Context, method, url string, bodyFn func() (io.Reader, error)) ([]byte, error) {
 	var body io.Reader
 	if bodyFn != nil {
@@ -203,7 +236,46 @@ func (c *Client) doHTTPRequest(ctx context.Context, method, url string, bodyFn f
 	return respBody, nil
 }
 
-func (c *Client) AddClient(ctx context.Context, inboundID int, email string, trafficBytes int64, expiryTime time.Time) (*ClientConfig, error) {
+// tgIDContextKey — ключ контекста для передачи Telegram ID в методы панели.
+//
+// Важно: значение живёт ровно до конца текущего вызова. При копировании
+// контекста через context.WithValue / WithTimeout / WithCancel новый
+// контекст наследует значение, поэтому не оборачивайте ctx вокруг
+// параллельных вызовов, если в них тоже читается TgIDFromContext —
+// они увидят чужой tgID. Ставьте WithTgID максимально локально,
+// сразу перед AddClientWithID / UpdateClient.
+type tgIDContextKey struct{}
+
+// WithTgID сохраняет Telegram ID в контексте для последующего использования
+// при создании/обновлении клиента в панели.
+//
+// Риски:
+//   - Контекст копируется по значению, но карта значений общая; при
+//     параллельных вызовах из того же ctx возможна утечка tgID в
+//     дочерние запросы.
+//   - Если контекст прокидывается выше по стеку (например, через HTTP
+//     middleware), tgID может «протечь» в логирование/метрики, если
+//     они тоже читают контекст. Здесь ключ package-private, поэтому
+//     внешний доступ исключён.
+func WithTgID(ctx context.Context, tgID int64) context.Context {
+	return context.WithValue(ctx, tgIDContextKey{}, tgID)
+}
+
+// TgIDFromContext извлекает Telegram ID из контекста.
+// Возвращает 0, если TgID не был установлен.
+//
+// Вызывается только внутри XUI-методов add/update после WithTgID.
+// Если значение не установлено, панель получит tgId=0, что для
+// большинства инстансов означает «без привязки Telegram».
+func TgIDFromContext(ctx context.Context) int64 {
+	if v, ok := ctx.Value(tgIDContextKey{}).(int64); ok {
+		return v
+	}
+	return 0
+}
+
+// AddClient создаёт клиента с автоматической генерацией clientID и subID.
+func (c *Client) AddClient(ctx context.Context, inboundIDs []int, email string, trafficBytes int64, expiryTime time.Time) (*ClientConfig, error) {
 	clientID, err := utils.GenerateUUID()
 	if err != nil {
 		return nil, fmt.Errorf("generate client id: %w", err)
@@ -213,12 +285,20 @@ func (c *Client) AddClient(ctx context.Context, inboundID int, email string, tra
 		return nil, fmt.Errorf("generate sub id: %w", err)
 	}
 
-	return c.AddClientWithID(ctx, inboundID, email, clientID, subID, trafficBytes, expiryTime, -1)
+	return c.AddClientWithID(ctx, inboundIDs, email, clientID, subID, trafficBytes, expiryTime, -1)
 }
 
-func (c *Client) AddClientWithID(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*ClientConfig, error) {
-	if inboundID < 1 {
-		return nil, fmt.Errorf("invalid inbound ID: %d", inboundID)
+// AddClientWithID создаёт клиента с указанными clientID и subID.
+// При наличии inboundIDs с разными требованиями к flow запрос автоматически
+// разбивается на отдельные вызовы панели, сгруппированные по совместимому flow.
+func (c *Client) AddClientWithID(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*ClientConfig, error) {
+	if len(inboundIDs) == 0 {
+		return nil, fmt.Errorf("inbound IDs cannot be empty")
+	}
+	for _, id := range inboundIDs {
+		if id <= 0 {
+			return nil, fmt.Errorf("invalid inbound ID %d: must be positive", id)
+		}
 	}
 	if clientID == "" {
 		return nil, fmt.Errorf("client ID cannot be empty")
@@ -231,21 +311,34 @@ func (c *Client) AddClientWithID(ctx context.Context, inboundID int, email, clie
 		resetDays = config.SubscriptionResetDay
 	}
 
-	flow, flowErr := c.getRequiredFlow(ctx, inboundID)
-	if flowErr != nil {
-		return nil, fmt.Errorf("failed to determine flow: %w", flowErr)
+	groups, err := c.groupInboundIDsByFlow(ctx, inboundIDs)
+	if err != nil {
+		return nil, err
 	}
 
-	var result *ClientConfig
-	errRetry := RetryWithBackoff(ctx, config.XUIMaxRetries, config.XUIInitialRetryDelay, func() error {
-		var innerErr error
-		result, innerErr = c.doAddClientWithID(ctx, inboundID, email, clientID, subID, trafficBytes, expiryTime, resetDays, flow)
-		return innerErr
-	})
-	return result, errRetry
+	tgID := TgIDFromContext(ctx)
+
+	var (
+		result  *ClientConfig
+		firstErr error
+	)
+	for flow, ids := range groups {
+		errRetry := RetryWithBackoff(ctx, config.XUIMaxRetries, config.XUIInitialRetryDelay, func() error {
+			var innerErr error
+			result, innerErr = c.doAddClientWithID(ctx, ids, email, clientID, subID, trafficBytes, expiryTime, resetDays, flow, tgID)
+			return innerErr
+		})
+		if errRetry != nil {
+			firstErr = errRetry
+			break
+		}
+	}
+	return result, firstErr
 }
 
-func (c *Client) doAddClientWithID(ctx context.Context, inboundID int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int, flow string) (*ClientConfig, error) {
+// doAddClientWithID выполняет реальный POST /panel/api/clients/add
+// с уже вычисленным flow для группы inboundIDs.
+func (c *Client) doAddClientWithID(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int, flow string, tgID int64) (*ClientConfig, error) {
 	clientObj := map[string]any{
 		"id":         clientID,
 		"email":      email,
@@ -256,18 +349,12 @@ func (c *Client) doAddClientWithID(ctx context.Context, inboundID int, email, cl
 		"flow":       flow,
 		"subId":      subID,
 		"reset":      resetDays,
-	}
-
-	requestData := map[string]any{
-		"client":     clientObj,
-		"inboundIds": []int{inboundID},
+		"tgId":       fmt.Sprintf("%d", tgID),
 	}
 
 	addURL := fmt.Sprintf("%s/panel/api/clients/add", c.host)
 
-	respBody, err := c.doHTTPRequest(ctx, http.MethodPost, addURL, func() (io.Reader, error) {
-		return marshalJSON(requestData)
-	})
+	respBody, err := c.doHTTPRequest(ctx, http.MethodPost, addURL, c.buildClientBody(clientObj, inboundIDs))
 	if err != nil {
 		return nil, err
 	}
@@ -301,6 +388,7 @@ func (c *Client) doAddClientWithID(ctx context.Context, inboundID int, email, cl
 	}, nil
 }
 
+// DeleteClient удаляет клиента из панели по email.
 func (c *Client) DeleteClient(ctx context.Context, email string) error {
 	if email == "" {
 		return fmt.Errorf("email cannot be empty")
@@ -310,6 +398,7 @@ func (c *Client) DeleteClient(ctx context.Context, email string) error {
 	})
 }
 
+// doDeleteClient выполняет реальный POST /panel/api/clients/del/{email}.
 func (c *Client) doDeleteClient(ctx context.Context, email string) error {
 	if email == "" {
 		return fmt.Errorf("email cannot be empty")
@@ -336,31 +425,46 @@ func (c *Client) doDeleteClient(ctx context.Context, email string) error {
 	return nil
 }
 
-func (c *Client) UpdateClient(ctx context.Context, inboundID int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, tgID int64, comment string) error {
+// UpdateClient обновляет данные клиента в панели.
+// Как и AddClientWithID, автоматически разбивает запрос на группы по flow,
+// если inboundIDs требуют разных значений flow.
+func (c *Client) UpdateClient(ctx context.Context, inboundIDs []int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, tgID int64, comment string) error {
 	if clientID == "" {
 		return fmt.Errorf("client ID cannot be empty")
 	}
 	if currentEmail == "" {
 		return fmt.Errorf("current email cannot be empty")
 	}
-	if inboundID < 1 {
-		return fmt.Errorf("invalid inbound ID: %d", inboundID)
+	if len(inboundIDs) == 0 {
+		return fmt.Errorf("inbound IDs cannot be empty")
+	}
+	for _, id := range inboundIDs {
+		if id <= 0 {
+			return fmt.Errorf("invalid inbound ID %d: must be positive", id)
+		}
 	}
 
-	return RetryWithBackoff(ctx, config.XUIMaxRetries, config.XUIInitialRetryDelay, func() error {
-		return c.doUpdateClient(ctx, inboundID, currentEmail, clientID, email, subID, trafficBytes, expiryTime, tgID, comment)
-	})
+	groups, err := c.groupInboundIDsByFlow(ctx, inboundIDs)
+	if err != nil {
+		return err
+	}
+
+	var firstErr error
+	for flow, ids := range groups {
+		errRetry := RetryWithBackoff(ctx, config.XUIMaxRetries, config.XUIInitialRetryDelay, func() error {
+			return c.doUpdateClient(ctx, ids, currentEmail, clientID, email, subID, trafficBytes, expiryTime, tgID, comment, flow)
+		})
+		if errRetry != nil {
+			firstErr = errRetry
+			break
+		}
+	}
+	return firstErr
 }
 
-func (c *Client) doUpdateClient(ctx context.Context, inboundID int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, tgID int64, comment string) error {
-	// Determine flow based on the actual inbound transport (tcp vs xhttp etc.)
-	// This prevents sending wrong flow value during full-row replace on /clients/update.
-	flow, flowErr := c.getRequiredFlow(ctx, inboundID)
-	if flowErr != nil {
-		logger.Debug("Failed to get required flow for update, using default xtls-rprx-vision", zap.Error(flowErr))
-		flow = "xtls-rprx-vision"
-	}
-
+// doUpdateClient выполняет реальный POST /panel/api/clients/update/{currentEmail}
+// с уже вычисленным flow для группы inboundIDs.
+func (c *Client) doUpdateClient(ctx context.Context, inboundIDs []int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, tgID int64, comment string, flow string) error {
 	clientObj := map[string]any{
 		"id":         clientID,
 		"email":      email,
@@ -377,9 +481,7 @@ func (c *Client) doUpdateClient(ctx context.Context, inboundID int, currentEmail
 
 	updateURL := fmt.Sprintf("%s/panel/api/clients/update/%s", c.host, url.PathEscape(currentEmail))
 
-	respBody, err := c.doHTTPRequest(ctx, http.MethodPost, updateURL, func() (io.Reader, error) {
-		return marshalJSON(clientObj)
-	})
+	respBody, err := c.doHTTPRequest(ctx, http.MethodPost, updateURL, c.buildClientBody(clientObj, inboundIDs))
 	if err != nil {
 		return err
 	}
@@ -400,6 +502,7 @@ func (c *Client) doUpdateClient(ctx context.Context, inboundID int, currentEmail
 	return nil
 }
 
+// GetClientTraffic возвращает актуальный трафик клиента по email.
 func (c *Client) GetClientTraffic(ctx context.Context, email string) (*ClientTraffic, error) {
 	var result *ClientTraffic
 	err := RetryWithBackoff(ctx, config.XUIMaxRetries, config.XUIInitialRetryDelay, func() error {
@@ -410,8 +513,10 @@ func (c *Client) GetClientTraffic(ctx context.Context, email string) (*ClientTra
 	return result, err
 }
 
+// ErrClientNotFound возвращается, когда панель не может найти клиента по email.
 var ErrClientNotFound = errors.New("client not found")
 
+// doGetClientTraffic выполняет GET /panel/api/clients/traffic/{email}.
 func (c *Client) doGetClientTraffic(ctx context.Context, email string) (*ClientTraffic, error) {
 	trafficURL := fmt.Sprintf("%s/panel/api/clients/traffic/%s", c.host, url.PathEscape(email))
 
@@ -440,10 +545,12 @@ func (c *Client) doGetClientTraffic(ctx context.Context, email string) (*ClientT
 	return &traffic, nil
 }
 
+// GetInbound запрашивает данные inbound по его ID у панели.
 func (c *Client) GetInbound(ctx context.Context, inboundID int) (*Inbound, error) {
 	return c.doGetInbound(ctx, inboundID)
 }
 
+// doGetInbound выполняет GET /panel/api/inbounds/get/{inboundID}.
 func (c *Client) doGetInbound(ctx context.Context, inboundID int) (*Inbound, error) {
 	inboundURL := fmt.Sprintf("%s/panel/api/inbounds/get/%d", c.host, inboundID)
 
@@ -469,7 +576,12 @@ func (c *Client) doGetInbound(ctx context.Context, inboundID int) (*Inbound, err
 	return &inbound, nil
 }
 
+// getRequiredFlow возвращает flow, требуемый для работы с указанным inbound.
+// При ошибке получения inbound'а используется безопасный fallback xtls-rprx-vision.
 func (c *Client) getRequiredFlow(ctx context.Context, inboundID int) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	inbound, err := c.doGetInbound(ctx, inboundID)
 	if err != nil {
 		logger.Debug("Failed to get inbound for flow, using default",
@@ -480,6 +592,31 @@ func (c *Client) getRequiredFlow(ctx context.Context, inboundID int) (string, er
 	return inbound.GetRequiredFlow(), nil
 }
 
+// groupInboundIDsByFlow группирует уникальные inboundIDs по совместимому значению flow.
+// Если разные inbound'ы требуют разные flow, они попадут в разные группы,
+// что позволяет корректно обработать их отдельными вызовами панели.
+func (c *Client) groupInboundIDsByFlow(ctx context.Context, inboundIDs []int) (map[string][]int, error) {
+	seen := make(map[int]struct{}, len(inboundIDs))
+	uniqueIDs := make([]int, 0, len(inboundIDs))
+	for _, id := range inboundIDs {
+		if _, ok := seen[id]; !ok {
+			seen[id] = struct{}{}
+			uniqueIDs = append(uniqueIDs, id)
+		}
+	}
+
+	groups := make(map[string][]int)
+	for _, id := range uniqueIDs {
+		flow, err := c.getRequiredFlow(ctx, id)
+		if err != nil {
+			return nil, fmt.Errorf("failed to determine flow for inbound %d: %w", id, err)
+		}
+		groups[flow] = append(groups[flow], id)
+	}
+	return groups, nil
+}
+
+// Close закрывает прозрачное HTTP-соединение к панели.
 func (c *Client) Close() error {
 	if c.transport != nil {
 		c.transport.CloseIdleConnections()
@@ -487,6 +624,7 @@ func (c *Client) Close() error {
 	return nil
 }
 
+// getExpiresAtMillis конвертирует время истечения в миллисекунды Unix.
 func getExpiresAtMillis(expiryTime time.Time) int64 {
 	if expiryTime.IsZero() {
 		return 0
@@ -494,6 +632,7 @@ func getExpiresAtMillis(expiryTime time.Time) int64 {
 	return expiryTime.UnixMilli()
 }
 
+// truncateString обрезает строку до maxLen символов, добавляя "..." при усечении.
 func truncateString(s string, maxLen int) string {
 	if len(s) <= maxLen {
 		return s
@@ -501,6 +640,8 @@ func truncateString(s string, maxLen int) string {
 	return s[:maxLen] + "..."
 }
 
+// isRetryable определяет, можно ли повторить запрос при данной ошибке.
+// DNS-ошибки и нерешаемые ошибки имён не ретраятся; таймауты — ретраятся.
 func isRetryable(err error) bool {
 	if err == nil {
 		return false
@@ -523,6 +664,8 @@ func isRetryable(err error) bool {
 	return true
 }
 
+// RetryWithBackoff выполняет fn с экспоненциальной задержкой до maxRetries раз.
+// Прерывается при не-retryable ошибке или отменённом контексте.
 func RetryWithBackoff(ctx context.Context, maxRetries int, initialDelay time.Duration, fn func() error) error {
 	if maxRetries <= 0 {
 		return errors.New("maxRetries must be positive")

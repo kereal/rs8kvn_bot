@@ -65,16 +65,18 @@ func (s *Service) IsNodesEmpty(ctx context.Context) (bool, error) {
 
 // SeedDefaultNode inserts the default node from environment variables if the nodes table is empty.
 // It also links all existing plans to the new node and assigns the free plan to legacy subscriptions.
-func (s *Service) SeedDefaultNode(ctx context.Context, name, host, apiToken string, inboundID int, subscriptionURL string) error {
+func (s *Service) SeedDefaultNode(ctx context.Context, name, host, apiToken string, inboundIDs []int, subscriptionURL string) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		node := Node{
 			Name:            name,
 			IsActive:        true,
 			Host:            host,
 			APIToken:        apiToken,
-			InboundID:       inboundID,
 			SubscriptionURL: subscriptionURL,
 			Type:            "x-ui",
+		}
+		if err := node.SetInboundIDs(inboundIDs); err != nil {
+			return err
 		}
 		if err := tx.Create(&node).Error; err != nil {
 			return err
