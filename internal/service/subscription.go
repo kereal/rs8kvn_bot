@@ -252,6 +252,7 @@ type TrafficInfo struct {
 	ResetInfo          string
 	CreatedAtFormatted string
 	ExpiresAtFormatted string
+	PlanName           string
 }
 
 func (s *SubscriptionService) PlanTrafficLimitGB(ctx context.Context, telegramID int64) int {
@@ -276,6 +277,24 @@ func (s *SubscriptionService) GetWithTraffic(ctx context.Context, telegramID int
 	}
 
 	limitGB := s.PlanTrafficLimitGB(ctx, telegramID)
+
+	// Получаем название тарифного плана
+	plan, planErr := s.db.GetPlanByID(ctx, sub.PlanID)
+	var planName string
+	if planErr == nil && plan != nil {
+		planName = plan.Name
+	}
+
+	// Если лимит трафика нулевой — не опрашиваем серверы
+	if limitGB == 0 {
+		return sub, &TrafficInfo{
+			UsedGB:             0,
+			LimitGB:            0,
+			PlanName:           planName,
+			CreatedAtFormatted: utils.FormatDateRu(sub.CreatedAt),
+			ExpiresAtFormatted: utils.FormatDateRu(sub.ExpiresAt),
+		}, nil
+	}
 
 	email := XUIEmail(sub.Username, sub.TelegramID)
 
@@ -302,8 +321,9 @@ func (s *SubscriptionService) GetWithTraffic(ctx context.Context, telegramID int
 	// не получилось опросить серверы
 	if !anySuccess {
 		return sub, &TrafficInfo{
-			UsedGB:  0,
-			LimitGB: limitGB,
+			UsedGB:   0,
+			LimitGB:  limitGB,
+			PlanName: planName,
 		}, nil
 	}
 
@@ -349,6 +369,7 @@ func (s *SubscriptionService) GetWithTraffic(ctx context.Context, telegramID int
 		ResetInfo:          resetInfo,
 		CreatedAtFormatted: utils.FormatDateRu(sub.CreatedAt),
 		ExpiresAtFormatted: utils.FormatDateRu(sub.ExpiresAt),
+		PlanName:           planName,
 	}, nil
 }
 

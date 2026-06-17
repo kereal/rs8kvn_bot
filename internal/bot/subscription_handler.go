@@ -118,13 +118,38 @@ func (sh *SubscriptionHandler) handleMySubscription(ctx context.Context, chatID 
 		return nil
 	}
 
-	trafficInfo := fmt.Sprintf("%.2f из %d Гб (%.0f%%)", traffic.UsedGB, traffic.LimitGB, traffic.Percentage)
+	var trafficInfo string
+	var progressBar string
+	if traffic.LimitGB == 0 {
+		trafficInfo = "неограничен"
+	} else {
+		trafficInfo = fmt.Sprintf("%.2f из %d Гб (%.0f%%)", traffic.UsedGB, traffic.LimitGB, traffic.Percentage)
+		progressBar = "\n" + traffic.ProgressBar
+	}
+
+	// Статус подписки
+	var statusText string
+	switch sub.Status {
+	case "active":
+		statusText = "активна"
+	default:
+		statusText = sub.Status
+	}
+
+	// Дата истечения
+	var expiresText string
+	if !sub.ExpiresAt.IsZero() {
+		expiresText = fmt.Sprintf("\n⏰ Истекает: %s", traffic.ExpiresAtFormatted)
+	}
 
 	messageText := fmt.Sprintf(
-		"📋 *Ваша подписка*\n\n📊 Трафик: %s\n%s\n\n📅 Создана: %s\n%s\n\n🔗 Ссылка\n`%s`",
+		"📋 *Ваша подписка*\n\n🔹 Статус: %s\n💡 Тариф: *%s*\n📊 Трафик: %s%s\n\n📅 Создана: %s%s\n%s\n\n🔗 Ссылка\n`%s`",
+		statusText,
+		traffic.PlanName,
 		trafficInfo,
-		traffic.ProgressBar,
+		progressBar,
 		traffic.CreatedAtFormatted,
+		expiresText,
 		traffic.ResetInfo,
 		sh.h.cfg.SubURL(sub.SubscriptionID),
 	)
