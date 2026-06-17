@@ -98,7 +98,7 @@ func TestHandleSubscription_AccessLog(t *testing.T) {
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/sub/unknown?debug=1", nil)
 	r.RemoteAddr = "203.0.113.10:1234"
-	r.Header.Set("X-HWID", "hw-1")
+	r.Header.Set("X-Hwid", "hw-1")
 	r.Header.Set("X-Device-Os", "iOS")
 	r.Header.Set("X-Ver-Os", "17.0")
 	r.Header.Set("X-Device-Model", "iPhone 15")
@@ -463,7 +463,7 @@ func TestHandleSubscription_DevicesTracking(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/sub/test123", nil)
-	r.Header.Set("X-HWID", "device1")
+	r.Header.Set("X-Hwid", "device1")
 	r.Header.Set("User-Agent", "v2rayN/1.0")
 	srv.handleSubscription(w, r)
 

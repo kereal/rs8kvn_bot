@@ -233,7 +233,7 @@ func (l *AccessLogger) Log(r *http.Request, statusCode int, clientIP string) {
 		zap.String("url", r.URL.RequestURI()),
 		zap.Int("status_code", statusCode),
 		zap.String("ip", sanitizeAccessLogValue(clientIP)),
-		zap.String("x_hwid", sanitizeAccessLogValue(r.Header.Get("X-HWID"))),
+		zap.String("x_hwid", sanitizeAccessLogValue(r.Header.Get("X-Hwid"))),
 		zap.String("x_device_os", sanitizeAccessLogValue(r.Header.Get("X-Device-Os"))),
 		zap.String("x_ver_os", sanitizeAccessLogValue(r.Header.Get("X-Ver-Os"))),
 		zap.String("x_device_model", sanitizeAccessLogValue(r.Header.Get("X-Device-Model"))),
