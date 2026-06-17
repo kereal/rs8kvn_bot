@@ -42,6 +42,7 @@ func TestSeedDefaultNode_Success(t *testing.T) {
 	require.NoError(t, parseErr)
 	assert.Equal(t, []int{1}, inboundIDs)
 	assert.Equal(t, "https://sub.example.com", mainSrc.SubscriptionURL)
+	assert.Equal(t, NodeType3xUI, mainSrc.Type)
 	assert.True(t, mainSrc.IsActive)
 }
 

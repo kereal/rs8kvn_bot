@@ -43,7 +43,7 @@ func (s *Service) GetOrdersBySubscriptionID(ctx context.Context, subscriptionID 
 }
 
 // UpdateOrderStatus updates the status of an order by ID.
-func (s *Service) UpdateOrderStatus(ctx context.Context, id uint, status string) error {
+func (s *Service) UpdateOrderStatus(ctx context.Context, id uint, status OrderStatus) error {
 	result := s.db.WithContext(ctx).Model(&Order{}).Where("id = ?", id).Update("status", status)
 	if result.Error != nil {
 		return fmt.Errorf("failed to update order status: %w", result.Error)

@@ -117,9 +117,9 @@ id, name UNIQUE, devices_limit, traffic_limit
 **Удалено в migration 019:** `duration`.  
 **Удалено в migration 016:** `price`.
 
-### `products` (migration 013)
+### `products` (migration 013 + 021)
 Покупаемые продукты, привязанные к планам.
-- `id`, `plan_id` (FK → plans), `duration_days`, `price_cents`, `currency`, `is_active`, `created_at`, `updated_at`.
+- `id`, `plan_id` (FK → plans), `name` (VARCHAR(255) NOT NULL), `duration_days`, `price_cents`, `currency`, `is_active`, `created_at`, `updated_at`.
 
 ### `orders` (migration 017)
 Факт покупки подписки и процесс обработки платежа.
