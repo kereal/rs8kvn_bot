@@ -583,7 +583,7 @@ func TestUpdateClient(t *testing.T) {
 			body, _ := io.ReadAll(r.Body)
 			assert.Contains(t, string(body), `"email":"new@email.com"`)
 			assert.Contains(t, string(body), `"totalGB"`)
-			assert.Contains(t, string(body), `"tgId":"12345"`)
+			assert.Contains(t, string(body), `"tgId":12345`)
 			assert.NotContains(t, string(body), `"clients"`) // no old nested wrapper
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
