@@ -87,10 +87,12 @@ func (tb *TokenBucket) WaitN(ctx context.Context, n float64) bool {
 
 		tb.mu.Unlock()
 
+		timer := time.NewTimer(waitDuration)
 		select {
-		case <-time.After(waitDuration):
+		case <-timer.C:
 			continue
 		case <-ctx.Done():
+			timer.Stop()
 			return false
 		}
 	}
