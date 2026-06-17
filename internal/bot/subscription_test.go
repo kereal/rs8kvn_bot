@@ -954,7 +954,7 @@ func TestInvalidateCache(t *testing.T) {
 	require.NotNil(t, handler.cache.Get(chatID))
 
 	// Invalidate
-	handler.invalidateCache(chatID)
+	handler.invalidateCache(context.Background(), chatID)
 
 	// Verify cache was cleared
 	assert.Nil(t, handler.cache.Get(chatID))

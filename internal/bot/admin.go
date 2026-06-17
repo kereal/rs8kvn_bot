@@ -143,7 +143,7 @@ func (h *Handler) HandleDel(ctx context.Context, update tgbotapi.Update) error {
 
 	// Invalidate cache only after successful deletion
 	if deleted.TelegramID != 0 {
-		h.invalidateCache(deleted.TelegramID)
+		h.invalidateCache(ctx, deleted.TelegramID)
 	}
 
 	// Success
@@ -280,7 +280,7 @@ func (h *Handler) HandleBroadcast(ctx context.Context, update tgbotapi.Update) e
 	}
 
 	if broadcastCancelled {
-		h.SendMessage(context.Background(), chatID, fmt.Sprintf(`⚠️ Рассылка прервана!
+		h.SendMessage(context.WithoutCancel(ctx), chatID, fmt.Sprintf(`⚠️ Рассылка прервана!
 
 📤 Отправлено: %d
 ❌ Ошибок: %d
@@ -291,7 +291,7 @@ func (h *Handler) HandleBroadcast(ctx context.Context, update tgbotapi.Update) e
 		return fmt.Errorf("broadcast cancelled")
 	}
 	if batchErr != nil {
-		h.SendMessage(context.Background(), chatID, fmt.Sprintf(`❌ Рассылка прервана из-за ошибки!
+		h.SendMessage(context.WithoutCancel(ctx), chatID, fmt.Sprintf(`❌ Рассылка прервана из-за ошибки!
 
 📤 Отправлено: %d
 ❌ Ошибок отправки: %d
@@ -311,7 +311,7 @@ func (h *Handler) HandleBroadcast(ctx context.Context, update tgbotapi.Update) e
 		return fmt.Errorf("broadcast batch error: %w", batchErr)
 	}
 
-	h.SendMessage(context.Background(), chatID, fmt.Sprintf(`✅ Рассылка завершена!
+	h.SendMessage(context.WithoutCancel(ctx), chatID, fmt.Sprintf(`✅ Рассылка завершена!
 
 📤 Отправлено: %d
 ❌ Ошибок: %d
