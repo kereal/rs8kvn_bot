@@ -91,8 +91,8 @@ func (s *SubscriptionService) Create(ctx context.Context, chatID int64, username
 
 	trafficBytes := plan.TrafficLimit
 
-	var expiryTime time.Time
-	var resetday int
+	expiryTime := time.Now().AddDate(0, 0, config.SubscriptionResetDay)
+	resetday := config.SubscriptionResetDay
 
 	clientID, err := utils.GenerateUUID()
 	if err != nil {
