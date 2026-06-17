@@ -311,20 +311,29 @@ func (c *Client) AddClientWithID(ctx context.Context, inboundIDs []int, email, c
 		resetDays = config.SubscriptionResetDay
 	}
 
-	flow, flowErr := c.getRequiredFlow(ctx, inboundIDs[0])
-	if flowErr != nil {
-		return nil, fmt.Errorf("failed to determine flow: %w", flowErr)
+	groups, err := c.groupInboundIDsByFlow(ctx, inboundIDs)
+	if err != nil {
+		return nil, err
 	}
 
 	tgID := TgIDFromContext(ctx)
 
-	var result *ClientConfig
-	errRetry := RetryWithBackoff(ctx, config.XUIMaxRetries, config.XUIInitialRetryDelay, func() error {
-		var innerErr error
-		result, innerErr = c.doAddClientWithID(ctx, inboundIDs, email, clientID, subID, trafficBytes, expiryTime, resetDays, flow, tgID)
-		return innerErr
-	})
-	return result, errRetry
+	var (
+		result  *ClientConfig
+		firstErr error
+	)
+	for flow, ids := range groups {
+		errRetry := RetryWithBackoff(ctx, config.XUIMaxRetries, config.XUIInitialRetryDelay, func() error {
+			var innerErr error
+			result, innerErr = c.doAddClientWithID(ctx, ids, email, clientID, subID, trafficBytes, expiryTime, resetDays, flow, tgID)
+			return innerErr
+		})
+		if errRetry != nil {
+			firstErr = errRetry
+			break
+		}
+	}
+	return result, firstErr
 }
 
 // doAddClientWithID выполняет реальный POST /panel/api/clients/add
