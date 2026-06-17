@@ -113,7 +113,7 @@ func HandleSubscription(ctx context.Context, db interfaces.DatabaseService, subS
 		sourceURL := srcSubURL + subID
 
 		// Fetch the upstream subscription response from the source.
-		xuiResp, err := FetchFromXUI(sourceURL)
+		xuiResp, err := FetchFromXUI(ctx, sourceURL)
 		if err != nil {
 			logger.Error("Failed to fetch from node",
 				zap.String("sub_id", subID),

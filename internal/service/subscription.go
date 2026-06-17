@@ -256,7 +256,7 @@ type TrafficInfo struct {
 
 func (s *SubscriptionService) PlanTrafficLimitGB(ctx context.Context, telegramID int64) int {
 	sub, err := s.db.GetByTelegramID(ctx, telegramID)
-	if err != nil {
+	if err != nil || sub == nil {
 		return 0
 	}
 	plan, planErr := s.db.GetPlanByID(ctx, sub.PlanID)

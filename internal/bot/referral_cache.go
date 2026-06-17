@@ -118,30 +118,28 @@ func (rc *ReferralCache) Sync(ctx context.Context) error {
 }
 
 func (rc *ReferralCache) StartSync(ctx context.Context) {
-	go func() {
-		defer logger.Recover("ReferralCache sync")
-		ticker := time.NewTicker(1 * time.Hour)
-		defer ticker.Stop()
+	defer logger.Recover("ReferralCache sync")
+	ticker := time.NewTicker(1 * time.Hour)
+	defer ticker.Stop()
 
-		if err := rc.Load(ctx); err != nil {
-			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-				logger.Info("Referral cache load skipped (context ending)")
-			} else {
-				logger.Error("Failed to load referral cache", zap.Error(err))
+	if err := rc.Load(ctx); err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			logger.Info("Referral cache load skipped (context ending)")
+		} else {
+			logger.Error("Failed to load referral cache", zap.Error(err))
+		}
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := rc.Sync(ctx); err != nil {
+				logger.Error("Failed to sync referral cache", zap.Error(err))
 			}
 		}
-
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				if err := rc.Sync(ctx); err != nil {
-					logger.Error("Failed to sync referral cache", zap.Error(err))
-				}
-			}
-		}
-	}()
+	}
 }
 
 func (rc *ReferralCache) CheckAdminSendRateLimit(chatID int64) bool {
