@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/kereal/rs8kvn_bot/internal/logger"
@@ -38,6 +39,7 @@ type Event struct {
 // WebhookSender interface for sending webhook events (mockable for tests).
 type WebhookSender interface {
 	SendAsync(event Event)
+	Wait()
 }
 
 // PermanentError indicates a client-side HTTP error (4xx except 429) that
@@ -65,6 +67,7 @@ type Sender struct {
 	url         string
 	secret      string
 	retryDelays []time.Duration
+	wg          sync.WaitGroup
 }
 
 // NewSender creates a new webhook sender.
@@ -98,7 +101,9 @@ func (s *Sender) SendAsync(event Event) {
 		return
 	}
 
+	s.wg.Add(1)
 	go func(e Event) {
+		defer s.wg.Done()
 		defer logger.Recover("Webhook delivery")
 		for i, delay := range s.retryDelays {
 			if i > 0 {
@@ -129,6 +134,11 @@ func (s *Sender) SendAsync(event Event) {
 			zap.String("event", e.Event),
 			zap.String("url", s.url))
 	}(event)
+}
+
+// Wait blocks until all current webhook deliveries complete.
+func (s *Sender) Wait() {
+	s.wg.Wait()
 }
 
 // send makes a single attempt to deliver the webhook event.
@@ -205,3 +215,5 @@ type NoopSender struct{}
 func (n *NoopSender) SendAsync(_ Event) {
 	// No-op
 }
+
+func (n *NoopSender) Wait() {}

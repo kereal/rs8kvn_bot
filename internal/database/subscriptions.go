@@ -79,6 +79,9 @@ func (s *Service) DeleteSubscription(ctx context.Context, telegramID int64) erro
 	if result.Error != nil {
 		return fmt.Errorf("failed to delete subscription: %w", result.Error)
 	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("no subscription found for telegram_id %d", telegramID)
+	}
 	return nil
 }
 

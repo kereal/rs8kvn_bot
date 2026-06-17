@@ -300,7 +300,7 @@ func (sh *SubscriptionHandler) createSubscription(ctx context.Context, chatID in
 }
 
 // handleCreateError handles errors from createSubscription.
-func (sh *SubscriptionHandler) handleCreateError(ctx context.Context, chatID int64, messageID int, username string, err error) error {
+func (sh *SubscriptionHandler) handleCreateError(ctx context.Context, chatID int64, messageID int, username string, err error) {
 	logger.Error("Failed to create subscription", zap.Error(err))
 
 	classified := classifyXUIError(err)
@@ -327,5 +327,4 @@ func (sh *SubscriptionHandler) handleCreateError(ctx context.Context, chatID int
 	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, errMsg)
 	editMsg.DisableWebPagePreview = true
 	sh.h.safeSend(editMsg)
-	return err
 }

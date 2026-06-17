@@ -1,6 +1,7 @@
 package subserver
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"io"
@@ -35,8 +36,8 @@ type XUIResponse struct {
 // FetchFromXUI sends an HTTP GET to url with a custom User-Agent and returns
 // the response body (up to 10 MB) together with all response headers stored
 // under lowercased keys. Header values are taken from the first value for each key.
-func FetchFromXUI(url string) (*XUIResponse, error) {
-	req, err := http.NewRequest(http.MethodGet, url, nil)
+func FetchFromXUI(ctx context.Context, url string) (*XUIResponse, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		logger.Error("Failed to create HTTP request for XUI fetch",
 			zap.String("url", url),

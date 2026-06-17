@@ -482,6 +482,13 @@ eventLoop:
 		logger.Warn("Timeout waiting for update handlers")
 	}
 
+	// Ожидание завершения текущих доставок webhook
+	if webhookSender != nil {
+		logger.Info("Waiting for webhook deliveries...")
+		webhookSender.Wait()
+		logger.Info("Webhook deliveries completed")
+	}
+
 	// Wait for background tasks with timeout
 	logger.Info("Waiting for background tasks to stop...")
 	bgDone := make(chan struct{})
@@ -496,6 +503,11 @@ eventLoop:
 	case <-time.After(config.ShutdownTimeout):
 		logger.Warn("Timeout waiting for background tasks to stop")
 	}
+
+	// Ожидание фоновых горутин обработчика
+	logger.Info("Waiting for handler background goroutines...")
+	handler.WaitForBackgroundGoroutines()
+	logger.Info("Handler background goroutines stopped")
 
 	logger.Info("Bot stopped successfully")
 }

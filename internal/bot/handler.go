@@ -79,6 +79,9 @@ type Handler struct {
 	cbHandler  *CallbackHandler
 	subHandler *SubscriptionHandler
 
+	// Background goroutine tracking
+	bgWg sync.WaitGroup
+
 	// Lazy init guards (for test-constructed handlers or deferred init)
 	subHandlerOnce sync.Once
 	referralOnce   sync.Once
@@ -261,9 +264,9 @@ func (h *Handler) createSubscription(ctx context.Context, chatID int64, username
 	return h.subHandler.createSubscription(ctx, chatID, username, messageID)
 }
 
-func (h *Handler) handleCreateError(ctx context.Context, chatID int64, messageID int, username string, err error) error {
+func (h *Handler) handleCreateError(ctx context.Context, chatID int64, messageID int, username string, err error) {
 	h.subHandlerOnce.Do(func() { h.subHandler = NewSubscriptionHandler(h) })
-	return h.subHandler.handleCreateError(ctx, chatID, messageID, username, err)
+	h.subHandler.handleCreateError(ctx, chatID, messageID, username, err)
 }
 
 // Referral delegates
@@ -458,7 +461,11 @@ func (h *Handler) SyncReferralCache(ctx context.Context) error {
 }
 
 func (h *Handler) StartReferralCacheSync(ctx context.Context) {
-	h.referralCache.StartSync(ctx)
+	h.bgWg.Add(1)
+	go func() {
+		defer h.bgWg.Done()
+		h.referralCache.StartSync(ctx)
+	}()
 }
 
 func (h *Handler) LoadReferralCache(ctx context.Context) error {
@@ -473,12 +480,23 @@ func (h *Handler) GetSubscriptionService() *service.SubscriptionService {
 
 // Lifecycle
 func (h *Handler) StartCacheCleanup(ctx context.Context, interval time.Duration) {
-	go h.cache.StartCleanup(ctx, interval)
+	h.bgWg.Add(1)
+	go func() {
+		defer h.bgWg.Done()
+		h.cache.StartCleanup(ctx, interval)
+	}()
 }
 
 func (h *Handler) StartRateLimiterCleanup(ctx context.Context, interval, maxIdle time.Duration) {
-	// Start cleanup in a separate goroutine to avoid blocking.
-	go h.rateLimiter.StartCleanup(ctx, interval, maxIdle)
+	h.bgWg.Add(1)
+	go func() {
+		defer h.bgWg.Done()
+		h.rateLimiter.StartCleanup(ctx, interval, maxIdle)
+	}()
+}
+
+func (h *Handler) WaitForBackgroundGoroutines() {
+	h.bgWg.Wait()
 }
 
 // checkAdminSendRateLimit checks if an admin can send a message (rate limit: 1 per minute).

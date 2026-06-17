@@ -536,7 +536,8 @@ func TestService_DeleteSubscription_NotFound(t *testing.T) {
 	svc := newTestService(t)
 
 	err := svc.DeleteSubscription(context.Background(), 999999)
-	assert.NoError(t, err)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "no subscription found")
 }
 
 // ==================== Service GetByID Tests ====================
