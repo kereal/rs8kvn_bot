@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"gorm.io/gorm"
@@ -38,6 +39,9 @@ func (s *Service) GetPlanByName(ctx context.Context, name string) (*Plan, error)
 	var plan Plan
 	result := s.db.WithContext(ctx).Where("name = ?", name).First(&plan)
 	if result.Error != nil {
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return nil, ErrPlanNotFound
+		}
 		return nil, fmt.Errorf("failed to get plan by name: %w", result.Error)
 	}
 	return &plan, nil
@@ -48,6 +52,9 @@ func (s *Service) GetPlanByID(ctx context.Context, id uint) (*Plan, error) {
 	var plan Plan
 	result := s.db.WithContext(ctx).First(&plan, id)
 	if result.Error != nil {
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return nil, ErrPlanNotFound
+		}
 		return nil, fmt.Errorf("failed to get plan by id: %w", result.Error)
 	}
 	return &plan, nil
@@ -73,7 +80,7 @@ func (s *Service) SeedDefaultNode(ctx context.Context, name, host, apiToken stri
 			Host:            host,
 			APIToken:        apiToken,
 			SubscriptionURL: subscriptionURL,
-			Type:            "x-ui",
+			Type:            "3x-ui",
 		}
 		if err := node.SetInboundIDs(inboundIDs); err != nil {
 			return err
