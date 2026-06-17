@@ -349,7 +349,7 @@ func (c *Client) doAddClientWithID(ctx context.Context, inboundIDs []int, email,
 		"flow":       flow,
 		"subId":      subID,
 		"reset":      resetDays,
-		"tgId":       fmt.Sprintf("%d", tgID),
+		"tgId":       tgID,
 	}
 
 	addURL := fmt.Sprintf("%s/panel/api/clients/add", c.host)
@@ -475,7 +475,7 @@ func (c *Client) doUpdateClient(ctx context.Context, inboundIDs []int, currentEm
 		"flow":       flow,
 		"subId":      subID,
 		"reset":      config.SubscriptionResetDay,
-		"tgId":       fmt.Sprintf("%d", tgID),
+		"tgId":       tgID,
 		"comment":    comment,
 	}
 
