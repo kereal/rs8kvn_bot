@@ -346,7 +346,7 @@ ConnMaxIdleTime = 2m
 - `BindTrialSubscription`: check telegram_id=0 → update (race-safe)
 
 **Orders/Products support:**
-- `Product` — purchasable subscription product bound to a plan (price, duration)
+- `Product` — purchasable subscription product bound to a plan (name, price, duration)
 - `Order` — purchase event with payment tracking (pending/paid/expired/canceled)
 - `UpdateOrderStatus`, `GetActiveByPlanID`, `GetOrdersBySubscriptionID`
 - Migration 017: `orders` table with CHECK constraint on status
@@ -554,6 +554,7 @@ SIGQUIT (kill -3) → core dump (not handled by us)
 ├─────────────────────────────────────────────────────────────┤
 │ id (PK)              uint                                   │
 │ plan_id              uint     INDEX  (FK → plans)           │
+│ name                 string   VARCHAR(255) NOT NULL         │
 │ duration_days        int      NOT NULL                      │
 │ price_cents          int64    NOT NULL                      │
 │ currency             char(3)  DEFAULT 'RUB'                 │

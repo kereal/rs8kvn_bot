@@ -73,7 +73,7 @@ type OrderRepository interface {
 	CreateOrder(ctx context.Context, order *database.Order) error
 	GetOrderByID(ctx context.Context, id uint) (*database.Order, error)
 	GetOrdersBySubscriptionID(ctx context.Context, subscriptionID uint) ([]database.Order, error)
-	UpdateOrderStatus(ctx context.Context, id uint, status string) error
+	UpdateOrderStatus(ctx context.Context, id uint, status database.OrderStatus) error
 }
 
 type DatabaseService interface {

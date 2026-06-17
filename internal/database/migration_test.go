@@ -149,6 +149,47 @@ func TestMigration_SchemaVersionTracking(t *testing.T) {
 	require.NoError(t, db.Close())
 }
 
+func TestMigration_ProductsHaveRequiredName(t *testing.T) {
+	t.Parallel()
+
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+
+	db, err := NewService(dbPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, db.Close()) })
+
+	sqlDB, err := db.db.DB()
+	require.NoError(t, err)
+
+	rows, err := sqlDB.Query("PRAGMA table_info(products)")
+	require.NoError(t, err)
+	defer rows.Close()
+
+	type columnInfo struct {
+		name     string
+		typeName string
+		notNull  int
+	}
+
+	var nameColumn *columnInfo
+	for rows.Next() {
+		var cid int
+		var name, typeName string
+		var notNull int
+		var defaultValue any
+		var pk int
+
+		require.NoError(t, rows.Scan(&cid, &name, &typeName, &notNull, &defaultValue, &pk))
+		if name == "name" {
+			nameColumn = &columnInfo{name: name, typeName: typeName, notNull: notNull}
+		}
+	}
+	require.NoError(t, rows.Err())
+	require.NotNil(t, nameColumn)
+	assert.Equal(t, "VARCHAR(255)", nameColumn.typeName)
+	assert.Equal(t, 1, nameColumn.notNull)
+}
+
 // TestMigration_005_CleansUpDuplicateInvites (and the dedup logic) now primarily
 // validates the deduplication SQL that was moved into migration 004 for safety.
 // The test still exercises the exact window-function dedup + unique index creation

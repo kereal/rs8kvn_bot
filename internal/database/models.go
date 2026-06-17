@@ -12,10 +12,10 @@ import (
 // Sentinel errors returned by Get* functions when a record is not found.
 // Callers should use errors.Is to distinguish "not found" from infrastructure/DB errors.
 var (
-	ErrInviteNotFound      = errors.New("invite not found")
+	ErrInviteNotFound       = errors.New("invite not found")
 	ErrSubscriptionNotFound = fmt.Errorf("subscription not found: %w", gorm.ErrRecordNotFound)
-	ErrPlanNotFound        = errors.New("plan not found")
-	ErrOrderNotFound       = errors.New("order not found")
+	ErrPlanNotFound         = errors.New("plan not found")
+	ErrOrderNotFound        = errors.New("order not found")
 )
 
 const (
@@ -50,6 +50,13 @@ type Subscription struct {
 	Nodes   []SubscriptionNode `gorm:"foreignKey:SubscriptionID"`
 }
 
+type NodeType string
+
+const (
+	NodeType3xUI    NodeType = "3x-ui"
+	NodeTypeProxman NodeType = "proxman"
+)
+
 // Node represents a configured 3x-ui panel source.
 type Node struct {
 	ID              uint      `gorm:"primaryKey;column:id"`
@@ -59,7 +66,7 @@ type Node struct {
 	APIToken        string    `gorm:"size:255;column:api_token"`
 	InboundIDs      string    `gorm:"type:text;not null;default:'[]';column:inbound_ids"`
 	SubscriptionURL string    `gorm:"size:512;column:subscription_url"`
-	Type            string    `gorm:"type:varchar(10);not null;default: x-ui;column:type" json:"type"`
+	Type            NodeType  `gorm:"type:varchar(10);not null;default:3x-ui;column:type" json:"type"`
 	CreatedAt       time.Time `gorm:"autoCreateTime;column:created_at"`
 	UpdatedAt       time.Time `gorm:"autoUpdateTime;column:updated_at"`
 
@@ -92,6 +99,7 @@ type PlanNode struct {
 type Product struct {
 	ID           uint      `gorm:"primaryKey;column:id"`
 	PlanID       uint      `gorm:"not null;column:plan_id"`
+	Name         string    `gorm:"size:255;not null;column:name"`
 	DurationDays int       `gorm:"not null;column:duration_days"`
 	PriceCents   int64     `gorm:"not null;column:price_cents"`
 	Currency     string    `gorm:"size:3;not null;default:RUB;column:currency"`
@@ -111,19 +119,28 @@ type Product struct {
 //   - paid_at — payment confirmation timestamp.
 //   - activated_at — subscription activation timestamp.
 //   - expires_at — payment invoice expiry (e.g. 30 minutes from creation).
+type OrderStatus string
+
+const (
+	OrderStatusPending  OrderStatus = "pending"
+	OrderStatusPaid     OrderStatus = "paid"
+	OrderStatusExpired  OrderStatus = "expired"
+	OrderStatusCanceled OrderStatus = "canceled"
+)
+
 type Order struct {
-	ID                uint       `gorm:"primaryKey;column:id"`
-	SubscriptionID    uint       `gorm:"not null;column:subscription_id"`
-	ProductID         uint       `gorm:"not null;column:product_id"`
-	Status            string     `gorm:"not null;size:16;column:status"`
-	AmountCents       int64      `gorm:"not null;column:amount_cents"`
-	Currency          string     `gorm:"size:3;not null;default:RUB;column:currency"`
-	PaymentProvider   string     `gorm:"column:payment_provider"`
-	ProviderPaymentID string     `gorm:"column:provider_payment_id"`
-	CreatedAt         time.Time  `gorm:"not null;column:created_at"`
-	PaidAt            *time.Time `gorm:"column:paid_at"`
-	ActivatedAt       *time.Time `gorm:"column:activated_at"`
-	ExpiresAt         *time.Time `gorm:"column:expires_at"`
+	ID                uint        `gorm:"primaryKey;column:id"`
+	SubscriptionID    uint        `gorm:"not null;column:subscription_id"`
+	ProductID         uint        `gorm:"not null;column:product_id"`
+	Status            OrderStatus `gorm:"not null;size:16;column:status"`
+	AmountCents       int64       `gorm:"not null;column:amount_cents"`
+	Currency          string      `gorm:"size:3;not null;default:RUB;column:currency"`
+	PaymentProvider   string      `gorm:"column:payment_provider"`
+	ProviderPaymentID string      `gorm:"column:provider_payment_id"`
+	CreatedAt         time.Time   `gorm:"not null;column:created_at"`
+	PaidAt            *time.Time  `gorm:"column:paid_at"`
+	ActivatedAt       *time.Time  `gorm:"column:activated_at"`
+	ExpiresAt         *time.Time  `gorm:"column:expires_at"`
 
 	Subscription *Subscription `gorm:"foreignKey:SubscriptionID"`
 	Product      *Product      `gorm:"foreignKey:ProductID"`
@@ -138,31 +155,31 @@ type Invite struct {
 	Subscriptions []Subscription `gorm:"foreignKey:InviteCode"`
 }
 
-// SubscriptionNodeStatus represents the synchronization status of a subscription on a VPN node.
+// SyncStatus represents the synchronization status of a subscription on a VPN node.
 // Statuses: active | pending_add | pending_remove.
 //
 // Values:
 //   - active — нода добавлена и последняя синхронизация прошла успешно.
 //   - pending_add — запрошено добавление ноды, операция ещё не выполнена на панели.
 //   - pending_remove — запрошено удаление ноды, операция ещё не выполнена на панели.
-type SubscriptionNodeStatus string
+type SyncStatus string
 
 const (
-	SubscriptionNodeStatusActive        SubscriptionNodeStatus = "active"
-	SubscriptionNodeStatusPendingAdd    SubscriptionNodeStatus = "pending_add"
-	SubscriptionNodeStatusPendingRemove SubscriptionNodeStatus = "pending_remove"
+	SyncStatusActive        SyncStatus = "active"
+	SyncStatusPendingAdd    SyncStatus = "pending_add"
+	SyncStatusPendingRemove SyncStatus = "pending_remove"
 )
 
 // SubscriptionNode represents the actual synchronization state of a specific
 // subscription with a specific VPN node (not plan-level, but concrete pair).
 type SubscriptionNode struct {
-	SubscriptionID uint                   `gorm:"primaryKey;column:subscription_id"`
-	NodeID         uint                   `gorm:"primaryKey;column:node_id"`
-	Status         SubscriptionNodeStatus `gorm:"not null;size:16;column:status"`
-	RetryCount     int                    `gorm:"not null;default:0;column:retry_count"`
-	RetryAt        *time.Time             `gorm:"column:retry_at"`
-	LastError      *string                `gorm:"type:text;column:last_error"`
-	UpdatedAt      time.Time              `gorm:"not null;autoUpdateTime;column:updated_at"`
+	SubscriptionID uint       `gorm:"primaryKey;column:subscription_id"`
+	NodeID         uint       `gorm:"primaryKey;column:node_id"`
+	Status         SyncStatus `gorm:"not null;size:16;column:status"`
+	RetryCount     int        `gorm:"not null;default:0;column:retry_count"`
+	RetryAt        *time.Time `gorm:"column:retry_at"`
+	LastError      *string    `gorm:"type:text;column:last_error"`
+	UpdatedAt      time.Time  `gorm:"not null;autoUpdateTime;column:updated_at"`
 }
 
 // TrialRequest tracks trial requests for rate limiting.

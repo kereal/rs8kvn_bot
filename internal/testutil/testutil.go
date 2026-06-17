@@ -99,7 +99,7 @@ type MockDatabaseService struct {
 	CreateOrderFunc                     func(ctx context.Context, order *database.Order) error
 	GetOrderByIDFunc                    func(ctx context.Context, id uint) (*database.Order, error)
 	GetOrdersBySubscriptionIDFunc       func(ctx context.Context, subscriptionID uint) ([]database.Order, error)
-	UpdateOrderStatusFunc               func(ctx context.Context, id uint, status string) error
+	UpdateOrderStatusFunc               func(ctx context.Context, id uint, status database.OrderStatus) error
 	GetSubscriptionBySubscriptionIDFunc func(ctx context.Context, subscriptionID string) (*database.Subscription, error)
 	GetTrialSubscriptionBySubIDFunc     func(ctx context.Context, subscriptionID string) (*database.Subscription, error)
 	BindTrialSubscriptionFunc           func(ctx context.Context, subscriptionID string, telegramID int64, username string) (*database.Subscription, error)
@@ -625,7 +625,7 @@ func (m *MockDatabaseService) GetOrdersBySubscriptionID(ctx context.Context, sub
 	return nil, gorm.ErrRecordNotFound
 }
 
-func (m *MockDatabaseService) UpdateOrderStatus(ctx context.Context, id uint, status string) error {
+func (m *MockDatabaseService) UpdateOrderStatus(ctx context.Context, id uint, status database.OrderStatus) error {
 	if m.UpdateOrderStatusFunc != nil {
 		return m.UpdateOrderStatusFunc(ctx, id, status)
 	}

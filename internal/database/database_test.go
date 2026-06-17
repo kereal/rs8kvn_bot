@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
@@ -20,6 +21,33 @@ func TestMain(m *testing.M) {
 }
 
 // ==================== Model Method Tests ====================
+
+func TestOrder_StatusUsesOrderStatusType(t *testing.T) {
+	t.Parallel()
+
+	orderType := reflect.TypeOf(Order{})
+	statusField, ok := orderType.FieldByName("Status")
+	require.True(t, ok)
+	assert.Equal(t, "database.OrderStatus", statusField.Type.String())
+}
+
+func TestNode_TypeUsesNodeType(t *testing.T) {
+	t.Parallel()
+
+	nodeType := reflect.TypeOf(Node{})
+	typeField, ok := nodeType.FieldByName("Type")
+	require.True(t, ok)
+	assert.Equal(t, "database.NodeType", typeField.Type.String())
+}
+
+func TestSubscriptionNode_StatusUsesSyncStatus(t *testing.T) {
+	t.Parallel()
+
+	subscriptionNodeType := reflect.TypeOf(SubscriptionNode{})
+	statusField, ok := subscriptionNodeType.FieldByName("Status")
+	require.True(t, ok)
+	assert.Equal(t, "database.SyncStatus", statusField.Type.String())
+}
 
 func TestSubscription_IsExpired(t *testing.T) {
 	t.Parallel()

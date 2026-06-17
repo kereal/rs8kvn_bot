@@ -80,7 +80,7 @@ func (s *Service) SeedDefaultNode(ctx context.Context, name, host, apiToken stri
 			Host:            host,
 			APIToken:        apiToken,
 			SubscriptionURL: subscriptionURL,
-			Type:            "3x-ui",
+			Type:            NodeType3xUI,
 		}
 		if err := node.SetInboundIDs(inboundIDs); err != nil {
 			return err
