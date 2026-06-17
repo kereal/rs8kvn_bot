@@ -1,6 +1,7 @@
 package webhook
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -43,7 +44,7 @@ func TestNoopSender(t *testing.T) {
 
 	n := &NoopSender{}
 	// Should not panic
-	n.SendAsync(Event{
+	n.SendAsync(context.Background(), Event{
 		EventID: "evt-test",
 		Event:   EventSubscriptionActivated,
 	})
@@ -92,7 +93,7 @@ func TestSender_SendAsync_Success(t *testing.T) {
 		SubscriptionID: "token-abc",
 	}
 
-	s.SendAsync(event)
+	s.SendAsync(context.Background(), event)
 
 	// Wait for async delivery
 	assert.Eventually(t, func() bool {
@@ -140,7 +141,7 @@ func TestSender_SendAsync_RetryOnFailure(t *testing.T) {
 		Email:    "retry@example.com",
 	}
 
-	s.SendAsync(event)
+	s.SendAsync(context.Background(), event)
 
 	// Wait for all retries
 	assert.Eventually(t, func() bool {
@@ -173,7 +174,7 @@ func TestSender_SendAsync_AllRetriesFail(t *testing.T) {
 		Email:    "fail@example.com",
 	}
 
-	s.SendAsync(event)
+	s.SendAsync(context.Background(), event)
 
 	// Wait for all retries (4 attempts with ms-scale delays)
 	assert.Eventually(t, func() bool {
@@ -190,7 +191,7 @@ func TestSender_SendAsync_EmptyURL_NoOp(t *testing.T) {
 	s := NewSender("", "")
 
 	// Should not panic and should return immediately
-	s.SendAsync(Event{
+	s.SendAsync(context.Background(), Event{
 		EventID: "evt-noop",
 		Event:   EventSubscriptionActivated,
 	})
@@ -226,7 +227,7 @@ func TestSender_SendAsync_PermanentError_NoRetry(t *testing.T) {
 			s := NewSender(server.URL, "secret")
 			s.client = server.Client()
 
-			s.SendAsync(Event{
+			s.SendAsync(context.Background(), Event{
 				EventID:  "evt-perm-test",
 				Event:    EventSubscriptionActivated,
 				ClientID: "user-perm",
@@ -268,7 +269,7 @@ func TestSender_SendAsync_TooManyRequests_Retried(t *testing.T) {
 	s.client = server.Client()
 	s.WithRetryDelays([]time.Duration{0, 1 * time.Millisecond, 5 * time.Millisecond, 15 * time.Millisecond})
 
-	s.SendAsync(Event{
+	s.SendAsync(context.Background(), Event{
 		EventID:  "evt-429-test",
 		Event:    EventSubscriptionActivated,
 		ClientID: "user-429",
@@ -299,7 +300,7 @@ func TestSender_SendAsync_ConnectionError(t *testing.T) {
 	s.WithRetryDelays([]time.Duration{0, 1 * time.Millisecond, 5 * time.Millisecond, 15 * time.Millisecond})
 
 	// After failures, all retries will fail since the server is closed
-	s.SendAsync(Event{
+	s.SendAsync(context.Background(), Event{
 		EventID: "evt-conn-error",
 		Event:   EventSubscriptionExpired,
 	})
@@ -346,7 +347,7 @@ func TestSender_SendAsync_Non2xxResponse(t *testing.T) {
 			s.client = server.Client()
 			s.WithRetryDelays([]time.Duration{0, 1 * time.Millisecond, 5 * time.Millisecond, 15 * time.Millisecond})
 
-			s.SendAsync(Event{
+			s.SendAsync(context.Background(), Event{
 				EventID:  "evt-status-test",
 				Event:    EventSubscriptionActivated,
 				ClientID: "user-test",
@@ -405,7 +406,7 @@ func TestSender_SendAsync_ConcurrentEvents(t *testing.T) {
 	// Send multiple events concurrently
 	eventCount := 5
 	for i := 0; i < eventCount; i++ {
-		s.SendAsync(Event{
+		s.SendAsync(context.Background(), Event{
 			EventID:        "evt-concurrent-" + string(rune('A'+i)),
 			Event:          EventSubscriptionActivated,
 			ClientID:       "user-concurrent",
@@ -463,7 +464,7 @@ func TestSender_SendAsync_EventDataIntegrity(t *testing.T) {
 		SubscriptionID: "abc123def456",
 	}
 
-	s.SendAsync(event)
+	s.SendAsync(context.Background(), event)
 
 	// Wait for delivery
 	assert.Eventually(t, func() bool {
@@ -508,7 +509,7 @@ func TestSender_SendAsync_AuthHeader(t *testing.T) {
 			s := NewSender(server.URL, tt.secret)
 			s.client = server.Client()
 
-			s.SendAsync(Event{
+			s.SendAsync(context.Background(), Event{
 				EventID: "evt-auth-test",
 				Event:   EventSubscriptionActivated,
 			})
@@ -536,7 +537,7 @@ func TestSender_SendAsync_ContentTypeHeader(t *testing.T) {
 	s := NewSender(server.URL, "secret")
 	s.client = server.Client()
 
-	s.SendAsync(Event{
+	s.SendAsync(context.Background(), Event{
 		EventID: "evt-content-type",
 		Event:   EventSubscriptionActivated,
 	})
@@ -582,8 +583,8 @@ func TestSender_SendAsync_DuplicateEvent(t *testing.T) {
 	}
 
 	// Send the same event twice
-	s.SendAsync(event)
-	s.SendAsync(event)
+	s.SendAsync(context.Background(), event)
+	s.SendAsync(context.Background(), event)
 
 	// Both should be delivered (server is responsible for dedup)
 	assert.Eventually(t, func() bool {

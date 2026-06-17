@@ -38,7 +38,7 @@ type Event struct {
 
 // WebhookSender interface for sending webhook events (mockable for tests).
 type WebhookSender interface {
-	SendAsync(event Event)
+	SendAsync(ctx context.Context, event Event)
 	Wait()
 }
 
@@ -96,7 +96,7 @@ func NewSender(url, secret string) *Sender {
 // SendAsync sends a webhook event asynchronously with retry logic.
 // This method does not block the caller.
 // If the URL is not configured, this is a no-op.
-func (s *Sender) SendAsync(event Event) {
+func (s *Sender) SendAsync(ctx context.Context, event Event) {
 	if s.url == "" {
 		return
 	}
@@ -113,7 +113,7 @@ func (s *Sender) SendAsync(event Event) {
 					zap.String("event", e.Event),
 					zap.Int("attempt", i+1))
 			}
-			err := s.send(e)
+			err := s.send(ctx, e)
 			if err == nil {
 				return
 			}
@@ -142,8 +142,8 @@ func (s *Sender) Wait() {
 }
 
 // send makes a single attempt to deliver the webhook event.
-func (s *Sender) send(event Event) error {
-	ctx, cancel := context.WithTimeout(context.Background(), webhookTimeout)
+func (s *Sender) send(ctx context.Context, event Event) error {
+	ctx, cancel := context.WithTimeout(ctx, webhookTimeout)
 	defer cancel()
 
 	body, err := json.Marshal(event)
@@ -212,7 +212,7 @@ func (s *Sender) WithRetryDelays(delays []time.Duration) *Sender {
 // NoopSender is a webhook sender that does nothing (used for tests and when webhook is disabled).
 type NoopSender struct{}
 
-func (n *NoopSender) SendAsync(_ Event) {
+func (n *NoopSender) SendAsync(_ context.Context, _ Event) {
 	// No-op
 }
 

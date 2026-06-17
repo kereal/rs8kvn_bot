@@ -403,7 +403,7 @@ func TestE2E_WebhookSender_DeliverySuccess(t *testing.T) {
 		SubscriptionID: "sub-token-xyz",
 	}
 
-	sender.SendAsync(event)
+	sender.SendAsync(context.Background(), event)
 
 	assert.Eventually(t, func() bool {
 		return received.Load() != nil && received.Load().(bool)
@@ -443,7 +443,7 @@ func TestE2E_WebhookSender_RetryOnFailure(t *testing.T) {
 		Email:    "retry@example.com",
 	}
 
-	sender.SendAsync(event)
+	sender.SendAsync(context.Background(), event)
 
 	assert.Eventually(t, func() bool {
 		return atomic.LoadInt64(&requestCount) >= 2
@@ -457,7 +457,7 @@ func TestE2E_WebhookSender_EmptyURL(t *testing.T) {
 	sender := webhook.NewSender("", "")
 
 	// Should not panic and should return immediately
-	sender.SendAsync(webhook.Event{
+	sender.SendAsync(context.Background(), webhook.Event{
 		EventID: "evt-noop",
 		Event:   webhook.EventSubscriptionActivated,
 	})
@@ -497,7 +497,7 @@ func TestE2E_WebhookSender_ConcurrentEvents(t *testing.T) {
 
 	eventCount := 5
 	for i := 0; i < eventCount; i++ {
-		sender.SendAsync(webhook.Event{
+		sender.SendAsync(context.Background(), webhook.Event{
 			EventID:        fmt.Sprintf("evt-concurrent-%d", i),
 			Event:          webhook.EventSubscriptionActivated,
 			ClientID:       fmt.Sprintf("user-%d", i),

@@ -333,7 +333,7 @@ func TestHandler_CacheInvalidation(t *testing.T) {
 	assert.NotNil(t, handler.cache.Get(12345), "Should be in cache")
 
 	// Invalidate
-	handler.invalidateCache(12345)
+	handler.invalidateCache(context.Background(), 12345)
 
 	// Verify it's gone
 	assert.Nil(t, handler.cache.Get(12345), "Should not be in cache after invalidation")

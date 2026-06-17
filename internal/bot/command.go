@@ -247,7 +247,7 @@ func (c *CommandHandler) handleBindTrial(ctx context.Context, chatID int64, user
 		zap.Int64("chat_id", chatID),
 		zap.String("subscription_id", subscriptionID))
 
-	c.h.invalidateCache(chatID)
+	c.h.invalidateCache(ctx, chatID)
 	c.h.SendMessage(ctx, chatID, fmt.Sprintf("✅ Подписка активирована!\n\nДобро пожаловать!\n\nВам доступно: %dГб\n\nИспользуйте /start для работы с ботом.", c.h.subscriptionService.PlanTrafficLimitGB(ctx, sub.TelegramID)))
 
 	// Admin notification

@@ -33,7 +33,7 @@ func (sh *SubscriptionHandler) getSubscriptionWithCache(ctx context.Context, cha
 			return sub, nil
 		}
 		// Stale cache entry (non-active) — invalidate and fall through
-		sh.h.invalidateCache(chatID)
+		sh.h.invalidateCache(ctx, chatID)
 	}
 
 	// Cache miss, query database

@@ -180,7 +180,7 @@ func (s *SubscriptionService) Delete(ctx context.Context, telegramID int64) erro
 
 	if s.webhook != nil {
 		eventID, _ := utils.GenerateUUID()
-		s.webhook.SendAsync(webhook.Event{
+		s.webhook.SendAsync(ctx, webhook.Event{
 			EventID:        "evt-" + eventID,
 			Event:          webhook.EventSubscriptionExpired,
 			ClientID:       sub.ClientID,
@@ -213,7 +213,7 @@ func (s *SubscriptionService) DeleteByID(ctx context.Context, id uint) (*databas
 
 	if s.webhook != nil {
 		eventID, _ := utils.GenerateUUID()
-		s.webhook.SendAsync(webhook.Event{
+		s.webhook.SendAsync(ctx, webhook.Event{
 			EventID:        "evt-" + eventID,
 			Event:          webhook.EventSubscriptionExpired,
 			ClientID:       clientID,
