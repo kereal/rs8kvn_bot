@@ -43,7 +43,7 @@ func makeTestSubService(mockDB *testutil.MockDatabaseService) (*config.Config, *
 
 	xuiClients := map[uint]interfaces.XUIClient{1: mockXUI}
 	nodes := []database.Node{{ID: 1, Name: "default", IsActive: true, Host: "http://localhost:2053", APIToken: "test-token", InboundIDs: "[1]", SubscriptionURL: cfg.GlobalSubURL}}
-	subService := service.NewSubscriptionService(mockDB, xuiClients, nodes, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
+	subService := service.NewSubscriptionService(mockDB, xuiClients, nil, nodes, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
 	return cfg, subService, mockXUI
 }
 

@@ -26,7 +26,7 @@ func newTestAdminHandler(cfg *config.Config, mockDB *testutil.MockDatabaseServic
 	h := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
 	xuiClients := map[uint]interfaces.XUIClient{1: mockXUI}
 	nodes := []database.Node{{ID: 1, IsActive: true, Host: "http://localhost:2053", APIToken: "test-token", InboundIDs: "[1]", SubscriptionURL: "http://example.com/sub/"}}
-	h.subscriptionService = service.NewSubscriptionService(mockDB, xuiClients, nodes, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
+	h.subscriptionService = service.NewSubscriptionService(mockDB, xuiClients, nil, nodes, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
 	// Wire cache invalidation for tests that manually set subscriptionService
 	h.subscriptionService.SetInvalidateFunc(h.cache.Invalidate)
 	return h
@@ -102,7 +102,7 @@ func TestHandleDel_ValidDeletion(t *testing.T) {
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
 	xuiClients := map[uint]interfaces.XUIClient{1: mockXUI}
 	nodes := []database.Node{{ID: 1, IsActive: true, Host: "http://localhost:2053", APIToken: "test-token", InboundIDs: "[1]", SubscriptionURL: "http://example.com/sub/"}}
-	handler.subscriptionService = service.NewSubscriptionService(mockDB, xuiClients, nodes, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
+	handler.subscriptionService = service.NewSubscriptionService(mockDB, xuiClients, nil, nodes, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
 
 	sub := &database.Subscription{
 		ID:         5,

@@ -96,10 +96,25 @@ type MockDatabaseService struct {
 	SeedDefaultDataFunc                 func(ctx context.Context) error
 	SeedDefaultNodeFunc                 func(ctx context.Context, name, xuiHost, xuiAPIToken string, xuiInboundIDs []int, subURL string) error
 	GetActiveByPlanIDFunc               func(ctx context.Context, planID uint) ([]database.Product, error)
+	GetProductByIDFunc                  func(ctx context.Context, id uint) (*database.Product, error)
+	GetNodeByIDFunc                     func(ctx context.Context, id uint) (*database.Node, error)
+	ListEnabledFunc                     func(ctx context.Context) ([]database.Node, error)
+	GetNodesByPlanIDFunc                func(ctx context.Context, planID uint) ([]database.Node, error)
+	CreateSubscriptionNodeFunc          func(ctx context.Context, sn *database.SubscriptionNode) error
+	UpdateSubscriptionNodeStatusFunc    func(ctx context.Context, subID, nodeID uint, status database.SyncStatus) error
+	UpsertSubscriptionNodeFunc          func(ctx context.Context, sn *database.SubscriptionNode) error
+	DeleteSubscriptionNodeFunc          func(ctx context.Context, subID, nodeID uint) error
+	UpdateRetryFunc                     func(ctx context.Context, subID, nodeID uint, retryCount int, retryAt *time.Time, lastErr *string) error
+	GetBySubscriptionIDFunc             func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error)
+	GetByNodeIDFunc                     func(ctx context.Context, nodeID uint) ([]database.SubscriptionNode, error)
+	GetPendingSyncFunc                  func(ctx context.Context) ([]database.SubscriptionNode, error)
+	GetPendingByNodeIDFunc              func(ctx context.Context, nodeID uint) ([]database.SubscriptionNode, error)
 	CreateOrderFunc                     func(ctx context.Context, order *database.Order) error
 	GetOrderByIDFunc                    func(ctx context.Context, id uint) (*database.Order, error)
 	GetOrdersBySubscriptionIDFunc       func(ctx context.Context, subscriptionID uint) ([]database.Order, error)
 	UpdateOrderStatusFunc               func(ctx context.Context, id uint, status database.OrderStatus) error
+	UpdateOrderPaidStatusFunc           func(ctx context.Context, id uint) error
+	UpdateOrderActivatedAtFunc          func(ctx context.Context, id uint, activatedAt, expiresAt time.Time) error
 	GetSubscriptionBySubscriptionIDFunc func(ctx context.Context, subscriptionID string) (*database.Subscription, error)
 	GetTrialSubscriptionBySubIDFunc     func(ctx context.Context, subscriptionID string) (*database.Subscription, error)
 	BindTrialSubscriptionFunc           func(ctx context.Context, subscriptionID string, telegramID int64, username string) (*database.Subscription, error)
@@ -149,11 +164,101 @@ func (m *MockDatabaseService) CreateSubscription(ctx context.Context, sub *datab
 		m.Subscriptions = make(map[int64]*database.Subscription)
 	}
 	if sub.TelegramID != 0 {
-		// Deep-copy so test assertions don't observe post-call mutations.
 		stored := *sub
 		m.Subscriptions[sub.TelegramID] = &stored
 	}
 	return nil
+}
+
+func (m *MockDatabaseService) CreateSubscriptionNode(ctx context.Context, sn *database.SubscriptionNode) error {
+	if m.CreateSubscriptionNodeFunc != nil {
+		return m.CreateSubscriptionNodeFunc(ctx, sn)
+	}
+	return nil
+}
+
+func (m *MockDatabaseService) UpdateSubscriptionNodeStatus(ctx context.Context, subID, nodeID uint, status database.SyncStatus) error {
+	if m.UpdateSubscriptionNodeStatusFunc != nil {
+		return m.UpdateSubscriptionNodeStatusFunc(ctx, subID, nodeID, status)
+	}
+	return nil
+}
+
+func (m *MockDatabaseService) UpsertSubscriptionNode(ctx context.Context, sn *database.SubscriptionNode) error {
+	if m.UpsertSubscriptionNodeFunc != nil {
+		return m.UpsertSubscriptionNodeFunc(ctx, sn)
+	}
+	return nil
+}
+
+func (m *MockDatabaseService) DeleteSubscriptionNode(ctx context.Context, subID, nodeID uint) error {
+	if m.DeleteSubscriptionNodeFunc != nil {
+		return m.DeleteSubscriptionNodeFunc(ctx, subID, nodeID)
+	}
+	return nil
+}
+
+func (m *MockDatabaseService) UpdateRetry(ctx context.Context, subID, nodeID uint, retryCount int, retryAt *time.Time, lastErr *string) error {
+	if m.UpdateRetryFunc != nil {
+		return m.UpdateRetryFunc(ctx, subID, nodeID, retryCount, retryAt, lastErr)
+	}
+	return nil
+}
+
+func (m *MockDatabaseService) GetBySubscriptionID(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
+	if m.GetBySubscriptionIDFunc != nil {
+		return m.GetBySubscriptionIDFunc(ctx, subscriptionID)
+	}
+	return nil, nil
+}
+
+func (m *MockDatabaseService) GetByNodeID(ctx context.Context, nodeID uint) ([]database.SubscriptionNode, error) {
+	if m.GetByNodeIDFunc != nil {
+		return m.GetByNodeIDFunc(ctx, nodeID)
+	}
+	return nil, nil
+}
+
+func (m *MockDatabaseService) GetPendingSync(ctx context.Context) ([]database.SubscriptionNode, error) {
+	if m.GetPendingSyncFunc != nil {
+		return m.GetPendingSyncFunc(ctx)
+	}
+	return nil, nil
+}
+
+func (m *MockDatabaseService) GetPendingByNodeID(ctx context.Context, nodeID uint) ([]database.SubscriptionNode, error) {
+	if m.GetPendingByNodeIDFunc != nil {
+		return m.GetPendingByNodeIDFunc(ctx, nodeID)
+	}
+	return nil, nil
+}
+
+func (m *MockDatabaseService) GetNodeByID(ctx context.Context, id uint) (*database.Node, error) {
+	if m.GetNodeByIDFunc != nil {
+		return m.GetNodeByIDFunc(ctx, id)
+	}
+	return nil, gorm.ErrRecordNotFound
+}
+
+func (m *MockDatabaseService) GetNodesByPlanID(ctx context.Context, planID uint) ([]database.Node, error) {
+	if m.GetNodesByPlanIDFunc != nil {
+		return m.GetNodesByPlanIDFunc(ctx, planID)
+	}
+	return nil, gorm.ErrRecordNotFound
+}
+
+func (m *MockDatabaseService) ListEnabled(ctx context.Context) ([]database.Node, error) {
+	if m.ListEnabledFunc != nil {
+		return m.ListEnabledFunc(ctx)
+	}
+	return nil, gorm.ErrRecordNotFound
+}
+
+func (m *MockDatabaseService) GetProductByID(ctx context.Context, id uint) (*database.Product, error) {
+	if m.GetProductByIDFunc != nil {
+		return m.GetProductByIDFunc(ctx, id)
+	}
+	return nil, gorm.ErrRecordNotFound
 }
 
 func (m *MockDatabaseService) UpdateSubscription(ctx context.Context, sub *database.Subscription) error {
@@ -636,6 +741,20 @@ func (m *MockDatabaseService) UpdateOrderStatus(ctx context.Context, id uint, st
 		return nil
 	}
 	return gorm.ErrRecordNotFound
+}
+
+func (m *MockDatabaseService) UpdateOrderPaidStatus(ctx context.Context, id uint) error {
+	if m.UpdateOrderPaidStatusFunc != nil {
+		return m.UpdateOrderPaidStatusFunc(ctx, id)
+	}
+	return nil
+}
+
+func (m *MockDatabaseService) UpdateOrderActivatedAt(ctx context.Context, id uint, activatedAt, expiresAt time.Time) error {
+	if m.UpdateOrderActivatedAtFunc != nil {
+		return m.UpdateOrderActivatedAtFunc(ctx, id, activatedAt, expiresAt)
+	}
+	return nil
 }
 
 func (m *MockDatabaseService) GetReferralCount(ctx context.Context, referrerTGID int64) (int64, error) {

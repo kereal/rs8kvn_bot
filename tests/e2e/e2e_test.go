@@ -111,7 +111,7 @@ func setupE2EEnv(t *testing.T) *e2eTestEnv {
 	require.NoError(t, db.SeedDefaultNode(ctx, "main", "https://panel.example.com", "test-api-token", []int{1}, ""), "seed test node")
 	xuiClients := map[uint]interfaces.XUIClient{1: mockXUI}
 	nodes := e2eNodes("https://panel.example.com")
-	subService := service.NewSubscriptionService(db, xuiClients, nodes, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
+	subService := service.NewSubscriptionService(db, xuiClients, nil, nodes, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
 	handler := bot.NewHandler(mockBotAPI, cfg, db, mockXUI, botCfg, subService, "")
 
 	return &e2eTestEnv{
@@ -237,7 +237,7 @@ func setupRealXUIEnv(t *testing.T, handlers map[string]http.HandlerFunc) *realXU
 
 	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
 	nodes := e2eNodes(server.URL)
-	subService := service.NewSubscriptionService(db, xuiClients, nodes, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
+	subService := service.NewSubscriptionService(db, xuiClients, nil, nodes, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
 
 	return &realXUIEnv{
 		t:          t,
