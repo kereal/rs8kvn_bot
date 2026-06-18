@@ -13,6 +13,18 @@ import (
 var _ DatabaseService = (*database.Service)(nil)
 var _ XUIClient = (*xui.Client)(nil)
 
+type SubscriptionNodeRepository interface {
+	GetBySubscriptionID(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error)
+	GetByNodeID(ctx context.Context, nodeID uint) ([]database.SubscriptionNode, error)
+	GetPendingSync(ctx context.Context) ([]database.SubscriptionNode, error)
+	GetPendingByNodeID(ctx context.Context, nodeID uint) ([]database.SubscriptionNode, error)
+	CreateSubscriptionNode(ctx context.Context, sn *database.SubscriptionNode) error
+	UpdateSubscriptionNodeStatus(ctx context.Context, subID, nodeID uint, status database.SyncStatus) error
+	UpsertSubscriptionNode(ctx context.Context, sn *database.SubscriptionNode) error
+	DeleteSubscriptionNode(ctx context.Context, subID, nodeID uint) error
+	UpdateRetry(ctx context.Context, subID, nodeID uint, retryCount int, retryAt *time.Time, lastErr *string) error
+}
+
 type SubscriptionRepository interface {
 	GetByTelegramID(ctx context.Context, telegramID int64) (*database.Subscription, error)
 	GetByID(ctx context.Context, id uint) (*database.Subscription, error)
@@ -48,6 +60,9 @@ type TrialRepository interface {
 type NodeRepository interface {
 	ListNodes(ctx context.Context) ([]database.Node, error)
 	GetNodesByPlanName(ctx context.Context, planName string) ([]database.Node, error)
+	GetNodesByPlanID(ctx context.Context, planID uint) ([]database.Node, error)
+	GetNodeByID(ctx context.Context, id uint) (*database.Node, error)
+	ListEnabled(ctx context.Context) ([]database.Node, error)
 	IsNodesEmpty(ctx context.Context) (bool, error)
 	SeedDefaultNode(ctx context.Context, name, host, apiToken string, inboundIDs []int, subscriptionURL string) error
 }
@@ -67,6 +82,7 @@ type PlanRepository interface {
 
 type ProductRepository interface {
 	GetActiveByPlanID(ctx context.Context, planID uint) ([]database.Product, error)
+	GetProductByID(ctx context.Context, id uint) (*database.Product, error)
 }
 
 type OrderRepository interface {
@@ -74,9 +90,12 @@ type OrderRepository interface {
 	GetOrderByID(ctx context.Context, id uint) (*database.Order, error)
 	GetOrdersBySubscriptionID(ctx context.Context, subscriptionID uint) ([]database.Order, error)
 	UpdateOrderStatus(ctx context.Context, id uint, status database.OrderStatus) error
+	UpdateOrderPaidStatus(ctx context.Context, id uint) error
+	UpdateOrderActivatedAt(ctx context.Context, id uint, activatedAt, expiresAt time.Time) error
 }
 
 type DatabaseService interface {
+	SubscriptionNodeRepository
 	SubscriptionRepository
 	TrialRepository
 	InviteRepository
@@ -99,8 +118,12 @@ type XUIClient interface {
 	Close() error
 }
 
-// BotAPI defines the interface for Telegram Bot API operations
 type BotAPI interface {
 	Send(c tgbotapi.Chattable) (tgbotapi.Message, error)
 	Request(c tgbotapi.Chattable) (*tgbotapi.APIResponse, error)
+}
+
+type VPNClient interface {
+	CreateSubscription(ctx context.Context, uuid, username string) error
+	DeleteSubscription(ctx context.Context, uuid, username string) error
 }

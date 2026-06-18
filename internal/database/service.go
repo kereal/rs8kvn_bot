@@ -22,6 +22,10 @@ type Service struct {
 	db *gorm.DB
 }
 
+func (s *Service) GetDB() *gorm.DB {
+	return s.db
+}
+
 // NewService creates a new database service.
 func NewService(dbPath string) (*Service, error) {
 	dbDir := filepath.Dir(dbPath)

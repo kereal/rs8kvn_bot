@@ -43,7 +43,7 @@ func TestE2E_APISubscriptions_Success(t *testing.T) {
 	env.cfg.APIToken = "test-api-token-12345"
 	xuiClients := map[uint]interfaces.XUIClient{1: env.xui}
 	nodes := []database.Node{{Name: "main", Host: "https://panel.example.com", APIToken: "test-api-token", InboundIDs: "[1]", IsActive: true}}
-	subService := service.NewSubscriptionService(env.db, xuiClients, nodes, env.cfg, env.cfg.GlobalSubURL, &webhook.NoopSender{})
+	subService := service.NewSubscriptionService(env.db, xuiClients, nil, nodes, env.cfg, env.cfg.GlobalSubURL, &webhook.NoopSender{})
 	srv := web.NewServer("127.0.0.1:0", env.db, env.cfg, env.botConfig, subService, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -102,7 +102,7 @@ func TestE2E_APISubscriptions_EmptyList(t *testing.T) {
 	env.cfg.APIToken = "test-api-token"
 	xuiClients := map[uint]interfaces.XUIClient{1: env.xui}
 	nodes := []database.Node{{Name: "main", Host: "https://panel.example.com", APIToken: "test-api-token", InboundIDs: "[1]", IsActive: true}}
-	subService := service.NewSubscriptionService(env.db, xuiClients, nodes, env.cfg, env.cfg.GlobalSubURL, &webhook.NoopSender{})
+	subService := service.NewSubscriptionService(env.db, xuiClients, nil, nodes, env.cfg, env.cfg.GlobalSubURL, &webhook.NoopSender{})
 	srv := web.NewServer("127.0.0.1:0", env.db, env.cfg, env.botConfig, subService, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -153,7 +153,7 @@ func TestE2E_APISubscriptions_Unauthorized(t *testing.T) {
 	env.cfg.APIToken = "secret-token"
 	xuiClients := map[uint]interfaces.XUIClient{1: env.xui}
 	nodes := []database.Node{{Name: "main", Host: "https://panel.example.com", APIToken: "test-api-token", InboundIDs: "[1]", IsActive: true}}
-	subService := service.NewSubscriptionService(env.db, xuiClients, nodes, env.cfg, env.cfg.GlobalSubURL, &webhook.NoopSender{})
+	subService := service.NewSubscriptionService(env.db, xuiClients, nil, nodes, env.cfg, env.cfg.GlobalSubURL, &webhook.NoopSender{})
 	srv := web.NewServer("127.0.0.1:0", env.db, env.cfg, env.botConfig, subService, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -208,7 +208,7 @@ func TestE2E_APISubscriptions_InvalidToken(t *testing.T) {
 	env.cfg.APIToken = "correct-token"
 	xuiClients := map[uint]interfaces.XUIClient{1: env.xui}
 	nodes := []database.Node{{Name: "main", Host: "https://panel.example.com", APIToken: "test-api-token", InboundIDs: "[1]", IsActive: true}}
-	subService := service.NewSubscriptionService(env.db, xuiClients, nodes, env.cfg, env.cfg.GlobalSubURL, &webhook.NoopSender{})
+	subService := service.NewSubscriptionService(env.db, xuiClients, nil, nodes, env.cfg, env.cfg.GlobalSubURL, &webhook.NoopSender{})
 	srv := web.NewServer("127.0.0.1:0", env.db, env.cfg, env.botConfig, subService, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -248,7 +248,7 @@ func TestE2E_APISubscriptions_MethodNotAllowed(t *testing.T) {
 	env.cfg.APIToken = "test-api-token"
 	xuiClients := map[uint]interfaces.XUIClient{1: env.xui}
 	nodes := []database.Node{{Name: "main", Host: "https://panel.example.com", APIToken: "test-api-token", InboundIDs: "[1]", IsActive: true}}
-	subService := service.NewSubscriptionService(env.db, xuiClients, nodes, env.cfg, env.cfg.GlobalSubURL, &webhook.NoopSender{})
+	subService := service.NewSubscriptionService(env.db, xuiClients, nil, nodes, env.cfg, env.cfg.GlobalSubURL, &webhook.NoopSender{})
 	srv := web.NewServer("127.0.0.1:0", env.db, env.cfg, env.botConfig, subService, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -316,7 +316,7 @@ func TestE2E_APISubscriptions_FiltersInactive(t *testing.T) {
 	env.cfg.APIToken = "test-api-token"
 	xuiClients := map[uint]interfaces.XUIClient{1: env.xui}
 	nodes := []database.Node{{Name: "main", Host: "https://panel.example.com", APIToken: "test-api-token", InboundIDs: "[1]", IsActive: true}}
-	subService := service.NewSubscriptionService(env.db, xuiClients, nodes, env.cfg, env.cfg.GlobalSubURL, &webhook.NoopSender{})
+	subService := service.NewSubscriptionService(env.db, xuiClients, nil, nodes, env.cfg, env.cfg.GlobalSubURL, &webhook.NoopSender{})
 	srv := web.NewServer("127.0.0.1:0", env.db, env.cfg, env.botConfig, subService, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -543,7 +543,7 @@ func TestE2E_APISubscriptions_MultipleActive(t *testing.T) {
 	env.cfg.APIToken = "test-api-token"
 	xuiClients := map[uint]interfaces.XUIClient{1: env.xui}
 	nodes := []database.Node{{Name: "main", Host: "https://panel.example.com", APIToken: "test-api-token", InboundIDs: "[1]", IsActive: true}}
-	subService := service.NewSubscriptionService(env.db, xuiClients, nodes, env.cfg, env.cfg.GlobalSubURL, &webhook.NoopSender{})
+	subService := service.NewSubscriptionService(env.db, xuiClients, nil, nodes, env.cfg, env.cfg.GlobalSubURL, &webhook.NoopSender{})
 	srv := web.NewServer("127.0.0.1:0", env.db, env.cfg, env.botConfig, subService, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -604,7 +604,7 @@ func TestE2E_APISubscriptions_ResponseHeaders(t *testing.T) {
 	env.cfg.APIToken = "test-api-token"
 	xuiClients := map[uint]interfaces.XUIClient{1: env.xui}
 	nodes := []database.Node{{Name: "main", Host: "https://panel.example.com", APIToken: "test-api-token", InboundIDs: "[1]", IsActive: true}}
-	subService := service.NewSubscriptionService(env.db, xuiClients, nodes, env.cfg, env.cfg.GlobalSubURL, &webhook.NoopSender{})
+	subService := service.NewSubscriptionService(env.db, xuiClients, nil, nodes, env.cfg, env.cfg.GlobalSubURL, &webhook.NoopSender{})
 	srv := web.NewServer("127.0.0.1:0", env.db, env.cfg, env.botConfig, subService, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

@@ -154,7 +154,7 @@ func NewTestFixture(t *testing.T) *IntegrationTestFixture {
 	handler := NewHandler(testutil.NewMockBotAPI(), cfg, dbService, mockXUI.Client, NewTestBotConfig(), nil, "")
 	mockXUIClients := map[uint]interfaces.XUIClient{1: mockXUI.Client}
 	nodes := []database.Node{{ID: 1, Name: "main", IsActive: true, Host: mockXUI.Server.URL, APIToken: "test-api-token", InboundIDs: "[1]"}}
-	subService := service.NewSubscriptionService(dbService, mockXUIClients, nodes, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
+	subService := service.NewSubscriptionService(dbService, mockXUIClients, nil, nodes, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
 	handler.subscriptionService = subService
 	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
 

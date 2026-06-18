@@ -175,7 +175,7 @@ func TestHandleStart_NormalFlow(t *testing.T) {
 			mockBot := testutil.NewMockBotAPI()
 			xuiClients := map[uint]interfaces.XUIClient{1: mockXUI}
 			nodes := []database.Node{{ID: 1, Name: "main", IsActive: true, Host: "http://example.com", APIToken: "token", InboundIDs: "[1]"}}
-			subService := service.NewSubscriptionService(mockDB, xuiClients, nodes, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
+			subService := service.NewSubscriptionService(mockDB, xuiClients, nil, nodes, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
 			handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), subService, "")
 			tt.setupMock(mockDB)
 
@@ -506,6 +506,7 @@ func TestHandleBindTrial_Success(t *testing.T) {
 	subService := service.NewSubscriptionService(
 		mockDB,
 		map[uint]interfaces.XUIClient{1: mockXUI},
+		nil,
 		dbSources,
 		cfg,
 		"http://example.com/sub/",
@@ -554,6 +555,7 @@ func TestHandleBindTrial_IncrementsReferrerCacheCount(t *testing.T) {
 	subService := service.NewSubscriptionService(
 		mockDB,
 		map[uint]interfaces.XUIClient{1: mockXUI},
+		nil,
 		dbSources,
 		cfg,
 		"http://example.com/sub/",
@@ -605,6 +607,7 @@ func TestHandleBindTrial_NoReferrerLeavesCacheUntouched(t *testing.T) {
 	subService := service.NewSubscriptionService(
 		mockDB,
 		map[uint]interfaces.XUIClient{1: mockXUI},
+		nil,
 		dbSources,
 		cfg,
 		"http://example.com/sub/",
@@ -957,7 +960,7 @@ func TestHandleMySubscription_ShowLoadingFails(t *testing.T) {
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
 	mockXUIClients := map[uint]interfaces.XUIClient{1: mockXUI}
 	nodes := []database.Node{{ID: 1, Name: "main", IsActive: true, Host: "http://example.com", APIToken: "token", InboundIDs: "[1]"}}
-	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUIClients, nodes, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
+	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUIClients, nil, nodes, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
 	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
 
 	mockBot.SendError = errors.New("send failed")
@@ -994,6 +997,7 @@ func newTestHandlerWithSubService(t *testing.T, cfg *config.Config, mockDB *test
 	subService := service.NewSubscriptionService(
 		mockDB,
 		map[uint]interfaces.XUIClient{1: mockXUI},
+		nil,
 		dbSources,
 		cfg,
 		"http://example.com/sub/",

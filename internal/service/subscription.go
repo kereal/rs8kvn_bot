@@ -13,6 +13,7 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/logger"
 	"github.com/kereal/rs8kvn_bot/internal/metrics"
 	"github.com/kereal/rs8kvn_bot/internal/utils"
+	"github.com/kereal/rs8kvn_bot/internal/vpn"
 	"github.com/kereal/rs8kvn_bot/internal/webhook"
 	"github.com/kereal/rs8kvn_bot/internal/xui"
 
@@ -22,11 +23,13 @@ import (
 type SubscriptionService struct {
 	db           interfaces.DatabaseService
 	xuiClients   map[uint]interfaces.XUIClient
+	vpnClients   map[uint]vpn.Client
 	nodes        []database.Node
 	cfg          *config.Config
 	globalSubURL string
 	webhook      webhook.WebhookSender
 	invalidate   func(telegramID int64)
+	syncService  *SyncService
 }
 
 type CreateResult struct {
@@ -44,15 +47,20 @@ func XUIEmail(username string, telegramID int64) string {
 }
 
 // NewSubscriptionService creates a SubscriptionService configured with the given database, XUI clients map, sources, configuration, global subscription URL prefix, and optional webhook sender.
-func NewSubscriptionService(db interfaces.DatabaseService, xuiClients map[uint]interfaces.XUIClient, nodes []database.Node, cfg *config.Config, globalSubURL string, webhookSender webhook.WebhookSender) *SubscriptionService {
+func NewSubscriptionService(db interfaces.DatabaseService, xuiClients map[uint]interfaces.XUIClient, vpnClients map[uint]vpn.Client, nodes []database.Node, cfg *config.Config, globalSubURL string, webhookSender webhook.WebhookSender) *SubscriptionService {
 	return &SubscriptionService{
 		db:           db,
 		xuiClients:   xuiClients,
+		vpnClients:   vpnClients,
 		nodes:        nodes,
 		cfg:          cfg,
 		globalSubURL: globalSubURL,
 		webhook:      webhookSender,
 	}
+}
+
+func (s *SubscriptionService) SetSyncService(svc *SyncService) {
+	s.syncService = svc
 }
 
 func (s *SubscriptionService) activeNodes() []database.Node {
@@ -662,4 +670,186 @@ func (s *SubscriptionService) GetTelegramIDsBatch(ctx context.Context, offset, l
 // GetAllReferralCounts returns referral counts for all users.
 func (s *SubscriptionService) GetAllReferralCounts(ctx context.Context) (map[int64]int64, error) {
 	return s.db.GetAllReferralCounts(ctx)
+}
+
+func (s *SubscriptionService) GetSubscription(ctx context.Context, telegramID int64) (*database.Subscription, error) {
+	return s.db.GetByTelegramID(ctx, telegramID)
+}
+
+func (s *SubscriptionService) GetOrCreateSubscription(ctx context.Context, telegramID int64, username, inviteCode string) (*database.Subscription, error) {
+	existing, err := s.db.GetByTelegramID(ctx, telegramID)
+	if err == nil {
+		return existing, nil
+	}
+	if !errors.Is(err, database.ErrSubscriptionNotFound) {
+		return nil, fmt.Errorf("lookup subscription: %w", err)
+	}
+
+	freePlan, err := s.db.GetPlanByName(ctx, database.FreePlanName)
+	if err != nil {
+		return nil, fmt.Errorf("resolve free plan: %w", err)
+	}
+
+	clientID, err := utils.GenerateUUID()
+	if err != nil {
+		return nil, fmt.Errorf("generate client id: %w", err)
+	}
+	subID, err := utils.GenerateSubID()
+	if err != nil {
+		return nil, fmt.Errorf("generate sub id: %w", err)
+	}
+
+	sub := &database.Subscription{
+		TelegramID:     telegramID,
+		Username:       username,
+		ClientID:       clientID,
+		SubscriptionID: subID,
+		PlanID:         freePlan.ID,
+		Status:         "active",
+	}
+
+	if err := s.db.CreateSubscription(ctx, sub, inviteCode); err != nil {
+		return nil, fmt.Errorf("create subscription: %w", err)
+	}
+
+	nodes, nodeErr := s.db.GetNodesByPlanName(ctx, database.FreePlanName)
+	if nodeErr != nil {
+		return nil, fmt.Errorf("load free plan nodes: %w", nodeErr)
+	}
+
+	for _, node := range nodes {
+		if err := s.db.UpsertSubscriptionNode(ctx, &database.SubscriptionNode{
+			SubscriptionID: sub.ID,
+			NodeID:         node.ID,
+			Status:         database.SyncStatusPendingAdd,
+		}); err != nil {
+			return nil, fmt.Errorf("upsert subscription node %d: %w", node.ID, err)
+		}
+	}
+
+	if s.syncService != nil {
+		if syncErr := s.syncService.SyncSubscription(ctx, sub.ID); syncErr != nil {
+			logger.Warn("initial sync failed for new subscription",
+				zap.Uint("subscription_id", sub.ID),
+				zap.Error(syncErr))
+		}
+	}
+
+	return sub, nil
+}
+
+func (s *SubscriptionService) RenewSubscription(ctx context.Context, telegramID int64, product *database.Product) (*database.Order, error) {
+	sub, err := s.db.GetByTelegramID(ctx, telegramID)
+	if err != nil {
+		return nil, fmt.Errorf("get subscription: %w", err)
+	}
+
+	now := time.Now().UTC().Truncate(time.Minute)
+	newExpiry := now
+	if sub.ExpiresAt.After(now) {
+		newExpiry = sub.ExpiresAt
+	}
+	newExpiry = newExpiry.AddDate(0, 0, product.DurationDays)
+
+	sub.PlanID = product.PlanID
+	sub.ExpiresAt = newExpiry
+	if err := s.db.UpdateSubscription(ctx, sub); err != nil {
+		return nil, fmt.Errorf("update subscription: %w", err)
+	}
+
+	order := &database.Order{
+		SubscriptionID: sub.ID,
+		ProductID:      product.ID,
+		Status:         database.OrderStatusPaid,
+		AmountCents:    product.PriceCents,
+		Currency:       product.Currency,
+		PaidAt:         &now,
+	}
+	if err := s.db.CreateOrder(ctx, order); err != nil {
+		return nil, fmt.Errorf("create order: %w", err)
+	}
+
+	if s.syncService != nil {
+		if err := s.syncService.RecalculateNodes(ctx, sub.ID); err != nil {
+			return nil, fmt.Errorf("recalculate nodes: %w", err)
+		}
+		if err := s.syncService.SyncSubscription(ctx, sub.ID); err != nil {
+			return nil, fmt.Errorf("sync subscription: %w", err)
+		}
+	}
+
+	return order, nil
+}
+
+func (s *SubscriptionService) ChangePlan(ctx context.Context, telegramID int64, product *database.Product) (*database.Order, error) {
+	sub, err := s.db.GetByTelegramID(ctx, telegramID)
+	if err != nil {
+		return nil, fmt.Errorf("get subscription: %w", err)
+	}
+
+	now := time.Now().UTC().Truncate(time.Minute)
+	newExpiry := now
+	if sub.ExpiresAt.After(now) {
+		newExpiry = sub.ExpiresAt
+	}
+	newExpiry = newExpiry.AddDate(0, 0, product.DurationDays)
+
+	sub.PlanID = product.PlanID
+	sub.ExpiresAt = newExpiry
+	if err := s.db.UpdateSubscription(ctx, sub); err != nil {
+		return nil, fmt.Errorf("update subscription: %w", err)
+	}
+
+	order := &database.Order{
+		SubscriptionID: sub.ID,
+		ProductID:      product.ID,
+		Status:         database.OrderStatusPaid,
+		AmountCents:    product.PriceCents,
+		Currency:       product.Currency,
+		PaidAt:         &now,
+	}
+	if err := s.db.CreateOrder(ctx, order); err != nil {
+		return nil, fmt.Errorf("create order: %w", err)
+	}
+
+	if s.syncService != nil {
+		if err := s.syncService.RecalculateNodes(ctx, sub.ID); err != nil {
+			return nil, fmt.Errorf("recalculate nodes: %w", err)
+		}
+		if err := s.syncService.SyncSubscription(ctx, sub.ID); err != nil {
+			return nil, fmt.Errorf("sync subscription: %w", err)
+		}
+	}
+
+	return order, nil
+}
+
+func (s *SubscriptionService) ExpireSubscription(ctx context.Context, telegramID int64) error {
+	freePlan, err := s.db.GetPlanByName(ctx, database.FreePlanName)
+	if err != nil {
+		return fmt.Errorf("resolve free plan: %w", err)
+	}
+
+	sub, err := s.db.GetByTelegramID(ctx, telegramID)
+	if err != nil {
+		return fmt.Errorf("get subscription: %w", err)
+	}
+
+	sub.PlanID = freePlan.ID
+	sub.ExpiresAt = time.Time{}
+	sub.Status = "active"
+	if err := s.db.UpdateSubscription(ctx, sub); err != nil {
+		return fmt.Errorf("update subscription: %w", err)
+	}
+
+	if s.syncService != nil {
+		if err := s.syncService.RecalculateNodes(ctx, sub.ID); err != nil {
+			return fmt.Errorf("recalculate nodes: %w", err)
+		}
+		if err := s.syncService.SyncSubscription(ctx, sub.ID); err != nil {
+			return fmt.Errorf("sync subscription: %w", err)
+		}
+	}
+
+	return nil
 }

@@ -10,3 +10,23 @@
 
 3. Отвечай всегда на русском
 4. После окончания работы, если это требуется, обновляй документацию и память
+
+
+## RTK - Rust Token Killer
+
+**Usage**: Token-optimized CLI proxy for shell commands.
+
+### Rule
+
+Always prefix shell commands with `rtk` to minimize token consumption.
+
+Examples:
+
+```bash
+rtk git status
+rtk ls src/
+rtk grep "pattern" src/
+rtk find "*.rs" .
+rtk docker ps
+rtk gh pr list
+```

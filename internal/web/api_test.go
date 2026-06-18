@@ -50,7 +50,7 @@ func newTestAPIServer(t *testing.T, cfg *config.Config, mockDB *testutil.MockDat
 	}
 
 	xuiClients := map[uint]interfaces.XUIClient{1: mockXUI}
-	subService := service.NewSubscriptionService(mockDB, xuiClients, dbSources, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
+	subService := service.NewSubscriptionService(mockDB, xuiClients, nil, dbSources, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
 
 	return NewServer(":0", mockDB, cfg, botConfig, subService, nil)
 }

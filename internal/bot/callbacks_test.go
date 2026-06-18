@@ -78,7 +78,7 @@ func TestHandleCallback_CallbackDataRouting(t *testing.T) {
 			setupSubService: func(mockDB *testutil.MockDatabaseService, mockXUI *testutil.MockXUIClient, cfg *config.Config) *service.SubscriptionService {
 				mockXUIClients := map[uint]interfaces.XUIClient{1: mockXUI}
 				nodes := []database.Node{{ID: 1, Name: "main", IsActive: true, Host: "http://example.com", APIToken: "token", InboundIDs: "[1]"}}
-				return service.NewSubscriptionService(mockDB, mockXUIClients, nodes, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
+				return service.NewSubscriptionService(mockDB, mockXUIClients, nil, nodes, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
 			},
 			wantSend: true,
 			wantText: "Ваша подписка готова",
@@ -167,7 +167,7 @@ func TestHandleCallback_CallbackDataRouting(t *testing.T) {
 			setupSubService: func(mockDB *testutil.MockDatabaseService, mockXUI *testutil.MockXUIClient, cfg *config.Config) *service.SubscriptionService {
 				mockXUIClients := map[uint]interfaces.XUIClient{1: mockXUI}
 				nodes := []database.Node{{ID: 1, Name: "main", IsActive: true, Host: "http://example.com", APIToken: "token", InboundIDs: "[1]"}}
-				return service.NewSubscriptionService(mockDB, mockXUIClients, nodes, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
+				return service.NewSubscriptionService(mockDB, mockXUIClients, nil, nodes, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
 			},
 			wantSend: true,
 			wantText: "Ваша подписка",
@@ -435,7 +435,7 @@ func TestHandleCallback_MenuSubscription_NoSubscription(t *testing.T) {
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
 	mockXUIClients := map[uint]interfaces.XUIClient{1: mockXUI}
 	nodes := []database.Node{{ID: 1, Name: "main", IsActive: true, Host: "http://example.com", APIToken: "token", InboundIDs: "[1]"}}
-	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUIClients, nodes, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
+	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUIClients, nil, nodes, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
 	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
 
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {

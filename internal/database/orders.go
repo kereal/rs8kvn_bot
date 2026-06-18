@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"gorm.io/gorm"
 )
@@ -47,6 +48,37 @@ func (s *Service) UpdateOrderStatus(ctx context.Context, id uint, status OrderSt
 	result := s.db.WithContext(ctx).Model(&Order{}).Where("id = ?", id).Update("status", status)
 	if result.Error != nil {
 		return fmt.Errorf("failed to update order status: %w", result.Error)
+	}
+	return nil
+}
+
+// UpdateOrderPaidStatus sets the order as paid with a paid_at timestamp.
+func (s *Service) UpdateOrderPaidStatus(ctx context.Context, id uint) error {
+	now := time.Now().UTC().Truncate(time.Minute)
+	result := s.db.WithContext(ctx).Model(&Order{}).Where("id = ?", id).Updates(map[string]interface{}{
+		"status":   OrderStatusPaid,
+		"paid_at":  now,
+	})
+	if result.Error != nil {
+		return fmt.Errorf("failed to update order paid status: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("order %d not found for paid status update", id)
+	}
+	return nil
+}
+
+// UpdateOrderActivatedAt sets activation and expiry timestamps for an order.
+func (s *Service) UpdateOrderActivatedAt(ctx context.Context, id uint, activatedAt, expiresAt time.Time) error {
+	result := s.db.WithContext(ctx).Model(&Order{}).Where("id = ?", id).Updates(map[string]interface{}{
+		"activated_at": activatedAt,
+		"expires_at":   expiresAt,
+	})
+	if result.Error != nil {
+		return fmt.Errorf("failed to update order activation: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("order %d not found for activation update", id)
 	}
 	return nil
 }

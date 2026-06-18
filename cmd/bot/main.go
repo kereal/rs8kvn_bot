@@ -22,6 +22,7 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/scheduler"
 	"github.com/kereal/rs8kvn_bot/internal/service"
 	"github.com/kereal/rs8kvn_bot/internal/subserver"
+	"github.com/kereal/rs8kvn_bot/internal/vpn"
 	"github.com/kereal/rs8kvn_bot/internal/web"
 	"github.com/kereal/rs8kvn_bot/internal/webhook"
 	"github.com/kereal/rs8kvn_bot/internal/xui"
@@ -224,6 +225,23 @@ func main() {
 		logger.Warn("No active node found — legacy XUI client will be nil; health check on /ping will be skipped")
 	}
 
+	vpnClients := make(map[uint]vpn.Client)
+	for _, node := range nodes {
+		client, initErr := vpn.NewClient(vpn.Config{
+			Host:       node.Host,
+			APIToken:   node.APIToken,
+			Type:       node.Type,
+			InboundIDs: node.ResolveInboundIDs(),
+			XUIClient:  xuiClients[node.ID],
+		})
+		if initErr != nil {
+			logger.Fatal("Failed to initialize VPN client",
+				zap.Uint("node_id", node.ID),
+				zap.Error(initErr))
+		}
+		vpnClients[node.ID] = client
+	}
+
 	// Initialize Telegram bot with retry to handle transient network issues
 	logger.Info("Validating Telegram bot token")
 
@@ -286,7 +304,7 @@ func main() {
 	webhookSender := webhook.NewSender(cfg.ProxyManagerWebhookURL, cfg.ProxyManagerWebhookSecret)
 
 	// Create subscription service (shared between bot handler and web server)
-	subService := service.NewSubscriptionService(dbService, xuiClients, nodes, cfg, cfg.GlobalSubURL, webhookSender)
+	subService := service.NewSubscriptionService(dbService, xuiClients, vpnClients, nodes, cfg, cfg.GlobalSubURL, webhookSender)
 
 	// Create Subscription server service
 	subServer := subserver.NewService(config.SubServerCacheTTL)
@@ -353,11 +371,13 @@ func main() {
 	handler.StartRateLimiterCleanup(ctx, bot.CacheTTL, bot.CacheTTL*2)
 	handler.StartReferralCacheSync(ctx)
 
-	// wg tracks exactly these 4 long-lived background workers.
+	// wg tracks exactly these 6 long-lived background workers.
+	// The first 4 are legacy workers (orphan reconciler, backup, heartbeat, trial cleanup).
+	// The last 2 are subscription sync and expire workers.
 	// All of them must exit (via ctx cancellation) before main returns,
 	// so we wait on wg at the end of graceful shutdown.
 	var wg sync.WaitGroup
-	wg.Add(4)
+	wg.Add(6)
 
 	// Start orphaned XUI client reconciler (every 6 hours)
 	go func() {
@@ -425,6 +445,26 @@ func main() {
 		defer wg.Done()
 		trialSched := scheduler.NewTrialCleanupScheduler(subService)
 		trialSched.Start(ctx)
+	}()
+
+	// Create sync service and inject into subscription service
+	syncSvc := service.NewSyncService(dbService, vpnClients, nodes)
+	subService.SetSyncService(syncSvc)
+
+	// Start subscription sync worker (every 5 minutes)
+	go func() {
+		defer recoverAndReport("Subscription sync worker")
+		defer wg.Done()
+		syncWorker := scheduler.NewSubscriptionSyncWorker(syncSvc)
+		syncWorker.Run(ctx)
+	}()
+
+	// Start subscription expire worker (every 1 hour)
+	go func() {
+		defer recoverAndReport("Subscription expire worker")
+		defer wg.Done()
+		expireWorker := scheduler.NewSubscriptionExpireWorker(dbService, subService)
+		expireWorker.Run(ctx)
 	}()
 
 	// Track in-flight update handlers
