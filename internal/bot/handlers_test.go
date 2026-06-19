@@ -549,7 +549,7 @@ func TestHandleUpdate_CallbackQuery(t *testing.T) {
 			TelegramID:     111,
 			Username:       "testuser",
 			SubscriptionID: "test-sub-id",
-			ExpiresAt:      time.Now().Add(24 * time.Hour),
+			ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
 			Status:         "active",
 		}, nil
 	}

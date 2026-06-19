@@ -181,7 +181,7 @@ func (f *IntegrationTestFixture) Close() {
 	}
 }
 
-func CreateTestSubscriptionInDB(t *testing.T, db *database.Service, chatID int64, username string, status string, expiry time.Time) *database.Subscription {
+func CreateTestSubscriptionInDB(t *testing.T, db *database.Service, chatID int64, username string, status string, expiry *time.Time) *database.Subscription {
 	t.Helper()
 
 	clientID, err := utils.GenerateUUID()
@@ -219,7 +219,7 @@ func TestSubscriptionFlow_CreateAndGet(t *testing.T) {
 		t.Fatalf("Expected no subscription, got: %v", sub)
 	}
 
-	activeSub := CreateTestSubscriptionInDB(t, f.DB, f.UserChatID, "testuser", "active", time.Now().Add(30*24*time.Hour))
+	activeSub := CreateTestSubscriptionInDB(t, f.DB, f.UserChatID, "testuser", "active", ptrTime(time.Now().Add(30*24*time.Hour)))
 
 	retrieved, err := f.DB.GetByTelegramID(ctx, f.UserChatID)
 	if err != nil {
@@ -243,7 +243,7 @@ func TestSubscriptionFlow_ExpiredSubscription(t *testing.T) {
 
 	ctx := context.Background()
 
-	CreateTestSubscriptionInDB(t, f.DB, f.UserChatID, "testuser", "active", time.Now().Add(-24*time.Hour))
+	CreateTestSubscriptionInDB(t, f.DB, f.UserChatID, "testuser", "active", ptrTime(time.Now().Add(-24*time.Hour)))
 
 	sub, err := f.DB.GetByTelegramID(ctx, f.UserChatID)
 	if err != nil {
@@ -267,7 +267,7 @@ func TestSubscriptionFlow_RevokeOldSubscription(t *testing.T) {
 
 	ctx := context.Background()
 
-	CreateTestSubscriptionInDB(t, f.DB, f.UserChatID, "testuser1", "active", time.Now().Add(30*24*time.Hour))
+	CreateTestSubscriptionInDB(t, f.DB, f.UserChatID, "testuser1", "active", ptrTime(time.Now().Add(30*24*time.Hour)))
 
 	clientID, err := utils.GenerateUUID()
 	if err != nil {
@@ -281,7 +281,7 @@ func TestSubscriptionFlow_RevokeOldSubscription(t *testing.T) {
 		Username:       "testuser2",
 		ClientID:       clientID,
 		SubscriptionID: "testuser2",
-		ExpiresAt:      time.Now().Add(30 * 24 * time.Hour),
+		ExpiresAt:      ptrTime(time.Now().Add(30 * 24 * time.Hour)),
 		Status:         "active",
 	}, "")
 	if err == nil {
@@ -313,9 +313,9 @@ func TestAdminStats(t *testing.T) {
 
 	ctx := context.Background()
 
-	CreateTestSubscriptionInDB(t, f.DB, 111, "user1", "active", time.Now().Add(30*24*time.Hour))
-	CreateTestSubscriptionInDB(t, f.DB, 222, "user2", "active", time.Now().Add(30*24*time.Hour))
-	CreateTestSubscriptionInDB(t, f.DB, 333, "user3", "revoked", time.Now().Add(-24*time.Hour))
+	CreateTestSubscriptionInDB(t, f.DB, 111, "user1", "active", ptrTime(time.Now().Add(30*24*time.Hour)))
+	CreateTestSubscriptionInDB(t, f.DB, 222, "user2", "active", ptrTime(time.Now().Add(30*24*time.Hour)))
+	CreateTestSubscriptionInDB(t, f.DB, 333, "user3", "revoked", ptrTime(time.Now().Add(-24*time.Hour)))
 
 	allSubs, err := f.DB.GetAllSubscriptions(ctx)
 	if err != nil {
@@ -344,9 +344,9 @@ func TestDatabaseService_GetAllTelegramIDs(t *testing.T) {
 
 	ctx := context.Background()
 
-	CreateTestSubscriptionInDB(t, f.DB, 111, "user1", "active", time.Now().Add(30*24*time.Hour))
-	CreateTestSubscriptionInDB(t, f.DB, 222, "user2", "active", time.Now().Add(30*24*time.Hour))
-	CreateTestSubscriptionInDB(t, f.DB, 333, "user3", "revoked", time.Now().Add(-24*time.Hour))
+	CreateTestSubscriptionInDB(t, f.DB, 111, "user1", "active", ptrTime(time.Now().Add(30*24*time.Hour)))
+	CreateTestSubscriptionInDB(t, f.DB, 222, "user2", "active", ptrTime(time.Now().Add(30*24*time.Hour)))
+	CreateTestSubscriptionInDB(t, f.DB, 333, "user3", "revoked", ptrTime(time.Now().Add(-24*time.Hour)))
 
 	ids, err := f.DB.GetAllTelegramIDs(ctx)
 	if err != nil {
@@ -366,7 +366,7 @@ func TestDatabaseService_GetByUsername(t *testing.T) {
 
 	ctx := context.Background()
 
-	CreateTestSubscriptionInDB(t, f.DB, 111, "testuser", "active", time.Now().Add(30*24*time.Hour))
+	CreateTestSubscriptionInDB(t, f.DB, 111, "testuser", "active", ptrTime(time.Now().Add(30*24*time.Hour)))
 
 	id, err := f.DB.GetTelegramIDByUsername(ctx, "testuser")
 	if err != nil {
@@ -611,7 +611,7 @@ func TestIntegration_HandleStart_WithSubscription(t *testing.T) {
 	defer f.Close()
 
 	ctx := context.Background()
-	CreateTestSubscriptionInDB(t, f.DB, f.UserChatID, "testuser", "active", time.Now().Add(30*24*time.Hour))
+	CreateTestSubscriptionInDB(t, f.DB, f.UserChatID, "testuser", "active", ptrTime(time.Now().Add(30*24*time.Hour)))
 	resetMockBotAPI(f.Handler.bot.(*testutil.MockBotAPI))
 
 	update := tgbotapi.Update{
@@ -713,7 +713,7 @@ func TestIntegration_Callback_MenuSubscription(t *testing.T) {
 	f := NewTestFixture(t)
 	defer f.Close()
 
-	CreateTestSubscriptionInDB(t, f.DB, f.UserChatID, "testuser", "active", time.Now().Add(30*24*time.Hour))
+	CreateTestSubscriptionInDB(t, f.DB, f.UserChatID, "testuser", "active", ptrTime(time.Now().Add(30*24*time.Hour)))
 	resetMockBotAPI(f.Handler.bot.(*testutil.MockBotAPI))
 
 	ctx := context.Background()
@@ -741,7 +741,7 @@ func TestIntegration_Callback_QRCode(t *testing.T) {
 	f := NewTestFixture(t)
 	defer f.Close()
 
-	CreateTestSubscriptionInDB(t, f.DB, f.UserChatID, "testuser", "active", time.Now().Add(30*24*time.Hour))
+	CreateTestSubscriptionInDB(t, f.DB, f.UserChatID, "testuser", "active", ptrTime(time.Now().Add(30*24*time.Hour)))
 	resetMockBotAPI(f.Handler.bot.(*testutil.MockBotAPI))
 
 	ctx := context.Background()

@@ -784,7 +784,7 @@ func (m *MockDatabaseService) GetAllReferralCounts(ctx context.Context) (map[int
 	return make(map[int64]int64), nil
 }
 
-func CreateTestSubscription(telegramID int64, username string, status string, expiry time.Time) *database.Subscription {
+func CreateTestSubscription(telegramID int64, username string, status string, expiry *time.Time) *database.Subscription {
 	return &database.Subscription{
 		TelegramID:     telegramID,
 		Username:       username,

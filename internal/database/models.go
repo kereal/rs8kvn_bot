@@ -38,7 +38,8 @@ type Subscription struct {
 	Username       string    `gorm:"size:255;index"`
 	ClientID       string    `gorm:"size:255;uniqueIndex"`
 	SubscriptionID string    `gorm:"size:255;index"`
-	ExpiresAt      time.Time `gorm:"index:idx_expiry"`
+	// ExpiresAt — срок действия подписки. NULL = бессрочная (free-план).
+	ExpiresAt      *time.Time `gorm:"index:idx_expiry"`
 	Status         string    `gorm:"default:active;size:50;index"`
 	InviteCode     string    `gorm:"size:16;index"`
 	PlanID         uint      `gorm:"index"`
@@ -253,12 +254,12 @@ func (SubscriptionNode) TableName() string {
 }
 
 // IsExpired returns true if the subscription has expired.
-// A zero ExpiresAt means no expiry is set, so it is not considered expired.
+// A nil ExpiresAt means the subscription is perpetual (no expiry set).
 func (s *Subscription) IsExpired() bool {
-	if s.ExpiresAt.IsZero() {
+	if s.ExpiresAt == nil {
 		return false
 	}
-	return time.Now().After(s.ExpiresAt)
+	return time.Now().After(*s.ExpiresAt)
 }
 
 // IsActive returns true if the subscription is active and not expired.

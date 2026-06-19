@@ -31,7 +31,7 @@ func TestSubscriptionNodeRepository_GetBySubscriptionID(t *testing.T) {
 		ClientID:       "subnode-client",
 		SubscriptionID: "subnode-sub",
 		Status:         "active",
-		ExpiresAt:      time.Now().Add(24 * time.Hour),
+		ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
 		PlanID:         plan.ID,
 	}
 	require.NoError(t, svc.CreateSubscription(ctx, sub, ""))

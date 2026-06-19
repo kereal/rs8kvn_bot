@@ -14,6 +14,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func ptrTime(t time.Time) *time.Time { return &t }
+
 func TestE2E_CreateSubscription_EmptyUsername(t *testing.T) {
 	env := setupE2EEnv(t)
 	defer env.db.Close()
@@ -214,7 +216,7 @@ func TestE2E_Subscription_Expired(t *testing.T) {
 		ClientID:       "test-client-id",
 		SubscriptionID: "test-sub-id",
 		Status:         "expired",
-		ExpiresAt:      time.Now().Add(-1 * time.Hour),
+		ExpiresAt:      ptrTime(time.Now().Add(-1 * time.Hour)),
 	}
 	require.NoError(t, env.db.CreateSubscription(ctx, sub, ""))
 
@@ -235,12 +237,13 @@ func TestE2E_Subscription_AboutToExpire(t *testing.T) {
 		ClientID:       "test-client-id",
 		SubscriptionID: "test-sub-id",
 		Status:         "active",
-		ExpiresAt:      time.Now().Add(1 * time.Hour),
+		ExpiresAt:      ptrTime(time.Now().Add(1 * time.Hour)),
 	}
 	require.NoError(t, env.db.CreateSubscription(ctx, sub, ""))
 
 	storedSub, err := env.db.GetByTelegramID(ctx, env.chatID)
 	require.NoError(t, err)
+	require.NotNil(t, storedSub.ExpiresAt)
 	assert.True(t, storedSub.ExpiresAt.Before(time.Now().Add(2*time.Hour)), "Should expire within 2 hours")
 }
 

@@ -25,7 +25,7 @@ func TestOrderRepository_UpdateOrderPaidStatus(t *testing.T) {
 		SubscriptionID: "s-order",
 		Status:         "active",
 		PlanID:         plan.ID,
-		ExpiresAt:      time.Now().Add(24 * time.Hour),
+		ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
 	}
 	require.NoError(t, svc.CreateSubscription(ctx, sub, ""))
 
@@ -86,7 +86,7 @@ func TestOrderRepository_UpdateOrderActivatedAt(t *testing.T) {
 		SubscriptionID: "s-activate",
 		Status:         "active",
 		PlanID:         plan.ID,
-		ExpiresAt:      time.Now().Add(24 * time.Hour),
+		ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
 	}
 	require.NoError(t, svc.CreateSubscription(ctx, sub, ""))
 
@@ -116,7 +116,8 @@ func TestOrderRepository_UpdateOrderActivatedAt(t *testing.T) {
 	var got Order
 	require.NoError(t, svc.db.WithContext(ctx).First(&got, order.ID).Error)
 	assert.Equal(t, activatedAt.UTC(), got.ActivatedAt.UTC())
-	assert.Equal(t, expiresAt.UTC(), got.ExpiresAt.UTC())
+	require.NotNil(t, got.ExpiresAt)
+	assert.Equal(t, expiresAt.UTC(), (*got.ExpiresAt).UTC())
 }
 
 func TestOrderRepository_UpdateOrderActivatedAt_NotFound(t *testing.T) {

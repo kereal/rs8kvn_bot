@@ -138,7 +138,7 @@ func (sh *SubscriptionHandler) handleMySubscription(ctx context.Context, chatID 
 
 	// Дата истечения
 	var expiresText string
-	if !sub.ExpiresAt.IsZero() {
+	if sub.ExpiresAt != nil {
 		expiresText = fmt.Sprintf("\n⏰ Истекает: %s", traffic.ExpiresAtFormatted)
 	}
 

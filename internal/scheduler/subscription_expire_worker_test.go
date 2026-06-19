@@ -19,6 +19,8 @@ func init() {
 	_, _ = logger.Init("", "error")
 }
 
+func ptrTime(t time.Time) *time.Time { return &t }
+
 func newTestSubServiceForExpire(t testing.TB, db *database.Service) *service.SubscriptionService {
 	t.Helper()
 	cfg := &config.Config{
@@ -44,7 +46,7 @@ func TestSubscriptionExpireWorker_process_FindsAndExpires(t *testing.T) {
 		SubscriptionID: "s-expire1",
 		Status:          "active",
 		PlanID:          plan.ID,
-		ExpiresAt:       time.Now().Add(-1 * time.Hour),
+		ExpiresAt:       ptrTime(time.Now().Add(-1 * time.Hour)),
 		PricePaidCents:  100,
 		Currency:        "RUB",
 		ProductID:       1,
@@ -80,7 +82,7 @@ func TestSubscriptionExpireWorker_process_EmptyResult(t *testing.T) {
 		SubscriptionID: "s-noexpire",
 		Status:          "active",
 		PlanID:          plan.ID,
-		ExpiresAt:       time.Now().Add(24 * time.Hour),
+		ExpiresAt:       ptrTime(time.Now().Add(24 * time.Hour)),
 		PricePaidCents:  100,
 		Currency:        "RUB",
 		ProductID:       1,
@@ -96,7 +98,7 @@ func TestSubscriptionExpireWorker_process_EmptyResult(t *testing.T) {
 	var unchanged database.Subscription
 	require.NoError(t, db.GetDB().WithContext(ctx).First(&unchanged, activeSub.ID).Error)
 	assert.Equal(t, "active", unchanged.Status)
-	assert.False(t, unchanged.ExpiresAt.IsZero())
+	assert.False(t, unchanged.ExpiresAt == nil)
 }
 
 func TestSubscriptionExpireWorker_Run_ContextCancel(t *testing.T) {
