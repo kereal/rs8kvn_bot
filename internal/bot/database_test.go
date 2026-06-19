@@ -169,8 +169,8 @@ func TestHandleBroadcast_DatabaseFunction(t *testing.T) {
 	ctx := context.Background()
 
 	subs := []*database.Subscription{
-		{TelegramID: 111111111, Username: "user1", ClientID: "client1", Status: "active", ExpiresAt: ptrTime(time.Now().Add(24 * time.Hour))},
-		{TelegramID: 222222222, Username: "user2", ClientID: "client2", Status: "active", ExpiresAt: ptrTime(time.Now().Add(24 * time.Hour))},
+		{TelegramID: 111111111, Username: "user1", ClientID: "client1", SubscriptionID: "sub-user1", Status: "active", ExpiresAt: ptrTime(time.Now().Add(24 * time.Hour))},
+		{TelegramID: 222222222, Username: "user2", ClientID: "client2", SubscriptionID: "sub-user2", Status: "active", ExpiresAt: ptrTime(time.Now().Add(24 * time.Hour))},
 	}
 
 	for _, sub := range subs {
@@ -286,9 +286,9 @@ func TestGetAllTelegramIDs(t *testing.T) {
 	ctx := context.Background()
 
 	subs := []*database.Subscription{
-		{TelegramID: 111111111, Username: "user1", ClientID: "client1", Status: "active", ExpiresAt: ptrTime(time.Now().Add(24 * time.Hour))},
-		{TelegramID: 222222222, Username: "user2", ClientID: "client2", Status: "active", ExpiresAt: ptrTime(time.Now().Add(24 * time.Hour))},
-		{TelegramID: 333333333, Username: "user3", ClientID: "client3", Status: "active", ExpiresAt: ptrTime(time.Now().Add(24 * time.Hour))},
+		{TelegramID: 111111111, Username: "user1", ClientID: "client1", SubscriptionID: "sub-user1", Status: "active", ExpiresAt: ptrTime(time.Now().Add(24 * time.Hour))},
+		{TelegramID: 222222222, Username: "user2", ClientID: "client2", SubscriptionID: "sub-user2", Status: "active", ExpiresAt: ptrTime(time.Now().Add(24 * time.Hour))},
+		{TelegramID: 333333333, Username: "user3", ClientID: "client3", SubscriptionID: "sub-user3", Status: "active", ExpiresAt: ptrTime(time.Now().Add(24 * time.Hour))},
 	}
 
 	for _, sub := range subs {

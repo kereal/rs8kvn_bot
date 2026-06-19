@@ -32,19 +32,19 @@ const (
 //
 // См. generateTrialTelegramID() в trials.go для генерации уникальных отрицательных ID.
 type Subscription struct {
-	ID             uint      `gorm:"primaryKey"`
+	ID uint `gorm:"primaryKey"`
 	// TelegramID — уникальный для каждой подписки. Trial подписки используют отрицательные ID.
-	TelegramID     int64     `gorm:"uniqueIndex"`
-	Username       string    `gorm:"size:255;index"`
-	ClientID       string    `gorm:"size:255;uniqueIndex"`
-	SubscriptionID string    `gorm:"size:255;index"`
+	TelegramID     int64  `gorm:"uniqueIndex"`
+	Username       string `gorm:"size:255;index"`
+	ClientID       string `gorm:"size:255;not null;uniqueIndex"`
+	SubscriptionID string `gorm:"size:255;not null;uniqueIndex"`
 	// ExpiresAt — срок действия подписки. NULL = бессрочная (free-план).
 	ExpiresAt      *time.Time `gorm:"index:idx_expiry"`
-	Status         string    `gorm:"default:active;size:50;index"`
-	InviteCode     string    `gorm:"size:16;index"`
-	PlanID         uint      `gorm:"index"`
-	ReferredBy     int64     `gorm:"index"`
-	ProductID      uint      `gorm:"index"`
+	Status         string     `gorm:"default:active;size:50;index"`
+	InviteCode     string     `gorm:"size:16;index"`
+	PlanID         uint       `gorm:"index"`
+	ReferredBy     int64      `gorm:"index"`
+	ProductID      uint       `gorm:"index"`
 	StartedAt      time.Time
 	PricePaidCents int64     `gorm:"default:0"`
 	Currency       string    `gorm:"size:3"`
@@ -84,9 +84,9 @@ type Node struct {
 
 // Plan represents a subscription plan.
 type Plan struct {
-	ID           uint      `gorm:"primaryKey;column:id"`
-	Name         string    `gorm:"size:50;uniqueIndex;column:name"`
-	DevicesLimit int       `gorm:"default:1;column:devices_limit"`
+	ID           uint   `gorm:"primaryKey;column:id"`
+	Name         string `gorm:"size:50;uniqueIndex;column:name"`
+	DevicesLimit int    `gorm:"default:1;column:devices_limit"`
 	// TrafficLimit — лимит трафика в байтах. 0 = безлимит.
 	TrafficLimit int64     `gorm:"default:0;column:traffic_limit"`
 	CreatedAt    time.Time `gorm:"autoCreateTime;column:created_at"`
