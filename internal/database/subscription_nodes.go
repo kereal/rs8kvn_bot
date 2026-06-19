@@ -134,5 +134,8 @@ func (s *Service) UpdateRetry(ctx context.Context, subID, nodeID uint, retryCoun
 	if result.Error != nil {
 		return fmt.Errorf("failed to update retry: %w", result.Error)
 	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("subscription node not found for sub_id=%d node_id=%d", subID, nodeID)
+	}
 	return nil
 }

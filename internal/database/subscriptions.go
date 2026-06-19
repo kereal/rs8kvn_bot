@@ -70,6 +70,9 @@ func (s *Service) UpdateSubscription(ctx context.Context, sub *Subscription) err
 	if result.Error != nil {
 		return fmt.Errorf("failed to update subscription: %w", result.Error)
 	}
+	if result.RowsAffected == 0 {
+		return ErrSubscriptionNotFound
+	}
 	return nil
 }
 
@@ -190,8 +193,6 @@ func (s *Service) GetSubscriptionBySubscriptionID(ctx context.Context, subscript
 	return &sub, nil
 }
 
-// GetSubscriptionStatus returns only the status and expiry time for a subscription
-// by its subscription_id. It is intended for cheap cache-hit checks in the
 // GetSubscriptionStatus returns subscription status and expiry time for the
 // subscription server (since v2.3.0) — it avoids the full JOIN with plans and
 // sources required by GetSubscriptionWithPlanAndNodes. Returns
@@ -209,12 +210,9 @@ func (s *Service) GetSubscriptionStatus(ctx context.Context, subscriptionID stri
 		Table("subscriptions").
 		Select("status, expires_at").
 		Where("subscription_id = ?", subscriptionID).
-		Scan(&row)
+		Take(&row)
 	if result.Error != nil {
 		return "", time.Time{}, result.Error
-	}
-	if result.RowsAffected == 0 {
-		return "", time.Time{}, gorm.ErrRecordNotFound
 	}
 	return row.Status, row.ExpiresAt, nil
 }
@@ -258,6 +256,9 @@ func (s *Service) UpdateSubscriptionDevices(ctx context.Context, id uint, device
 	if result.Error != nil {
 		return fmt.Errorf("failed to update subscription devices: %w", result.Error)
 	}
+	if result.RowsAffected == 0 {
+		return ErrSubscriptionNotFound
+	}
 	return nil
 }
 
@@ -266,6 +267,9 @@ func (s *Service) UpdateSubscriptionIPs(ctx context.Context, id uint, ipsJSON st
 	result := s.db.WithContext(ctx).Model(&Subscription{}).Where("id = ?", id).Update("ips", ipsJSON)
 	if result.Error != nil {
 		return fmt.Errorf("failed to update subscription ips: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return ErrSubscriptionNotFound
 	}
 	return nil
 }
