@@ -21,10 +21,10 @@ import (
 
 type stubVPNClient struct{}
 
-func (s *stubVPNClient) CreateSubscription(ctx context.Context, uuid, username string) error {
+func (s *stubVPNClient) CreateSubscription(ctx context.Context, provision vpn.SubscriptionProvision) error {
 	return nil
 }
-func (s *stubVPNClient) DeleteSubscription(ctx context.Context, uuid, username string) error {
+func (s *stubVPNClient) DeleteSubscription(ctx context.Context, provision vpn.SubscriptionProvision) error {
 	return nil
 }
 func (s *stubVPNClient) Close() error { return nil }

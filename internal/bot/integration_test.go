@@ -353,8 +353,8 @@ func TestDatabaseService_GetAllTelegramIDs(t *testing.T) {
 		t.Fatalf("Failed to get all telegram IDs: %v", err)
 	}
 
-	if len(ids) != 3 {
-		t.Errorf("Expected 3 telegram IDs, got %d", len(ids))
+	if len(ids) != 2 {
+		t.Errorf("Expected 2 active telegram IDs, got %d", len(ids))
 	}
 }
 

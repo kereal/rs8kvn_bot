@@ -8,6 +8,7 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/xui"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"gorm.io/gorm"
 )
 
 var _ DatabaseService = (*database.Service)(nil)
@@ -109,6 +110,7 @@ type DatabaseService interface {
 	Ping(ctx context.Context) error
 	Close() error
 	GetPoolStats() (*database.PoolStats, error)
+	Transaction(ctx context.Context, fn func(*gorm.DB) error) error
 }
 
 type XUIClient interface {

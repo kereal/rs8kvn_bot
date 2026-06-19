@@ -18,6 +18,7 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/xui"
 
 	"go.uber.org/zap"
+	"gorm.io/gorm"
 )
 
 type SubscriptionService struct {
@@ -48,12 +49,12 @@ func XUIEmail(username string, telegramID int64) string {
 // NewSubscriptionService creates a SubscriptionService configured with the given database, XUI clients map, sources, configuration, and optional webhook sender.
 func NewSubscriptionService(db interfaces.DatabaseService, xuiClients map[uint]interfaces.XUIClient, vpnClients map[uint]vpn.Client, nodes []database.Node, cfg *config.Config, _ string, webhookSender webhook.WebhookSender) *SubscriptionService {
 	return &SubscriptionService{
-		db:       db,
+		db:         db,
 		xuiClients: xuiClients,
 		vpnClients: vpnClients,
-		nodes:    nodes,
-		cfg:      cfg,
-		webhook:  webhookSender,
+		nodes:      nodes,
+		cfg:        cfg,
+		webhook:    webhookSender,
 	}
 }
 
@@ -283,7 +284,7 @@ func (s *SubscriptionService) GetWithTraffic(ctx context.Context, telegramID int
 			LimitGB:            0,
 			PlanName:           planName,
 			CreatedAtFormatted: utils.FormatDateRu(sub.CreatedAt),
-		ExpiresAtFormatted: formatExpiresAt(sub.ExpiresAt),
+			ExpiresAtFormatted: formatExpiresAt(sub.ExpiresAt),
 		}, nil
 	}
 
@@ -537,10 +538,10 @@ func (s *SubscriptionService) InvalidateSubscription(ctx context.Context, telegr
 func (s *SubscriptionService) ReconcileOrphanedClients(ctx context.Context) (int, error) {
 	type activeOnly struct {
 		ID             uint
-		TelegramID      int64
-		Username        string
-		SubscriptionID  string
-		ClientID        string
+		TelegramID     int64
+		Username       string
+		SubscriptionID string
+		ClientID       string
 	}
 
 	rows, err := s.db.GetAllSubscriptions(ctx)
@@ -646,12 +647,12 @@ func (s *SubscriptionService) CleanupExpiredTrials(ctx context.Context) (int64, 
 	return int64(len(subs)), nil
 }
 
-// GetTotalTelegramIDCount returns the total number of unique Telegram IDs.
+// GetTotalTelegramIDCount returns the count of unique Telegram IDs for active subscriptions eligible for broadcast.
 func (s *SubscriptionService) GetTotalTelegramIDCount(ctx context.Context) (int64, error) {
 	return s.db.GetTotalTelegramIDCount(ctx)
 }
 
-// GetTelegramIDsBatch returns a batch of Telegram IDs for pagination.
+// GetTelegramIDsBatch returns a batch of Telegram IDs for active subscriptions eligible for broadcast.
 func (s *SubscriptionService) GetTelegramIDsBatch(ctx context.Context, offset, limit int) ([]int64, error) {
 	return s.db.GetTelegramIDsBatch(ctx, offset, limit)
 }
@@ -778,10 +779,12 @@ func (s *SubscriptionService) RenewSubscription(ctx context.Context, telegramID 
 	newExpiry = newExpiry.AddDate(0, 0, product.DurationDays)
 
 	sub.PlanID = product.PlanID
+	sub.ProductID = product.ID
 	sub.ExpiresAt = &newExpiry
-	if err := s.db.UpdateSubscription(ctx, sub); err != nil {
-		return nil, fmt.Errorf("update subscription: %w", err)
-	}
+	sub.PricePaidCents = product.PriceCents
+	sub.Currency = product.Currency
+	sub.StartedAt = now
+	sub.UpdatedAt = now
 
 	order := &database.Order{
 		SubscriptionID: sub.ID,
@@ -790,9 +793,24 @@ func (s *SubscriptionService) RenewSubscription(ctx context.Context, telegramID 
 		AmountCents:    product.PriceCents,
 		Currency:       product.Currency,
 		PaidAt:         &now,
+		ActivatedAt:    &now,
+		ExpiresAt:      &newExpiry,
 	}
-	if err := s.db.CreateOrder(ctx, order); err != nil {
-		return nil, fmt.Errorf("create order: %w", err)
+	if err := s.db.Transaction(ctx, func(tx *gorm.DB) error {
+		if err := tx.Model(&database.Subscription{}).
+			Where("id = ?", sub.ID).
+			Select("telegram_id", "username", "client_id", "subscription_id", "expires_at", "status", "invite_code", "plan_id", "referred_by", "devices", "ips", "product_id", "started_at", "price_paid_cents", "currency", "updated_at").
+			Updates(sub).Error; err != nil {
+			return fmt.Errorf("update subscription: %w", err)
+		}
+
+		if err := tx.Create(order).Error; err != nil {
+			return fmt.Errorf("create order: %w", err)
+		}
+
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 
 	if s.syncService != nil {
