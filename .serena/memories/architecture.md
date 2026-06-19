@@ -1,8 +1,14 @@
 # Architecture — rs8kvn_bot
 
-**Версия:** v2.4.0  
-**Обновлено:** 2026-06-17  
-**Ветка:** `multi-outbounds` (merge candidate)
+**Версия:** v2.6.0
+**Обновлено:** 2026-06-18
+**Ветка:** `plans_and_pricing`
+
+## Рефакторинг 2026-06-18
+- Внедрен `SyncService` для надежной синхронизации подписок с нодами.
+- Добавлена таблица `subscription_nodes` для отслеживания состояния синхронизации (active, pending_add, pending_remove).
+- Реализованы фоновые воркеры для синхронизации и обработки истекших подписок.
+- Добавлена поддержка нескольких типов VPN-панелей через пакет `internal/vpn`.
 
 ## Рефакторинг 2026-06-08 (коммит 2a1e0fe)
 - Монолит `database.go` разбит на 9 файлов по доменам
@@ -12,23 +18,23 @@
 - Убран избыточный `if xuiHeaders != nil` в `subscription_handler.go`
 - Проведён `go fmt` по 20 файлам
 
-## Branch: multi-outbounds
+## Branch: plans_and_pricing
 
-Эта память описывает текущую ветку `multi-outbounds`, которая включает:
-- Multi-outbound flow: группировка inboundIDs по совместимому flow для панели 3x-ui
-- Миграция конфига `config.Source` → `config.Node`/`Nodes`
-- Defensive copy в `Node.ResolveInboundIDs` (защита от мутации слайса)
-- Валидация inbound-ID positivity в `xui/client.go`
-- TgID через контекст (`WithTgID`/`TgIDFromContext`) при создании/обновлении клиентов в панель
-- Актуализация roadmap и архитектурной памяти
+Эта память описывает текущую ветку `plans_and_pricing`, которая включает:
+- **Sync State Machine**: Использование таблицы `subscription_nodes` для управления жизненным циклом подписки на нодах.
+- **VPN Abstraction**: Пакет `internal/vpn` для поддержки различных типов панелей.
+- **Multi-outbound flow**: Группировка inboundIDs по совместимому flow для панели 3x-ui.
+- **Background Workers**: Воркеры для синхронизации и автоматического перевода на Free-план по истечении срока.
+- **Improved UI**: Детализация информации о подписке в Telegram.
 
 ## Общая схема
 
 ```
 Telegram Bot (Go, single binary)
-  ├── cmd/bot/main.go         — entry point, graceful shutdown
+  ├── cmd/bot/main.go         — entry point, graceful shutdown, background workers
   ├── internal/bot/           — handlers, referral cache, singleflight
-  ├── internal/service/       — SubscriptionService (orchestration)
+  ├── internal/service/       — SubscriptionService (orchestration), SyncService (state machine)
+  ├── internal/vpn/           — VPN client abstraction (3x-ui, Proxman)
   ├── internal/database/      — SQLite + GORM + migrations 000-019
   ├── internal/xui/           — multi-source 3x-ui client + circuit breaker
   ├── internal/subserver/      — LRU cache, merge, /sub/{id} endpoint, proxy, servers, optional async access log
