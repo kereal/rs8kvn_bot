@@ -440,7 +440,7 @@ func TestSyncService_handleSyncError_IncrementsRetry(t *testing.T) {
 	require.NoError(t, db.CreateSubscriptionNode(ctx, sn))
 
 	svc := NewSyncService(db, nil, []database.Node{*node1})
-	svc.handleSyncError(sn, assert.AnError)
+	svc.handleSyncError(ctx, sn, assert.AnError)
 
 	rows, err := db.GetBySubscriptionID(ctx, sub.ID)
 	require.NoError(t, err)

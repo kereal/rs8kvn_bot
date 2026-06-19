@@ -108,6 +108,7 @@ type MockDatabaseService struct {
 	GetBySubscriptionIDFunc             func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error)
 	GetByNodeIDFunc                     func(ctx context.Context, nodeID uint) ([]database.SubscriptionNode, error)
 	GetPendingSyncFunc                  func(ctx context.Context) ([]database.SubscriptionNode, error)
+	GetPendingBySubscriptionIDFunc      func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error)
 	GetPendingByNodeIDFunc              func(ctx context.Context, nodeID uint) ([]database.SubscriptionNode, error)
 	CreateOrderFunc                     func(ctx context.Context, order *database.Order) error
 	GetOrderByIDFunc                    func(ctx context.Context, id uint) (*database.Order, error)
@@ -222,6 +223,13 @@ func (m *MockDatabaseService) GetByNodeID(ctx context.Context, nodeID uint) ([]d
 func (m *MockDatabaseService) GetPendingSync(ctx context.Context) ([]database.SubscriptionNode, error) {
 	if m.GetPendingSyncFunc != nil {
 		return m.GetPendingSyncFunc(ctx)
+	}
+	return nil, nil
+}
+
+func (m *MockDatabaseService) GetPendingBySubscriptionID(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
+	if m.GetPendingBySubscriptionIDFunc != nil {
+		return m.GetPendingBySubscriptionIDFunc(ctx, subscriptionID)
 	}
 	return nil, nil
 }
@@ -672,6 +680,10 @@ func (m *MockDatabaseService) UpdateSubscriptionIPs(ctx context.Context, id uint
 
 func (m *MockDatabaseService) ExpireSubscription(ctx context.Context, id uint, freePlanID uint) error {
 	return nil
+}
+
+func (m *MockDatabaseService) GetExpiredPaidSubscriptions(ctx context.Context) ([]database.Subscription, error) {
+	return nil, nil
 }
 
 func (m *MockDatabaseService) GetActiveByPlanID(ctx context.Context, planID uint) ([]database.Product, error) {

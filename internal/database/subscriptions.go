@@ -288,6 +288,20 @@ func (s *Service) ExpireSubscription(ctx context.Context, id uint, freePlanID ui
 	return nil
 }
 
+// GetExpiredPaidSubscriptions returns active subscriptions that have expired and are not on the free plan.
+func (s *Service) GetExpiredPaidSubscriptions(ctx context.Context) ([]Subscription, error) {
+	var subs []Subscription
+	freePlanSubQuery := s.db.WithContext(ctx).Select("id").Table("plans").Where("name = ?", FreePlanName)
+	result := s.db.WithContext(ctx).
+		Where("expires_at <= ? AND status = ? AND plan_id NOT IN (?)",
+			time.Now().UTC().Truncate(time.Minute), "active", freePlanSubQuery).
+		Find(&subs)
+	if result.Error != nil {
+		return nil, fmt.Errorf("failed to get expired paid subscriptions: %w", result.Error)
+	}
+	return subs, nil
+}
+
 // GetAllTelegramIDs returns all unique Telegram IDs from subscriptions.
 func (s *Service) GetAllTelegramIDs(ctx context.Context) ([]int64, error) {
 	var ids []int64

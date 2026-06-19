@@ -113,9 +113,13 @@ func (s *SyncService) RecalculateNodes(ctx context.Context, subscriptionID uint)
 
 // SyncSubscription performs pending VPN operations for the given subscription.
 func (s *SyncService) SyncSubscription(ctx context.Context, subscriptionID uint) error {
-	pending, err := s.db.GetBySubscriptionID(ctx, subscriptionID)
+	pending, err := s.db.GetPendingBySubscriptionID(ctx, subscriptionID)
 	if err != nil {
 		return fmt.Errorf("sync subscription: load nodes: %w", err)
+	}
+
+	if len(pending) == 0 {
+		return nil
 	}
 
 	sub, err := s.db.GetByID(ctx, subscriptionID)
@@ -163,7 +167,7 @@ func (s *SyncService) processPendingAdd(ctx context.Context, sn *database.Subscr
 	}
 
 	if err := client.CreateSubscription(ctx, sub.ClientID, syncIdentifier(sub)); err != nil {
-		s.handleSyncError(sn, err)
+		s.handleSyncError(ctx, sn, err)
 		return err
 	}
 
@@ -180,7 +184,7 @@ func (s *SyncService) processPendingRemove(ctx context.Context, sn *database.Sub
 	}
 
 	if err := client.DeleteSubscription(ctx, sub.ClientID, syncIdentifier(sub)); err != nil {
-		s.handleSyncError(sn, err)
+		s.handleSyncError(ctx, sn, err)
 		return err
 	}
 
@@ -190,14 +194,14 @@ func (s *SyncService) processPendingRemove(ctx context.Context, sn *database.Sub
 	return nil
 }
 
-func (s *SyncService) handleSyncError(sn *database.SubscriptionNode, err error) {
+func (s *SyncService) handleSyncError(ctx context.Context, sn *database.SubscriptionNode, err error) {
 	sn.RetryCount++
 	errMsg := err.Error()
 	sn.LastError = &errMsg
 	retryAt := CalculateRetryAt(sn.RetryCount)
 	sn.RetryAt = &retryAt
 
-	_ = s.db.UpdateRetry(nil, sn.SubscriptionID, sn.NodeID, sn.RetryCount, sn.RetryAt, sn.LastError)
+	_ = s.db.UpdateRetry(ctx, sn.SubscriptionID, sn.NodeID, sn.RetryCount, sn.RetryAt, sn.LastError)
 }
 
 // CalculateRetryAt returns the next retry timestamp for the given retry count.
