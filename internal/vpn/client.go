@@ -29,12 +29,13 @@ type SubscriptionProvision struct {
 	ResetDays    int
 }
 
-// Client defines the interface for VPN node operations.
 type Client interface {
 	CreateSubscription(ctx context.Context, provision SubscriptionProvision) error
 	DeleteSubscription(ctx context.Context, provision SubscriptionProvision) error
 	Close() error
 }
+
+var _ Client = (*ThreeXUIClient)(nil)
 
 // NewClient creates a VPN client based on the node type.
 func NewClient(cfg Config) (Client, error) {

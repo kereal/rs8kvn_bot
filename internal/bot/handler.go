@@ -53,6 +53,7 @@ type pendingInvite struct {
 const PendingInviteTTL = 60 * time.Minute
 
 type Handler struct {
+	noCopy noCopy
 	bot                 interfaces.BotAPI
 	cfg                 *config.Config
 	db                  interfaces.DatabaseService

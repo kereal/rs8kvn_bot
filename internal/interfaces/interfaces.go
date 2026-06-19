@@ -14,44 +14,92 @@ import (
 var _ DatabaseService = (*database.Service)(nil)
 var _ XUIClient = (*xui.Client)(nil)
 
-type SubscriptionNodeRepository interface {
+// SubscriptionNodeCRUD provides basic CRUD operations for subscription nodes.
+type SubscriptionNodeCRUD interface {
 	GetBySubscriptionID(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error)
 	GetByNodeID(ctx context.Context, nodeID uint) ([]database.SubscriptionNode, error)
-	GetPendingSync(ctx context.Context) ([]database.SubscriptionNode, error)
-	GetPendingBySubscriptionID(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error)
-	GetPendingByNodeID(ctx context.Context, nodeID uint) ([]database.SubscriptionNode, error)
 	CreateSubscriptionNode(ctx context.Context, sn *database.SubscriptionNode) error
-	UpdateSubscriptionNodeStatus(ctx context.Context, subID, nodeID uint, status database.SyncStatus) error
 	UpsertSubscriptionNode(ctx context.Context, sn *database.SubscriptionNode) error
 	DeleteSubscriptionNode(ctx context.Context, subID, nodeID uint) error
+}
+
+// SubscriptionNodeStatus manages sync status and retry logic for subscription nodes.
+type SubscriptionNodeStatus interface {
+	UpdateSubscriptionNodeStatus(ctx context.Context, subID, nodeID uint, status database.SyncStatus) error
 	UpdateRetry(ctx context.Context, subID, nodeID uint, retryCount int, retryAt *time.Time, lastErr *string) error
 }
 
-type SubscriptionRepository interface {
-	GetByTelegramID(ctx context.Context, telegramID int64) (*database.Subscription, error)
-	GetByID(ctx context.Context, id uint) (*database.Subscription, error)
+// SubscriptionNodeQueries retrieves subscription nodes by various criteria.
+type SubscriptionNodeQueries interface {
+	GetPendingSync(ctx context.Context) ([]database.SubscriptionNode, error)
+	GetPendingBySubscriptionID(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error)
+	GetPendingByNodeID(ctx context.Context, nodeID uint) ([]database.SubscriptionNode, error)
+}
+
+// SubscriptionNodeRepository combines all subscription node interfaces.
+type SubscriptionNodeRepository interface {
+	SubscriptionNodeCRUD
+	SubscriptionNodeStatus
+	SubscriptionNodeQueries
+}
+
+// SubscriptionCRUD provides basic CRUD operations for subscriptions.
+type SubscriptionCRUD interface {
 	CreateSubscription(ctx context.Context, sub *database.Subscription, inviteCode string) error
 	UpdateSubscription(ctx context.Context, sub *database.Subscription) error
 	DeleteSubscription(ctx context.Context, telegramID int64) error
+	DeleteSubscriptionByID(ctx context.Context, id uint) (*database.Subscription, error)
+}
+
+// SubscriptionQueries retrieves subscriptions by various criteria.
+type SubscriptionQueries interface {
+	GetByTelegramID(ctx context.Context, telegramID int64) (*database.Subscription, error)
+	GetByID(ctx context.Context, id uint) (*database.Subscription, error)
 	GetLatestSubscriptions(ctx context.Context, limit int) ([]database.Subscription, error)
 	GetAllSubscriptions(ctx context.Context) ([]database.Subscription, error)
+}
+
+// SubscriptionCounts retrieves subscription statistics.
+type SubscriptionCounts interface {
 	CountAllSubscriptions(ctx context.Context) (int64, error)
 	CountActiveSubscriptions(ctx context.Context) (int64, error)
 	CountExpiredSubscriptions(ctx context.Context) (int64, error)
 	GetAllTelegramIDs(ctx context.Context) ([]int64, error)
 	GetTelegramIDByUsername(ctx context.Context, username string) (int64, error)
-	DeleteSubscriptionByID(ctx context.Context, id uint) (*database.Subscription, error)
 	GetTelegramIDsBatch(ctx context.Context, offset, limit int) ([]int64, error)
 	GetTotalTelegramIDCount(ctx context.Context) (int64, error)
-GetSubscription(ctx context.Context, subscriptionID string) (*database.Subscription, error)
-	GetWithPlanAndNodes(ctx context.Context, subscriptionID string) (*database.SubscriptionFull, error)
+}
+
+// SubscriptionStatus manages subscription lifecycle operations.
+type SubscriptionStatus interface {
 	GetSubscriptionStatus(ctx context.Context, subscriptionID string) (string, time.Time, error)
-	UpdateDevices(ctx context.Context, id uint, devicesJSON string) error
-	UpdateIPs(ctx context.Context, id uint, ipsJSON string) error
 	ExpireSubscription(ctx context.Context, id uint, freePlanID uint) error
 	GetExpiredPaidSubscriptions(ctx context.Context) ([]database.Subscription, error)
 }
 
+// SubscriptionJSONFields updates JSON-encoded fields on subscriptions.
+type SubscriptionJSONFields interface {
+	UpdateDevices(ctx context.Context, id uint, devicesJSON string) error
+	UpdateIPs(ctx context.Context, id uint, ipsJSON string) error
+}
+
+// SubscriptionLookup provides methods for external subscription ID lookups.
+type SubscriptionLookup interface {
+	GetSubscription(ctx context.Context, subscriptionID string) (*database.Subscription, error)
+	GetWithPlanAndNodes(ctx context.Context, subscriptionID string) (*database.SubscriptionFull, error)
+}
+
+// SubscriptionRepository combines all subscription interfaces.
+type SubscriptionRepository interface {
+	SubscriptionCRUD
+	SubscriptionQueries
+	SubscriptionCounts
+	SubscriptionStatus
+	SubscriptionJSONFields
+	SubscriptionLookup
+}
+
+// TrialRepository provides operations for trial subscriptions.
 type TrialRepository interface {
 	CreateTrialSubscription(ctx context.Context, inviteCode, subscriptionID, clientID string, expiryTime time.Time) (*database.Subscription, error)
 	GetTrialSubscriptionBySubID(ctx context.Context, subscriptionID string) (*database.Subscription, error)
