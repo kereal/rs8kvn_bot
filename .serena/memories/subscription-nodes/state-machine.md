@@ -316,5 +316,5 @@ subscription_nodes
 
 ---
 Schema: `subscription_nodes(subscription_id, node_id, status, retry_count, retry_at, last_error, updated_at)`
-Go model: `database.SubscriptionNode` в `internal/database/database.go`
+Go model: `database.SubscriptionNode` в `internal/database/models.go`
 Migration: `internal/database/migrations/018_create_subscription_nodes.up.sql`

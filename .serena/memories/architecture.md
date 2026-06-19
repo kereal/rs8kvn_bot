@@ -1,8 +1,8 @@
 # Architecture — rs8kvn_bot
 
 **Версия:** v2.4.0  
-**Обновлено:** 2026-06-17  
-**Ветка:** `multi-outbounds` (merge candidate)
+**Обновлено:** 2026-06-20  
+**Ветка:** `plans_and_pricing` (merge candidate)
 
 ## Рефакторинг 2026-06-08 (коммит 2a1e0fe)
 - Монолит `database.go` разбит на 9 файлов по доменам
@@ -12,9 +12,9 @@
 - Убран избыточный `if xuiHeaders != nil` в `subscription_handler.go`
 - Проведён `go fmt` по 20 файлам
 
-## Branch: multi-outbounds
+## Branch: plans_and_pricing
 
-Эта память описывает текущую ветку `multi-outbounds`, которая включает:
+Эта память описывает текущую ветку `plans_and_pricing`, которая включает:
 - Multi-outbound flow: группировка inboundIDs по совместимому flow для панели 3x-ui
 - Миграция конфига `config.Source` → `config.Node`/`Nodes`
 - Defensive copy в `Node.ResolveInboundIDs` (защита от мутации слайса)
@@ -29,7 +29,7 @@ Telegram Bot (Go, single binary)
   ├── cmd/bot/main.go         — entry point, graceful shutdown
   ├── internal/bot/           — handlers, referral cache, singleflight
   ├── internal/service/       — SubscriptionService (orchestration)
-  ├── internal/database/      — SQLite + GORM + migrations 000-019
+  ├── internal/database/      — SQLite + GORM + migrations 000-023
   ├── internal/xui/           — multi-source 3x-ui client + circuit breaker
   ├── internal/subserver/      — LRU cache, merge, /sub/{id} endpoint, proxy, servers, optional async access log
   ├── internal/web/           — /healthz, /readyz, /i/{code}, /sub/{subID}, access-log response recording and soft-fail startup
@@ -49,7 +49,7 @@ Telegram Bot (Go, single binary)
 ```
 
 
-Версия схемы: after migration 019  
+Версия схемы: after migration 023  
 **Ревизия:** 2026-06-08
 
 ### Tab Subscription Nodes — состояние синхронизации
@@ -72,8 +72,8 @@ CREATE TABLE subscription_nodes (
 Go-модель: `database.SubscriptionNode` с typed status `SubscriptionNodeStatus`.  
 Статусы: `active`, `pending_add`, `pending_remove`.
 
-### Таблицы подписок (существующие, без структурных изменений после migration 019)
-- `subscriptions`, `invites`, `trial_requests` — без структурных изменений после migration 019.
+### Таблицы подписок (существующие после migration 023)
+- `subscriptions`, `invites`, `trial_requests` — структурно без новых колонок после migration 023; в `subscriptions` добавлены `NOT NULL UNIQUE` constraints/indexes для `client_id` и `subscription_id`.
 
 ### УСТАРЕВШИЕ таблицы
 - `sources`, `plan_sources` — заменены на `nodes` и `plan_nodes` (migration 014). Остаются в БД для обратной совместимости, но не используются в новом коде.
@@ -86,12 +86,12 @@ Go-модель: `database.SubscriptionNode` с typed status `SubscriptionNodeSt
 - `plan_nodes` (M:N: plan → nodes) — привязка серверов к тарифным планам.
 - `subscription_nodes` (M:N: subscription → nodes) — серверы, выданные конкретной подписке.
 
-### `subscriptions` (версия после migration 015/019)
+### `subscriptions` (версия после migration 023)
 ```
 telegram_id          int64    INDEX
 username             string   INDEX
-client_id            string
-subscription_id      string   INDEX (unique)
+client_id            string   NOT NULL UNIQUE
+subscription_id      string   NOT NULL UNIQUE
 expires_at          time     INDEX
 status               string   default: "active"  INDEX  (active|revoked|expired)
 invite_code          string   INDEX
@@ -108,7 +108,7 @@ updated_at           time
 ```
 **Удалено:** `is_trial`, `traffic_limit`, `inbound_id`, `subscription_url`, `deleted_at`.  
 **Soft delete заменён** на `status='revoked'`.  
-**Добавлено:** `devices`, `ips`, `plan_id`, `product_id`, `started_at`, `price_paid_cents`, `currency`.
+**Добавлено:** `devices`, `ips`, `plan_id`, `product_id`, `started_at`, `price_paid_cents`, `currency`; migration 023 добавила `NOT NULL UNIQUE` для `client_id` и `subscription_id`.
 
 ### `plans`
 ```
@@ -127,8 +127,8 @@ id, name UNIQUE, devices_limit, traffic_limit
 
 ### `invites`, `trial_requests`, `metrics_counters` — без изменений.
 
-Миграции лежат в `internal/database/migrations/000-019_*.up.sql` (embedded через go:embed).  
-Версия схемы: **after migration 019**.
+Миграции лежат в `internal/database/migrations/000-023_*.up.sql` (embedded через go:embed).  
+Версия схемы: **after migration 023**.
 
 ## Ключевые компоненты
 
@@ -151,7 +151,7 @@ id, name UNIQUE, devices_limit, traffic_limit
 - `trials.go` — Trial CRUD (7 функций), включая `BindTrialSubscription`
 - `orders.go` — Order CRUD (4 функции)
 - `products.go` — `GetActiveByPlanID()`
-- **`CreateSubscription(ctx, sub, inviteCode string)`** — атомарная транзакция: revoke всех active subs для telegram_id + resolve invite → заполнение `sub.InviteCode` и `sub.ReferredBy` + insert.
+- **`CreateSubscription(ctx, sub, inviteCode string)`** — атомарная транзакция: revoke всех active subs для telegram_id + resolve invite → заполнение `sub.InviteCode` и `sub.ReferredBy` + insert; `sub.ClientID` и `sub.SubscriptionID` должны быть непустыми и уникальными после migration 023.
 - **`BindTrialSubscription(ctx, sub, telegramID, username)`** — UPDATE trial-row WHERE telegram_id=0 AND plan_id=trial → revoke других active subs для этого telegram_id в той же транзакции. Динамический поиск trial/free plans по имени (`TrialPlanName`/`FreePlanName`).
 - **`CleanupExpiredTrials(ctx)`** — DELETE WHERE expiry_time < now() RETURNING subscription_id (SQLite ≥ 3.35).
 - **Sentinel errors**: `xui.ErrClientNotFound` (для `errors.Is` в Reconcile).
