@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -18,6 +19,7 @@ type mockVPNClient struct {
 	createCalled   bool
 	deleteCalled   bool
 	createError    error
+	deleteError    error
 	createSubID    string
 	createUsername string
 	deleteSubID    string
@@ -35,7 +37,7 @@ func (m *mockVPNClient) DeleteSubscription(ctx context.Context, uuid, username s
 	m.deleteCalled = true
 	m.deleteSubID = uuid
 	m.deleteUsername = username
-	return nil
+	return m.deleteError
 }
 
 func (m *mockVPNClient) Close() error {
@@ -475,4 +477,162 @@ func TestCalculateRetryAt(t *testing.T) {
 			assert.Less(t, diff, tt.wantMax)
 		})
 	}
+}
+
+func TestIsAlreadyExistsError(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil error", nil, false},
+		{"already exists", fmt.Errorf("client already exists"), true},
+		{"duplicate", fmt.Errorf("duplicate key error"), true},
+		{"already added", fmt.Errorf("already added to inbound"), true},
+		{"unrelated error", fmt.Errorf("connection refused"), false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isAlreadyExistsError(tt.err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestIsNotFoundError(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil error", nil, false},
+		{"not found", fmt.Errorf("client not found"), true},
+		{"does not exist", fmt.Errorf("resource does not exist"), true},
+		{"unrelated error", fmt.Errorf("connection refused"), false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isNotFoundError(tt.err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestSyncService_SyncSubscription_PendingAdd_AlreadyExists(t *testing.T) {
+	t.Parallel()
+
+	db, err := testutil.NewTestDatabaseService(t)
+	require.NoError(t, err)
+	ctx := context.Background()
+
+	plan := &database.Plan{Name: "test-plan-sync-add-exists", DevicesLimit: 1, TrafficLimit: 1024}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(plan).Error)
+
+	node1 := &database.Node{Name: "sync-add-exists-node", IsActive: true, Host: "http://sae", APIToken: "tae", InboundIDs: `[1]`}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(node1).Error)
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(&database.PlanNode{PlanID: plan.ID, NodeID: node1.ID}).Error)
+
+	sub := &database.Subscription{
+		TelegramID:     9991,
+		Username:       "syncaddexists",
+		ClientID:       "c-syncaddexists",
+		SubscriptionID: "s-syncaddexists",
+		Status:         "active",
+		PlanID:         plan.ID,
+		ExpiresAt:      time.Now().Add(24 * time.Hour),
+	}
+	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
+	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusPendingAdd}))
+
+	mockVPN := &mockVPNClient{createError: fmt.Errorf("client already exists")}
+	svc := NewSyncService(db, map[uint]vpn.Client{node1.ID: mockVPN}, []database.Node{*node1})
+
+	require.NoError(t, svc.SyncSubscription(ctx, sub.ID))
+
+	rows, err := db.GetBySubscriptionID(ctx, sub.ID)
+	require.NoError(t, err)
+	assert.Len(t, rows, 1)
+	assert.Equal(t, database.SyncStatusActive, rows[0].Status, "should mark active when client already exists")
+	assert.Equal(t, 0, rows[0].RetryCount, "should not increment retry count")
+}
+
+func TestSyncService_SyncSubscription_PendingRemove_NotFound(t *testing.T) {
+	t.Parallel()
+
+	db, err := testutil.NewTestDatabaseService(t)
+	require.NoError(t, err)
+	ctx := context.Background()
+
+	plan := &database.Plan{Name: "test-plan-sync-rm-notfound", DevicesLimit: 1, TrafficLimit: 1024}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(plan).Error)
+
+	node1 := &database.Node{Name: "sync-rm-notfound-node", IsActive: true, Host: "http://srnf", APIToken: "trnf", InboundIDs: `[1]`}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(node1).Error)
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(&database.PlanNode{PlanID: plan.ID, NodeID: node1.ID}).Error)
+
+	sub := &database.Subscription{
+		TelegramID:     9992,
+		Username:       "syncrmnotfound",
+		ClientID:       "c-syncrmnotfound",
+		SubscriptionID: "s-syncrmnotfound",
+		Status:         "active",
+		PlanID:         plan.ID,
+		ExpiresAt:      time.Now().Add(24 * time.Hour),
+	}
+	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
+	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusPendingRemove}))
+
+	mockVPN := &mockVPNClient{deleteError: fmt.Errorf("client not found")}
+	svc := NewSyncService(db, map[uint]vpn.Client{node1.ID: mockVPN}, []database.Node{*node1})
+
+	require.NoError(t, svc.SyncSubscription(ctx, sub.ID))
+
+	rows, err := db.GetBySubscriptionID(ctx, sub.ID)
+	require.NoError(t, err)
+	assert.Empty(t, rows, "should delete subscription node when client not found")
+}
+
+func TestSyncService_SyncSubscription_PendingAdd_RetryOnOtherError(t *testing.T) {
+	t.Parallel()
+
+	db, err := testutil.NewTestDatabaseService(t)
+	require.NoError(t, err)
+	ctx := context.Background()
+
+	plan := &database.Plan{Name: "test-plan-sync-add-retry", DevicesLimit: 1, TrafficLimit: 1024}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(plan).Error)
+
+	node1 := &database.Node{Name: "sync-add-retry-node", IsActive: true, Host: "http://sar", APIToken: "tar", InboundIDs: `[1]`}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(node1).Error)
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(&database.PlanNode{PlanID: plan.ID, NodeID: node1.ID}).Error)
+
+	sub := &database.Subscription{
+		TelegramID:     9993,
+		Username:       "syncaddretry",
+		ClientID:       "c-syncaddretry",
+		SubscriptionID: "s-syncaddretry",
+		Status:         "active",
+		PlanID:         plan.ID,
+		ExpiresAt:      time.Now().Add(24 * time.Hour),
+	}
+	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
+	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusPendingAdd}))
+
+	mockVPN := &mockVPNClient{createError: fmt.Errorf("connection refused")}
+	svc := NewSyncService(db, map[uint]vpn.Client{node1.ID: mockVPN}, []database.Node{*node1})
+
+	err = svc.SyncSubscription(ctx, sub.ID)
+	assert.Error(t, err)
+
+	rows, err := db.GetBySubscriptionID(ctx, sub.ID)
+	require.NoError(t, err)
+	assert.Len(t, rows, 1)
+	assert.Equal(t, database.SyncStatusPendingAdd, rows[0].Status)
+	assert.Equal(t, 1, rows[0].RetryCount)
 }
