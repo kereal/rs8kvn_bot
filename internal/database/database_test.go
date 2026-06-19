@@ -1394,14 +1394,13 @@ func TestService_CreateTrialSubscription_AllowsSameSubID(t *testing.T) {
 	assert.Less(t, sub.TelegramID, int64(0), "Trial should have negative telegram_id")
 }
 
-func TestService_GetSubscriptionBySubscriptionID_Success(t *testing.T) {
+func TestService_GetSubscription_Success(t *testing.T) {
 	t.Parallel()
 
 	svc := newTestService(t)
 
 	ctx := context.Background()
 
-	// Create a regular (non-trial) subscription
 	origSub := &Subscription{
 		TelegramID:     123456,
 		Username:       "testuser",
@@ -1413,8 +1412,7 @@ func TestService_GetSubscriptionBySubscriptionID_Success(t *testing.T) {
 	err := svc.db.Create(origSub).Error
 	require.NoError(t, err)
 
-	// Retrieve by subscription ID
-	found, err := svc.GetSubscriptionBySubscriptionID(ctx, "sub-find-me")
+	found, err := svc.GetSubscription(ctx, "sub-find-me")
 
 	require.NoError(t, err)
 	assert.NotNil(t, found)
@@ -1429,19 +1427,18 @@ func TestService_GetSubscriptionBySubscriptionID_NotFound(t *testing.T) {
 
 	ctx := context.Background()
 
-	_, err := svc.GetSubscriptionBySubscriptionID(ctx, "nonexistent-sub-id")
+	_, err := svc.GetSubscription(ctx, "nonexistent-sub-id")
 
 	assert.Error(t, err, "Non-existent subscription ID should return error")
 }
 
-func TestService_GetSubscriptionBySubscriptionID_Trial(t *testing.T) {
+func TestService_GetSubscription_Trial(t *testing.T) {
 	t.Parallel()
 
 	svc := newTestService(t)
 
 	ctx := context.Background()
 
-	// Create a trial subscription
 	_, err := svc.CreateTrialSubscription(
 		ctx,
 		"INVITE789",
@@ -1451,8 +1448,7 @@ func TestService_GetSubscriptionBySubscriptionID_Trial(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	// Should be findable by subscription ID (even though it's a trial)
-	found, err := svc.GetSubscriptionBySubscriptionID(ctx, "sub-trial-find")
+	found, err := svc.GetSubscription(ctx, "sub-trial-find")
 
 	require.NoError(t, err)
 	assert.NotNil(t, found)

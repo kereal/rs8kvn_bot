@@ -180,8 +180,8 @@ func (s *Service) CountExpiredSubscriptions(ctx context.Context) (int64, error) 
 	return count, nil
 }
 
-// GetSubscriptionBySubscriptionID returns a subscription by its subscription ID.
-func (s *Service) GetSubscriptionBySubscriptionID(ctx context.Context, subscriptionID string) (*Subscription, error) {
+// GetSubscription retrieves a subscription by its subscription ID.
+func (s *Service) GetSubscription(ctx context.Context, subscriptionID string) (*Subscription, error) {
 	var sub Subscription
 	result := s.db.WithContext(ctx).Where("subscription_id = ?", subscriptionID).First(&sub)
 	if result.Error != nil {
@@ -217,9 +217,9 @@ func (s *Service) GetSubscriptionStatus(ctx context.Context, subscriptionID stri
 	return row.Status, row.ExpiresAt, nil
 }
 
-// GetSubscriptionWithPlanAndNodes returns a subscription (status=active) by subscription ID
+// GetWithPlanAndNodes returns a subscription (status=active) by subscription ID
 // together with its plan and active nodes, via JOINs through plan_nodes.
-func (s *Service) GetSubscriptionWithPlanAndNodes(ctx context.Context, subscriptionID string) (*SubscriptionFull, error) {
+func (s *Service) GetWithPlanAndNodes(ctx context.Context, subscriptionID string) (*SubscriptionFull, error) {
 	var result SubscriptionFull
 
 	subQuery := s.db.WithContext(ctx).Where("subscription_id = ? AND status = ?", subscriptionID, "active")
@@ -250,8 +250,8 @@ func (s *Service) GetSubscriptionWithPlanAndNodes(ctx context.Context, subscript
 	return &result, nil
 }
 
-// UpdateSubscriptionDevices updates only the devices JSON column for a subscription.
-func (s *Service) UpdateSubscriptionDevices(ctx context.Context, id uint, devicesJSON string) error {
+// UpdateDevices updates only the devices JSON column for a subscription.
+func (s *Service) UpdateDevices(ctx context.Context, id uint, devicesJSON string) error {
 	result := s.db.WithContext(ctx).Model(&Subscription{}).Where("id = ?", id).Update("devices", devicesJSON)
 	if result.Error != nil {
 		return fmt.Errorf("failed to update subscription devices: %w", result.Error)
@@ -262,8 +262,8 @@ func (s *Service) UpdateSubscriptionDevices(ctx context.Context, id uint, device
 	return nil
 }
 
-// UpdateSubscriptionIPs updates only the ips JSON column for a subscription.
-func (s *Service) UpdateSubscriptionIPs(ctx context.Context, id uint, ipsJSON string) error {
+// UpdateIPs updates only the ips JSON column for a subscription.
+func (s *Service) UpdateIPs(ctx context.Context, id uint, ipsJSON string) error {
 	result := s.db.WithContext(ctx).Model(&Subscription{}).Where("id = ?", id).Update("ips", ipsJSON)
 	if result.Error != nil {
 		return fmt.Errorf("failed to update subscription ips: %w", result.Error)

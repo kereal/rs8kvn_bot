@@ -267,8 +267,8 @@ func (s *Subscription) IsActive() bool {
 	return s.Status == "active" && !s.IsExpired()
 }
 
-// GetDevices parses the Devices JSON string into a slice of header maps.
-func (s *Subscription) GetDevices() ([]map[string]string, error) {
+// ParseDevices parses the Devices JSON string into a slice of header maps.
+func (s *Subscription) ParseDevices() ([]map[string]string, error) {
 	if s.Devices == "" {
 		return []map[string]string{}, nil
 	}
@@ -289,8 +289,8 @@ func (s *Subscription) SetDevices(devices []map[string]string) error {
 	return nil
 }
 
-// GetIPs parses the Ips JSON string into a slice of ip->timestamp maps.
-func (s *Subscription) GetIPs() ([]map[string]string, error) {
+// ParseIPs parses the Ips JSON string into a slice of ip->timestamp maps.
+func (s *Subscription) ParseIPs() ([]map[string]string, error) {
 	if s.Ips == "" {
 		return []map[string]string{}, nil
 	}
@@ -311,7 +311,7 @@ func (s *Subscription) SetIPs(ips []map[string]string) error {
 	return nil
 }
 
-func (n *Node) GetInboundIDs() ([]int, error) {
+func (n *Node) ParseInboundIDs() ([]int, error) {
 	if n.InboundIDs == "" {
 		return []int{}, nil
 	}
@@ -342,7 +342,7 @@ var DefaultInboundIDs = []int{1}
 // ResolveInboundIDs returns the node's inbound IDs, falling back to DefaultInboundIDs
 // when the stored list is empty or malformed. Callers must not repeat this fallback.
 func (n *Node) ResolveInboundIDs() []int {
-	ids, err := n.GetInboundIDs()
+	ids, err := n.ParseInboundIDs()
 	if err != nil || len(ids) == 0 {
 		out := make([]int, len(DefaultInboundIDs))
 		copy(out, DefaultInboundIDs)

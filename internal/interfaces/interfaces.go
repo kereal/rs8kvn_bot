@@ -43,11 +43,11 @@ type SubscriptionRepository interface {
 	DeleteSubscriptionByID(ctx context.Context, id uint) (*database.Subscription, error)
 	GetTelegramIDsBatch(ctx context.Context, offset, limit int) ([]int64, error)
 	GetTotalTelegramIDCount(ctx context.Context) (int64, error)
-	GetSubscriptionBySubscriptionID(ctx context.Context, subscriptionID string) (*database.Subscription, error)
-	GetSubscriptionWithPlanAndNodes(ctx context.Context, subscriptionID string) (*database.SubscriptionFull, error)
+GetSubscription(ctx context.Context, subscriptionID string) (*database.Subscription, error)
+	GetWithPlanAndNodes(ctx context.Context, subscriptionID string) (*database.SubscriptionFull, error)
 	GetSubscriptionStatus(ctx context.Context, subscriptionID string) (string, time.Time, error)
-	UpdateSubscriptionDevices(ctx context.Context, id uint, devicesJSON string) error
-	UpdateSubscriptionIPs(ctx context.Context, id uint, ipsJSON string) error
+	UpdateDevices(ctx context.Context, id uint, devicesJSON string) error
+	UpdateIPs(ctx context.Context, id uint, ipsJSON string) error
 	ExpireSubscription(ctx context.Context, id uint, freePlanID uint) error
 	GetExpiredPaidSubscriptions(ctx context.Context) ([]database.Subscription, error)
 }

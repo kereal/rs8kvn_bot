@@ -37,7 +37,7 @@ func TestSeedDefaultNode_Success(t *testing.T) {
 	assert.Equal(t, "main", mainSrc.Name)
 	assert.Equal(t, "http://xui:2053", mainSrc.Host)
 	assert.Equal(t, "token-abc", mainSrc.APIToken)
-	inboundIDs, parseErr := mainSrc.GetInboundIDs()
+	inboundIDs, parseErr := mainSrc.ParseInboundIDs()
 	require.NoError(t, parseErr)
 	assert.Equal(t, []int{1}, inboundIDs)
 	assert.Equal(t, "https://sub.example.com", mainSrc.SubscriptionURL)
