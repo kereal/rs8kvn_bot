@@ -252,7 +252,7 @@ func (h *Handler) getSubscriptionWithCache(ctx context.Context, chatID int64) (*
 // It uses centralized SubscriptionService if available, otherwise falls back to direct cache access.
 func (h *Handler) invalidateCache(ctx context.Context, chatID int64) {
 	if h.subscriptionService != nil {
-		_ = h.subscriptionService.InvalidateSubscription(ctx, chatID)
+		h.subscriptionService.InvalidateSubscription(ctx, chatID)
 		return
 	}
 	h.cache.Invalidate(chatID)

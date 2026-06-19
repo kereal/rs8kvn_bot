@@ -111,6 +111,25 @@ func (s *SyncService) RecalculateNodes(ctx context.Context, subscriptionID uint)
 	return nil
 }
 
+// MarkAllForRemoval sets all active subscription nodes to pending_remove status.
+// Used before deleting a subscription to ensure VPN clients are removed via sync.
+func (s *SyncService) MarkAllForRemoval(ctx context.Context, subscriptionID uint) error {
+	nodes, err := s.db.GetBySubscriptionID(ctx, subscriptionID)
+	if err != nil {
+		return fmt.Errorf("mark all for removal: load nodes: %w", err)
+	}
+
+	for _, sn := range nodes {
+		if sn.Status == database.SyncStatusActive {
+			if err := s.db.UpdateSubscriptionNodeStatus(ctx, sn.SubscriptionID, sn.NodeID, database.SyncStatusPendingRemove); err != nil {
+				return fmt.Errorf("mark all for removal: set pending_remove node %d: %w", sn.NodeID, err)
+			}
+		}
+	}
+
+	return nil
+}
+
 // SyncSubscription performs pending VPN operations for the given subscription.
 func (s *SyncService) SyncSubscription(ctx context.Context, subscriptionID uint) error {
 	pending, err := s.db.GetPendingBySubscriptionID(ctx, subscriptionID)
@@ -163,7 +182,9 @@ func (s *SyncService) syncNodes(ctx context.Context, sub *database.Subscription,
 func (s *SyncService) processPendingAdd(ctx context.Context, sn *database.SubscriptionNode, sub *database.Subscription) error {
 	client, ok := s.vpnClients[sn.NodeID]
 	if !ok {
-		return fmt.Errorf("no VPN client for node %d", sn.NodeID)
+		err := fmt.Errorf("no VPN client for node %d", sn.NodeID)
+		s.handleSyncError(ctx, sn, err)
+		return err
 	}
 
 	if err := client.CreateSubscription(ctx, sub.ClientID, syncIdentifier(sub)); err != nil {
@@ -180,7 +201,9 @@ func (s *SyncService) processPendingAdd(ctx context.Context, sn *database.Subscr
 func (s *SyncService) processPendingRemove(ctx context.Context, sn *database.SubscriptionNode, sub *database.Subscription) error {
 	client, ok := s.vpnClients[sn.NodeID]
 	if !ok {
-		return fmt.Errorf("no VPN client for node %d", sn.NodeID)
+		err := fmt.Errorf("no VPN client for node %d", sn.NodeID)
+		s.handleSyncError(ctx, sn, err)
+		return err
 	}
 
 	if err := client.DeleteSubscription(ctx, sub.ClientID, syncIdentifier(sub)); err != nil {
@@ -201,7 +224,12 @@ func (s *SyncService) handleSyncError(ctx context.Context, sn *database.Subscrip
 	retryAt := CalculateRetryAt(sn.RetryCount)
 	sn.RetryAt = &retryAt
 
-	_ = s.db.UpdateRetry(ctx, sn.SubscriptionID, sn.NodeID, sn.RetryCount, sn.RetryAt, sn.LastError)
+	if dbErr := s.db.UpdateRetry(ctx, sn.SubscriptionID, sn.NodeID, sn.RetryCount, sn.RetryAt, sn.LastError); dbErr != nil {
+		logger.Warn("failed to update retry metadata",
+			zap.Uint("subscription_id", sn.SubscriptionID),
+			zap.Uint("node_id", sn.NodeID),
+			zap.Error(dbErr))
+	}
 }
 
 // CalculateRetryAt returns the next retry timestamp for the given retry count.
