@@ -11,6 +11,7 @@ import (
 
 // generateTrialTelegramID generates a unique negative telegram_id for unbound trial subscriptions.
 // Negative IDs are reserved for trials and excluded from UNIQUE constraints on telegram_id.
+// The hash is based on the subscription ID to ensure uniqueness across concurrent trial creations.
 func generateTrialTelegramID(subscriptionID string) int64 {
 	var hash int64
 	for _, c := range subscriptionID {
