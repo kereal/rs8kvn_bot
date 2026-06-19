@@ -64,7 +64,7 @@ func HandleSubscription(ctx context.Context, db interfaces.DatabaseService, subS
 	}
 
 	// Cache miss: load the subscription with plan and active sources.
-	subFull, err := db.GetSubscriptionWithPlanAndNodes(ctx, subID)
+	subFull, err := db.GetWithPlanAndNodes(ctx, subID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			logger.Error("Subscription not found in database",
@@ -249,7 +249,7 @@ func HandleSubscription(ctx context.Context, db interfaces.DatabaseService, subS
 // has the same x-hwid value it is replaced (rotated to the end). The updated
 // list is persisted to DB.
 func UpdateDevices(ctx context.Context, db interfaces.DatabaseService, subFull *database.SubscriptionFull, headers map[string]string) {
-	devices, err := subFull.Subscription.GetDevices()
+	devices, err := subFull.Subscription.ParseDevices()
 	if err != nil {
 		logger.Error("Failed to parse devices JSON",
 			zap.Uint("sub_pk", subFull.Subscription.ID),
@@ -289,7 +289,7 @@ func UpdateDevices(ctx context.Context, db interfaces.DatabaseService, subFull *
 		return
 	}
 
-	if err := db.UpdateSubscriptionDevices(ctx, subFull.Subscription.ID, subFull.Subscription.Devices); err != nil {
+	if err := db.UpdateDevices(ctx, subFull.Subscription.ID, subFull.Subscription.Devices); err != nil {
 		logger.Error("Failed to save devices to database",
 			zap.Uint("sub_pk", subFull.Subscription.ID),
 			zap.String("sub_id", subFull.Subscription.SubscriptionID),
@@ -301,7 +301,7 @@ func UpdateDevices(ctx context.Context, db interfaces.DatabaseService, subFull *
 // subscription's Ips JSON field. Duplicate IPs are rotated to the end.
 // The list is capped at maxIPEntries (oldest entries are dropped).
 func UpdateIPs(ctx context.Context, db interfaces.DatabaseService, subFull *database.SubscriptionFull, ip string) {
-	ips, err := subFull.Subscription.GetIPs()
+	ips, err := subFull.Subscription.ParseIPs()
 	if err != nil {
 		logger.Error("Failed to parse ips JSON",
 			zap.Uint("sub_pk", subFull.Subscription.ID),
@@ -336,7 +336,7 @@ func UpdateIPs(ctx context.Context, db interfaces.DatabaseService, subFull *data
 		return
 	}
 
-	if err := db.UpdateSubscriptionIPs(ctx, subFull.Subscription.ID, subFull.Subscription.Ips); err != nil {
+	if err := db.UpdateIPs(ctx, subFull.Subscription.ID, subFull.Subscription.Ips); err != nil {
 		logger.Error("Failed to save ips to database",
 			zap.Uint("sub_pk", subFull.Subscription.ID),
 			zap.String("sub_id", subFull.Subscription.SubscriptionID),
