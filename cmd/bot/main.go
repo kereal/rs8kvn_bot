@@ -39,6 +39,56 @@ var (
 	buildTime = "unknown"
 )
 
+var (
+	newXUIClient = xui.NewClient
+	newVPNClient = vpn.NewClient
+)
+
+func buildRuntimeNodeClients(nodes []database.Node) ([]database.Node, map[uint]interfaces.XUIClient, map[uint]vpn.Client, interfaces.XUIClient, error) {
+	runtimeNodes := make([]database.Node, 0, len(nodes))
+	for _, node := range nodes {
+		if node.IsActive {
+			runtimeNodes = append(runtimeNodes, node)
+		}
+	}
+	if len(runtimeNodes) == 0 {
+		return nil, nil, nil, nil, fmt.Errorf("no active nodes configured")
+	}
+
+	xuiClients := make(map[uint]interfaces.XUIClient)
+	vpnClients := make(map[uint]vpn.Client)
+	var legacyXUIClient interfaces.XUIClient
+
+	for _, node := range runtimeNodes {
+		var xuiClient interfaces.XUIClient
+		if node.Type == database.NodeType3xUI {
+			client, err := newXUIClient(node.Host, node.APIToken)
+			if err != nil {
+				return nil, nil, nil, nil, fmt.Errorf("init 3x-ui client for node %d: %w", node.ID, err)
+			}
+			xuiClient = client
+			xuiClients[node.ID] = client
+			if legacyXUIClient == nil {
+				legacyXUIClient = client
+			}
+		}
+
+		client, err := newVPNClient(vpn.Config{
+			Host:       node.Host,
+			APIToken:   node.APIToken,
+			Type:       node.Type,
+			InboundIDs: node.ResolveInboundIDs(),
+			XUIClient:  xuiClient,
+		})
+		if err != nil {
+			return nil, nil, nil, nil, fmt.Errorf("init vpn client for node %d: %w", node.ID, err)
+		}
+		vpnClients[node.ID] = client
+	}
+
+	return runtimeNodes, xuiClients, vpnClients, legacyXUIClient, nil
+}
+
 // getVersion returns the service version string prefixed with "rs8kvn_bot@".
 // It prefers a non-"dev" ldflag version, then a module tag from build info, then a short VCS revision from build info, then an ldflag commit, and finally falls back to the ldflag version.
 func getVersion() string {
@@ -182,24 +232,14 @@ func main() {
 		logger.Info("Default node seeded", zap.String("host", xuiHost))
 	}
 
-	// Load nodes and create XUI clients
+	// Load active runtime nodes and create node clients.
 	nodes, err := dbService.ListNodes(context.Background())
 	if err != nil {
 		logger.Fatal("Failed to list nodes", zap.Error(err))
 	}
-	if len(nodes) == 0 {
-		logger.Fatal("No nodes configured")
-	}
-
-	xuiClients := make(map[uint]interfaces.XUIClient)
-	for _, node := range nodes {
-		client, initErr := xui.NewClient(node.Host, node.APIToken)
-		if initErr != nil {
-			logger.Fatal("Failed to initialize 3x-ui client",
-				zap.Uint("node_id", node.ID),
-				zap.Error(initErr))
-		}
-		xuiClients[node.ID] = client
+	runtimeNodes, xuiClients, vpnClients, legacyXUIClient, err := buildRuntimeNodeClients(nodes)
+	if err != nil {
+		logger.Fatal("Failed to initialize node clients", zap.Error(err))
 	}
 
 	// Close all XUI clients on shutdown
@@ -213,34 +253,10 @@ func main() {
 		}
 	}()
 
-	// For legacy health check — use the first active XUI client
-	var legacyXUIClient interfaces.XUIClient
-	for _, node := range nodes {
-		if node.IsActive {
-			legacyXUIClient = xuiClients[node.ID]
-			break
-		}
-	}
 	if legacyXUIClient == nil {
 		logger.Warn("No active node found — legacy XUI client will be nil; health check on /ping will be skipped")
 	}
-
-	vpnClients := make(map[uint]vpn.Client)
-	for _, node := range nodes {
-		client, initErr := vpn.NewClient(vpn.Config{
-			Host:       node.Host,
-			APIToken:   node.APIToken,
-			Type:       node.Type,
-			InboundIDs: node.ResolveInboundIDs(),
-			XUIClient:  xuiClients[node.ID],
-		})
-		if initErr != nil {
-			logger.Fatal("Failed to initialize VPN client",
-				zap.Uint("node_id", node.ID),
-				zap.Error(initErr))
-		}
-		vpnClients[node.ID] = client
-	}
+	nodes = runtimeNodes
 
 	// Initialize Telegram bot with retry to handle transient network issues
 	logger.Info("Validating Telegram bot token")

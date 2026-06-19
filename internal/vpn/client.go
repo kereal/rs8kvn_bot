@@ -34,7 +34,7 @@ func NewClient(cfg Config) (Client, error) {
 		}
 		return NewThreeXUIClient(cfg.XUIClient, cfg.InboundIDs), nil
 	case database.NodeTypeProxman:
-		return NewProxmanClient(), nil
+		return nil, errors.New("proxman nodes are not supported yet")
 	default:
 		return nil, fmt.Errorf("unsupported node type: %s", cfg.Type)
 	}
