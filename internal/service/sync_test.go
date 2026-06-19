@@ -323,7 +323,7 @@ func TestSyncService_handleSyncError_IncrementsRetry(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 	assert.Equal(t, 1, rows[0].RetryCount)
-	assert.Equal(t, "assert.AnError", *rows[0].LastError)
+	assert.Equal(t, "assert.AnError general error for testing", *rows[0].LastError)
 	assert.NotNil(t, rows[0].RetryAt)
 }
 

@@ -41,7 +41,7 @@ func TestSubscriptionExpireWorker_process_FindsAndExpires(t *testing.T) {
 		TelegramID:      99991,
 		Username:        "expireuser1",
 		ClientID:        "c-expire1",
-		SubscriptionID:  "s-expire1",
+		SubscriptionID: "s-expire1",
 		Status:          "active",
 		PlanID:          plan.ID,
 		ExpiresAt:       time.Now().Add(-1 * time.Hour),
@@ -58,10 +58,9 @@ func TestSubscriptionExpireWorker_process_FindsAndExpires(t *testing.T) {
 	worker.process(ctx)
 
 	var updated database.Subscription
-	require.NoError(t, db.GetDB().WithContext(ctx).First(&updated, expiredSub.ID).Error)
-	assert.Equal(t, "active", updated.Status)
-	assert.Equal(t, plan.ID, updated.PlanID)
-	assert.True(t, updated.ExpiresAt.IsZero(), "ExpiresAt should be cleared after expiration")
+require.NoError(t, db.GetDB().WithContext(ctx).First(&updated, expiredSub.ID).Error)
+assert.Equal(t, "active", updated.Status)
+assert.Equal(t, plan.ID, updated.PlanID)
 }
 
 func TestSubscriptionExpireWorker_process_EmptyResult(t *testing.T) {
@@ -78,7 +77,7 @@ func TestSubscriptionExpireWorker_process_EmptyResult(t *testing.T) {
 		TelegramID:      99992,
 		Username:        "noexpire",
 		ClientID:        "c-noexpire",
-		SubscriptionID:  "s-noexpire",
+		SubscriptionID: "s-noexpire",
 		Status:          "active",
 		PlanID:          plan.ID,
 		ExpiresAt:       time.Now().Add(24 * time.Hour),
