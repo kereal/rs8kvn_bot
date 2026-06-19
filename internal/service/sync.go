@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/kereal/rs8kvn_bot/internal/database"
@@ -12,6 +13,29 @@ import (
 
 	"go.uber.org/zap"
 )
+
+// isAlreadyExistsError returns true if the error indicates the VPN client already exists.
+func isAlreadyExistsError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "already exists") ||
+		strings.Contains(msg, "client already exists") ||
+		strings.Contains(msg, "duplicate") ||
+		strings.Contains(msg, "already added")
+}
+
+// isNotFoundError returns true if the error indicates the VPN client was not found.
+func isNotFoundError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "not found") ||
+		strings.Contains(msg, "does not exist") ||
+		strings.Contains(msg, "client not found")
+}
 
 // SyncService manages the synchronization of subscriptions with VPN nodes.
 type SyncService struct {
@@ -188,6 +212,15 @@ func (s *SyncService) processPendingAdd(ctx context.Context, sn *database.Subscr
 	}
 
 	if err := client.CreateSubscription(ctx, sub.ClientID, syncIdentifier(sub)); err != nil {
+		if isAlreadyExistsError(err) {
+			logger.Info("client already exists on node, treating as success",
+				zap.Uint("subscription_id", sub.ID),
+				zap.Uint("node_id", sn.NodeID))
+			if err := s.db.UpdateSubscriptionNodeStatus(ctx, sn.SubscriptionID, sn.NodeID, database.SyncStatusActive); err != nil {
+				return fmt.Errorf("mark active: %w", err)
+			}
+			return nil
+		}
 		s.handleSyncError(ctx, sn, err)
 		return err
 	}
@@ -207,6 +240,15 @@ func (s *SyncService) processPendingRemove(ctx context.Context, sn *database.Sub
 	}
 
 	if err := client.DeleteSubscription(ctx, sub.ClientID, syncIdentifier(sub)); err != nil {
+		if isNotFoundError(err) {
+			logger.Info("client not found on node, treating as success",
+				zap.Uint("subscription_id", sub.ID),
+				zap.Uint("node_id", sn.NodeID))
+			if err := s.db.DeleteSubscriptionNode(ctx, sn.SubscriptionID, sn.NodeID); err != nil {
+				return fmt.Errorf("delete subscription node: %w", err)
+			}
+			return nil
+		}
 		s.handleSyncError(ctx, sn, err)
 		return err
 	}
