@@ -3,7 +3,6 @@ package vpn
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/kereal/rs8kvn_bot/internal/interfaces"
 )
@@ -20,8 +19,17 @@ func NewThreeXUIClient(client interfaces.XUIClient, inboundIDs []int) *ThreeXUIC
 }
 
 // CreateSubscription adds a client on the 3x-ui panel.
-func (c *ThreeXUIClient) CreateSubscription(ctx context.Context, uuid, username string) error {
-	_, err := c.client.AddClientWithID(ctx, c.inboundIDs, username, uuid, uuid, 0, time.Time{}, 0)
+func (c *ThreeXUIClient) CreateSubscription(ctx context.Context, provision SubscriptionProvision) error {
+	_, err := c.client.AddClientWithID(
+		ctx,
+		c.inboundIDs,
+		provision.Username,
+		provision.ClientID,
+		provision.SubID,
+		provision.TrafficBytes,
+		provision.ExpiryTime,
+		provision.ResetDays,
+	)
 	if err != nil {
 		return fmt.Errorf("3x-ui create subscription: %w", err)
 	}
@@ -29,8 +37,8 @@ func (c *ThreeXUIClient) CreateSubscription(ctx context.Context, uuid, username 
 }
 
 // DeleteSubscription removes a client from the 3x-ui panel.
-func (c *ThreeXUIClient) DeleteSubscription(ctx context.Context, uuid, username string) error {
-	if err := c.client.DeleteClient(ctx, username); err != nil {
+func (c *ThreeXUIClient) DeleteSubscription(ctx context.Context, provision SubscriptionProvision) error {
+	if err := c.client.DeleteClient(ctx, provision.Username); err != nil {
 		return fmt.Errorf("3x-ui delete subscription: %w", err)
 	}
 	return nil

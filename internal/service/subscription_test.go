@@ -18,6 +18,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 func TestMain(m *testing.M) {
@@ -255,6 +256,107 @@ func TestSubscriptionService_GetByTelegramID_NotFound(t *testing.T) {
 	assert.Error(t, err)
 	assert.Nil(t, result)
 	assert.Contains(t, err.Error(), "not found")
+}
+
+func TestSubscriptionService_RenewSubscription_PersistsPurchaseMetadata(t *testing.T) {
+	t.Parallel()
+
+	db, err := testutil.NewTestDatabaseService(t)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	plan := &database.Plan{Name: "renew-plan", DevicesLimit: 1, TrafficLimit: 1024}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(plan).Error)
+	product := &database.Product{
+		PlanID:       plan.ID,
+		Name:         "renew-product",
+		DurationDays: 30,
+		PriceCents:   1500,
+		Currency:     "RUB",
+	}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(product).Error)
+
+	now := time.Now().UTC().Truncate(time.Minute)
+	sub := &database.Subscription{
+		TelegramID:     123456,
+		Username:       "renewuser",
+		ClientID:       "renew-client",
+		SubscriptionID: "renew-sub",
+		Status:         "active",
+		PlanID:         plan.ID,
+		ExpiresAt:      ptrTime(now.Add(-24 * time.Hour)),
+	}
+	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
+
+	svc := NewSubscriptionService(db, nil, nil, nil, &config.Config{}, "", &webhook.NoopSender{})
+	_, err = svc.RenewSubscription(ctx, sub.TelegramID, product)
+	require.NoError(t, err)
+
+	updated, err := db.GetByTelegramID(ctx, sub.TelegramID)
+	require.NoError(t, err)
+	require.NotNil(t, updated.ExpiresAt)
+
+	assert.Equal(t, product.ID, updated.ProductID)
+	assert.Equal(t, product.PriceCents, updated.PricePaidCents)
+	assert.Equal(t, product.Currency, updated.Currency)
+	assert.WithinDuration(t, now.AddDate(0, 0, product.DurationDays), *updated.ExpiresAt, time.Second)
+	assert.WithinDuration(t, now, updated.StartedAt, time.Second)
+	assert.NotZero(t, updated.UpdatedAt)
+
+	orders, err := db.GetOrdersBySubscriptionID(ctx, sub.ID)
+	require.NoError(t, err)
+	require.Len(t, orders, 1)
+	assert.Equal(t, database.OrderStatusPaid, orders[0].Status)
+	assert.Equal(t, product.ID, orders[0].ProductID)
+	assert.Equal(t, product.PriceCents, orders[0].AmountCents)
+	assert.Equal(t, product.Currency, orders[0].Currency)
+	require.NotNil(t, orders[0].PaidAt)
+	require.NotNil(t, orders[0].ActivatedAt)
+	require.NotNil(t, orders[0].ExpiresAt)
+	assert.WithinDuration(t, now, *orders[0].PaidAt, time.Second)
+	assert.WithinDuration(t, now, *orders[0].ActivatedAt, time.Second)
+	assert.WithinDuration(t, now.AddDate(0, 0, product.DurationDays), *orders[0].ExpiresAt, time.Second)
+}
+
+func TestSubscriptionService_RenewSubscription_UsesDatabaseServiceInterface(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{}
+	sub := &database.Subscription{
+		ID:             7,
+		TelegramID:     123456,
+		Username:       "ifaceuser",
+		ClientID:       "iface-client",
+		SubscriptionID: "iface-sub",
+		Status:         "active",
+		ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
+	}
+	product := &database.Product{
+		ID:           11,
+		PlanID:       1,
+		Name:         "iface-product",
+		DurationDays: 30,
+		PriceCents:   900,
+		Currency:     "RUB",
+	}
+
+	transactionCalled := false
+	db := &testutil.MockDatabaseService{
+		GetByTelegramIDFunc: func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
+			return sub, nil
+		},
+		TransactionFunc: func(ctx context.Context, fn func(*gorm.DB) error) error {
+			transactionCalled = true
+			return nil
+		},
+	}
+	svc := NewSubscriptionService(db, nil, nil, nil, cfg, "", &webhook.NoopSender{})
+
+	order, err := svc.RenewSubscription(context.Background(), sub.TelegramID, product)
+	require.NoError(t, err)
+	assert.True(t, transactionCalled)
+	assert.Equal(t, product.ID, order.ProductID)
+	assert.Equal(t, database.OrderStatusPaid, order.Status)
 }
 
 func TestSubscriptionService_Delete_Success(t *testing.T) {

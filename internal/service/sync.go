@@ -211,7 +211,24 @@ func (s *SyncService) processPendingAdd(ctx context.Context, sn *database.Subscr
 		return err
 	}
 
-	if err := client.CreateSubscription(ctx, sub.ClientID, syncIdentifier(sub)); err != nil {
+	plan, err := s.db.GetPlanByID(ctx, sub.PlanID)
+	if err != nil {
+		s.handleSyncError(ctx, sn, err)
+		return fmt.Errorf("load plan for subscription sync: %w", err)
+	}
+
+	provision := vpn.SubscriptionProvision{
+		ClientID:     sub.ClientID,
+		Username:     syncIdentifier(sub),
+		SubID:        sub.SubscriptionID,
+		TrafficBytes: plan.TrafficLimit,
+		ResetDays:    0,
+	}
+	if sub.ExpiresAt != nil {
+		provision.ExpiryTime = *sub.ExpiresAt
+	}
+
+	if err := client.CreateSubscription(ctx, provision); err != nil {
 		if isAlreadyExistsError(err) {
 			logger.Info("client already exists on node, treating as success",
 				zap.Uint("subscription_id", sub.ID),
@@ -239,7 +256,13 @@ func (s *SyncService) processPendingRemove(ctx context.Context, sn *database.Sub
 		return err
 	}
 
-	if err := client.DeleteSubscription(ctx, sub.ClientID, syncIdentifier(sub)); err != nil {
+	provision := vpn.SubscriptionProvision{
+		ClientID: sub.ClientID,
+		Username: syncIdentifier(sub),
+		SubID:    sub.SubscriptionID,
+	}
+
+	if err := client.DeleteSubscription(ctx, provision); err != nil {
 		if isNotFoundError(err) {
 			logger.Info("client not found on node, treating as success",
 				zap.Uint("subscription_id", sub.ID),

@@ -296,10 +296,11 @@ func (s *Service) GetExpiredPaidSubscriptions(ctx context.Context) ([]Subscripti
 	return subs, nil
 }
 
-// GetAllTelegramIDs returns all unique Telegram IDs from subscriptions.
+// GetAllTelegramIDs returns unique Telegram IDs for active subscriptions eligible for broadcast.
 func (s *Service) GetAllTelegramIDs(ctx context.Context) ([]int64, error) {
 	var ids []int64
 	result := s.db.WithContext(ctx).Model(&Subscription{}).
+		Where("telegram_id > 0 AND status = ?", "active").
 		Distinct("telegram_id").
 		Pluck("telegram_id", &ids)
 	if result.Error != nil {
@@ -321,12 +322,13 @@ func (s *Service) GetTelegramIDByUsername(ctx context.Context, username string) 
 	return sub.TelegramID, nil
 }
 
-// GetTelegramIDsBatch returns a batch of unique Telegram IDs for broadcast.
+// GetTelegramIDsBatch returns a batch of unique Telegram IDs for active subscriptions eligible for broadcast.
 // offset is the starting position, limit is the maximum number of IDs to return.
 func (s *Service) GetTelegramIDsBatch(ctx context.Context, offset, limit int) ([]int64, error) {
 	var ids []int64
 	result := s.db.WithContext(ctx).
 		Model(&Subscription{}).
+		Where("telegram_id > 0 AND status = ?", "active").
 		Distinct("telegram_id").
 		Order("telegram_id ASC").
 		Limit(limit).
@@ -338,11 +340,12 @@ func (s *Service) GetTelegramIDsBatch(ctx context.Context, offset, limit int) ([
 	return ids, nil
 }
 
-// GetTotalTelegramIDCount returns the total count of unique Telegram IDs.
+// GetTotalTelegramIDCount returns the count of unique Telegram IDs for active subscriptions eligible for broadcast.
 func (s *Service) GetTotalTelegramIDCount(ctx context.Context) (int64, error) {
 	var count int64
 	result := s.db.WithContext(ctx).
 		Model(&Subscription{}).
+		Where("telegram_id > 0 AND status = ?", "active").
 		Distinct("telegram_id").
 		Count(&count)
 	if result.Error != nil {

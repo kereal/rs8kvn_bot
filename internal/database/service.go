@@ -26,6 +26,10 @@ func (s *Service) GetDB() *gorm.DB {
 	return s.db
 }
 
+func (s *Service) Transaction(ctx context.Context, fn func(*gorm.DB) error) error {
+	return s.db.WithContext(ctx).Transaction(fn)
+}
+
 // NewService creates a new database service.
 func NewService(dbPath string) (*Service, error) {
 	dbDir := filepath.Dir(dbPath)

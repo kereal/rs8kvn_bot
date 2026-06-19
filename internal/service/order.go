@@ -61,14 +61,20 @@ func (o *OrderService) ActivateProduct(ctx context.Context, telegramID int64, pr
 		return nil, fmt.Errorf("create order: %w", err)
 	}
 
-	info, requestErr := o.requestPayment(ctx, order)
-	if requestErr != nil {
-		logger.Warn("payment request failed", zap.Error(requestErr), zap.Uint("order_id", order.ID))
+	if product.PriceCents > 0 {
+		info, requestErr := o.requestPayment(ctx, order)
+		if requestErr != nil {
+			return nil, fmt.Errorf("request payment: %w", requestErr)
+		}
+		_ = info
+		return order, nil
 	}
-	_ = info
 
 	if err := o.db.UpdateOrderActivatedAt(ctx, order.ID, now, newExpiry); err != nil {
 		return nil, fmt.Errorf("update order activation: %w", err)
+	}
+	if err := o.db.UpdateOrderPaidStatus(ctx, order.ID); err != nil {
+		return nil, fmt.Errorf("update order paid status: %w", err)
 	}
 
 	sub.PlanID = product.PlanID

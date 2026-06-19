@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/interfaces"
@@ -18,10 +19,20 @@ type Config struct {
 	Type         database.NodeType
 }
 
+// SubscriptionProvision describes the data needed to provision a client on a VPN node.
+type SubscriptionProvision struct {
+	ClientID     string
+	Username     string
+	SubID        string
+	TrafficBytes int64
+	ExpiryTime   time.Time
+	ResetDays    int
+}
+
 // Client defines the interface for VPN node operations.
 type Client interface {
-	CreateSubscription(ctx context.Context, uuid, username string) error
-	DeleteSubscription(ctx context.Context, uuid, username string) error
+	CreateSubscription(ctx context.Context, provision SubscriptionProvision) error
+	DeleteSubscription(ctx context.Context, provision SubscriptionProvision) error
 	Close() error
 }
 

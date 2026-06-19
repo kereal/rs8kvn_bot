@@ -89,17 +89,26 @@ func TestThreeXUIClient_CreateSubscription_CallsAddClientWithID(t *testing.T) {
 	client := NewThreeXUIClient(fake, []int{1, 2})
 
 	ctx := context.Background()
-	uuid := "test-uuid-123"
-	username := "testuser"
-	err := client.CreateSubscription(ctx, uuid, username)
+	provision := SubscriptionProvision{
+		ClientID:     "test-uuid-123",
+		Username:     "testuser",
+		SubID:        "sub-123",
+		TrafficBytes: 1024,
+		ExpiryTime:   time.Unix(1700000000, 0).UTC(),
+		ResetDays:    7,
+	}
+	err := client.CreateSubscription(ctx, provision)
 
 	require.NoError(t, err)
 	assert.True(t, fake.addCalled, "CreateSubscription must call AddClientWithID on the underlying xui client")
 	require.NotNil(t, fake.addCapture)
 	assert.Equal(t, []int{1, 2}, fake.addCapture.inboundIDs)
-	assert.Equal(t, username, fake.addCapture.email)
-	assert.Equal(t, uuid, fake.addCapture.clientID)
-	assert.Equal(t, uuid, fake.addCapture.subID)
+	assert.Equal(t, provision.Username, fake.addCapture.email)
+	assert.Equal(t, provision.ClientID, fake.addCapture.clientID)
+	assert.Equal(t, provision.SubID, fake.addCapture.subID)
+	assert.Equal(t, provision.TrafficBytes, fake.addCapture.trafficBytes)
+	assert.Equal(t, provision.ExpiryTime, fake.addCapture.expiryTime)
+	assert.Equal(t, provision.ResetDays, fake.addCapture.resetDays)
 }
 
 func TestThreeXUIClient_DeleteSubscription_CallsDeleteClient(t *testing.T) {
@@ -109,14 +118,13 @@ func TestThreeXUIClient_DeleteSubscription_CallsDeleteClient(t *testing.T) {
 	client := NewThreeXUIClient(fake, []int{1})
 
 	ctx := context.Background()
-	uuid := "del-uuid"
-	username := "deluser"
-	err := client.DeleteSubscription(ctx, uuid, username)
+	provision := SubscriptionProvision{ClientID: "del-uuid", Username: "deluser", SubID: "sub-del"}
+	err := client.DeleteSubscription(ctx, provision)
 
 	require.NoError(t, err)
 	assert.True(t, fake.deleteCalled, "DeleteSubscription must call DeleteClient on the underlying xui client")
 	require.NotNil(t, fake.deleteCapture)
-	assert.Equal(t, username, fake.deleteCapture.email)
+	assert.Equal(t, provision.Username, fake.deleteCapture.email)
 }
 
 func TestThreeXUIClient_CreateSubscription_WrapsError(t *testing.T) {
@@ -125,7 +133,7 @@ func TestThreeXUIClient_CreateSubscription_WrapsError(t *testing.T) {
 	fake := &fakeXUIClient{addErr: assert.AnError}
 	client := NewThreeXUIClient(fake, []int{1})
 
-	err := client.CreateSubscription(context.Background(), "uuid", "user")
+	err := client.CreateSubscription(context.Background(), SubscriptionProvision{ClientID: "uuid", Username: "user", SubID: "sub"})
 	assert.Error(t, err)
 }
 
@@ -135,6 +143,6 @@ func TestThreeXUIClient_DeleteSubscription_WrapsError(t *testing.T) {
 	fake := &fakeXUIClient{deleteErr: assert.AnError}
 	client := NewThreeXUIClient(fake, []int{1})
 
-	err := client.DeleteSubscription(context.Background(), "uuid", "user")
+	err := client.DeleteSubscription(context.Background(), SubscriptionProvision{ClientID: "uuid", Username: "user", SubID: "sub"})
 	assert.Error(t, err)
 }

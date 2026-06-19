@@ -22,23 +22,19 @@ type mockVPNClient struct {
 	deleteCalled   bool
 	createError    error
 	deleteError    error
-	createSubID    string
-	createUsername string
-	deleteSubID    string
-	deleteUsername string
+	createProvision vpn.SubscriptionProvision
+	deleteProvision vpn.SubscriptionProvision
 }
 
-func (m *mockVPNClient) CreateSubscription(ctx context.Context, uuid, username string) error {
+func (m *mockVPNClient) CreateSubscription(ctx context.Context, provision vpn.SubscriptionProvision) error {
 	m.createCalled = true
-	m.createSubID = uuid
-	m.createUsername = username
+	m.createProvision = provision
 	return m.createError
 }
 
-func (m *mockVPNClient) DeleteSubscription(ctx context.Context, uuid, username string) error {
+func (m *mockVPNClient) DeleteSubscription(ctx context.Context, provision vpn.SubscriptionProvision) error {
 	m.deleteCalled = true
-	m.deleteSubID = uuid
-	m.deleteUsername = username
+	m.deleteProvision = provision
 	return m.deleteError
 }
 
@@ -289,8 +285,10 @@ func TestSyncService_SyncSubscription_PendingAdd(t *testing.T) {
 	assert.Len(t, rows, 1)
 	assert.Equal(t, database.SyncStatusActive, rows[0].Status)
 	assert.True(t, mockVPN.createCalled, "CreateSubscription should be called on the VPN client")
-	assert.Equal(t, sub.ClientID, mockVPN.createSubID)
-	assert.Equal(t, sub.Username, mockVPN.createUsername)
+	assert.Equal(t, sub.ClientID, mockVPN.createProvision.ClientID)
+	assert.Equal(t, sub.SubscriptionID, mockVPN.createProvision.SubID)
+	assert.Equal(t, int64(1024), mockVPN.createProvision.TrafficBytes)
+	assert.Equal(t, XUIEmail(sub.Username, sub.TelegramID), mockVPN.createProvision.Username)
 }
 
 func TestSyncService_SyncSubscription_PendingRemove(t *testing.T) {
@@ -329,7 +327,8 @@ func TestSyncService_SyncSubscription_PendingRemove(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, rows, "pending_remove should delete the subscription node record")
 	assert.True(t, mockVPN.deleteCalled, "DeleteSubscription should be called on the VPN client")
-	assert.Equal(t, sub.ClientID, mockVPN.deleteSubID)
+	assert.Equal(t, sub.ClientID, mockVPN.deleteProvision.ClientID)
+	assert.Equal(t, sub.SubscriptionID, mockVPN.deleteProvision.SubID)
 }
 
 func TestSyncService_SyncSubscription_UsesFallbackXUIIdentifier(t *testing.T) {
@@ -362,7 +361,7 @@ func TestSyncService_SyncSubscription_UsesFallbackXUIIdentifier(t *testing.T) {
 	svc := NewSyncService(db, map[uint]vpn.Client{node1.ID: mockVPN}, []database.Node{*node1})
 
 	require.NoError(t, svc.SyncSubscription(ctx, sub.ID))
-	assert.Equal(t, "tgId_777000", mockVPN.createUsername)
+	assert.Equal(t, "tgId_777000", mockVPN.createProvision.Username)
 }
 
 func TestSyncService_SyncPendingNodes_ProcessesOnlyDueNodes(t *testing.T) {

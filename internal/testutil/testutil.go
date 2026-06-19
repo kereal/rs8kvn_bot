@@ -3,6 +3,7 @@ package testutil
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"sync"
@@ -116,6 +117,7 @@ type MockDatabaseService struct {
 	UpdateOrderStatusFunc               func(ctx context.Context, id uint, status database.OrderStatus) error
 	UpdateOrderPaidStatusFunc           func(ctx context.Context, id uint) error
 	UpdateOrderActivatedAtFunc          func(ctx context.Context, id uint, activatedAt, expiresAt time.Time) error
+	TransactionFunc                     func(ctx context.Context, fn func(*gorm.DB) error) error
 	GetSubscriptionBySubscriptionIDFunc func(ctx context.Context, subscriptionID string) (*database.Subscription, error)
 	GetTrialSubscriptionBySubIDFunc     func(ctx context.Context, subscriptionID string) (*database.Subscription, error)
 	BindTrialSubscriptionFunc           func(ctx context.Context, subscriptionID string, telegramID int64, username string) (*database.Subscription, error)
@@ -134,6 +136,13 @@ func (m *MockDatabaseService) Ping(ctx context.Context) error {
 		return m.PingFunc(ctx)
 	}
 	return nil
+}
+
+func (m *MockDatabaseService) Transaction(ctx context.Context, fn func(*gorm.DB) error) error {
+	if m.TransactionFunc != nil {
+		return m.TransactionFunc(ctx, fn)
+	}
+	return errors.New("mock transaction not configured")
 }
 
 func (m *MockDatabaseService) GetByTelegramID(ctx context.Context, telegramID int64) (*database.Subscription, error) {

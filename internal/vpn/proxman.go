@@ -14,12 +14,12 @@ func NewProxmanClient() *ProxmanClient {
 }
 
 // CreateSubscription is not implemented for proxman.
-func (c *ProxmanClient) CreateSubscription(ctx context.Context, uuid, username string) error {
+func (c *ProxmanClient) CreateSubscription(ctx context.Context, provision SubscriptionProvision) error {
 	return fmt.Errorf("proxman create subscription: not implemented")
 }
 
 // DeleteSubscription is not implemented for proxman.
-func (c *ProxmanClient) DeleteSubscription(ctx context.Context, uuid, username string) error {
+func (c *ProxmanClient) DeleteSubscription(ctx context.Context, provision SubscriptionProvision) error {
 	return fmt.Errorf("proxman delete subscription: not implemented")
 }
 
