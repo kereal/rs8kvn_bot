@@ -469,7 +469,8 @@ func TestService_UpdateSubscription_NotFound(t *testing.T) {
 	}
 
 	err := svc.UpdateSubscription(context.Background(), sub)
-	assert.NoError(t, err)
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, ErrSubscriptionNotFound)
 }
 
 func TestService_DeleteSubscription(t *testing.T) {
