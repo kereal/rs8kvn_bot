@@ -5,10 +5,11 @@ Telegram-бот для продажи и управления VLESS+Reality+Visi
 Production-grade: миграции, мониторинг, rate-limiting, circuit breaker, graceful shutdown.
 
 ## Текущая версия
-**v2.3.0** — рефакторинг, разбивка database.go на 9 доменных файлов, вынос escapeMarkdown в internal/utils, удаление мёртвого кода подписки, удаление `duration` из plans (migration 019), products/orders, nodes/plan_nodes, subscription_nodes.
+**v2.4.0** — рефакторинг, разбивка database.go на 9 доменных файлов, вынос escapeMarkdown в internal/utils, удаление мёртвого кода подписки, удаление `duration` из plans (migration 019), products/orders, nodes/plan_nodes, subscription_nodes, `NOT NULL UNIQUE` для `subscriptions.client_id` и `subscriptions.subscription_id` (migration 023).
 
 ## Ключевые фичи
 - Планы (trial/free/paid) без `duration`, без `price` (duration/price вынесены в products)
+- `subscriptions.client_id` и `subscriptions.subscription_id` имеют `NOT NULL UNIQUE` enforcement через migration 023 и GORM-модель
 - Мульти-источник 3x-ui: trial-подписки создаются на всех trial-нодах, BindTrial — первый успешный, Reconcile — все
 - Таблица `subscription_nodes` — очередь реальной синхронизации подписки×нода (`active|pending_add|pending_remove`)
 - Авто-продление на 30-й день (через `SubscriptionResetDay` в x-ui)
@@ -33,7 +34,7 @@ Production-grade: миграции, мониторинг, rate-limiting, circuit
 ```
 cmd/bot/                     — точка входа, graceful shutdown
 internal/bot/                 — handlers, commands, callbacks, referral cache
-internal/database/           — GORM-модели, миграции 000-019, транзакции (9 файлов: models, migrations, service, subscriptions, nodes, invites, trials, orders, products)
+internal/database/           — GORM-модели, миграции 000-023, транзакции (9 файлов: models, migrations, service, subscriptions, nodes, invites, trials, orders, products)
 internal/service/            — SubscriptionService (Create, BindTrial, CreateTrial, ReconcileOrphanedClients)
 internal/xui/                — 3x-ui HTTP-клиент + circuit breaker, multi-source map
 internal/interfaces/         — контракты (XUIClient, SubscriptionDatabase, SubscriptionService)

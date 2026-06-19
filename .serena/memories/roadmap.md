@@ -1,16 +1,17 @@
 # Roadmap — rs8kvn_bot
 
-**Версия:** v2.4.0  
-**Обновлено:** 2026-06-17  
-**Ветка:** `multi-outbounds`
+**Версия:** v2.4.0
+**Обновлено:** 2026-06-20
+**Ветка:** `plans_and_pricing`
 
 ## Текущий статус
-- **Ветка:** `multi-outbounds` (merge candidate)
+- **Ветка:** `plans_and_pricing`
 - **OpenAPI:** TgID передаётся при создании и обновлении клиента в панель; `go build ./...` + `go test ./...` зелёные
 - **Конфиг:** `config.Node` / `Nodes` — миграция завершена, `config.Source` удалён
 - **Пользователи:** ~10 клиентов
 - **Покрытие тестами:** ~85% (см. `test-info` для деталей)
 - **Сборка:** `go build ./...` ✅, `go test ./...` ✅
+- **DB constraints:** `subscriptions.client_id` и `subscriptions.subscription_id` имеют `NOT NULL UNIQUE` через migration 023 и GORM-модель
 
 ## Выполнено
 - [x] Multi-outbound flow: группировка inboundIDs по совместимому flow в XUI-клиенте
@@ -18,6 +19,7 @@
 - [x] Defensive copy в `Node.ResolveInboundIDs` (защита от мутации слайса)
 - [x] Валидация inbound-ID positivity в `xui/client.go`
 - [x] TgID передаётся при создании/обновлении клиента в панель
+- [x] `NOT NULL UNIQUE` для `subscriptions.client_id` и `subscriptions.subscription_id` (migration 023)
 - [x] Документация и память актуализированы
 
 ## Ближайшие приоритеты (1-2 мес)

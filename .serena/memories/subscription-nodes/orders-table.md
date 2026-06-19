@@ -28,7 +28,7 @@ Indexes: `idx_orders_subscription_id`, `idx_orders_status`, `idx_orders_created_
 
 ## Model
 
-`database.Order` в `internal/database/database.go`:
+`database.Order` в `internal/database/models.go`:
 - GORM-модель с внешними ключами
 - Связи: `Subscription` (`foreignKey:SubscriptionID`), `Product` (`foreignKey:ProductID`)
 - ключевые поля: `provider_payment_id`, `paid_at`, `activated_at`, `expires_at`
