@@ -59,7 +59,7 @@ func TestTrialCleanupScheduler_RunCleanup_WithExpiredTrials(t *testing.T) {
 	ctx := context.Background()
 
 	expiredSub := &database.Subscription{
-		TelegramID:     0,
+		TelegramID:     -1001,
 		ClientID:       "expired-client-1",
 		SubscriptionID: "expired-sub-1",
 		PlanID:         1,
@@ -71,7 +71,7 @@ func TestTrialCleanupScheduler_RunCleanup_WithExpiredTrials(t *testing.T) {
 	require.NoError(t, err)
 
 	expiredSub2 := &database.Subscription{
-		TelegramID:     0,
+		TelegramID:     -1002,
 		ClientID:       "expired-client-2",
 		SubscriptionID: "expired-sub-2",
 		PlanID:         1,
@@ -83,7 +83,7 @@ func TestTrialCleanupScheduler_RunCleanup_WithExpiredTrials(t *testing.T) {
 	require.NoError(t, err)
 
 	activeSub := &database.Subscription{
-		TelegramID:     0,
+		TelegramID:     -1003,
 		ClientID:       "active-client",
 		SubscriptionID: "active-sub",
 		PlanID:         1,
@@ -116,7 +116,7 @@ func TestTrialCleanupScheduler_RunCleanup_XUIFailure(t *testing.T) {
 	ctx := context.Background()
 
 	expiredSub := &database.Subscription{
-		TelegramID:     0,
+		TelegramID:     -2001,
 		ClientID:       "client-xui-fail",
 		SubscriptionID: "sub-xui-fail",
 		PlanID:         1,

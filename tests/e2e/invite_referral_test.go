@@ -589,7 +589,7 @@ func TestE2E_FullCycle_ConcurrentInviteAccess(t *testing.T) {
 	require.NoError(t, err)
 	trialCount := 0
 	for _, sub := range allSubs {
-		if sub.PlanID == trialPlan.ID && sub.TelegramID == 0 {
+		if sub.PlanID == trialPlan.ID && sub.TelegramID < 0 {
 			trialCount++
 		}
 	}

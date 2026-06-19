@@ -140,7 +140,7 @@ func TestE2E_Concurrent_TrialBind_SameTrial(t *testing.T) {
 	require.NoError(t, err)
 	boundCount := 0
 	for _, sub := range allSubs {
-		if sub.SubscriptionID == trialSubID && sub.TelegramID != 0 {
+		if sub.SubscriptionID == trialSubID && sub.TelegramID > 0 {
 			boundCount++
 		}
 	}

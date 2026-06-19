@@ -9,6 +9,22 @@ import (
 	"gorm.io/gorm"
 )
 
+// generateTrialTelegramID generates a unique negative telegram_id for unbound trial subscriptions.
+// Negative IDs are reserved for trials and excluded from UNIQUE constraints on telegram_id.
+func generateTrialTelegramID(subscriptionID string) int64 {
+	var hash int64
+	for _, c := range subscriptionID {
+		hash = hash*31 + int64(c)
+	}
+	if hash == 0 {
+		hash = -1
+	}
+	if hash > 0 {
+		hash = -hash
+	}
+	return hash
+}
+
 // CreateTrialSubscription creates a new trial subscription.
 func (s *Service) CreateTrialSubscription(ctx context.Context, inviteCode, subscriptionID, clientID string, expiryTime time.Time) (*Subscription, error) {
 	planID, err := s.resolveTrialPlanID(ctx)
@@ -17,7 +33,7 @@ func (s *Service) CreateTrialSubscription(ctx context.Context, inviteCode, subsc
 	}
 
 	sub := &Subscription{
-		TelegramID:     0,
+		TelegramID:     generateTrialTelegramID(subscriptionID),
 		SubscriptionID: subscriptionID,
 		ClientID:       clientID,
 		InviteCode:     inviteCode,
@@ -85,7 +101,7 @@ func (s *Service) BindTrialSubscription(ctx context.Context, subscriptionID stri
 		}
 		planID := trialPlan.ID
 
-		if err := tx.Where("subscription_id = ? AND plan_id = ? AND telegram_id = ?", subscriptionID, planID, 0).First(&sub).Error; err != nil {
+		if err := tx.Where("subscription_id = ? AND plan_id = ? AND telegram_id < 0", subscriptionID, planID).First(&sub).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return fmt.Errorf("trial subscription not found or already activated")
 			}
@@ -105,7 +121,7 @@ func (s *Service) BindTrialSubscription(ctx context.Context, subscriptionID stri
 		}
 		freePlanID = freePlan.ID
 		result := tx.Model(&Subscription{}).
-			Where("id = ? AND telegram_id = ? AND plan_id = ?", sub.ID, 0, planID).
+			Where("id = ? AND telegram_id < 0 AND plan_id = ?", sub.ID, planID).
 			Updates(map[string]any{
 				"telegram_id": telegramID,
 				"username":    username,
@@ -170,9 +186,9 @@ func (s *Service) CleanupExpiredTrials(ctx context.Context, hours int) ([]Subscr
 	var subs []Subscription
 	result := s.db.WithContext(ctx).Raw(
 		`DELETE FROM subscriptions
-		 WHERE plan_id = ? AND telegram_id = ? AND created_at < ?
+		 WHERE plan_id = ? AND telegram_id < 0 AND created_at < ?
 		 RETURNING id, client_id, subscription_id`,
-		trialPlan.ID, 0, cutoff,
+		trialPlan.ID, cutoff,
 	).Scan(&subs)
 	if result.Error != nil {
 		return nil, fmt.Errorf("failed to cleanup expired trials: %w", result.Error)
