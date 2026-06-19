@@ -116,9 +116,8 @@ func TestHandleDel_ValidDeletion(t *testing.T) {
 		return sub, nil
 	}
 
-	mockXUI.DeleteClientFunc = func(ctx context.Context, email string) error {
-		assert.NotEmpty(t, email)
-		return nil
+	mockDB.GetBySubscriptionIDFunc = func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
+		return nil, nil
 	}
 
 	mockDB.DeleteSubscriptionByIDFunc = func(ctx context.Context, id uint) (*database.Subscription, error) {
@@ -132,7 +131,6 @@ func TestHandleDel_ValidDeletion(t *testing.T) {
 	handler.HandleDel(ctx, update)
 	assert.True(t, mockBot.SendCalledSafe())
 	assert.Contains(t, mockBot.LastSentTextSafe(), "удалена")
-	assert.True(t, mockXUI.DeleteClientCalled)
 }
 
 func TestHandleDel_InvalidIDFormat(t *testing.T) {

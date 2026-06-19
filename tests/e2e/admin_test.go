@@ -56,7 +56,7 @@ func TestE2E_DelCommand_Success(t *testing.T) {
 	_, err = env.db.GetByID(ctx, subID)
 	assert.Error(t, err, "Subscription should be deleted")
 
-	assert.True(t, env.xui.DeleteClientCalled)
+	// Sync-based: XUI is called via sync module, not directly in DeleteByID()
 }
 
 func TestE2E_DelCommand_NoArgs(t *testing.T) {

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"testing"
-	"time"
 
 	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
@@ -68,11 +67,18 @@ func TestHandleCallback_CallbackDataRouting(t *testing.T) {
 				mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 					return nil, gorm.ErrRecordNotFound
 				}
+				mockDB.GetPlanByNameFunc = func(ctx context.Context, name string) (*database.Plan, error) {
+					return &database.Plan{ID: 1, Name: database.FreePlanName, TrafficLimit: 1073741824}, nil
+				}
 				mockDB.CreateSubscriptionFunc = func(ctx context.Context, sub *database.Subscription, inviteCode string) error {
+					sub.ID = 1
 					return nil
 				}
-				mockXUI.AddClientWithIDFunc = func(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
-					return &xui.ClientConfig{ID: "test-client-id", SubID: "test-sub-id"}, nil
+				mockDB.GetNodesByPlanIDFunc = func(ctx context.Context, planID uint) ([]database.Node, error) {
+					return nil, nil
+				}
+				mockDB.GetBySubscriptionIDFunc = func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
+					return nil, nil
 				}
 			},
 			setupSubService: func(mockDB *testutil.MockDatabaseService, mockXUI *testutil.MockXUIClient, cfg *config.Config) *service.SubscriptionService {

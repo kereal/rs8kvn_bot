@@ -33,24 +33,34 @@ func TestSubscriptionService_Create_Success(t *testing.T) {
 
 	cfg := &config.Config{}
 
-	db := &testutil.MockDatabaseService{}
-	xuiClient := &testutil.MockXUIClient{
-		AddClientWithIDFunc: func(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
-			return &xui.ClientConfig{ID: "client-123", SubID: "sub-456"}, nil
+	db := &testutil.MockDatabaseService{
+		GetPlanByNameFunc: func(ctx context.Context, name string) (*database.Plan, error) {
+			return &database.Plan{ID: 1, Name: database.FreePlanName, TrafficLimit: 1073741824}, nil
+		},
+		CreateSubscriptionFunc: func(ctx context.Context, sub *database.Subscription, inviteCode string) error {
+			sub.ID = 1
+			return nil
+		},
+		GetNodesByPlanIDFunc: func(ctx context.Context, planID uint) ([]database.Node, error) {
+			return nil, nil
+		},
+		GetBySubscriptionIDFunc: func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
+			return nil, nil
 		},
 	}
-	sources := []database.Node{
-		{ID: 1, IsActive: true, Host: "http://localhost:2053", InboundIDs: "[1]"},
-	}
-	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
+	sources := []database.Node{}
+	xuiClients := map[uint]interfaces.XUIClient{}
 
 	svc := NewSubscriptionService(db, xuiClients, nil, sources, cfg, "", &webhook.NoopSender{})
 	result, err := svc.Create(context.Background(), 123456, "testuser", "")
 
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
-	assert.Equal(t, "client-123", result.Subscription.ClientID)
-	assert.Equal(t, "sub-456", result.Subscription.SubscriptionID)
+	assert.NotNil(t, result.Subscription)
+	assert.NotEmpty(t, result.Subscription.ClientID)
+	assert.NotEmpty(t, result.Subscription.SubscriptionID)
+	assert.Equal(t, int64(123456), result.Subscription.TelegramID)
+	assert.Equal(t, "testuser", result.Subscription.Username)
 }
 
 func TestSubscriptionService_Create_XUIError(t *testing.T) {
@@ -58,23 +68,30 @@ func TestSubscriptionService_Create_XUIError(t *testing.T) {
 
 	cfg := &config.Config{}
 
-	db := &testutil.MockDatabaseService{}
-	xuiClient := &testutil.MockXUIClient{
-		AddClientWithIDFunc: func(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
-			return nil, errors.New("connection refused")
+	db := &testutil.MockDatabaseService{
+		GetPlanByNameFunc: func(ctx context.Context, name string) (*database.Plan, error) {
+			return &database.Plan{ID: 1, Name: database.FreePlanName, TrafficLimit: 1073741824}, nil
+		},
+		CreateSubscriptionFunc: func(ctx context.Context, sub *database.Subscription, inviteCode string) error {
+			sub.ID = 1
+			return nil
+		},
+		GetNodesByPlanIDFunc: func(ctx context.Context, planID uint) ([]database.Node, error) {
+			return nil, nil
+		},
+		GetBySubscriptionIDFunc: func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
+			return nil, nil
 		},
 	}
-	sources := []database.Node{
-		{ID: 1, IsActive: true, Host: "http://localhost:2053", InboundIDs: "[1]"},
-	}
-	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
+	sources := []database.Node{}
+	xuiClients := map[uint]interfaces.XUIClient{}
 
 	svc := NewSubscriptionService(db, xuiClients, nil, sources, cfg, "", &webhook.NoopSender{})
 	result, err := svc.Create(context.Background(), 123456, "testuser", "")
 
-	assert.Error(t, err)
-	assert.Nil(t, result)
-	assert.Contains(t, err.Error(), "connection refused")
+	// DB-first: Create succeeds even if XUI is unavailable
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
 }
 
 func TestSubscriptionService_Create_DBError_RollbackSuccess(t *testing.T) {
@@ -82,33 +99,22 @@ func TestSubscriptionService_Create_DBError_RollbackSuccess(t *testing.T) {
 
 	cfg := &config.Config{}
 
-	deleteCalled := false
 	db := &testutil.MockDatabaseService{
+		GetPlanByNameFunc: func(ctx context.Context, name string) (*database.Plan, error) {
+			return &database.Plan{ID: 1, Name: database.FreePlanName, TrafficLimit: 1073741824}, nil
+		},
 		CreateSubscriptionFunc: func(ctx context.Context, sub *database.Subscription, inviteCode string) error {
 			return errors.New("database error")
 		},
 	}
-	xuiClient := &testutil.MockXUIClient{
-		AddClientWithIDFunc: func(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
-			return &xui.ClientConfig{ID: "client-123", SubID: "sub-456"}, nil
-		},
-		DeleteClientFunc: func(ctx context.Context, email string) error {
-			deleteCalled = true
-			assert.Equal(t, "testuser", email)
-			return nil
-		},
-	}
-	sources := []database.Node{
-		{ID: 1, IsActive: true, Host: "http://localhost:2053", InboundIDs: "[1]"},
-	}
-	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
+	sources := []database.Node{}
+	xuiClients := map[uint]interfaces.XUIClient{}
 
 	svc := NewSubscriptionService(db, xuiClients, nil, sources, cfg, "", &webhook.NoopSender{})
 	result, err := svc.Create(context.Background(), 123456, "testuser", "")
 
 	assert.Error(t, err)
 	assert.Nil(t, result)
-	assert.True(t, deleteCalled)
 	assert.Contains(t, err.Error(), "create subscription")
 }
 
@@ -118,22 +124,15 @@ func TestSubscriptionService_Create_DBError_RollbackFailed(t *testing.T) {
 	cfg := &config.Config{}
 
 	db := &testutil.MockDatabaseService{
+		GetPlanByNameFunc: func(ctx context.Context, name string) (*database.Plan, error) {
+			return &database.Plan{ID: 1, Name: database.FreePlanName, TrafficLimit: 1073741824}, nil
+		},
 		CreateSubscriptionFunc: func(ctx context.Context, sub *database.Subscription, inviteCode string) error {
 			return errors.New("database error")
 		},
 	}
-	xuiClient := &testutil.MockXUIClient{
-		AddClientWithIDFunc: func(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
-			return &xui.ClientConfig{ID: "client-123", SubID: "sub-456"}, nil
-		},
-		DeleteClientFunc: func(ctx context.Context, email string) error {
-			return errors.New("rollback failed")
-		},
-	}
-	sources := []database.Node{
-		{ID: 1, IsActive: true, Host: "http://localhost:2053", InboundIDs: "[1]"},
-	}
-	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
+	sources := []database.Node{}
+	xuiClients := map[uint]interfaces.XUIClient{}
 
 	svc := NewSubscriptionService(db, xuiClients, nil, sources, cfg, "", &webhook.NoopSender{})
 	result, err := svc.Create(context.Background(), 123456, "testuser", "")
@@ -151,19 +150,24 @@ func TestSubscriptionService_Create_PropagatesInviteCodeToDB(t *testing.T) {
 	var gotSub *database.Subscription
 	var gotInviteCode string
 	db := &testutil.MockDatabaseService{
+		GetPlanByNameFunc: func(ctx context.Context, name string) (*database.Plan, error) {
+			return &database.Plan{ID: 1, Name: database.FreePlanName, TrafficLimit: 1073741824}, nil
+		},
 		CreateSubscriptionFunc: func(ctx context.Context, sub *database.Subscription, inviteCode string) error {
 			gotSub = sub
 			gotInviteCode = inviteCode
+			sub.ID = 1
 			return nil
 		},
-	}
-	xuiClient := &testutil.MockXUIClient{
-		AddClientWithIDFunc: func(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
-			return &xui.ClientConfig{ID: "client-123", SubID: "sub-456"}, nil
+		GetNodesByPlanIDFunc: func(ctx context.Context, planID uint) ([]database.Node, error) {
+			return nil, nil
+		},
+		GetBySubscriptionIDFunc: func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
+			return nil, nil
 		},
 	}
-	sources := []database.Node{{ID: 1, IsActive: true, Host: "http://localhost:2053", InboundIDs: "[1]"}}
-	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
+	sources := []database.Node{}
+	xuiClients := map[uint]interfaces.XUIClient{}
 
 	svc := NewSubscriptionService(db, xuiClients, nil, sources, cfg, "", &webhook.NoopSender{})
 	result, err := svc.Create(context.Background(), 123456, "testuser", "INV-ABC")
@@ -185,18 +189,23 @@ func TestSubscriptionService_Create_EmptyInviteCodeIsNoop(t *testing.T) {
 
 	var gotInviteCode string
 	db := &testutil.MockDatabaseService{
+		GetPlanByNameFunc: func(ctx context.Context, name string) (*database.Plan, error) {
+			return &database.Plan{ID: 1, Name: database.FreePlanName, TrafficLimit: 1073741824}, nil
+		},
 		CreateSubscriptionFunc: func(ctx context.Context, sub *database.Subscription, inviteCode string) error {
 			gotInviteCode = inviteCode
+			sub.ID = 1
 			return nil
 		},
-	}
-	xuiClient := &testutil.MockXUIClient{
-		AddClientWithIDFunc: func(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
-			return &xui.ClientConfig{ID: "client-123", SubID: "sub-456"}, nil
+		GetNodesByPlanIDFunc: func(ctx context.Context, planID uint) ([]database.Node, error) {
+			return nil, nil
+		},
+		GetBySubscriptionIDFunc: func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
+			return nil, nil
 		},
 	}
-	sources := []database.Node{{ID: 1, IsActive: true, Host: "http://localhost:2053", InboundIDs: "[1]"}}
-	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
+	sources := []database.Node{}
+	xuiClients := map[uint]interfaces.XUIClient{}
 
 	svc := NewSubscriptionService(db, xuiClients, nil, sources, cfg, "", &webhook.NoopSender{})
 	result, err := svc.Create(context.Background(), 123456, "testuser", "")
@@ -259,7 +268,6 @@ func TestSubscriptionService_Delete_Success(t *testing.T) {
 		ClientID:   "client-123",
 	}
 
-	xuiDeleteCalled := false
 	db := &testutil.MockDatabaseService{
 		GetByTelegramIDFunc: func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 			return sub, nil
@@ -267,24 +275,15 @@ func TestSubscriptionService_Delete_Success(t *testing.T) {
 		DeleteSubscriptionFunc: func(ctx context.Context, telegramID int64) error {
 			return nil
 		},
-	}
-	xuiClient := &testutil.MockXUIClient{
-		DeleteClientFunc: func(ctx context.Context, email string) error {
-			xuiDeleteCalled = true
-			assert.Equal(t, "testuser", email)
-			return nil
+		GetBySubscriptionIDFunc: func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
+			return nil, nil
 		},
 	}
-	sources := []database.Node{
-		{ID: 1, IsActive: true, Host: "http://localhost:2053", InboundIDs: "[1]"},
-	}
-	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
 
-	svc := NewSubscriptionService(db, xuiClients, nil, sources, cfg, "", &webhook.NoopSender{})
+	svc := NewSubscriptionService(db, nil, nil, nil, cfg, "", &webhook.NoopSender{})
 	err := svc.Delete(context.Background(), 123456)
 
 	assert.NoError(t, err)
-	assert.True(t, xuiDeleteCalled)
 }
 
 func TestSubscriptionService_Delete_NotFound(t *testing.T) {
@@ -314,7 +313,6 @@ func TestSubscriptionService_Delete_XUIError(t *testing.T) {
 		ClientID:   "client-123",
 	}
 
-	xuiDeleteCalled := false
 	db := &testutil.MockDatabaseService{
 		GetByTelegramIDFunc: func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 			return sub, nil
@@ -322,25 +320,16 @@ func TestSubscriptionService_Delete_XUIError(t *testing.T) {
 		DeleteSubscriptionFunc: func(ctx context.Context, telegramID int64) error {
 			return nil
 		},
-	}
-	xuiClient := &testutil.MockXUIClient{
-		DeleteClientFunc: func(ctx context.Context, email string) error {
-			xuiDeleteCalled = true
-			assert.Equal(t, "tgId_123456", email)
-			return errors.New("xui connection refused")
+		GetBySubscriptionIDFunc: func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
+			return nil, nil
 		},
 	}
-	sources := []database.Node{
-		{ID: 1, IsActive: true, Host: "http://localhost:2053", InboundIDs: "[1]"},
-	}
-	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
 
-	svc := NewSubscriptionService(db, xuiClients, nil, sources, cfg, "", &webhook.NoopSender{})
+	svc := NewSubscriptionService(db, nil, nil, nil, cfg, "", &webhook.NoopSender{})
 	err := svc.Delete(context.Background(), 123456)
 
-	// XUI errors are best-effort — Delete should succeed even if XUI cleanup fails
+	// Sync errors are best-effort — Delete should succeed even if sync fails
 	assert.NoError(t, err)
-	assert.True(t, xuiDeleteCalled, "XUI DeleteClient should still be called")
 }
 
 func TestSubscriptionService_Delete_DBError(t *testing.T) {
@@ -353,7 +342,6 @@ func TestSubscriptionService_Delete_DBError(t *testing.T) {
 		ClientID:   "client-123",
 	}
 
-	xuiDeleteCalled := false
 	db := &testutil.MockDatabaseService{
 		GetByTelegramIDFunc: func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 			return sub, nil
@@ -361,15 +349,16 @@ func TestSubscriptionService_Delete_DBError(t *testing.T) {
 		DeleteSubscriptionFunc: func(ctx context.Context, telegramID int64) error {
 			return errors.New("db connection refused")
 		},
+		GetBySubscriptionIDFunc: func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
+			return nil, nil
+		},
 	}
 	svc := NewSubscriptionService(db, nil, nil, nil, cfg, "", &webhook.NoopSender{})
 	err := svc.Delete(context.Background(), 123456)
 
-	// DB errors should still be returned since DB is deleted first
+	// DB errors should still be returned
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "db delete")
-	// XUI DeleteClient should NOT be called because DB delete failed first
-	assert.False(t, xuiDeleteCalled, "XUI DeleteClient should not be called when DB delete fails")
 }
 
 func TestSubscriptionService_Delete_UsesCorrectEmail(t *testing.T) {
@@ -383,7 +372,6 @@ func TestSubscriptionService_Delete_UsesCorrectEmail(t *testing.T) {
 		ClientID:   "client-456",
 	}
 
-	var receivedEmail string
 	db := &testutil.MockDatabaseService{
 		GetByTelegramIDFunc: func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 			return sub, nil
@@ -391,23 +379,16 @@ func TestSubscriptionService_Delete_UsesCorrectEmail(t *testing.T) {
 		DeleteSubscriptionFunc: func(ctx context.Context, telegramID int64) error {
 			return nil
 		},
-	}
-	xuiClient := &testutil.MockXUIClient{
-		DeleteClientFunc: func(ctx context.Context, email string) error {
-			receivedEmail = email
-			return nil
+		GetBySubscriptionIDFunc: func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
+			return nil, nil
 		},
 	}
-	sources := []database.Node{
-		{ID: 1, IsActive: true, Host: "http://localhost:2053", InboundIDs: "[1]"},
-	}
-	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
 
-	svc := NewSubscriptionService(db, xuiClients, nil, sources, cfg, "", &webhook.NoopSender{})
+	svc := NewSubscriptionService(db, nil, nil, nil, cfg, "", &webhook.NoopSender{})
 	err := svc.Delete(context.Background(), 123456)
 
+	// Email is now computed inside sync module, not in Delete()
 	assert.NoError(t, err)
-	assert.Equal(t, "testuser", receivedEmail, "DeleteClient should receive XUIEmail(username, id) when username is real")
 }
 
 func TestSubscriptionService_Delete_FallsBackToTgIdEmail(t *testing.T) {
@@ -422,7 +403,6 @@ func TestSubscriptionService_Delete_FallsBackToTgIdEmail(t *testing.T) {
 		// Username empty on purpose
 	}
 
-	var receivedEmail string
 	db := &testutil.MockDatabaseService{
 		GetByTelegramIDFunc: func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 			return sub, nil
@@ -430,23 +410,16 @@ func TestSubscriptionService_Delete_FallsBackToTgIdEmail(t *testing.T) {
 		DeleteSubscriptionFunc: func(ctx context.Context, telegramID int64) error {
 			return nil
 		},
-	}
-	xuiClient := &testutil.MockXUIClient{
-		DeleteClientFunc: func(ctx context.Context, email string) error {
-			receivedEmail = email
-			return nil
+		GetBySubscriptionIDFunc: func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
+			return nil, nil
 		},
 	}
-	sources := []database.Node{
-		{ID: 1, IsActive: true, Host: "http://localhost:2053", InboundIDs: "[1]"},
-	}
-	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
 
-	svc := NewSubscriptionService(db, xuiClients, nil, sources, cfg, "", &webhook.NoopSender{})
+	svc := NewSubscriptionService(db, nil, nil, nil, cfg, "", &webhook.NoopSender{})
 	err := svc.Delete(context.Background(), 123456)
 
+	// Email is now computed inside sync module, not in Delete()
 	assert.NoError(t, err)
-	assert.Equal(t, "tgId_123456", receivedEmail, "DeleteClient should receive tgId_ email when no real username")
 }
 
 func TestSubscriptionService_GetWithTraffic_Success(t *testing.T) {
@@ -1037,8 +1010,7 @@ func TestSubscriptionService_InvalidateSubscription_CallsCallback(t *testing.T) 
 		captured = telegramID
 	})
 
-	err := svc.InvalidateSubscription(context.Background(), 123)
-	assert.NoError(t, err)
+	svc.InvalidateSubscription(context.Background(), 123)
 	assert.Equal(t, int64(123), captured)
 }
 
@@ -1051,7 +1023,7 @@ func TestSubscriptionService_InvalidateSubscription_NoCallback(t *testing.T) {
 	svc := NewSubscriptionService(&testutil.MockDatabaseService{}, xuiClients, nil, sources, &config.Config{}, "", &webhook.NoopSender{})
 
 	assert.NotPanics(t, func() {
-		_ = svc.InvalidateSubscription(context.Background(), 1)
+		svc.InvalidateSubscription(context.Background(), 1)
 	})
 }
 

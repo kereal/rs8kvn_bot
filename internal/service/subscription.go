@@ -21,15 +21,14 @@ import (
 )
 
 type SubscriptionService struct {
-	db           interfaces.DatabaseService
-	xuiClients   map[uint]interfaces.XUIClient
-	vpnClients   map[uint]vpn.Client
-	nodes        []database.Node
-	cfg          *config.Config
-	globalSubURL string
-	webhook      webhook.WebhookSender
-	invalidate   func(telegramID int64)
-	syncService  *SyncService
+	db          interfaces.DatabaseService
+	xuiClients  map[uint]interfaces.XUIClient
+	vpnClients  map[uint]vpn.Client
+	nodes       []database.Node
+	cfg         *config.Config
+	webhook     webhook.WebhookSender
+	invalidate  func(telegramID int64)
+	syncService *SyncService
 }
 
 type CreateResult struct {
@@ -46,23 +45,24 @@ func XUIEmail(username string, telegramID int64) string {
 	return fmt.Sprintf("tgId_%d", telegramID)
 }
 
-// NewSubscriptionService creates a SubscriptionService configured with the given database, XUI clients map, sources, configuration, global subscription URL prefix, and optional webhook sender.
-func NewSubscriptionService(db interfaces.DatabaseService, xuiClients map[uint]interfaces.XUIClient, vpnClients map[uint]vpn.Client, nodes []database.Node, cfg *config.Config, globalSubURL string, webhookSender webhook.WebhookSender) *SubscriptionService {
+// NewSubscriptionService creates a SubscriptionService configured with the given database, XUI clients map, sources, configuration, and optional webhook sender.
+func NewSubscriptionService(db interfaces.DatabaseService, xuiClients map[uint]interfaces.XUIClient, vpnClients map[uint]vpn.Client, nodes []database.Node, cfg *config.Config, _ string, webhookSender webhook.WebhookSender) *SubscriptionService {
 	return &SubscriptionService{
-		db:           db,
-		xuiClients:   xuiClients,
-		vpnClients:   vpnClients,
-		nodes:        nodes,
-		cfg:          cfg,
-		globalSubURL: globalSubURL,
-		webhook:      webhookSender,
+		db:       db,
+		xuiClients: xuiClients,
+		vpnClients: vpnClients,
+		nodes:    nodes,
+		cfg:      cfg,
+		webhook:  webhookSender,
 	}
 }
 
+// SetSyncService links the subscription service to the sync module.
 func (s *SubscriptionService) SetSyncService(svc *SyncService) {
 	s.syncService = svc
 }
 
+// activeNodes returns nodes that are active and have a host configured.
 func (s *SubscriptionService) activeNodes() []database.Node {
 	var result []database.Node
 	for _, node := range s.nodes {
@@ -90,17 +90,12 @@ func (s *SubscriptionService) trialNodes(ctx context.Context) ([]database.Node, 
 // is resolved atomically inside the DB transaction and persisted in
 // sub.InviteCode / sub.ReferredBy. The resolved ReferrerTGID (0 if unset) is
 // returned in CreateResult so callers can update aggregate referral state.
-func (s *SubscriptionService) Create(ctx context.Context, chatID int64, username, inviteCode string) (*CreateResult, error) {
-
+// VPN node access is provisioned asynchronously via the sync module.
+func (s *SubscriptionService) Create(ctx context.Context, telegramID int64, username, inviteCode string) (*CreateResult, error) {
 	plan, err := s.db.GetPlanByName(ctx, database.FreePlanName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve free plan: %w", err)
 	}
-
-	trafficBytes := plan.TrafficLimit
-
-	expiryTime := time.Now().AddDate(0, 0, config.SubscriptionResetDay)
-	resetday := config.SubscriptionResetDay
 
 	clientID, err := utils.GenerateUUID()
 	if err != nil {
@@ -111,57 +106,27 @@ func (s *SubscriptionService) Create(ctx context.Context, chatID int64, username
 		return nil, fmt.Errorf("generate sub id: %w", err)
 	}
 
-	email := XUIEmail(username, chatID)
-
-	var firstClient *xui.ClientConfig
-	var firstErr error
-	nodes := s.activeNodes()
-	for _, node := range nodes {
-		client, ok := s.xuiClients[node.ID]
-		if !ok {
-			continue
-		}
-		inboundIDs := node.ResolveInboundIDs()
-		c, err := client.AddClientWithID(xui.WithTgID(ctx, chatID), inboundIDs, email, clientID, subID, trafficBytes, expiryTime, resetday)
-		if err != nil {
-			if firstErr == nil {
-				firstErr = err
-			}
-			logger.Warn("failed to add client on node",
-				zap.Uint("node_id", node.ID),
-				zap.Error(err))
-			continue
-		}
-		if firstClient == nil {
-			firstClient = c
-		}
-	}
-
-	if firstClient == nil {
-		return nil, fmt.Errorf("failed to create client on any node: %w", firstErr)
-	}
+	expiryTime := time.Now().AddDate(0, 0, config.SubscriptionResetDay)
 
 	sub := &database.Subscription{
-		TelegramID:     chatID,
+		TelegramID:     telegramID,
 		Username:       username,
-		ClientID:       firstClient.ID,
-		SubscriptionID: firstClient.SubID,
+		ClientID:       clientID,
+		SubscriptionID: subID,
 		ExpiresAt:      expiryTime,
 		PlanID:         plan.ID,
 		Status:         "active",
 	}
 
-	if firstClient.SubID == "" {
-		s.deleteClientFromAllNodes(ctx, email)
-		return nil, fmt.Errorf("xui client returned empty subscription id")
-	}
-
 	if err := s.db.CreateSubscription(ctx, sub, inviteCode); err != nil {
-		s.deleteClientFromAllNodes(ctx, email)
 		return nil, fmt.Errorf("create subscription: %w", err)
 	}
 
-	subscriptionURL := s.cfg.SubURL(firstClient.SubID)
+	if err := s.ensureSubscriptionNodes(ctx, sub); err != nil {
+		return nil, fmt.Errorf("ensure subscription nodes: %w", err)
+	}
+
+	subscriptionURL := s.cfg.SubURL(subID)
 	return &CreateResult{
 		Subscription:    sub,
 		SubscriptionURL: subscriptionURL,
@@ -169,22 +134,33 @@ func (s *SubscriptionService) Create(ctx context.Context, chatID int64, username
 	}, nil
 }
 
+// GetByTelegramID retrieves a subscription by Telegram user ID.
 func (s *SubscriptionService) GetByTelegramID(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 	return s.db.GetByTelegramID(ctx, telegramID)
 }
 
+// Delete removes a subscription by Telegram ID via sync module and sends a webhook event.
+// VPN client removal is best-effort; orphaned clients are cleaned up by ReconcileOrphanedClients.
 func (s *SubscriptionService) Delete(ctx context.Context, telegramID int64) error {
 	sub, err := s.db.GetByTelegramID(ctx, telegramID)
 	if err != nil {
 		return err
 	}
 
-	if err := s.db.DeleteSubscription(ctx, telegramID); err != nil {
-		return fmt.Errorf("db delete: %w", err)
+	if s.syncService != nil {
+		if err := s.syncService.MarkAllForRemoval(ctx, sub.ID); err != nil {
+			logger.Warn("mark all for removal failed", zap.Error(err))
+		}
+		if err := s.syncService.SyncSubscription(ctx, sub.ID); err != nil {
+			logger.Warn("sync subscription failed (will retry)", zap.Error(err))
+		}
 	}
 
 	email := XUIEmail(sub.Username, telegramID)
-	s.deleteClientFromAllNodes(ctx, email)
+
+	if err := s.db.DeleteSubscription(ctx, telegramID); err != nil {
+		return fmt.Errorf("db delete: %w", err)
+	}
 
 	if s.webhook != nil {
 		eventID, _ := utils.GenerateUUID()
@@ -200,12 +176,21 @@ func (s *SubscriptionService) Delete(ctx context.Context, telegramID int64) erro
 	return nil
 }
 
-// DeleteByID deletes a subscription by database ID.
+// DeleteByID deletes a subscription by database ID via sync module.
 // Used by admin /del command.
 func (s *SubscriptionService) DeleteByID(ctx context.Context, id uint) (*database.Subscription, error) {
 	sub, err := s.db.GetByID(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("get subscription: %w", err)
+	}
+
+	if s.syncService != nil {
+		if err := s.syncService.MarkAllForRemoval(ctx, sub.ID); err != nil {
+			logger.Warn("mark all for removal failed", zap.Error(err))
+		}
+		if err := s.syncService.SyncSubscription(ctx, sub.ID); err != nil {
+			logger.Warn("sync subscription failed (will retry)", zap.Error(err))
+		}
 	}
 
 	clientID := sub.ClientID
@@ -217,7 +202,6 @@ func (s *SubscriptionService) DeleteByID(ctx context.Context, id uint) (*databas
 	}
 
 	email := XUIEmail(deleted.Username, deleted.TelegramID)
-	s.deleteClientFromAllNodes(ctx, email)
 
 	if s.webhook != nil {
 		eventID, _ := utils.GenerateUUID()
@@ -233,6 +217,7 @@ func (s *SubscriptionService) DeleteByID(ctx context.Context, id uint) (*databas
 	return deleted, nil
 }
 
+// deleteClientFromAllNodes removes the client email from all active XUI nodes.
 func (s *SubscriptionService) deleteClientFromAllNodes(ctx context.Context, email string) {
 	for _, node := range s.nodes {
 		if !node.IsActive || node.Host == "" {
@@ -263,6 +248,7 @@ type TrafficInfo struct {
 	PlanName           string
 }
 
+// PlanTrafficLimitGB returns the traffic limit in GB for the user's current plan.
 func (s *SubscriptionService) PlanTrafficLimitGB(ctx context.Context, telegramID int64) int {
 	sub, err := s.db.GetByTelegramID(ctx, telegramID)
 	if err != nil || sub == nil {
@@ -462,8 +448,8 @@ func (s *SubscriptionService) GetInviteByCode(ctx context.Context, code string) 
 // BindTrialSubscription binds a trial subscription to a Telegram user.
 // It updates the trial in the database, then upgrades the client in the
 // 3x-ui panel with proper traffic limits and expiry settings.
-func (s *SubscriptionService) BindTrial(ctx context.Context, subscriptionID string, chatID int64, username string) (*database.Subscription, error) {
-	sub, err := s.db.BindTrialSubscription(ctx, subscriptionID, chatID, username)
+func (s *SubscriptionService) BindTrial(ctx context.Context, subscriptionID string, telegramID int64, username string) (*database.Subscription, error) {
+	sub, err := s.db.BindTrialSubscription(ctx, subscriptionID, telegramID, username)
 	if err != nil {
 		return nil, fmt.Errorf("bind trial subscription: %w", err)
 	}
@@ -484,7 +470,7 @@ func (s *SubscriptionService) BindTrial(ctx context.Context, subscriptionID stri
 	}
 
 	currentEmail := "trial_" + subscriptionID
-	email := XUIEmail(username, chatID)
+	email := XUIEmail(username, telegramID)
 
 	nodes, err := s.trialNodes(ctx)
 	if err != nil {
@@ -496,7 +482,7 @@ func (s *SubscriptionService) BindTrial(ctx context.Context, subscriptionID stri
 			continue
 		}
 		inboundIDs := node.ResolveInboundIDs()
-		if err := client.UpdateClient(ctx, inboundIDs, currentEmail, sub.ClientID, email, sub.SubscriptionID, trafficBytes, expiryTime, chatID, comment); err != nil {
+		if err := client.UpdateClient(ctx, inboundIDs, currentEmail, sub.ClientID, email, sub.SubscriptionID, trafficBytes, expiryTime, telegramID, comment); err != nil {
 			logger.Warn("UpdateClient failed on trial node",
 				zap.Uint("node_id", node.ID),
 				zap.Error(err))
@@ -534,12 +520,10 @@ func (s *SubscriptionService) SetInvalidateFunc(fn func(telegramID int64)) {
 
 // InvalidateSubscription clears cached subscription data for the given Telegram ID.
 // It is safe to call from any goroutine.
-func (s *SubscriptionService) InvalidateSubscription(ctx context.Context, telegramID int64) error {
+func (s *SubscriptionService) InvalidateSubscription(ctx context.Context, telegramID int64) {
 	if s.invalidate != nil {
 		s.invalidate(telegramID)
 	}
-	// No error needed; cache invalidation is best-effort.
-	return nil
 }
 
 // ReconcileOrphanedClients scans all active subscriptions and removes those whose
@@ -672,10 +656,7 @@ func (s *SubscriptionService) GetAllReferralCounts(ctx context.Context) (map[int
 	return s.db.GetAllReferralCounts(ctx)
 }
 
-func (s *SubscriptionService) GetSubscription(ctx context.Context, telegramID int64) (*database.Subscription, error) {
-	return s.db.GetByTelegramID(ctx, telegramID)
-}
-
+// GetOrCreateSubscription returns an existing subscription or creates a new free-plan one with sync.
 func (s *SubscriptionService) GetOrCreateSubscription(ctx context.Context, telegramID int64, username, inviteCode string) (*database.Subscription, error) {
 	existing, err := s.db.GetByTelegramID(ctx, telegramID)
 	if err == nil {
@@ -722,6 +703,7 @@ func (s *SubscriptionService) GetOrCreateSubscription(ctx context.Context, teleg
 	return sub, nil
 }
 
+// ensureSubscriptionNodes creates pending_add records for plan nodes missing from subscription_nodes, then triggers sync.
 func (s *SubscriptionService) ensureSubscriptionNodes(ctx context.Context, sub *database.Subscription) error {
 	if sub == nil {
 		return fmt.Errorf("nil subscription")
@@ -771,6 +753,7 @@ func (s *SubscriptionService) ensureSubscriptionNodes(ctx context.Context, sub *
 	return nil
 }
 
+// RenewSubscription extends the subscription expiry, creates a paid order, recalculates nodes, and syncs.
 func (s *SubscriptionService) RenewSubscription(ctx context.Context, telegramID int64, product *database.Product) (*database.Order, error) {
 	sub, err := s.db.GetByTelegramID(ctx, telegramID)
 	if err != nil {
@@ -804,59 +787,17 @@ func (s *SubscriptionService) RenewSubscription(ctx context.Context, telegramID 
 
 	if s.syncService != nil {
 		if err := s.syncService.RecalculateNodes(ctx, sub.ID); err != nil {
-			return nil, fmt.Errorf("recalculate nodes: %w", err)
+			logger.Warn("recalculate nodes failed (will retry)", zap.Error(err))
 		}
 		if err := s.syncService.SyncSubscription(ctx, sub.ID); err != nil {
-			return nil, fmt.Errorf("sync subscription: %w", err)
+			logger.Warn("sync subscription failed (will retry)", zap.Error(err))
 		}
 	}
 
 	return order, nil
 }
 
-func (s *SubscriptionService) ChangePlan(ctx context.Context, telegramID int64, product *database.Product) (*database.Order, error) {
-	sub, err := s.db.GetByTelegramID(ctx, telegramID)
-	if err != nil {
-		return nil, fmt.Errorf("get subscription: %w", err)
-	}
-
-	now := time.Now().UTC().Truncate(time.Minute)
-	newExpiry := now
-	if sub.ExpiresAt.After(now) {
-		newExpiry = sub.ExpiresAt
-	}
-	newExpiry = newExpiry.AddDate(0, 0, product.DurationDays)
-
-	sub.PlanID = product.PlanID
-	sub.ExpiresAt = newExpiry
-	if err := s.db.UpdateSubscription(ctx, sub); err != nil {
-		return nil, fmt.Errorf("update subscription: %w", err)
-	}
-
-	order := &database.Order{
-		SubscriptionID: sub.ID,
-		ProductID:      product.ID,
-		Status:         database.OrderStatusPaid,
-		AmountCents:    product.PriceCents,
-		Currency:       product.Currency,
-		PaidAt:         &now,
-	}
-	if err := s.db.CreateOrder(ctx, order); err != nil {
-		return nil, fmt.Errorf("create order: %w", err)
-	}
-
-	if s.syncService != nil {
-		if err := s.syncService.RecalculateNodes(ctx, sub.ID); err != nil {
-			return nil, fmt.Errorf("recalculate nodes: %w", err)
-		}
-		if err := s.syncService.SyncSubscription(ctx, sub.ID); err != nil {
-			return nil, fmt.Errorf("sync subscription: %w", err)
-		}
-	}
-
-	return order, nil
-}
-
+// ExpireSubscription downgrades the subscription to the Free plan and syncs node removals.
 func (s *SubscriptionService) ExpireSubscription(ctx context.Context, telegramID int64) error {
 	sub, err := s.db.GetByTelegramID(ctx, telegramID)
 	if err != nil {
@@ -874,10 +815,10 @@ func (s *SubscriptionService) ExpireSubscription(ctx context.Context, telegramID
 
 	if s.syncService != nil {
 		if err := s.syncService.RecalculateNodes(ctx, sub.ID); err != nil {
-			return fmt.Errorf("recalculate nodes: %w", err)
+			logger.Warn("recalculate nodes failed (will retry)", zap.Error(err))
 		}
 		if err := s.syncService.SyncSubscription(ctx, sub.ID); err != nil {
-			return fmt.Errorf("sync subscription: %w", err)
+			logger.Warn("sync subscription failed (will retry)", zap.Error(err))
 		}
 	}
 

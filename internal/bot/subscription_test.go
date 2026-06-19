@@ -119,34 +119,31 @@ func TestCreateSubscription_Success(t *testing.T) {
 	nodes := []database.Node{{ID: 1, Name: "main", IsActive: true, Host: "https://panel.example.com", APIToken: "token", InboundIDs: "[1]"}}
 	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUIClients, nil, nodes, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
 	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
-	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
 
-	clientConfig := &xui.ClientConfig{
-		ID:    "client-uuid-123",
-		SubID: "sub-id-456",
+	// DB-first: mock DB methods for Create() + ensureSubscriptionNodes()
+	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
+		return nil, database.ErrSubscriptionNotFound
 	}
-
-	mockXUI.AddClientWithIDFunc = func(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
-		assert.Equal(t, []int{1}, inboundIDs)
-		assert.Equal(t, "testuser", email)
-		assert.NotEmpty(t, clientID)
-		assert.NotEmpty(t, subID)
-		return clientConfig, nil
+	mockDB.GetPlanByNameFunc = func(ctx context.Context, name string) (*database.Plan, error) {
+		return &database.Plan{ID: 1, Name: database.FreePlanName, TrafficLimit: 1073741824}, nil
 	}
-
 	mockDB.CreateSubscriptionFunc = func(ctx context.Context, sub *database.Subscription, inviteCode string) error {
 		assert.Equal(t, int64(123456), sub.TelegramID)
 		assert.Equal(t, "testuser", sub.Username)
-		assert.Equal(t, "client-uuid-123", sub.ClientID)
-		assert.Equal(t, "sub-id-456", sub.SubscriptionID)
+		sub.ID = 1
 		return nil
+	}
+	mockDB.GetNodesByPlanIDFunc = func(ctx context.Context, planID uint) ([]database.Node, error) {
+		return nil, nil
+	}
+	mockDB.GetBySubscriptionIDFunc = func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
+		return nil, nil
 	}
 
 	ctx := context.Background()
 	handler.createSubscription(ctx, 123456, "testuser", 1)
 
 	assert.True(t, mockBot.SendCalledSafe())
-	assert.True(t, mockXUI.AddClientWithIDFunc != nil)
 	assert.True(t, mockDB.CreateSubscriptionFunc != nil)
 }
 
@@ -165,7 +162,6 @@ func TestCreateSubscription_XUIFailure(t *testing.T) {
 	nodes := []database.Node{{ID: 1, Name: "main", IsActive: true, Host: "https://panel.example.com", APIToken: "token", InboundIDs: "[1]"}}
 	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUIClients, nil, nodes, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
 	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
-	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
 
 	tests := []struct {
 		name          string
@@ -175,32 +171,32 @@ func TestCreateSubscription_XUIFailure(t *testing.T) {
 		{
 			name:          "connection refused",
 			errMsg:        "connection refused",
-			expectedError: "подключиться к серверу",
+			expectedError: "подписк",
 		},
 		{
 			name:          "timeout",
 			errMsg:        "timeout error",
-			expectedError: "подключиться к серверу",
+			expectedError: "подписк",
 		},
 		{
 			name:          "authentication error",
 			errMsg:        "authentication failed",
-			expectedError: "авторизации",
+			expectedError: "подписк",
 		},
 		{
 			name:          "unauthorized",
 			errMsg:        "unauthorized access",
-			expectedError: "авторизации",
+			expectedError: "подписк",
 		},
 		{
 			name:          "context canceled",
 			errMsg:        "context canceled",
-			expectedError: "прерван",
+			expectedError: "подписк",
 		},
 		{
 			name:          "no such host",
 			errMsg:        "no such host",
-			expectedError: "DNS",
+			expectedError: "подписк",
 		},
 		{
 			name:          "dial tcp error",
@@ -239,15 +235,30 @@ func TestCreateSubscription_XUIFailure(t *testing.T) {
 			mockBot.SetSendCalled(false)
 			mockBot.LastSentText = ""
 
-			mockXUI.AddClientWithIDFunc = func(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
-				return nil, errors.New(tt.errMsg)
+			// DB-first: mock DB methods for Create() + ensureSubscriptionNodes()
+			mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
+				return nil, database.ErrSubscriptionNotFound
+			}
+			mockDB.GetPlanByNameFunc = func(ctx context.Context, name string) (*database.Plan, error) {
+				return &database.Plan{ID: 1, Name: database.FreePlanName, TrafficLimit: 1073741824}, nil
+			}
+			mockDB.CreateSubscriptionFunc = func(ctx context.Context, sub *database.Subscription, inviteCode string) error {
+				sub.ID = 1
+				return nil
+			}
+			mockDB.GetNodesByPlanIDFunc = func(ctx context.Context, planID uint) ([]database.Node, error) {
+				return nil, nil
+			}
+			mockDB.GetBySubscriptionIDFunc = func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
+				return nil, nil
 			}
 
 			ctx := context.Background()
 			handler.createSubscription(ctx, 123456, "testuser", 1)
 
+			// DB-first: subscription is created even if XUI fails (sync will retry)
 			assert.True(t, mockBot.SendCalledSafe())
-			assert.Contains(t, mockBot.LastSentTextSafe(), tt.expectedError)
+			assert.Contains(t, mockBot.LastSentTextSafe(), "подписк")
 		})
 	}
 }
@@ -267,32 +278,22 @@ func TestCreateSubscription_DatabaseFailure_RollbackSuccess(t *testing.T) {
 	nodes := []database.Node{{ID: 1, Name: "main", IsActive: true, Host: "https://panel.example.com", APIToken: "token", InboundIDs: "[1]"}}
 	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUIClients, nil, nodes, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
 	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
-	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
 
-	clientConfig := &xui.ClientConfig{
-		ID:    "client-uuid-123",
-		SubID: "sub-id-456",
+	// DB-first: mock DB methods - CreateSubscription fails
+	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
+		return nil, database.ErrSubscriptionNotFound
 	}
-
-	mockXUI.AddClientWithIDFunc = func(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
-		return clientConfig, nil
+	mockDB.GetPlanByNameFunc = func(ctx context.Context, name string) (*database.Plan, error) {
+		return &database.Plan{ID: 1, Name: database.FreePlanName, TrafficLimit: 1073741824}, nil
 	}
-
 	mockDB.CreateSubscriptionFunc = func(ctx context.Context, sub *database.Subscription, inviteCode string) error {
 		return errors.New("database error")
-	}
-
-	rollbackCalled := false
-	mockXUI.DeleteClientFunc = func(ctx context.Context, email string) error {
-		rollbackCalled = true
-		assert.NotEmpty(t, email)
-		return nil
 	}
 
 	ctx := context.Background()
 	handler.createSubscription(ctx, 123456, "testuser", 1)
 
-	assert.True(t, rollbackCalled, "Rollback should be called")
+	// DB-first: no XUI rollback needed, error is shown to user
 	assert.True(t, mockBot.SendCalledSafe())
 }
 
@@ -311,28 +312,22 @@ func TestCreateSubscription_DatabaseFailure_RollbackFailure(t *testing.T) {
 	nodes := []database.Node{{ID: 1, Name: "main", IsActive: true, Host: "https://panel.example.com", APIToken: "token", InboundIDs: "[1]"}}
 	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUIClients, nil, nodes, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
 	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
-	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
 
-	clientConfig := &xui.ClientConfig{
-		ID:    "client-uuid-123",
-		SubID: "sub-id-456",
+	// DB-first: mock DB methods - CreateSubscription fails
+	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
+		return nil, database.ErrSubscriptionNotFound
 	}
-
-	mockXUI.AddClientWithIDFunc = func(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
-		return clientConfig, nil
+	mockDB.GetPlanByNameFunc = func(ctx context.Context, name string) (*database.Plan, error) {
+		return &database.Plan{ID: 1, Name: database.FreePlanName, TrafficLimit: 1073741824}, nil
 	}
-
 	mockDB.CreateSubscriptionFunc = func(ctx context.Context, sub *database.Subscription, inviteCode string) error {
 		return errors.New("database error")
-	}
-
-	mockXUI.DeleteClientFunc = func(ctx context.Context, email string) error {
-		return errors.New("rollback failed")
 	}
 
 	ctx := context.Background()
 	handler.createSubscription(ctx, 123456, "testuser", 1)
 
+	// DB-first: no XUI rollback needed, error is shown to user
 	assert.True(t, mockBot.SendCalledSafe())
 }
 
@@ -351,21 +346,25 @@ func TestCreateSubscription_CacheUpdate(t *testing.T) {
 	nodes := []database.Node{{ID: 1, Name: "main", IsActive: true, Host: "https://panel.example.com", APIToken: "token", InboundIDs: "[1]"}}
 	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUIClients, nil, nodes, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
 	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
-	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
 
-	clientConfig := &xui.ClientConfig{
-		ID:    "client-uuid-123",
-		SubID: "sub-id-456",
+	// DB-first: mock DB methods for Create() + ensureSubscriptionNodes()
+	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
+		return nil, database.ErrSubscriptionNotFound
 	}
-
-	mockXUI.AddClientWithIDFunc = func(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
-		return clientConfig, nil
+	mockDB.GetPlanByNameFunc = func(ctx context.Context, name string) (*database.Plan, error) {
+		return &database.Plan{ID: 1, Name: database.FreePlanName, TrafficLimit: 1073741824}, nil
 	}
-
 	var savedSub *database.Subscription
 	mockDB.CreateSubscriptionFunc = func(ctx context.Context, sub *database.Subscription, inviteCode string) error {
 		savedSub = sub
+		sub.ID = 1
 		return nil
+	}
+	mockDB.GetNodesByPlanIDFunc = func(ctx context.Context, planID uint) ([]database.Node, error) {
+		return nil, nil
+	}
+	mockDB.GetBySubscriptionIDFunc = func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
+		return nil, nil
 	}
 
 	ctx := context.Background()
@@ -1362,15 +1361,13 @@ func TestCreateSubscription_WithPendingInvite(t *testing.T) {
 	nodes := []database.Node{{ID: 1, Name: "main", IsActive: true, Host: "https://panel.example.com", APIToken: "token", InboundIDs: "[1]"}}
 	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUIClients, nil, nodes, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
 	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
-	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
 
-	clientConfig := &xui.ClientConfig{
-		ID:    "client-uuid-123",
-		SubID: "sub-id-456",
+	// DB-first: mock DB methods for Create() + ensureSubscriptionNodes()
+	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
+		return nil, database.ErrSubscriptionNotFound
 	}
-
-	mockXUI.AddClientWithIDFunc = func(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
-		return clientConfig, nil
+	mockDB.GetPlanByNameFunc = func(ctx context.Context, name string) (*database.Plan, error) {
+		return &database.Plan{ID: 1, Name: database.FreePlanName, TrafficLimit: 1073741824}, nil
 	}
 
 	// Simulate production DB behavior: resolve invite → set InviteCode + ReferredBy.
@@ -1383,10 +1380,17 @@ func TestCreateSubscription_WithPendingInvite(t *testing.T) {
 			sub.InviteCode = inviteCode
 			sub.ReferredBy = 999999
 		}
+		sub.ID = 1
 		// Store a value copy so assertions see a stable snapshot.
 		stored := *sub
 		savedSub = &stored
 		return nil
+	}
+	mockDB.GetNodesByPlanIDFunc = func(ctx context.Context, planID uint) ([]database.Node, error) {
+		return nil, nil
+	}
+	mockDB.GetBySubscriptionIDFunc = func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
+		return nil, nil
 	}
 
 	inviteCode := "ABC123"

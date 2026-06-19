@@ -39,8 +39,7 @@ func TestE2E_CreateSubscription_Success(t *testing.T) {
 		},
 	})
 
-	assert.True(t, env.xui.AddClientWithIDCalled, "XUI AddClientWithID should be called")
-
+	// DB-first: XUI is called via sync module, not directly in Create()
 	sub, err := env.db.GetByTelegramID(ctx, env.chatID)
 	require.NoError(t, err, "Subscription should exist in DB")
 	assert.Equal(t, env.chatID, sub.TelegramID)
@@ -161,11 +160,13 @@ func TestE2E_CreateSubscription_XUIFailure(t *testing.T) {
 		},
 	})
 
-	assert.True(t, env.botAPI.SendCalledSafe(), "Error message should be sent")
-	assert.Contains(t, env.botAPI.LastSentText, "подключиться к серверу", "Should show connection error message")
+	// DB-first: subscription is created even if XUI fails (sync will retry)
+	assert.True(t, env.botAPI.SendCalledSafe(), "Confirmation message should be sent")
+	assert.Contains(t, env.botAPI.LastSentText, "подписк", "Should mention subscription")
 
-	_, err := env.db.GetByTelegramID(ctx, env.chatID)
-	assert.Error(t, err, "No subscription should exist after XUI failure")
+	sub, err := env.db.GetByTelegramID(ctx, env.chatID)
+	require.NoError(t, err, "Subscription should exist in DB even with XUI failure")
+	assert.Equal(t, "active", sub.Status)
 }
 
 func TestE2E_CreateSubscription_TrafficLimitCorrect(t *testing.T) {
@@ -174,15 +175,6 @@ func TestE2E_CreateSubscription_TrafficLimitCorrect(t *testing.T) {
 	defer env.db.Close()
 
 	ctx := context.Background()
-
-	var capturedTraffic int64
-	env.xui.AddClientWithIDFunc = func(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
-		capturedTraffic = trafficBytes
-		return &xui.ClientConfig{
-			ID:    "client-uuid-123",
-			SubID: "sub-id-456",
-		}, nil
-	}
 
 	env.handler.HandleCallback(ctx, tgbotapi.Update{
 		CallbackQuery: &tgbotapi.CallbackQuery{
@@ -198,8 +190,12 @@ func TestE2E_CreateSubscription_TrafficLimitCorrect(t *testing.T) {
 		},
 	})
 
-	expectedTraffic := int64(50) * 1024 * 1024 * 1024
-	assert.Equal(t, expectedTraffic, capturedTraffic, "Traffic limit should match free plan (50GB)")
+	// DB-first: verify subscription has correct plan, traffic is set via sync
+	sub, err := env.db.GetByTelegramID(ctx, env.chatID)
+	require.NoError(t, err, "Subscription should exist in DB")
+	freePlan, err := env.db.GetPlanByName(ctx, database.FreePlanName)
+	require.NoError(t, err)
+	assert.Equal(t, freePlan.ID, sub.PlanID, "Subscription should have free plan")
 }
 
 func TestE2E_CreateSubscription_SubscriptionID_Set(t *testing.T) {
@@ -391,12 +387,14 @@ func TestE2E_Service_Create_XUIFailure_NoDBRecord(t *testing.T) {
 		return nil, fmt.Errorf("xui add client: connection refused")
 	}
 
-	_, err := env.subService.Create(ctx, env.chatID, env.username, "")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "connection refused")
+	// DB-first: subscription is created even if XUI fails (sync will retry)
+	sub, err := env.subService.Create(ctx, env.chatID, env.username, "")
+	require.NoError(t, err)
+	assert.NotNil(t, sub)
 
-	_, err = env.db.GetByTelegramID(ctx, env.chatID)
-	assert.Error(t, err, "No subscription should exist after XUI failure")
+	dbSub, err := env.db.GetByTelegramID(ctx, env.chatID)
+	assert.NoError(t, err, "Subscription should exist in DB")
+	assert.Equal(t, "active", dbSub.Status)
 }
 
 func TestE2E_Service_Create_DBFailure_RollbackXUI(t *testing.T) {
