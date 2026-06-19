@@ -192,9 +192,14 @@ func (s *Service) GetSubscriptionBySubscriptionID(ctx context.Context, subscript
 
 // GetSubscriptionStatus returns only the status and expiry time for a subscription
 // by its subscription_id. It is intended for cheap cache-hit checks in the
+// GetSubscriptionStatus returns subscription status and expiry time for the
 // subscription server (since v2.3.0) — it avoids the full JOIN with plans and
 // sources required by GetSubscriptionWithPlanAndNodes. Returns
 // gorm.ErrRecordNotFound if no row matches.
+//
+// For Free (unlimited) subscriptions, ExpiresAt is time.Time{} (zero value),
+// since the database stores NULL. Callers should check !expiryTime.IsZero()
+// before comparing against time.Now().
 func (s *Service) GetSubscriptionStatus(ctx context.Context, subscriptionID string) (string, time.Time, error) {
 	var row struct {
 		Status    string
