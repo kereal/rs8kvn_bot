@@ -271,6 +271,23 @@ func (s *Service) UpdateSubscriptionIPs(ctx context.Context, id uint, ipsJSON st
 	return nil
 }
 
+// ExpireSubscription downgrades the subscription to the free plan and clears expires_at.
+func (s *Service) ExpireSubscription(ctx context.Context, id uint, freePlanID uint) error {
+	result := s.db.WithContext(ctx).Model(&Subscription{}).Where("id = ?", id).
+		Updates(map[string]interface{}{
+			"status":     "active",
+			"expires_at": nil,
+			"plan_id":    freePlanID,
+		})
+	if result.Error != nil {
+		return fmt.Errorf("failed to expire subscription: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
+}
+
 // GetAllTelegramIDs returns all unique Telegram IDs from subscriptions.
 func (s *Service) GetAllTelegramIDs(ctx context.Context) ([]int64, error) {
 	var ids []int64

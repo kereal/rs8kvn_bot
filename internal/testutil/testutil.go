@@ -667,9 +667,10 @@ func (m *MockDatabaseService) UpdateSubscriptionDevices(ctx context.Context, id 
 }
 
 func (m *MockDatabaseService) UpdateSubscriptionIPs(ctx context.Context, id uint, ipsJSON string) error {
-	if m.UpdateSubscriptionIPsFunc != nil {
-		return m.UpdateSubscriptionIPsFunc(ctx, id, ipsJSON)
-	}
+	return nil
+}
+
+func (m *MockDatabaseService) ExpireSubscription(ctx context.Context, id uint, freePlanID uint) error {
 	return nil
 }
 
