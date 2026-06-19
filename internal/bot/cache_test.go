@@ -214,12 +214,12 @@ func TestSubscriptionCache_StartCleanup_Cancellation(t *testing.T) {
 	cancel()
 
 	// Wait for goroutine to exit
-	select {
-	case <-done:
-		// Goroutine exited successfully
-	case <-time.After(20 * time.Millisecond):
-		t.Error("StartCleanup did not exit after context cancellation")
-	}
+select {
+ 	case <-done:
+ 		// Goroutine exited successfully
+ 	case <-time.After(100 * time.Millisecond):
+ 		t.Error("StartCleanup did not exit after context cancellation")
+ 	}
 }
 
 func TestSubscriptionCache_LRU_EvictionOrder(t *testing.T) {

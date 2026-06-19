@@ -39,7 +39,8 @@ func TestBot_GracefulShutdown(t *testing.T) {
 
 	cancel()
 	runtime.Gosched()
-
+	runtime.GC()
+	runtime.Gosched()
 	runtime.GC()
 	var memStatsAfter runtime.MemStats
 	runtime.ReadMemStats(&memStatsAfter)
