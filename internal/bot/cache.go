@@ -20,7 +20,13 @@ type lruItem struct {
 	entry      *cacheEntry
 }
 
+type noCopy struct{}
+
+func (noCopy) Lock()   {}
+func (noCopy) Unlock() {}
+
 type SubscriptionCache struct {
+	noCopy noCopy
 	mu      sync.RWMutex
 	items   map[int64]*list.Element // telegram_id -> list element
 	lru     *list.List              // front = LRU, back = MRU

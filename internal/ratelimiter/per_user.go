@@ -9,6 +9,7 @@ import (
 // PerUserRateLimiter manages per-user token buckets to prevent
 // a single user from starving others of rate limit tokens.
 type PerUserRateLimiter struct {
+	noCopy noCopy
 	mu         sync.RWMutex
 	buckets    map[int64]*TokenBucket
 	maxTokens  float64

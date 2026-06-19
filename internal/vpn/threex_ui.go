@@ -7,6 +7,8 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/interfaces"
 )
 
+var _ Client = (*ThreeXUIClient)(nil)
+
 // ThreeXUIClient adapts an xui.Client to the VPNClient interface.
 type ThreeXUIClient struct {
 	client      interfaces.XUIClient
