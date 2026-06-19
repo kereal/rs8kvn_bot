@@ -642,8 +642,10 @@ func TestHandleMySubscription_ActiveSubscription(t *testing.T) {
 	}
 
 	traffic := &xui.ClientTraffic{
-		Up:   1024 * 1024 * 1024, // 1 GB
-		Down: 2048 * 1024 * 1024, // 2 GB
+		Up:        1024 * 1024 * 1024, // 1 GB
+		Down:      2048 * 1024 * 1024, // 2 GB
+		ExpiresAt: time.Now().AddDate(0, 1, 0).UnixMilli(), // +1 month
+		Reset:     30,
 	}
 
 	mockXUI.GetClientTrafficFunc = func(ctx context.Context, email string) (*xui.ClientTraffic, error) {

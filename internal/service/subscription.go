@@ -292,6 +292,8 @@ func (s *SubscriptionService) GetWithTraffic(ctx context.Context, telegramID int
 	// обходим серверы
 	var totalUp, totalDown int64
 	var anySuccess bool
+	var panelResetExpiry int64
+	var panelResetDays int
 	for _, node := range s.activeNodes() {
 		client, ok := s.xuiClients[node.ID]
 		if !ok {
@@ -306,6 +308,8 @@ func (s *SubscriptionService) GetWithTraffic(ctx context.Context, telegramID int
 		}
 		totalUp += traffic.Up
 		totalDown += traffic.Down
+		panelResetExpiry = traffic.ExpiresAt
+		panelResetDays = traffic.Reset
 		anySuccess = true
 	}
 
@@ -331,24 +335,20 @@ func (s *SubscriptionService) GetWithTraffic(ctx context.Context, telegramID int
 	// Progress bar
 	progressBar := utils.GenerateProgressBar(usedGB, float64(limitGB))
 
-	// Calculate reset time
-	var resetTime time.Time
-	if sub.ExpiresAt == nil {
-		resetTime = sub.CreatedAt.AddDate(0, 0, config.SubscriptionResetDay)
-	} else {
-		resetTime = *sub.ExpiresAt
-	}
-	daysUntilReset := utils.DaysUntilReset(time.Now(), resetTime)
-
-	// Reset info string
+	// Calculate reset time from panel: expiryTime + reset days
 	var resetInfo string
-	switch {
-	case daysUntilReset < 0:
-		resetInfo = "🔄 Сброс: отключен"
-	case daysUntilReset == 0:
-		resetInfo = "🔄 Сброс: сегодня"
-	default:
-		resetInfo = fmt.Sprintf("🔄 Сброс: через %d дн.", daysUntilReset)
+	var daysUntilReset int
+	if panelResetExpiry > 0 && panelResetDays > 0 {
+		resetTime := time.UnixMilli(panelResetExpiry).AddDate(0, 0, panelResetDays)
+		daysUntilReset = utils.DaysUntilReset(time.Now(), resetTime)
+		switch {
+		case daysUntilReset < 0:
+			resetInfo = "🔄 Сброс: отключен"
+		case daysUntilReset == 0:
+			resetInfo = "🔄 Сброс: сегодня"
+		default:
+			resetInfo = fmt.Sprintf("🔄 Сброс: через %d дн.", daysUntilReset)
+		}
 	}
 
 	return sub, &TrafficInfo{
