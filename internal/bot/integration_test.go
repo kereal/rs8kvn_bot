@@ -9,8 +9,6 @@ import (
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/interfaces"
@@ -19,6 +17,8 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/utils"
 	"github.com/kereal/rs8kvn_bot/internal/webhook"
 	"github.com/kereal/rs8kvn_bot/internal/xui"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type IntegrationTestFixture struct {
@@ -143,7 +143,7 @@ func NewTestFixture(t *testing.T) *IntegrationTestFixture {
 	mockXUI := NewMockXUIServer(t)
 
 	cfg := &config.Config{
-		Nodes:          []config.Node{{Name: "main", XUIHost: mockXUI.Server.URL, XUIAPIToken: "test-api-token", XUIInboundIDs: "[1]"}},
+		Nodes:            []config.Node{{Name: "main", XUIHost: mockXUI.Server.URL, XUIAPIToken: "test-api-token", XUIInboundIDs: "[1]"}},
 		TelegramAdminID:  123456789,
 		TelegramBotToken: "test_token",
 		LogFilePath:      "/dev/null",
@@ -189,11 +189,16 @@ func CreateTestSubscriptionInDB(t *testing.T, db *database.Service, chatID int64
 		t.Fatalf("Failed to generate client ID: %v", err)
 	}
 
+	subscriptionID, err := utils.GenerateUUID()
+	if err != nil {
+		t.Fatalf("Failed to generate subscription ID: %v", err)
+	}
+
 	sub := &database.Subscription{
 		TelegramID:     chatID,
 		Username:       username,
 		ClientID:       clientID,
-		SubscriptionID: "test-sub-id",
+		SubscriptionID: subscriptionID,
 		ExpiresAt:      expiry,
 		Status:         status,
 	}

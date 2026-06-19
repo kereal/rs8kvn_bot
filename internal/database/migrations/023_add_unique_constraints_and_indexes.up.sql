@@ -1,6 +1,9 @@
 -- UNIQUE: каждый VPN-клиент привязан ровно к одной подписке
 CREATE UNIQUE INDEX idx_subscriptions_client_id_unique ON subscriptions(client_id);
 
+-- UNIQUE: каждый public subscription ID привязан ровно к одной подписке
+CREATE UNIQUE INDEX idx_subscriptions_subscription_id_unique ON subscriptions(subscription_id);
+
 -- UNIQUE: каждый пользователь Telegram имеет ровно одну подписку
 -- Trial подписки используют отрицательные telegram_id и не конфликтуют
 CREATE UNIQUE INDEX idx_subscriptions_telegram_id_unique ON subscriptions(telegram_id);

@@ -889,11 +889,12 @@ func TestService_CountAllSubscriptions(t *testing.T) {
 
 	for i := 0; i < 3; i++ {
 		sub := &Subscription{
-			TelegramID: int64(40000 + i),
-			Username:   fmt.Sprintf("countuser%d", i),
-			ClientID:   fmt.Sprintf("client-count-%d", i),
-			Status:     "active",
-			ExpiresAt:  ptrTime(time.Now().Add(24 * time.Hour)),
+			TelegramID:     int64(40000 + i),
+			Username:       fmt.Sprintf("countuser%d", i),
+			ClientID:       fmt.Sprintf("client-count-%d", i),
+			SubscriptionID: fmt.Sprintf("sub-count-%d", i),
+			Status:         "active",
+			ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
 		}
 		require.NoError(t, svc.db.Create(sub).Error)
 	}
@@ -911,9 +912,9 @@ func TestService_GetAllTelegramIDs(t *testing.T) {
 	svc := newTestService(t)
 
 	subs := []*Subscription{
-		{TelegramID: 111111111, Username: "user1", ClientID: "client1", Status: "active", ExpiresAt: ptrTime(time.Now().Add(24 * time.Hour))},
-		{TelegramID: 222222222, Username: "user2", ClientID: "client2", Status: "active", ExpiresAt: ptrTime(time.Now().Add(24 * time.Hour))},
-		{TelegramID: 333333333, Username: "user3", ClientID: "client3", Status: "active", ExpiresAt: ptrTime(time.Now().Add(24 * time.Hour))},
+		{TelegramID: 111111111, Username: "user1", ClientID: "client1", SubscriptionID: "sub-user1", Status: "active", ExpiresAt: ptrTime(time.Now().Add(24 * time.Hour))},
+		{TelegramID: 222222222, Username: "user2", ClientID: "client2", SubscriptionID: "sub-user2", Status: "active", ExpiresAt: ptrTime(time.Now().Add(24 * time.Hour))},
+		{TelegramID: 333333333, Username: "user3", ClientID: "client3", SubscriptionID: "sub-user3", Status: "active", ExpiresAt: ptrTime(time.Now().Add(24 * time.Hour))},
 	}
 
 	for _, sub := range subs {
@@ -953,11 +954,12 @@ func TestService_GetAllTelegramIDs_Duplicates(t *testing.T) {
 	// with the same telegram_id. This test verifies that GetAllTelegramIDs returns
 	// unique telegram_ids.
 	sub := &Subscription{
-		TelegramID: 111111111,
-		Username:   "user1",
-		ClientID:   "client-1",
-		Status:     "active",
-		ExpiresAt:  ptrTime(time.Now().Add(24 * time.Hour)),
+		TelegramID:     111111111,
+		Username:       "user1",
+		ClientID:       "client-1",
+		SubscriptionID: "sub-client-1",
+		Status:         "active",
+		ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
 	}
 	require.NoError(t, svc.db.Create(sub).Error)
 
@@ -974,11 +976,12 @@ func TestService_GetTelegramIDByUsername(t *testing.T) {
 	svc := newTestService(t)
 
 	sub := &Subscription{
-		TelegramID: 123456789,
-		Username:   "testuser",
-		ClientID:   "client-id",
-		Status:     "active",
-		ExpiresAt:  ptrTime(time.Now().Add(24 * time.Hour)),
+		TelegramID:     123456789,
+		Username:       "testuser",
+		ClientID:       "client-id",
+		SubscriptionID: "sub-client-id",
+		Status:         "active",
+		ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
 	}
 	require.NoError(t, svc.db.Create(sub).Error)
 
@@ -1005,11 +1008,12 @@ func TestService_GetTelegramIDsBatch(t *testing.T) {
 
 	for i := 0; i < 10; i++ {
 		sub := &Subscription{
-			TelegramID: int64(50000 + i),
-			Username:   fmt.Sprintf("batchuser%d", i),
-			ClientID:   fmt.Sprintf("client-batch-%d", i),
-			Status:     "active",
-			ExpiresAt:  ptrTime(time.Now().Add(24 * time.Hour)),
+			TelegramID:     int64(50000 + i),
+			Username:       fmt.Sprintf("batchuser%d", i),
+			ClientID:       fmt.Sprintf("client-batch-%d", i),
+			SubscriptionID: fmt.Sprintf("sub-batch-%d", i),
+			Status:         "active",
+			ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
 		}
 		require.NoError(t, svc.db.Create(sub).Error)
 	}
@@ -1030,11 +1034,12 @@ func TestService_GetTelegramIDsBatch_OffsetBeyondTotal(t *testing.T) {
 
 	for i := 0; i < 3; i++ {
 		sub := &Subscription{
-			TelegramID: int64(60000 + i),
-			Username:   fmt.Sprintf("offsetuser%d", i),
-			ClientID:   fmt.Sprintf("client-offset-%d", i),
-			Status:     "active",
-			ExpiresAt:  ptrTime(time.Now().Add(24 * time.Hour)),
+			TelegramID:     int64(60000 + i),
+			Username:       fmt.Sprintf("offsetuser%d", i),
+			ClientID:       fmt.Sprintf("client-offset-%d", i),
+			SubscriptionID: fmt.Sprintf("sub-offset-%d", i),
+			Status:         "active",
+			ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
 		}
 		require.NoError(t, svc.db.Create(sub).Error)
 	}
@@ -1134,13 +1139,14 @@ func TestService_GetReferralCount(t *testing.T) {
 	referrerID := int64(22222)
 	for i := 0; i < 3; i++ {
 		sub := &Subscription{
-			TelegramID: int64(70000 + i),
-			Username:   fmt.Sprintf("referral%d", i),
-			ClientID:   fmt.Sprintf("client-ref-%d", i),
-			Status:     "active",
-			ExpiresAt:  ptrTime(time.Now().Add(24 * time.Hour)),
-			ReferredBy: referrerID,
-			PlanID:     0,
+			TelegramID:     int64(70000 + i),
+			Username:       fmt.Sprintf("referral%d", i),
+			ClientID:       fmt.Sprintf("client-ref-%d", i),
+			SubscriptionID: fmt.Sprintf("sub-ref-%d", i),
+			Status:         "active",
+			ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
+			ReferredBy:     referrerID,
+			PlanID:         0,
 		}
 		require.NoError(t, svc.db.Create(sub).Error)
 	}
@@ -1168,13 +1174,14 @@ func TestService_GetAllReferralCounts(t *testing.T) {
 	referrerID := int64(33333)
 	for i := 0; i < 2; i++ {
 		sub := &Subscription{
-			TelegramID: int64(80000 + i),
-			Username:   fmt.Sprintf("refuser%d", i),
-			ClientID:   fmt.Sprintf("client-refall-%d", i),
-			Status:     "active",
-			ExpiresAt:  ptrTime(time.Now().Add(24 * time.Hour)),
-			ReferredBy: referrerID,
-			PlanID:     0,
+			TelegramID:     int64(80000 + i),
+			Username:       fmt.Sprintf("refuser%d", i),
+			ClientID:       fmt.Sprintf("client-refall-%d", i),
+			SubscriptionID: fmt.Sprintf("sub-refall-%d", i),
+			Status:         "active",
+			ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
+			ReferredBy:     referrerID,
+			PlanID:         0,
 		}
 		require.NoError(t, svc.db.Create(sub).Error)
 	}
