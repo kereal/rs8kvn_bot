@@ -42,6 +42,20 @@ func (s *Service) GetPendingSync(ctx context.Context) ([]SubscriptionNode, error
 	return rows, nil
 }
 
+// GetPendingBySubscriptionID returns pending subscription nodes for the given subscription.
+func (s *Service) GetPendingBySubscriptionID(ctx context.Context, subscriptionID uint) ([]SubscriptionNode, error) {
+	var rows []SubscriptionNode
+	nowUTC := time.Now().UTC().Truncate(time.Minute)
+	result := s.db.WithContext(ctx).
+		Where("subscription_id = ? AND status IN ? AND (retry_at IS NULL OR retry_at <= ?)",
+			subscriptionID, []SyncStatus{SyncStatusPendingAdd, SyncStatusPendingRemove}, nowUTC).
+		Find(&rows)
+	if result.Error != nil {
+		return nil, fmt.Errorf("failed to get pending nodes by subscription id: %w", result.Error)
+	}
+	return rows, nil
+}
+
 // GetPendingByNodeID returns pending subscription nodes for the given node.
 func (s *Service) GetPendingByNodeID(ctx context.Context, nodeID uint) ([]SubscriptionNode, error) {
 	var rows []SubscriptionNode

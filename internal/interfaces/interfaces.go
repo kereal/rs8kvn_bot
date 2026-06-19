@@ -17,6 +17,7 @@ type SubscriptionNodeRepository interface {
 	GetBySubscriptionID(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error)
 	GetByNodeID(ctx context.Context, nodeID uint) ([]database.SubscriptionNode, error)
 	GetPendingSync(ctx context.Context) ([]database.SubscriptionNode, error)
+	GetPendingBySubscriptionID(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error)
 	GetPendingByNodeID(ctx context.Context, nodeID uint) ([]database.SubscriptionNode, error)
 	CreateSubscriptionNode(ctx context.Context, sn *database.SubscriptionNode) error
 	UpdateSubscriptionNodeStatus(ctx context.Context, subID, nodeID uint, status database.SyncStatus) error
@@ -47,6 +48,7 @@ type SubscriptionRepository interface {
 	UpdateSubscriptionDevices(ctx context.Context, id uint, devicesJSON string) error
 	UpdateSubscriptionIPs(ctx context.Context, id uint, ipsJSON string) error
 	ExpireSubscription(ctx context.Context, id uint, freePlanID uint) error
+	GetExpiredPaidSubscriptions(ctx context.Context) ([]database.Subscription, error)
 }
 
 type TrialRepository interface {
