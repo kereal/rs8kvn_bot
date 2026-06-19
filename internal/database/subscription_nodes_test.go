@@ -26,13 +26,13 @@ func TestSubscriptionNodeRepository_GetBySubscriptionID(t *testing.T) {
 	require.NoError(t, svc.db.WithContext(ctx).Create(&PlanNode{PlanID: plan.ID, NodeID: node2.ID}).Error)
 
 	sub := &Subscription{
-		TelegramID:      111111,
-		Username:        "subnodeuser",
-		ClientID:        "subnode-client",
-		SubscriptionID:  "subnode-sub",
-		Status:          "active",
-		ExpiresAt:       time.Now().Add(24 * time.Hour),
-		PlanID:          plan.ID,
+		TelegramID:     111111,
+		Username:       "subnodeuser",
+		ClientID:       "subnode-client",
+		SubscriptionID: "subnode-sub",
+		Status:         "active",
+		ExpiresAt:      time.Now().Add(24 * time.Hour),
+		PlanID:         plan.ID,
 	}
 	require.NoError(t, svc.CreateSubscription(ctx, sub, ""))
 
@@ -199,13 +199,16 @@ func TestSubscriptionNodeRepository_UpdateSubscriptionNodeStatus(t *testing.T) {
 
 	sub := &Subscription{TelegramID: 505, Username: "updatestatus", ClientID: "c-us", SubscriptionID: "s-us", Status: "active", PlanID: plan.ID}
 	require.NoError(t, svc.CreateSubscription(ctx, sub, ""))
-	require.NoError(t, svc.db.WithContext(ctx).Create(&SubscriptionNode{SubscriptionID: sub.ID, NodeID: node.ID, Status: SyncStatusPendingAdd}).Error)
+	errMsg := "boom"
+	retryAt := time.Now().UTC().Add(10 * time.Minute)
+	require.NoError(t, svc.db.WithContext(ctx).Create(&SubscriptionNode{SubscriptionID: sub.ID, NodeID: node.ID, Status: SyncStatusPendingAdd, RetryCount: 3, RetryAt: &retryAt, LastError: &errMsg}).Error)
 
 	require.NoError(t, svc.UpdateSubscriptionNodeStatus(ctx, sub.ID, node.ID, SyncStatusActive))
 
 	var found SubscriptionNode
 	require.NoError(t, svc.db.WithContext(ctx).Where("subscription_id = ? AND node_id = ?", sub.ID, node.ID).First(&found).Error)
 	assert.Equal(t, SyncStatusActive, found.Status)
+	assert.Equal(t, 0, found.RetryCount)
 	assert.Nil(t, found.RetryAt)
 	assert.Nil(t, found.LastError)
 }
@@ -309,4 +312,3 @@ func TestSubscriptionNodeRepository_UpdateRetry(t *testing.T) {
 	assert.Equal(t, retryAt, *found.RetryAt)
 	assert.Equal(t, errMsg, *found.LastError)
 }
-

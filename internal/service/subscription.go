@@ -679,6 +679,9 @@ func (s *SubscriptionService) GetSubscription(ctx context.Context, telegramID in
 func (s *SubscriptionService) GetOrCreateSubscription(ctx context.Context, telegramID int64, username, inviteCode string) (*database.Subscription, error) {
 	existing, err := s.db.GetByTelegramID(ctx, telegramID)
 	if err == nil {
+		if err := s.ensureSubscriptionNodes(ctx, existing); err != nil {
+			return nil, fmt.Errorf("repair subscription nodes: %w", err)
+		}
 		return existing, nil
 	}
 	if !errors.Is(err, database.ErrSubscriptionNotFound) {
@@ -712,30 +715,60 @@ func (s *SubscriptionService) GetOrCreateSubscription(ctx context.Context, teleg
 		return nil, fmt.Errorf("create subscription: %w", err)
 	}
 
-	nodes, nodeErr := s.db.GetNodesByPlanName(ctx, database.FreePlanName)
-	if nodeErr != nil {
-		return nil, fmt.Errorf("load free plan nodes: %w", nodeErr)
+	if err := s.ensureSubscriptionNodes(ctx, sub); err != nil {
+		return nil, fmt.Errorf("ensure subscription nodes: %w", err)
 	}
 
+	return sub, nil
+}
+
+func (s *SubscriptionService) ensureSubscriptionNodes(ctx context.Context, sub *database.Subscription) error {
+	if sub == nil {
+		return fmt.Errorf("nil subscription")
+	}
+
+	nodes, err := s.db.GetNodesByPlanID(ctx, sub.PlanID)
+	if err != nil {
+		return fmt.Errorf("load plan nodes: %w", err)
+	}
+
+	existing, err := s.db.GetBySubscriptionID(ctx, sub.ID)
+	if err != nil {
+		return fmt.Errorf("load subscription nodes: %w", err)
+	}
+
+	existingByNodeID := make(map[uint]database.SubscriptionNode, len(existing))
+	for _, sn := range existing {
+		existingByNodeID[sn.NodeID] = sn
+	}
+
+	createdAny := false
 	for _, node := range nodes {
+		if !node.IsActive {
+			continue
+		}
+		if _, ok := existingByNodeID[node.ID]; ok {
+			continue
+		}
 		if err := s.db.UpsertSubscriptionNode(ctx, &database.SubscriptionNode{
 			SubscriptionID: sub.ID,
 			NodeID:         node.ID,
 			Status:         database.SyncStatusPendingAdd,
 		}); err != nil {
-			return nil, fmt.Errorf("upsert subscription node %d: %w", node.ID, err)
+			return fmt.Errorf("upsert subscription node %d: %w", node.ID, err)
 		}
+		createdAny = true
 	}
 
-	if s.syncService != nil {
+	if createdAny && s.syncService != nil {
 		if syncErr := s.syncService.SyncSubscription(ctx, sub.ID); syncErr != nil {
-			logger.Warn("initial sync failed for new subscription",
+			logger.Warn("initial sync failed for subscription",
 				zap.Uint("subscription_id", sub.ID),
 				zap.Error(syncErr))
 		}
 	}
 
-	return sub, nil
+	return nil
 }
 
 func (s *SubscriptionService) RenewSubscription(ctx context.Context, telegramID int64, product *database.Product) (*database.Order, error) {

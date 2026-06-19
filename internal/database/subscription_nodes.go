@@ -69,9 +69,10 @@ func (s *Service) UpdateSubscriptionNodeStatus(ctx context.Context, subID, nodeI
 	result := s.db.WithContext(ctx).Model(&SubscriptionNode{}).
 		Where("subscription_id = ? AND node_id = ?", subID, nodeID).
 		Updates(map[string]interface{}{
-			"status":     status,
-			"retry_at":   nil,
-			"last_error": nil,
+			"status":      status,
+			"retry_count": 0,
+			"retry_at":    nil,
+			"last_error":  nil,
 		})
 	if result.Error != nil {
 		return fmt.Errorf("failed to update subscription node status: %w", result.Error)

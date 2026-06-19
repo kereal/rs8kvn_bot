@@ -1166,6 +1166,51 @@ func TestSubscriptionService_GetAllReferralCounts_Delegates(t *testing.T) {
 	assert.Equal(t, want, got)
 }
 
+func TestSubscriptionService_GetOrCreateSubscription_RepairsExistingSubscriptionNodes(t *testing.T) {
+	t.Parallel()
+
+	existing := &database.Subscription{ID: 42, TelegramID: 4242, Username: "repairuser", PlanID: 9, Status: "active"}
+	planNodes := []database.Node{
+		{ID: 1, IsActive: true},
+		{ID: 2, IsActive: true},
+		{ID: 3, IsActive: false},
+	}
+	existingNodes := []database.SubscriptionNode{{SubscriptionID: existing.ID, NodeID: 1, Status: database.SyncStatusActive}}
+
+	upserted := make([]database.SubscriptionNode, 0)
+	db := &testutil.MockDatabaseService{
+		GetByTelegramIDFunc: func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
+			assert.Equal(t, int64(4242), telegramID)
+			return existing, nil
+		},
+		GetNodesByPlanIDFunc: func(ctx context.Context, planID uint) ([]database.Node, error) {
+			assert.Equal(t, existing.PlanID, planID)
+			return planNodes, nil
+		},
+		GetBySubscriptionIDFunc: func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
+			assert.Equal(t, existing.ID, subscriptionID)
+			return existingNodes, nil
+		},
+		UpsertSubscriptionNodeFunc: func(ctx context.Context, sn *database.SubscriptionNode) error {
+			upserted = append(upserted, *sn)
+			return nil
+		},
+	}
+
+	xuiClients := map[uint]interfaces.XUIClient{1: &testutil.MockXUIClient{}}
+	sources := []database.Node{{ID: 1, IsActive: true, Host: "http://x", InboundIDs: "[1]"}}
+	svc := NewSubscriptionService(db, xuiClients, nil, sources, &config.Config{}, "", &webhook.NoopSender{})
+
+	got, err := svc.GetOrCreateSubscription(context.Background(), 4242, "repairuser", "")
+
+	assert.NoError(t, err)
+	assert.Equal(t, existing, got)
+	require.Len(t, upserted, 1)
+	assert.Equal(t, existing.ID, upserted[0].SubscriptionID)
+	assert.Equal(t, uint(2), upserted[0].NodeID)
+	assert.Equal(t, database.SyncStatusPendingAdd, upserted[0].Status)
+}
+
 // ==================== XUIEmail Tests ====================
 
 func TestXUIEmail_RealUsername(t *testing.T) {

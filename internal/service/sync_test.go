@@ -15,13 +15,13 @@ import (
 )
 
 type mockVPNClient struct {
-	createCalled    bool
-	deleteCalled    bool
-	createError     error
-	createSubID     string
-	createUsername  string
-	deleteSubID     string
-	deleteUsername  string
+	createCalled   bool
+	deleteCalled   bool
+	createError    error
+	createSubID    string
+	createUsername string
+	deleteSubID    string
+	deleteUsername string
 }
 
 func (m *mockVPNClient) CreateSubscription(ctx context.Context, uuid, username string) error {
@@ -209,6 +209,45 @@ func TestSyncService_RecalculateNodes_ReactivatePendingRemove(t *testing.T) {
 	assert.Equal(t, database.SyncStatusPendingAdd, rows[0].Status)
 }
 
+func TestSyncService_RecalculateNodes_RemovesStalePendingAdd(t *testing.T) {
+	t.Parallel()
+
+	db, err := testutil.NewTestDatabaseService(t)
+	require.NoError(t, err)
+	ctx := context.Background()
+
+	plan := &database.Plan{Name: "test-plan-recalc-stale", DevicesLimit: 1, TrafficLimit: 1024}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(plan).Error)
+
+	node1 := &database.Node{Name: "stale-1", IsActive: true, Host: "http://st1", APIToken: "t1", InboundIDs: `[1]`}
+	node2 := &database.Node{Name: "stale-2", IsActive: true, Host: "http://st2", APIToken: "t2", InboundIDs: `[1]`}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(node1).Error)
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(node2).Error)
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(&database.PlanNode{PlanID: plan.ID, NodeID: node1.ID}).Error)
+
+	sub := &database.Subscription{
+		TelegramID:     4545,
+		Username:       "staleuser",
+		ClientID:       "c-stale",
+		SubscriptionID: "s-stale",
+		Status:         "active",
+		PlanID:         plan.ID,
+		ExpiresAt:      time.Now().Add(24 * time.Hour),
+	}
+	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
+	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusActive}))
+	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node2.ID, Status: database.SyncStatusPendingAdd}))
+
+	svc := newTestSyncService(t, db, []database.Node{*node1, *node2})
+	require.NoError(t, svc.RecalculateNodes(ctx, sub.ID))
+
+	rows, err := db.GetBySubscriptionID(ctx, sub.ID)
+	require.NoError(t, err)
+	assert.Len(t, rows, 1)
+	assert.Equal(t, node1.ID, rows[0].NodeID)
+	assert.Equal(t, database.SyncStatusActive, rows[0].Status)
+}
+
 func TestSyncService_SyncSubscription_PendingAdd(t *testing.T) {
 	t.Parallel()
 
@@ -289,6 +328,90 @@ func TestSyncService_SyncSubscription_PendingRemove(t *testing.T) {
 	assert.Equal(t, sub.ClientID, mockVPN.deleteSubID)
 }
 
+func TestSyncService_SyncSubscription_UsesFallbackXUIIdentifier(t *testing.T) {
+	t.Parallel()
+
+	db, err := testutil.NewTestDatabaseService(t)
+	require.NoError(t, err)
+	ctx := context.Background()
+
+	plan := &database.Plan{Name: "test-plan-sync-fallback", DevicesLimit: 1, TrafficLimit: 1024}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(plan).Error)
+
+	node1 := &database.Node{Name: "sync-fallback-node", IsActive: true, Host: "http://sf", APIToken: "tf", InboundIDs: `[1]`}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(node1).Error)
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(&database.PlanNode{PlanID: plan.ID, NodeID: node1.ID}).Error)
+
+	sub := &database.Subscription{
+		TelegramID:     777000,
+		Username:       "",
+		ClientID:       "c-syncfallback",
+		SubscriptionID: "s-syncfallback",
+		Status:         "active",
+		PlanID:         plan.ID,
+		ExpiresAt:      time.Now().Add(24 * time.Hour),
+	}
+	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
+	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusPendingAdd}))
+
+	mockVPN := &mockVPNClient{}
+	svc := NewSyncService(db, map[uint]vpn.Client{node1.ID: mockVPN}, []database.Node{*node1})
+
+	require.NoError(t, svc.SyncSubscription(ctx, sub.ID))
+	assert.Equal(t, "tgId_777000", mockVPN.createUsername)
+}
+
+func TestSyncService_SyncPendingNodes_ProcessesOnlyDueNodes(t *testing.T) {
+	t.Parallel()
+
+	db, err := testutil.NewTestDatabaseService(t)
+	require.NoError(t, err)
+	ctx := context.Background()
+
+	plan := &database.Plan{Name: "test-plan-sync-due-only", DevicesLimit: 1, TrafficLimit: 1024}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(plan).Error)
+
+	nodeDue := &database.Node{Name: "sync-due-node", IsActive: true, Host: "http://sd1", APIToken: "t1", InboundIDs: `[1]`}
+	nodeLater := &database.Node{Name: "sync-later-node", IsActive: true, Host: "http://sd2", APIToken: "t2", InboundIDs: `[1]`}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(nodeDue).Error)
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(nodeLater).Error)
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(&database.PlanNode{PlanID: plan.ID, NodeID: nodeDue.ID}).Error)
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(&database.PlanNode{PlanID: plan.ID, NodeID: nodeLater.ID}).Error)
+
+	sub := &database.Subscription{
+		TelegramID:     8888,
+		Username:       "dueuser",
+		ClientID:       "c-due",
+		SubscriptionID: "s-due",
+		Status:         "active",
+		PlanID:         plan.ID,
+		ExpiresAt:      time.Now().Add(24 * time.Hour),
+	}
+	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
+
+	future := time.Now().UTC().Add(10 * time.Minute)
+	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: nodeDue.ID, Status: database.SyncStatusPendingAdd}))
+	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: nodeLater.ID, Status: database.SyncStatusPendingAdd, RetryAt: &future}))
+
+	dueClient := &mockVPNClient{}
+	laterClient := &mockVPNClient{}
+	svc := NewSyncService(db, map[uint]vpn.Client{nodeDue.ID: dueClient, nodeLater.ID: laterClient}, []database.Node{*nodeDue, *nodeLater})
+
+	require.NoError(t, svc.SyncPendingNodes(ctx))
+	assert.True(t, dueClient.createCalled)
+	assert.False(t, laterClient.createCalled)
+
+	rows, err := db.GetBySubscriptionID(ctx, sub.ID)
+	require.NoError(t, err)
+	statusByNode := make(map[uint]database.SubscriptionNode)
+	for _, row := range rows {
+		statusByNode[row.NodeID] = row
+	}
+	assert.Equal(t, database.SyncStatusActive, statusByNode[nodeDue.ID].Status)
+	assert.Equal(t, database.SyncStatusPendingAdd, statusByNode[nodeLater.ID].Status)
+	assert.NotNil(t, statusByNode[nodeLater.ID].RetryAt)
+}
+
 func TestSyncService_handleSyncError_IncrementsRetry(t *testing.T) {
 	t.Parallel()
 
@@ -336,12 +459,12 @@ func TestCalculateRetryAt(t *testing.T) {
 		wantMin    time.Duration
 		wantMax    time.Duration
 	}{
-		{"retry 0 -> 1m", 0, 1*time.Minute, 1*time.Minute + time.Minute},
-		{"retry 1 -> 5m", 1, 5*time.Minute, 5*time.Minute + time.Minute},
-		{"retry 2 -> 15m", 2, 15*time.Minute, 15*time.Minute + time.Minute},
-		{"retry 3 -> 1h", 3, 1*time.Hour, 1*time.Hour + time.Minute},
-		{"retry 4 -> 6h", 4, 6*time.Hour, 6*time.Hour + time.Minute},
-		{"retry 10 -> 6h", 10, 6*time.Hour, 6*time.Hour + time.Minute},
+		{"retry 0 -> 1m", 0, 1 * time.Minute, 1*time.Minute + time.Minute},
+		{"retry 1 -> 5m", 1, 5 * time.Minute, 5*time.Minute + time.Minute},
+		{"retry 2 -> 15m", 2, 15 * time.Minute, 15*time.Minute + time.Minute},
+		{"retry 3 -> 1h", 3, 1 * time.Hour, 1*time.Hour + time.Minute},
+		{"retry 4 -> 6h", 4, 6 * time.Hour, 6*time.Hour + time.Minute},
+		{"retry 10 -> 6h", 10, 6 * time.Hour, 6*time.Hour + time.Minute},
 	}
 
 	for _, tt := range tests {

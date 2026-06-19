@@ -2,18 +2,32 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"github.com/kereal/rs8kvn_bot/internal/bot"
 	"github.com/kereal/rs8kvn_bot/internal/config"
+	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/logger"
 	"github.com/kereal/rs8kvn_bot/internal/testutil"
+	"github.com/kereal/rs8kvn_bot/internal/vpn"
+	"github.com/kereal/rs8kvn_bot/internal/xui"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+type stubVPNClient struct{}
+
+func (s *stubVPNClient) CreateSubscription(ctx context.Context, uuid, username string) error {
+	return nil
+}
+func (s *stubVPNClient) DeleteSubscription(ctx context.Context, uuid, username string) error {
+	return nil
+}
+func (s *stubVPNClient) Close() error { return nil }
 
 func TestMain(m *testing.M) {
 	_, _ = logger.Init("", "error")
@@ -41,6 +55,68 @@ func TestGetVersion(t *testing.T) {
 			t.Log("buildTime is empty (expected in test environment)")
 		}
 	})
+}
+
+func TestBuildRuntimeNodeClients_FiltersInactiveAndInitializes3xUIOnly(t *testing.T) {
+	originalNewXUIClient := newXUIClient
+	originalNewVPNClient := newVPNClient
+	defer func() {
+		newXUIClient = originalNewXUIClient
+		newVPNClient = originalNewVPNClient
+	}()
+
+	xuiCalls := make([]string, 0)
+	vpnCalls := make([]vpn.Config, 0)
+	newXUIClient = func(host, apiToken string) (*xui.Client, error) {
+		xuiCalls = append(xuiCalls, host+"|"+apiToken)
+		return &xui.Client{}, nil
+	}
+	newVPNClient = func(cfg vpn.Config) (vpn.Client, error) {
+		vpnCalls = append(vpnCalls, cfg)
+		return &stubVPNClient{}, nil
+	}
+
+	nodes := []database.Node{
+		{ID: 1, Type: database.NodeType3xUI, IsActive: true, Host: "http://active-xui", APIToken: "token-a", InboundIDs: `[1]`},
+		{ID: 2, Type: database.NodeTypeProxman, IsActive: false, Host: "http://inactive-prox", APIToken: "token-b", InboundIDs: `[2]`},
+	}
+
+	runtimeNodes, xuiClients, vpnClients, legacyXUIClient, err := buildRuntimeNodeClients(nodes)
+
+	require.NoError(t, err)
+	require.Len(t, runtimeNodes, 1)
+	assert.Equal(t, uint(1), runtimeNodes[0].ID)
+	assert.Len(t, xuiCalls, 1)
+	assert.Len(t, vpnCalls, 1)
+	assert.Len(t, xuiClients, 1)
+	assert.Len(t, vpnClients, 1)
+	assert.NotNil(t, legacyXUIClient)
+	assert.Equal(t, database.NodeType3xUI, vpnCalls[0].Type)
+	assert.NotNil(t, vpnCalls[0].XUIClient)
+}
+
+func TestBuildRuntimeNodeClients_RejectsUnsupportedActiveNode(t *testing.T) {
+	originalNewXUIClient := newXUIClient
+	originalNewVPNClient := newVPNClient
+	defer func() {
+		newXUIClient = originalNewXUIClient
+		newVPNClient = originalNewVPNClient
+	}()
+
+	newXUIClient = func(host, apiToken string) (*xui.Client, error) {
+		return &xui.Client{}, nil
+	}
+	newVPNClient = func(cfg vpn.Config) (vpn.Client, error) {
+		return nil, fmt.Errorf("proxman nodes are not supported yet")
+	}
+
+	nodes := []database.Node{{ID: 7, Type: database.NodeTypeProxman, IsActive: true, Host: "http://prox", APIToken: "token", InboundIDs: `[1]`}}
+
+	_, _, _, _, err := buildRuntimeNodeClients(nodes)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "init vpn client for node 7")
+	assert.Contains(t, err.Error(), "proxman nodes are not supported yet")
 }
 
 func TestHandleUpdateSafely(t *testing.T) {
