@@ -704,16 +704,19 @@ func (s *SubscriptionService) GetOrCreateSubscription(ctx context.Context, teleg
 }
 
 // ensureSubscriptionNodes creates pending_add records for plan nodes missing from subscription_nodes, then triggers sync.
+// This is the single entry point for provisioning VPN node access when a subscription is created or changed.
 func (s *SubscriptionService) ensureSubscriptionNodes(ctx context.Context, sub *database.Subscription) error {
 	if sub == nil {
 		return fmt.Errorf("nil subscription")
 	}
 
+	// 1. Load active nodes linked to the subscription's plan
 	nodes, err := s.db.GetNodesByPlanID(ctx, sub.PlanID)
 	if err != nil {
 		return fmt.Errorf("load plan nodes: %w", err)
 	}
 
+	// 2. Load existing subscription_nodes to avoid duplicates
 	existing, err := s.db.GetBySubscriptionID(ctx, sub.ID)
 	if err != nil {
 		return fmt.Errorf("load subscription nodes: %w", err)
@@ -724,6 +727,7 @@ func (s *SubscriptionService) ensureSubscriptionNodes(ctx context.Context, sub *
 		existingByNodeID[sn.NodeID] = sn
 	}
 
+	// 3. Create pending_add for each active plan node not yet in subscription_nodes
 	createdAny := false
 	for _, node := range nodes {
 		if !node.IsActive {
@@ -742,6 +746,7 @@ func (s *SubscriptionService) ensureSubscriptionNodes(ctx context.Context, sub *
 		createdAny = true
 	}
 
+	// 4. Best-effort sync: trigger immediate VPN provisioning
 	if createdAny && s.syncService != nil {
 		if syncErr := s.syncService.SyncSubscription(ctx, sub.ID); syncErr != nil {
 			logger.Warn("initial sync failed for subscription",
