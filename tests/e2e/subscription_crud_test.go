@@ -310,25 +310,11 @@ func TestE2E_Subscription_ReplacesOldActive(t *testing.T) {
 	}
 	require.NoError(t, env.db.CreateSubscription(ctx, oldSub, ""))
 
+	// Creating another subscription with the same telegram_id should fail
+	// due to UNIQUE constraint
 	result, err := env.subService.Create(ctx, env.chatID, env.username, "")
-	require.NoError(t, err)
-	require.NotNil(t, result)
-
-	allSubs, err := env.db.GetAllSubscriptions(ctx)
-	require.NoError(t, err)
-
-	activeCount := 0
-	revokedCount := 0
-	for _, s := range allSubs {
-		switch s.Status {
-		case "active":
-			activeCount++
-		case "revoked":
-			revokedCount++
-		}
-	}
-	assert.Equal(t, 1, activeCount, "Should have exactly one active subscription")
-	assert.Equal(t, 1, revokedCount, "Old subscription should be revoked")
+	assert.Error(t, err, "Should fail due to UNIQUE constraint on telegram_id")
+	assert.Nil(t, result)
 }
 
 func TestE2E_CreateSubscription_RevokesOnlyActive(t *testing.T) {
@@ -350,6 +336,8 @@ func TestE2E_CreateSubscription_RevokesOnlyActive(t *testing.T) {
 	resetMockBotAPI(env.botAPI)
 	env.xui.AddClientWithIDCalled = false
 
+	// Creating another subscription with the same telegram_id should fail
+	// due to UNIQUE constraint
 	env.handler.HandleCallback(ctx, tgbotapi.Update{
 		CallbackQuery: &tgbotapi.CallbackQuery{
 			From: &tgbotapi.User{
@@ -367,13 +355,9 @@ func TestE2E_CreateSubscription_RevokesOnlyActive(t *testing.T) {
 	allSubs, err := env.db.GetAllSubscriptions(ctx)
 	require.NoError(t, err)
 
-	expiredCount := 0
-	for _, s := range allSubs {
-		if s.Status == "expired" {
-			expiredCount++
-		}
-	}
-	assert.Equal(t, 1, expiredCount, "Expired subscription should not be revoked")
+	// Only the original expired subscription should exist
+	assert.Equal(t, 1, len(allSubs), "Should have only one subscription")
+	assert.Equal(t, "expired", allSubs[0].Status)
 }
 
 func TestE2E_Service_Create_XUIFailure_NoDBRecord(t *testing.T) {
@@ -430,12 +414,9 @@ func TestE2E_Service_Create_RollbackXUIOnDBError(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "active", sub1.Status)
 
+	// Second creation should fail due to UNIQUE constraint on telegram_id
 	_, err = env.subService.Create(ctx, env.chatID, env.username, "")
-	require.NoError(t, err)
-
-	sub2, err := env.db.GetByTelegramID(ctx, env.chatID)
-	require.NoError(t, err)
-	assert.Equal(t, "active", sub2.Status)
+	assert.Error(t, err, "Should fail due to UNIQUE constraint on telegram_id")
 }
 
 func TestE2E_Service_Create_RollbackFailure_ReturnsError(t *testing.T) {
@@ -460,6 +441,7 @@ func TestE2E_Service_Create_RollbackFailure_ReturnsError(t *testing.T) {
 	_, err := env.subService.Create(ctx, env.chatID, env.username, "")
 	require.NoError(t, err)
 
+	// Second creation should fail due to UNIQUE constraint on telegram_id
 	_, err = env.subService.Create(ctx, env.chatID, env.username, "")
-	require.NoError(t, err, "Second creation should succeed (rollback not triggered when DB succeeds)")
+	assert.Error(t, err, "Should fail due to UNIQUE constraint on telegram_id")
 }

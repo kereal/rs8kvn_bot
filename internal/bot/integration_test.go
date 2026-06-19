@@ -274,6 +274,8 @@ func TestSubscriptionFlow_RevokeOldSubscription(t *testing.T) {
 		t.Fatalf("Failed to generate client ID: %v", err)
 	}
 
+	// Creating another subscription with the same telegram_id should fail
+	// due to UNIQUE constraint
 	err = f.DB.CreateSubscription(ctx, &database.Subscription{
 		TelegramID:     f.UserChatID,
 		Username:       "testuser2",
@@ -282,8 +284,8 @@ func TestSubscriptionFlow_RevokeOldSubscription(t *testing.T) {
 		ExpiresAt:      time.Now().Add(30 * 24 * time.Hour),
 		Status:         "active",
 	}, "")
-	if err != nil {
-		t.Fatalf("Failed to create new subscription: %v", err)
+	if err == nil {
+		t.Fatal("Expected error due to UNIQUE constraint on telegram_id")
 	}
 
 	subs, err := f.DB.GetLatestSubscriptions(ctx, 10)

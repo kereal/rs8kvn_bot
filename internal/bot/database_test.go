@@ -2,6 +2,7 @@ package bot
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -98,7 +99,7 @@ func TestHandleAdminStats(t *testing.T) {
 	ctx := context.Background()
 
 	for i := 0; i < 5; i++ {
-		sub := testutil.CreateTestSubscription(int64(100000000+i), "user", "active", time.Now().Add(24*time.Hour))
+		sub := testutil.CreateTestSubscription(int64(100000000+i), fmt.Sprintf("user%d", i), "active", time.Now().Add(24*time.Hour))
 		require.NoError(t, db.CreateSubscription(ctx, sub, ""), "Failed to create subscription")
 	}
 
@@ -231,7 +232,7 @@ func TestGetLatestSubscriptions(t *testing.T) {
 	ctx := context.Background()
 
 	for i := 0; i < 15; i++ {
-		sub := testutil.CreateTestSubscription(int64(100000000+i), "user", "active", time.Now().Add(24*time.Hour))
+		sub := testutil.CreateTestSubscription(int64(100000000+i), fmt.Sprintf("user%d", i), "active", time.Now().Add(24*time.Hour))
 		require.NoError(t, db.CreateSubscription(ctx, sub, ""), "Failed to create subscription")
 		time.Sleep(time.Millisecond * 2)
 	}
@@ -285,7 +286,6 @@ func TestGetAllTelegramIDs(t *testing.T) {
 		{TelegramID: 111111111, Username: "user1", ClientID: "client1", Status: "active", ExpiresAt: time.Now().Add(24 * time.Hour)},
 		{TelegramID: 222222222, Username: "user2", ClientID: "client2", Status: "active", ExpiresAt: time.Now().Add(24 * time.Hour)},
 		{TelegramID: 333333333, Username: "user3", ClientID: "client3", Status: "active", ExpiresAt: time.Now().Add(24 * time.Hour)},
-		{TelegramID: 111111111, Username: "user1_alt", ClientID: "client4", Status: "active", ExpiresAt: time.Now().Add(24 * time.Hour)},
 	}
 
 	for _, sub := range subs {

@@ -26,7 +26,9 @@ const (
 // Subscription represents a user's VPN subscription.
 type Subscription struct {
 	ID             uint      `gorm:"primaryKey"`
-	TelegramID     int64     `gorm:"uniqueIndex"`
+	// TelegramID — уникальный для привязанных пользователей (UNIQUE WHERE telegram_id != 0 в миграции 023).
+	// Trial подписки используют telegram_id=0 и не ограничены UNIQUE.
+	TelegramID     int64     `gorm:"index"`
 	Username       string    `gorm:"size:255;index"`
 	ClientID       string    `gorm:"size:255;uniqueIndex"`
 	SubscriptionID string    `gorm:"size:255;index"`
