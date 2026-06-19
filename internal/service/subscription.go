@@ -106,14 +106,11 @@ func (s *SubscriptionService) Create(ctx context.Context, telegramID int64, user
 		return nil, fmt.Errorf("generate sub id: %w", err)
 	}
 
-	expiryTime := time.Now().AddDate(0, 0, config.SubscriptionResetDay)
-
 	sub := &database.Subscription{
 		TelegramID:     telegramID,
 		Username:       username,
 		ClientID:       clientID,
 		SubscriptionID: subID,
-		ExpiresAt:      expiryTime,
 		PlanID:         plan.ID,
 		Status:         "active",
 	}
@@ -286,7 +283,7 @@ func (s *SubscriptionService) GetWithTraffic(ctx context.Context, telegramID int
 			LimitGB:            0,
 			PlanName:           planName,
 			CreatedAtFormatted: utils.FormatDateRu(sub.CreatedAt),
-			ExpiresAtFormatted: utils.FormatDateRu(sub.ExpiresAt),
+		ExpiresAtFormatted: formatExpiresAt(sub.ExpiresAt),
 		}, nil
 	}
 
@@ -336,10 +333,10 @@ func (s *SubscriptionService) GetWithTraffic(ctx context.Context, telegramID int
 
 	// Calculate reset time
 	var resetTime time.Time
-	if sub.ExpiresAt.IsZero() {
+	if sub.ExpiresAt == nil {
 		resetTime = sub.CreatedAt.AddDate(0, 0, config.SubscriptionResetDay)
 	} else {
-		resetTime = sub.ExpiresAt
+		resetTime = *sub.ExpiresAt
 	}
 	daysUntilReset := utils.DaysUntilReset(time.Now(), resetTime)
 
@@ -362,12 +359,20 @@ func (s *SubscriptionService) GetWithTraffic(ctx context.Context, telegramID int
 		DaysUntilReset:     daysUntilReset,
 		ResetInfo:          resetInfo,
 		CreatedAtFormatted: utils.FormatDateRu(sub.CreatedAt),
-		ExpiresAtFormatted: utils.FormatDateRu(sub.ExpiresAt),
+		ExpiresAtFormatted: formatExpiresAt(sub.ExpiresAt),
 		PlanName:           planName,
 	}, nil
 }
 
 // daysUntilReset calculates the number of days until the next traffic reset.
+
+// formatExpiresAt formats ExpiresAt for display. NULL = "бессрочно".
+func formatExpiresAt(t *time.Time) string {
+	if t == nil {
+		return "бессрочно"
+	}
+	return utils.FormatDateRu(*t)
+}
 
 // TrialCreateResult holds the outcome of a trial creation.
 type TrialCreateResult struct {
@@ -767,13 +772,13 @@ func (s *SubscriptionService) RenewSubscription(ctx context.Context, telegramID 
 
 	now := time.Now().UTC().Truncate(time.Minute)
 	newExpiry := now
-	if sub.ExpiresAt.After(now) {
-		newExpiry = sub.ExpiresAt
+	if sub.ExpiresAt != nil && sub.ExpiresAt.After(now) {
+		newExpiry = *sub.ExpiresAt
 	}
 	newExpiry = newExpiry.AddDate(0, 0, product.DurationDays)
 
 	sub.PlanID = product.PlanID
-	sub.ExpiresAt = newExpiry
+	sub.ExpiresAt = &newExpiry
 	if err := s.db.UpdateSubscription(ctx, sub); err != nil {
 		return nil, fmt.Errorf("update subscription: %w", err)
 	}

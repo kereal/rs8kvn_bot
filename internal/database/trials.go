@@ -38,7 +38,7 @@ func (s *Service) CreateTrialSubscription(ctx context.Context, inviteCode, subsc
 		SubscriptionID: subscriptionID,
 		ClientID:       clientID,
 		InviteCode:     inviteCode,
-		ExpiresAt:      expiryTime,
+		ExpiresAt:      &expiryTime,
 		PlanID:         planID,
 		Status:         "active",
 	}

@@ -199,14 +199,14 @@ func TestSubscription_IsActive_StatusCases(t *testing.T) {
 	tests := []struct {
 		name       string
 		status     string
-		expiryTime time.Time
+		expiryTime *time.Time
 		want       bool
 	}{
-		{"active + future expiry", "active", future, true},
-		{"active + past expiry", "active", past, false},
-		{"active + zero expiry", "active", time.Time{}, true},
-		{"revoked + future expiry", "revoked", future, false},
-		{"expired + future expiry", "expired", future, false},
+		{"active + future expiry", "active", ptrTime(future), true},
+		{"active + past expiry", "active", ptrTime(past), false},
+		{"active + nil expiry", "active", nil, true},
+		{"revoked + future expiry", "revoked", ptrTime(future), false},
+		{"expired + future expiry", "expired", ptrTime(future), false},
 	}
 
 	for _, tt := range tests {

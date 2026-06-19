@@ -25,6 +25,8 @@ import (
 	"gorm.io/gorm"
 )
 
+func ptrTime(t time.Time) *time.Time { return &t }
+
 func makeTestSubService(mockDB *testutil.MockDatabaseService) (*config.Config, *service.SubscriptionService, *testutil.MockXUIClient) {
 	mockXUI := testutil.NewMockXUIClient()
 	cfg := &config.Config{
@@ -341,7 +343,7 @@ func TestGetExistingTrialFromCookie_Expired(t *testing.T) {
 			SubscriptionID: subscriptionID,
 			PlanID:         1,
 			TelegramID:     0,
-			ExpiresAt:      time.Now().Add(-1 * time.Hour), // Expired
+			ExpiresAt:      ptrTime(time.Now().Add(-1 * time.Hour)), // Expired
 		}, nil
 	}
 
@@ -370,7 +372,7 @@ func TestGetExistingTrialFromCookie_Valid(t *testing.T) {
 			SubscriptionID: subscriptionID,
 			PlanID:         1,
 			TelegramID:     0,
-			ExpiresAt:      time.Now().Add(2 * time.Hour),
+			ExpiresAt:      ptrTime(time.Now().Add(2 * time.Hour)),
 		}, nil
 	}
 	mockDB.GetPlanByIDFunc = func(ctx context.Context, planID uint) (*database.Plan, error) {
@@ -534,7 +536,7 @@ func TestHandleInvite_ExistingTrialFromCookie(t *testing.T) {
 			SubscriptionID: "existing-sub-id",
 			PlanID:         1,
 			TelegramID:     0,
-			ExpiresAt:      time.Now().Add(2 * time.Hour),
+			ExpiresAt:      ptrTime(time.Now().Add(2 * time.Hour)),
 		}, nil
 	}
 	mockDB.GetPlanByIDFunc = func(ctx context.Context, planID uint) (*database.Plan, error) {

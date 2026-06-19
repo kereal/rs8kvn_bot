@@ -80,7 +80,7 @@ func HandleSubscription(ctx context.Context, db interfaces.DatabaseService, subS
 	logger.Debug("Subscription loaded from database",
 		zap.Uint("sub_pk", subFull.Subscription.ID),
 		zap.String("status", subFull.Subscription.Status),
-		zap.Time("expires_at", subFull.Subscription.ExpiresAt),
+		zap.Timep("expires_at", subFull.Subscription.ExpiresAt),
 		zap.Int64("plan_traffic_limit", subFull.Plan.TrafficLimit),
 		zap.Int("nodes_count", len(subFull.Nodes)),
 	)

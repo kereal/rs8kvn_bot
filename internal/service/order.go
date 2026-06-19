@@ -44,8 +44,8 @@ func (o *OrderService) ActivateProduct(ctx context.Context, telegramID int64, pr
 
 	now := time.Now().UTC().Truncate(time.Minute)
 	maxExpiry := now
-	if sub.ExpiresAt.After(now) {
-		maxExpiry = sub.ExpiresAt
+	if sub.ExpiresAt != nil && sub.ExpiresAt.After(now) {
+		maxExpiry = *sub.ExpiresAt
 	}
 	newExpiry := maxExpiry.AddDate(0, 0, product.DurationDays)
 
@@ -73,7 +73,7 @@ func (o *OrderService) ActivateProduct(ctx context.Context, telegramID int64, pr
 
 	sub.PlanID = product.PlanID
 	sub.ProductID = product.ID
-	sub.ExpiresAt = newExpiry
+	sub.ExpiresAt = &newExpiry
 	sub.PricePaidCents = product.PriceCents
 	sub.Currency = product.Currency
 	sub.StartedAt = now

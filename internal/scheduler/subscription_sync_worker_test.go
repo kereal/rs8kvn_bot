@@ -47,7 +47,7 @@ func TestSubscriptionSyncWorker_Run_CallsSyncPendingNodes(t *testing.T) {
 		SubscriptionID: "s-syncworker",
 		Status:         "active",
 		PlanID:         plan.ID,
-		ExpiresAt:      time.Now().Add(24 * time.Hour),
+		ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
 	}
 	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node.ID, Status: database.SyncStatusPendingAdd}))
