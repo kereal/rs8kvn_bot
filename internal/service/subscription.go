@@ -825,21 +825,18 @@ func (s *SubscriptionService) ChangePlan(ctx context.Context, telegramID int64, 
 }
 
 func (s *SubscriptionService) ExpireSubscription(ctx context.Context, telegramID int64) error {
-	freePlan, err := s.db.GetPlanByName(ctx, database.FreePlanName)
-	if err != nil {
-		return fmt.Errorf("resolve free plan: %w", err)
-	}
-
 	sub, err := s.db.GetByTelegramID(ctx, telegramID)
 	if err != nil {
 		return fmt.Errorf("get subscription: %w", err)
 	}
 
-	sub.PlanID = freePlan.ID
-	sub.ExpiresAt = time.Time{}
-	sub.Status = "active"
-	if err := s.db.UpdateSubscription(ctx, sub); err != nil {
-		return fmt.Errorf("update subscription: %w", err)
+	freePlan, err := s.db.GetPlanByName(ctx, database.FreePlanName)
+	if err != nil {
+		return fmt.Errorf("resolve free plan: %w", err)
+	}
+
+	if err := s.db.ExpireSubscription(ctx, sub.ID, freePlan.ID); err != nil {
+		return fmt.Errorf("expire subscription: %w", err)
 	}
 
 	if s.syncService != nil {

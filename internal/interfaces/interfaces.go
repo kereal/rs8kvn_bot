@@ -46,6 +46,7 @@ type SubscriptionRepository interface {
 	GetSubscriptionStatus(ctx context.Context, subscriptionID string) (string, time.Time, error)
 	UpdateSubscriptionDevices(ctx context.Context, id uint, devicesJSON string) error
 	UpdateSubscriptionIPs(ctx context.Context, id uint, ipsJSON string) error
+	ExpireSubscription(ctx context.Context, id uint, freePlanID uint) error
 }
 
 type TrialRepository interface {

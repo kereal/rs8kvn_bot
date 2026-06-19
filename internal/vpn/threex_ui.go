@@ -21,7 +21,7 @@ func NewThreeXUIClient(client interfaces.XUIClient, inboundIDs []int) *ThreeXUIC
 
 // CreateSubscription adds a client on the 3x-ui panel.
 func (c *ThreeXUIClient) CreateSubscription(ctx context.Context, uuid, username string) error {
-	_, err := c.client.AddClientWithID(ctx, c.inboundIDs, username, uuid, "", 0, time.Time{}, 0)
+	_, err := c.client.AddClientWithID(ctx, c.inboundIDs, username, uuid, uuid, 0, time.Time{}, 0)
 	if err != nil {
 		return fmt.Errorf("3x-ui create subscription: %w", err)
 	}
