@@ -24,6 +24,13 @@ const (
 )
 
 // Subscription represents a user's VPN subscription.
+//
+// Telegram ID conventions:
+//   - Positive values: привязанные пользователи (уникальный constraint)
+//   - Negative values: непривязанные trial подписки (генерируются через generateTrialTelegramID())
+//   - 0: не используется (историческая совместимость)
+//
+// См. generateTrialTelegramID() в trials.go для генерации уникальных отрицательных ID.
 type Subscription struct {
 	ID             uint      `gorm:"primaryKey"`
 	// TelegramID — уникальный для каждой подписки. Trial подписки используют отрицательные ID.
