@@ -1268,7 +1268,7 @@ func TestService_CleanupExpiredTrials(t *testing.T) {
 
 	// Create old trial subscription
 	oldTrial := &Subscription{
-		TelegramID:     0,
+		TelegramID:     -1,
 		ClientID:       "old-trial-client",
 		SubscriptionID: "old-trial-sub",
 		PlanID:         trialPlan.ID,
@@ -1319,7 +1319,7 @@ func TestService_CleanupExpiredTrials_UsesSubInboundID(t *testing.T) {
 
 	// Create old trial on inbound 5
 	oldTrial := &Subscription{
-		TelegramID:     0,
+		TelegramID:     -2,
 		ClientID:       "multi-inbound-client",
 		SubscriptionID: "multi-inbound-sub",
 		PlanID:         1,
@@ -1356,7 +1356,7 @@ func TestService_CreateTrialSubscription_Success(t *testing.T) {
 	assert.Equal(t, "sub-trial-abc", sub.SubscriptionID)
 	assert.Equal(t, "client-xyz", sub.ClientID)
 	assert.Equal(t, uint(1), sub.PlanID, "Should be marked as trial")
-	assert.Equal(t, int64(0), sub.TelegramID, "Unbound trial should have telegram_id = 0")
+	assert.Less(t, sub.TelegramID, int64(0), "Unbound trial should have negative telegram_id")
 	assert.Equal(t, "INVITE123", sub.InviteCode)
 }
 
@@ -1377,11 +1377,11 @@ func TestService_CreateTrialSubscription_AllowsSameSubID(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	// With UNIQUE constraint on telegram_id, we can only have one trial with telegram_id=0
-	// Verify the trial was created successfully
-	sub, err := svc.GetByTelegramID(ctx, 0)
+	// Verify the trial was created with a unique negative telegram_id
+	sub, err := svc.GetByID(ctx, 1)
 	require.NoError(t, err)
 	assert.Equal(t, "sub-same", sub.SubscriptionID)
+	assert.Less(t, sub.TelegramID, int64(0), "Trial should have negative telegram_id")
 }
 
 func TestService_GetSubscriptionBySubscriptionID_Success(t *testing.T) {
@@ -1641,7 +1641,7 @@ func TestService_CleanupExpiredTrials_RecordsError(t *testing.T) {
 	require.NotNil(t, plan)
 
 	oldTrial := &Subscription{
-		TelegramID:     0,
+		TelegramID:     -3,
 		ClientID:       "old-trial-client",
 		SubscriptionID: "old-trial-sub",
 		PlanID:         plan.ID,

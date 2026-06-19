@@ -164,7 +164,7 @@ func (m *MockDatabaseService) CreateSubscription(ctx context.Context, sub *datab
 	if m.Subscriptions == nil {
 		m.Subscriptions = make(map[int64]*database.Subscription)
 	}
-	if sub.TelegramID != 0 {
+	if sub.TelegramID > 0 {
 		stored := *sub
 		m.Subscriptions[sub.TelegramID] = &stored
 	}
@@ -278,7 +278,7 @@ func (m *MockDatabaseService) UpdateSubscription(ctx context.Context, sub *datab
 	if m.Subscriptions == nil {
 		m.Subscriptions = make(map[int64]*database.Subscription)
 	}
-	if sub.TelegramID != 0 {
+	if sub.TelegramID > 0 {
 		m.Subscriptions[sub.TelegramID] = sub
 	}
 	return nil

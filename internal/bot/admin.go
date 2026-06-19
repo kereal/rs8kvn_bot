@@ -142,7 +142,7 @@ func (h *Handler) HandleDel(ctx context.Context, update tgbotapi.Update) error {
 	}
 
 	// Invalidate cache only after successful deletion
-	if deleted.TelegramID != 0 {
+	if deleted.TelegramID > 0 {
 		h.invalidateCache(ctx, deleted.TelegramID)
 	}
 

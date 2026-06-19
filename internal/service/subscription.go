@@ -559,7 +559,7 @@ func (s *SubscriptionService) ReconcileOrphanedClients(ctx context.Context) (int
 	removed := 0
 	for _, sub := range activeSubs {
 		var xuiEmail string
-		if sub.TelegramID == 0 {
+		if sub.TelegramID < 0 {
 			if sub.SubscriptionID == "" {
 				continue
 			}
@@ -609,7 +609,7 @@ func (s *SubscriptionService) ReconcileOrphanedClients(ctx context.Context) (int
 					zap.Int64("telegram_id", sub.TelegramID),
 					zap.String("username", sub.Username),
 					zap.String("subscription_id", sub.SubscriptionID))
-				if s.invalidate != nil && sub.TelegramID != 0 {
+				if s.invalidate != nil && sub.TelegramID > 0 {
 					s.invalidate(sub.TelegramID)
 				}
 				metrics.OrphanedClientsRemovedTotal.Inc()
