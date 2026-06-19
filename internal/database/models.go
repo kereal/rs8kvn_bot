@@ -26,9 +26,9 @@ const (
 // Subscription represents a user's VPN subscription.
 type Subscription struct {
 	ID             uint      `gorm:"primaryKey"`
-	TelegramID     int64     `gorm:"index"`
+	TelegramID     int64     `gorm:"uniqueIndex"`
 	Username       string    `gorm:"size:255;index"`
-	ClientID       string    `gorm:"size:255"`
+	ClientID       string    `gorm:"size:255;uniqueIndex"`
 	SubscriptionID string    `gorm:"size:255;index"`
 	ExpiresAt      time.Time `gorm:"index:idx_expiry"`
 	Status         string    `gorm:"default:active;size:50;index"`
@@ -78,6 +78,7 @@ type Plan struct {
 	ID           uint      `gorm:"primaryKey;column:id"`
 	Name         string    `gorm:"size:50;uniqueIndex;column:name"`
 	DevicesLimit int       `gorm:"default:1;column:devices_limit"`
+	// TrafficLimit — лимит трафика в байтах. 0 = безлимит.
 	TrafficLimit int64     `gorm:"default:0;column:traffic_limit"`
 	CreatedAt    time.Time `gorm:"autoCreateTime;column:created_at"`
 	UpdatedAt    time.Time `gorm:"autoUpdateTime;column:updated_at"`
