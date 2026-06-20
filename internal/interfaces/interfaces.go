@@ -161,14 +161,22 @@ type DatabaseService interface {
 	Transaction(ctx context.Context, fn func(*gorm.DB) error) error
 }
 
-type XUIClient interface {
+type XUIClientReader interface {
 	Ping(ctx context.Context) error
+	GetClientTraffic(ctx context.Context, email string) (*xui.ClientTraffic, error)
+}
+
+type XUIClientWriter interface {
 	AddClient(ctx context.Context, inboundIDs []int, email string, trafficBytes int64, expiryTime time.Time) (*xui.ClientConfig, error)
 	AddClientWithID(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error)
 	UpdateClient(ctx context.Context, inboundIDs []int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, tgID int64, comment string) error
 	DeleteClient(ctx context.Context, email string) error
-	GetClientTraffic(ctx context.Context, email string) (*xui.ClientTraffic, error)
 	Close() error
+}
+
+type XUIClient interface {
+	XUIClientReader
+	XUIClientWriter
 }
 
 type BotAPI interface {
@@ -176,7 +184,4 @@ type BotAPI interface {
 	Request(c tgbotapi.Chattable) (*tgbotapi.APIResponse, error)
 }
 
-type VPNClient interface {
-	CreateSubscription(ctx context.Context, uuid, username string) error
-	DeleteSubscription(ctx context.Context, uuid, username string) error
-}
+// vpn.Client is defined in internal/vpn/client.go

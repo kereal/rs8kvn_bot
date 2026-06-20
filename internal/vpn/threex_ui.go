@@ -9,7 +9,7 @@ import (
 
 var _ Client = (*ThreeXUIClient)(nil)
 
-// ThreeXUIClient adapts an xui.Client to the VPNClient interface.
+// ThreeXUIClient adapts an xui.Client to the Client interface.
 type ThreeXUIClient struct {
 	client      interfaces.XUIClient
 	inboundIDs  []int

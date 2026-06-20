@@ -11,6 +11,7 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/bot"
 	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
+	"github.com/kereal/rs8kvn_bot/internal/interfaces"
 	"github.com/kereal/rs8kvn_bot/internal/logger"
 	"github.com/kereal/rs8kvn_bot/internal/testutil"
 	"github.com/kereal/rs8kvn_bot/internal/vpn"
@@ -58,22 +59,17 @@ func TestGetVersion(t *testing.T) {
 }
 
 func TestBuildRuntimeNodeClients_FiltersInactiveAndInitializes3xUIOnly(t *testing.T) {
-	originalNewXUIClient := newXUIClient
-	originalNewVPNClient := newVPNClient
-	defer func() {
-		newXUIClient = originalNewXUIClient
-		newVPNClient = originalNewVPNClient
-	}()
-
 	xuiCalls := make([]string, 0)
 	vpnCalls := make([]vpn.Config, 0)
-	newXUIClient = func(host, apiToken string) (*xui.Client, error) {
-		xuiCalls = append(xuiCalls, host+"|"+apiToken)
-		return &xui.Client{}, nil
-	}
-	newVPNClient = func(cfg vpn.Config) (vpn.Client, error) {
-		vpnCalls = append(vpnCalls, cfg)
-		return &stubVPNClient{}, nil
+	opts := &runOptions{
+		xuiClientFn: func(host, apiToken string) (interfaces.XUIClient, error) {
+			xuiCalls = append(xuiCalls, host+"|"+apiToken)
+			return &xui.Client{}, nil
+		},
+		vpnClientFn: func(cfg vpn.Config) (vpn.Client, error) {
+			vpnCalls = append(vpnCalls, cfg)
+			return &stubVPNClient{}, nil
+		},
 	}
 
 	nodes := []database.Node{
@@ -81,7 +77,7 @@ func TestBuildRuntimeNodeClients_FiltersInactiveAndInitializes3xUIOnly(t *testin
 		{ID: 2, Type: database.NodeTypeProxman, IsActive: false, Host: "http://inactive-prox", APIToken: "token-b", InboundIDs: `[2]`},
 	}
 
-	runtimeNodes, xuiClients, vpnClients, legacyXUIClient, err := buildRuntimeNodeClients(nodes)
+	runtimeNodes, xuiClients, vpnClients, legacyXUIClient, err := buildRuntimeNodeClients(nodes, opts)
 
 	require.NoError(t, err)
 	require.Len(t, runtimeNodes, 1)
@@ -96,23 +92,18 @@ func TestBuildRuntimeNodeClients_FiltersInactiveAndInitializes3xUIOnly(t *testin
 }
 
 func TestBuildRuntimeNodeClients_RejectsUnsupportedActiveNode(t *testing.T) {
-	originalNewXUIClient := newXUIClient
-	originalNewVPNClient := newVPNClient
-	defer func() {
-		newXUIClient = originalNewXUIClient
-		newVPNClient = originalNewVPNClient
-	}()
-
-	newXUIClient = func(host, apiToken string) (*xui.Client, error) {
-		return &xui.Client{}, nil
-	}
-	newVPNClient = func(cfg vpn.Config) (vpn.Client, error) {
-		return nil, fmt.Errorf("proxman nodes are not supported yet")
+	opts := &runOptions{
+		xuiClientFn: func(host, apiToken string) (interfaces.XUIClient, error) {
+			return &xui.Client{}, nil
+		},
+		vpnClientFn: func(cfg vpn.Config) (vpn.Client, error) {
+			return nil, fmt.Errorf("proxman nodes are not supported yet")
+		},
 	}
 
 	nodes := []database.Node{{ID: 7, Type: database.NodeTypeProxman, IsActive: true, Host: "http://prox", APIToken: "token", InboundIDs: `[1]`}}
 
-	_, _, _, _, err := buildRuntimeNodeClients(nodes)
+	_, _, _, _, err := buildRuntimeNodeClients(nodes, opts)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "init vpn client for node 7")

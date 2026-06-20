@@ -39,12 +39,38 @@ var (
 	buildTime = "unknown"
 )
 
-var (
-	newXUIClient = xui.NewClient
-	newVPNClient = vpn.NewClient
-)
+// Option is a functional option for Run.
+type Option func(*runOptions)
 
-func buildRuntimeNodeClients(nodes []database.Node) ([]database.Node, map[uint]interfaces.XUIClient, map[uint]vpn.Client, interfaces.XUIClient, error) {
+type runOptions struct {
+	xuiClientFn  func(host, apiToken string) (interfaces.XUIClient, error)
+	vpnClientFn  func(cfg vpn.Config) (vpn.Client, error)
+}
+
+// WithXUIClient sets a custom XUI client factory (for testing).
+func WithXUIClient(fn func(host, apiToken string) (interfaces.XUIClient, error)) Option {
+	return func(o *runOptions) { o.xuiClientFn = fn }
+}
+
+// WithVPNClient sets a custom VPN client factory (for testing).
+func WithVPNClient(fn func(cfg vpn.Config) (vpn.Client, error)) Option {
+	return func(o *runOptions) { o.vpnClientFn = fn }
+}
+
+func defaultOptions() *runOptions {
+	return &runOptions{
+		xuiClientFn: func(host, apiToken string) (interfaces.XUIClient, error) {
+			c, err := xui.NewClient(host, apiToken)
+			if err != nil {
+				return nil, err
+			}
+			return c, nil
+		},
+		vpnClientFn: vpn.NewClient,
+	}
+}
+
+func buildRuntimeNodeClients(nodes []database.Node, opts *runOptions) ([]database.Node, map[uint]interfaces.XUIClient, map[uint]vpn.Client, interfaces.XUIClient, error) {
 	runtimeNodes := make([]database.Node, 0, len(nodes))
 	for _, node := range nodes {
 		if node.IsActive {
@@ -62,7 +88,7 @@ func buildRuntimeNodeClients(nodes []database.Node) ([]database.Node, map[uint]i
 	for _, node := range runtimeNodes {
 		var xuiClient interfaces.XUIClient
 		if node.Type == database.NodeType3xUI {
-			client, err := newXUIClient(node.Host, node.APIToken)
+			client, err := opts.xuiClientFn(node.Host, node.APIToken)
 			if err != nil {
 				return nil, nil, nil, nil, fmt.Errorf("init 3x-ui client for node %d: %w", node.ID, err)
 			}
@@ -73,7 +99,7 @@ func buildRuntimeNodeClients(nodes []database.Node) ([]database.Node, map[uint]i
 			}
 		}
 
-		client, err := newVPNClient(vpn.Config{
+		client, err := opts.vpnClientFn(vpn.Config{
 			Host:       node.Host,
 			APIToken:   node.APIToken,
 			Type:       node.Type,
@@ -237,7 +263,7 @@ func main() {
 	if err != nil {
 		logger.Fatal("Failed to list nodes", zap.Error(err))
 	}
-	runtimeNodes, xuiClients, vpnClients, legacyXUIClient, err := buildRuntimeNodeClients(nodes)
+	runtimeNodes, xuiClients, vpnClients, legacyXUIClient, err := buildRuntimeNodeClients(nodes, defaultOptions())
 	if err != nil {
 		logger.Fatal("Failed to initialize node clients", zap.Error(err))
 	}
@@ -262,7 +288,7 @@ func main() {
 	logger.Info("Validating Telegram bot token")
 
 	const botInitMaxAttempts = 5
-	botInitDelay := 2 * time.Second
+	botInitDelay := 3 * time.Second
 
 	var botAPI *tgbotapi.BotAPI
 	var botConfig *bot.BotConfig
