@@ -35,8 +35,6 @@ type Client interface {
 	Close() error
 }
 
-var _ Client = (*ThreeXUIClient)(nil)
-
 // NewClient creates a VPN client based on the node type.
 func NewClient(cfg Config) (Client, error) {
 	switch cfg.Type {
