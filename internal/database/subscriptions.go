@@ -231,7 +231,7 @@ func (s *Service) GetWithPlanAndNodes(ctx context.Context, subscriptionID string
 		return nil, fmt.Errorf("failed to get subscription: %w", err)
 	}
 
-	if err := s.db.WithContext(ctx).First(&result.Plan, result.Subscription.PlanID).Error; err != nil {
+	if err := s.db.WithContext(ctx).Where("id = ? AND (is_active = ? OR name = ?)", result.Subscription.PlanID, true, FreePlanName).First(&result.Plan).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrPlanNotFound
 		}
@@ -242,7 +242,7 @@ func (s *Service) GetWithPlanAndNodes(ctx context.Context, subscriptionID string
 		Table("nodes").
 		Select("nodes.*").
 		Joins("JOIN plan_nodes ON plan_nodes.node_id = nodes.id").
-		Where("plan_nodes.plan_id = ? AND nodes.is_active = ?", result.Plan.ID, true).
+		Where("plan_nodes.plan_id = ? AND nodes.is_active = ? AND nodes.type = ?", result.Plan.ID, true, NodeType3xUI).
 		Find(&result.Nodes).Error; err != nil {
 		return nil, fmt.Errorf("failed to get nodes: %w", err)
 	}

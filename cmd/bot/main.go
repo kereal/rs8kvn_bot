@@ -43,8 +43,8 @@ var (
 type Option func(*runOptions)
 
 type runOptions struct {
-	xuiClientFn  func(host, apiToken string) (interfaces.XUIClient, error)
-	vpnClientFn  func(cfg vpn.Config) (vpn.Client, error)
+	xuiClientFn func(host, apiToken string) (interfaces.XUIClient, error)
+	vpnClientFn func(cfg vpn.Config) (vpn.Client, error)
 }
 
 // WithXUIClient sets a custom XUI client factory (for testing).
@@ -74,6 +74,9 @@ func buildRuntimeNodeClients(nodes []database.Node, opts *runOptions) ([]databas
 	runtimeNodes := make([]database.Node, 0, len(nodes))
 	for _, node := range nodes {
 		if node.IsActive {
+			if node.Type != database.NodeType3xUI {
+				continue
+			}
 			runtimeNodes = append(runtimeNodes, node)
 		}
 	}

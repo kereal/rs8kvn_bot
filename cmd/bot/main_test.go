@@ -91,7 +91,7 @@ func TestBuildRuntimeNodeClients_FiltersInactiveAndInitializes3xUIOnly(t *testin
 	assert.NotNil(t, vpnCalls[0].XUIClient)
 }
 
-func TestBuildRuntimeNodeClients_RejectsUnsupportedActiveNode(t *testing.T) {
+func TestBuildRuntimeNodeClients_SkipsUnsupportedActiveNode(t *testing.T) {
 	opts := &runOptions{
 		xuiClientFn: func(host, apiToken string) (interfaces.XUIClient, error) {
 			return &xui.Client{}, nil
@@ -103,11 +103,14 @@ func TestBuildRuntimeNodeClients_RejectsUnsupportedActiveNode(t *testing.T) {
 
 	nodes := []database.Node{{ID: 7, Type: database.NodeTypeProxman, IsActive: true, Host: "http://prox", APIToken: "token", InboundIDs: `[1]`}}
 
-	_, _, _, _, err := buildRuntimeNodeClients(nodes, opts)
+	runtimeNodes, xuiClients, vpnClients, legacyXUIClient, err := buildRuntimeNodeClients(nodes, opts)
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "init vpn client for node 7")
-	assert.Contains(t, err.Error(), "proxman nodes are not supported yet")
+	assert.Contains(t, err.Error(), "no active nodes configured")
+	assert.Empty(t, runtimeNodes)
+	assert.Empty(t, xuiClients)
+	assert.Empty(t, vpnClients)
+	assert.Nil(t, legacyXUIClient)
 }
 
 func TestHandleUpdateSafely(t *testing.T) {
