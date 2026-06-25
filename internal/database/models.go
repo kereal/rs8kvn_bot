@@ -86,6 +86,7 @@ type Node struct {
 type Plan struct {
 	ID           uint   `gorm:"primaryKey;column:id"`
 	Name         string `gorm:"size:50;uniqueIndex;column:name"`
+	IsActive     bool   `gorm:"not null;default:true;column:is_active"`
 	DevicesLimit int    `gorm:"default:1;column:devices_limit"`
 	// TrafficLimit — лимит трафика в байтах. 0 = безлимит.
 	TrafficLimit int64     `gorm:"default:0;column:traffic_limit"`

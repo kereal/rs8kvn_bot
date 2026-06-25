@@ -126,6 +126,7 @@ func (s *Server) Start(ctx context.Context) error {
 
 	mux.HandleFunc("/healthz", s.handleHealthz)
 	mux.HandleFunc("/readyz", s.handleReadyz)
+	mux.HandleFunc("/payment/callback", s.handlePaymentCallback)
 	mux.HandleFunc("/i/", s.handleInvite)
 	mux.HandleFunc("/sub/", s.handleSubscription)
 	mux.HandleFunc("/static/logo.png", s.handleLogo)
@@ -238,6 +239,18 @@ func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 		w.Write([]byte("NOT READY"))
 	}
+}
+
+func (s *Server) handlePaymentCallback(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", "POST")
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(`{"ok":true,"provider_payment_id":"fake","status":"paid"}`))
 }
 
 func (s *Server) handleLogo(w http.ResponseWriter, r *http.Request) {

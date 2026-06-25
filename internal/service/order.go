@@ -22,7 +22,9 @@ type OrderService struct {
 
 // PaymentInfo contains payment details for an order.
 type PaymentInfo struct {
-	URL string
+	URL       string
+	Provider  string
+	PaymentID string
 }
 
 // NewOrderService creates a new OrderService.
@@ -43,18 +45,27 @@ func (o *OrderService) ActivateProduct(ctx context.Context, telegramID int64, pr
 	}
 
 	now := time.Now().UTC().Truncate(time.Minute)
-	maxExpiry := now
-	if sub.ExpiresAt != nil && sub.ExpiresAt.After(now) {
-		maxExpiry = *sub.ExpiresAt
+	planChanged := sub.PlanID != product.PlanID
+	newExpiry := calculateProductExpiry(now, sub.PlanID, sub.ExpiresAt, product)
+	paymentInfo, err := o.requestPayment(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("request payment: %w", err)
 	}
-	newExpiry := maxExpiry.AddDate(0, 0, product.DurationDays)
 
 	order := &database.Order{
-		SubscriptionID: sub.ID,
-		ProductID:      product.ID,
-		Status:         database.OrderStatusPending,
-		AmountCents:    product.PriceCents,
-		Currency:       product.Currency,
+		SubscriptionID:    sub.ID,
+		ProductID:         product.ID,
+		Status:            database.OrderStatusPending,
+		AmountCents:       product.PriceCents,
+		Currency:          product.Currency,
+		PaymentProvider:   paymentInfo.Provider,
+		ProviderPaymentID: paymentInfo.PaymentID,
+	}
+	if product.PriceCents == 0 {
+		order.Status = database.OrderStatusPaid
+		order.PaidAt = &now
+		order.ActivatedAt = &now
+		order.ExpiresAt = &newExpiry
 	}
 
 	if err := o.db.CreateOrder(ctx, order); err != nil {
@@ -62,19 +73,8 @@ func (o *OrderService) ActivateProduct(ctx context.Context, telegramID int64, pr
 	}
 
 	if product.PriceCents > 0 {
-		info, requestErr := o.requestPayment(ctx, order)
-		if requestErr != nil {
-			return nil, fmt.Errorf("request payment: %w", requestErr)
-		}
-		_ = info
+		order.ProviderPaymentID = paymentInfo.PaymentID
 		return order, nil
-	}
-
-	if err := o.db.UpdateOrderActivatedAt(ctx, order.ID, now, newExpiry); err != nil {
-		return nil, fmt.Errorf("update order activation: %w", err)
-	}
-	if err := o.db.UpdateOrderPaidStatus(ctx, order.ID); err != nil {
-		return nil, fmt.Errorf("update order paid status: %w", err)
 	}
 
 	sub.PlanID = product.PlanID
@@ -87,7 +87,7 @@ func (o *OrderService) ActivateProduct(ctx context.Context, telegramID int64, pr
 		return nil, fmt.Errorf("update subscription: %w", err)
 	}
 
-	if o.syncSvc != nil {
+	if planChanged && o.syncSvc != nil {
 		if err := o.syncSvc.RecalculateNodes(ctx, sub.ID); err != nil {
 			logger.Warn("recalculate nodes failed (will retry)", zap.Error(err))
 		}
@@ -101,5 +101,12 @@ func (o *OrderService) ActivateProduct(ctx context.Context, telegramID int64, pr
 
 // requestPayment is a stub for external payment integration.
 func (o *OrderService) requestPayment(ctx context.Context, order *database.Order) (*PaymentInfo, error) {
-	return nil, fmt.Errorf("payment integration not implemented for order %d", order.ID)
+	_ = ctx
+	_ = order
+	paymentID := fmt.Sprintf("fake-payment-%d", time.Now().UTC().UnixNano())
+	return &PaymentInfo{
+		URL:       fmt.Sprintf("https://payment.example/pay/%s", paymentID),
+		Provider:  "fake-payment-provider",
+		PaymentID: paymentID,
+	}, nil
 }

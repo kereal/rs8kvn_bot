@@ -93,6 +93,21 @@ func (s *SubscriptionService) trialNodes(ctx context.Context) ([]database.Node, 
 // returned in CreateResult so callers can update aggregate referral state.
 // VPN node access is provisioned asynchronously via the sync module.
 func (s *SubscriptionService) Create(ctx context.Context, telegramID int64, username, inviteCode string) (*CreateResult, error) {
+	existing, err := s.db.GetByTelegramID(ctx, telegramID)
+	if err == nil {
+		if err := s.ensureSubscriptionNodes(ctx, existing); err != nil {
+			return nil, fmt.Errorf("ensure subscription nodes: %w", err)
+		}
+		return &CreateResult{
+			Subscription:    existing,
+			SubscriptionURL: s.cfg.SubURL(existing.SubscriptionID),
+			ReferrerTGID:    existing.ReferredBy,
+		}, nil
+	}
+	if !errors.Is(err, database.ErrSubscriptionNotFound) && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, fmt.Errorf("lookup subscription: %w", err)
+	}
+
 	plan, err := s.db.GetPlanByName(ctx, database.FreePlanName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve free plan: %w", err)
@@ -130,6 +145,14 @@ func (s *SubscriptionService) Create(ctx context.Context, telegramID int64, user
 		SubscriptionURL: subscriptionURL,
 		ReferrerTGID:    sub.ReferredBy,
 	}, nil
+}
+
+func calculateProductExpiry(now time.Time, currentPlanID uint, currentExpiry *time.Time, product *database.Product) time.Time {
+	base := now
+	if product != nil && currentPlanID == product.PlanID && currentExpiry != nil && currentExpiry.After(now) {
+		base = *currentExpiry
+	}
+	return base.AddDate(0, 0, product.DurationDays)
 }
 
 // GetByTelegramID retrieves a subscription by Telegram user ID.
@@ -716,7 +739,7 @@ func (s *SubscriptionService) ensureSubscriptionNodes(ctx context.Context, sub *
 		return fmt.Errorf("nil subscription")
 	}
 
-	// 1. Load active nodes linked to the subscription's plan
+	// 1. Load active 3x-ui nodes linked to the subscription's plan
 	nodes, err := s.db.GetNodesByPlanID(ctx, sub.PlanID)
 	if err != nil {
 		return fmt.Errorf("load plan nodes: %w", err)
@@ -772,11 +795,8 @@ func (s *SubscriptionService) RenewSubscription(ctx context.Context, telegramID 
 	}
 
 	now := time.Now().UTC().Truncate(time.Minute)
-	newExpiry := now
-	if sub.ExpiresAt != nil && sub.ExpiresAt.After(now) {
-		newExpiry = *sub.ExpiresAt
-	}
-	newExpiry = newExpiry.AddDate(0, 0, product.DurationDays)
+	planChanged := sub.PlanID != product.PlanID
+	newExpiry := calculateProductExpiry(now, sub.PlanID, sub.ExpiresAt, product)
 
 	sub.PlanID = product.PlanID
 	sub.ProductID = product.ID
@@ -813,7 +833,7 @@ func (s *SubscriptionService) RenewSubscription(ctx context.Context, telegramID 
 		return nil, err
 	}
 
-	if s.syncService != nil {
+	if planChanged && s.syncService != nil {
 		if err := s.syncService.RecalculateNodes(ctx, sub.ID); err != nil {
 			logger.Warn("recalculate nodes failed (will retry)", zap.Error(err))
 		}
