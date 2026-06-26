@@ -428,7 +428,7 @@ func (c *Client) doDeleteClient(ctx context.Context, email string) error {
 // UpdateClient обновляет данные клиента в панели.
 // Как и AddClientWithID, автоматически разбивает запрос на группы по flow,
 // если inboundIDs требуют разных значений flow.
-func (c *Client) UpdateClient(ctx context.Context, inboundIDs []int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, tgID int64, comment string) error {
+func (c *Client) UpdateClient(ctx context.Context, inboundIDs []int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, resetDays int, tgID int64, comment string) error {
 	if clientID == "" {
 		return fmt.Errorf("client ID cannot be empty")
 	}
@@ -452,7 +452,7 @@ func (c *Client) UpdateClient(ctx context.Context, inboundIDs []int, currentEmai
 	var firstErr error
 	for flow, ids := range groups {
 		errRetry := RetryWithBackoff(ctx, config.XUIMaxRetries, config.XUIInitialRetryDelay, func() error {
-			return c.doUpdateClient(ctx, ids, currentEmail, clientID, email, subID, trafficBytes, expiryTime, tgID, comment, flow)
+			return c.doUpdateClient(ctx, ids, currentEmail, clientID, email, subID, trafficBytes, expiryTime, resetDays, tgID, comment, flow)
 		})
 		if errRetry != nil {
 			firstErr = errRetry
@@ -464,7 +464,10 @@ func (c *Client) UpdateClient(ctx context.Context, inboundIDs []int, currentEmai
 
 // doUpdateClient выполняет реальный POST /panel/api/clients/update/{currentEmail}
 // с уже вычисленным flow для группы inboundIDs.
-func (c *Client) doUpdateClient(ctx context.Context, inboundIDs []int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, tgID int64, comment string, flow string) error {
+func (c *Client) doUpdateClient(ctx context.Context, inboundIDs []int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, resetDays int, tgID int64, comment string, flow string) error {
+	if resetDays < 0 {
+		resetDays = config.SubscriptionResetDay
+	}
 	clientObj := map[string]any{
 		"id":         clientID,
 		"email":      email,
@@ -474,7 +477,7 @@ func (c *Client) doUpdateClient(ctx context.Context, inboundIDs []int, currentEm
 		"enable":     true,
 		"flow":       flow,
 		"subId":      subID,
-		"reset":      config.SubscriptionResetDay,
+		"reset":      resetDays,
 		"tgId":       tgID,
 		"comment":    comment,
 	}

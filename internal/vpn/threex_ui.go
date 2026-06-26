@@ -49,6 +49,7 @@ func (c *ThreeXUIClient) UpdateSubscription(ctx context.Context, provision Subsc
 		provision.SubID,
 		provision.TrafficBytes,
 		provision.ExpiryTime,
+		provision.ResetDays,
 		0,
 		"",
 	)

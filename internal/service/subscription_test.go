@@ -839,12 +839,12 @@ func TestSubscriptionService_BindTrial_UpdatesAllSources(t *testing.T) {
 	}
 
 	xui1 := &testutil.MockXUIClient{
-		UpdateClientFunc: func(ctx context.Context, inboundIDs []int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, tgID int64, comment string) error {
+		UpdateClientFunc: func(ctx context.Context, inboundIDs []int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, resetDays int, tgID int64, comment string) error {
 			return errors.New("source 1 unreachable")
 		},
 	}
 	xui2 := &testutil.MockXUIClient{
-		UpdateClientFunc: func(ctx context.Context, inboundIDs []int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, tgID int64, comment string) error {
+		UpdateClientFunc: func(ctx context.Context, inboundIDs []int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, resetDays int, tgID int64, comment string) error {
 			return nil
 		},
 	}
