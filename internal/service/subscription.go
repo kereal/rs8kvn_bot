@@ -22,14 +22,15 @@ import (
 )
 
 type SubscriptionService struct {
-	db          interfaces.DatabaseService
-	xuiClients  map[uint]interfaces.XUIClient
-	vpnClients  map[uint]vpn.Client
-	nodes       []database.Node
-	cfg         *config.Config
-	webhook     webhook.WebhookSender
-	invalidate  func(telegramID int64)
-	syncService *SyncService
+	db             interfaces.DatabaseService
+	xuiClients     map[uint]interfaces.XUIClient
+	vpnClients     map[uint]vpn.Client
+	nodes          []database.Node
+	cfg            *config.Config
+	webhook        webhook.WebhookSender
+	invalidate     func(telegramID int64)
+	invalidateBySubID func(subID string)
+	syncService    *SyncService
 }
 
 type CreateResult struct {
@@ -191,6 +192,10 @@ func (s *SubscriptionService) Delete(ctx context.Context, telegramID int64) erro
 		return fmt.Errorf("db delete: %w", err)
 	}
 
+	if s.invalidateBySubID != nil && sub.SubscriptionID != "" {
+		s.invalidateBySubID(sub.SubscriptionID)
+	}
+
 	if s.webhook != nil {
 		eventID, _ := utils.GenerateUUID()
 		s.webhook.SendAsync(ctx, webhook.Event{
@@ -228,6 +233,10 @@ func (s *SubscriptionService) DeleteByID(ctx context.Context, id uint) (*databas
 	deleted, err := s.db.DeleteSubscriptionByID(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("db delete: %w", err)
+	}
+
+	if s.invalidateBySubID != nil && deleted.SubscriptionID != "" {
+		s.InvalidateBySubID(ctx, deleted.SubscriptionID)
 	}
 
 	email := XUIEmail(deleted.Username, deleted.TelegramID)
@@ -582,6 +591,20 @@ func (s *SubscriptionService) InvalidateSubscription(ctx context.Context, telegr
 	}
 }
 
+// SetInvalidateBySubIDFunc sets the cache invalidation callback keyed by subscription ID.
+// Used for trial and other subscriptions where TelegramID may be unavailable.
+func (s *SubscriptionService) SetInvalidateBySubIDFunc(fn func(subID string)) {
+	s.invalidateBySubID = fn
+}
+
+// InvalidateBySubID clears cached subscription data for the given subscription ID.
+// It is safe to call from any goroutine.
+func (s *SubscriptionService) InvalidateBySubID(ctx context.Context, subID string) {
+	if s.invalidateBySubID != nil {
+		s.invalidateBySubID(subID)
+	}
+}
+
 // ReconcileOrphanedClients scans all active subscriptions and removes those whose
 // client no longer exists in the XUI panel. It returns the number of removed subscriptions.
 // This is a best-effort background cleanup; errors are logged but do not stop the scan.
@@ -678,6 +701,9 @@ func (s *SubscriptionService) ReconcileOrphanedClients(ctx context.Context) (int
 				if s.invalidate != nil && sub.TelegramID > 0 {
 					s.invalidate(sub.TelegramID)
 				}
+				if s.invalidateBySubID != nil && sub.SubscriptionID != "" {
+					s.invalidateBySubID(sub.SubscriptionID)
+				}
 				metrics.OrphanedClientsRemovedTotal.Inc()
 			}
 		}
@@ -700,7 +726,14 @@ func (s *SubscriptionService) CleanupExpiredTrials(ctx context.Context) (int64, 
 	for _, sub := range subs {
 		if sub.SubscriptionID != "" {
 			email := "trial_" + sub.SubscriptionID
+			if sub.Status == "active" && s.syncService != nil {
+				s.syncService.MarkAllForRemoval(ctx, sub.ID)
+				s.syncService.SyncSubscription(ctx, sub.ID)
+			}
 			s.deleteClientFromAllNodes(ctx, email)
+			if s.invalidateBySubID != nil {
+				s.invalidateBySubID(sub.SubscriptionID)
+			}
 		}
 	}
 
@@ -833,7 +866,6 @@ func (s *SubscriptionService) RenewSubscription(ctx context.Context, telegramID 
 
 	now := time.Now().UTC().Truncate(time.Minute)
 	planChanged := sub.PlanID != product.PlanID
-	oldPlanID := sub.PlanID
 	newExpiry := calculateProductExpiry(now, sub.PlanID, sub.ExpiresAt, product)
 
 	sub.PlanID = product.PlanID
@@ -871,9 +903,13 @@ func (s *SubscriptionService) RenewSubscription(ctx context.Context, telegramID 
 		return nil, err
 	}
 
+	if s.invalidateBySubID != nil && sub.SubscriptionID != "" {
+		s.invalidateBySubID(sub.SubscriptionID)
+	}
+
 	if planChanged && s.syncService != nil {
-		if err := s.syncService.RecalculateNodes(ctx, sub.ID, oldPlanID); err != nil {
-			logger.Warn("recalculate nodes failed (will retry)", zap.Error(err))
+		if err := s.syncService.ReconcilePlanNodes(ctx, sub.ID); err != nil {
+			logger.Warn("reconcile plan nodes failed (will retry)", zap.Error(err))
 		}
 		if err := s.syncService.SyncSubscription(ctx, sub.ID); err != nil {
 			logger.Warn("sync subscription failed (will retry)", zap.Error(err))
@@ -895,14 +931,17 @@ func (s *SubscriptionService) ExpireSubscription(ctx context.Context, telegramID
 		return fmt.Errorf("resolve free plan: %w", err)
 	}
 
-	oldPlanID := sub.PlanID
 	if err := s.db.ExpireSubscription(ctx, sub.ID, freePlan.ID); err != nil {
 		return fmt.Errorf("expire subscription: %w", err)
 	}
 
+	if s.invalidateBySubID != nil && sub.SubscriptionID != "" {
+		s.invalidateBySubID(sub.SubscriptionID)
+	}
+
 	if s.syncService != nil {
-		if err := s.syncService.RecalculateNodes(ctx, sub.ID, oldPlanID); err != nil {
-			logger.Warn("recalculate nodes failed (will retry)", zap.Error(err))
+		if err := s.syncService.ReconcilePlanNodes(ctx, sub.ID); err != nil {
+			logger.Warn("reconcile plan nodes failed (will retry)", zap.Error(err))
 		}
 		if err := s.syncService.SyncSubscription(ctx, sub.ID); err != nil {
 			logger.Warn("sync subscription failed (will retry)", zap.Error(err))

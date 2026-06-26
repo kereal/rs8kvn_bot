@@ -46,7 +46,6 @@ func (o *OrderService) ActivateProduct(ctx context.Context, telegramID int64, pr
 
 	now := time.Now().UTC().Truncate(time.Minute)
 	planChanged := sub.PlanID != product.PlanID
-	oldPlanID := sub.PlanID
 	newExpiry := calculateProductExpiry(now, sub.PlanID, sub.ExpiresAt, product)
 	paymentInfo, err := o.requestPayment(ctx, nil)
 	if err != nil {
@@ -88,9 +87,13 @@ func (o *OrderService) ActivateProduct(ctx context.Context, telegramID int64, pr
 		return nil, fmt.Errorf("update subscription: %w", err)
 	}
 
+	if o.subSvc != nil && sub.SubscriptionID != "" {
+		o.subSvc.InvalidateBySubID(ctx, sub.SubscriptionID)
+	}
+
 	if planChanged && o.syncSvc != nil {
-		if err := o.syncSvc.RecalculateNodes(ctx, sub.ID, oldPlanID); err != nil {
-			logger.Warn("recalculate nodes failed (will retry)", zap.Error(err))
+		if err := o.syncSvc.ReconcilePlanNodes(ctx, sub.ID); err != nil {
+			logger.Warn("reconcile plan nodes failed (will retry)", zap.Error(err))
 		}
 		if err := o.syncSvc.SyncSubscription(ctx, sub.ID); err != nil {
 			logger.Warn("sync subscription failed (will retry)", zap.Error(err))

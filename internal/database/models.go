@@ -23,6 +23,16 @@ const (
 	FreePlanName  = "free"
 )
 
+// SubscriptionStatus represents the lifecycle state of a subscription.
+type SubscriptionStatus string
+
+const (
+	SubscriptionStatusActive   SubscriptionStatus = "active"
+	SubscriptionStatusExpired  SubscriptionStatus = "expired"
+	SubscriptionStatusPaused   SubscriptionStatus = "paused"
+	SubscriptionStatusCanceled SubscriptionStatus = "canceled"
+)
+
 // Subscription represents a user's VPN subscription.
 //
 // Telegram ID conventions:
@@ -40,7 +50,7 @@ type Subscription struct {
 	SubscriptionID string `gorm:"size:255;not null;uniqueIndex"`
 	// ExpiresAt — срок действия подписки. NULL = бессрочная (free-план).
 	ExpiresAt      *time.Time `gorm:"index:idx_expiry"`
-	Status         string     `gorm:"default:active;size:50;index"`
+	Status         string `gorm:"default:active;size:50;index"`
 	InviteCode     *string    `gorm:"size:16;index"`
 	PlanID         uint       `gorm:"index"`
 	ReferredBy     *int64     `gorm:"index"`

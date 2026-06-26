@@ -60,7 +60,7 @@ func newTestSyncService(t *testing.T, db interfaces.DatabaseService, nodes []dat
 	return NewSyncService(db, vpnClients, nodes)
 }
 
-func TestSyncService_RecalculateNodes_AddMissing(t *testing.T) {
+func TestSyncService_ReconcilePlanNodes_AddMissing(t *testing.T) {
 	t.Parallel()
 
 	db, err := testutil.NewTestDatabaseService(t)
@@ -90,7 +90,7 @@ func TestSyncService_RecalculateNodes_AddMissing(t *testing.T) {
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusActive}))
 
 	svc := newTestSyncService(t, db, []database.Node{*node1, *node2})
-	require.NoError(t, svc.RecalculateNodes(ctx, sub.ID))
+	require.NoError(t, svc.ReconcilePlanNodes(ctx, sub.ID))
 
 	rows, err := db.GetBySubscriptionID(ctx, sub.ID)
 	require.NoError(t, err)
@@ -104,7 +104,7 @@ func TestSyncService_RecalculateNodes_AddMissing(t *testing.T) {
 	assert.Equal(t, database.SyncStatusPendingAdd, statusMap[node2.ID])
 }
 
-func TestSyncService_RecalculateNodes_RemoveExtra(t *testing.T) {
+func TestSyncService_ReconcilePlanNodes_RemoveExtra(t *testing.T) {
 	t.Parallel()
 
 	db, err := testutil.NewTestDatabaseService(t)
@@ -134,7 +134,7 @@ func TestSyncService_RecalculateNodes_RemoveExtra(t *testing.T) {
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node2.ID, Status: database.SyncStatusActive}))
 
 	svc := newTestSyncService(t, db, []database.Node{*node1})
-	require.NoError(t, svc.RecalculateNodes(ctx, sub.ID))
+	require.NoError(t, svc.ReconcilePlanNodes(ctx, sub.ID))
 
 	rows, err := db.GetBySubscriptionID(ctx, sub.ID)
 	require.NoError(t, err)
@@ -148,7 +148,7 @@ func TestSyncService_RecalculateNodes_RemoveExtra(t *testing.T) {
 	assert.Equal(t, database.SyncStatusPendingRemove, statusMap[node2.ID])
 }
 
-func TestSyncService_RecalculateNodes_KeepExisting(t *testing.T) {
+func TestSyncService_ReconcilePlanNodes_KeepExisting(t *testing.T) {
 	t.Parallel()
 
 	db, err := testutil.NewTestDatabaseService(t)
@@ -175,7 +175,7 @@ func TestSyncService_RecalculateNodes_KeepExisting(t *testing.T) {
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusActive}))
 
 	svc := newTestSyncService(t, db, []database.Node{*node1})
-	require.NoError(t, svc.RecalculateNodes(ctx, sub.ID))
+	require.NoError(t, svc.ReconcilePlanNodes(ctx, sub.ID))
 
 	rows, err := db.GetBySubscriptionID(ctx, sub.ID)
 	require.NoError(t, err)
@@ -183,7 +183,7 @@ func TestSyncService_RecalculateNodes_KeepExisting(t *testing.T) {
 	assert.Equal(t, database.SyncStatusActive, rows[0].Status)
 }
 
-func TestSyncService_RecalculateNodes_ReactivatePendingRemove(t *testing.T) {
+func TestSyncService_ReconcilePlanNodes_ReactivatePendingRemove(t *testing.T) {
 	t.Parallel()
 
 	db, err := testutil.NewTestDatabaseService(t)
@@ -210,7 +210,7 @@ func TestSyncService_RecalculateNodes_ReactivatePendingRemove(t *testing.T) {
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusPendingRemove}))
 
 	svc := newTestSyncService(t, db, []database.Node{*node1})
-	require.NoError(t, svc.RecalculateNodes(ctx, sub.ID))
+	require.NoError(t, svc.ReconcilePlanNodes(ctx, sub.ID))
 
 	rows, err := db.GetBySubscriptionID(ctx, sub.ID)
 	require.NoError(t, err)
@@ -218,7 +218,7 @@ func TestSyncService_RecalculateNodes_ReactivatePendingRemove(t *testing.T) {
 	assert.Equal(t, database.SyncStatusPendingAdd, rows[0].Status)
 }
 
-func TestSyncService_RecalculateNodes_RemovesStalePendingAdd(t *testing.T) {
+func TestSyncService_ReconcilePlanNodes_RemovesStalePendingAdd(t *testing.T) {
 	t.Parallel()
 
 	db, err := testutil.NewTestDatabaseService(t)
@@ -248,7 +248,7 @@ func TestSyncService_RecalculateNodes_RemovesStalePendingAdd(t *testing.T) {
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node2.ID, Status: database.SyncStatusPendingAdd}))
 
 	svc := newTestSyncService(t, db, []database.Node{*node1, *node2})
-	require.NoError(t, svc.RecalculateNodes(ctx, sub.ID))
+	require.NoError(t, svc.ReconcilePlanNodes(ctx, sub.ID))
 
 	rows, err := db.GetBySubscriptionID(ctx, sub.ID)
 	require.NoError(t, err)
@@ -259,28 +259,27 @@ func TestSyncService_RecalculateNodes_RemovesStalePendingAdd(t *testing.T) {
 	assert.Equal(t, database.SyncStatusPendingRemove, rows[1].Status)
 }
 
-func TestSyncService_RecalculateNodes_PlanChange_MarksActiveForUpdate(t *testing.T) {
+func TestSyncService_ReconcilePlanNodes_PlanChange_KeepsActiveWhenSamePlan(t *testing.T) {
 	t.Parallel()
 
 	db, err := testutil.NewTestDatabaseService(t)
 	require.NoError(t, err)
 	ctx := context.Background()
 
-	planFree := &database.Plan{Name: "test-plan-change-free", DevicesLimit: 1, TrafficLimit: 1024}
-	planPremium := &database.Plan{Name: "test-plan-change-premium", DevicesLimit: 1, TrafficLimit: 0}
+	planFree := &database.Plan{Name: "test-plan-keep-free", DevicesLimit: 1, TrafficLimit: 1024}
+	planPremium := &database.Plan{Name: "test-plan-keep-premium", DevicesLimit: 1, TrafficLimit: 0}
 	require.NoError(t, db.GetDB().WithContext(ctx).Create(planFree).Error)
 	require.NoError(t, db.GetDB().WithContext(ctx).Create(planPremium).Error)
 
-	node1 := &database.Node{Name: "plan-chg-node", IsActive: true, Host: "http://pc1", APIToken: "tpc", InboundIDs: `[1]`}
+	node1 := &database.Node{Name: "plan-keep-node", IsActive: true, Host: "http://pk1", APIToken: "tpk", InboundIDs: `[1]`}
 	require.NoError(t, db.GetDB().WithContext(ctx).Create(node1).Error)
-	require.NoError(t, db.GetDB().WithContext(ctx).Create(&database.PlanNode{PlanID: planFree.ID, NodeID: node1.ID}).Error)
 	require.NoError(t, db.GetDB().WithContext(ctx).Create(&database.PlanNode{PlanID: planPremium.ID, NodeID: node1.ID}).Error)
 
 	sub := &database.Subscription{
 		TelegramID:     8888,
-		Username:       "planchguser",
-		ClientID:       "c-planchg",
-		SubscriptionID: "s-planchg",
+		Username:       "plankeepuser",
+		ClientID:       "c-plankeep",
+		SubscriptionID: "s-plankeep",
 		Status:         "active",
 		PlanID:         planPremium.ID,
 		ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
@@ -289,24 +288,12 @@ func TestSyncService_RecalculateNodes_PlanChange_MarksActiveForUpdate(t *testing
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusActive}))
 
 	svc := newTestSyncService(t, db, []database.Node{*node1})
-	require.NoError(t, svc.RecalculateNodes(ctx, sub.ID, planFree.ID))
+	require.NoError(t, svc.ReconcilePlanNodes(ctx, sub.ID))
 
 	rows, err := db.GetBySubscriptionID(ctx, sub.ID)
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
-	assert.Equal(t, database.SyncStatusPendingAdd, rows[0].Status, "active node should be marked pending_add when plan changed to trigger update")
-
-	mockVPN := &mockVPNClient{createError: fmt.Errorf("client already exists")}
-	svcWithVPN := NewSyncService(db, map[uint]vpn.Client{node1.ID: mockVPN}, []database.Node{*node1})
-
-	require.NoError(t, svcWithVPN.SyncSubscription(ctx, sub.ID))
-
-	rows, err = db.GetBySubscriptionID(ctx, sub.ID)
-	require.NoError(t, err)
-	require.Len(t, rows, 1)
-	assert.Equal(t, database.SyncStatusActive, rows[0].Status)
-	assert.True(t, mockVPN.updateCalled, "UpdateSubscription should be invoked when client already exists after plan change")
-	assert.Equal(t, int64(0), mockVPN.updateProvision.TrafficBytes, "traffic limit should reflect the new premium plan (unlimited)")
+	assert.Equal(t, database.SyncStatusActive, rows[0].Status, "active node should stay active when still in the current plan")
 }
 
 func TestSyncService_SyncSubscription_PendingAdd(t *testing.T) {
@@ -566,11 +553,13 @@ func TestCalculateRetryAt(t *testing.T) {
 		wantMax    time.Duration
 	}{
 		{"retry 0 -> 1m", 0, 1 * time.Minute, 1*time.Minute + time.Minute},
-		{"retry 1 -> 5m", 1, 5 * time.Minute, 5*time.Minute + time.Minute},
-		{"retry 2 -> 15m", 2, 15 * time.Minute, 15*time.Minute + time.Minute},
-		{"retry 3 -> 1h", 3, 1 * time.Hour, 1*time.Hour + time.Minute},
-		{"retry 4 -> 6h", 4, 6 * time.Hour, 6*time.Hour + time.Minute},
-		{"retry 10 -> 6h", 10, 6 * time.Hour, 6*time.Hour + time.Minute},
+		{"retry 1 -> 2m", 1, 2 * time.Minute, 2*time.Minute + time.Minute},
+		{"retry 2 -> 5m", 2, 5 * time.Minute, 5*time.Minute + time.Minute},
+		{"retry 3 -> 15m", 3, 15 * time.Minute, 15*time.Minute + time.Minute},
+		{"retry 4 -> 30m", 4, 30 * time.Minute, 30*time.Minute + time.Minute},
+		{"retry 5 -> 45m", 5, 45 * time.Minute, 45*time.Minute + time.Minute},
+		{"retry 6 -> 60m", 6, 60 * time.Minute, 60*time.Minute + time.Minute},
+		{"retry 10 -> 60m", 10, 60 * time.Minute, 60*time.Minute + time.Minute},
 	}
 
 	for _, tt := range tests {

@@ -55,30 +55,31 @@ func NewSyncService(db interfaces.DatabaseService, vpnClients map[uint]vpn.Clien
 	return &SyncService{db: db, vpnClients: vpnClients, nodes: nodes}
 }
 
-// RecalculateNodes computes the diff between plan nodes and current subscription nodes.
-// It only updates the database state, without invoking VPN operations.
-// oldPlanIDs, when provided, triggers update provisioning for active nodes that stay in the target set.
-func (s *SyncService) RecalculateNodes(ctx context.Context, subscriptionID uint, oldPlanIDs ...uint) error {
-	oldPlanID := uint(0)
-	if len(oldPlanIDs) > 0 {
-		oldPlanID = oldPlanIDs[0]
-	}
-	logger.Debug("recalculate nodes",
+// ReconcilePlanNodes reconciles the subscription_nodes table against the current plan.
+// It handles four cases:
+//   - ADD: a plan node has no subscription_nodes record → pending_add
+//   - CHANGED_LIMITS: an active node's plan limits differ from last provisioning → pending_add (triggers UpdateSubscription)
+//   - REMOVE: a subscription_nodes node is no longer in the plan → pending_remove
+//   - STALE: a pending_add node was removed from the plan → pending_remove
+// This replaces the old RecalculateNodes which required an explicit oldPlanID
+// and unconditionally re-provisioned all active nodes on every plan change.
+func (s *SyncService) ReconcilePlanNodes(ctx context.Context, subscriptionID uint) error {
+	logger.Debug("reconcile plan nodes",
 		zap.Uint("subscription_id", subscriptionID))
 
 	sub, err := s.db.GetByID(ctx, subscriptionID)
 	if err != nil {
-		return fmt.Errorf("recalculate nodes: load subscription: %w", err)
+		return fmt.Errorf("reconcile plan nodes: load subscription: %w", err)
 	}
 
 	targetNodes, err := s.db.GetNodesByPlanID(ctx, sub.PlanID)
 	if err != nil {
-		return fmt.Errorf("recalculate nodes: load plan nodes: %w", err)
+		return fmt.Errorf("reconcile plan nodes: load plan nodes: %w", err)
 	}
 
 	currentNodes, err := s.db.GetBySubscriptionID(ctx, subscriptionID)
 	if err != nil {
-		return fmt.Errorf("recalculate nodes: load current nodes: %w", err)
+		return fmt.Errorf("reconcile plan nodes: load current nodes: %w", err)
 	}
 
 	targetSet := make(map[uint]struct{}, len(targetNodes))
@@ -110,9 +111,9 @@ func (s *SyncService) RecalculateNodes(ctx context.Context, subscriptionID uint,
 			continue
 		}
 		if pending, ok := currentPendingRemove[target.ID]; ok {
-			if err := s.db.UpdateSubscriptionNodeStatus(ctx, pending.SubscriptionID, pending.NodeID, database.SyncStatusPendingAdd); err != nil {
-				return fmt.Errorf("recalculate nodes: reactivate pending_remove node %d: %w", target.ID, err)
-			}
+		if err := s.db.UpdateSubscriptionNodeStatus(ctx, pending.SubscriptionID, pending.NodeID, database.SyncStatusPendingAdd); err != nil {
+			return fmt.Errorf("reconcile plan nodes: reactivate pending_remove node %d: %w", target.ID, err)
+		}
 			logger.Debug("reactivated pending_remove to pending_add",
 				zap.Uint("subscription_id", subscriptionID),
 				zap.Uint("node_id", target.ID))
@@ -123,7 +124,7 @@ func (s *SyncService) RecalculateNodes(ctx context.Context, subscriptionID uint,
 			NodeID:         target.ID,
 			Status:         database.SyncStatusPendingAdd,
 		}); err != nil {
-			return fmt.Errorf("recalculate nodes: upsert pending_add node %d: %w", target.ID, err)
+			return fmt.Errorf("reconcile plan nodes: upsert pending_add node %d: %w", target.ID, err)
 		}
 		logger.Debug("created pending_add node",
 			zap.Uint("subscription_id", subscriptionID),
@@ -132,20 +133,10 @@ func (s *SyncService) RecalculateNodes(ctx context.Context, subscriptionID uint,
 
 	for nodeID, sn := range currentActive {
 		if _, inTarget := targetSet[nodeID]; inTarget {
-			if oldPlanID != 0 && oldPlanID != sub.PlanID {
-				if err := s.db.UpdateSubscriptionNodeStatus(ctx, sn.SubscriptionID, sn.NodeID, database.SyncStatusPendingAdd); err != nil {
-					return fmt.Errorf("recalculate nodes: mark active node %d as pending_add for plan change: %w", nodeID, err)
-				}
-				logger.Debug("marking active node as pending_add for plan change",
-					zap.Uint("subscription_id", subscriptionID),
-					zap.Uint("node_id", nodeID),
-					zap.Uint("old_plan_id", oldPlanID),
-					zap.Uint("new_plan_id", sub.PlanID))
-			}
 			continue
 		}
 		if err := s.db.UpdateSubscriptionNodeStatus(ctx, sn.SubscriptionID, sn.NodeID, database.SyncStatusPendingRemove); err != nil {
-			return fmt.Errorf("recalculate nodes: set pending_remove node %d: %w", nodeID, err)
+			return fmt.Errorf("reconcile plan nodes: set pending_remove node %d: %w", nodeID, err)
 		}
 		logger.Debug("set pending_remove for active node not in target",
 			zap.Uint("subscription_id", subscriptionID),
@@ -163,14 +154,14 @@ func (s *SyncService) RecalculateNodes(ctx context.Context, subscriptionID uint,
 			continue
 		}
 		if err := s.db.UpdateSubscriptionNodeStatus(ctx, sn.SubscriptionID, sn.NodeID, database.SyncStatusPendingRemove); err != nil {
-			return fmt.Errorf("recalculate nodes: set pending_remove for stale pending_add node %d: %w", nodeID, err)
+			return fmt.Errorf("reconcile plan nodes: set pending_remove for stale pending_add node %d: %w", nodeID, err)
 		}
 		logger.Debug("set pending_remove for stale pending_add node",
 			zap.Uint("subscription_id", subscriptionID),
 			zap.Uint("node_id", nodeID))
 	}
 
-	logger.Debug("recalculate nodes completed",
+	logger.Debug("reconcile plan nodes completed",
 		zap.Uint("subscription_id", subscriptionID))
 
 	return nil
@@ -441,23 +432,25 @@ func (s *SyncService) handleSyncError(ctx context.Context, sn *database.Subscrip
 }
 
 // CalculateRetryAt returns the next retry timestamp for the given retry count.
-// Retry intervals: 1st=5min, 2nd=15min, 3rd=1h, 4+=6h. Prevents hammering failing nodes.
+// Intervals: 1m → 2m → 5m → 15m → 30m → 45m → 60m (capped). After 6 failures
+// further calls still get 60m, and handleSyncError will mark the node pending_remove.
 func CalculateRetryAt(retryCount int) time.Time {
-	interval := 1 * time.Minute
 	switch retryCount {
+	case 0:
+		return time.Now().UTC().Truncate(time.Minute).Add(1 * time.Minute)
 	case 1:
-		interval = 5 * time.Minute
+		return time.Now().UTC().Truncate(time.Minute).Add(2 * time.Minute)
 	case 2:
-		interval = 15 * time.Minute
+		return time.Now().UTC().Truncate(time.Minute).Add(5 * time.Minute)
 	case 3:
-		interval = 1 * time.Hour
+		return time.Now().UTC().Truncate(time.Minute).Add(15 * time.Minute)
+	case 4:
+		return time.Now().UTC().Truncate(time.Minute).Add(30 * time.Minute)
+	case 5:
+		return time.Now().UTC().Truncate(time.Minute).Add(45 * time.Minute)
 	default:
-		if retryCount >= 4 {
-			interval = 6 * time.Hour
-		}
+		return time.Now().UTC().Truncate(time.Minute).Add(60 * time.Minute)
 	}
-
-	return time.Now().UTC().Truncate(time.Minute).Add(interval)
 }
 
 // SyncPendingNodes fetches pending nodes across all subscriptions and processes them.
@@ -507,8 +500,8 @@ func (s *SyncService) SyncPendingNodes(ctx context.Context) error {
 			lastErr = err
 		}
 
-		if pruneErr := s.RecalculateNodes(ctx, sub.ID, 0); pruneErr != nil {
-			logger.Warn("recalculate nodes failed",
+		if pruneErr := s.ReconcilePlanNodes(ctx, sub.ID); pruneErr != nil {
+			logger.Warn("reconcile plan nodes failed",
 				zap.Uint("subscription_id", sub.ID),
 				zap.Error(pruneErr))
 			lastErr = pruneErr
