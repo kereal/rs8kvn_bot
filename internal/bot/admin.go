@@ -193,32 +193,20 @@ func (h *Handler) HandleBroadcast(ctx context.Context, update tgbotapi.Update) e
 		return nil
 	}
 
-	totalCount, err := h.db.GetTotalTelegramIDCount(ctx)
-	if err != nil {
-		logger.Error("Failed to count telegram IDs", zap.Error(err))
-		h.SendMessage(ctx, chatID, "❌ Ошибка получения списка пользователей")
-		return fmt.Errorf("count telegram ids: %w", err)
-	}
-	if totalCount == 0 {
-		h.SendMessage(ctx, chatID, "❌ Нет пользователей для рассылки")
-		return nil
-	}
-
-	h.SendMessage(ctx, chatID, fmt.Sprintf("📤 Начинаю рассылку для %d пользователей...", totalCount))
-
 	const (
 		batchSize            = 100
 		broadcastConcurrency = 10 // max concurrent sends per batch
 	)
 
 	var (
-		successCount       int64 = 0
-		failCount          int64 = 0
+		successCount       int64
+		failCount          int64
+		totalProcessed     int64
 		batchErr           error
-		broadcastCancelled bool // set when ctx is cancelled mid-broadcast; guarantees we always reach wg.Wait() + final report
+		broadcastCancelled bool
 	)
 	offset := 0
-	for offset < int(totalCount) {
+	for {
 		select {
 		case <-ctx.Done():
 			broadcastCancelled = true
@@ -234,6 +222,9 @@ func (h *Handler) HandleBroadcast(ctx context.Context, update tgbotapi.Update) e
 			batchErr = err
 			break
 		}
+		if len(ids) == 0 {
+			break
+		}
 
 		var wg sync.WaitGroup
 		sem := make(chan struct{}, broadcastConcurrency)
@@ -247,8 +238,11 @@ func (h *Handler) HandleBroadcast(ctx context.Context, update tgbotapi.Update) e
 				wg.Add(1)
 				go func(tg int64) {
 					defer logger.Recover("Broadcast worker")
+					defer func() {
+						<-sem
+						time.Sleep(50 * time.Millisecond)
+					}()
 					defer wg.Done()
-					defer func() { <-sem }()
 
 					select {
 					case <-ctx.Done():
@@ -261,11 +255,12 @@ func (h *Handler) HandleBroadcast(ctx context.Context, update tgbotapi.Update) e
 					msg.ParseMode = "MarkdownV2"
 					msg.DisableWebPagePreview = true
 					if err := h.sendWithError(ctx, msg); err != nil {
-						atomic.AddInt64(&failCount, 1)
+						if ctx.Err() == nil {
+							atomic.AddInt64(&failCount, 1)
+						}
 					} else {
 						atomic.AddInt64(&successCount, 1)
 					}
-					time.Sleep(50 * time.Millisecond)
 				}(telegramID)
 			case <-ctx.Done():
 				broadcastCancelled = true
@@ -276,8 +271,13 @@ func (h *Handler) HandleBroadcast(ctx context.Context, update tgbotapi.Update) e
 		if broadcastCancelled {
 			break
 		}
-		offset += batchSize
+		offset += len(ids)
+		atomic.AddInt64(&totalProcessed, int64(len(ids)))
 	}
+
+	sent := atomic.LoadInt64(&successCount)
+	failed := atomic.LoadInt64(&failCount)
+	remaining := int(totalProcessed) - int(sent+failed)
 
 	if broadcastCancelled {
 		h.SendMessage(context.WithoutCancel(ctx), chatID, fmt.Sprintf(`⚠️ Рассылка прервана!
@@ -285,29 +285,24 @@ func (h *Handler) HandleBroadcast(ctx context.Context, update tgbotapi.Update) e
 📤 Отправлено: %d
 ❌ Ошибок: %d
 👥 Осталось: %d`,
-			atomic.LoadInt64(&successCount),
-			atomic.LoadInt64(&failCount),
-			int(totalCount)-int(atomic.LoadInt64(&successCount)+atomic.LoadInt64(&failCount))))
+			sent, failed, remaining))
 		return fmt.Errorf("broadcast cancelled")
 	}
 	if batchErr != nil {
 		h.SendMessage(context.WithoutCancel(ctx), chatID, fmt.Sprintf(`❌ Рассылка прервана из-за ошибки!
 
 📤 Отправлено: %d
-❌ Ошибок отправки: %d
-👥 Всего пользователей: %d
+❌ Ошибок: %d
+👥 Не обработано: %d
 
 Ошибка: %v`,
-			atomic.LoadInt64(&successCount),
-			atomic.LoadInt64(&failCount),
-			totalCount,
-			batchErr,
+			sent, failed, remaining, batchErr,
 		))
 		logger.Error("Broadcast failed due to batch retrieval error",
 			zap.Error(batchErr),
-			zap.Int64("success", atomic.LoadInt64(&successCount)),
-			zap.Int64("failed", atomic.LoadInt64(&failCount)),
-			zap.Int64("total", totalCount))
+			zap.Int64("success", sent),
+			zap.Int64("failed", failed),
+			zap.Int("remaining", remaining))
 		return fmt.Errorf("broadcast batch error: %w", batchErr)
 	}
 
@@ -315,15 +310,13 @@ func (h *Handler) HandleBroadcast(ctx context.Context, update tgbotapi.Update) e
 
 📤 Отправлено: %d
 ❌ Ошибок: %d
-👥 Всего пользователей: %d`,
-		atomic.LoadInt64(&successCount),
-		atomic.LoadInt64(&failCount),
-		totalCount,
+👥 Всего: %d`,
+		sent, failed, totalProcessed,
 	))
 	logger.Info("Broadcast completed",
-		zap.Int64("success", atomic.LoadInt64(&successCount)),
-		zap.Int64("failed", atomic.LoadInt64(&failCount)),
-		zap.Int64("total", totalCount))
+		zap.Int64("success", sent),
+		zap.Int64("failed", failed),
+		zap.Int64("total", totalProcessed))
 	return nil
 }
 

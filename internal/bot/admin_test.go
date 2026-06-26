@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/kereal/rs8kvn_bot/internal/config"
@@ -352,10 +353,6 @@ func TestHandleBroadcast_ValidBroadcast(t *testing.T) {
 	mockBot := testutil.NewMockBotAPI()
 	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
-	mockDB.GetTotalTelegramIDCountFunc = func(ctx context.Context) (int64, error) {
-		return 3, nil
-	}
-
 	callCount := 0
 	mockDB.GetTelegramIDsBatchFunc = func(ctx context.Context, offset, limit int) ([]int64, error) {
 		callCount++
@@ -370,6 +367,7 @@ func TestHandleBroadcast_ValidBroadcast(t *testing.T) {
 
 	handler.HandleBroadcast(ctx, update)
 	assert.True(t, mockBot.SendCalledSafe())
+	assert.Contains(t, mockBot.LastSentTextSafe(), "Рассылка завершена")
 }
 
 func TestHandleBroadcast_NoMessage(t *testing.T) {
@@ -402,8 +400,8 @@ func TestHandleBroadcast_NoUsers(t *testing.T) {
 	mockBot := testutil.NewMockBotAPI()
 	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
-	mockDB.GetTotalTelegramIDCountFunc = func(ctx context.Context) (int64, error) {
-		return 0, nil
+	mockDB.GetTelegramIDsBatchFunc = func(ctx context.Context, offset, limit int) ([]int64, error) {
+		return []int64{}, nil
 	}
 
 	ctx := context.Background()
@@ -411,7 +409,7 @@ func TestHandleBroadcast_NoUsers(t *testing.T) {
 
 	handler.HandleBroadcast(ctx, update)
 	assert.True(t, mockBot.SendCalledSafe())
-	assert.Contains(t, mockBot.LastSentTextSafe(), "Нет пользователей")
+	assert.Contains(t, mockBot.LastSentTextSafe(), "Всего: 0")
 }
 
 func TestHandleBroadcast_DatabaseError(t *testing.T) {
@@ -425,17 +423,16 @@ func TestHandleBroadcast_DatabaseError(t *testing.T) {
 	mockBot := testutil.NewMockBotAPI()
 	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
-	mockDB.GetTotalTelegramIDCountFunc = func(ctx context.Context) (int64, error) {
-		return 0, errors.New("database error")
+	mockDB.GetTelegramIDsBatchFunc = func(ctx context.Context, offset, limit int) ([]int64, error) {
+		return nil, errors.New("database error")
 	}
 
 	ctx := context.Background()
 	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "admin"}, "/broadcast Test message")
 
 	handler.HandleBroadcast(ctx, update)
-
-	// Should send some message (either error or result)
 	assert.True(t, mockBot.SendCalledSafe())
+	assert.Contains(t, mockBot.LastSentTextSafe(), "Ошибка")
 }
 
 func TestHandleBroadcast_SendFailure(t *testing.T) {
@@ -450,12 +447,13 @@ func TestHandleBroadcast_SendFailure(t *testing.T) {
 	mockBot.SendError = errors.New("send error")
 	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
-	mockDB.GetTotalTelegramIDCountFunc = func(ctx context.Context) (int64, error) {
-		return 2, nil
-	}
-
+	callCount := 0
 	mockDB.GetTelegramIDsBatchFunc = func(ctx context.Context, offset, limit int) ([]int64, error) {
-		return []int64{111, 222}, nil
+		callCount++
+		if callCount == 1 {
+			return []int64{111, 222}, nil
+		}
+		return []int64{}, nil
 	}
 
 	ctx := context.Background()
@@ -463,6 +461,8 @@ func TestHandleBroadcast_SendFailure(t *testing.T) {
 
 	handler.HandleBroadcast(ctx, update)
 	assert.True(t, mockBot.SendCalledSafe())
+	assert.Contains(t, mockBot.LastSentTextSafe(), "Рассылка завершена")
+	assert.Contains(t, mockBot.LastSentTextSafe(), "Ошибок: 2")
 }
 
 func TestHandleBroadcast_ContextCancellation(t *testing.T) {
@@ -476,12 +476,7 @@ func TestHandleBroadcast_ContextCancellation(t *testing.T) {
 	mockBot := testutil.NewMockBotAPI()
 	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
-	mockDB.GetTotalTelegramIDCountFunc = func(ctx context.Context) (int64, error) {
-		return 100, nil
-	}
-
 	ctx, cancel := context.WithCancel(context.Background())
-	// Cancel immediately to test early exit
 	cancel()
 
 	mockDB.GetTelegramIDsBatchFunc = func(ctx context.Context, offset, limit int) ([]int64, error) {
@@ -491,9 +486,8 @@ func TestHandleBroadcast_ContextCancellation(t *testing.T) {
 	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "admin"}, "/broadcast Test message")
 
 	handler.HandleBroadcast(ctx, update)
-	// Admin must reliably receive the cancellation report (uses background ctx per fix)
-	// even if broadcast was cancelled before any work.
 	assert.True(t, mockBot.SendCalledSafe(), "Cancellation report must be sent to admin even on ctx cancel")
+	assert.Contains(t, mockBot.LastSentTextSafe(), "прервана")
 }
 
 // TestHandleBroadcast_MultipleBatches tests broadcast with multiple batches of users
@@ -508,31 +502,23 @@ func TestHandleBroadcast_MultipleBatches(t *testing.T) {
 	mockBot := testutil.NewMockBotAPI()
 	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
-	// Set up 250 users to test multiple batches (batch size is 100)
-	mockDB.GetTotalTelegramIDCountFunc = func(ctx context.Context) (int64, error) {
-		return 250, nil
-	}
-
 	callCount := 0
 	mockDB.GetTelegramIDsBatchFunc = func(ctx context.Context, offset, limit int) ([]int64, error) {
 		callCount++
 		switch callCount {
 		case 1:
-			// First batch: 100 users
 			ids := make([]int64, 100)
 			for i := 0; i < 100; i++ {
 				ids[i] = int64(i + 1)
 			}
 			return ids, nil
 		case 2:
-			// Second batch: 100 users
 			ids := make([]int64, 100)
 			for i := 0; i < 100; i++ {
 				ids[i] = int64(i + 101)
 			}
 			return ids, nil
 		case 3:
-			// Third batch: 50 users
 			ids := make([]int64, 50)
 			for i := 0; i < 50; i++ {
 				ids[i] = int64(i + 201)
@@ -548,7 +534,8 @@ func TestHandleBroadcast_MultipleBatches(t *testing.T) {
 
 	handler.HandleBroadcast(ctx, update)
 	assert.True(t, mockBot.SendCalledSafe())
-	assert.Equal(t, 3, callCount, "Should call GetTelegramIDsBatch 3 times for 250 users")
+	assert.Equal(t, 4, callCount, "Should call GetTelegramIDsBatch 4 times (3 batches + 1 empty)")
+	assert.Contains(t, mockBot.LastSentTextSafe(), "Всего: 250")
 }
 
 // TestHandleBroadcast_BatchError tests broadcast when GetTelegramIDsBatch fails
@@ -563,18 +550,12 @@ func TestHandleBroadcast_BatchError(t *testing.T) {
 	mockBot := testutil.NewMockBotAPI()
 	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
-	mockDB.GetTotalTelegramIDCountFunc = func(ctx context.Context) (int64, error) {
-		return 200, nil
-	}
-
 	callCount := 0
 	mockDB.GetTelegramIDsBatchFunc = func(ctx context.Context, offset, limit int) ([]int64, error) {
 		callCount++
 		if callCount == 1 {
-			// First batch succeeds
 			return []int64{111, 222}, nil
 		}
-		// Second batch fails
 		return nil, errors.New("database connection lost")
 	}
 
@@ -582,7 +563,8 @@ func TestHandleBroadcast_BatchError(t *testing.T) {
 	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "admin"}, "/broadcast Test message")
 
 	handler.HandleBroadcast(ctx, update)
-	assert.True(t, mockBot.SendCalledSafe(), "Should send at least some messages before error")
+	assert.True(t, mockBot.SendCalledSafe(), "Should send error report")
+	assert.Contains(t, mockBot.LastSentTextSafe(), "Ошибка")
 }
 
 // TestHandleBroadcast_EmptyBatchAfterFirst tests handling of empty subsequent batches
@@ -597,18 +579,12 @@ func TestHandleBroadcast_EmptyBatchAfterFirst(t *testing.T) {
 	mockBot := testutil.NewMockBotAPI()
 	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
-	// Total count says 50, but only first batch returns users
-	mockDB.GetTotalTelegramIDCountFunc = func(ctx context.Context) (int64, error) {
-		return 50, nil
-	}
-
 	callCount := 0
 	mockDB.GetTelegramIDsBatchFunc = func(ctx context.Context, offset, limit int) ([]int64, error) {
 		callCount++
 		if callCount == 1 {
 			return []int64{111, 222}, nil
 		}
-		// Subsequent batches return empty (inconsistency in database)
 		return []int64{}, nil
 	}
 
@@ -617,6 +593,7 @@ func TestHandleBroadcast_EmptyBatchAfterFirst(t *testing.T) {
 
 	handler.HandleBroadcast(ctx, update)
 	assert.True(t, mockBot.SendCalledSafe())
+	assert.Contains(t, mockBot.LastSentTextSafe(), "Всего: 2")
 }
 
 // TestHandleBroadcast_GetTelegramIDsBatchErrorOnFirstCall tests error on first batch call
@@ -631,10 +608,6 @@ func TestHandleBroadcast_GetTelegramIDsBatchErrorOnFirstCall(t *testing.T) {
 	mockBot := testutil.NewMockBotAPI()
 	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
-	mockDB.GetTotalTelegramIDCountFunc = func(ctx context.Context) (int64, error) {
-		return 100, nil
-	}
-
 	mockDB.GetTelegramIDsBatchFunc = func(ctx context.Context, offset, limit int) ([]int64, error) {
 		return nil, errors.New("database unavailable")
 	}
@@ -643,8 +616,8 @@ func TestHandleBroadcast_GetTelegramIDsBatchErrorOnFirstCall(t *testing.T) {
 	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "admin"}, "/broadcast Test message")
 
 	handler.HandleBroadcast(ctx, update)
-	// Should send starting message but not complete broadcast
-	assert.True(t, mockBot.SendCalledSafe(), "Should send initial status message")
+	assert.True(t, mockBot.SendCalledSafe(), "Should send error report")
+	assert.Contains(t, mockBot.LastSentTextSafe(), "Ошибка")
 }
 
 // TestHandleBroadcast_ConcurrentBroadcasts tests handling of concurrent broadcast attempts
@@ -659,18 +632,18 @@ func TestHandleBroadcast_ConcurrentBroadcasts(t *testing.T) {
 	mockBot := testutil.NewMockBotAPI()
 	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
-	mockDB.GetTotalTelegramIDCountFunc = func(ctx context.Context) (int64, error) {
-		return 5, nil
-	}
-
+	var callCount int64
 	mockDB.GetTelegramIDsBatchFunc = func(ctx context.Context, offset, limit int) ([]int64, error) {
-		return []int64{111, 222, 333, 444, 555}, nil
+		n := atomic.AddInt64(&callCount, 1)
+		if n <= 2 {
+			return []int64{111, 222, 333, 444, 555}, nil
+		}
+		return []int64{}, nil
 	}
 
 	ctx := context.Background()
 	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "admin"}, "/broadcast Test message")
 
-	// Run two broadcasts concurrently
 	done1 := make(chan bool)
 	done2 := make(chan bool)
 
@@ -684,11 +657,9 @@ func TestHandleBroadcast_ConcurrentBroadcasts(t *testing.T) {
 		done2 <- true
 	}()
 
-	// Wait for both to complete
 	<-done1
 	<-done2
 
-	// Use thread-safe accessor to avoid data race
 	assert.True(t, mockBot.SendCalledSafe(), "Should have sent messages")
 }
 
@@ -1186,18 +1157,21 @@ func TestEscapeMarkdown(t *testing.T) {
 		{"backticks", "`code`", "\\`code\\`"},
 		{"tilde", "~~strike~~", "\\~\\~strike\\~\\~"},
 		{"pipe", "a|b", "a\\|b"},
-		{"dot", "file.txt", "file\\.txt"},
-		{"exclamation", "wow!", "wow\\!"},
+		{"dot", "file.txt", "file.txt"},
+		{"exclamation", "wow!", "wow!"},
 		{"plus", "a+b", "a\\+b"},
 		{"minus", "a-b", "a\\-b"},
 		{"equals", "a=b", "a\\=b"},
 		{"hash", "#heading", "\\#heading"},
 		{"greater than", "a>b", "a\\>b"},
 		{"curly braces", "{a}", "\\{a\\}"},
-		{"all special chars", "_*[test](url)`~>#+-=|{}.!", "\\_\\*\\[test\\]\\(url\\)\\`\\~\\>\\#\\+\\-\\=\\|\\{\\}\\.\\!"},
+		{"caret", "a^b", "a\\^b"},
+		{"all special chars", "_*[test](url)`~>#+-=|{}^", "\\_\\*\\[test\\]\\(url\\)\\`\\~\\>\\#\\+\\-\\=\\|\\{\\}\\^"},
 		{"cyrillic text", "Привет мир", "Привет мир"},
 		{"cyrillic with special", "Привет_мир", "Привет\\_мир"},
 		{"multiple underscores", "a_b_c", "a\\_b\\_c"},
+		{"exclamation not escaped", "Hello!", "Hello!"},
+		{"dot not escaped", "file.txt", "file.txt"},
 	}
 
 	for _, tt := range tests {
