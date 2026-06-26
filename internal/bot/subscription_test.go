@@ -1379,8 +1379,10 @@ func TestCreateSubscription_WithPendingInvite(t *testing.T) {
 	mockDB.CreateSubscriptionFunc = func(ctx context.Context, sub *database.Subscription, inviteCode string) error {
 		gotInviteCode = inviteCode
 		if inviteCode == "ABC123" {
-			sub.InviteCode = inviteCode
-			sub.ReferredBy = 999999
+			inviteVal := inviteCode
+			sub.InviteCode = &inviteVal
+			referredBy := int64(999999)
+			sub.ReferredBy = &referredBy
 		}
 		sub.ID = 1
 		// Store a value copy so assertions see a stable snapshot.
@@ -1409,8 +1411,8 @@ func TestCreateSubscription_WithPendingInvite(t *testing.T) {
 	require.NoError(t, result)
 	assert.Equal(t, "ABC123", gotInviteCode, "handler must forward inviteCode to db.CreateSubscription")
 	require.NotNil(t, savedSub)
-	assert.Equal(t, "ABC123", savedSub.InviteCode, "InviteCode must be persisted on the sub")
-	assert.Equal(t, int64(999999), savedSub.ReferredBy, "ReferredBy must be persisted on the sub")
+	assert.Equal(t, "ABC123", *savedSub.InviteCode, "InviteCode must be persisted on the sub")
+	assert.Equal(t, int64(999999), *savedSub.ReferredBy, "ReferredBy must be persisted on the sub")
 
 	// handler must consume the pending invite and bump the referral cache.
 	handler.pendingMu.Lock()

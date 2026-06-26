@@ -52,7 +52,7 @@ func TestHandleStart_WithTrialCode(t *testing.T) {
 						Username:       username,
 						SubscriptionID: subscriptionID,
 						ClientID:       "client-123",
-						InviteCode:     "invite-code",
+						InviteCode: testutil.PtrString("invite-code"),
 						Status:         "active",
 					}, nil
 				}
@@ -424,8 +424,8 @@ func TestHandleBindTrial_WithReferrerNotification(t *testing.T) {
 			Username:       username,
 			SubscriptionID: subscriptionID,
 			ClientID:       "client-123",
-			InviteCode:     "invite-code",
-			ReferredBy:     referrerTGID,
+			InviteCode:     testutil.PtrString("invite-code"),
+			ReferredBy:     testutil.PtrInt64(referrerTGID),
 			Status:         "active",
 		}, nil
 	}
@@ -523,7 +523,7 @@ func TestHandleBindTrial_Success(t *testing.T) {
 			Username:       username,
 			SubscriptionID: subscriptionID,
 			ClientID:       "client-123",
-			InviteCode:     "invite-code",
+			InviteCode:     testutil.PtrString("invite-code"),
 			Status:         "active",
 		}, nil
 	}
@@ -569,22 +569,22 @@ func TestHandleBindTrial_IncrementsReferrerCacheCount(t *testing.T) {
 		return nil, gorm.ErrRecordNotFound
 	}
 	mockDB.BindTrialSubscriptionFunc = func(ctx context.Context, subscriptionID string, telegramID int64, username string) (*database.Subscription, error) {
-		return &database.Subscription{
-			TelegramID:     telegramID,
-			Username:       username,
-			SubscriptionID: subscriptionID,
-			ClientID:       "client-123",
-			InviteCode:     "invite-code",
-			ReferredBy:     referrerTGID,
-			Status:         "active",
-		}, nil
-	}
-	mockDB.GetInviteByCodeFunc = func(ctx context.Context, code string) (*database.Invite, error) {
-		return &database.Invite{Code: code, ReferrerTGID: referrerTGID}, nil
-	}
+	return &database.Subscription{
+		TelegramID:     telegramID,
+		Username:       username,
+		SubscriptionID: subscriptionID,
+		ClientID:       "client-123",
+		InviteCode:     testutil.PtrString("invite-code"),
+		ReferredBy:     testutil.PtrInt64(referrerTGID),
+		Status:         "active",
+	}, nil
+}
+mockDB.GetInviteByCodeFunc = func(ctx context.Context, code string) (*database.Invite, error) {
+	return &database.Invite{Code: code, ReferrerTGID: referrerTGID}, nil
+}
 
-	ctx := context.Background()
-	handler.handleBindTrial(ctx, 123456, "testuser", "trial-code-123")
+ctx := context.Background()
+handler.handleBindTrial(ctx, 123456, "testuser", "trial-code-123")
 
 	assert.Equal(t, int64(1), handler.GetReferralCount(referrerTGID),
 		"IncrementReferralCount should fire on trial bind when invite resolves to a referrer")
@@ -624,8 +624,8 @@ func TestHandleBindTrial_NoReferrerLeavesCacheUntouched(t *testing.T) {
 			Username:       username,
 			SubscriptionID: subscriptionID,
 			ClientID:       "client-123",
-			InviteCode:     "",
-			ReferredBy:     0,
+			InviteCode:     nil,
+			ReferredBy:     nil,
 			Status:         "active",
 		}, nil
 	}
@@ -883,7 +883,7 @@ func TestHandleBindTrial_UpdateClientError(t *testing.T) {
 		Username:       "testuser",
 		SubscriptionID: "test-sub-id",
 		ClientID:       "test-client-id",
-		InviteCode:     "ABC123",
+			InviteCode: testutil.PtrString("ABC123"),
 		Status:         "active",
 	}
 	callCount := 0
@@ -929,7 +929,7 @@ func TestHandleBindTrial_GetInviteError(t *testing.T) {
 		Username:       "testuser",
 		SubscriptionID: "test-sub-id",
 		ClientID:       "test-client-id",
-		InviteCode:     "ABC123",
+			InviteCode: testutil.PtrString("ABC123"),
 		Status:         "active",
 	}
 	mockDB.BindTrialSubscriptionFunc = func(ctx context.Context, subscriptionID string, telegramID int64, username string) (*database.Subscription, error) {

@@ -137,8 +137,8 @@ func (h *Handler) HandleDel(ctx context.Context, update tgbotapi.Update) error {
 	}
 
 	// Decrement referral cache only after successful deletion
-	if deleted.ReferredBy > 0 {
-		h.DecrementReferralCount(deleted.ReferredBy)
+	if deleted.ReferredBy != nil && *deleted.ReferredBy > 0 {
+		h.DecrementReferralCount(*deleted.ReferredBy)
 	}
 
 	// Invalidate cache only after successful deletion
