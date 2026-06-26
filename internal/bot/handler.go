@@ -125,6 +125,7 @@ func NewHandler(bot interfaces.BotAPI, cfg *config.Config, db interfaces.Databas
 	// Wire cache invalidation to centralized service (if service is present)
 	if h.subscriptionService != nil {
 		h.subscriptionService.SetInvalidateFunc(h.cache.Invalidate)
+		h.subscriptionService.SetInvalidateBySubIDFunc(h.cache.InvalidateBySubID)
 	}
 
 	return h
