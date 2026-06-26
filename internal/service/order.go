@@ -91,9 +91,6 @@ func (o *OrderService) ActivateProduct(ctx context.Context, telegramID int64, pr
 		if err := o.syncSvc.RecalculateNodes(ctx, sub.ID); err != nil {
 			logger.Warn("recalculate nodes failed (will retry)", zap.Error(err))
 		}
-		if err := o.syncSvc.SyncSubscription(ctx, sub.ID); err != nil {
-			logger.Warn("sync subscription failed (will retry)", zap.Error(err))
-		}
 	}
 
 	return order, nil
