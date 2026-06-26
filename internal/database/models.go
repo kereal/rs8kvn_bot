@@ -41,13 +41,13 @@ type Subscription struct {
 	// ExpiresAt — срок действия подписки. NULL = бессрочная (free-план).
 	ExpiresAt      *time.Time `gorm:"index:idx_expiry"`
 	Status         string     `gorm:"default:active;size:50;index"`
-	InviteCode     string     `gorm:"size:16;index"`
+	InviteCode     *string    `gorm:"size:16;index"`
 	PlanID         uint       `gorm:"index"`
-	ReferredBy     int64      `gorm:"index"`
-	ProductID      uint       `gorm:"index"`
-	StartedAt      time.Time
-	PricePaidCents int64     `gorm:"default:0"`
-	Currency       string    `gorm:"size:3"`
+	ReferredBy     *int64     `gorm:"index"`
+	ProductID      *uint      `gorm:"index"`
+	StartedAt      *time.Time
+	PricePaidCents int64      `gorm:"default:0"`
+	Currency       *string    `gorm:"size:3"`
 	Devices        string    `gorm:"type:text;default:'[]'"` // JSON array of {header_key: value} device entries
 	Ips            string    `gorm:"type:text;default:'[]'"` // JSON array of {ip: timestamp} entries
 	CreatedAt      time.Time `gorm:"autoCreateTime"`

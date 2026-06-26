@@ -243,9 +243,11 @@ func TestSyncService_RecalculateNodes_RemovesStalePendingAdd(t *testing.T) {
 
 	rows, err := db.GetBySubscriptionID(ctx, sub.ID)
 	require.NoError(t, err)
-	assert.Len(t, rows, 1)
+	assert.Len(t, rows, 2)
 	assert.Equal(t, node1.ID, rows[0].NodeID)
 	assert.Equal(t, database.SyncStatusActive, rows[0].Status)
+	assert.Equal(t, node2.ID, rows[1].NodeID)
+	assert.Equal(t, database.SyncStatusPendingRemove, rows[1].Status)
 }
 
 func TestSyncService_SyncSubscription_PendingAdd(t *testing.T) {

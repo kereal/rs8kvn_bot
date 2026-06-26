@@ -48,9 +48,9 @@ func TestSubscriptionExpireWorker_process_FindsAndExpires(t *testing.T) {
 		PlanID:          plan.ID,
 		ExpiresAt:       ptrTime(time.Now().Add(-1 * time.Hour)),
 		PricePaidCents:  100,
-		Currency:        "RUB",
-		ProductID:       1,
-		StartedAt:       time.Now().Add(-48 * time.Hour),
+		Currency:       testutil.PtrString("RUB"),
+		ProductID:      testutil.PtrUint(1),
+		StartedAt:       ptrTime(time.Now().Add(-48 * time.Hour)),
 	}
 	require.NoError(t, db.CreateSubscription(ctx, expiredSub, ""))
 
@@ -84,9 +84,9 @@ func TestSubscriptionExpireWorker_process_EmptyResult(t *testing.T) {
 		PlanID:          plan.ID,
 		ExpiresAt:       ptrTime(time.Now().Add(24 * time.Hour)),
 		PricePaidCents:  100,
-		Currency:        "RUB",
-		ProductID:       1,
-		StartedAt:       time.Now().Add(-1 * time.Hour),
+		Currency:       testutil.PtrString("RUB"),
+		ProductID:      testutil.PtrUint(1),
+		StartedAt:       ptrTime(time.Now().Add(-1 * time.Hour)),
 	}
 	require.NoError(t, db.CreateSubscription(ctx, activeSub, ""))
 

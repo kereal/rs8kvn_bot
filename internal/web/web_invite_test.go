@@ -78,10 +78,11 @@ func TestHandleInvite_InvalidCode(t *testing.T) {
 	}
 
 	mockDB.CreateTrialSubscriptionFunc = func(ctx context.Context, inviteCode, subscriptionID, clientID string, expiryTime time.Time) (*database.Subscription, error) {
+		inviteVal := inviteCode
 		return &database.Subscription{
 			SubscriptionID: subscriptionID,
 			ClientID:       clientID,
-			InviteCode:     inviteCode,
+			InviteCode:     &inviteVal,
 		}, nil
 	}
 
@@ -681,10 +682,11 @@ func TestHandleInvite_ParallelRequests(t *testing.T) {
 		return nil
 	}
 	mockDB.CreateTrialSubscriptionFunc = func(ctx context.Context, inviteCode, subscriptionID, clientID string, expiryTime time.Time) (*database.Subscription, error) {
+		inviteVal := inviteCode
 		return &database.Subscription{
 			SubscriptionID: subscriptionID,
 			PlanID:         1,
-			InviteCode:     inviteCode,
+			InviteCode:     &inviteVal,
 		}, nil
 	}
 

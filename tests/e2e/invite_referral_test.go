@@ -479,7 +479,7 @@ func TestE2E_FullCycle_MultipleUsersViaInvite(t *testing.T) {
 		trialPlan, err := env.db.GetPlanByName(ctx, database.TrialPlanName)
 		require.NoError(t, err)
 		assert.False(t, sub.PlanID == trialPlan.ID)
-		assert.Equal(t, referrerID, sub.ReferredBy, "User %d should have correct referrer", chatID)
+		assert.Equal(t, referrerID, *sub.ReferredBy, "User %d should have correct referrer", chatID)
 	}
 }
 
@@ -675,13 +675,14 @@ func TestE2E_InviteChain_ABC(t *testing.T) {
 
 	subB, err := env.db.GetByTelegramID(ctx, userB)
 	require.NoError(t, err)
-	subB.ReferredBy = 100000
+	referredByB := int64(100000)
+	subB.ReferredBy = &referredByB
 	err = env.db.UpdateSubscription(ctx, subB)
 	require.NoError(t, err)
 
 	subB, err = env.db.GetByTelegramID(ctx, userB)
 	require.NoError(t, err)
-	assert.Equal(t, int64(100000), subB.ReferredBy, "B should have A as referrer")
+	assert.Equal(t, int64(100000), *subB.ReferredBy, "B should have A as referrer")
 
 	// Create invite for B
 	_, err = env.db.GetOrCreateInvite(ctx, userB, "invite_b")
@@ -694,16 +695,17 @@ func TestE2E_InviteChain_ABC(t *testing.T) {
 
 	subC, err := env.db.GetByTelegramID(ctx, userC)
 	require.NoError(t, err)
-	subC.ReferredBy = 200000
+	referredByC := int64(200000)
+	subC.ReferredBy = &referredByC
 	err = env.db.UpdateSubscription(ctx, subC)
 	require.NoError(t, err)
 
 	subC, err = env.db.GetByTelegramID(ctx, userC)
 	require.NoError(t, err)
-	assert.Equal(t, int64(200000), subC.ReferredBy, "C should have B as referrer")
+	assert.Equal(t, int64(200000), *subC.ReferredBy, "C should have B as referrer")
 
 	// Verify A has no referrer
 	subA, err := env.db.GetByTelegramID(ctx, 100000)
 	require.NoError(t, err)
-	assert.Equal(t, int64(0), subA.ReferredBy, "A should have no referrer")
+	assert.Nil(t, subA.ReferredBy, "A should have no referrer")
 }

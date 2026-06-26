@@ -295,12 +295,13 @@ func TestSubscriptionService_RenewSubscription_PersistsPurchaseMetadata(t *testi
 	updated, err := db.GetByTelegramID(ctx, sub.TelegramID)
 	require.NoError(t, err)
 	require.NotNil(t, updated.ExpiresAt)
-
-	assert.Equal(t, product.ID, updated.ProductID)
+	require.NotNil(t, updated.ProductID)
+	assert.Equal(t, product.ID, *updated.ProductID)
 	assert.Equal(t, product.PriceCents, updated.PricePaidCents)
-	assert.Equal(t, product.Currency, updated.Currency)
+	require.NotNil(t, updated.Currency)
+	assert.Equal(t, product.Currency, *updated.Currency)
 	assert.WithinDuration(t, now.AddDate(0, 0, product.DurationDays), *updated.ExpiresAt, time.Second)
-	assert.WithinDuration(t, now, updated.StartedAt, time.Second)
+	assert.WithinDuration(t, now, *updated.StartedAt, time.Second)
 	assert.NotZero(t, updated.UpdatedAt)
 
 	orders, err := db.GetOrdersBySubscriptionID(ctx, sub.ID)
@@ -647,7 +648,8 @@ func TestSubscriptionService_CreateTrial_XUIError(t *testing.T) {
 			return []database.Node{{ID: 1, IsActive: true, Host: "http://localhost:2053", InboundIDs: "[1]"}}, nil
 		},
 		CreateTrialSubscriptionFunc: func(ctx context.Context, inviteCode, subscriptionID, clientID string, expiryTime time.Time) (*database.Subscription, error) {
-			return &database.Subscription{InviteCode: inviteCode, SubscriptionID: subscriptionID, ClientID: clientID}, nil
+			inviteVal := inviteCode
+			return &database.Subscription{InviteCode: &inviteVal, SubscriptionID: subscriptionID, ClientID: clientID}, nil
 		},
 	}
 	xuiClient := &testutil.MockXUIClient{

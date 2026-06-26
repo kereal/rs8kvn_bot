@@ -252,26 +252,32 @@ func (c *CommandHandler) handleBindTrial(ctx context.Context, chatID int64, user
 
 	// Admin notification
 	if c.h.cfg.TelegramAdminID > 0 {
-		invite, err := c.h.db.GetInviteByCode(ctx, sub.InviteCode)
-		if err != nil {
-			logger.Warn("Failed to get invite for admin notification", zap.Error(err))
-		} else if invite != nil {
-			c.h.SendMessage(ctx, c.h.cfg.TelegramAdminID,
-				fmt.Sprintf("🔔 Новый пользователь активировал подписку по реферационной ссылке!\n\n- Username: @%s\n- Telegram ID: %d\n- Пригласил: %d",
-					username, chatID, invite.ReferrerTGID))
+		if sub.InviteCode != nil {
+			invite, err := c.h.db.GetInviteByCode(ctx, *sub.InviteCode)
+			if err != nil {
+				logger.Warn("Failed to get invite for admin notification", zap.Error(err))
+			} else if invite != nil {
+				c.h.SendMessage(ctx, c.h.cfg.TelegramAdminID,
+					fmt.Sprintf("🔔 Новый пользователь активировал подписку по реферационной ссылке!\n\n- Username: @%s\n- Telegram ID: %d\n- Пригласил: %d",
+						username, chatID, invite.ReferrerTGID))
+			}
 		}
 	}
 
 	// Notify referrer
-	if sub.ReferredBy > 0 {
+	referredBy := int64(0)
+	if sub.ReferredBy != nil {
+		referredBy = *sub.ReferredBy
+	}
+	if referredBy > 0 {
 		referrerMsg := fmt.Sprintf("🎉 По вашей ссылке новый пользователь @%s активировал подписку!", username)
-		msg := tgbotapi.NewMessage(sub.ReferredBy, referrerMsg)
+		msg := tgbotapi.NewMessage(referredBy, referrerMsg)
 		if err := c.h.sendWithError(ctx, msg); err != nil {
-			logger.Warn("Failed to notify referrer", zap.Int64("referrer_id", sub.ReferredBy), zap.Error(err))
+			logger.Warn("Failed to notify referrer", zap.Int64("referrer_id", referredBy), zap.Error(err))
 		} else {
-			logger.Info("Referrer notified", zap.Int64("referrer_id", sub.ReferredBy))
+			logger.Info("Referrer notified", zap.Int64("referrer_id", referredBy))
 		}
-		c.h.IncrementReferralCount(sub.ReferredBy)
+		c.h.IncrementReferralCount(referredBy)
 	}
 
 	return nil

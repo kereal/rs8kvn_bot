@@ -20,6 +20,22 @@ import (
 
 var ErrRecordNotFound = gorm.ErrRecordNotFound
 
+func PtrString(v string) *string {
+	return &v
+}
+
+func PtrInt64(v int64) *int64 {
+	return &v
+}
+
+func PtrUint(v uint) *uint {
+	return &v
+}
+
+func PtrTime(t time.Time) *time.Time {
+	return &t
+}
+
 const (
 	DefaultTelegramID = int64(123456789)
 	DefaultUsername   = "testuser"
@@ -469,7 +485,8 @@ func (m *MockDatabaseService) CreateTrialSubscription(ctx context.Context, invit
 	if err != nil {
 		return nil, err
 	}
-	return &database.Subscription{InviteCode: inviteCode, SubscriptionID: subscriptionID, ClientID: clientID, PlanID: trialPlan.ID}, nil
+	inviteVal := inviteCode
+	return &database.Subscription{InviteCode: &inviteVal, SubscriptionID: subscriptionID, ClientID: clientID, PlanID: trialPlan.ID}, nil
 }
 
 func (m *MockDatabaseService) ListNodes(ctx context.Context) ([]database.Node, error) {

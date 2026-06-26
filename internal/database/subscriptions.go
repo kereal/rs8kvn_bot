@@ -46,8 +46,10 @@ func (s *Service) CreateSubscription(ctx context.Context, sub *Subscription, inv
 		if inviteCode != "" {
 			var inv Invite
 			if err := tx.Where("code = ?", inviteCode).First(&inv).Error; err == nil {
-				sub.InviteCode = inviteCode
-				sub.ReferredBy = inv.ReferrerTGID
+				inviteVal := inviteCode
+				sub.InviteCode = &inviteVal
+				referredBy := inv.ReferrerTGID
+				sub.ReferredBy = &referredBy
 			} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 				return fmt.Errorf("failed to resolve invite: %w", err)
 			}

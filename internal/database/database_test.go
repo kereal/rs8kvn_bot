@@ -22,6 +22,8 @@ func TestMain(m *testing.M) {
 
 func ptrTime(t time.Time) *time.Time { return &t }
 
+func ptrInt64(v int64) *int64 { return &v }
+
 // ==================== Model Method Tests ====================
 
 func TestOrder_StatusUsesOrderStatusType(t *testing.T) {
@@ -326,8 +328,10 @@ func TestService_CreateSubscription_PersistsInviteCodeAndReferredBy(t *testing.T
 
 	retrieved, err := svc.GetByTelegramID(ctx, 888888)
 	require.NoError(t, err)
-	assert.Equal(t, "REFER123", retrieved.InviteCode, "InviteCode must be persisted on the subscription row")
-	assert.Equal(t, int64(777777), retrieved.ReferredBy, "ReferredBy must be resolved and persisted")
+	require.NotNil(t, retrieved.InviteCode)
+	assert.Equal(t, "REFER123", *retrieved.InviteCode, "InviteCode must be persisted on the subscription row")
+	require.NotNil(t, retrieved.ReferredBy)
+	assert.Equal(t, int64(777777), *retrieved.ReferredBy, "ReferredBy must be resolved and persisted")
 
 	// Referral counts must reflect the new attribution.
 	count, err := svc.GetReferralCount(ctx, 777777)
@@ -354,8 +358,8 @@ func TestService_CreateSubscription_EmptyInviteCodeLeavesFieldsEmpty(t *testing.
 
 	retrieved, err := svc.GetByTelegramID(ctx, 888889)
 	require.NoError(t, err)
-	assert.Empty(t, retrieved.InviteCode)
-	assert.Equal(t, int64(0), retrieved.ReferredBy)
+	assert.Nil(t, retrieved.InviteCode)
+	assert.Nil(t, retrieved.ReferredBy)
 }
 
 func TestService_CreateSubscription_UnknownInviteCodeDoesNotFail(t *testing.T) {
@@ -378,8 +382,8 @@ func TestService_CreateSubscription_UnknownInviteCodeDoesNotFail(t *testing.T) {
 
 	retrieved, err := svc.GetByTelegramID(ctx, 888890)
 	require.NoError(t, err)
-	assert.Empty(t, retrieved.InviteCode)
-	assert.Equal(t, int64(0), retrieved.ReferredBy)
+	assert.Nil(t, retrieved.InviteCode)
+	assert.Nil(t, retrieved.ReferredBy)
 }
 
 func TestService_CreateSubscription_AllFields(t *testing.T) {
@@ -1146,7 +1150,7 @@ func TestService_GetReferralCount(t *testing.T) {
 			SubscriptionID: fmt.Sprintf("sub-ref-%d", i),
 			Status:         "active",
 			ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
-			ReferredBy:     referrerID,
+			ReferredBy:     ptrInt64(referrerID),
 			PlanID:         0,
 		}
 		require.NoError(t, svc.db.Create(sub).Error)
@@ -1181,7 +1185,7 @@ func TestService_GetAllReferralCounts(t *testing.T) {
 			SubscriptionID: fmt.Sprintf("sub-refall-%d", i),
 			Status:         "active",
 			ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
-			ReferredBy:     referrerID,
+			ReferredBy:     ptrInt64(referrerID),
 			PlanID:         0,
 		}
 		require.NoError(t, svc.db.Create(sub).Error)
@@ -1367,7 +1371,8 @@ func TestService_CreateTrialSubscription_Success(t *testing.T) {
 	assert.Equal(t, "client-xyz", sub.ClientID)
 	assert.Equal(t, uint(1), sub.PlanID, "Should be marked as trial")
 	assert.Less(t, sub.TelegramID, int64(0), "Unbound trial should have negative telegram_id")
-	assert.Equal(t, "INVITE123", sub.InviteCode)
+	require.NotNil(t, sub.InviteCode)
+	assert.Equal(t, "INVITE123", *sub.InviteCode)
 }
 
 func TestService_CreateTrialSubscription_AllowsSameSubID(t *testing.T) {

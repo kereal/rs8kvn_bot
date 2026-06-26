@@ -89,7 +89,7 @@ func (s *SubscriptionService) trialNodes(ctx context.Context) ([]database.Node, 
 
 // Create provisions a new free-plan subscription. inviteCode, when non-empty,
 // is resolved atomically inside the DB transaction and persisted in
-// sub.InviteCode / sub.ReferredBy. The resolved ReferrerTGID (0 if unset) is
+// sub.InviteCode / sub.ReferredBy. The resolved ReferrerTGID (nil if unset) is
 // returned in CreateResult so callers can update aggregate referral state.
 // VPN node access is provisioned asynchronously via the sync module.
 func (s *SubscriptionService) Create(ctx context.Context, telegramID int64, username, inviteCode string) (*CreateResult, error) {
@@ -98,10 +98,14 @@ func (s *SubscriptionService) Create(ctx context.Context, telegramID int64, user
 		if err := s.ensureSubscriptionNodes(ctx, existing); err != nil {
 			return nil, fmt.Errorf("ensure subscription nodes: %w", err)
 		}
+		referrerID := int64(0)
+		if existing.ReferredBy != nil {
+			referrerID = *existing.ReferredBy
+		}
 		return &CreateResult{
 			Subscription:    existing,
 			SubscriptionURL: s.cfg.SubURL(existing.SubscriptionID),
-			ReferrerTGID:    existing.ReferredBy,
+			ReferrerTGID:    referrerID,
 		}, nil
 	}
 	if !errors.Is(err, database.ErrSubscriptionNotFound) && !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -139,11 +143,15 @@ func (s *SubscriptionService) Create(ctx context.Context, telegramID int64, user
 		return nil, fmt.Errorf("ensure subscription nodes: %w", err)
 	}
 
+	referrerID := int64(0)
+	if sub.ReferredBy != nil {
+		referrerID = *sub.ReferredBy
+	}
 	subscriptionURL := s.cfg.SubURL(subID)
 	return &CreateResult{
 		Subscription:    sub,
 		SubscriptionURL: subscriptionURL,
-		ReferrerTGID:    sub.ReferredBy,
+		ReferrerTGID:    referrerID,
 	}, nil
 }
 
@@ -300,8 +308,8 @@ func (s *SubscriptionService) GetWithTraffic(ctx context.Context, telegramID int
 		planName = plan.Name
 	}
 
-	if sub.ProductID != 0 {
-		product, productErr := s.db.GetProductByID(ctx, sub.ProductID)
+	if sub.ProductID != nil && *sub.ProductID != 0 {
+		product, productErr := s.db.GetProductByID(ctx, *sub.ProductID)
 		if productErr == nil && product != nil && product.Name != "" {
 			planName = product.Name
 		}
@@ -501,9 +509,11 @@ func (s *SubscriptionService) BindTrial(ctx context.Context, subscriptionID stri
 	expiryTime := time.UnixMilli(0)
 
 	var comment string
-	if invite, err := s.db.GetInviteByCode(ctx, sub.InviteCode); err == nil {
-		if referrerSub, err := s.db.GetByTelegramID(ctx, invite.ReferrerTGID); err == nil {
-			comment = fmt.Sprintf("from: @%s", referrerSub.Username)
+	if sub.InviteCode != nil {
+		if invite, err := s.db.GetInviteByCode(ctx, *sub.InviteCode); err == nil {
+			if referrerSub, err := s.db.GetByTelegramID(ctx, invite.ReferrerTGID); err == nil {
+				comment = fmt.Sprintf("from: @%s", referrerSub.Username)
+			}
 		}
 	}
 
@@ -607,6 +617,16 @@ func (s *SubscriptionService) ReconcileOrphanedClients(ctx context.Context) (int
 		}
 		if xuiEmail == "" {
 			continue
+		}
+
+		pendingNodes, pendErr := s.db.GetPendingBySubscriptionID(ctx, sub.ID)
+		if pendErr == nil && len(pendingNodes) > 0 {
+			continue
+		}
+		if pendErr != nil {
+			logger.Warn("failed to check pending nodes for orphan reconciliation",
+				zap.Uint("subscription_id", sub.ID),
+				zap.Error(pendErr))
 		}
 
 		notFoundOnAll := true
@@ -808,11 +828,11 @@ func (s *SubscriptionService) RenewSubscription(ctx context.Context, telegramID 
 	newExpiry := calculateProductExpiry(now, sub.PlanID, sub.ExpiresAt, product)
 
 	sub.PlanID = product.PlanID
-	sub.ProductID = product.ID
+	sub.ProductID = &product.ID
 	sub.ExpiresAt = &newExpiry
 	sub.PricePaidCents = product.PriceCents
-	sub.Currency = product.Currency
-	sub.StartedAt = now
+	sub.Currency = &product.Currency
+	sub.StartedAt = &now
 	sub.UpdatedAt = now
 
 	order := &database.Order{

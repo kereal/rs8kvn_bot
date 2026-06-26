@@ -15,6 +15,13 @@ import (
 	"go.uber.org/zap"
 )
 
+// SyncService manages the synchronization of subscriptions with VPN nodes.
+type SyncService struct {
+	db         interfaces.DatabaseService
+	vpnClients map[uint]vpn.Client
+	nodes      []database.Node
+}
+
 // isAlreadyExistsError returns true if the error indicates the VPN client already exists.
 func isAlreadyExistsError(err error) bool {
 	if err == nil {
@@ -36,13 +43,6 @@ func isNotFoundError(err error) bool {
 	return strings.Contains(msg, "not found") ||
 		strings.Contains(msg, "does not exist") ||
 		strings.Contains(msg, "client not found")
-}
-
-// SyncService manages the synchronization of subscriptions with VPN nodes.
-type SyncService struct {
-	db          interfaces.DatabaseService
-	vpnClients  map[uint]vpn.Client
-	nodes       []database.Node
 }
 
 func syncIdentifier(sub *database.Subscription) string {
@@ -128,8 +128,8 @@ func (s *SyncService) RecalculateNodes(ctx context.Context, subscriptionID uint)
 		if _, inTarget := targetSet[nodeID]; inTarget {
 			continue
 		}
-		if err := s.db.DeleteSubscriptionNode(ctx, sn.SubscriptionID, sn.NodeID); err != nil {
-			return fmt.Errorf("recalculate nodes: delete stale pending_add node %d: %w", nodeID, err)
+		if err := s.db.UpdateSubscriptionNodeStatus(ctx, sn.SubscriptionID, sn.NodeID, database.SyncStatusPendingRemove); err != nil {
+			return fmt.Errorf("recalculate nodes: set pending_remove for stale pending_add node %d: %w", nodeID, err)
 		}
 	}
 

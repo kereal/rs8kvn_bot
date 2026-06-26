@@ -37,11 +37,14 @@ func (s *Service) CreateTrialSubscription(ctx context.Context, inviteCode, subsc
 		TelegramID:     generateTrialTelegramID(subscriptionID),
 		SubscriptionID: subscriptionID,
 		ClientID:       clientID,
-		InviteCode:     inviteCode,
-		ExpiresAt:      &expiryTime,
 		PlanID:         planID,
 		Status:         "active",
 	}
+	if inviteCode != "" {
+		inviteVal := inviteCode
+		sub.InviteCode = &inviteVal
+	}
+	sub.ExpiresAt = &expiryTime
 	if err := s.db.WithContext(ctx).Create(sub).Error; err != nil {
 		return nil, fmt.Errorf("failed to create trial subscription: %w", err)
 	}
@@ -109,9 +112,9 @@ func (s *Service) BindTrialSubscription(ctx context.Context, subscriptionID stri
 			return fmt.Errorf("failed to get trial subscription: %w", err)
 		}
 
-		if sub.InviteCode != "" {
+		if sub.InviteCode != nil && *sub.InviteCode != "" {
 			var invite Invite
-			if err := tx.Where("code = ?", sub.InviteCode).First(&invite).Error; err == nil {
+			if err := tx.Where("code = ?", *sub.InviteCode).First(&invite).Error; err == nil {
 				referredBy = invite.ReferrerTGID
 			}
 		}
@@ -145,7 +148,10 @@ func (s *Service) BindTrialSubscription(ctx context.Context, subscriptionID stri
 	sub.TelegramID = telegramID
 	sub.Username = username
 	sub.PlanID = freePlanID
-	sub.ReferredBy = referredBy
+	if referredBy != 0 {
+		rb := referredBy
+		sub.ReferredBy = &rb
+	}
 	return &sub, nil
 }
 

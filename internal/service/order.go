@@ -78,11 +78,11 @@ func (o *OrderService) ActivateProduct(ctx context.Context, telegramID int64, pr
 	}
 
 	sub.PlanID = product.PlanID
-	sub.ProductID = product.ID
+	sub.ProductID = &product.ID
 	sub.ExpiresAt = &newExpiry
 	sub.PricePaidCents = product.PriceCents
-	sub.Currency = product.Currency
-	sub.StartedAt = now
+	sub.Currency = &product.Currency
+	sub.StartedAt = &now
 	if err := o.db.UpdateSubscription(ctx, sub); err != nil {
 		return nil, fmt.Errorf("update subscription: %w", err)
 	}
