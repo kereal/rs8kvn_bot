@@ -56,7 +56,7 @@ func (f *fakeXUIClient) AddClientWithID(ctx context.Context, inboundIDs []int, e
 	return &xui.ClientConfig{ID: clientID, SubID: subID, Email: email}, f.addErr
 }
 
-func (f *fakeXUIClient) UpdateClient(ctx context.Context, inboundIDs []int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, tgID int64, comment string) error {
+func (f *fakeXUIClient) UpdateClient(ctx context.Context, inboundIDs []int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, resetDays int, tgID int64, comment string) error {
 	return nil
 }
 

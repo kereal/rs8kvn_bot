@@ -499,7 +499,7 @@ func TestHandleBindTrial_Success(t *testing.T) {
 		ID: 1, Name: "main", Host: "http://example.com",
 		APIToken: "token", InboundIDs: "[1]", IsActive: true}}
 	mockXUI := testutil.NewMockXUIClient()
-	mockXUI.UpdateClientFunc = func(ctx context.Context, inboundIDs []int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, tgID int64, comment string) error {
+	mockXUI.UpdateClientFunc = func(ctx context.Context, inboundIDs []int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, resetDays int, tgID int64, comment string) error {
 		return nil
 	}
 
@@ -902,7 +902,7 @@ func TestHandleBindTrial_UpdateClientError(t *testing.T) {
 	mockDB.GetInviteByCodeFunc = func(ctx context.Context, code string) (*database.Invite, error) {
 		return &database.Invite{Code: "ABC123", ReferrerTGID: 999999}, nil
 	}
-	mockXUI.UpdateClientFunc = func(ctx context.Context, inboundIDs []int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, telegramID int64, comment string) error {
+	mockXUI.UpdateClientFunc = func(ctx context.Context, inboundIDs []int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, resetDays int, telegramID int64, comment string) error {
 		return errors.New("update client failed")
 	}
 
@@ -938,7 +938,7 @@ func TestHandleBindTrial_GetInviteError(t *testing.T) {
 	mockDB.GetInviteByCodeFunc = func(ctx context.Context, code string) (*database.Invite, error) {
 		return nil, errors.New("get invite failed")
 	}
-	mockXUI.UpdateClientFunc = func(ctx context.Context, inboundIDs []int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, telegramID int64, comment string) error {
+	mockXUI.UpdateClientFunc = func(ctx context.Context, inboundIDs []int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, resetDays int, telegramID int64, comment string) error {
 		return nil
 	}
 

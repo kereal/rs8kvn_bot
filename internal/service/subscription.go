@@ -445,6 +445,10 @@ func (s *SubscriptionService) CreateTrial(ctx context.Context, inviteCode string
 	trafficBytes := trialPlan.TrafficLimit
 	expiryTime := time.Now().Add(time.Duration(s.cfg.TrialDurationHours) * time.Hour)
 	email := "trial_" + subID
+	resetDays := 0
+	if trafficBytes > 0 {
+		resetDays = -1
+	}
 
 	trialNodes, err := s.trialNodes(ctx)
 	if err != nil {
@@ -457,7 +461,7 @@ func (s *SubscriptionService) CreateTrial(ctx context.Context, inviteCode string
 		return nil, fmt.Errorf("xui client not found for node %d", node.ID)
 	}
 	inboundIDs := node.ResolveInboundIDs()
-	if _, err = client.AddClientWithID(ctx, inboundIDs, email, clientID, subID, trafficBytes, expiryTime, 0); err != nil {
+	if _, err = client.AddClientWithID(ctx, inboundIDs, email, clientID, subID, trafficBytes, expiryTime, resetDays); err != nil {
 		return nil, fmt.Errorf("add trial client on node %d: %w", node.ID, err)
 	}
 
@@ -505,6 +509,10 @@ func (s *SubscriptionService) BindTrial(ctx context.Context, subscriptionID stri
 		return nil, fmt.Errorf("failed to resolve free plan: %w", err)
 	}
 	trafficBytes := freePlan.TrafficLimit
+	resetDays := 0
+	if trafficBytes > 0 {
+		resetDays = -1
+	}
 
 	expiryTime := time.UnixMilli(0)
 
@@ -530,7 +538,7 @@ func (s *SubscriptionService) BindTrial(ctx context.Context, subscriptionID stri
 			continue
 		}
 		inboundIDs := node.ResolveInboundIDs()
-		if err := client.UpdateClient(ctx, inboundIDs, currentEmail, sub.ClientID, email, sub.SubscriptionID, trafficBytes, expiryTime, telegramID, comment); err != nil {
+		if err := client.UpdateClient(ctx, inboundIDs, currentEmail, sub.ClientID, email, sub.SubscriptionID, trafficBytes, expiryTime, resetDays, telegramID, comment); err != nil {
 			logger.Warn("UpdateClient failed on trial node",
 				zap.Uint("node_id", node.ID),
 				zap.Error(err))

@@ -826,7 +826,7 @@ type MockXUIClient struct {
 	PingFunc                func(ctx context.Context) error
 	AddClientFunc           func(ctx context.Context, inboundIDs []int, email string, trafficBytes int64, expiryTime time.Time) (*xui.ClientConfig, error)
 	AddClientWithIDFunc     func(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error)
-	UpdateClientFunc        func(ctx context.Context, inboundIDs []int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, tgID int64, comment string) error
+	UpdateClientFunc        func(ctx context.Context, inboundIDs []int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, resetDays int, tgID int64, comment string) error
 	DeleteClientFunc        func(ctx context.Context, email string) error
 	GetClientTrafficFunc    func(ctx context.Context, email string) (*xui.ClientTraffic, error)
 	GetSubscriptionLinkFunc func(host, subID, subPath string) string
@@ -879,12 +879,12 @@ func (m *MockXUIClient) AddClientWithID(ctx context.Context, inboundIDs []int, e
 	}, nil
 }
 
-func (m *MockXUIClient) UpdateClient(ctx context.Context, inboundIDs []int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, tgID int64, comment string) error {
+func (m *MockXUIClient) UpdateClient(ctx context.Context, inboundIDs []int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, resetDays int, tgID int64, comment string) error {
 	m.mu.Lock()
 	m.UpdateClientCalled = true
 	m.mu.Unlock()
 	if m.UpdateClientFunc != nil {
-		return m.UpdateClientFunc(ctx, inboundIDs, currentEmail, clientID, email, subID, trafficBytes, expiryTime, tgID, comment)
+		return m.UpdateClientFunc(ctx, inboundIDs, currentEmail, clientID, email, subID, trafficBytes, expiryTime, resetDays, tgID, comment)
 	}
 	return nil
 }
