@@ -291,6 +291,48 @@ func TestSyncService_SyncSubscription_PendingAdd(t *testing.T) {
 	assert.Equal(t, XUIEmail(sub.Username, sub.TelegramID), mockVPN.createProvision.Username)
 }
 
+func TestSyncService_SyncSubscription_PendingAdd_UnlimitedPlan(t *testing.T) {
+	t.Parallel()
+
+	db, err := testutil.NewTestDatabaseService(t)
+	require.NoError(t, err)
+	ctx := context.Background()
+
+	plan := &database.Plan{Name: "test-plan-sync-add-unlimited", DevicesLimit: 1, TrafficLimit: 0}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(plan).Error)
+
+	node1 := &database.Node{Name: "sync-add-unlimited-node", IsActive: true, Host: "http://sa", APIToken: "ta", InboundIDs: `[1]`}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(node1).Error)
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(&database.PlanNode{PlanID: plan.ID, NodeID: node1.ID}).Error)
+
+	sub := &database.Subscription{
+		TelegramID:     5556,
+		Username:       "syncaddunlimited",
+		ClientID:       "c-syncadd-unlimited",
+		SubscriptionID: "s-syncadd-unlimited",
+		Status:         "active",
+		PlanID:         plan.ID,
+		ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
+	}
+	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
+	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusPendingAdd}))
+
+	mockVPN := &mockVPNClient{}
+	vpnClients := map[uint]vpn.Client{node1.ID: mockVPN}
+	svc := NewSyncService(db, vpnClients, []database.Node{*node1})
+
+	require.NoError(t, svc.SyncSubscription(ctx, sub.ID))
+
+	rows, err := db.GetBySubscriptionID(ctx, sub.ID)
+	require.NoError(t, err)
+	assert.Len(t, rows, 1)
+	assert.Equal(t, database.SyncStatusActive, rows[0].Status)
+	assert.True(t, mockVPN.createCalled, "CreateSubscription should be called on the VPN client")
+	assert.Equal(t, int64(0), mockVPN.createProvision.TrafficBytes)
+	assert.Equal(t, 0, mockVPN.createProvision.ResetDays, "ResetDays must be 0 for unlimited plan")
+	assert.True(t, mockVPN.createProvision.ExpiryTime.IsZero(), "ExpiryTime must be zero for unlimited plan")
+}
+
 func TestSyncService_SyncSubscription_PendingRemove(t *testing.T) {
 	t.Parallel()
 

@@ -496,6 +496,9 @@ func main() {
 	syncSvc := service.NewSyncService(dbService, vpnClients, nodes)
 	subService.SetSyncService(syncSvc)
 
+	orderService := service.NewOrderService(dbService, subService, syncSvc)
+	handler.SetOrderService(orderService)
+
 	// Start subscription sync worker (every 5 minutes)
 	go func() {
 		defer recoverAndReport("Subscription sync worker")

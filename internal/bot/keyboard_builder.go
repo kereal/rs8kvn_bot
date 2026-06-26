@@ -27,7 +27,7 @@ func NewKeyboardBuilder(botUsername, contactUser, donateCard, donateURL, siteURL
 }
 
 // MainMenu returns the inline keyboard for the main menu.
-func (kb *KeyboardBuilder) MainMenu(hasSubscription bool) tgbotapi.InlineKeyboardMarkup {
+func (kb *KeyboardBuilder) MainMenu(hasSubscription bool, freeUpgradeLabel string) tgbotapi.InlineKeyboardMarkup {
 	rows := [][]tgbotapi.InlineKeyboardButton{
 		tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData("📋 Подписка", "menu_subscription"),
@@ -42,6 +42,13 @@ func (kb *KeyboardBuilder) MainMenu(hasSubscription bool) tgbotapi.InlineKeyboar
 		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData("📤 Поделиться", "share_invite"),
 		))
+	}
+
+	if freeUpgradeLabel != "" {
+		upgradeRow := tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(freeUpgradeLabel, "upgrade_premium"),
+		)
+		rows = append([][]tgbotapi.InlineKeyboardButton{upgradeRow}, rows...)
 	}
 
 	return tgbotapi.NewInlineKeyboardMarkup(rows...)

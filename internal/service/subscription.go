@@ -293,11 +293,18 @@ func (s *SubscriptionService) GetWithTraffic(ctx context.Context, telegramID int
 
 	limitGB := s.PlanTrafficLimitGB(ctx, telegramID)
 
-	// Получаем название тарифного плана
+	// Получаем название тарифного плана (product.name если есть product_id, иначе plan.name)
 	plan, planErr := s.db.GetPlanByID(ctx, sub.PlanID)
 	var planName string
 	if planErr == nil && plan != nil {
 		planName = plan.Name
+	}
+
+	if sub.ProductID != 0 {
+		product, productErr := s.db.GetProductByID(ctx, sub.ProductID)
+		if productErr == nil && product != nil && product.Name != "" {
+			planName = product.Name
+		}
 	}
 
 	// Если лимит трафика нулевой — не опрашиваем серверы
@@ -363,16 +370,18 @@ func (s *SubscriptionService) GetWithTraffic(ctx context.Context, telegramID int
 	var resetInfo string
 	var daysUntilReset int
 	if panelResetExpiry > 0 && panelResetDays > 0 {
-		resetTime := time.UnixMilli(panelResetExpiry).AddDate(0, 0, panelResetDays)
+		resetTime := time.UnixMilli(panelResetExpiry)
 		daysUntilReset = utils.DaysUntilReset(time.Now(), resetTime)
+		var resetText string
 		switch {
 		case daysUntilReset < 0:
-			resetInfo = "🔄 Сброс: отключен"
+			resetText = "отключен"
 		case daysUntilReset == 0:
-			resetInfo = "🔄 Сброс: сегодня"
+			resetText = "сегодня"
 		default:
-			resetInfo = fmt.Sprintf("🔄 Сброс: через %d дн.", daysUntilReset)
+			resetText = fmt.Sprintf("через %d дн.", daysUntilReset)
 		}
+		resetInfo = resetText
 	}
 
 	return sub, &TrafficInfo{

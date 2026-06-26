@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/interfaces"
 	"github.com/kereal/rs8kvn_bot/internal/logger"
@@ -222,10 +223,14 @@ func (s *SyncService) processPendingAdd(ctx context.Context, sn *database.Subscr
 		Username:     syncIdentifier(sub),
 		SubID:        sub.SubscriptionID,
 		TrafficBytes: plan.TrafficLimit,
-		ResetDays:    0,
 	}
-	if sub.ExpiresAt != nil {
-		provision.ExpiryTime = *sub.ExpiresAt
+	if plan.TrafficLimit > 0 {
+		provision.ResetDays = -1
+		if sub.ExpiresAt != nil {
+			provision.ExpiryTime = *sub.ExpiresAt
+		} else {
+			provision.ExpiryTime = time.Now().Truncate(time.Minute).AddDate(0, 0, config.SubscriptionResetDay)
+		}
 	}
 
 	if err := client.CreateSubscription(ctx, provision); err != nil {

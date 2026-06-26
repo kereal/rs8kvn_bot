@@ -136,20 +136,14 @@ func (sh *SubscriptionHandler) handleMySubscription(ctx context.Context, chatID 
 		statusText = sub.Status
 	}
 
-	// Дата истечения
-	var expiresText string
-	if sub.ExpiresAt != nil {
-		expiresText = fmt.Sprintf("\n⏰ Истекает: %s", traffic.ExpiresAtFormatted)
-	}
-
 	messageText := fmt.Sprintf(
-		"📋 *Ваша подписка*\n\n🔹 Статус: %s\n💡 Тариф: *%s*\n📊 Трафик: %s%s\n\n📅 Создана: %s%s\n%s\n\n🔗 Ссылка\n`%s`",
+		"📋 *Ваша подписка*\n\n✌️ Статус: *%s*\n💡 Тариф: *%s*\n📊 Трафик: %s%s\n\n📅 Создана: %s\n⏰ Истекает: %s\n🔄 Сброс: %s\n\n🔗 Ссылка\n`%s`",
 		statusText,
 		traffic.PlanName,
 		trafficInfo,
 		progressBar,
 		traffic.CreatedAtFormatted,
-		expiresText,
+		traffic.ExpiresAtFormatted,
 		traffic.ResetInfo,
 		sh.h.cfg.SubURL(sub.SubscriptionID),
 	)
@@ -262,6 +256,104 @@ func (sh *SubscriptionHandler) handleBackToInvite(_ context.Context, chatID int6
 	if _, err := sh.h.bot.Request(deleteMsg); err != nil {
 		logger.Warn("Failed to delete QR message", zap.Error(err))
 	}
+	return nil
+}
+
+// handleUpgradePremium shows the premium upgrade confirmation screen.
+func (sh *SubscriptionHandler) handleUpgradePremium(ctx context.Context, chatID int64, username string, messageID int) error {
+	logger.Info("User viewing premium offer", zap.String("username", username))
+
+	sub, err := sh.getSubscriptionWithCache(ctx, chatID)
+	if err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			logger.Error("Failed to get subscription for premium offer", zap.Error(err))
+		}
+		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgSubNoActive))
+		sh.h.safeSend(editMsg)
+		return nil
+	}
+	if sub == nil || sub.Status != "active" {
+		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgSubNoActive))
+		sh.h.safeSend(editMsg)
+		return nil
+	}
+
+	plan, err := sh.h.db.GetPlanByID(ctx, sub.PlanID)
+	if err != nil || plan == nil || plan.Name != database.FreePlanName {
+		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgPremiumAlready, "Premium"))
+		editMsg.ParseMode = "Markdown"
+		sh.h.safeSend(editMsg)
+		return nil
+	}
+
+	product, err := sh.h.db.GetProductByID(ctx, 1)
+	if err != nil || product == nil || !product.IsActive || product.PriceCents != 0 {
+		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgPremiumUnavailable))
+		sh.h.safeSend(editMsg)
+		return nil
+	}
+
+	priceRub := fmt.Sprintf("%.2f ₽", float64(product.PriceCents)/100)
+	text := msg(MsgPremiumConfirm, product.Name, priceRub)
+	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, text)
+	editMsg.ParseMode = "Markdown"
+	editMsg.DisableWebPagePreview = true
+	kb := tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("✅ Получить", "confirm_upgrade_premium"),
+		),
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("⬅️ "+msg(MsgQRCodeBack), "back_to_start"),
+		),
+	)
+	editMsg.ReplyMarkup = &kb
+	sh.h.safeSend(editMsg)
+	return nil
+}
+
+// handleConfirmUpgradePremium activates the free premium product via OrderService.
+func (sh *SubscriptionHandler) handleConfirmUpgradePremium(ctx context.Context, chatID int64, username string, messageID int) error {
+	logger.Info("User confirming premium upgrade", zap.String("username", username))
+
+	if sh.h.orderService == nil {
+		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgSubTempError))
+		sh.h.safeSend(editMsg)
+		return fmt.Errorf("order service not available")
+	}
+
+	product, err := sh.h.db.GetProductByID(ctx, 1)
+	if err != nil || product == nil || !product.IsActive || product.PriceCents != 0 {
+		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgPremiumUnavailable))
+		sh.h.safeSend(editMsg)
+		return nil
+	}
+
+	_, err = sh.h.orderService.ActivateProduct(ctx, chatID, product)
+	if err != nil {
+		logger.Error("Failed to activate premium product", zap.Error(err))
+		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgSubTempError))
+		sh.h.safeSend(editMsg)
+		return fmt.Errorf("activate product: %w", err)
+	}
+
+	sh.h.invalidateCache(ctx, chatID)
+
+	sub, dbErr := sh.h.db.GetByTelegramID(ctx, chatID)
+	var subscriptionURL, expiresText string
+	if dbErr == nil && sub != nil {
+		subscriptionURL = sh.h.cfg.SubURL(sub.SubscriptionID)
+		if sub.ExpiresAt != nil {
+			expiresText = fmt.Sprintf("Истекает: %s", sub.ExpiresAt.Format("02.01.2006 15:04"))
+		}
+	}
+
+	text := msg(MsgPremiumSuccess, product.Name, expiresText, subscriptionURL)
+	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, text)
+	editMsg.ParseMode = "Markdown"
+	editMsg.DisableWebPagePreview = true
+	kb := sh.h.keyboards.Back()
+	editMsg.ReplyMarkup = &kb
+	sh.h.safeSend(editMsg)
 	return nil
 }
 

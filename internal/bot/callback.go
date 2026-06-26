@@ -78,6 +78,12 @@ func (c *CallbackHandler) HandleCallback(ctx context.Context, update tgbotapi.Up
 	case "menu_subscription":
 		messageID := update.CallbackQuery.Message.MessageID
 		return c.h.handleMySubscription(ctx, chatID, username, messageID)
+	case "upgrade_premium":
+		messageID := update.CallbackQuery.Message.MessageID
+		return c.h.handleUpgradePremium(ctx, chatID, username, messageID)
+	case "confirm_upgrade_premium":
+		messageID := update.CallbackQuery.Message.MessageID
+		return c.h.handleConfirmUpgradePremium(ctx, chatID, username, messageID)
 	case "back_to_subscription":
 		messageID := update.CallbackQuery.Message.MessageID
 		return c.h.handleBackToSubscription(ctx, chatID, username, messageID)
