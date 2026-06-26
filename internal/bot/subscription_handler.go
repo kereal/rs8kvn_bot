@@ -136,6 +136,11 @@ func (sh *SubscriptionHandler) handleMySubscription(ctx context.Context, chatID 
 		statusText = sub.Status
 	}
 
+	resetInfo := traffic.ResetInfo
+	if resetInfo == "" {
+		resetInfo = "нет"
+	}
+
 	messageText := fmt.Sprintf(
 		"📋 *Ваша подписка*\n\n✌️ Статус: *%s*\n💡 Тариф: *%s*\n📊 Трафик: %s%s\n\n📅 Создана: %s\n⏰ Истекает: %s\n🔄 Сброс: %s\n\n🔗 Ссылка\n`%s`",
 		statusText,
@@ -144,7 +149,7 @@ func (sh *SubscriptionHandler) handleMySubscription(ctx context.Context, chatID 
 		progressBar,
 		traffic.CreatedAtFormatted,
 		traffic.ExpiresAtFormatted,
-		traffic.ResetInfo,
+		resetInfo,
 		sh.h.cfg.SubURL(sub.SubscriptionID),
 	)
 
