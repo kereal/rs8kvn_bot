@@ -129,6 +129,12 @@ func (s *SyncService) RecalculateNodes(ctx context.Context, subscriptionID uint)
 		if _, inTarget := targetSet[nodeID]; inTarget {
 			continue
 		}
+		if len(targetSet) == 0 {
+			logger.Debug("preserving active node for empty target plan",
+				zap.Uint("subscription_id", subscriptionID),
+				zap.Uint("node_id", nodeID))
+			continue
+		}
 		if err := s.db.UpdateSubscriptionNodeStatus(ctx, sn.SubscriptionID, sn.NodeID, database.SyncStatusPendingRemove); err != nil {
 			return fmt.Errorf("recalculate nodes: set pending_remove node %d: %w", nodeID, err)
 		}
@@ -139,6 +145,12 @@ func (s *SyncService) RecalculateNodes(ctx context.Context, subscriptionID uint)
 
 	for nodeID, sn := range currentPendingAdd {
 		if _, inTarget := targetSet[nodeID]; inTarget {
+			continue
+		}
+		if len(targetSet) == 0 {
+			logger.Debug("preserving pending_add node for empty target plan",
+				zap.Uint("subscription_id", subscriptionID),
+				zap.Uint("node_id", nodeID))
 			continue
 		}
 		if err := s.db.UpdateSubscriptionNodeStatus(ctx, sn.SubscriptionID, sn.NodeID, database.SyncStatusPendingRemove); err != nil {
