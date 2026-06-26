@@ -53,7 +53,7 @@ type pendingInvite struct {
 const PendingInviteTTL = 60 * time.Minute
 
 type Handler struct {
-	noCopy noCopy
+	noCopy              noCopy
 	bot                 interfaces.BotAPI
 	cfg                 *config.Config
 	db                  interfaces.DatabaseService
@@ -68,6 +68,7 @@ type Handler struct {
 	referralCache       *ReferralCache
 	sender              *MessageSender
 	keyboards           *KeyboardBuilder
+	orderService        *service.OrderService
 	version             string
 	referral            *ReferralHandler
 
@@ -127,6 +128,10 @@ func NewHandler(bot interfaces.BotAPI, cfg *config.Config, db interfaces.Databas
 	}
 
 	return h
+}
+
+func (h *Handler) SetOrderService(orderService *service.OrderService) {
+	h.orderService = orderService
 }
 
 // isAdmin returns true if chatID matches configured admin ID
@@ -227,6 +232,16 @@ func (h *Handler) handleMySubscription(ctx context.Context, chatID int64, userna
 func (h *Handler) handleQRCode(ctx context.Context, chatID int64, username string, messageID int) error {
 	h.subHandlerOnce.Do(func() { h.subHandler = NewSubscriptionHandler(h) })
 	return h.subHandler.handleQRCode(ctx, chatID, username, messageID)
+}
+
+func (h *Handler) handleUpgradePremium(ctx context.Context, chatID int64, username string, messageID int) error {
+	h.subHandlerOnce.Do(func() { h.subHandler = NewSubscriptionHandler(h) })
+	return h.subHandler.handleUpgradePremium(ctx, chatID, username, messageID)
+}
+
+func (h *Handler) handleConfirmUpgradePremium(ctx context.Context, chatID int64, username string, messageID int) error {
+	h.subHandlerOnce.Do(func() { h.subHandler = NewSubscriptionHandler(h) })
+	return h.subHandler.handleConfirmUpgradePremium(ctx, chatID, username, messageID)
 }
 
 func (h *Handler) handleBackToSubscription(ctx context.Context, chatID int64, username string, messageID int) error {
@@ -339,10 +354,16 @@ func (h *Handler) getMainMenuContent(username string, hasSubscription bool, chat
 
 	var text string
 	var keyboard tgbotapi.InlineKeyboardMarkup
+	freeUpgradeLabel := ""
+	if hasSubscription {
+		if label, ok := h.getFreeUpgradeLabel(context.Background(), chatID); ok {
+			freeUpgradeLabel = label
+		}
+	}
 
 	if hasSubscription {
 		text = msg(MsgStartGreeting, username)
-		keyboard = h.getMainMenuKeyboard(true)
+		keyboard = h.getMainMenuKeyboard(true, freeUpgradeLabel)
 	} else {
 		text = msg(MsgStartGreetingNoSub, username)
 		keyboard = tgbotapi.NewInlineKeyboardMarkup(
@@ -375,8 +396,31 @@ func (h *Handler) getQRKeyboard() tgbotapi.InlineKeyboardMarkup {
 	return h.keyboards.QR()
 }
 
-func (h *Handler) getMainMenuKeyboard(hasSubscription bool) tgbotapi.InlineKeyboardMarkup {
-	return h.keyboards.MainMenu(hasSubscription)
+func (h *Handler) getMainMenuKeyboard(hasSubscription bool, freeUpgradeLabel ...string) tgbotapi.InlineKeyboardMarkup {
+	label := ""
+	if len(freeUpgradeLabel) > 0 {
+		label = freeUpgradeLabel[0]
+	}
+	return h.keyboards.MainMenu(hasSubscription, label)
+}
+
+func (h *Handler) getFreeUpgradeLabel(ctx context.Context, chatID int64) (string, bool) {
+	if h.db == nil {
+		return "", false
+	}
+	sub, err := h.db.GetByTelegramID(ctx, chatID)
+	if err != nil || sub == nil || sub.Status != "active" {
+		return "", false
+	}
+	plan, err := h.db.GetPlanByID(ctx, sub.PlanID)
+	if err != nil || plan == nil || plan.Name != database.FreePlanName {
+		return "", false
+	}
+	product, err := h.db.GetProductByID(ctx, 1)
+	if err != nil || product == nil || !product.IsActive || product.PriceCents != 0 {
+		return "", false
+	}
+	return fmt.Sprintf("🎁 %s бесплатно", product.Name), true
 }
 
 // addAdminButtons appends admin control buttons to a keyboard if the user is an admin.

@@ -12,10 +12,15 @@ const (
 	MsgUnknownCommand     MessageKey = "unknown_command"
 	MsgUseStart           MessageKey = "use_start"
 
-	MsgSubNoActive       MessageKey = "sub.no_active"
-	MsgSubTempError      MessageKey = "sub.temp_error"
-	MsgSubCreateError    MessageKey = "sub.create_error"
-	MsgSubCreatedSuccess MessageKey = "sub.created_success"
+	MsgSubNoActive        MessageKey = "sub.no_active"
+	MsgSubTempError       MessageKey = "sub.temp_error"
+	MsgSubCreateError     MessageKey = "sub.create_error"
+	MsgSubCreatedSuccess  MessageKey = "sub.created_success"
+	MsgPremiumOffer       MessageKey = "premium.offer"
+	MsgPremiumAlready     MessageKey = "premium.already"
+	MsgPremiumUnavailable MessageKey = "premium.unavailable"
+	MsgPremiumConfirm     MessageKey = "premium.confirm"
+	MsgPremiumSuccess     MessageKey = "premium.success"
 
 	MsgAdminNoSubs       MessageKey = "admin.no_subs"
 	MsgAdminLastReg      MessageKey = "admin.last_reg"
@@ -60,17 +65,22 @@ const (
 )
 
 var messages = map[MessageKey]string{
-	MsgStartGreeting:      "👋 Привет, %s!\n\nЯ — бот для выдачи подписок на VPN.\n\nИспользуйте кнопки ниже для взаимодействия с ботом.",
-	MsgStartGreetingNoSub: "👋 Привет, %s!\n\nЯ — бот для выдачи подписок на VPN.\n\nНажмите кнопку ниже, чтобы получить подписку",
+	MsgStartGreeting:      "👋 Привет, %s!\n\nЯ выдаю подписки на VPN.\n\nИспользуйте кнопки ниже для взаимодействия с ботом.",
+	MsgStartGreetingNoSub: "👋 Привет, %s!\n\nЯ выдаю подписки на VPN.\n\nНажмите кнопку ниже, чтобы получить подписку",
 	MsgStartButton:        "📥 Получить подписку",
 	MsgLoading:            "⏳ Загрузка...",
 	MsgUnknownCommand:     "Неизвестная команда. Используйте /start или /help",
 	MsgUseStart:           "Используйте /start для начала работы с ботом.",
 
-	MsgSubNoActive:       "❌ У вас нет активной подписки.\n\nНажмите «Получить подписку» для создания.",
-	MsgSubTempError:      "❌ Временная ошибка. Попробуйте позже.",
-	MsgSubCreateError:    "❌ Ошибка при создании подписки.",
-	MsgSubCreatedSuccess: "✅ Ваша подписка\n\n📊 Трафик: %d ГБ\n\n🔗 Ссылка\n`%s`",
+	MsgSubNoActive:        "❌ У вас нет активной подписки.\n\nНажмите «Получить подписку» для создания.",
+	MsgSubTempError:       "❌ Временная ошибка. Попробуйте позже.",
+	MsgSubCreateError:     "❌ Ошибка при создании подписки.",
+	MsgSubCreatedSuccess:  "✅ Ваша подписка\n\n📊 Трафик: %d ГБ\n\n🔗 Ссылка\n`%s`",
+	MsgPremiumOffer:       "💎 *Бесплатный апгрейд*\n\nСейчас у вас тариф *%s*.\n\nВы можете получить *%s* сразу после подтверждения.\nСтоимость сейчас: *%s*.\n\nПосле подтверждения тариф сменится автоматически.",
+	MsgPremiumAlready:     "✅ У вас уже активирован тариф *%s*.",
+	MsgPremiumUnavailable: "❌ Бесплатный premium-продукт сейчас недоступен. Попробуйте позже.",
+	MsgPremiumConfirm:     "💳 Вы покупаете *%s* за *%s*.\n\nНажмите «Получить», чтобы сразу активировать тариф.",
+	MsgPremiumSuccess:     "✅ Ваша подписка %s активирована\n\n%s\n\n🔗 Ссылка на подписку\n`%s`",
 
 	MsgAdminNoSubs:       "📭 Нет активных подписок",
 	MsgAdminLastReg:      "📋 *Последние регистрации*\n\n",
