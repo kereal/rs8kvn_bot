@@ -18,18 +18,27 @@ import (
 func ptrTime(t time.Time) *time.Time { return &t }
 
 type mockVPNClient struct {
-	createCalled   bool
-	deleteCalled   bool
-	createError    error
-	deleteError    error
+	createCalled    bool
+	deleteCalled    bool
+	updateCalled    bool
+	createError     error
+	deleteError     error
+	updateError     error
 	createProvision vpn.SubscriptionProvision
 	deleteProvision vpn.SubscriptionProvision
+	updateProvision vpn.SubscriptionProvision
 }
 
 func (m *mockVPNClient) CreateSubscription(ctx context.Context, provision vpn.SubscriptionProvision) error {
 	m.createCalled = true
 	m.createProvision = provision
 	return m.createError
+}
+
+func (m *mockVPNClient) UpdateSubscription(ctx context.Context, provision vpn.SubscriptionProvision) error {
+	m.updateCalled = true
+	m.updateProvision = provision
+	return m.updateError
 }
 
 func (m *mockVPNClient) DeleteSubscription(ctx context.Context, provision vpn.SubscriptionProvision) error {
@@ -248,6 +257,56 @@ func TestSyncService_RecalculateNodes_RemovesStalePendingAdd(t *testing.T) {
 	assert.Equal(t, database.SyncStatusActive, rows[0].Status)
 	assert.Equal(t, node2.ID, rows[1].NodeID)
 	assert.Equal(t, database.SyncStatusPendingRemove, rows[1].Status)
+}
+
+func TestSyncService_RecalculateNodes_PlanChange_MarksActiveForUpdate(t *testing.T) {
+	t.Parallel()
+
+	db, err := testutil.NewTestDatabaseService(t)
+	require.NoError(t, err)
+	ctx := context.Background()
+
+	planFree := &database.Plan{Name: "test-plan-change-free", DevicesLimit: 1, TrafficLimit: 1024}
+	planPremium := &database.Plan{Name: "test-plan-change-premium", DevicesLimit: 1, TrafficLimit: 0}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(planFree).Error)
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(planPremium).Error)
+
+	node1 := &database.Node{Name: "plan-chg-node", IsActive: true, Host: "http://pc1", APIToken: "tpc", InboundIDs: `[1]`}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(node1).Error)
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(&database.PlanNode{PlanID: planFree.ID, NodeID: node1.ID}).Error)
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(&database.PlanNode{PlanID: planPremium.ID, NodeID: node1.ID}).Error)
+
+	sub := &database.Subscription{
+		TelegramID:     8888,
+		Username:       "planchguser",
+		ClientID:       "c-planchg",
+		SubscriptionID: "s-planchg",
+		Status:         "active",
+		PlanID:         planPremium.ID,
+		ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
+	}
+	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
+	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusActive}))
+
+	svc := newTestSyncService(t, db, []database.Node{*node1})
+	require.NoError(t, svc.RecalculateNodes(ctx, sub.ID, planFree.ID))
+
+	rows, err := db.GetBySubscriptionID(ctx, sub.ID)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, database.SyncStatusPendingAdd, rows[0].Status, "active node should be marked pending_add when plan changed to trigger update")
+
+	mockVPN := &mockVPNClient{createError: fmt.Errorf("client already exists")}
+	svcWithVPN := NewSyncService(db, map[uint]vpn.Client{node1.ID: mockVPN}, []database.Node{*node1})
+
+	require.NoError(t, svcWithVPN.SyncSubscription(ctx, sub.ID))
+
+	rows, err = db.GetBySubscriptionID(ctx, sub.ID)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, database.SyncStatusActive, rows[0].Status)
+	assert.True(t, mockVPN.updateCalled, "UpdateSubscription should be invoked when client already exists after plan change")
+	assert.Equal(t, int64(0), mockVPN.updateProvision.TrafficBytes, "traffic limit should reflect the new premium plan (unlimited)")
 }
 
 func TestSyncService_SyncSubscription_PendingAdd(t *testing.T) {

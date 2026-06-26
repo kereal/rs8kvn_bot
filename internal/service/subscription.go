@@ -825,6 +825,7 @@ func (s *SubscriptionService) RenewSubscription(ctx context.Context, telegramID 
 
 	now := time.Now().UTC().Truncate(time.Minute)
 	planChanged := sub.PlanID != product.PlanID
+	oldPlanID := sub.PlanID
 	newExpiry := calculateProductExpiry(now, sub.PlanID, sub.ExpiresAt, product)
 
 	sub.PlanID = product.PlanID
@@ -863,7 +864,7 @@ func (s *SubscriptionService) RenewSubscription(ctx context.Context, telegramID 
 	}
 
 	if planChanged && s.syncService != nil {
-		if err := s.syncService.RecalculateNodes(ctx, sub.ID); err != nil {
+		if err := s.syncService.RecalculateNodes(ctx, sub.ID, oldPlanID); err != nil {
 			logger.Warn("recalculate nodes failed (will retry)", zap.Error(err))
 		}
 		if err := s.syncService.SyncSubscription(ctx, sub.ID); err != nil {
@@ -886,12 +887,13 @@ func (s *SubscriptionService) ExpireSubscription(ctx context.Context, telegramID
 		return fmt.Errorf("resolve free plan: %w", err)
 	}
 
+	oldPlanID := sub.PlanID
 	if err := s.db.ExpireSubscription(ctx, sub.ID, freePlan.ID); err != nil {
 		return fmt.Errorf("expire subscription: %w", err)
 	}
 
 	if s.syncService != nil {
-		if err := s.syncService.RecalculateNodes(ctx, sub.ID); err != nil {
+		if err := s.syncService.RecalculateNodes(ctx, sub.ID, oldPlanID); err != nil {
 			logger.Warn("recalculate nodes failed (will retry)", zap.Error(err))
 		}
 		if err := s.syncService.SyncSubscription(ctx, sub.ID); err != nil {

@@ -38,6 +38,26 @@ func (c *ThreeXUIClient) CreateSubscription(ctx context.Context, provision Subsc
 	return nil
 }
 
+// UpdateSubscription updates an existing client on the 3x-ui panel.
+func (c *ThreeXUIClient) UpdateSubscription(ctx context.Context, provision SubscriptionProvision) error {
+	err := c.client.UpdateClient(
+		ctx,
+		c.inboundIDs,
+		provision.Username,
+		provision.ClientID,
+		provision.Username,
+		provision.SubID,
+		provision.TrafficBytes,
+		provision.ExpiryTime,
+		0,
+		"",
+	)
+	if err != nil {
+		return fmt.Errorf("3x-ui update subscription: %w", err)
+	}
+	return nil
+}
+
 // DeleteSubscription removes a client from the 3x-ui panel.
 func (c *ThreeXUIClient) DeleteSubscription(ctx context.Context, provision SubscriptionProvision) error {
 	if err := c.client.DeleteClient(ctx, provision.Username); err != nil {

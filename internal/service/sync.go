@@ -57,7 +57,12 @@ func NewSyncService(db interfaces.DatabaseService, vpnClients map[uint]vpn.Clien
 
 // RecalculateNodes computes the diff between plan nodes and current subscription nodes.
 // It only updates the database state, without invoking VPN operations.
-func (s *SyncService) RecalculateNodes(ctx context.Context, subscriptionID uint) error {
+// oldPlanIDs, when provided, triggers update provisioning for active nodes that stay in the target set.
+func (s *SyncService) RecalculateNodes(ctx context.Context, subscriptionID uint, oldPlanIDs ...uint) error {
+	oldPlanID := uint(0)
+	if len(oldPlanIDs) > 0 {
+		oldPlanID = oldPlanIDs[0]
+	}
 	logger.Debug("recalculate nodes",
 		zap.Uint("subscription_id", subscriptionID))
 
@@ -127,12 +132,16 @@ func (s *SyncService) RecalculateNodes(ctx context.Context, subscriptionID uint)
 
 	for nodeID, sn := range currentActive {
 		if _, inTarget := targetSet[nodeID]; inTarget {
-			continue
-		}
-		if len(targetSet) == 0 {
-			logger.Debug("preserving active node for empty target plan",
-				zap.Uint("subscription_id", subscriptionID),
-				zap.Uint("node_id", nodeID))
+			if oldPlanID != 0 && oldPlanID != sub.PlanID {
+				if err := s.db.UpdateSubscriptionNodeStatus(ctx, sn.SubscriptionID, sn.NodeID, database.SyncStatusPendingAdd); err != nil {
+					return fmt.Errorf("recalculate nodes: mark active node %d as pending_add for plan change: %w", nodeID, err)
+				}
+				logger.Debug("marking active node as pending_add for plan change",
+					zap.Uint("subscription_id", subscriptionID),
+					zap.Uint("node_id", nodeID),
+					zap.Uint("old_plan_id", oldPlanID),
+					zap.Uint("new_plan_id", sub.PlanID))
+			}
 			continue
 		}
 		if err := s.db.UpdateSubscriptionNodeStatus(ctx, sn.SubscriptionID, sn.NodeID, database.SyncStatusPendingRemove); err != nil {
@@ -310,7 +319,30 @@ func (s *SyncService) processPendingAdd(ctx context.Context, sn *database.Subscr
 
 	if err := client.CreateSubscription(ctx, provision); err != nil {
 		if isAlreadyExistsError(err) {
-			logger.Info("client already exists on node, treating as success",
+			plan, planErr := s.db.GetPlanByID(ctx, sub.PlanID)
+			if planErr == nil {
+				updateProvision := vpn.SubscriptionProvision{
+					ClientID:     sub.ClientID,
+					Username:     syncIdentifier(sub),
+					SubID:        sub.SubscriptionID,
+					TrafficBytes: plan.TrafficLimit,
+				}
+				if plan.TrafficLimit > 0 {
+					updateProvision.ResetDays = -1
+					if sub.ExpiresAt != nil {
+						updateProvision.ExpiryTime = *sub.ExpiresAt
+					} else {
+						updateProvision.ExpiryTime = time.Now().Truncate(time.Minute).AddDate(0, 0, config.SubscriptionResetDay)
+					}
+				}
+				if updateErr := client.UpdateSubscription(ctx, updateProvision); updateErr != nil {
+					logger.Warn("failed to update existing client config",
+						zap.Uint("subscription_id", sub.ID),
+						zap.Uint("node_id", sn.NodeID),
+						zap.Error(updateErr))
+				}
+			}
+			logger.Info("client already exists on node, configuration updated/synchronized",
 				zap.Uint("subscription_id", sub.ID),
 				zap.Uint("node_id", sn.NodeID))
 			if err := s.db.UpdateSubscriptionNodeStatus(ctx, sn.SubscriptionID, sn.NodeID, database.SyncStatusActive); err != nil {
@@ -475,7 +507,7 @@ func (s *SyncService) SyncPendingNodes(ctx context.Context) error {
 			lastErr = err
 		}
 
-		if pruneErr := s.RecalculateNodes(ctx, sub.ID); pruneErr != nil {
+		if pruneErr := s.RecalculateNodes(ctx, sub.ID, 0); pruneErr != nil {
 			logger.Warn("recalculate nodes failed",
 				zap.Uint("subscription_id", sub.ID),
 				zap.Error(pruneErr))

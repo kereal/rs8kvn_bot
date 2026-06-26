@@ -31,6 +31,7 @@ type SubscriptionProvision struct {
 
 type Client interface {
 	CreateSubscription(ctx context.Context, provision SubscriptionProvision) error
+	UpdateSubscription(ctx context.Context, provision SubscriptionProvision) error
 	DeleteSubscription(ctx context.Context, provision SubscriptionProvision) error
 	Close() error
 }

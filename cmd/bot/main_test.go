@@ -25,6 +25,9 @@ type stubVPNClient struct{}
 func (s *stubVPNClient) CreateSubscription(ctx context.Context, provision vpn.SubscriptionProvision) error {
 	return nil
 }
+func (s *stubVPNClient) UpdateSubscription(ctx context.Context, provision vpn.SubscriptionProvision) error {
+	return nil
+}
 func (s *stubVPNClient) DeleteSubscription(ctx context.Context, provision vpn.SubscriptionProvision) error {
 	return nil
 }
