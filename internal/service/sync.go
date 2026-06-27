@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/vpn"
 
 	"go.uber.org/zap"
+	"gorm.io/gorm"
 )
 
 // SyncService manages the synchronization of subscriptions with VPN nodes.
@@ -61,6 +63,7 @@ func NewSyncService(db interfaces.DatabaseService, vpnClients map[uint]vpn.Clien
 //   - CHANGED_LIMITS: an active node's plan limits differ from last provisioning → pending_add (triggers UpdateSubscription)
 //   - REMOVE: a subscription_nodes node is no longer in the plan → pending_remove
 //   - STALE: a pending_add node was removed from the plan → pending_remove
+//
 // This replaces the old RecalculateNodes which required an explicit oldPlanID
 // and unconditionally re-provisioned all active nodes on every plan change.
 func (s *SyncService) ReconcilePlanNodes(ctx context.Context, subscriptionID uint) error {
@@ -111,9 +114,9 @@ func (s *SyncService) ReconcilePlanNodes(ctx context.Context, subscriptionID uin
 			continue
 		}
 		if pending, ok := currentPendingRemove[target.ID]; ok {
-		if err := s.db.UpdateSubscriptionNodeStatus(ctx, pending.SubscriptionID, pending.NodeID, database.SyncStatusPendingAdd); err != nil {
-			return fmt.Errorf("reconcile plan nodes: reactivate pending_remove node %d: %w", target.ID, err)
-		}
+			if err := s.db.UpdateSubscriptionNodeStatus(ctx, pending.SubscriptionID, pending.NodeID, database.SyncStatusPendingAdd); err != nil {
+				return fmt.Errorf("reconcile plan nodes: reactivate pending_remove node %d: %w", target.ID, err)
+			}
 			logger.Debug("reactivated pending_remove to pending_add",
 				zap.Uint("subscription_id", subscriptionID),
 				zap.Uint("node_id", target.ID))
@@ -167,7 +170,7 @@ func (s *SyncService) ReconcilePlanNodes(ctx context.Context, subscriptionID uin
 	return nil
 }
 
-// MarkAllForRemoval sets all active subscription nodes to pending_remove status.
+// MarkAllForRemoval sets all subscription nodes (active, pending_add, pending_remove) to pending_remove status.
 // Used before deleting a subscription to ensure VPN clients are removed via sync.
 func (s *SyncService) MarkAllForRemoval(ctx context.Context, subscriptionID uint) error {
 	logger.Debug("mark all nodes for removal",
@@ -179,7 +182,8 @@ func (s *SyncService) MarkAllForRemoval(ctx context.Context, subscriptionID uint
 	}
 
 	for _, sn := range nodes {
-		if sn.Status == database.SyncStatusActive {
+		switch sn.Status {
+		case database.SyncStatusActive, database.SyncStatusPendingAdd, database.SyncStatusPendingRemove:
 			if err := s.db.UpdateSubscriptionNodeStatus(ctx, sn.SubscriptionID, sn.NodeID, database.SyncStatusPendingRemove); err != nil {
 				return fmt.Errorf("mark all for removal: set pending_remove node %d: %w", sn.NodeID, err)
 			}
@@ -484,6 +488,18 @@ func (s *SyncService) SyncPendingNodes(ctx context.Context) error {
 			zap.Int("pending_nodes", len(nodes)))
 		sub, subErr := s.db.GetByID(ctx, subID)
 		if subErr != nil {
+			if errors.Is(subErr, database.ErrSubscriptionNotFound) || errors.Is(subErr, gorm.ErrRecordNotFound) {
+				if clErr := s.db.DeleteSubscriptionNodesBySubscriptionID(ctx, subID); clErr != nil {
+					logger.Warn("purge orphan subscription nodes failed",
+						zap.Uint("subscription_id", subID),
+						zap.Int("pending_nodes", len(nodes)),
+						zap.Error(clErr))
+				} else {
+					logger.Info("purged orphan subscription nodes",
+						zap.Uint("subscription_id", subID),
+						zap.Int("pending_nodes", len(nodes)))
+				}
+			}
 			lastErr = fmt.Errorf("sync pending nodes: load subscription %d: %w", subID, subErr)
 			logger.Warn("sync subscription failed",
 				zap.Uint("subscription_id", subID),

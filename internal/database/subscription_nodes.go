@@ -122,6 +122,17 @@ func (s *Service) DeleteSubscriptionNode(ctx context.Context, subID, nodeID uint
 	return nil
 }
 
+// DeleteSubscriptionNodesBySubscriptionID removes all subscription node records for a given subscription.
+func (s *Service) DeleteSubscriptionNodesBySubscriptionID(ctx context.Context, subID uint) error {
+	result := s.db.WithContext(ctx).
+		Where("subscription_id = ?", subID).
+		Delete(&SubscriptionNode{})
+	if result.Error != nil {
+		return fmt.Errorf("failed to delete subscription nodes for sub_id=%d: %w", subID, result.Error)
+	}
+	return nil
+}
+
 // UpdateRetry updates retry metadata for a subscription node.
 func (s *Service) UpdateRetry(ctx context.Context, subID, nodeID uint, retryCount int, retryAt *time.Time, lastErr *string) error {
 	result := s.db.WithContext(ctx).Model(&SubscriptionNode{}).

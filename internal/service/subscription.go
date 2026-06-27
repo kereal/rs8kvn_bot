@@ -22,15 +22,15 @@ import (
 )
 
 type SubscriptionService struct {
-	db             interfaces.DatabaseService
-	xuiClients     map[uint]interfaces.XUIClient
-	vpnClients     map[uint]vpn.Client
-	nodes          []database.Node
-	cfg            *config.Config
-	webhook        webhook.WebhookSender
-	invalidate     func(telegramID int64)
+	db                interfaces.DatabaseService
+	xuiClients        map[uint]interfaces.XUIClient
+	vpnClients        map[uint]vpn.Client
+	nodes             []database.Node
+	cfg               *config.Config
+	webhook           webhook.WebhookSender
+	invalidate        func(telegramID int64)
 	invalidateBySubID func(subID string)
-	syncService    *SyncService
+	syncService       *SyncService
 }
 
 type CreateResult struct {
@@ -170,7 +170,7 @@ func (s *SubscriptionService) GetByTelegramID(ctx context.Context, telegramID in
 }
 
 // Delete removes a subscription by Telegram ID via sync module and sends a webhook event.
-// VPN client removal is best-effort; orphaned clients are cleaned up by ReconcileOrphanedClients.
+// VPN client removal is performed via sync. Orphaned clients are cleaned up by ReconcileOrphanedClients.
 func (s *SubscriptionService) Delete(ctx context.Context, telegramID int64) error {
 	sub, err := s.db.GetByTelegramID(ctx, telegramID)
 	if err != nil {
@@ -190,6 +190,10 @@ func (s *SubscriptionService) Delete(ctx context.Context, telegramID int64) erro
 
 	if err := s.db.DeleteSubscription(ctx, telegramID); err != nil {
 		return fmt.Errorf("db delete: %w", err)
+	}
+
+	if purgeErr := s.db.DeleteSubscriptionNodesBySubscriptionID(ctx, sub.ID); purgeErr != nil {
+		logger.Warn("purge subscription nodes after delete failed", zap.Error(purgeErr))
 	}
 
 	if s.invalidateBySubID != nil && sub.SubscriptionID != "" {
@@ -233,6 +237,10 @@ func (s *SubscriptionService) DeleteByID(ctx context.Context, id uint) (*databas
 	deleted, err := s.db.DeleteSubscriptionByID(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("db delete: %w", err)
+	}
+
+	if purgeErr := s.db.DeleteSubscriptionNodesBySubscriptionID(ctx, deleted.ID); purgeErr != nil {
+		logger.Warn("purge subscription nodes after delete by id failed", zap.Error(purgeErr))
 	}
 
 	if s.invalidateBySubID != nil && deleted.SubscriptionID != "" {
