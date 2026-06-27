@@ -21,6 +21,7 @@ type SubscriptionNodeCRUD interface {
 	CreateSubscriptionNode(ctx context.Context, sn *database.SubscriptionNode) error
 	UpsertSubscriptionNode(ctx context.Context, sn *database.SubscriptionNode) error
 	DeleteSubscriptionNode(ctx context.Context, subID, nodeID uint) error
+	DeleteSubscriptionNodesBySubscriptionID(ctx context.Context, subID uint) error
 }
 
 // SubscriptionNodeStatus manages sync status and retry logic for subscription nodes.
