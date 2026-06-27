@@ -328,7 +328,7 @@ func TestE2E_BroadcastCommand_NoUsers(t *testing.T) {
 	env.handler.HandleBroadcast(ctx, update)
 
 	assert.True(t, env.botAPI.SendCalledSafe())
-	assert.Contains(t, env.botAPI.LastSentText, "Нет пользователей")
+	assert.Contains(t, env.botAPI.LastSentText, "Всего: 0")
 }
 
 func TestE2E_BroadcastCommand_SomeFailures(t *testing.T) {
