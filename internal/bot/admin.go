@@ -45,40 +45,55 @@ func (h *Handler) handleAdminLastReg(ctx context.Context, chatID int64, username
 	subs, err := h.db.GetLatestSubscriptions(ctx, 10)
 	if err != nil {
 		logger.Error("Failed to get latest subscriptions", zap.Error(err))
-		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "❌ Ошибка получения списка подписок")
-		editMsg.DisableWebPagePreview = true
-		keyboard := h.getBackKeyboard()
-		editMsg.ReplyMarkup = &keyboard
-		h.safeSend(editMsg)
+		h.sendLastRegText(ctx, chatID, messageID, "❌ Ошибка получения списка подписок", true)
 		return fmt.Errorf("get latest subscriptions: %w", err)
 	}
 
 	if len(subs) == 0 {
-		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "📭 Нет активных подписок")
-		editMsg.DisableWebPagePreview = true
-		keyboard := h.getBackKeyboard()
-		editMsg.ReplyMarkup = &keyboard
-		h.safeSend(editMsg)
+		h.sendLastRegText(ctx, chatID, messageID, "📭 Нет активных подписок", false)
 		return nil
 	}
 
-	// Format the message as a table with 3 columns
 	var sb strings.Builder
 	sb.WriteString("📋 *Последние регистрации*\n\n")
 
 	for _, sub := range subs {
 		username := formatUserLink(sub.Username, sub.TelegramID)
-		dateStr := sub.CreatedAt.Format("02.01.2006 15:04:05")
+		dateStr := sub.CreatedAt.Format("02.01.06")
 		fmt.Fprintf(&sb, "%d │ %s │ %s\n", sub.ID, username, dateStr)
 	}
 
-	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, sb.String())
-	editMsg.ParseMode = "Markdown"
+	h.sendLastRegText(ctx, chatID, messageID, sb.String(), true)
+	return nil
+}
+
+// sendLastRegText sends or edits the lastreg result message.
+// A zero messageID means there's no inline keyboard to update (slash command case),
+// so a new message is sent; otherwise the button message is edited.
+func (h *Handler) sendLastRegText(ctx context.Context, chatID int64, messageID int, text string, isMarkdown bool) {
+	if messageID == 0 {
+		h.sendLastRegNewMessage(ctx, chatID, text, isMarkdown)
+		return
+	}
+	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, text)
 	editMsg.DisableWebPagePreview = true
 	keyboard := h.getBackKeyboard()
 	editMsg.ReplyMarkup = &keyboard
+	if isMarkdown {
+		editMsg.ParseMode = "Markdown"
+	}
 	h.safeSend(editMsg)
-	return nil
+}
+
+func (h *Handler) sendLastRegNewMessage(ctx context.Context, chatID int64, text string, isMarkdown bool) {
+	msg := tgbotapi.NewMessage(chatID, text)
+	msg.DisableWebPagePreview = true
+	keyboard := h.getBackKeyboard()
+	msg.ReplyMarkup = &keyboard
+	if isMarkdown {
+		msg.ParseMode = "Markdown"
+	}
+	h.send(ctx, msg)
 }
 
 // HandleDel handles the /del command for admins.
