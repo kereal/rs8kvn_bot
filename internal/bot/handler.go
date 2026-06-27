@@ -36,7 +36,7 @@ const (
 // label values. Known commands are returned as-is; anything else becomes "unknown".
 func normalizeCommand(cmd string) string {
 	switch cmd {
-	case "start", "help", "invite", "del", "broadcast", "send", "refstats", "v":
+	case "start", "help", "invite", "del", "broadcast", "send", "refstats", "v", "lastreg":
 		return cmd
 	default:
 		return "unknown"
@@ -640,9 +640,11 @@ func (h *Handler) HandleUpdate(ctx context.Context, update tgbotapi.Update) {
 				err = h.HandleRefstats(ctx, update)
 			case "v":
 				err = h.HandleVersion(ctx, update)
+			case "lastreg":
+				err = h.handleAdminLastReg(ctx, update.Message.Chat.ID, update.Message.From.UserName, 0)
 			default:
-				h.SendMessage(ctx, update.Message.Chat.ID,
-					"Неизвестная команда. Используйте /start или /help")
+			h.SendMessage(ctx, update.Message.Chat.ID,
+				"Неизвестная команда. Используйте /start или /help")
 			}
 		} else {
 			// Non-command message: send help hint
