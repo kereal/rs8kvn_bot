@@ -230,7 +230,7 @@ func (c *Client) doHTTPRequest(ctx context.Context, method, url string, bodyFn f
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return respBody, fmt.Errorf("upstream returned non-200")
+		return respBody, fmt.Errorf("upstream returned non-200: %w", ErrNon200Response)
 	}
 
 	return respBody, nil
@@ -644,9 +644,13 @@ func truncateString(s string, maxLen int) string {
 }
 
 // isRetryable определяет, можно ли повторить запрос при данной ошибке.
-// DNS-ошибки и нерешаемые ошибки имён не ретраятся; таймауты — ретраятся.
+// Повторяются ТОЛЬКО сетевые ошибки (DNS, таймауты, соединение). Если сервер
+// ответил (даже с ошибкой) — повторять нет смысла.
 func isRetryable(err error) bool {
 	if err == nil {
+		return false
+	}
+	if errors.Is(err, ErrNon200Response) {
 		return false
 	}
 	var dnsErr *net.DNSError
@@ -654,7 +658,7 @@ func isRetryable(err error) bool {
 		return false
 	}
 	var netErr net.Error
-	if errors.As(err, &netErr) && netErr.Timeout() {
+	if errors.As(err, &netErr) {
 		return true
 	}
 	msg := strings.ToLower(err.Error())
@@ -664,7 +668,7 @@ func isRetryable(err error) bool {
 		strings.Contains(msg, "nodename nor servname provided") {
 		return false
 	}
-	return true
+	return false // по умолчанию: сервер ответил или иная не-сетевая ошибка, не ретраить
 }
 
 // RetryWithBackoff выполняет fn с экспоненциальной задержкой до maxRetries раз.

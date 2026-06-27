@@ -138,11 +138,13 @@ func TestIsRetryable(t *testing.T) {
 		retryable bool
 	}{
 		{"nil", nil, false},
-		{"timeout", http.ErrHandlerTimeout, true},
+		{"timeout", &net.OpError{Op: "read", Err: fmt.Errorf("i/o timeout")}, true},
 		{"dns error", &net.DNSError{Err: "dns", Name: "example.com"}, false},
 		{"no such host", fmt.Errorf("no such host"), false},
 		{"temporary failure", fmt.Errorf("temporary failure in name resolution"), false},
-		{"connection refused", fmt.Errorf("connection refused"), true},
+		{"connection refused", &net.OpError{Op: "dial", Net: "tcp", Err: fmt.Errorf("connection refused")}, true},
+		{"non-200", fmt.Errorf("upstream returned non-200: %w", ErrNon200Response), false},
+		{"other error", fmt.Errorf("some other error"), false},
 	}
 
 	for _, tt := range tests {
@@ -151,6 +153,12 @@ func TestIsRetryable(t *testing.T) {
 		})
 	}
 }
+
+type testNetError struct{}
+
+func (testNetError) Error() string   { return "connection reset" }
+func (testNetError) Timeout() bool   { return false }
+func (testNetError) Temporary() bool { return true }
 
 func TestRetryWithBackoff_Success(t *testing.T) {
 	t.Parallel()
@@ -172,7 +180,7 @@ func TestRetryWithBackoff_Retries(t *testing.T) {
 	err := RetryWithBackoff(context.Background(), 3, time.Millisecond, func() error {
 		calls.Add(1)
 		if calls.Load() < 3 {
-			return fmt.Errorf("transient error")
+			return testNetError{}
 		}
 		return nil
 	})
@@ -187,11 +195,11 @@ func TestRetryWithBackoff_Exhausted(t *testing.T) {
 	var calls atomic.Int32
 	err := RetryWithBackoff(context.Background(), 3, time.Millisecond, func() error {
 		calls.Add(1)
-		return fmt.Errorf("persistent error")
+		return testNetError{}
 	})
 
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "persistent error")
+	assert.Contains(t, err.Error(), "connection reset")
 	assert.Equal(t, int32(3), calls.Load())
 }
 
@@ -200,7 +208,7 @@ func TestRetryWithBackoff_ContextCancelled(t *testing.T) {
 	cancel()
 
 	err := RetryWithBackoff(ctx, 3, time.Millisecond, func() error {
-		return fmt.Errorf("error")
+		return testNetError{}
 	})
 
 	assert.Error(t, err)
@@ -216,6 +224,18 @@ func TestRetryWithBackoff_NonRetryable(t *testing.T) {
 
 	assert.Error(t, err)
 	assert.Equal(t, int32(1), calls.Load())
+}
+
+func TestRetryWithBackoff_Non200NotRetried(t *testing.T) {
+	var calls atomic.Int32
+	err := RetryWithBackoff(context.Background(), 3, time.Millisecond, func() error {
+		calls.Add(1)
+		return fmt.Errorf("upstream returned non-200: %w", ErrNon200Response)
+	})
+
+	assert.Error(t, err)
+	assert.Equal(t, int32(1), calls.Load())
+	assert.Contains(t, err.Error(), "upstream returned non-200")
 }
 
 func TestGetExpiresAtMillis(t *testing.T) {
