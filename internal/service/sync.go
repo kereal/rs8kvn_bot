@@ -95,6 +95,7 @@ func (s *SyncService) ReconcilePlanNodes(ctx context.Context, subscriptionID uin
 	currentActive := make(map[uint]database.SubscriptionNode)
 	currentPendingAdd := make(map[uint]database.SubscriptionNode)
 	currentPendingRemove := make(map[uint]database.SubscriptionNode)
+	currentPendingUpdate := make(map[uint]database.SubscriptionNode)
 	for _, sn := range currentNodes {
 		switch sn.Status {
 		case database.SyncStatusActive:
@@ -103,6 +104,8 @@ func (s *SyncService) ReconcilePlanNodes(ctx context.Context, subscriptionID uin
 			currentPendingAdd[sn.NodeID] = sn
 		case database.SyncStatusPendingRemove:
 			currentPendingRemove[sn.NodeID] = sn
+		case database.SyncStatusPendingUpdate:
+			currentPendingUpdate[sn.NodeID] = sn
 		}
 	}
 
@@ -111,6 +114,12 @@ func (s *SyncService) ReconcilePlanNodes(ctx context.Context, subscriptionID uin
 			continue
 		}
 		if _, exists := currentPendingAdd[target.ID]; exists {
+			continue
+		}
+		if _, exists := currentPendingUpdate[target.ID]; exists {
+			logger.Debug("pending_update node in target plan, leaving as-is",
+				zap.Uint("subscription_id", subscriptionID),
+				zap.Uint("node_id", target.ID))
 			continue
 		}
 		if pending, ok := currentPendingRemove[target.ID]; ok {
@@ -224,7 +233,7 @@ func (s *SyncService) SyncSubscription(ctx context.Context, subscriptionID uint)
 	return s.syncNodes(ctx, sub, pending)
 }
 
-// syncNodes iterates over pending subscription nodes and dispatches add/remove operations.
+// syncNodes iterates over pending subscription nodes and dispatches add/remove/update operations.
 // Continues on individual failures, returning the last error encountered.
 func (s *SyncService) syncNodes(ctx context.Context, sub *database.Subscription, pending []database.SubscriptionNode) error {
 	if sub == nil {
@@ -260,10 +269,81 @@ func (s *SyncService) syncNodes(ctx context.Context, sub *database.Subscription,
 					zap.Error(err))
 				lastErr = err
 			}
+		case database.SyncStatusPendingUpdate:
+			logger.Debug("processing pending_update",
+				zap.Uint("subscription_id", sub.ID),
+				zap.Uint("node_id", sn.NodeID))
+			if err := s.processPendingUpdate(ctx, &sn, sub); err != nil {
+				logger.Warn("pending_update failed",
+					zap.Uint("subscription_id", sub.ID),
+					zap.Uint("node_id", sn.NodeID),
+					zap.Error(err))
+				lastErr = err
+			}
 		}
 	}
 
 	return lastErr
+}
+
+// processPendingUpdate updates an existing VPN subscription client configuration.
+// Used when a plan change requires updating traffic limits or expiry on an active node.
+func (s *SyncService) processPendingUpdate(ctx context.Context, sn *database.SubscriptionNode, sub *database.Subscription) error {
+	client, ok := s.vpnClients[sn.NodeID]
+	if !ok {
+		node, nodeErr := s.db.GetNodeByID(ctx, sn.NodeID)
+		if nodeErr != nil || !node.IsActive || node.Type != database.NodeType3xUI {
+			logger.Info("node unavailable for pending_update, deleting record",
+				zap.Uint("subscription_id", sub.ID),
+				zap.Uint("node_id", sn.NodeID),
+				zap.Error(nodeErr))
+			if err := s.db.DeleteSubscriptionNode(ctx, sn.SubscriptionID, sn.NodeID); err != nil {
+				return fmt.Errorf("delete subscription node: %w", err)
+			}
+			return nil
+		}
+		err := fmt.Errorf("no VPN client for node %d", sn.NodeID)
+		s.handleSyncError(ctx, sn, err)
+		return err
+	}
+
+	plan, err := s.db.GetPlanByID(ctx, sub.PlanID)
+	if err != nil {
+		s.handleSyncError(ctx, sn, err)
+		return fmt.Errorf("load plan for subscription sync: %w", err)
+	}
+
+	provision := vpn.SubscriptionProvision{
+		ClientID:     sub.ClientID,
+		Username:     syncIdentifier(sub),
+		SubID:        sub.SubscriptionID,
+		TrafficBytes: plan.TrafficLimit,
+	}
+	if plan.TrafficLimit > 0 {
+		provision.ResetDays = -1
+		if sub.ExpiresAt != nil {
+			provision.ExpiryTime = *sub.ExpiresAt
+		} else {
+			provision.ExpiryTime = time.Now().Truncate(time.Minute).AddDate(0, 0, config.SubscriptionResetDay)
+		}
+	}
+
+	logger.Debug("updating VPN subscription",
+		zap.Uint("subscription_id", sub.ID),
+		zap.Uint("node_id", sn.NodeID))
+
+	if err := client.UpdateSubscription(ctx, provision); err != nil {
+		s.handleSyncError(ctx, sn, err)
+		return fmt.Errorf("update VPN subscription node %d: %w", sn.NodeID, err)
+	}
+
+	if err := s.db.UpdateSubscriptionNodeStatus(ctx, sn.SubscriptionID, sn.NodeID, database.SyncStatusActive); err != nil {
+		return fmt.Errorf("mark active: %w", err)
+	}
+	logger.Debug("subscription updated and marked active",
+		zap.Uint("subscription_id", sub.ID),
+		zap.Uint("node_id", sn.NodeID))
+	return nil
 }
 
 // processPendingAdd creates a VPN subscription on the target node.
