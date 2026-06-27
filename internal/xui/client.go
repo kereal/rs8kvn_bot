@@ -462,8 +462,9 @@ func (c *Client) UpdateClient(ctx context.Context, inboundIDs []int, currentEmai
 	return firstErr
 }
 
-// doUpdateClient выполняет реальный POST /panel/api/clients/update/{currentEmail}
-// с уже вычисленным flow для группы inboundIDs.
+// doUpdateClient выполняет реальный POST /panel/api/clients/update/{currentEmail}.
+// Панель ожидает плоский объект клиента (без обёртки "client"/"inboundIds"),
+// поэтому тело формируется напрямую из clientObj.
 func (c *Client) doUpdateClient(ctx context.Context, inboundIDs []int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, resetDays int, tgID int64, comment string, flow string) error {
 	if resetDays < 0 {
 		resetDays = config.SubscriptionResetDay
@@ -484,7 +485,9 @@ func (c *Client) doUpdateClient(ctx context.Context, inboundIDs []int, currentEm
 
 	updateURL := fmt.Sprintf("%s/panel/api/clients/update/%s", c.host, url.PathEscape(currentEmail))
 
-	respBody, err := c.doHTTPRequest(ctx, http.MethodPost, updateURL, c.buildClientBody(clientObj, inboundIDs))
+	respBody, err := c.doHTTPRequest(ctx, http.MethodPost, updateURL, func() (io.Reader, error) {
+		return marshalJSON(clientObj)
+	})
 	if err != nil {
 		return err
 	}
