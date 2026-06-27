@@ -390,6 +390,9 @@ func TestInbound_GetRequiredFlow(t *testing.T) {
 		{"grpc", ""},
 		{"grpcs", ""},
 		{"tcp", "xtls-rprx-vision"},
+		{"hysteria2", ""},
+		{"shadowsocks", ""},
+		{"tuic", ""},
 		{"", "xtls-rprx-vision"},
 	}
 

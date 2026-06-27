@@ -156,12 +156,15 @@ func (in *Inbound) GetTransport() string {
 }
 
 // GetRequiredFlow возвращает значение flow, необходимое для данного inbound.
-// Для xhttp/h2/ws/grpc/grpcs flow не требуется ("");
-// для всех остальных транспортов используется xtls-rprx-vision.
+// Для транспортов, не использующих XTLS (xhttp, hysteria2, ws, grpc, и т.д.),
+// flow не требуется (""). Fallback "xtls-rprx-vision" используется только
+// при ошибке получения inbound'а.
 func (in *Inbound) GetRequiredFlow() string {
 	transport := in.GetTransport()
 	switch transport {
-	case "xhttp", "h2", "ws", "grpc", "grpcs":
+	case "xhttp", "h2", "ws", "grpc", "grpcs",
+		"hysteria", "hysteria2", "shadowsocks", "ss2022",
+		"tuic", "wireguard", "reality", "darkertls":
 		return ""
 	default:
 		return "xtls-rprx-vision"
@@ -289,8 +292,8 @@ func (c *Client) AddClient(ctx context.Context, inboundIDs []int, email string, 
 }
 
 // AddClientWithID создаёт клиента с указанными clientID и subID.
-// При наличии inboundIDs с разными требованиями к flow запрос автоматически
-// разбивается на отдельные вызовы панели, сгруппированные по совместимому flow.
+// Группирует inboundIDs по flow: для каждого уникального flow делается
+// отдельный вызов панели со всеми inboundID этого flow (минимум вызовов).
 func (c *Client) AddClientWithID(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*ClientConfig, error) {
 	if len(inboundIDs) == 0 {
 		return nil, fmt.Errorf("inbound IDs cannot be empty")
@@ -426,8 +429,8 @@ func (c *Client) doDeleteClient(ctx context.Context, email string) error {
 }
 
 // UpdateClient обновляет данные клиента в панели.
-// Как и AddClientWithID, автоматически разбивает запрос на группы по flow,
-// если inboundIDs требуют разных значений flow.
+// Группирует inboundIDs по flow: для каждого уникального flow делается
+// отдельный вызов панели со всеми inboundID этого flow (минимум вызовов).
 func (c *Client) UpdateClient(ctx context.Context, inboundIDs []int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, resetDays int, tgID int64, comment string) error {
 	if clientID == "" {
 		return fmt.Errorf("client ID cannot be empty")
