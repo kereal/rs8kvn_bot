@@ -37,6 +37,8 @@ rtk gh pr list
 This project uses codebase-memory-mcp to maintain a knowledge graph of the codebase.
 ALWAYS prefer MCP graph tools over grep/glob/file-search for code discovery.
 
+Project name in the graph: **`home-kereal-rs8kvn_bot`** (auto-generated from repo path).
+
 ### Priority Order
 1. `search_graph` — find functions, classes, routes, variables by pattern
 2. `trace_path` — trace who calls a function or what it calls
@@ -50,9 +52,10 @@ ALWAYS prefer MCP graph tools over grep/glob/file-search for code discovery.
 - When MCP tools return insufficient results
 
 ### Examples
-- Find a handler: `search_graph(name_pattern=".*OrderHandler.*")`
-- Who calls it: `trace_path(function_name="OrderHandler", direction="inbound")`
-- Read source: `get_code_snippet(qualified_name="pkg/orders.OrderHandler")`
+- Find a handler: `search_graph(project="home-kereal-rs8kvn_bot", name_pattern=".*Handler.*")`
+- Who calls it: `trace_path(project="home-kereal-rs8kvn_bot", function_name="NewHandler", direction="inbound")`
+- Read source: `get_code_snippet(project="home-kereal-rs8kvn_bot", qualified_name="home-kereal-rs8kvn_bot.internal.bot.handler.NewHandler")`
+- Check architecture: `get_architecture(project="home-kereal-rs8kvn_bot")`
 
 
 ## Docs

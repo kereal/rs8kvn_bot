@@ -916,6 +916,15 @@ func (s *SubscriptionService) RenewSubscription(ctx context.Context, telegramID 
 	}
 
 	if planChanged && s.syncService != nil {
+		newNodes, _ := s.db.GetNodesByPlanID(ctx, sub.PlanID)
+		var newNodeIDs []uint
+		for _, n := range newNodes {
+			newNodeIDs = append(newNodeIDs, n.ID)
+		}
+		if err := s.db.MarkActiveNodesPendingUpdate(ctx, sub.ID, newNodeIDs); err != nil {
+			logger.Warn("mark active nodes pending update failed", zap.Error(err))
+		}
+
 		if err := s.syncService.ReconcilePlanNodes(ctx, sub.ID); err != nil {
 			logger.Warn("reconcile plan nodes failed (will retry)", zap.Error(err))
 		}
@@ -948,6 +957,15 @@ func (s *SubscriptionService) ExpireSubscription(ctx context.Context, telegramID
 	}
 
 	if s.syncService != nil {
+		newNodes, _ := s.db.GetNodesByPlanID(ctx, freePlan.ID)
+		var newNodeIDs []uint
+		for _, n := range newNodes {
+			newNodeIDs = append(newNodeIDs, n.ID)
+		}
+		if err := s.db.MarkActiveNodesPendingUpdate(ctx, sub.ID, newNodeIDs); err != nil {
+			logger.Warn("mark active nodes pending update failed", zap.Error(err))
+		}
+
 		if err := s.syncService.ReconcilePlanNodes(ctx, sub.ID); err != nil {
 			logger.Warn("reconcile plan nodes failed (will retry)", zap.Error(err))
 		}

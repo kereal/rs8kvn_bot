@@ -92,6 +92,15 @@ func (o *OrderService) ActivateProduct(ctx context.Context, telegramID int64, pr
 	}
 
 	if planChanged && o.syncSvc != nil {
+		newNodes, _ := o.db.GetNodesByPlanID(ctx, sub.PlanID)
+		var newNodeIDs []uint
+		for _, n := range newNodes {
+			newNodeIDs = append(newNodeIDs, n.ID)
+		}
+		if err := o.db.MarkActiveNodesPendingUpdate(ctx, sub.ID, newNodeIDs); err != nil {
+			logger.Warn("mark active nodes pending update failed", zap.Error(err))
+		}
+
 		if err := o.syncSvc.ReconcilePlanNodes(ctx, sub.ID); err != nil {
 			logger.Warn("reconcile plan nodes failed (will retry)", zap.Error(err))
 		}

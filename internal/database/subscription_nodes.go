@@ -33,7 +33,7 @@ func (s *Service) GetPendingSync(ctx context.Context) ([]SubscriptionNode, error
 	var rows []SubscriptionNode
 	nowUTC := time.Now().UTC().Truncate(time.Minute)
 	result := s.db.WithContext(ctx).
-		Where("status IN ?", []SyncStatus{SyncStatusPendingAdd, SyncStatusPendingRemove}).
+		Where("status IN ?", []SyncStatus{SyncStatusPendingAdd, SyncStatusPendingRemove, SyncStatusPendingUpdate}).
 		Where("retry_at IS NULL OR retry_at <= ?", nowUTC).
 		Find(&rows)
 	if result.Error != nil {
@@ -48,7 +48,7 @@ func (s *Service) GetPendingBySubscriptionID(ctx context.Context, subscriptionID
 	nowUTC := time.Now().UTC().Truncate(time.Minute)
 	result := s.db.WithContext(ctx).
 		Where("subscription_id = ? AND status IN ? AND (retry_at IS NULL OR retry_at <= ?)",
-			subscriptionID, []SyncStatus{SyncStatusPendingAdd, SyncStatusPendingRemove}, nowUTC).
+			subscriptionID, []SyncStatus{SyncStatusPendingAdd, SyncStatusPendingRemove, SyncStatusPendingUpdate}, nowUTC).
 		Find(&rows)
 	if result.Error != nil {
 		return nil, fmt.Errorf("failed to get pending nodes by subscription id: %w", result.Error)
@@ -62,7 +62,7 @@ func (s *Service) GetPendingByNodeID(ctx context.Context, nodeID uint) ([]Subscr
 	nowUTC := time.Now().UTC().Truncate(time.Minute)
 	result := s.db.WithContext(ctx).
 		Where("node_id = ? AND status IN ? AND (retry_at IS NULL OR retry_at <= ?)",
-			nodeID, []SyncStatus{SyncStatusPendingAdd, SyncStatusPendingRemove}, nowUTC).
+			nodeID, []SyncStatus{SyncStatusPendingAdd, SyncStatusPendingRemove, SyncStatusPendingUpdate}, nowUTC).
 		Find(&rows)
 	if result.Error != nil {
 		return nil, fmt.Errorf("failed to get pending nodes by node id: %w", result.Error)
@@ -105,6 +105,39 @@ func (s *Service) UpsertSubscriptionNode(ctx context.Context, sn *SubscriptionNo
 	if result.Error != nil {
 		return fmt.Errorf("failed to upsert subscription node: %w", result.Error)
 	}
+	return nil
+}
+
+// MarkActiveNodesPendingUpdate sets status to pending_update for active nodes
+// that belong to the given target node IDs. Used when a plan change requires
+// updating existing VPN client configurations.
+func (s *Service) MarkActiveNodesPendingUpdate(ctx context.Context, subID uint, targetNodeIDs []uint) error {
+	if len(targetNodeIDs) == 0 {
+		return nil
+	}
+
+	existing, err := s.GetBySubscriptionID(ctx, subID)
+	if err != nil {
+		return fmt.Errorf("mark active nodes pending update: load nodes: %w", err)
+	}
+
+	targetSet := make(map[uint]struct{}, len(targetNodeIDs))
+	for _, id := range targetNodeIDs {
+		targetSet[id] = struct{}{}
+	}
+
+	for _, sn := range existing {
+		if sn.Status != SyncStatusActive {
+			continue
+		}
+		if _, ok := targetSet[sn.NodeID]; !ok {
+			continue
+		}
+		if err := s.UpdateSubscriptionNodeStatus(ctx, subID, sn.NodeID, SyncStatusPendingUpdate); err != nil {
+			return fmt.Errorf("mark active node pending update node_id=%d: %w", sn.NodeID, err)
+		}
+	}
+
 	return nil
 }
 

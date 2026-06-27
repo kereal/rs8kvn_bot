@@ -122,6 +122,7 @@ type MockDatabaseService struct {
 	UpsertSubscriptionNodeFunc                  func(ctx context.Context, sn *database.SubscriptionNode) error
 	DeleteSubscriptionNodeFunc                  func(ctx context.Context, subID, nodeID uint) error
 	DeleteSubscriptionNodesBySubscriptionIDFunc func(ctx context.Context, subID uint) error
+	MarkActiveNodesPendingUpdateFunc            func(ctx context.Context, subID uint, targetNodeIDs []uint) error
 	UpdateRetryFunc                             func(ctx context.Context, subID, nodeID uint, retryCount int, retryAt *time.Time, lastErr *string) error
 	GetBySubscriptionIDFunc                     func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error)
 	GetByNodeIDFunc                             func(ctx context.Context, nodeID uint) ([]database.SubscriptionNode, error)
@@ -228,6 +229,13 @@ func (m *MockDatabaseService) DeleteSubscriptionNode(ctx context.Context, subID,
 func (m *MockDatabaseService) DeleteSubscriptionNodesBySubscriptionID(ctx context.Context, subID uint) error {
 	if m.DeleteSubscriptionNodesBySubscriptionIDFunc != nil {
 		return m.DeleteSubscriptionNodesBySubscriptionIDFunc(ctx, subID)
+	}
+	return nil
+}
+
+func (m *MockDatabaseService) MarkActiveNodesPendingUpdate(ctx context.Context, subID uint, targetNodeIDs []uint) error {
+	if m.MarkActiveNodesPendingUpdateFunc != nil {
+		return m.MarkActiveNodesPendingUpdateFunc(ctx, subID, targetNodeIDs)
 	}
 	return nil
 }

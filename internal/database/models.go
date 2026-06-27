@@ -23,6 +23,13 @@ const (
 	FreePlanName  = "free"
 )
 
+type NodeType string
+
+const (
+	NodeType3xUI    NodeType = "3x-ui"
+	NodeTypeProxman NodeType = "proxman"
+)
+
 // SubscriptionStatus represents the lifecycle state of a subscription.
 type SubscriptionStatus string
 
@@ -50,14 +57,14 @@ type Subscription struct {
 	SubscriptionID string `gorm:"size:255;not null;uniqueIndex"`
 	// ExpiresAt — срок действия подписки. NULL = бессрочная (free-план).
 	ExpiresAt      *time.Time `gorm:"index:idx_expiry"`
-	Status         string `gorm:"default:active;size:50;index"`
+	Status         string     `gorm:"default:active;size:50;index"`
 	InviteCode     *string    `gorm:"size:16;index"`
 	PlanID         uint       `gorm:"index"`
 	ReferredBy     *int64     `gorm:"index"`
 	ProductID      *uint      `gorm:"index"`
 	StartedAt      *time.Time
-	PricePaidCents int64      `gorm:"default:0"`
-	Currency       *string    `gorm:"size:3"`
+	PricePaidCents int64     `gorm:"default:0"`
+	Currency       *string   `gorm:"size:3"`
 	Devices        string    `gorm:"type:text;default:'[]'"` // JSON array of {header_key: value} device entries
 	Ips            string    `gorm:"type:text;default:'[]'"` // JSON array of {ip: timestamp} entries
 	CreatedAt      time.Time `gorm:"autoCreateTime"`
@@ -68,13 +75,6 @@ type Subscription struct {
 	Orders  []Order            `gorm:"foreignKey:SubscriptionID"`
 	Nodes   []SubscriptionNode `gorm:"foreignKey:SubscriptionID"`
 }
-
-type NodeType string
-
-const (
-	NodeType3xUI    NodeType = "3x-ui"
-	NodeTypeProxman NodeType = "proxman"
-)
 
 // Node represents a configured 3x-ui panel source.
 type Node struct {
@@ -183,12 +183,14 @@ type Invite struct {
 //   - active — нода добавлена и последняя синхронизация прошла успешно.
 //   - pending_add — запрошено добавление ноды, операция ещё не выполнена на панели.
 //   - pending_remove — запрошено удаление ноды, операция ещё не выполнена на панели.
+//   - pending_update — запрошено обновление конфигурации ноды (например, смена тарифа).
 type SyncStatus string
 
 const (
 	SyncStatusActive        SyncStatus = "active"
 	SyncStatusPendingAdd    SyncStatus = "pending_add"
 	SyncStatusPendingRemove SyncStatus = "pending_remove"
+	SyncStatusPendingUpdate SyncStatus = "pending_update"
 )
 
 // SubscriptionNode represents the actual synchronization state of a specific
