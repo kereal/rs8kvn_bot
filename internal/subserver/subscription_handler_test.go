@@ -97,7 +97,7 @@ func TestHandleSubscription_CacheHit_Expired_InvalidatesCache(t *testing.T) {
 	assert.False(t, ok, "cache should be invalidated for expired subscription")
 }
 
-func TestHandleSubscription_CacheHit_StatusCheckError_ServesStale(t *testing.T) {
+func TestHandleSubscription_CacheHit_StatusCheckError_ReturnsError(t *testing.T) {
 	t.Parallel()
 
 	mockDB := testutil.NewMockDatabaseService()
@@ -107,14 +107,13 @@ func TestHandleSubscription_CacheHit_StatusCheckError_ServesStale(t *testing.T) 
 	cachedBody := []byte("stale-content")
 	svc.SetCache("sub-err", cachedBody, map[string]string{"content-type": "text/plain"})
 
-	// Status check fails — should serve stale cache
 	mockDB.GetSubscriptionStatusFunc = func(ctx context.Context, subID string) (string, time.Time, error) {
 		return "", time.Time{}, fmt.Errorf("db error")
 	}
 
-	result, err := HandleSubscription(ctx, mockDB, svc, "sub-err", "1.2.3.4", nil)
-	require.NoError(t, err)
-	assert.Equal(t, cachedBody, result.Body)
+	_, err := HandleSubscription(ctx, mockDB, svc, "sub-err", "1.2.3.4", nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cache status check failed")
 }
 
 func TestHandleSubscription_CacheMiss_SubscriptionNotFound(t *testing.T) {
