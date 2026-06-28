@@ -34,31 +34,6 @@ func (s *Service) GetNodesByPlanName(ctx context.Context, planName string) ([]No
 	return nodes, nil
 }
 
-// GetPlanByName returns a plan by its name.
-func (s *Service) GetPlanByName(ctx context.Context, name string) (*Plan, error) {
-	var plan Plan
-	result := s.db.WithContext(ctx).Where("name = ? AND (is_active = ? OR name = ?)", name, true, FreePlanName).First(&plan)
-	if result.Error != nil {
-		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-			return nil, ErrPlanNotFound
-		}
-		return nil, fmt.Errorf("failed to get plan by name: %w", result.Error)
-	}
-	return &plan, nil
-}
-
-// GetPlanByID returns a plan by its ID.
-func (s *Service) GetPlanByID(ctx context.Context, id uint) (*Plan, error) {
-	var plan Plan
-	result := s.db.WithContext(ctx).First(&plan, id)
-	if result.Error != nil {
-		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-			return nil, ErrPlanNotFound
-		}
-		return nil, fmt.Errorf("failed to get plan by id: %w", result.Error)
-	}
-	return &plan, nil
-}
 
 // IsNodesEmpty returns true if no nodes exist in the database.
 func (s *Service) IsNodesEmpty(ctx context.Context) (bool, error) {
