@@ -240,14 +240,14 @@ func (s *Service) GetWithPlanAndNodes(ctx context.Context, subscriptionID string
 		return nil, fmt.Errorf("failed to get plan: %w", err)
 	}
 
-	if err := s.db.WithContext(ctx).
-		Table("nodes").
-		Select("nodes.*").
-		Joins("JOIN plan_nodes ON plan_nodes.node_id = nodes.id").
-		Where("plan_nodes.plan_id = ? AND nodes.is_active = ? AND nodes.type = ?", result.Plan.ID, true, NodeType3xUI).
-		Find(&result.Nodes).Error; err != nil {
-		return nil, fmt.Errorf("failed to get nodes: %w", err)
-	}
+		if err := s.db.WithContext(ctx).
+			Table("nodes").
+			Select("nodes.*").
+			Joins("JOIN plan_nodes ON plan_nodes.node_id = nodes.id").
+			Where("plan_nodes.plan_id = ? AND nodes.is_active = ?", result.Plan.ID, true).
+			Find(&result.Nodes).Error; err != nil {
+			return nil, fmt.Errorf("failed to get nodes: %w", err)
+		}
 
 	return &result, nil
 }
