@@ -232,12 +232,34 @@ func (s *SyncService) syncNodes(ctx context.Context, sub *database.Subscription,
 		return fmt.Errorf("sync subscription: nil subscription")
 	}
 
+	nodeTypes := make(map[uint]database.NodeType, len(s.nodes))
+	for _, n := range s.nodes {
+		nodeTypes[n.ID] = n.Type
+	}
+
 	logger.Debug("processing pending nodes",
 		zap.Uint("subscription_id", sub.ID),
 		zap.Int("pending_count", len(pending)))
 
 	var errs []error
 	for _, sn := range pending {
+		nodeType, hasNode := nodeTypes[sn.NodeID]
+		if !hasNode {
+			logger.Warn("node not found in runtime clients, skipping",
+				zap.Uint("subscription_id", sub.ID),
+				zap.Uint("node_id", sn.NodeID))
+			continue
+		}
+		switch nodeType {
+		case database.NodeType3xUI, database.NodeTypeProxman:
+		default:
+			logger.Warn("unsupported node type, skipping",
+				zap.Uint("subscription_id", sub.ID),
+				zap.Uint("node_id", sn.NodeID),
+				zap.String("node_type", string(nodeType)))
+			continue
+		}
+
 		switch sn.Status {
 		case database.SyncStatusPendingAdd:
 			logger.Debug("processing pending_add",
@@ -291,7 +313,7 @@ func (s *SyncService) retryUnavailableNode(ctx context.Context, sn *database.Sub
 		return err
 	}
 
-	if !node.IsActive || node.Type != database.NodeType3xUI {
+	if !node.IsActive {
 		err := fmt.Errorf("%s node %d unavailable: inactive=%t type=%s", operation, sn.NodeID, node.IsActive, node.Type)
 		logger.Warn("node unsuitable for sync operation, keeping pending record",
 			zap.String("operation", operation),

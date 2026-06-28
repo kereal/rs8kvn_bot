@@ -7,7 +7,7 @@
 
 A single 3x-ui node can now expose multiple inbounds. Inbound IDs are stored as a JSON array in `nodes.inbound_ids` and sent to the panel as `inboundIds` during client creation/update.
 
-rs8kvn_bot — production-ready Telegram bot for distributing VLESS+Reality+Vision VPN subscriptions via 3x-ui panel. Built with Go, following Clean Architecture principles.
+rs8kvn_bot — production-ready Telegram bot for distributing VLESS+Reality+Vision VPN subscriptions via 3x-ui and proxman panels. Built with Go, following Clean Architecture principles.
 
 **Key characteristics:**
 - Event-driven with bounded concurrency (worker pool)
@@ -27,8 +27,8 @@ rs8kvn_bot — production-ready Telegram bot for distributing VLESS+Reality+Visi
 ┌─────────────────────────────────────────────────────────────────────┐
 │                         EXTERNAL SYSTEMS                            │
 ├─────────────────────────────────────────────────────────────────────┤
-│  Telegram Bot API       3x-ui Panel         Optional Monitoring    │
-│  (users interact)       (VPN backend)       (Sentry, Heartbeat)    │
+│  Telegram Bot API       3x-ui Panel         proxman Panel      Optional Monitoring    │
+│  (users interact)       (VPN backend)       (VPN backend)       (Sentry, Heartbeat)    │
 │         │                     │                     │               │
 │         │  GET updates        │  HTTP API           │  POST /ping   │
 │         │◄────────────────────┼────────────────────►│              │
@@ -75,21 +75,20 @@ rs8kvn_bot — production-ready Telegram bot for distributing VLESS+Reality+Visi
 │  │  │ • CreateTrial    │              └─────────────────────────┘ │ │
 │  │  └────────┬─────────┘                                         │ │
 │  │           │                                                    │ │
-│  │  ┌────────▼─────────┐                                         │ │
-│  │  │   XUIClient      │ (3x-ui API wrapper)                     │ │
-│  │  │ • AddClient      │ • CircuitBreaker                        │ │
-│  │  │ • GetTraffic     │ • Retry+Jitter                          │ │
-│  │  │ • DeleteClient   │ • Singleflight                           │ │
-│  │  │ • Login          │ • Session mgmt                           │ │
-│  │  └────────┬─────────┘                                         │ │
-│  │           │                                                    │ │
-│  │  ┌────────▼─────────┐                                         │ │
-│  │  │  DatabaseService │ (GORM + SQLite)                         │ │
-│  │  │ • CRUD           │ • Migrations (golang-migrate)           │ │
-│  │  │ • Queries        │ • Connection pool (1 writer)             │ │
-│  │  │ • Transactions   │ • Soft deletes                           │ │
-│  │  │ • Orders         │ • Subscription purchase tracking         │ │
-│  │  └──────────────────┘                                         │ │
+│  │  ┌────────▼─────────┐              ┌─────────────────────────┐ │ │
+│  │  │  SyncService     │              │      VPN Clients        │ │ │
+│  │  │ • Reconcile      │              │  • 3x-ui (ThreeXUI)     │ │ │
+│  │  │ • SyncPending    │              │  • proxman (Proxman)    │ │ │
+│  │  │ • process*       │              │  • Node type routing    │ │ │
+│  │  └────────┬─────────┘              └─────────────┬───────────┘ │ │
+│  │           │                                      │               │ │
+│  │  ┌────────▼─────────┐                         ┌─┴─────────────┐ │ │
+│  │  │  XUIClient       │ (3x-ui API wrapper)     │  Database     │ │ │
+│  │  │ • AddClient      │ • CircuitBreaker        │  Service      │ │ │
+│  │  │ • GetTraffic     │ • Retry+Jitter          │  (GORM+SQLite)│ │ │
+│  │  │ • DeleteClient   │ • Singleflight          │  • CRUD       │ │ │
+│  │  │ • Login          │ • Session mgmt          │  • Queries    │ │ │
+│  │  └──────────────────┘                         └───────────────┘ │ │
 │  └─────────────────────────────────────────────────────────────────┘ │
 │                                 │                                   │
 │                                 ▼                                   │
@@ -111,9 +110,10 @@ rs8kvn_bot — production-ready Telegram bot for distributing VLESS+Reality+Visi
                    ┌─────────────────────────┐
                    │  External Resources     │
                    ├─────────────────────────┤
-                   │ • Telegram Bot API      │
-                   │ • 3x-ui Panel (REST)    │
-                   │ • Sentry (error track)  │
+│ • Telegram Bot API      │
+│ • 3x-ui Panel (REST)    │
+│ • proxman Panel (REST)  │
+│ • Sentry (error track)  │
                    │ • Filesystem (data/)    │
                    │ • Network (ports 8880)  │
                    └─────────────────────────┘
@@ -154,10 +154,10 @@ internal/
 │   ├── sync.go            # Multi-node subscription sync (Reconcile, SyncPendingNodes)
 │   ├── order.go           # Order lifecycle (Create, Activate, Expire)
 │   └── subscription_nodes.go # Subscription-node join table CRUD
-├── vpn/                # VPN client abstraction (multi-node)
+├── vpn/                # VPN client abstraction (multi-node, multi-type)
 │   ├── client.go            # Client interface, Config, SubscriptionProvision, NewClient factory, error classification
-│   ├── threexui.go          # 3x-ui specific client implementation
-│   └── proxman.go          # Stub for future proxman support
+│   ├── threex_ui.go          # 3x-ui specific client implementation
+│   └── proxman.go          # proxman client implementation
 ├── xui/              # Legacy 3x-ui integration (deprecated, use vpn/)
 │   ├── client.go            # Full API + retry + singleflight
 │   └── breaker.go           # Circuit breaker (5/30s/3-half-open)

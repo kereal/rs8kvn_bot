@@ -74,9 +74,6 @@ func buildRuntimeNodeClients(nodes []database.Node, opts *runOptions) ([]databas
 	runtimeNodes := make([]database.Node, 0, len(nodes))
 	for _, node := range nodes {
 		if node.IsActive {
-			if node.Type != database.NodeType3xUI {
-				continue
-			}
 			runtimeNodes = append(runtimeNodes, node)
 		}
 	}

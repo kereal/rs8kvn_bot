@@ -78,10 +78,11 @@ func TestNewClient_3xUI_Success(t *testing.T) {
 	assert.IsType(t, &ThreeXUIClient{}, client)
 }
 
-func TestNewClient_Proxman_NotSupported(t *testing.T) {
-	_, err := NewClient(Config{Type: database.NodeTypeProxman})
-	assert.Error(t, err)
-	assert.ErrorContains(t, err, "not supported yet")
+func TestNewClient_Proxman_Success(t *testing.T) {
+	client, err := NewClient(Config{Type: database.NodeTypeProxman})
+	assert.NoError(t, err)
+	assert.NotNil(t, client)
+	assert.IsType(t, &ProxmanClient{}, client)
 }
 
 func TestNewClient_UnknownType(t *testing.T) {

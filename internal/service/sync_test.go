@@ -184,6 +184,44 @@ func TestSyncService_ReconcilePlanNodes_KeepExisting(t *testing.T) {
 	assert.Equal(t, database.SyncStatusActive, rows[0].Status)
 }
 
+func TestSyncService_SyncNodes_SkipsUnknownNodeType(t *testing.T) {
+	t.Parallel()
+
+	db, err := testutil.NewTestDatabaseService(t)
+	require.NoError(t, err)
+	ctx := context.Background()
+
+	plan := &database.Plan{Name: "test-plan-unknown-type", DevicesLimit: 1, TrafficLimit: 1024}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(plan).Error)
+
+	unknownNode := &database.Node{Name: "unknown-node", Type: database.NodeType("unknown"), IsActive: true, Host: "http://unknown", APIToken: "token", InboundIDs: `[1]`}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(unknownNode).Error)
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(&database.PlanNode{PlanID: plan.ID, NodeID: unknownNode.ID}).Error)
+
+	sub := &database.Subscription{
+		TelegramID:     9999,
+		Username:       "unknowntype",
+		ClientID:       "c-unknowntype",
+		SubscriptionID: "s-unknowntype",
+		Status:         "active",
+		PlanID:         plan.ID,
+		ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
+	}
+	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
+	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: unknownNode.ID, Status: database.SyncStatusPendingAdd}))
+
+	svc := NewSyncService(db, map[uint]vpn.Client{}, []database.Node{*unknownNode})
+
+	err = svc.SyncSubscription(ctx, sub.ID)
+	require.NoError(t, err, "unknown node type should be skipped without error")
+
+	rows, err := db.GetBySubscriptionID(ctx, sub.ID)
+	require.NoError(t, err)
+	assert.Len(t, rows, 1)
+	assert.Equal(t, database.SyncStatusPendingAdd, rows[0].Status, "unknown node type record should remain unchanged")
+	assert.Equal(t, 0, rows[0].RetryCount)
+}
+
 func TestSyncService_ReconcilePlanNodes_ReactivatePendingRemove(t *testing.T) {
 	t.Parallel()
 

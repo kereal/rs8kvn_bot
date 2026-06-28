@@ -26,7 +26,7 @@ func (s *Service) GetNodesByPlanName(ctx context.Context, planName string) ([]No
 		Select("nodes.*").
 		Joins("JOIN plan_nodes ON plan_nodes.node_id = nodes.id").
 		Joins("JOIN plans ON plans.id = plan_nodes.plan_id").
-		Where("plans.name = ? AND nodes.type = ?", planName, NodeType3xUI).
+		Where("plans.name = ?", planName).
 		Find(&nodes)
 	if result.Error != nil {
 		return nil, fmt.Errorf("failed to get nodes by plan name: %w", result.Error)
@@ -130,7 +130,7 @@ func (s *Service) GetNodeByID(ctx context.Context, id uint) (*Node, error) {
 // ListEnabled returns all active nodes.
 func (s *Service) ListEnabled(ctx context.Context) ([]Node, error) {
 	var nodes []Node
-	result := s.db.WithContext(ctx).Where("is_active = ? AND type = ?", true, NodeType3xUI).Find(&nodes)
+	result := s.db.WithContext(ctx).Where("is_active = ?", true).Find(&nodes)
 	if result.Error != nil {
 		return nil, fmt.Errorf("failed to list enabled nodes: %w", result.Error)
 	}
@@ -144,7 +144,7 @@ func (s *Service) GetNodesByPlanID(ctx context.Context, planID uint) ([]Node, er
 		Table("nodes").
 		Select("nodes.*").
 		Joins("JOIN plan_nodes ON plan_nodes.node_id = nodes.id").
-		Where("plan_nodes.plan_id = ? AND nodes.is_active = ? AND nodes.type = ?", planID, true, NodeType3xUI).
+		Where("plan_nodes.plan_id = ? AND nodes.is_active = ?", planID, true).
 		Find(&nodes)
 	if result.Error != nil {
 		return nil, fmt.Errorf("failed to get nodes by plan ID: %w", result.Error)

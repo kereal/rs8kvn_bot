@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -100,7 +99,7 @@ func TestBuildRuntimeNodeClients_SkipsUnsupportedActiveNode(t *testing.T) {
 			return &xui.Client{}, nil
 		},
 		vpnClientFn: func(cfg vpn.Config) (vpn.Client, error) {
-			return nil, fmt.Errorf("proxman nodes are not supported yet")
+			return &stubVPNClient{}, nil
 		},
 	}
 
@@ -108,11 +107,12 @@ func TestBuildRuntimeNodeClients_SkipsUnsupportedActiveNode(t *testing.T) {
 
 	runtimeNodes, xuiClients, vpnClients, legacyXUIClient, err := buildRuntimeNodeClients(nodes, opts)
 
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "no active nodes configured")
-	assert.Empty(t, runtimeNodes)
+	require.NoError(t, err)
+	assert.Len(t, runtimeNodes, 1)
+	assert.Equal(t, uint(7), runtimeNodes[0].ID)
 	assert.Empty(t, xuiClients)
-	assert.Empty(t, vpnClients)
+	assert.Len(t, vpnClients, 1)
+	assert.NotNil(t, vpnClients[7])
 	assert.Nil(t, legacyXUIClient)
 }
 
