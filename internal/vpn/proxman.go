@@ -55,15 +55,10 @@ func (c *ProxmanClient) CreateSubscription(ctx context.Context, provision Subscr
 	return c.sendEvent(ctx, event)
 }
 
-// UpdateSubscription deletes then re-creates the subscription on proxman.
-// Proxman does not support update natively, so this is a delete + create sequence.
-// Note: if CreateSubscription fails after a successful DeleteSubscription, the subscription
-// is left absent on the node; callers must be prepared to re-create from DB state.
+// UpdateSubscription is a no-op for proxman: the webhook payload carries no
+// traffic or expiry fields, so there is nothing to update on the node.
 func (c *ProxmanClient) UpdateSubscription(ctx context.Context, provision SubscriptionProvision) error {
-	if err := c.DeleteSubscription(ctx, provision); err != nil {
-		return fmt.Errorf("proxman update: %w", err)
-	}
-	return c.CreateSubscription(ctx, provision)
+	return nil
 }
 
 // DeleteSubscription sends a subscription.delete event to proxman.

@@ -215,7 +215,7 @@ func TestProxmanClient_DeleteSubscription_NotFound(t *testing.T) {
 	require.ErrorIs(t, err, ErrSubscriptionNotFound)
 }
 
-func TestProxmanClient_UpdateSubscription_DeleteThenCreate(t *testing.T) {
+func TestProxmanClient_UpdateSubscription_NoOp(t *testing.T) {
 	t.Parallel()
 
 	var calls int
@@ -233,7 +233,7 @@ func TestProxmanClient_UpdateSubscription_DeleteThenCreate(t *testing.T) {
 		SubID:    "sub-456",
 	})
 	require.NoError(t, err)
-	assert.Equal(t, 2, calls)
+	assert.Equal(t, 0, calls)
 }
 
 func TestProxmanClient_Unauthorized(t *testing.T) {
