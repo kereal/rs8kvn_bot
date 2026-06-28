@@ -2,6 +2,8 @@ package vpn
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -28,9 +30,11 @@ type capturedDeleteClient struct {
 type fakeXUIClient struct {
 	addCalled    bool
 	deleteCalled bool
+	updateCalled bool
 	addCapture   *capturedAddClientWithID
 	deleteCapture *capturedDeleteClient
 	addErr       error
+	updateErr    error
 	deleteErr   error
 }
 
@@ -57,7 +61,8 @@ func (f *fakeXUIClient) AddClientWithID(ctx context.Context, inboundIDs []int, e
 }
 
 func (f *fakeXUIClient) UpdateClient(ctx context.Context, inboundIDs []int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, resetDays int, tgID int64, comment string) error {
-	return nil
+	f.updateCalled = true
+	return f.updateErr
 }
 
 func (f *fakeXUIClient) DeleteClient(ctx context.Context, email string) error {
@@ -130,19 +135,21 @@ func TestThreeXUIClient_DeleteSubscription_CallsDeleteClient(t *testing.T) {
 func TestThreeXUIClient_CreateSubscription_WrapsError(t *testing.T) {
 	t.Parallel()
 
-	fake := &fakeXUIClient{addErr: assert.AnError}
+	fake := &fakeXUIClient{addErr: fmt.Errorf("client already exists")}
 	client := NewThreeXUIClient(fake, []int{1})
 
 	err := client.CreateSubscription(context.Background(), SubscriptionProvision{ClientID: "uuid", Username: "user", SubID: "sub"})
 	assert.Error(t, err)
+	assert.True(t, errors.Is(err, ErrSubscriptionAlreadyExists))
 }
 
 func TestThreeXUIClient_DeleteSubscription_WrapsError(t *testing.T) {
 	t.Parallel()
 
-	fake := &fakeXUIClient{deleteErr: assert.AnError}
+	fake := &fakeXUIClient{deleteErr: fmt.Errorf("client not found")}
 	client := NewThreeXUIClient(fake, []int{1})
 
 	err := client.DeleteSubscription(context.Background(), SubscriptionProvision{ClientID: "uuid", Username: "user", SubID: "sub"})
 	assert.Error(t, err)
+	assert.True(t, errors.Is(err, ErrSubscriptionNotFound))
 }

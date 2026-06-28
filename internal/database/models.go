@@ -177,13 +177,19 @@ type Invite struct {
 }
 
 // SyncStatus represents the synchronization status of a subscription on a VPN node.
-// Statuses: active | pending_add | pending_remove.
+// Statuses: active | pending_add | pending_remove | pending_update.
 //
 // Values:
 //   - active — нода добавлена и последняя синхронизация прошла успешно.
 //   - pending_add — запрошено добавление ноды, операция ещё не выполнена на панели.
 //   - pending_remove — запрошено удаление ноды, операция ещё не выполнена на панели.
 //   - pending_update — запрошено обновление конфигурации ноды (например, смена тарифа).
+//
+// State machine:
+//   - pending_add -> active after successful create or successful fallback update
+//   - pending_update -> active after successful update
+//   - pending_remove -> row deletion after successful delete or idempotent not-found
+//   - any pending_* state stays pending and gets retry metadata on transient failures
 type SyncStatus string
 
 const (
