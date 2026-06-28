@@ -14,7 +14,6 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/logger"
 
 	"go.uber.org/zap"
-	"gorm.io/gorm"
 )
 
 // HandleSubscription processes a subscription request from cache or upstream sources.
@@ -64,7 +63,7 @@ func HandleSubscription(ctx context.Context, db interfaces.DatabaseService, subS
 	// Cache miss: load the subscription with plan and active sources.
 	subFull, err := db.GetWithPlanAndNodes(ctx, subID)
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(err, database.ErrSubscriptionNotFound) {
 			logger.Error("Subscription not found in database",
 				zap.String("sub_id", subID))
 			return nil, ErrSubscriptionNotFound

@@ -43,7 +43,7 @@ func (w *SubscriptionExpireWorker) Run(ctx context.Context) {
 }
 
 func (w *SubscriptionExpireWorker) process(ctx context.Context) {
-	subs, err := w.repos.GetExpiredPaidSubscriptions(ctx)
+	subs, err := w.repos.GetExpiredPaidSubscriptions(ctx, time.Now().UTC())
 	if err != nil {
 		logger.Error("Failed to query expired subscriptions", zap.Error(err))
 		return

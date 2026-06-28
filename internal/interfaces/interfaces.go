@@ -76,7 +76,7 @@ type SubscriptionCounts interface {
 type SubscriptionStatus interface {
 	GetSubscriptionStatus(ctx context.Context, subscriptionID string) (string, time.Time, error)
 	ExpireSubscription(ctx context.Context, id uint, freePlanID uint) error
-	GetExpiredPaidSubscriptions(ctx context.Context) ([]database.Subscription, error)
+	GetExpiredPaidSubscriptions(ctx context.Context, now time.Time) ([]database.Subscription, error)
 }
 
 // SubscriptionJSONFields updates JSON-encoded fields on subscriptions.
