@@ -19,7 +19,7 @@ CREATE TABLE subscription_nodes (
             'pending_update'
         )
     ),
-    retry_count INTEGER NOT NULL DEFAULT 0,
+    retry_count INTEGER NOT NULL DEFAULT 0 CHECK (retry_count >= 0),
     retry_at DATETIME,
     last_error TEXT,
     updated_at DATETIME NOT NULL,

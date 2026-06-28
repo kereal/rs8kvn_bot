@@ -197,12 +197,12 @@ func initBot(cfg *config.Config) (*tgbotapi.BotAPI, *bot.BotConfig, error) {
 			}
 		}()
 
-		if api != nil {
+		if api != nil && bc != nil {
 			break
 		}
 	}
 
-	if api == nil {
+	if api == nil || bc == nil {
 		return nil, nil, fmt.Errorf("failed to initialize Telegram bot after all attempts")
 	}
 
@@ -220,7 +220,7 @@ func startWebServer(subService *service.SubscriptionService, cfg *config.Config,
 	})
 	webServer.RegisterChecker("xui", func(ctx context.Context) web.ComponentHealth {
 		if legacyXUIClient == nil {
-			return web.ComponentHealth{Status: web.StatusDegraded, Message: "no active XUI client"}
+			return web.ComponentHealth{Status: web.StatusOK, Message: "xui not configured"}
 		}
 		if err := legacyXUIClient.Ping(ctx); err != nil {
 			return web.ComponentHealth{Status: web.StatusDegraded, Message: err.Error()}
@@ -509,7 +509,6 @@ func main() {
 	// All of them must exit (via ctx cancellation) before main returns,
 	// so we wait on wg at the end of graceful shutdown.
 	bgWg := startBackgroundWorkers(ctx, handler, subService, dbService, cfg, vpnClients, nodes)
-	defer bgWg.Wait()
 
 	logger.Info("Bot started successfully")
 

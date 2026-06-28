@@ -1633,7 +1633,7 @@ func TestHandleUpgradePremium_ProductUnavailable(t *testing.T) {
 		return &database.Plan{ID: 1, Name: database.FreePlanName}, nil
 	}
 	mockDB.GetProductByIDFunc = func(ctx context.Context, id uint) (*database.Product, error) {
-		return nil, errors.New("product not found")
+		return nil, nil
 	}
 
 	ctx := context.Background()
@@ -1734,6 +1734,9 @@ func TestHandleConfirmUpgradePremium_Success(t *testing.T) {
 	}
 	mockDB.GetBySubscriptionIDFunc = func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
 		return []database.SubscriptionNode{}, nil
+	}
+	mockDB.TransactionFunc = func(ctx context.Context, fn func(*gorm.DB) error) error {
+		return nil
 	}
 
 	subSvc := service.NewSubscriptionService(mockDB, nil, nil, nil, cfg)

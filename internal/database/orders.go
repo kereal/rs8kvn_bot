@@ -49,6 +49,9 @@ func (s *Service) UpdateOrderStatus(ctx context.Context, id uint, status OrderSt
 	if result.Error != nil {
 		return fmt.Errorf("failed to update order status: %w", result.Error)
 	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("order %d not found for status update: %w", id, ErrOrderNotFound)
+	}
 	return nil
 }
 
@@ -63,7 +66,7 @@ func (s *Service) UpdateOrderPaidStatus(ctx context.Context, id uint) error {
 		return fmt.Errorf("failed to update order paid status: %w", result.Error)
 	}
 	if result.RowsAffected == 0 {
-		return fmt.Errorf("order %d not found for paid status update", id)
+		return fmt.Errorf("order %d not found for paid status update: %w", id, ErrOrderNotFound)
 	}
 	return nil
 }
@@ -78,7 +81,7 @@ func (s *Service) UpdateOrderActivatedAt(ctx context.Context, id uint, activated
 		return fmt.Errorf("failed to update order activation: %w", result.Error)
 	}
 	if result.RowsAffected == 0 {
-		return fmt.Errorf("order %d not found for activation update", id)
+		return fmt.Errorf("order %d not found for activation update: %w", id, ErrOrderNotFound)
 	}
 	return nil
 }

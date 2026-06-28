@@ -5,7 +5,7 @@ CREATE TABLE subscription_nodes_new (
     node_id INTEGER NOT NULL,
     status TEXT NOT NULL CHECK (status IN ('active', 'pending_add', 'pending_remove')),
     retry_count INTEGER NOT NULL DEFAULT 0,
-    retry_at DATETIME,
+    retry_at DATETIME CHECK (retry_count = 0 OR retry_at IS NOT NULL),
     last_error TEXT,
     updated_at DATETIME NOT NULL,
     PRIMARY KEY (subscription_id, node_id),

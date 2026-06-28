@@ -107,7 +107,7 @@ func (s *Service) BindTrialSubscription(ctx context.Context, subscriptionID stri
 
 		if err := tx.Where("subscription_id = ? AND plan_id = ? AND telegram_id < 0", subscriptionID, planID).First(&sub).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return fmt.Errorf("trial subscription not found or already activated")
+				return fmt.Errorf("trial subscription not found or already activated: %w", ErrTrialAlreadyActivated)
 			}
 			return fmt.Errorf("failed to get trial subscription: %w", err)
 		}

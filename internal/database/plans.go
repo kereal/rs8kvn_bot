@@ -27,10 +27,9 @@ func (s *Service) GetPlanByName(ctx context.Context, name string) (*Plan, error)
 }
 
 // GetPlanByID returns a plan by its ID.
-// The free plan is always returned regardless of its active status.
 func (s *Service) GetPlanByID(ctx context.Context, id uint) (*Plan, error) {
 	var plan Plan
-	result := s.db.WithContext(ctx).Where("id = ? AND (is_active = ? OR name = ?)", id, true, FreePlanName).First(&plan)
+	result := s.db.WithContext(ctx).Where("id = ?", id).First(&plan)
 	if result.Error != nil {
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 			return nil, ErrPlanNotFound

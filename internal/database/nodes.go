@@ -94,7 +94,7 @@ func (s *Service) GetNodeByID(ctx context.Context, id uint) (*Node, error) {
 	result := s.db.WithContext(ctx).First(&node, id)
 	if result.Error != nil {
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-			return nil, fmt.Errorf("node not found: %w", result.Error)
+			return nil, fmt.Errorf("node not found: %w", ErrNodeNotFound)
 		}
 		return nil, fmt.Errorf("failed to get node: %w", result.Error)
 	}

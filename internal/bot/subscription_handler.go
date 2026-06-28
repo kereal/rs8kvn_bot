@@ -270,12 +270,15 @@ func (sh *SubscriptionHandler) handleUpgradePremium(ctx context.Context, chatID 
 
 	sub, err := sh.getSubscriptionWithCache(ctx, chatID)
 	if err != nil {
-		if !errors.Is(err, database.ErrSubscriptionNotFound) && !errors.Is(err, gorm.ErrRecordNotFound) {
-			logger.Error("Failed to get subscription for premium offer", zap.Error(err))
+		if errors.Is(err, database.ErrSubscriptionNotFound) || errors.Is(err, gorm.ErrRecordNotFound) {
+			editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgSubNoActive))
+			sh.h.safeSend(editMsg)
+			return nil
 		}
-		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgSubNoActive))
+		logger.Error("Failed to get subscription for premium offer", zap.Error(err), zap.Int64("chat_id", chatID))
+		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgSubTempError))
 		sh.h.safeSend(editMsg)
-		return nil
+		return fmt.Errorf("get subscription for premium offer: %w", err)
 	}
 	if sub == nil || sub.Status != "active" {
 		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgSubNoActive))
@@ -284,7 +287,13 @@ func (sh *SubscriptionHandler) handleUpgradePremium(ctx context.Context, chatID 
 	}
 
 	plan, err := sh.h.db.GetPlanByID(ctx, sub.PlanID)
-	if err != nil || plan == nil || plan.Name != database.FreePlanName {
+	if err != nil {
+		logger.Error("Failed to get plan for premium offer", zap.Error(err), zap.Int64("chat_id", chatID))
+		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgSubTempError))
+		sh.h.safeSend(editMsg)
+		return fmt.Errorf("get plan %d: %w", sub.PlanID, err)
+	}
+	if plan == nil || plan.Name != database.FreePlanName {
 		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgPremiumAlready, "Premium"))
 		editMsg.ParseMode = "Markdown"
 		sh.h.safeSend(editMsg)
@@ -292,7 +301,13 @@ func (sh *SubscriptionHandler) handleUpgradePremium(ctx context.Context, chatID 
 	}
 
 	product, err := sh.h.db.GetProductByID(ctx, 1)
-	if err != nil || product == nil || !product.IsActive || product.PriceCents != 0 {
+	if err != nil {
+		logger.Error("Failed to get product for premium offer", zap.Error(err), zap.Int64("chat_id", chatID))
+		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgSubTempError))
+		sh.h.safeSend(editMsg)
+		return fmt.Errorf("get product 1: %w", err)
+	}
+	if product == nil || !product.IsActive || product.PriceCents != 0 {
 		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgPremiumUnavailable))
 		sh.h.safeSend(editMsg)
 		return nil
