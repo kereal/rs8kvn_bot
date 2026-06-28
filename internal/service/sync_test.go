@@ -218,8 +218,10 @@ func TestSyncService_SyncNodes_SkipsUnknownNodeType(t *testing.T) {
 	rows, err := db.GetBySubscriptionID(ctx, sub.ID)
 	require.NoError(t, err)
 	assert.Len(t, rows, 1)
-	assert.Equal(t, database.SyncStatusPendingAdd, rows[0].Status, "unknown node type record should remain unchanged")
-	assert.Equal(t, 0, rows[0].RetryCount)
+	assert.Equal(t, database.SyncStatusPendingAdd, rows[0].Status, "unknown node type record should remain pending")
+	assert.Greater(t, rows[0].RetryCount, 0, "unknown node type should schedule retry")
+	assert.NotNil(t, rows[0].RetryAt, "retry_at should be set")
+	assert.NotNil(t, rows[0].LastError, "last_error should be set")
 }
 
 func TestSyncService_ReconcilePlanNodes_ReactivatePendingRemove(t *testing.T) {

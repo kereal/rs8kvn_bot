@@ -8,9 +8,7 @@ import (
 
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/interfaces"
-	"github.com/kereal/rs8kvn_bot/internal/logger"
 
-	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
 
@@ -108,20 +106,23 @@ func (o *OrderService) ActivateProduct(ctx context.Context, telegramID int64, pr
 	}
 
 	if planChanged && o.syncSvc != nil {
-		newNodes, _ := o.db.GetNodesByPlanID(ctx, sub.PlanID)
+		newNodes, err := o.db.GetNodesByPlanID(ctx, sub.PlanID)
+		if err != nil {
+			return nil, fmt.Errorf("load plan nodes: %w", err)
+		}
 		var newNodeIDs []uint
 		for _, n := range newNodes {
 			newNodeIDs = append(newNodeIDs, n.ID)
 		}
 		if err := o.db.MarkActiveNodesPendingUpdate(ctx, sub.ID, newNodeIDs); err != nil {
-			logger.Warn("mark active nodes pending update failed", zap.Error(err))
+			return nil, fmt.Errorf("mark active nodes pending update: %w", err)
 		}
 
 		if err := o.syncSvc.ReconcilePlanNodes(ctx, sub.ID); err != nil {
-			logger.Warn("reconcile plan nodes failed (will retry)", zap.Error(err))
+			return nil, fmt.Errorf("reconcile plan nodes: %w", err)
 		}
 		if err := o.syncSvc.SyncSubscription(ctx, sub.ID); err != nil {
-			logger.Warn("sync subscription failed (will retry)", zap.Error(err))
+			return nil, fmt.Errorf("sync subscription: %w", err)
 		}
 	}
 
