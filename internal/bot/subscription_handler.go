@@ -63,7 +63,7 @@ func (sh *SubscriptionHandler) handleCreateSubscription(ctx context.Context, cha
 
 	sub, err := sh.getSubscriptionWithCache(ctx, chatID)
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(err, database.ErrSubscriptionNotFound) || errors.Is(err, gorm.ErrRecordNotFound) {
 			logger.Info("No existing subscription, creating new one", zap.String("username", username))
 		} else {
 			logger.Error("Failed to check subscription", zap.Error(err))
@@ -101,7 +101,7 @@ func (sh *SubscriptionHandler) handleMySubscription(ctx context.Context, chatID 
 
 	sub, traffic, err := sh.h.subscriptionService.GetWithTraffic(ctx, chatID)
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(err, database.ErrSubscriptionNotFound) || errors.Is(err, gorm.ErrRecordNotFound) {
 			editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgSubNoActive))
 			sh.h.safeSend(editMsg)
 			return nil
@@ -168,7 +168,7 @@ func (sh *SubscriptionHandler) handleQRCode(ctx context.Context, chatID int64, u
 
 	sub, err := sh.h.db.GetByTelegramID(ctx, chatID)
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(err, database.ErrSubscriptionNotFound) || errors.Is(err, gorm.ErrRecordNotFound) {
 			// No active subscription — user-friendly message
 			editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgSubNoActive))
 			sh.h.safeSend(editMsg)
@@ -270,7 +270,7 @@ func (sh *SubscriptionHandler) handleUpgradePremium(ctx context.Context, chatID 
 
 	sub, err := sh.getSubscriptionWithCache(ctx, chatID)
 	if err != nil {
-		if !errors.Is(err, gorm.ErrRecordNotFound) {
+		if !errors.Is(err, database.ErrSubscriptionNotFound) && !errors.Is(err, gorm.ErrRecordNotFound) {
 			logger.Error("Failed to get subscription for premium offer", zap.Error(err))
 		}
 		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgSubNoActive))

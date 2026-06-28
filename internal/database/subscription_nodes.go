@@ -98,9 +98,13 @@ func (s *Service) UpdateSubscriptionNodeStatus(ctx context.Context, subID, nodeI
 }
 
 // UpsertSubscriptionNode inserts or updates a subscription node by its composite key.
+// Only mutable fields (status, retry_count, retry_at, last_error) are updated on conflict.
 func (s *Service) UpsertSubscriptionNode(ctx context.Context, sn *SubscriptionNode) error {
 	result := s.db.WithContext(ctx).
-		Clauses(clause.OnConflict{UpdateAll: true}).
+		Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "subscription_id"}, {Name: "node_id"}},
+			DoUpdates: clause.AssignmentColumns([]string{"status", "retry_count", "retry_at", "last_error", "updated_at"}),
+		}).
 		Create(sn)
 	if result.Error != nil {
 		return fmt.Errorf("failed to upsert subscription node: %w", result.Error)
@@ -116,28 +120,17 @@ func (s *Service) MarkActiveNodesPendingUpdate(ctx context.Context, subID uint, 
 		return nil
 	}
 
-	existing, err := s.GetBySubscriptionID(ctx, subID)
-	if err != nil {
-		return fmt.Errorf("mark active nodes pending update: load nodes: %w", err)
+	result := s.db.WithContext(ctx).Model(&SubscriptionNode{}).
+		Where("subscription_id = ? AND node_id IN (?) AND status = ?", subID, targetNodeIDs, SyncStatusActive).
+		Updates(map[string]interface{}{
+			"status":      SyncStatusPendingUpdate,
+			"retry_count": 0,
+			"retry_at":    nil,
+			"last_error":  nil,
+		})
+	if result.Error != nil {
+		return fmt.Errorf("mark active nodes pending update: %w", result.Error)
 	}
-
-	targetSet := make(map[uint]struct{}, len(targetNodeIDs))
-	for _, id := range targetNodeIDs {
-		targetSet[id] = struct{}{}
-	}
-
-	for _, sn := range existing {
-		if sn.Status != SyncStatusActive {
-			continue
-		}
-		if _, ok := targetSet[sn.NodeID]; !ok {
-			continue
-		}
-		if err := s.UpdateSubscriptionNodeStatus(ctx, subID, sn.NodeID, SyncStatusPendingUpdate); err != nil {
-			return fmt.Errorf("mark active node pending update node_id=%d: %w", sn.NodeID, err)
-		}
-	}
-
 	return nil
 }
 

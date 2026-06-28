@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/logger"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -20,7 +21,7 @@ func (h *Handler) handleBackToStart(ctx context.Context, chatID int64, username 
 	sub, err := h.getSubscriptionWithCache(ctx, chatID)
 	var hasSubscription bool
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(err, database.ErrSubscriptionNotFound) || errors.Is(err, gorm.ErrRecordNotFound) {
 			hasSubscription = false
 		} else {
 			logger.Error("Failed to get subscription", zap.Error(err))
@@ -56,7 +57,7 @@ func (h *Handler) handleMenuHelp(ctx context.Context, chatID int64, username str
 
 	sub, err := h.getSubscriptionWithCache(ctx, chatID)
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(err, database.ErrSubscriptionNotFound) || errors.Is(err, gorm.ErrRecordNotFound) {
 			editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "❌ У вас нет активной подписки.\n\nНажмите «Получить подписку» для создания.")
 			editMsg.DisableWebPagePreview = true
 			keyboard := h.getBackKeyboard()

@@ -112,7 +112,7 @@ func (s *Service) DeleteSubscriptionByID(ctx context.Context, id uint) (*Subscri
 	})
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, fmt.Errorf("failed to find subscription: %w", err)
+			return nil, ErrSubscriptionNotFound
 		}
 		return nil, fmt.Errorf("failed to delete subscription: %w", err)
 	}
@@ -198,7 +198,7 @@ func (s *Service) GetSubscription(ctx context.Context, subscriptionID string) (*
 // GetSubscriptionStatus returns subscription status and expiry time for the
 // subscription server (since v2.3.0) — it avoids the full JOIN with plans and
 // sources required by GetSubscriptionWithPlanAndNodes. Returns
-// gorm.ErrRecordNotFound if no row matches.
+// ErrSubscriptionNotFound if no row matches.
 //
 // For Free (unlimited) subscriptions, ExpiresAt is time.Time{} (zero value),
 // since the database stores NULL. Callers should check !expiryTime.IsZero()
@@ -214,6 +214,9 @@ func (s *Service) GetSubscriptionStatus(ctx context.Context, subscriptionID stri
 		Where("subscription_id = ?", subscriptionID).
 		Take(&row)
 	if result.Error != nil {
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return "", time.Time{}, ErrSubscriptionNotFound
+		}
 		return "", time.Time{}, result.Error
 	}
 	return row.Status, row.ExpiresAt, nil
@@ -290,18 +293,18 @@ func (s *Service) ExpireSubscription(ctx context.Context, id uint, freePlanID ui
 		return fmt.Errorf("failed to expire subscription: %w", result.Error)
 	}
 	if result.RowsAffected == 0 {
-		return gorm.ErrRecordNotFound
+		return ErrSubscriptionNotFound
 	}
 	return nil
 }
 
 // GetExpiredPaidSubscriptions returns active subscriptions that have expired and are not on the free plan.
-func (s *Service) GetExpiredPaidSubscriptions(ctx context.Context) ([]Subscription, error) {
+func (s *Service) GetExpiredPaidSubscriptions(ctx context.Context, now time.Time) ([]Subscription, error) {
 	var subs []Subscription
 	freePlanSubQuery := s.db.WithContext(ctx).Select("id").Table("plans").Where("name = ?", FreePlanName)
 	result := s.db.WithContext(ctx).
 		Where("expires_at <= ? AND status = ? AND plan_id NOT IN (?)",
-			time.Now().UTC().Truncate(time.Minute), "active", freePlanSubQuery).
+			now, "active", freePlanSubQuery).
 		Find(&subs)
 	if result.Error != nil {
 		return nil, fmt.Errorf("failed to get expired paid subscriptions: %w", result.Error)

@@ -7,7 +7,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"gorm.io/gorm"
 )
 
 // ==================== GetSubscriptionStatus Tests ====================
@@ -189,7 +188,7 @@ func TestExpireSubscription_NotFound(t *testing.T) {
 	ctx := context.Background()
 
 	err := svc.ExpireSubscription(ctx, 99999, 1)
-	assert.ErrorIs(t, err, gorm.ErrRecordNotFound)
+	assert.ErrorIs(t, err, ErrSubscriptionNotFound)
 }
 
 // ==================== GetExpiredPaidSubscriptions Tests ====================
@@ -216,7 +215,7 @@ func TestGetExpiredPaidSubscriptions_WithExpiredPaidSub(t *testing.T) {
 	}
 	require.NoError(t, svc.CreateSubscription(ctx, sub, ""))
 
-	subs, err := svc.GetExpiredPaidSubscriptions(ctx)
+	subs, err := svc.GetExpiredPaidSubscriptions(ctx, time.Now().UTC())
 	require.NoError(t, err)
 	require.Len(t, subs, 1)
 	assert.Equal(t, sub.SubscriptionID, subs[0].SubscriptionID)
@@ -231,7 +230,7 @@ func TestGetExpiredPaidSubscriptions_NoExpired(t *testing.T) {
 	// Active subscription with future expiry — should not appear
 	_ = createTestSubscription(t, svc, 9501, "not-expired", "client-not-exp")
 
-	subs, err := svc.GetExpiredPaidSubscriptions(ctx)
+	subs, err := svc.GetExpiredPaidSubscriptions(ctx, time.Now().UTC())
 	require.NoError(t, err)
 	assert.Empty(t, subs)
 }
@@ -258,7 +257,7 @@ func TestGetExpiredPaidSubscriptions_FreePlanExcluded(t *testing.T) {
 	}
 	require.NoError(t, svc.CreateSubscription(ctx, sub, ""))
 
-	subs, err := svc.GetExpiredPaidSubscriptions(ctx)
+	subs, err := svc.GetExpiredPaidSubscriptions(ctx, time.Now().UTC())
 	require.NoError(t, err)
 	assert.Empty(t, subs, "free plan subscriptions should be excluded")
 }

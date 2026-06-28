@@ -29,7 +29,7 @@ func (s *Service) GetProductByID(ctx context.Context, id uint) (*Product, error)
 	result := s.db.WithContext(ctx).First(&product, id)
 	if result.Error != nil {
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-			return nil, fmt.Errorf("product not found: %w", result.Error)
+			return nil, ErrProductNotFound
 		}
 		return nil, fmt.Errorf("failed to get product: %w", result.Error)
 	}

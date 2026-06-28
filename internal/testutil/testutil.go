@@ -724,7 +724,7 @@ func (m *DatabaseService) ExpireSubscription(ctx context.Context, id uint, freeP
 	return nil
 }
 
-func (m *DatabaseService) GetExpiredPaidSubscriptions(ctx context.Context) ([]database.Subscription, error) {
+func (m *DatabaseService) GetExpiredPaidSubscriptions(ctx context.Context, now time.Time) ([]database.Subscription, error) {
 	return nil, nil
 }
 
