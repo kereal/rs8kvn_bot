@@ -1557,5 +1557,195 @@ func TestHandleBackToSubscription_DeleteFails(t *testing.T) {
 	assert.True(t, mockBot.RequestCalledSafe(), "Bot.Request should be called to delete message")
 }
 
+func TestHandleUpgradePremium_NoActiveSubscription(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{TelegramAdminID: 123456}
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
+
+	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
+		return nil, gorm.ErrRecordNotFound
+	}
+
+	ctx := context.Background()
+	err := handler.handleUpgradePremium(ctx, 123456, "testuser", 1)
+	assert.NoError(t, err)
+	assert.True(t, mockBot.SendCalledSafe())
+	assert.Contains(t, mockBot.LastSentTextSafe(), "❌ У вас нет активной подписки")
+}
+
+func TestHandleUpgradePremium_InactiveSubscription(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{TelegramAdminID: 123456}
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
+
+	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
+		return &database.Subscription{TelegramID: 123456, Status: "expired"}, nil
+	}
+
+	ctx := context.Background()
+	err := handler.handleUpgradePremium(ctx, 123456, "testuser", 1)
+	assert.NoError(t, err)
+	assert.Contains(t, mockBot.LastSentTextSafe(), "❌ У вас нет активной подписки")
+}
+
+func TestHandleUpgradePremium_AlreadyPremium(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{TelegramAdminID: 123456}
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
+
+	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
+		return &database.Subscription{TelegramID: 123456, Status: "active", PlanID: 2}, nil
+	}
+	mockDB.GetPlanByIDFunc = func(ctx context.Context, planID uint) (*database.Plan, error) {
+		return &database.Plan{ID: 2, Name: "Premium"}, nil
+	}
+
+	ctx := context.Background()
+	err := handler.handleUpgradePremium(ctx, 123456, "testuser", 1)
+	assert.NoError(t, err)
+	assert.Contains(t, mockBot.LastSentTextSafe(), "У вас уже активирован")
+}
+
+func TestHandleUpgradePremium_ProductUnavailable(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{TelegramAdminID: 123456}
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
+
+	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
+		return &database.Subscription{TelegramID: 123456, Status: "active", PlanID: 1}, nil
+	}
+	mockDB.GetPlanByIDFunc = func(ctx context.Context, planID uint) (*database.Plan, error) {
+		return &database.Plan{ID: 1, Name: database.FreePlanName}, nil
+	}
+	mockDB.GetProductByIDFunc = func(ctx context.Context, id uint) (*database.Product, error) {
+		return nil, errors.New("product not found")
+	}
+
+	ctx := context.Background()
+	err := handler.handleUpgradePremium(ctx, 123456, "testuser", 1)
+	assert.NoError(t, err)
+	assert.Contains(t, mockBot.LastSentTextSafe(), "❌ Бесплатный premium-продукт сейчас недоступен")
+}
+
+func TestHandleUpgradePremium_Success(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{TelegramAdminID: 123456}
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
+
+	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
+		return &database.Subscription{TelegramID: 123456, Status: "active", PlanID: 1, SubscriptionID: "sub-123"}, nil
+	}
+	mockDB.GetPlanByIDFunc = func(ctx context.Context, planID uint) (*database.Plan, error) {
+		return &database.Plan{ID: 1, Name: database.FreePlanName}, nil
+	}
+	mockDB.GetProductByIDFunc = func(ctx context.Context, id uint) (*database.Product, error) {
+		return &database.Product{ID: 1, PlanID: 1, Name: "Free Premium", PriceCents: 0, IsActive: true}, nil
+	}
+
+	ctx := context.Background()
+	err := handler.handleUpgradePremium(ctx, 123456, "testuser", 1)
+	require.NoError(t, err)
+	assert.True(t, mockBot.SendCalledSafe())
+	assert.Contains(t, mockBot.LastSentTextSafe(), "Free Premium")
+}
+
+func TestHandleConfirmUpgradePremium_OrderServiceNil(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{TelegramAdminID: 123456}
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
+	handler.SetOrderService(nil)
+
+	ctx := context.Background()
+	err := handler.handleConfirmUpgradePremium(ctx, 123456, "testuser", 1)
+	assert.Error(t, err)
+	assert.ErrorContains(t, err, "order service not available")
+	assert.Contains(t, mockBot.LastSentTextSafe(), "❌ Временная ошибка")
+}
+
+func TestHandleConfirmUpgradePremium_ProductUnavailable(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{TelegramAdminID: 123456}
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
+
+	mockDB.GetProductByIDFunc = func(ctx context.Context, id uint) (*database.Product, error) {
+		return nil, errors.New("not found")
+	}
+
+	subSvc := service.NewSubscriptionService(mockDB, nil, nil, nil, cfg, "", &webhook.NoopSender{})
+	orderSvc := service.NewOrderService(mockDB, subSvc, nil)
+	handler.SetOrderService(orderSvc)
+
+	ctx := context.Background()
+	err := handler.handleConfirmUpgradePremium(ctx, 123456, "testuser", 1)
+	assert.NoError(t, err)
+	assert.Contains(t, mockBot.LastSentTextSafe(), "❌ Бесплатный premium-продукт сейчас недоступен")
+}
+
+func TestHandleConfirmUpgradePremium_Success(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{TelegramAdminID: 123456}
+	mockDB := testutil.NewMockDatabaseService()
+	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewMockBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
+
+	mockDB.GetProductByIDFunc = func(ctx context.Context, id uint) (*database.Product, error) {
+		return &database.Product{ID: 1, PlanID: 1, Name: "Free Premium", PriceCents: 0, IsActive: true}, nil
+	}
+	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
+		return &database.Subscription{ID: 1, TelegramID: 123456, SubscriptionID: "sub-123", PlanID: 1, Status: "active"}, nil
+	}
+	mockDB.CreateOrderFunc = func(ctx context.Context, order *database.Order) error {
+		return nil
+	}
+	mockDB.UpdateSubscriptionFunc = func(ctx context.Context, sub *database.Subscription) error {
+		return nil
+	}
+	mockDB.GetNodesByPlanIDFunc = func(ctx context.Context, planID uint) ([]database.Node, error) {
+		return []database.Node{}, nil
+	}
+	mockDB.GetBySubscriptionIDFunc = func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
+		return []database.SubscriptionNode{}, nil
+	}
+
+	subSvc := service.NewSubscriptionService(mockDB, nil, nil, nil, cfg, "", &webhook.NoopSender{})
+	orderSvc := service.NewOrderService(mockDB, subSvc, nil)
+	handler.SetOrderService(orderSvc)
+
+	ctx := context.Background()
+	err := handler.handleConfirmUpgradePremium(ctx, 123456, "testuser", 1)
+	assert.NoError(t, err)
+	assert.Contains(t, mockBot.LastSentTextSafe(), "Free Premium")
+}
+
 // daysUntilReset and GenerateProgressBar tests have been moved to
 // internal/utils/format_test.go
