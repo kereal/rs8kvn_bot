@@ -10,10 +10,9 @@
 1. [Health Checks](#1-health-checks)
 2. [Trial Landing Page](#2-trial-landing-page)
 3. [Subscription Proxy](#3-subscription-proxy)
-4. [Admin API](#4-admin-api)
-5. [Static Files](#5-static-files)
-6. [Error Codes](#6-error-codes)
-7. [Rate Limits](#7-rate-limits)
+4. [Static Files](#4-static-files)
+5. [Error Codes](#5-error-codes)
+6. [Rate Limits](#6-rate-limits)
 
 ---
 
@@ -239,69 +238,7 @@ Rate limit exceeded.
 
 ---
 
-## 4. Admin API
-
-### `GET /api/v1/subscriptions`
-
-Returns all active subscriptions. **Requires Bearer token authentication.**
-
-**Authentication:**
-```
-Authorization: Bearer <API_TOKEN>
-```
-
-**Request:**
-```http
-GET /api/v1/subscriptions HTTP/1.1
-Host: localhost:8880
-Authorization: Bearer secret-token-here
-```
-
-**Response 200 OK:**
-
-```json
-{
-  "subscriptions": [
-    {
-      "id": "uuid-1234-5678",
-      "email": "user@example.com",
-      "enabled": true,
-      "subscription_token": "sub_abc123..."
-    }
-  ]
-}
-```
-
-**Fields:**
-| Field | Type | Description |
-|-------|------|-------------|
-| `id` | string | Client ID (UUID from 3x-ui / ClientID field) |
-| `email` | string | Username (email-like identifier, maps to Username) |
-| `enabled` | bool | Whether subscription is active (matches IsActive()) |
-| `subscription_token` | string | Subscription ID (for `/sub/` endpoint / SubscriptionID) |
-
-**Response 401 Unauthorized:**
-
-Missing or invalid token.
-
-```json
-{
-  "error": "unauthorized",
-  "code": "UNAUTHORIZED"
-}
-```
-
-**Response 500 Internal Server Error:**
-
-Database error.
-
-**Rate Limiting:** Currently none — relies on token secrecy. If token leaks, enable nginx rate limiting or add per-token limiter.
-
-**Pagination:** Not implemented — returns all active subscriptions. May be slow with >10k users.
-
----
-
-## 5. Static Files
+## 4. Static Files
 
 ### `GET /static/logo.png`
 
@@ -317,7 +254,7 @@ Binary PNG image.
 
 ---
 
-## 6. Error Codes
+## 5. Error Codes
 
 All errors follow this format:
 
@@ -332,8 +269,7 @@ All errors follow this format:
 ### Common Error Codes
 
 | Code | HTTP Status | Description |
-|------|------------|-------------|
-| `UNAUTHORIZED` | 401 | Missing/invalid Bearer token |
+||------|------------|-------------|
 | `INVITE_NOT_FOUND` | 404 | Invite code invalid |
 | `RATE_LIMIT_EXCEEDED` | 429 | Too many trial requests from IP |
 | `SUBSCRIPTION_NOT_FOUND` | 404 | Subscription not found (inactive/expired) |
@@ -344,32 +280,25 @@ All errors follow this format:
 
 ---
 
-## 7. Rate Limits
+## 6. Examples
 
 | Endpoint | Limit | Enforcement |
 |----------|-------|-------------|
 | `/i/{code}` (trial) | 3 requests/hour per IP | In-memory DB counter |
 | `/sub/{subID}` | None (cached, 240s TTL) | Future: 30 req/min per IP |
-| `/api/v1/subscriptions` | None (token only) | Future: per-token |
 | Telegram bot commands | 30 tokens/user, 5/sec refill | In-memory token bucket |
 
 **Burst capacity:** Token bucket allows short bursts up to 30 requests.
 
 ---
 
-## 8. Examples
+## 7. Versioning
 
 ### cURL examples
 
 **Health check:**
 ```bash
 curl -s http://localhost:8880/healthz | jq
-```
-
-**Get subscription (with token):**
-```bash
-curl -H "Authorization: Bearer my-secret-token" \
-  http://localhost:8880/api/v1/subscriptions | jq '.subscriptions[0] | {email, enabled}'
 ```
 
 **Trial page:**
@@ -384,10 +313,10 @@ curl -s http://localhost:8880/sub/abc123def456 | base64 -d | head -20
 
 ---
 
-## 9. Versioning
+## 8. Versioning
 
 API version is implicit in endpoint paths:
-- `/api/v1/subscriptions` — v1 (current)
+- `/sub/{subID}` — subscription proxy (current)
 - No breaking changes expected without major version bump
 
 Bot version in logs: `rs8kvn_bot@v3.0.0`

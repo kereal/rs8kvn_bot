@@ -131,10 +131,6 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/sub/", s.handleSubscription)
 	mux.HandleFunc("/static/logo.png", s.handleLogo)
 
-	apiMux := http.NewServeMux()
-	apiMux.HandleFunc("/api/v1/subscriptions", s.GetSubscriptions)
-	mux.Handle("/api/v1/subscriptions", BearerAuthMiddleware(s.cfg.APIToken)(apiMux))
-
 	mux.Handle("/metrics", promhttp.Handler())
 
 	instrumentedHandler := metrics.InstrumentHTTP(mux)

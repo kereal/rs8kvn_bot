@@ -24,7 +24,6 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/subserver"
 	"github.com/kereal/rs8kvn_bot/internal/vpn"
 	"github.com/kereal/rs8kvn_bot/internal/web"
-	"github.com/kereal/rs8kvn_bot/internal/webhook"
 	"github.com/kereal/rs8kvn_bot/internal/xui"
 
 	"github.com/getsentry/sentry-go"
@@ -163,7 +162,7 @@ func getVersion() string {
 // coordinates a graceful shutdown when termination signals are received.
 //
 // It performs best-effort initialization of optional components (Sentry, 3x-ui, Telegram
-// bot), constructs shared services (database, subscription service, webhook sender),
+// bot), constructs shared services (database, subscription service),
 // registers health checks, starts scheduled background tasks, and marks the web server
 // readiness. On shutdown it stops receiving updates, drains channels, and waits for
 // in-flight update handlers and background tasks to complete within configured timeouts.
@@ -342,11 +341,8 @@ func main() {
 
 	logger.Info("Telegram bot authorized", zap.String("username", botConfig.Username))
 
-	// Create webhook sender for Proxy Manager notifications
-	webhookSender := webhook.NewSender(cfg.ProxyManagerWebhookURL, cfg.ProxyManagerWebhookSecret)
-
 	// Create subscription service (shared between bot handler and web server)
-	subService := service.NewSubscriptionService(dbService, xuiClients, vpnClients, nodes, cfg, cfg.GlobalSubURL, webhookSender)
+	subService := service.NewSubscriptionService(dbService, xuiClients, vpnClients, nodes, cfg)
 
 	// Create Subscription server service
 	subServer := subserver.NewService(config.SubServerCacheTTL)
@@ -565,13 +561,6 @@ eventLoop:
 		logger.Info("All update handlers completed")
 	case <-time.After(config.ShutdownTimeout):
 		logger.Warn("Timeout waiting for update handlers")
-	}
-
-	// Ожидание завершения текущих доставок webhook
-	if webhookSender != nil {
-		logger.Info("Waiting for webhook deliveries...")
-		webhookSender.Wait()
-		logger.Info("Webhook deliveries completed")
 	}
 
 	// Wait for background tasks with timeout

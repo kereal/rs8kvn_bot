@@ -47,8 +47,6 @@ Instead, contact us privately:
 | Component | Protection |
 |-----------|------------|
 | Telegram bot | User identification via `chat_id`; admin commands check `TELEGRAM_ADMIN_ID` |
-| API endpoint | Bearer token (`API_TOKEN`) with constant-time comparison |
-| Webhook | Bearer secret (`PROXY_MANAGER_WEBHOOK_SECRET`) |
 | 3x-ui panel | API token (`XUI_API_TOKEN`) via Bearer header over HTTPS |
 
 ### 2. Input Validation
@@ -126,8 +124,6 @@ Instead, contact us privately:
 
 - [ ] **Use HTTPS** for `XUI_HOST` (no HTTP in prod)
 - [ ] Set `TELEGRAM_ADMIN_ID` to real admin user ID
-- [ ] Generate strong `API_TOKEN` (32+ random chars)
-- [ ] Set `PROXY_MANAGER_WEBHOOK_SECRET` if webhook enabled
 - [ ] `.env` file permissions: `chmod 600 .env`
 - [ ] Docker volumes: owned by non-root user (UID 1000)
 - [ ] Enable `SENTRY_DSN` for error monitoring
@@ -137,7 +133,7 @@ Instead, contact us privately:
 
 ### Operational Security
 
-- [ ] **Rotate secrets** every 90 days (XUI API token, API_TOKEN, webhook secrets)
+- [ ] **Rotate secrets** every 90 days (XUI API token)
 - [ ] Monitor `/healthz` with external service (UptimeRobot, healthchecks.io)
 - [ ] Review logs daily for `error`/`warn` level
 - [ ] Watch for `401` / `XUI API error` patterns indicating token issues
@@ -187,8 +183,6 @@ Instead, contact us privately:
 4. **Rotate secrets:**
    - New Telegram bot token (via @BotFather)
    - New 3x-ui credentials
-   - New `API_TOKEN`
-   - New `PROXY_MANAGER_WEBHOOK_SECRET`
 5. **Restore from clean backup:** If DB tampered, restore from known-good backup
 6. **Update:** Deploy latest version with security fixes
 7. **Notify:** Inform users if personal data potentially exposed
@@ -200,7 +194,6 @@ Instead, contact us privately:
 3. Update `XUI_API_TOKEN` in `.env` and restart the bot
 4. Check panel logs for unauthorized client modifications
 5. Audit all recent changes made via the compromised token (panel access logs)
-6. If shared/leaked token is suspected, also rotate `API_TOKEN` and `PROXY_MANAGER_WEBHOOK_SECRET`
 
 ### Data Breach Notification
 
@@ -244,13 +237,6 @@ HEALTH_CHECK_PORT=8880
 # Trial
 TRIAL_DURATION_HOURS=3
 TRIAL_RATE_LIMIT=3
-
-# API (generate random 64-char hex)
-API_TOKEN=$(openssl rand -hex 32)
-
-# Webhook (if used)
-PROXY_MANAGER_WEBHOOK_SECRET=$(openssl rand -hex 32)
-PROXY_MANAGER_WEBHOOK_URL=https://api.example.com/webhook
 ```
 
 **Docker run:**

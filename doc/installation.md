@@ -238,16 +238,10 @@ Air will automatically rebuild and restart the bot when you save changes to Go f
 | **Subscription Proxy** |
 | `SUB_EXTRA_SERVERS_ENABLED` | Enable extra servers in proxy | `true` | ❌ | `true`/`false` |
 | `SUB_EXTRA_SERVERS_FILE` | Path to extra servers config | `./data/extra_servers.txt` | ❌ | See below |
-| **API** |
-| `API_TOKEN` | Bearer token for `/api/v1/subscriptions` | — | ✅ if endpoint used | Random string |
-| **Webhook** |
-| `PROXY_MANAGER_WEBHOOK_SECRET` | Secret for webhook auth | — | ❌ | Bearer token |
-| `PROXY_MANAGER_WEBHOOK_URL` | Webhook URL for external notifications | — | ❌ | Must be HTTPS |
 
 ### Security Notes
 
 - **XUI_HOST** must use **HTTPS** in production (HTTP only allowed for localhost)
-- All webhook URLs must use **HTTPS** (except localhost)
 - `.env` file should have permissions `600` (readable only by owner)
 - Never commit `.env` to version control
 

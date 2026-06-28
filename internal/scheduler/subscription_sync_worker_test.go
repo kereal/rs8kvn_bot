@@ -23,7 +23,7 @@ func newTestSubServiceForSyncWorker(t testing.TB, db *database.Service) *service
 	cfg := &config.Config{
 		TrialDurationHours: 1,
 	}
-	return service.NewSubscriptionService(db, nil, nil, nil, cfg, "", nil)
+	return service.NewSubscriptionService(db, nil, nil, nil, cfg)
 }
 
 func TestSubscriptionSyncWorker_Run_CallsSyncPendingNodes(t *testing.T) {
