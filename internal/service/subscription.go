@@ -192,11 +192,7 @@ func (s *SubscriptionService) Delete(ctx context.Context, telegramID int64) erro
 		return fmt.Errorf("db delete: %w", err)
 	}
 
-	if purgeErr := s.db.DeleteSubscriptionNodesBySubscriptionID(ctx, sub.ID); purgeErr != nil {
-		logger.Warn("purge subscription nodes after delete failed", zap.Error(purgeErr))
-	}
-
-	s.deleteClientFromAllNodes(ctx, email)
+	s.db.DeleteSubscriptionNodesBySubscriptionID(ctx, sub.ID)
 
 	if s.invalidateBySubID != nil && sub.SubscriptionID != "" {
 		s.InvalidateBySubID(ctx, sub.SubscriptionID)
@@ -243,11 +239,7 @@ func (s *SubscriptionService) DeleteByID(ctx context.Context, id uint) (*databas
 
 	email := XUIEmail(deleted.Username, deleted.TelegramID)
 
-	if purgeErr := s.db.DeleteSubscriptionNodesBySubscriptionID(ctx, deleted.ID); purgeErr != nil {
-		logger.Warn("purge subscription nodes after delete by id failed", zap.Error(purgeErr))
-	}
-
-	s.deleteClientFromAllNodes(ctx, email)
+	s.db.DeleteSubscriptionNodesBySubscriptionID(ctx, deleted.ID)
 
 	if s.invalidateBySubID != nil && deleted.SubscriptionID != "" {
 		s.InvalidateBySubID(ctx, deleted.SubscriptionID)
@@ -741,8 +733,9 @@ func (s *SubscriptionService) CleanupExpiredTrials(ctx context.Context) (int64, 
 			if sub.Status == "active" && s.syncService != nil {
 				s.syncService.MarkAllForRemoval(ctx, sub.ID)
 				s.syncService.SyncSubscription(ctx, sub.ID)
+			} else {
+				s.deleteClientFromAllNodes(ctx, email)
 			}
-			s.deleteClientFromAllNodes(ctx, email)
 			if s.invalidateBySubID != nil {
 				s.invalidateBySubID(sub.SubscriptionID)
 			}
