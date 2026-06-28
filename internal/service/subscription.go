@@ -187,7 +187,9 @@ func (s *SubscriptionService) Delete(ctx context.Context, telegramID int64) erro
 		return fmt.Errorf("db delete: %w", err)
 	}
 
-	s.db.DeleteSubscriptionNodesBySubscriptionID(ctx, sub.ID)
+	if err := s.db.DeleteSubscriptionNodesBySubscriptionID(ctx, sub.ID); err != nil {
+		return fmt.Errorf("delete subscription nodes: %w", err)
+	}
 
 	if s.invalidateBySubID != nil && sub.SubscriptionID != "" {
 		s.InvalidateBySubID(ctx, sub.SubscriptionID)
@@ -218,7 +220,9 @@ func (s *SubscriptionService) DeleteByID(ctx context.Context, id uint) (*databas
 		return nil, fmt.Errorf("db delete: %w", err)
 	}
 
-	s.db.DeleteSubscriptionNodesBySubscriptionID(ctx, deleted.ID)
+	if err := s.db.DeleteSubscriptionNodesBySubscriptionID(ctx, deleted.ID); err != nil {
+		return nil, fmt.Errorf("delete subscription nodes: %w", err)
+	}
 
 	if s.invalidateBySubID != nil && deleted.SubscriptionID != "" {
 		s.InvalidateBySubID(ctx, deleted.SubscriptionID)

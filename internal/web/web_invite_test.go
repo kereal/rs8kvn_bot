@@ -26,8 +26,8 @@ import (
 
 func ptrTime(t time.Time) *time.Time { return &t }
 
-func makeTestSubService(mockDB *testutil.MockDatabaseService) (*config.Config, *service.SubscriptionService, *testutil.MockXUIClient) {
-	mockXUI := testutil.NewMockXUIClient()
+func makeTestSubService(mockDB *testutil.DatabaseService) (*config.Config, *service.SubscriptionService, *testutil.XUIClient) {
+	mockXUI := testutil.NewXUIClient()
 	cfg := &config.Config{
 		SiteURL:            "https://vpn.site",
 		TrialDurationHours: 3,
@@ -51,7 +51,7 @@ func makeTestSubService(mockDB *testutil.MockDatabaseService) (*config.Config, *
 func TestHandleInvite_InvalidCode(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewMockDatabaseService()
+	mockDB := testutil.NewDatabaseService()
 	mockDB.GetPlanByNameFunc = func(ctx context.Context, name string) (*database.Plan, error) {
 		return &database.Plan{ID: 1, Name: "trial", DevicesLimit: 1, TrafficLimit: 1073741824}, nil
 	}
@@ -126,7 +126,7 @@ func TestHandleInvite_InvalidCode(t *testing.T) {
 func TestHandleInvite_XUIError(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewMockDatabaseService()
+	mockDB := testutil.NewDatabaseService()
 
 	cfg, subService, mockXUI := makeTestSubService(mockDB)
 
@@ -182,7 +182,7 @@ func isHexDigit(c rune) bool {
 func TestHandleInvite_EmptyCode(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewMockDatabaseService()
+	mockDB := testutil.NewDatabaseService()
 	mockDB.GetPlanByNameFunc = func(ctx context.Context, name string) (*database.Plan, error) {
 		return &database.Plan{ID: 1, Name: "trial", DevicesLimit: 1, TrafficLimit: 1073741824}, nil
 	}
@@ -209,7 +209,7 @@ func TestHandleInvite_EmptyCode(t *testing.T) {
 func TestHandleInvite_DatabaseError(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewMockDatabaseService()
+	mockDB := testutil.NewDatabaseService()
 	mockDB.GetPlanByNameFunc = func(ctx context.Context, name string) (*database.Plan, error) {
 		return &database.Plan{ID: 1, Name: "trial", DevicesLimit: 1, TrafficLimit: 1073741824}, nil
 	}
@@ -242,7 +242,7 @@ func TestHandleInvite_DatabaseError(t *testing.T) {
 func TestGetExistingTrialFromCookie_NoCookie(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewMockDatabaseService()
+	mockDB := testutil.NewDatabaseService()
 	cfg := &config.Config{}
 	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, nil)
 
@@ -258,7 +258,7 @@ func TestGetExistingTrialFromCookie_NoCookie(t *testing.T) {
 func TestGetExistingTrialFromCookie_InvalidSubID(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewMockDatabaseService()
+	mockDB := testutil.NewDatabaseService()
 	cfg := &config.Config{}
 	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, nil)
 
@@ -278,7 +278,7 @@ func TestGetExistingTrialFromCookie_InvalidSubID(t *testing.T) {
 func TestGetExistingTrialFromCookie_NotTrial(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewMockDatabaseService()
+	mockDB := testutil.NewDatabaseService()
 	cfg := &config.Config{}
 	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, nil)
 
@@ -306,7 +306,7 @@ func TestGetExistingTrialFromCookie_NotTrial(t *testing.T) {
 func TestGetExistingTrialFromCookie_AlreadyActivated(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewMockDatabaseService()
+	mockDB := testutil.NewDatabaseService()
 	cfg := &config.Config{}
 	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, nil)
 
@@ -334,7 +334,7 @@ func TestGetExistingTrialFromCookie_AlreadyActivated(t *testing.T) {
 func TestGetExistingTrialFromCookie_Expired(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewMockDatabaseService()
+	mockDB := testutil.NewDatabaseService()
 	cfg := &config.Config{}
 	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, nil)
 
@@ -363,7 +363,7 @@ func TestGetExistingTrialFromCookie_Expired(t *testing.T) {
 func TestGetExistingTrialFromCookie_Valid(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewMockDatabaseService()
+	mockDB := testutil.NewDatabaseService()
 	cfg := &config.Config{}
 	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, nil)
 
@@ -439,7 +439,7 @@ func TestInviteCodeRegex(t *testing.T) {
 func TestHandleInvite_XUIAddClientFails(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewMockDatabaseService()
+	mockDB := testutil.NewDatabaseService()
 
 	cfg, subService, mockXUI := makeTestSubService(mockDB)
 
@@ -471,7 +471,7 @@ func TestHandleInvite_XUIAddClientFails(t *testing.T) {
 func TestHandleInvite_CreateTrialSubscriptionFails(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewMockDatabaseService()
+	mockDB := testutil.NewDatabaseService()
 
 	cfg, subService, mockXUI := makeTestSubService(mockDB)
 
@@ -512,7 +512,7 @@ func TestHandleInvite_CreateTrialSubscriptionFails(t *testing.T) {
 func TestHandleInvite_ExistingTrialFromCookie(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewMockDatabaseService()
+	mockDB := testutil.NewDatabaseService()
 	mockDB.GetPlanByNameFunc = func(ctx context.Context, name string) (*database.Plan, error) {
 		return &database.Plan{ID: 1, Name: "trial", DevicesLimit: 1, TrafficLimit: 1073741824}, nil
 	}
@@ -562,7 +562,7 @@ func TestHandleInvite_ExistingTrialFromCookie(t *testing.T) {
 func TestHandleInvite_MethodNotAllowed(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewMockDatabaseService()
+	mockDB := testutil.NewDatabaseService()
 	cfg := &config.Config{}
 	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, nil)
 
@@ -578,7 +578,7 @@ func TestHandleInvite_MethodNotAllowed(t *testing.T) {
 func TestHandleInvite_InvalidPath(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewMockDatabaseService()
+	mockDB := testutil.NewDatabaseService()
 	cfg := &config.Config{}
 	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, nil)
 
@@ -594,7 +594,7 @@ func TestHandleInvite_InvalidPath(t *testing.T) {
 func TestHandleInvite_InvalidCodeChars(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewMockDatabaseService()
+	mockDB := testutil.NewDatabaseService()
 	cfg := &config.Config{}
 	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, nil)
 
@@ -610,7 +610,7 @@ func TestHandleInvite_InvalidCodeChars(t *testing.T) {
 func TestHandleInvite_RateLimitCheckError(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewMockDatabaseService()
+	mockDB := testutil.NewDatabaseService()
 	mockDB.GetPlanByNameFunc = func(ctx context.Context, name string) (*database.Plan, error) {
 		return &database.Plan{ID: 1, Name: "trial", DevicesLimit: 1, TrafficLimit: 1073741824}, nil
 	}
@@ -646,7 +646,7 @@ func TestHandleInvite_RateLimitCheckError(t *testing.T) {
 func TestHandleInvite_ParallelRequests(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewMockDatabaseService()
+	mockDB := testutil.NewDatabaseService()
 	mockDB.GetPlanByNameFunc = func(ctx context.Context, name string) (*database.Plan, error) {
 		return &database.Plan{ID: 1, Name: "trial", DevicesLimit: 1, TrafficLimit: 1073741824}, nil
 	}

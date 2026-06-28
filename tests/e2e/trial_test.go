@@ -23,7 +23,7 @@ func TestE2E_TrialBind_Success(t *testing.T) {
 	_, err := env.db.CreateTrialSubscription(ctx, "test_invite_code", trialSubID, "trial-client-id", time.Now().Add(24*time.Hour))
 	require.NoError(t, err)
 
-	resetMockBotAPI(env.botAPI)
+	resetBotAPI(env.botAPI)
 
 	env.handler.HandleStart(ctx, tgbotapi.Update{
 		Message: newCommandMessage(env.chatID, env.chatID, env.username, "/start trial_"+trialSubID, 6),
@@ -59,7 +59,7 @@ func TestE2E_TrialBind_AlreadyHasSubscription(t *testing.T) {
 	_, err := env.db.CreateTrialSubscription(ctx, "test_invite_code", trialSubID, "trial-client-id", time.Now().Add(24*time.Hour))
 	require.NoError(t, err)
 
-	resetMockBotAPI(env.botAPI)
+	resetBotAPI(env.botAPI)
 
 	env.handler.HandleStart(ctx, tgbotapi.Update{
 		Message: newCommandMessage(env.chatID, env.chatID, env.username, "/start trial_"+trialSubID, 6),
@@ -76,7 +76,7 @@ func TestE2E_TrialBind_NotFound(t *testing.T) {
 
 	ctx := context.Background()
 
-	resetMockBotAPI(env.botAPI)
+	resetBotAPI(env.botAPI)
 
 	env.handler.HandleStart(ctx, tgbotapi.Update{
 		Message: newCommandMessage(env.chatID, env.chatID, env.username, "/start trial_nonexistent", 6),
@@ -101,7 +101,7 @@ func TestE2E_TrialBind_AlreadyActivated(t *testing.T) {
 		Message: newCommandMessage(env.chatID, env.chatID, env.username, "/start trial_"+trialSubID, 6),
 	})
 
-	resetMockBotAPI(env.botAPI)
+	resetBotAPI(env.botAPI)
 
 	env.handler.HandleStart(ctx, tgbotapi.Update{
 		Message: newCommandMessage(env.chatID, env.chatID, env.username, "/start trial_"+trialSubID, 6),

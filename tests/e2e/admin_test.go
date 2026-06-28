@@ -32,7 +32,7 @@ func TestE2E_DelCommand_Success(t *testing.T) {
 	require.NoError(t, err)
 	subID := sub.ID
 
-	resetMockBotAPI(env.botAPI)
+	resetBotAPI(env.botAPI)
 
 	update := tgbotapi.Update{
 		Message: &tgbotapi.Message{
@@ -71,7 +71,7 @@ func TestE2E_DelCommand_NoArgs(t *testing.T) {
 
 	ctx := context.Background()
 	adminID := env.cfg.TelegramAdminID
-	resetMockBotAPI(env.botAPI)
+	resetBotAPI(env.botAPI)
 
 	update := tgbotapi.Update{
 		Message: &tgbotapi.Message{
@@ -102,7 +102,7 @@ func TestE2E_DelCommand_InvalidID(t *testing.T) {
 
 	ctx := context.Background()
 	adminID := env.cfg.TelegramAdminID
-	resetMockBotAPI(env.botAPI)
+	resetBotAPI(env.botAPI)
 
 	update := tgbotapi.Update{
 		Message: &tgbotapi.Message{
@@ -133,7 +133,7 @@ func TestE2E_DelCommand_NegativeID(t *testing.T) {
 
 	ctx := context.Background()
 	adminID := env.cfg.TelegramAdminID
-	resetMockBotAPI(env.botAPI)
+	resetBotAPI(env.botAPI)
 
 	update := tgbotapi.Update{
 		Message: &tgbotapi.Message{
@@ -164,7 +164,7 @@ func TestE2E_DelCommand_NotFound(t *testing.T) {
 
 	ctx := context.Background()
 	adminID := env.cfg.TelegramAdminID
-	resetMockBotAPI(env.botAPI)
+	resetBotAPI(env.botAPI)
 
 	update := tgbotapi.Update{
 		Message: &tgbotapi.Message{
@@ -206,7 +206,7 @@ func TestE2E_DelCommand_XUIFailure(t *testing.T) {
 		return fmt.Errorf("xui delete: connection refused")
 	}
 
-	resetMockBotAPI(env.botAPI)
+	resetBotAPI(env.botAPI)
 
 	update := tgbotapi.Update{
 		Message: &tgbotapi.Message{
@@ -250,7 +250,7 @@ func TestE2E_BroadcastCommand_Success(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	resetMockBotAPI(env.botAPI)
+	resetBotAPI(env.botAPI)
 
 	update := tgbotapi.Update{
 		Message: &tgbotapi.Message{
@@ -282,7 +282,7 @@ func TestE2E_BroadcastCommand_NoArgs(t *testing.T) {
 
 	ctx := context.Background()
 	adminID := env.cfg.TelegramAdminID
-	resetMockBotAPI(env.botAPI)
+	resetBotAPI(env.botAPI)
 
 	update := tgbotapi.Update{
 		Message: &tgbotapi.Message{
@@ -312,7 +312,7 @@ func TestE2E_BroadcastCommand_NoUsers(t *testing.T) {
 
 	ctx := context.Background()
 	adminID := env.cfg.TelegramAdminID
-	resetMockBotAPI(env.botAPI)
+	resetBotAPI(env.botAPI)
 
 	update := tgbotapi.Update{
 		Message: &tgbotapi.Message{
@@ -349,7 +349,7 @@ func TestE2E_BroadcastCommand_SomeFailures(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	resetMockBotAPI(env.botAPI)
+	resetBotAPI(env.botAPI)
 	env.botAPI.SendError = fmt.Errorf("send failed")
 
 	update := tgbotapi.Update{
@@ -383,7 +383,7 @@ func TestE2E_SendCommand_ByTelegramID(t *testing.T) {
 	_, err := env.subService.Create(ctx, env.chatID, env.username, "")
 	require.NoError(t, err)
 
-	resetMockBotAPI(env.botAPI)
+	resetBotAPI(env.botAPI)
 
 	update := tgbotapi.Update{
 		Message: &tgbotapi.Message{
@@ -416,7 +416,7 @@ func TestE2E_SendCommand_ByUsername(t *testing.T) {
 	_, err := env.subService.Create(ctx, env.chatID, env.username, "")
 	require.NoError(t, err)
 
-	resetMockBotAPI(env.botAPI)
+	resetBotAPI(env.botAPI)
 
 	update := tgbotapi.Update{
 		Message: &tgbotapi.Message{
@@ -445,7 +445,7 @@ func TestE2E_SendCommand_UserNotFound(t *testing.T) {
 
 	ctx := context.Background()
 	adminID := env.cfg.TelegramAdminID
-	resetMockBotAPI(env.botAPI)
+	resetBotAPI(env.botAPI)
 
 	update := tgbotapi.Update{
 		Message: &tgbotapi.Message{
@@ -474,7 +474,7 @@ func TestE2E_SendCommand_NoArgs(t *testing.T) {
 
 	ctx := context.Background()
 	adminID := env.cfg.TelegramAdminID
-	resetMockBotAPI(env.botAPI)
+	resetBotAPI(env.botAPI)
 
 	update := tgbotapi.Update{
 		Message: &tgbotapi.Message{
@@ -507,7 +507,7 @@ func TestE2E_SendCommand_SendFails(t *testing.T) {
 	_, err := env.subService.Create(ctx, env.chatID, env.username, "")
 	require.NoError(t, err)
 
-	resetMockBotAPI(env.botAPI)
+	resetBotAPI(env.botAPI)
 	env.botAPI.SendError = fmt.Errorf("send error")
 
 	update := tgbotapi.Update{
@@ -566,7 +566,7 @@ func TestE2E_SendCommand_OnlyMessageNoTarget(t *testing.T) {
 	ctx := context.Background()
 	adminID := env.cfg.TelegramAdminID
 
-	resetMockBotAPI(env.botAPI)
+	resetBotAPI(env.botAPI)
 
 	update := tgbotapi.Update{
 		Message: &tgbotapi.Message{
@@ -593,7 +593,7 @@ func TestE2E_SendCommand_OnlyTargetNoMessage(t *testing.T) {
 	ctx := context.Background()
 	adminID := env.cfg.TelegramAdminID
 
-	resetMockBotAPI(env.botAPI)
+	resetBotAPI(env.botAPI)
 
 	update := tgbotapi.Update{
 		Message: &tgbotapi.Message{
@@ -642,7 +642,7 @@ func TestE2E_SendCommand_RateLimitBlocksExcess(t *testing.T) {
 			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 5}},
 		},
 	}
-	resetMockBotAPI(env.botAPI)
+	resetBotAPI(env.botAPI)
 	env.handler.HandleSend(ctx, update2)
 
 	assert.True(t, env.botAPI.SendCalledSafe(), "Second send should succeed under normal rate")
@@ -715,7 +715,7 @@ func TestE2E_NonAdmin_CannotUseDel(t *testing.T) {
 	ctx := context.Background()
 	nonAdminID := int64(999999)
 
-	resetMockBotAPI(env.botAPI)
+	resetBotAPI(env.botAPI)
 
 	update := tgbotapi.Update{
 		Message: &tgbotapi.Message{
@@ -744,7 +744,7 @@ func TestE2E_NonAdmin_CannotUseBroadcast(t *testing.T) {
 	ctx := context.Background()
 	nonAdminID := int64(999999)
 
-	resetMockBotAPI(env.botAPI)
+	resetBotAPI(env.botAPI)
 
 	update := tgbotapi.Update{
 		Message: &tgbotapi.Message{
@@ -773,7 +773,7 @@ func TestE2E_NonAdmin_CannotUseSend(t *testing.T) {
 	ctx := context.Background()
 	nonAdminID := int64(999999)
 
-	resetMockBotAPI(env.botAPI)
+	resetBotAPI(env.botAPI)
 
 	update := tgbotapi.Update{
 		Message: &tgbotapi.Message{
@@ -802,7 +802,7 @@ func TestE2E_NonAdmin_CannotUseRefstats(t *testing.T) {
 	ctx := context.Background()
 	nonAdminID := int64(999999)
 
-	resetMockBotAPI(env.botAPI)
+	resetBotAPI(env.botAPI)
 
 	update := tgbotapi.Update{
 		Message: &tgbotapi.Message{
@@ -832,7 +832,7 @@ func TestE2E_NonAdmin_CannotAccessAdminStats(t *testing.T) {
 	ctx := context.Background()
 	nonAdminID := int64(999999)
 
-	resetMockBotAPI(env.botAPI)
+	resetBotAPI(env.botAPI)
 
 	env.handler.HandleCallback(ctx, tgbotapi.Update{
 		CallbackQuery: &tgbotapi.CallbackQuery{
@@ -862,7 +862,7 @@ func TestE2E_NonAdmin_CannotAccessAdminLastreg(t *testing.T) {
 	ctx := context.Background()
 	nonAdminID := int64(999999)
 
-	resetMockBotAPI(env.botAPI)
+	resetBotAPI(env.botAPI)
 
 	env.handler.HandleCallback(ctx, tgbotapi.Update{
 		CallbackQuery: &tgbotapi.CallbackQuery{
@@ -931,7 +931,7 @@ func TestE2E_AdminLastReg(t *testing.T) {
 	}
 	require.NoError(t, env.db.CreateSubscription(ctx, sub, ""))
 
-	resetMockBotAPI(env.botAPI)
+	resetBotAPI(env.botAPI)
 
 	env.handler.HandleCallback(ctx, tgbotapi.Update{
 		CallbackQuery: &tgbotapi.CallbackQuery{
@@ -961,7 +961,7 @@ func TestE2E_VersionCommand_Admin(t *testing.T) {
 
 	ctx := context.Background()
 	adminID := env.cfg.TelegramAdminID
-	resetMockBotAPI(env.botAPI)
+	resetBotAPI(env.botAPI)
 
 	update := tgbotapi.Update{
 		Message: &tgbotapi.Message{
@@ -989,7 +989,7 @@ func TestE2E_VersionCommand_NonAdmin(t *testing.T) {
 
 	ctx := context.Background()
 	nonAdminID := int64(999999)
-	resetMockBotAPI(env.botAPI)
+	resetBotAPI(env.botAPI)
 
 	update := tgbotapi.Update{
 		Message: &tgbotapi.Message{

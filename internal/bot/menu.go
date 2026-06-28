@@ -30,7 +30,7 @@ func (h *Handler) handleBackToStart(ctx context.Context, chatID int64, username 
 		hasSubscription = sub != nil && sub.Status == "active"
 	}
 
-	text, keyboard := h.getMainMenuContent(username, hasSubscription, chatID)
+	text, keyboard := h.getMainMenuContent(ctx, username, hasSubscription, chatID)
 	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, text)
 	editMsg.DisableWebPagePreview = true
 	editMsg.ReplyMarkup = &keyboard

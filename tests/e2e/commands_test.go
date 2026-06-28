@@ -54,7 +54,7 @@ func TestE2E_StartCommand_WithSubscription(t *testing.T) {
 	}
 	require.NoError(t, env.db.CreateSubscription(ctx, sub, ""))
 
-	resetMockBotAPI(env.botAPI)
+	resetBotAPI(env.botAPI)
 
 	env.handler.HandleStart(ctx, tgbotapi.Update{
 		Message: &tgbotapi.Message{
@@ -87,7 +87,7 @@ func TestE2E_MySubscription(t *testing.T) {
 	}
 	require.NoError(t, env.db.CreateSubscription(ctx, sub, ""))
 
-	resetMockBotAPI(env.botAPI)
+	resetBotAPI(env.botAPI)
 
 	env.handler.HandleCallback(ctx, tgbotapi.Update{
 		CallbackQuery: &tgbotapi.CallbackQuery{
@@ -161,9 +161,9 @@ func TestE2E_StartCommand_AdminUser(t *testing.T) {
 	ctx := context.Background()
 
 	cfg := &config.Config{TelegramAdminID: env.chatID}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
+	mockBot := testutil.NewBotAPI()
 	handler := bot.NewHandler(mockBot, cfg, mockDB, mockXUI, &bot.BotConfig{
 		Username: "testbot", ID: 123456789, FirstName: "TestBot", IsBot: true,
 	}, nil, "")

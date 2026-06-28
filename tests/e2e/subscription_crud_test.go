@@ -75,7 +75,7 @@ func TestE2E_CreateSubscription_NoDuplicate(t *testing.T) {
 		},
 	})
 
-	resetMockBotAPI(env.botAPI)
+	resetBotAPI(env.botAPI)
 	env.xui.AddClientWithIDCalled = false
 
 	env.handler.HandleCallback(ctx, tgbotapi.Update{
@@ -335,7 +335,7 @@ func TestE2E_CreateSubscription_RevokesOnlyActive(t *testing.T) {
 	}
 	require.NoError(t, env.db.CreateSubscription(ctx, oldSub, ""))
 
-	resetMockBotAPI(env.botAPI)
+	resetBotAPI(env.botAPI)
 	env.xui.AddClientWithIDCalled = false
 
 	// Creating another subscription with the same telegram_id should fail

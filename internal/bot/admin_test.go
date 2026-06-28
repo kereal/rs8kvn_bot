@@ -22,7 +22,7 @@ import (
 // newTestAdminHandler creates a Handler with a stub SubscriptionService
 // wired to the provided mock objects. This eliminates the repeated two-line
 // pattern of NewHandler + subscriptionService assignment across all admin tests.
-func newTestAdminHandler(cfg *config.Config, mockDB *testutil.MockDatabaseService, mockXUI *testutil.MockXUIClient, mockBot *testutil.MockBotAPI) *Handler {
+func newTestAdminHandler(cfg *config.Config, mockDB *testutil.DatabaseService, mockXUI *testutil.XUIClient, mockBot *testutil.BotAPI) *Handler {
 	h := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
 	xuiClients := map[uint]interfaces.XUIClient{1: mockXUI}
 	nodes := []database.Node{{ID: 1, IsActive: true, Host: "http://localhost:2053", APIToken: "test-token", InboundIDs: "[1]", SubscriptionURL: "http://example.com/sub/"}}
@@ -77,9 +77,9 @@ func TestHandleDel_NonAdminUser(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 999999,
 	}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
+	mockBot := testutil.NewBotAPI()
 	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	ctx := context.Background()
@@ -96,9 +96,9 @@ func TestHandleDel_ValidDeletion(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 	}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
+	mockBot := testutil.NewBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
 	xuiClients := map[uint]interfaces.XUIClient{1: mockXUI}
 	nodes := []database.Node{{ID: 1, IsActive: true, Host: "http://localhost:2053", APIToken: "test-token", InboundIDs: "[1]", SubscriptionURL: "http://example.com/sub/"}}
@@ -139,9 +139,9 @@ func TestHandleDel_InvalidIDFormat(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 	}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
+	mockBot := testutil.NewBotAPI()
 	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	tests := []struct {
@@ -192,9 +192,9 @@ func TestHandleDel_GetByIDError(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 	}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
+	mockBot := testutil.NewBotAPI()
 	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	mockDB.GetByIDFunc = func(ctx context.Context, id uint) (*database.Subscription, error) {
@@ -215,9 +215,9 @@ func TestHandleDel_XUIDeleteFailure(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 	}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
+	mockBot := testutil.NewBotAPI()
 	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	mockDB.GetByIDFunc = func(ctx context.Context, id uint) (*database.Subscription, error) {
@@ -245,9 +245,9 @@ func TestHandleDel_DatabaseDeleteFailure(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 	}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
+	mockBot := testutil.NewBotAPI()
 	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	mockDB.GetByIDFunc = func(ctx context.Context, id uint) (*database.Subscription, error) {
@@ -282,9 +282,9 @@ func TestHandleDel_CacheInvalidation(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 	}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
+	mockBot := testutil.NewBotAPI()
 	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	telegramID := int64(789012)
@@ -328,9 +328,9 @@ func TestHandleBroadcast_NonAdminUser(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 999999,
 	}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
+	mockBot := testutil.NewBotAPI()
 	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	ctx := context.Background()
@@ -347,9 +347,9 @@ func TestHandleBroadcast_ValidBroadcast(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 	}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
+	mockBot := testutil.NewBotAPI()
 	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	callCount := 0
@@ -375,9 +375,9 @@ func TestHandleBroadcast_NoMessage(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 	}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
+	mockBot := testutil.NewBotAPI()
 	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	ctx := context.Background()
@@ -394,9 +394,9 @@ func TestHandleBroadcast_NoUsers(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 	}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
+	mockBot := testutil.NewBotAPI()
 	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	mockDB.GetTelegramIDsBatchFunc = func(ctx context.Context, offset, limit int) ([]int64, error) {
@@ -417,9 +417,9 @@ func TestHandleBroadcast_DatabaseError(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 	}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
+	mockBot := testutil.NewBotAPI()
 	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	mockDB.GetTelegramIDsBatchFunc = func(ctx context.Context, offset, limit int) ([]int64, error) {
@@ -440,9 +440,9 @@ func TestHandleBroadcast_SendFailure(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 	}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
+	mockBot := testutil.NewBotAPI()
 	mockBot.SendError = errors.New("send error")
 	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
@@ -470,9 +470,9 @@ func TestHandleBroadcast_ContextCancellation(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 	}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
+	mockBot := testutil.NewBotAPI()
 	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -496,9 +496,9 @@ func TestHandleBroadcast_MultipleBatches(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 	}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
+	mockBot := testutil.NewBotAPI()
 	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	callCount := 0
@@ -544,9 +544,9 @@ func TestHandleBroadcast_BatchError(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 	}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
+	mockBot := testutil.NewBotAPI()
 	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	callCount := 0
@@ -573,9 +573,9 @@ func TestHandleBroadcast_EmptyBatchAfterFirst(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 	}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
+	mockBot := testutil.NewBotAPI()
 	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	callCount := 0
@@ -602,9 +602,9 @@ func TestHandleBroadcast_GetTelegramIDsBatchErrorOnFirstCall(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 	}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
+	mockBot := testutil.NewBotAPI()
 	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	mockDB.GetTelegramIDsBatchFunc = func(ctx context.Context, offset, limit int) ([]int64, error) {
@@ -626,9 +626,9 @@ func TestHandleBroadcast_ConcurrentBroadcasts(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 	}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
+	mockBot := testutil.NewBotAPI()
 	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	var callCount int64
@@ -668,9 +668,9 @@ func TestHandleSend_NonAdminUser(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 999999,
 	}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
+	mockBot := testutil.NewBotAPI()
 	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	ctx := context.Background()
@@ -687,9 +687,9 @@ func TestHandleSend_ByNumericID(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 	}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
+	mockBot := testutil.NewBotAPI()
 	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	ctx := context.Background()
@@ -706,9 +706,9 @@ func TestHandleSend_ByUsernameLookup(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 	}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
+	mockBot := testutil.NewBotAPI()
 	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	mockDB.GetTelegramIDByUsernameFunc = func(ctx context.Context, username string) (int64, error) {
@@ -730,9 +730,9 @@ func TestHandleSend_ByUsernameWithAt(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 	}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
+	mockBot := testutil.NewBotAPI()
 	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	mockDB.GetTelegramIDByUsernameFunc = func(ctx context.Context, username string) (int64, error) {
@@ -763,9 +763,9 @@ func TestHandleSend_InvalidFormat(t *testing.T) {
 			cfg := &config.Config{
 				TelegramAdminID: 123456,
 			}
-			mockDB := testutil.NewMockDatabaseService()
-			mockXUI := testutil.NewMockXUIClient()
-			mockBot := testutil.NewMockBotAPI()
+			mockDB := testutil.NewDatabaseService()
+			mockXUI := testutil.NewXUIClient()
+			mockBot := testutil.NewBotAPI()
 			handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 			mockBot.SetSendCalled(false)
@@ -787,9 +787,9 @@ func TestHandleSend_UsernameNotFound(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 	}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
+	mockBot := testutil.NewBotAPI()
 	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	mockDB.GetTelegramIDByUsernameFunc = func(ctx context.Context, username string) (int64, error) {
@@ -810,9 +810,9 @@ func TestHandleSend_SendFailure(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 	}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
+	mockBot := testutil.NewBotAPI()
 	mockBot.SendError = errors.New("send error")
 	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
@@ -830,9 +830,9 @@ func TestNotifyAdminError_WithAdminID(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 999888,
 	}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
+	mockBot := testutil.NewBotAPI()
 	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	ctx := context.Background()
@@ -849,9 +849,9 @@ func TestHandleAdminLastReg_NonAdminUser(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 999999,
 	}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
+	mockBot := testutil.NewBotAPI()
 	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	ctx := context.Background()
@@ -867,9 +867,9 @@ func TestHandleAdminLastReg_EmptyList(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 	}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
+	mockBot := testutil.NewBotAPI()
 	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	mockDB.GetLatestSubscriptionsFunc = func(ctx context.Context, limit int) ([]database.Subscription, error) {
@@ -889,9 +889,9 @@ func TestHandleAdminLastReg_DatabaseError(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 	}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
+	mockBot := testutil.NewBotAPI()
 	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	mockDB.GetLatestSubscriptionsFunc = func(ctx context.Context, limit int) ([]database.Subscription, error) {
@@ -911,9 +911,9 @@ func TestHandleAdminLastReg_WithSubscriptions(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 	}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
+	mockBot := testutil.NewBotAPI()
 	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	subs := []database.Subscription{
@@ -943,9 +943,9 @@ func TestHandleAdminStats_NonAdminUser(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 999999,
 	}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
+	mockBot := testutil.NewBotAPI()
 	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	ctx := context.Background()
@@ -961,9 +961,9 @@ func TestHandleAdminStats_DatabaseError(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 	}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
+	mockBot := testutil.NewBotAPI()
 	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	mockDB.CountAllSubscriptionsFunc = func(ctx context.Context) (int64, error) {
@@ -983,9 +983,9 @@ func TestHandleAdminStats_Success(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 	}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
+	mockBot := testutil.NewBotAPI()
 	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	mockDB.CountAllSubscriptionsFunc = func(ctx context.Context) (int64, error) {
@@ -1009,9 +1009,9 @@ func TestHandleAdminStats_PartialDatabaseError(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 	}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
+	mockBot := testutil.NewBotAPI()
 	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	mockDB.CountAllSubscriptionsFunc = func(ctx context.Context) (int64, error) {
@@ -1037,9 +1037,9 @@ func TestHandleRefstats_NonAdminUser(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 999999,
 	}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
+	mockBot := testutil.NewBotAPI()
 	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	ctx := context.Background()
@@ -1057,9 +1057,9 @@ func TestHandleRefstats_EmptyReferrals(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 	}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
+	mockBot := testutil.NewBotAPI()
 	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	ctx := context.Background()
@@ -1077,9 +1077,9 @@ func TestHandleRefstats_WithMultipleReferrers(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 	}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
+	mockBot := testutil.NewBotAPI()
 	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	handler.referralCache.SetForTest(111, 10)
@@ -1112,9 +1112,9 @@ func TestHandleRefstats_Top10Limit(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 	}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
+	mockBot := testutil.NewBotAPI()
 	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	for i := 0; i < 15; i++ {

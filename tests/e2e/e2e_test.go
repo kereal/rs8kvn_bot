@@ -50,8 +50,8 @@ func e2eNodes(host string) []database.Node {
 type e2eTestEnv struct {
 	t          *testing.T
 	db         *database.Service
-	xui        *testutil.MockXUIClient
-	botAPI     *testutil.MockBotAPI
+	xui        *testutil.XUIClient
+	botAPI     *testutil.BotAPI
 	handler    *bot.Handler
 	cfg        *config.Config
 	botConfig  *bot.BotConfig
@@ -96,8 +96,8 @@ func setupE2EEnv(t *testing.T) *e2eTestEnv {
 		GlobalSubURL:     "https://example.com/sub/",
 	}
 
-	mockXUI := testutil.NewMockXUIClient()
-	mockBotAPI := testutil.NewMockBotAPI()
+	mockXUI := testutil.NewXUIClient()
+	mockBotAPI := testutil.NewBotAPI()
 
 	botCfg := &bot.BotConfig{
 		Username:  "testbot",
@@ -127,7 +127,7 @@ func setupE2EEnv(t *testing.T) *e2eTestEnv {
 	}
 }
 
-func resetMockBotAPI(m *testutil.MockBotAPI) {
+func resetBotAPI(m *testutil.BotAPI) {
 	m.SetSendCalled(false)
 	m.SetRequestCalled(false)
 	m.LastSentText = ""

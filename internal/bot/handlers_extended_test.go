@@ -1,19 +1,19 @@
 package bot
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-
 	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // TestGetUsername_EdgeCases tests edge cases for username extraction
@@ -354,27 +354,24 @@ func TestGetMainMenuContent_Scenarios(t *testing.T) {
 	h := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, cfg.DonateCardNumber, cfg.DonateURL, cfg.SiteURL)}
 
 	t.Run("content for user without subscription", func(t *testing.T) {
-		text, keyboard := h.getMainMenuContent("TestUser", false, 654321)
+		text, keyboard := h.getMainMenuContent(context.Background(), "TestUser", false, 654321)
 
 		assert.Contains(t, text, "TestUser")
 		assert.Contains(t, text, "получить подписку")
-		assert.Len(t, keyboard.InlineKeyboard, 1) // Just the get subscription button
+		assert.Len(t, keyboard.InlineKeyboard, 1)
 	})
 
 	t.Run("content for user with subscription", func(t *testing.T) {
-		text, keyboard := h.getMainMenuContent("TestUser", true, 654321)
+		text, keyboard := h.getMainMenuContent(context.Background(), "TestUser", true, 654321)
 
 		assert.Contains(t, text, "TestUser")
-		// Check keyboard has subscription button instead
-		assert.GreaterOrEqual(t, len(keyboard.InlineKeyboard), 2)
 		assert.GreaterOrEqual(t, len(keyboard.InlineKeyboard), 2)
 	})
 
 	t.Run("content for admin user", func(t *testing.T) {
-		text, keyboard := h.getMainMenuContent("AdminUser", true, 123456)
+		text, keyboard := h.getMainMenuContent(context.Background(), "AdminUser", true, 123456)
 
 		assert.Contains(t, text, "AdminUser")
-		// Admin should have additional buttons
 		lastRow := keyboard.InlineKeyboard[len(keyboard.InlineKeyboard)-1]
 		adminButtonFound := false
 		for _, btn := range lastRow {
@@ -387,10 +384,9 @@ func TestGetMainMenuContent_Scenarios(t *testing.T) {
 	})
 
 	t.Run("content for admin without subscription", func(t *testing.T) {
-		text, keyboard := h.getMainMenuContent("AdminUser", false, 123456)
+		text, keyboard := h.getMainMenuContent(context.Background(), "AdminUser", false, 123456)
 
 		assert.Contains(t, text, "AdminUser")
-		// Even without subscription, admin should have admin buttons
 		lastRow := keyboard.InlineKeyboard[len(keyboard.InlineKeyboard)-1]
 		adminButtonFound := false
 		for _, btn := range lastRow {
@@ -403,14 +399,14 @@ func TestGetMainMenuContent_Scenarios(t *testing.T) {
 	})
 
 	t.Run("content with unicode username", func(t *testing.T) {
-		text, _ := h.getMainMenuContent("用户🎉名", true, 654321)
+		text, _ := h.getMainMenuContent(context.Background(), "用户🎉名", true, 654321)
 
 		assert.Contains(t, text, "用户🎉名")
 	})
 
 	t.Run("content with very long username", func(t *testing.T) {
 		longName := strings.Repeat("VeryLongUserName", 10)
-		text, _ := h.getMainMenuContent(longName, true, 654321)
+		text, _ := h.getMainMenuContent(context.Background(), longName, true, 654321)
 
 		assert.Contains(t, text, longName)
 	})
@@ -614,7 +610,7 @@ func TestGetMainMenuContent_SpecialUsernameChars(t *testing.T) {
 
 	for _, username := range specialUsernames {
 		t.Run(fmt.Sprintf("username_len_%d", len(username)), func(t *testing.T) {
-			text, _ := h.getMainMenuContent(username, true, 456)
+			text, _ := h.getMainMenuContent(context.Background(), username, true, 456)
 			assert.Contains(t, text, username)
 		})
 	}

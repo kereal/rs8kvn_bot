@@ -30,7 +30,7 @@ func newTestSubSvc(t *testing.T) *Service {
 func TestHandleSubscription_CacheHit_Active(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewMockDatabaseService()
+	mockDB := testutil.NewDatabaseService()
 	svc := newTestSubSvc(t)
 	ctx := context.Background()
 
@@ -53,7 +53,7 @@ func TestHandleSubscription_CacheHit_Active(t *testing.T) {
 func TestHandleSubscription_CacheHit_Revoked_InvalidatesCache(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewMockDatabaseService()
+	mockDB := testutil.NewDatabaseService()
 	svc := newTestSubSvc(t)
 	ctx := context.Background()
 
@@ -77,7 +77,7 @@ func TestHandleSubscription_CacheHit_Revoked_InvalidatesCache(t *testing.T) {
 func TestHandleSubscription_CacheHit_Expired_InvalidatesCache(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewMockDatabaseService()
+	mockDB := testutil.NewDatabaseService()
 	svc := newTestSubSvc(t)
 	ctx := context.Background()
 
@@ -100,7 +100,7 @@ func TestHandleSubscription_CacheHit_Expired_InvalidatesCache(t *testing.T) {
 func TestHandleSubscription_CacheHit_StatusCheckError_ReturnsError(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewMockDatabaseService()
+	mockDB := testutil.NewDatabaseService()
 	svc := newTestSubSvc(t)
 	ctx := context.Background()
 
@@ -119,7 +119,7 @@ func TestHandleSubscription_CacheHit_StatusCheckError_ReturnsError(t *testing.T)
 func TestHandleSubscription_CacheMiss_SubscriptionNotFound(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewMockDatabaseService()
+	mockDB := testutil.NewDatabaseService()
 	svc := newTestSubSvc(t)
 	ctx := context.Background()
 
@@ -145,7 +145,7 @@ func TestHandleSubscription_Base64Response(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	mockDB := testutil.NewMockDatabaseService()
+	mockDB := testutil.NewDatabaseService()
 	svc := newTestSubSvc(t)
 	ctx := context.Background()
 
@@ -179,7 +179,7 @@ func TestHandleSubscription_PlainResponse(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	mockDB := testutil.NewMockDatabaseService()
+	mockDB := testutil.NewDatabaseService()
 	svc := newTestSubSvc(t)
 	ctx := context.Background()
 
@@ -226,7 +226,7 @@ func TestHandleSubscription_JSONResponse_PureJSON(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	mockDB := testutil.NewMockDatabaseService()
+	mockDB := testutil.NewDatabaseService()
 	svc := newTestSubSvc(t)
 	ctx := context.Background()
 
@@ -251,7 +251,7 @@ func TestHandleSubscription_JSONResponse_PureJSON(t *testing.T) {
 func TestHandleSubscription_NoNodesWithSubscriptionURL(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewMockDatabaseService()
+	mockDB := testutil.NewDatabaseService()
 	svc := newTestSubSvc(t)
 	ctx := context.Background()
 
@@ -275,7 +275,7 @@ func TestHandleSubscription_NoNodesWithSubscriptionURL(t *testing.T) {
 func TestHandleSubscription_FetchError_SkipsNode(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewMockDatabaseService()
+	mockDB := testutil.NewDatabaseService()
 	svc := newTestSubSvc(t)
 	ctx := context.Background()
 
@@ -315,7 +315,7 @@ func TestHandleSubscription_MultipleNodes_AggregatesResponses(t *testing.T) {
 	}))
 	defer ts2.Close()
 
-	mockDB := testutil.NewMockDatabaseService()
+	mockDB := testutil.NewDatabaseService()
 	svc := newTestSubSvc(t)
 	ctx := context.Background()
 
@@ -349,7 +349,7 @@ func TestHandleSubscription_MultipleNodes_AggregatesResponses(t *testing.T) {
 func TestUpdateDevices_NewDevice(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewMockDatabaseService()
+	mockDB := testutil.NewDatabaseService()
 	var capturedDevices string
 	mockDB.UpdateDevicesFunc = func(ctx context.Context, id uint, devicesJSON string) error {
 		capturedDevices = devicesJSON
@@ -375,7 +375,7 @@ func TestUpdateDevices_NewDevice(t *testing.T) {
 func TestUpdateDevices_NilHeaders_SkipsDevice(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewMockDatabaseService()
+	mockDB := testutil.NewDatabaseService()
 	var capturedDevices string
 	mockDB.UpdateDevicesFunc = func(ctx context.Context, id uint, devicesJSON string) error {
 		capturedDevices = devicesJSON
@@ -398,7 +398,7 @@ func TestUpdateDevices_NilHeaders_SkipsDevice(t *testing.T) {
 func TestUpdateDevices_ReplacesExistingDevice(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewMockDatabaseService()
+	mockDB := testutil.NewDatabaseService()
 	var capturedDevices string
 	mockDB.UpdateDevicesFunc = func(ctx context.Context, id uint, devicesJSON string) error {
 		capturedDevices = devicesJSON
@@ -428,7 +428,7 @@ func TestUpdateDevices_ReplacesExistingDevice(t *testing.T) {
 func TestUpdateIPs_NewIP(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewMockDatabaseService()
+	mockDB := testutil.NewDatabaseService()
 	subFull := &database.SubscriptionFull{
 		Subscription: database.Subscription{
 			ID:             10,
@@ -446,7 +446,7 @@ func TestUpdateIPs_NewIP(t *testing.T) {
 func TestUpdateIPs_EmptyIP_SkipsEntry(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewMockDatabaseService()
+	mockDB := testutil.NewDatabaseService()
 
 	subFull := &database.SubscriptionFull{
 		Subscription: database.Subscription{
@@ -465,7 +465,7 @@ func TestUpdateIPs_EmptyIP_SkipsEntry(t *testing.T) {
 func TestUpdateIPs_ReplacesExistingIP(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewMockDatabaseService()
+	mockDB := testutil.NewDatabaseService()
 
 	existingIPs := `[{"10.0.0.1":"2025-01-01T00:00:00Z"}]`
 	subFull := &database.SubscriptionFull{

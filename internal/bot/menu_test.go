@@ -20,8 +20,8 @@ func TestHandleBackToStart_WithActiveSubscription(t *testing.T) {
 
 	ctx := context.Background()
 
-	mockBot := testutil.NewMockBotAPI()
-	mockDB := testutil.NewMockDatabaseService()
+	mockBot := testutil.NewBotAPI()
+	mockDB := testutil.NewDatabaseService()
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 		return &database.Subscription{
 			ID:             1,
@@ -37,7 +37,7 @@ func TestHandleBackToStart_WithActiveSubscription(t *testing.T) {
 		TelegramAdminID:  0,
 	}
 
-	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewMockXUIClient(), NewTestBotConfig(), nil, "")
+	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewXUIClient(), NewTestBotConfig(), nil, "")
 	handler.handleBackToStart(ctx, 12345, "testuser", 100)
 
 	require.NotNil(t, mockBot.LastChattableSafe(), "Message should be sent")
@@ -53,8 +53,8 @@ func TestHandleBackToStart_NoSubscription(t *testing.T) {
 
 	ctx := context.Background()
 
-	mockBot := testutil.NewMockBotAPI()
-	mockDB := testutil.NewMockDatabaseService()
+	mockBot := testutil.NewBotAPI()
+	mockDB := testutil.NewDatabaseService()
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 		return nil, gorm.ErrRecordNotFound
 	}
@@ -64,7 +64,7 @@ func TestHandleBackToStart_NoSubscription(t *testing.T) {
 		TelegramAdminID:  0,
 	}
 
-	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewMockXUIClient(), NewTestBotConfig(), nil, "")
+	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewXUIClient(), NewTestBotConfig(), nil, "")
 	handler.handleBackToStart(ctx, 12345, "testuser", 100)
 
 	require.NotNil(t, mockBot.LastChattableSafe(), "Message should be sent")
@@ -79,8 +79,8 @@ func TestHandleBackToStart_InactiveSubscription(t *testing.T) {
 
 	ctx := context.Background()
 
-	mockBot := testutil.NewMockBotAPI()
-	mockDB := testutil.NewMockDatabaseService()
+	mockBot := testutil.NewBotAPI()
+	mockDB := testutil.NewDatabaseService()
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 		return &database.Subscription{
 			ID:         1,
@@ -95,7 +95,7 @@ func TestHandleBackToStart_InactiveSubscription(t *testing.T) {
 		TelegramAdminID:  0,
 	}
 
-	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewMockXUIClient(), NewTestBotConfig(), nil, "")
+	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewXUIClient(), NewTestBotConfig(), nil, "")
 	handler.handleBackToStart(ctx, 12345, "testuser", 100)
 
 	require.NotNil(t, mockBot.LastChattableSafe(), "Message should be sent")
@@ -110,8 +110,8 @@ func TestHandleBackToStart_DatabaseError(t *testing.T) {
 
 	ctx := context.Background()
 
-	mockBot := testutil.NewMockBotAPI()
-	mockDB := testutil.NewMockDatabaseService()
+	mockBot := testutil.NewBotAPI()
+	mockDB := testutil.NewDatabaseService()
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 		return nil, errors.New("database connection failed")
 	}
@@ -121,7 +121,7 @@ func TestHandleBackToStart_DatabaseError(t *testing.T) {
 		TelegramAdminID:  0,
 	}
 
-	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewMockXUIClient(), NewTestBotConfig(), nil, "")
+	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewXUIClient(), NewTestBotConfig(), nil, "")
 	handler.handleBackToStart(ctx, 12345, "testuser", 100)
 
 	require.NotNil(t, mockBot.LastChattableSafe(), "Message should be sent even on database error")
@@ -135,8 +135,8 @@ func TestHandleBackToStart_NilSubscription(t *testing.T) {
 
 	ctx := context.Background()
 
-	mockBot := testutil.NewMockBotAPI()
-	mockDB := testutil.NewMockDatabaseService()
+	mockBot := testutil.NewBotAPI()
+	mockDB := testutil.NewDatabaseService()
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 		return nil, nil
 	}
@@ -146,7 +146,7 @@ func TestHandleBackToStart_NilSubscription(t *testing.T) {
 		TelegramAdminID:  0,
 	}
 
-	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewMockXUIClient(), NewTestBotConfig(), nil, "")
+	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewXUIClient(), NewTestBotConfig(), nil, "")
 	handler.handleBackToStart(ctx, 12345, "testuser", 100)
 
 	require.NotNil(t, mockBot.LastChattableSafe(), "Message should be sent")
@@ -157,15 +157,15 @@ func TestHandleMenuDonate(t *testing.T) {
 
 	ctx := context.Background()
 
-	mockBot := testutil.NewMockBotAPI()
-	mockDB := testutil.NewMockDatabaseService()
+	mockBot := testutil.NewBotAPI()
+	mockDB := testutil.NewDatabaseService()
 
 	cfg := &config.Config{
 		TelegramBotToken: "test:token",
 		TelegramAdminID:  0,
 	}
 
-	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewMockXUIClient(), NewTestBotConfig(), nil, "")
+	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewXUIClient(), NewTestBotConfig(), nil, "")
 	handler.handleMenuDonate(ctx, 12345, "testuser", 100)
 
 	require.NotNil(t, mockBot.LastChattableSafe(), "Message should be sent")
@@ -182,15 +182,15 @@ func TestHandleMenuDonate_WithDifferentUsernames(t *testing.T) {
 
 	ctx := context.Background()
 
-	mockBot := testutil.NewMockBotAPI()
-	mockDB := testutil.NewMockDatabaseService()
+	mockBot := testutil.NewBotAPI()
+	mockDB := testutil.NewDatabaseService()
 
 	cfg := &config.Config{
 		TelegramBotToken: "test:token",
 		TelegramAdminID:  0,
 	}
 
-	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewMockXUIClient(), NewTestBotConfig(), nil, "")
+	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewXUIClient(), NewTestBotConfig(), nil, "")
 
 	testCases := []struct {
 		name     string
@@ -215,8 +215,8 @@ func TestHandleMenuHelp_WithSubscription(t *testing.T) {
 
 	ctx := context.Background()
 
-	mockBot := testutil.NewMockBotAPI()
-	mockDB := testutil.NewMockDatabaseService()
+	mockBot := testutil.NewBotAPI()
+	mockDB := testutil.NewDatabaseService()
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 		return &database.Subscription{
 			ID:             1,
@@ -232,7 +232,7 @@ func TestHandleMenuHelp_WithSubscription(t *testing.T) {
 		TelegramAdminID:  0,
 	}
 
-	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewMockXUIClient(), NewTestBotConfig(), nil, "")
+	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewXUIClient(), NewTestBotConfig(), nil, "")
 	handler.handleMenuHelp(ctx, 12345, "testuser", 100)
 
 	require.NotNil(t, mockBot.LastChattableSafe(), "Message should be sent")
@@ -249,8 +249,8 @@ func TestHandleMenuHelp_NoSubscription(t *testing.T) {
 
 	ctx := context.Background()
 
-	mockBot := testutil.NewMockBotAPI()
-	mockDB := testutil.NewMockDatabaseService()
+	mockBot := testutil.NewBotAPI()
+	mockDB := testutil.NewDatabaseService()
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 		return nil, gorm.ErrRecordNotFound
 	}
@@ -260,7 +260,7 @@ func TestHandleMenuHelp_NoSubscription(t *testing.T) {
 		TelegramAdminID:  0,
 	}
 
-	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewMockXUIClient(), NewTestBotConfig(), nil, "")
+	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewXUIClient(), NewTestBotConfig(), nil, "")
 	handler.handleMenuHelp(ctx, 12345, "testuser", 100)
 
 	require.NotNil(t, mockBot.LastChattableSafe(), "Message should be sent")
@@ -274,8 +274,8 @@ func TestHandleMenuHelp_DatabaseError(t *testing.T) {
 
 	ctx := context.Background()
 
-	mockBot := testutil.NewMockBotAPI()
-	mockDB := testutil.NewMockDatabaseService()
+	mockBot := testutil.NewBotAPI()
+	mockDB := testutil.NewDatabaseService()
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 		return nil, errors.New("database connection failed")
 	}
@@ -285,7 +285,7 @@ func TestHandleMenuHelp_DatabaseError(t *testing.T) {
 		TelegramAdminID:  0,
 	}
 
-	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewMockXUIClient(), NewTestBotConfig(), nil, "")
+	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewXUIClient(), NewTestBotConfig(), nil, "")
 	handler.handleMenuHelp(ctx, 12345, "testuser", 100)
 
 	require.NotNil(t, mockBot.LastChattableSafe(), "Message should be sent even on database error")
@@ -312,8 +312,8 @@ func TestHandleMenuHelp_VariousTrafficLimits(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			mockBot := testutil.NewMockBotAPI()
-			mockDB := testutil.NewMockDatabaseService()
+			mockBot := testutil.NewBotAPI()
+			mockDB := testutil.NewDatabaseService()
 			mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 				return &database.Subscription{
 					ID:             1,
@@ -329,7 +329,7 @@ func TestHandleMenuHelp_VariousTrafficLimits(t *testing.T) {
 				TelegramAdminID:  0,
 			}
 
-			handler := NewHandler(mockBot, cfg, mockDB, testutil.NewMockXUIClient(), NewTestBotConfig(), nil, "")
+			handler := NewHandler(mockBot, cfg, mockDB, testutil.NewXUIClient(), NewTestBotConfig(), nil, "")
 			handler.handleMenuHelp(ctx, 12345, "testuser", 100)
 
 			require.NotNil(t, mockBot.LastChattableSafe(), "Message should be sent")
@@ -353,8 +353,8 @@ func TestHandleBackToStart_VariousMessageIDs(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			mockBot := testutil.NewMockBotAPI()
-			mockDB := testutil.NewMockDatabaseService()
+			mockBot := testutil.NewBotAPI()
+			mockDB := testutil.NewDatabaseService()
 			mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 				return &database.Subscription{
 					ID:         1,
@@ -368,7 +368,7 @@ func TestHandleBackToStart_VariousMessageIDs(t *testing.T) {
 				TelegramAdminID:  0,
 			}
 
-			handler := NewHandler(mockBot, cfg, mockDB, testutil.NewMockXUIClient(), NewTestBotConfig(), nil, "")
+			handler := NewHandler(mockBot, cfg, mockDB, testutil.NewXUIClient(), NewTestBotConfig(), nil, "")
 			handler.handleBackToStart(ctx, 12345, "testuser", tc.messageID)
 
 			require.NotNil(t, mockBot.LastChattableSafe(), "Message should be sent")
@@ -385,8 +385,8 @@ func TestHandleMenuHelp_ContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	mockBot := testutil.NewMockBotAPI()
-	mockDB := testutil.NewMockDatabaseService()
+	mockBot := testutil.NewBotAPI()
+	mockDB := testutil.NewDatabaseService()
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 		return &database.Subscription{
 			ID:         1,
@@ -400,7 +400,7 @@ func TestHandleMenuHelp_ContextCancellation(t *testing.T) {
 		TelegramAdminID:  0,
 	}
 
-	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewMockXUIClient(), NewTestBotConfig(), nil, "")
+	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewXUIClient(), NewTestBotConfig(), nil, "")
 
 	// Should not panic with cancelled context
 	handler.handleMenuHelp(ctx, 12345, "testuser", 100)
@@ -415,9 +415,9 @@ func TestHandleBackToStart_SendError(t *testing.T) {
 
 	ctx := context.Background()
 
-	mockBot := testutil.NewMockBotAPI()
+	mockBot := testutil.NewBotAPI()
 	mockBot.SendError = errors.New("send failed")
-	mockDB := testutil.NewMockDatabaseService()
+	mockDB := testutil.NewDatabaseService()
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 		return &database.Subscription{
 			ID:         1,
@@ -431,7 +431,7 @@ func TestHandleBackToStart_SendError(t *testing.T) {
 		TelegramAdminID:  0,
 	}
 
-	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewMockXUIClient(), NewTestBotConfig(), nil, "")
+	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewXUIClient(), NewTestBotConfig(), nil, "")
 
 	// Should not panic on send error
 	handler.handleBackToStart(ctx, 12345, "testuser", 100)
@@ -442,16 +442,16 @@ func TestHandleMenuDonate_SendError(t *testing.T) {
 
 	ctx := context.Background()
 
-	mockBot := testutil.NewMockBotAPI()
+	mockBot := testutil.NewBotAPI()
 	mockBot.SendError = errors.New("send failed")
-	mockDB := testutil.NewMockDatabaseService()
+	mockDB := testutil.NewDatabaseService()
 
 	cfg := &config.Config{
 		TelegramBotToken: "test:token",
 		TelegramAdminID:  0,
 	}
 
-	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewMockXUIClient(), NewTestBotConfig(), nil, "")
+	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewXUIClient(), NewTestBotConfig(), nil, "")
 
 	// Should not panic on send error
 	handler.handleMenuDonate(ctx, 12345, "testuser", 100)
@@ -462,9 +462,9 @@ func TestHandleMenuHelp_SendError(t *testing.T) {
 
 	ctx := context.Background()
 
-	mockBot := testutil.NewMockBotAPI()
+	mockBot := testutil.NewBotAPI()
 	mockBot.SendError = errors.New("send failed")
-	mockDB := testutil.NewMockDatabaseService()
+	mockDB := testutil.NewDatabaseService()
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 		return &database.Subscription{
 			ID:         1,
@@ -478,7 +478,7 @@ func TestHandleMenuHelp_SendError(t *testing.T) {
 		TelegramAdminID:  0,
 	}
 
-	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewMockXUIClient(), NewTestBotConfig(), nil, "")
+	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewXUIClient(), NewTestBotConfig(), nil, "")
 
 	// Should not panic on send error
 	handler.handleMenuHelp(ctx, 12345, "testuser", 100)
@@ -500,8 +500,8 @@ func TestHandleBackToStart_VariousChatIDs(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			mockBot := testutil.NewMockBotAPI()
-			mockDB := testutil.NewMockDatabaseService()
+			mockBot := testutil.NewBotAPI()
+			mockDB := testutil.NewDatabaseService()
 			mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 				return nil, gorm.ErrRecordNotFound
 			}
@@ -511,7 +511,7 @@ func TestHandleBackToStart_VariousChatIDs(t *testing.T) {
 				TelegramAdminID:  0,
 			}
 
-			handler := NewHandler(mockBot, cfg, mockDB, testutil.NewMockXUIClient(), NewTestBotConfig(), nil, "")
+			handler := NewHandler(mockBot, cfg, mockDB, testutil.NewXUIClient(), NewTestBotConfig(), nil, "")
 			handler.handleBackToStart(ctx, tc.chatID, "testuser", 100)
 
 			require.NotNil(t, mockBot.LastChattableSafe(), "Message should be sent")

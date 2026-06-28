@@ -186,7 +186,7 @@ func TestReferralCache_Save_IsNoOp(t *testing.T) {
 func TestReferralCache_Sync_RefreshesFromDB(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewMockDatabaseService()
+	mockDB := testutil.NewDatabaseService()
 	mockDB.GetAllReferralCountsFunc = func(ctx context.Context) (map[int64]int64, error) {
 		return map[int64]int64{100: 10, 200: 20}, nil
 	}
