@@ -38,13 +38,11 @@ func HandleSubscription(ctx context.Context, db interfaces.DatabaseService, subS
 		// On cache hit, verify the subscription is still active.
 		status, expiryTime, err := db.GetSubscriptionStatus(ctx, subID)
 		if err != nil {
-			logger.Error("Cache status check failed, serving stale cache",
+			subSvc.InvalidateCache(cacheKey)
+			logger.Error("Cache status check failed, cache invalidated",
 				zap.String("sub_id", subID),
 				zap.Error(err))
-			return &SubscriptionResult{
-				Body:    cachedBody,
-				Headers: cachedHeaders,
-			}, nil
+			return nil, fmt.Errorf("cache status check failed: %w", err)
 		}
 		// If the subscription is no longer active or expired, invalidate the cache.
 		if status != "active" || (!expiryTime.IsZero() && time.Now().After(expiryTime)) {

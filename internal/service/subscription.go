@@ -196,8 +196,10 @@ func (s *SubscriptionService) Delete(ctx context.Context, telegramID int64) erro
 		logger.Warn("purge subscription nodes after delete failed", zap.Error(purgeErr))
 	}
 
+	s.deleteClientFromAllNodes(ctx, email)
+
 	if s.invalidateBySubID != nil && sub.SubscriptionID != "" {
-		s.invalidateBySubID(sub.SubscriptionID)
+		s.InvalidateBySubID(ctx, sub.SubscriptionID)
 	}
 
 	if s.webhook != nil {
@@ -239,15 +241,17 @@ func (s *SubscriptionService) DeleteByID(ctx context.Context, id uint) (*databas
 		return nil, fmt.Errorf("db delete: %w", err)
 	}
 
+	email := XUIEmail(deleted.Username, deleted.TelegramID)
+
 	if purgeErr := s.db.DeleteSubscriptionNodesBySubscriptionID(ctx, deleted.ID); purgeErr != nil {
 		logger.Warn("purge subscription nodes after delete by id failed", zap.Error(purgeErr))
 	}
 
+	s.deleteClientFromAllNodes(ctx, email)
+
 	if s.invalidateBySubID != nil && deleted.SubscriptionID != "" {
 		s.InvalidateBySubID(ctx, deleted.SubscriptionID)
 	}
-
-	email := XUIEmail(deleted.Username, deleted.TelegramID)
 
 	if s.webhook != nil {
 		eventID, _ := utils.GenerateUUID()
@@ -915,19 +919,22 @@ func (s *SubscriptionService) RenewSubscription(ctx context.Context, telegramID 
 		s.invalidateBySubID(sub.SubscriptionID)
 	}
 
-	if planChanged && s.syncService != nil {
-		newNodes, _ := s.db.GetNodesByPlanID(ctx, sub.PlanID)
-		var newNodeIDs []uint
-		for _, n := range newNodes {
-			newNodeIDs = append(newNodeIDs, n.ID)
-		}
-		if err := s.db.MarkActiveNodesPendingUpdate(ctx, sub.ID, newNodeIDs); err != nil {
-			logger.Warn("mark active nodes pending update failed", zap.Error(err))
+	if s.syncService != nil {
+		if planChanged {
+			newNodes, _ := s.db.GetNodesByPlanID(ctx, sub.PlanID)
+			var newNodeIDs []uint
+			for _, n := range newNodes {
+				newNodeIDs = append(newNodeIDs, n.ID)
+			}
+			if err := s.db.MarkActiveNodesPendingUpdate(ctx, sub.ID, newNodeIDs); err != nil {
+				logger.Warn("mark active nodes pending update failed", zap.Error(err))
+			}
+
+			if err := s.syncService.ReconcilePlanNodes(ctx, sub.ID); err != nil {
+				logger.Warn("reconcile plan nodes failed (will retry)", zap.Error(err))
+			}
 		}
 
-		if err := s.syncService.ReconcilePlanNodes(ctx, sub.ID); err != nil {
-			logger.Warn("reconcile plan nodes failed (will retry)", zap.Error(err))
-		}
 		if err := s.syncService.SyncSubscription(ctx, sub.ID); err != nil {
 			logger.Warn("sync subscription failed (will retry)", zap.Error(err))
 		}
