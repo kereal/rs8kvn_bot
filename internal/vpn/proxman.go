@@ -1,12 +1,12 @@
 package vpn
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/kereal/rs8kvn_bot/internal/utils"
@@ -56,7 +56,9 @@ func (c *ProxmanClient) CreateSubscription(ctx context.Context, provision Subscr
 }
 
 // UpdateSubscription deletes then re-creates the subscription on proxman.
-// Proxman does not support update, so delete + create is the idempotent path.
+// Proxman does not support update natively, so this is a delete + create sequence.
+// Note: if CreateSubscription fails after a successful DeleteSubscription, the subscription
+// is left absent on the node; callers must be prepared to re-create from DB state.
 func (c *ProxmanClient) UpdateSubscription(ctx context.Context, provision SubscriptionProvision) error {
 	if err := c.DeleteSubscription(ctx, provision); err != nil {
 		return fmt.Errorf("proxman update: %w", err)
@@ -79,12 +81,7 @@ func (c *ProxmanClient) DeleteSubscription(ctx context.Context, provision Subscr
 		SubscriptionID: provision.SubID,
 	}
 
-	return c.sendEvent(ctx, event)
-}
-
-// Close is a no-op for the HTTP proxman client.
-func (c *ProxmanClient) Close() error {
-	return nil
+	return classifyDeleteSubscriptionError(c.sendEvent(ctx, event))
 }
 
 func (c *ProxmanClient) sendEvent(ctx context.Context, event ProxmanEvent) error {
@@ -93,7 +90,7 @@ func (c *ProxmanClient) sendEvent(ctx context.Context, event ProxmanEvent) error
 		return fmt.Errorf("marshal proxman event: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.host, strings.NewReader(string(body)))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.host, bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("create proxman request: %w", err)
 	}
@@ -108,12 +105,12 @@ func (c *ProxmanClient) sendEvent(ctx context.Context, event ProxmanEvent) error
 	defer resp.Body.Close()
 
 	respBody, _ := io.ReadAll(resp.Body)
-	bodyStr := strings.TrimSpace(string(respBody))
+	bodyStr := string(bytes.TrimSpace(respBody))
 
 	switch resp.StatusCode {
 	case http.StatusOK:
-		if strings.Contains(bodyStr, "duplicate") {
-			return nil
+		if bodyStr == "duplicate" {
+			return ErrSubscriptionAlreadyExists
 		}
 		return nil
 	case http.StatusBadRequest:
@@ -125,4 +122,9 @@ func (c *ProxmanClient) sendEvent(ctx context.Context, event ProxmanEvent) error
 	default:
 		return fmt.Errorf("proxman unexpected status %d: %s", resp.StatusCode, bodyStr)
 	}
+}
+
+// Close is a no-op for the HTTP proxman client.
+func (c *ProxmanClient) Close() error {
+	return nil
 }

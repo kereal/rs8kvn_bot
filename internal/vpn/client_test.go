@@ -175,7 +175,7 @@ func TestProxmanClient_CreateSubscription_Duplicate(t *testing.T) {
 
 	client := NewProxmanClient(srv.URL, "test-token")
 	err := client.CreateSubscription(context.Background(), SubscriptionProvision{})
-	require.NoError(t, err)
+	require.ErrorIs(t, err, ErrSubscriptionAlreadyExists)
 }
 
 func TestProxmanClient_DeleteSubscription_SendsWebhook(t *testing.T) {
@@ -194,6 +194,25 @@ func TestProxmanClient_DeleteSubscription_SendsWebhook(t *testing.T) {
 		SubID:    "sub-456",
 	})
 	require.NoError(t, err)
+}
+
+
+func TestProxmanClient_DeleteSubscription_NotFound(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte("client not found"))
+	}))
+	defer srv.Close()
+
+	client := NewProxmanClient(srv.URL, "test-token")
+	err := client.DeleteSubscription(context.Background(), SubscriptionProvision{
+		ClientID: "client-123",
+		Username: "testuser",
+		SubID:    "sub-456",
+	})
+	require.ErrorIs(t, err, ErrSubscriptionNotFound)
 }
 
 func TestProxmanClient_UpdateSubscription_DeleteThenCreate(t *testing.T) {
