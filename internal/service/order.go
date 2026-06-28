@@ -96,7 +96,7 @@ func (o *OrderService) ActivateProduct(ctx context.Context, telegramID int64, pr
 			return fmt.Errorf("update subscription: %w", result.Error)
 		}
 		if result.RowsAffected == 0 {
-			return database.ErrSubscriptionNotFound
+			return fmt.Errorf("update subscription: %w", database.ErrSubscriptionNotFound)
 		}
 		return nil
 	}); err != nil {
