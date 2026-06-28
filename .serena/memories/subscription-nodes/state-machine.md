@@ -1,6 +1,6 @@
-> ⚠️ FUTURE TASK — schema/model already exist; worker/implementation still TODO.
-
 # Subscription Nodes — фактическое состояние синхронизации подписки с VPN-нодами
+
+**Status:** IMPLEMENTED (migration 018 + 027, `internal/service/sync.go` + `internal/database/subscription_nodes.go`)
 
 Эта таблица хранит **не список серверов тарифа**, а **фактическое состояние синхронизации конкретной подписки с конкретными VPN-нодами**.
 
@@ -122,6 +122,22 @@ VPN-нода.
 * истек Premium;
 * сменился план;
 * нода больше не входит в план.
+
+---
+
+### pending_update
+
+Означает:
+
+```text
+Пользователя нужно обновить на ноде (изменение тарифа, трафика, срока).
+```
+
+Причины:
+
+* смена плана с изменением лимитов;
+* обновление срока действия;
+* синхронизация конфигурации при уже существующем клиенте.
 
 ---
 
@@ -315,6 +331,24 @@ subscription_nodes
 По сути это очередь задач и источник истины для синхронизации VPN-доступов одновременно.
 
 ---
-Schema: `subscription_nodes(subscription_id, node_id, status, retry_count, retry_at, last_error, updated_at)`
-Go model: `database.SubscriptionNode` в `internal/database/models.go`
-Migration: `internal/database/migrations/018_create_subscription_nodes.up.sql`
+Schema: `subscription_nodes(subscription_id, node_id, status, retry_count, retry_at, last_error, updated_at)`  
+Go model: `database.SubscriptionNode` + `SyncStatus` в `internal/database/models.go`  
+Migration: `internal/database/migrations/027_add_pending_update_sync_status.up.sql`
+
+## Жизненный цикл: pending_update
+
+При смене плана с изменением лимитов клиент уже существует на ноде:
+
+```text
+| subscription_id | node_id | status        |
+| --------------- | ------- | ------------- |
+| 15              | 3       | pending_update |
+```
+
+После успешного `UpdateSubscription`:
+
+```text
+| subscription_id | node_id | status |
+| --------------- | ------- | ------ |
+| 15              | 3       | active |
+```
