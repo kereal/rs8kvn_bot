@@ -10,6 +10,8 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"gorm.io/gorm"
 )
 
 func orderPtrTime(t time.Time) *time.Time {
@@ -98,6 +100,9 @@ func TestOrderService_ActivateProduct_FreeProduct_SamePlan(t *testing.T) {
 	db.GetBySubscriptionIDFunc = func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
 		return []database.SubscriptionNode{}, nil
 	}
+	db.TransactionFunc = func(ctx context.Context, fn func(*gorm.DB) error) error {
+		return nil
+	}
 
 	subSvc := &SubscriptionService{db: db}
 	svc := NewOrderService(db, subSvc, nil)
@@ -146,6 +151,9 @@ func TestOrderService_ActivateProduct_FreeProduct_DifferentPlan_UpdatesSubscript
 		return []database.SubscriptionNode{}, nil
 	}
 	db.MarkActiveNodesPendingUpdateFunc = func(ctx context.Context, subID uint, targetNodeIDs []uint) error {
+		return nil
+	}
+	db.TransactionFunc = func(ctx context.Context, fn func(*gorm.DB) error) error {
 		return nil
 	}
 

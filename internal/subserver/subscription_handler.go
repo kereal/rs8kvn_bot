@@ -38,6 +38,9 @@ func HandleSubscription(ctx context.Context, db interfaces.DatabaseService, subS
 		status, expiryTime, err := db.GetSubscriptionStatus(ctx, subID)
 		if err != nil {
 			subSvc.InvalidateCache(cacheKey)
+			if errors.Is(err, database.ErrSubscriptionNotFound) {
+				return nil, ErrSubscriptionNotFound
+			}
 			logger.Error("Cache status check failed, cache invalidated",
 				zap.String("sub_id", subID),
 				zap.Error(err))

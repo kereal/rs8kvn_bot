@@ -176,10 +176,10 @@ func (s *SubscriptionService) Delete(ctx context.Context, telegramID int64) erro
 
 	if s.syncService != nil {
 		if err := s.syncService.MarkAllForRemoval(ctx, sub.ID); err != nil {
-			logger.Warn("mark all for removal failed", zap.Error(err))
+			return fmt.Errorf("deprovision mark failed: %w", err)
 		}
 		if err := s.syncService.SyncSubscription(ctx, sub.ID); err != nil {
-			logger.Warn("sync subscription failed (will retry)", zap.Error(err))
+			return fmt.Errorf("deprovision sync failed: %w", err)
 		}
 	}
 
@@ -208,10 +208,10 @@ func (s *SubscriptionService) DeleteByID(ctx context.Context, id uint) (*databas
 
 	if s.syncService != nil {
 		if err := s.syncService.MarkAllForRemoval(ctx, sub.ID); err != nil {
-			logger.Warn("mark all for removal failed", zap.Error(err))
+			return nil, fmt.Errorf("deprovision mark failed: %w", err)
 		}
 		if err := s.syncService.SyncSubscription(ctx, sub.ID); err != nil {
-			logger.Warn("sync subscription failed (will retry)", zap.Error(err))
+			return nil, fmt.Errorf("deprovision sync failed: %w", err)
 		}
 	}
 
@@ -699,22 +699,36 @@ func (s *SubscriptionService) CleanupExpiredTrials(ctx context.Context) (int64, 
 		return 0, err
 	}
 
+	var successCount int64
 	for _, sub := range subs {
-		if sub.SubscriptionID != "" {
-			email := "trial_" + sub.SubscriptionID
-			if sub.Status == "active" && s.syncService != nil {
-				s.syncService.MarkAllForRemoval(ctx, sub.ID)
-				s.syncService.SyncSubscription(ctx, sub.ID)
-			} else {
-				s.deleteClientFromAllNodes(ctx, email)
+		if sub.SubscriptionID == "" {
+			continue
+		}
+		email := "trial_" + sub.SubscriptionID
+		if sub.Status == "active" && s.syncService != nil {
+			if markErr := s.syncService.MarkAllForRemoval(ctx, sub.ID); markErr != nil {
+				logger.Warn("cleanup trial: mark for removal failed",
+					zap.Uint("subscription_id", sub.ID),
+					zap.Error(markErr))
+				continue
 			}
-			if s.invalidateBySubID != nil {
-				s.invalidateBySubID(sub.SubscriptionID)
+			if syncErr := s.syncService.SyncSubscription(ctx, sub.ID); syncErr != nil {
+				logger.Warn("cleanup trial: sync failed",
+					zap.Uint("subscription_id", sub.ID),
+					zap.Error(syncErr))
+				continue
 			}
+			successCount++
+		} else {
+			s.deleteClientFromAllNodes(ctx, email)
+			successCount++
+		}
+		if s.invalidateBySubID != nil {
+			s.invalidateBySubID(sub.SubscriptionID)
 		}
 	}
 
-	return int64(len(subs)), nil
+	return successCount, nil
 }
 
 // GetTotalTelegramIDCount returns the count of unique Telegram IDs for active subscriptions eligible for broadcast.
@@ -886,22 +900,25 @@ func (s *SubscriptionService) RenewSubscription(ctx context.Context, telegramID 
 
 	if s.syncService != nil {
 		if planChanged {
-			newNodes, _ := s.db.GetNodesByPlanID(ctx, sub.PlanID)
+			newNodes, err := s.db.GetNodesByPlanID(ctx, sub.PlanID)
+			if err != nil {
+				return nil, fmt.Errorf("load plan nodes: %w", err)
+			}
 			var newNodeIDs []uint
 			for _, n := range newNodes {
 				newNodeIDs = append(newNodeIDs, n.ID)
 			}
 			if err := s.db.MarkActiveNodesPendingUpdate(ctx, sub.ID, newNodeIDs); err != nil {
-				logger.Warn("mark active nodes pending update failed", zap.Error(err))
+				return nil, fmt.Errorf("mark active nodes pending update: %w", err)
 			}
 
 			if err := s.syncService.ReconcilePlanNodes(ctx, sub.ID); err != nil {
-				logger.Warn("reconcile plan nodes failed (will retry)", zap.Error(err))
+				return nil, fmt.Errorf("reconcile plan nodes: %w", err)
 			}
 		}
 
 		if err := s.syncService.SyncSubscription(ctx, sub.ID); err != nil {
-			logger.Warn("sync subscription failed (will retry)", zap.Error(err))
+			return nil, fmt.Errorf("sync subscription: %w", err)
 		}
 	}
 

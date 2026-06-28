@@ -148,12 +148,6 @@ func (s *SyncService) ReconcilePlanNodes(ctx context.Context, subscriptionID uin
 		if _, inTarget := targetSet[nodeID]; inTarget {
 			continue
 		}
-		if len(targetSet) == 0 {
-			logger.Debug("preserving pending_add node for empty target plan",
-				zap.Uint("subscription_id", subscriptionID),
-				zap.Uint("node_id", nodeID))
-			continue
-		}
 		if err := s.db.UpdateSubscriptionNodeStatus(ctx, sn.SubscriptionID, sn.NodeID, database.SyncStatusPendingRemove); err != nil {
 			return fmt.Errorf("reconcile plan nodes: set pending_remove for stale pending_add node %d: %w", nodeID, err)
 		}
@@ -181,7 +175,7 @@ func (s *SyncService) MarkAllForRemoval(ctx context.Context, subscriptionID uint
 
 	for _, sn := range nodes {
 		switch sn.Status {
-		case database.SyncStatusActive, database.SyncStatusPendingAdd, database.SyncStatusPendingRemove:
+		case database.SyncStatusActive, database.SyncStatusPendingAdd, database.SyncStatusPendingRemove, database.SyncStatusPendingUpdate:
 			if err := s.db.UpdateSubscriptionNodeStatus(ctx, sn.SubscriptionID, sn.NodeID, database.SyncStatusPendingRemove); err != nil {
 				return fmt.Errorf("mark all for removal: set pending_remove node %d: %w", sn.NodeID, err)
 			}
@@ -199,6 +193,7 @@ func (s *SyncService) MarkAllForRemoval(ctx context.Context, subscriptionID uint
 }
 
 // SyncSubscription performs pending VPN operations for the given subscription.
+// Background path: per-node failures are logged and processing continues; only returns error on DB/cancel failure.
 func (s *SyncService) SyncSubscription(ctx context.Context, subscriptionID uint) error {
 	unlock := s.lockSubscription(subscriptionID)
 	defer unlock()
@@ -226,7 +221,7 @@ func (s *SyncService) SyncSubscription(ctx context.Context, subscriptionID uint)
 }
 
 // syncNodes iterates over pending subscription nodes and dispatches add/remove/update operations.
-// Continues on individual failures, returning an aggregated error when needed.
+// Individual node failures are logged; returns nil unless ctx is cancelled upstream.
 func (s *SyncService) syncNodes(ctx context.Context, sub *database.Subscription, pending []database.SubscriptionNode) error {
 	if sub == nil {
 		return fmt.Errorf("sync subscription: nil subscription")
@@ -241,7 +236,6 @@ func (s *SyncService) syncNodes(ctx context.Context, sub *database.Subscription,
 		zap.Uint("subscription_id", sub.ID),
 		zap.Int("pending_count", len(pending)))
 
-	var errs []error
 	for _, sn := range pending {
 		nodeType, hasNode := nodeTypes[sn.NodeID]
 		if !hasNode {
@@ -270,7 +264,6 @@ func (s *SyncService) syncNodes(ctx context.Context, sub *database.Subscription,
 					zap.Uint("subscription_id", sub.ID),
 					zap.Uint("node_id", sn.NodeID),
 					zap.Error(err))
-				errs = append(errs, err)
 			}
 		case database.SyncStatusPendingRemove:
 			logger.Debug("processing pending_remove",
@@ -281,7 +274,6 @@ func (s *SyncService) syncNodes(ctx context.Context, sub *database.Subscription,
 					zap.Uint("subscription_id", sub.ID),
 					zap.Uint("node_id", sn.NodeID),
 					zap.Error(err))
-				errs = append(errs, err)
 			}
 		case database.SyncStatusPendingUpdate:
 			logger.Debug("processing pending_update",
@@ -292,12 +284,11 @@ func (s *SyncService) syncNodes(ctx context.Context, sub *database.Subscription,
 					zap.Uint("subscription_id", sub.ID),
 					zap.Uint("node_id", sn.NodeID),
 					zap.Error(err))
-				errs = append(errs, err)
 			}
 		}
 	}
 
-	return errors.Join(errs...)
+	return nil
 }
 
 func (s *SyncService) retryUnavailableNode(ctx context.Context, sn *database.SubscriptionNode, sub *database.Subscription, operation string) error {
@@ -595,8 +586,5 @@ func (s *SyncService) SyncPendingNodes(ctx context.Context) error {
 		unlock()
 	}
 
-	logger.Debug("sync pending nodes completed",
-		zap.Int("subscriptions_processed", len(groups)))
-
-	return errors.Join(errs...)
+	return ctx.Err()
 }

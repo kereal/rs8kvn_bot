@@ -11,6 +11,7 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/logger"
 
 	"go.uber.org/zap"
+	"gorm.io/gorm"
 )
 
 // OrderService handles order creation and activation flows.
@@ -68,11 +69,10 @@ func (o *OrderService) ActivateProduct(ctx context.Context, telegramID int64, pr
 		order.ExpiresAt = &newExpiry
 	}
 
-	if err := o.db.CreateOrder(ctx, order); err != nil {
-		return nil, fmt.Errorf("create order: %w", err)
-	}
-
 	if product.PriceCents > 0 {
+		if err := o.db.CreateOrder(ctx, order); err != nil {
+			return nil, fmt.Errorf("create order: %w", err)
+		}
 		order.ProviderPaymentID = paymentInfo.PaymentID
 		return order, nil
 	}
@@ -83,8 +83,24 @@ func (o *OrderService) ActivateProduct(ctx context.Context, telegramID int64, pr
 	sub.PricePaidCents = product.PriceCents
 	sub.Currency = &product.Currency
 	sub.StartedAt = &now
-	if err := o.db.UpdateSubscription(ctx, sub); err != nil {
-		return nil, fmt.Errorf("update subscription: %w", err)
+
+	if err := o.db.Transaction(ctx, func(tx *gorm.DB) error {
+		if err := tx.Create(order).Error; err != nil {
+			return fmt.Errorf("create order: %w", err)
+		}
+		result := tx.Model(&database.Subscription{}).
+			Where("id = ?", sub.ID).
+			Select("telegram_id", "username", "client_id", "subscription_id", "expires_at", "status", "invite_code", "plan_id", "referred_by", "devices", "ips", "product_id", "started_at", "price_paid_cents", "currency").
+			Updates(sub)
+		if result.Error != nil {
+			return fmt.Errorf("update subscription: %w", result.Error)
+		}
+		if result.RowsAffected == 0 {
+			return database.ErrSubscriptionNotFound
+		}
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 
 	if o.subSvc != nil && sub.SubscriptionID != "" {

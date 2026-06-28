@@ -288,6 +288,7 @@ func (s *Service) ExpireSubscription(ctx context.Context, id uint, freePlanID ui
 			"status":     "active",
 			"expires_at": nil,
 			"plan_id":    freePlanID,
+			"product_id": nil,
 		})
 	if result.Error != nil {
 		return fmt.Errorf("failed to expire subscription: %w", result.Error)

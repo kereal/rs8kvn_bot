@@ -92,7 +92,7 @@ func (s *Service) UpdateSubscriptionNodeStatus(ctx context.Context, subID, nodeI
 		return fmt.Errorf("failed to update subscription node status: %w", result.Error)
 	}
 	if result.RowsAffected == 0 {
-		return fmt.Errorf("subscription node not found for sub_id=%d node_id=%d", subID, nodeID)
+		return fmt.Errorf("subscription node not found for sub_id=%d node_id=%d: %w", subID, nodeID, ErrSubscriptionNodeNotFound)
 	}
 	return nil
 }
@@ -143,7 +143,7 @@ func (s *Service) DeleteSubscriptionNode(ctx context.Context, subID, nodeID uint
 		return fmt.Errorf("failed to delete subscription node: %w", result.Error)
 	}
 	if result.RowsAffected == 0 {
-		return fmt.Errorf("subscription node not found for sub_id=%d node_id=%d", subID, nodeID)
+		return fmt.Errorf("subscription node not found for sub_id=%d node_id=%d: %w", subID, nodeID, ErrSubscriptionNodeNotFound)
 	}
 	return nil
 }
@@ -172,7 +172,7 @@ func (s *Service) UpdateRetry(ctx context.Context, subID, nodeID uint, retryCoun
 		return fmt.Errorf("failed to update retry: %w", result.Error)
 	}
 	if result.RowsAffected == 0 {
-		return fmt.Errorf("subscription node not found for sub_id=%d node_id=%d", subID, nodeID)
+		return fmt.Errorf("subscription node not found for sub_id=%d node_id=%d: %w", subID, nodeID, ErrSubscriptionNodeNotFound)
 	}
 	return nil
 }

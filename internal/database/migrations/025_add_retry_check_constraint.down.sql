@@ -30,7 +30,7 @@ CREATE INDEX IF NOT EXISTS idx_subscription_nodes_subscription_id
     ON subscription_nodes(subscription_id);
 CREATE INDEX IF NOT EXISTS idx_subscription_nodes_node_id
     ON subscription_nodes(node_id);
-CREATE INDEX IF EXISTS idx_subscription_nodes_status
+CREATE INDEX IF NOT EXISTS idx_subscription_nodes_status
     ON subscription_nodes(status);
-CREATE INDEX IF EXISTS idx_subscription_nodes_updated_at
+CREATE INDEX IF NOT EXISTS idx_subscription_nodes_updated_at
     ON subscription_nodes(updated_at);

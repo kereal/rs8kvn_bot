@@ -95,6 +95,7 @@ func (c *SubscriptionCache) Set(telegramID int64, sub *database.Subscription) {
 		item := elem.Value.(*lruItem)
 		item.entry.sub = sub
 		item.entry.expiresAt = time.Now().Add(c.ttl)
+		delete(c.bySubID, item.subID)
 		item.subID = subID
 		c.lru.MoveToBack(elem)
 		c.bySubID[subID] = elem
