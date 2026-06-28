@@ -2,13 +2,18 @@ package vpn
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/xui"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestClassifyCreateSubscriptionError_AlreadyExists(t *testing.T) {
@@ -119,4 +124,139 @@ func (m *mockXUIClient) DeleteClient(ctx context.Context, email string) error {
 
 func (m *mockXUIClient) Close() error {
 	return nil
+}
+
+func TestProxmanClient_CreateSubscription_SendsWebhook(t *testing.T) {
+	t.Parallel()
+
+	var gotToken string
+	var gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotToken = r.Header.Get("Authorization")
+		b, _ := io.ReadAll(r.Body)
+		gotBody = string(b)
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("ok"))
+	}))
+	defer srv.Close()
+
+	client := NewProxmanClient(srv.URL, "test-token")
+	provision := SubscriptionProvision{
+		ClientID:       "client-123",
+		Username:       "testuser",
+		SubID:          "sub-456",
+		TrafficBytes:   1024,
+		ExpiryTime:     time.Now().Add(24 * time.Hour),
+		ResetDays:      -1,
+	}
+
+	err := client.CreateSubscription(context.Background(), provision)
+	require.NoError(t, err)
+	assert.Equal(t, "Bearer test-token", gotToken)
+
+	var event ProxmanEvent
+	require.NoError(t, json.Unmarshal([]byte(gotBody), &event))
+	assert.Equal(t, "subscription.create", event.Event)
+	assert.Equal(t, "client-123", event.ClientID)
+	assert.Equal(t, "testuser", event.Email)
+	assert.Equal(t, "sub-456", event.SubscriptionID)
+	assert.NotEmpty(t, event.EventID)
+}
+
+func TestProxmanClient_CreateSubscription_Duplicate(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("duplicate"))
+	}))
+	defer srv.Close()
+
+	client := NewProxmanClient(srv.URL, "test-token")
+	err := client.CreateSubscription(context.Background(), SubscriptionProvision{})
+	require.NoError(t, err)
+}
+
+func TestProxmanClient_DeleteSubscription_SendsWebhook(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("ok"))
+	}))
+	defer srv.Close()
+
+	client := NewProxmanClient(srv.URL, "test-token")
+	err := client.DeleteSubscription(context.Background(), SubscriptionProvision{
+		ClientID: "client-123",
+		Username: "testuser",
+		SubID:    "sub-456",
+	})
+	require.NoError(t, err)
+}
+
+func TestProxmanClient_UpdateSubscription_DeleteThenCreate(t *testing.T) {
+	t.Parallel()
+
+	var calls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("ok"))
+	}))
+	defer srv.Close()
+
+	client := NewProxmanClient(srv.URL, "test-token")
+	err := client.UpdateSubscription(context.Background(), SubscriptionProvision{
+		ClientID: "client-123",
+		Username: "testuser",
+		SubID:    "sub-456",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 2, calls)
+}
+
+func TestProxmanClient_Unauthorized(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		w.Write([]byte("unauthorized"))
+	}))
+	defer srv.Close()
+
+	client := NewProxmanClient(srv.URL, "bad-token")
+	err := client.CreateSubscription(context.Background(), SubscriptionProvision{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unauthorized")
+}
+
+func TestProxmanClient_BadRequest(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte("unknown event"))
+	}))
+	defer srv.Close()
+
+	client := NewProxmanClient(srv.URL, "test-token")
+	err := client.CreateSubscription(context.Background(), SubscriptionProvision{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "bad request")
+}
+
+func TestProxmanClient_NotImplemented(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotImplemented)
+	}))
+	defer srv.Close()
+
+	client := NewProxmanClient(srv.URL, "test-token")
+	err := client.CreateSubscription(context.Background(), SubscriptionProvision{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not implemented")
 }
