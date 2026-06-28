@@ -32,7 +32,7 @@ func (s *Service) GetPlanByID(ctx context.Context, id uint) (*Plan, error) {
 	result := s.db.WithContext(ctx).Where("id = ?", id).First(&plan)
 	if result.Error != nil {
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-			return nil, ErrPlanNotFound
+			return nil, fmt.Errorf("plan %d not found: %w", id, ErrPlanNotFound)
 		}
 		return nil, fmt.Errorf("failed to get plan by id: %w", result.Error)
 	}
