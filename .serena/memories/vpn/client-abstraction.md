@@ -26,8 +26,7 @@ type Client interface {
 
 ## Implementations
 - **`ThreeXUIClient`** (`internal/vpn/threex_ui.go`): адаптер над `interfaces.XUIClient`
-- **`NodeType3xUI`** и **`NodeTypeProxman`** в `database.NodeType`
-- Proxman пока возвращает `ErrNotImplemented`
+- `ProxmanClient` (`internal/vpn/proxman.go`): HTTP webhook client (`subscription.delete` event); response `"duplicate"` → `ErrSubscriptionAlreadyExists`; other errors classified via `classifyDeleteSubscriptionError`
 
 ## Usage
 `SyncService` берёт `map[uint]vpn.Client` и выбирает клиент по node ID.
