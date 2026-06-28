@@ -2,7 +2,7 @@
 
 **Дата анализа:** 2026-06-26
 **Метод:** Ручной анализ coverage.out (2407 строк, mode: set)
-**Общее покрытие:** ~55-60% (целевой показатель из code_style: ~51%)
+**Общее покрытие:** ~65-70% (целевой показатель из code_style: ~51%)
 
 ## По пакетам (оценка)
 
@@ -18,37 +18,31 @@
 | internal/config | ~78% | 🟡 |
 | internal/utils | ~70% | 🟡 |
 | internal/logger | ~68% | 🟡 |
-| internal/service | ~65% | 🟡 |
-| internal/backup | ~55% | 🟡 |
-| internal/database | ~45% | 🔴 |
+| internal/service | ~70% | 🟢 |
+| internal/database | ~55% | 🟡 |
+| internal/vpn | ~65% | 🟢 |
 | internal/metrics | ~35% | 🔴 |
 | internal/subserver | ~30% | 🔴 |
 | internal/testutil | 0% | ⚪ (ожидаемо) |
 
-## Файлы с 0% покрытием (критические!)
-
-- internal/subserver/subscription_handler.go (~80+ stmts) — ВЕСЬ хендлер подписок
-- internal/subserver/subscription_helpers.go (~40+ stmts) — хелперы конвертации
-- internal/subserver/subscription.go
-- internal/database/orders.go — CRUD заказов
-- internal/database/products.go — CRUD продуктов
+## Файлы с низким покрытием
+- internal/database/subscription_nodes.go — частично покрыт sync.go тестами
+- internal/service/sync.go — ~50% (нужны тесты на ReconcilePlanNodes, handleSyncError)
+- internal/vpn/client.go — ~65% (ThreeXUIClient, classify errors)
 - internal/utils/markdown.go — EscapeMarkdown
 
 ## Приоритеты улучшения
 
-### P1 — Критическое
-1. database/orders.go + products.go — нет НИ ОДНОГО теста
-2. subserver/subscription_handler.go — самый большой пробел (~80 stmts)
+### P1 — Высокое
+1. service/sync.go — непокрытые пути: ReconcilePlanNodes edge cases, handleSyncError
+2. vpn/client.go — classify ошибок, retryUnavailableNode
 
-### P2 — Высокое
-3. subserver/servers.go — новые функции не покрыты
-4. database/subscriptions.go — непокрытые ветки CreateSubscription, BindTrial
-5. service/subscription.go — ветки ошибок с xui
+### P2 — Среднее
+3. database/subscription_nodes.go — UpsertSubscriptionNode, GetPendingSync edge cases
+4. database/trials.go — BindTrialSubscription race-condition flows
 
-### P3 — Среднее
-6. utils/markdown.go — EscapeMarkdown
-7. metrics/metrics.go — Prometheus-обёртки
-8. database/models.go — новые модели SubscriptionNode
+### P3 — Низкое
+5. utils/markdown.go — EscapeMarkdown
 
 ## Количество тестовых файлов: 86 (+5)
 

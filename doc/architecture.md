@@ -1,7 +1,7 @@
 # Architecture — rs8kvn_bot
 
-**Version:** 2.6.0
-**Date:** 2026-06-16
+**Version:** v3.0.0
+**Date:** 2026-06-28
 
 ## Multi-outbounds per node
 
@@ -16,9 +16,7 @@ rs8kvn_bot — production-ready Telegram bot for distributing VLESS+Reality+Visi
 - Graceful shutdown with coordinated cleanup
 - 85%+ test coverage (unit, e2e, fuzz, leak detection)
 - Payment/order tracking for subscription purchases
-- Node-based subscription synchronization with state machine (`subscription_nodes`)
-- Dynamic plan resolution by name (no hardcoded IDs)
-- Node-based subscription synchronization with state machine (`subscription_nodes`)
+- Node-based subscription synchronization with 4-state sync machine (`subscription_nodes`)
 - Dynamic plan resolution by name (no hardcoded IDs)
 
 ---
@@ -152,13 +150,20 @@ internal/
 │   ├── servers.go           # Load extra config file
 │   └── servers_test.go      # Parser tests
 ├── service/          # Business logic
-│   └── subscription.go      # Use cases: Create, Delete, Trial
-├── xui/              # 3x-ui client
+│   ├── subscription.go      # Use cases: Create, Delete, Trial
+│   ├── sync.go            # Multi-node subscription sync (Reconcile, SyncPendingNodes)
+│   ├── order.go           # Order lifecycle (Create, Activate, Expire)
+│   └── subscription_nodes.go # Subscription-node join table CRUD
+├── vpn/                # VPN client abstraction (multi-node)
+│   ├── client.go            # Client interface, Config, SubscriptionProvision, NewClient factory, error classification
+│   ├── threexui.go          # 3x-ui specific client implementation
+│   └── proxman.go          # Stub for future proxman support
+├── xui/              # Legacy 3x-ui integration (deprecated, use vpn/)
 │   ├── client.go            # Full API + retry + singleflight
 │   └── breaker.go           # Circuit breaker (5/30s/3-half-open)
 ├── database/         # Persistence
 │   ├── database.go          # GORM service + migrations
-│   ├── migrations/          # 000..019 SQL files (embedded; 018 adds subscription_nodes)
+│   ├── migrations/          # 000..027 SQL files (embedded; 018 adds subscription_nodes, 027 adds pending_update)
 │   └── models:               # Subscription, Plan, Node, Product, Order, Invite
 ├── config/           # Configuration
 │   ├── config.go            # Load + validate

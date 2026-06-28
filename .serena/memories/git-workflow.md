@@ -83,8 +83,8 @@ git push origin --delete <name>  # удалить удалённую ветку
 - SSH ключ настроен.
 
 ## Текущая активная ветка
-- `feature/sources-table` (на 2026-06-03).
+- `plans_and_pricing` (merge candidate, ready for v3.0.0)
 
 ---
 
-**Обновлено:** 2026-06-03
+**Обновлено:** 2026-06-28
