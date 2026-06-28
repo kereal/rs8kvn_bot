@@ -12,7 +12,6 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/interfaces"
 	"github.com/kereal/rs8kvn_bot/internal/service"
 	"github.com/kereal/rs8kvn_bot/internal/testutil"
-	"github.com/kereal/rs8kvn_bot/internal/webhook"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/stretchr/testify/assert"
@@ -175,7 +174,7 @@ func TestHandleStart_NormalFlow(t *testing.T) {
 			mockBot := testutil.NewMockBotAPI()
 			xuiClients := map[uint]interfaces.XUIClient{1: mockXUI}
 			nodes := []database.Node{{ID: 1, Name: "main", IsActive: true, Host: "http://example.com", APIToken: "token", InboundIDs: "[1]"}}
-			subService := service.NewSubscriptionService(mockDB, xuiClients, nil, nodes, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
+			subService := service.NewSubscriptionService(mockDB, xuiClients, nil, nodes, cfg)
 			handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), subService, "")
 			tt.setupMock(mockDB)
 
@@ -508,10 +507,7 @@ func TestHandleBindTrial_Success(t *testing.T) {
 		map[uint]interfaces.XUIClient{1: mockXUI},
 		nil,
 		dbSources,
-		cfg,
-		"http://example.com/sub/",
-		nil,
-	)
+		cfg)
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), subService, "")
 
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
@@ -557,10 +553,7 @@ func TestHandleBindTrial_IncrementsReferrerCacheCount(t *testing.T) {
 		map[uint]interfaces.XUIClient{1: mockXUI},
 		nil,
 		dbSources,
-		cfg,
-		"http://example.com/sub/",
-		nil,
-	)
+		cfg)
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), subService, "")
 
 	referrerTGID := int64(888777)
@@ -609,10 +602,7 @@ func TestHandleBindTrial_NoReferrerLeavesCacheUntouched(t *testing.T) {
 		map[uint]interfaces.XUIClient{1: mockXUI},
 		nil,
 		dbSources,
-		cfg,
-		"http://example.com/sub/",
-		nil,
-	)
+		cfg)
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), subService, "")
 
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
@@ -960,7 +950,7 @@ func TestHandleMySubscription_ShowLoadingFails(t *testing.T) {
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
 	mockXUIClients := map[uint]interfaces.XUIClient{1: mockXUI}
 	nodes := []database.Node{{ID: 1, Name: "main", IsActive: true, Host: "http://example.com", APIToken: "token", InboundIDs: "[1]"}}
-	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUIClients, nil, nodes, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
+	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUIClients, nil, nodes, cfg)
 	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
 
 	mockBot.SendError = errors.New("send failed")
@@ -999,9 +989,6 @@ func newTestHandlerWithSubService(t *testing.T, cfg *config.Config, mockDB *test
 		map[uint]interfaces.XUIClient{1: mockXUI},
 		nil,
 		dbSources,
-		cfg,
-		"http://example.com/sub/",
-		nil,
-	)
+		cfg)
 	return NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), subService, "")
 }

@@ -607,7 +607,8 @@ deploy:
 - [ ] Enable Sentry for error monitoring
 - [ ] Configure firewall: only 8880 port open to internet (optional, health checks)
 - [ ] Backup encryption (if using S3, enable SSE)
-- [ ] Rotate `API_TOKEN` periodically
+- [ ] Monitor `/healthz` with external service (UptimeRobot, healthchecks.io)
+- [ ] Review logs daily for `error`/`warn` level
 
 ### 7.2 Secret Management
 

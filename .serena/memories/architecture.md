@@ -44,13 +44,14 @@ Telegram Bot (Go, single binary)
 ```
 Telegram Bot (Go, single binary)
   ├── cmd/bot/main.go         — entry point, graceful shutdown
-  ├── internal/bot/           — handlers, referral cache, singleflight
-  ├── internal/service/       — SubscriptionService (orchestration)
-  ├── internal/database/      — SQLite + GORM + migrations 000-023
+  ├── internal/bot/           — handlers, referral cache
+  ├── internal/service/       — SubscriptionService (orchestration) + SyncService (state machine)
+  ├── internal/database/      — SQLite + GORM + migrations 000-027
   ├── internal/xui/           — multi-source 3x-ui client + circuit breaker
+  ├── internal/vpn/           — VPN client abstraction (3x-ui, proxman)
   ├── internal/subserver/      — LRU cache, merge, /sub/{id} endpoint, proxy, servers, optional async access log
   ├── internal/web/           — /healthz, /readyz, /i/{code}, /sub/{subID}, access-log response recording and soft-fail startup
-  ├── internal/scheduler/     — backup (daily 03:00) + trial cleanup (hourly)
+  ├── internal/scheduler/     — backup (daily 03:00) + trial cleanup (hourly) + sync workers
   ├── internal/backup/        — SQLite backup with WAL checkpoint
   ├── internal/heartbeat/     — monitoring pings
   ├── internal/metrics/       — Prometheus (через zap-обёртку)

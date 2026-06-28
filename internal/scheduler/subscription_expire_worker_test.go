@@ -26,7 +26,7 @@ func newTestSubServiceForExpire(t testing.TB, db *database.Service) *service.Sub
 	cfg := &config.Config{
 		TrialDurationHours: 1,
 	}
-	return service.NewSubscriptionService(db, nil, nil, nil, cfg, "", nil)
+	return service.NewSubscriptionService(db, nil, nil, nil, cfg)
 }
 
 func TestSubscriptionExpireWorker_process_FindsAndExpires(t *testing.T) {

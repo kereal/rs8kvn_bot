@@ -14,7 +14,6 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/metrics"
 	"github.com/kereal/rs8kvn_bot/internal/utils"
 	"github.com/kereal/rs8kvn_bot/internal/vpn"
-	"github.com/kereal/rs8kvn_bot/internal/webhook"
 	"github.com/kereal/rs8kvn_bot/internal/xui"
 
 	"go.uber.org/zap"
@@ -27,7 +26,6 @@ type SubscriptionService struct {
 	vpnClients        map[uint]vpn.Client
 	nodes             []database.Node
 	cfg               *config.Config
-	webhook           webhook.WebhookSender
 	invalidate        func(telegramID int64)
 	invalidateBySubID func(subID string)
 	syncService       *SyncService
@@ -47,15 +45,14 @@ func XUIEmail(username string, telegramID int64) string {
 	return fmt.Sprintf("tgId_%d", telegramID)
 }
 
-// NewSubscriptionService creates a SubscriptionService configured with the given database, XUI clients map, sources, configuration, and optional webhook sender.
-func NewSubscriptionService(db interfaces.DatabaseService, xuiClients map[uint]interfaces.XUIClient, vpnClients map[uint]vpn.Client, nodes []database.Node, cfg *config.Config, _ string, webhookSender webhook.WebhookSender) *SubscriptionService {
+// NewSubscriptionService creates a SubscriptionService configured with the given database, XUI clients map, VPN clients map, nodes, and configuration.
+func NewSubscriptionService(db interfaces.DatabaseService, xuiClients map[uint]interfaces.XUIClient, vpnClients map[uint]vpn.Client, nodes []database.Node, cfg *config.Config) *SubscriptionService {
 	return &SubscriptionService{
 		db:         db,
 		xuiClients: xuiClients,
 		vpnClients: vpnClients,
 		nodes:      nodes,
 		cfg:        cfg,
-		webhook:    webhookSender,
 	}
 }
 
@@ -169,7 +166,7 @@ func (s *SubscriptionService) GetByTelegramID(ctx context.Context, telegramID in
 	return s.db.GetByTelegramID(ctx, telegramID)
 }
 
-// Delete removes a subscription by Telegram ID via sync module and sends a webhook event.
+// Delete removes a subscription by Telegram ID via sync module.
 // VPN client removal is performed via sync. Orphaned clients are cleaned up by ReconcileOrphanedClients.
 func (s *SubscriptionService) Delete(ctx context.Context, telegramID int64) error {
 	sub, err := s.db.GetByTelegramID(ctx, telegramID)
@@ -186,8 +183,6 @@ func (s *SubscriptionService) Delete(ctx context.Context, telegramID int64) erro
 		}
 	}
 
-	email := XUIEmail(sub.Username, telegramID)
-
 	if err := s.db.DeleteSubscription(ctx, telegramID); err != nil {
 		return fmt.Errorf("db delete: %w", err)
 	}
@@ -196,17 +191,6 @@ func (s *SubscriptionService) Delete(ctx context.Context, telegramID int64) erro
 
 	if s.invalidateBySubID != nil && sub.SubscriptionID != "" {
 		s.InvalidateBySubID(ctx, sub.SubscriptionID)
-	}
-
-	if s.webhook != nil {
-		eventID, _ := utils.GenerateUUID()
-		s.webhook.SendAsync(ctx, webhook.Event{
-			EventID:        "evt-" + eventID,
-			Event:          webhook.EventSubscriptionExpired,
-			ClientID:       sub.ClientID,
-			Email:          email,
-			SubscriptionID: sub.SubscriptionID,
-		})
 	}
 
 	return nil
@@ -229,31 +213,15 @@ func (s *SubscriptionService) DeleteByID(ctx context.Context, id uint) (*databas
 		}
 	}
 
-	clientID := sub.ClientID
-	subscriptionID := sub.SubscriptionID
-
 	deleted, err := s.db.DeleteSubscriptionByID(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("db delete: %w", err)
 	}
 
-	email := XUIEmail(deleted.Username, deleted.TelegramID)
-
 	s.db.DeleteSubscriptionNodesBySubscriptionID(ctx, deleted.ID)
 
 	if s.invalidateBySubID != nil && deleted.SubscriptionID != "" {
 		s.InvalidateBySubID(ctx, deleted.SubscriptionID)
-	}
-
-	if s.webhook != nil {
-		eventID, _ := utils.GenerateUUID()
-		s.webhook.SendAsync(ctx, webhook.Event{
-			EventID:        "evt-" + eventID,
-			Event:          webhook.EventSubscriptionExpired,
-			ClientID:       clientID,
-			Email:          email,
-			SubscriptionID: subscriptionID,
-		})
 	}
 
 	return deleted, nil

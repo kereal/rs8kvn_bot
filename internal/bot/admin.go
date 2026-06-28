@@ -139,7 +139,7 @@ func (h *Handler) HandleDel(ctx context.Context, update tgbotapi.Update) error {
 
 	id := uint(parsedID)
 
-	// Delete subscription via service (includes webhook notification).
+	// Delete subscription via service.
 	// DeleteByID returns the deleted record so we can use it for
 	// referral/cache updates only after a successful deletion.
 	deleted, err := h.subscriptionService.DeleteByID(ctx, id)

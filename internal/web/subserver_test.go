@@ -30,7 +30,7 @@ import (
 
 func testServer(t *testing.T, db interfaces.DatabaseService, cfg *config.Config) *Server {
 	botCfg := &bot.BotConfig{Username: "testbot"}
-	subSvc := service.NewSubscriptionService(db, nil, nil, nil, cfg, "", nil)
+	subSvc := service.NewSubscriptionService(db, nil, nil, nil, cfg)
 	srv := NewServer(":0", db, cfg, botCfg, subSvc, subserver.NewService(config.SubServerCacheTTL))
 	return srv
 }

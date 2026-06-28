@@ -17,6 +17,7 @@ Production-grade: миграции, мониторинг, rate-limiting, circuit
 - Авто-продление на 30-й день (через `SubscriptionResetDay` в x-ui)
 - Реферальная система: in-memory cache + периодический sync
 - Админ-уведомления, heartbeat, health endpoints (`/healthz`, `/readyz`)
+
 - Ротация логов (zap), ежедневные бэкапы БД
 - Sentry, rate-limiting per-user, circuit breaker для x-ui
 - O(1) LRU кэш подписок (RLock для concurrent reads)

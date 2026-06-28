@@ -63,13 +63,6 @@ type Config struct {
 
 	// Nodes configuration
 	Nodes []Node
-
-	// API configuration
-	APIToken string
-
-	// Proxy Manager webhook configuration
-	ProxyManagerWebhookSecret string
-	ProxyManagerWebhookURL    string
 }
 
 // configFlags holds typed flag values for config fields.
@@ -91,9 +84,6 @@ type configFlags struct {
 	donateURL                 *flag.StringValue
 	globalSubURL              *flag.StringValue
 	subServerAccessLogPath    *flag.StringValue
-	apiToken                  *flag.StringValue
-	proxyManagerWebhookSecret *flag.StringValue
-	proxyManagerWebhookURL    *flag.StringValue
 }
 
 // registerFlags creates a new flag.Registry and initializes a configFlags instance with defaults,
@@ -120,9 +110,6 @@ func registerFlags() (*flag.Registry, *configFlags) {
 		donateURL:                 flag.NewString(DonateURL),
 		globalSubURL:              flag.NewString(""),
 		subServerAccessLogPath:    flag.NewString(""),
-		apiToken:                  flag.NewString(""),
-		proxyManagerWebhookSecret: flag.NewString(""),
-		proxyManagerWebhookURL:    flag.NewString(""),
 	}
 
 	r.Register("TELEGRAM_BOT_TOKEN", f.telegramBotToken)
@@ -142,9 +129,6 @@ func registerFlags() (*flag.Registry, *configFlags) {
 	r.Register("DONATE_CARD_NUMBER", f.donateCardNumber)
 	r.Register("DONATE_URL", f.donateURL)
 	r.Register("SUBSERVER_ACCESS_LOG", f.subServerAccessLogPath)
-	r.Register("API_TOKEN", f.apiToken)
-	r.Register("PROXY_MANAGER_WEBHOOK_SECRET", f.proxyManagerWebhookSecret)
-	r.Register("PROXY_MANAGER_WEBHOOK_URL", f.proxyManagerWebhookURL)
 
 	return r, f
 }
@@ -177,9 +161,6 @@ func Load() (*Config, error) {
 		DonateURL:                 f.donateURL.Get(),
 		GlobalSubURL:              f.globalSubURL.Get(),
 		SubServerAccessLogPath:    f.subServerAccessLogPath.Get(),
-		APIToken:                  f.apiToken.Get(),
-		ProxyManagerWebhookSecret: f.proxyManagerWebhookSecret.Get(),
-		ProxyManagerWebhookURL:    f.proxyManagerWebhookURL.Get(),
 	}
 
 	// Validate all required fields

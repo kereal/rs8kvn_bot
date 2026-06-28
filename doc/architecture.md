@@ -138,8 +138,7 @@ internal/
 │   └── message_sender.go    # Rate-limited send wrapper
 ├── web/              # HTTP server
 │   ├── web.go               # Server struct, routes, health
-│   ├── middleware.go        # Bearer auth
-│   ├── api.go               # /api/v1/subscriptions
+│   ├── middleware.go        # Access-log response recording
 │   ├── subserver_test.go     # Proxy handler tests
 │   └── templates/           # trial.html, error.html
 ├── subserver/         # Subscription server (aggregation + proxy)
@@ -180,8 +179,6 @@ internal/
 │   └── backup.go            # WAL checkpoint + atomic copy + rotate
 ├── heartbeat/        # External monitoring
 │   └── heartbeat.go         # Periodic POST to HEARTBEAT_URL
-├── webhook/          # Async notifications
-│   └── sender.go            # Retry with classification
 ├── interfaces/       # DI interfaces
 │   └── interfaces.go        # BotAPI, DatabaseService, XUIClient, etc.
 ├── utils/            # Utilities

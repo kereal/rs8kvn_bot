@@ -276,7 +276,7 @@ All tests pass with `-race` detector. Fuzzing enabled for critical functions.
 
 ### Subscription Flow
 - **Trial:** `/i/{code}` → IP rate limit (3/hour) → DB trial record (telegram_id=0) → user clicks link in Telegram → `BindTrialSubscription` sets telegram_id, removes is_trial, sets referred_by if from invite
-- **Regular:** `create_subscription` callback → XUI client (30GB, expiryTime: now+30d, reset:30) → DB record → cache invalidate → admin notify → webhook
+- **Regular:** `create_subscription` callback → XUI client (30GB, expiryTime: now+30d, reset:30) → DB record → cache invalidate → admin notify
 - **Trial cookie:** `rs8kvn_trial_{code}` prevents duplication for 3 hours (HttpOnly, Secure, SameSite=Strict)
 - **Atomic cleanup:** `DELETE ... RETURNING` for expired trials (prevent race with bind)
 - **Share referral:** `pendingInvites[chatID]` cached 60 min (in-memory, periodic cleanup prevents leak)
@@ -284,7 +284,6 @@ All tests pass with `-race` detector. Fuzzing enabled for critical functions.
 ### Subscription Deletion (v2.2.0+)
 - **Order:** DB-first, then XUI-best-effort
 - **Rationale:** If DB delete fails → XUI untouched (safe to retry). If XUI fails after DB success → orphaned client (less critical, manual cleanup).
-- **Webhook:** Sent on successful DB deletion regardless of XUI outcome.
 - **Referral cache:** `DecrementReferralCount` called after successful deletion.
 
 ### Subscription Proxy (v2.3.0+)

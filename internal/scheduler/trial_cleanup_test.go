@@ -24,7 +24,7 @@ func newTestSubService(t testing.TB, db *database.Service) *service.Subscription
 	cfg := &config.Config{
 		TrialDurationHours: 1,
 	}
-	return service.NewSubscriptionService(db, nil, nil, nil, cfg, "", nil)
+	return service.NewSubscriptionService(db, nil, nil, nil, cfg)
 }
 
 func TestTrialCleanupScheduler_New(t *testing.T) {
