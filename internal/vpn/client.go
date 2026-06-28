@@ -13,11 +13,11 @@ import (
 
 // Config holds configuration for a VPN client.
 type Config struct {
-	Host         string
-	APIToken     string
-	InboundIDs   []int
-	XUIClient    interfaces.XUIClient
-	Type         database.NodeType
+	Host       string
+	APIToken   string
+	InboundIDs []int
+	XUIClient  interfaces.XUIClient
+	Type       database.NodeType
 }
 
 // SubscriptionProvision describes the data needed to provision a client on a VPN node.
@@ -30,6 +30,7 @@ type SubscriptionProvision struct {
 	ResetDays    int
 }
 
+// Client is the abstraction for provisioning VPN subscriptions on different node types.
 type Client interface {
 	CreateSubscription(ctx context.Context, provision SubscriptionProvision) error
 	UpdateSubscription(ctx context.Context, provision SubscriptionProvision) error
@@ -43,6 +44,8 @@ var (
 	ErrNotImplemented            = errors.New("vpn operation not implemented")
 )
 
+// classifyCreateSubscriptionError wraps the underlying error with ErrSubscriptionAlreadyExists
+// when the error message indicates the client is already present on the node.
 func classifyCreateSubscriptionError(err error) error {
 	if err == nil {
 		return nil
@@ -59,6 +62,8 @@ func classifyCreateSubscriptionError(err error) error {
 	return err
 }
 
+// classifyDeleteSubscriptionError wraps the underlying error with ErrSubscriptionNotFound
+// when the error message indicates the client does not exist on the node.
 func classifyDeleteSubscriptionError(err error) error {
 	if err == nil {
 		return nil
@@ -83,7 +88,7 @@ func NewClient(cfg Config) (Client, error) {
 		}
 		return NewThreeXUIClient(cfg.XUIClient, cfg.InboundIDs), nil
 	case database.NodeTypeProxman:
-		return NewProxmanClient(), nil
+		return NewProxmanClient(cfg.Host, cfg.APIToken), nil
 	default:
 		return nil, fmt.Errorf("unsupported node type: %s", cfg.Type)
 	}
