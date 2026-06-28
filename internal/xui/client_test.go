@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/kereal/rs8kvn_bot/internal/logger"
+	"github.com/kereal/rs8kvn_bot/internal/utils"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -149,7 +150,7 @@ func TestIsRetryable(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.retryable, isRetryable(tt.err))
+			assert.Equal(t, tt.retryable, utils.IsRetryable(tt.err))
 		})
 	}
 }
@@ -164,7 +165,7 @@ func TestRetryWithBackoff_Success(t *testing.T) {
 	t.Parallel()
 
 	var calls atomic.Int32
-	err := RetryWithBackoff(context.Background(), 3, time.Millisecond, func() error {
+	err := utils.RetryWithBackoff(context.Background(), 3, time.Millisecond, func() error {
 		calls.Add(1)
 		return nil
 	})
@@ -177,7 +178,7 @@ func TestRetryWithBackoff_Retries(t *testing.T) {
 	t.Parallel()
 
 	var calls atomic.Int32
-	err := RetryWithBackoff(context.Background(), 3, time.Millisecond, func() error {
+	err := utils.RetryWithBackoff(context.Background(), 3, time.Millisecond, func() error {
 		calls.Add(1)
 		if calls.Load() < 3 {
 			return testNetError{}
@@ -193,7 +194,7 @@ func TestRetryWithBackoff_Exhausted(t *testing.T) {
 	t.Parallel()
 
 	var calls atomic.Int32
-	err := RetryWithBackoff(context.Background(), 3, time.Millisecond, func() error {
+	err := utils.RetryWithBackoff(context.Background(), 3, time.Millisecond, func() error {
 		calls.Add(1)
 		return testNetError{}
 	})
@@ -207,7 +208,7 @@ func TestRetryWithBackoff_ContextCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	err := RetryWithBackoff(ctx, 3, time.Millisecond, func() error {
+	err := utils.RetryWithBackoff(ctx, 3, time.Millisecond, func() error {
 		return testNetError{}
 	})
 
@@ -217,7 +218,7 @@ func TestRetryWithBackoff_ContextCancelled(t *testing.T) {
 
 func TestRetryWithBackoff_NonRetryable(t *testing.T) {
 	var calls atomic.Int32
-	err := RetryWithBackoff(context.Background(), 3, time.Millisecond, func() error {
+	err := utils.RetryWithBackoff(context.Background(), 3, time.Millisecond, func() error {
 		calls.Add(1)
 		return &net.DNSError{Err: "dns", Name: "example.com"}
 	})
@@ -228,7 +229,7 @@ func TestRetryWithBackoff_NonRetryable(t *testing.T) {
 
 func TestRetryWithBackoff_Non200NotRetried(t *testing.T) {
 	var calls atomic.Int32
-	err := RetryWithBackoff(context.Background(), 3, time.Millisecond, func() error {
+	err := utils.RetryWithBackoff(context.Background(), 3, time.Millisecond, func() error {
 		calls.Add(1)
 		return fmt.Errorf("upstream returned non-200: %w", ErrNon200Response)
 	})

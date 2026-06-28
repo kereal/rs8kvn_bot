@@ -258,7 +258,7 @@ func TestE2E_RateLimit_ExactlyAtLimit(t *testing.T) {
 	require.NoError(t, err)
 
 	for i := 0; i < 3; i++ {
-		resetMockBotAPI(env.botAPI)
+		resetBotAPI(env.botAPI)
 		update := tgbotapi.Update{
 			Message: &tgbotapi.Message{
 				Chat:     &tgbotapi.Chat{ID: adminID},

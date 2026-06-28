@@ -122,9 +122,9 @@ func TestHandleUpdateSafely(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 	}
-	mockBot := testutil.NewMockBotAPI()
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
 	handler := bot.NewHandler(mockBot, cfg, mockDB, mockXUI, bot.NewTestBotConfig(), nil, "")
 	ctx := context.Background()
 
@@ -149,9 +149,9 @@ func TestHandleUpdate_UnknownCommand(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 	}
-	mockBot := testutil.NewMockBotAPI()
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
 	handler := bot.NewHandler(mockBot, cfg, mockDB, mockXUI, bot.NewTestBotConfig(), nil, "")
 	ctx := context.Background()
 
@@ -174,9 +174,9 @@ func TestHandleUpdate_NilMessage(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 	}
-	mockBot := testutil.NewMockBotAPI()
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
 	handler := bot.NewHandler(mockBot, cfg, mockDB, mockXUI, bot.NewTestBotConfig(), nil, "")
 	ctx := context.Background()
 
@@ -194,9 +194,9 @@ func TestHandleUpdate_UnknownCommands(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 	}
-	mockBot := testutil.NewMockBotAPI()
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
 	handler := bot.NewHandler(mockBot, cfg, mockDB, mockXUI, bot.NewTestBotConfig(), nil, "")
 	ctx := context.Background()
 
@@ -233,9 +233,9 @@ func TestHandleUpdate_UnknownCommand_Text(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 	}
-	mockBot := testutil.NewMockBotAPI()
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
 	handler := bot.NewHandler(mockBot, cfg, mockDB, mockXUI, bot.NewTestBotConfig(), nil, "")
 	ctx := context.Background()
 
@@ -262,9 +262,9 @@ func TestHandleUpdate_NonCommandMessage_Text(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 	}
-	mockBot := testutil.NewMockBotAPI()
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
 	handler := bot.NewHandler(mockBot, cfg, mockDB, mockXUI, bot.NewTestBotConfig(), nil, "")
 	ctx := context.Background()
 
@@ -288,9 +288,9 @@ func TestHandleUpdate_NonCommandMessage_UsernameFallback(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 	}
-	mockBot := testutil.NewMockBotAPI()
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
 	handler := bot.NewHandler(mockBot, cfg, mockDB, mockXUI, bot.NewTestBotConfig(), nil, "")
 	ctx := context.Background()
 
@@ -313,9 +313,9 @@ func TestHandleUpdate_NonCommandMessage_NoUser(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 	}
-	mockBot := testutil.NewMockBotAPI()
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
 	handler := bot.NewHandler(mockBot, cfg, mockDB, mockXUI, bot.NewTestBotConfig(), nil, "")
 	ctx := context.Background()
 
@@ -337,9 +337,9 @@ func TestHandleUpdate_NonCommandMessage_LongText(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 	}
-	mockBot := testutil.NewMockBotAPI()
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
 	handler := bot.NewHandler(mockBot, cfg, mockDB, mockXUI, bot.NewTestBotConfig(), nil, "")
 	ctx := context.Background()
 
@@ -363,9 +363,9 @@ func TestHandleUpdate_CallbackQuery_NoMessage(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 	}
-	mockBot := testutil.NewMockBotAPI()
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
 	handler := bot.NewHandler(mockBot, cfg, mockDB, mockXUI, bot.NewTestBotConfig(), nil, "")
 	ctx := context.Background()
 
@@ -388,9 +388,9 @@ func TestHandleUpdate_NilMessageAndNilCallback(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 	}
-	mockBot := testutil.NewMockBotAPI()
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
 	handler := bot.NewHandler(mockBot, cfg, mockDB, mockXUI, bot.NewTestBotConfig(), nil, "")
 	ctx := context.Background()
 

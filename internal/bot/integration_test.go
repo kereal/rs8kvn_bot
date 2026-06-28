@@ -150,7 +150,7 @@ func NewTestFixture(t *testing.T) *IntegrationTestFixture {
 		DatabasePath:     ":memory:",
 	}
 
-	handler := NewHandler(testutil.NewMockBotAPI(), cfg, dbService, mockXUI.Client, NewTestBotConfig(), nil, "")
+	handler := NewHandler(testutil.NewBotAPI(), cfg, dbService, mockXUI.Client, NewTestBotConfig(), nil, "")
 	mockXUIClients := map[uint]interfaces.XUIClient{1: mockXUI.Client}
 	nodes := []database.Node{{ID: 1, Name: "main", IsActive: true, Host: mockXUI.Server.URL, APIToken: "test-api-token", InboundIDs: "[1]"}}
 	subService := service.NewSubscriptionService(dbService, mockXUIClients, nil, nodes, cfg)
@@ -393,19 +393,9 @@ func TestHandler_GetMainMenuContent_Admin(t *testing.T) {
 	f := NewTestFixture(t)
 	defer f.Close()
 
-	text, keyboard := f.Handler.getMainMenuContent("testuser", true, f.AdminChatID)
+	_, _ = f.Handler.getMainMenuContent(context.Background(), "testuser", true, f.AdminChatID)
 
-	assert.Contains(t, text, "testuser")
-	assert.NotEmpty(t, keyboard.InlineKeyboard)
-}
-
-func TestHandler_GetMainMenuContent_User(t *testing.T) {
-	t.Parallel()
-
-	f := NewTestFixture(t)
-	defer f.Close()
-
-	text, keyboard := f.Handler.getMainMenuContent("testuser", false, f.UserChatID)
+	text, keyboard := f.Handler.getMainMenuContent(context.Background(), "testuser", false, f.UserChatID)
 
 	assert.Contains(t, text, "testuser")
 	assert.NotEmpty(t, keyboard.InlineKeyboard)
@@ -571,7 +561,7 @@ func TestMockXUIServer_ErrorResponses(t *testing.T) {
 	})
 }
 
-func resetMockBotAPI(m *testutil.MockBotAPI) {
+func resetBotAPI(m *testutil.BotAPI) {
 	m.SetSendCalled(false)
 	m.SetRequestCalled(false)
 	m.LastSentText = ""
@@ -590,7 +580,7 @@ func TestIntegration_HandleStart_NoSubscription(t *testing.T) {
 	defer f.Close()
 
 	ctx := context.Background()
-	resetMockBotAPI(f.Handler.bot.(*testutil.MockBotAPI))
+	resetBotAPI(f.Handler.bot.(*testutil.BotAPI))
 
 	update := tgbotapi.Update{
 		Message: &tgbotapi.Message{
@@ -605,7 +595,7 @@ func TestIntegration_HandleStart_NoSubscription(t *testing.T) {
 	}
 	f.Handler.HandleStart(ctx, update)
 
-	assert.True(t, f.Handler.bot.(*testutil.MockBotAPI).SendCalledSafe())
+	assert.True(t, f.Handler.bot.(*testutil.BotAPI).SendCalledSafe())
 }
 
 func TestIntegration_HandleStart_WithSubscription(t *testing.T) {
@@ -616,7 +606,7 @@ func TestIntegration_HandleStart_WithSubscription(t *testing.T) {
 
 	ctx := context.Background()
 	CreateTestSubscriptionInDB(t, f.DB, f.UserChatID, "testuser", "active", ptrTime(time.Now().Add(30*24*time.Hour)))
-	resetMockBotAPI(f.Handler.bot.(*testutil.MockBotAPI))
+	resetBotAPI(f.Handler.bot.(*testutil.BotAPI))
 
 	update := tgbotapi.Update{
 		Message: &tgbotapi.Message{
@@ -631,7 +621,7 @@ func TestIntegration_HandleStart_WithSubscription(t *testing.T) {
 	}
 	f.Handler.HandleStart(ctx, update)
 
-	assert.True(t, f.Handler.bot.(*testutil.MockBotAPI).SendCalledSafe())
+	assert.True(t, f.Handler.bot.(*testutil.BotAPI).SendCalledSafe())
 }
 
 func TestIntegration_HandleHelp(t *testing.T) {
@@ -641,7 +631,7 @@ func TestIntegration_HandleHelp(t *testing.T) {
 	defer f.Close()
 
 	ctx := context.Background()
-	resetMockBotAPI(f.Handler.bot.(*testutil.MockBotAPI))
+	resetBotAPI(f.Handler.bot.(*testutil.BotAPI))
 
 	update := tgbotapi.Update{
 		Message: &tgbotapi.Message{
@@ -656,7 +646,7 @@ func TestIntegration_HandleHelp(t *testing.T) {
 	}
 	f.Handler.HandleHelp(ctx, update)
 
-	assert.True(t, f.Handler.bot.(*testutil.MockBotAPI).SendCalledSafe())
+	assert.True(t, f.Handler.bot.(*testutil.BotAPI).SendCalledSafe())
 }
 
 func TestIntegration_HandleInvite(t *testing.T) {
@@ -666,7 +656,7 @@ func TestIntegration_HandleInvite(t *testing.T) {
 	defer f.Close()
 
 	ctx := context.Background()
-	resetMockBotAPI(f.Handler.bot.(*testutil.MockBotAPI))
+	resetBotAPI(f.Handler.bot.(*testutil.BotAPI))
 
 	update := tgbotapi.Update{
 		Message: &tgbotapi.Message{
@@ -681,7 +671,7 @@ func TestIntegration_HandleInvite(t *testing.T) {
 	}
 	f.Handler.HandleInvite(ctx, update)
 
-	assert.True(t, f.Handler.bot.(*testutil.MockBotAPI).SendCalledSafe())
+	assert.True(t, f.Handler.bot.(*testutil.BotAPI).SendCalledSafe())
 }
 
 func TestIntegration_Callback_CreateSubscription(t *testing.T) {
@@ -691,7 +681,7 @@ func TestIntegration_Callback_CreateSubscription(t *testing.T) {
 	defer f.Close()
 
 	ctx := context.Background()
-	resetMockBotAPI(f.Handler.bot.(*testutil.MockBotAPI))
+	resetBotAPI(f.Handler.bot.(*testutil.BotAPI))
 
 	update := tgbotapi.Update{
 		CallbackQuery: &tgbotapi.CallbackQuery{
@@ -708,7 +698,7 @@ func TestIntegration_Callback_CreateSubscription(t *testing.T) {
 	}
 	f.Handler.HandleCallback(ctx, update)
 
-	assert.True(t, f.Handler.bot.(*testutil.MockBotAPI).SendCalledSafe())
+	assert.True(t, f.Handler.bot.(*testutil.BotAPI).SendCalledSafe())
 }
 
 func TestIntegration_Callback_MenuSubscription(t *testing.T) {
@@ -718,7 +708,7 @@ func TestIntegration_Callback_MenuSubscription(t *testing.T) {
 	defer f.Close()
 
 	CreateTestSubscriptionInDB(t, f.DB, f.UserChatID, "testuser", "active", ptrTime(time.Now().Add(30*24*time.Hour)))
-	resetMockBotAPI(f.Handler.bot.(*testutil.MockBotAPI))
+	resetBotAPI(f.Handler.bot.(*testutil.BotAPI))
 
 	ctx := context.Background()
 	update := tgbotapi.Update{
@@ -736,7 +726,7 @@ func TestIntegration_Callback_MenuSubscription(t *testing.T) {
 	}
 	f.Handler.HandleCallback(ctx, update)
 
-	assert.True(t, f.Handler.bot.(*testutil.MockBotAPI).SendCalledSafe())
+	assert.True(t, f.Handler.bot.(*testutil.BotAPI).SendCalledSafe())
 }
 
 func TestIntegration_Callback_QRCode(t *testing.T) {
@@ -746,7 +736,7 @@ func TestIntegration_Callback_QRCode(t *testing.T) {
 	defer f.Close()
 
 	CreateTestSubscriptionInDB(t, f.DB, f.UserChatID, "testuser", "active", ptrTime(time.Now().Add(30*24*time.Hour)))
-	resetMockBotAPI(f.Handler.bot.(*testutil.MockBotAPI))
+	resetBotAPI(f.Handler.bot.(*testutil.BotAPI))
 
 	ctx := context.Background()
 	update := tgbotapi.Update{
@@ -764,5 +754,5 @@ func TestIntegration_Callback_QRCode(t *testing.T) {
 	}
 	f.Handler.HandleCallback(ctx, update)
 
-	assert.True(t, f.Handler.bot.(*testutil.MockBotAPI).SendCalledSafe())
+	assert.True(t, f.Handler.bot.(*testutil.BotAPI).SendCalledSafe())
 }

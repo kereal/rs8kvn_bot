@@ -415,7 +415,7 @@ func TestRenderTrialPage_XSSProtection(t *testing.T) {
 		TrialRateLimit:     3,
 	}
 
-	srv := NewServer(":8880", testutil.NewMockDatabaseService(), cfg, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", testutil.NewDatabaseService(), cfg, bot.NewTestBotConfig(), nil, nil)
 
 	tests := []struct {
 		name         string
@@ -553,7 +553,7 @@ func TestRenderErrorPage_TemplateRendersLogo(t *testing.T) {
 func TestRenderTrialPage_Golden(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewMockDatabaseService()
+	mockDB := testutil.NewDatabaseService()
 	cfg := &config.Config{
 		SiteURL:            "https://example.com",
 		TrialDurationHours: 24,
@@ -583,7 +583,7 @@ func TestRenderTrialPage_Golden(t *testing.T) {
 func TestRenderTrialPage_Structure(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewMockDatabaseService()
+	mockDB := testutil.NewDatabaseService()
 	cfg := &config.Config{
 		SiteURL:            "https://example.com",
 		TrialDurationHours: 24,

@@ -17,7 +17,7 @@ func orderPtrTime(t time.Time) *time.Time {
 }
 
 func TestOrderService_ActivateProduct_NilProduct(t *testing.T) {
-	db := testutil.NewMockDatabaseService()
+	db := testutil.NewDatabaseService()
 	subSvc := &SubscriptionService{db: db}
 	svc := NewOrderService(db, subSvc, nil)
 
@@ -37,7 +37,7 @@ func TestOrderService_ActivateProduct_PaidProduct_NoPlanChange(t *testing.T) {
 		PlanID: 1, Status: "active", Username: "user",
 	}
 
-	db := testutil.NewMockDatabaseService()
+	db := testutil.NewDatabaseService()
 	db.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 		return sub, nil
 	}
@@ -79,7 +79,7 @@ func TestOrderService_ActivateProduct_FreeProduct_SamePlan(t *testing.T) {
 		ExpiresAt: orderPtrTime(now.Add(30 * 24 * time.Hour)),
 	}
 
-	db := testutil.NewMockDatabaseService()
+	db := testutil.NewDatabaseService()
 	db.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 		return sub, nil
 	}
@@ -126,7 +126,7 @@ func TestOrderService_ActivateProduct_FreeProduct_DifferentPlan_UpdatesSubscript
 		ExpiresAt: orderPtrTime(now.Add(30 * 24 * time.Hour)),
 	}
 
-	db := testutil.NewMockDatabaseService()
+	db := testutil.NewDatabaseService()
 	db.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 		return sub, nil
 	}
@@ -165,7 +165,7 @@ func TestOrderService_ActivateProduct_FreeProduct_DifferentPlan_UpdatesSubscript
 }
 
 func TestOrderService_ActivateProduct_GetOrCreateSubscriptionError(t *testing.T) {
-	db := testutil.NewMockDatabaseService()
+	db := testutil.NewDatabaseService()
 	subSvc := &SubscriptionService{db: db}
 	svc := NewOrderService(db, subSvc, nil)
 
@@ -189,7 +189,7 @@ func TestOrderService_ActivateProduct_CreateOrderError(t *testing.T) {
 		PlanID: 1, Status: "active", Username: "user",
 	}
 
-	db := testutil.NewMockDatabaseService()
+	db := testutil.NewDatabaseService()
 	db.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 		return sub, nil
 	}
@@ -228,7 +228,7 @@ func TestOrderService_ActivateProduct_PaidProduct_ExpiryNotModified(t *testing.T
 		ExpiresAt: &oldExpiry,
 	}
 
-	db := testutil.NewMockDatabaseService()
+	db := testutil.NewDatabaseService()
 	db.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 		return sub, nil
 	}

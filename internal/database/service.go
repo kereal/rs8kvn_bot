@@ -22,6 +22,9 @@ type Service struct {
 	db *gorm.DB
 }
 
+// GetDB returns the underlying *gorm.DB instance.
+// ⚠️ Test use only: production code should use domain methods (subscriptions, nodes, etc.)
+// or Transaction(ctx, fn) instead of bypassing the service layer.
 func (s *Service) GetDB() *gorm.DB {
 	return s.db
 }

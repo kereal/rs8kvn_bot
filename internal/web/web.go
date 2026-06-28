@@ -188,16 +188,14 @@ func (s *Server) Stop(ctx context.Context) error {
 	}
 
 	var err error
-	if s.server != nil {
-		err = s.server.Shutdown(ctx)
-	}
 	if s.subserverLogger != nil {
 		closeCtx, cancel := context.WithTimeout(ctx, subserverAccessLogCloseTimeout)
 		defer cancel()
 
-		if closeErr := s.subserverLogger.CloseWithContext(closeCtx); err == nil {
-			err = closeErr
-		}
+		err = s.subserverLogger.CloseWithContext(closeCtx)
+	}
+	if err == nil && s.server != nil {
+		err = s.server.Shutdown(ctx)
 	}
 	return err
 }

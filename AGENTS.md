@@ -67,3 +67,15 @@ Don't read and don't write
   * nginx-xhttp-hysteria2-architecture.md
   * task-bot-integration.md
 
+
+## Error Handling Conventions
+
+This project distinguishes between user-initiated operations (must be reliable) and background best-effort work (can tolerate partial failure).
+
+- **User-initiated** (`Create`, `BindTrial`, `RenewSubscription`, `Delete`): return errors to the caller. The handler will surface the failure to the user. Do NOT log + continue silently.
+- **Background sync** (`SyncSubscription`, `ReconcilePlanNodes`, `ReconcileOrphanedClients`): log as `Warn` and continue. Failures are retried by the scheduler. Only return error if the entire scan was cancelled via context.
+- **Cleanup jobs** (`CleanupExpiredTrials`, trial cleanup scheduler): log failures per-item, continue. Return aggregated count of successfully processed items; errors are informational.
+- **Never** use `panic` for control flow in handlers or services. Panic recovery exists only at the top level (`main.go`, `handleUpdateSafely`).
+- Always wrap errors with `%w` to preserve the chain for `errors.Is` / `errors.As` checks.
+- Sentinel errors (`database.ErrSubscriptionNotFound`, `xui.ErrClientNotFound`) are the preferred way to signal expected "not found" states. Callers must use `errors.Is` to distinguish them from infrastructure errors.
+

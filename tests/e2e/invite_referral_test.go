@@ -30,7 +30,7 @@ func TestE2E_ShareLink_CachesPendingInvite(t *testing.T) {
 	_, err := env.db.GetOrCreateInvite(ctx, 111222, "sharecode123")
 	require.NoError(t, err)
 
-	resetMockBotAPI(env.botAPI)
+	resetBotAPI(env.botAPI)
 
 	env.handler.HandleStart(ctx, tgbotapi.Update{
 		Message: newCommandMessage(env.chatID, env.chatID, env.username, "/start share_sharecode123", 6),
@@ -59,7 +59,7 @@ func TestE2E_ShareLink_ExistingSubscription_Ignored(t *testing.T) {
 	_, err := env.db.GetOrCreateInvite(ctx, 111222, "sharecode456")
 	require.NoError(t, err)
 
-	resetMockBotAPI(env.botAPI)
+	resetBotAPI(env.botAPI)
 
 	env.handler.HandleStart(ctx, tgbotapi.Update{
 		Message: newCommandMessage(env.chatID, env.chatID, env.username, "/start share_sharecode456", 6),
@@ -75,7 +75,7 @@ func TestE2E_ShareLink_InvalidCode(t *testing.T) {
 
 	ctx := context.Background()
 
-	resetMockBotAPI(env.botAPI)
+	resetBotAPI(env.botAPI)
 
 	env.handler.HandleStart(ctx, tgbotapi.Update{
 		Message: newCommandMessage(env.chatID, env.chatID, env.username, "/start share_invalidcode", 6),
@@ -284,7 +284,7 @@ func TestE2E_InviteLink_FullFlow_BindTrial(t *testing.T) {
 	require.Greater(t, subIDEnd, -1, "Should find closing quote")
 	trialSubID := html[subIDStart+6 : subIDStart+subIDEnd]
 
-	resetMockBotAPI(env.botAPI)
+	resetBotAPI(env.botAPI)
 	env.xui.AddClientWithIDCalled = false
 
 	env.handler.HandleStart(ctx, tgbotapi.Update{
@@ -336,7 +336,7 @@ func TestE2E_FullCycle_InviteToQR(t *testing.T) {
 	require.Greater(t, subIDEnd, -1)
 	trialSubID := html[subIDStart+6 : subIDStart+subIDEnd]
 
-	resetMockBotAPI(env.botAPI)
+	resetBotAPI(env.botAPI)
 	env.xui.AddClientWithIDCalled = false
 	env.xui.UpdateClientCalled = false
 
@@ -356,7 +356,7 @@ func TestE2E_FullCycle_InviteToQR(t *testing.T) {
 	assert.False(t, sub.PlanID == trialPlan.ID, "Should be converted from trial")
 	assert.NotEmpty(t, sub.Username, "Username should be stored")
 
-	resetMockBotAPI(env.botAPI)
+	resetBotAPI(env.botAPI)
 
 	env.handler.HandleCallback(ctx, tgbotapi.Update{
 		CallbackQuery: &tgbotapi.CallbackQuery{
@@ -389,7 +389,7 @@ func TestE2E_FullCycle_ShareToSubscription(t *testing.T) {
 	_, err := env.db.GetOrCreateInvite(ctx, 300002, inviteCode)
 	require.NoError(t, err)
 
-	resetMockBotAPI(env.botAPI)
+	resetBotAPI(env.botAPI)
 	env.handler.HandleStart(ctx, tgbotapi.Update{
 		Message: newCommandMessage(env.chatID, env.chatID, env.username, "/start share_"+inviteCode, 6),
 	})
@@ -397,7 +397,7 @@ func TestE2E_FullCycle_ShareToSubscription(t *testing.T) {
 	assert.True(t, env.botAPI.SendCalledSafe(), "Should respond to share link")
 	assert.Contains(t, env.botAPI.LastSentText, "пригласил", "Should mention invitation")
 
-	resetMockBotAPI(env.botAPI)
+	resetBotAPI(env.botAPI)
 	env.xui.AddClientWithIDCalled = false
 
 	env.handler.HandleCallback(ctx, tgbotapi.Update{
@@ -461,7 +461,7 @@ func TestE2E_FullCycle_MultipleUsersViaInvite(t *testing.T) {
 		require.Greater(t, subIDEnd, -1)
 		trialSubID := html[subIDStart+6 : subIDStart+subIDEnd]
 
-		resetMockBotAPI(env.botAPI)
+		resetBotAPI(env.botAPI)
 		env.xui.AddClientWithIDCalled = false
 		env.xui.UpdateClientCalled = false
 
@@ -517,7 +517,7 @@ func TestE2E_FullCycle_InviteThenShare(t *testing.T) {
 	require.Greater(t, subIDEnd, -1)
 	trialSubID := html[subIDStart+6 : subIDStart+subIDEnd]
 
-	resetMockBotAPI(env.botAPI)
+	resetBotAPI(env.botAPI)
 	env.xui.AddClientWithIDCalled = false
 	env.xui.UpdateClientCalled = false
 
@@ -527,7 +527,7 @@ func TestE2E_FullCycle_InviteThenShare(t *testing.T) {
 
 	assert.True(t, env.botAPI.SendCalledSafe())
 
-	resetMockBotAPI(env.botAPI)
+	resetBotAPI(env.botAPI)
 	env.handler.HandleStart(ctx, tgbotapi.Update{
 		Message: newCommandMessage(env.chatID, env.chatID, env.username, "/start share_"+shareInviteCode, 6),
 	})

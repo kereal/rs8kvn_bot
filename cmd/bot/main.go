@@ -152,6 +152,179 @@ func getVersion() string {
 	return "rs8kvn_bot@" + version
 }
 
+func initBot(cfg *config.Config) (*tgbotapi.BotAPI, *bot.BotConfig, error) {
+	logger.Info("Validating Telegram bot token")
+
+	const botInitMaxAttempts = 5
+	botInitDelay := 3 * time.Second
+
+	var api *tgbotapi.BotAPI
+	var bc *bot.BotConfig
+
+	for i := 0; i < botInitMaxAttempts; i++ {
+		func() {
+			defer recoverAndReport("Telegram bot init")
+
+			var err error
+			api, err = tgbotapi.NewBotAPI(cfg.TelegramBotToken)
+			if err != nil {
+				if i == botInitMaxAttempts-1 {
+					logger.Fatal("Failed to initialize Telegram bot after max attempts",
+						zap.Error(err),
+						zap.Int("attempts", botInitMaxAttempts))
+				}
+				logger.Warn("Telegram bot init failed, retrying...",
+					zap.Int("attempt", i+1),
+					zap.Int("max_attempts", botInitMaxAttempts),
+					zap.Error(err))
+				time.Sleep(botInitDelay + time.Duration(rand.Int63n(int64(botInitDelay/2)))) //nolint:gosec // jitter
+				return
+			}
+
+			bc, err = bot.NewBotConfig(api)
+			if err != nil {
+				if i == botInitMaxAttempts-1 {
+					logger.Fatal("Failed to create bot config after max attempts",
+						zap.Int("attempts", botInitMaxAttempts),
+						zap.Error(err))
+				}
+				logger.Warn("Bot config creation failed, retrying...",
+					zap.Int("attempt", i+1),
+					zap.Int("max_attempts", botInitMaxAttempts),
+					zap.Error(err))
+				time.Sleep(botInitDelay + time.Duration(rand.Int63n(int64(botInitDelay/2)))) //nolint:gosec // jitter
+				return
+			}
+		}()
+
+		if api != nil {
+			break
+		}
+	}
+
+	if api == nil {
+		return nil, nil, fmt.Errorf("failed to initialize Telegram bot after all attempts")
+	}
+
+	logger.Info("Telegram bot authorized", zap.String("username", bc.Username))
+	return api, bc, nil
+}
+
+func startWebServer(subService *service.SubscriptionService, cfg *config.Config, botConfig *bot.BotConfig, subServer *subserver.Service, dbService *database.Service, legacyXUIClient interfaces.XUIClient) (*web.Server, error) {
+	webServer := web.NewServer(fmt.Sprintf(":%d", cfg.HealthCheckPort), dbService, cfg, botConfig, subService, subServer)
+	webServer.RegisterChecker("database", func(ctx context.Context) web.ComponentHealth {
+		if err := dbService.Ping(ctx); err != nil {
+			return web.ComponentHealth{Status: web.StatusDown, Message: err.Error()}
+		}
+		return web.ComponentHealth{Status: web.StatusOK}
+	})
+	webServer.RegisterChecker("xui", func(ctx context.Context) web.ComponentHealth {
+		if legacyXUIClient == nil {
+			return web.ComponentHealth{Status: web.StatusDegraded, Message: "no active XUI client"}
+		}
+		if err := legacyXUIClient.Ping(ctx); err != nil {
+			return web.ComponentHealth{Status: web.StatusDegraded, Message: err.Error()}
+		}
+		return web.ComponentHealth{Status: web.StatusOK}
+	})
+
+	webServerStartErr := make(chan error, 1)
+	go func() {
+		defer recoverAndReport("Web server start")
+		if err := webServer.Start(context.Background()); err != nil {
+			webServerStartErr <- err
+		}
+	}()
+
+	select {
+	case err := <-webServerStartErr:
+		return nil, err
+	case <-time.After(2 * time.Second):
+		return webServer, nil
+	}
+}
+
+func startBackgroundWorkers(ctx context.Context, handler *bot.Handler, subService *service.SubscriptionService, dbService *database.Service, cfg *config.Config, vpnClients map[uint]vpn.Client, nodes []database.Node) *sync.WaitGroup {
+	var wg sync.WaitGroup
+	wg.Add(6)
+
+	go func() {
+		defer recoverAndReport("Orphan reconciler")
+		defer wg.Done()
+		select {
+		case <-time.After(30 * time.Second):
+		case <-ctx.Done():
+			return
+		}
+		svc := handler.GetSubscriptionService()
+		if svc == nil {
+			logger.Warn("SubscriptionService not available, skipping orphan reconciliation")
+			return
+		}
+		if count, err := svc.ReconcileOrphanedClients(ctx); err != nil {
+			logger.Warn("Initial orphan reconciliation failed", zap.Error(err))
+		} else {
+			logger.Info("Orphan reconciliation completed", zap.Int("removed", count))
+		}
+		ticker := time.NewTicker(6 * time.Hour)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if count, err := svc.ReconcileOrphanedClients(ctx); err != nil {
+					logger.Warn("Orphan reconciliation failed", zap.Error(err))
+				} else {
+					logger.Info("Orphan reconciliation completed", zap.Int("removed", count))
+				}
+			}
+		}
+	}()
+
+	backupSched := scheduler.NewBackupScheduler(cfg.DatabasePath, config.DefaultBackupHour, config.DefaultBackupRetention)
+	go func() {
+		defer recoverAndReport("Backup scheduler")
+		defer wg.Done()
+		backupSched.Start(ctx)
+	}()
+
+	go func() {
+		defer recoverAndReport("Heartbeat scheduler")
+		defer wg.Done()
+		heartbeat.Start(ctx, cfg.HeartbeatURL, cfg.HeartbeatInterval)
+	}()
+
+	go func() {
+		defer recoverAndReport("Trial cleanup scheduler")
+		defer wg.Done()
+		trialSched := scheduler.NewTrialCleanupScheduler(subService)
+		trialSched.Start(ctx)
+	}()
+
+	syncSvc := service.NewSyncService(dbService, vpnClients, nodes)
+	subService.SetSyncService(syncSvc)
+
+	orderService := service.NewOrderService(dbService, subService, syncSvc)
+	handler.SetOrderService(orderService)
+
+	go func() {
+		defer recoverAndReport("Subscription sync worker")
+		defer wg.Done()
+		syncWorker := scheduler.NewSubscriptionSyncWorker(syncSvc)
+		syncWorker.Run(ctx)
+	}()
+
+	go func() {
+		defer recoverAndReport("Subscription expire worker")
+		defer wg.Done()
+		expireWorker := scheduler.NewSubscriptionExpireWorker(dbService, subService)
+		expireWorker.Run(ctx)
+	}()
+
+	return &wg
+}
+
 // The function performs best-effort initialization for optional components (Sentry,
 // database, 3x-ui client, Telegram bot) so the service can start even if some
 // dependencies are unavailable. It also starts background maintenance tasks
@@ -283,63 +456,10 @@ func main() {
 	}
 	nodes = runtimeNodes
 
-	// Initialize Telegram bot with retry to handle transient network issues
-	logger.Info("Validating Telegram bot token")
-
-	const botInitMaxAttempts = 5
-	botInitDelay := 3 * time.Second
-
-	var botAPI *tgbotapi.BotAPI
-	var botConfig *bot.BotConfig
-
-	for i := 0; i < botInitMaxAttempts; i++ {
-		func() {
-			defer recoverAndReport("Telegram bot init")
-
-			api, err := tgbotapi.NewBotAPI(cfg.TelegramBotToken)
-			if err != nil {
-				if i == botInitMaxAttempts-1 {
-					logger.Fatal("Failed to initialize Telegram bot after max attempts",
-						zap.Error(err),
-						zap.Int("attempts", botInitMaxAttempts))
-				}
-				logger.Warn("Telegram bot init failed, retrying...",
-					zap.Int("attempt", i+1),
-					zap.Int("max_attempts", botInitMaxAttempts),
-					zap.Error(err))
-				time.Sleep(botInitDelay + time.Duration(rand.Int63n(int64(botInitDelay/2)))) //nolint:gosec // jitter
-				return
-			}
-
-			bc, err := bot.NewBotConfig(api)
-			if err != nil {
-				if i == botInitMaxAttempts-1 {
-					logger.Fatal("Failed to create bot config after max attempts",
-						zap.Error(err),
-						zap.Int("attempts", botInitMaxAttempts))
-				}
-				logger.Warn("Bot config creation failed, retrying...",
-					zap.Int("attempt", i+1),
-					zap.Int("max_attempts", botInitMaxAttempts),
-					zap.Error(err))
-				time.Sleep(botInitDelay + time.Duration(rand.Int63n(int64(botInitDelay/2)))) //nolint:gosec // jitter
-				return
-			}
-
-			botAPI = api
-			botConfig = bc
-		}()
-
-		if botAPI != nil {
-			break
-		}
+	botAPI, botConfig, err := initBot(cfg)
+	if err != nil {
+		logger.Fatal("Failed to initialize Telegram bot", zap.Error(err))
 	}
-
-	if botAPI == nil {
-		logger.Fatal("Failed to initialize Telegram bot after all attempts")
-	}
-
-	logger.Info("Telegram bot authorized", zap.String("username", botConfig.Username))
 
 	// Create subscription service (shared between bot handler and web server)
 	subService := service.NewSubscriptionService(dbService, xuiClients, vpnClients, nodes, cfg)
@@ -352,40 +472,14 @@ func main() {
 	handler := bot.NewHandler(botAPI, cfg, dbService, legacyXUIClient, botConfig, subService, getVersion())
 
 	// Initialize and start web server (health + trial pages)
-	webServer := web.NewServer(fmt.Sprintf(":%d", cfg.HealthCheckPort), dbService, cfg, botConfig, subService, subServer)
-	webServer.RegisterChecker("database", func(ctx context.Context) web.ComponentHealth {
-		if err := dbService.Ping(ctx); err != nil {
-			return web.ComponentHealth{Status: web.StatusDown, Message: err.Error()}
-		}
-		return web.ComponentHealth{Status: web.StatusOK}
-	})
-	webServer.RegisterChecker("xui", func(ctx context.Context) web.ComponentHealth {
-		if legacyXUIClient == nil {
-			return web.ComponentHealth{Status: web.StatusDegraded, Message: "no active XUI client"}
-		}
-		if err := legacyXUIClient.Ping(ctx); err != nil {
-			return web.ComponentHealth{Status: web.StatusDegraded, Message: err.Error()}
-		}
-		return web.ComponentHealth{Status: web.StatusOK}
-	})
-
-	// Start web server in background to prevent blocking startup
-	webServerStartErr := make(chan error, 1)
-	go func() {
-		defer recoverAndReport("Web server start")
-		if err := webServer.Start(context.Background()); err != nil {
-			webServerStartErr <- err
-		}
-	}()
-
-	// Wait briefly for web server to start or fail
-	select {
-	case err := <-webServerStartErr:
+	webServer, err := startWebServer(subService, cfg, botConfig, subServer, dbService, legacyXUIClient)
+	if err != nil {
 		logger.Warn("Failed to start web server, continuing without web server", zap.Error(err))
-	case <-time.After(2 * time.Second):
-		logger.Info("Web server started", zap.String("addr", webServer.Addr()), zap.Int("port", cfg.HealthCheckPort))
 	}
 	defer func() {
+		if webServer == nil {
+			return
+		}
 		webServer.SetReady(false)
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -414,99 +508,19 @@ func main() {
 	// The last 2 are subscription sync and expire workers.
 	// All of them must exit (via ctx cancellation) before main returns,
 	// so we wait on wg at the end of graceful shutdown.
-	var wg sync.WaitGroup
-	wg.Add(6)
-
-	// Start orphaned XUI client reconciler (every 6 hours)
-	go func() {
-		defer recoverAndReport("Orphan reconciler")
-		defer wg.Done()
-		// Initial run after 30 seconds to let XUI settle
-		select {
-		case <-time.After(30 * time.Second):
-		case <-ctx.Done():
-			return
-		}
-		svc := handler.GetSubscriptionService()
-		if svc == nil {
-			logger.Warn("SubscriptionService not available, skipping orphan reconciliation")
-			return
-		}
-		if count, err := svc.ReconcileOrphanedClients(ctx); err != nil {
-			logger.Warn("Initial orphan reconciliation failed", zap.Error(err))
-		} else {
-			logger.Info("Orphan reconciliation completed", zap.Int("removed", count))
-		}
-		ticker := time.NewTicker(6 * time.Hour)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				if count, err := svc.ReconcileOrphanedClients(ctx); err != nil {
-					logger.Warn("Orphan reconciliation failed", zap.Error(err))
-				} else {
-					logger.Info("Orphan reconciliation completed", zap.Int("removed", count))
-				}
-			}
-		}
-	}()
+	bgWg := startBackgroundWorkers(ctx, handler, subService, dbService, cfg, vpnClients, nodes)
+	defer bgWg.Wait()
 
 	logger.Info("Bot started successfully")
 
 	// Mark web server as ready after all components are initialized
-	webServer.SetReady(true)
+	if webServer != nil {
+		webServer.SetReady(true)
+	}
 
 	// Channel to limit concurrent update handlers (worker pool)
 	// This prevents unbounded goroutine spawning
 	updateSem := make(chan struct{}, config.MaxConcurrentHandlers)
-
-	// Start backup scheduler
-	backupSched := scheduler.NewBackupScheduler(cfg.DatabasePath, config.DefaultBackupHour, config.DefaultBackupRetention)
-	go func() {
-		defer recoverAndReport("Backup scheduler")
-		defer wg.Done()
-		backupSched.Start(ctx)
-	}()
-
-	// Start heartbeat monitor
-	go func() {
-		defer recoverAndReport("Heartbeat scheduler")
-		defer wg.Done()
-		heartbeat.Start(ctx, cfg.HeartbeatURL, cfg.HeartbeatInterval)
-	}()
-
-	// Start trial cleanup scheduler
-	go func() {
-		defer recoverAndReport("Trial cleanup scheduler")
-		defer wg.Done()
-		trialSched := scheduler.NewTrialCleanupScheduler(subService)
-		trialSched.Start(ctx)
-	}()
-
-	// Create sync service and inject into subscription service
-	syncSvc := service.NewSyncService(dbService, vpnClients, nodes)
-	subService.SetSyncService(syncSvc)
-
-	orderService := service.NewOrderService(dbService, subService, syncSvc)
-	handler.SetOrderService(orderService)
-
-	// Start subscription sync worker (every 5 minutes)
-	go func() {
-		defer recoverAndReport("Subscription sync worker")
-		defer wg.Done()
-		syncWorker := scheduler.NewSubscriptionSyncWorker(syncSvc)
-		syncWorker.Run(ctx)
-	}()
-
-	// Start subscription expire worker (every 1 hour)
-	go func() {
-		defer recoverAndReport("Subscription expire worker")
-		defer wg.Done()
-		expireWorker := scheduler.NewSubscriptionExpireWorker(dbService, subService)
-		expireWorker.Run(ctx)
-	}()
 
 	// Track in-flight update handlers
 	var updatesWg sync.WaitGroup
@@ -567,7 +581,7 @@ eventLoop:
 	logger.Info("Waiting for background tasks to stop...")
 	bgDone := make(chan struct{})
 	go func() {
-		wg.Wait()
+		bgWg.Wait()
 		close(bgDone)
 	}()
 

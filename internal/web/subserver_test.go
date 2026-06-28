@@ -38,7 +38,7 @@ func testServer(t *testing.T, db interfaces.DatabaseService, cfg *config.Config)
 func TestHandleSubscription_MethodNotAllowed(t *testing.T) {
 	t.Parallel()
 
-	db := testutil.NewMockDatabaseService()
+	db := testutil.NewDatabaseService()
 	srv := testServer(t, db, &config.Config{})
 
 	w := httptest.NewRecorder()
@@ -66,7 +66,7 @@ func TestHandleSubscription_SubServerNil(t *testing.T) {
 func TestHandleSubscription_InvalidCode(t *testing.T) {
 	t.Parallel()
 
-	db := testutil.NewMockDatabaseService()
+	db := testutil.NewDatabaseService()
 	srv := testServer(t, db, &config.Config{})
 
 	tests := []string{
@@ -87,7 +87,7 @@ func TestHandleSubscription_InvalidCode(t *testing.T) {
 func TestHandleSubscription_AccessLog(t *testing.T) {
 	t.Parallel()
 
-	db := testutil.NewMockDatabaseService()
+	db := testutil.NewDatabaseService()
 	srv := testServer(t, db, &config.Config{})
 	logPath := filepath.Join(t.TempDir(), "subserver.log")
 	accessLogger, err := subserver.NewAccessLogger(logPath)
@@ -123,7 +123,7 @@ func TestHandleSubscription_AccessLog(t *testing.T) {
 func TestHandleSubscription_AccessLogMissingOptionalHeaders(t *testing.T) {
 	t.Parallel()
 
-	db := testutil.NewMockDatabaseService()
+	db := testutil.NewDatabaseService()
 	srv := testServer(t, db, &config.Config{})
 	logPath := filepath.Join(t.TempDir(), "subserver.log")
 	accessLogger, err := subserver.NewAccessLogger(logPath)
@@ -147,7 +147,7 @@ func TestHandleSubscription_AccessLogMissingOptionalHeaders(t *testing.T) {
 func TestHandleSubscription_SubscriptionNotFound(t *testing.T) {
 	t.Parallel()
 
-	db := testutil.NewMockDatabaseService()
+	db := testutil.NewDatabaseService()
 	db.GetWithPlanAndNodesFunc = func(ctx context.Context, _ string) (*database.SubscriptionFull, error) {
 		return nil, gorm.ErrRecordNotFound
 	}
@@ -164,7 +164,7 @@ func TestHandleSubscription_SubscriptionNotFound(t *testing.T) {
 func TestHandleSubscription_NoServersAvailable(t *testing.T) {
 	t.Parallel()
 
-	db := testutil.NewMockDatabaseService()
+	db := testutil.NewDatabaseService()
 	db.GetWithPlanAndNodesFunc = func(ctx context.Context, _ string) (*database.SubscriptionFull, error) {
 		return &database.SubscriptionFull{
 			Subscription: database.Subscription{ID: 1, Status: "active"},
@@ -193,7 +193,7 @@ func TestHandleSubscription_PlainSource(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	db := testutil.NewMockDatabaseService()
+	db := testutil.NewDatabaseService()
 	db.GetWithPlanAndNodesFunc = func(ctx context.Context, _ string) (*database.SubscriptionFull, error) {
 		return &database.SubscriptionFull{
 			Subscription: database.Subscription{ID: 1, Status: "active"},
@@ -236,7 +236,7 @@ func TestHandleSubscription_JSONSource(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	db := testutil.NewMockDatabaseService()
+	db := testutil.NewDatabaseService()
 	db.GetWithPlanAndNodesFunc = func(ctx context.Context, _ string) (*database.SubscriptionFull, error) {
 		return &database.SubscriptionFull{
 			Subscription: database.Subscription{ID: 1, Status: "active"},
@@ -290,7 +290,7 @@ func TestHandleSubscription_MultipleSources(t *testing.T) {
 	}))
 	defer b2.Close()
 
-	db := testutil.NewMockDatabaseService()
+	db := testutil.NewDatabaseService()
 	db.GetWithPlanAndNodesFunc = func(ctx context.Context, _ string) (*database.SubscriptionFull, error) {
 		return &database.SubscriptionFull{
 			Subscription: database.Subscription{ID: 1, Status: "active"},
@@ -339,7 +339,7 @@ func TestHandleSubscription_MixedJSONAndPlain(t *testing.T) {
 	}))
 	defer b2.Close()
 
-	db := testutil.NewMockDatabaseService()
+	db := testutil.NewDatabaseService()
 	db.GetWithPlanAndNodesFunc = func(ctx context.Context, _ string) (*database.SubscriptionFull, error) {
 		return &database.SubscriptionFull{
 			Subscription: database.Subscription{ID: 1, Status: "active"},
@@ -374,7 +374,7 @@ func TestHandleSubscription_SourceFetchError(t *testing.T) {
 	}))
 	defer b.Close()
 
-	db := testutil.NewMockDatabaseService()
+	db := testutil.NewDatabaseService()
 	db.GetWithPlanAndNodesFunc = func(ctx context.Context, _ string) (*database.SubscriptionFull, error) {
 		return &database.SubscriptionFull{
 			Subscription: database.Subscription{ID: 1, Status: "active"},
@@ -406,7 +406,7 @@ func TestHandleSubscription_CacheSubscriptionResult(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	db := testutil.NewMockDatabaseService()
+	db := testutil.NewDatabaseService()
 	db.GetWithPlanAndNodesFunc = func(ctx context.Context, _ string) (*database.SubscriptionFull, error) {
 		return &database.SubscriptionFull{
 			Subscription: database.Subscription{ID: 1, Status: "active"},
@@ -445,7 +445,7 @@ func TestHandleSubscription_DevicesTracking(t *testing.T) {
 	defer backend.Close()
 
 	var savedDevices string
-	db := testutil.NewMockDatabaseService()
+	db := testutil.NewDatabaseService()
 	db.GetWithPlanAndNodesFunc = func(ctx context.Context, _ string) (*database.SubscriptionFull, error) {
 		return &database.SubscriptionFull{
 			Subscription: database.Subscription{ID: 1, Status: "active"},
@@ -481,7 +481,7 @@ func TestHandleSubscription_DevicesTracking(t *testing.T) {
 func TestHandleSubscription_SourceWithoutSubURL(t *testing.T) {
 	t.Parallel()
 
-	db := testutil.NewMockDatabaseService()
+	db := testutil.NewDatabaseService()
 	db.GetWithPlanAndNodesFunc = func(ctx context.Context, _ string) (*database.SubscriptionFull, error) {
 		return &database.SubscriptionFull{
 			Subscription: database.Subscription{ID: 1, Status: "active"},
@@ -512,7 +512,7 @@ func TestHandleSubscription_Base64EncodedSource(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	db := testutil.NewMockDatabaseService()
+	db := testutil.NewDatabaseService()
 	db.GetWithPlanAndNodesFunc = func(ctx context.Context, _ string) (*database.SubscriptionFull, error) {
 		return &database.SubscriptionFull{
 			Subscription: database.Subscription{ID: 1, Status: "active"},

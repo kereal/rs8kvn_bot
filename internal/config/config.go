@@ -319,6 +319,20 @@ func (c *Config) SubURL(subID string) string {
 	return u
 }
 
+// InboundIDs parses XUIInboundIDs from a JSON string to a slice of ints.
+// Returns nil slice (not error) when XUIInboundIDs is empty.
+// Validation in Load() ensures non-empty values are valid JSON arrays.
+func (n *Node) InboundIDs() ([]int, error) {
+	if n.XUIInboundIDs == "" {
+		return nil, nil
+	}
+	var ids []int
+	if err := json.Unmarshal([]byte(n.XUIInboundIDs), &ids); err != nil {
+		return nil, fmt.Errorf("parse inbound IDs for node %s: %w", n.Name, err)
+	}
+	return ids, nil
+}
+
 // maskURL returns a masked version of a URL for logging purposes.
 func maskURL(urlStr string) string {
 	if urlStr == "" {

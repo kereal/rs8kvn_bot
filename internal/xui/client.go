@@ -7,8 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/rand"
-	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -326,7 +324,7 @@ func (c *Client) AddClientWithID(ctx context.Context, inboundIDs []int, email, c
 		firstErr error
 	)
 	for flow, ids := range groups {
-		errRetry := RetryWithBackoff(ctx, config.XUIMaxRetries, config.XUIInitialRetryDelay, func() error {
+		errRetry := utils.RetryWithBackoff(ctx, config.XUIMaxRetries, config.XUIInitialRetryDelay, func() error {
 			var innerErr error
 			result, innerErr = c.doAddClientWithID(ctx, ids, email, clientID, subID, trafficBytes, expiryTime, resetDays, flow, tgID)
 			return innerErr
@@ -396,7 +394,7 @@ func (c *Client) DeleteClient(ctx context.Context, email string) error {
 	if email == "" {
 		return fmt.Errorf("email cannot be empty")
 	}
-	return RetryWithBackoff(ctx, config.XUIMaxRetries, config.XUIInitialRetryDelay, func() error {
+	return utils.RetryWithBackoff(ctx, config.XUIMaxRetries, config.XUIInitialRetryDelay, func() error {
 		return c.doDeleteClient(ctx, email)
 	})
 }
@@ -454,7 +452,7 @@ func (c *Client) UpdateClient(ctx context.Context, inboundIDs []int, currentEmai
 
 	var firstErr error
 	for flow, ids := range groups {
-		errRetry := RetryWithBackoff(ctx, config.XUIMaxRetries, config.XUIInitialRetryDelay, func() error {
+		errRetry := utils.RetryWithBackoff(ctx, config.XUIMaxRetries, config.XUIInitialRetryDelay, func() error {
 			return c.doUpdateClient(ctx, ids, currentEmail, clientID, email, subID, trafficBytes, expiryTime, resetDays, tgID, comment, flow)
 		})
 		if errRetry != nil {
@@ -514,7 +512,7 @@ func (c *Client) doUpdateClient(ctx context.Context, inboundIDs []int, currentEm
 // GetClientTraffic возвращает актуальный трафик клиента по email.
 func (c *Client) GetClientTraffic(ctx context.Context, email string) (*ClientTraffic, error) {
 	var result *ClientTraffic
-	err := RetryWithBackoff(ctx, config.XUIMaxRetries, config.XUIInitialRetryDelay, func() error {
+	err := utils.RetryWithBackoff(ctx, config.XUIMaxRetries, config.XUIInitialRetryDelay, func() error {
 		var err error
 		result, err = c.doGetClientTraffic(ctx, email)
 		return err
@@ -649,79 +647,4 @@ func truncateString(s string, maxLen int) string {
 	return s[:maxLen] + "..."
 }
 
-// isRetryable определяет, можно ли повторить запрос при данной ошибке.
-// Повторяются ТОЛЬКО сетевые ошибки (DNS, таймауты, соединение). Если сервер
-// ответил (даже с ошибкой) — повторять нет смысла.
-func isRetryable(err error) bool {
-	if err == nil {
-		return false
-	}
-	if errors.Is(err, ErrNon200Response) {
-		return false
-	}
-	var dnsErr *net.DNSError
-	if errors.As(err, &dnsErr) {
-		return false
-	}
-	var netErr net.Error
-	if errors.As(err, &netErr) {
-		return true
-	}
-	msg := strings.ToLower(err.Error())
-	if strings.Contains(msg, "no such host") ||
-		strings.Contains(msg, "temporary failure in name resolution") ||
-		strings.Contains(msg, "name or service not known") ||
-		strings.Contains(msg, "nodename nor servname provided") {
-		return false
-	}
-	return false // по умолчанию: сервер ответил или иная не-сетевая ошибка, не ретраить
-}
 
-// RetryWithBackoff выполняет fn с экспоненциальной задержкой до maxRetries раз.
-// Прерывается при не-retryable ошибке или отменённом контексте.
-func RetryWithBackoff(ctx context.Context, maxRetries int, initialDelay time.Duration, fn func() error) error {
-	if maxRetries <= 0 {
-		return errors.New("maxRetries must be positive")
-	}
-	if initialDelay <= 0 {
-		return errors.New("initialDelay must be positive")
-	}
-
-	var lastErr error
-	delay := initialDelay
-
-	for attempt := range maxRetries {
-		err := fn()
-		if err == nil {
-			return nil
-		}
-
-		if !isRetryable(err) {
-			logger.Error("Non-retryable XUI error, failing immediately",
-				zap.Error(err))
-			return err
-		}
-
-		lastErr = err
-
-		if attempt < maxRetries-1 {
-			logger.Debug("Retry after error",
-				zap.Int("attempt", attempt+1),
-				zap.Int("max_retries", maxRetries),
-				zap.Error(err))
-
-			select {
-			case <-time.After(delay + time.Duration(rand.Int63n(int64(delay/2)))): //nolint:gosec
-				delay *= 2
-			case <-ctx.Done():
-				return fmt.Errorf("context cancelled: %w", ctx.Err())
-			}
-		}
-	}
-
-	logger.Error("XUI operation failed after retries",
-		zap.Int("retries", maxRetries),
-		zap.Error(lastErr))
-
-	return fmt.Errorf("after %d retries: %w", maxRetries, lastErr)
-}

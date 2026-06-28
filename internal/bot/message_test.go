@@ -19,7 +19,7 @@ func TestSend_Success(t *testing.T) {
 
 	ctx := context.Background()
 
-	mockBot := &testutil.MockBotAPI{
+	mockBot := &testutil.BotAPI{
 		SendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
 			return tgbotapi.Message{MessageID: 123}, nil
 		},
@@ -46,7 +46,7 @@ func TestSend_RateLimitContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately
 
-	mockBot := &testutil.MockBotAPI{
+	mockBot := &testutil.BotAPI{
 		SendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
 			return tgbotapi.Message{MessageID: 123}, nil
 		},
@@ -72,7 +72,7 @@ func TestSend_SendError(t *testing.T) {
 
 	ctx := context.Background()
 
-	mockBot := &testutil.MockBotAPI{
+	mockBot := &testutil.BotAPI{
 		SendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
 			return tgbotapi.Message{}, errors.New("send failed")
 		},
@@ -100,7 +100,7 @@ func TestSend_DisablesWebPagePreview(t *testing.T) {
 	ctx := context.Background()
 
 	var capturedMsg tgbotapi.MessageConfig
-	mockBot := &testutil.MockBotAPI{
+	mockBot := &testutil.BotAPI{
 		SendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
 			if msg, ok := c.(tgbotapi.MessageConfig); ok {
 				capturedMsg = msg
@@ -126,7 +126,7 @@ func TestSend_DisablesWebPagePreview(t *testing.T) {
 func TestSafeSend_Success(t *testing.T) {
 	t.Parallel()
 
-	mockBot := &testutil.MockBotAPI{
+	mockBot := &testutil.BotAPI{
 		SendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
 			return tgbotapi.Message{MessageID: 456}, nil
 		},
@@ -149,7 +149,7 @@ func TestSafeSend_Success(t *testing.T) {
 func TestSafeSend_SendError(t *testing.T) {
 	t.Parallel()
 
-	mockBot := &testutil.MockBotAPI{
+	mockBot := &testutil.BotAPI{
 		SendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
 			return tgbotapi.Message{}, errors.New("safe send failed")
 		},
@@ -174,7 +174,7 @@ func TestSafeSend_SendError(t *testing.T) {
 func TestSafeSend_WithEditMessage(t *testing.T) {
 	t.Parallel()
 
-	mockBot := &testutil.MockBotAPI{
+	mockBot := &testutil.BotAPI{
 		SendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
 			return tgbotapi.Message{MessageID: 789}, nil
 		},
@@ -201,7 +201,7 @@ func TestSendMessage_Success(t *testing.T) {
 
 	ctx := context.Background()
 
-	mockBot := &testutil.MockBotAPI{
+	mockBot := &testutil.BotAPI{
 		SendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
 			return tgbotapi.Message{MessageID: 999}, nil
 		},
@@ -231,7 +231,7 @@ func TestSendMessage_EmptyMessage(t *testing.T) {
 
 	ctx := context.Background()
 
-	mockBot := &testutil.MockBotAPI{
+	mockBot := &testutil.BotAPI{
 		SendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
 			return tgbotapi.Message{MessageID: 999}, nil
 		},
@@ -256,7 +256,7 @@ func TestSendMessage_ContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately
 
-	mockBot := &testutil.MockBotAPI{
+	mockBot := &testutil.BotAPI{
 		SendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
 			return tgbotapi.Message{MessageID: 999}, nil
 		},
@@ -282,7 +282,7 @@ func TestSendMessage_SpecialCharacters(t *testing.T) {
 	ctx := context.Background()
 
 	var capturedMsg tgbotapi.MessageConfig
-	mockBot := &testutil.MockBotAPI{
+	mockBot := &testutil.BotAPI{
 		SendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
 			if msg, ok := c.(tgbotapi.MessageConfig); ok {
 				capturedMsg = msg
@@ -311,7 +311,7 @@ func TestSendMessage_Unicode(t *testing.T) {
 	ctx := context.Background()
 
 	var capturedMsg tgbotapi.MessageConfig
-	mockBot := &testutil.MockBotAPI{
+	mockBot := &testutil.BotAPI{
 		SendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
 			if msg, ok := c.(tgbotapi.MessageConfig); ok {
 				capturedMsg = msg
@@ -340,7 +340,7 @@ func TestSendMessage_LongMessage(t *testing.T) {
 	ctx := context.Background()
 
 	var capturedMsg tgbotapi.MessageConfig
-	mockBot := &testutil.MockBotAPI{
+	mockBot := &testutil.BotAPI{
 		SendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
 			if msg, ok := c.(tgbotapi.MessageConfig); ok {
 				capturedMsg = msg
@@ -373,7 +373,7 @@ func TestSendMessage_MultipleMessages(t *testing.T) {
 
 	ctx := context.Background()
 
-	mockBot := &testutil.MockBotAPI{
+	mockBot := &testutil.BotAPI{
 		SendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
 			return tgbotapi.Message{MessageID: 999}, nil
 		},
@@ -413,7 +413,7 @@ func TestSendMessage_DifferentChatIDs(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			var capturedMsg tgbotapi.MessageConfig
-			mockBot := &testutil.MockBotAPI{
+			mockBot := &testutil.BotAPI{
 				SendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
 					if msg, ok := c.(tgbotapi.MessageConfig); ok {
 						capturedMsg = msg
@@ -440,7 +440,7 @@ func TestSendMessage_DifferentChatIDs(t *testing.T) {
 func TestSend_WithContextTimeout(t *testing.T) {
 	t.Parallel()
 
-	mockBot := &testutil.MockBotAPI{
+	mockBot := &testutil.BotAPI{
 		SendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
 			return tgbotapi.Message{MessageID: 123}, nil
 		},
@@ -501,7 +501,7 @@ func TestSafeSend_WithVariousChattables(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			mockBot := &testutil.MockBotAPI{
+			mockBot := &testutil.BotAPI{
 				SendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
 					return tgbotapi.Message{MessageID: 999}, nil
 				},
@@ -528,7 +528,7 @@ func TestSend_MultipleConcurrentSends(t *testing.T) {
 
 	ctx := context.Background()
 
-	mockBot := &testutil.MockBotAPI{
+	mockBot := &testutil.BotAPI{
 		SendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
 			return tgbotapi.Message{MessageID: 123}, nil
 		},
@@ -565,7 +565,7 @@ func TestSendMessage_NilHandler(t *testing.T) {
 
 	ctx := context.Background()
 
-	mockBot := &testutil.MockBotAPI{
+	mockBot := &testutil.BotAPI{
 		SendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
 			return tgbotapi.Message{MessageID: 999}, nil
 		},
@@ -591,7 +591,7 @@ func TestSend_WithMarkdownText(t *testing.T) {
 	ctx := context.Background()
 
 	var capturedMsg tgbotapi.MessageConfig
-	mockBot := &testutil.MockBotAPI{
+	mockBot := &testutil.BotAPI{
 		SendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
 			if msg, ok := c.(tgbotapi.MessageConfig); ok {
 				capturedMsg = msg
