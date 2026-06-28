@@ -14,7 +14,7 @@ func (noCopy) Unlock() {}
 // TokenBucket implements a thread-safe token bucket rate limiter.
 // It allows bursts up to maxTokens and refills at refillRate tokens per second.
 type TokenBucket struct {
-	noCopy noCopy
+	noCopy     noCopy
 	tokens     float64
 	maxTokens  float64
 	refillRate float64 // tokens per second

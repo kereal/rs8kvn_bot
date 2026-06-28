@@ -15,8 +15,8 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/logger"
 
 	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/buffer"
+	"go.uber.org/zap/zapcore"
 )
 
 const (
@@ -256,7 +256,7 @@ func (l *AccessLogger) CloseWithContext(ctx context.Context) error {
 }
 
 type asyncAccessLogWriter struct {
-	noCopy noCopy
+	noCopy     noCopy
 	path       string
 	file       *os.File
 	queue      chan []byte

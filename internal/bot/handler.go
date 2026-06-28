@@ -679,8 +679,8 @@ func (h *Handler) HandleUpdate(ctx context.Context, update tgbotapi.Update) {
 			case "lastreg":
 				err = h.handleAdminLastReg(ctx, update.Message.Chat.ID, update.Message.From.UserName, 0)
 			default:
-			h.SendMessage(ctx, update.Message.Chat.ID,
-				"Неизвестная команда. Используйте /start или /help")
+				h.SendMessage(ctx, update.Message.Chat.ID,
+					"Неизвестная команда. Используйте /start или /help")
 			}
 		} else {
 			// Non-command message: send help hint

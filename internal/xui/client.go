@@ -47,7 +47,7 @@ type ClientConfig struct {
 	Flow      string `json:"flow,omitempty"`
 	Reset     int    `json:"reset,omitempty"`
 
-	UUID string `json:"uuid"`
+	UUID  string `json:"uuid"`
 	Group string `json:"group"`
 
 	CreatedAt int64 `json:"-"`
@@ -320,7 +320,7 @@ func (c *Client) AddClientWithID(ctx context.Context, inboundIDs []int, email, c
 	tgID := TgIDFromContext(ctx)
 
 	var (
-		result  *ClientConfig
+		result   *ClientConfig
 		firstErr error
 	)
 	for flow, ids := range groups {
@@ -646,5 +646,3 @@ func truncateString(s string, maxLen int) string {
 	}
 	return s[:maxLen] + "..."
 }
-
-

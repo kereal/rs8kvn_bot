@@ -74,8 +74,8 @@ func TestNewClient_3xUI_RequiresXUIClient(t *testing.T) {
 func TestNewClient_3xUI_Success(t *testing.T) {
 	mockXUI := &mockXUIClient{}
 	client, err := NewClient(Config{
-		Type:      database.NodeType3xUI,
-		XUIClient: mockXUI,
+		Type:       database.NodeType3xUI,
+		XUIClient:  mockXUI,
 		InboundIDs: []int{1},
 	})
 	assert.NoError(t, err)
@@ -142,12 +142,12 @@ func TestProxmanClient_CreateSubscription_SendsWebhook(t *testing.T) {
 
 	client := NewProxmanClient(srv.URL, "test-token")
 	provision := SubscriptionProvision{
-		ClientID:       "client-123",
-		Username:       "testuser",
-		SubID:          "sub-456",
-		TrafficBytes:   1024,
-		ExpiryTime:     time.Now().Add(24 * time.Hour),
-		ResetDays:      -1,
+		ClientID:     "client-123",
+		Username:     "testuser",
+		SubID:        "sub-456",
+		TrafficBytes: 1024,
+		ExpiryTime:   time.Now().Add(24 * time.Hour),
+		ResetDays:    -1,
 	}
 
 	err := client.CreateSubscription(context.Background(), provision)
@@ -195,7 +195,6 @@ func TestProxmanClient_DeleteSubscription_SendsWebhook(t *testing.T) {
 	})
 	require.NoError(t, err)
 }
-
 
 func TestProxmanClient_DeleteSubscription_NotFound(t *testing.T) {
 	t.Parallel()

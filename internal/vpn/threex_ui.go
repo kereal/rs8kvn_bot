@@ -11,8 +11,8 @@ var _ Client = (*ThreeXUIClient)(nil)
 
 // ThreeXUIClient adapts an xui.Client to the Client interface.
 type ThreeXUIClient struct {
-	client      interfaces.XUIClient
-	inboundIDs  []int
+	client     interfaces.XUIClient
+	inboundIDs []int
 }
 
 // NewThreeXUIClient wraps the provided XUI client with inbound IDs.

@@ -67,23 +67,23 @@ type Config struct {
 
 // configFlags holds typed flag values for config fields.
 type configFlags struct {
-	telegramBotToken          *flag.StringValue
-	telegramAdminID           *flag.Int64Value
-	databasePath              *flag.StringValue
-	logFilePath               *flag.StringValue
-	logLevel                  *flag.StringValue
-	heartbeatURL              *flag.StringValue
-	heartbeatInterval         *flag.IntValue
-	sentryDSN                 *flag.StringValue
-	healthCheckPort           *flag.IntValue
-	siteURL                   *flag.StringValue
-	trialDurationHours        *flag.IntValue
-	trialRateLimit            *flag.IntValue
-	contactUsername           *flag.StringValue
-	donateCardNumber          *flag.StringValue
-	donateURL                 *flag.StringValue
-	globalSubURL              *flag.StringValue
-	subServerAccessLogPath    *flag.StringValue
+	telegramBotToken       *flag.StringValue
+	telegramAdminID        *flag.Int64Value
+	databasePath           *flag.StringValue
+	logFilePath            *flag.StringValue
+	logLevel               *flag.StringValue
+	heartbeatURL           *flag.StringValue
+	heartbeatInterval      *flag.IntValue
+	sentryDSN              *flag.StringValue
+	healthCheckPort        *flag.IntValue
+	siteURL                *flag.StringValue
+	trialDurationHours     *flag.IntValue
+	trialRateLimit         *flag.IntValue
+	contactUsername        *flag.StringValue
+	donateCardNumber       *flag.StringValue
+	donateURL              *flag.StringValue
+	globalSubURL           *flag.StringValue
+	subServerAccessLogPath *flag.StringValue
 }
 
 // registerFlags creates a new flag.Registry and initializes a configFlags instance with defaults,
@@ -93,23 +93,23 @@ func registerFlags() (*flag.Registry, *configFlags) {
 	r := flag.New()
 
 	f := &configFlags{
-		telegramBotToken:          flag.NewString(""),
-		telegramAdminID:           flag.NewInt64(0),
-		databasePath:              flag.NewString(DefaultDatabasePath),
-		logFilePath:               flag.NewString(DefaultLogFilePath),
-		logLevel:                  flag.NewString(DefaultLogLevel),
-		heartbeatURL:              flag.NewString(""),
-		heartbeatInterval:         flag.NewInt(DefaultHeartbeatInterval),
-		sentryDSN:                 flag.NewString(""),
-		healthCheckPort:           flag.NewInt(DefaultHealthCheckPort),
-		siteURL:                   flag.NewString(DefaultSiteURL),
-		trialDurationHours:        flag.NewInt(DefaultTrialDurationHours),
-		trialRateLimit:            flag.NewInt(DefaultTrialRateLimit),
-		contactUsername:           flag.NewString(ContactUsername),
-		donateCardNumber:          flag.NewString(DonateCardNumber),
-		donateURL:                 flag.NewString(DonateURL),
-		globalSubURL:              flag.NewString(""),
-		subServerAccessLogPath:    flag.NewString(""),
+		telegramBotToken:       flag.NewString(""),
+		telegramAdminID:        flag.NewInt64(0),
+		databasePath:           flag.NewString(DefaultDatabasePath),
+		logFilePath:            flag.NewString(DefaultLogFilePath),
+		logLevel:               flag.NewString(DefaultLogLevel),
+		heartbeatURL:           flag.NewString(""),
+		heartbeatInterval:      flag.NewInt(DefaultHeartbeatInterval),
+		sentryDSN:              flag.NewString(""),
+		healthCheckPort:        flag.NewInt(DefaultHealthCheckPort),
+		siteURL:                flag.NewString(DefaultSiteURL),
+		trialDurationHours:     flag.NewInt(DefaultTrialDurationHours),
+		trialRateLimit:         flag.NewInt(DefaultTrialRateLimit),
+		contactUsername:        flag.NewString(ContactUsername),
+		donateCardNumber:       flag.NewString(DonateCardNumber),
+		donateURL:              flag.NewString(DonateURL),
+		globalSubURL:           flag.NewString(""),
+		subServerAccessLogPath: flag.NewString(""),
 	}
 
 	r.Register("TELEGRAM_BOT_TOKEN", f.telegramBotToken)
@@ -144,23 +144,23 @@ func Load() (*Config, error) {
 	}
 
 	cfg := &Config{
-		TelegramBotToken:          f.telegramBotToken.Get(),
-		TelegramAdminID:           f.telegramAdminID.Get(),
-		DatabasePath:              f.databasePath.Get(),
-		LogFilePath:               f.logFilePath.Get(),
-		LogLevel:                  f.logLevel.Get(),
-		HeartbeatURL:              f.heartbeatURL.Get(),
-		HeartbeatInterval:         f.heartbeatInterval.Get(),
-		SentryDSN:                 f.sentryDSN.Get(),
-		HealthCheckPort:           f.healthCheckPort.Get(),
-		SiteURL:                   f.siteURL.Get(),
-		TrialDurationHours:        f.trialDurationHours.Get(),
-		TrialRateLimit:            f.trialRateLimit.Get(),
-		ContactUsername:           f.contactUsername.Get(),
-		DonateCardNumber:          f.donateCardNumber.Get(),
-		DonateURL:                 f.donateURL.Get(),
-		GlobalSubURL:              f.globalSubURL.Get(),
-		SubServerAccessLogPath:    f.subServerAccessLogPath.Get(),
+		TelegramBotToken:       f.telegramBotToken.Get(),
+		TelegramAdminID:        f.telegramAdminID.Get(),
+		DatabasePath:           f.databasePath.Get(),
+		LogFilePath:            f.logFilePath.Get(),
+		LogLevel:               f.logLevel.Get(),
+		HeartbeatURL:           f.heartbeatURL.Get(),
+		HeartbeatInterval:      f.heartbeatInterval.Get(),
+		SentryDSN:              f.sentryDSN.Get(),
+		HealthCheckPort:        f.healthCheckPort.Get(),
+		SiteURL:                f.siteURL.Get(),
+		TrialDurationHours:     f.trialDurationHours.Get(),
+		TrialRateLimit:         f.trialRateLimit.Get(),
+		ContactUsername:        f.contactUsername.Get(),
+		DonateCardNumber:       f.donateCardNumber.Get(),
+		DonateURL:              f.donateURL.Get(),
+		GlobalSubURL:           f.globalSubURL.Get(),
+		SubServerAccessLogPath: f.subServerAccessLogPath.Get(),
 	}
 
 	// Validate all required fields

@@ -231,7 +231,7 @@ func TestHandleCallback_CallbackDataRouting(t *testing.T) {
 			cfg := &config.Config{
 				TelegramAdminID: 123456,
 				SiteURL:         "https://example.com",
-				Nodes:         []config.Node{{Name: "main", XUIHost: "http://example.com", XUIAPIToken: "token", XUIInboundIDs: "[1]"}},
+				Nodes:           []config.Node{{Name: "main", XUIHost: "http://example.com", XUIAPIToken: "token", XUIInboundIDs: "[1]"}},
 			}
 			mockDB := testutil.NewDatabaseService()
 			mockXUI := testutil.NewXUIClient()

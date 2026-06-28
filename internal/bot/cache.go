@@ -27,11 +27,11 @@ func (noCopy) Lock()   {}
 func (noCopy) Unlock() {}
 
 type SubscriptionCache struct {
-	noCopy noCopy
+	noCopy  noCopy
 	mu      sync.RWMutex
-	items   map[int64]*list.Element // telegram_id -> list element
+	items   map[int64]*list.Element  // telegram_id -> list element
 	bySubID map[string]*list.Element // subscription_id -> list element
-	lru     *list.List              // front = LRU, back = MRU
+	lru     *list.List               // front = LRU, back = MRU
 	maxSize int
 	ttl     time.Duration
 }

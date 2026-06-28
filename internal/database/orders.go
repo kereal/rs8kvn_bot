@@ -56,8 +56,8 @@ func (s *Service) UpdateOrderStatus(ctx context.Context, id uint, status OrderSt
 func (s *Service) UpdateOrderPaidStatus(ctx context.Context, id uint) error {
 	now := time.Now().UTC().Truncate(time.Minute)
 	result := s.db.WithContext(ctx).Model(&Order{}).Where("id = ?", id).Updates(map[string]interface{}{
-		"status":   OrderStatusPaid,
-		"paid_at":  now,
+		"status":  OrderStatusPaid,
+		"paid_at": now,
 	})
 	if result.Error != nil {
 		return fmt.Errorf("failed to update order paid status: %w", result.Error)
