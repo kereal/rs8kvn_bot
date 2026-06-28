@@ -23,14 +23,14 @@ type cacheEntry struct {
 
 // Cache is an in-memory TTL cache for subscription responses.
 type Cache struct {
-	noCopy noCopy
-	mu          sync.RWMutex
-	entries     map[string]*cacheEntry
-	ttl         time.Duration
-	stopCh      chan struct{}
-	stopped     atomic.Bool
-	hits        atomic.Int64
-	misses      atomic.Int64
+	noCopy  noCopy
+	mu      sync.RWMutex
+	entries map[string]*cacheEntry
+	ttl     time.Duration
+	stopCh  chan struct{}
+	stopped atomic.Bool
+	hits    atomic.Int64
+	misses  atomic.Int64
 }
 
 // NewCache creates a new Cache with the given TTL and starts the cleanup loop.

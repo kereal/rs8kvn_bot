@@ -28,14 +28,14 @@ type capturedDeleteClient struct {
 }
 
 type fakeXUIClient struct {
-	addCalled    bool
-	deleteCalled bool
-	updateCalled bool
-	addCapture   *capturedAddClientWithID
+	addCalled     bool
+	deleteCalled  bool
+	updateCalled  bool
+	addCapture    *capturedAddClientWithID
 	deleteCapture *capturedDeleteClient
-	addErr       error
-	updateErr    error
-	deleteErr   error
+	addErr        error
+	updateErr     error
+	deleteErr     error
 }
 
 func (f *fakeXUIClient) Ping(ctx context.Context) error {

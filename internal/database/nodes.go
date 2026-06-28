@@ -34,7 +34,6 @@ func (s *Service) GetNodesByPlanName(ctx context.Context, planName string) ([]No
 	return nodes, nil
 }
 
-
 // IsNodesEmpty returns true if no nodes exist in the database.
 func (s *Service) IsNodesEmpty(ctx context.Context) (bool, error) {
 	var count int64

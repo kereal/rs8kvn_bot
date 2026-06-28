@@ -40,17 +40,17 @@ func TestSubscriptionExpireWorker_process_FindsAndExpires(t *testing.T) {
 	require.NoError(t, planErr)
 
 	expiredSub := &database.Subscription{
-		TelegramID:      99991,
-		Username:        "expireuser1",
-		ClientID:        "c-expire1",
+		TelegramID:     99991,
+		Username:       "expireuser1",
+		ClientID:       "c-expire1",
 		SubscriptionID: "s-expire1",
-		Status:          "active",
-		PlanID:          plan.ID,
-		ExpiresAt:       ptrTime(time.Now().Add(-1 * time.Hour)),
-		PricePaidCents:  100,
+		Status:         "active",
+		PlanID:         plan.ID,
+		ExpiresAt:      ptrTime(time.Now().Add(-1 * time.Hour)),
+		PricePaidCents: 100,
 		Currency:       testutil.PtrString("RUB"),
 		ProductID:      testutil.PtrUint(1),
-		StartedAt:       ptrTime(time.Now().Add(-48 * time.Hour)),
+		StartedAt:      ptrTime(time.Now().Add(-48 * time.Hour)),
 	}
 	require.NoError(t, db.CreateSubscription(ctx, expiredSub, ""))
 
@@ -60,9 +60,9 @@ func TestSubscriptionExpireWorker_process_FindsAndExpires(t *testing.T) {
 	worker.process(ctx)
 
 	var updated database.Subscription
-require.NoError(t, db.GetDB().WithContext(ctx).First(&updated, expiredSub.ID).Error)
-assert.Equal(t, "active", updated.Status)
-assert.Equal(t, plan.ID, updated.PlanID)
+	require.NoError(t, db.GetDB().WithContext(ctx).First(&updated, expiredSub.ID).Error)
+	assert.Equal(t, "active", updated.Status)
+	assert.Equal(t, plan.ID, updated.PlanID)
 }
 
 func TestSubscriptionExpireWorker_process_EmptyResult(t *testing.T) {
@@ -76,17 +76,17 @@ func TestSubscriptionExpireWorker_process_EmptyResult(t *testing.T) {
 	require.NoError(t, planErr)
 
 	activeSub := &database.Subscription{
-		TelegramID:      99992,
-		Username:        "noexpire",
-		ClientID:        "c-noexpire",
+		TelegramID:     99992,
+		Username:       "noexpire",
+		ClientID:       "c-noexpire",
 		SubscriptionID: "s-noexpire",
-		Status:          "active",
-		PlanID:          plan.ID,
-		ExpiresAt:       ptrTime(time.Now().Add(24 * time.Hour)),
-		PricePaidCents:  100,
+		Status:         "active",
+		PlanID:         plan.ID,
+		ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
+		PricePaidCents: 100,
 		Currency:       testutil.PtrString("RUB"),
 		ProductID:      testutil.PtrUint(1),
-		StartedAt:       ptrTime(time.Now().Add(-1 * time.Hour)),
+		StartedAt:      ptrTime(time.Now().Add(-1 * time.Hour)),
 	}
 	require.NoError(t, db.CreateSubscription(ctx, activeSub, ""))
 
