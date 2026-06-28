@@ -55,7 +55,7 @@ func (w *SubscriptionExpireWorker) process(ctx context.Context) {
 
 	processed := 0
 	for _, sub := range subs {
-		if err := w.subSvc.ExpireSubscription(ctx, sub.TelegramID); err != nil {
+		if err := w.subSvc.ExpireSubscription(ctx, sub.ID); err != nil {
 			logger.Warn("Expire subscription failed",
 				zap.Uint("subscription_id", sub.ID),
 				zap.Int64("telegram_id", sub.TelegramID),

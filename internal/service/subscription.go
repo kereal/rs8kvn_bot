@@ -909,8 +909,8 @@ func (s *SubscriptionService) RenewSubscription(ctx context.Context, telegramID 
 }
 
 // ExpireSubscription downgrades the subscription to the Free plan and syncs node removals.
-func (s *SubscriptionService) ExpireSubscription(ctx context.Context, telegramID int64) error {
-	sub, err := s.db.GetByTelegramID(ctx, telegramID)
+func (s *SubscriptionService) ExpireSubscription(ctx context.Context, subscriptionID uint) error {
+	sub, err := s.db.GetByID(ctx, subscriptionID)
 	if err != nil {
 		return fmt.Errorf("get subscription: %w", err)
 	}
