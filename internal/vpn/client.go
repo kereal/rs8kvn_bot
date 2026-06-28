@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/kereal/rs8kvn_bot/internal/database"
@@ -34,6 +35,43 @@ type Client interface {
 	UpdateSubscription(ctx context.Context, provision SubscriptionProvision) error
 	DeleteSubscription(ctx context.Context, provision SubscriptionProvision) error
 	Close() error
+}
+
+var (
+	ErrSubscriptionAlreadyExists = errors.New("vpn subscription already exists")
+	ErrSubscriptionNotFound      = errors.New("vpn subscription not found")
+	ErrNotImplemented            = errors.New("vpn operation not implemented")
+)
+
+func classifyCreateSubscriptionError(err error) error {
+	if err == nil {
+		return nil
+	}
+
+	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, "already exists") ||
+		strings.Contains(msg, "client already exists") ||
+		strings.Contains(msg, "duplicate") ||
+		strings.Contains(msg, "already added") {
+		return fmt.Errorf("%w: %w", ErrSubscriptionAlreadyExists, err)
+	}
+
+	return err
+}
+
+func classifyDeleteSubscriptionError(err error) error {
+	if err == nil {
+		return nil
+	}
+
+	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, "not found") ||
+		strings.Contains(msg, "does not exist") ||
+		strings.Contains(msg, "client not found") {
+		return fmt.Errorf("%w: %w", ErrSubscriptionNotFound, err)
+	}
+
+	return err
 }
 
 // NewClient creates a VPN client based on the node type.

@@ -15,17 +15,17 @@ func NewProxmanClient() *ProxmanClient {
 
 // CreateSubscription is not implemented for proxman.
 func (c *ProxmanClient) CreateSubscription(ctx context.Context, provision SubscriptionProvision) error {
-	return fmt.Errorf("proxman create subscription: not implemented")
+	return fmt.Errorf("proxman create subscription: %w", ErrNotImplemented)
 }
 
 // UpdateSubscription is not implemented for proxman.
 func (c *ProxmanClient) UpdateSubscription(ctx context.Context, provision SubscriptionProvision) error {
-	return fmt.Errorf("proxman update subscription: not implemented")
+	return fmt.Errorf("proxman update subscription: %w", ErrNotImplemented)
 }
 
 // DeleteSubscription is not implemented for proxman.
 func (c *ProxmanClient) DeleteSubscription(ctx context.Context, provision SubscriptionProvision) error {
-	return fmt.Errorf("proxman delete subscription: not implemented")
+	return fmt.Errorf("proxman delete subscription: %w", ErrNotImplemented)
 }
 
 // Close is a no-op for the stub proxman client.
