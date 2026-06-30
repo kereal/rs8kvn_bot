@@ -8,7 +8,9 @@ import (
 
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/interfaces"
+	"github.com/kereal/rs8kvn_bot/internal/logger"
 
+	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
 
@@ -108,21 +110,37 @@ func (o *OrderService) ActivateProduct(ctx context.Context, telegramID int64, pr
 	if planChanged && o.syncSvc != nil {
 		newNodes, err := o.db.GetNodesByPlanID(ctx, sub.PlanID)
 		if err != nil {
-			return nil, fmt.Errorf("load plan nodes: %w", err)
+			logger.Warn("activate product: post-commit sync setup failed",
+				zap.Uint("subscription_id", sub.ID),
+				zap.Uint("product_id", product.ID),
+				zap.Error(err))
+			return order, nil
 		}
 		var newNodeIDs []uint
 		for _, n := range newNodes {
 			newNodeIDs = append(newNodeIDs, n.ID)
 		}
 		if err := o.db.MarkActiveNodesPendingUpdate(ctx, sub.ID, newNodeIDs); err != nil {
-			return nil, fmt.Errorf("mark active nodes pending update: %w", err)
+			logger.Warn("activate product: post-commit node update scheduling failed",
+				zap.Uint("subscription_id", sub.ID),
+				zap.Uint("product_id", product.ID),
+				zap.Error(err))
+			return order, nil
 		}
 
 		if err := o.syncSvc.ReconcilePlanNodes(ctx, sub.ID); err != nil {
-			return nil, fmt.Errorf("reconcile plan nodes: %w", err)
+			logger.Warn("activate product: post-commit reconcile failed",
+				zap.Uint("subscription_id", sub.ID),
+				zap.Uint("product_id", product.ID),
+				zap.Error(err))
+			return order, nil
 		}
 		if err := o.syncSvc.SyncSubscription(ctx, sub.ID); err != nil {
-			return nil, fmt.Errorf("sync subscription: %w", err)
+			logger.Warn("activate product: post-commit sync failed",
+				zap.Uint("subscription_id", sub.ID),
+				zap.Uint("product_id", product.ID),
+				zap.Error(err))
+			return order, nil
 		}
 	}
 

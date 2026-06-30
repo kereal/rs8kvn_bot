@@ -929,45 +929,40 @@ func TestSyncService_SyncSubscription_PendingRemove_NoVPNClientKeepsPending(t *t
 func TestSyncService_SyncPendingNodes_JoinsErrors(t *testing.T) {
 	t.Parallel()
 
-	db, err := testutil.NewTestDatabaseService(t)
-	require.NoError(t, err)
 	ctx := context.Background()
-
-	plan := &database.Plan{Name: "test-plan-sync-join-errors", DevicesLimit: 1, TrafficLimit: 1024}
-	require.NoError(t, db.GetDB().WithContext(ctx).Create(plan).Error)
-
-	node1 := &database.Node{Name: "sync-join-errors-node-1", IsActive: true, Host: "http://sje1", APIToken: "tje1", InboundIDs: `[1]`}
-	node2 := &database.Node{Name: "sync-join-errors-node-2", IsActive: true, Host: "http://sje2", APIToken: "tje2", InboundIDs: `[1]`}
-	require.NoError(t, db.GetDB().WithContext(ctx).Create(node1).Error)
-	require.NoError(t, db.GetDB().WithContext(ctx).Create(node2).Error)
-	require.NoError(t, db.GetDB().WithContext(ctx).Create(&database.PlanNode{PlanID: plan.ID, NodeID: node1.ID}).Error)
-	require.NoError(t, db.GetDB().WithContext(ctx).Create(&database.PlanNode{PlanID: plan.ID, NodeID: node2.ID}).Error)
-
-	sub := &database.Subscription{
-		TelegramID:     9998,
-		Username:       "syncjoinerrors",
-		ClientID:       "c-syncjoinerrors",
-		SubscriptionID: "s-syncjoinerrors",
-		Status:         "active",
-		PlanID:         plan.ID,
-		ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
+	loadErr := errors.New("load subscription failed")
+	reconcileErr := errors.New("load plan nodes failed")
+	sub := &database.Subscription{ID: 10, TelegramID: 9998, Username: "syncjoinerrors", PlanID: 1}
+	pending := []database.SubscriptionNode{
+		{SubscriptionID: 10, NodeID: 1, Status: database.SyncStatusPendingAdd},
+		{SubscriptionID: 20, NodeID: 2, Status: database.SyncStatusPendingAdd},
 	}
-	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
-	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusPendingAdd}))
-	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node2.ID, Status: database.SyncStatusPendingAdd}))
 
-	firstErr := fmt.Errorf("first create failed")
-	secondErr := fmt.Errorf("second create failed")
-	node1VPN := &mockVPNClient{createError: firstErr}
-	node2VPN := &mockVPNClient{createError: secondErr}
-	svc := NewSyncService(db, map[uint]vpn.Client{
-		node1.ID: node1VPN,
-		node2.ID: node2VPN,
-	}, []database.Node{*node1, *node2})
+	db := testutil.NewDatabaseService()
+	db.GetPendingSyncFunc = func(ctx context.Context) ([]database.SubscriptionNode, error) {
+		return pending, nil
+	}
+	db.GetByIDFunc = func(ctx context.Context, id uint) (*database.Subscription, error) {
+		switch id {
+		case 10:
+			return sub, nil
+		case 20:
+			return nil, loadErr
+		default:
+			return nil, errors.New("unexpected subscription")
+		}
+	}
+	db.GetNodesByPlanIDFunc = func(ctx context.Context, planID uint) ([]database.Node, error) {
+		return nil, reconcileErr
+	}
+	db.GetBySubscriptionIDFunc = func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
+		return []database.SubscriptionNode{}, nil
+	}
 
-	err = svc.SyncPendingNodes(ctx)
-	require.NoError(t, err, "background sync: per-node failures must not escape as aggregated error")
+	svc := NewSyncService(db, map[uint]vpn.Client{}, nil)
 
-	assert.True(t, node1VPN.createCalled, "node1: CreateSubscription should have been called")
-	assert.True(t, node2VPN.createCalled, "node2: CreateSubscription should have been called")
+	err := svc.SyncPendingNodes(ctx)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, loadErr)
+	assert.ErrorIs(t, err, reconcileErr)
 }

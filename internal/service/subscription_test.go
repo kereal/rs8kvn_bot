@@ -359,6 +359,57 @@ func TestSubscriptionService_RenewSubscription_UsesDatabaseServiceInterface(t *t
 	assert.Equal(t, database.OrderStatusPaid, order.Status)
 }
 
+func TestSubscriptionService_RenewSubscription_PostCommitSyncSetupFailureStillSucceeds(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{}
+	sub := &database.Subscription{
+		ID:             7,
+		TelegramID:     123456,
+		Username:       "ifaceuser",
+		ClientID:       "iface-client",
+		SubscriptionID: "iface-sub",
+		Status:         "active",
+		PlanID:         1,
+		ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
+	}
+	product := &database.Product{
+		ID:           11,
+		PlanID:       2,
+		Name:         "iface-product",
+		DurationDays: 30,
+		PriceCents:   900,
+		Currency:     "RUB",
+	}
+
+	transactionCalled := false
+	db := &testutil.DatabaseService{
+		GetByTelegramIDFunc: func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
+			return sub, nil
+		},
+		TransactionFunc: func(ctx context.Context, fn func(*gorm.DB) error) error {
+			transactionCalled = true
+			return nil
+		},
+		GetNodesByPlanIDFunc: func(ctx context.Context, planID uint) ([]database.Node, error) {
+			return nil, errors.New("load nodes failed")
+		},
+	}
+	svc := NewSubscriptionService(db, nil, nil, nil, cfg)
+	svc.SetSyncService(NewSyncService(db, nil, nil))
+
+	order, err := svc.RenewSubscription(context.Background(), sub.TelegramID, product)
+
+	require.NoError(t, err)
+	assert.True(t, transactionCalled)
+	assert.NotNil(t, order)
+	assert.Equal(t, database.OrderStatusPaid, order.Status)
+	assert.Equal(t, product.ID, order.ProductID)
+	assert.Equal(t, uint(2), sub.PlanID)
+	require.NotNil(t, sub.ProductID)
+	assert.Equal(t, product.ID, *sub.ProductID)
+}
+
 func TestSubscriptionService_Delete_Success(t *testing.T) {
 	t.Parallel()
 
