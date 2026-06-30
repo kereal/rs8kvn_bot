@@ -394,6 +394,28 @@ func TestHandleSubscription_SourceFetchError(t *testing.T) {
 	assert.Equal(t, "Subscription not found", w.Body.String())
 }
 
+// TestHandleSubscription_DatabaseError_Returns500GenericBody verifies the audit #5
+// fix: a real infrastructure (DB) error must return 500 with a generic body, NOT
+// "Subscription not found" (which would conflate 404 and 500 semantics).
+func TestHandleSubscription_DatabaseError_Returns500GenericBody(t *testing.T) {
+	t.Parallel()
+
+	db := testutil.NewDatabaseService()
+	db.GetWithPlanAndNodesFunc = func(ctx context.Context, _ string) (*database.SubscriptionFull, error) {
+		return nil, gorm.ErrInvalidDB // arbitrary non-not-found infra error
+	}
+	srv := testServer(t, db, &config.Config{})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/sub/test123", nil)
+	srv.handleSubscription(w, r)
+
+	assert.Equal(t, http.StatusInternalServerError, w.Code, "infra error must be 500, not 404")
+	assert.Equal(t, "Internal Server Error", w.Body.String(), "500 body must be generic, not 'Subscription not found'")
+}
+
+
+
 func TestHandleSubscription_CacheSubscriptionResult(t *testing.T) {
 	t.Parallel()
 

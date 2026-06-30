@@ -187,17 +187,22 @@ func (s *Server) Stop(ctx context.Context) error {
 		ctx = context.Background()
 	}
 
-	var err error
+	var errs []error
 	if s.subserverLogger != nil {
 		closeCtx, cancel := context.WithTimeout(ctx, subserverAccessLogCloseTimeout)
 		defer cancel()
 
-		err = s.subserverLogger.CloseWithContext(closeCtx)
+		if cerr := s.subserverLogger.CloseWithContext(closeCtx); cerr != nil {
+			errs = append(errs, cerr)
+		}
 	}
-	if err == nil && s.server != nil {
-		err = s.server.Shutdown(ctx)
+	// HTTP server must shut down even if access-log close failed.
+	if s.server != nil {
+		if serr := s.server.Shutdown(ctx); serr != nil {
+			errs = append(errs, serr)
+		}
 	}
-	return err
+	return errors.Join(errs...)
 }
 
 func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
@@ -438,36 +443,48 @@ func (s *Server) HandleInvite(w http.ResponseWriter, r *http.Request) {
 	s.renderTrialPage(w, result.SubID, result.SubscriptionURL, telegramLink, s.cfg.TrialDurationHours)
 }
 
-// getExistingTrialFromCookie проверяет куку и возвращает существующий trial
+// getExistingTrialFromCookie checks the cookie and returns an existing unactivated trial.
+// Expected business states (no cookie, empty, not a trial, already activated, expired) return (nil, nil).
+// Only infrastructure/DB failures return (nil, error); those are logged as Error by the caller.
 func (s *Server) getExistingTrialFromCookie(r *http.Request, ctx context.Context, code string) (*database.Subscription, error) {
 	cookie, err := r.Cookie("rs8kvn_trial_" + code)
 	if err != nil {
-		return nil, err
+		// No cookie (new visitor) — expected, not an error.
+		return nil, nil
 	}
 
 	subID := cookie.Value
 	if subID == "" {
-		return nil, fmt.Errorf("empty cookie value")
+		// Malformed cookie — expected business state.
+		return nil, nil
 	}
 
 	sub, err := s.db.GetTrialSubscriptionBySubID(ctx, subID)
 	if err != nil {
-		return nil, err
+		if errors.Is(err, database.ErrSubscriptionNotFound) || errors.Is(err, gorm.ErrRecordNotFound) {
+			// Trial was cleaned up or not found — expected, fall through to new trial creation.
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get trial subscription by sub id: %w", err)
 	}
 
-	// Проверяем, что это trial и не активирован
+	// Already activated — expected, no existing trial to show.
 	if sub.TelegramID > 0 {
-		return nil, fmt.Errorf("not a valid trial")
+		return nil, nil
 	}
 
 	plan, planErr := s.db.GetPlanByID(ctx, sub.PlanID)
-	if planErr != nil || plan.Name != database.TrialPlanName {
-		return nil, fmt.Errorf("not a valid trial")
+	if planErr != nil {
+		return nil, fmt.Errorf("get plan for trial check: %w", planErr)
+	}
+	if plan.Name != database.TrialPlanName {
+		// Not a trial — expected business state.
+		return nil, nil
 	}
 
-	// Проверяем, что не истёк
+	// Expired — expected business state.
 	if sub.ExpiresAt != nil && time.Now().After(*sub.ExpiresAt) {
-		return nil, fmt.Errorf("trial expired")
+		return nil, nil
 	}
 
 	return sub, nil
@@ -612,7 +629,7 @@ func (s *Server) handleSubscription(w http.ResponseWriter, r *http.Request) {
 			writeSubscriptionText(response, http.StatusNotFound, "Subscription not found")
 			return
 		}
-		writeSubscriptionText(response, http.StatusInternalServerError, "Subscription not found")
+		writeSubscriptionText(response, http.StatusInternalServerError, "Internal Server Error")
 		return
 	}
 
@@ -620,7 +637,7 @@ func (s *Server) handleSubscription(w http.ResponseWriter, r *http.Request) {
 		logger.Error("Empty subscription result",
 			zap.String("sub_id", subID),
 			zap.String("client_ip", clientIP))
-		writeSubscriptionText(response, http.StatusInternalServerError, "Subscription not found")
+		writeSubscriptionText(response, http.StatusInternalServerError, "Internal Server Error")
 		return
 	}
 

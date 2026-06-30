@@ -902,8 +902,8 @@ func TestHandleBindTrial_UpdateClientError(t *testing.T) {
 	ctx := context.Background()
 	handler.handleBindTrial(ctx, 123456, "testuser", "ABC123")
 
-	assert.True(t, mockBot.SendCalledSafe(), "Should send success message even if update client fails")
-	assert.Contains(t, mockBot.LastSentTextSafe(), "Подписка активирована")
+	assert.True(t, mockBot.SendCalledSafe(), "Should send error message when update client fails")
+	assert.Contains(t, mockBot.LastSentTextSafe(), "❌")
 }
 
 func TestHandleBindTrial_GetInviteError(t *testing.T) {

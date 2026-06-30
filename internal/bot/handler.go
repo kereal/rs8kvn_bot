@@ -661,11 +661,11 @@ func (h *Handler) HandleUpdate(ctx context.Context, update tgbotapi.Update) {
 		if update.Message.IsCommand() {
 			switch update.Message.Command() {
 			case "start":
-				h.HandleStart(ctx, update)
+				err = h.HandleStart(ctx, update)
 			case "help":
-				h.HandleHelp(ctx, update)
+				err = h.HandleHelp(ctx, update)
 			case "invite":
-				h.HandleInvite(ctx, update)
+				err = h.HandleInvite(ctx, update)
 			case "del":
 				err = h.HandleDel(ctx, update)
 			case "broadcast":
@@ -684,7 +684,7 @@ func (h *Handler) HandleUpdate(ctx context.Context, update tgbotapi.Update) {
 			}
 		} else {
 			// Non-command message: send help hint
-			h.HandleHelp(ctx, update)
+			err = h.HandleHelp(ctx, update)
 		}
 	} else if update.CallbackQuery != nil {
 		err = h.HandleCallback(ctx, update)

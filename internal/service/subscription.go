@@ -166,23 +166,37 @@ func (s *SubscriptionService) GetByTelegramID(ctx context.Context, telegramID in
 	return s.db.GetByTelegramID(ctx, telegramID)
 }
 
-// Delete removes a subscription by Telegram ID via sync module.
-// VPN client removal is performed via sync. Orphaned clients are cleaned up by ReconcileOrphanedClients.
+// Delete removes a subscription by Telegram ID.
+// Two-phase: first marks the subscription revoked (so /sub/{id} stops serving config
+// and the user no longer sees it as active), then deprovisions VPN access via sync,
+// then physically deletes the DB row. If deprovision fails, the subscription stays
+// revoked and ReconcileOrphanedClients/SyncPendingNodes will finish removal in the background.
 func (s *SubscriptionService) Delete(ctx context.Context, telegramID int64) error {
 	sub, err := s.db.GetByTelegramID(ctx, telegramID)
 	if err != nil {
 		return err
 	}
 
+	// Phase 1: mark revoked before any external effect.
+	sub.Status = "revoked"
+	if err := s.db.UpdateSubscription(ctx, sub); err != nil {
+		return fmt.Errorf("mark revoked: %w", err)
+	}
+
+	// Phase 2: deprovision VPN access (best-effort; background sync reconciles on failure).
 	if s.syncService != nil {
 		if err := s.syncService.MarkAllForRemoval(ctx, sub.ID); err != nil {
 			return fmt.Errorf("deprovision mark failed: %w", err)
 		}
 		if err := s.syncService.SyncSubscription(ctx, sub.ID); err != nil {
-			return fmt.Errorf("deprovision sync failed: %w", err)
+			logger.Warn("deprovision sync failed; subscription remains revoked, background sync will retry",
+				zap.Uint("subscription_id", sub.ID),
+				zap.Error(err))
 		}
 	}
 
+	// Phase 3: physical delete. If this fails, the subscription is already revoked
+	// and orphaned-client reconciliation will clean up.
 	if err := s.db.DeleteSubscription(ctx, telegramID); err != nil {
 		return fmt.Errorf("db delete: %w", err)
 	}
@@ -198,23 +212,33 @@ func (s *SubscriptionService) Delete(ctx context.Context, telegramID int64) erro
 	return nil
 }
 
-// DeleteByID deletes a subscription by database ID via sync module.
-// Used by admin /del command.
+// DeleteByID deletes a subscription by database ID.
+// Used by admin /del command. Two-phase: mark revoked → deprovision → physical delete.
 func (s *SubscriptionService) DeleteByID(ctx context.Context, id uint) (*database.Subscription, error) {
 	sub, err := s.db.GetByID(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("get subscription: %w", err)
 	}
 
+	// Phase 1: mark revoked before any external effect.
+	sub.Status = "revoked"
+	if err := s.db.UpdateSubscription(ctx, sub); err != nil {
+		return nil, fmt.Errorf("mark revoked: %w", err)
+	}
+
+	// Phase 2: deprovision VPN access (best-effort; background sync reconciles on failure).
 	if s.syncService != nil {
 		if err := s.syncService.MarkAllForRemoval(ctx, sub.ID); err != nil {
 			return nil, fmt.Errorf("deprovision mark failed: %w", err)
 		}
 		if err := s.syncService.SyncSubscription(ctx, sub.ID); err != nil {
-			return nil, fmt.Errorf("deprovision sync failed: %w", err)
+			logger.Warn("deprovision sync failed; subscription remains revoked, background sync will retry",
+				zap.Uint("subscription_id", sub.ID),
+				zap.Error(err))
 		}
 	}
 
+	// Phase 3: physical delete.
 	deleted, err := s.db.DeleteSubscriptionByID(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("db delete: %w", err)
@@ -517,18 +541,16 @@ func (s *SubscriptionService) BindTrial(ctx context.Context, subscriptionID stri
 	if err != nil {
 		return sub, fmt.Errorf("load trial nodes: %w", err)
 	}
-	for _, node := range nodes {
-		client, ok := s.xuiClients[node.ID]
-		if !ok {
-			continue
-		}
-		inboundIDs := node.ResolveInboundIDs()
-		if err := client.UpdateClient(ctx, inboundIDs, currentEmail, sub.ClientID, email, sub.SubscriptionID, trafficBytes, expiryTime, resetDays, telegramID, comment); err != nil {
-			logger.Warn("UpdateClient failed on trial node",
-				zap.Uint("node_id", node.ID),
-				zap.Error(err))
-			continue
-		}
+	// Trial is intentionally single-node (provisioned on nodes[0] by CreateTrial).
+	// Only update the node where the client actually exists.
+	node := nodes[0]
+	client, ok := s.xuiClients[node.ID]
+	if !ok {
+		return sub, fmt.Errorf("xui client not found for trial node %d", node.ID)
+	}
+	inboundIDs := node.ResolveInboundIDs()
+	if err := client.UpdateClient(ctx, inboundIDs, currentEmail, sub.ClientID, email, sub.SubscriptionID, trafficBytes, expiryTime, resetDays, telegramID, comment); err != nil {
+		return sub, fmt.Errorf("update trial client on node %d: %w", node.ID, err)
 	}
 
 	return sub, nil

@@ -251,7 +251,7 @@ func TestGetExistingTrialFromCookie_NoCookie(t *testing.T) {
 	ctx := context.Background()
 	sub, err := srv.getExistingTrialFromCookie(req, ctx, "test")
 
-	assert.Error(t, err, "getExistingTrialFromCookie() should return error when no cookie")
+	assert.NoError(t, err, "getExistingTrialFromCookie() should not return error when no cookie (expected business state)")
 	assert.Nil(t, sub, "getExistingTrialFromCookie() should return nil when no cookie")
 }
 
@@ -271,7 +271,7 @@ func TestGetExistingTrialFromCookie_InvalidSubID(t *testing.T) {
 	ctx := context.Background()
 	sub, err := srv.getExistingTrialFromCookie(req, ctx, "test")
 
-	assert.Error(t, err, "getExistingTrialFromCookie() should return error for invalid sub ID")
+	assert.NoError(t, err, "getExistingTrialFromCookie() should not return error for invalid sub ID (expected business state)")
 	assert.Nil(t, sub, "getExistingTrialFromCookie() should return nil for invalid sub ID")
 }
 
@@ -299,7 +299,7 @@ func TestGetExistingTrialFromCookie_NotTrial(t *testing.T) {
 	ctx := context.Background()
 	sub, err := srv.getExistingTrialFromCookie(req, ctx, "test")
 
-	assert.Error(t, err, "getExistingTrialFromCookie() should return error for non-trial subscription")
+	assert.NoError(t, err, "getExistingTrialFromCookie() should not return error for non-trial subscription (expected business state)")
 	assert.Nil(t, sub, "getExistingTrialFromCookie() should return nil for non-trial subscription")
 }
 
@@ -327,7 +327,7 @@ func TestGetExistingTrialFromCookie_AlreadyActivated(t *testing.T) {
 	ctx := context.Background()
 	sub, err := srv.getExistingTrialFromCookie(req, ctx, "test")
 
-	assert.Error(t, err, "getExistingTrialFromCookie() should return error for activated trial")
+	assert.NoError(t, err, "getExistingTrialFromCookie() should not return error for activated trial (expected business state)")
 	assert.Nil(t, sub, "getExistingTrialFromCookie() should return nil for activated trial")
 }
 
@@ -346,6 +346,9 @@ func TestGetExistingTrialFromCookie_Expired(t *testing.T) {
 			ExpiresAt:      ptrTime(time.Now().Add(-1 * time.Hour)), // Expired
 		}, nil
 	}
+	mockDB.GetPlanByIDFunc = func(ctx context.Context, planID uint) (*database.Plan, error) {
+		return &database.Plan{ID: 1, Name: database.TrialPlanName}, nil
+	}
 
 	req := httptest.NewRequest("GET", "/i/test", nil)
 	req.AddCookie(&http.Cookie{
@@ -356,7 +359,7 @@ func TestGetExistingTrialFromCookie_Expired(t *testing.T) {
 	ctx := context.Background()
 	sub, err := srv.getExistingTrialFromCookie(req, ctx, "test")
 
-	assert.Error(t, err, "getExistingTrialFromCookie() should return error for expired trial")
+	assert.NoError(t, err, "getExistingTrialFromCookie() should not return error for expired trial (expected business state)")
 	assert.Nil(t, sub, "getExistingTrialFromCookie() should return nil for expired trial")
 }
 
