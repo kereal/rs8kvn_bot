@@ -10,6 +10,7 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/logger"
 	"github.com/kereal/rs8kvn_bot/internal/service"
 	"github.com/kereal/rs8kvn_bot/internal/testutil"
+	"github.com/kereal/rs8kvn_bot/internal/vpn"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -20,6 +21,20 @@ func init() {
 }
 
 func ptrTime(t time.Time) *time.Time { return &t }
+
+type mockVPNClientForExpire struct {
+	deleteCalled    bool
+	deleteProvision vpn.SubscriptionProvision
+}
+
+func (m *mockVPNClientForExpire) CreateSubscription(ctx context.Context, provision vpn.SubscriptionProvision) error { return nil }
+func (m *mockVPNClientForExpire) UpdateSubscription(ctx context.Context, provision vpn.SubscriptionProvision) error { return nil }
+func (m *mockVPNClientForExpire) DeleteSubscription(ctx context.Context, provision vpn.SubscriptionProvision) error {
+	m.deleteCalled = true
+	m.deleteProvision = provision
+	return nil
+}
+func (m *mockVPNClientForExpire) Close() error { return nil }
 
 func newTestSubServiceForExpire(t testing.TB, db *database.Service) *service.SubscriptionService {
 	t.Helper()
@@ -125,4 +140,70 @@ func TestSubscriptionExpireWorker_Run_ContextCancel(t *testing.T) {
 	case <-time.After(200 * time.Millisecond):
 		t.Fatal("SubscriptionExpireWorker.Run should stop after context cancel")
 	}
+}
+
+func TestSubscriptionExpireWorker_process_PaidPlanExpires_DowngradesToFree(t *testing.T) {
+	t.Parallel()
+
+	db, err := testutil.NewTestDatabaseService(t)
+	require.NoError(t, err)
+	ctx := context.Background()
+
+	freePlan, planErr := db.GetPlanByName(ctx, database.FreePlanName)
+	require.NoError(t, planErr)
+
+	paidPlan := &database.Plan{Name: "paid-plan-expire-e2e", DevicesLimit: 3, TrafficLimit: 1024 * 1024 * 1024}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(paidPlan).Error)
+
+	node := &database.Node{Name: "expire-e2e-node", IsActive: true, Host: "http://expire-e2e", APIToken: "token", InboundIDs: `[1]`}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(node).Error)
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(&database.PlanNode{PlanID: paidPlan.ID, NodeID: node.ID}).Error)
+
+	sub := &database.Subscription{
+		TelegramID:     99994,
+		Username:       "expirepaiduser",
+		ClientID:       "c-expire-paid",
+		SubscriptionID: "s-expire-paid",
+		Status:         "active",
+		PlanID:         paidPlan.ID,
+		ExpiresAt:      ptrTime(time.Now().Add(-1 * time.Hour).UTC().Truncate(time.Minute)),
+		PricePaidCents: 100,
+		Currency:       testutil.PtrString("RUB"),
+		ProductID:      testutil.PtrUint(1),
+		StartedAt:      ptrTime(time.Now().Add(-48 * time.Hour).UTC().Truncate(time.Minute)),
+	}
+	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
+	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node.ID, Status: database.SyncStatusActive}))
+
+	var invalidateCalled bool
+	var invalidateSubID string
+	mockVPN := &mockVPNClientForExpire{}
+	vpnClients := map[uint]vpn.Client{node.ID: mockVPN}
+	syncSvc := service.NewSyncService(db, vpnClients, []database.Node{*node})
+	subService := service.NewSubscriptionService(db, nil, vpnClients, []database.Node{*node}, &config.Config{TrialDurationHours: 1})
+	subService.SetSyncService(syncSvc)
+	subService.SetInvalidateBySubIDFunc(func(id string) {
+		invalidateCalled = true
+		invalidateSubID = id
+	})
+
+	worker := NewSubscriptionExpireWorker(db, subService)
+
+	worker.process(ctx)
+
+	var updated database.Subscription
+	require.NoError(t, db.GetDB().WithContext(ctx).First(&updated, sub.ID).Error)
+	assert.Equal(t, freePlan.ID, updated.PlanID, "subscription should be downgraded to free plan")
+	assert.Equal(t, "active", updated.Status)
+
+	nodes, nodeErr := db.GetBySubscriptionID(ctx, sub.ID)
+	require.NoError(t, nodeErr)
+	assert.Empty(t, nodes, "subscription nodes should be deleted after sync removes them")
+
+	assert.True(t, mockVPN.deleteCalled, "DeleteSubscription should be called on the VPN client")
+	assert.Equal(t, sub.ClientID, mockVPN.deleteProvision.ClientID)
+	assert.Equal(t, sub.SubscriptionID, mockVPN.deleteProvision.SubID)
+
+	assert.True(t, invalidateCalled, "cache invalidation should be called")
+	assert.Equal(t, sub.SubscriptionID, invalidateSubID)
 }
