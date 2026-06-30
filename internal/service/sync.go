@@ -597,5 +597,12 @@ func (s *SyncService) SyncPendingNodes(ctx context.Context) error {
 		unlock()
 	}
 
-	return ctx.Err()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if len(errs) > 0 {
+		return errors.Join(errs...)
+	}
+
+	return nil
 }

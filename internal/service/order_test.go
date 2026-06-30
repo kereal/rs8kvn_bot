@@ -263,6 +263,51 @@ func TestOrderService_ActivateProduct_PaidProduct_ExpiryNotModified(t *testing.T
 	assert.Equal(t, oldExpiry, *sub.ExpiresAt)
 }
 
+func TestOrderService_ActivateProduct_FreeProduct_PostCommitSyncSetupFailureStillSucceeds(t *testing.T) {
+	ctx := context.Background()
+	product := &database.Product{
+		ID: 1, PlanID: 2, Name: "Pro", DurationDays: 30,
+		PriceCents: 0, Currency: "RUB", IsActive: true,
+	}
+	sub := &database.Subscription{
+		ID: 1, TelegramID: 123, SubscriptionID: "sub-1",
+		PlanID: 1, Status: "active", Username: "user",
+	}
+
+	transactionCalled := false
+	db := testutil.NewDatabaseService()
+	db.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
+		return sub, nil
+	}
+	db.TransactionFunc = func(ctx context.Context, fn func(*gorm.DB) error) error {
+		transactionCalled = true
+		return nil
+	}
+	db.GetNodesByPlanIDFunc = func(ctx context.Context, planID uint) ([]database.Node, error) {
+		if planID == 1 {
+			return []database.Node{}, nil
+		}
+		return nil, errors.New("load nodes failed")
+	}
+	db.GetBySubscriptionIDFunc = func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
+		return []database.SubscriptionNode{}, nil
+	}
+
+	subSvc := &SubscriptionService{db: db}
+	syncSvc := NewSyncService(db, nil, nil)
+	svc := NewOrderService(db, subSvc, syncSvc)
+
+	order, err := svc.ActivateProduct(ctx, 123, product)
+
+	require.NoError(t, err)
+	assert.True(t, transactionCalled)
+	assert.NotNil(t, order)
+	assert.Equal(t, database.OrderStatusPaid, order.Status)
+	assert.Equal(t, uint(2), sub.PlanID)
+	require.NotNil(t, sub.ProductID)
+	assert.Equal(t, product.ID, *sub.ProductID)
+}
+
 func TestCalculateProductExpiry_SamePlanExtends(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Minute)
 	oldExpiry := now.Add(10 * 24 * time.Hour)
