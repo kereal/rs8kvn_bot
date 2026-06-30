@@ -852,10 +852,11 @@ func TestSubscriptionService_ReconcileOrphanedClients_NoActive(t *testing.T) {
 	assert.Equal(t, 0, count)
 }
 
-// TestSubscriptionService_BindTrial_UpdatesAllSources verifies that when
-// UpdateClient fails on one trial source, the loop continues to the next
-// source (fix #6: break → continue). All trial sources must be upgraded.
-func TestSubscriptionService_BindTrial_UpdatesAllSources(t *testing.T) {
+// TestSubscriptionService_BindTrial_SingleNode_ErrorPropagated verifies the
+// single-node trial contract: BindTrial only touches nodes[0] (the node where
+// CreateTrial provisioned the client). A failure on that node must be returned
+// to the caller, not swallowed, and other trial nodes must not be contacted.
+func TestSubscriptionService_BindTrial_SingleNode_ErrorPropagated(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{TrialDurationHours: 3}
@@ -888,13 +889,84 @@ func TestSubscriptionService_BindTrial_UpdatesAllSources(t *testing.T) {
 		},
 	}
 
+	xui1Calls := 0
+	xui2Calls := 0
 	xui1 := &testutil.XUIClient{
 		UpdateClientFunc: func(ctx context.Context, inboundIDs []int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, resetDays int, tgID int64, comment string) error {
+			xui1Calls++
 			return errors.New("source 1 unreachable")
 		},
 	}
 	xui2 := &testutil.XUIClient{
 		UpdateClientFunc: func(ctx context.Context, inboundIDs []int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, resetDays int, tgID int64, comment string) error {
+			xui2Calls++
+			return nil
+		},
+	}
+
+	xuiClients := map[uint]interfaces.XUIClient{1: xui1, 2: xui2}
+	sources := []database.Node{
+		{ID: 1, IsActive: true, Host: "http://x1", InboundIDs: "[1]"},
+		{ID: 2, IsActive: true, Host: "http://x2", InboundIDs: "[1]"},
+	}
+
+	svc := NewSubscriptionService(db, xuiClients, nil, sources, cfg)
+
+	got, err := svc.BindTrial(context.Background(), "trial-sub-1", 123456, "testuser")
+	require.Error(t, err, "BindTrial must propagate UpdateClient failure on nodes[0]")
+	assert.Contains(t, err.Error(), "update trial client on node 1")
+	// On error the bound sub is still returned for caller context.
+	assert.NotNil(t, got)
+	assert.Equal(t, 1, xui1Calls, "only nodes[0] must be contacted")
+	assert.Equal(t, 0, xui2Calls, "nodes[1] must not be contacted (single-node trial contract)")
+}
+
+// TestSubscriptionService_BindTrial_SingleNode_Success verifies the happy path
+// of the single-node trial contract: exactly one UpdateClient on nodes[0].
+func TestSubscriptionService_BindTrial_SingleNode_Success(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{TrialDurationHours: 3}
+
+	bound := &database.Subscription{
+		ID:             42,
+		TelegramID:     123456,
+		Username:       "testuser",
+		ClientID:       "client-xyz",
+		SubscriptionID: "trial-sub-1",
+		Status:         "active",
+		PlanID:         2,
+	}
+
+	db := &testutil.DatabaseService{
+		BindTrialSubscriptionFunc: func(ctx context.Context, subscriptionID string, telegramID int64, username string) (*database.Subscription, error) {
+			return bound, nil
+		},
+		GetPlanByNameFunc: func(ctx context.Context, name string) (*database.Plan, error) {
+			return &database.Plan{ID: 2, Name: database.FreePlanName, TrafficLimit: 1024 * 1024 * 1024}, nil
+		},
+		GetNodesByPlanNameFunc: func(ctx context.Context, planName string) ([]database.Node, error) {
+			if planName == database.TrialPlanName {
+				return []database.Node{
+					{ID: 1, IsActive: true, Host: "http://x1", InboundIDs: "[1]"},
+					{ID: 2, IsActive: true, Host: "http://x2", InboundIDs: "[1]"},
+				}, nil
+			}
+			return nil, nil
+		},
+	}
+
+	xui1Calls := 0
+	xui2Calls := 0
+	xui1 := &testutil.XUIClient{
+		UpdateClientFunc: func(ctx context.Context, inboundIDs []int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, resetDays int, tgID int64, comment string) error {
+			xui1Calls++
+			return nil
+		},
+	}
+	xui2 := &testutil.XUIClient{
+		UpdateClientFunc: func(ctx context.Context, inboundIDs []int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, resetDays int, tgID int64, comment string) error {
+			xui2Calls++
 			return nil
 		},
 	}
@@ -911,6 +983,8 @@ func TestSubscriptionService_BindTrial_UpdatesAllSources(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, got)
 	assert.Equal(t, uint(42), got.ID)
+	assert.Equal(t, 1, xui1Calls, "exactly one UpdateClient on nodes[0]")
+	assert.Equal(t, 0, xui2Calls, "nodes[1] must not be contacted")
 }
 
 // ==================== DeleteByID Tests ====================
@@ -986,6 +1060,51 @@ func TestSubscriptionService_DeleteByID_DBError(t *testing.T) {
 	assert.Error(t, err)
 	assert.Nil(t, deleted)
 	assert.Contains(t, err.Error(), "db delete")
+}
+
+// TestSubscriptionService_DeleteByID_MarkRevokedBeforeDBDelete verifies audit #2
+// fix: the subscription is marked revoked (Phase 1) BEFORE the physical DB delete
+// (Phase 3). If the DB delete fails, the subscription is already revoked so /sub/{id}
+// returns 404 and the user/admin no longer sees it as active. The deprovision
+// (Phase 2) is skipped when syncService is nil.
+func TestSubscriptionService_DeleteByID_MarkRevokedBeforeDBDelete(t *testing.T) {
+	t.Parallel()
+
+	var updatedStatus string
+	var updateBeforeDelete bool
+	deleteCalled := false
+
+	cfg := &config.Config{}
+	db := &testutil.DatabaseService{
+		GetByIDFunc: func(ctx context.Context, id uint) (*database.Subscription, error) {
+			return &database.Subscription{ID: 1, ClientID: "c", SubscriptionID: "s", TelegramID: 1, Username: "u", Status: "active"}, nil
+		},
+		UpdateSubscriptionFunc: func(ctx context.Context, sub *database.Subscription) error {
+			updatedStatus = sub.Status
+			// Record that Update happened before Delete by checking the flag.
+			if !deleteCalled {
+				updateBeforeDelete = true
+			}
+			return nil
+		},
+		DeleteSubscriptionByIDFunc: func(ctx context.Context, id uint) (*database.Subscription, error) {
+			deleteCalled = true
+			return nil, errors.New("db delete failed")
+		},
+	}
+	xuiClients := map[uint]interfaces.XUIClient{1: &testutil.XUIClient{}}
+	sources := []database.Node{{ID: 1, IsActive: true, Host: "http://x", InboundIDs: "[1]"}}
+
+	svc := NewSubscriptionService(db, xuiClients, nil, sources, cfg)
+	_, err := svc.DeleteByID(context.Background(), 1)
+
+	// DB delete failed → error returned to caller.
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "db delete")
+
+	// Phase 1 happened: subscription was marked revoked before the delete attempt.
+	assert.True(t, updateBeforeDelete, "UpdateSubscription (mark revoked) must happen before DeleteSubscriptionByID")
+	assert.Equal(t, "revoked", updatedStatus, "subscription must be marked revoked before deprovision/delete")
 }
 
 // ==================== GetByID Tests ====================

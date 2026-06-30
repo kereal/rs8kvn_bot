@@ -267,6 +267,44 @@ func TestServer_StopWithoutStart(t *testing.T) {
 	assert.NoError(t, err, "Stop() without Start() should not return error")
 }
 
+// TestServer_Stop_AlwaysShutdownsHTTPServer verifies the audit #8 fix:
+// even when the access-log CloseWithContext fails (here: via an already-canceled
+// context), HTTP server Shutdown must still be invoked and release the listener.
+// Before the fix, a CloseWithContext error short-circuited Shutdown, leaving the
+// HTTP server accepting connections.
+func TestServer_Stop_AlwaysShutdownsHTTPServer(t *testing.T) {
+	t.Parallel()
+
+	logPath := filepath.Join(t.TempDir(), "subserver.log")
+	srv := NewServer(":0", nil, &config.Config{
+		SubServerAccessLogPath: logPath,
+	}, bot.NewTestBotConfig(), nil, nil)
+
+	require.NoError(t, srv.Start(context.Background()))
+
+	// Capture the bound address before stopping.
+	addr := srv.listenerAddr
+	require.NotEmpty(t, addr)
+
+	// Use an already-canceled context so CloseWithContext fails with context.Canceled.
+	// Shutdown receives the same ctx and will also fail, but it MUST still be called
+	// (the listener must be released) — that is the regression we guard against.
+	stopCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := srv.Stop(stopCtx)
+	// We expect an aggregate error (log close + shutdown both failed), not nil.
+	require.Error(t, err, "Stop should report errors from both log-close and shutdown")
+
+	// The key assertion: the listener must be released even though CloseWithContext failed.
+	// Attempt a new bind on the same address; if Shutdown was skipped, this would block/fail.
+	conn, dialErr := net.DialTimeout("tcp", addr, 500*time.Millisecond)
+	if conn != nil {
+		conn.Close()
+	}
+	assert.Error(t, dialErr, "listener must be released after Stop even if access-log close failed")
+}
+
 func TestIsLocalAddress_Loopback(t *testing.T) {
 	t.Parallel()
 

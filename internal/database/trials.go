@@ -136,7 +136,7 @@ func (s *Service) BindTrialSubscription(ctx context.Context, subscriptionID stri
 			return fmt.Errorf("failed to bind trial subscription: %w", result.Error)
 		}
 		if result.RowsAffected == 0 {
-			return fmt.Errorf("trial subscription not found or already activated")
+			return fmt.Errorf("trial subscription not found or already activated: %w", ErrTrialAlreadyActivated)
 		}
 
 		return nil

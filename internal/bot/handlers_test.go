@@ -11,10 +11,12 @@ import (
 
 	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
+	"github.com/kereal/rs8kvn_bot/internal/metrics"
 	"github.com/kereal/rs8kvn_bot/internal/ratelimiter"
 	"github.com/kereal/rs8kvn_bot/internal/testutil"
 	"github.com/kereal/rs8kvn_bot/internal/utils"
 	"github.com/kereal/rs8kvn_bot/internal/xui"
+	promtestutil "github.com/prometheus/client_golang/prometheus/testutil"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/stretchr/testify/assert"
@@ -569,4 +571,40 @@ func TestHandleUpdate_CallbackQuery(t *testing.T) {
 	handler.HandleUpdate(context.Background(), update)
 
 	assert.True(t, mockBot.SendCalledSafe(), "should handle callback query")
+}
+
+// TestHandleUpdate_PropagatesStartErrorToMetrics verifies audit #1 fix:
+// an error from HandleStart must be propagated to err in HandleUpdate so that
+// BotUpdateErrorsTotal increments. Before the fix, /start errors were silently
+// dropped and the update was counted as success.
+func TestHandleUpdate_PropagatesStartErrorToMetrics(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{
+	TelegramAdminID:  123456789,
+		TelegramBotToken: "test_token",
+		Nodes:            []config.Node{{Name: "main", XUIHost: "http://localhost:2053", XUIAPIToken: "t", XUIInboundIDs: "[1]"}},
+	}
+	xuiClient, err := xui.NewClient(cfg.Nodes[0].XUIHost, cfg.Nodes[0].XUIAPIToken)
+	require.NoError(t, err)
+	mockDB := testutil.NewDatabaseService()
+	handler := NewHandler(testutil.NewBotAPI(), cfg, mockDB, xuiClient, NewTestBotConfig(), nil, "")
+
+	// /start with nil From → HandleStart returns "nil from" error.
+	update := tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Text: "/start",
+			Chat: &tgbotapi.Chat{ID: 999},
+			Entities: []tgbotapi.MessageEntity{
+				{Type: "bot_command", Offset: 0, Length: 6},
+			},
+			// From is nil → triggers error path.
+		},
+	}
+
+	before := promtestutil.ToFloat64(metrics.BotUpdateErrorsTotal.WithLabelValues("start"))
+	handler.HandleUpdate(context.Background(), update)
+	after := promtestutil.ToFloat64(metrics.BotUpdateErrorsTotal.WithLabelValues("start"))
+
+	assert.Greater(t, after, before, "BotUpdateErrorsTotal must increment when /start handler errors")
 }
