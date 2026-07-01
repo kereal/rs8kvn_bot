@@ -609,7 +609,7 @@ func (s *Server) handleSubscription(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 
-	logger.Info("subscription request received",
+	logger.Debug("subscription request received",
 		zap.String("sub_id", subID),
 		zap.String("client_ip", clientIP),
 		zap.String("method", r.Method),

@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/kereal/rs8kvn_bot/internal/database"
+	"github.com/kereal/rs8kvn_bot/internal/interfaces"
 	"github.com/kereal/rs8kvn_bot/internal/logger"
 	"github.com/kereal/rs8kvn_bot/internal/service"
 
@@ -13,13 +13,13 @@ import (
 
 // SubscriptionExpireWorker handles expiration of paid subscriptions that have passed their expiry date.
 type SubscriptionExpireWorker struct {
-	repos  *database.Service
+	db     interfaces.DatabaseService
 	subSvc *service.SubscriptionService
 }
 
 // NewSubscriptionExpireWorker creates a new SubscriptionExpireWorker.
-func NewSubscriptionExpireWorker(repos *database.Service, subSvc *service.SubscriptionService) *SubscriptionExpireWorker {
-	return &SubscriptionExpireWorker{repos: repos, subSvc: subSvc}
+func NewSubscriptionExpireWorker(db interfaces.DatabaseService, subSvc *service.SubscriptionService) *SubscriptionExpireWorker {
+	return &SubscriptionExpireWorker{db: db, subSvc: subSvc}
 }
 
 // Run starts the periodic expiration loop. It blocks until ctx is cancelled.
@@ -43,7 +43,7 @@ func (w *SubscriptionExpireWorker) Run(ctx context.Context) {
 }
 
 func (w *SubscriptionExpireWorker) process(ctx context.Context) {
-	subs, err := w.repos.GetExpiredPaidSubscriptions(ctx, time.Now().UTC())
+	subs, err := w.db.GetExpiredPaidSubscriptions(ctx, time.Now().UTC())
 	if err != nil {
 		logger.Error("Failed to query expired subscriptions", zap.Error(err))
 		return
