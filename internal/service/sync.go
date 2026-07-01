@@ -22,11 +22,14 @@ type SyncService struct {
 	db         interfaces.DatabaseService
 	vpnClients map[uint]vpn.Client
 	nodes      []database.Node
-	locks      sync.Map
+
+	locksMu sync.Mutex
+	locks   map[uint]*subscriptionSyncLock
 }
 
 type subscriptionSyncLock struct {
-	mu sync.Mutex
+	mu      sync.Mutex
+	waiters int // goroutines waiting or holding this lock
 }
 
 // syncIdentifier builds a unique VPN client identifier from username and telegram ID.
@@ -36,14 +39,37 @@ func syncIdentifier(sub *database.Subscription) string {
 
 // NewSyncService creates a new SyncService.
 func NewSyncService(db interfaces.DatabaseService, vpnClients map[uint]vpn.Client, nodes []database.Node) *SyncService {
-	return &SyncService{db: db, vpnClients: vpnClients, nodes: nodes}
+	return &SyncService{
+		db:         db,
+		vpnClients: vpnClients,
+		nodes:      nodes,
+		locks:      make(map[uint]*subscriptionSyncLock),
+	}
 }
 
+// lockSubscription acquires a per-subscription mutex and returns an unlock function.
+// The entry is removed from the map when the last waiter releases the lock,
+// preventing unbounded map growth over the lifetime of the process.
 func (s *SyncService) lockSubscription(subscriptionID uint) func() {
-	lockAny, _ := s.locks.LoadOrStore(subscriptionID, &subscriptionSyncLock{})
-	lock := lockAny.(*subscriptionSyncLock)
-	lock.mu.Lock()
-	return lock.mu.Unlock
+	s.locksMu.Lock()
+	l, ok := s.locks[subscriptionID]
+	if !ok {
+		l = &subscriptionSyncLock{}
+		s.locks[subscriptionID] = l
+	}
+	l.waiters++
+	s.locksMu.Unlock()
+
+	l.mu.Lock()
+	return func() {
+		l.mu.Unlock()
+		s.locksMu.Lock()
+		l.waiters--
+		if l.waiters == 0 {
+			delete(s.locks, subscriptionID)
+		}
+		s.locksMu.Unlock()
+	}
 }
 
 // ReconcilePlanNodes reconciles the subscription_nodes table against the current plan.
@@ -53,9 +79,17 @@ func (s *SyncService) lockSubscription(subscriptionID uint) func() {
 //   - REMOVE: a subscription_nodes node is no longer in the plan → pending_remove
 //   - STALE: a pending_add node was removed from the plan → pending_remove
 //
-// This replaces the old RecalculateNodes which required an explicit oldPlanID
-// and unconditionally re-provisioned all active nodes on every plan change.
+// Acquires the per-subscription lock. Callers that already hold the lock
+// (e.g. SyncPendingNodes) must call reconcilePlanNodesLocked directly.
 func (s *SyncService) ReconcilePlanNodes(ctx context.Context, subscriptionID uint) error {
+	unlock := s.lockSubscription(subscriptionID)
+	defer unlock()
+	return s.reconcilePlanNodesLocked(ctx, subscriptionID)
+}
+
+// reconcilePlanNodesLocked is the lock-free body of ReconcilePlanNodes.
+// The caller must hold lockSubscription(subscriptionID).
+func (s *SyncService) reconcilePlanNodesLocked(ctx context.Context, subscriptionID uint) error {
 	logger.Debug("reconcile plan nodes",
 		zap.Uint("subscription_id", subscriptionID))
 
@@ -551,44 +585,64 @@ func (s *SyncService) SyncPendingNodes(ctx context.Context) error {
 		zap.Int("subscriptions_count", len(groups)))
 
 	var errs []error
-	for subID, nodes := range groups {
+	for subID := range groups {
 		unlock := s.lockSubscription(subID)
-		logger.Debug("processing subscription pending nodes",
-			zap.Uint("subscription_id", subID),
-			zap.Int("pending_nodes", len(nodes)))
+
 		sub, subErr := s.db.GetByID(ctx, subID)
 		if subErr != nil {
 			if errors.Is(subErr, database.ErrSubscriptionNotFound) || errors.Is(subErr, gorm.ErrRecordNotFound) {
 				if clErr := s.db.DeleteSubscriptionNodesBySubscriptionID(ctx, subID); clErr != nil {
 					logger.Warn("purge orphan subscription nodes failed",
 						zap.Uint("subscription_id", subID),
-						zap.Int("pending_nodes", len(nodes)),
 						zap.Error(clErr))
 				} else {
 					logger.Info("purged orphan subscription nodes",
-						zap.Uint("subscription_id", subID),
-						zap.Int("pending_nodes", len(nodes)))
+						zap.Uint("subscription_id", subID))
 				}
 			}
 			err := fmt.Errorf("sync pending nodes: load subscription %d: %w", subID, subErr)
 			errs = append(errs, err)
 			logger.Warn("sync subscription failed",
 				zap.Uint("subscription_id", subID),
-				zap.Int("pending_nodes", len(nodes)),
 				zap.Error(err))
 			unlock()
 			continue
 		}
 
-		if err := s.syncNodes(ctx, sub, nodes); err != nil {
+		// Re-read pending nodes under the lock to fix TOCTOU: a concurrent
+		// SyncSubscription may have already processed nodes between
+		// GetPendingSync (above) and lockSubscription.
+		freshNodes, fnErr := s.db.GetPendingBySubscriptionID(ctx, subID)
+		if fnErr != nil {
+			err := fmt.Errorf("sync pending nodes: re-read pending for subscription %d: %w", subID, fnErr)
+			errs = append(errs, err)
+			logger.Warn("sync subscription failed (re-read)",
+				zap.Uint("subscription_id", subID),
+				zap.Error(err))
+			unlock()
+			continue
+		}
+		if len(freshNodes) == 0 {
+			logger.Debug("sync pending nodes: no pending after lock (already processed)",
+				zap.Uint("subscription_id", subID))
+			unlock()
+			continue
+		}
+
+		logger.Debug("processing subscription pending nodes",
+			zap.Uint("subscription_id", subID),
+			zap.Int("pending_nodes", len(freshNodes)))
+
+		if err := s.syncNodes(ctx, sub, freshNodes); err != nil {
 			logger.Warn("sync subscription failed",
 				zap.Uint("subscription_id", sub.ID),
-				zap.Int("pending_nodes", len(nodes)),
+				zap.Int("pending_nodes", len(freshNodes)),
 				zap.Error(err))
 			errs = append(errs, err)
 		}
 
-		if pruneErr := s.ReconcilePlanNodes(ctx, sub.ID); pruneErr != nil {
+		// Use locked variant — we already hold the subscription lock.
+		if pruneErr := s.reconcilePlanNodesLocked(ctx, sub.ID); pruneErr != nil {
 			logger.Warn("reconcile plan nodes failed",
 				zap.Uint("subscription_id", sub.ID),
 				zap.Error(pruneErr))

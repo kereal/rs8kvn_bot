@@ -955,6 +955,14 @@ func TestSyncService_SyncPendingNodes_JoinsErrors(t *testing.T) {
 	db.GetNodesByPlanIDFunc = func(ctx context.Context, planID uint) ([]database.Node, error) {
 		return nil, reconcileErr
 	}
+	db.GetPendingBySubscriptionIDFunc = func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
+		if subscriptionID == 10 {
+			return []database.SubscriptionNode{
+				{SubscriptionID: 10, NodeID: 1, Status: database.SyncStatusPendingAdd},
+			}, nil
+		}
+		return []database.SubscriptionNode{}, nil
+	}
 	db.GetBySubscriptionIDFunc = func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
 		return []database.SubscriptionNode{}, nil
 	}

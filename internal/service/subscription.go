@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/kereal/rs8kvn_bot/internal/config"
@@ -195,14 +194,16 @@ func (s *SubscriptionService) Delete(ctx context.Context, telegramID int64) erro
 		}
 	}
 
-	// Phase 3: physical delete. If this fails, the subscription is already revoked
-	// and orphaned-client reconciliation will clean up.
+	// Phase 3: physical delete.
+	// If this fails, the row is already revoked; background reconciliation cleans up.
 	if err := s.db.DeleteSubscription(ctx, telegramID); err != nil {
 		return fmt.Errorf("db delete: %w", err)
 	}
-
 	if err := s.db.DeleteSubscriptionNodesBySubscriptionID(ctx, sub.ID); err != nil {
-		return fmt.Errorf("delete subscription nodes: %w", err)
+		// Non-fatal: SyncPendingNodes will purge orphan nodes on next run.
+		logger.Warn("failed to delete subscription nodes after subscription delete",
+			zap.Uint("subscription_id", sub.ID),
+			zap.Error(err))
 	}
 
 	if s.invalidateBySubID != nil && sub.SubscriptionID != "" {
@@ -243,9 +244,11 @@ func (s *SubscriptionService) DeleteByID(ctx context.Context, id uint) (*databas
 	if err != nil {
 		return nil, fmt.Errorf("db delete: %w", err)
 	}
-
 	if err := s.db.DeleteSubscriptionNodesBySubscriptionID(ctx, deleted.ID); err != nil {
-		return nil, fmt.Errorf("delete subscription nodes: %w", err)
+		// Non-fatal: SyncPendingNodes will purge orphan nodes on next run.
+		logger.Warn("failed to delete subscription nodes after subscription delete",
+			zap.Uint("subscription_id", deleted.ID),
+			zap.Error(err))
 	}
 
 	if s.invalidateBySubID != nil && deleted.SubscriptionID != "" {
@@ -255,19 +258,21 @@ func (s *SubscriptionService) DeleteByID(ctx context.Context, id uint) (*databas
 	return deleted, nil
 }
 
-// deleteClientFromAllNodes removes the client email from all active XUI nodes.
-func (s *SubscriptionService) deleteClientFromAllNodes(ctx context.Context, email string) {
+// deleteClientFromAllNodes removes the VPN subscription from all active nodes.
+// Uses vpnClients (supports 3x-ui and proxman) — the legacy xuiClients map
+// covers only 3x-ui nodes and must not be used here.
+func (s *SubscriptionService) deleteClientFromAllNodes(ctx context.Context, provision vpn.SubscriptionProvision) {
 	for _, node := range s.nodes {
-		if !node.IsActive || node.Host == "" {
+		if !node.IsActive {
 			continue
 		}
-		client, ok := s.xuiClients[node.ID]
+		client, ok := s.vpnClients[node.ID]
 		if !ok {
 			continue
 		}
-		if err := client.DeleteClient(ctx, email); err != nil {
-			logger.Warn("failed to delete XUI client on source",
-				zap.String("email", email),
+		if err := client.DeleteSubscription(ctx, provision); err != nil {
+			logger.Warn("failed to delete VPN subscription on node",
+				zap.String("username", provision.Username),
 				zap.Uint("node_id", node.ID),
 				zap.Error(err))
 		}
@@ -337,12 +342,32 @@ func (s *SubscriptionService) GetWithTraffic(ctx context.Context, telegramID int
 
 	email := XUIEmail(sub.Username, sub.TelegramID)
 
-	// обходим серверы
+	// Опрашиваем только ноды, на которых подписка фактически активна (active в subscription_nodes).
+	// Это исключает ноды других планов и ноды в состоянии pending_*.
+	subNodes, err := s.db.GetBySubscriptionID(ctx, sub.ID)
+	if err != nil {
+		logger.Warn("GetWithTraffic: failed to load subscription nodes, falling back to all active nodes",
+			zap.Uint("subscription_id", sub.ID),
+			zap.Error(err))
+		subNodes = nil
+	}
+	activeSubNodeIDs := make(map[uint]struct{}, len(subNodes))
+	for _, sn := range subNodes {
+		if sn.Status == database.SyncStatusActive {
+			activeSubNodeIDs[sn.NodeID] = struct{}{}
+		}
+	}
+
 	var totalUp, totalDown int64
 	var anySuccess bool
 	var panelResetExpiry int64
 	var panelResetDays int
 	for _, node := range s.activeNodes() {
+		if len(activeSubNodeIDs) > 0 {
+			if _, ok := activeSubNodeIDs[node.ID]; !ok {
+				continue
+			}
+		}
 		client, ok := s.xuiClients[node.ID]
 		if !ok {
 			continue
@@ -476,7 +501,11 @@ func (s *SubscriptionService) CreateTrial(ctx context.Context, inviteCode string
 
 	sub, err := s.db.CreateTrialSubscription(ctx, inviteCode, subID, clientID, expiryTime)
 	if err != nil {
-		s.deleteClientFromAllNodes(ctx, email)
+		s.deleteClientFromAllNodes(ctx, vpn.SubscriptionProvision{
+			ClientID: clientID,
+			Username: email,
+			SubID:    subID,
+		})
 		return nil, fmt.Errorf("create trial subscription: %w", err)
 	}
 
@@ -672,14 +701,13 @@ func (s *SubscriptionService) ReconcileOrphanedClients(ctx context.Context) (int
 			if errors.Is(err, xui.ErrClientNotFound) {
 				continue
 			}
-			errMsg := strings.ToLower(err.Error())
-			if !strings.Contains(errMsg, "client not found") {
-				notFoundOnAll = false
-				logger.Debug("Error checking XUI client, skipping",
-					zap.Error(err),
-					zap.Int64("telegram_id", sub.TelegramID))
-				break
-			}
+			// Non-sentinel error: node is reachable but returned unexpected error.
+			// Treat as "found" to avoid incorrectly deleting an active subscription.
+			notFoundOnAll = false
+			logger.Debug("unexpected error checking XUI client, skipping orphan check",
+				zap.Error(err),
+				zap.Int64("telegram_id", sub.TelegramID))
+			break
 		}
 
 		if notFoundOnAll {
@@ -726,7 +754,6 @@ func (s *SubscriptionService) CleanupExpiredTrials(ctx context.Context) (int64, 
 		if sub.SubscriptionID == "" {
 			continue
 		}
-		email := "trial_" + sub.SubscriptionID
 		if sub.Status == "active" && s.syncService != nil {
 			if markErr := s.syncService.MarkAllForRemoval(ctx, sub.ID); markErr != nil {
 				logger.Warn("cleanup trial: mark for removal failed",
@@ -742,7 +769,11 @@ func (s *SubscriptionService) CleanupExpiredTrials(ctx context.Context) (int64, 
 			}
 			successCount++
 		} else {
-			s.deleteClientFromAllNodes(ctx, email)
+			s.deleteClientFromAllNodes(ctx, vpn.SubscriptionProvision{
+				ClientID: sub.ClientID,
+				Username: "trial_" + sub.SubscriptionID,
+				SubID:    sub.SubscriptionID,
+			})
 			successCount++
 		}
 		if s.invalidateBySubID != nil {
@@ -984,7 +1015,13 @@ func (s *SubscriptionService) ExpireSubscription(ctx context.Context, subscripti
 	}
 
 	if s.syncService != nil {
-		newNodes, _ := s.db.GetNodesByPlanID(ctx, freePlan.ID)
+		newNodes, err := s.db.GetNodesByPlanID(ctx, freePlan.ID)
+		if err != nil {
+			logger.Warn("expire subscription: failed to load free plan nodes; skipping pending_update marking",
+				zap.Uint("subscription_id", sub.ID),
+				zap.Uint("free_plan_id", freePlan.ID),
+				zap.Error(err))
+		}
 		var newNodeIDs []uint
 		for _, n := range newNodes {
 			newNodeIDs = append(newNodeIDs, n.ID)

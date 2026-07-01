@@ -14,6 +14,7 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/interfaces"
 	"github.com/kereal/rs8kvn_bot/internal/testutil"
 	"github.com/kereal/rs8kvn_bot/internal/xui"
+	"github.com/kereal/rs8kvn_bot/internal/vpn"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -750,8 +751,9 @@ func TestSubscriptionService_CreateTrial_DBError(t *testing.T) {
 		{ID: 1, IsActive: true, Host: "http://localhost:2053", InboundIDs: "[1]"},
 	}
 	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
+	vpnClients := map[uint]vpn.Client{1: vpn.NewThreeXUIClient(xuiClient, []int{1})}
 
-	svc := NewSubscriptionService(db, xuiClients, nil, sources, cfg)
+	svc := NewSubscriptionService(db, xuiClients, vpnClients, sources, cfg)
 	result, err := svc.CreateTrial(context.Background(), "testcode")
 
 	assert.Error(t, err)
@@ -818,7 +820,7 @@ func TestSubscriptionService_ReconcileOrphanedClients_RemovesMissing(t *testing.
 			if email == "gooduser" {
 				return &xui.ClientTraffic{}, nil
 			}
-			return nil, fmt.Errorf("client not found")
+			return nil, fmt.Errorf("client not found: %w", xui.ErrClientNotFound)
 		},
 	}
 	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
