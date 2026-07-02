@@ -9,7 +9,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/kereal/rs8kvn_bot/internal/bot"
 	"github.com/kereal/rs8kvn_bot/internal/config"
 )
 
@@ -18,7 +17,7 @@ import (
 func TestHandleHealthz(t *testing.T) {
 	t.Parallel()
 
-	srv := NewServer(":8880", nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", nil, &config.Config{}, "testbot", nil, nil)
 
 	req := httptest.NewRequest("GET", "/healthz", nil)
 	rec := httptest.NewRecorder()
@@ -32,7 +31,7 @@ func TestHandleHealthz(t *testing.T) {
 func TestHandleHealthz_MethodNotAllowed(t *testing.T) {
 	t.Parallel()
 
-	srv := NewServer(":8880", nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", nil, &config.Config{}, "testbot", nil, nil)
 
 	// Test POST method
 	req := httptest.NewRequest("POST", "/healthz", nil)
@@ -63,7 +62,7 @@ func TestHandleHealthz_MethodNotAllowed(t *testing.T) {
 func TestHandleHealthz_HeadMethod(t *testing.T) {
 	t.Parallel()
 
-	srv := NewServer(":8880", nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", nil, &config.Config{}, "testbot", nil, nil)
 
 	req := httptest.NewRequest("HEAD", "/healthz", nil)
 	rec := httptest.NewRecorder()
@@ -76,7 +75,7 @@ func TestHandleHealthz_HeadMethod(t *testing.T) {
 func TestHandleReadyz_MethodNotAllowed(t *testing.T) {
 	t.Parallel()
 
-	srv := NewServer(":8880", nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", nil, &config.Config{}, "testbot", nil, nil)
 
 	// Test POST method
 	req := httptest.NewRequest("POST", "/readyz", nil)
@@ -107,7 +106,7 @@ func TestHandleReadyz_MethodNotAllowed(t *testing.T) {
 func TestHandleReadyz_HeadMethod(t *testing.T) {
 	t.Parallel()
 
-	srv := NewServer(":8880", nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", nil, &config.Config{}, "testbot", nil, nil)
 	srv.SetReady(true)
 
 	req := httptest.NewRequest("HEAD", "/readyz", nil)
@@ -121,7 +120,7 @@ func TestHandleReadyz_HeadMethod(t *testing.T) {
 func TestHandleReadyz_NotReady(t *testing.T) {
 	t.Parallel()
 
-	srv := NewServer(":8880", nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", nil, &config.Config{}, "testbot", nil, nil)
 	// Register a failing checker to make health status not "ok"
 	srv.RegisterChecker("failing", func(ctx context.Context) ComponentHealth {
 		return ComponentHealth{Status: StatusDown, Message: "service down"}
@@ -139,7 +138,7 @@ func TestHandleReadyz_NotReady(t *testing.T) {
 func TestHandleReadyz_Ready(t *testing.T) {
 	t.Parallel()
 
-	srv := NewServer(":8880", nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", nil, &config.Config{}, "testbot", nil, nil)
 	// No checkers registered means health status will be "ok"
 
 	req := httptest.NewRequest("GET", "/readyz", nil)
@@ -154,7 +153,7 @@ func TestHandleReadyz_Ready(t *testing.T) {
 func TestHandleReadyz_WithChecker(t *testing.T) {
 	t.Parallel()
 
-	srv := NewServer(":8880", nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", nil, &config.Config{}, "testbot", nil, nil)
 
 	// Register a health checker that returns OK
 	srv.RegisterChecker("test-component", func(ctx context.Context) ComponentHealth {
@@ -174,7 +173,7 @@ func TestHandleReadyz_WithChecker(t *testing.T) {
 func TestHandleReadyz_WithFailingChecker(t *testing.T) {
 	t.Parallel()
 
-	srv := NewServer(":8880", nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", nil, &config.Config{}, "testbot", nil, nil)
 
 	// Register a health checker that returns degraded
 	srv.RegisterChecker("failing-component", func(ctx context.Context) ComponentHealth {
@@ -194,7 +193,7 @@ func TestHandleReadyz_WithFailingChecker(t *testing.T) {
 func TestHandleReadyz_WithDownChecker(t *testing.T) {
 	t.Parallel()
 
-	srv := NewServer(":8880", nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", nil, &config.Config{}, "testbot", nil, nil)
 
 	// Register a health checker that returns down
 	srv.RegisterChecker("down-component", func(ctx context.Context) ComponentHealth {
@@ -213,7 +212,7 @@ func TestHandleReadyz_WithDownChecker(t *testing.T) {
 func TestCheckHealth_NoCheckers(t *testing.T) {
 	t.Parallel()
 
-	srv := NewServer(":8880", nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", nil, &config.Config{}, "testbot", nil, nil)
 
 	health := srv.checkHealth(context.Background())
 
@@ -224,7 +223,7 @@ func TestCheckHealth_NoCheckers(t *testing.T) {
 func TestCheckHealth_WithCheckers(t *testing.T) {
 	t.Parallel()
 
-	srv := NewServer(":8880", nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", nil, &config.Config{}, "testbot", nil, nil)
 
 	srv.RegisterChecker("comp1", func(ctx context.Context) ComponentHealth {
 		return ComponentHealth{Status: StatusOK, Message: "ok"}
@@ -242,7 +241,7 @@ func TestCheckHealth_WithCheckers(t *testing.T) {
 func TestCheckHealth_AllDown(t *testing.T) {
 	t.Parallel()
 
-	srv := NewServer(":8880", nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", nil, &config.Config{}, "testbot", nil, nil)
 
 	srv.RegisterChecker("comp1", func(ctx context.Context) ComponentHealth {
 		return ComponentHealth{Status: StatusDown, Message: "down1"}
@@ -259,7 +258,7 @@ func TestCheckHealth_AllDown(t *testing.T) {
 func TestWriteJSON(t *testing.T) {
 	t.Parallel()
 
-	srv := NewServer(":8880", nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", nil, &config.Config{}, "testbot", nil, nil)
 
 	rec := httptest.NewRecorder()
 
@@ -277,7 +276,7 @@ func TestWriteJSON(t *testing.T) {
 func TestSetReady(t *testing.T) {
 	t.Parallel()
 
-	srv := NewServer(":8880", nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", nil, &config.Config{}, "testbot", nil, nil)
 
 	// Initially not ready
 	srv.mu.Lock()
@@ -303,7 +302,7 @@ func TestSetReady(t *testing.T) {
 func TestRegisterChecker(t *testing.T) {
 	t.Parallel()
 
-	srv := NewServer(":8880", nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", nil, &config.Config{}, "testbot", nil, nil)
 
 	// Register multiple checkers
 	srv.RegisterChecker("checker1", func(ctx context.Context) ComponentHealth {

@@ -14,7 +14,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kereal/rs8kvn_bot/internal/bot"
 	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/interfaces"
@@ -61,7 +60,7 @@ type Server struct {
 	addr            string
 	db              interfaces.DatabaseService
 	cfg             *config.Config
-	botConfig       *bot.BotConfig
+	botUsername     string
 	subService      *service.SubscriptionService
 	subServer       *subserver.Service
 	subserverLogger *subserver.AccessLogger
@@ -76,7 +75,7 @@ type Server struct {
 	errorTemplate   *template.Template
 }
 
-func NewServer(addr string, db interfaces.DatabaseService, cfg *config.Config, botConfig *bot.BotConfig, subService *service.SubscriptionService, subServer *subserver.Service) *Server {
+func NewServer(addr string, db interfaces.DatabaseService, cfg *config.Config, botUsername string, subService *service.SubscriptionService, subServer *subserver.Service) *Server {
 	trialTmpl := template.Must(template.New("trial.html").Funcs(template.FuncMap{
 		"escape": func(s string) string {
 			var buf strings.Builder
@@ -91,7 +90,7 @@ func NewServer(addr string, db interfaces.DatabaseService, cfg *config.Config, b
 		addr:            addr,
 		db:              db,
 		cfg:             cfg,
-		botConfig:       botConfig,
+		botUsername:     botUsername,
 		subService:      subService,
 		subServer:       subServer,
 		checkers:        make(map[string]func(context.Context) ComponentHealth),
@@ -183,10 +182,6 @@ func (s *Server) initSubserverAccessLogger() {
 }
 
 func (s *Server) Stop(ctx context.Context) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-
 	var errs []error
 	if s.subserverLogger != nil {
 		closeCtx, cancel := context.WithTimeout(ctx, subserverAccessLogCloseTimeout)
@@ -374,7 +369,7 @@ func (s *Server) HandleInvite(w http.ResponseWriter, r *http.Request) {
 	} else if existingSub != nil {
 		// Trial уже создан — показываем существующий
 		logger.Info("Existing trial found via cookie", zap.String("sub_id", existingSub.SubscriptionID))
-		telegramLink := "https://t.me/" + s.botConfig.Username + "?start=trial_" + existingSub.SubscriptionID
+		telegramLink := "https://t.me/" + s.botUsername + "?start=trial_" + existingSub.SubscriptionID
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 		subURL := s.cfg.GlobalSubURL + existingSub.SubscriptionID
@@ -439,7 +434,7 @@ func (s *Server) HandleInvite(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	telegramLink := "https://t.me/" + s.botConfig.Username + "?start=trial_" + result.SubID
+	telegramLink := "https://t.me/" + s.botUsername + "?start=trial_" + result.SubID
 	s.renderTrialPage(w, result.SubID, result.SubscriptionURL, telegramLink, s.cfg.TrialDurationHours)
 }
 
@@ -532,8 +527,10 @@ func getClientIP(r *http.Request) string {
 		forwarded := r.Header.Get("X-Forwarded-For")
 		if forwarded != "" {
 			ips := strings.Split(forwarded, ",")
-			if len(ips) > 0 {
-				ip := strings.TrimSpace(ips[0])
+			// Use the rightmost IP — set by the trusted reverse proxy.
+			// The leftmost is client-controlled and spoofable.
+			for i := len(ips) - 1; i >= 0; i-- {
+				ip := strings.TrimSpace(ips[i])
 				if ip != "" {
 					return ip
 				}
@@ -576,7 +573,7 @@ func (s *Server) handleSubscription(w http.ResponseWriter, r *http.Request) {
 	clientIP := getClientIP(r)
 
 	var rec *statusRecorder
-	var response http.ResponseWriter = w
+	var response = w
 	if s.subserverLogger != nil && s.subserverLogger.Enabled() {
 		rec = &statusRecorder{ResponseWriter: w}
 		response = rec

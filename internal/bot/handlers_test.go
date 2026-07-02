@@ -581,7 +581,7 @@ func TestHandleUpdate_PropagatesStartErrorToMetrics(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{
-	TelegramAdminID:  123456789,
+		TelegramAdminID:  123456789,
 		TelegramBotToken: "test_token",
 		Nodes:            []config.Node{{Name: "main", XUIHost: "http://localhost:2053", XUIAPIToken: "t", XUIInboundIDs: "[1]"}},
 	}

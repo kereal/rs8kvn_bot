@@ -83,7 +83,7 @@ func TestE2E_SubscriptionDelivery_AfterRenew_InvalidatesCacheAndServesUpdatedCon
 	subSrv := subserver.NewService(config.SubServerCacheTTL)
 	defer subSrv.Stop()
 	subService.SetInvalidateBySubIDFunc(subSrv.InvalidateCache)
-	srv := web.NewServer("127.0.0.1:0", env.db, env.cfg, env.botConfig, subService, subSrv)
+	srv := web.NewServer("127.0.0.1:0", env.db, env.cfg, env.botConfig.Username, subService, subSrv)
 
 	ctxSrv, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

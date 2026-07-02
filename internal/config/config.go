@@ -274,9 +274,12 @@ func (c *Config) validateURL(name, value string) error {
 		return fmt.Errorf("%s is not a valid URL: %w", name, err)
 	}
 
-	// Check that scheme is present
-	if u.Scheme == "" {
-		return fmt.Errorf("%s must include a scheme (http:// or https://)", name)
+	// Check that scheme is present and allowed
+	switch u.Scheme {
+	case "http", "https":
+		// allowed
+	default:
+		return fmt.Errorf("%s must use http or https scheme", name)
 	}
 
 	// Check that host is present

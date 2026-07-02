@@ -516,6 +516,8 @@ func TestValidateURL(t *testing.T) {
 		{"with path", "https://example.com/path/to/resource", false},
 		{"with query", "https://example.com?query=value", false},
 		{"with port and path", "https://localhost:8080/api/v1", false},
+		{"disallowed scheme file", "file:///etc/passwd", true},
+		{"disallowed scheme gopher", "gopher://localhost", true},
 	}
 
 	for _, tt := range tests {

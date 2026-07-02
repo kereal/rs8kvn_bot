@@ -95,8 +95,8 @@ rs8kvn_bot — production-ready Telegram bot for distributing VLESS+Reality+Visi
 │  ┌─────────────────────────────────────────────────────────────────┐ │
 │  │              Infrastructure & Cross-cutting                     │ │
 │  │  ┌──────────────┐  ┌──────────────┐  ┌─────────────────────┐ │ │
-│  │  │   Logger     │  │  RateLimiter │  │    WebhookSender    │ │ │
-│  │  │ (Zap+Sentry) │  │(token bucket)│  │(async+retry)        │ │ │
+│  │  │   Logger     │  │  RateLimiter │  │  SubscriptionSync   │ │ │
+│  │  │ (Zap+Sentry) │  │(token bucket)│  │  Worker (pending)   │ │ │
 │  │  └──────────────┘  └──────────────┘  └─────────────────────┘ │ │
 │  │  ┌──────────────┐  ┌──────────────┐  ┌─────────────────────┐ │ │
 │  │  │   Backup     │  │  Heartbeat   │  │   Scheduler         │ │ │
@@ -655,9 +655,6 @@ site:
 api:
   token: "string (optional, 32+ random chars)"
 
-webhook:
-  proxy_manager_webhook_secret: "string (optional)"
-  proxy_manager_webhook_url: "URL (optional, must be HTTPS)"
 ```
 
 ---
@@ -707,7 +704,7 @@ User           Telegram       Bot (main)     Handler      XUI Panel       DB
   │                │              │              │            │  INSERT OK
   │                │              │              │            │◄───────────
   │                │              │              │ Cache Set  │
-  │                │              │              │ Webhook ↑  │
+  │                │              │              │ Sync ↑     │
   │                │              │              │ Notify ↓   │
   │                │              │              │◄───────────┤
   │                │              │ SendMessage  │             │
@@ -755,7 +752,7 @@ User           Telegram       Bot (main)     Handler      XUI Panel       DB
   │                │              │              │            │  INSERT OK
   │                │              │              │            │◄───────────
   │                │              │              │ Cache Set  │
-  │                │              │              │ Webhook ↑  │
+  │                │              │              │ Sync ↑     │
   │                │              │              │ Notify ↓   │
   │                │              │              │◄───────────┤
   │                │              │ SendMessage  │             │
@@ -791,7 +788,6 @@ User           Telegram       Bot (main)     Handler      XUI Panel       DB
 | **Cache** | Redis for shared cache across multiple bot instances | P3 (if horizontal scaling) |
 | **Metrics** | Prometheus /metrics endpoint with counters/gauges | P1 (monitoring) |
 | **Rate limiting** | Distributed rate limiting via Redis (per-IP) | P2 (DDoS protection) |
-| **Webhook** | Retry queue with exponential backoff + dead-letter queue | P2 (reliability) |
 | **Proxy** | Support formultiple XUI panels (sharding) | P3 (load balancing) |
 | **Auth** | OAuth for admin panel (web UI) | P3 (convenience) |
 | **Testing** | Property-based testing (quickcheck) | P2 (quality) |

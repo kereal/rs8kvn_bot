@@ -53,7 +53,7 @@ Instead, contact us privately:
 
 - **XUI_SUB_PATH:** Regex validation `^[a-zA-Z0-9_-]+$` — no path traversal
 - **Extra servers file:** Path traversal checks (`..`, system dirs) before opening
-- **URLs:** HTTPS enforced for all sensitive endpoints (XUI_HOST, webhooks)
+- **URLs:** HTTPS enforced for all sensitive endpoints (XUI_HOST)
 - **Invite codes:** Alphanumeric regex validation
 - **Telegram IDs:** Integer parsing with overflow protection
 

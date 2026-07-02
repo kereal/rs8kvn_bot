@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/logger"
 	"github.com/kereal/rs8kvn_bot/internal/service"
@@ -16,14 +15,6 @@ import (
 
 func init() {
 	_, _ = logger.Init("", "error")
-}
-
-func newTestSubServiceForSyncWorker(t testing.TB, db *database.Service) *service.SubscriptionService {
-	t.Helper()
-	cfg := &config.Config{
-		TrialDurationHours: 1,
-	}
-	return service.NewSubscriptionService(db, nil, nil, nil, cfg)
 }
 
 func TestSubscriptionSyncWorker_Run_CallsSyncPendingNodes(t *testing.T) {

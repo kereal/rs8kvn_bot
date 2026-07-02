@@ -4,7 +4,6 @@ import (
 	"regexp"
 	"testing"
 
-	"github.com/kereal/rs8kvn_bot/internal/bot"
 	"github.com/kereal/rs8kvn_bot/internal/config"
 )
 
@@ -43,7 +42,7 @@ func FuzzInviteCodeRegex(f *testing.F) {
 			return
 		}
 
-		srv := NewServer(":0", nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil)
+		srv := NewServer(":0", nil, &config.Config{}, "testbot", nil, nil)
 		result := srv.inviteCodeRegex.MatchString(code)
 		expected := validPattern.MatchString(code)
 
@@ -91,7 +90,7 @@ func FuzzInviteCodeRegex_ValidOnly(f *testing.F) {
 			}
 		}
 
-		srv := NewServer(":0", nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil)
+		srv := NewServer(":0", nil, &config.Config{}, "testbot", nil, nil)
 		result := srv.inviteCodeRegex.MatchString(code)
 
 		// Valid codes should always match
