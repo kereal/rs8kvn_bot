@@ -13,8 +13,8 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/interfaces"
 	"github.com/kereal/rs8kvn_bot/internal/testutil"
-	"github.com/kereal/rs8kvn_bot/internal/xui"
 	"github.com/kereal/rs8kvn_bot/internal/vpn"
+	"github.com/kereal/rs8kvn_bot/internal/xui"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

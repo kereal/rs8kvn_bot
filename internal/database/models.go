@@ -10,14 +10,14 @@ import (
 // Sentinel errors returned by Get* functions when a record is not found.
 // Callers should use errors.Is to distinguish "not found" from infrastructure/DB errors.
 var (
-	ErrInviteNotFound       = errors.New("invite not found")
-	ErrSubscriptionNotFound = errors.New("subscription not found")
-	ErrPlanNotFound         = errors.New("plan not found")
-	ErrOrderNotFound        = errors.New("order not found")
-	ErrProductNotFound      = errors.New("product not found")
+	ErrInviteNotFound           = errors.New("invite not found")
+	ErrSubscriptionNotFound     = errors.New("subscription not found")
+	ErrPlanNotFound             = errors.New("plan not found")
+	ErrOrderNotFound            = errors.New("order not found")
+	ErrProductNotFound          = errors.New("product not found")
 	ErrSubscriptionNodeNotFound = errors.New("subscription node not found")
-	ErrNodeNotFound         = errors.New("node not found")
-	ErrTrialAlreadyActivated = errors.New("trial already activated")
+	ErrNodeNotFound             = errors.New("node not found")
+	ErrTrialAlreadyActivated    = errors.New("trial already activated")
 )
 
 const (

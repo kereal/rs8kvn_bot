@@ -27,8 +27,12 @@ type mockVPNClientForExpire struct {
 	deleteProvision vpn.SubscriptionProvision
 }
 
-func (m *mockVPNClientForExpire) CreateSubscription(ctx context.Context, provision vpn.SubscriptionProvision) error { return nil }
-func (m *mockVPNClientForExpire) UpdateSubscription(ctx context.Context, provision vpn.SubscriptionProvision) error { return nil }
+func (m *mockVPNClientForExpire) CreateSubscription(ctx context.Context, provision vpn.SubscriptionProvision) error {
+	return nil
+}
+func (m *mockVPNClientForExpire) UpdateSubscription(ctx context.Context, provision vpn.SubscriptionProvision) error {
+	return nil
+}
 func (m *mockVPNClientForExpire) DeleteSubscription(ctx context.Context, provision vpn.SubscriptionProvision) error {
 	m.deleteCalled = true
 	m.deleteProvision = provision

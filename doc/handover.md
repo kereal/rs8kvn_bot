@@ -98,9 +98,6 @@ Database: CreateSubscription (transaction)
 Cache: Set(telegramID, subscription)
         │
         ▼
-Webhook: async POST to Proxy Manager (if URL configured)
-        │
-        ▼
 Notify admin: "New subscription: @username"
         │
         ▼

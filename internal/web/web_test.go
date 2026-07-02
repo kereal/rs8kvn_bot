@@ -14,7 +14,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/kereal/rs8kvn_bot/internal/bot"
 	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/testutil"
 )
@@ -32,7 +31,7 @@ func TestRenderTrialPage(t *testing.T) {
 		TrialDurationHours: 3,
 	}
 
-	srv := NewServer(":8880", nil, cfg, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", nil, cfg, "testbot", nil, nil)
 
 	w := httptest.NewRecorder()
 	srv.renderTrialPage(w, "sub123", "https://vpn.site/sub/sub123", "https://t.me/testbot?start=trial_sub123", 3)
@@ -61,7 +60,7 @@ func TestRenderTrialPage(t *testing.T) {
 func TestRenderErrorPage(t *testing.T) {
 	t.Parallel()
 
-	srv := NewServer(":8880", nil, nil, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", nil, nil, "testbot", nil, nil)
 
 	w := httptest.NewRecorder()
 	srv.renderErrorPage(w, "Тестовая ошибка")
@@ -94,14 +93,14 @@ func TestGetClientIP_XForwardedFor(t *testing.T) {
 
 	ip := getClientIP(req)
 
-	// Should use first IP from X-Forwarded-For
-	assert.Equal(t, "203.0.113.50", ip, "getClientIP() should use first IP from X-Forwarded-For")
+	// Should use the rightmost IP (set by trusted proxy)
+	assert.Equal(t, "198.51.100.1", ip, "getClientIP() should use rightmost IP from X-Forwarded-For")
 }
 
 func TestRenderTrialPage_HappLink(t *testing.T) {
 	t.Parallel()
 
-	srv := NewServer(":8880", nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", nil, &config.Config{}, "testbot", nil, nil)
 
 	subURL := "https://vpn.site/sub/abc123"
 	w := httptest.NewRecorder()
@@ -124,8 +123,8 @@ func TestGetClientIP_XForwardedForMultiple(t *testing.T) {
 
 	ip := getClientIP(req)
 
-	// Should use first IP from X-Forwarded-For
-	assert.Equal(t, "203.0.113.50", ip, "getClientIP() should use first IP from X-Forwarded-For")
+	// Should use the rightmost IP (set by trusted proxy)
+	assert.Equal(t, "192.0.2.1", ip, "getClientIP() should use rightmost IP from X-Forwarded-For")
 }
 
 // Note: X-Real-IP is not checked by getClientIP - it only checks X-Forwarded-For
@@ -191,7 +190,7 @@ func TestGetClientIP_WhitespaceInXForwardedFor(t *testing.T) {
 
 	ip := getClientIP(req)
 
-	assert.Equal(t, "192.0.2.1", ip, "Should trim whitespace from IP")
+	assert.Equal(t, "198.51.100.1", ip, "Should trim whitespace and use rightmost IP")
 }
 
 // === Server Start/Stop tests ===
@@ -199,7 +198,7 @@ func TestGetClientIP_WhitespaceInXForwardedFor(t *testing.T) {
 func TestServer_StartAndStop(t *testing.T) {
 	t.Parallel()
 
-	srv := NewServer(":0", nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil) // :0 for random port
+	srv := NewServer(":0", nil, &config.Config{}, "testbot", nil, nil) // :0 for random port
 
 	ctx := context.Background()
 
@@ -221,7 +220,7 @@ func TestServer_StartWithInvalidSubserverAccessLog(t *testing.T) {
 	cfg := &config.Config{
 		SubServerAccessLogPath: t.TempDir(),
 	}
-	srv := NewServer(":0", nil, cfg, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":0", nil, cfg, "testbot", nil, nil)
 
 	ctx := context.Background()
 	err := srv.Start(ctx)
@@ -244,7 +243,7 @@ func TestServer_StartPortInUseDoesNotCreateSubserverAccessLog(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "subserver.log")
 	srv := NewServer(listener.Addr().String(), nil, &config.Config{
 		SubServerAccessLogPath: logPath,
-	}, bot.NewTestBotConfig(), nil, nil)
+	}, "testbot", nil, nil)
 
 	err = srv.Start(context.Background())
 	require.Error(t, err, "Start() should return error when port is already in use")
@@ -257,7 +256,7 @@ func TestServer_StartPortInUseDoesNotCreateSubserverAccessLog(t *testing.T) {
 func TestServer_StopWithoutStart(t *testing.T) {
 	t.Parallel()
 
-	srv := NewServer(":0", nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":0", nil, &config.Config{}, "testbot", nil, nil)
 
 	// Stop without start should not panic
 	stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -278,7 +277,7 @@ func TestServer_Stop_AlwaysShutdownsHTTPServer(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "subserver.log")
 	srv := NewServer(":0", nil, &config.Config{
 		SubServerAccessLogPath: logPath,
-	}, bot.NewTestBotConfig(), nil, nil)
+	}, "testbot", nil, nil)
 
 	require.NoError(t, srv.Start(context.Background()))
 
@@ -387,7 +386,7 @@ func TestServer_Start_PortInUse(t *testing.T) {
 	addr := listener.Addr().String()
 	port := strings.Split(addr, ":")[1]
 
-	srv := NewServer(":"+port, nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":"+port, nil, &config.Config{}, "testbot", nil, nil)
 
 	ctx := context.Background()
 	err = srv.Start(ctx)
@@ -419,10 +418,10 @@ func TestGetClientIP_IPv6(t *testing.T) {
 			expected: "[2001:db8::1]:8080",
 		},
 		{
-			name:     "IPv6 first of multiple",
+			name:     "IPv6 mixed with IPv4 (rightmost wins)",
 			forward:  "2001:db8::1, 192.168.1.1",
 			remote:   "[::1]:12345",
-			expected: "2001:db8::1",
+			expected: "192.168.1.1",
 		},
 		{
 			name:     "IPv6 loopback",
@@ -453,7 +452,7 @@ func TestRenderTrialPage_XSSProtection(t *testing.T) {
 		TrialRateLimit:     3,
 	}
 
-	srv := NewServer(":8880", testutil.NewDatabaseService(), cfg, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", testutil.NewDatabaseService(), cfg, "testbot", nil, nil)
 
 	tests := []struct {
 		name         string
@@ -520,7 +519,7 @@ func TestRenderTrialPage_XSSProtection(t *testing.T) {
 func TestHandleLogo_Success(t *testing.T) {
 	t.Parallel()
 
-	srv := NewServer(":8880", nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", nil, &config.Config{}, "testbot", nil, nil)
 
 	req := httptest.NewRequest("GET", "/static/logo.png", nil)
 	w := httptest.NewRecorder()
@@ -540,7 +539,7 @@ func TestHandleLogo_Success(t *testing.T) {
 func TestHandleLogo_CacheHeaders(t *testing.T) {
 	t.Parallel()
 
-	srv := NewServer(":8880", nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", nil, &config.Config{}, "testbot", nil, nil)
 
 	req := httptest.NewRequest("GET", "/static/logo.png", nil)
 	w := httptest.NewRecorder()
@@ -554,7 +553,7 @@ func TestHandleLogo_CacheHeaders(t *testing.T) {
 func TestHandleLogo_HEAD(t *testing.T) {
 	t.Parallel()
 
-	srv := NewServer(":8880", nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", nil, &config.Config{}, "testbot", nil, nil)
 
 	req := httptest.NewRequest("HEAD", "/static/logo.png", nil)
 	w := httptest.NewRecorder()
@@ -569,7 +568,7 @@ func TestHandleLogo_HEAD(t *testing.T) {
 func TestRenderTrialPage_TemplateRendersLogo(t *testing.T) {
 	t.Parallel()
 
-	srv := NewServer(":8880", nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", nil, &config.Config{}, "testbot", nil, nil)
 
 	w := httptest.NewRecorder()
 	srv.renderTrialPage(w, "sub1", "https://example.com/sub", "https://t.me/testbot?start=trial_sub1", 3)
@@ -580,7 +579,7 @@ func TestRenderTrialPage_TemplateRendersLogo(t *testing.T) {
 func TestRenderErrorPage_TemplateRendersLogo(t *testing.T) {
 	t.Parallel()
 
-	srv := NewServer(":8880", nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", nil, &config.Config{}, "testbot", nil, nil)
 
 	w := httptest.NewRecorder()
 	srv.renderErrorPage(w, "Test error")
@@ -597,7 +596,7 @@ func TestRenderTrialPage_Golden(t *testing.T) {
 		TrialDurationHours: 24,
 	}
 
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", mockDB, cfg, "testbot", nil, nil)
 	defer srv.db.Close()
 
 	subID := "test_sub_123"
@@ -627,7 +626,7 @@ func TestRenderTrialPage_Structure(t *testing.T) {
 		TrialDurationHours: 24,
 	}
 
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", mockDB, cfg, "testbot", nil, nil)
 	defer srv.db.Close()
 
 	w := httptest.NewRecorder()

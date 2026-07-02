@@ -300,10 +300,6 @@ func (w *asyncAccessLogWriter) Write(p []byte) (int, error) {
 }
 
 func (w *asyncAccessLogWriter) Sync(ctx context.Context) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-
 	w.mu.Lock()
 	if w.closed {
 		w.mu.Unlock()

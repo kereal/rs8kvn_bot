@@ -393,7 +393,7 @@ func (h *Handler) getMainMenuContent(ctx context.Context, username string, hasSu
 	var keyboard tgbotapi.InlineKeyboardMarkup
 	freeUpgradeLabel := ""
 	if hasSubscription {
-		if label, ok := h.getFreeUpgradeLabel(context.Background(), chatID); ok {
+		if label, ok := h.getFreeUpgradeLabel(ctx, chatID); ok {
 			freeUpgradeLabel = label
 		}
 	}

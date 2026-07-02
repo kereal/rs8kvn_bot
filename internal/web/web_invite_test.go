@@ -12,7 +12,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/kereal/rs8kvn_bot/internal/bot"
 	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/interfaces"
@@ -98,7 +97,7 @@ func TestHandleInvite_InvalidCode(t *testing.T) {
 		return host
 	}
 
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), subService, nil)
+	srv := NewServer(":8880", mockDB, cfg, "testbot", subService, nil)
 
 	req := httptest.NewRequest("GET", "/i/testcode", nil)
 	req.RemoteAddr = "192.168.1.1:12345"
@@ -146,7 +145,7 @@ func TestHandleInvite_XUIError(t *testing.T) {
 		return nil, fmt.Errorf("XUI API error")
 	}
 
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), subService, nil)
+	srv := NewServer(":8880", mockDB, cfg, "testbot", subService, nil)
 
 	req := httptest.NewRequest("GET", "/i/testcode", nil)
 	req.RemoteAddr = "192.168.1.1:12345"
@@ -196,7 +195,7 @@ func TestHandleInvite_EmptyCode(t *testing.T) {
 		TrialRateLimit:     3,
 	}
 
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", mockDB, cfg, "testbot", nil, nil)
 
 	req := httptest.NewRequest("GET", "/i/", nil)
 	rec := httptest.NewRecorder()
@@ -223,7 +222,7 @@ func TestHandleInvite_DatabaseError(t *testing.T) {
 		TrialRateLimit:     3,
 	}
 
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", mockDB, cfg, "testbot", nil, nil)
 
 	mockDB.GetInviteByCodeFunc = func(ctx context.Context, code string) (*database.Invite, error) {
 		return nil, gorm.ErrInvalidDB
@@ -244,7 +243,7 @@ func TestGetExistingTrialFromCookie_NoCookie(t *testing.T) {
 
 	mockDB := testutil.NewDatabaseService()
 	cfg := &config.Config{}
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", mockDB, cfg, "testbot", nil, nil)
 
 	req := httptest.NewRequest("GET", "/i/test", nil)
 
@@ -260,7 +259,7 @@ func TestGetExistingTrialFromCookie_InvalidSubID(t *testing.T) {
 
 	mockDB := testutil.NewDatabaseService()
 	cfg := &config.Config{}
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", mockDB, cfg, "testbot", nil, nil)
 
 	req := httptest.NewRequest("GET", "/i/test", nil)
 	req.AddCookie(&http.Cookie{
@@ -280,7 +279,7 @@ func TestGetExistingTrialFromCookie_NotTrial(t *testing.T) {
 
 	mockDB := testutil.NewDatabaseService()
 	cfg := &config.Config{}
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", mockDB, cfg, "testbot", nil, nil)
 
 	mockDB.GetTrialSubscriptionBySubIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
 		return &database.Subscription{
@@ -308,7 +307,7 @@ func TestGetExistingTrialFromCookie_AlreadyActivated(t *testing.T) {
 
 	mockDB := testutil.NewDatabaseService()
 	cfg := &config.Config{}
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", mockDB, cfg, "testbot", nil, nil)
 
 	mockDB.GetTrialSubscriptionBySubIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
 		return &database.Subscription{
@@ -336,7 +335,7 @@ func TestGetExistingTrialFromCookie_Expired(t *testing.T) {
 
 	mockDB := testutil.NewDatabaseService()
 	cfg := &config.Config{}
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", mockDB, cfg, "testbot", nil, nil)
 
 	mockDB.GetTrialSubscriptionBySubIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
 		return &database.Subscription{
@@ -368,7 +367,7 @@ func TestGetExistingTrialFromCookie_Valid(t *testing.T) {
 
 	mockDB := testutil.NewDatabaseService()
 	cfg := &config.Config{}
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", mockDB, cfg, "testbot", nil, nil)
 
 	mockDB.GetTrialSubscriptionBySubIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
 		return &database.Subscription{
@@ -402,7 +401,7 @@ func TestGetExistingTrialFromCookie_Valid(t *testing.T) {
 func TestInviteCodeRegex(t *testing.T) {
 	t.Parallel()
 
-	srv := NewServer(":8880", nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", nil, &config.Config{}, "testbot", nil, nil)
 
 	tests := []struct {
 		name  string
@@ -459,7 +458,7 @@ func TestHandleInvite_XUIAddClientFails(t *testing.T) {
 		return nil, fmt.Errorf("XUI add client error")
 	}
 
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), subService, nil)
+	srv := NewServer(":8880", mockDB, cfg, "testbot", subService, nil)
 
 	req := httptest.NewRequest("GET", "/i/testcode", nil)
 	req.RemoteAddr = "192.168.1.1:12345"
@@ -500,7 +499,7 @@ func TestHandleInvite_CreateTrialSubscriptionFails(t *testing.T) {
 		return nil, fmt.Errorf("DB error")
 	}
 
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), subService, nil)
+	srv := NewServer(":8880", mockDB, cfg, "testbot", subService, nil)
 
 	req := httptest.NewRequest("GET", "/i/testcode", nil)
 	req.RemoteAddr = "192.168.1.1:12345"
@@ -529,7 +528,7 @@ func TestHandleInvite_ExistingTrialFromCookie(t *testing.T) {
 		TrialRateLimit:     3,
 	}
 
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", mockDB, cfg, "testbot", nil, nil)
 
 	mockDB.GetInviteByCodeFunc = func(ctx context.Context, code string) (*database.Invite, error) {
 		return &database.Invite{Code: "testcode", ReferrerTGID: 12345}, nil
@@ -567,7 +566,7 @@ func TestHandleInvite_MethodNotAllowed(t *testing.T) {
 
 	mockDB := testutil.NewDatabaseService()
 	cfg := &config.Config{}
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", mockDB, cfg, "testbot", nil, nil)
 
 	req := httptest.NewRequest("POST", "/i/testcode", nil)
 	rec := httptest.NewRecorder()
@@ -583,7 +582,7 @@ func TestHandleInvite_InvalidPath(t *testing.T) {
 
 	mockDB := testutil.NewDatabaseService()
 	cfg := &config.Config{}
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", mockDB, cfg, "testbot", nil, nil)
 
 	req := httptest.NewRequest("GET", "/not-invite/testcode", nil)
 	rec := httptest.NewRecorder()
@@ -599,7 +598,7 @@ func TestHandleInvite_InvalidCodeChars(t *testing.T) {
 
 	mockDB := testutil.NewDatabaseService()
 	cfg := &config.Config{}
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", mockDB, cfg, "testbot", nil, nil)
 
 	req := httptest.NewRequest("GET", "/i/invalid@code!", nil)
 	rec := httptest.NewRecorder()
@@ -627,7 +626,7 @@ func TestHandleInvite_RateLimitCheckError(t *testing.T) {
 		TrialRateLimit:     3,
 	}
 
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", mockDB, cfg, "testbot", nil, nil)
 
 	mockDB.GetInviteByCodeFunc = func(ctx context.Context, code string) (*database.Invite, error) {
 		return &database.Invite{Code: "testcode", ReferrerTGID: 12345}, nil
@@ -664,7 +663,7 @@ func TestHandleInvite_ParallelRequests(t *testing.T) {
 	}
 
 	cfg, subService, _ := makeTestSubService(mockDB)
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), subService, nil)
+	srv := NewServer(":8880", mockDB, cfg, "testbot", subService, nil)
 
 	var (
 		mu    sync.Mutex

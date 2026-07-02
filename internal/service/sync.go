@@ -295,41 +295,41 @@ func (s *SyncService) syncNodes(ctx context.Context, sub *database.Subscription,
 			logger.Debug("processing pending_add",
 				zap.Uint("subscription_id", sub.ID),
 				zap.Uint("node_id", sn.NodeID))
-		if err := s.processPendingAdd(ctx, &sn, sub); err != nil {
-			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-				return err
+			if err := s.processPendingAdd(ctx, &sn, sub); err != nil {
+				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+					return err
+				}
+				logger.Warn("pending_add failed",
+					zap.Uint("subscription_id", sub.ID),
+					zap.Uint("node_id", sn.NodeID),
+					zap.Error(err))
 			}
-			logger.Warn("pending_add failed",
-				zap.Uint("subscription_id", sub.ID),
-				zap.Uint("node_id", sn.NodeID),
-				zap.Error(err))
-		}
 		case database.SyncStatusPendingRemove:
 			logger.Debug("processing pending_remove",
 				zap.Uint("subscription_id", sub.ID),
 				zap.Uint("node_id", sn.NodeID))
-		if err := s.processPendingRemove(ctx, &sn, sub); err != nil {
-			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-				return err
+			if err := s.processPendingRemove(ctx, &sn, sub); err != nil {
+				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+					return err
+				}
+				logger.Warn("pending_remove failed",
+					zap.Uint("subscription_id", sub.ID),
+					zap.Uint("node_id", sn.NodeID),
+					zap.Error(err))
 			}
-			logger.Warn("pending_remove failed",
-				zap.Uint("subscription_id", sub.ID),
-				zap.Uint("node_id", sn.NodeID),
-				zap.Error(err))
-		}
 		case database.SyncStatusPendingUpdate:
 			logger.Debug("processing pending_update",
 				zap.Uint("subscription_id", sub.ID),
 				zap.Uint("node_id", sn.NodeID))
-		if err := s.processPendingUpdate(ctx, &sn, sub); err != nil {
-			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-				return err
+			if err := s.processPendingUpdate(ctx, &sn, sub); err != nil {
+				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+					return err
+				}
+				logger.Warn("pending_update failed",
+					zap.Uint("subscription_id", sub.ID),
+					zap.Uint("node_id", sn.NodeID),
+					zap.Error(err))
 			}
-			logger.Warn("pending_update failed",
-				zap.Uint("subscription_id", sub.ID),
-				zap.Uint("node_id", sn.NodeID),
-				zap.Error(err))
-		}
 		}
 	}
 

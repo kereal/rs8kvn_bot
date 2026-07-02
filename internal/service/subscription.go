@@ -306,7 +306,6 @@ func (s *SubscriptionService) PlanTrafficLimitGB(ctx context.Context, telegramID
 
 // Получаем данные подписки, содержащие информацию о трафике
 func (s *SubscriptionService) GetWithTraffic(ctx context.Context, telegramID int64) (*database.Subscription, *TrafficInfo, error) {
-
 	// получили подписку
 	sub, err := s.db.GetByTelegramID(ctx, telegramID)
 	if err != nil {

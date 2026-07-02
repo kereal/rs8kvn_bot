@@ -17,7 +17,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/kereal/rs8kvn_bot/internal/bot"
 	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/interfaces"
@@ -29,9 +28,8 @@ import (
 )
 
 func testServer(t *testing.T, db interfaces.DatabaseService, cfg *config.Config) *Server {
-	botCfg := &bot.BotConfig{Username: "testbot"}
 	subSvc := service.NewSubscriptionService(db, nil, nil, nil, cfg)
-	srv := NewServer(":0", db, cfg, botCfg, subSvc, subserver.NewService(config.SubServerCacheTTL))
+	srv := NewServer(":0", db, cfg, "testbot", subSvc, subserver.NewService(config.SubServerCacheTTL))
 	return srv
 }
 
@@ -413,8 +411,6 @@ func TestHandleSubscription_DatabaseError_Returns500GenericBody(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, w.Code, "infra error must be 500, not 404")
 	assert.Equal(t, "Internal Server Error", w.Body.String(), "500 body must be generic, not 'Subscription not found'")
 }
-
-
 
 func TestHandleSubscription_CacheSubscriptionResult(t *testing.T) {
 	t.Parallel()
