@@ -335,16 +335,13 @@ The bot exposes a `/metrics` endpoint on the same port as health checks (default
 | `bot_updates_total` | Counter | command, result | Bot updates processed (success/error/rate_limited) |
 | `bot_update_errors_total` | Counter | type | Bot update errors |
 | `bot_update_duration_seconds` | Histogram | — | Bot update processing time |
-| `xui_requests_total` | Counter | operation, result | 3x-ui API requests |
-| `xui_request_duration_seconds` | Histogram | operation | 3x-ui API latency |
-| `db_queries_total` | Counter | operation, result | Database queries |
-| `db_query_duration_seconds` | Histogram | operation | Database query latency |
 | `cache_hits_total` / `cache_misses_total` | Counter | cache | Cache hit/miss (subscription, referral, subserver) |
 | `circuit_breaker_state` | Gauge | target | Circuit breaker state (0=closed, 1=open, 2=half-open) |
-| `active_subscriptions` | Gauge | — | Current active subscriptions |
-| `trial_conversions_total` | Counter | — | Trial → paid conversions |
 | `bot_orphaned_clients_removed_total` | Counter | — | Orphaned XUI clients removed |
-| `subserver_partial_sources_total` | Counter | sub_id | Subscription requests with partial source failures |
+| `subserver_source_fetch_total` | Counter | result, format | Upstream source fetch results (success/error by format) |
+| `subserver_source_fetch_duration_seconds` | Histogram | result | Upstream source fetch duration |
+| `subserver_cache_invalidations_total` | Counter | reason | Cache invalidations by reason |
+| `subserver_no_items_total` | Counter | — | Requests returning no items |
 
 **Prometheus scrape config:**
 ```yaml
@@ -444,6 +441,12 @@ sqlite3 ./data/tgvpn.db "SELECT * FROM subscriptions WHERE telegram_id = <user_i
 docker logs -f rs8kvn_bot 2>&1 | grep -E "error|failed|subscription"
 ```
 
+> **Note (v3.0+):** Node configuration is managed via the `nodes` table in the database, not env vars. `XUI_HOST`, `XUI_API_TOKEN`, and `XUI_INBOUND_ID` are seed-only (first run). Check node state:
+```sql
+SELECT id, name, type, is_active, host, subscription_url FROM nodes;
+SELECT sn.* FROM subscription_nodes sn WHERE sn.subscription_id = (SELECT id FROM subscriptions WHERE subscription_id = 'subID');
+```
+
 ---
 
 ### 5.4 Trial page returns 500
@@ -488,6 +491,21 @@ docker restart rs8kvn_bot
 
 # Check proxy logs
 docker logs rs8kvn_bot | grep "subserver"
+```
+
+**Check node state:**
+```sql
+-- Check subscription and its nodes
+SELECT s.subscription_id, s.status, n.name, n.type, n.subscription_url, n.is_active
+FROM subscriptions s
+JOIN subscription_nodes sn ON sn.subscription_id = s.id
+JOIN nodes n ON n.id = sn.node_id
+WHERE s.subscription_id = 'your-sub-id';
+
+-- Check sync state
+SELECT subscription_id, node_id, status, retry_count, last_error
+FROM subscription_nodes
+WHERE subscription_id = (SELECT id FROM subscriptions WHERE subscription_id = 'your-sub-id');
 ```
 
 ---
@@ -550,7 +568,7 @@ sqlite3 ./data/tgvpn.db "PRAGMA journal_mode=WAL;"
 
 **Fix:**
 1. Check 3x-ui panel is up: `curl -H "Authorization: Bearer $XUI_API_TOKEN" "$XUI_HOST/panel/api/server/status"`
-2. Verify `XUI_API_TOKEN` in `.env` is correct (generate new token in panel Security settings if needed)
+2. Verify `nodes.api_token` in database is correct (seed-only env var `XUI_API_TOKEN` is not read at runtime)
 3. Check panel logs for errors
 4. Retries happen automatically — check logs after ~30s for recovery
 5. DNS errors will fast-fail without retries

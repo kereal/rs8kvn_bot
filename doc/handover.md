@@ -3,7 +3,7 @@
 **Repo:** https://github.com/kereal/rs8kvn_bot
 **Module:** `rs8kvn_bot` (Go 1.25+)
 **Version:** v3.0.0
-**Branch:** `plans_and_pricing` (v3.0.0; GitFlow: `main` = production, `dev` = integration)
+**Branch:** `dev` (GitFlow: `main` = production, `dev` = integration, feature branches from dev or `plans_and_pricing`)
 
 ---
 
@@ -78,17 +78,16 @@ Handler.HandleUpdate → HandleCallback ("create_subscription")
 SubscriptionService.Create(ctx, telegramID)
         │
         ├─ Generate UUID, SubID (14 random bytes → 28 hex)
-        ├─ Build subscription URL: {XUI_HOST}/sub/{SubID}?...
+        ├─ Build subscription URL: GLOBAL_SUB_URL + SubID
         │
         ▼
-XUI Client: AddClientWithID(...)
+ensureSubscriptionNodes(ctx, sub)
         │
-        ├─ Authorize via Bearer token (no session needed)
-        ├─ Group inboundIDs by required flow
-        ├─ POST /panel/api/clients/add per compatible flow group
-        └─ Return client ID (UUID)
+        ├─ Load active nodes for plan (GetNodesByPlanID)
+        ├─ Create pending_add records in subscription_nodes
+        ├─ Best-effort SyncSubscription (async, errors don't rollback)
         │
-        ▼ (on success)
+        ▼
 Database: CreateSubscription (transaction)
         │
         ├─ Revoke old active subs for this user (UPDATE status='revoked')
@@ -103,9 +102,9 @@ Notify admin: "New subscription: @username"
         ▼
 Send message to user: subscription URL + QR code
 
-On DB error (but XUI success):
-    → Retry XUI.DeleteClient (rollback, best-effort)
-```
+Background sync (eventual consistency):
+    SyncSubscription → vpn.Client.CreateSubscription per node
+    pending_add → active on success, retry on failure
 
 ### Data Flow: Trial Activation via Landing Page
 
@@ -152,35 +151,32 @@ User opens subscription link in client
         ▼
 GET /sub/{subID}
         │
-        ├─ Validate subID format (regex: ^[a-zA-Z0-9_-]+$, no '/')
-        ├─ Check cache (Cache.Get, TTL 240s)
+        ├─ Validate subID format (regex: ^[a-zA-Z0-9_-]+$)
+        ├─ Check cache (TTL 240s)
         │
-        ├─ Cache hit?
-        │   ├─ Yes → validate subscription still active in DB (optional but done)
-        │   │         If inactive → fetch from XUI
-        │   └─ No  → fetch from XUI
+        ├─ Cache hit? → verify subscription active in DB → serve cached
+        └─ Cache miss → proceed
         │
         ▼
-Fetch from XUI (singleflight.Do — dedup concurrent requests)
-        │
-        ├─ GET /panel/api/subscriptions/:subID?...
-        └─ Parse format (VLESS/VMESS/Trojan/etc.)
+GetWithPlanAndNodes(subID) — load subscription + plan + active nodes
         │
         ▼
-Merge:
-  1. XUI subscription lines
-  2. Extra servers from SUB_EXTRA_SERVERS_FILE (if enabled)
-  3. Headers: extra headers override XUI headers
+For each active node:
+  ├─ Build sourceURL:
+  │   • 3x-ui/proxman: subscription_url + "/" + subID
+  │   • fetch: subscription_url as-is
+  ├─ FetchFromXUI(ctx, sourceURL) — HTTP GET
+  ├─ DetectFormat (JSON / Base64 / Plain)
+  └─ Aggregate subscription-userinfo headers
         │
         ▼
-Cache.Set(240s)
+Merge all sources:
+  • JSON configs → share links if mixed mode
+  • Base64/Plain → decode and join
+  • Aggregate upload/download/expire across nodes
         │
         ▼
-Write response:
-  • Content-Type based on format (usually text/plain)
-  • Extra headers (X-Custom-*, Profile-Title)
-  • No Content-Length (chunked)
-  • Body: merged subscription lines
+Cache.Set(240s) → return body with Content-Type + Subscription-Userinfo
 ```
 
 ## Stack
@@ -232,7 +228,7 @@ Write response:
 | - Docker: multi-stage build (UPX compression), non-root user, healthcheck, GHCR images
 | - CI/CD: GitHub Actions — golangci-lint, gosec, tests (race), Docker build/push
 | - Prometheus metrics — `/metrics` endpoint with HTTP, bot, XUI, DB, cache, circuit breaker, subscription metrics |
-| - VPN client abstraction — `internal/vpn/` package with `Client` interface, `NewClient` factory routing by node type (3x-ui, proxman) |
+| - VPN client abstraction — `internal/vpn/` package with `Client` interface, `NewClient` factory routing by node type (3x-ui, proxman, fetch) |
 | - Plans & pricing — `plans`, `products`, `orders` tables for subscription plan management and payment lifecycle |
 | - Orphan reconciliation — `ReconcileOrphanedClients` runs every 6h to clean up orphaned XUI clients |
 | - Subscription expire worker — background worker handling subscription expiration |
@@ -267,7 +263,7 @@ All tests pass with `-race` detector. Fuzzing enabled for critical functions.
 ### 3x-ui Integration
 - **API Token auth:** Bearer token via `Authorization` header (no session/login/CSRF/cookiejar)
 - **Node configuration:** `XUI_HOST`, `XUI_API_TOKEN`, `XUI_INBOUND_ID` are **seed-only** env vars — read on first run to populate the `nodes` table, after which nodes are managed via DB. Multi-node support via `nodes` table.
-- **VPN client abstraction:** `internal/vpn/` package provides `Client` interface with `NewClient` factory routing by `NodeType` (3x-ui, proxman). Each node gets its own VPN client instance.
+- **VPN client abstraction:** `internal/vpn/` package provides `Client` interface with `NewClient` factory routing by `NodeType` (3x-ui, proxman, fetch). Each node gets its own VPN client instance. Fetch nodes use no-op client — subscription_url fetched directly by subserver.
 - **Circuit breaker:** 5 failures → 30s open → half-open (3 attempts) → close. Monitor via `circuit_breaker_state` metric.
 - **RetryWithBackoff:** 3 retries with exponential backoff + jitter. DNS errors fast-fail.
 - **Subscription defaults:** `reset: 30` (days from creation), `expiresAt: now + 30 days`

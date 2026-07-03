@@ -247,8 +247,7 @@ Subserver not initialized.
 Non-GET request.
 
 **Notes:**
-- Singleflight deduplication prevents thundering herd on cache miss
-- If an upstream node fails, partial results from remaining nodes are still served; the `subserver_partial_sources_total` metric is incremented
+- If an upstream node fails, partial results from remaining nodes are still served; the `subserver_source_fetch_total{result="error"}` metric is incremented
 - `Content-Length` header removed after merge (chunked encoding)
 - Access logging is enabled when `SUBSERVER_ACCESS_LOG` is configured
 
@@ -275,17 +274,14 @@ Content-Type: text/plain; version=0.0.4; charset=utf-8
 | `bot_updates_total` | counter | `command`, `result` | Bot updates processed (`result`: success, error, rate_limited) |
 | `bot_update_errors_total` | counter | `type` | Errors during bot update processing |
 | `bot_update_duration_seconds` | histogram | — | Bot update processing duration |
-| `xui_requests_total` | counter | `operation`, `result` | Requests to 3x-ui / VPN nodes |
-| `xui_request_duration_seconds` | histogram | `operation` | XUI request duration |
-| `db_queries_total` | counter | `operation`, `result` | Database queries |
-| `db_query_duration_seconds` | histogram | `operation` | Database query duration |
 | `cache_hits_total` | counter | `cache` | Cache hits (`cache`: subscription, referral, subserver) |
 | `cache_misses_total` | counter | `cache` | Cache misses |
 | `circuit_breaker_state` | gauge | `target` | Circuit breaker state (0=closed, 1=open, 2=half-open) |
-| `active_subscriptions` | gauge | — | Current number of active subscriptions |
-| `trial_conversions_total` | counter | — | Trial-to-paid conversions |
 | `bot_orphaned_clients_removed_total` | counter | — | Orphaned clients removed during reconciliation |
-| `subserver_partial_sources_total` | counter | `sub_id` | Subscription requests where ≥1 source failed |
+| `subserver_source_fetch_total` | counter | `result`, `format` | Upstream source fetch results (success/error by format) |
+| `subserver_source_fetch_duration_seconds` | histogram | `result` | Upstream source fetch duration |
+| `subserver_cache_invalidations_total` | counter | `reason` | Subscription cache invalidations (not_found, status_error, revoked, expired) |
+| `subserver_no_items_total` | counter | — | Subscription requests with no items returned |
 
 **Path normalization:** Dynamic path segments are normalized for cardinality control — `/i/{code}` → `/i/:code`, `/sub/{subID}` → `/sub/:id`.
 
