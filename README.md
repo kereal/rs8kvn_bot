@@ -11,12 +11,15 @@
 - 📥 Get subscription on demand with QR code import
 - 🔗 Invite/trial landing page (`/i/{code}`) with one-click Happ setup
 - 👥 Referral system — users generate invite codes with in-memory cache + periodic sync
-- 📊 Plan-based traffic limits (nodes/plan_nodes schema)
+- 📊 Plans & pricing — plan-based traffic/device limits, products, orders, multi-node via `nodes`/`plan_nodes` schema
 - 🔗 Subscription server endpoint (`/sub/{subID}`) with multi-source aggregation, devices/IPs tracking, and profile headers, node-state synchronization via subscription_nodes table
+- 🌐 Multi-node VPN abstraction — `internal/vpn/` with `Client` interface, 3x-ui and proxman support, per-node client provisioning
+- 📈 Prometheus metrics — `/metrics` endpoint with HTTP, bot, XUI, DB, cache, circuit breaker, subscription metrics
 - 🗄️ Daily database backups with rotation, embedded migrations (000–027)
-- 🐛 Sentry error tracking
-- 🐳 Docker support with health checks
+- 🐛 Sentry error tracking (+ performance traces)
+- 🐳 Docker support with health checks, non-root user, UPX compression
 - 🧪 Unit + E2E tests (~85% coverage, race-safe, fuzzing)
+- 🔒 Security hardening — X-Forwarded-For rightmost IP (S2), URL scheme allowlist http/https (S3), web↔bot dependency isolation (A1)
 
 ## Quick Start
 
@@ -82,8 +85,10 @@ The bot exposes HTTP endpoints on port 8880:
 | `GET /healthz` | Basic health (process alive, DB and xui status) | 200/503 |
 | `GET /readyz` | Ready state (accepting requests after init) | 200/503 |
 | `GET /i/{code}` | Trial invites landing page | 200/404/429/500 |
+| `GET /metrics` | Prometheus metrics endpoint | 200 |
 | `GET /sub/{subID}` | Subscription server | 200/404/502/405 |
 | `GET /static/logo.png` | Logo image (mobile-optimized PNG) | 200/404 |
+| `POST /payment/callback` | Payment provider callback (stub) | 200/405 |
 
 ### Invite/Trial Landing Page (`/i/{code}`)
 
@@ -135,5 +140,9 @@ go build -ldflags="-s -w" -o rs8kvn_bot ./cmd/bot
 ### Project Documentation
 
 - **[Installation & Configuration](doc/installation.md)** — All setup methods, env vars, and 3x-ui instructions
-- **[Handover](doc/handover.md)** — Architecture, stack, current state, nuances
+- **[Architecture](doc/architecture.md)** — System architecture, data model, component deep dives, sync pipeline
+- **[Handover](doc/handover.md)** — Architecture overview, stack, current state, nuances
+- **[Security Policy](doc/security.md)** — Security measures, hardening checklist, incident response
+- **[API Reference](doc/api.md)** — HTTP endpoints, error codes, rate limits
+- **[Operations Guide](doc/operations.md)** — Monitoring, troubleshooting, scaling, backup/restore
 - **[.serena/instructions.md](.serena/instructions.md)** — AI assistant workflow and memory structure
