@@ -1,7 +1,7 @@
 # Operations Guide — rs8kvn_bot
 
 **Version:** 3.0.0  
-**Last updated:** 2026-04-17
+**Last updated:** 2026-07-02
 
 ---
 
@@ -319,16 +319,48 @@ kill -ABRT <pid>
 # Check Sentry dashboard for new issue
 ```
 
-### 4.6 Metrics (future)
+### 4.6 Prometheus Metrics
 
-Currently no Prometheus metrics. To add:
+The bot exposes a `/metrics` endpoint on the same port as health checks (default 8880).
 
-```go
-// In web/server.go
-prometheus.MustRegister(requestCounter, errorCounter, xuiLatency)
+**Endpoint:** `GET /metrics`
+
+**Key metrics:**
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `http_requests_total` | Counter | method, path, status | Total HTTP requests |
+| `http_request_duration_seconds` | Histogram | method, path | HTTP request latency |
+| `http_requests_in_flight` | Gauge | method, path | Current in-flight requests |
+| `bot_updates_total` | Counter | command, result | Bot updates processed (success/error/rate_limited) |
+| `bot_update_errors_total` | Counter | type | Bot update errors |
+| `bot_update_duration_seconds` | Histogram | — | Bot update processing time |
+| `xui_requests_total` | Counter | operation, result | 3x-ui API requests |
+| `xui_request_duration_seconds` | Histogram | operation | 3x-ui API latency |
+| `db_queries_total` | Counter | operation, result | Database queries |
+| `db_query_duration_seconds` | Histogram | operation | Database query latency |
+| `cache_hits_total` / `cache_misses_total` | Counter | cache | Cache hit/miss (subscription, referral, subserver) |
+| `circuit_breaker_state` | Gauge | target | Circuit breaker state (0=closed, 1=open, 2=half-open) |
+| `active_subscriptions` | Gauge | — | Current active subscriptions |
+| `trial_conversions_total` | Counter | — | Trial → paid conversions |
+| `bot_orphaned_clients_removed_total` | Counter | — | Orphaned XUI clients removed |
+| `subserver_partial_sources_total` | Counter | sub_id | Subscription requests with partial source failures |
+
+**Prometheus scrape config:**
+```yaml
+scrape_configs:
+  - job_name: 'rs8kvn_bot'
+    static_configs:
+      - targets: ['localhost:8880']
+    metrics_path: /metrics
 ```
 
----
+**Grafana dashboard ideas:**
+- HTTP error rate: `rate(http_requests_total{status=~"5.."}[5m]) / rate(http_requests_total[5m])`
+- Bot error rate: `rate(bot_updates_total{result="error"}[5m])`
+- XUI latency p99: `histogram_quantile(0.99, rate(xui_request_duration_seconds_bucket[5m]))`
+- Active subscriptions: `active_subscriptions`
+
 
 ## 5. Troubleshooting
 
@@ -514,7 +546,7 @@ sqlite3 ./data/tgvpn.db "PRAGMA journal_mode=WAL;"
 
 **Log:** `"XUI API error"`, `"retrying after backoff"`, or similar.
 
-**Note:** The circuit breaker has been removed. The system uses `RetryWithBackoff` with exponential backoff + jitter (up to 3 retries).
+**Note:** The system uses `RetryWithBackoff` with exponential backoff + jitter (up to 3 retries) and a circuit breaker (5 failures → 30s open → half-open with 3 attempts). Monitor `circuit_breaker_state` metric (0=closed, 1=open, 2=half-open).
 
 **Fix:**
 1. Check 3x-ui panel is up: `curl -H "Authorization: Bearer $XUI_API_TOKEN" "$XUI_HOST/panel/api/server/status"`
@@ -543,6 +575,33 @@ sqlite3 ./data/tgvpn.db "PRAGMA journal_mode=WAL;"
 ```
 
 **Logrotate alternative:** See section 4.3.
+
+---
+
+### 5.10 Subscription sync stuck in pending state
+
+**Symptom:** Subscription nodes remain in `pending_add`, `pending_remove`, or `pending_update` status.
+
+**Check:**
+```sql
+-- Find stuck subscription nodes
+SELECT subscription_id, node_id, status, retry_count, retry_at, last_error, updated_at
+FROM subscription_nodes
+WHERE status LIKE 'pending_%'
+ORDER BY updated_at DESC;
+```
+
+**Common causes:**
+- VPN node unreachable (check node host and API token in `nodes` table)
+- XUI panel rejecting client creation (inbound ID mismatch)
+- Network timeout to VPN node
+
+**Fix:**
+1. Check node connectivity: verify `nodes` table has correct host/api_token
+2. Review `last_error` column for specific error messages
+3. The background `SyncPendingNodes` worker retries with exponential backoff automatically
+4. For persistent stuck states, restart bot to reset worker state
+5. Check `bot_orphaned_clients_removed_total` metric for orphan reconciliation activity
 
 ---
 
@@ -676,4 +735,4 @@ limit_req_zone $binary_remote_addr zone=sub:10m rate=30r/m;
 
 ---
 
-*Last updated: 2026-04-17*
+*Last updated: 2026-07-02*
