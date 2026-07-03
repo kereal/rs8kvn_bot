@@ -13,7 +13,7 @@
 - 👥 Referral system — users generate invite codes with in-memory cache + periodic sync
 - 📊 Plans & pricing — plan-based traffic/device limits, products, orders, multi-node via `nodes`/`plan_nodes` schema
 - 🔗 Subscription server endpoint (`/sub/{subID}`) with multi-source aggregation, devices/IPs tracking, and profile headers, node-state synchronization via subscription_nodes table
-- 🌐 Multi-node VPN abstraction — `internal/vpn/` with `Client` interface, 3x-ui and proxman support, per-node client provisioning
+- 🌐 Multi-node VPN abstraction — `internal/vpn/` with `Client` interface, 3x-ui, proxman, and fetch support, per-node client provisioning
 - 📈 Prometheus metrics — `/metrics` endpoint with HTTP, bot, XUI, DB, cache, circuit breaker, subscription metrics
 - 🗄️ Daily database backups with rotation, embedded migrations (000–027)
 - 🐛 Sentry error tracking (+ performance traces)
@@ -100,7 +100,7 @@ Each user can generate an invite code via the referral flow. The landing page va
 
 ### Subscription Server (`/sub/{subID}`)
 
-Serves subscriptions with optional extra servers and custom headers. Validates `subID`, checks cache (240s TTL), fetches from 3x-ui, merges extra servers/headers from config file, returns combined response. Stale cache is used as fallback if 3x-ui is unavailable.
+Serves subscriptions with optional extra servers and custom headers. Validates `subID`, checks cache (240s TTL), fetches from all active nodes (3x-ui, proxman, fetch), merges responses, returns combined output. Fetch nodes use `subscription_url` directly; other types append `subID`.
 
 When `SUBSERVER_ACCESS_LOG` is set, each `/sub/{id}` request is appended to the configured access log file in a zap-console line without a message, caller, or field keys. The record includes timestamp, level, method, URL, response status, client IP, device headers, and User-Agent as space-separated values; values containing spaces are quoted, and empty optional values are written as `-`. The main log also records an INFO message when access logging is enabled. Access log writes are buffered asynchronously; if the file cannot be opened, the bot continues without the access log and writes an error to the main log.
 

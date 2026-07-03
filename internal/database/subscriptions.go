@@ -85,12 +85,12 @@ func (s *Service) DeleteSubscription(ctx context.Context, telegramID int64) erro
 		return fmt.Errorf("failed to delete subscription: %w", result.Error)
 	}
 	if result.RowsAffected == 0 {
-		return fmt.Errorf("no subscription found for telegram_id %d", telegramID)
+		return fmt.Errorf("no subscription found for telegram_id %d: %w", telegramID, ErrSubscriptionNotFound)
 	}
 	return nil
 }
 
-// DeleteSubscriptionByID soft-deletes a subscription by its database ID.
+// DeleteSubscriptionByID hard-deletes a subscription by its database ID.
 func (s *Service) DeleteSubscriptionByID(ctx context.Context, id uint) (*Subscription, error) {
 	var deleted Subscription
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {

@@ -821,7 +821,7 @@ The `SyncService` manages synchronization of subscriptions with VPN nodes via a 
 ┌──────────────┐ ◄────────────────────────────────┘
 │pending_remove│ ── delete row ──→ (gone)
 └──────────────┘
-``+
+```
 ### Operations
 
 | Method | Description |
@@ -863,16 +863,13 @@ The bot exposes a `/metrics` endpoint (via `promhttp.Handler()`) on the HTTP ser
 | `bot_updates_total` | Counter | command, result | Bot updates (success/error/rate_limited) |
 | `bot_update_errors_total` | Counter | type | Bot update errors |
 | `bot_update_duration_seconds` | Histogram | — | Bot update processing time |
-| `xui_requests_total` | Counter | operation, result | 3x-ui API requests |
-| `xui_request_duration_seconds` | Histogram | operation | 3x-ui API latency |
-| `db_queries_total` | Counter | operation, result | Database queries |
-| `db_query_duration_seconds` | Histogram | operation | Database query latency |
+| `subserver_source_fetch_total` | Counter | `result`, `format` | Upstream source fetch results |
+| `subserver_source_fetch_duration_seconds` | Histogram | `result` | Upstream source fetch duration |
 | `cache_hits_total` / `cache_misses_total` | Counter | cache | Cache hit/miss |
 | `circuit_breaker_state` | Gauge | target | CB state (0=closed, 1=open, 2=half-open) |
-| `active_subscriptions` | Gauge | — | Current active subscriptions |
-| `trial_conversions_total` | Counter | — | Trial → paid conversions |
 | `bot_orphaned_clients_removed_total` | Counter | — | Orphaned clients removed |
-| `subserver_partial_sources_total` | Counter | sub_id | Partial source failures |
+| `subserver_cache_invalidations_total` | Counter | `reason` | Cache invalidations by reason |
+| `subserver_no_items_total` | Counter | — | Requests returning no items |
 
 **Path normalization:** `/i/{code}` → `/i/:code`, `/sub/{id}` → `/sub/:id` (reduces cardinality).
 
