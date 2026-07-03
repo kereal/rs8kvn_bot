@@ -30,6 +30,7 @@ type NodeType string
 const (
 	NodeType3xUI    NodeType = "3x-ui"
 	NodeTypeProxman NodeType = "proxman"
+	NodeTypeFetch   NodeType = "fetch"
 )
 
 // SubscriptionStatus represents the lifecycle state of a subscription.

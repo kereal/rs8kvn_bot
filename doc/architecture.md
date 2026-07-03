@@ -80,7 +80,7 @@ rs8kvn_bot — production-ready Telegram bot for distributing VLESS+Reality+Visi
 │  │  │  SyncService     │              │      VPN Clients        │ │ │
 │  │  │ • Reconcile      │              │  • 3x-ui (ThreeXUI)     │ │ │
 │  │  │ • SyncPending    │              │  • proxman (Proxman)    │ │ │
-│  │  │ • process*       │              │  • Node type routing    │ │ │
+│  │  │ • process*       │              │  • fetch (FetchClient)  │ │ │
 │  │  └────────┬─────────┘              └─────────────┬───────────┘ │ │
 │  │           │                                      │               │ │
 │  │  ┌────────▼─────────┐                         ┌─┴─────────────┐ │ │
@@ -157,7 +157,8 @@ internal/
 ├── vpn/                # VPN client abstraction (multi-node, multi-type)
 │   ├── client.go            # Client interface, Config, NewClient factory, error classification
 │   ├── threex_ui.go         # 3x-ui specific client implementation
-│   └── proxman.go           # proxman client implementation
+│   ├── proxman.go           # proxman client implementation
+│   └── fetch.go             # fetch client (read-only HTTP, no-op provisioning)
 ├── xui/              # Legacy 3x-ui API client (used by vpn/threex_ui.go)
 │   ├── client.go            # API + RetryWithBackoff + singleflight
 │   ├── breaker.go           # Circuit breaker (5/30s/3-half-open)
@@ -794,7 +795,8 @@ type Client interface {
 
 **Factory:** `NewClient(cfg Config) (Client, error)` routes by `NodeType`:
 - `NodeType3xUI` → `ThreeXUIClient` (wraps `xui.Client`, iterates inbound IDs)
-- `NodeTypeProxman` → `ProxmanClient` (direct HTTP API)
+- `NodeTypeProxman` → `ProxmanClient` (direct HTTP webhook, no-op update)
+- `NodeTypeFetch` → `FetchClient` (read-only HTTP fetch, all methods no-op)
 
 **Error classification:**
 - `ErrSubscriptionAlreadyExists` — wrapped when create fails with "already exists"/"duplicate"
@@ -804,6 +806,61 @@ type Client interface {
 **Per-node clients:** Each `database.Node` gets its own `vpn.Client` instance created at startup. The `SyncService` holds a `map[uint]vpn.Client` keyed by node ID.
 
 ---
+
+## Node Types Reference
+
+The system supports three node types, stored in the `nodes.type` column (`VARCHAR(10)`). Each type defines how the node provisions VPN clients and how the subserver fetches proxy configuration.
+
+### `3x-ui` — 3X-UI Panel
+
+Full lifecycle management via the 3x-ui REST API.
+
+| Operation | Behaviour |
+|-----------|-----------|
+| Create | `AddClientWithID` on each inbound ID via `xui.Client` |
+| Update | `UpdateClient` (traffic limits, expiry) |
+| Delete | `DeleteClient` by email |
+| Subserver URL | `subscription_url + "/" + subID` |
+
+**End-to-end:**
+1. Subscription created → `pending_add` record in `subscription_nodes`
+2. `SyncService` calls `ThreeXUIClient.CreateSubscription` → adds client on panel → status `active`
+3. Subserver request `/sub/{id}` → HTTP GET to `subscription_url/subID` → 3x-ui returns proxy configs
+4. Subscription deleted → `pending_remove` → `DeleteClient` on panel → row removed
+
+### `proxman` — Proxman Webhook
+
+Provisioning via HTTP webhook events. No update operation (webhook payload carries no traffic/expiry fields).
+
+| Operation | Behaviour |
+|-----------|-----------|
+| Create | POST `subscription.create` event to node host |
+| Update | No-op (returns `nil`) |
+| Delete | POST `subscription.delete` event to node host |
+| Subserver URL | `subscription_url + "/" + subID` |
+
+**End-to-end:**
+1. Subscription created → `pending_add` → `ProxmanClient.CreateSubscription` sends webhook → status `active`
+2. Subserver request → HTTP GET to `subscription_url/subID` → proxman returns proxy configs
+3. Subscription deleted → `pending_remove` → `ProxmanClient.DeleteSubscription` sends webhook → row removed
+
+### `fetch` — Read-Only HTTP Fetch
+
+No provisioning at all. The `subscription_url` points directly to an HTTP endpoint that returns proxy configuration. All `vpn.Client` methods are no-ops.
+
+| Operation | Behaviour |
+|-----------|-----------|
+| Create | No-op (returns `nil`) |
+| Update | No-op (returns `nil`) |
+| Delete | No-op (returns `nil`) |
+| Subserver URL | `subscription_url` used as-is (no `subID` appended) |
+
+**End-to-end:**
+1. Subscription created → `pending_add` → `FetchClient.CreateSubscription` (no-op) → status `active`
+2. Subserver request `/sub/{id}` → HTTP GET to `subscription_url` directly → upstream returns proxy configs
+3. Subscription deleted → `pending_remove` → `FetchClient.DeleteSubscription` (no-op) → row removed
+
+The `fetch` node type is useful for aggregating external subscription sources that do not support client management — the bot simply proxies their response to the end user.
 
 ## Subscription Sync Pipeline (internal/service/sync.go)
 
