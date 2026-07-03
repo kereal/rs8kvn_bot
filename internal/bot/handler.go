@@ -195,7 +195,7 @@ func (h *Handler) sendInviteLink(ctx context.Context, chatID int64, messageID in
 	return h.referral.sendInviteLink(ctx, chatID, messageID)
 }
 
-// Callback delegate
+// HandleCallback delegates callback handling to the callback handler.
 func (h *Handler) HandleCallback(ctx context.Context, update tgbotapi.Update) error {
 	if h.cbHandler == nil {
 		return errors.New("handler: cbHandler is nil, use NewHandler to construct Handler")
