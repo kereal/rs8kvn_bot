@@ -163,6 +163,46 @@ var (
 		},
 		[]string{"sub_id"},
 	)
+
+	// SubserverSourceFetchTotal is a counter of upstream source fetches
+	// with labels: result (success|error), format (json|base64|plain|unknown).
+	SubserverSourceFetchTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "subserver_source_fetch_total",
+			Help: "Total upstream source fetches by result and detected format",
+		},
+		[]string{"result", "format"},
+	)
+
+	// SubserverSourceFetchDuration is a histogram of time spent fetching a
+	// single upstream subscription source, with label: result (success|error).
+	SubserverSourceFetchDuration = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "subserver_source_fetch_duration_seconds",
+			Help:    "Time spent fetching a single upstream subscription source",
+			Buckets: []float64{0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10},
+		},
+		[]string{"result"},
+	)
+
+	// SubserverCacheInvalidationsTotal is a counter of cache invalidations
+	// with label: reason (revoked|expired|status_error|not_found).
+	SubserverCacheInvalidationsTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "subserver_cache_invalidations_total",
+			Help: "Cache invalidations by reason",
+		},
+		[]string{"reason"},
+	)
+
+	// SubserverNoItemsTotal is a counter of requests where no subscription
+	// items could be collected from any source.
+	SubserverNoItemsTotal = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "subserver_no_items_total",
+			Help: "Total subscription requests with no items collected",
+		},
+	)
 )
 
 // InstrumentHTTP middleware records metrics for HTTP requests.
