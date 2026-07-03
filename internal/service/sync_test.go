@@ -224,6 +224,45 @@ func TestSyncService_SyncNodes_SkipsUnknownNodeType(t *testing.T) {
 	assert.NotNil(t, rows[0].LastError, "last_error should be set")
 }
 
+func TestSyncService_SyncNodes_FetchType_PendingAddBecomesActive(t *testing.T) {
+	t.Parallel()
+
+	db, err := testutil.NewTestDatabaseService(t)
+	require.NoError(t, err)
+	ctx := context.Background()
+
+	plan := &database.Plan{Name: "test-plan-fetch", DevicesLimit: 1, TrafficLimit: 1024}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(plan).Error)
+
+	fetchNode := &database.Node{Name: "fetch-node", Type: database.NodeTypeFetch, IsActive: true, Host: "http://fetch", APIToken: "token", InboundIDs: `[1]`}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(fetchNode).Error)
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(&database.PlanNode{PlanID: plan.ID, NodeID: fetchNode.ID}).Error)
+
+	sub := &database.Subscription{
+		TelegramID:     8888,
+		Username:       "fetchuser",
+		ClientID:       "c-fetch",
+		SubscriptionID: "s-fetch",
+		Status:         "active",
+		PlanID:         plan.ID,
+		ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
+	}
+	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
+	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: fetchNode.ID, Status: database.SyncStatusPendingAdd}))
+
+	fetchClient := vpn.NewFetchClient()
+	svc := NewSyncService(db, map[uint]vpn.Client{fetchNode.ID: fetchClient}, []database.Node{*fetchNode})
+
+	err = svc.SyncSubscription(ctx, sub.ID)
+	require.NoError(t, err)
+
+	rows, err := db.GetBySubscriptionID(ctx, sub.ID)
+	require.NoError(t, err)
+	assert.Len(t, rows, 1)
+	assert.Equal(t, database.SyncStatusActive, rows[0].Status, "fetch node pending_add should become active via no-op CreateSubscription")
+	assert.Equal(t, 0, rows[0].RetryCount, "no retry expected for no-op fetch client")
+}
+
 func TestSyncService_ReconcilePlanNodes_ReactivatePendingRemove(t *testing.T) {
 	t.Parallel()
 

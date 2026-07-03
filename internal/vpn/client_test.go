@@ -96,6 +96,32 @@ func TestNewClient_UnknownType(t *testing.T) {
 	assert.ErrorContains(t, err, "unsupported node type")
 }
 
+func TestNewClient_Fetch_Success(t *testing.T) {
+	t.Parallel()
+
+	client, err := NewClient(Config{Type: database.NodeTypeFetch})
+	assert.NoError(t, err)
+	assert.NotNil(t, client)
+	assert.IsType(t, &FetchClient{}, client)
+}
+
+func TestFetchClient_AllNoOps(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	provision := SubscriptionProvision{
+		ClientID: "client-123",
+		Username: "testuser",
+		SubID:    "sub-456",
+	}
+
+	client := NewFetchClient()
+	assert.NoError(t, client.CreateSubscription(ctx, provision))
+	assert.NoError(t, client.UpdateSubscription(ctx, provision))
+	assert.NoError(t, client.DeleteSubscription(ctx, provision))
+	assert.NoError(t, client.Close())
+}
+
 type mockXUIClient struct{}
 
 func (m *mockXUIClient) Ping(ctx context.Context) error {
