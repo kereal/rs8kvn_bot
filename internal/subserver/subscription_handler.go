@@ -1,3 +1,6 @@
+// Package subserver implements the subscription delivery endpoint (/sub/:id)
+// that aggregates proxy configurations from multiple 3x-ui upstream sources,
+// caches responses, and tracks requesting devices and IPs for analytics.
 package subserver
 
 import (

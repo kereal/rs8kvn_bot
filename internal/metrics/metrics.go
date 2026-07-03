@@ -1,3 +1,7 @@
+// Package metrics defines Prometheus collectors and HTTP middleware for
+// observability across the bot, web, subserver, xui, and service layers.
+// All collectors are registered at init time via promauto, so they appear
+// on the /metrics endpoint without explicit registration.
 package metrics
 
 import (
@@ -149,6 +153,8 @@ var (
 			Help: "Total number of trial conversions to paid subscriptions",
 		},
 	)
+	// OrphanedClientsRemovedTotal counts XUI clients/subscriptions removed
+	// during background reconciliation of orphaned entries.
 	OrphanedClientsRemovedTotal = promauto.NewCounter(
 		prometheus.CounterOpts{
 			Name: "bot_orphaned_clients_removed_total",
@@ -156,6 +162,12 @@ var (
 		},
 	)
 
+	// SubserverPartialSourcesTotal counts subscription requests where at least
+	// one upstream source failed to respond. Label: sub_id.
+	//
+	// Deprecated: unused — no code path increments this metric. Partial source
+	// failures are now observable via subserver_source_fetch_total{result="error"}.
+	// Scheduled for removal; see doc/subserver_metrics_audit.md.
 	SubserverPartialSourcesTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "subserver_partial_sources_total",
