@@ -253,11 +253,11 @@ func (h *Handler) HandleBroadcast(ctx context.Context, update tgbotapi.Update) e
 				wg.Add(1)
 				go func(tg int64) {
 					defer logger.Recover("Broadcast worker")
-					defer func() {
-						<-sem
-						time.Sleep(50 * time.Millisecond)
-					}()
 					defer wg.Done()
+					defer func() {
+						time.Sleep(50 * time.Millisecond)
+						<-sem
+					}()
 
 					select {
 					case <-ctx.Done():

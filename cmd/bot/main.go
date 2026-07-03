@@ -471,6 +471,17 @@ func main() {
 	// Create bot handler
 	handler := bot.NewHandler(botAPI, cfg, dbService, legacyXUIClient, botConfig, subService, getVersion())
 
+	// Compose cache invalidation: invalidate both the bot subscription cache
+	// and the subserver response cache. NewHandler wired invalidateBySubID to
+	// the bot cache only; we override it here so Delete/Revoke/Expire also
+	// evict the subserver entry (otherwise revoked subs serve stale config
+	// for up to SubServerCacheTTL).
+	botCache := handler.Cache()
+	subService.SetInvalidateBySubIDFunc(func(subID string) {
+		botCache.InvalidateBySubID(subID)
+		subServer.InvalidateCache(subID)
+	})
+
 	// Initialize and start web server (health + trial pages)
 	webServer, err := startWebServer(subService, cfg, botConfig, subServer, dbService, legacyXUIClient)
 	if err != nil {
