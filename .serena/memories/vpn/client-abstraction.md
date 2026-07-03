@@ -27,6 +27,7 @@ type Client interface {
 ## Implementations
 - **`ThreeXUIClient`** (`internal/vpn/threex_ui.go`): адаптер над `interfaces.XUIClient`
 - `ProxmanClient` (`internal/vpn/proxman.go`): HTTP webhook client (`subscription.delete` event); response `"duplicate"` → `ErrSubscriptionAlreadyExists`; other errors classified via `classifyDeleteSubscriptionError`
+- `FetchClient` (`internal/vpn/fetch.go`): read-only HTTP fetch node. All methods (Create/Update/Delete/Close) — no-op. `subscription_url` используется subserver'ом напрямую (без добавления subID). Не управляет VPN-клиентами, только отдаёт proxy-данные по HTTP.
 
 ## Usage
 `SyncService` берёт `map[uint]vpn.Client` и выбирает клиент по node ID.
