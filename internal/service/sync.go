@@ -280,7 +280,7 @@ func (s *SyncService) syncNodes(ctx context.Context, sub *database.Subscription,
 			continue
 		}
 		switch nodeType {
-		case database.NodeType3xUI, database.NodeTypeProxman:
+		case database.NodeType3xUI, database.NodeTypeProxman, database.NodeTypeFetch:
 		default:
 			logger.Warn("unsupported node type, skipping",
 				zap.Uint("subscription_id", sub.ID),
