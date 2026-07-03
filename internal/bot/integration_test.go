@@ -393,9 +393,9 @@ func TestHandler_GetMainMenuContent_Admin(t *testing.T) {
 	f := NewTestFixture(t)
 	defer f.Close()
 
-	_, _ = f.Handler.getMainMenuContent(context.Background(), "testuser", true, f.AdminChatID)
+	_, _ = f.Handler.getMainMenuContent(context.Background(), "testuser", true, f.AdminChatID, nil)
 
-	text, keyboard := f.Handler.getMainMenuContent(context.Background(), "testuser", false, f.UserChatID)
+	text, keyboard := f.Handler.getMainMenuContent(context.Background(), "testuser", false, f.UserChatID, nil)
 
 	assert.Contains(t, text, "testuser")
 	assert.NotEmpty(t, keyboard.InlineKeyboard)

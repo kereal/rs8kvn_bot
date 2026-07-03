@@ -252,6 +252,34 @@ The following environment variables are **not** part of the runtime configuratio
 
 > Once the `nodes` table is populated, these env vars are ignored on subsequent starts. To add or modify nodes, edit the `nodes` table directly (or via the bot's admin tooling). At runtime the bot loads node configuration from the DB, not from env.
 
+### Adding Nodes via SQL
+
+Nodes are managed through the `nodes` table. To add a new node, insert a row and link it to a plan:
+
+```sql
+-- Add a 3x-ui node
+INSERT INTO nodes (name, is_active, host, api_token, inbound_ids, subscription_url, type)
+VALUES ('main', 1, 'http://panel:2053', 'your-token', '[1]', 'http://panel:2053/sub/', '3x-ui');
+
+-- Add a proxman node
+INSERT INTO nodes (name, is_active, host, api_token, inbound_ids, subscription_url, type)
+VALUES ('proxman1', 1, 'http://proxman:8080', 'your-token', '[]', 'http://proxman:8080/sub/', 'proxman');
+
+-- Add a fetch node (read-only HTTP source, no API token needed)
+INSERT INTO nodes (name, is_active, host, api_token, inbound_ids, subscription_url, type)
+VALUES ('external', 1, '', '', '[]', 'https://external-source.com/raw-proxy', 'fetch');
+
+-- Link node to a plan (replace IDs as needed)
+INSERT INTO plan_nodes (plan_id, node_id) VALUES (1, <node_id>);
+```
+
+**Node types:**
+|Type|Host|API Token|Subscription URL|Description|
+|---|---|---|---|---|
+|`3x-ui`|Required|Required|`http://panel/sub/`|Full CRUD via 3x-ui API|
+|`proxman`|Required|Required|`http://proxman/sub/`|Webhook create/delete|
+|`fetch`|Empty|Empty|`https://source/raw`|Read-only HTTP fetch, URL used as-is|
+
 ### Security Notes
 
 - **`GLOBAL_SUB_URL`** must use **HTTPS** in production — subscription links are distributed to users and must not leak over plain HTTP. The URL is validated to be a well-formed `http` or `https` URL.
