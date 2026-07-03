@@ -12,6 +12,7 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/interfaces"
 	"github.com/kereal/rs8kvn_bot/internal/logger"
+	"github.com/kereal/rs8kvn_bot/internal/metrics"
 
 	"go.uber.org/zap"
 )
@@ -39,8 +40,10 @@ func HandleSubscription(ctx context.Context, db interfaces.DatabaseService, subS
 		if err != nil {
 			subSvc.InvalidateCache(cacheKey)
 			if errors.Is(err, database.ErrSubscriptionNotFound) {
+				metrics.SubserverCacheInvalidationsTotal.WithLabelValues("not_found").Inc()
 				return nil, ErrSubscriptionNotFound
 			}
+			metrics.SubserverCacheInvalidationsTotal.WithLabelValues("status_error").Inc()
 			logger.Error("Cache status check failed, cache invalidated",
 				zap.String("sub_id", subID),
 				zap.Error(err))
@@ -49,6 +52,11 @@ func HandleSubscription(ctx context.Context, db interfaces.DatabaseService, subS
 		// If the subscription is no longer active or expired, invalidate the cache.
 		if status != "active" || (!expiryTime.IsZero() && time.Now().After(expiryTime)) {
 			subSvc.InvalidateCache(cacheKey)
+			invalidReason := "revoked"
+			if status == "active" {
+				invalidReason = "expired"
+			}
+			metrics.SubserverCacheInvalidationsTotal.WithLabelValues(invalidReason).Inc()
 			logger.Warn("Cache invalidated: subscription no longer active",
 				zap.String("sub_id", subID),
 				zap.String("status", status),
@@ -113,8 +121,12 @@ func HandleSubscription(ctx context.Context, db interfaces.DatabaseService, subS
 		sourceURL := srcSubURL + subID
 
 		// Fetch the upstream subscription response from the source.
+		fetchStart := time.Now()
 		xuiResp, err := FetchFromXUI(ctx, sourceURL)
+		fetchDuration := time.Since(fetchStart).Seconds()
 		if err != nil {
+			metrics.SubserverSourceFetchTotal.WithLabelValues("error", "unknown").Inc()
+			metrics.SubserverSourceFetchDuration.WithLabelValues("error").Observe(fetchDuration)
 			logger.Error("Failed to fetch from node",
 				zap.String("sub_id", subID),
 				zap.String("source", src.Name),
@@ -131,6 +143,8 @@ func HandleSubscription(ctx context.Context, db interfaces.DatabaseService, subS
 
 		// Detect response format and log source details.
 		format := DetectFormat(body)
+		metrics.SubserverSourceFetchTotal.WithLabelValues("success", format.String()).Inc()
+		metrics.SubserverSourceFetchDuration.WithLabelValues("success").Observe(fetchDuration)
 		logger.Debug("Node response received",
 			zap.String("sub_id", subID),
 			zap.String("source", src.Name),
@@ -227,6 +241,7 @@ func HandleSubscription(ctx context.Context, db interfaces.DatabaseService, subS
 
 	// No servers collected from any source.
 	if len(allItems) == 0 {
+		metrics.SubserverNoItemsTotal.Inc()
 		return nil, ErrNoSubscriptionItems
 	}
 
