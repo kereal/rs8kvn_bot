@@ -79,6 +79,8 @@ func classifyDeleteSubscriptionError(err error) error {
 	return err
 }
 
+var _ Client = (*FetchClient)(nil)
+
 // NewClient creates a VPN client based on the node type.
 func NewClient(cfg Config) (Client, error) {
 	switch cfg.Type {
@@ -89,6 +91,8 @@ func NewClient(cfg Config) (Client, error) {
 		return NewThreeXUIClient(cfg.XUIClient, cfg.InboundIDs), nil
 	case database.NodeTypeProxman:
 		return NewProxmanClient(cfg.Host, cfg.APIToken), nil
+	case database.NodeTypeFetch:
+		return NewFetchClient(), nil
 	default:
 		return nil, fmt.Errorf("unsupported node type: %s", cfg.Type)
 	}

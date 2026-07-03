@@ -117,11 +117,16 @@ func HandleSubscription(ctx context.Context, db interfaces.DatabaseService, subS
 			continue
 		}
 
-		srcSubURL := src.SubscriptionURL
-		if srcSubURL != "" && !strings.HasSuffix(srcSubURL, "/") {
-			srcSubURL += "/"
+		var sourceURL string
+		if src.Type == database.NodeTypeFetch {
+			sourceURL = src.SubscriptionURL
+		} else {
+			srcSubURL := src.SubscriptionURL
+			if !strings.HasSuffix(srcSubURL, "/") {
+				srcSubURL += "/"
+			}
+			sourceURL = srcSubURL + subID
 		}
-		sourceURL := srcSubURL + subID
 
 		// Fetch the upstream subscription response from the source.
 		fetchStart := time.Now()

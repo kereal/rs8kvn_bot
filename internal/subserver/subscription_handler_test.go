@@ -344,6 +344,50 @@ func TestHandleSubscription_MultipleNodes_AggregatesResponses(t *testing.T) {
 	assert.Contains(t, bodyStr, "vless://uuid2@")
 }
 
+func TestHandleSubscription_FetchNode_UsesURLDirectly(t *testing.T) {
+	t.Parallel()
+
+	// Fetch node: the upstream URL is used as-is, without appending subID.
+	// The server verifies it receives the exact URL path (no /sub-xxx suffix).
+	vlessLink := "vless://uuid@fetch-server:443?encryption=none#FetchNode"
+
+	var requestedPath string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestedPath = r.URL.Path
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(vlessLink))
+	}))
+	defer ts.Close()
+
+	mockDB := testutil.NewDatabaseService()
+	svc := newTestSubSvc(t)
+	ctx := context.Background()
+
+	mockDB.GetWithPlanAndNodesFunc = func(ctx context.Context, subID string) (*database.SubscriptionFull, error) {
+		return &database.SubscriptionFull{
+			Subscription: database.Subscription{ID: 7, SubscriptionID: "sub-fetch", Status: "active"},
+			Plan:         database.Plan{ID: 1, Name: "test", TrafficLimit: 0},
+			Nodes: []database.Node{
+				{ID: 1, Name: "fetch-node", IsActive: true, Type: database.NodeTypeFetch, SubscriptionURL: ts.URL + "/raw-proxy"},
+			},
+		}, nil
+	}
+	mockDB.UpdateDevicesFunc = func(ctx context.Context, id uint, devicesJSON string) error { return nil }
+	mockDB.UpdateIPsFunc = func(ctx context.Context, id uint, ipsJSON string) error { return nil }
+
+	result, err := HandleSubscription(ctx, mockDB, svc, "sub-fetch", "1.2.3.4", nil)
+	require.NoError(t, err)
+	assert.NotNil(t, result.Body)
+
+	// Verify the server received the exact URL path, not path + subID
+	assert.Equal(t, "/raw-proxy", requestedPath)
+
+	// Verify the proxy data was returned
+	decoded, decErr := base64.StdEncoding.DecodeString(string(result.Body))
+	require.NoError(t, decErr)
+	assert.Contains(t, string(decoded), "vless://uuid@fetch-server")
+}
+
 // ==================== UpdateDevices Tests ====================
 
 func TestUpdateDevices_NewDevice(t *testing.T) {
