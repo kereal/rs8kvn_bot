@@ -48,6 +48,7 @@ Instead, contact us privately:
 |-----------|------------|
 | Telegram bot | User identification via `chat_id`; admin commands check `TELEGRAM_ADMIN_ID` |
 | VPN panels (3x-ui / proxman) | API token per node (`nodes.api_token`) via Bearer header over HTTPS |
+| Fetch nodes | No API token; `subscription_url` fetched via HTTP GET (no client management) |
 | Trial Telegram IDs | Positive = bound users, Negative = unbound trial subscriptions, 0 = unused |
 
 ### 2. Input Validation
@@ -100,7 +101,7 @@ Instead, contact us privately:
 ### 7. Architecture Security
 
 - **Decoupled web layer (A1):** The `web` package no longer imports the `bot` package. `NewServer` accepts a `botUsername string` instead of `*bot.BotConfig`, reducing coupling and attack surface — a compromise of the web/subscription server cannot reach into bot internals.
-- **VPN abstraction layer:** `internal/vpn/` defines a `Client` interface (`CreateSubscription`, `UpdateSubscription`, `DeleteSubscription`) with a factory (`NewClient()`) that routes by `NodeType` (3x-ui, proxman). Panel-specific logic is isolated; adding a new panel type does not touch service code.
+- **VPN abstraction layer:** `internal/vpn/` defines a `Client` interface (`CreateSubscription`, `UpdateSubscription`, `DeleteSubscription`) with a factory (`NewClient()`) that routes by `NodeType` (3x-ui, proxman, fetch). Panel-specific logic is isolated; adding a new panel type does not touch service code. Fetch nodes use a no-op client (all methods return `nil`) and serve proxy data via direct HTTP GET to `subscription_url`.
 - **Error classification:** Typed errors (`ErrSubscriptionAlreadyExists`, `ErrSubscriptionNotFound`) prevent information leakage through generic error messages.
 
 ### 8. VPN Panel API Token Management
@@ -185,6 +186,7 @@ Instead, contact us privately:
 | No request signing for API | Bearer token only | Use HTTPS + rotate token regularly |
 | Trial rate limit per IP (not per user) | IPs can be changed via VPN | Acceptable for free tier; paid users get unique links |
 | Extra servers file path validation | Could be stricter (currently prevents traversal but allows any absolute path within readable FS) | Future: restrict to `./data/` subdirectory only |
+| Fetch node SSRF | `subscription_url` can point to arbitrary internal addresses | Restrict via firewall; do not use fetch nodes with untrusted URLs; validate `subscription_url` points to expected hosts |
 
 ---
 
