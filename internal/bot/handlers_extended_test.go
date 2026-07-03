@@ -354,7 +354,7 @@ func TestGetMainMenuContent_Scenarios(t *testing.T) {
 	h := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, cfg.DonateCardNumber, cfg.DonateURL, cfg.SiteURL)}
 
 	t.Run("content for user without subscription", func(t *testing.T) {
-		text, keyboard := h.getMainMenuContent(context.Background(), "TestUser", false, 654321)
+		text, keyboard := h.getMainMenuContent(context.Background(), "TestUser", false, 654321, nil)
 
 		assert.Contains(t, text, "TestUser")
 		assert.Contains(t, text, "получить подписку")
@@ -362,14 +362,14 @@ func TestGetMainMenuContent_Scenarios(t *testing.T) {
 	})
 
 	t.Run("content for user with subscription", func(t *testing.T) {
-		text, keyboard := h.getMainMenuContent(context.Background(), "TestUser", true, 654321)
+		text, keyboard := h.getMainMenuContent(context.Background(), "TestUser", true, 654321, nil)
 
 		assert.Contains(t, text, "TestUser")
 		assert.GreaterOrEqual(t, len(keyboard.InlineKeyboard), 2)
 	})
 
 	t.Run("content for admin user", func(t *testing.T) {
-		text, keyboard := h.getMainMenuContent(context.Background(), "AdminUser", true, 123456)
+		text, keyboard := h.getMainMenuContent(context.Background(), "AdminUser", true, 123456, nil)
 
 		assert.Contains(t, text, "AdminUser")
 		lastRow := keyboard.InlineKeyboard[len(keyboard.InlineKeyboard)-1]
@@ -384,7 +384,7 @@ func TestGetMainMenuContent_Scenarios(t *testing.T) {
 	})
 
 	t.Run("content for admin without subscription", func(t *testing.T) {
-		text, keyboard := h.getMainMenuContent(context.Background(), "AdminUser", false, 123456)
+		text, keyboard := h.getMainMenuContent(context.Background(), "AdminUser", false, 123456, nil)
 
 		assert.Contains(t, text, "AdminUser")
 		lastRow := keyboard.InlineKeyboard[len(keyboard.InlineKeyboard)-1]
@@ -399,14 +399,14 @@ func TestGetMainMenuContent_Scenarios(t *testing.T) {
 	})
 
 	t.Run("content with unicode username", func(t *testing.T) {
-		text, _ := h.getMainMenuContent(context.Background(), "用户🎉名", true, 654321)
+		text, _ := h.getMainMenuContent(context.Background(), "用户🎉名", true, 654321, nil)
 
 		assert.Contains(t, text, "用户🎉名")
 	})
 
 	t.Run("content with very long username", func(t *testing.T) {
 		longName := strings.Repeat("VeryLongUserName", 10)
-		text, _ := h.getMainMenuContent(context.Background(), longName, true, 654321)
+		text, _ := h.getMainMenuContent(context.Background(), longName, true, 654321, nil)
 
 		assert.Contains(t, text, longName)
 	})
@@ -610,7 +610,7 @@ func TestGetMainMenuContent_SpecialUsernameChars(t *testing.T) {
 
 	for _, username := range specialUsernames {
 		t.Run(fmt.Sprintf("username_len_%d", len(username)), func(t *testing.T) {
-			text, _ := h.getMainMenuContent(context.Background(), username, true, 456)
+			text, _ := h.getMainMenuContent(context.Background(), username, true, 456, nil)
 			assert.Contains(t, text, username)
 		})
 	}

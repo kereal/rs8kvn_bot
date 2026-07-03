@@ -58,7 +58,7 @@ func (c *CommandHandler) HandleStart(ctx context.Context, update tgbotapi.Update
 	sub, err := c.h.db.GetByTelegramID(ctx, chatID)
 	hasSubscription := err == nil && sub != nil && sub.Status == "active"
 
-	text, keyboard := c.h.getMainMenuContent(ctx, username, hasSubscription, chatID)
+	text, keyboard := c.h.getMainMenuContent(ctx, username, hasSubscription, chatID, sub)
 	msg := tgbotapi.NewMessage(chatID, text)
 	msg.ReplyMarkup = &keyboard
 	c.h.send(ctx, msg)
@@ -154,7 +154,7 @@ func (c *CommandHandler) handleShareStart(ctx context.Context, chatID int64, use
 			zap.Int64("chat_id", chatID),
 			zap.String("invite_code", inviteCode))
 
-		text, keyboard := c.h.getMainMenuContent(ctx, username, true, chatID)
+		text, keyboard := c.h.getMainMenuContent(ctx, username, true, chatID, sub)
 		msg := tgbotapi.NewMessage(chatID, text)
 		msg.ReplyMarkup = &keyboard
 		c.h.send(ctx, msg)
@@ -169,7 +169,7 @@ func (c *CommandHandler) handleShareStart(ctx context.Context, chatID int64, use
 				zap.String("invite_code", inviteCode),
 				zap.Error(err))
 
-			text, keyboard := c.h.getMainMenuContent(ctx, username, false, chatID)
+			text, keyboard := c.h.getMainMenuContent(ctx, username, false, chatID, nil)
 			msg := tgbotapi.NewMessage(chatID, text)
 			msg.ReplyMarkup = &keyboard
 			c.h.send(ctx, msg)
@@ -179,7 +179,7 @@ func (c *CommandHandler) handleShareStart(ctx context.Context, chatID int64, use
 		logger.Error("Failed to validate invite code (infrastructure error)",
 			zap.String("invite_code", inviteCode),
 			zap.Error(err))
-		text, keyboard := c.h.getMainMenuContent(ctx, username, false, chatID)
+		text, keyboard := c.h.getMainMenuContent(ctx, username, false, chatID, nil)
 		msg := tgbotapi.NewMessage(chatID, text)
 		msg.ReplyMarkup = &keyboard
 		c.h.send(ctx, msg)
