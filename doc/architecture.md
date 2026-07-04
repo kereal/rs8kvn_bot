@@ -540,6 +540,7 @@ SIGQUIT (kill -3) → core dump (not handled by us)
 │ currency            *string   size:3                         │
 │ devices              text     default:'[]' (JSON array)      │
 │ ips                  text     default:'[]' (JSON array)      │
+│ last_request        *time     INDEX (NULL until first /sub)  │
 │ created_at           time     autoCreate                     │
 │ updated_at           time     autoUpdate                     │
 └─────────────────────────────────────────────────────────────┘
@@ -672,8 +673,8 @@ SIGQUIT (kill -3) → core dump (not handled by us)
 - `telegram_id + status` → fast lookup of user's active subscription
 - `subscription_id` → fast `/sub/{subID}` lookup
 - `expires_at` → cleanup of expired subs
-- `invite_code` → trial activation via invite
 - `referred_by` → referral stats query
+- `last_request` → "last active" queries (when a client last fetched its subscription)
 
 ---
 

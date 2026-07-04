@@ -704,3 +704,137 @@ func TestIsValidServer(t *testing.T) {
 		})
 	}
 }
+
+// ==================== UpdateLastRequest Tests ====================
+
+func TestHandleSubscription_CacheHit_UpdatesLastRequest(t *testing.T) {
+	t.Parallel()
+
+	mockDB := testutil.NewDatabaseService()
+	svc := newTestSubSvc(t)
+	ctx := context.Background()
+
+	svc.SetCache("sub-lr-hit", []byte("cached"), map[string]string{"content-type": "text/plain"})
+
+	mockDB.GetSubscriptionStatusFunc = func(ctx context.Context, subID string) (string, time.Time, error) {
+		return "active", time.Now().Add(24 * time.Hour), nil
+	}
+
+	var calledSubID string
+	mockDB.UpdateLastRequestFunc = func(ctx context.Context, subscriptionID string) error {
+		calledSubID = subscriptionID
+		return nil
+	}
+
+	_, err := HandleSubscription(ctx, mockDB, svc, "sub-lr-hit", "1.2.3.4", nil)
+	require.NoError(t, err)
+	assert.Equal(t, "sub-lr-hit", calledSubID, "UpdateLastRequest must be called on cache hit")
+}
+
+func TestHandleSubscription_CacheHit_LastRequestError_DoesNotBlockResponse(t *testing.T) {
+	t.Parallel()
+
+	mockDB := testutil.NewDatabaseService()
+	svc := newTestSubSvc(t)
+	ctx := context.Background()
+
+	svc.SetCache("sub-lr-err", []byte("cached"), map[string]string{"content-type": "text/plain"})
+
+	mockDB.GetSubscriptionStatusFunc = func(ctx context.Context, subID string) (string, time.Time, error) {
+		return "active", time.Now().Add(24 * time.Hour), nil
+	}
+	mockDB.UpdateLastRequestFunc = func(ctx context.Context, subscriptionID string) error {
+		return fmt.Errorf("db error")
+	}
+
+	result, err := HandleSubscription(ctx, mockDB, svc, "sub-lr-err", "1.2.3.4", nil)
+	require.NoError(t, err, "UpdateLastRequest failure must not block cache hit response")
+	assert.NotNil(t, result.Body)
+}
+
+func TestHandleSubscription_CacheMiss_UpdatesLastRequest(t *testing.T) {
+	t.Parallel()
+
+	vlessLink := "vless://uuid@server:443#Test"
+	encodedBody := base64.StdEncoding.EncodeToString([]byte(vlessLink))
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("subscription-userinfo", "upload=0; download=0; total=1073741824; expire=1735689600")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(encodedBody))
+	}))
+	defer ts.Close()
+
+	mockDB := testutil.NewDatabaseService()
+	svc := newTestSubSvc(t)
+	ctx := context.Background()
+
+	subURL := ts.URL + "/"
+	mockDB.GetWithPlanAndNodesFunc = func(ctx context.Context, subID string) (*database.SubscriptionFull, error) {
+		return &database.SubscriptionFull{
+			Subscription: database.Subscription{ID: 1, SubscriptionID: "sub-lr-miss", Status: "active"},
+			Plan:         database.Plan{ID: 1, Name: "test", TrafficLimit: 1073741824},
+			Nodes: []database.Node{
+				{ID: 1, Name: "test-node", IsActive: true, SubscriptionURL: subURL},
+			},
+		}, nil
+	}
+	mockDB.UpdateDevicesFunc = func(ctx context.Context, id uint, devicesJSON string) error { return nil }
+	mockDB.UpdateIPsFunc = func(ctx context.Context, id uint, ipsJSON string) error { return nil }
+
+	var calledSubID string
+	mockDB.UpdateLastRequestFunc = func(ctx context.Context, subscriptionID string) error {
+		calledSubID = subscriptionID
+		return nil
+	}
+
+	_, err := HandleSubscription(ctx, mockDB, svc, "sub-lr-miss", "1.2.3.4", nil)
+	require.NoError(t, err)
+	assert.Equal(t, "sub-lr-miss", calledSubID, "UpdateLastRequest must be called on cache miss")
+}
+
+// TestUpdateLastRequest_DB проверяет интеграционно, что колонка last_request
+// обновляется в реальной SQLite БД.
+func TestUpdateLastRequest_DB(t *testing.T) {
+	t.Parallel()
+
+	db, err := testutil.NewTestDatabaseService(t)
+	require.NoError(t, err, "Failed to create test database service")
+	ctx := context.Background()
+
+	sub := &database.Subscription{
+		TelegramID:     999888777,
+		Username:       "lr-test",
+		ClientID:       "client-lr-1",
+		SubscriptionID: "sub-lr-integration",
+		Status:         "active",
+	}
+	require.NoError(t, db.CreateSubscription(ctx, sub, ""), "Failed to create subscription")
+	require.Nil(t, sub.LastRequest, "LastRequest must be nil before first request")
+
+	before := time.Now().UTC().Add(-1 * time.Second)
+	require.NoError(t, db.UpdateLastRequest(ctx, "sub-lr-integration"), "UpdateLastRequest failed")
+
+	loaded, err := db.GetSubscription(ctx, "sub-lr-integration")
+	require.NoError(t, err)
+	require.NotNil(t, loaded.LastRequest, "LastRequest must be set after update")
+	assert.True(t, loaded.LastRequest.After(before), "LastRequest must be >= invocation time")
+
+	// Повторный вызов обновляет timestamp (не раньше первого).
+	first := *loaded.LastRequest
+	require.NoError(t, db.UpdateLastRequest(ctx, "sub-lr-integration"))
+	loaded2, err := db.GetSubscription(ctx, "sub-lr-integration")
+	require.NoError(t, err)
+	require.NotNil(t, loaded2.LastRequest)
+	assert.False(t, loaded2.LastRequest.Before(first), "LastRequest must not be earlier than the first call")
+}
+
+func TestUpdateLastRequest_NotFound(t *testing.T) {
+	t.Parallel()
+
+	db, err := testutil.NewTestDatabaseService(t)
+	require.NoError(t, err, "Failed to create test database service")
+
+	err = db.UpdateLastRequest(context.Background(), "nonexistent-sub-id")
+	assert.ErrorIs(t, err, database.ErrSubscriptionNotFound)
+}
