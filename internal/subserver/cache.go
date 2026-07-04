@@ -9,6 +9,11 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/metrics"
 )
 
+type noCopy struct{}
+
+func (noCopy) Lock()   {}
+func (noCopy) Unlock() {}
+
 // cacheEntry holds a cached response body and headers with its expiry time.
 type cacheEntry struct {
 	body      []byte
@@ -18,13 +23,14 @@ type cacheEntry struct {
 
 // Cache is an in-memory TTL cache for subscription responses.
 type Cache struct {
-	mu          sync.RWMutex
-	entries     map[string]*cacheEntry
-	ttl         time.Duration
-	stopCh      chan struct{}
-	stopped     atomic.Bool
-	hits        atomic.Int64
-	misses      atomic.Int64
+	noCopy  noCopy
+	mu      sync.RWMutex
+	entries map[string]*cacheEntry
+	ttl     time.Duration
+	stopCh  chan struct{}
+	stopped atomic.Bool
+	hits    atomic.Int64
+	misses  atomic.Int64
 }
 
 // NewCache creates a new Cache with the given TTL and starts the cleanup loop.

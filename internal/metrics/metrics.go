@@ -1,3 +1,7 @@
+// Package metrics defines Prometheus collectors and HTTP middleware for
+// observability across the bot, web, subserver, xui, and service layers.
+// All collectors are registered at init time via promauto, so they appear
+// on the /metrics endpoint without explicit registration.
 package metrics
 
 import (
@@ -149,6 +153,8 @@ var (
 			Help: "Total number of trial conversions to paid subscriptions",
 		},
 	)
+	// OrphanedClientsRemovedTotal counts XUI clients/subscriptions removed
+	// during background reconciliation of orphaned entries.
 	OrphanedClientsRemovedTotal = promauto.NewCounter(
 		prometheus.CounterOpts{
 			Name: "bot_orphaned_clients_removed_total",
@@ -156,12 +162,58 @@ var (
 		},
 	)
 
+	// SubserverPartialSourcesTotal counts subscription requests where at least
+	// one upstream source failed to respond. Label: sub_id.
+	//
+	// Deprecated: unused — no code path increments this metric. Partial source
+	// failures are now observable via subserver_source_fetch_total{result="error"}.
+	// Scheduled for removal; see doc/subserver_metrics_audit.md.
 	SubserverPartialSourcesTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "subserver_partial_sources_total",
 			Help: "Total number of subscription requests where at least one source failed",
 		},
 		[]string{"sub_id"},
+	)
+
+	// SubserverSourceFetchTotal is a counter of upstream source fetches
+	// with labels: result (success|error), format (json|base64|plain|unknown).
+	SubserverSourceFetchTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "subserver_source_fetch_total",
+			Help: "Total upstream source fetches by result and detected format",
+		},
+		[]string{"result", "format"},
+	)
+
+	// SubserverSourceFetchDuration is a histogram of time spent fetching a
+	// single upstream subscription source, with label: result (success|error).
+	SubserverSourceFetchDuration = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "subserver_source_fetch_duration_seconds",
+			Help:    "Time spent fetching a single upstream subscription source",
+			Buckets: []float64{0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10},
+		},
+		[]string{"result"},
+	)
+
+	// SubserverCacheInvalidationsTotal is a counter of cache invalidations
+	// with label: reason (revoked|expired|status_error|not_found).
+	SubserverCacheInvalidationsTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "subserver_cache_invalidations_total",
+			Help: "Cache invalidations by reason",
+		},
+		[]string{"reason"},
+	)
+
+	// SubserverNoItemsTotal is a counter of requests where no subscription
+	// items could be collected from any source.
+	SubserverNoItemsTotal = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "subserver_no_items_total",
+			Help: "Total subscription requests with no items collected",
+		},
 	)
 )
 

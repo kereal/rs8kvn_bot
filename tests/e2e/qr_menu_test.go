@@ -27,7 +27,7 @@ func TestE2E_QRCodeGeneration(t *testing.T) {
 	}
 	require.NoError(t, env.db.CreateSubscription(ctx, sub, ""))
 
-	resetMockBotAPI(env.botAPI)
+	resetBotAPI(env.botAPI)
 
 	env.handler.HandleCallback(ctx, tgbotapi.Update{
 		CallbackQuery: &tgbotapi.CallbackQuery{
@@ -86,7 +86,7 @@ func TestE2E_MenuHelp(t *testing.T) {
 	}
 	require.NoError(t, env.db.CreateSubscription(ctx, sub, ""))
 
-	resetMockBotAPI(env.botAPI)
+	resetBotAPI(env.botAPI)
 
 	env.handler.HandleCallback(ctx, tgbotapi.Update{
 		CallbackQuery: &tgbotapi.CallbackQuery{
@@ -145,7 +145,7 @@ func TestE2E_BackToStart(t *testing.T) {
 	}
 	require.NoError(t, env.db.CreateSubscription(ctx, sub, ""))
 
-	resetMockBotAPI(env.botAPI)
+	resetBotAPI(env.botAPI)
 
 	env.handler.HandleCallback(ctx, tgbotapi.Update{
 		CallbackQuery: &tgbotapi.CallbackQuery{
@@ -171,7 +171,7 @@ func TestE2E_Callback_ShareInvite(t *testing.T) {
 
 	ctx := context.Background()
 
-	resetMockBotAPI(env.botAPI)
+	resetBotAPI(env.botAPI)
 
 	env.handler.HandleCallback(ctx, tgbotapi.Update{
 		CallbackQuery: &tgbotapi.CallbackQuery{
@@ -197,7 +197,7 @@ func TestE2E_Callback_QRTelegram(t *testing.T) {
 
 	ctx := context.Background()
 
-	resetMockBotAPI(env.botAPI)
+	resetBotAPI(env.botAPI)
 
 	env.handler.HandleCallback(ctx, tgbotapi.Update{
 		CallbackQuery: &tgbotapi.CallbackQuery{
@@ -222,7 +222,7 @@ func TestE2E_Callback_QRWeb(t *testing.T) {
 
 	ctx := context.Background()
 
-	resetMockBotAPI(env.botAPI)
+	resetBotAPI(env.botAPI)
 
 	env.handler.HandleCallback(ctx, tgbotapi.Update{
 		CallbackQuery: &tgbotapi.CallbackQuery{
@@ -239,50 +239,4 @@ func TestE2E_Callback_QRWeb(t *testing.T) {
 	})
 
 	assert.True(t, env.botAPI.SendCalledSafe(), "QR code for web link should be sent")
-}
-
-func TestE2E_Callback_BackToInvite(t *testing.T) {
-	env := setupE2EEnv(t)
-	defer env.db.Close()
-
-	ctx := context.Background()
-
-	resetMockBotAPI(env.botAPI)
-
-	env.handler.HandleCallback(ctx, tgbotapi.Update{
-		CallbackQuery: &tgbotapi.CallbackQuery{
-			From: &tgbotapi.User{
-				ID:       env.chatID,
-				UserName: env.username,
-			},
-			Data: "back_to_invite",
-			Message: &tgbotapi.Message{
-				Chat:      &tgbotapi.Chat{ID: env.chatID},
-				MessageID: 100,
-			},
-		},
-	})
-
-	_ = env.botAPI.LastSentText
-}
-
-func TestE2E_Callback_UnknownData(t *testing.T) {
-	env := setupE2EEnv(t)
-	defer env.db.Close()
-
-	ctx := context.Background()
-
-	env.handler.HandleCallback(ctx, tgbotapi.Update{
-		CallbackQuery: &tgbotapi.CallbackQuery{
-			From: &tgbotapi.User{
-				ID:       env.chatID,
-				UserName: env.username,
-			},
-			Data: "unknown_callback_action_xyz",
-			Message: &tgbotapi.Message{
-				Chat:      &tgbotapi.Chat{ID: env.chatID},
-				MessageID: 100,
-			},
-		},
-	})
 }

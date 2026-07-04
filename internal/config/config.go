@@ -61,39 +61,33 @@ type Config struct {
 	GlobalSubURL           string
 	SubServerAccessLogPath string
 
+	// Main menu configuration
+	MainMenuBtnProductID uint
+
 	// Nodes configuration
 	Nodes []Node
-
-	// API configuration
-	APIToken string
-
-	// Proxy Manager webhook configuration
-	ProxyManagerWebhookSecret string
-	ProxyManagerWebhookURL    string
 }
 
 // configFlags holds typed flag values for config fields.
 type configFlags struct {
-	telegramBotToken          *flag.StringValue
-	telegramAdminID           *flag.Int64Value
-	databasePath              *flag.StringValue
-	logFilePath               *flag.StringValue
-	logLevel                  *flag.StringValue
-	heartbeatURL              *flag.StringValue
-	heartbeatInterval         *flag.IntValue
-	sentryDSN                 *flag.StringValue
-	healthCheckPort           *flag.IntValue
-	siteURL                   *flag.StringValue
-	trialDurationHours        *flag.IntValue
-	trialRateLimit            *flag.IntValue
-	contactUsername           *flag.StringValue
-	donateCardNumber          *flag.StringValue
-	donateURL                 *flag.StringValue
-	globalSubURL              *flag.StringValue
-	subServerAccessLogPath    *flag.StringValue
-	apiToken                  *flag.StringValue
-	proxyManagerWebhookSecret *flag.StringValue
-	proxyManagerWebhookURL    *flag.StringValue
+	telegramBotToken       *flag.StringValue
+	telegramAdminID        *flag.Int64Value
+	databasePath           *flag.StringValue
+	logFilePath            *flag.StringValue
+	logLevel               *flag.StringValue
+	heartbeatURL           *flag.StringValue
+	heartbeatInterval      *flag.IntValue
+	sentryDSN              *flag.StringValue
+	healthCheckPort        *flag.IntValue
+	siteURL                *flag.StringValue
+	trialDurationHours     *flag.IntValue
+	trialRateLimit         *flag.IntValue
+	contactUsername        *flag.StringValue
+	donateCardNumber       *flag.StringValue
+	donateURL              *flag.StringValue
+	globalSubURL           *flag.StringValue
+	subServerAccessLogPath *flag.StringValue
+	mainMenuBtnProductID   *flag.IntValue
 }
 
 // registerFlags creates a new flag.Registry and initializes a configFlags instance with defaults,
@@ -103,26 +97,24 @@ func registerFlags() (*flag.Registry, *configFlags) {
 	r := flag.New()
 
 	f := &configFlags{
-		telegramBotToken:          flag.NewString(""),
-		telegramAdminID:           flag.NewInt64(0),
-		databasePath:              flag.NewString(DefaultDatabasePath),
-		logFilePath:               flag.NewString(DefaultLogFilePath),
-		logLevel:                  flag.NewString(DefaultLogLevel),
-		heartbeatURL:              flag.NewString(""),
-		heartbeatInterval:         flag.NewInt(DefaultHeartbeatInterval),
-		sentryDSN:                 flag.NewString(""),
-		healthCheckPort:           flag.NewInt(DefaultHealthCheckPort),
-		siteURL:                   flag.NewString(DefaultSiteURL),
-		trialDurationHours:        flag.NewInt(DefaultTrialDurationHours),
-		trialRateLimit:            flag.NewInt(DefaultTrialRateLimit),
-		contactUsername:           flag.NewString(ContactUsername),
-		donateCardNumber:          flag.NewString(DonateCardNumber),
-		donateURL:                 flag.NewString(DonateURL),
-		globalSubURL:              flag.NewString(""),
-		subServerAccessLogPath:    flag.NewString(""),
-		apiToken:                  flag.NewString(""),
-		proxyManagerWebhookSecret: flag.NewString(""),
-		proxyManagerWebhookURL:    flag.NewString(""),
+		telegramBotToken:       flag.NewString(""),
+		telegramAdminID:        flag.NewInt64(0),
+		databasePath:           flag.NewString(DefaultDatabasePath),
+		logFilePath:            flag.NewString(DefaultLogFilePath),
+		logLevel:               flag.NewString(DefaultLogLevel),
+		heartbeatURL:           flag.NewString(""),
+		heartbeatInterval:      flag.NewInt(DefaultHeartbeatInterval),
+		sentryDSN:              flag.NewString(""),
+		healthCheckPort:        flag.NewInt(DefaultHealthCheckPort),
+		siteURL:                flag.NewString(DefaultSiteURL),
+		trialDurationHours:     flag.NewInt(DefaultTrialDurationHours),
+		trialRateLimit:         flag.NewInt(DefaultTrialRateLimit),
+		contactUsername:        flag.NewString(ContactUsername),
+		donateCardNumber:       flag.NewString(DonateCardNumber),
+		donateURL:              flag.NewString(DonateURL),
+		globalSubURL:           flag.NewString(""),
+		subServerAccessLogPath: flag.NewString(""),
+		mainMenuBtnProductID:   flag.NewInt(0),
 	}
 
 	r.Register("TELEGRAM_BOT_TOKEN", f.telegramBotToken)
@@ -142,9 +134,7 @@ func registerFlags() (*flag.Registry, *configFlags) {
 	r.Register("DONATE_CARD_NUMBER", f.donateCardNumber)
 	r.Register("DONATE_URL", f.donateURL)
 	r.Register("SUBSERVER_ACCESS_LOG", f.subServerAccessLogPath)
-	r.Register("API_TOKEN", f.apiToken)
-	r.Register("PROXY_MANAGER_WEBHOOK_SECRET", f.proxyManagerWebhookSecret)
-	r.Register("PROXY_MANAGER_WEBHOOK_URL", f.proxyManagerWebhookURL)
+	r.Register("MAIN_MENU_BTN_PRODUCT", f.mainMenuBtnProductID)
 
 	return r, f
 }
@@ -160,26 +150,24 @@ func Load() (*Config, error) {
 	}
 
 	cfg := &Config{
-		TelegramBotToken:          f.telegramBotToken.Get(),
-		TelegramAdminID:           f.telegramAdminID.Get(),
-		DatabasePath:              f.databasePath.Get(),
-		LogFilePath:               f.logFilePath.Get(),
-		LogLevel:                  f.logLevel.Get(),
-		HeartbeatURL:              f.heartbeatURL.Get(),
-		HeartbeatInterval:         f.heartbeatInterval.Get(),
-		SentryDSN:                 f.sentryDSN.Get(),
-		HealthCheckPort:           f.healthCheckPort.Get(),
-		SiteURL:                   f.siteURL.Get(),
-		TrialDurationHours:        f.trialDurationHours.Get(),
-		TrialRateLimit:            f.trialRateLimit.Get(),
-		ContactUsername:           f.contactUsername.Get(),
-		DonateCardNumber:          f.donateCardNumber.Get(),
-		DonateURL:                 f.donateURL.Get(),
-		GlobalSubURL:              f.globalSubURL.Get(),
-		SubServerAccessLogPath:    f.subServerAccessLogPath.Get(),
-		APIToken:                  f.apiToken.Get(),
-		ProxyManagerWebhookSecret: f.proxyManagerWebhookSecret.Get(),
-		ProxyManagerWebhookURL:    f.proxyManagerWebhookURL.Get(),
+		TelegramBotToken:       f.telegramBotToken.Get(),
+		TelegramAdminID:        f.telegramAdminID.Get(),
+		DatabasePath:           f.databasePath.Get(),
+		LogFilePath:            f.logFilePath.Get(),
+		LogLevel:               f.logLevel.Get(),
+		HeartbeatURL:           f.heartbeatURL.Get(),
+		HeartbeatInterval:      f.heartbeatInterval.Get(),
+		SentryDSN:              f.sentryDSN.Get(),
+		HealthCheckPort:        f.healthCheckPort.Get(),
+		SiteURL:                f.siteURL.Get(),
+		TrialDurationHours:     f.trialDurationHours.Get(),
+		TrialRateLimit:         f.trialRateLimit.Get(),
+		ContactUsername:        f.contactUsername.Get(),
+		DonateCardNumber:       f.donateCardNumber.Get(),
+		DonateURL:              f.donateURL.Get(),
+		GlobalSubURL:           f.globalSubURL.Get(),
+		SubServerAccessLogPath: f.subServerAccessLogPath.Get(),
+		MainMenuBtnProductID:   uint(f.mainMenuBtnProductID.Get()),
 	}
 
 	// Validate all required fields
@@ -293,9 +281,12 @@ func (c *Config) validateURL(name, value string) error {
 		return fmt.Errorf("%s is not a valid URL: %w", name, err)
 	}
 
-	// Check that scheme is present
-	if u.Scheme == "" {
-		return fmt.Errorf("%s must include a scheme (http:// or https://)", name)
+	// Check that scheme is present and allowed
+	switch u.Scheme {
+	case "http", "https":
+		// allowed
+	default:
+		return fmt.Errorf("%s must use http or https scheme", name)
 	}
 
 	// Check that host is present
@@ -336,6 +327,20 @@ func (c *Config) SubURL(subID string) string {
 		return c.GlobalSubURL + subID
 	}
 	return u
+}
+
+// InboundIDs parses XUIInboundIDs from a JSON string to a slice of ints.
+// Returns nil slice (not error) when XUIInboundIDs is empty.
+// Validation in Load() ensures non-empty values are valid JSON arrays.
+func (n *Node) InboundIDs() ([]int, error) {
+	if n.XUIInboundIDs == "" {
+		return nil, nil
+	}
+	var ids []int
+	if err := json.Unmarshal([]byte(n.XUIInboundIDs), &ids); err != nil {
+		return nil, fmt.Errorf("parse inbound IDs for node %s: %w", n.Name, err)
+	}
+	return ids, nil
 }
 
 // maskURL returns a masked version of a URL for logging purposes.

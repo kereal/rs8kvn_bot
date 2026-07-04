@@ -9,6 +9,23 @@ import (
 	"gorm.io/gorm"
 )
 
+// generateTrialTelegramID generates a unique negative telegram_id for unbound trial subscriptions.
+// Negative IDs are reserved for trials and excluded from UNIQUE constraints on telegram_id.
+// The hash is based on the subscription ID to ensure uniqueness across concurrent trial creations.
+func generateTrialTelegramID(subscriptionID string) int64 {
+	var hash int64
+	for _, c := range subscriptionID {
+		hash = hash*31 + int64(c)
+	}
+	if hash == 0 {
+		hash = -1
+	}
+	if hash > 0 {
+		hash = -hash
+	}
+	return hash
+}
+
 // CreateTrialSubscription creates a new trial subscription.
 func (s *Service) CreateTrialSubscription(ctx context.Context, inviteCode, subscriptionID, clientID string, expiryTime time.Time) (*Subscription, error) {
 	planID, err := s.resolveTrialPlanID(ctx)
@@ -17,14 +34,17 @@ func (s *Service) CreateTrialSubscription(ctx context.Context, inviteCode, subsc
 	}
 
 	sub := &Subscription{
-		TelegramID:     0,
+		TelegramID:     generateTrialTelegramID(subscriptionID),
 		SubscriptionID: subscriptionID,
 		ClientID:       clientID,
-		InviteCode:     inviteCode,
-		ExpiresAt:      expiryTime,
 		PlanID:         planID,
 		Status:         "active",
 	}
+	if inviteCode != "" {
+		inviteVal := inviteCode
+		sub.InviteCode = &inviteVal
+	}
+	sub.ExpiresAt = &expiryTime
 	if err := s.db.WithContext(ctx).Create(sub).Error; err != nil {
 		return nil, fmt.Errorf("failed to create trial subscription: %w", err)
 	}
@@ -85,16 +105,16 @@ func (s *Service) BindTrialSubscription(ctx context.Context, subscriptionID stri
 		}
 		planID := trialPlan.ID
 
-		if err := tx.Where("subscription_id = ? AND plan_id = ? AND telegram_id = ?", subscriptionID, planID, 0).First(&sub).Error; err != nil {
+		if err := tx.Where("subscription_id = ? AND plan_id = ? AND telegram_id < 0", subscriptionID, planID).First(&sub).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return fmt.Errorf("trial subscription not found or already activated")
+				return fmt.Errorf("trial subscription not found or already activated: %w", ErrTrialAlreadyActivated)
 			}
 			return fmt.Errorf("failed to get trial subscription: %w", err)
 		}
 
-		if sub.InviteCode != "" {
+		if sub.InviteCode != nil && *sub.InviteCode != "" {
 			var invite Invite
-			if err := tx.Where("code = ?", sub.InviteCode).First(&invite).Error; err == nil {
+			if err := tx.Where("code = ?", *sub.InviteCode).First(&invite).Error; err == nil {
 				referredBy = invite.ReferrerTGID
 			}
 		}
@@ -105,7 +125,7 @@ func (s *Service) BindTrialSubscription(ctx context.Context, subscriptionID stri
 		}
 		freePlanID = freePlan.ID
 		result := tx.Model(&Subscription{}).
-			Where("id = ? AND telegram_id = ? AND plan_id = ?", sub.ID, 0, planID).
+			Where("id = ? AND telegram_id < 0 AND plan_id = ?", sub.ID, planID).
 			Updates(map[string]any{
 				"telegram_id": telegramID,
 				"username":    username,
@@ -116,16 +136,7 @@ func (s *Service) BindTrialSubscription(ctx context.Context, subscriptionID stri
 			return fmt.Errorf("failed to bind trial subscription: %w", result.Error)
 		}
 		if result.RowsAffected == 0 {
-			return fmt.Errorf("trial subscription not found or already activated")
-		}
-
-		// Defensive: revoke any other active subscription the user may already have
-		// (e.g. a free-plan sub created concurrently via /start). Without this, the
-		// user could end up with two active subscriptions.
-		if err := tx.Model(&Subscription{}).
-			Where("telegram_id = ? AND status = ? AND id <> ?", telegramID, "active", sub.ID).
-			Update("status", "revoked").Error; err != nil {
-			return fmt.Errorf("failed to revoke pre-existing active subscriptions: %w", err)
+			return fmt.Errorf("trial subscription not found or already activated: %w", ErrTrialAlreadyActivated)
 		}
 
 		return nil
@@ -137,7 +148,10 @@ func (s *Service) BindTrialSubscription(ctx context.Context, subscriptionID stri
 	sub.TelegramID = telegramID
 	sub.Username = username
 	sub.PlanID = freePlanID
-	sub.ReferredBy = referredBy
+	if referredBy != 0 {
+		rb := referredBy
+		sub.ReferredBy = &rb
+	}
 	return &sub, nil
 }
 
@@ -179,9 +193,9 @@ func (s *Service) CleanupExpiredTrials(ctx context.Context, hours int) ([]Subscr
 	var subs []Subscription
 	result := s.db.WithContext(ctx).Raw(
 		`DELETE FROM subscriptions
-		 WHERE plan_id = ? AND telegram_id = ? AND created_at < ?
+		 WHERE plan_id = ? AND telegram_id < 0 AND created_at < ?
 		 RETURNING id, client_id, subscription_id`,
-		trialPlan.ID, 0, cutoff,
+		trialPlan.ID, cutoff,
 	).Scan(&subs)
 	if result.Error != nil {
 		return nil, fmt.Errorf("failed to cleanup expired trials: %w", result.Error)

@@ -1,7 +1,7 @@
 # Operations Guide — rs8kvn_bot
 
 **Version:** 3.0.0  
-**Last updated:** 2026-04-17
+**Last updated:** 2026-07-02
 
 ---
 
@@ -319,16 +319,45 @@ kill -ABRT <pid>
 # Check Sentry dashboard for new issue
 ```
 
-### 4.6 Metrics (future)
+### 4.6 Prometheus Metrics
 
-Currently no Prometheus metrics. To add:
+The bot exposes a `/metrics` endpoint on the same port as health checks (default 8880).
 
-```go
-// In web/server.go
-prometheus.MustRegister(requestCounter, errorCounter, xuiLatency)
+**Endpoint:** `GET /metrics`
+
+**Key metrics:**
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `http_requests_total` | Counter | method, path, status | Total HTTP requests |
+| `http_request_duration_seconds` | Histogram | method, path | HTTP request latency |
+| `http_requests_in_flight` | Gauge | method, path | Current in-flight requests |
+| `bot_updates_total` | Counter | command, result | Bot updates processed (success/error/rate_limited) |
+| `bot_update_errors_total` | Counter | type | Bot update errors |
+| `bot_update_duration_seconds` | Histogram | — | Bot update processing time |
+| `cache_hits_total` / `cache_misses_total` | Counter | cache | Cache hit/miss (subscription, referral, subserver) |
+| `circuit_breaker_state` | Gauge | target | Circuit breaker state (0=closed, 1=open, 2=half-open) |
+| `bot_orphaned_clients_removed_total` | Counter | — | Orphaned XUI clients removed |
+| `subserver_source_fetch_total` | Counter | result, format | Upstream source fetch results (success/error by format) |
+| `subserver_source_fetch_duration_seconds` | Histogram | result | Upstream source fetch duration |
+| `subserver_cache_invalidations_total` | Counter | reason | Cache invalidations by reason |
+| `subserver_no_items_total` | Counter | — | Requests returning no items |
+
+**Prometheus scrape config:**
+```yaml
+scrape_configs:
+  - job_name: 'rs8kvn_bot'
+    static_configs:
+      - targets: ['localhost:8880']
+    metrics_path: /metrics
 ```
 
----
+**Grafana dashboard ideas:**
+- HTTP error rate: `rate(http_requests_total{status=~"5.."}[5m]) / rate(http_requests_total[5m])`
+- Bot error rate: `rate(bot_updates_total{result="error"}[5m])`
+- XUI latency p99: `histogram_quantile(0.99, rate(xui_request_duration_seconds_bucket[5m]))`
+- Active subscriptions: `active_subscriptions`
+
 
 ## 5. Troubleshooting
 
@@ -412,6 +441,12 @@ sqlite3 ./data/tgvpn.db "SELECT * FROM subscriptions WHERE telegram_id = <user_i
 docker logs -f rs8kvn_bot 2>&1 | grep -E "error|failed|subscription"
 ```
 
+> **Note (v3.0+):** Node configuration is managed via the `nodes` table in the database, not env vars. `XUI_HOST`, `XUI_API_TOKEN`, and `XUI_INBOUND_ID` are seed-only (first run). Check node state:
+```sql
+SELECT id, name, type, is_active, host, subscription_url FROM nodes;
+SELECT sn.* FROM subscription_nodes sn WHERE sn.subscription_id = (SELECT id FROM subscriptions WHERE subscription_id = 'subID');
+```
+
 ---
 
 ### 5.4 Trial page returns 500
@@ -456,6 +491,21 @@ docker restart rs8kvn_bot
 
 # Check proxy logs
 docker logs rs8kvn_bot | grep "subserver"
+```
+
+**Check node state:**
+```sql
+-- Check subscription and its nodes
+SELECT s.subscription_id, s.status, n.name, n.type, n.subscription_url, n.is_active
+FROM subscriptions s
+JOIN subscription_nodes sn ON sn.subscription_id = s.id
+JOIN nodes n ON n.id = sn.node_id
+WHERE s.subscription_id = 'your-sub-id';
+
+-- Check sync state
+SELECT subscription_id, node_id, status, retry_count, last_error
+FROM subscription_nodes
+WHERE subscription_id = (SELECT id FROM subscriptions WHERE subscription_id = 'your-sub-id');
 ```
 
 ---
@@ -514,11 +564,11 @@ sqlite3 ./data/tgvpn.db "PRAGMA journal_mode=WAL;"
 
 **Log:** `"XUI API error"`, `"retrying after backoff"`, or similar.
 
-**Note:** The circuit breaker has been removed. The system uses `RetryWithBackoff` with exponential backoff + jitter (up to 3 retries).
+**Note:** The system uses `RetryWithBackoff` with exponential backoff + jitter (up to 3 retries) and a circuit breaker (5 failures → 30s open → half-open with 3 attempts). Monitor `circuit_breaker_state` metric (0=closed, 1=open, 2=half-open).
 
 **Fix:**
 1. Check 3x-ui panel is up: `curl -H "Authorization: Bearer $XUI_API_TOKEN" "$XUI_HOST/panel/api/server/status"`
-2. Verify `XUI_API_TOKEN` in `.env` is correct (generate new token in panel Security settings if needed)
+2. Verify `nodes.api_token` in database is correct (seed-only env var `XUI_API_TOKEN` is not read at runtime)
 3. Check panel logs for errors
 4. Retries happen automatically — check logs after ~30s for recovery
 5. DNS errors will fast-fail without retries
@@ -543,6 +593,33 @@ sqlite3 ./data/tgvpn.db "PRAGMA journal_mode=WAL;"
 ```
 
 **Logrotate alternative:** See section 4.3.
+
+---
+
+### 5.10 Subscription sync stuck in pending state
+
+**Symptom:** Subscription nodes remain in `pending_add`, `pending_remove`, or `pending_update` status.
+
+**Check:**
+```sql
+-- Find stuck subscription nodes
+SELECT subscription_id, node_id, status, retry_count, retry_at, last_error, updated_at
+FROM subscription_nodes
+WHERE status LIKE 'pending_%'
+ORDER BY updated_at DESC;
+```
+
+**Common causes:**
+- VPN node unreachable (check node host and API token in `nodes` table)
+- XUI panel rejecting client creation (inbound ID mismatch)
+- Network timeout to VPN node
+
+**Fix:**
+1. Check node connectivity: verify `nodes` table has correct host/api_token
+2. Review `last_error` column for specific error messages
+3. The background `SyncPendingNodes` worker retries with exponential backoff automatically
+4. For persistent stuck states, restart bot to reset worker state
+5. Check `bot_orphaned_clients_removed_total` metric for orphan reconciliation activity
 
 ---
 
@@ -607,7 +684,8 @@ deploy:
 - [ ] Enable Sentry for error monitoring
 - [ ] Configure firewall: only 8880 port open to internet (optional, health checks)
 - [ ] Backup encryption (if using S3, enable SSE)
-- [ ] Rotate `API_TOKEN` periodically
+- [ ] Monitor `/healthz` with external service (UptimeRobot, healthchecks.io)
+- [ ] Review logs daily for `error`/`warn` level
 
 ### 7.2 Secret Management
 
@@ -675,4 +753,4 @@ limit_req_zone $binary_remote_addr zone=sub:10m rate=30r/m;
 
 ---
 
-*Last updated: 2026-04-17*
+*Last updated: 2026-07-02*

@@ -22,6 +22,17 @@ type Service struct {
 	db *gorm.DB
 }
 
+// GetDB returns the underlying *gorm.DB instance.
+// ⚠️ Test use only: production code should use domain methods (subscriptions, nodes, etc.)
+// or Transaction(ctx, fn) instead of bypassing the service layer.
+func (s *Service) GetDB() *gorm.DB {
+	return s.db
+}
+
+func (s *Service) Transaction(ctx context.Context, fn func(*gorm.DB) error) error {
+	return s.db.WithContext(ctx).Transaction(fn)
+}
+
 // NewService creates a new database service.
 func NewService(dbPath string) (*Service, error) {
 	dbDir := filepath.Dir(dbPath)
@@ -63,19 +74,24 @@ func NewService(dbPath string) (*Service, error) {
 		return nil, fmt.Errorf("failed to count default plans: %w", err)
 	}
 	if count == 0 {
-		if err := db.WithContext(context.Background()).Create(&Plan{
-			Name:         TrialPlanName,
-			DevicesLimit: 1,
-			TrafficLimit: 1073741824,
-		}).Error; err != nil {
-			return nil, fmt.Errorf("failed to seed default trial plan: %w", err)
-		}
-		if err := db.WithContext(context.Background()).Create(&Plan{
-			Name:         FreePlanName,
-			DevicesLimit: 1,
-			TrafficLimit: 53687091200,
-		}).Error; err != nil {
-			return nil, fmt.Errorf("failed to seed default free plan: %w", err)
+		if err := db.WithContext(context.Background()).Transaction(func(tx *gorm.DB) error {
+			if err := tx.Create(&Plan{
+				Name:         TrialPlanName,
+				DevicesLimit: 1,
+				TrafficLimit: 1073741824,
+			}).Error; err != nil {
+				return fmt.Errorf("failed to seed default trial plan: %w", err)
+			}
+			if err := tx.Create(&Plan{
+				Name:         FreePlanName,
+				DevicesLimit: 1,
+				TrafficLimit: 53687091200,
+			}).Error; err != nil {
+				return fmt.Errorf("failed to seed default free plan: %w", err)
+			}
+			return nil
+		}); err != nil {
+			return nil, err
 		}
 		logger.Info("Inserted default trial/free plans")
 	}

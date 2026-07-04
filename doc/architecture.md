@@ -1,13 +1,13 @@
 # Architecture — rs8kvn_bot
 
-**Version:** 2.6.0
-**Date:** 2026-06-16
+**Version:** v3.0.0
+**Date:** 2026-07-02
 
 ## Multi-outbounds per node
 
 A single 3x-ui node can now expose multiple inbounds. Inbound IDs are stored as a JSON array in `nodes.inbound_ids` and sent to the panel as `inboundIds` during client creation/update.
 
-rs8kvn_bot — production-ready Telegram bot for distributing VLESS+Reality+Vision VPN subscriptions via 3x-ui panel. Built with Go, following Clean Architecture principles.
+rs8kvn_bot — production-ready Telegram bot for distributing VLESS+Reality+Vision VPN subscriptions via 3x-ui and proxman panels. Built with Go, following Clean Architecture principles.
 
 **Key characteristics:**
 - Event-driven with bounded concurrency (worker pool)
@@ -16,9 +16,7 @@ rs8kvn_bot — production-ready Telegram bot for distributing VLESS+Reality+Visi
 - Graceful shutdown with coordinated cleanup
 - 85%+ test coverage (unit, e2e, fuzz, leak detection)
 - Payment/order tracking for subscription purchases
-- Node-based subscription synchronization with state machine (`subscription_nodes`)
-- Dynamic plan resolution by name (no hardcoded IDs)
-- Node-based subscription synchronization with state machine (`subscription_nodes`)
+- Node-based subscription synchronization with 4-state sync machine (`subscription_nodes`)
 - Dynamic plan resolution by name (no hardcoded IDs)
 
 ---
@@ -29,8 +27,8 @@ rs8kvn_bot — production-ready Telegram bot for distributing VLESS+Reality+Visi
 ┌─────────────────────────────────────────────────────────────────────┐
 │                         EXTERNAL SYSTEMS                            │
 ├─────────────────────────────────────────────────────────────────────┤
-│  Telegram Bot API       3x-ui Panel         Optional Monitoring    │
-│  (users interact)       (VPN backend)       (Sentry, Heartbeat)    │
+│  Telegram Bot API       3x-ui Panel         proxman Panel      Optional Monitoring    │
+│  (users interact)       (VPN backend)       (VPN backend)       (Sentry, Heartbeat)    │
 │         │                     │                     │               │
 │         │  GET updates        │  HTTP API           │  POST /ping   │
 │         │◄────────────────────┼────────────────────►│              │
@@ -54,7 +52,7 @@ rs8kvn_bot — production-ready Telegram bot for distributing VLESS+Reality+Visi
 │       ┌────────────────────────────┼────────────────────────────┐   │
 │       ▼                            ▼                            ▼   │
 │  ┌──────────┐              ┌──────────────┐              ┌──────────┐│
-│  │ Bot API  │              │  Web Server  │  │ Subserver ││
+│  │ Bot API  │              │  Web Server  │              │ Subserver││
 │  │ Layer    │              │  (port 8880) │              │ Service  ││
 │  │          │              │              │              │          ││
 │  │ Handler  │              │ /healthz     │              │ cache    ││
@@ -62,6 +60,7 @@ rs8kvn_bot — production-ready Telegram bot for distributing VLESS+Reality+Visi
 │  │ Callbacks│              │ /i/{code}    │              │ servers  ││
 │  │ RateLim  │              │ /sub/{subID} │              │ merge    ││
 │  │ Cache    │              │ /api/v1/*    │              │ reload   ││
+│  │          │              │ /metrics     │              │          ││
 │  └────┬─────┘              └──────┬───────┘              └────┬─────┘│
 │       │                          │                           │      │
 │       │    ┌─────────────────────┼─────────────────────┐     │      │
@@ -77,29 +76,28 @@ rs8kvn_bot — production-ready Telegram bot for distributing VLESS+Reality+Visi
 │  │  │ • CreateTrial    │              └─────────────────────────┘ │ │
 │  │  └────────┬─────────┘                                         │ │
 │  │           │                                                    │ │
-│  │  ┌────────▼─────────┐                                         │ │
-│  │  │   XUIClient      │ (3x-ui API wrapper)                     │ │
-│  │  │ • AddClient      │ • CircuitBreaker                        │ │
-│  │  │ • GetTraffic     │ • Retry+Jitter                          │ │
-│  │  │ • DeleteClient   │ • Singleflight                           │ │
-│  │  │ • Login          │ • Session mgmt                           │ │
-│  │  └────────┬─────────┘                                         │ │
-│  │           │                                                    │ │
-│  │  ┌────────▼─────────┐                                         │ │
-│  │  │  DatabaseService │ (GORM + SQLite)                         │ │
-│  │  │ • CRUD           │ • Migrations (golang-migrate)           │ │
-│  │  │ • Queries        │ • Connection pool (1 writer)             │ │
-│  │  │ • Transactions   │ • Soft deletes                           │ │
-│  │  │ • Orders         │ • Subscription purchase tracking         │ │
-│  │  └──────────────────┘                                         │ │
+│  │  ┌────────▼─────────┐              ┌─────────────────────────┐ │ │
+│  │  │  SyncService     │              │      VPN Clients        │ │ │
+│  │  │ • Reconcile      │              │  • 3x-ui (ThreeXUI)     │ │ │
+│  │  │ • SyncPending    │              │  • proxman (Proxman)    │ │ │
+│  │  │ • process*       │              │  • fetch (FetchClient)  │ │ │
+│  │  └────────┬─────────┘              └─────────────┬───────────┘ │ │
+│  │           │                                      │               │ │
+│  │  ┌────────▼─────────┐                         ┌─┴─────────────┐ │ │
+│  │  │  XUIClient       │ (3x-ui API wrapper)     │  Database     │ │ │
+│  │  │ • AddClient      │ • CircuitBreaker        │  Service      │ │ │
+│  │  │ • GetTraffic     │ • Retry+Jitter          │  (GORM+SQLite)│ │ │
+│  │  │ • DeleteClient   │ • Singleflight          │  • CRUD       │ │ │
+│  │  │ • Login          │ • Session mgmt          │  • Queries    │ │ │
+│  │  └──────────────────┘                         └───────────────┘ │ │
 │  └─────────────────────────────────────────────────────────────────┘ │
 │                                 │                                   │
 │                                 ▼                                   │
 │  ┌─────────────────────────────────────────────────────────────────┐ │
 │  │              Infrastructure & Cross-cutting                     │ │
 │  │  ┌──────────────┐  ┌──────────────┐  ┌─────────────────────┐ │ │
-│  │  │   Logger     │  │  RateLimiter │  │    WebhookSender    │ │ │
-│  │  │ (Zap+Sentry) │  │(token bucket)│  │(async+retry)        │ │ │
+│  │  │   Logger     │  │  RateLimiter │  │  SubscriptionSync   │ │ │
+│  │  │ (Zap+Sentry) │  │(token bucket)│  │  Worker (pending)   │ │ │
 │  │  └──────────────┘  └──────────────┘  └─────────────────────┘ │ │
 │  │  ┌──────────────┐  ┌──────────────┐  ┌─────────────────────┐ │ │
 │  │  │   Backup     │  │  Heartbeat   │  │   Scheduler         │ │ │
@@ -113,9 +111,10 @@ rs8kvn_bot — production-ready Telegram bot for distributing VLESS+Reality+Visi
                    ┌─────────────────────────┐
                    │  External Resources     │
                    ├─────────────────────────┤
-                   │ • Telegram Bot API      │
-                   │ • 3x-ui Panel (REST)    │
-                   │ • Sentry (error track)  │
+│ • Telegram Bot API      │
+│ • 3x-ui Panel (REST)    │
+│ • proxman Panel (REST)  │
+│ • Sentry (error track)  │
                    │ • Filesystem (data/)    │
                    │ • Network (ports 8880)  │
                    └─────────────────────────┘
@@ -132,37 +131,57 @@ internal/
 │   ├── commands.go          # /start, /help, /invite
 │   ├── callbacks.go         # Inline keyboard callbacks
 │   ├── admin.go             # /del, /broadcast, /send, /refstats
-│   ├── subscription.go      # Create/view/QR subscription
+│   ├── subscription_handler.go # Create/view/QR subscription
 │   ├── menu.go              # Navigation: donate, help, back
 │   ├── cache.go             # LRU cache (1000 entries, 5min TTL)
 │   ├── referral_cache.go    # Referral count cache (sync hourly)
 │   ├── keyboard_builder.go  # Telegram inline keyboards
 │   └── message_sender.go    # Rate-limited send wrapper
-├── web/              # HTTP server
-│   ├── web.go               # Server struct, routes, health
-│   ├── middleware.go        # Bearer auth
-│   ├── api.go               # /api/v1/subscriptions
-│   ├── subserver_test.go     # Proxy handler tests
+├── web/              # HTTP server (no longer imports internal/bot — A1 fix)
+│   ├── web.go               # Server struct, routes, health, getClientIP
+│   ├── middleware.go        # Access-log response recording
 │   └── templates/           # trial.html, error.html
 ├── subserver/         # Subscription server (aggregation + proxy)
 │   ├── service.go           # Hot reload loop (5 min)
 │   ├── proxy.go             # Fetch+XUI+merge logic
+│   ├── subscription_handler.go # Subscription request handler
+│   ├── subscription_helpers.go # Header filtering (FilterHeaders)
 │   ├── cache.go             # TTL cache (240s)
 │   ├── access_log.go        # Optional async /sub/{id} access log
-│   ├── servers.go           # Load extra config file
-│   └── servers_test.go      # Parser tests
+│   └── servers.go           # Load extra config file
 ├── service/          # Business logic
-│   └── subscription.go      # Use cases: Create, Delete, Trial
-├── xui/              # 3x-ui client
-│   ├── client.go            # Full API + retry + singleflight
-│   └── breaker.go           # Circuit breaker (5/30s/3-half-open)
+│   ├── subscription.go      # Use cases: Create, Delete, Trial
+│   ├── sync.go              # Multi-node subscription sync (Reconcile, SyncPendingNodes)
+│   ├── order.go             # Order lifecycle (Create, Activate, Expire)
+│   └── subscription_nodes.go # Subscription-node join table CRUD
+├── vpn/                # VPN client abstraction (multi-node, multi-type)
+│   ├── client.go            # Client interface, Config, NewClient factory, error classification
+│   ├── threex_ui.go         # 3x-ui specific client implementation
+│   ├── proxman.go           # proxman client implementation
+│   └── fetch.go             # fetch client (read-only HTTP, no-op provisioning)
+├── xui/              # Legacy 3x-ui API client (used by vpn/threex_ui.go)
+│   ├── client.go            # API + RetryWithBackoff + singleflight
+│   ├── breaker.go           # Circuit breaker (5/30s/3-half-open)
+│   └── errors.go            # Sentinel errors (ErrClientNotFound)
 ├── database/         # Persistence
-│   ├── database.go          # GORM service + migrations
-│   ├── migrations/          # 000..019 SQL files (embedded; 018 adds subscription_nodes)
-│   └── models:               # Subscription, Plan, Node, Product, Order, Invite
+│   ├── service.go           # GORM service + connection pool
+│   ├── migrations.go        # Embedded migration runner
+│   ├── migrations/          # 000..027 SQL files (embedded)
+│   ├── models.go            # Subscription, Plan, Node, Product, Order, Invite, SubscriptionNode
+│   ├── trials.go            # Trial subscription logic, generateTrialTelegramID
+│   ├── subscriptions.go     # Subscription CRUD
+│   ├── nodes.go             # Node CRUD
+│   ├── plans.go             # Plan CRUD
+│   ├── products.go          # Product CRUD
+│   ├── orders.go            # Order CRUD
+│   └── subscription_nodes.go # SubscriptionNode CRUD
 ├── config/           # Configuration
-│   ├── config.go            # Load + validate
+│   ├── config.go            # Load + validate (URL scheme allowlist via S3)
 │   └── constants.go         # All defaults & limits
+├── flag/             # Typed environment variable registry
+│   └── flag.go              # Registry, typed flags (string, int, int64)
+├── metrics/          # Prometheus metrics
+│   └── metrics.go           # HTTP, bot, XUI, DB, cache, circuit breaker metrics
 ├── logger/           # Logging
 │   └── logger.go            # Zap + Sentry + lumberjack
 ├── ratelimiter/      # Rate limiting
@@ -170,20 +189,21 @@ internal/
 │   └── per_user.go          # Per-chatID wrapper
 ├── scheduler/        # Background jobs
 │   ├── backup.go            # Daily backup (03:00)
-│   └── trial_cleanup.go     # Hourly expired trial cleanup
+│   ├── trial_cleanup.go     # Hourly expired trial cleanup
+│   ├── subscription_sync_worker.go  # SyncPendingNodes worker
+│   └── subscription_expire_worker.go # Subscription expiry worker
 ├── backup/           # Backup engine
 │   └── backup.go            # WAL checkpoint + atomic copy + rotate
 ├── heartbeat/        # External monitoring
 │   └── heartbeat.go         # Periodic POST to HEARTBEAT_URL
-├── webhook/          # Async notifications
-│   └── sender.go            # Retry with classification
 ├── interfaces/       # DI interfaces
 │   └── interfaces.go        # BotAPI, DatabaseService, XUIClient, etc.
 ├── utils/            # Utilities
 │   ├── uuid.go              # Crypto-random UUID v4, SubID, invite code
 │   ├── qr.go                # QR code generation
-│   ├── time.go              # Month boundary calculation
-│   └── format.go            # Progress bar, date formatting
+│   ├── retry.go             # Retry helper
+│   ├── format.go            # Progress bar, date formatting
+│   └── markdown.go          # Markdown sanitization
 └── testutil/         # Test helpers
     └── testutil.go          # Mock DB, XUI, Bot + Setenv
 ```
@@ -346,7 +366,7 @@ ConnMaxIdleTime = 2m
 - `BindTrialSubscription`: check telegram_id=0 → update (race-safe)
 
 **Orders/Products support:**
-- `Product` — purchasable subscription product bound to a plan (price, duration)
+- `Product` — purchasable subscription product bound to a plan (name, price, duration)
 - `Order` — purchase event with payment tracking (pending/paid/expired/canceled)
 - `UpdateOrderStatus`, `GetActiveByPlanID`, `GetOrdersBySubscriptionID`
 - Migration 017: `orders` table with CHECK constraint on status
@@ -505,22 +525,23 @@ SIGQUIT (kill -3) → core dump (not handled by us)
 ┌─────────────────────────────────────────────────────────────┐
 │                     subscriptions                           │
 ├─────────────────────────────────────────────────────────────┤
-│ id (PK)              uint                                   │
-│ telegram_id          int64    INDEX                         │
-│ username             string   INDEX                         │
-│ client_id            string                                 │
-│ subscription_id      string   INDEX (unique)                 │
-│ inbound_id           int      INDEX                         │
-│ traffic_limit        int64    default: 107374182400 (100GB)  │
-│ expires_at          time     INDEX                         │
+│ telegram_id          int64    UNIQUE INDEX                   │
+│ username             string   INDEX                          │
+│ client_id            string   NOT NULL UNIQUE                │
+│ subscription_id      string   NOT NULL UNIQUE INDEX          │
+│ expires_at          *time     INDEX (NULL = perpetual)       │
 │ status               string   default: "active"  INDEX       │
-│ subscription_url     string                                  │
-│ invite_code          string   INDEX                         │
-│ is_trial             bool     default: false  INDEX         │
-│ referred_by          int64    INDEX                         │
-│ created_at           time     autoCreate                    │
-│ updated_at           time     autoUpdate                    │
-│ deleted_at           gorm.DeletedAt  INDEX (soft delete)    │
+│ invite_code         *string   INDEX                          │
+│ plan_id              uint     INDEX (FK → plans)             │
+│ referred_by         *int64    INDEX                          │
+│ product_id          *uint     INDEX                          │
+│ started_at          *time                                     │
+│ price_paid_cents     int64    default: 0                     │
+│ currency            *string   size:3                         │
+│ devices              text     default:'[]' (JSON array)      │
+│ ips                  text     default:'[]' (JSON array)      │
+│ created_at           time     autoCreate                     │
+│ updated_at           time     autoUpdate                     │
 └─────────────────────────────────────────────────────────────┘
                                │
                                │ referred_by
@@ -554,6 +575,7 @@ SIGQUIT (kill -3) → core dump (not handled by us)
 ├─────────────────────────────────────────────────────────────┤
 │ id (PK)              uint                                   │
 │ plan_id              uint     INDEX  (FK → plans)           │
+│ name                 string   VARCHAR(255) NOT NULL         │
 │ duration_days        int      NOT NULL                      │
 │ price_cents          int64    NOT NULL                      │
 │ currency             char(3)  DEFAULT 'RUB'                 │
@@ -581,6 +603,56 @@ SIGQUIT (kill -3) → core dump (not handled by us)
 │ paid_at              datetime  When payment confirmed       │
 │ activated_at         datetime  When subscription activated  │
 │ expires_at           datetime  Payment expiry (e.g. 30 min) │
+
+┌─────────────────────────────────────────────────────────────┐
+│                        nodes                                │
+├─────────────────────────────────────────────────────────────┤
+│ id (PK)              uint                                   │
+│ name                 string   size:255                      │
+│ is_active            bool     default: true                 │
+│ host                 string   size:255                      │
+│ api_token            string   size:255                      │
+│ inbound_ids          text     JSON array (e.g. [1,2,3])     │
+│ subscription_url     string   size:512                      │
+│ type                 varchar  default: '3x-ui'              │
+│ created_at           time     autoCreate                    │
+│ updated_at           time     autoUpdate                    │
+└─────────────────────────────────────────────────────────────┘
+                               │
+                               │ M2M via plan_nodes
+                               ▼
+┌─────────────────────────────────────────────────────────────┐
+│                        plans                                │
+├─────────────────────────────────────────────────────────────┤
+│ id (PK)              uint                                   │
+│ name                 string   size:50 UNIQUE                │
+│ is_active            bool     not null default: true        │
+│ devices_limit        int      default: 1                    │
+│ traffic_limit        int64    default: 0 (0=unlimited)      │
+│ created_at           time     autoCreate                    │
+│ updated_at           time     autoUpdate                    │
+└─────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────┐
+│                     plan_nodes (M2M)                        │
+├─────────────────────────────────────────────────────────────┤
+│ plan_id (PK, FK)     uint → plans.id                        │
+│ node_id (PK, FK)     uint → nodes.id                        │
+└─────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────┐
+│                  subscription_nodes                         │
+├─────────────────────────────────────────────────────────────┤
+│ subscription_id (PK, FK)  uint → subscriptions.id           │
+│ node_id (PK, FK)          uint → nodes.id                   │
+│ status                    SyncStatus (active/pending_*)     │
+│ retry_count               int      default: 0               │
+│ retry_at                 *time                               │
+│ last_error               *text                               │
+│ updated_at                time     autoUpdate               │
+└─────────────────────────────────────────────────────────────┘
+
+**Sync states:** active | pending_add | pending_remove | pending_update
 └─────────────────────────────────────────────────────────────┘
 
 **Order statuses:**
@@ -608,53 +680,43 @@ SIGQUIT (kill -3) → core dump (not handled by us)
 ## Configuration Schema
 
 ```yaml
-# Full .env schema
+# Full .env schema (matches internal/config/config.go)
 telegram:
   bot_token: "string (required, format: number:token)"
-  admin_id: "int64 (optional, default 0)"
+  admin_id: "int64 (required, must be positive)"
+  contact_username: "string (default '')"
 
-xui:
-  host: "URL (required, must be HTTPS unless localhost)"
-  username: "string (required)"
-  password: "string (required)"
-  inbound_id: "int (default 1, min 1)"
-  sub_path: "string (default 'sub', alphanumeric+_-)"
-  session_max_age_minutes: "int (default 720)"
+# Seed-only — read on first run to populate nodes table if empty
+xui_seed:
+  host: "URL (seed-only, default http://localhost:2053)"
+  api_token: "string (seed-only)"
+  inbound_id: "int (seed-only, default 1)"
+
+subscription_server:
+  global_sub_url: "URL (required, e.g. https://vpn.example.com/sub/)"
+  subserver_access_log: "path (optional, empty=disabled)"
 
 database:
-  path: "string (default ./data/tgvpn.db)"
+  path: "string (default ./data/rs8kvn.db)"
 
 logging:
   file_path: "string (default ./data/bot.log)"
   level: "enum: debug|info|warn|error (default info)"
 
-subscription:
-  traffic_limit_gb: "int 1-1000 (default 30)"
-  trial_duration_hours: "int 1-168 (default 3)"
-  trial_rate_limit: "int 1-100 (default 3)"
-
-proxy:
-  extra_servers_enabled: "bool (default true)"
-  extra_servers_file: "string (default ./data/extra_servers.txt)"
-
 monitoring:
-  heartbeat_url: "URL (optional, must be HTTPS)"
+  heartbeat_url: "URL (optional, http/https only — S3 scheme allowlist)"
   heartbeat_interval: "int seconds, min 10 (default 300)"
-  sentry_dsn: "URL (optional, must be HTTPS)"
+  sentry_dsn: "URL (optional, http/https only — S3 scheme allowlist)"
   health_check_port: "int 1-65535 (default 8880)"
 
+trial:
+  duration_hours: "int 1-168 (default 3)"
+  rate_limit: "int 1-100 (default 3)"
+
 site:
-  url: "URL (default https://vpn.site)"
-  contact_username: "string (default '')"
+  url: "URL (default https://vpn.site, http/https only)"
   donate_card_number: "string (default '')"
   donate_url: "string (default '')"
-
-api:
-  token: "string (optional, 32+ random chars)"
-
-webhook:
-  proxy_manager_webhook_secret: "string (optional)"
-  proxy_manager_webhook_url: "URL (optional, must be HTTPS)"
 ```
 
 ---
@@ -704,7 +766,7 @@ User           Telegram       Bot (main)     Handler      XUI Panel       DB
   │                │              │              │            │  INSERT OK
   │                │              │              │            │◄───────────
   │                │              │              │ Cache Set  │
-  │                │              │              │ Webhook ↑  │
+  │                │              │              │ Sync ↑     │
   │                │              │              │ Notify ↓   │
   │                │              │              │◄───────────┤
   │                │              │ SendMessage  │             │
@@ -716,51 +778,157 @@ User           Telegram       Bot (main)     Handler      XUI Panel       DB
   │
   │ (Background queue workers sync subscription_nodes -> active)
 ```
-User           Telegram       Bot (main)     Handler      XUI Panel       DB
-  │                │              │              │             │             │
-  │ /start         │              │              │             │             │
-  │───────────────►│              │              │             │             │
-  │                │ update       │              │             │             │
-  │                │─────────────►│              │             │             │
-  │                │              │ route        │             │             │
-  │                │              │─────────────►│             │             │
-  │                │              │              │ HandleStart │             │
-  │                │              │              │────────────►│             │
-  │                │              │              │            SendMessage  │
-  │                │              │              │ (main menu) │           │
-  │                │              │              │◄────────────┤             │
-  │                │              │              │             │             │
-  │ Click "Get sub" │              │              │             │             │
-  │                │ callback     │              │             │             │
-  │───────────────►│              │              │             │             │
-  │                │ cb query     │              │             │             │
-  │                │─────────────►│              │             │             │
-  │                │              │ HandleCallback│             │             │
-  │                │              │─────────────►│             │             │
-  │                │              │              │ createSub   │             │
-  │                │              │              │────────────►│             │
-  │                │              │              │            GenerateUUID │
-  │                │              │              │            ┌───────────┘
-  │                │              │              │            │ XUI.AddClient
-  │                │              │              │            │───────────►
-  │                │              │              │            │  201 Created
-  │                │              │              │            │◄───────────
-  │                │              │              │            BuildURL
-  │                │              │              │            ┌───────────┘
-  │                │              │              │            │ DB Create
-  │                │              │              │            │───────────►
-  │                │              │              │            │  INSERT OK
-  │                │              │              │            │◄───────────
-  │                │              │              │ Cache Set  │
-  │                │              │              │ Webhook ↑  │
-  │                │              │              │ Notify ↓   │
-  │                │              │              │◄───────────┤
-  │                │              │ SendMessage  │             │
-  │                │              │ (with URL+QR)│             │
-  │                │              │◄─────────────┤             │
-  │                │ Message      │              │             │
-  │◄───────────────│              │              │             │
+---
+
+## VPN Client Abstraction (internal/vpn/)
+
+The `vpn` package provides a unified interface for provisioning VPN subscriptions across different panel types.
+
+```go
+type Client interface {
+    CreateSubscription(ctx context.Context, provision SubscriptionProvision) error
+    UpdateSubscription(ctx context.Context, provision SubscriptionProvision) error
+    DeleteSubscription(ctx context.Context, provision SubscriptionProvision) error
+    Close() error
+}
 ```
+
+**Factory:** `NewClient(cfg Config) (Client, error)` routes by `NodeType`:
+- `NodeType3xUI` → `ThreeXUIClient` (wraps `xui.Client`, iterates inbound IDs)
+- `NodeTypeProxman` → `ProxmanClient` (direct HTTP webhook, no-op update)
+- `NodeTypeFetch` → `FetchClient` (read-only HTTP fetch, all methods no-op)
+
+**Error classification:**
+- `ErrSubscriptionAlreadyExists` — wrapped when create fails with "already exists"/"duplicate"
+- `ErrSubscriptionNotFound` — wrapped when delete fails with "not found"/"does not exist"
+- `ErrNotImplemented` — unsupported operation for node type
+
+**Per-node clients:** Each `database.Node` gets its own `vpn.Client` instance created at startup. The `SyncService` holds a `map[uint]vpn.Client` keyed by node ID.
+
+---
+
+## Node Types Reference
+
+The system supports three node types, stored in the `nodes.type` column (`VARCHAR(10)`). Each type defines how the node provisions VPN clients and how the subserver fetches proxy configuration.
+
+### `3x-ui` — 3X-UI Panel
+
+Full lifecycle management via the 3x-ui REST API.
+
+| Operation | Behaviour |
+|-----------|-----------|
+| Create | `AddClientWithID` on each inbound ID via `xui.Client` |
+| Update | `UpdateClient` (traffic limits, expiry) |
+| Delete | `DeleteClient` by email |
+| Subserver URL | `subscription_url + "/" + subID` |
+
+**End-to-end:**
+1. Subscription created → `pending_add` record in `subscription_nodes`
+2. `SyncService` calls `ThreeXUIClient.CreateSubscription` → adds client on panel → status `active`
+3. Subserver request `/sub/{id}` → HTTP GET to `subscription_url/subID` → 3x-ui returns proxy configs
+4. Subscription deleted → `pending_remove` → `DeleteClient` on panel → row removed
+
+### `proxman` — Proxman Webhook
+
+Provisioning via HTTP webhook events. No update operation (webhook payload carries no traffic/expiry fields).
+
+| Operation | Behaviour |
+|-----------|-----------|
+| Create | POST `subscription.create` event to node host |
+| Update | No-op (returns `nil`) |
+| Delete | POST `subscription.delete` event to node host |
+| Subserver URL | `subscription_url + "/" + subID` |
+
+**End-to-end:**
+1. Subscription created → `pending_add` → `ProxmanClient.CreateSubscription` sends webhook → status `active`
+2. Subserver request → HTTP GET to `subscription_url/subID` → proxman returns proxy configs
+3. Subscription deleted → `pending_remove` → `ProxmanClient.DeleteSubscription` sends webhook → row removed
+
+### `fetch` — Read-Only HTTP Fetch
+
+No provisioning at all. The `subscription_url` points directly to an HTTP endpoint that returns proxy configuration. All `vpn.Client` methods are no-ops.
+
+| Operation | Behaviour |
+|-----------|-----------|
+| Create | No-op (returns `nil`) |
+| Update | No-op (returns `nil`) |
+| Delete | No-op (returns `nil`) |
+| Subserver URL | `subscription_url` used as-is (no `subID` appended) |
+
+**End-to-end:**
+1. Subscription created → `pending_add` → `FetchClient.CreateSubscription` (no-op) → status `active`
+2. Subserver request `/sub/{id}` → HTTP GET to `subscription_url` directly → upstream returns proxy configs
+3. Subscription deleted → `pending_remove` → `FetchClient.DeleteSubscription` (no-op) → row removed
+
+The `fetch` node type is useful for aggregating external subscription sources that do not support client management — the bot simply proxies their response to the end user.
+
+## Subscription Sync Pipeline (internal/service/sync.go)
+
+The `SyncService` manages synchronization of subscriptions with VPN nodes via a 4-state machine.
+
+### State Machine
+
+```
+┌──────────────┐
+│ pending_add  │ ── CreateSubscription() ──→ ┌──────────┐
+└──────────────┘                              │  active  │
+┌──────────────┐ ── UpdateSubscription() ──→ └──────────┘
+│pending_update│                                   │
+└──────────────┘                                   │ DeleteSubscription()
+┌──────────────┐ ◄────────────────────────────────┘
+│pending_remove│ ── delete row ──→ (gone)
+└──────────────┘
+```
+### Operations
+
+| Method | Description |
+|--------|-------------|
+| `SyncSubscription` | Sync a single subscription across all its nodes |
+| `SyncPendingNodes` | Scan all `pending_*` records, process with retry |
+| `ReconcilePlanNodes` | Add/remove nodes when plan changes |
+| `ReconcileOrphanedClients` | Find XUI clients without DB subscription, delete them |
+
+### Concurrency
+- Per-subscription locking via `lockSubscription(subscriptionID)` — prevents concurrent sync of the same subscription
+- Lock entries cleaned up when last waiter releases (prevents unbounded map growth)
+
+### Background Workers
+
+| Worker | Schedule | Description |
+|--------|----------|-------------|
+| `SubscriptionSyncWorker` | Continuous | Processes `pending_*` states with exponential backoff |
+| `SubscriptionExpireWorker` | Periodic | Expires subscriptions past `expires_at` |
+| `OrphanReconciler` | Every 6h | Cleans up orphaned XUI clients |
+
+### Retry Behavior
+- Transient failures: `retry_count` incremented, `retry_at` set with exponential backoff
+- `last_error` column stores the last error message
+- `SyncPendingNodes` returns aggregate error (`errors.Join`) on partial failures
+- Only `context.Cancelled`/`DeadlineExceeded` abort the scan early
+
+---
+
+## Prometheus Metrics (internal/metrics/)
+
+The bot exposes a `/metrics` endpoint (via `promhttp.Handler()`) on the HTTP server port.
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `http_requests_total` | Counter | method, path, status | Total HTTP requests |
+| `http_request_duration_seconds` | Histogram | method, path | HTTP request latency |
+| `http_requests_in_flight` | Gauge | method, path | Current in-flight requests |
+| `bot_updates_total` | Counter | command, result | Bot updates (success/error/rate_limited) |
+| `bot_update_errors_total` | Counter | type | Bot update errors |
+| `bot_update_duration_seconds` | Histogram | — | Bot update processing time |
+| `subserver_source_fetch_total` | Counter | `result`, `format` | Upstream source fetch results |
+| `subserver_source_fetch_duration_seconds` | Histogram | `result` | Upstream source fetch duration |
+| `cache_hits_total` / `cache_misses_total` | Counter | cache | Cache hit/miss |
+| `circuit_breaker_state` | Gauge | target | CB state (0=closed, 1=open, 2=half-open) |
+| `bot_orphaned_clients_removed_total` | Counter | — | Orphaned clients removed |
+| `subserver_cache_invalidations_total` | Counter | `reason` | Cache invalidations by reason |
+| `subserver_no_items_total` | Counter | — | Requests returning no items |
+
+**Path normalization:** `/i/{code}` → `/i/:code`, `/sub/{id}` → `/sub/:id` (reduces cardinality).
 
 ---
 
@@ -777,6 +945,11 @@ User           Telegram       Bot (main)     Handler      XUI Panel       DB
 | 2026-04 | 5-min subserver reload | Balance between config freshness and file I/O |
 | 2026-04 | Token bucket rate limiting | Standard algorithm, per-user isolation, tunable |
 | 2026-04 | Daily backup at 03:00 | Low-traffic period, WAL checkpoint ensures consistency |
+| 2026-05 | Multi-node VPN abstraction (vpn/) | Support multiple 3x-ui/proxman panels, node-type routing |
+| 2026-05 | Plans & pricing model | Plans with devices_limit, traffic_limit; products with duration/price |
+| 2026-06 | Subscription sync pipeline | 4-state sync machine (subscription_nodes) with per-sub locking |
+| 2026-06 | Prometheus metrics | `/metrics` endpoint with HTTP, bot, XUI, DB, cache metrics |
+| 2026-07 | Security hardening (S2/S3/A1) | X-Forwarded-For rightmost IP, URL scheme allowlist, web→bot dependency break |
 
 ---
 
@@ -786,14 +959,15 @@ User           Telegram       Bot (main)     Handler      XUI Panel       DB
 |------|----------------------|----------|
 | **Database** | Migrate to PostgreSQL for horizontal scaling | P2 (when >10k users) |
 | **Cache** | Redis for shared cache across multiple bot instances | P3 (if horizontal scaling) |
-| **Metrics** | Prometheus /metrics endpoint with counters/gauges | P1 (monitoring) |
 | **Rate limiting** | Distributed rate limiting via Redis (per-IP) | P2 (DDoS protection) |
-| **Webhook** | Retry queue with exponential backoff + dead-letter queue | P2 (reliability) |
-| **Proxy** | Support formultiple XUI panels (sharding) | P3 (load balancing) |
+| **Proxy** | Support for multiple XUI panels (sharding) | Done — multi-node via vpn/ abstraction |
 | **Auth** | OAuth for admin panel (web UI) | P3 (convenience) |
 | **Testing** | Property-based testing (quickcheck) | P2 (quality) |
 | **CI/CD** | Automated security scanning (Trivy, gosec in CI) | P1 (security) |
 | **Deployment** | Helm chart for Kubernetes | P2 (if using k8s) |
+| **Config** | Remove XUI_INBOUND_ID (singular) seed-only env var | P3 (next release) |
+| **Storage** | Real Cloudflare R2 backend for UploadStore | P2 (WIRED-not-PROVEN) |
+| **Transcription** | Live HTTP transcription endpoint | P2 (WIRED-not-PROVEN) |
 
 ---
 

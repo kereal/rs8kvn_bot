@@ -45,8 +45,10 @@ func TestMessageFormat_NoDoubleEscape(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			result := utils.EscapeMarkdown(tt.input)
 			assert.Equal(t, tt.want, result, "Should escape special chars")
+
 		})
 	}
 }
@@ -88,8 +90,10 @@ func TestMessageFormat_EscapedMessageContent(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			result := utils.EscapeMarkdown(tt.input)
 			assert.Equal(t, tt.want, result)
+
 		})
 	}
 }

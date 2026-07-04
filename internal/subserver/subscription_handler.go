@@ -1,3 +1,6 @@
+// Package subserver implements the subscription delivery endpoint (/sub/:id)
+// that aggregates proxy configurations from multiple 3x-ui upstream sources,
+// caches responses, and tracks requesting devices and IPs for analytics.
 package subserver
 
 import (
@@ -12,9 +15,9 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/interfaces"
 	"github.com/kereal/rs8kvn_bot/internal/logger"
+	"github.com/kereal/rs8kvn_bot/internal/metrics"
 
 	"go.uber.org/zap"
-	"gorm.io/gorm"
 )
 
 // HandleSubscription processes a subscription request from cache or upstream sources.
@@ -38,17 +41,25 @@ func HandleSubscription(ctx context.Context, db interfaces.DatabaseService, subS
 		// On cache hit, verify the subscription is still active.
 		status, expiryTime, err := db.GetSubscriptionStatus(ctx, subID)
 		if err != nil {
-			logger.Error("Cache status check failed, serving stale cache",
+			subSvc.InvalidateCache(cacheKey)
+			if errors.Is(err, database.ErrSubscriptionNotFound) {
+				metrics.SubserverCacheInvalidationsTotal.WithLabelValues("not_found").Inc()
+				return nil, ErrSubscriptionNotFound
+			}
+			metrics.SubserverCacheInvalidationsTotal.WithLabelValues("status_error").Inc()
+			logger.Error("Cache status check failed, cache invalidated",
 				zap.String("sub_id", subID),
 				zap.Error(err))
-			return &SubscriptionResult{
-				Body:    cachedBody,
-				Headers: cachedHeaders,
-			}, nil
+			return nil, fmt.Errorf("cache status check failed: %w", err)
 		}
 		// If the subscription is no longer active or expired, invalidate the cache.
 		if status != "active" || (!expiryTime.IsZero() && time.Now().After(expiryTime)) {
 			subSvc.InvalidateCache(cacheKey)
+			invalidReason := "revoked"
+			if status == "active" {
+				invalidReason = "expired"
+			}
+			metrics.SubserverCacheInvalidationsTotal.WithLabelValues(invalidReason).Inc()
 			logger.Warn("Cache invalidated: subscription no longer active",
 				zap.String("sub_id", subID),
 				zap.String("status", status),
@@ -64,9 +75,9 @@ func HandleSubscription(ctx context.Context, db interfaces.DatabaseService, subS
 	}
 
 	// Cache miss: load the subscription with plan and active sources.
-	subFull, err := db.GetSubscriptionWithPlanAndNodes(ctx, subID)
+	subFull, err := db.GetWithPlanAndNodes(ctx, subID)
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(err, database.ErrSubscriptionNotFound) {
 			logger.Error("Subscription not found in database",
 				zap.String("sub_id", subID))
 			return nil, ErrSubscriptionNotFound
@@ -80,7 +91,7 @@ func HandleSubscription(ctx context.Context, db interfaces.DatabaseService, subS
 	logger.Debug("Subscription loaded from database",
 		zap.Uint("sub_pk", subFull.Subscription.ID),
 		zap.String("status", subFull.Subscription.Status),
-		zap.Time("expires_at", subFull.Subscription.ExpiresAt),
+		zap.Timep("expires_at", subFull.Subscription.ExpiresAt),
 		zap.Int64("plan_traffic_limit", subFull.Plan.TrafficLimit),
 		zap.Int("nodes_count", len(subFull.Nodes)),
 	)
@@ -106,15 +117,24 @@ func HandleSubscription(ctx context.Context, db interfaces.DatabaseService, subS
 			continue
 		}
 
-		srcSubURL := src.SubscriptionURL
-		if srcSubURL != "" && !strings.HasSuffix(srcSubURL, "/") {
-			srcSubURL += "/"
+		var sourceURL string
+		if src.Type == database.NodeTypeFetch {
+			sourceURL = src.SubscriptionURL
+		} else {
+			srcSubURL := src.SubscriptionURL
+			if !strings.HasSuffix(srcSubURL, "/") {
+				srcSubURL += "/"
+			}
+			sourceURL = srcSubURL + subID
 		}
-		sourceURL := srcSubURL + subID
 
 		// Fetch the upstream subscription response from the source.
+		fetchStart := time.Now()
 		xuiResp, err := FetchFromXUI(ctx, sourceURL)
+		fetchDuration := time.Since(fetchStart).Seconds()
 		if err != nil {
+			metrics.SubserverSourceFetchTotal.WithLabelValues("error", "unknown").Inc()
+			metrics.SubserverSourceFetchDuration.WithLabelValues("error").Observe(fetchDuration)
 			logger.Error("Failed to fetch from node",
 				zap.String("sub_id", subID),
 				zap.String("source", src.Name),
@@ -131,6 +151,8 @@ func HandleSubscription(ctx context.Context, db interfaces.DatabaseService, subS
 
 		// Detect response format and log source details.
 		format := DetectFormat(body)
+		metrics.SubserverSourceFetchTotal.WithLabelValues("success", format.String()).Inc()
+		metrics.SubserverSourceFetchDuration.WithLabelValues("success").Observe(fetchDuration)
 		logger.Debug("Node response received",
 			zap.String("sub_id", subID),
 			zap.String("source", src.Name),
@@ -227,6 +249,7 @@ func HandleSubscription(ctx context.Context, db interfaces.DatabaseService, subS
 
 	// No servers collected from any source.
 	if len(allItems) == 0 {
+		metrics.SubserverNoItemsTotal.Inc()
 		return nil, ErrNoSubscriptionItems
 	}
 
@@ -249,7 +272,7 @@ func HandleSubscription(ctx context.Context, db interfaces.DatabaseService, subS
 // has the same x-hwid value it is replaced (rotated to the end). The updated
 // list is persisted to DB.
 func UpdateDevices(ctx context.Context, db interfaces.DatabaseService, subFull *database.SubscriptionFull, headers map[string]string) {
-	devices, err := subFull.Subscription.GetDevices()
+	devices, err := subFull.Subscription.ParseDevices()
 	if err != nil {
 		logger.Error("Failed to parse devices JSON",
 			zap.Uint("sub_pk", subFull.Subscription.ID),
@@ -289,7 +312,7 @@ func UpdateDevices(ctx context.Context, db interfaces.DatabaseService, subFull *
 		return
 	}
 
-	if err := db.UpdateSubscriptionDevices(ctx, subFull.Subscription.ID, subFull.Subscription.Devices); err != nil {
+	if err := db.UpdateDevices(ctx, subFull.Subscription.ID, subFull.Subscription.Devices); err != nil {
 		logger.Error("Failed to save devices to database",
 			zap.Uint("sub_pk", subFull.Subscription.ID),
 			zap.String("sub_id", subFull.Subscription.SubscriptionID),
@@ -301,7 +324,7 @@ func UpdateDevices(ctx context.Context, db interfaces.DatabaseService, subFull *
 // subscription's Ips JSON field. Duplicate IPs are rotated to the end.
 // The list is capped at maxIPEntries (oldest entries are dropped).
 func UpdateIPs(ctx context.Context, db interfaces.DatabaseService, subFull *database.SubscriptionFull, ip string) {
-	ips, err := subFull.Subscription.GetIPs()
+	ips, err := subFull.Subscription.ParseIPs()
 	if err != nil {
 		logger.Error("Failed to parse ips JSON",
 			zap.Uint("sub_pk", subFull.Subscription.ID),
@@ -336,7 +359,7 @@ func UpdateIPs(ctx context.Context, db interfaces.DatabaseService, subFull *data
 		return
 	}
 
-	if err := db.UpdateSubscriptionIPs(ctx, subFull.Subscription.ID, subFull.Subscription.Ips); err != nil {
+	if err := db.UpdateIPs(ctx, subFull.Subscription.ID, subFull.Subscription.Ips); err != nil {
 		logger.Error("Failed to save ips to database",
 			zap.Uint("sub_pk", subFull.Subscription.ID),
 			zap.String("sub_id", subFull.Subscription.SubscriptionID),

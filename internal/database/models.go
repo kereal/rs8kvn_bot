@@ -5,17 +5,19 @@ import (
 	"errors"
 	"fmt"
 	"time"
-
-	"gorm.io/gorm"
 )
 
 // Sentinel errors returned by Get* functions when a record is not found.
 // Callers should use errors.Is to distinguish "not found" from infrastructure/DB errors.
 var (
-	ErrInviteNotFound      = errors.New("invite not found")
-	ErrSubscriptionNotFound = fmt.Errorf("subscription not found: %w", gorm.ErrRecordNotFound)
-	ErrPlanNotFound        = errors.New("plan not found")
-	ErrOrderNotFound       = errors.New("order not found")
+	ErrInviteNotFound           = errors.New("invite not found")
+	ErrSubscriptionNotFound     = errors.New("subscription not found")
+	ErrPlanNotFound             = errors.New("plan not found")
+	ErrOrderNotFound            = errors.New("order not found")
+	ErrProductNotFound          = errors.New("product not found")
+	ErrSubscriptionNodeNotFound = errors.New("subscription node not found")
+	ErrNodeNotFound             = errors.New("node not found")
+	ErrTrialAlreadyActivated    = errors.New("trial already activated")
 )
 
 const (
@@ -23,22 +25,49 @@ const (
 	FreePlanName  = "free"
 )
 
+type NodeType string
+
+const (
+	NodeType3xUI    NodeType = "3x-ui"
+	NodeTypeProxman NodeType = "proxman"
+	NodeTypeFetch   NodeType = "fetch"
+)
+
+// SubscriptionStatus represents the lifecycle state of a subscription.
+type SubscriptionStatus string
+
+const (
+	SubscriptionStatusActive   SubscriptionStatus = "active"
+	SubscriptionStatusExpired  SubscriptionStatus = "expired"
+	SubscriptionStatusPaused   SubscriptionStatus = "paused"
+	SubscriptionStatusCanceled SubscriptionStatus = "canceled"
+)
+
 // Subscription represents a user's VPN subscription.
+//
+// Telegram ID conventions:
+//   - Positive values: привязанные пользователи (уникальный constraint)
+//   - Negative values: непривязанные trial подписки (генерируются через generateTrialTelegramID())
+//   - 0: не используется (историческая совместимость)
+//
+// См. generateTrialTelegramID() в trials.go для генерации уникальных отрицательных ID.
 type Subscription struct {
-	ID             uint      `gorm:"primaryKey"`
-	TelegramID     int64     `gorm:"index"`
-	Username       string    `gorm:"size:255;index"`
-	ClientID       string    `gorm:"size:255"`
-	SubscriptionID string    `gorm:"size:255;index"`
-	ExpiresAt      time.Time `gorm:"index:idx_expiry"`
-	Status         string    `gorm:"default:active;size:50;index"`
-	InviteCode     string    `gorm:"size:16;index"`
-	PlanID         uint      `gorm:"index"`
-	ReferredBy     int64     `gorm:"index"`
-	ProductID      uint      `gorm:"index"`
-	StartedAt      time.Time
+	ID uint `gorm:"primaryKey"`
+	// TelegramID — уникальный для каждой подписки. Trial подписки используют отрицательные ID.
+	TelegramID     int64  `gorm:"uniqueIndex"`
+	Username       string `gorm:"size:255;index"`
+	ClientID       string `gorm:"size:255;not null;uniqueIndex"`
+	SubscriptionID string `gorm:"size:255;not null;uniqueIndex"`
+	// ExpiresAt — срок действия подписки. NULL = бессрочная (free-план).
+	ExpiresAt      *time.Time `gorm:"index:idx_expiry"`
+	Status         string     `gorm:"default:active;size:50;index"`
+	InviteCode     *string    `gorm:"size:16;index"`
+	PlanID         uint       `gorm:"index"`
+	ReferredBy     *int64     `gorm:"index"`
+	ProductID      *uint      `gorm:"index"`
+	StartedAt      *time.Time
 	PricePaidCents int64     `gorm:"default:0"`
-	Currency       string    `gorm:"size:3"`
+	Currency       *string   `gorm:"size:3"`
 	Devices        string    `gorm:"type:text;default:'[]'"` // JSON array of {header_key: value} device entries
 	Ips            string    `gorm:"type:text;default:'[]'"` // JSON array of {ip: timestamp} entries
 	CreatedAt      time.Time `gorm:"autoCreateTime"`
@@ -59,7 +88,7 @@ type Node struct {
 	APIToken        string    `gorm:"size:255;column:api_token"`
 	InboundIDs      string    `gorm:"type:text;not null;default:'[]';column:inbound_ids"`
 	SubscriptionURL string    `gorm:"size:512;column:subscription_url"`
-	Type            string    `gorm:"type:varchar(10);not null;default: x-ui;column:type" json:"type"`
+	Type            NodeType  `gorm:"type:varchar(10);not null;default:3x-ui;column:type" json:"type"`
 	CreatedAt       time.Time `gorm:"autoCreateTime;column:created_at"`
 	UpdatedAt       time.Time `gorm:"autoUpdateTime;column:updated_at"`
 
@@ -68,9 +97,11 @@ type Node struct {
 
 // Plan represents a subscription plan.
 type Plan struct {
-	ID           uint      `gorm:"primaryKey;column:id"`
-	Name         string    `gorm:"size:50;uniqueIndex;column:name"`
-	DevicesLimit int       `gorm:"default:1;column:devices_limit"`
+	ID           uint   `gorm:"primaryKey;column:id"`
+	Name         string `gorm:"size:50;uniqueIndex;column:name"`
+	IsActive     bool   `gorm:"not null;default:true;column:is_active"`
+	DevicesLimit int    `gorm:"default:1;column:devices_limit"`
+	// TrafficLimit — лимит трафика в байтах. 0 = безлимит.
 	TrafficLimit int64     `gorm:"default:0;column:traffic_limit"`
 	CreatedAt    time.Time `gorm:"autoCreateTime;column:created_at"`
 	UpdatedAt    time.Time `gorm:"autoUpdateTime;column:updated_at"`
@@ -92,6 +123,7 @@ type PlanNode struct {
 type Product struct {
 	ID           uint      `gorm:"primaryKey;column:id"`
 	PlanID       uint      `gorm:"not null;column:plan_id"`
+	Name         string    `gorm:"size:255;not null;column:name"`
 	DurationDays int       `gorm:"not null;column:duration_days"`
 	PriceCents   int64     `gorm:"not null;column:price_cents"`
 	Currency     string    `gorm:"size:3;not null;default:RUB;column:currency"`
@@ -111,19 +143,28 @@ type Product struct {
 //   - paid_at — payment confirmation timestamp.
 //   - activated_at — subscription activation timestamp.
 //   - expires_at — payment invoice expiry (e.g. 30 minutes from creation).
+type OrderStatus string
+
+const (
+	OrderStatusPending  OrderStatus = "pending"
+	OrderStatusPaid     OrderStatus = "paid"
+	OrderStatusExpired  OrderStatus = "expired"
+	OrderStatusCanceled OrderStatus = "canceled"
+)
+
 type Order struct {
-	ID                uint       `gorm:"primaryKey;column:id"`
-	SubscriptionID    uint       `gorm:"not null;column:subscription_id"`
-	ProductID         uint       `gorm:"not null;column:product_id"`
-	Status            string     `gorm:"not null;size:16;column:status"`
-	AmountCents       int64      `gorm:"not null;column:amount_cents"`
-	Currency          string     `gorm:"size:3;not null;default:RUB;column:currency"`
-	PaymentProvider   string     `gorm:"column:payment_provider"`
-	ProviderPaymentID string     `gorm:"column:provider_payment_id"`
-	CreatedAt         time.Time  `gorm:"not null;column:created_at"`
-	PaidAt            *time.Time `gorm:"column:paid_at"`
-	ActivatedAt       *time.Time `gorm:"column:activated_at"`
-	ExpiresAt         *time.Time `gorm:"column:expires_at"`
+	ID                uint        `gorm:"primaryKey;column:id"`
+	SubscriptionID    uint        `gorm:"not null;column:subscription_id"`
+	ProductID         uint        `gorm:"not null;column:product_id"`
+	Status            OrderStatus `gorm:"not null;size:16;column:status"`
+	AmountCents       int64       `gorm:"not null;column:amount_cents"`
+	Currency          string      `gorm:"size:3;not null;default:RUB;column:currency"`
+	PaymentProvider   string      `gorm:"column:payment_provider"`
+	ProviderPaymentID string      `gorm:"column:provider_payment_id"`
+	CreatedAt         time.Time   `gorm:"not null;column:created_at"`
+	PaidAt            *time.Time  `gorm:"column:paid_at"`
+	ActivatedAt       *time.Time  `gorm:"column:activated_at"`
+	ExpiresAt         *time.Time  `gorm:"column:expires_at"`
 
 	Subscription *Subscription `gorm:"foreignKey:SubscriptionID"`
 	Product      *Product      `gorm:"foreignKey:ProductID"`
@@ -138,31 +179,39 @@ type Invite struct {
 	Subscriptions []Subscription `gorm:"foreignKey:InviteCode"`
 }
 
-// SubscriptionNodeStatus represents the synchronization status of a subscription on a VPN node.
-// Statuses: active | pending_add | pending_remove.
+// SyncStatus represents the synchronization status of a subscription on a VPN node.
+// Statuses: active | pending_add | pending_remove | pending_update.
 //
 // Values:
 //   - active — нода добавлена и последняя синхронизация прошла успешно.
 //   - pending_add — запрошено добавление ноды, операция ещё не выполнена на панели.
 //   - pending_remove — запрошено удаление ноды, операция ещё не выполнена на панели.
-type SubscriptionNodeStatus string
+//   - pending_update — запрошено обновление конфигурации ноды (например, смена тарифа).
+//
+// State machine:
+//   - pending_add -> active after successful create or successful fallback update
+//   - pending_update -> active after successful update
+//   - pending_remove -> row deletion after successful delete or idempotent not-found
+//   - any pending_* state stays pending and gets retry metadata on transient failures
+type SyncStatus string
 
 const (
-	SubscriptionNodeStatusActive        SubscriptionNodeStatus = "active"
-	SubscriptionNodeStatusPendingAdd    SubscriptionNodeStatus = "pending_add"
-	SubscriptionNodeStatusPendingRemove SubscriptionNodeStatus = "pending_remove"
+	SyncStatusActive        SyncStatus = "active"
+	SyncStatusPendingAdd    SyncStatus = "pending_add"
+	SyncStatusPendingRemove SyncStatus = "pending_remove"
+	SyncStatusPendingUpdate SyncStatus = "pending_update"
 )
 
 // SubscriptionNode represents the actual synchronization state of a specific
 // subscription with a specific VPN node (not plan-level, but concrete pair).
 type SubscriptionNode struct {
-	SubscriptionID uint                   `gorm:"primaryKey;column:subscription_id"`
-	NodeID         uint                   `gorm:"primaryKey;column:node_id"`
-	Status         SubscriptionNodeStatus `gorm:"not null;size:16;column:status"`
-	RetryCount     int                    `gorm:"not null;default:0;column:retry_count"`
-	RetryAt        *time.Time             `gorm:"column:retry_at"`
-	LastError      *string                `gorm:"type:text;column:last_error"`
-	UpdatedAt      time.Time              `gorm:"not null;autoUpdateTime;column:updated_at"`
+	SubscriptionID uint       `gorm:"primaryKey;column:subscription_id"`
+	NodeID         uint       `gorm:"primaryKey;column:node_id"`
+	Status         SyncStatus `gorm:"not null;size:16;column:status"`
+	RetryCount     int        `gorm:"not null;default:0;column:retry_count"`
+	RetryAt        *time.Time `gorm:"column:retry_at"`
+	LastError      *string    `gorm:"type:text;column:last_error"`
+	UpdatedAt      time.Time  `gorm:"not null;autoUpdateTime;column:updated_at"`
 }
 
 // TrialRequest tracks trial requests for rate limiting.
@@ -227,12 +276,12 @@ func (SubscriptionNode) TableName() string {
 }
 
 // IsExpired returns true if the subscription has expired.
-// A zero ExpiresAt means no expiry is set, so it is not considered expired.
+// A nil ExpiresAt means the subscription is perpetual (no expiry set).
 func (s *Subscription) IsExpired() bool {
-	if s.ExpiresAt.IsZero() {
+	if s.ExpiresAt == nil {
 		return false
 	}
-	return time.Now().After(s.ExpiresAt)
+	return time.Now().After(*s.ExpiresAt)
 }
 
 // IsActive returns true if the subscription is active and not expired.
@@ -240,8 +289,8 @@ func (s *Subscription) IsActive() bool {
 	return s.Status == "active" && !s.IsExpired()
 }
 
-// GetDevices parses the Devices JSON string into a slice of header maps.
-func (s *Subscription) GetDevices() ([]map[string]string, error) {
+// ParseDevices parses the Devices JSON string into a slice of header maps.
+func (s *Subscription) ParseDevices() ([]map[string]string, error) {
 	if s.Devices == "" {
 		return []map[string]string{}, nil
 	}
@@ -262,8 +311,8 @@ func (s *Subscription) SetDevices(devices []map[string]string) error {
 	return nil
 }
 
-// GetIPs parses the Ips JSON string into a slice of ip->timestamp maps.
-func (s *Subscription) GetIPs() ([]map[string]string, error) {
+// ParseIPs parses the Ips JSON string into a slice of ip->timestamp maps.
+func (s *Subscription) ParseIPs() ([]map[string]string, error) {
 	if s.Ips == "" {
 		return []map[string]string{}, nil
 	}
@@ -284,7 +333,7 @@ func (s *Subscription) SetIPs(ips []map[string]string) error {
 	return nil
 }
 
-func (n *Node) GetInboundIDs() ([]int, error) {
+func (n *Node) ParseInboundIDs() ([]int, error) {
 	if n.InboundIDs == "" {
 		return []int{}, nil
 	}
@@ -315,7 +364,7 @@ var DefaultInboundIDs = []int{1}
 // ResolveInboundIDs returns the node's inbound IDs, falling back to DefaultInboundIDs
 // when the stored list is empty or malformed. Callers must not repeat this fallback.
 func (n *Node) ResolveInboundIDs() []int {
-	ids, err := n.GetInboundIDs()
+	ids, err := n.ParseInboundIDs()
 	if err != nil || len(ids) == 0 {
 		out := make([]int, len(DefaultInboundIDs))
 		copy(out, DefaultInboundIDs)

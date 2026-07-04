@@ -32,7 +32,7 @@ func TestE2E_DelCommand_Success(t *testing.T) {
 	require.NoError(t, err)
 	subID := sub.ID
 
-	resetMockBotAPI(env.botAPI)
+	resetBotAPI(env.botAPI)
 
 	update := tgbotapi.Update{
 		Message: &tgbotapi.Message{
@@ -56,132 +56,55 @@ func TestE2E_DelCommand_Success(t *testing.T) {
 	_, err = env.db.GetByID(ctx, subID)
 	assert.Error(t, err, "Subscription should be deleted")
 
-	assert.True(t, env.xui.DeleteClientCalled)
+	// Sync-based: XUI is called via sync module, not directly in DeleteByID()
 }
 
-func TestE2E_DelCommand_NoArgs(t *testing.T) {
+func TestE2E_DelCommand_ArgValidation(t *testing.T) {
 	t.Parallel()
 
-	env := setupE2EEnv(t)
-	defer func() {
-		if err := env.db.Close(); err != nil {
-			t.Logf("Warning: failed to close database: %v", err)
-		}
-	}()
-
-	ctx := context.Background()
-	adminID := env.cfg.TelegramAdminID
-	resetMockBotAPI(env.botAPI)
-
-	update := tgbotapi.Update{
-		Message: &tgbotapi.Message{
-			Chat: &tgbotapi.Chat{ID: adminID},
-			From: &tgbotapi.User{
-				ID:       adminID,
-				UserName: "admin",
-			},
-			Text:     "/del",
-			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 4}},
-		},
+	tests := []struct {
+		name    string
+		cmd     string
+		wantMsg string
+	}{
+		{name: "no_args", cmd: "/del", wantMsg: "Использование: /del"},
+		{name: "invalid_id", cmd: "/del not-a-number", wantMsg: "Неверный формат ID"},
+		{name: "negative_id", cmd: "/del -1", wantMsg: "положительным числом"},
+		{name: "not_found", cmd: "/del 99999", wantMsg: "Ошибка удаления подписки"},
 	}
-	env.handler.HandleDel(ctx, update)
 
-	assert.True(t, env.botAPI.SendCalledSafe())
-	assert.Contains(t, env.botAPI.LastSentText, "Использование: /del")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env := setupE2EEnv(t)
+			defer func() {
+				if err := env.db.Close(); err != nil {
+					t.Logf("Warning: failed to close database: %v", err)
+				}
+			}()
+
+			ctx := context.Background()
+			adminID := env.cfg.TelegramAdminID
+			resetBotAPI(env.botAPI)
+
+			update := tgbotapi.Update{
+				Message: &tgbotapi.Message{
+					Chat: &tgbotapi.Chat{ID: adminID},
+					From: &tgbotapi.User{
+						ID:       adminID,
+						UserName: "admin",
+					},
+					Text:     tt.cmd,
+					Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 4}},
+				},
+			}
+			env.handler.HandleDel(ctx, update)
+
+			assert.True(t, env.botAPI.SendCalledSafe())
+			assert.Contains(t, env.botAPI.LastSentText, tt.wantMsg)
+		})
+	}
 }
 
-func TestE2E_DelCommand_InvalidID(t *testing.T) {
-	t.Parallel()
-
-	env := setupE2EEnv(t)
-	defer func() {
-		if err := env.db.Close(); err != nil {
-			t.Logf("Warning: failed to close database: %v", err)
-		}
-	}()
-
-	ctx := context.Background()
-	adminID := env.cfg.TelegramAdminID
-	resetMockBotAPI(env.botAPI)
-
-	update := tgbotapi.Update{
-		Message: &tgbotapi.Message{
-			Chat: &tgbotapi.Chat{ID: adminID},
-			From: &tgbotapi.User{
-				ID:       adminID,
-				UserName: "admin",
-			},
-			Text:     "/del not-a-number",
-			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 4}},
-		},
-	}
-	env.handler.HandleDel(ctx, update)
-
-	assert.True(t, env.botAPI.SendCalledSafe())
-	assert.Contains(t, env.botAPI.LastSentText, "Неверный формат ID")
-}
-
-func TestE2E_DelCommand_NegativeID(t *testing.T) {
-	t.Parallel()
-
-	env := setupE2EEnv(t)
-	defer func() {
-		if err := env.db.Close(); err != nil {
-			t.Logf("Warning: failed to close database: %v", err)
-		}
-	}()
-
-	ctx := context.Background()
-	adminID := env.cfg.TelegramAdminID
-	resetMockBotAPI(env.botAPI)
-
-	update := tgbotapi.Update{
-		Message: &tgbotapi.Message{
-			Chat: &tgbotapi.Chat{ID: adminID},
-			From: &tgbotapi.User{
-				ID:       adminID,
-				UserName: "admin",
-			},
-			Text:     "/del -1",
-			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 4}},
-		},
-	}
-	env.handler.HandleDel(ctx, update)
-
-	assert.True(t, env.botAPI.SendCalledSafe())
-	assert.Contains(t, env.botAPI.LastSentText, "положительным числом")
-}
-
-func TestE2E_DelCommand_NotFound(t *testing.T) {
-	t.Parallel()
-
-	env := setupE2EEnv(t)
-	defer func() {
-		if err := env.db.Close(); err != nil {
-			t.Logf("Warning: failed to close database: %v", err)
-		}
-	}()
-
-	ctx := context.Background()
-	adminID := env.cfg.TelegramAdminID
-	resetMockBotAPI(env.botAPI)
-
-	update := tgbotapi.Update{
-		Message: &tgbotapi.Message{
-			Chat: &tgbotapi.Chat{ID: adminID},
-			From: &tgbotapi.User{
-				ID:       adminID,
-				UserName: "admin",
-			},
-			Text:     "/del 99999",
-			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 4}},
-		},
-	}
-	env.handler.HandleDel(ctx, update)
-
-	assert.True(t, env.botAPI.SendCalledSafe())
-	assert.Contains(t, env.botAPI.LastSentText, "Ошибка удаления подписки")
-}
 
 func TestE2E_DelCommand_XUIFailure(t *testing.T) {
 	t.Parallel()
@@ -206,7 +129,7 @@ func TestE2E_DelCommand_XUIFailure(t *testing.T) {
 		return fmt.Errorf("xui delete: connection refused")
 	}
 
-	resetMockBotAPI(env.botAPI)
+	resetBotAPI(env.botAPI)
 
 	update := tgbotapi.Update{
 		Message: &tgbotapi.Message{
@@ -250,7 +173,7 @@ func TestE2E_BroadcastCommand_Success(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	resetMockBotAPI(env.botAPI)
+	resetBotAPI(env.botAPI)
 
 	update := tgbotapi.Update{
 		Message: &tgbotapi.Message{
@@ -282,7 +205,7 @@ func TestE2E_BroadcastCommand_NoArgs(t *testing.T) {
 
 	ctx := context.Background()
 	adminID := env.cfg.TelegramAdminID
-	resetMockBotAPI(env.botAPI)
+	resetBotAPI(env.botAPI)
 
 	update := tgbotapi.Update{
 		Message: &tgbotapi.Message{
@@ -312,7 +235,7 @@ func TestE2E_BroadcastCommand_NoUsers(t *testing.T) {
 
 	ctx := context.Background()
 	adminID := env.cfg.TelegramAdminID
-	resetMockBotAPI(env.botAPI)
+	resetBotAPI(env.botAPI)
 
 	update := tgbotapi.Update{
 		Message: &tgbotapi.Message{
@@ -328,7 +251,7 @@ func TestE2E_BroadcastCommand_NoUsers(t *testing.T) {
 	env.handler.HandleBroadcast(ctx, update)
 
 	assert.True(t, env.botAPI.SendCalledSafe())
-	assert.Contains(t, env.botAPI.LastSentText, "Нет пользователей")
+	assert.Contains(t, env.botAPI.LastSentText, "Всего: 0")
 }
 
 func TestE2E_BroadcastCommand_SomeFailures(t *testing.T) {
@@ -349,7 +272,7 @@ func TestE2E_BroadcastCommand_SomeFailures(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	resetMockBotAPI(env.botAPI)
+	resetBotAPI(env.botAPI)
 	env.botAPI.SendError = fmt.Errorf("send failed")
 
 	update := tgbotapi.Update{
@@ -383,7 +306,7 @@ func TestE2E_SendCommand_ByTelegramID(t *testing.T) {
 	_, err := env.subService.Create(ctx, env.chatID, env.username, "")
 	require.NoError(t, err)
 
-	resetMockBotAPI(env.botAPI)
+	resetBotAPI(env.botAPI)
 
 	update := tgbotapi.Update{
 		Message: &tgbotapi.Message{
@@ -416,7 +339,7 @@ func TestE2E_SendCommand_ByUsername(t *testing.T) {
 	_, err := env.subService.Create(ctx, env.chatID, env.username, "")
 	require.NoError(t, err)
 
-	resetMockBotAPI(env.botAPI)
+	resetBotAPI(env.botAPI)
 
 	update := tgbotapi.Update{
 		Message: &tgbotapi.Message{
@@ -435,65 +358,49 @@ func TestE2E_SendCommand_ByUsername(t *testing.T) {
 	assert.Contains(t, env.botAPI.LastSentText, "Сообщение отправлено")
 }
 
-func TestE2E_SendCommand_UserNotFound(t *testing.T) {
-	env := setupE2EEnv(t)
-	defer func() {
-		if err := env.db.Close(); err != nil {
-			t.Logf("Warning: failed to close database: %v", err)
-		}
-	}()
+func TestE2E_SendCommand_ArgValidation(t *testing.T) {
+	t.Parallel()
 
-	ctx := context.Background()
-	adminID := env.cfg.TelegramAdminID
-	resetMockBotAPI(env.botAPI)
-
-	update := tgbotapi.Update{
-		Message: &tgbotapi.Message{
-			Chat: &tgbotapi.Chat{ID: adminID},
-			From: &tgbotapi.User{
-				ID:       adminID,
-				UserName: "admin",
-			},
-			Text:     "/send nonexistent_user Hello!",
-			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 5}},
-		},
+	tests := []struct {
+		name    string
+		cmd     string
+		wantMsg string
+	}{
+		{name: "no_args", cmd: "/send", wantMsg: "Использование: /send"},
+		{name: "only_target_no_message", cmd: "/send 123456", wantMsg: "Использование"},
+		{name: "user_not_found", cmd: "/send nonexistent_user Hello!", wantMsg: "не найден в базе"},
 	}
-	env.handler.HandleSend(ctx, update)
 
-	assert.True(t, env.botAPI.SendCalledSafe())
-	assert.Contains(t, env.botAPI.LastSentText, "не найден в базе")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env := setupE2EEnv(t)
+			defer func() {
+				if err := env.db.Close(); err != nil {
+					t.Logf("Warning: failed to close database: %v", err)
+				}
+			}()
+
+			ctx := context.Background()
+			adminID := env.cfg.TelegramAdminID
+			resetBotAPI(env.botAPI)
+
+			update := tgbotapi.Update{
+				Message: &tgbotapi.Message{
+					Chat:     &tgbotapi.Chat{ID: adminID},
+					From:     &tgbotapi.User{ID: adminID, UserName: "admin"},
+					Text:     tt.cmd,
+					Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 5}},
+				},
+			}
+			env.handler.HandleSend(ctx, update)
+
+			assert.True(t, env.botAPI.SendCalledSafe())
+			assert.Contains(t, env.botAPI.LastSentText, tt.wantMsg)
+		})
+	}
 }
 
-func TestE2E_SendCommand_NoArgs(t *testing.T) {
-	env := setupE2EEnv(t)
-	defer func() {
-		if err := env.db.Close(); err != nil {
-			t.Logf("Warning: failed to close database: %v", err)
-		}
-	}()
-
-	ctx := context.Background()
-	adminID := env.cfg.TelegramAdminID
-	resetMockBotAPI(env.botAPI)
-
-	update := tgbotapi.Update{
-		Message: &tgbotapi.Message{
-			Chat: &tgbotapi.Chat{ID: adminID},
-			From: &tgbotapi.User{
-				ID:       adminID,
-				UserName: "admin",
-			},
-			Text:     "/send",
-			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 5}},
-		},
-	}
-	env.handler.HandleSend(ctx, update)
-
-	assert.True(t, env.botAPI.SendCalledSafe())
-	assert.Contains(t, env.botAPI.LastSentText, "Использование: /send")
-}
-
-func TestE2E_SendCommand_SendFails(t *testing.T) {
+func TestE2E_SendCommand_ByTelegramID_SendError(t *testing.T) {
 	env := setupE2EEnv(t)
 	defer func() {
 		if err := env.db.Close(); err != nil {
@@ -507,7 +414,7 @@ func TestE2E_SendCommand_SendFails(t *testing.T) {
 	_, err := env.subService.Create(ctx, env.chatID, env.username, "")
 	require.NoError(t, err)
 
-	resetMockBotAPI(env.botAPI)
+	resetBotAPI(env.botAPI)
 	env.botAPI.SendError = fmt.Errorf("send error")
 
 	update := tgbotapi.Update{
@@ -566,7 +473,7 @@ func TestE2E_SendCommand_OnlyMessageNoTarget(t *testing.T) {
 	ctx := context.Background()
 	adminID := env.cfg.TelegramAdminID
 
-	resetMockBotAPI(env.botAPI)
+	resetBotAPI(env.botAPI)
 
 	update := tgbotapi.Update{
 		Message: &tgbotapi.Message{
@@ -593,7 +500,7 @@ func TestE2E_SendCommand_OnlyTargetNoMessage(t *testing.T) {
 	ctx := context.Background()
 	adminID := env.cfg.TelegramAdminID
 
-	resetMockBotAPI(env.botAPI)
+	resetBotAPI(env.botAPI)
 
 	update := tgbotapi.Update{
 		Message: &tgbotapi.Message{
@@ -642,7 +549,7 @@ func TestE2E_SendCommand_RateLimitBlocksExcess(t *testing.T) {
 			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 5}},
 		},
 	}
-	resetMockBotAPI(env.botAPI)
+	resetBotAPI(env.botAPI)
 	env.handler.HandleSend(ctx, update2)
 
 	assert.True(t, env.botAPI.SendCalledSafe(), "Second send should succeed under normal rate")
@@ -704,184 +611,130 @@ func TestE2E_SendCommand_EscapesMarkdown(t *testing.T) {
 	assert.Contains(t, env.botAPI.LastSentText, "Сообщение отправлено")
 }
 
+func TestE2E_NonAdmin_AccessControl(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		setupEnv  func(*e2eTestEnv, context.Context)
+		wantNotSent bool
+		sentContains string
+	}{
+		{
+			name: "cannot_use_del",
+			setupEnv: func(env *e2eTestEnv, ctx context.Context) {
+				env.handler.HandleDel(ctx, tgbotapi.Update{
+					Message: &tgbotapi.Message{
+						Chat: &tgbotapi.Chat{ID: 999999},
+						From: &tgbotapi.User{ID: 999999, UserName: "notadmin"},
+						Text: "/del 1",
+						Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 4}},
+					},
+				})
+			},
+			wantNotSent: true,
+		},
+		{
+			name: "cannot_use_broadcast",
+			setupEnv: func(env *e2eTestEnv, ctx context.Context) {
+				env.handler.HandleBroadcast(ctx, tgbotapi.Update{
+					Message: &tgbotapi.Message{
+						Chat: &tgbotapi.Chat{ID: 999999},
+						From: &tgbotapi.User{ID: 999999, UserName: "notadmin"},
+						Text: "/broadcast Hello",
+						Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 10}},
+					},
+				})
+			},
+			wantNotSent: true,
+		},
+		{
+			name: "cannot_use_send",
+			setupEnv: func(env *e2eTestEnv, ctx context.Context) {
+				env.handler.HandleSend(ctx, tgbotapi.Update{
+					Message: &tgbotapi.Message{
+						Chat:     &tgbotapi.Chat{ID: 999999},
+						From:     &tgbotapi.User{ID: 999999, UserName: "notadmin"},
+						Text:     "/send 123456789 Hello",
+						Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 5}},
+					},
+				})
+			},
+			wantNotSent: true,
+		},
+		{
+			name: "cannot_access_refstats",
+			setupEnv: func(env *e2eTestEnv, ctx context.Context) {
+				env.handler.HandleRefstats(ctx, tgbotapi.Update{
+					Message: &tgbotapi.Message{
+						Chat:     &tgbotapi.Chat{ID: 999999},
+						From:     &tgbotapi.User{ID: 999999, UserName: "notadmin"},
+						Text:     "/refstats",
+						Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 9}},
+					},
+				})
+			},
+			wantNotSent: false,
+			sentContains: "только администратору",
+		},
+		{
+			name: "cannot_access_admin_stats",
+			setupEnv: func(env *e2eTestEnv, ctx context.Context) {
+				env.handler.HandleCallback(ctx, tgbotapi.Update{
+					CallbackQuery: &tgbotapi.CallbackQuery{
+						From: &tgbotapi.User{ID: 999999, UserName: "notadmin"},
+						Data: "admin_stats",
+						Message: &tgbotapi.Message{
+							Chat:     &tgbotapi.Chat{ID: 999999},
+							MessageID: 100,
+						},
+					},
+				})
+			},
+			wantNotSent: true,
+		},
+		{
+			name: "cannot_access_admin_lastreg",
+			setupEnv: func(env *e2eTestEnv, ctx context.Context) {
+				env.handler.HandleCallback(ctx, tgbotapi.Update{
+					CallbackQuery: &tgbotapi.CallbackQuery{
+						From: &tgbotapi.User{ID: 999999, UserName: "notadmin"},
+						Data: "admin_lastreg",
+						Message: &tgbotapi.Message{
+							Chat:     &tgbotapi.Chat{ID: 999999},
+							MessageID: 100,
+						},
+					},
+				})
+			},
+			wantNotSent: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env := setupE2EEnv(t)
+			defer func() {
+				if err := env.db.Close(); err != nil {
+					t.Logf("Warning: failed to close database: %v", err)
+				}
+			}()
+
+			ctx := context.Background()
+			resetBotAPI(env.botAPI)
+			tt.setupEnv(env, ctx)
+
+			if tt.wantNotSent {
+				assert.False(t, env.botAPI.SendCalledSafe())
+			} else {
+				assert.True(t, env.botAPI.SendCalledSafe())
+				assert.Contains(t, env.botAPI.LastSentText, tt.sentContains)
+			}
+		})
+	}
+}
+
 func TestE2E_NonAdmin_CannotUseDel(t *testing.T) {
-	env := setupE2EEnv(t)
-	defer func() {
-		if err := env.db.Close(); err != nil {
-			t.Logf("Warning: failed to close database: %v", err)
-		}
-	}()
-
-	ctx := context.Background()
-	nonAdminID := int64(999999)
-
-	resetMockBotAPI(env.botAPI)
-
-	update := tgbotapi.Update{
-		Message: &tgbotapi.Message{
-			Chat: &tgbotapi.Chat{ID: nonAdminID},
-			From: &tgbotapi.User{
-				ID:       nonAdminID,
-				UserName: "notadmin",
-			},
-			Text:     "/del 1",
-			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 4}},
-		},
-	}
-	env.handler.HandleDel(ctx, update)
-
-	assert.False(t, env.botAPI.SendCalledSafe(), "Non-admin should not receive response for /del")
-}
-
-func TestE2E_NonAdmin_CannotUseBroadcast(t *testing.T) {
-	env := setupE2EEnv(t)
-	defer func() {
-		if err := env.db.Close(); err != nil {
-			t.Logf("Warning: failed to close database: %v", err)
-		}
-	}()
-
-	ctx := context.Background()
-	nonAdminID := int64(999999)
-
-	resetMockBotAPI(env.botAPI)
-
-	update := tgbotapi.Update{
-		Message: &tgbotapi.Message{
-			Chat: &tgbotapi.Chat{ID: nonAdminID},
-			From: &tgbotapi.User{
-				ID:       nonAdminID,
-				UserName: "notadmin",
-			},
-			Text:     "/broadcast Hello",
-			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 10}},
-		},
-	}
-	env.handler.HandleBroadcast(ctx, update)
-
-	assert.False(t, env.botAPI.SendCalledSafe(), "Non-admin should not receive response for /broadcast")
-}
-
-func TestE2E_NonAdmin_CannotUseSend(t *testing.T) {
-	env := setupE2EEnv(t)
-	defer func() {
-		if err := env.db.Close(); err != nil {
-			t.Logf("Warning: failed to close database: %v", err)
-		}
-	}()
-
-	ctx := context.Background()
-	nonAdminID := int64(999999)
-
-	resetMockBotAPI(env.botAPI)
-
-	update := tgbotapi.Update{
-		Message: &tgbotapi.Message{
-			Chat: &tgbotapi.Chat{ID: nonAdminID},
-			From: &tgbotapi.User{
-				ID:       nonAdminID,
-				UserName: "notadmin",
-			},
-			Text:     "/send 123456789 Hello",
-			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 5}},
-		},
-	}
-	env.handler.HandleSend(ctx, update)
-
-	assert.False(t, env.botAPI.SendCalledSafe(), "Non-admin should not receive response for /send")
-}
-
-func TestE2E_NonAdmin_CannotUseRefstats(t *testing.T) {
-	env := setupE2EEnv(t)
-	defer func() {
-		if err := env.db.Close(); err != nil {
-			t.Logf("Warning: failed to close database: %v", err)
-		}
-	}()
-
-	ctx := context.Background()
-	nonAdminID := int64(999999)
-
-	resetMockBotAPI(env.botAPI)
-
-	update := tgbotapi.Update{
-		Message: &tgbotapi.Message{
-			Chat: &tgbotapi.Chat{ID: nonAdminID},
-			From: &tgbotapi.User{
-				ID:       nonAdminID,
-				UserName: "notadmin",
-			},
-			Text:     "/refstats",
-			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 9}},
-		},
-	}
-	env.handler.HandleRefstats(ctx, update)
-
-	assert.True(t, env.botAPI.SendCalledSafe(), "Non-admin should receive error message for /refstats")
-	assert.Contains(t, env.botAPI.LastSentText, "только администратору", "Should show access denied message")
-}
-
-func TestE2E_NonAdmin_CannotAccessAdminStats(t *testing.T) {
-	env := setupE2EEnv(t)
-	defer func() {
-		if err := env.db.Close(); err != nil {
-			t.Logf("Warning: failed to close database: %v", err)
-		}
-	}()
-
-	ctx := context.Background()
-	nonAdminID := int64(999999)
-
-	resetMockBotAPI(env.botAPI)
-
-	env.handler.HandleCallback(ctx, tgbotapi.Update{
-		CallbackQuery: &tgbotapi.CallbackQuery{
-			From: &tgbotapi.User{
-				ID:       nonAdminID,
-				UserName: "notadmin",
-			},
-			Data: "admin_stats",
-			Message: &tgbotapi.Message{
-				Chat:      &tgbotapi.Chat{ID: nonAdminID},
-				MessageID: 100,
-			},
-		},
-	})
-
-	assert.False(t, env.botAPI.SendCalledSafe(), "Non-admin should not access admin_stats callback")
-}
-
-func TestE2E_NonAdmin_CannotAccessAdminLastreg(t *testing.T) {
-	env := setupE2EEnv(t)
-	defer func() {
-		if err := env.db.Close(); err != nil {
-			t.Logf("Warning: failed to close database: %v", err)
-		}
-	}()
-
-	ctx := context.Background()
-	nonAdminID := int64(999999)
-
-	resetMockBotAPI(env.botAPI)
-
-	env.handler.HandleCallback(ctx, tgbotapi.Update{
-		CallbackQuery: &tgbotapi.CallbackQuery{
-			From: &tgbotapi.User{
-				ID:       nonAdminID,
-				UserName: "notadmin",
-			},
-			Data: "admin_lastreg",
-			Message: &tgbotapi.Message{
-				Chat:      &tgbotapi.Chat{ID: nonAdminID},
-				MessageID: 100,
-			},
-		},
-	})
-
-	assert.False(t, env.botAPI.SendCalledSafe(), "Non-admin should not access admin_lastreg callback")
-}
-
-func TestE2E_AdminStats(t *testing.T) {
 	t.Parallel()
 	env := setupE2EEnv(t)
 	defer func() {
@@ -931,7 +784,7 @@ func TestE2E_AdminLastReg(t *testing.T) {
 	}
 	require.NoError(t, env.db.CreateSubscription(ctx, sub, ""))
 
-	resetMockBotAPI(env.botAPI)
+	resetBotAPI(env.botAPI)
 
 	env.handler.HandleCallback(ctx, tgbotapi.Update{
 		CallbackQuery: &tgbotapi.CallbackQuery{
@@ -961,7 +814,7 @@ func TestE2E_VersionCommand_Admin(t *testing.T) {
 
 	ctx := context.Background()
 	adminID := env.cfg.TelegramAdminID
-	resetMockBotAPI(env.botAPI)
+	resetBotAPI(env.botAPI)
 
 	update := tgbotapi.Update{
 		Message: &tgbotapi.Message{
@@ -989,7 +842,7 @@ func TestE2E_VersionCommand_NonAdmin(t *testing.T) {
 
 	ctx := context.Background()
 	nonAdminID := int64(999999)
-	resetMockBotAPI(env.botAPI)
+	resetBotAPI(env.botAPI)
 
 	update := tgbotapi.Update{
 		Message: &tgbotapi.Message{

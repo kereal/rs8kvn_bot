@@ -22,6 +22,8 @@ Send a message to [@userinfobot](https://t.me/userinfobot) on Telegram to get yo
    ```
    Should return JSON with `success: true`.
 
+> **Note (v3.0+):** `XUI_HOST`, `XUI_API_TOKEN`, and `XUI_INBOUND_ID` are **not** read from the environment at runtime. They are used **only on first run** to seed the `nodes` table (when it is empty). After that, node configuration — host, API token, inbound IDs, type, subscription URL — is managed via the database. See [Initial Node Seeding](#initial-node-seeding) below.
+
 ## Installation
 
 ### Option 1: Docker with GitHub Container Registry (Recommended)
@@ -45,10 +47,15 @@ nano .env  # or use your editor
 ```env
 TELEGRAM_BOT_TOKEN=your_bot_token_here
 TELEGRAM_ADMIN_ID=123456789
+GLOBAL_SUB_URL=https://vpn.example.com/sub/
+
+# Initial node seed (only used on first run to populate the nodes table):
 XUI_HOST=http://your-panel-ip:2053
 XUI_API_TOKEN=your_panel_api_token
 XUI_INBOUND_ID=1
 ```
+
+`GLOBAL_SUB_URL` is the base URL for subscription links. The bot constructs full subscription URLs as `GLOBAL_SUB_URL + <subscription_id>` (e.g. `https://vpn.example.com/sub/abc123`). It must be set, or subscription links will be broken.
 
 #### 3. Create data directory
 
@@ -210,120 +217,75 @@ Air will automatically rebuild and restart the bot when you save changes to Go f
 |----------|-------------|---------|----------|-------|
 | **Telegram** |
 | `TELEGRAM_BOT_TOKEN` | Bot token from @BotFather | — | ✅ | Format: `123456:ABC-def...` |
-| `TELEGRAM_ADMIN_ID` | Admin Telegram ID for notifications | `0` | ❌ | Get from @userinfobot |
-| `CONTACT_USERNAME` | Support Telegram username | `kereal` | ❌ | Without `@` |
-| **3x-ui Panel** |
-| `XUI_HOST` | Panel URL | `http://localhost:2053` | ✅ | Must be reachable from bot |
-| `XUI_API_TOKEN` | Panel API token | — | ✅ | Generated in panel Security settings |
-| `XUI_INBOUND_ID` | VLESS inbound ID | `1` | ✅ | Integer |
-| `XUI_SUB_PATH` | Subscription URL path segment | `sub` | ❌ | Alphanumeric, `_`, `-` only |
+| `TELEGRAM_ADMIN_ID` | Admin Telegram ID for notifications | `0` | ✅ | Must be positive; get from @userinfobot |
+| `CONTACT_USERNAME` | Support Telegram username | *(empty)* | ❌ | Without `@` |
+| **Subscription Server** |
+| `GLOBAL_SUB_URL` | Base URL for subscription links | — | ✅ | Constructed as `GLOBAL_SUB_URL + <sub_id>` (e.g. `https://vpn.example.com/sub/abc123`); must be valid http/https URL, HTTPS in production |
+| `SUBSERVER_ACCESS_LOG` | `/sub/{id}` access log file path | *(empty)* | ❌ | Set empty to disable; zap-console line without message/caller/field keys, values are space-separated, values with spaces are quoted, empty optional values are `-`; startup continues if the file cannot be opened |
 | **Database** |
-| `DATABASE_PATH` | SQLite database file path | `./data/tgvpn.db` | ❌ | Directory must exist |
+| `DATABASE_PATH` | SQLite database file path | `./data/rs8kvn.db` | ❌ | Directory must exist |
 | **Logging** |
 | `LOG_FILE_PATH` | Log file path | `./data/bot.log` | ❌ | Rotated automatically |
 | `LOG_LEVEL` | Log level | `info` | ❌ | `debug`, `info`, `warn`, `error` |
-| `SUBSERVER_ACCESS_LOG` | `/sub/{id}` access log file path | `./data/subserver.log` | ❌ | Set empty to disable; zap-console line without message/caller/field keys, values are space-separated, values with spaces are quoted, empty optional values are `-`; startup continues if the file cannot be opened |
-| **Trial & Referral** |
-| `HEARTBEAT_URL` | URL for heartbeat POST (optional) | — | ❌ | Receives `{}` every 5 min |
+| **Monitoring** |
+| `HEARTBEAT_URL` | URL for heartbeat POST (optional) | — | ❌ | Receives `{}` every 5 min; must be valid http/https URL if set |
 | `HEARTBEAT_INTERVAL` | Heartbeat interval (seconds) | `300` | ❌ | Min 10s |
-| `SENTRY_DSN` | Sentry DSN for error tracking | — | ❌ | https://sentry.io/... |
+| `SENTRY_DSN` | Sentry DSN for error tracking | — | ❌ | https://sentry.io/...; must be valid http/https URL if set |
 | `HEALTH_CHECK_PORT` | HTTP server port for health checks | `8880` | ❌ | 1–65535 |
 | **Trial & Referral** |
-| `SITE_URL` | Base URL for landing pages | `https://vpn.site` | ❌ | Used in Telegram links |
+| `SITE_URL` | Base URL for landing pages | `https://vpn.site` | ❌ | Must be valid http/https URL; used in Telegram links |
 | `TRIAL_DURATION_HOURS` | Trial subscription duration | `3` | ❌ | 1–168 hours (7 days max) |
 | `TRIAL_RATE_LIMIT` | Max trial requests per IP per hour | `3` | ❌ | 1–100 |
 | **Donation** |
 | `DONATE_CARD_NUMBER` | Donation card (T-Bank) | *(empty)* | ❌ | Shown in donate menu |
 | `DONATE_URL` | Donation collection link | *(empty)* | ❌ | T-Bank or other |
-| **Subscription Proxy** |
-| `SUB_EXTRA_SERVERS_ENABLED` | Enable extra servers in proxy | `true` | ❌ | `true`/`false` |
-| `SUB_EXTRA_SERVERS_FILE` | Path to extra servers config | `./data/extra_servers.txt` | ❌ | See below |
-| **API** |
-| `API_TOKEN` | Bearer token for `/api/v1/subscriptions` | — | ✅ if endpoint used | Random string |
-| **Webhook** |
-| `PROXY_MANAGER_WEBHOOK_SECRET` | Secret for webhook auth | — | ❌ | Bearer token |
-| `PROXY_MANAGER_WEBHOOK_URL` | Webhook URL for external notifications | — | ❌ | Must be HTTPS |
+
+### Initial Node Seeding
+
+The following environment variables are **not** part of the runtime configuration. They are read via `os.Getenv` **only on first run**, when the `nodes` table is empty, to seed a default node. After the first run, nodes are managed entirely through the database (`nodes` table: `host`, `api_token`, `inbound_ids` JSON array, `type`, `subscription_url`).
+
+| Variable | Description | Default | Notes |
+|----------|-------------|---------|-------|
+| `XUI_HOST` | Seed node panel URL | — | Seed-only; e.g. `http://your-panel-ip:2053` |
+| `XUI_API_TOKEN` | Seed node panel API token | — | Seed-only; generated in panel Security settings |
+| `XUI_INBOUND_ID` | Seed node inbound ID (singular integer) | `1` | Seed-only; populates `nodes.inbound_ids` as a JSON array `[1]` |
+
+> Once the `nodes` table is populated, these env vars are ignored on subsequent starts. To add or modify nodes, edit the `nodes` table directly (or via the bot's admin tooling). At runtime the bot loads node configuration from the DB, not from env.
+
+### Adding Nodes via SQL
+
+Nodes are managed through the `nodes` table. To add a new node, insert a row and link it to a plan:
+
+```sql
+-- Add a 3x-ui node
+INSERT INTO nodes (name, is_active, host, api_token, inbound_ids, subscription_url, type)
+VALUES ('main', 1, 'http://panel:2053', 'your-token', '[1]', 'http://panel:2053/sub/', '3x-ui');
+
+-- Add a proxman node
+INSERT INTO nodes (name, is_active, host, api_token, inbound_ids, subscription_url, type)
+VALUES ('proxman1', 1, 'http://proxman:8080', 'your-token', '[]', 'http://proxman:8080/sub/', 'proxman');
+
+-- Add a fetch node (read-only HTTP source, no API token needed)
+INSERT INTO nodes (name, is_active, host, api_token, inbound_ids, subscription_url, type)
+VALUES ('external', 1, '', '', '[]', 'https://external-source.com/raw-proxy', 'fetch');
+
+-- Link node to a plan (replace IDs as needed)
+INSERT INTO plan_nodes (plan_id, node_id) VALUES (1, <node_id>);
+```
+
+**Node types:**
+|Type|Host|API Token|Subscription URL|Description|
+|---|---|---|---|---|
+|`3x-ui`|Required|Required|`http://panel/sub/`|Full CRUD via 3x-ui API|
+|`proxman`|Required|Required|`http://proxman/sub/`|Webhook create/delete|
+|`fetch`|Empty|Empty|`https://source/raw`|Read-only HTTP fetch, URL used as-is|
 
 ### Security Notes
 
-- **XUI_HOST** must use **HTTPS** in production (HTTP only allowed for localhost)
-- All webhook URLs must use **HTTPS** (except localhost)
+- **`GLOBAL_SUB_URL`** must use **HTTPS** in production — subscription links are distributed to users and must not leak over plain HTTP. The URL is validated to be a well-formed `http` or `https` URL.
+- **`XUI_HOST`** is seed-only; it is not validated at runtime. When seeding, prefer HTTPS for the panel URL.
 - `.env` file should have permissions `600` (readable only by owner)
 - Never commit `.env` to version control
-
----
-
-## Extra Servers Config File
-
-**Path:** `SUB_EXTRA_SERVERS_FILE` (default: `./data/extra_servers.txt`)
-
-**Format:**
-```
-# Optional headers (Key: Value) — appear at top of subscription
-X-Custom-Header: custom-value
-Profile-Title: My VPN
-
-# Blank line separates headers from server list
-
-# Server lines (one per line, supported schemes):
-vless://user@server1.example.com:443
-trojan://pass@server2.example.com:443
-ss://加密:server3.example.com:8388
-vmess://uuid@server4.example.com:443
-```
-
-**Features:**
-- Headers override 3x-ui headers
-- Extra servers appended to subscription body
-- Config reloaded automatically every 5 minutes
-- Invalid lines ignored
-
-**Security:** Path is validated — no directory traversal allowed.
-
----
-
-## Database Migrations
-
-The bot uses [golang-migrate](https://github.com/golang-migrate/migrate). Migration files are stored in `internal/database/migrations/` and embedded into the binary via `go:embed`.
-
-Migrations are applied automatically on startup. If migration fails, bot exits with error.
-
-### Current Migration Files
-
-| Version | Description |
-|---------|-------------|
-| `000_create_subscriptions.up.sql` | Initial subscriptions table |
-| `001_replace_xuihost_with_subscription_id.up.sql` | Replaces `x_ui_host` column with `subscription_id` |
-| `002_add_invites_and_trials.up.sql` | Adds `invites` and `trial_requests` tables |
-| `003_add_referral_columns.up.sql` | Adds `invite_code`, `is_trial`, `referred_by` columns |
-| `004_add_unique_referrer_tg_id.up.sql` | Adds UNIQUE constraint on `invites.referrer_tg_id` (one canonical code per user) |
-| `005_cleanup_duplicate_invites.up.sql` | No-op placeholder after 004 dedup |
-| `006_create_sources.up.sql` | Creates `sources` table (3x-ui panel registry, `x_ui_*` columns) |
-| `007_create_plans.up.sql` | Creates `plans` table (free/trial with traffic_limit, duration) |
-| `008_create_plan_sources.up.sql` | Creates `plan_sources` M:N join |
-| `009_add_plan_id_to_subscriptions.up.sql` | Adds `plan_id` FK to subscriptions |
-| `010_remove_subscription_idx.up.sql` | Drops legacy index no longer needed |
-| `011_remove_subscription_columns.up.sql` | Drops `inbound_id`, `traffic_limit`, `subscription_url`, `is_trial`, `deleted_at` from subscriptions |
-| `012_add_devices_ips_to_subscriptions.up.sql` | Adds `devices` and `ips` JSON columns for HWID/IP tracking |
-
-**Schema after migration 012:**
-- `subscriptions`: `telegram_id`, `username`, `client_id`, `subscription_id`, `expires_at`, `status`, `invite_code`, `plan_id`, `referred_by`, `devices`, `ips`, `created_at`, `updated_at`
-- New tables: `sources`, `plans`, `plan_sources` (see `doc/architecture.md` for full schema)
-- `is_trial` is now derived: `plan.name = 'trial'` (single source of truth)
-
-### Adding a New Migration
-
-```bash
-# Create migration files (next number is 013)
-touch internal/database/migrations/013_add_new_column.up.sql
-touch internal/database/migrations/013_add_new_column.down.sql
-
-# Write SQL in files, then rebuild:
-go build -o rs8kvn_bot ./cmd/bot
-```
-
-**Up migration:** Add/modify columns  
-**Down migration:** Reverse changes (optional but recommended)
 
 ---
 
@@ -335,7 +297,7 @@ go build -o rs8kvn_bot ./cmd/bot
 # Health check
 curl http://localhost:8880/healthz
 
-# Expected: {"database":"ok","xui":"ok","status":"ok"}
+# Expected: {"database":"ok","status":"ok"}
 
 # Bot logs
 docker logs rs8kvn_bot | tail -20
@@ -363,18 +325,25 @@ Admin-only commands:
 
 ## Upgrade from Older Version
 
-### From v2.2.0 → v2.3.0
+### From v2.x → v3.0.0
 
-1. Pull new image or rebuild from source
-2. Stop old container, start new (same data volume)
-3. Migrations auto-applied (no manual action needed)
-4. New features available immediately
+1. Backup database: `cp data/rs8kvn.db data/rs8kvn.db.backup`
+2. Pull new image or rebuild from source — migrations (021–027) run automatically
+3. Update `.env`:
+   - **New required:** `GLOBAL_SUB_URL` (base URL for subscription links)
+   - **New optional:** `SUBSERVER_ACCESS_LOG` (subscription access log)
+   - **Removed:** `XUI_SUB_PATH`, `SUB_EXTRA_SERVERS_ENABLED`, `SUB_EXTRA_SERVERS_FILE` (no longer used)
+   - **Changed:** `XUI_HOST`, `XUI_API_TOKEN`, `XUI_INBOUND_ID` are now **seed-only** — kept for first-run population of the `nodes` table, then ignored. Node configuration lives in the `nodes` table.
+4. Restart bot. On first start with an empty `nodes` table, the default node is seeded from `XUI_HOST`/`XUI_API_TOKEN`/`XUI_INBOUND_ID`.
 
-**Breaking changes:** None
+**Breaking changes:**
+- `GLOBAL_SUB_URL` is now **required**. Without it the bot will not start.
+- `XUI_SUB_PATH` is removed — subscription path is now derived from `GLOBAL_SUB_URL`.
+- Extra servers config file (`SUB_EXTRA_SERVERS_FILE`) feature has been removed.
 
 ### From v1.x → v2.x
 
-1. Backup database: `cp data/tgvpn.db data/tgvpn.db.backup`
+1. Backup database: `cp data/rs8kvn.db data/rs8kvn.db.backup`
 2. Pull new image — migrations run automatically
 3. Update `.env`:
    - New required: `XUI_INBOUND_ID`
@@ -408,10 +377,10 @@ rm .env
 
 **Before reporting:**
 1. Check logs: `docker logs rs8kvn_bot`
-2. Verify `.env` settings
-3. Test 3x-ui connectivity: `curl $XUI_HOST/panel/api/server/status`
+2. Verify `.env` settings (especially `GLOBAL_SUB_URL`)
+3. Test 3x-ui connectivity: `curl -H "Authorization: Bearer $XUI_API_TOKEN" http://your-panel-ip:2053/panel/api/server/status`
 4. Include bot version from logs (`rs8kvn_bot@v3.0.0`)
 
 ---
 
-*This document covers installation up to v3.0.0. For architecture details, see [handover.md](../handover.md).*
+*This document covers installation up to v3.0.0 (2026-07-02). For architecture details, see [handover.md](../handover.md).*

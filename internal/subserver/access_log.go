@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/kereal/rs8kvn_bot/internal/logger"
+
 	"go.uber.org/zap"
 	"go.uber.org/zap/buffer"
 	"go.uber.org/zap/zapcore"
@@ -255,6 +256,7 @@ func (l *AccessLogger) CloseWithContext(ctx context.Context) error {
 }
 
 type asyncAccessLogWriter struct {
+	noCopy     noCopy
 	path       string
 	file       *os.File
 	queue      chan []byte
@@ -298,10 +300,6 @@ func (w *asyncAccessLogWriter) Write(p []byte) (int, error) {
 }
 
 func (w *asyncAccessLogWriter) Sync(ctx context.Context) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-
 	w.mu.Lock()
 	if w.closed {
 		w.mu.Unlock()

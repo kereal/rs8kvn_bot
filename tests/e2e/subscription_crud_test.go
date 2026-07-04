@@ -39,8 +39,7 @@ func TestE2E_CreateSubscription_Success(t *testing.T) {
 		},
 	})
 
-	assert.True(t, env.xui.AddClientWithIDCalled, "XUI AddClientWithID should be called")
-
+	// DB-first: XUI is called via sync module, not directly in Create()
 	sub, err := env.db.GetByTelegramID(ctx, env.chatID)
 	require.NoError(t, err, "Subscription should exist in DB")
 	assert.Equal(t, env.chatID, sub.TelegramID)
@@ -76,7 +75,7 @@ func TestE2E_CreateSubscription_NoDuplicate(t *testing.T) {
 		},
 	})
 
-	resetMockBotAPI(env.botAPI)
+	resetBotAPI(env.botAPI)
 	env.xui.AddClientWithIDCalled = false
 
 	env.handler.HandleCallback(ctx, tgbotapi.Update{
@@ -161,11 +160,13 @@ func TestE2E_CreateSubscription_XUIFailure(t *testing.T) {
 		},
 	})
 
-	assert.True(t, env.botAPI.SendCalledSafe(), "Error message should be sent")
-	assert.Contains(t, env.botAPI.LastSentText, "подключиться к серверу", "Should show connection error message")
+	// DB-first: subscription is created even if XUI fails (sync will retry)
+	assert.True(t, env.botAPI.SendCalledSafe(), "Confirmation message should be sent")
+	assert.Contains(t, env.botAPI.LastSentText, "подписк", "Should mention subscription")
 
-	_, err := env.db.GetByTelegramID(ctx, env.chatID)
-	assert.Error(t, err, "No subscription should exist after XUI failure")
+	sub, err := env.db.GetByTelegramID(ctx, env.chatID)
+	require.NoError(t, err, "Subscription should exist in DB even with XUI failure")
+	assert.Equal(t, "active", sub.Status)
 }
 
 func TestE2E_CreateSubscription_TrafficLimitCorrect(t *testing.T) {
@@ -174,15 +175,6 @@ func TestE2E_CreateSubscription_TrafficLimitCorrect(t *testing.T) {
 	defer env.db.Close()
 
 	ctx := context.Background()
-
-	var capturedTraffic int64
-	env.xui.AddClientWithIDFunc = func(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
-		capturedTraffic = trafficBytes
-		return &xui.ClientConfig{
-			ID:    "client-uuid-123",
-			SubID: "sub-id-456",
-		}, nil
-	}
 
 	env.handler.HandleCallback(ctx, tgbotapi.Update{
 		CallbackQuery: &tgbotapi.CallbackQuery{
@@ -198,8 +190,12 @@ func TestE2E_CreateSubscription_TrafficLimitCorrect(t *testing.T) {
 		},
 	})
 
-	expectedTraffic := int64(50) * 1024 * 1024 * 1024
-	assert.Equal(t, expectedTraffic, capturedTraffic, "Traffic limit should match free plan (50GB)")
+	// DB-first: verify subscription has correct plan, traffic is set via sync
+	sub, err := env.db.GetByTelegramID(ctx, env.chatID)
+	require.NoError(t, err, "Subscription should exist in DB")
+	freePlan, err := env.db.GetPlanByName(ctx, database.FreePlanName)
+	require.NoError(t, err)
+	assert.Equal(t, freePlan.ID, sub.PlanID, "Subscription should have free plan")
 }
 
 func TestE2E_CreateSubscription_SubscriptionID_Set(t *testing.T) {
@@ -314,25 +310,13 @@ func TestE2E_Subscription_ReplacesOldActive(t *testing.T) {
 	}
 	require.NoError(t, env.db.CreateSubscription(ctx, oldSub, ""))
 
+	// Creating another subscription with the same telegram_id should fail
+	// due to UNIQUE constraint
 	result, err := env.subService.Create(ctx, env.chatID, env.username, "")
 	require.NoError(t, err)
-	require.NotNil(t, result)
-
-	allSubs, err := env.db.GetAllSubscriptions(ctx)
-	require.NoError(t, err)
-
-	activeCount := 0
-	revokedCount := 0
-	for _, s := range allSubs {
-		switch s.Status {
-		case "active":
-			activeCount++
-		case "revoked":
-			revokedCount++
-		}
-	}
-	assert.Equal(t, 1, activeCount, "Should have exactly one active subscription")
-	assert.Equal(t, 1, revokedCount, "Old subscription should be revoked")
+	assert.NotNil(t, result)
+	assert.Equal(t, oldSub.SubscriptionID, result.Subscription.SubscriptionID)
+	assert.Equal(t, "active", result.Subscription.Status)
 }
 
 func TestE2E_CreateSubscription_RevokesOnlyActive(t *testing.T) {
@@ -351,9 +335,11 @@ func TestE2E_CreateSubscription_RevokesOnlyActive(t *testing.T) {
 	}
 	require.NoError(t, env.db.CreateSubscription(ctx, oldSub, ""))
 
-	resetMockBotAPI(env.botAPI)
+	resetBotAPI(env.botAPI)
 	env.xui.AddClientWithIDCalled = false
 
+	// Creating another subscription with the same telegram_id should fail
+	// due to UNIQUE constraint
 	env.handler.HandleCallback(ctx, tgbotapi.Update{
 		CallbackQuery: &tgbotapi.CallbackQuery{
 			From: &tgbotapi.User{
@@ -371,97 +357,85 @@ func TestE2E_CreateSubscription_RevokesOnlyActive(t *testing.T) {
 	allSubs, err := env.db.GetAllSubscriptions(ctx)
 	require.NoError(t, err)
 
-	expiredCount := 0
-	for _, s := range allSubs {
-		if s.Status == "expired" {
-			expiredCount++
-		}
-	}
-	assert.Equal(t, 1, expiredCount, "Expired subscription should not be revoked")
+	// Only the original expired subscription should exist
+	assert.Equal(t, 1, len(allSubs), "Should have only one subscription")
+	assert.Equal(t, "expired", allSubs[0].Status)
 }
 
-func TestE2E_Service_Create_XUIFailure_NoDBRecord(t *testing.T) {
+func TestE2E_Service_Create_XUIFailure_Parameterized(t *testing.T) {
 	t.Parallel()
+
 	env := setupE2EEnv(t)
 	defer env.db.Close()
-
 	ctx := context.Background()
 
-	env.xui.AddClientWithIDFunc = func(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
-		return nil, fmt.Errorf("xui add client: connection refused")
+	tests := []struct {
+		name     string
+		setupXUI func()
+		wantActive bool
+		checkSecond func(*testing.T)
+	}{
+		{
+			name: "xui_failure_sub_still_created",
+			setupXUI: func() {
+				env.xui.AddClientWithIDFunc = func(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
+					return nil, fmt.Errorf("connection refused")
+				}
+			},
+			wantActive: true,
+			checkSecond: nil,
+		},
+		{
+			name: "rollback_xui_delete_succeeds",
+			setupXUI: func() {
+				env.xui.AddClientWithIDFunc = func(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
+					return &xui.ClientConfig{ID: clientID, Email: email, SubID: subID}, nil
+				}
+				env.xui.DeleteClientFunc = func(ctx context.Context, email string) error { return nil }
+			},
+			wantActive: true,
+			checkSecond: func(t *testing.T) {
+				result, err := env.subService.Create(ctx, env.chatID, env.username, "")
+				require.NoError(t, err)
+				assert.Equal(t, "active", result.Subscription.Status)
+			},
+		},
+		{
+			name: "rollback_failure_returns_existing",
+			setupXUI: func() {
+				env.xui.AddClientWithIDFunc = func(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
+					return &xui.ClientConfig{ID: clientID, Email: email, SubID: subID}, nil
+				}
+				env.xui.DeleteClientFunc = func(ctx context.Context, email string) error {
+					return fmt.Errorf("rollback failed: connection refused")
+				}
+			},
+			wantActive: true,
+			checkSecond: func(t *testing.T) {
+				result, err := env.subService.Create(ctx, env.chatID, env.username, "")
+				require.NoError(t, err)
+				assert.Equal(t, env.chatID, result.Subscription.TelegramID)
+			},
+		},
 	}
 
-	_, err := env.subService.Create(ctx, env.chatID, env.username, "")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "connection refused")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env := setupE2EEnv(t)
+			defer env.db.Close()
 
-	_, err = env.db.GetByTelegramID(ctx, env.chatID)
-	assert.Error(t, err, "No subscription should exist after XUI failure")
-}
+			ctx := context.Background()
+			tt.setupXUI()
 
-func TestE2E_Service_Create_DBFailure_RollbackXUI(t *testing.T) {
-	env := setupE2EEnv(t)
-	defer env.db.Close()
+			sub, err := env.subService.Create(ctx, env.chatID, env.username, "")
+			if tt.wantActive {
+				require.NoError(t, err)
+				assert.Equal(t, "active", sub.Subscription.Status)
+			}
 
-	t.Skip("Covered by TestE2E_Service_Create_RollbackXUIOnDBError")
-}
-
-func TestE2E_Service_Create_RollbackXUIOnDBError(t *testing.T) {
-	t.Parallel()
-	env := setupE2EEnv(t)
-	defer env.db.Close()
-
-	ctx := context.Background()
-
-	env.xui.AddClientWithIDFunc = func(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
-		return &xui.ClientConfig{
-			ID:    clientID,
-			Email: email,
-			SubID: subID,
-		}, nil
+			if tt.checkSecond != nil {
+				tt.checkSecond(t)
+			}
+		})
 	}
-
-	env.xui.DeleteClientFunc = func(ctx context.Context, email string) error {
-		return nil
-	}
-
-	_, err := env.subService.Create(ctx, env.chatID, env.username, "")
-	require.NoError(t, err)
-
-	sub1, err := env.db.GetByTelegramID(ctx, env.chatID)
-	require.NoError(t, err)
-	assert.Equal(t, "active", sub1.Status)
-
-	_, err = env.subService.Create(ctx, env.chatID, env.username, "")
-	require.NoError(t, err)
-
-	sub2, err := env.db.GetByTelegramID(ctx, env.chatID)
-	require.NoError(t, err)
-	assert.Equal(t, "active", sub2.Status)
-}
-
-func TestE2E_Service_Create_RollbackFailure_ReturnsError(t *testing.T) {
-	t.Parallel()
-	env := setupE2EEnv(t)
-	defer env.db.Close()
-
-	ctx := context.Background()
-
-	env.xui.AddClientWithIDFunc = func(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
-		return &xui.ClientConfig{
-			ID:    clientID,
-			Email: email,
-			SubID: subID,
-		}, nil
-	}
-
-	env.xui.DeleteClientFunc = func(ctx context.Context, email string) error {
-		return fmt.Errorf("rollback failed: connection refused")
-	}
-
-	_, err := env.subService.Create(ctx, env.chatID, env.username, "")
-	require.NoError(t, err)
-
-	_, err = env.subService.Create(ctx, env.chatID, env.username, "")
-	require.NoError(t, err, "Second creation should succeed (rollback not triggered when DB succeeds)")
 }

@@ -34,32 +34,6 @@ func (s *Service) GetNodesByPlanName(ctx context.Context, planName string) ([]No
 	return nodes, nil
 }
 
-// GetPlanByName returns a plan by its name.
-func (s *Service) GetPlanByName(ctx context.Context, name string) (*Plan, error) {
-	var plan Plan
-	result := s.db.WithContext(ctx).Where("name = ?", name).First(&plan)
-	if result.Error != nil {
-		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-			return nil, ErrPlanNotFound
-		}
-		return nil, fmt.Errorf("failed to get plan by name: %w", result.Error)
-	}
-	return &plan, nil
-}
-
-// GetPlanByID returns a plan by its ID.
-func (s *Service) GetPlanByID(ctx context.Context, id uint) (*Plan, error) {
-	var plan Plan
-	result := s.db.WithContext(ctx).First(&plan, id)
-	if result.Error != nil {
-		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-			return nil, ErrPlanNotFound
-		}
-		return nil, fmt.Errorf("failed to get plan by id: %w", result.Error)
-	}
-	return &plan, nil
-}
-
 // IsNodesEmpty returns true if no nodes exist in the database.
 func (s *Service) IsNodesEmpty(ctx context.Context) (bool, error) {
 	var count int64
@@ -80,7 +54,7 @@ func (s *Service) SeedDefaultNode(ctx context.Context, name, host, apiToken stri
 			Host:            host,
 			APIToken:        apiToken,
 			SubscriptionURL: subscriptionURL,
-			Type:            "3x-ui",
+			Type:            NodeType3xUI,
 		}
 		if err := node.SetInboundIDs(inboundIDs); err != nil {
 			return err
@@ -112,4 +86,42 @@ func (s *Service) LinkNodeToPlan(ctx context.Context, planName string, nodeID ui
 		return fmt.Errorf("plan %q not found: %w", planName, err)
 	}
 	return s.db.WithContext(ctx).Create(&PlanNode{PlanID: plan.ID, NodeID: nodeID}).Error
+}
+
+// GetNodeByID retrieves a node by its ID.
+func (s *Service) GetNodeByID(ctx context.Context, id uint) (*Node, error) {
+	var node Node
+	result := s.db.WithContext(ctx).First(&node, id)
+	if result.Error != nil {
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("node not found: %w", ErrNodeNotFound)
+		}
+		return nil, fmt.Errorf("failed to get node: %w", result.Error)
+	}
+	return &node, nil
+}
+
+// ListEnabled returns all active nodes.
+func (s *Service) ListEnabled(ctx context.Context) ([]Node, error) {
+	var nodes []Node
+	result := s.db.WithContext(ctx).Where("is_active = ?", true).Find(&nodes)
+	if result.Error != nil {
+		return nil, fmt.Errorf("failed to list enabled nodes: %w", result.Error)
+	}
+	return nodes, nil
+}
+
+// GetNodesByPlanID returns active nodes linked to the given plan via plan_nodes.
+func (s *Service) GetNodesByPlanID(ctx context.Context, planID uint) ([]Node, error) {
+	var nodes []Node
+	result := s.db.WithContext(ctx).
+		Table("nodes").
+		Select("nodes.*").
+		Joins("JOIN plan_nodes ON plan_nodes.node_id = nodes.id").
+		Where("plan_nodes.plan_id = ? AND nodes.is_active = ?", planID, true).
+		Find(&nodes)
+	if result.Error != nil {
+		return nil, fmt.Errorf("failed to get nodes by plan ID: %w", result.Error)
+	}
+	return nodes, nil
 }

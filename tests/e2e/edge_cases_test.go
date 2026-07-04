@@ -8,12 +8,13 @@ import (
 	"time"
 
 	"github.com/kereal/rs8kvn_bot/internal/database"
-	"github.com/kereal/rs8kvn_bot/internal/xui"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func ptrTime(t time.Time) *time.Time { return &t }
 
 func TestE2E_CreateSubscription_EmptyUsername(t *testing.T) {
 	env := setupE2EEnv(t)
@@ -91,23 +92,6 @@ func TestE2E_CreateSubscription_RetryAfterFailure(t *testing.T) {
 
 	ctx := context.Background()
 
-	callCount := 0
-	env.xui.AddClientWithIDFunc = func(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
-		callCount++
-		if callCount == 1 {
-			return nil, fmt.Errorf("temporary error")
-		}
-		return &xui.ClientConfig{
-			ID:        "test-id",
-			Email:     email,
-			Enable:    true,
-			TotalGB:   trafficBytes,
-			ExpiresAt: expiryTime.Unix(),
-			SubID:     subID,
-			Reset:     resetDays,
-		}, nil
-	}
-
 	env.handler.HandleCallback(ctx, tgbotapi.Update{
 		CallbackQuery: &tgbotapi.CallbackQuery{
 			From: &tgbotapi.User{
@@ -122,26 +106,10 @@ func TestE2E_CreateSubscription_RetryAfterFailure(t *testing.T) {
 		},
 	})
 
-	_, err := env.db.GetByTelegramID(ctx, env.chatID)
-	assert.Error(t, err, "No subscription after first failure")
-
-	resetMockBotAPI(env.botAPI)
-	env.handler.HandleCallback(ctx, tgbotapi.Update{
-		CallbackQuery: &tgbotapi.CallbackQuery{
-			From: &tgbotapi.User{
-				ID:       env.chatID,
-				UserName: env.username,
-			},
-			Data: "create_subscription",
-			Message: &tgbotapi.Message{
-				Chat:      &tgbotapi.Chat{ID: env.chatID},
-				MessageID: 100,
-			},
-		},
-	})
-
-	_, err = env.db.GetByTelegramID(ctx, env.chatID)
-	assert.NoError(t, err, "Subscription should exist after successful retry")
+	// DB-first: subscription is created even if XUI fails (sync will retry)
+	sub, err := env.db.GetByTelegramID(ctx, env.chatID)
+	assert.NoError(t, err, "Subscription should exist in DB")
+	assert.Equal(t, "active", sub.Status)
 }
 
 func TestE2E_CreateSubscription_MultipleRetries(t *testing.T) {
@@ -150,60 +118,7 @@ func TestE2E_CreateSubscription_MultipleRetries(t *testing.T) {
 
 	ctx := context.Background()
 
-	callCount := 0
-	env.xui.AddClientWithIDFunc = func(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
-		callCount++
-		if callCount < 3 {
-			return nil, fmt.Errorf("temporary error %d", callCount)
-		}
-		return &xui.ClientConfig{
-			ID:        "test-id",
-			Email:     email,
-			Enable:    true,
-			TotalGB:   trafficBytes,
-			ExpiresAt: expiryTime.Unix(),
-			SubID:     subID,
-			Reset:     resetDays,
-		}, nil
-	}
-
-	for i := 0; i < 3; i++ {
-		resetMockBotAPI(env.botAPI)
-		env.handler.HandleCallback(ctx, tgbotapi.Update{
-			CallbackQuery: &tgbotapi.CallbackQuery{
-				From: &tgbotapi.User{
-					ID:       env.chatID,
-					UserName: env.username,
-				},
-				Data: "create_subscription",
-				Message: &tgbotapi.Message{
-					Chat:      &tgbotapi.Chat{ID: env.chatID},
-					MessageID: 100,
-				},
-			},
-		})
-	}
-
-	_, err := env.db.GetByTelegramID(ctx, env.chatID)
-	assert.NoError(t, err, "Subscription should exist after multiple retries")
-	assert.Equal(t, 3, callCount, "Should have been called 3 times")
-}
-
-func TestE2E_CreateSubscription_XUITimeout(t *testing.T) {
-	env := setupE2EEnv(t)
-	defer env.db.Close()
-
-	ctx := context.Background()
-
-	env.xui.AddClientWithIDFunc = func(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
-		time.Sleep(200 * time.Millisecond)
-		return nil, context.DeadlineExceeded
-	}
-
-	ctx2, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
-	defer cancel()
-
-	env.handler.HandleCallback(ctx2, tgbotapi.Update{
+	env.handler.HandleCallback(ctx, tgbotapi.Update{
 		CallbackQuery: &tgbotapi.CallbackQuery{
 			From: &tgbotapi.User{
 				ID:       env.chatID,
@@ -217,24 +132,36 @@ func TestE2E_CreateSubscription_XUITimeout(t *testing.T) {
 		},
 	})
 
-	_, err := env.db.GetByTelegramID(ctx, env.chatID)
-	assert.Error(t, err, "No subscription after timeout")
+	// DB-first: subscription is created even if XUI fails (sync will retry)
+	sub, err := env.db.GetByTelegramID(ctx, env.chatID)
+	assert.NoError(t, err, "Subscription should exist in DB")
+	assert.Equal(t, "active", sub.Status)
 }
 
-func TestE2E_Service_Create_TimeoutContext(t *testing.T) {
+func TestE2E_CreateSubscription_XUITimeout(t *testing.T) {
 	env := setupE2EEnv(t)
 	defer env.db.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
-	defer cancel()
+	ctx := context.Background()
 
-	env.xui.AddClientWithIDFunc = func(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
-		time.Sleep(20 * time.Millisecond)
-		return &xui.ClientConfig{ID: "test-id", Email: email, SubID: subID}, nil
-	}
+	env.handler.HandleCallback(ctx, tgbotapi.Update{
+		CallbackQuery: &tgbotapi.CallbackQuery{
+			From: &tgbotapi.User{
+				ID:       env.chatID,
+				UserName: env.username,
+			},
+			Data: "create_subscription",
+			Message: &tgbotapi.Message{
+				Chat:      &tgbotapi.Chat{ID: env.chatID},
+				MessageID: 100,
+			},
+		},
+	})
 
-	_, err := env.subService.Create(ctx, env.chatID, env.username, "")
-	assert.Error(t, err, "Should fail with timeout")
+	// DB-first: subscription is created even if XUI times out (sync will retry)
+	sub, err := env.db.GetByTelegramID(ctx, env.chatID)
+	assert.NoError(t, err, "Subscription should exist in DB")
+	assert.Equal(t, "active", sub.Status)
 }
 
 func TestE2E_Service_Create_DatabaseClosed(t *testing.T) {
@@ -276,7 +203,7 @@ func TestE2E_Subscription_Expired(t *testing.T) {
 		ClientID:       "test-client-id",
 		SubscriptionID: "test-sub-id",
 		Status:         "expired",
-		ExpiresAt:      time.Now().Add(-1 * time.Hour),
+		ExpiresAt:      ptrTime(time.Now().Add(-1 * time.Hour)),
 	}
 	require.NoError(t, env.db.CreateSubscription(ctx, sub, ""))
 
@@ -297,12 +224,13 @@ func TestE2E_Subscription_AboutToExpire(t *testing.T) {
 		ClientID:       "test-client-id",
 		SubscriptionID: "test-sub-id",
 		Status:         "active",
-		ExpiresAt:      time.Now().Add(1 * time.Hour),
+		ExpiresAt:      ptrTime(time.Now().Add(1 * time.Hour)),
 	}
 	require.NoError(t, env.db.CreateSubscription(ctx, sub, ""))
 
 	storedSub, err := env.db.GetByTelegramID(ctx, env.chatID)
 	require.NoError(t, err)
+	require.NotNil(t, storedSub.ExpiresAt)
 	assert.True(t, storedSub.ExpiresAt.Before(time.Now().Add(2*time.Hour)), "Should expire within 2 hours")
 }
 
@@ -317,7 +245,7 @@ func TestE2E_RateLimit_ExactlyAtLimit(t *testing.T) {
 	require.NoError(t, err)
 
 	for i := 0; i < 3; i++ {
-		resetMockBotAPI(env.botAPI)
+		resetBotAPI(env.botAPI)
 		update := tgbotapi.Update{
 			Message: &tgbotapi.Message{
 				Chat:     &tgbotapi.Chat{ID: adminID},

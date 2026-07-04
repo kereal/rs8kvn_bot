@@ -45,40 +45,55 @@ func (h *Handler) handleAdminLastReg(ctx context.Context, chatID int64, username
 	subs, err := h.db.GetLatestSubscriptions(ctx, 10)
 	if err != nil {
 		logger.Error("Failed to get latest subscriptions", zap.Error(err))
-		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "❌ Ошибка получения списка подписок")
-		editMsg.DisableWebPagePreview = true
-		keyboard := h.getBackKeyboard()
-		editMsg.ReplyMarkup = &keyboard
-		h.safeSend(editMsg)
+		h.sendLastRegText(ctx, chatID, messageID, "❌ Ошибка получения списка подписок", true)
 		return fmt.Errorf("get latest subscriptions: %w", err)
 	}
 
 	if len(subs) == 0 {
-		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "📭 Нет активных подписок")
-		editMsg.DisableWebPagePreview = true
-		keyboard := h.getBackKeyboard()
-		editMsg.ReplyMarkup = &keyboard
-		h.safeSend(editMsg)
+		h.sendLastRegText(ctx, chatID, messageID, "📭 Нет активных подписок", false)
 		return nil
 	}
 
-	// Format the message as a table with 3 columns
 	var sb strings.Builder
 	sb.WriteString("📋 *Последние регистрации*\n\n")
 
 	for _, sub := range subs {
 		username := formatUserLink(sub.Username, sub.TelegramID)
-		dateStr := sub.CreatedAt.Format("02.01.2006 15:04:05")
+		dateStr := sub.CreatedAt.Format("02.01.06")
 		fmt.Fprintf(&sb, "%d │ %s │ %s\n", sub.ID, username, dateStr)
 	}
 
-	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, sb.String())
-	editMsg.ParseMode = "Markdown"
+	h.sendLastRegText(ctx, chatID, messageID, sb.String(), true)
+	return nil
+}
+
+// sendLastRegText sends or edits the lastreg result message.
+// A zero messageID means there's no inline keyboard to update (slash command case),
+// so a new message is sent; otherwise the button message is edited.
+func (h *Handler) sendLastRegText(ctx context.Context, chatID int64, messageID int, text string, isMarkdown bool) {
+	if messageID == 0 {
+		h.sendLastRegNewMessage(ctx, chatID, text, isMarkdown)
+		return
+	}
+	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, text)
 	editMsg.DisableWebPagePreview = true
 	keyboard := h.getBackKeyboard()
 	editMsg.ReplyMarkup = &keyboard
+	if isMarkdown {
+		editMsg.ParseMode = "Markdown"
+	}
 	h.safeSend(editMsg)
-	return nil
+}
+
+func (h *Handler) sendLastRegNewMessage(ctx context.Context, chatID int64, text string, isMarkdown bool) {
+	msg := tgbotapi.NewMessage(chatID, text)
+	msg.DisableWebPagePreview = true
+	keyboard := h.getBackKeyboard()
+	msg.ReplyMarkup = &keyboard
+	if isMarkdown {
+		msg.ParseMode = "Markdown"
+	}
+	h.send(ctx, msg)
 }
 
 // HandleDel handles the /del command for admins.
@@ -124,7 +139,7 @@ func (h *Handler) HandleDel(ctx context.Context, update tgbotapi.Update) error {
 
 	id := uint(parsedID)
 
-	// Delete subscription via service (includes webhook notification).
+	// Delete subscription via service.
 	// DeleteByID returns the deleted record so we can use it for
 	// referral/cache updates only after a successful deletion.
 	deleted, err := h.subscriptionService.DeleteByID(ctx, id)
@@ -137,12 +152,12 @@ func (h *Handler) HandleDel(ctx context.Context, update tgbotapi.Update) error {
 	}
 
 	// Decrement referral cache only after successful deletion
-	if deleted.ReferredBy > 0 {
-		h.DecrementReferralCount(deleted.ReferredBy)
+	if deleted.ReferredBy != nil && *deleted.ReferredBy > 0 {
+		h.DecrementReferralCount(*deleted.ReferredBy)
 	}
 
 	// Invalidate cache only after successful deletion
-	if deleted.TelegramID != 0 {
+	if deleted.TelegramID > 0 {
 		h.invalidateCache(ctx, deleted.TelegramID)
 	}
 
@@ -193,32 +208,20 @@ func (h *Handler) HandleBroadcast(ctx context.Context, update tgbotapi.Update) e
 		return nil
 	}
 
-	totalCount, err := h.db.GetTotalTelegramIDCount(ctx)
-	if err != nil {
-		logger.Error("Failed to count telegram IDs", zap.Error(err))
-		h.SendMessage(ctx, chatID, "❌ Ошибка получения списка пользователей")
-		return fmt.Errorf("count telegram ids: %w", err)
-	}
-	if totalCount == 0 {
-		h.SendMessage(ctx, chatID, "❌ Нет пользователей для рассылки")
-		return nil
-	}
-
-	h.SendMessage(ctx, chatID, fmt.Sprintf("📤 Начинаю рассылку для %d пользователей...", totalCount))
-
 	const (
 		batchSize            = 100
 		broadcastConcurrency = 10 // max concurrent sends per batch
 	)
 
 	var (
-		successCount       int64 = 0
-		failCount          int64 = 0
+		successCount       int64
+		failCount          int64
+		totalProcessed     int64
 		batchErr           error
-		broadcastCancelled bool // set when ctx is cancelled mid-broadcast; guarantees we always reach wg.Wait() + final report
+		broadcastCancelled bool
 	)
 	offset := 0
-	for offset < int(totalCount) {
+	for {
 		select {
 		case <-ctx.Done():
 			broadcastCancelled = true
@@ -232,6 +235,9 @@ func (h *Handler) HandleBroadcast(ctx context.Context, update tgbotapi.Update) e
 		if err != nil {
 			logger.Error("Failed to get telegram IDs batch", zap.Error(err))
 			batchErr = err
+			break
+		}
+		if len(ids) == 0 {
 			break
 		}
 
@@ -248,7 +254,10 @@ func (h *Handler) HandleBroadcast(ctx context.Context, update tgbotapi.Update) e
 				go func(tg int64) {
 					defer logger.Recover("Broadcast worker")
 					defer wg.Done()
-					defer func() { <-sem }()
+					defer func() {
+						time.Sleep(50 * time.Millisecond)
+						<-sem
+					}()
 
 					select {
 					case <-ctx.Done():
@@ -261,11 +270,12 @@ func (h *Handler) HandleBroadcast(ctx context.Context, update tgbotapi.Update) e
 					msg.ParseMode = "MarkdownV2"
 					msg.DisableWebPagePreview = true
 					if err := h.sendWithError(ctx, msg); err != nil {
-						atomic.AddInt64(&failCount, 1)
+						if ctx.Err() == nil {
+							atomic.AddInt64(&failCount, 1)
+						}
 					} else {
 						atomic.AddInt64(&successCount, 1)
 					}
-					time.Sleep(50 * time.Millisecond)
 				}(telegramID)
 			case <-ctx.Done():
 				broadcastCancelled = true
@@ -276,8 +286,13 @@ func (h *Handler) HandleBroadcast(ctx context.Context, update tgbotapi.Update) e
 		if broadcastCancelled {
 			break
 		}
-		offset += batchSize
+		offset += len(ids)
+		atomic.AddInt64(&totalProcessed, int64(len(ids)))
 	}
+
+	sent := atomic.LoadInt64(&successCount)
+	failed := atomic.LoadInt64(&failCount)
+	remaining := int(totalProcessed) - int(sent+failed)
 
 	if broadcastCancelled {
 		h.SendMessage(context.WithoutCancel(ctx), chatID, fmt.Sprintf(`⚠️ Рассылка прервана!
@@ -285,29 +300,24 @@ func (h *Handler) HandleBroadcast(ctx context.Context, update tgbotapi.Update) e
 📤 Отправлено: %d
 ❌ Ошибок: %d
 👥 Осталось: %d`,
-			atomic.LoadInt64(&successCount),
-			atomic.LoadInt64(&failCount),
-			int(totalCount)-int(atomic.LoadInt64(&successCount)+atomic.LoadInt64(&failCount))))
+			sent, failed, remaining))
 		return fmt.Errorf("broadcast cancelled")
 	}
 	if batchErr != nil {
 		h.SendMessage(context.WithoutCancel(ctx), chatID, fmt.Sprintf(`❌ Рассылка прервана из-за ошибки!
 
 📤 Отправлено: %d
-❌ Ошибок отправки: %d
-👥 Всего пользователей: %d
+❌ Ошибок: %d
+👥 Не обработано: %d
 
 Ошибка: %v`,
-			atomic.LoadInt64(&successCount),
-			atomic.LoadInt64(&failCount),
-			totalCount,
-			batchErr,
+			sent, failed, remaining, batchErr,
 		))
 		logger.Error("Broadcast failed due to batch retrieval error",
 			zap.Error(batchErr),
-			zap.Int64("success", atomic.LoadInt64(&successCount)),
-			zap.Int64("failed", atomic.LoadInt64(&failCount)),
-			zap.Int64("total", totalCount))
+			zap.Int64("success", sent),
+			zap.Int64("failed", failed),
+			zap.Int("remaining", remaining))
 		return fmt.Errorf("broadcast batch error: %w", batchErr)
 	}
 
@@ -315,15 +325,13 @@ func (h *Handler) HandleBroadcast(ctx context.Context, update tgbotapi.Update) e
 
 📤 Отправлено: %d
 ❌ Ошибок: %d
-👥 Всего пользователей: %d`,
-		atomic.LoadInt64(&successCount),
-		atomic.LoadInt64(&failCount),
-		totalCount,
+👥 Всего: %d`,
+		sent, failed, totalProcessed,
 	))
 	logger.Info("Broadcast completed",
-		zap.Int64("success", atomic.LoadInt64(&successCount)),
-		zap.Int64("failed", atomic.LoadInt64(&failCount)),
-		zap.Int64("total", totalCount))
+		zap.Int64("success", sent),
+		zap.Int64("failed", failed),
+		zap.Int64("total", totalProcessed))
 	return nil
 }
 

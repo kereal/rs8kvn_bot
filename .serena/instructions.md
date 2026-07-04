@@ -17,7 +17,6 @@
 **ПОСЛЕ активации:** Прочитай перед началом работы:
 1. `.serena/memories/project_overview.md`
 2. `.serena/memories/architecture.md`
-3. `.serena/memories/roadmap.md`
 
 **ПРОВЕРЬ:** Дата последнего обновления (> 1 месяц = устарело)
 
@@ -84,7 +83,6 @@ timeout_ms: 120000  # 2 минуты
 1. Обнови соответствующий файл в `.serena/memories/`:
    - Добавил новую фичу → обнови `project_overview.md`
    - Изменил архитектуру → обнови `architecture.md`
-   - Изменил планы → обнови `roadmap.md`
 
 2. Проверь:
    - Тесты проходят (`go test ./...`)
@@ -128,10 +126,8 @@ timeout_ms: 120000  # 2 минуты
 .serena/memories/
 ├── project_overview.md    # Общая информация о проекте
 ├── architecture.md       # Архитектурные решения и ограничения
-├── roadmap.md           # Планы развития
 ├── code_style.md        # Стиль кода
 ├── git-workflow.md      # Git workflow, команды, terminal usage
-├── test-info.md         # Информация о тестах
 ├── xui/auth-mechanism.md  # Аутентификация XUI
 ├── xui/reset-mechanism.md  # Автосброс трафика XUI
 └── instructions.md      # ЭТОТ ФАЙЛ — читать первым

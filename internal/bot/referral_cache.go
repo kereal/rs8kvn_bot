@@ -23,6 +23,7 @@ type referralEntry struct {
 }
 
 type ReferralCache struct {
+	noCopy noCopy
 	db     interfaces.DatabaseService
 	data   map[int64]*referralEntry
 	mu     sync.RWMutex

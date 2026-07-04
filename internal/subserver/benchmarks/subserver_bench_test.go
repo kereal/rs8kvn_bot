@@ -10,8 +10,6 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/subserver"
 )
 
-
-
 func BenchmarkExtractJSONConfigs(b *testing.B) {
 	b.ReportAllocs()
 	input := json.RawMessage(`[{"type":"vless","address":"1.2.3.4","port":443,"uuid":"abc"}]`)

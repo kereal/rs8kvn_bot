@@ -36,7 +36,7 @@ const (
 // label values. Known commands are returned as-is; anything else becomes "unknown".
 func normalizeCommand(cmd string) string {
 	switch cmd {
-	case "start", "help", "invite", "del", "broadcast", "send", "refstats", "v":
+	case "start", "help", "invite", "del", "broadcast", "send", "refstats", "v", "lastreg":
 		return cmd
 	default:
 		return "unknown"
@@ -53,6 +53,7 @@ type pendingInvite struct {
 const PendingInviteTTL = 60 * time.Minute
 
 type Handler struct {
+	noCopy              noCopy
 	bot                 interfaces.BotAPI
 	cfg                 *config.Config
 	db                  interfaces.DatabaseService
@@ -67,6 +68,7 @@ type Handler struct {
 	referralCache       *ReferralCache
 	sender              *MessageSender
 	keyboards           *KeyboardBuilder
+	orderService        *service.OrderService
 	version             string
 	referral            *ReferralHandler
 
@@ -123,9 +125,20 @@ func NewHandler(bot interfaces.BotAPI, cfg *config.Config, db interfaces.Databas
 	// Wire cache invalidation to centralized service (if service is present)
 	if h.subscriptionService != nil {
 		h.subscriptionService.SetInvalidateFunc(h.cache.Invalidate)
+		h.subscriptionService.SetInvalidateBySubIDFunc(h.cache.InvalidateBySubID)
 	}
 
 	return h
+}
+
+// Cache returns the subscription cache. Used by external callers (e.g. main.go)
+// to compose cache invalidation across multiple caches.
+func (h *Handler) Cache() *SubscriptionCache {
+	return h.cache
+}
+
+func (h *Handler) SetOrderService(orderService *service.OrderService) {
+	h.orderService = orderService
 }
 
 // isAdmin returns true if chatID matches configured admin ID
@@ -140,111 +153,148 @@ func (h *Handler) withTimeout(ctx context.Context) (context.Context, context.Can
 
 // Command delegates (implemented in command.go after handler split)
 func (h *Handler) HandleStart(ctx context.Context, update tgbotapi.Update) error {
-	if h.cmdHandler != nil {
-		return h.cmdHandler.HandleStart(ctx, update)
+	if h.cmdHandler == nil {
+		return errors.New("handler: cmdHandler is nil, use NewHandler to construct Handler")
 	}
-	return errors.New("handler: cmdHandler is nil, cannot handle Start")
+	return h.cmdHandler.HandleStart(ctx, update)
 }
 
 func (h *Handler) HandleHelp(ctx context.Context, update tgbotapi.Update) error {
-	if h.cmdHandler != nil {
-		return h.cmdHandler.HandleHelp(ctx, update)
+	if h.cmdHandler == nil {
+		return errors.New("handler: cmdHandler is nil, use NewHandler to construct Handler")
 	}
-	return errors.New("handler: cmdHandler is nil, cannot handle Help")
+	return h.cmdHandler.HandleHelp(ctx, update)
 }
 
 func (h *Handler) HandleInvite(ctx context.Context, update tgbotapi.Update) error {
-	if h.cmdHandler != nil {
-		return h.cmdHandler.HandleInvite(ctx, update)
+	if h.cmdHandler == nil {
+		return errors.New("handler: cmdHandler is nil, use NewHandler to construct Handler")
 	}
-	return errors.New("handler: cmdHandler is nil, cannot handle Invite")
+	return h.cmdHandler.HandleInvite(ctx, update)
 }
 
 // Private delegations kept for test compatibility after handler split
 func (h *Handler) handleBindTrial(ctx context.Context, chatID int64, username, subscriptionID string) error {
-	if h.cmdHandler != nil {
-		return h.cmdHandler.handleBindTrial(ctx, chatID, username, subscriptionID)
+	if h.cmdHandler == nil {
+		return errors.New("handler: cmdHandler is nil, use NewHandler to construct Handler")
 	}
-	return errors.New("handler: cmdHandler is nil")
+	return h.cmdHandler.handleBindTrial(ctx, chatID, username, subscriptionID)
 }
 
 func (h *Handler) handleShareStart(ctx context.Context, chatID int64, username, inviteCode string) error {
-	if h.cmdHandler != nil {
-		return h.cmdHandler.handleShareStart(ctx, chatID, username, inviteCode)
+	if h.cmdHandler == nil {
+		return errors.New("handler: cmdHandler is nil, use NewHandler to construct Handler")
 	}
-	return errors.New("handler: cmdHandler is nil")
+	return h.cmdHandler.handleShareStart(ctx, chatID, username, inviteCode)
 }
 
 func (h *Handler) sendInviteLink(ctx context.Context, chatID int64, messageID int) error {
-	if h.referral != nil {
-		return h.referral.sendInviteLink(ctx, chatID, messageID)
+	if h.referral == nil {
+		return errors.New("handler: referral is nil, use NewHandler to construct Handler")
 	}
-	return errors.New("handler: referral is nil")
+	return h.referral.sendInviteLink(ctx, chatID, messageID)
 }
 
-// Callback delegate
+// HandleCallback delegates callback handling to the callback handler.
 func (h *Handler) HandleCallback(ctx context.Context, update tgbotapi.Update) error {
-	if h.cbHandler != nil {
-		return h.cbHandler.HandleCallback(ctx, update)
+	if h.cbHandler == nil {
+		return errors.New("handler: cbHandler is nil, use NewHandler to construct Handler")
 	}
-	return errors.New("handler: cbHandler is nil, cannot handle Callback")
+	return h.cbHandler.HandleCallback(ctx, update)
 }
 
 // Callback private delegates
 func (h *Handler) handleShareInvite(ctx context.Context, chatID int64, username string, messageID int) error {
-	if h.cbHandler != nil {
-		return h.cbHandler.handleShareInvite(ctx, chatID, username, messageID)
+	if h.cbHandler == nil {
+		return errors.New("handler: cbHandler is nil, use NewHandler to construct Handler")
 	}
-	return nil
+	return h.cbHandler.handleShareInvite(ctx, chatID, username, messageID)
 }
 
 func (h *Handler) handleQRTelegram(ctx context.Context, chatID int64, username string, messageID int) error {
-	if h.cbHandler != nil {
-		return h.cbHandler.handleQRTelegram(ctx, chatID, username, messageID)
+	if h.cbHandler == nil {
+		return errors.New("handler: cbHandler is nil, use NewHandler to construct Handler")
 	}
-	return nil
+	return h.cbHandler.handleQRTelegram(ctx, chatID, username, messageID)
 }
 
 func (h *Handler) handleQRWeb(ctx context.Context, chatID int64, username string, messageID int) error {
-	if h.cbHandler != nil {
-		return h.cbHandler.handleQRWeb(ctx, chatID, username, messageID)
+	if h.cbHandler == nil {
+		return errors.New("handler: cbHandler is nil, use NewHandler to construct Handler")
 	}
-	return nil
+	return h.cbHandler.handleQRWeb(ctx, chatID, username, messageID)
 }
 
 // Subscription delegates
 func (h *Handler) handleCreateSubscription(ctx context.Context, chatID int64, username string, messageID int) error {
 	h.subHandlerOnce.Do(func() { h.subHandler = NewSubscriptionHandler(h) })
+	if h.subHandler == nil {
+		return errors.New("handler: subHandler is nil, use NewHandler to construct Handler")
+	}
 	return h.subHandler.handleCreateSubscription(ctx, chatID, username, messageID)
 }
 
 func (h *Handler) handleMySubscription(ctx context.Context, chatID int64, username string, messageID int) error {
 	h.subHandlerOnce.Do(func() { h.subHandler = NewSubscriptionHandler(h) })
+	if h.subHandler == nil {
+		return errors.New("handler: subHandler is nil, use NewHandler to construct Handler")
+	}
 	return h.subHandler.handleMySubscription(ctx, chatID, username, messageID)
 }
 
 func (h *Handler) handleQRCode(ctx context.Context, chatID int64, username string, messageID int) error {
 	h.subHandlerOnce.Do(func() { h.subHandler = NewSubscriptionHandler(h) })
+	if h.subHandler == nil {
+		return errors.New("handler: subHandler is nil, use NewHandler to construct Handler")
+	}
 	return h.subHandler.handleQRCode(ctx, chatID, username, messageID)
+}
+
+func (h *Handler) handleUpgradePremium(ctx context.Context, chatID int64, username string, messageID int) error {
+	h.subHandlerOnce.Do(func() { h.subHandler = NewSubscriptionHandler(h) })
+	if h.subHandler == nil {
+		return errors.New("handler: subHandler is nil, use NewHandler to construct Handler")
+	}
+	return h.subHandler.handleUpgradePremium(ctx, chatID, username, messageID)
+}
+
+func (h *Handler) handleConfirmUpgradePremium(ctx context.Context, chatID int64, username string, messageID int) error {
+	h.subHandlerOnce.Do(func() { h.subHandler = NewSubscriptionHandler(h) })
+	if h.subHandler == nil {
+		return errors.New("handler: subHandler is nil, use NewHandler to construct Handler")
+	}
+	return h.subHandler.handleConfirmUpgradePremium(ctx, chatID, username, messageID)
 }
 
 func (h *Handler) handleBackToSubscription(ctx context.Context, chatID int64, username string, messageID int) error {
 	h.subHandlerOnce.Do(func() { h.subHandler = NewSubscriptionHandler(h) })
+	if h.subHandler == nil {
+		return errors.New("handler: subHandler is nil, use NewHandler to construct Handler")
+	}
 	return h.subHandler.handleBackToSubscription(ctx, chatID, username, messageID)
 }
 
 func (h *Handler) sendQRCode(ctx context.Context, chatID int64, messageID int, url string, caption string) error {
 	h.subHandlerOnce.Do(func() { h.subHandler = NewSubscriptionHandler(h) })
+	if h.subHandler == nil {
+		return errors.New("handler: subHandler is nil, use NewHandler to construct Handler")
+	}
 	return h.subHandler.sendQRCode(ctx, chatID, messageID, url, caption)
 }
 
 func (h *Handler) handleBackToInvite(ctx context.Context, chatID int64, username string, messageID int) error {
 	h.subHandlerOnce.Do(func() { h.subHandler = NewSubscriptionHandler(h) })
+	if h.subHandler == nil {
+		return errors.New("handler: subHandler is nil, use NewHandler to construct Handler")
+	}
 	return h.subHandler.handleBackToInvite(ctx, chatID, username, messageID)
 }
 
 func (h *Handler) getSubscriptionWithCache(ctx context.Context, chatID int64) (*database.Subscription, error) {
 	h.subHandlerOnce.Do(func() { h.subHandler = NewSubscriptionHandler(h) })
+	if h.subHandler == nil {
+		return nil, errors.New("handler: subHandler is nil, use NewHandler to construct Handler")
+	}
 	return h.subHandler.getSubscriptionWithCache(ctx, chatID)
 }
 
@@ -252,7 +302,7 @@ func (h *Handler) getSubscriptionWithCache(ctx context.Context, chatID int64) (*
 // It uses centralized SubscriptionService if available, otherwise falls back to direct cache access.
 func (h *Handler) invalidateCache(ctx context.Context, chatID int64) {
 	if h.subscriptionService != nil {
-		_ = h.subscriptionService.InvalidateSubscription(ctx, chatID)
+		h.subscriptionService.InvalidateSubscription(ctx, chatID)
 		return
 	}
 	h.cache.Invalidate(chatID)
@@ -261,11 +311,20 @@ func (h *Handler) invalidateCache(ctx context.Context, chatID int64) {
 // Subscription direct delegates (used by tests and internal flows)
 func (h *Handler) createSubscription(ctx context.Context, chatID int64, username string, messageID int) error {
 	h.subHandlerOnce.Do(func() { h.subHandler = NewSubscriptionHandler(h) })
+	if h.subHandler == nil {
+		return errors.New("handler: subHandler is nil, use NewHandler to construct Handler")
+	}
 	return h.subHandler.createSubscription(ctx, chatID, username, messageID)
 }
 
 func (h *Handler) handleCreateError(ctx context.Context, chatID int64, messageID int, username string, err error) {
 	h.subHandlerOnce.Do(func() { h.subHandler = NewSubscriptionHandler(h) })
+	if h.subHandler == nil {
+		logger.Error("handler: subHandler is nil, cannot handle create error",
+			zap.Int64("chat_id", chatID),
+			zap.Error(err))
+		return
+	}
 	h.subHandler.handleCreateError(ctx, chatID, messageID, username, err)
 }
 
@@ -274,6 +333,9 @@ func (h *Handler) generateInviteLink(ctx context.Context, chatID int64, lt linkT
 	h.referralOnce.Do(func() {
 		h.referral = NewReferralHandler(h.db, h.cfg, h.bot, h.botConfig, h.sender, h.keyboards)
 	})
+	if h.referral == nil {
+		return "", errors.New("handler: referral is nil, use NewHandler to construct Handler")
+	}
 	return h.referral.generateInviteLink(ctx, chatID, lt)
 }
 
@@ -328,7 +390,7 @@ func displayUsername(username string) string {
 	return ", @" + username
 }
 
-func (h *Handler) getMainMenuContent(username string, hasSubscription bool, chatID int64) (string, tgbotapi.InlineKeyboardMarkup) {
+func (h *Handler) getMainMenuContent(ctx context.Context, username string, hasSubscription bool, chatID int64, sub *database.Subscription) (string, tgbotapi.InlineKeyboardMarkup) {
 	// Ensure keyboards is initialized (for manually constructed handlers in tests)
 	h.keyboardsOnce.Do(func() {
 		if h.keyboards == nil {
@@ -338,10 +400,16 @@ func (h *Handler) getMainMenuContent(username string, hasSubscription bool, chat
 
 	var text string
 	var keyboard tgbotapi.InlineKeyboardMarkup
+	freeUpgradeLabel := ""
+	if hasSubscription {
+		if label, ok := h.getFreeUpgradeLabel(ctx, sub); ok {
+			freeUpgradeLabel = label
+		}
+	}
 
 	if hasSubscription {
 		text = msg(MsgStartGreeting, username)
-		keyboard = h.getMainMenuKeyboard(true)
+		keyboard = h.getMainMenuKeyboard(true, freeUpgradeLabel)
 	} else {
 		text = msg(MsgStartGreetingNoSub, username)
 		keyboard = tgbotapi.NewInlineKeyboardMarkup(
@@ -374,8 +442,27 @@ func (h *Handler) getQRKeyboard() tgbotapi.InlineKeyboardMarkup {
 	return h.keyboards.QR()
 }
 
-func (h *Handler) getMainMenuKeyboard(hasSubscription bool) tgbotapi.InlineKeyboardMarkup {
-	return h.keyboards.MainMenu(hasSubscription)
+func (h *Handler) getMainMenuKeyboard(hasSubscription bool, freeUpgradeLabel ...string) tgbotapi.InlineKeyboardMarkup {
+	label := ""
+	if len(freeUpgradeLabel) > 0 {
+		label = freeUpgradeLabel[0]
+	}
+	return h.keyboards.MainMenu(hasSubscription, label)
+}
+
+func (h *Handler) getFreeUpgradeLabel(ctx context.Context, sub *database.Subscription) (string, bool) {
+	if h.db == nil || sub == nil || sub.Status != "active" || h.cfg == nil || h.cfg.MainMenuBtnProductID == 0 {
+		return "", false
+	}
+	plan, err := h.db.GetPlanByID(ctx, sub.PlanID)
+	if err != nil || plan == nil || plan.Name != database.FreePlanName {
+		return "", false
+	}
+	product, err := h.db.GetProductByID(ctx, h.cfg.MainMenuBtnProductID)
+	if err != nil || product == nil || !product.IsActive || product.PriceCents != 0 {
+		return "", false
+	}
+	return fmt.Sprintf("🎁 %s бесплатно", product.Name), true
 }
 
 // addAdminButtons appends admin control buttons to a keyboard if the user is an admin.
@@ -579,11 +666,11 @@ func (h *Handler) HandleUpdate(ctx context.Context, update tgbotapi.Update) {
 		if update.Message.IsCommand() {
 			switch update.Message.Command() {
 			case "start":
-				h.HandleStart(ctx, update)
+				err = h.HandleStart(ctx, update)
 			case "help":
-				h.HandleHelp(ctx, update)
+				err = h.HandleHelp(ctx, update)
 			case "invite":
-				h.HandleInvite(ctx, update)
+				err = h.HandleInvite(ctx, update)
 			case "del":
 				err = h.HandleDel(ctx, update)
 			case "broadcast":
@@ -594,13 +681,15 @@ func (h *Handler) HandleUpdate(ctx context.Context, update tgbotapi.Update) {
 				err = h.HandleRefstats(ctx, update)
 			case "v":
 				err = h.HandleVersion(ctx, update)
+			case "lastreg":
+				err = h.handleAdminLastReg(ctx, update.Message.Chat.ID, update.Message.From.UserName, 0)
 			default:
 				h.SendMessage(ctx, update.Message.Chat.ID,
 					"Неизвестная команда. Используйте /start или /help")
 			}
 		} else {
 			// Non-command message: send help hint
-			h.HandleHelp(ctx, update)
+			err = h.HandleHelp(ctx, update)
 		}
 	} else if update.CallbackQuery != nil {
 		err = h.HandleCallback(ctx, update)

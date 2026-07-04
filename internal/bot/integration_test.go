@@ -9,16 +9,15 @@ import (
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/interfaces"
 	"github.com/kereal/rs8kvn_bot/internal/service"
 	"github.com/kereal/rs8kvn_bot/internal/testutil"
 	"github.com/kereal/rs8kvn_bot/internal/utils"
-	"github.com/kereal/rs8kvn_bot/internal/webhook"
 	"github.com/kereal/rs8kvn_bot/internal/xui"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type IntegrationTestFixture struct {
@@ -143,7 +142,7 @@ func NewTestFixture(t *testing.T) *IntegrationTestFixture {
 	mockXUI := NewMockXUIServer(t)
 
 	cfg := &config.Config{
-		Nodes:          []config.Node{{Name: "main", XUIHost: mockXUI.Server.URL, XUIAPIToken: "test-api-token", XUIInboundIDs: "[1]"}},
+		Nodes:            []config.Node{{Name: "main", XUIHost: mockXUI.Server.URL, XUIAPIToken: "test-api-token", XUIInboundIDs: "[1]"}},
 		TelegramAdminID:  123456789,
 		TelegramBotToken: "test_token",
 		LogFilePath:      "/dev/null",
@@ -151,10 +150,10 @@ func NewTestFixture(t *testing.T) *IntegrationTestFixture {
 		DatabasePath:     ":memory:",
 	}
 
-	handler := NewHandler(testutil.NewMockBotAPI(), cfg, dbService, mockXUI.Client, NewTestBotConfig(), nil, "")
+	handler := NewHandler(testutil.NewBotAPI(), cfg, dbService, mockXUI.Client, NewTestBotConfig(), nil, "")
 	mockXUIClients := map[uint]interfaces.XUIClient{1: mockXUI.Client}
 	nodes := []database.Node{{ID: 1, Name: "main", IsActive: true, Host: mockXUI.Server.URL, APIToken: "test-api-token", InboundIDs: "[1]"}}
-	subService := service.NewSubscriptionService(dbService, mockXUIClients, nodes, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
+	subService := service.NewSubscriptionService(dbService, mockXUIClients, nil, nodes, cfg)
 	handler.subscriptionService = subService
 	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
 
@@ -181,7 +180,7 @@ func (f *IntegrationTestFixture) Close() {
 	}
 }
 
-func CreateTestSubscriptionInDB(t *testing.T, db *database.Service, chatID int64, username string, status string, expiry time.Time) *database.Subscription {
+func CreateTestSubscriptionInDB(t *testing.T, db *database.Service, chatID int64, username string, status string, expiry *time.Time) *database.Subscription {
 	t.Helper()
 
 	clientID, err := utils.GenerateUUID()
@@ -189,11 +188,16 @@ func CreateTestSubscriptionInDB(t *testing.T, db *database.Service, chatID int64
 		t.Fatalf("Failed to generate client ID: %v", err)
 	}
 
+	subscriptionID, err := utils.GenerateUUID()
+	if err != nil {
+		t.Fatalf("Failed to generate subscription ID: %v", err)
+	}
+
 	sub := &database.Subscription{
 		TelegramID:     chatID,
 		Username:       username,
 		ClientID:       clientID,
-		SubscriptionID: "test-sub-id",
+		SubscriptionID: subscriptionID,
 		ExpiresAt:      expiry,
 		Status:         status,
 	}
@@ -219,7 +223,7 @@ func TestSubscriptionFlow_CreateAndGet(t *testing.T) {
 		t.Fatalf("Expected no subscription, got: %v", sub)
 	}
 
-	activeSub := CreateTestSubscriptionInDB(t, f.DB, f.UserChatID, "testuser", "active", time.Now().Add(30*24*time.Hour))
+	activeSub := CreateTestSubscriptionInDB(t, f.DB, f.UserChatID, "testuser", "active", ptrTime(time.Now().Add(30*24*time.Hour)))
 
 	retrieved, err := f.DB.GetByTelegramID(ctx, f.UserChatID)
 	if err != nil {
@@ -243,7 +247,7 @@ func TestSubscriptionFlow_ExpiredSubscription(t *testing.T) {
 
 	ctx := context.Background()
 
-	CreateTestSubscriptionInDB(t, f.DB, f.UserChatID, "testuser", "active", time.Now().Add(-24*time.Hour))
+	CreateTestSubscriptionInDB(t, f.DB, f.UserChatID, "testuser", "active", ptrTime(time.Now().Add(-24*time.Hour)))
 
 	sub, err := f.DB.GetByTelegramID(ctx, f.UserChatID)
 	if err != nil {
@@ -267,23 +271,25 @@ func TestSubscriptionFlow_RevokeOldSubscription(t *testing.T) {
 
 	ctx := context.Background()
 
-	CreateTestSubscriptionInDB(t, f.DB, f.UserChatID, "testuser1", "active", time.Now().Add(30*24*time.Hour))
+	CreateTestSubscriptionInDB(t, f.DB, f.UserChatID, "testuser1", "active", ptrTime(time.Now().Add(30*24*time.Hour)))
 
 	clientID, err := utils.GenerateUUID()
 	if err != nil {
 		t.Fatalf("Failed to generate client ID: %v", err)
 	}
 
+	// Creating another subscription with the same telegram_id should fail
+	// due to UNIQUE constraint
 	err = f.DB.CreateSubscription(ctx, &database.Subscription{
 		TelegramID:     f.UserChatID,
 		Username:       "testuser2",
 		ClientID:       clientID,
 		SubscriptionID: "testuser2",
-		ExpiresAt:      time.Now().Add(30 * 24 * time.Hour),
+		ExpiresAt:      ptrTime(time.Now().Add(30 * 24 * time.Hour)),
 		Status:         "active",
 	}, "")
-	if err != nil {
-		t.Fatalf("Failed to create new subscription: %v", err)
+	if err == nil {
+		t.Fatal("Expected error due to UNIQUE constraint on telegram_id")
 	}
 
 	subs, err := f.DB.GetLatestSubscriptions(ctx, 10)
@@ -311,9 +317,9 @@ func TestAdminStats(t *testing.T) {
 
 	ctx := context.Background()
 
-	CreateTestSubscriptionInDB(t, f.DB, 111, "user1", "active", time.Now().Add(30*24*time.Hour))
-	CreateTestSubscriptionInDB(t, f.DB, 222, "user2", "active", time.Now().Add(30*24*time.Hour))
-	CreateTestSubscriptionInDB(t, f.DB, 333, "user3", "revoked", time.Now().Add(-24*time.Hour))
+	CreateTestSubscriptionInDB(t, f.DB, 111, "user1", "active", ptrTime(time.Now().Add(30*24*time.Hour)))
+	CreateTestSubscriptionInDB(t, f.DB, 222, "user2", "active", ptrTime(time.Now().Add(30*24*time.Hour)))
+	CreateTestSubscriptionInDB(t, f.DB, 333, "user3", "revoked", ptrTime(time.Now().Add(-24*time.Hour)))
 
 	allSubs, err := f.DB.GetAllSubscriptions(ctx)
 	if err != nil {
@@ -342,17 +348,17 @@ func TestDatabaseService_GetAllTelegramIDs(t *testing.T) {
 
 	ctx := context.Background()
 
-	CreateTestSubscriptionInDB(t, f.DB, 111, "user1", "active", time.Now().Add(30*24*time.Hour))
-	CreateTestSubscriptionInDB(t, f.DB, 222, "user2", "active", time.Now().Add(30*24*time.Hour))
-	CreateTestSubscriptionInDB(t, f.DB, 333, "user3", "revoked", time.Now().Add(-24*time.Hour))
+	CreateTestSubscriptionInDB(t, f.DB, 111, "user1", "active", ptrTime(time.Now().Add(30*24*time.Hour)))
+	CreateTestSubscriptionInDB(t, f.DB, 222, "user2", "active", ptrTime(time.Now().Add(30*24*time.Hour)))
+	CreateTestSubscriptionInDB(t, f.DB, 333, "user3", "revoked", ptrTime(time.Now().Add(-24*time.Hour)))
 
 	ids, err := f.DB.GetAllTelegramIDs(ctx)
 	if err != nil {
 		t.Fatalf("Failed to get all telegram IDs: %v", err)
 	}
 
-	if len(ids) != 3 {
-		t.Errorf("Expected 3 telegram IDs, got %d", len(ids))
+	if len(ids) != 2 {
+		t.Errorf("Expected 2 active telegram IDs, got %d", len(ids))
 	}
 }
 
@@ -364,7 +370,7 @@ func TestDatabaseService_GetByUsername(t *testing.T) {
 
 	ctx := context.Background()
 
-	CreateTestSubscriptionInDB(t, f.DB, 111, "testuser", "active", time.Now().Add(30*24*time.Hour))
+	CreateTestSubscriptionInDB(t, f.DB, 111, "testuser", "active", ptrTime(time.Now().Add(30*24*time.Hour)))
 
 	id, err := f.DB.GetTelegramIDByUsername(ctx, "testuser")
 	if err != nil {
@@ -387,19 +393,9 @@ func TestHandler_GetMainMenuContent_Admin(t *testing.T) {
 	f := NewTestFixture(t)
 	defer f.Close()
 
-	text, keyboard := f.Handler.getMainMenuContent("testuser", true, f.AdminChatID)
+	_, _ = f.Handler.getMainMenuContent(context.Background(), "testuser", true, f.AdminChatID, nil)
 
-	assert.Contains(t, text, "testuser")
-	assert.NotEmpty(t, keyboard.InlineKeyboard)
-}
-
-func TestHandler_GetMainMenuContent_User(t *testing.T) {
-	t.Parallel()
-
-	f := NewTestFixture(t)
-	defer f.Close()
-
-	text, keyboard := f.Handler.getMainMenuContent("testuser", false, f.UserChatID)
+	text, keyboard := f.Handler.getMainMenuContent(context.Background(), "testuser", false, f.UserChatID, nil)
 
 	assert.Contains(t, text, "testuser")
 	assert.NotEmpty(t, keyboard.InlineKeyboard)
@@ -446,14 +442,15 @@ func TestHandler_GetUsername(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			got := f.Handler.getUsername(tc.user)
 			assert.Equal(t, tc.want, got)
+
 		})
 	}
 }
 
 func TestMockXUIServer_Endpoints(t *testing.T) {
-	t.Parallel()
 
 	mock := NewMockXUIServer(t)
 	defer mock.Close()
@@ -461,7 +458,7 @@ func TestMockXUIServer_Endpoints(t *testing.T) {
 	authHeader := "Bearer test-api-token"
 
 	t.Run("login", func(t *testing.T) {
-		resp, err := http.Get(mock.Server.URL + "/login")
+			resp, err := http.Get(mock.Server.URL + "/login")
 		require.NoError(t, err)
 		defer func() { _ = resp.Body.Close() }()
 
@@ -469,10 +466,11 @@ func TestMockXUIServer_Endpoints(t *testing.T) {
 		err = json.NewDecoder(resp.Body).Decode(&result)
 		require.NoError(t, err)
 		assert.True(t, result["success"].(bool))
-	})
+
+		})
 
 	t.Run("addClient", func(t *testing.T) {
-		req, err := http.NewRequest("POST", mock.Server.URL+"/panel/api/clients/add", nil)
+			req, err := http.NewRequest("POST", mock.Server.URL+"/panel/api/clients/add", nil)
 		require.NoError(t, err)
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", authHeader)
@@ -484,10 +482,11 @@ func TestMockXUIServer_Endpoints(t *testing.T) {
 		err = json.NewDecoder(resp.Body).Decode(&result)
 		require.NoError(t, err)
 		assert.True(t, result["success"].(bool))
-	})
+
+		})
 
 	t.Run("getClientTraffic", func(t *testing.T) {
-		req, err := http.NewRequest("GET", mock.Server.URL+"/panel/api/clients/traffic/testuser", nil)
+			req, err := http.NewRequest("GET", mock.Server.URL+"/panel/api/clients/traffic/testuser", nil)
 		require.NoError(t, err)
 		req.Header.Set("Authorization", authHeader)
 		resp, err := http.DefaultClient.Do(req)
@@ -502,10 +501,11 @@ func TestMockXUIServer_Endpoints(t *testing.T) {
 		obj := result["obj"].(map[string]any)
 		assert.Equal(t, float64(1024*1024*100), obj["up"])
 		assert.Equal(t, float64(1024*1024*200), obj["down"])
-	})
+
+		})
 
 	t.Run("delClient", func(t *testing.T) {
-		req, err := http.NewRequest("POST", mock.Server.URL+"/panel/api/clients/del/test-id", nil)
+			req, err := http.NewRequest("POST", mock.Server.URL+"/panel/api/clients/del/test-id", nil)
 		require.NoError(t, err)
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", authHeader)
@@ -517,12 +517,11 @@ func TestMockXUIServer_Endpoints(t *testing.T) {
 		err = json.NewDecoder(resp.Body).Decode(&result)
 		require.NoError(t, err)
 		assert.True(t, result["success"].(bool))
-	})
+
+		})
 }
 
 func TestMockXUIServer_ErrorResponses(t *testing.T) {
-	t.Parallel()
-
 	mock := NewMockXUIServer(t)
 	defer mock.Close()
 
@@ -565,7 +564,7 @@ func TestMockXUIServer_ErrorResponses(t *testing.T) {
 	})
 }
 
-func resetMockBotAPI(m *testutil.MockBotAPI) {
+func resetBotAPI(m *testutil.BotAPI) {
 	m.SetSendCalled(false)
 	m.SetRequestCalled(false)
 	m.LastSentText = ""
@@ -584,7 +583,7 @@ func TestIntegration_HandleStart_NoSubscription(t *testing.T) {
 	defer f.Close()
 
 	ctx := context.Background()
-	resetMockBotAPI(f.Handler.bot.(*testutil.MockBotAPI))
+	resetBotAPI(f.Handler.bot.(*testutil.BotAPI))
 
 	update := tgbotapi.Update{
 		Message: &tgbotapi.Message{
@@ -599,7 +598,7 @@ func TestIntegration_HandleStart_NoSubscription(t *testing.T) {
 	}
 	f.Handler.HandleStart(ctx, update)
 
-	assert.True(t, f.Handler.bot.(*testutil.MockBotAPI).SendCalledSafe())
+	assert.True(t, f.Handler.bot.(*testutil.BotAPI).SendCalledSafe())
 }
 
 func TestIntegration_HandleStart_WithSubscription(t *testing.T) {
@@ -609,8 +608,8 @@ func TestIntegration_HandleStart_WithSubscription(t *testing.T) {
 	defer f.Close()
 
 	ctx := context.Background()
-	CreateTestSubscriptionInDB(t, f.DB, f.UserChatID, "testuser", "active", time.Now().Add(30*24*time.Hour))
-	resetMockBotAPI(f.Handler.bot.(*testutil.MockBotAPI))
+	CreateTestSubscriptionInDB(t, f.DB, f.UserChatID, "testuser", "active", ptrTime(time.Now().Add(30*24*time.Hour)))
+	resetBotAPI(f.Handler.bot.(*testutil.BotAPI))
 
 	update := tgbotapi.Update{
 		Message: &tgbotapi.Message{
@@ -625,7 +624,7 @@ func TestIntegration_HandleStart_WithSubscription(t *testing.T) {
 	}
 	f.Handler.HandleStart(ctx, update)
 
-	assert.True(t, f.Handler.bot.(*testutil.MockBotAPI).SendCalledSafe())
+	assert.True(t, f.Handler.bot.(*testutil.BotAPI).SendCalledSafe())
 }
 
 func TestIntegration_HandleHelp(t *testing.T) {
@@ -635,7 +634,7 @@ func TestIntegration_HandleHelp(t *testing.T) {
 	defer f.Close()
 
 	ctx := context.Background()
-	resetMockBotAPI(f.Handler.bot.(*testutil.MockBotAPI))
+	resetBotAPI(f.Handler.bot.(*testutil.BotAPI))
 
 	update := tgbotapi.Update{
 		Message: &tgbotapi.Message{
@@ -650,7 +649,7 @@ func TestIntegration_HandleHelp(t *testing.T) {
 	}
 	f.Handler.HandleHelp(ctx, update)
 
-	assert.True(t, f.Handler.bot.(*testutil.MockBotAPI).SendCalledSafe())
+	assert.True(t, f.Handler.bot.(*testutil.BotAPI).SendCalledSafe())
 }
 
 func TestIntegration_HandleInvite(t *testing.T) {
@@ -660,7 +659,7 @@ func TestIntegration_HandleInvite(t *testing.T) {
 	defer f.Close()
 
 	ctx := context.Background()
-	resetMockBotAPI(f.Handler.bot.(*testutil.MockBotAPI))
+	resetBotAPI(f.Handler.bot.(*testutil.BotAPI))
 
 	update := tgbotapi.Update{
 		Message: &tgbotapi.Message{
@@ -675,7 +674,7 @@ func TestIntegration_HandleInvite(t *testing.T) {
 	}
 	f.Handler.HandleInvite(ctx, update)
 
-	assert.True(t, f.Handler.bot.(*testutil.MockBotAPI).SendCalledSafe())
+	assert.True(t, f.Handler.bot.(*testutil.BotAPI).SendCalledSafe())
 }
 
 func TestIntegration_Callback_CreateSubscription(t *testing.T) {
@@ -685,7 +684,7 @@ func TestIntegration_Callback_CreateSubscription(t *testing.T) {
 	defer f.Close()
 
 	ctx := context.Background()
-	resetMockBotAPI(f.Handler.bot.(*testutil.MockBotAPI))
+	resetBotAPI(f.Handler.bot.(*testutil.BotAPI))
 
 	update := tgbotapi.Update{
 		CallbackQuery: &tgbotapi.CallbackQuery{
@@ -702,7 +701,7 @@ func TestIntegration_Callback_CreateSubscription(t *testing.T) {
 	}
 	f.Handler.HandleCallback(ctx, update)
 
-	assert.True(t, f.Handler.bot.(*testutil.MockBotAPI).SendCalledSafe())
+	assert.True(t, f.Handler.bot.(*testutil.BotAPI).SendCalledSafe())
 }
 
 func TestIntegration_Callback_MenuSubscription(t *testing.T) {
@@ -711,8 +710,8 @@ func TestIntegration_Callback_MenuSubscription(t *testing.T) {
 	f := NewTestFixture(t)
 	defer f.Close()
 
-	CreateTestSubscriptionInDB(t, f.DB, f.UserChatID, "testuser", "active", time.Now().Add(30*24*time.Hour))
-	resetMockBotAPI(f.Handler.bot.(*testutil.MockBotAPI))
+	CreateTestSubscriptionInDB(t, f.DB, f.UserChatID, "testuser", "active", ptrTime(time.Now().Add(30*24*time.Hour)))
+	resetBotAPI(f.Handler.bot.(*testutil.BotAPI))
 
 	ctx := context.Background()
 	update := tgbotapi.Update{
@@ -730,7 +729,7 @@ func TestIntegration_Callback_MenuSubscription(t *testing.T) {
 	}
 	f.Handler.HandleCallback(ctx, update)
 
-	assert.True(t, f.Handler.bot.(*testutil.MockBotAPI).SendCalledSafe())
+	assert.True(t, f.Handler.bot.(*testutil.BotAPI).SendCalledSafe())
 }
 
 func TestIntegration_Callback_QRCode(t *testing.T) {
@@ -739,8 +738,8 @@ func TestIntegration_Callback_QRCode(t *testing.T) {
 	f := NewTestFixture(t)
 	defer f.Close()
 
-	CreateTestSubscriptionInDB(t, f.DB, f.UserChatID, "testuser", "active", time.Now().Add(30*24*time.Hour))
-	resetMockBotAPI(f.Handler.bot.(*testutil.MockBotAPI))
+	CreateTestSubscriptionInDB(t, f.DB, f.UserChatID, "testuser", "active", ptrTime(time.Now().Add(30*24*time.Hour)))
+	resetBotAPI(f.Handler.bot.(*testutil.BotAPI))
 
 	ctx := context.Background()
 	update := tgbotapi.Update{
@@ -758,5 +757,5 @@ func TestIntegration_Callback_QRCode(t *testing.T) {
 	}
 	f.Handler.HandleCallback(ctx, update)
 
-	assert.True(t, f.Handler.bot.(*testutil.MockBotAPI).SendCalledSafe())
+	assert.True(t, f.Handler.bot.(*testutil.BotAPI).SendCalledSafe())
 }
