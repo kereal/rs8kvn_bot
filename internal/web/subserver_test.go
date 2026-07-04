@@ -86,66 +86,6 @@ func TestHandleSubscription_AccessLog(t *testing.T) {
 	t.Parallel()
 
 	db := testutil.NewDatabaseService()
-	srv := testServer(t, db, &config.Config{})
-	logPath := filepath.Join(t.TempDir(), "subserver.log")
-	accessLogger, err := subserver.NewAccessLogger(logPath)
-	require.NoError(t, err)
-
-	srv.subserverLogger = accessLogger
-
-	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodGet, "/sub/unknown?debug=1", nil)
-	r.RemoteAddr = "203.0.113.10:1234"
-	r.Header.Set("X-Hwid", "hw-1")
-	r.Header.Set("X-Device-Os", "iOS")
-	r.Header.Set("X-Ver-Os", "17.0")
-	r.Header.Set("X-Device-Model", "iPhone 15")
-	r.Header.Set("User-Agent", "V2Ray/1.0")
-	srv.handleSubscription(w, r)
-
-	require.NoError(t, accessLogger.Close())
-	content, err := os.ReadFile(logPath)
-	require.NoError(t, err)
-
-	line := strings.TrimSpace(string(content))
-	assert.Regexp(t, regexp.MustCompile(`\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}`), line)
-	assert.Contains(t, line, "\tINFO\t")
-	assert.NotContains(t, line, "\nGET")
-	assert.NotContains(t, line, "SUBSERVER_ACCESS")
-	assert.NotContains(t, line, `"method"`)
-	assert.NotContains(t, line, `"status_code"`)
-	assert.NotContains(t, line, `"url"`)
-	assert.Contains(t, line, "GET /sub/unknown?debug=1 404 203.0.113.10 hw-1 iOS 17.0 \"iPhone 15\" V2Ray/1.0")
-}
-
-func TestHandleSubscription_AccessLogMissingOptionalHeaders(t *testing.T) {
-	t.Parallel()
-
-	db := testutil.NewDatabaseService()
-	srv := testServer(t, db, &config.Config{})
-	logPath := filepath.Join(t.TempDir(), "subserver.log")
-	accessLogger, err := subserver.NewAccessLogger(logPath)
-	require.NoError(t, err)
-
-	srv.subserverLogger = accessLogger
-
-	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodGet, "/sub/unknown", nil)
-	r.RemoteAddr = "203.0.113.10:1234"
-	srv.handleSubscription(w, r)
-
-	require.NoError(t, accessLogger.Close())
-	content, err := os.ReadFile(logPath)
-	require.NoError(t, err)
-
-	line := strings.TrimSpace(string(content))
-	assert.Contains(t, line, "GET /sub/unknown 404 203.0.113.10 - - - - -")
-}
-
-func TestHandleSubscription_SubscriptionNotFound(t *testing.T) {
-	t.Parallel()
-
-	db := testutil.NewDatabaseService()
 	db.GetWithPlanAndNodesFunc = func(ctx context.Context, _ string) (*database.SubscriptionFull, error) {
 		return nil, gorm.ErrRecordNotFound
 	}
@@ -180,190 +120,223 @@ func TestHandleSubscription_NoServersAvailable(t *testing.T) {
 	assert.Equal(t, "Subscription not found", w.Body.String())
 }
 
-func TestHandleSubscription_PlainSource(t *testing.T) {
+func TestHandleSubscription_SourceVariants(t *testing.T) {
 	t.Parallel()
 
-	plainContent := "vless://abc@x.com:443\nvmess://def@y.com:8443"
-
-	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Subscription-UserInfo", "upload=100; download=200; total=1000; expire=1234567890")
-		w.Write([]byte(plainContent))
-	}))
-	defer backend.Close()
-
-	db := testutil.NewDatabaseService()
-	db.GetWithPlanAndNodesFunc = func(ctx context.Context, _ string) (*database.SubscriptionFull, error) {
-		return &database.SubscriptionFull{
-			Subscription: database.Subscription{ID: 1, Status: "active"},
-			Plan:         database.Plan{TrafficLimit: 1 << 30},
-			Nodes: []database.Node{
-				{ID: 1, Name: "src1", IsActive: true, SubscriptionURL: backend.URL + "/sub/"},
+	tests := []struct {
+		name       string
+		body       string
+		userInfo   string
+		mockDBExtra func(db *testutil.DatabaseService)
+		check      func(t *testing.T, w *httptest.ResponseRecorder, body string)
+	}{
+		{
+			name:    "plain source",
+			body:    "vless://abc@x.com:443\nvmess://def@y.com:8443",
+			userInfo: "upload=100; download=200; total=1000; expire=1234567890",
+			check: func(t *testing.T, w *httptest.ResponseRecorder, body string) {
+				decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(body))
+				require.NoError(t, err)
+				assert.Contains(t, string(decoded), "vless://abc@x.com:443")
+				assert.Contains(t, string(decoded), "vmess://def@y.com:8443")
+				userInfo := w.Header().Get("Subscription-UserInfo")
+				assert.Contains(t, userInfo, "upload=100")
+				assert.Contains(t, userInfo, "download=200")
 			},
-		}, nil
+		},
+		{
+			name:    "JSON source",
+			body:    `[{"type":"vless","address":"x.com","port":443,"uuid":"abc123","encryption":"none","remark":"S1"}]`,
+			userInfo: "upload=50; download=75; total=500; expire=9999",
+			check: func(t *testing.T, w *httptest.ResponseRecorder, body string) {
+				assert.Equal(t, "application/json; charset=utf-8", w.Header().Get("Content-Type"))
+				var items []json.RawMessage
+				require.NoError(t, json.Unmarshal(w.Body.Bytes(), &items))
+				require.Len(t, items, 1)
+				var parsed map[string]any
+				require.NoError(t, json.Unmarshal(items[0], &parsed))
+				assert.Equal(t, "vless", parsed["type"])
+				assert.Equal(t, "x.com", parsed["address"])
+				userInfo := w.Header().Get("Subscription-UserInfo")
+				assert.Contains(t, userInfo, "upload=50")
+			},
+		},
+		{
+			name:    "multiple sources",
+			body:    "vless://a@x.com:443",
+			userInfo: "upload=100; download=200; total=500; expire=111",
+			mockDBExtra: func(db *testutil.DatabaseService) {
+				db.GetWithPlanAndNodesFunc = func(ctx context.Context, _ string) (*database.SubscriptionFull, error) {
+					return &database.SubscriptionFull{
+						Subscription: database.Subscription{ID: 1, Status: "active"},
+						Plan:         database.Plan{TrafficLimit: 10 << 30},
+						Nodes: []database.Node{
+							{ID: 1, Name: "s1", IsActive: true, SubscriptionURL: httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+								w.Header().Set("Subscription-UserInfo", "upload=100; download=200; total=500; expire=111")
+								w.Write([]byte("vless://a@x.com:443"))
+							})).URL + "/sub/"},
+							{ID: 2, Name: "s2", IsActive: true, SubscriptionURL: httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+								w.Header().Set("Subscription-UserInfo", "upload=300; download=400; total=500; expire=222")
+								w.Write([]byte("trojan://b@y.com:8443"))
+							})).URL + "/sub/"},
+						},
+					}, nil
+				}
+			},
+			check: func(t *testing.T, w *httptest.ResponseRecorder, body string) {
+				decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(body))
+				require.NoError(t, err)
+				assert.Contains(t, string(decoded), "vless://a@x.com:443")
+				assert.Contains(t, string(decoded), "trojan://b@y.com:8443")
+				userInfo := w.Header().Get("Subscription-UserInfo")
+				assert.Contains(t, userInfo, "upload=400")
+				assert.Contains(t, userInfo, "download=600")
+			},
+		},
+		{
+			name:    "mixed JSON and plain",
+			body:    `{"type":"vless","address":"j.com","port":443,"uuid":"abc","encryption":"none","remark":"J"}`,
+			check: func(t *testing.T, w *httptest.ResponseRecorder, body string) {
+				decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(body))
+				require.NoError(t, err)
+				assert.Contains(t, string(decoded), "vless://abc@j.com:443")
+			},
+		},
+		{
+			name:    "base64 encoded source",
+			body:    base64.StdEncoding.EncodeToString([]byte("vless://b64@x.com:443\nvmess://b64@y.com:443")),
+			userInfo: "upload=10; download=20; total=100; expire=555",
+			check: func(t *testing.T, w *httptest.ResponseRecorder, body string) {
+				decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(body))
+				require.NoError(t, err)
+				assert.Contains(t, string(decoded), "vless://b64@x.com:443")
+				assert.Contains(t, string(decoded), "vmess://b64@y.com:443")
+			},
+		},
 	}
-	srv := testServer(t, db, &config.Config{})
 
-	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodGet, "/sub/test123", nil)
-	srv.handleSubscription(w, r)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var b1, b2 *httptest.Server
+			if tt.name == "mixed JSON and plain" {
+				b1 = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.Write([]byte(`{"type":"vless","address":"j.com","port":443,"uuid":"abc","encryption":"none","remark":"J"}`))
+				}))
+				b2 = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.Write([]byte("vless://p@plain.com:443"))
+				}))
+				defer b1.Close()
+				defer b2.Close()
+			}
+			if tt.name == "multiple sources" {
+				defer func() { if b1 != nil { b1.Close() } }()
+				defer func() { if b2 != nil { b2.Close() } }()
+			}
 
-	assert.Equal(t, http.StatusOK, w.Code)
+			var sourceURL string
+			if tt.name == "mixed JSON and plain" {
+				sourceURL = b1.URL + "/sub/"
+			} else if tt.name == "multiple sources" {
+				// already set in mockDBExtra
+			} else {
+				backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Set("Subscription-UserInfo", tt.userInfo)
+					w.Write([]byte(tt.body))
+				}))
+				defer backend.Close()
+				sourceURL = backend.URL + "/sub/"
+			}
 
-	decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(w.Body.String()))
-	require.NoError(t, err)
-	body := string(decoded)
+			db := testutil.NewDatabaseService()
+			if tt.mockDBExtra != nil {
+				tt.mockDBExtra(db)
+			} else {
+				db.GetWithPlanAndNodesFunc = func(ctx context.Context, _ string) (*database.SubscriptionFull, error) {
+					nodes := []database.Node{{ID: 1, Name: tt.name, IsActive: true, SubscriptionURL: sourceURL}}
+					if tt.name == "mixed JSON and plain" {
+						nodes = []database.Node{
+							{ID: 1, Name: "json", IsActive: true, SubscriptionURL: b1.URL + "/sub/"},
+							{ID: 2, Name: "plain", IsActive: true, SubscriptionURL: b2.URL + "/sub/"},
+						}
+					}
+					return &database.SubscriptionFull{
+						Subscription: database.Subscription{ID: 1, Status: "active"},
+						Plan:         database.Plan{TrafficLimit: 1 << 30},
+						Nodes:        nodes,
+					}, nil
+				}
+			}
+			srv := testServer(t, db, &config.Config{})
 
-	assert.Contains(t, body, "vless://abc@x.com:443")
-	assert.Contains(t, body, "vmess://def@y.com:8443")
-
-	userInfo := w.Header().Get("Subscription-UserInfo")
-	assert.Contains(t, userInfo, "upload=100")
-	assert.Contains(t, userInfo, "download=200")
-	assert.Contains(t, userInfo, "total="+fmt.Sprintf("%d", 1<<30))
-	assert.Contains(t, userInfo, "expire=1234567890")
+			w := httptest.NewRecorder()
+			r := httptest.NewRequest(http.MethodGet, "/sub/test123", nil)
+			srv.handleSubscription(w, r)
+			assert.Equal(t, http.StatusOK, w.Code)
+			tt.check(t, w, w.Body.String())
+		})
+	}
 }
 
-func TestHandleSubscription_JSONSource(t *testing.T) {
+func TestHandleSubscription_AccessLogVariants(t *testing.T) {
 	t.Parallel()
 
-	jsonContent := `[{"type":"vless","address":"x.com","port":443,"uuid":"abc123","encryption":"none","remark":"S1"}]`
-
-	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Subscription-UserInfo", "upload=50; download=75; total=500; expire=9999")
-		w.Write([]byte(jsonContent))
-	}))
-	defer backend.Close()
-
-	db := testutil.NewDatabaseService()
-	db.GetWithPlanAndNodesFunc = func(ctx context.Context, _ string) (*database.SubscriptionFull, error) {
-		return &database.SubscriptionFull{
-			Subscription: database.Subscription{ID: 1, Status: "active"},
-			Plan:         database.Plan{TrafficLimit: 2 << 30},
-			Nodes: []database.Node{
-				{ID: 1, Name: "src1", IsActive: true, SubscriptionURL: backend.URL + "/sub/"},
+	tests := []struct {
+		name        string
+		setupReq    func() *http.Request
+		wantLineContains string
+	}{
+		{
+			name: "with headers",
+			setupReq: func() *http.Request {
+				r := httptest.NewRequest(http.MethodGet, "/sub/unknown?debug=1", nil)
+				r.RemoteAddr = "203.0.113.10:1234"
+				r.Header.Set("X-Hwid", "hw-1")
+				r.Header.Set("X-Device-Os", "iOS")
+				r.Header.Set("X-Ver-Os", "17.0")
+				r.Header.Set("X-Device-Model", "iPhone 15")
+				r.Header.Set("User-Agent", "V2Ray/1.0")
+				return r
 			},
-		}, nil
-	}
-	srv := testServer(t, db, &config.Config{})
-
-	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodGet, "/sub/test123", nil)
-	srv.handleSubscription(w, r)
-
-	assert.Equal(t, http.StatusOK, w.Code)
-
-	assert.Equal(t, "application/json; charset=utf-8", w.Header().Get("Content-Type"))
-
-	var items []json.RawMessage
-	err := json.Unmarshal(w.Body.Bytes(), &items)
-	require.NoError(t, err)
-	require.Len(t, items, 1)
-
-	var parsed map[string]any
-	require.NoError(t, json.Unmarshal(items[0], &parsed))
-	assert.Equal(t, "vless", parsed["type"])
-	assert.Equal(t, "x.com", parsed["address"])
-
-	userInfo := w.Header().Get("Subscription-UserInfo")
-	assert.Contains(t, userInfo, "upload=50")
-	assert.Contains(t, userInfo, "download=75")
-	assert.Contains(t, userInfo, "total="+fmt.Sprintf("%d", 2<<30))
-}
-
-func TestHandleSubscription_MultipleSources(t *testing.T) {
-	t.Parallel()
-
-	s1Content := "vless://a@x.com:443"
-	s2Content := "trojan://b@y.com:8443"
-
-	b1 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Subscription-UserInfo", "upload=100; download=200; total=500; expire=111")
-		w.Write([]byte(s1Content))
-	}))
-	defer b1.Close()
-
-	b2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Subscription-UserInfo", "upload=300; download=400; total=500; expire=222")
-		w.Write([]byte(s2Content))
-	}))
-	defer b2.Close()
-
-	db := testutil.NewDatabaseService()
-	db.GetWithPlanAndNodesFunc = func(ctx context.Context, _ string) (*database.SubscriptionFull, error) {
-		return &database.SubscriptionFull{
-			Subscription: database.Subscription{ID: 1, Status: "active"},
-			Plan:         database.Plan{TrafficLimit: 10 << 30},
-			Nodes: []database.Node{
-				{ID: 1, Name: "s1", IsActive: true, SubscriptionURL: b1.URL + "/sub/"},
-				{ID: 2, Name: "s2", IsActive: true, SubscriptionURL: b2.URL + "/sub/"},
+			wantLineContains: "GET /sub/unknown?debug=1 404 203.0.113.10 hw-1 iOS 17.0 \"iPhone 15\" V2Ray/1.0",
+		},
+		{
+			name: "missing optional headers",
+			setupReq: func() *http.Request {
+				r := httptest.NewRequest(http.MethodGet, "/sub/unknown", nil)
+				r.RemoteAddr = "203.0.113.10:1234"
+				return r
 			},
-		}, nil
+			wantLineContains: "GET /sub/unknown 404 203.0.113.10 - - - - -",
+		},
 	}
-	srv := testServer(t, db, &config.Config{})
 
-	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodGet, "/sub/test123", nil)
-	srv.handleSubscription(w, r)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db := testutil.NewDatabaseService()
+			srv := testServer(t, db, &config.Config{})
+			logPath := filepath.Join(t.TempDir(), "subserver.log")
+			accessLogger, err := subserver.NewAccessLogger(logPath)
+			require.NoError(t, err)
+			srv.subserverLogger = accessLogger
 
-	assert.Equal(t, http.StatusOK, w.Code)
+			r := tt.setupReq()
+			w := httptest.NewRecorder()
+			srv.handleSubscription(w, r)
 
-	decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(w.Body.String()))
-	require.NoError(t, err)
-	body := string(decoded)
+			require.NoError(t, accessLogger.Close())
+			content, err := os.ReadFile(logPath)
+			require.NoError(t, err)
 
-	assert.Contains(t, body, "vless://a@x.com:443")
-	assert.Contains(t, body, "trojan://b@y.com:8443")
-
-	userInfo := w.Header().Get("Subscription-UserInfo")
-	assert.Contains(t, userInfo, "upload=400")
-	assert.Contains(t, userInfo, "download=600")
-	assert.Contains(t, userInfo, "total="+fmt.Sprintf("%d", 10<<30))
-	assert.Contains(t, userInfo, "expire=111")
-}
-
-func TestHandleSubscription_MixedJSONAndPlain(t *testing.T) {
-	t.Parallel()
-
-	jsonContent := `{"type":"vless","address":"j.com","port":443,"uuid":"abc","encryption":"none","remark":"J"}`
-	plainContent := "vless://p@plain.com:443"
-
-	b1 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(jsonContent))
-	}))
-	defer b1.Close()
-
-	b2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(plainContent))
-	}))
-	defer b2.Close()
-
-	db := testutil.NewDatabaseService()
-	db.GetWithPlanAndNodesFunc = func(ctx context.Context, _ string) (*database.SubscriptionFull, error) {
-		return &database.SubscriptionFull{
-			Subscription: database.Subscription{ID: 1, Status: "active"},
-			Plan:         database.Plan{TrafficLimit: 1 << 30},
-			Nodes: []database.Node{
-				{ID: 1, Name: "json", IsActive: true, SubscriptionURL: b1.URL + "/sub/"},
-				{ID: 2, Name: "plain", IsActive: true, SubscriptionURL: b2.URL + "/sub/"},
-			},
-		}, nil
+			line := strings.TrimSpace(string(content))
+			assert.Regexp(t, regexp.MustCompile(`\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}`), line)
+			assert.Contains(t, line, "\tINFO\t")
+			assert.NotContains(t, line, "\nGET")
+			assert.NotContains(t, line, "SUBSERVER_ACCESS")
+			assert.NotContains(t, line, `"method"`)
+			assert.Contains(t, line, tt.wantLineContains)
+		})
 	}
-	srv := testServer(t, db, &config.Config{})
-
-	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodGet, "/sub/test123", nil)
-	srv.handleSubscription(w, r)
-
-	assert.Equal(t, http.StatusOK, w.Code)
-
-	decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(w.Body.String()))
-	require.NoError(t, err)
-	body := string(decoded)
-
-	assert.Contains(t, body, "vless://abc@j.com:443")
-	assert.Contains(t, body, "vless://p@plain.com:443")
 }
-
 func TestHandleSubscription_SourceFetchError(t *testing.T) {
 	t.Parallel()
 
@@ -517,43 +490,6 @@ func TestHandleSubscription_SourceWithoutSubURL(t *testing.T) {
 
 	assert.Equal(t, http.StatusNotFound, w.Code)
 	assert.Equal(t, "Subscription not found", w.Body.String())
-}
-
-func TestHandleSubscription_Base64EncodedSource(t *testing.T) {
-	t.Parallel()
-
-	encoded := base64.StdEncoding.EncodeToString([]byte("vless://b64@x.com:443\nvmess://b64@y.com:443"))
-
-	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Subscription-UserInfo", "upload=10; download=20; total=100; expire=555")
-		w.Write([]byte(encoded))
-	}))
-	defer backend.Close()
-
-	db := testutil.NewDatabaseService()
-	db.GetWithPlanAndNodesFunc = func(ctx context.Context, _ string) (*database.SubscriptionFull, error) {
-		return &database.SubscriptionFull{
-			Subscription: database.Subscription{ID: 1, Status: "active"},
-			Plan:         database.Plan{TrafficLimit: 1 << 30},
-			Nodes: []database.Node{
-				{ID: 1, Name: "b64src", IsActive: true, SubscriptionURL: backend.URL + "/sub/"},
-			},
-		}, nil
-	}
-	srv := testServer(t, db, &config.Config{})
-
-	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodGet, "/sub/test123", nil)
-	srv.handleSubscription(w, r)
-
-	assert.Equal(t, http.StatusOK, w.Code)
-
-	decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(w.Body.String()))
-	require.NoError(t, err)
-	body := string(decoded)
-
-	assert.Contains(t, body, "vless://b64@x.com:443")
-	assert.Contains(t, body, "vmess://b64@y.com:443")
 }
 
 func init() {

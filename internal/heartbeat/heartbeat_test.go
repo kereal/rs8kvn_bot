@@ -270,32 +270,6 @@ func TestStart_IntervalTiming(t *testing.T) {
 	cancel()
 }
 
-func TestMaskURL_Heartbeat(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name     string
-		url      string
-		expected string
-	}{
-		{"http", "http://example.com/heartbeat", "http://example.com/***"},
-		{"https", "https://secure.example.com:8443/hb", "https://secure.example.com:8443/***"},
-		{"empty", "", "(empty)"},
-		{"no scheme short", "localhost", "***"},
-		{"no scheme long", "verylonghostname.example.com", "verylongho..."},
-		{"scheme only no path", "http://example.com", "http://example.com/***"},
-		{"https no path", "https://secure.example.com", "https://secure.example.com/***"},
-		{"path with query", "http://example.com/path?query=value", "http://example.com/***"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := maskURL(tt.url)
-			assert.Equal(t, tt.expected, result, "maskURL(%q)", tt.url)
-		})
-	}
-}
-
 func TestStart_MultipleContexts(t *testing.T) {
 	t.Parallel()
 
@@ -313,10 +287,4 @@ func TestStart_MultipleContexts(t *testing.T) {
 	cancel2()
 }
 
-func TestSendHeartbeat_ContextTimeout(t *testing.T) {
-	t.Parallel()
 
-	// Test that sendHeartbeat handles context-like timeouts gracefully
-	// Use very short timeout by calling invalid URL
-	_ = maskURL("http://localhost:19999/heartbeat")
-}

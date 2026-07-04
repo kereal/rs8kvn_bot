@@ -13,6 +13,7 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/interfaces"
 	"github.com/kereal/rs8kvn_bot/internal/service"
+	"github.com/kereal/rs8kvn_bot/internal/testutil"
 	"github.com/kereal/rs8kvn_bot/internal/web"
 	"github.com/kereal/rs8kvn_bot/internal/xui"
 
@@ -85,99 +86,108 @@ func TestE2E_ShareLink_InvalidCode(t *testing.T) {
 	assert.Contains(t, env.botAPI.LastSentText, "Привет", "Should show normal menu for invalid code")
 }
 
-func TestE2E_InviteLink_CreatesTrial(t *testing.T) {
-	env := setupE2EEnv(t)
-	defer env.db.Close()
-
-	ctx := context.Background()
-
-	inviteCode := "invite_test_abc"
-	_, err := env.db.GetOrCreateInvite(ctx, 200001, inviteCode)
-	require.NoError(t, err)
-
+func setupInviteServer(t *testing.T, env *e2eTestEnv, inviteCode string, xuiSetup func(*testutil.XUIClient)) (*web.Server, *service.SubscriptionService) {
+	t.Helper()
 	env.cfg.TrialRateLimit = 100
-
 	xuiClients := map[uint]interfaces.XUIClient{1: env.xui}
+	if xuiSetup != nil {
+		xuiSetup(env.xui)
+	}
 	nodes := []database.Node{{Name: "main", Host: "https://panel.example.com", APIToken: "test-api-token", InboundIDs: "[1]", IsActive: true, ID: 1}}
 	subService := service.NewSubscriptionService(env.db, xuiClients, nil, nodes, env.cfg)
 	srv := web.NewServer("127.0.0.1:0", env.db, env.cfg, env.botConfig.Username, subService, nil)
-
-	req := httptest.NewRequest("GET", "/i/"+inviteCode, nil)
-	req.Header.Set("X-Forwarded-For", "10.1.1.1")
-	rec := httptest.NewRecorder()
-
-	srv.HandleInvite(rec, req)
-
-	assert.Equal(t, http.StatusOK, rec.Code)
-
-	html := rec.Body.String()
-	assert.Contains(t, html, "trial_", "Should contain trial activation link")
-	assert.Contains(t, html, "https://t.me/", "Should contain Telegram link")
-
-	allSubs, err := env.db.GetAllSubscriptions(ctx)
-	require.NoError(t, err)
-	trialPlan, err := env.db.GetPlanByName(ctx, database.TrialPlanName)
-	require.NoError(t, err)
-	trialCount := 0
-	for _, sub := range allSubs {
-		if sub.PlanID == trialPlan.ID {
-			trialCount++
-		}
-	}
-	assert.Equal(t, 1, trialCount, "Trial subscription should be created in DB")
-	assert.True(t, env.xui.AddClientWithIDCalled, "XUI AddClientWithID should be called")
+	return srv, subService
 }
 
-func TestE2E_InviteLink_InvalidCode(t *testing.T) {
-	env := setupE2EEnv(t)
-	defer env.db.Close()
+func TestE2E_InviteLink_Parameterized(t *testing.T) {
+	t.Parallel()
 
-	env.cfg.TrialRateLimit = 100
-
-	xuiClients := map[uint]interfaces.XUIClient{1: env.xui}
-	nodes := []database.Node{{Name: "main", Host: "https://panel.example.com", APIToken: "test-api-token", InboundIDs: "[1]", IsActive: true, ID: 1}}
-	subService := service.NewSubscriptionService(env.db, xuiClients, nil, nodes, env.cfg)
-	srv := web.NewServer("127.0.0.1:0", env.db, env.cfg, env.botConfig.Username, subService, nil)
-
-	req := httptest.NewRequest("GET", "/i/nonexistent_code", nil)
-	req.Header.Set("X-Forwarded-For", "10.1.2.1")
-	rec := httptest.NewRecorder()
-
-	srv.HandleInvite(rec, req)
-
-	assert.Equal(t, http.StatusNotFound, rec.Code)
-	assert.Contains(t, rec.Body.String(), "Приглашение не найдено", "Should show invite not found error")
-}
-
-func TestE2E_InviteLink_XuiLoginFails(t *testing.T) {
-	env := setupE2EEnv(t)
-	defer env.db.Close()
-
-	ctx := context.Background()
-
-	inviteCode := "invite_xui_fail"
-	_, err := env.db.GetOrCreateInvite(ctx, 200003, inviteCode)
-	require.NoError(t, err)
-
-	env.cfg.TrialRateLimit = 100
-
-	env.xui.AddClientWithIDFunc = func(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
-		return nil, fmt.Errorf("authentication failed")
+	tests := []struct {
+		name         string
+		inviteCode   string
+		referrerID   int64
+		setupXUI     func(*testutil.XUIClient)
+		createInvite bool
+		wantStatus   int
+		wantContains string
+		check        func(*testing.T, *e2eTestEnv, *httptest.ResponseRecorder)
+	}{
+		{
+			name:         "creates_trial",
+			inviteCode:   "invite_test_abc",
+			referrerID:   200001,
+			setupXUI:     nil,
+			createInvite: true,
+			wantStatus:   http.StatusOK,
+			wantContains: "trial_",
+			check: func(t *testing.T, env *e2eTestEnv, rec *httptest.ResponseRecorder) {
+				ctx := context.Background()
+				trialPlan, err := env.db.GetPlanByName(ctx, database.TrialPlanName)
+				require.NoError(t, err)
+				allSubs, err := env.db.GetAllSubscriptions(ctx)
+				require.NoError(t, err)
+				trialCount := 0
+				for _, sub := range allSubs {
+					if sub.PlanID == trialPlan.ID {
+						trialCount++
+					}
+				}
+				assert.Equal(t, 1, trialCount, "Trial subscription should be created in DB")
+				assert.True(t, env.xui.AddClientWithIDCalled, "XUI AddClientWithID should be called")
+			},
+		},
+		{
+			name:         "invalid_code",
+			inviteCode:   "nonexistent_code",
+			referrerID:   0,
+			setupXUI:     nil,
+			createInvite: false,
+			wantStatus:   http.StatusNotFound,
+			wantContains: "Приглашение не найдено",
+			check:        nil,
+		},
+		{
+			name:     "xui_error",
+			inviteCode: "invite_xui_fail",
+			referrerID: 200003,
+			setupXUI: func(xuiClient *testutil.XUIClient) {
+				xuiClient.AddClientWithIDFunc = func(ctx context.Context, inboundIDs []int, email, clientID, subId string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
+					return nil, fmt.Errorf("authentication failed")
+				}
+			},
+			createInvite: true,
+			wantStatus:   http.StatusInternalServerError,
+			wantContains: "Ошибка сервера",
+			check:        nil,
+		},
 	}
 
-	xuiClients := map[uint]interfaces.XUIClient{1: env.xui}
-	nodes := []database.Node{{Name: "main", Host: "https://panel.example.com", APIToken: "test-api-token", InboundIDs: "[1]", IsActive: true, ID: 1}}
-	subService := service.NewSubscriptionService(env.db, xuiClients, nil, nodes, env.cfg)
-	srv := web.NewServer("127.0.0.1:0", env.db, env.cfg, env.botConfig.Username, subService, nil)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env := setupE2EEnv(t)
+			defer env.db.Close()
 
-	req := httptest.NewRequest("GET", "/i/"+inviteCode, nil)
-	req.Header.Set("X-Forwarded-For", "10.1.3.1")
-	rec := httptest.NewRecorder()
+			ctx := context.Background()
+			if tt.createInvite {
+				_, err := env.db.GetOrCreateInvite(ctx, tt.referrerID, tt.inviteCode)
+				require.NoError(t, err)
+			}
 
-	srv.HandleInvite(rec, req)
+			srv, _ := setupInviteServer(t, env, tt.inviteCode, tt.setupXUI)
 
-	assert.Equal(t, http.StatusInternalServerError, rec.Code)
-	assert.Contains(t, rec.Body.String(), "Ошибка сервера", "Should show server error")
+			req := httptest.NewRequest("GET", "/i/"+tt.inviteCode, nil)
+			req.Header.Set("X-Forwarded-For", "10.1.1.1")
+			rec := httptest.NewRecorder()
+
+			srv.HandleInvite(rec, req)
+
+			assert.Equal(t, tt.wantStatus, rec.Code)
+			assert.Contains(t, rec.Body.String(), tt.wantContains)
+			if tt.check != nil {
+				tt.check(t, env, rec)
+			}
+		})
+	}
 }
 
 func TestE2E_AutoRelogin_On401(t *testing.T) {

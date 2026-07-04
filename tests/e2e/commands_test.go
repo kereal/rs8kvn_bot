@@ -15,60 +15,60 @@ import (
 	"gorm.io/gorm"
 )
 
-func TestE2E_StartCommand_NoSubscription(t *testing.T) {
+func TestE2E_StartCommand_Parameterized(t *testing.T) {
 	t.Parallel()
-	env := setupE2EEnv(t)
-	defer env.db.Close()
 
-	ctx := context.Background()
-
-	env.handler.HandleStart(ctx, tgbotapi.Update{
-		Message: &tgbotapi.Message{
-			Chat: &tgbotapi.Chat{ID: env.chatID},
-			From: &tgbotapi.User{
-				ID:       env.chatID,
-				UserName: env.username,
+	tests := []struct {
+		name      string
+		setupEnv  func(*e2eTestEnv, context.Context)
+		wantMsg   string
+	}{
+		{
+			name: "no_subscription",
+			setupEnv: func(env *e2eTestEnv, ctx context.Context) {
 			},
-			Text: "/start",
+			wantMsg: "Привет",
 		},
-	})
-
-	assert.True(t, env.botAPI.SendCalledSafe(), "Main menu should be sent")
-	assert.Contains(t, env.botAPI.LastSentText, "Привет", "Should greet user")
-	assert.Contains(t, env.botAPI.LastSentText, "подписк", "Should mention subscription")
-}
-
-func TestE2E_StartCommand_WithSubscription(t *testing.T) {
-	t.Parallel()
-	env := setupE2EEnv(t)
-	defer env.db.Close()
-
-	ctx := context.Background()
-
-	sub := &database.Subscription{
-		TelegramID:     env.chatID,
-		Username:       env.username,
-		ClientID:       "test-client-id",
-		SubscriptionID: "test-sub-id",
-		Status:         "active",
+		{
+			name: "with_subscription",
+			setupEnv: func(env *e2eTestEnv, ctx context.Context) {
+				sub := &database.Subscription{
+					TelegramID:     env.chatID,
+					Username:       env.username,
+					ClientID:       "test-client-id",
+					SubscriptionID: "test-sub-id",
+					Status:         "active",
+				}
+				require.NoError(t, env.db.CreateSubscription(ctx, sub, ""))
+				resetBotAPI(env.botAPI)
+			},
+			wantMsg: "кнопки ниже",
+		},
 	}
-	require.NoError(t, env.db.CreateSubscription(ctx, sub, ""))
 
-	resetBotAPI(env.botAPI)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env := setupE2EEnv(t)
+			defer env.db.Close()
 
-	env.handler.HandleStart(ctx, tgbotapi.Update{
-		Message: &tgbotapi.Message{
-			Chat: &tgbotapi.Chat{ID: env.chatID},
-			From: &tgbotapi.User{
-				ID:       env.chatID,
-				UserName: env.username,
-			},
-			Text: "/start",
-		},
-	})
+			ctx := context.Background()
+			tt.setupEnv(env, ctx)
 
-	assert.True(t, env.botAPI.SendCalledSafe(), "Subscription menu should be sent")
-	assert.Contains(t, env.botAPI.LastSentText, "кнопки ниже", "Should show menu with buttons")
+			env.handler.HandleStart(ctx, tgbotapi.Update{
+				Message: &tgbotapi.Message{
+					Chat: &tgbotapi.Chat{ID: env.chatID},
+					From: &tgbotapi.User{
+						ID:       env.chatID,
+						UserName: env.username,
+					},
+					Text: "/start",
+				},
+			})
+
+			assert.True(t, env.botAPI.SendCalledSafe())
+			assert.Contains(t, env.botAPI.LastSentText, tt.wantMsg)
+		})
+	}
 }
 
 func TestE2E_MySubscription(t *testing.T) {

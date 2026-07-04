@@ -19,60 +19,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// newTestAdminHandler creates a Handler with a stub SubscriptionService
-// wired to the provided mock objects. This eliminates the repeated two-line
-// pattern of NewHandler + subscriptionService assignment across all admin tests.
-func newTestAdminHandler(cfg *config.Config, mockDB *testutil.DatabaseService, mockXUI *testutil.XUIClient, mockBot *testutil.BotAPI) *Handler {
-	h := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
-	xuiClients := map[uint]interfaces.XUIClient{1: mockXUI}
-	nodes := []database.Node{{ID: 1, IsActive: true, Host: "http://localhost:2053", APIToken: "test-token", InboundIDs: "[1]", SubscriptionURL: "http://example.com/sub/"}}
-	h.subscriptionService = service.NewSubscriptionService(mockDB, xuiClients, nil, nodes, cfg)
-	// Wire cache invalidation for tests that manually set subscriptionService
-	h.subscriptionService.SetInvalidateFunc(h.cache.Invalidate)
-	return h
-}
-
-// createCommandUpdate creates an Update with a command message.
-// This is needed because CommandArguments() requires the Message to have
-// a bot_command entity set.
-func createCommandUpdate(chatID int64, from *tgbotapi.User, text string) tgbotapi.Update {
-	// Find the command in the text (first word starting with /)
-	cmdLen := 0
-	for _, ch := range text {
-		if ch == ' ' {
-			break
-		}
-		if ch == '/' {
-			cmdLen = 0
-		}
-		cmdLen++
-	}
-	if cmdLen == 0 {
-		cmdLen = len(text)
-	}
-
-	// Create entity for the command
-	entities := []tgbotapi.MessageEntity{}
-	if cmdLen > 0 && len(text) > 0 && text[0] == '/' {
-		entities = append(entities, tgbotapi.MessageEntity{
-			Type:   "bot_command",
-			Offset: 0,
-			Length: cmdLen,
-		})
-	}
-
-	return tgbotapi.Update{
-		Message: &tgbotapi.Message{
-			Chat:     &tgbotapi.Chat{ID: chatID},
-			From:     from,
-			Text:     text,
-			Entities: entities,
-		},
-	}
-}
-
 func TestHandleDel_NonAdminUser(t *testing.T) {
-	t.Parallel()
 
 	cfg := &config.Config{
 		TelegramAdminID: 999999,

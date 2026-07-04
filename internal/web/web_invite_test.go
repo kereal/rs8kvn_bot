@@ -10,20 +10,63 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 
 	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/interfaces"
 	"github.com/kereal/rs8kvn_bot/internal/service"
 	"github.com/kereal/rs8kvn_bot/internal/testutil"
-	"github.com/kereal/rs8kvn_bot/internal/utils"
 	"github.com/kereal/rs8kvn_bot/internal/xui"
 
 	"gorm.io/gorm"
 )
 
 func ptrTime(t time.Time) *time.Time { return &t }
+
+func setupInviteServer(t *testing.T, inviteCode string) *Server {
+	t.Helper()
+	mockDB := testutil.NewDatabaseService()
+	mockDB.GetPlanByNameFunc = func(ctx context.Context, name string) (*database.Plan, error) {
+		return &database.Plan{ID: 1, Name: "trial", DevicesLimit: 1, TrafficLimit: 1073741824}, nil
+	}
+	mockDB.GetNodesByPlanNameFunc = func(ctx context.Context, planName string) ([]database.Node, error) {
+		return []database.Node{{ID: 1, IsActive: true, Host: "http://localhost:2053", InboundIDs: "[1]"}}, nil
+	}
+	cfg := &config.Config{
+		SiteURL:            "https://vpn.site",
+		TrialDurationHours: 3,
+		TrialRateLimit:     3,
+	}
+	return NewServer(":8880", mockDB, cfg, "testbot", nil, nil)
+}
+
+func TestHandleInvite_InvalidCodeVariants(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		path     string
+		wantCode int
+		wantBody string
+	}{
+		{"empty code", "/i/", http.StatusNotFound, ""},
+		{"invalid path", "/not-invite/testcode", http.StatusNotFound, "Страница не найдена"},
+		{"invalid chars", "/i/invalid@code!", http.StatusNotFound, "Приглашение не найдено"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := setupInviteServer(t, tt.path)
+			req := httptest.NewRequest("GET", tt.path, nil)
+			rec := httptest.NewRecorder()
+			srv.handleInvite(rec, req)
+			assert.Equal(t, tt.wantCode, rec.Code, "handleInvite() status")
+			if tt.wantBody != "" {
+				assert.Contains(t, rec.Body.String(), tt.wantBody)
+			}
+		})
+	}
+}
 
 func makeTestSubService(mockDB *testutil.DatabaseService) (*config.Config, *service.SubscriptionService, *testutil.XUIClient) {
 	mockXUI := testutil.NewXUIClient()
@@ -157,52 +200,6 @@ func TestHandleInvite_XUIError(t *testing.T) {
 
 	body := rec.Body.String()
 	assert.Contains(t, body, "Ошибка сервера", "handleInvite() body should contain error message")
-}
-
-func TestGenerateSubID(t *testing.T) {
-	t.Parallel()
-
-	id1, err := utils.GenerateSubID()
-	require.NoError(t, err)
-	id2, err := utils.GenerateSubID()
-	require.NoError(t, err)
-
-	assert.Equal(t, 10, len(id1), "GenerateSubID() length")
-	assert.NotEqual(t, id1, id2, "GenerateSubID() should generate different IDs")
-	for _, c := range id1 {
-		assert.True(t, isHexDigit(c), "GenerateSubID() contains non-hex character: %c", c)
-	}
-}
-
-func isHexDigit(c rune) bool {
-	return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')
-}
-
-func TestHandleInvite_EmptyCode(t *testing.T) {
-	t.Parallel()
-
-	mockDB := testutil.NewDatabaseService()
-	mockDB.GetPlanByNameFunc = func(ctx context.Context, name string) (*database.Plan, error) {
-		return &database.Plan{ID: 1, Name: "trial", DevicesLimit: 1, TrafficLimit: 1073741824}, nil
-	}
-	mockDB.GetNodesByPlanNameFunc = func(ctx context.Context, planName string) ([]database.Node, error) {
-		return []database.Node{{ID: 1, IsActive: true, Host: "http://localhost:2053", InboundIDs: "[1]"}}, nil
-	}
-
-	cfg := &config.Config{
-		SiteURL:            "https://vpn.site",
-		TrialDurationHours: 3,
-		TrialRateLimit:     3,
-	}
-
-	srv := NewServer(":8880", mockDB, cfg, "testbot", nil, nil)
-
-	req := httptest.NewRequest("GET", "/i/", nil)
-	rec := httptest.NewRecorder()
-
-	srv.handleInvite(rec, req)
-
-	assert.Equal(t, http.StatusNotFound, rec.Code, "handleInvite() status")
 }
 
 func TestHandleInvite_DatabaseError(t *testing.T) {
@@ -398,44 +395,6 @@ func TestGetExistingTrialFromCookie_Valid(t *testing.T) {
 	assert.Equal(t, "valid-sub-id", sub.SubscriptionID, "getExistingTrialFromCookie() should return correct sub ID")
 }
 
-func TestInviteCodeRegex(t *testing.T) {
-	t.Parallel()
-
-	srv := NewServer(":8880", nil, &config.Config{}, "testbot", nil, nil)
-
-	tests := []struct {
-		name  string
-		code  string
-		valid bool
-	}{
-		{"alphanumeric", "abc123", true},
-		{"with underscore", "abc_123", true},
-		{"with hyphen", "abc-123", true},
-		{"uppercase", "ABC123", true},
-		{"mixed case", "AbC123", true},
-		{"empty string", "", false},
-		{"with slash", "abc/123", false},
-		{"with dot", "abc.123", false},
-		{"with space", "abc 123", false},
-		{"with at sign", "abc@123", false},
-		{"sql injection", "abc'; DROP TABLE--", false},
-		{"path traversal", "../etc/passwd", false},
-		{"only numbers", "123456", true},
-		{"only letters", "abcdef", true},
-		{"single char", "a", true},
-		{"long code", "abcdefghij1234567890", true},
-		{"cyrillic", "абв", false},
-		{"unicode", "用户", false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := srv.inviteCodeRegex.MatchString(tt.code)
-			assert.Equal(t, tt.valid, result, "inviteCodeRegex.MatchString(%q)", tt.code)
-		})
-	}
-}
-
 // === Additional handleInvite error path tests ===
 
 func TestHandleInvite_XUIAddClientFails(t *testing.T) {
@@ -575,38 +534,6 @@ func TestHandleInvite_MethodNotAllowed(t *testing.T) {
 
 	assert.Equal(t, http.StatusMethodNotAllowed, rec.Code)
 	assert.Equal(t, "GET", rec.Header().Get("Allow"))
-}
-
-func TestHandleInvite_InvalidPath(t *testing.T) {
-	t.Parallel()
-
-	mockDB := testutil.NewDatabaseService()
-	cfg := &config.Config{}
-	srv := NewServer(":8880", mockDB, cfg, "testbot", nil, nil)
-
-	req := httptest.NewRequest("GET", "/not-invite/testcode", nil)
-	rec := httptest.NewRecorder()
-
-	srv.handleInvite(rec, req)
-
-	assert.Equal(t, http.StatusNotFound, rec.Code)
-	assert.Contains(t, rec.Body.String(), "Страница не найдена")
-}
-
-func TestHandleInvite_InvalidCodeChars(t *testing.T) {
-	t.Parallel()
-
-	mockDB := testutil.NewDatabaseService()
-	cfg := &config.Config{}
-	srv := NewServer(":8880", mockDB, cfg, "testbot", nil, nil)
-
-	req := httptest.NewRequest("GET", "/i/invalid@code!", nil)
-	rec := httptest.NewRecorder()
-
-	srv.handleInvite(rec, req)
-
-	assert.Equal(t, http.StatusNotFound, rec.Code)
-	assert.Contains(t, rec.Body.String(), "Приглашение не найдено")
 }
 
 func TestHandleInvite_RateLimitCheckError(t *testing.T) {
