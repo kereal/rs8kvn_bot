@@ -174,7 +174,7 @@ func (s *Service) CountExpiredSubscriptions(ctx context.Context) (int64, error) 
 	var count int64
 	result := s.db.WithContext(ctx).
 		Model(&Subscription{}).
-		Where("expires_at <= ?", time.Now()).
+		Where("expires_at <= ?", time.Now().UTC()).
 		Count(&count)
 	if result.Error != nil {
 		return 0, fmt.Errorf("failed to count expired subscriptions: %w", result.Error)
@@ -274,6 +274,24 @@ func (s *Service) UpdateIPs(ctx context.Context, id uint, ipsJSON string) error 
 	result := s.db.WithContext(ctx).Model(&Subscription{}).Where("id = ?", id).Update("ips", ipsJSON)
 	if result.Error != nil {
 		return fmt.Errorf("failed to update subscription ips: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return ErrSubscriptionNotFound
+	}
+	return nil
+}
+
+// UpdateLastRequest обновляет колонку last_request текущим временем
+// для подписки, идентифицированной строковым subscription_id.
+// Используется субсервером при каждом запросе клиента (best-effort):
+// ошибки логируются вызывающим кодом и не блокируют выдачу подписки.
+func (s *Service) UpdateLastRequest(ctx context.Context, subscriptionID string) error {
+	now := time.Now().UTC()
+	result := s.db.WithContext(ctx).Model(&Subscription{}).
+		Where("subscription_id = ?", subscriptionID).
+		Update("last_request", now)
+	if result.Error != nil {
+		return fmt.Errorf("failed to update subscription last_request: %w", result.Error)
 	}
 	if result.RowsAffected == 0 {
 		return ErrSubscriptionNotFound

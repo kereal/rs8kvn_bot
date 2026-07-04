@@ -314,7 +314,7 @@ All tests pass with `-race` detector. Fuzzing enabled for critical functions.
 - **Orders:** `orders` table tracks payment lifecycle: pending → paid → expired/canceled. Statuses enforced via CHECK constraint. 30-minute expiry window for unpaid invoices.
 - **Nodes:** `nodes` table stores VPN panel sources (host, api_token, inbound_ids, type, subscription_url). Seeded from env vars on first run.
 - **Plans:** `plans` table (name, devices_limit, traffic_limit), `plan_nodes` M2M join, `products` (duration, price), `subscription_nodes` (sync state machine: active/pending_add/pending_remove/pending_update)
-- **Devices tracking:** `subscriptions.devices` column stores JSON array of client request header maps (HWID, Device-OS, etc.). `ips` column stores IP→timestamp entries.
+- **Devices tracking:** `subscriptions.devices` column stores JSON array of client request header maps (HWID, Device-OS, etc.). `ips` column stores IP→timestamp entries. `last_request` column (*time, indexed) records the last time a client fetched its subscription via `/sub/{id}` (best-effort, updated on both cache hit and cache miss).
 
 ### Configuration
 - **Required:** `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ADMIN_ID` (must be positive), `GLOBAL_SUB_URL` (required, builds sub URLs)

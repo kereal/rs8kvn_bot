@@ -85,12 +85,16 @@ type SubscriptionJSONFields interface {
 	UpdateIPs(ctx context.Context, id uint, ipsJSON string) error
 }
 
+// SubscriptionLastRequest updates the last_request timestamp on subscriptions.
+type SubscriptionLastRequest interface {
+	UpdateLastRequest(ctx context.Context, subscriptionID string) error
+}
+
 // SubscriptionLookup provides methods for external subscription ID lookups.
 type SubscriptionLookup interface {
 	GetSubscription(ctx context.Context, subscriptionID string) (*database.Subscription, error)
 	GetWithPlanAndNodes(ctx context.Context, subscriptionID string) (*database.SubscriptionFull, error)
 }
-
 // SubscriptionRepository combines all subscription interfaces.
 type SubscriptionRepository interface {
 	SubscriptionCRUD
@@ -98,6 +102,7 @@ type SubscriptionRepository interface {
 	SubscriptionCounts
 	SubscriptionStatus
 	SubscriptionJSONFields
+	SubscriptionLastRequest
 	SubscriptionLookup
 }
 

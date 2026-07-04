@@ -201,9 +201,9 @@ Returns the merged subscription configuration aggregated from **all active nodes
 **Query Parameters:** None
 
 **Flow:**
-1. Check the per-`subID` response cache (240s TTL). On hit, verify the subscription is still active via a cheap status lookup; invalidate stale entries.
+1. Check the per-`subID` response cache (240s TTL). On hit, verify the subscription is still active via a cheap status lookup; invalidate stale entries. On successful hit (active subscription), update `subscriptions.last_request` (best-effort) — not updated when the entry is invalidated as revoked/expired.
 2. On cache miss, load the subscription with its plan and active node sources (`db.GetWithPlanAndNodes`).
-3. Track the requesting device (HWID, Device-OS, Ver-OS, Device-Model from request headers) and client IP.
+3. Track the requesting device (HWID, Device-OS, Ver-OS, Device-Model from request headers) and client IP. Update `subscriptions.last_request` (best-effort).
 4. For each active node source, fetch the upstream subscription URL. Request headers are filtered via `subserver.FilterHeaders` (excludes `X-Forwarded-Proto`, `X-Forwarded-For`, `X-Real-Ip`).
 5. Detect format (JSON / Base64 / plain), convert JSON configs to share links if mixed mode detected.
 6. Aggregate `subscription-userinfo` headers across all sources.
