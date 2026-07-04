@@ -954,30 +954,20 @@ func (s *SubscriptionService) RenewSubscription(ctx context.Context, telegramID 
 		if planChanged {
 			newNodes, err := s.db.GetNodesByPlanID(ctx, sub.PlanID)
 			if err != nil {
-				logger.Warn("renew subscription: post-commit sync setup failed",
-					zap.Uint("subscription_id", sub.ID),
-					zap.Uint("product_id", product.ID),
-					zap.Error(err))
-				return order, nil
+				return order, fmt.Errorf("renew subscription: load plan nodes: %w", err)
 			}
 			var newNodeIDs []uint
 			for _, n := range newNodes {
-				newNodeIDs = append(newNodeIDs, n.ID)
+				if n.IsActive {
+					newNodeIDs = append(newNodeIDs, n.ID)
+				}
 			}
 			if err := s.db.MarkActiveNodesPendingUpdate(ctx, sub.ID, newNodeIDs); err != nil {
-				logger.Warn("renew subscription: post-commit node update scheduling failed",
-					zap.Uint("subscription_id", sub.ID),
-					zap.Uint("product_id", product.ID),
-					zap.Error(err))
-				return order, nil
+				return order, fmt.Errorf("renew subscription: schedule node updates: %w", err)
 			}
 
 			if err := s.syncService.ReconcilePlanNodes(ctx, sub.ID); err != nil {
-				logger.Warn("renew subscription: post-commit reconcile failed",
-					zap.Uint("subscription_id", sub.ID),
-					zap.Uint("product_id", product.ID),
-					zap.Error(err))
-				return order, nil
+				return order, fmt.Errorf("renew subscription: reconcile plan nodes: %w", err)
 			}
 		}
 

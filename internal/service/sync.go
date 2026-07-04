@@ -133,6 +133,9 @@ func (s *SyncService) reconcilePlanNodesLocked(ctx context.Context, subscription
 	}
 
 	for _, target := range targetNodes {
+		if !target.IsActive {
+			continue
+		}
 		if _, exists := currentActive[target.ID]; exists {
 			continue
 		}

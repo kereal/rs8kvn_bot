@@ -73,10 +73,14 @@ func TestSyncService_ReconcilePlanNodes_AddMissing(t *testing.T) {
 
 	node1 := &database.Node{Name: "rec-node-1", IsActive: true, Host: "http://r1", APIToken: "t1", InboundIDs: `[1]`}
 	node2 := &database.Node{Name: "rec-node-2", IsActive: true, Host: "http://r2", APIToken: "t2", InboundIDs: `[1]`}
+	node3 := &database.Node{Name: "rec-node-3", IsActive: false, Host: "http://r3", APIToken: "t3", InboundIDs: `[1]`}
 	require.NoError(t, db.GetDB().WithContext(ctx).Create(node1).Error)
 	require.NoError(t, db.GetDB().WithContext(ctx).Create(node2).Error)
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(node3).Error)
+	require.NoError(t, db.GetDB().WithContext(ctx).Model(node3).Update("is_active", false).Error)
 	require.NoError(t, db.GetDB().WithContext(ctx).Create(&database.PlanNode{PlanID: plan.ID, NodeID: node1.ID}).Error)
 	require.NoError(t, db.GetDB().WithContext(ctx).Create(&database.PlanNode{PlanID: plan.ID, NodeID: node2.ID}).Error)
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(&database.PlanNode{PlanID: plan.ID, NodeID: node3.ID}).Error)
 
 	sub := &database.Subscription{
 		TelegramID:     1111,
@@ -90,7 +94,7 @@ func TestSyncService_ReconcilePlanNodes_AddMissing(t *testing.T) {
 	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusActive}))
 
-	svc := newTestSyncService(t, db, []database.Node{*node1, *node2})
+	svc := newTestSyncService(t, db, []database.Node{*node1, *node2, *node3})
 	require.NoError(t, svc.ReconcilePlanNodes(ctx, sub.ID))
 
 	rows, err := db.GetBySubscriptionID(ctx, sub.ID)
@@ -103,6 +107,7 @@ func TestSyncService_ReconcilePlanNodes_AddMissing(t *testing.T) {
 	}
 	assert.Equal(t, database.SyncStatusActive, statusMap[node1.ID])
 	assert.Equal(t, database.SyncStatusPendingAdd, statusMap[node2.ID])
+	assert.Empty(t, statusMap[node3.ID])
 }
 
 func TestSyncService_ReconcilePlanNodes_RemoveExtra(t *testing.T) {
