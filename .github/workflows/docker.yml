@@ -21,7 +21,7 @@ jobs:
         runs-on: ubuntu-latest
         steps:
             - name: Checkout repository
-              uses: actions/checkout@v6
+              uses: actions/checkout@v7
               with:
                 persist-credentials: false  # предотвращает утечку GITHUB_TOKEN в последующие шаги и PR из форков
 
@@ -63,7 +63,7 @@ jobs:
 
         steps:
             - name: Checkout repository
-              uses: actions/checkout@v6
+              uses: actions/checkout@v7
               with:
                 persist-credentials: false  # предотвращает утечку GITHUB_TOKEN в последующие шаги и PR из форков
 
@@ -124,7 +124,7 @@ jobs:
 
         steps:
             - name: Checkout repository
-              uses: actions/checkout@v6
+              uses: actions/checkout@v7
               with:
                   fetch-depth: 0
                   persist-credentials: false  # предотвращает утечку GITHUB_TOKEN в последующие шаги и PR из форков
