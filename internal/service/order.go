@@ -110,30 +110,20 @@ func (o *OrderService) ActivateProduct(ctx context.Context, telegramID int64, pr
 	if planChanged && o.syncSvc != nil {
 		newNodes, err := o.db.GetNodesByPlanID(ctx, sub.PlanID)
 		if err != nil {
-			logger.Warn("activate product: post-commit sync setup failed",
-				zap.Uint("subscription_id", sub.ID),
-				zap.Uint("product_id", product.ID),
-				zap.Error(err))
-			return order, nil
+			return order, fmt.Errorf("activate product: load plan nodes: %w", err)
 		}
 		var newNodeIDs []uint
 		for _, n := range newNodes {
-			newNodeIDs = append(newNodeIDs, n.ID)
+			if n.IsActive {
+				newNodeIDs = append(newNodeIDs, n.ID)
+			}
 		}
 		if err := o.db.MarkActiveNodesPendingUpdate(ctx, sub.ID, newNodeIDs); err != nil {
-			logger.Warn("activate product: post-commit node update scheduling failed",
-				zap.Uint("subscription_id", sub.ID),
-				zap.Uint("product_id", product.ID),
-				zap.Error(err))
-			return order, nil
+			return order, fmt.Errorf("activate product: schedule node updates: %w", err)
 		}
 
 		if err := o.syncSvc.ReconcilePlanNodes(ctx, sub.ID); err != nil {
-			logger.Warn("activate product: post-commit reconcile failed",
-				zap.Uint("subscription_id", sub.ID),
-				zap.Uint("product_id", product.ID),
-				zap.Error(err))
-			return order, nil
+			return order, fmt.Errorf("activate product: reconcile plan nodes: %w", err)
 		}
 		if err := o.syncSvc.SyncSubscription(ctx, sub.ID); err != nil {
 			logger.Warn("activate product: post-commit sync failed",

@@ -360,7 +360,7 @@ func TestSubscriptionService_RenewSubscription_UsesDatabaseServiceInterface(t *t
 	assert.Equal(t, database.OrderStatusPaid, order.Status)
 }
 
-func TestSubscriptionService_RenewSubscription_PostCommitSyncSetupFailureStillSucceeds(t *testing.T) {
+func TestSubscriptionService_RenewSubscription_SyncSetupFailureReturnsError(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{}
@@ -401,7 +401,7 @@ func TestSubscriptionService_RenewSubscription_PostCommitSyncSetupFailureStillSu
 
 	order, err := svc.RenewSubscription(context.Background(), sub.TelegramID, product)
 
-	require.NoError(t, err)
+	require.ErrorContains(t, err, "renew subscription: load plan nodes")
 	assert.True(t, transactionCalled)
 	assert.NotNil(t, order)
 	assert.Equal(t, database.OrderStatusPaid, order.Status)

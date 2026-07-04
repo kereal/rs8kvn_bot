@@ -263,7 +263,7 @@ func TestOrderService_ActivateProduct_PaidProduct_ExpiryNotModified(t *testing.T
 	assert.Equal(t, oldExpiry, *sub.ExpiresAt)
 }
 
-func TestOrderService_ActivateProduct_FreeProduct_PostCommitSyncSetupFailureStillSucceeds(t *testing.T) {
+func TestOrderService_ActivateProduct_FreeProduct_SyncSetupFailureReturnsError(t *testing.T) {
 	ctx := context.Background()
 	product := &database.Product{
 		ID: 1, PlanID: 2, Name: "Pro", DurationDays: 30,
@@ -299,7 +299,7 @@ func TestOrderService_ActivateProduct_FreeProduct_PostCommitSyncSetupFailureStil
 
 	order, err := svc.ActivateProduct(ctx, 123, product)
 
-	require.NoError(t, err)
+	require.ErrorContains(t, err, "activate product: load plan nodes")
 	assert.True(t, transactionCalled)
 	assert.NotNil(t, order)
 	assert.Equal(t, database.OrderStatusPaid, order.Status)
