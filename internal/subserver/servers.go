@@ -14,12 +14,6 @@ import (
 	"go.uber.org/zap"
 )
 
-var excludedHeaders = map[string]struct{}{
-	"x-forwarded-proto": {},
-	"x-forwarded-for":   {},
-	"x-real-ip":         {},
-}
-
 // validSchemes lists all proxy URI schemes recognised by isValidServer.
 var validSchemes = []string{
 	"vless://",
@@ -426,7 +420,7 @@ func buildTUICServerLink(cfg *serverConfig) (string, error) {
 		remark = cfg.Ps
 	}
 
-	base := fmt.Sprintf("tuic://%s:%d", cfg.Address, cfg.Port)
+	base := fmt.Sprintf("tuic://%s", net.JoinHostPort(cfg.Address, strconv.Itoa(cfg.Port)))
 	if params.Encode() != "" {
 		base += "?" + params.Encode()
 	}

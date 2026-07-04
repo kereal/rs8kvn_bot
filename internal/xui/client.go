@@ -7,8 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/rand"
-	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -49,7 +47,7 @@ type ClientConfig struct {
 	Flow      string `json:"flow,omitempty"`
 	Reset     int    `json:"reset,omitempty"`
 
-	UUID string `json:"uuid"`
+	UUID  string `json:"uuid"`
 	Group string `json:"group"`
 
 	CreatedAt int64 `json:"-"`
@@ -156,12 +154,15 @@ func (in *Inbound) GetTransport() string {
 }
 
 // GetRequiredFlow возвращает значение flow, необходимое для данного inbound.
-// Для xhttp/h2/ws/grpc/grpcs flow не требуется ("");
-// для всех остальных транспортов используется xtls-rprx-vision.
+// Для транспортов, не использующих XTLS (xhttp, hysteria2, ws, grpc, и т.д.),
+// flow не требуется (""). Fallback "xtls-rprx-vision" используется только
+// при ошибке получения inbound'а.
 func (in *Inbound) GetRequiredFlow() string {
 	transport := in.GetTransport()
 	switch transport {
-	case "xhttp", "h2", "ws", "grpc", "grpcs":
+	case "xhttp", "h2", "ws", "grpc", "grpcs",
+		"hysteria", "hysteria2", "shadowsocks", "ss2022",
+		"tuic", "wireguard", "reality", "darkertls":
 		return ""
 	default:
 		return "xtls-rprx-vision"
@@ -230,7 +231,7 @@ func (c *Client) doHTTPRequest(ctx context.Context, method, url string, bodyFn f
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return respBody, fmt.Errorf("upstream returned non-200")
+		return respBody, fmt.Errorf("upstream returned non-200: %w", ErrNon200Response)
 	}
 
 	return respBody, nil
@@ -289,8 +290,8 @@ func (c *Client) AddClient(ctx context.Context, inboundIDs []int, email string, 
 }
 
 // AddClientWithID создаёт клиента с указанными clientID и subID.
-// При наличии inboundIDs с разными требованиями к flow запрос автоматически
-// разбивается на отдельные вызовы панели, сгруппированные по совместимому flow.
+// Группирует inboundIDs по flow: для каждого уникального flow делается
+// отдельный вызов панели со всеми inboundID этого flow (минимум вызовов).
 func (c *Client) AddClientWithID(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*ClientConfig, error) {
 	if len(inboundIDs) == 0 {
 		return nil, fmt.Errorf("inbound IDs cannot be empty")
@@ -319,11 +320,11 @@ func (c *Client) AddClientWithID(ctx context.Context, inboundIDs []int, email, c
 	tgID := TgIDFromContext(ctx)
 
 	var (
-		result  *ClientConfig
+		result   *ClientConfig
 		firstErr error
 	)
 	for flow, ids := range groups {
-		errRetry := RetryWithBackoff(ctx, config.XUIMaxRetries, config.XUIInitialRetryDelay, func() error {
+		errRetry := utils.RetryWithBackoff(ctx, config.XUIMaxRetries, config.XUIInitialRetryDelay, func() error {
 			var innerErr error
 			result, innerErr = c.doAddClientWithID(ctx, ids, email, clientID, subID, trafficBytes, expiryTime, resetDays, flow, tgID)
 			return innerErr
@@ -393,7 +394,7 @@ func (c *Client) DeleteClient(ctx context.Context, email string) error {
 	if email == "" {
 		return fmt.Errorf("email cannot be empty")
 	}
-	return RetryWithBackoff(ctx, config.XUIMaxRetries, config.XUIInitialRetryDelay, func() error {
+	return utils.RetryWithBackoff(ctx, config.XUIMaxRetries, config.XUIInitialRetryDelay, func() error {
 		return c.doDeleteClient(ctx, email)
 	})
 }
@@ -426,9 +427,9 @@ func (c *Client) doDeleteClient(ctx context.Context, email string) error {
 }
 
 // UpdateClient обновляет данные клиента в панели.
-// Как и AddClientWithID, автоматически разбивает запрос на группы по flow,
-// если inboundIDs требуют разных значений flow.
-func (c *Client) UpdateClient(ctx context.Context, inboundIDs []int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, tgID int64, comment string) error {
+// Группирует inboundIDs по flow: для каждого уникального flow делается
+// отдельный вызов панели со всеми inboundID этого flow (минимум вызовов).
+func (c *Client) UpdateClient(ctx context.Context, inboundIDs []int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, resetDays int, tgID int64, comment string) error {
 	if clientID == "" {
 		return fmt.Errorf("client ID cannot be empty")
 	}
@@ -451,8 +452,8 @@ func (c *Client) UpdateClient(ctx context.Context, inboundIDs []int, currentEmai
 
 	var firstErr error
 	for flow, ids := range groups {
-		errRetry := RetryWithBackoff(ctx, config.XUIMaxRetries, config.XUIInitialRetryDelay, func() error {
-			return c.doUpdateClient(ctx, ids, currentEmail, clientID, email, subID, trafficBytes, expiryTime, tgID, comment, flow)
+		errRetry := utils.RetryWithBackoff(ctx, config.XUIMaxRetries, config.XUIInitialRetryDelay, func() error {
+			return c.doUpdateClient(ctx, ids, currentEmail, clientID, email, subID, trafficBytes, expiryTime, resetDays, tgID, comment, flow)
 		})
 		if errRetry != nil {
 			firstErr = errRetry
@@ -462,9 +463,13 @@ func (c *Client) UpdateClient(ctx context.Context, inboundIDs []int, currentEmai
 	return firstErr
 }
 
-// doUpdateClient выполняет реальный POST /panel/api/clients/update/{currentEmail}
-// с уже вычисленным flow для группы inboundIDs.
-func (c *Client) doUpdateClient(ctx context.Context, inboundIDs []int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, tgID int64, comment string, flow string) error {
+// doUpdateClient выполняет реальный POST /panel/api/clients/update/{currentEmail}.
+// Панель ожидает плоский объект клиента (без обёртки "client"/"inboundIds"),
+// поэтому тело формируется напрямую из clientObj.
+func (c *Client) doUpdateClient(ctx context.Context, inboundIDs []int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, resetDays int, tgID int64, comment string, flow string) error {
+	if resetDays < 0 {
+		resetDays = config.SubscriptionResetDay
+	}
 	clientObj := map[string]any{
 		"id":         clientID,
 		"email":      email,
@@ -474,14 +479,16 @@ func (c *Client) doUpdateClient(ctx context.Context, inboundIDs []int, currentEm
 		"enable":     true,
 		"flow":       flow,
 		"subId":      subID,
-		"reset":      config.SubscriptionResetDay,
+		"reset":      resetDays,
 		"tgId":       tgID,
 		"comment":    comment,
 	}
 
 	updateURL := fmt.Sprintf("%s/panel/api/clients/update/%s", c.host, url.PathEscape(currentEmail))
 
-	respBody, err := c.doHTTPRequest(ctx, http.MethodPost, updateURL, c.buildClientBody(clientObj, inboundIDs))
+	respBody, err := c.doHTTPRequest(ctx, http.MethodPost, updateURL, func() (io.Reader, error) {
+		return marshalJSON(clientObj)
+	})
 	if err != nil {
 		return err
 	}
@@ -505,7 +512,7 @@ func (c *Client) doUpdateClient(ctx context.Context, inboundIDs []int, currentEm
 // GetClientTraffic возвращает актуальный трафик клиента по email.
 func (c *Client) GetClientTraffic(ctx context.Context, email string) (*ClientTraffic, error) {
 	var result *ClientTraffic
-	err := RetryWithBackoff(ctx, config.XUIMaxRetries, config.XUIInitialRetryDelay, func() error {
+	err := utils.RetryWithBackoff(ctx, config.XUIMaxRetries, config.XUIInitialRetryDelay, func() error {
 		var err error
 		result, err = c.doGetClientTraffic(ctx, email)
 		return err
@@ -638,77 +645,4 @@ func truncateString(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen] + "..."
-}
-
-// isRetryable определяет, можно ли повторить запрос при данной ошибке.
-// DNS-ошибки и нерешаемые ошибки имён не ретраятся; таймауты — ретраятся.
-func isRetryable(err error) bool {
-	if err == nil {
-		return false
-	}
-	var dnsErr *net.DNSError
-	if errors.As(err, &dnsErr) {
-		return false
-	}
-	var netErr net.Error
-	if errors.As(err, &netErr) && netErr.Timeout() {
-		return true
-	}
-	msg := strings.ToLower(err.Error())
-	if strings.Contains(msg, "no such host") ||
-		strings.Contains(msg, "temporary failure in name resolution") ||
-		strings.Contains(msg, "name or service not known") ||
-		strings.Contains(msg, "nodename nor servname provided") {
-		return false
-	}
-	return true
-}
-
-// RetryWithBackoff выполняет fn с экспоненциальной задержкой до maxRetries раз.
-// Прерывается при не-retryable ошибке или отменённом контексте.
-func RetryWithBackoff(ctx context.Context, maxRetries int, initialDelay time.Duration, fn func() error) error {
-	if maxRetries <= 0 {
-		return errors.New("maxRetries must be positive")
-	}
-	if initialDelay <= 0 {
-		return errors.New("initialDelay must be positive")
-	}
-
-	var lastErr error
-	delay := initialDelay
-
-	for attempt := range maxRetries {
-		err := fn()
-		if err == nil {
-			return nil
-		}
-
-		if !isRetryable(err) {
-			logger.Error("Non-retryable XUI error, failing immediately",
-				zap.Error(err))
-			return err
-		}
-
-		lastErr = err
-
-		if attempt < maxRetries-1 {
-			logger.Debug("Retry after error",
-				zap.Int("attempt", attempt+1),
-				zap.Int("max_retries", maxRetries),
-				zap.Error(err))
-
-			select {
-			case <-time.After(delay + time.Duration(rand.Int63n(int64(delay/2)))): //nolint:gosec
-				delay *= 2
-			case <-ctx.Done():
-				return fmt.Errorf("context cancelled: %w", ctx.Err())
-			}
-		}
-	}
-
-	logger.Error("XUI operation failed after retries",
-		zap.Int("retries", maxRetries),
-		zap.Error(lastErr))
-
-	return fmt.Errorf("after %d retries: %w", maxRetries, lastErr)
 }

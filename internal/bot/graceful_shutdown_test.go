@@ -20,12 +20,12 @@ func TestBot_GracefulShutdown(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID:  123456789,
 		TelegramBotToken: "test_token",
-		Nodes:          []config.Node{{Name: "main", XUIHost: "http://localhost:2053", XUIAPIToken: "test-api-token", XUIInboundIDs: "[1]"}},
+		Nodes:            []config.Node{{Name: "main", XUIHost: "http://localhost:2053", XUIAPIToken: "test-api-token", XUIInboundIDs: "[1]"}},
 	}
 
-	mockBot := testutil.NewMockBotAPI()
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "test")
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -39,7 +39,8 @@ func TestBot_GracefulShutdown(t *testing.T) {
 
 	cancel()
 	runtime.Gosched()
-
+	runtime.GC()
+	runtime.Gosched()
 	runtime.GC()
 	var memStatsAfter runtime.MemStats
 	runtime.ReadMemStats(&memStatsAfter)
@@ -58,12 +59,12 @@ func TestServer_GracefulShutdown(t *testing.T) {
 	cfg := &config.Config{
 		TelegramBotToken: "test_token",
 		HealthCheckPort:  18880,
-		Nodes:          []config.Node{{Name: "main", XUIHost: "http://localhost:2053", XUIAPIToken: "token", XUIInboundIDs: "[1]"}},
+		Nodes:            []config.Node{{Name: "main", XUIHost: "http://localhost:2053", XUIAPIToken: "token", XUIInboundIDs: "[1]"}},
 	}
 
-	mockBot := testutil.NewMockBotAPI()
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "test")
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -154,12 +155,12 @@ func TestGracefulShutdown_WithActiveUpdates(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID:  123456789,
 		TelegramBotToken: "test_token",
-		Nodes:          []config.Node{{Name: "main", XUIHost: "http://localhost:2053", XUIAPIToken: "test-api-token", XUIInboundIDs: "[1]"}},
+		Nodes:            []config.Node{{Name: "main", XUIHost: "http://localhost:2053", XUIAPIToken: "test-api-token", XUIInboundIDs: "[1]"}},
 	}
 
-	mockBot := testutil.NewMockBotAPI()
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "test")
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -176,7 +177,7 @@ func TestGracefulShutdown_WithActiveUpdates(t *testing.T) {
 func TestGracefulShutdown_DatabaseClose(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewMockDatabaseService()
+	mockDB := testutil.NewDatabaseService()
 
 	err := mockDB.Close()
 	require.NoError(t, err, "Database should close without error")
@@ -191,12 +192,12 @@ func TestGracefulShutdown_RateLimiterCleanup(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID:  123456789,
 		TelegramBotToken: "test_token",
-		Nodes:          []config.Node{{Name: "main", XUIHost: "http://localhost:2053", XUIAPIToken: "token", XUIInboundIDs: "[1]"}},
+		Nodes:            []config.Node{{Name: "main", XUIHost: "http://localhost:2053", XUIAPIToken: "token", XUIInboundIDs: "[1]"}},
 	}
 
-	mockBot := testutil.NewMockBotAPI()
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
+	mockBot := testutil.NewBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "test")
 
 	ctx, cancel := context.WithCancel(context.Background())

@@ -3,7 +3,7 @@
 **Repo:** https://github.com/kereal/rs8kvn_bot
 **Module:** `rs8kvn_bot` (Go 1.25+)
 **Version:** v3.0.0
-**Branch:** `dev` (GitFlow: `main` = production, `dev` = integration)
+**Branch:** `dev` (GitFlow: `main` = production, `dev` = integration, feature branches from dev or `plans_and_pricing`)
 
 ---
 
@@ -78,17 +78,16 @@ Handler.HandleUpdate → HandleCallback ("create_subscription")
 SubscriptionService.Create(ctx, telegramID)
         │
         ├─ Generate UUID, SubID (14 random bytes → 28 hex)
-        ├─ Build subscription URL: {XUI_HOST}/sub/{SubID}?...
+        ├─ Build subscription URL: GLOBAL_SUB_URL + SubID
         │
         ▼
-XUI Client: AddClientWithID(...)
+ensureSubscriptionNodes(ctx, sub)
         │
-        ├─ Authorize via Bearer token (no session needed)
-        ├─ Group inboundIDs by required flow
-        ├─ POST /panel/api/clients/add per compatible flow group
-        └─ Return client ID (UUID)
+        ├─ Load active nodes for plan (GetNodesByPlanID)
+        ├─ Create pending_add records in subscription_nodes
+        ├─ Best-effort SyncSubscription (async, errors don't rollback)
         │
-        ▼ (on success)
+        ▼
 Database: CreateSubscription (transaction)
         │
         ├─ Revoke old active subs for this user (UPDATE status='revoked')
@@ -98,17 +97,14 @@ Database: CreateSubscription (transaction)
 Cache: Set(telegramID, subscription)
         │
         ▼
-Webhook: async POST to Proxy Manager (if URL configured)
-        │
-        ▼
 Notify admin: "New subscription: @username"
         │
         ▼
 Send message to user: subscription URL + QR code
 
-On DB error (but XUI success):
-    → Retry XUI.DeleteClient (rollback, best-effort)
-```
+Background sync (eventual consistency):
+    SyncSubscription → vpn.Client.CreateSubscription per node
+    pending_add → active on success, retry on failure
 
 ### Data Flow: Trial Activation via Landing Page
 
@@ -155,49 +151,47 @@ User opens subscription link in client
         ▼
 GET /sub/{subID}
         │
-        ├─ Validate subID format (regex: ^[a-zA-Z0-9_-]+$, no '/')
-        ├─ Check cache (Cache.Get, TTL 240s)
+        ├─ Validate subID format (regex: ^[a-zA-Z0-9_-]+$)
+        ├─ Check cache (TTL 240s)
         │
-        ├─ Cache hit?
-        │   ├─ Yes → validate subscription still active in DB (optional but done)
-        │   │         If inactive → fetch from XUI
-        │   └─ No  → fetch from XUI
+        ├─ Cache hit? → verify subscription active in DB → serve cached
+        └─ Cache miss → proceed
         │
         ▼
-Fetch from XUI (singleflight.Do — dedup concurrent requests)
-        │
-        ├─ GET /panel/api/subscriptions/:subID?...
-        └─ Parse format (VLESS/VMESS/Trojan/etc.)
+GetWithPlanAndNodes(subID) — load subscription + plan + active nodes
         │
         ▼
-Merge:
-  1. XUI subscription lines
-  2. Extra servers from SUB_EXTRA_SERVERS_FILE (if enabled)
-  3. Headers: extra headers override XUI headers
+For each active node:
+  ├─ Build sourceURL:
+  │   • 3x-ui/proxman: subscription_url + "/" + subID
+  │   • fetch: subscription_url as-is
+  ├─ FetchFromXUI(ctx, sourceURL) — HTTP GET
+  ├─ DetectFormat (JSON / Base64 / Plain)
+  └─ Aggregate subscription-userinfo headers
         │
         ▼
-Cache.Set(240s)
+Merge all sources:
+  • JSON configs → share links if mixed mode
+  • Base64/Plain → decode and join
+  • Aggregate upload/download/expire across nodes
         │
         ▼
-Write response:
-  • Content-Type based on format (usually text/plain)
-  • Extra headers (X-Custom-*, Profile-Title)
-  • No Content-Length (chunked)
-  • Body: merged subscription lines
+Cache.Set(240s) → return body with Content-Type + Subscription-Userinfo
 ```
 
 ## Stack
 
 | Component | Library/DB | Version |
 |-----------|------------|---------|
-| Go | `go` | 1.24+ |
+| Go | `go` | 1.25+ |
 | Telegram API | `go-telegram-bot-api/telegram-bot-api/v5` | v5.5.1 |
 | ORM | `gorm.io/gorm` + `gorm.io/driver/sqlite` | v1.31.1 |
-| DB engine | SQLite (mattn/go-sqlite3, CGO) | `./data/tgvpn.db` |
+| DB engine | SQLite (mattn/go-sqlite3, CGO) | `./data/rs8kvn.db` |
 | Migrations | `golang-migrate/migrate/v4` | v4.19.1 |
 | QR Code | `piglig/go-qr` | v0.2.6 |
 | Logging | `go.uber.org/zap` + `lumberjack.v2` | v1.27.1 |
 | Error tracking | `getsentry/sentry-go` | v0.45.0 |
+| Metrics | `prometheus/client_golang` | v1.22.0 |
 | Concurrency | `golang.org/x/sync/singleflight` | — |
 | Testing | `stretchr/testify` | v1.11.1 |
 | CI/CD | GitHub Actions → golangci-lint, gosec, test, Docker → GHCR | — |
@@ -221,17 +215,23 @@ Write response:
 - `/refstats` — referral statistics (top 10 from cache)
 - 📊 Stats — bot statistics
 
-**Infrastructure:**
-- 3x-ui integration — Bearer token auth (no session/login/CSRF), client CRUD, RetryWithBackoff (3 retries, jitter), flow detection
-- Health endpoints — `/healthz` (503 when Down), `/readyz` (503 during init)
-- Invite/trial landing — `/i/{code}` with IP rate limit (3/hour), cookie dedup (3h)
-- Per-user rate limiting — chatID token bucket (30 tokens, 5/sec refill, 10-min idle cleanup)
-- Subscription proxy — `GET /sub/{subID}` with extra servers + headers, 240s TTL cache, singleflight
-- Daily backups — WAL checkpoint, atomic copy, 14-day rotation
-- Sentry error tracking (+ traces), Zap structured JSON logging with rotation
-- Order/Product tracking — payment lifecycle (pending/paid/expired/canceled) with 30-min payment window
-- Docker: multi-stage build (UPX compression), non-root user, healthcheck, GHCR images
-- CI/CD: GitHub Actions — golangci-lint, gosec, tests (race), Docker build/push
+| **Infrastructure** |
+| - 3x-ui integration — Bearer token auth (no session/login/CSRF), client CRUD, RetryWithBackoff (3 retries, jitter), flow detection
+| - Multi-node subscription synchronization — `subscription_nodes` table with 4-state sync machine (active/pending_add/pending_remove/pending_update), per-subscription locking, retry with exponential backoff |
+| - Health endpoints — `/healthz` (503 when Down), `/readyz` (503 during init)
+| - Invite/trial landing — `/i/{code}` with IP rate limit (3/hour), cookie dedup (3h) |
+| - Per-user rate limiting — chatID token bucket (30 tokens, 5/sec refill, 10-min idle cleanup) |
+| - Subscription proxy — `GET /sub/{subID}` with extra servers + headers, 240s TTL cache, singleflight |
+| - Daily backups — WAL checkpoint, atomic copy, 14-day rotation |
+| - Sentry error tracking (+ traces), Zap structured JSON logging with rotation
+| - Order/Product tracking — payment lifecycle (pending/paid/expired/canceled) with 30-min payment window
+| - Docker: multi-stage build (UPX compression), non-root user, healthcheck, GHCR images
+| - CI/CD: GitHub Actions — golangci-lint, gosec, tests (race), Docker build/push
+| - Prometheus metrics — `/metrics` endpoint with HTTP, bot, XUI, DB, cache, circuit breaker, subscription metrics |
+| - VPN client abstraction — `internal/vpn/` package with `Client` interface, `NewClient` factory routing by node type (3x-ui, proxman, fetch) |
+| - Plans & pricing — `plans`, `products`, `orders` tables for subscription plan management and payment lifecycle |
+| - Orphan reconciliation — `ReconcileOrphanedClients` runs every 6h to clean up orphaned XUI clients |
+| - Subscription expire worker — background worker handling subscription expiration |
 
 ### Test Coverage
 
@@ -262,28 +262,28 @@ All tests pass with `-race` detector. Fuzzing enabled for critical functions.
 
 ### 3x-ui Integration
 - **API Token auth:** Bearer token via `Authorization` header (no session/login/CSRF/cookiejar)
-- **Token configuration:** `XUI_API_TOKEN` env var — no username, password, or session age needed
-- **No connection pool cleanup needed:** No session state to invalidate
-- **No circuit breaker:** Removed in favor of simple `RetryWithBackoff` with exponential backoff + jitter
+- **Node configuration:** `XUI_HOST`, `XUI_API_TOKEN`, `XUI_INBOUND_ID` are **seed-only** env vars — read on first run to populate the `nodes` table, after which nodes are managed via DB. Multi-node support via `nodes` table.
+- **VPN client abstraction:** `internal/vpn/` package provides `Client` interface with `NewClient` factory routing by `NodeType` (3x-ui, proxman, fetch). Each node gets its own VPN client instance. Fetch nodes use no-op client — subscription_url fetched directly by subserver.
+- **Circuit breaker:** 5 failures → 30s open → half-open (3 attempts) → close. Monitor via `circuit_breaker_state` metric.
+- **RetryWithBackoff:** 3 retries with exponential backoff + jitter. DNS errors fast-fail.
 - **Subscription defaults:** `reset: 30` (days from creation), `expiresAt: now + 30 days`
 - **Auto-reset:** Only works when `expiresAt` > 0. Traffic resets every 30 days, expiry extends (3x-ui auto-renew logic)
 - **Client email:** `trial_{subID}` for trial, `{username}` for regular
-- **Ping:** `Ping()` sends GET `/panel/api/server/status` with Bearer token — no session verification needed
-- **No singleflight:** Deduplication removed (no concurrent login to deduplicate)
-- **DNS error fast-fail:** Non-retryable errors fail immediately (no retry spam)
 - **Flow detection:** When creating/updating clients, fetches inbound config via `GET /panel/api/inbounds/get/{id}` to determine transport type. Flow is set based on transport: `tcp` → `"xtls-rprx-vision"`, `xhttp/h2/ws/grpc` → `""` (empty). Falls back to `"xtls-rprx-vision"` if inbound cannot be fetched.
+- **Multi-inbound:** Nodes store `inbound_ids` as a JSON array. Client creation iterates all inbounds for the node.
 
 ### Subscription Flow
-- **Trial:** `/i/{code}` → IP rate limit (3/hour) → DB trial record (telegram_id=0) → user clicks link in Telegram → `BindTrialSubscription` sets telegram_id, removes is_trial, sets referred_by if from invite
-- **Regular:** `create_subscription` callback → XUI client (30GB, expiryTime: now+30d, reset:30) → DB record → cache invalidate → admin notify → webhook
+- **Trial:** `/i/{code}` → IP rate limit (3/hour) → DB trial record (negative telegram_id) → user clicks link in Telegram → `BindTrialSubscription` sets telegram_id, removes is_trial, sets referred_by if from invite
+- **Regular:** `create_subscription` callback → VPN client provisioning (per-node) → `subscription_nodes` records created as `pending_add` → DB record → cache invalidate → admin notify
+- **Sync pipeline:** Background `SyncPendingNodes` worker processes `pending_add`/`pending_remove`/`pending_update` states with per-subscription locking and exponential backoff retry
 - **Trial cookie:** `rs8kvn_trial_{code}` prevents duplication for 3 hours (HttpOnly, Secure, SameSite=Strict)
 - **Atomic cleanup:** `DELETE ... RETURNING` for expired trials (prevent race with bind)
 - **Share referral:** `pendingInvites[chatID]` cached 60 min (in-memory, periodic cleanup prevents leak)
+- **TelegramID conventions:** Positive = bound users, Negative = unbound trial subscriptions, 0 = unused
 
 ### Subscription Deletion (v2.2.0+)
 - **Order:** DB-first, then XUI-best-effort
 - **Rationale:** If DB delete fails → XUI untouched (safe to retry). If XUI fails after DB success → orphaned client (less critical, manual cleanup).
-- **Webhook:** Sent on successful DB deletion regardless of XUI outcome.
 - **Referral cache:** `DecrementReferralCount` called after successful deletion.
 
 ### Subscription Proxy (v2.3.0+)
@@ -312,15 +312,20 @@ All tests pass with `-race` detector. Fuzzing enabled for critical functions.
 - **trial_requests cleanup:** 1-hour cutoff (matching rate-limit window) + 1s buffer to avoid boundary race
 - **Connection pool:** `MaxOpenConns=1` (SQLite single-writer), `MaxIdle=1`, `ConnMaxLifetime=5m`
 - **Orders:** `orders` table tracks payment lifecycle: pending → paid → expired/canceled. Statuses enforced via CHECK constraint. 30-minute expiry window for unpaid invoices.
+- **Nodes:** `nodes` table stores VPN panel sources (host, api_token, inbound_ids, type, subscription_url). Seeded from env vars on first run.
+- **Plans:** `plans` table (name, devices_limit, traffic_limit), `plan_nodes` M2M join, `products` (duration, price), `subscription_nodes` (sync state machine: active/pending_add/pending_remove/pending_update)
+- **Devices tracking:** `subscriptions.devices` column stores JSON array of client request header maps (HWID, Device-OS, etc.). `ips` column stores IP→timestamp entries.
 
 ### Configuration
-- **Required:** `TELEGRAM_BOT_TOKEN`, `XUI_API_TOKEN` (NO defaults)
-- **Validated:** 
-  - `XUI_SUB_PATH` — only `a-zA-Z0-9_-`, no `..` or `/`
-  - `XUI_HOST` — must be valid URL, **HTTPS enforced** (except localhost)
-  - `SUB_EXTRA_SERVERS_FILE` — path traversal check
+- **Required:** `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ADMIN_ID` (must be positive), `GLOBAL_SUB_URL` (required, builds sub URLs)
+- **Seed-only:** `XUI_HOST`, `XUI_API_TOKEN`, `XUI_INBOUND_ID` — read via `os.Getenv` on first run to seed `nodes` table if empty, then managed via DB
+- **Validated:**
+  - `GLOBAL_SUB_URL` — must be valid URL with http/https scheme (S3: scheme allowlist)
+  - `SENTRY_DSN`, `HEARTBEAT_URL` — must be valid URLs with http/https scheme
+  - `SITE_URL` — must be valid URL
 - **Web server:** Runs on `HEALTH_CHECK_PORT` (default 8880), bound to all interfaces
 - **Init failure:** Fatal exit for DB, XUI, and Bot API init errors (cannot operate without them)
+- **SUBSERVER_ACCESS_LOG:** Optional path for `/sub/{id}` access logging (zap-console format)
 
 ### Rate Limiting
 - **Per-user (Telegram):** Each `chatID` gets own token bucket (max 30 tokens, refill 5/sec)
@@ -331,14 +336,17 @@ All tests pass with `-race` detector. Fuzzing enabled for critical functions.
 - **Broadcast:** 50ms delay between messages (~20 msg/sec, respects Telegram limits)
 
 ### Security
-- **Input validation:** Path traversal checks (XUI_SUB_PATH, extra_servers.txt), regex invite codes
-- **IP spoofing:** X-Forwarded-For trusted only from loopback (127.0.0.1, ::1). Private IPs NOT trusted.
+- **Input validation:** Regex invite codes, path traversal checks
+- **IP spoofing (S2):** `getClientIP` uses rightmost IP from `X-Forwarded-For` (set by trusted reverse proxy), NOT leftmost (client-controlled, spoofable). Only trusted from loopback.
+- **URL scheme restriction (S3):** `validateURL` restricts all configured URLs to `http`/`https` schemes only — prevents `file://`, `gopher://`, etc. SSRF vectors
+- **Web→bot dependency break (A1):** `internal/web` no longer imports `internal/bot` — `Server.botUsername string` instead of `*bot.BotConfig`, reducing coupling and attack surface
 - **API auth:** Timing-safe token comparison via `crypto/subtle.ConstantTimeCompare`
 - **No secrets in code:** `.env` only, `.env.example` has placeholders
 - **HTTP timeouts:** ReadHeaderTimeout 5s, ReadTimeout 10s, WriteTimeout 30s, IdleTimeout 60s
 - **Port binding:** Verified before goroutine launch — `net.Listen()` then `Serve()` in separate goroutine
 - **Non-root Docker:** UID 1000, `no-new-privileges:true`
 - **RetryWithBackoff:** 3 retries with exponential backoff + jitter; DNS errors fast-fail
+
 
 ### Health Checks
 - **`/healthz`:** Composite: DB ping + XUI status check → 200 (ok|degraded) or 503 (down)

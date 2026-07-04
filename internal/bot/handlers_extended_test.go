@@ -1,19 +1,19 @@
 package bot
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-
 	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // TestGetUsername_EdgeCases tests edge cases for username extraction
@@ -173,8 +173,10 @@ func TestGetUsername_EdgeCases(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			result := h.getUsername(tt.user)
 			assert.Equal(t, tt.expected, result)
+
 		})
 	}
 }
@@ -241,50 +243,17 @@ func TestIsAdmin_EdgeCases(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			cfg := &config.Config{TelegramAdminID: tt.adminID}
 			h := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, cfg.DonateCardNumber, cfg.DonateURL, cfg.SiteURL)}
 			result := h.isAdmin(tt.chatID)
 			assert.Equal(t, tt.expected, result)
+
 		})
 	}
 }
 
-// TestGetMainMenuKeyboard_ButtonCounts tests keyboard structure
-func TestGetMainMenuKeyboard_ButtonCounts(t *testing.T) {
-	t.Parallel()
 
-	cfg := &config.Config{TelegramAdminID: 123}
-	h := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, cfg.DonateCardNumber, cfg.DonateURL, cfg.SiteURL)}
-
-	t.Run("keyboard without subscription has correct buttons", func(t *testing.T) {
-		keyboard := h.getMainMenuKeyboard(false)
-
-		// Should have 3 rows: subscription+donate, help
-		require.Len(t, keyboard.InlineKeyboard, 2, "expected 2 rows without subscription")
-
-		// First row: subscription and donate
-		require.Len(t, keyboard.InlineKeyboard[0], 2, "first row should have 2 buttons")
-		assert.Contains(t, keyboard.InlineKeyboard[0][0].Text, "Подписка")
-		assert.Contains(t, keyboard.InlineKeyboard[0][1].Text, "Донат")
-
-		// Second row: help
-		require.Len(t, keyboard.InlineKeyboard[1], 1, "second row should have 1 button")
-		assert.Contains(t, keyboard.InlineKeyboard[1][0].Text, "Помощь")
-	})
-
-	t.Run("keyboard with subscription has share button", func(t *testing.T) {
-		keyboard := h.getMainMenuKeyboard(true)
-
-		// Should have 3 rows: subscription+donate, help, share
-		require.Len(t, keyboard.InlineKeyboard, 3, "expected 3 rows with subscription")
-
-		// Third row: share
-		require.Len(t, keyboard.InlineKeyboard[2], 1, "third row should have 1 button")
-		assert.Contains(t, keyboard.InlineKeyboard[2][0].Text, "Поделиться")
-	})
-}
-
-// TestGetHelpText_EdgeCases tests help text with various traffic limits
 func TestGetHelpText_EdgeCases(t *testing.T) {
 	t.Parallel()
 
@@ -335,6 +304,7 @@ func TestGetHelpText_EdgeCases(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			text := h.getHelpText(tt.trafficLimit, tt.subscriptionURL)
 
 			assert.Contains(t, text, fmt.Sprintf("%dГб", tt.trafficLimit))
@@ -342,169 +312,48 @@ func TestGetHelpText_EdgeCases(t *testing.T) {
 			assert.Contains(t, text, "Happ")
 			assert.Contains(t, text, "iOS")
 			assert.Contains(t, text, "Android")
+
 		})
 	}
 }
 
-// TestGetMainMenuContent_Scenarios tests main menu content scenarios
-func TestGetMainMenuContent_Scenarios(t *testing.T) {
-	t.Parallel()
 
-	cfg := &config.Config{TelegramAdminID: 123456}
-	h := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, cfg.DonateCardNumber, cfg.DonateURL, cfg.SiteURL)}
-
-	t.Run("content for user without subscription", func(t *testing.T) {
-		text, keyboard := h.getMainMenuContent("TestUser", false, 654321)
-
-		assert.Contains(t, text, "TestUser")
-		assert.Contains(t, text, "получить подписку")
-		assert.Len(t, keyboard.InlineKeyboard, 1) // Just the get subscription button
-	})
-
-	t.Run("content for user with subscription", func(t *testing.T) {
-		text, keyboard := h.getMainMenuContent("TestUser", true, 654321)
-
-		assert.Contains(t, text, "TestUser")
-		// Check keyboard has subscription button instead
-		assert.GreaterOrEqual(t, len(keyboard.InlineKeyboard), 2)
-		assert.GreaterOrEqual(t, len(keyboard.InlineKeyboard), 2)
-	})
-
-	t.Run("content for admin user", func(t *testing.T) {
-		text, keyboard := h.getMainMenuContent("AdminUser", true, 123456)
-
-		assert.Contains(t, text, "AdminUser")
-		// Admin should have additional buttons
-		lastRow := keyboard.InlineKeyboard[len(keyboard.InlineKeyboard)-1]
-		adminButtonFound := false
-		for _, btn := range lastRow {
-			if btn.Text == "📊 Стат" || btn.Text == "📋 Посл.рег" {
-				adminButtonFound = true
-				break
-			}
-		}
-		assert.True(t, adminButtonFound, "Admin buttons should be present")
-	})
-
-	t.Run("content for admin without subscription", func(t *testing.T) {
-		text, keyboard := h.getMainMenuContent("AdminUser", false, 123456)
-
-		assert.Contains(t, text, "AdminUser")
-		// Even without subscription, admin should have admin buttons
-		lastRow := keyboard.InlineKeyboard[len(keyboard.InlineKeyboard)-1]
-		adminButtonFound := false
-		for _, btn := range lastRow {
-			if btn.Text == "📊 Стат" || btn.Text == "📋 Посл.рег" {
-				adminButtonFound = true
-				break
-			}
-		}
-		assert.True(t, adminButtonFound, "Admin buttons should be present")
-	})
-
-	t.Run("content with unicode username", func(t *testing.T) {
-		text, _ := h.getMainMenuContent("用户🎉名", true, 654321)
-
-		assert.Contains(t, text, "用户🎉名")
-	})
-
-	t.Run("content with very long username", func(t *testing.T) {
-		longName := strings.Repeat("VeryLongUserName", 10)
-		text, _ := h.getMainMenuContent(longName, true, 654321)
-
-		assert.Contains(t, text, longName)
-	})
-}
-
-// TestAddAdminButtons_Scenarios tests admin button addition scenarios
-func TestAddAdminButtons_Scenarios(t *testing.T) {
-	t.Parallel()
-
-	t.Run("adds buttons for admin", func(t *testing.T) {
-		t.Parallel()
-
-		cfg := &config.Config{TelegramAdminID: 123456}
-		h := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, cfg.DonateCardNumber, cfg.DonateURL, cfg.SiteURL)}
-
-		keyboard := tgbotapi.NewInlineKeyboardMarkup(
-			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData("Button1", "callback1"),
-			),
-		)
-
-		initialRows := len(keyboard.InlineKeyboard)
-		h.addAdminButtons(&keyboard, 123456)
-
-		assert.Greater(t, len(keyboard.InlineKeyboard), initialRows)
-	})
-
-	t.Run("does not add buttons for non-admin", func(t *testing.T) {
-		t.Parallel()
-
-		cfg := &config.Config{TelegramAdminID: 123456}
-		h := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, cfg.DonateCardNumber, cfg.DonateURL, cfg.SiteURL)}
-
-		keyboard := tgbotapi.NewInlineKeyboardMarkup(
-			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData("Button1", "callback1"),
-			),
-		)
-
-		initialRows := len(keyboard.InlineKeyboard)
-		h.addAdminButtons(&keyboard, 654321)
-
-		assert.Equal(t, initialRows, len(keyboard.InlineKeyboard))
-	})
-
-	t.Run("does not add buttons when admin ID is zero", func(t *testing.T) {
-		t.Parallel()
-
-		cfg := &config.Config{TelegramAdminID: 0}
-		h := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, cfg.DonateCardNumber, cfg.DonateURL, cfg.SiteURL)}
-
-		keyboard := tgbotapi.NewInlineKeyboardMarkup(
-			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData("Button1", "callback1"),
-			),
-		)
-
-		initialRows := len(keyboard.InlineKeyboard)
-		h.addAdminButtons(&keyboard, 0)
-
-		assert.Equal(t, initialRows, len(keyboard.InlineKeyboard))
-	})
-}
-
-// TestSubscriptionCache_EdgeCases tests cache edge cases
 func TestSubscriptionCache_EdgeCases(t *testing.T) {
 	t.Parallel()
 
 	t.Run("Set with nil subscription", func(t *testing.T) {
-		cache := NewSubscriptionCache(10, 5*time.Minute)
+			t.Parallel()
+			cache := NewSubscriptionCache(10, 5*time.Minute)
 		cache.Set(123, nil)
 
 		// Should not panic, and Get should return nil
 		result := cache.Get(123)
 		assert.Nil(t, result)
-	})
+
+		})
 
 	t.Run("Get on empty cache", func(t *testing.T) {
-		cache := NewSubscriptionCache(10, 5*time.Minute)
+			t.Parallel()
+			cache := NewSubscriptionCache(10, 5*time.Minute)
 
 		assert.Nil(t, cache.Get(999))
 		assert.Equal(t, 0, cache.Size())
-	})
+
+		})
 
 	t.Run("Invalidate non-existent key", func(t *testing.T) {
-		cache := NewSubscriptionCache(10, 5*time.Minute)
+			t.Parallel()
+			cache := NewSubscriptionCache(10, 5*time.Minute)
 
 		// Should not panic
 		cache.Invalidate(999)
 		assert.Equal(t, 0, cache.Size())
-	})
+
+		})
 
 	t.Run("Set updates existing entry", func(t *testing.T) {
-		cache := NewSubscriptionCache(10, 5*time.Minute)
+			t.Parallel()
+			cache := NewSubscriptionCache(10, 5*time.Minute)
 
 		sub1 := &database.Subscription{TelegramID: 123, Username: "user1"}
 		sub2 := &database.Subscription{TelegramID: 123, Username: "user2"}
@@ -521,10 +370,12 @@ func TestSubscriptionCache_EdgeCases(t *testing.T) {
 
 		// Size should still be 1
 		assert.Equal(t, 1, cache.Size())
-	})
+
+		})
 
 	t.Run("Zero TTL behavior", func(t *testing.T) {
-		cache := NewSubscriptionCache(10, 1*time.Nanosecond)
+			t.Parallel()
+			cache := NewSubscriptionCache(10, 1*time.Nanosecond)
 
 		sub := &database.Subscription{TelegramID: 123, Username: "user"}
 		cache.Set(123, sub)
@@ -533,10 +384,12 @@ func TestSubscriptionCache_EdgeCases(t *testing.T) {
 		time.Sleep(2 * time.Millisecond)
 		result := cache.Get(123)
 		assert.Nil(t, result)
-	})
+
+		})
 
 	t.Run("Negative telegram ID", func(t *testing.T) {
-		cache := NewSubscriptionCache(10, 5*time.Minute)
+			t.Parallel()
+			cache := NewSubscriptionCache(10, 5*time.Minute)
 
 		sub := &database.Subscription{TelegramID: -123, Username: "user"}
 		cache.Set(-123, sub)
@@ -544,7 +397,8 @@ func TestSubscriptionCache_EdgeCases(t *testing.T) {
 		result := cache.Get(-123)
 		require.NotNil(t, result)
 		assert.Equal(t, int64(-123), result.TelegramID)
-	})
+
+		})
 }
 
 // TestSubscriptionCache_ConcurrentStress tests cache under heavy concurrent load
@@ -614,8 +468,10 @@ func TestGetMainMenuContent_SpecialUsernameChars(t *testing.T) {
 
 	for _, username := range specialUsernames {
 		t.Run(fmt.Sprintf("username_len_%d", len(username)), func(t *testing.T) {
-			text, _ := h.getMainMenuContent(username, true, 456)
+			t.Parallel()
+			text, _ := h.getMainMenuContent(context.Background(), username, true, 456, nil)
 			assert.Contains(t, text, username)
+
 		})
 	}
 }
@@ -635,9 +491,11 @@ func TestHelpText_InjectionSafety(t *testing.T) {
 
 	for _, url := range maliciousURLs {
 		t.Run("url_safety", func(t *testing.T) {
+			t.Parallel()
 			text := h.getHelpText(10, url)
 			// URL should be included as-is (Markdown code block handles special chars)
 			assert.Contains(t, text, url)
+
 		})
 	}
 }
@@ -662,8 +520,10 @@ func TestFormatUserLink_NumericUsername(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got := formatUserLink(tt.username, tt.id)
 			assert.Equal(t, tt.want, got)
+
 		})
 	}
 }

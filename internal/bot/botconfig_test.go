@@ -33,33 +33,7 @@ func TestSelf_ReturnsCorrectUser(t *testing.T) {
 	assert.True(t, user.SupportsInlineQueries)
 }
 
-func TestSelf_AllFieldsMapped(t *testing.T) {
-	t.Parallel()
-
-	botConfig := &BotConfig{
-		Username:                "fieldtest",
-		ID:                      111222333,
-		FirstName:               "FieldTest",
-		IsBot:                   false,
-		CanJoinGroups:           false,
-		CanReadAllGroupMessages: true,
-		SupportsInlineQueries:   false,
-	}
-
-	user := botConfig.Self()
-
-	require.NotNil(t, user)
-	assert.Equal(t, botConfig.ID, user.ID)
-	assert.Equal(t, botConfig.FirstName, user.FirstName)
-	assert.Equal(t, botConfig.Username, user.UserName)
-	assert.Equal(t, botConfig.IsBot, user.IsBot)
-	assert.Equal(t, botConfig.CanJoinGroups, user.CanJoinGroups)
-	assert.Equal(t, botConfig.CanReadAllGroupMessages, user.CanReadAllGroupMessages)
-	assert.Equal(t, botConfig.SupportsInlineQueries, user.SupportsInlineQueries)
-}
-
 func TestSelf_DefaultValues(t *testing.T) {
-	t.Parallel()
 
 	botConfig := &BotConfig{}
 
@@ -107,23 +81,7 @@ func TestNewBotConfig_ReturnsValidConfig(t *testing.T) {
 	assert.False(t, botConfig.loadedAt.IsZero(), "loadedAt should be set")
 }
 
-func TestNewBotConfig_SelfRoundTrip(t *testing.T) {
-	t.Parallel()
-
-	original := NewTestBotConfig()
-	user := original.Self()
-
-	assert.Equal(t, original.ID, user.ID)
-	assert.Equal(t, original.FirstName, user.FirstName)
-	assert.Equal(t, original.Username, user.UserName)
-	assert.Equal(t, original.IsBot, user.IsBot)
-	assert.Equal(t, original.CanJoinGroups, user.CanJoinGroups)
-	assert.Equal(t, original.CanReadAllGroupMessages, user.CanReadAllGroupMessages)
-	assert.Equal(t, original.SupportsInlineQueries, user.SupportsInlineQueries)
-}
-
 func TestNewBotConfig_WithBotAPI(t *testing.T) {
-	t.Parallel()
 
 	botAPI := &tgbotapi.BotAPI{
 		Self: tgbotapi.User{

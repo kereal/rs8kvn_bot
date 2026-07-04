@@ -14,7 +14,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kereal/rs8kvn_bot/internal/bot"
 	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/interfaces"
@@ -61,7 +60,7 @@ type Server struct {
 	addr            string
 	db              interfaces.DatabaseService
 	cfg             *config.Config
-	botConfig       *bot.BotConfig
+	botUsername     string
 	subService      *service.SubscriptionService
 	subServer       *subserver.Service
 	subserverLogger *subserver.AccessLogger
@@ -76,7 +75,7 @@ type Server struct {
 	errorTemplate   *template.Template
 }
 
-func NewServer(addr string, db interfaces.DatabaseService, cfg *config.Config, botConfig *bot.BotConfig, subService *service.SubscriptionService, subServer *subserver.Service) *Server {
+func NewServer(addr string, db interfaces.DatabaseService, cfg *config.Config, botUsername string, subService *service.SubscriptionService, subServer *subserver.Service) *Server {
 	trialTmpl := template.Must(template.New("trial.html").Funcs(template.FuncMap{
 		"escape": func(s string) string {
 			var buf strings.Builder
@@ -91,7 +90,7 @@ func NewServer(addr string, db interfaces.DatabaseService, cfg *config.Config, b
 		addr:            addr,
 		db:              db,
 		cfg:             cfg,
-		botConfig:       botConfig,
+		botUsername:     botUsername,
 		subService:      subService,
 		subServer:       subServer,
 		checkers:        make(map[string]func(context.Context) ComponentHealth),
@@ -126,13 +125,10 @@ func (s *Server) Start(ctx context.Context) error {
 
 	mux.HandleFunc("/healthz", s.handleHealthz)
 	mux.HandleFunc("/readyz", s.handleReadyz)
+	mux.HandleFunc("/payment/callback", s.handlePaymentCallback)
 	mux.HandleFunc("/i/", s.handleInvite)
 	mux.HandleFunc("/sub/", s.handleSubscription)
 	mux.HandleFunc("/static/logo.png", s.handleLogo)
-
-	apiMux := http.NewServeMux()
-	apiMux.HandleFunc("/api/v1/subscriptions", s.GetSubscriptions)
-	mux.Handle("/api/v1/subscriptions", BearerAuthMiddleware(s.cfg.APIToken)(apiMux))
 
 	mux.Handle("/metrics", promhttp.Handler())
 
@@ -186,23 +182,22 @@ func (s *Server) initSubserverAccessLogger() {
 }
 
 func (s *Server) Stop(ctx context.Context) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-
-	var err error
-	if s.server != nil {
-		err = s.server.Shutdown(ctx)
-	}
+	var errs []error
 	if s.subserverLogger != nil {
 		closeCtx, cancel := context.WithTimeout(ctx, subserverAccessLogCloseTimeout)
 		defer cancel()
 
-		if closeErr := s.subserverLogger.CloseWithContext(closeCtx); err == nil {
-			err = closeErr
+		if cerr := s.subserverLogger.CloseWithContext(closeCtx); cerr != nil {
+			errs = append(errs, cerr)
 		}
 	}
-	return err
+	// HTTP server must shut down even if access-log close failed.
+	if s.server != nil {
+		if serr := s.server.Shutdown(ctx); serr != nil {
+			errs = append(errs, serr)
+		}
+	}
+	return errors.Join(errs...)
 }
 
 func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
@@ -238,6 +233,18 @@ func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 		w.Write([]byte("NOT READY"))
 	}
+}
+
+func (s *Server) handlePaymentCallback(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", "POST")
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(`{"ok":true,"provider_payment_id":"fake","status":"paid"}`))
 }
 
 func (s *Server) handleLogo(w http.ResponseWriter, r *http.Request) {
@@ -362,7 +369,7 @@ func (s *Server) HandleInvite(w http.ResponseWriter, r *http.Request) {
 	} else if existingSub != nil {
 		// Trial уже создан — показываем существующий
 		logger.Info("Existing trial found via cookie", zap.String("sub_id", existingSub.SubscriptionID))
-		telegramLink := "https://t.me/" + s.botConfig.Username + "?start=trial_" + existingSub.SubscriptionID
+		telegramLink := "https://t.me/" + s.botUsername + "?start=trial_" + existingSub.SubscriptionID
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 		subURL := s.cfg.GlobalSubURL + existingSub.SubscriptionID
@@ -427,40 +434,53 @@ func (s *Server) HandleInvite(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	telegramLink := "https://t.me/" + s.botConfig.Username + "?start=trial_" + result.SubID
+	telegramLink := "https://t.me/" + s.botUsername + "?start=trial_" + result.SubID
 	s.renderTrialPage(w, result.SubID, result.SubscriptionURL, telegramLink, s.cfg.TrialDurationHours)
 }
 
-// getExistingTrialFromCookie проверяет куку и возвращает существующий trial
+// getExistingTrialFromCookie checks the cookie and returns an existing unactivated trial.
+// Expected business states (no cookie, empty, not a trial, already activated, expired) return (nil, nil).
+// Only infrastructure/DB failures return (nil, error); those are logged as Error by the caller.
 func (s *Server) getExistingTrialFromCookie(r *http.Request, ctx context.Context, code string) (*database.Subscription, error) {
 	cookie, err := r.Cookie("rs8kvn_trial_" + code)
 	if err != nil {
-		return nil, err
+		// No cookie (new visitor) — expected, not an error.
+		//nolint:nilerr // no cookie means new visitor, expected business state
+		return nil, nil
 	}
 
 	subID := cookie.Value
 	if subID == "" {
-		return nil, fmt.Errorf("empty cookie value")
+		// Malformed cookie — expected business state.
+		return nil, nil
 	}
 
 	sub, err := s.db.GetTrialSubscriptionBySubID(ctx, subID)
 	if err != nil {
-		return nil, err
+		if errors.Is(err, database.ErrSubscriptionNotFound) || errors.Is(err, gorm.ErrRecordNotFound) {
+			// Trial was cleaned up or not found — expected, fall through to new trial creation.
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get trial subscription by sub id: %w", err)
 	}
 
-	// Проверяем, что это trial и не активирован
-	if sub.TelegramID != 0 {
-		return nil, fmt.Errorf("not a valid trial")
+	// Already activated — expected, no existing trial to show.
+	if sub.TelegramID > 0 {
+		return nil, nil
 	}
 
 	plan, planErr := s.db.GetPlanByID(ctx, sub.PlanID)
-	if planErr != nil || plan.Name != database.TrialPlanName {
-		return nil, fmt.Errorf("not a valid trial")
+	if planErr != nil {
+		return nil, fmt.Errorf("get plan for trial check: %w", planErr)
+	}
+	if plan.Name != database.TrialPlanName {
+		// Not a trial — expected business state.
+		return nil, nil
 	}
 
-	// Проверяем, что не истёк
-	if time.Now().After(sub.ExpiresAt) {
-		return nil, fmt.Errorf("trial expired")
+	// Expired — expected business state.
+	if sub.ExpiresAt != nil && time.Now().After(*sub.ExpiresAt) {
+		return nil, nil
 	}
 
 	return sub, nil
@@ -508,8 +528,10 @@ func getClientIP(r *http.Request) string {
 		forwarded := r.Header.Get("X-Forwarded-For")
 		if forwarded != "" {
 			ips := strings.Split(forwarded, ",")
-			if len(ips) > 0 {
-				ip := strings.TrimSpace(ips[0])
+			// Use the rightmost IP — set by the trusted reverse proxy.
+			// The leftmost is client-controlled and spoofable.
+			for i := len(ips) - 1; i >= 0; i-- {
+				ip := strings.TrimSpace(ips[i])
 				if ip != "" {
 					return ip
 				}
@@ -552,7 +574,7 @@ func (s *Server) handleSubscription(w http.ResponseWriter, r *http.Request) {
 	clientIP := getClientIP(r)
 
 	var rec *statusRecorder
-	var response http.ResponseWriter = w
+	var response = w
 	if s.subserverLogger != nil && s.subserverLogger.Enabled() {
 		rec = &statusRecorder{ResponseWriter: w}
 		response = rec
@@ -585,7 +607,7 @@ func (s *Server) handleSubscription(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 
-	logger.Info("subscription request received",
+	logger.Debug("subscription request received",
 		zap.String("sub_id", subID),
 		zap.String("client_ip", clientIP),
 		zap.String("method", r.Method),
@@ -605,7 +627,7 @@ func (s *Server) handleSubscription(w http.ResponseWriter, r *http.Request) {
 			writeSubscriptionText(response, http.StatusNotFound, "Subscription not found")
 			return
 		}
-		writeSubscriptionText(response, http.StatusInternalServerError, "Subscription not found")
+		writeSubscriptionText(response, http.StatusInternalServerError, "Internal Server Error")
 		return
 	}
 
@@ -613,7 +635,7 @@ func (s *Server) handleSubscription(w http.ResponseWriter, r *http.Request) {
 		logger.Error("Empty subscription result",
 			zap.String("sub_id", subID),
 			zap.String("client_ip", clientIP))
-		writeSubscriptionText(response, http.StatusInternalServerError, "Subscription not found")
+		writeSubscriptionText(response, http.StatusInternalServerError, "Internal Server Error")
 		return
 	}
 

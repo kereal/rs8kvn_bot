@@ -1,6 +1,7 @@
 package bot
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -41,11 +42,13 @@ func TestGetMainMenuContent(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			text, keyboard := handler.getMainMenuContent(tt.username, tt.hasSubscription, tt.chatID)
+			t.Parallel()
+			text, keyboard := handler.getMainMenuContent(context.Background(), tt.username, tt.hasSubscription, tt.chatID, nil)
 
 			assert.Contains(t, text, tt.username, "getMainMenuContent() text should contain username")
 			assert.NotEmpty(t, text, "getMainMenuContent() text should not be empty")
 			assert.NotEmpty(t, keyboard.InlineKeyboard, "getMainMenuContent() keyboard should have buttons")
+
 		})
 	}
 }
@@ -60,7 +63,7 @@ func TestGetMainMenuContent_WithSubscription(t *testing.T) {
 		cfg: cfg,
 	}
 
-	text, keyboard := handler.getMainMenuContent("testuser", true, 123456789)
+	text, keyboard := handler.getMainMenuContent(context.Background(), "testuser", true, 123456789, nil)
 
 	assert.NotEmpty(t, text, "Expected non-empty text for user with subscription")
 	assert.Contains(t, text, "testuser", "Expected text to contain username")
@@ -77,13 +80,12 @@ func TestGetMainMenuContent_WithoutSubscription(t *testing.T) {
 		cfg: cfg,
 	}
 
-	text, keyboard := handler.getMainMenuContent("testuser", false, 123456789)
+	text, keyboard := handler.getMainMenuContent(context.Background(), "testuser", false, 123456789, nil)
 
 	assert.NotEmpty(t, text, "Expected non-empty text for user without subscription")
 	assert.Contains(t, text, "testuser", "Expected text to contain username")
 	assert.GreaterOrEqual(t, len(keyboard.InlineKeyboard), 1, "Expected at least 1 keyboard row")
 
-	// Check that "create_subscription" callback is used
 	found := false
 	for _, row := range keyboard.InlineKeyboard {
 		for _, button := range row {
@@ -106,9 +108,8 @@ func TestGetMainMenuContent_AdminButtons(t *testing.T) {
 		cfg: cfg,
 	}
 
-	_, keyboard := handler.getMainMenuContent("admin", true, 123456789)
+	_, keyboard := handler.getMainMenuContent(context.Background(), "admin", true, 123456789, nil)
 
-	// Check for admin buttons
 	foundStats := false
 	foundLastReg := false
 	for _, row := range keyboard.InlineKeyboard {
@@ -131,7 +132,7 @@ func TestHandler_GetMainMenuContent_SpecialCharacters(t *testing.T) {
 	cfg := &config.Config{TelegramAdminID: 12345}
 	handler := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, cfg.DonateCardNumber, cfg.DonateURL, cfg.SiteURL)}
 
-	text, keyboard := handler.getMainMenuContent("test_user_123", true, 12345)
+	text, keyboard := handler.getMainMenuContent(context.Background(), "test_user_123", true, 12345, nil)
 	assert.Contains(t, text, "test_user_123", "Text should contain username")
 	assert.NotEmpty(t, keyboard.InlineKeyboard, "Keyboard should not be empty")
 }
@@ -142,7 +143,7 @@ func TestHandler_GetMainMenuContent_AdminUser(t *testing.T) {
 	cfg := &config.Config{TelegramAdminID: 12345}
 	handler := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, cfg.DonateCardNumber, cfg.DonateURL, cfg.SiteURL)}
 
-	text, keyboard := handler.getMainMenuContent("admin", true, 12345)
+	text, keyboard := handler.getMainMenuContent(context.Background(), "admin", true, 12345, nil)
 	assert.Contains(t, text, "admin", "Text should contain username")
 	assert.GreaterOrEqual(t, len(keyboard.InlineKeyboard), 3, "Admin should see admin buttons")
 }
@@ -218,8 +219,10 @@ func TestGetHelpText_DifferentTrafficLimits(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			text := handler.getHelpText(tt.trafficLimit, "http://test.url/sub")
 			assert.NotEmpty(t, text, "text should not be empty")
+
 		})
 	}
 }

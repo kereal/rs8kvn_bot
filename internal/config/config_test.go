@@ -44,6 +44,10 @@ func TestLoad_DefaultValues(t *testing.T) {
 		}
 	}()
 
+	// Isolate from host environment — SUBSERVER_ACCESS_LOG may be set in .env
+	if err := os.Unsetenv("SUBSERVER_ACCESS_LOG"); err != nil {
+		t.Logf("Warning: Unsetenv failed: %v", err)
+	}
 	require.NoError(t, os.Setenv("GLOBAL_SUB_URL", "https://vpn.example.com/sub/"))
 	defer os.Unsetenv("GLOBAL_SUB_URL")
 
@@ -513,6 +517,8 @@ func TestValidateURL(t *testing.T) {
 		{"with path", "https://example.com/path/to/resource", false},
 		{"with query", "https://example.com?query=value", false},
 		{"with port and path", "https://localhost:8080/api/v1", false},
+		{"disallowed scheme file", "file:///etc/passwd", true},
+		{"disallowed scheme gopher", "gopher://localhost", true},
 	}
 
 	for _, tt := range tests {

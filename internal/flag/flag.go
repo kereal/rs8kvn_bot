@@ -13,6 +13,11 @@ import (
 	"github.com/joho/godotenv"
 )
 
+type noCopy struct{}
+
+func (noCopy) Lock()   {}
+func (noCopy) Unlock() {}
+
 // Value is an interface for typed configuration values.
 // Compatible with the standard library's flag.Value interface.
 type Value interface {
@@ -23,6 +28,7 @@ type Value interface {
 
 // Registry holds a map of named configuration values.
 type Registry struct {
+	noCopy noCopy
 	mu     sync.RWMutex
 	values map[string]Value
 }

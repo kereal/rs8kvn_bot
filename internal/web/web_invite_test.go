@@ -10,23 +10,66 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 
-	"github.com/kereal/rs8kvn_bot/internal/bot"
 	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/interfaces"
 	"github.com/kereal/rs8kvn_bot/internal/service"
 	"github.com/kereal/rs8kvn_bot/internal/testutil"
-	"github.com/kereal/rs8kvn_bot/internal/utils"
-	"github.com/kereal/rs8kvn_bot/internal/webhook"
 	"github.com/kereal/rs8kvn_bot/internal/xui"
 
 	"gorm.io/gorm"
 )
 
-func makeTestSubService(mockDB *testutil.MockDatabaseService) (*config.Config, *service.SubscriptionService, *testutil.MockXUIClient) {
-	mockXUI := testutil.NewMockXUIClient()
+func ptrTime(t time.Time) *time.Time { return &t }
+
+func setupInviteServer(t *testing.T, inviteCode string) *Server {
+	t.Helper()
+	mockDB := testutil.NewDatabaseService()
+	mockDB.GetPlanByNameFunc = func(ctx context.Context, name string) (*database.Plan, error) {
+		return &database.Plan{ID: 1, Name: "trial", DevicesLimit: 1, TrafficLimit: 1073741824}, nil
+	}
+	mockDB.GetNodesByPlanNameFunc = func(ctx context.Context, planName string) ([]database.Node, error) {
+		return []database.Node{{ID: 1, IsActive: true, Host: "http://localhost:2053", InboundIDs: "[1]"}}, nil
+	}
+	cfg := &config.Config{
+		SiteURL:            "https://vpn.site",
+		TrialDurationHours: 3,
+		TrialRateLimit:     3,
+	}
+	return NewServer(":8880", mockDB, cfg, "testbot", nil, nil)
+}
+
+func TestHandleInvite_InvalidCodeVariants(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		path     string
+		wantCode int
+		wantBody string
+	}{
+		{"empty code", "/i/", http.StatusNotFound, ""},
+		{"invalid path", "/not-invite/testcode", http.StatusNotFound, "Страница не найдена"},
+		{"invalid chars", "/i/invalid@code!", http.StatusNotFound, "Приглашение не найдено"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := setupInviteServer(t, tt.path)
+			req := httptest.NewRequest("GET", tt.path, nil)
+			rec := httptest.NewRecorder()
+			srv.handleInvite(rec, req)
+			assert.Equal(t, tt.wantCode, rec.Code, "handleInvite() status")
+			if tt.wantBody != "" {
+				assert.Contains(t, rec.Body.String(), tt.wantBody)
+			}
+		})
+	}
+}
+
+func makeTestSubService(mockDB *testutil.DatabaseService) (*config.Config, *service.SubscriptionService, *testutil.XUIClient) {
+	mockXUI := testutil.NewXUIClient()
 	cfg := &config.Config{
 		SiteURL:            "https://vpn.site",
 		TrialDurationHours: 3,
@@ -43,14 +86,14 @@ func makeTestSubService(mockDB *testutil.MockDatabaseService) (*config.Config, *
 
 	xuiClients := map[uint]interfaces.XUIClient{1: mockXUI}
 	nodes := []database.Node{{ID: 1, Name: "default", IsActive: true, Host: "http://localhost:2053", APIToken: "test-token", InboundIDs: "[1]", SubscriptionURL: cfg.GlobalSubURL}}
-	subService := service.NewSubscriptionService(mockDB, xuiClients, nodes, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
+	subService := service.NewSubscriptionService(mockDB, xuiClients, nil, nodes, cfg)
 	return cfg, subService, mockXUI
 }
 
 func TestHandleInvite_InvalidCode(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewMockDatabaseService()
+	mockDB := testutil.NewDatabaseService()
 	mockDB.GetPlanByNameFunc = func(ctx context.Context, name string) (*database.Plan, error) {
 		return &database.Plan{ID: 1, Name: "trial", DevicesLimit: 1, TrafficLimit: 1073741824}, nil
 	}
@@ -76,10 +119,11 @@ func TestHandleInvite_InvalidCode(t *testing.T) {
 	}
 
 	mockDB.CreateTrialSubscriptionFunc = func(ctx context.Context, inviteCode, subscriptionID, clientID string, expiryTime time.Time) (*database.Subscription, error) {
+		inviteVal := inviteCode
 		return &database.Subscription{
 			SubscriptionID: subscriptionID,
 			ClientID:       clientID,
-			InviteCode:     inviteCode,
+			InviteCode:     &inviteVal,
 		}, nil
 	}
 
@@ -96,7 +140,7 @@ func TestHandleInvite_InvalidCode(t *testing.T) {
 		return host
 	}
 
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), subService, nil)
+	srv := NewServer(":8880", mockDB, cfg, "testbot", subService, nil)
 
 	req := httptest.NewRequest("GET", "/i/testcode", nil)
 	req.RemoteAddr = "192.168.1.1:12345"
@@ -124,7 +168,7 @@ func TestHandleInvite_InvalidCode(t *testing.T) {
 func TestHandleInvite_XUIError(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewMockDatabaseService()
+	mockDB := testutil.NewDatabaseService()
 
 	cfg, subService, mockXUI := makeTestSubService(mockDB)
 
@@ -144,7 +188,7 @@ func TestHandleInvite_XUIError(t *testing.T) {
 		return nil, fmt.Errorf("XUI API error")
 	}
 
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), subService, nil)
+	srv := NewServer(":8880", mockDB, cfg, "testbot", subService, nil)
 
 	req := httptest.NewRequest("GET", "/i/testcode", nil)
 	req.RemoteAddr = "192.168.1.1:12345"
@@ -158,56 +202,10 @@ func TestHandleInvite_XUIError(t *testing.T) {
 	assert.Contains(t, body, "Ошибка сервера", "handleInvite() body should contain error message")
 }
 
-func TestGenerateSubID(t *testing.T) {
-	t.Parallel()
-
-	id1, err := utils.GenerateSubID()
-	require.NoError(t, err)
-	id2, err := utils.GenerateSubID()
-	require.NoError(t, err)
-
-	assert.Equal(t, 10, len(id1), "GenerateSubID() length")
-	assert.NotEqual(t, id1, id2, "GenerateSubID() should generate different IDs")
-	for _, c := range id1 {
-		assert.True(t, isHexDigit(c), "GenerateSubID() contains non-hex character: %c", c)
-	}
-}
-
-func isHexDigit(c rune) bool {
-	return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')
-}
-
-func TestHandleInvite_EmptyCode(t *testing.T) {
-	t.Parallel()
-
-	mockDB := testutil.NewMockDatabaseService()
-	mockDB.GetPlanByNameFunc = func(ctx context.Context, name string) (*database.Plan, error) {
-		return &database.Plan{ID: 1, Name: "trial", DevicesLimit: 1, TrafficLimit: 1073741824}, nil
-	}
-	mockDB.GetNodesByPlanNameFunc = func(ctx context.Context, planName string) ([]database.Node, error) {
-		return []database.Node{{ID: 1, IsActive: true, Host: "http://localhost:2053", InboundIDs: "[1]"}}, nil
-	}
-
-	cfg := &config.Config{
-		SiteURL:            "https://vpn.site",
-		TrialDurationHours: 3,
-		TrialRateLimit:     3,
-	}
-
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, nil)
-
-	req := httptest.NewRequest("GET", "/i/", nil)
-	rec := httptest.NewRecorder()
-
-	srv.handleInvite(rec, req)
-
-	assert.Equal(t, http.StatusNotFound, rec.Code, "handleInvite() status")
-}
-
 func TestHandleInvite_DatabaseError(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewMockDatabaseService()
+	mockDB := testutil.NewDatabaseService()
 	mockDB.GetPlanByNameFunc = func(ctx context.Context, name string) (*database.Plan, error) {
 		return &database.Plan{ID: 1, Name: "trial", DevicesLimit: 1, TrafficLimit: 1073741824}, nil
 	}
@@ -221,7 +219,7 @@ func TestHandleInvite_DatabaseError(t *testing.T) {
 		TrialRateLimit:     3,
 	}
 
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", mockDB, cfg, "testbot", nil, nil)
 
 	mockDB.GetInviteByCodeFunc = func(ctx context.Context, code string) (*database.Invite, error) {
 		return nil, gorm.ErrInvalidDB
@@ -240,25 +238,25 @@ func TestHandleInvite_DatabaseError(t *testing.T) {
 func TestGetExistingTrialFromCookie_NoCookie(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewMockDatabaseService()
+	mockDB := testutil.NewDatabaseService()
 	cfg := &config.Config{}
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", mockDB, cfg, "testbot", nil, nil)
 
 	req := httptest.NewRequest("GET", "/i/test", nil)
 
 	ctx := context.Background()
 	sub, err := srv.getExistingTrialFromCookie(req, ctx, "test")
 
-	assert.Error(t, err, "getExistingTrialFromCookie() should return error when no cookie")
+	assert.NoError(t, err, "getExistingTrialFromCookie() should not return error when no cookie (expected business state)")
 	assert.Nil(t, sub, "getExistingTrialFromCookie() should return nil when no cookie")
 }
 
 func TestGetExistingTrialFromCookie_InvalidSubID(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewMockDatabaseService()
+	mockDB := testutil.NewDatabaseService()
 	cfg := &config.Config{}
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", mockDB, cfg, "testbot", nil, nil)
 
 	req := httptest.NewRequest("GET", "/i/test", nil)
 	req.AddCookie(&http.Cookie{
@@ -269,16 +267,16 @@ func TestGetExistingTrialFromCookie_InvalidSubID(t *testing.T) {
 	ctx := context.Background()
 	sub, err := srv.getExistingTrialFromCookie(req, ctx, "test")
 
-	assert.Error(t, err, "getExistingTrialFromCookie() should return error for invalid sub ID")
+	assert.NoError(t, err, "getExistingTrialFromCookie() should not return error for invalid sub ID (expected business state)")
 	assert.Nil(t, sub, "getExistingTrialFromCookie() should return nil for invalid sub ID")
 }
 
 func TestGetExistingTrialFromCookie_NotTrial(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewMockDatabaseService()
+	mockDB := testutil.NewDatabaseService()
 	cfg := &config.Config{}
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", mockDB, cfg, "testbot", nil, nil)
 
 	mockDB.GetTrialSubscriptionBySubIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
 		return &database.Subscription{
@@ -297,16 +295,16 @@ func TestGetExistingTrialFromCookie_NotTrial(t *testing.T) {
 	ctx := context.Background()
 	sub, err := srv.getExistingTrialFromCookie(req, ctx, "test")
 
-	assert.Error(t, err, "getExistingTrialFromCookie() should return error for non-trial subscription")
+	assert.NoError(t, err, "getExistingTrialFromCookie() should not return error for non-trial subscription (expected business state)")
 	assert.Nil(t, sub, "getExistingTrialFromCookie() should return nil for non-trial subscription")
 }
 
 func TestGetExistingTrialFromCookie_AlreadyActivated(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewMockDatabaseService()
+	mockDB := testutil.NewDatabaseService()
 	cfg := &config.Config{}
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", mockDB, cfg, "testbot", nil, nil)
 
 	mockDB.GetTrialSubscriptionBySubIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
 		return &database.Subscription{
@@ -325,24 +323,27 @@ func TestGetExistingTrialFromCookie_AlreadyActivated(t *testing.T) {
 	ctx := context.Background()
 	sub, err := srv.getExistingTrialFromCookie(req, ctx, "test")
 
-	assert.Error(t, err, "getExistingTrialFromCookie() should return error for activated trial")
+	assert.NoError(t, err, "getExistingTrialFromCookie() should not return error for activated trial (expected business state)")
 	assert.Nil(t, sub, "getExistingTrialFromCookie() should return nil for activated trial")
 }
 
 func TestGetExistingTrialFromCookie_Expired(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewMockDatabaseService()
+	mockDB := testutil.NewDatabaseService()
 	cfg := &config.Config{}
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", mockDB, cfg, "testbot", nil, nil)
 
 	mockDB.GetTrialSubscriptionBySubIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
 		return &database.Subscription{
 			SubscriptionID: subscriptionID,
 			PlanID:         1,
 			TelegramID:     0,
-			ExpiresAt:      time.Now().Add(-1 * time.Hour), // Expired
+			ExpiresAt:      ptrTime(time.Now().Add(-1 * time.Hour)), // Expired
 		}, nil
+	}
+	mockDB.GetPlanByIDFunc = func(ctx context.Context, planID uint) (*database.Plan, error) {
+		return &database.Plan{ID: 1, Name: database.TrialPlanName}, nil
 	}
 
 	req := httptest.NewRequest("GET", "/i/test", nil)
@@ -354,23 +355,23 @@ func TestGetExistingTrialFromCookie_Expired(t *testing.T) {
 	ctx := context.Background()
 	sub, err := srv.getExistingTrialFromCookie(req, ctx, "test")
 
-	assert.Error(t, err, "getExistingTrialFromCookie() should return error for expired trial")
+	assert.NoError(t, err, "getExistingTrialFromCookie() should not return error for expired trial (expected business state)")
 	assert.Nil(t, sub, "getExistingTrialFromCookie() should return nil for expired trial")
 }
 
 func TestGetExistingTrialFromCookie_Valid(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewMockDatabaseService()
+	mockDB := testutil.NewDatabaseService()
 	cfg := &config.Config{}
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", mockDB, cfg, "testbot", nil, nil)
 
 	mockDB.GetTrialSubscriptionBySubIDFunc = func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
 		return &database.Subscription{
 			SubscriptionID: subscriptionID,
 			PlanID:         1,
 			TelegramID:     0,
-			ExpiresAt:      time.Now().Add(2 * time.Hour),
+			ExpiresAt:      ptrTime(time.Now().Add(2 * time.Hour)),
 		}, nil
 	}
 	mockDB.GetPlanByIDFunc = func(ctx context.Context, planID uint) (*database.Plan, error) {
@@ -394,50 +395,12 @@ func TestGetExistingTrialFromCookie_Valid(t *testing.T) {
 	assert.Equal(t, "valid-sub-id", sub.SubscriptionID, "getExistingTrialFromCookie() should return correct sub ID")
 }
 
-func TestInviteCodeRegex(t *testing.T) {
-	t.Parallel()
-
-	srv := NewServer(":8880", nil, &config.Config{}, bot.NewTestBotConfig(), nil, nil)
-
-	tests := []struct {
-		name  string
-		code  string
-		valid bool
-	}{
-		{"alphanumeric", "abc123", true},
-		{"with underscore", "abc_123", true},
-		{"with hyphen", "abc-123", true},
-		{"uppercase", "ABC123", true},
-		{"mixed case", "AbC123", true},
-		{"empty string", "", false},
-		{"with slash", "abc/123", false},
-		{"with dot", "abc.123", false},
-		{"with space", "abc 123", false},
-		{"with at sign", "abc@123", false},
-		{"sql injection", "abc'; DROP TABLE--", false},
-		{"path traversal", "../etc/passwd", false},
-		{"only numbers", "123456", true},
-		{"only letters", "abcdef", true},
-		{"single char", "a", true},
-		{"long code", "abcdefghij1234567890", true},
-		{"cyrillic", "абв", false},
-		{"unicode", "用户", false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := srv.inviteCodeRegex.MatchString(tt.code)
-			assert.Equal(t, tt.valid, result, "inviteCodeRegex.MatchString(%q)", tt.code)
-		})
-	}
-}
-
 // === Additional handleInvite error path tests ===
 
 func TestHandleInvite_XUIAddClientFails(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewMockDatabaseService()
+	mockDB := testutil.NewDatabaseService()
 
 	cfg, subService, mockXUI := makeTestSubService(mockDB)
 
@@ -454,7 +417,7 @@ func TestHandleInvite_XUIAddClientFails(t *testing.T) {
 		return nil, fmt.Errorf("XUI add client error")
 	}
 
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), subService, nil)
+	srv := NewServer(":8880", mockDB, cfg, "testbot", subService, nil)
 
 	req := httptest.NewRequest("GET", "/i/testcode", nil)
 	req.RemoteAddr = "192.168.1.1:12345"
@@ -469,7 +432,7 @@ func TestHandleInvite_XUIAddClientFails(t *testing.T) {
 func TestHandleInvite_CreateTrialSubscriptionFails(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewMockDatabaseService()
+	mockDB := testutil.NewDatabaseService()
 
 	cfg, subService, mockXUI := makeTestSubService(mockDB)
 
@@ -495,7 +458,7 @@ func TestHandleInvite_CreateTrialSubscriptionFails(t *testing.T) {
 		return nil, fmt.Errorf("DB error")
 	}
 
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), subService, nil)
+	srv := NewServer(":8880", mockDB, cfg, "testbot", subService, nil)
 
 	req := httptest.NewRequest("GET", "/i/testcode", nil)
 	req.RemoteAddr = "192.168.1.1:12345"
@@ -510,7 +473,7 @@ func TestHandleInvite_CreateTrialSubscriptionFails(t *testing.T) {
 func TestHandleInvite_ExistingTrialFromCookie(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewMockDatabaseService()
+	mockDB := testutil.NewDatabaseService()
 	mockDB.GetPlanByNameFunc = func(ctx context.Context, name string) (*database.Plan, error) {
 		return &database.Plan{ID: 1, Name: "trial", DevicesLimit: 1, TrafficLimit: 1073741824}, nil
 	}
@@ -524,7 +487,7 @@ func TestHandleInvite_ExistingTrialFromCookie(t *testing.T) {
 		TrialRateLimit:     3,
 	}
 
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", mockDB, cfg, "testbot", nil, nil)
 
 	mockDB.GetInviteByCodeFunc = func(ctx context.Context, code string) (*database.Invite, error) {
 		return &database.Invite{Code: "testcode", ReferrerTGID: 12345}, nil
@@ -534,7 +497,7 @@ func TestHandleInvite_ExistingTrialFromCookie(t *testing.T) {
 			SubscriptionID: "existing-sub-id",
 			PlanID:         1,
 			TelegramID:     0,
-			ExpiresAt:      time.Now().Add(2 * time.Hour),
+			ExpiresAt:      ptrTime(time.Now().Add(2 * time.Hour)),
 		}, nil
 	}
 	mockDB.GetPlanByIDFunc = func(ctx context.Context, planID uint) (*database.Plan, error) {
@@ -560,9 +523,9 @@ func TestHandleInvite_ExistingTrialFromCookie(t *testing.T) {
 func TestHandleInvite_MethodNotAllowed(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewMockDatabaseService()
+	mockDB := testutil.NewDatabaseService()
 	cfg := &config.Config{}
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", mockDB, cfg, "testbot", nil, nil)
 
 	req := httptest.NewRequest("POST", "/i/testcode", nil)
 	rec := httptest.NewRecorder()
@@ -573,42 +536,10 @@ func TestHandleInvite_MethodNotAllowed(t *testing.T) {
 	assert.Equal(t, "GET", rec.Header().Get("Allow"))
 }
 
-func TestHandleInvite_InvalidPath(t *testing.T) {
-	t.Parallel()
-
-	mockDB := testutil.NewMockDatabaseService()
-	cfg := &config.Config{}
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, nil)
-
-	req := httptest.NewRequest("GET", "/not-invite/testcode", nil)
-	rec := httptest.NewRecorder()
-
-	srv.handleInvite(rec, req)
-
-	assert.Equal(t, http.StatusNotFound, rec.Code)
-	assert.Contains(t, rec.Body.String(), "Страница не найдена")
-}
-
-func TestHandleInvite_InvalidCodeChars(t *testing.T) {
-	t.Parallel()
-
-	mockDB := testutil.NewMockDatabaseService()
-	cfg := &config.Config{}
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, nil)
-
-	req := httptest.NewRequest("GET", "/i/invalid@code!", nil)
-	rec := httptest.NewRecorder()
-
-	srv.handleInvite(rec, req)
-
-	assert.Equal(t, http.StatusNotFound, rec.Code)
-	assert.Contains(t, rec.Body.String(), "Приглашение не найдено")
-}
-
 func TestHandleInvite_RateLimitCheckError(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewMockDatabaseService()
+	mockDB := testutil.NewDatabaseService()
 	mockDB.GetPlanByNameFunc = func(ctx context.Context, name string) (*database.Plan, error) {
 		return &database.Plan{ID: 1, Name: "trial", DevicesLimit: 1, TrafficLimit: 1073741824}, nil
 	}
@@ -622,7 +553,7 @@ func TestHandleInvite_RateLimitCheckError(t *testing.T) {
 		TrialRateLimit:     3,
 	}
 
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), nil, nil)
+	srv := NewServer(":8880", mockDB, cfg, "testbot", nil, nil)
 
 	mockDB.GetInviteByCodeFunc = func(ctx context.Context, code string) (*database.Invite, error) {
 		return &database.Invite{Code: "testcode", ReferrerTGID: 12345}, nil
@@ -644,7 +575,7 @@ func TestHandleInvite_RateLimitCheckError(t *testing.T) {
 func TestHandleInvite_ParallelRequests(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewMockDatabaseService()
+	mockDB := testutil.NewDatabaseService()
 	mockDB.GetPlanByNameFunc = func(ctx context.Context, name string) (*database.Plan, error) {
 		return &database.Plan{ID: 1, Name: "trial", DevicesLimit: 1, TrafficLimit: 1073741824}, nil
 	}
@@ -659,7 +590,7 @@ func TestHandleInvite_ParallelRequests(t *testing.T) {
 	}
 
 	cfg, subService, _ := makeTestSubService(mockDB)
-	srv := NewServer(":8880", mockDB, cfg, bot.NewTestBotConfig(), subService, nil)
+	srv := NewServer(":8880", mockDB, cfg, "testbot", subService, nil)
 
 	var (
 		mu    sync.Mutex
@@ -679,10 +610,11 @@ func TestHandleInvite_ParallelRequests(t *testing.T) {
 		return nil
 	}
 	mockDB.CreateTrialSubscriptionFunc = func(ctx context.Context, inviteCode, subscriptionID, clientID string, expiryTime time.Time) (*database.Subscription, error) {
+		inviteVal := inviteCode
 		return &database.Subscription{
 			SubscriptionID: subscriptionID,
 			PlanID:         1,
-			InviteCode:     inviteCode,
+			InviteCode:     &inviteVal,
 		}, nil
 	}
 

@@ -6,7 +6,7 @@ func EscapeMarkdown(text string) string {
 	var b strings.Builder
 	b.Grow(len(text) * 2)
 	for _, r := range text {
-		if strings.ContainsRune(`\_*[]()~`+"`"+">#+-=|{}.!", r) {
+		if strings.ContainsRune(`\_*[]()~`+"`"+">-#+=|{}^", r) {
 			b.WriteRune('\\')
 		}
 		b.WriteRune(r)

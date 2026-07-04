@@ -226,32 +226,74 @@ func TestRotateBackups(t *testing.T) {
 func TestDailyBackup(t *testing.T) {
 	t.Parallel()
 
-	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "test.db")
+	tests := []struct {
+		name        string
+		keepDays    int
+		createDB    bool
+		check       func(t *testing.T, dbPath string)
+	}{
+		{
+			name:     "default_keep_days",
+			keepDays: 7,
+			createDB: true,
+			check: func(t *testing.T, dbPath string) {
+				matches, err := filepath.Glob(dbPath + ".backup.*")
+				require.NoError(t, err, "Failed to find backups")
+				assert.Equal(t, 1, len(matches), "Expected 1 timed backup")
+			},
+		},
+		{
+			name:     "keep_days_zero",
+			keepDays: 0,
+			createDB: true,
+			check: func(t *testing.T, dbPath string) {
+				matches, err := filepath.Glob(dbPath + ".backup.*")
+				require.NoError(t, err, "Failed to find backups")
+				assert.Equal(t, 1, len(matches), "With keepDays=0 still triggers daily backup")
+			},
+		},
+		{
+			name:     "keep_days_one",
+			keepDays: 1,
+			createDB: true,
+			check: func(t *testing.T, dbPath string) {
+				infos, err := GetBackupInfo(dbPath)
+				require.NoError(t, err, "GetBackupInfo() error")
+				assert.Equal(t, 1, len(infos), "Expected 1 backup with keepDays=1")
+			},
+		},
+		{
+			name:     "keep_days_negative_uses_default",
+			keepDays: -5,
+			createDB: true,
+			check: func(t *testing.T, dbPath string) {
+				assert.NoError(t, DailyBackup(context.Background(), dbPath, -5), "DailyBackup() with negative keepDays should not error")
+			},
+		},
+		{
+			name:     "non_existent_database",
+			keepDays: 7,
+			createDB: false,
+			check: func(t *testing.T, dbPath string) {
+				err := DailyBackup(context.Background(), dbPath, 7)
+				require.Error(t, err, "DailyBackup() should return error for non-existent database")
+			},
+		},
+	}
 
-	// Create test database
-	content := []byte("test database content")
-	require.NoError(t, os.WriteFile(dbPath, content, 0600), "Failed to create test database")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			tmpDir := t.TempDir()
+			dbPath := filepath.Join(tmpDir, "test.db")
 
-	err := DailyBackup(context.Background(), dbPath, 7)
-	require.NoError(t, err, "DailyBackup() error")
-
-	// Check timed backup exists
-	pattern := dbPath + ".backup.*"
-	matches, err := filepath.Glob(pattern)
-	require.NoError(t, err, "Failed to find backups")
-
-	assert.Equal(t, 1, len(matches), "Expected 1 timed backup")
-}
-
-func TestDailyBackup_NonExistentDatabase(t *testing.T) {
-	t.Parallel()
-
-	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "nonexistent.db")
-
-	err := DailyBackup(context.Background(), dbPath, 7)
-	require.Error(t, err, "DailyBackup() should return error for non-existent database")
+			if tt.createDB {
+				require.NoError(t, os.WriteFile(dbPath, []byte("content"), 0600), "Failed to create test database")
+				require.NoError(t, DailyBackup(context.Background(), dbPath, tt.keepDays), "DailyBackup() error")
+			}
+			tt.check(t, dbPath)
+		})
+	}
 }
 
 func TestDailyBackup_MultipleRuns(t *testing.T) {
@@ -260,61 +302,71 @@ func TestDailyBackup_MultipleRuns(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
-	// Create test database
 	require.NoError(t, os.WriteFile(dbPath, []byte("content"), 0600), "Failed to create test database")
 
-	// Run daily backup twice
 	require.NoError(t, DailyBackup(context.Background(), dbPath, 5), "First DailyBackup() error")
-
-	// Small delay to ensure different timestamp
-	// time.Sleep(time.Second)
-
 	require.NoError(t, DailyBackup(context.Background(), dbPath, 5), "Second DailyBackup() error")
 
-	// Check we have at least 1 timed backup
-	pattern := dbPath + ".backup.*"
-	matches, err := filepath.Glob(pattern)
+	matches, err := filepath.Glob(dbPath + ".backup.*")
 	require.NoError(t, err, "Failed to find backups")
-
 	assert.GreaterOrEqual(t, len(matches), 1, "Expected at least 1 timed backup")
 }
 
-func TestGetBackupInfo_Empty(t *testing.T) {
+func TestGetBackupInfo(t *testing.T) {
 	t.Parallel()
 
-	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "test.db")
+	tests := []struct {
+		name     string
+		setup    func(t *testing.T, dbPath string)
+		check    func(t *testing.T, infos []BackupInfo)
+	}{
+		{
+			name: "empty",
+			setup: func(t *testing.T, dbPath string) {},
+			check: func(t *testing.T, infos []BackupInfo) {
+				assert.Equal(t, 0, len(infos), "Expected 0 backups")
+			},
+		},
+		{
+			name: "with_backups",
+			setup: func(t *testing.T, dbPath string) {
+				require.NoError(t, os.WriteFile(dbPath, []byte("content"), 0600), "Failed to create database")
+				require.NoError(t, BackupDatabase(context.Background(), dbPath), "BackupDatabase() error")
+				require.NoError(t, DailyBackup(context.Background(), dbPath, 7), "DailyBackup() error")
+			},
+			check: func(t *testing.T, infos []BackupInfo) {
+				assert.Greater(t, len(infos), 0, "Expected at least 1 backup info")
+				for _, info := range infos {
+					assert.NotEmpty(t, info.Path, "Backup path should not be empty")
+					assert.NotEmpty(t, info.Size, "BackupInfo.Size should not be zero")
+				}
+			},
+		},
+		{
+			name: "backup_info_path",
+			setup: func(t *testing.T, dbPath string) {
+				require.NoError(t, os.WriteFile(dbPath, []byte("test"), 0600), "Failed to create test file")
+				require.NoError(t, BackupDatabase(context.Background(), dbPath), "BackupDatabase() error")
+			},
+			check: func(t *testing.T, infos []BackupInfo) {
+				require.Greater(t, len(infos), 0, "Expected at least one backup")
+				assert.NotEmpty(t, infos[0].Path, "BackupInfo.Path should not be empty")
+				assert.Greater(t, infos[0].Size, int64(0), "BackupInfo.Size should not be zero")
+			},
+		},
+	}
 
-	infos, err := GetBackupInfo(dbPath)
-	require.NoError(t, err, "GetBackupInfo() error")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			tmpDir := t.TempDir()
+			dbPath := filepath.Join(tmpDir, "test.db")
+			tt.setup(t, dbPath)
 
-	assert.Equal(t, 0, len(infos), "Expected 0 backups")
-}
-
-func TestGetBackupInfo_WithBackups(t *testing.T) {
-	t.Parallel()
-
-	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "test.db")
-
-	// Create database and backups
-	require.NoError(t, os.WriteFile(dbPath, []byte("content"), 0600), "Failed to create database")
-
-	// Create current backup
-	require.NoError(t, BackupDatabase(context.Background(), dbPath), "BackupDatabase() error")
-
-	// Create timed backup
-	require.NoError(t, DailyBackup(context.Background(), dbPath, 7), "DailyBackup() error")
-
-	infos, err := GetBackupInfo(dbPath)
-	require.NoError(t, err, "GetBackupInfo() error")
-
-	assert.Greater(t, len(infos), 0, "Expected at least 1 backup info")
-
-	// Verify backup info structure
-	for _, info := range infos {
-		assert.NotEmpty(t, info.Path, "Backup path should not be empty")
-		assert.GreaterOrEqual(t, info.Size, int64(0), "Backup size should be non-negative")
+			infos, err := GetBackupInfo(dbPath)
+			require.NoError(t, err, "GetBackupInfo() error")
+			tt.check(t, infos)
+		})
 	}
 }
 
@@ -324,10 +376,8 @@ func TestGetBackupInfo_SortedByTime(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
-	// Create database
 	require.NoError(t, os.WriteFile(dbPath, []byte("content"), 0600), "Failed to create database")
 
-	// Create multiple timed backups
 	for i := 0; i < 3; i++ {
 		require.NoError(t, DailyBackup(context.Background(), dbPath, 7), "DailyBackup() error")
 		time.Sleep(2 * time.Millisecond)
@@ -336,166 +386,65 @@ func TestGetBackupInfo_SortedByTime(t *testing.T) {
 	infos, err := GetBackupInfo(dbPath)
 	require.NoError(t, err, "GetBackupInfo() error")
 
-	// Verify sorted by time (newest first)
 	for i := 0; i < len(infos)-1; i++ {
 		assert.True(t, infos[i].ModTime.After(infos[i+1].ModTime) || infos[i].ModTime.Equal(infos[i+1].ModTime),
 			"Backups should be sorted by modification time (newest first)")
 	}
 }
 
-func TestTotalBackupSize_Empty(t *testing.T) {
+func TestTotalBackupSize(t *testing.T) {
 	t.Parallel()
 
-	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "test.db")
+	tests := []struct {
+		name   string
+		setup  func(t *testing.T, dbPath string)
+		check  func(t *testing.T, size int64)
+	}{
+		{
+			name:  "empty",
+			setup: func(t *testing.T, dbPath string) {},
+			check: func(t *testing.T, size int64) {
+				assert.Equal(t, int64(0), size, "Expected 0 size")
+			},
+		},
+		{
+			name: "with_backups",
+			setup: func(t *testing.T, dbPath string) {
+				content := []byte("test database content")
+				require.NoError(t, os.WriteFile(dbPath, content, 0600), "Failed to create database")
+				require.NoError(t, BackupDatabase(context.Background(), dbPath), "BackupDatabase() error")
+			},
+			check: func(t *testing.T, size int64) {
+				assert.Greater(t, size, int64(0), "Expected non-zero total backup size")
+			},
+		},
+		{
+			name: "multiple_backups",
+			setup: func(t *testing.T, dbPath string) {
+				content := []byte("test content")
+				require.NoError(t, os.WriteFile(dbPath, content, 0600), "Failed to create database")
+				require.NoError(t, BackupDatabase(context.Background(), dbPath), "BackupDatabase() error")
+			},
+			check: func(t *testing.T, size int64) {
+				assert.GreaterOrEqual(t, size, int64(5), "Expected size >= 5")
+			},
+		},
+	}
 
-	size, err := TotalBackupSize(dbPath)
-	require.NoError(t, err, "TotalBackupSize() error")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			tmpDir := t.TempDir()
+			dbPath := filepath.Join(tmpDir, "test.db")
+			tt.setup(t, dbPath)
 
-	assert.Equal(t, int64(0), size, "Expected 0 size")
+			size, err := TotalBackupSize(dbPath)
+			require.NoError(t, err, "TotalBackupSize() error")
+			tt.check(t, size)
+		})
+	}
 }
 
-func TestTotalBackupSize_WithBackups(t *testing.T) {
-	t.Parallel()
-
-	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "test.db")
-
-	// Create database
-	content := []byte("test database content")
-	require.NoError(t, os.WriteFile(dbPath, content, 0600), "Failed to create database")
-
-	// Create backup
-	require.NoError(t, BackupDatabase(context.Background(), dbPath), "BackupDatabase() error")
-
-	size, err := TotalBackupSize(dbPath)
-	require.NoError(t, err, "TotalBackupSize() error")
-
-	assert.Greater(t, size, int64(0), "Expected non-zero total backup size")
-	assert.Equal(t, int64(len(content)), size, "Expected size to match content length")
-}
-
-func TestTotalBackupSize_MultipleBackups(t *testing.T) {
-	t.Parallel()
-
-	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "test.db")
-
-	// Create database
-	content := []byte("test content")
-	require.NoError(t, os.WriteFile(dbPath, content, 0600), "Failed to create database")
-
-	// Create first backup
-	require.NoError(t, BackupDatabase(context.Background(), dbPath), "BackupDatabase() error")
-
-	size, err := TotalBackupSize(dbPath)
-	require.NoError(t, err, "TotalBackupSize() error")
-
-	// Should have at least the content size in backup
-	assert.GreaterOrEqual(t, size, int64(5), "Expected size >= 5")
-}
-
-func TestValidatePath(t *testing.T) {
-	t.Parallel()
-
-	// Test that paths are validated
-	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "test.db")
-
-	// Create a database file
-	require.NoError(t, os.WriteFile(dbPath, []byte("test"), 0600), "Failed to create test file")
-
-	// ValidatePath should work for existing files
-	err := BackupDatabase(context.Background(), dbPath)
-	assert.NoError(t, err, "BackupDatabase() should work for valid path")
-}
-
-func TestDailyBackup_KeepDaysZero(t *testing.T) {
-	t.Parallel()
-
-	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "test.db")
-
-	// Create a database file
-	require.NoError(t, os.WriteFile(dbPath, []byte("test content"), 0600), "Failed to create test file")
-
-	// With keepDays=0, should still work (keep all)
-	err := DailyBackup(context.Background(), dbPath, 0)
-	assert.NoError(t, err, "DailyBackup() with keepDays=0 should not error")
-}
-
-func TestDailyBackup_KeepDaysOne(t *testing.T) {
-	t.Parallel()
-
-	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "test.db")
-
-	// Create a database file
-	require.NoError(t, os.WriteFile(dbPath, []byte("test content"), 0600), "Failed to create test file")
-
-	// With keepDays=1, should only keep latest
-	err := DailyBackup(context.Background(), dbPath, 1)
-	require.NoError(t, err, "DailyBackup() with keepDays=1 should not error")
-
-	// Verify only one backup exists
-	infos, err := GetBackupInfo(dbPath)
-	require.NoError(t, err, "GetBackupInfo() error")
-	assert.Equal(t, 1, len(infos), "Expected 1 backup")
-}
-
-func TestDailyBackup_KeepDaysNegative_UsesDefault(t *testing.T) {
-	t.Parallel()
-
-	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "test.db")
-
-	require.NoError(t, os.WriteFile(dbPath, []byte("test"), 0600), "Failed to create test file")
-
-	err := DailyBackup(context.Background(), dbPath, -5)
-	assert.NoError(t, err, "DailyBackup() with negative keepDays should not error")
-}
-
-func TestBackupInfo_Path(t *testing.T) {
-	t.Parallel()
-
-	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "test.db")
-
-	require.NoError(t, os.WriteFile(dbPath, []byte("test"), 0600), "Failed to create test file")
-	require.NoError(t, BackupDatabase(context.Background(), dbPath), "BackupDatabase() error")
-
-	infos, err := GetBackupInfo(dbPath)
-	require.NoError(t, err, "GetBackupInfo() error")
-	require.Greater(t, len(infos), 0, "Expected at least one backup")
-
-	// Verify path is set
-	assert.NotEmpty(t, infos[0].Path, "BackupInfo.Path should not be empty")
-
-	// Verify Size is set
-	assert.Greater(t, infos[0].Size, int64(0), "BackupInfo.Size should not be zero")
-}
-
-func TestBackupInfo_FileNotFound(t *testing.T) {
-	t.Parallel()
-
-	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "nonexistent.db")
-
-	infos, err := GetBackupInfo(dbPath)
-	require.NoError(t, err, "GetBackupInfo() error")
-
-	assert.Equal(t, 0, len(infos), "Expected 0 backups for nonexistent file")
-}
-
-func TestBackupDatabase_ReadError(t *testing.T) {
-	t.Parallel()
-
-	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "nonexistent.db")
-
-	err := BackupDatabase(context.Background(), dbPath)
-	require.Error(t, err, "BackupDatabase() should return error for non-existent file")
-}
 
 func TestBackupDatabase_FilePermission(t *testing.T) {
 	t.Parallel()

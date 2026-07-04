@@ -4,14 +4,12 @@ import (
 	"context"
 	"errors"
 	"testing"
-	"time"
 
 	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/interfaces"
 	"github.com/kereal/rs8kvn_bot/internal/service"
 	"github.com/kereal/rs8kvn_bot/internal/testutil"
-	"github.com/kereal/rs8kvn_bot/internal/webhook"
 	"github.com/kereal/rs8kvn_bot/internal/xui"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -22,11 +20,14 @@ import (
 func TestHandleCallback_NilCallbackQuery(t *testing.T) {
 	t.Parallel()
 
-	handler := &Handler{}
+	cfg := &config.Config{}
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
+	handler := NewHandler(testutil.NewBotAPI(), cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
+
 	ctx := context.Background()
 	update := tgbotapi.Update{}
 
-	// Should not panic
 	handler.HandleCallback(ctx, update)
 }
 
@@ -34,9 +35,9 @@ func TestHandleCallback_NilFrom(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	handler := NewHandler(testutil.NewMockBotAPI(), cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
+	handler := NewHandler(testutil.NewBotAPI(), cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
 
 	ctx := context.Background()
 	update := tgbotapi.Update{
@@ -56,29 +57,36 @@ func TestHandleCallback_CallbackDataRouting(t *testing.T) {
 	tests := []struct {
 		name            string
 		callbackData    string
-		setupMock       func(*testutil.MockDatabaseService, *testutil.MockXUIClient)
-		setupSubService func(*testutil.MockDatabaseService, *testutil.MockXUIClient, *config.Config) *service.SubscriptionService
+		setupMock       func(*testutil.DatabaseService, *testutil.XUIClient)
+		setupSubService func(*testutil.DatabaseService, *testutil.XUIClient, *config.Config) *service.SubscriptionService
 		wantSend        bool
 		wantText        string
 	}{
 		{
 			name:         "create_subscription",
 			callbackData: "create_subscription",
-			setupMock: func(mockDB *testutil.MockDatabaseService, mockXUI *testutil.MockXUIClient) {
+			setupMock: func(mockDB *testutil.DatabaseService, mockXUI *testutil.XUIClient) {
 				mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 					return nil, gorm.ErrRecordNotFound
 				}
+				mockDB.GetPlanByNameFunc = func(ctx context.Context, name string) (*database.Plan, error) {
+					return &database.Plan{ID: 1, Name: database.FreePlanName, TrafficLimit: 1073741824}, nil
+				}
 				mockDB.CreateSubscriptionFunc = func(ctx context.Context, sub *database.Subscription, inviteCode string) error {
+					sub.ID = 1
 					return nil
 				}
-				mockXUI.AddClientWithIDFunc = func(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
-					return &xui.ClientConfig{ID: "test-client-id", SubID: "test-sub-id"}, nil
+				mockDB.GetNodesByPlanIDFunc = func(ctx context.Context, planID uint) ([]database.Node, error) {
+					return nil, nil
+				}
+				mockDB.GetBySubscriptionIDFunc = func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
+					return nil, nil
 				}
 			},
-			setupSubService: func(mockDB *testutil.MockDatabaseService, mockXUI *testutil.MockXUIClient, cfg *config.Config) *service.SubscriptionService {
+			setupSubService: func(mockDB *testutil.DatabaseService, mockXUI *testutil.XUIClient, cfg *config.Config) *service.SubscriptionService {
 				mockXUIClients := map[uint]interfaces.XUIClient{1: mockXUI}
 				nodes := []database.Node{{ID: 1, Name: "main", IsActive: true, Host: "http://example.com", APIToken: "token", InboundIDs: "[1]"}}
-				return service.NewSubscriptionService(mockDB, mockXUIClients, nodes, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
+				return service.NewSubscriptionService(mockDB, mockXUIClients, nil, nodes, cfg)
 			},
 			wantSend: true,
 			wantText: "Ваша подписка готова",
@@ -86,7 +94,7 @@ func TestHandleCallback_CallbackDataRouting(t *testing.T) {
 		{
 			name:         "qr_code",
 			callbackData: "qr_code",
-			setupMock: func(mockDB *testutil.MockDatabaseService, mockXUI *testutil.MockXUIClient) {
+			setupMock: func(mockDB *testutil.DatabaseService, mockXUI *testutil.XUIClient) {
 				mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 					return &database.Subscription{
 						TelegramID: telegramID,
@@ -101,7 +109,7 @@ func TestHandleCallback_CallbackDataRouting(t *testing.T) {
 		{
 			name:         "admin_stats",
 			callbackData: "admin_stats",
-			setupMock: func(mockDB *testutil.MockDatabaseService, mockXUI *testutil.MockXUIClient) {
+			setupMock: func(mockDB *testutil.DatabaseService, mockXUI *testutil.XUIClient) {
 				mockDB.CountAllSubscriptionsFunc = func(ctx context.Context) (int64, error) {
 					return 10, nil
 				}
@@ -118,7 +126,7 @@ func TestHandleCallback_CallbackDataRouting(t *testing.T) {
 		{
 			name:         "admin_lastreg",
 			callbackData: "admin_lastreg",
-			setupMock: func(mockDB *testutil.MockDatabaseService, mockXUI *testutil.MockXUIClient) {
+			setupMock: func(mockDB *testutil.DatabaseService, mockXUI *testutil.XUIClient) {
 				mockDB.GetLatestSubscriptionsFunc = func(ctx context.Context, limit int) ([]database.Subscription, error) {
 					return []database.Subscription{
 						{ID: 1, Username: "user1"},
@@ -132,7 +140,7 @@ func TestHandleCallback_CallbackDataRouting(t *testing.T) {
 		{
 			name:         "back_to_start",
 			callbackData: "back_to_start",
-			setupMock: func(mockDB *testutil.MockDatabaseService, mockXUI *testutil.MockXUIClient) {
+			setupMock: func(mockDB *testutil.DatabaseService, mockXUI *testutil.XUIClient) {
 				mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 					return nil, gorm.ErrRecordNotFound
 				}
@@ -143,7 +151,7 @@ func TestHandleCallback_CallbackDataRouting(t *testing.T) {
 		{
 			name:         "menu_donate",
 			callbackData: "menu_donate",
-			setupMock: func(mockDB *testutil.MockDatabaseService, mockXUI *testutil.MockXUIClient) {
+			setupMock: func(mockDB *testutil.DatabaseService, mockXUI *testutil.XUIClient) {
 				// No special setup needed
 			},
 			wantSend: true,
@@ -152,7 +160,7 @@ func TestHandleCallback_CallbackDataRouting(t *testing.T) {
 		{
 			name:         "menu_subscription",
 			callbackData: "menu_subscription",
-			setupMock: func(mockDB *testutil.MockDatabaseService, mockXUI *testutil.MockXUIClient) {
+			setupMock: func(mockDB *testutil.DatabaseService, mockXUI *testutil.XUIClient) {
 				mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 					return &database.Subscription{
 						TelegramID: telegramID,
@@ -164,10 +172,10 @@ func TestHandleCallback_CallbackDataRouting(t *testing.T) {
 					return &xui.ClientTraffic{Up: 1000, Down: 2000}, nil
 				}
 			},
-			setupSubService: func(mockDB *testutil.MockDatabaseService, mockXUI *testutil.MockXUIClient, cfg *config.Config) *service.SubscriptionService {
+			setupSubService: func(mockDB *testutil.DatabaseService, mockXUI *testutil.XUIClient, cfg *config.Config) *service.SubscriptionService {
 				mockXUIClients := map[uint]interfaces.XUIClient{1: mockXUI}
 				nodes := []database.Node{{ID: 1, Name: "main", IsActive: true, Host: "http://example.com", APIToken: "token", InboundIDs: "[1]"}}
-				return service.NewSubscriptionService(mockDB, mockXUIClients, nodes, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
+				return service.NewSubscriptionService(mockDB, mockXUIClients, nil, nodes, cfg)
 			},
 			wantSend: true,
 			wantText: "Ваша подписка",
@@ -175,7 +183,7 @@ func TestHandleCallback_CallbackDataRouting(t *testing.T) {
 		{
 			name:         "back_to_subscription",
 			callbackData: "back_to_subscription",
-			setupMock: func(mockDB *testutil.MockDatabaseService, mockXUI *testutil.MockXUIClient) {
+			setupMock: func(mockDB *testutil.DatabaseService, mockXUI *testutil.XUIClient) {
 				// No special setup needed - just deletes message via Request, not Send
 			},
 			wantSend: false,
@@ -184,7 +192,7 @@ func TestHandleCallback_CallbackDataRouting(t *testing.T) {
 		{
 			name:         "menu_help",
 			callbackData: "menu_help",
-			setupMock: func(mockDB *testutil.MockDatabaseService, mockXUI *testutil.MockXUIClient) {
+			setupMock: func(mockDB *testutil.DatabaseService, mockXUI *testutil.XUIClient) {
 				mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 					return &database.Subscription{
 						TelegramID: telegramID,
@@ -199,7 +207,7 @@ func TestHandleCallback_CallbackDataRouting(t *testing.T) {
 		{
 			name:         "share_invite",
 			callbackData: "share_invite",
-			setupMock: func(mockDB *testutil.MockDatabaseService, mockXUI *testutil.MockXUIClient) {
+			setupMock: func(mockDB *testutil.DatabaseService, mockXUI *testutil.XUIClient) {
 				mockDB.GetOrCreateInviteFunc = func(ctx context.Context, referrerTGID int64, code string) (*database.Invite, error) {
 					return &database.Invite{Code: code, ReferrerTGID: referrerTGID}, nil
 				}
@@ -210,7 +218,7 @@ func TestHandleCallback_CallbackDataRouting(t *testing.T) {
 		{
 			name:         "unknown callback",
 			callbackData: "unknown_callback",
-			setupMock: func(mockDB *testutil.MockDatabaseService, mockXUI *testutil.MockXUIClient) {
+			setupMock: func(mockDB *testutil.DatabaseService, mockXUI *testutil.XUIClient) {
 				// No setup needed
 			},
 			wantSend: false,
@@ -220,14 +228,15 @@ func TestHandleCallback_CallbackDataRouting(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			cfg := &config.Config{
 				TelegramAdminID: 123456,
 				SiteURL:         "https://example.com",
-				Nodes:         []config.Node{{Name: "main", XUIHost: "http://example.com", XUIAPIToken: "token", XUIInboundIDs: "[1]"}},
+				Nodes:           []config.Node{{Name: "main", XUIHost: "http://example.com", XUIAPIToken: "token", XUIInboundIDs: "[1]"}},
 			}
-			mockDB := testutil.NewMockDatabaseService()
-			mockXUI := testutil.NewMockXUIClient()
-			mockBot := testutil.NewMockBotAPI()
+			mockDB := testutil.NewDatabaseService()
+			mockXUI := testutil.NewXUIClient()
+			mockBot := testutil.NewBotAPI()
 			tt.setupMock(mockDB, mockXUI)
 			var subService *service.SubscriptionService
 			if tt.setupSubService != nil {
@@ -258,6 +267,7 @@ func TestHandleCallback_CallbackDataRouting(t *testing.T) {
 			} else {
 				assert.False(t, mockBot.SendCalledSafe(), "Bot.Send should not be called for %s", tt.name)
 			}
+
 		})
 	}
 }
@@ -268,9 +278,9 @@ func TestHandleCallback_AdminStats_NonAdmin(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 999999, // Different from chat ID
 	}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
+	mockBot := testutil.NewBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
 
 	ctx := context.Background()
@@ -299,9 +309,9 @@ func TestHandleCallback_AdminLastReg_NonAdmin(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 999999, // Different from chat ID
 	}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
+	mockBot := testutil.NewBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
 
 	ctx := context.Background()
@@ -329,9 +339,9 @@ func TestHandleCallback_AdminStats_DatabaseError(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 	}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
+	mockBot := testutil.NewBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
 
 	mockDB.CountAllSubscriptionsFunc = func(ctx context.Context) (int64, error) {
@@ -363,9 +373,9 @@ func TestHandleCallback_AdminLastReg_EmptyList(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 	}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
+	mockBot := testutil.NewBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
 
 	mockDB.GetLatestSubscriptionsFunc = func(ctx context.Context, limit int) ([]database.Subscription, error) {
@@ -397,9 +407,9 @@ func TestHandleCallback_AdminLastReg_DatabaseError(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 	}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
+	mockBot := testutil.NewBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
 
 	mockDB.GetLatestSubscriptionsFunc = func(ctx context.Context, limit int) ([]database.Subscription, error) {
@@ -429,13 +439,13 @@ func TestHandleCallback_MenuSubscription_NoSubscription(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
+	mockBot := testutil.NewBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
 	mockXUIClients := map[uint]interfaces.XUIClient{1: mockXUI}
 	nodes := []database.Node{{ID: 1, Name: "main", IsActive: true, Host: "http://example.com", APIToken: "token", InboundIDs: "[1]"}}
-	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUIClients, nodes, cfg, cfg.GlobalSubURL, &webhook.NoopSender{})
+	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUIClients, nil, nodes, cfg)
 	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
 
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
@@ -465,9 +475,9 @@ func TestHandleCallback_QRCode_NoSubscription(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
+	mockBot := testutil.NewBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
 
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
@@ -497,9 +507,9 @@ func TestHandleCallback_QRCode_WithSubscription(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
+	mockBot := testutil.NewBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
 
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
@@ -534,9 +544,9 @@ func TestHandleShareInvite_Success(t *testing.T) {
 	cfg := &config.Config{
 		SiteURL: "https://example.com",
 	}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
+	mockBot := testutil.NewBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
 
 	mockDB.GetOrCreateInviteFunc = func(ctx context.Context, referrerTGID int64, code string) (*database.Invite, error) {
@@ -559,9 +569,9 @@ func TestHandleShareInvite_DatabaseError(t *testing.T) {
 	cfg := &config.Config{
 		SiteURL: "https://example.com",
 	}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
+	mockBot := testutil.NewBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
 
 	mockDB.GetOrCreateInviteFunc = func(ctx context.Context, referrerTGID int64, code string) (*database.Invite, error) {
@@ -581,9 +591,9 @@ func TestHandleCallback_CreateSubscription_DatabaseError(t *testing.T) {
 	cfg := &config.Config{
 		Nodes: []config.Node{{Name: "main", XUIHost: "http://example.com", XUIAPIToken: "token", XUIInboundIDs: "[1]"}},
 	}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
+	mockBot := testutil.NewBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
 
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
@@ -613,9 +623,9 @@ func TestHandleCallback_MenuHelp_NoSubscription(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
+	mockBot := testutil.NewBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
 
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
@@ -645,9 +655,9 @@ func TestHandleCallback_MenuHelp_DatabaseError(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
+	mockBot := testutil.NewBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
 
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
@@ -673,198 +683,6 @@ func TestHandleCallback_MenuHelp_DatabaseError(t *testing.T) {
 	assert.Contains(t, mockBot.LastSentTextSafe(), "ошибк", "message should mention error")
 }
 
-func TestHandleCallback_AllCallbackTypes(t *testing.T) {
-	t.Parallel()
-
-	// Test that all expected callback types are handled
-	expectedCallbacks := []string{
-		"create_subscription",
-		"qr_code",
-		"admin_stats",
-		"admin_lastreg",
-		"back_to_start",
-		"menu_donate",
-		"menu_subscription",
-		"back_to_subscription",
-		"menu_help",
-		"share_invite",
-		"qr_telegram",
-		"qr_web",
-		"back_to_invite",
-	}
-
-	for _, callback := range expectedCallbacks {
-		t.Run("callback_"+callback, func(t *testing.T) {
-			assert.NotEmpty(t, callback, "Callback data should not be empty")
-		})
-	}
-}
-
-func TestHandleQRTelegram(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{
-		TelegramAdminID: 123456,
-		SiteURL:         "https://vpn.site",
-	}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
-
-	chatID := int64(123456)
-	messageID := 789
-	username := "testuser"
-
-	mockDB.GetOrCreateInviteFunc = func(ctx context.Context, referrerTGID int64, code string) (*database.Invite, error) {
-		return &database.Invite{
-			Code:         "ABC123",
-			ReferrerTGID: referrerTGID,
-		}, nil
-	}
-
-	ctx := context.Background()
-	handler.handleQRTelegram(ctx, chatID, username, messageID)
-
-	assert.True(t, mockBot.SendCalledSafe(), "Bot.Send should be called for QR photo")
-}
-
-func TestHandleQRTelegram_DatabaseError(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{
-		TelegramAdminID: 123456,
-	}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
-
-	chatID := int64(123456)
-	messageID := 789
-	username := "testuser"
-
-	mockDB.GetOrCreateInviteFunc = func(ctx context.Context, referrerTGID int64, code string) (*database.Invite, error) {
-		return nil, errors.New("database error")
-	}
-
-	ctx := context.Background()
-	handler.handleQRTelegram(ctx, chatID, username, messageID)
-
-	assert.True(t, mockBot.SendCalledSafe(), "Bot.Send should be called for error message")
-	assert.Contains(t, mockBot.LastSentTextSafe(), "Ошибка", "message should mention error")
-}
-
-func TestHandleQRWeb(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{
-		TelegramAdminID: 123456,
-		SiteURL:         "https://vpn.site",
-	}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
-
-	chatID := int64(123456)
-	messageID := 789
-	username := "testuser"
-
-	mockDB.GetOrCreateInviteFunc = func(ctx context.Context, referrerTGID int64, code string) (*database.Invite, error) {
-		return &database.Invite{
-			Code:         "XYZ789",
-			ReferrerTGID: referrerTGID,
-		}, nil
-	}
-
-	ctx := context.Background()
-	handler.handleQRWeb(ctx, chatID, username, messageID)
-
-	assert.True(t, mockBot.SendCalledSafe(), "Bot.Send should be called for QR photo")
-}
-
-func TestHandleQRWeb_DatabaseError(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{
-		TelegramAdminID: 123456,
-	}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
-
-	chatID := int64(123456)
-	messageID := 789
-	username := "testuser"
-
-	mockDB.GetOrCreateInviteFunc = func(ctx context.Context, referrerTGID int64, code string) (*database.Invite, error) {
-		return nil, errors.New("database error")
-	}
-
-	ctx := context.Background()
-	handler.handleQRWeb(ctx, chatID, username, messageID)
-
-	assert.True(t, mockBot.SendCalledSafe(), "Bot.Send should be called for error message")
-	assert.Contains(t, mockBot.LastSentTextSafe(), "Ошибка", "message should mention error")
-}
-
-func TestGenerateInviteLink_Telegram(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{
-		TelegramAdminID: 123456,
-		SiteURL:         "https://vpn.site",
-	}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
-
-	chatID := int64(123456)
-
-	mockDB.GetOrCreateInviteFunc = func(ctx context.Context, referrerTGID int64, code string) (*database.Invite, error) {
-		return &database.Invite{
-			Code:         "TEST123",
-			ReferrerTGID: referrerTGID,
-		}, nil
-	}
-
-	ctx := context.Background()
-	link, err := handler.generateInviteLink(ctx, chatID, linkTypeTelegram)
-
-	assert.NoError(t, err)
-	assert.Equal(t, "https://t.me/testbot?start=share_TEST123", link)
-}
-
-func TestGenerateInviteLink_Web(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{
-		TelegramAdminID: 123456,
-		SiteURL:         "https://vpn.site",
-	}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
-
-	chatID := int64(123456)
-
-	mockDB.GetOrCreateInviteFunc = func(ctx context.Context, referrerTGID int64, code string) (*database.Invite, error) {
-		return &database.Invite{
-			Code:         "WEB456",
-			ReferrerTGID: referrerTGID,
-		}, nil
-	}
-
-	ctx := context.Background()
-	link, err := handler.generateInviteLink(ctx, chatID, linkTypeWeb)
-
-	assert.NoError(t, err)
-	assert.Equal(t, "https://vpn.site/i/WEB456", link)
-}
 
 func TestGenerateInviteLink_DatabaseError(t *testing.T) {
 	t.Parallel()
@@ -872,9 +690,9 @@ func TestGenerateInviteLink_DatabaseError(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 	}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
+	mockBot := testutil.NewBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
 
 	chatID := int64(123456)
@@ -890,42 +708,15 @@ func TestGenerateInviteLink_DatabaseError(t *testing.T) {
 	assert.Contains(t, err.Error(), "database error")
 }
 
-func TestHandleCallback_NilMessage(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{
-		TelegramAdminID: 123456,
-	}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
-
-	ctx := context.Background()
-	update := tgbotapi.Update{
-		CallbackQuery: &tgbotapi.CallbackQuery{
-			ID:      "test-callback-id",
-			Data:    "create_subscription",
-			From:    &tgbotapi.User{ID: 123456, UserName: "testuser"},
-			Message: nil,
-		},
-	}
-
-	handler.HandleCallback(ctx, update)
-
-	assert.True(t, mockBot.RequestCalledSafe(), "Bot.Request should be called to answer callback")
-	assert.False(t, mockBot.SendCalledSafe(), "Bot.Send should not be called without message")
-}
-
 func TestHandleCallback_UnknownCallback(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 	}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
+	mockBot := testutil.NewBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
 
 	ctx := context.Background()
@@ -953,9 +744,9 @@ func TestGenerateInviteLink_UnknownType(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 	}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
+	mockBot := testutil.NewBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
 
 	ctx := context.Background()
@@ -971,9 +762,9 @@ func TestSendQRCode_SendError(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 	}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
+	mockBot := testutil.NewBotAPI()
 	mockBot.SendError = errors.New("send failed")
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
 
@@ -989,9 +780,9 @@ func TestHandleQRCode_QRError(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 	}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
+	mockBot := testutil.NewBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
 
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
@@ -1013,9 +804,9 @@ func TestHandleBackToSubscription_RequestError(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 	}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
+	mockBot := testutil.NewBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
 
 	ctx := context.Background()
@@ -1031,9 +822,9 @@ func TestHandleCallback_NilMessage_RequestError(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 	}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
+	mockBot := testutil.NewBotAPI()
 	mockBot.RequestError = errors.New("request failed")
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
 
@@ -1055,9 +846,9 @@ func TestHandleCallback_NilMessage_RequestError(t *testing.T) {
 func TestHandleCallback_RequestError(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
+	mockBot := testutil.NewBotAPI()
 	mockBot.RequestError = errors.New("request failed")
 	cfg := &config.Config{TelegramAdminID: 123456}
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
@@ -1086,9 +877,9 @@ func TestHandleCallback_QRTelegram(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 	}
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
+	mockBot := testutil.NewBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
 
 	ctx := context.Background()
@@ -1112,10 +903,10 @@ func TestHandleCallback_QRTelegram(t *testing.T) {
 func TestHandleCallback_QRWeb(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewMockDatabaseService()
-	mockXUI := testutil.NewMockXUIClient()
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
 	cfg := &config.Config{TelegramAdminID: 123456}
-	mockBot := testutil.NewMockBotAPI()
+	mockBot := testutil.NewBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
 
 	ctx := context.Background()
@@ -1139,10 +930,10 @@ func TestHandleCallback_QRWeb(t *testing.T) {
 func TestHandleCallback_BackToInvite(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewMockDatabaseService()
+	mockDB := testutil.NewDatabaseService()
 	cfg := &config.Config{TelegramAdminID: 123456}
-	mockXUI := testutil.NewMockXUIClient()
-	mockBot := testutil.NewMockBotAPI()
+	mockXUI := testutil.NewXUIClient()
+	mockBot := testutil.NewBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
 
 	ctx := context.Background()

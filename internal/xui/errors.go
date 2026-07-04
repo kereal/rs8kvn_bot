@@ -13,4 +13,6 @@ var (
 	ErrNotFound = errors.New("not found")
 	// ErrServerError indicates the XUI panel returned a 5xx error.
 	ErrServerError = errors.New("server error")
+	// ErrNon200Response indicates the panel responded with a non-200 status code.
+	ErrNon200Response = errors.New("upstream returned non-200")
 )

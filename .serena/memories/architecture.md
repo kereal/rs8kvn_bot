@@ -1,8 +1,8 @@
 # Architecture — rs8kvn_bot
 
-**Версия:** v2.4.0  
-**Обновлено:** 2026-06-17  
-**Ветка:** `multi-outbounds` (merge candidate)
+**Версия:** v3.0.0  
+**Обновлено:** 2026-06-28  
+**Ветка:** `plans_and_pricing` (merge candidate)
 
 ## Рефакторинг 2026-06-08 (коммит 2a1e0fe)
 - Монолит `database.go` разбит на 9 файлов по доменам
@@ -12,9 +12,9 @@
 - Убран избыточный `if xuiHeaders != nil` в `subscription_handler.go`
 - Проведён `go fmt` по 20 файлам
 
-## Branch: multi-outbounds
+## Branch: plans_and_pricing
 
-Эта память описывает текущую ветку `multi-outbounds`, которая включает:
+Эта память описывает текущую ветку `plans_and_pricing`, которая включает:
 - Multi-outbound flow: группировка inboundIDs по совместимому flow для панели 3x-ui
 - Миграция конфига `config.Source` → `config.Node`/`Nodes`
 - Defensive copy в `Node.ResolveInboundIDs` (защита от мутации слайса)
@@ -28,12 +28,30 @@
 Telegram Bot (Go, single binary)
   ├── cmd/bot/main.go         — entry point, graceful shutdown
   ├── internal/bot/           — handlers, referral cache, singleflight
-  ├── internal/service/       — SubscriptionService (orchestration)
-  ├── internal/database/      — SQLite + GORM + migrations 000-019
+  ├── internal/service/       — SubscriptionService (orchestration) + SyncService (state machine)
+  ├── internal/database/      — SQLite + GORM + migrations 000-027
   ├── internal/xui/           — multi-source 3x-ui client + circuit breaker
+  ├── internal/vpn/           — VPN client abstraction (3x-ui, proxman)
   ├── internal/subserver/      — LRU cache, merge, /sub/{id} endpoint, proxy, servers, optional async access log
   ├── internal/web/           — /healthz, /readyz, /i/{code}, /sub/{subID}, access-log response recording and soft-fail startup
-  ├── internal/scheduler/     — backup (daily 03:00) + trial cleanup (hourly)
+  ├── internal/scheduler/     — backup (daily 03:00) + trial cleanup (hourly) + sync workers
+  ├── internal/backup/        — SQLite backup with WAL checkpoint
+  ├── internal/heartbeat/     — monitoring pings
+  ├── internal/metrics/       — Prometheus (через zap-обёртку)
+  ├── internal/ratelimiter/   — per-user token bucket
+  ├── internal/logger/        — zap setup
+  └── internal/config/        — env loading + validation
+```
+Telegram Bot (Go, single binary)
+  ├── cmd/bot/main.go         — entry point, graceful shutdown
+  ├── internal/bot/           — handlers, referral cache
+  ├── internal/service/       — SubscriptionService (orchestration) + SyncService (state machine)
+  ├── internal/database/      — SQLite + GORM + migrations 000-027
+  ├── internal/xui/           — multi-source 3x-ui client + circuit breaker
+  ├── internal/vpn/           — VPN client abstraction (3x-ui, proxman)
+  ├── internal/subserver/      — LRU cache, merge, /sub/{id} endpoint, proxy, servers, optional async access log
+  ├── internal/web/           — /healthz, /readyz, /i/{code}, /sub/{subID}, access-log response recording and soft-fail startup
+  ├── internal/scheduler/     — backup (daily 03:00) + trial cleanup (hourly) + sync workers
   ├── internal/backup/        — SQLite backup with WAL checkpoint
   ├── internal/heartbeat/     — monitoring pings
   ├── internal/metrics/       — Prometheus (через zap-обёртку)
@@ -49,8 +67,8 @@ Telegram Bot (Go, single binary)
 ```
 
 
-Версия схемы: after migration 019  
-**Ревизия:** 2026-06-08
+Версия схемы: after migration 027  
+**Ревизия:** 2026-06-28
 
 ### Tab Subscription Nodes — состояние синхронизации
 
@@ -60,7 +78,7 @@ Telegram Bot (Go, single binary)
 CREATE TABLE subscription_nodes (
     subscription_id INTEGER NOT NULL,
     node_id INTEGER NOT NULL,
-    status TEXT NOT NULL CHECK (status IN ('active','pending_add','pending_remove')),
+    status TEXT NOT NULL CHECK (status IN ('active','pending_add','pending_remove','pending_update')),
     retry_count INTEGER NOT NULL DEFAULT 0,
     retry_at DATETIME,
     last_error TEXT,
@@ -69,11 +87,11 @@ CREATE TABLE subscription_nodes (
 );
 ```
 
-Go-модель: `database.SubscriptionNode` с typed status `SubscriptionNodeStatus`.  
-Статусы: `active`, `pending_add`, `pending_remove`.
+Go-модель: `database.SubscriptionNode` с typed status `SyncStatus`.  
+Статусы: `active`, `pending_add`, `pending_remove`, `pending_update`.
 
-### Таблицы подписок (существующие, без структурных изменений после migration 019)
-- `subscriptions`, `invites`, `trial_requests` — без структурных изменений после migration 019.
+### Таблицы подписок (существующие после migration 023)
+- `subscriptions`, `invites`, `trial_requests` — структурно без новых колонок после migration 023; в `subscriptions` добавлены `NOT NULL UNIQUE` constraints/indexes для `client_id` и `subscription_id`.
 
 ### УСТАРЕВШИЕ таблицы
 - `sources`, `plan_sources` — заменены на `nodes` и `plan_nodes` (migration 014). Остаются в БД для обратной совместимости, но не используются в новом коде.
@@ -86,12 +104,12 @@ Go-модель: `database.SubscriptionNode` с typed status `SubscriptionNodeSt
 - `plan_nodes` (M:N: plan → nodes) — привязка серверов к тарифным планам.
 - `subscription_nodes` (M:N: subscription → nodes) — серверы, выданные конкретной подписке.
 
-### `subscriptions` (версия после migration 015/019)
+### `subscriptions` (версия после migration 023)
 ```
 telegram_id          int64    INDEX
 username             string   INDEX
-client_id            string
-subscription_id      string   INDEX (unique)
+client_id            string   NOT NULL UNIQUE
+subscription_id      string   NOT NULL UNIQUE
 expires_at          time     INDEX
 status               string   default: "active"  INDEX  (active|revoked|expired)
 invite_code          string   INDEX
@@ -108,7 +126,7 @@ updated_at           time
 ```
 **Удалено:** `is_trial`, `traffic_limit`, `inbound_id`, `subscription_url`, `deleted_at`.  
 **Soft delete заменён** на `status='revoked'`.  
-**Добавлено:** `devices`, `ips`, `plan_id`, `product_id`, `started_at`, `price_paid_cents`, `currency`.
+**Добавлено:** `devices`, `ips`, `plan_id`, `product_id`, `started_at`, `price_paid_cents`, `currency`; migration 023 добавила `NOT NULL UNIQUE` для `client_id` и `subscription_id`.
 
 ### `plans`
 ```
@@ -117,9 +135,9 @@ id, name UNIQUE, devices_limit, traffic_limit
 **Удалено в migration 019:** `duration`.  
 **Удалено в migration 016:** `price`.
 
-### `products` (migration 013)
+### `products` (migration 013 + 021)
 Покупаемые продукты, привязанные к планам.
-- `id`, `plan_id` (FK → plans), `duration_days`, `price_cents`, `currency`, `is_active`, `created_at`, `updated_at`.
+- `id`, `plan_id` (FK → plans), `name` (VARCHAR(255) NOT NULL), `duration_days`, `price_cents`, `currency`, `is_active`, `created_at`, `updated_at`.
 
 ### `orders` (migration 017)
 Факт покупки подписки и процесс обработки платежа.
@@ -127,10 +145,23 @@ id, name UNIQUE, devices_limit, traffic_limit
 
 ### `invites`, `trial_requests`, `metrics_counters` — без изменений.
 
-Миграции лежат в `internal/database/migrations/000-019_*.up.sql` (embedded через go:embed).  
-Версия схемы: **after migration 019**.
+Миграции лежат в `internal/database/migrations/000-027_*.up.sql` (embedded через go:embed).  
+Версия схемы: **after migration 027**.
 
 ## Ключевые компоненты
+
+### VPN Client (`internal/vpn/`)
+- **`Client` interface**: `CreateSubscription`, `UpdateSubscription`, `DeleteSubscription`, `Close`
+- **`ThreeXUIClient`**: адаптер над `interfaces.XUIClient` для 3x-ui нод
+- **`Config`**: Host, APIToken, InboundIDs, XUIClient, Type
+- Sentinel errors: `ErrSubscriptionAlreadyExists`, `ErrSubscriptionNotFound`, `ErrNotImplemented`
+
+### Sync Service (`internal/service/sync.go`)
+- **State machine**: `pending_add → active`, `pending_update → active`, `pending_remove → row deletion`
+- **Retry logic**: exponential backoff (1m→2m→5m→15m→30m→45m→60m кап)
+- **Lock per subscription**: `sync.Map` для предотвращения race conditions
+- **`ReconcilePlanNodes`**: сравнивает текущие ноды с целевыми по плану
+- **`SyncPendingNodes`**: обрабатывает все pending nodes с автоматической очисткой orphan records
 
 ### Service Layer (`internal/service/subscription.go`)
 - **`Create(ctx, chatID, username, inviteCode string)`** — создание free/paid подписки. Параметр `inviteCode` пробрасывается в `db.CreateSubscription` для резолва referrer.
@@ -151,11 +182,18 @@ id, name UNIQUE, devices_limit, traffic_limit
 - `trials.go` — Trial CRUD (7 функций), включая `BindTrialSubscription`
 - `orders.go` — Order CRUD (4 функции)
 - `products.go` — `GetActiveByPlanID()`
-- **`CreateSubscription(ctx, sub, inviteCode string)`** — атомарная транзакция: revoke всех active subs для telegram_id + resolve invite → заполнение `sub.InviteCode` и `sub.ReferredBy` + insert.
+- `subscription_nodes.go` — SubscriptionNode CRUD (10 функций)
+- **`CreateSubscription(ctx, sub, inviteCode string)`** — атомарная транзакция: revoke всех active subs для telegram_id + resolve invite → заполнение `sub.InviteCode` и `sub.ReferredBy` + insert; `sub.ClientID` и `sub.SubscriptionID` должны быть непустыми и уникальными после migration 023.
 - **`BindTrialSubscription(ctx, sub, telegramID, username)`** — UPDATE trial-row WHERE telegram_id=0 AND plan_id=trial → revoke других active subs для этого telegram_id в той же транзакции. Динамический поиск trial/free plans по имени (`TrialPlanName`/`FreePlanName`).
 - **`CleanupExpiredTrials(ctx)`** — DELETE WHERE expiry_time < now() RETURNING subscription_id (SQLite ≥ 3.35).
-- **Sentinel errors**: `xui.ErrClientNotFound` (для `errors.Is` в Reconcile).
+- **Sentinel errors**: `database.ErrSubscriptionNotFound`, `database.ErrInviteNotFound`, `database.ErrPlanNotFound`
 - **`SeedDefaultNode`**: если nodes пуста, создаёт ноду из env и привязывает ко всем планам.
+
+### НОВЫЕ миграции (plans_and_pricing)
+- `024_add_plan_is_active` — добавление is_active в plans
+- `025_add_retry_check_constraint` — CHECK constraint для retry_count
+- `026_remove_subscription_nodes_cascade` — исправление внешних ключей
+- `027_add_pending_update_sync_status` — добавление pending_update статуса
 
 ### X-UI Client (`internal/xui/client.go`)
 - **Multi-source**: `xuiClients map[uint]interfaces.XUIClient` (key = node ID).
@@ -184,8 +222,9 @@ id, name UNIQUE, devices_limit, traffic_limit
 - Окей до 500-1000 пользователей. `database is locked` при >500 concurrent writes.
 - Миграция на PostgreSQL: 2-4 часа (заменить драйвер, проверить миграции).
 
-### 🟡 Multi-server config
-- Сейчас одна подписка = несколько нод, но каждому клиенту выдаётся свой inbound на каждой ноде. Multi-server VLESS-конфиг (массив серверов в одном профиле) — отложено (см. `roadmap`).
+### ✅ Multi-server config
+- Одна подписка = несколько нод, каждому клиенту выдаётся свой inbound на каждой ноде
+- VLESS поддерживает массив серверов нативно, клиенты переключаются автоматически
 
 ### 🟡 Web UI
 - Весь UI через Telegram inline-кнопки. Нет классического e-commerce, нет графиков.
@@ -212,11 +251,14 @@ id, name UNIQUE, devices_limit, traffic_limit
 - `Order` — факт покупки, статусы `pending|paid|expired|canceled` (CHECK constraint).
 - ORM-связи: `Plan.Products`, `Product.Orders`, `Subscription.Orders`.
 
-### ✅ Subscription Nodes state machine (migration 018, реализовано)
-- `subscription_nodes(subscription_id, node_id, status, retry_count, retry_at, last_error, updated_at)`.
-- Статусы: `active|pending_add|pending_remove`.
-- Хранит реальное состояние синхронизации, а не желаемое состояние тарифа.
-- Восстанавливаемость после падения нод/рестартов/ошибок сети.
+### ✅ Subscription Nodes state machine (migration 018 + 027)
+- `active|pending_add|pending_remove|pending_update`
+- `SyncService` реализует state machine с retry и lock-ом
+
+### ✅ VPN Client abstraction (v3.0.0)
+- Интерфейс `Client` в `internal/vpn/client.go`
+- `ThreeXUIClient` адаптер для 3x-ui
+- Поддержка `NodeType3xUI` и `NodeTypeProxman`
 
 ### ⏸ Кастомный генератор подписок (отложено)
 - VLESS поддерживает массив серверов нативно. Клиенты (Happ, V2RayNG) переключаются автоматически. Не нужно переписывать бота.
