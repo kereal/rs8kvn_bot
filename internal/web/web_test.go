@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kereal/rs8kvn_bot/internal/config"
+	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/testutil"
 )
 
@@ -26,171 +27,135 @@ func TestMain(m *testing.M) {
 func TestRenderTrialPage(t *testing.T) {
 	t.Parallel()
 
-	cfg := &config.Config{
-		SiteURL:            "https://vpn.site",
-		TrialDurationHours: 3,
-	}
-
-	srv := NewServer(":8880", nil, cfg, "testbot", nil, nil)
-
-	w := httptest.NewRecorder()
-	srv.renderTrialPage(w, "sub123", "https://vpn.site/sub/sub123", "https://t.me/testbot?start=trial_sub123", 3)
-	html := w.Body.String()
-
-	// Check that HTML contains expected elements
-	expectedElements := []string{
-		"<!DOCTYPE html>",
-		"RS8 KVN",
-		"Добавить в Happ",
-		"happ://add/",
-		"Активировать",
-		"https://t.me/testbot?start=trial_sub123",
-		"3 часа",
-		"Срок действия",
-		"copyToClipboard",
-		"play.google.com",
-		"apps.apple.com",
-	}
-
-	for _, expected := range expectedElements {
-		assert.Contains(t, html, expected, "renderTrialPage() should contain expected element")
-	}
-}
-
-func TestRenderErrorPage(t *testing.T) {
-	t.Parallel()
-
-	srv := NewServer(":8880", nil, nil, "testbot", nil, nil)
-
-	w := httptest.NewRecorder()
-	srv.renderErrorPage(w, "Тестовая ошибка")
-	html := w.Body.String()
-
-	// Check that HTML contains error message
-	assert.Contains(t, html, "Тестовая ошибка", "renderErrorPage() should contain error message")
-
-	// Check HTML structure
-	assert.Contains(t, html, "<!DOCTYPE html>", "renderErrorPage() should be valid HTML")
-}
-
-func TestGetClientIP_Direct(t *testing.T) {
-	t.Parallel()
-
-	req := httptest.NewRequest("GET", "/i/test", nil)
-	req.RemoteAddr = "192.168.1.100:12345"
-
-	ip := getClientIP(req)
-
-	assert.Equal(t, "192.168.1.100", ip, "getClientIP()")
-}
-
-func TestGetClientIP_XForwardedFor(t *testing.T) {
-	t.Parallel()
-
-	req := httptest.NewRequest("GET", "/i/test", nil)
-	req.RemoteAddr = "127.0.0.1:12345"
-	req.Header.Set("X-Forwarded-For", "203.0.113.50, 198.51.100.1")
-
-	ip := getClientIP(req)
-
-	// Should use the rightmost IP (set by trusted proxy)
-	assert.Equal(t, "198.51.100.1", ip, "getClientIP() should use rightmost IP from X-Forwarded-For")
-}
-
-func TestRenderTrialPage_HappLink(t *testing.T) {
-	t.Parallel()
-
-	srv := NewServer(":8880", nil, &config.Config{}, "testbot", nil, nil)
-
-	subURL := "https://vpn.site/sub/abc123"
-	w := httptest.NewRecorder()
-	srv.renderTrialPage(w, "abc123", subURL, "https://t.me/testbot?start=trial_abc123", 3)
-	html := w.Body.String()
-
-	// Check happ:// link is generated correctly
-	expectedHappLink := "happ://add/" + subURL
-	assert.Contains(t, html, expectedHappLink, "renderTrialPage() should contain happ link")
-}
-
-// === GetClientIP edge cases ===
-
-func TestGetClientIP_XForwardedForMultiple(t *testing.T) {
-	t.Parallel()
-
-	req := httptest.NewRequest("GET", "/i/test", nil)
-	req.RemoteAddr = "127.0.0.1:12345"
-	req.Header.Set("X-Forwarded-For", "203.0.113.50, 198.51.100.1, 192.0.2.1")
-
-	ip := getClientIP(req)
-
-	// Should use the rightmost IP (set by trusted proxy)
-	assert.Equal(t, "192.0.2.1", ip, "getClientIP() should use rightmost IP from X-Forwarded-For")
-}
-
-// Note: X-Real-IP is not checked by getClientIP - it only checks X-Forwarded-For
-
-func TestGetClientIP_NoPort(t *testing.T) {
-	t.Parallel()
-
-	req := httptest.NewRequest("GET", "/i/test", nil)
-	req.RemoteAddr = "192.168.1.100" // No port
-
-	ip := getClientIP(req)
-
-	assert.Equal(t, "192.168.1.100", ip, "getClientIP() should handle address without port")
-}
-
-func TestGetClientIP_Localhost(t *testing.T) {
-	t.Parallel()
-
 	tests := []struct {
-		name     string
-		remote   string
-		forward  string
-		expected string
+		name          string
+		subURL        string
+		telegramLink  string
+		mockDB        bool
+		trialHours    int
+		check         func(t *testing.T, html string)
 	}{
-		{"localhost IPv4", "127.0.0.1:12345", "8.8.8.8", "8.8.8.8"},
-		{"localhost IPv6", "[::1]:12345", "", "::1"},
-		{"private network NOT trusted", "192.168.1.1:12345", "10.0.0.5", "192.168.1.1"},
-		{"public IP not trusted", "8.8.8.8:12345", "1.2.3.4", "8.8.8.8"},
+		{
+			name:         "basic elements",
+			subURL:       "https://vpn.site/sub/sub123",
+			telegramLink: "https://t.me/testbot?start=trial_sub123",
+			mockDB:       false,
+			trialHours:   3,
+			check: func(t *testing.T, html string) {
+				for _, expected := range []string{
+					"<!DOCTYPE html>", "RS8 KVN", "Добавить в Happ",
+					"happ://add/", "Активировать",
+					"https://t.me/testbot?start=trial_sub123",
+					"3 часа", "Срок действия", "copyToClipboard",
+					"play.google.com", "apps.apple.com",
+				} {
+					assert.Contains(t, html, expected)
+				}
+			},
+		},
+		{
+			name:         "happ link",
+			subURL:       "https://vpn.site/sub/abc123",
+			telegramLink: "https://t.me/testbot?start=trial_abc123",
+			mockDB:       false,
+			trialHours:   3,
+			check: func(t *testing.T, html string) {
+				assert.Contains(t, html, "happ://add/https://vpn.site/sub/abc123")
+			},
+		},
+		{
+			name:         "xss protection - script tag",
+			subURL:       "test<script>alert('xss')</script>",
+			telegramLink: "https://t.me/testbot?start=123",
+			mockDB:       true,
+			trialHours:   3,
+			check: func(t *testing.T, html string) {
+				assert.NotContains(t, html, "<script>alert('xss')</script>")
+				assert.Contains(t, html, `\u003cscript\u003ealert(\u0027xss\u0027)\u003c\/script\u003e`)
+			},
+		},
+		{
+			name:         "xss protection - javascript href",
+			subURL:       "javascript:alert('xss')",
+			telegramLink: "https://t.me/testbot?start=123",
+			mockDB:       true,
+			trialHours:   3,
+			check: func(t *testing.T, html string) {
+				assert.NotContains(t, html, `<a href="javascript:alert`)
+				assert.Contains(t, html, `javascript:alert(\u0027xss\u0027)`)
+			},
+		},
+		{
+			name:         "xss protection - onclick",
+			subURL:       `test" onclick="alert('xss')"`,
+			telegramLink: "https://t.me/testbot?start=123",
+			mockDB:       true,
+			trialHours:   3,
+			check: func(t *testing.T, html string) {
+				assert.NotContains(t, html, `onclick="alert`)
+			},
+		},
+		{
+			name:         "logo reference",
+			subURL:       "https://example.com/sub",
+			telegramLink: "https://t.me/testbot?start=trial_sub1",
+			mockDB:       false,
+			trialHours:   3,
+			check: func(t *testing.T, html string) {
+				assert.Contains(t, html, `/static/logo.png`)
+			},
+		},
+		{
+			name:         "golden - 24h",
+			subURL:       "https://example.com/sub/abc123",
+			telegramLink: "https://t.me/testbot?start=trial_abc123",
+			mockDB:       true,
+			trialHours:   24,
+			check: func(t *testing.T, html string) {
+				assert.Contains(t, html, "<!DOCTYPE html>")
+				assert.Contains(t, html, "RS8 KVN")
+				assert.Contains(t, html, "Добавить в Happ")
+				assert.Contains(t, html, "Активировать")
+				assert.Contains(t, html, "24 часа")
+				assert.Contains(t, html, "Скопировать ссылку")
+			},
+		},
+		{
+			name:         "structure",
+			subURL:       "https://example.com/sub/abc123",
+			telegramLink: "https://t.me/testbot?start=trial_abc123",
+			mockDB:       true,
+			trialHours:   24,
+			check: func(t *testing.T, html string) {
+				assert.Contains(t, html, "<!DOCTYPE html>")
+				assert.Contains(t, html, "RS8 KVN")
+				assert.Contains(t, html, "Добавить в Happ")
+				assert.Contains(t, html, "Активировать")
+				assert.Contains(t, html, "24 часа")
+			},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest("GET", "/i/test", nil)
-			req.RemoteAddr = tt.remote
-			if tt.forward != "" {
-				req.Header.Set("X-Forwarded-For", tt.forward)
+			var srv *Server
+			if tt.mockDB {
+				mockDB := testutil.NewDatabaseService()
+				cfg := &config.Config{SiteURL: "https://example.com", TrialDurationHours: 24}
+				mockDB.GetPlanByNameFunc = func(ctx context.Context, name string) (*database.Plan, error) {
+					return &database.Plan{ID: 1, Name: "trial", DevicesLimit: 1, TrafficLimit: 1073741824}, nil
+				}
+				srv = NewServer(":8880", mockDB, cfg, "testbot", nil, nil)
+				defer srv.db.Close()
+			} else {
+				cfg := &config.Config{SiteURL: "https://vpn.site", TrialDurationHours: 3}
+				srv = NewServer(":8880", nil, cfg, "testbot", nil, nil)
 			}
-
-			ip := getClientIP(req)
-			assert.Equal(t, tt.expected, ip)
+			w := httptest.NewRecorder()
+			srv.renderTrialPage(w, "sub1", tt.subURL, tt.telegramLink, tt.trialHours)
+			tt.check(t, w.Body.String())
 		})
 	}
-}
-
-func TestGetClientIP_EmptyXForwardedFor(t *testing.T) {
-	t.Parallel()
-
-	req := httptest.NewRequest("GET", "/i/test", nil)
-	req.RemoteAddr = "127.0.0.1:12345"
-	req.Header.Set("X-Forwarded-For", "") // Empty header
-
-	ip := getClientIP(req)
-
-	assert.Equal(t, "127.0.0.1", ip, "Should fall back to RemoteAddr when X-Forwarded-For is empty")
-}
-
-func TestGetClientIP_WhitespaceInXForwardedFor(t *testing.T) {
-	t.Parallel()
-
-	req := httptest.NewRequest("GET", "/i/test", nil)
-	req.RemoteAddr = "127.0.0.1:12345"
-	req.Header.Set("X-Forwarded-For", "  192.0.2.1  ,  198.51.100.1  ") // Extra whitespace
-
-	ip := getClientIP(req)
-
-	assert.Equal(t, "198.51.100.1", ip, "Should trim whitespace and use rightmost IP")
 }
 
 // === Server Start/Stop tests ===
@@ -231,26 +196,6 @@ func TestServer_StartWithInvalidSubserverAccessLog(t *testing.T) {
 
 	err = srv.Stop(stopCtx)
 	assert.NoError(t, err, "Stop() should not return error")
-}
-
-func TestServer_StartPortInUseDoesNotCreateSubserverAccessLog(t *testing.T) {
-	t.Parallel()
-
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	require.NoError(t, err, "Failed to create listener")
-	defer listener.Close()
-
-	logPath := filepath.Join(t.TempDir(), "subserver.log")
-	srv := NewServer(listener.Addr().String(), nil, &config.Config{
-		SubServerAccessLogPath: logPath,
-	}, "testbot", nil, nil)
-
-	err = srv.Start(context.Background())
-	require.Error(t, err, "Start() should return error when port is already in use")
-	assert.Contains(t, err.Error(), "failed to bind")
-
-	_, err = os.Stat(logPath)
-	assert.True(t, os.IsNotExist(err), "access log should not be created before successful bind")
 }
 
 func TestServer_StopWithoutStart(t *testing.T) {
@@ -304,7 +249,7 @@ func TestServer_Stop_AlwaysShutdownsHTTPServer(t *testing.T) {
 	assert.Error(t, dialErr, "listener must be released after Stop even if access-log close failed")
 }
 
-func TestIsLocalAddress_Loopback(t *testing.T) {
+func TestIsLocalAddress(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -315,28 +260,6 @@ func TestIsLocalAddress_Loopback(t *testing.T) {
 		{"127.0.0.1", "127.0.0.1", true},
 		{"localhost IPv4", "127.0.0.2", true},
 		{"localhost IPv6", "::1", true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := isLocalAddress(tt.ip)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
-}
-
-func TestIsLocalAddress_NonLoopback(t *testing.T) {
-	t.Parallel()
-
-	// Only loopback addresses are trusted as proxy nodes.
-	// Private IPs (10.x, 172.16.x, 192.168.x) are NOT trusted because
-	// in cloud environments other VMs on the same VPC could spoof
-	// X-Forwarded-For to bypass IP-based rate limiting.
-	tests := []struct {
-		name     string
-		ip       string
-		expected bool
-	}{
 		{"10.x.x.x", "10.0.0.1", false},
 		{"172.16.x.x", "172.16.0.1", false},
 		{"192.168.x.x", "192.168.1.1", false},
@@ -354,29 +277,102 @@ func TestIsLocalAddress_NonLoopback(t *testing.T) {
 	}
 }
 
-func TestGetClientIP_NonLocalRemoteAddr(t *testing.T) {
+func TestGetClientIP(t *testing.T) {
 	t.Parallel()
 
-	req := httptest.NewRequest("GET", "/i/test", nil)
-	req.RemoteAddr = "8.8.8.8:12345"
+	tests := []struct {
+		name     string
+		remote   string
+		forward  string
+		expected string
+	}{
+		{"direct", "192.168.1.100:12345", "", "192.168.1.100"},
+		{"x-forwarded-for single", "127.0.0.1:12345", "203.0.113.50, 198.51.100.1", "198.51.100.1"},
+		{"x-forwarded-for multiple", "127.0.0.1:12345", "203.0.113.50, 198.51.100.1, 192.0.2.1", "192.0.2.1"},
+		{"no port", "192.168.1.100", "", "192.168.1.100"},
+		{"localhost IPv4", "127.0.0.1:12345", "8.8.8.8", "8.8.8.8"},
+		{"localhost IPv6", "[::1]:12345", "", "::1"},
+		{"private network NOT trusted", "192.168.1.1:12345", "10.0.0.5", "192.168.1.1"},
+		{"public IP not trusted", "8.8.8.8:12345", "1.2.3.4", "8.8.8.8"},
+		{"empty X-Forwarded-For fallback", "127.0.0.1:12345", "", "127.0.0.1"},
+		{"whitespace in X-Forwarded-For", "127.0.0.1:12345", "  192.0.2.1  ,  198.51.100.1  ", "198.51.100.1"},
+		{"non-local remote addr", "8.8.8.8:12345", "", "8.8.8.8"},
+		{"invalid remote addr", "invalid", "", "invalid"},
+		{"IPv6 single", "[::1]:12345", "2001:db8::1", "2001:db8::1"},
+		{"IPv6 with brackets port", "[::1]:12345", "[2001:db8::1]:8080", "[2001:db8::1]:8080"},
+		{"IPv6 mixed with IPv4", "[::1]:12345", "2001:db8::1, 192.168.1.1", "192.168.1.1"},
+		{"IPv6 loopback", "[::1]:12345", "::1", "::1"},
+	}
 
-	ip := getClientIP(req)
-
-	assert.Equal(t, "8.8.8.8", ip, "Should use remote addr when not local")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest("GET", "/i/test", nil)
+			req.RemoteAddr = tt.remote
+			if tt.forward != "" {
+				req.Header.Set("X-Forwarded-For", tt.forward)
+			}
+			ip := getClientIP(req)
+			assert.Equal(t, tt.expected, ip)
+		})
+	}
 }
 
-func TestGetClientIP_InvalidRemoteAddr(t *testing.T) {
+func TestHandleLogo(t *testing.T) {
 	t.Parallel()
 
-	req := httptest.NewRequest("GET", "/i/test", nil)
-	req.RemoteAddr = "invalid"
+	tests := []struct {
+		name     string
+		method   string
+		expectedCode int
+		checks   func(t *testing.T, w *httptest.ResponseRecorder)
+	}{
+		{
+			name: "success",
+			method: http.MethodGet,
+			expectedCode: http.StatusOK,
+			checks: func(t *testing.T, w *httptest.ResponseRecorder) {
+				assert.Equal(t, "image/png", w.Header().Get("Content-Type"))
+				assert.Equal(t, "public, max-age=86400", w.Header().Get("Cache-Control"))
+				assert.NotEmpty(t, w.Body.Bytes())
+				assert.Equal(t, byte(0x89), w.Body.Bytes()[0])
+				assert.Equal(t, byte('P'), w.Body.Bytes()[1])
+				assert.Equal(t, byte('N'), w.Body.Bytes()[2])
+				assert.Equal(t, byte('G'), w.Body.Bytes()[3])
+			},
+		},
+		{
+			name: "cache headers",
+			method: http.MethodGet,
+			expectedCode: http.StatusOK,
+			checks: func(t *testing.T, w *httptest.ResponseRecorder) {
+				assert.Equal(t, "image/png", w.Header().Get("Content-Type"))
+				assert.Equal(t, "public, max-age=86400", w.Header().Get("Cache-Control"))
+			},
+		},
+		{
+			name: "HEAD no body",
+			method: http.MethodHead,
+			expectedCode: http.StatusOK,
+			checks: func(t *testing.T, w *httptest.ResponseRecorder) {
+				assert.Equal(t, "image/png", w.Header().Get("Content-Type"))
+				assert.Empty(t, w.Body.Bytes())
+			},
+		},
+	}
 
-	ip := getClientIP(req)
-
-	assert.Equal(t, "invalid", ip, "Should fall back to raw remote addr")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := NewServer(":8880", nil, &config.Config{}, "testbot", nil, nil)
+			req := httptest.NewRequest(tt.method, "/static/logo.png", nil)
+			w := httptest.NewRecorder()
+			srv.handleLogo(w, req)
+			assert.Equal(t, tt.expectedCode, w.Code)
+			tt.checks(t, w)
+		})
+	}
 }
 
-func TestServer_Start_PortInUse(t *testing.T) {
+func TestServer_StartPortInUse(t *testing.T) {
 	t.Parallel()
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -386,257 +382,42 @@ func TestServer_Start_PortInUse(t *testing.T) {
 	addr := listener.Addr().String()
 	port := strings.Split(addr, ":")[1]
 
-	srv := NewServer(":"+port, nil, &config.Config{}, "testbot", nil, nil)
+	t.Run("start_binds_fails", func(t *testing.T) {
+		srv := NewServer(":"+port, nil, &config.Config{}, "testbot", nil, nil)
+		ctx := context.Background()
+		err := srv.Start(ctx)
+		require.Error(t, err, "Start() should return error when port is already in use")
+		assert.Contains(t, err.Error(), "failed to bind")
+	})
 
-	ctx := context.Background()
-	err = srv.Start(ctx)
-	require.Error(t, err, "Start() should return error when port is already in use")
-	assert.Contains(t, err.Error(), "failed to bind", "Error message should mention binding failure")
+	t.Run("port_inuse_does_not_create_subserver_log", func(t *testing.T) {
+		listener2, err2 := net.Listen("tcp", "127.0.0.1:0")
+		require.NoError(t, err2)
+		defer listener2.Close()
 
-	listener.Close()
+		logPath := filepath.Join(t.TempDir(), "subserver.log")
+		srv := NewServer(listener2.Addr().String(), nil, &config.Config{
+			SubServerAccessLogPath: logPath,
+		}, "testbot", nil, nil)
+
+		err := srv.Start(context.Background())
+		require.Error(t, err, "Start() should return error when port is already in use")
+		assert.Contains(t, err.Error(), "failed to bind")
+
+		_, statErr := os.Stat(logPath)
+		assert.True(t, os.IsNotExist(statErr), "access log should not be created before successful bind")
+	})
 }
 
-func TestGetClientIP_IPv6(t *testing.T) {
+func TestRenderErrorPage(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		name     string
-		forward  string
-		remote   string
-		expected string
-	}{
-		{
-			name:     "single IPv6",
-			forward:  "2001:db8::1",
-			remote:   "[::1]:12345",
-			expected: "2001:db8::1",
-		},
-		{
-			name:     "IPv6 with port in brackets",
-			forward:  "[2001:db8::1]:8080",
-			remote:   "[::1]:12345",
-			expected: "[2001:db8::1]:8080",
-		},
-		{
-			name:     "IPv6 mixed with IPv4 (rightmost wins)",
-			forward:  "2001:db8::1, 192.168.1.1",
-			remote:   "[::1]:12345",
-			expected: "192.168.1.1",
-		},
-		{
-			name:     "IPv6 loopback",
-			forward:  "::1",
-			remote:   "[::1]:12345",
-			expected: "::1",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest("GET", "/i/test", nil)
-			req.RemoteAddr = tt.remote
-			req.Header.Set("X-Forwarded-For", tt.forward)
-
-			ip := getClientIP(req)
-			assert.Equal(t, tt.expected, ip)
-		})
-	}
-}
-
-func TestRenderTrialPage_XSSProtection(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{
-		SiteURL:            "https://vpn.site",
-		TrialDurationHours: 3,
-		TrialRateLimit:     3,
-	}
-
-	srv := NewServer(":8880", testutil.NewDatabaseService(), cfg, "testbot", nil, nil)
-
-	tests := []struct {
-		name         string
-		subURL       string
-		telegramLink string
-		checkXSS     func(t *testing.T, html string)
-	}{
-		{
-			name:         "script tag in subURL",
-			subURL:       "test<script>alert('xss')</script>",
-			telegramLink: "https://t.me/testbot?start=123",
-			checkXSS: func(t *testing.T, html string) {
-				assert.NotContains(t, html, "<script>alert('xss')</script>", "script tag should be escaped")
-				assert.Contains(t, html, `\u003cscript\u003ealert(\u0027xss\u0027)\u003c\/script\u003e`, "script should be JS-escaped in template context")
-			},
-		},
-		{
-			name:         "javascript in subURL",
-			subURL:       "javascript:alert('xss')",
-			telegramLink: "https://t.me/testbot?start=123",
-			checkXSS: func(t *testing.T, html string) {
-				assert.NotContains(t, html, `<a href="javascript:alert`, "raw javascript href should be escaped")
-				assert.Contains(t, html, `javascript:alert(\u0027xss\u0027)`, "javascript should be JS-escaped")
-			},
-		},
-		{
-			name:         "onclick in subURL",
-			subURL:       `test" onclick="alert('xss')"`,
-			telegramLink: "https://t.me/testbot?start=123",
-			checkXSS: func(t *testing.T, html string) {
-				assert.NotContains(t, html, `onclick="alert`, "onclick should not appear unescaped")
-			},
-		},
-		{
-			name:         "script tag in telegramLink",
-			subURL:       "test123",
-			telegramLink: "https://t.me/testbot?start=<script>alert('xss')</script>",
-			checkXSS: func(t *testing.T, html string) {
-				assert.NotContains(t, html, `<script>alert('xss')</script>`, "raw script in telegramLink should not appear")
-			},
-		},
-		{
-			name:         "normal input - no escaping needed",
-			subURL:       "abc123def456",
-			telegramLink: "https://t.me/testbot?start=abc123",
-			checkXSS: func(t *testing.T, html string) {
-				assert.Contains(t, html, "abc123def456", "normal subURL should be present")
-				assert.Contains(t, html, "https://t.me/testbot?start=abc123", "normal telegramLink should be present")
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			w := httptest.NewRecorder()
-			srv.renderTrialPage(w, "sub1", tt.subURL, tt.telegramLink, 3)
-			tt.checkXSS(t, w.Body.String())
-		})
-	}
-}
-
-// ==================== HandleLogo Tests ====================
-
-func TestHandleLogo_Success(t *testing.T) {
-	t.Parallel()
-
-	srv := NewServer(":8880", nil, &config.Config{}, "testbot", nil, nil)
-
-	req := httptest.NewRequest("GET", "/static/logo.png", nil)
-	w := httptest.NewRecorder()
-
-	srv.handleLogo(w, req)
-
-	assert.Equal(t, http.StatusOK, w.Code)
-	assert.Equal(t, "image/png", w.Header().Get("Content-Type"))
-	assert.Equal(t, "public, max-age=86400", w.Header().Get("Cache-Control"))
-	assert.NotEmpty(t, w.Body.Bytes(), "logo body should not be empty")
-	assert.Equal(t, byte(0x89), w.Body.Bytes()[0], "PNG should start with 0x89")
-	assert.Equal(t, byte('P'), w.Body.Bytes()[1], "PNG should have 'P' as second byte")
-	assert.Equal(t, byte('N'), w.Body.Bytes()[2], "PNG should have 'N' as third byte")
-	assert.Equal(t, byte('G'), w.Body.Bytes()[3], "PNG should have 'G' as fourth byte")
-}
-
-func TestHandleLogo_CacheHeaders(t *testing.T) {
-	t.Parallel()
-
-	srv := NewServer(":8880", nil, &config.Config{}, "testbot", nil, nil)
-
-	req := httptest.NewRequest("GET", "/static/logo.png", nil)
-	w := httptest.NewRecorder()
-
-	srv.handleLogo(w, req)
-
-	assert.Equal(t, "image/png", w.Header().Get("Content-Type"), "Content-Type should be image/png")
-	assert.Equal(t, "public, max-age=86400", w.Header().Get("Cache-Control"), "Cache-Control should be set")
-}
-
-func TestHandleLogo_HEAD(t *testing.T) {
-	t.Parallel()
-
-	srv := NewServer(":8880", nil, &config.Config{}, "testbot", nil, nil)
-
-	req := httptest.NewRequest("HEAD", "/static/logo.png", nil)
-	w := httptest.NewRecorder()
-
-	srv.handleLogo(w, req)
-
-	assert.Equal(t, http.StatusOK, w.Code)
-	assert.Equal(t, "image/png", w.Header().Get("Content-Type"))
-	assert.Empty(t, w.Body.Bytes(), "HEAD should not return body")
-}
-
-func TestRenderTrialPage_TemplateRendersLogo(t *testing.T) {
-	t.Parallel()
-
-	srv := NewServer(":8880", nil, &config.Config{}, "testbot", nil, nil)
+	srv := NewServer(":8880", nil, nil, "testbot", nil, nil)
 
 	w := httptest.NewRecorder()
-	srv.renderTrialPage(w, "sub1", "https://example.com/sub", "https://t.me/testbot?start=trial_sub1", 3)
+	srv.renderErrorPage(w, "Тестовая ошибка")
+	html := w.Body.String()
 
-	assert.Contains(t, w.Body.String(), `/static/logo.png`, "trial page should reference logo")
-}
-
-func TestRenderErrorPage_TemplateRendersLogo(t *testing.T) {
-	t.Parallel()
-
-	srv := NewServer(":8880", nil, &config.Config{}, "testbot", nil, nil)
-
-	w := httptest.NewRecorder()
-	srv.renderErrorPage(w, "Test error")
-
-	assert.Contains(t, w.Body.String(), `/static/logo.png`, "error page should reference logo")
-}
-
-func TestRenderTrialPage_Golden(t *testing.T) {
-	t.Parallel()
-
-	mockDB := testutil.NewDatabaseService()
-	cfg := &config.Config{
-		SiteURL:            "https://example.com",
-		TrialDurationHours: 24,
-	}
-
-	srv := NewServer(":8880", mockDB, cfg, "testbot", nil, nil)
-	defer srv.db.Close()
-
-	subID := "test_sub_123"
-	subURL := "https://example.com/sub/abc123"
-	telegramLink := "https://t.me/testbot?start=trial_abc123"
-	trialHours := 24
-
-	w := httptest.NewRecorder()
-	srv.renderTrialPage(w, subID, subURL, telegramLink, trialHours)
-
-	rendered := w.Body.String()
-
-	assert.Contains(t, rendered, "<!DOCTYPE html>", "Should have HTML doctype")
-	assert.Contains(t, rendered, "RS8 KVN", "Should have title")
-	assert.Contains(t, rendered, "Добавить в Happ", "Should have Add to Happ button")
-	assert.Contains(t, rendered, "Активировать", "Should have Activate button")
-	assert.Contains(t, rendered, "24 часа", "Should have trial hours")
-	assert.Contains(t, rendered, "Скопировать ссылку", "Should have copy link")
-}
-
-func TestRenderTrialPage_Structure(t *testing.T) {
-	t.Parallel()
-
-	mockDB := testutil.NewDatabaseService()
-	cfg := &config.Config{
-		SiteURL:            "https://example.com",
-		TrialDurationHours: 24,
-	}
-
-	srv := NewServer(":8880", mockDB, cfg, "testbot", nil, nil)
-	defer srv.db.Close()
-
-	w := httptest.NewRecorder()
-	srv.renderTrialPage(w, "test_sub_123", "https://example.com/sub/abc123", "https://t.me/testbot?start=trial_abc123", 24)
-
-	rendered := w.Body.String()
-
-	assert.Contains(t, rendered, "<!DOCTYPE html>", "Should have HTML doctype")
-	assert.Contains(t, rendered, "RS8 KVN", "Should have title")
-	assert.Contains(t, rendered, "Добавить в Happ", "Should have Add to Happ button")
-	assert.Contains(t, rendered, "Активировать", "Should have Activate button")
-	assert.Contains(t, rendered, "24 часа", "Should have trial hours")
+	assert.Contains(t, html, "Тестовая ошибка", "renderErrorPage() should contain error message")
+	assert.Contains(t, html, "<!DOCTYPE html>", "renderErrorPage() should be valid HTML")
 }

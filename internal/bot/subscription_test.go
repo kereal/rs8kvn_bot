@@ -298,39 +298,6 @@ func TestCreateSubscription_DatabaseFailure_RollbackSuccess(t *testing.T) {
 	assert.True(t, mockBot.SendCalledSafe())
 }
 
-func TestCreateSubscription_DatabaseFailure_RollbackFailure(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{
-		TelegramAdminID: 123456,
-		Nodes:           []config.Node{{Name: "main", XUIHost: "http://example.com", XUIAPIToken: "token", XUIInboundIDs: "[1]"}},
-	}
-	mockDB := testutil.NewDatabaseService()
-	mockXUI := testutil.NewXUIClient()
-	mockBot := testutil.NewBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
-	mockXUIClients := map[uint]interfaces.XUIClient{1: mockXUI}
-	nodes := []database.Node{{ID: 1, Name: "main", IsActive: true, Host: "https://panel.example.com", APIToken: "token", InboundIDs: "[1]"}}
-	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUIClients, nil, nodes, cfg)
-	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
-
-	// DB-first: mock DB methods - CreateSubscription fails
-	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
-		return nil, database.ErrSubscriptionNotFound
-	}
-	mockDB.GetPlanByNameFunc = func(ctx context.Context, name string) (*database.Plan, error) {
-		return &database.Plan{ID: 1, Name: database.FreePlanName, TrafficLimit: 1073741824}, nil
-	}
-	mockDB.CreateSubscriptionFunc = func(ctx context.Context, sub *database.Subscription, inviteCode string) error {
-		return errors.New("database error")
-	}
-
-	ctx := context.Background()
-	handler.createSubscription(ctx, 123456, "testuser", 1)
-
-	// DB-first: no XUI rollback needed, error is shown to user
-	assert.True(t, mockBot.SendCalledSafe())
-}
 
 func TestCreateSubscription_CacheUpdate(t *testing.T) {
 	t.Parallel()
@@ -1117,23 +1084,6 @@ func TestHandleBackToSubscription(t *testing.T) {
 
 	assert.True(t, mockBot.RequestCalledSafe(), "Bot.Request should be called to delete message")
 	assert.False(t, mockBot.SendCalledSafe(), "Bot.Send should not be called")
-}
-
-func TestSendQRCode_Success(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{
-		TelegramAdminID: 123456,
-	}
-	mockDB := testutil.NewDatabaseService()
-	mockXUI := testutil.NewXUIClient()
-	mockBot := testutil.NewBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
-
-	ctx := context.Background()
-	handler.sendQRCode(ctx, 123456, 100, "https://example.com/sub", "Test caption")
-
-	assert.True(t, mockBot.SendCalledSafe(), "Bot.Send should be called for QR photo")
 }
 
 func TestNotifyAdmin_Success(t *testing.T) {

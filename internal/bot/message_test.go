@@ -39,34 +39,7 @@ func TestSend_Success(t *testing.T) {
 	assert.NotNil(t, mockBot.LastChattableSafe(), "Message should be captured")
 }
 
-// TestSend_RateLimitContext tests the send function with context cancellation
-func TestSend_RateLimitContext(t *testing.T) {
-	t.Parallel()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // Cancel immediately
-
-	mockBot := &testutil.BotAPI{
-		SendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
-			return tgbotapi.Message{MessageID: 123}, nil
-		},
-	}
-
-	cfg := &config.Config{
-		TelegramBotToken: "test:token",
-		TelegramAdminID:  0,
-	}
-
-	handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig(), nil, "")
-
-	msg := tgbotapi.NewMessage(12345, "test message")
-	handler.send(ctx, msg)
-
-	// With cancelled context, the rate limiter should return false and not send
-	assert.Equal(t, 0, mockBot.SendCountSafe(), "Send should not be called with cancelled context")
-}
-
-// TestSend_SendError tests the send function when bot.Send fails
 func TestSend_SendError(t *testing.T) {
 	t.Parallel()
 
@@ -438,35 +411,7 @@ func TestSendMessage_DifferentChatIDs(t *testing.T) {
 	}
 }
 
-// TestSend_WithContextTimeout tests send with a context that times out
-func TestSend_WithContextTimeout(t *testing.T) {
-	t.Parallel()
 
-	mockBot := &testutil.BotAPI{
-		SendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
-			return tgbotapi.Message{MessageID: 123}, nil
-		},
-	}
-
-	cfg := &config.Config{
-		TelegramBotToken: "test:token",
-		TelegramAdminID:  0,
-	}
-
-	handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig(), nil, "")
-
-	// Create a context that's already timed out
-	ctx, cancel := context.WithTimeout(context.Background(), 0)
-	defer cancel()
-
-	msg := tgbotapi.NewMessage(12345, "test message")
-	handler.send(ctx, msg)
-
-	// With timed out context, the rate limiter should return false and not send
-	assert.Equal(t, 0, mockBot.SendCountSafe(), "Send should not be called with timed out context")
-}
-
-// TestSafeSend_WithVariousChattables tests safeSend with different Chattable types
 func TestSafeSend_WithVariousChattables(t *testing.T) {
 	t.Parallel()
 

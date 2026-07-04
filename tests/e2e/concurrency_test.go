@@ -221,31 +221,3 @@ func TestE2E_Concurrent_GetSubscription_SameUser(t *testing.T) {
 	}
 	assert.Equal(t, 10, count, "All concurrent reads should succeed")
 }
-
-func TestE2E_Concurrent_CreateDelete_SameUser(t *testing.T) {
-	env := setupE2EEnv(t)
-	defer env.db.Close()
-
-	ctx := context.Background()
-
-	var wg sync.WaitGroup
-	wg.Add(2)
-
-	var createErr, deleteErr error
-
-	go func() {
-		defer wg.Done()
-		_, createErr = env.subService.Create(ctx, env.chatID, env.username, "")
-	}()
-
-	go func() {
-		defer wg.Done()
-		time.Sleep(1 * time.Millisecond)
-		deleteErr = env.subService.Delete(ctx, env.chatID)
-	}()
-
-	wg.Wait()
-
-	_ = createErr
-	_ = deleteErr
-}

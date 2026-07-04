@@ -164,19 +164,6 @@ func TestE2E_CreateSubscription_XUITimeout(t *testing.T) {
 	assert.Equal(t, "active", sub.Status)
 }
 
-func TestE2E_Service_Create_TimeoutContext(t *testing.T) {
-	env := setupE2EEnv(t)
-	defer env.db.Close()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
-	defer cancel()
-
-	// DB-first: Create() only does DB writes (fast), so it succeeds even with short timeout
-	_, err := env.subService.Create(ctx, env.chatID, env.username, "")
-	// The context may or may not expire before DB write completes - both outcomes are valid
-	_ = err
-}
-
 func TestE2E_Service_Create_DatabaseClosed(t *testing.T) {
 	env := setupE2EEnv(t)
 	env.db.Close()

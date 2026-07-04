@@ -451,7 +451,6 @@ func TestHandler_GetUsername(t *testing.T) {
 }
 
 func TestMockXUIServer_Endpoints(t *testing.T) {
-	t.Parallel()
 
 	mock := NewMockXUIServer(t)
 	defer mock.Close()
@@ -459,7 +458,6 @@ func TestMockXUIServer_Endpoints(t *testing.T) {
 	authHeader := "Bearer test-api-token"
 
 	t.Run("login", func(t *testing.T) {
-			t.Parallel()
 			resp, err := http.Get(mock.Server.URL + "/login")
 		require.NoError(t, err)
 		defer func() { _ = resp.Body.Close() }()
@@ -472,7 +470,6 @@ func TestMockXUIServer_Endpoints(t *testing.T) {
 		})
 
 	t.Run("addClient", func(t *testing.T) {
-			t.Parallel()
 			req, err := http.NewRequest("POST", mock.Server.URL+"/panel/api/clients/add", nil)
 		require.NoError(t, err)
 		req.Header.Set("Content-Type", "application/json")
@@ -489,7 +486,6 @@ func TestMockXUIServer_Endpoints(t *testing.T) {
 		})
 
 	t.Run("getClientTraffic", func(t *testing.T) {
-			t.Parallel()
 			req, err := http.NewRequest("GET", mock.Server.URL+"/panel/api/clients/traffic/testuser", nil)
 		require.NoError(t, err)
 		req.Header.Set("Authorization", authHeader)
@@ -509,7 +505,6 @@ func TestMockXUIServer_Endpoints(t *testing.T) {
 		})
 
 	t.Run("delClient", func(t *testing.T) {
-			t.Parallel()
 			req, err := http.NewRequest("POST", mock.Server.URL+"/panel/api/clients/del/test-id", nil)
 		require.NoError(t, err)
 		req.Header.Set("Content-Type", "application/json")
@@ -527,16 +522,13 @@ func TestMockXUIServer_Endpoints(t *testing.T) {
 }
 
 func TestMockXUIServer_ErrorResponses(t *testing.T) {
-	t.Parallel()
-
 	mock := NewMockXUIServer(t)
 	defer mock.Close()
 
 	authHeader := "Bearer test-api-token"
 
 	t.Run("addClient error", func(t *testing.T) {
-			t.Parallel()
-			mock.AddClientErr = assert.AnError
+		mock.AddClientErr = assert.AnError
 
 		req, err := http.NewRequest("POST", mock.Server.URL+"/panel/api/clients/add", nil)
 		require.NoError(t, err)
@@ -551,12 +543,10 @@ func TestMockXUIServer_ErrorResponses(t *testing.T) {
 		require.NoError(t, err)
 		assert.False(t, result["success"].(bool))
 		assert.Equal(t, assert.AnError.Error(), result["msg"])
-
-		})
+	})
 
 	t.Run("delClient error", func(t *testing.T) {
-			t.Parallel()
-			mock.DeleteErr = assert.AnError
+		mock.DeleteErr = assert.AnError
 
 		req, err := http.NewRequest("POST", mock.Server.URL+"/panel/api/clients/del/test-id", nil)
 		require.NoError(t, err)
@@ -571,8 +561,7 @@ func TestMockXUIServer_ErrorResponses(t *testing.T) {
 		require.NoError(t, err)
 		assert.False(t, result["success"].(bool))
 		assert.Equal(t, assert.AnError.Error(), result["msg"])
-
-		})
+	})
 }
 
 func resetBotAPI(m *testutil.BotAPI) {

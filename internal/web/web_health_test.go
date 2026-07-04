@@ -319,43 +319,4 @@ func TestRegisterChecker(t *testing.T) {
 	assert.Equal(t, 2, count, "Server should have 2 checkers registered")
 }
 
-// === Status constant tests ===
-
-func TestStatusConstants(t *testing.T) {
-	t.Parallel()
-
-	assert.Equal(t, Status("ok"), StatusOK, "StatusOK constant")
-	assert.Equal(t, Status("degraded"), StatusDegraded, "StatusDegraded constant")
-	assert.Equal(t, Status("down"), StatusDown, "StatusDown constant")
-}
-
-// === ComponentHealth tests ===
-
-func TestComponentHealth_Fields(t *testing.T) {
-	t.Parallel()
-
-	health := ComponentHealth{
-		Status:  StatusOK,
-		Message: "test message",
-	}
-
-	assert.Equal(t, StatusOK, health.Status, "ComponentHealth.Status")
-	assert.Equal(t, "test message", health.Message, "ComponentHealth.Message")
-}
-
-// === HealthResponse tests ===
-
-func TestHealthResponse_Fields(t *testing.T) {
-	t.Parallel()
-
-	resp := HealthResponse{
-		Status:    string(StatusOK),
-		Timestamp: time.Now(),
-		Components: map[string]ComponentHealth{
-			"comp1": {Status: StatusOK, Message: "component1"},
-		},
-	}
-
-	assert.Equal(t, string(StatusOK), resp.Status, "HealthResponse.Status")
-	assert.Len(t, resp.Components, 1, "HealthResponse.Components length")
-}
+	// Register multiple checkers

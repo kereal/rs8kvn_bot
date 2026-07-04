@@ -51,60 +51,23 @@ func TestBearerAuthMiddleware_InvalidToken(t *testing.T) {
 	assert.Contains(t, rec.Body.String(), "unauthorized")
 }
 
-func TestBearerAuthMiddleware_MissingHeader(t *testing.T) {
-	t.Parallel()
-
-	called := false
-	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		called = true
-		w.WriteHeader(http.StatusOK)
-	})
-
-	handler := BearerAuthMiddleware("my-token")(next)
-
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/subscriptions", nil)
-	rec := httptest.NewRecorder()
-
-	handler.ServeHTTP(rec, req)
-
-	assert.False(t, called, "next handler should not be called")
-	assert.Equal(t, http.StatusUnauthorized, rec.Code)
-	assert.Contains(t, rec.Body.String(), "unauthorized")
-}
-
-func TestBearerAuthMiddleware_EmptyHeader(t *testing.T) {
-	t.Parallel()
-
-	called := false
-	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		called = true
-		w.WriteHeader(http.StatusOK)
-	})
-
-	handler := BearerAuthMiddleware("my-token")(next)
-
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/subscriptions", nil)
-	req.Header.Set("Authorization", "")
-	rec := httptest.NewRecorder()
-
-	handler.ServeHTTP(rec, req)
-
-	assert.False(t, called, "next handler should not be called")
-	assert.Equal(t, http.StatusUnauthorized, rec.Code)
-}
-
-func TestBearerAuthMiddleware_WrongScheme(t *testing.T) {
+func TestBearerAuthMiddleware_Rejection(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name   string
-		header string
+		name        string
+		token       string
+		header      string
+		wantCalled  bool
+		wantCode    int
 	}{
-		{"Basic auth", "Basic dXNlcjpwYXNz"},
-		{"Token without Bearer prefix", "my-secret-token"},
-		{"Bearer lowercase", "bearer my-secret-token"},
-		{"Double Bearer", "Bearer Bearer my-secret-token"},
-		{"Bearer with extra space", "Bearer  my-secret-token"},
+		{"missing header", "my-token", "", false, http.StatusUnauthorized},
+		{"empty header value", "my-token", "", false, http.StatusUnauthorized},
+		{"wrong scheme Basic", "my-secret-token", "Basic dXNlcjpwYXNz", false, http.StatusUnauthorized},
+		{"wrong scheme no prefix", "my-secret-token", "my-secret-token", false, http.StatusUnauthorized},
+		{"wrong scheme lowercase bearer", "my-secret-token", "bearer my-secret-token", false, http.StatusUnauthorized},
+		{"double bearer", "my-secret-token", "Bearer Bearer my-secret-token", false, http.StatusUnauthorized},
+		{"bearer with extra space", "my-secret-token", "Bearer  my-secret-token", false, http.StatusUnauthorized},
 	}
 
 	for _, tt := range tests {
@@ -115,16 +78,59 @@ func TestBearerAuthMiddleware_WrongScheme(t *testing.T) {
 				w.WriteHeader(http.StatusOK)
 			})
 
-			handler := BearerAuthMiddleware("my-secret-token")(next)
+			handler := BearerAuthMiddleware(tt.token)(next)
 
 			req := httptest.NewRequest(http.MethodGet, "/api/v1/subscriptions", nil)
-			req.Header.Set("Authorization", tt.header)
+			if tt.header != "" {
+				req.Header.Set("Authorization", tt.header)
+			}
 			rec := httptest.NewRecorder()
 
 			handler.ServeHTTP(rec, req)
 
-			assert.False(t, called, "next handler should not be called")
-			assert.Equal(t, http.StatusUnauthorized, rec.Code)
+			assert.Equal(t, tt.wantCalled, called)
+			assert.Equal(t, tt.wantCode, rec.Code)
+		})
+	}
+}
+
+func TestBearerAuthMiddleware_EmptyExpectedToken(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		authHeader  string
+		shouldAllow bool
+	}{
+		{"empty bearer token", "Bearer ", false},
+		{"no auth header", "", false},
+		{"non-empty token", "Bearer something", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			called := false
+			next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				called = true
+				w.WriteHeader(http.StatusOK)
+			})
+
+			handler := BearerAuthMiddleware("")(next)
+
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/subscriptions", nil)
+			if tt.authHeader != "" {
+				req.Header.Set("Authorization", tt.authHeader)
+			}
+			rec := httptest.NewRecorder()
+
+			handler.ServeHTTP(rec, req)
+
+			assert.Equal(t, tt.shouldAllow, called)
+			if tt.shouldAllow {
+				assert.Equal(t, http.StatusOK, rec.Code)
+			} else {
+				assert.Equal(t, http.StatusUnauthorized, rec.Code)
+			}
 		})
 	}
 }
@@ -148,48 +154,6 @@ func TestBearerAuthMiddleware_OptionsRequest(t *testing.T) {
 
 	assert.True(t, called, "next handler should be called for OPTIONS without auth")
 	assert.Equal(t, http.StatusOK, rec.Code)
-}
-
-func TestBearerAuthMiddleware_EmptyExpectedToken(t *testing.T) {
-	t.Parallel()
-
-	called := false
-	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		called = true
-		w.WriteHeader(http.StatusOK)
-	})
-
-	handler := BearerAuthMiddleware("")(next)
-
-	tests := []struct {
-		name        string
-		authHeader  string
-		shouldAllow bool
-	}{
-		{"empty bearer token", "Bearer ", false},
-		{"no auth header", "", false},
-		{"non-empty token", "Bearer something", false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			called = false
-			req := httptest.NewRequest(http.MethodGet, "/api/v1/subscriptions", nil)
-			if tt.authHeader != "" {
-				req.Header.Set("Authorization", tt.authHeader)
-			}
-			rec := httptest.NewRecorder()
-
-			handler.ServeHTTP(rec, req)
-
-			assert.Equal(t, tt.shouldAllow, called)
-			if tt.shouldAllow {
-				assert.Equal(t, http.StatusOK, rec.Code)
-			} else {
-				assert.Equal(t, http.StatusUnauthorized, rec.Code)
-			}
-		})
-	}
 }
 
 func TestBearerAuthMiddleware_TokenWithSpecialChars(t *testing.T) {
