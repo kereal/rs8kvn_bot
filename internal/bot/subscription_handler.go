@@ -345,6 +345,7 @@ func (sh *SubscriptionHandler) handleConfirmUpgradePremium(ctx context.Context, 
 	if err != nil || product == nil || !product.IsActive || product.PriceCents != 0 {
 		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgPremiumUnavailable))
 		sh.h.safeSend(editMsg)
+		//nolint:nilerr // product unavailable is an expected business state, surfaced to user as MsgPremiumUnavailable
 		return nil
 	}
 
