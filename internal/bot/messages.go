@@ -80,7 +80,7 @@ var messages = map[MessageKey]string{
 	MsgPremiumAlready:     "✅ У вас уже активирован тариф *%s*.",
 	MsgPremiumUnavailable: "❌ Бесплатный premium-продукт сейчас недоступен. Попробуйте позже.",
 	MsgPremiumConfirm:     "💳 Вы покупаете *%s* за *%s*.\n\nНажмите «Получить», чтобы сразу активировать тариф.",
-	MsgPremiumSuccess:     "✅ Ваша подписка %s активирована\n\n%s\n\n🔗 Ссылка на подписку\n`%s`",
+	MsgPremiumSuccess:     "✅ Ваша подписка %s активирована\n\n%s\n\n🔗 Ссылка на подписку\n`%s`\n\nОбновите подписку в программе чтобы получить изменения",
 
 	MsgAdminNoSubs:       "📭 Нет активных подписок",
 	MsgAdminLastReg:      "📋 *Последние регистрации*\n\n",
