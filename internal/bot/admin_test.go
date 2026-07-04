@@ -173,6 +173,7 @@ func TestHandleDel_InvalidIDFormat(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			mockBot.SetSendCalled(false)
 			mockBot.LastSentText = ""
 
@@ -182,6 +183,7 @@ func TestHandleDel_InvalidIDFormat(t *testing.T) {
 			handler.HandleDel(ctx, update)
 			assert.True(t, mockBot.SendCalledSafe())
 			assert.Contains(t, mockBot.LastSentTextSafe(), tt.wantMsg)
+
 		})
 	}
 }
@@ -760,6 +762,7 @@ func TestHandleSend_InvalidFormat(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			cfg := &config.Config{
 				TelegramAdminID: 123456,
 			}
@@ -777,6 +780,7 @@ func TestHandleSend_InvalidFormat(t *testing.T) {
 			handler.HandleSend(ctx, update)
 			assert.True(t, mockBot.SendCalledSafe())
 			assert.Contains(t, mockBot.LastSentTextSafe(), "Использование")
+
 		})
 	}
 }
@@ -1175,8 +1179,10 @@ func TestEscapeMarkdown(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			result := utils.EscapeMarkdown(tt.input)
 			assert.Equal(t, tt.expected, result)
+
 		})
 	}
 }

@@ -412,6 +412,7 @@ func TestSendMessage_DifferentChatIDs(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			var capturedMsg tgbotapi.MessageConfig
 			mockBot := &testutil.BotAPI{
 				SendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
@@ -432,6 +433,7 @@ func TestSendMessage_DifferentChatIDs(t *testing.T) {
 			handler.SendMessage(ctx, tc.chatID, "test message")
 
 			assert.Equal(t, tc.chatID, capturedMsg.ChatID, "ChatID should match")
+
 		})
 	}
 }
@@ -501,6 +503,7 @@ func TestSafeSend_WithVariousChattables(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			mockBot := &testutil.BotAPI{
 				SendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
 					return tgbotapi.Message{MessageID: 999}, nil
@@ -518,6 +521,7 @@ func TestSafeSend_WithVariousChattables(t *testing.T) {
 
 			assert.Equal(t, 1, mockBot.SendCountSafe(), "Send should be called once")
 			tc.checkFunc(t, mockBot.LastChattableSafe())
+
 		})
 	}
 }

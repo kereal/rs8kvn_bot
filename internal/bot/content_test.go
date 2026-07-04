@@ -42,11 +42,13 @@ func TestGetMainMenuContent(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			text, keyboard := handler.getMainMenuContent(context.Background(), tt.username, tt.hasSubscription, tt.chatID, nil)
 
 			assert.Contains(t, text, tt.username, "getMainMenuContent() text should contain username")
 			assert.NotEmpty(t, text, "getMainMenuContent() text should not be empty")
 			assert.NotEmpty(t, keyboard.InlineKeyboard, "getMainMenuContent() keyboard should have buttons")
+
 		})
 	}
 }
@@ -217,8 +219,10 @@ func TestGetHelpText_DifferentTrafficLimits(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			text := handler.getHelpText(tt.trafficLimit, "http://test.url/sub")
 			assert.NotEmpty(t, text, "text should not be empty")
+
 		})
 	}
 }

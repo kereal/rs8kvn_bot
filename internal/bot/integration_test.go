@@ -442,8 +442,10 @@ func TestHandler_GetUsername(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			got := f.Handler.getUsername(tc.user)
 			assert.Equal(t, tc.want, got)
+
 		})
 	}
 }
@@ -457,7 +459,8 @@ func TestMockXUIServer_Endpoints(t *testing.T) {
 	authHeader := "Bearer test-api-token"
 
 	t.Run("login", func(t *testing.T) {
-		resp, err := http.Get(mock.Server.URL + "/login")
+			t.Parallel()
+			resp, err := http.Get(mock.Server.URL + "/login")
 		require.NoError(t, err)
 		defer func() { _ = resp.Body.Close() }()
 
@@ -465,10 +468,12 @@ func TestMockXUIServer_Endpoints(t *testing.T) {
 		err = json.NewDecoder(resp.Body).Decode(&result)
 		require.NoError(t, err)
 		assert.True(t, result["success"].(bool))
-	})
+
+		})
 
 	t.Run("addClient", func(t *testing.T) {
-		req, err := http.NewRequest("POST", mock.Server.URL+"/panel/api/clients/add", nil)
+			t.Parallel()
+			req, err := http.NewRequest("POST", mock.Server.URL+"/panel/api/clients/add", nil)
 		require.NoError(t, err)
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", authHeader)
@@ -480,10 +485,12 @@ func TestMockXUIServer_Endpoints(t *testing.T) {
 		err = json.NewDecoder(resp.Body).Decode(&result)
 		require.NoError(t, err)
 		assert.True(t, result["success"].(bool))
-	})
+
+		})
 
 	t.Run("getClientTraffic", func(t *testing.T) {
-		req, err := http.NewRequest("GET", mock.Server.URL+"/panel/api/clients/traffic/testuser", nil)
+			t.Parallel()
+			req, err := http.NewRequest("GET", mock.Server.URL+"/panel/api/clients/traffic/testuser", nil)
 		require.NoError(t, err)
 		req.Header.Set("Authorization", authHeader)
 		resp, err := http.DefaultClient.Do(req)
@@ -498,10 +505,12 @@ func TestMockXUIServer_Endpoints(t *testing.T) {
 		obj := result["obj"].(map[string]any)
 		assert.Equal(t, float64(1024*1024*100), obj["up"])
 		assert.Equal(t, float64(1024*1024*200), obj["down"])
-	})
+
+		})
 
 	t.Run("delClient", func(t *testing.T) {
-		req, err := http.NewRequest("POST", mock.Server.URL+"/panel/api/clients/del/test-id", nil)
+			t.Parallel()
+			req, err := http.NewRequest("POST", mock.Server.URL+"/panel/api/clients/del/test-id", nil)
 		require.NoError(t, err)
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", authHeader)
@@ -513,7 +522,8 @@ func TestMockXUIServer_Endpoints(t *testing.T) {
 		err = json.NewDecoder(resp.Body).Decode(&result)
 		require.NoError(t, err)
 		assert.True(t, result["success"].(bool))
-	})
+
+		})
 }
 
 func TestMockXUIServer_ErrorResponses(t *testing.T) {
@@ -525,7 +535,8 @@ func TestMockXUIServer_ErrorResponses(t *testing.T) {
 	authHeader := "Bearer test-api-token"
 
 	t.Run("addClient error", func(t *testing.T) {
-		mock.AddClientErr = assert.AnError
+			t.Parallel()
+			mock.AddClientErr = assert.AnError
 
 		req, err := http.NewRequest("POST", mock.Server.URL+"/panel/api/clients/add", nil)
 		require.NoError(t, err)
@@ -540,10 +551,12 @@ func TestMockXUIServer_ErrorResponses(t *testing.T) {
 		require.NoError(t, err)
 		assert.False(t, result["success"].(bool))
 		assert.Equal(t, assert.AnError.Error(), result["msg"])
-	})
+
+		})
 
 	t.Run("delClient error", func(t *testing.T) {
-		mock.DeleteErr = assert.AnError
+			t.Parallel()
+			mock.DeleteErr = assert.AnError
 
 		req, err := http.NewRequest("POST", mock.Server.URL+"/panel/api/clients/del/test-id", nil)
 		require.NoError(t, err)
@@ -558,7 +571,8 @@ func TestMockXUIServer_ErrorResponses(t *testing.T) {
 		require.NoError(t, err)
 		assert.False(t, result["success"].(bool))
 		assert.Equal(t, assert.AnError.Error(), result["msg"])
-	})
+
+		})
 }
 
 func resetBotAPI(m *testutil.BotAPI) {

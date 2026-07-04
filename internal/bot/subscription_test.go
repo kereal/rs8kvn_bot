@@ -231,6 +231,7 @@ func TestCreateSubscription_XUIFailure(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			mockBot.SetSendCalled(false)
 			mockBot.LastSentText = ""
 
@@ -258,6 +259,7 @@ func TestCreateSubscription_XUIFailure(t *testing.T) {
 			// DB-first: subscription is created even if XUI fails (sync will retry)
 			assert.True(t, mockBot.SendCalledSafe())
 			assert.Contains(t, mockBot.LastSentTextSafe(), "подписк")
+
 		})
 	}
 }
@@ -1559,7 +1561,7 @@ func TestHandleBackToSubscription_DeleteFails(t *testing.T) {
 func TestHandleUpgradePremium_NoActiveSubscription(t *testing.T) {
 	t.Parallel()
 
-	cfg := &config.Config{TelegramAdminID: 123456}
+	cfg := &config.Config{TelegramAdminID: 123456, MainMenuBtnProductID: 1}
 	mockDB := testutil.NewDatabaseService()
 	mockXUI := testutil.NewXUIClient()
 	mockBot := testutil.NewBotAPI()
@@ -1579,7 +1581,7 @@ func TestHandleUpgradePremium_NoActiveSubscription(t *testing.T) {
 func TestHandleUpgradePremium_InactiveSubscription(t *testing.T) {
 	t.Parallel()
 
-	cfg := &config.Config{TelegramAdminID: 123456}
+	cfg := &config.Config{TelegramAdminID: 123456, MainMenuBtnProductID: 1}
 	mockDB := testutil.NewDatabaseService()
 	mockXUI := testutil.NewXUIClient()
 	mockBot := testutil.NewBotAPI()
@@ -1598,7 +1600,7 @@ func TestHandleUpgradePremium_InactiveSubscription(t *testing.T) {
 func TestHandleUpgradePremium_AlreadyPremium(t *testing.T) {
 	t.Parallel()
 
-	cfg := &config.Config{TelegramAdminID: 123456}
+	cfg := &config.Config{TelegramAdminID: 123456, MainMenuBtnProductID: 1}
 	mockDB := testutil.NewDatabaseService()
 	mockXUI := testutil.NewXUIClient()
 	mockBot := testutil.NewBotAPI()
@@ -1620,7 +1622,7 @@ func TestHandleUpgradePremium_AlreadyPremium(t *testing.T) {
 func TestHandleUpgradePremium_ProductUnavailable(t *testing.T) {
 	t.Parallel()
 
-	cfg := &config.Config{TelegramAdminID: 123456}
+	cfg := &config.Config{TelegramAdminID: 123456, MainMenuBtnProductID: 1}
 	mockDB := testutil.NewDatabaseService()
 	mockXUI := testutil.NewXUIClient()
 	mockBot := testutil.NewBotAPI()
@@ -1645,7 +1647,7 @@ func TestHandleUpgradePremium_ProductUnavailable(t *testing.T) {
 func TestHandleUpgradePremium_Success(t *testing.T) {
 	t.Parallel()
 
-	cfg := &config.Config{TelegramAdminID: 123456}
+	cfg := &config.Config{TelegramAdminID: 123456, MainMenuBtnProductID: 1}
 	mockDB := testutil.NewDatabaseService()
 	mockXUI := testutil.NewXUIClient()
 	mockBot := testutil.NewBotAPI()
@@ -1671,7 +1673,7 @@ func TestHandleUpgradePremium_Success(t *testing.T) {
 func TestHandleConfirmUpgradePremium_OrderServiceNil(t *testing.T) {
 	t.Parallel()
 
-	cfg := &config.Config{TelegramAdminID: 123456}
+	cfg := &config.Config{TelegramAdminID: 123456, MainMenuBtnProductID: 1}
 	mockDB := testutil.NewDatabaseService()
 	mockXUI := testutil.NewXUIClient()
 	mockBot := testutil.NewBotAPI()
@@ -1688,7 +1690,7 @@ func TestHandleConfirmUpgradePremium_OrderServiceNil(t *testing.T) {
 func TestHandleConfirmUpgradePremium_ProductUnavailable(t *testing.T) {
 	t.Parallel()
 
-	cfg := &config.Config{TelegramAdminID: 123456}
+	cfg := &config.Config{TelegramAdminID: 123456, MainMenuBtnProductID: 1}
 	mockDB := testutil.NewDatabaseService()
 	mockXUI := testutil.NewXUIClient()
 	mockBot := testutil.NewBotAPI()
@@ -1711,7 +1713,7 @@ func TestHandleConfirmUpgradePremium_ProductUnavailable(t *testing.T) {
 func TestHandleConfirmUpgradePremium_Success(t *testing.T) {
 	t.Parallel()
 
-	cfg := &config.Config{TelegramAdminID: 123456}
+	cfg := &config.Config{TelegramAdminID: 123456, MainMenuBtnProductID: 1}
 	mockDB := testutil.NewDatabaseService()
 	mockXUI := testutil.NewXUIClient()
 	mockBot := testutil.NewBotAPI()

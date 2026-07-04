@@ -451,14 +451,14 @@ func (h *Handler) getMainMenuKeyboard(hasSubscription bool, freeUpgradeLabel ...
 }
 
 func (h *Handler) getFreeUpgradeLabel(ctx context.Context, sub *database.Subscription) (string, bool) {
-	if h.db == nil || sub == nil || sub.Status != "active" {
+	if h.db == nil || sub == nil || sub.Status != "active" || h.cfg == nil || h.cfg.MainMenuBtnProductID == 0 {
 		return "", false
 	}
 	plan, err := h.db.GetPlanByID(ctx, sub.PlanID)
 	if err != nil || plan == nil || plan.Name != database.FreePlanName {
 		return "", false
 	}
-	product, err := h.db.GetProductByID(ctx, 1)
+	product, err := h.db.GetProductByID(ctx, h.cfg.MainMenuBtnProductID)
 	if err != nil || product == nil || !product.IsActive || product.PriceCents != 0 {
 		return "", false
 	}

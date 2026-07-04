@@ -204,8 +204,10 @@ func TestHandleMenuDonate_WithDifferentUsernames(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			handler.handleMenuDonate(ctx, 12345, tc.username, 100)
 			require.NotNil(t, mockBot.LastChattableSafe(), "Message should be sent")
+
 		})
 	}
 }
@@ -312,6 +314,7 @@ func TestHandleMenuHelp_VariousTrafficLimits(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			mockBot := testutil.NewBotAPI()
 			mockDB := testutil.NewDatabaseService()
 			mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
@@ -333,6 +336,7 @@ func TestHandleMenuHelp_VariousTrafficLimits(t *testing.T) {
 			handler.handleMenuHelp(ctx, 12345, "testuser", 100)
 
 			require.NotNil(t, mockBot.LastChattableSafe(), "Message should be sent")
+
 		})
 	}
 }
@@ -353,6 +357,7 @@ func TestHandleBackToStart_VariousMessageIDs(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			mockBot := testutil.NewBotAPI()
 			mockDB := testutil.NewDatabaseService()
 			mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
@@ -375,6 +380,7 @@ func TestHandleBackToStart_VariousMessageIDs(t *testing.T) {
 			editMsg, ok := mockBot.LastChattableSafe().(tgbotapi.EditMessageTextConfig)
 			require.True(t, ok, "Should be EditMessageTextConfig")
 			assert.Equal(t, tc.messageID, editMsg.MessageID, "MessageID should match")
+
 		})
 	}
 }
@@ -500,6 +506,7 @@ func TestHandleBackToStart_VariousChatIDs(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			mockBot := testutil.NewBotAPI()
 			mockDB := testutil.NewDatabaseService()
 			mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
@@ -518,6 +525,7 @@ func TestHandleBackToStart_VariousChatIDs(t *testing.T) {
 			editMsg, ok := mockBot.LastChattableSafe().(tgbotapi.EditMessageTextConfig)
 			require.True(t, ok, "Should be EditMessageTextConfig")
 			assert.Equal(t, tc.chatID, editMsg.ChatID, "ChatID should match")
+
 		})
 	}
 }

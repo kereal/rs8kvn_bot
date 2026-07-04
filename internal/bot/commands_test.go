@@ -103,6 +103,7 @@ func TestHandleStart_WithTrialCode(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			mockDB := testutil.NewDatabaseService()
 			mockXUI := testutil.NewXUIClient()
 			mockBot := testutil.NewBotAPI()
@@ -126,6 +127,7 @@ func TestHandleStart_WithTrialCode(t *testing.T) {
 			assert.True(t, mockBot.SendCalledSafe(), "Should send a message")
 			assert.Equal(t, tt.wantSendCount, mockBot.SendCountSafe(), "Should send expected number of messages")
 			assert.Contains(t, mockBot.LastSentTextSafe(), tt.wantText, "Should contain expected text")
+
 		})
 	}
 }
@@ -169,6 +171,7 @@ func TestHandleStart_NormalFlow(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			mockDB := testutil.NewDatabaseService()
 			mockXUI := testutil.NewXUIClient()
 			mockBot := testutil.NewBotAPI()
@@ -193,6 +196,7 @@ func TestHandleStart_NormalFlow(t *testing.T) {
 
 			assert.True(t, mockBot.SendCalledSafe(), "Should send a message")
 			assert.Contains(t, mockBot.LastSentTextSafe(), tt.wantText, "Should contain expected text")
+
 		})
 	}
 }
