@@ -42,6 +42,7 @@ func TestE2E_SubscriptionDelivery_AfterRenew_InvalidatesCacheAndServesUpdatedCon
 
 	backendState := struct {
 		sync.Mutex
+
 		body       string
 		userInfo   string
 		requestCnt int
