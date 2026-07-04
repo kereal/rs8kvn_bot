@@ -61,6 +61,9 @@ type Config struct {
 	GlobalSubURL           string
 	SubServerAccessLogPath string
 
+	// Main menu configuration
+	MainMenuBtnProductID uint
+
 	// Nodes configuration
 	Nodes []Node
 }
@@ -84,6 +87,7 @@ type configFlags struct {
 	donateURL              *flag.StringValue
 	globalSubURL           *flag.StringValue
 	subServerAccessLogPath *flag.StringValue
+	mainMenuBtnProductID   *flag.IntValue
 }
 
 // registerFlags creates a new flag.Registry and initializes a configFlags instance with defaults,
@@ -110,6 +114,7 @@ func registerFlags() (*flag.Registry, *configFlags) {
 		donateURL:              flag.NewString(DonateURL),
 		globalSubURL:           flag.NewString(""),
 		subServerAccessLogPath: flag.NewString(""),
+		mainMenuBtnProductID:   flag.NewInt(0),
 	}
 
 	r.Register("TELEGRAM_BOT_TOKEN", f.telegramBotToken)
@@ -129,6 +134,7 @@ func registerFlags() (*flag.Registry, *configFlags) {
 	r.Register("DONATE_CARD_NUMBER", f.donateCardNumber)
 	r.Register("DONATE_URL", f.donateURL)
 	r.Register("SUBSERVER_ACCESS_LOG", f.subServerAccessLogPath)
+	r.Register("MAIN_MENU_BTN_PRODUCT", f.mainMenuBtnProductID)
 
 	return r, f
 }
@@ -161,6 +167,7 @@ func Load() (*Config, error) {
 		DonateURL:              f.donateURL.Get(),
 		GlobalSubURL:           f.globalSubURL.Get(),
 		SubServerAccessLogPath: f.subServerAccessLogPath.Get(),
+		MainMenuBtnProductID:   uint(f.mainMenuBtnProductID.Get()),
 	}
 
 	// Validate all required fields

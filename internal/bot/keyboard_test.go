@@ -151,6 +151,7 @@ func TestAddAdminButtons(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			cfg := &config.Config{TelegramAdminID: tt.adminID}
 			handler := &Handler{cfg: cfg, botConfig: NewTestBotConfig()}
 
@@ -167,6 +168,7 @@ func TestAddAdminButtons(t *testing.T) {
 			} else {
 				assert.Len(t, keyboard.InlineKeyboard, 1, "Expected no admin buttons")
 			}
+
 		})
 	}
 }

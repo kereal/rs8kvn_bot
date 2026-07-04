@@ -268,6 +268,12 @@ func (sh *SubscriptionHandler) handleBackToInvite(_ context.Context, chatID int6
 func (sh *SubscriptionHandler) handleUpgradePremium(ctx context.Context, chatID int64, username string, messageID int) error {
 	logger.Info("User viewing premium offer", zap.String("username", username))
 
+	if sh.h.cfg == nil || sh.h.cfg.MainMenuBtnProductID == 0 || sh.h.db == nil {
+		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgPremiumUnavailable))
+		sh.h.safeSend(editMsg)
+		return nil
+	}
+
 	sub, err := sh.getSubscriptionWithCache(ctx, chatID)
 	if err != nil {
 		if errors.Is(err, database.ErrSubscriptionNotFound) || errors.Is(err, gorm.ErrRecordNotFound) {
@@ -300,12 +306,12 @@ func (sh *SubscriptionHandler) handleUpgradePremium(ctx context.Context, chatID 
 		return nil
 	}
 
-	product, err := sh.h.db.GetProductByID(ctx, 1)
+	product, err := sh.h.db.GetProductByID(ctx, sh.h.cfg.MainMenuBtnProductID)
 	if err != nil {
 		logger.Error("Failed to get product for premium offer", zap.Error(err), zap.Int64("chat_id", chatID))
 		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgSubTempError))
 		sh.h.safeSend(editMsg)
-		return fmt.Errorf("get product 1: %w", err)
+		return fmt.Errorf("get product %d: %w", sh.h.cfg.MainMenuBtnProductID, err)
 	}
 	if product == nil || !product.IsActive || product.PriceCents != 0 {
 		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgPremiumUnavailable))
@@ -335,13 +341,19 @@ func (sh *SubscriptionHandler) handleUpgradePremium(ctx context.Context, chatID 
 func (sh *SubscriptionHandler) handleConfirmUpgradePremium(ctx context.Context, chatID int64, username string, messageID int) error {
 	logger.Info("User confirming premium upgrade", zap.String("username", username))
 
+	if sh.h.cfg == nil || sh.h.cfg.MainMenuBtnProductID == 0 || sh.h.db == nil {
+		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgPremiumUnavailable))
+		sh.h.safeSend(editMsg)
+		return fmt.Errorf("product purchase not configured")
+	}
+
 	if sh.h.orderService == nil {
 		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgSubTempError))
 		sh.h.safeSend(editMsg)
 		return fmt.Errorf("order service not available")
 	}
 
-	product, err := sh.h.db.GetProductByID(ctx, 1)
+	product, err := sh.h.db.GetProductByID(ctx, sh.h.cfg.MainMenuBtnProductID)
 	if err != nil || product == nil || !product.IsActive || product.PriceCents != 0 {
 		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgPremiumUnavailable))
 		sh.h.safeSend(editMsg)

@@ -228,6 +228,7 @@ func TestHandleCallback_CallbackDataRouting(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			cfg := &config.Config{
 				TelegramAdminID: 123456,
 				SiteURL:         "https://example.com",
@@ -266,6 +267,7 @@ func TestHandleCallback_CallbackDataRouting(t *testing.T) {
 			} else {
 				assert.False(t, mockBot.SendCalledSafe(), "Bot.Send should not be called for %s", tt.name)
 			}
+
 		})
 	}
 }
@@ -703,7 +705,9 @@ func TestHandleCallback_AllCallbackTypes(t *testing.T) {
 
 	for _, callback := range expectedCallbacks {
 		t.Run("callback_"+callback, func(t *testing.T) {
+			t.Parallel()
 			assert.NotEmpty(t, callback, "Callback data should not be empty")
+
 		})
 	}
 }

@@ -31,7 +31,9 @@ func TestNormalizeCommand(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.in, func(t *testing.T) {
+			t.Parallel()
 			assert.Equal(t, tt.want, normalizeCommand(tt.in))
+
 		})
 	}
 }
@@ -55,7 +57,9 @@ func TestFormatUserDisplay(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			assert.Equal(t, tt.want, formatUserDisplay(tt.username))
+
 		})
 	}
 }
@@ -78,7 +82,9 @@ func TestDisplayUsername(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			assert.Equal(t, tt.want, displayUsername(tt.username))
+
 		})
 	}
 }
