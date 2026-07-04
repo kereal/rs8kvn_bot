@@ -45,8 +45,9 @@ func TestLoad_DefaultValues(t *testing.T) {
 	}()
 
 	// Isolate from host environment — SUBSERVER_ACCESS_LOG may be set in .env
-	os.Unsetenv("SUBSERVER_ACCESS_LOG")
-
+	if err := os.Unsetenv("SUBSERVER_ACCESS_LOG"); err != nil {
+		t.Logf("Warning: Unsetenv failed: %v", err)
+	}
 	require.NoError(t, os.Setenv("GLOBAL_SUB_URL", "https://vpn.example.com/sub/"))
 	defer os.Unsetenv("GLOBAL_SUB_URL")
 
