@@ -2,11 +2,8 @@ package e2e
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -17,7 +14,6 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/logger"
 	"github.com/kereal/rs8kvn_bot/internal/service"
 	"github.com/kereal/rs8kvn_bot/internal/testutil"
-	"github.com/kereal/rs8kvn_bot/internal/xui"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/stretchr/testify/require"
@@ -151,106 +147,3 @@ func newCommandMessage(chatID int64, userID int64, username, text string, cmdLen
 	}
 }
 
-type realXUIEnv struct {
-	t          *testing.T
-	db         *database.Service
-	xuiClient  *xui.Client
-	server     *httptest.Server
-	cfg        *config.Config
-	subService *service.SubscriptionService
-}
-
-func setupRealXUIEnv(t *testing.T, handlers map[string]http.HandlerFunc) *realXUIEnv {
-	t.Helper()
-	db := setupTestDB(t)
-
-	defaults := map[string]http.HandlerFunc{
-		"/login": func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			if err := json.NewEncoder(w).Encode(xui.APIResponse{Success: true, Msg: "Login successful"}); err != nil {
-				t.Fatalf("encode %s response: %v", "/login", err)
-			}
-		},
-		"/panel/api/server/status": func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			if err := json.NewEncoder(w).Encode(xui.APIResponse{Success: true}); err != nil {
-				t.Fatalf("encode %s response: %v", "/panel/api/server/status", err)
-			}
-		},
-		"/panel/api/clients/add": func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			if err := json.NewEncoder(w).Encode(xui.APIResponse{Success: true, Msg: "Client added"}); err != nil {
-				t.Fatalf("encode %s response: %v", "/panel/api/clients/add", err)
-			}
-		},
-	}
-
-	allHandlers := make(map[string]http.HandlerFunc)
-	for path, handler := range defaults {
-		allHandlers[path] = handler
-	}
-	for path, handler := range handlers {
-		allHandlers[path] = handler
-	}
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		path := r.URL.Path
-
-		if h, ok := allHandlers[path]; ok {
-			h(w, r)
-			return
-		}
-
-		if strings.HasPrefix(path, "/panel/api/clients/del/") {
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(xui.APIResponse{Success: true, Msg: "Client deleted"})
-			return
-		}
-		if strings.HasPrefix(path, "/panel/api/clients/traffic/") {
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(xui.APIResponse{
-				Success: true,
-				Obj:     json.RawMessage(`{"id":1,"inboundId":1,"enable":true,"email":"test","up":100,"down":200,"allTime":300,"total":107374182400}`),
-			})
-			return
-		}
-
-		http.NotFound(w, r)
-	})
-
-	server := httptest.NewServer(mux)
-
-	cfg := &config.Config{
-		TelegramAdminID:  123456,
-		SiteURL:          "https://example.com",
-		TelegramBotToken: "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11",
-		GlobalSubURL:     "",
-		Nodes: []config.Node{
-			{Name: "main", XUIHost: server.URL, XUIAPIToken: "test-api-token", XUIInboundIDs: "[1]", Active: true},
-		},
-	}
-
-	xuiClient, err := xui.NewClient(server.URL, "test-api-token")
-	require.NoError(t, err)
-
-	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
-	nodes := e2eNodes(server.URL)
-	subService := service.NewSubscriptionService(db, xuiClients, nil, nodes, cfg)
-
-	return &realXUIEnv{
-		t:          t,
-		db:         db,
-		xuiClient:  xuiClient,
-		server:     server,
-		cfg:        cfg,
-		subService: subService,
-	}
-}
-
-func (e *realXUIEnv) Close() {
-	e.server.Close()
-	if err := e.db.Close(); err != nil {
-		e.t.Logf("Warning: failed to close database: %v", err)
-	}
-}

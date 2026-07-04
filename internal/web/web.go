@@ -445,6 +445,7 @@ func (s *Server) getExistingTrialFromCookie(r *http.Request, ctx context.Context
 	cookie, err := r.Cookie("rs8kvn_trial_" + code)
 	if err != nil {
 		// No cookie (new visitor) — expected, not an error.
+		//nolint:nilerr // no cookie means new visitor, expected business state
 		return nil, nil
 	}
 
