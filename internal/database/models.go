@@ -59,7 +59,7 @@ type Subscription struct {
 	ClientID       string `gorm:"size:255;not null;uniqueIndex"`
 	SubscriptionID string `gorm:"size:255;not null;uniqueIndex"`
 	// ExpiresAt — срок действия подписки. NULL = бессрочная (free-план).
-	ExpiresAt      *time.Time `gorm:"index:idx_expiry"`
+	ExpiresAt      *time.Time `gorm:"index"`
 	Status         string     `gorm:"default:active;size:50;index"`
 	InviteCode     *string    `gorm:"size:16;index"`
 	PlanID         uint       `gorm:"index"`
@@ -70,6 +70,9 @@ type Subscription struct {
 	Currency       *string   `gorm:"size:3"`
 	Devices        string    `gorm:"type:text;default:'[]'"` // JSON array of {header_key: value} device entries
 	Ips            string    `gorm:"type:text;default:'[]'"` // JSON array of {ip: timestamp} entries
+	// LastRequest — дата/время последнего запроса подписки через субсервер (/sub/:id).
+	// Обновляется best-effort при каждом запросе клиента. NULL до первого запроса.
+	LastRequest    *time.Time `gorm:"index"`
 	CreatedAt      time.Time `gorm:"autoCreateTime"`
 	UpdatedAt      time.Time `gorm:"autoUpdateTime"`
 

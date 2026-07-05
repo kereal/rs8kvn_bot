@@ -166,7 +166,7 @@ internal/
 ├── database/         # Persistence
 │   ├── service.go           # GORM service + connection pool
 │   ├── migrations.go        # Embedded migration runner
-│   ├── migrations/          # 000..027 SQL files (embedded)
+│   ├── migrations/          # 000..029 SQL files (embedded)
 │   ├── models.go            # Subscription, Plan, Node, Product, Order, Invite, SubscriptionNode
 │   ├── trials.go            # Trial subscription logic, generateTrialTelegramID
 │   ├── subscriptions.go     # Subscription CRUD
@@ -375,7 +375,8 @@ ConnMaxIdleTime = 2m
 ```sql
 CREATE INDEX idx_subscriptions_telegram_id    ON subscriptions(telegram_id);
 CREATE INDEX idx_subscriptions_subscription_id ON subscriptions(subscription_id);
-CREATE INDEX idx_subscriptions_expiry          ON subscriptions(expires_at);
+CREATE INDEX idx_subscriptions_expires_at     ON subscriptions(expires_at);
+CREATE INDEX idx_subscriptions_last_request    ON subscriptions(last_request);
 CREATE INDEX idx_subscriptions_invite_code     ON subscriptions(invite_code);
 CREATE INDEX idx_subscriptions_referred_by     ON subscriptions(referred_by);
 CREATE UNIQUE INDEX idx_invites_referrer_unique ON invites(referrer_tg_id);
@@ -540,6 +541,7 @@ SIGQUIT (kill -3) → core dump (not handled by us)
 │ currency            *string   size:3                         │
 │ devices              text     default:'[]' (JSON array)      │
 │ ips                  text     default:'[]' (JSON array)      │
+│ last_request        *time     INDEX (NULL until first /sub)  │
 │ created_at           time     autoCreate                     │
 │ updated_at           time     autoUpdate                     │
 └─────────────────────────────────────────────────────────────┘
@@ -672,8 +674,8 @@ SIGQUIT (kill -3) → core dump (not handled by us)
 - `telegram_id + status` → fast lookup of user's active subscription
 - `subscription_id` → fast `/sub/{subID}` lookup
 - `expires_at` → cleanup of expired subs
-- `invite_code` → trial activation via invite
 - `referred_by` → referral stats query
+- `last_request` → "last active" queries (when a client last fetched its subscription)
 
 ---
 

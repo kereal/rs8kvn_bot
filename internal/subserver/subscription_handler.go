@@ -67,7 +67,13 @@ func HandleSubscription(ctx context.Context, db interfaces.DatabaseService, subS
 			)
 			return nil, fmt.Errorf("subscription not active")
 		}
-		logger.Info("Cache hit", zap.String("sub_id", subID))
+		logger.Debug("Cache hit", zap.String("sub_id", subID))
+		// best-effort: обновляем last_request, ошибки не блокируют выдачу.
+		if err := db.UpdateLastRequest(ctx, subID); err != nil {
+			logger.Warn("Failed to update last_request",
+				zap.String("sub_id", subID),
+				zap.Error(err))
+		}
 		return &SubscriptionResult{
 			Body:    cachedBody,
 			Headers: cachedHeaders,
@@ -99,6 +105,13 @@ func HandleSubscription(ctx context.Context, db interfaces.DatabaseService, subS
 	// Track the requesting device and IP for analytics/audit.
 	UpdateDevices(ctx, db, subFull, requestHeaders)
 	UpdateIPs(ctx, db, subFull, clientIP)
+
+	// best-effort: обновляем last_request, ошибки не блокируют выдачу.
+	if err := db.UpdateLastRequest(ctx, subID); err != nil {
+		logger.Warn("Failed to update last_request",
+			zap.String("sub_id", subID),
+			zap.Error(err))
+	}
 
 	var allItems []string
 	var allJSONConfigs []json.RawMessage
