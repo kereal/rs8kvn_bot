@@ -147,6 +147,7 @@ type DatabaseService struct {
 	GetSubscriptionStatusFunc                   func(ctx context.Context, subscriptionID string) (string, time.Time, error)
 	UpdateDevicesFunc                           func(ctx context.Context, id uint, devicesJSON string) error
 	UpdateIPsFunc                               func(ctx context.Context, id uint, ipsJSON string) error
+	UpdateLastRequestFunc                       func(ctx context.Context, subscriptionID string) error
 }
 
 func (m *DatabaseService) Ping(ctx context.Context) error {
@@ -717,6 +718,13 @@ func (m *DatabaseService) UpdateDevices(ctx context.Context, id uint, devicesJSO
 }
 
 func (m *DatabaseService) UpdateIPs(ctx context.Context, id uint, ipsJSON string) error {
+	return nil
+}
+
+func (m *DatabaseService) UpdateLastRequest(ctx context.Context, subscriptionID string) error {
+	if m.UpdateLastRequestFunc != nil {
+		return m.UpdateLastRequestFunc(ctx, subscriptionID)
+	}
 	return nil
 }
 

@@ -866,7 +866,7 @@ func TestService_CountExpiredSubscriptions(t *testing.T) {
 			Username:       fmt.Sprintf("expired%d", i),
 			ClientID:       fmt.Sprintf("client-expired-%d", i),
 			SubscriptionID: fmt.Sprintf("sub-expired-%d", i),
-			ExpiresAt:      ptrTime(time.Now().Add(-1 * time.Hour)),
+		ExpiresAt:      ptrTime(time.Now().UTC().Add(-1 * time.Hour)),
 			Status:         "active",
 		}
 		require.NoError(t, svc.db.Create(sub).Error)
@@ -877,7 +877,7 @@ func TestService_CountExpiredSubscriptions(t *testing.T) {
 		Username:       "active",
 		ClientID:       "client-active",
 		SubscriptionID: "sub-active-final",
-		ExpiresAt:      ptrTime(time.Now().Add(1 * time.Hour)),
+	ExpiresAt:      ptrTime(time.Now().UTC().Add(1 * time.Hour)),
 		Status:         "active",
 	}
 	require.NoError(t, svc.db.Create(activeSub).Error)
