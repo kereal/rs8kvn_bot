@@ -443,51 +443,6 @@ type CircuitBreaker struct {
 
 ---
 
-### 7. Subscription Proxy Extra Servers
-
-**Config format** (`extra_servers.txt`):
-
-```
-# Headers section (optional)
-X-Custom-Header: my-value
-X-Server-Name: RS8-KVN Backup
-
-# End of headers (blank line required)
-
-# Server lines (one per line)
-vless://uuid@backup1.example.com:443?security=reality&...
-trojan://password@backup2.example.com:443?...
-vmess://another-uuid@backup3.com:443?...
-```
-
-**Parsing rules:**
-- Lines starting with `#` are comments (ignored)
-- Blank line ends header section
-- Header lines require `Key: Value` format
-- Server lines recognized by scheme prefix (case-insensitive)
-- Headers override 3x-ui headers (last-wins)
-- Servers appended after 3x-ui servers (client selects first working)
-
-**Supported schemes:**
-`vless://`, `vmess://`, `trojan://`, `ss://`, `ssr://`, `hysteria://`, `hysteria2://`, `hy2://`, `tuic://`, `wg://`, `wireguard://`
-
-**Security:** Path validated before `os.Open` — no `..`, no system dirs, must be absolute within allowed base.
-
-**Reload loop:**
-```go
-ticker := time.NewTicker(5 * time.Minute)
-for {
-    select {
-    case <-ticker.C:
-        svc.ReloadConfig() // keeps old config on error
-    case <-stopCh:
-        return
-    }
-}
-```
-
----
-
 ### 8. Graceful Shutdown
 
 **Signal handling:**
@@ -967,7 +922,6 @@ The bot exposes a `/metrics` endpoint (via `promhttp.Handler()`) on the HTTP ser
 | **Testing** | Property-based testing (quickcheck) | P2 (quality) |
 | **CI/CD** | Automated security scanning (Trivy, gosec in CI) | P1 (security) |
 | **Deployment** | Helm chart for Kubernetes | P2 (if using k8s) |
-| **Config** | Remove XUI_INBOUND_ID (singular) seed-only env var | P3 (next release) |
 | **Storage** | Real Cloudflare R2 backend for UploadStore | P2 (WIRED-not-PROVEN) |
 | **Transcription** | Live HTTP transcription endpoint | P2 (WIRED-not-PROVEN) |
 

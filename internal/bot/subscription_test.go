@@ -108,7 +108,6 @@ func TestCreateSubscription_Success(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		Nodes:           []config.Node{{Name: "main", XUIHost: "https://panel.example.com", XUIAPIToken: "token", XUIInboundIDs: "[1]"}},
 	}
 	mockDB := testutil.NewDatabaseService()
 	mockXUI := testutil.NewXUIClient()
@@ -151,7 +150,6 @@ func TestCreateSubscription_XUIFailure(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		Nodes:           []config.Node{{Name: "main", XUIHost: "http://example.com", XUIAPIToken: "token", XUIInboundIDs: "[1]"}},
 	}
 	mockDB := testutil.NewDatabaseService()
 	mockXUI := testutil.NewXUIClient()
@@ -269,7 +267,6 @@ func TestCreateSubscription_DatabaseFailure_RollbackSuccess(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		Nodes:           []config.Node{{Name: "main", XUIHost: "http://example.com", XUIAPIToken: "token", XUIInboundIDs: "[1]"}},
 	}
 	mockDB := testutil.NewDatabaseService()
 	mockXUI := testutil.NewXUIClient()
@@ -304,7 +301,6 @@ func TestCreateSubscription_CacheUpdate(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		Nodes:           []config.Node{{Name: "main", XUIHost: "https://panel.example.com", XUIAPIToken: "token", XUIInboundIDs: "[1]"}},
 	}
 	mockDB := testutil.NewDatabaseService()
 	mockXUI := testutil.NewXUIClient()
@@ -355,7 +351,6 @@ func TestHandleCreateSubscription_AlreadyInProgress(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		Nodes:           []config.Node{{Name: "main", XUIHost: "http://example.com", XUIAPIToken: "token", XUIInboundIDs: "[1]"}},
 	}
 	mockDB := testutil.NewDatabaseService()
 	mockXUI := testutil.NewXUIClient()
@@ -384,7 +379,6 @@ func TestHandleCreateSubscription_ExistingActiveSubscription(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		Nodes:           []config.Node{{Name: "main", XUIHost: "http://example.com", XUIAPIToken: "token", XUIInboundIDs: "[1]"}},
 	}
 	mockDB := testutil.NewDatabaseService()
 	mockXUI := testutil.NewXUIClient()
@@ -416,7 +410,6 @@ func TestHandleCreateSubscription_ExpiredSubscription(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		Nodes:           []config.Node{{Name: "main", XUIHost: "http://example.com", XUIAPIToken: "token", XUIInboundIDs: "[1]"}},
 	}
 	mockDB := testutil.NewDatabaseService()
 	mockXUI := testutil.NewXUIClient()
@@ -460,7 +453,6 @@ func TestHandleCreateSubscription_DatabaseError(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		Nodes:           []config.Node{{Name: "main", XUIHost: "http://example.com", XUIAPIToken: "token", XUIInboundIDs: "[1]"}},
 	}
 	mockDB := testutil.NewDatabaseService()
 	mockXUI := testutil.NewXUIClient()
@@ -483,7 +475,6 @@ func TestHandleCreateSubscription_NoSubscription(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		Nodes:           []config.Node{{Name: "main", XUIHost: "http://example.com", XUIAPIToken: "token", XUIInboundIDs: "[1]"}},
 	}
 	mockDB := testutil.NewDatabaseService()
 	mockXUI := testutil.NewXUIClient()
@@ -985,7 +976,6 @@ func TestHandleCreateSubscription_ZeroMessageID(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		Nodes:           []config.Node{{Name: "main", XUIHost: "http://example.com", XUIAPIToken: "token", XUIInboundIDs: "[1]"}},
 	}
 	mockDB := testutil.NewDatabaseService()
 	mockXUI := testutil.NewXUIClient()
@@ -1182,7 +1172,6 @@ func TestHandleCreateError_RollbackFailed(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		SiteURL:         "https://vpn.site",
-		Nodes:           []config.Node{{Name: "main", XUIHost: "http://example.com", XUIAPIToken: "token", XUIInboundIDs: "[1]"}},
 	}
 	mockDB := testutil.NewDatabaseService()
 	mockXUI := testutil.NewXUIClient()
@@ -1204,7 +1193,6 @@ func TestHandleCreateError_ConnectionRefused(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		SiteURL:         "https://vpn.site",
-		Nodes:           []config.Node{{Name: "main", XUIHost: "http://example.com", XUIAPIToken: "token", XUIInboundIDs: "[1]"}},
 	}
 	mockDB := testutil.NewDatabaseService()
 	mockXUI := testutil.NewXUIClient()
@@ -1225,7 +1213,6 @@ func TestHandleCreateError_Authentication(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 		SiteURL:         "https://vpn.site",
-		Nodes:           []config.Node{{Name: "main", XUIHost: "http://example.com", XUIAPIToken: "token", XUIInboundIDs: "[1]"}},
 	}
 	mockDB := testutil.NewDatabaseService()
 	mockXUI := testutil.NewXUIClient()
@@ -1304,7 +1291,6 @@ func TestCreateSubscription_WithPendingInvite(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		Nodes:           []config.Node{{Name: "main", XUIHost: "https://panel.example.com", XUIAPIToken: "token", XUIInboundIDs: "[1]"}},
 	}
 	mockDB := testutil.NewDatabaseService()
 	mockXUI := testutil.NewXUIClient()
@@ -1378,7 +1364,6 @@ func TestCreateSubscription_WithExpiredPendingInvite(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		Nodes:           []config.Node{{Name: "main", XUIHost: "https://panel.example.com", XUIAPIToken: "token", XUIInboundIDs: "[1]"}},
 	}
 	mockDB := testutil.NewDatabaseService()
 	mockXUI := testutil.NewXUIClient()

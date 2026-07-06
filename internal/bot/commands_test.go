@@ -38,7 +38,6 @@ func TestHandleStart_WithTrialCode(t *testing.T) {
 			name: "valid trial code",
 			cfg: &config.Config{
 				TelegramAdminID: 0,
-				Nodes:           []config.Node{{Name: "main", XUIHost: "http://example.com", XUIAPIToken: "token", XUIInboundIDs: "[1]"}},
 			},
 			args: "trial_abc12345",
 			setupMock: func(db *testutil.DatabaseService) {
@@ -359,7 +358,6 @@ func TestHandleBindTrial_AlreadyHasSubscription(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{
-		Nodes: []config.Node{{Name: "main", XUIHost: "http://example.com", XUIAPIToken: "token", XUIInboundIDs: "[1]"}},
 	}
 	mockDB := testutil.NewDatabaseService()
 	mockXUI := testutil.NewXUIClient()

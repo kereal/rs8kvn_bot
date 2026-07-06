@@ -148,6 +148,7 @@ func (s *Server) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to bind %s: %w", s.addr, err)
 	}
 	s.listenerAddr = listener.Addr().String()
+	logger.Info("Web server started", zap.String("addr", s.listenerAddr))
 	s.initSubserverAccessLogger()
 
 	go func() {

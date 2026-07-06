@@ -78,10 +78,18 @@ func (r *Registry) LoadEnv() error {
 	defer r.mu.RUnlock()
 
 	for name, v := range r.values {
-		if val, ok := os.LookupEnv(name); ok {
-			if err := v.Set(strings.TrimSpace(val)); err != nil {
-				return fmt.Errorf("invalid value for %s: %w", name, err)
-			}
+		val, ok := os.LookupEnv(name)
+		if !ok {
+			continue
+		}
+		val = strings.TrimSpace(val)
+		// An empty environment value is treated as unset: keep the default.
+		// Required fields are still caught by config validation.
+		if val == "" {
+			continue
+		}
+		if err := v.Set(val); err != nil {
+			return fmt.Errorf("invalid value for %s: %w", name, err)
 		}
 	}
 

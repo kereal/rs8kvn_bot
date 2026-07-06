@@ -7,8 +7,6 @@ import (
 	"os"
 	"os/signal"
 	"runtime/debug"
-	"strconv"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -395,40 +393,6 @@ func main() {
 		}
 	}()
 	logger.Info("Database initialized successfully")
-
-	// Seed default node from env vars if nodes table is empty
-	seedCtx, seedCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer seedCancel()
-	isEmpty, err := dbService.IsNodesEmpty(seedCtx)
-	if err != nil {
-		logger.Fatal("Failed to check nodes table", zap.Error(err))
-	}
-	if isEmpty {
-		xuiHost := os.Getenv("XUI_HOST")
-		xuiAPIToken := os.Getenv("XUI_API_TOKEN")
-		xuiInboundIDStr := os.Getenv("XUI_INBOUND_ID")
-		var xuiInboundIDs []int
-		if xuiInboundIDStr != "" {
-			if parsed, convErr := strconv.Atoi(xuiInboundIDStr); convErr == nil && parsed > 0 {
-				xuiInboundIDs = []int{parsed}
-			} else {
-				logger.Warn("Invalid XUI_INBOUND_ID",
-					zap.String("raw_value", xuiInboundIDStr),
-					zap.Error(convErr))
-			}
-		}
-		if len(xuiInboundIDs) == 0 {
-			xuiInboundIDs = []int{1}
-		}
-		defaultSubURL := cfg.GlobalSubURL
-		if defaultSubURL == "" && xuiHost != "" {
-			defaultSubURL = strings.TrimRight(xuiHost, "/") + "/sub/"
-		}
-		if err := dbService.SeedDefaultNode(seedCtx, "default", xuiHost, xuiAPIToken, xuiInboundIDs, defaultSubURL); err != nil {
-			logger.Fatal("Failed to seed default node", zap.Error(err))
-		}
-		logger.Info("Default node seeded", zap.String("host", xuiHost))
-	}
 
 	// Load active runtime nodes and create node clients.
 	nodes, err := dbService.ListNodes(context.Background())
