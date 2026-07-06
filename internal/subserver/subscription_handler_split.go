@@ -80,7 +80,7 @@ func loadSubscription(ctx context.Context, db interfaces.DatabaseService, subID,
 	subFull, err := db.GetWithPlanAndNodes(ctx, subID)
 	if err != nil {
 		if errors.Is(err, database.ErrSubscriptionNotFound) {
-			logger.Error("Subscription not found in database",
+			logger.Debug("Subscription not found in database",
 				zap.String("sub_id", subID))
 			return nil, ErrSubscriptionNotFound
 		}
@@ -114,12 +114,12 @@ func loadSubscription(ctx context.Context, db interfaces.DatabaseService, subID,
 
 // aggregatedSources holds the collected items and traffic data from all sources.
 type aggregatedSources struct {
-	items             []string
-	jsonConfigs       []json.RawMessage
-	firstExpire       string
-	totalUpload       int64
-	totalDownload     int64
-	allJSON           bool
+	items              []string
+	jsonConfigs        []json.RawMessage
+	firstExpire        string
+	totalUpload        int64
+	totalDownload      int64
+	allJSON            bool
 	firstSourceHeaders map[string]string
 }
 

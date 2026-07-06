@@ -19,23 +19,6 @@ type clashConfig struct {
 	Proxies []map[string]any `yaml:"proxies"`
 }
 
-// realityOpts mirrors the Clash "reality-opts" object.
-type realityOpts struct {
-	PublicKey string `yaml:"public-key"`
-	ShortID   string `yaml:"short-id"`
-}
-
-// grpcOpts mirrors the Clash "grpc-opts" object.
-type grpcOpts struct {
-	GrpcServiceName string `yaml:"grpc-service-name"`
-}
-
-// wsOpts mirrors the Clash "ws-opts" object.
-type wsOpts struct {
-	Path    string            `yaml:"path"`
-	Headers map[string]string `yaml:"headers"`
-}
-
 // ExtractClashConfigs parses a Clash/Mihomo YAML config body and returns the
 // proxy entries as json.RawMessage slice (compatible with ExtractJSONConfigs).
 // Each proxy map is normalised to the serverConfig JSON schema and re-marshalled,

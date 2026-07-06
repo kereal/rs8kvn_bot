@@ -78,7 +78,7 @@ Instead, contact us privately:
 - **Backups:** Daily rotation (14 days), same directory (consider off-site)
 - **Logging:** Sensitive data masked in `Config.String()`; no secrets in logs
 - **Secrets:** Stored in `.env` (not in code), file permissions recommended `600`
-- **Node API tokens:** Stored in `nodes` table (encrypted at rest by DB), seeded from env on first run then managed via DB
+- **Node API tokens:** Stored and managed only via `nodes.api_token` in the database (no env-var dependency)
 
 ### 5. Error Handling
 
@@ -207,7 +207,7 @@ Instead, contact us privately:
 
 1. Panel is separate system — follow its security procedures
 2. **Revoke the panel API token** immediately in panel Security settings → generate a new one
-3. Update `nodes.api_token` in DB (or re-seed from env) and restart the bot
+3. Update `nodes.api_token` in DB and restart the bot
 4. Check panel logs for unauthorized client modifications
 5. Audit all recent changes made via the compromised token (panel access logs)
 

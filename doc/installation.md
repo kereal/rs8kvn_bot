@@ -308,7 +308,7 @@ Admin-only commands:
 ### From v2.x → v2.3.0
 
 1. Backup database: `cp data/rs8kvn.db data/rs8kvn.db.backup`
-2. Pull new image or rebuild from source — migrations (021–027) run automatically
+2. Pull new image or rebuild from source — migrations (021–029) run automatically
 3. Update `.env`:
    - **New required:** `GLOBAL_SUB_URL` (base URL for subscription links)
    - **New optional:** `SUBSERVER_ACCESS_LOG` (subscription access log)

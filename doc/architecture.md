@@ -443,7 +443,7 @@ type CircuitBreaker struct {
 
 ---
 
-### 8. Graceful Shutdown
+### 7. Graceful Shutdown
 
 **Signal handling:**
 ```bash

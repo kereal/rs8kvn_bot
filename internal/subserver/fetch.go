@@ -17,8 +17,9 @@ import (
 
 // fetchHTTPClient is a shared HTTP client for fetching subscription responses
 // from upstream nodes (3x-ui JSON, Clash YAML, base64, plain links). It limits
-// idle connections (2 per host) and disables transparent compression passthrough
-// to preserve the original response body.
+// idle connections (2 per host) and keeps transparent gzip decompression
+// enabled (DisableCompression is false), so resp.Body is the decompressed
+// content that DetectFormat and the parsers consume directly.
 var fetchHTTPClient = &http.Client{
 	Timeout: 15 * time.Second,
 	Transport: &http.Transport{
@@ -60,7 +61,7 @@ func FetchFromSource(ctx context.Context, url string) (*SourceResponse, error) {
 	if resp != nil && resp.Body != nil {
 		defer func() {
 			if closeErr := resp.Body.Close(); closeErr != nil {
-			logger.Error("Failed to close source response body",
+				logger.Error("Failed to close source response body",
 					zap.String("url", url),
 					zap.Error(closeErr))
 			}

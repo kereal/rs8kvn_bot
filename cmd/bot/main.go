@@ -339,6 +339,7 @@ func main() {
 
 	// 2. Initialize Sentry (before logger)
 	initSentry(cfg)
+	defer sentry.Flush(logger.SentryFlushTimeout)
 
 	// 3. Initialize logger
 	logService := initLogger(cfg)
