@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/kereal/rs8kvn_bot/internal/logger"
+	"github.com/kereal/rs8kvn_bot/internal/utils"
 
 	"go.uber.org/zap"
 )
@@ -85,7 +86,7 @@ func toServerConfig(raw json.RawMessage) (*serverConfig, error) {
 	if err := json.Unmarshal(raw, &cfg); err != nil {
 		logger.Error("Failed to parse server config JSON",
 			zap.Error(err),
-			zap.String("raw_preview", truncateString(string(raw), 200)))
+			zap.String("raw_preview", utils.TruncateString(string(raw), 200)))
 		return nil, err
 	}
 	if cfg.Address == "" {
@@ -119,7 +120,7 @@ func ExtractJSONConfigs(body []byte) ([]json.RawMessage, error) {
 		}
 		logger.Error("Failed to extract JSON configs",
 			zap.Error(err),
-			zap.String("body_preview", truncateString(string(body), 200)))
+			zap.String("body_preview", utils.TruncateString(string(body), 200)))
 		return nil, fmt.Errorf("extract JSON configs: %w", err)
 	}
 	return items, nil
@@ -132,7 +133,7 @@ func ConvertSingleJSONToLink(raw json.RawMessage) (string, error) {
 	if err != nil {
 		logger.Error("Failed to convert JSON config to share link",
 			zap.Error(err),
-			zap.String("raw_preview", truncateString(string(raw), 200)))
+			zap.String("raw_preview", utils.TruncateString(string(raw), 200)))
 		return "", err
 	}
 
@@ -428,9 +429,3 @@ func buildTUICServerLink(cfg *serverConfig) (string, error) {
 	return base, nil
 }
 
-func truncateString(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen] + "..."
-}

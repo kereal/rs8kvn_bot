@@ -26,7 +26,7 @@ func TestE2E_CreateSubscription_EmptyUsername(t *testing.T) {
 	if err == nil {
 		sub, err := env.db.GetByTelegramID(ctx, env.chatID)
 		require.NoError(t, err)
-		assert.Equal(t, "", sub.Username)
+		assert.Equal(t, fmt.Sprintf("tgId_%d", env.chatID), sub.Username)
 	}
 }
 

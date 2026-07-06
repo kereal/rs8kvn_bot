@@ -217,6 +217,38 @@ func TestSubscriptionService_Create_EmptyInviteCodeIsNoop(t *testing.T) {
 	assert.Equal(t, int64(0), result.ReferrerTGID)
 }
 
+func TestSubscriptionService_Create_FillsFallbackUsername(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{}
+
+	var gotSub *database.Subscription
+	db := &testutil.DatabaseService{
+		GetPlanByNameFunc: func(ctx context.Context, name string) (*database.Plan, error) {
+			return &database.Plan{ID: 1, Name: database.FreePlanName, TrafficLimit: 1073741824}, nil
+		},
+		CreateSubscriptionFunc: func(ctx context.Context, sub *database.Subscription, inviteCode string) error {
+			gotSub = sub
+			sub.ID = 1
+			return nil
+		},
+		GetNodesByPlanIDFunc: func(ctx context.Context, planID uint) ([]database.Node, error) {
+			return nil, nil
+		},
+		GetBySubscriptionIDFunc: func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
+			return nil, nil
+		},
+	}
+
+	svc := NewSubscriptionService(db, nil, nil, nil, cfg)
+	result, err := svc.Create(context.Background(), 123456, "", "")
+
+	assert.NoError(t, err)
+	require.NotNil(t, gotSub)
+	assert.Equal(t, "tgId_123456", gotSub.Username)
+	assert.Equal(t, "tgId_123456", result.Subscription.Username)
+}
+
 func TestSubscriptionService_GetByTelegramID_Success(t *testing.T) {
 	t.Parallel()
 
@@ -666,8 +698,8 @@ func TestSubscriptionService_CreateTrial_Success(t *testing.T) {
 		},
 	}
 	xuiClient := &testutil.XUIClient{
-		AddClientWithIDFunc: func(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
-			return &xui.ClientConfig{ID: clientID, SubID: subID}, nil
+		AddClientWithIDFunc: func(ctx context.Context, req xui.ClientRequest) (*xui.ClientConfig, error) {
+			return &xui.ClientConfig{ID: req.ClientID, SubID: req.SubID}, nil
 		},
 	}
 	sources := []database.Node{
@@ -704,7 +736,7 @@ func TestSubscriptionService_CreateTrial_XUIError(t *testing.T) {
 		},
 	}
 	xuiClient := &testutil.XUIClient{
-		AddClientWithIDFunc: func(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
+		AddClientWithIDFunc: func(ctx context.Context, req xui.ClientRequest) (*xui.ClientConfig, error) {
 			return nil, errors.New("xui error")
 		},
 	}
@@ -738,8 +770,8 @@ func TestSubscriptionService_CreateTrial_DBError(t *testing.T) {
 		},
 	}
 	xuiClient := &testutil.XUIClient{
-		AddClientWithIDFunc: func(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
-			return &xui.ClientConfig{ID: clientID, SubID: subID}, nil
+		AddClientWithIDFunc: func(ctx context.Context, req xui.ClientRequest) (*xui.ClientConfig, error) {
+			return &xui.ClientConfig{ID: req.ClientID, SubID: req.SubID}, nil
 		},
 		DeleteClientFunc: func(ctx context.Context, email string) error {
 			deleteCalled = true
@@ -777,8 +809,8 @@ func TestSubscriptionService_CreateTrial_NoTrialNodes(t *testing.T) {
 		},
 	}
 	xuiClient := &testutil.XUIClient{
-		AddClientWithIDFunc: func(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
-			return &xui.ClientConfig{ID: clientID, SubID: subID}, nil
+		AddClientWithIDFunc: func(ctx context.Context, req xui.ClientRequest) (*xui.ClientConfig, error) {
+			return &xui.ClientConfig{ID: req.ClientID, SubID: req.SubID}, nil
 		},
 	}
 	sources := []database.Node{
@@ -893,14 +925,16 @@ func TestSubscriptionService_BindTrial_SingleNode_ErrorPropagated(t *testing.T) 
 
 	xui1Calls := 0
 	xui2Calls := 0
+	var gotReq xui.ClientRequest
 	xui1 := &testutil.XUIClient{
-		UpdateClientFunc: func(ctx context.Context, inboundIDs []int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, resetDays int, tgID int64, comment string) error {
+		UpdateClientFunc: func(ctx context.Context, req xui.ClientRequest) error {
 			xui1Calls++
+			gotReq = req
 			return errors.New("source 1 unreachable")
 		},
 	}
 	xui2 := &testutil.XUIClient{
-		UpdateClientFunc: func(ctx context.Context, inboundIDs []int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, resetDays int, tgID int64, comment string) error {
+		UpdateClientFunc: func(ctx context.Context, req xui.ClientRequest) error {
 			xui2Calls++
 			return nil
 		},
@@ -921,6 +955,8 @@ func TestSubscriptionService_BindTrial_SingleNode_ErrorPropagated(t *testing.T) 
 	assert.NotNil(t, got)
 	assert.Equal(t, 1, xui1Calls, "only nodes[0] must be contacted")
 	assert.Equal(t, 0, xui2Calls, "nodes[1] must not be contacted (single-node trial contract)")
+	assert.Equal(t, "trial_trial-sub-1", gotReq.CurrentEmail, "CurrentEmail must be trial_ + subscriptionID")
+	assert.Equal(t, "testuser", gotReq.Email, "Email must be the resolved XUIEmail (username)")
 }
 
 // TestSubscriptionService_BindTrial_SingleNode_Success verifies the happy path
@@ -960,14 +996,16 @@ func TestSubscriptionService_BindTrial_SingleNode_Success(t *testing.T) {
 
 	xui1Calls := 0
 	xui2Calls := 0
+	var gotReq xui.ClientRequest
 	xui1 := &testutil.XUIClient{
-		UpdateClientFunc: func(ctx context.Context, inboundIDs []int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, resetDays int, tgID int64, comment string) error {
+		UpdateClientFunc: func(ctx context.Context, req xui.ClientRequest) error {
 			xui1Calls++
+			gotReq = req
 			return nil
 		},
 	}
 	xui2 := &testutil.XUIClient{
-		UpdateClientFunc: func(ctx context.Context, inboundIDs []int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, resetDays int, tgID int64, comment string) error {
+		UpdateClientFunc: func(ctx context.Context, req xui.ClientRequest) error {
 			xui2Calls++
 			return nil
 		},
@@ -987,6 +1025,8 @@ func TestSubscriptionService_BindTrial_SingleNode_Success(t *testing.T) {
 	assert.Equal(t, uint(42), got.ID)
 	assert.Equal(t, 1, xui1Calls, "exactly one UpdateClient on nodes[0]")
 	assert.Equal(t, 0, xui2Calls, "nodes[1] must not be contacted")
+	assert.Equal(t, "trial_trial-sub-1", gotReq.CurrentEmail, "CurrentEmail must be trial_ + subscriptionID")
+	assert.Equal(t, "testuser", gotReq.Email, "Email must be the resolved XUIEmail (username)")
 }
 
 // ==================== DeleteByID Tests ====================

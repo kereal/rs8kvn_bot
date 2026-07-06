@@ -46,21 +46,21 @@ func (f *fakeXUIClient) AddClient(ctx context.Context, inboundIDs []int, email s
 	return nil, nil
 }
 
-func (f *fakeXUIClient) AddClientWithID(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
+func (f *fakeXUIClient) AddClientWithID(ctx context.Context, req xui.ClientRequest) (*xui.ClientConfig, error) {
 	f.addCalled = true
 	f.addCapture = &capturedAddClientWithID{
-		inboundIDs:   inboundIDs,
-		email:        email,
-		clientID:     clientID,
-		subID:        subID,
-		trafficBytes: trafficBytes,
-		expiryTime:   expiryTime,
-		resetDays:    resetDays,
+		inboundIDs:   req.InboundIDs,
+		email:        req.Email,
+		clientID:     req.ClientID,
+		subID:        req.SubID,
+		trafficBytes: req.TrafficBytes,
+		expiryTime:   req.ExpiryTime,
+		resetDays:    req.ResetDays,
 	}
-	return &xui.ClientConfig{ID: clientID, SubID: subID, Email: email}, f.addErr
+	return &xui.ClientConfig{ID: req.ClientID, SubID: req.SubID, Email: req.Email}, f.addErr
 }
 
-func (f *fakeXUIClient) UpdateClient(ctx context.Context, inboundIDs []int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, resetDays int, tgID int64, comment string) error {
+func (f *fakeXUIClient) UpdateClient(ctx context.Context, req xui.ClientRequest) error {
 	f.updateCalled = true
 	return f.updateErr
 }

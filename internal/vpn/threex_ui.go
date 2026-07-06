@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/kereal/rs8kvn_bot/internal/interfaces"
+	"github.com/kereal/rs8kvn_bot/internal/xui"
 )
 
 var _ Client = (*ThreeXUIClient)(nil)
@@ -22,16 +23,15 @@ func NewThreeXUIClient(client interfaces.XUIClient, inboundIDs []int) *ThreeXUIC
 
 // CreateSubscription adds a client on the 3x-ui panel.
 func (c *ThreeXUIClient) CreateSubscription(ctx context.Context, provision SubscriptionProvision) error {
-	_, err := c.client.AddClientWithID(
-		ctx,
-		c.inboundIDs,
-		provision.Username,
-		provision.ClientID,
-		provision.SubID,
-		provision.TrafficBytes,
-		provision.ExpiryTime,
-		provision.ResetDays,
-	)
+	_, err := c.client.AddClientWithID(ctx, xui.ClientRequest{
+		InboundIDs:   c.inboundIDs,
+		Email:        provision.Username,
+		ClientID:     provision.ClientID,
+		SubID:        provision.SubID,
+		TrafficBytes: provision.TrafficBytes,
+		ExpiryTime:   provision.ExpiryTime,
+		ResetDays:    provision.ResetDays,
+	})
 	if err != nil {
 		return fmt.Errorf("3x-ui create subscription: %w", classifyCreateSubscriptionError(err))
 	}
@@ -40,19 +40,16 @@ func (c *ThreeXUIClient) CreateSubscription(ctx context.Context, provision Subsc
 
 // UpdateSubscription updates an existing client on the 3x-ui panel.
 func (c *ThreeXUIClient) UpdateSubscription(ctx context.Context, provision SubscriptionProvision) error {
-	err := c.client.UpdateClient(
-		ctx,
-		c.inboundIDs,
-		provision.Username,
-		provision.ClientID,
-		provision.Username,
-		provision.SubID,
-		provision.TrafficBytes,
-		provision.ExpiryTime,
-		provision.ResetDays,
-		0,
-		"",
-	)
+	err := c.client.UpdateClient(ctx, xui.ClientRequest{
+		InboundIDs:   c.inboundIDs,
+		CurrentEmail: provision.Username,
+		ClientID:     provision.ClientID,
+		Email:        provision.Username,
+		SubID:        provision.SubID,
+		TrafficBytes: provision.TrafficBytes,
+		ExpiryTime:   provision.ExpiryTime,
+		ResetDays:    provision.ResetDays,
+	})
 	if err != nil {
 		return fmt.Errorf("3x-ui update subscription: %w", err)
 	}

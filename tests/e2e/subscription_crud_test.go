@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/xui"
@@ -142,7 +141,7 @@ func TestE2E_CreateSubscription_XUIFailure(t *testing.T) {
 
 	ctx := context.Background()
 
-	env.xui.AddClientWithIDFunc = func(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
+	env.xui.AddClientWithIDFunc = func(ctx context.Context, req xui.ClientRequest) (*xui.ClientConfig, error) {
 		return nil, fmt.Errorf("connection refused")
 	}
 
@@ -378,7 +377,7 @@ func TestE2E_Service_Create_XUIFailure_Parameterized(t *testing.T) {
 		{
 			name: "xui_failure_sub_still_created",
 			setupXUI: func() {
-				env.xui.AddClientWithIDFunc = func(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
+				env.xui.AddClientWithIDFunc = func(ctx context.Context, req xui.ClientRequest) (*xui.ClientConfig, error) {
 					return nil, fmt.Errorf("connection refused")
 				}
 			},
@@ -388,8 +387,8 @@ func TestE2E_Service_Create_XUIFailure_Parameterized(t *testing.T) {
 		{
 			name: "rollback_xui_delete_succeeds",
 			setupXUI: func() {
-				env.xui.AddClientWithIDFunc = func(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
-					return &xui.ClientConfig{ID: clientID, Email: email, SubID: subID}, nil
+				env.xui.AddClientWithIDFunc = func(ctx context.Context, req xui.ClientRequest) (*xui.ClientConfig, error) {
+					return &xui.ClientConfig{ID: req.ClientID, Email: req.Email, SubID: req.SubID}, nil
 				}
 				env.xui.DeleteClientFunc = func(ctx context.Context, email string) error { return nil }
 			},
@@ -403,8 +402,8 @@ func TestE2E_Service_Create_XUIFailure_Parameterized(t *testing.T) {
 		{
 			name: "rollback_failure_returns_existing",
 			setupXUI: func() {
-				env.xui.AddClientWithIDFunc = func(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
-					return &xui.ClientConfig{ID: clientID, Email: email, SubID: subID}, nil
+				env.xui.AddClientWithIDFunc = func(ctx context.Context, req xui.ClientRequest) (*xui.ClientConfig, error) {
+					return &xui.ClientConfig{ID: req.ClientID, Email: req.Email, SubID: req.SubID}, nil
 				}
 				env.xui.DeleteClientFunc = func(ctx context.Context, email string) error {
 					return fmt.Errorf("rollback failed: connection refused")

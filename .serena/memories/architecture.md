@@ -1,6 +1,6 @@
 # Architecture — rs8kvn_bot
 
-**Версия:** v3.0.0  
+**Версия:** v2.3.0  
 **Обновлено:** 2026-06-28  
 **Ветка:** `plans_and_pricing` (merge candidate)
 
@@ -187,7 +187,7 @@ id, name UNIQUE, devices_limit, traffic_limit
 - **`BindTrialSubscription(ctx, sub, telegramID, username)`** — UPDATE trial-row WHERE telegram_id=0 AND plan_id=trial → revoke других active subs для этого telegram_id в той же транзакции. Динамический поиск trial/free plans по имени (`TrialPlanName`/`FreePlanName`).
 - **`CleanupExpiredTrials(ctx)`** — DELETE WHERE expiry_time < now() RETURNING subscription_id (SQLite ≥ 3.35).
 - **Sentinel errors**: `database.ErrSubscriptionNotFound`, `database.ErrInviteNotFound`, `database.ErrPlanNotFound`
-- **`SeedDefaultNode`**: если nodes пуста, создаёт ноду из env и привязывает ко всем планам.
+- **`CreateNode(ctx, node)`** — вставляет новую ноду в БД. Управление нодами только через DB (env seed удалён).
 
 ### НОВЫЕ миграции (plans_and_pricing)
 - `024_add_plan_is_active` — добавление is_active в plans
@@ -255,7 +255,7 @@ id, name UNIQUE, devices_limit, traffic_limit
 - `active|pending_add|pending_remove|pending_update`
 - `SyncService` реализует state machine с retry и lock-ом
 
-### ✅ VPN Client abstraction (v3.0.0)
+### ✅ VPN Client abstraction (v2.3.0)
 - Интерфейс `Client` в `internal/vpn/client.go`
 - `ThreeXUIClient` адаптер для 3x-ui
 - Поддержка `NodeType3xUI` и `NodeTypeProxman`

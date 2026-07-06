@@ -7,8 +7,6 @@ import (
 	"os"
 	"os/signal"
 	"runtime/debug"
-	"strconv"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -328,121 +326,38 @@ func startBackgroundWorkers(ctx context.Context, handler *bot.Handler, subServic
 // The function performs best-effort initialization for optional components (Sentry,
 // database, 3x-ui client, Telegram bot) so the service can start even if some
 // dependencies are unavailable. It also starts background maintenance tasks
-// (backups, heartbeat, trial cleanup, Subscription server reload), marks the web
-// server readiness, and coordinates orderly shutdown of update handlers and
 // main is the entry point that initializes configuration and services, starts background
 // workers and the web server, processes Telegram updates with bounded concurrency, and
 // coordinates a graceful shutdown when termination signals are received.
-//
-// It performs best-effort initialization of optional components (Sentry, 3x-ui, Telegram
-// bot), constructs shared services (database, subscription service),
-// registers health checks, starts scheduled background tasks, and marks the web server
-// readiness. On shutdown it stops receiving updates, drains channels, and waits for
-// in-flight update handlers and background tasks to complete within configured timeouts.
 func main() {
-	// Load configuration first
+	// 1. Load configuration
 	cfg, err := config.Load()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
 		os.Exit(1)
 	}
 
-	// Initialize Sentry for error tracking (before logger)
-	if cfg.SentryDSN != "" {
-		err := sentry.Init(sentry.ClientOptions{
-			Dsn:              cfg.SentryDSN,
-			Environment:      "production",
-			Release:          getVersion(),
-			TracesSampleRate: logger.SentryTracesSampleRate,
-		})
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to initialize Sentry: %v\n", err)
-		} else {
-			defer sentry.Flush(logger.SentryFlushTimeout)
-			fmt.Fprintln(os.Stderr, "Sentry error tracking initialized")
-		}
-	}
+	// 2. Initialize Sentry (before logger)
+	initSentry(cfg)
+	defer sentry.Flush(logger.SentryFlushTimeout)
 
-	// Initialize logger
-	logService, err := logger.Init(cfg.LogFilePath, cfg.LogLevel)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
-		sentry.Flush(logger.SentryFlushTimeout) // flush before exit
-		os.Exit(1)                              //nolint:gocritic // flush called explicitly above
-	}
+	// 3. Initialize logger
+	logService := initLogger(cfg)
 	defer func() {
 		if err := logService.Close(); err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to close logger: %v\n", err)
 		}
 	}()
 
-	// Redirect standard log output (from third-party libraries) to our logger
-	logger.RedirectStdLog()
-
-	logger.Info("Starting bot",
-		zap.String("version", getVersion()),
-		zap.String("built", buildTime))
-	logger.Info("Configuration loaded", zap.String("config", cfg.String()))
-
-	// Initialize database with Service pattern for dependency injection
-	dbService, err := database.NewService(cfg.DatabasePath)
-	if err != nil {
-		logger.Fatal("Failed to initialize database", zap.Error(err))
-	}
+	// 4. Initialize database and node clients
+	dbService, deps := initDatabase(cfg)
 	defer func() {
 		if err := dbService.Close(); err != nil {
 			logger.Error("Failed to close database", zap.Error(err))
 		}
 	}()
-	logger.Info("Database initialized successfully")
-
-	// Seed default node from env vars if nodes table is empty
-	seedCtx, seedCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer seedCancel()
-	isEmpty, err := dbService.IsNodesEmpty(seedCtx)
-	if err != nil {
-		logger.Fatal("Failed to check nodes table", zap.Error(err))
-	}
-	if isEmpty {
-		xuiHost := os.Getenv("XUI_HOST")
-		xuiAPIToken := os.Getenv("XUI_API_TOKEN")
-		xuiInboundIDStr := os.Getenv("XUI_INBOUND_ID")
-		var xuiInboundIDs []int
-		if xuiInboundIDStr != "" {
-			if parsed, convErr := strconv.Atoi(xuiInboundIDStr); convErr == nil && parsed > 0 {
-				xuiInboundIDs = []int{parsed}
-			} else {
-				logger.Warn("Invalid XUI_INBOUND_ID",
-					zap.String("raw_value", xuiInboundIDStr),
-					zap.Error(convErr))
-			}
-		}
-		if len(xuiInboundIDs) == 0 {
-			xuiInboundIDs = []int{1}
-		}
-		defaultSubURL := cfg.GlobalSubURL
-		if defaultSubURL == "" && xuiHost != "" {
-			defaultSubURL = strings.TrimRight(xuiHost, "/") + "/sub/"
-		}
-		if err := dbService.SeedDefaultNode(seedCtx, "default", xuiHost, xuiAPIToken, xuiInboundIDs, defaultSubURL); err != nil {
-			logger.Fatal("Failed to seed default node", zap.Error(err))
-		}
-		logger.Info("Default node seeded", zap.String("host", xuiHost))
-	}
-
-	// Load active runtime nodes and create node clients.
-	nodes, err := dbService.ListNodes(context.Background())
-	if err != nil {
-		logger.Fatal("Failed to list nodes", zap.Error(err))
-	}
-	runtimeNodes, xuiClients, vpnClients, legacyXUIClient, err := buildRuntimeNodeClients(nodes, defaultOptions())
-	if err != nil {
-		logger.Fatal("Failed to initialize node clients", zap.Error(err))
-	}
-
-	// Close all XUI clients on shutdown
 	defer func() {
-		for id, client := range xuiClients {
+		for id, client := range deps.xuiClients {
 			if err := client.Close(); err != nil {
 				logger.Error("Failed to close 3x-ui client",
 					zap.Uint("node_id", id),
@@ -450,40 +365,20 @@ func main() {
 			}
 		}
 	}()
+	logger.Info("Database initialized successfully")
 
-	if legacyXUIClient == nil {
-		logger.Warn("No active node found — legacy XUI client will be nil; health check on /ping will be skipped")
-	}
-	nodes = runtimeNodes
-
+	// 5. Initialize Telegram bot
 	botAPI, botConfig, err := initBot(cfg)
 	if err != nil {
 		logger.Fatal("Failed to initialize Telegram bot", zap.Error(err))
 	}
 
-	// Create subscription service (shared between bot handler and web server)
-	subService := service.NewSubscriptionService(dbService, xuiClients, vpnClients, nodes, cfg)
+	// 6. Wire application services
+	svc := initServices(cfg, dbService, deps, botAPI, botConfig)
+	defer svc.subServer.Stop()
 
-	// Create Subscription server service
-	subServer := subserver.NewService(config.SubServerCacheTTL)
-	defer subServer.Stop()
-
-	// Create bot handler
-	handler := bot.NewHandler(botAPI, cfg, dbService, legacyXUIClient, botConfig, subService, getVersion())
-
-	// Compose cache invalidation: invalidate both the bot subscription cache
-	// and the subserver response cache. NewHandler wired invalidateBySubID to
-	// the bot cache only; we override it here so Delete/Revoke/Expire also
-	// evict the subserver entry (otherwise revoked subs serve stale config
-	// for up to SubServerCacheTTL).
-	botCache := handler.Cache()
-	subService.SetInvalidateBySubIDFunc(func(subID string) {
-		botCache.InvalidateBySubID(subID)
-		subServer.InvalidateCache(subID)
-	})
-
-	// Initialize and start web server (health + trial pages)
-	webServer, err := startWebServer(subService, cfg, botConfig, subServer, dbService, legacyXUIClient)
+	// 7. Start web server
+	webServer, err := startWebServer(svc.subService, cfg, botConfig, svc.subServer, dbService, deps.legacyXUIClient)
 	if err != nil {
 		logger.Warn("Failed to start web server, continuing without web server", zap.Error(err))
 	}
@@ -499,115 +394,32 @@ func main() {
 		}
 	}()
 
-	// Configure update listener
+	// 8. Configure update listener
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = config.BotUpdateTimeout
 	u.AllowedUpdates = []string{"message", "callback_query"}
 	updates := botAPI.GetUpdatesChan(u)
 
-	// Setup graceful shutdown
+	// 9. Setup graceful shutdown context
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 	defer stop()
 
-	// Start background goroutines (using shutdown context for lifecycle management)
-	handler.StartCacheCleanup(ctx, bot.CacheTTL/2)
-	handler.StartRateLimiterCleanup(ctx, bot.CacheTTL, bot.CacheTTL*2)
-	handler.StartReferralCacheSync(ctx)
-
-	// wg tracks exactly these 6 long-lived background workers.
-	// The first 4 are legacy workers (orphan reconciler, backup, heartbeat, trial cleanup).
-	// The last 2 are subscription sync and expire workers.
-	// All of them must exit (via ctx cancellation) before main returns,
-	// so we wait on wg at the end of graceful shutdown.
-	bgWg := startBackgroundWorkers(ctx, handler, subService, dbService, cfg, vpnClients, nodes)
+	// 10. Start background goroutines
+	svc.handler.StartCacheCleanup(ctx, bot.CacheTTL/2)
+	svc.handler.StartRateLimiterCleanup(ctx, bot.CacheTTL, bot.CacheTTL*2)
+	svc.handler.StartReferralCacheSync(ctx)
+	bgWg := startBackgroundWorkers(ctx, svc.handler, svc.subService, dbService, cfg, deps.vpnClients, deps.nodes)
 
 	logger.Info("Bot started successfully")
-
-	// Mark web server as ready after all components are initialized
 	if webServer != nil {
 		webServer.SetReady(true)
 	}
 
-	// Channel to limit concurrent update handlers (worker pool)
-	// This prevents unbounded goroutine spawning
-	updateSem := make(chan struct{}, config.MaxConcurrentHandlers)
+	// 11. Run the main event loop (blocks until shutdown)
+	runEventLoop(ctx, botAPI, svc.handler, updates)
 
-	// Track in-flight update handlers
-	var updatesWg sync.WaitGroup
-
-	// Main event loop
-eventLoop:
-	for {
-		select {
-		case update := <-updates:
-			// Acquire semaphore slot (blocks if all slots are busy)
-			select {
-			case updateSem <- struct{}{}:
-				updatesWg.Add(1)
-				go func(u tgbotapi.Update) {
-					defer func() {
-						<-updateSem // Release semaphore slot
-						updatesWg.Done()
-					}()
-					handleUpdateSafely(ctx, handler, u)
-				}(update)
-			case <-ctx.Done():
-				// Shutdown initiated while waiting for semaphore
-				logger.Info("Graceful shutdown initiated, draining updates...")
-				break eventLoop
-			}
-
-		case <-ctx.Done():
-			break eventLoop
-		}
-	}
-
-	logger.Info("Graceful shutdown initiated")
-	botAPI.StopReceivingUpdates()
-
-	// Drain the updates channel to prevent goroutine leak
-	go func() {
-		for range updates {
-			// Drain the channel until it's closed
-		}
-	}()
-
-	// Wait for in-flight update handlers to complete
-	logger.Info("Waiting for update handlers to complete...")
-	done := make(chan struct{})
-	go func() {
-		updatesWg.Wait()
-		close(done)
-	}()
-
-	select {
-	case <-done:
-		logger.Info("All update handlers completed")
-	case <-time.After(config.ShutdownTimeout):
-		logger.Warn("Timeout waiting for update handlers")
-	}
-
-	// Wait for background tasks with timeout
-	logger.Info("Waiting for background tasks to stop...")
-	bgDone := make(chan struct{})
-	go func() {
-		bgWg.Wait()
-		close(bgDone)
-	}()
-
-	select {
-	case <-bgDone:
-		logger.Info("All background tasks stopped successfully")
-	case <-time.After(config.ShutdownTimeout):
-		logger.Warn("Timeout waiting for background tasks to stop")
-	}
-
-	// Ожидание фоновых горутин обработчика
-	logger.Info("Waiting for handler background goroutines...")
-	handler.WaitForBackgroundGoroutines()
-	logger.Info("Handler background goroutines stopped")
-
-	logger.Info("Bot stopped successfully")
+	// 12. Graceful shutdown of background workers
+	gracefulShutdown(bgWg, svc.handler)
 }
 
 // recoverAndReport recovers from panics, reports to Sentry, and logs the error.

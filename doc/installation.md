@@ -17,12 +17,9 @@ Send a message to [@userinfobot](https://t.me/userinfobot) on Telegram to get yo
 2. Note the **inbound ID** (shown in the inbounds list, usually `1`)
 3. Make sure the panel API is accessible from the bot host:
    ```bash
-   export XUI_API_TOKEN=your_panel_api_token
-   curl -H "Authorization: Bearer $XUI_API_TOKEN" http://your-panel-ip:2053/panel/api/server/status
+   curl -H "Authorization: Bearer <api_token>" http://your-panel-ip:2053/panel/api/server/status
    ```
-   Should return JSON with `success: true`.
-
-> **Note (v3.0+):** `XUI_HOST`, `XUI_API_TOKEN`, and `XUI_INBOUND_ID` are **not** read from the environment at runtime. They are used **only on first run** to seed the `nodes` table (when it is empty). After that, node configuration — host, API token, inbound IDs, type, subscription URL — is managed via the database. See [Initial Node Seeding](#initial-node-seeding) below.
+   Should return JSON with `success: true`. The `<api_token>` is the panel API token generated in 3x-ui Security settings; in production it is stored in the `nodes` table (`nodes.api_token`).
 
 ## Installation
 
@@ -48,14 +45,9 @@ nano .env  # or use your editor
 TELEGRAM_BOT_TOKEN=your_bot_token_here
 TELEGRAM_ADMIN_ID=123456789
 GLOBAL_SUB_URL=https://vpn.example.com/sub/
-
-# Initial node seed (only used on first run to populate the nodes table):
-XUI_HOST=http://your-panel-ip:2053
-XUI_API_TOKEN=your_panel_api_token
-XUI_INBOUND_ID=1
 ```
 
-`GLOBAL_SUB_URL` is the base URL for subscription links. The bot constructs full subscription URLs as `GLOBAL_SUB_URL + <subscription_id>` (e.g. `https://vpn.example.com/sub/abc123`). It must be set, or subscription links will be broken.
+Node configuration (panel host, API token, inbound IDs) is stored in the `nodes` DB table — see [Adding Nodes via SQL](#adding-nodes-via-sql) below.
 
 #### 3. Create data directory
 
@@ -240,17 +232,6 @@ Air will automatically rebuild and restart the bot when you save changes to Go f
 | `DONATE_CARD_NUMBER` | Donation card (T-Bank) | *(empty)* | ❌ | Shown in donate menu |
 | `DONATE_URL` | Donation collection link | *(empty)* | ❌ | T-Bank or other |
 
-### Initial Node Seeding
-
-The following environment variables are **not** part of the runtime configuration. They are read via `os.Getenv` **only on first run**, when the `nodes` table is empty, to seed a default node. After the first run, nodes are managed entirely through the database (`nodes` table: `host`, `api_token`, `inbound_ids` JSON array, `type`, `subscription_url`).
-
-| Variable | Description | Default | Notes |
-|----------|-------------|---------|-------|
-| `XUI_HOST` | Seed node panel URL | — | Seed-only; e.g. `http://your-panel-ip:2053` |
-| `XUI_API_TOKEN` | Seed node panel API token | — | Seed-only; generated in panel Security settings |
-| `XUI_INBOUND_ID` | Seed node inbound ID (singular integer) | `1` | Seed-only; populates `nodes.inbound_ids` as a JSON array `[1]` |
-
-> Once the `nodes` table is populated, these env vars are ignored on subsequent starts. To add or modify nodes, edit the `nodes` table directly (or via the bot's admin tooling). At runtime the bot loads node configuration from the DB, not from env.
 
 ### Adding Nodes via SQL
 
@@ -283,7 +264,6 @@ INSERT INTO plan_nodes (plan_id, node_id) VALUES (1, <node_id>);
 ### Security Notes
 
 - **`GLOBAL_SUB_URL`** must use **HTTPS** in production — subscription links are distributed to users and must not leak over plain HTTP. The URL is validated to be a well-formed `http` or `https` URL.
-- **`XUI_HOST`** is seed-only; it is not validated at runtime. When seeding, prefer HTTPS for the panel URL.
 - `.env` file should have permissions `600` (readable only by owner)
 - Never commit `.env` to version control
 
@@ -325,20 +305,18 @@ Admin-only commands:
 
 ## Upgrade from Older Version
 
-### From v2.x → v3.0.0
+### From v2.x → v2.3.0
 
 1. Backup database: `cp data/rs8kvn.db data/rs8kvn.db.backup`
-2. Pull new image or rebuild from source — migrations (021–027) run automatically
+2. Pull new image or rebuild from source — migrations (021–029) run automatically
 3. Update `.env`:
    - **New required:** `GLOBAL_SUB_URL` (base URL for subscription links)
    - **New optional:** `SUBSERVER_ACCESS_LOG` (subscription access log)
-   - **Removed:** `XUI_SUB_PATH`, `SUB_EXTRA_SERVERS_ENABLED`, `SUB_EXTRA_SERVERS_FILE` (no longer used)
-   - **Changed:** `XUI_HOST`, `XUI_API_TOKEN`, `XUI_INBOUND_ID` are now **seed-only** — kept for first-run population of the `nodes` table, then ignored. Node configuration lives in the `nodes` table.
-4. Restart bot. On first start with an empty `nodes` table, the default node is seeded from `XUI_HOST`/`XUI_API_TOKEN`/`XUI_INBOUND_ID`.
+   - **Removed:** `SUB_EXTRA_SERVERS_ENABLED`, `SUB_EXTRA_SERVERS_FILE` (no longer used)
+4. Restart bot. Node configuration lives in the `nodes` table — add nodes via SQL (see [Adding Nodes via SQL](#adding-nodes-via-sql)).
 
 **Breaking changes:**
 - `GLOBAL_SUB_URL` is now **required**. Without it the bot will not start.
-- `XUI_SUB_PATH` is removed — subscription path is now derived from `GLOBAL_SUB_URL`.
 - Extra servers config file (`SUB_EXTRA_SERVERS_FILE`) feature has been removed.
 
 ### From v1.x → v2.x
@@ -346,7 +324,6 @@ Admin-only commands:
 1. Backup database: `cp data/rs8kvn.db data/rs8kvn.db.backup`
 2. Pull new image — migrations run automatically
 3. Update `.env`:
-   - New required: `XUI_INBOUND_ID`
    - New optional: `TRIAL_DURATION_HOURS`
 4. Restart bot
 
@@ -378,9 +355,9 @@ rm .env
 **Before reporting:**
 1. Check logs: `docker logs rs8kvn_bot`
 2. Verify `.env` settings (especially `GLOBAL_SUB_URL`)
-3. Test 3x-ui connectivity: `curl -H "Authorization: Bearer $XUI_API_TOKEN" http://your-panel-ip:2053/panel/api/server/status`
-4. Include bot version from logs (`rs8kvn_bot@v3.0.0`)
+3. Test 3x-ui connectivity: `curl -H "Authorization: Bearer <api_token>" http://your-panel-ip:2053/panel/api/server/status`
+4. Include bot version from logs (`rs8kvn_bot@v2.3.0`)
 
 ---
 
-*This document covers installation up to v3.0.0 (2026-07-02). For architecture details, see [handover.md](../handover.md).*
+*This document covers installation up to v2.3.0 (2026-07-02). For architecture details, see [handover.md](../handover.md).*

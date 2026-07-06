@@ -5,13 +5,13 @@ import (
 	"errors"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/interfaces"
 	"github.com/kereal/rs8kvn_bot/internal/service"
 	"github.com/kereal/rs8kvn_bot/internal/testutil"
+	"github.com/kereal/rs8kvn_bot/internal/xui"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/stretchr/testify/assert"
@@ -38,7 +38,6 @@ func TestHandleStart_WithTrialCode(t *testing.T) {
 			name: "valid trial code",
 			cfg: &config.Config{
 				TelegramAdminID: 0,
-				Nodes:           []config.Node{{Name: "main", XUIHost: "http://example.com", XUIAPIToken: "token", XUIInboundIDs: "[1]"}},
 			},
 			args: "trial_abc12345",
 			setupMock: func(db *testutil.DatabaseService) {
@@ -359,7 +358,6 @@ func TestHandleBindTrial_AlreadyHasSubscription(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{
-		Nodes: []config.Node{{Name: "main", XUIHost: "http://example.com", XUIAPIToken: "token", XUIInboundIDs: "[1]"}},
 	}
 	mockDB := testutil.NewDatabaseService()
 	mockXUI := testutil.NewXUIClient()
@@ -505,7 +503,7 @@ func TestHandleBindTrial_Success(t *testing.T) {
 		ID: 1, Name: "main", Host: "http://example.com",
 		APIToken: "token", InboundIDs: "[1]", IsActive: true}}
 	mockXUI := testutil.NewXUIClient()
-	mockXUI.UpdateClientFunc = func(ctx context.Context, inboundIDs []int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, resetDays int, tgID int64, comment string) error {
+	mockXUI.UpdateClientFunc = func(ctx context.Context, req xui.ClientRequest) error {
 		return nil
 	}
 
@@ -802,7 +800,7 @@ func TestHandleBindTrial_UpdateClientError(t *testing.T) {
 	mockDB.GetInviteByCodeFunc = func(ctx context.Context, code string) (*database.Invite, error) {
 		return &database.Invite{Code: "ABC123", ReferrerTGID: 999999}, nil
 	}
-	mockXUI.UpdateClientFunc = func(ctx context.Context, inboundIDs []int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, resetDays int, telegramID int64, comment string) error {
+	mockXUI.UpdateClientFunc = func(ctx context.Context, req xui.ClientRequest) error {
 		return errors.New("update client failed")
 	}
 
@@ -838,7 +836,7 @@ func TestHandleBindTrial_GetInviteError(t *testing.T) {
 	mockDB.GetInviteByCodeFunc = func(ctx context.Context, code string) (*database.Invite, error) {
 		return nil, errors.New("get invite failed")
 	}
-	mockXUI.UpdateClientFunc = func(ctx context.Context, inboundIDs []int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, resetDays int, telegramID int64, comment string) error {
+	mockXUI.UpdateClientFunc = func(ctx context.Context, req xui.ClientRequest) error {
 		return nil
 	}
 

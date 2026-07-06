@@ -232,7 +232,6 @@ func TestHandleCallback_CallbackDataRouting(t *testing.T) {
 			cfg := &config.Config{
 				TelegramAdminID: 123456,
 				SiteURL:         "https://example.com",
-				Nodes:           []config.Node{{Name: "main", XUIHost: "http://example.com", XUIAPIToken: "token", XUIInboundIDs: "[1]"}},
 			}
 			mockDB := testutil.NewDatabaseService()
 			mockXUI := testutil.NewXUIClient()
@@ -589,7 +588,6 @@ func TestHandleCallback_CreateSubscription_DatabaseError(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{
-		Nodes: []config.Node{{Name: "main", XUIHost: "http://example.com", XUIAPIToken: "token", XUIInboundIDs: "[1]"}},
 	}
 	mockDB := testutil.NewDatabaseService()
 	mockXUI := testutil.NewXUIClient()

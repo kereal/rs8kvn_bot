@@ -541,26 +541,27 @@ func (s *SyncService) handleSyncError(ctx context.Context, sn *database.Subscrip
 	}
 }
 
+// retryBackoffIntervals defines exponential-ish backoff for sync retries.
+// Index = retryCount; beyond the last entry, the final interval is reused (capped).
+var retryBackoffIntervals = []time.Duration{
+	1 * time.Minute,
+	2 * time.Minute,
+	5 * time.Minute,
+	15 * time.Minute,
+	30 * time.Minute,
+	45 * time.Minute,
+	60 * time.Minute,
+}
+
 // CalculateRetryAt returns the next retry timestamp for the given retry count.
 // Intervals: 1m → 2m → 5m → 15m → 30m → 45m → 60m (capped).
 // After 6 failures further calls still get 60m and the record remains pending.
 func CalculateRetryAt(retryCount int) time.Time {
-	switch retryCount {
-	case 0:
-		return time.Now().UTC().Truncate(time.Minute).Add(1 * time.Minute)
-	case 1:
-		return time.Now().UTC().Truncate(time.Minute).Add(2 * time.Minute)
-	case 2:
-		return time.Now().UTC().Truncate(time.Minute).Add(5 * time.Minute)
-	case 3:
-		return time.Now().UTC().Truncate(time.Minute).Add(15 * time.Minute)
-	case 4:
-		return time.Now().UTC().Truncate(time.Minute).Add(30 * time.Minute)
-	case 5:
-		return time.Now().UTC().Truncate(time.Minute).Add(45 * time.Minute)
-	default:
-		return time.Now().UTC().Truncate(time.Minute).Add(60 * time.Minute)
+	idx := retryCount
+	if idx >= len(retryBackoffIntervals) {
+		idx = len(retryBackoffIntervals) - 1
 	}
+	return time.Now().UTC().Truncate(time.Minute).Add(retryBackoffIntervals[idx])
 }
 
 // SyncPendingNodes fetches pending nodes across all subscriptions and processes them.

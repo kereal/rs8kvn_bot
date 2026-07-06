@@ -148,6 +148,7 @@ func (s *Server) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to bind %s: %w", s.addr, err)
 	}
 	s.listenerAddr = listener.Addr().String()
+	logger.Info("Web server started", zap.String("addr", s.listenerAddr))
 	s.initSubserverAccessLogger()
 
 	go func() {
@@ -617,12 +618,18 @@ func (s *Server) handleSubscription(w http.ResponseWriter, r *http.Request) {
 	requestHeaders := subserver.FilterHeaders(r.Header)
 	result, err := subserver.HandleSubscription(ctx, s.db, s.subServer, subID, clientIP, requestHeaders)
 	if err != nil {
+		if errors.Is(err, subserver.ErrSubscriptionNotFound) {
+			logger.Warn("Subscription not found",
+				zap.String("sub_id", subID),
+				zap.String("client_ip", clientIP))
+			writeSubscriptionText(response, http.StatusNotFound, "Subscription not found")
+			return
+		}
 		logger.Error("Failed to process subscription",
 			zap.String("sub_id", subID),
 			zap.String("client_ip", clientIP),
 			zap.Error(err))
 		if errors.Is(err, gorm.ErrRecordNotFound) ||
-			errors.Is(err, subserver.ErrSubscriptionNotFound) ||
 			errors.Is(err, subserver.ErrNoSubscriptionItems) {
 			writeSubscriptionText(response, http.StatusNotFound, "Subscription not found")
 			return

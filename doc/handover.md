@@ -2,7 +2,7 @@
 
 **Repo:** https://github.com/kereal/rs8kvn_bot
 **Module:** `rs8kvn_bot` (Go 1.25+)
-**Version:** v3.0.0
+**Version:** v2.3.0
 **Branch:** `dev` (GitFlow: `main` = production, `dev` = integration, feature branches from dev or `plans_and_pricing`)
 
 ---
@@ -165,8 +165,8 @@ For each active node:
   ├─ Build sourceURL:
   │   • 3x-ui/proxman: subscription_url + "/" + subID
   │   • fetch: subscription_url as-is
-  ├─ FetchFromXUI(ctx, sourceURL) — HTTP GET
-  ├─ DetectFormat (JSON / Base64 / Plain)
+  ├─ FetchFromSource(ctx, sourceURL) — HTTP GET
+  ├─ DetectFormat (JSON / Clash / Base64 / Plain)
   └─ Aggregate subscription-userinfo headers
         │
         ▼
@@ -196,7 +196,7 @@ Cache.Set(240s) → return body with Content-Type + Subscription-Userinfo
 | Testing | `stretchr/testify` | v1.11.1 |
 | CI/CD | GitHub Actions → golangci-lint, gosec, test, Docker → GHCR | — |
 
-## Current State (v3.0.0)
+## Current State (v2.3.0)
 
 ### Working Features
 
@@ -262,7 +262,7 @@ All tests pass with `-race` detector. Fuzzing enabled for critical functions.
 
 ### 3x-ui Integration
 - **API Token auth:** Bearer token via `Authorization` header (no session/login/CSRF/cookiejar)
-- **Node configuration:** `XUI_HOST`, `XUI_API_TOKEN`, `XUI_INBOUND_ID` are **seed-only** env vars — read on first run to populate the `nodes` table, after which nodes are managed via DB. Multi-node support via `nodes` table.
+- **Node configuration:** Managed entirely via the `nodes` DB table (host, API token, inbound IDs, type, subscription URL). Multi-node support via `nodes` table.
 - **VPN client abstraction:** `internal/vpn/` package provides `Client` interface with `NewClient` factory routing by `NodeType` (3x-ui, proxman, fetch). Each node gets its own VPN client instance. Fetch nodes use no-op client — subscription_url fetched directly by subserver.
 - **Circuit breaker:** 5 failures → 30s open → half-open (3 attempts) → close. Monitor via `circuit_breaker_state` metric.
 - **RetryWithBackoff:** 3 retries with exponential backoff + jitter. DNS errors fast-fail.
@@ -312,13 +312,12 @@ All tests pass with `-race` detector. Fuzzing enabled for critical functions.
 - **trial_requests cleanup:** 1-hour cutoff (matching rate-limit window) + 1s buffer to avoid boundary race
 - **Connection pool:** `MaxOpenConns=1` (SQLite single-writer), `MaxIdle=1`, `ConnMaxLifetime=5m`
 - **Orders:** `orders` table tracks payment lifecycle: pending → paid → expired/canceled. Statuses enforced via CHECK constraint. 30-minute expiry window for unpaid invoices.
-- **Nodes:** `nodes` table stores VPN panel sources (host, api_token, inbound_ids, type, subscription_url). Seeded from env vars on first run.
+- **Nodes:** `nodes` table stores VPN panel sources (host, api_token, inbound_ids, type, subscription_url). Managed via DB only.
 - **Plans:** `plans` table (name, devices_limit, traffic_limit), `plan_nodes` M2M join, `products` (duration, price), `subscription_nodes` (sync state machine: active/pending_add/pending_remove/pending_update)
 - **Devices tracking:** `subscriptions.devices` column stores JSON array of client request header maps (HWID, Device-OS, etc.). `ips` column stores IP→timestamp entries. `last_request` column (*time, indexed) records the last time a client fetched its subscription via `/sub/{id}` (best-effort, updated on both cache hit and cache miss).
 
 ### Configuration
 - **Required:** `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ADMIN_ID` (must be positive), `GLOBAL_SUB_URL` (required, builds sub URLs)
-- **Seed-only:** `XUI_HOST`, `XUI_API_TOKEN`, `XUI_INBOUND_ID` — read via `os.Getenv` on first run to seed `nodes` table if empty, then managed via DB
 - **Validated:**
   - `GLOBAL_SUB_URL` — must be valid URL with http/https scheme (S3: scheme allowlist)
   - `SENTRY_DSN`, `HEARTBEAT_URL` — must be valid URLs with http/https scheme
@@ -374,7 +373,7 @@ go test -coverprofile=coverage.out ./...
 go tool cover -func=coverage.out
 
 # Build binary
-go build -ldflags="-s -w -X main.version=v3.0.0 -X main.commit=$(git rev-parse --short HEAD 2>/dev/null || echo unknown) -X main.buildTime=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" -o rs8kvn_bot ./cmd/bot
+go build -ldflags="-s -w -X main.version=v2.3.0 -X main.commit=$(git rev-parse --short HEAD 2>/dev/null || echo unknown) -X main.buildTime=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" -o rs8kvn_bot ./cmd/bot
 
 # Run linters
 golangci-lint run ./...

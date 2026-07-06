@@ -54,6 +54,22 @@ type ClientConfig struct {
 	UpdatedAt int64 `json:"-"`
 }
 
+// ClientRequest carries the parameters for creating or updating a 3x-ui client.
+// Using a struct instead of positional parameters prevents identifier-swap bugs
+// (currentEmail vs email vs clientID vs subID are all strings).
+type ClientRequest struct {
+	InboundIDs   []int
+	Email        string   // desired email after the operation
+	CurrentEmail string   // existing email (update only); empty for create
+	ClientID     string   // 3x-ui client UUID
+	SubID        string   // subscription ID surfaced in /sub/{subID}
+	TrafficBytes int64    // totalGB limit in bytes
+	ExpiryTime   time.Time // zero = no expiry
+	ResetDays    int      // traffic reset period; negative = use default
+	TgID         int64    // Telegram user id for panel binding (0 = none)
+	Comment      string   // free-form comment stored in the panel
+}
+
 // ClientTraffic — DTO трафика клиента, возвращаемого панелью.
 type ClientTraffic struct {
 	ID         int    `json:"id"`
@@ -286,38 +302,49 @@ func (c *Client) AddClient(ctx context.Context, inboundIDs []int, email string, 
 		return nil, fmt.Errorf("generate sub id: %w", err)
 	}
 
-	return c.AddClientWithID(ctx, inboundIDs, email, clientID, subID, trafficBytes, expiryTime, -1)
+	return c.AddClientWithID(ctx, ClientRequest{
+		InboundIDs:   inboundIDs,
+		Email:        email,
+		ClientID:     clientID,
+		SubID:        subID,
+		TrafficBytes: trafficBytes,
+		ExpiryTime:   expiryTime,
+		ResetDays:    -1,
+	})
 }
 
 // AddClientWithID создаёт клиента с указанными clientID и subID.
 // Группирует inboundIDs по flow: для каждого уникального flow делается
 // отдельный вызов панели со всеми inboundID этого flow (минимум вызовов).
-func (c *Client) AddClientWithID(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*ClientConfig, error) {
-	if len(inboundIDs) == 0 {
+func (c *Client) AddClientWithID(ctx context.Context, req ClientRequest) (*ClientConfig, error) {
+	if len(req.InboundIDs) == 0 {
 		return nil, fmt.Errorf("inbound IDs cannot be empty")
 	}
-	for _, id := range inboundIDs {
+	if req.ClientID == "" {
+		return nil, fmt.Errorf("client ID cannot be empty")
+	}
+	if req.SubID == "" {
+		return nil, fmt.Errorf("sub ID cannot be empty")
+	}
+	for _, id := range req.InboundIDs {
 		if id <= 0 {
 			return nil, fmt.Errorf("invalid inbound ID %d: must be positive", id)
 		}
 	}
-	if clientID == "" {
-		return nil, fmt.Errorf("client ID cannot be empty")
-	}
-	if subID == "" {
-		return nil, fmt.Errorf("subscription ID cannot be empty")
+
+	if req.ResetDays < 0 {
+		req.ResetDays = config.SubscriptionResetDay
 	}
 
-	if resetDays < 0 {
-		resetDays = config.SubscriptionResetDay
-	}
-
-	groups, err := c.groupInboundIDsByFlow(ctx, inboundIDs)
+	groups, err := c.groupInboundIDsByFlow(ctx, req.InboundIDs)
 	if err != nil {
 		return nil, err
 	}
 
-	tgID := TgIDFromContext(ctx)
+	tgID := req.TgID
+	if tgID == 0 {
+		tgID = TgIDFromContext(ctx)
+	}
 
 	var (
 		result   *ClientConfig
@@ -326,7 +353,7 @@ func (c *Client) AddClientWithID(ctx context.Context, inboundIDs []int, email, c
 	for flow, ids := range groups {
 		errRetry := utils.RetryWithBackoff(ctx, config.XUIMaxRetries, config.XUIInitialRetryDelay, func() error {
 			var innerErr error
-			result, innerErr = c.doAddClientWithID(ctx, ids, email, clientID, subID, trafficBytes, expiryTime, resetDays, flow, tgID)
+			result, innerErr = c.doAddClientWithID(ctx, ids, req, flow, tgID)
 			return innerErr
 		})
 		if errRetry != nil {
@@ -339,17 +366,17 @@ func (c *Client) AddClientWithID(ctx context.Context, inboundIDs []int, email, c
 
 // doAddClientWithID выполняет реальный POST /panel/api/clients/add
 // с уже вычисленным flow для группы inboundIDs.
-func (c *Client) doAddClientWithID(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int, flow string, tgID int64) (*ClientConfig, error) {
+func (c *Client) doAddClientWithID(ctx context.Context, inboundIDs []int, req ClientRequest, flow string, tgID int64) (*ClientConfig, error) {
 	clientObj := map[string]any{
-		"id":         clientID,
-		"email":      email,
+		"id":         req.ClientID,
+		"email":      req.Email,
 		"limitIp":    0,
-		"totalGB":    trafficBytes,
-		"expiryTime": getExpiresAtMillis(expiryTime),
+		"totalGB":    req.TrafficBytes,
+		"expiryTime": getExpiresAtMillis(req.ExpiryTime),
 		"enable":     true,
 		"flow":       flow,
-		"subId":      subID,
-		"reset":      resetDays,
+		"subId":      req.SubID,
+		"reset":      req.ResetDays,
 		"tgId":       tgID,
 	}
 
@@ -362,7 +389,7 @@ func (c *Client) doAddClientWithID(ctx context.Context, inboundIDs []int, email,
 
 	logger.Debug("3x-ui clients/add response",
 		zap.Int("body_length", len(respBody)),
-		zap.String("response_preview", truncateString(string(respBody), 200)))
+		zap.String("response_preview", utils.TruncateString(string(respBody), 200)))
 
 	var simpleResp struct {
 		Success bool   `json:"success"`
@@ -379,13 +406,13 @@ func (c *Client) doAddClientWithID(ctx context.Context, inboundIDs []int, email,
 	}
 
 	return &ClientConfig{
-		ID:        clientID,
-		Email:     email,
-		TotalGB:   trafficBytes,
-		ExpiresAt: getExpiresAtMillis(expiryTime),
+		ID:        req.ClientID,
+		Email:     req.Email,
+		TotalGB:   req.TrafficBytes,
+		ExpiresAt: getExpiresAtMillis(req.ExpiryTime),
 		Enable:    true,
-		SubID:     subID,
-		Reset:     resetDays,
+		SubID:     req.SubID,
+		Reset:     req.ResetDays,
 	}, nil
 }
 
@@ -429,23 +456,23 @@ func (c *Client) doDeleteClient(ctx context.Context, email string) error {
 // UpdateClient обновляет данные клиента в панели.
 // Группирует inboundIDs по flow: для каждого уникального flow делается
 // отдельный вызов панели со всеми inboundID этого flow (минимум вызовов).
-func (c *Client) UpdateClient(ctx context.Context, inboundIDs []int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, resetDays int, tgID int64, comment string) error {
-	if clientID == "" {
+func (c *Client) UpdateClient(ctx context.Context, req ClientRequest) error {
+	if req.ClientID == "" {
 		return fmt.Errorf("client ID cannot be empty")
 	}
-	if currentEmail == "" {
+	if req.CurrentEmail == "" {
 		return fmt.Errorf("current email cannot be empty")
 	}
-	if len(inboundIDs) == 0 {
+	if len(req.InboundIDs) == 0 {
 		return fmt.Errorf("inbound IDs cannot be empty")
 	}
-	for _, id := range inboundIDs {
+	for _, id := range req.InboundIDs {
 		if id <= 0 {
 			return fmt.Errorf("invalid inbound ID %d: must be positive", id)
 		}
 	}
 
-	groups, err := c.groupInboundIDsByFlow(ctx, inboundIDs)
+	groups, err := c.groupInboundIDsByFlow(ctx, req.InboundIDs)
 	if err != nil {
 		return err
 	}
@@ -453,7 +480,7 @@ func (c *Client) UpdateClient(ctx context.Context, inboundIDs []int, currentEmai
 	var firstErr error
 	for flow, ids := range groups {
 		errRetry := utils.RetryWithBackoff(ctx, config.XUIMaxRetries, config.XUIInitialRetryDelay, func() error {
-			return c.doUpdateClient(ctx, ids, currentEmail, clientID, email, subID, trafficBytes, expiryTime, resetDays, tgID, comment, flow)
+			return c.doUpdateClient(ctx, ids, req, flow)
 		})
 		if errRetry != nil {
 			firstErr = errRetry
@@ -466,25 +493,26 @@ func (c *Client) UpdateClient(ctx context.Context, inboundIDs []int, currentEmai
 // doUpdateClient выполняет реальный POST /panel/api/clients/update/{currentEmail}.
 // Панель ожидает плоский объект клиента (без обёртки "client"/"inboundIds"),
 // поэтому тело формируется напрямую из clientObj.
-func (c *Client) doUpdateClient(ctx context.Context, inboundIDs []int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, resetDays int, tgID int64, comment string, flow string) error {
+func (c *Client) doUpdateClient(ctx context.Context, inboundIDs []int, req ClientRequest, flow string) error {
+	resetDays := req.ResetDays
 	if resetDays < 0 {
 		resetDays = config.SubscriptionResetDay
 	}
 	clientObj := map[string]any{
-		"id":         clientID,
-		"email":      email,
+		"id":         req.ClientID,
+		"email":      req.Email,
 		"limitIp":    0,
-		"totalGB":    trafficBytes,
-		"expiryTime": getExpiresAtMillis(expiryTime),
+		"totalGB":    req.TrafficBytes,
+		"expiryTime": getExpiresAtMillis(req.ExpiryTime),
 		"enable":     true,
 		"flow":       flow,
-		"subId":      subID,
+		"subId":      req.SubID,
 		"reset":      resetDays,
-		"tgId":       tgID,
-		"comment":    comment,
+		"tgId":       req.TgID,
+		"comment":    req.Comment,
 	}
 
-	updateURL := fmt.Sprintf("%s/panel/api/clients/update/%s", c.host, url.PathEscape(currentEmail))
+	updateURL := fmt.Sprintf("%s/panel/api/clients/update/%s", c.host, url.PathEscape(req.CurrentEmail))
 
 	respBody, err := c.doHTTPRequest(ctx, http.MethodPost, updateURL, func() (io.Reader, error) {
 		return marshalJSON(clientObj)
@@ -503,8 +531,8 @@ func (c *Client) doUpdateClient(ctx context.Context, inboundIDs []int, currentEm
 	}
 
 	logger.Info("Successfully updated client via new API",
-		zap.String("current_email", currentEmail),
-		zap.String("new_email", email))
+		zap.String("current_email", req.CurrentEmail),
+		zap.String("new_email", req.Email))
 
 	return nil
 }
@@ -639,10 +667,3 @@ func getExpiresAtMillis(expiryTime time.Time) int64 {
 	return expiryTime.UnixMilli()
 }
 
-// truncateString обрезает строку до maxLen символов, добавляя "..." при усечении.
-func truncateString(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen] + "..."
-}

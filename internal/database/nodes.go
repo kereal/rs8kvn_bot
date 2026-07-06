@@ -34,51 +34,6 @@ func (s *Service) GetNodesByPlanName(ctx context.Context, planName string) ([]No
 	return nodes, nil
 }
 
-// IsNodesEmpty returns true if no nodes exist in the database.
-func (s *Service) IsNodesEmpty(ctx context.Context) (bool, error) {
-	var count int64
-	result := s.db.WithContext(ctx).Model(&Node{}).Count(&count)
-	if result.Error != nil {
-		return false, fmt.Errorf("failed to count nodes: %w", result.Error)
-	}
-	return count == 0, nil
-}
-
-// SeedDefaultNode inserts the default node from environment variables if the nodes table is empty.
-// It also links all existing plans to the new node and assigns the free plan to legacy subscriptions.
-func (s *Service) SeedDefaultNode(ctx context.Context, name, host, apiToken string, inboundIDs []int, subscriptionURL string) error {
-	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		node := Node{
-			Name:            name,
-			IsActive:        true,
-			Host:            host,
-			APIToken:        apiToken,
-			SubscriptionURL: subscriptionURL,
-			Type:            NodeType3xUI,
-		}
-		if err := node.SetInboundIDs(inboundIDs); err != nil {
-			return err
-		}
-		if err := tx.Create(&node).Error; err != nil {
-			return err
-		}
-		var plans []Plan
-		if err := tx.Find(&plans).Error; err != nil {
-			return err
-		}
-		for _, p := range plans {
-			pn := PlanNode{PlanID: p.ID, NodeID: node.ID}
-			if err := tx.Create(&pn).Error; err != nil {
-				return fmt.Errorf("failed to link plan %d to node %d: %w", p.ID, node.ID, err)
-			}
-		}
-		return tx.Exec(
-			`UPDATE subscriptions SET plan_id = (SELECT id FROM plans WHERE name = ?) WHERE plan_id IS NULL`,
-			FreePlanName,
-		).Error
-	})
-}
-
 // LinkNodeToPlan creates a link between a node and a plan (plan_nodes entry).
 func (s *Service) LinkNodeToPlan(ctx context.Context, planName string, nodeID uint) error {
 	var plan Plan
@@ -109,6 +64,14 @@ func (s *Service) ListEnabled(ctx context.Context) ([]Node, error) {
 		return nil, fmt.Errorf("failed to list enabled nodes: %w", result.Error)
 	}
 	return nodes, nil
+}
+
+// CreateNode inserts a new node and returns it with the assigned ID.
+func (s *Service) CreateNode(ctx context.Context, node *Node) error {
+	if err := s.db.WithContext(ctx).Create(node).Error; err != nil {
+		return fmt.Errorf("failed to create node: %w", err)
+	}
+	return nil
 }
 
 // GetNodesByPlanID returns active nodes linked to the given plan via plan_nodes.

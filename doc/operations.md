@@ -1,6 +1,6 @@
 # Operations Guide — rs8kvn_bot
 
-**Version:** 3.0.0  
+**Version:** 2.3.0  
 **Last updated:** 2026-07-02
 
 ---
@@ -371,7 +371,7 @@ scrape_configs:
 |-------|-------|-----|
 | `Failed to load config: TELEGRAM_BOT_TOKEN is required` | Missing env var | Set in `.env` or export |
 | `Failed to initialize database` | Permission denied or disk full | Check `data/` dir, permissions |
-| `Failed to connect to 3x-ui panel` | Wrong XUI_HOST, panel down | Verify URL: `curl $XUI_HOST` |
+| `Failed to connect to 3x-ui panel` | Wrong node host, panel down | Verify `nodes.host` in DB, then `curl <panel_host>` |
 | `listen tcp :8880: bind: address already in use` | Port occupied | Change `HEALTH_CHECK_PORT` or kill process using port |
 
 **Diagnostic:**
@@ -383,7 +383,7 @@ cat .env | grep -v '^#'
 sqlite3 ./data/tgvpn.db "SELECT 1;"
 
 # Test XUI panel
-curl -H "Authorization: Bearer $XUI_API_TOKEN" "$XUI_HOST/panel/api/server/status"
+curl -H "Authorization: Bearer <api_token>" "<panel_host>/panel/api/server/status"
 
 # Check port
 lsof -i :8880
@@ -425,14 +425,14 @@ docker restart rs8kvn_bot
 
 | Error | Cause | Fix |
 |-------|-------|-----|
-| `failed to create client` | 3x-ui unreachable | Check XUI_HOST, credentials, inbound ID |
+| `failed to create client` | 3x-ui unreachable | Check `nodes.host` and `nodes.api_token` in DB |
 | `context deadline exceeded` | XUI slow response | Increase timeout in `config` |
 | `cannot allocate UUID` | DB full or read-only | Check disk space, DB permissions |
 
 **Debug steps:**
 ```bash
 # Check XUI directly
-curl -H "Authorization: Bearer $XUI_API_TOKEN" "$XUI_HOST/panel/api/inbounds/list"
+curl -H "Authorization: Bearer <api_token>" "<panel_host>/panel/api/inbounds/list"
 
 # Check DB state
 sqlite3 ./data/tgvpn.db "SELECT * FROM subscriptions WHERE telegram_id = <user_id> ORDER BY created_at DESC LIMIT 5;"
@@ -441,7 +441,7 @@ sqlite3 ./data/tgvpn.db "SELECT * FROM subscriptions WHERE telegram_id = <user_i
 docker logs -f rs8kvn_bot 2>&1 | grep -E "error|failed|subscription"
 ```
 
-> **Note (v3.0+):** Node configuration is managed via the `nodes` table in the database, not env vars. `XUI_HOST`, `XUI_API_TOKEN`, and `XUI_INBOUND_ID` are seed-only (first run). Check node state:
+> **Note:** Node configuration is managed via the `nodes` table in the database. Check node state:
 ```sql
 SELECT id, name, type, is_active, host, subscription_url FROM nodes;
 SELECT sn.* FROM subscription_nodes sn WHERE sn.subscription_id = (SELECT id FROM subscriptions WHERE subscription_id = 'subID');
@@ -567,8 +567,8 @@ sqlite3 ./data/tgvpn.db "PRAGMA journal_mode=WAL;"
 **Note:** The system uses `RetryWithBackoff` with exponential backoff + jitter (up to 3 retries) and a circuit breaker (5 failures → 30s open → half-open with 3 attempts). Monitor `circuit_breaker_state` metric (0=closed, 1=open, 2=half-open).
 
 **Fix:**
-1. Check 3x-ui panel is up: `curl -H "Authorization: Bearer $XUI_API_TOKEN" "$XUI_HOST/panel/api/server/status"`
-2. Verify `nodes.api_token` in database is correct (seed-only env var `XUI_API_TOKEN` is not read at runtime)
+1. Check 3x-ui panel is up: `curl -H "Authorization: Bearer <api_token>" "<panel_host>/panel/api/server/status"`
+2. Verify `nodes.host` and `nodes.api_token` in database are correct
 3. Check panel logs for errors
 4. Retries happen automatically — check logs after ~30s for recovery
 5. DNS errors will fast-fail without retries
@@ -674,7 +674,7 @@ deploy:
 
 ### 7.1 Checklist
 
-- [ ] Use HTTPS for XUI_HOST (no HTTP in production)
+- [ ] Use HTTPS for node panel URLs (`nodes.host`, no HTTP in production)
 - [ ] Set strong `TELEGRAM_BOT_TOKEN` (20+ chars, random)
 - [ ] Restrict `.env` permissions: `chmod 600 .env`
 - [ ] Run Docker with `--read-only` (not possible due to SQLite writes)

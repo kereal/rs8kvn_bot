@@ -20,45 +20,17 @@ func TestListNodes_Empty(t *testing.T) {
 	assert.Len(t, sources, 0)
 }
 
-func TestSeedDefaultNode_Success(t *testing.T) {
-	t.Parallel()
-
-	svc := newTestService(t)
-	ctx := context.Background()
-
-	err := svc.SeedDefaultNode(ctx, "main", "http://xui:2053", "token-abc", []int{1}, "https://sub.example.com")
-	require.NoError(t, err)
-
-	sources, err := svc.ListNodes(ctx)
-	require.NoError(t, err)
-	require.Len(t, sources, 1)
-
-	mainSrc := &sources[0]
-	assert.Equal(t, "main", mainSrc.Name)
-	assert.Equal(t, "http://xui:2053", mainSrc.Host)
-	assert.Equal(t, "token-abc", mainSrc.APIToken)
-	inboundIDs, parseErr := mainSrc.ParseInboundIDs()
-	require.NoError(t, parseErr)
-	assert.Equal(t, []int{1}, inboundIDs)
-	assert.Equal(t, "https://sub.example.com", mainSrc.SubscriptionURL)
-	assert.Equal(t, NodeType3xUI, mainSrc.Type)
-	assert.True(t, mainSrc.IsActive)
-}
-
-func TestIsNodesEmpty_TrueAndFalse(t *testing.T) {
-	t.Parallel()
-
-	svc := newTestService(t)
-	ctx := context.Background()
-
-	empty, err := svc.IsNodesEmpty(ctx)
-	require.NoError(t, err)
-	assert.True(t, empty, "no node seeded after NewService")
-
-	require.NoError(t, svc.SeedDefaultNode(ctx, "main", "http://xui:2053", "token-abc", []int{1}, "https://sub.example.com"))
-	empty, err = svc.IsNodesEmpty(ctx)
-	require.NoError(t, err)
-	assert.False(t, empty, "nodes should not be empty after seeding")
+// createTestNode inserts a node and links it to all existing plans, mirroring the
+// old SeedDefaultNode behaviour for test setup.
+func createTestNode(t *testing.T, svc *Service, name, host, apiToken string) Node {
+	node := Node{Name: name, IsActive: true, Host: host, APIToken: apiToken, Type: NodeType3xUI, InboundIDs: "[1]"}
+	require.NoError(t, svc.CreateNode(context.Background(), &node))
+	var plans []Plan
+	require.NoError(t, svc.db.Find(&plans).Error)
+	for _, p := range plans {
+		require.NoError(t, svc.db.Create(&PlanNode{PlanID: p.ID, NodeID: node.ID}).Error)
+	}
+	return node
 }
 
 // ==================== Plan Tests ====================
@@ -156,8 +128,8 @@ func TestGetNodesByPlanName_ReturnsLinkedNodes(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
 
-	require.NoError(t, svc.SeedDefaultNode(ctx, "primary", "http://x1", "t1", []int{1}, ""))
-	require.NoError(t, svc.SeedDefaultNode(ctx, "backup", "http://x2", "t2", []int{1}, ""))
+	createTestNode(t, svc, "primary", "http://x1", "t1")
+	createTestNode(t, svc, "backup", "http://x2", "t2")
 
 	linked, err := svc.GetNodesByPlanName(ctx, "trial")
 	require.NoError(t, err)
@@ -174,7 +146,7 @@ func TestGetNodesByPlanName_FilterByName(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
 
-	require.NoError(t, svc.SeedDefaultNode(ctx, "default", "http://x1", "t1", []int{1}, ""))
+	createTestNode(t, svc, "default", "http://x1", "t1")
 
 	trialNodes, err := svc.GetNodesByPlanName(ctx, "trial")
 	require.NoError(t, err)
