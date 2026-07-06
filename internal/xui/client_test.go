@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/logger"
 	"github.com/kereal/rs8kvn_bot/internal/utils"
 
@@ -111,13 +112,14 @@ func TestMarshalJSON(t *testing.T) {
 		assert.Nil(t, decoded)
 	})
 }
-
 func TestTruncateString(t *testing.T) {
 	t.Parallel()
 
-	assert.Equal(t, "hello", truncateString("hello", 10))
-	assert.Equal(t, "hello...", truncateString("hello world", 5))
-	assert.Equal(t, "", truncateString("", 5))
+	assert.Equal(t, "hello", utils.TruncateString("hello", 10))
+	assert.Equal(t, "hello...", utils.TruncateString("hello world", 5))
+	assert.Equal(t, "", utils.TruncateString("", 5))
+	// rune-safe: Cyrillic
+	assert.Equal(t, "прив...", utils.TruncateString("привет мир", 4))
 }
 
 func TestClientClose(t *testing.T) {
@@ -537,17 +539,17 @@ func TestAddClientWithID_Validation(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("empty inbound IDs", func(t *testing.T) {
-		_, err := client.AddClientWithID(ctx, []int{}, "test@example.com", "uuid", "subid", 100, time.Now(), -1)
+		_, err := client.AddClientWithID(ctx, ClientRequest{InboundIDs: []int{}, Email: "test@example.com", ClientID: "uuid", SubID: "subid", TrafficBytes: 100, ExpiryTime: time.Now(), ResetDays: -1})
 		assert.Error(t, err)
 	})
 
 	t.Run("empty client ID", func(t *testing.T) {
-		_, err := client.AddClientWithID(ctx, []int{1}, "test@example.com", "", "subid", 100, time.Now(), -1)
+		_, err := client.AddClientWithID(ctx, ClientRequest{InboundIDs: []int{1}, Email: "test@example.com", ClientID: "", SubID: "subid", TrafficBytes: 100, ExpiryTime: time.Now(), ResetDays: -1})
 		assert.Error(t, err)
 	})
 
 	t.Run("empty sub ID", func(t *testing.T) {
-		_, err := client.AddClientWithID(ctx, []int{1}, "test@example.com", "uuid", "", 100, time.Now(), -1)
+		_, err := client.AddClientWithID(ctx, ClientRequest{InboundIDs: []int{1}, Email: "test@example.com", ClientID: "uuid", SubID: "", TrafficBytes: 100, ExpiryTime: time.Now(), ResetDays: -1})
 		assert.Error(t, err)
 	})
 }
@@ -581,11 +583,38 @@ func TestAddClientWithID(t *testing.T) {
 		require.NoError(t, err)
 		defer client.Close()
 
-		result, err := client.AddClientWithID(context.Background(), []int{1}, "test@example.com", "some-uuid", "sub-123", 1<<30, time.Now().Add(24*time.Hour), 0)
+	result, err := client.AddClientWithID(context.Background(), ClientRequest{InboundIDs: []int{1}, Email: "test@example.com", ClientID: "some-uuid", SubID: "sub-123", TrafficBytes: 1 << 30, ExpiryTime: time.Now().Add(24 * time.Hour), ResetDays: 0})
 		require.NoError(t, err)
 		assert.Equal(t, "test@example.com", result.Email)
 		assert.Equal(t, "some-uuid", result.ID)
 		assert.Equal(t, "sub-123", result.SubID)
+		assert.Equal(t, 0, result.Reset, "ResetDays=0 must stay 0")
+	})
+
+	t.Run("reset_days_negative_normalized", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.Contains(r.URL.Path, "get/") {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				fmt.Fprint(w, `{"success":true,"obj":{"id":1}}`)
+				return
+			}
+			body, _ := io.ReadAll(r.Body)
+			// The panel must receive the normalized value, not -1
+			assert.Contains(t, string(body), `"reset":30`, "negative ResetDays must be normalized to SubscriptionResetDay")
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprint(w, `{"success":true,"msg":"ok"}`)
+		}))
+		defer server.Close()
+
+		client, err := NewClient(server.URL, testAPIToken)
+		require.NoError(t, err)
+		defer client.Close()
+
+		result, err := client.AddClientWithID(context.Background(), ClientRequest{InboundIDs: []int{1}, Email: "test@example.com", ClientID: "uuid", SubID: "sub", TrafficBytes: 100, ExpiryTime: time.Now().Add(24 * time.Hour), ResetDays: -1})
+		require.NoError(t, err)
+		assert.Equal(t, config.SubscriptionResetDay, result.Reset, "returned ClientConfig.Reset must reflect normalized value")
 	})
 }
 
@@ -660,7 +689,7 @@ func TestUpdateClient(t *testing.T) {
 		require.NoError(t, err)
 		defer client.Close()
 
-		err = client.UpdateClient(context.Background(), []int{1}, "old-email", "test-uuid", "new@email.com", "sub-456", 1<<30, time.Now().Add(48*time.Hour), -1, 12345, "test comment")
+	err = client.UpdateClient(context.Background(), ClientRequest{InboundIDs: []int{1}, CurrentEmail: "old-email", ClientID: "test-uuid", Email: "new@email.com", SubID: "sub-456", TrafficBytes: 1 << 30, ExpiryTime: time.Now().Add(48 * time.Hour), ResetDays: -1, TgID: 12345, Comment: "test comment"})
 		assert.NoError(t, err)
 	})
 
@@ -669,7 +698,7 @@ func TestUpdateClient(t *testing.T) {
 		require.NoError(t, err)
 		defer client.Close()
 
-		err = client.UpdateClient(context.Background(), []int{1}, "current-email", "", "email", "sub", 0, time.Time{}, -1, 0, "")
+	err = client.UpdateClient(context.Background(), ClientRequest{InboundIDs: []int{1}, CurrentEmail: "current-email", ClientID: "", Email: "email", SubID: "sub", TrafficBytes: 0, ExpiryTime: time.Time{}, ResetDays: -1, TgID: 0, Comment: ""})
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "client ID cannot be empty")
 	})
@@ -692,7 +721,7 @@ func TestUpdateClient(t *testing.T) {
 		require.NoError(t, err)
 		defer client.Close()
 
-		err = client.UpdateClient(context.Background(), []int{1}, "current-email", "test-uuid", "email", "sub", 0, time.Time{}, -1, 0, "")
+	err = client.UpdateClient(context.Background(), ClientRequest{InboundIDs: []int{1}, CurrentEmail: "current-email", ClientID: "test-uuid", Email: "email", SubID: "sub", TrafficBytes: 0, ExpiryTime: time.Time{}, ResetDays: -1, TgID: 0, Comment: ""})
 		assert.Error(t, err)
 	})
 }

@@ -8,7 +8,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/interfaces"
@@ -151,9 +150,9 @@ func TestE2E_InviteLink_Parameterized(t *testing.T) {
 			inviteCode: "invite_xui_fail",
 			referrerID: 200003,
 			setupXUI: func(xuiClient *testutil.XUIClient) {
-				xuiClient.AddClientWithIDFunc = func(ctx context.Context, inboundIDs []int, email, clientID, subId string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
-					return nil, fmt.Errorf("authentication failed")
-				}
+			xuiClient.AddClientWithIDFunc = func(ctx context.Context, req xui.ClientRequest) (*xui.ClientConfig, error) {
+				return nil, fmt.Errorf("authentication failed")
+			}
 			},
 			createInvite: true,
 			wantStatus:   http.StatusInternalServerError,
@@ -203,15 +202,15 @@ func TestE2E_AutoRelogin_On401(t *testing.T) {
 	env.cfg.TrialRateLimit = 100
 
 	addClientCallCount := 0
-	env.xui.AddClientWithIDFunc = func(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
+	env.xui.AddClientWithIDFunc = func(ctx context.Context, req xui.ClientRequest) (*xui.ClientConfig, error) {
 		addClientCallCount++
 		if addClientCallCount == 1 {
 			return nil, fmt.Errorf("authentication failed")
 		}
 		return &xui.ClientConfig{
-			ID:    clientID,
-			Email: email,
-			SubID: subID,
+			ID:    req.ClientID,
+			Email: req.Email,
+			SubID: req.SubID,
 		}, nil
 	}
 

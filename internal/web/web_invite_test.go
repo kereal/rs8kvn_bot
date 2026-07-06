@@ -127,9 +127,9 @@ func TestHandleInvite_InvalidCode(t *testing.T) {
 		}, nil
 	}
 
-	mockXUI.AddClientWithIDFunc = func(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
-		assert.Equal(t, []int{1}, inboundIDs, "inboundIDs should resolve to expected value")
-		return &xui.ClientConfig{ID: clientID, SubID: subID}, nil
+	mockXUI.AddClientWithIDFunc = func(ctx context.Context, req xui.ClientRequest) (*xui.ClientConfig, error) {
+		assert.Equal(t, []int{1}, req.InboundIDs, "inboundIDs should resolve to expected value")
+		return &xui.ClientConfig{ID: req.ClientID, SubID: req.SubID}, nil
 	}
 
 	mockXUI.GetSubscriptionLinkFunc = func(host, subID, subPath string) string {
@@ -184,7 +184,7 @@ func TestHandleInvite_XUIError(t *testing.T) {
 		return nil
 	}
 
-	mockXUI.AddClientWithIDFunc = func(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
+	mockXUI.AddClientWithIDFunc = func(ctx context.Context, req xui.ClientRequest) (*xui.ClientConfig, error) {
 		return nil, fmt.Errorf("XUI API error")
 	}
 
@@ -413,7 +413,7 @@ func TestHandleInvite_XUIAddClientFails(t *testing.T) {
 	mockDB.CreateTrialRequestFunc = func(ctx context.Context, ip string) error {
 		return nil
 	}
-	mockXUI.AddClientWithIDFunc = func(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
+	mockXUI.AddClientWithIDFunc = func(ctx context.Context, req xui.ClientRequest) (*xui.ClientConfig, error) {
 		return nil, fmt.Errorf("XUI add client error")
 	}
 
@@ -445,8 +445,8 @@ func TestHandleInvite_CreateTrialSubscriptionFails(t *testing.T) {
 	mockDB.CreateTrialRequestFunc = func(ctx context.Context, ip string) error {
 		return nil
 	}
-	mockXUI.AddClientWithIDFunc = func(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
-		return &xui.ClientConfig{ID: clientID, SubID: subID}, nil
+	mockXUI.AddClientWithIDFunc = func(ctx context.Context, req xui.ClientRequest) (*xui.ClientConfig, error) {
+		return &xui.ClientConfig{ID: req.ClientID, SubID: req.SubID}, nil
 	}
 	mockXUI.GetSubscriptionLinkFunc = func(host, subID, subPath string) string {
 		return "http://localhost:2053/sub/" + subID

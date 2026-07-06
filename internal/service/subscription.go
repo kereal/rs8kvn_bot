@@ -496,7 +496,15 @@ func (s *SubscriptionService) CreateTrial(ctx context.Context, inviteCode string
 		return nil, fmt.Errorf("xui client not found for node %d", node.ID)
 	}
 	inboundIDs := node.ResolveInboundIDs()
-	if _, err = client.AddClientWithID(ctx, inboundIDs, email, clientID, subID, trafficBytes, expiryTime, resetDays); err != nil {
+	if _, err = client.AddClientWithID(ctx, xui.ClientRequest{
+		InboundIDs:   inboundIDs,
+		Email:        email,
+		ClientID:     clientID,
+		SubID:        subID,
+		TrafficBytes: trafficBytes,
+		ExpiryTime:   expiryTime,
+		ResetDays:    resetDays,
+	}); err != nil {
 		return nil, fmt.Errorf("add trial client on node %d: %w", node.ID, err)
 	}
 
@@ -581,7 +589,18 @@ func (s *SubscriptionService) BindTrial(ctx context.Context, subscriptionID stri
 		return sub, fmt.Errorf("xui client not found for trial node %d", node.ID)
 	}
 	inboundIDs := node.ResolveInboundIDs()
-	if err := client.UpdateClient(ctx, inboundIDs, currentEmail, sub.ClientID, email, sub.SubscriptionID, trafficBytes, expiryTime, resetDays, telegramID, comment); err != nil {
+	if err := client.UpdateClient(ctx, xui.ClientRequest{
+		InboundIDs:   inboundIDs,
+		CurrentEmail: currentEmail,
+		ClientID:     sub.ClientID,
+		Email:        email,
+		SubID:        sub.SubscriptionID,
+		TrafficBytes: trafficBytes,
+		ExpiryTime:   expiryTime,
+		ResetDays:    resetDays,
+		TgID:         telegramID,
+		Comment:      comment,
+	}); err != nil {
 		return sub, fmt.Errorf("update trial client on node %d: %w", node.ID, err)
 	}
 
