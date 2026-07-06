@@ -242,7 +242,9 @@ func TestRegistry_LoadEnv_EmptyStringKeepsDefault(t *testing.T) {
 	t.Parallel()
 
 	require.NoError(t, os.Setenv("TEST_EMPTY_FLAG", ""))
-	defer os.Unsetenv("TEST_EMPTY_FLAG")
+	t.Cleanup(func() {
+		_ = os.Unsetenv("TEST_EMPTY_FLAG")
+	})
 
 	r := New()
 	i := NewInt(7)
