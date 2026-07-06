@@ -136,11 +136,11 @@ func (m *mockXUIClient) AddClient(ctx context.Context, inboundIDs []int, email s
 	return nil, nil
 }
 
-func (m *mockXUIClient) AddClientWithID(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
-	return &xui.ClientConfig{ID: clientID, SubID: subID}, nil
+func (m *mockXUIClient) AddClientWithID(ctx context.Context, req xui.ClientRequest) (*xui.ClientConfig, error) {
+	return &xui.ClientConfig{ID: req.ClientID, SubID: req.SubID}, nil
 }
 
-func (m *mockXUIClient) UpdateClient(ctx context.Context, inboundIDs []int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, resetDays int, tgID int64, comment string) error {
+func (m *mockXUIClient) UpdateClient(ctx context.Context, req xui.ClientRequest) error {
 	return nil
 }
 

@@ -279,7 +279,7 @@ func TestHandleSubscription_FetchError_SkipsNode(t *testing.T) {
 	svc := newTestSubSvc(t)
 	ctx := context.Background()
 
-	// Node points to an invalid URL — FetchFromXUI will fail
+	// Node points to an invalid URL — FetchFromSource will fail
 	mockDB.GetWithPlanAndNodesFunc = func(ctx context.Context, subID string) (*database.SubscriptionFull, error) {
 		return &database.SubscriptionFull{
 			Subscription: database.Subscription{ID: 5, SubscriptionID: "sub-fetch-err", Status: "active"},
@@ -654,6 +654,8 @@ func TestDetectFormat(t *testing.T) {
 		{"plain vless link", "vless://uuid@server:443#Test", FormatPlain},
 		{"plain trojan link", "trojan://pass@server:443#Test", FormatPlain},
 		{"random text", "not-a-valid-protocol://something", FormatUnknown},
+		{"clash yaml with proxies", "proxies:\n  - type: vless\n    server: 1.2.3.4\n    port: 443\n    uuid: test-uuid\n", FormatClash},
+		{"clash yaml without proxies", "mixed-port: 7890\nmode: rule\n", FormatUnknown},
 	}
 
 	for _, tt := range tests {
@@ -670,6 +672,7 @@ func TestFormat_String(t *testing.T) {
 	assert.Equal(t, "json", FormatJSON.String())
 	assert.Equal(t, "base64", FormatBase64.String())
 	assert.Equal(t, "plain", FormatPlain.String())
+	assert.Equal(t, "clash", FormatClash.String())
 	assert.Equal(t, "unknown", FormatUnknown.String())
 }
 

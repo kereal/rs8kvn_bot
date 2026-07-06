@@ -83,7 +83,7 @@ git push origin --delete <name>  # удалить удалённую ветку
 - SSH ключ настроен.
 
 ## Текущая активная ветка
-- `plans_and_pricing` (merge candidate, ready for v3.0.0)
+- `plans_and_pricing` (merge candidate, ready for v2.3.0)
 
 ---
 

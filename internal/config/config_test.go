@@ -11,11 +11,6 @@ import (
 func TestLoad_DefaultValues(t *testing.T) {
 	require.NoError(t, os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz"))
 	require.NoError(t, os.Setenv("TELEGRAM_ADMIN_ID", "123456"))
-	require.NoError(t, os.Setenv("XUI_HOST", "http://localhost:2053"))
-	require.NoError(t, os.Setenv("XUI_USERNAME", "admin"))
-	require.NoError(t, os.Setenv("XUI_PASSWORD", "password"))
-	require.NoError(t, os.Setenv("XUI_INBOUND_ID", "1"))
-	require.NoError(t, os.Setenv("XUI_API_TOKEN", "test-token-for-defaults"))
 	require.NoError(t, os.Setenv("LOG_LEVEL", "info"))
 	defer func() {
 		if err := os.Unsetenv("TELEGRAM_BOT_TOKEN"); err != nil {
@@ -24,21 +19,7 @@ func TestLoad_DefaultValues(t *testing.T) {
 		if err := os.Unsetenv("TELEGRAM_ADMIN_ID"); err != nil {
 			t.Logf("Warning: Unsetenv failed: %v", err)
 		}
-		if err := os.Unsetenv("XUI_HOST"); err != nil {
-			t.Logf("Warning: Unsetenv failed: %v", err)
-		}
-		if err := os.Unsetenv("XUI_USERNAME"); err != nil {
-			t.Logf("Warning: Unsetenv failed: %v", err)
-		}
-		if err := os.Unsetenv("XUI_PASSWORD"); err != nil {
-			t.Logf("Warning: Unsetenv failed: %v", err)
-		}
-		if err := os.Unsetenv("XUI_INBOUND_ID"); err != nil {
-			t.Logf("Warning: Unsetenv failed: %v", err)
-		}
-		if err := os.Unsetenv("XUI_API_TOKEN"); err != nil {
-			t.Logf("Warning: Unsetenv failed: %v", err)
-		}
+
 		if err := os.Unsetenv("LOG_LEVEL"); err != nil {
 			t.Logf("Warning: Unsetenv failed: %v", err)
 		}
@@ -62,9 +43,6 @@ func TestLoad_DefaultValues(t *testing.T) {
 func TestLoad_CustomValues(t *testing.T) {
 	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
 	os.Setenv("TELEGRAM_ADMIN_ID", "999999")
-	os.Setenv("XUI_HOST", "https://custom:2053")
-	os.Setenv("XUI_API_TOKEN", "custom-token")
-	os.Setenv("XUI_INBOUND_ID", "5")
 
 	os.Setenv("HEARTBEAT_INTERVAL", "120")
 	os.Setenv("DATABASE_PATH", "/custom/path/db.db")
@@ -76,9 +54,6 @@ func TestLoad_CustomValues(t *testing.T) {
 	defer func() {
 		os.Unsetenv("TELEGRAM_BOT_TOKEN")
 		os.Unsetenv("TELEGRAM_ADMIN_ID")
-		os.Unsetenv("XUI_HOST")
-		os.Unsetenv("XUI_API_TOKEN")
-		os.Unsetenv("XUI_INBOUND_ID")
 		os.Unsetenv("HEARTBEAT_INTERVAL")
 		os.Unsetenv("DATABASE_PATH")
 		os.Unsetenv("LOG_LEVEL")
@@ -98,16 +73,10 @@ func TestLoad_CustomValues(t *testing.T) {
 func TestLoad_MissingBotToken(t *testing.T) {
 	os.Setenv("TELEGRAM_BOT_TOKEN", "")
 	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
-	os.Setenv("XUI_HOST", "https://localhost:2053")
-	os.Setenv("XUI_API_TOKEN", "some-test-token")
-	os.Setenv("XUI_INBOUND_ID", "1")
 	os.Setenv("LOG_LEVEL", "info")
 	defer func() {
 		os.Unsetenv("TELEGRAM_BOT_TOKEN")
 		os.Unsetenv("TELEGRAM_ADMIN_ID")
-		os.Unsetenv("XUI_HOST")
-		os.Unsetenv("XUI_API_TOKEN")
-		os.Unsetenv("XUI_INBOUND_ID")
 		os.Unsetenv("LOG_LEVEL")
 	}()
 
@@ -118,15 +87,9 @@ func TestLoad_MissingBotToken(t *testing.T) {
 func TestLoad_InvalidTelegramAdminID(t *testing.T) {
 	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
 	os.Setenv("TELEGRAM_ADMIN_ID", "invalid")
-	os.Setenv("XUI_HOST", "https://localhost:2053")
-	os.Setenv("XUI_API_TOKEN", "some-test-token")
-	os.Setenv("XUI_INBOUND_ID", "1")
 	os.Setenv("LOG_LEVEL", "info")
 	defer func() {
 		os.Unsetenv("TELEGRAM_BOT_TOKEN")
-		os.Unsetenv("XUI_HOST")
-		os.Unsetenv("XUI_API_TOKEN")
-		os.Unsetenv("XUI_INBOUND_ID")
 		os.Unsetenv("LOG_LEVEL")
 	}()
 
@@ -138,9 +101,6 @@ func TestLoad_InvalidTelegramAdminID(t *testing.T) {
 func TestLoad_InvalidHeartbeatInterval_Zero(t *testing.T) {
 	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
 	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
-	os.Setenv("XUI_HOST", "https://localhost:2053")
-	os.Setenv("XUI_API_TOKEN", "some-test-token")
-	os.Setenv("XUI_INBOUND_ID", "1")
 	os.Setenv("HEARTBEAT_INTERVAL", "0")
 	os.Setenv("HEARTBEAT_URL", "https://example.com/heartbeat")
 	os.Setenv("LOG_LEVEL", "info")
@@ -149,9 +109,6 @@ func TestLoad_InvalidHeartbeatInterval_Zero(t *testing.T) {
 	defer func() {
 		os.Unsetenv("TELEGRAM_BOT_TOKEN")
 		os.Unsetenv("TELEGRAM_ADMIN_ID")
-		os.Unsetenv("XUI_HOST")
-		os.Unsetenv("XUI_API_TOKEN")
-		os.Unsetenv("XUI_INBOUND_ID")
 		os.Unsetenv("HEARTBEAT_INTERVAL")
 		os.Unsetenv("HEARTBEAT_URL")
 		os.Unsetenv("LOG_LEVEL")
@@ -165,9 +122,6 @@ func TestLoad_InvalidHeartbeatInterval_Zero(t *testing.T) {
 func TestLoad_ValidHeartbeatInterval_MinValue(t *testing.T) {
 	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
 	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
-	os.Setenv("XUI_HOST", "https://localhost:2053")
-	os.Setenv("XUI_API_TOKEN", "some-test-token")
-	os.Setenv("XUI_INBOUND_ID", "1")
 	os.Setenv("HEARTBEAT_INTERVAL", "60")
 	os.Setenv("HEARTBEAT_URL", "https://example.com/heartbeat")
 	os.Setenv("LOG_LEVEL", "info")
@@ -176,9 +130,6 @@ func TestLoad_ValidHeartbeatInterval_MinValue(t *testing.T) {
 	defer func() {
 		os.Unsetenv("TELEGRAM_BOT_TOKEN")
 		os.Unsetenv("TELEGRAM_ADMIN_ID")
-		os.Unsetenv("XUI_HOST")
-		os.Unsetenv("XUI_API_TOKEN")
-		os.Unsetenv("XUI_INBOUND_ID")
 		os.Unsetenv("HEARTBEAT_INTERVAL")
 		os.Unsetenv("HEARTBEAT_URL")
 		os.Unsetenv("LOG_LEVEL")
@@ -193,17 +144,11 @@ func TestLoad_ValidHeartbeatInterval_MinValue(t *testing.T) {
 func TestLoad_InvalidHealthCheckPort_Zero(t *testing.T) {
 	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
 	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
-	os.Setenv("XUI_HOST", "https://localhost:2053")
-	os.Setenv("XUI_API_TOKEN", "some-test-token")
-	os.Setenv("XUI_INBOUND_ID", "1")
 	os.Setenv("HEALTH_CHECK_PORT", "0")
 	os.Setenv("LOG_LEVEL", "info")
 	defer func() {
 		os.Unsetenv("TELEGRAM_BOT_TOKEN")
 		os.Unsetenv("TELEGRAM_ADMIN_ID")
-		os.Unsetenv("XUI_HOST")
-		os.Unsetenv("XUI_API_TOKEN")
-		os.Unsetenv("XUI_INBOUND_ID")
 		os.Unsetenv("HEALTH_CHECK_PORT")
 		os.Unsetenv("LOG_LEVEL")
 	}()
@@ -215,17 +160,11 @@ func TestLoad_InvalidHealthCheckPort_Zero(t *testing.T) {
 func TestLoad_InvalidHealthCheckPort_Max(t *testing.T) {
 	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
 	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
-	os.Setenv("XUI_HOST", "https://localhost:2053")
-	os.Setenv("XUI_API_TOKEN", "some-test-token")
-	os.Setenv("XUI_INBOUND_ID", "1")
 	os.Setenv("HEALTH_CHECK_PORT", "65536")
 	os.Setenv("LOG_LEVEL", "info")
 	defer func() {
 		os.Unsetenv("TELEGRAM_BOT_TOKEN")
 		os.Unsetenv("TELEGRAM_ADMIN_ID")
-		os.Unsetenv("XUI_HOST")
-		os.Unsetenv("XUI_API_TOKEN")
-		os.Unsetenv("XUI_INBOUND_ID")
 		os.Unsetenv("HEALTH_CHECK_PORT")
 		os.Unsetenv("LOG_LEVEL")
 	}()
@@ -237,9 +176,6 @@ func TestLoad_InvalidHealthCheckPort_Max(t *testing.T) {
 func TestLoad_ValidHealthCheckPort_Max(t *testing.T) {
 	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
 	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
-	os.Setenv("XUI_HOST", "https://localhost:2053")
-	os.Setenv("XUI_API_TOKEN", "some-test-token")
-	os.Setenv("XUI_INBOUND_ID", "1")
 	os.Setenv("HEALTH_CHECK_PORT", "65535")
 	os.Setenv("LOG_LEVEL", "info")
 
@@ -247,9 +183,6 @@ func TestLoad_ValidHealthCheckPort_Max(t *testing.T) {
 	defer func() {
 		os.Unsetenv("TELEGRAM_BOT_TOKEN")
 		os.Unsetenv("TELEGRAM_ADMIN_ID")
-		os.Unsetenv("XUI_HOST")
-		os.Unsetenv("XUI_API_TOKEN")
-		os.Unsetenv("XUI_INBOUND_ID")
 		os.Unsetenv("HEALTH_CHECK_PORT")
 		os.Unsetenv("LOG_LEVEL")
 		os.Unsetenv("GLOBAL_SUB_URL")
@@ -263,18 +196,12 @@ func TestLoad_ValidHealthCheckPort_Max(t *testing.T) {
 func TestLoad_ValidTelegramAdminID(t *testing.T) {
 	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
 	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
-	os.Setenv("XUI_HOST", "https://localhost:2053")
-	os.Setenv("XUI_API_TOKEN", "some-test-token")
-	os.Setenv("XUI_INBOUND_ID", "1")
 	os.Setenv("LOG_LEVEL", "info")
 
 	os.Setenv("GLOBAL_SUB_URL", "https://vpn.example.com/sub/")
 	defer func() {
 		os.Unsetenv("TELEGRAM_BOT_TOKEN")
 		os.Unsetenv("TELEGRAM_ADMIN_ID")
-		os.Unsetenv("XUI_HOST")
-		os.Unsetenv("XUI_API_TOKEN")
-		os.Unsetenv("XUI_INBOUND_ID")
 		os.Unsetenv("LOG_LEVEL")
 		os.Unsetenv("GLOBAL_SUB_URL")
 	}()
@@ -287,9 +214,6 @@ func TestLoad_ValidTelegramAdminID(t *testing.T) {
 func TestLoad_InvalidTrialDurationHours_Zero(t *testing.T) {
 	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
 	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
-	os.Setenv("XUI_HOST", "https://localhost:2053")
-	os.Setenv("XUI_API_TOKEN", "some-test-token")
-	os.Setenv("XUI_INBOUND_ID", "1")
 	os.Setenv("TRIAL_DURATION_HOURS", "0")
 	os.Setenv("SITE_URL", "https://example.com")
 	os.Setenv("LOG_LEVEL", "info")
@@ -298,9 +222,6 @@ func TestLoad_InvalidTrialDurationHours_Zero(t *testing.T) {
 	defer func() {
 		os.Unsetenv("TELEGRAM_BOT_TOKEN")
 		os.Unsetenv("TELEGRAM_ADMIN_ID")
-		os.Unsetenv("XUI_HOST")
-		os.Unsetenv("XUI_API_TOKEN")
-		os.Unsetenv("XUI_INBOUND_ID")
 		os.Unsetenv("TRIAL_DURATION_HOURS")
 		os.Unsetenv("SITE_URL")
 		os.Unsetenv("LOG_LEVEL")
@@ -314,9 +235,6 @@ func TestLoad_InvalidTrialDurationHours_Zero(t *testing.T) {
 func TestLoad_ValidTrialDurationHours_Min(t *testing.T) {
 	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
 	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
-	os.Setenv("XUI_HOST", "https://localhost:2053")
-	os.Setenv("XUI_API_TOKEN", "some-test-token")
-	os.Setenv("XUI_INBOUND_ID", "1")
 	os.Setenv("TRIAL_DURATION_HOURS", "1")
 	os.Setenv("SITE_URL", "https://example.com")
 	os.Setenv("LOG_LEVEL", "info")
@@ -325,9 +243,6 @@ func TestLoad_ValidTrialDurationHours_Min(t *testing.T) {
 	defer func() {
 		os.Unsetenv("TELEGRAM_BOT_TOKEN")
 		os.Unsetenv("TELEGRAM_ADMIN_ID")
-		os.Unsetenv("XUI_HOST")
-		os.Unsetenv("XUI_API_TOKEN")
-		os.Unsetenv("XUI_INBOUND_ID")
 		os.Unsetenv("TRIAL_DURATION_HOURS")
 		os.Unsetenv("SITE_URL")
 		os.Unsetenv("LOG_LEVEL")
@@ -342,9 +257,6 @@ func TestLoad_ValidTrialDurationHours_Min(t *testing.T) {
 func TestLoad_ValidTrialDurationHours_Max(t *testing.T) {
 	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
 	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
-	os.Setenv("XUI_HOST", "https://localhost:2053")
-	os.Setenv("XUI_API_TOKEN", "some-test-token")
-	os.Setenv("XUI_INBOUND_ID", "1")
 	os.Setenv("TRIAL_DURATION_HOURS", "168")
 	os.Setenv("SITE_URL", "https://example.com")
 	os.Setenv("LOG_LEVEL", "info")
@@ -353,9 +265,6 @@ func TestLoad_ValidTrialDurationHours_Max(t *testing.T) {
 	defer func() {
 		os.Unsetenv("TELEGRAM_BOT_TOKEN")
 		os.Unsetenv("TELEGRAM_ADMIN_ID")
-		os.Unsetenv("XUI_HOST")
-		os.Unsetenv("XUI_API_TOKEN")
-		os.Unsetenv("XUI_INBOUND_ID")
 		os.Unsetenv("TRIAL_DURATION_HOURS")
 		os.Unsetenv("SITE_URL")
 		os.Unsetenv("LOG_LEVEL")
@@ -370,18 +279,12 @@ func TestLoad_ValidTrialDurationHours_Max(t *testing.T) {
 func TestLoad_InvalidTrialDurationHours_OverMax(t *testing.T) {
 	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
 	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
-	os.Setenv("XUI_HOST", "https://localhost:2053")
-	os.Setenv("XUI_API_TOKEN", "some-test-token")
-	os.Setenv("XUI_INBOUND_ID", "1")
 	os.Setenv("TRIAL_DURATION_HOURS", "169")
 	os.Setenv("SITE_URL", "https://example.com")
 	os.Setenv("LOG_LEVEL", "info")
 	defer func() {
 		os.Unsetenv("TELEGRAM_BOT_TOKEN")
 		os.Unsetenv("TELEGRAM_ADMIN_ID")
-		os.Unsetenv("XUI_HOST")
-		os.Unsetenv("XUI_API_TOKEN")
-		os.Unsetenv("XUI_INBOUND_ID")
 		os.Unsetenv("TRIAL_DURATION_HOURS")
 		os.Unsetenv("SITE_URL")
 		os.Unsetenv("LOG_LEVEL")
@@ -394,9 +297,6 @@ func TestLoad_InvalidTrialDurationHours_OverMax(t *testing.T) {
 func TestLoad_InvalidTrialRateLimit_Zero(t *testing.T) {
 	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
 	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
-	os.Setenv("XUI_HOST", "https://localhost:2053")
-	os.Setenv("XUI_API_TOKEN", "some-test-token")
-	os.Setenv("XUI_INBOUND_ID", "1")
 	os.Setenv("TRIAL_RATE_LIMIT", "0")
 	os.Setenv("SITE_URL", "https://example.com")
 	os.Setenv("LOG_LEVEL", "info")
@@ -405,9 +305,6 @@ func TestLoad_InvalidTrialRateLimit_Zero(t *testing.T) {
 	defer func() {
 		os.Unsetenv("TELEGRAM_BOT_TOKEN")
 		os.Unsetenv("TELEGRAM_ADMIN_ID")
-		os.Unsetenv("XUI_HOST")
-		os.Unsetenv("XUI_API_TOKEN")
-		os.Unsetenv("XUI_INBOUND_ID")
 		os.Unsetenv("TRIAL_RATE_LIMIT")
 		os.Unsetenv("SITE_URL")
 		os.Unsetenv("LOG_LEVEL")
@@ -421,9 +318,6 @@ func TestLoad_InvalidTrialRateLimit_Zero(t *testing.T) {
 func TestLoad_ValidTrialRateLimit_Min(t *testing.T) {
 	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
 	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
-	os.Setenv("XUI_HOST", "https://localhost:2053")
-	os.Setenv("XUI_API_TOKEN", "some-test-token")
-	os.Setenv("XUI_INBOUND_ID", "1")
 	os.Setenv("TRIAL_RATE_LIMIT", "1")
 	os.Setenv("SITE_URL", "https://example.com")
 	os.Setenv("LOG_LEVEL", "info")
@@ -432,9 +326,6 @@ func TestLoad_ValidTrialRateLimit_Min(t *testing.T) {
 	defer func() {
 		os.Unsetenv("TELEGRAM_BOT_TOKEN")
 		os.Unsetenv("TELEGRAM_ADMIN_ID")
-		os.Unsetenv("XUI_HOST")
-		os.Unsetenv("XUI_API_TOKEN")
-		os.Unsetenv("XUI_INBOUND_ID")
 		os.Unsetenv("TRIAL_RATE_LIMIT")
 		os.Unsetenv("SITE_URL")
 		os.Unsetenv("LOG_LEVEL")
@@ -449,9 +340,6 @@ func TestLoad_ValidTrialRateLimit_Min(t *testing.T) {
 func TestLoad_ValidTrialRateLimit_Max(t *testing.T) {
 	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
 	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
-	os.Setenv("XUI_HOST", "https://localhost:2053")
-	os.Setenv("XUI_API_TOKEN", "some-test-token")
-	os.Setenv("XUI_INBOUND_ID", "1")
 	os.Setenv("TRIAL_RATE_LIMIT", "100")
 	os.Setenv("SITE_URL", "https://example.com")
 	os.Setenv("LOG_LEVEL", "info")
@@ -460,9 +348,6 @@ func TestLoad_ValidTrialRateLimit_Max(t *testing.T) {
 	defer func() {
 		os.Unsetenv("TELEGRAM_BOT_TOKEN")
 		os.Unsetenv("TELEGRAM_ADMIN_ID")
-		os.Unsetenv("XUI_HOST")
-		os.Unsetenv("XUI_API_TOKEN")
-		os.Unsetenv("XUI_INBOUND_ID")
 		os.Unsetenv("TRIAL_RATE_LIMIT")
 		os.Unsetenv("SITE_URL")
 		os.Unsetenv("LOG_LEVEL")
@@ -477,17 +362,11 @@ func TestLoad_ValidTrialRateLimit_Max(t *testing.T) {
 func TestLoad_InvalidHeartbeatInterval(t *testing.T) {
 	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
 	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
-	os.Setenv("XUI_HOST", "https://localhost:2053")
-	os.Setenv("XUI_API_TOKEN", "some-test-token")
-	os.Setenv("XUI_INBOUND_ID", "1")
 	os.Setenv("HEARTBEAT_INTERVAL", "invalid")
 	os.Setenv("LOG_LEVEL", "info")
 	defer func() {
 		os.Unsetenv("TELEGRAM_BOT_TOKEN")
 		os.Unsetenv("TELEGRAM_ADMIN_ID")
-		os.Unsetenv("XUI_HOST")
-		os.Unsetenv("XUI_API_TOKEN")
-		os.Unsetenv("XUI_INBOUND_ID")
 		os.Unsetenv("HEARTBEAT_INTERVAL")
 		os.Unsetenv("LOG_LEVEL")
 	}()
@@ -539,9 +418,6 @@ func TestConfig_String(t *testing.T) {
 	cfg := &Config{
 		TelegramBotToken: "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 		TelegramAdminID:  123456,
-		Nodes: []Node{
-			{Name: "default", Active: true, XUIHost: "https://localhost:2053", XUIAPIToken: "some-token", XUIInboundIDs: "[1]"},
-		},
 	}
 
 	str := cfg.String()
@@ -580,66 +456,6 @@ func TestMaskURL_InvalidURL(t *testing.T) {
 	assert.Equal(t, ":///***", result, "maskURL() for invalid URL")
 }
 
-func TestConfig_Validate_EmptyXUIHost(t *testing.T) {
-	t.Parallel()
-
-	cfg := &Config{
-		TelegramBotToken: "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
-		TelegramAdminID:  123456,
-		Nodes: []Node{
-			{Name: "default", Active: true, XUIHost: "", XUIAPIToken: "some-token"},
-		},
-	}
-
-	err := cfg.validate()
-	assert.Error(t, err, "validate() should error on empty XUIHost")
-}
-
-func TestConfig_Validate_EmptyXUIAPIToken(t *testing.T) {
-	t.Parallel()
-
-	cfg := &Config{
-		TelegramBotToken: "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
-		TelegramAdminID:  123456,
-		Nodes: []Node{
-			{Name: "default", Active: true, XUIHost: "https://localhost:2053", XUIAPIToken: ""},
-		},
-	}
-
-	err := cfg.validate()
-	assert.Error(t, err, "validate() should error on empty XUIAPIToken")
-}
-
-func TestConfig_Validate_InvalidAdminID_Zero(t *testing.T) {
-	t.Parallel()
-
-	cfg := &Config{
-		TelegramBotToken: "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
-		TelegramAdminID:  0,
-		Nodes: []Node{
-			{Name: "default", Active: true, XUIHost: "https://localhost:2053", XUIAPIToken: "valid-token", XUIInboundIDs: "[1]"},
-		},
-	}
-
-	err := cfg.validate()
-	assert.Error(t, err, "validate() should error")
-	assert.Contains(t, err.Error(), "TELEGRAM_ADMIN_ID", "error should mention TELEGRAM_ADMIN_ID")
-}
-
-func TestConfig_Validate_InvalidInboundID_Zero(t *testing.T) {
-	t.Parallel()
-
-	cfg := &Config{
-		TelegramBotToken: "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
-		TelegramAdminID:  123456,
-		Nodes: []Node{
-			{Name: "default", Active: true, XUIHost: "https://localhost:2053", XUIAPIToken: "some-token", XUIInboundIDs: "[0]"},
-		},
-	}
-
-	err := cfg.validate()
-	assert.Error(t, err, "validate() should error on zero InboundID")
-}
 
 func TestConfig_Validate_Valid(t *testing.T) {
 	t.Parallel()
@@ -647,9 +463,6 @@ func TestConfig_Validate_Valid(t *testing.T) {
 	cfg := &Config{
 		TelegramBotToken: "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 		TelegramAdminID:  123456,
-		Nodes: []Node{
-			{Name: "default", Active: true, XUIHost: "https://localhost:2053", XUIAPIToken: "some-token", XUIInboundIDs: "[1]"},
-		},
 		HeartbeatInterval:  60,
 		LogLevel:           "info",
 		HealthCheckPort:    DefaultHealthCheckPort,
@@ -669,9 +482,6 @@ func TestConfig_Validate_SentryDSN_Valid(t *testing.T) {
 	cfg := &Config{
 		TelegramBotToken: "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 		TelegramAdminID:  123456,
-		Nodes: []Node{
-			{Name: "default", Active: true, XUIHost: "https://localhost:2053", XUIAPIToken: "some-token", XUIInboundIDs: "[1]"},
-		},
 		HeartbeatInterval:  60,
 		LogLevel:           "info",
 		SentryDSN:          "https://abc@sentry.io/123",
@@ -692,9 +502,6 @@ func TestConfig_Validate_SentryDSN_Invalid(t *testing.T) {
 	cfg := &Config{
 		TelegramBotToken: "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 		TelegramAdminID:  123456,
-		Nodes: []Node{
-			{Name: "default", Active: true, XUIHost: "https://localhost:2053", XUIAPIToken: "some-token", XUIInboundIDs: "[1]"},
-		},
 		SentryDSN: "invalid-dsn",
 	}
 
@@ -708,9 +515,6 @@ func TestConfig_Validate_WithSubPath(t *testing.T) {
 	cfg := &Config{
 		TelegramBotToken: "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 		TelegramAdminID:  123456,
-		Nodes: []Node{
-			{Name: "default", Active: true, XUIHost: "https://localhost:2053", XUIAPIToken: "some-token", XUIInboundIDs: "[1]"},
-		},
 		HeartbeatInterval:  60,
 		LogLevel:           "info",
 		HealthCheckPort:    DefaultHealthCheckPort,
@@ -730,9 +534,6 @@ func TestConfig_Validate_WithHeartbeatURL(t *testing.T) {
 	cfg := &Config{
 		TelegramBotToken: "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 		TelegramAdminID:  123456,
-		Nodes: []Node{
-			{Name: "default", Active: true, XUIHost: "https://localhost:2053", XUIAPIToken: "some-token", XUIInboundIDs: "[1]"},
-		},
 		HeartbeatInterval:  60,
 		LogLevel:           "info",
 		HeartbeatURL:       "https://health.example.com",
@@ -753,9 +554,6 @@ func TestConfig_Validate_InvalidTokenFormat(t *testing.T) {
 	cfg := &Config{
 		TelegramBotToken: "invalid-token-without-colon",
 		TelegramAdminID:  123456,
-		Nodes: []Node{
-			{Name: "default", Active: true, XUIHost: "https://localhost:2053", XUIAPIToken: "some-token", XUIInboundIDs: "[1]"},
-		},
 	}
 
 	err := cfg.validate()
@@ -768,9 +566,6 @@ func TestConfig_Validate_NegativeAdminID(t *testing.T) {
 	cfg := &Config{
 		TelegramBotToken: "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 		TelegramAdminID:  -1,
-		Nodes: []Node{
-			{Name: "default", Active: true, XUIHost: "https://localhost:2053", XUIAPIToken: "some-token", XUIInboundIDs: "[1]"},
-		},
 	}
 
 	err := cfg.validate()
@@ -783,9 +578,6 @@ func TestConfig_Validate_InvalidLogLevel(t *testing.T) {
 	cfg := &Config{
 		TelegramBotToken: "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 		TelegramAdminID:  123456,
-		Nodes: []Node{
-			{Name: "default", Active: true, XUIHost: "https://localhost:2053", XUIAPIToken: "some-token", XUIInboundIDs: "[1]"},
-		},
 		LogLevel: "invalid",
 	}
 
@@ -799,9 +591,6 @@ func TestConfig_Validate_InvalidHealthCheckPort_TooLow(t *testing.T) {
 	cfg := &Config{
 		TelegramBotToken: "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 		TelegramAdminID:  123456,
-		Nodes: []Node{
-			{Name: "default", Active: true, XUIHost: "https://localhost:2053", XUIAPIToken: "some-token", XUIInboundIDs: "[1]"},
-		},
 		HeartbeatInterval: 60,
 		LogLevel:          "info",
 		HealthCheckPort:   0,
@@ -817,9 +606,6 @@ func TestConfig_Validate_InvalidHealthCheckPort_TooHigh(t *testing.T) {
 	cfg := &Config{
 		TelegramBotToken: "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 		TelegramAdminID:  123456,
-		Nodes: []Node{
-			{Name: "default", Active: true, XUIHost: "https://localhost:2053", XUIAPIToken: "some-token", XUIInboundIDs: "[1]"},
-		},
 		HeartbeatInterval: 60,
 		LogLevel:          "info",
 		HealthCheckPort:   70000,
@@ -860,9 +646,6 @@ func TestMaskURL_ValidURL(t *testing.T) {
 func TestLoad_TrialDurationHours_TooLow(t *testing.T) {
 	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
 	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
-	os.Setenv("XUI_HOST", "https://localhost:2053")
-	os.Setenv("XUI_API_TOKEN", "some-test-token")
-	os.Setenv("XUI_INBOUND_ID", "1")
 	os.Setenv("LOG_LEVEL", "info")
 	os.Setenv("TRIAL_DURATION_HOURS", "0")
 	os.Setenv("GLOBAL_SUB_URL", "https://vpn.example.com/sub/")
@@ -870,9 +653,6 @@ func TestLoad_TrialDurationHours_TooLow(t *testing.T) {
 	defer func() {
 		os.Unsetenv("TELEGRAM_BOT_TOKEN")
 		os.Unsetenv("TELEGRAM_ADMIN_ID")
-		os.Unsetenv("XUI_HOST")
-		os.Unsetenv("XUI_API_TOKEN")
-		os.Unsetenv("XUI_INBOUND_ID")
 		os.Unsetenv("LOG_LEVEL")
 		os.Unsetenv("TRIAL_DURATION_HOURS")
 		os.Unsetenv("GLOBAL_SUB_URL")
@@ -886,9 +666,6 @@ func TestLoad_TrialDurationHours_TooLow(t *testing.T) {
 func TestLoad_TrialDurationHours_TooHigh(t *testing.T) {
 	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
 	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
-	os.Setenv("XUI_HOST", "https://localhost:2053")
-	os.Setenv("XUI_API_TOKEN", "some-test-token")
-	os.Setenv("XUI_INBOUND_ID", "1")
 	os.Setenv("LOG_LEVEL", "info")
 	os.Setenv("TRIAL_DURATION_HOURS", "200")
 	os.Setenv("GLOBAL_SUB_URL", "https://vpn.example.com/sub/")
@@ -896,9 +673,6 @@ func TestLoad_TrialDurationHours_TooHigh(t *testing.T) {
 	defer func() {
 		os.Unsetenv("TELEGRAM_BOT_TOKEN")
 		os.Unsetenv("TELEGRAM_ADMIN_ID")
-		os.Unsetenv("XUI_HOST")
-		os.Unsetenv("XUI_API_TOKEN")
-		os.Unsetenv("XUI_INBOUND_ID")
 		os.Unsetenv("LOG_LEVEL")
 		os.Unsetenv("TRIAL_DURATION_HOURS")
 		os.Unsetenv("GLOBAL_SUB_URL")
@@ -912,9 +686,6 @@ func TestLoad_TrialDurationHours_TooHigh(t *testing.T) {
 func TestLoad_TrialDurationHours_Valid(t *testing.T) {
 	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
 	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
-	os.Setenv("XUI_HOST", "https://localhost:2053")
-	os.Setenv("XUI_API_TOKEN", "some-test-token")
-	os.Setenv("XUI_INBOUND_ID", "1")
 	os.Setenv("LOG_LEVEL", "info")
 	os.Setenv("TRIAL_DURATION_HOURS", "24")
 	os.Setenv("GLOBAL_SUB_URL", "https://vpn.example.com/sub/")
@@ -922,9 +693,6 @@ func TestLoad_TrialDurationHours_Valid(t *testing.T) {
 	defer func() {
 		os.Unsetenv("TELEGRAM_BOT_TOKEN")
 		os.Unsetenv("TELEGRAM_ADMIN_ID")
-		os.Unsetenv("XUI_HOST")
-		os.Unsetenv("XUI_API_TOKEN")
-		os.Unsetenv("XUI_INBOUND_ID")
 		os.Unsetenv("LOG_LEVEL")
 		os.Unsetenv("TRIAL_DURATION_HOURS")
 		os.Unsetenv("GLOBAL_SUB_URL")
@@ -938,9 +706,6 @@ func TestLoad_TrialDurationHours_Valid(t *testing.T) {
 func TestLoad_TrialRateLimit_TooLow(t *testing.T) {
 	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
 	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
-	os.Setenv("XUI_HOST", "https://localhost:2053")
-	os.Setenv("XUI_API_TOKEN", "some-test-token")
-	os.Setenv("XUI_INBOUND_ID", "1")
 	os.Setenv("LOG_LEVEL", "info")
 	os.Setenv("TRIAL_RATE_LIMIT", "0")
 	os.Setenv("GLOBAL_SUB_URL", "https://vpn.example.com/sub/")
@@ -948,9 +713,6 @@ func TestLoad_TrialRateLimit_TooLow(t *testing.T) {
 	defer func() {
 		os.Unsetenv("TELEGRAM_BOT_TOKEN")
 		os.Unsetenv("TELEGRAM_ADMIN_ID")
-		os.Unsetenv("XUI_HOST")
-		os.Unsetenv("XUI_API_TOKEN")
-		os.Unsetenv("XUI_INBOUND_ID")
 		os.Unsetenv("LOG_LEVEL")
 		os.Unsetenv("TRIAL_RATE_LIMIT")
 		os.Unsetenv("GLOBAL_SUB_URL")
@@ -964,9 +726,6 @@ func TestLoad_TrialRateLimit_TooLow(t *testing.T) {
 func TestLoad_TrialRateLimit_TooHigh(t *testing.T) {
 	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
 	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
-	os.Setenv("XUI_HOST", "https://localhost:2053")
-	os.Setenv("XUI_API_TOKEN", "some-test-token")
-	os.Setenv("XUI_INBOUND_ID", "1")
 	os.Setenv("LOG_LEVEL", "info")
 	os.Setenv("TRIAL_RATE_LIMIT", "150")
 	os.Setenv("GLOBAL_SUB_URL", "https://vpn.example.com/sub/")
@@ -974,9 +733,6 @@ func TestLoad_TrialRateLimit_TooHigh(t *testing.T) {
 	defer func() {
 		os.Unsetenv("TELEGRAM_BOT_TOKEN")
 		os.Unsetenv("TELEGRAM_ADMIN_ID")
-		os.Unsetenv("XUI_HOST")
-		os.Unsetenv("XUI_API_TOKEN")
-		os.Unsetenv("XUI_INBOUND_ID")
 		os.Unsetenv("LOG_LEVEL")
 		os.Unsetenv("TRIAL_RATE_LIMIT")
 		os.Unsetenv("GLOBAL_SUB_URL")
@@ -990,9 +746,6 @@ func TestLoad_TrialRateLimit_TooHigh(t *testing.T) {
 func TestLoad_TrialRateLimit_Valid(t *testing.T) {
 	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
 	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
-	os.Setenv("XUI_HOST", "https://localhost:2053")
-	os.Setenv("XUI_API_TOKEN", "some-test-token")
-	os.Setenv("XUI_INBOUND_ID", "1")
 	os.Setenv("LOG_LEVEL", "info")
 	os.Setenv("TRIAL_RATE_LIMIT", "5")
 	os.Setenv("GLOBAL_SUB_URL", "https://vpn.example.com/sub/")
@@ -1000,9 +753,6 @@ func TestLoad_TrialRateLimit_Valid(t *testing.T) {
 	defer func() {
 		os.Unsetenv("TELEGRAM_BOT_TOKEN")
 		os.Unsetenv("TELEGRAM_ADMIN_ID")
-		os.Unsetenv("XUI_HOST")
-		os.Unsetenv("XUI_API_TOKEN")
-		os.Unsetenv("XUI_INBOUND_ID")
 		os.Unsetenv("LOG_LEVEL")
 		os.Unsetenv("TRIAL_RATE_LIMIT")
 		os.Unsetenv("GLOBAL_SUB_URL")
@@ -1016,9 +766,6 @@ func TestLoad_TrialRateLimit_Valid(t *testing.T) {
 func TestLoad_SiteURL_Invalid(t *testing.T) {
 	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
 	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
-	os.Setenv("XUI_HOST", "https://localhost:2053")
-	os.Setenv("XUI_API_TOKEN", "some-test-token")
-	os.Setenv("XUI_INBOUND_ID", "1")
 	os.Setenv("LOG_LEVEL", "info")
 	os.Setenv("SITE_URL", "not-a-valid-url")
 	os.Setenv("GLOBAL_SUB_URL", "https://vpn.example.com/sub/")
@@ -1026,9 +773,6 @@ func TestLoad_SiteURL_Invalid(t *testing.T) {
 	defer func() {
 		os.Unsetenv("TELEGRAM_BOT_TOKEN")
 		os.Unsetenv("TELEGRAM_ADMIN_ID")
-		os.Unsetenv("XUI_HOST")
-		os.Unsetenv("XUI_API_TOKEN")
-		os.Unsetenv("XUI_INBOUND_ID")
 		os.Unsetenv("LOG_LEVEL")
 		os.Unsetenv("SITE_URL")
 		os.Unsetenv("GLOBAL_SUB_URL")
@@ -1042,9 +786,6 @@ func TestLoad_SiteURL_Invalid(t *testing.T) {
 func TestLoad_SiteURL_MissingScheme(t *testing.T) {
 	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
 	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
-	os.Setenv("XUI_HOST", "https://localhost:2053")
-	os.Setenv("XUI_API_TOKEN", "some-test-token")
-	os.Setenv("XUI_INBOUND_ID", "1")
 	os.Setenv("LOG_LEVEL", "info")
 	os.Setenv("SITE_URL", "example.com")
 	os.Setenv("GLOBAL_SUB_URL", "https://vpn.example.com/sub/")
@@ -1052,9 +793,6 @@ func TestLoad_SiteURL_MissingScheme(t *testing.T) {
 	defer func() {
 		os.Unsetenv("TELEGRAM_BOT_TOKEN")
 		os.Unsetenv("TELEGRAM_ADMIN_ID")
-		os.Unsetenv("XUI_HOST")
-		os.Unsetenv("XUI_API_TOKEN")
-		os.Unsetenv("XUI_INBOUND_ID")
 		os.Unsetenv("LOG_LEVEL")
 		os.Unsetenv("SITE_URL")
 		os.Unsetenv("GLOBAL_SUB_URL")
@@ -1068,9 +806,6 @@ func TestLoad_SiteURL_MissingScheme(t *testing.T) {
 func TestLoad_SiteURL_Valid(t *testing.T) {
 	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
 	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
-	os.Setenv("XUI_HOST", "https://localhost:2053")
-	os.Setenv("XUI_API_TOKEN", "some-test-token")
-	os.Setenv("XUI_INBOUND_ID", "1")
 	os.Setenv("LOG_LEVEL", "info")
 	os.Setenv("SITE_URL", "https://vpn.example.com")
 	os.Setenv("GLOBAL_SUB_URL", "https://vpn.example.com/sub/")
@@ -1078,9 +813,6 @@ func TestLoad_SiteURL_Valid(t *testing.T) {
 	defer func() {
 		os.Unsetenv("TELEGRAM_BOT_TOKEN")
 		os.Unsetenv("TELEGRAM_ADMIN_ID")
-		os.Unsetenv("XUI_HOST")
-		os.Unsetenv("XUI_API_TOKEN")
-		os.Unsetenv("XUI_INBOUND_ID")
 		os.Unsetenv("LOG_LEVEL")
 		os.Unsetenv("SITE_URL")
 		os.Unsetenv("GLOBAL_SUB_URL")
@@ -1094,9 +826,6 @@ func TestLoad_SiteURL_Valid(t *testing.T) {
 func TestLoad_AllTrialSettings(t *testing.T) {
 	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
 	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
-	os.Setenv("XUI_HOST", "https://localhost:2053")
-	os.Setenv("XUI_API_TOKEN", "some-test-token")
-	os.Setenv("XUI_INBOUND_ID", "1")
 	os.Setenv("LOG_LEVEL", "info")
 	os.Setenv("TRIAL_DURATION_HOURS", "48")
 	os.Setenv("TRIAL_RATE_LIMIT", "10")
@@ -1106,9 +835,6 @@ func TestLoad_AllTrialSettings(t *testing.T) {
 	defer func() {
 		os.Unsetenv("TELEGRAM_BOT_TOKEN")
 		os.Unsetenv("TELEGRAM_ADMIN_ID")
-		os.Unsetenv("XUI_HOST")
-		os.Unsetenv("XUI_API_TOKEN")
-		os.Unsetenv("XUI_INBOUND_ID")
 		os.Unsetenv("LOG_LEVEL")
 		os.Unsetenv("TRIAL_DURATION_HOURS")
 		os.Unsetenv("TRIAL_RATE_LIMIT")
@@ -1129,9 +855,6 @@ func FuzzLoad_InvalidEnvValues(f *testing.F) {
 	baseEnvs := map[string]string{
 		"TELEGRAM_BOT_TOKEN": "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 		"TELEGRAM_ADMIN_ID":  "123456",
-		"XUI_HOST":           "https://localhost:2053",
-		"XUI_API_TOKEN":      "some-token",
-		"XUI_INBOUND_ID":     "1",
 		"LOG_LEVEL":          "info",
 		"GLOBAL_SUB_URL":     "https://vpn.example.com/sub/",
 	}
@@ -1155,7 +878,7 @@ func FuzzLoad_InvalidEnvValues(f *testing.F) {
 	}
 
 	f.Fuzz(func(t *testing.T, invalidVal string) {
-		for _, key := range []string{"TELEGRAM_ADMIN_ID", "XUI_INBOUND_ID", "HEARTBEAT_INTERVAL", "TRIAL_DURATION_HOURS", "TRIAL_RATE_LIMIT", "HEALTH_CHECK_PORT"} {
+		for _, key := range []string{"TELEGRAM_ADMIN_ID", "HEARTBEAT_INTERVAL", "TRIAL_DURATION_HOURS", "TRIAL_RATE_LIMIT", "HEALTH_CHECK_PORT"} {
 			os.Setenv(key, invalidVal)
 		}
 		for k, v := range baseEnvs {

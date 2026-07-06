@@ -90,6 +90,8 @@ func (s *SubscriptionService) trialNodes(ctx context.Context) ([]database.Node, 
 // returned in CreateResult so callers can update aggregate referral state.
 // VPN node access is provisioned asynchronously via the sync module.
 func (s *SubscriptionService) Create(ctx context.Context, telegramID int64, username, inviteCode string) (*CreateResult, error) {
+	username = XUIEmail(username, telegramID)
+
 	existing, err := s.db.GetByTelegramID(ctx, telegramID)
 	if err == nil {
 		if err := s.ensureSubscriptionNodes(ctx, existing); err != nil {
@@ -494,7 +496,15 @@ func (s *SubscriptionService) CreateTrial(ctx context.Context, inviteCode string
 		return nil, fmt.Errorf("xui client not found for node %d", node.ID)
 	}
 	inboundIDs := node.ResolveInboundIDs()
-	if _, err = client.AddClientWithID(ctx, inboundIDs, email, clientID, subID, trafficBytes, expiryTime, resetDays); err != nil {
+	if _, err = client.AddClientWithID(ctx, xui.ClientRequest{
+		InboundIDs:   inboundIDs,
+		Email:        email,
+		ClientID:     clientID,
+		SubID:        subID,
+		TrafficBytes: trafficBytes,
+		ExpiryTime:   expiryTime,
+		ResetDays:    resetDays,
+	}); err != nil {
 		return nil, fmt.Errorf("add trial client on node %d: %w", node.ID, err)
 	}
 
@@ -536,6 +546,8 @@ func (s *SubscriptionService) GetInviteByCode(ctx context.Context, code string) 
 // It updates the trial in the database, then upgrades the client in the
 // 3x-ui panel with proper traffic limits and expiry settings.
 func (s *SubscriptionService) BindTrial(ctx context.Context, subscriptionID string, telegramID int64, username string) (*database.Subscription, error) {
+	username = XUIEmail(username, telegramID)
+
 	sub, err := s.db.BindTrialSubscription(ctx, subscriptionID, telegramID, username)
 	if err != nil {
 		return nil, fmt.Errorf("bind trial subscription: %w", err)
@@ -577,7 +589,18 @@ func (s *SubscriptionService) BindTrial(ctx context.Context, subscriptionID stri
 		return sub, fmt.Errorf("xui client not found for trial node %d", node.ID)
 	}
 	inboundIDs := node.ResolveInboundIDs()
-	if err := client.UpdateClient(ctx, inboundIDs, currentEmail, sub.ClientID, email, sub.SubscriptionID, trafficBytes, expiryTime, resetDays, telegramID, comment); err != nil {
+	if err := client.UpdateClient(ctx, xui.ClientRequest{
+		InboundIDs:   inboundIDs,
+		CurrentEmail: currentEmail,
+		ClientID:     sub.ClientID,
+		Email:        email,
+		SubID:        sub.SubscriptionID,
+		TrafficBytes: trafficBytes,
+		ExpiryTime:   expiryTime,
+		ResetDays:    resetDays,
+		TgID:         telegramID,
+		Comment:      comment,
+	}); err != nil {
 		return sub, fmt.Errorf("update trial client on node %d: %w", node.ID, err)
 	}
 
@@ -800,6 +823,8 @@ func (s *SubscriptionService) GetAllReferralCounts(ctx context.Context) (map[int
 
 // GetOrCreateSubscription returns an existing subscription or creates a new free-plan one with sync.
 func (s *SubscriptionService) GetOrCreateSubscription(ctx context.Context, telegramID int64, username, inviteCode string) (*database.Subscription, error) {
+	username = XUIEmail(username, telegramID)
+
 	existing, err := s.db.GetByTelegramID(ctx, telegramID)
 	if err == nil {
 		if err := s.ensureSubscriptionNodes(ctx, existing); err != nil {

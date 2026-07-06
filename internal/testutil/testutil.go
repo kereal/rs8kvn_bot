@@ -99,7 +99,6 @@ type DatabaseService struct {
 	GetAllReferralCountsFunc                    func(ctx context.Context) (map[int64]int64, error)
 	CreateTrialSubscriptionFunc                 func(ctx context.Context, inviteCode, subscriptionID, clientID string, expiryTime time.Time) (*database.Subscription, error)
 	ListNodesFunc                               func(ctx context.Context) ([]database.Node, error)
-	IsNodesEmptyFunc                            func(ctx context.Context) (bool, error)
 	GetNodesByPlanNameFunc                      func(ctx context.Context, planName string) ([]database.Node, error)
 	GetPlansBySourceIDFunc                      func(ctx context.Context, sourceID uint) ([]database.Plan, error)
 	GetPlanByNameFunc                           func(ctx context.Context, name string) (*database.Plan, error)
@@ -111,7 +110,6 @@ type DatabaseService struct {
 	AddSourceToPlanFunc                         func(ctx context.Context, planID, sourceID uint) error
 	RemoveSourceFromPlanFunc                    func(ctx context.Context, planID, sourceID uint) error
 	SeedDefaultDataFunc                         func(ctx context.Context) error
-	SeedDefaultNodeFunc                         func(ctx context.Context, name, xuiHost, xuiAPIToken string, xuiInboundIDs []int, subURL string) error
 	GetActiveByPlanIDFunc                       func(ctx context.Context, planID uint) ([]database.Product, error)
 	GetProductByIDFunc                          func(ctx context.Context, id uint) (*database.Product, error)
 	GetNodeByIDFunc                             func(ctx context.Context, id uint) (*database.Node, error)
@@ -515,23 +513,6 @@ func (m *DatabaseService) ListNodes(ctx context.Context) ([]database.Node, error
 	}, nil
 }
 
-func (m *DatabaseService) IsNodesEmpty(ctx context.Context) (bool, error) {
-	if m.IsNodesEmptyFunc != nil {
-		return m.IsNodesEmptyFunc(ctx)
-	}
-	return false, nil
-}
-
-func (m *DatabaseService) SeedDefaultNode(ctx context.Context, name, xuiHost, xuiAPIToken string, xuiInboundIDs []int, subURL string) error {
-	if m.SeedDefaultDataFunc != nil {
-		return m.SeedDefaultDataFunc(ctx)
-	}
-	if m.SeedDefaultNodeFunc != nil {
-		return m.SeedDefaultNodeFunc(ctx, name, xuiHost, xuiAPIToken, xuiInboundIDs, subURL)
-	}
-	return nil
-}
-
 func (m *DatabaseService) SeedDefaultData(ctx context.Context) error {
 	if m.SeedDefaultDataFunc != nil {
 		return m.SeedDefaultDataFunc(ctx)
@@ -849,8 +830,8 @@ type XUIClient struct {
 	mu                      sync.Mutex
 	PingFunc                func(ctx context.Context) error
 	AddClientFunc           func(ctx context.Context, inboundIDs []int, email string, trafficBytes int64, expiryTime time.Time) (*xui.ClientConfig, error)
-	AddClientWithIDFunc     func(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error)
-	UpdateClientFunc        func(ctx context.Context, inboundIDs []int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, resetDays int, tgID int64, comment string) error
+	AddClientWithIDFunc     func(ctx context.Context, req xui.ClientRequest) (*xui.ClientConfig, error)
+	UpdateClientFunc        func(ctx context.Context, req xui.ClientRequest) error
 	DeleteClientFunc        func(ctx context.Context, email string) error
 	GetClientTrafficFunc    func(ctx context.Context, email string) (*xui.ClientTraffic, error)
 	GetSubscriptionLinkFunc func(host, subID, subPath string) string
@@ -886,29 +867,29 @@ func (m *XUIClient) AddClient(ctx context.Context, inboundIDs []int, email strin
 	}, nil
 }
 
-func (m *XUIClient) AddClientWithID(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
+func (m *XUIClient) AddClientWithID(ctx context.Context, req xui.ClientRequest) (*xui.ClientConfig, error) {
 	m.mu.Lock()
 	m.AddClientWithIDCalled = true
 	m.mu.Unlock()
 	if m.AddClientWithIDFunc != nil {
-		return m.AddClientWithIDFunc(ctx, inboundIDs, email, clientID, subID, trafficBytes, expiryTime, resetDays)
+		return m.AddClientWithIDFunc(ctx, req)
 	}
 	return &xui.ClientConfig{
-		ID:        clientID,
-		Email:     email,
-		TotalGB:   trafficBytes,
-		ExpiresAt: expiryTime.UnixMilli(),
+		ID:        req.ClientID,
+		Email:     req.Email,
+		TotalGB:   req.TrafficBytes,
+		ExpiresAt: req.ExpiryTime.UnixMilli(),
 		Enable:    true,
-		SubID:     subID,
+		SubID:     req.SubID,
 	}, nil
 }
 
-func (m *XUIClient) UpdateClient(ctx context.Context, inboundIDs []int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, resetDays int, tgID int64, comment string) error {
+func (m *XUIClient) UpdateClient(ctx context.Context, req xui.ClientRequest) error {
 	m.mu.Lock()
 	m.UpdateClientCalled = true
 	m.mu.Unlock()
 	if m.UpdateClientFunc != nil {
-		return m.UpdateClientFunc(ctx, inboundIDs, currentEmail, clientID, email, subID, trafficBytes, expiryTime, resetDays, tgID, comment)
+		return m.UpdateClientFunc(ctx, req)
 	}
 	return nil
 }

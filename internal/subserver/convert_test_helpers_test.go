@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/kereal/rs8kvn_bot/internal/logger"
+	"github.com/kereal/rs8kvn_bot/internal/utils"
 
 	"go.uber.org/zap"
 )
@@ -14,7 +15,7 @@ func ConvertJSONToShareLinks(body []byte) ([]string, error) {
 	if err := json.Unmarshal(body, &raw); err != nil {
 		logger.Error("Failed to unmarshal subscription JSON",
 			zap.Error(err),
-			zap.String("body_preview", truncateString(string(body), 200)))
+			zap.String("body_preview", utils.TruncateString(string(body), 200)))
 		return nil, fmt.Errorf("invalid JSON: %w", err)
 	}
 
@@ -26,7 +27,7 @@ func ConvertJSONToShareLinks(body []byte) ([]string, error) {
 			if err != nil {
 				logger.Error("Failed to marshal JSON array item",
 					zap.Error(err),
-					zap.String("item_preview", truncateString(fmt.Sprintf("%v", item), 200)))
+					zap.String("item_preview", utils.TruncateString(fmt.Sprintf("%v", item), 200)))
 				return nil, fmt.Errorf("marshal JSON array item: %w", err)
 			}
 			items = append(items, rawItem)
@@ -36,14 +37,14 @@ func ConvertJSONToShareLinks(body []byte) ([]string, error) {
 		if err != nil {
 			logger.Error("Failed to marshal JSON object",
 				zap.Error(err),
-				zap.String("object_preview", truncateString(fmt.Sprintf("%v", v), 200)))
+				zap.String("object_preview", utils.TruncateString(fmt.Sprintf("%v", v), 200)))
 			return nil, fmt.Errorf("marshal JSON object: %w", err)
 		}
 		items = append(items, rawMarshalled)
 	default:
 		logger.Error("Unexpected JSON type in subscription body",
 			zap.String("type", fmt.Sprintf("%T", raw)),
-			zap.String("body_preview", truncateString(string(body), 200)))
+			zap.String("body_preview", utils.TruncateString(string(body), 200)))
 		return nil, fmt.Errorf("unexpected JSON type: %T", raw)
 	}
 

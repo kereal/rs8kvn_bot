@@ -1,6 +1,6 @@
 # Security Policy — rs8kvn_bot
 
-**Version:** 3.0.0  
+**Version:** 2.3.0  
 **Last updated:** 2026-07-02
 
 ---
@@ -53,7 +53,6 @@ Instead, contact us privately:
 
 ### 2. Input Validation
 
-- **XUI_SUB_PATH:** Regex validation `^[a-zA-Z0-9_-]+$` — no path traversal
 - **Extra servers file:** Path traversal checks (`..`, system dirs) before opening
 - **URLs (S3):** `validateURL()` restricts schemes to `http` and `https` only — prevents `file://`, `gopher://`, and other schemes that could enable SSRF
 - **HTTPS enforcement:** All sensitive VPN panel endpoints (`nodes.host`) require HTTPS
@@ -79,7 +78,7 @@ Instead, contact us privately:
 - **Backups:** Daily rotation (14 days), same directory (consider off-site)
 - **Logging:** Sensitive data masked in `Config.String()`; no secrets in logs
 - **Secrets:** Stored in `.env` (not in code), file permissions recommended `600`
-- **Node API tokens:** Stored in `nodes` table (encrypted at rest by DB), seeded from env on first run then managed via DB
+- **Node API tokens:** Stored and managed only via `nodes.api_token` in the database (no env-var dependency)
 
 ### 5. Error Handling
 
@@ -109,9 +108,9 @@ Instead, contact us privately:
 #### Token Lifecycle
 
 1. **Creation:** Generate token in panel (3x-ui: Security settings → API Token; proxman: equivalent). Copy immediately — token is shown only once.
-2. **Storage:** Stored in `nodes.api_token` in DB. Seeded from env (`XUI_API_TOKEN` for the initial node) on first run. `.env` file permissions must be `600`.
+2. **Storage:** Stored in `nodes.api_token` in DB. `.env` file permissions must be `600` if used for other secrets.
 3. **Usage:** Sent as `Authorization: Bearer $token` header on every API call.
-4. **Rotation:** Rotate every 90 days. Generate new token in panel, update via DB or re-seed from env, restart bot.
+4. **Rotation:** Rotate every 90 days. Generate new token in panel, update `nodes.api_token` in DB, restart bot.
 5. **Revocation:** Generate a new token in panel — the old token is immediately invalidated.
 
 #### Audit & Monitoring
@@ -208,7 +207,7 @@ Instead, contact us privately:
 
 1. Panel is separate system — follow its security procedures
 2. **Revoke the panel API token** immediately in panel Security settings → generate a new one
-3. Update `nodes.api_token` in DB (or re-seed from env) and restart the bot
+3. Update `nodes.api_token` in DB and restart the bot
 4. Check panel logs for unauthorized client modifications
 5. Audit all recent changes made via the compromised token (panel access logs)
 
@@ -230,11 +229,8 @@ If subscriber data (Telegram IDs, usernames, subscription links) is exposed:
 TELEGRAM_BOT_TOKEN=1234567890:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi
 TELEGRAM_ADMIN_ID=123456789
 
-# VPN Panel (seed data — used on first run to populate the nodes table)
-# After first run, nodes are managed via the database.
-XUI_HOST=https://vpn.example.com:2053
-XUI_API_TOKEN=your_xui_api_token_here  # Seed-only: moved to nodes table after first run
-XUI_INBOUND_ID=1                       # Seed-only: singular, populates nodes.inbound_ids JSON array
+# VPN Panel configuration is managed via the `nodes` table in the database.
+# Add nodes via SQL or admin commands after first startup.
 
 # Subscription server (REQUIRED in v3.0+)
 GLOBAL_SUB_URL=https://sub.example.com  # Public HTTPS URL for subscription links
@@ -258,7 +254,7 @@ TRIAL_DURATION_HOURS=3
 TRIAL_RATE_LIMIT=3
 ```
 
-> **Note:** In v3.0+, `XUI_HOST`, `XUI_API_TOKEN`, and `XUI_INBOUND_ID` are no longer read from env at runtime (except for initial DB seeding on first run). Node configuration lives in the `nodes` table (`host`, `api_token`, `inbound_ids` JSON array, `type`, `subscription_url`). `GLOBAL_SUB_URL` is required and replaces the old per-node subscription path construction.
+> **Note:** Node configuration lives in the `nodes` table (`host`, `api_token`, `inbound_ids` JSON array, `type`, `subscription_url`), managed via the database. `GLOBAL_SUB_URL` is required and provides the subscription URL prefix.
 
 **Docker run:**
 ```bash
@@ -324,7 +320,7 @@ go mod verify
 
 **Past audits:**
 - 2026-04-17: Internal audit (SEC-01..SEC-12) — see `docs/review-sf35.md`
-- 2026-07-02: Pre-release audit (v3.0.0) — S2 (X-Forwarded-For spoofing: `getClientIP` now reads rightmost IP from trusted proxy), S3 (URL scheme restriction: `validateURL` now restricts to http/https only, preventing SSRF via `file://`/`gopher://`), A1 (web→bot dependency break: `web` package no longer imports `bot`, reducing attack surface)
+- 2026-07-02: Pre-release audit (v2.3.0) — S2 (X-Forwarded-For spoofing: `getClientIP` now reads rightmost IP from trusted proxy), S3 (URL scheme restriction: `validateURL` now restricts to http/https only, preventing SSRF via `file://`/`gopher://`), A1 (web→bot dependency break: `web` package no longer imports `bot`, reducing attack surface)
 
 **Future audits:** Schedule annual external pentest if handling >10k users.
 

@@ -76,15 +76,10 @@ func TestSmoke_BinaryStartup(t *testing.T) {
 	}
 
 	dir := t.TempDir()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
 
 	cmd := startBinary(t, []string{
-		"TELEGRAM_BOT_TOKEN=test_token_1234567:ABCdefGHIjklMNOpqrstuVWX",
+		"TELEGRAM_BOT_TOKEN=test_token_1234567:ABCdefGHIjklMNOpqrsTUVwWX",
 		"TELEGRAM_ADMIN_ID=0",
-		"XUI_HOST=http://localhost:2053",
-		"XUI_API_TOKEN=some-token",
-		"XUI_INBOUND_ID=1",
 	}, "DATABASE_PATH="+filepath.Join(dir, "test.db"),
 		"LOG_FILE_PATH="+filepath.Join(dir, "test.log"),
 		"LOG_LEVEL=debug",
@@ -112,9 +107,6 @@ func TestSmoke_PanicRecovery(t *testing.T) {
 			envVars: []string{
 				"TELEGRAM_BOT_TOKEN=test_token_1234567:ABCdefGHIjklMNOpqrstuVWX",
 				"TELEGRAM_ADMIN_ID=0",
-				"XUI_HOST=http://localhost:2053",
-				"XUI_API_TOKEN=some-token",
-				"XUI_INBOUND_ID=1",
 			},
 			hasPanic: false,
 		},
@@ -139,17 +131,13 @@ func TestSmoke_ConfigValidation(t *testing.T) {
 			name: "missing_token",
 			envVars: []string{
 				"TELEGRAM_ADMIN_ID=0",
-				"XUI_HOST=http://localhost:2053",
-				"XUI_API_TOKEN=some-token",
-				"XUI_INBOUND_ID=1",
 			},
 			wantErr: true,
 		},
 		{
-			name: "missing_xui",
+			name: "invalid_token",
 			envVars: []string{
 				"TELEGRAM_BOT_TOKEN=test",
-				"XUI_INBOUND_ID=1",
 			},
 			wantErr: true,
 		},

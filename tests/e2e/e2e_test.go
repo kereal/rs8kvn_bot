@@ -103,7 +103,10 @@ func setupE2EEnv(t *testing.T) *e2eTestEnv {
 	}
 
 	ctx := context.Background()
-	require.NoError(t, db.SeedDefaultNode(ctx, "main", "https://panel.example.com", "test-api-token", []int{1}, ""), "seed test node")
+	node := &database.Node{Name: "main", IsActive: true, Host: "https://panel.example.com", APIToken: "test-api-token", Type: database.NodeType3xUI, InboundIDs: "[1]"}
+	require.NoError(t, db.CreateNode(ctx, node), "create test node")
+	require.NoError(t, db.LinkNodeToPlan(ctx, "trial", node.ID), "link node to trial plan")
+	require.NoError(t, db.LinkNodeToPlan(ctx, "free", node.ID), "link node to free plan")
 	xuiClients := map[uint]interfaces.XUIClient{1: mockXUI}
 	nodes := e2eNodes("https://panel.example.com")
 	subService := service.NewSubscriptionService(db, xuiClients, nil, nodes, cfg)
