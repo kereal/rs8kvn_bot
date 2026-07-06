@@ -143,10 +143,10 @@ internal/
 │   └── templates/           # trial.html, error.html
 ├── subserver/         # Subscription server (aggregation + proxy)
 │   ├── service.go           # Hot reload loop (5 min)
-│   ├── proxy.go             # Fetch+XUI+merge logic
+│   ├── fetch.go             # Fetch from upstream nodes + format detection (JSON/Clash/Base64/Plain)
 │   ├── subscription_handler.go # Subscription request handler
 │   ├── subscription_helpers.go # Header filtering (FilterHeaders)
-│   ├── cache.go             # TTL cache (240s)
+│   ├── clash.go             # Clash YAML → serverConfig normaliser
 │   ├── access_log.go        # Optional async /sub/{id} access log
 │   └── servers.go           # Load extra config file
 ├── service/          # Business logic

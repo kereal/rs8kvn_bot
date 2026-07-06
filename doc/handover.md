@@ -165,8 +165,8 @@ For each active node:
   ├─ Build sourceURL:
   │   • 3x-ui/proxman: subscription_url + "/" + subID
   │   • fetch: subscription_url as-is
-  ├─ FetchFromXUI(ctx, sourceURL) — HTTP GET
-  ├─ DetectFormat (JSON / Base64 / Plain)
+  ├─ FetchFromSource(ctx, sourceURL) — HTTP GET
+  ├─ DetectFormat (JSON / Clash / Base64 / Plain)
   └─ Aggregate subscription-userinfo headers
         │
         ▼
