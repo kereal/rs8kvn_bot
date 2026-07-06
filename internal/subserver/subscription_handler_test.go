@@ -344,6 +344,145 @@ func TestHandleSubscription_MultipleNodes_AggregatesResponses(t *testing.T) {
 	assert.Contains(t, bodyStr, "vless://uuid2@")
 }
 
+// clashBody is a minimal Clash/Mihomo config used by the priority tests.
+const clashBody = `proxies:
+  - name: "DE_3"
+    type: vless
+    server: 46.101.238.160
+    port: 443
+    uuid: 0970324b-8c61-4ae7-8c3f-385a6f1e17e4
+    network: ws
+    ws-opts:
+      path: "/"
+      headers:
+        Host: vpn47.cc.cd
+    tls: true
+    servername: vpn47.cc.cd
+    client-fingerprint: chrome
+`
+
+func newClashServer() *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/yaml")
+		_, _ = w.Write([]byte(clashBody))
+	}))
+}
+
+// Clash-only must be returned as base64-encoded share links, not a JSON array.
+func TestHandleSubscription_ClashOnly_ReturnsBase64Links(t *testing.T) {
+	t.Parallel()
+	ts := newClashServer()
+	defer ts.Close()
+
+	mockDB := testutil.NewDatabaseService()
+	svc := newTestSubSvc(t)
+	ctx := context.Background()
+
+	mockDB.GetWithPlanAndNodesFunc = func(ctx context.Context, subID string) (*database.SubscriptionFull, error) {
+		return &database.SubscriptionFull{
+			Subscription: database.Subscription{ID: 7, SubscriptionID: "sub-clash", Status: "active"},
+			Plan:         database.Plan{ID: 1, Name: "test", TrafficLimit: 0},
+			Nodes: []database.Node{
+				{ID: 1, Name: "node1", IsActive: true, SubscriptionURL: ts.URL + "/"},
+			},
+		}, nil
+	}
+	mockDB.UpdateDevicesFunc = func(ctx context.Context, id uint, devicesJSON string) error { return nil }
+	mockDB.UpdateIPsFunc = func(ctx context.Context, id uint, ipsJSON string) error { return nil }
+
+	result, err := HandleSubscription(ctx, mockDB, svc, "sub-clash", "1.2.3.4", nil)
+	require.NoError(t, err)
+	require.NotNil(t, result.Body)
+
+	decoded, decErr := base64.StdEncoding.DecodeString(string(result.Body))
+	require.NoError(t, decErr)
+	assert.NotEmpty(t, decoded)
+	// Must NOT be a JSON array of serverConfig objects.
+	assert.False(t, strings.HasPrefix(strings.TrimSpace(string(decoded)), "["),
+		"clash-only must not return a raw serverConfig array")
+	assert.Contains(t, string(decoded), "vless://0970324b-8c61-4ae7-8c3f-385a6f1e17e4@46.101.238.160:443")
+}
+
+// Any Clash node mixed with another format forces the base64/link output.
+func TestHandleSubscription_JSONAndClash_ReturnsBase64(t *testing.T) {
+	t.Parallel()
+	tsClash := newClashServer()
+	defer tsClash.Close()
+
+	jsonBody := `[{"type":"vless","address":"9.9.9.9","port":443,"uuid":"aaaaaaaa-8c61-4ae7-8c3f-385a6f1e17e4","remark":"J"}]`
+	tsJSON := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(jsonBody))
+	}))
+	defer tsJSON.Close()
+
+	mockDB := testutil.NewDatabaseService()
+	svc := newTestSubSvc(t)
+	ctx := context.Background()
+
+	mockDB.GetWithPlanAndNodesFunc = func(ctx context.Context, subID string) (*database.SubscriptionFull, error) {
+		return &database.SubscriptionFull{
+			Subscription: database.Subscription{ID: 8, SubscriptionID: "sub-mix", Status: "active"},
+			Plan:         database.Plan{ID: 1, Name: "test", TrafficLimit: 0},
+			Nodes: []database.Node{
+				{ID: 1, Name: "json", IsActive: true, SubscriptionURL: tsJSON.URL + "/"},
+				{ID: 2, Name: "clash", IsActive: true, SubscriptionURL: tsClash.URL + "/"},
+			},
+		}, nil
+	}
+	mockDB.UpdateDevicesFunc = func(ctx context.Context, id uint, devicesJSON string) error { return nil }
+	mockDB.UpdateIPsFunc = func(ctx context.Context, id uint, ipsJSON string) error { return nil }
+
+	result, err := HandleSubscription(ctx, mockDB, svc, "sub-mix", "1.2.3.4", nil)
+	require.NoError(t, err)
+	require.NotNil(t, result.Body)
+
+	decoded, decErr := base64.StdEncoding.DecodeString(string(result.Body))
+	require.NoError(t, decErr)
+	bodyStr := string(decoded)
+	assert.Contains(t, bodyStr, "vless://0970324b-8c61-4ae7-8c3f-385a6f1e17e4@46.101.238.160:443")
+	assert.Contains(t, bodyStr, "vless://aaaaaaaa-8c61-4ae7-8c3f-385a6f1e17e4@9.9.9.9:443")
+}
+
+// Base64 + Clash also forces the base64/link output.
+func TestHandleSubscription_Base64AndClash_ReturnsBase64(t *testing.T) {
+	t.Parallel()
+	tsClash := newClashServer()
+	defer tsClash.Close()
+
+	link := "trojan://pass@8.8.8.8:443?security=tls#T"
+	tsB64 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(base64.StdEncoding.EncodeToString([]byte(link))))
+	}))
+	defer tsB64.Close()
+
+	mockDB := testutil.NewDatabaseService()
+	svc := newTestSubSvc(t)
+	ctx := context.Background()
+
+	mockDB.GetWithPlanAndNodesFunc = func(ctx context.Context, subID string) (*database.SubscriptionFull, error) {
+		return &database.SubscriptionFull{
+			Subscription: database.Subscription{ID: 9, SubscriptionID: "sub-b64c", Status: "active"},
+			Plan:         database.Plan{ID: 1, Name: "test", TrafficLimit: 0},
+			Nodes: []database.Node{
+				{ID: 1, Name: "b64", IsActive: true, SubscriptionURL: tsB64.URL + "/"},
+				{ID: 2, Name: "clash", IsActive: true, SubscriptionURL: tsClash.URL + "/"},
+			},
+		}, nil
+	}
+	mockDB.UpdateDevicesFunc = func(ctx context.Context, id uint, devicesJSON string) error { return nil }
+	mockDB.UpdateIPsFunc = func(ctx context.Context, id uint, ipsJSON string) error { return nil }
+
+	result, err := HandleSubscription(ctx, mockDB, svc, "sub-b64c", "1.2.3.4", nil)
+	require.NoError(t, err)
+	require.NotNil(t, result.Body)
+
+	decoded, decErr := base64.StdEncoding.DecodeString(string(result.Body))
+	require.NoError(t, decErr)
+	bodyStr := string(decoded)
+	assert.Contains(t, bodyStr, "trojan://pass@8.8.8.8:443")
+	assert.Contains(t, bodyStr, "vless://0970324b-8c61-4ae7-8c3f-385a6f1e17e4@46.101.238.160:443")
+}
+
 func TestHandleSubscription_FetchNode_UsesURLDirectly(t *testing.T) {
 	t.Parallel()
 

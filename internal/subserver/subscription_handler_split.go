@@ -227,13 +227,14 @@ func aggregateFormat(agg *aggregatedSources, format Format, body []byte, src dat
 		}
 		agg.jsonConfigs = append(agg.jsonConfigs, configs...)
 	case FormatClash:
+		// Clash is not a pure-JSON source, so force the base64/link output path.
+		agg.allJSON = false
 		configs, parseErr := ExtractClashConfigs(body)
 		if parseErr != nil {
 			logger.Error("Failed to parse Clash configs from node",
 				zap.String("sub_id", subID),
 				zap.String("source", src.Name),
 				zap.Error(parseErr))
-			agg.allJSON = false
 			return
 		}
 		agg.jsonConfigs = append(agg.jsonConfigs, configs...)
@@ -275,7 +276,8 @@ func buildResponse(subSvc *Service, cacheKey string, agg aggregatedSources, traf
 		}
 	}
 
-	// Pure-JSON output: marshal all raw configs into a JSON array response.
+	// Pure-JSON output: marshal all raw serverConfig objects into a JSON
+	// array response.
 	if agg.allJSON && len(agg.jsonConfigs) > 0 {
 		responseBody, marshalErr := json.Marshal(agg.jsonConfigs)
 		if marshalErr != nil {
