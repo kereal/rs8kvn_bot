@@ -217,6 +217,38 @@ func TestSubscriptionService_Create_EmptyInviteCodeIsNoop(t *testing.T) {
 	assert.Equal(t, int64(0), result.ReferrerTGID)
 }
 
+func TestSubscriptionService_Create_FillsFallbackUsername(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{}
+
+	var gotSub *database.Subscription
+	db := &testutil.DatabaseService{
+		GetPlanByNameFunc: func(ctx context.Context, name string) (*database.Plan, error) {
+			return &database.Plan{ID: 1, Name: database.FreePlanName, TrafficLimit: 1073741824}, nil
+		},
+		CreateSubscriptionFunc: func(ctx context.Context, sub *database.Subscription, inviteCode string) error {
+			gotSub = sub
+			sub.ID = 1
+			return nil
+		},
+		GetNodesByPlanIDFunc: func(ctx context.Context, planID uint) ([]database.Node, error) {
+			return nil, nil
+		},
+		GetBySubscriptionIDFunc: func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
+			return nil, nil
+		},
+	}
+
+	svc := NewSubscriptionService(db, nil, nil, nil, cfg)
+	result, err := svc.Create(context.Background(), 123456, "", "")
+
+	assert.NoError(t, err)
+	require.NotNil(t, gotSub)
+	assert.Equal(t, "tgId_123456", gotSub.Username)
+	assert.Equal(t, "tgId_123456", result.Subscription.Username)
+}
+
 func TestSubscriptionService_GetByTelegramID_Success(t *testing.T) {
 	t.Parallel()
 
