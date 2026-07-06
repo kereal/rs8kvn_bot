@@ -143,7 +143,7 @@ func HandleSubscription(ctx context.Context, db interfaces.DatabaseService, subS
 
 		// Fetch the upstream subscription response from the source.
 		fetchStart := time.Now()
-		xuiResp, err := FetchFromXUI(ctx, sourceURL)
+		srcResp, err := FetchFromSource(ctx, sourceURL)
 		fetchDuration := time.Since(fetchStart).Seconds()
 		if err != nil {
 			metrics.SubserverSourceFetchTotal.WithLabelValues("error", "unknown").Inc()
@@ -156,10 +156,10 @@ func HandleSubscription(ctx context.Context, db interfaces.DatabaseService, subS
 			continue
 		}
 
-		body := xuiResp.Body
-		xuiHeaders := xuiResp.Headers
-		if xuiHeaders == nil {
-			xuiHeaders = make(map[string]string)
+		body := srcResp.Body
+		srcHeaders := srcResp.Headers
+		if srcHeaders == nil {
+			srcHeaders = make(map[string]string)
 		}
 
 		// Detect response format and log source details.
@@ -171,15 +171,15 @@ func HandleSubscription(ctx context.Context, db interfaces.DatabaseService, subS
 			zap.String("source", src.Name),
 			zap.String("format", format.String()),
 			zap.Int("body_size", len(body)),
-			zap.Int("headers_count", len(xuiHeaders)),
+			zap.Int("headers_count", len(srcHeaders)),
 		)
 
 		// Capture headers from the first successful source for replay.
-		if xuiHeaders != nil {
+		if srcHeaders != nil {
 			if firstSourceHeaders == nil {
-				firstSourceHeaders = xuiHeaders
+				firstSourceHeaders = srcHeaders
 			}
-			if expireVal, ok := xuiHeaders["subscription-userinfo"]; ok {
+			if expireVal, ok := srcHeaders["subscription-userinfo"]; ok {
 				expire := ParseExpireFromUserInfo(expireVal)
 				if expire != "" && (firstExpire == "" || expire < firstExpire) {
 					firstExpire = expire
@@ -188,8 +188,8 @@ func HandleSubscription(ctx context.Context, db interfaces.DatabaseService, subS
 		}
 
 		// Aggregate usage counters across all sources.
-		totalUpload += ParseUserInfoValue(xuiHeaders, "upload")
-		totalDownload += ParseUserInfoValue(xuiHeaders, "download")
+		totalUpload += ParseUserInfoValue(srcHeaders, "upload")
+		totalDownload += ParseUserInfoValue(srcHeaders, "download")
 
 		switch format {
 		case FormatJSON:
@@ -198,6 +198,19 @@ func HandleSubscription(ctx context.Context, db interfaces.DatabaseService, subS
 			configs, parseErr := ExtractJSONConfigs(body)
 			if parseErr != nil {
 				logger.Error("Failed to parse JSON configs from node",
+					zap.String("sub_id", subID),
+					zap.String("source", src.Name),
+					zap.Error(parseErr))
+				allJSON = false
+				continue
+			}
+			allJSONConfigs = append(allJSONConfigs, configs...)
+		case FormatClash:
+			// Clash YAML configs are normalised to serverConfig JSON and
+			// treated like JSON configs for pure-JSON or mixed-mode output.
+			configs, parseErr := ExtractClashConfigs(body)
+			if parseErr != nil {
+				logger.Error("Failed to parse Clash configs from node",
 					zap.String("sub_id", subID),
 					zap.String("source", src.Name),
 					zap.Error(parseErr))

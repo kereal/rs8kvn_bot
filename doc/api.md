@@ -191,7 +191,7 @@ X-Frame-Options: DENY
 
 ### `GET /sub/{subID}`
 
-Returns the merged subscription configuration aggregated from **all active nodes** for the subscription. This is a multi-node flow: the subserver (`internal/subserver/`) fetches the subscription's plan and active node sources from the database, requests each node's subscription URL in parallel, detects the response format (JSON / Base64 / plain), converts JSON server configs to share links, aggregates `subscription-userinfo` headers across sources (earliest expiry, summed upload/download), and returns the combined body.
+Returns the merged subscription configuration aggregated from **all active nodes** for the subscription. This is a multi-node flow: the subserver (`internal/subserver/`) fetches the subscription's plan and active node sources from the database, requests each node's subscription URL in parallel, detects the response format (JSON / Clash YAML / Base64 / plain), normalises Clash YAML and JSON server configs to share links, aggregates `subscription-userinfo` headers across sources (earliest expiry, summed upload/download), and returns the combined body.
 
 **Path Parameters:**
 | Parameter | Description |
@@ -205,7 +205,7 @@ Returns the merged subscription configuration aggregated from **all active nodes
 2. On cache miss, load the subscription with its plan and active node sources (`db.GetWithPlanAndNodes`).
 3. Track the requesting device (HWID, Device-OS, Ver-OS, Device-Model from request headers) and client IP. Update `subscriptions.last_request` (best-effort).
 4. For each active node source, fetch the upstream subscription URL. Request headers are filtered via `subserver.FilterHeaders` (excludes `X-Forwarded-Proto`, `X-Forwarded-For`, `X-Real-Ip`).
-5. Detect format (JSON / Base64 / plain), convert JSON configs to share links if mixed mode detected.
+5. Detect format (JSON / Clash YAML / Base64 / plain); convert Clash YAML and JSON configs to share links if mixed mode detected.
 6. Aggregate `subscription-userinfo` headers across all sources.
 7. Cache and return the final body with appropriate `Content-Type`.
 
