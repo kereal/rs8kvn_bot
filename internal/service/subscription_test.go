@@ -925,9 +925,11 @@ func TestSubscriptionService_BindTrial_SingleNode_ErrorPropagated(t *testing.T) 
 
 	xui1Calls := 0
 	xui2Calls := 0
+	var gotReq xui.ClientRequest
 	xui1 := &testutil.XUIClient{
 		UpdateClientFunc: func(ctx context.Context, req xui.ClientRequest) error {
 			xui1Calls++
+			gotReq = req
 			return errors.New("source 1 unreachable")
 		},
 	}
@@ -953,6 +955,8 @@ func TestSubscriptionService_BindTrial_SingleNode_ErrorPropagated(t *testing.T) 
 	assert.NotNil(t, got)
 	assert.Equal(t, 1, xui1Calls, "only nodes[0] must be contacted")
 	assert.Equal(t, 0, xui2Calls, "nodes[1] must not be contacted (single-node trial contract)")
+	assert.Equal(t, "trial_trial-sub-1", gotReq.CurrentEmail, "CurrentEmail must be trial_ + subscriptionID")
+	assert.Equal(t, "testuser", gotReq.Email, "Email must be the resolved XUIEmail (username)")
 }
 
 // TestSubscriptionService_BindTrial_SingleNode_Success verifies the happy path
@@ -992,9 +996,11 @@ func TestSubscriptionService_BindTrial_SingleNode_Success(t *testing.T) {
 
 	xui1Calls := 0
 	xui2Calls := 0
+	var gotReq xui.ClientRequest
 	xui1 := &testutil.XUIClient{
 		UpdateClientFunc: func(ctx context.Context, req xui.ClientRequest) error {
 			xui1Calls++
+			gotReq = req
 			return nil
 		},
 	}
@@ -1019,6 +1025,8 @@ func TestSubscriptionService_BindTrial_SingleNode_Success(t *testing.T) {
 	assert.Equal(t, uint(42), got.ID)
 	assert.Equal(t, 1, xui1Calls, "exactly one UpdateClient on nodes[0]")
 	assert.Equal(t, 0, xui2Calls, "nodes[1] must not be contacted")
+	assert.Equal(t, "trial_trial-sub-1", gotReq.CurrentEmail, "CurrentEmail must be trial_ + subscriptionID")
+	assert.Equal(t, "testuser", gotReq.Email, "Email must be the resolved XUIEmail (username)")
 }
 
 // ==================== DeleteByID Tests ====================

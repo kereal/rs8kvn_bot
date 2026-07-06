@@ -36,7 +36,6 @@ func initSentry(cfg *config.Config) {
 		fmt.Fprintf(os.Stderr, "Failed to initialize Sentry: %v\n", err)
 		return
 	}
-	defer sentry.Flush(logger.SentryFlushTimeout)
 	fmt.Fprintln(os.Stderr, "Sentry error tracking initialized")
 }
 
