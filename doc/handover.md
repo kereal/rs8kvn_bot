@@ -2,7 +2,7 @@
 
 **Repo:** https://github.com/kereal/rs8kvn_bot
 **Module:** `rs8kvn_bot` (Go 1.25+)
-**Version:** v3.0.0
+**Version:** v2.3.0
 **Branch:** `dev` (GitFlow: `main` = production, `dev` = integration, feature branches from dev or `plans_and_pricing`)
 
 ---
@@ -196,7 +196,7 @@ Cache.Set(240s) → return body with Content-Type + Subscription-Userinfo
 | Testing | `stretchr/testify` | v1.11.1 |
 | CI/CD | GitHub Actions → golangci-lint, gosec, test, Docker → GHCR | — |
 
-## Current State (v3.0.0)
+## Current State (v2.3.0)
 
 ### Working Features
 
@@ -373,7 +373,7 @@ go test -coverprofile=coverage.out ./...
 go tool cover -func=coverage.out
 
 # Build binary
-go build -ldflags="-s -w -X main.version=v3.0.0 -X main.commit=$(git rev-parse --short HEAD 2>/dev/null || echo unknown) -X main.buildTime=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" -o rs8kvn_bot ./cmd/bot
+go build -ldflags="-s -w -X main.version=v2.3.0 -X main.commit=$(git rev-parse --short HEAD 2>/dev/null || echo unknown) -X main.buildTime=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" -o rs8kvn_bot ./cmd/bot
 
 # Run linters
 golangci-lint run ./...

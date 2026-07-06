@@ -305,7 +305,7 @@ Admin-only commands:
 
 ## Upgrade from Older Version
 
-### From v2.x → v3.0.0
+### From v2.x → v2.3.0
 
 1. Backup database: `cp data/rs8kvn.db data/rs8kvn.db.backup`
 2. Pull new image or rebuild from source — migrations (021–027) run automatically
@@ -356,8 +356,8 @@ rm .env
 1. Check logs: `docker logs rs8kvn_bot`
 2. Verify `.env` settings (especially `GLOBAL_SUB_URL`)
 3. Test 3x-ui connectivity: `curl -H "Authorization: Bearer <api_token>" http://your-panel-ip:2053/panel/api/server/status`
-4. Include bot version from logs (`rs8kvn_bot@v3.0.0`)
+4. Include bot version from logs (`rs8kvn_bot@v2.3.0`)
 
 ---
 
-*This document covers installation up to v3.0.0 (2026-07-02). For architecture details, see [handover.md](../handover.md).*
+*This document covers installation up to v2.3.0 (2026-07-02). For architecture details, see [handover.md](../handover.md).*

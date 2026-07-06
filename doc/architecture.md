@@ -1,6 +1,6 @@
 # Architecture — rs8kvn_bot
 
-**Version:** v3.0.0
+**Version:** v2.3.0
 **Date:** 2026-07-02
 
 ## Multi-outbounds per node

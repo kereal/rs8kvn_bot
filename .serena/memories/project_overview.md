@@ -5,7 +5,7 @@ Telegram-бот для продажи и управления VLESS+Reality+Visi
 Production-grade: миграции, мониторинг, rate-limiting, circuit breaker, graceful shutdown.
 
 ## Текущая версия
-**v3.0.0** — рефакторинг, VPN-абстракция (`internal/vpn`), SyncService с state machine (`pending_update`), миграции 024-027.
+**v2.3.0** — рефакторинг, VPN-абстракция (`internal/vpn`), SyncService с state machine (`pending_update`), миграции 024-027.
 
 ## Ключевые фичи
 - Планы (trial/free/paid) без `duration`, без `price` (duration/price вынесены в products)
