@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/kereal/rs8kvn_bot/internal/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -219,25 +220,33 @@ func TestToServerConfig_RemarkAlias(t *testing.T) {
 	assert.Equal(t, "MyTag", cfg.Remark)
 }
 
-// ==================== truncateString Tests ====================
+// ==================== TruncateString Tests ====================
 
 func TestTruncateString_Short(t *testing.T) {
 	t.Parallel()
 
-	result := truncateString("hello", 10)
+	result := utils.TruncateString("hello", 10)
 	assert.Equal(t, "hello", result)
 }
 
 func TestTruncateString_Exact(t *testing.T) {
 	t.Parallel()
 
-	result := truncateString("hello", 5)
+	result := utils.TruncateString("hello", 5)
 	assert.Equal(t, "hello", result)
 }
 
 func TestTruncateString_Long(t *testing.T) {
 	t.Parallel()
 
-	result := truncateString("hello world", 5)
+	result := utils.TruncateString("hello world", 5)
 	assert.Equal(t, "hello...", result)
+}
+
+func TestTruncateString_Cyrillic(t *testing.T) {
+	t.Parallel()
+
+	// rune-safe: 4 Cyrillic runes + "..."
+	result := utils.TruncateString("привет мир", 4)
+	assert.Equal(t, "прив...", result)
 }

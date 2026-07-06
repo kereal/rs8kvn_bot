@@ -105,3 +105,16 @@ func FormatDateRu(t time.Time) string {
 
 	return fmt.Sprintf("%d %s %d", day, month, year)
 }
+
+// TruncateString truncates s to at most maxLen runes, appending "..." if truncation occurs.
+// Rune-safe: correctly handles multi-byte UTF-8 (Cyrillic, CJK, emoji) without splitting characters.
+func TruncateString(s string, maxLen int) string {
+	if maxLen <= 0 {
+		return ""
+	}
+	r := []rune(s)
+	if len(r) <= maxLen {
+		return s
+	}
+	return string(r[:maxLen]) + "..."
+}

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/kereal/rs8kvn_bot/internal/logger"
+	"github.com/kereal/rs8kvn_bot/internal/utils"
 
 	"go.uber.org/zap"
 	"gopkg.in/yaml.v3"
@@ -44,7 +45,7 @@ func ExtractClashConfigs(body []byte) ([]json.RawMessage, error) {
 	if err := yaml.Unmarshal(body, &cfg); err != nil {
 		logger.Error("Failed to parse Clash YAML",
 			zap.Error(err),
-			zap.String("body_preview", truncateString(string(body), 200)))
+			zap.String("body_preview", utils.TruncateString(string(body), 200)))
 		return nil, fmt.Errorf("parse clash yaml: %w", err)
 	}
 

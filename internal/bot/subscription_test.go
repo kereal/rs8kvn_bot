@@ -433,7 +433,7 @@ func TestHandleCreateSubscription_ExpiredSubscription(t *testing.T) {
 		SubID: "new-sub-id",
 	}
 
-	mockXUI.AddClientWithIDFunc = func(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
+	mockXUI.AddClientWithIDFunc = func(ctx context.Context, req xui.ClientRequest) (*xui.ClientConfig, error) {
 		return clientConfig, nil
 	}
 
@@ -495,7 +495,7 @@ func TestHandleCreateSubscription_NoSubscription(t *testing.T) {
 		SubID: "new-sub-id",
 	}
 
-	mockXUI.AddClientWithIDFunc = func(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
+	mockXUI.AddClientWithIDFunc = func(ctx context.Context, req xui.ClientRequest) (*xui.ClientConfig, error) {
 		return clientConfig, nil
 	}
 
@@ -996,7 +996,7 @@ func TestHandleCreateSubscription_ZeroMessageID(t *testing.T) {
 		SubID: "new-sub-id",
 	}
 
-	mockXUI.AddClientWithIDFunc = func(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
+	mockXUI.AddClientWithIDFunc = func(ctx context.Context, req xui.ClientRequest) (*xui.ClientConfig, error) {
 		return clientConfig, nil
 	}
 
@@ -1380,7 +1380,7 @@ func TestCreateSubscription_WithExpiredPendingInvite(t *testing.T) {
 		SubID: "sub-id-456",
 	}
 
-	mockXUI.AddClientWithIDFunc = func(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
+	mockXUI.AddClientWithIDFunc = func(ctx context.Context, req xui.ClientRequest) (*xui.ClientConfig, error) {
 		return clientConfig, nil
 	}
 
@@ -1441,7 +1441,7 @@ func TestCreateSubscription_ShowLoadingMessageFails(t *testing.T) {
 	mockBot.SendError = errors.New("send failed")
 
 	xuiCalled := false
-	mockXUI.AddClientWithIDFunc = func(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
+	mockXUI.AddClientWithIDFunc = func(ctx context.Context, req xui.ClientRequest) (*xui.ClientConfig, error) {
 		xuiCalled = true
 		return nil, nil
 	}

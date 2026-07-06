@@ -698,8 +698,8 @@ func TestSubscriptionService_CreateTrial_Success(t *testing.T) {
 		},
 	}
 	xuiClient := &testutil.XUIClient{
-		AddClientWithIDFunc: func(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
-			return &xui.ClientConfig{ID: clientID, SubID: subID}, nil
+		AddClientWithIDFunc: func(ctx context.Context, req xui.ClientRequest) (*xui.ClientConfig, error) {
+			return &xui.ClientConfig{ID: req.ClientID, SubID: req.SubID}, nil
 		},
 	}
 	sources := []database.Node{
@@ -736,7 +736,7 @@ func TestSubscriptionService_CreateTrial_XUIError(t *testing.T) {
 		},
 	}
 	xuiClient := &testutil.XUIClient{
-		AddClientWithIDFunc: func(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
+		AddClientWithIDFunc: func(ctx context.Context, req xui.ClientRequest) (*xui.ClientConfig, error) {
 			return nil, errors.New("xui error")
 		},
 	}
@@ -770,8 +770,8 @@ func TestSubscriptionService_CreateTrial_DBError(t *testing.T) {
 		},
 	}
 	xuiClient := &testutil.XUIClient{
-		AddClientWithIDFunc: func(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
-			return &xui.ClientConfig{ID: clientID, SubID: subID}, nil
+		AddClientWithIDFunc: func(ctx context.Context, req xui.ClientRequest) (*xui.ClientConfig, error) {
+			return &xui.ClientConfig{ID: req.ClientID, SubID: req.SubID}, nil
 		},
 		DeleteClientFunc: func(ctx context.Context, email string) error {
 			deleteCalled = true
@@ -809,8 +809,8 @@ func TestSubscriptionService_CreateTrial_NoTrialNodes(t *testing.T) {
 		},
 	}
 	xuiClient := &testutil.XUIClient{
-		AddClientWithIDFunc: func(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error) {
-			return &xui.ClientConfig{ID: clientID, SubID: subID}, nil
+		AddClientWithIDFunc: func(ctx context.Context, req xui.ClientRequest) (*xui.ClientConfig, error) {
+			return &xui.ClientConfig{ID: req.ClientID, SubID: req.SubID}, nil
 		},
 	}
 	sources := []database.Node{
@@ -926,13 +926,13 @@ func TestSubscriptionService_BindTrial_SingleNode_ErrorPropagated(t *testing.T) 
 	xui1Calls := 0
 	xui2Calls := 0
 	xui1 := &testutil.XUIClient{
-		UpdateClientFunc: func(ctx context.Context, inboundIDs []int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, resetDays int, tgID int64, comment string) error {
+		UpdateClientFunc: func(ctx context.Context, req xui.ClientRequest) error {
 			xui1Calls++
 			return errors.New("source 1 unreachable")
 		},
 	}
 	xui2 := &testutil.XUIClient{
-		UpdateClientFunc: func(ctx context.Context, inboundIDs []int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, resetDays int, tgID int64, comment string) error {
+		UpdateClientFunc: func(ctx context.Context, req xui.ClientRequest) error {
 			xui2Calls++
 			return nil
 		},
@@ -993,13 +993,13 @@ func TestSubscriptionService_BindTrial_SingleNode_Success(t *testing.T) {
 	xui1Calls := 0
 	xui2Calls := 0
 	xui1 := &testutil.XUIClient{
-		UpdateClientFunc: func(ctx context.Context, inboundIDs []int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, resetDays int, tgID int64, comment string) error {
+		UpdateClientFunc: func(ctx context.Context, req xui.ClientRequest) error {
 			xui1Calls++
 			return nil
 		},
 	}
 	xui2 := &testutil.XUIClient{
-		UpdateClientFunc: func(ctx context.Context, inboundIDs []int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, resetDays int, tgID int64, comment string) error {
+		UpdateClientFunc: func(ctx context.Context, req xui.ClientRequest) error {
 			xui2Calls++
 			return nil
 		},

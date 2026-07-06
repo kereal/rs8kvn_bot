@@ -173,8 +173,8 @@ type XUIClientReader interface {
 
 type XUIClientWriter interface {
 	AddClient(ctx context.Context, inboundIDs []int, email string, trafficBytes int64, expiryTime time.Time) (*xui.ClientConfig, error)
-	AddClientWithID(ctx context.Context, inboundIDs []int, email, clientID, subID string, trafficBytes int64, expiryTime time.Time, resetDays int) (*xui.ClientConfig, error)
-	UpdateClient(ctx context.Context, inboundIDs []int, currentEmail, clientID, email, subID string, trafficBytes int64, expiryTime time.Time, resetDays int, tgID int64, comment string) error
+	AddClientWithID(ctx context.Context, req xui.ClientRequest) (*xui.ClientConfig, error)
+	UpdateClient(ctx context.Context, req xui.ClientRequest) error
 	DeleteClient(ctx context.Context, email string) error
 	Close() error
 }
