@@ -99,7 +99,6 @@ type DatabaseService struct {
 	GetAllReferralCountsFunc                    func(ctx context.Context) (map[int64]int64, error)
 	CreateTrialSubscriptionFunc                 func(ctx context.Context, inviteCode, subscriptionID, clientID string, expiryTime time.Time) (*database.Subscription, error)
 	ListNodesFunc                               func(ctx context.Context) ([]database.Node, error)
-	IsNodesEmptyFunc                            func(ctx context.Context) (bool, error)
 	GetNodesByPlanNameFunc                      func(ctx context.Context, planName string) ([]database.Node, error)
 	GetPlansBySourceIDFunc                      func(ctx context.Context, sourceID uint) ([]database.Plan, error)
 	GetPlanByNameFunc                           func(ctx context.Context, name string) (*database.Plan, error)
@@ -111,7 +110,6 @@ type DatabaseService struct {
 	AddSourceToPlanFunc                         func(ctx context.Context, planID, sourceID uint) error
 	RemoveSourceFromPlanFunc                    func(ctx context.Context, planID, sourceID uint) error
 	SeedDefaultDataFunc                         func(ctx context.Context) error
-	SeedDefaultNodeFunc                         func(ctx context.Context, name, xuiHost, xuiAPIToken string, xuiInboundIDs []int, subURL string) error
 	GetActiveByPlanIDFunc                       func(ctx context.Context, planID uint) ([]database.Product, error)
 	GetProductByIDFunc                          func(ctx context.Context, id uint) (*database.Product, error)
 	GetNodeByIDFunc                             func(ctx context.Context, id uint) (*database.Node, error)
@@ -513,23 +511,6 @@ func (m *DatabaseService) ListNodes(ctx context.Context) ([]database.Node, error
 	return []database.Node{
 		{ID: 1, Name: "default", IsActive: true, Host: "http://localhost:2053", APIToken: "test-token", InboundIDs: `[1]`, SubscriptionURL: "http://example.com/sub/"},
 	}, nil
-}
-
-func (m *DatabaseService) IsNodesEmpty(ctx context.Context) (bool, error) {
-	if m.IsNodesEmptyFunc != nil {
-		return m.IsNodesEmptyFunc(ctx)
-	}
-	return false, nil
-}
-
-func (m *DatabaseService) SeedDefaultNode(ctx context.Context, name, xuiHost, xuiAPIToken string, xuiInboundIDs []int, subURL string) error {
-	if m.SeedDefaultDataFunc != nil {
-		return m.SeedDefaultDataFunc(ctx)
-	}
-	if m.SeedDefaultNodeFunc != nil {
-		return m.SeedDefaultNodeFunc(ctx, name, xuiHost, xuiAPIToken, xuiInboundIDs, subURL)
-	}
-	return nil
 }
 
 func (m *DatabaseService) SeedDefaultData(ctx context.Context) error {

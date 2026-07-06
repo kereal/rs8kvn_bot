@@ -237,3 +237,18 @@ func TestRegistry_LoadEnv_IgnoresUnregistered(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "default", s.Get())
 }
+
+func TestRegistry_LoadEnv_EmptyStringKeepsDefault(t *testing.T) {
+	t.Parallel()
+
+	require.NoError(t, os.Setenv("TEST_EMPTY_FLAG", ""))
+	defer os.Unsetenv("TEST_EMPTY_FLAG")
+
+	r := New()
+	i := NewInt(7)
+	r.Register("TEST_EMPTY_FLAG", i)
+
+	err := r.LoadEnv()
+	require.NoError(t, err)
+	assert.Equal(t, 7, i.Get())
+}

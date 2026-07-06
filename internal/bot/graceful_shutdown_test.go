@@ -20,7 +20,6 @@ func TestBot_GracefulShutdown(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID:  123456789,
 		TelegramBotToken: "test_token",
-		Nodes:            []config.Node{{Name: "main", XUIHost: "http://localhost:2053", XUIAPIToken: "test-api-token", XUIInboundIDs: "[1]"}},
 	}
 
 	mockBot := testutil.NewBotAPI()
@@ -59,7 +58,6 @@ func TestServer_GracefulShutdown(t *testing.T) {
 	cfg := &config.Config{
 		TelegramBotToken: "test_token",
 		HealthCheckPort:  18880,
-		Nodes:            []config.Node{{Name: "main", XUIHost: "http://localhost:2053", XUIAPIToken: "token", XUIInboundIDs: "[1]"}},
 	}
 
 	mockBot := testutil.NewBotAPI()
@@ -155,7 +153,6 @@ func TestGracefulShutdown_WithActiveUpdates(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID:  123456789,
 		TelegramBotToken: "test_token",
-		Nodes:            []config.Node{{Name: "main", XUIHost: "http://localhost:2053", XUIAPIToken: "test-api-token", XUIInboundIDs: "[1]"}},
 	}
 
 	mockBot := testutil.NewBotAPI()
@@ -192,7 +189,6 @@ func TestGracefulShutdown_RateLimiterCleanup(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID:  123456789,
 		TelegramBotToken: "test_token",
-		Nodes:            []config.Node{{Name: "main", XUIHost: "http://localhost:2053", XUIAPIToken: "token", XUIInboundIDs: "[1]"}},
 	}
 
 	mockBot := testutil.NewBotAPI()

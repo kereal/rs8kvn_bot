@@ -53,7 +53,6 @@ Instead, contact us privately:
 
 ### 2. Input Validation
 
-- **XUI_SUB_PATH:** Regex validation `^[a-zA-Z0-9_-]+$` — no path traversal
 - **Extra servers file:** Path traversal checks (`..`, system dirs) before opening
 - **URLs (S3):** `validateURL()` restricts schemes to `http` and `https` only — prevents `file://`, `gopher://`, and other schemes that could enable SSRF
 - **HTTPS enforcement:** All sensitive VPN panel endpoints (`nodes.host`) require HTTPS
@@ -109,9 +108,9 @@ Instead, contact us privately:
 #### Token Lifecycle
 
 1. **Creation:** Generate token in panel (3x-ui: Security settings → API Token; proxman: equivalent). Copy immediately — token is shown only once.
-2. **Storage:** Stored in `nodes.api_token` in DB. Seeded from env (`XUI_API_TOKEN` for the initial node) on first run. `.env` file permissions must be `600`.
+2. **Storage:** Stored in `nodes.api_token` in DB. `.env` file permissions must be `600` if used for other secrets.
 3. **Usage:** Sent as `Authorization: Bearer $token` header on every API call.
-4. **Rotation:** Rotate every 90 days. Generate new token in panel, update via DB or re-seed from env, restart bot.
+4. **Rotation:** Rotate every 90 days. Generate new token in panel, update `nodes.api_token` in DB, restart bot.
 5. **Revocation:** Generate a new token in panel — the old token is immediately invalidated.
 
 #### Audit & Monitoring
@@ -230,11 +229,8 @@ If subscriber data (Telegram IDs, usernames, subscription links) is exposed:
 TELEGRAM_BOT_TOKEN=1234567890:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi
 TELEGRAM_ADMIN_ID=123456789
 
-# VPN Panel (seed data — used on first run to populate the nodes table)
-# After first run, nodes are managed via the database.
-XUI_HOST=https://vpn.example.com:2053
-XUI_API_TOKEN=your_xui_api_token_here  # Seed-only: moved to nodes table after first run
-XUI_INBOUND_ID=1                       # Seed-only: singular, populates nodes.inbound_ids JSON array
+# VPN Panel configuration is managed via the `nodes` table in the database.
+# Add nodes via SQL or admin commands after first startup.
 
 # Subscription server (REQUIRED in v3.0+)
 GLOBAL_SUB_URL=https://sub.example.com  # Public HTTPS URL for subscription links
@@ -258,7 +254,7 @@ TRIAL_DURATION_HOURS=3
 TRIAL_RATE_LIMIT=3
 ```
 
-> **Note:** In v3.0+, `XUI_HOST`, `XUI_API_TOKEN`, and `XUI_INBOUND_ID` are no longer read from env at runtime (except for initial DB seeding on first run). Node configuration lives in the `nodes` table (`host`, `api_token`, `inbound_ids` JSON array, `type`, `subscription_url`). `GLOBAL_SUB_URL` is required and replaces the old per-node subscription path construction.
+> **Note:** Node configuration lives in the `nodes` table (`host`, `api_token`, `inbound_ids` JSON array, `type`, `subscription_url`), managed via the database. `GLOBAL_SUB_URL` is required and provides the subscription URL prefix.
 
 **Docker run:**
 ```bash

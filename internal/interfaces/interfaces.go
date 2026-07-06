@@ -122,8 +122,6 @@ type NodeRepository interface {
 	GetNodesByPlanID(ctx context.Context, planID uint) ([]database.Node, error)
 	GetNodeByID(ctx context.Context, id uint) (*database.Node, error)
 	ListEnabled(ctx context.Context) ([]database.Node, error)
-	IsNodesEmpty(ctx context.Context) (bool, error)
-	SeedDefaultNode(ctx context.Context, name, host, apiToken string, inboundIDs []int, subscriptionURL string) error
 }
 
 type InviteRepository interface {

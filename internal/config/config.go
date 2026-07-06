@@ -1,25 +1,12 @@
 package config
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/url"
 	"strings"
 
 	flag "github.com/kereal/rs8kvn_bot/internal/flag"
 )
-
-// Node represents a configured 3x-ui panel source.
-type Node struct {
-	ID            uint
-	Name          string
-	Active        bool
-	Trial         bool
-	XUIHost       string
-	XUIAPIToken   string
-	XUIInboundIDs string
-	SubURL        string
-}
 
 // Config holds all configuration for the application.
 // All fields are validated before use.
@@ -63,9 +50,6 @@ type Config struct {
 
 	// Main menu configuration
 	MainMenuBtnProductID uint
-
-	// Nodes configuration
-	Nodes []Node
 }
 
 // configFlags holds typed flag values for config fields.
@@ -251,25 +235,6 @@ func (c *Config) validate() error {
 		return fmt.Errorf("TRIAL_RATE_LIMIT must be between 1 and 100")
 	}
 
-	// Nodes validation (validate individual node fields if nodes are configured)
-	for i, node := range c.Nodes {
-		if node.XUIHost == "" {
-			return fmt.Errorf("node %d: XUI_HOST is required", i)
-		}
-		if node.XUIAPIToken == "" {
-			return fmt.Errorf("node %d: XUI_API_TOKEN is required", i)
-		}
-		if node.XUIInboundIDs == "" {
-			return fmt.Errorf("node %d: XUI_INBOUND_IDS must not be empty", i)
-		}
-		var ids []int
-		if err := json.Unmarshal([]byte(node.XUIInboundIDs), &ids); err != nil {
-			return fmt.Errorf("node %d: XUI_INBOUND_IDS must be a JSON array of ints", i)
-		}
-		if len(ids) == 0 {
-			return fmt.Errorf("node %d: XUI_INBOUND_IDS must contain at least one inbound ID", i)
-		}
-	}
 
 	return nil
 }
@@ -329,19 +294,6 @@ func (c *Config) SubURL(subID string) string {
 	return u
 }
 
-// InboundIDs parses XUIInboundIDs from a JSON string to a slice of ints.
-// Returns nil slice (not error) when XUIInboundIDs is empty.
-// Validation in Load() ensures non-empty values are valid JSON arrays.
-func (n *Node) InboundIDs() ([]int, error) {
-	if n.XUIInboundIDs == "" {
-		return nil, nil
-	}
-	var ids []int
-	if err := json.Unmarshal([]byte(n.XUIInboundIDs), &ids); err != nil {
-		return nil, fmt.Errorf("parse inbound IDs for node %s: %w", n.Name, err)
-	}
-	return ids, nil
-}
 
 // maskURL returns a masked version of a URL for logging purposes.
 func maskURL(urlStr string) string {
