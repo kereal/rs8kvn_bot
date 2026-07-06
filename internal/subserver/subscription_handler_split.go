@@ -17,11 +17,6 @@ import (
 	"go.uber.org/zap"
 )
 
-// cachedResult holds the outcome of a cache-hit check.
-type cachedResult struct {
-	result *SubscriptionResult
-	hit    bool
-}
 
 // serveFromCache attempts to serve a subscription response from cache.
 // On a hit, it revalidates the subscription status in the DB and invalidates
