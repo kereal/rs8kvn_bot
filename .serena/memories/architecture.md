@@ -1,6 +1,6 @@
 # Architecture — rs8kvn_bot
 
-**Версия:** v3.0.0  
+**Версия:** v2.3.0  
 **Обновлено:** 2026-06-28  
 **Ветка:** `plans_and_pricing` (merge candidate)
 
@@ -255,7 +255,7 @@ id, name UNIQUE, devices_limit, traffic_limit
 - `active|pending_add|pending_remove|pending_update`
 - `SyncService` реализует state machine с retry и lock-ом
 
-### ✅ VPN Client abstraction (v3.0.0)
+### ✅ VPN Client abstraction (v2.3.0)
 - Интерфейс `Client` в `internal/vpn/client.go`
 - `ThreeXUIClient` адаптер для 3x-ui
 - Поддержка `NodeType3xUI` и `NodeTypeProxman`

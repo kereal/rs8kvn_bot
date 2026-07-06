@@ -1,6 +1,6 @@
 # VPN Client Abstraction
 
-**Status:** IMPLEMENTED (v3.0.0)
+**Status:** IMPLEMENTED (v2.3.0)
 
 ## Purpose
 Абстрагировать создание/обновление/удаление VPN-клиентов от типа панели (3x-ui, proxman, будущие провайдеры).

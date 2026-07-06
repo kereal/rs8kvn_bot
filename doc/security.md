@@ -1,6 +1,6 @@
 # Security Policy — rs8kvn_bot
 
-**Version:** 3.0.0  
+**Version:** 2.3.0  
 **Last updated:** 2026-07-02
 
 ---
@@ -320,7 +320,7 @@ go mod verify
 
 **Past audits:**
 - 2026-04-17: Internal audit (SEC-01..SEC-12) — see `docs/review-sf35.md`
-- 2026-07-02: Pre-release audit (v3.0.0) — S2 (X-Forwarded-For spoofing: `getClientIP` now reads rightmost IP from trusted proxy), S3 (URL scheme restriction: `validateURL` now restricts to http/https only, preventing SSRF via `file://`/`gopher://`), A1 (web→bot dependency break: `web` package no longer imports `bot`, reducing attack surface)
+- 2026-07-02: Pre-release audit (v2.3.0) — S2 (X-Forwarded-For spoofing: `getClientIP` now reads rightmost IP from trusted proxy), S3 (URL scheme restriction: `validateURL` now restricts to http/https only, preventing SSRF via `file://`/`gopher://`), A1 (web→bot dependency break: `web` package no longer imports `bot`, reducing attack surface)
 
 **Future audits:** Schedule annual external pentest if handling >10k users.
 
