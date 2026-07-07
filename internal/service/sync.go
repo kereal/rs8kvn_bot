@@ -527,10 +527,11 @@ func (s *SyncService) handleSyncError(ctx context.Context, sn *database.Subscrip
 		zap.Uint("node_id", sn.NodeID),
 		zap.Int("retry_count", sn.RetryCount),
 		zap.Error(err))
+	retryAt := CalculateRetryAt(sn.RetryCount)
+	sn.RetryAt = &retryAt
 	sn.RetryCount++
 	errMsg := err.Error()
 	sn.LastError = &errMsg
-	retryAt := CalculateRetryAt(sn.RetryCount)
 	sn.RetryAt = &retryAt
 
 	if dbErr := s.db.UpdateRetry(ctx, sn.SubscriptionID, sn.NodeID, sn.RetryCount, sn.RetryAt, sn.LastError); dbErr != nil {
