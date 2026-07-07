@@ -600,7 +600,10 @@ func (s *Server) handleSubscription(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	// Use a generous timeout for multi-source aggregation: with up to 8 concurrent
+	// fetches (maxSourceConcurrency) each taking up to 10s, we need headroom beyond
+	// a single fetch timeout to avoid premature cancellation under load.
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
 	logger.Debug("subscription request received",
