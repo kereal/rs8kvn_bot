@@ -377,7 +377,7 @@ scrape_configs:
 | `Failed to load config: TELEGRAM_BOT_TOKEN is required` | Missing env var | Set in `.env` or export |
 | `Failed to initialize database` | Permission denied or disk full | Check `data/` dir, permissions |
 | `Failed to connect to 3x-ui panel` | Wrong node host, panel down | Verify `nodes.host` in DB, then `curl <panel_host>` |
-| `listen tcp :8880: bind: address already in use` | Port occupied | Change `HEALTH_CHECK_PORT` or kill process using port |
+| `listen tcp :8880: bind: address already in use` | Port occupied | Change `WEB_SERVER_PORT` or kill process using port |
 
 **Diagnostic:**
 ```bash
