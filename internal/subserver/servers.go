@@ -54,6 +54,7 @@ type serverConfig struct {
 	Encryption    string `json:"encryption"`
 	Security      string `json:"security"`
 	SNI           string `json:"sni"`
+	Aid           string `json:"aid"`
 	Fingerprint   string `json:"fp"`
 	PublicKey     string `json:"pbk"`
 	ShortID       string `json:"sid"`
@@ -232,7 +233,7 @@ func buildVMessServerLink(cfg *serverConfig) (string, error) {
 		Add:  cfg.Address,
 		Port: cfg.Port,
 		ID:   cfg.UUID,
-		Aid:  "0",
+		Aid:  cfg.Aid,
 		Scy:  cfg.Scy,
 		Net:  cfg.Network,
 		Type: cfg.HeaderType,
@@ -246,6 +247,9 @@ func buildVMessServerLink(cfg *serverConfig) (string, error) {
 
 	if obj.Scy == "" {
 		obj.Scy = "auto"
+	}
+	if obj.Aid == "" {
+		obj.Aid = "0"
 	}
 	if obj.Net == "" {
 		obj.Net = "tcp"
@@ -414,6 +418,8 @@ func buildTUICServerLink(cfg *serverConfig) (string, error) {
 	}
 	if cfg.Host != "" {
 		params.Set("sni", cfg.Host)
+	} else if cfg.SNI != "" {
+		params.Set("sni", cfg.SNI)
 	}
 
 	remark := cfg.Remark
