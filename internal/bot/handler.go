@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -346,6 +347,24 @@ func (h *Handler) getUsername(user *tgbotapi.User) string {
 	}
 
 	return user.UserName
+}
+
+// userFields returns structured log fields identifying a Telegram user.
+// Always includes chat_id (the stable user identifier). Adds first_name and
+// last_name as a human-readable fallback when the @username is empty, so logs
+// stay identifiable even for users without a Telegram username.
+func userFields(from *tgbotapi.User, chatID int64) []zap.Field {
+	fields := []zap.Field{
+		zap.Int64("chat_id", chatID),
+		zap.String("username", ""),
+	}
+	if from != nil {
+		fields[1] = zap.String("username", from.UserName)
+		if name := strings.TrimSpace(from.FirstName + " " + from.LastName); name != "" {
+			fields = append(fields, zap.String("name", name))
+		}
+	}
+	return fields
 }
 
 // formatUserLink returns a Markdown-formatted clickable user link for Telegram.

@@ -52,7 +52,7 @@ func (sh *SubscriptionHandler) getSubscriptionWithCache(ctx context.Context, cha
 
 // handleCreateSubscription handles the "create_subscription" callback or deep link flow.
 func (sh *SubscriptionHandler) handleCreateSubscription(ctx context.Context, chatID int64, username string, messageID int) error {
-	logger.Info("User requesting subscription", zap.String("username", username))
+	logger.Info("User requesting subscription", zap.String("username", username), zap.Int64("chat_id", chatID))
 
 	// Prevent duplicate creation
 	if _, loaded := sh.h.inProgressSyncMap.LoadOrStore(chatID, true); loaded {
@@ -64,7 +64,7 @@ func (sh *SubscriptionHandler) handleCreateSubscription(ctx context.Context, cha
 	sub, err := sh.getSubscriptionWithCache(ctx, chatID)
 	if err != nil {
 		if errors.Is(err, database.ErrSubscriptionNotFound) || errors.Is(err, gorm.ErrRecordNotFound) {
-			logger.Info("No existing subscription, creating new one", zap.String("username", username))
+			logger.Info("No existing subscription, creating new one", zap.String("username", username), zap.Int64("chat_id", chatID))
 		} else {
 			logger.Error("Failed to check subscription", zap.Error(err))
 			errMsg := msg(MsgSubTempError)
@@ -92,7 +92,7 @@ func (sh *SubscriptionHandler) handleCreateSubscription(ctx context.Context, cha
 
 // handleMySubscription displays user's subscription details.
 func (sh *SubscriptionHandler) handleMySubscription(ctx context.Context, chatID int64, username string, messageID int) error {
-	logger.Info("User checking subscription status", zap.String("username", username))
+	logger.Info("User checking subscription status", zap.String("username", username), zap.Int64("chat_id", chatID))
 
 	messageID = sh.h.showLoadingMessage(chatID, messageID)
 	if messageID == 0 {
@@ -164,7 +164,7 @@ func (sh *SubscriptionHandler) handleMySubscription(ctx context.Context, chatID 
 
 // handleQRCode generates and sends QR code for subscription.
 func (sh *SubscriptionHandler) handleQRCode(ctx context.Context, chatID int64, username string, messageID int) error {
-	logger.Info("User requesting QR code", zap.String("username", username))
+	logger.Info("User requesting QR code", zap.String("username", username), zap.Int64("chat_id", chatID))
 
 	sub, err := sh.h.db.GetByTelegramID(ctx, chatID)
 	if err != nil {
@@ -215,7 +215,7 @@ func (sh *SubscriptionHandler) handleQRCode(ctx context.Context, chatID int64, u
 
 // handleBackToSubscription deletes the QR photo message.
 func (sh *SubscriptionHandler) handleBackToSubscription(_ context.Context, chatID int64, username string, messageID int) error {
-	logger.Info("User closing QR code", zap.String("username", username))
+	logger.Info("User closing QR code", zap.String("username", username), zap.Int64("chat_id", chatID))
 	deleteMsg := tgbotapi.NewDeleteMessage(chatID, messageID)
 	if _, err := sh.h.bot.Request(deleteMsg); err != nil {
 		logger.Warn("Failed to delete QR message", zap.Error(err))
@@ -256,7 +256,7 @@ func (sh *SubscriptionHandler) sendQRCode(ctx context.Context, chatID int64, mes
 
 // handleBackToInvite deletes the QR photo and returns to invite.
 func (sh *SubscriptionHandler) handleBackToInvite(_ context.Context, chatID int64, username string, messageID int) error {
-	logger.Info("User closing QR code", zap.String("username", username))
+	logger.Info("User closing QR code", zap.String("username", username), zap.Int64("chat_id", chatID))
 	deleteMsg := tgbotapi.NewDeleteMessage(chatID, messageID)
 	if _, err := sh.h.bot.Request(deleteMsg); err != nil {
 		logger.Warn("Failed to delete QR message", zap.Error(err))
@@ -266,7 +266,7 @@ func (sh *SubscriptionHandler) handleBackToInvite(_ context.Context, chatID int6
 
 // handleUpgradePremium shows the premium upgrade confirmation screen.
 func (sh *SubscriptionHandler) handleUpgradePremium(ctx context.Context, chatID int64, username string, messageID int) error {
-	logger.Info("User viewing premium offer", zap.String("username", username))
+	logger.Info("User viewing premium offer", zap.String("username", username), zap.Int64("chat_id", chatID))
 
 	if sh.h.cfg == nil || sh.h.cfg.MainMenuBtnProductID == 0 || sh.h.db == nil {
 		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgPremiumUnavailable))
@@ -339,7 +339,7 @@ func (sh *SubscriptionHandler) handleUpgradePremium(ctx context.Context, chatID 
 
 // handleConfirmUpgradePremium activates the free premium product via OrderService.
 func (sh *SubscriptionHandler) handleConfirmUpgradePremium(ctx context.Context, chatID int64, username string, messageID int) error {
-	logger.Info("User confirming premium upgrade", zap.String("username", username))
+	logger.Info("User confirming premium upgrade", zap.String("username", username), zap.Int64("chat_id", chatID))
 
 	if sh.h.cfg == nil || sh.h.cfg.MainMenuBtnProductID == 0 || sh.h.db == nil {
 		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgPremiumUnavailable))

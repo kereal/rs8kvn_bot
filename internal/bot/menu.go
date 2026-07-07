@@ -15,7 +15,7 @@ import (
 // handleBackToStart handles the "back_to_start" callback
 // Edits message to show main menu (instant for text messages)
 func (h *Handler) handleBackToStart(ctx context.Context, chatID int64, username string, messageID int) error {
-	logger.Info("User returning to start", zap.String("username", username))
+	logger.Info("User returning to start", zap.String("username", username), zap.Int64("chat_id", chatID))
 
 	// Check if user has an active subscription
 	sub, err := h.getSubscriptionWithCache(ctx, chatID)
@@ -41,7 +41,7 @@ func (h *Handler) handleBackToStart(ctx context.Context, chatID int64, username 
 
 // handleMenuDonate handles the "menu_donate" callback - shows donate message with back button
 func (h *Handler) handleMenuDonate(_ context.Context, chatID int64, username string, messageID int) error {
-	logger.Info("User viewing donate", zap.String("username", username))
+	logger.Info("User viewing donate", zap.String("username", username), zap.Int64("chat_id", chatID))
 	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, h.getDonateText())
 	editMsg.ParseMode = "Markdown"
 	editMsg.DisableWebPagePreview = true
@@ -53,7 +53,7 @@ func (h *Handler) handleMenuDonate(_ context.Context, chatID int64, username str
 
 // handleMenuHelp handles the "menu_help" callback - shows help message with back button
 func (h *Handler) handleMenuHelp(ctx context.Context, chatID int64, username string, messageID int) error {
-	logger.Info("User viewing help", zap.String("username", username))
+	logger.Info("User viewing help", zap.String("username", username), zap.Int64("chat_id", chatID))
 
 	sub, err := h.getSubscriptionWithCache(ctx, chatID)
 	if err != nil {
