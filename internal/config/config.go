@@ -133,6 +133,10 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("failed to load configuration: %w", err)
 	}
 
+	if v := f.mainMenuBtnProductID.Get(); v < 0 {
+		return nil, fmt.Errorf("MAIN_MENU_BTN_PRODUCT must be non-negative, got %d", v)
+	}
+
 	cfg := &Config{
 		TelegramBotToken:       f.telegramBotToken.Get(),
 		TelegramAdminID:        f.telegramAdminID.Get(),
@@ -151,7 +155,7 @@ func Load() (*Config, error) {
 		DonateURL:              f.donateURL.Get(),
 		GlobalSubURL:           f.globalSubURL.Get(),
 		SubServerAccessLogPath: f.subServerAccessLogPath.Get(),
-		MainMenuBtnProductID:   uint(f.mainMenuBtnProductID.Get()),
+		MainMenuBtnProductID:   uint(f.mainMenuBtnProductID.Get()), //nolint:gosec // non-negative value validated above
 	}
 
 	// Validate all required fields

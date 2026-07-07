@@ -210,20 +210,6 @@ func (h *Handler) handleShareInvite(ctx context.Context, chatID int64, username 
 	return h.cbHandler.handleShareInvite(ctx, chatID, username, messageID)
 }
 
-func (h *Handler) handleQRTelegram(ctx context.Context, chatID int64, username string, messageID int) error {
-	if h.cbHandler == nil {
-		return errors.New("handler: cbHandler is nil, use NewHandler to construct Handler")
-	}
-	return h.cbHandler.handleQRTelegram(ctx, chatID, username, messageID)
-}
-
-func (h *Handler) handleQRWeb(ctx context.Context, chatID int64, username string, messageID int) error {
-	if h.cbHandler == nil {
-		return errors.New("handler: cbHandler is nil, use NewHandler to construct Handler")
-	}
-	return h.cbHandler.handleQRWeb(ctx, chatID, username, messageID)
-}
-
 // Subscription delegates
 func (h *Handler) handleCreateSubscription(ctx context.Context, chatID int64, username string, messageID int) error {
 	h.subHandlerOnce.Do(func() { h.subHandler = NewSubscriptionHandler(h) })
