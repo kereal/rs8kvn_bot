@@ -82,7 +82,7 @@ The bot exposes HTTP endpoints on port 8880:
 
 | Endpoint | Description | Status Codes |
 |----------|-------------|--------------|
-| `GET /healthz` | Basic health (process alive, DB and xui status) | 200/503 |
+| `GET /healthz` | Basic health (process alive, DB status) | 200/503 |
 | `GET /readyz` | Ready state (accepting requests after init) | 200/503 |
 | `GET /i/{code}` | Trial invites landing page | 200/404/429/500 |
 | `GET /metrics` | Prometheus metrics endpoint | 200 |

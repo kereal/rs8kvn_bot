@@ -220,7 +220,7 @@ Currently backups are local only. For production, configure remote storage:
 
 | Endpoint | Description | Success | Failure |
 |----------|-------------|---------|---------|
-| `GET /healthz` | Liveness: DB ping + XUI health | 200 | 503 |
+| `GET /healthz` | Liveness: DB ping | 200 | 503 |
 | `GET /readyz` | Readiness: all components initialized | 200 | 503 |
 
 **Usage:**

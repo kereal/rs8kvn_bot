@@ -25,15 +25,14 @@
 
 ### `GET /healthz`
 
-Liveness probe — returns overall service health, aggregating registered component checkers (`database`, `xui`).
+Liveness probe — returns overall service health, aggregating registered component checkers (`database`).
 
 **Response 200 OK** (all components healthy):
 ```json
 {
   "status": "ok",
   "components": {
-    "database": {"status": "ok"},
-    "xui": {"status": "ok"}
+    "database": {"status": "ok"}
   },
   "timestamp": "2026-07-02T05:30:00Z",
   "uptime": "4h32m11s"
@@ -43,17 +42,16 @@ Liveness probe — returns overall service health, aggregating registered compon
 **Response 503 Service Unavailable** (degraded — a component is down or degraded):
 ```json
 {
-  "status": "degraded",
+  "status": "down",
   "components": {
-    "database": {"status": "ok"},
-    "xui": {"status": "degraded", "message": "3x-ui panel unreachable"}
+    "database": {"status": "down", "message": "connection refused"}
   },
   "timestamp": "2026-07-02T05:30:00Z",
   "uptime": "4h32m11s"
 }
 ```
 
-> `status` is `ok` only when every component is `ok`; it becomes `degraded` if any component is `degraded`, and `down` if any component is `down`. The `xui` checker pings the legacy XUI client; if no legacy client is configured it reports `ok` with message `"xui not configured"`.
+> `status` is `ok` only when every component is `ok`; it becomes `down` if any component is `down`.
 
 **Headers:**
 ```

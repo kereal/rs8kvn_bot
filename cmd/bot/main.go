@@ -204,25 +204,11 @@ func initBot(cfg *config.Config) (*tgbotapi.BotAPI, *bot.BotConfig, error) {
 	return api, bc, nil
 }
 
-func startWebServer(subService *service.SubscriptionService, cfg *config.Config, botConfig *bot.BotConfig, subServer *subserver.Service, dbService *database.Service, xuiClients map[uint]interfaces.XUIClient) (*web.Server, error) {
+func startWebServer(subService *service.SubscriptionService, cfg *config.Config, botConfig *bot.BotConfig, subServer *subserver.Service, dbService *database.Service) (*web.Server, error) {
 	webServer := web.NewServer(fmt.Sprintf(":%d", cfg.WebServerPort), dbService, cfg, botConfig.Username, subService, subServer)
 	webServer.RegisterChecker("database", func(ctx context.Context) web.ComponentHealth {
 		if err := dbService.Ping(ctx); err != nil {
 			return web.ComponentHealth{Status: web.StatusDown, Message: err.Error()}
-		}
-		return web.ComponentHealth{Status: web.StatusOK}
-	})
-	webServer.RegisterChecker("xui", func(ctx context.Context) web.ComponentHealth {
-		var firstClient interfaces.XUIClient
-		for _, c := range xuiClients {
-			firstClient = c
-			break
-		}
-		if firstClient == nil {
-			return web.ComponentHealth{Status: web.StatusOK, Message: "xui not configured"}
-		}
-		if err := firstClient.Ping(ctx); err != nil {
-			return web.ComponentHealth{Status: web.StatusDegraded, Message: err.Error()}
 		}
 		return web.ComponentHealth{Status: web.StatusOK}
 	})
@@ -379,7 +365,7 @@ func main() {
 	defer svc.subServer.Stop()
 
 	// 7. Start web server
-	webServer, err := startWebServer(svc.subService, cfg, botConfig, svc.subServer, dbService, deps.xuiClients)
+	webServer, err := startWebServer(svc.subService, cfg, botConfig, svc.subServer, dbService)
 	if err != nil {
 		logger.Warn("Failed to start web server, continuing without web server", zap.Error(err))
 	}

@@ -348,7 +348,7 @@ All tests pass with `-race` detector. Fuzzing enabled for critical functions.
 
 
 ### Health Checks
-- **`/healthz`:** Composite: DB ping + XUI status check → 200 (ok|degraded) or 503 (down)
+- **`/healthz`:** DB ping → 200 (ok) or 503 (down)
 - **`/readyz`:** Simple flag — set to true only after all services initialized → 200 or 503
 
 ### Docker
