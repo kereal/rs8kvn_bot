@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -57,7 +58,6 @@ type Handler struct {
 	bot                 interfaces.BotAPI
 	cfg                 *config.Config
 	db                  interfaces.DatabaseService
-	xui                 interfaces.XUIClient
 	rateLimiter         *ratelimiter.PerUserRateLimiter
 	cache               *SubscriptionCache
 	inProgressSyncMap   sync.Map                // atomic tracking of subscription creation
@@ -91,7 +91,7 @@ type Handler struct {
 }
 
 // NewHandler creates a new Handler with all sub-handlers initialized.
-func NewHandler(bot interfaces.BotAPI, cfg *config.Config, db interfaces.DatabaseService, xuiClient interfaces.XUIClient, botConfig *BotConfig, subService *service.SubscriptionService, version string) *Handler {
+func NewHandler(bot interfaces.BotAPI, cfg *config.Config, db interfaces.DatabaseService, botConfig *BotConfig, subService *service.SubscriptionService, version string) *Handler {
 	rl := ratelimiter.NewPerUserRateLimiter(float64(config.RateLimiterMaxTokens), float64(config.RateLimiterRefillRate))
 	kb := NewKeyboardBuilder(botConfig.Username, cfg.ContactUsername, cfg.DonateCardNumber, cfg.DonateURL, cfg.SiteURL)
 
@@ -99,7 +99,6 @@ func NewHandler(bot interfaces.BotAPI, cfg *config.Config, db interfaces.Databas
 		bot:                 bot,
 		cfg:                 cfg,
 		db:                  db,
-		xui:                 xuiClient,
 		rateLimiter:         rl,
 		cache:               NewSubscriptionCache(CacheMaxSize, CacheTTL),
 		inProgressSyncMap:   sync.Map{},
@@ -209,20 +208,6 @@ func (h *Handler) handleShareInvite(ctx context.Context, chatID int64, username 
 		return errors.New("handler: cbHandler is nil, use NewHandler to construct Handler")
 	}
 	return h.cbHandler.handleShareInvite(ctx, chatID, username, messageID)
-}
-
-func (h *Handler) handleQRTelegram(ctx context.Context, chatID int64, username string, messageID int) error {
-	if h.cbHandler == nil {
-		return errors.New("handler: cbHandler is nil, use NewHandler to construct Handler")
-	}
-	return h.cbHandler.handleQRTelegram(ctx, chatID, username, messageID)
-}
-
-func (h *Handler) handleQRWeb(ctx context.Context, chatID int64, username string, messageID int) error {
-	if h.cbHandler == nil {
-		return errors.New("handler: cbHandler is nil, use NewHandler to construct Handler")
-	}
-	return h.cbHandler.handleQRWeb(ctx, chatID, username, messageID)
 }
 
 // Subscription delegates
@@ -348,6 +333,24 @@ func (h *Handler) getUsername(user *tgbotapi.User) string {
 	}
 
 	return user.UserName
+}
+
+// userFields returns structured log fields identifying a Telegram user.
+// Always includes chat_id (the stable user identifier). Adds first_name and
+// last_name as a human-readable fallback when the @username is empty, so logs
+// stay identifiable even for users without a Telegram username.
+func userFields(from *tgbotapi.User, chatID int64) []zap.Field {
+	fields := []zap.Field{
+		zap.Int64("chat_id", chatID),
+		zap.String("username", ""),
+	}
+	if from != nil {
+		fields[1] = zap.String("username", from.UserName)
+		if name := strings.TrimSpace(from.FirstName + " " + from.LastName); name != "" {
+			fields = append(fields, zap.String("name", name))
+		}
+	}
+	return fields
 }
 
 // formatUserLink returns a Markdown-formatted clickable user link for Telegram.

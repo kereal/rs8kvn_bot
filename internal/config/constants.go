@@ -124,10 +124,10 @@ const (
 	ShutdownTimeout = 30 * time.Second
 )
 
-// Health Check Constants
+// Web Server Constants
 const (
-	// DefaultHealthCheckPort is the default port for the health check HTTP server
-	DefaultHealthCheckPort = 8880
+	// DefaultWebServerPort is the default port for the web server
+	DefaultWebServerPort = 8880
 )
 
 // Validation Constants

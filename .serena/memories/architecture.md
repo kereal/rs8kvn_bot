@@ -1,13 +1,14 @@
 # Architecture — rs8kvn_bot
 
 **Версия:** v2.3.0  
-**Обновлено:** 2026-06-28  
+**Обновлено:** 2026-07-07  
 **Ветка:** `plans_and_pricing` (merge candidate)
 
 ## Рефакторинг 2026-06-08 (коммит 2a1e0fe)
 - Монолит `database.go` разбит на 9 файлов по доменам
 - `escapeMarkdown` перемещён в `internal/utils/markdown.go` (экспортирован как `EscapeMarkdown`)
 - Удалён мёртвый код: `AddTrialClient`, `Login`, `TestForceSessionExpiry` (xui), `sourceHost` (web)
+- Удалён неиспользуемый XUI health-check: `RegisterChecker("xui", ...)` + параметр `xuiClients` в `startWebServer` (`cmd/bot/main.go`, 2026-07-07)
 - `ConvertJSONToShareLinks` перенесён в `convert_test_helpers_test.go`
 - Убран избыточный `if xuiHeaders != nil` в `subscription_handler.go`
 - Проведён `go fmt` по 20 файлам

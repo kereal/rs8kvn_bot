@@ -52,8 +52,8 @@ func TestConstants_Heartbeat(t *testing.T) {
 func TestConstants_HealthCheck(t *testing.T) {
 	t.Parallel()
 
-	assert.Greater(t, DefaultHealthCheckPort, 0)
-	assert.Less(t, DefaultHealthCheckPort, 65536)
+	assert.Greater(t, DefaultWebServerPort, 0)
+	assert.Less(t, DefaultWebServerPort, 65536)
 }
 
 func TestConstants_TelegramLimits(t *testing.T) {

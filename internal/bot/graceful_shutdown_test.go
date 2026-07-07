@@ -24,8 +24,7 @@ func TestBot_GracefulShutdown(t *testing.T) {
 
 	mockBot := testutil.NewBotAPI()
 	mockDB := testutil.NewDatabaseService()
-	mockXUI := testutil.NewXUIClient()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "test")
+	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "test")
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -57,13 +56,12 @@ func TestServer_GracefulShutdown(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramBotToken: "test_token",
-		HealthCheckPort:  18880,
+		WebServerPort:  18880,
 	}
 
 	mockBot := testutil.NewBotAPI()
 	mockDB := testutil.NewDatabaseService()
-	mockXUI := testutil.NewXUIClient()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "test")
+	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "test")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -157,8 +155,7 @@ func TestGracefulShutdown_WithActiveUpdates(t *testing.T) {
 
 	mockBot := testutil.NewBotAPI()
 	mockDB := testutil.NewDatabaseService()
-	mockXUI := testutil.NewXUIClient()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "test")
+	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "test")
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -193,8 +190,7 @@ func TestGracefulShutdown_RateLimiterCleanup(t *testing.T) {
 
 	mockBot := testutil.NewBotAPI()
 	mockDB := testutil.NewDatabaseService()
-	mockXUI := testutil.NewXUIClient()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "test")
+	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "test")
 
 	ctx, cancel := context.WithCancel(context.Background())
 

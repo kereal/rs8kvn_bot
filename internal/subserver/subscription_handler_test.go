@@ -66,8 +66,8 @@ func TestHandleSubscription_CacheHit_Revoked_InvalidatesCache(t *testing.T) {
 	}
 
 	_, err := HandleSubscription(ctx, mockDB, svc, "sub-revoked", "1.2.3.4", nil)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "not active")
+	// A revoked subscription must read as not found (404), not as a server error.
+	assert.ErrorIs(t, err, ErrSubscriptionNotFound)
 
 	// Cache should be invalidated
 	_, _, ok := svc.GetCache("sub-revoked")
@@ -90,8 +90,8 @@ func TestHandleSubscription_CacheHit_Expired_InvalidatesCache(t *testing.T) {
 	}
 
 	_, err := HandleSubscription(ctx, mockDB, svc, "sub-expired", "1.2.3.4", nil)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "not active")
+	// An expired subscription must read as not found (404), not as a server error.
+	assert.ErrorIs(t, err, ErrSubscriptionNotFound)
 
 	_, _, ok := svc.GetCache("sub-expired")
 	assert.False(t, ok, "cache should be invalidated for expired subscription")
@@ -107,13 +107,19 @@ func TestHandleSubscription_CacheHit_StatusCheckError_ReturnsError(t *testing.T)
 	cachedBody := []byte("stale-content")
 	svc.SetCache("sub-err", cachedBody, map[string]string{"content-type": "text/plain"})
 
+	// A transient DB error during revalidation must not fail the request or
+	// destroy a still-valid cache entry: the stale response is served best-effort.
 	mockDB.GetSubscriptionStatusFunc = func(ctx context.Context, subID string) (string, time.Time, error) {
 		return "", time.Time{}, fmt.Errorf("db error")
 	}
 
-	_, err := HandleSubscription(ctx, mockDB, svc, "sub-err", "1.2.3.4", nil)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "cache status check failed")
+	result, err := HandleSubscription(ctx, mockDB, svc, "sub-err", "1.2.3.4", nil)
+	require.NoError(t, err)
+	assert.Equal(t, cachedBody, result.Body)
+
+	// Cache must remain intact on revalidation error.
+	_, _, ok := svc.GetCache("sub-err")
+	assert.True(t, ok, "cache must not be invalidated on transient revalidation error")
 }
 
 func TestHandleSubscription_CacheMiss_SubscriptionNotFound(t *testing.T) {
@@ -279,7 +285,7 @@ func TestHandleSubscription_FetchError_SkipsNode(t *testing.T) {
 	svc := newTestSubSvc(t)
 	ctx := context.Background()
 
-	// Node points to an invalid URL — FetchFromSource will fail
+	// Node points to an invalid URL — FetchFromNode will fail
 	mockDB.GetWithPlanAndNodesFunc = func(ctx context.Context, subID string) (*database.SubscriptionFull, error) {
 		return &database.SubscriptionFull{
 			Subscription: database.Subscription{ID: 5, SubscriptionID: "sub-fetch-err", Status: "active"},
@@ -342,6 +348,145 @@ func TestHandleSubscription_MultipleNodes_AggregatesResponses(t *testing.T) {
 	bodyStr := string(decoded)
 	assert.Contains(t, bodyStr, "vless://uuid1@")
 	assert.Contains(t, bodyStr, "vless://uuid2@")
+}
+
+// clashBody is a minimal Clash/Mihomo config used by the priority tests.
+const clashBody = `proxies:
+  - name: "DE_3"
+    type: vless
+    server: 46.101.238.160
+    port: 443
+    uuid: 0970324b-8c61-4ae7-8c3f-385a6f1e17e4
+    network: ws
+    ws-opts:
+      path: "/"
+      headers:
+        Host: vpn47.cc.cd
+    tls: true
+    servername: vpn47.cc.cd
+    client-fingerprint: chrome
+`
+
+func newClashServer() *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/yaml")
+		_, _ = w.Write([]byte(clashBody))
+	}))
+}
+
+// Clash-only must be returned as base64-encoded share links, not a JSON array.
+func TestHandleSubscription_ClashOnly_ReturnsBase64Links(t *testing.T) {
+	t.Parallel()
+	ts := newClashServer()
+	defer ts.Close()
+
+	mockDB := testutil.NewDatabaseService()
+	svc := newTestSubSvc(t)
+	ctx := context.Background()
+
+	mockDB.GetWithPlanAndNodesFunc = func(ctx context.Context, subID string) (*database.SubscriptionFull, error) {
+		return &database.SubscriptionFull{
+			Subscription: database.Subscription{ID: 7, SubscriptionID: "sub-clash", Status: "active"},
+			Plan:         database.Plan{ID: 1, Name: "test", TrafficLimit: 0},
+			Nodes: []database.Node{
+				{ID: 1, Name: "node1", IsActive: true, SubscriptionURL: ts.URL + "/"},
+			},
+		}, nil
+	}
+	mockDB.UpdateDevicesFunc = func(ctx context.Context, id uint, devicesJSON string) error { return nil }
+	mockDB.UpdateIPsFunc = func(ctx context.Context, id uint, ipsJSON string) error { return nil }
+
+	result, err := HandleSubscription(ctx, mockDB, svc, "sub-clash", "1.2.3.4", nil)
+	require.NoError(t, err)
+	require.NotNil(t, result.Body)
+
+	decoded, decErr := base64.StdEncoding.DecodeString(string(result.Body))
+	require.NoError(t, decErr)
+	assert.NotEmpty(t, decoded)
+	// Must NOT be a JSON array of serverConfig objects.
+	assert.False(t, strings.HasPrefix(strings.TrimSpace(string(decoded)), "["),
+		"clash-only must not return a raw serverConfig array")
+	assert.Contains(t, string(decoded), "vless://0970324b-8c61-4ae7-8c3f-385a6f1e17e4@46.101.238.160:443")
+}
+
+// Any Clash node mixed with another format forces the base64/link output.
+func TestHandleSubscription_JSONAndClash_ReturnsBase64(t *testing.T) {
+	t.Parallel()
+	tsClash := newClashServer()
+	defer tsClash.Close()
+
+	jsonBody := `[{"type":"vless","address":"9.9.9.9","port":443,"uuid":"aaaaaaaa-8c61-4ae7-8c3f-385a6f1e17e4","remark":"J"}]`
+	tsJSON := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(jsonBody))
+	}))
+	defer tsJSON.Close()
+
+	mockDB := testutil.NewDatabaseService()
+	svc := newTestSubSvc(t)
+	ctx := context.Background()
+
+	mockDB.GetWithPlanAndNodesFunc = func(ctx context.Context, subID string) (*database.SubscriptionFull, error) {
+		return &database.SubscriptionFull{
+			Subscription: database.Subscription{ID: 8, SubscriptionID: "sub-mix", Status: "active"},
+			Plan:         database.Plan{ID: 1, Name: "test", TrafficLimit: 0},
+			Nodes: []database.Node{
+				{ID: 1, Name: "json", IsActive: true, SubscriptionURL: tsJSON.URL + "/"},
+				{ID: 2, Name: "clash", IsActive: true, SubscriptionURL: tsClash.URL + "/"},
+			},
+		}, nil
+	}
+	mockDB.UpdateDevicesFunc = func(ctx context.Context, id uint, devicesJSON string) error { return nil }
+	mockDB.UpdateIPsFunc = func(ctx context.Context, id uint, ipsJSON string) error { return nil }
+
+	result, err := HandleSubscription(ctx, mockDB, svc, "sub-mix", "1.2.3.4", nil)
+	require.NoError(t, err)
+	require.NotNil(t, result.Body)
+
+	decoded, decErr := base64.StdEncoding.DecodeString(string(result.Body))
+	require.NoError(t, decErr)
+	bodyStr := string(decoded)
+	assert.Contains(t, bodyStr, "vless://0970324b-8c61-4ae7-8c3f-385a6f1e17e4@46.101.238.160:443")
+	assert.Contains(t, bodyStr, "vless://aaaaaaaa-8c61-4ae7-8c3f-385a6f1e17e4@9.9.9.9:443")
+}
+
+// Base64 + Clash also forces the base64/link output.
+func TestHandleSubscription_Base64AndClash_ReturnsBase64(t *testing.T) {
+	t.Parallel()
+	tsClash := newClashServer()
+	defer tsClash.Close()
+
+	link := "trojan://pass@8.8.8.8:443?security=tls#T"
+	tsB64 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(base64.StdEncoding.EncodeToString([]byte(link))))
+	}))
+	defer tsB64.Close()
+
+	mockDB := testutil.NewDatabaseService()
+	svc := newTestSubSvc(t)
+	ctx := context.Background()
+
+	mockDB.GetWithPlanAndNodesFunc = func(ctx context.Context, subID string) (*database.SubscriptionFull, error) {
+		return &database.SubscriptionFull{
+			Subscription: database.Subscription{ID: 9, SubscriptionID: "sub-b64c", Status: "active"},
+			Plan:         database.Plan{ID: 1, Name: "test", TrafficLimit: 0},
+			Nodes: []database.Node{
+				{ID: 1, Name: "b64", IsActive: true, SubscriptionURL: tsB64.URL + "/"},
+				{ID: 2, Name: "clash", IsActive: true, SubscriptionURL: tsClash.URL + "/"},
+			},
+		}, nil
+	}
+	mockDB.UpdateDevicesFunc = func(ctx context.Context, id uint, devicesJSON string) error { return nil }
+	mockDB.UpdateIPsFunc = func(ctx context.Context, id uint, ipsJSON string) error { return nil }
+
+	result, err := HandleSubscription(ctx, mockDB, svc, "sub-b64c", "1.2.3.4", nil)
+	require.NoError(t, err)
+	require.NotNil(t, result.Body)
+
+	decoded, decErr := base64.StdEncoding.DecodeString(string(result.Body))
+	require.NoError(t, decErr)
+	bodyStr := string(decoded)
+	assert.Contains(t, bodyStr, "trojan://pass@8.8.8.8:443")
+	assert.Contains(t, bodyStr, "vless://0970324b-8c61-4ae7-8c3f-385a6f1e17e4@46.101.238.160:443")
 }
 
 func TestHandleSubscription_FetchNode_UsesURLDirectly(t *testing.T) {
@@ -603,12 +748,18 @@ func TestFilterHeaders(t *testing.T) {
 	h.Set("X-Forwarded-For", "1.2.3.4")
 	h.Set("X-Real-Ip", "5.6.7.8")
 	h.Set("User-Agent", "v2rayng")
+	h.Set("Accept", "application/json")
+	h.Set("Authorization", "Bearer token")
+	h.Set("Cookie", "session=abc")
 
 	filtered := FilterHeaders(h)
 	assert.Equal(t, "test-device", filtered["x-hwid"])
 	assert.Equal(t, "v2rayng", filtered["user-agent"])
 	assert.NotContains(t, filtered, "x-forwarded-for")
 	assert.NotContains(t, filtered, "x-real-ip")
+	assert.NotContains(t, filtered, "accept")
+	assert.NotContains(t, filtered, "authorization")
+	assert.NotContains(t, filtered, "cookie")
 }
 
 func TestSkipTransportHeader(t *testing.T) {

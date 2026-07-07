@@ -30,7 +30,7 @@ type Config struct {
 	SentryDSN string
 
 	// Health check configuration
-	HealthCheckPort int
+	WebServerPort int
 
 	// Trial & Referral configuration
 	SiteURL            string
@@ -62,7 +62,7 @@ type configFlags struct {
 	heartbeatURL           *flag.StringValue
 	heartbeatInterval      *flag.IntValue
 	sentryDSN              *flag.StringValue
-	healthCheckPort        *flag.IntValue
+	webServerPort        *flag.IntValue
 	siteURL                *flag.StringValue
 	trialDurationHours     *flag.IntValue
 	trialRateLimit         *flag.IntValue
@@ -89,7 +89,7 @@ func registerFlags() (*flag.Registry, *configFlags) {
 		heartbeatURL:           flag.NewString(""),
 		heartbeatInterval:      flag.NewInt(DefaultHeartbeatInterval),
 		sentryDSN:              flag.NewString(""),
-		healthCheckPort:        flag.NewInt(DefaultHealthCheckPort),
+		webServerPort:        flag.NewInt(DefaultWebServerPort),
 		siteURL:                flag.NewString(DefaultSiteURL),
 		trialDurationHours:     flag.NewInt(DefaultTrialDurationHours),
 		trialRateLimit:         flag.NewInt(DefaultTrialRateLimit),
@@ -110,7 +110,7 @@ func registerFlags() (*flag.Registry, *configFlags) {
 	r.Register("HEARTBEAT_URL", f.heartbeatURL)
 	r.Register("HEARTBEAT_INTERVAL", f.heartbeatInterval)
 	r.Register("SENTRY_DSN", f.sentryDSN)
-	r.Register("HEALTH_CHECK_PORT", f.healthCheckPort)
+	r.Register("WEB_SERVER_PORT", f.webServerPort)
 	r.Register("SITE_URL", f.siteURL)
 	r.Register("TRIAL_DURATION_HOURS", f.trialDurationHours)
 	r.Register("TRIAL_RATE_LIMIT", f.trialRateLimit)
@@ -133,6 +133,10 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("failed to load configuration: %w", err)
 	}
 
+	if v := f.mainMenuBtnProductID.Get(); v < 0 {
+		return nil, fmt.Errorf("MAIN_MENU_BTN_PRODUCT must be non-negative, got %d", v)
+	}
+
 	cfg := &Config{
 		TelegramBotToken:       f.telegramBotToken.Get(),
 		TelegramAdminID:        f.telegramAdminID.Get(),
@@ -142,7 +146,7 @@ func Load() (*Config, error) {
 		HeartbeatURL:           f.heartbeatURL.Get(),
 		HeartbeatInterval:      f.heartbeatInterval.Get(),
 		SentryDSN:              f.sentryDSN.Get(),
-		HealthCheckPort:        f.healthCheckPort.Get(),
+		WebServerPort:        f.webServerPort.Get(),
 		SiteURL:                f.siteURL.Get(),
 		TrialDurationHours:     f.trialDurationHours.Get(),
 		TrialRateLimit:         f.trialRateLimit.Get(),
@@ -151,7 +155,7 @@ func Load() (*Config, error) {
 		DonateURL:              f.donateURL.Get(),
 		GlobalSubURL:           f.globalSubURL.Get(),
 		SubServerAccessLogPath: f.subServerAccessLogPath.Get(),
-		MainMenuBtnProductID:   uint(f.mainMenuBtnProductID.Get()),
+		MainMenuBtnProductID:   uint(f.mainMenuBtnProductID.Get()), //nolint:gosec // non-negative value validated above
 	}
 
 	// Validate all required fields
@@ -182,8 +186,8 @@ func (c *Config) validate() error {
 	}
 
 	// Health check port validation
-	if c.HealthCheckPort < 1 || c.HealthCheckPort > 65535 {
-		return fmt.Errorf("HEALTH_CHECK_PORT must be between 1 and 65535")
+	if c.WebServerPort < 1 || c.WebServerPort > 65535 {
+		return fmt.Errorf("WEB_SERVER_PORT must be between 1 and 65535")
 	}
 
 	// Log level validation

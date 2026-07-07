@@ -497,9 +497,9 @@ type trialPageData struct {
 func (s *Server) renderTrialPage(w http.ResponseWriter, subID, subURL, telegramLink string, trialHours int) {
 	happLink := "happ://add/" + subURL
 	data := trialPageData{
-		HappLink:     template.URL(happLink),
+		HappLink:     template.URL(happLink),   //nolint:gosec // template.URL is the correct html/template idiom for happ:// custom scheme; value is server-generated
 		SubURL:       subURL,
-		TelegramLink: template.URL(telegramLink),
+		TelegramLink: template.URL(telegramLink), //nolint:gosec // template.URL is the correct html/template idiom for tg:// custom scheme; value is server-generated
 		TrialHours:   trialHours,
 	}
 	if err := s.trialTemplate.Execute(w, data); err != nil {
@@ -517,11 +517,6 @@ func (s *Server) renderErrorPage(w http.ResponseWriter, message string) {
 		logger.Error("Failed to render error page", zap.Error(err))
 	}
 }
-
-var (
-	ErrSubscriptionNotFound = errors.New("subscription not found")
-	ErrSubscriptionNoItems  = errors.New("no subscription items found")
-)
 
 func getClientIP(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
@@ -605,7 +600,10 @@ func (s *Server) handleSubscription(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	// Use a generous timeout for multi-source aggregation: with up to 8 concurrent
+	// fetches (maxSourceConcurrency) each taking up to 10s, we need headroom beyond
+	// a single fetch timeout to avoid premature cancellation under load.
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
 	logger.Debug("subscription request received",

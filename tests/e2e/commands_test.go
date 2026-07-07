@@ -162,9 +162,9 @@ func TestE2E_StartCommand_AdminUser(t *testing.T) {
 
 	cfg := &config.Config{TelegramAdminID: env.chatID}
 	mockDB := testutil.NewDatabaseService()
-	mockXUI := testutil.NewXUIClient()
+
 	mockBot := testutil.NewBotAPI()
-	handler := bot.NewHandler(mockBot, cfg, mockDB, mockXUI, &bot.BotConfig{
+	handler := bot.NewHandler(mockBot, cfg, mockDB, &bot.BotConfig{
 		Username: "testbot", ID: 123456789, FirstName: "TestBot", IsBot: true,
 	}, nil, "")
 

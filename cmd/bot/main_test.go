@@ -79,7 +79,7 @@ func TestBuildRuntimeNodeClients_FiltersInactiveAndInitializes3xUIOnly(t *testin
 		{ID: 2, Type: database.NodeTypeProxman, IsActive: false, Host: "http://inactive-prox", APIToken: "token-b", InboundIDs: `[2]`},
 	}
 
-	runtimeNodes, xuiClients, vpnClients, legacyXUIClient, err := buildRuntimeNodeClients(nodes, opts)
+	runtimeNodes, xuiClients, vpnClients, err := buildRuntimeNodeClients(nodes, opts)
 
 	require.NoError(t, err)
 	require.Len(t, runtimeNodes, 1)
@@ -88,7 +88,6 @@ func TestBuildRuntimeNodeClients_FiltersInactiveAndInitializes3xUIOnly(t *testin
 	assert.Len(t, vpnCalls, 1)
 	assert.Len(t, xuiClients, 1)
 	assert.Len(t, vpnClients, 1)
-	assert.NotNil(t, legacyXUIClient)
 	assert.Equal(t, database.NodeType3xUI, vpnCalls[0].Type)
 	assert.NotNil(t, vpnCalls[0].XUIClient)
 }
@@ -105,7 +104,7 @@ func TestBuildRuntimeNodeClients_SkipsUnsupportedActiveNode(t *testing.T) {
 
 	nodes := []database.Node{{ID: 7, Type: database.NodeTypeProxman, IsActive: true, Host: "http://prox", APIToken: "token", InboundIDs: `[1]`}}
 
-	runtimeNodes, xuiClients, vpnClients, legacyXUIClient, err := buildRuntimeNodeClients(nodes, opts)
+	runtimeNodes, xuiClients, vpnClients, err := buildRuntimeNodeClients(nodes, opts)
 
 	require.NoError(t, err)
 	assert.Len(t, runtimeNodes, 1)
@@ -113,7 +112,6 @@ func TestBuildRuntimeNodeClients_SkipsUnsupportedActiveNode(t *testing.T) {
 	assert.Empty(t, xuiClients)
 	assert.Len(t, vpnClients, 1)
 	assert.NotNil(t, vpnClients[7])
-	assert.Nil(t, legacyXUIClient)
 }
 
 func TestHandleUpdateSafely(t *testing.T) {
@@ -124,8 +122,8 @@ func TestHandleUpdateSafely(t *testing.T) {
 	}
 	mockBot := testutil.NewBotAPI()
 	mockDB := testutil.NewDatabaseService()
-	mockXUI := testutil.NewXUIClient()
-	handler := bot.NewHandler(mockBot, cfg, mockDB, mockXUI, bot.NewTestBotConfig(), nil, "")
+
+	handler := bot.NewHandler(mockBot, cfg, mockDB, bot.NewTestBotConfig(), nil, "")
 	ctx := context.Background()
 
 	update := tgbotapi.Update{
@@ -151,8 +149,8 @@ func TestHandleUpdate_UnknownCommand(t *testing.T) {
 	}
 	mockBot := testutil.NewBotAPI()
 	mockDB := testutil.NewDatabaseService()
-	mockXUI := testutil.NewXUIClient()
-	handler := bot.NewHandler(mockBot, cfg, mockDB, mockXUI, bot.NewTestBotConfig(), nil, "")
+
+	handler := bot.NewHandler(mockBot, cfg, mockDB, bot.NewTestBotConfig(), nil, "")
 	ctx := context.Background()
 
 	update := tgbotapi.Update{
@@ -176,8 +174,8 @@ func TestHandleUpdate_NilMessage(t *testing.T) {
 	}
 	mockBot := testutil.NewBotAPI()
 	mockDB := testutil.NewDatabaseService()
-	mockXUI := testutil.NewXUIClient()
-	handler := bot.NewHandler(mockBot, cfg, mockDB, mockXUI, bot.NewTestBotConfig(), nil, "")
+
+	handler := bot.NewHandler(mockBot, cfg, mockDB, bot.NewTestBotConfig(), nil, "")
 	ctx := context.Background()
 
 	update := tgbotapi.Update{}
@@ -196,8 +194,8 @@ func TestHandleUpdate_UnknownCommands(t *testing.T) {
 	}
 	mockBot := testutil.NewBotAPI()
 	mockDB := testutil.NewDatabaseService()
-	mockXUI := testutil.NewXUIClient()
-	handler := bot.NewHandler(mockBot, cfg, mockDB, mockXUI, bot.NewTestBotConfig(), nil, "")
+
+	handler := bot.NewHandler(mockBot, cfg, mockDB, bot.NewTestBotConfig(), nil, "")
 	ctx := context.Background()
 
 	tests := []struct {
@@ -235,8 +233,8 @@ func TestHandleUpdate_UnknownCommand_Text(t *testing.T) {
 	}
 	mockBot := testutil.NewBotAPI()
 	mockDB := testutil.NewDatabaseService()
-	mockXUI := testutil.NewXUIClient()
-	handler := bot.NewHandler(mockBot, cfg, mockDB, mockXUI, bot.NewTestBotConfig(), nil, "")
+
+	handler := bot.NewHandler(mockBot, cfg, mockDB, bot.NewTestBotConfig(), nil, "")
 	ctx := context.Background()
 
 	update := tgbotapi.Update{
@@ -264,8 +262,8 @@ func TestHandleUpdate_NonCommandMessage_Text(t *testing.T) {
 	}
 	mockBot := testutil.NewBotAPI()
 	mockDB := testutil.NewDatabaseService()
-	mockXUI := testutil.NewXUIClient()
-	handler := bot.NewHandler(mockBot, cfg, mockDB, mockXUI, bot.NewTestBotConfig(), nil, "")
+
+	handler := bot.NewHandler(mockBot, cfg, mockDB, bot.NewTestBotConfig(), nil, "")
 	ctx := context.Background()
 
 	update := tgbotapi.Update{
@@ -290,8 +288,8 @@ func TestHandleUpdate_NonCommandMessage_UsernameFallback(t *testing.T) {
 	}
 	mockBot := testutil.NewBotAPI()
 	mockDB := testutil.NewDatabaseService()
-	mockXUI := testutil.NewXUIClient()
-	handler := bot.NewHandler(mockBot, cfg, mockDB, mockXUI, bot.NewTestBotConfig(), nil, "")
+
+	handler := bot.NewHandler(mockBot, cfg, mockDB, bot.NewTestBotConfig(), nil, "")
 	ctx := context.Background()
 
 	update := tgbotapi.Update{
@@ -315,8 +313,8 @@ func TestHandleUpdate_NonCommandMessage_NoUser(t *testing.T) {
 	}
 	mockBot := testutil.NewBotAPI()
 	mockDB := testutil.NewDatabaseService()
-	mockXUI := testutil.NewXUIClient()
-	handler := bot.NewHandler(mockBot, cfg, mockDB, mockXUI, bot.NewTestBotConfig(), nil, "")
+
+	handler := bot.NewHandler(mockBot, cfg, mockDB, bot.NewTestBotConfig(), nil, "")
 	ctx := context.Background()
 
 	update := tgbotapi.Update{
@@ -339,8 +337,8 @@ func TestHandleUpdate_NonCommandMessage_LongText(t *testing.T) {
 	}
 	mockBot := testutil.NewBotAPI()
 	mockDB := testutil.NewDatabaseService()
-	mockXUI := testutil.NewXUIClient()
-	handler := bot.NewHandler(mockBot, cfg, mockDB, mockXUI, bot.NewTestBotConfig(), nil, "")
+
+	handler := bot.NewHandler(mockBot, cfg, mockDB, bot.NewTestBotConfig(), nil, "")
 	ctx := context.Background()
 
 	longText := strings.Repeat("a", 200)
@@ -365,8 +363,8 @@ func TestHandleUpdate_CallbackQuery_NoMessage(t *testing.T) {
 	}
 	mockBot := testutil.NewBotAPI()
 	mockDB := testutil.NewDatabaseService()
-	mockXUI := testutil.NewXUIClient()
-	handler := bot.NewHandler(mockBot, cfg, mockDB, mockXUI, bot.NewTestBotConfig(), nil, "")
+
+	handler := bot.NewHandler(mockBot, cfg, mockDB, bot.NewTestBotConfig(), nil, "")
 	ctx := context.Background()
 
 	update := tgbotapi.Update{
@@ -390,8 +388,8 @@ func TestHandleUpdate_NilMessageAndNilCallback(t *testing.T) {
 	}
 	mockBot := testutil.NewBotAPI()
 	mockDB := testutil.NewDatabaseService()
-	mockXUI := testutil.NewXUIClient()
-	handler := bot.NewHandler(mockBot, cfg, mockDB, mockXUI, bot.NewTestBotConfig(), nil, "")
+
+	handler := bot.NewHandler(mockBot, cfg, mockDB, bot.NewTestBotConfig(), nil, "")
 	ctx := context.Background()
 
 	update := tgbotapi.Update{}
@@ -429,7 +427,7 @@ func TestConfigLoad_InvalidNumericValues(t *testing.T) {
 	t.Setenv("DATABASE_PATH", ":memory:")
 	t.Setenv("LOG_LEVEL", "error")
 	t.Setenv("HEARTBEAT_INTERVAL", "negative")
-	t.Setenv("HEALTH_CHECK_PORT", "not_a_port")
+	t.Setenv("WEB_SERVER_PORT", "not_a_port")
 	t.Setenv("SITE_URL", "https://example.com")
 	t.Setenv("TRIAL_DURATION_HOURS", "24")
 	t.Setenv("TRIAL_RATE_LIMIT", "10")
@@ -446,7 +444,7 @@ func TestConfigLoad_InvalidURL(t *testing.T) {
 	t.Setenv("DATABASE_PATH", ":memory:")
 	t.Setenv("LOG_LEVEL", "error")
 	t.Setenv("HEARTBEAT_INTERVAL", "50")
-	t.Setenv("HEALTH_CHECK_PORT", "8080")
+	t.Setenv("WEB_SERVER_PORT", "8080")
 	t.Setenv("SITE_URL", "invalid-url")
 	t.Setenv("TRIAL_DURATION_HOURS", "24")
 	t.Setenv("TRIAL_RATE_LIMIT", "10")
@@ -464,7 +462,7 @@ func TestConfigLoad_InvalidPort(t *testing.T) {
 	t.Setenv("DATABASE_PATH", ":memory:")
 	t.Setenv("LOG_LEVEL", "error")
 	t.Setenv("HEARTBEAT_INTERVAL", "50")
-	t.Setenv("HEALTH_CHECK_PORT", "999999")
+	t.Setenv("WEB_SERVER_PORT", "999999")
 	t.Setenv("SITE_URL", "https://example.com")
 	t.Setenv("TRIAL_DURATION_HOURS", "24")
 	t.Setenv("TRIAL_RATE_LIMIT", "10")

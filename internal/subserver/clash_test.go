@@ -264,5 +264,18 @@ func TestExtractClashConfigs_UnsupportedType(t *testing.T) {
 	assert.Len(t, configs, 1)
 }
 
+func TestNormaliseClashProxy_VMessAlterId(t *testing.T) {
+	t.Parallel()
+
+	yaml := "proxies:\n  - type: vmess\n    server: 1.2.3.4\n    port: 443\n    uuid: aaaa-bbbb\n    alterId: 2\n    cipher: auto\n    servername: example.com\n"
+	configs, err := ExtractClashConfigs([]byte(yaml))
+	require.NoError(t, err)
+	require.Len(t, configs, 1)
+
+	cfg, err := toServerConfig(configs[0])
+	require.NoError(t, err)
+	assert.Equal(t, "2", cfg.Aid)
+}
+
 // Suppress unused import warning if json is not directly referenced.
 var _ = json.RawMessage(nil)

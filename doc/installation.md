@@ -213,7 +213,7 @@ Air will automatically rebuild and restart the bot when you save changes to Go f
 | `CONTACT_USERNAME` | Support Telegram username | *(empty)* | ❌ | Without `@` |
 | **Subscription Server** |
 | `GLOBAL_SUB_URL` | Base URL for subscription links | — | ✅ | Constructed as `GLOBAL_SUB_URL + <sub_id>` (e.g. `https://vpn.example.com/sub/abc123`); must be valid http/https URL, HTTPS in production |
-| `SUBSERVER_ACCESS_LOG` | `/sub/{id}` access log file path | *(empty)* | ❌ | Set empty to disable; zap-console line without message/caller/field keys, values are space-separated, values with spaces are quoted, empty optional values are `-`; startup continues if the file cannot be opened |
+| `SUBSERVER_ACCESS_LOG` | `/sub/{id}` access log file path | *(empty)* | ❌ | Set empty to disable; tab-separated (TSV) line, fields separated by tabs with empty optional values as empty fields (no zap-console encoding); startup continues if the file cannot be opened |
 | **Database** |
 | `DATABASE_PATH` | SQLite database file path | `./data/rs8kvn.db` | ❌ | Directory must exist |
 | **Logging** |
@@ -223,7 +223,7 @@ Air will automatically rebuild and restart the bot when you save changes to Go f
 | `HEARTBEAT_URL` | URL for heartbeat POST (optional) | — | ❌ | Receives `{}` every 5 min; must be valid http/https URL if set |
 | `HEARTBEAT_INTERVAL` | Heartbeat interval (seconds) | `300` | ❌ | Min 10s |
 | `SENTRY_DSN` | Sentry DSN for error tracking | — | ❌ | https://sentry.io/...; must be valid http/https URL if set |
-| `HEALTH_CHECK_PORT` | HTTP server port for health checks | `8880` | ❌ | 1–65535 |
+| `WEB_SERVER_PORT` | HTTP (web) server port | `8880` | ❌ | 1–65535 |
 | **Trial & Referral** |
 | `SITE_URL` | Base URL for landing pages | `https://vpn.site` | ❌ | Must be valid http/https URL; used in Telegram links |
 | `TRIAL_DURATION_HOURS` | Trial subscription duration | `3` | ❌ | 1–168 hours (7 days max) |

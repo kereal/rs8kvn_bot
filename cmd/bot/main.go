@@ -67,7 +67,7 @@ func defaultOptions() *runOptions {
 	}
 }
 
-func buildRuntimeNodeClients(nodes []database.Node, opts *runOptions) ([]database.Node, map[uint]interfaces.XUIClient, map[uint]vpn.Client, interfaces.XUIClient, error) {
+func buildRuntimeNodeClients(nodes []database.Node, opts *runOptions) ([]database.Node, map[uint]interfaces.XUIClient, map[uint]vpn.Client, error) {
 	runtimeNodes := make([]database.Node, 0, len(nodes))
 	for _, node := range nodes {
 		if node.IsActive {
@@ -75,25 +75,21 @@ func buildRuntimeNodeClients(nodes []database.Node, opts *runOptions) ([]databas
 		}
 	}
 	if len(runtimeNodes) == 0 {
-		return nil, nil, nil, nil, fmt.Errorf("no active nodes configured")
+		return nil, nil, nil, fmt.Errorf("no active nodes configured")
 	}
 
 	xuiClients := make(map[uint]interfaces.XUIClient)
 	vpnClients := make(map[uint]vpn.Client)
-	var legacyXUIClient interfaces.XUIClient
 
 	for _, node := range runtimeNodes {
 		var xuiClient interfaces.XUIClient
 		if node.Type == database.NodeType3xUI {
 			client, err := opts.xuiClientFn(node.Host, node.APIToken)
 			if err != nil {
-				return nil, nil, nil, nil, fmt.Errorf("init 3x-ui client for node %d: %w", node.ID, err)
+				return nil, nil, nil, fmt.Errorf("init 3x-ui client for node %d: %w", node.ID, err)
 			}
 			xuiClient = client
 			xuiClients[node.ID] = client
-			if legacyXUIClient == nil {
-				legacyXUIClient = client
-			}
 		}
 
 		client, err := opts.vpnClientFn(vpn.Config{
@@ -104,12 +100,12 @@ func buildRuntimeNodeClients(nodes []database.Node, opts *runOptions) ([]databas
 			XUIClient:  xuiClient,
 		})
 		if err != nil {
-			return nil, nil, nil, nil, fmt.Errorf("init vpn client for node %d: %w", node.ID, err)
+			return nil, nil, nil, fmt.Errorf("init vpn client for node %d: %w", node.ID, err)
 		}
 		vpnClients[node.ID] = client
 	}
 
-	return runtimeNodes, xuiClients, vpnClients, legacyXUIClient, nil
+	return runtimeNodes, xuiClients, vpnClients, nil
 }
 
 // getVersion returns the service version string prefixed with "rs8kvn_bot@".
@@ -208,20 +204,11 @@ func initBot(cfg *config.Config) (*tgbotapi.BotAPI, *bot.BotConfig, error) {
 	return api, bc, nil
 }
 
-func startWebServer(subService *service.SubscriptionService, cfg *config.Config, botConfig *bot.BotConfig, subServer *subserver.Service, dbService *database.Service, legacyXUIClient interfaces.XUIClient) (*web.Server, error) {
-	webServer := web.NewServer(fmt.Sprintf(":%d", cfg.HealthCheckPort), dbService, cfg, botConfig.Username, subService, subServer)
+func startWebServer(subService *service.SubscriptionService, cfg *config.Config, botConfig *bot.BotConfig, subServer *subserver.Service, dbService *database.Service) (*web.Server, error) {
+	webServer := web.NewServer(fmt.Sprintf(":%d", cfg.WebServerPort), dbService, cfg, botConfig.Username, subService, subServer)
 	webServer.RegisterChecker("database", func(ctx context.Context) web.ComponentHealth {
 		if err := dbService.Ping(ctx); err != nil {
 			return web.ComponentHealth{Status: web.StatusDown, Message: err.Error()}
-		}
-		return web.ComponentHealth{Status: web.StatusOK}
-	})
-	webServer.RegisterChecker("xui", func(ctx context.Context) web.ComponentHealth {
-		if legacyXUIClient == nil {
-			return web.ComponentHealth{Status: web.StatusOK, Message: "xui not configured"}
-		}
-		if err := legacyXUIClient.Ping(ctx); err != nil {
-			return web.ComponentHealth{Status: web.StatusDegraded, Message: err.Error()}
 		}
 		return web.ComponentHealth{Status: web.StatusOK}
 	})
@@ -378,7 +365,7 @@ func main() {
 	defer svc.subServer.Stop()
 
 	// 7. Start web server
-	webServer, err := startWebServer(svc.subService, cfg, botConfig, svc.subServer, dbService, deps.legacyXUIClient)
+	webServer, err := startWebServer(svc.subService, cfg, botConfig, svc.subServer, dbService)
 	if err != nil {
 		logger.Warn("Failed to start web server, continuing without web server", zap.Error(err))
 	}
