@@ -30,7 +30,7 @@ func NewTestBotConfig() *BotConfig {
 // wired to the provided mock objects. Eliminates repeated NewHandler + subscriptionService
 // assignment across admin tests.
 func newTestAdminHandler(cfg *config.Config, mockDB *testutil.DatabaseService, mockXUI *testutil.XUIClient, mockBot *testutil.BotAPI) *Handler {
-	h := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
+	h := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
 	xuiClients := map[uint]interfaces.XUIClient{1: mockXUI}
 	nodes := []database.Node{{ID: 1, IsActive: true, Host: "http://localhost:2053", APIToken: "test-token", InboundIDs: "[1]", SubscriptionURL: "http://example.com/sub/"}}
 	h.subscriptionService = service.NewSubscriptionService(mockDB, xuiClients, nil, nodes, cfg)
@@ -99,5 +99,5 @@ func newTestHandlerWithSubService(t *testing.T, cfg *config.Config, mockDB *test
 		nil,
 		dbSources,
 		cfg)
-	return NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), subService, "")
+	return NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), subService, "")
 }

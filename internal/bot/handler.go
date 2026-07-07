@@ -57,7 +57,6 @@ type Handler struct {
 	bot                 interfaces.BotAPI
 	cfg                 *config.Config
 	db                  interfaces.DatabaseService
-	xui                 interfaces.XUIClient
 	rateLimiter         *ratelimiter.PerUserRateLimiter
 	cache               *SubscriptionCache
 	inProgressSyncMap   sync.Map                // atomic tracking of subscription creation
@@ -91,7 +90,7 @@ type Handler struct {
 }
 
 // NewHandler creates a new Handler with all sub-handlers initialized.
-func NewHandler(bot interfaces.BotAPI, cfg *config.Config, db interfaces.DatabaseService, xuiClient interfaces.XUIClient, botConfig *BotConfig, subService *service.SubscriptionService, version string) *Handler {
+func NewHandler(bot interfaces.BotAPI, cfg *config.Config, db interfaces.DatabaseService, botConfig *BotConfig, subService *service.SubscriptionService, version string) *Handler {
 	rl := ratelimiter.NewPerUserRateLimiter(float64(config.RateLimiterMaxTokens), float64(config.RateLimiterRefillRate))
 	kb := NewKeyboardBuilder(botConfig.Username, cfg.ContactUsername, cfg.DonateCardNumber, cfg.DonateURL, cfg.SiteURL)
 
@@ -99,7 +98,6 @@ func NewHandler(bot interfaces.BotAPI, cfg *config.Config, db interfaces.Databas
 		bot:                 bot,
 		cfg:                 cfg,
 		db:                  db,
-		xui:                 xuiClient,
 		rateLimiter:         rl,
 		cache:               NewSubscriptionCache(CacheMaxSize, CacheTTL),
 		inProgressSyncMap:   sync.Map{},

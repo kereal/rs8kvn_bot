@@ -37,7 +37,7 @@ func TestHandleBackToStart_WithActiveSubscription(t *testing.T) {
 		TelegramAdminID:  0,
 	}
 
-	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewXUIClient(), NewTestBotConfig(), nil, "")
+	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
 	handler.handleBackToStart(ctx, 12345, "testuser", 100)
 
 	require.NotNil(t, mockBot.LastChattableSafe(), "Message should be sent")
@@ -64,7 +64,7 @@ func TestHandleBackToStart_NoSubscription(t *testing.T) {
 		TelegramAdminID:  0,
 	}
 
-	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewXUIClient(), NewTestBotConfig(), nil, "")
+	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
 	handler.handleBackToStart(ctx, 12345, "testuser", 100)
 
 	require.NotNil(t, mockBot.LastChattableSafe(), "Message should be sent")
@@ -95,7 +95,7 @@ func TestHandleBackToStart_InactiveSubscription(t *testing.T) {
 		TelegramAdminID:  0,
 	}
 
-	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewXUIClient(), NewTestBotConfig(), nil, "")
+	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
 	handler.handleBackToStart(ctx, 12345, "testuser", 100)
 
 	require.NotNil(t, mockBot.LastChattableSafe(), "Message should be sent")
@@ -121,7 +121,7 @@ func TestHandleBackToStart_DatabaseError(t *testing.T) {
 		TelegramAdminID:  0,
 	}
 
-	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewXUIClient(), NewTestBotConfig(), nil, "")
+	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
 	handler.handleBackToStart(ctx, 12345, "testuser", 100)
 
 	require.NotNil(t, mockBot.LastChattableSafe(), "Message should be sent even on database error")
@@ -146,7 +146,7 @@ func TestHandleBackToStart_NilSubscription(t *testing.T) {
 		TelegramAdminID:  0,
 	}
 
-	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewXUIClient(), NewTestBotConfig(), nil, "")
+	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
 	handler.handleBackToStart(ctx, 12345, "testuser", 100)
 
 	require.NotNil(t, mockBot.LastChattableSafe(), "Message should be sent")
@@ -165,7 +165,7 @@ func TestHandleMenuDonate(t *testing.T) {
 		TelegramAdminID:  0,
 	}
 
-	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewXUIClient(), NewTestBotConfig(), nil, "")
+	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
 	handler.handleMenuDonate(ctx, 12345, "testuser", 100)
 
 	require.NotNil(t, mockBot.LastChattableSafe(), "Message should be sent")
@@ -190,7 +190,7 @@ func TestHandleMenuDonate_WithDifferentUsernames(t *testing.T) {
 		TelegramAdminID:  0,
 	}
 
-	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewXUIClient(), NewTestBotConfig(), nil, "")
+	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
 
 	testCases := []struct {
 		name     string
@@ -234,7 +234,7 @@ func TestHandleMenuHelp_WithSubscription(t *testing.T) {
 		TelegramAdminID:  0,
 	}
 
-	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewXUIClient(), NewTestBotConfig(), nil, "")
+	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
 	handler.handleMenuHelp(ctx, 12345, "testuser", 100)
 
 	require.NotNil(t, mockBot.LastChattableSafe(), "Message should be sent")
@@ -262,7 +262,7 @@ func TestHandleMenuHelp_NoSubscription(t *testing.T) {
 		TelegramAdminID:  0,
 	}
 
-	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewXUIClient(), NewTestBotConfig(), nil, "")
+	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
 	handler.handleMenuHelp(ctx, 12345, "testuser", 100)
 
 	require.NotNil(t, mockBot.LastChattableSafe(), "Message should be sent")
@@ -287,7 +287,7 @@ func TestHandleMenuHelp_DatabaseError(t *testing.T) {
 		TelegramAdminID:  0,
 	}
 
-	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewXUIClient(), NewTestBotConfig(), nil, "")
+	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
 	handler.handleMenuHelp(ctx, 12345, "testuser", 100)
 
 	require.NotNil(t, mockBot.LastChattableSafe(), "Message should be sent even on database error")
@@ -332,7 +332,7 @@ func TestHandleMenuHelp_VariousTrafficLimits(t *testing.T) {
 				TelegramAdminID:  0,
 			}
 
-			handler := NewHandler(mockBot, cfg, mockDB, testutil.NewXUIClient(), NewTestBotConfig(), nil, "")
+			handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
 			handler.handleMenuHelp(ctx, 12345, "testuser", 100)
 
 			require.NotNil(t, mockBot.LastChattableSafe(), "Message should be sent")
@@ -373,7 +373,7 @@ func TestHandleBackToStart_VariousMessageIDs(t *testing.T) {
 				TelegramAdminID:  0,
 			}
 
-			handler := NewHandler(mockBot, cfg, mockDB, testutil.NewXUIClient(), NewTestBotConfig(), nil, "")
+			handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
 			handler.handleBackToStart(ctx, 12345, "testuser", tc.messageID)
 
 			require.NotNil(t, mockBot.LastChattableSafe(), "Message should be sent")
@@ -406,7 +406,7 @@ func TestHandleMenuHelp_ContextCancellation(t *testing.T) {
 		TelegramAdminID:  0,
 	}
 
-	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewXUIClient(), NewTestBotConfig(), nil, "")
+	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
 
 	// Should not panic with cancelled context
 	handler.handleMenuHelp(ctx, 12345, "testuser", 100)
@@ -437,7 +437,7 @@ func TestHandleBackToStart_SendError(t *testing.T) {
 		TelegramAdminID:  0,
 	}
 
-	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewXUIClient(), NewTestBotConfig(), nil, "")
+	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
 
 	// Should not panic on send error
 	handler.handleBackToStart(ctx, 12345, "testuser", 100)
@@ -457,7 +457,7 @@ func TestHandleMenuDonate_SendError(t *testing.T) {
 		TelegramAdminID:  0,
 	}
 
-	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewXUIClient(), NewTestBotConfig(), nil, "")
+	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
 
 	// Should not panic on send error
 	handler.handleMenuDonate(ctx, 12345, "testuser", 100)
@@ -484,7 +484,7 @@ func TestHandleMenuHelp_SendError(t *testing.T) {
 		TelegramAdminID:  0,
 	}
 
-	handler := NewHandler(mockBot, cfg, mockDB, testutil.NewXUIClient(), NewTestBotConfig(), nil, "")
+	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
 
 	// Should not panic on send error
 	handler.handleMenuHelp(ctx, 12345, "testuser", 100)
@@ -518,7 +518,7 @@ func TestHandleBackToStart_VariousChatIDs(t *testing.T) {
 				TelegramAdminID:  0,
 			}
 
-			handler := NewHandler(mockBot, cfg, mockDB, testutil.NewXUIClient(), NewTestBotConfig(), nil, "")
+			handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
 			handler.handleBackToStart(ctx, tc.chatID, "testuser", 100)
 
 			require.NotNil(t, mockBot.LastChattableSafe(), "Message should be sent")
