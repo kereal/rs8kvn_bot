@@ -165,7 +165,7 @@ For each active node:
   ├─ Build sourceURL:
   │   • 3x-ui/proxman: subscription_url + "/" + subID
   │   • fetch: subscription_url as-is
-  ├─ FetchFromSource(ctx, sourceURL) — HTTP GET
+  ├─ FetchFromNode(ctx, sourceURL) — HTTP GET
   ├─ DetectFormat (JSON / Clash / Base64 / Plain)
   └─ Aggregate subscription-userinfo headers
         │
@@ -322,9 +322,9 @@ All tests pass with `-race` detector. Fuzzing enabled for critical functions.
   - `GLOBAL_SUB_URL` — must be valid URL with http/https scheme (S3: scheme allowlist)
   - `SENTRY_DSN`, `HEARTBEAT_URL` — must be valid URLs with http/https scheme
   - `SITE_URL` — must be valid URL
-- **Web server:** Runs on `HEALTH_CHECK_PORT` (default 8880), bound to all interfaces
+- **Web server:** Runs on `WEB_SERVER_PORT` (default 8880), bound to all interfaces
 - **Init failure:** Fatal exit for DB, XUI, and Bot API init errors (cannot operate without them)
-- **SUBSERVER_ACCESS_LOG:** Optional path for `/sub/{id}` access logging (zap-console format)
+- **SUBSERVER_ACCESS_LOG:** Optional path for `/sub/{id}` access logging (tab-separated / TSV format)
 
 ### Rate Limiting
 - **Per-user (Telegram):** Each `chatID` gets own token bucket (max 30 tokens, refill 5/sec)
@@ -348,7 +348,7 @@ All tests pass with `-race` detector. Fuzzing enabled for critical functions.
 
 
 ### Health Checks
-- **`/healthz`:** Composite: DB ping + XUI status check → 200 (ok|degraded) or 503 (down)
+- **`/healthz`:** DB ping → 200 (ok) or 503 (down)
 - **`/readyz`:** Simple flag — set to true only after all services initialized → 200 or 503
 
 ### Docker

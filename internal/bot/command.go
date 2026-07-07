@@ -51,9 +51,7 @@ func (c *CommandHandler) HandleStart(ctx context.Context, update tgbotapi.Update
 		return c.handleShareStart(ctx, chatID, username, strings.TrimPrefix(args, "share_"))
 	}
 
-	logger.Info("User started bot",
-		zap.Int64("chat_id", chatID),
-		zap.String("username", username))
+	logger.Info("User started bot", userFields(update.Message.From, chatID)...)
 
 	sub, err := c.h.db.GetByTelegramID(ctx, chatID)
 	hasSubscription := err == nil && sub != nil && sub.Status == "active"
@@ -129,7 +127,7 @@ func (c *CommandHandler) HandleInvite(ctx context.Context, update tgbotapi.Updat
 
 	logger.Info("User requested invite link",
 		zap.Int64("chat_id", chatID),
-		zap.String("username", username))
+		zap.String("username", username), zap.Int64("chat_id", chatID))
 
 	// Delegate to referral handler (no rate limit here)
 	if err := c.h.referral.HandleInvite(ctx, chatID, username, 0); err != nil {

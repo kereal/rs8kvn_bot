@@ -63,7 +63,6 @@ type runtimeDeps struct {
 	nodes           []database.Node
 	xuiClients      map[uint]interfaces.XUIClient
 	vpnClients      map[uint]vpn.Client
-	legacyXUIClient interfaces.XUIClient
 }
 
 // initDatabase initializes the database service and loads runtime node clients.
@@ -78,20 +77,19 @@ func initDatabase(cfg *config.Config) (*database.Service, *runtimeDeps) {
 	if err != nil {
 		logger.Fatal("Failed to list nodes", zap.Error(err))
 	}
-	runtimeNodes, xuiClients, vpnClients, legacyXUIClient, err := buildRuntimeNodeClients(nodes, defaultOptions())
+	runtimeNodes, xuiClients, vpnClients, err := buildRuntimeNodeClients(nodes, defaultOptions())
 	if err != nil {
 		logger.Fatal("Failed to initialize node clients", zap.Error(err))
 	}
 
-	if legacyXUIClient == nil {
-		logger.Warn("No active node found — legacy XUI client will be nil; health check on /ping will be skipped")
+	if len(xuiClients) == 0 {
+		logger.Warn("No active 3x-ui node found — /ping xui health check will report not configured")
 	}
 
 	return dbService, &runtimeDeps{
-		nodes:           runtimeNodes,
-		xuiClients:      xuiClients,
-		vpnClients:      vpnClients,
-		legacyXUIClient: legacyXUIClient,
+		nodes:      runtimeNodes,
+		xuiClients: xuiClients,
+		vpnClients: vpnClients,
 	}
 }
 
@@ -107,7 +105,7 @@ type appServices struct {
 func initServices(cfg *config.Config, dbService *database.Service, deps *runtimeDeps, botAPI *tgbotapi.BotAPI, botConfig *bot.BotConfig) *appServices {
 	subService := service.NewSubscriptionService(dbService, deps.xuiClients, deps.vpnClients, deps.nodes, cfg)
 	subServer := subserver.NewService(config.SubServerCacheTTL)
-	handler := bot.NewHandler(botAPI, cfg, dbService, deps.legacyXUIClient, botConfig, subService, getVersion())
+	handler := bot.NewHandler(botAPI, cfg, dbService, botConfig, subService, getVersion())
 
 	// Compose cache invalidation: invalidate both the bot subscription cache
 	// and the subserver response cache. NewHandler wired invalidateBySubID to

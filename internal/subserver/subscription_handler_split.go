@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/kereal/rs8kvn_bot/internal/database"
@@ -16,7 +18,6 @@ import (
 
 	"go.uber.org/zap"
 )
-
 
 // serveFromCache attempts to serve a subscription response from cache.
 // On a hit, it revalidates the subscription status in the DB and invalidates
@@ -29,19 +30,26 @@ func serveFromCache(ctx context.Context, db interfaces.DatabaseService, subSvc *
 		return nil, false, nil
 	}
 
-	// On cache hit, verify the subscription is still active.
+	// On cache hit, revalidate the subscription status in the DB.
 	status, expiryTime, err := db.GetSubscriptionStatus(ctx, subID)
 	if err != nil {
-		subSvc.InvalidateCache(cacheKey)
 		if errors.Is(err, database.ErrSubscriptionNotFound) {
+			subSvc.InvalidateCache(cacheKey)
 			metrics.SubserverCacheInvalidationsTotal.WithLabelValues("not_found").Inc()
 			return nil, true, ErrSubscriptionNotFound
 		}
-		metrics.SubserverCacheInvalidationsTotal.WithLabelValues("status_error").Inc()
-		logger.Error("Cache status check failed, cache invalidated",
+		// Transient DB error: serve the stale entry best-effort instead of
+		// failing the request or destroying a still-valid cache entry.
+		logger.Warn("Cache status revalidation failed, serving stale entry",
 			zap.String("sub_id", subID),
 			zap.Error(err))
-		return nil, true, fmt.Errorf("cache status check failed: %w", err)
+		// best-effort: обновляем last_request, ошибки не блокируют выдачу.
+		if err := db.UpdateLastRequest(ctx, subID); err != nil {
+			logger.Warn("Failed to update last_request",
+				zap.String("sub_id", subID),
+				zap.Error(err))
+		}
+		return &SubscriptionResult{Body: cachedBody, Headers: cachedHeaders}, true, nil
 	}
 
 	// If the subscription is no longer active or expired, invalidate the cache.
@@ -57,7 +65,9 @@ func serveFromCache(ctx context.Context, db interfaces.DatabaseService, subSvc *
 			zap.String("status", status),
 			zap.Time("expires_at", expiryTime),
 		)
-		return nil, true, fmt.Errorf("subscription not active")
+		// A revoked/expired subscription must read as not found to clients
+		// (matches the /sub/:id 404 contract), not as a server error.
+		return nil, true, ErrSubscriptionNotFound
 	}
 
 	logger.Debug("Cache hit", zap.String("sub_id", subID))
@@ -117,21 +127,41 @@ type aggregatedSources struct {
 	items              []string
 	jsonConfigs        []json.RawMessage
 	firstExpire        string
+	firstExpireVal     int64
 	totalUpload        int64
 	totalDownload      int64
 	allJSON            bool
 	firstSourceHeaders map[string]string
 }
 
-// fetchAndAggregateSources iterates over all active source nodes, fetches
-// upstream subscription responses, detects their format, and aggregates
-// subscription items plus traffic counters.
+// maxSourceConcurrency bounds how many upstream sources are fetched in parallel
+// so a single slow/down node cannot be amplified into unbounded connection usage.
+const maxSourceConcurrency = 8
+
+// sourceResult holds the outcome of fetching a single upstream node.
+type sourceResult struct {
+	source  database.Node
+	body    []byte
+	headers map[string]string
+	format  Format
+}
+
+// fetchAndAggregateSources fetches all active source nodes concurrently (bounded
+// by maxSourceConcurrency) and aggregates their items and traffic counters. The
+// per-source fetch is isolated: a failure logs and is skipped, never aborting the
+// others. Results are merged in source order to keep header/expire selection
+// deterministic.
 func fetchAndAggregateSources(ctx context.Context, subID string, nodes []database.Node) aggregatedSources {
 	agg := aggregatedSources{
 		allJSON: true,
 	}
 
-	for _, src := range nodes {
+	results := make([]sourceResult, len(nodes))
+	sem := make(chan struct{}, maxSourceConcurrency)
+	var wg sync.WaitGroup
+
+	for i := range nodes {
+		src := nodes[i]
 		if src.SubscriptionURL == "" {
 			logger.Warn("Skipping node without subscription_url",
 				zap.String("sub_id", subID),
@@ -139,63 +169,80 @@ func fetchAndAggregateSources(ctx context.Context, subID string, nodes []databas
 			)
 			continue
 		}
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(idx int, src database.Node) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			results[idx] = fetchSource(ctx, subID, src)
+		}(i, src)
+	}
+	wg.Wait()
 
-		sourceURL := buildSourceURL(src, subID)
-
-		// Fetch the upstream subscription response from the source.
-		fetchStart := time.Now()
-		srcResp, err := FetchFromSource(ctx, sourceURL)
-		fetchDuration := time.Since(fetchStart).Seconds()
-		if err != nil {
-			metrics.SubserverSourceFetchTotal.WithLabelValues("error", "unknown").Inc()
-			metrics.SubserverSourceFetchDuration.WithLabelValues("error").Observe(fetchDuration)
-			logger.Error("Failed to fetch from node",
-				zap.String("sub_id", subID),
-				zap.String("source", src.Name),
-				zap.String("node_url", sourceURL),
-				zap.Error(err))
+	for i := range nodes {
+		res := results[i]
+		if res.body == nil {
 			continue
 		}
-
-		body := srcResp.Body
-		srcHeaders := srcResp.Headers
-		if srcHeaders == nil {
-			srcHeaders = make(map[string]string)
+		// Capture headers from the first successful source for client replay.
+		if agg.firstSourceHeaders == nil {
+			agg.firstSourceHeaders = res.headers
 		}
-
-		// Detect response format and log source details.
-		format := DetectFormat(body)
-		metrics.SubserverSourceFetchTotal.WithLabelValues("success", format.String()).Inc()
-		metrics.SubserverSourceFetchDuration.WithLabelValues("success").Observe(fetchDuration)
-		logger.Debug("Node response received",
-			zap.String("sub_id", subID),
-			zap.String("source", src.Name),
-			zap.String("format", format.String()),
-			zap.Int("body_size", len(body)),
-			zap.Int("headers_count", len(srcHeaders)),
-		)
-
-		// Capture headers from the first successful source for replay.
-		if firstSourceHeaders := srcHeaders; firstSourceHeaders != nil {
-			if agg.firstSourceHeaders == nil {
-				agg.firstSourceHeaders = firstSourceHeaders
-			}
-			if expireVal, ok := firstSourceHeaders["subscription-userinfo"]; ok {
-				expire := ParseExpireFromUserInfo(expireVal)
-				if expire != "" && (agg.firstExpire == "" || expire < agg.firstExpire) {
-					agg.firstExpire = expire
-				}
-			}
-		}
+		updateMinExpire(&agg, res.headers)
 
 		// Aggregate usage counters across all sources.
-		agg.totalUpload += ParseUserInfoValue(srcHeaders, "upload")
-		agg.totalDownload += ParseUserInfoValue(srcHeaders, "download")
+		agg.totalUpload += ParseUserInfoValue(res.headers, "upload")
+		agg.totalDownload += ParseUserInfoValue(res.headers, "download")
 
-		aggregateFormat(&agg, format, body, src, subID)
+		aggregateFormat(&agg, res.format, res.body, res.source, subID)
 	}
 
 	return agg
+}
+
+// fetchSource performs a single upstream fetch, records metrics, and returns the
+// parsed result. On error it returns a zero sourceResult (nil body), which the
+// caller treats as "skip this source".
+func fetchSource(ctx context.Context, subID string, src database.Node) sourceResult {
+	sourceURL := buildSourceURL(src, subID)
+
+	fetchStart := time.Now()
+	srcResp, err := FetchFromNode(ctx, sourceURL)
+	fetchDuration := time.Since(fetchStart).Seconds()
+	if err != nil {
+		metrics.SubserverSourceFetchTotal.WithLabelValues("error", "unknown").Inc()
+		metrics.SubserverSourceFetchDuration.WithLabelValues("error").Observe(fetchDuration)
+		logger.Error("Failed to fetch from node",
+			zap.String("sub_id", subID),
+			zap.String("source", src.Name),
+			zap.String("node_url", sourceURL),
+			zap.Error(err))
+		return sourceResult{}
+	}
+
+	body := srcResp.Body
+	srcHeaders := srcResp.Headers
+	if srcHeaders == nil {
+		srcHeaders = make(map[string]string)
+	}
+
+	format := DetectFormat(body)
+	metrics.SubserverSourceFetchTotal.WithLabelValues("success", format.String()).Inc()
+	metrics.SubserverSourceFetchDuration.WithLabelValues("success").Observe(fetchDuration)
+	logger.Debug("Node response received",
+		zap.String("sub_id", subID),
+		zap.String("source", src.Name),
+		zap.String("format", format.String()),
+		zap.Int("body_size", len(body)),
+		zap.Int("headers_count", len(srcHeaders)),
+	)
+
+	return sourceResult{
+		source:  src,
+		body:    body,
+		headers: srcHeaders,
+		format:  format,
+	}
 }
 
 // buildSourceURL constructs the upstream fetch URL for a node, handling
@@ -227,13 +274,14 @@ func aggregateFormat(agg *aggregatedSources, format Format, body []byte, src dat
 		}
 		agg.jsonConfigs = append(agg.jsonConfigs, configs...)
 	case FormatClash:
+		// Clash is not a pure-JSON source, so force the base64/link output path.
+		agg.allJSON = false
 		configs, parseErr := ExtractClashConfigs(body)
 		if parseErr != nil {
 			logger.Error("Failed to parse Clash configs from node",
 				zap.String("sub_id", subID),
 				zap.String("source", src.Name),
 				zap.Error(parseErr))
-			agg.allJSON = false
 			return
 		}
 		agg.jsonConfigs = append(agg.jsonConfigs, configs...)
@@ -256,6 +304,43 @@ func aggregateFormat(agg *aggregatedSources, format Format, body []byte, src dat
 	}
 }
 
+// updateMinExpire records the earliest expiry seen across sources. Expiry
+// values are normalized to seconds before comparison so that seconds and
+// milliseconds widths are ordered correctly.
+func updateMinExpire(agg *aggregatedSources, srcHeaders map[string]string) {
+	userInfo, ok := srcHeaders["subscription-userinfo"]
+	if !ok {
+		return
+	}
+	exp, ok := parseExpireToInt(userInfo)
+	if !ok {
+		return
+	}
+	if agg.firstExpireVal == 0 || exp < agg.firstExpireVal {
+		agg.firstExpireVal = exp
+		agg.firstExpire = strconv.FormatInt(exp, 10)
+	}
+}
+
+// parseExpireToInt extracts the "expire=" value from a subscription-userinfo
+// header and parses it as an int64 (unix seconds). Values in milliseconds are
+// normalized to seconds so sources using different widths compare correctly.
+// Non-numeric expires are ignored because they cannot be compared reliably.
+func parseExpireToInt(userInfo string) (int64, bool) {
+	raw := ParseExpireFromUserInfo(userInfo)
+	if raw == "" {
+		return 0, false
+	}
+	exp, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	if exp > 1e11 {
+		exp /= 1000
+	}
+	return exp, true
+}
+
 // buildResponse takes the aggregated source data and constructs the final
 // subscription response body with headers, writing it to cache.
 func buildResponse(subSvc *Service, cacheKey string, agg aggregatedSources, trafficLimit int64) (*SubscriptionResult, error) {
@@ -275,7 +360,8 @@ func buildResponse(subSvc *Service, cacheKey string, agg aggregatedSources, traf
 		}
 	}
 
-	// Pure-JSON output: marshal all raw configs into a JSON array response.
+	// Pure-JSON output: marshal all raw serverConfig objects into a JSON
+	// array response.
 	if agg.allJSON && len(agg.jsonConfigs) > 0 {
 		responseBody, marshalErr := json.Marshal(agg.jsonConfigs)
 		if marshalErr != nil {

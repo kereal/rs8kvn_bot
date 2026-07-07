@@ -2,7 +2,7 @@
 
 **Version:** v2.3.0  
 **Date:** 2026-07-02  
-**Base URL:** `http://localhost:8880` (configurable via `HEALTH_CHECK_PORT`)
+**Base URL:** `http://localhost:8880` (configurable via `WEB_SERVER_PORT`)
 
 ---
 
@@ -25,15 +25,14 @@
 
 ### `GET /healthz`
 
-Liveness probe — returns overall service health, aggregating registered component checkers (`database`, `xui`).
+Liveness probe — returns overall service health, aggregating registered component checkers (`database`).
 
 **Response 200 OK** (all components healthy):
 ```json
 {
   "status": "ok",
   "components": {
-    "database": {"status": "ok"},
-    "xui": {"status": "ok"}
+    "database": {"status": "ok"}
   },
   "timestamp": "2026-07-02T05:30:00Z",
   "uptime": "4h32m11s"
@@ -43,17 +42,16 @@ Liveness probe — returns overall service health, aggregating registered compon
 **Response 503 Service Unavailable** (degraded — a component is down or degraded):
 ```json
 {
-  "status": "degraded",
+  "status": "down",
   "components": {
-    "database": {"status": "ok"},
-    "xui": {"status": "degraded", "message": "3x-ui panel unreachable"}
+    "database": {"status": "down", "message": "connection refused"}
   },
   "timestamp": "2026-07-02T05:30:00Z",
   "uptime": "4h32m11s"
 }
 ```
 
-> `status` is `ok` only when every component is `ok`; it becomes `degraded` if any component is `degraded`, and `down` if any component is `down`. The `xui` checker pings the legacy XUI client; if no legacy client is configured it reports `ok` with message `"xui not configured"`.
+> `status` is `ok` only when every component is `ok`; it becomes `down` if any component is `down`.
 
 **Headers:**
 ```
@@ -201,7 +199,7 @@ Returns the merged subscription configuration aggregated from **all active nodes
 **Query Parameters:** None
 
 **Flow:**
-1. Check the per-`subID` response cache (240s TTL). On hit, verify the subscription is still active via a cheap status lookup; invalidate stale entries. On successful hit (active subscription), update `subscriptions.last_request` (best-effort) — not updated when the entry is invalidated as revoked/expired.
+1. Check the per-`subID` response cache (240s TTL). On hit, verify the subscription is still active via a cheap status lookup. If active, serve from cache and update `subscriptions.last_request` and device/IP tracking (best-effort). If the subscription is revoked or expired, return `404 Not Found` and leave the cache entry intact. If the status lookup fails (e.g. a transient DB error), serve the stale cached body best-effort and update `last_request` (best-effort).
 2. On cache miss, load the subscription with its plan and active node sources (`db.GetWithPlanAndNodes`).
 3. Track the requesting device (HWID, Device-OS, Ver-OS, Device-Model from request headers) and client IP. Update `subscriptions.last_request` (best-effort).
 4. For each active node source, fetch the upstream subscription URL. Request headers are filtered via `subserver.FilterHeaders` (excludes `X-Forwarded-Proto`, `X-Forwarded-For`, `X-Real-Ip`).

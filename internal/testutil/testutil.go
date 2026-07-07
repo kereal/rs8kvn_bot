@@ -742,7 +742,7 @@ func (m *DatabaseService) CreateOrder(ctx context.Context, order *database.Order
 		m.OrdersBySubscriptionID = make(map[uint][]database.Order)
 	}
 	if order.ID == 0 {
-		order.ID = uint(len(m.Orders) + 1)
+		order.ID = uint(len(m.Orders) + 1) //nolint:gosec // test helper: map size is tiny, no overflow risk
 	}
 	stored := *order
 	m.Orders[order.ID] = &stored

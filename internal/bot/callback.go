@@ -47,9 +47,7 @@ func (c *CallbackHandler) HandleCallback(ctx context.Context, update tgbotapi.Up
 	username := c.h.getUsername(update.CallbackQuery.From)
 
 	logger.Debug("Callback received",
-		zap.String("data", data),
-		zap.String("username", username),
-		zap.Int64("chat_id", chatID))
+		append(userFields(update.CallbackQuery.From, chatID), zap.String("data", data))...)
 
 	callback := tgbotapi.NewCallback(update.CallbackQuery.ID, "")
 	if _, err := c.h.bot.Request(callback); err != nil {
@@ -110,13 +108,13 @@ func (c *CallbackHandler) HandleCallback(ctx context.Context, update tgbotapi.Up
 
 // handleShareInvite generates and sends an invite link.
 func (c *CallbackHandler) handleShareInvite(ctx context.Context, chatID int64, username string, messageID int) error {
-	logger.Info("User requesting share invite", zap.String("username", username))
+	logger.Info("User requesting share invite", zap.String("username", username), zap.Int64("chat_id", chatID))
 	return c.h.referral.sendInviteLink(ctx, chatID, messageID)
 }
 
 // handleQRTelegram generates QR for Telegram invite link.
 func (c *CallbackHandler) handleQRTelegram(ctx context.Context, chatID int64, username string, messageID int) error {
-	logger.Info("User requesting QR for Telegram invite", zap.String("username", username))
+	logger.Info("User requesting QR for Telegram invite", zap.String("username", username), zap.Int64("chat_id", chatID))
 
 	link, err := c.h.referral.generateInviteLink(ctx, chatID, linkTypeTelegram)
 	if err != nil {
@@ -134,7 +132,7 @@ func (c *CallbackHandler) handleQRTelegram(ctx context.Context, chatID int64, us
 
 // handleQRWeb generates QR for web invite page.
 func (c *CallbackHandler) handleQRWeb(ctx context.Context, chatID int64, username string, messageID int) error {
-	logger.Info("User requesting QR for web invite", zap.String("username", username))
+	logger.Info("User requesting QR for web invite", zap.String("username", username), zap.Int64("chat_id", chatID))
 
 	link, err := c.h.referral.generateInviteLink(ctx, chatID, linkTypeWeb)
 	if err != nil {

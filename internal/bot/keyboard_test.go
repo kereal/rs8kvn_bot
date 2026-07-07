@@ -101,7 +101,7 @@ func TestGetQRKeyboard(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{TelegramAdminID: 123}
-	handler := NewHandler(nil, cfg, nil, nil, NewTestBotConfig(), nil, "")
+	handler := NewHandler(nil, cfg, nil, NewTestBotConfig(), nil, "")
 
 	keyboard := handler.getQRKeyboard()
 
@@ -124,7 +124,7 @@ func TestGetQRKeyboard_PreservesHandlerState(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{TelegramAdminID: 456}
-	handler := NewHandler(nil, cfg, nil, nil, NewTestBotConfig(), nil, "")
+	handler := NewHandler(nil, cfg, nil, NewTestBotConfig(), nil, "")
 
 	keyboard1 := handler.getQRKeyboard()
 	keyboard2 := handler.getQRKeyboard()

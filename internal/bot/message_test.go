@@ -30,7 +30,7 @@ func TestSend_Success(t *testing.T) {
 		TelegramAdminID:  0,
 	}
 
-	handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig(), nil, "")
+	handler := NewHandler(mockBot, cfg, nil, NewTestBotConfig(), nil, "")
 
 	msg := tgbotapi.NewMessage(12345, "test message")
 	handler.send(ctx, msg)
@@ -56,7 +56,7 @@ func TestSend_SendError(t *testing.T) {
 		TelegramAdminID:  0,
 	}
 
-	handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig(), nil, "")
+	handler := NewHandler(mockBot, cfg, nil, NewTestBotConfig(), nil, "")
 
 	msg := tgbotapi.NewMessage(12345, "test message")
 
@@ -87,7 +87,7 @@ func TestSend_DisablesWebPagePreview(t *testing.T) {
 		TelegramAdminID:  0,
 	}
 
-	handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig(), nil, "")
+	handler := NewHandler(mockBot, cfg, nil, NewTestBotConfig(), nil, "")
 
 	msg := tgbotapi.NewMessage(12345, "test message with link https://example.com")
 	handler.send(ctx, msg)
@@ -110,7 +110,7 @@ func TestSafeSend_Success(t *testing.T) {
 		TelegramAdminID:  0,
 	}
 
-	handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig(), nil, "")
+	handler := NewHandler(mockBot, cfg, nil, NewTestBotConfig(), nil, "")
 
 	msg := tgbotapi.NewMessage(12345, "safe message")
 	handler.safeSend(msg)
@@ -133,7 +133,7 @@ func TestSafeSend_SendError(t *testing.T) {
 		TelegramAdminID:  0,
 	}
 
-	handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig(), nil, "")
+	handler := NewHandler(mockBot, cfg, nil, NewTestBotConfig(), nil, "")
 
 	msg := tgbotapi.NewMessage(12345, "safe message")
 
@@ -158,7 +158,7 @@ func TestSafeSend_WithEditMessage(t *testing.T) {
 		TelegramAdminID:  0,
 	}
 
-	handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig(), nil, "")
+	handler := NewHandler(mockBot, cfg, nil, NewTestBotConfig(), nil, "")
 
 	editMsg := tgbotapi.NewEditMessageText(12345, 100, "edited message")
 	handler.safeSend(editMsg)
@@ -185,7 +185,7 @@ func TestSendMessage_Success(t *testing.T) {
 		TelegramAdminID:  0,
 	}
 
-	handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig(), nil, "")
+	handler := NewHandler(mockBot, cfg, nil, NewTestBotConfig(), nil, "")
 
 	handler.SendMessage(ctx, 12345, "Hello, World!")
 
@@ -215,7 +215,7 @@ func TestSendMessage_EmptyMessage(t *testing.T) {
 		TelegramAdminID:  0,
 	}
 
-	handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig(), nil, "")
+	handler := NewHandler(mockBot, cfg, nil, NewTestBotConfig(), nil, "")
 
 	handler.SendMessage(ctx, 12345, "")
 
@@ -240,7 +240,7 @@ func TestSendMessage_ContextCancellation(t *testing.T) {
 		TelegramAdminID:  0,
 	}
 
-	handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig(), nil, "")
+	handler := NewHandler(mockBot, cfg, nil, NewTestBotConfig(), nil, "")
 
 	handler.SendMessage(ctx, 12345, "test message")
 
@@ -269,7 +269,7 @@ func TestSendMessage_SpecialCharacters(t *testing.T) {
 		TelegramAdminID:  0,
 	}
 
-	handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig(), nil, "")
+	handler := NewHandler(mockBot, cfg, nil, NewTestBotConfig(), nil, "")
 
 	specialText := "Test with *markdown* and _formatting_ and `code`"
 	handler.SendMessage(ctx, 12345, specialText)
@@ -298,7 +298,7 @@ func TestSendMessage_Unicode(t *testing.T) {
 		TelegramAdminID:  0,
 	}
 
-	handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig(), nil, "")
+	handler := NewHandler(mockBot, cfg, nil, NewTestBotConfig(), nil, "")
 
 	unicodeText := "Привет мир! 世界你好! 🎉"
 	handler.SendMessage(ctx, 12345, unicodeText)
@@ -327,7 +327,7 @@ func TestSendMessage_LongMessage(t *testing.T) {
 		TelegramAdminID:  0,
 	}
 
-	handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig(), nil, "")
+	handler := NewHandler(mockBot, cfg, nil, NewTestBotConfig(), nil, "")
 
 	// Create a long message
 	longText := ""
@@ -357,7 +357,7 @@ func TestSendMessage_MultipleMessages(t *testing.T) {
 		TelegramAdminID:  0,
 	}
 
-	handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig(), nil, "")
+	handler := NewHandler(mockBot, cfg, nil, NewTestBotConfig(), nil, "")
 
 	// Send multiple messages
 	for i := 0; i < 5; i++ {
@@ -401,7 +401,7 @@ func TestSendMessage_DifferentChatIDs(t *testing.T) {
 				TelegramAdminID:  0,
 			}
 
-			handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig(), nil, "")
+			handler := NewHandler(mockBot, cfg, nil, NewTestBotConfig(), nil, "")
 
 			handler.SendMessage(ctx, tc.chatID, "test message")
 
@@ -460,7 +460,7 @@ func TestSafeSend_WithVariousChattables(t *testing.T) {
 				TelegramAdminID:  0,
 			}
 
-			handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig(), nil, "")
+			handler := NewHandler(mockBot, cfg, nil, NewTestBotConfig(), nil, "")
 
 			handler.safeSend(tc.chattable)
 
@@ -488,7 +488,7 @@ func TestSend_MultipleConcurrentSends(t *testing.T) {
 		TelegramAdminID:  0,
 	}
 
-	handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig(), nil, "")
+	handler := NewHandler(mockBot, cfg, nil, NewTestBotConfig(), nil, "")
 
 	// Send multiple messages concurrently
 	done := make(chan bool, 10)
@@ -525,7 +525,7 @@ func TestSendMessage_NilHandler(t *testing.T) {
 		TelegramAdminID:  0,
 	}
 
-	handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig(), nil, "")
+	handler := NewHandler(mockBot, cfg, nil, NewTestBotConfig(), nil, "")
 
 	// Should not panic
 	handler.SendMessage(ctx, 12345, "test message")
@@ -554,7 +554,7 @@ func TestSend_WithMarkdownText(t *testing.T) {
 		TelegramAdminID:  0,
 	}
 
-	handler := NewHandler(mockBot, cfg, nil, nil, NewTestBotConfig(), nil, "")
+	handler := NewHandler(mockBot, cfg, nil, NewTestBotConfig(), nil, "")
 
 	msg := tgbotapi.NewMessage(12345, "*bold* _italic_ `code`")
 	msg.ParseMode = "Markdown"

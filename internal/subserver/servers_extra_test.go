@@ -1,7 +1,9 @@
 package subserver
 
 import (
+	"encoding/base64"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/kereal/rs8kvn_bot/internal/utils"
@@ -141,7 +143,7 @@ func TestConvertSingleJSONToLink_Hysteria2(t *testing.T) {
 	assert.Contains(t, link, "#Hy2-Node")
 }
 
-func TestConvertSingleJSONToLink_TUIC(t *testing.T) {
+func TestConvertSingleJSONToLink_TUIC_SNIFromCfg(t *testing.T) {
 	t.Parallel()
 
 	raw := json.RawMessage(`{
@@ -150,16 +152,43 @@ func TestConvertSingleJSONToLink_TUIC(t *testing.T) {
 		"port": 8443,
 		"uuid": "tuic-uuid",
 		"password": "tuic-pass",
-		"host": "tuic-sni.example.com",
+		"sni": "tuic-sni.example.com",
 		"remark": "TUIC-Node"
 	}`)
 
 	link, err := ConvertSingleJSONToLink(raw)
 	require.NoError(t, err)
 	assert.Contains(t, link, "tuic://tuic.example.com:8443")
-	assert.Contains(t, link, "uuid=tuic-uuid")
-	assert.Contains(t, link, "password=tuic-pass")
+	assert.Contains(t, link, "sni=tuic-sni.example.com")
 	assert.Contains(t, link, "#TUIC-Node")
+}
+
+func TestConvertSingleJSONToLink_VMess_Aid(t *testing.T) {
+	t.Parallel()
+
+	raw := json.RawMessage(`{
+		"type": "vmess",
+		"address": "vmess.example.com",
+		"port": 443,
+		"uuid": "vmess-uuid",
+		"aid": "1",
+		"scy": "auto",
+		"network": "tcp",
+		"sni": "vmess-sni.example.com",
+		"remark": "VMESS-Node"
+	}`)
+
+	cfg, err := toServerConfig(raw)
+	require.NoError(t, err)
+	assert.Equal(t, "1", cfg.Aid)
+
+	link, err := ConvertSingleJSONToLink(raw)
+	require.NoError(t, err)
+	assert.True(t, strings.HasPrefix(link, "vmess://"))
+
+	decoded, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(link, "vmess://"))
+	require.NoError(t, err)
+	assert.Contains(t, string(decoded), `"aid":"1"`)
 }
 
 func TestConvertSingleJSONToLink_UnsupportedType(t *testing.T) {

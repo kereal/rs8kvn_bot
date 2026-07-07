@@ -125,9 +125,7 @@ func normaliseClashProxy(p map[string]any) (map[string]any, error) {
 		setStr(out, p, "servername", "sni")
 		setStr(out, p, "client-fingerprint", "fp")
 		setStr(out, p, "alpn", "alpn")
-		if aID, ok := p["alterId"]; ok {
-			out["aid"] = aID
-		}
+		setStr(out, p, "alterId", "aid")
 		if b, _ := p["tls"].(bool); b {
 			out["tls"] = "tls"
 		}

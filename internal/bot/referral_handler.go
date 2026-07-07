@@ -49,7 +49,7 @@ func NewReferralHandler(
 func (rh *ReferralHandler) HandleInvite(ctx context.Context, chatID int64, username string, messageID int) error {
 	logger.Info("User requesting invite link",
 		zap.Int64("chat_id", chatID),
-		zap.String("username", username))
+		zap.String("username", username), zap.Int64("chat_id", chatID))
 	return rh.sendInviteLink(ctx, chatID, messageID)
 }
 

@@ -35,7 +35,7 @@ func (h *Handler) HandleVersion(ctx context.Context, update tgbotapi.Update) err
 }
 
 func (h *Handler) handleAdminLastReg(ctx context.Context, chatID int64, username string, messageID int) error {
-	logger.Info("Admin requesting last registrations", zap.String("username", username))
+	logger.Info("Admin requesting last registrations", zap.String("username", username), zap.Int64("chat_id", chatID))
 
 	if !h.isAdmin(chatID) {
 		logger.Warn("Non-admin user attempted to access last registrations", zap.Int64("chat_id", chatID))
@@ -420,7 +420,7 @@ func (h *Handler) HandleSend(ctx context.Context, update tgbotapi.Update) error 
 
 // handleAdminStats handles the "admin stats" callback.
 func (h *Handler) handleAdminStats(ctx context.Context, chatID int64, username string, messageID int) error {
-	logger.Info("Admin requesting stats", zap.String("username", username))
+	logger.Info("Admin requesting stats", zap.String("username", username), zap.Int64("chat_id", chatID))
 
 	// Verify admin access
 	if !h.isAdmin(chatID) {
@@ -482,7 +482,7 @@ func (h *Handler) notifyAdmin(ctx context.Context, username string, chatID int64
 		return fmt.Errorf("notify admin: %w", err)
 	}
 
-	logger.Info("Admin notified about new subscription", zap.String("username", username))
+	logger.Info("Admin notified about new subscription", zap.String("username", username), zap.Int64("chat_id", chatID))
 	return nil
 }
 
@@ -515,7 +515,7 @@ func (h *Handler) HandleRefstats(ctx context.Context, update tgbotapi.Update) er
 		return nil
 	}
 
-	logger.Info("Admin requesting referral stats", zap.String("username", username))
+	logger.Info("Admin requesting referral stats", zap.String("username", username), zap.Int64("chat_id", chatID))
 
 	allCounts := h.referralCache.GetAll()
 	type referrer struct {

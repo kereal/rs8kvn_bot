@@ -47,7 +47,7 @@ func TestLoad_CustomValues(t *testing.T) {
 	os.Setenv("HEARTBEAT_INTERVAL", "120")
 	os.Setenv("DATABASE_PATH", "/custom/path/db.db")
 	os.Setenv("LOG_LEVEL", "debug")
-	os.Setenv("HEALTH_CHECK_PORT", "9090")
+	os.Setenv("WEB_SERVER_PORT", "9090")
 	os.Setenv("GLOBAL_SUB_URL", "https://vpn.example.com/sub/")
 	os.Setenv("SUBSERVER_ACCESS_LOG", "./data/subserver-test.log")
 
@@ -57,7 +57,7 @@ func TestLoad_CustomValues(t *testing.T) {
 		os.Unsetenv("HEARTBEAT_INTERVAL")
 		os.Unsetenv("DATABASE_PATH")
 		os.Unsetenv("LOG_LEVEL")
-		os.Unsetenv("HEALTH_CHECK_PORT")
+		os.Unsetenv("WEB_SERVER_PORT")
 		os.Unsetenv("GLOBAL_SUB_URL")
 		os.Unsetenv("SUBSERVER_ACCESS_LOG")
 	}()
@@ -66,7 +66,7 @@ func TestLoad_CustomValues(t *testing.T) {
 	require.NoError(t, err, "Load() error")
 
 	assert.Equal(t, 120, cfg.HeartbeatInterval, "HeartbeatInterval")
-	assert.Equal(t, 9090, cfg.HealthCheckPort, "HealthCheckPort")
+	assert.Equal(t, 9090, cfg.WebServerPort, "WebServerPort")
 	assert.Equal(t, "./data/subserver-test.log", cfg.SubServerAccessLogPath, "SubServerAccessLogPath")
 }
 
@@ -141,56 +141,56 @@ func TestLoad_ValidHeartbeatInterval_MinValue(t *testing.T) {
 	assert.Equal(t, 60, cfg.HeartbeatInterval)
 }
 
-func TestLoad_InvalidHealthCheckPort_Zero(t *testing.T) {
+func TestLoad_InvalidWebServerPort_Zero(t *testing.T) {
 	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
 	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
-	os.Setenv("HEALTH_CHECK_PORT", "0")
+	os.Setenv("WEB_SERVER_PORT", "0")
 	os.Setenv("LOG_LEVEL", "info")
 	defer func() {
 		os.Unsetenv("TELEGRAM_BOT_TOKEN")
 		os.Unsetenv("TELEGRAM_ADMIN_ID")
-		os.Unsetenv("HEALTH_CHECK_PORT")
+		os.Unsetenv("WEB_SERVER_PORT")
 		os.Unsetenv("LOG_LEVEL")
 	}()
 
 	_, err := Load()
-	assert.Error(t, err, "Load() should error for HEALTH_CHECK_PORT=0")
+	assert.Error(t, err, "Load() should error for WEB_SERVER_PORT=0")
 }
 
-func TestLoad_InvalidHealthCheckPort_Max(t *testing.T) {
+func TestLoad_InvalidWebServerPort_Max(t *testing.T) {
 	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
 	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
-	os.Setenv("HEALTH_CHECK_PORT", "65536")
+	os.Setenv("WEB_SERVER_PORT", "65536")
 	os.Setenv("LOG_LEVEL", "info")
 	defer func() {
 		os.Unsetenv("TELEGRAM_BOT_TOKEN")
 		os.Unsetenv("TELEGRAM_ADMIN_ID")
-		os.Unsetenv("HEALTH_CHECK_PORT")
+		os.Unsetenv("WEB_SERVER_PORT")
 		os.Unsetenv("LOG_LEVEL")
 	}()
 
 	_, err := Load()
-	assert.Error(t, err, "Load() should error for HEALTH_CHECK_PORT=65536 (max is 65535)")
+	assert.Error(t, err, "Load() should error for WEB_SERVER_PORT=65536 (max is 65535)")
 }
 
-func TestLoad_ValidHealthCheckPort_Max(t *testing.T) {
+func TestLoad_ValidWebServerPort_Max(t *testing.T) {
 	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
 	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
-	os.Setenv("HEALTH_CHECK_PORT", "65535")
+	os.Setenv("WEB_SERVER_PORT", "65535")
 	os.Setenv("LOG_LEVEL", "info")
 
 	os.Setenv("GLOBAL_SUB_URL", "https://vpn.example.com/sub/")
 	defer func() {
 		os.Unsetenv("TELEGRAM_BOT_TOKEN")
 		os.Unsetenv("TELEGRAM_ADMIN_ID")
-		os.Unsetenv("HEALTH_CHECK_PORT")
+		os.Unsetenv("WEB_SERVER_PORT")
 		os.Unsetenv("LOG_LEVEL")
 		os.Unsetenv("GLOBAL_SUB_URL")
 	}()
 
 	cfg, err := Load()
 	assert.NoError(t, err)
-	assert.Equal(t, 65535, cfg.HealthCheckPort)
+	assert.Equal(t, 65535, cfg.WebServerPort)
 }
 
 func TestLoad_ValidTelegramAdminID(t *testing.T) {
@@ -465,7 +465,7 @@ func TestConfig_Validate_Valid(t *testing.T) {
 		TelegramAdminID:  123456,
 		HeartbeatInterval:  60,
 		LogLevel:           "info",
-		HealthCheckPort:    DefaultHealthCheckPort,
+		WebServerPort:    DefaultWebServerPort,
 		SiteURL:            "https://vpn.site",
 		TrialDurationHours: 3,
 		TrialRateLimit:     3,
@@ -485,7 +485,7 @@ func TestConfig_Validate_SentryDSN_Valid(t *testing.T) {
 		HeartbeatInterval:  60,
 		LogLevel:           "info",
 		SentryDSN:          "https://abc@sentry.io/123",
-		HealthCheckPort:    DefaultHealthCheckPort,
+		WebServerPort:    DefaultWebServerPort,
 		SiteURL:            "https://vpn.site",
 		TrialDurationHours: 3,
 		TrialRateLimit:     3,
@@ -517,7 +517,7 @@ func TestConfig_Validate_WithSubPath(t *testing.T) {
 		TelegramAdminID:  123456,
 		HeartbeatInterval:  60,
 		LogLevel:           "info",
-		HealthCheckPort:    DefaultHealthCheckPort,
+		WebServerPort:    DefaultWebServerPort,
 		SiteURL:            "https://vpn.site",
 		TrialDurationHours: 3,
 		TrialRateLimit:     3,
@@ -537,7 +537,7 @@ func TestConfig_Validate_WithHeartbeatURL(t *testing.T) {
 		HeartbeatInterval:  60,
 		LogLevel:           "info",
 		HeartbeatURL:       "https://health.example.com",
-		HealthCheckPort:    DefaultHealthCheckPort,
+		WebServerPort:    DefaultWebServerPort,
 		SiteURL:            "https://vpn.site",
 		TrialDurationHours: 3,
 		TrialRateLimit:     3,
@@ -585,7 +585,7 @@ func TestConfig_Validate_InvalidLogLevel(t *testing.T) {
 	assert.Error(t, err, "validate() should error on invalid LogLevel")
 }
 
-func TestConfig_Validate_InvalidHealthCheckPort_TooLow(t *testing.T) {
+func TestConfig_Validate_InvalidWebServerPort_TooLow(t *testing.T) {
 	t.Parallel()
 
 	cfg := &Config{
@@ -593,14 +593,14 @@ func TestConfig_Validate_InvalidHealthCheckPort_TooLow(t *testing.T) {
 		TelegramAdminID:  123456,
 		HeartbeatInterval: 60,
 		LogLevel:          "info",
-		HealthCheckPort:   0,
+		WebServerPort:   0,
 	}
 
 	err := cfg.validate()
-	assert.Error(t, err, "validate() should error on HealthCheckPort = 0")
+	assert.Error(t, err, "validate() should error on WebServerPort = 0")
 }
 
-func TestConfig_Validate_InvalidHealthCheckPort_TooHigh(t *testing.T) {
+func TestConfig_Validate_InvalidWebServerPort_TooHigh(t *testing.T) {
 	t.Parallel()
 
 	cfg := &Config{
@@ -608,11 +608,11 @@ func TestConfig_Validate_InvalidHealthCheckPort_TooHigh(t *testing.T) {
 		TelegramAdminID:  123456,
 		HeartbeatInterval: 60,
 		LogLevel:          "info",
-		HealthCheckPort:   70000,
+		WebServerPort:   70000,
 	}
 
 	err := cfg.validate()
-	assert.Error(t, err, "validate() should error on HealthCheckPort = 70000")
+	assert.Error(t, err, "validate() should error on WebServerPort = 70000")
 }
 
 func TestMaskURL_Empty(t *testing.T) {
@@ -878,7 +878,7 @@ func FuzzLoad_InvalidEnvValues(f *testing.F) {
 	}
 
 	f.Fuzz(func(t *testing.T, invalidVal string) {
-		for _, key := range []string{"TELEGRAM_ADMIN_ID", "HEARTBEAT_INTERVAL", "TRIAL_DURATION_HOURS", "TRIAL_RATE_LIMIT", "HEALTH_CHECK_PORT"} {
+		for _, key := range []string{"TELEGRAM_ADMIN_ID", "HEARTBEAT_INTERVAL", "TRIAL_DURATION_HOURS", "TRIAL_RATE_LIMIT", "WEB_SERVER_PORT"} {
 			os.Setenv(key, invalidVal)
 		}
 		for k, v := range baseEnvs {
@@ -888,7 +888,7 @@ func FuzzLoad_InvalidEnvValues(f *testing.F) {
 			for key := range baseEnvs {
 				os.Unsetenv(key)
 			}
-			for _, key := range []string{"HEARTBEAT_INTERVAL", "TRIAL_DURATION_HOURS", "TRIAL_RATE_LIMIT", "HEALTH_CHECK_PORT"} {
+			for _, key := range []string{"HEARTBEAT_INTERVAL", "TRIAL_DURATION_HOURS", "TRIAL_RATE_LIMIT", "WEB_SERVER_PORT"} {
 				os.Unsetenv(key)
 			}
 		}()

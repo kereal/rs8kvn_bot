@@ -247,7 +247,7 @@ LOG_FILE_PATH=/app/data/bot.log
 HEARTBEAT_URL=https://healthchecks.io/ping/your-uuid
 HEARTBEAT_INTERVAL=300
 SENTRY_DSN=https://your-key@o123456.ingest.sentry.io/1234567
-HEALTH_CHECK_PORT=8880
+WEB_SERVER_PORT=8880
 
 # Trial
 TRIAL_DURATION_HOURS=3
