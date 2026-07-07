@@ -283,7 +283,7 @@ func TestHandleSubscription_AccessLogVariants(t *testing.T) {
 	tests := []struct {
 		name        string
 		setupReq    func() *http.Request
-		wantLineContains string
+		wantFields  []string
 	}{
 		{
 			name: "with headers",
@@ -297,7 +297,7 @@ func TestHandleSubscription_AccessLogVariants(t *testing.T) {
 				r.Header.Set("User-Agent", "V2Ray/1.0")
 				return r
 			},
-			wantLineContains: "GET\t/sub/unknown?debug=1\t404\t203.0.113.10\thw-1\tiOS\t17.0\tiPhone 15\tV2Ray/1.0",
+			wantFields: []string{"GET", "/sub/unknown?debug=1", "404", "203.0.113.10", "hw-1", "iOS", "17.0", "iPhone 15", "V2Ray/1.0"},
 		},
 		{
 			name: "missing optional headers",
@@ -306,7 +306,7 @@ func TestHandleSubscription_AccessLogVariants(t *testing.T) {
 				r.RemoteAddr = "203.0.113.10:1234"
 				return r
 			},
-			wantLineContains: "GET\t/sub/unknown\t404\t203.0.113.10",
+			wantFields: []string{"GET", "/sub/unknown", "404", "203.0.113.10", "", "", "", "", ""},
 		},
 	}
 
@@ -327,13 +327,15 @@ func TestHandleSubscription_AccessLogVariants(t *testing.T) {
 			content, err := os.ReadFile(logPath)
 			require.NoError(t, err)
 
-			line := strings.TrimSpace(string(content))
-			assert.Regexp(t, regexp.MustCompile(`\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}`), line)
-			assert.Contains(t, line, "\tINFO\t")
+			line := strings.TrimRight(string(content), "\n")
+			parts := strings.Split(line, "\t")
+			require.Len(t, parts, 11)
+			assert.Regexp(t, regexp.MustCompile(`\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}`), parts[0])
+			assert.Equal(t, "INFO", parts[1])
 			assert.NotContains(t, line, "\nGET")
 			assert.NotContains(t, line, "SUBSERVER_ACCESS")
 			assert.NotContains(t, line, `"method"`)
-			assert.Contains(t, line, tt.wantLineContains)
+			assert.Equal(t, tt.wantFields, parts[2:])
 		})
 	}
 }
