@@ -40,7 +40,6 @@ func serveFromCache(ctx context.Context, db interfaces.DatabaseService, subSvc *
 		}
 		// Transient DB error: serve the stale entry best-effort instead of
 		// failing the request or destroying a still-valid cache entry.
-		metrics.SubserverCacheInvalidationsTotal.WithLabelValues("status_error").Inc()
 		logger.Warn("Cache status revalidation failed, serving stale entry",
 			zap.String("sub_id", subID),
 			zap.Error(err))
