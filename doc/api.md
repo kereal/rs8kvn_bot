@@ -2,7 +2,7 @@
 
 **Version:** v2.3.0  
 **Date:** 2026-07-02  
-**Base URL:** `http://localhost:8880` (configurable via `HEALTH_CHECK_PORT`)
+**Base URL:** `http://localhost:8880` (configurable via `WEB_SERVER_PORT`)
 
 ---
 

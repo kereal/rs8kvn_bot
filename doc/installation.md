@@ -223,7 +223,7 @@ Air will automatically rebuild and restart the bot when you save changes to Go f
 | `HEARTBEAT_URL` | URL for heartbeat POST (optional) | — | ❌ | Receives `{}` every 5 min; must be valid http/https URL if set |
 | `HEARTBEAT_INTERVAL` | Heartbeat interval (seconds) | `300` | ❌ | Min 10s |
 | `SENTRY_DSN` | Sentry DSN for error tracking | — | ❌ | https://sentry.io/...; must be valid http/https URL if set |
-| `HEALTH_CHECK_PORT` | HTTP server port for health checks | `8880` | ❌ | 1–65535 |
+| `WEB_SERVER_PORT` | HTTP (web) server port | `8880` | ❌ | 1–65535 |
 | **Trial & Referral** |
 | `SITE_URL` | Base URL for landing pages | `https://vpn.site` | ❌ | Must be valid http/https URL; used in Telegram links |
 | `TRIAL_DURATION_HOURS` | Trial subscription duration | `3` | ❌ | 1–168 hours (7 days max) |

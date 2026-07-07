@@ -322,7 +322,7 @@ All tests pass with `-race` detector. Fuzzing enabled for critical functions.
   - `GLOBAL_SUB_URL` — must be valid URL with http/https scheme (S3: scheme allowlist)
   - `SENTRY_DSN`, `HEARTBEAT_URL` — must be valid URLs with http/https scheme
   - `SITE_URL` — must be valid URL
-- **Web server:** Runs on `HEALTH_CHECK_PORT` (default 8880), bound to all interfaces
+- **Web server:** Runs on `WEB_SERVER_PORT` (default 8880), bound to all interfaces
 - **Init failure:** Fatal exit for DB, XUI, and Bot API init errors (cannot operate without them)
 - **SUBSERVER_ACCESS_LOG:** Optional path for `/sub/{id}` access logging (tab-separated / TSV format)
 
