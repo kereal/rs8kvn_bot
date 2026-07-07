@@ -149,7 +149,7 @@ func NewTestFixture(t *testing.T) *IntegrationTestFixture {
 		DatabasePath:     ":memory:",
 	}
 
-	handler := NewHandler(testutil.NewBotAPI(), cfg, dbService, mockXUI.Client, NewTestBotConfig(), nil, "")
+	handler := NewHandler(testutil.NewBotAPI(), cfg, dbService, NewTestBotConfig(), nil, "")
 	mockXUIClients := map[uint]interfaces.XUIClient{1: mockXUI.Client}
 	nodes := []database.Node{{ID: 1, Name: "main", IsActive: true, Host: mockXUI.Server.URL, APIToken: "test-api-token", InboundIDs: "[1]"}}
 	subService := service.NewSubscriptionService(dbService, mockXUIClients, nil, nodes, cfg)

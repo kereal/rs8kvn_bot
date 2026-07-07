@@ -46,7 +46,7 @@ func TestHandleDel_ValidDeletion(t *testing.T) {
 	mockDB := testutil.NewDatabaseService()
 	mockXUI := testutil.NewXUIClient()
 	mockBot := testutil.NewBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, mockXUI, NewTestBotConfig(), nil, "")
+	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
 	xuiClients := map[uint]interfaces.XUIClient{1: mockXUI}
 	nodes := []database.Node{{ID: 1, IsActive: true, Host: "http://localhost:2053", APIToken: "test-token", InboundIDs: "[1]", SubscriptionURL: "http://example.com/sub/"}}
 	handler.subscriptionService = service.NewSubscriptionService(mockDB, xuiClients, nil, nodes, cfg)

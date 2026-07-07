@@ -110,7 +110,7 @@ func setupE2EEnv(t *testing.T) *e2eTestEnv {
 	xuiClients := map[uint]interfaces.XUIClient{1: mockXUI}
 	nodes := e2eNodes("https://panel.example.com")
 	subService := service.NewSubscriptionService(db, xuiClients, nil, nodes, cfg)
-	handler := bot.NewHandler(mockBotAPI, cfg, db, mockXUI, botCfg, subService, "")
+	handler := bot.NewHandler(mockBotAPI, cfg, db, botCfg, subService, "")
 
 	return &e2eTestEnv{
 		t:          t,
