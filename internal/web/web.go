@@ -518,11 +518,6 @@ func (s *Server) renderErrorPage(w http.ResponseWriter, message string) {
 	}
 }
 
-var (
-	ErrSubscriptionNotFound = errors.New("subscription not found")
-	ErrSubscriptionNoItems  = errors.New("no subscription items found")
-)
-
 func getClientIP(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err == nil && isLocalAddress(host) {
@@ -605,7 +600,7 @@ func (s *Server) handleSubscription(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 
 	logger.Debug("subscription request received",

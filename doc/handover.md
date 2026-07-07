@@ -165,7 +165,7 @@ For each active node:
   ├─ Build sourceURL:
   │   • 3x-ui/proxman: subscription_url + "/" + subID
   │   • fetch: subscription_url as-is
-  ├─ FetchFromSource(ctx, sourceURL) — HTTP GET
+  ├─ FetchFromNode(ctx, sourceURL) — HTTP GET
   ├─ DetectFormat (JSON / Clash / Base64 / Plain)
   └─ Aggregate subscription-userinfo headers
         │
@@ -324,7 +324,7 @@ All tests pass with `-race` detector. Fuzzing enabled for critical functions.
   - `SITE_URL` — must be valid URL
 - **Web server:** Runs on `HEALTH_CHECK_PORT` (default 8880), bound to all interfaces
 - **Init failure:** Fatal exit for DB, XUI, and Bot API init errors (cannot operate without them)
-- **SUBSERVER_ACCESS_LOG:** Optional path for `/sub/{id}` access logging (zap-console format)
+- **SUBSERVER_ACCESS_LOG:** Optional path for `/sub/{id}` access logging (tab-separated / TSV format)
 
 ### Rate Limiting
 - **Per-user (Telegram):** Each `chatID` gets own token bucket (max 30 tokens, refill 5/sec)
