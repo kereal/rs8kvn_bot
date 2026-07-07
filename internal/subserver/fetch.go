@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -21,7 +22,7 @@ import (
 // enabled (DisableCompression is false), so resp.Body is the decompressed
 // content that DetectFormat and the parsers consume directly.
 var fetchHTTPClient = &http.Client{
-	Timeout: 15 * time.Second,
+	Timeout: 10 * time.Second,
 	Transport: &http.Transport{
 		MaxIdleConns:        4,
 		MaxIdleConnsPerHost: 2,
@@ -30,17 +31,19 @@ var fetchHTTPClient = &http.Client{
 	},
 }
 
-// SourceResponse holds the body and headers returned by an upstream node's
+// NodeResponse holds the body and headers returned by an upstream node's
 // subscription endpoint (3x-ui JSON, Clash YAML, base64, plain links).
-type SourceResponse struct {
+type NodeResponse struct {
 	Body    []byte
 	Headers map[string]string
 }
 
-// FetchFromSource sends an HTTP GET to url with a custom User-Agent and returns
+// FetchFromNode sends an HTTP GET to url with a custom User-Agent and returns
 // the response body (up to 10 MB) together with all response headers stored
 // under lowercased keys. Header values are taken from the first value for each key.
-func FetchFromSource(ctx context.Context, url string) (*SourceResponse, error) {
+// Non-2xx responses are treated as fetch errors so upstream failures are never
+// aggregated into a subscription.
+func FetchFromNode(ctx context.Context, url string) (*NodeResponse, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		logger.Error("Failed to create HTTP request for source fetch",
@@ -58,15 +61,25 @@ func FetchFromSource(ctx context.Context, url string) (*SourceResponse, error) {
 			zap.Error(err))
 		return nil, err
 	}
-	if resp != nil && resp.Body != nil {
-		defer func() {
-			if closeErr := resp.Body.Close(); closeErr != nil {
-				logger.Error("Failed to close source response body",
-					zap.String("url", url),
-					zap.Error(closeErr))
-			}
-		}()
+	if resp == nil || resp.Body == nil {
+		logger.Error("Source fetch returned no response body",
+			zap.String("url", url))
+		return nil, fmt.Errorf("source fetch returned no body: %s", url)
 	}
+	if resp.StatusCode >= 400 {
+		resp.Body.Close()
+		logger.Error("Source fetch returned error status",
+			zap.String("url", url),
+			zap.Int("status", resp.StatusCode))
+		return nil, fmt.Errorf("source fetch %s returned status %d", url, resp.StatusCode)
+	}
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			logger.Error("Failed to close source response body",
+				zap.String("url", url),
+				zap.Error(closeErr))
+		}
+	}()
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 10<<20))
 	if err != nil {
@@ -83,7 +96,7 @@ func FetchFromSource(ctx context.Context, url string) (*SourceResponse, error) {
 		}
 	}
 
-	return &SourceResponse{
+	return &NodeResponse{
 		Body:    body,
 		Headers: headers,
 	}, nil

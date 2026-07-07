@@ -297,7 +297,7 @@ func TestHandleSubscription_AccessLogVariants(t *testing.T) {
 				r.Header.Set("User-Agent", "V2Ray/1.0")
 				return r
 			},
-			wantLineContains: "GET /sub/unknown?debug=1 404 203.0.113.10 hw-1 iOS 17.0 \"iPhone 15\" V2Ray/1.0",
+			wantLineContains: "GET\t/sub/unknown?debug=1\t404\t203.0.113.10\thw-1\tiOS\t17.0\tiPhone 15\tV2Ray/1.0",
 		},
 		{
 			name: "missing optional headers",
@@ -306,7 +306,7 @@ func TestHandleSubscription_AccessLogVariants(t *testing.T) {
 				r.RemoteAddr = "203.0.113.10:1234"
 				return r
 			},
-			wantLineContains: "GET /sub/unknown 404 203.0.113.10 - - - - -",
+			wantLineContains: "GET\t/sub/unknown\t404\t203.0.113.10",
 		},
 	}
 

@@ -15,8 +15,6 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/logger"
 
 	"go.uber.org/zap"
-	"go.uber.org/zap/buffer"
-	"go.uber.org/zap/zapcore"
 )
 
 const (
@@ -24,12 +22,9 @@ const (
 	accessLogTimeLayout = "2006-01-02T15:04:05.000Z0700"
 )
 
-var accessLogBufferPool = buffer.NewPool()
-
 // AccessLogger writes subscription endpoint request summaries to a separate file.
 type AccessLogger struct {
 	writer *asyncAccessLogWriter
-	log    *zap.Logger
 }
 
 // NewAccessLogger creates an access logger. An empty path disables logging.
@@ -49,173 +44,7 @@ func NewAccessLogger(path string) (*AccessLogger, error) {
 	}
 
 	writer := newAsyncAccessLogWriter(path, file)
-	encoder := newAccessLogEncoder()
-	core := zapcore.NewCore(encoder, zapcore.AddSync(writer), zapcore.InfoLevel)
-
-	return &AccessLogger{
-		writer: writer,
-		log:    zap.New(core),
-	}, nil
-}
-
-type accessLogEncoder struct {
-	zapcore.ObjectEncoder
-}
-
-func newAccessLogEncoder() *accessLogEncoder {
-	return &accessLogEncoder{}
-}
-
-func (e *accessLogEncoder) Clone() zapcore.Encoder {
-	return &accessLogEncoder{}
-}
-
-func (e *accessLogEncoder) EncodeEntry(ent zapcore.Entry, fields []zapcore.Field) (*buffer.Buffer, error) {
-	line := accessLogBufferPool.Get()
-
-	appendAccessLogPart(line, ent.Time.Format(accessLogTimeLayout))
-	appendAccessLogPart(line, ent.Level.CapitalString())
-
-	if len(fields) > 0 {
-		appendAccessLogPart(line, "")
-		appendAccessLogFields(line, fields)
-	}
-	line.AppendByte('\n')
-
-	return line, nil
-}
-
-func appendAccessLogPart(line *buffer.Buffer, value string) {
-	if line.Len() > 0 {
-		line.AppendByte('\t')
-	}
-	line.AppendString(value)
-}
-
-func appendAccessLogFields(line *buffer.Buffer, fields []zapcore.Field) {
-	encoder := &accessLogFieldEncoder{line: line}
-	for i, field := range fields {
-		if i > 0 {
-			line.AppendByte(' ')
-		}
-		field.AddTo(encoder)
-	}
-}
-
-type accessLogFieldEncoder struct {
-	line *buffer.Buffer
-}
-
-func (e *accessLogFieldEncoder) AddArray(key string, marshaler zapcore.ArrayMarshaler) error {
-	appendAccessLogValue(e.line, "-")
-	return nil
-}
-
-func (e *accessLogFieldEncoder) AddObject(key string, marshaler zapcore.ObjectMarshaler) error {
-	appendAccessLogValue(e.line, "-")
-	return nil
-}
-
-func (e *accessLogFieldEncoder) AddBinary(key string, value []byte) {
-	appendAccessLogValue(e.line, fmt.Sprintf("[%d bytes]", len(value)))
-}
-
-func (e *accessLogFieldEncoder) AddByteString(key string, value []byte) {
-	appendAccessLogValue(e.line, string(value))
-}
-
-func (e *accessLogFieldEncoder) AddBool(key string, value bool) {
-	appendAccessLogValue(e.line, strconv.FormatBool(value))
-}
-
-func (e *accessLogFieldEncoder) AddComplex128(key string, value complex128) {
-	appendAccessLogValue(e.line, strconv.FormatComplex(value, 'g', -1, 128))
-}
-
-func (e *accessLogFieldEncoder) AddComplex64(key string, value complex64) {
-	appendAccessLogValue(e.line, strconv.FormatComplex(complex128(value), 'g', -1, 64))
-}
-
-func (e *accessLogFieldEncoder) AddDuration(key string, value time.Duration) {
-	appendAccessLogValue(e.line, value.String())
-}
-
-func (e *accessLogFieldEncoder) AddFloat64(key string, value float64) {
-	appendAccessLogValue(e.line, strconv.FormatFloat(value, 'f', -1, 64))
-}
-
-func (e *accessLogFieldEncoder) AddFloat32(key string, value float32) {
-	appendAccessLogValue(e.line, strconv.FormatFloat(float64(value), 'f', -1, 32))
-}
-
-func (e *accessLogFieldEncoder) AddInt(key string, value int) {
-	appendAccessLogValue(e.line, strconv.Itoa(value))
-}
-
-func (e *accessLogFieldEncoder) AddInt64(key string, value int64) {
-	appendAccessLogValue(e.line, strconv.FormatInt(value, 10))
-}
-
-func (e *accessLogFieldEncoder) AddInt32(key string, value int32) {
-	appendAccessLogValue(e.line, strconv.FormatInt(int64(value), 10))
-}
-
-func (e *accessLogFieldEncoder) AddInt16(key string, value int16) {
-	appendAccessLogValue(e.line, strconv.FormatInt(int64(value), 10))
-}
-
-func (e *accessLogFieldEncoder) AddInt8(key string, value int8) {
-	appendAccessLogValue(e.line, strconv.FormatInt(int64(value), 10))
-}
-
-func (e *accessLogFieldEncoder) AddString(key string, value string) {
-	appendAccessLogValue(e.line, value)
-}
-
-func (e *accessLogFieldEncoder) AddTime(key string, value time.Time) {
-	appendAccessLogValue(e.line, value.Format(time.RFC3339))
-}
-
-func (e *accessLogFieldEncoder) AddUint(key string, value uint) {
-	appendAccessLogValue(e.line, strconv.FormatUint(uint64(value), 10))
-}
-
-func (e *accessLogFieldEncoder) AddUint64(key string, value uint64) {
-	appendAccessLogValue(e.line, strconv.FormatUint(value, 10))
-}
-
-func (e *accessLogFieldEncoder) AddUint32(key string, value uint32) {
-	appendAccessLogValue(e.line, strconv.FormatUint(uint64(value), 10))
-}
-
-func (e *accessLogFieldEncoder) AddUint16(key string, value uint16) {
-	appendAccessLogValue(e.line, strconv.FormatUint(uint64(value), 10))
-}
-
-func (e *accessLogFieldEncoder) AddUint8(key string, value uint8) {
-	appendAccessLogValue(e.line, strconv.FormatUint(uint64(value), 10))
-}
-
-func (e *accessLogFieldEncoder) AddUintptr(key string, value uintptr) {
-	appendAccessLogValue(e.line, strconv.FormatUint(uint64(value), 10))
-}
-
-func (e *accessLogFieldEncoder) AddReflected(key string, value interface{}) error {
-	appendAccessLogValue(e.line, fmt.Sprint(value))
-	return nil
-}
-
-func (e *accessLogFieldEncoder) OpenNamespace(key string) {}
-
-func appendAccessLogValue(line *buffer.Buffer, value string) {
-	value = sanitizeAccessLogValue(value)
-	if value == "" {
-		value = "-"
-	}
-	if strings.Contains(value, " ") {
-		value = strconv.Quote(value)
-	}
-	line.AppendString(value)
+	return &AccessLogger{writer: writer}, nil
 }
 
 // Enabled reports whether access logging is active.
@@ -223,23 +52,34 @@ func (l *AccessLogger) Enabled() bool {
 	return l != nil && l.writer != nil
 }
 
-// Log writes one subscription request record.
+// Log writes one subscription request record as a tab-separated line.
 func (l *AccessLogger) Log(r *http.Request, statusCode int, clientIP string) {
-	if l == nil || l.log == nil {
+	if l == nil || l.writer == nil {
 		return
 	}
 
-	l.log.Info("",
-		zap.String("method", r.Method),
-		zap.String("url", r.URL.RequestURI()),
-		zap.Int("status_code", statusCode),
-		zap.String("ip", sanitizeAccessLogValue(clientIP)),
-		zap.String("x_hwid", sanitizeAccessLogValue(r.Header.Get("X-Hwid"))),
-		zap.String("x_device_os", sanitizeAccessLogValue(r.Header.Get("X-Device-Os"))),
-		zap.String("x_ver_os", sanitizeAccessLogValue(r.Header.Get("X-Ver-Os"))),
-		zap.String("x_device_model", sanitizeAccessLogValue(r.Header.Get("X-Device-Model"))),
-		zap.String("user_agent", sanitizeAccessLogValue(r.Header.Get("User-Agent"))),
-	)
+	var b strings.Builder
+	appendAccessLogPart(&b, time.Now().UTC().Format(accessLogTimeLayout))
+	appendAccessLogPart(&b, "INFO")
+	appendAccessLogPart(&b, r.Method)
+	appendAccessLogPart(&b, r.URL.RequestURI())
+	appendAccessLogPart(&b, strconv.Itoa(statusCode))
+	appendAccessLogPart(&b, sanitizeAccessLogValue(clientIP))
+	appendAccessLogPart(&b, sanitizeAccessLogValue(r.Header.Get("X-Hwid")))
+	appendAccessLogPart(&b, sanitizeAccessLogValue(r.Header.Get("X-Device-Os")))
+	appendAccessLogPart(&b, sanitizeAccessLogValue(r.Header.Get("X-Ver-Os")))
+	appendAccessLogPart(&b, sanitizeAccessLogValue(r.Header.Get("X-Device-Model")))
+	appendAccessLogPart(&b, sanitizeAccessLogValue(r.Header.Get("User-Agent")))
+	b.WriteByte('\n')
+
+	l.writer.Write([]byte(b.String()))
+}
+
+func appendAccessLogPart(b *strings.Builder, value string) {
+	if b.Len() > 0 {
+		b.WriteByte('\t')
+	}
+	b.WriteString(value)
 }
 
 // Close flushes pending records and closes the access log file.

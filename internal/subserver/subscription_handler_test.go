@@ -66,8 +66,8 @@ func TestHandleSubscription_CacheHit_Revoked_InvalidatesCache(t *testing.T) {
 	}
 
 	_, err := HandleSubscription(ctx, mockDB, svc, "sub-revoked", "1.2.3.4", nil)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "not active")
+	// A revoked subscription must read as not found (404), not as a server error.
+	assert.ErrorIs(t, err, ErrSubscriptionNotFound)
 
 	// Cache should be invalidated
 	_, _, ok := svc.GetCache("sub-revoked")
@@ -90,8 +90,8 @@ func TestHandleSubscription_CacheHit_Expired_InvalidatesCache(t *testing.T) {
 	}
 
 	_, err := HandleSubscription(ctx, mockDB, svc, "sub-expired", "1.2.3.4", nil)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "not active")
+	// An expired subscription must read as not found (404), not as a server error.
+	assert.ErrorIs(t, err, ErrSubscriptionNotFound)
 
 	_, _, ok := svc.GetCache("sub-expired")
 	assert.False(t, ok, "cache should be invalidated for expired subscription")
@@ -107,13 +107,19 @@ func TestHandleSubscription_CacheHit_StatusCheckError_ReturnsError(t *testing.T)
 	cachedBody := []byte("stale-content")
 	svc.SetCache("sub-err", cachedBody, map[string]string{"content-type": "text/plain"})
 
+	// A transient DB error during revalidation must not fail the request or
+	// destroy a still-valid cache entry: the stale response is served best-effort.
 	mockDB.GetSubscriptionStatusFunc = func(ctx context.Context, subID string) (string, time.Time, error) {
 		return "", time.Time{}, fmt.Errorf("db error")
 	}
 
-	_, err := HandleSubscription(ctx, mockDB, svc, "sub-err", "1.2.3.4", nil)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "cache status check failed")
+	result, err := HandleSubscription(ctx, mockDB, svc, "sub-err", "1.2.3.4", nil)
+	require.NoError(t, err)
+	assert.Equal(t, cachedBody, result.Body)
+
+	// Cache must remain intact on revalidation error.
+	_, _, ok := svc.GetCache("sub-err")
+	assert.True(t, ok, "cache must not be invalidated on transient revalidation error")
 }
 
 func TestHandleSubscription_CacheMiss_SubscriptionNotFound(t *testing.T) {
@@ -279,7 +285,7 @@ func TestHandleSubscription_FetchError_SkipsNode(t *testing.T) {
 	svc := newTestSubSvc(t)
 	ctx := context.Background()
 
-	// Node points to an invalid URL — FetchFromSource will fail
+	// Node points to an invalid URL — FetchFromNode will fail
 	mockDB.GetWithPlanAndNodesFunc = func(ctx context.Context, subID string) (*database.SubscriptionFull, error) {
 		return &database.SubscriptionFull{
 			Subscription: database.Subscription{ID: 5, SubscriptionID: "sub-fetch-err", Status: "active"},

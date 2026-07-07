@@ -261,10 +261,15 @@ docker logs rs8kvn_bot 2>&1 | grep "Heartbeat sent"
 
 ### 4.3 Subscription Access Log
 
-If `SUBSERVER_ACCESS_LOG` is set, the bot appends every `/sub/{id}` request to that file as a zap-console line without a message, caller, or field keys. Access log writes are buffered asynchronously so disk I/O does not block subscription responses. If the file cannot be opened, the bot continues without the access log and writes an error to the main application log. Each line contains:
+If `SUBSERVER_ACCESS_LOG` is set, the bot appends every `/sub/{id}` request to that file as a tab-separated (TSV) line (no zap-console encoding, no message/caller/field keys). Fields are separated by tab characters; empty optional values are written as empty fields (not `-`). Access log writes are buffered asynchronously so disk I/O does not block subscription responses. If the file cannot be opened, the bot continues without the access log and writes an error to the main application log. Each line contains, tab-separated:
 
-- timestamp and log level separated by tabs
-- method, request URL, response status code, client IP, `X-HWID`, `X-Device-Os`, `X-Ver-Os`, `X-Device-Model`, and `User-Agent` as space-separated values; values containing spaces are quoted, and empty optional values are written as `-`
+- `timestamp` — request time in UTC (`2006-01-02T15:04:05.000Z0700`)
+- `level` — always `INFO`
+- `method` — HTTP method (e.g. `GET`)
+- `request_uri` — full request URI (e.g. `/sub/{id}`)
+- `status_code` — response status code
+- `client_ip` — client IP address
+- `X-Hwid`, `X-Device-Os`, `X-Ver-Os`, `X-Device-Model`, and `User-Agent` request headers (sanitised: CR/LF/TAB replaced with spaces)
 
 The main application log records an INFO message when this access log is enabled. To disable it, set `SUBSERVER_ACCESS_LOG` to an empty value and restart the bot.
 
