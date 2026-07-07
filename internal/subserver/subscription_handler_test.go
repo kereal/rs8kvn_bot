@@ -748,12 +748,18 @@ func TestFilterHeaders(t *testing.T) {
 	h.Set("X-Forwarded-For", "1.2.3.4")
 	h.Set("X-Real-Ip", "5.6.7.8")
 	h.Set("User-Agent", "v2rayng")
+	h.Set("Accept", "application/json")
+	h.Set("Authorization", "Bearer token")
+	h.Set("Cookie", "session=abc")
 
 	filtered := FilterHeaders(h)
 	assert.Equal(t, "test-device", filtered["x-hwid"])
 	assert.Equal(t, "v2rayng", filtered["user-agent"])
 	assert.NotContains(t, filtered, "x-forwarded-for")
 	assert.NotContains(t, filtered, "x-real-ip")
+	assert.NotContains(t, filtered, "accept")
+	assert.NotContains(t, filtered, "authorization")
+	assert.NotContains(t, filtered, "cookie")
 }
 
 func TestSkipTransportHeader(t *testing.T) {
