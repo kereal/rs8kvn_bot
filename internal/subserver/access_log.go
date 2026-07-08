@@ -27,6 +27,21 @@ type AccessLogger struct {
 	writer *asyncAccessLogWriter
 }
 
+// asyncAccessLogWriter handles asynchronous writing to the access log file.
+type asyncAccessLogWriter struct {
+	noCopy     noCopy
+	path       string
+	file       *os.File
+	queue      chan []byte
+	done       chan struct{}
+	wg         sync.WaitGroup
+	mu         sync.Mutex
+	closed     bool
+	fileClosed bool
+	drops      atomic.Uint64
+	warned     atomic.Bool
+}
+
 // NewAccessLogger creates an access logger. An empty path disables logging.
 func NewAccessLogger(path string) (*AccessLogger, error) {
 	path = strings.TrimSpace(path)
@@ -52,34 +67,52 @@ func (l *AccessLogger) Enabled() bool {
 	return l != nil && l.writer != nil
 }
 
-// Log writes one subscription request record as a tab-separated line.
-func (l *AccessLogger) Log(r *http.Request, statusCode int, clientIP string) {
+// Log writes one subscription request record as a space-separated line,
+// including fetch statistics if available.
+func (l *AccessLogger) Log(r *http.Request, statusCode int, clientIP string, success, total int) {
 	if l == nil || l.writer == nil {
 		return
 	}
 
 	var b strings.Builder
+	// Write standard HTTP request information
 	appendAccessLogPart(&b, time.Now().UTC().Format(accessLogTimeLayout))
-	appendAccessLogPart(&b, "INFO")
 	appendAccessLogPart(&b, r.Method)
 	appendAccessLogPart(&b, r.URL.RequestURI())
 	appendAccessLogPart(&b, strconv.Itoa(statusCode))
+
+	// Write upstream fetch statistics: total sources / successful fetches
+	if total > 0 {
+		appendAccessLogPart(&b, fmt.Sprintf("%d/%d", success, total))
+	} else {
+		appendAccessLogPart(&b, "-")
+	}
+
+	// Write client metadata
 	appendAccessLogPart(&b, sanitizeAccessLogValue(clientIP))
 	appendAccessLogPart(&b, sanitizeAccessLogValue(r.Header.Get("X-Hwid")))
 	appendAccessLogPart(&b, sanitizeAccessLogValue(r.Header.Get("X-Device-Os")))
 	appendAccessLogPart(&b, sanitizeAccessLogValue(r.Header.Get("X-Ver-Os")))
 	appendAccessLogPart(&b, sanitizeAccessLogValue(r.Header.Get("X-Device-Model")))
 	appendAccessLogPart(&b, sanitizeAccessLogValue(r.Header.Get("User-Agent")))
+
 	b.WriteByte('\n')
 
 	l.writer.Write([]byte(b.String()))
 }
 
+// appendAccessLogPart joins parts with a space, wrapping values containing spaces in quotes.
 func appendAccessLogPart(b *strings.Builder, value string) {
 	if b.Len() > 0 {
-		b.WriteByte('\t')
+		b.WriteByte(' ')
 	}
-	b.WriteString(value)
+	if strings.Contains(value, " ") {
+		b.WriteByte('"')
+		b.WriteString(value)
+		b.WriteByte('"')
+	} else {
+		b.WriteString(value)
+	}
 }
 
 // Close flushes pending records and closes the access log file.
@@ -95,20 +128,6 @@ func (l *AccessLogger) CloseWithContext(ctx context.Context) error {
 	return l.writer.Sync(ctx)
 }
 
-type asyncAccessLogWriter struct {
-	noCopy     noCopy
-	path       string
-	file       *os.File
-	queue      chan []byte
-	done       chan struct{}
-	wg         sync.WaitGroup
-	mu         sync.Mutex
-	closed     bool
-	fileClosed bool
-	drops      atomic.Uint64
-	warned     atomic.Bool
-}
-
 func newAsyncAccessLogWriter(path string, file *os.File) *asyncAccessLogWriter {
 	writer := &asyncAccessLogWriter{
 		path:  path,
@@ -121,6 +140,7 @@ func newAsyncAccessLogWriter(path string, file *os.File) *asyncAccessLogWriter {
 	return writer
 }
 
+// Write enqueues log data to be written asynchronously.
 func (w *asyncAccessLogWriter) Write(p []byte) (int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -139,6 +159,7 @@ func (w *asyncAccessLogWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
+// Sync flushes the queue, waits for completion, and closes the file.
 func (w *asyncAccessLogWriter) Sync(ctx context.Context) error {
 	w.mu.Lock()
 	if w.closed {
@@ -205,6 +226,8 @@ func (w *asyncAccessLogWriter) run() {
 	}
 }
 
+// sanitizeAccessLogValue cleans values by removing carriage returns, newlines, and tabs,
+// and trimming surrounding whitespace, suitable for log formatting.
 func sanitizeAccessLogValue(value string) string {
 	if value == "" {
 		return ""
@@ -213,5 +236,6 @@ func sanitizeAccessLogValue(value string) string {
 	value = strings.ReplaceAll(value, "\r", " ")
 	value = strings.ReplaceAll(value, "\n", " ")
 	value = strings.ReplaceAll(value, "\t", " ")
+	value = strings.ReplaceAll(value, "\"", " ")
 	return strings.TrimSpace(value)
 }

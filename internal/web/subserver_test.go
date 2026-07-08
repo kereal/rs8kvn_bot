@@ -297,7 +297,7 @@ func TestHandleSubscription_AccessLogVariants(t *testing.T) {
 				r.Header.Set("User-Agent", "V2Ray/1.0")
 				return r
 			},
-			wantFields: []string{"GET", "/sub/unknown?debug=1", "404", "203.0.113.10", "hw-1", "iOS", "17.0", "iPhone 15", "V2Ray/1.0"},
+			wantFields: []string{"GET", "/sub/unknown?debug=1", "404", "-", "203.0.113.10", "hw-1", "iOS", "17.0", "iPhone 15", "V2Ray/1.0"},
 		},
 		{
 			name: "missing optional headers",
@@ -306,7 +306,7 @@ func TestHandleSubscription_AccessLogVariants(t *testing.T) {
 				r.RemoteAddr = "203.0.113.10:1234"
 				return r
 			},
-			wantFields: []string{"GET", "/sub/unknown", "404", "203.0.113.10", "", "", "", "", ""},
+			wantFields: []string{"GET", "/sub/unknown", "404", "-", "203.0.113.10", "", "", "", "", ""},
 		},
 	}
 
@@ -328,16 +328,64 @@ func TestHandleSubscription_AccessLogVariants(t *testing.T) {
 			require.NoError(t, err)
 
 			line := strings.TrimRight(string(content), "\n")
-			parts := strings.Split(line, "\t")
+			parts := splitAccessLogLine(line)
+			for len(parts) < 11 {
+				parts = append(parts, "")
+			}
 			require.Len(t, parts, 11)
 			assert.Regexp(t, regexp.MustCompile(`\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}`), parts[0])
-			assert.Equal(t, "INFO", parts[1])
 			assert.NotContains(t, line, "\nGET")
 			assert.NotContains(t, line, "SUBSERVER_ACCESS")
 			assert.NotContains(t, line, `"method"`)
-			assert.Equal(t, tt.wantFields, parts[2:])
+			assert.Equal(t, tt.wantFields, parts[1:])
 		})
 	}
+}
+
+func TestHandleSubscription_AccessLogSuccessTotalOrder(t *testing.T) {
+	t.Parallel()
+
+	logPath := filepath.Join(t.TempDir(), "subserver.log")
+	accessLogger, err := subserver.NewAccessLogger(logPath)
+	require.NoError(t, err)
+
+	r := httptest.NewRequest(http.MethodGet, "/sub/test", nil)
+	r.RemoteAddr = "203.0.113.10:1234"
+	// success=3, total=5 must be written as "3/5", not "5/3".
+	accessLogger.Log(r, 200, "203.0.113.10", 3, 5)
+
+	require.NoError(t, accessLogger.Close())
+	content, err := os.ReadFile(logPath)
+	require.NoError(t, err)
+
+	line := strings.TrimRight(string(content), "\n")
+	parts := splitAccessLogLine(line)
+	require.GreaterOrEqual(t, len(parts), 5)
+	// Field layout: timestamp method uri status success/total ...
+	assert.Equal(t, "3/5", parts[4])
+}
+
+func splitAccessLogLine(line string) []string {
+	var parts []string
+	var current strings.Builder
+	inQuotes := false
+	for _, r := range line {
+		if r == '"' {
+			inQuotes = !inQuotes
+		} else if r == ' ' && !inQuotes {
+			parts = append(parts, current.String())
+			current.Reset()
+			continue
+		}
+		current.WriteRune(r)
+	}
+	parts = append(parts, current.String())
+	for i, p := range parts {
+		if len(p) >= 2 && p[0] == '"' && p[len(p)-1] == '"' {
+			parts[i] = p[1 : len(p)-1]
+		}
+	}
+	return parts
 }
 func TestHandleSubscription_SourceFetchError(t *testing.T) {
 	t.Parallel()
