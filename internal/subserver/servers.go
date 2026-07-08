@@ -59,6 +59,7 @@ type serverConfig struct {
 	PublicKey     string `json:"pbk"`
 	ShortID       string `json:"sid"`
 	Network       string `json:"network"`
+	Mode          string `json:"mode"`
 	Tag           string `json:"tag"`
 	Remark        string `json:"remark"`
 	Ps            string `json:"ps"`
@@ -71,6 +72,8 @@ type serverConfig struct {
 	HeaderType    string `json:"headerType"`
 	PortNumber    int    `json:"portNumber"`
 	Method        string `json:"method"`
+	Plugin        string `json:"plugin"`
+	PluginOpts    string `json:"pluginOpts"`
 	Key           string `json:"key"`
 	Crypt         string `json:"crypt"`
 	Obfs          string `json:"obfs"`
@@ -187,10 +190,18 @@ func buildVLESSServerLink(cfg *serverConfig) (string, error) {
 		params.Set("sid", cfg.ShortID)
 	}
 	if cfg.Network != "" {
-		params.Set("type", cfg.Network)
-		if cfg.Network == "grpc" && cfg.Path != "" {
+		netType := cfg.Network
+		// Legacy "splithttp" was renamed to "xhttp" in v2rayN 7.x / Xray-core.
+		if netType == "splithttp" {
+			netType = "xhttp"
+		}
+		params.Set("type", netType)
+		if netType == "grpc" && cfg.Path != "" {
 			// gRPC transport uses serviceName, not path, in share links.
 			params.Set("serviceName", cfg.Path)
+		}
+		if netType == "xhttp" && cfg.Mode != "" {
+			params.Set("mode", cfg.Mode)
 		}
 	}
 	if cfg.Host != "" {
@@ -343,6 +354,9 @@ func buildShadowsocksServerLink(cfg *serverConfig) (string, error) {
 	}
 
 	link := "ss://" + userInfo + "@" + net.JoinHostPort(cfg.Address, strconv.Itoa(cfg.Port))
+	if cfg.PluginOpts != "" {
+		link += "?plugin=" + url.QueryEscape(cfg.PluginOpts)
+	}
 	if remark != "" {
 		link += "#" + url.QueryEscape(remark)
 	}
