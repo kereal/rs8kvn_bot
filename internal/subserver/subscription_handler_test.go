@@ -44,7 +44,7 @@ func TestHandleSubscription_CacheHit_Active(t *testing.T) {
 		return "active", time.Now().Add(24 * time.Hour), nil
 	}
 
-	result, err := HandleSubscription(ctx, mockDB, svc, "sub123", "1.2.3.4", nil)
+	result, _, _, err := HandleSubscription(ctx, mockDB, svc, "sub123", "1.2.3.4", nil)
 	require.NoError(t, err)
 	assert.Equal(t, cachedBody, result.Body)
 	assert.Equal(t, cachedHeaders, result.Headers)
@@ -65,7 +65,7 @@ func TestHandleSubscription_CacheHit_Revoked_InvalidatesCache(t *testing.T) {
 		return "revoked", time.Time{}, nil
 	}
 
-	_, err := HandleSubscription(ctx, mockDB, svc, "sub-revoked", "1.2.3.4", nil)
+	_, _, _, err := HandleSubscription(ctx, mockDB, svc, "sub-revoked", "1.2.3.4", nil)
 	// A revoked subscription must read as not found (404), not as a server error.
 	assert.ErrorIs(t, err, ErrSubscriptionNotFound)
 
@@ -89,7 +89,7 @@ func TestHandleSubscription_CacheHit_Expired_InvalidatesCache(t *testing.T) {
 		return "active", pastTime, nil
 	}
 
-	_, err := HandleSubscription(ctx, mockDB, svc, "sub-expired", "1.2.3.4", nil)
+	_, _, _, err := HandleSubscription(ctx, mockDB, svc, "sub-expired", "1.2.3.4", nil)
 	// An expired subscription must read as not found (404), not as a server error.
 	assert.ErrorIs(t, err, ErrSubscriptionNotFound)
 
@@ -113,7 +113,7 @@ func TestHandleSubscription_CacheHit_StatusCheckError_ReturnsError(t *testing.T)
 		return "", time.Time{}, fmt.Errorf("db error")
 	}
 
-	result, err := HandleSubscription(ctx, mockDB, svc, "sub-err", "1.2.3.4", nil)
+	result, _, _, err := HandleSubscription(ctx, mockDB, svc, "sub-err", "1.2.3.4", nil)
 	require.NoError(t, err)
 	assert.Equal(t, cachedBody, result.Body)
 
@@ -133,7 +133,7 @@ func TestHandleSubscription_CacheMiss_SubscriptionNotFound(t *testing.T) {
 		return nil, fmt.Errorf("not found: %w", database.ErrSubscriptionNotFound)
 	}
 
-	_, err := HandleSubscription(ctx, mockDB, svc, "nonexistent", "1.2.3.4", nil)
+	_, _, _, err := HandleSubscription(ctx, mockDB, svc, "nonexistent", "1.2.3.4", nil)
 	assert.ErrorIs(t, err, ErrSubscriptionNotFound)
 }
 
@@ -168,7 +168,7 @@ func TestHandleSubscription_Base64Response(t *testing.T) {
 	mockDB.UpdateDevicesFunc = func(ctx context.Context, id uint, devicesJSON string) error { return nil }
 	mockDB.UpdateIPsFunc = func(ctx context.Context, id uint, ipsJSON string) error { return nil }
 
-	result, err := HandleSubscription(ctx, mockDB, svc, "sub-b64", "1.2.3.4", nil)
+	result, _, _, err := HandleSubscription(ctx, mockDB, svc, "sub-b64", "1.2.3.4", nil)
 	require.NoError(t, err)
 	assert.NotNil(t, result.Body)
 	assert.Contains(t, result.Headers["content-type"], "base64")
@@ -201,7 +201,7 @@ func TestHandleSubscription_PlainResponse(t *testing.T) {
 	mockDB.UpdateDevicesFunc = func(ctx context.Context, id uint, devicesJSON string) error { return nil }
 	mockDB.UpdateIPsFunc = func(ctx context.Context, id uint, ipsJSON string) error { return nil }
 
-	result, err := HandleSubscription(ctx, mockDB, svc, "sub-plain", "1.2.3.4", nil)
+	result, _, _, err := HandleSubscription(ctx, mockDB, svc, "sub-plain", "1.2.3.4", nil)
 	require.NoError(t, err)
 	assert.NotNil(t, result.Body)
 	// Should be base64-encoded
@@ -248,7 +248,7 @@ func TestHandleSubscription_JSONResponse_PureJSON(t *testing.T) {
 	mockDB.UpdateDevicesFunc = func(ctx context.Context, id uint, devicesJSON string) error { return nil }
 	mockDB.UpdateIPsFunc = func(ctx context.Context, id uint, ipsJSON string) error { return nil }
 
-	result, err := HandleSubscription(ctx, mockDB, svc, "sub-json", "1.2.3.4", nil)
+	result, _, _, err := HandleSubscription(ctx, mockDB, svc, "sub-json", "1.2.3.4", nil)
 	require.NoError(t, err)
 	assert.NotNil(t, result.Body)
 	assert.Contains(t, result.Headers["content-type"], "application/json")
@@ -274,7 +274,7 @@ func TestHandleSubscription_NoNodesWithSubscriptionURL(t *testing.T) {
 	mockDB.UpdateDevicesFunc = func(ctx context.Context, id uint, devicesJSON string) error { return nil }
 	mockDB.UpdateIPsFunc = func(ctx context.Context, id uint, ipsJSON string) error { return nil }
 
-	_, err := HandleSubscription(ctx, mockDB, svc, "sub-no-url", "1.2.3.4", nil)
+	_, _, _, err := HandleSubscription(ctx, mockDB, svc, "sub-no-url", "1.2.3.4", nil)
 	assert.ErrorIs(t, err, ErrNoSubscriptionItems)
 }
 
@@ -298,7 +298,7 @@ func TestHandleSubscription_FetchError_SkipsNode(t *testing.T) {
 	mockDB.UpdateDevicesFunc = func(ctx context.Context, id uint, devicesJSON string) error { return nil }
 	mockDB.UpdateIPsFunc = func(ctx context.Context, id uint, ipsJSON string) error { return nil }
 
-	_, err := HandleSubscription(ctx, mockDB, svc, "sub-fetch-err", "1.2.3.4", nil)
+	_, _, _, err := HandleSubscription(ctx, mockDB, svc, "sub-fetch-err", "1.2.3.4", nil)
 	assert.ErrorIs(t, err, ErrNoSubscriptionItems)
 }
 
@@ -338,7 +338,7 @@ func TestHandleSubscription_MultipleNodes_AggregatesResponses(t *testing.T) {
 	mockDB.UpdateDevicesFunc = func(ctx context.Context, id uint, devicesJSON string) error { return nil }
 	mockDB.UpdateIPsFunc = func(ctx context.Context, id uint, ipsJSON string) error { return nil }
 
-	result, err := HandleSubscription(ctx, mockDB, svc, "sub-multi", "1.2.3.4", nil)
+	result, _, _, err := HandleSubscription(ctx, mockDB, svc, "sub-multi", "1.2.3.4", nil)
 	require.NoError(t, err)
 	assert.NotNil(t, result.Body)
 
@@ -396,7 +396,7 @@ func TestHandleSubscription_ClashOnly_ReturnsBase64Links(t *testing.T) {
 	mockDB.UpdateDevicesFunc = func(ctx context.Context, id uint, devicesJSON string) error { return nil }
 	mockDB.UpdateIPsFunc = func(ctx context.Context, id uint, ipsJSON string) error { return nil }
 
-	result, err := HandleSubscription(ctx, mockDB, svc, "sub-clash", "1.2.3.4", nil)
+	result, _, _, err := HandleSubscription(ctx, mockDB, svc, "sub-clash", "1.2.3.4", nil)
 	require.NoError(t, err)
 	require.NotNil(t, result.Body)
 
@@ -438,7 +438,7 @@ func TestHandleSubscription_JSONAndClash_ReturnsBase64(t *testing.T) {
 	mockDB.UpdateDevicesFunc = func(ctx context.Context, id uint, devicesJSON string) error { return nil }
 	mockDB.UpdateIPsFunc = func(ctx context.Context, id uint, ipsJSON string) error { return nil }
 
-	result, err := HandleSubscription(ctx, mockDB, svc, "sub-mix", "1.2.3.4", nil)
+	result, _, _, err := HandleSubscription(ctx, mockDB, svc, "sub-mix", "1.2.3.4", nil)
 	require.NoError(t, err)
 	require.NotNil(t, result.Body)
 
@@ -478,7 +478,7 @@ func TestHandleSubscription_Base64AndClash_ReturnsBase64(t *testing.T) {
 	mockDB.UpdateDevicesFunc = func(ctx context.Context, id uint, devicesJSON string) error { return nil }
 	mockDB.UpdateIPsFunc = func(ctx context.Context, id uint, ipsJSON string) error { return nil }
 
-	result, err := HandleSubscription(ctx, mockDB, svc, "sub-b64c", "1.2.3.4", nil)
+	result, _, _, err := HandleSubscription(ctx, mockDB, svc, "sub-b64c", "1.2.3.4", nil)
 	require.NoError(t, err)
 	require.NotNil(t, result.Body)
 
@@ -520,7 +520,7 @@ func TestHandleSubscription_FetchNode_UsesURLDirectly(t *testing.T) {
 	mockDB.UpdateDevicesFunc = func(ctx context.Context, id uint, devicesJSON string) error { return nil }
 	mockDB.UpdateIPsFunc = func(ctx context.Context, id uint, ipsJSON string) error { return nil }
 
-	result, err := HandleSubscription(ctx, mockDB, svc, "sub-fetch", "1.2.3.4", nil)
+	result, _, _, err := HandleSubscription(ctx, mockDB, svc, "sub-fetch", "1.2.3.4", nil)
 	require.NoError(t, err)
 	assert.NotNil(t, result.Body)
 
@@ -880,7 +880,7 @@ func TestHandleSubscription_CacheHit_UpdatesLastRequest(t *testing.T) {
 		return nil
 	}
 
-	_, err := HandleSubscription(ctx, mockDB, svc, "sub-lr-hit", "1.2.3.4", nil)
+	_, _, _, err := HandleSubscription(ctx, mockDB, svc, "sub-lr-hit", "1.2.3.4", nil)
 	require.NoError(t, err)
 	assert.Equal(t, "sub-lr-hit", calledSubID, "UpdateLastRequest must be called on cache hit")
 }
@@ -901,7 +901,7 @@ func TestHandleSubscription_CacheHit_LastRequestError_DoesNotBlockResponse(t *te
 		return fmt.Errorf("db error")
 	}
 
-	result, err := HandleSubscription(ctx, mockDB, svc, "sub-lr-err", "1.2.3.4", nil)
+	result, _, _, err := HandleSubscription(ctx, mockDB, svc, "sub-lr-err", "1.2.3.4", nil)
 	require.NoError(t, err, "UpdateLastRequest failure must not block cache hit response")
 	assert.NotNil(t, result.Body)
 }
@@ -942,7 +942,7 @@ func TestHandleSubscription_CacheMiss_UpdatesLastRequest(t *testing.T) {
 		return nil
 	}
 
-	_, err := HandleSubscription(ctx, mockDB, svc, "sub-lr-miss", "1.2.3.4", nil)
+	_, _, _, err := HandleSubscription(ctx, mockDB, svc, "sub-lr-miss", "1.2.3.4", nil)
 	require.NoError(t, err)
 	assert.Equal(t, "sub-lr-miss", calledSubID, "UpdateLastRequest must be called on cache miss")
 }
