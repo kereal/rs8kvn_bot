@@ -189,4 +189,14 @@ type BotAPI interface {
 	Request(c tgbotapi.Chattable) (*tgbotapi.APIResponse, error)
 }
 
+// WebRepository is the composed DB seam for the web/HTTP server: subscription
+// aggregation handoff (SubscriptionRepository) plus the invite/trial/plan reads
+// its landing pages need. It deliberately drops Node/Order/SubscriptionNode/Product.
+type WebRepository interface {
+	SubscriptionRepository
+	InviteRepository
+	TrialRepository
+	PlanRepository
+}
+
 // vpn.Client is defined in internal/vpn/client.go
