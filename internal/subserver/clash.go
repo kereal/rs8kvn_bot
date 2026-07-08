@@ -74,31 +74,27 @@ func normaliseClashProxy(p map[string]any) (map[string]any, error) {
 
 	// Common fields shared across protocols.
 	out["type"] = proxyType
-	setStr(out, p, "server", "address")
-	setStr(out, p, "name", "remark")
+	setStrFallback(out, p, []string{"server", "address"}, "address")
+	setStrFallback(out, p, []string{"name", "remark"}, "remark")
 	if v, ok := p["port"]; ok {
 		out["port"] = portToInt(v)
 	}
 
 	switch proxyType {
 	case "vless":
-		setStr(out, p, "uuid", "uuid")
-		setStr(out, p, "flow", "flow")
-		setStr(out, p, "encryption", "encryption")
-		setStr(out, p, "network", "network")
-		setStr(out, p, "servername", "sni")
-		setStr(out, p, "client-fingerprint", "fp")
-		setStr(out, p, "alpn", "alpn")
+		setStrFallback(out, p, []string{"uuid", "id", "userId"}, "uuid")
+		setStrFallback(out, p, []string{"flow"}, "flow")
+		setStrFallback(out, p, []string{"encryption"}, "encryption")
+		setStrFallback(out, p, []string{"network", "net"}, "network")
+		setStrFallback(out, p, []string{"servername", "sni"}, "sni")
+		setStrFallback(out, p, []string{"client-fingerprint", "fp"}, "fp")
+		setStrFallback(out, p, []string{"alpn"}, "alpn")
 		// REALITY: presence of reality-opts means security=reality.
 		if ro := getMap(p, "reality-opts"); ro != nil {
 			out["security"] = "reality"
-			if pk, ok := ro["public-key"].(string); ok {
-				out["pbk"] = pk
-			}
-			if sid, ok := ro["short-id"].(string); ok {
-				out["sid"] = sid
-			}
-		} else if b, _ := p["tls"].(bool); b {
+			setStrFallback(out, ro, []string{"public-key", "pbk"}, "pbk")
+			setStrFallback(out, ro, []string{"short-id", "sid"}, "sid")
+		} else if toBool(p["tls"]) {
 			out["security"] = "tls"
 		}
 		// grpc transport.
@@ -109,24 +105,22 @@ func normaliseClashProxy(p map[string]any) (map[string]any, error) {
 		}
 		// ws transport.
 		if w := getMap(p, "ws-opts"); w != nil {
-			if s, ok := w["path"].(string); ok {
-				out["path"] = s
-			}
-			if h, ok := w["headers"].(map[string]any); ok {
-				if host, ok := h["Host"].(string); ok {
-					out["host"] = host
-				}
+			setWSHost(out, w)
+			setWSPath(out, w)
+		} else if h := getMap(p, "ws-headers"); h != nil {
+			if host := getHostFromHeaders(h); host != "" {
+				out["host"] = host
 			}
 		}
 	case "vmess":
-		setStr(out, p, "uuid", "uuid")
-		setStr(out, p, "cipher", "scy")
-		setStr(out, p, "network", "network")
-		setStr(out, p, "servername", "sni")
-		setStr(out, p, "client-fingerprint", "fp")
-		setStr(out, p, "alpn", "alpn")
-		setStr(out, p, "alterId", "aid")
-		if b, _ := p["tls"].(bool); b {
+		setStrFallback(out, p, []string{"uuid", "id", "userId"}, "uuid")
+		setStrFallback(out, p, []string{"cipher", "scy"}, "scy")
+		setStrFallback(out, p, []string{"network", "net"}, "network")
+		setStrFallback(out, p, []string{"servername", "sni"}, "sni")
+		setStrFallback(out, p, []string{"client-fingerprint", "fp"}, "fp")
+		setStrFallback(out, p, []string{"alpn"}, "alpn")
+		setStrFallback(out, p, []string{"alterId", "aid"}, "aid")
+		if toBool(p["tls"]) {
 			out["tls"] = "tls"
 		}
 		if g := getMap(p, "grpc-opts"); g != nil {
@@ -135,23 +129,24 @@ func normaliseClashProxy(p map[string]any) (map[string]any, error) {
 			}
 		}
 		if w := getMap(p, "ws-opts"); w != nil {
-			if s, ok := w["path"].(string); ok {
-				out["path"] = s
-			}
-			if h, ok := w["headers"].(map[string]any); ok {
-				if host, ok := h["Host"].(string); ok {
-					out["host"] = host
-				}
+			setWSHost(out, w)
+			setWSPath(out, w)
+		} else if h := getMap(p, "ws-headers"); h != nil {
+			if host := getHostFromHeaders(h); host != "" {
+				out["host"] = host
 			}
 		}
 	case "trojan":
-		setStr(out, p, "password", "password")
-		setStr(out, p, "network", "network")
-		setStr(out, p, "sni", "sni")
-		setStr(out, p, "client-fingerprint", "fp")
-		setStr(out, p, "alpn", "alpn")
-		if b, _ := p["skip-cert-verify"].(bool); b {
+		setStrFallback(out, p, []string{"password", "pass"}, "password")
+		setStrFallback(out, p, []string{"network", "net"}, "network")
+		setStrFallback(out, p, []string{"sni", "servername"}, "sni")
+		setStrFallback(out, p, []string{"client-fingerprint", "fp"}, "fp")
+		setStrFallback(out, p, []string{"alpn"}, "alpn")
+		if toBool(p["skip-cert-verify"]) || toBool(p["allowInsecure"]) {
 			out["allowInsecure"] = true
+		}
+		if toBool(p["tls"]) {
+			out["tls"] = "tls"
 		}
 		if g := getMap(p, "grpc-opts"); g != nil {
 			if s, ok := g["grpc-service-name"].(string); ok {
@@ -159,45 +154,35 @@ func normaliseClashProxy(p map[string]any) (map[string]any, error) {
 			}
 		}
 		if w := getMap(p, "ws-opts"); w != nil {
-			if s, ok := w["path"].(string); ok {
-				out["path"] = s
-			}
-			if h, ok := w["headers"].(map[string]any); ok {
-				if host, ok := h["Host"].(string); ok {
-					out["host"] = host
-				}
+			setWSHost(out, w)
+			setWSPath(out, w)
+		} else if h := getMap(p, "ws-headers"); h != nil {
+			if host := getHostFromHeaders(h); host != "" {
+				out["host"] = host
 			}
 		}
 	case "shadowsocks", "ss":
-		setStr(out, p, "cipher", "method")
-		setStr(out, p, "password", "password")
-	case "socks5", "socks":
-		setStr(out, p, "username", "uuid")
-		setStr(out, p, "password", "password")
-		if b, _ := p["tls"].(bool); b {
-			out["tls"] = "tls"
-		}
-		if b, _ := p["skip-cert-verify"].(bool); b {
-			out["allowInsecure"] = true
-		}
+		setStrFallback(out, p, []string{"cipher", "method"}, "method")
+		setStrFallback(out, p, []string{"password", "pass"}, "password")
 	case "hysteria", "hysteria2", "hy2":
-		setStr(out, p, "password", "password")
-		setStr(out, p, "sni", "sni")
-		setStr(out, p, "obfs", "obfs")
-		setStr(out, p, "obfs-password", "obfsPassword")
-		if b, _ := p["skip-cert-verify"].(bool); b {
+		setStrFallback(out, p, []string{"password", "auth", "auth-str", "auth_str"}, "password")
+		setStrFallback(out, p, []string{"sni", "servername"}, "sni")
+		setStrFallback(out, p, []string{"obfs"}, "obfs")
+		setStrFallback(out, p, []string{"obfs-password", "obfs_password", "obfsPassword"}, "obfsPassword")
+		if toBool(p["skip-cert-verify"]) || toBool(p["allowInsecure"]) {
 			out["allowInsecure"] = true
 		}
-		setStr(out, p, "client-fingerprint", "fp")
+		setStrFallback(out, p, []string{"client-fingerprint", "fp"}, "fp")
+		setStrFallback(out, p, []string{"alpn"}, "alpn")
 	case "tuic":
-		setStr(out, p, "uuid", "uuid")
-		setStr(out, p, "password", "password")
-		setStr(out, p, "sni", "sni")
-		setStr(out, p, "alpn", "alpn")
-		if b, _ := p["skip-cert-verify"].(bool); b {
+		setStrFallback(out, p, []string{"uuid", "id", "userId"}, "uuid")
+		setStrFallback(out, p, []string{"password", "pass"}, "password")
+		setStrFallback(out, p, []string{"sni", "servername"}, "sni")
+		setStrFallback(out, p, []string{"alpn"}, "alpn")
+		if toBool(p["skip-cert-verify"]) || toBool(p["allowInsecure"]) {
 			out["allowInsecure"] = true
 		}
-		setStr(out, p, "client-fingerprint", "fp")
+		setStrFallback(out, p, []string{"client-fingerprint", "fp"}, "fp")
 	default:
 		return nil, fmt.Errorf("unsupported clash proxy type: %s", proxyType)
 	}
@@ -205,18 +190,74 @@ func normaliseClashProxy(p map[string]any) (map[string]any, error) {
 	return out, nil
 }
 
-// setStr copies a string value from src[key] to dst[jsonTag] if present.
-func setStr(dst, src map[string]any, key, jsonTag string) {
-	if v, ok := src[key]; ok {
-		switch s := v.(type) {
-		case string:
-			dst[jsonTag] = s
-		case int:
-			dst[jsonTag] = strconv.Itoa(s)
-		case bool:
-			dst[jsonTag] = strconv.FormatBool(s)
+// setWSHost extracts the WS Host header (case-insensitive) into out["host"].
+func setWSHost(out, wsOpts map[string]any) {
+	if host := getWSHeaderHost(wsOpts); host != "" {
+		out["host"] = host
+	}
+}
+
+// setWSPath extracts the WS path into out["path"].
+func setWSPath(out, wsOpts map[string]any) {
+	if s, ok := wsOpts["path"].(string); ok {
+		out["path"] = s
+	}
+}
+
+// setStrFallback copies the first found string value from src[keys] to dst[jsonTag] if present.
+func setStrFallback(dst, src map[string]any, keys []string, jsonTag string) {
+	for _, key := range keys {
+		if v, ok := src[key]; ok {
+			switch s := v.(type) {
+			case string:
+				dst[jsonTag] = s
+				return
+			case int:
+				dst[jsonTag] = strconv.Itoa(s)
+				return
+			case bool:
+				dst[jsonTag] = strconv.FormatBool(s)
+				return
+			}
 		}
 	}
+}
+
+// toBool converts any value (bool, string, int) to bool.
+func toBool(v any) bool {
+	switch b := v.(type) {
+	case bool:
+		return b
+	case string:
+		lower := strings.ToLower(b)
+		return lower == "true" || lower == "1"
+	case int:
+		return b != 0
+	}
+	return false
+}
+
+// getHostFromHeaders extracts case-insensitive Host header value.
+func getHostFromHeaders(headers map[string]any) string {
+	return getWSHeaderHost(headers)
+}
+
+// getWSHeaderHost returns the case-insensitive "host" header value from a map
+// that may be a ws-opts (with nested "headers") or a raw headers map.
+func getWSHeaderHost(wsOpts map[string]any) string {
+	headers := getMap(wsOpts, "headers")
+	src := wsOpts
+	if headers != nil {
+		src = headers
+	}
+	for k, v := range src {
+		if strings.EqualFold(k, "host") {
+			if s, ok := v.(string); ok {
+				return s
+			}
+		}
+	}
+	return ""
 }
 
 // getMap returns a nested map field, or nil if absent/not a map.
