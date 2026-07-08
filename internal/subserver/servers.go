@@ -42,7 +42,7 @@ func isValidServer(line string) bool {
 }
 
 // serverConfig holds a parsed 3x-ui JSON server configuration.
-// Fields cover VLESS, VMess, Trojan, Shadowsocks, SOCKS, Hysteria, TUIC protocols.
+// Fields cover VLESS, VMess, Trojan, Shadowsocks, Hysteria, TUIC protocols.
 type serverConfig struct {
 	Type          string `json:"type"`
 	Address       string `json:"address"`
@@ -147,8 +147,6 @@ func ConvertSingleJSONToLink(raw json.RawMessage) (string, error) {
 		return buildTrojanServerLink(cfg)
 	case "shadowsocks", "ss":
 		return buildShadowsocksServerLink(cfg)
-	case "socks", "socks5":
-		return buildSOCKSServerLink(cfg)
 	case "hysteria", "hysteria2", "hy2":
 		return buildHysteriaServerLink(cfg, cfg.Type)
 	case "tuic":
@@ -173,6 +171,8 @@ func buildVLESSServerLink(cfg *serverConfig) (string, error) {
 		params.Set("security", cfg.Security)
 	} else if cfg.TLS != "" {
 		params.Set("security", cfg.TLS)
+	} else {
+		params.Set("security", "none")
 	}
 	if cfg.SNI != "" {
 		params.Set("sni", cfg.SNI)
@@ -188,11 +188,15 @@ func buildVLESSServerLink(cfg *serverConfig) (string, error) {
 	}
 	if cfg.Network != "" {
 		params.Set("type", cfg.Network)
+		if cfg.Network == "grpc" && cfg.Path != "" {
+			// gRPC transport uses serviceName, not path, in share links.
+			params.Set("serviceName", cfg.Path)
+		}
 	}
 	if cfg.Host != "" {
 		params.Set("host", cfg.Host)
 	}
-	if cfg.Path != "" {
+	if cfg.Path != "" && cfg.Network != "grpc" {
 		params.Set("path", cfg.Path)
 	}
 	if cfg.Alpn != "" {
@@ -216,7 +220,7 @@ func buildVMessServerLink(cfg *serverConfig) (string, error) {
 		V    string `json:"v"`
 		PS   string `json:"ps"`
 		Add  string `json:"add"`
-		Port int    `json:"port"`
+		Port string `json:"port"`
 		ID   string `json:"id"`
 		Aid  string `json:"aid"`
 		Scy  string `json:"scy"`
@@ -234,7 +238,7 @@ func buildVMessServerLink(cfg *serverConfig) (string, error) {
 		V:    "2",
 		PS:   cfg.Remark,
 		Add:  cfg.Address,
-		Port: cfg.Port,
+		Port: strconv.Itoa(cfg.Port),
 		ID:   cfg.UUID,
 		Aid:  cfg.Aid,
 		Scy:  cfg.Scy,
@@ -287,11 +291,14 @@ func buildTrojanServerLink(cfg *serverConfig) (string, error) {
 	}
 	if cfg.Network != "" {
 		params.Set("type", cfg.Network)
+		if cfg.Network == "grpc" && cfg.Path != "" {
+			params.Set("serviceName", cfg.Path)
+		}
 	}
 	if cfg.Host != "" {
 		params.Set("host", cfg.Host)
 	}
-	if cfg.Path != "" {
+	if cfg.Path != "" && cfg.Network != "grpc" {
 		params.Set("path", cfg.Path)
 	}
 	if cfg.TLS != "" {
@@ -325,55 +332,21 @@ func buildTrojanServerLink(cfg *serverConfig) (string, error) {
 	return base, nil
 }
 
-// buildShadowsocksServerLink builds an ss:// share URI (base64-encoded method:password@host:port).
+// buildShadowsocksServerLink builds an ss:// share URI in SIP002 form:
+// ss://base64url(method:password)@host:port#tag (host:port in cleartext, no padding).
 func buildShadowsocksServerLink(cfg *serverConfig) (string, error) {
-	raw := cfg.Method + ":" + cfg.Password + "@" + cfg.Address + ":" + strconv.Itoa(cfg.Port)
-	encoded := base64StdEncode([]byte(raw))
+	userInfo := base64.RawURLEncoding.EncodeToString([]byte(cfg.Method + ":" + cfg.Password))
 
 	remark := cfg.Remark
 	if remark == "" {
 		remark = cfg.Ps
 	}
 
-	link := "ss://" + encoded
+	link := "ss://" + userInfo + "@" + net.JoinHostPort(cfg.Address, strconv.Itoa(cfg.Port))
 	if remark != "" {
 		link += "#" + url.QueryEscape(remark)
 	}
 	return link, nil
-}
-
-// buildSOCKSServerLink builds a socks:// share URI from a parsed server config.
-func buildSOCKSServerLink(cfg *serverConfig) (string, error) {
-	params := url.Values{}
-	if cfg.Protocol != "" {
-		params.Set("protocol", cfg.Protocol)
-	}
-	if cfg.Method != "" {
-		params.Set("method", cfg.Method)
-	}
-	if cfg.Obfs != "" {
-		params.Set("obfs", cfg.Obfs)
-	}
-	if cfg.ObfsPassword != "" {
-		params.Set("obfs-password", cfg.ObfsPassword)
-	}
-
-	remark := cfg.Remark
-	if remark == "" {
-		remark = cfg.Ps
-	}
-
-	userInfo := cfg.ProtocolParam
-	if userInfo == "" {
-		userInfo = cfg.UUID
-	}
-
-	base := fmt.Sprintf("socks://%s@%s", userInfo, net.JoinHostPort(cfg.Address, strconv.Itoa(cfg.Port)))
-	if params.Encode() != "" {
-		base += "?" + params.Encode()
-	}
-	base += "#" + url.QueryEscape(remark)
-	return base, nil
 }
 
 // buildHysteriaServerLink builds a hysteria:// or hysteria2:// share URI from a parsed server config.
@@ -390,6 +363,15 @@ func buildHysteriaServerLink(cfg *serverConfig, protocol string) (string, error)
 	}
 	if cfg.Fingerprint != "" {
 		params.Set("fp", cfg.Fingerprint)
+	}
+	if cfg.Obfs != "" {
+		params.Set("obfs", cfg.Obfs)
+	}
+	if cfg.ObfsPassword != "" {
+		params.Set("obfs-password", cfg.ObfsPassword)
+	}
+	if cfg.Alpn != "" {
+		params.Set("alpn", cfg.Alpn)
 	}
 
 	remark := cfg.Remark
@@ -410,19 +392,24 @@ func buildHysteriaServerLink(cfg *serverConfig, protocol string) (string, error)
 	return link, nil
 }
 
-// buildTUICServerLink builds a tuic:// share URI from a parsed server config.
+// buildTUICServerLink builds a tuic:// share URI. The uuid:password credential
+// lives in the userinfo component (standard TUIC share-link form), not as query params.
 func buildTUICServerLink(cfg *serverConfig) (string, error) {
 	params := url.Values{}
-	if cfg.UUID != "" {
-		params.Set("uuid", cfg.UUID)
-	}
-	if cfg.Password != "" {
-		params.Set("password", cfg.Password)
-	}
 	if cfg.Host != "" {
 		params.Set("sni", cfg.Host)
 	} else if cfg.SNI != "" {
 		params.Set("sni", cfg.SNI)
+	}
+	if cfg.Alpn != "" {
+		params.Set("alpn", cfg.Alpn)
+	}
+	if cfg.AllowInsecure {
+		params.Set("allow_insecure", "1")
+		params.Set("insecure", "1")
+	}
+	if cfg.Fingerprint != "" {
+		params.Set("fp", cfg.Fingerprint)
 	}
 
 	remark := cfg.Remark
@@ -430,11 +417,15 @@ func buildTUICServerLink(cfg *serverConfig) (string, error) {
 		remark = cfg.Ps
 	}
 
-	base := fmt.Sprintf("tuic://%s", net.JoinHostPort(cfg.Address, strconv.Itoa(cfg.Port)))
+	userInfo := cfg.UUID
+	if cfg.Password != "" {
+		userInfo = userInfo + ":" + cfg.Password
+	}
+
+	base := fmt.Sprintf("tuic://%s@%s", userInfo, net.JoinHostPort(cfg.Address, strconv.Itoa(cfg.Port)))
 	if params.Encode() != "" {
 		base += "?" + params.Encode()
 	}
 	base += "#" + url.QueryEscape(remark)
 	return base, nil
 }
-

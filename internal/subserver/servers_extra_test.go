@@ -108,23 +108,6 @@ func TestConvertSingleJSONToLink_Shadowsocks(t *testing.T) {
 	assert.Contains(t, link, "#SS-Node")
 }
 
-func TestConvertSingleJSONToLink_SOCKS(t *testing.T) {
-	t.Parallel()
-
-	raw := json.RawMessage(`{
-		"type": "socks5",
-		"address": "socks.example.com",
-		"port": 1080,
-		"uuid": "user-uuid",
-		"remark": "SOCKS-Node"
-	}`)
-
-	link, err := ConvertSingleJSONToLink(raw)
-	require.NoError(t, err)
-	assert.Contains(t, link, "socks://user-uuid@socks.example.com:1080")
-	assert.Contains(t, link, "#SOCKS-Node")
-}
-
 func TestConvertSingleJSONToLink_Hysteria2(t *testing.T) {
 	t.Parallel()
 
@@ -158,9 +141,69 @@ func TestConvertSingleJSONToLink_TUIC_SNIFromCfg(t *testing.T) {
 
 	link, err := ConvertSingleJSONToLink(raw)
 	require.NoError(t, err)
-	assert.Contains(t, link, "tuic://tuic.example.com:8443")
+	// TUIC credential must be in userinfo as uuid:password@host:port
+	assert.Contains(t, link, "tuic://tuic-uuid:tuic-pass@tuic.example.com:8443")
 	assert.Contains(t, link, "sni=tuic-sni.example.com")
 	assert.Contains(t, link, "#TUIC-Node")
+}
+
+func TestConvertSingleJSONToLink_Shadowsocks_SIP002(t *testing.T) {
+	t.Parallel()
+
+	raw := json.RawMessage(`{
+		"type": "ss",
+		"address": "ss.example.com",
+		"port": 8388,
+		"method": "chacha20-ietf-poly1305",
+		"password": "ss-pass",
+		"remark": "SS-Node"
+	}`)
+
+	link, err := ConvertSingleJSONToLink(raw)
+	require.NoError(t, err)
+	// SIP002: ss://base64url(method:password)@host:port#tag, host:port in cleartext.
+	assert.Equal(t, "ss://"+base64.RawURLEncoding.EncodeToString([]byte("chacha20-ietf-poly1305:ss-pass"))+"@ss.example.com:8388#SS-Node", link)
+}
+
+func TestConvertSingleJSONToLink_VLESS_SecurityDefaultNone(t *testing.T) {
+	t.Parallel()
+
+	raw := json.RawMessage(`{
+		"type": "vless",
+		"address": "v.example.com",
+		"port": 80,
+		"uuid": "uuid-1",
+		"encryption": "none",
+		"remark": "VLESS-NoTLS"
+	}`)
+
+	link, err := ConvertSingleJSONToLink(raw)
+	require.NoError(t, err)
+	assert.Contains(t, link, "security=none")
+	assert.NotContains(t, link, "sni=")
+}
+
+func TestConvertSingleJSONToLink_VMess_PortIsString(t *testing.T) {
+	t.Parallel()
+
+	raw := json.RawMessage(`{
+		"type": "vmess",
+		"address": "vm.example.com",
+		"port": 443,
+		"uuid": "vm-uuid",
+		"network": "tcp",
+		"remark": "VMESS-Node"
+	}`)
+
+	link, err := ConvertSingleJSONToLink(raw)
+	require.NoError(t, err)
+	require.True(t, strings.HasPrefix(link, "vmess://"))
+
+	decoded, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(link, "vmess://"))
+	require.NoError(t, err)
+	// v2rayNG (Gson) requires port as a string; a bare JSON number would fail to import.
+	assert.Contains(t, string(decoded), `"port":"443"`)
+	assert.NotContains(t, string(decoded), `"port":443`)
 }
 
 func TestConvertSingleJSONToLink_VMess_Aid(t *testing.T) {
