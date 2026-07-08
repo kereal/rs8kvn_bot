@@ -177,6 +177,9 @@ func buildVLESSServerLink(cfg *serverConfig) (string, error) {
 	} else {
 		params.Set("security", "none")
 	}
+	if cfg.AllowInsecure {
+		params.Set("allowInsecure", "1")
+	}
 	if cfg.SNI != "" {
 		params.Set("sni", cfg.SNI)
 	}

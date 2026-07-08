@@ -381,5 +381,73 @@ func TestExtractClashConfigs_VLESSSplitHTTPAlias(t *testing.T) {
 	assert.Contains(t, link, "path=%2Fs")
 }
 
+// TestExtractClashConfigs_VLESSSkipCertVerify verifies that Clash
+// skip-cert-verify/allowInsecure propagates to allowInsecure=1 in the VLESS
+// share link (v2rayN equivalent).
+func TestExtractClashConfigs_VLESSSkipCertVerify(t *testing.T) {
+	t.Parallel()
+
+	yaml := "proxies:\n  - name: vless-skip\n    type: vless\n    server: 1.2.3.4\n    port: 443\n    uuid: aaaa-bbbb\n    tls: true\n    skip-cert-verify: true\n    network: ws\n    ws-opts:\n      path: /ws\n      headers:\n        Host: example.com\n"
+	configs, err := ExtractClashConfigs([]byte(yaml))
+	require.NoError(t, err)
+	require.Len(t, configs, 1)
+
+	cfg, err := toServerConfig(configs[0])
+	require.NoError(t, err)
+	assert.True(t, cfg.AllowInsecure)
+
+	link, err := ConvertSingleJSONToLink(configs[0])
+	require.NoError(t, err)
+	assert.Contains(t, link, "allowInsecure=1")
+}
+
+// TestExtractClashConfigs_VLESSHTTPOpts verifies VLESS with network: http
+// correctly extracts path and host from http-opts.
+func TestExtractClashConfigs_VLESSHTTPOpts(t *testing.T) {
+	t.Parallel()
+
+	yaml := "proxies:\n  - name: vless-http\n    type: vless\n    server: 1.2.3.4\n    port: 443\n    uuid: aaaa-bbbb\n    network: http\n    tls: true\n    alpn:\n      - h2\n    http-opts:\n      path:\n        - /a\n      headers:\n        Host:\n          - fake.com\n"
+	configs, err := ExtractClashConfigs([]byte(yaml))
+	require.NoError(t, err)
+	require.Len(t, configs, 1)
+
+	cfg, err := toServerConfig(configs[0])
+	require.NoError(t, err)
+	assert.Equal(t, "http", cfg.Network)
+	assert.Equal(t, "/a", cfg.Path)
+	assert.Equal(t, "fake.com", cfg.Host)
+	assert.Equal(t, "h2", cfg.Alpn)
+
+	link, err := ConvertSingleJSONToLink(configs[0])
+	require.NoError(t, err)
+	assert.Contains(t, link, "type=http")
+	assert.Contains(t, link, "path=%2Fa")
+	assert.Contains(t, link, "host=fake.com")
+}
+
+// TestExtractClashConfigs_VLESSH2Opts verifies VLESS with network: h2
+// correctly extracts path and host from h2-opts.
+func TestExtractClashConfigs_VLESSH2Opts(t *testing.T) {
+	t.Parallel()
+
+	yaml := "proxies:\n  - name: vless-h2\n    type: vless\n    server: 1.2.3.4\n    port: 443\n    uuid: aaaa-bbbb\n    network: h2\n    tls: true\n    alpn:\n      - h2\n    h2-opts:\n      path:\n        - /h2\n      headers:\n        Host:\n          - h2.example.com\n"
+	configs, err := ExtractClashConfigs([]byte(yaml))
+	require.NoError(t, err)
+	require.Len(t, configs, 1)
+
+	cfg, err := toServerConfig(configs[0])
+	require.NoError(t, err)
+	assert.Equal(t, "h2", cfg.Network)
+	assert.Equal(t, "/h2", cfg.Path)
+	assert.Equal(t, "h2.example.com", cfg.Host)
+	assert.Equal(t, "h2", cfg.Alpn)
+
+	link, err := ConvertSingleJSONToLink(configs[0])
+	require.NoError(t, err)
+	assert.Contains(t, link, "type=h2")
+	assert.Contains(t, link, "path=%2Fh2")
+	assert.Contains(t, link, "host=h2.example.com")
+}
+
 // Suppress unused import warning if json is not directly referenced.
 var _ = json.RawMessage(nil)
