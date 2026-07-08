@@ -236,5 +236,6 @@ func sanitizeAccessLogValue(value string) string {
 	value = strings.ReplaceAll(value, "\r", " ")
 	value = strings.ReplaceAll(value, "\n", " ")
 	value = strings.ReplaceAll(value, "\t", " ")
+	value = strings.ReplaceAll(value, "\"", " ")
 	return strings.TrimSpace(value)
 }
