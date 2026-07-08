@@ -615,6 +615,10 @@ func (s *Server) handleSubscription(w http.ResponseWriter, r *http.Request) {
 
 	requestHeaders := subserver.FilterHeaders(r.Header)
 	result, success, total, err := subserver.HandleSubscription(ctx, s.db, s.subServer, subID, clientIP, requestHeaders)
+	if rec != nil {
+		rec.success = success
+		rec.total = total
+	}
 	if err != nil {
 		if errors.Is(err, subserver.ErrSubscriptionNotFound) {
 			logger.Warn("Subscription not found",
@@ -642,12 +646,6 @@ func (s *Server) handleSubscription(w http.ResponseWriter, r *http.Request) {
 			zap.String("client_ip", clientIP))
 		writeSubscriptionText(response, http.StatusInternalServerError, "Internal Server Error")
 		return
-	}
-
-	// Capture stats for logging after the response is sent.
-	if rec != nil {
-		rec.success = success
-		rec.total = total
 	}
 
 	for k, v := range result.Headers {

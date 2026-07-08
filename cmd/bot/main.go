@@ -354,34 +354,14 @@ func main() {
 	}()
 	logger.Info("Database initialized successfully")
 
-	// 5. Initialize Telegram bot (non-blocking)
-	botAPIChan := make(chan struct {
-		api *tgbotapi.BotAPI
-		cfg *bot.BotConfig
-	}, 1)
-
-	// Use dummy bot for initial server startup
+	// 5. Wire application services with dummy bot, real bot will be swapped in once ready.
 	botAPI := &tgbotapi.BotAPI{Self: tgbotapi.User{UserName: "rs8kvn_bot_offline"}}
 	botConfig := &bot.BotConfig{Username: "rs8kvn_bot_offline"}
 
-	// 6. Wire application services (using dummy bot initially)
 	svc := initServices(cfg, dbService, deps, botAPI, botConfig)
-
-	go func() {
-		api, bc, err := initBot(cfg)
-		if err != nil {
-			logger.Error("Failed to initialize Telegram bot in background", zap.Error(err))
-			return
-		}
-		botAPIChan <- struct {
-			api *tgbotapi.BotAPI
-			cfg *bot.BotConfig
-		}{api, bc}
-		svc.handler.SetBot(api)
-	}()
 	defer svc.subServer.Stop()
 
-	// 7. Start web server
+	// 6. Start web server immediately so subscriptions are served while bot initializes.
 	webServer, err := startWebServer(svc.subService, cfg, botConfig, svc.subServer, dbService)
 	if err != nil {
 		logger.Warn("Failed to start web server, continuing without web server", zap.Error(err))
@@ -398,27 +378,22 @@ func main() {
 		}
 	}()
 
-	// 8. Configure update listener
-	var updates tgbotapi.UpdatesChannel
-	var botAPIInst *tgbotapi.BotAPI
-	
-	// Default to dummy
-	botAPIInst = botAPI
-
-	// If background init finishes, switch to real bot
-	select {
-	case result := <-botAPIChan:
-		botAPIInst = result.api
-		logger.Info("Telegram bot initialized successfully")
-		
-		u := tgbotapi.NewUpdate(0)
-		u.Timeout = config.BotUpdateTimeout
-		u.AllowedUpdates = []string{"message", "callback_query"}
-		updates = botAPIInst.GetUpdatesChan(u)
-	default:
-		logger.Warn("Telegram bot not initialized yet, starting in offline mode")
-		updates = make(tgbotapi.UpdatesChannel)
+	// 7. Initialize Telegram bot (initBot retries internally and calls Fatal on total failure).
+	logger.Info("Initializing Telegram bot...")
+	api, bc, err := initBot(cfg)
+	if err != nil {
+		logger.Fatal("Telegram bot initialization failed", zap.Error(err))
 	}
+	svc.handler.SetBot(api)
+	botAPI = api
+	botConfig = bc
+	logger.Info("Telegram bot initialized successfully")
+
+	// 8. Configure update listener
+	u := tgbotapi.NewUpdate(0)
+	u.Timeout = config.BotUpdateTimeout
+	u.AllowedUpdates = []string{"message", "callback_query"}
+	updates := botAPI.GetUpdatesChan(u)
 
 	// 9. Setup graceful shutdown context
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
@@ -436,7 +411,7 @@ func main() {
 	}
 
 	// 11. Run the main event loop (blocks until shutdown)
-	runEventLoop(ctx, botAPIInst, svc.handler, updates)
+	runEventLoop(ctx, botAPI, svc.handler, updates)
 
 	// 12. Graceful shutdown of background workers
 	gracefulShutdown(bgWg, svc.handler)
