@@ -46,9 +46,10 @@ var (
 
 // classifyCreateSubscriptionError wraps the underlying error with ErrSubscriptionAlreadyExists
 // when the error message indicates the client is already present on the node.
+// Idempotent: a value already carrying the sentinel is returned unchanged.
 func classifyCreateSubscriptionError(err error) error {
-	if err == nil {
-		return nil
+	if err == nil || errors.Is(err, ErrSubscriptionAlreadyExists) {
+		return err
 	}
 
 	msg := strings.ToLower(err.Error())
@@ -64,9 +65,10 @@ func classifyCreateSubscriptionError(err error) error {
 
 // classifyDeleteSubscriptionError wraps the underlying error with ErrSubscriptionNotFound
 // when the error message indicates the client does not exist on the node.
+// Idempotent: a value already carrying the sentinel is returned unchanged.
 func classifyDeleteSubscriptionError(err error) error {
-	if err == nil {
-		return nil
+	if err == nil || errors.Is(err, ErrSubscriptionNotFound) {
+		return err
 	}
 
 	msg := strings.ToLower(err.Error())
