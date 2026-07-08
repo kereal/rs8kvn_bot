@@ -385,8 +385,12 @@ func main() {
 		logger.Fatal("Telegram bot initialization failed", zap.Error(err))
 	}
 	svc.handler.SetBot(api)
+	svc.handler.SetBotConfig(bc)
 	botAPI = api
 	botConfig = bc
+	if webServer != nil {
+		webServer.SetBotUsername(bc.Username)
+	}
 	logger.Info("Telegram bot initialized successfully")
 
 	// 8. Configure update listener
