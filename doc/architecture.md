@@ -59,7 +59,8 @@ rs8kvn_bot — production-ready Telegram bot for distributing VLESS+Reality+Visi
 │  │ Commands │              │ /readyz      │              │ extra    ││
 │  │ Callbacks│              │ /i/{code}    │              │ servers  ││
 │  │ RateLim  │              │ /sub/{subID} │              │ merge    ││
-│  │ Cache    │              │ /api/v1/*    │              │ reload   ││
+│  │  Cache    │              │ /payment/cb │              │ reload   ││
+│  │          │              │ /static/logo│              │          ││
 │  │          │              │ /metrics     │              │          ││
 │  └────┬─────┘              └──────┬───────┘              └────┬─────┘│
 │       │                          │                           │      │
@@ -160,7 +161,7 @@ internal/
 │   ├── proxman.go           # proxman client implementation
 │   └── fetch.go             # fetch client (read-only HTTP, no-op provisioning)
 ├── xui/              # Legacy 3x-ui API client (used by vpn/threex_ui.go)
-│   ├── client.go            # API + RetryWithBackoff + singleflight
+│   ├── client.go            # 3x-ui REST API + RetryWithBackoff (Bearer auth, multi-outbound flow grouping)
 │   ├── breaker.go           # Circuit breaker (5/30s/3-half-open)
 │   └── errors.go            # Sentinel errors (ErrClientNotFound)
 ├── database/         # Persistence
@@ -253,39 +254,44 @@ for update := range updates {
 ### 2. XUI Client (internal/xui/client.go)
 
 **Features:**
-- Session-based auth (cookie jar)
-- Auto-relogin on 401 with double-checked locking
-- Singleflight dedup concurrent logins
-- Circuit breaker: 5 failures → 30s open → half-open (3 attempts) → close
-- Retry with exponential backoff + jitter (max 3, initial 2s)
-- DNS errors classified as non-retryable
+- Stateless **Bearer-token auth**: every request sets `Authorization: Bearer <apiToken>` (no session, no cookie jar, no login/relogin).
+- `doHTTPRequest` does raw HTTP + response-size cap (`MaxResponseSize`); non-200 → `ErrNon200Response` (no retry on server errors).
+- Retry with exponential backoff + jitter via   `utils.RetryWithBackoff` (max 3, initial 2s). Retryability is governed by `utils.IsRetryable`.
+- Multi-outbound aware: groups `inboundIDs` by required `flow` and issues one panel call per flow group.
 
-**Session lifecycle:**
+**Request layer (`doHTTPRequest`):**
 
-```
-ensureLoggedIn(ctx, force)           // Public entry point
-    ├─ RLock: check lastLogin < sessionValidity?
-    │   └─ Yes → return (session OK)
-    │   └─ No  → Lock: re-check (double-checked)
-    │            ├─ Still valid? → return
-    │            └─ Expired? → login()
-    │                       ├─ POST /login
-    │                       ├─ Save cookies to jar
-    │                       ├─ Update lastLogin timestamp
-    │                       └─ Verify: GET /panel/api/server/status
-    │
-    ├─ If login fails → circuit breaker.RecordFailure()
-    └─ On success → circuit breaker.RecordSuccess()
-```
-
-**Singleflight for logins:**
 ```go
-// Multiple goroutines call ensureLoggedIn simultaneously
-// Only ONE actually executes login(), others wait for result
-result, err, _ := loginGroup.Do("login", func() (interface{}, error) {
-    return c.login(ctx)
-})
+req.Header.Set("Authorization", "Bearer "+c.apiToken)
+req.Header.Set("Accept", "application/json")
+// body present → Content-Type: application/json
+resp, err := c.httpClient.Do(req)
+// non-200 → ErrNon200Response (not retried)
+// body capped at config.MaxResponseSize
 ```
+
+**Resilience:**
+- **Retry** — `AddClientWithID` / `UpdateClient` / `DeleteClient` / `GetClientTraffic` wrap the panel call in
+  `utils.RetryWithBackoff(ctx, config.XUIMaxRetries, config.XUIInitialRetryDelay, fn)` (3 attempts, 2s base,
+  exponential ×2 with ±50% jitter). Only network-level errors are retried (`IsRetryable`); DNS errors and
+  non-200 responses are treated as **non-retryable**. Context cancellation aborts immediately.
+- **Circuit breaker** — `internal/xui/breaker.go` defines a `CircuitBreaker` (closed → open after `maxFailures`
+  → half-open with up to 3 test reqs), but it is **currently not wired into the client path** (no live caller;
+  only exercised by tests). Resilience today relies solely on `RetryWithBackoff`.
+
+**Multi-outbound flow grouping:**
+`groupInboundIDsByFlow` fetches each inbound's transport (`GET /panel/api/inbounds/get/{id}` → `GetRequiredFlow`)
+and buckets inbound IDs by flow (e.g. `xtls-rprx-vision` vs transports that need none). Create uses the
+`{client, inboundIds}` wrapper; update uses a flat client object. One panel call per flow group.
+
+**Endpoints:**
+| Op | Method + path |
+|----|---------------|
+| Add | `POST /panel/api/clients/add` |
+| Delete | `POST /panel/api/clients/del/{email}` |
+| Update | `POST /panel/api/clients/update/{currentEmail}` |
+| Traffic | `GET /panel/api/clients/traffic/{email}` |
+| Ping/verify | `GET /panel/api/server/status` |
 
 ---
 
@@ -439,7 +445,7 @@ type CircuitBreaker struct {
 }
 ```
 
-**Used by:** XUI client on every API call (wrapped in `RetryWithBackoff` which also calls `breaker.Allow()` before request).
+**Used by:** Defined in `internal/xui/breaker.go` but currently **not wired into the XUI client path** — there is no live caller (only tests exercise it). Resilience today relies on `utils.RetryWithBackoff` (see §2).
 
 ---
 
@@ -449,16 +455,16 @@ type CircuitBreaker struct {
 ```bash
 SIGINT  (Ctrl+C)  → graceful shutdown
 SIGTERM (docker stop) → graceful shutdown
-SIGQUIT (kill -3) → core dump (not handled by us)
+SIGQUIT (kill -3) → graceful shutdown (also handled)
 ```
 
-**Shutdown sequence** (`cmd/bot/main.go:386-424`):
+**Shutdown sequence** (`cmd/bot/lifecycle.go` — `runEventLoop` + `gracefulShutdown`; deferred cleanup of web server, logger and DB in `main()`):
 
 1. `ctx.Done()` received → break event loop
 2. `botAPI.StopReceivingUpdates()` — stops long polling, channel closes
 3. Drain updates channel (discard remaining updates)
 4. Wait for `updatesWg` (max 30s) — all handlers finish or timeout
-5. Wait for background `wg` (backup, heartbeat, trial cleanup) (max 30s)
+5. Wait for background `wg` (backup, heartbeat, trial cleanup, sync/expire/orphan workers) (max 30s)
 6. Stop `subProxy` cache cleanup
 7. Set `webServer.ready = false`
 8. `webServer.Stop(ctx)` — shutdown HTTP server (5s timeout)
@@ -636,45 +642,33 @@ SIGQUIT (kill -3) → core dump (not handled by us)
 
 ## Configuration Schema
 
-```yaml
-# Full .env schema (matches internal/config/config.go)
-telegram:
-  bot_token: "string (required, format: number:token)"
-  admin_id: "int64 (required, must be positive)"
-  contact_username: "string (default '')"
+Configuration is loaded from **flat environment variables** (not nested YAML) via `internal/flag`
+and validated in `internal/config/config.go`. Required vars must be set or `Load()` fails.
 
-# Seed-only — read on first run to populate nodes table if empty
-xui_seed:
-  host: "URL (seed-only, default http://localhost:2053)"
-  api_token: "string (seed-only)"
-  inbound_id: "int (seed-only, default 1)"
+| Env var | Type | Default | Notes |
+|---------|------|---------|-------|
+| `TELEGRAM_BOT_TOKEN` | string | — (required) | Format `number:token` |
+| `TELEGRAM_ADMIN_ID` | int64 | — (required) | Must be positive |
+| `GLOBAL_SUB_URL` | URL | — (required) | e.g. `https://vpn.example.com/sub/` (trailing `/` appended) |
+| `DATABASE_PATH` | string | `./data/rs8kvn.db` | SQLite file path |
+| `LOG_FILE_PATH` | string | `./data/bot.log` | |
+| `LOG_LEVEL` | enum | `info` | `debug`\|`info`\|`warn`\|`error` |
+| `HEARTBEAT_URL` | URL | empty (disabled) | http/https only |
+| `HEARTBEAT_INTERVAL` | int (s) | `300` | min `10` |
+| `SENTRY_DSN` | URL | empty (disabled) | http/https only |
+| `WEB_SERVER_PORT` | int | `8880` | `1`–`65535` |
+| `SITE_URL` | URL | `https://vpn.site` | http/https only |
+| `TRIAL_DURATION_HOURS` | int | `3` | `1`–`168` |
+| `TRIAL_RATE_LIMIT` | int | `3` | `1`–`100` (per-IP per hour) |
+| `CONTACT_USERNAME` | string | `''` | Support contact |
+| `DONATE_CARD_NUMBER` | string | `''` | |
+| `DONATE_URL` | string | `''` | |
+| `SUBSERVER_ACCESS_LOG` | path | `''` (disabled) | Optional access log |
+| `MAIN_MENU_BTN_PRODUCT` | uint | `0` | Product shown on main-menu button |
 
-subscription_server:
-  global_sub_url: "URL (required, e.g. https://vpn.example.com/sub/)"
-  subserver_access_log: "path (optional, empty=disabled)"
-
-database:
-  path: "string (default ./data/rs8kvn.db)"
-
-logging:
-  file_path: "string (default ./data/bot.log)"
-  level: "enum: debug|info|warn|error (default info)"
-
-monitoring:
-  heartbeat_url: "URL (optional, http/https only — S3 scheme allowlist)"
-  heartbeat_interval: "int seconds, min 10 (default 300)"
-  sentry_dsn: "URL (optional, http/https only — S3 scheme allowlist)"
-  health_check_port: "int 1-65535 (default 8880)"
-
-trial:
-  duration_hours: "int 1-168 (default 3)"
-  rate_limit: "int 1-100 (default 3)"
-
-site:
-  url: "URL (default https://vpn.site, http/https only)"
-  donate_card_number: "string (default '')"
-  donate_url: "string (default '')"
-```
+**Seeding:** `xui_seed` does **not** exist. Nodes are configured via admin commands / DB, not env.
+Only the default **plans** (`trial`, `free`) are auto-seeded when the `plans` table is empty
+(`internal/database/service.go`).
 
 ---
 
