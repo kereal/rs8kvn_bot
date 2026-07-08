@@ -151,7 +151,7 @@ type sourceResult struct {
 // per-source fetch is isolated: a failure logs and is skipped, never aborting the
 // others. Results are merged in source order to keep header/expire selection
 // deterministic.
-func fetchAndAggregateSources(ctx context.Context, subID string, nodes []database.Node) aggregatedSources {
+func fetchAndAggregateSources(ctx context.Context, subID string, nodes []database.Node) (aggregatedSources, int, int) {
 	agg := aggregatedSources{
 		allJSON: true,
 	}
@@ -179,6 +179,15 @@ func fetchAndAggregateSources(ctx context.Context, subID string, nodes []databas
 	}
 	wg.Wait()
 
+	successCount := 0
+	totalCount := 0
+	for _, res := range results {
+		totalCount++
+		if res.body != nil {
+			successCount++
+		}
+	}
+
 	for i := range nodes {
 		res := results[i]
 		if res.body == nil {
@@ -197,7 +206,7 @@ func fetchAndAggregateSources(ctx context.Context, subID string, nodes []databas
 		aggregateFormat(&agg, res.format, res.body, res.source, subID)
 	}
 
-	return agg
+	return agg, successCount, totalCount
 }
 
 // fetchSource performs a single upstream fetch, records metrics, and returns the

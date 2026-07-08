@@ -31,7 +31,7 @@ func TestFetchAndAggregateSources_Parallel(t *testing.T) {
 
 	start := time.Now()
 	ctx := context.Background()
-	_ = fetchAndAggregateSources(ctx, "test", nodes)
+	_, _, _ = fetchAndAggregateSources(ctx, "test", nodes)
 	duration := time.Since(start)
 
 	// Verify parallel execution (significantly less than sequential)

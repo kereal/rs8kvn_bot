@@ -614,7 +614,7 @@ func (s *Server) handleSubscription(w http.ResponseWriter, r *http.Request) {
 	)
 
 	requestHeaders := subserver.FilterHeaders(r.Header)
-	result, err := subserver.HandleSubscription(ctx, s.db, s.subServer, subID, clientIP, requestHeaders)
+	result, success, total, err := subserver.HandleSubscription(ctx, s.db, s.subServer, subID, clientIP, requestHeaders)
 	if err != nil {
 		if errors.Is(err, subserver.ErrSubscriptionNotFound) {
 			logger.Warn("Subscription not found",
@@ -644,6 +644,12 @@ func (s *Server) handleSubscription(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Capture stats for logging after the response is sent.
+	if rec != nil {
+		rec.success = success
+		rec.total = total
+	}
+
 	for k, v := range result.Headers {
 		response.Header().Set(k, v)
 	}
@@ -660,7 +666,7 @@ func (s *Server) logSubscriptionAccess(rec *statusRecorder, r *http.Request, cli
 	if s == nil || s.subserverLogger == nil || rec == nil {
 		return
 	}
-	s.subserverLogger.Log(r, rec.StatusCode(), clientIP)
+	s.subserverLogger.Log(r, rec.StatusCode(), clientIP, rec.success, rec.total)
 }
 
 func writeSubscriptionText(w http.ResponseWriter, statusCode int, body string) {
@@ -673,6 +679,8 @@ type statusRecorder struct {
 	http.ResponseWriter
 
 	statusCode int
+	success    int
+	total      int
 }
 
 func (r *statusRecorder) WriteHeader(statusCode int) {
