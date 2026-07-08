@@ -196,7 +196,7 @@ func normaliseClashProxy(p map[string]any) (map[string]any, error) {
 			out["allowInsecure"] = true
 		}
 		if toBool(p["tls"]) {
-			out["tls"] = "tls"
+			out["security"] = "tls"
 		}
 		if g := getMap(p, "grpc-opts"); g != nil {
 			if s, ok := g["grpc-service-name"].(string); ok {

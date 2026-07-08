@@ -21,13 +21,10 @@ var validSchemes = []string{
 	"vmess://",
 	"trojan://",
 	"ss://",
-	"ssr://",
 	"hysteria://",
 	"hysteria2://",
 	"hy2://",
 	"tuic://",
-	"wg://",
-	"wireguard://",
 }
 
 // isValidServer checks whether line starts with a recognised proxy URI scheme.
@@ -300,6 +297,11 @@ func buildVMessServerLink(cfg *serverConfig) (string, error) {
 // buildTrojanServerLink builds a trojan:// share URI from a parsed server config.
 func buildTrojanServerLink(cfg *serverConfig) (string, error) {
 	params := url.Values{}
+	if cfg.Security != "" {
+		params.Set("security", cfg.Security)
+	} else if cfg.TLS != "" {
+		params.Set("security", cfg.TLS)
+	}
 	if cfg.SNI != "" {
 		params.Set("sni", cfg.SNI)
 	}
@@ -401,7 +403,8 @@ func buildHysteriaServerLink(cfg *serverConfig, protocol string) (string, error)
 		password = cfg.UUID
 	}
 
-	link := fmt.Sprintf("%s://%s@%s:%d", protocol, password, cfg.Address, cfg.Port)
+	addr := net.JoinHostPort(cfg.Address, strconv.Itoa(cfg.Port))
+	link := fmt.Sprintf("%s://%s@%s", protocol, password, addr)
 	if params.Encode() != "" {
 		link += "?" + params.Encode()
 	}

@@ -449,5 +449,32 @@ func TestExtractClashConfigs_VLESSH2Opts(t *testing.T) {
 	assert.Contains(t, link, "host=h2.example.com")
 }
 
+// TestExtractClashConfigs_TrojanTLS verifies Trojan with tls: true outputs
+// "security": "tls" (matching 3x-ui flat format), not "tls": "tls".
+func TestExtractClashConfigs_TrojanTLS(t *testing.T) {
+	t.Parallel()
+
+	yaml := "proxies:\n  - name: trojan-tls\n    type: trojan\n    server: 5.6.7.8\n    port: 443\n    password: trojpass\n    sni: sni.example.com\n    tls: true\n    network: ws\n    ws-opts:\n      path: /ws\n      headers:\n        Host: ws.example.com\n"
+	configs, err := ExtractClashConfigs([]byte(yaml))
+	require.NoError(t, err)
+	require.Len(t, configs, 1)
+
+	cfg, err := toServerConfig(configs[0])
+	require.NoError(t, err)
+	assert.Equal(t, "trojan", cfg.Type)
+	assert.Equal(t, "trojpass", cfg.Password)
+	assert.Equal(t, "ws.example.com", cfg.Host)
+	assert.Equal(t, "/ws", cfg.Path)
+
+	// Must use "security" field (3x-ui flat format), not "tls".
+	assert.Equal(t, "tls", cfg.Security)
+
+	link, err := ConvertSingleJSONToLink(configs[0])
+	require.NoError(t, err)
+	assert.Contains(t, link, "trojan://trojpass@5.6.7.8:443")
+	assert.Contains(t, link, "security=tls")
+	assert.Contains(t, link, "sni=sni.example.com")
+}
+
 // Suppress unused import warning if json is not directly referenced.
 var _ = json.RawMessage(nil)

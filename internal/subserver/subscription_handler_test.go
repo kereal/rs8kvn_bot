@@ -841,13 +841,10 @@ func TestIsValidServer(t *testing.T) {
 		{"vmess://encoded", true},
 		{"trojan://pass@host:443", true},
 		{"ss://method:pass@host:443", true},
-		{"ssr://something", true},
 		{"hysteria://pass@host:443", true},
 		{"hysteria2://pass@host:443", true},
 		{"hy2://pass@host:443", true},
 		{"tuic://host:443", true},
-		{"wg://host:443", true},
-		{"wireguard://host:443", true},
 		{"http://example.com", false},
 		{"random text", false},
 	}
