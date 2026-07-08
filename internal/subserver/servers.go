@@ -75,8 +75,6 @@ type serverConfig struct {
 	Crypt         string `json:"crypt"`
 	Obfs          string `json:"obfs"`
 	ObfsPassword  string `json:"obfsPassword"`
-	Protocol      string `json:"protocol"`
-	ProtocolParam string `json:"protocolParam"`
 	ObfsParam     string `json:"obfsParam"`
 }
 
@@ -306,8 +304,13 @@ func buildTrojanServerLink(cfg *serverConfig) (string, error) {
 		params.Set("sni", cfg.SNI)
 	}
 	if cfg.Network != "" {
-		params.Set("type", cfg.Network)
-		if cfg.Network == "grpc" && cfg.Path != "" {
+		netType := cfg.Network
+		// Legacy "splithttp" was renamed to "xhttp" in v2rayN 7.x / Xray-core.
+		if netType == "splithttp" {
+			netType = "xhttp"
+		}
+		params.Set("type", netType)
+		if netType == "grpc" && cfg.Path != "" {
 			params.Set("serviceName", cfg.Path)
 		}
 	}
@@ -316,9 +319,6 @@ func buildTrojanServerLink(cfg *serverConfig) (string, error) {
 	}
 	if cfg.Path != "" && cfg.Network != "grpc" {
 		params.Set("path", cfg.Path)
-	}
-	if cfg.TLS != "" {
-		params.Set("security", cfg.TLS)
 	}
 	if cfg.Fingerprint != "" {
 		params.Set("fp", cfg.Fingerprint)

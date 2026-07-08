@@ -476,5 +476,22 @@ func TestExtractClashConfigs_TrojanTLS(t *testing.T) {
 	assert.Contains(t, link, "sni=sni.example.com")
 }
 
+// TestExtractClashConfigs_TrojanSplitHTTPAlias verifies legacy "splithttp"
+// network normalises to "xhttp" in the Trojan share link (matching VLESS).
+func TestExtractClashConfigs_TrojanSplitHTTPAlias(t *testing.T) {
+	t.Parallel()
+
+	yaml := "proxies:\n  - name: trojan-splithttp\n    type: trojan\n    server: 5.6.7.8\n    port: 443\n    password: trojpass\n    tls: true\n    network: splithttp\n"
+	configs, err := ExtractClashConfigs([]byte(yaml))
+	require.NoError(t, err)
+	require.Len(t, configs, 1)
+
+	link, err := ConvertSingleJSONToLink(configs[0])
+	require.NoError(t, err)
+	assert.Contains(t, link, "trojan://trojpass@5.6.7.8:443")
+	assert.Contains(t, link, "type=xhttp")
+	assert.NotContains(t, link, "type=splithttp")
+}
+
 // Suppress unused import warning if json is not directly referenced.
 var _ = json.RawMessage(nil)
