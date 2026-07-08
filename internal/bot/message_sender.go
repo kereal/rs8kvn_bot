@@ -22,6 +22,10 @@ func NewMessageSender(bot interfaces.BotAPI, rl *ratelimiter.PerUserRateLimiter)
 	return &MessageSender{bot: bot, rateLimiter: rl}
 }
 
+func (ms *MessageSender) SetBot(bot interfaces.BotAPI) {
+	ms.bot = bot
+}
+
 // Send sends a message with rate limiting, swallowing errors.
 func (ms *MessageSender) Send(ctx context.Context, msg tgbotapi.MessageConfig) {
 	_ = ms.SendWithError(ctx, msg)

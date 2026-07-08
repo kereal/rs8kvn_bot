@@ -130,6 +130,11 @@ func NewHandler(bot interfaces.BotAPI, cfg *config.Config, db interfaces.Databas
 	return h
 }
 
+func (h *Handler) SetBot(bot interfaces.BotAPI) {
+	h.bot = bot
+	h.sender.SetBot(bot)
+}
+
 // Cache returns the subscription cache. Used by external callers (e.g. main.go)
 // to compose cache invalidation across multiple caches.
 func (h *Handler) Cache() *SubscriptionCache {

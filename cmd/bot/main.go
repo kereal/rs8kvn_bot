@@ -354,14 +354,31 @@ func main() {
 	}()
 	logger.Info("Database initialized successfully")
 
-	// 5. Initialize Telegram bot
-	botAPI, botConfig, err := initBot(cfg)
-	if err != nil {
-		logger.Fatal("Failed to initialize Telegram bot", zap.Error(err))
-	}
+	// 5. Initialize Telegram bot (non-blocking)
+	botAPIChan := make(chan struct {
+		api *tgbotapi.BotAPI
+		cfg *bot.BotConfig
+	}, 1)
 
-	// 6. Wire application services
+	// Use dummy bot for initial server startup
+	botAPI := &tgbotapi.BotAPI{Self: tgbotapi.User{UserName: "rs8kvn_bot_offline"}}
+	botConfig := &bot.BotConfig{Username: "rs8kvn_bot_offline"}
+
+	// 6. Wire application services (using dummy bot initially)
 	svc := initServices(cfg, dbService, deps, botAPI, botConfig)
+
+	go func() {
+		api, bc, err := initBot(cfg)
+		if err != nil {
+			logger.Error("Failed to initialize Telegram bot in background", zap.Error(err))
+			return
+		}
+		botAPIChan <- struct {
+			api *tgbotapi.BotAPI
+			cfg *bot.BotConfig
+		}{api, bc}
+		svc.handler.SetBot(api)
+	}()
 	defer svc.subServer.Stop()
 
 	// 7. Start web server
@@ -382,10 +399,26 @@ func main() {
 	}()
 
 	// 8. Configure update listener
-	u := tgbotapi.NewUpdate(0)
-	u.Timeout = config.BotUpdateTimeout
-	u.AllowedUpdates = []string{"message", "callback_query"}
-	updates := botAPI.GetUpdatesChan(u)
+	var updates tgbotapi.UpdatesChannel
+	var botAPIInst *tgbotapi.BotAPI
+	
+	// Default to dummy
+	botAPIInst = botAPI
+
+	// If background init finishes, switch to real bot
+	select {
+	case result := <-botAPIChan:
+		botAPIInst = result.api
+		logger.Info("Telegram bot initialized successfully")
+		
+		u := tgbotapi.NewUpdate(0)
+		u.Timeout = config.BotUpdateTimeout
+		u.AllowedUpdates = []string{"message", "callback_query"}
+		updates = botAPIInst.GetUpdatesChan(u)
+	default:
+		logger.Warn("Telegram bot not initialized yet, starting in offline mode")
+		updates = make(tgbotapi.UpdatesChannel)
+	}
 
 	// 9. Setup graceful shutdown context
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
@@ -397,13 +430,13 @@ func main() {
 	svc.handler.StartReferralCacheSync(ctx)
 	bgWg := startBackgroundWorkers(ctx, svc.handler, svc.subService, dbService, cfg, deps.vpnClients, deps.nodes)
 
-	logger.Info("Bot started successfully")
+	logger.Debug("Bot started successfully")
 	if webServer != nil {
 		webServer.SetReady(true)
 	}
 
 	// 11. Run the main event loop (blocks until shutdown)
-	runEventLoop(ctx, botAPI, svc.handler, updates)
+	runEventLoop(ctx, botAPIInst, svc.handler, updates)
 
 	// 12. Graceful shutdown of background workers
 	gracefulShutdown(bgWg, svc.handler)
