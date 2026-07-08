@@ -5,8 +5,8 @@
 > а не по именам файлов/функций. Если углубляемый модуль назван понятием, которого здесь нет — добавь
 > термин; если формулировка размыта — уточни её прямо здесь.
 >
-> ADR: в репозитории пока нет `docs/adr/`. Решения, которые не стоит переоткрывать будущим обзорам,
-> фиксируются там (см. `/grilling`).
+> ADR: решения, которые не стоит переоткрывать будущим обзорам, фиксируются в `docs/adr/`
+> (см. `0001-narrow-database-service-seam.md`). Новые кандидаты отмечай в разделе «Открытые вопросы».
 
 ## Продукт
 
@@ -43,14 +43,26 @@ Telegram-бот для раздачи VPN-подписок (VLESS+Reality+Vision
 
 - **VPN Client** (`internal/vpn`) — абстракция провизии на ноде; адаптеры: `ThreeXUIClient`, `ProxmanClient`,
   `FetchClient` (read-only). Фабрика `NewClient` по `NodeType`. Классификация ошибок (already-exists / not-found)
-  сейчас завязана на текст панели 3x-ui — кандидат на вынос за шов (см. архитектурный обзор, Кандидат 4).
+  вынесена за шов `Client` (реализовано, обзор Кандидат 4). Операций чтения трафика/`Exists` в интерфейсе пока
+  нет — из-за этого trial/reconcile/`GetWithTraffic` утекают в параллельную карту `xuiClients` (см. обзор, Кандидат 2).
 - **XUIClient** (`internal/xui`) — REST-клиент панели 3x-ui: Bearer-auth, retry с jitter, circuit breaker
-  (определён, но **не подключён** к пути клиента — resilience только на `RetryWithBackoff`).
+  (`breaker.go`, определён, но **не подключён** к пути клиента — см. обзор, Кандидат 1).
 - **SubserverCache / SubscriptionCache / ReferralCache** — слои кэша (TTL/LRU). Инвалидируются при
   создании/удалении/привязке подписки и смене конфига.
 
 ## Открытые вопросы (кандидаты на углубление)
 
-- Узкий шов `DatabaseService` вместо божественного интерфейса (обзор, Кандидат 1).
-- Единый владелец двухфазного жизненного цикла удаления (обзор, Кандидат 2).
-- Вынос представления трафика из `SubscriptionService` (обзор, Кандидат 3).
+### Реализовано (обзор 2026-07-08/09, ветка `dev`)
+- Кандидат 1 — узкий шов `DatabaseService` → пер-срезовые интерфейсы (`subserver`/`web`/`scheduler`), ADR-0001.
+- Кандидат 2 — единый владелец двухфазного удаления (`revokeAndDeprovisionThenDelete`).
+- Кандидат 3 — вынос представления трафика в `internal/service/subscription_traffic.go`.
+- Кандидат 4 — классификация ошибок VPN за швом `Client` (3x-ui + proxman).
+
+### Открыто (обзор 2026-07-09)
+- Кандидат 1 — подключить или удалить осиротевший circuit breaker XUI (`internal/xui/breaker.go`, 153 строки, 0 вызывающих в prod).
+- Кандидат 2 — объединить trial/reconcile/traffic через шов `vpn.Client`, убрать параллельную карту `xuiClients` (латентный баг: proxman trial-ноды молча падают).
+- Кандидат 3 — общий HTTP-транспорт для `xui`/`proxman` адаптеров (`httpx`: Bearer + лимит размера + retry); у proxman сейчас нет ни того, ни другого.
+- Кандидат 4 — один `buildProvision(sub, plan)` в SyncService (дублируется в `processPendingAdd`/`processPendingUpdate`).
+- Кандидат 5 — `reconcileAndSyncNodes` для fan-out при смене плана (дублируется в `ActivateProduct`/`Renew`/`Expire`).
+- Кандидат 6 — `subserver.Service` как pass-through над `Cache` (углубить или убрать).
+- Кандидат 7 — timeout пролог применять один раз на диспетчеризации, а не копировать в каждый handler.
