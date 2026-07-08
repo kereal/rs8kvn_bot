@@ -151,14 +151,15 @@ internal/
 │   ├── access_log.go        # Optional async /sub/{id} access log
 │   └── servers.go           # Load extra config file
 ├── service/          # Business logic
-│   ├── subscription.go      # Use cases: Create, Delete, Trial
+│   ├── subscription.go      # Use cases: Create, Delete, DeleteByID, Renew; unified two-phase teardown (revokeAndDeprovisionThenDelete)
+│   ├── subscription_traffic.go # Presentation: TrafficInfo, GetWithTraffic, formatExpiresAt
 │   ├── sync.go              # Multi-node subscription sync (Reconcile, SyncPendingNodes)
 │   ├── order.go             # Order lifecycle (Create, Activate, Expire)
 │   └── subscription_nodes.go # Subscription-node join table CRUD
 ├── vpn/                # VPN client abstraction (multi-node, multi-type)
-│   ├── client.go            # Client interface, Config, NewClient factory, error classification
-│   ├── threex_ui.go         # 3x-ui specific client implementation
-│   ├── proxman.go           # proxman client implementation
+│   ├── client.go            # Client interface, Config, NewClient factory, idempotent error classification (ErrSubscriptionAlreadyExists / ErrSubscriptionNotFound)
+│   ├── threex_ui.go         # 3x-ui specific client implementation (classifies Create/Update/Delete)
+│   ├── proxman.go           # proxman client implementation (classifies Create/Delete)
 │   └── fetch.go             # fetch client (read-only HTTP, no-op provisioning)
 ├── xui/              # Legacy 3x-ui API client (used by vpn/threex_ui.go)
 │   ├── client.go            # 3x-ui REST API + RetryWithBackoff (Bearer auth, multi-outbound flow grouping)
@@ -198,7 +199,7 @@ internal/
 ├── heartbeat/        # External monitoring
 │   └── heartbeat.go         # Periodic POST to HEARTBEAT_URL
 ├── interfaces/       # DI interfaces
-│   └── interfaces.go        # BotAPI, DatabaseService, XUIClient, etc.
+│   └── interfaces.go        # BotAPI, DatabaseService (composition root), XUIClient; per-slice seams SubscriptionRepository/InviteRepository/TrialRepository/PlanRepository and composed WebRepository
 ├── utils/            # Utilities
 │   ├── uuid.go              # Crypto-random UUID v4, SubID, invite code
 │   ├── qr.go                # QR code generation
@@ -206,7 +207,8 @@ internal/
 │   ├── format.go            # Progress bar, date formatting
 │   └── markdown.go          # Markdown sanitization
 └── testutil/         # Test helpers
-    └── testutil.go          # Mock DB, XUI, Bot + Setenv
+    ├── testutil.go          # Mock DB, XUI, Bot + Setenv (flat DatabaseService fake)
+    └── db_slice_fakes.go    # Per-slice fakes (NewSubscriptionRepository, NewInviteRepository, etc.)
 ```
 
 ---

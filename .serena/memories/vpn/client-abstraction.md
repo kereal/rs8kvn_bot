@@ -26,7 +26,7 @@ type Client interface {
 
 ## Implementations
 - **`ThreeXUIClient`** (`internal/vpn/threex_ui.go`): адаптер над `interfaces.XUIClient`
-- `ProxmanClient` (`internal/vpn/proxman.go`): HTTP webhook client (`subscription.delete` event); response `"duplicate"` → `ErrSubscriptionAlreadyExists`; other errors classified via `classifyDeleteSubscriptionError`
+- `ProxmanClient` (`internal/vpn/proxman.go`): HTTP webhook client. `Create`/`Delete` классифицируются через `classifyCreateSubscriptionError`/`classifyDeleteSubscriptionError`; `subscription.delete` возвращает `"duplicate"` → `ErrSubscriptionAlreadyExists`. `UpdateSubscription` — no-op.
 - `FetchClient` (`internal/vpn/fetch.go`): read-only HTTP fetch node. All methods (Create/Update/Delete/Close) — no-op. `subscription_url` используется subserver'ом напрямую (без добавления subID). Не управляет VPN-клиентами, только отдаёт proxy-данные по HTTP.
 
 ## Usage
@@ -34,5 +34,9 @@ type Client interface {
 `NewClient(Config)` — фабрика, создающая нужную реализацию.
 
 ## Error Classification
-- `ErrSubscriptionAlreadyExists` → fallback на UpdateSubscription
-- `ErrSubscriptionNotFound` → при удалении, удаляем запись из БД
+Классификаторы `classifyCreateSubscriptionError`/`classifyDeleteSubscriptionError` (`internal/vpn/client.go`) — **идемпотентные**: если ошибка уже несёт sentinel, возвращают как есть. `classifyCreateSubscriptionError` матчит `already exists`/`client already exists`/`duplicate`/`already added` → `ErrSubscriptionAlreadyExists`; `classifyDeleteSubscriptionError` матчит `not found`/`does not exist`/`client not found` → `ErrSubscriptionNotFound`.
+
+Применяются **за швом `Client`** — ко всем `Create`/`Update`/`Delete` у `ThreeXUIClient` и `ProxmanClient`:
+- `ErrSubscriptionAlreadyExists` → fallback на `UpdateSubscription` (3x-ui) / событие `subscription.create` возвращает `"duplicate"` → `ErrSubscriptionAlreadyExists` (proxman).
+- `ErrSubscriptionNotFound` → при удалении, удаляем запись из БД.
+- `FetchClient` — no-op, классификация не применяется.

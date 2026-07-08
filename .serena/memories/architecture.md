@@ -35,6 +35,15 @@
 - Убран избыточный `if xuiHeaders != nil` в `subscription_handler.go`
 - Проведён `go fmt` по 20 файлам
 
+## Refactoring 2026-07-09 (dev, коммиты c3c92bf / 155bb92 / 183cb85)
+Реализованы 4 пункта архитектурного обзора (отчёты `architecture-review-20260708T2332.html` и `-ru`):
+- **Кандидат 1 — узкий шов `DatabaseService`** (`c3c92bf`): `subserver`/`scheduler` берут `interfaces.SubscriptionRepository`, `web` — составной `interfaces.WebRepository`. Мелкие срезы определены в `internal/interfaces/interfaces.go`; `DatabaseService` оставлен composition root в `main.go`. Добавлены пер-срезовые фейки `internal/testutil/db_slice_fakes.go`. См. `docs/adr/0001-narrow-database-service-seam.md`.
+- **Кандидат 2 — дедупликация двухфазного удаления** (`155bb92`): `Delete`/`DeleteByID` объединены на `revokeAndDeprovisionThenDelete` (см. Service Layer). Исправлен nil-разыменование: используется `sub`, а не `deleted`, который может быть nil.
+- **Кандидат 3 — вынос презентации трафика** (`155bb92`): `TrafficInfo`, `GetWithTraffic`, `formatExpiresAt` перенесены в `internal/service/subscription_traffic.go`. `subscription.go` сократился, презентация отделена от жизненного цикла.
+- **Кандидат 4 — классификация ошибок `vpn`** (`183cb85`): классификаторы сделаны идемпотентными и применены ко всем `Create`/`Update`/`Delete` клиентов 3x-ui и proxman (см. VPN Client).
+- Итог: `go build ./...` зелёный, `go vet` чистый, **1776 тестов проходят** в 22 пакетах.
+- `doc/architecture.md` актуализирован: дерево каталогов (`service/`, `vpn/`, `interfaces/`, `testutil/`), описания интерфейсов.
+
 ## Branch: dev
 
 Эта память описывает текущую ветку `plans_and_pricing`, которая включает:
@@ -178,6 +187,7 @@ id, name UNIQUE, devices_limit, traffic_limit
 - **`ThreeXUIClient`**: адаптер над `interfaces.XUIClient` для 3x-ui нод
 - **`Config`**: Host, APIToken, InboundIDs, XUIClient, Type
 - Sentinel errors: `ErrSubscriptionAlreadyExists`, `ErrSubscriptionNotFound`, `ErrNotImplemented`
+- **Классификация ошибок** (`classifyCreateSubscriptionError`/`classifyDeleteSubscriptionError` в `internal/vpn/client.go`): идемпотентные, оборачивают низкоуровневую ошибку панели sentinel-ом по тексту (`already exists`/`duplicate` → `ErrSubscriptionAlreadyExists`; `not found`/`does not exist` → `ErrSubscriptionNotFound`). Применяются ко ВСЕМ `Create`/`Update`/`Delete` у `ThreeXUIClient` и `ProxmanClient`, поэтому вызывающий код в `service` всегда получает sentinel-ошибки. `FetchClient` — no-op, классификация не нужна.
 
 ### Sync Service (`internal/service/sync.go`)
 - **State machine**: `pending_add → active`, `pending_update → active`, `pending_remove → row deletion`
@@ -192,6 +202,9 @@ id, name UNIQUE, devices_limit, traffic_limit
 - **`BindTrial(ctx, subID, telegramID, username, inviteCode string)`** — обновляет ВСЕ trial-источники (`xui.UpdateClient`), в `db.BindTrialSubscription` — defensive revoke всех active subs для telegram_id (защита double-active race).
 - **`ReconcileOrphanedClients(ctx)`** — проверяет ВСЕ источники, удаляет только если клиент не найден НИГДЕ.
 - **`LinkNodeToPlan(ctx, planName, nodeID)`** — создаёт план-ноду в `plan_nodes`.
+- **`Delete(ctx, telegramID int64) error`** — резолв `GetByTelegramID` → `revokeAndDeprovisionThenDelete`.
+- **`DeleteByID(ctx, id uint) (*database.Subscription, error)`** — резолв `GetByID` → `revokeAndDeprovisionThenDelete`.
+- **`revokeAndDeprovisionThenDelete(ctx, sub *database.Subscription)`** — единый владелец двухфазного удаления: mark `revoked` → deprovision (best-effort `MarkAllForRemoval`+`SyncSubscription`, фоновый sync доделает при сбое) → физическое удаление `DeleteSubscriptionByID(sub.ID)` + `DeleteSubscriptionNodesBySubscriptionID` → `InvalidateBySubID`. Оба входа ведут сюда; расхождение telegramID/id устранено.
 
 ### Database (`internal/database/` — 9 файлов)
 
