@@ -3,6 +3,7 @@ package subserver
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -88,7 +89,7 @@ func normaliseClashProxy(p map[string]any) (map[string]any, error) {
 		setStrFallback(out, p, []string{"network", "net"}, "network")
 		setStrFallback(out, p, []string{"servername", "sni"}, "sni")
 		setStrFallback(out, p, []string{"client-fingerprint", "fp"}, "fp")
-		setStrFallback(out, p, []string{"alpn"}, "alpn")
+		setAlpn(out, p)
 		// REALITY: presence of reality-opts means security=reality.
 		if ro := getMap(p, "reality-opts"); ro != nil {
 			out["security"] = "reality"
@@ -112,13 +113,19 @@ func normaliseClashProxy(p map[string]any) (map[string]any, error) {
 				out["host"] = host
 			}
 		}
+		// xhttp (SplitHTTP / XTLS) transport.
+		if x := getMap(p, "xhttp-opts"); x != nil {
+			setStrFallback(out, x, []string{"path"}, "path")
+			setStrFallback(out, x, []string{"host"}, "host")
+			setStrFallback(out, x, []string{"mode"}, "mode")
+		}
 	case "vmess":
 		setStrFallback(out, p, []string{"uuid", "id", "userId"}, "uuid")
 		setStrFallback(out, p, []string{"cipher", "scy"}, "scy")
 		setStrFallback(out, p, []string{"network", "net"}, "network")
 		setStrFallback(out, p, []string{"servername", "sni"}, "sni")
 		setStrFallback(out, p, []string{"client-fingerprint", "fp"}, "fp")
-		setStrFallback(out, p, []string{"alpn"}, "alpn")
+		setAlpn(out, p)
 		setStrFallback(out, p, []string{"alterId", "aid"}, "aid")
 		if toBool(p["tls"]) {
 			out["tls"] = "tls"
@@ -136,12 +143,34 @@ func normaliseClashProxy(p map[string]any) (map[string]any, error) {
 				out["host"] = host
 			}
 		}
+		// For vmess, the v2ray "header type" (none/http) is expressed in Clash
+		// via network: http (HTTP-obfs). http-opts carries path/host.
+		if net, _ := out["network"].(string); net == "http" {
+			out["headerType"] = "http"
+		}
+		if h := getMap(p, "http-opts"); h != nil {
+			if s := firstListOrString(h["path"]); s != "" {
+				out["path"] = s
+			}
+			if s := httpOptsHost(h); s != "" {
+				out["host"] = s
+			}
+		}
+		// h2 transport options.
+		if h := getMap(p, "h2-opts"); h != nil {
+			if s := firstListOrString(h["path"]); s != "" {
+				out["path"] = s
+			}
+			if s := httpOptsHost(h); s != "" {
+				out["host"] = s
+			}
+		}
 	case "trojan":
 		setStrFallback(out, p, []string{"password", "pass"}, "password")
 		setStrFallback(out, p, []string{"network", "net"}, "network")
 		setStrFallback(out, p, []string{"sni", "servername"}, "sni")
 		setStrFallback(out, p, []string{"client-fingerprint", "fp"}, "fp")
-		setStrFallback(out, p, []string{"alpn"}, "alpn")
+		setAlpn(out, p)
 		if toBool(p["skip-cert-verify"]) || toBool(p["allowInsecure"]) {
 			out["allowInsecure"] = true
 		}
@@ -164,6 +193,14 @@ func normaliseClashProxy(p map[string]any) (map[string]any, error) {
 	case "shadowsocks", "ss":
 		setStrFallback(out, p, []string{"cipher", "method"}, "method")
 		setStrFallback(out, p, []string{"password", "pass"}, "password")
+		// SIP002 plugin (simple-obfs / v2ray-plugin). The Clash "plugin" field
+		// names the plugin and "plugin-opts" carries its parameters.
+		if plugin, ok := p["plugin"].(string); ok && plugin != "" {
+			out["plugin"] = plugin
+			if po := getMap(p, "plugin-opts"); po != nil {
+				out["pluginOpts"] = formatSSPluginOpts(plugin, po)
+			}
+		}
 	case "hysteria", "hysteria2", "hy2":
 		setStrFallback(out, p, []string{"password", "auth", "auth-str", "auth_str"}, "password")
 		setStrFallback(out, p, []string{"sni", "servername"}, "sni")
@@ -173,12 +210,12 @@ func normaliseClashProxy(p map[string]any) (map[string]any, error) {
 			out["allowInsecure"] = true
 		}
 		setStrFallback(out, p, []string{"client-fingerprint", "fp"}, "fp")
-		setStrFallback(out, p, []string{"alpn"}, "alpn")
+		setAlpn(out, p)
 	case "tuic":
 		setStrFallback(out, p, []string{"uuid", "id", "userId"}, "uuid")
 		setStrFallback(out, p, []string{"password", "pass"}, "password")
 		setStrFallback(out, p, []string{"sni", "servername"}, "sni")
-		setStrFallback(out, p, []string{"alpn"}, "alpn")
+		setAlpn(out, p)
 		if toBool(p["skip-cert-verify"]) || toBool(p["allowInsecure"]) {
 			out["allowInsecure"] = true
 		}
@@ -201,6 +238,32 @@ func setWSHost(out, wsOpts map[string]any) {
 func setWSPath(out, wsOpts map[string]any) {
 	if s, ok := wsOpts["path"].(string); ok {
 		out["path"] = s
+	}
+}
+
+// setAlpn copies the Clash "alpn" field into out["alpn"] as a comma-joined
+// string. In Clash the field is a YAML list (alpn: [h2, http/1.1]); share-link
+// specs (v2rayN) expect a single comma-separated value (alpn=h2,http/1.1).
+func setAlpn(out, p map[string]any) {
+	v, ok := p["alpn"]
+	if !ok {
+		return
+	}
+	switch a := v.(type) {
+	case string:
+		if a != "" {
+			out["alpn"] = a
+		}
+	case []any:
+		parts := make([]string, 0, len(a))
+		for _, item := range a {
+			if s, ok := item.(string); ok && s != "" {
+				parts = append(parts, s)
+			}
+		}
+		if len(parts) > 0 {
+			out["alpn"] = strings.Join(parts, ",")
+		}
 	}
 }
 
@@ -268,6 +331,116 @@ func getMap(src map[string]any, key string) map[string]any {
 		}
 	}
 	return nil
+}
+
+// firstListOrString returns the string value of v, or the first string element
+// of a list value (Clash http-opts/h2-opts use list-valued path/host fields).
+func firstListOrString(v any) string {
+	switch x := v.(type) {
+	case string:
+		return x
+	case []any:
+		if len(x) > 0 {
+			if s, ok := x[0].(string); ok {
+				return s
+			}
+		}
+	}
+	return ""
+}
+
+// ssPluginKeyMap maps Clash plugin-opts keys to SIP002 URI plugin parameter
+// keys for the supported Shadowsocks plugins. Keys not listed are passed
+// through verbatim (lowercased) so unknown plugins still produce a usable link.
+var ssPluginKeyMap = map[string]map[string]string{
+	"obfs": {
+		"mode": "obfs",
+		"host": "obfs-host",
+		"path": "obfs-uri",
+	},
+	"obfs-local": {
+		"mode": "obfs",
+		"host": "obfs-host",
+		"path": "obfs-uri",
+	},
+	"v2ray-plugin": {
+		"mode":    "mode",
+		"host":    "host",
+		"path":    "path",
+		"tls":     "tls",
+		"mux":     "mux",
+		"headers": "headers",
+	},
+}
+
+// formatSSPluginOpts serialises Clash plugin-opts into the SIP002 plugin string
+// ("key=value;key2=value2"), applying per-plugin key translation where known.
+// Clash uses "obfs" while SIP002 expects "obfs-local"; that alias is applied here.
+func formatSSPluginOpts(plugin string, opts map[string]any) string {
+	name := plugin
+	if plugin == "obfs" {
+		name = "obfs-local"
+	}
+	keyMap := ssPluginKeyMap[plugin]
+
+	pairs := make([]string, 0, len(opts))
+	for _, k := range sortedKeys(opts) {
+		outKey := k
+		if keyMap != nil {
+			if mapped, ok := keyMap[k]; ok {
+				outKey = mapped
+			}
+		}
+		pairs = append(pairs, outKey+"="+ssPluginValue(opts[k]))
+	}
+	return name + ";" + strings.Join(pairs, ";")
+}
+
+// ssPluginValue renders a plugin-opts value: bools as 0/1, lists joined by "&".
+func ssPluginValue(v any) string {
+	switch x := v.(type) {
+	case string:
+		return x
+	case bool:
+		if x {
+			return "1"
+		}
+		return "0"
+	case int:
+		return strconv.Itoa(x)
+	case []any:
+		parts := make([]string, 0, len(x))
+		for _, item := range x {
+			if s, ok := item.(string); ok {
+				parts = append(parts, s)
+			}
+		}
+		return strings.Join(parts, "&")
+	}
+	return fmt.Sprintf("%v", v)
+}
+
+// httpOptsHost returns the host value from a Clash http-opts/h2-opts block.
+// http-opts nests it under headers.Host (a list); h2-opts places host directly
+// (also a list). The first string value is used.
+func httpOptsHost(h map[string]any) string {
+	if headers := getMap(h, "headers"); headers != nil {
+		if s := firstListOrString(headers["Host"]); s != "" {
+			return s
+		}
+	}
+	return firstListOrString(h["host"])
+}
+
+// sortedKeys returns the keys of m sorted lexicographically for deterministic
+// serialisation of plugin options.
+func sortedKeys(m map[string]any) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // portToInt converts a port value (string or int) to int.
