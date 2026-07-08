@@ -6,8 +6,7 @@ import (
 	"strings"
 )
 
-// FilterHeaders extracts request headers into a lowercased map, excluding
-// X-Forwarded-Proto, X-Forwarded-For, X-Real-Ip, Accept, Authorization, and Cookie.
+// FilterHeaders extracts request headers into a lowercased map, excluding following:
 func FilterHeaders(h http.Header) map[string]string {
 	result := make(map[string]string)
 	excluded := map[string]bool{
@@ -17,6 +16,8 @@ func FilterHeaders(h http.Header) map[string]string {
 		"accept":            true,
 		"authorization":     true,
 		"cookie":            true,
+		"accept-encoding":   true,
+		"connection":        true,
 	}
 
 	for key, values := range h {
