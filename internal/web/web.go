@@ -58,7 +58,7 @@ const subserverAccessLogCloseTimeout = 5 * time.Second
 
 type Server struct {
 	addr            string
-	db              interfaces.DatabaseService
+	db              interfaces.WebRepository
 	cfg             *config.Config
 	botUsername     string
 	subService      *service.SubscriptionService
@@ -75,7 +75,7 @@ type Server struct {
 	errorTemplate   *template.Template
 }
 
-func NewServer(addr string, db interfaces.DatabaseService, cfg *config.Config, botUsername string, subService *service.SubscriptionService, subServer *subserver.Service) *Server {
+func NewServer(addr string, db interfaces.WebRepository, cfg *config.Config, botUsername string, subService *service.SubscriptionService, subServer *subserver.Service) *Server {
 	trialTmpl := template.Must(template.New("trial.html").Funcs(template.FuncMap{
 		"escape": func(s string) string {
 			var buf strings.Builder

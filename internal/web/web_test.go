@@ -146,7 +146,7 @@ func TestRenderTrialPage(t *testing.T) {
 					return &database.Plan{ID: 1, Name: "trial", DevicesLimit: 1, TrafficLimit: 1073741824}, nil
 				}
 				srv = NewServer(":8880", mockDB, cfg, "testbot", nil, nil)
-				defer srv.db.Close()
+				defer mockDB.Close()
 			} else {
 				cfg := &config.Config{SiteURL: "https://vpn.site", TrialDurationHours: 3}
 				srv = NewServer(":8880", nil, cfg, "testbot", nil, nil)
