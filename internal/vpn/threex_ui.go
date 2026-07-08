@@ -51,7 +51,7 @@ func (c *ThreeXUIClient) UpdateSubscription(ctx context.Context, provision Subsc
 		ResetDays:    provision.ResetDays,
 	})
 	if err != nil {
-		return fmt.Errorf("3x-ui update subscription: %w", err)
+		return fmt.Errorf("3x-ui update subscription: %w", classifyCreateSubscriptionError(err))
 	}
 	return nil
 }

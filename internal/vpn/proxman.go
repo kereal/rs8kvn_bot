@@ -52,7 +52,7 @@ func (c *ProxmanClient) CreateSubscription(ctx context.Context, provision Subscr
 		SubscriptionID: provision.SubID,
 	}
 
-	return c.sendEvent(ctx, event)
+	return classifyCreateSubscriptionError(c.sendEvent(ctx, event))
 }
 
 // UpdateSubscription is a no-op for proxman: the webhook payload carries no
