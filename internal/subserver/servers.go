@@ -161,12 +161,18 @@ func ConvertSingleJSONToLink(raw json.RawMessage) (string, error) {
 // buildVLESSServerLink builds a vless:// share URI from a parsed server config.
 func buildVLESSServerLink(cfg *serverConfig) (string, error) {
 	params := url.Values{}
-	params.Set("encryption", cfg.Encryption)
+	encryption := cfg.Encryption
+	if encryption == "" {
+		encryption = "none"
+	}
+	params.Set("encryption", encryption)
 	if cfg.Flow != "" {
 		params.Set("flow", cfg.Flow)
 	}
 	if cfg.Security != "" {
 		params.Set("security", cfg.Security)
+	} else if cfg.TLS != "" {
+		params.Set("security", cfg.TLS)
 	}
 	if cfg.SNI != "" {
 		params.Set("sni", cfg.SNI)
@@ -188,9 +194,6 @@ func buildVLESSServerLink(cfg *serverConfig) (string, error) {
 	}
 	if cfg.Path != "" {
 		params.Set("path", cfg.Path)
-	}
-	if cfg.TLS != "" {
-		params.Set("security", cfg.TLS)
 	}
 	if cfg.Alpn != "" {
 		params.Set("alpn", cfg.Alpn)
