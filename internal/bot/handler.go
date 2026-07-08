@@ -135,6 +135,11 @@ func (h *Handler) SetBot(bot interfaces.BotAPI) {
 	h.sender.SetBot(bot)
 }
 
+func (h *Handler) SetBotConfig(bc *BotConfig) {
+	h.botConfig = bc
+	h.keyboards = NewKeyboardBuilder(bc.Username, h.cfg.ContactUsername, h.cfg.DonateCardNumber, h.cfg.DonateURL, h.cfg.SiteURL)
+}
+
 // Cache returns the subscription cache. Used by external callers (e.g. main.go)
 // to compose cache invalidation across multiple caches.
 func (h *Handler) Cache() *SubscriptionCache {

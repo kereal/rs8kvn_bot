@@ -113,6 +113,12 @@ func (s *Server) SetReady(ready bool) {
 	s.ready = ready
 }
 
+func (s *Server) SetBotUsername(username string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.botUsername = username
+}
+
 func (s *Server) Addr() string {
 	if s.listenerAddr != "" {
 		return s.listenerAddr
