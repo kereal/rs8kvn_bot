@@ -181,9 +181,12 @@ func fetchAndAggregateSources(ctx context.Context, subID string, nodes []databas
 
 	successCount := 0
 	totalCount := 0
-	for _, res := range results {
+	for i := range nodes {
+		if nodes[i].SubscriptionURL == "" {
+			continue
+		}
 		totalCount++
-		if res.body != nil {
+		if results[i].body != nil {
 			successCount++
 		}
 	}
