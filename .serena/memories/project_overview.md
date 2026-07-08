@@ -24,6 +24,21 @@ Production-grade: миграции, мониторинг, rate-limiting, circuit
 - Subscription status check в `/sub/{subID}` — revoked/expired → 404
 - Subscription expiration хранится в БД на момент Create
 
+## Subserver share-link conversion
+- Поддерживаемые схемы: `vmess://`, `trojan://`, `ss://`, `hysteria://`, `hysteria2://`, `hy2://`, `tuic://`
+- ALPN list→comma string (Clash YAML list → v2rayN share-link param)
+- Shadowsocks SIP002 plugin: `obfs`→`obfs-local` alias + `plugin-opts` serialisation
+- VLESS xhttp/splithttp normalisation + `mode` param
+- `security=tls` для Trojan/VLESS (3x-ui flat format)
+- IPv6-safe addresses через `net.JoinHostPort`
+- VMess port as string для v2rayNG
+
+## Access log
+- Space-separated format, async writer с bounded queue (1024 records)
+- Fields: timestamp, method, URI, status, success/total, client IP, hwid, os, ver, model, user-agent
+- Quote-wrapping для значений с пробелами
+- `statusRecorder` tracks per-request success/total counts
+
 ## Стек
 - **Go 1.25** (go.mod)
 - **Bot**: telegram-bot-api/v5

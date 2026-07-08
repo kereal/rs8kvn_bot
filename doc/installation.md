@@ -213,7 +213,7 @@ Air will automatically rebuild and restart the bot when you save changes to Go f
 | `CONTACT_USERNAME` | Support Telegram username | *(empty)* | ❌ | Without `@` |
 | **Subscription Server** |
 | `GLOBAL_SUB_URL` | Base URL for subscription links | — | ✅ | Constructed as `GLOBAL_SUB_URL + <sub_id>` (e.g. `https://vpn.example.com/sub/abc123`); must be valid http/https URL, HTTPS in production |
-| `SUBSERVER_ACCESS_LOG` | `/sub/{id}` access log file path | *(empty)* | ❌ | Set empty to disable; tab-separated (TSV) line, fields separated by tabs with empty optional values as empty fields (no zap-console encoding); startup continues if the file cannot be opened |
+| `SUBSERVER_ACCESS_LOG` | `/sub/{id}` access log file path | *(empty)* | ❌ | Set empty to disable; space-separated line with quote-wrapped values; startup continues if the file cannot be opened |
 | **Database** |
 | `DATABASE_PATH` | SQLite database file path | `./data/rs8kvn.db` | ❌ | Directory must exist |
 | **Logging** |

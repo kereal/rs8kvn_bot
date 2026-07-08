@@ -24,23 +24,24 @@ import (
 //  3. Track the requesting device and IP for analytics.
 //  4. For each active source, fetch the upstream response and detect its format (fetchAndAggregateSources).
 //  5. Aggregate subscription-userinfo headers and build the final response (buildResponse).
-func HandleSubscription(ctx context.Context, db interfaces.DatabaseService, subSvc *Service, subID, clientIP string, requestHeaders map[string]string) (*SubscriptionResult, error) {
+func HandleSubscription(ctx context.Context, db interfaces.DatabaseService, subSvc *Service, subID, clientIP string, requestHeaders map[string]string) (*SubscriptionResult, int, int, error) {
 	// 1. Try to serve from cache first.
 	if result, hit, err := serveFromCache(ctx, db, subSvc, subID); hit {
-		return result, err
+		return result, 0, 0, err
 	}
 
 	// 2. Cache miss: load the subscription with plan and active sources.
 	subFull, err := loadSubscription(ctx, db, subID, clientIP, requestHeaders)
 	if err != nil {
-		return nil, err
+		return nil, 0, 0, err
 	}
 
 	// 3-4. Fetch from all active sources and aggregate items + traffic.
-	agg := fetchAndAggregateSources(ctx, subID, subFull.Nodes)
+	agg, success, total := fetchAndAggregateSources(ctx, subID, subFull.Nodes)
 
 	// 5. Build the final response and cache it.
-	return buildResponse(subSvc, subID, agg, subFull.Plan.TrafficLimit)
+	res, err := buildResponse(subSvc, subID, agg, subFull.Plan.TrafficLimit)
+	return res, success, total, err
 }
 
 // UpdateDevices records the current request headers as a device entry in the

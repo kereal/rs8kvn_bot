@@ -277,5 +277,221 @@ func TestNormaliseClashProxy_VMessAlterId(t *testing.T) {
 	assert.Equal(t, "2", cfg.Aid)
 }
 
+// TestExtractClashConfigs_ALPNList verifies that the Clash "alpn" list field is
+// serialised as a comma-joined value in the resulting share link (v2rayN spec).
+func TestExtractClashConfigs_ALPNList(t *testing.T) {
+	t.Parallel()
+
+	yaml := "proxies:\n  - name: vless-alpn\n    type: vless\n    server: 1.2.3.4\n    port: 443\n    uuid: aaaa-bbbb\n    network: ws\n    tls: true\n    alpn:\n      - h2\n      - http/1.1\n"
+	configs, err := ExtractClashConfigs([]byte(yaml))
+	require.NoError(t, err)
+	require.Len(t, configs, 1)
+
+	cfg, err := toServerConfig(configs[0])
+	require.NoError(t, err)
+	assert.Equal(t, "h2,http/1.1", cfg.Alpn)
+
+	link, err := ConvertSingleJSONToLink(configs[0])
+	require.NoError(t, err)
+	assert.Contains(t, link, "alpn=h2%2Chttp%2F1.1")
+}
+
+// TestExtractClashConfigs_VMessHTTPObfs verifies vmess header type and http-opts
+// host/path are captured (previously dropped).
+func TestExtractClashConfigs_VMessHTTPObfs(t *testing.T) {
+	t.Parallel()
+
+	yaml := "proxies:\n  - name: vmess-http\n    type: vmess\n    server: 1.2.3.4\n    port: 443\n    uuid: aaaa-bbbb\n    cipher: auto\n    tls: true\n    network: http\n    http-opts:\n      path:\n        - /a\n        - /b\n      headers:\n        Host:\n          - fake.com\n"
+	configs, err := ExtractClashConfigs([]byte(yaml))
+	require.NoError(t, err)
+	require.Len(t, configs, 1)
+
+	cfg, err := toServerConfig(configs[0])
+	require.NoError(t, err)
+	assert.Equal(t, "http", cfg.HeaderType)
+	assert.Equal(t, "/a", cfg.Path)
+	assert.Equal(t, "fake.com", cfg.Host)
+
+	link, err := ConvertSingleJSONToLink(configs[0])
+	require.NoError(t, err)
+	assert.True(t, strings.HasPrefix(link, "vmess://"))
+}
+
+// TestExtractClashConfigs_SSPlugin verifies Shadowsocks simple-obfs plugin is
+// emitted as a SIP002 plugin parameter (Clash "obfs" -> "obfs-local").
+func TestExtractClashConfigs_SSPlugin(t *testing.T) {
+	t.Parallel()
+
+	yaml := "proxies:\n  - name: ss-obfs\n    type: shadowsocks\n    server: 1.2.3.4\n    port: 8388\n    cipher: aes-256-gcm\n    password: sspass\n    plugin: obfs\n    plugin-opts:\n      mode: http\n      host: bing.com\n"
+	configs, err := ExtractClashConfigs([]byte(yaml))
+	require.NoError(t, err)
+	require.Len(t, configs, 1)
+
+	cfg, err := toServerConfig(configs[0])
+	require.NoError(t, err)
+	assert.Equal(t, "obfs-local;obfs-host=bing.com;obfs=http", cfg.PluginOpts)
+
+	link, err := ConvertSingleJSONToLink(configs[0])
+	require.NoError(t, err)
+	assert.Contains(t, link, "plugin=obfs-local")
+	assert.Contains(t, link, "obfs%3Dhttp")
+	assert.Contains(t, link, "obfs-host%3Dbing.com")
+}
+
+// TestExtractClashConfigs_VLESSXHTTP verifies the XTLS SplitHTTP (xhttp)
+// transport is converted to type=xhttp with path/host/mode in the link.
+func TestExtractClashConfigs_VLESSXHTTP(t *testing.T) {
+	t.Parallel()
+
+	yaml := "proxies:\n  - name: vless-xhttp\n    type: vless\n    server: 1.2.3.4\n    port: 443\n    uuid: aaaa-bbbb\n    flow: xtls-rprx-vision\n    network: xhttp\n    tls: true\n    alpn:\n      - h2\n    reality-opts:\n      public-key: pk\n      short-id: sid\n    xhttp-opts:\n      path: /x\n      host: x.example.com\n      mode: stream-up\n"
+	configs, err := ExtractClashConfigs([]byte(yaml))
+	require.NoError(t, err)
+	require.Len(t, configs, 1)
+
+	cfg, err := toServerConfig(configs[0])
+	require.NoError(t, err)
+	assert.Equal(t, "xhttp", cfg.Network)
+	assert.Equal(t, "/x", cfg.Path)
+	assert.Equal(t, "x.example.com", cfg.Host)
+	assert.Equal(t, "stream-up", cfg.Mode)
+	assert.Equal(t, "h2", cfg.Alpn)
+
+	link, err := ConvertSingleJSONToLink(configs[0])
+	require.NoError(t, err)
+	assert.Contains(t, link, "type=xhttp")
+	assert.Contains(t, link, "path=%2Fx")
+	assert.Contains(t, link, "host=x.example.com")
+	assert.Contains(t, link, "mode=stream-up")
+	assert.Contains(t, link, "alpn=h2")
+}
+
+// TestExtractClashConfigs_VLESSSplitHTTPAlias verifies legacy "splithttp"
+// network normalises to "xhttp" in the generated link.
+func TestExtractClashConfigs_VLESSSplitHTTPAlias(t *testing.T) {
+	t.Parallel()
+
+	yaml := "proxies:\n  - name: vless-splithttp\n    type: vless\n    server: 1.2.3.4\n    port: 443\n    uuid: aaaa-bbbb\n    network: splithttp\n    tls: true\n    xhttp-opts:\n      path: /s\n"
+	configs, err := ExtractClashConfigs([]byte(yaml))
+	require.NoError(t, err)
+	require.Len(t, configs, 1)
+
+	link, err := ConvertSingleJSONToLink(configs[0])
+	require.NoError(t, err)
+	assert.Contains(t, link, "type=xhttp")
+	assert.Contains(t, link, "path=%2Fs")
+}
+
+// TestExtractClashConfigs_VLESSSkipCertVerify verifies that Clash
+// skip-cert-verify/allowInsecure propagates to allowInsecure=1 in the VLESS
+// share link (v2rayN equivalent).
+func TestExtractClashConfigs_VLESSSkipCertVerify(t *testing.T) {
+	t.Parallel()
+
+	yaml := "proxies:\n  - name: vless-skip\n    type: vless\n    server: 1.2.3.4\n    port: 443\n    uuid: aaaa-bbbb\n    tls: true\n    skip-cert-verify: true\n    network: ws\n    ws-opts:\n      path: /ws\n      headers:\n        Host: example.com\n"
+	configs, err := ExtractClashConfigs([]byte(yaml))
+	require.NoError(t, err)
+	require.Len(t, configs, 1)
+
+	cfg, err := toServerConfig(configs[0])
+	require.NoError(t, err)
+	assert.True(t, cfg.AllowInsecure)
+
+	link, err := ConvertSingleJSONToLink(configs[0])
+	require.NoError(t, err)
+	assert.Contains(t, link, "allowInsecure=1")
+}
+
+// TestExtractClashConfigs_VLESSHTTPOpts verifies VLESS with network: http
+// correctly extracts path and host from http-opts.
+func TestExtractClashConfigs_VLESSHTTPOpts(t *testing.T) {
+	t.Parallel()
+
+	yaml := "proxies:\n  - name: vless-http\n    type: vless\n    server: 1.2.3.4\n    port: 443\n    uuid: aaaa-bbbb\n    network: http\n    tls: true\n    alpn:\n      - h2\n    http-opts:\n      path:\n        - /a\n      headers:\n        Host:\n          - fake.com\n"
+	configs, err := ExtractClashConfigs([]byte(yaml))
+	require.NoError(t, err)
+	require.Len(t, configs, 1)
+
+	cfg, err := toServerConfig(configs[0])
+	require.NoError(t, err)
+	assert.Equal(t, "http", cfg.Network)
+	assert.Equal(t, "/a", cfg.Path)
+	assert.Equal(t, "fake.com", cfg.Host)
+	assert.Equal(t, "h2", cfg.Alpn)
+
+	link, err := ConvertSingleJSONToLink(configs[0])
+	require.NoError(t, err)
+	assert.Contains(t, link, "type=http")
+	assert.Contains(t, link, "path=%2Fa")
+	assert.Contains(t, link, "host=fake.com")
+}
+
+// TestExtractClashConfigs_VLESSH2Opts verifies VLESS with network: h2
+// correctly extracts path and host from h2-opts.
+func TestExtractClashConfigs_VLESSH2Opts(t *testing.T) {
+	t.Parallel()
+
+	yaml := "proxies:\n  - name: vless-h2\n    type: vless\n    server: 1.2.3.4\n    port: 443\n    uuid: aaaa-bbbb\n    network: h2\n    tls: true\n    alpn:\n      - h2\n    h2-opts:\n      path:\n        - /h2\n      headers:\n        Host:\n          - h2.example.com\n"
+	configs, err := ExtractClashConfigs([]byte(yaml))
+	require.NoError(t, err)
+	require.Len(t, configs, 1)
+
+	cfg, err := toServerConfig(configs[0])
+	require.NoError(t, err)
+	assert.Equal(t, "h2", cfg.Network)
+	assert.Equal(t, "/h2", cfg.Path)
+	assert.Equal(t, "h2.example.com", cfg.Host)
+	assert.Equal(t, "h2", cfg.Alpn)
+
+	link, err := ConvertSingleJSONToLink(configs[0])
+	require.NoError(t, err)
+	assert.Contains(t, link, "type=h2")
+	assert.Contains(t, link, "path=%2Fh2")
+	assert.Contains(t, link, "host=h2.example.com")
+}
+
+// TestExtractClashConfigs_TrojanTLS verifies Trojan with tls: true outputs
+// "security": "tls" (matching 3x-ui flat format), not "tls": "tls".
+func TestExtractClashConfigs_TrojanTLS(t *testing.T) {
+	t.Parallel()
+
+	yaml := "proxies:\n  - name: trojan-tls\n    type: trojan\n    server: 5.6.7.8\n    port: 443\n    password: trojpass\n    sni: sni.example.com\n    tls: true\n    network: ws\n    ws-opts:\n      path: /ws\n      headers:\n        Host: ws.example.com\n"
+	configs, err := ExtractClashConfigs([]byte(yaml))
+	require.NoError(t, err)
+	require.Len(t, configs, 1)
+
+	cfg, err := toServerConfig(configs[0])
+	require.NoError(t, err)
+	assert.Equal(t, "trojan", cfg.Type)
+	assert.Equal(t, "trojpass", cfg.Password)
+	assert.Equal(t, "ws.example.com", cfg.Host)
+	assert.Equal(t, "/ws", cfg.Path)
+
+	// Must use "security" field (3x-ui flat format), not "tls".
+	assert.Equal(t, "tls", cfg.Security)
+
+	link, err := ConvertSingleJSONToLink(configs[0])
+	require.NoError(t, err)
+	assert.Contains(t, link, "trojan://trojpass@5.6.7.8:443")
+	assert.Contains(t, link, "security=tls")
+	assert.Contains(t, link, "sni=sni.example.com")
+}
+
+// TestExtractClashConfigs_TrojanSplitHTTPAlias verifies legacy "splithttp"
+// network normalises to "xhttp" in the Trojan share link (matching VLESS).
+func TestExtractClashConfigs_TrojanSplitHTTPAlias(t *testing.T) {
+	t.Parallel()
+
+	yaml := "proxies:\n  - name: trojan-splithttp\n    type: trojan\n    server: 5.6.7.8\n    port: 443\n    password: trojpass\n    tls: true\n    network: splithttp\n"
+	configs, err := ExtractClashConfigs([]byte(yaml))
+	require.NoError(t, err)
+	require.Len(t, configs, 1)
+
+	link, err := ConvertSingleJSONToLink(configs[0])
+	require.NoError(t, err)
+	assert.Contains(t, link, "trojan://trojpass@5.6.7.8:443")
+	assert.Contains(t, link, "type=xhttp")
+	assert.NotContains(t, link, "type=splithttp")
+}
+
 // Suppress unused import warning if json is not directly referenced.
 var _ = json.RawMessage(nil)

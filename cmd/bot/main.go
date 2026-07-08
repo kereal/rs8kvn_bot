@@ -354,17 +354,15 @@ func main() {
 	}()
 	logger.Info("Database initialized successfully")
 
-	// 5. Initialize Telegram bot
-	botAPI, botConfig, err := initBot(cfg)
-	if err != nil {
-		logger.Fatal("Failed to initialize Telegram bot", zap.Error(err))
-	}
+	// 5. Wire application services with a placeholder bot; initBot runs below
+	// and replaces it with the real bot before any update is processed.
+	botAPI := &tgbotapi.BotAPI{Self: tgbotapi.User{UserName: "rs8kvn_bot_offline"}}
+	botConfig := &bot.BotConfig{Username: "rs8kvn_bot_offline"}
 
-	// 6. Wire application services
 	svc := initServices(cfg, dbService, deps, botAPI, botConfig)
 	defer svc.subServer.Stop()
 
-	// 7. Start web server
+	// 6. Start web server so subscriptions are served; bot is initialised next.
 	webServer, err := startWebServer(svc.subService, cfg, botConfig, svc.subServer, dbService)
 	if err != nil {
 		logger.Warn("Failed to start web server, continuing without web server", zap.Error(err))
@@ -380,6 +378,21 @@ func main() {
 			logger.Error("Failed to stop web server", zap.Error(err))
 		}
 	}()
+
+	// 7. Initialize Telegram bot (initBot retries internally and calls Fatal on total failure).
+	logger.Info("Initializing Telegram bot...")
+	api, bc, err := initBot(cfg)
+	if err != nil {
+		logger.Fatal("Telegram bot initialization failed", zap.Error(err))
+	}
+	svc.handler.SetBot(api)
+	svc.handler.SetBotConfig(bc)
+	botAPI = api
+	botConfig = bc
+	if webServer != nil {
+		webServer.SetBotUsername(bc.Username)
+	}
+	logger.Info("Telegram bot initialized successfully")
 
 	// 8. Configure update listener
 	u := tgbotapi.NewUpdate(0)
@@ -397,7 +410,7 @@ func main() {
 	svc.handler.StartReferralCacheSync(ctx)
 	bgWg := startBackgroundWorkers(ctx, svc.handler, svc.subService, dbService, cfg, deps.vpnClients, deps.nodes)
 
-	logger.Info("Bot started successfully")
+	logger.Debug("Bot started successfully")
 	if webServer != nil {
 		webServer.SetReady(true)
 	}

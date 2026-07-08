@@ -1,6 +1,7 @@
 package subserver
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -119,6 +120,45 @@ func TestConvertJSONToShareLinks_JSONArray(t *testing.T) {
 	require.Len(t, links, 2)
 	assert.Contains(t, links[0], "vless://")
 	assert.Contains(t, links[1], "trojan://")
+}
+
+func TestConvertJSONToShareLinks_TrojanTLS(t *testing.T) {
+	t.Parallel()
+
+	body := []byte(`{
+		"type": "trojan",
+		"address": "trojan.example.com",
+		"port": 443,
+		"password": "trojan-pass",
+		"security": "tls",
+		"sni": "real.example.com",
+		"remark": "Trojan-TLS"
+	}`)
+
+	links, err := ConvertJSONToShareLinks(body)
+	require.NoError(t, err)
+	require.Len(t, links, 1)
+	assert.Contains(t, links[0], "trojan://trojan-pass@trojan.example.com:443")
+	assert.Contains(t, links[0], "security=tls")
+	assert.Contains(t, links[0], "sni=real.example.com")
+	assert.Contains(t, links[0], "#Trojan-TLS")
+}
+
+func TestConvertSingleJSONToLink_Hysteria_IPv6(t *testing.T) {
+	t.Parallel()
+
+	raw := json.RawMessage(`{
+		"type": "hysteria2",
+		"address": "::1",
+		"port": 443,
+		"password": "hy2-pass",
+		"remark": "Hy2-IPv6"
+	}`)
+
+	link, err := ConvertSingleJSONToLink(raw)
+	require.NoError(t, err)
+	assert.Contains(t, link, "hysteria2://hy2-pass@[::1]:443")
+	assert.Contains(t, link, "#Hy2-IPv6")
 }
 
 func TestConvertJSONToShareLinks_InvalidJSON(t *testing.T) {

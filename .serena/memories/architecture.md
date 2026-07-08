@@ -4,16 +4,38 @@
 **Обновлено:** 2026-07-07  
 **Ветка:** `plans_and_pricing` (merge candidate)
 
-## Рефакторинг 2026-06-08 (коммит 2a1e0fe)
+## Subserver share-link conversion overhaul \(dev, коммит 70d30ca\)
+- Поддержка ALPN list→comma string \(v2rayN spec\)
+- Поддержка VMess HTTP-obfs/http-opts/h2-opts \(headerType, path, host\)
+- Поддержка Shadowsocks SIP002 plugin \(Clash "obfs"→"obfs-local" alias, plugin-opts serialisation\)
+- Поддержка VLESS xhttp/splithttp→xhttp normalisation \+ mode param
+- `allowInsecure`/`skip-cert-verify` propagation для VLESS/Trojan/Hysteria/TUIC
+- `security=tls` для Trojan/VLESS \(3x-ui flat format\) вместо legacy `tls` field
+- `net.JoinHostPort` для IPv6-safe addresses в Hysteria/TUIC/SS links
+- VMess port encoded as string для v2rayNG compatibility
+- Добавлены поля в `serverConfig`: `Mode`, `Plugin`, `PluginOpts`
+- Удалены неподдерживаемые схемы: SSR, WireGuard, SOCKS
+
+## Access log format change \(dev, коммит 70d30ca\)
+- С таб-разделителя на space-separated \(`appendAccessLogPart`\)
+- Удалён `INFO` level field
+- Добавлено поле `success/total` \(- если нет источников\)
+- Значения с пробелами оборачиваются в кавычки \(`"iPhone 15"`\)
+- `fetchAndAggregateSources` возвращает \(agg, successCount, totalCount\)
+- `HandleSubscription` пробрасывает success/total в web handler
+- `statusRecorder` tracks per-request source success/total counts
+- `logSubscriptionAccess` включает success/total в structured log
+
+## Refactoring 2026-06-08 \(коммит 2a1e0fe\)
 - Монолит `database.go` разбит на 9 файлов по доменам
-- `escapeMarkdown` перемещён в `internal/utils/markdown.go` (экспортирован как `EscapeMarkdown`)
-- Удалён мёртвый код: `AddTrialClient`, `Login`, `TestForceSessionExpiry` (xui), `sourceHost` (web)
-- Удалён неиспользуемый XUI health-check: `RegisterChecker("xui", ...)` + параметр `xuiClients` в `startWebServer` (`cmd/bot/main.go`, 2026-07-07)
+- `escapeMarkdown` перемещён в `internal/utils/markdown.go` \(экспортирован как `EscapeMarkdown`\)
+- Удалён мёртвый код: `AddTrialClient`, `Login`, `TestForceSessionExpiry` \(xui\), `sourceHost` \(web\)
+- Удалён неиспользуемый XUI health-check: `RegisterChecker\("xui", \.\.\.\)` \+ параметр `xuiClients` в `startWebServer` \(`cmd/bot/main.go`, 2026-07-07\)
 - `ConvertJSONToShareLinks` перенесён в `convert_test_helpers_test.go`
 - Убран избыточный `if xuiHeaders != nil` в `subscription_handler.go`
 - Проведён `go fmt` по 20 файлам
 
-## Branch: plans_and_pricing
+## Branch: dev
 
 Эта память описывает текущую ветку `plans_and_pricing`, которая включает:
 - Multi-outbound flow: группировка inboundIDs по совместимому flow для панели 3x-ui

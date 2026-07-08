@@ -1,4 +1,9 @@
-# Code Style and Conventions
+# Code Style
+- Use `rtk` prefix for shell commands.
+- Ponytail: lazy, minimal, simplest solution.
+- Use codebase-memory-mcp for code discovery.
+- Sequential initialization logic for bot and server to be decoupled in `cmd/bot/main.go`.
+ and Conventions
 
 ## Naming
 - Use CamelCase for exported names

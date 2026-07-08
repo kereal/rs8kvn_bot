@@ -324,7 +324,7 @@ All tests pass with `-race` detector. Fuzzing enabled for critical functions.
   - `SITE_URL` — must be valid URL
 - **Web server:** Runs on `WEB_SERVER_PORT` (default 8880), bound to all interfaces
 - **Init failure:** Fatal exit for DB, XUI, and Bot API init errors (cannot operate without them)
-- **SUBSERVER_ACCESS_LOG:** Optional path for `/sub/{id}` access logging (tab-separated / TSV format)
+- **SUBSERVER_ACCESS_LOG:** Optional path for `/sub/{id}` access logging (space-separated format with upstream fetch stats)
 
 ### Rate Limiting
 - **Per-user (Telegram):** Each `chatID` gets own token bucket (max 30 tokens, refill 5/sec)
