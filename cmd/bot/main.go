@@ -354,14 +354,15 @@ func main() {
 	}()
 	logger.Info("Database initialized successfully")
 
-	// 5. Wire application services with dummy bot, real bot will be swapped in once ready.
+	// 5. Wire application services with a placeholder bot; initBot runs below
+	// and replaces it with the real bot before any update is processed.
 	botAPI := &tgbotapi.BotAPI{Self: tgbotapi.User{UserName: "rs8kvn_bot_offline"}}
 	botConfig := &bot.BotConfig{Username: "rs8kvn_bot_offline"}
 
 	svc := initServices(cfg, dbService, deps, botAPI, botConfig)
 	defer svc.subServer.Stop()
 
-	// 6. Start web server immediately so subscriptions are served while bot initializes.
+	// 6. Start web server so subscriptions are served; bot is initialised next.
 	webServer, err := startWebServer(svc.subService, cfg, botConfig, svc.subServer, dbService)
 	if err != nil {
 		logger.Warn("Failed to start web server, continuing without web server", zap.Error(err))

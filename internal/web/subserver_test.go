@@ -342,6 +342,29 @@ func TestHandleSubscription_AccessLogVariants(t *testing.T) {
 	}
 }
 
+func TestHandleSubscription_AccessLogSuccessTotalOrder(t *testing.T) {
+	t.Parallel()
+
+	logPath := filepath.Join(t.TempDir(), "subserver.log")
+	accessLogger, err := subserver.NewAccessLogger(logPath)
+	require.NoError(t, err)
+
+	r := httptest.NewRequest(http.MethodGet, "/sub/test", nil)
+	r.RemoteAddr = "203.0.113.10:1234"
+	// success=3, total=5 must be written as "3/5", not "5/3".
+	accessLogger.Log(r, 200, "203.0.113.10", 3, 5)
+
+	require.NoError(t, accessLogger.Close())
+	content, err := os.ReadFile(logPath)
+	require.NoError(t, err)
+
+	line := strings.TrimRight(string(content), "\n")
+	parts := splitAccessLogLine(line)
+	require.GreaterOrEqual(t, len(parts), 5)
+	// Field layout: timestamp method uri status success/total ...
+	assert.Equal(t, "3/5", parts[4])
+}
+
 func splitAccessLogLine(line string) []string {
 	var parts []string
 	var current strings.Builder

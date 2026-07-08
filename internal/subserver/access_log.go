@@ -83,7 +83,7 @@ func (l *AccessLogger) Log(r *http.Request, statusCode int, clientIP string, suc
 
 	// Write upstream fetch statistics: total sources / successful fetches
 	if total > 0 {
-		appendAccessLogPart(&b, fmt.Sprintf("%d/%d", total, success))
+		appendAccessLogPart(&b, fmt.Sprintf("%d/%d", success, total))
 	} else {
 		appendAccessLogPart(&b, "-")
 	}
