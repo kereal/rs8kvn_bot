@@ -90,6 +90,9 @@ func normaliseClashProxy(p map[string]any) (map[string]any, error) {
 		setStrFallback(out, p, []string{"servername", "sni"}, "sni")
 		setStrFallback(out, p, []string{"client-fingerprint", "fp"}, "fp")
 		setAlpn(out, p)
+		if toBool(p["skip-cert-verify"]) || toBool(p["allowInsecure"]) {
+			out["allowInsecure"] = true
+		}
 		// REALITY: presence of reality-opts means security=reality.
 		if ro := getMap(p, "reality-opts"); ro != nil {
 			out["security"] = "reality"
@@ -118,6 +121,24 @@ func normaliseClashProxy(p map[string]any) (map[string]any, error) {
 			setStrFallback(out, x, []string{"path"}, "path")
 			setStrFallback(out, x, []string{"host"}, "host")
 			setStrFallback(out, x, []string{"mode"}, "mode")
+		}
+		// http transport (HTTP/1.1 disguise).
+		if h := getMap(p, "http-opts"); h != nil {
+			if s := firstListOrString(h["path"]); s != "" {
+				out["path"] = s
+			}
+			if s := httpOptsHost(h); s != "" {
+				out["host"] = s
+			}
+		}
+		// h2 transport options.
+		if h := getMap(p, "h2-opts"); h != nil {
+			if s := firstListOrString(h["path"]); s != "" {
+				out["path"] = s
+			}
+			if s := httpOptsHost(h); s != "" {
+				out["host"] = s
+			}
 		}
 	case "vmess":
 		setStrFallback(out, p, []string{"uuid", "id", "userId"}, "uuid")
