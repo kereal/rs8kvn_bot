@@ -87,6 +87,7 @@ func normaliseClashProxy(p map[string]any) (map[string]any, error) {
 		setStrFallback(out, p, []string{"flow"}, "flow")
 		setStrFallback(out, p, []string{"encryption"}, "encryption")
 		setStrFallback(out, p, []string{"network", "net"}, "network")
+		normaliseVLESSNetwork(out)
 		setStrFallback(out, p, []string{"servername", "sni"}, "sni")
 		setStrFallback(out, p, []string{"client-fingerprint", "fp"}, "fp")
 		setAlpn(out, p)
@@ -246,6 +247,21 @@ func normaliseClashProxy(p map[string]any) (map[string]any, error) {
 	}
 
 	return out, nil
+}
+
+func normaliseVLESSNetwork(out map[string]any) {
+	network, _ := out["network"].(string)
+	if network == "" {
+		return
+	}
+
+	network = strings.ToLower(network)
+	switch network {
+	case "raw":
+		out["network"] = "tcp"
+	default:
+		out["network"] = network
+	}
 }
 
 // setWSHost extracts the WS Host header (case-insensitive) into out["host"].
@@ -446,8 +462,13 @@ func ssPluginValue(v any) string {
 // (also a list). The first string value is used.
 func httpOptsHost(h map[string]any) string {
 	if headers := getMap(h, "headers"); headers != nil {
-		if s := firstListOrString(headers["Host"]); s != "" {
-			return s
+		for k, v := range headers {
+			if strings.EqualFold(k, "host") {
+				if s := firstListOrString(v); s != "" {
+					return s
+				}
+				break
+			}
 		}
 	}
 	return firstListOrString(h["host"])

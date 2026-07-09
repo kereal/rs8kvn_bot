@@ -425,6 +425,24 @@ func TestExtractClashConfigs_VLESSHTTPOpts(t *testing.T) {
 	assert.Contains(t, link, "host=fake.com")
 }
 
+func TestExtractClashConfigs_VLESSHTTPOptsLowercaseHost(t *testing.T) {
+	t.Parallel()
+
+	yaml := "proxies:\n  - name: vless-http-lower\n    type: vless\n    server: 1.2.3.4\n    port: 443\n    uuid: aaaa-bbbb\n    network: http\n    tls: true\n    http-opts:\n      path:\n        - /a\n      headers:\n        host:\n          - lower.example.com\n"
+	configs, err := ExtractClashConfigs([]byte(yaml))
+	require.NoError(t, err)
+	require.Len(t, configs, 1)
+
+	cfg, err := toServerConfig(configs[0])
+	require.NoError(t, err)
+	assert.Equal(t, "/a", cfg.Path)
+	assert.Equal(t, "lower.example.com", cfg.Host)
+
+	link, err := ConvertSingleJSONToLink(configs[0])
+	require.NoError(t, err)
+	assert.Contains(t, link, "host=lower.example.com")
+}
+
 // TestExtractClashConfigs_VLESSH2Opts verifies VLESS with network: h2
 // correctly extracts path and host from h2-opts.
 func TestExtractClashConfigs_VLESSH2Opts(t *testing.T) {
@@ -447,6 +465,44 @@ func TestExtractClashConfigs_VLESSH2Opts(t *testing.T) {
 	assert.Contains(t, link, "type=h2")
 	assert.Contains(t, link, "path=%2Fh2")
 	assert.Contains(t, link, "host=h2.example.com")
+}
+
+func TestExtractClashConfigs_VLESSH2OptsLowercaseHost(t *testing.T) {
+	t.Parallel()
+
+	yaml := "proxies:\n  - name: vless-h2-lower\n    type: vless\n    server: 1.2.3.4\n    port: 443\n    uuid: aaaa-bbbb\n    network: h2\n    tls: true\n    h2-opts:\n      path:\n        - /h2\n      headers:\n        host:\n          - h2-lower.example.com\n"
+	configs, err := ExtractClashConfigs([]byte(yaml))
+	require.NoError(t, err)
+	require.Len(t, configs, 1)
+
+	cfg, err := toServerConfig(configs[0])
+	require.NoError(t, err)
+	assert.Equal(t, "/h2", cfg.Path)
+	assert.Equal(t, "h2-lower.example.com", cfg.Host)
+
+	link, err := ConvertSingleJSONToLink(configs[0])
+	require.NoError(t, err)
+	assert.Contains(t, link, "host=h2-lower.example.com")
+}
+
+func TestExtractClashConfigs_VLESSRawNormalisesToTCP(t *testing.T) {
+	t.Parallel()
+
+	yaml := "proxies:\n  - name: vless-raw\n    type: vless\n    server: 1.2.3.4\n    port: 443\n    uuid: aaaa-bbbb\n    network: raw\n    tls: true\n    servername: tls.example.com\n"
+	configs, err := ExtractClashConfigs([]byte(yaml))
+	require.NoError(t, err)
+	require.Len(t, configs, 1)
+
+	cfg, err := toServerConfig(configs[0])
+	require.NoError(t, err)
+	assert.Equal(t, "tcp", cfg.Network)
+	assert.Equal(t, "tls.example.com", cfg.SNI)
+
+	link, err := ConvertSingleJSONToLink(configs[0])
+	require.NoError(t, err)
+	assert.Contains(t, link, "type=tcp")
+	assert.Contains(t, link, "sni=tls.example.com")
+	assert.NotContains(t, link, "type=raw")
 }
 
 // TestExtractClashConfigs_TrojanTLS verifies Trojan with tls: true outputs
