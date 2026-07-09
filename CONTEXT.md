@@ -41,12 +41,12 @@ Telegram-бот для раздачи VPN-подписок (VLESS+Reality+Vision
 
 ## Инфраструктурные понятия (тоже часть домена)
 
-- **VPN Client** (`internal/vpn`) — абстракция провизии на ноде; адаптеры: `ThreeXUIClient`, `ProxmanClient`,
-  `FetchClient` (read-only). Фабрика `NewClient` по `NodeType`. Классификация ошибок (already-exists / not-found)
-  вынесена за шов `Client` (реализовано, обзор Кандидат 4). Операций чтения трафика/`Exists` в интерфейсе пока
-  нет — из-за этого trial/reconcile/`GetWithTraffic` утекают в параллельную карту `xuiClients` (см. обзор, Кандидат 2).
-- **XUIClient** (`internal/xui`) — REST-клиент панели 3x-ui: Bearer-auth, retry с jitter, circuit breaker
-  (`breaker.go`, определён, но **не подключён** к пути клиента — см. обзор, Кандидат 1).
+- **VPN Client** (`internal/vpn`) — доменная абстракция провизии VPN на ноде. Пер-нодные адаптеры
+  (3x-ui, proxman, read-only fetch) предоставляют создание/обновление/удаление и синхронизацию жизненного цикла
+  клиентов на ноде. Классификация ошибок (already-exists / not-found) живёт на шве, вне адаптера.
+  Чтение трафика клиента пока не является первоклассной возможностью этой абстракции (см. открытый Кандидат 2).
+- **XUIClient** (`internal/xui`) — доменный адаптер к панели 3x-ui: аутентификация, повторы с jitter и
+  circuit breaker для устойчивости к сбоям панели (подключение breaker — см. открытый Кандидат 1).
 - **SubserverCache / SubscriptionCache / ReferralCache** — слои кэша (TTL/LRU). Инвалидируются при
   создании/удалении/привязке подписки и смене конфига.
 

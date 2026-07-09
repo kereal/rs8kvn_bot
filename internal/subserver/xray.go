@@ -80,8 +80,6 @@ func buildXrayOutbound(cfg *serverConfig) (map[string]any, error) {
 		outbound = buildShadowsocksXray(cfg)
 	case "hysteria", "hysteria2", "hy2":
 		outbound = buildHysteria2Xray(cfg)
-	case "tuic":
-		outbound = buildTUICXray(cfg)
 	default:
 		return nil, fmt.Errorf("unsupported protocol for xray: %s", cfg.Type)
 	}
@@ -227,38 +225,15 @@ func buildHysteria2Xray(cfg *serverConfig) map[string]any {
 	}
 }
 
-func buildTUICXray(cfg *serverConfig) map[string]any {
-	server := map[string]any{
-		"address":  net.JoinHostPort(cfg.Address, strconv.Itoa(cfg.Port)),
-		"uuid":     cfg.UUID,
-		"password": cfg.Password,
-		"level":    0,
-	}
-	if cfg.SNI != "" {
-		server["sni"] = cfg.SNI
-	}
-	if cfg.Alpn != "" {
-		server["alpn"] = splitComma(cfg.Alpn)
-	}
-	if cfg.AllowInsecure {
-		server["allowInsecure"] = true
-	}
-	return map[string]any{
-		"protocol": "tuic",
-		"settings": map[string]any{
-			"servers": []map[string]any{server},
-		},
-		"streamSettings": map[string]any{"network": "tcp"},
-	}
-}
+
 
 // buildStreamSettings builds the Xray streamSettings object. For VLESS/VMess/Trojan
 // it fully resolves the transport (ws/grpc/xhttp/h2/http/tcp) and security layer
-// (none/tls/reality). For Shadowsocks/Hysteria2/TUIC the transport is plain TCP
+// (none/tls/reality). For Shadowsocks/Hysteria2 the transport is plain TCP
 // and TLS is handled inside the protocol itself.
 func buildStreamSettings(cfg *serverConfig, protocol string) map[string]any {
 	switch protocol {
-	case "shadowsocks", "hysteria", "hysteria2", "hy2", "tuic":
+	case "shadowsocks", "hysteria", "hysteria2", "hy2":
 		return map[string]any{"network": "tcp"}
 	}
 
@@ -272,6 +247,10 @@ func buildStreamSettings(cfg *serverConfig, protocol string) map[string]any {
 	}
 	if network == "splithttp" {
 		network = "xhttp"
+	}
+	// Xray uses "http" (httpSettings), not Clash's "h2".
+	if network == "h2" {
+		network = "http"
 	}
 
 	ss := map[string]any{"network": network}

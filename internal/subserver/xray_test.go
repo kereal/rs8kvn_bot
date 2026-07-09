@@ -224,7 +224,7 @@ func TestConvertJSONConfigsToXray_Batch(t *testing.T) {
 		var ob map[string]any
 		require.NoError(t, json.Unmarshal(x, &ob))
 		// Every outbound must be a valid Xray node object.
-		assert.Contains(t, []any{"vless", "vmess", "trojan", "shadowsocks", "hysteria2", "tuic"}, ob["protocol"])
+		assert.Contains(t, []any{"vless", "vmess", "trojan", "shadowsocks", "hysteria2"}, ob["protocol"])
 	}
 }
 

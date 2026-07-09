@@ -37,6 +37,14 @@ func (s *SubscriptionService) PlanTrafficLimitGB(ctx context.Context, telegramID
 	if planErr != nil {
 		return 0
 	}
+	return planTrafficLimitGB(plan)
+}
+
+// planTrafficLimitGB derives the traffic limit in GB from an already-fetched plan.
+func planTrafficLimitGB(plan *database.Plan) int {
+	if plan == nil {
+		return 0
+	}
 	return int(float64(plan.TrafficLimit) / 1024 / 1024 / 1024)
 }
 
@@ -48,10 +56,9 @@ func (s *SubscriptionService) GetWithTraffic(ctx context.Context, telegramID int
 		return nil, nil, err
 	}
 
-	limitGB := s.PlanTrafficLimitGB(ctx, telegramID)
-
-	// Получаем название тарифного плана (product.name если есть product_id, иначе plan.name)
+	// Получаем план один раз и переиспользуем для лимита и названия.
 	plan, planErr := s.db.GetPlanByID(ctx, sub.PlanID)
+	limitGB := planTrafficLimitGB(plan)
 	var planName string
 	if planErr == nil && plan != nil {
 		planName = plan.Name
@@ -124,9 +131,13 @@ func (s *SubscriptionService) GetWithTraffic(ctx context.Context, telegramID int
 	// не получилось опросить серверы
 	if !anySuccess {
 		return sub, &TrafficInfo{
-			UsedGB:   0,
-			LimitGB:  limitGB,
-			PlanName: planName,
+			UsedGB:             0,
+			LimitGB:            limitGB,
+			Percentage:         0,
+			ProgressBar:        utils.GenerateProgressBar(0, float64(limitGB)),
+			CreatedAtFormatted: utils.FormatDateRu(sub.CreatedAt),
+			ExpiresAtFormatted: formatExpiresAt(sub.ExpiresAt),
+			PlanName:           planName,
 		}, nil
 	}
 
