@@ -39,6 +39,12 @@ Production-grade: миграции, мониторинг, rate-limiting, circuit
 - Quote-wrapping для значений с пробелами
 - `statusRecorder` tracks per-request success/total counts
 
+## Broadcast (рассылка `/broadcast`)
+- Поток: `/broadcast` → черновик (текст) → превью (MarkdownV2) → подтверждение inline-кнопками → массовая отправка батчами (100, concurrency 10) всем `telegram_id` из БД.
+- Текст отправляется как **MarkdownV2**. Спецсимволы (`.`, `!`, `_`, `*`, `()` и т.д.) **авто-экранируются** в `utils.EscapeMarkdownV2`, форматирование (`*bold*`, `_italic_`, `` `code` ``, `[text](url)`, `~strike~`) сохраняется — ручное экранирование юзеру не нужно.
+- Отчёт в конце разделяет счётчики: `Отправлено` / `Заблокировали бота` / `Ошибок` / `Всего`. Ошибки «bot was blocked by the user» / «user is deactivated» / «chat not found» считаются отдельно (`isUserBlockedError`), не смешиваясь с реальными сбоями.
+- Таймаут рассылки 5 мин; при отмене/ошибке БД отправляется частичный отчёт.
+
 ## Стек
 - **Go 1.25** (go.mod)
 - **Bot**: telegram-bot-api/v5
