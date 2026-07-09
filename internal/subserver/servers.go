@@ -187,6 +187,12 @@ func buildVLESSServerLink(cfg *serverConfig) (string, error) {
 	if cfg.ShortID != "" {
 		params.Set("sid", cfg.ShortID)
 	}
+	// spx (spiderX) is part of the canonical VLESS+Reality share link
+	// (v2rayN / 3x-ui). It always defaults to "/" on the client, so emitting
+	// it keeps the link spec-complete rather than relying on the default.
+	if cfg.Security == "reality" {
+		params.Set("spx", "/")
+	}
 	if cfg.Network != "" {
 		netType := cfg.Network
 		// Legacy "splithttp" was renamed to "xhttp" in v2rayN 7.x / Xray-core.
