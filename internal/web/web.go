@@ -671,7 +671,7 @@ func (s *Server) handleSubscription(w http.ResponseWriter, r *http.Request) {
 	} else {
 		response.WriteHeader(http.StatusOK)
 	}
-	response.Write(result.Body)
+	_, _ = response.Write(result.Body)
 }
 
 func (s *Server) logSubscriptionAccess(rec *statusRecorder, r *http.Request, clientIP string) {
