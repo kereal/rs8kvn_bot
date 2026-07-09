@@ -697,8 +697,10 @@ func TestSubscriptionService_CreateTrial_Success(t *testing.T) {
 			return &database.Plan{ID: 1, Name: name, TrafficLimit: 1073741824}, nil
 		},
 	}
+	var gotResetDays int
 	xuiClient := &testutil.XUIClient{
 		AddClientWithIDFunc: func(ctx context.Context, req xui.ClientRequest) (*xui.ClientConfig, error) {
+			gotResetDays = req.ResetDays
 			return &xui.ClientConfig{ID: req.ClientID, SubID: req.SubID}, nil
 		},
 	}
@@ -714,6 +716,7 @@ func TestSubscriptionService_CreateTrial_Success(t *testing.T) {
 	assert.NotNil(t, result)
 	assert.NotEmpty(t, result.SubID)
 	assert.NotEmpty(t, result.ClientID)
+	assert.Equal(t, 0, gotResetDays, "trial must not auto-renew (resetDays=0)")
 }
 
 func TestSubscriptionService_CreateTrial_XUIError(t *testing.T) {

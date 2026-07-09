@@ -438,7 +438,13 @@ func (s *SyncService) processPendingAdd(ctx context.Context, sn *database.Subscr
 		TrafficBytes: plan.TrafficLimit,
 	}
 	if plan.TrafficLimit > 0 {
-		provision.ResetDays = -1
+		// Trials must never auto-renew even though the trial plan carries a
+		// traffic limit (which would otherwise enable it via reset=-1 → 30).
+		if plan.Name == database.TrialPlanName {
+			provision.ResetDays = 0
+		} else {
+			provision.ResetDays = -1
+		}
 		if sub.ExpiresAt != nil {
 			provision.ExpiryTime = *sub.ExpiresAt
 		} else {
