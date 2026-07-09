@@ -9,6 +9,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/logger"
@@ -180,12 +181,26 @@ func (h *Handler) HandleDel(ctx context.Context, update tgbotapi.Update) error {
 	return nil
 }
 
-// HandleBroadcast handles the /broadcast command for admins to send messages to all users.
-func (h *Handler) HandleBroadcast(ctx context.Context, update tgbotapi.Update) error {
-	const broadcastTimeout = 5 * time.Minute
-	ctx, cancel := context.WithTimeout(ctx, broadcastTimeout)
-	defer cancel()
+// broadcastStage represents the state of an admin broadcast session.
+type broadcastStage int
 
+const (
+	broadcastStageIdle       broadcastStage = iota
+	broadcastStageAwaitingDraft
+	broadcastStagePreview
+)
+
+// broadcastSession holds the in-progress broadcast draft for an admin.
+type broadcastSession struct {
+	stage       broadcastStage
+	text        string
+	previewMsgID int
+}
+
+// HandleBroadcast handles the /broadcast command for admins.
+// It starts the draft flow: the admin then sends a multi-line MarkdownV2
+// message which is previewed, and confirmed via inline buttons before sending.
+func (h *Handler) HandleBroadcast(ctx context.Context, update tgbotapi.Update) error {
 	if update.Message == nil {
 		logger.Error("HandleBroadcast called with nil Message")
 		return fmt.Errorf("nil message")
@@ -198,15 +213,95 @@ func (h *Handler) HandleBroadcast(ctx context.Context, update tgbotapi.Update) e
 		return nil
 	}
 
-	message := update.Message.CommandArguments()
-	if message == "" {
-		h.SendMessage(ctx, chatID, "❌ Использование: /broadcast <сообщение>\n\nПример: /broadcast Привет всем!")
+	h.startBroadcastSession(chatID)
+
+	h.SendMessage(ctx, chatID, "✍️ Отправьте сообщение для рассылки (MarkdownV2, до 4096 символов, с форматированием).\n\n"+
+		"Многострочный текст поддерживается. После отправки бот покажет превью и кнопки подтверждения.\n\n"+
+		"Нажмите /cancel для отмены.")
+	return nil
+}
+
+// HandleBroadcastDraft consumes the admin's text message as a broadcast draft,
+// previews it (validating MarkdownV2), and offers confirm/cancel buttons.
+func (h *Handler) HandleBroadcastDraft(ctx context.Context, update tgbotapi.Update) error {
+	if update.Message == nil {
+		logger.Error("HandleBroadcastDraft called with nil Message")
+		return fmt.Errorf("nil message")
+	}
+
+	chatID := update.Message.Chat.ID
+
+	if !h.isAdmin(chatID) {
+		h.clearBroadcastSession(chatID)
 		return nil
 	}
-	if len(message) > config.MaxTelegramMessageLen {
-		h.SendMessage(ctx, chatID, fmt.Sprintf("❌ Сообщение слишком длинное (%d символов).\n\nМаксимум: %d символов.", len(message), config.MaxTelegramMessageLen))
+
+	text := update.Message.Text
+	if text == "" {
+		h.SendMessage(ctx, chatID, "❌ Поддерживаются только текстовые сообщения. /cancel для отмены.")
 		return nil
 	}
+	if text == "/cancel" {
+		h.clearBroadcastSession(chatID)
+		h.SendMessage(ctx, chatID, "❌ Рассылка отменена.")
+		return nil
+	}
+	if len(text) > config.MaxTelegramMessageLen {
+		h.SendMessage(ctx, chatID, fmt.Sprintf("❌ Сообщение слишком длинное (%d символов).\n\nМаксимум: %d символов.", len(text), config.MaxTelegramMessageLen))
+		return nil
+	}
+
+	// D3: preview with MarkdownV2 to validate formatting before mass send.
+	preview := tgbotapi.NewMessage(chatID, text)
+	preview.ParseMode = "MarkdownV2"
+	preview.DisableWebPagePreview = true
+	if _, err := h.bot.Send(preview); err != nil {
+		logger.Warn("Broadcast preview failed (invalid MarkdownV2)", zap.Error(err))
+		h.SendMessage(ctx, chatID, fmt.Sprintf("❌ Ошибка форматирования MarkdownV2:\n\n%v\n\n"+
+			"Исправьте сообщение и отправьте снова. /cancel для отмены.", err))
+		return nil
+	}
+
+	h.broadcastMu.Lock()
+	h.broadcastSessions[chatID] = &broadcastSession{stage: broadcastStagePreview, text: text}
+	h.broadcastMu.Unlock()
+
+	kb := tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("✅ Отправить всем", "broadcast_confirm"),
+			tgbotapi.NewInlineKeyboardButtonData("❌ Отмена", "broadcast_cancel"),
+		),
+	)
+	msg := tgbotapi.NewMessage(chatID, "✅ Превью готово. Отправить это сообщение всем пользователям?")
+	msg.ReplyMarkup = kb
+	h.send(ctx, msg)
+	return nil
+}
+
+// handleBroadcastConfirm runs the broadcast for the confirmed draft.
+func (h *Handler) handleBroadcastConfirm(ctx context.Context, chatID int64) error {
+	s := h.getBroadcastSession(chatID)
+	if s == nil || s.stage != broadcastStagePreview {
+		h.SendMessage(ctx, chatID, "❌ Нет активной рассылки для подтверждения.")
+		return nil
+	}
+	text := s.text
+	h.clearBroadcastSession(chatID)
+	return h.runBroadcast(ctx, chatID, text)
+}
+
+// handleBroadcastCancel discards the in-progress broadcast draft.
+func (h *Handler) handleBroadcastCancel(ctx context.Context, chatID int64) error {
+	h.clearBroadcastSession(chatID)
+	h.SendMessage(ctx, chatID, "❌ Рассылка отменена.")
+	return nil
+}
+
+// runBroadcast sends text (MarkdownV2, as-is) to all users in batches.
+func (h *Handler) runBroadcast(ctx context.Context, adminChatID int64, text string) error {
+	const broadcastTimeout = 5 * time.Minute
+	ctx, cancel := context.WithTimeout(ctx, broadcastTimeout)
+	defer cancel()
 
 	const (
 		batchSize            = 100
@@ -265,14 +360,23 @@ func (h *Handler) HandleBroadcast(ctx context.Context, update tgbotapi.Update) e
 					default:
 					}
 
-					escapedMessage := utils.EscapeMarkdown(message)
-					msg := tgbotapi.NewMessage(tg, escapedMessage)
-					msg.ParseMode = "MarkdownV2"
-					msg.DisableWebPagePreview = true
-					if err := h.sendWithError(ctx, msg); err != nil {
-						if ctx.Err() == nil {
-							atomic.AddInt64(&failCount, 1)
+					chunks := splitMessage(text, config.MaxTelegramMessageLen)
+					failed := false
+					for _, chunk := range chunks {
+						msg := tgbotapi.NewMessage(tg, chunk)
+						msg.ParseMode = "MarkdownV2"
+						msg.DisableWebPagePreview = true
+						if err := h.sendWithError(ctx, msg); err != nil {
+							if ctx.Err() == nil {
+								failed = true
+							}
 						}
+					}
+					if ctx.Err() != nil {
+						return
+					}
+					if failed {
+						atomic.AddInt64(&failCount, 1)
 					} else {
 						atomic.AddInt64(&successCount, 1)
 					}
@@ -283,11 +387,11 @@ func (h *Handler) HandleBroadcast(ctx context.Context, update tgbotapi.Update) e
 		}
 
 		wg.Wait()
+		offset += len(ids)
+		atomic.AddInt64(&totalProcessed, int64(len(ids)))
 		if broadcastCancelled {
 			break
 		}
-		offset += len(ids)
-		atomic.AddInt64(&totalProcessed, int64(len(ids)))
 	}
 
 	sent := atomic.LoadInt64(&successCount)
@@ -295,7 +399,7 @@ func (h *Handler) HandleBroadcast(ctx context.Context, update tgbotapi.Update) e
 	remaining := int(totalProcessed) - int(sent+failed)
 
 	if broadcastCancelled {
-		h.SendMessage(context.WithoutCancel(ctx), chatID, fmt.Sprintf(`⚠️ Рассылка прервана!
+		h.SendMessage(context.WithoutCancel(ctx), adminChatID, fmt.Sprintf(`⚠️ Рассылка прервана!
 
 📤 Отправлено: %d
 ❌ Ошибок: %d
@@ -304,7 +408,7 @@ func (h *Handler) HandleBroadcast(ctx context.Context, update tgbotapi.Update) e
 		return fmt.Errorf("broadcast cancelled")
 	}
 	if batchErr != nil {
-		h.SendMessage(context.WithoutCancel(ctx), chatID, fmt.Sprintf(`❌ Рассылка прервана из-за ошибки!
+		h.SendMessage(context.WithoutCancel(ctx), adminChatID, fmt.Sprintf(`❌ Рассылка прервана из-за ошибки!
 
 📤 Отправлено: %d
 ❌ Ошибок: %d
@@ -321,7 +425,7 @@ func (h *Handler) HandleBroadcast(ctx context.Context, update tgbotapi.Update) e
 		return fmt.Errorf("broadcast batch error: %w", batchErr)
 	}
 
-	h.SendMessage(context.WithoutCancel(ctx), chatID, fmt.Sprintf(`✅ Рассылка завершена!
+	h.SendMessage(context.WithoutCancel(ctx), adminChatID, fmt.Sprintf(`✅ Рассылка завершена!
 
 📤 Отправлено: %d
 ❌ Ошибок: %d
@@ -333,6 +437,78 @@ func (h *Handler) HandleBroadcast(ctx context.Context, update tgbotapi.Update) e
 		zap.Int64("failed", failed),
 		zap.Int64("total", totalProcessed))
 	return nil
+}
+
+// startBroadcastSession begins (or restarts) the draft flow for an admin.
+func (h *Handler) startBroadcastSession(chatID int64) {
+	h.broadcastMu.Lock()
+	defer h.broadcastMu.Unlock()
+	h.broadcastSessions[chatID] = &broadcastSession{stage: broadcastStageAwaitingDraft}
+}
+
+// getBroadcastSession returns the active broadcast session for an admin, or nil.
+func (h *Handler) getBroadcastSession(chatID int64) *broadcastSession {
+	h.broadcastMu.Lock()
+	defer h.broadcastMu.Unlock()
+	return h.broadcastSessions[chatID]
+}
+
+// clearBroadcastSession removes the broadcast session for an admin.
+func (h *Handler) clearBroadcastSession(chatID int64) {
+	h.broadcastMu.Lock()
+	defer h.broadcastMu.Unlock()
+	delete(h.broadcastSessions, chatID)
+}
+
+// splitMessage splits text into chunks of at most maxLen characters, preferring
+// to break at line boundaries so MarkdownV2 entities stay intact within a chunk.
+// A single line longer than maxLen is hard-split.
+func splitMessage(text string, maxLen int) []string {
+	if len(text) <= maxLen {
+		return []string{text}
+	}
+
+	var chunks []string
+	var current strings.Builder
+	flush := func() {
+		if current.Len() > 0 {
+			chunks = append(chunks, current.String())
+			current.Reset()
+		}
+	}
+	for _, line := range strings.Split(text, "\n") {
+		if len(line) > maxLen {
+			flush()
+			for len(line) > maxLen {
+				cut := maxLen
+				for cut > 0 && !utf8.RuneStart(line[cut]) {
+					cut--
+				}
+				if cut == 0 {
+					cut = maxLen
+				}
+				chunks = append(chunks, line[:cut])
+				line = line[cut:]
+			}
+			current.WriteString(line)
+			continue
+		}
+		if current.Len() > 0 && current.Len()+len(line)+1 > maxLen {
+			flush()
+		}
+		if current.Len() > 0 {
+			current.WriteByte('\n')
+		}
+		current.WriteString(line)
+	}
+	flush()
+	return chunks
+}
+
+// broadcastSessionActive reports whether an admin has an in-progress broadcast.
+func (h *Handler) broadcastSessionActive(chatID int64) bool {
+	s := h.getBroadcastSession(chatID)
+	return s != nil && (s.stage == broadcastStageAwaitingDraft || s.stage == broadcastStagePreview)
 }
 
 // HandleSend handles the /send command for admins to send a message to a specific user.

@@ -39,7 +39,6 @@ func TestSend_Success(t *testing.T) {
 	assert.NotNil(t, mockBot.LastChattableSafe(), "Message should be captured")
 }
 
-
 func TestSend_SendError(t *testing.T) {
 	t.Parallel()
 
@@ -410,7 +409,6 @@ func TestSendMessage_DifferentChatIDs(t *testing.T) {
 		})
 	}
 }
-
 
 func TestSafeSend_WithVariousChattables(t *testing.T) {
 	t.Parallel()

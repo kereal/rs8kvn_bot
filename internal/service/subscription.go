@@ -167,62 +167,12 @@ func (s *SubscriptionService) GetByTelegramID(ctx context.Context, telegramID in
 	return s.db.GetByTelegramID(ctx, telegramID)
 }
 
-// Delete removes a subscription by Telegram ID.
-// Two-phase: first marks the subscription revoked (so /sub/{id} stops serving config
-// and the user no longer sees it as active), then deprovisions VPN access via sync,
-// then physically deletes the DB row. If deprovision fails, the subscription stays
-// revoked and ReconcileOrphanedClients/SyncPendingNodes will finish removal in the background.
-func (s *SubscriptionService) Delete(ctx context.Context, telegramID int64) error {
-	sub, err := s.db.GetByTelegramID(ctx, telegramID)
-	if err != nil {
-		return err
-	}
-
-	// Phase 1: mark revoked before any external effect.
-	sub.Status = "revoked"
-	if err := s.db.UpdateSubscription(ctx, sub); err != nil {
-		return fmt.Errorf("mark revoked: %w", err)
-	}
-
-	// Phase 2: deprovision VPN access (best-effort; background sync reconciles on failure).
-	if s.syncService != nil {
-		if err := s.syncService.MarkAllForRemoval(ctx, sub.ID); err != nil {
-			return fmt.Errorf("deprovision mark failed: %w", err)
-		}
-		if err := s.syncService.SyncSubscription(ctx, sub.ID); err != nil {
-			logger.Warn("deprovision sync failed; subscription remains revoked, background sync will retry",
-				zap.Uint("subscription_id", sub.ID),
-				zap.Error(err))
-		}
-	}
-
-	// Phase 3: physical delete.
-	// If this fails, the row is already revoked; background reconciliation cleans up.
-	if err := s.db.DeleteSubscription(ctx, telegramID); err != nil {
-		return fmt.Errorf("db delete: %w", err)
-	}
-	if err := s.db.DeleteSubscriptionNodesBySubscriptionID(ctx, sub.ID); err != nil {
-		// Non-fatal: SyncPendingNodes will purge orphan nodes on next run.
-		logger.Warn("failed to delete subscription nodes after subscription delete",
-			zap.Uint("subscription_id", sub.ID),
-			zap.Error(err))
-	}
-
-	if s.invalidateBySubID != nil && sub.SubscriptionID != "" {
-		s.InvalidateBySubID(ctx, sub.SubscriptionID)
-	}
-
-	return nil
-}
-
-// DeleteByID deletes a subscription by database ID.
-// Used by admin /del command. Two-phase: mark revoked → deprovision → physical delete.
-func (s *SubscriptionService) DeleteByID(ctx context.Context, id uint) (*database.Subscription, error) {
-	sub, err := s.db.GetByID(ctx, id)
-	if err != nil {
-		return nil, fmt.Errorf("get subscription: %w", err)
-	}
-
+// revokeAndDeprovisionThenDelete runs the two-phase subscription teardown shared by
+// Delete and DeleteByID: mark revoked → deprovision VPN access (best-effort; background
+// sync reconciles on failure) → physically delete the DB row + subscription nodes →
+// invalidate the cache. The resolved sub is the single input, so the lifecycle contract
+// lives in exactly one place. Returns the deleted subscription (nil on error).
+func (s *SubscriptionService) revokeAndDeprovisionThenDelete(ctx context.Context, sub *database.Subscription) (*database.Subscription, error) {
 	// Phase 1: mark revoked before any external effect.
 	sub.Status = "revoked"
 	if err := s.db.UpdateSubscription(ctx, sub); err != nil {
@@ -242,22 +192,46 @@ func (s *SubscriptionService) DeleteByID(ctx context.Context, id uint) (*databas
 	}
 
 	// Phase 3: physical delete.
-	deleted, err := s.db.DeleteSubscriptionByID(ctx, id)
-	if err != nil {
+	// If this fails, the row is already revoked; background reconciliation cleans up.
+	// Unified on DeleteSubscriptionByID(sub.ID): both entry points already resolved sub,
+	// so the primary key is known and the telegramID/id divergence in the old copies is gone.
+	if _, err := s.db.DeleteSubscriptionByID(ctx, sub.ID); err != nil {
 		return nil, fmt.Errorf("db delete: %w", err)
 	}
-	if err := s.db.DeleteSubscriptionNodesBySubscriptionID(ctx, deleted.ID); err != nil {
+	if err := s.db.DeleteSubscriptionNodesBySubscriptionID(ctx, sub.ID); err != nil {
 		// Non-fatal: SyncPendingNodes will purge orphan nodes on next run.
 		logger.Warn("failed to delete subscription nodes after subscription delete",
-			zap.Uint("subscription_id", deleted.ID),
+			zap.Uint("subscription_id", sub.ID),
 			zap.Error(err))
 	}
 
-	if s.invalidateBySubID != nil && deleted.SubscriptionID != "" {
-		s.InvalidateBySubID(ctx, deleted.SubscriptionID)
+	if s.invalidateBySubID != nil && sub.SubscriptionID != "" {
+		s.InvalidateBySubID(ctx, sub.SubscriptionID)
 	}
 
-	return deleted, nil
+	return sub, nil
+}
+
+// Delete removes a subscription by Telegram ID. Two-phase teardown is owned by
+// revokeAndDeprovisionThenDelete; if deprovision fails, the subscription stays
+// revoked and ReconcileOrphanedClients/SyncPendingNodes finish removal in the background.
+func (s *SubscriptionService) Delete(ctx context.Context, telegramID int64) error {
+	sub, err := s.db.GetByTelegramID(ctx, telegramID)
+	if err != nil {
+		return err
+	}
+	_, err = s.revokeAndDeprovisionThenDelete(ctx, sub)
+	return err
+}
+
+// DeleteByID deletes a subscription by database ID. Used by admin /del command.
+// Two-phase teardown is owned by revokeAndDeprovisionThenDelete.
+func (s *SubscriptionService) DeleteByID(ctx context.Context, id uint) (*database.Subscription, error) {
+	sub, err := s.db.GetByID(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("get subscription: %w", err)
+	}
+	return s.revokeAndDeprovisionThenDelete(ctx, sub)
 }
 
 // deleteClientFromAllNodes removes the VPN subscription from all active nodes.
@@ -279,175 +253,6 @@ func (s *SubscriptionService) deleteClientFromAllNodes(ctx context.Context, prov
 				zap.Error(err))
 		}
 	}
-}
-
-type TrafficInfo struct {
-	UsedGB             float64
-	LimitGB            int
-	Percentage         float64
-	ProgressBar        string
-	DaysUntilReset     int
-	ResetInfo          string
-	CreatedAtFormatted string
-	ExpiresAtFormatted string
-	PlanName           string
-}
-
-// PlanTrafficLimitGB returns the traffic limit in GB for the user's current plan.
-func (s *SubscriptionService) PlanTrafficLimitGB(ctx context.Context, telegramID int64) int {
-	sub, err := s.db.GetByTelegramID(ctx, telegramID)
-	if err != nil || sub == nil {
-		return 0
-	}
-	plan, planErr := s.db.GetPlanByID(ctx, sub.PlanID)
-	if planErr != nil {
-		return 0
-	}
-	return int(float64(plan.TrafficLimit) / 1024 / 1024 / 1024)
-}
-
-// Получаем данные подписки, содержащие информацию о трафике
-func (s *SubscriptionService) GetWithTraffic(ctx context.Context, telegramID int64) (*database.Subscription, *TrafficInfo, error) {
-	// получили подписку
-	sub, err := s.db.GetByTelegramID(ctx, telegramID)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	limitGB := s.PlanTrafficLimitGB(ctx, telegramID)
-
-	// Получаем название тарифного плана (product.name если есть product_id, иначе plan.name)
-	plan, planErr := s.db.GetPlanByID(ctx, sub.PlanID)
-	var planName string
-	if planErr == nil && plan != nil {
-		planName = plan.Name
-	}
-
-	if sub.ProductID != nil && *sub.ProductID != 0 {
-		product, productErr := s.db.GetProductByID(ctx, *sub.ProductID)
-		if productErr == nil && product != nil && product.Name != "" {
-			planName = product.Name
-		}
-	}
-
-	// Если лимит трафика нулевой — не опрашиваем серверы
-	if limitGB == 0 {
-		return sub, &TrafficInfo{
-			UsedGB:             0,
-			LimitGB:            0,
-			PlanName:           planName,
-			CreatedAtFormatted: utils.FormatDateRu(sub.CreatedAt),
-			ExpiresAtFormatted: formatExpiresAt(sub.ExpiresAt),
-		}, nil
-	}
-
-	email := XUIEmail(sub.Username, sub.TelegramID)
-
-	// Опрашиваем только ноды, на которых подписка фактически активна (active в subscription_nodes).
-	// Это исключает ноды других планов и ноды в состоянии pending_*.
-	subNodes, err := s.db.GetBySubscriptionID(ctx, sub.ID)
-	if err != nil {
-		logger.Warn("GetWithTraffic: failed to load subscription nodes, falling back to all active nodes",
-			zap.Uint("subscription_id", sub.ID),
-			zap.Error(err))
-		subNodes = nil
-	}
-	activeSubNodeIDs := make(map[uint]struct{}, len(subNodes))
-	for _, sn := range subNodes {
-		if sn.Status == database.SyncStatusActive {
-			activeSubNodeIDs[sn.NodeID] = struct{}{}
-		}
-	}
-
-	var totalUp, totalDown int64
-	var anySuccess bool
-	var panelResetExpiry int64
-	var panelResetDays int
-	for _, node := range s.activeNodes() {
-		if len(activeSubNodeIDs) > 0 {
-			if _, ok := activeSubNodeIDs[node.ID]; !ok {
-				continue
-			}
-		}
-		client, ok := s.xuiClients[node.ID]
-		if !ok {
-			continue
-		}
-		traffic, err := client.GetClientTraffic(ctx, email)
-		if err != nil {
-			logger.Debug("GetClientTraffic failed on source",
-				zap.Uint("node_id", node.ID),
-				zap.Error(err))
-			continue
-		}
-		totalUp += traffic.Up
-		totalDown += traffic.Down
-		panelResetExpiry = traffic.ExpiresAt
-		panelResetDays = traffic.Reset
-		anySuccess = true
-	}
-
-	// не получилось опросить серверы
-	if !anySuccess {
-		return sub, &TrafficInfo{
-			UsedGB:   0,
-			LimitGB:  limitGB,
-			PlanName: planName,
-		}, nil
-	}
-
-	usedGB := float64(totalUp+totalDown) / 1024 / 1024 / 1024
-	percentage := 0.0
-
-	if limitGB > 0 {
-		percentage = (usedGB / float64(limitGB)) * 100
-		if percentage > 100 {
-			percentage = 100
-		}
-	}
-
-	// Progress bar
-	progressBar := utils.GenerateProgressBar(usedGB, float64(limitGB))
-
-	// Calculate reset time from panel: expiryTime + reset days
-	var resetInfo string
-	var daysUntilReset int
-	if panelResetExpiry > 0 && panelResetDays > 0 {
-		resetTime := time.UnixMilli(panelResetExpiry)
-		daysUntilReset = utils.DaysUntilReset(time.Now(), resetTime)
-		var resetText string
-		switch {
-		case daysUntilReset < 0:
-			resetText = "отключен"
-		case daysUntilReset == 0:
-			resetText = "сегодня"
-		default:
-			resetText = fmt.Sprintf("через %d дн.", daysUntilReset)
-		}
-		resetInfo = resetText
-	}
-
-	return sub, &TrafficInfo{
-		UsedGB:             usedGB,
-		LimitGB:            limitGB,
-		Percentage:         percentage,
-		ProgressBar:        progressBar,
-		DaysUntilReset:     daysUntilReset,
-		ResetInfo:          resetInfo,
-		CreatedAtFormatted: utils.FormatDateRu(sub.CreatedAt),
-		ExpiresAtFormatted: formatExpiresAt(sub.ExpiresAt),
-		PlanName:           planName,
-	}, nil
-}
-
-// daysUntilReset calculates the number of days until the next traffic reset.
-
-// formatExpiresAt formats ExpiresAt for display. NULL = "бессрочно".
-func formatExpiresAt(t *time.Time) string {
-	if t == nil {
-		return "бессрочно"
-	}
-	return utils.FormatDateRu(*t)
 }
 
 // TrialCreateResult holds the outcome of a trial creation.

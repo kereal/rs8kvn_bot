@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/kereal/rs8kvn_bot/internal/database"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestFetchAndAggregateSources_Parallel(t *testing.T) {

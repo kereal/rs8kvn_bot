@@ -369,9 +369,9 @@ func TestE2E_Service_Create_XUIFailure_Parameterized(t *testing.T) {
 	ctx := context.Background()
 
 	tests := []struct {
-		name     string
-		setupXUI func()
-		wantActive bool
+		name        string
+		setupXUI    func()
+		wantActive  bool
 		checkSecond func(*testing.T)
 	}{
 		{
@@ -381,7 +381,7 @@ func TestE2E_Service_Create_XUIFailure_Parameterized(t *testing.T) {
 					return nil, fmt.Errorf("connection refused")
 				}
 			},
-			wantActive: true,
+			wantActive:  true,
 			checkSecond: nil,
 		},
 		{

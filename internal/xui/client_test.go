@@ -213,9 +213,9 @@ func TestRetryWithBackoff(t *testing.T) {
 				exhaustedCalls.Add(1)
 				return testNetError{}
 			},
-			wantErr:     true,
+			wantErr:      true,
 			wantContains: "connection reset",
-			wantCalls:   3,
+			wantCalls:    3,
 		},
 		{
 			name: "context cancelled",
@@ -229,9 +229,9 @@ func TestRetryWithBackoff(t *testing.T) {
 				cancelledCalls.Add(1)
 				return testNetError{}
 			},
-			wantErr:     true,
+			wantErr:      true,
 			wantContains: "context cancelled",
-			wantCalls:   1,
+			wantCalls:    1,
 		},
 		{
 			name: "non-retryable error",
@@ -254,9 +254,9 @@ func TestRetryWithBackoff(t *testing.T) {
 				non200Calls.Add(1)
 				return fmt.Errorf("upstream returned non-200: %w", ErrNon200Response)
 			},
-			wantErr:     true,
+			wantErr:      true,
 			wantContains: "upstream returned non-200",
-			wantCalls:   1,
+			wantCalls:    1,
 		},
 	}
 
@@ -583,7 +583,7 @@ func TestAddClientWithID(t *testing.T) {
 		require.NoError(t, err)
 		defer client.Close()
 
-	result, err := client.AddClientWithID(context.Background(), ClientRequest{InboundIDs: []int{1}, Email: "test@example.com", ClientID: "some-uuid", SubID: "sub-123", TrafficBytes: 1 << 30, ExpiryTime: time.Now().Add(24 * time.Hour), ResetDays: 0})
+		result, err := client.AddClientWithID(context.Background(), ClientRequest{InboundIDs: []int{1}, Email: "test@example.com", ClientID: "some-uuid", SubID: "sub-123", TrafficBytes: 1 << 30, ExpiryTime: time.Now().Add(24 * time.Hour), ResetDays: 0})
 		require.NoError(t, err)
 		assert.Equal(t, "test@example.com", result.Email)
 		assert.Equal(t, "some-uuid", result.ID)
@@ -689,7 +689,7 @@ func TestUpdateClient(t *testing.T) {
 		require.NoError(t, err)
 		defer client.Close()
 
-	err = client.UpdateClient(context.Background(), ClientRequest{InboundIDs: []int{1}, CurrentEmail: "old-email", ClientID: "test-uuid", Email: "new@email.com", SubID: "sub-456", TrafficBytes: 1 << 30, ExpiryTime: time.Now().Add(48 * time.Hour), ResetDays: -1, TgID: 12345, Comment: "test comment"})
+		err = client.UpdateClient(context.Background(), ClientRequest{InboundIDs: []int{1}, CurrentEmail: "old-email", ClientID: "test-uuid", Email: "new@email.com", SubID: "sub-456", TrafficBytes: 1 << 30, ExpiryTime: time.Now().Add(48 * time.Hour), ResetDays: -1, TgID: 12345, Comment: "test comment"})
 		assert.NoError(t, err)
 	})
 
@@ -698,7 +698,7 @@ func TestUpdateClient(t *testing.T) {
 		require.NoError(t, err)
 		defer client.Close()
 
-	err = client.UpdateClient(context.Background(), ClientRequest{InboundIDs: []int{1}, CurrentEmail: "current-email", ClientID: "", Email: "email", SubID: "sub", TrafficBytes: 0, ExpiryTime: time.Time{}, ResetDays: -1, TgID: 0, Comment: ""})
+		err = client.UpdateClient(context.Background(), ClientRequest{InboundIDs: []int{1}, CurrentEmail: "current-email", ClientID: "", Email: "email", SubID: "sub", TrafficBytes: 0, ExpiryTime: time.Time{}, ResetDays: -1, TgID: 0, Comment: ""})
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "client ID cannot be empty")
 	})
@@ -721,7 +721,7 @@ func TestUpdateClient(t *testing.T) {
 		require.NoError(t, err)
 		defer client.Close()
 
-	err = client.UpdateClient(context.Background(), ClientRequest{InboundIDs: []int{1}, CurrentEmail: "current-email", ClientID: "test-uuid", Email: "email", SubID: "sub", TrafficBytes: 0, ExpiryTime: time.Time{}, ResetDays: -1, TgID: 0, Comment: ""})
+		err = client.UpdateClient(context.Background(), ClientRequest{InboundIDs: []int{1}, CurrentEmail: "current-email", ClientID: "test-uuid", Email: "email", SubID: "sub", TrafficBytes: 0, ExpiryTime: time.Time{}, ResetDays: -1, TgID: 0, Comment: ""})
 		assert.Error(t, err)
 	})
 }

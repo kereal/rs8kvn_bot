@@ -97,6 +97,10 @@ func (c *CallbackHandler) HandleCallback(ctx context.Context, update tgbotapi.Up
 	case "qr_web":
 		messageID := update.CallbackQuery.Message.MessageID
 		return c.handleQRWeb(ctx, chatID, username, messageID)
+	case "broadcast_confirm":
+		return c.h.handleBroadcastConfirm(ctx, chatID)
+	case "broadcast_cancel":
+		return c.h.handleBroadcastCancel(ctx, chatID)
 	case "back_to_invite":
 		messageID := update.CallbackQuery.Message.MessageID
 		return c.h.handleBackToInvite(ctx, chatID, username, messageID)

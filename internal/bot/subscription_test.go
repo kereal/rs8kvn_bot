@@ -290,7 +290,6 @@ func TestCreateSubscription_DatabaseFailure_RollbackSuccess(t *testing.T) {
 	assert.True(t, mockBot.SendCalledSafe())
 }
 
-
 func TestCreateSubscription_CacheUpdate(t *testing.T) {
 	t.Parallel()
 

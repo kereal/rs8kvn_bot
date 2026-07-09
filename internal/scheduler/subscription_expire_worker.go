@@ -13,12 +13,12 @@ import (
 
 // SubscriptionExpireWorker handles expiration of paid subscriptions that have passed their expiry date.
 type SubscriptionExpireWorker struct {
-	db     interfaces.DatabaseService
+	db     interfaces.SubscriptionRepository
 	subSvc *service.SubscriptionService
 }
 
 // NewSubscriptionExpireWorker creates a new SubscriptionExpireWorker.
-func NewSubscriptionExpireWorker(db interfaces.DatabaseService, subSvc *service.SubscriptionService) *SubscriptionExpireWorker {
+func NewSubscriptionExpireWorker(db interfaces.SubscriptionRepository, subSvc *service.SubscriptionService) *SubscriptionExpireWorker {
 	return &SubscriptionExpireWorker{db: db, subSvc: subSvc}
 }
 

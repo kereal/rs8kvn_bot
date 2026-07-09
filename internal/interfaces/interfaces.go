@@ -95,6 +95,7 @@ type SubscriptionLookup interface {
 	GetSubscription(ctx context.Context, subscriptionID string) (*database.Subscription, error)
 	GetWithPlanAndNodes(ctx context.Context, subscriptionID string) (*database.SubscriptionFull, error)
 }
+
 // SubscriptionRepository combines all subscription interfaces.
 type SubscriptionRepository interface {
 	SubscriptionCRUD
@@ -187,6 +188,16 @@ type XUIClient interface {
 type BotAPI interface {
 	Send(c tgbotapi.Chattable) (tgbotapi.Message, error)
 	Request(c tgbotapi.Chattable) (*tgbotapi.APIResponse, error)
+}
+
+// WebRepository is the composed DB seam for the web/HTTP server: subscription
+// aggregation handoff (SubscriptionRepository) plus the invite/trial/plan reads
+// its landing pages need. It deliberately drops Node/Order/SubscriptionNode/Product.
+type WebRepository interface {
+	SubscriptionRepository
+	InviteRepository
+	TrialRepository
+	PlanRepository
 }
 
 // vpn.Client is defined in internal/vpn/client.go

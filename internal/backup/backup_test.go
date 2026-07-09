@@ -227,10 +227,10 @@ func TestDailyBackup(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name        string
-		keepDays    int
-		createDB    bool
-		check       func(t *testing.T, dbPath string)
+		name     string
+		keepDays int
+		createDB bool
+		check    func(t *testing.T, dbPath string)
 	}{
 		{
 			name:     "default_keep_days",
@@ -316,12 +316,12 @@ func TestGetBackupInfo(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name     string
-		setup    func(t *testing.T, dbPath string)
-		check    func(t *testing.T, infos []BackupInfo)
+		name  string
+		setup func(t *testing.T, dbPath string)
+		check func(t *testing.T, infos []BackupInfo)
 	}{
 		{
-			name: "empty",
+			name:  "empty",
 			setup: func(t *testing.T, dbPath string) {},
 			check: func(t *testing.T, infos []BackupInfo) {
 				assert.Equal(t, 0, len(infos), "Expected 0 backups")
@@ -396,9 +396,9 @@ func TestTotalBackupSize(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name   string
-		setup  func(t *testing.T, dbPath string)
-		check  func(t *testing.T, size int64)
+		name  string
+		setup func(t *testing.T, dbPath string)
+		check func(t *testing.T, size int64)
 	}{
 		{
 			name:  "empty",
@@ -444,7 +444,6 @@ func TestTotalBackupSize(t *testing.T) {
 		})
 	}
 }
-
 
 func TestBackupDatabase_FilePermission(t *testing.T) {
 	t.Parallel()

@@ -76,6 +76,10 @@ type Handler struct {
 	adminRateLimiters map[int64]*ratelimiter.TokenBucket
 	adminRateLimitMu  sync.RWMutex
 
+	// Broadcast draft -> preview -> confirm session state (admin only)
+	broadcastSessions map[int64]*broadcastSession
+	broadcastMu       sync.Mutex
+
 	// Decomposed handlers
 	cmdHandler *CommandHandler
 	cbHandler  *CallbackHandler
@@ -113,6 +117,7 @@ func NewHandler(bot interfaces.BotAPI, cfg *config.Config, db interfaces.Databas
 	}
 	// Initialize admin rate limiters map
 	h.adminRateLimiters = make(map[int64]*ratelimiter.TokenBucket)
+	h.broadcastSessions = make(map[int64]*broadcastSession)
 
 	// Initialize decomposed handlers
 	h.cmdHandler = NewCommandHandler(h)
@@ -677,6 +682,9 @@ func (h *Handler) HandleUpdate(ctx context.Context, update tgbotapi.Update) {
 
 	if update.Message != nil {
 		if update.Message.IsCommand() {
+			if h.isAdmin(chatID) && h.broadcastSessionActive(chatID) && update.Message.Command() != "broadcast" {
+				h.clearBroadcastSession(chatID)
+			}
 			switch update.Message.Command() {
 			case "start":
 				err = h.HandleStart(ctx, update)
@@ -701,8 +709,13 @@ func (h *Handler) HandleUpdate(ctx context.Context, update tgbotapi.Update) {
 					"Неизвестная команда. Используйте /start или /help")
 			}
 		} else {
-			// Non-command message: send help hint
-			err = h.HandleHelp(ctx, update)
+			// Non-command message: if admin is composing a broadcast draft,
+			// treat it as the broadcast message; otherwise send help hint.
+			if h.isAdmin(chatID) && h.broadcastSessionActive(chatID) {
+				err = h.HandleBroadcastDraft(ctx, update)
+			} else {
+				err = h.HandleHelp(ctx, update)
+			}
 		}
 	} else if update.CallbackQuery != nil {
 		err = h.HandleCallback(ctx, update)

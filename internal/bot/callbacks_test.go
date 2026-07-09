@@ -588,8 +588,7 @@ func TestHandleShareInvite_DatabaseError(t *testing.T) {
 func TestHandleCallback_CreateSubscription_DatabaseError(t *testing.T) {
 	t.Parallel()
 
-	cfg := &config.Config{
-	}
+	cfg := &config.Config{}
 	mockDB := testutil.NewDatabaseService()
 
 	mockBot := testutil.NewBotAPI()
@@ -681,7 +680,6 @@ func TestHandleCallback_MenuHelp_DatabaseError(t *testing.T) {
 	assert.True(t, mockBot.SendCalledSafe(), "Bot.Send should be called with error message")
 	assert.Contains(t, mockBot.LastSentTextSafe(), "ошибк", "message should mention error")
 }
-
 
 func TestGenerateInviteLink_DatabaseError(t *testing.T) {
 	t.Parallel()
