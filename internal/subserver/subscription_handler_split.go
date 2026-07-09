@@ -23,7 +23,7 @@ import (
 // On a hit, it revalidates the subscription status in the DB and invalidates
 // stale entries. Returns (result, hit, err): when hit is false, the caller
 // should proceed to a cache-miss path.
-func serveFromCache(ctx context.Context, db interfaces.DatabaseService, subSvc *Service, subID string) (*SubscriptionResult, bool, error) {
+func serveFromCache(ctx context.Context, db interfaces.SubscriptionRepository, subSvc *Service, subID string) (*SubscriptionResult, bool, error) {
 	cacheKey := subID
 	cachedBody, cachedHeaders, ok := subSvc.GetCache(cacheKey)
 	if !ok {
@@ -86,7 +86,7 @@ func serveFromCache(ctx context.Context, db interfaces.DatabaseService, subSvc *
 // loadSubscription fetches the subscription with plan and nodes from the DB,
 // records device/IP analytics, and updates last_request. Returns the full
 // subscription or an error.
-func loadSubscription(ctx context.Context, db interfaces.DatabaseService, subID, clientIP string, requestHeaders map[string]string) (*database.SubscriptionFull, error) {
+func loadSubscription(ctx context.Context, db interfaces.SubscriptionRepository, subID, clientIP string, requestHeaders map[string]string) (*database.SubscriptionFull, error) {
 	subFull, err := db.GetWithPlanAndNodes(ctx, subID)
 	if err != nil {
 		if errors.Is(err, database.ErrSubscriptionNotFound) {

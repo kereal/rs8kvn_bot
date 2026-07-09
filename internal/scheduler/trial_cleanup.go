@@ -24,12 +24,12 @@ func NewTrialCleanupScheduler(subService *service.SubscriptionService) *TrialCle
 
 // Start runs the trial cleanup scheduler loop. It blocks until ctx is cancelled.
 func (s *TrialCleanupScheduler) Start(ctx context.Context) {
-	logger.Info("Trial cleanup scheduler started", zap.String("schedule", "hourly"))
+	logger.Info("Trial cleanup scheduler started", zap.String("schedule", "every 3h"))
 
 	// Run cleanup immediately on startup
 	s.runCleanup(ctx)
 
-	ticker := time.NewTicker(1 * time.Hour)
+	ticker := time.NewTicker(3 * time.Hour)
 	defer ticker.Stop()
 
 	for {

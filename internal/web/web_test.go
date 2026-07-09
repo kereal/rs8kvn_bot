@@ -28,12 +28,12 @@ func TestRenderTrialPage(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name          string
-		subURL        string
-		telegramLink  string
-		mockDB        bool
-		trialHours    int
-		check         func(t *testing.T, html string)
+		name         string
+		subURL       string
+		telegramLink string
+		mockDB       bool
+		trialHours   int
+		check        func(t *testing.T, html string)
 	}{
 		{
 			name:         "basic elements",
@@ -146,7 +146,7 @@ func TestRenderTrialPage(t *testing.T) {
 					return &database.Plan{ID: 1, Name: "trial", DevicesLimit: 1, TrafficLimit: 1073741824}, nil
 				}
 				srv = NewServer(":8880", mockDB, cfg, "testbot", nil, nil)
-				defer srv.db.Close()
+				defer mockDB.Close()
 			} else {
 				cfg := &config.Config{SiteURL: "https://vpn.site", TrialDurationHours: 3}
 				srv = NewServer(":8880", nil, cfg, "testbot", nil, nil)
@@ -321,14 +321,14 @@ func TestHandleLogo(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name     string
-		method   string
+		name         string
+		method       string
 		expectedCode int
-		checks   func(t *testing.T, w *httptest.ResponseRecorder)
+		checks       func(t *testing.T, w *httptest.ResponseRecorder)
 	}{
 		{
-			name: "success",
-			method: http.MethodGet,
+			name:         "success",
+			method:       http.MethodGet,
 			expectedCode: http.StatusOK,
 			checks: func(t *testing.T, w *httptest.ResponseRecorder) {
 				assert.Equal(t, "image/png", w.Header().Get("Content-Type"))
@@ -341,8 +341,8 @@ func TestHandleLogo(t *testing.T) {
 			},
 		},
 		{
-			name: "cache headers",
-			method: http.MethodGet,
+			name:         "cache headers",
+			method:       http.MethodGet,
 			expectedCode: http.StatusOK,
 			checks: func(t *testing.T, w *httptest.ResponseRecorder) {
 				assert.Equal(t, "image/png", w.Header().Get("Content-Type"))
@@ -350,8 +350,8 @@ func TestHandleLogo(t *testing.T) {
 			},
 		},
 		{
-			name: "HEAD no body",
-			method: http.MethodHead,
+			name:         "HEAD no body",
+			method:       http.MethodHead,
 			expectedCode: http.StatusOK,
 			checks: func(t *testing.T, w *httptest.ResponseRecorder) {
 				assert.Equal(t, "image/png", w.Header().Get("Content-Type"))

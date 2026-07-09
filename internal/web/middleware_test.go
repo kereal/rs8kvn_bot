@@ -55,11 +55,11 @@ func TestBearerAuthMiddleware_Rejection(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name        string
-		token       string
-		header      string
-		wantCalled  bool
-		wantCode    int
+		name       string
+		token      string
+		header     string
+		wantCalled bool
+		wantCode   int
 	}{
 		{"missing header", "my-token", "", false, http.StatusUnauthorized},
 		{"empty header value", "my-token", "", false, http.StatusUnauthorized},

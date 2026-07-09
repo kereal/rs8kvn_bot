@@ -146,13 +146,13 @@ func TestE2E_InviteLink_Parameterized(t *testing.T) {
 			check:        nil,
 		},
 		{
-			name:     "xui_error",
+			name:       "xui_error",
 			inviteCode: "invite_xui_fail",
 			referrerID: 200003,
 			setupXUI: func(xuiClient *testutil.XUIClient) {
-			xuiClient.AddClientWithIDFunc = func(ctx context.Context, req xui.ClientRequest) (*xui.ClientConfig, error) {
-				return nil, fmt.Errorf("authentication failed")
-			}
+				xuiClient.AddClientWithIDFunc = func(ctx context.Context, req xui.ClientRequest) (*xui.ClientConfig, error) {
+					return nil, fmt.Errorf("authentication failed")
+				}
 			},
 			createInvite: true,
 			wantStatus:   http.StatusInternalServerError,

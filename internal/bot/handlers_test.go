@@ -97,9 +97,10 @@ func TestHandleBroadcast_MessageTooLong(t *testing.T) {
 		longMessage[i] = 'a'
 	}
 
+	admin := &tgbotapi.User{ID: 123456, UserName: "admin"}
 	ctx := context.Background()
-	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "admin"}, "/broadcast "+string(longMessage))
-	handler.HandleBroadcast(ctx, update)
+	handler.HandleBroadcast(ctx, createCommandUpdate(123456, admin, "/broadcast"))
+	handler.HandleBroadcastDraft(ctx, createTextUpdate(admin, string(longMessage)))
 
 	assert.True(t, mockBot.SendCalledSafe())
 	assert.Contains(t, mockBot.LastSentTextSafe(), "слишком длинное")
@@ -407,7 +408,6 @@ func TestHandleUpdate_CommandRouting(t *testing.T) {
 		TelegramBotToken: "test_token",
 	}
 
-
 	tests := []struct {
 		name        string
 		update      tgbotapi.Update
@@ -494,7 +494,6 @@ func TestHandleUpdate_NonCommandMessage(t *testing.T) {
 		TelegramBotToken: "test_token",
 	}
 
-
 	mockBot := testutil.NewBotAPI()
 	mockDB := testutil.NewDatabaseService()
 	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
@@ -520,7 +519,6 @@ func TestHandleUpdate_CallbackQuery(t *testing.T) {
 		TelegramAdminID:  123456789,
 		TelegramBotToken: "test_token",
 	}
-
 
 	mockBot := testutil.NewBotAPI()
 	mockDB := testutil.NewDatabaseService()

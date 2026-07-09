@@ -457,7 +457,7 @@ func TestMockXUIServer_Endpoints(t *testing.T) {
 	authHeader := "Bearer test-api-token"
 
 	t.Run("login", func(t *testing.T) {
-			resp, err := http.Get(mock.Server.URL + "/login")
+		resp, err := http.Get(mock.Server.URL + "/login")
 		require.NoError(t, err)
 		defer func() { _ = resp.Body.Close() }()
 
@@ -466,10 +466,10 @@ func TestMockXUIServer_Endpoints(t *testing.T) {
 		require.NoError(t, err)
 		assert.True(t, result["success"].(bool))
 
-		})
+	})
 
 	t.Run("addClient", func(t *testing.T) {
-			req, err := http.NewRequest("POST", mock.Server.URL+"/panel/api/clients/add", nil)
+		req, err := http.NewRequest("POST", mock.Server.URL+"/panel/api/clients/add", nil)
 		require.NoError(t, err)
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", authHeader)
@@ -482,10 +482,10 @@ func TestMockXUIServer_Endpoints(t *testing.T) {
 		require.NoError(t, err)
 		assert.True(t, result["success"].(bool))
 
-		})
+	})
 
 	t.Run("getClientTraffic", func(t *testing.T) {
-			req, err := http.NewRequest("GET", mock.Server.URL+"/panel/api/clients/traffic/testuser", nil)
+		req, err := http.NewRequest("GET", mock.Server.URL+"/panel/api/clients/traffic/testuser", nil)
 		require.NoError(t, err)
 		req.Header.Set("Authorization", authHeader)
 		resp, err := http.DefaultClient.Do(req)
@@ -501,10 +501,10 @@ func TestMockXUIServer_Endpoints(t *testing.T) {
 		assert.Equal(t, float64(1024*1024*100), obj["up"])
 		assert.Equal(t, float64(1024*1024*200), obj["down"])
 
-		})
+	})
 
 	t.Run("delClient", func(t *testing.T) {
-			req, err := http.NewRequest("POST", mock.Server.URL+"/panel/api/clients/del/test-id", nil)
+		req, err := http.NewRequest("POST", mock.Server.URL+"/panel/api/clients/del/test-id", nil)
 		require.NoError(t, err)
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", authHeader)
@@ -517,7 +517,7 @@ func TestMockXUIServer_Endpoints(t *testing.T) {
 		require.NoError(t, err)
 		assert.True(t, result["success"].(bool))
 
-		})
+	})
 }
 
 func TestMockXUIServer_ErrorResponses(t *testing.T) {

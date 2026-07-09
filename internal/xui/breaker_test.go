@@ -14,10 +14,10 @@ func TestCircuitBreaker_FailureThreshold(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name          string
+		name           string
 		failuresBefore int
-		wantState     CircuitState
-		wantAllowed   bool
+		wantState      CircuitState
+		wantAllowed    bool
 	}{
 		{"just below threshold allows", 1, CircuitStateClosed, true},
 		{"exactly at threshold opens", 2, CircuitStateOpen, false},
@@ -68,11 +68,11 @@ func TestCircuitBreaker_Execute(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name         string
-		setup        func() *CircuitBreaker
-		fn           func() error
-		wantErr      bool
-		wantErrIs    error
+		name      string
+		setup     func() *CircuitBreaker
+		fn        func() error
+		wantErr   bool
+		wantErrIs error
 	}{
 		{
 			name: "success",
@@ -98,8 +98,8 @@ func TestCircuitBreaker_Execute(t *testing.T) {
 				cb.recordResult(errors.New("failure"))
 				return cb
 			},
-			fn:       func() error { return nil },
-			wantErr:  true,
+			fn:        func() error { return nil },
+			wantErr:   true,
 			wantErrIs: ErrCircuitOpen,
 		},
 		{
@@ -107,7 +107,7 @@ func TestCircuitBreaker_Execute(t *testing.T) {
 			setup: func() *CircuitBreaker {
 				return NewCircuitBreaker(3, 10*time.Second)
 			},
-			fn: func() error { return nil },
+			fn:      func() error { return nil },
 			wantErr: true,
 			wantErrIs: func() error {
 				ctx, cancel := context.WithCancel(context.Background())
@@ -120,7 +120,7 @@ func TestCircuitBreaker_Execute(t *testing.T) {
 			setup: func() *CircuitBreaker {
 				return NewCircuitBreaker(3, 100*time.Millisecond)
 			},
-			fn: func() error { return nil },
+			fn:      func() error { return nil },
 			wantErr: true,
 			wantErrIs: func() error {
 				ctx, cancel := context.WithTimeout(context.Background(), 1*time.Nanosecond)
@@ -183,9 +183,9 @@ func TestCircuitBreaker_HalfOpenTransitions(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name     string
-		setup    func() (*CircuitBreaker, func())
-		actions  func(t *testing.T, cb *CircuitBreaker)
+		name      string
+		setup     func() (*CircuitBreaker, func())
+		actions   func(t *testing.T, cb *CircuitBreaker)
 		wantState CircuitState
 	}{
 		{
@@ -227,9 +227,9 @@ func TestCircuitBreaker_HalfOpenTransitions(t *testing.T) {
 				return cb, func() { time.Sleep(10 * time.Millisecond) }
 			},
 			actions: func(t *testing.T, cb *CircuitBreaker) {
-				cb.allowRequest() // 1st attempt
-				cb.allowRequest() // 2nd
-				cb.allowRequest() // 3rd (halfOpenMax=3)
+				cb.allowRequest()            // 1st attempt
+				cb.allowRequest()            // 2nd
+				cb.allowRequest()            // 3rd (halfOpenMax=3)
 				allowed := cb.allowRequest() // 4th should be blocked
 				assert.False(t, allowed, "Fourth request should be blocked after max half-open attempts")
 			},

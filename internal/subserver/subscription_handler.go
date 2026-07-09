@@ -24,7 +24,7 @@ import (
 //  3. Track the requesting device and IP for analytics.
 //  4. For each active source, fetch the upstream response and detect its format (fetchAndAggregateSources).
 //  5. Aggregate subscription-userinfo headers and build the final response (buildResponse).
-func HandleSubscription(ctx context.Context, db interfaces.DatabaseService, subSvc *Service, subID, clientIP string, requestHeaders map[string]string) (*SubscriptionResult, int, int, error) {
+func HandleSubscription(ctx context.Context, db interfaces.SubscriptionRepository, subSvc *Service, subID, clientIP string, requestHeaders map[string]string) (*SubscriptionResult, int, int, error) {
 	// 1. Try to serve from cache first.
 	if result, hit, err := serveFromCache(ctx, db, subSvc, subID); hit {
 		return result, 0, 0, err
@@ -49,7 +49,7 @@ func HandleSubscription(ctx context.Context, db interfaces.DatabaseService, subS
 // (UTC RFC3339) marking when the device was last seen. If an existing entry
 // has the same x-hwid value it is replaced (rotated to the end). The updated
 // list is persisted to DB.
-func UpdateDevices(ctx context.Context, db interfaces.DatabaseService, subFull *database.SubscriptionFull, headers map[string]string) {
+func UpdateDevices(ctx context.Context, db interfaces.SubscriptionRepository, subFull *database.SubscriptionFull, headers map[string]string) {
 	devices, err := subFull.Subscription.ParseDevices()
 	if err != nil {
 		logger.Error("Failed to parse devices JSON",
@@ -101,7 +101,7 @@ func UpdateDevices(ctx context.Context, db interfaces.DatabaseService, subFull *
 // UpdateIPs records the current client IP with a UTC timestamp in the
 // subscription's Ips JSON field. Duplicate IPs are rotated to the end.
 // The list is capped at maxIPEntries (oldest entries are dropped).
-func UpdateIPs(ctx context.Context, db interfaces.DatabaseService, subFull *database.SubscriptionFull, ip string) {
+func UpdateIPs(ctx context.Context, db interfaces.SubscriptionRepository, subFull *database.SubscriptionFull, ip string) {
 	ips, err := subFull.Subscription.ParseIPs()
 	if err != nil {
 		logger.Error("Failed to parse ips JSON",

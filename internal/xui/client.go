@@ -59,15 +59,15 @@ type ClientConfig struct {
 // (currentEmail vs email vs clientID vs subID are all strings).
 type ClientRequest struct {
 	InboundIDs   []int
-	Email        string   // desired email after the operation
-	CurrentEmail string   // existing email (update only); empty for create
-	ClientID     string   // 3x-ui client UUID
-	SubID        string   // subscription ID surfaced in /sub/{subID}
-	TrafficBytes int64    // totalGB limit in bytes
+	Email        string    // desired email after the operation
+	CurrentEmail string    // existing email (update only); empty for create
+	ClientID     string    // 3x-ui client UUID
+	SubID        string    // subscription ID surfaced in /sub/{subID}
+	TrafficBytes int64     // totalGB limit in bytes
 	ExpiryTime   time.Time // zero = no expiry
-	ResetDays    int      // traffic reset period; negative = use default
-	TgID         int64    // Telegram user id for panel binding (0 = none)
-	Comment      string   // free-form comment stored in the panel
+	ResetDays    int       // traffic reset period; negative = use default
+	TgID         int64     // Telegram user id for panel binding (0 = none)
+	Comment      string    // free-form comment stored in the panel
 }
 
 // ClientTraffic — DTO трафика клиента, возвращаемого панелью.
@@ -666,4 +666,3 @@ func getExpiresAtMillis(expiryTime time.Time) int64 {
 	}
 	return expiryTime.UnixMilli()
 }
-

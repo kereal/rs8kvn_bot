@@ -253,7 +253,6 @@ func TestIsAdmin_EdgeCases(t *testing.T) {
 	}
 }
 
-
 func TestGetHelpText_EdgeCases(t *testing.T) {
 	t.Parallel()
 
@@ -317,43 +316,42 @@ func TestGetHelpText_EdgeCases(t *testing.T) {
 	}
 }
 
-
 func TestSubscriptionCache_EdgeCases(t *testing.T) {
 	t.Parallel()
 
 	t.Run("Set with nil subscription", func(t *testing.T) {
-			t.Parallel()
-			cache := NewSubscriptionCache(10, 5*time.Minute)
+		t.Parallel()
+		cache := NewSubscriptionCache(10, 5*time.Minute)
 		cache.Set(123, nil)
 
 		// Should not panic, and Get should return nil
 		result := cache.Get(123)
 		assert.Nil(t, result)
 
-		})
+	})
 
 	t.Run("Get on empty cache", func(t *testing.T) {
-			t.Parallel()
-			cache := NewSubscriptionCache(10, 5*time.Minute)
+		t.Parallel()
+		cache := NewSubscriptionCache(10, 5*time.Minute)
 
 		assert.Nil(t, cache.Get(999))
 		assert.Equal(t, 0, cache.Size())
 
-		})
+	})
 
 	t.Run("Invalidate non-existent key", func(t *testing.T) {
-			t.Parallel()
-			cache := NewSubscriptionCache(10, 5*time.Minute)
+		t.Parallel()
+		cache := NewSubscriptionCache(10, 5*time.Minute)
 
 		// Should not panic
 		cache.Invalidate(999)
 		assert.Equal(t, 0, cache.Size())
 
-		})
+	})
 
 	t.Run("Set updates existing entry", func(t *testing.T) {
-			t.Parallel()
-			cache := NewSubscriptionCache(10, 5*time.Minute)
+		t.Parallel()
+		cache := NewSubscriptionCache(10, 5*time.Minute)
 
 		sub1 := &database.Subscription{TelegramID: 123, Username: "user1"}
 		sub2 := &database.Subscription{TelegramID: 123, Username: "user2"}
@@ -371,11 +369,11 @@ func TestSubscriptionCache_EdgeCases(t *testing.T) {
 		// Size should still be 1
 		assert.Equal(t, 1, cache.Size())
 
-		})
+	})
 
 	t.Run("Zero TTL behavior", func(t *testing.T) {
-			t.Parallel()
-			cache := NewSubscriptionCache(10, 1*time.Nanosecond)
+		t.Parallel()
+		cache := NewSubscriptionCache(10, 1*time.Nanosecond)
 
 		sub := &database.Subscription{TelegramID: 123, Username: "user"}
 		cache.Set(123, sub)
@@ -385,11 +383,11 @@ func TestSubscriptionCache_EdgeCases(t *testing.T) {
 		result := cache.Get(123)
 		assert.Nil(t, result)
 
-		})
+	})
 
 	t.Run("Negative telegram ID", func(t *testing.T) {
-			t.Parallel()
-			cache := NewSubscriptionCache(10, 5*time.Minute)
+		t.Parallel()
+		cache := NewSubscriptionCache(10, 5*time.Minute)
 
 		sub := &database.Subscription{TelegramID: -123, Username: "user"}
 		cache.Set(-123, sub)
@@ -398,7 +396,7 @@ func TestSubscriptionCache_EdgeCases(t *testing.T) {
 		require.NotNil(t, result)
 		assert.Equal(t, int64(-123), result.TelegramID)
 
-		})
+	})
 }
 
 // TestSubscriptionCache_ConcurrentStress tests cache under heavy concurrent load

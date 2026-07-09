@@ -3,6 +3,7 @@ package e2e
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -105,7 +106,6 @@ func TestE2E_DelCommand_ArgValidation(t *testing.T) {
 	}
 }
 
-
 func TestE2E_DelCommand_XUIFailure(t *testing.T) {
 	t.Parallel()
 
@@ -154,6 +154,40 @@ func TestE2E_DelCommand_XUIFailure(t *testing.T) {
 	assert.Error(t, err, "Subscription should be deleted from DB even when XUI fails")
 }
 
+// runBroadcastFlow drives the draft -> preview -> confirm broadcast flow end to end.
+func runBroadcastFlow(t *testing.T, env *e2eTestEnv, adminID int64, draftText string) {
+	t.Helper()
+	ctx := context.Background()
+
+	env.handler.HandleBroadcast(ctx, tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat: &tgbotapi.Chat{ID: adminID},
+			From: &tgbotapi.User{ID: adminID, UserName: "admin"},
+			Text: "/broadcast",
+			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 10}},
+		},
+	})
+
+	env.handler.HandleBroadcastDraft(ctx, tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat: &tgbotapi.Chat{ID: adminID},
+			From: &tgbotapi.User{ID: adminID, UserName: "admin"},
+			Text: draftText,
+		},
+	})
+
+	env.handler.HandleCallback(ctx, tgbotapi.Update{
+		CallbackQuery: &tgbotapi.CallbackQuery{
+			From: &tgbotapi.User{ID: adminID, UserName: "admin"},
+			Data: "broadcast_confirm",
+			Message: &tgbotapi.Message{
+				Chat:      &tgbotapi.Chat{ID: adminID},
+				MessageID: 1,
+			},
+		},
+	})
+}
+
 func TestE2E_BroadcastCommand_Success(t *testing.T) {
 	t.Parallel()
 
@@ -175,22 +209,10 @@ func TestE2E_BroadcastCommand_Success(t *testing.T) {
 
 	resetBotAPI(env.botAPI)
 
-	update := tgbotapi.Update{
-		Message: &tgbotapi.Message{
-			Chat: &tgbotapi.Chat{ID: adminID},
-			From: &tgbotapi.User{
-				ID:       adminID,
-				UserName: "admin",
-			},
-			Text:     "/broadcast Hello everyone!",
-			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 10}},
-		},
-	}
-	env.handler.HandleBroadcast(ctx, update)
+	runBroadcastFlow(t, env, adminID, "Hello everyone!")
 
 	assert.True(t, env.botAPI.SendCalledSafe())
 	assert.GreaterOrEqual(t, env.botAPI.SendCount, 3, "Should send to at least 3 users")
-
 	assert.Contains(t, env.botAPI.LastSentText, "Рассылка завершена")
 }
 
@@ -221,7 +243,7 @@ func TestE2E_BroadcastCommand_NoArgs(t *testing.T) {
 	env.handler.HandleBroadcast(ctx, update)
 
 	assert.True(t, env.botAPI.SendCalledSafe())
-	assert.Contains(t, env.botAPI.LastSentText, "Использование: /broadcast")
+	assert.Contains(t, env.botAPI.LastSentText, "Отправьте сообщение")
 }
 
 func TestE2E_BroadcastCommand_NoUsers(t *testing.T) {
@@ -233,22 +255,10 @@ func TestE2E_BroadcastCommand_NoUsers(t *testing.T) {
 		}
 	}()
 
-	ctx := context.Background()
 	adminID := env.cfg.TelegramAdminID
 	resetBotAPI(env.botAPI)
 
-	update := tgbotapi.Update{
-		Message: &tgbotapi.Message{
-			Chat: &tgbotapi.Chat{ID: adminID},
-			From: &tgbotapi.User{
-				ID:       adminID,
-				UserName: "admin",
-			},
-			Text:     "/broadcast Hello",
-			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 10}},
-		},
-	}
-	env.handler.HandleBroadcast(ctx, update)
+	runBroadcastFlow(t, env, adminID, "Hello")
 
 	assert.True(t, env.botAPI.SendCalledSafe())
 	assert.Contains(t, env.botAPI.LastSentText, "Всего: 0")
@@ -273,23 +283,39 @@ func TestE2E_BroadcastCommand_SomeFailures(t *testing.T) {
 	}
 
 	resetBotAPI(env.botAPI)
-	env.botAPI.SendError = fmt.Errorf("send failed")
 
-	update := tgbotapi.Update{
+	// Drive the flow manually so the preview send (before confirm) succeeds,
+	// then make the actual user sends fail.
+	env.handler.HandleBroadcast(ctx, tgbotapi.Update{
 		Message: &tgbotapi.Message{
 			Chat: &tgbotapi.Chat{ID: adminID},
-			From: &tgbotapi.User{
-				ID:       adminID,
-				UserName: "admin",
-			},
-			Text:     "/broadcast Hello",
+			From: &tgbotapi.User{ID: adminID, UserName: "admin"},
+			Text: "/broadcast",
 			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 10}},
 		},
-	}
-	env.handler.HandleBroadcast(ctx, update)
+	})
+	env.handler.HandleBroadcastDraft(ctx, tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat: &tgbotapi.Chat{ID: adminID},
+			From: &tgbotapi.User{ID: adminID, UserName: "admin"},
+			Text: "Hello",
+		},
+	})
+	env.botAPI.SendError = fmt.Errorf("send failed")
+	env.handler.HandleCallback(ctx, tgbotapi.Update{
+		CallbackQuery: &tgbotapi.CallbackQuery{
+			From: &tgbotapi.User{ID: adminID, UserName: "admin"},
+			Data: "broadcast_confirm",
+			Message: &tgbotapi.Message{
+				Chat:      &tgbotapi.Chat{ID: adminID},
+				MessageID: 1,
+			},
+		},
+	})
 
 	assert.True(t, env.botAPI.SendCalledSafe())
 	assert.Contains(t, env.botAPI.LastSentText, "Рассылка завершена")
+	assert.Contains(t, env.botAPI.LastSentText, "Ошибок: 3")
 }
 
 func TestE2E_SendCommand_ByTelegramID(t *testing.T) {
@@ -555,7 +581,7 @@ func TestE2E_SendCommand_RateLimitBlocksExcess(t *testing.T) {
 	assert.True(t, env.botAPI.SendCalledSafe(), "Second send should succeed under normal rate")
 }
 
-func TestE2E_BroadcastCommand_EscapesMarkdown(t *testing.T) {
+func TestE2E_BroadcastCommand_PreservesFormatting(t *testing.T) {
 	env := setupE2EEnv(t)
 	defer func() {
 		if err := env.db.Close(); err != nil {
@@ -569,18 +595,21 @@ func TestE2E_BroadcastCommand_EscapesMarkdown(t *testing.T) {
 	_, err := env.subService.Create(ctx, int64(950001), "testuser", "")
 	require.NoError(t, err)
 
-	update := tgbotapi.Update{
-		Message: &tgbotapi.Message{
-			Chat:     &tgbotapi.Chat{ID: adminID},
-			From:     &tgbotapi.User{ID: adminID, UserName: "admin"},
-			Text:     "/broadcast Test *bold* _italic_ [link](url)",
-			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 10}},
-		},
-	}
-	env.handler.HandleBroadcast(ctx, update)
+	resetBotAPI(env.botAPI)
 
-	assert.True(t, env.botAPI.SendCalledSafe(), "Broadcast should send")
+	const draft = "Test *bold* _italic_ [link](https://example.com)"
+	runBroadcastFlow(t, env, adminID, draft)
+
 	assert.Contains(t, env.botAPI.LastSentText, "Рассылка завершена")
+
+	// Formatting must be delivered as-is (MarkdownV2, not escaped with backslashes).
+	var delivered bool
+	for _, m := range env.botAPI.GetAllSentMessages() {
+		if strings.Contains(m.Text, "*bold*") && !strings.Contains(m.Text, `\*bold\*`) {
+			delivered = true
+		}
+	}
+	assert.True(t, delivered, "delivered message should keep MarkdownV2 formatting unescaped")
 }
 
 func TestE2E_SendCommand_EscapesMarkdown(t *testing.T) {
@@ -615,9 +644,9 @@ func TestE2E_NonAdmin_AccessControl(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name      string
-		setupEnv  func(*e2eTestEnv, context.Context)
-		wantNotSent bool
+		name         string
+		setupEnv     func(*e2eTestEnv, context.Context)
+		wantNotSent  bool
 		sentContains string
 	}{
 		{
@@ -625,9 +654,9 @@ func TestE2E_NonAdmin_AccessControl(t *testing.T) {
 			setupEnv: func(env *e2eTestEnv, ctx context.Context) {
 				env.handler.HandleDel(ctx, tgbotapi.Update{
 					Message: &tgbotapi.Message{
-						Chat: &tgbotapi.Chat{ID: 999999},
-						From: &tgbotapi.User{ID: 999999, UserName: "notadmin"},
-						Text: "/del 1",
+						Chat:     &tgbotapi.Chat{ID: 999999},
+						From:     &tgbotapi.User{ID: 999999, UserName: "notadmin"},
+						Text:     "/del 1",
 						Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 4}},
 					},
 				})
@@ -639,9 +668,9 @@ func TestE2E_NonAdmin_AccessControl(t *testing.T) {
 			setupEnv: func(env *e2eTestEnv, ctx context.Context) {
 				env.handler.HandleBroadcast(ctx, tgbotapi.Update{
 					Message: &tgbotapi.Message{
-						Chat: &tgbotapi.Chat{ID: 999999},
-						From: &tgbotapi.User{ID: 999999, UserName: "notadmin"},
-						Text: "/broadcast Hello",
+						Chat:     &tgbotapi.Chat{ID: 999999},
+						From:     &tgbotapi.User{ID: 999999, UserName: "notadmin"},
+						Text:     "/broadcast Hello",
 						Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 10}},
 					},
 				})
@@ -674,7 +703,7 @@ func TestE2E_NonAdmin_AccessControl(t *testing.T) {
 					},
 				})
 			},
-			wantNotSent: false,
+			wantNotSent:  false,
 			sentContains: "только администратору",
 		},
 		{
@@ -685,7 +714,7 @@ func TestE2E_NonAdmin_AccessControl(t *testing.T) {
 						From: &tgbotapi.User{ID: 999999, UserName: "notadmin"},
 						Data: "admin_stats",
 						Message: &tgbotapi.Message{
-							Chat:     &tgbotapi.Chat{ID: 999999},
+							Chat:      &tgbotapi.Chat{ID: 999999},
 							MessageID: 100,
 						},
 					},
@@ -701,7 +730,7 @@ func TestE2E_NonAdmin_AccessControl(t *testing.T) {
 						From: &tgbotapi.User{ID: 999999, UserName: "notadmin"},
 						Data: "admin_lastreg",
 						Message: &tgbotapi.Message{
-							Chat:     &tgbotapi.Chat{ID: 999999},
+							Chat:      &tgbotapi.Chat{ID: 999999},
 							MessageID: 100,
 						},
 					},

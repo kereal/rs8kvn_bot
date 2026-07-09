@@ -458,8 +458,8 @@ func TestSubscriptionService_Delete_Success(t *testing.T) {
 		GetByTelegramIDFunc: func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 			return sub, nil
 		},
-		DeleteSubscriptionFunc: func(ctx context.Context, telegramID int64) error {
-			return nil
+		DeleteSubscriptionByIDFunc: func(ctx context.Context, id uint) (*database.Subscription, error) {
+			return nil, nil
 		},
 		GetBySubscriptionIDFunc: func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
 			return nil, nil
@@ -503,8 +503,8 @@ func TestSubscriptionService_Delete_XUIError(t *testing.T) {
 		GetByTelegramIDFunc: func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 			return sub, nil
 		},
-		DeleteSubscriptionFunc: func(ctx context.Context, telegramID int64) error {
-			return nil
+		DeleteSubscriptionByIDFunc: func(ctx context.Context, id uint) (*database.Subscription, error) {
+			return nil, nil
 		},
 		GetBySubscriptionIDFunc: func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
 			return nil, nil
@@ -532,8 +532,8 @@ func TestSubscriptionService_Delete_DBError(t *testing.T) {
 		GetByTelegramIDFunc: func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 			return sub, nil
 		},
-		DeleteSubscriptionFunc: func(ctx context.Context, telegramID int64) error {
-			return errors.New("db connection refused")
+		DeleteSubscriptionByIDFunc: func(ctx context.Context, id uint) (*database.Subscription, error) {
+			return nil, errors.New("db connection refused")
 		},
 		GetBySubscriptionIDFunc: func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
 			return nil, nil
@@ -562,8 +562,8 @@ func TestSubscriptionService_Delete_UsesCorrectEmail(t *testing.T) {
 		GetByTelegramIDFunc: func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 			return sub, nil
 		},
-		DeleteSubscriptionFunc: func(ctx context.Context, telegramID int64) error {
-			return nil
+		DeleteSubscriptionByIDFunc: func(ctx context.Context, id uint) (*database.Subscription, error) {
+			return nil, nil
 		},
 		GetBySubscriptionIDFunc: func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
 			return nil, nil
@@ -593,8 +593,8 @@ func TestSubscriptionService_Delete_FallsBackToTgIdEmail(t *testing.T) {
 		GetByTelegramIDFunc: func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 			return sub, nil
 		},
-		DeleteSubscriptionFunc: func(ctx context.Context, telegramID int64) error {
-			return nil
+		DeleteSubscriptionByIDFunc: func(ctx context.Context, id uint) (*database.Subscription, error) {
+			return nil, nil
 		},
 		GetBySubscriptionIDFunc: func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
 			return nil, nil

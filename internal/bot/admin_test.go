@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 	"strings"
-	"sync/atomic"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
@@ -287,21 +287,144 @@ func TestHandleBroadcast_NonAdminUser(t *testing.T) {
 	handler.HandleBroadcast(ctx, update)
 	// Should not call any database methods
 	assert.Nil(t, mockDB.GetTotalTelegramIDCountFunc)
+	assert.False(t, handler.broadcastSessionActive(123456))
 }
 
-func TestHandleBroadcast_ValidBroadcast(t *testing.T) {
+func TestHandleBroadcast_StartsSession(t *testing.T) {
 	t.Parallel()
 
-	cfg := &config.Config{
-		TelegramAdminID: 123456,
-	}
-	mockDB := testutil.NewDatabaseService()
-	mockXUI := testutil.NewXUIClient()
+	cfg := &config.Config{TelegramAdminID: 123456}
 	mockBot := testutil.NewBotAPI()
-	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
+	handler := newTestAdminHandler(cfg, testutil.NewDatabaseService(), testutil.NewXUIClient(), mockBot)
+	admin := &tgbotapi.User{ID: 123456, UserName: "admin"}
+
+	handler.HandleBroadcast(context.Background(), createCommandUpdate(123456, admin, "/broadcast"))
+
+	assert.True(t, handler.broadcastSessionActive(123456), "session should be active after /broadcast")
+	assert.Contains(t, mockBot.LastSentTextSafe(), "Отправьте сообщение")
+}
+
+func TestHandleBroadcast_DraftPreviewShowsButtons(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{TelegramAdminID: 123456}
+	mockBot := testutil.NewBotAPI()
+	handler := newTestAdminHandler(cfg, testutil.NewDatabaseService(), testutil.NewXUIClient(), mockBot)
+	admin := &tgbotapi.User{ID: 123456, UserName: "admin"}
+
+	handler.HandleBroadcast(context.Background(), createCommandUpdate(123456, admin, "/broadcast"))
+
+	// Capture all chatables to verify ParseMode and buttons.
+	var captured []tgbotapi.Chattable
+	mockBot.SendFunc = func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
+		captured = append(captured, c)
+		return tgbotapi.Message{MessageID: 1}, nil
+	}
+
+	draft := "Привет *все*!\nЭто _многострочное_ сообщение."
+	handler.HandleBroadcastDraft(context.Background(), createTextUpdate(admin, draft))
+
+	// Preview must use MarkdownV2.
+	var previewed bool
+	for _, c := range captured {
+		if mc, ok := c.(tgbotapi.MessageConfig); ok && mc.ParseMode == "MarkdownV2" {
+			previewed = true
+			assert.Equal(t, draft, mc.Text)
+		}
+	}
+	assert.True(t, previewed, "draft preview must be sent with MarkdownV2")
+
+	// Confirm/cancel buttons must be present on the final message.
+	last, ok := mockBot.LastChattableSafe().(tgbotapi.MessageConfig)
+	require.True(t, ok)
+	require.NotNil(t, last.ReplyMarkup)
+	kb, ok := last.ReplyMarkup.(tgbotapi.InlineKeyboardMarkup)
+	require.True(t, ok)
+	assert.Equal(t, "broadcast_confirm", *kb.InlineKeyboard[0][0].CallbackData)
+	assert.Equal(t, "broadcast_cancel", *kb.InlineKeyboard[0][1].CallbackData)
+
+	// Session moved to preview stage.
+	s := handler.getBroadcastSession(123456)
+	require.NotNil(t, s)
+	assert.Equal(t, broadcastStagePreview, s.stage)
+	assert.Equal(t, draft, s.text)
+}
+
+func TestHandleBroadcast_InvalidMarkdownKeepsSession(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{TelegramAdminID: 123456}
+	mockBot := testutil.NewBotAPI()
+	mockBot.SendError = errors.New("Bad Request: can't parse entities")
+	handler := newTestAdminHandler(cfg, testutil.NewDatabaseService(), testutil.NewXUIClient(), mockBot)
+	admin := &tgbotapi.User{ID: 123456, UserName: "admin"}
+
+	handler.HandleBroadcast(context.Background(), createCommandUpdate(123456, admin, "/broadcast"))
+	handler.HandleBroadcastDraft(context.Background(), createTextUpdate(admin, "broken *bold"))
+
+	// Session must remain active so admin can resend a fixed draft.
+	assert.True(t, handler.broadcastSessionActive(123456))
+	assert.Contains(t, mockBot.LastSentTextSafe(), "Ошибка форматирования")
+
+	// Fix: clear error and resend valid markdown.
+	mockBot.SendError = nil
+	handler.HandleBroadcastDraft(context.Background(), createTextUpdate(admin, "ok *bold*"))
+	assert.Contains(t, mockBot.LastSentTextSafe(), "Превью готово")
+}
+
+func TestHandleBroadcast_DraftTooLong(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{TelegramAdminID: 123456}
+	mockBot := testutil.NewBotAPI()
+	handler := newTestAdminHandler(cfg, testutil.NewDatabaseService(), testutil.NewXUIClient(), mockBot)
+	admin := &tgbotapi.User{ID: 123456, UserName: "admin"}
+
+	handler.HandleBroadcast(context.Background(), createCommandUpdate(123456, admin, "/broadcast"))
+
+	long := make([]byte, config.MaxTelegramMessageLen+1)
+	for i := range long {
+		long[i] = 'a'
+	}
+	handler.HandleBroadcastDraft(context.Background(), createTextUpdate(admin, string(long)))
+
+	assert.Contains(t, mockBot.LastSentTextSafe(), "слишком длинное")
+	// Session stays in awaiting stage so admin can resend a shorter draft.
+	s := handler.getBroadcastSession(123456)
+	require.NotNil(t, s)
+	assert.Equal(t, broadcastStageAwaitingDraft, s.stage)
+}
+
+func TestHandleBroadcast_CancelClearsSession(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{TelegramAdminID: 123456}
+	mockBot := testutil.NewBotAPI()
+	handler := newTestAdminHandler(cfg, testutil.NewDatabaseService(), testutil.NewXUIClient(), mockBot)
+	admin := &tgbotapi.User{ID: 123456, UserName: "admin"}
+
+	handler.HandleBroadcast(context.Background(), createCommandUpdate(123456, admin, "/broadcast"))
+	handler.HandleBroadcastDraft(context.Background(), createTextUpdate(admin, "/cancel"))
+
+	assert.False(t, handler.broadcastSessionActive(123456))
+	assert.Contains(t, mockBot.LastSentTextSafe(), "отменена")
+}
+
+// confirmBroadcast prepares a preview-stage session and runs the confirm handler.
+func confirmBroadcast(h *Handler, mockBot *testutil.BotAPI, text string) {
+	h.broadcastSessions[123456] = &broadcastSession{stage: broadcastStagePreview, text: text}
+	h.handleBroadcastConfirm(context.Background(), 123456)
+}
+
+func TestHandleBroadcast_ConfirmSendsToAll(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{TelegramAdminID: 123456}
+	mockBot := testutil.NewBotAPI()
+	handler := newTestAdminHandler(cfg, testutil.NewDatabaseService(), testutil.NewXUIClient(), mockBot)
 
 	callCount := 0
-	mockDB.GetTelegramIDsBatchFunc = func(ctx context.Context, offset, limit int) ([]int64, error) {
+	handler.db.(*testutil.DatabaseService).GetTelegramIDsBatchFunc = func(ctx context.Context, offset, limit int) ([]int64, error) {
 		callCount++
 		if callCount == 1 {
 			return []int64{111, 222, 333}, nil
@@ -309,165 +432,38 @@ func TestHandleBroadcast_ValidBroadcast(t *testing.T) {
 		return []int64{}, nil
 	}
 
-	ctx := context.Background()
-	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "admin"}, "/broadcast Test message")
-
-	handler.HandleBroadcast(ctx, update)
-	assert.True(t, mockBot.SendCalledSafe())
+	confirmBroadcast(handler, mockBot, "Test *message*")
 	assert.Contains(t, mockBot.LastSentTextSafe(), "Рассылка завершена")
+	assert.Contains(t, mockBot.LastSentTextSafe(), "Всего: 3")
+	assert.False(t, handler.broadcastSessionActive(123456), "session cleared after confirm")
 }
 
-func TestHandleBroadcast_NoMessage(t *testing.T) {
+func TestHandleBroadcast_ConfirmMultipleBatches(t *testing.T) {
 	t.Parallel()
 
-	cfg := &config.Config{
-		TelegramAdminID: 123456,
-	}
-	mockDB := testutil.NewDatabaseService()
-	mockXUI := testutil.NewXUIClient()
+	cfg := &config.Config{TelegramAdminID: 123456}
 	mockBot := testutil.NewBotAPI()
-	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
-
-	ctx := context.Background()
-	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "admin"}, "/broadcast")
-
-	handler.HandleBroadcast(ctx, update)
-	assert.True(t, mockBot.SendCalledSafe())
-	assert.Contains(t, mockBot.LastSentTextSafe(), "Использование")
-}
-
-func TestHandleBroadcast_NoUsers(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{
-		TelegramAdminID: 123456,
-	}
-	mockDB := testutil.NewDatabaseService()
-	mockXUI := testutil.NewXUIClient()
-	mockBot := testutil.NewBotAPI()
-	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
-
-	mockDB.GetTelegramIDsBatchFunc = func(ctx context.Context, offset, limit int) ([]int64, error) {
-		return []int64{}, nil
-	}
-
-	ctx := context.Background()
-	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "admin"}, "/broadcast Test message")
-
-	handler.HandleBroadcast(ctx, update)
-	assert.True(t, mockBot.SendCalledSafe())
-	assert.Contains(t, mockBot.LastSentTextSafe(), "Всего: 0")
-}
-
-func TestHandleBroadcast_DatabaseError(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{
-		TelegramAdminID: 123456,
-	}
-	mockDB := testutil.NewDatabaseService()
-	mockXUI := testutil.NewXUIClient()
-	mockBot := testutil.NewBotAPI()
-	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
-
-	mockDB.GetTelegramIDsBatchFunc = func(ctx context.Context, offset, limit int) ([]int64, error) {
-		return nil, errors.New("database error")
-	}
-
-	ctx := context.Background()
-	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "admin"}, "/broadcast Test message")
-
-	handler.HandleBroadcast(ctx, update)
-	assert.True(t, mockBot.SendCalledSafe())
-	assert.Contains(t, mockBot.LastSentTextSafe(), "Ошибка")
-}
-
-func TestHandleBroadcast_SendFailure(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{
-		TelegramAdminID: 123456,
-	}
-	mockDB := testutil.NewDatabaseService()
-	mockXUI := testutil.NewXUIClient()
-	mockBot := testutil.NewBotAPI()
-	mockBot.SendError = errors.New("send error")
-	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
+	handler := newTestAdminHandler(cfg, testutil.NewDatabaseService(), testutil.NewXUIClient(), mockBot)
 
 	callCount := 0
-	mockDB.GetTelegramIDsBatchFunc = func(ctx context.Context, offset, limit int) ([]int64, error) {
-		callCount++
-		if callCount == 1 {
-			return []int64{111, 222}, nil
-		}
-		return []int64{}, nil
-	}
-
-	ctx := context.Background()
-	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "admin"}, "/broadcast Test message")
-
-	handler.HandleBroadcast(ctx, update)
-	assert.True(t, mockBot.SendCalledSafe())
-	assert.Contains(t, mockBot.LastSentTextSafe(), "Рассылка завершена")
-	assert.Contains(t, mockBot.LastSentTextSafe(), "Ошибок: 2")
-}
-
-func TestHandleBroadcast_ContextCancellation(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{
-		TelegramAdminID: 123456,
-	}
-	mockDB := testutil.NewDatabaseService()
-	mockXUI := testutil.NewXUIClient()
-	mockBot := testutil.NewBotAPI()
-	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	mockDB.GetTelegramIDsBatchFunc = func(ctx context.Context, offset, limit int) ([]int64, error) {
-		return []int64{111}, nil
-	}
-
-	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "admin"}, "/broadcast Test message")
-
-	handler.HandleBroadcast(ctx, update)
-	assert.True(t, mockBot.SendCalledSafe(), "Cancellation report must be sent to admin even on ctx cancel")
-	assert.Contains(t, mockBot.LastSentTextSafe(), "прервана")
-}
-
-// TestHandleBroadcast_MultipleBatches tests broadcast with multiple batches of users
-func TestHandleBroadcast_MultipleBatches(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{
-		TelegramAdminID: 123456,
-	}
-	mockDB := testutil.NewDatabaseService()
-	mockXUI := testutil.NewXUIClient()
-	mockBot := testutil.NewBotAPI()
-	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
-
-	callCount := 0
-	mockDB.GetTelegramIDsBatchFunc = func(ctx context.Context, offset, limit int) ([]int64, error) {
+	handler.db.(*testutil.DatabaseService).GetTelegramIDsBatchFunc = func(ctx context.Context, offset, limit int) ([]int64, error) {
 		callCount++
 		switch callCount {
 		case 1:
 			ids := make([]int64, 100)
-			for i := 0; i < 100; i++ {
+			for i := range ids {
 				ids[i] = int64(i + 1)
 			}
 			return ids, nil
 		case 2:
 			ids := make([]int64, 100)
-			for i := 0; i < 100; i++ {
+			for i := range ids {
 				ids[i] = int64(i + 101)
 			}
 			return ids, nil
 		case 3:
 			ids := make([]int64, 50)
-			for i := 0; i < 50; i++ {
+			for i := range ids {
 				ids[i] = int64(i + 201)
 			}
 			return ids, nil
@@ -476,58 +472,37 @@ func TestHandleBroadcast_MultipleBatches(t *testing.T) {
 		}
 	}
 
-	ctx := context.Background()
-	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "admin"}, "/broadcast Test message")
-
-	handler.HandleBroadcast(ctx, update)
-	assert.True(t, mockBot.SendCalledSafe())
-	assert.Equal(t, 4, callCount, "Should call GetTelegramIDsBatch 4 times (3 batches + 1 empty)")
+	confirmBroadcast(handler, mockBot, "Test message")
+	assert.Equal(t, 4, callCount, "should call GetTelegramIDsBatch 4 times (3 batches + 1 empty)")
 	assert.Contains(t, mockBot.LastSentTextSafe(), "Всего: 250")
 }
 
-// TestHandleBroadcast_BatchError tests broadcast when GetTelegramIDsBatch fails
-func TestHandleBroadcast_BatchError(t *testing.T) {
+func TestHandleBroadcast_ConfirmDatabaseError(t *testing.T) {
 	t.Parallel()
 
-	cfg := &config.Config{
-		TelegramAdminID: 123456,
-	}
-	mockDB := testutil.NewDatabaseService()
-	mockXUI := testutil.NewXUIClient()
+	cfg := &config.Config{TelegramAdminID: 123456}
 	mockBot := testutil.NewBotAPI()
-	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
+	handler := newTestAdminHandler(cfg, testutil.NewDatabaseService(), testutil.NewXUIClient(), mockBot)
 
-	callCount := 0
-	mockDB.GetTelegramIDsBatchFunc = func(ctx context.Context, offset, limit int) ([]int64, error) {
-		callCount++
-		if callCount == 1 {
-			return []int64{111, 222}, nil
-		}
-		return nil, errors.New("database connection lost")
+	handler.db.(*testutil.DatabaseService).GetTelegramIDsBatchFunc = func(ctx context.Context, offset, limit int) ([]int64, error) {
+		return nil, errors.New("database error")
 	}
 
-	ctx := context.Background()
-	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "admin"}, "/broadcast Test message")
-
-	handler.HandleBroadcast(ctx, update)
-	assert.True(t, mockBot.SendCalledSafe(), "Should send error report")
+	confirmBroadcast(handler, mockBot, "Test message")
+	assert.True(t, mockBot.SendCalledSafe(), "should send error report")
 	assert.Contains(t, mockBot.LastSentTextSafe(), "Ошибка")
 }
 
-// TestHandleBroadcast_EmptyBatchAfterFirst tests handling of empty subsequent batches
-func TestHandleBroadcast_EmptyBatchAfterFirst(t *testing.T) {
+func TestHandleBroadcast_ConfirmSendFailure(t *testing.T) {
 	t.Parallel()
 
-	cfg := &config.Config{
-		TelegramAdminID: 123456,
-	}
-	mockDB := testutil.NewDatabaseService()
-	mockXUI := testutil.NewXUIClient()
+	cfg := &config.Config{TelegramAdminID: 123456}
 	mockBot := testutil.NewBotAPI()
-	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
+	mockBot.SendError = errors.New("send error")
+	handler := newTestAdminHandler(cfg, testutil.NewDatabaseService(), testutil.NewXUIClient(), mockBot)
 
 	callCount := 0
-	mockDB.GetTelegramIDsBatchFunc = func(ctx context.Context, offset, limit int) ([]int64, error) {
+	handler.db.(*testutil.DatabaseService).GetTelegramIDsBatchFunc = func(ctx context.Context, offset, limit int) ([]int64, error) {
 		callCount++
 		if callCount == 1 {
 			return []int64{111, 222}, nil
@@ -535,79 +510,90 @@ func TestHandleBroadcast_EmptyBatchAfterFirst(t *testing.T) {
 		return []int64{}, nil
 	}
 
-	ctx := context.Background()
-	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "admin"}, "/broadcast Test message")
+	confirmBroadcast(handler, mockBot, "Test message")
+	assert.Contains(t, mockBot.LastSentTextSafe(), "Рассылка завершена")
+	assert.Contains(t, mockBot.LastSentTextSafe(), "Ошибок: 2")
+}
 
-	handler.HandleBroadcast(ctx, update)
-	assert.True(t, mockBot.SendCalledSafe())
+func TestHandleBroadcast_ConfirmContextCancellation(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{TelegramAdminID: 123456}
+	mockBot := testutil.NewBotAPI()
+	handler := newTestAdminHandler(cfg, testutil.NewDatabaseService(), testutil.NewXUIClient(), mockBot)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	handler.db.(*testutil.DatabaseService).GetTelegramIDsBatchFunc = func(ctx context.Context, offset, limit int) ([]int64, error) {
+		return []int64{111}, nil
+	}
+
+	handler.broadcastSessions[123456] = &broadcastSession{stage: broadcastStagePreview, text: "Test message"}
+	handler.handleBroadcastConfirm(ctx, 123456)
+	assert.True(t, mockBot.SendCalledSafe(), "cancellation report must be sent even on ctx cancel")
+	assert.Contains(t, mockBot.LastSentTextSafe(), "прервана")
+}
+
+func TestSplitMessage_BelowLimit(t *testing.T) {
+	t.Parallel()
+	chunks := splitMessage("short", 4096)
+	assert.Equal(t, []string{"short"}, chunks)
+}
+
+func TestSplitMessage_LineBoundary(t *testing.T) {
+	t.Parallel()
+	text := strings.Repeat("a", 10) + "\n" + strings.Repeat("b", 10)
+	chunks := splitMessage(text, 15)
+	require.Len(t, chunks, 2)
+	assert.Equal(t, strings.Repeat("a", 10), chunks[0])
+	assert.Equal(t, strings.Repeat("b", 10), chunks[1])
+}
+
+func TestSplitMessage_HardSplitLongLine(t *testing.T) {
+	t.Parallel()
+	text := strings.Repeat("x", 100)
+	chunks := splitMessage(text, 40)
+	require.Len(t, chunks, 3)
+	assert.Equal(t, strings.Repeat("x", 40), chunks[0])
+	assert.Equal(t, strings.Repeat("x", 40), chunks[1])
+	assert.Equal(t, strings.Repeat("x", 20), chunks[2])
+}
+
+func TestSplitMessage_HardSplitMultibyte(t *testing.T) {
+	t.Parallel()
+	// 30 Cyrillic runes, 2 bytes each = 60 bytes. maxLen=25 would cut mid-rune with byte slicing.
+	text := strings.Repeat("я", 30)
+	chunks := splitMessage(text, 25)
+	require.Len(t, chunks, 3)
+	for _, c := range chunks {
+		assert.True(t, utf8.ValidString(c), "chunk must remain valid UTF-8: %q", c)
+	}
+	assert.Equal(t, text, strings.Join(chunks, ""))
+}
+
+func TestHandleBroadcast_ConfirmChunking(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{TelegramAdminID: 123456}
+	mockBot := testutil.NewBotAPI()
+	handler := newTestAdminHandler(cfg, testutil.NewDatabaseService(), testutil.NewXUIClient(), mockBot)
+
+	handler.db.(*testutil.DatabaseService).GetTelegramIDsBatchFunc = func(ctx context.Context, offset, limit int) ([]int64, error) {
+		if offset == 0 {
+			return []int64{111, 222}, nil
+		}
+		return []int64{}, nil
+	}
+
+	// 2 users, message > 4096 -> each gets 2 chunks.
+	text := strings.Repeat("строка\n", 500) // ~3500 chars, bump to exceed
+	text = strings.Repeat("строка\n", 600)  // ~4200 chars
+	confirmBroadcast(handler, mockBot, text)
+
+	assert.GreaterOrEqual(t, mockBot.SendCountSafe(), 4, "2 users x 2 chunks")
+	assert.Contains(t, mockBot.LastSentTextSafe(), "Рассылка завершена")
 	assert.Contains(t, mockBot.LastSentTextSafe(), "Всего: 2")
-}
-
-// TestHandleBroadcast_GetTelegramIDsBatchErrorOnFirstCall tests error on first batch call
-func TestHandleBroadcast_GetTelegramIDsBatchErrorOnFirstCall(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{
-		TelegramAdminID: 123456,
-	}
-	mockDB := testutil.NewDatabaseService()
-	mockXUI := testutil.NewXUIClient()
-	mockBot := testutil.NewBotAPI()
-	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
-
-	mockDB.GetTelegramIDsBatchFunc = func(ctx context.Context, offset, limit int) ([]int64, error) {
-		return nil, errors.New("database unavailable")
-	}
-
-	ctx := context.Background()
-	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "admin"}, "/broadcast Test message")
-
-	handler.HandleBroadcast(ctx, update)
-	assert.True(t, mockBot.SendCalledSafe(), "Should send error report")
-	assert.Contains(t, mockBot.LastSentTextSafe(), "Ошибка")
-}
-
-// TestHandleBroadcast_ConcurrentBroadcasts tests handling of concurrent broadcast attempts
-func TestHandleBroadcast_ConcurrentBroadcasts(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{
-		TelegramAdminID: 123456,
-	}
-	mockDB := testutil.NewDatabaseService()
-	mockXUI := testutil.NewXUIClient()
-	mockBot := testutil.NewBotAPI()
-	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
-
-	var callCount int64
-	mockDB.GetTelegramIDsBatchFunc = func(ctx context.Context, offset, limit int) ([]int64, error) {
-		n := atomic.AddInt64(&callCount, 1)
-		if n <= 2 {
-			return []int64{111, 222, 333, 444, 555}, nil
-		}
-		return []int64{}, nil
-	}
-
-	ctx := context.Background()
-	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "admin"}, "/broadcast Test message")
-
-	done1 := make(chan bool)
-	done2 := make(chan bool)
-
-	go func() {
-		handler.HandleBroadcast(ctx, update)
-		done1 <- true
-	}()
-
-	go func() {
-		handler.HandleBroadcast(ctx, update)
-		done2 <- true
-	}()
-
-	<-done1
-	<-done2
-
-	assert.True(t, mockBot.SendCalledSafe(), "Should have sent messages")
 }
 
 func TestHandleSend_NonAdminUser(t *testing.T) {
