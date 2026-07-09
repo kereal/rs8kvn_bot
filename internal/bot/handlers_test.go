@@ -97,9 +97,10 @@ func TestHandleBroadcast_MessageTooLong(t *testing.T) {
 		longMessage[i] = 'a'
 	}
 
+	admin := &tgbotapi.User{ID: 123456, UserName: "admin"}
 	ctx := context.Background()
-	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "admin"}, "/broadcast "+string(longMessage))
-	handler.HandleBroadcast(ctx, update)
+	handler.HandleBroadcast(ctx, createCommandUpdate(123456, admin, "/broadcast"))
+	handler.HandleBroadcastDraft(ctx, createTextUpdate(admin, string(longMessage)))
 
 	assert.True(t, mockBot.SendCalledSafe())
 	assert.Contains(t, mockBot.LastSentTextSafe(), "слишком длинное")
