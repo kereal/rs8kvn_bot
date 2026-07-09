@@ -292,7 +292,12 @@ func (m *TrialRepositoryFake) CreateTrialSubscription(ctx context.Context, invit
 	if m.CreateTrialSubscriptionFunc != nil {
 		return m.CreateTrialSubscriptionFunc(ctx, inviteCode, subscriptionID, clientID, expiryTime)
 	}
-	return nil, gorm.ErrRecordNotFound
+	return &database.Subscription{
+		SubscriptionID: subscriptionID,
+		ClientID:       clientID,
+		Status:         "active",
+		ExpiresAt:      &expiryTime,
+	}, nil
 }
 func (m *TrialRepositoryFake) GetTrialSubscriptionBySubID(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
 	if m.GetTrialSubscriptionBySubIDFunc != nil {
@@ -446,7 +451,7 @@ func (m *ProductRepositoryFake) GetActiveByPlanID(ctx context.Context, planID ui
 	if m.GetActiveByPlanIDFunc != nil {
 		return m.GetActiveByPlanIDFunc(ctx, planID)
 	}
-	return nil, gorm.ErrRecordNotFound
+	return nil, nil
 }
 func (m *ProductRepositoryFake) GetProductByID(ctx context.Context, id uint) (*database.Product, error) {
 	if m.GetProductByIDFunc != nil {
@@ -484,7 +489,7 @@ func (m *OrderRepositoryFake) GetOrdersBySubscriptionID(ctx context.Context, sub
 	if m.GetOrdersBySubscriptionIDFunc != nil {
 		return m.GetOrdersBySubscriptionIDFunc(ctx, subscriptionID)
 	}
-	return nil, gorm.ErrRecordNotFound
+	return nil, nil
 }
 func (m *OrderRepositoryFake) UpdateOrderStatus(ctx context.Context, id uint, status database.OrderStatus) error {
 	if m.UpdateOrderStatusFunc != nil {

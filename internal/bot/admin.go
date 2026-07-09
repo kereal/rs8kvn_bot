@@ -9,6 +9,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/logger"
@@ -386,11 +387,11 @@ func (h *Handler) runBroadcast(ctx context.Context, adminChatID int64, text stri
 		}
 
 		wg.Wait()
+		offset += len(ids)
+		atomic.AddInt64(&totalProcessed, int64(len(ids)))
 		if broadcastCancelled {
 			break
 		}
-		offset += len(ids)
-		atomic.AddInt64(&totalProcessed, int64(len(ids)))
 	}
 
 	sent := atomic.LoadInt64(&successCount)
@@ -479,8 +480,15 @@ func splitMessage(text string, maxLen int) []string {
 		if len(line) > maxLen {
 			flush()
 			for len(line) > maxLen {
-				chunks = append(chunks, line[:maxLen])
-				line = line[maxLen:]
+				cut := maxLen
+				for cut > 0 && !utf8.RuneStart(line[cut]) {
+					cut--
+				}
+				if cut == 0 {
+					cut = maxLen
+				}
+				chunks = append(chunks, line[:cut])
+				line = line[cut:]
 			}
 			current.WriteString(line)
 			continue

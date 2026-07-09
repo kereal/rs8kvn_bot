@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
@@ -557,6 +558,18 @@ func TestSplitMessage_HardSplitLongLine(t *testing.T) {
 	assert.Equal(t, strings.Repeat("x", 40), chunks[0])
 	assert.Equal(t, strings.Repeat("x", 40), chunks[1])
 	assert.Equal(t, strings.Repeat("x", 20), chunks[2])
+}
+
+func TestSplitMessage_HardSplitMultibyte(t *testing.T) {
+	t.Parallel()
+	// 30 Cyrillic runes, 2 bytes each = 60 bytes. maxLen=25 would cut mid-rune with byte slicing.
+	text := strings.Repeat("я", 30)
+	chunks := splitMessage(text, 25)
+	require.Len(t, chunks, 3)
+	for _, c := range chunks {
+		assert.True(t, utf8.ValidString(c), "chunk must remain valid UTF-8: %q", c)
+	}
+	assert.Equal(t, text, strings.Join(chunks, ""))
 }
 
 func TestHandleBroadcast_ConfirmChunking(t *testing.T) {
