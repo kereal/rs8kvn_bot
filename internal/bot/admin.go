@@ -205,9 +205,8 @@ const (
 
 // broadcastSession holds the in-progress broadcast draft for an admin.
 type broadcastSession struct {
-	stage       broadcastStage
-	text        string
-	previewMsgID int
+	stage broadcastStage
+	text  string
 }
 
 // HandleBroadcast handles the /broadcast command for admins.

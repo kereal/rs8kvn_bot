@@ -27,10 +27,10 @@ const mdv2Reserved = `\_*[]()~` + "`" + `+-=|{}.!`
 var mdv2Protect = []*regexp.Regexp{
 	regexp.MustCompile("```[\\s\\S]*?```"),
 	regexp.MustCompile("`[^`]*`"),
-	regexp.MustCompile("\\[[^\\]]*\\]\\([^)]*\\)"),
-	regexp.MustCompile("\\*(\\S(?:[^*\\n]*?\\S)?)\\*"),
-	regexp.MustCompile("_(\\S(?:[^_\\n]*?\\S)?)_"),
-	regexp.MustCompile("~(\\S(?:[^~\\n]*?\\S)?)~"),
+	regexp.MustCompile(`\[[^\]]*\]\([^)]*\)`),
+	regexp.MustCompile(`\*(\S(?:[^*\n]*?\S)?)\*`),
+	regexp.MustCompile(`_(\S(?:[^_\n]*?\S)?)_`),
+	regexp.MustCompile(`~(\S(?:[^~\n]*?\S)?)~`),
 }
 
 // EscapeMarkdownV2 escapes reserved MarkdownV2 chars (so plain text with dots,

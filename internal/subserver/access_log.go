@@ -53,6 +53,7 @@ func NewAccessLogger(path string) (*AccessLogger, error) {
 		return nil, fmt.Errorf("create access log directory: %w", err)
 	}
 
+	// #nosec G304 -- path is the operator-configured access log file, not user input.
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("open access log file: %w", err)
@@ -98,7 +99,7 @@ func (l *AccessLogger) Log(r *http.Request, statusCode int, clientIP string, suc
 
 	b.WriteByte('\n')
 
-	l.writer.Write([]byte(b.String()))
+	_, _ = l.writer.Write([]byte(b.String()))
 }
 
 // appendAccessLogPart joins parts with a space, wrapping values containing spaces in quotes.
