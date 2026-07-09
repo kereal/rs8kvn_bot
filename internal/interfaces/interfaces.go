@@ -95,6 +95,7 @@ type SubscriptionLookup interface {
 	GetSubscription(ctx context.Context, subscriptionID string) (*database.Subscription, error)
 	GetWithPlanAndNodes(ctx context.Context, subscriptionID string) (*database.SubscriptionFull, error)
 }
+
 // SubscriptionRepository combines all subscription interfaces.
 type SubscriptionRepository interface {
 	SubscriptionCRUD

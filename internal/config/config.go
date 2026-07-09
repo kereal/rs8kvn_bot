@@ -62,7 +62,7 @@ type configFlags struct {
 	heartbeatURL           *flag.StringValue
 	heartbeatInterval      *flag.IntValue
 	sentryDSN              *flag.StringValue
-	webServerPort        *flag.IntValue
+	webServerPort          *flag.IntValue
 	siteURL                *flag.StringValue
 	trialDurationHours     *flag.IntValue
 	trialRateLimit         *flag.IntValue
@@ -89,7 +89,7 @@ func registerFlags() (*flag.Registry, *configFlags) {
 		heartbeatURL:           flag.NewString(""),
 		heartbeatInterval:      flag.NewInt(DefaultHeartbeatInterval),
 		sentryDSN:              flag.NewString(""),
-		webServerPort:        flag.NewInt(DefaultWebServerPort),
+		webServerPort:          flag.NewInt(DefaultWebServerPort),
 		siteURL:                flag.NewString(DefaultSiteURL),
 		trialDurationHours:     flag.NewInt(DefaultTrialDurationHours),
 		trialRateLimit:         flag.NewInt(DefaultTrialRateLimit),
@@ -146,7 +146,7 @@ func Load() (*Config, error) {
 		HeartbeatURL:           f.heartbeatURL.Get(),
 		HeartbeatInterval:      f.heartbeatInterval.Get(),
 		SentryDSN:              f.sentryDSN.Get(),
-		WebServerPort:        f.webServerPort.Get(),
+		WebServerPort:          f.webServerPort.Get(),
 		SiteURL:                f.siteURL.Get(),
 		TrialDurationHours:     f.trialDurationHours.Get(),
 		TrialRateLimit:         f.trialRateLimit.Get(),
@@ -239,7 +239,6 @@ func (c *Config) validate() error {
 		return fmt.Errorf("TRIAL_RATE_LIMIT must be between 1 and 100")
 	}
 
-
 	return nil
 }
 
@@ -297,7 +296,6 @@ func (c *Config) SubURL(subID string) string {
 	}
 	return u
 }
-
 
 // maskURL returns a masked version of a URL for logging purposes.
 func maskURL(urlStr string) string {

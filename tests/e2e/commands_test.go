@@ -19,9 +19,9 @@ func TestE2E_StartCommand_Parameterized(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name      string
-		setupEnv  func(*e2eTestEnv, context.Context)
-		wantMsg   string
+		name     string
+		setupEnv func(*e2eTestEnv, context.Context)
+		wantMsg  string
 	}{
 		{
 			name: "no_subscription",

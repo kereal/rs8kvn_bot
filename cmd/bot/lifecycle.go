@@ -60,9 +60,9 @@ func initLogger(cfg *config.Config) *logger.Service {
 
 // runtimeDeps holds the initialized runtime node clients.
 type runtimeDeps struct {
-	nodes           []database.Node
-	xuiClients      map[uint]interfaces.XUIClient
-	vpnClients      map[uint]vpn.Client
+	nodes      []database.Node
+	xuiClients map[uint]interfaces.XUIClient
+	vpnClients map[uint]vpn.Client
 }
 
 // initDatabase initializes the database service and loads runtime node clients.

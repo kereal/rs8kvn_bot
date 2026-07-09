@@ -319,4 +319,4 @@ func TestRegisterChecker(t *testing.T) {
 	assert.Equal(t, 2, count, "Server should have 2 checkers registered")
 }
 
-	// Register multiple checkers
+// Register multiple checkers

@@ -149,4 +149,3 @@ func newCommandMessage(chatID int64, userID int64, username, text string, cmdLen
 		},
 	}
 }
-

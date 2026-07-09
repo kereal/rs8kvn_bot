@@ -66,15 +66,15 @@ type Subscription struct {
 	ReferredBy     *int64     `gorm:"index"`
 	ProductID      *uint      `gorm:"index"`
 	StartedAt      *time.Time
-	PricePaidCents int64     `gorm:"default:0"`
-	Currency       *string   `gorm:"size:3"`
-	Devices        string    `gorm:"type:text;default:'[]'"` // JSON array of {header_key: value} device entries
-	Ips            string    `gorm:"type:text;default:'[]'"` // JSON array of {ip: timestamp} entries
+	PricePaidCents int64   `gorm:"default:0"`
+	Currency       *string `gorm:"size:3"`
+	Devices        string  `gorm:"type:text;default:'[]'"` // JSON array of {header_key: value} device entries
+	Ips            string  `gorm:"type:text;default:'[]'"` // JSON array of {ip: timestamp} entries
 	// LastRequest — дата/время последнего запроса подписки через субсервер (/sub/:id).
 	// Обновляется best-effort при каждом запросе клиента. NULL до первого запроса.
-	LastRequest    *time.Time `gorm:"index"`
-	CreatedAt      time.Time `gorm:"autoCreateTime"`
-	UpdatedAt      time.Time `gorm:"autoUpdateTime"`
+	LastRequest *time.Time `gorm:"index"`
+	CreatedAt   time.Time  `gorm:"autoCreateTime"`
+	UpdatedAt   time.Time  `gorm:"autoUpdateTime"`
 
 	Plan    *Plan              `gorm:"foreignKey:PlanID"`
 	Product *Product           `gorm:"foreignKey:ProductID"`

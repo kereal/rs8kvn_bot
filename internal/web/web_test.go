@@ -28,12 +28,12 @@ func TestRenderTrialPage(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name          string
-		subURL        string
-		telegramLink  string
-		mockDB        bool
-		trialHours    int
-		check         func(t *testing.T, html string)
+		name         string
+		subURL       string
+		telegramLink string
+		mockDB       bool
+		trialHours   int
+		check        func(t *testing.T, html string)
 	}{
 		{
 			name:         "basic elements",
@@ -321,14 +321,14 @@ func TestHandleLogo(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name     string
-		method   string
+		name         string
+		method       string
 		expectedCode int
-		checks   func(t *testing.T, w *httptest.ResponseRecorder)
+		checks       func(t *testing.T, w *httptest.ResponseRecorder)
 	}{
 		{
-			name: "success",
-			method: http.MethodGet,
+			name:         "success",
+			method:       http.MethodGet,
 			expectedCode: http.StatusOK,
 			checks: func(t *testing.T, w *httptest.ResponseRecorder) {
 				assert.Equal(t, "image/png", w.Header().Get("Content-Type"))
@@ -341,8 +341,8 @@ func TestHandleLogo(t *testing.T) {
 			},
 		},
 		{
-			name: "cache headers",
-			method: http.MethodGet,
+			name:         "cache headers",
+			method:       http.MethodGet,
 			expectedCode: http.StatusOK,
 			checks: func(t *testing.T, w *httptest.ResponseRecorder) {
 				assert.Equal(t, "image/png", w.Header().Get("Content-Type"))
@@ -350,8 +350,8 @@ func TestHandleLogo(t *testing.T) {
 			},
 		},
 		{
-			name: "HEAD no body",
-			method: http.MethodHead,
+			name:         "HEAD no body",
+			method:       http.MethodHead,
 			expectedCode: http.StatusOK,
 			checks: func(t *testing.T, w *httptest.ResponseRecorder) {
 				assert.Equal(t, "image/png", w.Header().Get("Content-Type"))

@@ -286,5 +286,3 @@ func TestStart_MultipleContexts(t *testing.T) {
 	cancel1()
 	cancel2()
 }
-
-
