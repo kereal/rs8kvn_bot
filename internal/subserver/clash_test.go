@@ -171,6 +171,8 @@ func TestExtractClashConfigs_VlessReality(t *testing.T) {
 		require.NoError(t, err, "config %d", i)
 		assert.True(t, strings.HasPrefix(link, "vless://"), "config %d: %s", i, link)
 		assert.Contains(t, link, "security=reality")
+		// Canonical VLESS+Reality link carries spx (spiderX), defaulting to "/".
+		assert.Contains(t, link, "spx=%2F")
 	}
 }
 
