@@ -210,7 +210,7 @@ Cache.Set(240s) → return body with Content-Type + Subscription-Userinfo
 
 **Admin Features:**
 - `/del <id>` — delete subscription by ID
-- `/broadcast <msg>` — send message to all users (respects shutdown context)
+- `/broadcast <msg>` — draft → MarkdownV2 preview (special chars auto-escaped, `*bold*`/`_italic_`/`` `code` ``/`[text](url)` preserved) → inline confirm → batched send to all subscribers (100/batch, concurrency 10); final report splits delivered / blocked-the-bot / other errors
 - `/send <id|username> <msg>` — private message (30s cooldown per admin)
 - `/refstats` — referral statistics (top 10 from cache)
 - 📊 Stats — bot statistics
