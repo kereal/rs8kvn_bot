@@ -22,28 +22,28 @@ import (
 // --- SubscriptionRepository ---
 
 type SubscriptionRepositoryFake struct {
-	GetByTelegramIDFunc           func(ctx context.Context, telegramID int64) (*database.Subscription, error)
-	CreateSubscriptionFunc        func(ctx context.Context, sub *database.Subscription, inviteCode string) error
-	UpdateSubscriptionFunc        func(ctx context.Context, sub *database.Subscription) error
-	DeleteSubscriptionFunc        func(ctx context.Context, telegramID int64) error
-	DeleteSubscriptionByIDFunc     func(ctx context.Context, id uint) (*database.Subscription, error)
-	GetLatestSubscriptionsFunc    func(ctx context.Context, limit int) ([]database.Subscription, error)
-	GetAllSubscriptionsFunc       func(ctx context.Context) ([]database.Subscription, error)
-	CountAllSubscriptionsFunc     func(ctx context.Context) (int64, error)
-	CountActiveSubscriptionsFunc  func(ctx context.Context) (int64, error)
-	CountExpiredSubscriptionsFunc func(ctx context.Context) (int64, error)
-	GetAllTelegramIDsFunc         func(ctx context.Context) ([]int64, error)
-	GetTelegramIDByUsernameFunc   func(ctx context.Context, username string) (int64, error)
-	GetTelegramIDsBatchFunc       func(ctx context.Context, offset, limit int) ([]int64, error)
-	GetTotalTelegramIDCountFunc   func(ctx context.Context) (int64, error)
-	GetSubscriptionStatusFunc     func(ctx context.Context, subscriptionID string) (string, time.Time, error)
-	ExpireSubscriptionFunc        func(ctx context.Context, id uint, freePlanID uint) error
+	GetByTelegramIDFunc             func(ctx context.Context, telegramID int64) (*database.Subscription, error)
+	CreateSubscriptionFunc          func(ctx context.Context, sub *database.Subscription, inviteCode string) error
+	UpdateSubscriptionFunc          func(ctx context.Context, sub *database.Subscription) error
+	DeleteSubscriptionFunc          func(ctx context.Context, telegramID int64) error
+	DeleteSubscriptionByIDFunc      func(ctx context.Context, id uint) (*database.Subscription, error)
+	GetLatestSubscriptionsFunc      func(ctx context.Context, limit int) ([]database.Subscription, error)
+	GetAllSubscriptionsFunc         func(ctx context.Context) ([]database.Subscription, error)
+	CountAllSubscriptionsFunc       func(ctx context.Context) (int64, error)
+	CountActiveSubscriptionsFunc    func(ctx context.Context) (int64, error)
+	CountExpiredSubscriptionsFunc   func(ctx context.Context) (int64, error)
+	GetAllTelegramIDsFunc           func(ctx context.Context) ([]int64, error)
+	GetTelegramIDByUsernameFunc     func(ctx context.Context, username string) (int64, error)
+	GetTelegramIDsBatchFunc         func(ctx context.Context, offset, limit int) ([]int64, error)
+	GetTotalTelegramIDCountFunc     func(ctx context.Context) (int64, error)
+	GetSubscriptionStatusFunc       func(ctx context.Context, subscriptionID string) (string, time.Time, error)
+	ExpireSubscriptionFunc          func(ctx context.Context, id uint, freePlanID uint) error
 	GetExpiredPaidSubscriptionsFunc func(ctx context.Context, now time.Time) ([]database.Subscription, error)
-	UpdateDevicesFunc             func(ctx context.Context, id uint, devicesJSON string) error
-	UpdateIPsFunc                 func(ctx context.Context, id uint, ipsJSON string) error
-	UpdateLastRequestFunc         func(ctx context.Context, subscriptionID string) error
-	GetSubscriptionFunc           func(ctx context.Context, subscriptionID string) (*database.Subscription, error)
-	GetWithPlanAndNodesFunc       func(ctx context.Context, subscriptionID string) (*database.SubscriptionFull, error)
+	UpdateDevicesFunc               func(ctx context.Context, id uint, devicesJSON string) error
+	UpdateIPsFunc                   func(ctx context.Context, id uint, ipsJSON string) error
+	UpdateLastRequestFunc           func(ctx context.Context, subscriptionID string) error
+	GetSubscriptionFunc             func(ctx context.Context, subscriptionID string) (*database.Subscription, error)
+	GetWithPlanAndNodesFunc         func(ctx context.Context, subscriptionID string) (*database.SubscriptionFull, error)
 }
 
 func NewSubscriptionRepository() *SubscriptionRepositoryFake { return &SubscriptionRepositoryFake{} }
@@ -184,21 +184,23 @@ func (m *SubscriptionRepositoryFake) GetWithPlanAndNodes(ctx context.Context, su
 // --- SubscriptionNodeRepository ---
 
 type SubscriptionNodeRepositoryFake struct {
-	GetBySubscriptionIDFunc                 func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error)
-	GetByNodeIDFunc                          func(ctx context.Context, nodeID uint) ([]database.SubscriptionNode, error)
-	CreateSubscriptionNodeFunc               func(ctx context.Context, sn *database.SubscriptionNode) error
-	UpsertSubscriptionNodeFunc               func(ctx context.Context, sn *database.SubscriptionNode) error
-	DeleteSubscriptionNodeFunc               func(ctx context.Context, subID, nodeID uint) error
+	GetBySubscriptionIDFunc                     func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error)
+	GetByNodeIDFunc                             func(ctx context.Context, nodeID uint) ([]database.SubscriptionNode, error)
+	CreateSubscriptionNodeFunc                  func(ctx context.Context, sn *database.SubscriptionNode) error
+	UpsertSubscriptionNodeFunc                  func(ctx context.Context, sn *database.SubscriptionNode) error
+	DeleteSubscriptionNodeFunc                  func(ctx context.Context, subID, nodeID uint) error
 	DeleteSubscriptionNodesBySubscriptionIDFunc func(ctx context.Context, subID uint) error
-	MarkActiveNodesPendingUpdateFunc         func(ctx context.Context, subID uint, targetNodeIDs []uint) error
-	UpdateSubscriptionNodeStatusFunc         func(ctx context.Context, subID, nodeID uint, status database.SyncStatus) error
-	UpdateRetryFunc                          func(ctx context.Context, subID, nodeID uint, retryCount int, retryAt *time.Time, lastErr *string) error
-	GetPendingSyncFunc                       func(ctx context.Context) ([]database.SubscriptionNode, error)
-	GetPendingBySubscriptionIDFunc           func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error)
-	GetPendingByNodeIDFunc                   func(ctx context.Context, nodeID uint) ([]database.SubscriptionNode, error)
+	MarkActiveNodesPendingUpdateFunc            func(ctx context.Context, subID uint, targetNodeIDs []uint) error
+	UpdateSubscriptionNodeStatusFunc            func(ctx context.Context, subID, nodeID uint, status database.SyncStatus) error
+	UpdateRetryFunc                             func(ctx context.Context, subID, nodeID uint, retryCount int, retryAt *time.Time, lastErr *string) error
+	GetPendingSyncFunc                          func(ctx context.Context) ([]database.SubscriptionNode, error)
+	GetPendingBySubscriptionIDFunc              func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error)
+	GetPendingByNodeIDFunc                      func(ctx context.Context, nodeID uint) ([]database.SubscriptionNode, error)
 }
 
-func NewSubscriptionNodeRepository() *SubscriptionNodeRepositoryFake { return &SubscriptionNodeRepositoryFake{} }
+func NewSubscriptionNodeRepository() *SubscriptionNodeRepositoryFake {
+	return &SubscriptionNodeRepositoryFake{}
+}
 
 func (m *SubscriptionNodeRepositoryFake) GetBySubscriptionID(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
 	if m.GetBySubscriptionIDFunc != nil {
@@ -276,12 +278,12 @@ func (m *SubscriptionNodeRepositoryFake) GetPendingByNodeID(ctx context.Context,
 // --- TrialRepository ---
 
 type TrialRepositoryFake struct {
-	CreateTrialSubscriptionFunc    func(ctx context.Context, inviteCode, subscriptionID, clientID string, expiryTime time.Time) (*database.Subscription, error)
-	GetTrialSubscriptionBySubIDFunc func(ctx context.Context, subscriptionID string) (*database.Subscription, error)
-	BindTrialSubscriptionFunc      func(ctx context.Context, subscriptionID string, telegramID int64, username string) (*database.Subscription, error)
+	CreateTrialSubscriptionFunc        func(ctx context.Context, inviteCode, subscriptionID, clientID string, expiryTime time.Time) (*database.Subscription, error)
+	GetTrialSubscriptionBySubIDFunc    func(ctx context.Context, subscriptionID string) (*database.Subscription, error)
+	BindTrialSubscriptionFunc          func(ctx context.Context, subscriptionID string, telegramID int64, username string) (*database.Subscription, error)
 	CountTrialRequestsByIPLastHourFunc func(ctx context.Context, ip string) (int, error)
-	CreateTrialRequestFunc         func(ctx context.Context, ip string) error
-	CleanupExpiredTrialsFunc        func(ctx context.Context, hours int) ([]database.Subscription, error)
+	CreateTrialRequestFunc             func(ctx context.Context, ip string) error
+	CleanupExpiredTrialsFunc           func(ctx context.Context, hours int) ([]database.Subscription, error)
 }
 
 func NewTrialRepository() *TrialRepositoryFake { return &TrialRepositoryFake{} }
@@ -326,11 +328,11 @@ func (m *TrialRepositoryFake) CleanupExpiredTrials(ctx context.Context, hours in
 // --- NodeRepository ---
 
 type NodeRepositoryFake struct {
-	ListNodesFunc        func(ctx context.Context) ([]database.Node, error)
+	ListNodesFunc          func(ctx context.Context) ([]database.Node, error)
 	GetNodesByPlanNameFunc func(ctx context.Context, planName string) ([]database.Node, error)
-	GetNodesByPlanIDFunc func(ctx context.Context, planID uint) ([]database.Node, error)
-	GetNodeByIDFunc      func(ctx context.Context, id uint) (*database.Node, error)
-	ListEnabledFunc      func(ctx context.Context) ([]database.Node, error)
+	GetNodesByPlanIDFunc   func(ctx context.Context, planID uint) ([]database.Node, error)
+	GetNodeByIDFunc        func(ctx context.Context, id uint) (*database.Node, error)
+	ListEnabledFunc        func(ctx context.Context) ([]database.Node, error)
 }
 
 func NewNodeRepository() *NodeRepositoryFake { return &NodeRepositoryFake{} }
@@ -457,7 +459,7 @@ func (m *ProductRepositoryFake) GetProductByID(ctx context.Context, id uint) (*d
 
 type OrderRepositoryFake struct {
 	CreateOrderFunc               func(ctx context.Context, order *database.Order) error
-	GetOrderByIDFunc             func(ctx context.Context, id uint) (*database.Order, error)
+	GetOrderByIDFunc              func(ctx context.Context, id uint) (*database.Order, error)
 	GetOrdersBySubscriptionIDFunc func(ctx context.Context, subscriptionID uint) ([]database.Order, error)
 	UpdateOrderStatusFunc         func(ctx context.Context, id uint, status database.OrderStatus) error
 	UpdateOrderPaidStatusFunc     func(ctx context.Context, id uint) error

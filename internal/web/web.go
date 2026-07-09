@@ -503,7 +503,7 @@ type trialPageData struct {
 func (s *Server) renderTrialPage(w http.ResponseWriter, subID, subURL, telegramLink string, trialHours int) {
 	happLink := "happ://add/" + subURL
 	data := trialPageData{
-		HappLink:     template.URL(happLink),   //nolint:gosec // template.URL is the correct html/template idiom for happ:// custom scheme; value is server-generated
+		HappLink:     template.URL(happLink), //nolint:gosec // template.URL is the correct html/template idiom for happ:// custom scheme; value is server-generated
 		SubURL:       subURL,
 		TelegramLink: template.URL(telegramLink), //nolint:gosec // template.URL is the correct html/template idiom for tg:// custom scheme; value is server-generated
 		TrialHours:   trialHours,

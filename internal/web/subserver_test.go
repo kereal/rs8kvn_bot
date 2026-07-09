@@ -124,15 +124,15 @@ func TestHandleSubscription_SourceVariants(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name       string
-		body       string
-		userInfo   string
+		name        string
+		body        string
+		userInfo    string
 		mockDBExtra func(db *testutil.DatabaseService)
-		check      func(t *testing.T, w *httptest.ResponseRecorder, body string)
+		check       func(t *testing.T, w *httptest.ResponseRecorder, body string)
 	}{
 		{
-			name:    "plain source",
-			body:    "vless://abc@x.com:443\nvmess://def@y.com:8443",
+			name:     "plain source",
+			body:     "vless://abc@x.com:443\nvmess://def@y.com:8443",
 			userInfo: "upload=100; download=200; total=1000; expire=1234567890",
 			check: func(t *testing.T, w *httptest.ResponseRecorder, body string) {
 				decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(body))
@@ -145,8 +145,8 @@ func TestHandleSubscription_SourceVariants(t *testing.T) {
 			},
 		},
 		{
-			name:    "JSON source",
-			body:    `[{"type":"vless","address":"x.com","port":443,"uuid":"abc123","encryption":"none","remark":"S1"}]`,
+			name:     "JSON source",
+			body:     `[{"type":"vless","address":"x.com","port":443,"uuid":"abc123","encryption":"none","remark":"S1"}]`,
 			userInfo: "upload=50; download=75; total=500; expire=9999",
 			check: func(t *testing.T, w *httptest.ResponseRecorder, body string) {
 				assert.Equal(t, "application/json; charset=utf-8", w.Header().Get("Content-Type"))
@@ -162,8 +162,8 @@ func TestHandleSubscription_SourceVariants(t *testing.T) {
 			},
 		},
 		{
-			name:    "multiple sources",
-			body:    "vless://a@x.com:443",
+			name:     "multiple sources",
+			body:     "vless://a@x.com:443",
 			userInfo: "upload=100; download=200; total=500; expire=111",
 			mockDBExtra: func(db *testutil.DatabaseService) {
 				db.GetWithPlanAndNodesFunc = func(ctx context.Context, _ string) (*database.SubscriptionFull, error) {
@@ -194,8 +194,8 @@ func TestHandleSubscription_SourceVariants(t *testing.T) {
 			},
 		},
 		{
-			name:    "mixed JSON and plain",
-			body:    `{"type":"vless","address":"j.com","port":443,"uuid":"abc","encryption":"none","remark":"J"}`,
+			name: "mixed JSON and plain",
+			body: `{"type":"vless","address":"j.com","port":443,"uuid":"abc","encryption":"none","remark":"J"}`,
 			check: func(t *testing.T, w *httptest.ResponseRecorder, body string) {
 				decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(body))
 				require.NoError(t, err)
@@ -203,8 +203,8 @@ func TestHandleSubscription_SourceVariants(t *testing.T) {
 			},
 		},
 		{
-			name:    "base64 encoded source",
-			body:    base64.StdEncoding.EncodeToString([]byte("vless://b64@x.com:443\nvmess://b64@y.com:443")),
+			name:     "base64 encoded source",
+			body:     base64.StdEncoding.EncodeToString([]byte("vless://b64@x.com:443\nvmess://b64@y.com:443")),
 			userInfo: "upload=10; download=20; total=100; expire=555",
 			check: func(t *testing.T, w *httptest.ResponseRecorder, body string) {
 				decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(body))
@@ -229,8 +229,16 @@ func TestHandleSubscription_SourceVariants(t *testing.T) {
 				defer b2.Close()
 			}
 			if tt.name == "multiple sources" {
-				defer func() { if b1 != nil { b1.Close() } }()
-				defer func() { if b2 != nil { b2.Close() } }()
+				defer func() {
+					if b1 != nil {
+						b1.Close()
+					}
+				}()
+				defer func() {
+					if b2 != nil {
+						b2.Close()
+					}
+				}()
 			}
 
 			var sourceURL string
@@ -281,9 +289,9 @@ func TestHandleSubscription_AccessLogVariants(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name        string
-		setupReq    func() *http.Request
-		wantFields  []string
+		name       string
+		setupReq   func() *http.Request
+		wantFields []string
 	}{
 		{
 			name: "with headers",

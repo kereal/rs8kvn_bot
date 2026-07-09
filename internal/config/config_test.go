@@ -456,16 +456,15 @@ func TestMaskURL_InvalidURL(t *testing.T) {
 	assert.Equal(t, ":///***", result, "maskURL() for invalid URL")
 }
 
-
 func TestConfig_Validate_Valid(t *testing.T) {
 	t.Parallel()
 
 	cfg := &Config{
-		TelegramBotToken: "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
-		TelegramAdminID:  123456,
+		TelegramBotToken:   "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
+		TelegramAdminID:    123456,
 		HeartbeatInterval:  60,
 		LogLevel:           "info",
-		WebServerPort:    DefaultWebServerPort,
+		WebServerPort:      DefaultWebServerPort,
 		SiteURL:            "https://vpn.site",
 		TrialDurationHours: 3,
 		TrialRateLimit:     3,
@@ -480,12 +479,12 @@ func TestConfig_Validate_SentryDSN_Valid(t *testing.T) {
 	t.Parallel()
 
 	cfg := &Config{
-		TelegramBotToken: "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
-		TelegramAdminID:  123456,
+		TelegramBotToken:   "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
+		TelegramAdminID:    123456,
 		HeartbeatInterval:  60,
 		LogLevel:           "info",
 		SentryDSN:          "https://abc@sentry.io/123",
-		WebServerPort:    DefaultWebServerPort,
+		WebServerPort:      DefaultWebServerPort,
 		SiteURL:            "https://vpn.site",
 		TrialDurationHours: 3,
 		TrialRateLimit:     3,
@@ -502,7 +501,7 @@ func TestConfig_Validate_SentryDSN_Invalid(t *testing.T) {
 	cfg := &Config{
 		TelegramBotToken: "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 		TelegramAdminID:  123456,
-		SentryDSN: "invalid-dsn",
+		SentryDSN:        "invalid-dsn",
 	}
 
 	err := cfg.validate()
@@ -513,11 +512,11 @@ func TestConfig_Validate_WithSubPath(t *testing.T) {
 	t.Parallel()
 
 	cfg := &Config{
-		TelegramBotToken: "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
-		TelegramAdminID:  123456,
+		TelegramBotToken:   "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
+		TelegramAdminID:    123456,
 		HeartbeatInterval:  60,
 		LogLevel:           "info",
-		WebServerPort:    DefaultWebServerPort,
+		WebServerPort:      DefaultWebServerPort,
 		SiteURL:            "https://vpn.site",
 		TrialDurationHours: 3,
 		TrialRateLimit:     3,
@@ -532,12 +531,12 @@ func TestConfig_Validate_WithHeartbeatURL(t *testing.T) {
 	t.Parallel()
 
 	cfg := &Config{
-		TelegramBotToken: "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
-		TelegramAdminID:  123456,
+		TelegramBotToken:   "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
+		TelegramAdminID:    123456,
 		HeartbeatInterval:  60,
 		LogLevel:           "info",
 		HeartbeatURL:       "https://health.example.com",
-		WebServerPort:    DefaultWebServerPort,
+		WebServerPort:      DefaultWebServerPort,
 		SiteURL:            "https://vpn.site",
 		TrialDurationHours: 3,
 		TrialRateLimit:     3,
@@ -578,7 +577,7 @@ func TestConfig_Validate_InvalidLogLevel(t *testing.T) {
 	cfg := &Config{
 		TelegramBotToken: "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 		TelegramAdminID:  123456,
-		LogLevel: "invalid",
+		LogLevel:         "invalid",
 	}
 
 	err := cfg.validate()
@@ -589,11 +588,11 @@ func TestConfig_Validate_InvalidWebServerPort_TooLow(t *testing.T) {
 	t.Parallel()
 
 	cfg := &Config{
-		TelegramBotToken: "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
-		TelegramAdminID:  123456,
+		TelegramBotToken:  "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
+		TelegramAdminID:   123456,
 		HeartbeatInterval: 60,
 		LogLevel:          "info",
-		WebServerPort:   0,
+		WebServerPort:     0,
 	}
 
 	err := cfg.validate()
@@ -604,11 +603,11 @@ func TestConfig_Validate_InvalidWebServerPort_TooHigh(t *testing.T) {
 	t.Parallel()
 
 	cfg := &Config{
-		TelegramBotToken: "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
-		TelegramAdminID:  123456,
+		TelegramBotToken:  "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
+		TelegramAdminID:   123456,
 		HeartbeatInterval: 60,
 		LogLevel:          "info",
-		WebServerPort:   70000,
+		WebServerPort:     70000,
 	}
 
 	err := cfg.validate()

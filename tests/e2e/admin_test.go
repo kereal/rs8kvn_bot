@@ -105,7 +105,6 @@ func TestE2E_DelCommand_ArgValidation(t *testing.T) {
 	}
 }
 
-
 func TestE2E_DelCommand_XUIFailure(t *testing.T) {
 	t.Parallel()
 
@@ -615,9 +614,9 @@ func TestE2E_NonAdmin_AccessControl(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name      string
-		setupEnv  func(*e2eTestEnv, context.Context)
-		wantNotSent bool
+		name         string
+		setupEnv     func(*e2eTestEnv, context.Context)
+		wantNotSent  bool
 		sentContains string
 	}{
 		{
@@ -625,9 +624,9 @@ func TestE2E_NonAdmin_AccessControl(t *testing.T) {
 			setupEnv: func(env *e2eTestEnv, ctx context.Context) {
 				env.handler.HandleDel(ctx, tgbotapi.Update{
 					Message: &tgbotapi.Message{
-						Chat: &tgbotapi.Chat{ID: 999999},
-						From: &tgbotapi.User{ID: 999999, UserName: "notadmin"},
-						Text: "/del 1",
+						Chat:     &tgbotapi.Chat{ID: 999999},
+						From:     &tgbotapi.User{ID: 999999, UserName: "notadmin"},
+						Text:     "/del 1",
 						Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 4}},
 					},
 				})
@@ -639,9 +638,9 @@ func TestE2E_NonAdmin_AccessControl(t *testing.T) {
 			setupEnv: func(env *e2eTestEnv, ctx context.Context) {
 				env.handler.HandleBroadcast(ctx, tgbotapi.Update{
 					Message: &tgbotapi.Message{
-						Chat: &tgbotapi.Chat{ID: 999999},
-						From: &tgbotapi.User{ID: 999999, UserName: "notadmin"},
-						Text: "/broadcast Hello",
+						Chat:     &tgbotapi.Chat{ID: 999999},
+						From:     &tgbotapi.User{ID: 999999, UserName: "notadmin"},
+						Text:     "/broadcast Hello",
 						Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 10}},
 					},
 				})
@@ -674,7 +673,7 @@ func TestE2E_NonAdmin_AccessControl(t *testing.T) {
 					},
 				})
 			},
-			wantNotSent: false,
+			wantNotSent:  false,
 			sentContains: "только администратору",
 		},
 		{
@@ -685,7 +684,7 @@ func TestE2E_NonAdmin_AccessControl(t *testing.T) {
 						From: &tgbotapi.User{ID: 999999, UserName: "notadmin"},
 						Data: "admin_stats",
 						Message: &tgbotapi.Message{
-							Chat:     &tgbotapi.Chat{ID: 999999},
+							Chat:      &tgbotapi.Chat{ID: 999999},
 							MessageID: 100,
 						},
 					},
@@ -701,7 +700,7 @@ func TestE2E_NonAdmin_AccessControl(t *testing.T) {
 						From: &tgbotapi.User{ID: 999999, UserName: "notadmin"},
 						Data: "admin_lastreg",
 						Message: &tgbotapi.Message{
-							Chat:     &tgbotapi.Chat{ID: 999999},
+							Chat:      &tgbotapi.Chat{ID: 999999},
 							MessageID: 100,
 						},
 					},

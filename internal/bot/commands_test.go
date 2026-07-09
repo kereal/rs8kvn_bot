@@ -350,8 +350,7 @@ func TestHandleHelp_VerifyHelpText(t *testing.T) {
 func TestHandleBindTrial_AlreadyHasSubscription(t *testing.T) {
 	t.Parallel()
 
-	cfg := &config.Config{
-	}
+	cfg := &config.Config{}
 	mockDB := testutil.NewDatabaseService()
 	mockBot := testutil.NewBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
@@ -722,7 +721,6 @@ func TestHandleShareStart_ValidInviteCode(t *testing.T) {
 	assert.Equal(t, "ABC12345", pending.code)
 }
 
-
 func TestHandleStart_SharePrefix(t *testing.T) {
 	t.Parallel()
 
@@ -861,4 +859,3 @@ func TestHandleMySubscription_ShowLoadingFails(t *testing.T) {
 
 	assert.False(t, dbCalled, "Database should not be called when loading fails")
 }
-

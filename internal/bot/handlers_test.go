@@ -407,7 +407,6 @@ func TestHandleUpdate_CommandRouting(t *testing.T) {
 		TelegramBotToken: "test_token",
 	}
 
-
 	tests := []struct {
 		name        string
 		update      tgbotapi.Update
@@ -494,7 +493,6 @@ func TestHandleUpdate_NonCommandMessage(t *testing.T) {
 		TelegramBotToken: "test_token",
 	}
 
-
 	mockBot := testutil.NewBotAPI()
 	mockDB := testutil.NewDatabaseService()
 	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
@@ -520,7 +518,6 @@ func TestHandleUpdate_CallbackQuery(t *testing.T) {
 		TelegramAdminID:  123456789,
 		TelegramBotToken: "test_token",
 	}
-
 
 	mockBot := testutil.NewBotAPI()
 	mockDB := testutil.NewDatabaseService()

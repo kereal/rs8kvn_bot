@@ -56,7 +56,7 @@ func TestServer_GracefulShutdown(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramBotToken: "test_token",
-		WebServerPort:  18880,
+		WebServerPort:    18880,
 	}
 
 	mockBot := testutil.NewBotAPI()
