@@ -402,7 +402,7 @@ func (c *Client) doAddClientWithID(ctx context.Context, inboundIDs []int, req Cl
 	}
 
 	if !simpleResp.Success {
-		return nil, fmt.Errorf("add client failed")
+		return nil, fmt.Errorf("add client failed: %s", simpleResp.Msg)
 	}
 
 	return &ClientConfig{
