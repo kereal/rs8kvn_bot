@@ -68,6 +68,14 @@ Don't read and don't write
   * task-bot-integration.md
 
 
+## Back-button navigation (CRITICAL — was broken once)
+
+Screens with content in a SEPARATE message (QR photo, invite QR) + Back button:
+**Open** = send new message, keep card underneath. **Back** = delete only that
+message (its id comes in the callback), never re-show the card — re-sending
+spawns a stray duplicate. Guard: `TestNavigation_OpenAndBack`
+(`internal/bot/repro_qr_test.go`). Ref: `handleQRCode`/`handleBackToSubscription`.
+
 ## Error Handling Conventions
 
 This project distinguishes between user-initiated operations (must be reliable) and background best-effort work (can tolerate partial failure).

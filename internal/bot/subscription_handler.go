@@ -210,15 +210,30 @@ func (sh *SubscriptionHandler) handleQRCode(ctx context.Context, chatID int64, u
 		logger.Error("Failed to send QR photo", zap.Error(err))
 		return fmt.Errorf("send QR photo: %w", err)
 	}
+
+	// NAVIGATION CONTRACT (shared by QR / invite / any "own message" screen):
+	//   - send the screen as a SEPARATE message (photo here); do NOT delete the
+	//     underlying card/menu (messageID) — it must stay open underneath.
+	//   - the Back button is attached to THIS message, so the back callback's
+	//     messageID IS this message's id. Never "fix" a missing card by
+	//     re-sending it here: that spawns a stray message. See AGENTS.md
+	//     "Back-button navigation" and TestNavigation_OpenAndBack.
 	return nil
 }
 
-// handleBackToSubscription deletes the QR photo message.
-func (sh *SubscriptionHandler) handleBackToSubscription(_ context.Context, chatID int64, username string, messageID int) error {
-	logger.Info("User closing QR code", zap.String("username", username), zap.Int64("chat_id", chatID))
+// handleBackToSubscription deletes the screen message and nothing else.
+//
+// NAVIGATION CONTRACT: the Back button is attached to the screen message
+// itself, so the callback's messageID IS that message's id — just delete it.
+// Do NOT re-show the underlying card/menu here: it is already open underneath,
+// and re-sending it spawns a duplicate/stray message (this broke once — see
+// AGENTS.md "Back-button navigation" and TestNavigation_OpenAndBack).
+func (sh *SubscriptionHandler) handleBackToSubscription(_ context.Context, chatID int64, _ string, messageID int) error {
+	logger.Info("User closing QR code", zap.Int64("chat_id", chatID))
+
 	deleteMsg := tgbotapi.NewDeleteMessage(chatID, messageID)
 	if _, err := sh.h.bot.Request(deleteMsg); err != nil {
-		logger.Warn("Failed to delete QR message", zap.Error(err))
+		logger.Warn("Failed to delete QR message", zap.Error(err), zap.Int("target_msg_id", messageID))
 	}
 	return nil
 }
