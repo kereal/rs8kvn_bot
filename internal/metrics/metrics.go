@@ -147,12 +147,65 @@ var (
 		},
 	)
 
-	TrialConversionsTotal = promauto.NewCounter(
+	// SubscriptionCreatesTotal counts new subscription creations.
+	SubscriptionCreatesTotal = promauto.NewCounter(
 		prometheus.CounterOpts{
-			Name: "trial_conversions_total",
-			Help: "Total number of trial conversions to paid subscriptions",
+			Name: "subscription_creates_total",
+			Help: "Total number of subscription creations",
 		},
 	)
+
+	// SubscriptionRenewalsTotal counts subscription renewals/activations.
+	SubscriptionRenewalsTotal = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "subscription_renewals_total",
+			Help: "Total number of subscription renewals or activations",
+		},
+	)
+
+	// SubscriptionSyncTotal counts subscription sync worker runs.
+	SubscriptionSyncTotal = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "subscription_sync_total",
+			Help: "Total number of subscription sync worker runs",
+		},
+	)
+
+	// SubscriptionSyncDuration is a histogram of subscription sync worker duration.
+	SubscriptionSyncDuration = promauto.NewHistogram(
+		prometheus.HistogramOpts{
+			Name:    "subscription_sync_duration_seconds",
+			Help:    "Subscription sync worker duration in seconds",
+			Buckets: []float64{0.1, 0.5, 1, 2, 5, 10, 30, 60},
+		},
+	)
+
+	// SubscriptionExpireTotal counts subscription expire worker runs.
+	SubscriptionExpireTotal = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "subscription_expire_total",
+			Help: "Total number of subscription expire worker runs",
+		},
+	)
+
+	// SubscriptionExpireDuration is a histogram of subscription expire worker duration.
+	SubscriptionExpireDuration = promauto.NewHistogram(
+		prometheus.HistogramOpts{
+			Name:    "subscription_expire_duration_seconds",
+			Help:    "Subscription expire worker duration in seconds",
+			Buckets: []float64{0.1, 0.5, 1, 2, 5, 10, 30, 60},
+		},
+	)
+
+	// ReconcileOrphanedDuration is a histogram of orphaned client reconciliation duration.
+	ReconcileOrphanedDuration = promauto.NewHistogram(
+		prometheus.HistogramOpts{
+			Name:    "reconcile_orphaned_duration_seconds",
+			Help:    "Orphaned client reconciliation duration in seconds",
+			Buckets: []float64{0.1, 0.5, 1, 2, 5, 10, 30, 60},
+		},
+	)
+
 	// OrphanedClientsRemovedTotal counts XUI clients/subscriptions removed
 	// during background reconciliation of orphaned entries.
 	OrphanedClientsRemovedTotal = promauto.NewCounter(
@@ -160,20 +213,6 @@ var (
 			Name: "bot_orphaned_clients_removed_total",
 			Help: "Total number of orphaned XUI clients/subscriptions removed during reconciliation",
 		},
-	)
-
-	// SubserverPartialSourcesTotal counts subscription requests where at least
-	// one upstream source failed to respond. Label: sub_id.
-	//
-	// Deprecated: unused — no code path increments this metric. Partial source
-	// failures are now observable via subserver_source_fetch_total{result="error"}.
-	// Scheduled for removal; see doc/subserver_metrics_audit.md.
-	SubserverPartialSourcesTotal = promauto.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "subserver_partial_sources_total",
-			Help: "Total number of subscription requests where at least one source failed",
-		},
-		[]string{"sub_id"},
 	)
 
 	// SubserverSourceFetchTotal is a counter of upstream source fetches
@@ -213,6 +252,26 @@ var (
 		prometheus.CounterOpts{
 			Name: "subserver_no_items_total",
 			Help: "Total subscription requests with no items collected",
+		},
+	)
+
+	// SubserverCacheHitDuration is a histogram of time spent serving
+	// a subscription response from cache (including DB revalidation).
+	SubserverCacheHitDuration = promauto.NewHistogram(
+		prometheus.HistogramOpts{
+			Name:    "subserver_cache_hit_duration_seconds",
+			Help:    "Time spent serving subscription from cache",
+			Buckets: []float64{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1},
+		},
+	)
+
+	// SubserverCacheMissDuration is a histogram of time spent building
+	// a subscription response on cache miss (DB load + upstream fetch + aggregation).
+	SubserverCacheMissDuration = promauto.NewHistogram(
+		prometheus.HistogramOpts{
+			Name:    "subserver_cache_miss_duration_seconds",
+			Help:    "Time spent building subscription response on cache miss",
+			Buckets: []float64{0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30},
 		},
 	)
 )

@@ -318,5 +318,21 @@ id, name UNIQUE, devices_limit, traffic_limit
 ### Нужно добавить
 - Prometheus, Grafana, алерты, real-time активность.
 
+## Мониторинг
+
+### Текущий
+- `/healthz` (liveness), `/readyz` (DB ready), Sentry, zap, heartbeat scheduler.
+- Prometheus метрики на `/metrics`:
+  - HTTP: requests total/duration/in_flight
+  - Bot: updates total/errors/duration
+  - DB: queries total/duration (GORM callbacks)
+  - Cache: hits/misses total
+  - Subscriptions: active_subscriptions gauge, creates/renewals/sync/expire counters + durations
+  - Subserver: cache hit/miss duration, source fetch total/duration, cache invalidations, no_items
+  - Circuit breaker state
+
+### Нужно добавить
+- Grafana, алерты, real-time активность.
+
 ## Remnawave (out of scope, отложено)
 - 3x-ui выбран как проверенный (годы развития, огромное комьюнити). Remnawave — молодой, рискованно. **Критерий пересмотра**: >200 клиентов И Remnawave доказал стабильность 6+ мес.
