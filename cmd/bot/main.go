@@ -362,6 +362,10 @@ func main() {
 	svc := initServices(cfg, dbService, deps, botAPI, botConfig)
 	defer svc.subServer.Stop()
 
+	go func() {
+		svc.subService.RefreshActiveSubscriptionsMetric(context.Background())
+	}()
+
 	// 6. Start web server so subscriptions are served; bot is initialised next.
 	webServer, err := startWebServer(svc.subService, cfg, botConfig, svc.subServer, dbService)
 	if err != nil {

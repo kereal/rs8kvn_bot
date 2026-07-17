@@ -147,11 +147,14 @@ func (s *SubscriptionService) Create(ctx context.Context, telegramID int64, user
 		referrerID = *sub.ReferredBy
 	}
 	subscriptionURL := s.cfg.SubURL(subID)
-	return &CreateResult{
+	result := &CreateResult{
 		Subscription:    sub,
 		SubscriptionURL: subscriptionURL,
 		ReferrerTGID:    referrerID,
-	}, nil
+	}
+	metrics.SubscriptionCreatesTotal.Inc()
+	s.RefreshActiveSubscriptionsMetric(ctx)
+	return result, nil
 }
 
 func calculateProductExpiry(now time.Time, currentPlanID uint, currentExpiry *time.Time, product *database.Product) time.Time {
@@ -209,6 +212,7 @@ func (s *SubscriptionService) revokeAndDeprovisionThenDelete(ctx context.Context
 		s.InvalidateBySubID(ctx, sub.SubscriptionID)
 	}
 
+	s.RefreshActiveSubscriptionsMetric(ctx)
 	return sub, nil
 }
 
@@ -324,12 +328,14 @@ func (s *SubscriptionService) CreateTrial(ctx context.Context, inviteCode string
 	}
 
 	subURL := s.cfg.SubURL(subID)
-	return &TrialCreateResult{
+	result := &TrialCreateResult{
 		Subscription:    sub,
 		SubscriptionURL: subURL,
 		SubID:           subID,
 		ClientID:        clientID,
-	}, nil
+	}
+	s.RefreshActiveSubscriptionsMetric(ctx)
+	return result, nil
 }
 
 // GetByID retrieves a subscription by database ID.
@@ -421,6 +427,16 @@ func (s *SubscriptionService) CountActive(ctx context.Context) (int64, error) {
 	return s.db.CountActiveSubscriptions(ctx)
 }
 
+// RefreshActiveSubscriptionsMetric updates the active_subscriptions gauge.
+func (s *SubscriptionService) RefreshActiveSubscriptionsMetric(ctx context.Context) {
+	count, err := s.CountActive(ctx)
+	if err != nil {
+		logger.Warn("failed to refresh active subscriptions metric", zap.Error(err))
+		return
+	}
+	metrics.ActiveSubscriptions.Set(float64(count))
+}
+
 // GetLatest returns the most recent subscriptions up to the given limit.
 func (s *SubscriptionService) GetLatest(ctx context.Context, limit int) ([]database.Subscription, error) {
 	return s.db.GetLatestSubscriptions(ctx, limit)
@@ -470,6 +486,7 @@ func (s *SubscriptionService) ReconcileOrphanedClients(ctx context.Context) (int
 		ClientID       string
 	}
 
+	start := time.Now()
 	rows, err := s.db.GetAllSubscriptions(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("failed to fetch subscriptions: %w", err)
@@ -564,6 +581,8 @@ func (s *SubscriptionService) ReconcileOrphanedClients(ctx context.Context) (int
 			return removed, ctx.Err()
 		}
 	}
+	s.RefreshActiveSubscriptionsMetric(ctx)
+	metrics.ReconcileOrphanedDuration.Observe(time.Since(start).Seconds())
 	return removed, nil
 }
 
@@ -671,6 +690,8 @@ func (s *SubscriptionService) GetOrCreateSubscription(ctx context.Context, teleg
 		return nil, fmt.Errorf("ensure subscription nodes: %w", err)
 	}
 
+	metrics.SubscriptionCreatesTotal.Inc()
+	s.RefreshActiveSubscriptionsMetric(ctx)
 	return sub, nil
 }
 
@@ -805,10 +826,12 @@ func (s *SubscriptionService) RenewSubscription(ctx context.Context, telegramID 
 				zap.Uint("subscription_id", sub.ID),
 				zap.Uint("product_id", product.ID),
 				zap.Error(err))
+			metrics.SubscriptionRenewalsTotal.Inc()
 			return order, nil
 		}
 	}
 
+	metrics.SubscriptionRenewalsTotal.Inc()
 	return order, nil
 }
 

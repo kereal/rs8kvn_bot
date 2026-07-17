@@ -12,6 +12,7 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/interfaces"
 	"github.com/kereal/rs8kvn_bot/internal/logger"
+	"github.com/kereal/rs8kvn_bot/internal/metrics"
 	"github.com/kereal/rs8kvn_bot/internal/service"
 	"github.com/kereal/rs8kvn_bot/internal/subserver"
 	"github.com/kereal/rs8kvn_bot/internal/vpn"
@@ -72,6 +73,8 @@ func initDatabase(cfg *config.Config) (*database.Service, *runtimeDeps) {
 	if err != nil {
 		logger.Fatal("Failed to initialize database", zap.Error(err))
 	}
+
+	metrics.RegisterDBMetrics(dbService.GetDB())
 
 	nodes, err := dbService.ListNodes(context.Background())
 	if err != nil {

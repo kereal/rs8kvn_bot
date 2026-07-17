@@ -6,6 +6,7 @@ import (
 
 	"github.com/kereal/rs8kvn_bot/internal/interfaces"
 	"github.com/kereal/rs8kvn_bot/internal/logger"
+	"github.com/kereal/rs8kvn_bot/internal/metrics"
 	"github.com/kereal/rs8kvn_bot/internal/service"
 
 	"go.uber.org/zap"
@@ -43,6 +44,8 @@ func (w *SubscriptionExpireWorker) Run(ctx context.Context) {
 }
 
 func (w *SubscriptionExpireWorker) process(ctx context.Context) {
+	metrics.SubscriptionExpireTotal.Inc()
+	start := time.Now()
 	subs, err := w.db.GetExpiredPaidSubscriptions(ctx, time.Now().UTC())
 	if err != nil {
 		logger.Error("Failed to query expired subscriptions", zap.Error(err))
@@ -68,4 +71,5 @@ func (w *SubscriptionExpireWorker) process(ctx context.Context) {
 	logger.Info("Subscription expiration processed",
 		zap.Int("found", len(subs)),
 		zap.Int("expired", processed))
+	metrics.SubscriptionExpireDuration.Observe(time.Since(start).Seconds())
 }
