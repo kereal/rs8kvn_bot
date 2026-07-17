@@ -14,6 +14,7 @@ import (
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
 
@@ -800,17 +801,26 @@ func TestHandleBackToSubscription_RequestError(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
+		SiteURL:          "https://x.com",
+		GlobalSubURL:     "https://x.com/sub/",
 	}
 	mockDB := testutil.NewDatabaseService()
-
 	mockBot := testutil.NewBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
+	mockBot.RequestError = errors.New("request failed")
+	xuiClients := map[uint]interfaces.XUIClient{1: testutil.NewXUIClient()}
+	nodes := []database.Node{{ID: 1, IsActive: true, Host: "https://p", APIToken: "t", InboundIDs: "[1]"}}
+	require.NoError(t, mockDB.CreateSubscription(context.Background(), &database.Subscription{
+		TelegramID: 123456, Username: "testuser", ClientID: "c", SubscriptionID: "s", Status: "active",
+	}, ""))
+	svc := service.NewSubscriptionService(mockDB, xuiClients, nil, nodes, cfg)
+	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), svc, "")
 
 	ctx := context.Background()
 	handler.handleBackToSubscription(ctx, 123456, "testuser", 789)
 
+	// Back only deletes the QR photo; the card underneath is not re-sent.
 	assert.True(t, mockBot.RequestCalledSafe())
-	assert.False(t, mockBot.SendCalledSafe())
+	assert.False(t, mockBot.SendCalledSafe(), "Bot.Send must NOT re-show the card on Back")
 }
 
 func TestHandleCallback_NilMessage_RequestError(t *testing.T) {

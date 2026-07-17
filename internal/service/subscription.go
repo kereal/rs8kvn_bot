@@ -285,10 +285,10 @@ func (s *SubscriptionService) CreateTrial(ctx context.Context, inviteCode string
 	trafficBytes := trialPlan.TrafficLimit
 	expiryTime := time.Now().Add(time.Duration(s.cfg.TrialDurationHours) * time.Hour)
 	email := "trial_" + subID
+	// Trials must not auto-renew. resetDays=0 disables the 3x-ui auto-renew,
+	// which (reset>0 + expiryTime>0) would otherwise reset traffic and extend
+	// expiry by SubscriptionResetDay every cycle, making the short trial expire.
 	resetDays := 0
-	if trafficBytes > 0 {
-		resetDays = -1
-	}
 
 	trialNodes, err := s.trialNodes(ctx)
 	if err != nil {
@@ -363,10 +363,9 @@ func (s *SubscriptionService) BindTrial(ctx context.Context, subscriptionID stri
 		return nil, fmt.Errorf("failed to resolve free plan: %w", err)
 	}
 	trafficBytes := freePlan.TrafficLimit
+	// Trials must never auto-renew. Keep resetDays=0 even though the free
+	// plan carries a traffic limit (which would otherwise enable reset=-1 → 30).
 	resetDays := 0
-	if trafficBytes > 0 {
-		resetDays = -1
-	}
 
 	expiryTime := time.UnixMilli(0)
 

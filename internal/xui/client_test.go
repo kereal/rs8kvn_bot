@@ -529,6 +529,35 @@ func TestAddClient(t *testing.T) {
 	})
 }
 
+func TestAddClientWithID_SurfacesPanelMsg(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "get/") {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprint(w, `{"success":true,"obj":{"id":1}}`)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"success":false,"msg":"A client with this email already exists"}`)
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, testAPIToken)
+	require.NoError(t, err)
+	defer client.Close()
+
+	_, err = client.AddClientWithID(context.Background(), ClientRequest{
+		InboundIDs: []int{1}, Email: "dup@example.com", ClientID: "uuid", SubID: "sub", TrafficBytes: 100, ExpiryTime: time.Now(), ResetDays: 0,
+	})
+	require.Error(t, err)
+	// Core fix: the panel message must be surfaced so the sync classifier
+	// can detect "already exists" and resolve the duplicate via the idempotent path.
+	assert.ErrorContains(t, err, "A client with this email already exists")
+}
+
 func TestAddClientWithID_Validation(t *testing.T) {
 	t.Parallel()
 

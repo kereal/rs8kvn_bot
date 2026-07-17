@@ -329,7 +329,7 @@ func TestHandleBroadcast_DraftPreviewShowsButtons(t *testing.T) {
 	for _, c := range captured {
 		if mc, ok := c.(tgbotapi.MessageConfig); ok && mc.ParseMode == "MarkdownV2" {
 			previewed = true
-			assert.Equal(t, draft, mc.Text)
+			assert.Equal(t, utils.EscapeMarkdownV2(draft), mc.Text)
 		}
 	}
 	assert.True(t, previewed, "draft preview must be sent with MarkdownV2")
@@ -350,26 +350,34 @@ func TestHandleBroadcast_DraftPreviewShowsButtons(t *testing.T) {
 	assert.Equal(t, draft, s.text)
 }
 
-func TestHandleBroadcast_InvalidMarkdownKeepsSession(t *testing.T) {
+func TestHandleBroadcast_AutoEscapesSpecialChars(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{TelegramAdminID: 123456}
 	mockBot := testutil.NewBotAPI()
-	mockBot.SendError = errors.New("Bad Request: can't parse entities")
 	handler := newTestAdminHandler(cfg, testutil.NewDatabaseService(), testutil.NewXUIClient(), mockBot)
 	admin := &tgbotapi.User{ID: 123456, UserName: "admin"}
 
 	handler.HandleBroadcast(context.Background(), createCommandUpdate(123456, admin, "/broadcast"))
-	handler.HandleBroadcastDraft(context.Background(), createTextUpdate(admin, "broken *bold"))
 
-	// Session must remain active so admin can resend a fixed draft.
-	assert.True(t, handler.broadcastSessionActive(123456))
-	assert.Contains(t, mockBot.LastSentTextSafe(), "Ошибка форматирования")
+	// Dots, exclamation marks and broken markdown must not require manual escaping.
+	draft := "Привет всем! Цены на vpn.ru обновлены. broken *bold"
+	handler.HandleBroadcastDraft(context.Background(), createTextUpdate(admin, draft))
 
-	// Fix: clear error and resend valid markdown.
-	mockBot.SendError = nil
-	handler.HandleBroadcastDraft(context.Background(), createTextUpdate(admin, "ok *bold*"))
-	assert.Contains(t, mockBot.LastSentTextSafe(), "Превью готово")
+	// Preview must be sent (escaped) and session must advance to the preview stage.
+	var previewed bool
+	for _, c := range mockBot.GetAllSentMessages() {
+		if strings.Contains(c.Text, `Привет всем\!`) {
+			previewed = true
+			assert.Contains(t, c.Text, `vpn\.ru`)
+			assert.Contains(t, c.Text, `broken \*bold`)
+		}
+	}
+	assert.True(t, previewed, "escaped draft preview must be sent")
+
+	s := handler.getBroadcastSession(123456)
+	require.NotNil(t, s)
+	assert.Equal(t, broadcastStagePreview, s.stage)
 }
 
 func TestHandleBroadcast_DraftTooLong(t *testing.T) {
@@ -491,6 +499,46 @@ func TestHandleBroadcast_ConfirmDatabaseError(t *testing.T) {
 	confirmBroadcast(handler, mockBot, "Test message")
 	assert.True(t, mockBot.SendCalledSafe(), "should send error report")
 	assert.Contains(t, mockBot.LastSentTextSafe(), "Ошибка")
+}
+
+func TestHandleBroadcast_ConfirmSeparatesBlocked(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{TelegramAdminID: 123456}
+	mockBot := testutil.NewBotAPI()
+	handler := newTestAdminHandler(cfg, testutil.NewDatabaseService(), testutil.NewXUIClient(), mockBot)
+
+	// 111 -> blocked, 222 -> generic error, 333 -> success.
+	mockBot.SendFunc = func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
+		mc, ok := c.(tgbotapi.MessageConfig)
+		if !ok {
+			return tgbotapi.Message{}, nil
+		}
+		switch mc.ChatID {
+		case 111:
+			return tgbotapi.Message{}, errors.New("Forbidden: bot was blocked by the user")
+		case 222:
+			return tgbotapi.Message{}, errors.New("send error")
+		}
+		return tgbotapi.Message{MessageID: 1}, nil
+	}
+
+	callCount := 0
+	handler.db.(*testutil.DatabaseService).GetTelegramIDsBatchFunc = func(ctx context.Context, offset, limit int) ([]int64, error) {
+		callCount++
+		if callCount == 1 {
+			return []int64{111, 222, 333}, nil
+		}
+		return []int64{}, nil
+	}
+
+	confirmBroadcast(handler, mockBot, "Test message")
+	report := mockBot.LastSentTextSafe()
+	assert.Contains(t, report, "Рассылка завершена")
+	assert.Contains(t, report, "Отправлено: 1")
+	assert.Contains(t, report, "Заблокировали бота: 1")
+	assert.Contains(t, report, "Ошибок: 1")
+	assert.Contains(t, report, "Всего: 3")
 }
 
 func TestHandleBroadcast_ConfirmSendFailure(t *testing.T) {

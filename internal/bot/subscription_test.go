@@ -1044,16 +1044,26 @@ func TestHandleBackToSubscription(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
+		SiteURL:          "https://x.com",
+		GlobalSubURL:     "https://x.com/sub/",
 	}
 	mockDB := testutil.NewDatabaseService()
 	mockBot := testutil.NewBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
+	xuiClients := map[uint]interfaces.XUIClient{1: testutil.NewXUIClient()}
+	nodes := []database.Node{{ID: 1, IsActive: true, Host: "https://p", APIToken: "t", InboundIDs: "[1]"}}
+	require.NoError(t, mockDB.CreateSubscription(context.Background(), &database.Subscription{
+		TelegramID: 123456, Username: "testuser", ClientID: "c", SubscriptionID: "s", Status: "active",
+	}, ""))
+	svc := service.NewSubscriptionService(mockDB, xuiClients, nil, nodes, cfg)
+	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), svc, "")
 
 	ctx := context.Background()
 	handler.handleBackToSubscription(ctx, 123456, "testuser", 789)
 
-	assert.True(t, mockBot.RequestCalledSafe(), "Bot.Request should be called to delete message")
-	assert.False(t, mockBot.SendCalledSafe(), "Bot.Send should not be called")
+	// Back must only delete the QR photo; the subscription card stays open
+	// underneath, so no re-show (Bot.Send) is expected.
+	assert.True(t, mockBot.RequestCalledSafe(), "Bot.Request should be called to delete QR message")
+	assert.False(t, mockBot.SendCalledSafe(), "Bot.Send must NOT re-show the card on Back")
 }
 
 func TestNotifyAdmin_Success(t *testing.T) {
@@ -1447,11 +1457,19 @@ func TestHandleBackToSubscription_DeleteFails(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
+		SiteURL:          "https://x.com",
+		GlobalSubURL:     "https://x.com/sub/",
 	}
 	mockDB := testutil.NewDatabaseService()
 	mockBot := testutil.NewBotAPI()
 	mockBot.RequestError = errors.New("delete failed")
-	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
+	xuiClients := map[uint]interfaces.XUIClient{1: testutil.NewXUIClient()}
+	nodes := []database.Node{{ID: 1, IsActive: true, Host: "https://p", APIToken: "t", InboundIDs: "[1]"}}
+	require.NoError(t, mockDB.CreateSubscription(context.Background(), &database.Subscription{
+		TelegramID: 123456, Username: "testuser", ClientID: "c", SubscriptionID: "s", Status: "active",
+	}, ""))
+	svc := service.NewSubscriptionService(mockDB, xuiClients, nil, nodes, cfg)
+	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), svc, "")
 
 	ctx := context.Background()
 	handler.handleBackToSubscription(ctx, 123456, "testuser", 789)

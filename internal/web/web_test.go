@@ -260,9 +260,10 @@ func TestIsLocalAddress(t *testing.T) {
 		{"127.0.0.1", "127.0.0.1", true},
 		{"localhost IPv4", "127.0.0.2", true},
 		{"localhost IPv6", "::1", true},
-		{"10.x.x.x", "10.0.0.1", false},
-		{"172.16.x.x", "172.16.0.1", false},
-		{"192.168.x.x", "192.168.1.1", false},
+		{"10.x.x.x", "10.0.0.1", true},
+		{"172.16.x.x", "172.16.0.1", true},
+		{"172.19.x.x docker gw", "172.19.0.1", true},
+		{"192.168.x.x", "192.168.1.1", true},
 		{"public IP", "8.8.8.8", false},
 		{"public IP 2", "1.1.1.1", false},
 		{"invalid", "invalid", false},
@@ -284,24 +285,27 @@ func TestGetClientIP(t *testing.T) {
 		name     string
 		remote   string
 		forward  string
+		realIP   string
 		expected string
 	}{
-		{"direct", "192.168.1.100:12345", "", "192.168.1.100"},
-		{"x-forwarded-for single", "127.0.0.1:12345", "203.0.113.50, 198.51.100.1", "198.51.100.1"},
-		{"x-forwarded-for multiple", "127.0.0.1:12345", "203.0.113.50, 198.51.100.1, 192.0.2.1", "192.0.2.1"},
-		{"no port", "192.168.1.100", "", "192.168.1.100"},
-		{"localhost IPv4", "127.0.0.1:12345", "8.8.8.8", "8.8.8.8"},
-		{"localhost IPv6", "[::1]:12345", "", "::1"},
-		{"private network NOT trusted", "192.168.1.1:12345", "10.0.0.5", "192.168.1.1"},
-		{"public IP not trusted", "8.8.8.8:12345", "1.2.3.4", "8.8.8.8"},
-		{"empty X-Forwarded-For fallback", "127.0.0.1:12345", "", "127.0.0.1"},
-		{"whitespace in X-Forwarded-For", "127.0.0.1:12345", "  192.0.2.1  ,  198.51.100.1  ", "198.51.100.1"},
-		{"non-local remote addr", "8.8.8.8:12345", "", "8.8.8.8"},
-		{"invalid remote addr", "invalid", "", "invalid"},
-		{"IPv6 single", "[::1]:12345", "2001:db8::1", "2001:db8::1"},
-		{"IPv6 with brackets port", "[::1]:12345", "[2001:db8::1]:8080", "[2001:db8::1]:8080"},
-		{"IPv6 mixed with IPv4", "[::1]:12345", "2001:db8::1, 192.168.1.1", "192.168.1.1"},
-		{"IPv6 loopback", "[::1]:12345", "::1", "::1"},
+		{"direct", "192.168.1.100:12345", "", "", "192.168.1.100"},
+		{"x-forwarded-for single", "127.0.0.1:12345", "203.0.113.50, 198.51.100.1", "", "198.51.100.1"},
+		{"x-forwarded-for multiple", "127.0.0.1:12345", "203.0.113.50, 198.51.100.1, 192.0.2.1", "", "192.0.2.1"},
+		{"no port", "192.168.1.100", "", "", "192.168.1.100"},
+		{"localhost IPv4", "127.0.0.1:12345", "8.8.8.8", "", "8.8.8.8"},
+		{"localhost IPv6", "[::1]:12345", "", "", "::1"},
+		{"private network trusted (docker gw)", "172.19.0.1:12345", "10.0.0.5", "", "10.0.0.5"},
+		{"public IP not trusted", "8.8.8.8:12345", "1.2.3.4", "", "8.8.8.8"},
+		{"empty X-Forwarded-For fallback", "127.0.0.1:12345", "", "", "127.0.0.1"},
+		{"whitespace in X-Forwarded-For", "127.0.0.1:12345", "  192.0.2.1  ,  198.51.100.1  ", "", "198.51.100.1"},
+		{"non-local remote addr", "8.8.8.8:12345", "", "", "8.8.8.8"},
+		{"invalid remote addr", "invalid", "", "", "invalid"},
+		{"IPv6 single", "[::1]:12345", "2001:db8::1", "", "2001:db8::1"},
+		{"IPv6 with brackets port", "[::1]:12345", "[2001:db8::1]:8080", "", "[2001:db8::1]:8080"},
+		{"IPv6 mixed with IPv4", "[::1]:12345", "2001:db8::1, 192.168.1.1", "", "192.168.1.1"},
+		{"IPv6 loopback", "[::1]:12345", "::1", "", "::1"},
+		{"x-real-ip preferred", "172.19.0.1:12345", "10.0.0.5", "203.0.113.9", "203.0.113.9"},
+		{"x-real-ip docker gw", "172.19.0.1:12345", "", "203.0.113.9", "203.0.113.9"},
 	}
 
 	for _, tt := range tests {
@@ -310,6 +314,9 @@ func TestGetClientIP(t *testing.T) {
 			req.RemoteAddr = tt.remote
 			if tt.forward != "" {
 				req.Header.Set("X-Forwarded-For", tt.forward)
+			}
+			if tt.realIP != "" {
+				req.Header.Set("X-Real-IP", tt.realIP)
 			}
 			ip := getClientIP(req)
 			assert.Equal(t, tt.expected, ip)

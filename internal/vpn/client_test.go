@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -52,6 +53,22 @@ func TestClassifyDeleteSubscriptionError_NotFound(t *testing.T) {
 func TestClassifyDeleteSubscriptionError_DoesNotExist(t *testing.T) {
 	err := classifyDeleteSubscriptionError(errors.New("does not exist"))
 	assert.ErrorIs(t, err, ErrSubscriptionNotFound)
+}
+
+func TestClassifyCreateSubscriptionError_AddClientMsg(t *testing.T) {
+	// After the fix, xui/client.go surfaces the panel msg, so the
+	// error is "add client failed: <msg>". The classifier must
+	// detect "already exists" and wrap it as ErrSubscriptionAlreadyExists,
+	// which lets the sync worker resolve the duplicate idempotently.
+	newErr := classifyCreateSubscriptionError(fmt.Errorf("add client failed: %s", "A client with this email already exists"))
+	assert.ErrorIs(t, newErr, ErrSubscriptionAlreadyExists)
+
+	// Before the fix, xui discarded the panel msg and returned a bare
+	// "add client failed". The classifier could not detect it, so the sync
+	// worker treated it as a permanent (non-retryable) error and looped
+	// forever (the 164-167 symptom).
+	oldErr := classifyCreateSubscriptionError(fmt.Errorf("add client failed"))
+	assert.NotErrorIs(t, oldErr, ErrSubscriptionAlreadyExists)
 }
 
 func TestClassifyDeleteSubscriptionError_OtherError(t *testing.T) {

@@ -67,7 +67,7 @@ func FetchFromNode(ctx context.Context, url string) (*NodeResponse, error) {
 		return nil, fmt.Errorf("source fetch returned no body: %s", url)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		logger.Error("Source fetch returned non-2xx status",
 			zap.String("url", url),
 			zap.Int("status", resp.StatusCode))

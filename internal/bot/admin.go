@@ -181,6 +181,19 @@ func (h *Handler) HandleDel(ctx context.Context, update tgbotapi.Update) error {
 	return nil
 }
 
+// isUserBlockedError reports whether the Telegram error means the user can no
+// longer receive messages (blocked the bot, deactivated, or chat gone). These
+// are expected during a broadcast and reported separately from real failures.
+func isUserBlockedError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "bot was blocked by the user") ||
+		strings.Contains(msg, "user is deactivated") ||
+		strings.Contains(msg, "chat not found")
+}
+
 // broadcastStage represents the state of an admin broadcast session.
 type broadcastStage int
 
@@ -192,9 +205,8 @@ const (
 
 // broadcastSession holds the in-progress broadcast draft for an admin.
 type broadcastSession struct {
-	stage       broadcastStage
-	text        string
-	previewMsgID int
+	stage broadcastStage
+	text  string
 }
 
 // HandleBroadcast handles the /broadcast command for admins.
@@ -251,14 +263,14 @@ func (h *Handler) HandleBroadcastDraft(ctx context.Context, update tgbotapi.Upda
 		return nil
 	}
 
-	// D3: preview with MarkdownV2 to validate formatting before mass send.
-	preview := tgbotapi.NewMessage(chatID, text)
+	// D3: preview with MarkdownV2. Special chars are auto-escaped, formatting kept.
+	preview := tgbotapi.NewMessage(chatID, utils.EscapeMarkdownV2(text))
 	preview.ParseMode = "MarkdownV2"
 	preview.DisableWebPagePreview = true
 	if _, err := h.bot.Send(preview); err != nil {
-		logger.Warn("Broadcast preview failed (invalid MarkdownV2)", zap.Error(err))
-		h.SendMessage(ctx, chatID, fmt.Sprintf("❌ Ошибка форматирования MarkdownV2:\n\n%v\n\n"+
-			"Исправьте сообщение и отправьте снова. /cancel для отмены.", err))
+		logger.Warn("Broadcast preview failed", zap.Error(err))
+		h.SendMessage(ctx, chatID, fmt.Sprintf("❌ Не удалось отправить превью:\n\n%v\n\n"+
+			"/cancel для отмены.", err))
 		return nil
 	}
 
@@ -311,6 +323,7 @@ func (h *Handler) runBroadcast(ctx context.Context, adminChatID int64, text stri
 	var (
 		successCount       int64
 		failCount          int64
+		blockedCount       int64
 		totalProcessed     int64
 		batchErr           error
 		broadcastCancelled bool
@@ -361,23 +374,31 @@ func (h *Handler) runBroadcast(ctx context.Context, adminChatID int64, text stri
 					}
 
 					chunks := splitMessage(text, config.MaxTelegramMessageLen)
-					failed := false
+					userBlocked, userFailed := false, false
 					for _, chunk := range chunks {
-						msg := tgbotapi.NewMessage(tg, chunk)
+						msg := tgbotapi.NewMessage(tg, utils.EscapeMarkdownV2(chunk))
 						msg.ParseMode = "MarkdownV2"
 						msg.DisableWebPagePreview = true
 						if err := h.sendWithError(ctx, msg); err != nil {
-							if ctx.Err() == nil {
-								failed = true
+							if ctx.Err() != nil {
+								return
+							}
+							if isUserBlockedError(err) {
+								userBlocked = true
+							} else {
+								userFailed = true
 							}
 						}
 					}
 					if ctx.Err() != nil {
 						return
 					}
-					if failed {
+					switch {
+					case userBlocked:
+						atomic.AddInt64(&blockedCount, 1)
+					case userFailed:
 						atomic.AddInt64(&failCount, 1)
-					} else {
+					default:
 						atomic.AddInt64(&successCount, 1)
 					}
 				}(telegramID)
@@ -396,30 +417,34 @@ func (h *Handler) runBroadcast(ctx context.Context, adminChatID int64, text stri
 
 	sent := atomic.LoadInt64(&successCount)
 	failed := atomic.LoadInt64(&failCount)
-	remaining := int(totalProcessed) - int(sent+failed)
+	blocked := atomic.LoadInt64(&blockedCount)
+	remaining := int(totalProcessed) - int(sent+failed+blocked)
 
 	if broadcastCancelled {
 		h.SendMessage(context.WithoutCancel(ctx), adminChatID, fmt.Sprintf(`⚠️ Рассылка прервана!
 
 📤 Отправлено: %d
+🚫 Заблокировали бота: %d
 ❌ Ошибок: %d
 👥 Осталось: %d`,
-			sent, failed, remaining))
-		return fmt.Errorf("broadcast cancelled")
+			sent, blocked, failed, remaining))
+		return fmt.Errorf("broadcast cancelled: %w", ctx.Err())
 	}
 	if batchErr != nil {
 		h.SendMessage(context.WithoutCancel(ctx), adminChatID, fmt.Sprintf(`❌ Рассылка прервана из-за ошибки!
 
 📤 Отправлено: %d
+🚫 Заблокировали бота: %d
 ❌ Ошибок: %d
 👥 Не обработано: %d
 
 Ошибка: %v`,
-			sent, failed, remaining, batchErr,
+			sent, blocked, failed, remaining, batchErr,
 		))
 		logger.Error("Broadcast failed due to batch retrieval error",
 			zap.Error(batchErr),
 			zap.Int64("success", sent),
+			zap.Int64("blocked", blocked),
 			zap.Int64("failed", failed),
 			zap.Int("remaining", remaining))
 		return fmt.Errorf("broadcast batch error: %w", batchErr)
@@ -428,12 +453,14 @@ func (h *Handler) runBroadcast(ctx context.Context, adminChatID int64, text stri
 	h.SendMessage(context.WithoutCancel(ctx), adminChatID, fmt.Sprintf(`✅ Рассылка завершена!
 
 📤 Отправлено: %d
+🚫 Заблокировали бота: %d
 ❌ Ошибок: %d
 👥 Всего: %d`,
-		sent, failed, totalProcessed,
+		sent, blocked, failed, totalProcessed,
 	))
 	logger.Info("Broadcast completed",
 		zap.Int64("success", sent),
+		zap.Int64("blocked", blocked),
 		zap.Int64("failed", failed),
 		zap.Int64("total", totalProcessed))
 	return nil
