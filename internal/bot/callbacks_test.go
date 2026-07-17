@@ -14,6 +14,7 @@ import (
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
 
@@ -808,7 +809,7 @@ func TestHandleBackToSubscription_RequestError(t *testing.T) {
 	mockBot.RequestError = errors.New("request failed")
 	xuiClients := map[uint]interfaces.XUIClient{1: testutil.NewXUIClient()}
 	nodes := []database.Node{{ID: 1, IsActive: true, Host: "https://p", APIToken: "t", InboundIDs: "[1]"}}
-	assert.NoError(t, mockDB.CreateSubscription(context.Background(), &database.Subscription{
+	require.NoError(t, mockDB.CreateSubscription(context.Background(), &database.Subscription{
 		TelegramID: 123456, Username: "testuser", ClientID: "c", SubscriptionID: "s", Status: "active",
 	}, ""))
 	svc := service.NewSubscriptionService(mockDB, xuiClients, nil, nodes, cfg)

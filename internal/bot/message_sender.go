@@ -2,7 +2,6 @@ package bot
 
 import (
 	"context"
-	"strings"
 
 	"github.com/kereal/rs8kvn_bot/internal/interfaces"
 	"github.com/kereal/rs8kvn_bot/internal/logger"
@@ -42,7 +41,7 @@ func (ms *MessageSender) SendWithError(ctx context.Context, msg tgbotapi.Message
 
 	_, err := ms.bot.Send(msg)
 	if err != nil {
-		if strings.Contains(err.Error(), "Forbidden: bot was blocked by the user") {
+		if isUserBlockedError(err) {
 			logger.Warn("Failed to send message", zap.Error(err))
 		} else {
 			logger.Error("Failed to send message", zap.Error(err))
@@ -57,7 +56,7 @@ func (ms *MessageSender) SendWithError(ctx context.Context, msg tgbotapi.Message
 func (ms *MessageSender) SafeSend(chattable tgbotapi.Chattable) {
 	_, err := ms.bot.Send(chattable)
 	if err != nil {
-		if strings.Contains(err.Error(), "Forbidden: bot was blocked by the user") {
+		if isUserBlockedError(err) {
 			logger.Warn("Failed to send message", zap.Error(err))
 		} else {
 			logger.Error("Failed to send message", zap.Error(err))

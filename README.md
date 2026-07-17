@@ -69,7 +69,7 @@ See **[Installation Guide](doc/installation.md)** for:
 
 **Examples:**
 
-```
+```text
 /del 5                                    # Delete subscription with DB ID 5
 /broadcast 🔔 Важное обновление!          # Broadcast to all subscribers (MarkdownV2 supported)
 /send 123456789 Привет!                   # Private message by Telegram ID
