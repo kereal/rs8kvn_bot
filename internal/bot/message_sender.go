@@ -41,7 +41,11 @@ func (ms *MessageSender) SendWithError(ctx context.Context, msg tgbotapi.Message
 
 	_, err := ms.bot.Send(msg)
 	if err != nil {
-		logger.Error("Failed to send message", zap.Error(err))
+		if isUserBlockedError(err) {
+			logger.Warn("Failed to send message", zap.Error(err))
+		} else {
+			logger.Error("Failed to send message", zap.Error(err))
+		}
 		return err
 	}
 
@@ -52,7 +56,11 @@ func (ms *MessageSender) SendWithError(ctx context.Context, msg tgbotapi.Message
 func (ms *MessageSender) SafeSend(chattable tgbotapi.Chattable) {
 	_, err := ms.bot.Send(chattable)
 	if err != nil {
-		logger.Error("Failed to send message", zap.Error(err))
+		if isUserBlockedError(err) {
+			logger.Warn("Failed to send message", zap.Error(err))
+		} else {
+			logger.Error("Failed to send message", zap.Error(err))
+		}
 	}
 }
 

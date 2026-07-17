@@ -165,11 +165,12 @@ func buildVLESSServerLink(cfg *serverConfig) (string, error) {
 	if cfg.Flow != "" {
 		params.Set("flow", cfg.Flow)
 	}
-	if cfg.Security != "" {
+	switch {
+	case cfg.Security != "":
 		params.Set("security", cfg.Security)
-	} else if cfg.TLS != "" {
+	case cfg.TLS != "":
 		params.Set("security", cfg.TLS)
-	} else {
+	default:
 		params.Set("security", "none")
 	}
 	if cfg.AllowInsecure {

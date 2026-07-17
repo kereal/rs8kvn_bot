@@ -388,7 +388,6 @@ func main() {
 	svc.handler.SetBot(api)
 	svc.handler.SetBotConfig(bc)
 	botAPI = api
-	botConfig = bc
 	if webServer != nil {
 		webServer.SetBotUsername(bc.Username)
 	}

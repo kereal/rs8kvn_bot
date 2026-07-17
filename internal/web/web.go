@@ -527,6 +527,10 @@ func (s *Server) renderErrorPage(w http.ResponseWriter, message string) {
 func getClientIP(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err == nil && isLocalAddress(host) {
+		// X-Real-IP is a single value set by the trusted reverse proxy.
+		if realIP := strings.TrimSpace(r.Header.Get("X-Real-IP")); realIP != "" {
+			return realIP
+		}
 		forwarded := r.Header.Get("X-Forwarded-For")
 		if forwarded != "" {
 			ips := strings.Split(forwarded, ",")
@@ -560,7 +564,11 @@ func isLocalAddress(host string) bool {
 	if ip == nil {
 		return false
 	}
-	return ip.IsLoopback()
+	// Trust loopback and private ranges: in Docker the direct peer is the
+	// bridge gateway (e.g. 172.19.0.1), which is private, not loopback.
+	// nginx runs behind this gateway and sets X-Real-IP / X-Forwarded-For.
+	// ponytail: trusts any private peer; tighten to specific proxy CIDRs if the bridge is ever shared with untrusted containers.
+	return ip.IsLoopback() || ip.IsPrivate()
 }
 
 // handleSubscription is the HTTP handler for GET /sub/{subID}.
@@ -663,7 +671,7 @@ func (s *Server) handleSubscription(w http.ResponseWriter, r *http.Request) {
 	} else {
 		response.WriteHeader(http.StatusOK)
 	}
-	response.Write(result.Body)
+	_, _ = response.Write(result.Body)
 }
 
 func (s *Server) logSubscriptionAccess(rec *statusRecorder, r *http.Request, clientIP string) {
