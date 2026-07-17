@@ -428,7 +428,7 @@ func (h *Handler) runBroadcast(ctx context.Context, adminChatID int64, text stri
 ❌ Ошибок: %d
 👥 Осталось: %d`,
 			sent, blocked, failed, remaining))
-		return fmt.Errorf("broadcast cancelled")
+		return fmt.Errorf("broadcast cancelled: %w", ctx.Err())
 	}
 	if batchErr != nil {
 		h.SendMessage(context.WithoutCancel(ctx), adminChatID, fmt.Sprintf(`❌ Рассылка прервана из-за ошибки!

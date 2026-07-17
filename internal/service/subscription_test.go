@@ -697,7 +697,7 @@ func TestSubscriptionService_CreateTrial_Success(t *testing.T) {
 			return &database.Plan{ID: 1, Name: name, TrafficLimit: 1073741824}, nil
 		},
 	}
-	var gotResetDays int
+	var gotResetDays = -1
 	xuiClient := &testutil.XUIClient{
 		AddClientWithIDFunc: func(ctx context.Context, req xui.ClientRequest) (*xui.ClientConfig, error) {
 			gotResetDays = req.ResetDays

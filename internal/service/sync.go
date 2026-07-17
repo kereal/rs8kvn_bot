@@ -391,7 +391,11 @@ func (s *SyncService) processPendingUpdate(ctx context.Context, sn *database.Sub
 		TrafficBytes: plan.TrafficLimit,
 	}
 	if plan.TrafficLimit > 0 {
-		provision.ResetDays = -1
+		if plan.Name == database.TrialPlanName {
+			provision.ResetDays = 0
+		} else {
+			provision.ResetDays = -1
+		}
 		if sub.ExpiresAt != nil {
 			provision.ExpiryTime = *sub.ExpiresAt
 		} else {
