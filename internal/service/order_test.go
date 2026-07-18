@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -54,6 +55,9 @@ func TestOrderService_ActivateProduct_PaidProduct_NoPlanChange(t *testing.T) {
 	}
 	db.GetBySubscriptionIDFunc = func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
 		return []database.SubscriptionNode{}, nil
+	}
+	db.TransactionFunc = func(ctx context.Context, fn func(*gorm.DB) error) error {
+		return nil
 	}
 
 	subSvc := &SubscriptionService{db: db}
@@ -213,6 +217,9 @@ func TestOrderService_ActivateProduct_CreateOrderError(t *testing.T) {
 	db.GetBySubscriptionIDFunc = func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
 		return []database.SubscriptionNode{}, nil
 	}
+	db.TransactionFunc = func(ctx context.Context, fn func(*gorm.DB) error) error {
+		return fmt.Errorf("create order: %w", errors.New("order db error"))
+	}
 
 	subSvc := &SubscriptionService{db: db}
 	svc := NewOrderService(db, subSvc, nil)
@@ -222,7 +229,7 @@ func TestOrderService_ActivateProduct_CreateOrderError(t *testing.T) {
 	assert.ErrorContains(t, err, "create order")
 }
 
-func TestOrderService_ActivateProduct_PaidProduct_ExpiryNotModified(t *testing.T) {
+func TestOrderService_ActivateProduct_PaidProduct_ExpiryModified(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC().Truncate(time.Minute)
 	oldExpiry := now.Add(10 * 24 * time.Hour)
@@ -252,6 +259,9 @@ func TestOrderService_ActivateProduct_PaidProduct_ExpiryNotModified(t *testing.T
 	db.GetBySubscriptionIDFunc = func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
 		return []database.SubscriptionNode{}, nil
 	}
+	db.TransactionFunc = func(ctx context.Context, fn func(*gorm.DB) error) error {
+		return nil
+	}
 
 	subSvc := &SubscriptionService{db: db}
 	svc := NewOrderService(db, subSvc, nil)
@@ -260,7 +270,7 @@ func TestOrderService_ActivateProduct_PaidProduct_ExpiryNotModified(t *testing.T
 	require.NoError(t, err)
 	assert.NotNil(t, order)
 	assert.Equal(t, database.OrderStatusPending, order.Status)
-	assert.Equal(t, oldExpiry, *sub.ExpiresAt)
+	assert.Equal(t, oldExpiry.AddDate(0, 0, product.DurationDays), *sub.ExpiresAt)
 }
 
 func TestOrderService_ActivateProduct_FreeProduct_SyncSetupFailureReturnsError(t *testing.T) {

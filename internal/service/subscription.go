@@ -797,6 +797,8 @@ func (s *SubscriptionService) RenewSubscription(ctx context.Context, telegramID 
 		return nil, err
 	}
 
+	metrics.SubscriptionRenewalsTotal.Inc()
+
 	if s.invalidateBySubID != nil && sub.SubscriptionID != "" {
 		s.invalidateBySubID(sub.SubscriptionID)
 	}
@@ -813,12 +815,10 @@ func (s *SubscriptionService) RenewSubscription(ctx context.Context, telegramID 
 				zap.Uint("subscription_id", sub.ID),
 				zap.Uint("product_id", product.ID),
 				zap.Error(err))
-			metrics.SubscriptionRenewalsTotal.Inc()
 			return order, nil
 		}
 	}
 
-	metrics.SubscriptionRenewalsTotal.Inc()
 	return order, nil
 }
 
