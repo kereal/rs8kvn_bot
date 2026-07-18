@@ -135,24 +135,34 @@ func NewHandler(bot interfaces.BotAPI, cfg *config.Config, db interfaces.Databas
 	return h
 }
 
+// SetBot updates the bot client and propagates the change to the message sender.
 func (h *Handler) SetBot(bot interfaces.BotAPI) {
 	h.bot = bot
 	h.sender.SetBot(bot)
 }
 
+// SetBotConfig updates runtime bot config and rebuilds keyboard templates.
 func (h *Handler) SetBotConfig(bc *BotConfig) {
 	h.botConfig = bc
 	h.keyboards = NewKeyboardBuilder(bc.Username, h.cfg.ContactUsername, h.cfg.DonateCardNumber, h.cfg.DonateURL, h.cfg.SiteURL)
 }
 
-// Cache returns the subscription cache. Used by external callers (e.g. main.go)
-// to compose cache invalidation across multiple caches.
+// Cache returns the subscription cache.
+// Used by external callers (e.g. main.go) to compose cache invalidation across multiple caches.
 func (h *Handler) Cache() *SubscriptionCache {
 	return h.cache
 }
 
+// SetOrderService wires the order service after handler construction.
 func (h *Handler) SetOrderService(orderService *service.OrderService) {
 	h.orderService = orderService
+}
+
+// getSubHandler returns the subscription sub-handler, initializing it once.
+// The sync.Once guard supports test-constructed handlers that omit subHandler.
+func (h *Handler) getSubHandler() *SubscriptionHandler {
+	h.subHandlerOnce.Do(func() { h.subHandler = NewSubscriptionHandler(h) })
+	return h.subHandler
 }
 
 // isAdmin returns true if chatID matches configured admin ID
@@ -226,76 +236,41 @@ func (h *Handler) handleShareInvite(ctx context.Context, chatID int64, username 
 }
 
 // Subscription delegates
+
 func (h *Handler) handleCreateSubscription(ctx context.Context, chatID int64, username string, messageID int) error {
-	h.subHandlerOnce.Do(func() { h.subHandler = NewSubscriptionHandler(h) })
-	if h.subHandler == nil {
-		return errors.New("handler: subHandler is nil, use NewHandler to construct Handler")
-	}
-	return h.subHandler.handleCreateSubscription(ctx, chatID, username, messageID)
+	return h.getSubHandler().handleCreateSubscription(ctx, chatID, username, messageID)
 }
 
 func (h *Handler) handleMySubscription(ctx context.Context, chatID int64, username string, messageID int) error {
-	h.subHandlerOnce.Do(func() { h.subHandler = NewSubscriptionHandler(h) })
-	if h.subHandler == nil {
-		return errors.New("handler: subHandler is nil, use NewHandler to construct Handler")
-	}
-	return h.subHandler.handleMySubscription(ctx, chatID, username, messageID)
+	return h.getSubHandler().handleMySubscription(ctx, chatID, username, messageID)
 }
 
 func (h *Handler) handleQRCode(ctx context.Context, chatID int64, username string, messageID int) error {
-	h.subHandlerOnce.Do(func() { h.subHandler = NewSubscriptionHandler(h) })
-	if h.subHandler == nil {
-		return errors.New("handler: subHandler is nil, use NewHandler to construct Handler")
-	}
-	return h.subHandler.handleQRCode(ctx, chatID, username, messageID)
+	return h.getSubHandler().handleQRCode(ctx, chatID, username, messageID)
 }
 
 func (h *Handler) handleUpgradePremium(ctx context.Context, chatID int64, username string, messageID int) error {
-	h.subHandlerOnce.Do(func() { h.subHandler = NewSubscriptionHandler(h) })
-	if h.subHandler == nil {
-		return errors.New("handler: subHandler is nil, use NewHandler to construct Handler")
-	}
-	return h.subHandler.handleUpgradePremium(ctx, chatID, username, messageID)
+	return h.getSubHandler().handleUpgradePremium(ctx, chatID, username, messageID)
 }
 
 func (h *Handler) handleConfirmUpgradePremium(ctx context.Context, chatID int64, username string, messageID int) error {
-	h.subHandlerOnce.Do(func() { h.subHandler = NewSubscriptionHandler(h) })
-	if h.subHandler == nil {
-		return errors.New("handler: subHandler is nil, use NewHandler to construct Handler")
-	}
-	return h.subHandler.handleConfirmUpgradePremium(ctx, chatID, username, messageID)
+	return h.getSubHandler().handleConfirmUpgradePremium(ctx, chatID, username, messageID)
 }
 
 func (h *Handler) handleBackToSubscription(ctx context.Context, chatID int64, username string, messageID int) error {
-	h.subHandlerOnce.Do(func() { h.subHandler = NewSubscriptionHandler(h) })
-	if h.subHandler == nil {
-		return errors.New("handler: subHandler is nil, use NewHandler to construct Handler")
-	}
-	return h.subHandler.handleBackToSubscription(ctx, chatID, username, messageID)
+	return h.getSubHandler().handleBackToSubscription(ctx, chatID, username, messageID)
 }
 
 func (h *Handler) sendQRCode(ctx context.Context, chatID int64, messageID int, url string, caption string) error {
-	h.subHandlerOnce.Do(func() { h.subHandler = NewSubscriptionHandler(h) })
-	if h.subHandler == nil {
-		return errors.New("handler: subHandler is nil, use NewHandler to construct Handler")
-	}
-	return h.subHandler.sendQRCode(ctx, chatID, messageID, url, caption)
+	return h.getSubHandler().sendQRCode(ctx, chatID, messageID, url, caption)
 }
 
 func (h *Handler) handleBackToInvite(ctx context.Context, chatID int64, username string, messageID int) error {
-	h.subHandlerOnce.Do(func() { h.subHandler = NewSubscriptionHandler(h) })
-	if h.subHandler == nil {
-		return errors.New("handler: subHandler is nil, use NewHandler to construct Handler")
-	}
-	return h.subHandler.handleBackToInvite(ctx, chatID, username, messageID)
+	return h.getSubHandler().handleBackToInvite(ctx, chatID, username, messageID)
 }
 
 func (h *Handler) getSubscriptionWithCache(ctx context.Context, chatID int64) (*database.Subscription, error) {
-	h.subHandlerOnce.Do(func() { h.subHandler = NewSubscriptionHandler(h) })
-	if h.subHandler == nil {
-		return nil, errors.New("handler: subHandler is nil, use NewHandler to construct Handler")
-	}
-	return h.subHandler.getSubscriptionWithCache(ctx, chatID)
+	return h.getSubHandler().getSubscriptionWithCache(ctx, chatID)
 }
 
 // invalidateCache clears the subscription cache for the given chatID.
@@ -309,26 +284,20 @@ func (h *Handler) invalidateCache(ctx context.Context, chatID int64) {
 }
 
 // Subscription direct delegates (used by tests and internal flows)
+
+// createSubscription creates a new subscription for a user.
 func (h *Handler) createSubscription(ctx context.Context, chatID int64, username string, messageID int) error {
-	h.subHandlerOnce.Do(func() { h.subHandler = NewSubscriptionHandler(h) })
-	if h.subHandler == nil {
-		return errors.New("handler: subHandler is nil, use NewHandler to construct Handler")
-	}
-	return h.subHandler.createSubscription(ctx, chatID, username, messageID)
+	return h.getSubHandler().createSubscription(ctx, chatID, username, messageID)
 }
 
+// handleCreateError handles errors during subscription creation.
 func (h *Handler) handleCreateError(ctx context.Context, chatID int64, messageID int, username string, err error) {
-	h.subHandlerOnce.Do(func() { h.subHandler = NewSubscriptionHandler(h) })
-	if h.subHandler == nil {
-		logger.Error("handler: subHandler is nil, cannot handle create error",
-			zap.Int64("chat_id", chatID),
-			zap.Error(err))
-		return
-	}
-	h.subHandler.handleCreateError(ctx, chatID, messageID, username, err)
+	h.getSubHandler().handleCreateError(ctx, chatID, messageID, username, err)
 }
 
 // Referral delegates
+
+// generateInviteLink generates an invite link for a user.
 func (h *Handler) generateInviteLink(ctx context.Context, chatID int64, lt linkType) (string, error) {
 	h.referralOnce.Do(func() {
 		h.referral = NewReferralHandler(h.db, h.cfg, h.bot, h.botConfig, h.sender, h.keyboards)
@@ -408,6 +377,7 @@ func displayUsername(username string) string {
 	return ", @" + username
 }
 
+// getMainMenuContent builds the start-screen text and keyboard for a user.
 func (h *Handler) getMainMenuContent(ctx context.Context, username string, hasSubscription bool, chatID int64, sub *database.Subscription) (string, tgbotapi.InlineKeyboardMarkup) {
 	// Ensure keyboards is initialized (for manually constructed handlers in tests)
 	h.keyboardsOnce.Do(func() {
@@ -443,23 +413,28 @@ func (h *Handler) getMainMenuContent(ctx context.Context, username string, hasSu
 	return text, keyboard
 }
 
+// getHelpText returns the detailed setup help text.
 func (h *Handler) getHelpText(trafficLimit int, subscriptionURL string) string {
 	// Use the detailed help from KeyboardBuilder which includes setup instructions.
 	return h.keyboards.HelpText(trafficLimit, subscriptionURL)
 }
 
+// getDonateText returns the donate info text.
 func (h *Handler) getDonateText() string {
 	return h.keyboards.DonateText()
 }
 
+// getBackKeyboard returns the back-navigation keyboard.
 func (h *Handler) getBackKeyboard() tgbotapi.InlineKeyboardMarkup {
 	return h.keyboards.Back()
 }
 
+// getQRKeyboard returns the QR-code keyboard.
 func (h *Handler) getQRKeyboard() tgbotapi.InlineKeyboardMarkup {
 	return h.keyboards.QR()
 }
 
+// getMainMenuKeyboard builds the main menu keyboard.
 func (h *Handler) getMainMenuKeyboard(hasSubscription bool, freeUpgradeLabel ...string) tgbotapi.InlineKeyboardMarkup {
 	label := ""
 	if len(freeUpgradeLabel) > 0 {
@@ -468,6 +443,8 @@ func (h *Handler) getMainMenuKeyboard(hasSubscription bool, freeUpgradeLabel ...
 	return h.keyboards.MainMenu(hasSubscription, label)
 }
 
+// getFreeUpgradeLabel returns a free-upgrade promo label when the user is on
+// the free plan and a zero-cost product is configured.
 func (h *Handler) getFreeUpgradeLabel(ctx context.Context, sub *database.Subscription) (string, bool) {
 	if h.db == nil || sub == nil || sub.Status != "active" || h.cfg == nil || h.cfg.MainMenuBtnProductID == 0 {
 		return "", false

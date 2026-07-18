@@ -420,6 +420,9 @@ func TestSubscriptionService_RenewSubscription_SyncSetupFailureReturnsError(t *t
 		GetByTelegramIDFunc: func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 			return sub, nil
 		},
+		GetByIDFunc: func(ctx context.Context, id uint) (*database.Subscription, error) {
+			return sub, nil
+		},
 		TransactionFunc: func(ctx context.Context, fn func(*gorm.DB) error) error {
 			transactionCalled = true
 			return nil
@@ -433,7 +436,7 @@ func TestSubscriptionService_RenewSubscription_SyncSetupFailureReturnsError(t *t
 
 	order, err := svc.RenewSubscription(context.Background(), sub.TelegramID, product)
 
-	require.ErrorContains(t, err, "renew subscription: load plan nodes")
+	require.ErrorContains(t, err, "renew subscription: apply plan: apply plan to subscription 7: load plan nodes")
 	assert.True(t, transactionCalled)
 	assert.NotNil(t, order)
 	assert.Equal(t, database.OrderStatusPaid, order.Status)

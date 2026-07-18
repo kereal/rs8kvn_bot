@@ -193,6 +193,18 @@ func (s *SyncService) reconcilePlanNodesLocked(ctx context.Context, subscription
 			zap.Uint("node_id", nodeID))
 	}
 
+	for nodeID, sn := range currentPendingUpdate {
+		if _, inTarget := targetSet[nodeID]; inTarget {
+			continue
+		}
+		if err := s.db.UpdateSubscriptionNodeStatus(ctx, sn.SubscriptionID, sn.NodeID, database.SyncStatusPendingRemove); err != nil {
+			return fmt.Errorf("reconcile plan nodes: set pending_remove for stale pending_update node %d: %w", nodeID, err)
+		}
+		logger.Debug("set pending_remove for stale pending_update node",
+			zap.Uint("subscription_id", subscriptionID),
+			zap.Uint("node_id", nodeID))
+	}
+
 	logger.Debug("reconcile plan nodes completed",
 		zap.Uint("subscription_id", subscriptionID))
 
@@ -211,15 +223,12 @@ func (s *SyncService) MarkAllForRemoval(ctx context.Context, subscriptionID uint
 	}
 
 	for _, sn := range nodes {
-		switch sn.Status {
-		case database.SyncStatusActive, database.SyncStatusPendingAdd, database.SyncStatusPendingRemove, database.SyncStatusPendingUpdate:
-			if err := s.db.UpdateSubscriptionNodeStatus(ctx, sn.SubscriptionID, sn.NodeID, database.SyncStatusPendingRemove); err != nil {
-				return fmt.Errorf("mark all for removal: set pending_remove node %d: %w", sn.NodeID, err)
-			}
-			logger.Debug("marked node for removal",
-				zap.Uint("subscription_id", subscriptionID),
-				zap.Uint("node_id", sn.NodeID))
+		if err := s.db.UpdateSubscriptionNodeStatus(ctx, sn.SubscriptionID, sn.NodeID, database.SyncStatusPendingRemove); err != nil {
+			return fmt.Errorf("mark all for removal: set pending_remove node %d: %w", sn.NodeID, err)
 		}
+		logger.Debug("marked node for removal",
+			zap.Uint("subscription_id", subscriptionID),
+			zap.Uint("node_id", sn.NodeID))
 	}
 
 	logger.Debug("mark all for removal completed",
@@ -542,7 +551,6 @@ func (s *SyncService) handleSyncError(ctx context.Context, sn *database.Subscrip
 	sn.RetryCount++
 	errMsg := err.Error()
 	sn.LastError = &errMsg
-	sn.RetryAt = &retryAt
 
 	if dbErr := s.db.UpdateRetry(ctx, sn.SubscriptionID, sn.NodeID, sn.RetryCount, sn.RetryAt, sn.LastError); dbErr != nil {
 		logger.Warn("failed to update retry metadata",
@@ -671,6 +679,38 @@ func (s *SyncService) SyncPendingNodes(ctx context.Context) error {
 	}
 	if len(errs) > 0 {
 		return errors.Join(errs...)
+	}
+
+	return nil
+}
+
+// ApplyPlanToSubscription loads the subscription, marks its active nodes as
+// pending_update for the current plan, and reconciles plan membership.
+// The caller is responsible for invoking SyncSubscription afterwards.
+func (s *SyncService) ApplyPlanToSubscription(ctx context.Context, subscriptionID uint) error {
+	sub, err := s.db.GetByID(ctx, subscriptionID)
+	if err != nil {
+		return fmt.Errorf("apply plan to subscription %d: load subscription: %w", subscriptionID, err)
+	}
+
+	newNodes, err := s.db.GetNodesByPlanID(ctx, sub.PlanID)
+	if err != nil {
+		return fmt.Errorf("apply plan to subscription %d: load plan nodes: %w", subscriptionID, err)
+	}
+
+	var newNodeIDs []uint
+	for _, n := range newNodes {
+		if n.IsActive {
+			newNodeIDs = append(newNodeIDs, n.ID)
+		}
+	}
+
+	if err := s.db.MarkActiveNodesPendingUpdate(ctx, subscriptionID, newNodeIDs); err != nil {
+		return fmt.Errorf("apply plan to subscription %d: mark active nodes pending update: %w", subscriptionID, err)
+	}
+
+	if err := s.ReconcilePlanNodes(ctx, subscriptionID); err != nil {
+		return fmt.Errorf("apply plan to subscription %d: reconcile plan nodes: %w", subscriptionID, err)
 	}
 
 	return nil

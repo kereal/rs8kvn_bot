@@ -108,22 +108,8 @@ func (o *OrderService) ActivateProduct(ctx context.Context, telegramID int64, pr
 	}
 
 	if planChanged && o.syncSvc != nil {
-		newNodes, err := o.db.GetNodesByPlanID(ctx, sub.PlanID)
-		if err != nil {
-			return order, fmt.Errorf("activate product: load plan nodes: %w", err)
-		}
-		var newNodeIDs []uint
-		for _, n := range newNodes {
-			if n.IsActive {
-				newNodeIDs = append(newNodeIDs, n.ID)
-			}
-		}
-		if err := o.db.MarkActiveNodesPendingUpdate(ctx, sub.ID, newNodeIDs); err != nil {
-			return order, fmt.Errorf("activate product: schedule node updates: %w", err)
-		}
-
-		if err := o.syncSvc.ReconcilePlanNodes(ctx, sub.ID); err != nil {
-			return order, fmt.Errorf("activate product: reconcile plan nodes: %w", err)
+		if err := o.syncSvc.ApplyPlanToSubscription(ctx, sub.ID); err != nil {
+			return order, fmt.Errorf("activate product: apply plan: %w", err)
 		}
 		if err := o.syncSvc.SyncSubscription(ctx, sub.ID); err != nil {
 			logger.Warn("activate product: post-commit sync failed",
