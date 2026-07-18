@@ -62,19 +62,14 @@ func (o *OrderService) ActivateProduct(ctx context.Context, telegramID int64, pr
 		PaymentProvider:   paymentInfo.Provider,
 		ProviderPaymentID: paymentInfo.PaymentID,
 	}
-	if product.PriceCents == 0 {
+	if product.PriceCents > 0 {
+		order.Status = database.OrderStatusPending
+		order.ProviderPaymentID = paymentInfo.PaymentID
+	} else {
 		order.Status = database.OrderStatusPaid
 		order.PaidAt = &now
 		order.ActivatedAt = &now
 		order.ExpiresAt = &newExpiry
-	}
-
-	if product.PriceCents > 0 {
-		if err := o.db.CreateOrder(ctx, order); err != nil {
-			return nil, fmt.Errorf("create order: %w", err)
-		}
-		order.ProviderPaymentID = paymentInfo.PaymentID
-		return order, nil
 	}
 
 	sub.PlanID = product.PlanID
