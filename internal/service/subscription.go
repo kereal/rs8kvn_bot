@@ -760,6 +760,7 @@ func (s *SubscriptionService) RenewSubscription(ctx context.Context, telegramID 
 	now := time.Now().UTC().Truncate(time.Minute)
 	planChanged := sub.PlanID != product.PlanID
 	newExpiry := calculateProductExpiry(now, sub.PlanID, sub.ExpiresAt, product)
+	oldExpiry := sub.ExpiresAt
 
 	sub.PlanID = product.PlanID
 	sub.ProductID = &product.ID
@@ -801,23 +802,9 @@ func (s *SubscriptionService) RenewSubscription(ctx context.Context, telegramID 
 	}
 
 	if s.syncService != nil {
-		if planChanged {
-			newNodes, err := s.db.GetNodesByPlanID(ctx, sub.PlanID)
-			if err != nil {
-				return order, fmt.Errorf("renew subscription: load plan nodes: %w", err)
-			}
-			var newNodeIDs []uint
-			for _, n := range newNodes {
-				if n.IsActive {
-					newNodeIDs = append(newNodeIDs, n.ID)
-				}
-			}
-			if err := s.db.MarkActiveNodesPendingUpdate(ctx, sub.ID, newNodeIDs); err != nil {
-				return order, fmt.Errorf("renew subscription: schedule node updates: %w", err)
-			}
-
-			if err := s.syncService.ReconcilePlanNodes(ctx, sub.ID); err != nil {
-				return order, fmt.Errorf("renew subscription: reconcile plan nodes: %w", err)
+		if planChanged || (oldExpiry == nil || !oldExpiry.Equal(newExpiry)) {
+			if err := s.syncService.ApplyPlanToSubscription(ctx, sub.ID); err != nil {
+				return order, fmt.Errorf("renew subscription: apply plan: %w", err)
 			}
 		}
 
@@ -856,23 +843,10 @@ func (s *SubscriptionService) ExpireSubscription(ctx context.Context, subscripti
 	}
 
 	if s.syncService != nil {
-		newNodes, err := s.db.GetNodesByPlanID(ctx, freePlan.ID)
-		if err != nil {
-			logger.Warn("expire subscription: failed to load free plan nodes; skipping pending_update marking",
+		if err := s.syncService.ApplyPlanToSubscription(ctx, sub.ID); err != nil {
+			logger.Warn("expire subscription: apply plan failed (will retry)",
 				zap.Uint("subscription_id", sub.ID),
-				zap.Uint("free_plan_id", freePlan.ID),
 				zap.Error(err))
-		}
-		var newNodeIDs []uint
-		for _, n := range newNodes {
-			newNodeIDs = append(newNodeIDs, n.ID)
-		}
-		if err := s.db.MarkActiveNodesPendingUpdate(ctx, sub.ID, newNodeIDs); err != nil {
-			logger.Warn("mark active nodes pending update failed", zap.Error(err))
-		}
-
-		if err := s.syncService.ReconcilePlanNodes(ctx, sub.ID); err != nil {
-			logger.Warn("reconcile plan nodes failed (will retry)", zap.Error(err))
 		}
 		if err := s.syncService.SyncSubscription(ctx, sub.ID); err != nil {
 			logger.Warn("sync subscription failed (will retry)", zap.Error(err))

@@ -279,6 +279,9 @@ func TestOrderService_ActivateProduct_FreeProduct_SyncSetupFailureReturnsError(t
 	db.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 		return sub, nil
 	}
+	db.GetByIDFunc = func(ctx context.Context, id uint) (*database.Subscription, error) {
+		return sub, nil
+	}
 	db.TransactionFunc = func(ctx context.Context, fn func(*gorm.DB) error) error {
 		transactionCalled = true
 		return nil
@@ -299,7 +302,7 @@ func TestOrderService_ActivateProduct_FreeProduct_SyncSetupFailureReturnsError(t
 
 	order, err := svc.ActivateProduct(ctx, 123, product)
 
-	require.ErrorContains(t, err, "activate product: load plan nodes")
+	require.ErrorContains(t, err, "activate product: apply plan: apply plan to subscription 1: load plan nodes")
 	assert.True(t, transactionCalled)
 	assert.NotNil(t, order)
 	assert.Equal(t, database.OrderStatusPaid, order.Status)
