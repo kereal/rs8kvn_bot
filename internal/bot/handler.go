@@ -649,6 +649,7 @@ func (h *Handler) HandleUpdate(ctx context.Context, update tgbotapi.Update) {
 		return
 	}
 	defer func() {
+		metrics.BotUpdateDuration.WithLabelValues(command).Observe(time.Since(start).Seconds())
 		if err != nil {
 			metrics.BotUpdateErrorsTotal.WithLabelValues(command).Inc()
 			metrics.BotUpdatesTotal.WithLabelValues(command, "error").Inc()
@@ -698,5 +699,4 @@ func (h *Handler) HandleUpdate(ctx context.Context, update tgbotapi.Update) {
 		err = h.HandleCallback(ctx, update)
 	}
 
-	metrics.BotUpdateDuration.WithLabelValues(command).Observe(time.Since(start).Seconds())
 }

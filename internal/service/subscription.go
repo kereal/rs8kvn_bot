@@ -933,9 +933,7 @@ func (s *SubscriptionService) ExpireSubscription(ctx context.Context, subscripti
 
 	if s.syncService != nil {
 		if err := s.syncService.ApplyPlanToSubscription(ctx, sub.ID); err != nil {
-			logger.Warn("expire subscription: apply plan failed (will retry)",
-				zap.Uint("subscription_id", sub.ID),
-				zap.Error(err))
+			return fmt.Errorf("expire subscription: apply plan: %w", err)
 		}
 		if err := s.syncService.SyncSubscription(ctx, sub.ID); err != nil {
 			logger.Warn("sync subscription failed (will retry)", zap.Error(err))
