@@ -184,6 +184,13 @@ eventLoop:
 		updatesWg.Wait()
 		close(done)
 	}()
+
+	select {
+	case <-done:
+		logger.Info("All update handlers completed successfully")
+	case <-time.After(config.ShutdownTimeout):
+		logger.Warn("Timeout waiting for update handlers to complete")
+	}
 }
 // gracefulShutdown stops background workers and handler goroutines with timeouts.
 // subServer.Stop() (cache drop) runs first so revoked/updated subs stop being
