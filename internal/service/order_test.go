@@ -24,7 +24,7 @@ func TestOrderService_ActivateProduct_NilProduct(t *testing.T) {
 	subSvc := &SubscriptionService{db: db}
 	svc := NewOrderService(db, subSvc, nil)
 
-	_, err := svc.ActivateProduct(context.Background(), 123, nil)
+	_, err := svc.ActivateProduct(context.Background(), 123, "", nil)
 	assert.Error(t, err)
 	assert.ErrorContains(t, err, "product is nil")
 }
@@ -62,7 +62,7 @@ func TestOrderService_ActivateProduct_PaidProduct_NoPlanChange(t *testing.T) {
 
 	subSvc := &SubscriptionService{db: db}
 	svc := NewOrderService(db, subSvc, nil)
-	order, err := svc.ActivateProduct(ctx, 123, product)
+	order, err := svc.ActivateProduct(ctx, 123, "testuser", product)
 
 	require.NoError(t, err)
 	assert.NotNil(t, order)
@@ -110,7 +110,7 @@ func TestOrderService_ActivateProduct_FreeProduct_SamePlan(t *testing.T) {
 
 	subSvc := &SubscriptionService{db: db}
 	svc := NewOrderService(db, subSvc, nil)
-	order, err := svc.ActivateProduct(ctx, 123, product)
+	order, err := svc.ActivateProduct(ctx, 123, "testuser", product)
 
 	require.NoError(t, err)
 	assert.NotNil(t, order)
@@ -120,6 +120,39 @@ func TestOrderService_ActivateProduct_FreeProduct_SamePlan(t *testing.T) {
 	assert.NotNil(t, order.ActivatedAt)
 	assert.NotNil(t, order.ExpiresAt)
 	assert.Equal(t, now.AddDate(0, 0, product.DurationDays+30), *order.ExpiresAt)
+}
+
+func TestOrderService_ActivateProduct_NewSubscriptionStoresUsername(t *testing.T) {
+	ctx := context.Background()
+	product := &database.Product{
+		ID: 1, PlanID: 1, Name: "Trial", DurationDays: 7,
+		PriceCents: 0, Currency: "RUB", IsActive: true,
+	}
+
+	db := testutil.NewDatabaseService()
+	// Simulate "no existing subscription" so ActivateProduct creates a new one.
+	var created *database.Subscription
+	db.CreateSubscriptionFunc = func(ctx context.Context, sub *database.Subscription, _ string) error {
+		created = sub
+		return nil
+	}
+	db.GetNodesByPlanIDFunc = func(ctx context.Context, planID uint) ([]database.Node, error) {
+		return []database.Node{}, nil
+	}
+	db.GetBySubscriptionIDFunc = func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
+		return []database.SubscriptionNode{}, nil
+	}
+	db.TransactionFunc = func(ctx context.Context, fn func(*gorm.DB) error) error {
+		return nil
+	}
+
+	subSvc := &SubscriptionService{db: db}
+	svc := NewOrderService(db, subSvc, nil)
+	_, err := svc.ActivateProduct(ctx, 123, "real_username", product)
+
+	require.NoError(t, err)
+	require.NotNil(t, created, "expected a new subscription to be created")
+	assert.Equal(t, "real_username", created.Username, "username must be stored on the new subscription")
 }
 
 func TestOrderService_ActivateProduct_FreeProduct_DifferentPlan_UpdatesSubscription(t *testing.T) {
@@ -163,7 +196,7 @@ func TestOrderService_ActivateProduct_FreeProduct_DifferentPlan_UpdatesSubscript
 
 	subSvc := &SubscriptionService{db: db}
 	svc := NewOrderService(db, subSvc, nil)
-	order, err := svc.ActivateProduct(ctx, 123, product)
+	order, err := svc.ActivateProduct(ctx, 123, "testuser", product)
 
 	require.NoError(t, err)
 	assert.NotNil(t, order)
@@ -185,7 +218,7 @@ func TestOrderService_ActivateProduct_GetOrCreateSubscriptionError(t *testing.T)
 		return nil, errors.New("db error")
 	}
 
-	_, err := svc.ActivateProduct(context.Background(), 123, &database.Product{ID: 1})
+	_, err := svc.ActivateProduct(context.Background(), 123, "", &database.Product{ID: 1})
 	assert.Error(t, err)
 	assert.ErrorContains(t, err, "get or create subscription")
 }
@@ -223,7 +256,7 @@ func TestOrderService_ActivateProduct_CreateOrderError(t *testing.T) {
 
 	subSvc := &SubscriptionService{db: db}
 	svc := NewOrderService(db, subSvc, nil)
-	_, err := svc.ActivateProduct(ctx, 123, product)
+	_, err := svc.ActivateProduct(ctx, 123, "testuser", product)
 
 	assert.Error(t, err)
 	assert.ErrorContains(t, err, "create order")
@@ -265,7 +298,7 @@ func TestOrderService_ActivateProduct_PaidProduct_DoesNotModifySubscription(t *t
 
 	subSvc := &SubscriptionService{db: db}
 	svc := NewOrderService(db, subSvc, nil)
-	order, err := svc.ActivateProduct(ctx, 123, product)
+	order, err := svc.ActivateProduct(ctx, 123, "testuser", product)
 
 	require.NoError(t, err)
 	assert.NotNil(t, order)
@@ -315,7 +348,7 @@ func TestOrderService_ActivateProduct_FreeProduct_SyncSetupFailureReturnsError(t
 	syncSvc := NewSyncService(db, nil, nil)
 	svc := NewOrderService(db, subSvc, syncSvc)
 
-	order, err := svc.ActivateProduct(ctx, 123, product)
+	order, err := svc.ActivateProduct(ctx, 123, "testuser", product)
 
 	require.ErrorContains(t, err, "activate product: apply plan: apply plan to subscription 1: load plan nodes")
 	assert.True(t, transactionCalled)
