@@ -352,7 +352,7 @@ type TrialCreateResult struct {
 // CreateTrial provisions a new anonymous trial subscription.
 // It resolves the trial plan, picks the first trial node,
 // creates a client on that node via XUI, and persists the subscription
-// in the database with telegram_id = 0 (unactivated).
+// in the database with a negative telegram_id (unactivated).
 func (s *SubscriptionService) CreateTrial(ctx context.Context, inviteCode string) (*TrialCreateResult, error) {
 	subID, err := utils.GenerateSubID()
 	if err != nil {

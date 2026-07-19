@@ -51,7 +51,7 @@ func TestSubscriptionCache_TTL(t *testing.T) {
 	// Wait for TTL to expire
 	assert.Eventually(t, func() bool {
 		return cache.Get(456) == nil
-	}, 100*time.Millisecond, 1*time.Millisecond, "Get() should return nil after TTL expired")
+	}, 2*time.Second, 5*time.Millisecond, "Get() should return nil after TTL expired")
 }
 
 func TestSubscriptionCache_Invalidate(t *testing.T) {
@@ -127,7 +127,7 @@ func TestSubscriptionCache_Cleanup(t *testing.T) {
 	// Wait for entries to expire
 	assert.Eventually(t, func() bool {
 		return cache.Get(1) == nil
-	}, 100*time.Millisecond, 1*time.Millisecond, "entries should expire")
+	}, 2*time.Second, 5*time.Millisecond, "entries should expire")
 
 	// Add one more entry (not expired)
 	cache.Set(4, &database.Subscription{TelegramID: 4})

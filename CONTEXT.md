@@ -25,7 +25,7 @@ Telegram-бот для раздачи VPN-подписок (VLESS+Reality+Vision
 - **SubscriptionNode** — связь «подписка ↔ нода» плюс 4-ступенчатый автомат синхронизации
   (`pending_add` / `pending_remove` / `pending_update` / `active`), с retry-счётчиком. Единица депровизионирования.
 - **Trial** — пробная подписка через план Trial + `trial_requests` (rate-limit по IP). Жизненный цикл:
-  создание заявки → привязка к Telegram-ID (`BindTrialSubscription`, race-safe по `telegram_id=0`).
+  создание заявки → привязка к Telegram-ID (`BindTrialSubscription`, race-safe по `telegram_id < 0`).
 - **Invite / Referral** — реферальная система: один код на реферера (`UNIQUE`-ограничение),
   подсчёт рефералов в `ReferralCache`, инвалидация кэша при привязке.
 

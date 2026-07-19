@@ -371,7 +371,7 @@ ConnMaxIdleTime = 2m
 
 **Transactions used for:**
 - `CreateSubscription`: revoke old + create new (atomic)
-- `BindTrialSubscription`: check telegram_id=0 → update (race-safe)
+- `BindTrialSubscription`: check telegram_id < 0 → update (race-safe)
 
 **Orders/Products support:**
 - `Product` — purchasable subscription product bound to a plan (name, price, duration)
