@@ -165,15 +165,11 @@ eventLoop:
 	logger.Info("Graceful shutdown initiated")
 	botAPI.StopReceivingUpdates()
 
-	// Drain the updates channel to prevent goroutine leak. Bounded by ctx so it
-	// can never block past shutdown even if the underlying channel is not closed.
+	// Drain the updates channel to prevent goroutine leak. StopReceivingUpdates
+	// closes the channel (via the polling goroutine on shutdownChannel), so a
+	// plain range exits once the buffered updates are exhausted.
 	go func() {
-		for {
-			select {
-			case <-updates:
-			case <-ctx.Done():
-				return
-			}
+		for range updates {
 		}
 	}()
 
