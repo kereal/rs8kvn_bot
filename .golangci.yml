@@ -1,8 +1,60 @@
+version: "2"
+
 run:
   timeout: 5m
 
-issues:
-  exclude-rules:
+linters:
+  default: all
+  disable:
+    - depguard
+    - exhaustruct
+    - forcetypeassert
+    - funlen
+    - gochecknoglobals
+    - gocognit
+    - gochecknoinits
+    - goconst
+    - gocyclo
+    - godot
+    - godox
+    - ireturn
+    - lll
+    - maintidx
+    - mnd
+    - nestif
+    - nlreturn
+    - noctx
+    - paralleltest
+    - predeclared
+    - tagliatelle
+    - testpackage
+    - varnamelen
+    - wrapcheck
+    - wsl
+    - cyclop
+    - dupl
+    - err113
+    - funcorder
+    - gosmopolitan
+    - nonamedreturns
+    - perfsprint
+    - prealloc
+    - recvcheck
+    - revive
+    - intrange
+    - nilnil
+    - exhaustive
+    - testifylint
+    - thelper
+    - unparam
+    - usetesting
+    - containedctx
+    - interfacebloat
+    - nolintlint
+    - usestdlibvars
+
+linters.exclusions:
+  rules:
     # Test files in internal/ directory
     - path: internal/.+_test\.go$
       linters:
@@ -78,53 +130,3 @@ issues:
     - path: internal/flag/flag\.go
       linters:
         - inamedparam
-
-linters:
-  default: all
-  disable:
-    - depguard
-    - exhaustruct
-    - forcetypeassert
-    - funlen
-    - gochecknoglobals
-    - gocognit
-    - gochecknoinits
-    - goconst
-    - gocyclo
-    - godot
-    - godox
-    - ireturn
-    - lll
-    - maintidx
-    - mnd
-    - nestif
-    - nlreturn
-    - noctx
-    - paralleltest
-    - predeclared
-    - tagliatelle
-    - testpackage
-    - varnamelen
-    - wrapcheck
-    - wsl
-    - cyclop
-    - dupl
-    - err113
-    - funcorder
-    - gosmopolitan
-    - nonamedreturns
-    - perfsprint
-    - prealloc
-    - recvcheck
-    - revive
-    - intrange
-    - nilnil
-    - exhaustive
-    - testifylint
-    - thelper
-    - unparam
-    - usetesting
-    - containedctx
-    - interfacebloat
-    - nolintlint
-    - usestdlibvars

@@ -48,7 +48,7 @@
     — задокументированный trade-off из памяти строки 24-25), утверждение
     `len(chunk) ≤ maxLen` ему противоречит. Остальные 3 подтеста валидны.
   - `TestBroadcastSession_TTLExpiry` — переписан с `setupE2EEnv` на bot-уровневый
-    `NewTestFixture` (есь в `integration_test.go`); использует неэкспортируемые
+    `NewTestFixture` (есть в `integration_test.go`); использует неэкспортируемые
     `startBroadcastSession`/`getBroadcastSession`/`broadcastMu`/`broadcastSessions`/
     `broadcastSessionActive`.
 - Проверено: `go vet -tags integration ./...` в `internal/bot` и `tests/e2e`

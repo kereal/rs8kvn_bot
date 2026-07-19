@@ -1,7 +1,7 @@
 # Security Policy — rs8kvn_bot
 
-**Version:** 2.3.0  
-**Last updated:** 2026-07-02
+**Version:** 2.3.4
+**Last updated:** 2026-07-19
 
 ---
 
@@ -194,7 +194,7 @@ Instead, contact us privately:
 ### If Bot is Compromised
 
 1. **Isolate:** Stop container / kill process
-2. **Preserve evidence:** Copy logs (`data/bot.log`), DB (`tgvpn.db`), memory dump if possible
+2. **Preserve evidence:** Copy logs (`data/bot.log`), DB (`rs8kvn.db`), memory dump if possible
 3. **Analyze:** Check logs for unauthorized access, unusual API calls, new admin users in Telegram
 4. **Rotate secrets:**
    - New Telegram bot token (via @BotFather)
@@ -237,7 +237,7 @@ GLOBAL_SUB_URL=https://sub.example.com  # Public HTTPS URL for subscription link
 SUBSERVER_ACCESS_LOG=true               # Enable access logging on sub server
 
 # Database (on persistent volume)
-DATABASE_PATH=/app/data/tgvpn.db
+DATABASE_PATH=/app/data/rs8kvn.db
 
 # Logging
 LOG_LEVEL=warn  # Less verbose in prod
@@ -296,11 +296,10 @@ docker run -d \
 
 | Package | Version | Known vulns? |
 |---------|---------|--------------|
-| `golang.org/x/sync` | v0.16.0 | None |
-| `gorm.io/gorm` | v1.31.1 | None |
-| `github.com/mattn/go-sqlite3` | v1.14.28 | None (CVE-2023-32636 patched) |
-| `go.uber.org/zap` | v1.27.1 | None |
-| `github.com/prometheus/client_golang` | v1.22.0 | None |
+| `gorm.io/gorm` | v1.31.2 | None |
+| `github.com/mattn/go-sqlite3` | v1.14.47 | None (CVE-2023-32636 patched) |
+| `go.uber.org/zap` | v1.28.0 | None |
+| `github.com/prometheus/client_golang` | v1.23.2 | None |
 
 **Check regularly:**
 ```bash
@@ -331,4 +330,4 @@ go mod verify
 Security issues: **security@kereal.me** (example)  
 General questions: GitHub Issues (public)
 
-*Last updated: 2026-07-02*
+*Last updated: 2026-07-19*
