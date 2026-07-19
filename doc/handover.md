@@ -190,7 +190,7 @@ Cache.Set(240s) → return body with Content-Type + Subscription-Userinfo
 | Migrations | `golang-migrate/migrate/v4` | v4.19.1 |
 | QR Code | `piglig/go-qr` | v1.1.0 |
 | Logging | `go.uber.org/zap` + `lumberjack.v2` | v2.2.1 |
-| Error tracking | `getsentry/sentry-go` | v0.47.0 |
+| Error tracking | `getsentry/sentry-go` | v0.48.0 |
 | Metrics | `prometheus/client_golang` | v1.23.2 |
 | Concurrency | `golang.org/x/sync/singleflight` | — |
 | Testing | `stretchr/testify` | v1.11.1 |
