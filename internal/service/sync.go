@@ -653,6 +653,9 @@ func (s *SyncService) SyncPendingNodes(ctx context.Context) error {
 			logger.Warn("sync pending nodes: failed to acquire lock",
 				zap.Uint("subscription_id", subID),
 				zap.Error(err))
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				break
+			}
 			continue
 		}
 
