@@ -402,7 +402,7 @@ func (m *DatabaseService) CountTrialSubscriptions(ctx context.Context) (int64, e
 	defer m.mu.RUnlock()
 	var count int64
 	for _, sub := range m.Subscriptions {
-		if sub.TelegramID == 0 {
+		if sub.TelegramID < 0 {
 			count++
 		}
 	}
