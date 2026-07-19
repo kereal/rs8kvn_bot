@@ -1,8 +1,8 @@
 run:
   timeout: 5m
 
-exclusions:
-  rules:
+issues:
+  exclude-rules:
     # Test files in internal/ directory
     - path: internal/.+_test\.go$
       linters:
