@@ -279,11 +279,11 @@ All tests pass with `-race` detector. Fuzzing enabled for critical functions.
 - **Trial cookie:** `rs8kvn_trial_{code}` prevents duplication for 3 hours (HttpOnly, Secure, SameSite=Strict)
 - **Atomic cleanup:** `DELETE ... RETURNING` for expired trials (prevent race with bind)
 - **Share referral:** `pendingInvites[chatID]` cached 60 min (in-memory, periodic cleanup prevents leak)
-- **TelegramID conventions:** Positive = bound users, Negative = unbound trial subscriptions, 0 = unused
+- **TelegramID conventions:** Positive = bound users, Negative = unbound trial subscriptions
 
 ### Subscription Deletion (v2.2.0+)
-- **Order:** DB-first, then XUI-best-effort
-- **Rationale:** If DB delete fails → XUI untouched (safe to retry). If XUI fails after DB success → orphaned client (less critical, manual cleanup).
+- **Order:** Mark as revoked → best-effort deprovision VPN access → physical deletion of DB row
+- **Rationale:** Subscription is immediately inaccessible after revoked status is set. VPN deprovisioning is best-effort (background sync retries on failure). Physical deletion happens last. See AGENTS.md for detailed flow description.
 - **Referral cache:** `DecrementReferralCount` called after successful deletion.
 
 ### Subscription Proxy (v2.3.4+)
@@ -304,8 +304,8 @@ All tests pass with `-race` detector. Fuzzing enabled for critical functions.
 
 ### Database
 - **Engine:** SQLite (mattn/go-sqlite3, WAL mode)
-- **Soft deletes:** Отсутствуют — удаление заменено на `status='revoked'` (см. AGENTS.md: Delete flow). Строки в БД физически удаляются только после депровизионирования VPN-доступа.
-- **Trial subscriptions:** `telegram_id = 0` (not NULL) until activated via `/start trial_{subID}`
+- **Soft deletes:** Отсутствуют — при удалении подписка сначала помечается `status='revoked'`, затем выполняется best-effort депровизионирование VPN-доступа, и только потом происходит физическое удаление строки из БД (см. AGENTS.md: Delete flow).
+- **Trial subscriptions:** `telegram_id < 0` (negative value) until activated via `/start trial_{subID}`
 - **Migrations:** Auto-applied on startup from `internal/database/migrations/` (embedded via `go:embed`)
 - **Legacy support:** Auto-migration for pre-embedded databases (adds `subscription_id` column, drops `x_ui_host`)
 - **trial_requests cleanup:** 1-hour cutoff (matching rate-limit window) + 1s buffer to avoid boundary race
