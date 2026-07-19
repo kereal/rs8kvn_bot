@@ -23,6 +23,7 @@ import (
 
 type SubscriptionRepositoryFake struct {
 	GetByTelegramIDFunc             func(ctx context.Context, telegramID int64) (*database.Subscription, error)
+	GetAnyByTelegramIDFunc             func(ctx context.Context, telegramID int64) (*database.Subscription, error)
 	CreateSubscriptionFunc          func(ctx context.Context, sub *database.Subscription, inviteCode string) error
 	UpdateSubscriptionFunc          func(ctx context.Context, sub *database.Subscription) error
 	DeleteSubscriptionFunc          func(ctx context.Context, telegramID int64) error
@@ -52,6 +53,12 @@ func NewSubscriptionRepository() *SubscriptionRepositoryFake { return &Subscript
 func (m *SubscriptionRepositoryFake) GetByTelegramID(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 	if m.GetByTelegramIDFunc != nil {
 		return m.GetByTelegramIDFunc(ctx, telegramID)
+	}
+	return nil, gorm.ErrRecordNotFound
+}
+func (m *SubscriptionRepositoryFake) GetAnyByTelegramID(ctx context.Context, telegramID int64) (*database.Subscription, error) {
+	if m.GetAnyByTelegramIDFunc != nil {
+		return m.GetAnyByTelegramIDFunc(ctx, telegramID)
 	}
 	return nil, gorm.ErrRecordNotFound
 }

@@ -57,6 +57,7 @@ type SubscriptionCRUD interface {
 // SubscriptionQueries retrieves subscriptions by various criteria.
 type SubscriptionQueries interface {
 	GetByTelegramID(ctx context.Context, telegramID int64) (*database.Subscription, error)
+	GetAnyByTelegramID(ctx context.Context, telegramID int64) (*database.Subscription, error)
 	GetByID(ctx context.Context, id uint) (*database.Subscription, error)
 	GetLatestSubscriptions(ctx context.Context, limit int) ([]database.Subscription, error)
 	GetAllSubscriptions(ctx context.Context) ([]database.Subscription, error)

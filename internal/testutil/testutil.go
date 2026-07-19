@@ -78,6 +78,7 @@ type DatabaseService struct {
 	OrdersBySubscriptionID                      map[uint][]database.Order
 	PingFunc                                    func(ctx context.Context) error
 	GetByTelegramIDFunc                         func(ctx context.Context, telegramID int64) (*database.Subscription, error)
+	GetAnyByTelegramIDFunc                    func(ctx context.Context, telegramID int64) (*database.Subscription, error)
 	CreateSubscriptionFunc                      func(ctx context.Context, sub *database.Subscription, inviteCode string) error
 	UpdateSubscriptionFunc                      func(ctx context.Context, sub *database.Subscription) error
 	DeleteSubscriptionFunc                      func(ctx context.Context, telegramID int64) error
@@ -166,6 +167,18 @@ func (m *DatabaseService) Transaction(ctx context.Context, fn func(*gorm.DB) err
 func (m *DatabaseService) GetByTelegramID(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 	if m.GetByTelegramIDFunc != nil {
 		return m.GetByTelegramIDFunc(ctx, telegramID)
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if sub, ok := m.Subscriptions[telegramID]; ok {
+		return sub, nil
+	}
+	return nil, gorm.ErrRecordNotFound
+}
+
+func (m *DatabaseService) GetAnyByTelegramID(ctx context.Context, telegramID int64) (*database.Subscription, error) {
+	if m.GetAnyByTelegramIDFunc != nil {
+		return m.GetAnyByTelegramIDFunc(ctx, telegramID)
 	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()

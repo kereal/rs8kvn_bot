@@ -111,6 +111,29 @@ func (s *SubscriptionService) Create(ctx context.Context, telegramID int64, user
 		return nil, fmt.Errorf("lookup subscription: %w", err)
 	}
 
+	// No active subscription. If a non-active one exists (e.g. left "revoked"
+	// after a partially-failed delete), reanimate it instead of inserting a
+	// duplicate row that would violate telegram_id uniqueness.
+	existingAny, anyErr := s.db.GetAnyByTelegramID(ctx, telegramID)
+	if anyErr == nil {
+		reanimated, reErr := s.reanimateRevokedSubscription(ctx, existingAny, inviteCode)
+		if reErr != nil {
+			return nil, fmt.Errorf("reanimate subscription: %w", reErr)
+		}
+		referrerID := int64(0)
+		if reanimated.ReferredBy != nil {
+			referrerID = *reanimated.ReferredBy
+		}
+		return &CreateResult{
+			Subscription:    reanimated,
+			SubscriptionURL: s.cfg.SubURL(reanimated.SubscriptionID),
+			ReferrerTGID:    referrerID,
+		}, nil
+	}
+	if !errors.Is(anyErr, database.ErrSubscriptionNotFound) && !errors.Is(anyErr, gorm.ErrRecordNotFound) {
+		return nil, fmt.Errorf("lookup subscription (any status): %w", anyErr)
+	}
+
 	plan, err := s.db.GetPlanByName(ctx, database.FreePlanName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve free plan: %w", err)
@@ -168,6 +191,66 @@ func calculateProductExpiry(now time.Time, currentPlanID uint, currentExpiry *ti
 // GetByTelegramID retrieves a subscription by Telegram user ID.
 func (s *SubscriptionService) GetByTelegramID(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 	return s.db.GetByTelegramID(ctx, telegramID)
+}
+
+// reanimateRevokedSubscription recovers a subscription left in a non-active state
+// (e.g. "revoked") after a partially-failed delete, turning it back into an
+// active free-plan subscription. This avoids creating a second row for the same
+// telegram_id (which would violate the telegram_id uniqueness expectation and
+// could otherwise permanently block the user from re-subscribing).
+//
+// The existing subscription_nodes are wiped so ensureSubscriptionNodes can rebuild
+// them as pending_add — leftovers from the failed delete (pending_remove) would
+// otherwise make the next sync attempt to deprovision instead of re-provision.
+func (s *SubscriptionService) reanimateRevokedSubscription(ctx context.Context, sub *database.Subscription, inviteCode string) (*database.Subscription, error) {
+	freePlan, err := s.db.GetPlanByName(ctx, database.FreePlanName)
+	if err != nil {
+		return nil, fmt.Errorf("resolve free plan: %w", err)
+	}
+
+	if inviteCode != "" {
+		inv, err := s.db.GetInviteByCode(ctx, inviteCode)
+		if err == nil {
+			inviteVal := inviteCode
+			sub.InviteCode = &inviteVal
+			referredBy := inv.ReferrerTGID
+			sub.ReferredBy = &referredBy
+		} else if !errors.Is(err, database.ErrInviteNotFound) {
+			return nil, fmt.Errorf("resolve invite: %w", err)
+		}
+	} else {
+		sub.InviteCode = nil
+		sub.ReferredBy = nil
+	}
+
+	sub.PlanID = freePlan.ID
+	sub.Status = "active"
+	sub.ExpiresAt = nil
+	sub.ProductID = nil
+	sub.StartedAt = nil
+	sub.PricePaidCents = 0
+	sub.Currency = nil
+	sub.Devices = "[]"
+	sub.Ips = "[]"
+
+	if err := s.db.UpdateSubscription(ctx, sub); err != nil {
+		return nil, fmt.Errorf("reanimate subscription: %w", err)
+	}
+
+	// Wipe stale node bindings; ensureSubscriptionNodes rebuilds them as pending_add.
+	if err := s.db.DeleteSubscriptionNodesBySubscriptionID(ctx, sub.ID); err != nil {
+		logger.Warn("failed to clear subscription nodes during reanimation",
+			zap.Uint("subscription_id", sub.ID),
+			zap.Error(err))
+	}
+
+	if err := s.ensureSubscriptionNodes(ctx, sub); err != nil {
+		return nil, fmt.Errorf("ensure subscription nodes: %w", err)
+	}
+
+	metrics.SubscriptionCreatesTotal.Inc()
+	s.RefreshActiveSubscriptionsMetric(ctx)
+	return sub, nil
 }
 
 // revokeAndDeprovisionThenDelete runs the two-phase subscription teardown shared by
@@ -646,8 +729,18 @@ func (s *SubscriptionService) GetOrCreateSubscription(ctx context.Context, teleg
 		}
 		return existing, nil
 	}
-	if !errors.Is(err, database.ErrSubscriptionNotFound) {
+	if !errors.Is(err, database.ErrSubscriptionNotFound) && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, fmt.Errorf("lookup subscription: %w", err)
+	}
+	// No active subscription. If a non-active one exists (e.g. left "revoked"
+	// after a partially-failed delete), reanimate it instead of inserting a
+	// duplicate row that would violate telegram_id uniqueness.
+	existingAny, anyErr := s.db.GetAnyByTelegramID(ctx, telegramID)
+	if anyErr == nil {
+		return s.reanimateRevokedSubscription(ctx, existingAny, inviteCode)
+	}
+	if !errors.Is(anyErr, database.ErrSubscriptionNotFound) && !errors.Is(anyErr, gorm.ErrRecordNotFound) {
+		return nil, fmt.Errorf("lookup subscription (any status): %w", anyErr)
 	}
 
 	freePlan, err := s.db.GetPlanByName(ctx, database.FreePlanName)
