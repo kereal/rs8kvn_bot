@@ -51,7 +51,7 @@
 
 ## Ситуация по subserver конкретно
 
-```
+```text
 subserver/cache.go ──── cache_hits_total{cache="subserver"}      живая
                         cache_misses_total{cache="subserver"}    живая
 

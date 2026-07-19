@@ -46,6 +46,10 @@ func (w *SubscriptionExpireWorker) Run(ctx context.Context) {
 func (w *SubscriptionExpireWorker) process(ctx context.Context) {
 	metrics.SubscriptionExpireTotal.Inc()
 	start := time.Now()
+	defer func() {
+		metrics.SubscriptionExpireDuration.Observe(time.Since(start).Seconds())
+	}()
+
 	subs, err := w.db.GetExpiredPaidSubscriptions(ctx, time.Now().UTC())
 	if err != nil {
 		logger.Error("Failed to query expired subscriptions", zap.Error(err))
@@ -71,5 +75,4 @@ func (w *SubscriptionExpireWorker) process(ctx context.Context) {
 	logger.Info("Subscription expiration processed",
 		zap.Int("found", len(subs)),
 		zap.Int("expired", processed))
-	metrics.SubscriptionExpireDuration.Observe(time.Since(start).Seconds())
 }

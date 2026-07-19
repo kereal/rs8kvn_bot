@@ -508,9 +508,11 @@ func (h *Handler) clearBroadcastSession(chatID int64) {
 // break at spaces and newlines, but never breaks an open MarkdownV2 entity: a
 // word that would exceed maxLen while an entity is still open is kept whole
 // (the chunk may then exceed maxLen, but the entity stays valid). A single
-// token longer than maxLen that is NOT inside an entity is hard-split at rune
-// boundaries so multi-byte characters are never split — this may break the
-// entity (an accepted trade-off for pathological, whitespace-free input).
+// token longer than maxLen that is NOT inside an entity is hard-split by
+// UTF-8 byte length at valid rune boundaries so multi-byte characters are
+// never split and every returned chunk is at most maxLen bytes — this may
+// break the entity (an accepted trade-off for pathological, whitespace-free
+// input).
 func splitMessage(text string, maxLen int) []string {
 	if maxLen <= 0 {
 		return []string{text}
@@ -616,17 +618,27 @@ func updateEntities(open *[]string, seg string) {
 }
 
 // hardSplitToken splits a single over-long token into chunks of at most maxLen
-// runes, cutting only at rune boundaries so multi-byte characters are never
-// split.
+// bytes, cutting only at rune boundaries so multi-byte characters are never
+// split and every returned chunk is at most maxLen bytes.
 func hardSplitToken(word string, maxLen int) []string {
+	// Split by runes first to preserve UTF-8, then re-encode each chunk and
+	// verify its byte length stays within maxLen.
 	runes := []rune(word)
 	var out []string
 	for len(runes) > 0 {
-		take := maxLen
-		if take > len(runes) {
-			take = len(runes)
+		// Grow the chunk by runes until adding the next rune would exceed
+		// maxLen bytes (or we run out of runes).
+		take := 0
+		for take < len(runes) {
+			next := string(runes[:take+1])
+			if len(next) > maxLen {
+				break
+			}
+			take++
 		}
 		if take == 0 {
+			// A single rune is wider than maxLen; emit it alone to make
+			// progress without producing invalid UTF-8.
 			take = 1
 		}
 		out = append(out, string(runes[:take]))

@@ -21,11 +21,10 @@ func TestE2E_Concurrent_CreateSubscription_SameUser(t *testing.T) {
 	defer env.db.Close()
 
 	ctx := context.Background()
-
 	var wg sync.WaitGroup
 	results := make(chan error, 5)
 
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -49,10 +48,17 @@ func TestE2E_Concurrent_CreateSubscription_SameUser(t *testing.T) {
 
 	assert.GreaterOrEqual(t, successCount, 1, "At least one should succeed")
 
-	sub, err := env.db.GetByTelegramID(ctx, env.chatID)
+	// After all concurrent creates, the user must have exactly one active
+	// subscription (idempotency), regardless of how many calls raced.
+	all, err := env.db.GetAllSubscriptions(ctx)
 	require.NoError(t, err)
-	assert.Equal(t, env.chatID, sub.TelegramID)
-	assert.Equal(t, "active", sub.Status)
+	active := 0
+	for _, s := range all {
+		if s.TelegramID == env.chatID && s.Status == "active" {
+			active++
+		}
+	}
+	assert.Equal(t, 1, active, "exactly one active subscription should exist for the user after concurrent creates")
 }
 
 func TestE2E_Concurrent_CreateSubscription_DifferentUsers(t *testing.T) {
@@ -146,7 +152,7 @@ func TestE2E_Concurrent_TrialBind_SameTrial(t *testing.T) {
 			boundCount++
 		}
 	}
-	assert.Equal(t, 1, boundCount, "Trial should be bound to exactly one user")
+	assert.Equal(t, 1, boundCount, "Exactly one trial subscription should be bound")
 }
 
 func TestE2E_Concurrent_Handler_CreateSubscription(t *testing.T) {
@@ -158,30 +164,37 @@ func TestE2E_Concurrent_Handler_CreateSubscription(t *testing.T) {
 	var mu sync.Mutex
 	sendCount := 0
 
-	for i := 0; i < 5; i++ {
-		env.handler.HandleCallback(ctx, tgbotapi.Update{
-			CallbackQuery: &tgbotapi.CallbackQuery{
-				Message: &tgbotapi.Message{
-					Chat: &tgbotapi.Chat{ID: env.chatID},
+	var wg sync.WaitGroup
+	for range 5 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			env.handler.HandleCallback(ctx, tgbotapi.Update{
+				CallbackQuery: &tgbotapi.CallbackQuery{
+					Message: &tgbotapi.Message{
+						Chat: &tgbotapi.Chat{ID: env.chatID},
+						From: &tgbotapi.User{
+							ID:       env.chatID,
+							UserName: env.username,
+						},
+					},
 					From: &tgbotapi.User{
 						ID:       env.chatID,
 						UserName: env.username,
 					},
+					Data: "create_subscription",
 				},
-				From: &tgbotapi.User{
-					ID:       env.chatID,
-					UserName: env.username,
-				},
-				Data: "create_subscription",
-			},
-		})
-		mu.Lock()
-		if env.botAPI.SendCalledSafe() {
-			sendCount++
-		}
-		env.botAPI.SetSendCalled(false)
-		mu.Unlock()
+			})
+			mu.Lock()
+			if env.botAPI.SendCalledSafe() {
+				sendCount++
+			}
+			env.botAPI.SetSendCalled(false)
+			mu.Unlock()
+		}()
 	}
+
+	wg.Wait()
 
 	assert.GreaterOrEqual(t, sendCount, 1, "At least one message should be sent")
 
