@@ -2,9 +2,11 @@ package bot
 
 import (
 	"context"
+	"time"
 
 	"github.com/kereal/rs8kvn_bot/internal/interfaces"
 	"github.com/kereal/rs8kvn_bot/internal/logger"
+	"github.com/kereal/rs8kvn_bot/internal/metrics"
 	"github.com/kereal/rs8kvn_bot/internal/ratelimiter"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -39,8 +41,13 @@ func (ms *MessageSender) SendWithError(ctx context.Context, msg tgbotapi.Message
 		return ctx.Err()
 	}
 
+	start := time.Now()
 	_, err := ms.bot.Send(msg)
+	duration := time.Since(start).Seconds()
+
 	if err != nil {
+		metrics.TelegramAPICallsTotal.WithLabelValues("send", "error").Inc()
+		metrics.TelegramAPIDuration.WithLabelValues("send").Observe(duration)
 		if isUserBlockedError(err) {
 			logger.Warn("Failed to send message", zap.Error(err))
 		} else {
@@ -49,18 +56,28 @@ func (ms *MessageSender) SendWithError(ctx context.Context, msg tgbotapi.Message
 		return err
 	}
 
+	metrics.TelegramAPICallsTotal.WithLabelValues("send", "success").Inc()
+	metrics.TelegramAPIDuration.WithLabelValues("send").Observe(duration)
 	return nil
 }
 
 // SafeSend sends a message without rate limiting and logs errors.
 func (ms *MessageSender) SafeSend(chattable tgbotapi.Chattable) {
+	start := time.Now()
 	_, err := ms.bot.Send(chattable)
+	duration := time.Since(start).Seconds()
+
 	if err != nil {
+		metrics.TelegramAPICallsTotal.WithLabelValues("send", "error").Inc()
+		metrics.TelegramAPIDuration.WithLabelValues("send").Observe(duration)
 		if isUserBlockedError(err) {
 			logger.Warn("Failed to send message", zap.Error(err))
 		} else {
 			logger.Error("Failed to send message", zap.Error(err))
 		}
+	} else {
+		metrics.TelegramAPICallsTotal.WithLabelValues("send", "success").Inc()
+		metrics.TelegramAPIDuration.WithLabelValues("send").Observe(duration)
 	}
 }
 

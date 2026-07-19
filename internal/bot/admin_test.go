@@ -175,16 +175,26 @@ func TestHandleDel_XUIDeleteFailure(t *testing.T) {
 		}, nil
 	}
 
-	mockXUI.DeleteClientFunc = func(ctx context.Context, email string) error {
-		return errors.New("xui error")
+	// Best-effort deprovision failure MUST NOT block the physical delete.
+	// In the bot layer the deprovision is owned by the subscription service
+	// (syncService), not the XUI client directly — so we assert that the
+	// handler still delegates the teardown to DeleteByID (via
+	// DeleteSubscriptionByID) regardless of any external-sync error.
+	var deleteByIDCalled bool
+	mockDB.DeleteSubscriptionByIDFunc = func(ctx context.Context, id uint) (*database.Subscription, error) {
+		deleteByIDCalled = true
+		return &database.Subscription{ID: id, ClientID: "client-123"}, nil
 	}
 
 	ctx := context.Background()
 	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "admin"}, "/del 5")
-
 	handler.HandleDel(ctx, update)
+	assert.True(t, deleteByIDCalled, "DeleteSubscriptionByID (physical delete) must run even if external deprovision fails")
 	assert.True(t, mockBot.SendCalledSafe())
-	assert.Contains(t, mockBot.LastSentTextSafe(), "Ошибка удаления")
+	// Best-effort deprovision failure does NOT surface as an error: the row was
+	// physically deleted (see AGENTS.md two-phase delete contract), so the user
+	// sees a success message, not "Ошибка удаления".
+	assert.Contains(t, mockBot.LastSentTextSafe(), "удалена")
 }
 
 func TestHandleDel_DatabaseDeleteFailure(t *testing.T) {

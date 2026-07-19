@@ -855,6 +855,40 @@ func TestService_CountActiveSubscriptions(t *testing.T) {
 	assert.Equal(t, int64(4), count)
 }
 
+func TestService_CountTrialSubscriptions(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+
+	// Create trial subscriptions (telegram_id < 0)
+	for i := 0; i < 3; i++ {
+		sub := &Subscription{
+			TelegramID:     int64(-1000 - i), // negative IDs are for trials
+			Username:       fmt.Sprintf("trial%d", i),
+			ClientID:       fmt.Sprintf("client-trial-%d", i),
+			SubscriptionID: fmt.Sprintf("sub-trial-%d", i),
+			ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
+			Status:         "active",
+		}
+		require.NoError(t, svc.CreateSubscription(context.Background(), sub, ""))
+	}
+
+	// Create regular subscription (telegram_id > 0)
+	regularSub := &Subscription{
+		TelegramID:     12345,
+		Username:       "regular",
+		ClientID:       "client-regular",
+		SubscriptionID: "sub-regular",
+		ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
+		Status:         "active",
+	}
+	require.NoError(t, svc.CreateSubscription(context.Background(), regularSub, ""))
+
+	count, err := svc.CountTrialSubscriptions(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, int64(3), count)
+}
+
 func TestService_CountExpiredSubscriptions(t *testing.T) {
 	t.Parallel()
 

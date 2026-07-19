@@ -63,13 +63,14 @@ var (
 		[]string{"type"},
 	)
 
-	// BotUpdateDuration is a histogram of bot update processing duration in seconds.
-	BotUpdateDuration = promauto.NewHistogram(
+	// BotUpdateDuration is a histogram of bot update processing duration in seconds with label: command.
+	BotUpdateDuration = promauto.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Name:    "bot_update_duration_seconds",
 			Help:    "Bot update processing duration in seconds",
 			Buckets: []float64{0.01, 0.05, 0.1, 0.3, 0.6, 1, 2},
 		},
+		[]string{"command"},
 	)
 
 	// XUIRequestsTotal is a counter of requests to 3x-ui panel with labels: operation, result.
@@ -92,6 +93,25 @@ var (
 		[]string{"operation"},
 	)
 
+	// TelegramAPICallsTotal is a counter of Telegram Bot API calls with labels: method, result.
+	TelegramAPICallsTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "telegram_api_calls_total",
+			Help: "Total number of Telegram Bot API calls",
+		},
+		[]string{"method", "result"},
+	)
+
+	// TelegramAPIDuration is a histogram of Telegram Bot API call duration in seconds.
+	TelegramAPIDuration = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "telegram_api_duration_seconds",
+			Help:    "Telegram Bot API call duration in seconds",
+			Buckets: []float64{0.01, 0.05, 0.1, 0.3, 0.6, 1, 2, 5},
+		},
+		[]string{"method"},
+	)
+
 	// DBQueriesTotal is a counter of database queries with labels: operation, result.
 	DBQueriesTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
@@ -109,6 +129,38 @@ var (
 			Buckets: []float64{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5},
 		},
 		[]string{"operation"},
+	)
+
+	// DBPoolOpen is a gauge of current open database connections.
+	DBPoolOpen = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "db_pool_open",
+			Help: "Current number of open database connections",
+		},
+	)
+
+	// DBPoolInUse is a gauge of database connections currently in use.
+	DBPoolInUse = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "db_pool_in_use",
+			Help: "Current number of database connections in use",
+		},
+	)
+
+	// DBPoolIdle is a gauge of idle database connections.
+	DBPoolIdle = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "db_pool_idle",
+			Help: "Current number of idle database connections",
+		},
+	)
+
+	// DBPoolWait is a counter of times a database connection wait exceeded the pool.
+	DBPoolWait = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "db_pool_wait_total",
+			Help: "Total number of times a database connection wait exceeded the pool",
+		},
 	)
 
 	// CacheHitsTotal is a counter of cache hits with label: cache.
@@ -144,6 +196,14 @@ var (
 		prometheus.GaugeOpts{
 			Name: "active_subscriptions",
 			Help: "Current number of active subscriptions",
+		},
+	)
+
+	// TrialSubscriptions is a gauge of current trial subscriptions (telegramID=0).
+	TrialSubscriptions = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "trial_subscriptions",
+			Help: "Current number of trial subscriptions",
 		},
 	)
 

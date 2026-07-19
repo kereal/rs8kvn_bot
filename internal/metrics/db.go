@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	"context"
 	"time"
 
 	"gorm.io/gorm"
@@ -56,4 +57,18 @@ func recordDBMetric(tx *gorm.DB, startTimeKey, operation string) {
 	}
 	DBQueryDuration.WithLabelValues(operation).Observe(duration)
 	DBQueriesTotal.WithLabelValues(operation, result).Inc()
+}
+
+// CollectDBPoolMetrics collects database connection pool statistics.
+func CollectDBPoolMetrics(ctx context.Context, db *gorm.DB) {
+	sqlDB, err := db.DB()
+	if err != nil {
+		return
+	}
+
+	stats := sqlDB.Stats()
+	DBPoolOpen.Set(float64(stats.OpenConnections))
+	DBPoolInUse.Set(float64(stats.InUse))
+	DBPoolIdle.Set(float64(stats.Idle))
+	DBPoolWait.Add(float64(stats.WaitCount))
 }
