@@ -229,7 +229,7 @@ func TestOrderService_ActivateProduct_CreateOrderError(t *testing.T) {
 	assert.ErrorContains(t, err, "create order")
 }
 
-func TestOrderService_ActivateProduct_PaidProduct_ExpiryModified(t *testing.T) {
+func TestOrderService_ActivateProduct_PaidProduct_DoesNotModifySubscription(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC().Truncate(time.Minute)
 	oldExpiry := now.Add(10 * 24 * time.Hour)
@@ -270,7 +270,12 @@ func TestOrderService_ActivateProduct_PaidProduct_ExpiryModified(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotNil(t, order)
 	assert.Equal(t, database.OrderStatusPending, order.Status)
-	assert.Equal(t, oldExpiry.AddDate(0, 0, product.DurationDays), *sub.ExpiresAt)
+	assert.Equal(t, oldExpiry, *sub.ExpiresAt, "paid product must not modify subscription expiry")
+	assert.Equal(t, uint(1), sub.PlanID, "paid product must not change plan immediately")
+	assert.Nil(t, sub.ProductID)
+	assert.Equal(t, int64(0), sub.PricePaidCents)
+	assert.Nil(t, sub.Currency)
+	assert.Nil(t, sub.StartedAt)
 }
 
 func TestOrderService_ActivateProduct_FreeProduct_SyncSetupFailureReturnsError(t *testing.T) {
