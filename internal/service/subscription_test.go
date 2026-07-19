@@ -1587,3 +1587,65 @@ func TestXUIEmail_FallbackToTgID(t *testing.T) {
 		})
 	}
 }
+
+// TestSubscriptionService_Create_ReanimatesRevoked verifies the bug fix: when a
+// prior delete left the subscription in "revoked" state (partial delete failure),
+// Create must reanimate that single row instead of inserting a duplicate — which
+// would otherwise hit the telegram_id UNIQUE constraint and permanently block the
+// user from re-subscribing.
+func TestSubscriptionService_Create_ReanimatesRevoked(t *testing.T) {
+	t.Parallel()
+
+	db, err := testutil.NewTestDatabaseService(t)
+	require.NoError(t, err)
+	ctx := context.Background()
+
+	// Simulate a partially-failed delete: a row left in "revoked" with a
+	// stale subscription node binding (pending_remove from the failed deprovision).
+	revoked := &database.Subscription{
+		TelegramID:     777777,
+		Username:       "revoked_user",
+		ClientID:       "client-revoked",
+		SubscriptionID: "sub-revoked",
+		PlanID:         1,
+		Status:         "revoked",
+	}
+	require.NoError(t, db.CreateSubscription(ctx, revoked, ""))
+	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{
+		SubscriptionID: revoked.ID,
+		NodeID:         1,
+		Status:         database.SyncStatusPendingRemove,
+	}))
+
+	cfg := &config.Config{}
+	sources := []database.Node{}
+	xuiClients := map[uint]interfaces.XUIClient{}
+	svc := NewSubscriptionService(db, xuiClients, nil, sources, cfg)
+
+	result, err := svc.Create(ctx, 777777, "revoked_user", "")
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	// Exactly one row for this telegram_id, now active — no duplicate.
+	all, err := db.GetAllSubscriptions(ctx)
+	require.NoError(t, err)
+	var matching []database.Subscription
+	for _, s := range all {
+		if s.TelegramID == 777777 {
+			matching = append(matching, s)
+		}
+	}
+	require.Len(t, matching, 1, "must not create a second row")
+	assert.Equal(t, "active", matching[0].Status)
+
+	freePlan, err := db.GetPlanByName(ctx, database.FreePlanName)
+	require.NoError(t, err)
+	assert.Equal(t, freePlan.ID, matching[0].PlanID)
+	assert.Nil(t, matching[0].ExpiresAt)
+	assert.Equal(t, uint(revoked.ID), matching[0].ID, "same row reanimated, not a new one")
+
+	// Stale node bindings were wiped so re-provision starts clean.
+	nodes, err := db.GetBySubscriptionID(ctx, revoked.ID)
+	require.NoError(t, err)
+	assert.Empty(t, nodes, "stale pending_remove node must be cleared")
+}

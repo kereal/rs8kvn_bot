@@ -25,6 +25,26 @@ func (s *Service) GetByTelegramID(ctx context.Context, telegramID int64) (*Subsc
 	return &sub, nil
 }
 
+// GetAnyByTelegramID retrieves a subscription by Telegram ID regardless of status.
+// Unlike GetByTelegramID (which only returns active subscriptions), this is used
+// to recover a subscription that was left in a non-active state (e.g. "revoked")
+// after a partially-failed delete, so it can be reanimated instead of creating a
+// duplicate row that violates the telegram_id uniqueness expectation.
+func (s *Service) GetAnyByTelegramID(ctx context.Context, telegramID int64) (*Subscription, error) {
+	var sub Subscription
+	result := s.db.WithContext(ctx).
+		Where("telegram_id = ?", telegramID).
+		Order("created_at DESC").
+		First(&sub)
+	if result.Error != nil {
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return nil, ErrSubscriptionNotFound
+		}
+		return nil, fmt.Errorf("failed to get subscription by telegram ID: %w", result.Error)
+	}
+	return &sub, nil
+}
+
 // GetByID retrieves a subscription by its database ID.
 func (s *Service) GetByID(ctx context.Context, id uint) (*Subscription, error) {
 	var sub Subscription
