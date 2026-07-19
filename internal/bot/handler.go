@@ -145,6 +145,9 @@ func (h *Handler) SetBot(bot interfaces.BotAPI) {
 func (h *Handler) SetBotConfig(bc *BotConfig) {
 	h.botConfig = bc
 	h.keyboards = NewKeyboardBuilder(bc.Username, h.cfg.ContactUsername, h.cfg.DonateCardNumber, h.cfg.DonateURL, h.cfg.SiteURL)
+	// Propagate to decomposed handlers so generated links (invite/share) use the
+	// real bot username instead of the startup placeholder.
+	h.referral.SetBotConfig(bc)
 }
 
 // Cache returns the subscription cache.

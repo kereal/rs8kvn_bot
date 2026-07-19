@@ -28,13 +28,20 @@ type TrafficInfo struct {
 }
 
 // PlanTrafficLimitGB returns the traffic limit in GB for the user's current plan.
+// Best-effort: DB failures are logged and fall back to 0 (unlimited) rather than
+// surfaced to the user.
 func (s *SubscriptionService) PlanTrafficLimitGB(ctx context.Context, telegramID int64) int {
 	sub, err := s.db.GetByTelegramID(ctx, telegramID)
-	if err != nil || sub == nil {
+	if err != nil {
+		logger.Warn("PlanTrafficLimitGB: failed to load subscription", zap.Int64("telegram_id", telegramID), zap.Error(err))
+		return 0
+	}
+	if sub == nil {
 		return 0
 	}
 	plan, planErr := s.db.GetPlanByID(ctx, sub.PlanID)
 	if planErr != nil {
+		logger.Warn("PlanTrafficLimitGB: failed to load plan, reporting unlimited", zap.Uint("plan_id", sub.PlanID), zap.Error(planErr))
 		return 0
 	}
 	return planTrafficLimitGB(plan)

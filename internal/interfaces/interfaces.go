@@ -13,6 +13,7 @@ import (
 
 var _ DatabaseService = (*database.Service)(nil)
 var _ XUIClient = (*xui.Client)(nil)
+var _ WebRepository = (*database.Service)(nil)
 
 // SubscriptionNodeCRUD provides basic CRUD operations for subscription nodes.
 type SubscriptionNodeCRUD interface {

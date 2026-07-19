@@ -155,9 +155,10 @@ var (
 		},
 	)
 
-	// DBPoolWait is a counter of times a database connection wait exceeded the pool.
-	DBPoolWait = promauto.NewCounter(
-		prometheus.CounterOpts{
+	// DBPoolWait is a gauge reflecting the cumulative number of times a
+	// database connection wait exceeded the pool (sql.DBStats.WaitCount).
+	DBPoolWait = promauto.NewGauge(
+		prometheus.GaugeOpts{
 			Name: "db_pool_wait_total",
 			Help: "Total number of times a database connection wait exceeded the pool",
 		},

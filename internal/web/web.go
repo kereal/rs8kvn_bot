@@ -118,6 +118,12 @@ func (s *Server) SetBotUsername(username string) {
 	defer s.mu.Unlock()
 	s.botUsername = username
 }
+// effectiveBotUsername returns the bot username for share/invite links.
+// It is the runtime-injected username from initBot (set via SetBotUsername);
+// the bot username comes from Telegram getMe, not from configuration.
+func (s *Server) effectiveBotUsername() string {
+	return s.botUsername
+}
 
 func (s *Server) Addr() string {
 	if s.listenerAddr != "" {
@@ -376,7 +382,7 @@ func (s *Server) HandleInvite(w http.ResponseWriter, r *http.Request) {
 	} else if existingSub != nil {
 		// Trial уже создан — показываем существующий
 		logger.Info("Existing trial found via cookie", zap.String("sub_id", existingSub.SubscriptionID))
-		telegramLink := "https://t.me/" + s.botUsername + "?start=trial_" + existingSub.SubscriptionID
+		telegramLink := "https://t.me/" + s.effectiveBotUsername() + "?start=trial_" + existingSub.SubscriptionID
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 		subURL := s.cfg.GlobalSubURL + existingSub.SubscriptionID
@@ -441,7 +447,7 @@ func (s *Server) HandleInvite(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	telegramLink := "https://t.me/" + s.botUsername + "?start=trial_" + result.SubID
+	telegramLink := "https://t.me/" + s.effectiveBotUsername() + "?start=trial_" + result.SubID
 	s.renderTrialPage(w, result.SubID, result.SubscriptionURL, telegramLink, s.cfg.TrialDurationHours)
 }
 

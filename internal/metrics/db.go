@@ -70,5 +70,5 @@ func CollectDBPoolMetrics(ctx context.Context, db *gorm.DB) {
 	DBPoolOpen.Set(float64(stats.OpenConnections))
 	DBPoolInUse.Set(float64(stats.InUse))
 	DBPoolIdle.Set(float64(stats.Idle))
-	DBPoolWait.Add(float64(stats.WaitCount))
+	DBPoolWait.Set(float64(stats.WaitCount))
 }
