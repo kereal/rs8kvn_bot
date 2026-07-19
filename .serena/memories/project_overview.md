@@ -5,7 +5,7 @@ Telegram-бот для продажи и управления VLESS+Reality+Visi
 Production-grade: миграции, мониторинг, rate-limiting, circuit breaker, graceful shutdown.
 
 ## Текущая версия
-**v2.3.0** — рефакторинг, VPN-абстракция (`internal/vpn`), SyncService с state machine (`pending_update`), миграции 024-027.
+**v2.3.4** — рефакторинг, VPN-абстракция (`internal/vpn`), SyncService с state machine (`pending_update`), миграции 000-029.
 
 ## Ключевые фичи
 - Планы (trial/free/paid) без `duration`, без `price` (duration/price вынесены в products)
@@ -17,8 +17,7 @@ Production-grade: миграции, мониторинг, rate-limiting, circuit
 - Авто-продление на 30-й день (через `SubscriptionResetDay` в x-ui)
 - Реферальная система: in-memory cache + периодический sync
 - Админ-уведомления, heartbeat, health endpoints (`/healthz`, `/readyz`)
-
-- Ротация логов (zap), ежедневные бэкапы БД
+- Ротация логов (zap), ежедневные бэкапы БД (имя `rs8kvn.db.backup.YYYYMMDD_HHMMSS`)
 - Sentry, rate-limiting per-user, circuit breaker для x-ui
 - O(1) LRU кэш подписок (RLock для concurrent reads)
 - Subscription status check в `/sub/{subID}` — revoked/expired → 404
@@ -58,9 +57,9 @@ Production-grade: миграции, мониторинг, rate-limiting, circuit
 ```
 cmd/bot/                     — точка входа, graceful shutdown
 internal/bot/                 — handlers, commands, callbacks, referral cache
-internal/database/           — GORM-модели, миграции 000-027, транзакции (10 файлов: + subscription_nodes.go)
+internal/database/           — GORM-модели, миграции 000-029, транзакции (9 файлов: + subscription_nodes.go)
 internal/service/            — SubscriptionService + SyncService
-internal/vpn/                — VPN client abstraction (3x-ui, proxman)
+internal/vpn/                — VPN client abstraction (3x-ui, proxman, fetch)
 internal/xui/                — 3x-ui HTTP-клиент + circuit breaker
 internal/interfaces/         — контракты (XUIClient, SubscriptionDatabase, SubscriptionService)
 internal/testutil/           — моки (MockDatabaseService, MockXUIClient, MockBotAPI)
@@ -71,9 +70,10 @@ internal/heartbeat/          — мониторинг
 internal/backup/             — ежедневные бэкапы с WAL checkpoint
 internal/scheduler/          — backup + trial cleanup
 internal/ratelimiter/        — per-user token bucket
-internal/web/                — /healthz, /readyz, /i/{code}, /sub/{subID} + singleflight
-internal/subserver/           — кэш + merge подписок
-internal/metrics/            — Prometheus (обёрнутый zap-логом, не реальный Prometheus)
+internal/web/                — /healthz, /readyz, /i/{code}, /sub/{subID}, /metrics, /payment/callback, /static/logo.png + singleflight
+internal/subserver/           — кэш + merge подписок (тонкий кэш-адаптер, без hot reload)
+internal/metrics/             — Prometheus (обёрнутый zap-логом, не реальный Prometheus)
+internal/flag/                — типизированный реестр env-переменных
 ```
 
 ## Bootstrap для AI-агента
@@ -83,7 +83,7 @@ internal/metrics/            — Prometheus (обёрнутый zap-логом, 
 3. При работе с x-ui API — прочитать `xui/auth-mechanism` + `xui/client-crud`
 4. При работе с trial/referral/subscription-nodes flows — прочитать `fixes/2026-06-03-*` + `subscription-nodes/state-machine`
 5. **Отвечать на русском** (AGENTS.md)
-6. **Не удалять** legacy-код без явного запроса (см. `roadmap`)
+6. **Не удалять** legacy-код без явного запроса
 
 ## Подробности
 - Архитектура: см. `architecture`

@@ -2,7 +2,7 @@
 
 **Repo:** https://github.com/kereal/rs8kvn_bot
 **Module:** `rs8kvn_bot` (Go 1.25+)
-**Version:** v2.3.0
+**Version:** v2.3.4
 **Branch:** `dev` (GitFlow: `main` = production, `dev` = integration, feature branches from dev or `plans_and_pricing`)
 
 ---
@@ -37,7 +37,7 @@
 │ • Commands    │    │ • /readyz     │    │   (03:00)     │
 │ • Callbacks   │    │ • /i/{code}   │    │ • Trial       │
 │ • Cache       │    │ • /sub/{subID}│    │   cleanup     │
-│ • RateLimit   │    │ • /api/v1/*   │    │   (hourly)    │
+│ • RateLimit   │    │ • /metrics    │    │   (hourly)    │
 └───────────────┘    └───────────────┘    └───────────────┘
         │                     │                     │
         └─────────────────────┼─────────────────────┘
@@ -127,7 +127,7 @@ CreateTrialSubscription(ctx, inviteCode)
         │   • Expiry: now + TRIAL_DURATION_HOURS
         │
         ▼
-Database: CreateTrialSubscription (is_trial=true, telegram_id=0)
+Database: CreateTrialSubscription (telegram_id=0, отрицательный ID)
         │
         ▼
 Set cookie: rs8kvn_trial_{code} = {subID}; HttpOnly; Secure; SameSite=Strict
@@ -185,18 +185,18 @@ Cache.Set(240s) → return body with Content-Type + Subscription-Userinfo
 |-----------|------------|---------|
 | Go | `go` | 1.25+ |
 | Telegram API | `go-telegram-bot-api/telegram-bot-api/v5` | v5.5.1 |
-| ORM | `gorm.io/gorm` + `gorm.io/driver/sqlite` | v1.31.1 |
+| ORM | `gorm.io/gorm` + `gorm.io/driver/sqlite` | v1.31.2 |
 | DB engine | SQLite (mattn/go-sqlite3, CGO) | `./data/rs8kvn.db` |
 | Migrations | `golang-migrate/migrate/v4` | v4.19.1 |
-| QR Code | `piglig/go-qr` | v0.2.6 |
-| Logging | `go.uber.org/zap` + `lumberjack.v2` | v1.27.1 |
-| Error tracking | `getsentry/sentry-go` | v0.45.0 |
-| Metrics | `prometheus/client_golang` | v1.22.0 |
+| QR Code | `piglig/go-qr` | v1.1.0 |
+| Logging | `go.uber.org/zap` + `lumberjack.v2` | v2.2.1 |
+| Error tracking | `getsentry/sentry-go` | v0.47.0 |
+| Metrics | `prometheus/client_golang` | v1.23.2 |
 | Concurrency | `golang.org/x/sync/singleflight` | — |
 | Testing | `stretchr/testify` | v1.11.1 |
 | CI/CD | GitHub Actions → golangci-lint, gosec, test, Docker → GHCR | — |
 
-## Current State (v2.3.0)
+## Current State (v2.3.4)
 
 ### Working Features
 
@@ -273,7 +273,7 @@ All tests pass with `-race` detector. Fuzzing enabled for critical functions.
 - **Multi-inbound:** Nodes store `inbound_ids` as a JSON array. Client creation iterates all inbounds for the node.
 
 ### Subscription Flow
-- **Trial:** `/i/{code}` → IP rate limit (3/hour) → DB trial record (negative telegram_id) → user clicks link in Telegram → `BindTrialSubscription` sets telegram_id, removes is_trial, sets referred_by if from invite
+- **Trial:** `/i/{code}` → IP rate limit (3/hour) → DB trial record (negative telegram_id) → user clicks link in Telegram → `BindTrialSubscription` sets telegram_id (из отрицательного в реальный), sets referred_by if from invite
 - **Regular:** `create_subscription` callback → VPN client provisioning (per-node) → `subscription_nodes` records created as `pending_add` → DB record → cache invalidate → admin notify
 - **Sync pipeline:** Background `SyncPendingNodes` worker processes `pending_add`/`pending_remove`/`pending_update` states with per-subscription locking and exponential backoff retry
 - **Trial cookie:** `rs8kvn_trial_{code}` prevents duplication for 3 hours (HttpOnly, Secure, SameSite=Strict)
@@ -286,15 +286,14 @@ All tests pass with `-race` detector. Fuzzing enabled for critical functions.
 - **Rationale:** If DB delete fails → XUI untouched (safe to retry). If XUI fails after DB success → orphaned client (less critical, manual cleanup).
 - **Referral cache:** `DecrementReferralCount` called after successful deletion.
 
-### Subscription Proxy (v2.3.0+)
+### Subscription Proxy (v2.3.4+)
 - **Endpoint:** `GET /sub/{subID}` — subID = SubscriptionID from DB (14 random bytes → 28 hex chars)
-- **Extra config:** Headers section → blank line → server links. Headers override 3x-ui.
+- **Config:** Subserver агрегирует ответы нод как-is; кастомные extra-серверы (extra_servers.txt, hot reload) удалены в v2.3.0.
 - **Cache:** 240s TTL hardcoded (`config.SubServerCacheTTL`)
-- **Reload:** Every 5 minutes, graceful — keeps old config if file read fails
-- **Singleflight:** First request fetches, others wait and get same result (prevents thundering herd)
+- **Singleflight:** First request fetches, others wait and get same result (prevents thundering herd) — загрузка внешнего конфиг-файла не выполняется (фича удалена)
 - **Content-Length:** Removed after merge (body size changes, Go uses chunked encoding)
 - **Rate limiting:** Currently none — 240s cache TTL mitigates abuse; future: per-IP limit
-- **Path traversal protection:** `extra_servers.txt` path validated before opening (no `..`, no system dirs)
+- **Path traversal protection:** (исторически) `extra_servers.txt` path валидировался перед открытием — фича удалена в v2.3.0, проверка больше не применяется.
 
 ### Referral Cache
 - **Source of truth:** subscriptions table (`SELECT referred_by, COUNT(*) GROUP BY referred_by`)
@@ -305,7 +304,7 @@ All tests pass with `-race` detector. Fuzzing enabled for critical functions.
 
 ### Database
 - **Engine:** SQLite (mattn/go-sqlite3, WAL mode)
-- **Soft deletes:** `deleted_at` column (GORM)
+- **Soft deletes:** Отсутствуют — удаление заменено на `status='revoked'` (см. AGENTS.md: Delete flow). Строки в БД физически удаляются только после депровизионирования VPN-доступа.
 - **Trial subscriptions:** `telegram_id = 0` (not NULL) until activated via `/start trial_{subID}`
 - **Migrations:** Auto-applied on startup from `internal/database/migrations/` (embedded via `go:embed`)
 - **Legacy support:** Auto-migration for pre-embedded databases (adds `subscription_id` column, drops `x_ui_host`)
@@ -373,7 +372,7 @@ go test -coverprofile=coverage.out ./...
 go tool cover -func=coverage.out
 
 # Build binary
-go build -ldflags="-s -w -X main.version=v2.3.0 -X main.commit=$(git rev-parse --short HEAD 2>/dev/null || echo unknown) -X main.buildTime=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" -o rs8kvn_bot ./cmd/bot
+go build -ldflags="-s -w -X main.version=v2.3.4 -X main.commit=$(git rev-parse --short HEAD 2>/dev/null || echo unknown) -X main.buildTime=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" -o rs8kvn_bot ./cmd/bot
 
 # Run linters
 golangci-lint run ./...
