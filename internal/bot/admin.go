@@ -19,6 +19,26 @@ import (
 	"go.uber.org/zap"
 )
 
+// broadcastStage represents the state of an admin broadcast session.
+type broadcastStage int
+
+const (
+	broadcastStageIdle broadcastStage = iota
+	broadcastStageAwaitingDraft
+	broadcastStagePreview
+)
+
+const (
+	broadcastSessionTTL = 15 * time.Minute
+)
+
+// broadcastSession holds the in-progress broadcast draft for an admin.
+type broadcastSession struct {
+	createdAt time.Time
+	stage     broadcastStage
+	text      string
+}
+
 func (h *Handler) HandleVersion(ctx context.Context, update tgbotapi.Update) error {
 	if update.Message == nil {
 		logger.Error("HandleVersion called with nil Message")
@@ -194,26 +214,6 @@ func isUserBlockedError(err error) bool {
 		strings.Contains(msg, "chat not found")
 }
 
-// broadcastStage represents the state of an admin broadcast session.
-type broadcastStage int
-
-const (
-	broadcastStageIdle       broadcastStage = iota
-	broadcastStageAwaitingDraft
-	broadcastStagePreview
-)
-
-
-const (
-	broadcastSessionTTL = 15 * time.Minute
-)
-// broadcastSession holds the in-progress broadcast draft for an admin.
-type broadcastSession struct {
-	createdAt time.Time
-	stage     broadcastStage
-	text      string
-}
-
 // HandleBroadcast handles the /broadcast command for admins.
 // It starts the draft flow: the admin then sends a multi-line MarkdownV2
 // message which is previewed, and confirmed via inline buttons before sending.
@@ -281,7 +281,7 @@ func (h *Handler) HandleBroadcastDraft(ctx context.Context, update tgbotapi.Upda
 	}
 
 	h.broadcastMu.Lock()
-	h.broadcastSessions[chatID] = &broadcastSession{stage: broadcastStagePreview, text: text}
+	h.broadcastSessions[chatID] = &broadcastSession{createdAt: time.Now(), stage: broadcastStagePreview, text: text}
 	h.broadcastMu.Unlock()
 
 	kb := tgbotapi.NewInlineKeyboardMarkup(
