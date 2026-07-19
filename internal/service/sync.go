@@ -23,8 +23,9 @@ type SyncService struct {
 	vpnClients map[uint]vpn.Client
 	nodes      []database.Node
 
-	locksMu sync.Mutex
-	locks   map[uint]*subscriptionSyncLock
+	locksMu    sync.Mutex
+	locks      map[uint]*subscriptionSyncLock
+	lockTimeout time.Duration
 }
 
 type subscriptionSyncLock struct {
@@ -44,14 +45,9 @@ func NewSyncService(db interfaces.DatabaseService, vpnClients map[uint]vpn.Clien
 		vpnClients: vpnClients,
 		nodes:      nodes,
 		locks:      make(map[uint]*subscriptionSyncLock),
+		lockTimeout: 2 * time.Minute,
 	}
 }
-// subscriptionLockTimeout caps how long a goroutine waits to acquire a
-// per-subscription lock. It bounds the blast radius of a stuck holder: waiters
-// fail fast instead of blocking forever. A caller-provided context deadline
-// shorter than this takes precedence. Tests may override this to keep the
-// already-held timeout bounded to a short duration.
-var subscriptionLockTimeout = 2 * time.Minute
 
 // lockSubscription acquires a per-subscription lock and returns an unlock
 // function. Acquisition is bounded by the shorter of the caller's context
@@ -70,7 +66,7 @@ func (s *SyncService) lockSubscription(ctx context.Context, subscriptionID uint)
 	l.waiters++
 	s.locksMu.Unlock()
 
-	timeout := subscriptionLockTimeout
+	timeout := s.lockTimeout
 	if dl, ok := ctx.Deadline(); ok {
 		if rem := time.Until(dl); rem < timeout {
 			timeout = rem

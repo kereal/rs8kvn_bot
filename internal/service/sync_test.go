@@ -1021,15 +1021,10 @@ func TestSyncService_SyncPendingNodes_JoinsErrors(t *testing.T) {
 func TestSyncService_lockSubscription_Timeout(t *testing.T) {
 	t.Parallel()
 
-	// Pin the production timeout so the elapsed-time assertion is stable even
-	// though subscriptionLockTimeout is a package-level var shared across
-	// parallel tests.
-	origTimeout := subscriptionLockTimeout
-	subscriptionLockTimeout = 2 * time.Minute
-	defer func() { subscriptionLockTimeout = origTimeout }()
-
 	db := testutil.NewDatabaseService()
 	svc := newTestSyncService(t, db, nil)
+	// Pin the production timeout so the elapsed-time assertion is stable.
+	svc.lockTimeout = 2 * time.Minute
 
 	// Holder grabs the lock and keeps it indefinitely.
 	holdCtx := context.Background()
@@ -1047,21 +1042,18 @@ func TestSyncService_lockSubscription_Timeout(t *testing.T) {
 
 	require.Error(t, err)
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
-	assert.Less(t, elapsed, subscriptionLockTimeout,
+	assert.Less(t, elapsed, svc.lockTimeout,
 		"waiter must not wait the full subscriptionLockTimeout when ctx is short")
 }
 
 func TestSyncService_lockSubscription_TimeoutWhenAlreadyHeld(t *testing.T) {
 	t.Parallel()
 
-	// Override the production two-minute timeout so the already-held case is
-	// bounded to a short duration in this test.
-	origTimeout := subscriptionLockTimeout
-	subscriptionLockTimeout = 30 * time.Millisecond
-	defer func() { subscriptionLockTimeout = origTimeout }()
-
 	db := testutil.NewDatabaseService()
 	svc := newTestSyncService(t, db, nil)
+	// Override the production two-minute timeout so the already-held case is
+	// bounded to a short duration in this test.
+	svc.lockTimeout = 30 * time.Millisecond
 
 	// Take the lock and never release it.
 	holdCtx := context.Background()
@@ -1078,8 +1070,8 @@ func TestSyncService_lockSubscription_TimeoutWhenAlreadyHeld(t *testing.T) {
 
 	require.Error(t, err)
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
-	assert.GreaterOrEqual(t, elapsed, subscriptionLockTimeout,
+	assert.GreaterOrEqual(t, elapsed, svc.lockTimeout,
 		"waiter should wait up to subscriptionLockTimeout when ctx has no deadline")
-	assert.Less(t, elapsed, subscriptionLockTimeout+30*time.Second,
+	assert.Less(t, elapsed, svc.lockTimeout+30*time.Second,
 		"waiter must not wait unbounded")
 }
