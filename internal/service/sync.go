@@ -28,8 +28,8 @@ type SyncService struct {
 }
 
 type subscriptionSyncLock struct {
-	mu      sync.Mutex
-	waiters int // goroutines waiting or holding this lock
+	ch      chan struct{} // capacity-1 token: the holder owns the token
+	waiters int           // goroutines waiting or holding this lock
 }
 
 // syncIdentifier builds a unique VPN client identifier from username and telegram ID.
@@ -46,30 +46,62 @@ func NewSyncService(db interfaces.DatabaseService, vpnClients map[uint]vpn.Clien
 		locks:      make(map[uint]*subscriptionSyncLock),
 	}
 }
+// subscriptionLockTimeout caps how long a goroutine waits to acquire a
+// per-subscription lock. It bounds the blast radius of a stuck holder: waiters
+// fail fast instead of blocking forever. A caller-provided context deadline
+// shorter than this takes precedence.
+const subscriptionLockTimeout = 2 * time.Minute
 
-// lockSubscription acquires a per-subscription mutex and returns an unlock function.
-// The entry is removed from the map when the last waiter releases the lock,
-// preventing unbounded map growth over the lifetime of the process.
-func (s *SyncService) lockSubscription(subscriptionID uint) func() {
+// lockSubscription acquires a per-subscription lock and returns an unlock
+// function. Acquisition is bounded by the shorter of the caller's context
+// deadline and subscriptionLockTimeout, so a stuck holder cannot block other
+// goroutines operating on the same subscription indefinitely. The map entry is
+// removed once the last waiter releases the lock, preventing unbounded map
+// growth over the lifetime of the process.
+func (s *SyncService) lockSubscription(ctx context.Context, subscriptionID uint) (func(), error) {
 	s.locksMu.Lock()
 	l, ok := s.locks[subscriptionID]
 	if !ok {
-		l = &subscriptionSyncLock{}
+		l = &subscriptionSyncLock{ch: make(chan struct{}, 1)}
+		l.ch <- struct{}{} // initial token available
 		s.locks[subscriptionID] = l
 	}
 	l.waiters++
 	s.locksMu.Unlock()
 
-	l.mu.Lock()
-	return func() {
-		l.mu.Unlock()
-		s.locksMu.Lock()
-		l.waiters--
-		if l.waiters == 0 {
-			delete(s.locks, subscriptionID)
+	timeout := subscriptionLockTimeout
+	if dl, ok := ctx.Deadline(); ok {
+		if rem := time.Until(dl); rem < timeout {
+			timeout = rem
 		}
-		s.locksMu.Unlock()
 	}
+	acquireCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	select {
+	case <-l.ch:
+		return func() {
+			l.ch <- struct{}{} // return the token to the next waiter
+			s.dropWaiter(l, subscriptionID)
+		}, nil
+	case <-acquireCtx.Done():
+		// Never return the token here: the holder still owns it. Only undo our
+		// waiter accounting so the map entry can be reclaimed correctly.
+		s.dropWaiter(l, subscriptionID)
+		return nil, fmt.Errorf("lock subscription %d: %w", subscriptionID, acquireCtx.Err())
+	}
+}
+
+// dropWaiter decrements the waiter count for a subscription lock and removes
+// the map entry once no goroutine holds or waits for it. It must NOT touch l.ch:
+// only the actual holder returns the token on unlock.
+func (s *SyncService) dropWaiter(l *subscriptionSyncLock, subscriptionID uint) {
+	s.locksMu.Lock()
+	l.waiters--
+	if l.waiters == 0 {
+		delete(s.locks, subscriptionID)
+	}
+	s.locksMu.Unlock()
 }
 
 // ReconcilePlanNodes reconciles the subscription_nodes table against the current plan.
@@ -82,7 +114,10 @@ func (s *SyncService) lockSubscription(subscriptionID uint) func() {
 // Acquires the per-subscription lock. Callers that already hold the lock
 // (e.g. SyncPendingNodes) must call reconcilePlanNodesLocked directly.
 func (s *SyncService) ReconcilePlanNodes(ctx context.Context, subscriptionID uint) error {
-	unlock := s.lockSubscription(subscriptionID)
+	unlock, err := s.lockSubscription(ctx, subscriptionID)
+	if err != nil {
+		return fmt.Errorf("reconcile plan nodes: acquire lock: %w", err)
+	}
 	defer unlock()
 	return s.reconcilePlanNodesLocked(ctx, subscriptionID)
 }
@@ -241,7 +276,10 @@ func (s *SyncService) MarkAllForRemoval(ctx context.Context, subscriptionID uint
 // SyncSubscription performs pending VPN operations for the given subscription.
 // Background path: per-node failures are logged and processing continues; only returns error on DB/cancel failure.
 func (s *SyncService) SyncSubscription(ctx context.Context, subscriptionID uint) error {
-	unlock := s.lockSubscription(subscriptionID)
+	unlock, err := s.lockSubscription(ctx, subscriptionID)
+	if err != nil {
+		return fmt.Errorf("sync subscription: acquire lock: %w", err)
+	}
 	defer unlock()
 
 	logger.Debug("sync subscription",
@@ -609,7 +647,14 @@ func (s *SyncService) SyncPendingNodes(ctx context.Context) error {
 
 	var errs []error
 	for subID := range groups {
-		unlock := s.lockSubscription(subID)
+		unlock, err := s.lockSubscription(ctx, subID)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("sync pending nodes: acquire lock for subscription %d: %w", subID, err))
+			logger.Warn("sync pending nodes: failed to acquire lock",
+				zap.Uint("subscription_id", subID),
+				zap.Error(err))
+			continue
+		}
 
 		sub, subErr := s.db.GetByID(ctx, subID)
 		if subErr != nil {
