@@ -832,38 +832,48 @@ func TestSubscriptionService_CreateTrial_NoTrialNodes(t *testing.T) {
 	assert.Contains(t, err.Error(), "no linked nodes")
 }
 
-func TestSubscriptionService_ReconcileOrphanedClients_RemovesMissing(t *testing.T) {
+// TestSubscriptionService_ReconcileOrphanedClients_RemovesFullyDeprovisioned verifies
+// a subscription with only pending_remove node bindings (deprovisioning that did
+// not complete in the delete flow) is removed, while:
+//   - a subscription with a live (active) binding is kept,
+//   - a subscription with NO subscription_nodes (e.g. a trial) is kept.
+func TestSubscriptionService_ReconcileOrphanedClients_RemovesFullyDeprovisioned(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{}
 
-	normal := &database.Subscription{ID: 10, TelegramID: 100, Username: "realuser", Status: "active"}
-	trial := &database.Subscription{ID: 20, TelegramID: 0, SubscriptionID: "orphan123", Status: "active", PlanID: 1}
-	good := &database.Subscription{ID: 30, TelegramID: 300, Username: "gooduser", Status: "active"}
+	withLive := &database.Subscription{ID: 10, TelegramID: 100, Username: "liveuser", Status: "active"}
+	orphan := &database.Subscription{ID: 20, TelegramID: 200, Username: "orphanuser", Status: "active"}
+	trial := &database.Subscription{ID: 30, TelegramID: 0, SubscriptionID: "trial123", Status: "active"}
 	inactive := &database.Subscription{ID: 40, TelegramID: 400, Username: "bad", Status: "revoked"}
 
 	deleted := []uint{}
 	db := &testutil.DatabaseService{
 		GetAllSubscriptionsFunc: func(ctx context.Context) ([]database.Subscription, error) {
-			return []database.Subscription{*normal, *trial, *good, *inactive}, nil
+			return []database.Subscription{*withLive, *orphan, *trial, *inactive}, nil
+		},
+		GetBySubscriptionIDFunc: func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
+			switch subscriptionID {
+			case withLive.ID:
+				return []database.SubscriptionNode{
+					{SubscriptionID: withLive.ID, NodeID: 1, Status: database.SyncStatusActive},
+				}, nil
+			case orphan.ID:
+				return []database.SubscriptionNode{
+					{SubscriptionID: orphan.ID, NodeID: 1, Status: database.SyncStatusPendingRemove},
+					{SubscriptionID: orphan.ID, NodeID: 2, Status: database.SyncStatusPendingRemove},
+				}, nil
+			default:
+				// trial (no subscription_nodes) and others.
+				return nil, nil
+			}
 		},
 		DeleteSubscriptionByIDFunc: func(ctx context.Context, id uint) (*database.Subscription, error) {
 			deleted = append(deleted, id)
 			return &database.Subscription{ID: id}, nil
 		},
 	}
-
-	xuiClient := &testutil.XUIClient{
-		GetClientTrafficFunc: func(ctx context.Context, email string) (*xui.ClientTraffic, error) {
-			if email == "gooduser" {
-				return &xui.ClientTraffic{}, nil
-			}
-			return nil, fmt.Errorf("client not found: %w", xui.ErrClientNotFound)
-		},
-	}
-	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
-	sources := []database.Node{{ID: 1, IsActive: true, Host: "http://localhost:2053", InboundIDs: "[1]"}}
-	svc := NewSubscriptionService(db, xuiClients, nil, sources, cfg)
+	svc := NewSubscriptionService(db, nil, nil, nil, cfg)
 
 	invoked := []int64{}
 	svc.SetInvalidateFunc(func(id int64) { invoked = append(invoked, id) })
@@ -871,11 +881,13 @@ func TestSubscriptionService_ReconcileOrphanedClients_RemovesMissing(t *testing.
 	count, err := svc.ReconcileOrphanedClients(context.Background())
 
 	assert.NoError(t, err)
-	assert.Equal(t, 2, count)
-	assert.ElementsMatch(t, []uint{10, 20}, deleted)
-	assert.Equal(t, []int64{100}, invoked)
+	assert.Equal(t, 1, count)
+	assert.Equal(t, []uint{orphan.ID}, deleted)
+	assert.Equal(t, []int64{orphan.TelegramID}, invoked)
 }
 
+// TestSubscriptionService_ReconcileOrphanedClients_NoActive verifies that an
+// all-revoked set produces no deletions and no error.
 func TestSubscriptionService_ReconcileOrphanedClients_NoActive(t *testing.T) {
 	t.Parallel()
 
