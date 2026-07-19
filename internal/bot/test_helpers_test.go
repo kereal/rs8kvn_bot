@@ -2,7 +2,6 @@ package bot
 
 import (
 	"testing"
-	"time"
 
 	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
@@ -13,18 +12,6 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
-func NewTestBotConfig() *BotConfig {
-	return &BotConfig{
-		Username:                "testbot",
-		ID:                      123456789,
-		FirstName:               "TestBot",
-		IsBot:                   true,
-		CanJoinGroups:           false,
-		CanReadAllGroupMessages: false,
-		SupportsInlineQueries:   false,
-		loadedAt:                time.Now(),
-	}
-}
 
 // newTestAdminHandler creates a Handler with admin config and a stub SubscriptionService
 // wired to the provided mock objects. Eliminates repeated NewHandler + subscriptionService

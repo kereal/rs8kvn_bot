@@ -40,6 +40,8 @@ var (
 // Option is a functional option for Run.
 type Option func(*runOptions)
 
+// runOptions содержит инъектируемые фабричные функции для XUI- и VPN-клиентов,
+// позволяющие подменять реальные реализации моками в тестах.
 type runOptions struct {
 	xuiClientFn func(host, apiToken string) (interfaces.XUIClient, error)
 	vpnClientFn func(cfg vpn.Config) (vpn.Client, error)
@@ -55,6 +57,9 @@ func WithVPNClient(fn func(cfg vpn.Config) (vpn.Client, error)) Option {
 	return func(o *runOptions) { o.vpnClientFn = fn }
 }
 
+// defaultOptions возвращает настройки запуска с фабриками клиентов по умолчанию.
+// XUI- и VPN-клиенты создаются реальными реализациями; для тестов их можно
+// переопределить через WithXUIClient / WithVPNClient.
 func defaultOptions() *runOptions {
 	return &runOptions{
 		xuiClientFn: func(host, apiToken string) (interfaces.XUIClient, error) {
@@ -68,6 +73,9 @@ func defaultOptions() *runOptions {
 	}
 }
 
+// buildRuntimeNodeClients фильтрует активные ноды и для каждой создаёт
+// runtime-клиенты: XUI-клиент (только для 3x-ui нод) и VPN-клиент. Возвращает
+// отфильтрованные ноды и карты клиентов, индексированные по ID ноды.
 func buildRuntimeNodeClients(nodes []database.Node, opts *runOptions) ([]database.Node, map[uint]interfaces.XUIClient, map[uint]vpn.Client, error) {
 	runtimeNodes := make([]database.Node, 0, len(nodes))
 	for _, node := range nodes {
@@ -147,6 +155,8 @@ func getVersion() string {
 	return "rs8kvn_bot@" + version
 }
 
+// initBot инициализирует Telegram-бота: проверяет токен, создаёт BotAPI
+// и собирает bot.BotConfig с повторными попытками при сбоях подключения.
 func initBot(cfg *config.Config) (*tgbotapi.BotAPI, *bot.BotConfig, error) {
 	logger.Info("Validating Telegram bot token")
 
@@ -201,10 +211,17 @@ func initBot(cfg *config.Config) (*tgbotapi.BotAPI, *bot.BotConfig, error) {
 		return nil, nil, fmt.Errorf("failed to initialize Telegram bot after all attempts")
 	}
 
+	// The username comes from Telegram getMe (populated in NewBotConfig above).
+	// The bot is authorized via its token, and getMe reliably returns the @username,
+	// which is then propagated to handlers/links via SetBotConfig.
 	logger.Info("Telegram bot authorized", zap.String("username", bc.Username))
+
 	return api, bc, nil
 }
 
+// startWebServer создаёт и запускает HTTP-сервер (подписки, инвайт/trial-страницы).
+// Сервер стартует асинхронно; функция ждёт до 2 секунд первой ошибки запуска,
+// чтобы не блокировать старт бота, но вернуть ошибку, если сервер точно не поднялся.
 func startWebServer(subService *service.SubscriptionService, cfg *config.Config, botConfig *bot.BotConfig, subServer *subserver.Service, dbService *database.Service) (*web.Server, error) {
 	webServer := web.NewServer(fmt.Sprintf(":%d", cfg.WebServerPort), dbService, cfg, botConfig.Username, subService, subServer)
 	webServer.RegisterChecker("database", func(ctx context.Context) web.ComponentHealth {
@@ -230,6 +247,10 @@ func startWebServer(subService *service.SubscriptionService, cfg *config.Config,
 	}
 }
 
+// startBackgroundWorkers запускает фоновые goroutine-воркеры: сбор метрик пула БД,
+// периодическую сверку осиротевших клиентов, бэкапы, heartbeat, очистку trial,
+// а также синхронизацию и истечение подписок. Возвращает WaitGroup для ожидания
+// завершения при штатном выключении.
 func startBackgroundWorkers(ctx context.Context, handler *bot.Handler, subService *service.SubscriptionService, dbService *database.Service, cfg *config.Config, vpnClients map[uint]vpn.Client, nodes []database.Node) *sync.WaitGroup {
 	var wg sync.WaitGroup
 	wg.Add(7)
@@ -326,12 +347,12 @@ func startBackgroundWorkers(ctx context.Context, handler *bot.Handler, subServic
 	return &wg
 }
 
-// The function performs best-effort initialization for optional components (Sentry,
-// database, 3x-ui client, Telegram bot) so the service can start even if some
-// dependencies are unavailable. It also starts background maintenance tasks
-// main is the entry point that initializes configuration and services, starts background
-// workers and the web server, processes Telegram updates with bounded concurrency, and
-// coordinates a graceful shutdown when termination signals are received.
+// main — точка входа: инициализирует конфигурацию и сервисы, запускает фоновые
+// воркеры и веб-сервер, обрабатывает обновления Telegram с ограниченным
+// параллелизмом и выполняет корректное завершение при получении сигнала.
+// Инициализация опциональных компонентов (Sentry, БД, 3x-ui клиент, бот) делается
+// по принципу best-effort, чтобы сервис стартовал даже при недоступности части
+// зависимостей.
 func main() {
 	// 1. Load configuration
 	cfg, err := config.Load()
@@ -369,20 +390,19 @@ func main() {
 		}
 	}()
 	logger.Info("Database initialized successfully")
-
 	// 5. Wire application services with a placeholder bot; initBot runs below
-	// and replaces it with the real bot before any update is processed.
-	botAPI := &tgbotapi.BotAPI{Self: tgbotapi.User{UserName: "rs8kvn_bot_offline"}}
-	botConfig := &bot.BotConfig{Username: "rs8kvn_bot_offline"}
-
+	// (step 7) and replaces it with the real bot before any update is processed.
+	// The real username comes from Telegram getMe inside initBot — it is NOT
+	// configured manually. The placeholder carries no username; the real one is
+	// injected via SetBotConfig once initBot returns.
+	botConfig := &bot.BotConfig{}
+	botAPI := &tgbotapi.BotAPI{Self: tgbotapi.User{UserName: ""}}
 	svc := initServices(cfg, dbService, deps, botAPI, botConfig)
-	defer svc.subServer.Stop()
-
-	go func() {
-		svc.subService.RefreshActiveSubscriptionsMetric(context.Background())
-	}()
 
 	// 6. Start web server so subscriptions are served; bot is initialised next.
+	// The web server starts with an empty bot username; initBot injects the real
+	// username (from Telegram getMe) via SetBotUsername once the bot is ready, so
+	// the share/invite page shows the correct @username after startup.
 	webServer, err := startWebServer(svc.subService, cfg, botConfig, svc.subServer, dbService)
 	if err != nil {
 		logger.Warn("Failed to start web server, continuing without web server", zap.Error(err))
@@ -410,6 +430,8 @@ func main() {
 	botAPI = api
 	if webServer != nil {
 		webServer.SetBotUsername(bc.Username)
+	} else {
+		logger.Warn("web server not running; share/invite page username not updated")
 	}
 	logger.Info("Telegram bot initialized successfully")
 
@@ -438,7 +460,7 @@ func main() {
 	runEventLoop(ctx, botAPI, svc.handler, updates)
 
 	// 12. Graceful shutdown of background workers
-	gracefulShutdown(bgWg, svc.handler)
+	gracefulShutdown(bgWg, svc.handler, svc.subServer)
 }
 
 // recoverAndReport recovers from panics, reports to Sentry, and logs the error.

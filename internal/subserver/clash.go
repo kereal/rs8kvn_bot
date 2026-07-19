@@ -246,6 +246,15 @@ func normaliseClashProxy(p map[string]any) (map[string]any, error) {
 		return nil, fmt.Errorf("unsupported clash proxy type: %s", proxyType)
 	}
 
+	// Skip entries missing the minimum required connection fields instead of
+	// emitting a malformed URI (e.g. vless://uuid@:443?... with an empty host).
+	if addr, _ := out["address"].(string); addr == "" {
+		return nil, fmt.Errorf("clash proxy %q missing address", proxyType)
+	}
+	if _, ok := out["port"]; !ok {
+		return nil, fmt.Errorf("clash proxy %q missing port", proxyType)
+	}
+
 	return out, nil
 }
 
