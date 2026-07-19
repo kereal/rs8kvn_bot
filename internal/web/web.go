@@ -122,6 +122,8 @@ func (s *Server) SetBotUsername(username string) {
 // It is the runtime-injected username from initBot (set via SetBotUsername);
 // the bot username comes from Telegram getMe, not from configuration.
 func (s *Server) effectiveBotUsername() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return s.botUsername
 }
 
