@@ -35,12 +35,14 @@ func NewOrderService(db interfaces.DatabaseService, subSvc *SubscriptionService,
 
 // ActivateProduct creates an order and initializes a paid subscription for the user.
 // If the subscription does not exist, a free subscription is created first.
-func (o *OrderService) ActivateProduct(ctx context.Context, telegramID int64, product *database.Product) (*database.Order, error) {
+// username is passed through to GetOrCreateSubscription so a newly created
+// subscription is stored with the real Telegram username instead of a fallback.
+func (o *OrderService) ActivateProduct(ctx context.Context, telegramID int64, username string, product *database.Product) (*database.Order, error) {
 	if product == nil {
 		return nil, errors.New("product is nil")
 	}
 
-	sub, err := o.subSvc.GetOrCreateSubscription(ctx, telegramID, "", "")
+	sub, err := o.subSvc.GetOrCreateSubscription(ctx, telegramID, username, "")
 	if err != nil {
 		return nil, fmt.Errorf("get or create subscription: %w", err)
 	}

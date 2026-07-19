@@ -376,7 +376,7 @@ func (sh *SubscriptionHandler) handleConfirmUpgradePremium(ctx context.Context, 
 		return nil
 	}
 
-	_, err = sh.h.orderService.ActivateProduct(ctx, chatID, product)
+	_, err = sh.h.orderService.ActivateProduct(ctx, chatID, username, product)
 	if err != nil {
 		logger.Error("Failed to activate premium product", zap.Error(err))
 		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgSubTempError))
