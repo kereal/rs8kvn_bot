@@ -31,6 +31,7 @@ type SubscriptionRepositoryFake struct {
 	GetAllSubscriptionsFunc         func(ctx context.Context) ([]database.Subscription, error)
 	CountAllSubscriptionsFunc       func(ctx context.Context) (int64, error)
 	CountActiveSubscriptionsFunc    func(ctx context.Context) (int64, error)
+	CountTrialSubscriptionsFunc     func(ctx context.Context) (int64, error)
 	CountExpiredSubscriptionsFunc   func(ctx context.Context) (int64, error)
 	GetAllTelegramIDsFunc           func(ctx context.Context) ([]int64, error)
 	GetTelegramIDByUsernameFunc     func(ctx context.Context, username string) (int64, error)
@@ -99,6 +100,12 @@ func (m *SubscriptionRepositoryFake) CountAllSubscriptions(ctx context.Context) 
 func (m *SubscriptionRepositoryFake) CountActiveSubscriptions(ctx context.Context) (int64, error) {
 	if m.CountActiveSubscriptionsFunc != nil {
 		return m.CountActiveSubscriptionsFunc(ctx)
+	}
+	return 0, nil
+}
+func (m *SubscriptionRepositoryFake) CountTrialSubscriptions(ctx context.Context) (int64, error) {
+	if m.CountTrialSubscriptionsFunc != nil {
+		return m.CountTrialSubscriptionsFunc(ctx)
 	}
 	return 0, nil
 }

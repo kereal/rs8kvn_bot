@@ -1155,6 +1155,50 @@ func TestSubscriptionService_DeleteByID_MarkRevokedBeforeDBDelete(t *testing.T) 
 	assert.Equal(t, "revoked", updatedStatus, "subscription must be marked revoked before deprovision/delete")
 }
 
+// TestSubscriptionService_DeleteByID_SyncFailureStillDeletes verifies the
+// best-effort contract from AGENTS.md: deprovision (Phase 2, external sync)
+// is best-effort — if the VPN node sync fails, the subscription stays
+// revoked and the physical delete (Phase 3) MUST still run so the row is
+// removed. Background reconciliation finishes removal of the orphaned VPN client.
+func TestSubscriptionService_DeleteByID_SyncFailureStillDeletes(t *testing.T) {
+	t.Parallel()
+
+	var deleteByIDCalled bool
+	db := &testutil.DatabaseService{
+		GetByIDFunc: func(ctx context.Context, id uint) (*database.Subscription, error) {
+			return &database.Subscription{ID: 1, ClientID: "c", SubscriptionID: "s", TelegramID: 1, Username: "u", Status: "active"}, nil
+		},
+		// MarkAllForRemoval loads nodes then marks each; an empty list means
+		// it succeeds without touching UpdateSubscriptionNodeStatus.
+		GetBySubscriptionIDFunc: func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
+			return nil, nil
+		},
+		UpdateSubscriptionFunc: func(ctx context.Context, sub *database.Subscription) error {
+			return nil
+		},
+		DeleteSubscriptionByIDFunc: func(ctx context.Context, id uint) (*database.Subscription, error) {
+			deleteByIDCalled = true
+			return &database.Subscription{ID: id, ClientID: "c", SubscriptionID: "s"}, nil
+		},
+	}
+
+	// XUI client is unused by the teardown path (syncService owns deprovision).
+	xuiClients := map[uint]interfaces.XUIClient{1: &testutil.XUIClient{}}
+	// VPN client fails on delete → SyncSubscription returns an error (best-effort).
+	vpnClients := map[uint]vpn.Client{1: &mockVPNClient{deleteError: errors.New("vpn delete failed")}}
+	nodes := []database.Node{{ID: 1, IsActive: true, Host: "http://x", InboundIDs: "[1]"}}
+
+	svc := NewSubscriptionService(db, xuiClients, vpnClients, nodes, &config.Config{})
+	svc.SetSyncService(NewSyncService(db, vpnClients, nodes))
+
+	deleted, err := svc.DeleteByID(context.Background(), 1)
+
+	// Physical delete (Phase 3) runs despite the Phase 2 sync failure.
+	require.NoError(t, err, "best-effort deprovision failure must not abort the delete")
+	assert.True(t, deleteByIDCalled, "DeleteSubscriptionByID (physical delete) must run even if external deprovision fails")
+	assert.NotNil(t, deleted)
+}
+
 // ==================== GetByID Tests ====================
 
 func TestSubscriptionService_GetByID_Success(t *testing.T) {

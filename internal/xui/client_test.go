@@ -941,3 +941,28 @@ func TestHTTPStatusHandling(t *testing.T) {
 		assert.Contains(t, err.Error(), "upstream returned non-200")
 	})
 }
+
+func TestExtractOperation(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		url      string
+		expected string
+	}{
+		{"add client", "http://host/panel/api/clients/add", "clients"},
+		{"delete client", "http://host/panel/api/clients/del/email", "clients"},
+		{"update client", "http://host/panel/api/clients/update/email", "clients"},
+		{"traffic", "http://host/panel/api/clients/traffic/email", "clients"},
+		{"inbound", "http://host/panel/api/inbounds/get/1", "inbounds"},
+		{"server status", "http://host/panel/api/server/status", "server"},
+		{"unknown path", "http://host/other/path", "unknown"},
+		{"empty", "", "unknown"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, extractOperation(tt.url))
+		})
+	}
+}

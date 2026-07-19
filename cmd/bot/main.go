@@ -17,6 +17,7 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/heartbeat"
 	"github.com/kereal/rs8kvn_bot/internal/interfaces"
 	"github.com/kereal/rs8kvn_bot/internal/logger"
+	"github.com/kereal/rs8kvn_bot/internal/metrics"
 	"github.com/kereal/rs8kvn_bot/internal/scheduler"
 	"github.com/kereal/rs8kvn_bot/internal/service"
 	"github.com/kereal/rs8kvn_bot/internal/subserver"
@@ -231,7 +232,22 @@ func startWebServer(subService *service.SubscriptionService, cfg *config.Config,
 
 func startBackgroundWorkers(ctx context.Context, handler *bot.Handler, subService *service.SubscriptionService, dbService *database.Service, cfg *config.Config, vpnClients map[uint]vpn.Client, nodes []database.Node) *sync.WaitGroup {
 	var wg sync.WaitGroup
-	wg.Add(6)
+	wg.Add(7)
+
+	go func() {
+		defer recoverAndReport("DB pool metrics collector")
+		defer wg.Done()
+		ticker := time.NewTicker(10 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				metrics.CollectDBPoolMetrics(ctx, dbService.GetDB())
+			}
+		}
+	}()
 
 	go func() {
 		defer recoverAndReport("Orphan reconciler")

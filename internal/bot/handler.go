@@ -618,9 +618,6 @@ func (h *Handler) ClearAdminSendRateLimit(chatID int64) {
 // Main update router
 func (h *Handler) HandleUpdate(ctx context.Context, update tgbotapi.Update) {
 	start := time.Now()
-	defer func() {
-		metrics.BotUpdateDuration.Observe(time.Since(start).Seconds())
-	}()
 
 	// Rate limiting: extract chat ID and check for non-admin users
 	var chatID int64
@@ -697,4 +694,6 @@ func (h *Handler) HandleUpdate(ctx context.Context, update tgbotapi.Update) {
 	} else if update.CallbackQuery != nil {
 		err = h.HandleCallback(ctx, update)
 	}
+
+	metrics.BotUpdateDuration.WithLabelValues(command).Observe(time.Since(start).Seconds())
 }

@@ -169,6 +169,19 @@ func (s *Service) CountActiveSubscriptions(ctx context.Context) (int64, error) {
 	return count, nil
 }
 
+// CountTrialSubscriptions returns the number of trial subscriptions (telegram_id < 0).
+func (s *Service) CountTrialSubscriptions(ctx context.Context) (int64, error) {
+	var count int64
+	result := s.db.WithContext(ctx).
+		Model(&Subscription{}).
+		Where("telegram_id < 0").
+		Count(&count)
+	if result.Error != nil {
+		return 0, fmt.Errorf("failed to count trial subscriptions: %w", result.Error)
+	}
+	return count, nil
+}
+
 // CountExpiredSubscriptions returns the number of expired subscriptions.
 func (s *Service) CountExpiredSubscriptions(ctx context.Context) (int64, error) {
 	var count int64

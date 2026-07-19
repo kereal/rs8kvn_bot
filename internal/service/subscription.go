@@ -427,7 +427,7 @@ func (s *SubscriptionService) CountActive(ctx context.Context) (int64, error) {
 	return s.db.CountActiveSubscriptions(ctx)
 }
 
-// RefreshActiveSubscriptionsMetric updates the active_subscriptions gauge.
+// RefreshActiveSubscriptionsMetric updates the active_subscriptions and trial_subscriptions gauges.
 func (s *SubscriptionService) RefreshActiveSubscriptionsMetric(ctx context.Context) {
 	count, err := s.CountActive(ctx)
 	if err != nil {
@@ -435,6 +435,13 @@ func (s *SubscriptionService) RefreshActiveSubscriptionsMetric(ctx context.Conte
 		return
 	}
 	metrics.ActiveSubscriptions.Set(float64(count))
+
+	trialCount, err := s.db.CountTrialSubscriptions(ctx)
+	if err != nil {
+		logger.Warn("failed to refresh trial subscriptions metric", zap.Error(err))
+		return
+	}
+	metrics.TrialSubscriptions.Set(float64(trialCount))
 }
 
 // GetLatest returns the most recent subscriptions up to the given limit.
