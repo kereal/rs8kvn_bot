@@ -142,7 +142,7 @@ func TestE2E_Concurrent_TrialBind_SameTrial(t *testing.T) {
 		}
 	}
 
-	assert.Equal(t, 1, successCount, "Only one bind should succeed due to atomic WHERE telegram_id = 0")
+	assert.Equal(t, 1, successCount, "Only one bind should succeed due to atomic WHERE telegram_id < 0")
 
 	allSubs, err := env.db.GetAllSubscriptions(ctx)
 	require.NoError(t, err)

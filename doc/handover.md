@@ -127,7 +127,7 @@ CreateTrialSubscription(ctx, inviteCode)
         │   • Expiry: now + TRIAL_DURATION_HOURS
         │
         ▼
-Database: CreateTrialSubscription (telegram_id=0, отрицательный ID)
+       Database: CreateTrialSubscription (отрицательный telegram_id до активации)
         │
         ▼
 Set cookie: rs8kvn_trial_{code} = {subID}; HttpOnly; Secure; SameSite=Strict
@@ -334,7 +334,7 @@ All tests pass with `-race` detector. Fuzzing enabled for critical functions.
 - **Broadcast:** 50ms delay between messages (~20 msg/sec, respects Telegram limits)
 
 ### Security
-- **Input validation:** Regex invite codes, path traversal checks
+- **Input validation:** Regex validation rejects path-separator/invalid characters in invite codes (`internal/web/web.go`) and subIDs (`^[a-zA-Z0-9_-]+$` in `internal/subserver/subscription.go`). (The historical `extra_servers.txt` file-path check was removed in v2.3.0 along with that feature.)
 - **IP spoofing (S2):** `getClientIP` uses rightmost IP from `X-Forwarded-For` (set by trusted reverse proxy), NOT leftmost (client-controlled, spoofable). Only trusted from loopback.
 - **URL scheme restriction (S3):** `validateURL` restricts all configured URLs to `http`/`https` schemes only — prevents `file://`, `gopher://`, etc. SSRF vectors
 - **Web→bot dependency break (A1):** `internal/web` no longer imports `internal/bot` — `Server.botUsername string` instead of `*bot.BotConfig`, reducing coupling and attack surface

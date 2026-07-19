@@ -1566,7 +1566,7 @@ func TestService_BindTrialSubscription_Success(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Create trial subscription (unbound - telegram_id = 0)
+	// Create trial subscription (unbound - negative telegram_id)
 	_, err := svc.CreateTrialSubscription(
 		ctx,
 		"INVITE000",

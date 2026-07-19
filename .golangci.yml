@@ -52,6 +52,7 @@ linters:
     - interfacebloat
     - nolintlint
     - usestdlibvars
+
   exclusions:
     rules:
       # Test files in internal/ directory
