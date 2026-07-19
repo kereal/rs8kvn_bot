@@ -1017,3 +1017,56 @@ func TestSyncService_SyncPendingNodes_JoinsErrors(t *testing.T) {
 	assert.ErrorIs(t, err, loadErr)
 	assert.ErrorIs(t, err, reconcileErr)
 }
+
+func TestSyncService_lockSubscription_Timeout(t *testing.T) {
+	t.Parallel()
+
+	db := testutil.NewDatabaseService()
+	svc := newTestSyncService(t, db, nil)
+
+	// Holder grabs the lock and keeps it indefinitely.
+	holdCtx := context.Background()
+	release, err := svc.lockSubscription(holdCtx, 42)
+	require.NoError(t, err)
+	defer release()
+
+	// A waiter must not block forever when the holder hangs.
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	_, err = svc.lockSubscription(ctx, 42)
+	elapsed := time.Since(start)
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.Less(t, elapsed, subscriptionLockTimeout,
+		"waiter must not wait the full subscriptionLockTimeout when ctx is short")
+}
+
+func TestSyncService_lockSubscription_TimeoutWhenAlreadyHeld(t *testing.T) {
+	t.Parallel()
+
+	db := testutil.NewDatabaseService()
+	svc := newTestSyncService(t, db, nil)
+
+	// Take the lock and never release it.
+	holdCtx := context.Background()
+	release, err := svc.lockSubscription(holdCtx, 7)
+	require.NoError(t, err)
+	// NB: intentionally do not call release() — simulate a stuck holder.
+	_ = release
+
+	// Without an outer deadline, the acquisition is bounded by the internal
+	// subscriptionLockTimeout so other goroutines can't block forever.
+	start := time.Now()
+	_, err = svc.lockSubscription(context.Background(), 7)
+	elapsed := time.Since(start)
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.GreaterOrEqual(t, elapsed, subscriptionLockTimeout,
+		"waiter should wait up to subscriptionLockTimeout when ctx has no deadline")
+	assert.Less(t, elapsed, subscriptionLockTimeout+30*time.Second,
+		"waiter must not wait unbounded")
+}
