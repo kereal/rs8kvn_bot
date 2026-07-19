@@ -33,11 +33,23 @@
 - `handlers_test.go:TestHandleBroadcast_MessageTooLong` обновлён: приём при
   `Max+1`, отказ только при `Max*20+1`.
 
-## Предсуществующая регрессия (вне scope, НЕ чинил)
-- `internal/bot/admin_test.go` — `package e2e` + `//go:build integration` в той
-  же директории, что `package bot` → integration-сборка `internal/bot` падает
-  (`found packages bot (admin.go) and e2e (admin_test.go)`). Введено коммитом
-  `a75650a`. `setupE2EEnv`/`e2eTestEnv` живут в `tests/e2e/e2e_test.go`, поэтому
-  e2e-тесты в `admin_test.go` не компилируются даже при integration-теге.
-  Рекомендация: перенести e2e-тесты из `admin_test.go` в `tests/e2e/` или
-  сделать файл `package bot` и заменить `setupE2EEnv` на bot-уровневый хелпер.
+## Регрессия устранена (2026-07-19, follow-up)
+- `internal/bot/admin_test.go` был `package e2e` + `//go:build integration` в той
+  же директории, что `package bot` → integration-сборка `internal/bot` падала
+  (`found packages bot (admin.go) and e2e (admin_test.go)`). И `setupE2EEnv`/
+  `e2eTestEnv` живут в `tests/e2e/e2e_test.go`, поэтому e2e-тесты в файле и так
+  не собирались.
+- Исправлено: файл переведён в `package bot`, все дублирующие `TestE2E_*` тесты
+  удалены (их полные копии уже есть в `tests/e2e/admin_test.go`), оставлены
+  только 2 теста на неэкспортируемые символы:
+  - `TestSplitMessage_DoesNotBreakMarkdownV2Entities` — убран подтест
+    `long_markdown_is_hard-split_safely`: нынешний entity-aware `splitMessage`
+    намеренно оставляет over-long токен с delimiter (`a*`+N) целиком (чанк > maxLen
+    — задокументированный trade-off из памяти строки 24-25), утверждение
+    `len(chunk) ≤ maxLen` ему противоречит. Остальные 3 подтеста валидны.
+  - `TestBroadcastSession_TTLExpiry` — переписан с `setupE2EEnv` на bot-уровневый
+    `NewTestFixture` (есь в `integration_test.go`); использует неэкспортируемые
+    `startBroadcastSession`/`getBroadcastSession`/`broadcastMu`/`broadcastSessions`/
+    `broadcastSessionActive`.
+- Проверено: `go vet -tags integration ./...` в `internal/bot` и `tests/e2e`
+  проходят; оба теста проходят (`go test -tags integration -run ...`).
