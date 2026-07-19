@@ -161,9 +161,6 @@ func TestE2E_Concurrent_Handler_CreateSubscription(t *testing.T) {
 
 	ctx := context.Background()
 
-	var mu sync.Mutex
-	sendCount := 0
-
 	var wg sync.WaitGroup
 	for range 5 {
 		wg.Add(1)
@@ -185,18 +182,12 @@ func TestE2E_Concurrent_Handler_CreateSubscription(t *testing.T) {
 					Data: "create_subscription",
 				},
 			})
-			mu.Lock()
-			if env.botAPI.SendCalledSafe() {
-				sendCount++
-			}
-			env.botAPI.SetSendCalled(false)
-			mu.Unlock()
 		}()
 	}
 
 	wg.Wait()
 
-	assert.GreaterOrEqual(t, sendCount, 1, "At least one message should be sent")
+	assert.True(t, env.botAPI.SendCalledSafe(), "At least one message should be sent during concurrent callback handling")
 
 	sub, err := env.db.GetByTelegramID(ctx, env.chatID)
 	require.NoError(t, err)

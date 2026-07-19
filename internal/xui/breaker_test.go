@@ -260,7 +260,6 @@ func TestCircuitBreaker_HalfOpenTransitions(t *testing.T) {
 				assert.Equal(t, CircuitStateOpen, cb.state)
 
 				// Transition open -> half-open by calling allowRequest once timeout elapses.
-				// Transition open -> half-open once timeout elapses.
 				require.Eventually(t, cb.allowRequest, 200*time.Millisecond, 5*time.Millisecond, "circuit should become half-open after timeout")
 				assert.Equal(t, CircuitStateHalfOpen, cb.state)
 
