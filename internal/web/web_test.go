@@ -2,7 +2,6 @@ package web
 
 import (
 	"context"
-	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"

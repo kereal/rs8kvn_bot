@@ -361,8 +361,9 @@ func TestE2E_CreateSubscription_RevokesOnlyActive(t *testing.T) {
 	require.NoError(t, err)
 
 	// Only the original subscription should exist (reanimated, not duplicated).
-	assert.Equal(t, 1, len(allSubs), "Should have only one subscription")
+	require.Len(t, allSubs, 1, "Should have only one subscription")
 	assert.Equal(t, "active", allSubs[0].Status)
+	require.Equal(t, oldSub.SubscriptionID, allSubs[0].SubscriptionID, "Original record should be reactivated, not replaced")
 }
 
 func TestE2E_Service_Create_XUIFailure_Parameterized(t *testing.T) {

@@ -852,7 +852,7 @@ func TestE2E_NonAdmin_AccessControl(t *testing.T) {
 	}
 }
 
-func TestE2E_NonAdmin_CannotUseDel(t *testing.T) {
+func TestE2E_Admin_StatsCallback(t *testing.T) {
 	t.Parallel()
 	env := setupE2EEnv(t)
 	defer func() {
