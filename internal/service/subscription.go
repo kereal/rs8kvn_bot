@@ -481,107 +481,91 @@ func (s *SubscriptionService) InvalidateBySubID(ctx context.Context, subID strin
 	}
 }
 
-// ReconcileOrphanedClients scans all active subscriptions and removes those whose
-// client no longer exists in the XUI panel. It returns the number of removed subscriptions.
+// ReconcileOrphanedClients scans all active subscriptions and removes those that
+// are no longer provisioned on any VPN node.
+//
+// It uses the subscription_nodes table — the source of truth for node
+// provisioning — instead of querying each node's panel directly. This works for
+// every node type (3x-ui, proxman, fetch) and fixes the previous bug where
+// subscriptions on proxman/fetch nodes were falsely deleted because the legacy
+// xuiClients map only covers 3x-ui nodes.
+//
+// A subscription is orphaned when it has subscription_nodes rows but none are in
+// a live state (active/pending_add/pending_update) — i.e. every binding is
+// pending_remove (deprovisioning did not complete in the delete flow).
+//
+// Subscriptions without any subscription_nodes (trial subscriptions, which are
+// cleaned up by their own expiry-based mechanism, or brand-new subscriptions
+// still being provisioned) are left untouched to avoid races and to keep the
+// trial lifecycle separate from node-level orphan cleanup.
+//
 // This is a best-effort background cleanup; errors are logged but do not stop the scan.
 func (s *SubscriptionService) ReconcileOrphanedClients(ctx context.Context) (int, error) {
-	type activeOnly struct {
-		ID             uint
-		TelegramID     int64
-		Username       string
-		SubscriptionID string
-		ClientID       string
-	}
-
 	start := time.Now()
 	rows, err := s.db.GetAllSubscriptions(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("failed to fetch subscriptions: %w", err)
 	}
 
-	activeSubs := make([]activeOnly, 0, len(rows))
+	activeSubs := make([]database.Subscription, 0, len(rows))
 	for _, sub := range rows {
 		if sub.Status == "active" {
-			activeSubs = append(activeSubs, activeOnly{
-				ID:             sub.ID,
-				TelegramID:     sub.TelegramID,
-				Username:       sub.Username,
-				SubscriptionID: sub.SubscriptionID,
-				ClientID:       sub.ClientID,
-			})
+			activeSubs = append(activeSubs, sub)
 		}
 	}
 
 	removed := 0
 	for _, sub := range activeSubs {
-		var xuiEmail string
-		if sub.TelegramID < 0 {
-			if sub.SubscriptionID == "" {
-				continue
-			}
-			xuiEmail = "trial_" + sub.SubscriptionID
-		} else {
-			xuiEmail = XUIEmail(sub.Username, sub.TelegramID)
-		}
-		if xuiEmail == "" {
-			continue
-		}
-
-		pendingNodes, pendErr := s.db.GetPendingBySubscriptionID(ctx, sub.ID)
-		if pendErr == nil && len(pendingNodes) > 0 {
-			continue
-		}
-		if pendErr != nil {
-			logger.Warn("failed to check pending nodes for orphan reconciliation",
+		subNodes, nodeErr := s.db.GetBySubscriptionID(ctx, sub.ID)
+		if nodeErr != nil {
+			logger.Warn("failed to load subscription nodes for orphan reconciliation",
 				zap.Uint("subscription_id", sub.ID),
-				zap.Error(pendErr))
+				zap.Error(nodeErr))
+			continue
 		}
 
-		notFoundOnAll := true
-		for _, node := range s.activeNodes() {
-			client, ok := s.xuiClients[node.ID]
-			if !ok {
-				continue
-			}
-			_, err := client.GetClientTraffic(ctx, xuiEmail)
-			if err == nil {
-				notFoundOnAll = false
+		// No node bindings: trial subscription (cleaned up by expiry) or a
+		// subscription still being provisioned. Never treat as orphan here.
+		if len(subNodes) == 0 {
+			continue
+		}
+
+		hasLiveNode := false
+		for _, sn := range subNodes {
+			if sn.Status == database.SyncStatusActive ||
+				sn.Status == database.SyncStatusPendingAdd ||
+				sn.Status == database.SyncStatusPendingUpdate {
+				hasLiveNode = true
 				break
 			}
-			if errors.Is(err, xui.ErrClientNotFound) {
-				continue
-			}
-			// Non-sentinel error: node is reachable but returned unexpected error.
-			// Treat as "found" to avoid incorrectly deleting an active subscription.
-			notFoundOnAll = false
-			logger.Debug("unexpected error checking XUI client, skipping orphan check",
-				zap.Error(err),
-				zap.Int64("telegram_id", sub.TelegramID))
-			break
 		}
 
-		if notFoundOnAll {
-			if _, delErr := s.db.DeleteSubscriptionByID(ctx, sub.ID); delErr != nil {
-				logger.Warn("Failed to delete orphaned subscription",
-					zap.Error(delErr),
-					zap.Uint("id", sub.ID),
-					zap.Int64("telegram_id", sub.TelegramID),
-					zap.String("subscription_id", sub.SubscriptionID))
-			} else {
-				removed++
-				logger.Info("Removed orphaned subscription (XUI client missing on all nodes)",
-					zap.Uint("id", sub.ID),
-					zap.Int64("telegram_id", sub.TelegramID),
-					zap.String("username", sub.Username),
-					zap.String("subscription_id", sub.SubscriptionID))
-				if s.invalidate != nil && sub.TelegramID > 0 {
-					s.invalidate(sub.TelegramID)
-				}
-				if s.invalidateBySubID != nil && sub.SubscriptionID != "" {
-					s.invalidateBySubID(sub.SubscriptionID)
-				}
-				metrics.OrphanedClientsRemovedTotal.Inc()
+		if hasLiveNode {
+			continue
+		}
+
+		// Every node binding is pending_remove (or an unexpected state):
+		// the subscription is fully deprovisioned but the DB row remains.
+		if _, delErr := s.db.DeleteSubscriptionByID(ctx, sub.ID); delErr != nil {
+			logger.Warn("failed to delete orphaned subscription",
+				zap.Error(delErr),
+				zap.Uint("id", sub.ID),
+				zap.Int64("telegram_id", sub.TelegramID),
+				zap.String("subscription_id", sub.SubscriptionID))
+		} else {
+			removed++
+			logger.Info("removed orphaned subscription (no live node bindings)",
+				zap.Uint("id", sub.ID),
+				zap.Int64("telegram_id", sub.TelegramID),
+				zap.String("username", sub.Username),
+				zap.String("subscription_id", sub.SubscriptionID))
+			if s.invalidate != nil && sub.TelegramID > 0 {
+				s.invalidate(sub.TelegramID)
 			}
+			if s.invalidateBySubID != nil && sub.SubscriptionID != "" {
+				s.invalidateBySubID(sub.SubscriptionID)
+			}
+			metrics.OrphanedClientsRemovedTotal.Inc()
 		}
 
 		if ctx.Err() != nil {
