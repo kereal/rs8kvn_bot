@@ -297,7 +297,7 @@ docker run -d \
 | Package | Version | Known vulns? |
 |---------|---------|--------------|
 | `gorm.io/gorm` | v1.31.2 | None |
-| `github.com/mattn/go-sqlite3` | v1.14.47 | None (CVE-2023-32636 patched) |
+| `github.com/mattn/go-sqlite3` | v1.14.48 | None (CVE-2023-32636 patched) |
 | `go.uber.org/zap` | v1.28.0 | None |
 | `github.com/prometheus/client_golang` | v1.23.2 | None |
 
