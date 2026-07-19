@@ -123,11 +123,7 @@ func TestCircuitBreaker_Execute(t *testing.T) {
 			},
 			fn:      func() error { return nil },
 			wantErr: true,
-			wantErrIs: func() error {
-				ctx, cancel := context.WithTimeout(context.Background(), 1*time.Nanosecond)
-				defer cancel()
-				return ctx.Err()
-			}(),
+			wantErrIs: context.DeadlineExceeded,
 		},
 		{
 			name: "panicking callback",
@@ -160,9 +156,12 @@ func TestCircuitBreaker_Execute(t *testing.T) {
 				ctx = cancelCtx
 			}
 			if tt.name == "context timeout" {
+				// Wait for the timeout context to report completion so the
+				// breaker sees a genuinely-expired context inside Execute.
 				timeoutCtx, cancel := context.WithTimeout(ctx, 1*time.Nanosecond)
-				ctx = timeoutCtx
 				defer cancel()
+				<-timeoutCtx.Done()
+				ctx = timeoutCtx
 			}
 
 			err := cb.Execute(ctx, tt.fn)
@@ -261,8 +260,8 @@ func TestCircuitBreaker_HalfOpenTransitions(t *testing.T) {
 				assert.Equal(t, CircuitStateOpen, cb.state)
 
 				// Transition open -> half-open by calling allowRequest once timeout elapses.
+				// Transition open -> half-open once timeout elapses.
 				require.Eventually(t, cb.allowRequest, 200*time.Millisecond, 5*time.Millisecond, "circuit should become half-open after timeout")
-				cb.allowRequest() // open -> half-open
 				assert.Equal(t, CircuitStateHalfOpen, cb.state)
 
 				for i := 0; i < 3; i++ {

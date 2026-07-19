@@ -223,21 +223,26 @@ func (c *Client) doHTTPRequest(ctx context.Context, method, url string, bodyFn f
 	operation := extractOperation(url)
 	start := time.Now()
 
+	// Single deferred handler records both metrics on every return path.
+	result := "success"
+	defer func() {
+		metrics.XUIRequestsTotal.WithLabelValues(operation, result).Inc()
+		metrics.XUIRequestDuration.WithLabelValues(operation).Observe(time.Since(start).Seconds())
+	}()
+
 	var body io.Reader
 	if bodyFn != nil {
 		var err error
 		body, err = bodyFn()
 		if err != nil {
-			metrics.XUIRequestsTotal.WithLabelValues(operation, "error").Inc()
-			metrics.XUIRequestDuration.WithLabelValues(operation).Observe(time.Since(start).Seconds())
+			result = "error"
 			return nil, err
 		}
 	}
 
 	req, err := http.NewRequestWithContext(ctx, method, url, body)
 	if err != nil {
-		metrics.XUIRequestsTotal.WithLabelValues(operation, "error").Inc()
-		metrics.XUIRequestDuration.WithLabelValues(operation).Observe(time.Since(start).Seconds())
+		result = "error"
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
@@ -249,27 +254,22 @@ func (c *Client) doHTTPRequest(ctx context.Context, method, url string, bodyFn f
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		metrics.XUIRequestsTotal.WithLabelValues(operation, "error").Inc()
-		metrics.XUIRequestDuration.WithLabelValues(operation).Observe(time.Since(start).Seconds())
+		result = "error"
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
 	defer closeResponseBody(resp)
 
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, config.MaxResponseSize))
 	if err != nil {
-		metrics.XUIRequestsTotal.WithLabelValues(operation, "error").Inc()
-		metrics.XUIRequestDuration.WithLabelValues(operation).Observe(time.Since(start).Seconds())
+		result = "error"
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		metrics.XUIRequestsTotal.WithLabelValues(operation, "error").Inc()
-		metrics.XUIRequestDuration.WithLabelValues(operation).Observe(time.Since(start).Seconds())
+		result = "error"
 		return respBody, fmt.Errorf("upstream returned non-200: %w", ErrNon200Response)
 	}
 
-	metrics.XUIRequestsTotal.WithLabelValues(operation, "success").Inc()
-	metrics.XUIRequestDuration.WithLabelValues(operation).Observe(time.Since(start).Seconds())
 	return respBody, nil
 }
 

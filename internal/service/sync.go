@@ -49,8 +49,9 @@ func NewSyncService(db interfaces.DatabaseService, vpnClients map[uint]vpn.Clien
 // subscriptionLockTimeout caps how long a goroutine waits to acquire a
 // per-subscription lock. It bounds the blast radius of a stuck holder: waiters
 // fail fast instead of blocking forever. A caller-provided context deadline
-// shorter than this takes precedence.
-const subscriptionLockTimeout = 2 * time.Minute
+// shorter than this takes precedence. Tests may override this to keep the
+// already-held timeout bounded to a short duration.
+var subscriptionLockTimeout = 2 * time.Minute
 
 // lockSubscription acquires a per-subscription lock and returns an unlock
 // function. Acquisition is bounded by the shorter of the caller's context

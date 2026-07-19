@@ -1207,14 +1207,26 @@ func TestSubscriptionService_DeleteByID_SyncFailureStillDeletes(t *testing.T) {
 	t.Parallel()
 
 	var deleteByIDCalled bool
+	// Node binding used by MarkAllForRemoval / SyncSubscription.
+	nodes := []database.Node{{ID: 1, IsActive: true, Host: "http://x", InboundIDs: "[1]"}}
 	db := &testutil.DatabaseService{
 		GetByIDFunc: func(ctx context.Context, id uint) (*database.Subscription, error) {
 			return &database.Subscription{ID: 1, ClientID: "c", SubscriptionID: "s", TelegramID: 1, Username: "u", Status: "active"}, nil
 		},
-		// MarkAllForRemoval loads nodes then marks each; an empty list means
-		// it succeeds without touching UpdateSubscriptionNodeStatus.
+		// An existing active node binding so MarkAllForRemoval flips it to
+		// pending_remove, and the subsequent SyncSubscription reaches the VPN
+		// client's DeleteSubscription call.
 		GetBySubscriptionIDFunc: func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
-			return nil, nil
+			return []database.SubscriptionNode{
+				{SubscriptionID: subscriptionID, NodeID: 1, Status: database.SyncStatusActive},
+			}, nil
+		},
+		// SyncSubscription reads the pending_remove node and dispatches the
+		// delete to the VPN client (which fails below).
+		GetPendingBySubscriptionIDFunc: func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
+			return []database.SubscriptionNode{
+				{SubscriptionID: subscriptionID, NodeID: 1, Status: database.SyncStatusPendingRemove},
+			}, nil
 		},
 		UpdateSubscriptionFunc: func(ctx context.Context, sub *database.Subscription) error {
 			return nil
@@ -1227,9 +1239,9 @@ func TestSubscriptionService_DeleteByID_SyncFailureStillDeletes(t *testing.T) {
 
 	// XUI client is unused by the teardown path (syncService owns deprovision).
 	xuiClients := map[uint]interfaces.XUIClient{1: &testutil.XUIClient{}}
-	// VPN client fails on delete → SyncSubscription returns an error (best-effort).
+	// VPN client fails on delete → SyncSubscription reaches DeleteSubscription
+	// and receives the configured "vpn delete failed" error (best-effort).
 	vpnClients := map[uint]vpn.Client{1: &mockVPNClient{deleteError: errors.New("vpn delete failed")}}
-	nodes := []database.Node{{ID: 1, IsActive: true, Host: "http://x", InboundIDs: "[1]"}}
 
 	svc := NewSubscriptionService(db, xuiClients, vpnClients, nodes, &config.Config{})
 	svc.SetSyncService(NewSyncService(db, vpnClients, nodes))
