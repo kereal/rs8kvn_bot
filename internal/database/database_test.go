@@ -19,10 +19,11 @@ func TestMain(m *testing.M) {
 	_, _ = logger.Init("", "error")
 	os.Exit(m.Run())
 }
-
 func ptrTime(t time.Time) *time.Time { return &t }
 
 func ptrInt64(v int64) *int64 { return &v }
+
+
 
 // ==================== Model Method Tests ====================
 

@@ -16,7 +16,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func ptrTime(t time.Time) *time.Time { return &t }
 
 type mockVPNClient struct {
 	createCalled    bool
@@ -89,7 +88,7 @@ func TestSyncService_ReconcilePlanNodes_AddMissing(t *testing.T) {
 		SubscriptionID: "s-rec",
 		Status:         "active",
 		PlanID:         plan.ID,
-		ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
+		ExpiresAt:      testutil.PtrTime(time.Now().Add(24 * time.Hour)),
 	}
 	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusActive}))
@@ -133,7 +132,7 @@ func TestSyncService_ReconcilePlanNodes_RemoveExtra(t *testing.T) {
 		SubscriptionID: "s-recrm",
 		Status:         "active",
 		PlanID:         plan.ID,
-		ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
+		ExpiresAt:      testutil.PtrTime(time.Now().Add(24 * time.Hour)),
 	}
 	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusActive}))
@@ -175,7 +174,7 @@ func TestSyncService_ReconcilePlanNodes_KeepExisting(t *testing.T) {
 		SubscriptionID: "s-keep",
 		Status:         "active",
 		PlanID:         plan.ID,
-		ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
+		ExpiresAt:      testutil.PtrTime(time.Now().Add(24 * time.Hour)),
 	}
 	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusActive}))
@@ -210,7 +209,7 @@ func TestSyncService_SyncNodes_SkipsUnknownNodeType(t *testing.T) {
 		SubscriptionID: "s-unknowntype",
 		Status:         "active",
 		PlanID:         plan.ID,
-		ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
+		ExpiresAt:      testutil.PtrTime(time.Now().Add(24 * time.Hour)),
 	}
 	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: unknownNode.ID, Status: database.SyncStatusPendingAdd}))
@@ -250,7 +249,7 @@ func TestSyncService_SyncNodes_FetchType_PendingAddBecomesActive(t *testing.T) {
 		SubscriptionID: "s-fetch",
 		Status:         "active",
 		PlanID:         plan.ID,
-		ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
+		ExpiresAt:      testutil.PtrTime(time.Now().Add(24 * time.Hour)),
 	}
 	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: fetchNode.ID, Status: database.SyncStatusPendingAdd}))
@@ -289,7 +288,7 @@ func TestSyncService_ReconcilePlanNodes_ReactivatePendingRemove(t *testing.T) {
 		SubscriptionID: "s-react",
 		Status:         "active",
 		PlanID:         plan.ID,
-		ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
+		ExpiresAt:      testutil.PtrTime(time.Now().Add(24 * time.Hour)),
 	}
 	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusPendingRemove}))
@@ -326,7 +325,7 @@ func TestSyncService_ReconcilePlanNodes_RemovesStalePendingAdd(t *testing.T) {
 		SubscriptionID: "s-stale",
 		Status:         "active",
 		PlanID:         plan.ID,
-		ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
+		ExpiresAt:      testutil.PtrTime(time.Now().Add(24 * time.Hour)),
 	}
 	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusActive}))
@@ -367,7 +366,7 @@ func TestSyncService_ReconcilePlanNodes_PlanChange_KeepsActiveWhenSamePlan(t *te
 		SubscriptionID: "s-plankeep",
 		Status:         "active",
 		PlanID:         planPremium.ID,
-		ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
+		ExpiresAt:      testutil.PtrTime(time.Now().Add(24 * time.Hour)),
 	}
 	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusActive}))
@@ -402,7 +401,7 @@ func TestSyncService_SyncSubscription_PendingAdd(t *testing.T) {
 		SubscriptionID: "s-syncadd",
 		Status:         "active",
 		PlanID:         plan.ID,
-		ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
+		ExpiresAt:      testutil.PtrTime(time.Now().Add(24 * time.Hour)),
 	}
 	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusPendingAdd}))
@@ -445,7 +444,7 @@ func TestSyncService_SyncSubscription_PendingAdd_UnlimitedPlan(t *testing.T) {
 		SubscriptionID: "s-syncadd-unlimited",
 		Status:         "active",
 		PlanID:         plan.ID,
-		ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
+		ExpiresAt:      testutil.PtrTime(time.Now().Add(24 * time.Hour)),
 	}
 	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusPendingAdd}))
@@ -487,7 +486,7 @@ func TestSyncService_SyncSubscription_PendingRemove(t *testing.T) {
 		SubscriptionID: "s-syncrm",
 		Status:         "active",
 		PlanID:         plan.ID,
-		ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
+		ExpiresAt:      testutil.PtrTime(time.Now().Add(24 * time.Hour)),
 	}
 	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusPendingRemove}))
@@ -527,7 +526,7 @@ func TestSyncService_SyncSubscription_UsesFallbackXUIIdentifier(t *testing.T) {
 		SubscriptionID: "s-syncfallback",
 		Status:         "active",
 		PlanID:         plan.ID,
-		ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
+		ExpiresAt:      testutil.PtrTime(time.Now().Add(24 * time.Hour)),
 	}
 	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusPendingAdd}))
@@ -563,7 +562,7 @@ func TestSyncService_SyncPendingNodes_ProcessesOnlyDueNodes(t *testing.T) {
 		SubscriptionID: "s-due",
 		Status:         "active",
 		PlanID:         plan.ID,
-		ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
+		ExpiresAt:      testutil.PtrTime(time.Now().Add(24 * time.Hour)),
 	}
 	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
 
@@ -611,7 +610,7 @@ func TestSyncService_handleSyncError_IncrementsRetry(t *testing.T) {
 		SubscriptionID: "s-syncerr",
 		Status:         "active",
 		PlanID:         plan.ID,
-		ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
+		ExpiresAt:      testutil.PtrTime(time.Now().Add(24 * time.Hour)),
 	}
 	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
 	sn := &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusPendingAdd, RetryCount: 0}
@@ -720,7 +719,7 @@ func TestSyncService_SyncSubscription_PendingAdd_AlreadyExists(t *testing.T) {
 		SubscriptionID: "s-syncaddexists",
 		Status:         "active",
 		PlanID:         plan.ID,
-		ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
+		ExpiresAt:      testutil.PtrTime(time.Now().Add(24 * time.Hour)),
 	}
 	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusPendingAdd}))
@@ -759,7 +758,7 @@ func TestSyncService_SyncSubscription_PendingAdd_AlreadyExistsUpdateFails(t *tes
 		SubscriptionID: "s-syncaddexistsupdatefails",
 		Status:         "active",
 		PlanID:         plan.ID,
-		ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
+		ExpiresAt:      testutil.PtrTime(time.Now().Add(24 * time.Hour)),
 	}
 	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusPendingAdd}))
@@ -801,7 +800,7 @@ func TestSyncService_SyncSubscription_PendingRemove_NotFound(t *testing.T) {
 		SubscriptionID: "s-syncrmnotfound",
 		Status:         "active",
 		PlanID:         plan.ID,
-		ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
+		ExpiresAt:      testutil.PtrTime(time.Now().Add(24 * time.Hour)),
 	}
 	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusPendingRemove}))
@@ -837,7 +836,7 @@ func TestSyncService_SyncSubscription_PendingAdd_RetryOnOtherError(t *testing.T)
 		SubscriptionID: "s-syncaddretry",
 		Status:         "active",
 		PlanID:         plan.ID,
-		ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
+		ExpiresAt:      testutil.PtrTime(time.Now().Add(24 * time.Hour)),
 	}
 	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusPendingAdd}))
@@ -876,7 +875,7 @@ func TestSyncService_SyncSubscription_PendingAdd_NoVPNClientKeepsPending(t *test
 		SubscriptionID: "s-syncaddnovpnclient",
 		Status:         "active",
 		PlanID:         plan.ID,
-		ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
+		ExpiresAt:      testutil.PtrTime(time.Now().Add(24 * time.Hour)),
 	}
 	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusPendingAdd}))
@@ -915,7 +914,7 @@ func TestSyncService_SyncSubscription_PendingUpdate_NoVPNClientKeepsPending(t *t
 		SubscriptionID: "s-syncupdatenovpnclient",
 		Status:         "active",
 		PlanID:         plan.ID,
-		ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
+		ExpiresAt:      testutil.PtrTime(time.Now().Add(24 * time.Hour)),
 	}
 	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusPendingUpdate}))
@@ -953,7 +952,7 @@ func TestSyncService_SyncSubscription_PendingRemove_NoVPNClientKeepsPending(t *t
 		SubscriptionID: "s-syncremovenovpnclient",
 		Status:         "active",
 		PlanID:         plan.ID,
-		ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
+		ExpiresAt:      testutil.PtrTime(time.Now().Add(24 * time.Hour)),
 	}
 	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusPendingRemove}))

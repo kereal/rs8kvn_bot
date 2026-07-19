@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestCircuitBreaker_FailureThreshold(t *testing.T) {
@@ -125,7 +126,6 @@ func TestCircuitBreaker_Execute(t *testing.T) {
 			wantErrIs: func() error {
 				ctx, cancel := context.WithTimeout(context.Background(), 1*time.Nanosecond)
 				defer cancel()
-				time.Sleep(2 * time.Millisecond)
 				return ctx.Err()
 			}(),
 		},
@@ -161,7 +161,6 @@ func TestCircuitBreaker_Execute(t *testing.T) {
 			}
 			if tt.name == "context timeout" {
 				timeoutCtx, cancel := context.WithTimeout(ctx, 1*time.Nanosecond)
-				time.Sleep(2 * time.Millisecond)
 				ctx = timeoutCtx
 				defer cancel()
 			}
@@ -261,7 +260,8 @@ func TestCircuitBreaker_HalfOpenTransitions(t *testing.T) {
 				cb.recordResult(errors.New("failure"))
 				assert.Equal(t, CircuitStateOpen, cb.state)
 
-				time.Sleep(10 * time.Millisecond)
+				// Transition open -> half-open by calling allowRequest once timeout elapses.
+				require.Eventually(t, cb.allowRequest, 200*time.Millisecond, 5*time.Millisecond, "circuit should become half-open after timeout")
 				cb.allowRequest() // open -> half-open
 				assert.Equal(t, CircuitStateHalfOpen, cb.state)
 
@@ -403,7 +403,11 @@ func TestCircuitBreaker_ResetClearsAllState(t *testing.T) {
 	cb.recordResult(errors.New("failure"))
 	cb.recordResult(errors.New("failure"))
 
-	time.Sleep(10 * time.Millisecond)
+	require.Eventually(t, func() bool {
+		cb.mu.Lock()
+		defer cb.mu.Unlock()
+		return cb.state == CircuitStateOpen
+	}, 200*time.Millisecond, 5*time.Millisecond, "circuit should remain open after failures")
 	cb.allowRequest()
 
 	cb.recordResult(nil)

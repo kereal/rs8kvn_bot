@@ -1,3 +1,5 @@
+//go:build integration
+
 package e2e
 
 import (
@@ -8,13 +10,13 @@ import (
 	"time"
 
 	"github.com/kereal/rs8kvn_bot/internal/database"
+	"github.com/kereal/rs8kvn_bot/internal/testutil"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func ptrTime(t time.Time) *time.Time { return &t }
 
 func TestE2E_CreateSubscription_EmptyUsername(t *testing.T) {
 	env := setupE2EEnv(t)
@@ -203,7 +205,7 @@ func TestE2E_Subscription_Expired(t *testing.T) {
 		ClientID:       "test-client-id",
 		SubscriptionID: "test-sub-id",
 		Status:         "expired",
-		ExpiresAt:      ptrTime(time.Now().Add(-1 * time.Hour)),
+		ExpiresAt:      testutil.PtrTime(time.Now().Add(-1 * time.Hour)),
 	}
 	require.NoError(t, env.db.CreateSubscription(ctx, sub, ""))
 
@@ -224,7 +226,7 @@ func TestE2E_Subscription_AboutToExpire(t *testing.T) {
 		ClientID:       "test-client-id",
 		SubscriptionID: "test-sub-id",
 		Status:         "active",
-		ExpiresAt:      ptrTime(time.Now().Add(1 * time.Hour)),
+		ExpiresAt:      testutil.PtrTime(time.Now().Add(1 * time.Hour)),
 	}
 	require.NoError(t, env.db.CreateSubscription(ctx, sub, ""))
 

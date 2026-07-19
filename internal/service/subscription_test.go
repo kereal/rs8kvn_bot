@@ -316,7 +316,7 @@ func TestSubscriptionService_RenewSubscription_PersistsPurchaseMetadata(t *testi
 		SubscriptionID: "renew-sub",
 		Status:         "active",
 		PlanID:         plan.ID,
-		ExpiresAt:      ptrTime(now.Add(-24 * time.Hour)),
+		ExpiresAt:      testutil.PtrTime(now.Add(-24 * time.Hour)),
 	}
 	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
 
@@ -362,7 +362,7 @@ func TestSubscriptionService_RenewSubscription_UsesDatabaseServiceInterface(t *t
 		ClientID:       "iface-client",
 		SubscriptionID: "iface-sub",
 		Status:         "active",
-		ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
+		ExpiresAt:      testutil.PtrTime(time.Now().Add(24 * time.Hour)),
 	}
 	product := &database.Product{
 		ID:           11,
@@ -404,7 +404,7 @@ func TestSubscriptionService_RenewSubscription_SyncSetupFailureReturnsError(t *t
 		SubscriptionID: "iface-sub",
 		Status:         "active",
 		PlanID:         1,
-		ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
+		ExpiresAt:      testutil.PtrTime(time.Now().Add(24 * time.Hour)),
 	}
 	product := &database.Product{
 		ID:           11,
@@ -621,7 +621,7 @@ func TestSubscriptionService_GetWithTraffic_Success(t *testing.T) {
 		Username:   "testuser",
 		PlanID:     1,
 		CreatedAt:  time.Now(),
-		ExpiresAt:  ptrTime(time.Now().Add(7 * 24 * time.Hour)),
+		ExpiresAt:  testutil.PtrTime(time.Now().Add(7 * 24 * time.Hour)),
 	}
 
 	db := &testutil.DatabaseService{

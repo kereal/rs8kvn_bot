@@ -20,7 +20,6 @@ func TestMain(m *testing.M) {
 	testutil.InitLogger(m)
 	os.Exit(m.Run())
 }
-
 func TestGetHTTPClient_Singleton(t *testing.T) {
 	// Reset the singleton for this test
 	resetHTTPClient()
@@ -95,11 +94,12 @@ func TestStart_ContextCancellation(t *testing.T) {
 	t.Parallel()
 
 	// Create a mock server that responds quickly
+	var requestReceived atomic.Bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestReceived.Store(true)
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()
-
 	ctx, cancel := context.WithCancel(context.Background())
 
 	done := make(chan struct{})
@@ -108,8 +108,8 @@ func TestStart_ContextCancellation(t *testing.T) {
 		close(done)
 	}()
 
-	// Wait a bit for initial heartbeat
-	time.Sleep(20 * time.Millisecond)
+	// Wait for the initial heartbeat to be sent
+	require.Eventually(t, requestReceived.Load, 200*time.Millisecond, 5*time.Millisecond, "initial heartbeat should be sent")
 
 	// Cancel the context
 	cancel()
@@ -124,13 +124,11 @@ func TestStart_ContextCancellation(t *testing.T) {
 
 func TestStart_NegativeInterval(t *testing.T) {
 	t.Parallel()
-
-	// Create a mock server
+	var requestReceived atomic.Bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestReceived.Store(true)
 		w.WriteHeader(http.StatusOK)
 	}))
-	defer server.Close()
-
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -141,8 +139,8 @@ func TestStart_NegativeInterval(t *testing.T) {
 		close(done)
 	}()
 
-	// Wait for initial heartbeat
-	time.Sleep(20 * time.Millisecond)
+	// Wait for the initial heartbeat to be sent
+	require.Eventually(t, requestReceived.Load, 200*time.Millisecond, 5*time.Millisecond, "initial heartbeat should be sent")
 
 	// Cancel to stop the scheduler
 	cancel()
@@ -159,11 +157,13 @@ func TestStart_ZeroInterval(t *testing.T) {
 	t.Parallel()
 
 	// Create a mock server
+	var requestReceived atomic.Bool
+	// Create a mock server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestReceived.Store(true)
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()
-
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -174,8 +174,8 @@ func TestStart_ZeroInterval(t *testing.T) {
 		close(done)
 	}()
 
-	// Wait for initial heartbeat
-	time.Sleep(20 * time.Millisecond)
+	// Wait for the initial heartbeat to be sent
+	require.Eventually(t, requestReceived.Load, 200*time.Millisecond, 5*time.Millisecond, "initial heartbeat should be sent")
 
 	// Cancel to stop the scheduler
 	cancel()
@@ -260,8 +260,8 @@ func TestStart_IntervalTiming(t *testing.T) {
 	// Use 1 second interval for testing
 	go Start(ctx, server.URL, 1)
 
-	// Wait for initial heartbeat
-	time.Sleep(20 * time.Millisecond)
+	// Wait for the initial heartbeat to be sent
+	require.Eventually(t, func() bool { return atomic.LoadInt64(&requestCount) >= 1 }, 200*time.Millisecond, 5*time.Millisecond, "initial heartbeat was not sent")
 
 	// Initial heartbeat should have been sent
 	assert.GreaterOrEqual(t, atomic.LoadInt64(&requestCount), int64(1), "Initial heartbeat was not sent")

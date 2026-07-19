@@ -11,6 +11,7 @@ require (
 	github.com/piglig/go-qr v1.1.0
 	github.com/prometheus/client_golang v1.23.2
 	github.com/stretchr/testify v1.11.1
+	go.uber.org/goleak v1.3.0
 	go.uber.org/zap v1.28.0
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	gopkg.in/yaml.v3 v3.0.1
