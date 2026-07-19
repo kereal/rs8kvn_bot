@@ -203,10 +203,15 @@ const (
 	broadcastStagePreview
 )
 
+
+const (
+	broadcastSessionTTL = 15 * time.Minute
+)
 // broadcastSession holds the in-progress broadcast draft for an admin.
 type broadcastSession struct {
-	stage broadcastStage
-	text  string
+	createdAt time.Time
+	stage     broadcastStage
+	text      string
 }
 
 // HandleBroadcast handles the /broadcast command for admins.
@@ -259,7 +264,8 @@ func (h *Handler) HandleBroadcastDraft(ctx context.Context, update tgbotapi.Upda
 		return nil
 	}
 	if len(text) > config.MaxTelegramMessageLen {
-		h.SendMessage(ctx, chatID, fmt.Sprintf("❌ Сообщение слишком длинное (%d символов).\n\nМаксимум: %d символов.", len(text), config.MaxTelegramMessageLen))
+		h.clearBroadcastSession(chatID)
+		h.SendMessage(ctx, chatID, fmt.Sprintf("❌ Сообщение слишком длинное (%d символов). MarkdownV2-рассылка не поддерживает автоматическое разбиение: отправьте текст короче %d символов.", len(text), config.MaxTelegramMessageLen))
 		return nil
 	}
 
@@ -470,14 +476,19 @@ func (h *Handler) runBroadcast(ctx context.Context, adminChatID int64, text stri
 func (h *Handler) startBroadcastSession(chatID int64) {
 	h.broadcastMu.Lock()
 	defer h.broadcastMu.Unlock()
-	h.broadcastSessions[chatID] = &broadcastSession{stage: broadcastStageAwaitingDraft}
+	h.broadcastSessions[chatID] = &broadcastSession{createdAt: time.Now(), stage: broadcastStageAwaitingDraft}
 }
 
 // getBroadcastSession returns the active broadcast session for an admin, or nil.
 func (h *Handler) getBroadcastSession(chatID int64) *broadcastSession {
 	h.broadcastMu.Lock()
 	defer h.broadcastMu.Unlock()
-	return h.broadcastSessions[chatID]
+	s, ok := h.broadcastSessions[chatID]
+	if !ok || time.Since(s.createdAt) > broadcastSessionTTL {
+		delete(h.broadcastSessions, chatID)
+		return nil
+	}
+	return s
 }
 
 // clearBroadcastSession removes the broadcast session for an admin.

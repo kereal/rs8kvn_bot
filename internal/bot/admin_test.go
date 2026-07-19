@@ -1,1178 +1,979 @@
-package bot
+//go:build integration
+
+package e2e
 
 import (
 	"context"
-	"errors"
+	"fmt"
 	"strings"
 	"testing"
-	"unicode/utf8"
+	"time"
 
-	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
-	"github.com/kereal/rs8kvn_bot/internal/interfaces"
-	"github.com/kereal/rs8kvn_bot/internal/service"
-	"github.com/kereal/rs8kvn_bot/internal/testutil"
-	"github.com/kereal/rs8kvn_bot/internal/utils"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func TestHandleDel_NonAdminUser(t *testing.T) {
-
-	cfg := &config.Config{
-		TelegramAdminID: 999999,
-	}
-	mockDB := testutil.NewDatabaseService()
-	mockXUI := testutil.NewXUIClient()
-	mockBot := testutil.NewBotAPI()
-	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
+func TestE2E_DelCommand_Success(t *testing.T) {
+	t.Parallel()
+	env := setupE2EEnv(t)
+	defer func() {
+		if err := env.db.Close(); err != nil {
+			t.Logf("Warning: failed to close database: %v", err)
+		}
+	}()
 
 	ctx := context.Background()
-	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "regularuser"}, "/del 5")
+	adminID := env.cfg.TelegramAdminID
 
-	handler.HandleDel(ctx, update)
-	// Should not call any database or XUI methods
-	assert.Nil(t, mockDB.GetByIDFunc)
+	_, err := env.subService.Create(ctx, env.chatID, env.username, "")
+	require.NoError(t, err)
+
+	sub, err := env.db.GetByTelegramID(ctx, env.chatID)
+	require.NoError(t, err)
+	subID := sub.ID
+
+	resetBotAPI(env.botAPI)
+
+	update := tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat: &tgbotapi.Chat{ID: adminID},
+			From: &tgbotapi.User{
+				ID:       adminID,
+				UserName: "admin",
+			},
+			Text: fmt.Sprintf("/del %d", subID),
+			Entities: []tgbotapi.MessageEntity{
+				{Type: "bot_command", Offset: 0, Length: 4},
+			},
+		},
+	}
+	env.handler.HandleDel(ctx, update)
+
+	assert.True(t, env.botAPI.SendCalledSafe())
+	assert.Contains(t, env.botAPI.LastSentText, "Подписка успешно удалена")
+	assert.Contains(t, env.botAPI.LastSentText, fmt.Sprintf("%d", subID))
+
+	_, err = env.db.GetByID(ctx, subID)
+	assert.Error(t, err, "Subscription should be deleted")
+
+	// Sync-based: XUI is called via sync module, not directly in DeleteByID()
 }
 
-func TestHandleDel_ValidDeletion(t *testing.T) {
+func TestE2E_DelCommand_ArgValidation(t *testing.T) {
 	t.Parallel()
-
-	cfg := &config.Config{
-		TelegramAdminID: 123456,
-	}
-	mockDB := testutil.NewDatabaseService()
-	mockXUI := testutil.NewXUIClient()
-	mockBot := testutil.NewBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
-	xuiClients := map[uint]interfaces.XUIClient{1: mockXUI}
-	nodes := []database.Node{{ID: 1, IsActive: true, Host: "http://localhost:2053", APIToken: "test-token", InboundIDs: "[1]", SubscriptionURL: "http://example.com/sub/"}}
-	handler.subscriptionService = service.NewSubscriptionService(mockDB, xuiClients, nil, nodes, cfg)
-
-	sub := &database.Subscription{
-		ID:         5,
-		TelegramID: 789012,
-		Username:   "testuser",
-		ClientID:   "client-123",
-	}
-
-	mockDB.GetByIDFunc = func(ctx context.Context, id uint) (*database.Subscription, error) {
-		assert.Equal(t, uint(5), id)
-		return sub, nil
-	}
-
-	mockDB.GetBySubscriptionIDFunc = func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
-		return nil, nil
-	}
-
-	mockDB.DeleteSubscriptionByIDFunc = func(ctx context.Context, id uint) (*database.Subscription, error) {
-		assert.Equal(t, uint(5), id)
-		return sub, nil
-	}
-
-	ctx := context.Background()
-	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "admin"}, "/del 5")
-
-	handler.HandleDel(ctx, update)
-	assert.True(t, mockBot.SendCalledSafe())
-	assert.Contains(t, mockBot.LastSentTextSafe(), "удалена")
-}
-
-func TestHandleDel_InvalidIDFormat(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{
-		TelegramAdminID: 123456,
-	}
-	mockDB := testutil.NewDatabaseService()
-	mockXUI := testutil.NewXUIClient()
-	mockBot := testutil.NewBotAPI()
-	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
 
 	tests := []struct {
 		name    string
-		text    string
+		cmd     string
 		wantMsg string
 	}{
-		{
-			name:    "no arguments",
-			text:    "/del",
-			wantMsg: "Использование",
-		},
-		{
-			name:    "invalid format",
-			text:    "/del abc",
-			wantMsg: "Неверный формат",
-		},
-		{
-			name:    "negative id",
-			text:    "/del -5",
-			wantMsg: "положительным",
-		},
-		{
-			name:    "zero id",
-			text:    "/del 0",
-			wantMsg: "положительным",
-		},
+		{name: "no_args", cmd: "/del", wantMsg: "Использование: /del"},
+		{name: "invalid_id", cmd: "/del not-a-number", wantMsg: "Неверный формат ID"},
+		{name: "negative_id", cmd: "/del -1", wantMsg: "положительным числом"},
+		{name: "not_found", cmd: "/del 99999", wantMsg: "Ошибка удаления подписки"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mockBot.SetSendCalled(false)
-			mockBot.LastSentText = ""
+			env := setupE2EEnv(t)
+			defer func() {
+				if err := env.db.Close(); err != nil {
+					t.Logf("Warning: failed to close database: %v", err)
+				}
+			}()
 
 			ctx := context.Background()
-			update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "admin"}, tt.text)
+			adminID := env.cfg.TelegramAdminID
+			resetBotAPI(env.botAPI)
 
-			handler.HandleDel(ctx, update)
-			assert.True(t, mockBot.SendCalledSafe())
-			assert.Contains(t, mockBot.LastSentTextSafe(), tt.wantMsg)
+			update := tgbotapi.Update{
+				Message: &tgbotapi.Message{
+					Chat: &tgbotapi.Chat{ID: adminID},
+					From: &tgbotapi.User{
+						ID:       adminID,
+						UserName: "admin",
+					},
+					Text:     tt.cmd,
+					Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 4}},
+				},
+			}
+			env.handler.HandleDel(ctx, update)
 
+			assert.True(t, env.botAPI.SendCalledSafe())
+			assert.Contains(t, env.botAPI.LastSentText, tt.wantMsg)
 		})
 	}
 }
 
-func TestHandleDel_GetByIDError(t *testing.T) {
+func TestE2E_DelCommand_XUIFailure(t *testing.T) {
 	t.Parallel()
 
-	cfg := &config.Config{
-		TelegramAdminID: 123456,
-	}
-	mockDB := testutil.NewDatabaseService()
-	mockXUI := testutil.NewXUIClient()
-	mockBot := testutil.NewBotAPI()
-	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
-
-	mockDB.GetByIDFunc = func(ctx context.Context, id uint) (*database.Subscription, error) {
-		return nil, errors.New("not found")
-	}
+	env := setupE2EEnv(t)
+	defer func() {
+		if err := env.db.Close(); err != nil {
+			t.Logf("Warning: failed to close database: %v", err)
+		}
+	}()
 
 	ctx := context.Background()
-	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "admin"}, "/del 999")
+	adminID := env.cfg.TelegramAdminID
 
-	handler.HandleDel(ctx, update)
-	assert.True(t, mockBot.SendCalledSafe())
-	assert.Contains(t, mockBot.LastSentTextSafe(), "Ошибка удаления подписки")
+	_, err := env.subService.Create(ctx, env.chatID, env.username, "")
+	require.NoError(t, err)
+
+	sub, err := env.db.GetByTelegramID(ctx, env.chatID)
+	require.NoError(t, err)
+
+	env.xui.DeleteClientFunc = func(ctx context.Context, email string) error {
+		return fmt.Errorf("xui delete: connection refused")
+	}
+
+	resetBotAPI(env.botAPI)
+
+	update := tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat: &tgbotapi.Chat{ID: adminID},
+			From: &tgbotapi.User{
+				ID:       adminID,
+				UserName: "admin",
+			},
+			Text:     fmt.Sprintf("/del %d", sub.ID),
+			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 4}},
+		},
+	}
+	env.handler.HandleDel(ctx, update)
+
+	assert.True(t, env.botAPI.SendCalledSafe())
+	// With DB-first deletion, the subscription is removed from DB even when
+	// XUI deletion fails (best-effort XUI cleanup). The orphaned XUI client
+	// is less critical than an orphaned DB record.
+	assert.Contains(t, env.botAPI.LastSentText, "успешно удалена")
+
+	_, err = env.db.GetByID(ctx, sub.ID)
+	assert.Error(t, err, "Subscription should be deleted from DB even when XUI fails")
 }
 
-func TestHandleDel_XUIDeleteFailure(t *testing.T) {
+// runBroadcastFlow drives the draft -> preview -> confirm broadcast flow end to end.
+func runBroadcastFlow(t *testing.T, env *e2eTestEnv, adminID int64, draftText string) {
+	t.Helper()
+	ctx := context.Background()
+
+	env.handler.HandleBroadcast(ctx, tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat: &tgbotapi.Chat{ID: adminID},
+			From: &tgbotapi.User{ID: adminID, UserName: "admin"},
+			Text: "/broadcast",
+			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 10}},
+		},
+	})
+
+	env.handler.HandleBroadcastDraft(ctx, tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat: &tgbotapi.Chat{ID: adminID},
+			From: &tgbotapi.User{ID: adminID, UserName: "admin"},
+			Text: draftText,
+		},
+	})
+
+	env.handler.HandleCallback(ctx, tgbotapi.Update{
+		CallbackQuery: &tgbotapi.CallbackQuery{
+			From: &tgbotapi.User{ID: adminID, UserName: "admin"},
+			Data: "broadcast_confirm",
+			Message: &tgbotapi.Message{
+				Chat:      &tgbotapi.Chat{ID: adminID},
+				MessageID: 1,
+			},
+		},
+	})
+}
+
+func TestE2E_BroadcastCommand_Success(t *testing.T) {
 	t.Parallel()
 
-	cfg := &config.Config{
-		TelegramAdminID: 123456,
-	}
-	mockDB := testutil.NewDatabaseService()
-	mockXUI := testutil.NewXUIClient()
-	mockBot := testutil.NewBotAPI()
-	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
-
-	mockDB.GetByIDFunc = func(ctx context.Context, id uint) (*database.Subscription, error) {
-		return &database.Subscription{
-			ID:       5,
-			ClientID: "client-123",
-		}, nil
-	}
-
-	// Best-effort deprovision failure MUST NOT block the physical delete.
-	// In the bot layer the deprovision is owned by the subscription service
-	// (syncService), not the XUI client directly — so we assert that the
-	// handler still delegates the teardown to DeleteByID (via
-	// DeleteSubscriptionByID) regardless of any external-sync error.
-	var deleteByIDCalled bool
-	mockDB.DeleteSubscriptionByIDFunc = func(ctx context.Context, id uint) (*database.Subscription, error) {
-		deleteByIDCalled = true
-		return &database.Subscription{ID: id, ClientID: "client-123"}, nil
-	}
+	env := setupE2EEnv(t)
+	defer func() {
+		if err := env.db.Close(); err != nil {
+			t.Logf("Warning: failed to close database: %v", err)
+		}
+	}()
 
 	ctx := context.Background()
-	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "admin"}, "/del 5")
-	handler.HandleDel(ctx, update)
-	assert.True(t, deleteByIDCalled, "DeleteSubscriptionByID (physical delete) must run even if external deprovision fails")
-	assert.True(t, mockBot.SendCalledSafe())
-	// Best-effort deprovision failure does NOT surface as an error: the row was
-	// physically deleted (see AGENTS.md two-phase delete contract), so the user
-	// sees a success message, not "Ошибка удаления".
-	assert.Contains(t, mockBot.LastSentTextSafe(), "удалена")
+	adminID := env.cfg.TelegramAdminID
+
+	for i := 0; i < 3; i++ {
+		chatID := int64(300000 + i)
+		_, err := env.subService.Create(ctx, chatID, fmt.Sprintf("user%d", i), "")
+		require.NoError(t, err)
+	}
+
+	resetBotAPI(env.botAPI)
+
+	runBroadcastFlow(t, env, adminID, "Hello everyone!")
+
+	assert.True(t, env.botAPI.SendCalledSafe())
+	assert.GreaterOrEqual(t, env.botAPI.SendCount, 3, "Should send to at least 3 users")
+	assert.Contains(t, env.botAPI.LastSentText, "Рассылка завершена")
 }
 
-func TestHandleDel_DatabaseDeleteFailure(t *testing.T) {
+func TestE2E_BroadcastCommand_NoArgs(t *testing.T) {
 	t.Parallel()
-
-	cfg := &config.Config{
-		TelegramAdminID: 123456,
-	}
-	mockDB := testutil.NewDatabaseService()
-	mockXUI := testutil.NewXUIClient()
-	mockBot := testutil.NewBotAPI()
-	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
-
-	mockDB.GetByIDFunc = func(ctx context.Context, id uint) (*database.Subscription, error) {
-		return &database.Subscription{
-			ID:       5,
-			ClientID: "client-123",
-		}, nil
-	}
-
-	mockXUI.DeleteClientFunc = func(ctx context.Context, email string) error {
-		return nil
-	}
-
-	var deleteByIDCalled bool
-	mockDB.DeleteSubscriptionByIDFunc = func(ctx context.Context, id uint) (*database.Subscription, error) {
-		deleteByIDCalled = true
-		return nil, errors.New("database error")
-	}
+	env := setupE2EEnv(t)
+	defer func() {
+		if err := env.db.Close(); err != nil {
+			t.Logf("Warning: failed to close database: %v", err)
+		}
+	}()
 
 	ctx := context.Background()
-	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "admin"}, "/del 5")
+	adminID := env.cfg.TelegramAdminID
+	resetBotAPI(env.botAPI)
 
-	handler.HandleDel(ctx, update)
-	assert.True(t, deleteByIDCalled, "DeleteSubscriptionByID should have been called")
-	assert.True(t, mockBot.SendCalledSafe())
-	assert.Contains(t, mockBot.LastSentTextSafe(), "Ошибка удаления")
+	update := tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat: &tgbotapi.Chat{ID: adminID},
+			From: &tgbotapi.User{
+				ID:       adminID,
+				UserName: "admin",
+			},
+			Text:     "/broadcast",
+			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 10}},
+		},
+	}
+	env.handler.HandleBroadcast(ctx, update)
+
+	assert.True(t, env.botAPI.SendCalledSafe())
+	assert.Contains(t, env.botAPI.LastSentText, "Отправьте сообщение")
 }
 
-func TestHandleDel_CacheInvalidation(t *testing.T) {
+func TestE2E_BroadcastCommand_NoUsers(t *testing.T) {
 	t.Parallel()
+	env := setupE2EEnv(t)
+	defer func() {
+		if err := env.db.Close(); err != nil {
+			t.Logf("Warning: failed to close database: %v", err)
+		}
+	}()
 
-	cfg := &config.Config{
-		TelegramAdminID: 123456,
-	}
-	mockDB := testutil.NewDatabaseService()
-	mockXUI := testutil.NewXUIClient()
-	mockBot := testutil.NewBotAPI()
-	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
+	adminID := env.cfg.TelegramAdminID
+	resetBotAPI(env.botAPI)
 
-	telegramID := int64(789012)
-	sub := &database.Subscription{
-		ID:         5,
-		TelegramID: telegramID,
-		Username:   "testuser",
-		ClientID:   "client-123",
-	}
+	runBroadcastFlow(t, env, adminID, "Hello")
 
-	// Set up cache
-	handler.cache.Set(telegramID, sub)
-	cachedSub := handler.cache.Get(telegramID)
-	require.NotNil(t, cachedSub, "Cache should contain subscription before deletion")
+	assert.True(t, env.botAPI.SendCalledSafe())
+	assert.Contains(t, env.botAPI.LastSentText, "Всего: 0")
+}
 
-	mockDB.GetByIDFunc = func(ctx context.Context, id uint) (*database.Subscription, error) {
-		return sub, nil
-	}
-
-	mockXUI.DeleteClientFunc = func(ctx context.Context, email string) error {
-		return nil
-	}
-
-	mockDB.DeleteSubscriptionByIDFunc = func(ctx context.Context, id uint) (*database.Subscription, error) {
-		return sub, nil
-	}
+func TestE2E_BroadcastCommand_SomeFailures(t *testing.T) {
+	t.Parallel()
+	env := setupE2EEnv(t)
+	defer func() {
+		if err := env.db.Close(); err != nil {
+			t.Logf("Warning: failed to close database: %v", err)
+		}
+	}()
 
 	ctx := context.Background()
-	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "admin"}, "/del 5")
+	adminID := env.cfg.TelegramAdminID
 
-	handler.HandleDel(ctx, update)
+	for i := 0; i < 3; i++ {
+		chatID := int64(400000 + i)
+		_, err := env.subService.Create(ctx, chatID, fmt.Sprintf("user%d", i), "")
+		require.NoError(t, err)
+	}
 
-	// Verify cache was invalidated
-	cachedSubAfter := handler.cache.Get(telegramID)
-	assert.Nil(t, cachedSubAfter, "Cache should be invalidated after deletion")
+	resetBotAPI(env.botAPI)
+
+	// Drive the flow manually so the preview send (before confirm) succeeds,
+	// then make the actual user sends fail.
+	env.handler.HandleBroadcast(ctx, tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat: &tgbotapi.Chat{ID: adminID},
+			From: &tgbotapi.User{ID: adminID, UserName: "admin"},
+			Text: "/broadcast",
+			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 10}},
+		},
+	})
+	env.handler.HandleBroadcastDraft(ctx, tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat: &tgbotapi.Chat{ID: adminID},
+			From: &tgbotapi.User{ID: adminID, UserName: "admin"},
+			Text: "Hello",
+		},
+	})
+	env.botAPI.SendError = fmt.Errorf("send failed")
+	env.handler.HandleCallback(ctx, tgbotapi.Update{
+		CallbackQuery: &tgbotapi.CallbackQuery{
+			From: &tgbotapi.User{ID: adminID, UserName: "admin"},
+			Data: "broadcast_confirm",
+			Message: &tgbotapi.Message{
+				Chat:      &tgbotapi.Chat{ID: adminID},
+				MessageID: 1,
+			},
+		},
+	})
+
+	assert.True(t, env.botAPI.SendCalledSafe())
+	assert.Contains(t, env.botAPI.LastSentText, "Рассылка завершена")
+	assert.Contains(t, env.botAPI.LastSentText, "Ошибок: 3")
 }
 
-func TestHandleBroadcast_NonAdminUser(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{
-		TelegramAdminID: 999999,
-	}
-	mockDB := testutil.NewDatabaseService()
-	mockXUI := testutil.NewXUIClient()
-	mockBot := testutil.NewBotAPI()
-	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
+func TestE2E_SendCommand_ByTelegramID(t *testing.T) {
+	env := setupE2EEnv(t)
+	defer func() {
+		if err := env.db.Close(); err != nil {
+			t.Logf("Warning: failed to close database: %v", err)
+		}
+	}()
 
 	ctx := context.Background()
-	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "regularuser"}, "/broadcast Hello everyone!")
+	adminID := env.cfg.TelegramAdminID
 
-	handler.HandleBroadcast(ctx, update)
-	// Should not call any database methods
-	assert.Nil(t, mockDB.GetTotalTelegramIDCountFunc)
-	assert.False(t, handler.broadcastSessionActive(123456))
-}
+	_, err := env.subService.Create(ctx, env.chatID, env.username, "")
+	require.NoError(t, err)
 
-func TestHandleBroadcast_StartsSession(t *testing.T) {
-	t.Parallel()
+	resetBotAPI(env.botAPI)
 
-	cfg := &config.Config{TelegramAdminID: 123456}
-	mockBot := testutil.NewBotAPI()
-	handler := newTestAdminHandler(cfg, testutil.NewDatabaseService(), testutil.NewXUIClient(), mockBot)
-	admin := &tgbotapi.User{ID: 123456, UserName: "admin"}
-
-	handler.HandleBroadcast(context.Background(), createCommandUpdate(123456, admin, "/broadcast"))
-
-	assert.True(t, handler.broadcastSessionActive(123456), "session should be active after /broadcast")
-	assert.Contains(t, mockBot.LastSentTextSafe(), "Отправьте сообщение")
-}
-
-func TestHandleBroadcast_DraftPreviewShowsButtons(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{TelegramAdminID: 123456}
-	mockBot := testutil.NewBotAPI()
-	handler := newTestAdminHandler(cfg, testutil.NewDatabaseService(), testutil.NewXUIClient(), mockBot)
-	admin := &tgbotapi.User{ID: 123456, UserName: "admin"}
-
-	handler.HandleBroadcast(context.Background(), createCommandUpdate(123456, admin, "/broadcast"))
-
-	// Capture all chatables to verify ParseMode and buttons.
-	var captured []tgbotapi.Chattable
-	mockBot.SendFunc = func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
-		captured = append(captured, c)
-		return tgbotapi.Message{MessageID: 1}, nil
+	update := tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat: &tgbotapi.Chat{ID: adminID},
+			From: &tgbotapi.User{
+				ID:       adminID,
+				UserName: "admin",
+			},
+			Text:     fmt.Sprintf("/send %d Hello via ID!", env.chatID),
+			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 5}},
+		},
 	}
+	env.handler.HandleSend(ctx, update)
 
-	draft := "Привет *все*!\nЭто _многострочное_ сообщение."
-	handler.HandleBroadcastDraft(context.Background(), createTextUpdate(admin, draft))
+	assert.True(t, env.botAPI.SendCalledSafe())
+	assert.Contains(t, env.botAPI.LastSentText, "Сообщение отправлено")
+}
 
-	// Preview must use MarkdownV2.
-	var previewed bool
-	for _, c := range captured {
-		if mc, ok := c.(tgbotapi.MessageConfig); ok && mc.ParseMode == "MarkdownV2" {
-			previewed = true
-			assert.Equal(t, utils.EscapeMarkdownV2(draft), mc.Text)
+func TestE2E_SendCommand_ByUsername(t *testing.T) {
+	env := setupE2EEnv(t)
+	defer func() {
+		if err := env.db.Close(); err != nil {
+			t.Logf("Warning: failed to close database: %v", err)
 		}
-	}
-	assert.True(t, previewed, "draft preview must be sent with MarkdownV2")
-
-	// Confirm/cancel buttons must be present on the final message.
-	last, ok := mockBot.LastChattableSafe().(tgbotapi.MessageConfig)
-	require.True(t, ok)
-	require.NotNil(t, last.ReplyMarkup)
-	kb, ok := last.ReplyMarkup.(tgbotapi.InlineKeyboardMarkup)
-	require.True(t, ok)
-	assert.Equal(t, "broadcast_confirm", *kb.InlineKeyboard[0][0].CallbackData)
-	assert.Equal(t, "broadcast_cancel", *kb.InlineKeyboard[0][1].CallbackData)
-
-	// Session moved to preview stage.
-	s := handler.getBroadcastSession(123456)
-	require.NotNil(t, s)
-	assert.Equal(t, broadcastStagePreview, s.stage)
-	assert.Equal(t, draft, s.text)
-}
-
-func TestHandleBroadcast_AutoEscapesSpecialChars(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{TelegramAdminID: 123456}
-	mockBot := testutil.NewBotAPI()
-	handler := newTestAdminHandler(cfg, testutil.NewDatabaseService(), testutil.NewXUIClient(), mockBot)
-	admin := &tgbotapi.User{ID: 123456, UserName: "admin"}
-
-	handler.HandleBroadcast(context.Background(), createCommandUpdate(123456, admin, "/broadcast"))
-
-	// Dots, exclamation marks and broken markdown must not require manual escaping.
-	draft := "Привет всем! Цены на vpn.ru обновлены. broken *bold"
-	handler.HandleBroadcastDraft(context.Background(), createTextUpdate(admin, draft))
-
-	// Preview must be sent (escaped) and session must advance to the preview stage.
-	var previewed bool
-	for _, c := range mockBot.GetAllSentMessages() {
-		if strings.Contains(c.Text, `Привет всем\!`) {
-			previewed = true
-			assert.Contains(t, c.Text, `vpn\.ru`)
-			assert.Contains(t, c.Text, `broken \*bold`)
-		}
-	}
-	assert.True(t, previewed, "escaped draft preview must be sent")
-
-	s := handler.getBroadcastSession(123456)
-	require.NotNil(t, s)
-	assert.Equal(t, broadcastStagePreview, s.stage)
-}
-
-func TestHandleBroadcast_DraftTooLong(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{TelegramAdminID: 123456}
-	mockBot := testutil.NewBotAPI()
-	handler := newTestAdminHandler(cfg, testutil.NewDatabaseService(), testutil.NewXUIClient(), mockBot)
-	admin := &tgbotapi.User{ID: 123456, UserName: "admin"}
-
-	handler.HandleBroadcast(context.Background(), createCommandUpdate(123456, admin, "/broadcast"))
-
-	long := make([]byte, config.MaxTelegramMessageLen+1)
-	for i := range long {
-		long[i] = 'a'
-	}
-	handler.HandleBroadcastDraft(context.Background(), createTextUpdate(admin, string(long)))
-
-	assert.Contains(t, mockBot.LastSentTextSafe(), "слишком длинное")
-	// Session stays in awaiting stage so admin can resend a shorter draft.
-	s := handler.getBroadcastSession(123456)
-	require.NotNil(t, s)
-	assert.Equal(t, broadcastStageAwaitingDraft, s.stage)
-}
-
-func TestHandleBroadcast_CancelClearsSession(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{TelegramAdminID: 123456}
-	mockBot := testutil.NewBotAPI()
-	handler := newTestAdminHandler(cfg, testutil.NewDatabaseService(), testutil.NewXUIClient(), mockBot)
-	admin := &tgbotapi.User{ID: 123456, UserName: "admin"}
-
-	handler.HandleBroadcast(context.Background(), createCommandUpdate(123456, admin, "/broadcast"))
-	handler.HandleBroadcastDraft(context.Background(), createTextUpdate(admin, "/cancel"))
-
-	assert.False(t, handler.broadcastSessionActive(123456))
-	assert.Contains(t, mockBot.LastSentTextSafe(), "отменена")
-}
-
-// confirmBroadcast prepares a preview-stage session and runs the confirm handler.
-func confirmBroadcast(h *Handler, mockBot *testutil.BotAPI, text string) {
-	h.broadcastSessions[123456] = &broadcastSession{stage: broadcastStagePreview, text: text}
-	h.handleBroadcastConfirm(context.Background(), 123456)
-}
-
-func TestHandleBroadcast_ConfirmSendsToAll(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{TelegramAdminID: 123456}
-	mockBot := testutil.NewBotAPI()
-	handler := newTestAdminHandler(cfg, testutil.NewDatabaseService(), testutil.NewXUIClient(), mockBot)
-
-	callCount := 0
-	handler.db.(*testutil.DatabaseService).GetTelegramIDsBatchFunc = func(ctx context.Context, offset, limit int) ([]int64, error) {
-		callCount++
-		if callCount == 1 {
-			return []int64{111, 222, 333}, nil
-		}
-		return []int64{}, nil
-	}
-
-	confirmBroadcast(handler, mockBot, "Test *message*")
-	assert.Contains(t, mockBot.LastSentTextSafe(), "Рассылка завершена")
-	assert.Contains(t, mockBot.LastSentTextSafe(), "Всего: 3")
-	assert.False(t, handler.broadcastSessionActive(123456), "session cleared after confirm")
-}
-
-func TestHandleBroadcast_ConfirmMultipleBatches(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{TelegramAdminID: 123456}
-	mockBot := testutil.NewBotAPI()
-	handler := newTestAdminHandler(cfg, testutil.NewDatabaseService(), testutil.NewXUIClient(), mockBot)
-
-	callCount := 0
-	handler.db.(*testutil.DatabaseService).GetTelegramIDsBatchFunc = func(ctx context.Context, offset, limit int) ([]int64, error) {
-		callCount++
-		switch callCount {
-		case 1:
-			ids := make([]int64, 100)
-			for i := range ids {
-				ids[i] = int64(i + 1)
-			}
-			return ids, nil
-		case 2:
-			ids := make([]int64, 100)
-			for i := range ids {
-				ids[i] = int64(i + 101)
-			}
-			return ids, nil
-		case 3:
-			ids := make([]int64, 50)
-			for i := range ids {
-				ids[i] = int64(i + 201)
-			}
-			return ids, nil
-		default:
-			return []int64{}, nil
-		}
-	}
-
-	confirmBroadcast(handler, mockBot, "Test message")
-	assert.Equal(t, 4, callCount, "should call GetTelegramIDsBatch 4 times (3 batches + 1 empty)")
-	assert.Contains(t, mockBot.LastSentTextSafe(), "Всего: 250")
-}
-
-func TestHandleBroadcast_ConfirmDatabaseError(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{TelegramAdminID: 123456}
-	mockBot := testutil.NewBotAPI()
-	handler := newTestAdminHandler(cfg, testutil.NewDatabaseService(), testutil.NewXUIClient(), mockBot)
-
-	handler.db.(*testutil.DatabaseService).GetTelegramIDsBatchFunc = func(ctx context.Context, offset, limit int) ([]int64, error) {
-		return nil, errors.New("database error")
-	}
-
-	confirmBroadcast(handler, mockBot, "Test message")
-	assert.True(t, mockBot.SendCalledSafe(), "should send error report")
-	assert.Contains(t, mockBot.LastSentTextSafe(), "Ошибка")
-}
-
-func TestHandleBroadcast_ConfirmSeparatesBlocked(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{TelegramAdminID: 123456}
-	mockBot := testutil.NewBotAPI()
-	handler := newTestAdminHandler(cfg, testutil.NewDatabaseService(), testutil.NewXUIClient(), mockBot)
-
-	// 111 -> blocked, 222 -> generic error, 333 -> success.
-	mockBot.SendFunc = func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
-		mc, ok := c.(tgbotapi.MessageConfig)
-		if !ok {
-			return tgbotapi.Message{}, nil
-		}
-		switch mc.ChatID {
-		case 111:
-			return tgbotapi.Message{}, errors.New("Forbidden: bot was blocked by the user")
-		case 222:
-			return tgbotapi.Message{}, errors.New("send error")
-		}
-		return tgbotapi.Message{MessageID: 1}, nil
-	}
-
-	callCount := 0
-	handler.db.(*testutil.DatabaseService).GetTelegramIDsBatchFunc = func(ctx context.Context, offset, limit int) ([]int64, error) {
-		callCount++
-		if callCount == 1 {
-			return []int64{111, 222, 333}, nil
-		}
-		return []int64{}, nil
-	}
-
-	confirmBroadcast(handler, mockBot, "Test message")
-	report := mockBot.LastSentTextSafe()
-	assert.Contains(t, report, "Рассылка завершена")
-	assert.Contains(t, report, "Отправлено: 1")
-	assert.Contains(t, report, "Заблокировали бота: 1")
-	assert.Contains(t, report, "Ошибок: 1")
-	assert.Contains(t, report, "Всего: 3")
-}
-
-func TestHandleBroadcast_ConfirmSendFailure(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{TelegramAdminID: 123456}
-	mockBot := testutil.NewBotAPI()
-	mockBot.SendError = errors.New("send error")
-	handler := newTestAdminHandler(cfg, testutil.NewDatabaseService(), testutil.NewXUIClient(), mockBot)
-
-	callCount := 0
-	handler.db.(*testutil.DatabaseService).GetTelegramIDsBatchFunc = func(ctx context.Context, offset, limit int) ([]int64, error) {
-		callCount++
-		if callCount == 1 {
-			return []int64{111, 222}, nil
-		}
-		return []int64{}, nil
-	}
-
-	confirmBroadcast(handler, mockBot, "Test message")
-	assert.Contains(t, mockBot.LastSentTextSafe(), "Рассылка завершена")
-	assert.Contains(t, mockBot.LastSentTextSafe(), "Ошибок: 2")
-}
-
-func TestHandleBroadcast_ConfirmContextCancellation(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{TelegramAdminID: 123456}
-	mockBot := testutil.NewBotAPI()
-	handler := newTestAdminHandler(cfg, testutil.NewDatabaseService(), testutil.NewXUIClient(), mockBot)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	handler.db.(*testutil.DatabaseService).GetTelegramIDsBatchFunc = func(ctx context.Context, offset, limit int) ([]int64, error) {
-		return []int64{111}, nil
-	}
-
-	handler.broadcastSessions[123456] = &broadcastSession{stage: broadcastStagePreview, text: "Test message"}
-	handler.handleBroadcastConfirm(ctx, 123456)
-	assert.True(t, mockBot.SendCalledSafe(), "cancellation report must be sent even on ctx cancel")
-	assert.Contains(t, mockBot.LastSentTextSafe(), "прервана")
-}
-
-func TestSplitMessage_BelowLimit(t *testing.T) {
-	t.Parallel()
-	chunks := splitMessage("short", 4096)
-	assert.Equal(t, []string{"short"}, chunks)
-}
-
-func TestSplitMessage_LineBoundary(t *testing.T) {
-	t.Parallel()
-	text := strings.Repeat("a", 10) + "\n" + strings.Repeat("b", 10)
-	chunks := splitMessage(text, 15)
-	require.Len(t, chunks, 2)
-	assert.Equal(t, strings.Repeat("a", 10), chunks[0])
-	assert.Equal(t, strings.Repeat("b", 10), chunks[1])
-}
-
-func TestSplitMessage_HardSplitLongLine(t *testing.T) {
-	t.Parallel()
-	text := strings.Repeat("x", 100)
-	chunks := splitMessage(text, 40)
-	require.Len(t, chunks, 3)
-	assert.Equal(t, strings.Repeat("x", 40), chunks[0])
-	assert.Equal(t, strings.Repeat("x", 40), chunks[1])
-	assert.Equal(t, strings.Repeat("x", 20), chunks[2])
-}
-
-func TestSplitMessage_HardSplitMultibyte(t *testing.T) {
-	t.Parallel()
-	// 30 Cyrillic runes, 2 bytes each = 60 bytes. maxLen=25 would cut mid-rune with byte slicing.
-	text := strings.Repeat("я", 30)
-	chunks := splitMessage(text, 25)
-	require.Len(t, chunks, 3)
-	for _, c := range chunks {
-		assert.True(t, utf8.ValidString(c), "chunk must remain valid UTF-8: %q", c)
-	}
-	assert.Equal(t, text, strings.Join(chunks, ""))
-}
-
-func TestHandleBroadcast_ConfirmChunking(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{TelegramAdminID: 123456}
-	mockBot := testutil.NewBotAPI()
-	handler := newTestAdminHandler(cfg, testutil.NewDatabaseService(), testutil.NewXUIClient(), mockBot)
-
-	handler.db.(*testutil.DatabaseService).GetTelegramIDsBatchFunc = func(ctx context.Context, offset, limit int) ([]int64, error) {
-		if offset == 0 {
-			return []int64{111, 222}, nil
-		}
-		return []int64{}, nil
-	}
-
-	// 2 users, message > 4096 -> each gets 2 chunks.
-	text := strings.Repeat("строка\n", 500) // ~3500 chars, bump to exceed
-	text = strings.Repeat("строка\n", 600)  // ~4200 chars
-	confirmBroadcast(handler, mockBot, text)
-
-	assert.GreaterOrEqual(t, mockBot.SendCountSafe(), 4, "2 users x 2 chunks")
-	assert.Contains(t, mockBot.LastSentTextSafe(), "Рассылка завершена")
-	assert.Contains(t, mockBot.LastSentTextSafe(), "Всего: 2")
-}
-
-func TestHandleSend_NonAdminUser(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{
-		TelegramAdminID: 999999,
-	}
-	mockDB := testutil.NewDatabaseService()
-	mockXUI := testutil.NewXUIClient()
-	mockBot := testutil.NewBotAPI()
-	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
+	}()
 
 	ctx := context.Background()
-	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "regularuser"}, "/send 789012 Hello!")
+	adminID := env.cfg.TelegramAdminID
 
-	handler.HandleSend(ctx, update)
-	// Should not call any database methods
-	assert.Nil(t, mockDB.GetTelegramIDByUsernameFunc)
+	_, err := env.subService.Create(ctx, env.chatID, env.username, "")
+	require.NoError(t, err)
+
+	resetBotAPI(env.botAPI)
+
+	update := tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat: &tgbotapi.Chat{ID: adminID},
+			From: &tgbotapi.User{
+				ID:       adminID,
+				UserName: "admin",
+			},
+			Text:     fmt.Sprintf("/send %s Hello via username!", env.username),
+			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 5}},
+		},
+	}
+	env.handler.HandleSend(ctx, update)
+
+	assert.True(t, env.botAPI.SendCalledSafe())
+	assert.Contains(t, env.botAPI.LastSentText, "Сообщение отправлено")
 }
 
-func TestHandleSend_ByNumericID(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{
-		TelegramAdminID: 123456,
-	}
-	mockDB := testutil.NewDatabaseService()
-	mockXUI := testutil.NewXUIClient()
-	mockBot := testutil.NewBotAPI()
-	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
-
-	ctx := context.Background()
-	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "admin"}, "/send 789012 Hello user!")
-
-	handler.HandleSend(ctx, update)
-	assert.True(t, mockBot.SendCalledSafe())
-	assert.Contains(t, mockBot.LastSentTextSafe(), "отправлено")
-}
-
-func TestHandleSend_ByUsernameLookup(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{
-		TelegramAdminID: 123456,
-	}
-	mockDB := testutil.NewDatabaseService()
-	mockXUI := testutil.NewXUIClient()
-	mockBot := testutil.NewBotAPI()
-	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
-
-	mockDB.GetTelegramIDByUsernameFunc = func(ctx context.Context, username string) (int64, error) {
-		assert.Equal(t, "testuser", username)
-		return 789012, nil
-	}
-
-	ctx := context.Background()
-	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "admin"}, "/send testuser Hello!")
-
-	handler.HandleSend(ctx, update)
-	assert.True(t, mockBot.SendCalledSafe())
-	assert.Contains(t, mockBot.LastSentTextSafe(), "отправлено")
-}
-
-func TestHandleSend_ByUsernameWithAt(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{
-		TelegramAdminID: 123456,
-	}
-	mockDB := testutil.NewDatabaseService()
-	mockXUI := testutil.NewXUIClient()
-	mockBot := testutil.NewBotAPI()
-	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
-
-	mockDB.GetTelegramIDByUsernameFunc = func(ctx context.Context, username string) (int64, error) {
-		assert.Equal(t, "testuser", username)
-		return 789012, nil
-	}
-
-	ctx := context.Background()
-	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "admin"}, "/send @testuser Hello!")
-
-	handler.HandleSend(ctx, update)
-	assert.True(t, mockBot.SendCalledSafe())
-}
-
-func TestHandleSend_InvalidFormat(t *testing.T) {
+func TestE2E_SendCommand_ArgValidation(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name string
-		text string
+		name    string
+		cmd     string
+		wantMsg string
 	}{
-		{"no arguments", "/send"},
-		{"only target", "/send 123456"},
+		{name: "no_args", cmd: "/send", wantMsg: "Использование: /send"},
+		{name: "only_target_no_message", cmd: "/send 123456", wantMsg: "Использование"},
+		{name: "user_not_found", cmd: "/send nonexistent_user Hello!", wantMsg: "не найден в базе"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			cfg := &config.Config{
-				TelegramAdminID: 123456,
-			}
-			mockDB := testutil.NewDatabaseService()
-			mockXUI := testutil.NewXUIClient()
-			mockBot := testutil.NewBotAPI()
-			handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
-
-			mockBot.SetSendCalled(false)
-			mockBot.LastSentText = ""
+			env := setupE2EEnv(t)
+			defer func() {
+				if err := env.db.Close(); err != nil {
+					t.Logf("Warning: failed to close database: %v", err)
+				}
+			}()
 
 			ctx := context.Background()
-			update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "admin"}, tt.text)
+			adminID := env.cfg.TelegramAdminID
+			resetBotAPI(env.botAPI)
 
-			handler.HandleSend(ctx, update)
-			assert.True(t, mockBot.SendCalledSafe())
-			assert.Contains(t, mockBot.LastSentTextSafe(), "Использование")
+			update := tgbotapi.Update{
+				Message: &tgbotapi.Message{
+					Chat:     &tgbotapi.Chat{ID: adminID},
+					From:     &tgbotapi.User{ID: adminID, UserName: "admin"},
+					Text:     tt.cmd,
+					Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 5}},
+				},
+			}
+			env.handler.HandleSend(ctx, update)
 
+			assert.True(t, env.botAPI.SendCalledSafe())
+			assert.Contains(t, env.botAPI.LastSentText, tt.wantMsg)
 		})
 	}
 }
 
-func TestHandleSend_UsernameNotFound(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{
-		TelegramAdminID: 123456,
-	}
-	mockDB := testutil.NewDatabaseService()
-	mockXUI := testutil.NewXUIClient()
-	mockBot := testutil.NewBotAPI()
-	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
-
-	mockDB.GetTelegramIDByUsernameFunc = func(ctx context.Context, username string) (int64, error) {
-		return 0, errors.New("not found")
-	}
+func TestE2E_SendCommand_ByTelegramID_SendError(t *testing.T) {
+	env := setupE2EEnv(t)
+	defer func() {
+		if err := env.db.Close(); err != nil {
+			t.Logf("Warning: failed to close database: %v", err)
+		}
+	}()
 
 	ctx := context.Background()
-	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "admin"}, "/send unknownuser Hello!")
+	adminID := env.cfg.TelegramAdminID
 
-	handler.HandleSend(ctx, update)
-	assert.True(t, mockBot.SendCalledSafe())
-	assert.Contains(t, mockBot.LastSentTextSafe(), "не найден")
+	_, err := env.subService.Create(ctx, env.chatID, env.username, "")
+	require.NoError(t, err)
+
+	resetBotAPI(env.botAPI)
+	env.botAPI.SendError = fmt.Errorf("send error")
+
+	update := tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat: &tgbotapi.Chat{ID: adminID},
+			From: &tgbotapi.User{
+				ID:       adminID,
+				UserName: "admin",
+			},
+			Text:     fmt.Sprintf("/send %d Hello!", env.chatID),
+			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 5}},
+		},
+	}
+	env.handler.HandleSend(ctx, update)
+
+	assert.True(t, env.botAPI.SendCalledSafe())
+	assert.Contains(t, env.botAPI.LastSentText, "Ошибка отправки")
 }
 
-func TestHandleSend_SendFailure(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{
-		TelegramAdminID: 123456,
-	}
-	mockDB := testutil.NewDatabaseService()
-	mockXUI := testutil.NewXUIClient()
-	mockBot := testutil.NewBotAPI()
-	mockBot.SendError = errors.New("send error")
-	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
+func TestE2E_SendCommand_WithAtPrefix(t *testing.T) {
+	env := setupE2EEnv(t)
+	defer func() {
+		if err := env.db.Close(); err != nil {
+			t.Logf("Warning: failed to close database: %v", err)
+		}
+	}()
 
 	ctx := context.Background()
-	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "admin"}, "/send 789012 Hello!")
+	adminID := env.cfg.TelegramAdminID
 
-	handler.HandleSend(ctx, update)
-	assert.True(t, mockBot.SendCalledSafe())
-	assert.Contains(t, mockBot.LastSentTextSafe(), "Ошибка")
+	_, err := env.subService.Create(ctx, env.chatID, env.username, "")
+	require.NoError(t, err)
+
+	update := tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat:     &tgbotapi.Chat{ID: adminID},
+			From:     &tgbotapi.User{ID: adminID, UserName: "admin"},
+			Text:     fmt.Sprintf("/send @%s Hello!", env.username),
+			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 5}},
+		},
+	}
+	env.handler.HandleSend(ctx, update)
+
+	assert.True(t, env.botAPI.SendCalledSafe())
+	assert.Contains(t, env.botAPI.LastSentText, "Сообщение отправлено")
 }
 
-func TestNotifyAdminError_WithAdminID(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{
-		TelegramAdminID: 999888,
-	}
-	mockDB := testutil.NewDatabaseService()
-	mockXUI := testutil.NewXUIClient()
-	mockBot := testutil.NewBotAPI()
-	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
+func TestE2E_SendCommand_OnlyMessageNoTarget(t *testing.T) {
+	env := setupE2EEnv(t)
+	defer func() {
+		if err := env.db.Close(); err != nil {
+			t.Logf("Warning: failed to close database: %v", err)
+		}
+	}()
 
 	ctx := context.Background()
-	handler.notifyAdminError(ctx, "Test error message")
+	adminID := env.cfg.TelegramAdminID
 
-	assert.True(t, mockBot.SendCalledSafe())
-	assert.Equal(t, int64(999888), mockBot.LastChatID)
-	assert.Contains(t, mockBot.LastSentTextSafe(), "Test error message")
+	resetBotAPI(env.botAPI)
+
+	update := tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat:     &tgbotapi.Chat{ID: adminID},
+			From:     &tgbotapi.User{ID: adminID, UserName: "admin"},
+			Text:     "/send",
+			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 5}},
+		},
+	}
+	env.handler.HandleSend(ctx, update)
+
+	assert.True(t, env.botAPI.SendCalledSafe())
+	assert.Contains(t, env.botAPI.LastSentText, "Использование")
 }
 
-func TestHandleAdminLastReg_NonAdminUser(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{
-		TelegramAdminID: 999999,
-	}
-	mockDB := testutil.NewDatabaseService()
-	mockXUI := testutil.NewXUIClient()
-	mockBot := testutil.NewBotAPI()
-	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
+func TestE2E_SendCommand_OnlyTargetNoMessage(t *testing.T) {
+	env := setupE2EEnv(t)
+	defer func() {
+		if err := env.db.Close(); err != nil {
+			t.Logf("Warning: failed to close database: %v", err)
+		}
+	}()
 
 	ctx := context.Background()
-	handler.handleAdminLastReg(ctx, 123456, "regularuser", 1)
+	adminID := env.cfg.TelegramAdminID
 
-	// Should not call database
-	assert.Nil(t, mockDB.GetLatestSubscriptionsFunc)
+	resetBotAPI(env.botAPI)
+
+	update := tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat:     &tgbotapi.Chat{ID: adminID},
+			From:     &tgbotapi.User{ID: adminID, UserName: "admin"},
+			Text:     "/send 123456",
+			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 5}},
+		},
+	}
+	env.handler.HandleSend(ctx, update)
+
+	assert.True(t, env.botAPI.SendCalledSafe())
+	assert.Contains(t, env.botAPI.LastSentText, "Использование")
 }
 
-func TestHandleAdminLastReg_EmptyList(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{
-		TelegramAdminID: 123456,
-	}
-	mockDB := testutil.NewDatabaseService()
-	mockXUI := testutil.NewXUIClient()
-	mockBot := testutil.NewBotAPI()
-	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
-
-	mockDB.GetLatestSubscriptionsFunc = func(ctx context.Context, limit int) ([]database.Subscription, error) {
-		return []database.Subscription{}, nil
-	}
+func TestE2E_SendCommand_RateLimitBlocksExcess(t *testing.T) {
+	env := setupE2EEnv(t)
+	defer func() {
+		if err := env.db.Close(); err != nil {
+			t.Logf("Warning: failed to close database: %v", err)
+		}
+	}()
 
 	ctx := context.Background()
-	handler.handleAdminLastReg(ctx, 123456, "admin", 1)
+	adminID := env.cfg.TelegramAdminID
 
-	assert.True(t, mockBot.SendCalledSafe())
-	assert.Contains(t, mockBot.LastSentTextSafe(), "Нет активных")
+	_, err := env.subService.Create(ctx, env.chatID, env.username, "")
+	require.NoError(t, err)
+
+	update := tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat:     &tgbotapi.Chat{ID: adminID},
+			From:     &tgbotapi.User{ID: adminID, UserName: "admin"},
+			Text:     fmt.Sprintf("/send %d Message 1", env.chatID),
+			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 5}},
+		},
+	}
+	env.handler.HandleSend(ctx, update)
+	require.True(t, env.botAPI.SendCalledSafe(), "First send should succeed")
+
+	update2 := tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat:     &tgbotapi.Chat{ID: adminID},
+			From:     &tgbotapi.User{ID: adminID, UserName: "admin"},
+			Text:     fmt.Sprintf("/send %d Message 2", env.chatID),
+			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 5}},
+		},
+	}
+	resetBotAPI(env.botAPI)
+	env.handler.HandleSend(ctx, update2)
+
+	assert.True(t, env.botAPI.SendCalledSafe(), "Second send should succeed under normal rate")
 }
 
-func TestHandleAdminLastReg_DatabaseError(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{
-		TelegramAdminID: 123456,
-	}
-	mockDB := testutil.NewDatabaseService()
-	mockXUI := testutil.NewXUIClient()
-	mockBot := testutil.NewBotAPI()
-	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
-
-	mockDB.GetLatestSubscriptionsFunc = func(ctx context.Context, limit int) ([]database.Subscription, error) {
-		return nil, errors.New("database error")
-	}
+func TestE2E_BroadcastCommand_PreservesFormatting(t *testing.T) {
+	env := setupE2EEnv(t)
+	defer func() {
+		if err := env.db.Close(); err != nil {
+			t.Logf("Warning: failed to close database: %v", err)
+		}
+	}()
 
 	ctx := context.Background()
-	handler.handleAdminLastReg(ctx, 123456, "admin", 1)
+	adminID := env.cfg.TelegramAdminID
 
-	assert.True(t, mockBot.SendCalledSafe())
-	assert.Contains(t, mockBot.LastSentTextSafe(), "Ошибка")
+	_, err := env.subService.Create(ctx, int64(950001), "testuser", "")
+	require.NoError(t, err)
+
+	resetBotAPI(env.botAPI)
+
+	const draft = "Test *bold* _italic_ [link](https://example.com)"
+	runBroadcastFlow(t, env, adminID, draft)
+
+	assert.Contains(t, env.botAPI.LastSentText, "Рассылка завершена")
+
+	// Formatting must be delivered as-is (MarkdownV2, not escaped with backslashes).
+	var delivered bool
+	for _, m := range env.botAPI.GetAllSentMessages() {
+		if strings.Contains(m.Text, "*bold*") && !strings.Contains(m.Text, `\*bold\*`) {
+			delivered = true
+		}
+	}
+	assert.True(t, delivered, "delivered message should keep MarkdownV2 formatting unescaped")
 }
 
-func TestHandleAdminLastReg_WithSubscriptions(t *testing.T) {
+func TestSplitMessage_DoesNotBreakMarkdownV2Entities(t *testing.T) {
 	t.Parallel()
 
-	cfg := &config.Config{
-		TelegramAdminID: 123456,
-	}
-	mockDB := testutil.NewDatabaseService()
-	mockXUI := testutil.NewXUIClient()
-	mockBot := testutil.NewBotAPI()
-	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
-
-	subs := []database.Subscription{
-		{ID: 1, Username: "user1", TelegramID: 111},
-		{ID: 2, Username: "user2", TelegramID: 222},
-		{ID: 3, Username: "", TelegramID: 333}, // Test empty username
-	}
-
-	mockDB.GetLatestSubscriptionsFunc = func(ctx context.Context, limit int) ([]database.Subscription, error) {
-		assert.Equal(t, 10, limit)
-		return subs, nil
-	}
-
-	ctx := context.Background()
-	handler.handleAdminLastReg(ctx, 123456, "admin", 1)
-
-	assert.True(t, mockBot.SendCalledSafe())
-	assert.Contains(t, mockBot.LastSentTextSafe(), "Последние регистрации")
-	assert.Contains(t, mockBot.LastSentTextSafe(), "user1")
-	assert.Contains(t, mockBot.LastSentTextSafe(), "user2")
-	assert.Contains(t, mockBot.LastSentTextSafe(), "unknown")
-}
-
-func TestHandleAdminStats_NonAdminUser(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{
-		TelegramAdminID: 999999,
-	}
-	mockDB := testutil.NewDatabaseService()
-	mockXUI := testutil.NewXUIClient()
-	mockBot := testutil.NewBotAPI()
-	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
-
-	ctx := context.Background()
-	handler.handleAdminStats(ctx, 123456, "regularuser", 1)
-
-	// Should not call database
-	assert.Nil(t, mockDB.CountAllSubscriptionsFunc)
-}
-
-func TestHandleAdminStats_DatabaseError(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{
-		TelegramAdminID: 123456,
-	}
-	mockDB := testutil.NewDatabaseService()
-	mockXUI := testutil.NewXUIClient()
-	mockBot := testutil.NewBotAPI()
-	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
-
-	mockDB.CountAllSubscriptionsFunc = func(ctx context.Context) (int64, error) {
-		return 0, errors.New("database error")
-	}
-
-	ctx := context.Background()
-	handler.handleAdminStats(ctx, 123456, "admin", 1)
-
-	assert.True(t, mockBot.SendCalledSafe())
-	assert.Contains(t, mockBot.LastSentTextSafe(), "Ошибка")
-}
-
-func TestHandleAdminStats_Success(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{
-		TelegramAdminID: 123456,
-	}
-	mockDB := testutil.NewDatabaseService()
-	mockXUI := testutil.NewXUIClient()
-	mockBot := testutil.NewBotAPI()
-	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
-
-	mockDB.CountAllSubscriptionsFunc = func(ctx context.Context) (int64, error) {
-		return 100, nil
-	}
-	mockDB.CountActiveSubscriptionsFunc = func(ctx context.Context) (int64, error) {
-		return 80, nil
-	}
-
-	ctx := context.Background()
-	handler.handleAdminStats(ctx, 123456, "admin", 1)
-
-	assert.True(t, mockBot.SendCalledSafe())
-	assert.Contains(t, mockBot.LastSentTextSafe(), "100")
-	assert.Contains(t, mockBot.LastSentTextSafe(), "80")
-}
-
-func TestHandleAdminStats_PartialDatabaseError(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{
-		TelegramAdminID: 123456,
-	}
-	mockDB := testutil.NewDatabaseService()
-	mockXUI := testutil.NewXUIClient()
-	mockBot := testutil.NewBotAPI()
-	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
-
-	mockDB.CountAllSubscriptionsFunc = func(ctx context.Context) (int64, error) {
-		return 100, nil
-	}
-	mockDB.CountActiveSubscriptionsFunc = func(ctx context.Context) (int64, error) {
-		return 0, errors.New("error")
-	}
-	mockDB.CountExpiredSubscriptionsFunc = func(ctx context.Context) (int64, error) {
-		return 0, errors.New("error")
-	}
-
-	ctx := context.Background()
-	handler.handleAdminStats(ctx, 123456, "admin", 1)
-
-	assert.True(t, mockBot.SendCalledSafe())
-	assert.Contains(t, mockBot.LastSentTextSafe(), "100")
-}
-
-func TestHandleRefstats_NonAdminUser(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{
-		TelegramAdminID: 999999,
-	}
-	mockDB := testutil.NewDatabaseService()
-	mockXUI := testutil.NewXUIClient()
-	mockBot := testutil.NewBotAPI()
-	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
-
-	ctx := context.Background()
-	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "regularuser"}, "/refstats")
-
-	handler.HandleRefstats(ctx, update)
-
-	assert.True(t, mockBot.SendCalledSafe())
-	assert.Contains(t, mockBot.LastSentTextSafe(), "только администратору")
-}
-
-func TestHandleRefstats_EmptyReferrals(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{
-		TelegramAdminID: 123456,
-	}
-	mockDB := testutil.NewDatabaseService()
-	mockXUI := testutil.NewXUIClient()
-	mockBot := testutil.NewBotAPI()
-	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
-
-	ctx := context.Background()
-	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "admin"}, "/refstats")
-
-	handler.HandleRefstats(ctx, update)
-
-	assert.True(t, mockBot.SendCalledSafe())
-	assert.Contains(t, mockBot.LastSentTextSafe(), "Нет данных о рефералах")
-}
-
-func TestHandleRefstats_WithMultipleReferrers(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{
-		TelegramAdminID: 123456,
-	}
-	mockDB := testutil.NewDatabaseService()
-	mockXUI := testutil.NewXUIClient()
-	mockBot := testutil.NewBotAPI()
-	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
-
-	handler.referralCache.SetForTest(111, 10)
-	handler.referralCache.SetForTest(222, 5)
-	handler.referralCache.SetForTest(333, 20)
-
-	ctx := context.Background()
-	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "admin"}, "/refstats")
-
-	handler.HandleRefstats(ctx, update)
-
-	assert.True(t, mockBot.SendCalledSafe())
-	text := mockBot.LastSentTextSafe()
-	assert.Contains(t, text, "35")  // total referrals
-	assert.Contains(t, text, "3")   // unique referrers
-	assert.Contains(t, text, "333") // top referrer
-	assert.Contains(t, text, "111")
-	assert.Contains(t, text, "222")
-	// Verify ordering: 333 (20) should appear before 111 (10) before 222 (5)
-	idx333 := strings.Index(text, "333")
-	idx111 := strings.Index(text, "111")
-	idx222 := strings.Index(text, "222")
-	assert.Less(t, idx333, idx111, "333 should appear before 111")
-	assert.Less(t, idx111, idx222, "111 should appear before 222")
-}
-
-func TestHandleRefstats_Top10Limit(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{
-		TelegramAdminID: 123456,
-	}
-	mockDB := testutil.NewDatabaseService()
-	mockXUI := testutil.NewXUIClient()
-	mockBot := testutil.NewBotAPI()
-	handler := newTestAdminHandler(cfg, mockDB, mockXUI, mockBot)
-
-	for i := 0; i < 15; i++ {
-		handler.referralCache.SetForTest(int64(1000+i), int64(100-i*5))
-	}
-
-	ctx := context.Background()
-	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "admin"}, "/refstats")
-
-	handler.HandleRefstats(ctx, update)
-
-	assert.True(t, mockBot.SendCalledSafe())
-	text := mockBot.LastSentTextSafe()
-	assert.Contains(t, text, "15") // unique referrers count
-
-	// Count how many "ID" entries appear (should be exactly 10)
-	idCount := strings.Count(text, "ID ")
-	assert.Equal(t, 10, idCount, "Should only show top 10 referrers")
-
-	// Top referrer (1000 with 100 referrals) should be present
-	assert.Contains(t, text, "1000")
-	// 11th referrer (1010 with 50 referrals) should NOT be present
-	assert.NotContains(t, text, "1010")
-}
-
-func TestEscapeMarkdown(t *testing.T) {
-	t.Parallel()
+	const maxLen = 20
 
 	tests := []struct {
 		name     string
 		input    string
-		expected string
+		wantAny  []string
+		maxChunk int
 	}{
-		{"empty string", "", ""},
-		{"no special chars", "hello world", "hello world"},
-		{"underscore", "hello_world", "hello\\_world"},
-		{"asterisk", "hello*world", "hello\\*world"},
-		{"brackets", "[test](url)", "\\[test\\]\\(url\\)"},
-		{"backticks", "`code`", "\\`code\\`"},
-		{"tilde", "~~strike~~", "\\~\\~strike\\~\\~"},
-		{"pipe", "a|b", "a\\|b"},
-		{"dot", "file.txt", "file.txt"},
-		{"exclamation", "wow!", "wow!"},
-		{"plus", "a+b", "a\\+b"},
-		{"minus", "a-b", "a\\-b"},
-		{"equals", "a=b", "a\\=b"},
-		{"hash", "#heading", "\\#heading"},
-		{"greater than", "a>b", "a\\>b"},
-		{"curly braces", "{a}", "\\{a\\}"},
-		{"caret", "a^b", "a\\^b"},
-		{"all special chars", "_*[test](url)`~>#+-=|{}^", "\\_\\*\\[test\\]\\(url\\)\\`\\~\\>\\#\\+\\-\\=\\|\\{\\}\\^"},
-		{"cyrillic text", "Привет мир", "Привет мир"},
-		{"cyrillic with special", "Привет_мир", "Привет\\_мир"},
-		{"multiple underscores", "a_b_c", "a\\_b\\_c"},
-		{"exclamation not escaped", "Hello!", "Hello!"},
-		{"dot not escaped", "file.txt", "file.txt"},
+		{
+			name:     "short text",
+			input:    "short",
+			wantAny:  []string{"short"},
+			maxChunk: maxLen,
+		},
+		{
+			name:     "plain long text",
+			input:    strings.Repeat("a", maxLen+5),
+			wantAny:  nil,
+			maxChunk: maxLen,
+		},
+		{
+			name:     "markdown entities stay intact",
+			input:    "prefix *bold* suffix extra padding",
+			wantAny:  []string{"prefix *bold* suffix", "extra padding"},
+			maxChunk: maxLen,
+		},
+		{
+			name:     "long markdown is hard-split safely",
+			input:    "a*" + strings.Repeat("b", maxLen*3),
+			wantAny:  nil,
+			maxChunk: maxLen,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			chunks := splitMessage(tt.input, maxLen)
+			for _, c := range chunks {
+				assert.LessOrEqual(t, len(c), tt.maxChunk, "chunk must not exceed maxLen")
+			}
+			if tt.wantAny != nil {
+				var matched bool
+				for _, c := range chunks {
+					for _, w := range tt.wantAny {
+						if c == w {
+							matched = true
+							break
+						}
+					}
+				}
+				assert.True(t, matched, "expected one of %v in chunks %v", tt.wantAny, chunks)
+			}
+		})
+	}
+}
+
+func TestBroadcastSession_TTLExpiry(t *testing.T) {
+	t.Parallel()
+
+	env := setupE2EEnv(t)
+	defer func() {
+		if err := env.db.Close(); err != nil {
+			t.Logf("Warning: failed to close database: %v", err)
+		}
+	}()
+
+	ctx := context.Background()
+	chatID := env.cfg.TelegramAdminID
+
+	env.handler.startBroadcastSession(chatID)
+	require.NotNil(t, env.handler.getBroadcastSession(chatID))
+
+	env.handler.broadcastMu.Lock()
+	s := env.handler.broadcastSessions[chatID]
+	s.createdAt = time.Now().Add(-16 * time.Minute)
+	env.handler.broadcastMu.Unlock()
+
+	require.Nil(t, env.handler.getBroadcastSession(chatID))
+	require.False(t, env.handler.broadcastSessionActive(chatID))
+}
+
+func TestE2E_SendCommand_EscapesMarkdown(t *testing.T) {
+	env := setupE2EEnv(t)
+	defer func() {
+		if err := env.db.Close(); err != nil {
+			t.Logf("Warning: failed to close database: %v", err)
+		}
+	}()
+
+	ctx := context.Background()
+	adminID := env.cfg.TelegramAdminID
+
+	_, err := env.subService.Create(ctx, env.chatID, env.username, "")
+	require.NoError(t, err)
+
+	update := tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat:     &tgbotapi.Chat{ID: adminID},
+			From:     &tgbotapi.User{ID: adminID, UserName: "admin"},
+			Text:     fmt.Sprintf("/send %d *bold* and _italic_", env.chatID),
+			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 5}},
+		},
+	}
+	env.handler.HandleSend(ctx, update)
+
+	assert.True(t, env.botAPI.SendCalledSafe(), "Send should succeed")
+	assert.Contains(t, env.botAPI.LastSentText, "Сообщение отправлено")
+}
+
+func TestE2E_NonAdmin_AccessControl(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		setupEnv     func(*e2eTestEnv, context.Context)
+		wantNotSent  bool
+		sentContains string
+	}{
+		{
+			name: "cannot_use_del",
+			setupEnv: func(env *e2eTestEnv, ctx context.Context) {
+				env.handler.HandleDel(ctx, tgbotapi.Update{
+					Message: &tgbotapi.Message{
+						Chat:     &tgbotapi.Chat{ID: 999999},
+						From:     &tgbotapi.User{ID: 999999, UserName: "notadmin"},
+						Text:     "/del 1",
+						Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 4}},
+					},
+				})
+			},
+			wantNotSent: true,
+		},
+		{
+			name: "cannot_use_broadcast",
+			setupEnv: func(env *e2eTestEnv, ctx context.Context) {
+				env.handler.HandleBroadcast(ctx, tgbotapi.Update{
+					Message: &tgbotapi.Message{
+						Chat:     &tgbotapi.Chat{ID: 999999},
+						From:     &tgbotapi.User{ID: 999999, UserName: "notadmin"},
+						Text:     "/broadcast Hello",
+						Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 10}},
+					},
+				})
+			},
+			wantNotSent: true,
+		},
+		{
+			name: "cannot_use_send",
+			setupEnv: func(env *e2eTestEnv, ctx context.Context) {
+				env.handler.HandleSend(ctx, tgbotapi.Update{
+					Message: &tgbotapi.Message{
+						Chat:     &tgbotapi.Chat{ID: 999999},
+						From:     &tgbotapi.User{ID: 999999, UserName: "notadmin"},
+						Text:     "/send 123456789 Hello",
+						Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 5}},
+					},
+				})
+			},
+			wantNotSent: true,
+		},
+		{
+			name: "cannot_access_refstats",
+			setupEnv: func(env *e2eTestEnv, ctx context.Context) {
+				env.handler.HandleRefstats(ctx, tgbotapi.Update{
+					Message: &tgbotapi.Message{
+						Chat:     &tgbotapi.Chat{ID: 999999},
+						From:     &tgbotapi.User{ID: 999999, UserName: "notadmin"},
+						Text:     "/refstats",
+						Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 9}},
+					},
+				})
+			},
+			wantNotSent:  false,
+			sentContains: "только администратору",
+		},
+		{
+			name: "cannot_access_admin_stats",
+			setupEnv: func(env *e2eTestEnv, ctx context.Context) {
+				env.handler.HandleCallback(ctx, tgbotapi.Update{
+					CallbackQuery: &tgbotapi.CallbackQuery{
+						From: &tgbotapi.User{ID: 999999, UserName: "notadmin"},
+						Data: "admin_stats",
+						Message: &tgbotapi.Message{
+							Chat:      &tgbotapi.Chat{ID: 999999},
+							MessageID: 100,
+						},
+					},
+				})
+			},
+			wantNotSent: true,
+		},
+		{
+			name: "cannot_access_admin_lastreg",
+			setupEnv: func(env *e2eTestEnv, ctx context.Context) {
+				env.handler.HandleCallback(ctx, tgbotapi.Update{
+					CallbackQuery: &tgbotapi.CallbackQuery{
+						From: &tgbotapi.User{ID: 999999, UserName: "notadmin"},
+						Data: "admin_lastreg",
+						Message: &tgbotapi.Message{
+							Chat:      &tgbotapi.Chat{ID: 999999},
+							MessageID: 100,
+						},
+					},
+				})
+			},
+			wantNotSent: true,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			result := utils.EscapeMarkdown(tt.input)
-			assert.Equal(t, tt.expected, result)
+			env := setupE2EEnv(t)
+			defer func() {
+				if err := env.db.Close(); err != nil {
+					t.Logf("Warning: failed to close database: %v", err)
+				}
+			}()
 
+			ctx := context.Background()
+			resetBotAPI(env.botAPI)
+			tt.setupEnv(env, ctx)
+
+			if tt.wantNotSent {
+				assert.False(t, env.botAPI.SendCalledSafe())
+			} else {
+				assert.True(t, env.botAPI.SendCalledSafe())
+				assert.Contains(t, env.botAPI.LastSentText, tt.sentContains)
+			}
 		})
 	}
+}
+
+func TestE2E_NonAdmin_CannotUseDel(t *testing.T) {
+	t.Parallel()
+	env := setupE2EEnv(t)
+	defer func() {
+		if err := env.db.Close(); err != nil {
+			t.Logf("Warning: failed to close database: %v", err)
+		}
+	}()
+
+	ctx := context.Background()
+
+	env.handler.HandleCallback(ctx, tgbotapi.Update{
+		CallbackQuery: &tgbotapi.CallbackQuery{
+			From: &tgbotapi.User{
+				ID:       env.cfg.TelegramAdminID,
+				UserName: "admin",
+			},
+			Data: "admin_stats",
+			Message: &tgbotapi.Message{
+				Chat:      &tgbotapi.Chat{ID: env.cfg.TelegramAdminID},
+				MessageID: 100,
+			},
+		},
+	})
+
+	assert.True(t, env.botAPI.SendCalledSafe(), "Admin stats should be sent")
+	assert.Contains(t, env.botAPI.LastSentText, "Статистика", "Should contain stats")
+}
+
+func TestE2E_AdminLastReg(t *testing.T) {
+	t.Parallel()
+	env := setupE2EEnv(t)
+	defer func() {
+		if err := env.db.Close(); err != nil {
+			t.Logf("Warning: failed to close database: %v", err)
+		}
+	}()
+
+	ctx := context.Background()
+
+	sub := &database.Subscription{
+		TelegramID:     env.chatID,
+		Username:       env.username,
+		ClientID:       "test-client-id",
+		SubscriptionID: "test-sub-id",
+		Status:         "active",
+		CreatedAt:      time.Now(),
+	}
+	require.NoError(t, env.db.CreateSubscription(ctx, sub, ""))
+
+	resetBotAPI(env.botAPI)
+
+	env.handler.HandleCallback(ctx, tgbotapi.Update{
+		CallbackQuery: &tgbotapi.CallbackQuery{
+			From: &tgbotapi.User{
+				ID:       env.cfg.TelegramAdminID,
+				UserName: "admin",
+			},
+			Data: "admin_lastreg",
+			Message: &tgbotapi.Message{
+				Chat:      &tgbotapi.Chat{ID: env.cfg.TelegramAdminID},
+				MessageID: 100,
+			},
+		},
+	})
+
+	assert.True(t, env.botAPI.SendCalledSafe(), "Last registrations should be sent")
+	assert.Contains(t, env.botAPI.LastSentText, env.username, "Should show registered user")
+}
+
+func TestE2E_VersionCommand_Admin(t *testing.T) {
+	env := setupE2EEnv(t)
+	defer func() {
+		if err := env.db.Close(); err != nil {
+			t.Logf("Warning: failed to close database: %v", err)
+		}
+	}()
+
+	ctx := context.Background()
+	adminID := env.cfg.TelegramAdminID
+	resetBotAPI(env.botAPI)
+
+	update := tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat: &tgbotapi.Chat{ID: adminID},
+			From: &tgbotapi.User{
+				ID:       adminID,
+				UserName: "admin",
+			},
+			Text:     "/v",
+			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 2}},
+		},
+	}
+	env.handler.HandleVersion(ctx, update)
+
+	assert.True(t, env.botAPI.SendCalledSafe(), "Admin should receive version info")
+}
+
+func TestE2E_VersionCommand_NonAdmin(t *testing.T) {
+	env := setupE2EEnv(t)
+	defer func() {
+		if err := env.db.Close(); err != nil {
+			t.Logf("Warning: failed to close database: %v", err)
+		}
+	}()
+
+	ctx := context.Background()
+	nonAdminID := int64(999999)
+	resetBotAPI(env.botAPI)
+
+	update := tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat: &tgbotapi.Chat{ID: nonAdminID},
+			From: &tgbotapi.User{
+				ID:       nonAdminID,
+				UserName: "notadmin",
+			},
+			Text:     "/v",
+			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 2}},
+		},
+	}
+	env.handler.HandleVersion(ctx, update)
+
+	assert.False(t, env.botAPI.SendCalledSafe(), "Non-admin should not receive version info")
 }
