@@ -9,7 +9,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-	"unicode/utf8"
 
 	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/logger"
@@ -263,14 +262,21 @@ func (h *Handler) HandleBroadcastDraft(ctx context.Context, update tgbotapi.Upda
 		h.SendMessage(ctx, chatID, "❌ Рассылка отменена.")
 		return nil
 	}
-	if len(text) > config.MaxTelegramMessageLen {
+	const maxBroadcastLen = config.MaxTelegramMessageLen * 20
+	if len(text) > maxBroadcastLen {
 		h.clearBroadcastSession(chatID)
-		h.SendMessage(ctx, chatID, fmt.Sprintf("❌ Сообщение слишком длинное (%d символов). MarkdownV2-рассылка не поддерживает автоматическое разбиение: отправьте текст короче %d символов.", len(text), config.MaxTelegramMessageLen))
+		h.SendMessage(ctx, chatID, fmt.Sprintf("❌ Сообщение слишком длинное (%d символов). Максимум — %d символов; рассылка автоматически разбивается на части по %d символов.", len(text), maxBroadcastLen, config.MaxTelegramMessageLen))
 		return nil
 	}
 
-	// D3: preview with MarkdownV2. Special chars are auto-escaped, formatting kept.
-	preview := tgbotapi.NewMessage(chatID, utils.EscapeMarkdownV2(text))
+	// D3: preview with MarkdownV2. The draft may exceed one Telegram message,
+	// so show the first chunk and note how many parts the broadcast will use.
+	chunks := splitMessage(text, config.MaxTelegramMessageLen)
+	previewText := chunks[0]
+	if len(chunks) > 1 {
+		previewText += fmt.Sprintf("\n\n… (и ещё %d частей по %d символов)", len(chunks)-1, config.MaxTelegramMessageLen)
+	}
+	preview := tgbotapi.NewMessage(chatID, utils.EscapeMarkdownV2(previewText))
 	preview.ParseMode = "MarkdownV2"
 	preview.DisableWebPagePreview = true
 	if _, err := h.bot.Send(preview); err != nil {
@@ -498,49 +504,147 @@ func (h *Handler) clearBroadcastSession(chatID int64) {
 	delete(h.broadcastSessions, chatID)
 }
 
-// splitMessage splits text into chunks of at most maxLen characters, preferring
-// to break at line boundaries so MarkdownV2 entities stay intact within a chunk.
-// A single line longer than maxLen is hard-split.
+// splitMessage splits text into chunks of at most maxLen bytes. It prefers to
+// break at spaces and newlines, but never breaks an open MarkdownV2 entity: a
+// word that would exceed maxLen while an entity is still open is kept whole
+// (the chunk may then exceed maxLen, but the entity stays valid). A single
+// token longer than maxLen that is NOT inside an entity is hard-split at rune
+// boundaries so multi-byte characters are never split — this may break the
+// entity (an accepted trade-off for pathological, whitespace-free input).
 func splitMessage(text string, maxLen int) []string {
+	if maxLen <= 0 {
+		return []string{text}
+	}
 	if len(text) <= maxLen {
 		return []string{text}
 	}
 
 	var chunks []string
-	var current strings.Builder
+	var cur strings.Builder
+	var open []string
+	lastNewline := false
 	flush := func() {
-		if current.Len() > 0 {
-			chunks = append(chunks, current.String())
-			current.Reset()
+		if cur.Len() > 0 {
+			chunks = append(chunks, cur.String())
+			cur.Reset()
+			open = nil
 		}
+		lastNewline = false
 	}
-	for _, line := range strings.Split(text, "\n") {
-		if len(line) > maxLen {
+
+	// addWord appends a word. While an inline entity is open the chunk must not
+	// be split (that would invalidate the entity), so the word is kept whole
+	// even if it pushes the chunk past maxLen. Otherwise we break the chunk
+	// first when the word would not fit.
+	addWord := func(word string) {
+		sep := 0
+		if cur.Len() > 0 && !lastNewline {
+			sep = 1
+		}
+		if len(open) == 0 && cur.Len() > 0 && cur.Len()+sep+len(word) > maxLen {
 			flush()
-			for len(line) > maxLen {
-				cut := maxLen
-				for cut > 0 && !utf8.RuneStart(line[cut]) {
-					cut--
-				}
-				if cut == 0 {
-					cut = maxLen
-				}
-				chunks = append(chunks, line[:cut])
-				line = line[cut:]
+		}
+		if cur.Len() > 0 && !lastNewline {
+			cur.WriteByte(' ')
+		}
+		cur.WriteString(word)
+		lastNewline = false
+		updateEntities(&open, word)
+	}
+
+	for li, line := range strings.Split(text, "\n") {
+		if li > 0 && cur.Len() > 0 {
+			// Newlines are legal inside MarkdownV2 entities, so keep an open
+			// entity intact across the break. Break the chunk only when no
+			// entity is open and there is no room for the newline.
+			if len(open) == 0 && cur.Len()+1 > maxLen {
+				flush()
+			} else {
+				cur.WriteByte('\n')
+				lastNewline = true
 			}
-			current.WriteString(line)
-			continue
 		}
-		if current.Len() > 0 && current.Len()+len(line)+1 > maxLen {
-			flush()
+		for _, word := range strings.Fields(line) {
+			if len(word) > maxLen {
+				// The token is over-long. If an entity is open, or the token
+				// itself contains an entity delimiter, keep it whole: a
+				// hard-split would break the entity and trigger a Telegram
+				// parse error. We tolerate the chunk exceeding maxLen; such a
+				// token is inherently unparseable in MarkdownV2 anyway.
+				if len(open) > 0 || containsEntityChar(word) {
+					addWord(word)
+					continue
+				}
+				flush()
+				for _, piece := range hardSplitToken(word, maxLen) {
+					if cur.Len() > 0 {
+						flush()
+					}
+					cur.WriteString(piece)
+				}
+				continue
+			}
+			addWord(word)
 		}
-		if current.Len() > 0 {
-			current.WriteByte('\n')
-		}
-		current.WriteString(line)
 	}
 	flush()
 	return chunks
+}
+
+// updateEntities maintains the stack of currently-open MarkdownV2 inline
+// entities as text is appended. Delimiters handled: * _ ` ~ (open and close),
+// [ ] (link text open / close).
+func updateEntities(open *[]string, seg string) {
+	for _, r := range seg {
+		switch r {
+		case '[':
+			*open = append(*open, "[")
+		case ']':
+			if len(*open) > 0 && (*open)[len(*open)-1] == "[" {
+				*open = (*open)[:len(*open)-1]
+			} else {
+				*open = append(*open, "]")
+			}
+		case '*', '_', '`', '~':
+			if len(*open) > 0 && (*open)[len(*open)-1] == string(r) {
+				*open = (*open)[:len(*open)-1]
+			} else {
+				*open = append(*open, string(r))
+			}
+		}
+	}
+}
+
+// hardSplitToken splits a single over-long token into chunks of at most maxLen
+// runes, cutting only at rune boundaries so multi-byte characters are never
+// split.
+func hardSplitToken(word string, maxLen int) []string {
+	runes := []rune(word)
+	var out []string
+	for len(runes) > 0 {
+		take := maxLen
+		if take > len(runes) {
+			take = len(runes)
+		}
+		if take == 0 {
+			take = 1
+		}
+		out = append(out, string(runes[:take]))
+		runes = runes[take:]
+	}
+	return out
+}
+
+// containsEntityChar reports whether the token contains a MarkdownV2 inline
+// entity delimiter, meaning a hard-split would break an entity.
+func containsEntityChar(s string) bool {
+	for _, r := range s {
+		switch r {
+		case '*', '_', '`', '~', '[', ']':
+			return true
+		}
+	}
+	return false
 }
 
 // broadcastSessionActive reports whether an admin has an in-progress broadcast.
