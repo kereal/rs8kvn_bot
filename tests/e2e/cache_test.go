@@ -119,6 +119,8 @@ func TestE2E_Cache_CacheInvalidation(t *testing.T) {
 	sub1 := env.handler.Cache().Get(env.chatID)
 	if sub1 == nil {
 		sub1, err = env.db.GetByTelegramID(ctx, env.chatID)
+		require.NoError(t, err)
+		env.handler.Cache().Set(env.chatID, sub1)
 	}
 	require.NoError(t, err)
 	assert.Equal(t, env.username, sub1.Username)
