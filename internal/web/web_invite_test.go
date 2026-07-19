@@ -16,6 +16,7 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/interfaces"
 	"github.com/kereal/rs8kvn_bot/internal/service"
 	"github.com/kereal/rs8kvn_bot/internal/testutil"
+	"github.com/kereal/rs8kvn_bot/internal/vpn"
 	"github.com/kereal/rs8kvn_bot/internal/xui"
 
 	"gorm.io/gorm"
@@ -82,10 +83,10 @@ func makeTestSubService(mockDB *testutil.DatabaseService) (*config.Config, *serv
 	mockDB.GetNodesByPlanNameFunc = func(ctx context.Context, planName string) ([]database.Node, error) {
 		return []database.Node{{ID: 1, IsActive: true, Host: "http://localhost:2053", InboundIDs: "[1]"}}, nil
 	}
-
 	xuiClients := map[uint]interfaces.XUIClient{1: mockXUI}
+	vpnClients := map[uint]vpn.Client{1: vpn.NewThreeXUIClient(mockXUI, []int{1})}
 	nodes := []database.Node{{ID: 1, Name: "default", IsActive: true, Host: "http://localhost:2053", APIToken: "test-token", InboundIDs: "[1]", SubscriptionURL: cfg.GlobalSubURL}}
-	subService := service.NewSubscriptionService(mockDB, xuiClients, nil, nodes, cfg)
+	subService := service.NewSubscriptionService(mockDB, xuiClients, vpnClients, nodes, cfg)
 	return cfg, subService, mockXUI
 }
 

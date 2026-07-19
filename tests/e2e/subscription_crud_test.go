@@ -339,8 +339,10 @@ func TestE2E_CreateSubscription_RevokesOnlyActive(t *testing.T) {
 	resetBotAPI(env.botAPI)
 	env.xui.AddClientWithIDCalled = false
 
-	// Creating another subscription with the same telegram_id should fail
-	// due to UNIQUE constraint
+	// A second create for the same telegram_id no longer errors: it reanimates
+	// the existing (non-active) subscription back to "active" instead of
+	// inserting a duplicate row that would violate telegram_id uniqueness.
+	// See reanimateRevokedSubscription (a08175f).
 	env.handler.HandleCallback(ctx, tgbotapi.Update{
 		CallbackQuery: &tgbotapi.CallbackQuery{
 			From: &tgbotapi.User{
@@ -358,9 +360,9 @@ func TestE2E_CreateSubscription_RevokesOnlyActive(t *testing.T) {
 	allSubs, err := env.db.GetAllSubscriptions(ctx)
 	require.NoError(t, err)
 
-	// Only the original expired subscription should exist
+	// Only the original subscription should exist (reanimated, not duplicated).
 	assert.Equal(t, 1, len(allSubs), "Should have only one subscription")
-	assert.Equal(t, "expired", allSubs[0].Status)
+	assert.Equal(t, "active", allSubs[0].Status)
 }
 
 func TestE2E_Service_Create_XUIFailure_Parameterized(t *testing.T) {
