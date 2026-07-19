@@ -379,9 +379,9 @@ func TestSubscriptionCache_EdgeCases(t *testing.T) {
 		cache.Set(123, sub)
 
 		// Should expire almost immediately
-		time.Sleep(2 * time.Millisecond)
-		result := cache.Get(123)
-		assert.Nil(t, result)
+		require.Eventually(t, func() bool {
+			return cache.Get(123) == nil
+		}, 100*time.Millisecond, 1*time.Millisecond, "entry should expire")
 
 	})
 

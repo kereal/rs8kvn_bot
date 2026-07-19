@@ -14,6 +14,11 @@ import (
 	"go.uber.org/zap"
 )
 
+func TestMain(m *testing.M) {
+	code := m.Run()
+	os.Exit(code)
+}
+
 func TestSentryLevelFromString(t *testing.T) {
 
 	tests := []struct {

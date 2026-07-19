@@ -13,7 +13,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func ptrTime(t time.Time) *time.Time { return &t }
 
 func TestHandleStart_WithDatabase(t *testing.T) {
 	t.Parallel()
@@ -23,7 +22,7 @@ func TestHandleStart_WithDatabase(t *testing.T) {
 
 	ctx := context.Background()
 
-	sub := testutil.CreateTestSubscription(123456789, "testuser", "active", ptrTime(time.Now().Add(24*time.Hour)))
+	sub := testutil.CreateTestSubscription(123456789, "testuser", "active", testutil.PtrTime(time.Now().Add(24*time.Hour)))
 	require.NoError(t, db.CreateSubscription(ctx, sub, ""), "Failed to create subscription")
 
 	got, err := db.GetByTelegramID(ctx, 123456789)
@@ -65,7 +64,7 @@ func TestHandleMySubscription_WithSubscription(t *testing.T) {
 
 	ctx := context.Background()
 
-	sub := testutil.CreateTestSubscription(123456789, "testuser", "active", ptrTime(time.Now().Add(24*time.Hour)))
+	sub := testutil.CreateTestSubscription(123456789, "testuser", "active", testutil.PtrTime(time.Now().Add(24*time.Hour)))
 	require.NoError(t, db.CreateSubscription(ctx, sub, ""), "Failed to create subscription")
 
 	got, err := db.GetByTelegramID(ctx, 123456789)
@@ -83,7 +82,7 @@ func TestHandleMySubscription_ExpiredSubscription(t *testing.T) {
 
 	ctx := context.Background()
 
-	sub := testutil.CreateTestSubscription(123456789, "testuser", "active", ptrTime(time.Now().Add(-24*time.Hour)))
+	sub := testutil.CreateTestSubscription(123456789, "testuser", "active", testutil.PtrTime(time.Now().Add(-24*time.Hour)))
 	require.NoError(t, db.CreateSubscription(ctx, sub, ""), "Failed to create subscription")
 
 	got, err := db.GetByTelegramID(ctx, 123456789)
@@ -102,7 +101,7 @@ func TestHandleAdminStats(t *testing.T) {
 	ctx := context.Background()
 
 	for i := 0; i < 5; i++ {
-		sub := testutil.CreateTestSubscription(int64(100000000+i), fmt.Sprintf("user%d", i), "active", ptrTime(time.Now().Add(24*time.Hour)))
+		sub := testutil.CreateTestSubscription(int64(100000000+i), fmt.Sprintf("user%d", i), "active", testutil.PtrTime(time.Now().Add(24*time.Hour)))
 		require.NoError(t, db.CreateSubscription(ctx, sub, ""), "Failed to create subscription")
 	}
 
@@ -119,7 +118,7 @@ func TestHandleDel_GetSubscriptionByID(t *testing.T) {
 
 	ctx := context.Background()
 
-	sub := testutil.CreateTestSubscription(123456789, "deltestuser", "active", ptrTime(time.Now().Add(24*time.Hour)))
+	sub := testutil.CreateTestSubscription(123456789, "deltestuser", "active", testutil.PtrTime(time.Now().Add(24*time.Hour)))
 	require.NoError(t, db.CreateSubscription(ctx, sub, ""), "Failed to create subscription")
 
 	got, err := db.GetByID(ctx, sub.ID)
@@ -135,7 +134,7 @@ func TestHandleDel_DeleteSubscriptionByID(t *testing.T) {
 
 	ctx := context.Background()
 
-	sub := testutil.CreateTestSubscription(999888777, "deletetest", "active", ptrTime(time.Now().Add(24*time.Hour)))
+	sub := testutil.CreateTestSubscription(999888777, "deletetest", "active", testutil.PtrTime(time.Now().Add(24*time.Hour)))
 	require.NoError(t, db.CreateSubscription(ctx, sub, ""), "Failed to create subscription")
 
 	id := sub.ID
@@ -169,8 +168,8 @@ func TestHandleBroadcast_DatabaseFunction(t *testing.T) {
 	ctx := context.Background()
 
 	subs := []*database.Subscription{
-		{TelegramID: 111111111, Username: "user1", ClientID: "client1", SubscriptionID: "sub-user1", Status: "active", ExpiresAt: ptrTime(time.Now().Add(24 * time.Hour))},
-		{TelegramID: 222222222, Username: "user2", ClientID: "client2", SubscriptionID: "sub-user2", Status: "active", ExpiresAt: ptrTime(time.Now().Add(24 * time.Hour))},
+		{TelegramID: 111111111, Username: "user1", ClientID: "client1", SubscriptionID: "sub-user1", Status: "active", ExpiresAt: testutil.PtrTime(time.Now().Add(24 * time.Hour))},
+		{TelegramID: 222222222, Username: "user2", ClientID: "client2", SubscriptionID: "sub-user2", Status: "active", ExpiresAt: testutil.PtrTime(time.Now().Add(24 * time.Hour))},
 	}
 
 	for _, sub := range subs {
@@ -190,7 +189,7 @@ func TestHandleSend_ByTelegramID(t *testing.T) {
 
 	ctx := context.Background()
 
-	sub := testutil.CreateTestSubscription(123456789, "testuser", "active", ptrTime(time.Now().Add(24*time.Hour)))
+	sub := testutil.CreateTestSubscription(123456789, "testuser", "active", testutil.PtrTime(time.Now().Add(24*time.Hour)))
 	require.NoError(t, db.CreateSubscription(ctx, sub, ""), "Failed to create subscription")
 
 	got, err := db.GetByTelegramID(ctx, 123456789)
@@ -206,7 +205,7 @@ func TestHandleSend_ByUsername(t *testing.T) {
 
 	ctx := context.Background()
 
-	sub := testutil.CreateTestSubscription(123456789, "testuser", "active", ptrTime(time.Now().Add(24*time.Hour)))
+	sub := testutil.CreateTestSubscription(123456789, "testuser", "active", testutil.PtrTime(time.Now().Add(24*time.Hour)))
 	require.NoError(t, db.CreateSubscription(ctx, sub, ""), "Failed to create subscription")
 
 	id, err := db.GetTelegramIDByUsername(ctx, "testuser")
@@ -235,9 +234,8 @@ func TestGetLatestSubscriptions(t *testing.T) {
 	ctx := context.Background()
 
 	for i := 0; i < 15; i++ {
-		sub := testutil.CreateTestSubscription(int64(100000000+i), fmt.Sprintf("user%d", i), "active", ptrTime(time.Now().Add(24*time.Hour)))
+		sub := testutil.CreateTestSubscription(int64(100000000+i), fmt.Sprintf("user%d", i), "active", testutil.PtrTime(time.Now().Add(24*time.Hour)))
 		require.NoError(t, db.CreateSubscription(ctx, sub, ""), "Failed to create subscription")
-		time.Sleep(time.Millisecond * 2)
 	}
 
 	subs, err := db.GetLatestSubscriptions(ctx, 10)
@@ -266,10 +264,10 @@ func TestGetLatestSubscriptions_OnlyActive(t *testing.T) {
 
 	ctx := context.Background()
 
-	sub1 := testutil.CreateTestSubscription(100000001, "active_user", "active", ptrTime(time.Now().Add(24*time.Hour)))
+	sub1 := testutil.CreateTestSubscription(100000001, "active_user", "active", testutil.PtrTime(time.Now().Add(24*time.Hour)))
 	require.NoError(t, db.CreateSubscription(ctx, sub1, ""), "Failed to create active subscription")
 
-	sub2 := testutil.CreateTestSubscription(100000002, "revoked_user", "revoked", ptrTime(time.Now().Add(24*time.Hour)))
+	sub2 := testutil.CreateTestSubscription(100000002, "revoked_user", "revoked", testutil.PtrTime(time.Now().Add(24*time.Hour)))
 	require.NoError(t, db.CreateSubscription(ctx, sub2, ""), "Failed to create revoked subscription")
 
 	subs, err := db.GetLatestSubscriptions(ctx, 10)
@@ -286,9 +284,9 @@ func TestGetAllTelegramIDs(t *testing.T) {
 	ctx := context.Background()
 
 	subs := []*database.Subscription{
-		{TelegramID: 111111111, Username: "user1", ClientID: "client1", SubscriptionID: "sub-user1", Status: "active", ExpiresAt: ptrTime(time.Now().Add(24 * time.Hour))},
-		{TelegramID: 222222222, Username: "user2", ClientID: "client2", SubscriptionID: "sub-user2", Status: "active", ExpiresAt: ptrTime(time.Now().Add(24 * time.Hour))},
-		{TelegramID: 333333333, Username: "user3", ClientID: "client3", SubscriptionID: "sub-user3", Status: "active", ExpiresAt: ptrTime(time.Now().Add(24 * time.Hour))},
+		{TelegramID: 111111111, Username: "user1", ClientID: "client1", SubscriptionID: "sub-user1", Status: "active", ExpiresAt: testutil.PtrTime(time.Now().Add(24 * time.Hour))},
+		{TelegramID: 222222222, Username: "user2", ClientID: "client2", SubscriptionID: "sub-user2", Status: "active", ExpiresAt: testutil.PtrTime(time.Now().Add(24 * time.Hour))},
+		{TelegramID: 333333333, Username: "user3", ClientID: "client3", SubscriptionID: "sub-user3", Status: "active", ExpiresAt: testutil.PtrTime(time.Now().Add(24 * time.Hour))},
 	}
 
 	for _, sub := range subs {

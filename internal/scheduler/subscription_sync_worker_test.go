@@ -2,9 +2,9 @@ package scheduler
 
 import (
 	"context"
+	"os"
 	"testing"
 	"time"
-
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/logger"
 	"github.com/kereal/rs8kvn_bot/internal/service"
@@ -12,6 +12,11 @@ import (
 
 	"github.com/stretchr/testify/require"
 )
+
+func TestMain(m *testing.M) {
+	code := m.Run()
+	os.Exit(code)
+}
 
 func init() {
 	_, _ = logger.Init("", "error")
@@ -38,7 +43,7 @@ func TestSubscriptionSyncWorker_Run_CallsSyncPendingNodes(t *testing.T) {
 		SubscriptionID: "s-syncworker",
 		Status:         "active",
 		PlanID:         plan.ID,
-		ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
+		ExpiresAt:      testutil.PtrTime(time.Now().Add(24 * time.Hour)),
 	}
 	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node.ID, Status: database.SyncStatusPendingAdd}))
