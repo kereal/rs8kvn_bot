@@ -54,6 +54,13 @@
 - TgID через контекст (`WithTgID`/`TgIDFromContext`) при создании/обновлении клиентов в панель
 - Актуализация roadmap и архитектурной памяти
 
+## Applied fixes on dev (2026-07-19)
+
+- **Fix A**: `ActivateProduct` для платных продуктов не активирует подписку сразу. При `PriceCents > 0` создаётся ордер в статусе `pending`, подписка не модифицируется, план не синхронизируется. Единый тест подтверждает неизменность подписки.
+- **Fix C**: Broadcast перешёл на безопасный сплит MarkdownV2 без разрыва сущностей. Добавлен `splitMessage`: предпочитает границы строк, fallback — UTF-8 hard-split. В `runBroadcast` восстановлен per-user подсчёт через `userBlocked/userFailed`.
+- **Fix E**: Удалены `//go:build integration` теги из `tests/e2e/*.go`.
+- **Fix G**: `broadcastSession` получил TTL 15 минут. `startBroadcastSession` проставляет `createdAt`. `getBroadcastSession` автоматически удаляет устаревшие сессии. Добавлен `TestBroadcastSession_TTLExpiry`.
+
 ## Общая схема
 
 ```
