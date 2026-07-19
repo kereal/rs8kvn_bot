@@ -246,10 +246,9 @@ func TestServer_Stop_AlwaysShutdownsHTTPServer(t *testing.T) {
 	if conn != nil {
 		conn.Close()
 	}
-	// The key assertion: after Stop the listener is released, so a dial must
-	// return promptly (success or refused) rather than hang. We only require
-	// that DialTimeout itself did not time out.
-	require.NotEqual(t, "i/o timeout", fmt.Sprintf("%v", dialErr), "dial should not hang after listener release")
+	if dialErr != nil {
+		require.False(t, os.IsTimeout(dialErr), "dial should not hang after listener release")
+	}
 }
 
 func TestIsLocalAddress(t *testing.T) {
