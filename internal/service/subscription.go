@@ -13,7 +13,6 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/metrics"
 	"github.com/kereal/rs8kvn_bot/internal/utils"
 	"github.com/kereal/rs8kvn_bot/internal/vpn"
-	"github.com/kereal/rs8kvn_bot/internal/xui"
 
 	"go.uber.org/zap"
 	"gorm.io/gorm"
@@ -383,30 +382,32 @@ func (s *SubscriptionService) CreateTrial(ctx context.Context, inviteCode string
 	}
 
 	node := trialNodes[0]
-	client, ok := s.xuiClients[node.ID]
+	client, ok := s.vpnClients[node.ID]
 	if !ok {
-		return nil, fmt.Errorf("xui client not found for node %d", node.ID)
+		return nil, fmt.Errorf("vpn client not found for trial node %d", node.ID)
 	}
-	inboundIDs := node.ResolveInboundIDs()
-	if _, err = client.AddClientWithID(ctx, xui.ClientRequest{
-		InboundIDs:   inboundIDs,
-		Email:        email,
+	// Trial provisioned on a 3x-ui-style node (email == client id). For
+	// proxman/fetch nodes the CreateSubscription is a no-op, so the trial
+	// still works there without a 3x-ui panel.
+	provision := vpn.SubscriptionProvision{
 		ClientID:     clientID,
+		Username:     email,
 		SubID:        subID,
 		TrafficBytes: trafficBytes,
 		ExpiryTime:   expiryTime,
 		ResetDays:    resetDays,
-	}); err != nil {
+	}
+	if err = client.CreateSubscription(ctx, provision); err != nil {
 		return nil, fmt.Errorf("add trial client on node %d: %w", node.ID, err)
 	}
 
 	sub, err := s.db.CreateTrialSubscription(ctx, inviteCode, subID, clientID, expiryTime)
 	if err != nil {
-		s.deleteClientFromAllNodes(ctx, vpn.SubscriptionProvision{
-			ClientID: clientID,
-			Username: email,
-			SubID:    subID,
-		})
+		if delErr := client.DeleteSubscription(ctx, provision); delErr != nil {
+			logger.Warn("failed to rollback trial client on node",
+				zap.Uint("node_id", node.ID),
+				zap.Error(delErr))
+		}
 		return nil, fmt.Errorf("create trial subscription: %w", err)
 	}
 
@@ -474,19 +475,23 @@ func (s *SubscriptionService) BindTrial(ctx context.Context, subscriptionID stri
 	if err != nil {
 		return sub, fmt.Errorf("load trial nodes: %w", err)
 	}
+	if len(nodes) == 0 {
+		return sub, fmt.Errorf("no trial nodes configured")
+	}
 	// Trial is intentionally single-node (provisioned on nodes[0] by CreateTrial).
 	// Only update the node where the client actually exists.
 	node := nodes[0]
-	client, ok := s.xuiClients[node.ID]
+	client, ok := s.vpnClients[node.ID]
 	if !ok {
-		return sub, fmt.Errorf("xui client not found for trial node %d", node.ID)
+		return sub, fmt.Errorf("vpn client not found for trial node %d", node.ID)
 	}
-	inboundIDs := node.ResolveInboundIDs()
-	if err := client.UpdateClient(ctx, xui.ClientRequest{
-		InboundIDs:   inboundIDs,
-		CurrentEmail: currentEmail,
+	// Rename the anonymous trial client (email "trial_<subID>") to the bound
+	// user's identity, lift traffic limits to the free plan, and bind the
+	// Telegram id. proxman/fetch nodes treat this as a no-op.
+	if err := client.UpdateSubscription(ctx, vpn.SubscriptionProvision{
 		ClientID:     sub.ClientID,
-		Email:        email,
+		CurrentEmail: currentEmail,
+		Username:     email,
 		SubID:        sub.SubscriptionID,
 		TrafficBytes: trafficBytes,
 		ExpiryTime:   expiryTime,

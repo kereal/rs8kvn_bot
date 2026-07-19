@@ -8,6 +8,7 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/interfaces"
 	"github.com/kereal/rs8kvn_bot/internal/service"
 	"github.com/kereal/rs8kvn_bot/internal/testutil"
+	"github.com/kereal/rs8kvn_bot/internal/vpn"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
@@ -92,7 +93,7 @@ func newTestHandlerWithSubService(t *testing.T, cfg *config.Config, mockDB *test
 	subService := service.NewSubscriptionService(
 		mockDB,
 		map[uint]interfaces.XUIClient{1: mockXUI},
-		nil,
+		map[uint]vpn.Client{1: vpn.NewThreeXUIClient(mockXUI, []int{1})},
 		dbSources,
 		cfg)
 	return NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), subService, "")

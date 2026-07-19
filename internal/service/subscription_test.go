@@ -711,8 +711,9 @@ func TestSubscriptionService_CreateTrial_Success(t *testing.T) {
 		{ID: 1, IsActive: true, Host: "http://localhost:2053", InboundIDs: "[1]"},
 	}
 	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
+	vpnClients := map[uint]vpn.Client{1: vpn.NewThreeXUIClient(xuiClient, []int{1})}
 
-	svc := NewSubscriptionService(db, xuiClients, nil, sources, cfg)
+	svc := NewSubscriptionService(db, xuiClients, vpnClients, sources, cfg)
 	result, err := svc.CreateTrial(context.Background(), "testcode")
 
 	assert.NoError(t, err)
@@ -750,8 +751,9 @@ func TestSubscriptionService_CreateTrial_XUIError(t *testing.T) {
 		{ID: 1, IsActive: true, Host: "http://localhost:2053", InboundIDs: "[1]"},
 	}
 	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
+	vpnClients := map[uint]vpn.Client{1: vpn.NewThreeXUIClient(xuiClient, []int{1})}
 
-	svc := NewSubscriptionService(db, xuiClients, nil, sources, cfg)
+	svc := NewSubscriptionService(db, xuiClients, vpnClients, sources, cfg)
 	result, err := svc.CreateTrial(context.Background(), "testcode")
 
 	assert.Error(t, err)
@@ -823,8 +825,9 @@ func TestSubscriptionService_CreateTrial_NoTrialNodes(t *testing.T) {
 		{ID: 1, IsActive: true, Host: "http://localhost:2053", InboundIDs: "[1]"},
 	}
 	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
+	vpnClients := map[uint]vpn.Client{1: vpn.NewThreeXUIClient(xuiClient, []int{1})}
 
-	svc := NewSubscriptionService(db, xuiClients, nil, sources, cfg)
+	svc := NewSubscriptionService(db, xuiClients, vpnClients, sources, cfg)
 	result, err := svc.CreateTrial(context.Background(), "testcode")
 
 	assert.Error(t, err)
@@ -943,11 +946,21 @@ func TestSubscriptionService_BindTrial_SingleNode_ErrorPropagated(t *testing.T) 
 
 	xui1Calls := 0
 	xui2Calls := 0
-	var gotReq xui.ClientRequest
+	var gotReq vpn.SubscriptionProvision
 	xui1 := &testutil.XUIClient{
 		UpdateClientFunc: func(ctx context.Context, req xui.ClientRequest) error {
 			xui1Calls++
-			gotReq = req
+			gotReq = vpn.SubscriptionProvision{
+				ClientID:     req.ClientID,
+				CurrentEmail: req.CurrentEmail,
+				Username:     req.Email,
+				SubID:        req.SubID,
+				TrafficBytes: req.TrafficBytes,
+				ExpiryTime:   req.ExpiryTime,
+				ResetDays:    req.ResetDays,
+				TgID:         req.TgID,
+				Comment:      req.Comment,
+			}
 			return errors.New("source 1 unreachable")
 		},
 	}
@@ -959,12 +972,16 @@ func TestSubscriptionService_BindTrial_SingleNode_ErrorPropagated(t *testing.T) 
 	}
 
 	xuiClients := map[uint]interfaces.XUIClient{1: xui1, 2: xui2}
+	vpnClients := map[uint]vpn.Client{
+		1: vpn.NewThreeXUIClient(xui1, []int{1}),
+		2: vpn.NewThreeXUIClient(xui2, []int{1}),
+	}
 	sources := []database.Node{
 		{ID: 1, IsActive: true, Host: "http://x1", InboundIDs: "[1]"},
 		{ID: 2, IsActive: true, Host: "http://x2", InboundIDs: "[1]"},
 	}
 
-	svc := NewSubscriptionService(db, xuiClients, nil, sources, cfg)
+	svc := NewSubscriptionService(db, xuiClients, vpnClients, sources, cfg)
 
 	got, err := svc.BindTrial(context.Background(), "trial-sub-1", 123456, "testuser")
 	require.Error(t, err, "BindTrial must propagate UpdateClient failure on nodes[0]")
@@ -974,7 +991,7 @@ func TestSubscriptionService_BindTrial_SingleNode_ErrorPropagated(t *testing.T) 
 	assert.Equal(t, 1, xui1Calls, "only nodes[0] must be contacted")
 	assert.Equal(t, 0, xui2Calls, "nodes[1] must not be contacted (single-node trial contract)")
 	assert.Equal(t, "trial_trial-sub-1", gotReq.CurrentEmail, "CurrentEmail must be trial_ + subscriptionID")
-	assert.Equal(t, "testuser", gotReq.Email, "Email must be the resolved XUIEmail (username)")
+	assert.Equal(t, "testuser", gotReq.Username, "Username must be the resolved XUIEmail (username)")
 }
 
 // TestSubscriptionService_BindTrial_SingleNode_Success verifies the happy path
@@ -1014,11 +1031,21 @@ func TestSubscriptionService_BindTrial_SingleNode_Success(t *testing.T) {
 
 	xui1Calls := 0
 	xui2Calls := 0
-	var gotReq xui.ClientRequest
+	var gotReq vpn.SubscriptionProvision
 	xui1 := &testutil.XUIClient{
 		UpdateClientFunc: func(ctx context.Context, req xui.ClientRequest) error {
 			xui1Calls++
-			gotReq = req
+			gotReq = vpn.SubscriptionProvision{
+				ClientID:     req.ClientID,
+				CurrentEmail: req.CurrentEmail,
+				Username:     req.Email,
+				SubID:        req.SubID,
+				TrafficBytes: req.TrafficBytes,
+				ExpiryTime:   req.ExpiryTime,
+				ResetDays:    req.ResetDays,
+				TgID:         req.TgID,
+				Comment:      req.Comment,
+			}
 			return nil
 		},
 	}
@@ -1030,12 +1057,16 @@ func TestSubscriptionService_BindTrial_SingleNode_Success(t *testing.T) {
 	}
 
 	xuiClients := map[uint]interfaces.XUIClient{1: xui1, 2: xui2}
+	vpnClients := map[uint]vpn.Client{
+		1: vpn.NewThreeXUIClient(xui1, []int{1}),
+		2: vpn.NewThreeXUIClient(xui2, []int{1}),
+	}
 	sources := []database.Node{
 		{ID: 1, IsActive: true, Host: "http://x1", InboundIDs: "[1]"},
 		{ID: 2, IsActive: true, Host: "http://x2", InboundIDs: "[1]"},
 	}
 
-	svc := NewSubscriptionService(db, xuiClients, nil, sources, cfg)
+	svc := NewSubscriptionService(db, xuiClients, vpnClients, sources, cfg)
 
 	got, err := svc.BindTrial(context.Background(), "trial-sub-1", 123456, "testuser")
 	require.NoError(t, err)
@@ -1044,7 +1075,7 @@ func TestSubscriptionService_BindTrial_SingleNode_Success(t *testing.T) {
 	assert.Equal(t, 1, xui1Calls, "exactly one UpdateClient on nodes[0]")
 	assert.Equal(t, 0, xui2Calls, "nodes[1] must not be contacted")
 	assert.Equal(t, "trial_trial-sub-1", gotReq.CurrentEmail, "CurrentEmail must be trial_ + subscriptionID")
-	assert.Equal(t, "testuser", gotReq.Email, "Email must be the resolved XUIEmail (username)")
+	assert.Equal(t, "testuser", gotReq.Username, "Username must be the resolved XUIEmail (username)")
 }
 
 // ==================== DeleteByID Tests ====================
