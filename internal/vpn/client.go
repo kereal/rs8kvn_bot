@@ -24,10 +24,13 @@ type Config struct {
 type SubscriptionProvision struct {
 	ClientID     string
 	Username     string
+	CurrentEmail string // existing email to update (rename); empty for create
 	SubID        string
 	TrafficBytes int64
 	ExpiryTime   time.Time
 	ResetDays    int
+	TgID         int64  // Telegram user id for panel binding (0 = none)
+	Comment      string // free-form comment stored in the panel
 }
 
 // Client is the abstraction for provisioning VPN subscriptions on different node types.

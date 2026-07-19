@@ -31,6 +31,8 @@ func (c *ThreeXUIClient) CreateSubscription(ctx context.Context, provision Subsc
 		TrafficBytes: provision.TrafficBytes,
 		ExpiryTime:   provision.ExpiryTime,
 		ResetDays:    provision.ResetDays,
+		TgID:         provision.TgID,
+		Comment:      provision.Comment,
 	})
 	if err != nil {
 		return fmt.Errorf("3x-ui create subscription: %w", classifyCreateSubscriptionError(err))
@@ -42,13 +44,15 @@ func (c *ThreeXUIClient) CreateSubscription(ctx context.Context, provision Subsc
 func (c *ThreeXUIClient) UpdateSubscription(ctx context.Context, provision SubscriptionProvision) error {
 	err := c.client.UpdateClient(ctx, xui.ClientRequest{
 		InboundIDs:   c.inboundIDs,
-		CurrentEmail: provision.Username,
+		CurrentEmail: provision.CurrentEmail,
 		ClientID:     provision.ClientID,
 		Email:        provision.Username,
 		SubID:        provision.SubID,
 		TrafficBytes: provision.TrafficBytes,
 		ExpiryTime:   provision.ExpiryTime,
 		ResetDays:    provision.ResetDays,
+		TgID:         provision.TgID,
+		Comment:      provision.Comment,
 	})
 	if err != nil {
 		return fmt.Errorf("3x-ui update subscription: %w", classifyCreateSubscriptionError(err))
