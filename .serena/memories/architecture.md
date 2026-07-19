@@ -1,8 +1,8 @@
 # Architecture — rs8kvn_bot
 
-**Версия:** v2.3.0  
-**Обновлено:** 2026-07-07  
-**Ветка:** `plans_and_pricing` (merge candidate)
+**Версия:** v2.3.x (dev)
+**Обновлено:** 2026-07-19
+**Ветка:** `dev` (HEAD 18855bb; продакшн — `main`)
 
 ## Subserver share-link conversion overhaul \(dev, коммит 70d30ca\)
 - Поддержка ALPN list→comma string \(v2rayN spec\)
@@ -68,7 +68,7 @@ Telegram Bot (Go, single binary)
   ├── cmd/bot/main.go         — entry point, graceful shutdown
   ├── internal/bot/           — handlers, referral cache, singleflight
   ├── internal/service/       — SubscriptionService (orchestration) + SyncService (state machine)
-  ├── internal/database/      — SQLite + GORM + migrations 000-027
+  ├── internal/database/      — SQLite + GORM + migrations 000-029
   ├── internal/xui/           — multi-source 3x-ui client + circuit breaker
   ├── internal/vpn/           — VPN client abstraction (3x-ui, proxman)
   ├── internal/subserver/      — LRU cache, merge, /sub/{id} endpoint, proxy, servers, optional async access log
@@ -85,7 +85,7 @@ Telegram Bot (Go, single binary)
   ├── cmd/bot/main.go         — entry point, graceful shutdown
   ├── internal/bot/           — handlers, referral cache
   ├── internal/service/       — SubscriptionService (orchestration) + SyncService (state machine)
-  ├── internal/database/      — SQLite + GORM + migrations 000-027
+  ├── internal/database/      — SQLite + GORM + migrations 000-029
   ├── internal/xui/           — multi-source 3x-ui client + circuit breaker
   ├── internal/vpn/           — VPN client abstraction (3x-ui, proxman)
   ├── internal/subserver/      — LRU cache, merge, /sub/{id} endpoint, proxy, servers, optional async access log
@@ -106,7 +106,7 @@ Telegram Bot (Go, single binary)
 ```
 
 
-Версия схемы: after migration 027  
+Версия схемы: after migration 029  
 **Ревизия:** 2026-06-28
 
 ### Tab Subscription Nodes — состояние синхронизации
@@ -160,8 +160,7 @@ price_paid_cents     int64    default: 0
 currency             string   size:3
 devices              json     devices list with hwid rotation
 ips                  json     ip:timestamp history (max 100)
-created_at           time
-updated_at           time
+last_request         time     INDEX   (last client request via subserver; migration 028)
 ```
 **Удалено:** `is_trial`, `traffic_limit`, `inbound_id`, `subscription_url`, `deleted_at`.  
 **Soft delete заменён** на `status='revoked'`.  
@@ -184,8 +183,8 @@ id, name UNIQUE, devices_limit, traffic_limit
 
 ### `invites`, `trial_requests`, `metrics_counters` — без изменений.
 
-Миграции лежат в `internal/database/migrations/000-027_*.up.sql` (embedded через go:embed).  
-Версия схемы: **after migration 027**.
+Миграции лежат в `internal/database/migrations/000-029_*.up.sql` (embedded через go:embed).  
+Версия схемы: **after migration 029**.
 
 ## Ключевые компоненты
 
@@ -232,11 +231,13 @@ id, name UNIQUE, devices_limit, traffic_limit
 - **Sentinel errors**: `database.ErrSubscriptionNotFound`, `database.ErrInviteNotFound`, `database.ErrPlanNotFound`
 - **`CreateNode(ctx, node)`** — вставляет новую ноду в БД. Управление нодами только через DB (env seed удалён).
 
-### НОВЫЕ миграции (plans_and_pricing)
+### Миграции (актуально на dev, 2026-07-19)
 - `024_add_plan_is_active` — добавление is_active в plans
 - `025_add_retry_check_constraint` — CHECK constraint для retry_count
 - `026_remove_subscription_nodes_cascade` — исправление внешних ключей
 - `027_add_pending_update_sync_status` — добавление pending_update статуса
+- `028_add_last_request_to_subscriptions` — колонка `last_request` (DATETIME) + индекс `idx_subscriptions_last_request`; отслеживание последнего запроса подписки клиентом через субсервер
+- `029_rename_subscriptions_expiry_index` — переименование legacy-индекса `idx_subscriptions_expiry`/`idx_expiry` → `idx_subscriptions_expires_at` (колонка переименована в 015)
 
 ### X-UI Client (`internal/xui/client.go`)
 - **Multi-source**: `xuiClients map[uint]interfaces.XUIClient` (key = node ID).

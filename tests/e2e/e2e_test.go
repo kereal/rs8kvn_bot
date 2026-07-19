@@ -16,6 +16,7 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/logger"
 	"github.com/kereal/rs8kvn_bot/internal/service"
 	"github.com/kereal/rs8kvn_bot/internal/testutil"
+	"github.com/kereal/rs8kvn_bot/internal/vpn"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/stretchr/testify/require"
@@ -111,7 +112,7 @@ func setupE2EEnv(t *testing.T) *e2eTestEnv {
 	require.NoError(t, db.LinkNodeToPlan(ctx, "free", node.ID), "link node to free plan")
 	xuiClients := map[uint]interfaces.XUIClient{1: mockXUI}
 	nodes := e2eNodes("https://panel.example.com")
-	subService := service.NewSubscriptionService(db, xuiClients, nil, nodes, cfg)
+	subService := service.NewSubscriptionService(db, xuiClients, e2eVPNClients(xuiClients), nodes, cfg)
 	handler := bot.NewHandler(mockBotAPI, cfg, db, botCfg, subService, "")
 
 	return &e2eTestEnv{
@@ -150,4 +151,15 @@ func newCommandMessage(chatID int64, userID int64, username, text string, cmdLen
 			{Type: "bot_command", Offset: 0, Length: cmdLen},
 		},
 	}
+}
+
+// e2eVPNClients builds a vpn.Client map mirroring the given XUI clients map so
+// that SubscriptionService can provision/deprovision trials and subscriptions in
+// tests the same way production wiring does (cmd/bot/main.go buildRuntimeNodeClients).
+func e2eVPNClients(xuiClients map[uint]interfaces.XUIClient) map[uint]vpn.Client {
+	m := make(map[uint]vpn.Client, len(xuiClients))
+	for id, xc := range xuiClients {
+		m[id] = vpn.NewThreeXUIClient(xc, []int{1})
+	}
+	return m
 }
