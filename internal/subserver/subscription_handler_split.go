@@ -169,6 +169,9 @@ func fetchAndAggregateSources(ctx context.Context, subID string, nodes []databas
 			)
 			continue
 		}
+		if ctx.Err() != nil {
+			break
+		}
 		wg.Add(1)
 		sem <- struct{}{}
 		go func(idx int, src database.Node) {

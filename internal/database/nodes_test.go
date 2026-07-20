@@ -20,8 +20,7 @@ func TestListNodes_Empty(t *testing.T) {
 	assert.Len(t, sources, 0)
 }
 
-// createTestNode inserts a node and links it to all existing plans, mirroring the
-// old SeedDefaultNode behaviour for test setup.
+// createTestNode inserts a node and links it to all existing plans.
 func createTestNode(t *testing.T, svc *Service, name, host, apiToken string) Node {
 	node := Node{Name: name, IsActive: true, Host: host, APIToken: apiToken, Type: NodeType3xUI, InboundIDs: "[1]"}
 	require.NoError(t, svc.CreateNode(context.Background(), &node))

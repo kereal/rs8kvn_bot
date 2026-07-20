@@ -12,6 +12,7 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/interfaces"
 	"github.com/kereal/rs8kvn_bot/internal/logger"
+	"github.com/kereal/rs8kvn_bot/internal/metrics"
 	"github.com/kereal/rs8kvn_bot/internal/service"
 	"github.com/kereal/rs8kvn_bot/internal/subserver"
 	"github.com/kereal/rs8kvn_bot/internal/vpn"
@@ -73,9 +74,14 @@ func initDatabase(cfg *config.Config) (*database.Service, *runtimeDeps) {
 		logger.Fatal("Failed to initialize database", zap.Error(err))
 	}
 
+	metrics.RegisterDBMetrics(dbService.GetDB())
+
 	nodes, err := dbService.ListNodes(context.Background())
 	if err != nil {
 		logger.Fatal("Failed to list nodes", zap.Error(err))
+	}
+	if len(nodes) == 0 {
+		logger.Fatal("No nodes configured — insert at least one node via migration or setup command before starting")
 	}
 	runtimeNodes, xuiClients, vpnClients, err := buildRuntimeNodeClients(nodes, defaultOptions())
 	if err != nil {
@@ -159,7 +165,9 @@ eventLoop:
 	logger.Info("Graceful shutdown initiated")
 	botAPI.StopReceivingUpdates()
 
-	// Drain the updates channel to prevent goroutine leak
+	// Drain the updates channel to prevent goroutine leak. StopReceivingUpdates
+	// closes the channel (via the polling goroutine on shutdownChannel), so a
+	// plain range exits once the buffered updates are exhausted.
 	go func() {
 		for range updates {
 		}
@@ -175,14 +183,17 @@ eventLoop:
 
 	select {
 	case <-done:
-		logger.Info("All update handlers completed")
+		logger.Info("All update handlers completed successfully")
 	case <-time.After(config.ShutdownTimeout):
-		logger.Warn("Timeout waiting for update handlers")
+		logger.Warn("Timeout waiting for update handlers to complete")
 	}
 }
-
 // gracefulShutdown stops background workers and handler goroutines with timeouts.
-func gracefulShutdown(bgWg *sync.WaitGroup, handler *bot.Handler) {
+// subServer.Stop() (cache drop) runs first so revoked/updated subs stop being
+// served before we wait on workers; web server drain remains via its own defer.
+func gracefulShutdown(bgWg *sync.WaitGroup, handler *bot.Handler, subServer *subserver.Service) {
+	subServer.Stop()
+
 	logger.Info("Waiting for background tasks to stop...")
 	bgDone := make(chan struct{})
 	go func() {

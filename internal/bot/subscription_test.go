@@ -382,7 +382,7 @@ func TestHandleCreateSubscription_ExistingActiveSubscription(t *testing.T) {
 		TelegramID: 123456,
 		Username:   "testuser",
 
-		ExpiresAt: ptrTime(time.Now().Add(30 * 24 * time.Hour)), // Not expired
+		ExpiresAt: testutil.PtrTime(time.Now().Add(30 * 24 * time.Hour)), // Not expired
 		Status:    "active",
 	}
 
@@ -413,7 +413,7 @@ func TestHandleCreateSubscription_ExpiredSubscription(t *testing.T) {
 		TelegramID: 123456,
 		Username:   "testuser",
 
-		ExpiresAt: ptrTime(time.Now().Add(-24 * time.Hour)), // Expired
+		ExpiresAt: testutil.PtrTime(time.Now().Add(-24 * time.Hour)), // Expired
 		Status:    "expired",
 	}
 
@@ -576,7 +576,7 @@ func TestHandleMySubscription_ActiveSubscription(t *testing.T) {
 		Username:   "testuser",
 		PlanID:     1,
 
-		ExpiresAt: ptrTime(time.Now().Add(30 * 24 * time.Hour)),
+		ExpiresAt: testutil.PtrTime(time.Now().Add(30 * 24 * time.Hour)),
 		Status:    "active",
 		CreatedAt: time.Now().Add(-7 * 24 * time.Hour), // Created 7 days ago
 	}
@@ -634,7 +634,7 @@ func TestHandleMySubscription_TrafficFetchError(t *testing.T) {
 		TelegramID: 123456,
 		Username:   "testuser",
 
-		ExpiresAt: ptrTime(time.Now().Add(30 * 24 * time.Hour)),
+		ExpiresAt: testutil.PtrTime(time.Now().Add(30 * 24 * time.Hour)),
 		Status:    "active",
 		CreatedAt: time.Now().Add(-7 * 24 * time.Hour), // Created 7 days ago
 	}
@@ -680,7 +680,7 @@ func TestHandleMySubscription_UsesCache(t *testing.T) {
 		TelegramID: 123456,
 		Username:   "testuser",
 
-		ExpiresAt: ptrTime(time.Now().Add(30 * 24 * time.Hour)),
+		ExpiresAt: testutil.PtrTime(time.Now().Add(30 * 24 * time.Hour)),
 		Status:    "active",
 	}
 

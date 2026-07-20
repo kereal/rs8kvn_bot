@@ -20,7 +20,6 @@ func init() {
 	_, _ = logger.Init("", "error")
 }
 
-func ptrTime(t time.Time) *time.Time { return &t }
 
 type mockVPNClientForExpire struct {
 	deleteCalled    bool
@@ -65,11 +64,11 @@ func TestSubscriptionExpireWorker_process_FindsAndExpires(t *testing.T) {
 		SubscriptionID: "s-expire1",
 		Status:         "active",
 		PlanID:         plan.ID,
-		ExpiresAt:      ptrTime(time.Now().Add(-1 * time.Hour)),
+		ExpiresAt:      testutil.PtrTime(time.Now().Add(-1 * time.Hour)),
 		PricePaidCents: 100,
 		Currency:       testutil.PtrString("RUB"),
 		ProductID:      testutil.PtrUint(1),
-		StartedAt:      ptrTime(time.Now().Add(-48 * time.Hour)),
+		StartedAt:      testutil.PtrTime(time.Now().Add(-48 * time.Hour)),
 	}
 	require.NoError(t, db.CreateSubscription(ctx, expiredSub, ""))
 
@@ -101,11 +100,11 @@ func TestSubscriptionExpireWorker_process_EmptyResult(t *testing.T) {
 		SubscriptionID: "s-noexpire",
 		Status:         "active",
 		PlanID:         plan.ID,
-		ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
+		ExpiresAt:      testutil.PtrTime(time.Now().Add(24 * time.Hour)),
 		PricePaidCents: 100,
 		Currency:       testutil.PtrString("RUB"),
 		ProductID:      testutil.PtrUint(1),
-		StartedAt:      ptrTime(time.Now().Add(-1 * time.Hour)),
+		StartedAt:      testutil.PtrTime(time.Now().Add(-1 * time.Hour)),
 	}
 	require.NoError(t, db.CreateSubscription(ctx, activeSub, ""))
 
@@ -170,11 +169,11 @@ func TestSubscriptionExpireWorker_process_PaidPlanExpires_DowngradesToFree(t *te
 		SubscriptionID: "s-expire-paid",
 		Status:         "active",
 		PlanID:         paidPlan.ID,
-		ExpiresAt:      ptrTime(time.Now().Add(-1 * time.Hour).UTC().Truncate(time.Minute)),
+		ExpiresAt:      testutil.PtrTime(time.Now().Add(-1 * time.Hour).UTC().Truncate(time.Minute)),
 		PricePaidCents: 100,
 		Currency:       testutil.PtrString("RUB"),
 		ProductID:      testutil.PtrUint(1),
-		StartedAt:      ptrTime(time.Now().Add(-48 * time.Hour).UTC().Truncate(time.Minute)),
+		StartedAt:      testutil.PtrTime(time.Now().Add(-48 * time.Hour).UTC().Truncate(time.Minute)),
 	}
 	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node.ID, Status: database.SyncStatusActive}))

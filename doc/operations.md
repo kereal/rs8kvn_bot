@@ -1,7 +1,7 @@
 # Operations Guide — rs8kvn_bot
 
-**Version:** 2.3.0  
-**Last updated:** 2026-07-02
+**Version:** 2.3.4
+**Last updated:** 2026-07-19
 
 ---
 
@@ -38,7 +38,7 @@ curl http://localhost:8880/healthz
 curl http://localhost:8880/readyz
 
 # Check database
-sqlite3 ./data/tgvpn.db "SELECT COUNT(*) FROM subscriptions;"
+sqlite3 ./data/rs8kvn.db "SELECT COUNT(*) FROM subscriptions;"
 
 # List backups
 ls -lh ./data/*.backup*
@@ -54,7 +54,7 @@ go run ./cmd/bot
 | File | Purpose |
 |------|---------|
 | `.env` | Environment variables (secrets) |
-| `data/tgvpn.db` | SQLite database |
+| `data/rs8kvn.db` | SQLite database |
 | `data/bot.log` | Application logs (rotated) |
 | `data/subserver.log` | Optional `/sub/{id}` access log |
 | `internal/database/migrations/` | DB migration SQL files |
@@ -121,17 +121,17 @@ pkill -f rs8kvn_bot
 Migrations run automatically on startup. If migration fails:
 - Bot logs error and exits (fatal)
 - Database remains in previous state (safe)
-- Check `data/tgvpn.db` integrity
+- Check `data/rs8kvn.db` integrity
 
 **Manual migration:**
 ```bash
 # Apply migrations using golang-migrate CLI
-migrate -path internal/database/migrations -database "sqlite3://data/tgvpn.db" up
+migrate -path internal/database/migrations -database "sqlite3://data/rs8kvn.db" up
 ```
 
 **Rollback migration:**
 ```bash
-migrate -path internal/database/migrations -database "sqlite3://data/tgvpn.db" down 1
+migrate -path internal/database/migrations -database "sqlite3://data/rs8kvn.db" down 1
 ```
 
 ---
@@ -144,11 +144,11 @@ migrate -path internal/database/migrations -database "sqlite3://data/tgvpn.db" d
 - **Schedule:** Daily at 03:00 (config `DefaultBackupHour`)
 - **Retention:** 14 days
 - **Location:** Same directory as database (`./data/`)
-- **Naming:** `tgvpn.db.backup.YYYYMMDD_HHMMSS`
+- **Naming:** `rs8kvn.db.backup.YYYYMMDD_HHMMSS`
 
 **What gets backed up:**
 - WAL checkpoint executed first → consistent snapshot
-- Full copy of `tgvpn.db`
+- Full copy of `rs8kvn.db`
 - Not compressed (fast restore)
 
 ### 3.2 Manual Backup
@@ -156,11 +156,11 @@ migrate -path internal/database/migrations -database "sqlite3://data/tgvpn.db" d
 ```bash
 # Trigger immediately (if bot running, send signal)
 # Or run backup tool directly:
-go run ./internal/backup/backup.go -db ./data/tgvpn.db -out ./data/manual.backup
+go run ./internal/backup/backup.go -db ./data/rs8kvn.db -out ./data/manual.backup
 
 # Or copy file manually (ensure WAL checkpoint first):
-sqlite3 ./data/tgvpn.db "PRAGMA wal_checkpoint(TRUNCATE);"
-cp ./data/tgvpn.db ./data/backup.manual
+sqlite3 ./data/rs8kvn.db "PRAGMA wal_checkpoint(TRUNCATE);"
+cp ./data/rs8kvn.db ./data/backup.manual
 ```
 
 ### 3.3 Restore from Backup
@@ -170,13 +170,13 @@ cp ./data/tgvpn.db ./data/backup.manual
 docker stop rs8kvn_bot
 
 # 2. Rename current DB (for safety)
-mv ./data/tgvpn.db ./data/tgvpn.db.before-restore-$(date +%s)
+mv ./data/rs8kvn.db ./data/rs8kvn.db.before-restore-$(date +%s)
 
 # 3. Copy backup over
-cp ./data/tgvpn.db.backup.20260417_030000 ./data/tgvpn.db
+cp ./data/rs8kvn.db.backup.20260417_030000 ./data/rs8kvn.db
 
 # 4. Fix permissions (if needed)
-chown 1000:1000 ./data/tgvpn.db  # Docker user
+chown 1000:1000 ./data/rs8kvn.db  # Docker user
 # or chown current-user if running binary
 
 # 5. Start bot
@@ -185,7 +185,7 @@ docker start rs8kvn_bot
 
 **Verify:**
 ```bash
-sqlite3 ./data/tgvpn.db "SELECT COUNT(*) FROM subscriptions;"
+sqlite3 ./data/rs8kvn.db "SELECT COUNT(*) FROM subscriptions;"
 docker logs rs8kvn_bot | grep -i "database initialized"
 ```
 
@@ -197,17 +197,17 @@ Currently backups are local only. For production, configure remote storage:
 1. **S3-compatible** (MinIO, Backblaze B2, AWS S3):
    ```bash
    # Sync to S3 daily (cron)
-   aws s3 cp ./data/tgvpn.db.backup.* s3://your-bucket/backups/ --storage-class STANDARD_IA
+   aws s3 cp ./data/rs8kvn.db.backup.* s3://your-bucket/backups/ --storage-class STANDARD_IA
    ```
 
 2. **rsync to remote server:**
    ```bash
-   rsync -avz ./data/tgvpn.db.backup.* user@remote:/backup/rs8kvn/
+   rsync -avz ./data/rs8kvn.db.backup.* user@remote:/backup/rs8kvn/
    ```
 
 3. **Encrypted backup** (GPG):
    ```bash
-   gpg --symmetric --cipher-algo AES256 -o backup.gpg ./data/tgvpn.db.backup
+   gpg --symmetric --cipher-algo AES256 -o backup.gpg ./data/rs8kvn.db.backup
    ```
 
 ---
@@ -313,7 +313,7 @@ tail -n 100 ./data/bot.log
 If `SENTRY_DSN` configured, errors and panics are reported automatically.
 
 **Features:**
-- Release tracking (`rs8kvn_bot@v2.3.0`)
+- Release tracking (`rs8kvn_bot@v2.3.4`)
 - Performance traces (enabled via `SENTRY_TRACES_SAMPLE_RATE`)
 - Stack traces on panic
 
@@ -385,7 +385,7 @@ scrape_configs:
 cat .env | grep -v '^#'
 
 # Test DB connection
-sqlite3 ./data/tgvpn.db "SELECT 1;"
+sqlite3 ./data/rs8kvn.db "SELECT 1;"
 
 # Test XUI panel
 curl -H "Authorization: Bearer <api_token>" "<panel_host>/panel/api/server/status"
@@ -440,7 +440,7 @@ docker restart rs8kvn_bot
 curl -H "Authorization: Bearer <api_token>" "<panel_host>/panel/api/inbounds/list"
 
 # Check DB state
-sqlite3 ./data/tgvpn.db "SELECT * FROM subscriptions WHERE telegram_id = <user_id> ORDER BY created_at DESC LIMIT 5;"
+sqlite3 ./data/rs8kvn.db "SELECT * FROM subscriptions WHERE telegram_id = <user_id> ORDER BY created_at DESC LIMIT 5;"
 
 # Watch logs while testing
 docker logs -f rs8kvn_bot 2>&1 | grep -E "error|failed|subscription"
@@ -489,7 +489,7 @@ grep "trial" ./data/bot.log | tail -50
 **Fix:**
 ```bash
 # Check subID in DB
-sqlite3 ./data/tgvpn.db "SELECT subscription_id, status, expires_at FROM subscriptions WHERE subscription_id = 'abc123';"
+sqlite3 ./data/rs8kvn.db "SELECT subscription_id, status, expires_at FROM subscriptions WHERE subscription_id = 'abc123';"
 
 # Invalidate cache (restart bot)
 docker restart rs8kvn_bot
@@ -557,8 +557,8 @@ curl http://localhost:8880/debug/pprof/goroutine?debug=1  # if enabled
 
 **Check locking:**
 ```bash
-sqlite3 ./data/tgvpn.db "PRAGMA wal_checkpoint(TRUNCATE);"
-sqlite3 ./data/tgvpn.db "PRAGMA journal_mode=WAL;"
+sqlite3 ./data/rs8kvn.db "PRAGMA wal_checkpoint(TRUNCATE);"
+sqlite3 ./data/rs8kvn.db "PRAGMA journal_mode=WAL;"
 ```
 
 ---
@@ -758,4 +758,4 @@ limit_req_zone $binary_remote_addr zone=sub:10m rate=30r/m;
 
 ---
 
-*Last updated: 2026-07-02*
+*Last updated: 2026-07-19*

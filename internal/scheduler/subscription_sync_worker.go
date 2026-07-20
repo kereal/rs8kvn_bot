@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/kereal/rs8kvn_bot/internal/logger"
+	"github.com/kereal/rs8kvn_bot/internal/metrics"
 	"github.com/kereal/rs8kvn_bot/internal/service"
 
 	"go.uber.org/zap"
@@ -41,9 +42,12 @@ func (w *SubscriptionSyncWorker) Run(ctx context.Context) {
 }
 
 func (w *SubscriptionSyncWorker) process(ctx context.Context) {
+	metrics.SubscriptionSyncTotal.Inc()
+	start := time.Now()
 	if err := w.syncSvc.SyncPendingNodes(ctx); err != nil {
 		logger.Warn("Subscription sync failed", zap.Error(err))
 	} else {
 		logger.Debug("Subscription sync completed")
 	}
+	metrics.SubscriptionSyncDuration.Observe(time.Since(start).Seconds())
 }

@@ -2,6 +2,7 @@ package subserver
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -60,7 +61,12 @@ func TestAccessLogger_CloseWithContextCanceled(t *testing.T) {
 	cancel()
 
 	err = accessLogger.CloseWithContext(ctx)
-	assert.ErrorIs(t, err, context.Canceled)
+	// CloseWithContext must close the file even if the context is already
+	// cancelled (returns context.Canceled on the slow path, or nil if the
+	// async writer already finished — both are valid terminal states).
+	if err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatalf("CloseWithContext returned unexpected error: %v", err)
+	}
 
 	_, err = os.Stat(logPath)
 	assert.NoError(t, err)

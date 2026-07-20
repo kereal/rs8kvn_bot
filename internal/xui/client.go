@@ -9,15 +9,20 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/logger"
+	"github.com/kereal/rs8kvn_bot/internal/metrics"
 	"github.com/kereal/rs8kvn_bot/internal/utils"
 
 	"go.uber.org/zap"
 )
+
+// operationRegex extracts the API operation from the URL path.
+var operationRegex = regexp.MustCompile(`/panel/api/([^/]+)(?:/[^/]+)*`)
 
 // Client — HTTP-клиент для взаимодействия с панелью 3x-ui.
 type Client struct {
@@ -215,17 +220,29 @@ func (c *Client) Ping(ctx context.Context) error {
 
 // doHTTPRequest выполняет HTTP-запрос к панели и возвращает сырой ответ.
 func (c *Client) doHTTPRequest(ctx context.Context, method, url string, bodyFn func() (io.Reader, error)) ([]byte, error) {
+	operation := extractOperation(url)
+	start := time.Now()
+
+	// Single deferred handler records both metrics on every return path.
+	result := "success"
+	defer func() {
+		metrics.XUIRequestsTotal.WithLabelValues(operation, result).Inc()
+		metrics.XUIRequestDuration.WithLabelValues(operation).Observe(time.Since(start).Seconds())
+	}()
+
 	var body io.Reader
 	if bodyFn != nil {
 		var err error
 		body, err = bodyFn()
 		if err != nil {
+			result = "error"
 			return nil, err
 		}
 	}
 
 	req, err := http.NewRequestWithContext(ctx, method, url, body)
 	if err != nil {
+		result = "error"
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
@@ -237,20 +254,32 @@ func (c *Client) doHTTPRequest(ctx context.Context, method, url string, bodyFn f
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
+		result = "error"
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
 	defer closeResponseBody(resp)
 
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, config.MaxResponseSize))
 	if err != nil {
+		result = "error"
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
+		result = "error"
 		return respBody, fmt.Errorf("upstream returned non-200: %w", ErrNon200Response)
 	}
 
 	return respBody, nil
+}
+
+// extractOperation извлекает имя операции из URL панели.
+func extractOperation(urlStr string) string {
+	matches := operationRegex.FindStringSubmatch(urlStr)
+	if len(matches) >= 2 {
+		return matches[1]
+	}
+	return "unknown"
 }
 
 // tgIDContextKey — ключ контекста для передачи Telegram ID в методы панели.

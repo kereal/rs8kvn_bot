@@ -1,3 +1,5 @@
+
+
 package e2e
 
 import (
@@ -24,7 +26,7 @@ func TestE2E_HealthEndpoint(t *testing.T) {
 
 	xuiClients := map[uint]interfaces.XUIClient{1: env.xui}
 	nodes := []database.Node{{Name: "main", Host: "https://panel.example.com", APIToken: "test-api-token", InboundIDs: "[1]", IsActive: true}}
-	subService := service.NewSubscriptionService(env.db, xuiClients, nil, nodes, env.cfg)
+	subService := service.NewSubscriptionService(env.db, xuiClients, e2eVPNClients(xuiClients), nodes, env.cfg)
 	srv := web.NewServer("127.0.0.1:0", env.db, env.cfg, env.botConfig.Username, subService, nil)
 
 	srv.RegisterChecker("database", func(ctx context.Context) web.ComponentHealth {
@@ -61,7 +63,7 @@ func TestE2E_HealthEndpoint_DBError(t *testing.T) {
 
 	xuiClients := map[uint]interfaces.XUIClient{1: env.xui}
 	nodes := []database.Node{{Name: "main", Host: "https://panel.example.com", APIToken: "test-api-token", InboundIDs: "[1]", IsActive: true}}
-	subService := service.NewSubscriptionService(env.db, xuiClients, nil, nodes, env.cfg)
+	subService := service.NewSubscriptionService(env.db, xuiClients, e2eVPNClients(xuiClients), nodes, env.cfg)
 	srv := web.NewServer("127.0.0.1:0", env.db, env.cfg, env.botConfig.Username, subService, nil)
 
 	srv.RegisterChecker("database", func(ctx context.Context) web.ComponentHealth {
@@ -95,7 +97,7 @@ func TestE2E_ReadyEndpoint(t *testing.T) {
 
 	xuiClients := map[uint]interfaces.XUIClient{1: env.xui}
 	nodes := []database.Node{{Name: "main", Host: "https://panel.example.com", APIToken: "test-api-token", InboundIDs: "[1]", IsActive: true}}
-	subService := service.NewSubscriptionService(env.db, xuiClients, nil, nodes, env.cfg)
+	subService := service.NewSubscriptionService(env.db, xuiClients, e2eVPNClients(xuiClients), nodes, env.cfg)
 	srv := web.NewServer("127.0.0.1:0", env.db, env.cfg, env.botConfig.Username, subService, nil)
 
 	srv.RegisterChecker("database", func(ctx context.Context) web.ComponentHealth {

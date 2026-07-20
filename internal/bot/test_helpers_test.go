@@ -2,29 +2,17 @@ package bot
 
 import (
 	"testing"
-	"time"
 
 	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/interfaces"
 	"github.com/kereal/rs8kvn_bot/internal/service"
 	"github.com/kereal/rs8kvn_bot/internal/testutil"
+	"github.com/kereal/rs8kvn_bot/internal/vpn"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
-func NewTestBotConfig() *BotConfig {
-	return &BotConfig{
-		Username:                "testbot",
-		ID:                      123456789,
-		FirstName:               "TestBot",
-		IsBot:                   true,
-		CanJoinGroups:           false,
-		CanReadAllGroupMessages: false,
-		SupportsInlineQueries:   false,
-		loadedAt:                time.Now(),
-	}
-}
 
 // newTestAdminHandler creates a Handler with admin config and a stub SubscriptionService
 // wired to the provided mock objects. Eliminates repeated NewHandler + subscriptionService
@@ -105,7 +93,7 @@ func newTestHandlerWithSubService(t *testing.T, cfg *config.Config, mockDB *test
 	subService := service.NewSubscriptionService(
 		mockDB,
 		map[uint]interfaces.XUIClient{1: mockXUI},
-		nil,
+		map[uint]vpn.Client{1: vpn.NewThreeXUIClient(mockXUI, []int{1})},
 		dbSources,
 		cfg)
 	return NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), subService, "")

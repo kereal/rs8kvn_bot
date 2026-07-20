@@ -9,7 +9,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-	"unicode/utf8"
 
 	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/logger"
@@ -18,6 +17,26 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"go.uber.org/zap"
 )
+
+// broadcastStage represents the state of an admin broadcast session.
+type broadcastStage int
+
+const (
+	broadcastStageIdle broadcastStage = iota
+	broadcastStageAwaitingDraft
+	broadcastStagePreview
+)
+
+const (
+	broadcastSessionTTL = 15 * time.Minute
+)
+
+// broadcastSession holds the in-progress broadcast draft for an admin.
+type broadcastSession struct {
+	createdAt time.Time
+	stage     broadcastStage
+	text      string
+}
 
 func (h *Handler) HandleVersion(ctx context.Context, update tgbotapi.Update) error {
 	if update.Message == nil {
@@ -194,21 +213,6 @@ func isUserBlockedError(err error) bool {
 		strings.Contains(msg, "chat not found")
 }
 
-// broadcastStage represents the state of an admin broadcast session.
-type broadcastStage int
-
-const (
-	broadcastStageIdle       broadcastStage = iota
-	broadcastStageAwaitingDraft
-	broadcastStagePreview
-)
-
-// broadcastSession holds the in-progress broadcast draft for an admin.
-type broadcastSession struct {
-	stage broadcastStage
-	text  string
-}
-
 // HandleBroadcast handles the /broadcast command for admins.
 // It starts the draft flow: the admin then sends a multi-line MarkdownV2
 // message which is previewed, and confirmed via inline buttons before sending.
@@ -258,13 +262,21 @@ func (h *Handler) HandleBroadcastDraft(ctx context.Context, update tgbotapi.Upda
 		h.SendMessage(ctx, chatID, "❌ Рассылка отменена.")
 		return nil
 	}
-	if len(text) > config.MaxTelegramMessageLen {
-		h.SendMessage(ctx, chatID, fmt.Sprintf("❌ Сообщение слишком длинное (%d символов).\n\nМаксимум: %d символов.", len(text), config.MaxTelegramMessageLen))
+	const maxBroadcastLen = config.MaxTelegramMessageLen * 20
+	if len(text) > maxBroadcastLen {
+		h.clearBroadcastSession(chatID)
+		h.SendMessage(ctx, chatID, fmt.Sprintf("❌ Сообщение слишком длинное (%d символов). Максимум — %d символов; рассылка автоматически разбивается на части по %d символов.", len(text), maxBroadcastLen, config.MaxTelegramMessageLen))
 		return nil
 	}
 
-	// D3: preview with MarkdownV2. Special chars are auto-escaped, formatting kept.
-	preview := tgbotapi.NewMessage(chatID, utils.EscapeMarkdownV2(text))
+	// D3: preview with MarkdownV2. The draft may exceed one Telegram message,
+	// so show the first chunk and note how many parts the broadcast will use.
+	chunks := splitMessage(text, config.MaxTelegramMessageLen)
+	previewText := chunks[0]
+	if len(chunks) > 1 {
+		previewText += fmt.Sprintf("\n\n… (и ещё %d частей по %d символов)", len(chunks)-1, config.MaxTelegramMessageLen)
+	}
+	preview := tgbotapi.NewMessage(chatID, utils.EscapeMarkdownV2(previewText))
 	preview.ParseMode = "MarkdownV2"
 	preview.DisableWebPagePreview = true
 	if _, err := h.bot.Send(preview); err != nil {
@@ -275,7 +287,7 @@ func (h *Handler) HandleBroadcastDraft(ctx context.Context, update tgbotapi.Upda
 	}
 
 	h.broadcastMu.Lock()
-	h.broadcastSessions[chatID] = &broadcastSession{stage: broadcastStagePreview, text: text}
+	h.broadcastSessions[chatID] = &broadcastSession{createdAt: time.Now(), stage: broadcastStagePreview, text: text}
 	h.broadcastMu.Unlock()
 
 	kb := tgbotapi.NewInlineKeyboardMarkup(
@@ -470,14 +482,19 @@ func (h *Handler) runBroadcast(ctx context.Context, adminChatID int64, text stri
 func (h *Handler) startBroadcastSession(chatID int64) {
 	h.broadcastMu.Lock()
 	defer h.broadcastMu.Unlock()
-	h.broadcastSessions[chatID] = &broadcastSession{stage: broadcastStageAwaitingDraft}
+	h.broadcastSessions[chatID] = &broadcastSession{createdAt: time.Now(), stage: broadcastStageAwaitingDraft}
 }
 
 // getBroadcastSession returns the active broadcast session for an admin, or nil.
 func (h *Handler) getBroadcastSession(chatID int64) *broadcastSession {
 	h.broadcastMu.Lock()
 	defer h.broadcastMu.Unlock()
-	return h.broadcastSessions[chatID]
+	s, ok := h.broadcastSessions[chatID]
+	if !ok || time.Since(s.createdAt) > broadcastSessionTTL {
+		delete(h.broadcastSessions, chatID)
+		return nil
+	}
+	return s
 }
 
 // clearBroadcastSession removes the broadcast session for an admin.
@@ -487,49 +504,159 @@ func (h *Handler) clearBroadcastSession(chatID int64) {
 	delete(h.broadcastSessions, chatID)
 }
 
-// splitMessage splits text into chunks of at most maxLen characters, preferring
-// to break at line boundaries so MarkdownV2 entities stay intact within a chunk.
-// A single line longer than maxLen is hard-split.
+// splitMessage splits text into chunks of at most maxLen bytes. It prefers to
+// break at spaces and newlines, but never breaks an open MarkdownV2 entity: a
+// word that would exceed maxLen while an entity is still open is kept whole
+// (the chunk may then exceed maxLen, but the entity stays valid). A single
+// token longer than maxLen that is NOT inside an entity is hard-split by
+// UTF-8 byte length at valid rune boundaries so multi-byte characters are
+// never split and every returned chunk is at most maxLen bytes — this may
+// break the entity (an accepted trade-off for pathological, whitespace-free
+// input).
 func splitMessage(text string, maxLen int) []string {
+	if maxLen <= 0 {
+		return []string{text}
+	}
 	if len(text) <= maxLen {
 		return []string{text}
 	}
 
 	var chunks []string
-	var current strings.Builder
+	var cur strings.Builder
+	var open []string
+	lastNewline := false
 	flush := func() {
-		if current.Len() > 0 {
-			chunks = append(chunks, current.String())
-			current.Reset()
+		if cur.Len() > 0 {
+			chunks = append(chunks, cur.String())
+			cur.Reset()
+			open = nil
 		}
+		lastNewline = false
 	}
-	for _, line := range strings.Split(text, "\n") {
-		if len(line) > maxLen {
+
+	// addWord appends a word. While an inline entity is open the chunk must not
+	// be split (that would invalidate the entity), so the word is kept whole
+	// even if it pushes the chunk past maxLen. Otherwise we break the chunk
+	// first when the word would not fit.
+	addWord := func(word string) {
+		sep := 0
+		if cur.Len() > 0 && !lastNewline {
+			sep = 1
+		}
+		if len(open) == 0 && cur.Len() > 0 && cur.Len()+sep+len(word) > maxLen {
 			flush()
-			for len(line) > maxLen {
-				cut := maxLen
-				for cut > 0 && !utf8.RuneStart(line[cut]) {
-					cut--
-				}
-				if cut == 0 {
-					cut = maxLen
-				}
-				chunks = append(chunks, line[:cut])
-				line = line[cut:]
+		}
+		if cur.Len() > 0 && !lastNewline {
+			cur.WriteByte(' ')
+		}
+		cur.WriteString(word)
+		lastNewline = false
+		updateEntities(&open, word)
+	}
+
+	for li, line := range strings.Split(text, "\n") {
+		if li > 0 && cur.Len() > 0 {
+			// Newlines are legal inside MarkdownV2 entities, so keep an open
+			// entity intact across the break. Break the chunk only when no
+			// entity is open and there is no room for the newline.
+			if len(open) == 0 && cur.Len()+1 > maxLen {
+				flush()
+			} else {
+				cur.WriteByte('\n')
+				lastNewline = true
 			}
-			current.WriteString(line)
-			continue
 		}
-		if current.Len() > 0 && current.Len()+len(line)+1 > maxLen {
-			flush()
+		for _, word := range strings.Fields(line) {
+			if len(word) > maxLen {
+				// The token is over-long. If an entity is open, or the token
+				// itself contains an entity delimiter, keep it whole: a
+				// hard-split would break the entity and trigger a Telegram
+				// parse error. We tolerate the chunk exceeding maxLen; such a
+				// token is inherently unparseable in MarkdownV2 anyway.
+				if len(open) > 0 || containsEntityChar(word) {
+					addWord(word)
+					continue
+				}
+				flush()
+				for _, piece := range hardSplitToken(word, maxLen) {
+					if cur.Len() > 0 {
+						flush()
+					}
+					cur.WriteString(piece)
+				}
+				continue
+			}
+			addWord(word)
 		}
-		if current.Len() > 0 {
-			current.WriteByte('\n')
-		}
-		current.WriteString(line)
 	}
 	flush()
 	return chunks
+}
+
+// updateEntities maintains the stack of currently-open MarkdownV2 inline
+// entities as text is appended. Delimiters handled: * _ ` ~ (open and close),
+// [ ] (link text open / close).
+func updateEntities(open *[]string, seg string) {
+	for _, r := range seg {
+		switch r {
+		case '[':
+			*open = append(*open, "[")
+		case ']':
+			if len(*open) > 0 && (*open)[len(*open)-1] == "[" {
+				*open = (*open)[:len(*open)-1]
+			} else {
+				*open = append(*open, "]")
+			}
+		case '*', '_', '`', '~':
+			if len(*open) > 0 && (*open)[len(*open)-1] == string(r) {
+				*open = (*open)[:len(*open)-1]
+			} else {
+				*open = append(*open, string(r))
+			}
+		}
+	}
+}
+
+// hardSplitToken splits a single over-long token into chunks of at most maxLen
+// bytes, cutting only at rune boundaries so multi-byte characters are never
+// split and every returned chunk is at most maxLen bytes.
+func hardSplitToken(word string, maxLen int) []string {
+	// Split by runes first to preserve UTF-8, then re-encode each chunk and
+	// verify its byte length stays within maxLen.
+	runes := []rune(word)
+	var out []string
+	for len(runes) > 0 {
+		// Grow the chunk by runes until adding the next rune would exceed
+		// maxLen bytes (or we run out of runes).
+		take := 0
+		for take < len(runes) {
+			next := string(runes[:take+1])
+			if len(next) > maxLen {
+				break
+			}
+			take++
+		}
+		if take == 0 {
+			// A single rune is wider than maxLen; emit it alone to make
+			// progress without producing invalid UTF-8.
+			take = 1
+		}
+		out = append(out, string(runes[:take]))
+		runes = runes[take:]
+	}
+	return out
+}
+
+// containsEntityChar reports whether the token contains a MarkdownV2 inline
+// entity delimiter, meaning a hard-split would break an entity.
+func containsEntityChar(s string) bool {
+	for _, r := range s {
+		switch r {
+		case '*', '_', '`', '~', '[', ']':
+			return true
+		}
+	}
+	return false
 }
 
 // broadcastSessionActive reports whether an admin has an in-progress broadcast.

@@ -238,16 +238,16 @@ func buildVMessServerLink(cfg *serverConfig) (string, error) {
 		Add  string `json:"add"`
 		Port string `json:"port"`
 		ID   string `json:"id"`
-		Aid  string `json:"aid"`
-		Scy  string `json:"scy"`
-		Net  string `json:"net"`
-		Type string `json:"type"`
-		Host string `json:"host"`
-		Path string `json:"path"`
-		TLS  string `json:"tls"`
-		SNI  string `json:"sni"`
-		ALPN string `json:"alpn"`
-		FP   string `json:"fp"`
+		Aid  string `json:"aid,omitempty"`
+		Scy  string `json:"scy,omitempty"`
+		Net  string `json:"net,omitempty"`
+		Type string `json:"type,omitempty"`
+		Host string `json:"host,omitempty"`
+		Path string `json:"path,omitempty"`
+		TLS  string `json:"tls,omitempty"`
+		SNI  string `json:"sni,omitempty"`
+		ALPN string `json:"alpn,omitempty"`
+		FP   string `json:"fp,omitempty"`
 	}
 
 	obj := vmessObj{
@@ -277,25 +277,12 @@ func buildVMessServerLink(cfg *serverConfig) (string, error) {
 	if obj.Net == "" {
 		obj.Net = "tcp"
 	}
-	drop := func(field *string) {
-		if *field == "" {
-			*field = "__OMIT__"
-		}
-	}
-	drop(&obj.TLS)
-	drop(&obj.SNI)
-	drop(&obj.ALPN)
-	drop(&obj.FP)
-	drop(&obj.Host)
-	drop(&obj.Path)
-	drop(&obj.Type)
 
 	data, err := json.Marshal(obj)
 	if err != nil {
 		return "", fmt.Errorf("marshal vmess object: %w", err)
 	}
 	encoded := base64.StdEncoding.EncodeToString(data)
-	encoded = strings.ReplaceAll(encoded, "__OMIT__", "")
 	return "vmess://" + encoded, nil
 }
 

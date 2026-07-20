@@ -13,6 +13,7 @@ import (
 
 var _ DatabaseService = (*database.Service)(nil)
 var _ XUIClient = (*xui.Client)(nil)
+var _ WebRepository = (*database.Service)(nil)
 
 // SubscriptionNodeCRUD provides basic CRUD operations for subscription nodes.
 type SubscriptionNodeCRUD interface {
@@ -56,6 +57,7 @@ type SubscriptionCRUD interface {
 // SubscriptionQueries retrieves subscriptions by various criteria.
 type SubscriptionQueries interface {
 	GetByTelegramID(ctx context.Context, telegramID int64) (*database.Subscription, error)
+	GetAnyByTelegramID(ctx context.Context, telegramID int64) (*database.Subscription, error)
 	GetByID(ctx context.Context, id uint) (*database.Subscription, error)
 	GetLatestSubscriptions(ctx context.Context, limit int) ([]database.Subscription, error)
 	GetAllSubscriptions(ctx context.Context) ([]database.Subscription, error)
@@ -65,6 +67,7 @@ type SubscriptionQueries interface {
 type SubscriptionCounts interface {
 	CountAllSubscriptions(ctx context.Context) (int64, error)
 	CountActiveSubscriptions(ctx context.Context) (int64, error)
+	CountTrialSubscriptions(ctx context.Context) (int64, error)
 	CountExpiredSubscriptions(ctx context.Context) (int64, error)
 	GetAllTelegramIDs(ctx context.Context) ([]int64, error)
 	GetTelegramIDByUsername(ctx context.Context, username string) (int64, error)

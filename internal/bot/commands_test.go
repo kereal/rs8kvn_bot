@@ -11,6 +11,7 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/interfaces"
 	"github.com/kereal/rs8kvn_bot/internal/service"
 	"github.com/kereal/rs8kvn_bot/internal/testutil"
+	"github.com/kereal/rs8kvn_bot/internal/vpn"
 	"github.com/kereal/rs8kvn_bot/internal/xui"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -500,7 +501,7 @@ func TestHandleBindTrial_Success(t *testing.T) {
 	subService := service.NewSubscriptionService(
 		mockDB,
 		map[uint]interfaces.XUIClient{1: mockXUI},
-		nil,
+		map[uint]vpn.Client{1: vpn.NewThreeXUIClient(mockXUI, []int{1})},
 		dbSources,
 		cfg)
 	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), subService, "")
@@ -546,7 +547,7 @@ func TestHandleBindTrial_IncrementsReferrerCacheCount(t *testing.T) {
 	subService := service.NewSubscriptionService(
 		mockDB,
 		map[uint]interfaces.XUIClient{1: mockXUI},
-		nil,
+		map[uint]vpn.Client{1: vpn.NewThreeXUIClient(mockXUI, []int{1})},
 		dbSources,
 		cfg)
 	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), subService, "")
@@ -595,7 +596,7 @@ func TestHandleBindTrial_NoReferrerLeavesCacheUntouched(t *testing.T) {
 	subService := service.NewSubscriptionService(
 		mockDB,
 		map[uint]interfaces.XUIClient{1: mockXUI},
-		nil,
+		map[uint]vpn.Client{1: vpn.NewThreeXUIClient(mockXUI, []int{1})},
 		dbSources,
 		cfg)
 	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), subService, "")

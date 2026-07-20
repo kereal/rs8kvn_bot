@@ -1,3 +1,5 @@
+
+
 package e2e
 
 import (
@@ -80,7 +82,7 @@ func TestE2E_SubscriptionDelivery_AfterRenew_InvalidatesCacheAndServesUpdatedCon
 		{ID: 1, Name: "main", IsActive: true, Host: "https://panel.example.com", APIToken: "test-api-token", InboundIDs: "[1]"},
 		*node,
 	}
-	subService := service.NewSubscriptionService(env.db, xuiClients, nil, nodes, env.cfg)
+	subService := service.NewSubscriptionService(env.db, xuiClients, e2eVPNClients(xuiClients), nodes, env.cfg)
 	subSrv := subserver.NewService(config.SubServerCacheTTL)
 	defer subSrv.Stop()
 	subService.SetInvalidateBySubIDFunc(subSrv.InvalidateCache)
