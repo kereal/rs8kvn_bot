@@ -78,6 +78,7 @@ type DatabaseService struct {
 	OrdersBySubscriptionID                      map[uint][]database.Order
 	PingFunc                                    func(ctx context.Context) error
 	GetByTelegramIDFunc                         func(ctx context.Context, telegramID int64) (*database.Subscription, error)
+	GetAnyByTelegramIDFunc                    func(ctx context.Context, telegramID int64) (*database.Subscription, error)
 	CreateSubscriptionFunc                      func(ctx context.Context, sub *database.Subscription, inviteCode string) error
 	UpdateSubscriptionFunc                      func(ctx context.Context, sub *database.Subscription) error
 	DeleteSubscriptionFunc                      func(ctx context.Context, telegramID int64) error
@@ -85,6 +86,7 @@ type DatabaseService struct {
 	GetAllSubscriptionsFunc                     func(ctx context.Context) ([]database.Subscription, error)
 	CountAllSubscriptionsFunc                   func(ctx context.Context) (int64, error)
 	CountActiveSubscriptionsFunc                func(ctx context.Context) (int64, error)
+	CountTrialSubscriptionsFunc                 func(ctx context.Context) (int64, error)
 	CountExpiredSubscriptionsFunc               func(ctx context.Context) (int64, error)
 	GetAllTelegramIDsFunc                       func(ctx context.Context) ([]int64, error)
 	GetByIDFunc                                 func(ctx context.Context, id uint) (*database.Subscription, error)
@@ -165,6 +167,18 @@ func (m *DatabaseService) Transaction(ctx context.Context, fn func(*gorm.DB) err
 func (m *DatabaseService) GetByTelegramID(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 	if m.GetByTelegramIDFunc != nil {
 		return m.GetByTelegramIDFunc(ctx, telegramID)
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if sub, ok := m.Subscriptions[telegramID]; ok {
+		return sub, nil
+	}
+	return nil, gorm.ErrRecordNotFound
+}
+
+func (m *DatabaseService) GetAnyByTelegramID(ctx context.Context, telegramID int64) (*database.Subscription, error) {
+	if m.GetAnyByTelegramIDFunc != nil {
+		return m.GetAnyByTelegramIDFunc(ctx, telegramID)
 	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -374,6 +388,21 @@ func (m *DatabaseService) CountActiveSubscriptions(ctx context.Context) (int64, 
 	var count int64
 	for _, sub := range m.Subscriptions {
 		if sub.Status == "active" && !sub.IsExpired() {
+			count++
+		}
+	}
+	return count, nil
+}
+
+func (m *DatabaseService) CountTrialSubscriptions(ctx context.Context) (int64, error) {
+	if m.CountTrialSubscriptionsFunc != nil {
+		return m.CountTrialSubscriptionsFunc(ctx)
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var count int64
+	for _, sub := range m.Subscriptions {
+		if sub.TelegramID < 0 {
 			count++
 		}
 	}

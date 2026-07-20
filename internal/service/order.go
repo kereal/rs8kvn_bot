@@ -35,12 +35,14 @@ func NewOrderService(db interfaces.DatabaseService, subSvc *SubscriptionService,
 
 // ActivateProduct creates an order and initializes a paid subscription for the user.
 // If the subscription does not exist, a free subscription is created first.
-func (o *OrderService) ActivateProduct(ctx context.Context, telegramID int64, product *database.Product) (*database.Order, error) {
+// username is passed through to GetOrCreateSubscription so a newly created
+// subscription is stored with the real Telegram username instead of a fallback.
+func (o *OrderService) ActivateProduct(ctx context.Context, telegramID int64, username string, product *database.Product) (*database.Order, error) {
 	if product == nil {
 		return nil, errors.New("product is nil")
 	}
 
-	sub, err := o.subSvc.GetOrCreateSubscription(ctx, telegramID, "", "")
+	sub, err := o.subSvc.GetOrCreateSubscription(ctx, telegramID, username, "")
 	if err != nil {
 		return nil, fmt.Errorf("get or create subscription: %w", err)
 	}
@@ -62,20 +64,22 @@ func (o *OrderService) ActivateProduct(ctx context.Context, telegramID int64, pr
 		PaymentProvider:   paymentInfo.Provider,
 		ProviderPaymentID: paymentInfo.PaymentID,
 	}
-	if product.PriceCents == 0 {
-		order.Status = database.OrderStatusPaid
-		order.PaidAt = &now
-		order.ActivatedAt = &now
-		order.ExpiresAt = &newExpiry
-	}
-
 	if product.PriceCents > 0 {
-		if err := o.db.CreateOrder(ctx, order); err != nil {
-			return nil, fmt.Errorf("create order: %w", err)
+		if err := o.db.Transaction(ctx, func(tx *gorm.DB) error {
+			if err := tx.Create(order).Error; err != nil {
+				return fmt.Errorf("create order: %w", err)
+			}
+			return nil
+		}); err != nil {
+			return nil, err
 		}
-		order.ProviderPaymentID = paymentInfo.PaymentID
 		return order, nil
 	}
+
+	order.Status = database.OrderStatusPaid
+	order.PaidAt = &now
+	order.ActivatedAt = &now
+	order.ExpiresAt = &newExpiry
 
 	sub.PlanID = product.PlanID
 	sub.ProductID = &product.ID
@@ -108,22 +112,8 @@ func (o *OrderService) ActivateProduct(ctx context.Context, telegramID int64, pr
 	}
 
 	if planChanged && o.syncSvc != nil {
-		newNodes, err := o.db.GetNodesByPlanID(ctx, sub.PlanID)
-		if err != nil {
-			return order, fmt.Errorf("activate product: load plan nodes: %w", err)
-		}
-		var newNodeIDs []uint
-		for _, n := range newNodes {
-			if n.IsActive {
-				newNodeIDs = append(newNodeIDs, n.ID)
-			}
-		}
-		if err := o.db.MarkActiveNodesPendingUpdate(ctx, sub.ID, newNodeIDs); err != nil {
-			return order, fmt.Errorf("activate product: schedule node updates: %w", err)
-		}
-
-		if err := o.syncSvc.ReconcilePlanNodes(ctx, sub.ID); err != nil {
-			return order, fmt.Errorf("activate product: reconcile plan nodes: %w", err)
+		if err := o.syncSvc.ApplyPlanToSubscription(ctx, sub.ID); err != nil {
+			return order, fmt.Errorf("activate product: apply plan: %w", err)
 		}
 		if err := o.syncSvc.SyncSubscription(ctx, sub.ID); err != nil {
 			logger.Warn("activate product: post-commit sync failed",

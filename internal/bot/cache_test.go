@@ -51,7 +51,7 @@ func TestSubscriptionCache_TTL(t *testing.T) {
 	// Wait for TTL to expire
 	assert.Eventually(t, func() bool {
 		return cache.Get(456) == nil
-	}, 100*time.Millisecond, 1*time.Millisecond, "Get() should return nil after TTL expired")
+	}, 2*time.Second, 5*time.Millisecond, "Get() should return nil after TTL expired")
 }
 
 func TestSubscriptionCache_Invalidate(t *testing.T) {
@@ -100,8 +100,6 @@ func TestSubscriptionCache_MaxSize(t *testing.T) {
 	assert.Equal(t, 3, cache.Size(), "Size()")
 
 	// Adding one more should evict the oldest entry (by expiresAt time)
-	// Sleep briefly to ensure the new entry has a later expiresAt
-	time.Sleep(2 * time.Millisecond)
 	cache.Set(4, &database.Subscription{TelegramID: 4})
 
 	// Should still have 3 entries (maxSize), with entry 1 evicted
@@ -129,7 +127,7 @@ func TestSubscriptionCache_Cleanup(t *testing.T) {
 	// Wait for entries to expire
 	assert.Eventually(t, func() bool {
 		return cache.Get(1) == nil
-	}, 100*time.Millisecond, 1*time.Millisecond, "entries should expire")
+	}, 2*time.Second, 5*time.Millisecond, "entries should expire")
 
 	// Add one more entry (not expired)
 	cache.Set(4, &database.Subscription{TelegramID: 4})
@@ -227,10 +225,9 @@ func TestSubscriptionCache_LRU_EvictionOrder(t *testing.T) {
 
 	cache := NewSubscriptionCache(3, 5*time.Minute) // Long TTL to avoid expiration
 
-	// Add entries with delays to ensure different expiresAt times
+	// Add entries; entry 1 is oldest, entry 3 is newest
 	for i := int64(1); i <= 3; i++ {
 		cache.Set(i, &database.Subscription{TelegramID: i})
-		time.Sleep(2 * time.Millisecond)
 	}
 
 	// Entry 1 should be oldest, entry 3 should be newest
@@ -256,7 +253,6 @@ func TestSubscriptionCache_LRU_MultipleEvictions(t *testing.T) {
 	// Add entries and trigger multiple evictions
 	// With maxSize=2, after adding 5 entries, only the last 2 should remain
 	for i := int64(1); i <= 5; i++ {
-		time.Sleep(2 * time.Millisecond)
 		cache.Set(i, &database.Subscription{TelegramID: i})
 	}
 

@@ -10,6 +10,7 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/interfaces"
 	"github.com/kereal/rs8kvn_bot/internal/logger"
+	"github.com/kereal/rs8kvn_bot/internal/metrics"
 
 	"go.uber.org/zap"
 )
@@ -26,13 +27,17 @@ import (
 //  5. Aggregate subscription-userinfo headers and build the final response (buildResponse).
 func HandleSubscription(ctx context.Context, db interfaces.SubscriptionRepository, subSvc *Service, subID, clientIP string, requestHeaders map[string]string) (*SubscriptionResult, int, int, error) {
 	// 1. Try to serve from cache first.
+	hitStart := time.Now()
 	if result, hit, err := serveFromCache(ctx, db, subSvc, subID); hit {
+		metrics.SubserverCacheHitDuration.Observe(time.Since(hitStart).Seconds())
 		return result, 0, 0, err
 	}
 
 	// 2. Cache miss: load the subscription with plan and active sources.
+	missStart := time.Now()
 	subFull, err := loadSubscription(ctx, db, subID, clientIP, requestHeaders)
 	if err != nil {
+		metrics.SubserverCacheMissDuration.Observe(time.Since(missStart).Seconds())
 		return nil, 0, 0, err
 	}
 
@@ -41,6 +46,7 @@ func HandleSubscription(ctx context.Context, db interfaces.SubscriptionRepositor
 
 	// 5. Build the final response and cache it.
 	res, err := buildResponse(subSvc, subID, agg, subFull.Plan.TrafficLimit)
+	metrics.SubserverCacheMissDuration.Observe(time.Since(missStart).Seconds())
 	return res, success, total, err
 }
 

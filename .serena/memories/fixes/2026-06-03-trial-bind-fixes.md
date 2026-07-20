@@ -1,3 +1,14 @@
+# ⚠️ STATUS: фикс #7 ОТМЕНЁН
+
+- Коммит `4489e0d` (2026-06-19, `feat(db): add UNIQUE constraints, index, and remove revoke logic`)
+  **явно удалил** `UPDATE status='revoked'` из `BindTrialSubscription` и `CreateSubscription`.
+- Миграция `023_add_unique_constraints_and_indexes` (2026-06-20) ставит hard
+  `UNIQUE INDEX idx_subscriptions_telegram_id_unique ON subscriptions(telegram_id)`.
+- Инвариант «один пользователь = одна активная подписка» теперь гарантируется на уровне БД,
+  а не кодом. Defensive revoke из фикса #7 стал избыточным и **не должен возвращаться**
+  (при наличии UNIQUE на telegram_id вторая active-строка не существует по определению).
+- Тест `TestService_BindTrialSubscription_RevokesExistingActiveSub` удалён вместе с ревоком.
+
 # Fix: Trial bind — propagate updates to all sources, aggregate errors, prevent double-activation race
 
 ## Что было сломано
@@ -34,11 +45,12 @@
 - `deleteClientFromAllSources` на rollback остаётся best-effort (logger.Warn per source) — это
   не часть основного пути ошибок.
 
-### #7 BindTrialSubscription revoke other active subs
-`internal/database/database.go:BindTrialSubscription` — после успешного UPDATE trial-row
-добавлен revoke всех остальных active subs с тем же `telegram_id` (кроме только что
-забинденной). Это гарантирует, что после BindTrial у пользователя ровно ОДНА active
-подписка — та, что была только что забиндена. Делается в той же транзакции, атомарно.
+### #7 BindTrialSubscription revoke other active subs — ОТМЕНЕНО (см. STATUS выше)
+`internal/database/database.go:BindTrialSubscription` — **больше НЕ применяется**.
+Удалено коммитом `4489e0d` (2026-06-19). Причина: миграция `023` ввела
+`UNIQUE INDEX` на `telegram_id`, поэтому две `active` подписки с одним
+`telegram_id` невозможны физически; мягкий revoke в коде стал избыточным.
+Приведённый ниже фрагмент — **историческая справка, не вставлять в код**:
 
 ```go
 result := tx.Model(&Subscription{}).

@@ -1,7 +1,7 @@
 # Architecture — rs8kvn_bot
 
-**Version:** v2.3.0
-**Date:** 2026-07-02
+**Version:** v2.3.4
+**Date:** 2026-07-19
 
 ## Multi-outbounds per node
 
@@ -143,13 +143,13 @@ internal/
 │   ├── middleware.go        # Access-log response recording
 │   └── templates/           # trial.html, error.html
 ├── subserver/         # Subscription server (aggregation + proxy)
-│   ├── service.go           # Hot reload loop (5 min)
+│   ├── service.go           # Thin cache adapter over SubscriptionCache (Get/Set/Invalidate)
 │   ├── fetch.go             # Fetch from upstream nodes + format detection (JSON/Clash/Base64/Plain)
 │   ├── subscription_handler.go # Subscription request handler
 │   ├── subscription_helpers.go # Header filtering (FilterHeaders)
 │   ├── clash.go             # Clash YAML → serverConfig normaliser
 │   ├── access_log.go        # Optional async /sub/{id} access log
-│   └── servers.go           # Load extra config file
+│   └── servers.go           # Legacy: загрузка extra-серверов (фича удалена в v2.3.0, не используется в prod)
 ├── service/          # Business logic
 │   ├── subscription.go      # Use cases: Create, Delete, DeleteByID, Renew; unified two-phase teardown (revokeAndDeprovisionThenDelete)
 │   ├── subscription_traffic.go # Presentation: TrafficInfo, GetWithTraffic, formatExpiresAt
@@ -371,7 +371,7 @@ ConnMaxIdleTime = 2m
 
 **Transactions used for:**
 - `CreateSubscription`: revoke old + create new (atomic)
-- `BindTrialSubscription`: check telegram_id=0 → update (race-safe)
+- `BindTrialSubscription`: check telegram_id < 0 → update (race-safe)
 
 **Orders/Products support:**
 - `Product` — purchasable subscription product bound to a plan (name, price, duration)
@@ -396,7 +396,7 @@ CREATE INDEX idx_orders_created_at             ON orders(created_at);
 ```
 
 **Race-safe patterns:**
-- `BindTrialSubscription`: `UPDATE WHERE telegram_id=0 AND is_trial=true` + `RowsAffected` check
+- `BindTrialSubscription`: `UPDATE WHERE telegram_id < 0 AND plan_id = <trial_plan_id>` + `RowsAffected` check (trial-подписки используют отрицательные `telegram_id`, колонки `is_trial` нет)
 - `CleanupExpiredTrials`: `DELETE ... RETURNING` to atomically fetch deleted rows
 - `GetOrCreateInvite`: always returns the oldest (canonical) code for the referrer.
   The UNIQUE constraint + "one code per referrer" guarantee is enforced by migration 004

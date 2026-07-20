@@ -316,7 +316,7 @@ func TestSubscriptionService_RenewSubscription_PersistsPurchaseMetadata(t *testi
 		SubscriptionID: "renew-sub",
 		Status:         "active",
 		PlanID:         plan.ID,
-		ExpiresAt:      ptrTime(now.Add(-24 * time.Hour)),
+		ExpiresAt:      testutil.PtrTime(now.Add(-24 * time.Hour)),
 	}
 	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
 
@@ -362,7 +362,7 @@ func TestSubscriptionService_RenewSubscription_UsesDatabaseServiceInterface(t *t
 		ClientID:       "iface-client",
 		SubscriptionID: "iface-sub",
 		Status:         "active",
-		ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
+		ExpiresAt:      testutil.PtrTime(time.Now().Add(24 * time.Hour)),
 	}
 	product := &database.Product{
 		ID:           11,
@@ -404,7 +404,7 @@ func TestSubscriptionService_RenewSubscription_SyncSetupFailureReturnsError(t *t
 		SubscriptionID: "iface-sub",
 		Status:         "active",
 		PlanID:         1,
-		ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
+		ExpiresAt:      testutil.PtrTime(time.Now().Add(24 * time.Hour)),
 	}
 	product := &database.Product{
 		ID:           11,
@@ -420,6 +420,9 @@ func TestSubscriptionService_RenewSubscription_SyncSetupFailureReturnsError(t *t
 		GetByTelegramIDFunc: func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 			return sub, nil
 		},
+		GetByIDFunc: func(ctx context.Context, id uint) (*database.Subscription, error) {
+			return sub, nil
+		},
 		TransactionFunc: func(ctx context.Context, fn func(*gorm.DB) error) error {
 			transactionCalled = true
 			return nil
@@ -433,7 +436,7 @@ func TestSubscriptionService_RenewSubscription_SyncSetupFailureReturnsError(t *t
 
 	order, err := svc.RenewSubscription(context.Background(), sub.TelegramID, product)
 
-	require.ErrorContains(t, err, "renew subscription: load plan nodes")
+	require.ErrorContains(t, err, "renew subscription: apply plan: apply plan to subscription 7: load plan nodes")
 	assert.True(t, transactionCalled)
 	assert.NotNil(t, order)
 	assert.Equal(t, database.OrderStatusPaid, order.Status)
@@ -618,7 +621,7 @@ func TestSubscriptionService_GetWithTraffic_Success(t *testing.T) {
 		Username:   "testuser",
 		PlanID:     1,
 		CreatedAt:  time.Now(),
-		ExpiresAt:  ptrTime(time.Now().Add(7 * 24 * time.Hour)),
+		ExpiresAt:  testutil.PtrTime(time.Now().Add(7 * 24 * time.Hour)),
 	}
 
 	db := &testutil.DatabaseService{
@@ -708,8 +711,9 @@ func TestSubscriptionService_CreateTrial_Success(t *testing.T) {
 		{ID: 1, IsActive: true, Host: "http://localhost:2053", InboundIDs: "[1]"},
 	}
 	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
+	vpnClients := map[uint]vpn.Client{1: vpn.NewThreeXUIClient(xuiClient, []int{1})}
 
-	svc := NewSubscriptionService(db, xuiClients, nil, sources, cfg)
+	svc := NewSubscriptionService(db, xuiClients, vpnClients, sources, cfg)
 	result, err := svc.CreateTrial(context.Background(), "testcode")
 
 	assert.NoError(t, err)
@@ -747,8 +751,9 @@ func TestSubscriptionService_CreateTrial_XUIError(t *testing.T) {
 		{ID: 1, IsActive: true, Host: "http://localhost:2053", InboundIDs: "[1]"},
 	}
 	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
+	vpnClients := map[uint]vpn.Client{1: vpn.NewThreeXUIClient(xuiClient, []int{1})}
 
-	svc := NewSubscriptionService(db, xuiClients, nil, sources, cfg)
+	svc := NewSubscriptionService(db, xuiClients, vpnClients, sources, cfg)
 	result, err := svc.CreateTrial(context.Background(), "testcode")
 
 	assert.Error(t, err)
@@ -820,8 +825,9 @@ func TestSubscriptionService_CreateTrial_NoTrialNodes(t *testing.T) {
 		{ID: 1, IsActive: true, Host: "http://localhost:2053", InboundIDs: "[1]"},
 	}
 	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
+	vpnClients := map[uint]vpn.Client{1: vpn.NewThreeXUIClient(xuiClient, []int{1})}
 
-	svc := NewSubscriptionService(db, xuiClients, nil, sources, cfg)
+	svc := NewSubscriptionService(db, xuiClients, vpnClients, sources, cfg)
 	result, err := svc.CreateTrial(context.Background(), "testcode")
 
 	assert.Error(t, err)
@@ -829,38 +835,48 @@ func TestSubscriptionService_CreateTrial_NoTrialNodes(t *testing.T) {
 	assert.Contains(t, err.Error(), "no linked nodes")
 }
 
-func TestSubscriptionService_ReconcileOrphanedClients_RemovesMissing(t *testing.T) {
+// TestSubscriptionService_ReconcileOrphanedClients_RemovesFullyDeprovisioned verifies
+// a subscription with only pending_remove node bindings (deprovisioning that did
+// not complete in the delete flow) is removed, while:
+//   - a subscription with a live (active) binding is kept,
+//   - a subscription with NO subscription_nodes (e.g. a trial) is kept.
+func TestSubscriptionService_ReconcileOrphanedClients_RemovesFullyDeprovisioned(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{}
 
-	normal := &database.Subscription{ID: 10, TelegramID: 100, Username: "realuser", Status: "active"}
-	trial := &database.Subscription{ID: 20, TelegramID: 0, SubscriptionID: "orphan123", Status: "active", PlanID: 1}
-	good := &database.Subscription{ID: 30, TelegramID: 300, Username: "gooduser", Status: "active"}
+	withLive := &database.Subscription{ID: 10, TelegramID: 100, Username: "liveuser", Status: "active"}
+	orphan := &database.Subscription{ID: 20, TelegramID: 200, Username: "orphanuser", Status: "active"}
+	trial := &database.Subscription{ID: 30, TelegramID: 0, SubscriptionID: "trial123", Status: "active"}
 	inactive := &database.Subscription{ID: 40, TelegramID: 400, Username: "bad", Status: "revoked"}
 
 	deleted := []uint{}
 	db := &testutil.DatabaseService{
 		GetAllSubscriptionsFunc: func(ctx context.Context) ([]database.Subscription, error) {
-			return []database.Subscription{*normal, *trial, *good, *inactive}, nil
+			return []database.Subscription{*withLive, *orphan, *trial, *inactive}, nil
+		},
+		GetBySubscriptionIDFunc: func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
+			switch subscriptionID {
+			case withLive.ID:
+				return []database.SubscriptionNode{
+					{SubscriptionID: withLive.ID, NodeID: 1, Status: database.SyncStatusActive},
+				}, nil
+			case orphan.ID:
+				return []database.SubscriptionNode{
+					{SubscriptionID: orphan.ID, NodeID: 1, Status: database.SyncStatusPendingRemove},
+					{SubscriptionID: orphan.ID, NodeID: 2, Status: database.SyncStatusPendingRemove},
+				}, nil
+			default:
+				// trial (no subscription_nodes) and others.
+				return nil, nil
+			}
 		},
 		DeleteSubscriptionByIDFunc: func(ctx context.Context, id uint) (*database.Subscription, error) {
 			deleted = append(deleted, id)
 			return &database.Subscription{ID: id}, nil
 		},
 	}
-
-	xuiClient := &testutil.XUIClient{
-		GetClientTrafficFunc: func(ctx context.Context, email string) (*xui.ClientTraffic, error) {
-			if email == "gooduser" {
-				return &xui.ClientTraffic{}, nil
-			}
-			return nil, fmt.Errorf("client not found: %w", xui.ErrClientNotFound)
-		},
-	}
-	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
-	sources := []database.Node{{ID: 1, IsActive: true, Host: "http://localhost:2053", InboundIDs: "[1]"}}
-	svc := NewSubscriptionService(db, xuiClients, nil, sources, cfg)
+	svc := NewSubscriptionService(db, nil, nil, nil, cfg)
 
 	invoked := []int64{}
 	svc.SetInvalidateFunc(func(id int64) { invoked = append(invoked, id) })
@@ -868,11 +884,13 @@ func TestSubscriptionService_ReconcileOrphanedClients_RemovesMissing(t *testing.
 	count, err := svc.ReconcileOrphanedClients(context.Background())
 
 	assert.NoError(t, err)
-	assert.Equal(t, 2, count)
-	assert.ElementsMatch(t, []uint{10, 20}, deleted)
-	assert.Equal(t, []int64{100}, invoked)
+	assert.Equal(t, 1, count)
+	assert.Equal(t, []uint{orphan.ID}, deleted)
+	assert.Equal(t, []int64{orphan.TelegramID}, invoked)
 }
 
+// TestSubscriptionService_ReconcileOrphanedClients_NoActive verifies that an
+// all-revoked set produces no deletions and no error.
 func TestSubscriptionService_ReconcileOrphanedClients_NoActive(t *testing.T) {
 	t.Parallel()
 
@@ -928,11 +946,21 @@ func TestSubscriptionService_BindTrial_SingleNode_ErrorPropagated(t *testing.T) 
 
 	xui1Calls := 0
 	xui2Calls := 0
-	var gotReq xui.ClientRequest
+	var gotReq vpn.SubscriptionProvision
 	xui1 := &testutil.XUIClient{
 		UpdateClientFunc: func(ctx context.Context, req xui.ClientRequest) error {
 			xui1Calls++
-			gotReq = req
+			gotReq = vpn.SubscriptionProvision{
+				ClientID:     req.ClientID,
+				CurrentEmail: req.CurrentEmail,
+				Username:     req.Email,
+				SubID:        req.SubID,
+				TrafficBytes: req.TrafficBytes,
+				ExpiryTime:   req.ExpiryTime,
+				ResetDays:    req.ResetDays,
+				TgID:         req.TgID,
+				Comment:      req.Comment,
+			}
 			return errors.New("source 1 unreachable")
 		},
 	}
@@ -944,12 +972,16 @@ func TestSubscriptionService_BindTrial_SingleNode_ErrorPropagated(t *testing.T) 
 	}
 
 	xuiClients := map[uint]interfaces.XUIClient{1: xui1, 2: xui2}
+	vpnClients := map[uint]vpn.Client{
+		1: vpn.NewThreeXUIClient(xui1, []int{1}),
+		2: vpn.NewThreeXUIClient(xui2, []int{1}),
+	}
 	sources := []database.Node{
 		{ID: 1, IsActive: true, Host: "http://x1", InboundIDs: "[1]"},
 		{ID: 2, IsActive: true, Host: "http://x2", InboundIDs: "[1]"},
 	}
 
-	svc := NewSubscriptionService(db, xuiClients, nil, sources, cfg)
+	svc := NewSubscriptionService(db, xuiClients, vpnClients, sources, cfg)
 
 	got, err := svc.BindTrial(context.Background(), "trial-sub-1", 123456, "testuser")
 	require.Error(t, err, "BindTrial must propagate UpdateClient failure on nodes[0]")
@@ -959,7 +991,7 @@ func TestSubscriptionService_BindTrial_SingleNode_ErrorPropagated(t *testing.T) 
 	assert.Equal(t, 1, xui1Calls, "only nodes[0] must be contacted")
 	assert.Equal(t, 0, xui2Calls, "nodes[1] must not be contacted (single-node trial contract)")
 	assert.Equal(t, "trial_trial-sub-1", gotReq.CurrentEmail, "CurrentEmail must be trial_ + subscriptionID")
-	assert.Equal(t, "testuser", gotReq.Email, "Email must be the resolved XUIEmail (username)")
+	assert.Equal(t, "testuser", gotReq.Username, "Username must be the resolved XUIEmail (username)")
 }
 
 // TestSubscriptionService_BindTrial_SingleNode_Success verifies the happy path
@@ -999,11 +1031,21 @@ func TestSubscriptionService_BindTrial_SingleNode_Success(t *testing.T) {
 
 	xui1Calls := 0
 	xui2Calls := 0
-	var gotReq xui.ClientRequest
+	var gotReq vpn.SubscriptionProvision
 	xui1 := &testutil.XUIClient{
 		UpdateClientFunc: func(ctx context.Context, req xui.ClientRequest) error {
 			xui1Calls++
-			gotReq = req
+			gotReq = vpn.SubscriptionProvision{
+				ClientID:     req.ClientID,
+				CurrentEmail: req.CurrentEmail,
+				Username:     req.Email,
+				SubID:        req.SubID,
+				TrafficBytes: req.TrafficBytes,
+				ExpiryTime:   req.ExpiryTime,
+				ResetDays:    req.ResetDays,
+				TgID:         req.TgID,
+				Comment:      req.Comment,
+			}
 			return nil
 		},
 	}
@@ -1015,12 +1057,16 @@ func TestSubscriptionService_BindTrial_SingleNode_Success(t *testing.T) {
 	}
 
 	xuiClients := map[uint]interfaces.XUIClient{1: xui1, 2: xui2}
+	vpnClients := map[uint]vpn.Client{
+		1: vpn.NewThreeXUIClient(xui1, []int{1}),
+		2: vpn.NewThreeXUIClient(xui2, []int{1}),
+	}
 	sources := []database.Node{
 		{ID: 1, IsActive: true, Host: "http://x1", InboundIDs: "[1]"},
 		{ID: 2, IsActive: true, Host: "http://x2", InboundIDs: "[1]"},
 	}
 
-	svc := NewSubscriptionService(db, xuiClients, nil, sources, cfg)
+	svc := NewSubscriptionService(db, xuiClients, vpnClients, sources, cfg)
 
 	got, err := svc.BindTrial(context.Background(), "trial-sub-1", 123456, "testuser")
 	require.NoError(t, err)
@@ -1029,7 +1075,7 @@ func TestSubscriptionService_BindTrial_SingleNode_Success(t *testing.T) {
 	assert.Equal(t, 1, xui1Calls, "exactly one UpdateClient on nodes[0]")
 	assert.Equal(t, 0, xui2Calls, "nodes[1] must not be contacted")
 	assert.Equal(t, "trial_trial-sub-1", gotReq.CurrentEmail, "CurrentEmail must be trial_ + subscriptionID")
-	assert.Equal(t, "testuser", gotReq.Email, "Email must be the resolved XUIEmail (username)")
+	assert.Equal(t, "testuser", gotReq.Username, "Username must be the resolved XUIEmail (username)")
 }
 
 // ==================== DeleteByID Tests ====================
@@ -1150,6 +1196,62 @@ func TestSubscriptionService_DeleteByID_MarkRevokedBeforeDBDelete(t *testing.T) 
 	// Phase 1 happened: subscription was marked revoked before the delete attempt.
 	assert.True(t, updateBeforeDelete, "UpdateSubscription (mark revoked) must happen before DeleteSubscriptionByID")
 	assert.Equal(t, "revoked", updatedStatus, "subscription must be marked revoked before deprovision/delete")
+}
+
+// TestSubscriptionService_DeleteByID_SyncFailureStillDeletes verifies the
+// best-effort contract from AGENTS.md: deprovision (Phase 2, external sync)
+// is best-effort — if the VPN node sync fails, the subscription stays
+// revoked and the physical delete (Phase 3) MUST still run so the row is
+// removed. Background reconciliation finishes removal of the orphaned VPN client.
+func TestSubscriptionService_DeleteByID_SyncFailureStillDeletes(t *testing.T) {
+	t.Parallel()
+
+	var deleteByIDCalled bool
+	// Node binding used by MarkAllForRemoval / SyncSubscription.
+	nodes := []database.Node{{ID: 1, IsActive: true, Host: "http://x", InboundIDs: "[1]"}}
+	db := &testutil.DatabaseService{
+		GetByIDFunc: func(ctx context.Context, id uint) (*database.Subscription, error) {
+			return &database.Subscription{ID: 1, ClientID: "c", SubscriptionID: "s", TelegramID: 1, Username: "u", Status: "active"}, nil
+		},
+		// An existing active node binding so MarkAllForRemoval flips it to
+		// pending_remove, and the subsequent SyncSubscription reaches the VPN
+		// client's DeleteSubscription call.
+		GetBySubscriptionIDFunc: func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
+			return []database.SubscriptionNode{
+				{SubscriptionID: subscriptionID, NodeID: 1, Status: database.SyncStatusActive},
+			}, nil
+		},
+		// SyncSubscription reads the pending_remove node and dispatches the
+		// delete to the VPN client (which fails below).
+		GetPendingBySubscriptionIDFunc: func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
+			return []database.SubscriptionNode{
+				{SubscriptionID: subscriptionID, NodeID: 1, Status: database.SyncStatusPendingRemove},
+			}, nil
+		},
+		UpdateSubscriptionFunc: func(ctx context.Context, sub *database.Subscription) error {
+			return nil
+		},
+		DeleteSubscriptionByIDFunc: func(ctx context.Context, id uint) (*database.Subscription, error) {
+			deleteByIDCalled = true
+			return &database.Subscription{ID: id, ClientID: "c", SubscriptionID: "s"}, nil
+		},
+	}
+
+	// XUI client is unused by the teardown path (syncService owns deprovision).
+	xuiClients := map[uint]interfaces.XUIClient{1: &testutil.XUIClient{}}
+	// VPN client fails on delete → SyncSubscription reaches DeleteSubscription
+	// and receives the configured "vpn delete failed" error (best-effort).
+	vpnClients := map[uint]vpn.Client{1: &mockVPNClient{deleteError: errors.New("vpn delete failed")}}
+
+	svc := NewSubscriptionService(db, xuiClients, vpnClients, nodes, &config.Config{})
+	svc.SetSyncService(NewSyncService(db, vpnClients, nodes))
+
+	deleted, err := svc.DeleteByID(context.Background(), 1)
+
+	// Physical delete (Phase 3) runs despite the Phase 2 sync failure.
+	require.NoError(t, err, "best-effort deprovision failure must not abort the delete")
+	assert.True(t, deleteByIDCalled, "DeleteSubscriptionByID (physical delete) must run even if external deprovision fails")
+	assert.NotNil(t, deleted)
 }
 
 // ==================== GetByID Tests ====================
@@ -1527,4 +1629,66 @@ func TestXUIEmail_FallbackToTgID(t *testing.T) {
 			assert.Equal(t, tt.want, XUIEmail(tt.username, tt.chatID))
 		})
 	}
+}
+
+// TestSubscriptionService_Create_ReanimatesRevoked verifies the bug fix: when a
+// prior delete left the subscription in "revoked" state (partial delete failure),
+// Create must reanimate that single row instead of inserting a duplicate — which
+// would otherwise hit the telegram_id UNIQUE constraint and permanently block the
+// user from re-subscribing.
+func TestSubscriptionService_Create_ReanimatesRevoked(t *testing.T) {
+	t.Parallel()
+
+	db, err := testutil.NewTestDatabaseService(t)
+	require.NoError(t, err)
+	ctx := context.Background()
+
+	// Simulate a partially-failed delete: a row left in "revoked" with a
+	// stale subscription node binding (pending_remove from the failed deprovision).
+	revoked := &database.Subscription{
+		TelegramID:     777777,
+		Username:       "revoked_user",
+		ClientID:       "client-revoked",
+		SubscriptionID: "sub-revoked",
+		PlanID:         1,
+		Status:         "revoked",
+	}
+	require.NoError(t, db.CreateSubscription(ctx, revoked, ""))
+	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{
+		SubscriptionID: revoked.ID,
+		NodeID:         1,
+		Status:         database.SyncStatusPendingRemove,
+	}))
+
+	cfg := &config.Config{}
+	sources := []database.Node{}
+	xuiClients := map[uint]interfaces.XUIClient{}
+	svc := NewSubscriptionService(db, xuiClients, nil, sources, cfg)
+
+	result, err := svc.Create(ctx, 777777, "revoked_user", "")
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	// Exactly one row for this telegram_id, now active — no duplicate.
+	all, err := db.GetAllSubscriptions(ctx)
+	require.NoError(t, err)
+	var matching []database.Subscription
+	for _, s := range all {
+		if s.TelegramID == 777777 {
+			matching = append(matching, s)
+		}
+	}
+	require.Len(t, matching, 1, "must not create a second row")
+	assert.Equal(t, "active", matching[0].Status)
+
+	freePlan, err := db.GetPlanByName(ctx, database.FreePlanName)
+	require.NoError(t, err)
+	assert.Equal(t, freePlan.ID, matching[0].PlanID)
+	assert.Nil(t, matching[0].ExpiresAt)
+	assert.Equal(t, uint(revoked.ID), matching[0].ID, "same row reanimated, not a new one")
+
+	// Stale node bindings were wiped so re-provision starts clean.
+	nodes, err := db.GetBySubscriptionID(ctx, revoked.ID)
+	require.NoError(t, err)
+	assert.Empty(t, nodes, "stale pending_remove node must be cleared")
 }

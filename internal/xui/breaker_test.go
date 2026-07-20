@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestCircuitBreaker_FailureThreshold(t *testing.T) {
@@ -122,12 +123,7 @@ func TestCircuitBreaker_Execute(t *testing.T) {
 			},
 			fn:      func() error { return nil },
 			wantErr: true,
-			wantErrIs: func() error {
-				ctx, cancel := context.WithTimeout(context.Background(), 1*time.Nanosecond)
-				defer cancel()
-				time.Sleep(2 * time.Millisecond)
-				return ctx.Err()
-			}(),
+			wantErrIs: context.DeadlineExceeded,
 		},
 		{
 			name: "panicking callback",
@@ -160,10 +156,12 @@ func TestCircuitBreaker_Execute(t *testing.T) {
 				ctx = cancelCtx
 			}
 			if tt.name == "context timeout" {
+				// Wait for the timeout context to report completion so the
+				// breaker sees a genuinely-expired context inside Execute.
 				timeoutCtx, cancel := context.WithTimeout(ctx, 1*time.Nanosecond)
-				time.Sleep(2 * time.Millisecond)
-				ctx = timeoutCtx
 				defer cancel()
+				<-timeoutCtx.Done()
+				ctx = timeoutCtx
 			}
 
 			err := cb.Execute(ctx, tt.fn)
@@ -261,8 +259,8 @@ func TestCircuitBreaker_HalfOpenTransitions(t *testing.T) {
 				cb.recordResult(errors.New("failure"))
 				assert.Equal(t, CircuitStateOpen, cb.state)
 
-				time.Sleep(10 * time.Millisecond)
-				cb.allowRequest() // open -> half-open
+				// Transition open -> half-open by calling allowRequest once timeout elapses.
+				require.Eventually(t, cb.allowRequest, 200*time.Millisecond, 5*time.Millisecond, "circuit should become half-open after timeout")
 				assert.Equal(t, CircuitStateHalfOpen, cb.state)
 
 				for i := 0; i < 3; i++ {
@@ -403,7 +401,11 @@ func TestCircuitBreaker_ResetClearsAllState(t *testing.T) {
 	cb.recordResult(errors.New("failure"))
 	cb.recordResult(errors.New("failure"))
 
-	time.Sleep(10 * time.Millisecond)
+	require.Eventually(t, func() bool {
+		cb.mu.Lock()
+		defer cb.mu.Unlock()
+		return cb.state == CircuitStateOpen
+	}, 200*time.Millisecond, 5*time.Millisecond, "circuit should remain open after failures")
 	cb.allowRequest()
 
 	cb.recordResult(nil)

@@ -45,6 +45,30 @@ func NewReferralHandler(
 	}
 }
 
+// effectiveBotUsername returns the bot username for generated invite/share links.
+// It comes from the runtime-injected bot config (set via SetBotConfig from the
+// initBot getMe result), not from configuration.
+func (rh *ReferralHandler) effectiveBotUsername() string {
+	if rh.botConfig != nil {
+		return rh.botConfig.Username
+	}
+	return ""
+}
+
+// SetBotConfig updates the runtime bot config so generated invite/share links
+// always carry the real bot username (from Telegram getMe via initBot).
+func (rh *ReferralHandler) SetBotConfig(botConfig *BotConfig) {
+	rh.botConfig = botConfig
+	// Rebuild keyboards so InviteLinkText shows the real @username (not the
+	// empty value captured at construction time before initBot ran).
+	rh.keyboards = NewKeyboardBuilder(
+		botConfig.Username,
+		rh.cfg.ContactUsername,
+		rh.cfg.DonateCardNumber,
+		rh.cfg.DonateURL,
+		rh.cfg.SiteURL,
+	)
+}
 // HandleInvite handles the /invite command.
 func (rh *ReferralHandler) HandleInvite(ctx context.Context, chatID int64, username string, messageID int) error {
 	logger.Info("User requesting invite link",
@@ -77,7 +101,7 @@ func (rh *ReferralHandler) sendInviteLink(ctx context.Context, chatID int64, mes
 		return fmt.Errorf("get or create invite: %w", err)
 	}
 
-	telegramLink := fmt.Sprintf("https://t.me/%s?start=share_%s", rh.botConfig.Username, invite.Code)
+	telegramLink := fmt.Sprintf("https://t.me/%s?start=share_%s", rh.effectiveBotUsername(), invite.Code)
 	webLink := fmt.Sprintf("%s/i/%s", rh.cfg.SiteURL, invite.Code)
 	text := rh.keyboards.InviteLinkText(telegramLink, webLink)
 	keyboard := rh.keyboards.Invite()
@@ -115,7 +139,7 @@ func (rh *ReferralHandler) generateInviteLink(ctx context.Context, chatID int64,
 
 	switch lt {
 	case linkTypeTelegram:
-		return fmt.Sprintf("https://t.me/%s?start=share_%s", rh.botConfig.Username, invite.Code), nil
+		return fmt.Sprintf("https://t.me/%s?start=share_%s", rh.effectiveBotUsername(), invite.Code), nil
 	case linkTypeWeb:
 		return fmt.Sprintf("%s/i/%s", rh.cfg.SiteURL, invite.Code), nil
 	default:

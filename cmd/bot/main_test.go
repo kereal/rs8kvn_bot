@@ -402,12 +402,6 @@ func TestHandleUpdate_NilMessageAndNilCallback(t *testing.T) {
 	assert.False(t, mockBot.RequestCalledSafe())
 }
 
-// Skipped: requires proper test isolation for config.Load()
-// func TestConfigLoad_ValidEnvVars(t *testing.T) { ... }
-// func TestConfigLoad_InvalidNumericValues(t *testing.T) { ... }
-// func TestConfigLoad_InvalidURL(t *testing.T) { ... }
-// func TestConfigLoad_InvalidPort(t *testing.T) { ... }
-
 func TestConfigLoad_MissingRequiredFields(t *testing.T) {
 	// Not parallel: uses os.Unsetenv which modifies global process state
 

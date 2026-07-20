@@ -1,7 +1,7 @@
 # API Reference — rs8kvn_bot
 
-**Version:** v2.3.0  
-**Date:** 2026-07-02  
+**Version:** v2.3.4
+**Date:** 2026-07-19
 **Base URL:** `http://localhost:8880` (configurable via `WEB_SERVER_PORT`)
 
 ---
@@ -405,8 +405,8 @@ API version is implicit in endpoint paths:
 - `/sub/{subID}` — subscription proxy (multi-node, current)
 - No breaking changes expected without major version bump
 
-Bot version in logs: `rs8kvn_bot@v2.3.0`
+Bot version in logs: `rs8kvn_bot@v2.3.4`
 
 ---
 
-*Documentation last updated: 2026-07-02*
+*Documentation last updated: 2026-07-19*

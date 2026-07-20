@@ -9,7 +9,6 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -21,11 +20,12 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 )
 
 func TestMain(m *testing.M) {
 	_, _ = logger.Init("", "error")
-	os.Exit(m.Run())
+	goleak.VerifyTestMain(m)
 }
 
 const testAPIToken = "test-api-token"
@@ -222,7 +222,6 @@ func TestRetryWithBackoff(t *testing.T) {
 			setupCtx: func() context.Context {
 				ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
 				cancel()
-				time.Sleep(5 * time.Millisecond)
 				return ctx
 			},
 			fn: func() error {
@@ -940,4 +939,29 @@ func TestHTTPStatusHandling(t *testing.T) {
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "upstream returned non-200")
 	})
+}
+
+func TestExtractOperation(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		url      string
+		expected string
+	}{
+		{"add client", "http://host/panel/api/clients/add", "clients"},
+		{"delete client", "http://host/panel/api/clients/del/email", "clients"},
+		{"update client", "http://host/panel/api/clients/update/email", "clients"},
+		{"traffic", "http://host/panel/api/clients/traffic/email", "clients"},
+		{"inbound", "http://host/panel/api/inbounds/get/1", "inbounds"},
+		{"server status", "http://host/panel/api/server/status", "server"},
+		{"unknown path", "http://host/other/path", "unknown"},
+		{"empty", "", "unknown"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, extractOperation(tt.url))
+		})
+	}
 }

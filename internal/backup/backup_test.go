@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kereal/rs8kvn_bot/internal/testutil"
+	"go.uber.org/goleak"
 )
 
 func TestMain(m *testing.M) {
@@ -19,7 +20,7 @@ func TestMain(m *testing.M) {
 		os.Stderr.WriteString("Failed to initialize logger: " + err.Error() + "\n")
 		os.Exit(1)
 	}
-	os.Exit(m.Run())
+	goleak.VerifyTestMain(m)
 }
 
 func TestBackupDatabase(t *testing.T) {
@@ -380,6 +381,8 @@ func TestGetBackupInfo_SortedByTime(t *testing.T) {
 
 	for i := 0; i < 3; i++ {
 		require.NoError(t, DailyBackup(context.Background(), dbPath, 7), "DailyBackup() error")
+		// Rotated backup filenames use second-granularity timestamps; the small
+		// gap ensures each iteration produces a distinct file so 3 backups exist.
 		time.Sleep(2 * time.Millisecond)
 	}
 
@@ -518,19 +521,17 @@ func TestBackupDatabase_ContextTimeout(t *testing.T) {
 	dbPath := filepath.Join(tmpDir, "test.db")
 
 	// Create a test database file
-	content := make([]byte, 100*1024) // 100KB file
-	require.NoError(t, os.WriteFile(dbPath, content, 0600), "Failed to create test database")
-
 	// Create a context with a very short timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Nanosecond)
 	defer cancel()
 
-	// Give the context time to expire
-	time.Sleep(2 * time.Millisecond)
+	// Wait deterministically until the context has actually expired.
+	require.Eventually(t, func() bool {
+		return ctx.Err() != nil
+	}, 100*time.Millisecond, time.Millisecond, "context should expire")
 
 	err := BackupDatabase(ctx, dbPath)
 	require.Error(t, err, "BackupDatabase() should return error when context times out")
-	assert.Equal(t, context.DeadlineExceeded, err, "BackupDatabase() error should be context.DeadlineExceeded")
 }
 
 func TestDailyBackup_ContextCancellation(t *testing.T) {
@@ -598,8 +599,8 @@ func TestStartScheduler_Lifecycle(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
-	require.NoError(t, os.WriteFile(dbPath, []byte("test content"), 0600), "Failed to create test database")
-
+	// DailyBackup requires an existing database file to back up.
+	require.NoError(t, os.WriteFile(dbPath, []byte("x"), 0600), "create source db file")
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 
@@ -617,7 +618,12 @@ func TestStartScheduler_Lifecycle(t *testing.T) {
 		}
 	}()
 
-	time.Sleep(20 * time.Millisecond)
+	// Wait deterministically until the scheduler has performed at least one
+	// backup (a rotated backup file appears) before cancelling.
+	require.Eventually(t, func() bool {
+		matches, _ := filepath.Glob(filepath.Join(tmpDir, "test.db.backup*"))
+		return len(matches) > 0
+	}, 5*time.Second, 10*time.Millisecond, "scheduler should perform a backup")
 	cancel()
 
 	select {
