@@ -262,6 +262,31 @@ func TestGetExpiredPaidSubscriptions_FreePlanExcluded(t *testing.T) {
 	assert.Empty(t, subs, "free plan subscriptions should be excluded")
 }
 
+func TestGetExpiredPaidSubscriptions_TrialPlanExcluded(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	trialPlan, err := svc.GetPlanByName(ctx, TrialPlanName)
+	require.NoError(t, err)
+
+	pastTime := time.Now().Add(-1 * time.Hour).UTC().Truncate(time.Minute)
+	sub := &Subscription{
+		TelegramID:     -9503,
+		ClientID:       "client-trial-exp-1",
+		SubscriptionID: "sub-trial-exp-1",
+		Status:         "active",
+		PlanID:         trialPlan.ID,
+		ExpiresAt:      &pastTime,
+	}
+	require.NoError(t, svc.CreateSubscription(ctx, sub, ""))
+
+	subs, err := svc.GetExpiredPaidSubscriptions(ctx, time.Now().UTC())
+	require.NoError(t, err)
+	assert.Empty(t, subs, "trial subscriptions are cleaned up by TrialCleanupScheduler")
+}
+
 // ==================== GetSubscription Tests ====================
 
 func TestService_GetSubscription_Active(t *testing.T) {
