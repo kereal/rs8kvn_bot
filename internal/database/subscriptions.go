@@ -350,13 +350,16 @@ func (s *Service) ExpireSubscription(ctx context.Context, id uint, freePlanID ui
 	return nil
 }
 
-// GetExpiredPaidSubscriptions returns active subscriptions that have expired and are not on the free plan.
+// GetExpiredPaidSubscriptions returns active subscriptions that have expired and are not on free or trial plans.
 func (s *Service) GetExpiredPaidSubscriptions(ctx context.Context, now time.Time) ([]Subscription, error) {
 	var subs []Subscription
-	freePlanSubQuery := s.db.WithContext(ctx).Select("id").Table("plans").Where("name = ?", FreePlanName)
+	nonExpiringPlanSubQuery := s.db.WithContext(ctx).
+		Select("id").
+		Table("plans").
+		Where("name IN ?", []string{FreePlanName, TrialPlanName})
 	result := s.db.WithContext(ctx).
 		Where("expires_at <= ? AND status = ? AND plan_id NOT IN (?)",
-			now, "active", freePlanSubQuery).
+			now, "active", nonExpiringPlanSubQuery).
 		Find(&subs)
 	if result.Error != nil {
 		return nil, fmt.Errorf("failed to get expired paid subscriptions: %w", result.Error)
