@@ -17,7 +17,7 @@ rs8kvn_bot — production-ready Telegram bot for distributing VLESS+Reality+Visi
 - 85%+ test coverage (unit, e2e, fuzz, leak detection)
 - Payment/order tracking for subscription purchases
 - Node-based subscription synchronization with 4-state sync machine (`subscription_nodes`)
-- 3-touch expiry reminders (3d/1d/3h) with idempotent bitmask (`subscription.reminders_sent`)
+- 3-touch expiry reminders (3d/1d/3h) with atomic claim and bitmask (`subscription.reminders_sent`)
 - Dynamic plan resolution by name (no hardcoded IDs)
 
 ---
@@ -146,13 +146,10 @@ internal/
 ├── subserver/         # Subscription server (aggregation + proxy)
 │   ├── service.go           # Thin cache adapter over SubscriptionCache (Get/Set/Invalidate)
 │   ├── fetch.go             # Fetch from upstream nodes + format detection (JSON/Clash/Base64/Plain)
-│   ├── subscription_handler.go # Subscription request handler
-│   ├── subscription_helpers.go # Header filtering (FilterHeaders)
-│   ├── clash.go             # Clash YAML → serverConfig normaliser
-│   ├── access_log.go        # Optional async /sub/{id} access log
 │   └── servers.go           # Legacy: загрузка extra-серверов (фича удалена в v2.3.0, не используется в prod)
 ├── service/          # Business logic
 │   ├── subscription.go      # Use cases: Create, Delete, DeleteByID, Renew; unified two-phase teardown (revokeAndDeprovisionThenDelete)
+│   ├── subscription_reminders.go # Reminder window model and Telegram delivery
 │   ├── subscription_traffic.go # Presentation: TrafficInfo, GetWithTraffic, formatExpiresAt
 │   ├── sync.go              # Multi-node subscription sync (Reconcile, SyncPendingNodes)
 │   ├── order.go             # Order lifecycle (Create, Activate, Expire)
@@ -169,10 +166,11 @@ internal/
 ├── database/         # Persistence
 │   ├── service.go           # GORM service + connection pool
 │   ├── migrations.go        # Embedded migration runner
-│   ├── migrations/          # 000..029 SQL files (embedded)
+│   ├── migrations/          # 000..030 SQL files (embedded)
 │   ├── models.go            # Subscription, Plan, Node, Product, Order, Invite, SubscriptionNode
-│   ├── trials.go            # Trial subscription logic, generateTrialTelegramID
-│   ├── subscriptions.go     # Subscription CRUD
+│   ├── trials.go             # Trial subscription logic, generateTrialTelegramID
+│   ├── subscriptions.go      # Subscription CRUD and lifecycle queries
+│   ├── subscription_reminders.go # Atomic reminder claim/release and expiry query
 │   ├── nodes.go             # Node CRUD
 │   ├── plans.go             # Plan CRUD
 │   ├── products.go          # Product CRUD

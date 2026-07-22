@@ -152,7 +152,8 @@ type DatabaseService struct {
 	UpdateLastRequestFunc                       func(ctx context.Context, subscriptionID string) error
 
 	GetSubscriptionsExpiringInRangeFunc func(ctx context.Context, from, to time.Time) ([]database.Subscription, error)
-	UpdateRemindersSentFunc             func(ctx context.Context, id uint, bit int) error
+	ClaimReminderFunc                   func(ctx context.Context, id uint, bit int, expiresAt time.Time) (bool, error)
+	ReleaseReminderFunc                 func(ctx context.Context, id uint, bit int, expiresAt time.Time) error
 }
 
 func (m *DatabaseService) Ping(ctx context.Context) error {
@@ -777,35 +778,10 @@ func (m *DatabaseService) GetSubscriptionsExpiringInRange(ctx context.Context, f
 	return nil, nil
 }
 
-func (m *DatabaseService) UpdateRemindersSent(ctx context.Context, id uint, bit int) error {
-	if m.UpdateRemindersSentFunc != nil {
-		return m.UpdateRemindersSentFunc(ctx, id, bit)
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.SubscriptionsByID == nil {
-		m.SubscriptionsByID = make(map[uint]*database.Subscription)
-	}
-	sub, ok := m.SubscriptionsByID[id]
-	if !ok {
-		return gorm.ErrRecordNotFound
-	}
-	sub.RemindersSent |= bit
-	if sub.TelegramID > 0 {
-		if current, exists := m.Subscriptions[sub.TelegramID]; exists {
-			current.RemindersSent = sub.RemindersSent
-		}
-	}
-	return nil
-}
-
 // ClaimReminder atomically claims a reminder bit in the stateful fake.
 func (m *DatabaseService) ClaimReminder(ctx context.Context, id uint, bit int, expiresAt time.Time) (bool, error) {
-	if m.UpdateRemindersSentFunc != nil {
-		if err := m.UpdateRemindersSentFunc(ctx, id, bit); err != nil {
-			return false, err
-		}
-		return true, nil
+	if m.ClaimReminderFunc != nil {
+		return m.ClaimReminderFunc(ctx, id, bit, expiresAt)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -827,6 +803,9 @@ func (m *DatabaseService) ClaimReminder(ctx context.Context, id uint, bit int, e
 
 // ReleaseReminder releases a reminder claim after a failed send.
 func (m *DatabaseService) ReleaseReminder(ctx context.Context, id uint, bit int, expiresAt time.Time) error {
+	if m.ReleaseReminderFunc != nil {
+		return m.ReleaseReminderFunc(ctx, id, bit, expiresAt)
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	sub, ok := m.SubscriptionsByID[id]

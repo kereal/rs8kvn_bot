@@ -366,6 +366,13 @@ Terminal-state сейчас нет.
 - уже примененную миграцию `018` редактировать нельзя;
 - схема должна обновляться через новую миграцию, а не через переписывание старой.
 
+Для expiry reminders используется отдельная миграция:
+
+- `internal/database/migrations/030_add_reminders_sent_to_subscriptions.up.sql`
+- `internal/database/migrations/030_add_reminders_sent_to_subscriptions.down.sql`
+
+Колонка `subscriptions.reminders_sent` хранит bitmask отправленных касаний (`3d`, `1d`, `3h`).
+
 ## 10. Известные проблемы, оставленные на будущее
 
 Ниже перечислены проблемы, которые известны, но пока сознательно не исправляются.

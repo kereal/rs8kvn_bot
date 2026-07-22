@@ -21,31 +21,45 @@ func (f *fakeRepo) GetSubscriptionsExpiringInRange(ctx context.Context, from, to
 	return f.subsFn(ctx, from, to)
 }
 
-func (f *fakeRepo) GetByTelegramID(ctx context.Context, telegramID int64) (*database.Subscription, error) { return nil, nil }
-func (f *fakeRepo) GetAnyByTelegramID(ctx context.Context, telegramID int64) (*database.Subscription, error) { return nil, nil }
-func (f *fakeRepo) GetByID(ctx context.Context, id uint) (*database.Subscription, error)                     { return nil, nil }
+func (f *fakeRepo) GetByTelegramID(ctx context.Context, telegramID int64) (*database.Subscription, error) {
+	return nil, nil
+}
+func (f *fakeRepo) GetAnyByTelegramID(ctx context.Context, telegramID int64) (*database.Subscription, error) {
+	return nil, nil
+}
+func (f *fakeRepo) GetByID(ctx context.Context, id uint) (*database.Subscription, error) {
+	return nil, nil
+}
 func (f *fakeRepo) CreateSubscription(ctx context.Context, sub *database.Subscription, inviteCode string) error {
 	return nil
 }
-func (f *fakeRepo) UpdateSubscription(ctx context.Context, sub *database.Subscription) error { return nil }
-func (f *fakeRepo) DeleteSubscription(ctx context.Context, telegramID int64) error            { return nil }
-func (f *fakeRepo) GetAllSubscriptions(ctx context.Context) ([]database.Subscription, error)  { return nil, nil }
-func (f *fakeRepo) CountAllSubscriptions(ctx context.Context) (int64, error)                  { return 0, nil }
-func (f *fakeRepo) CountActiveSubscriptions(ctx context.Context) (int64, error)               { return 0, nil }
-func (f *fakeRepo) CountTrialSubscriptions(ctx context.Context) (int64, error)                { return 0, nil }
-func (f *fakeRepo) CountExpiredSubscriptions(ctx context.Context) (int64, error)              { return 0, nil }
-func (f *fakeRepo) CountExpiredAtTime(ctx context.Context, t time.Time) (int64, error)        { return 0, nil }
+func (f *fakeRepo) UpdateSubscription(ctx context.Context, sub *database.Subscription) error {
+	return nil
+}
+func (f *fakeRepo) DeleteSubscription(ctx context.Context, telegramID int64) error { return nil }
+func (f *fakeRepo) GetAllSubscriptions(ctx context.Context) ([]database.Subscription, error) {
+	return nil, nil
+}
+func (f *fakeRepo) CountAllSubscriptions(ctx context.Context) (int64, error)           { return 0, nil }
+func (f *fakeRepo) CountActiveSubscriptions(ctx context.Context) (int64, error)        { return 0, nil }
+func (f *fakeRepo) CountTrialSubscriptions(ctx context.Context) (int64, error)         { return 0, nil }
+func (f *fakeRepo) CountExpiredSubscriptions(ctx context.Context) (int64, error)       { return 0, nil }
+func (f *fakeRepo) CountExpiredAtTime(ctx context.Context, t time.Time) (int64, error) { return 0, nil }
 func (f *fakeRepo) GetExpiredSubscriptionsBefore(ctx context.Context, t time.Time) ([]database.Subscription, error) {
 	return nil, nil
 }
 func (f *fakeRepo) GetExpiredPaidAtTime(ctx context.Context, t time.Time) ([]database.Subscription, error) {
 	return nil, nil
 }
-func (f *fakeRepo) ExpireSubscription(ctx context.Context, id uint, freePlanID uint) error { return nil }
+func (f *fakeRepo) ExpireSubscription(ctx context.Context, id uint, freePlanID uint) error {
+	return nil
+}
 func (f *fakeRepo) GetReferralCount(ctx context.Context, referrerTGID int64) (int64, error) {
 	return 0, nil
 }
-func (f *fakeRepo) GetAllReferralCounts(ctx context.Context) (map[int64]int64, error) { return nil, nil }
+func (f *fakeRepo) GetAllReferralCounts(ctx context.Context) (map[int64]int64, error) {
+	return nil, nil
+}
 func (f *fakeRepo) GetTelegramIDsBatch(ctx context.Context, offset, limit int) ([]int64, error) {
 	return nil, nil
 }
@@ -59,7 +73,9 @@ func (f *fakeRepo) GetBySubscriptionID(ctx context.Context, subscriptionID uint)
 func (f *fakeRepo) GetByNodeID(ctx context.Context, nodeID uint) ([]database.SubscriptionNode, error) {
 	return nil, nil
 }
-func (f *fakeRepo) GetPendingSync(ctx context.Context) ([]database.SubscriptionNode, error) { return nil, nil }
+func (f *fakeRepo) GetPendingSync(ctx context.Context) ([]database.SubscriptionNode, error) {
+	return nil, nil
+}
 func (f *fakeRepo) GetPendingBySubscriptionID(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
 	return nil, nil
 }
@@ -74,33 +90,43 @@ func (f *fakeRepo) ListEnabled(ctx context.Context) ([]database.Node, error) { r
 func (f *fakeRepo) GetProductByID(ctx context.Context, id uint) (*database.Product, error) {
 	return nil, nil
 }
-func (f *fakeRepo) CreateSubscriptionNode(ctx context.Context, sn *database.SubscriptionNode) error { return nil }
+func (f *fakeRepo) CreateSubscriptionNode(ctx context.Context, sn *database.SubscriptionNode) error {
+	return nil
+}
 func (f *fakeRepo) UpdateSubscriptionNodeStatus(ctx context.Context, subID, nodeID uint, status database.SyncStatus) error {
 	return nil
 }
-func (f *fakeRepo) UpsertSubscriptionNode(ctx context.Context, sn *database.SubscriptionNode) error { return nil }
-func (f *fakeRepo) DeleteSubscriptionNode(ctx context.Context, subID, nodeID uint) error               { return nil }
-func (f *fakeRepo) DeleteSubscriptionNodesBySubscriptionID(ctx context.Context, subID uint) error       { return nil }
+func (f *fakeRepo) UpsertSubscriptionNode(ctx context.Context, sn *database.SubscriptionNode) error {
+	return nil
+}
+func (f *fakeRepo) DeleteSubscriptionNode(ctx context.Context, subID, nodeID uint) error { return nil }
+func (f *fakeRepo) DeleteSubscriptionNodesBySubscriptionID(ctx context.Context, subID uint) error {
+	return nil
+}
 func (f *fakeRepo) MarkActiveNodesPendingUpdate(ctx context.Context, subID uint, targetNodeIDs []uint) error {
 	return nil
 }
 func (f *fakeRepo) UpdateRetry(ctx context.Context, subID, nodeID uint, retryCount int, retryAt *time.Time, lastErr *string) error {
 	return nil
 }
-func (f *fakeRepo) GetPlanByName(ctx context.Context, name string) (*database.Plan, error) { return nil, nil }
-func (f *fakeRepo) GetPlanByID(ctx context.Context, planID uint) (*database.Plan, error)   { return nil, nil }
-func (f *fakeRepo) GetAllPlans(ctx context.Context) ([]database.Plan, error)               { return nil, nil }
-func (f *fakeRepo) CreatePlan(ctx context.Context, plan *database.Plan) error               { return nil }
-func (f *fakeRepo) UpdatePlan(ctx context.Context, plan *database.Plan) error               { return nil }
-func (f *fakeRepo) DeletePlan(ctx context.Context, planID uint) error                       { return nil }
+func (f *fakeRepo) GetPlanByName(ctx context.Context, name string) (*database.Plan, error) {
+	return nil, nil
+}
+func (f *fakeRepo) GetPlanByID(ctx context.Context, planID uint) (*database.Plan, error) {
+	return nil, nil
+}
+func (f *fakeRepo) GetAllPlans(ctx context.Context) ([]database.Plan, error)  { return nil, nil }
+func (f *fakeRepo) CreatePlan(ctx context.Context, plan *database.Plan) error { return nil }
+func (f *fakeRepo) UpdatePlan(ctx context.Context, plan *database.Plan) error { return nil }
+func (f *fakeRepo) DeletePlan(ctx context.Context, planID uint) error         { return nil }
 func (f *fakeRepo) GetNodesByPlanName(ctx context.Context, planName string) ([]database.Node, error) {
 	return nil, nil
 }
 func (f *fakeRepo) GetPlansBySourceID(ctx context.Context, sourceID uint) ([]database.Product, error) {
 	return nil, nil
 }
-func (f *fakeRepo) AddSourceToPlan(ctx context.Context, planID, sourceID uint) error               { return nil }
-func (f *fakeRepo) RemoveSourceFromPlan(ctx context.Context, planID, sourceID uint) error           { return nil }
+func (f *fakeRepo) AddSourceToPlan(ctx context.Context, planID, sourceID uint) error      { return nil }
+func (f *fakeRepo) RemoveSourceFromPlan(ctx context.Context, planID, sourceID uint) error { return nil }
 func (f *fakeRepo) GetSubscription(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
 	return nil, nil
 }
@@ -110,8 +136,10 @@ func (f *fakeRepo) GetTrialSubscriptionBySubID(ctx context.Context, subscription
 func (f *fakeRepo) BindTrialSubscription(ctx context.Context, subscriptionID string, telegramID int64, username string) (*database.Subscription, error) {
 	return nil, nil
 }
-func (f *fakeRepo) CountTrialRequestsByIPLastHour(ctx context.Context, ip string) (int, error) { return 0, nil }
-func (f *fakeRepo) CreateTrialRequest(ctx context.Context, ip string) error                   { return nil }
+func (f *fakeRepo) CountTrialRequestsByIPLastHour(ctx context.Context, ip string) (int, error) {
+	return 0, nil
+}
+func (f *fakeRepo) CreateTrialRequest(ctx context.Context, ip string) error { return nil }
 func (f *fakeRepo) CleanupExpiredTrials(ctx context.Context, hours int) ([]database.Subscription, error) {
 	return nil, nil
 }
@@ -123,20 +151,22 @@ func (f *fakeRepo) GetSubscriptionStatus(ctx context.Context, subscriptionID str
 	return "", time.Time{}, nil
 }
 func (f *fakeRepo) UpdateDevices(ctx context.Context, id uint, devicesJSON string) error { return nil }
-func (f *fakeRepo) UpdateIPs(ctx context.Context, id uint, ipsJSON string) error             { return nil }
-func (f *fakeRepo) UpdateLastRequest(ctx context.Context, subscriptionID string) error        { return nil }
+func (f *fakeRepo) UpdateIPs(ctx context.Context, id uint, ipsJSON string) error         { return nil }
+func (f *fakeRepo) UpdateLastRequest(ctx context.Context, subscriptionID string) error   { return nil }
 func (f *fakeRepo) GetActiveByPlanID(ctx context.Context, planID uint) ([]database.Product, error) {
 	return nil, nil
 }
-func (f *fakeRepo) CreateOrder(ctx context.Context, order *database.Order) error                    { return nil }
-func (f *fakeRepo) GetOrderByID(ctx context.Context, id uint) (*database.Order, error)               { return nil, nil }
+func (f *fakeRepo) CreateOrder(ctx context.Context, order *database.Order) error { return nil }
+func (f *fakeRepo) GetOrderByID(ctx context.Context, id uint) (*database.Order, error) {
+	return nil, nil
+}
 func (f *fakeRepo) GetOrdersBySubscriptionID(ctx context.Context, subscriptionID uint) ([]database.Order, error) {
 	return nil, nil
 }
 func (f *fakeRepo) UpdateOrderStatus(ctx context.Context, id uint, status database.OrderStatus) error {
 	return nil
 }
-func (f *fakeRepo) UpdateOrderPaidStatus(ctx context.Context, id uint) error      { return nil }
+func (f *fakeRepo) UpdateOrderPaidStatus(ctx context.Context, id uint) error { return nil }
 func (f *fakeRepo) UpdateOrderActivatedAt(ctx context.Context, id uint, activatedAt, expiresAt time.Time) error {
 	return nil
 }
@@ -153,7 +183,7 @@ func (f *fakeRepo) CreateTrialSubscription(ctx context.Context, inviteCode, subs
 	return nil, nil
 }
 func (f *fakeRepo) ListNodes(ctx context.Context) ([]database.Node, error) { return nil, nil }
-func (f *fakeRepo) SeedDefaultData(ctx context.Context) error               { return nil }
+func (f *fakeRepo) SeedDefaultData(ctx context.Context) error              { return nil }
 func (f *fakeRepo) GetTelegramIDByUsername(ctx context.Context, username string) (int64, error) {
 	return 0, nil
 }
@@ -162,19 +192,25 @@ func (f *fakeRepo) GetExpiredPaidSubscriptions(ctx context.Context, now time.Tim
 	return nil, nil
 }
 func (f *fakeRepo) Ping(ctx context.Context) error { return nil }
-func (f *fakeRepo) Close() error { return nil }
-func (f *fakeRepo) UpdateRemindersSent(ctx context.Context, id uint, bit int) error { return nil }
+func (f *fakeRepo) Close() error                   { return nil }
+func (f *fakeRepo) ClaimReminder(ctx context.Context, id uint, bit int, expiresAt time.Time) (bool, error) {
+	return true, nil
+}
+func (f *fakeRepo) ReleaseReminder(ctx context.Context, id uint, bit int, expiresAt time.Time) error {
+	return nil
+}
 func (f *fakeRepo) DeleteSubscriptionByID(ctx context.Context, id uint) (*database.Subscription, error) {
 	return nil, nil
 }
 
 type fakeSubSvc struct {
-	bot   interfaces.BotAPI
+	bot    interfaces.BotAPI
 	sendFn func(ctx context.Context, sub *database.Subscription, bit int, daysLeft int, hoursLeft int) error
 }
 
-func (f *fakeSubSvc) SendExpiryReminder(ctx context.Context, sub *database.Subscription, bit int, daysLeft int, hoursLeft int) error {
-	return f.sendFn(ctx, sub, bit, daysLeft, hoursLeft)
+func (f *fakeSubSvc) SendExpiryReminder(ctx context.Context, sub *database.Subscription, window interfaces.SubscriptionReminderWindow) error {
+	daysLeft, hoursLeft := service.ReminderWindowRemaining(time.Now().UTC(), *sub.ExpiresAt)
+	return f.sendFn(ctx, sub, window.Bit, daysLeft, hoursLeft)
 }
 
 func TestSubscriptionReminderWorker_process_SendsReminderForMatchingWindow(t *testing.T) {

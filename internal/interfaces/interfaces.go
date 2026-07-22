@@ -81,7 +81,6 @@ type SubscriptionStatus interface {
 	GetSubscriptionStatus(ctx context.Context, subscriptionID string) (string, time.Time, error)
 	ExpireSubscription(ctx context.Context, id uint, freePlanID uint) error
 	GetExpiredPaidSubscriptions(ctx context.Context, now time.Time) ([]database.Subscription, error)
-	GetSubscriptionsExpiringInRange(ctx context.Context, from, to time.Time) ([]database.Subscription, error)
 }
 
 // SubscriptionJSONFields updates JSON-encoded fields on subscriptions.
@@ -90,15 +89,24 @@ type SubscriptionJSONFields interface {
 	UpdateIPs(ctx context.Context, id uint, ipsJSON string) error
 }
 
-// SubscriptionRemindersSent manages reminder bits on subscriptions.
-type SubscriptionRemindersSent interface {
-	UpdateRemindersSent(ctx context.Context, id uint, bit int) error
+// SubscriptionReminderRepository provides the atomic reminder workflow and expiry query.
+type SubscriptionReminderRepository interface {
+	GetSubscriptionsExpiringInRange(ctx context.Context, from, to time.Time) ([]database.Subscription, error)
+	ClaimReminder(ctx context.Context, id uint, bit int, expiresAt time.Time) (bool, error)
+	ReleaseReminder(ctx context.Context, id uint, bit int, expiresAt time.Time) error
+}
+
+// SubscriptionReminderWindow identifies one expiry reminder touch.
+type SubscriptionReminderWindow struct {
+	Name     string
+	Bit      int
+	LeadTime time.Duration
 }
 
 // SubscriptionReminderService is the narrow contract the reminder worker needs
 // from the subscription service.
 type SubscriptionReminderService interface {
-	SendExpiryReminder(ctx context.Context, sub *database.Subscription, bit int, daysLeft int, hoursLeft int) error
+	SendExpiryReminder(ctx context.Context, sub *database.Subscription, window SubscriptionReminderWindow) error
 }
 
 // SubscriptionLastRequest updates the last_request timestamp on subscriptions.
@@ -118,7 +126,7 @@ type SubscriptionRepository interface {
 	SubscriptionCounts
 	SubscriptionStatus
 	SubscriptionJSONFields
-	SubscriptionRemindersSent
+	SubscriptionReminderRepository
 	SubscriptionLastRequest
 	SubscriptionLookup
 }

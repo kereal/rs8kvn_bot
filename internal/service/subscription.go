@@ -14,13 +14,13 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/utils"
 	"github.com/kereal/rs8kvn_bot/internal/vpn"
 
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
 
 type SubscriptionService struct {
 	db                interfaces.DatabaseService
+	reminderRepo      interfaces.SubscriptionReminderRepository
 	xuiClients        map[uint]interfaces.XUIClient
 	vpnClients        map[uint]vpn.Client
 	nodes             []database.Node
@@ -29,80 +29,6 @@ type SubscriptionService struct {
 	invalidateBySubID func(subID string)
 	syncService       *SyncService
 	bot               interfaces.BotAPI
-}
-type reminderClaimer interface {
-	ClaimReminder(ctx context.Context, id uint, bit int, expiresAt time.Time) (bool, error)
-	ReleaseReminder(ctx context.Context, id uint, bit int, expiresAt time.Time) error
-}
-
-// SendExpiryReminder claims a reminder bit before sending and releases it on send failure.
-func (s *SubscriptionService) SendExpiryReminder(ctx context.Context, sub *database.Subscription, bit int, daysLeft int, hoursLeft int) error {
-	if s.bot == nil || sub == nil || sub.TelegramID == 0 || sub.ExpiresAt == nil {
-		return nil
-	}
-	window := reminderWindow(bit)
-	claimer, supportsClaim := s.db.(reminderClaimer)
-	if supportsClaim {
-		claimed, err := claimer.ClaimReminder(ctx, sub.ID, bit, *sub.ExpiresAt)
-		if err != nil {
-			metrics.SubscriptionRemindersTotal.WithLabelValues(window, "error").Inc()
-			return fmt.Errorf("claim reminder: %w", err)
-		}
-		if !claimed {
-			return nil
-		}
-	}
-
-	text := utils.EscapeMarkdownV2(reminderText(daysLeft, hoursLeft, s.cfg.SubURL(sub.SubscriptionID)))
-	msg := tgbotapi.NewMessage(sub.TelegramID, text)
-	msg.ParseMode = tgbotapi.ModeMarkdownV2
-	if _, err := s.bot.Send(msg); err != nil {
-		if supportsClaim {
-			if releaseErr := claimer.ReleaseReminder(ctx, sub.ID, bit, *sub.ExpiresAt); releaseErr != nil {
-				err = errors.Join(err, releaseErr)
-			}
-		}
-		metrics.SubscriptionRemindersTotal.WithLabelValues(window, "error").Inc()
-		return fmt.Errorf("send reminder: %w", err)
-	}
-	if !supportsClaim {
-		if err := s.db.UpdateRemindersSent(ctx, sub.ID, bit); err != nil {
-			metrics.SubscriptionRemindersTotal.WithLabelValues(window, "error").Inc()
-			return fmt.Errorf("mark reminder: %w", err)
-		}
-	}
-	metrics.SubscriptionRemindersTotal.WithLabelValues(window, "success").Inc()
-	return nil
-}
-
-func reminderWindow(bit int) string {
-	switch bit {
-	case ReminderBit3Days:
-		return "3d"
-	case ReminderBit1Day:
-		return "1d"
-	case ReminderBit3Hours:
-		return "3h"
-	default:
-		return "unknown"
-	}
-}
-
-const (
-	// ReminderBit3Days marks the 3-day reminder.
-	ReminderBit3Days = 1 << iota
-	// ReminderBit1Day marks the 1-day reminder.
-	ReminderBit1Day
-	// ReminderBit3Hours marks the 3-hour reminder.
-	ReminderBit3Hours
-)
-
-func reminderText(daysLeft int, hoursLeft int, subURL string) string {
-	const renewalInstruction = "\n\nЧтобы продлить подписку, откройте главное меню — нажмите /start."
-	if daysLeft > 0 {
-		return fmt.Sprintf("⏳ До окончания подписки осталось %d д\n%s%s", daysLeft, subURL, renewalInstruction)
-	}
-	return fmt.Sprintf("🚨 До окончания подписки осталось %d ч\n%s%s", hoursLeft, subURL, renewalInstruction)
 }
 
 type CreateResult struct {
@@ -119,14 +45,15 @@ func XUIEmail(username string, telegramID int64) string {
 	return fmt.Sprintf("tgId_%d", telegramID)
 }
 
-// NewSubscriptionService creates a SubscriptionService configured with the given database, XUI clients map, VPN clients map, nodes, and configuration.
+// NewSubscriptionService creates a SubscriptionService configured with the given database, xui clients, VPN clients, nodes, and configuration.
 func NewSubscriptionService(db interfaces.DatabaseService, xuiClients map[uint]interfaces.XUIClient, vpnClients map[uint]vpn.Client, nodes []database.Node, cfg *config.Config) *SubscriptionService {
 	return &SubscriptionService{
-		db:         db,
-		xuiClients: xuiClients,
-		vpnClients: vpnClients,
-		nodes:      nodes,
-		cfg:        cfg,
+		db:           db,
+		reminderRepo: db,
+		xuiClients:   xuiClients,
+		vpnClients:   vpnClients,
+		nodes:        nodes,
+		cfg:          cfg,
 	}
 }
 
