@@ -41,8 +41,17 @@ func (s *Service) ReleaseReminder(ctx context.Context, id uint, bit int, expires
 	if result.Error != nil {
 		return fmt.Errorf("failed to release reminder: %w", result.Error)
 	}
-	if result.RowsAffected == 0 {
+	if result.RowsAffected > 0 {
+		return nil
+	}
+
+	var current Subscription
+	check := s.db.WithContext(ctx).Select("id, expires_at").First(&current, id)
+	if errors.Is(check.Error, gorm.ErrRecordNotFound) {
 		return ErrSubscriptionNotFound
+	}
+	if check.Error != nil {
+		return fmt.Errorf("failed to verify reminder release: %w", check.Error)
 	}
 	return nil
 }

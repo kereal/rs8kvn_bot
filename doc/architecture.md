@@ -17,7 +17,7 @@ rs8kvn_bot — production-ready Telegram bot for distributing VLESS+Reality+Visi
 - 85%+ test coverage (unit, e2e, fuzz, leak detection)
 - Payment/order tracking for subscription purchases
 - Node-based subscription synchronization with 4-state sync machine (`subscription_nodes`)
-- 3-touch expiry reminders (3d/1d/3h) with atomic claim and bitmask (`subscription.reminders_sent`)
+- 3-touch expiry reminders (3d/1d/3h) with atomic claim and bitmask (`subscriptions.reminders_sent`)
 - Dynamic plan resolution by name (no hardcoded IDs)
 
 ---
@@ -507,7 +507,7 @@ SIGQUIT (kill -3) → graceful shutdown (also handled)
 │ last_request        *time     INDEX (NULL until first /sub)  │
 │ created_at           time     autoCreate                     │
 │ updated_at           time     autoUpdate                     │
-└─────────────────────────────────────────────────────────────┘
+│ reminders_sent       int      NOT NULL default: 0 (bitmask: 3d/1d/3h)   │
                                │
                                │ referred_by
                                ▼
@@ -925,6 +925,6 @@ The bot exposes a `/metrics` endpoint (via `promhttp.Handler()`) on the HTTP ser
 
 ### N. Subscription Reminder Worker (internal/scheduler/subscription_reminder_worker.go)
 
-Worker каждые 30 минут выбирает активные платные подписки, у которых `expires_at` попадает в окна 3д / 1д / 3ч. Для каждого окна `SubscriptionService.SendExpiryReminder()` атомарно claim-ит bit только при неизменном сроке и отправляет сообщение с безопасным MarkdownV2 URL. При ошибке Telegram claim освобождается для повторной попытки. Повторы при пересекающихся окнах и параллельных вызовах исключаются условным claim по `subscription.reminders_sent`. При продлении (`RenewSubscription`) маска сбрасывается в `0` в одной транзакции с обновлением подписки и созданием order. Подписки без `expires_at`, а также free/trial планы не участвуют. Метрики: `subscription_reminders_total{window,result}` и `subscription_reminder_runs_total`.
+Worker каждые 30 минут выбирает активные платные подписки, у которых `expires_at` попадает в окна 3д / 1д / 3ч. Для каждого окна `SubscriptionService.SendExpiryReminder()` атомарно claim-ит bit только при неизменном сроке и отправляет сообщение с безопасным MarkdownV2 URL. При ошибке Telegram claim освобождается для повторной попытки. Повторы при пересекающихся окнах и параллельных вызовах исключаются условным claim по `subscriptions.reminders_sent`. При продлении (`RenewSubscription`) маска сбрасывается в `0` в одной транзакции с обновлением подписки и созданием order. Подписки без `expires_at`, а также free/trial планы не участвуют. Метрики: `subscription_reminders_total{window,result}` и `subscription_reminder_runs_total`.
 
 *End of architecture documentation.*
