@@ -431,12 +431,14 @@ func buildTUICServerLink(cfg *serverConfig) (string, error) {
 		remark = cfg.Ps
 	}
 
-	userInfo := cfg.UUID
+	var userInfo *url.Userinfo
 	if cfg.Password != "" {
-		userInfo = userInfo + ":" + cfg.Password
+		userInfo = url.UserPassword(cfg.UUID, cfg.Password)
+	} else {
+		userInfo = url.User(cfg.UUID)
 	}
 
-	base := "tuic://" + url.UserPassword(cfg.UUID, cfg.Password).String() + "@" + net.JoinHostPort(cfg.Address, strconv.Itoa(cfg.Port))
+	base := "tuic://" + userInfo.String() + "@" + net.JoinHostPort(cfg.Address, strconv.Itoa(cfg.Port))
 	if params.Encode() != "" {
 		base += "?" + params.Encode()
 	}
