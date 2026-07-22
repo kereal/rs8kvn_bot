@@ -253,7 +253,7 @@ func startWebServer(subService *service.SubscriptionService, cfg *config.Config,
 // завершения при штатном выключении.
 func startBackgroundWorkers(ctx context.Context, handler *bot.Handler, subService *service.SubscriptionService, dbService *database.Service, cfg *config.Config, vpnClients map[uint]vpn.Client, nodes []database.Node) *sync.WaitGroup {
 	var wg sync.WaitGroup
-	wg.Add(7)
+	wg.Add(8)
 
 	go func() {
 		defer recoverAndReport("DB pool metrics collector")
@@ -344,6 +344,13 @@ func startBackgroundWorkers(ctx context.Context, handler *bot.Handler, subServic
 		expireWorker.Run(ctx)
 	}()
 
+	go func() {
+		defer recoverAndReport("Subscription reminder worker")
+		defer wg.Done()
+		reminderWorker := scheduler.NewSubscriptionReminderWorker(dbService, subService)
+		reminderWorker.Run(ctx)
+	}()
+
 	return &wg
 }
 
@@ -426,6 +433,7 @@ func main() {
 		logger.Fatal("Telegram bot initialization failed", zap.Error(err))
 	}
 	svc.handler.SetBot(api)
+	svc.subService.SetBot(api)
 	svc.handler.SetBotConfig(bc)
 	botAPI = api
 	if webServer != nil {

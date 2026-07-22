@@ -337,6 +337,23 @@ var (
 	)
 )
 
+// SubscriptionRemindersTotal counts reminder sends by expiry window and result.
+var SubscriptionRemindersTotal = promauto.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "subscription_reminders_total",
+		Help: "Total number of subscription expiry reminder sends by window and result.",
+	},
+	[]string{"window", "result"},
+)
+
+// SubscriptionReminderRunsTotal counts reminder worker scans.
+var SubscriptionReminderRunsTotal = promauto.NewCounter(
+	prometheus.CounterOpts{
+		Name: "subscription_reminder_runs_total",
+		Help: "Total number of subscription reminder worker scans.",
+	},
+)
+
 // InstrumentHTTP middleware records metrics for HTTP requests.
 func InstrumentHTTP(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
