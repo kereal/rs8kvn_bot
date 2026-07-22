@@ -66,19 +66,21 @@ func NewTestDatabaseService(t any) (*database.Service, error) {
 
 func NewDatabaseService() *DatabaseService {
 	return &DatabaseService{
-		Subscriptions: make(map[int64]*database.Subscription),
+		Subscriptions:     make(map[int64]*database.Subscription),
+		SubscriptionsByID: make(map[uint]*database.Subscription),
 	}
 }
 
 type DatabaseService struct {
 	mu                                          sync.RWMutex
 	Subscriptions                               map[int64]*database.Subscription
+	SubscriptionsByID                           map[uint]*database.Subscription
 	Products                                    map[uint]*database.Product
 	Orders                                      map[uint]*database.Order
 	OrdersBySubscriptionID                      map[uint][]database.Order
 	PingFunc                                    func(ctx context.Context) error
 	GetByTelegramIDFunc                         func(ctx context.Context, telegramID int64) (*database.Subscription, error)
-	GetAnyByTelegramIDFunc                    func(ctx context.Context, telegramID int64) (*database.Subscription, error)
+	GetAnyByTelegramIDFunc                      func(ctx context.Context, telegramID int64) (*database.Subscription, error)
 	CreateSubscriptionFunc                      func(ctx context.Context, sub *database.Subscription, inviteCode string) error
 	UpdateSubscriptionFunc                      func(ctx context.Context, sub *database.Subscription) error
 	DeleteSubscriptionFunc                      func(ctx context.Context, telegramID int64) error
@@ -148,6 +150,10 @@ type DatabaseService struct {
 	UpdateDevicesFunc                           func(ctx context.Context, id uint, devicesJSON string) error
 	UpdateIPsFunc                               func(ctx context.Context, id uint, ipsJSON string) error
 	UpdateLastRequestFunc                       func(ctx context.Context, subscriptionID string) error
+
+	GetSubscriptionsExpiringInRangeFunc func(ctx context.Context, from, to time.Time) ([]database.Subscription, error)
+	ClaimReminderFunc                   func(ctx context.Context, id uint, bit int, expiresAt time.Time) (bool, error)
+	ReleaseReminderFunc                 func(ctx context.Context, id uint, bit int, expiresAt time.Time) error
 }
 
 func (m *DatabaseService) Ping(ctx context.Context) error {
@@ -192,6 +198,12 @@ func (m *DatabaseService) GetByID(ctx context.Context, id uint) (*database.Subsc
 	if m.GetByIDFunc != nil {
 		return m.GetByIDFunc(ctx, id)
 	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if sub, ok := m.SubscriptionsByID[id]; ok {
+		copy := *sub
+		return &copy, nil
+	}
 	return nil, gorm.ErrRecordNotFound
 }
 
@@ -204,9 +216,15 @@ func (m *DatabaseService) CreateSubscription(ctx context.Context, sub *database.
 	if m.Subscriptions == nil {
 		m.Subscriptions = make(map[int64]*database.Subscription)
 	}
+	if m.SubscriptionsByID == nil {
+		m.SubscriptionsByID = make(map[uint]*database.Subscription)
+	}
+	stored := *sub
 	if sub.TelegramID > 0 {
-		stored := *sub
 		m.Subscriptions[sub.TelegramID] = &stored
+	}
+	if sub.ID > 0 {
+		m.SubscriptionsByID[sub.ID] = &stored
 	}
 	return nil
 }
@@ -332,8 +350,15 @@ func (m *DatabaseService) UpdateSubscription(ctx context.Context, sub *database.
 	if m.Subscriptions == nil {
 		m.Subscriptions = make(map[int64]*database.Subscription)
 	}
+	stored := *sub
 	if sub.TelegramID > 0 {
-		m.Subscriptions[sub.TelegramID] = sub
+		m.Subscriptions[sub.TelegramID] = &stored
+	}
+	if sub.ID > 0 {
+		if m.SubscriptionsByID == nil {
+			m.SubscriptionsByID = make(map[uint]*database.Subscription)
+		}
+		m.SubscriptionsByID[sub.ID] = &stored
 	}
 	return nil
 }
@@ -746,6 +771,58 @@ func (m *DatabaseService) GetExpiredPaidSubscriptions(ctx context.Context, now t
 	return nil, nil
 }
 
+func (m *DatabaseService) GetSubscriptionsExpiringInRange(ctx context.Context, from, to time.Time) ([]database.Subscription, error) {
+	if m.GetSubscriptionsExpiringInRangeFunc != nil {
+		return m.GetSubscriptionsExpiringInRangeFunc(ctx, from, to)
+	}
+	return nil, nil
+}
+
+// ClaimReminder atomically claims a reminder bit in the stateful fake.
+func (m *DatabaseService) ClaimReminder(ctx context.Context, id uint, bit int, expiresAt time.Time) (bool, error) {
+	if m.ClaimReminderFunc != nil {
+		return m.ClaimReminderFunc(ctx, id, bit, expiresAt)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	sub, ok := m.SubscriptionsByID[id]
+	if !ok {
+		return false, gorm.ErrRecordNotFound
+	}
+	if sub.ExpiresAt == nil || !sub.ExpiresAt.Equal(expiresAt) || sub.RemindersSent&bit != 0 {
+		return false, nil
+	}
+	sub.RemindersSent |= bit
+	if sub.TelegramID > 0 {
+		if current, exists := m.Subscriptions[sub.TelegramID]; exists {
+			current.RemindersSent = sub.RemindersSent
+		}
+	}
+	return true, nil
+}
+
+// ReleaseReminder releases a reminder claim after a failed send.
+func (m *DatabaseService) ReleaseReminder(ctx context.Context, id uint, bit int, expiresAt time.Time) error {
+	if m.ReleaseReminderFunc != nil {
+		return m.ReleaseReminderFunc(ctx, id, bit, expiresAt)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	sub, ok := m.SubscriptionsByID[id]
+	if !ok {
+		return gorm.ErrRecordNotFound
+	}
+	if sub.ExpiresAt == nil || !sub.ExpiresAt.Equal(expiresAt) {
+		return nil
+	}
+	sub.RemindersSent &^= bit
+	if sub.TelegramID > 0 {
+		if current, exists := m.Subscriptions[sub.TelegramID]; exists {
+			current.RemindersSent = sub.RemindersSent
+		}
+	}
+	return nil
+}
 func (m *DatabaseService) GetActiveByPlanID(ctx context.Context, planID uint) ([]database.Product, error) {
 	if m.GetActiveByPlanIDFunc != nil {
 		return m.GetActiveByPlanIDFunc(ctx, planID)

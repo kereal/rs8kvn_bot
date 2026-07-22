@@ -20,6 +20,7 @@ import (
 
 type SubscriptionService struct {
 	db                interfaces.DatabaseService
+	reminderRepo      interfaces.SubscriptionReminderRepository
 	xuiClients        map[uint]interfaces.XUIClient
 	vpnClients        map[uint]vpn.Client
 	nodes             []database.Node
@@ -27,6 +28,7 @@ type SubscriptionService struct {
 	invalidate        func(telegramID int64)
 	invalidateBySubID func(subID string)
 	syncService       *SyncService
+	bot               interfaces.BotAPI
 }
 
 type CreateResult struct {
@@ -43,15 +45,21 @@ func XUIEmail(username string, telegramID int64) string {
 	return fmt.Sprintf("tgId_%d", telegramID)
 }
 
-// NewSubscriptionService creates a SubscriptionService configured with the given database, XUI clients map, VPN clients map, nodes, and configuration.
+// NewSubscriptionService creates a SubscriptionService configured with the given database, xui clients, VPN clients, nodes, and configuration.
 func NewSubscriptionService(db interfaces.DatabaseService, xuiClients map[uint]interfaces.XUIClient, vpnClients map[uint]vpn.Client, nodes []database.Node, cfg *config.Config) *SubscriptionService {
 	return &SubscriptionService{
-		db:         db,
-		xuiClients: xuiClients,
-		vpnClients: vpnClients,
-		nodes:      nodes,
-		cfg:        cfg,
+		db:           db,
+		reminderRepo: db,
+		xuiClients:   xuiClients,
+		vpnClients:   vpnClients,
+		nodes:        nodes,
+		cfg:          cfg,
 	}
+}
+
+// SetBot links the Telegram bot client to the subscription service.
+func (s *SubscriptionService) SetBot(bot interfaces.BotAPI) {
+	s.bot = bot
 }
 
 // SetSyncService links the subscription service to the sync module.
@@ -791,24 +799,19 @@ func (s *SubscriptionService) ensureSubscriptionNodes(ctx context.Context, sub *
 		return fmt.Errorf("nil subscription")
 	}
 
-	// 1. Load active 3x-ui nodes linked to the subscription's plan
 	nodes, err := s.db.GetNodesByPlanID(ctx, sub.PlanID)
 	if err != nil {
 		return fmt.Errorf("load plan nodes: %w", err)
 	}
-
-	// 2. Load existing subscription_nodes to avoid duplicates
 	existing, err := s.db.GetBySubscriptionID(ctx, sub.ID)
 	if err != nil {
 		return fmt.Errorf("load subscription nodes: %w", err)
 	}
-
 	existingByNodeID := make(map[uint]database.SubscriptionNode, len(existing))
 	for _, sn := range existing {
 		existingByNodeID[sn.NodeID] = sn
 	}
 
-	// 3. Create pending_add for each active plan node not yet in subscription_nodes
 	createdAny := false
 	for _, node := range nodes {
 		if !node.IsActive {
@@ -827,7 +830,6 @@ func (s *SubscriptionService) ensureSubscriptionNodes(ctx context.Context, sub *
 		createdAny = true
 	}
 
-	// 4. Best-effort sync: trigger immediate VPN provisioning
 	if createdAny && s.syncService != nil {
 		if syncErr := s.syncService.SyncSubscription(ctx, sub.ID); syncErr != nil {
 			logger.Warn("initial sync failed for subscription",
@@ -876,29 +878,30 @@ func (s *SubscriptionService) RenewSubscription(ctx context.Context, telegramID 
 			Updates(sub).Error; err != nil {
 			return fmt.Errorf("update subscription: %w", err)
 		}
-
+		if err := tx.Model(&database.Subscription{}).
+			Where("id = ?", sub.ID).
+			Update("reminders_sent", 0).Error; err != nil {
+			return fmt.Errorf("reset reminders: %w", err)
+		}
 		if err := tx.Create(order).Error; err != nil {
 			return fmt.Errorf("create order: %w", err)
 		}
-
 		return nil
 	}); err != nil {
 		return nil, err
 	}
 
 	metrics.SubscriptionRenewalsTotal.Inc()
-
 	if s.invalidateBySubID != nil && sub.SubscriptionID != "" {
 		s.invalidateBySubID(sub.SubscriptionID)
 	}
 
 	if s.syncService != nil {
-		if planChanged || (oldExpiry == nil || !oldExpiry.Equal(newExpiry)) {
+		if planChanged || oldExpiry == nil || !oldExpiry.Equal(newExpiry) {
 			if err := s.syncService.ApplyPlanToSubscription(ctx, sub.ID); err != nil {
 				return order, fmt.Errorf("renew subscription: apply plan: %w", err)
 			}
 		}
-
 		if err := s.syncService.SyncSubscription(ctx, sub.ID); err != nil {
 			logger.Warn("renew subscription: post-commit sync failed",
 				zap.Uint("subscription_id", sub.ID),

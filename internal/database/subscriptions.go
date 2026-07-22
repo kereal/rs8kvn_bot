@@ -84,6 +84,7 @@ func (s *Service) CreateSubscription(ctx context.Context, sub *Subscription, inv
 }
 
 // UpdateSubscription updates an existing subscription.
+// UpdateSubscription updates lifecycle fields without touching reminder state.
 func (s *Service) UpdateSubscription(ctx context.Context, sub *Subscription) error {
 	result := s.db.WithContext(ctx).Model(&Subscription{}).
 		Where("id = ?", sub.ID).
