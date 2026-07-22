@@ -22,33 +22,57 @@ import (
 // --- SubscriptionRepository ---
 
 type SubscriptionRepositoryFake struct {
-	GetByTelegramIDFunc             func(ctx context.Context, telegramID int64) (*database.Subscription, error)
-	GetAnyByTelegramIDFunc             func(ctx context.Context, telegramID int64) (*database.Subscription, error)
-	CreateSubscriptionFunc          func(ctx context.Context, sub *database.Subscription, inviteCode string) error
-	UpdateSubscriptionFunc          func(ctx context.Context, sub *database.Subscription) error
-	DeleteSubscriptionFunc          func(ctx context.Context, telegramID int64) error
-	DeleteSubscriptionByIDFunc      func(ctx context.Context, id uint) (*database.Subscription, error)
-	GetLatestSubscriptionsFunc      func(ctx context.Context, limit int) ([]database.Subscription, error)
-	GetAllSubscriptionsFunc         func(ctx context.Context) ([]database.Subscription, error)
-	CountAllSubscriptionsFunc       func(ctx context.Context) (int64, error)
-	CountActiveSubscriptionsFunc    func(ctx context.Context) (int64, error)
-	CountTrialSubscriptionsFunc     func(ctx context.Context) (int64, error)
-	CountExpiredSubscriptionsFunc   func(ctx context.Context) (int64, error)
-	GetAllTelegramIDsFunc           func(ctx context.Context) ([]int64, error)
-	GetTelegramIDByUsernameFunc     func(ctx context.Context, username string) (int64, error)
-	GetTelegramIDsBatchFunc         func(ctx context.Context, offset, limit int) ([]int64, error)
-	GetTotalTelegramIDCountFunc     func(ctx context.Context) (int64, error)
-	GetSubscriptionStatusFunc       func(ctx context.Context, subscriptionID string) (string, time.Time, error)
-	ExpireSubscriptionFunc          func(ctx context.Context, id uint, freePlanID uint) error
-	GetExpiredPaidSubscriptionsFunc func(ctx context.Context, now time.Time) ([]database.Subscription, error)
-	UpdateDevicesFunc               func(ctx context.Context, id uint, devicesJSON string) error
-	UpdateIPsFunc                   func(ctx context.Context, id uint, ipsJSON string) error
-	UpdateLastRequestFunc           func(ctx context.Context, subscriptionID string) error
-	GetSubscriptionFunc             func(ctx context.Context, subscriptionID string) (*database.Subscription, error)
-	GetWithPlanAndNodesFunc         func(ctx context.Context, subscriptionID string) (*database.SubscriptionFull, error)
+	GetByTelegramIDFunc                 func(ctx context.Context, telegramID int64) (*database.Subscription, error)
+	GetAnyByTelegramIDFunc              func(ctx context.Context, telegramID int64) (*database.Subscription, error)
+	CreateSubscriptionFunc              func(ctx context.Context, sub *database.Subscription, inviteCode string) error
+	UpdateSubscriptionFunc              func(ctx context.Context, sub *database.Subscription) error
+	DeleteSubscriptionFunc              func(ctx context.Context, telegramID int64) error
+	DeleteSubscriptionByIDFunc          func(ctx context.Context, id uint) (*database.Subscription, error)
+	GetLatestSubscriptionsFunc          func(ctx context.Context, limit int) ([]database.Subscription, error)
+	GetAllSubscriptionsFunc             func(ctx context.Context) ([]database.Subscription, error)
+	CountAllSubscriptionsFunc           func(ctx context.Context) (int64, error)
+	CountActiveSubscriptionsFunc        func(ctx context.Context) (int64, error)
+	CountTrialSubscriptionsFunc         func(ctx context.Context) (int64, error)
+	CountExpiredSubscriptionsFunc       func(ctx context.Context) (int64, error)
+	GetAllTelegramIDsFunc               func(ctx context.Context) ([]int64, error)
+	GetTelegramIDByUsernameFunc         func(ctx context.Context, username string) (int64, error)
+	GetTelegramIDsBatchFunc             func(ctx context.Context, offset, limit int) ([]int64, error)
+	GetTotalTelegramIDCountFunc         func(ctx context.Context) (int64, error)
+	GetSubscriptionStatusFunc           func(ctx context.Context, subscriptionID string) (string, time.Time, error)
+	ExpireSubscriptionFunc              func(ctx context.Context, id uint, freePlanID uint) error
+	GetExpiredPaidSubscriptionsFunc     func(ctx context.Context, now time.Time) ([]database.Subscription, error)
+	UpdateDevicesFunc                   func(ctx context.Context, id uint, devicesJSON string) error
+	UpdateIPsFunc                       func(ctx context.Context, id uint, ipsJSON string) error
+	UpdateLastRequestFunc               func(ctx context.Context, subscriptionID string) error
+	GetSubscriptionFunc                 func(ctx context.Context, subscriptionID string) (*database.Subscription, error)
+	GetWithPlanAndNodesFunc             func(ctx context.Context, subscriptionID string) (*database.SubscriptionFull, error)
+	GetSubscriptionsExpiringInRangeFunc func(ctx context.Context, from, to time.Time) ([]database.Subscription, error)
+	ClaimReminderFunc                   func(ctx context.Context, id uint, bit int, expiresAt time.Time) (bool, error)
+	ReleaseReminderFunc                 func(ctx context.Context, id uint, bit int, expiresAt time.Time) error
 }
 
 func NewSubscriptionRepository() *SubscriptionRepositoryFake { return &SubscriptionRepositoryFake{} }
+
+func (m *SubscriptionRepositoryFake) GetSubscriptionsExpiringInRange(ctx context.Context, from, to time.Time) ([]database.Subscription, error) {
+	if m.GetSubscriptionsExpiringInRangeFunc != nil {
+		return m.GetSubscriptionsExpiringInRangeFunc(ctx, from, to)
+	}
+	return nil, nil
+}
+
+func (m *SubscriptionRepositoryFake) ClaimReminder(ctx context.Context, id uint, bit int, expiresAt time.Time) (bool, error) {
+	if m.ClaimReminderFunc != nil {
+		return m.ClaimReminderFunc(ctx, id, bit, expiresAt)
+	}
+	return true, nil
+}
+
+func (m *SubscriptionRepositoryFake) ReleaseReminder(ctx context.Context, id uint, bit int, expiresAt time.Time) error {
+	if m.ReleaseReminderFunc != nil {
+		return m.ReleaseReminderFunc(ctx, id, bit, expiresAt)
+	}
+	return nil
+}
 
 func (m *SubscriptionRepositoryFake) GetByTelegramID(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 	if m.GetByTelegramIDFunc != nil {

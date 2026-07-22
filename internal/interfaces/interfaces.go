@@ -61,6 +61,7 @@ type SubscriptionQueries interface {
 	GetByID(ctx context.Context, id uint) (*database.Subscription, error)
 	GetLatestSubscriptions(ctx context.Context, limit int) ([]database.Subscription, error)
 	GetAllSubscriptions(ctx context.Context) ([]database.Subscription, error)
+	GetWithPlanAndNodes(ctx context.Context, subscriptionID string) (*database.SubscriptionFull, error)
 }
 
 // SubscriptionCounts retrieves subscription statistics.
@@ -88,6 +89,26 @@ type SubscriptionJSONFields interface {
 	UpdateIPs(ctx context.Context, id uint, ipsJSON string) error
 }
 
+// SubscriptionReminderRepository provides the atomic reminder workflow and expiry query.
+type SubscriptionReminderRepository interface {
+	GetSubscriptionsExpiringInRange(ctx context.Context, from, to time.Time) ([]database.Subscription, error)
+	ClaimReminder(ctx context.Context, id uint, bit int, expiresAt time.Time) (bool, error)
+	ReleaseReminder(ctx context.Context, id uint, bit int, expiresAt time.Time) error
+}
+
+// SubscriptionReminderWindow identifies one expiry reminder touch.
+type SubscriptionReminderWindow struct {
+	Name     string
+	Bit      int
+	LeadTime time.Duration
+}
+
+// SubscriptionReminderService is the narrow contract the reminder worker needs
+// from the subscription service.
+type SubscriptionReminderService interface {
+	SendExpiryReminder(ctx context.Context, sub *database.Subscription, window SubscriptionReminderWindow) error
+}
+
 // SubscriptionLastRequest updates the last_request timestamp on subscriptions.
 type SubscriptionLastRequest interface {
 	UpdateLastRequest(ctx context.Context, subscriptionID string) error
@@ -95,8 +116,7 @@ type SubscriptionLastRequest interface {
 
 // SubscriptionLookup provides methods for external subscription ID lookups.
 type SubscriptionLookup interface {
-	GetSubscription(ctx context.Context, subscriptionID string) (*database.Subscription, error)
-	GetWithPlanAndNodes(ctx context.Context, subscriptionID string) (*database.SubscriptionFull, error)
+	GetReferralCount(ctx context.Context, referrerTGID int64) (int64, error)
 }
 
 // SubscriptionRepository combines all subscription interfaces.
@@ -106,6 +126,7 @@ type SubscriptionRepository interface {
 	SubscriptionCounts
 	SubscriptionStatus
 	SubscriptionJSONFields
+	SubscriptionReminderRepository
 	SubscriptionLastRequest
 	SubscriptionLookup
 }
