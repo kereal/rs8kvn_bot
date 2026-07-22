@@ -110,6 +110,7 @@ type appServices struct {
 // and cache invalidation composition.
 func initServices(cfg *config.Config, dbService *database.Service, deps *runtimeDeps, botAPI *tgbotapi.BotAPI, botConfig *bot.BotConfig) *appServices {
 	subService := service.NewSubscriptionService(dbService, deps.xuiClients, deps.vpnClients, deps.nodes, cfg)
+	subService.SetBot(botAPI)
 	subServer := subserver.NewService(config.SubServerCacheTTL)
 	handler := bot.NewHandler(botAPI, cfg, dbService, botConfig, subService, getVersion())
 

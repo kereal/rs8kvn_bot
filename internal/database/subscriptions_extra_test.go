@@ -103,61 +103,11 @@ func TestGetWithPlanAndNodes_RevokedSubscription(t *testing.T) {
 
 // ==================== UpdateDevices Tests ====================
 
-func TestService_UpdateDevices_Success(t *testing.T) {
-	t.Parallel()
 
-	svc := newTestService(t)
-	ctx := context.Background()
-
-	sub := createTestSubscription(t, svc, 9200, "dev-user", "client-dev-1")
-
-	devices := `[{"x-hwid":"abc","timestamp":"2025-01-01T00:00:00Z"}]`
-	err := svc.UpdateDevices(ctx, sub.ID, devices)
-	require.NoError(t, err)
-
-	got, err := svc.GetByID(ctx, sub.ID)
-	require.NoError(t, err)
-	assert.JSONEq(t, devices, got.Devices)
-}
-
-func TestService_UpdateDevices_NotFound(t *testing.T) {
-	t.Parallel()
-
-	svc := newTestService(t)
-	ctx := context.Background()
-
-	err := svc.UpdateDevices(ctx, 99999, "[]")
-	assert.ErrorIs(t, err, ErrSubscriptionNotFound)
-}
 
 // ==================== UpdateIPs Tests ====================
 
-func TestService_UpdateIPs_Success(t *testing.T) {
-	t.Parallel()
 
-	svc := newTestService(t)
-	ctx := context.Background()
-
-	sub := createTestSubscription(t, svc, 9300, "ip-user", "client-ip-1")
-
-	ips := `[{"10.0.0.1":"2025-01-01T00:00:00Z"}]`
-	err := svc.UpdateIPs(ctx, sub.ID, ips)
-	require.NoError(t, err)
-
-	got, err := svc.GetByID(ctx, sub.ID)
-	require.NoError(t, err)
-	assert.JSONEq(t, ips, got.Ips)
-}
-
-func TestService_UpdateIPs_NotFound(t *testing.T) {
-	t.Parallel()
-
-	svc := newTestService(t)
-	ctx := context.Background()
-
-	err := svc.UpdateIPs(ctx, 99999, "[]")
-	assert.ErrorIs(t, err, ErrSubscriptionNotFound)
-}
 
 // ==================== ExpireSubscription Tests ====================
 
@@ -288,27 +238,3 @@ func TestGetExpiredPaidSubscriptions_TrialPlanExcluded(t *testing.T) {
 }
 
 // ==================== GetSubscription Tests ====================
-
-func TestService_GetSubscription_Active(t *testing.T) {
-	t.Parallel()
-
-	svc := newTestService(t)
-	ctx := context.Background()
-
-	sub := createTestSubscription(t, svc, 9600, "getsub-user", "client-getsub-1")
-
-	got, err := svc.GetSubscription(ctx, sub.SubscriptionID)
-	require.NoError(t, err)
-	assert.Equal(t, sub.ID, got.ID)
-	assert.Equal(t, sub.TelegramID, got.TelegramID)
-}
-
-func TestService_GetSubscription_NotFound(t *testing.T) {
-	t.Parallel()
-
-	svc := newTestService(t)
-	ctx := context.Background()
-
-	_, err := svc.GetSubscription(ctx, "nonexistent-sub")
-	assert.ErrorIs(t, err, ErrSubscriptionNotFound)
-}

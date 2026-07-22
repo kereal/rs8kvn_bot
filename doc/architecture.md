@@ -17,6 +17,7 @@ rs8kvn_bot — production-ready Telegram bot for distributing VLESS+Reality+Visi
 - 85%+ test coverage (unit, e2e, fuzz, leak detection)
 - Payment/order tracking for subscription purchases
 - Node-based subscription synchronization with 4-state sync machine (`subscription_nodes`)
+- 3-touch expiry reminders (3d/1d/3h) with idempotent bitmask (`subscription.reminders_sent`)
 - Dynamic plan resolution by name (no hardcoded IDs)
 
 ---
@@ -44,7 +45,7 @@ rs8kvn_bot — production-ready Telegram bot for distributing VLESS+Reality+Visi
 │  │ main.go — Event Loop & Orchestration                           │ │
 │  │ • Signal handling (SIGINT, SIGTERM, SIGQUIT)                   │ │
 │  │ • Update semaphore (10 concurrent handlers max)                 │ │
-│  │ • Background workers startup (backup, heartbeat, trial cleanup) │ │
+│  │ • Background workers startup (backup, heartbeat, trial cleanup, subscription reminders) │ │
 │  │ • Web server run in goroutine                                   │ │
 │  │ • Graceful shutdown: stop receiving, drain updates, wait WG     │ │
 │  └─────────────────────────────────┬───────────────────────────────┘ │
@@ -193,7 +194,8 @@ internal/
 │   ├── backup.go            # Daily backup (03:00)
 │   ├── trial_cleanup.go     # Hourly expired trial cleanup
 │   ├── subscription_sync_worker.go  # SyncPendingNodes worker
-│   └── subscription_expire_worker.go # Subscription expiry worker
+│   ├── subscription_expire_worker.go # Subscription expiry worker
+│   └── subscription_reminder_worker.go # Expiry reminders: 3d / 1d / 3h, idempotent bitmask
 ├── backup/           # Backup engine
 │   └── backup.go            # WAL checkpoint + atomic copy + rotate
 ├── heartbeat/        # External monitoring
@@ -922,5 +924,9 @@ The bot exposes a `/metrics` endpoint (via `promhttp.Handler()`) on the HTTP ser
 | **Transcription** | Live HTTP transcription endpoint | P2 (WIRED-not-PROVEN) |
 
 ---
+
+### N. Subscription Reminder Worker (internal/scheduler/subscription_reminder_worker.go)
+
+Worker каждые 30 минут выбирает активные платные подписки, у которых `expires_at` попадает в окна 3д / 1д / 3ч. Для каждого окна `SubscriptionService.SendExpiryReminder()` атомарно claim-ит bit только при неизменном сроке и отправляет сообщение с безопасным MarkdownV2 URL. При ошибке Telegram claim освобождается для повторной попытки. Повторы при пересекающихся окнах и параллельных вызовах исключаются условным claim по `subscription.reminders_sent`. При продлении (`RenewSubscription`) маска сбрасывается в `0` в одной транзакции с обновлением подписки и созданием order. Подписки без `expires_at`, а также free/trial планы не участвуют. Метрики: `subscription_reminders_total{window,result}` и `subscription_reminder_runs_total`.
 
 *End of architecture documentation.*
