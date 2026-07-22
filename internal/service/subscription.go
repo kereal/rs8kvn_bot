@@ -14,6 +14,7 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/utils"
 	"github.com/kereal/rs8kvn_bot/internal/vpn"
 
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
@@ -27,6 +28,81 @@ type SubscriptionService struct {
 	invalidate        func(telegramID int64)
 	invalidateBySubID func(subID string)
 	syncService       *SyncService
+	bot               interfaces.BotAPI
+}
+type reminderClaimer interface {
+	ClaimReminder(ctx context.Context, id uint, bit int, expiresAt time.Time) (bool, error)
+	ReleaseReminder(ctx context.Context, id uint, bit int, expiresAt time.Time) error
+}
+
+// SendExpiryReminder claims a reminder bit before sending and releases it on send failure.
+func (s *SubscriptionService) SendExpiryReminder(ctx context.Context, sub *database.Subscription, bit int, daysLeft int, hoursLeft int) error {
+	if s.bot == nil || sub == nil || sub.TelegramID == 0 || sub.ExpiresAt == nil {
+		return nil
+	}
+	window := reminderWindow(bit)
+	claimer, supportsClaim := s.db.(reminderClaimer)
+	if supportsClaim {
+		claimed, err := claimer.ClaimReminder(ctx, sub.ID, bit, *sub.ExpiresAt)
+		if err != nil {
+			metrics.SubscriptionRemindersTotal.WithLabelValues(window, "error").Inc()
+			return fmt.Errorf("claim reminder: %w", err)
+		}
+		if !claimed {
+			return nil
+		}
+	}
+
+	text := utils.EscapeMarkdownV2(reminderText(daysLeft, hoursLeft, s.cfg.SubURL(sub.SubscriptionID)))
+	msg := tgbotapi.NewMessage(sub.TelegramID, text)
+	msg.ParseMode = tgbotapi.ModeMarkdownV2
+	if _, err := s.bot.Send(msg); err != nil {
+		if supportsClaim {
+			if releaseErr := claimer.ReleaseReminder(ctx, sub.ID, bit, *sub.ExpiresAt); releaseErr != nil {
+				err = errors.Join(err, releaseErr)
+			}
+		}
+		metrics.SubscriptionRemindersTotal.WithLabelValues(window, "error").Inc()
+		return fmt.Errorf("send reminder: %w", err)
+	}
+	if !supportsClaim {
+		if err := s.db.UpdateRemindersSent(ctx, sub.ID, bit); err != nil {
+			metrics.SubscriptionRemindersTotal.WithLabelValues(window, "error").Inc()
+			return fmt.Errorf("mark reminder: %w", err)
+		}
+	}
+	metrics.SubscriptionRemindersTotal.WithLabelValues(window, "success").Inc()
+	return nil
+}
+
+func reminderWindow(bit int) string {
+	switch bit {
+	case ReminderBit3Days:
+		return "3d"
+	case ReminderBit1Day:
+		return "1d"
+	case ReminderBit3Hours:
+		return "3h"
+	default:
+		return "unknown"
+	}
+}
+
+const (
+	// ReminderBit3Days marks the 3-day reminder.
+	ReminderBit3Days = 1 << iota
+	// ReminderBit1Day marks the 1-day reminder.
+	ReminderBit1Day
+	// ReminderBit3Hours marks the 3-hour reminder.
+	ReminderBit3Hours
+)
+
+func reminderText(daysLeft int, hoursLeft int, subURL string) string {
+	const renewalInstruction = "\n\nЧтобы продлить подписку, откройте главное меню — нажмите /start."
+	if daysLeft > 0 {
+		return fmt.Sprintf("⏳ До окончания подписки осталось %d д\n%s%s", daysLeft, subURL, renewalInstruction)
+	}
+	return fmt.Sprintf("🚨 До окончания подписки осталось %d ч\n%s%s", hoursLeft, subURL, renewalInstruction)
 }
 
 type CreateResult struct {
@@ -52,6 +128,11 @@ func NewSubscriptionService(db interfaces.DatabaseService, xuiClients map[uint]i
 		nodes:      nodes,
 		cfg:        cfg,
 	}
+}
+
+// SetBot links the Telegram bot client to the subscription service.
+func (s *SubscriptionService) SetBot(bot interfaces.BotAPI) {
+	s.bot = bot
 }
 
 // SetSyncService links the subscription service to the sync module.
@@ -791,24 +872,19 @@ func (s *SubscriptionService) ensureSubscriptionNodes(ctx context.Context, sub *
 		return fmt.Errorf("nil subscription")
 	}
 
-	// 1. Load active 3x-ui nodes linked to the subscription's plan
 	nodes, err := s.db.GetNodesByPlanID(ctx, sub.PlanID)
 	if err != nil {
 		return fmt.Errorf("load plan nodes: %w", err)
 	}
-
-	// 2. Load existing subscription_nodes to avoid duplicates
 	existing, err := s.db.GetBySubscriptionID(ctx, sub.ID)
 	if err != nil {
 		return fmt.Errorf("load subscription nodes: %w", err)
 	}
-
 	existingByNodeID := make(map[uint]database.SubscriptionNode, len(existing))
 	for _, sn := range existing {
 		existingByNodeID[sn.NodeID] = sn
 	}
 
-	// 3. Create pending_add for each active plan node not yet in subscription_nodes
 	createdAny := false
 	for _, node := range nodes {
 		if !node.IsActive {
@@ -827,7 +903,6 @@ func (s *SubscriptionService) ensureSubscriptionNodes(ctx context.Context, sub *
 		createdAny = true
 	}
 
-	// 4. Best-effort sync: trigger immediate VPN provisioning
 	if createdAny && s.syncService != nil {
 		if syncErr := s.syncService.SyncSubscription(ctx, sub.ID); syncErr != nil {
 			logger.Warn("initial sync failed for subscription",
@@ -876,29 +951,30 @@ func (s *SubscriptionService) RenewSubscription(ctx context.Context, telegramID 
 			Updates(sub).Error; err != nil {
 			return fmt.Errorf("update subscription: %w", err)
 		}
-
+		if err := tx.Model(&database.Subscription{}).
+			Where("id = ?", sub.ID).
+			Update("reminders_sent", 0).Error; err != nil {
+			return fmt.Errorf("reset reminders: %w", err)
+		}
 		if err := tx.Create(order).Error; err != nil {
 			return fmt.Errorf("create order: %w", err)
 		}
-
 		return nil
 	}); err != nil {
 		return nil, err
 	}
 
 	metrics.SubscriptionRenewalsTotal.Inc()
-
 	if s.invalidateBySubID != nil && sub.SubscriptionID != "" {
 		s.invalidateBySubID(sub.SubscriptionID)
 	}
 
 	if s.syncService != nil {
-		if planChanged || (oldExpiry == nil || !oldExpiry.Equal(newExpiry)) {
+		if planChanged || oldExpiry == nil || !oldExpiry.Equal(newExpiry) {
 			if err := s.syncService.ApplyPlanToSubscription(ctx, sub.ID); err != nil {
 				return order, fmt.Errorf("renew subscription: apply plan: %w", err)
 			}
 		}
-
 		if err := s.syncService.SyncSubscription(ctx, sub.ID); err != nil {
 			logger.Warn("renew subscription: post-commit sync failed",
 				zap.Uint("subscription_id", sub.ID),

@@ -117,26 +117,45 @@ Terminal-state сейчас нет.
 - `active`, `pending_add`, `pending_remove` переводятся в `pending_remove`;
 - затем вызывается sync, который удаляет клиентов с нод.
 
-### 4.4. Фоновый retry
+### 4.4. Фоновый retry `SyncPendingNodes`
 
-`SubscriptionSyncWorker`:
+`SubscriptionSyncWorker` периодически обрабатывает due-записи `pending_add`, `pending_update` и `pending_remove`:
+
+1. Загружает due pending-записи из `subscription_nodes`.
+2. Группирует их по подписке.
+3. Повторно загружает подписку и применяет операции к соответствующим нодам.
+4. При успехе переводит записи в `active` либо удаляет `pending_remove`.
+5. При ошибке сохраняет `retry_count`, `retry_at` и `last_error`; следующие попытки используют exponential backoff.
+6. Отдельно reconciles orphaned clients и строки, для которых подписка больше не существует.
+
+Ошибки отдельных подписок логируются и не останавливают обработку остальных; отмена контекста завершает текущий проход.
+
+### 4.5. Напоминания об истечении подписки
+
+`SubscriptionReminderWorker`:
 
 - делает один проход сразу при старте;
-- затем вызывает `SyncPendingNodes()` каждые 5 минут.
+- затем сканирует базу каждые 30 минут;
+- выбирает активные платные подписки, у которых `expires_at` попадает в окно 3д / 1д / 3ч до истечения;
+- для найденных подписок атомарно claim-ит соответствующий bit с проверкой текущего `expires_at`, затем отправляет напоминание через `SubscriptionService.SendExpiryReminder()`;
+- при ошибке Telegram освобождает claim, чтобы следующая попытка могла повториться;
+- при продлении reset `reminders_sent` выполняется в одной транзакции с обновлением подписки и созданием order.
 
-`SyncPendingNodes()`:
+Важно:
 
-1. Берет только due pending-строки (`retry_at IS NULL OR retry_at <= now`).
-2. Группирует их по `subscription_id`.
-3. Для каждой подписки загружает subscription.
-4. Вызывает `syncNodes()`.
-5. После этого вызывает `ReconcilePlanNodes()`.
+- в рассмотрение попадают только `status = 'active'`, `expires_at IS NOT NULL` и планы, отличные от `free` и `trial`;
+- атомарный claim предотвращает повторы при пересекающихся 30-минутных окнах и параллельных worker-вызовах;
+- при продлении подписки поле `reminders_sent` сбрасывается в `0`, поэтому новая подписная история снова проходит весь триплет напоминаний;
+- если отправка сообщения пользователю падает, воркер логирует ошибку, освобождает claim и продолжает сканирование;
+- `SubscriptionReminderWorker` регистрируется в `cmd/bot/main.go` как отдельный фоновый воркер с `recoverAndReport("Subscription reminder worker")` и учитывается в `wg.Add(...)`.
 
-Если подписка уже удалена:
+Метрики:
 
-- orphan rows очищаются через `DeleteSubscriptionNodesBySubscriptionID()`.
+- `subscription_reminders_total{window,result}` — отправки по окну (`3d`, `1d`, `3h`) и результату (`success`, `error`);
+- `subscription_reminder_runs_total` — число проходов worker.
 
 ## 5. Как работает reconcile
+
 
 `ReconcilePlanNodes()` сравнивает:
 

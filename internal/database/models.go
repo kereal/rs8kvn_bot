@@ -75,6 +75,7 @@ type Subscription struct {
 	LastRequest *time.Time `gorm:"index"`
 	CreatedAt   time.Time  `gorm:"autoCreateTime"`
 	UpdatedAt   time.Time  `gorm:"autoUpdateTime"`
+	RemindersSent int `gorm:"not null;default:0"` // bitmask: 1<<0=3d, 1<<1=1d, 1<<2=3h
 
 	Plan    *Plan              `gorm:"foreignKey:PlanID"`
 	Product *Product           `gorm:"foreignKey:ProductID"`

@@ -46,9 +46,25 @@ type SubscriptionRepositoryFake struct {
 	UpdateLastRequestFunc           func(ctx context.Context, subscriptionID string) error
 	GetSubscriptionFunc             func(ctx context.Context, subscriptionID string) (*database.Subscription, error)
 	GetWithPlanAndNodesFunc         func(ctx context.Context, subscriptionID string) (*database.SubscriptionFull, error)
+	GetSubscriptionsExpiringInRangeFunc func(ctx context.Context, from, to time.Time) ([]database.Subscription, error)
+	UpdateRemindersSentFunc            func(ctx context.Context, id uint, bit int) error
 }
 
 func NewSubscriptionRepository() *SubscriptionRepositoryFake { return &SubscriptionRepositoryFake{} }
+
+func (m *SubscriptionRepositoryFake) GetSubscriptionsExpiringInRange(ctx context.Context, from, to time.Time) ([]database.Subscription, error) {
+	if m.GetSubscriptionsExpiringInRangeFunc != nil {
+		return m.GetSubscriptionsExpiringInRangeFunc(ctx, from, to)
+	}
+	return nil, nil
+}
+
+func (m *SubscriptionRepositoryFake) UpdateRemindersSent(ctx context.Context, id uint, bit int) error {
+	if m.UpdateRemindersSentFunc != nil {
+		return m.UpdateRemindersSentFunc(ctx, id, bit)
+	}
+	return nil
+}
 
 func (m *SubscriptionRepositoryFake) GetByTelegramID(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 	if m.GetByTelegramIDFunc != nil {
