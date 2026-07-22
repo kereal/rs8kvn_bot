@@ -334,7 +334,7 @@ func buildTrojanServerLink(cfg *serverConfig) (string, error) {
 		remark = cfg.Ps
 	}
 
-	base := fmt.Sprintf("trojan://%s@%s", password, net.JoinHostPort(cfg.Address, strconv.Itoa(cfg.Port)))
+	base := "trojan://" + url.User(password).String() + "@" + net.JoinHostPort(cfg.Address, strconv.Itoa(cfg.Port))
 	if params.Encode() != "" {
 		base += "?" + params.Encode()
 	}
@@ -398,7 +398,7 @@ func buildHysteriaServerLink(cfg *serverConfig, protocol string) (string, error)
 	}
 
 	addr := net.JoinHostPort(cfg.Address, strconv.Itoa(cfg.Port))
-	link := fmt.Sprintf("%s://%s@%s", protocol, password, addr)
+	link := protocol + "://" + url.User(password).String() + "@" + addr
 	if params.Encode() != "" {
 		link += "?" + params.Encode()
 	}
@@ -436,7 +436,7 @@ func buildTUICServerLink(cfg *serverConfig) (string, error) {
 		userInfo = userInfo + ":" + cfg.Password
 	}
 
-	base := fmt.Sprintf("tuic://%s@%s", userInfo, net.JoinHostPort(cfg.Address, strconv.Itoa(cfg.Port)))
+	base := "tuic://" + url.UserPassword(cfg.UUID, cfg.Password).String() + "@" + net.JoinHostPort(cfg.Address, strconv.Itoa(cfg.Port))
 	if params.Encode() != "" {
 		base += "?" + params.Encode()
 	}

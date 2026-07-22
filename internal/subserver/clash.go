@@ -78,7 +78,16 @@ func normaliseClashProxy(p map[string]any) (map[string]any, error) {
 	setStrFallback(out, p, []string{"server", "address"}, "address")
 	setStrFallback(out, p, []string{"name", "remark"}, "remark")
 	if v, ok := p["port"]; ok {
-		out["port"] = portToInt(v)
+		if port := portToInt(v); port > 0 {
+			out["port"] = port
+		}
+	}
+	// Hysteria2 port-hopping: "ports: 443,20000-50000" — use first concrete port
+	// when the singular "port" field is absent so the proxy is not dropped.
+	if _, ok := out["port"]; !ok {
+		if port := firstPortFromPorts(p["ports"]); port > 0 {
+			out["port"] = port
+		}
 	}
 
 	switch proxyType {
@@ -87,10 +96,11 @@ func normaliseClashProxy(p map[string]any) (map[string]any, error) {
 		setStrFallback(out, p, []string{"flow"}, "flow")
 		setStrFallback(out, p, []string{"encryption"}, "encryption")
 		setStrFallback(out, p, []string{"network", "net"}, "network")
-		normaliseVLESSNetwork(out)
+		normaliseTransportNetwork(out)
 		setStrFallback(out, p, []string{"servername", "sni"}, "sni")
 		setStrFallback(out, p, []string{"client-fingerprint", "fp"}, "fp")
 		setAlpn(out, p)
+		setPacketEncoding(out, p)
 		if toBool(p["skip-cert-verify"]) || toBool(p["allowInsecure"]) {
 			out["allowInsecure"] = true
 		}
@@ -145,6 +155,7 @@ func normaliseClashProxy(p map[string]any) (map[string]any, error) {
 		setStrFallback(out, p, []string{"uuid", "id", "userId"}, "uuid")
 		setStrFallback(out, p, []string{"cipher", "scy"}, "scy")
 		setStrFallback(out, p, []string{"network", "net"}, "network")
+		normaliseTransportNetwork(out)
 		setStrFallback(out, p, []string{"servername", "sni"}, "sni")
 		setStrFallback(out, p, []string{"client-fingerprint", "fp"}, "fp")
 		setAlpn(out, p)
@@ -190,14 +201,21 @@ func normaliseClashProxy(p map[string]any) (map[string]any, error) {
 	case "trojan":
 		setStrFallback(out, p, []string{"password", "pass"}, "password")
 		setStrFallback(out, p, []string{"network", "net"}, "network")
+		normaliseTransportNetwork(out)
 		setStrFallback(out, p, []string{"sni", "servername"}, "sni")
 		setStrFallback(out, p, []string{"client-fingerprint", "fp"}, "fp")
 		setAlpn(out, p)
 		if toBool(p["skip-cert-verify"]) || toBool(p["allowInsecure"]) {
 			out["allowInsecure"] = true
 		}
-		if toBool(p["tls"]) {
-			out["security"] = "tls"
+		// Clash Meta always runs Trojan over TLS; the tls field is often omitted.
+		if toBool(p["tls"]) || !toBool(p["tls"]) && p["tls"] == nil {
+			// Default security=tls unless the source explicitly disables it.
+			if v, ok := p["tls"]; ok && !toBool(v) {
+				// explicit tls: false — leave security unset
+			} else {
+				out["security"] = "tls"
+			}
 		}
 		if g := getMap(p, "grpc-opts"); g != nil {
 			if s, ok := g["grpc-service-name"].(string); ok {
@@ -212,6 +230,28 @@ func normaliseClashProxy(p map[string]any) (map[string]any, error) {
 				out["host"] = host
 			}
 		}
+		// xhttp / http / h2 transports (same shape as VLESS).
+		if x := getMap(p, "xhttp-opts"); x != nil {
+			setStrFallback(out, x, []string{"path"}, "path")
+			setStrFallback(out, x, []string{"host"}, "host")
+			setStrFallback(out, x, []string{"mode"}, "mode")
+		}
+		if h := getMap(p, "http-opts"); h != nil {
+			if s := firstListOrString(h["path"]); s != "" {
+				out["path"] = s
+			}
+			if s := httpOptsHost(h); s != "" {
+				out["host"] = s
+			}
+		}
+		if h := getMap(p, "h2-opts"); h != nil {
+			if s := firstListOrString(h["path"]); s != "" {
+				out["path"] = s
+			}
+			if s := httpOptsHost(h); s != "" {
+				out["host"] = s
+			}
+		}
 	case "shadowsocks", "ss":
 		setStrFallback(out, p, []string{"cipher", "method"}, "method")
 		setStrFallback(out, p, []string{"password", "pass"}, "password")
@@ -224,11 +264,16 @@ func normaliseClashProxy(p map[string]any) (map[string]any, error) {
 			}
 		}
 	case "hysteria", "hysteria2", "hy2":
+		// Share links and most clients use hysteria2://; keep hy2 as an input
+		// alias only so Happ/sing-box do not see a non-standard scheme.
+		if proxyType == "hy2" || proxyType == "hysteria2" {
+			out["type"] = "hysteria2"
+		}
 		setStrFallback(out, p, []string{"password", "auth", "auth-str", "auth_str"}, "password")
 		setStrFallback(out, p, []string{"sni", "servername"}, "sni")
 		setStrFallback(out, p, []string{"obfs"}, "obfs")
 		setStrFallback(out, p, []string{"obfs-password", "obfs_password", "obfsPassword"}, "obfsPassword")
-		if toBool(p["skip-cert-verify"]) || toBool(p["allowInsecure"]) {
+		if toBool(p["skip-cert-verify"]) || toBool(p["allowInsecure"]) || toBool(p["insecure"]) {
 			out["allowInsecure"] = true
 		}
 		setStrFallback(out, p, []string{"client-fingerprint", "fp"}, "fp")
@@ -251,16 +296,20 @@ func normaliseClashProxy(p map[string]any) (map[string]any, error) {
 	if addr, _ := out["address"].(string); addr == "" {
 		return nil, fmt.Errorf("clash proxy %q missing address", proxyType)
 	}
-	if _, ok := out["port"]; !ok {
+	port, _ := out["port"].(int)
+	if port <= 0 {
 		return nil, fmt.Errorf("clash proxy %q missing port", proxyType)
 	}
 
 	return out, nil
 }
 
-func normaliseVLESSNetwork(out map[string]any) {
+// normaliseTransportNetwork maps Clash transport aliases to share-link values
+// and defaults a missing network to "tcp" (Clash/Xray default).
+func normaliseTransportNetwork(out map[string]any) {
 	network, _ := out["network"].(string)
 	if network == "" {
+		out["network"] = "tcp"
 		return
 	}
 
@@ -268,8 +317,57 @@ func normaliseVLESSNetwork(out map[string]any) {
 	switch network {
 	case "raw":
 		out["network"] = "tcp"
+	case "splithttp":
+		out["network"] = "xhttp"
 	default:
 		out["network"] = network
+	}
+}
+
+// setPacketEncoding maps Clash packet-encoding / xudp into the share-link
+// packetEncoding field (v2rayN: none|packet|xudp).
+func setPacketEncoding(out, p map[string]any) {
+	if v, ok := p["packet-encoding"]; ok {
+		if s, ok := v.(string); ok && s != "" {
+			out["packetEncoding"] = s
+			return
+		}
+	}
+	if v, ok := p["packetEncoding"]; ok {
+		if s, ok := v.(string); ok && s != "" {
+			out["packetEncoding"] = s
+			return
+		}
+	}
+	// Clash boolean "xudp: true" is the common Reality/VLESS form.
+	if toBool(p["xudp"]) {
+		out["packetEncoding"] = "xudp"
+	}
+}
+
+// firstPortFromPorts extracts the first concrete port from a Clash "ports"
+// hop list ("443,20000-50000" / "20000-50000" / 443). Returns 0 if unusable.
+func firstPortFromPorts(v any) int {
+	switch x := v.(type) {
+	case int:
+		return x
+	case string:
+		// Take the first comma-separated token; if it is a range, take the start.
+		token := strings.TrimSpace(strings.Split(x, ",")[0])
+		if token == "" {
+			return 0
+		}
+		if i := strings.IndexByte(token, '-'); i >= 0 {
+			token = token[:i]
+		}
+		return portToInt(token)
+	case []any:
+		if len(x) == 0 {
+			return 0
+		}
+		return firstPortFromPorts(x[0])
+	default:
+		return portToInt(v)
 	}
 }
 
