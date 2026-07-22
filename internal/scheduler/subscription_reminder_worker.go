@@ -12,14 +12,14 @@ import (
 	"go.uber.org/zap"
 )
 
-// SubscriptionReminderWorker sends expiry reminders to active subscriptions.
+// SubscriptionReminderWorker sends expiry reminders to active paid subscriptions.
 type SubscriptionReminderWorker struct {
-	db     interfaces.SubscriptionRepository
+	db     interfaces.SubscriptionReminderRepository
 	subSvc interfaces.SubscriptionReminderService
 }
 
 // NewSubscriptionReminderWorker creates a new SubscriptionReminderWorker.
-func NewSubscriptionReminderWorker(db interfaces.SubscriptionRepository, subSvc interfaces.SubscriptionReminderService) *SubscriptionReminderWorker {
+func NewSubscriptionReminderWorker(db interfaces.SubscriptionReminderRepository, subSvc interfaces.SubscriptionReminderService) *SubscriptionReminderWorker {
 	return &SubscriptionReminderWorker{db: db, subSvc: subSvc}
 }
 
@@ -47,40 +47,21 @@ func (w *SubscriptionReminderWorker) process(ctx context.Context) {
 	now := time.Now().UTC()
 	metrics.SubscriptionReminderRunsTotal.Inc()
 
-	windows := []struct {
-		name string
-		bit  int
-		from time.Time
-		to   time.Time
-	}{
-		{"3d", service.ReminderBit3Days, now.Add(72*time.Hour - 30*time.Minute), now.Add(72*time.Hour + 30*time.Minute)},
-		{"1d", service.ReminderBit1Day, now.Add(24*time.Hour - 30*time.Minute), now.Add(24*time.Hour + 30*time.Minute)},
-		{"3h", service.ReminderBit3Hours, now.Add(3*time.Hour - 30*time.Minute), now.Add(3*time.Hour + 30*time.Minute)},
-	}
-
-	for _, win := range windows {
-		subs, err := w.db.GetSubscriptionsExpiringInRange(ctx, win.from, win.to)
+	for _, window := range service.ExpiryReminderWindows() {
+		from, to := service.ReminderWindowBounds(window, now)
+		subs, err := w.db.GetSubscriptionsExpiringInRange(ctx, from, to)
 		if err != nil {
 			logger.Error("Failed to query subscriptions for reminder window",
-				zap.String("window", win.name),
+				zap.String("window", window.Name),
 				zap.Error(err))
 			continue
 		}
 		for _, sub := range subs {
-			var daysLeft, hoursLeft int
-			if sub.ExpiresAt != nil {
-				d := sub.ExpiresAt.Sub(now)
-				if d > 0 {
-					daysLeft = int(d.Hours() / 24)
-					hoursLeft = int(d.Hours()) % 24
-				}
-			}
-			if err := w.subSvc.SendExpiryReminder(ctx, &sub, win.bit, daysLeft, hoursLeft); err != nil {
+			if err := w.subSvc.SendExpiryReminder(ctx, &sub, window); err != nil {
 				logger.Error("Failed to send expiry reminder",
 					zap.Uint("subscription_id", sub.ID),
-					zap.String("window", win.name),
+					zap.String("window", window.Name),
 					zap.Error(err))
-				continue
 			}
 		}
 	}
