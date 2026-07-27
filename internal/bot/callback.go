@@ -49,11 +49,6 @@ func (c *CallbackHandler) HandleCallback(ctx context.Context, update tgbotapi.Up
 	logger.Debug("Callback received",
 		append(userFields(update.CallbackQuery.From, chatID), zap.String("data", data))...)
 
-	callback := tgbotapi.NewCallback(update.CallbackQuery.ID, "")
-	if _, err := c.h.bot.Request(callback); err != nil {
-		logger.Error("Failed to answer callback", zap.Error(err))
-	}
-
 	switch data {
 	case "create_subscription":
 		messageID := update.CallbackQuery.Message.MessageID
@@ -73,9 +68,13 @@ func (c *CallbackHandler) HandleCallback(ctx context.Context, update tgbotapi.Up
 	case "menu_donate":
 		messageID := update.CallbackQuery.Message.MessageID
 		return c.h.handleMenuDonate(ctx, chatID, username, messageID)
-	case "menu_subscription":
-		messageID := update.CallbackQuery.Message.MessageID
-		return c.h.handleMySubscription(ctx, chatID, username, messageID)
+	case "buy_premium_230":
+		answer := tgbotapi.CallbackConfig{
+			CallbackQueryID: update.CallbackQuery.ID,
+			Text:            "Скоро в продаже",
+		}
+		c.h.bot.Request(answer)
+		return nil
 	case "upgrade_premium":
 		messageID := update.CallbackQuery.Message.MessageID
 		return c.h.handleUpgradePremium(ctx, chatID, username, messageID)
@@ -88,6 +87,21 @@ func (c *CallbackHandler) HandleCallback(ctx context.Context, update tgbotapi.Up
 	case "menu_help":
 		messageID := update.CallbackQuery.Message.MessageID
 		return c.h.handleMenuHelp(ctx, chatID, username, messageID)
+	case "back_to_documents":
+		messageID := update.CallbackQuery.Message.MessageID
+		return c.h.handleBackToDocuments(ctx, chatID, username, messageID)
+	case "menu_documents":
+		messageID := update.CallbackQuery.Message.MessageID
+		return c.h.handleMenuDocuments(ctx, chatID, username, messageID)
+	case "menu_privacy":
+		messageID := update.CallbackQuery.Message.MessageID
+		return c.h.handleMenuPrivacy(ctx, chatID, username, messageID)
+	case "menu_terms":
+		messageID := update.CallbackQuery.Message.MessageID
+		return c.h.handleMenuTerms(ctx, chatID, username, messageID)
+	case "menu_support":
+		messageID := update.CallbackQuery.Message.MessageID
+		return c.h.handleMenuSupport(ctx, chatID, username, messageID)
 	case "share_invite":
 		messageID := update.CallbackQuery.Message.MessageID
 		return c.handleShareInvite(ctx, chatID, username, messageID)

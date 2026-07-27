@@ -35,8 +35,13 @@ func (kb *KeyboardBuilder) MainMenu(hasSubscription bool, freeUpgradeLabel strin
 		),
 		tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData("❓ Помощь", "menu_help"),
+			tgbotapi.NewInlineKeyboardButtonData("📑 Документы", "menu_documents"),
 		),
 	}
+
+	rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+		tgbotapi.NewInlineKeyboardButtonData("💎 Premium на 30 дней за 230₽", "buy_premium_230"),
+	))
 
 	if hasSubscription {
 		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
@@ -59,6 +64,15 @@ func (kb *KeyboardBuilder) Back() tgbotapi.InlineKeyboardMarkup {
 	return tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData("🏠 В начало", "back_to_start"),
+		),
+	)
+}
+
+// BackToDocuments returns the inline keyboard with a back button to documents.
+func (kb *KeyboardBuilder) BackToDocuments() tgbotapi.InlineKeyboardMarkup {
+	return tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("⬅️ Назад", "back_to_documents"),
 		),
 	)
 }
@@ -98,6 +112,39 @@ func (kb *KeyboardBuilder) WithAdminButtons(keyboard *tgbotapi.InlineKeyboardMar
 			),
 		)
 	}
+}
+
+// Documents returns the inline keyboard for the documents menu.
+func (kb *KeyboardBuilder) Documents() tgbotapi.InlineKeyboardMarkup {
+	return tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("🔒 Политика конфиденциальности", "menu_privacy"),
+		),
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("📄 Пользовательское соглашение", "menu_terms"),
+		),
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("💬 Поддержка", "menu_support"),
+		),
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("🏠 В начало", "back_to_start"),
+		),
+	)
+}
+
+// PrivacyText returns the privacy policy text.
+func (kb *KeyboardBuilder) PrivacyText() string {
+	return PrivacyText()
+}
+
+// TermsText returns the terms of service text.
+func (kb *KeyboardBuilder) TermsText() string {
+	return TermsText()
+}
+
+// SupportText returns the support contact text.
+func (kb *KeyboardBuilder) SupportText() string {
+	return SupportText()
 }
 
 // DonateText returns the donation message text.
