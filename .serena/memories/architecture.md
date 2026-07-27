@@ -13,7 +13,7 @@
 
 ## System Context
 
-```
+```text
 Telegram Bot API  3x-ui / proxman panels  Sentry
        │                │                   │
        ▼                ▼                   ▼
@@ -33,7 +33,7 @@ Telegram Bot API  3x-ui / proxman panels  Sentry
 - Renewal resets: `RenewSubscription` resets `reminders_sent=0`.
 - Business rule: free and trial plans excluded.
 - Metrics: `SubscriptionRemindersTotal{window,status}`, `SubscriptionReminderRunsTotal`.
-- Lifecycle wiring: `cmd/bot/lifecycle.go`.
+- Lifecycle wiring: `cmd/bot/main.go` (startBackgroundWorkers).
 
 ## Subserver share-link normalization
 - Supported schemes: VMess, VLESS, Trojan, Hysteria2, TUIC, Shadowsocks SIP002.

@@ -12,7 +12,7 @@ Production-grade: миграции, мониторинг, rate-limiting, circuit
 - Исключаются free и trial планы (`GetSubscriptionsExpiringInRange`).
 - Пушечные метрики: `SubscriptionRemindersTotal` (`name`, `status`), `SubscriptionReminderRunsTotal` (`internal/metrics/metrics.go`).
 - Миграция 030: добавлено поле `subscriptions.reminders_sent`.
-- Триггер жизненного цикла: `SubscriptionReminderWorker` запускается в `cmd/bot/lifecycle.go`.
+- Триггер жизненного цикла: `SubscriptionReminderWorker` запускается в `cmd/bot/main.go` (startBackgroundWorkers).
 
 ## Subscription expiration
 - Paid-подписки автоматически помечаются `expired`, если истёк `expires_at` и план не free/trial (`GetExpiredPaidSubscriptions`).
@@ -81,7 +81,7 @@ Production-grade: миграции, мониторинг, rate-limiting, circuit
 - Backup ежедневно, trial cleanup каждый час, sync workers фоном, reminders — каждые 30 минут.
 
 ## Структура
-```
+```text
 cmd/bot/                     — точка входа, graceful shutdown, lifecycle workers
 internal/bot/                — handlers, commands, callbacks, referral cache, keyboard/menu
 internal/database/           — GORM-модели, миграции 000-030, транзакции
