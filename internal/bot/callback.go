@@ -52,74 +52,120 @@ func (c *CallbackHandler) HandleCallback(ctx context.Context, update tgbotapi.Up
 	switch data {
 	case "create_subscription":
 		messageID := update.CallbackQuery.Message.MessageID
-		c.h.handleCreateSubscription(ctx, chatID, username, messageID)
+		if err := c.h.handleCreateSubscription(ctx, chatID, username, messageID); err != nil {
+			return fmt.Errorf("handle create_subscription: %w", err)
+		}
 	case "qr_code":
 		messageID := update.CallbackQuery.Message.MessageID
-		c.h.handleQRCode(ctx, chatID, username, messageID)
+		if err := c.h.handleQRCode(ctx, chatID, username, messageID); err != nil {
+			return fmt.Errorf("handle qr_code: %w", err)
+		}
 	case "admin_stats":
 		messageID := update.CallbackQuery.Message.MessageID
-		c.h.handleAdminStats(ctx, chatID, username, messageID)
+		if err := c.h.handleAdminStats(ctx, chatID, username, messageID); err != nil {
+			return fmt.Errorf("handle admin_stats: %w", err)
+		}
 	case "admin_lastreg":
 		messageID := update.CallbackQuery.Message.MessageID
-		c.h.handleAdminLastReg(ctx, chatID, username, messageID)
+		if err := c.h.handleAdminLastReg(ctx, chatID, username, messageID); err != nil {
+			return fmt.Errorf("handle admin_lastreg: %w", err)
+		}
 	case "menu_subscription":
 		messageID := update.CallbackQuery.Message.MessageID
-		c.h.handleMySubscription(ctx, chatID, username, messageID)
+		if err := c.h.handleMySubscription(ctx, chatID, username, messageID); err != nil {
+			return fmt.Errorf("handle menu_subscription: %w", err)
+		}
 	case "back_to_start":
 		messageID := update.CallbackQuery.Message.MessageID
-		c.h.handleBackToStart(ctx, chatID, username, messageID)
+		if err := c.h.handleBackToStart(ctx, chatID, username, messageID); err != nil {
+			return fmt.Errorf("handle back_to_start: %w", err)
+		}
 	case "menu_donate":
 		messageID := update.CallbackQuery.Message.MessageID
-		c.h.handleMenuDonate(ctx, chatID, username, messageID)
+		if err := c.h.handleMenuDonate(ctx, chatID, username, messageID); err != nil {
+			return fmt.Errorf("handle menu_donate: %w", err)
+		}
 	case "buy_premium_230":
 		answer := tgbotapi.CallbackConfig{
 			CallbackQueryID: update.CallbackQuery.ID,
 			Text:            "Скоро в продаже",
 		}
-		c.h.bot.Request(answer)
+		if _, err := c.h.bot.Request(answer); err != nil {
+			logger.Error("Failed to answer callback", zap.Error(err))
+		}
 	case "upgrade_premium":
 		messageID := update.CallbackQuery.Message.MessageID
-		c.h.handleUpgradePremium(ctx, chatID, username, messageID)
+		if err := c.h.handleUpgradePremium(ctx, chatID, username, messageID); err != nil {
+			return fmt.Errorf("handle upgrade_premium: %w", err)
+		}
 	case "confirm_upgrade_premium":
 		messageID := update.CallbackQuery.Message.MessageID
-		c.h.handleConfirmUpgradePremium(ctx, chatID, username, messageID)
+		if err := c.h.handleConfirmUpgradePremium(ctx, chatID, username, messageID); err != nil {
+			return fmt.Errorf("handle confirm_upgrade_premium: %w", err)
+		}
 	case "back_to_subscription":
 		messageID := update.CallbackQuery.Message.MessageID
-		c.h.handleBackToSubscription(ctx, chatID, username, messageID)
+		if err := c.h.handleBackToSubscription(ctx, chatID, username, messageID); err != nil {
+			return fmt.Errorf("handle back_to_subscription: %w", err)
+		}
 	case "menu_help":
 		messageID := update.CallbackQuery.Message.MessageID
-		c.h.handleMenuHelp(ctx, chatID, username, messageID)
+		if err := c.h.handleMenuHelp(ctx, chatID, username, messageID); err != nil {
+			return fmt.Errorf("handle menu_help: %w", err)
+		}
 	case "back_to_documents":
 		messageID := update.CallbackQuery.Message.MessageID
-		c.h.handleBackToDocuments(ctx, chatID, username, messageID)
+		if err := c.h.handleBackToDocuments(ctx, chatID, username, messageID); err != nil {
+			return fmt.Errorf("handle back_to_documents: %w", err)
+		}
 	case "menu_documents":
 		messageID := update.CallbackQuery.Message.MessageID
-		c.h.handleMenuDocuments(ctx, chatID, username, messageID)
+		if err := c.h.handleMenuDocuments(ctx, chatID, username, messageID); err != nil {
+			return fmt.Errorf("handle menu_documents: %w", err)
+		}
 	case "menu_privacy":
 		messageID := update.CallbackQuery.Message.MessageID
-		c.h.handleMenuPrivacy(ctx, chatID, username, messageID)
+		if err := c.h.handleMenuPrivacy(ctx, chatID, username, messageID); err != nil {
+			return fmt.Errorf("handle menu_privacy: %w", err)
+		}
 	case "menu_terms":
 		messageID := update.CallbackQuery.Message.MessageID
-		c.h.handleMenuTerms(ctx, chatID, username, messageID)
+		if err := c.h.handleMenuTerms(ctx, chatID, username, messageID); err != nil {
+			return fmt.Errorf("handle menu_terms: %w", err)
+		}
 	case "menu_support":
 		messageID := update.CallbackQuery.Message.MessageID
-		c.h.handleMenuSupport(ctx, chatID, username, messageID)
+		if err := c.h.handleMenuSupport(ctx, chatID, username, messageID); err != nil {
+			return fmt.Errorf("handle menu_support: %w", err)
+		}
 	case "share_invite":
 		messageID := update.CallbackQuery.Message.MessageID
-		c.handleShareInvite(ctx, chatID, username, messageID)
+		if err := c.handleShareInvite(ctx, chatID, username, messageID); err != nil {
+			return fmt.Errorf("handle share_invite: %w", err)
+		}
 	case "qr_telegram":
 		messageID := update.CallbackQuery.Message.MessageID
-		c.handleQRTelegram(ctx, chatID, username, messageID)
+		if err := c.handleQRTelegram(ctx, chatID, username, messageID); err != nil {
+			return fmt.Errorf("handle qr_telegram: %w", err)
+		}
 	case "qr_web":
 		messageID := update.CallbackQuery.Message.MessageID
-		c.handleQRWeb(ctx, chatID, username, messageID)
+		if err := c.handleQRWeb(ctx, chatID, username, messageID); err != nil {
+			return fmt.Errorf("handle qr_web: %w", err)
+		}
 	case "broadcast_confirm":
-		c.h.handleBroadcastConfirm(ctx, chatID)
+		if err := c.h.handleBroadcastConfirm(ctx, chatID); err != nil {
+			return fmt.Errorf("handle broadcast_confirm: %w", err)
+		}
 	case "broadcast_cancel":
-		c.h.handleBroadcastCancel(ctx, chatID)
+		if err := c.h.handleBroadcastCancel(ctx, chatID); err != nil {
+			return fmt.Errorf("handle broadcast_cancel: %w", err)
+		}
 	case "back_to_invite":
 		messageID := update.CallbackQuery.Message.MessageID
-		c.h.handleBackToInvite(ctx, chatID, username, messageID)
+		if err := c.h.handleBackToInvite(ctx, chatID, username, messageID); err != nil {
+			return fmt.Errorf("handle back_to_invite: %w", err)
+		}
 	default:
 		logger.Warn("Unknown callback data", zap.String("data", data))
 	}

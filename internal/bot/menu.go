@@ -113,11 +113,15 @@ func (h *Handler) handleMenuDocuments(_ context.Context, chatID int64, username 
 
 // handleBackToDocuments returns to the documents menu.
 func (h *Handler) handleBackToDocuments(_ context.Context, chatID int64, _ string, messageID int) error {
-	logger.Info("User closing document", zap.Int64("chat_id", chatID))
+	logger.Info("User returning to documents", zap.Int64("chat_id", chatID))
 
-	deleteMsg := tgbotapi.NewDeleteMessage(chatID, messageID)
-	if _, err := h.bot.Request(deleteMsg); err != nil {
-		return fmt.Errorf("delete message: %w", err)
+	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "📑 *Документы*")
+	editMsg.ParseMode = "Markdown"
+	editMsg.DisableWebPagePreview = true
+	keyboard := h.keyboards.Documents()
+	editMsg.ReplyMarkup = &keyboard
+	if _, err := h.bot.Request(editMsg); err != nil {
+		return fmt.Errorf("return to documents menu: %w", err)
 	}
 	return nil
 }
