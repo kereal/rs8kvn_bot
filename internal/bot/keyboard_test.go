@@ -19,10 +19,10 @@ func TestGetMainMenuKeyboard(t *testing.T) {
 	handler := &Handler{cfg: cfg, botConfig: NewTestBotConfig()}
 
 	keyboardWithShare := handler.getMainMenuKeyboard(true)
-	assert.Len(t, keyboardWithShare.InlineKeyboard, 3, "Expected 3 rows with subscription")
+	assert.Len(t, keyboardWithShare.InlineKeyboard, 4, "Expected 4 rows with subscription, documents, buy premium, and share")
 
 	keyboardNoShare := handler.getMainMenuKeyboard(false)
-	assert.Len(t, keyboardNoShare.InlineKeyboard, 2, "Expected 2 rows without subscription")
+	assert.Len(t, keyboardNoShare.InlineKeyboard, 3, "Expected 3 rows without subscription, with documents and buy premium")
 }
 
 func TestHandler_GetMainMenuKeyboard_ButtonLabels(t *testing.T) {
@@ -34,8 +34,10 @@ func TestHandler_GetMainMenuKeyboard_ButtonLabels(t *testing.T) {
 
 	assert.Equal(t, "📋 Подписка", keyboard.InlineKeyboard[0][0].Text, "First button label")
 	assert.Equal(t, "☕ Донат", keyboard.InlineKeyboard[0][1].Text, "Second button label")
-	assert.Equal(t, "❓ Помощь", keyboard.InlineKeyboard[1][0].Text, "Third button label")
-	assert.Equal(t, "📤 Поделиться", keyboard.InlineKeyboard[2][0].Text, "Share button label")
+	assert.Equal(t, "❓ Помощь", keyboard.InlineKeyboard[1][0].Text, "Help button label")
+	assert.Equal(t, "📑 Документы", keyboard.InlineKeyboard[1][1].Text, "Documents button label")
+	assert.Equal(t, "💎 Premium на 30 дней за 230₽", keyboard.InlineKeyboard[2][0].Text, "Buy premium button label")
+	assert.Equal(t, "📤 Поделиться", keyboard.InlineKeyboard[3][0].Text, "Share button label")
 }
 
 func TestHandler_GetMainMenuKeyboard_CallbackData(t *testing.T) {
@@ -51,8 +53,12 @@ func TestHandler_GetMainMenuKeyboard_CallbackData(t *testing.T) {
 	assert.Equal(t, "menu_donate", *keyboard.InlineKeyboard[0][1].CallbackData, "Donate callback")
 	require.NotNil(t, keyboard.InlineKeyboard[1][0].CallbackData, "Help callback should not be nil")
 	assert.Equal(t, "menu_help", *keyboard.InlineKeyboard[1][0].CallbackData, "Help callback")
-	require.NotNil(t, keyboard.InlineKeyboard[2][0].CallbackData, "Share callback should not be nil")
-	assert.Equal(t, "share_invite", *keyboard.InlineKeyboard[2][0].CallbackData, "Share callback")
+	require.NotNil(t, keyboard.InlineKeyboard[1][1].CallbackData, "Documents callback should not be nil")
+	assert.Equal(t, "menu_documents", *keyboard.InlineKeyboard[1][1].CallbackData, "Documents callback")
+	require.NotNil(t, keyboard.InlineKeyboard[2][0].CallbackData, "Buy premium callback should not be nil")
+	assert.Equal(t, "buy_premium_230", *keyboard.InlineKeyboard[2][0].CallbackData, "Buy premium callback")
+	require.NotNil(t, keyboard.InlineKeyboard[3][0].CallbackData, "Share callback should not be nil")
+	assert.Equal(t, "share_invite", *keyboard.InlineKeyboard[3][0].CallbackData, "Share callback")
 }
 
 func TestHandler_KeyboardConstruction_MultipleRows(t *testing.T) {

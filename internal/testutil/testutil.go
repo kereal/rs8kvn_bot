@@ -1053,6 +1053,7 @@ type BotAPI struct {
 	SendError       error
 	RequestError    error
 	LastChattable   tgbotapi.Chattable
+	LastRequest     tgbotapi.Chattable
 	SendFunc        func(c tgbotapi.Chattable) (tgbotapi.Message, error)
 	AllSentMessages []SentMessage
 	// DeletedMessageIDs captures the message ids passed to DeleteMessage.
@@ -1111,6 +1112,7 @@ func (m *BotAPI) Request(c tgbotapi.Chattable) (*tgbotapi.APIResponse, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.requestCalled = true
+	m.LastRequest = c
 
 	if dm, ok := c.(tgbotapi.DeleteMessageConfig); ok {
 		m.DeletedMessageIDs = append(m.DeletedMessageIDs, dm.MessageID)
@@ -1141,6 +1143,13 @@ func (m *BotAPI) RequestCalledSafe() bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.requestCalled
+}
+
+// LastRequestSafe returns the last Request Chattable (thread-safe).
+func (m *BotAPI) LastRequestSafe() tgbotapi.Chattable {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.LastRequest
 }
 
 // DeletedMessageIDsSafe returns the captured DeleteMessage ids (thread-safe).

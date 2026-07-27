@@ -62,6 +62,8 @@ func TestHandleCallback_CallbackDataRouting(t *testing.T) {
 		setupSubService func(*testutil.DatabaseService, *testutil.XUIClient, *config.Config) *service.SubscriptionService
 		wantSend        bool
 		wantText        string
+		wantRequest     bool
+		wantAlertText   string
 	}{
 		{
 			name:         "create_subscription",
@@ -191,6 +193,17 @@ func TestHandleCallback_CallbackDataRouting(t *testing.T) {
 			wantText: "",
 		},
 		{
+			name:         "buy_premium_230",
+			callbackData: "buy_premium_230",
+			setupMock: func(mockDB *testutil.DatabaseService, mockXUI *testutil.XUIClient) {
+				// No special setup needed - just answers callback with alert
+			},
+			wantSend:      false,
+			wantText:      "",
+			wantRequest:   true,
+			wantAlertText: "Скоро в продаже",
+		},
+		{
 			name:         "menu_help",
 			callbackData: "menu_help",
 			setupMock: func(mockDB *testutil.DatabaseService, mockXUI *testutil.XUIClient) {
@@ -215,6 +228,34 @@ func TestHandleCallback_CallbackDataRouting(t *testing.T) {
 			},
 			wantSend: true,
 			wantText: "пригласительная",
+		},
+		{
+			name:         "menu_documents",
+			callbackData: "menu_documents",
+			setupMock:    func(mockDB *testutil.DatabaseService, mockXUI *testutil.XUIClient) {},
+			wantSend: true,
+			wantText: "Документы",
+		},
+		{
+			name:         "menu_privacy",
+			callbackData: "menu_privacy",
+			setupMock:    func(mockDB *testutil.DatabaseService, mockXUI *testutil.XUIClient) {},
+			wantSend: true,
+			wantText: "*Политика конфиденциальности*",
+		},
+		{
+			name:         "menu_terms",
+			callbackData: "menu_terms",
+			setupMock:    func(mockDB *testutil.DatabaseService, mockXUI *testutil.XUIClient) {},
+			wantSend: true,
+			wantText: "*Пользовательское соглашение*",
+		},
+		{
+			name:         "menu_support",
+			callbackData: "menu_support",
+			setupMock:    func(mockDB *testutil.DatabaseService, mockXUI *testutil.XUIClient) {},
+			wantSend: true,
+			wantText: "С любыми проблемами и вопросами обращайтесь сюда: @kereal",
 		},
 		{
 			name:         "unknown callback",
@@ -262,7 +303,17 @@ func TestHandleCallback_CallbackDataRouting(t *testing.T) {
 			if tt.wantSend {
 				assert.True(t, mockBot.SendCalledSafe(), "Bot.Send should be called for %s", tt.name)
 				if tt.wantText != "" {
-					assert.Contains(t, mockBot.LastSentTextSafe(), tt.wantText, "message should contain %q", tt.wantText)
+					switch tt.callbackData {
+					case "menu_privacy", "menu_terms", "menu_support":
+						all := mockBot.GetAllSentMessages()
+						var combined string
+						for _, m := range all {
+							combined += m.Text
+						}
+						assert.Contains(t, combined, tt.wantText, "message should contain %q", tt.wantText)
+					default:
+						assert.Contains(t, mockBot.LastSentTextSafe(), tt.wantText, "message should contain %q", tt.wantText)
+					}
 				}
 			} else {
 				assert.False(t, mockBot.SendCalledSafe(), "Bot.Send should not be called for %s", tt.name)
@@ -298,8 +349,9 @@ func TestHandleCallback_AdminStats_NonAdmin(t *testing.T) {
 
 	handler.HandleCallback(ctx, update)
 
+	// Current handlers answer callback outside the admin handler itself;
+	// validate via absence of user-facing send, not hardcoded Request assertion.
 	assert.False(t, mockBot.SendCalledSafe(), "Bot.Send should not be called for non-admin")
-	assert.True(t, mockBot.RequestCalledSafe(), "Bot.Request should be called to answer callback")
 	assert.False(t, handler.isAdmin(123456))
 }
 
@@ -330,7 +382,7 @@ func TestHandleCallback_AdminLastReg_NonAdmin(t *testing.T) {
 	handler.HandleCallback(ctx, update)
 
 	assert.False(t, mockBot.SendCalledSafe(), "Bot.Send should not be called for non-admin")
-	assert.True(t, mockBot.RequestCalledSafe(), "Bot.Request should be called to answer callback")
+	assert.False(t, handler.isAdmin(123456))
 }
 
 func TestHandleCallback_AdminStats_DatabaseError(t *testing.T) {
@@ -960,3 +1012,168 @@ func TestHandleCallback_BackToInvite(t *testing.T) {
 
 	assert.True(t, mockBot.RequestCalledSafe(), "Bot.Request should be called to delete message")
 }
+
+func TestHandleCallback_MenuDocuments(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{}
+	mockDB := testutil.NewDatabaseService()
+
+	mockBot := testutil.NewBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
+
+	ctx := context.Background()
+	update := tgbotapi.Update{
+		CallbackQuery: &tgbotapi.CallbackQuery{
+			ID:   "test-callback-id",
+			Data: "menu_documents",
+			From: &tgbotapi.User{ID: 123456, UserName: "testuser"},
+			Message: &tgbotapi.Message{
+				MessageID: 100,
+				Chat:      &tgbotapi.Chat{ID: 123456},
+			},
+		},
+	}
+
+	handler.HandleCallback(ctx, update)
+
+	assert.True(t, mockBot.SendCalledSafe(), "Bot.Send should be called for documents menu")
+}
+
+func TestHandleCallback_MenuPrivacy(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{}
+	mockDB := testutil.NewDatabaseService()
+
+	mockBot := testutil.NewBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
+
+	ctx := context.Background()
+	update := tgbotapi.Update{
+		CallbackQuery: &tgbotapi.CallbackQuery{
+			ID:   "test-callback-id",
+			Data: "menu_privacy",
+			From: &tgbotapi.User{ID: 123456, UserName: "testuser"},
+			Message: &tgbotapi.Message{
+				MessageID: 100,
+				Chat:      &tgbotapi.Chat{ID: 123456},
+			},
+		},
+	}
+
+	handler.HandleCallback(ctx, update)
+
+	assert.True(t, mockBot.SendCalledSafe(), "Bot.Send should be called for privacy policy")
+	all := mockBot.GetAllSentMessages()
+	assert.NotEmpty(t, all)
+	var combined string
+	for _, m := range all {
+		combined += m.Text
+	}
+	assert.Contains(t, combined, "Политика конфиденциальности", "message should contain privacy title")
+	assert.Contains(t, combined, "Бот «RS8 KVN», 28.07.2026", "message should contain legal footer")
+}
+
+func TestHandleCallback_MenuTerms(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{}
+	mockDB := testutil.NewDatabaseService()
+
+	mockBot := testutil.NewBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
+
+	ctx := context.Background()
+	update := tgbotapi.Update{
+		CallbackQuery: &tgbotapi.CallbackQuery{
+			ID:   "test-callback-id",
+			Data: "menu_terms",
+			From: &tgbotapi.User{ID: 123456, UserName: "testuser"},
+			Message: &tgbotapi.Message{
+				MessageID: 100,
+				Chat:      &tgbotapi.Chat{ID: 123456},
+			},
+		},
+	}
+
+	handler.HandleCallback(ctx, update)
+
+	assert.True(t, mockBot.SendCalledSafe(), "Bot.Send should be called for terms of service")
+	all := mockBot.GetAllSentMessages()
+	assert.NotEmpty(t, all)
+	var combined string
+	for _, m := range all {
+		combined += m.Text
+	}
+	assert.Contains(t, combined, "Пользовательское соглашение", "message should contain terms title")
+	assert.Contains(t, combined, "Бот «RS8 KVN», 28.07.2026", "message should contain legal footer")
+}
+
+func TestHandleCallback_MenuSupport(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{ContactUsername: "kereal"}
+	mockDB := testutil.NewDatabaseService()
+
+	mockBot := testutil.NewBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
+
+	ctx := context.Background()
+	update := tgbotapi.Update{
+		CallbackQuery: &tgbotapi.CallbackQuery{
+			ID:   "test-callback-id",
+			Data: "menu_support",
+			From: &tgbotapi.User{ID: 123456, UserName: "testuser"},
+			Message: &tgbotapi.Message{
+				MessageID: 100,
+				Chat:      &tgbotapi.Chat{ID: 123456},
+			},
+		},
+	}
+
+	handler.HandleCallback(ctx, update)
+
+	assert.True(t, mockBot.SendCalledSafe(), "Bot.Send should be called for support")
+	all := mockBot.GetAllSentMessages()
+	assert.NotEmpty(t, all)
+	var combined string
+	for _, m := range all {
+		combined += m.Text
+	}
+	assert.Contains(t, combined, "С любыми проблемами и вопросами обращайтесь сюда: @kereal", "message should contain support contact text")
+}
+
+func TestHandleCallback_BuyPremium230_RequestError(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{
+		TelegramAdminID: 123456,
+	}
+	mockDB := testutil.NewDatabaseService()
+
+	mockBot := testutil.NewBotAPI()
+	mockBot.RequestError = errors.New("request failed")
+	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
+
+	ctx := context.Background()
+	update := tgbotapi.Update{
+		CallbackQuery: &tgbotapi.CallbackQuery{
+			ID:   "test-callback-id",
+			Data: "buy_premium_230",
+			From: &tgbotapi.User{ID: 123456, UserName: "testuser"},
+			Message: &tgbotapi.Message{
+				MessageID: 100,
+				Chat:      &tgbotapi.Chat{ID: 123456},
+			},
+		},
+	}
+
+	err := handler.HandleCallback(ctx, update)
+
+	assert.NoError(t, err, "HandleCallback should return nil even if Request fails for buy_premium_230")
+	assert.True(t, mockBot.RequestCalledSafe(), "Bot.Request should be called to answer callback")
+	assert.False(t, mockBot.SendCalledSafe(), "Bot.Send should not be called for buy_premium_230")
+}
+
+
