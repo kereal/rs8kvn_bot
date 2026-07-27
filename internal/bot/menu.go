@@ -105,7 +105,9 @@ func (h *Handler) handleMenuDocuments(_ context.Context, chatID int64, username 
 	editMsg.DisableWebPagePreview = true
 	keyboard := h.keyboards.Documents()
 	editMsg.ReplyMarkup = &keyboard
-	h.safeSend(editMsg)
+	if _, err := h.bot.Send(editMsg); err != nil {
+		return fmt.Errorf("send documents menu: %w", err)
+	}
 	return nil
 }
 
@@ -113,12 +115,10 @@ func (h *Handler) handleMenuDocuments(_ context.Context, chatID int64, username 
 func (h *Handler) handleBackToDocuments(_ context.Context, chatID int64, _ string, messageID int) error {
 	logger.Info("User closing document", zap.Int64("chat_id", chatID))
 
-	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "📑 *Документы*")
-	editMsg.ParseMode = "Markdown"
-	editMsg.DisableWebPagePreview = true
-	keyboard := h.keyboards.Documents()
-	editMsg.ReplyMarkup = &keyboard
-	h.safeSend(editMsg)
+	deleteMsg := tgbotapi.NewDeleteMessage(chatID, messageID)
+	if _, err := h.bot.Request(deleteMsg); err != nil {
+		return fmt.Errorf("delete message: %w", err)
+	}
 	return nil
 }
 
@@ -132,16 +132,6 @@ func (h *Handler) sendLegalText(ctx context.Context, chatID int64, messageID int
 		if i == len(chunks)-1 {
 			key := h.keyboards.BackToDocuments()
 			keyboard = &key
-		}
-		if i == 0 {
-			editMsg := tgbotapi.NewEditMessageText(chatID, messageID, chunk)
-			editMsg.ParseMode = "Markdown"
-			editMsg.DisableWebPagePreview = true
-			editMsg.ReplyMarkup = keyboard
-			if !h.safeSend(editMsg) {
-				return fmt.Errorf("legal preview send failed")
-			}
-			continue
 		}
 		msg := tgbotapi.NewMessage(chatID, chunk)
 		msg.ParseMode = "Markdown"
