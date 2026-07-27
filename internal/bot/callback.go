@@ -52,76 +52,82 @@ func (c *CallbackHandler) HandleCallback(ctx context.Context, update tgbotapi.Up
 	switch data {
 	case "create_subscription":
 		messageID := update.CallbackQuery.Message.MessageID
-		return c.h.handleCreateSubscription(ctx, chatID, username, messageID)
+		c.h.handleCreateSubscription(ctx, chatID, username, messageID)
 	case "qr_code":
 		messageID := update.CallbackQuery.Message.MessageID
-		return c.h.handleQRCode(ctx, chatID, username, messageID)
+		c.h.handleQRCode(ctx, chatID, username, messageID)
 	case "admin_stats":
 		messageID := update.CallbackQuery.Message.MessageID
-		return c.h.handleAdminStats(ctx, chatID, username, messageID)
+		c.h.handleAdminStats(ctx, chatID, username, messageID)
 	case "admin_lastreg":
 		messageID := update.CallbackQuery.Message.MessageID
-		return c.h.handleAdminLastReg(ctx, chatID, username, messageID)
+		c.h.handleAdminLastReg(ctx, chatID, username, messageID)
+	case "menu_subscription":
+		messageID := update.CallbackQuery.Message.MessageID
+		c.h.handleMySubscription(ctx, chatID, username, messageID)
 	case "back_to_start":
 		messageID := update.CallbackQuery.Message.MessageID
-		return c.h.handleBackToStart(ctx, chatID, username, messageID)
+		c.h.handleBackToStart(ctx, chatID, username, messageID)
 	case "menu_donate":
 		messageID := update.CallbackQuery.Message.MessageID
-		return c.h.handleMenuDonate(ctx, chatID, username, messageID)
+		c.h.handleMenuDonate(ctx, chatID, username, messageID)
 	case "buy_premium_230":
 		answer := tgbotapi.CallbackConfig{
 			CallbackQueryID: update.CallbackQuery.ID,
 			Text:            "Скоро в продаже",
 		}
 		c.h.bot.Request(answer)
-		return nil
 	case "upgrade_premium":
 		messageID := update.CallbackQuery.Message.MessageID
-		return c.h.handleUpgradePremium(ctx, chatID, username, messageID)
+		c.h.handleUpgradePremium(ctx, chatID, username, messageID)
 	case "confirm_upgrade_premium":
 		messageID := update.CallbackQuery.Message.MessageID
-		return c.h.handleConfirmUpgradePremium(ctx, chatID, username, messageID)
+		c.h.handleConfirmUpgradePremium(ctx, chatID, username, messageID)
 	case "back_to_subscription":
 		messageID := update.CallbackQuery.Message.MessageID
-		return c.h.handleBackToSubscription(ctx, chatID, username, messageID)
+		c.h.handleBackToSubscription(ctx, chatID, username, messageID)
 	case "menu_help":
 		messageID := update.CallbackQuery.Message.MessageID
-		return c.h.handleMenuHelp(ctx, chatID, username, messageID)
+		c.h.handleMenuHelp(ctx, chatID, username, messageID)
 	case "back_to_documents":
 		messageID := update.CallbackQuery.Message.MessageID
-		return c.h.handleBackToDocuments(ctx, chatID, username, messageID)
+		c.h.handleBackToDocuments(ctx, chatID, username, messageID)
 	case "menu_documents":
 		messageID := update.CallbackQuery.Message.MessageID
-		return c.h.handleMenuDocuments(ctx, chatID, username, messageID)
+		c.h.handleMenuDocuments(ctx, chatID, username, messageID)
 	case "menu_privacy":
 		messageID := update.CallbackQuery.Message.MessageID
-		return c.h.handleMenuPrivacy(ctx, chatID, username, messageID)
+		c.h.handleMenuPrivacy(ctx, chatID, username, messageID)
 	case "menu_terms":
 		messageID := update.CallbackQuery.Message.MessageID
-		return c.h.handleMenuTerms(ctx, chatID, username, messageID)
+		c.h.handleMenuTerms(ctx, chatID, username, messageID)
 	case "menu_support":
 		messageID := update.CallbackQuery.Message.MessageID
-		return c.h.handleMenuSupport(ctx, chatID, username, messageID)
+		c.h.handleMenuSupport(ctx, chatID, username, messageID)
 	case "share_invite":
 		messageID := update.CallbackQuery.Message.MessageID
-		return c.handleShareInvite(ctx, chatID, username, messageID)
+		c.handleShareInvite(ctx, chatID, username, messageID)
 	case "qr_telegram":
 		messageID := update.CallbackQuery.Message.MessageID
-		return c.handleQRTelegram(ctx, chatID, username, messageID)
+		c.handleQRTelegram(ctx, chatID, username, messageID)
 	case "qr_web":
 		messageID := update.CallbackQuery.Message.MessageID
-		return c.handleQRWeb(ctx, chatID, username, messageID)
+		c.handleQRWeb(ctx, chatID, username, messageID)
 	case "broadcast_confirm":
-		return c.h.handleBroadcastConfirm(ctx, chatID)
+		c.h.handleBroadcastConfirm(ctx, chatID)
 	case "broadcast_cancel":
-		return c.h.handleBroadcastCancel(ctx, chatID)
+		c.h.handleBroadcastCancel(ctx, chatID)
 	case "back_to_invite":
 		messageID := update.CallbackQuery.Message.MessageID
-		return c.h.handleBackToInvite(ctx, chatID, username, messageID)
+		c.h.handleBackToInvite(ctx, chatID, username, messageID)
 	default:
 		logger.Warn("Unknown callback data", zap.String("data", data))
-		return nil
 	}
+	callback := tgbotapi.NewCallback(update.CallbackQuery.ID, "")
+	if _, err := c.h.bot.Request(callback); err != nil {
+		logger.Error("Failed to answer callback", zap.Error(err))
+	}
+	return nil
 }
 
 // handleShareInvite generates and sends an invite link.
