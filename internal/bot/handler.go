@@ -97,7 +97,7 @@ type Handler struct {
 // NewHandler creates a new Handler with all sub-handlers initialized.
 func NewHandler(bot interfaces.BotAPI, cfg *config.Config, db interfaces.DatabaseService, botConfig *BotConfig, subService *service.SubscriptionService, version string) *Handler {
 	rl := ratelimiter.NewPerUserRateLimiter(float64(config.RateLimiterMaxTokens), float64(config.RateLimiterRefillRate))
-	kb := NewKeyboardBuilder(botConfig.Username, cfg.ContactUsername, cfg.DonateCardNumber, cfg.DonateURL, cfg.SiteURL)
+	kb := NewKeyboardBuilder(botConfig.Username, cfg.ContactUsername, cfg.DonateCardNumber, cfg.DonateURL, cfg.SiteURL, cfg.DonateEnabled)
 
 	h := &Handler{
 		bot:                 bot,
@@ -144,7 +144,7 @@ func (h *Handler) SetBot(bot interfaces.BotAPI) {
 // SetBotConfig updates runtime bot config and rebuilds keyboard templates.
 func (h *Handler) SetBotConfig(bc *BotConfig) {
 	h.botConfig = bc
-	h.keyboards = NewKeyboardBuilder(bc.Username, h.cfg.ContactUsername, h.cfg.DonateCardNumber, h.cfg.DonateURL, h.cfg.SiteURL)
+	h.keyboards = NewKeyboardBuilder(bc.Username, h.cfg.ContactUsername, h.cfg.DonateCardNumber, h.cfg.DonateURL, h.cfg.SiteURL, h.cfg.DonateEnabled)
 	// Propagate to decomposed handlers so generated links (invite/share) use the
 	// real bot username instead of the startup placeholder.
 	h.referral.SetBotConfig(bc)
@@ -385,7 +385,7 @@ func (h *Handler) getMainMenuContent(ctx context.Context, username string, hasSu
 	// Ensure keyboards is initialized (for manually constructed handlers in tests)
 	h.keyboardsOnce.Do(func() {
 		if h.keyboards == nil {
-			h.keyboards = NewKeyboardBuilder("", "", "", "", "")
+			h.keyboards = NewKeyboardBuilder("", "", "", "", "", true)
 		}
 	})
 
@@ -439,6 +439,11 @@ func (h *Handler) getQRKeyboard() tgbotapi.InlineKeyboardMarkup {
 
 // getMainMenuKeyboard builds the main menu keyboard.
 func (h *Handler) getMainMenuKeyboard(hasSubscription bool, freeUpgradeLabel ...string) tgbotapi.InlineKeyboardMarkup {
+	h.keyboardsOnce.Do(func() {
+		if h.keyboards == nil {
+			h.keyboards = NewKeyboardBuilder("", "", "", "", "", true)
+		}
+	})
 	label := ""
 	if len(freeUpgradeLabel) > 0 {
 		label = freeUpgradeLabel[0]
