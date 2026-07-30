@@ -387,3 +387,64 @@ func TestCalculateProductExpiry_DifferentPlanUsesNow(t *testing.T) {
 	expected := now.AddDate(0, 0, 30)
 	assert.Equal(t, expected, result)
 }
+
+// TestOrderService_ActivateProduct_FreeProduct_SamePlan_SyncsExpiry verifies that
+// ActivateProduct syncs VPN nodes even when the plan is unchanged, as long as
+// the expiry changed. Previously sync was skipped when planChanged == false,
+// leaving the 3x-ui panel unaware of the new expiry.
+func TestOrderService_ActivateProduct_FreeProduct_SamePlan_SyncsExpiry(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Minute)
+	product := &database.Product{
+		ID: 1, PlanID: 1, Name: "Pro", DurationDays: 30,
+		PriceCents: 0, Currency: "RUB", IsActive: true,
+	}
+	oldExpiry := now.Add(10 * 24 * time.Hour) // expires in 10 days → renewal extends it
+	sub := &database.Subscription{
+		ID: 1, TelegramID: 123, SubscriptionID: "sub-1",
+		PlanID: 1, Status: "active", Username: "user",
+		ExpiresAt: &oldExpiry,
+	}
+
+	transactionCalled := false
+	db := testutil.NewDatabaseService()
+	db.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
+		return sub, nil
+	}
+	db.GetByIDFunc = func(ctx context.Context, id uint) (*database.Subscription, error) {
+		return sub, nil
+	}
+	db.TransactionFunc = func(ctx context.Context, fn func(*gorm.DB) error) error {
+		transactionCalled = true
+		return nil
+	}
+	// GetNodesByPlanID is called twice: first by GetOrCreateSubscription's
+	// repair-nodes path (planID=1, must succeed), then by ApplyPlanToSubscription
+	// during sync (planID=1 again). The second call fails, proving sync was
+	// invoked even though planChanged == false.
+	nodesCallCount := 0
+	db.GetNodesByPlanIDFunc = func(ctx context.Context, planID uint) ([]database.Node, error) {
+		nodesCallCount++
+		if nodesCallCount == 1 {
+			return []database.Node{}, nil // repair-nodes in GetOrCreateSubscription
+		}
+		return nil, errors.New("load nodes failed") // sync path
+	}
+	db.GetBySubscriptionIDFunc = func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
+		return []database.SubscriptionNode{}, nil
+	}
+
+	subSvc := &SubscriptionService{db: db}
+	syncSvc := NewSyncService(db, nil, nil)
+	svc := NewOrderService(db, subSvc, syncSvc)
+
+	order, err := svc.ActivateProduct(ctx, 123, "testuser", product)
+
+	// The error proves sync was attempted despite planChanged == false,
+	// because the expiry moved (oldExpiry + 30 days != oldExpiry).
+	require.ErrorContains(t, err, "activate product: apply plan: apply plan to subscription 1: load plan nodes")
+	assert.True(t, transactionCalled)
+	assert.NotNil(t, order)
+	assert.Equal(t, database.OrderStatusPaid, order.Status)
+	assert.Equal(t, uint(1), sub.PlanID, "plan must be unchanged")
+}
