@@ -67,8 +67,10 @@ func (rh *ReferralHandler) SetBotConfig(botConfig *BotConfig) {
 		rh.cfg.DonateCardNumber,
 		rh.cfg.DonateURL,
 		rh.cfg.SiteURL,
+		rh.cfg.DonateEnabled,
 	)
 }
+
 // HandleInvite handles the /invite command.
 func (rh *ReferralHandler) HandleInvite(ctx context.Context, chatID int64, username string, messageID int) error {
 	logger.Info("User requesting invite link",

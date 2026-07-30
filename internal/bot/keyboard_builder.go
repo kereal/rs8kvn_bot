@@ -8,40 +8,61 @@ import (
 
 // KeyboardBuilder creates Telegram inline keyboards.
 type KeyboardBuilder struct {
-	botUsername string
-	contactUser string
-	donateCard  string
-	donateURL   string
-	siteURL     string
+	botUsername   string
+	contactUser   string
+	donateCard    string
+	donateURL     string
+	siteURL       string
+	donateEnabled bool
 }
 
 // NewKeyboardBuilder creates a new KeyboardBuilder.
-func NewKeyboardBuilder(botUsername, contactUser, donateCard, donateURL, siteURL string) *KeyboardBuilder {
+// donateEnabled toggles the visibility of the "☕ Донат" button in MainMenu.
+func NewKeyboardBuilder(botUsername, contactUser, donateCard, donateURL, siteURL string, donateEnabled bool) *KeyboardBuilder {
 	return &KeyboardBuilder{
-		botUsername: botUsername,
-		contactUser: contactUser,
-		donateCard:  donateCard,
-		donateURL:   donateURL,
-		siteURL:     siteURL,
+		botUsername:   botUsername,
+		contactUser:   contactUser,
+		donateCard:    donateCard,
+		donateURL:     donateURL,
+		siteURL:       siteURL,
+		donateEnabled: donateEnabled,
 	}
 }
 
 // MainMenu returns the inline keyboard for the main menu.
 func (kb *KeyboardBuilder) MainMenu(hasSubscription bool, freeUpgradeLabel string) tgbotapi.InlineKeyboardMarkup {
-	rows := [][]tgbotapi.InlineKeyboardButton{
-		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("📋 Подписка", "menu_subscription"),
-			tgbotapi.NewInlineKeyboardButtonData("☕ Донат", "menu_donate"),
-		),
-		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("❓ Помощь", "menu_help"),
-			tgbotapi.NewInlineKeyboardButtonData("📑 Документы", "menu_documents"),
-		),
+	var firstRow []tgbotapi.InlineKeyboardButton
+	firstRow = append(firstRow, tgbotapi.NewInlineKeyboardButtonData("📋 Подписка", "menu_subscription"))
+	if kb.donateEnabled {
+		firstRow = append(firstRow, tgbotapi.NewInlineKeyboardButtonData("☕ Донат", "menu_donate"))
 	}
-
-	rows = append(rows, tgbotapi.NewInlineKeyboardRow(
-		tgbotapi.NewInlineKeyboardButtonData("💎 Premium на 30 дней за 230₽", "buy_premium_230"),
-	))
+	rows := [][]tgbotapi.InlineKeyboardButton{
+		tgbotapi.NewInlineKeyboardRow(firstRow...),
+	}
+	if kb.donateEnabled {
+		// Default layout: Premium stays at the bottom (row 3).
+		rows = append(rows,
+			tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("❓ Помощь", "menu_help"),
+				tgbotapi.NewInlineKeyboardButtonData("📑 Документы", "menu_documents"),
+			),
+			tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("💎 Premium на 30 дней за 230₽", "buy_premium_230"),
+			),
+		)
+	} else {
+		// Donate hidden: lift Premium directly under "Подписка" (row 2);
+		// the rest of the menu keeps the original order.
+		rows = append(rows,
+			tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("💎 Premium на 30 дней за 230₽", "buy_premium_230"),
+			),
+			tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("❓ Помощь", "menu_help"),
+				tgbotapi.NewInlineKeyboardButtonData("📑 Документы", "menu_documents"),
+			),
+		)
+	}
 
 	if hasSubscription {
 		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
