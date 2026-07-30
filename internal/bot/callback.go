@@ -166,6 +166,11 @@ func (c *CallbackHandler) HandleCallback(ctx context.Context, update tgbotapi.Up
 		if err := c.h.handleBackToInvite(ctx, chatID, username, messageID); err != nil {
 			return fmt.Errorf("handle back_to_invite: %w", err)
 		}
+	case "delete_message":
+		messageID := update.CallbackQuery.Message.MessageID
+		if err := c.handleDeleteMessage(ctx, chatID, messageID); err != nil {
+			return fmt.Errorf("handle delete_message: %w", err)
+		}
 	default:
 		logger.Warn("Unknown callback data", zap.String("data", data))
 	}
@@ -214,6 +219,17 @@ func (c *CallbackHandler) handleQRWeb(ctx context.Context, chatID int64, usernam
 
 	if err := c.h.sendQRCode(ctx, chatID, messageID, link, "🌐 QR-код для веб-страницы\n\nПокажите этот QR-код для открытия страницы с подпиской"); err != nil {
 		return fmt.Errorf("send qr code: %w", err)
+	}
+	return nil
+}
+
+// handleDeleteMessage deletes the message that triggered the callback.
+func (c *CallbackHandler) handleDeleteMessage(ctx context.Context, chatID int64, messageID int) error {
+	logger.Debug("User deleting message", zap.Int64("chat_id", chatID), zap.Int("message_id", messageID))
+	deleteMsg := tgbotapi.NewDeleteMessage(chatID, messageID)
+	if _, err := c.h.bot.Request(deleteMsg); err != nil {
+		logger.Error("Failed to delete message", zap.Error(err))
+		return fmt.Errorf("delete message: %w", err)
 	}
 	return nil
 }

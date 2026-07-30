@@ -385,7 +385,11 @@ func (h *Handler) getMainMenuContent(ctx context.Context, username string, hasSu
 	// Ensure keyboards is initialized (for manually constructed handlers in tests)
 	h.keyboardsOnce.Do(func() {
 		if h.keyboards == nil {
-			h.keyboards = NewKeyboardBuilder("", "", "", "", "", true)
+			donateEnabled := true
+			if h.cfg != nil {
+				donateEnabled = h.cfg.DonateEnabled
+			}
+			h.keyboards = NewKeyboardBuilder("", "", "", "", "", donateEnabled)
 		}
 	})
 
@@ -441,7 +445,11 @@ func (h *Handler) getQRKeyboard() tgbotapi.InlineKeyboardMarkup {
 func (h *Handler) getMainMenuKeyboard(hasSubscription bool, freeUpgradeLabel ...string) tgbotapi.InlineKeyboardMarkup {
 	h.keyboardsOnce.Do(func() {
 		if h.keyboards == nil {
-			h.keyboards = NewKeyboardBuilder("", "", "", "", "", true)
+			donateEnabled := true
+			if h.cfg != nil {
+				donateEnabled = h.cfg.DonateEnabled
+			}
+			h.keyboards = NewKeyboardBuilder("", "", "", "", "", donateEnabled)
 		}
 	})
 	label := ""

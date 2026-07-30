@@ -28,7 +28,8 @@ func TestGetMainMenuKeyboard(t *testing.T) {
 func TestHandler_GetMainMenuKeyboard_ButtonLabels(t *testing.T) {
 	t.Parallel()
 
-	handler := &Handler{cfg: &config.Config{}, botConfig: NewTestBotConfig()}
+	cfg := &config.Config{DonateEnabled: true}
+	handler := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", "", "", "", "", true)}
 
 	keyboard := handler.getMainMenuKeyboard(true)
 
@@ -43,7 +44,8 @@ func TestHandler_GetMainMenuKeyboard_ButtonLabels(t *testing.T) {
 func TestHandler_GetMainMenuKeyboard_CallbackData(t *testing.T) {
 	t.Parallel()
 
-	handler := &Handler{cfg: &config.Config{}, botConfig: NewTestBotConfig()}
+	cfg := &config.Config{DonateEnabled: true}
+	handler := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", "", "", "", "", true)}
 
 	keyboard := handler.getMainMenuKeyboard(true)
 

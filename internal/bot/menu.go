@@ -40,15 +40,19 @@ func (h *Handler) handleBackToStart(ctx context.Context, chatID int64, username 
 	return nil
 }
 
-// handleMenuDonate handles the "menu_donate" callback - shows donate message with back button
+// handleMenuDonate handles the "menu_donate" callback - shows donate message in a new message
 func (h *Handler) handleMenuDonate(_ context.Context, chatID int64, username string, messageID int) error {
 	logger.Info("User viewing donate", zap.String("username", username), zap.Int64("chat_id", chatID))
-	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, h.getDonateText())
-	editMsg.ParseMode = "Markdown"
-	editMsg.DisableWebPagePreview = true
-	keyboard := h.getBackKeyboard()
-	editMsg.ReplyMarkup = &keyboard
-	h.safeSend(editMsg)
+	msg := tgbotapi.NewMessage(chatID, h.getDonateText())
+	msg.ParseMode = "Markdown"
+	msg.DisableWebPagePreview = true
+	keyboard := tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("🗑 Закрыть", "delete_message"),
+		),
+	)
+	msg.ReplyMarkup = keyboard
+	h.safeSend(msg)
 	return nil
 }
 
