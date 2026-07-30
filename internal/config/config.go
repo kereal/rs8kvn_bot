@@ -43,7 +43,9 @@ type Config struct {
 	// Donation configuration
 	DonateCardNumber string
 	DonateURL        string
-
+	// DonateEnabled controls whether the "☕ Донат" button is shown in the main menu.
+	// Defaults to true (preserves historical behaviour).
+	DonateEnabled bool
 	// Subscription server configuration
 	GlobalSubURL           string
 	SubServerAccessLogPath string
@@ -69,6 +71,7 @@ type configFlags struct {
 	contactUsername        *flag.StringValue
 	donateCardNumber       *flag.StringValue
 	donateURL              *flag.StringValue
+	donateEnabled          *flag.BoolValue
 	globalSubURL           *flag.StringValue
 	subServerAccessLogPath *flag.StringValue
 	mainMenuBtnProductID   *flag.IntValue
@@ -96,6 +99,7 @@ func registerFlags() (*flag.Registry, *configFlags) {
 		contactUsername:        flag.NewString(ContactUsername),
 		donateCardNumber:       flag.NewString(DonateCardNumber),
 		donateURL:              flag.NewString(DonateURL),
+		donateEnabled:          flag.NewBool(DefaultDonateEnabled),
 		globalSubURL:           flag.NewString(""),
 		subServerAccessLogPath: flag.NewString(""),
 		mainMenuBtnProductID:   flag.NewInt(0),
@@ -117,6 +121,7 @@ func registerFlags() (*flag.Registry, *configFlags) {
 	r.Register("CONTACT_USERNAME", f.contactUsername)
 	r.Register("DONATE_CARD_NUMBER", f.donateCardNumber)
 	r.Register("DONATE_URL", f.donateURL)
+	r.Register("DONATE_ENABLED", f.donateEnabled)
 	r.Register("SUBSERVER_ACCESS_LOG", f.subServerAccessLogPath)
 	r.Register("MAIN_MENU_BTN_PRODUCT", f.mainMenuBtnProductID)
 
@@ -153,6 +158,7 @@ func Load() (*Config, error) {
 		ContactUsername:        f.contactUsername.Get(),
 		DonateCardNumber:       f.donateCardNumber.Get(),
 		DonateURL:              f.donateURL.Get(),
+		DonateEnabled:          f.donateEnabled.Get(),
 		GlobalSubURL:           f.globalSubURL.Get(),
 		SubServerAccessLogPath: f.subServerAccessLogPath.Get(),
 		MainMenuBtnProductID:   uint(f.mainMenuBtnProductID.Get()), //nolint:gosec // non-negative value validated above

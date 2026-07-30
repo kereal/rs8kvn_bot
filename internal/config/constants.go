@@ -164,6 +164,10 @@ const (
 	AdminSendMinInterval = 6 * time.Second // Min interval between messages
 )
 
+// DefaultDonateEnabled controls the default visibility of the "☕ Донат" button
+// in the main menu. Override via DONATE_ENABLED env var.
+const DefaultDonateEnabled = true
+
 // Donate Constants
 const (
 	// DonateCardNumber is the card number for donations (T-Bank)

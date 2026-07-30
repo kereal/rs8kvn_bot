@@ -665,6 +665,7 @@ and validated in `internal/config/config.go`. Required vars must be set or `Load
 | `CONTACT_USERNAME` | string | `''` | Support contact |
 | `DONATE_CARD_NUMBER` | string | `''` | |
 | `DONATE_URL` | string | `''` | |
+| `DONATE_ENABLED` | bool | `true` | Toggle "☕ Донат" button in main menu |
 | `SUBSERVER_ACCESS_LOG` | path | `''` (disabled) | Optional access log |
 | `MAIN_MENU_BTN_PRODUCT` | uint | `0` | Product shown on main-menu button |
 
