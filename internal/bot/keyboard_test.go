@@ -15,8 +15,8 @@ import (
 func TestGetMainMenuKeyboard(t *testing.T) {
 	t.Parallel()
 
-	cfg := &config.Config{TelegramAdminID: 123}
-	handler := &Handler{cfg: cfg, botConfig: NewTestBotConfig()}
+	cfg := &config.Config{TelegramAdminID: 123, DonateEnabled: true}
+	handler := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", "", "", "", "", true)}
 
 	keyboardWithShare := handler.getMainMenuKeyboard(true)
 	assert.Len(t, keyboardWithShare.InlineKeyboard, 4, "Expected 4 rows with subscription, documents, buy premium, and share")
@@ -75,33 +75,66 @@ func TestHandler_KeyboardConstruction_MultipleRows(t *testing.T) {
 	}
 }
 
+// === donate button visibility tests ===
+
+func TestHandler_MainMenu_DonateHidden(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{TelegramAdminID: 123, DonateEnabled: false}
+	h := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, cfg.DonateCardNumber, cfg.DonateURL, cfg.SiteURL, false)}
+
+	kb := h.getMainMenuKeyboard(false)
+
+	require.NotEmpty(t, kb.InlineKeyboard, "Keyboard must have rows")
+	require.Len(t, kb.InlineKeyboard[0], 1, "First row must contain only Subscription when donate is disabled")
+	assert.Equal(t, "📋 Подписка", kb.InlineKeyboard[0][0].Text, "First button must be Subscription")
+
+	for _, row := range kb.InlineKeyboard {
+		for _, btn := range row {
+			require.NotNil(t, btn.CallbackData)
+			assert.NotEqual(t, "menu_donate", *btn.CallbackData, "Donate callback must not appear when donate is disabled")
+		}
+	}
+}
+
+func TestHandler_MainMenu_DonateShown(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{TelegramAdminID: 123, DonateEnabled: true}
+	h := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, cfg.DonateCardNumber, cfg.DonateURL, cfg.SiteURL, true)}
+
+	kb := h.getMainMenuKeyboard(false)
+
+	require.GreaterOrEqual(t, len(kb.InlineKeyboard[0]), 2, "First row must contain Subscription and Donate when donate is enabled")
+	assert.Equal(t, "menu_subscription", *kb.InlineKeyboard[0][0].CallbackData)
+	assert.Equal(t, "menu_donate", *kb.InlineKeyboard[0][1].CallbackData)
+}
+
 // === getBackKeyboard tests ===
 
 func TestGetBackKeyboard(t *testing.T) {
 	t.Parallel()
 
-	cfg := &config.Config{}
-	handler := &Handler{cfg: cfg, botConfig: NewTestBotConfig()}
-
+	handler := NewHandler(nil, &config.Config{}, nil, NewTestBotConfig(), nil, "")
 	keyboard := handler.getBackKeyboard()
 
-	assert.Len(t, keyboard.InlineKeyboard, 1, "Back keyboard should have 1 row")
-	assert.Len(t, keyboard.InlineKeyboard[0], 1, "Back keyboard should have 1 button")
+	require.NotEmpty(t, keyboard.InlineKeyboard, "should have at least 1 row")
+	require.Len(t, keyboard.InlineKeyboard, 1, "should have exactly 1 row")
+	require.Len(t, keyboard.InlineKeyboard[0], 1, "row should have 1 button")
 	assert.Equal(t, "🏠 В начало", keyboard.InlineKeyboard[0][0].Text)
+	require.NotNil(t, keyboard.InlineKeyboard[0][0].CallbackData)
+	assert.Equal(t, "back_to_start", *keyboard.InlineKeyboard[0][0].CallbackData)
 }
-
 func TestHandler_GetBackKeyboard_CallbackData(t *testing.T) {
 	t.Parallel()
 
-	handler := &Handler{cfg: &config.Config{}, botConfig: NewTestBotConfig()}
+	handler := &Handler{cfg: &config.Config{}, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", "", "", "", "", true)}
 
 	keyboard := handler.getBackKeyboard()
 
 	require.NotNil(t, keyboard.InlineKeyboard[0][0].CallbackData, "Back button callback should not be nil")
 	assert.Equal(t, "back_to_start", *keyboard.InlineKeyboard[0][0].CallbackData, "Back button callback")
 }
-
-// === getQRKeyboard tests ===
 
 func TestGetQRKeyboard(t *testing.T) {
 	t.Parallel()
