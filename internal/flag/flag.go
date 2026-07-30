@@ -165,3 +165,28 @@ func (v *Int64Value) Set(s string) error {
 
 // Get returns the current value.
 func (v *Int64Value) Get() int64 { return v.val }
+
+// BoolValue implements Value for boolean configuration.
+// Accepts: 1, t, T, TRUE, true, True, 0, f, F, FALSE, false, False (per strconv.ParseBool).
+type BoolValue struct {
+	val bool
+	def bool
+}
+
+// NewBool creates a BoolValue with the given default.
+func NewBool(def bool) *BoolValue {
+	return &BoolValue{val: def, def: def}
+}
+
+func (v *BoolValue) String() string { return strconv.FormatBool(v.val) }
+func (v *BoolValue) Set(s string) error {
+	b, err := strconv.ParseBool(s)
+	if err != nil {
+		return fmt.Errorf("must be a boolean (true/false/1/0), got: %q", s)
+	}
+	v.val = b
+	return nil
+}
+
+// Get returns the current value.
+func (v *BoolValue) Get() bool { return v.val }
