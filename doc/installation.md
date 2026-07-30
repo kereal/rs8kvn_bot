@@ -231,6 +231,7 @@ Air will automatically rebuild and restart the bot when you save changes to Go f
 | **Donation** |
 | `DONATE_CARD_NUMBER` | Donation card (T-Bank) | *(empty)* | ❌ | Shown in donate menu |
 | `DONATE_URL` | Donation collection link | *(empty)* | ❌ | T-Bank or other |
+| `DONATE_ENABLED` | Show "☕ Донат" button in main menu | `true` | ❌ | `true` / `false`; when false the "💎 Premium" button is lifted directly under "📋 Подписка" |
 
 
 ### Adding Nodes via SQL
