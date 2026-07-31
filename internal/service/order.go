@@ -50,6 +50,7 @@ func (o *OrderService) ActivateProduct(ctx context.Context, telegramID int64, us
 	now := time.Now().UTC().Truncate(time.Minute)
 	planChanged := sub.PlanID != product.PlanID
 	newExpiry := calculateProductExpiry(now, sub.PlanID, sub.ExpiresAt, product)
+	oldExpiry := sub.ExpiresAt
 	paymentInfo, err := o.requestPayment(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("request payment: %w", err)
@@ -111,9 +112,16 @@ func (o *OrderService) ActivateProduct(ctx context.Context, telegramID int64, us
 		o.subSvc.InvalidateBySubID(ctx, sub.SubscriptionID)
 	}
 
-	if planChanged && o.syncSvc != nil {
-		if err := o.syncSvc.ApplyPlanToSubscription(ctx, sub.ID); err != nil {
-			return order, fmt.Errorf("activate product: apply plan: %w", err)
+	// Sync VPN nodes when the plan changed or the expiry moved. Even when
+	// planID is the same, a renewal extends ExpiresAt and the 3x-ui panel must
+	// receive the updated expiry before the old one disconnects the client.
+	// Mirrors the condition in RenewSubscription.
+	needsSync := planChanged || oldExpiry == nil || !oldExpiry.Equal(newExpiry)
+	if o.syncSvc != nil {
+		if needsSync {
+			if err := o.syncSvc.ApplyPlanToSubscription(ctx, sub.ID); err != nil {
+				return order, fmt.Errorf("activate product: apply plan: %w", err)
+			}
 		}
 		if err := o.syncSvc.SyncSubscription(ctx, sub.ID); err != nil {
 			logger.Warn("activate product: post-commit sync failed",

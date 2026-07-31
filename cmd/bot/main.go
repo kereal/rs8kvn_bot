@@ -255,6 +255,17 @@ func startBackgroundWorkers(ctx context.Context, handler *bot.Handler, subServic
 	var wg sync.WaitGroup
 	wg.Add(8)
 
+	// Create sync service and wire it into subscription service BEFORE starting
+	// any background goroutines. This prevents a race where the trial cleanup
+	// scheduler calls CleanupExpiredTrials before SetSyncService has run, which
+	// would bypass the sync-based deprovision path and fall into the legacy
+	// deleteClientFromAllNodes code that sends delete requests to ALL nodes.
+	syncSvc := service.NewSyncService(dbService, vpnClients, nodes)
+	subService.SetSyncService(syncSvc)
+
+	orderService := service.NewOrderService(dbService, subService, syncSvc)
+	handler.SetOrderService(orderService)
+
 	go func() {
 		defer recoverAndReport("DB pool metrics collector")
 		defer wg.Done()
@@ -323,12 +334,6 @@ func startBackgroundWorkers(ctx context.Context, handler *bot.Handler, subServic
 		trialSched := scheduler.NewTrialCleanupScheduler(subService)
 		trialSched.Start(ctx)
 	}()
-
-	syncSvc := service.NewSyncService(dbService, vpnClients, nodes)
-	subService.SetSyncService(syncSvc)
-
-	orderService := service.NewOrderService(dbService, subService, syncSvc)
-	handler.SetOrderService(orderService)
 
 	go func() {
 		defer recoverAndReport("Subscription sync worker")
