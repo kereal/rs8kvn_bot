@@ -674,7 +674,13 @@ func (s *SubscriptionService) ReconcileOrphanedClients(ctx context.Context) (int
 }
 
 // CleanupExpiredTrials deletes expired trial subscriptions from the database
-// and removes their clients from all XUI sources.
+// and deprovisions their VPN clients via the sync service.
+//
+// The DB cleanup (database.CleanupExpiredTrials) only returns unbound trials
+// (telegram_id < 0, plan_id == trial plan). These subscriptions always have
+// Status == "active" (BindTrialSubscription changes plan_id to free, which
+// excludes them from the DB query). Therefore the sync-based deprovision path
+// is the only branch that executes in production.
 func (s *SubscriptionService) CleanupExpiredTrials(ctx context.Context) (int64, error) {
 	subs, err := s.db.CleanupExpiredTrials(ctx, s.cfg.TrialDurationHours)
 	if err != nil {
@@ -701,6 +707,9 @@ func (s *SubscriptionService) CleanupExpiredTrials(ctx context.Context) (int64, 
 			}
 			successCount++
 		} else {
+			// Fallback: syncService is nil (only possible in tests or before
+			// SetSyncService is called). Use direct deprovision so VPN clients
+			// are still cleaned up.
 			s.deleteClientFromAllNodes(ctx, vpn.SubscriptionProvision{
 				ClientID: sub.ClientID,
 				Username: "trial_" + sub.SubscriptionID,
