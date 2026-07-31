@@ -117,9 +117,11 @@ func (o *OrderService) ActivateProduct(ctx context.Context, telegramID int64, us
 	// receive the updated expiry before the old one disconnects the client.
 	// Mirrors the condition in RenewSubscription.
 	needsSync := planChanged || oldExpiry == nil || !oldExpiry.Equal(newExpiry)
-	if needsSync && o.syncSvc != nil {
-		if err := o.syncSvc.ApplyPlanToSubscription(ctx, sub.ID); err != nil {
-			return order, fmt.Errorf("activate product: apply plan: %w", err)
+	if o.syncSvc != nil {
+		if needsSync {
+			if err := o.syncSvc.ApplyPlanToSubscription(ctx, sub.ID); err != nil {
+				return order, fmt.Errorf("activate product: apply plan: %w", err)
+			}
 		}
 		if err := o.syncSvc.SyncSubscription(ctx, sub.ID); err != nil {
 			logger.Warn("activate product: post-commit sync failed",
