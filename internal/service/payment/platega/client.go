@@ -1,0 +1,146 @@
+package platega
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
+	"time"
+)
+
+const defaultBaseURL = "https://app.platega.io"
+
+var (
+	ErrAuth       = errors.New("platega: authentication failed")
+	ErrBadRequest = errors.New("platega: bad request")
+	ErrProvider   = errors.New("platega: provider error")
+)
+
+// Config configures the Platega API client.
+type Config struct {
+	MerchantID string
+	Secret     string
+	BaseURL    string
+	HTTPClient *http.Client
+}
+
+// Client creates transactions through the Platega API.
+type Client struct {
+	cfg Config
+}
+
+// CreateTransactionRequest describes a payment link request.
+type CreateTransactionRequest struct {
+	AmountCents int64
+	Currency    string
+	Description string
+	ReturnURL   string
+	FailedURL   string
+	Payload     string
+	UserID      string
+	UserName    string
+}
+
+type transactionRequest struct {
+	PaymentDetails paymentDetails `json:"paymentDetails"`
+	Description    string         `json:"description"`
+	ReturnURL      string         `json:"return"`
+	FailedURL      string         `json:"failedUrl"`
+	Payload        string         `json:"payload"`
+	Metadata       metadata       `json:"metadata"`
+}
+
+type paymentDetails struct {
+	Amount   json.RawMessage `json:"amount"`
+	Currency string          `json:"currency"`
+}
+
+type metadata struct {
+	UserID   string `json:"userId"`
+	UserName string `json:"userName"`
+}
+
+// CreateTransactionResponse is returned by Platega after transaction creation.
+type CreateTransactionResponse struct {
+	TransactionID string `json:"transactionId"`
+	Status        string `json:"status"`
+	URL           string `json:"url"`
+	Redirect      string `json:"redirect"`
+}
+
+// New creates a Platega client with production-safe defaults.
+func New(cfg Config) *Client {
+	if strings.TrimSpace(cfg.BaseURL) == "" {
+		cfg.BaseURL = defaultBaseURL
+	}
+	if cfg.HTTPClient == nil {
+		cfg.HTTPClient = &http.Client{Timeout: 5 * time.Second}
+	}
+	return &Client{cfg: cfg}
+}
+
+// CreateTransaction creates a payment link without selecting a payment method.
+func (c *Client) CreateTransaction(ctx context.Context, req CreateTransactionRequest) (*CreateTransactionResponse, error) {
+	if req.AmountCents <= 0 {
+		return nil, errors.New("amount must be positive")
+	}
+	if strings.TrimSpace(req.Currency) == "" {
+		return nil, errors.New("currency is required")
+	}
+
+	amount := []byte(fmt.Sprintf("%d.%02d", req.AmountCents/100, req.AmountCents%100))
+	body, err := json.Marshal(transactionRequest{
+		PaymentDetails: paymentDetails{Amount: json.RawMessage(amount), Currency: req.Currency},
+		Description:    req.Description,
+		ReturnURL:      req.ReturnURL,
+		FailedURL:      req.FailedURL,
+		Payload:        req.Payload,
+		Metadata:       metadata{UserID: req.UserID, UserName: req.UserName},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("encode transaction request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(c.cfg.BaseURL, "/")+"/v2/transaction/process", bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("create transaction request: %w", err)
+	}
+	httpReq.Header.Set("X-MerchantId", c.cfg.MerchantID)
+	httpReq.Header.Set("X-Secret", c.cfg.Secret)
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.cfg.HTTPClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("%w: send transaction request: %v", ErrProvider, err)
+	}
+	defer resp.Body.Close()
+
+	limited := io.LimitReader(resp.Body, 1<<20)
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		message, _ := io.ReadAll(limited)
+		switch resp.StatusCode {
+		case http.StatusBadRequest:
+			return nil, fmt.Errorf("%w: %s", ErrBadRequest, strings.TrimSpace(string(message)))
+		case http.StatusUnauthorized:
+			return nil, fmt.Errorf("%w: %s", ErrAuth, strings.TrimSpace(string(message)))
+		default:
+			return nil, fmt.Errorf("%w: %s: %s", ErrProvider, resp.Status, strings.TrimSpace(string(message)))
+		}
+	}
+
+	var result CreateTransactionResponse
+	if err := json.NewDecoder(limited).Decode(&result); err != nil {
+		return nil, fmt.Errorf("%w: decode transaction response: %v", ErrProvider, err)
+	}
+	if strings.TrimSpace(result.TransactionID) == "" {
+		return nil, fmt.Errorf("%w: response has no transactionId", ErrProvider)
+	}
+	if strings.TrimSpace(result.URL) == "" && strings.TrimSpace(result.Redirect) == "" {
+		return nil, fmt.Errorf("%w: response has no payment URL", ErrProvider)
+	}
+	return &result, nil
+}

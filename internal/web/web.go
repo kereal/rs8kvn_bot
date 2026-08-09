@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
+	"io"
 	"net"
 	"net/http"
 	"regexp"
@@ -14,14 +15,15 @@ import (
 	"sync"
 	"time"
 
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/interfaces"
 	"github.com/kereal/rs8kvn_bot/internal/logger"
 	"github.com/kereal/rs8kvn_bot/internal/metrics"
 	"github.com/kereal/rs8kvn_bot/internal/service"
+	"github.com/kereal/rs8kvn_bot/internal/service/payment/platega"
 	"github.com/kereal/rs8kvn_bot/internal/subserver"
-
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
@@ -61,7 +63,9 @@ type Server struct {
 	db              interfaces.WebRepository
 	cfg             *config.Config
 	botUsername     string
+	bot             interfaces.BotAPI
 	subService      *service.SubscriptionService
+	orderService    *service.OrderService
 	subServer       *subserver.Service
 	subserverLogger *subserver.AccessLogger
 	server          *http.Server
@@ -76,30 +80,16 @@ type Server struct {
 }
 
 func NewServer(addr string, db interfaces.WebRepository, cfg *config.Config, botUsername string, subService *service.SubscriptionService, subServer *subserver.Service) *Server {
-	trialTmpl := template.Must(template.New("trial.html").Funcs(template.FuncMap{
-		"escape": func(s string) string {
-			var buf strings.Builder
-			template.HTMLEscape(&buf, []byte(s))
-			return buf.String()
-		},
-	}).ParseFS(allFiles, "templates/trial.html"))
-
-	errorTmpl := template.Must(template.New("error.html").ParseFS(allFiles, "templates/error.html"))
-
-	return &Server{
-		addr:            addr,
-		db:              db,
-		cfg:             cfg,
-		botUsername:     botUsername,
-		subService:      subService,
-		subServer:       subServer,
-		checkers:        make(map[string]func(context.Context) ComponentHealth),
-		inviteCodeRegex: regexp.MustCompile(`^[a-zA-Z0-9_-]+$`),
-		startTime:       time.Now(),
-		trialTemplate:   trialTmpl,
-		errorTemplate:   errorTmpl,
-	}
+	trialTmpl := template.Must(template.New("trial.html").Funcs(template.FuncMap{"formatTime": func(t time.Time) string { return t.Format("02.01.2006 15:04") }}).ParseFS(staticFiles, "templates/trial.html"))
+	errorTmpl := template.Must(template.New("error.html").ParseFS(staticFiles, "templates/error.html"))
+	return &Server{addr: addr, db: db, cfg: cfg, botUsername: botUsername, subService: subService, subServer: subServer, checkers: make(map[string]func(context.Context) ComponentHealth), inviteCodeRegex: regexp.MustCompile(`^[a-zA-Z0-9_-]+$`), startTime: time.Now(), trialTemplate: trialTmpl, errorTemplate: errorTmpl}
 }
+
+// SetOrderService wires payment confirmation into the callback endpoint.
+
+// SetBot wires Telegram delivery for payment notifications.
+func (s *Server) SetBot(bot interfaces.BotAPI)                       { s.bot = bot }
+func (s *Server) SetOrderService(orderService *service.OrderService) { s.orderService = orderService }
 
 func (s *Server) RegisterChecker(name string, checker func(context.Context) ComponentHealth) {
 	s.mu.Lock()
@@ -118,6 +108,7 @@ func (s *Server) SetBotUsername(username string) {
 	defer s.mu.Unlock()
 	s.botUsername = username
 }
+
 // effectiveBotUsername returns the bot username for share/invite links.
 // It is the runtime-injected username from initBot (set via SetBotUsername);
 // the bot username comes from Telegram getMe, not from configuration.
@@ -256,10 +247,55 @@ func (s *Server) handlePaymentCallback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if s.cfg == nil || !s.cfg.PaymentEnabled || s.orderService == nil || !platega.VerifyHeaders(s.cfg.PlategaMerchantID, s.cfg.PlategaSecret, r.Header) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	defer r.Body.Close()
+	decoder := json.NewDecoder(io.LimitReader(r.Body, 1<<20))
+	decoder.UseNumber()
+	var payload platega.CallbackPayload
+	if err := decoder.Decode(&payload); err != nil || payload.Validate() != nil {
+		http.Error(w, "invalid callback", http.StatusBadRequest)
+		return
+	}
+	var trailing struct{}
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		http.Error(w, "invalid callback", http.StatusBadRequest)
+		return
+	}
 
+	switch strings.ToUpper(strings.TrimSpace(payload.Status)) {
+	case "CONFIRMED", "PAID", "SUCCESS":
+		confirmation, err := s.orderService.ConfirmPayment(r.Context(), payload.ID, payload.Amount, payload.Currency)
+		if err != nil {
+			if errors.Is(err, service.ErrAmountMismatch) || errors.Is(err, service.ErrCurrencyMismatch) || errors.Is(err, service.ErrInvalidPaymentTransition) {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+			} else {
+				http.Error(w, "processing failed", http.StatusInternalServerError)
+			}
+			return
+		}
+		if confirmation.Activated {
+			chatID, text, err := s.orderService.NotifyPaidUser(r.Context(), confirmation.Order)
+			if err != nil {
+				logger.Warn("failed to build paid notification", zap.Error(err))
+			} else if chatID > 0 && s.bot != nil {
+				if _, err := s.bot.Send(tgbotapi.NewMessage(chatID, text)); err != nil {
+					logger.Warn("failed to send paid notification", zap.Int64("chat_id", chatID), zap.Error(err))
+				}
+			}
+		}
+	case "CANCELED", "CHARGEBACKED":
+		if err := s.orderService.CancelPaymentByProvider(r.Context(), payload.ID, strings.ToUpper(strings.TrimSpace(payload.Status))); err != nil {
+			http.Error(w, "processing failed", http.StatusInternalServerError)
+			return
+		}
+	default:
+		logger.Warn("ignored unsupported payment callback status", zap.String("status", payload.Status), zap.String("payment_id", payload.ID))
+	}
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(`{"ok":true,"provider_payment_id":"fake","status":"paid"}`))
+	_ = json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 }
 
 func (s *Server) handleLogo(w http.ResponseWriter, r *http.Request) {
@@ -268,7 +304,6 @@ func (s *Server) handleLogo(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 		return
 	}
-
 	data, err := staticFiles.ReadFile("templates/logo.png")
 	if err != nil {
 		http.Error(w, "logo not found", http.StatusNotFound)
@@ -279,7 +314,7 @@ func (s *Server) handleLogo(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodHead {
 		return
 	}
-	w.Write(data)
+	_, _ = w.Write(data)
 }
 
 type HealthResponse struct {

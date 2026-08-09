@@ -98,6 +98,7 @@ type Handler struct {
 func NewHandler(bot interfaces.BotAPI, cfg *config.Config, db interfaces.DatabaseService, botConfig *BotConfig, subService *service.SubscriptionService, version string) *Handler {
 	rl := ratelimiter.NewPerUserRateLimiter(float64(config.RateLimiterMaxTokens), float64(config.RateLimiterRefillRate))
 	kb := NewKeyboardBuilder(botConfig.Username, cfg.ContactUsername, cfg.DonateCardNumber, cfg.DonateURL, cfg.SiteURL, cfg.DonateEnabled)
+	kb.SetPaymentEnabled(cfg != nil && cfg.PaymentEnabled)
 
 	h := &Handler{
 		bot:                 bot,
@@ -141,12 +142,11 @@ func (h *Handler) SetBot(bot interfaces.BotAPI) {
 	h.sender.SetBot(bot)
 }
 
-// SetBotConfig updates runtime bot config and rebuilds keyboard templates.
 func (h *Handler) SetBotConfig(bc *BotConfig) {
 	h.botConfig = bc
 	h.keyboards = NewKeyboardBuilder(bc.Username, h.cfg.ContactUsername, h.cfg.DonateCardNumber, h.cfg.DonateURL, h.cfg.SiteURL, h.cfg.DonateEnabled)
-	// Propagate to decomposed handlers so generated links (invite/share) use the
-	// real bot username instead of the startup placeholder.
+	h.keyboards.SetPaymentEnabled(h.cfg != nil && h.cfg.PaymentEnabled)
+	// Propagate to decomposed handlers so generated links use the real bot username.
 	h.referral.SetBotConfig(bc)
 }
 
@@ -157,9 +157,47 @@ func (h *Handler) Cache() *SubscriptionCache {
 }
 
 // SetOrderService wires the order service after handler construction.
+
+func (h *Handler) handlePaymentMenu(ctx context.Context, chatID int64, username string, messageID int) error {
+	if h.cfg == nil || !h.cfg.PaymentEnabled || h.orderService == nil {
+		return errors.New("payment is unavailable")
+	}
+	products, err := h.db.ListActiveProducts(ctx)
+	if err != nil {
+		return fmt.Errorf("list active products: %w", err)
+	}
+	msg := tgbotapi.NewEditMessageText(chatID, messageID, "Выберите тариф для оплаты:")
+	keyboard := h.keyboards.BuyProductList(products)
+	msg.ReplyMarkup = &keyboard
+	h.safeSend(msg)
+	return nil
+}
+
+func (h *Handler) handlePayProduct(ctx context.Context, chatID int64, username string, messageID int, productID uint) error {
+	product, err := h.db.GetProductByID(ctx, productID)
+	if err != nil {
+		return err
+	}
+	if product == nil || !product.IsActive || product.PriceCents <= 0 {
+		return errors.New("paid product is unavailable")
+	}
+	info, _, err := h.orderService.RequestPayment(ctx, chatID, username, product)
+	if err != nil {
+		return err
+	}
+	msg := tgbotapi.NewEditMessageText(chatID, messageID, fmt.Sprintf("Тариф: %s\nСтоимость: %.2f ₽\n\nПосле оплаты бот пришлёт данные подписки.", product.Name, float64(product.PriceCents)/100))
+	keyboard := h.keyboards.BuyProductConfirm(product, info.URL)
+	msg.ReplyMarkup = &keyboard
+	h.safeSend(msg)
+	return nil
+}
+
 func (h *Handler) SetOrderService(orderService *service.OrderService) {
 	h.orderService = orderService
 }
+
+// OrderService returns the payment service wired into the handler.
+func (h *Handler) OrderService() *service.OrderService { return h.orderService }
 
 // getSubHandler returns the subscription sub-handler, initializing it once.
 // The sync.Once guard supports test-constructed handlers that omit subHandler.
@@ -250,14 +288,6 @@ func (h *Handler) handleMySubscription(ctx context.Context, chatID int64, userna
 
 func (h *Handler) handleQRCode(ctx context.Context, chatID int64, username string, messageID int) error {
 	return h.getSubHandler().handleQRCode(ctx, chatID, username, messageID)
-}
-
-func (h *Handler) handleUpgradePremium(ctx context.Context, chatID int64, username string, messageID int) error {
-	return h.getSubHandler().handleUpgradePremium(ctx, chatID, username, messageID)
-}
-
-func (h *Handler) handleConfirmUpgradePremium(ctx context.Context, chatID int64, username string, messageID int) error {
-	return h.getSubHandler().handleConfirmUpgradePremium(ctx, chatID, username, messageID)
 }
 
 func (h *Handler) handleBackToSubscription(ctx context.Context, chatID int64, username string, messageID int) error {
@@ -380,40 +410,24 @@ func displayUsername(username string) string {
 	return ", @" + username
 }
 
-// getMainMenuContent builds the start-screen text and keyboard for a user.
 func (h *Handler) getMainMenuContent(ctx context.Context, username string, hasSubscription bool, chatID int64, sub *database.Subscription) (string, tgbotapi.InlineKeyboardMarkup) {
-	// Ensure keyboards is initialized (for manually constructed handlers in tests)
 	h.keyboardsOnce.Do(func() {
 		if h.keyboards == nil {
 			h.keyboards = NewKeyboardBuilder("", "", "", "", "", true)
 		}
 	})
-
 	var text string
 	var keyboard tgbotapi.InlineKeyboardMarkup
-	freeUpgradeLabel := ""
-	if hasSubscription {
-		if label, ok := h.getFreeUpgradeLabel(ctx, sub); ok {
-			freeUpgradeLabel = label
-		}
-	}
-
 	if hasSubscription {
 		text = msg(MsgStartGreeting, username)
-		keyboard = h.getMainMenuKeyboard(true, freeUpgradeLabel)
+		keyboard = h.getMainMenuKeyboard(true)
 	} else {
 		text = msg(MsgStartGreetingNoSub, username)
-		keyboard = tgbotapi.NewInlineKeyboardMarkup(
-			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData("📥 Получить подписку", "create_subscription"),
-			),
-		)
+		keyboard = tgbotapi.NewInlineKeyboardMarkup(tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("📥 Получить подписку", "create_subscription")))
 	}
-
-	// Add admin buttons if the user is an admin
 	h.addAdminButtons(&keyboard, chatID)
-
 	return text, keyboard
+
 }
 
 // getHelpText returns the detailed setup help text.
@@ -449,23 +463,6 @@ func (h *Handler) getMainMenuKeyboard(hasSubscription bool, freeUpgradeLabel ...
 		label = freeUpgradeLabel[0]
 	}
 	return h.keyboards.MainMenu(hasSubscription, label)
-}
-
-// getFreeUpgradeLabel returns a free-upgrade promo label when the user is on
-// the free plan and a zero-cost product is configured.
-func (h *Handler) getFreeUpgradeLabel(ctx context.Context, sub *database.Subscription) (string, bool) {
-	if h.db == nil || sub == nil || sub.Status != "active" || h.cfg == nil || h.cfg.MainMenuBtnProductID == 0 {
-		return "", false
-	}
-	plan, err := h.db.GetPlanByID(ctx, sub.PlanID)
-	if err != nil || plan == nil || plan.Name != database.FreePlanName {
-		return "", false
-	}
-	product, err := h.db.GetProductByID(ctx, h.cfg.MainMenuBtnProductID)
-	if err != nil || product == nil || !product.IsActive || product.PriceCents != 0 {
-		return "", false
-	}
-	return fmt.Sprintf("🎁 %s бесплатно", product.Name), true
 }
 
 // addAdminButtons appends admin control buttons to a keyboard if the user is an admin.
