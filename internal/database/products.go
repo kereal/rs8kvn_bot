@@ -23,6 +23,18 @@ func (s *Service) GetActiveByPlanID(ctx context.Context, planID uint) ([]Product
 	return products, nil
 }
 
+// ListActiveProducts returns active paid products sorted by price and ID.
+func (s *Service) ListActiveProducts(ctx context.Context) ([]Product, error) {
+	var products []Product
+	result := s.db.WithContext(ctx).
+		Where("is_active = ? AND price_cents > ?", true, 0).
+		Order("price_cents ASC, id ASC").Find(&products)
+	if result.Error != nil {
+		return nil, fmt.Errorf("failed to list active products: %w", result.Error)
+	}
+	return products, nil
+}
+
 // GetProductByID returns a product by database ID.
 func (s *Service) GetProductByID(ctx context.Context, id uint) (*Product, error) {
 	var product Product

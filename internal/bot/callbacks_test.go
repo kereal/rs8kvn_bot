@@ -193,17 +193,6 @@ func TestHandleCallback_CallbackDataRouting(t *testing.T) {
 			wantText: "",
 		},
 		{
-			name:         "buy_premium_230",
-			callbackData: "buy_premium_230",
-			setupMock: func(mockDB *testutil.DatabaseService, mockXUI *testutil.XUIClient) {
-				// No special setup needed - just answers callback with alert
-			},
-			wantSend:      false,
-			wantText:      "",
-			wantRequest:   true,
-			wantAlertText: "Скоро в продаже",
-		},
-		{
 			name:         "menu_help",
 			callbackData: "menu_help",
 			setupMock: func(mockDB *testutil.DatabaseService, mockXUI *testutil.XUIClient) {
@@ -233,29 +222,29 @@ func TestHandleCallback_CallbackDataRouting(t *testing.T) {
 			name:         "menu_documents",
 			callbackData: "menu_documents",
 			setupMock:    func(mockDB *testutil.DatabaseService, mockXUI *testutil.XUIClient) {},
-			wantSend: true,
-			wantText: "Документы",
+			wantSend:     true,
+			wantText:     "Документы",
 		},
 		{
 			name:         "menu_privacy",
 			callbackData: "menu_privacy",
 			setupMock:    func(mockDB *testutil.DatabaseService, mockXUI *testutil.XUIClient) {},
-			wantSend: true,
-			wantText: "*Политика конфиденциальности*",
+			wantSend:     true,
+			wantText:     "*Политика конфиденциальности*",
 		},
 		{
 			name:         "menu_terms",
 			callbackData: "menu_terms",
 			setupMock:    func(mockDB *testutil.DatabaseService, mockXUI *testutil.XUIClient) {},
-			wantSend: true,
-			wantText: "*Пользовательское соглашение*",
+			wantSend:     true,
+			wantText:     "*Пользовательское соглашение*",
 		},
 		{
 			name:         "menu_support",
 			callbackData: "menu_support",
 			setupMock:    func(mockDB *testutil.DatabaseService, mockXUI *testutil.XUIClient) {},
-			wantSend: true,
-			wantText: "С любыми проблемами и вопросами обращайтесь сюда: @kereal",
+			wantSend:     true,
+			wantText:     "С любыми проблемами и вопросами обращайтесь сюда: @kereal",
 		},
 		{
 			name:         "unknown callback",
@@ -853,8 +842,8 @@ func TestHandleBackToSubscription_RequestError(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		SiteURL:          "https://x.com",
-		GlobalSubURL:     "https://x.com/sub/",
+		SiteURL:         "https://x.com",
+		GlobalSubURL:    "https://x.com/sub/",
 	}
 	mockDB := testutil.NewDatabaseService()
 	mockBot := testutil.NewBotAPI()
@@ -1143,37 +1132,3 @@ func TestHandleCallback_MenuSupport(t *testing.T) {
 	}
 	assert.Contains(t, combined, "С любыми проблемами и вопросами обращайтесь сюда: @kereal", "message should contain support contact text")
 }
-
-func TestHandleCallback_BuyPremium230_RequestError(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{
-		TelegramAdminID: 123456,
-	}
-	mockDB := testutil.NewDatabaseService()
-
-	mockBot := testutil.NewBotAPI()
-	mockBot.RequestError = errors.New("request failed")
-	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
-
-	ctx := context.Background()
-	update := tgbotapi.Update{
-		CallbackQuery: &tgbotapi.CallbackQuery{
-			ID:   "test-callback-id",
-			Data: "buy_premium_230",
-			From: &tgbotapi.User{ID: 123456, UserName: "testuser"},
-			Message: &tgbotapi.Message{
-				MessageID: 100,
-				Chat:      &tgbotapi.Chat{ID: 123456},
-			},
-		},
-	}
-
-	err := handler.HandleCallback(ctx, update)
-
-	assert.NoError(t, err, "HandleCallback should return nil even if Request fails for buy_premium_230")
-	assert.True(t, mockBot.RequestCalledSafe(), "Bot.Request should be called to answer callback")
-	assert.False(t, mockBot.SendCalledSafe(), "Bot.Send should not be called for buy_premium_230")
-}
-
-

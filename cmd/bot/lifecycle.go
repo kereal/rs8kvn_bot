@@ -14,6 +14,7 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/logger"
 	"github.com/kereal/rs8kvn_bot/internal/metrics"
 	"github.com/kereal/rs8kvn_bot/internal/service"
+	"github.com/kereal/rs8kvn_bot/internal/service/payment/platega"
 	"github.com/kereal/rs8kvn_bot/internal/subserver"
 	"github.com/kereal/rs8kvn_bot/internal/vpn"
 
@@ -99,11 +100,11 @@ func initDatabase(cfg *config.Config) (*database.Service, *runtimeDeps) {
 	}
 }
 
-// appServices holds the wired application services and handler.
 type appServices struct {
-	subService *service.SubscriptionService
-	subServer  *subserver.Service
-	handler    *bot.Handler
+	subService   *service.SubscriptionService
+	subServer    *subserver.Service
+	handler      *bot.Handler
+	orderService *service.OrderService
 }
 
 // initServices wires the subscription service, subserver, bot handler,
@@ -113,23 +114,18 @@ func initServices(cfg *config.Config, dbService *database.Service, deps *runtime
 	subService.SetBot(botAPI)
 	subServer := subserver.NewService(config.SubServerCacheTTL)
 	handler := bot.NewHandler(botAPI, cfg, dbService, botConfig, subService, getVersion())
-
-	// Compose cache invalidation: invalidate both the bot subscription cache
-	// and the subserver response cache. NewHandler wired invalidateBySubID to
-	// the bot cache only; we override it here so Delete/Revoke/Expire also
-	// evict the subserver entry (otherwise revoked subs serve stale config
-	// for up to SubServerCacheTTL).
 	botCache := handler.Cache()
 	subService.SetInvalidateBySubIDFunc(func(subID string) {
 		botCache.InvalidateBySubID(subID)
 		subServer.InvalidateCache(subID)
 	})
-
-	return &appServices{
-		subService: subService,
-		subServer:  subServer,
-		handler:    handler,
+	var payment service.PaymentProvider
+	if cfg.PaymentEnabled {
+		payment = platega.New(platega.Config{MerchantID: cfg.PlategaMerchantID, Secret: cfg.PlategaSecret})
 	}
+	orderService := service.NewOrderService(dbService, subService, nil, payment, "", cfg)
+	handler.SetOrderService(orderService)
+	return &appServices{subService: subService, subServer: subServer, handler: handler, orderService: orderService}
 }
 
 // runEventLoop processes Telegram updates with bounded concurrency until
@@ -189,6 +185,7 @@ eventLoop:
 		logger.Warn("Timeout waiting for update handlers to complete")
 	}
 }
+
 // gracefulShutdown stops background workers and handler goroutines with timeouts.
 // subServer.Stop() (cache drop) runs first so revoked/updated subs stop being
 // served before we wait on workers; web server drain remains via its own defer.

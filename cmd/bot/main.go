@@ -11,6 +11,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/getsentry/sentry-go"
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/kereal/rs8kvn_bot/internal/bot"
 	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
@@ -24,9 +26,6 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/vpn"
 	"github.com/kereal/rs8kvn_bot/internal/web"
 	"github.com/kereal/rs8kvn_bot/internal/xui"
-
-	"github.com/getsentry/sentry-go"
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"go.uber.org/zap"
 )
 
@@ -222,8 +221,10 @@ func initBot(cfg *config.Config) (*tgbotapi.BotAPI, *bot.BotConfig, error) {
 // startWebServer создаёт и запускает HTTP-сервер (подписки, инвайт/trial-страницы).
 // Сервер стартует асинхронно; функция ждёт до 2 секунд первой ошибки запуска,
 // чтобы не блокировать старт бота, но вернуть ошибку, если сервер точно не поднялся.
-func startWebServer(subService *service.SubscriptionService, cfg *config.Config, botConfig *bot.BotConfig, subServer *subserver.Service, dbService *database.Service) (*web.Server, error) {
+func startWebServer(subService *service.SubscriptionService, cfg *config.Config, botConfig *bot.BotConfig, subServer *subserver.Service, dbService *database.Service, orderService *service.OrderService, botAPI interfaces.BotAPI) (*web.Server, error) {
 	webServer := web.NewServer(fmt.Sprintf(":%d", cfg.WebServerPort), dbService, cfg, botConfig.Username, subService, subServer)
+	webServer.SetOrderService(orderService)
+	webServer.SetBot(botAPI)
 	webServer.RegisterChecker("database", func(ctx context.Context) web.ComponentHealth {
 		if err := dbService.Ping(ctx); err != nil {
 			return web.ComponentHealth{Status: web.StatusDown, Message: err.Error()}
@@ -261,10 +262,9 @@ func startBackgroundWorkers(ctx context.Context, handler *bot.Handler, subServic
 	// would bypass the sync-based deprovision path and fall into the legacy
 	// deleteClientFromAllNodes code that sends delete requests to ALL nodes.
 	syncSvc := service.NewSyncService(dbService, vpnClients, nodes)
-	subService.SetSyncService(syncSvc)
-
-	orderService := service.NewOrderService(dbService, subService, syncSvc)
-	handler.SetOrderService(orderService)
+	if orderService := handler.OrderService(); orderService != nil {
+		orderService.SetSyncService(syncSvc)
+	}
 
 	go func() {
 		defer recoverAndReport("DB pool metrics collector")
@@ -415,7 +415,7 @@ func main() {
 	// The web server starts with an empty bot username; initBot injects the real
 	// username (from Telegram getMe) via SetBotUsername once the bot is ready, so
 	// the share/invite page shows the correct @username after startup.
-	webServer, err := startWebServer(svc.subService, cfg, botConfig, svc.subServer, dbService)
+	webServer, err := startWebServer(svc.subService, cfg, botConfig, svc.subServer, dbService, svc.orderService, botAPI)
 	if err != nil {
 		logger.Warn("Failed to start web server, continuing without web server", zap.Error(err))
 	}
@@ -440,15 +440,16 @@ func main() {
 	svc.handler.SetBot(api)
 	svc.subService.SetBot(api)
 	svc.handler.SetBotConfig(bc)
+	if svc.orderService != nil {
+		svc.orderService.SetBotUsername(bc.Username)
+	}
 	botAPI = api
 	if webServer != nil {
+		webServer.SetBot(api)
 		webServer.SetBotUsername(bc.Username)
 	} else {
 		logger.Warn("web server not running; share/invite page username not updated")
 	}
-	logger.Info("Telegram bot initialized successfully")
-
-	// 8. Configure update listener
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = config.BotUpdateTimeout
 	u.AllowedUpdates = []string{"message", "callback_query"}
