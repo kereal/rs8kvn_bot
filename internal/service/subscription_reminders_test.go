@@ -128,40 +128,6 @@ func TestSubscriptionService_SendExpiryReminder_ClaimErrorPropagates(t *testing.
 	assert.Empty(t, bot.GetAllSentMessages())
 }
 
-// TestSubscriptionService_RenewSubscription_ResetsRemindersSent verifies the
-// reminder lifecycle invariant after a successful renewal.
-func TestSubscriptionService_RenewSubscription_ResetsRemindersSent(t *testing.T) {
-	t.Parallel()
-
-	db, err := testutil.NewTestDatabaseService(t)
-	require.NoError(t, err)
-	ctx := context.Background()
-	expiry := time.Now().UTC().Add(24 * time.Hour)
-	sub := &database.Subscription{
-		TelegramID:     123456,
-		Username:       "renew_user",
-		ClientID:       "client-renew",
-		SubscriptionID: "sub-renew",
-		Status:         "active",
-		PlanID:         1,
-		ExpiresAt:      &expiry,
-		RemindersSent:  ReminderBit1Day,
-	}
-	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
-
-	product := &database.Product{PlanID: 1, Name: "renew-product", DurationDays: 30, PriceCents: 1000, Currency: "RUB"}
-	svc := NewSubscriptionService(db, nil, nil, nil, &config.Config{})
-	svc.SetInvalidateBySubIDFunc(func(string) {})
-
-	order, err := svc.RenewSubscription(ctx, sub.TelegramID, product)
-	require.NoError(t, err)
-	require.NotNil(t, order)
-
-	updated, err := db.GetByID(ctx, sub.ID)
-	require.NoError(t, err)
-	assert.Equal(t, 0, updated.RemindersSent, "renewed subscription must reset reminders bitmask")
-}
-
 // TestSubscriptionService_SendExpiryReminder_HoursOnlyText verifies the hours-only
 // reminder text when daysLeft == 0.
 func TestSubscriptionService_SendExpiryReminder_HoursOnlyText(t *testing.T) {

@@ -115,6 +115,7 @@ type DatabaseService struct {
 	RemoveSourceFromPlanFunc                    func(ctx context.Context, planID, sourceID uint) error
 	SeedDefaultDataFunc                         func(ctx context.Context) error
 	GetActiveByPlanIDFunc                       func(ctx context.Context, planID uint) ([]database.Product, error)
+	ListActiveProductsFunc                      func(ctx context.Context) ([]database.Product, error)
 	GetProductByIDFunc                          func(ctx context.Context, id uint) (*database.Product, error)
 	GetNodeByIDFunc                             func(ctx context.Context, id uint) (*database.Node, error)
 	ListEnabledFunc                             func(ctx context.Context) ([]database.Node, error)
@@ -134,9 +135,13 @@ type DatabaseService struct {
 	CreateOrderFunc                             func(ctx context.Context, order *database.Order) error
 	GetOrderByIDFunc                            func(ctx context.Context, id uint) (*database.Order, error)
 	GetOrdersBySubscriptionIDFunc               func(ctx context.Context, subscriptionID uint) ([]database.Order, error)
+	GetOrderByProviderPaymentIDFunc             func(ctx context.Context, provider, providerPaymentID string) (*database.Order, error)
 	UpdateOrderStatusFunc                       func(ctx context.Context, id uint, status database.OrderStatus) error
 	UpdateOrderPaidStatusFunc                   func(ctx context.Context, id uint) error
 	UpdateOrderActivatedAtFunc                  func(ctx context.Context, id uint, activatedAt, expiresAt time.Time) error
+	UpdateOrderProviderPaymentIDFunc            func(ctx context.Context, orderID uint, providerPaymentID string) error
+	ConfirmOrderPaidCASFunc                     func(ctx context.Context, orderID uint, paidAt, activatedAt time.Time, sub *database.Subscription, newExpiry time.Time, product *database.Product) (bool, error)
+	CancelOrderCASFunc                          func(ctx context.Context, provider, providerPaymentID string, fromStatuses []database.OrderStatus) (bool, error)
 	TransactionFunc                             func(ctx context.Context, fn func(*gorm.DB) error) error
 	GetSubscriptionFunc                         func(ctx context.Context, subscriptionID string) (*database.Subscription, error)
 	GetTrialSubscriptionBySubIDFunc             func(ctx context.Context, subscriptionID string) (*database.Subscription, error)
@@ -829,12 +834,31 @@ func (m *DatabaseService) GetActiveByPlanID(ctx context.Context, planID uint) ([
 	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+	products := make([]database.Product, 0)
 	for _, product := range m.Products {
 		if product.PlanID == planID && product.IsActive {
-			return []database.Product{*product}, nil
+			products = append(products, *product)
 		}
 	}
-	return nil, gorm.ErrRecordNotFound
+	if len(products) == 0 {
+		return nil, gorm.ErrRecordNotFound
+	}
+	return products, nil
+}
+
+func (m *DatabaseService) ListActiveProducts(ctx context.Context) ([]database.Product, error) {
+	if m.ListActiveProductsFunc != nil {
+		return m.ListActiveProductsFunc(ctx)
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	products := make([]database.Product, 0, len(m.Products))
+	for _, product := range m.Products {
+		if product.IsActive && product.PriceCents > 0 {
+			products = append(products, *product)
+		}
+	}
+	return products, nil
 }
 
 func (m *DatabaseService) CreateOrder(ctx context.Context, order *database.Order) error {
@@ -880,6 +904,66 @@ func (m *DatabaseService) GetOrdersBySubscriptionID(ctx context.Context, subscri
 	return nil, gorm.ErrRecordNotFound
 }
 
+func (m *DatabaseService) GetOrderByProviderPaymentID(ctx context.Context, provider, providerPaymentID string) (*database.Order, error) {
+	if m.GetOrderByProviderPaymentIDFunc != nil {
+		return m.GetOrderByProviderPaymentIDFunc(ctx, provider, providerPaymentID)
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, order := range m.Orders {
+		if order.PaymentProvider == provider && order.ProviderPaymentID == providerPaymentID {
+			return order, nil
+		}
+	}
+	return nil, gorm.ErrRecordNotFound
+}
+
+func (m *DatabaseService) UpdateOrderProviderPaymentID(ctx context.Context, orderID uint, providerPaymentID string) error {
+	if m.UpdateOrderProviderPaymentIDFunc != nil {
+		return m.UpdateOrderProviderPaymentIDFunc(ctx, orderID, providerPaymentID)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	order, ok := m.Orders[orderID]
+	if !ok || order.Status != database.OrderStatusPending {
+		return gorm.ErrRecordNotFound
+	}
+	order.ProviderPaymentID = providerPaymentID
+	return nil
+}
+
+func (m *DatabaseService) ConfirmOrderPaidCAS(ctx context.Context, orderID uint, paidAt, activatedAt time.Time, sub *database.Subscription, newExpiry time.Time, product *database.Product) (bool, error) {
+	if m.ConfirmOrderPaidCASFunc != nil {
+		return m.ConfirmOrderPaidCASFunc(ctx, orderID, paidAt, activatedAt, sub, newExpiry, product)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	order, ok := m.Orders[orderID]
+	if !ok || order.Status != database.OrderStatusPending {
+		return false, nil
+	}
+	order.Status, order.PaidAt, order.ActivatedAt, order.ExpiresAt = database.OrderStatusPaid, &paidAt, &activatedAt, &newExpiry
+	return true, nil
+}
+
+func (m *DatabaseService) CancelOrderCAS(ctx context.Context, provider, providerPaymentID string, fromStatuses []database.OrderStatus) (bool, error) {
+	if m.CancelOrderCASFunc != nil {
+		return m.CancelOrderCASFunc(ctx, provider, providerPaymentID, fromStatuses)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, order := range m.Orders {
+		if order.PaymentProvider == provider && order.ProviderPaymentID == providerPaymentID {
+			for _, status := range fromStatuses {
+				if order.Status == status {
+					order.Status = database.OrderStatusCanceled
+					return true, nil
+				}
+			}
+		}
+	}
+	return false, nil
+}
 func (m *DatabaseService) UpdateOrderStatus(ctx context.Context, id uint, status database.OrderStatus) error {
 	if m.UpdateOrderStatusFunc != nil {
 		return m.UpdateOrderStatusFunc(ctx, id, status)
