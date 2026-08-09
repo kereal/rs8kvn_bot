@@ -4,80 +4,70 @@ import (
 	"fmt"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"github.com/kereal/rs8kvn_bot/internal/database"
 )
 
 // KeyboardBuilder creates Telegram inline keyboards.
 type KeyboardBuilder struct {
-	botUsername   string
-	contactUser   string
-	donateCard    string
-	donateURL     string
-	siteURL       string
-	donateEnabled bool
+	botUsername    string
+	contactUser    string
+	donateCard     string
+	donateURL      string
+	siteURL        string
+	donateEnabled  bool
+	paymentEnabled bool
 }
 
 // NewKeyboardBuilder creates a new KeyboardBuilder.
 // donateEnabled toggles the visibility of the "☕ Донат" button in MainMenu.
 func NewKeyboardBuilder(botUsername, contactUser, donateCard, donateURL, siteURL string, donateEnabled bool) *KeyboardBuilder {
-	return &KeyboardBuilder{
-		botUsername:   botUsername,
-		contactUser:   contactUser,
-		donateCard:    donateCard,
-		donateURL:     donateURL,
-		siteURL:       siteURL,
-		donateEnabled: donateEnabled,
-	}
+	return &KeyboardBuilder{botUsername: botUsername, contactUser: contactUser, donateCard: donateCard, donateURL: donateURL, siteURL: siteURL, donateEnabled: donateEnabled}
 }
 
+// SetPaymentEnabled toggles the product-payment entry.
+func (kb *KeyboardBuilder) SetPaymentEnabled(enabled bool) { kb.paymentEnabled = enabled }
+
 // MainMenu returns the inline keyboard for the main menu.
-func (kb *KeyboardBuilder) MainMenu(hasSubscription bool, freeUpgradeLabel string) tgbotapi.InlineKeyboardMarkup {
+func (kb *KeyboardBuilder) MainMenu(hasSubscription bool, _ string) tgbotapi.InlineKeyboardMarkup {
 	var firstRow []tgbotapi.InlineKeyboardButton
 	firstRow = append(firstRow, tgbotapi.NewInlineKeyboardButtonData("📋 Подписка", "menu_subscription"))
 	if kb.donateEnabled {
 		firstRow = append(firstRow, tgbotapi.NewInlineKeyboardButtonData("☕ Донат", "menu_donate"))
 	}
-	rows := [][]tgbotapi.InlineKeyboardButton{
-		tgbotapi.NewInlineKeyboardRow(firstRow...),
+	rows := [][]tgbotapi.InlineKeyboardButton{tgbotapi.NewInlineKeyboardRow(firstRow...)}
+	rows = append(rows, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("❓ Помощь", "menu_help"), tgbotapi.NewInlineKeyboardButtonData("📑 Документы", "menu_documents")))
+	if kb.paymentEnabled && hasSubscription {
+		rows = append(rows, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("💳 Оплатить подписку", "menu_payment")))
 	}
-	if kb.donateEnabled {
-		// Default layout: Premium stays at the bottom (row 3).
-		rows = append(rows,
-			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData("❓ Помощь", "menu_help"),
-				tgbotapi.NewInlineKeyboardButtonData("📑 Документы", "menu_documents"),
-			),
-			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData("💎 Premium на 30 дней за 230₽", "buy_premium_230"),
-			),
-		)
-	} else {
-		// Donate hidden: lift Premium directly under "Подписка" (row 2);
-		// the rest of the menu keeps the original order.
-		rows = append(rows,
-			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData("💎 Premium на 30 дней за 230₽", "buy_premium_230"),
-			),
-			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData("❓ Помощь", "menu_help"),
-				tgbotapi.NewInlineKeyboardButtonData("📑 Документы", "menu_documents"),
-			),
-		)
-	}
-
 	if hasSubscription {
-		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("📤 Поделиться", "share_invite"),
-		))
+		rows = append(rows, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("📤 Поделиться", "share_invite")))
 	}
+	return tgbotapi.InlineKeyboardMarkup{InlineKeyboard: rows}
+}
 
-	if freeUpgradeLabel != "" {
-		upgradeRow := tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData(freeUpgradeLabel, "upgrade_premium"),
-		)
-		rows = append([][]tgbotapi.InlineKeyboardButton{upgradeRow}, rows...)
+// BuyProductList builds the paid product selection keyboard.
+func (kb *KeyboardBuilder) BuyProductList(products []database.Product) tgbotapi.InlineKeyboardMarkup {
+	rows := make([][]tgbotapi.InlineKeyboardButton, 0, len(products)+1)
+	for _, product := range products {
+		if !product.IsActive || product.PriceCents <= 0 {
+			continue
+		}
+		rows = append(rows, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData(fmt.Sprintf("%s — %.2f ₽", product.Name, float64(product.PriceCents)/100), fmt.Sprintf("buy_product_%d", product.ID))))
 	}
+	rows = append(rows, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("⬅️ Назад", "back_to_start")))
+	return tgbotapi.InlineKeyboardMarkup{InlineKeyboard: rows}
+}
 
-	return tgbotapi.NewInlineKeyboardMarkup(rows...)
+// BuyProductConfirm builds the payment-link keyboard.
+func (kb *KeyboardBuilder) BuyProductConfirm(product *database.Product, paymentURL string) tgbotapi.InlineKeyboardMarkup {
+	price := ""
+	if product != nil {
+		price = fmt.Sprintf("%.2f ₽", float64(product.PriceCents)/100)
+	}
+	return tgbotapi.InlineKeyboardMarkup{InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{
+		tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonURL("🔗 Оплатить "+price, paymentURL)),
+		tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("⬅️ Назад", "menu_payment")),
+	}}
 }
 
 // Back returns the inline keyboard with a back button.

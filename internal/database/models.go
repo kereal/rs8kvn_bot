@@ -72,10 +72,10 @@ type Subscription struct {
 	Ips            string  `gorm:"type:text;default:'[]'"` // JSON array of {ip: timestamp} entries
 	// LastRequest — дата/время последнего запроса подписки через субсервер (/sub/:id).
 	// Обновляется best-effort при каждом запросе клиента. NULL до первого запроса.
-	LastRequest *time.Time `gorm:"index"`
-	CreatedAt   time.Time  `gorm:"autoCreateTime"`
-	UpdatedAt   time.Time  `gorm:"autoUpdateTime"`
-	RemindersSent int `gorm:"not null;default:0"` // bitmask: 1<<0=3d, 1<<1=1d, 1<<2=3h
+	LastRequest   *time.Time `gorm:"index"`
+	CreatedAt     time.Time  `gorm:"autoCreateTime"`
+	UpdatedAt     time.Time  `gorm:"autoUpdateTime"`
+	RemindersSent int        `gorm:"not null;default:0"` // bitmask: 1<<0=3d, 1<<1=1d, 1<<2=3h
 
 	Plan    *Plan              `gorm:"foreignKey:PlanID"`
 	Product *Product           `gorm:"foreignKey:ProductID"`
@@ -146,7 +146,9 @@ type Product struct {
 //   - provider_payment_id — external payment ID from provider.
 //   - paid_at — payment confirmation timestamp.
 //   - activated_at — subscription activation timestamp.
-//   - expires_at — payment invoice expiry (e.g. 30 minutes from creation).
+//   - expires_at — subscription validity granted by this purchase (a snapshot of
+//     subscriptions.expires_at at payment time), not an invoice timeout.
+
 type OrderStatus string
 
 const (
