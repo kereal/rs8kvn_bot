@@ -252,9 +252,15 @@ func (s *SubscriptionService) reanimateRevokedSubscription(ctx context.Context, 
 	return sub, nil
 }
 
-// DowngradeToFreePlan resets a subscription to the free plan, removes premium VPN
-// nodes, and re-creates free-plan nodes. Used when a paid order is chargebacked:
-// the user loses premium access but retains the free tier. Returns the updated subscription.
+// DowngradeToFreePlan resets a subscription to the free plan and deprovisions
+// premium VPN access. Used when a paid order is chargebacked: the user loses
+// premium access but retains the free tier. Returns the updated subscription.
+//
+// With the sync service wired, premium node bindings are first transitioned to
+// pending_remove and free-plan bindings to pending_add via ApplyPlanToSubscription,
+// then SyncSubscription physically deletes the VPN clients from the premium
+// panels. Without the sync service (tests / before wiring) the node bindings are
+// rebuilt in place and the background worker reconciles panels later.
 func (s *SubscriptionService) DowngradeToFreePlan(ctx context.Context, sub *database.Subscription) (*database.Subscription, error) {
 	if sub == nil {
 		return nil, errors.New("downgrade: subscription is nil")
@@ -278,7 +284,30 @@ func (s *SubscriptionService) DowngradeToFreePlan(ctx context.Context, sub *data
 		return nil, fmt.Errorf("downgrade: update subscription: %w", err)
 	}
 
-	// Remove premium VPN nodes; ensureSubscriptionNodes rebuilds free-plan nodes.
+	if s.invalidateBySubID != nil && sub.SubscriptionID != "" {
+		s.invalidateBySubID(sub.SubscriptionID)
+	}
+
+	if s.syncService != nil {
+		// The subscription now points at the free plan, so ApplyPlanToSubscription
+		// reconciles the bindings against it: premium nodes become pending_remove
+		// and missing free nodes pending_add. SyncSubscription then physically
+		// removes the premium clients from the panels (best-effort; the background
+		// worker retries any failed removals).
+		if err := s.syncService.ApplyPlanToSubscription(ctx, sub.ID); err != nil {
+			return nil, fmt.Errorf("downgrade: apply plan: %w", err)
+		}
+		if err := s.syncService.SyncSubscription(ctx, sub.ID); err != nil {
+			logger.Warn("downgrade: sync subscription failed (will retry)",
+				zap.Uint("subscription_id", sub.ID),
+				zap.Error(err))
+		}
+		s.RefreshActiveSubscriptionsMetric(ctx)
+		return sub, nil
+	}
+
+	// Fallback without the sync service (tests / before wiring): rebuild the
+	// node bindings; physical panel cleanup is left to the background workers.
 	if err := s.db.DeleteSubscriptionNodesBySubscriptionID(ctx, sub.ID); err != nil {
 		logger.Warn("downgrade: failed to clear subscription nodes",
 			zap.Uint("subscription_id", sub.ID),
@@ -707,13 +736,16 @@ func (s *SubscriptionService) ReconcileOrphanedClients(ctx context.Context) (int
 }
 
 // CleanupExpiredTrials deletes expired trial subscriptions from the database
-// and deprovisions their VPN clients via the sync service.
+// and deprovisions their VPN clients.
 //
-// The DB cleanup (database.CleanupExpiredTrials) only returns unbound trials
-// (telegram_id < 0, plan_id == trial plan). These subscriptions always have
-// Status == "active" (BindTrialSubscription changes plan_id to free, which
-// excludes them from the DB query). Therefore the sync-based deprovision path
-// is the only branch that executes in production.
+// The DB cleanup (database.CleanupExpiredTrials) removes rows with
+// `RETURNING id, client_id, subscription_id` — the status column is NOT
+// returned, so sub.Status is empty and the sync-based branch below is
+// unreachable: deprovision always runs through deleteClientFromAllNodes even
+// when a sync service is wired. Do not "fix" this by adding status to the
+// RETURNING clause: the sync path needs the subscription row to still exist
+// (SyncSubscription loads it by ID), but the row is already deleted here,
+// which would leave the trial clients orphaned on the panels.
 func (s *SubscriptionService) CleanupExpiredTrials(ctx context.Context) (int64, error) {
 	subs, err := s.db.CleanupExpiredTrials(ctx, s.cfg.TrialDurationHours)
 	if err != nil {
