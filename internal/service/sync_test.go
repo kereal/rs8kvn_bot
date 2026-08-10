@@ -16,7 +16,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-
 type mockVPNClient struct {
 	createCalled    bool
 	deleteCalled    bool
@@ -967,6 +966,55 @@ func TestSyncService_SyncSubscription_PendingRemove_NoVPNClientKeepsPending(t *t
 	assert.Len(t, rows, 1)
 	assert.Equal(t, database.SyncStatusPendingRemove, rows[0].Status)
 	assert.Equal(t, 1, rows[0].RetryCount)
+}
+
+func TestSyncService_SyncPendingNodes_ContinuesAfterNodeFailure(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db, err := testutil.NewTestDatabaseService(t)
+	require.NoError(t, err)
+
+	planOne := &database.Plan{Name: "test-plan-sync-continue-one", DevicesLimit: 1, TrafficLimit: 1024}
+	planTwo := &database.Plan{Name: "test-plan-sync-continue-two", DevicesLimit: 1, TrafficLimit: 1024}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(planOne).Error)
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(planTwo).Error)
+
+	nodeOne := &database.Node{Name: "sync-continue-one", Type: database.NodeType3xUI, IsActive: true, Host: "http://one", APIToken: "one", InboundIDs: `[1]`}
+	nodeTwo := &database.Node{Name: "sync-continue-two", Type: database.NodeType3xUI, IsActive: true, Host: "http://two", APIToken: "two", InboundIDs: `[1]`}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(nodeOne).Error)
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(nodeTwo).Error)
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(&database.PlanNode{PlanID: planOne.ID, NodeID: nodeOne.ID}).Error)
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(&database.PlanNode{PlanID: planTwo.ID, NodeID: nodeTwo.ID}).Error)
+
+	subOne := &database.Subscription{TelegramID: 9101, Username: "sync-continue-one", ClientID: "client-one", SubscriptionID: "sub-one", Status: "active", PlanID: planOne.ID, ExpiresAt: testutil.PtrTime(time.Now().Add(24 * time.Hour))}
+	subTwo := &database.Subscription{TelegramID: 9102, Username: "sync-continue-two", ClientID: "client-two", SubscriptionID: "sub-two", Status: "active", PlanID: planTwo.ID, ExpiresAt: testutil.PtrTime(time.Now().Add(24 * time.Hour))}
+	require.NoError(t, db.CreateSubscription(ctx, subOne, ""))
+	require.NoError(t, db.CreateSubscription(ctx, subTwo, ""))
+	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: subOne.ID, NodeID: nodeOne.ID, Status: database.SyncStatusPendingAdd}))
+	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: subTwo.ID, NodeID: nodeTwo.ID, Status: database.SyncStatusPendingAdd}))
+
+	failedClient := &mockVPNClient{createError: errors.New("node one unavailable")}
+	successClient := &mockVPNClient{}
+	svc := NewSyncService(db, map[uint]vpn.Client{nodeOne.ID: failedClient, nodeTwo.ID: successClient}, []database.Node{*nodeOne, *nodeTwo})
+
+	require.NoError(t, svc.SyncPendingNodes(ctx), "a per-node failure is best-effort and must not stop other subscriptions")
+
+	rowsOne, err := db.GetBySubscriptionID(ctx, subOne.ID)
+	require.NoError(t, err)
+	require.Len(t, rowsOne, 1)
+	assert.Equal(t, database.SyncStatusPendingAdd, rowsOne[0].Status)
+	assert.Equal(t, 1, rowsOne[0].RetryCount)
+	require.NotNil(t, rowsOne[0].LastError)
+	assert.Contains(t, *rowsOne[0].LastError, "node one unavailable")
+
+	rowsTwo, err := db.GetBySubscriptionID(ctx, subTwo.ID)
+	require.NoError(t, err)
+	require.Len(t, rowsTwo, 1)
+	assert.Equal(t, database.SyncStatusActive, rowsTwo[0].Status)
+	assert.Equal(t, 0, rowsTwo[0].RetryCount)
+	assert.True(t, failedClient.createCalled)
+	assert.True(t, successClient.createCalled)
 }
 
 func TestSyncService_SyncPendingNodes_JoinsErrors(t *testing.T) {

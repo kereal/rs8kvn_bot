@@ -123,6 +123,57 @@ func TestHandlePaymentCallback_ConfirmedActivatesOrder(t *testing.T) {
 	assert.Equal(t, 0, bot.SendCountSafe()) // Telegram success is skipped for invalid Telegram ID
 }
 
+func TestHandlePaymentCallback_DuplicateConfirmedIsIdempotent(t *testing.T) {
+	t.Parallel()
+
+	order := &database.Order{ID: 8, SubscriptionID: 26, ProductID: 36, Status: database.OrderStatusPending, ProviderPaymentID: testPaymentID.String(), AmountCents: 2300, Currency: "RUB"}
+	srv, db, bot := newPaymentTestServer(t, order)
+	confirmCalls := 0
+	db.ConfirmOrderPaidCASFunc = func(_ context.Context, orderID uint, paidAt, activatedAt time.Time, _ *database.Subscription, expiry time.Time, _ *database.Product, _ database.ApplyPlanInTxFn) (bool, error) {
+		confirmCalls++
+		if orderID != order.ID || order.Status != database.OrderStatusPending {
+			return false, nil
+		}
+		order.Status = database.OrderStatusPaid
+		order.PaidAt = &paidAt
+		order.ActivatedAt = &activatedAt
+		order.ExpiresAt = &expiry
+		return true, nil
+	}
+
+	first := httptest.NewRecorder()
+	srv.handlePaymentCallback(first, paymentRequest("CONFIRMED", testPaymentID, `23.00`))
+	require.Equal(t, http.StatusOK, first.Code)
+	require.Equal(t, database.OrderStatusPaid, order.Status)
+
+	second := httptest.NewRecorder()
+	srv.handlePaymentCallback(second, paymentRequest("CONFIRMED", testPaymentID, `23.00`))
+	require.Equal(t, http.StatusOK, second.Code)
+	require.Contains(t, second.Body.String(), `"ok":true`)
+
+	stored, err := db.GetOrderByID(context.Background(), order.ID)
+	require.NoError(t, err)
+	require.Equal(t, database.OrderStatusPaid, stored.Status)
+	require.Equal(t, 1, confirmCalls, "duplicate callback must not repeat activation CAS")
+	assert.Empty(t, bot.GetAllSentMessages(), "invalid Telegram ID should not produce duplicate notifications")
+}
+
+func TestHandlePaymentCallback_CurrencyMismatchLeavesOrderPending(t *testing.T) {
+	t.Parallel()
+
+	order := &database.Order{ID: 9, SubscriptionID: 27, ProductID: 37, Status: database.OrderStatusPending, ProviderPaymentID: testPaymentID.String(), AmountCents: 2300, Currency: "RUB"}
+	srv, db, _ := newPaymentTestServer(t, order)
+	req := paymentRequestWithCurrency("CONFIRMED", testPaymentID, `23.00`, "USD")
+	rec := httptest.NewRecorder()
+
+	srv.handlePaymentCallback(rec, req)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+
+	stored, err := db.GetOrderByID(context.Background(), order.ID)
+	require.NoError(t, err)
+	assert.Equal(t, database.OrderStatusPending, stored.Status)
+}
+
 func TestHandlePaymentCallback_CanceledAmountMismatch(t *testing.T) {
 	t.Parallel()
 
@@ -251,7 +302,11 @@ func TestHandlePaymentCallback_MalformedPayloadNotifiesAdmin(t *testing.T) {
 }
 
 func paymentRequest(status string, id uuid.UUID, amount string) *http.Request {
-	body := map[string]any{"id": id.String(), "amount": json.Number(amount), "currency": "RUB", "status": status}
+	return paymentRequestWithCurrency(status, id, amount, "RUB")
+}
+
+func paymentRequestWithCurrency(status string, id uuid.UUID, amount, currency string) *http.Request {
+	body := map[string]any{"id": id.String(), "amount": json.Number(amount), "currency": currency, "status": status}
 	encoded, _ := json.Marshal(body)
 	req := httptest.NewRequest(http.MethodPost, "/payment/callback", strings.NewReader(string(encoded)))
 	req.Header.Set("X-MerchantId", "merchant")
