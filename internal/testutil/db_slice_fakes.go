@@ -1,3 +1,4 @@
+// Package testutil provides reusable fakes and fixtures for repository and bot tests.
 package testutil
 
 import (

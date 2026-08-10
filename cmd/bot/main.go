@@ -1,3 +1,4 @@
+// Package main starts the Telegram bot and its HTTP/background services.
 package main
 
 import (

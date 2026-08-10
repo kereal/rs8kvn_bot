@@ -1,3 +1,4 @@
+// Package platega implements the Platega transaction API and callback contract.
 package platega
 
 import (
@@ -14,6 +15,8 @@ import (
 
 const defaultBaseURL = "https://app.platega.io"
 
+// Sentinel errors classify provider responses so callers can distinguish
+// rejected requests from authentication and transport/provider failures.
 var (
 	ErrAuth       = errors.New("platega: authentication failed")
 	ErrBadRequest = errors.New("platega: bad request")
@@ -28,7 +31,8 @@ type Config struct {
 	HTTPClient *http.Client
 }
 
-// Client creates transactions through the Platega API.
+// Client creates transactions through the Platega API using the configured
+// HTTP client and merchant credentials.
 type Client struct {
 	cfg Config
 }
@@ -73,7 +77,8 @@ type CreateTransactionResponse struct {
 	ExpiresIn     string `json:"expiresIn"`
 }
 
-// ParseExpiresIn parses Platega's HH:MM:SS payment-link lifetime.
+// ParseExpiresIn parses Platega's positive HH:MM:SS payment-link lifetime
+// into a Go duration used for the local payment deadline.
 func ParseExpiresIn(raw string) (time.Duration, error) {
 	value := strings.TrimSpace(raw)
 	if value == "" {
@@ -101,6 +106,8 @@ func New(cfg Config) *Client {
 }
 
 // CreateTransaction creates a payment link without selecting a payment method.
+// The response is validated for a UUID v4 transaction ID, a usable URL, and a
+// positive expiresIn value before it is returned to the order service.
 func (c *Client) CreateTransaction(ctx context.Context, req CreateTransactionRequest) (*CreateTransactionResponse, error) {
 	if req.AmountCents <= 0 {
 		return nil, errors.New("amount must be positive")

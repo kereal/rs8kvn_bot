@@ -1,3 +1,4 @@
+// Package service contains subscription, payment, and synchronization business logic.
 package service
 
 import (
@@ -21,11 +22,14 @@ import (
 	"go.uber.org/zap"
 )
 
-// PaymentProvider is the minimal outbound payment contract consumed by OrderService.
+// PaymentProvider is the minimal outbound payment contract consumed by OrderService
+// for creating a provider transaction.
 type PaymentProvider interface {
 	CreateTransaction(context.Context, platega.CreateTransactionRequest) (*platega.CreateTransactionResponse, error)
 }
 
+// Sentinel errors returned for expected payment states and configuration failures.
+// Callers should use errors.Is when they need to distinguish these cases.
 var (
 	ErrPaymentDisabled          = errors.New("payment is disabled")
 	ErrAmountMismatch           = errors.New("payment amount mismatch")
@@ -56,6 +60,9 @@ type PaymentInfo struct {
 	ExpiresAt time.Time
 }
 
+// PaymentConfirmation describes the result of a callback transition. Activated
+// is true only for the callback that changed an order from pending to paid; repeat
+// callbacks return the existing order with Activated=false.
 type PaymentConfirmation struct {
 	Order     *database.Order
 	Activated bool
@@ -107,6 +114,8 @@ func (o *OrderService) NotifyPaymentIssue(ctx context.Context, issue PaymentIssu
 	o.notifyAdmin(ctx, formatPaymentIssue(issue))
 }
 
+// paymentMethodLogValue preserves the distinction between an omitted payment
+// method and the valid numeric value zero in structured logs.
 func paymentMethodLogValue(method *int) string {
 	if method == nil {
 		return "-"
@@ -114,6 +123,9 @@ func paymentMethodLogValue(method *int) string {
 	return fmt.Sprintf("%d", *method)
 }
 
+// formatPaymentIssue renders a Telegram-safe operational alert. Provider-controlled
+// fields are truncated both individually and as a whole to stay below Telegram's
+// message limit while preserving valid UTF-8.
 func formatPaymentIssue(issue PaymentIssue) string {
 	method := "-"
 	if issue.PaymentMethod != nil {
@@ -133,10 +145,13 @@ func formatPaymentIssue(issue PaymentIssue) string {
 }
 
 const (
-	maxPaymentAlertFieldLength   = 700
+	// Keep individual untrusted fields bounded before assembling the alert.
+	maxPaymentAlertFieldLength = 700
+	// Leave headroom below Telegram's 4096-character message limit.
 	maxPaymentAlertMessageLength = 3900
 )
 
+// truncatePaymentField bounds one provider-controlled field by Unicode code points.
 func truncatePaymentField(value string) string {
 	runes := []rune(value)
 	if len(runes) <= maxPaymentAlertFieldLength {
@@ -145,6 +160,8 @@ func truncatePaymentField(value string) string {
 	return string(runes[:maxPaymentAlertFieldLength]) + "… [truncated]"
 }
 
+// truncatePaymentMessage applies the final Telegram message-size limit without
+// splitting a UTF-8 sequence.
 func truncatePaymentMessage(value string) string {
 	runes := []rune(value)
 	if len(runes) <= maxPaymentAlertMessageLength {
@@ -153,7 +170,9 @@ func truncatePaymentMessage(value string) string {
 	return string(runes[:maxPaymentAlertMessageLength]) + "… [truncated]"
 }
 
-// NewOrderService keeps the existing three-argument call contract; optional arguments are payment provider and bot username.
+// NewOrderService keeps the existing three-argument call contract; optional
+// arguments are the payment provider, bot username, and runtime configuration.
+// Missing optional arguments leave the corresponding integration disabled.
 func NewOrderService(db interfaces.DatabaseService, subSvc *SubscriptionService, syncSvc *SyncService, options ...interface{}) *OrderService {
 	o := &OrderService{db: db, subSvc: subSvc, syncSvc: syncSvc}
 	if len(options) > 0 {
@@ -171,14 +190,17 @@ func NewOrderService(db interfaces.DatabaseService, subSvc *SubscriptionService,
 // SetSyncService wires post-commit VPN synchronization after startup.
 func (o *OrderService) SetSyncService(syncSvc *SyncService) { o.syncSvc = syncSvc }
 
-// SetConfig wires URL presentation configuration.
+// SetConfig wires URL presentation configuration used in user notifications.
 func (o *OrderService) SetConfig(cfg *config.Config) { o.cfg = cfg }
 
+// SetBotUsername sets the username used to build provider return and failure URLs.
 func (o *OrderService) SetBotUsername(username string) { o.botUsername = strings.TrimSpace(username) }
 
 // SetAdminBot wires the Telegram client used for best-effort operational alerts.
 func (o *OrderService) SetAdminBot(bot interfaces.BotAPI) { o.adminBot = bot }
 
+// notifyRequestIssue enriches an early RequestPayment failure with whichever
+// product/order context is available and routes it through the common alert path.
 func (o *OrderService) notifyRequestIssue(ctx context.Context, event, reason, action string, telegramID uint64, product *database.Product, order *database.Order) {
 	issue := PaymentIssue{Event: event, Reason: reason, Action: action, TelegramID: int64(telegramID)}
 	if product != nil {
@@ -199,6 +221,8 @@ func (o *OrderService) notifyRequestIssue(ctx context.Context, event, reason, ac
 	o.NotifyPaymentIssue(ctx, issue)
 }
 
+// notifyAdmin sends a best-effort Telegram alert. Payment processing never fails
+// solely because the operational alert could not be delivered.
 func (o *OrderService) notifyAdmin(ctx context.Context, text string) {
 	if o.adminBot == nil || o.cfg == nil || o.cfg.TelegramAdminID <= 0 {
 		return
@@ -208,6 +232,10 @@ func (o *OrderService) notifyAdmin(ctx context.Context, text string) {
 	}
 }
 
+// RequestPayment validates the current product and plan, reuses a valid pending
+// intent when possible, and otherwise claims one intent before contacting Platega.
+// An error with an uncertain provider outcome leaves the intent marked uncertain
+// so a duplicate charge is not accidentally created by a retry.
 func (o *OrderService) RequestPayment(ctx context.Context, telegramID int64, username string, product *database.Product) (*PaymentInfo, *database.Order, error) {
 	if o.payment == nil {
 		return nil, nil, ErrPaymentDisabled
@@ -397,6 +425,9 @@ func (o *OrderService) RequestPayment(ctx context.Context, telegramID int64, use
 	return &PaymentInfo{URL: url, Provider: "platega", PaymentID: providerPaymentID, ExpiresAt: expiresAt}, order, nil
 }
 
+// ConfirmPayment validates a provider callback and atomically applies the paid
+// transition plus subscription plan changes. Only the successful pending-to-paid
+// CAS caller performs post-commit synchronization and reports Activated=true.
 func (o *OrderService) ConfirmPayment(ctx context.Context, providerPaymentID uuid.UUID, amount json.Number, currency string) (*PaymentConfirmation, error) {
 	if o.payment == nil {
 		return nil, ErrPaymentDisabled
@@ -497,6 +528,9 @@ func (o *OrderService) ConfirmPayment(ctx context.Context, providerPaymentID uui
 // order receives a CHARGEBACKED status. The webhook deliberately does not
 // call an automatic subscription downgrade; that status requires manual review.
 // Returns (nil, false, nil) for an idempotent no-op.
+// CancelPaymentByProvider validates a cancellation or chargeback callback and
+// applies an idempotent order transition. A chargeback reports wasPaid=true so
+// callers can trigger manual financial/access reconciliation.
 func (o *OrderService) CancelPaymentByProvider(ctx context.Context, providerPaymentID uuid.UUID, status string, amount json.Number, currency string) (*database.Order, bool, error) {
 	if o.payment == nil {
 		return nil, false, ErrPaymentDisabled
@@ -566,6 +600,8 @@ func (o *OrderService) CancelPaymentByProvider(ctx context.Context, providerPaym
 }
 
 // NotifyPaidUser builds the same subscription presentation used by the bot screen.
+// It returns the target Telegram ID and message text; delivery is intentionally
+// left to the webhook layer so a send failure cannot roll back a paid order.
 func (o *OrderService) NotifyPaidUser(ctx context.Context, order *database.Order) (int64, string, error) {
 	if order == nil {
 		return 0, "", errors.New("order is nil")
