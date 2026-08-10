@@ -58,15 +58,26 @@ func validatePath(path string) error {
 	return nil
 }
 
-// checkpointWAL opens the database in read-only mode, checkpoints WAL, and closes it.
-// checkpointWAL forces a WAL checkpoint (TRUNCATE) on the SQLite database at dbPath so the
-// main database file contains all committed data.
-// It opens the database in read-only mode and executes `PRAGMA wal_checkpoint(TRUNCATE)` with
-// a 5-second timeout; any error performing the checkpoint is returned. Closing the database is
-// logged on failure but does not change the returned error.
+// checkpointWAL opens the database with write access, checkpoints WAL, and closes it.
+// A writable connection is required because TRUNCATE may modify both the WAL and the
+// main database file. The caller must fail the backup if checkpointing fails.
 func checkpointWAL(ctx context.Context, dbPath string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if _, err := os.Stat(dbPath); err != nil {
+		return fmt.Errorf("stat database: %w", err)
+	}
+	// A database without a WAL sidecar has nothing to checkpoint. This also
+	// keeps backups of legacy rollback-journal databases on the ordinary copy path.
+	if _, err := os.Stat(dbPath + "-wal"); os.IsNotExist(err) {
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("stat database WAL: %w", err)
+	}
+
 	// #nosec G304 -- dbPath is validated by the caller
-	dsn := fmt.Sprintf("file:%s?mode=ro", dbPath)
+	dsn := fmt.Sprintf("file:%s?_busy_timeout=5000", dbPath)
 	db, err := sql.Open("sqlite3", dsn)
 	if err != nil {
 		return fmt.Errorf("failed to open database for checkpoint: %w", err)
@@ -97,9 +108,14 @@ func BackupDatabase(ctx context.Context, dbPath string) error {
 		return fmt.Errorf("invalid database path: %w", err)
 	}
 
-	// Checkpoint WAL to ensure the main database file contains all data
+	// Checkpoint WAL to ensure the main database file contains all data. Never
+	// create a raw copy after a failed checkpoint: the current data may still be
+	// stored in the WAL sidecar and omitted from the backup.
 	if err := checkpointWAL(ctx, dbPath); err != nil {
-		logger.Warn("WAL checkpoint failed, proceeding with raw copy", zap.Error(err))
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return err
+		}
+		return fmt.Errorf("checkpoint database WAL: %w", err)
 	}
 
 	backupPath := dbPath + ".backup"
