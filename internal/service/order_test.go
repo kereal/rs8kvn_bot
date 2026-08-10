@@ -831,6 +831,74 @@ func TestCancelPaymentByProvider_ChargebackDowngradeFailureAlertsAdmin(t *testin
 	assert.Contains(t, messages[1].Text, "free plan node lookup failed")
 }
 
+func TestCancelPaymentByProvider_ChargebackDowngradeUsesSyncService(t *testing.T) {
+	// With the sync service wired, the downgrade must deprovision premium nodes
+	// via ApplyPlanToSubscription (pending_remove) + SyncSubscription instead of
+	// the fallback that deletes bindings without touching the panels.
+	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440128")
+	sub := &database.Subscription{ID: 89, TelegramID: 59, PlanID: 99, Status: "active", ExpiresAt: testutil.PtrTime(time.Now().Add(24 * time.Hour))}
+	calls := 0
+	updateCalled := false
+	deleteNodesCalled := false
+	syncInvoked := false
+	premiumMarkedForRemoval := false
+	mock := &testutil.DatabaseService{
+		CancelOrderCASFunc: func(context.Context, string, uuid.UUID, []database.OrderStatus) (bool, error) {
+			return true, nil
+		},
+		GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
+			calls++
+			status := database.OrderStatusCanceled
+			if calls == 1 {
+				status = database.OrderStatusPaid
+			}
+			return &database.Order{ID: 101, SubscriptionID: 89, ProductID: 70, Status: status, AmountCents: 2300, Currency: "RUB", ProviderPaymentID: providerID.String()}, nil
+		},
+		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
+			return sub, nil
+		},
+		GetOrdersBySubscriptionIDFunc: func(context.Context, uint) ([]database.Order, error) {
+			return []database.Order{{ID: 101, SubscriptionID: 89, Status: database.OrderStatusCanceled}}, nil
+		},
+		UpdateSubscriptionFunc: func(_ context.Context, updated *database.Subscription) error {
+			updateCalled = true
+			assert.Equal(t, uint(2), updated.PlanID)
+			return nil
+		},
+		DeleteSubscriptionNodesBySubscriptionIDFunc: func(context.Context, uint) error {
+			deleteNodesCalled = true
+			return nil
+		},
+		// Sync path dependencies: the free plan has no nodes, but the subscription
+		// still holds an active premium binding that must become pending_remove.
+		GetNodesByPlanIDFunc: func(context.Context, uint) ([]database.Node, error) { return nil, nil },
+		GetBySubscriptionIDFunc: func(context.Context, uint) ([]database.SubscriptionNode, error) {
+			return []database.SubscriptionNode{{SubscriptionID: 89, NodeID: 555, Status: database.SyncStatusActive}}, nil
+		},
+		UpdateSubscriptionNodeStatusFunc: func(_ context.Context, subID, nodeID uint, status database.SyncStatus) error {
+			assert.Equal(t, uint(89), subID)
+			assert.Equal(t, uint(555), nodeID)
+			assert.Equal(t, database.SyncStatusPendingRemove, status, "premium node must be marked pending_remove for physical deprovision")
+			premiumMarkedForRemoval = true
+			return nil
+		},
+		GetPendingBySubscriptionIDFunc: func(context.Context, uint) ([]database.SubscriptionNode, error) {
+			syncInvoked = true
+			return nil, nil
+		},
+	}
+	subSvc := NewSubscriptionService(mock, nil, nil, nil, &config.Config{})
+	subSvc.SetSyncService(NewSyncService(mock, nil, nil))
+	o := NewOrderService(mock, subSvc, nil, fakePaymentProvider{}, "", nil)
+
+	_, wasPaid, err := o.CancelPaymentByProvider(context.Background(), providerID, "CHARGEBACKED", json.Number("23.00"), "RUB")
+	require.NoError(t, err)
+	require.True(t, wasPaid)
+	assert.True(t, updateCalled, "subscription must be reset to the free plan")
+	assert.False(t, deleteNodesCalled, "the sync path must not wipe node bindings without pending_remove")
+	assert.True(t, premiumMarkedForRemoval, "premium node must transition to pending_remove so the panel client is deleted")
+	assert.True(t, syncInvoked, "SyncSubscription must run so premium clients are removed from the panels")
+}
 
 func TestCancelPaymentByProvider_ChargebackOnPendingDoesNotDowngrade(t *testing.T) {
 	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440126")
