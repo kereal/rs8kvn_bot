@@ -98,6 +98,9 @@ type Handler struct {
 
 // NewHandler creates a new Handler with all sub-handlers initialized.
 func NewHandler(bot interfaces.BotAPI, cfg *config.Config, db interfaces.DatabaseService, botConfig *BotConfig, subService *service.SubscriptionService, version string) *Handler {
+	if cfg == nil {
+		cfg = &config.Config{}
+	}
 	rl := ratelimiter.NewPerUserRateLimiter(float64(config.RateLimiterMaxTokens), float64(config.RateLimiterRefillRate))
 	kb := NewKeyboardBuilder(botConfig.Username, cfg.ContactUsername, cfg.DonateCardNumber, cfg.DonateURL, cfg.SiteURL, cfg.DonateEnabled)
 
@@ -115,7 +118,7 @@ func NewHandler(bot interfaces.BotAPI, cfg *config.Config, db interfaces.Databas
 		referralCache:       NewReferralCache(db),
 		sender:              NewMessageSender(bot, rl),
 		keyboards:           kb,
-		paymentEnabled:      cfg != nil && cfg.PaymentEnabled,
+		paymentEnabled:      cfg.PaymentEnabled,
 		version:             version,
 	}
 	// Initialize admin rate limiters map
@@ -404,7 +407,6 @@ func (h *Handler) getMainMenuContent(ctx context.Context, username string, hasSu
 	}
 	h.addAdminButtons(&keyboard, chatID)
 	return text, keyboard
-
 }
 
 // getHelpText returns the detailed setup help text.
@@ -673,5 +675,4 @@ func (h *Handler) HandleUpdate(ctx context.Context, update tgbotapi.Update) {
 	} else if update.CallbackQuery != nil {
 		err = h.HandleCallback(ctx, update)
 	}
-
 }

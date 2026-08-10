@@ -647,7 +647,10 @@ func (m *DatabaseService) GetNodesByPlanName(ctx context.Context, planName strin
 		return m.GetNodesByPlanNameFunc(ctx, planName)
 	}
 	if planName == database.TrialPlanName {
-		inboundIDs, _ := json.Marshal([]int{1})
+		inboundIDs, err := json.Marshal([]int{1})
+		if err != nil {
+			return nil, err
+		}
 		return []database.Node{{ID: 1, IsActive: true, Host: "http://localhost:2053", InboundIDs: string(inboundIDs)}}, nil
 	}
 	return nil, nil
@@ -980,7 +983,7 @@ func (m *DatabaseService) CreatePendingPaymentOrder(ctx context.Context, subscri
 			return existing, nil
 		}
 	}
-	order := &database.Order{ID: uint(len(m.Orders) + 1), SubscriptionID: subscriptionID, ProductID: productID, Status: database.OrderStatusPending, AmountCents: amountCents, Currency: currency, PaymentProvider: "platega", CreatedAt: now}
+	order := &database.Order{ID: uint(len(m.Orders) + 1), SubscriptionID: subscriptionID, ProductID: productID, Status: database.OrderStatusPending, AmountCents: amountCents, Currency: currency, PaymentProvider: "platega", CreatedAt: now} // #nosec G115 -- slice length is non-negative
 	m.Orders[order.ID] = order
 	m.OrdersBySubscriptionID[subscriptionID] = append(m.OrdersBySubscriptionID[subscriptionID], *order)
 	return order, nil
@@ -1008,7 +1011,7 @@ func (m *DatabaseService) FindOrCreatePendingPaymentOrder(ctx context.Context, s
 		m.Orders = make(map[uint]*database.Order)
 		m.OrdersBySubscriptionID = make(map[uint][]database.Order)
 	}
-	order := &database.Order{ID: uint(len(m.Orders) + 1), SubscriptionID: subscriptionID, ProductID: productID, Status: database.OrderStatusPending, AmountCents: amountCents, Currency: currency, PaymentProvider: "platega", CreatedAt: now}
+	order := &database.Order{ID: uint(len(m.Orders) + 1), SubscriptionID: subscriptionID, ProductID: productID, Status: database.OrderStatusPending, AmountCents: amountCents, Currency: currency, PaymentProvider: "platega", CreatedAt: now} // #nosec G115 -- slice length is non-negative
 	m.Orders[order.ID] = order
 	m.OrdersBySubscriptionID[subscriptionID] = append(m.OrdersBySubscriptionID[subscriptionID], *order)
 	return order, nil

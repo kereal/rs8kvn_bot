@@ -35,7 +35,7 @@ func TestParseCallbackAmount(t *testing.T) {
 
 func TestVerifyHeaders(t *testing.T) {
 	headers := make(http.Header)
-	headers.Set("X-MerchantId", "merchant")
+	headers.Set("X-Merchantid", "merchant")
 	headers.Set("X-Secret", "secret")
 	require.True(t, VerifyHeaders("merchant", "secret", headers))
 	require.False(t, VerifyHeaders("merchant", "wrong", headers))

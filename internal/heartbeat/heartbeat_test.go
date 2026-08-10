@@ -246,7 +246,6 @@ func TestSendHeartbeat_MultipleRequests(t *testing.T) {
 }
 
 func TestStart_IntervalTiming(t *testing.T) {
-
 	var requestCount int64
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt64(&requestCount, 1)

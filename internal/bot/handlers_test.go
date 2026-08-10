@@ -494,7 +494,6 @@ func TestHandleUpdate_CommandRouting(t *testing.T) {
 			handler.HandleUpdate(context.Background(), tt.update)
 
 			assert.True(t, mockBot.SendCalledSafe(), "should send response")
-
 		})
 	}
 }

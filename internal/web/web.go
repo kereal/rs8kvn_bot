@@ -342,7 +342,7 @@ func (s *Server) handlePaymentCallback(w http.ResponseWriter, r *http.Request) {
 	// the request context for all follow-up work so an aborted webhook cannot
 	// drop a confirmed payment or its alert.
 	notifyCtx := context.WithoutCancel(r.Context())
-	defer r.Body.Close()
+	defer func() { _ = r.Body.Close() }()
 	r.Body = http.MaxBytesReader(w, r.Body, 256<<10)
 	decoder := json.NewDecoder(r.Body)
 	decoder.UseNumber()
@@ -428,7 +428,9 @@ func (s *Server) handlePaymentCallback(w http.ResponseWriter, r *http.Request) {
 		s.notifyPaymentCallbackIssue(r.Context(), payload, "unsupported_callback_status", fmt.Sprintf("unsupported callback status %q", payload.Status), "verify the provider status and update the integration only after documentation confirms it")
 	}
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+	if err := json.NewEncoder(w).Encode(map[string]bool{"ok": true}); err != nil {
+		logger.Warn("failed to write payment callback response", zap.Error(err))
+	}
 }
 
 // notifyPaymentCallbackIssue sends malformed or operational callback details

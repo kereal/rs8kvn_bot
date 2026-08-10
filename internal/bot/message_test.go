@@ -405,7 +405,6 @@ func TestSendMessage_DifferentChatIDs(t *testing.T) {
 			handler.SendMessage(ctx, tc.chatID, "test message")
 
 			assert.Equal(t, tc.chatID, capturedMsg.ChatID, "ChatID should match")
-
 		})
 	}
 }
@@ -464,7 +463,6 @@ func TestSafeSend_WithVariousChattables(t *testing.T) {
 
 			assert.Equal(t, 1, mockBot.SendCountSafe(), "Send should be called once")
 			tc.checkFunc(t, mockBot.LastChattableSafe())
-
 		})
 	}
 }

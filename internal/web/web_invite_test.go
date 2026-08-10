@@ -583,12 +583,6 @@ func TestHandleInvite_ParallelRequests(t *testing.T) {
 		return []database.Node{{ID: 1, IsActive: true, Host: "http://localhost:2053", InboundIDs: "[1]"}}, nil
 	}
 
-	cfg := &config.Config{
-		SiteURL:            "https://vpn.site",
-		TrialDurationHours: 3,
-		TrialRateLimit:     3,
-	}
-
 	cfg, subService, _ := makeTestSubService(mockDB)
 	srv := NewServer(":8880", mockDB, cfg, "testbot", subService, nil)
 

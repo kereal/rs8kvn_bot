@@ -77,7 +77,7 @@ func TestHandlePaymentCallback_InvalidJSON(t *testing.T) {
 
 	srv, _, _ := newPaymentTestServer(t, nil)
 	req := httptest.NewRequest(http.MethodPost, "/payment/callback", strings.NewReader(`{invalid`))
-	req.Header.Set("X-MerchantId", "merchant")
+	req.Header.Set("X-Merchantid", "merchant")
 	req.Header.Set("X-Secret", "secret")
 	rec := httptest.NewRecorder()
 
@@ -90,7 +90,7 @@ func TestHandlePaymentCallback_InvalidUUIDNotifiesAdmin(t *testing.T) {
 
 	srv, _, bot := newPaymentTestServer(t, nil)
 	req := httptest.NewRequest(http.MethodPost, "/payment/callback", strings.NewReader(`{"id":"not-a-uuid","amount":23.00,"currency":"RUB","status":"CONFIRMED"}`))
-	req.Header.Set("X-MerchantId", "merchant")
+	req.Header.Set("X-Merchantid", "merchant")
 	req.Header.Set("X-Secret", "secret")
 	rec := httptest.NewRecorder()
 
@@ -118,7 +118,7 @@ func TestHandlePaymentCallback_TrailingJSONNotifiesAdminAndSkipsProcessing(t *te
 			// A valid callback would reach this fake; trailing data must stop the
 			// request before any payment state transition is attempted.
 			req := httptest.NewRequest(http.MethodPost, "/payment/callback", strings.NewReader(`{"id":"550e8400-e29b-41d4-a716-446655440111","amount":23.00,"currency":"RUB","status":"CONFIRMED"}`+tt.extra))
-			req.Header.Set("X-MerchantId", "merchant")
+			req.Header.Set("X-Merchantid", "merchant")
 			req.Header.Set("X-Secret", "secret")
 			rec := httptest.NewRecorder()
 
@@ -159,7 +159,7 @@ func TestHandlePaymentCallback_BodySizeLimit(t *testing.T) {
 	body := strings.NewReader(strings.Repeat("x", 300<<10))
 	srv, _, _ := newPaymentTestServer(t, nil)
 	req := httptest.NewRequest(http.MethodPost, "/payment/callback", body)
-	req.Header.Set("X-MerchantId", "merchant")
+	req.Header.Set("X-Merchantid", "merchant")
 	req.Header.Set("X-Secret", "secret")
 	rec := httptest.NewRecorder()
 
@@ -401,7 +401,7 @@ func TestHandlePaymentCallback_MalformedPayloadNotifiesAdmin(t *testing.T) {
 
 	srv, _, bot := newPaymentTestServer(t, nil)
 	req := httptest.NewRequest(http.MethodPost, "/payment/callback", strings.NewReader(`{"id":`))
-	req.Header.Set("X-MerchantId", "merchant")
+	req.Header.Set("X-Merchantid", "merchant")
 	req.Header.Set("X-Secret", "secret")
 	rec := httptest.NewRecorder()
 
@@ -419,9 +419,12 @@ func paymentRequest(status string, id uuid.UUID, amount string) *http.Request {
 
 func paymentRequestWithCurrency(status string, id uuid.UUID, amount, currency string) *http.Request {
 	body := map[string]any{"id": id.String(), "amount": json.Number(amount), "currency": currency, "status": status}
-	encoded, _ := json.Marshal(body)
+	encoded, err := json.Marshal(body)
+	if err != nil {
+		panic(err)
+	}
 	req := httptest.NewRequest(http.MethodPost, "/payment/callback", strings.NewReader(string(encoded)))
-	req.Header.Set("X-MerchantId", "merchant")
+	req.Header.Set("X-Merchantid", "merchant")
 	req.Header.Set("X-Secret", "secret")
 	return req
 }

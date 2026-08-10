@@ -56,7 +56,7 @@ func NewMockXUIServer(t *testing.T) *MockXUIServer {
 		if r.Header.Get("Authorization") != expectedToken {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUnauthorized)
-			json.NewEncoder(w).Encode(map[string]any{"success": false, "msg": "unauthorized"})
+			_, _ = w.Write([]byte(`{"success":false,"msg":"unauthorized"}`))
 			return false
 		}
 		return true
@@ -444,13 +444,11 @@ func TestHandler_GetUsername(t *testing.T) {
 			t.Parallel()
 			got := f.Handler.getUsername(tc.user)
 			assert.Equal(t, tc.want, got)
-
 		})
 	}
 }
 
 func TestMockXUIServer_Endpoints(t *testing.T) {
-
 	mock := NewMockXUIServer(t)
 	defer mock.Close()
 
@@ -465,7 +463,6 @@ func TestMockXUIServer_Endpoints(t *testing.T) {
 		err = json.NewDecoder(resp.Body).Decode(&result)
 		require.NoError(t, err)
 		assert.True(t, result["success"].(bool))
-
 	})
 
 	t.Run("addClient", func(t *testing.T) {
@@ -481,7 +478,6 @@ func TestMockXUIServer_Endpoints(t *testing.T) {
 		err = json.NewDecoder(resp.Body).Decode(&result)
 		require.NoError(t, err)
 		assert.True(t, result["success"].(bool))
-
 	})
 
 	t.Run("getClientTraffic", func(t *testing.T) {
@@ -500,7 +496,6 @@ func TestMockXUIServer_Endpoints(t *testing.T) {
 		obj := result["obj"].(map[string]any)
 		assert.Equal(t, float64(1024*1024*100), obj["up"])
 		assert.Equal(t, float64(1024*1024*200), obj["down"])
-
 	})
 
 	t.Run("delClient", func(t *testing.T) {
@@ -516,7 +511,6 @@ func TestMockXUIServer_Endpoints(t *testing.T) {
 		err = json.NewDecoder(resp.Body).Decode(&result)
 		require.NoError(t, err)
 		assert.True(t, result["success"].(bool))
-
 	})
 }
 
