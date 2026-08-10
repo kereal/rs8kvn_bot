@@ -363,6 +363,38 @@ func TestConfirmPayment_ReleasesPaymentLockBeforePostCommitSync(t *testing.T) {
 	require.NoError(t, <-firstDone)
 }
 
+func TestConfirmPayment_ActivatedCASWithNilExpiryDoesNotPanic(t *testing.T) {
+	// The post-CAS code mirrors sub.ExpiresAt onto the order snapshot only when
+	// the CAS populated it. A CAS/fake that activates without setting
+	// sub.ExpiresAt must not panic and must leave order.ExpiresAt nil.
+	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440122")
+	mock := &testutil.DatabaseService{
+		GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
+			return &database.Order{ID: 32, SubscriptionID: 42, ProductID: 52, Status: database.OrderStatusPending, AmountCents: 2300, Currency: "RUB"}, nil
+		},
+		GetProductByIDFunc: func(_ context.Context, id uint) (*database.Product, error) {
+			return &database.Product{ID: id, PlanID: 62, DurationDays: 30, PriceCents: 2300, Currency: "RUB", IsActive: true}, nil
+		},
+		GetByIDFunc: func(_ context.Context, id uint) (*database.Subscription, error) {
+			return &database.Subscription{ID: id, TelegramID: 72, PlanID: 62}, nil
+		},
+		ConfirmOrderPaidCASFunc: func(_ context.Context, _ uint, _, _ time.Time, _ *database.Subscription, _ *database.Product, _ database.ApplyPlanInTxFn) (bool, error) {
+			// Intentionally leaves sub.ExpiresAt nil.
+			return true, nil
+		},
+		GetPendingBySubscriptionIDFunc: func(context.Context, uint) ([]database.SubscriptionNode, error) {
+			return nil, nil
+		},
+	}
+	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), fakePaymentProvider{}, "", nil)
+
+	confirmation, err := o.ConfirmPayment(context.Background(), providerID, json.Number("23.00"), "RUB")
+	require.NoError(t, err)
+	require.True(t, confirmation.Activated)
+	assert.Equal(t, database.OrderStatusPaid, confirmation.Order.Status)
+	assert.Nil(t, confirmation.Order.ExpiresAt, "expiry must stay nil when CAS leaves sub.ExpiresAt nil")
+}
+
 func TestConfirmPayment_RequiresSyncServiceForPendingOrder(t *testing.T) {
 	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440105")
 	mock := &testutil.DatabaseService{
