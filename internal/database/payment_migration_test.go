@@ -88,6 +88,21 @@ func TestMigration031_DoesNotRequireLegacyPaymentDeduplication(t *testing.T) {
 	assert.Zero(t, orderCount)
 }
 
+func TestMigration031_PendingIndexEnforcesOnlyPlategaPendingOrders(t *testing.T) {
+	sqlDB, cleanup := newSQLiteAtMigration30(t)
+	t.Cleanup(cleanup)
+	require.NoError(t, runMigrations(sqlDB))
+
+	insert := func(status, provider string) error {
+		_, err := sqlDB.Exec(`INSERT INTO orders (subscription_id, product_id, status, amount_cents, currency, payment_provider, created_at) VALUES (?, ?, ?, ?, ?, ?, datetime('now'))`, 1, 1, status, 100, "RUB", provider)
+		return err
+	}
+	require.NoError(t, insert("pending", "platega"))
+	require.Error(t, insert("pending", "platega"), "duplicate pending Platega intent must be rejected")
+	require.NoError(t, insert("paid", "platega"), "paid orders are outside the pending partial index")
+	require.NoError(t, insert("pending", "other-provider"), "other providers are outside the pending partial index")
+}
+
 func TestMigration031_DownRestoresOriginalProviderIndexOnSQLite(t *testing.T) {
 	sqlDB, cleanup := newSQLiteAtMigration30(t)
 	t.Cleanup(cleanup)

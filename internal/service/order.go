@@ -319,6 +319,7 @@ func (o *OrderService) RequestPayment(ctx context.Context, telegramID int64, use
 	}
 	plan, planErr := o.db.GetPlanByID(ctx, canonical.PlanID)
 	if planErr != nil {
+		o.notifyRequestIssue(ctx, "load_plan_failed", planErr.Error(), "retry after database recovery", uint64(telegramID), canonical, order)
 		return nil, order, fmt.Errorf("load product plan: %w", planErr)
 	}
 	if plan == nil || !plan.IsActive {
