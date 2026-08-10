@@ -22,8 +22,9 @@ func init() {
 
 
 type mockVPNClientForExpire struct {
-	deleteCalled    bool
-	deleteProvision vpn.SubscriptionProvision
+	deleteCalled     bool
+	deleteProvision  vpn.SubscriptionProvision
+	deleteProvisions []vpn.SubscriptionProvision
 }
 
 func (m *mockVPNClientForExpire) CreateSubscription(ctx context.Context, provision vpn.SubscriptionProvision) error {
@@ -35,6 +36,7 @@ func (m *mockVPNClientForExpire) UpdateSubscription(ctx context.Context, provisi
 func (m *mockVPNClientForExpire) DeleteSubscription(ctx context.Context, provision vpn.SubscriptionProvision) error {
 	m.deleteCalled = true
 	m.deleteProvision = provision
+	m.deleteProvisions = append(m.deleteProvisions, provision)
 	return nil
 }
 func (m *mockVPNClientForExpire) Close() error { return nil }
