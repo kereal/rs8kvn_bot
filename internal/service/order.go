@@ -379,7 +379,12 @@ func (o *OrderService) requestPayment(ctx context.Context, telegramID int64, use
 			return nil, order, fmt.Errorf("reload payment order after concurrent claim: %w", loadErr)
 		}
 		if latest.PaymentCreationUncertain {
-			return nil, latest, ErrPaymentCreationUncertain
+			// The intent was claimed by a concurrent RequestPayment in this race:
+			// that caller is already contacting the provider. This is not the
+			// manual-reconciliation case (a stale uncertain flag would have been
+			// caught by the earlier check), so report the payment as already in
+			// progress instead of alarming the user.
+			return nil, latest, ErrPaymentAlreadyInProgress
 		}
 		if strings.TrimSpace(latest.ProviderPaymentID) != "" && latest.PaymentURL != "" && latest.PaymentExpiresAt != nil && now.Before(*latest.PaymentExpiresAt) {
 			paymentID, parseErr := platega.ParseTransactionID(latest.ProviderPaymentID)
@@ -513,15 +518,33 @@ func (o *OrderService) confirmPayment(ctx context.Context, providerPaymentID uui
 	}
 	product, err := o.db.GetProductByID(ctx, order.ProductID)
 	if err != nil {
+		if errors.Is(err, database.ErrProductNotFound) || errors.Is(err, gorm.ErrRecordNotFound) {
+			// The product row was removed after the order was created (e.g. by a
+			// direct SQL cleanup). Activation is impossible and the money was
+			// taken, so acknowledge the callback (200) and alert for manual
+			// refund/reconciliation instead of returning 5xx forever.
+			logger.Warn("payment callback for deleted product", zap.Uint("order_id", order.ID), zap.Uint("product_id", order.ProductID), zap.String("provider_payment_id", providerPaymentID.String()))
+			o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "load_order_product_failed", Reason: "ordered product no longer exists", Action: "verify payment and refund or activate manually", OrderID: order.ID, ProductID: order.ProductID, SubscriptionID: order.SubscriptionID, AmountCents: order.AmountCents, Currency: order.Currency, ProviderID: providerPaymentID.String(), CallbackStatus: "CONFIRMED"})
+			return &PaymentConfirmation{Activated: false}, nil
+		}
 		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "load_order_product_failed", Reason: err.Error(), Action: "retry callback after database recovery", OrderID: order.ID, ProductID: order.ProductID, SubscriptionID: order.SubscriptionID, AmountCents: order.AmountCents, Currency: order.Currency, ProviderID: providerPaymentID.String(), CallbackStatus: "CONFIRMED"})
 		return nil, fmt.Errorf("get ordered product: %w", err)
 	}
 	sub, err := o.db.GetByID(ctx, order.SubscriptionID)
 	if err != nil {
+		if errors.Is(err, database.ErrSubscriptionNotFound) || errors.Is(err, gorm.ErrRecordNotFound) {
+			// The subscription was deleted (or revoked and removed) after the
+			// order was created. The money was taken, so acknowledge the callback
+			// (200) and alert for manual refund/reconciliation instead of
+			// returning 5xx forever while Platega retries.
+			logger.Warn("payment callback for deleted subscription", zap.Uint("order_id", order.ID), zap.Uint("subscription_id", order.SubscriptionID), zap.String("provider_payment_id", providerPaymentID.String()))
+			o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "load_order_subscription_failed", Reason: "ordered subscription no longer exists", Action: "verify payment and refund or reconcile manually", OrderID: order.ID, ProductID: order.ProductID, SubscriptionID: order.SubscriptionID, AmountCents: order.AmountCents, Currency: order.Currency, ProviderID: providerPaymentID.String(), CallbackStatus: "CONFIRMED"})
+			return &PaymentConfirmation{Activated: false}, nil
+		}
 		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "load_order_subscription_failed", Reason: err.Error(), Action: "retry callback after database recovery", OrderID: order.ID, ProductID: order.ProductID, SubscriptionID: order.SubscriptionID, AmountCents: order.AmountCents, Currency: order.Currency, ProviderID: providerPaymentID.String(), CallbackStatus: "CONFIRMED"})
 		return nil, fmt.Errorf("get ordered subscription: %w", err)
 	}
-	now := time.Now().UTC().Truncate(time.Minute)
+	now := time.Now().UTC()
 	var applyPlan database.ApplyPlanInTxFn
 	if o.syncSvc != nil {
 		applyPlan = o.syncSvc.ApplyPlanToSubscriptionInTx
@@ -560,9 +583,11 @@ func (o *OrderService) confirmPayment(ctx context.Context, providerPaymentID uui
 // CancelPaymentByProvider validates a cancellation or chargeback callback and
 // applies an idempotent order transition. wasPaid is true only when a
 // previously-paid order is transitioned by a CHARGEBACKED callback — a chargeback
-// on a still-pending order (money never collected) reports wasPaid=false. The
-// webhook deliberately does not call an automatic subscription downgrade; that
-// status requires manual review. Returns (nil, false, nil) for an idempotent no-op.
+// on a still-pending order (money never collected) reports wasPaid=false.
+// A chargeback on a paid order automatically downgrades the subscription to the
+// free plan (best-effort, after the payment lock is released) unless another
+// paid order for the same subscription still exists — in that case access is
+// preserved for manual review. Returns (nil, false, nil) for an idempotent no-op.
 func (o *OrderService) CancelPaymentByProvider(ctx context.Context, providerPaymentID uuid.UUID, status string, amount json.Number, currency string) (order *database.Order, wasPaid bool, err error) {
 	start := time.Now()
 	defer func() {
@@ -581,7 +606,12 @@ func (o *OrderService) CancelPaymentByProvider(ctx context.Context, providerPaym
 		return nil, false, errors.New("invalid provider payment UUID")
 	}
 	o.paymentMu.Lock()
-	defer o.paymentMu.Unlock()
+	paymentLocked := true
+	defer func() {
+		if paymentLocked {
+			o.paymentMu.Unlock()
+		}
+	}()
 
 	order, err = o.db.GetOrderByProviderPaymentID(ctx, "platega", providerPaymentID)
 	if err != nil {
@@ -635,12 +665,60 @@ func (o *OrderService) CancelPaymentByProvider(ctx context.Context, providerPaym
 	}
 	if isChargeback {
 		telegramID := int64(0)
-		if sub, subErr := o.db.GetByID(ctx, order.SubscriptionID); subErr == nil && sub != nil {
-			telegramID = sub.TelegramID
+		if loaded, subErr := o.db.GetByID(ctx, order.SubscriptionID); subErr == nil && loaded != nil {
+			telegramID = loaded.TelegramID
 		}
-		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "chargeback", Reason: "provider reported CHARGEBACKED", Action: "verify access revocation and refund/manual reconciliation", OrderID: order.ID, TelegramID: telegramID, ProductID: order.ProductID, SubscriptionID: order.SubscriptionID, AmountCents: order.AmountCents, Currency: order.Currency, ProviderID: providerPaymentID.String(), CallbackStatus: status})
+		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "chargeback", Reason: "provider reported CHARGEBACKED", Action: "verify the refund; a paid order is downgraded to free automatically", OrderID: order.ID, TelegramID: telegramID, ProductID: order.ProductID, SubscriptionID: order.SubscriptionID, AmountCents: order.AmountCents, Currency: order.Currency, ProviderID: providerPaymentID.String(), CallbackStatus: status})
+	}
+	// Release the payment lock before the best-effort downgrade so a slow plan
+	// or node transition cannot block other payment callbacks.
+	o.paymentMu.Unlock()
+	paymentLocked = false
+	if wasPaid {
+		o.downgradeSubscriptionAfterChargeback(ctx, order)
 	}
 	return order, wasPaid, nil
+}
+
+// downgradeSubscriptionAfterChargeback resets subscription access to the free
+// plan after a chargeback on a previously-paid order. It runs after the payment
+// lock is released and is best-effort, like post-commit sync: a failure never
+// fails the webhook response and only raises a Warn log plus an admin alert.
+// Access is preserved when the subscription still has another paid order, so a
+// legitimately purchased product is not revoked by an unrelated chargeback.
+func (o *OrderService) downgradeSubscriptionAfterChargeback(ctx context.Context, order *database.Order) {
+	if o.subSvc == nil {
+		logger.Warn("chargeback: subscription service not configured; manual downgrade required", zap.Uint("order_id", order.ID))
+		return
+	}
+	// Reload the subscription fresh: the pointer captured under the payment
+	// lock may be stale, and a concurrent activation for the same subscription
+	// could otherwise be overwritten by a full-object downgrade write.
+	sub, err := o.db.GetByID(ctx, order.SubscriptionID)
+	if err != nil {
+		if errors.Is(err, database.ErrSubscriptionNotFound) || errors.Is(err, gorm.ErrRecordNotFound) {
+			logger.Warn("chargeback: subscription already removed; downgrade skipped", zap.Uint("order_id", order.ID))
+			return
+		}
+		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "chargeback_downgrade_failed", Reason: err.Error(), Action: "downgrade the subscription to free manually", OrderID: order.ID, ProductID: order.ProductID, SubscriptionID: order.SubscriptionID, AmountCents: order.AmountCents, Currency: order.Currency, ProviderID: order.ProviderPaymentID, CallbackStatus: "CHARGEBACKED"})
+		return
+	}
+	orders, err := o.db.GetOrdersBySubscriptionID(ctx, order.SubscriptionID)
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) && !errors.Is(err, database.ErrOrderNotFound) {
+		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "chargeback_downgrade_failed", Reason: err.Error(), Action: "downgrade the subscription to free manually", OrderID: order.ID, TelegramID: sub.TelegramID, ProductID: order.ProductID, SubscriptionID: order.SubscriptionID, AmountCents: order.AmountCents, Currency: order.Currency, ProviderID: order.ProviderPaymentID, CallbackStatus: "CHARGEBACKED"})
+		return
+	}
+	for _, other := range orders {
+		if other.ID != order.ID && other.Status == database.OrderStatusPaid {
+			logger.Warn("chargeback: another paid order exists; keeping access for manual review", zap.Uint("order_id", order.ID), zap.Uint("subscription_id", order.SubscriptionID))
+			return
+		}
+	}
+	dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), paymentSyncTimeout)
+	defer cancel()
+	if _, err := o.subSvc.DowngradeToFreePlan(dctx, sub); err != nil {
+		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "chargeback_downgrade_failed", Reason: err.Error(), Action: "downgrade the subscription to free manually", OrderID: order.ID, TelegramID: sub.TelegramID, ProductID: order.ProductID, SubscriptionID: order.SubscriptionID, AmountCents: order.AmountCents, Currency: order.Currency, ProviderID: order.ProviderPaymentID, CallbackStatus: "CHARGEBACKED"})
+	}
 }
 
 // NotifyPaidUser builds the same subscription presentation used by the bot screen.

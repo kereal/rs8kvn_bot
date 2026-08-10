@@ -254,16 +254,65 @@ func TestHandlePaymentCallback_ChargebackNotifiesAdmin(t *testing.T) {
 	t.Parallel()
 
 	order := &database.Order{ID: 5, SubscriptionID: 23, ProductID: 33, Status: database.OrderStatusPaid, ProviderPaymentID: testPaymentID.String(), AmountCents: 2300, Currency: "RUB"}
-	srv, _, bot := newPaymentTestServer(t, order)
+	srv, db, bot := newPaymentTestServer(t, order)
+	// The chargeback on a paid order must downgrade the subscription to free.
+	downgradeCalled := false
+	db.GetNodesByPlanIDFunc = func(context.Context, uint) ([]database.Node, error) { return nil, nil }
+	db.UpdateSubscriptionFunc = func(_ context.Context, sub *database.Subscription) error {
+		downgradeCalled = true
+		assert.Equal(t, uint(2), sub.PlanID, "chargeback must downgrade the subscription to the free plan")
+		assert.Nil(t, sub.ExpiresAt)
+		return nil
+	}
 	req := paymentRequest("CHARGEBACKED", testPaymentID, `23.00`)
 	rec := httptest.NewRecorder()
 
 	srv.handlePaymentCallback(rec, req)
 	require.Equal(t, http.StatusOK, rec.Code)
 	assert.Equal(t, database.OrderStatusCanceled, order.Status)
+	assert.True(t, downgradeCalled, "chargeback on a paid order must downgrade access to free")
 	messages := bot.GetAllSentMessages()
 	require.Len(t, messages, 1)
 	assert.Contains(t, messages[0].Text, "Chargeback requires manual review")
+}
+
+func TestHandlePaymentCallback_ConfirmedForDeletedSubscription(t *testing.T) {
+	t.Parallel()
+
+	order := &database.Order{ID: 40, SubscriptionID: 41, ProductID: 42, Status: database.OrderStatusPending, ProviderPaymentID: testPaymentID.String(), AmountCents: 2300, Currency: "RUB"}
+	srv, db, bot := newPaymentTestServer(t, order)
+	db.GetByIDFunc = func(context.Context, uint) (*database.Subscription, error) {
+		return nil, database.ErrSubscriptionNotFound
+	}
+	req := paymentRequest("CONFIRMED", testPaymentID, `23.00`)
+	rec := httptest.NewRecorder()
+
+	srv.handlePaymentCallback(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, "deleted subscription must not turn the callback into a retried 5xx")
+	assert.Equal(t, database.OrderStatusPending, order.Status, "order must not be activated without its subscription")
+	messages := bot.GetAllSentMessages()
+	require.Len(t, messages, 1)
+	assert.Equal(t, int64(999), messages[0].ChatID)
+	assert.Contains(t, messages[0].Text, "load_order_subscription_failed")
+}
+
+func TestHandlePaymentCallback_ConfirmedForDeletedProduct(t *testing.T) {
+	t.Parallel()
+
+	order := &database.Order{ID: 43, SubscriptionID: 44, ProductID: 45, Status: database.OrderStatusPending, ProviderPaymentID: testPaymentID.String(), AmountCents: 2300, Currency: "RUB"}
+	srv, db, bot := newPaymentTestServer(t, order)
+	db.GetProductByIDFunc = func(context.Context, uint) (*database.Product, error) {
+		return nil, database.ErrProductNotFound
+	}
+	req := paymentRequest("CONFIRMED", testPaymentID, `23.00`)
+	rec := httptest.NewRecorder()
+
+	srv.handlePaymentCallback(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, "deleted product must not turn the callback into a retried 5xx")
+	assert.Equal(t, database.OrderStatusPending, order.Status)
+	messages := bot.GetAllSentMessages()
+	require.Len(t, messages, 1)
+	assert.Contains(t, messages[0].Text, "load_order_product_failed")
 }
 
 func TestHandlePaymentCallback_LateConfirmedNotifiesAdmin(t *testing.T) {
