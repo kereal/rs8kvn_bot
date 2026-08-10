@@ -128,9 +128,9 @@ services:
     security_opt:
       - no-new-privileges:true
 
-    # Health check
+    # Health check - verify the process is running
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8880/healthz"]
+      test: ["CMD", "pgrep", "-f", "rs8kvn_bot"]
       interval: 30s
       timeout: 10s
       retries: 3
