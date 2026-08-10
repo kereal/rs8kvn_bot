@@ -257,6 +257,15 @@ func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 
+	s.mu.RLock()
+	ready := s.ready
+	s.mu.RUnlock()
+	if !ready {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte("NOT READY"))
+		return
+	}
+
 	health := s.checkHealth(ctx)
 
 	if health.Status == "ok" {

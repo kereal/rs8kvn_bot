@@ -162,60 +162,38 @@ func initBot(cfg *config.Config) (*tgbotapi.BotAPI, *bot.BotConfig, error) {
 	const botInitMaxAttempts = 5
 	botInitDelay := 3 * time.Second
 
-	var api *tgbotapi.BotAPI
-	var bc *bot.BotConfig
-
+	var lastErr error
 	for i := 0; i < botInitMaxAttempts; i++ {
+		var api *tgbotapi.BotAPI
+		var bc *bot.BotConfig
+		var err error
+
 		func() {
-			defer recoverAndReport("Telegram bot init")
-
-			var err error
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					lastErr = fmt.Errorf("telegram bot init panic: %v", recovered)
+				}
+			}()
 			api, err = tgbotapi.NewBotAPI(cfg.TelegramBotToken)
-			if err != nil {
-				if i == botInitMaxAttempts-1 {
-					logger.Fatal("Failed to initialize Telegram bot after max attempts",
-						zap.Error(err),
-						zap.Int("attempts", botInitMaxAttempts))
-				}
-				logger.Warn("Telegram bot init failed, retrying...",
-					zap.Int("attempt", i+1),
-					zap.Int("max_attempts", botInitMaxAttempts),
-					zap.Error(err))
-				time.Sleep(botInitDelay + time.Duration(rand.Int63n(int64(botInitDelay/2)))) //nolint:gosec // jitter
-				return
-			}
-
-			bc, err = bot.NewBotConfig(api)
-			if err != nil {
-				if i == botInitMaxAttempts-1 {
-					logger.Fatal("Failed to create bot config after max attempts",
-						zap.Int("attempts", botInitMaxAttempts),
-						zap.Error(err))
-				}
-				logger.Warn("Bot config creation failed, retrying...",
-					zap.Int("attempt", i+1),
-					zap.Int("max_attempts", botInitMaxAttempts),
-					zap.Error(err))
-				time.Sleep(botInitDelay + time.Duration(rand.Int63n(int64(botInitDelay/2)))) //nolint:gosec // jitter
-				return
+			if err == nil {
+				bc, err = bot.NewBotConfig(api)
 			}
 		}()
-
-		if api != nil && bc != nil {
+		if err == nil && api != nil && bc != nil {
+			logger.Info("Telegram bot authorized", zap.String("username", bc.Username))
+			return api, bc, nil
+		}
+		if err == nil {
+			err = lastErr
+		}
+		lastErr = err
+		if i == botInitMaxAttempts-1 {
 			break
 		}
+		logger.Warn("Telegram bot init failed, retrying...", zap.Int("attempt", i+1), zap.Int("max_attempts", botInitMaxAttempts), zap.Error(err))
+		time.Sleep(botInitDelay + time.Duration(rand.Int63n(int64(botInitDelay/2)))) //nolint:gosec // jitter
 	}
-
-	if api == nil || bc == nil {
-		return nil, nil, fmt.Errorf("failed to initialize Telegram bot after all attempts")
-	}
-
-	// The username comes from Telegram getMe (populated in NewBotConfig above).
-	// The bot is authorized via its token, and getMe reliably returns the @username,
-	// which is then propagated to handlers/links via SetBotConfig.
-	logger.Info("Telegram bot authorized", zap.String("username", bc.Username))
-
-	return api, bc, nil
+	return nil, nil, fmt.Errorf("failed to initialize Telegram bot after %d attempts: %w", botInitMaxAttempts, lastErr)
 }
 
 // startWebServer создаёт и запускает HTTP-сервер (подписки, инвайт/trial-страницы).
@@ -385,7 +363,11 @@ func main() {
 	defer sentry.Flush(logger.SentryFlushTimeout)
 
 	// 3. Initialize logger
-	logService := initLogger(cfg)
+	logService, err := initLogger(cfg)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
+		os.Exit(1)
+	}
 	defer func() {
 		if err := logService.Close(); err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to close logger: %v\n", err)
@@ -393,7 +375,10 @@ func main() {
 	}()
 
 	// 4. Initialize database and node clients
-	dbService, deps := initDatabase(cfg)
+	dbService, deps, err := initDatabase(cfg)
+	if err != nil {
+		logger.Fatal("Failed to initialize database", zap.Error(err))
+	}
 	defer func() {
 		if err := dbService.Close(); err != nil {
 			logger.Error("Failed to close database", zap.Error(err))
@@ -424,7 +409,7 @@ func main() {
 	// the share/invite page shows the correct @username after startup.
 	webServer, err := startWebServer(svc.subService, cfg, botConfig, svc.subServer, dbService, svc.orderService, botAPI)
 	if err != nil {
-		logger.Warn("Failed to start web server, continuing without web server", zap.Error(err))
+		logger.Fatal("Failed to start web server", zap.Error(err))
 	}
 	defer func() {
 		if webServer == nil {
