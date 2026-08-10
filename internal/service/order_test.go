@@ -605,3 +605,262 @@ func TestCancelPaymentByProvider_PendingCancelNotChargeback(t *testing.T) {
 	assert.False(t, wasPaid)
 	require.NotNil(t, order)
 }
+
+func TestConfirmPayment_DeletedSubscriptionOrProductReturnsNoop(t *testing.T) {
+	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440123")
+	tests := []struct {
+		name      string
+		productFn func(context.Context, uint) (*database.Product, error)
+		subFn     func(context.Context, uint) (*database.Subscription, error)
+		wantEvent string
+	}{
+		{
+			name: "deleted subscription",
+			productFn: func(context.Context, uint) (*database.Product, error) {
+				return &database.Product{ID: 60, PlanID: 2, Name: "Premium", DurationDays: 30, PriceCents: 2300, Currency: "RUB", IsActive: true}, nil
+			},
+			subFn: func(context.Context, uint) (*database.Subscription, error) {
+				return nil, database.ErrSubscriptionNotFound
+			},
+			wantEvent: "load_order_subscription_failed",
+		},
+		{
+			name: "deleted product",
+			productFn: func(context.Context, uint) (*database.Product, error) {
+				return nil, database.ErrProductNotFound
+			},
+			subFn: func(context.Context, uint) (*database.Subscription, error) {
+				return &database.Subscription{ID: 70, TelegramID: 80, PlanID: 2}, nil
+			},
+			wantEvent: "load_order_product_failed",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			adminBot := testutil.NewBotAPI()
+			casCalled := false
+			mock := &testutil.DatabaseService{
+				GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
+					return &database.Order{ID: 90, SubscriptionID: 70, ProductID: 60, Status: database.OrderStatusPending, AmountCents: 2300, Currency: "RUB", ProviderPaymentID: providerID.String()}, nil
+				},
+				GetProductByIDFunc:              tt.productFn,
+				GetByIDFunc:                     tt.subFn,
+				ConfirmOrderPaidCASFunc: func(context.Context, uint, time.Time, time.Time, *database.Subscription, *database.Product, database.ApplyPlanInTxFn) (bool, error) {
+					casCalled = true
+					return true, nil
+				},
+			}
+			o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), fakePaymentProvider{}, "", &config.Config{TelegramAdminID: 999})
+			o.SetAdminBot(adminBot)
+
+			confirmation, err := o.ConfirmPayment(context.Background(), providerID, json.Number("23.00"), "RUB")
+			require.NoError(t, err, "deleted dependency must acknowledge the callback instead of 500")
+			require.False(t, confirmation.Activated)
+			assert.False(t, casCalled, "no CAS may run when the product/subscription is gone")
+			messages := adminBot.GetAllSentMessages()
+			require.Len(t, messages, 1)
+			assert.Contains(t, messages[0].Text, tt.wantEvent)
+		})
+	}
+}
+
+func TestRequestPayment_ConcurrentClaimReturnsAlreadyInProgress(t *testing.T) {
+	adminBot := testutil.NewBotAPI()
+	order := &database.Order{ID: 95, SubscriptionID: 75, ProductID: 65, Status: database.OrderStatusPending, AmountCents: 2300, Currency: "RUB"}
+	latest := &database.Order{ID: 95, SubscriptionID: 75, ProductID: 65, Status: database.OrderStatusPending, AmountCents: 2300, Currency: "RUB", PaymentCreationUncertain: true}
+	mock := &testutil.DatabaseService{
+		GetProductByIDFunc: func(context.Context, uint) (*database.Product, error) {
+			return &database.Product{ID: 65, PlanID: 2, Name: "Premium", PriceCents: 2300, Currency: "RUB", IsActive: true}, nil
+		},
+		GetByTelegramIDFunc: func(context.Context, int64) (*database.Subscription, error) {
+			return &database.Subscription{ID: 75, TelegramID: 55}, nil
+		},
+		FindPendingPaymentOrderFunc: func(context.Context, uint, uint, time.Time) (*database.Order, error) {
+			return order, nil
+		},
+		GetPlanByIDFunc: func(context.Context, uint) (*database.Plan, error) {
+			return &database.Plan{ID: 2, IsActive: true}, nil
+		},
+		MarkPaymentCreationUncertainFunc: func(context.Context, uint, bool) (bool, error) {
+			// A concurrent RequestPayment already claimed the intent.
+			return false, nil
+		},
+		GetOrderByIDFunc: func(context.Context, uint) (*database.Order, error) {
+			return latest, nil
+		},
+	}
+	o := NewOrderService(mock, nil, nil, fakePaymentProvider{}, "", &config.Config{TelegramAdminID: 999})
+	o.SetAdminBot(adminBot)
+
+	_, gotOrder, err := o.RequestPayment(context.Background(), 55, "user", &database.Product{ID: 65})
+	require.ErrorIs(t, err, ErrPaymentAlreadyInProgress)
+	require.Same(t, latest, gotOrder)
+	require.Empty(t, adminBot.GetAllSentMessages(), "a concurrent claim must not raise a manual-reconciliation alert")
+}
+
+func TestCancelPaymentByProvider_ChargebackDowngradesPaidSubscription(t *testing.T) {
+	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440124")
+	sub := &database.Subscription{ID: 85, TelegramID: 55, PlanID: 99, Status: "active", ExpiresAt: testutil.PtrTime(time.Now().Add(24 * time.Hour))}
+	calls := 0
+	downgradePersisted := false
+	mock := &testutil.DatabaseService{
+		CancelOrderCASFunc: func(context.Context, string, uuid.UUID, []database.OrderStatus) (bool, error) {
+			return true, nil
+		},
+		GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
+			calls++
+			status := database.OrderStatusCanceled
+			if calls == 1 {
+				status = database.OrderStatusPaid
+			}
+			return &database.Order{ID: 96, SubscriptionID: 85, ProductID: 66, Status: status, AmountCents: 2300, Currency: "RUB", ProviderPaymentID: providerID.String()}, nil
+		},
+		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
+			return sub, nil
+		},
+		GetOrdersBySubscriptionIDFunc: func(context.Context, uint) ([]database.Order, error) {
+			// Only the chargebacked order itself exists (now canceled).
+			return []database.Order{{ID: 96, SubscriptionID: 85, Status: database.OrderStatusCanceled}}, nil
+		},
+		GetNodesByPlanIDFunc: func(context.Context, uint) ([]database.Node, error) {
+			return nil, nil
+		},
+		UpdateSubscriptionFunc: func(_ context.Context, updated *database.Subscription) error {
+			downgradePersisted = true
+			assert.Equal(t, uint(2), updated.PlanID, "subscription must be downgraded to the free plan")
+			assert.Nil(t, updated.ExpiresAt, "free plan has no expiry")
+			assert.Nil(t, updated.ProductID)
+			return nil
+		},
+	}
+	subSvc := NewSubscriptionService(mock, nil, nil, nil, &config.Config{})
+	o := NewOrderService(mock, subSvc, nil, fakePaymentProvider{}, "", nil)
+
+	order, wasPaid, err := o.CancelPaymentByProvider(context.Background(), providerID, "CHARGEBACKED", json.Number("23.00"), "RUB")
+	require.NoError(t, err)
+	require.True(t, wasPaid)
+	require.NotNil(t, order)
+	assert.Equal(t, uint(96), order.ID)
+	assert.True(t, downgradePersisted, "chargeback on a paid order must downgrade the subscription to free")
+}
+
+func TestCancelPaymentByProvider_ChargebackKeepsAccessWithAnotherPaidOrder(t *testing.T) {
+	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440125")
+	sub := &database.Subscription{ID: 86, TelegramID: 56, PlanID: 99, Status: "active", ExpiresAt: testutil.PtrTime(time.Now().Add(24 * time.Hour))}
+	calls := 0
+	updateCalled := false
+	mock := &testutil.DatabaseService{
+		CancelOrderCASFunc: func(context.Context, string, uuid.UUID, []database.OrderStatus) (bool, error) {
+			return true, nil
+		},
+		GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
+			calls++
+			status := database.OrderStatusCanceled
+			if calls == 1 {
+				status = database.OrderStatusPaid
+			}
+			return &database.Order{ID: 97, SubscriptionID: 86, ProductID: 67, Status: status, AmountCents: 2300, Currency: "RUB", ProviderPaymentID: providerID.String()}, nil
+		},
+		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
+			return sub, nil
+		},
+		GetOrdersBySubscriptionIDFunc: func(context.Context, uint) ([]database.Order, error) {
+			// Another paid order for the same subscription is still legitimately active.
+			return []database.Order{
+				{ID: 97, SubscriptionID: 86, Status: database.OrderStatusCanceled},
+				{ID: 98, SubscriptionID: 86, Status: database.OrderStatusPaid},
+			}, nil
+		},
+		GetNodesByPlanIDFunc: func(context.Context, uint) ([]database.Node, error) {
+			return nil, nil
+		},
+		UpdateSubscriptionFunc: func(context.Context, *database.Subscription) error {
+			updateCalled = true
+			return nil
+		},
+	}
+	subSvc := NewSubscriptionService(mock, nil, nil, nil, &config.Config{})
+	o := NewOrderService(mock, subSvc, nil, fakePaymentProvider{}, "", nil)
+
+	_, wasPaid, err := o.CancelPaymentByProvider(context.Background(), providerID, "CHARGEBACKED", json.Number("23.00"), "RUB")
+	require.NoError(t, err)
+	require.True(t, wasPaid)
+	assert.False(t, updateCalled, "access must be preserved when another paid order exists")
+	assert.Equal(t, uint(99), sub.PlanID, "subscription plan must stay untouched")
+}
+
+func TestCancelPaymentByProvider_ChargebackDowngradeFailureAlertsAdmin(t *testing.T) {
+	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440127")
+	adminBot := testutil.NewBotAPI()
+	sub := &database.Subscription{ID: 88, TelegramID: 58, PlanID: 99, Status: "active", ExpiresAt: testutil.PtrTime(time.Now().Add(24 * time.Hour))}
+	calls := 0
+	mock := &testutil.DatabaseService{
+		CancelOrderCASFunc: func(context.Context, string, uuid.UUID, []database.OrderStatus) (bool, error) {
+			return true, nil
+		},
+		GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
+			calls++
+			status := database.OrderStatusCanceled
+			if calls == 1 {
+				status = database.OrderStatusPaid
+			}
+			return &database.Order{ID: 100, SubscriptionID: 88, ProductID: 69, Status: status, AmountCents: 2300, Currency: "RUB", ProviderPaymentID: providerID.String()}, nil
+		},
+		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
+			return sub, nil
+		},
+		GetOrdersBySubscriptionIDFunc: func(context.Context, uint) ([]database.Order, error) {
+			return []database.Order{{ID: 100, SubscriptionID: 88, Status: database.OrderStatusCanceled}}, nil
+		},
+		// Free-plan node load fails, so DowngradeToFreePlan errors out.
+		GetNodesByPlanIDFunc: func(context.Context, uint) ([]database.Node, error) {
+			return nil, errors.New("free plan node lookup failed")
+		},
+	}
+	subSvc := NewSubscriptionService(mock, nil, nil, nil, &config.Config{})
+	o := NewOrderService(mock, subSvc, nil, fakePaymentProvider{}, "", &config.Config{TelegramAdminID: 999})
+	o.SetAdminBot(adminBot)
+
+	_, wasPaid, err := o.CancelPaymentByProvider(context.Background(), providerID, "CHARGEBACKED", json.Number("23.00"), "RUB")
+	require.NoError(t, err, "a best-effort downgrade failure must not fail the webhook")
+	require.True(t, wasPaid)
+	messages := adminBot.GetAllSentMessages()
+	require.Len(t, messages, 2, "chargeback alert plus downgrade-failure alert")
+	assert.Contains(t, messages[1].Text, "chargeback_downgrade_failed")
+	assert.Contains(t, messages[1].Text, "free plan node lookup failed")
+}
+
+
+func TestCancelPaymentByProvider_ChargebackOnPendingDoesNotDowngrade(t *testing.T) {
+	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440126")
+	calls := 0
+	ordersQueried := false
+	mock := &testutil.DatabaseService{
+		CancelOrderCASFunc: func(context.Context, string, uuid.UUID, []database.OrderStatus) (bool, error) {
+			return true, nil
+		},
+		GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
+			calls++
+			status := database.OrderStatusCanceled
+			if calls == 1 {
+				status = database.OrderStatusPending
+			}
+			return &database.Order{ID: 99, SubscriptionID: 87, ProductID: 68, Status: status, AmountCents: 2300, Currency: "RUB", ProviderPaymentID: providerID.String()}, nil
+		},
+		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
+			return &database.Subscription{ID: 87, TelegramID: 57, PlanID: 99}, nil
+		},
+		GetOrdersBySubscriptionIDFunc: func(context.Context, uint) ([]database.Order, error) {
+			ordersQueried = true
+			return nil, nil
+		},
+	}
+	subSvc := NewSubscriptionService(mock, nil, nil, nil, &config.Config{})
+	o := NewOrderService(mock, subSvc, nil, fakePaymentProvider{}, "", nil)
+
+	_, wasPaid, err := o.CancelPaymentByProvider(context.Background(), providerID, "CHARGEBACKED", json.Number("23.00"), "RUB")
+	require.NoError(t, err)
+	require.False(t, wasPaid, "chargeback on pending order collected no money")
+	assert.False(t, ordersQueried, "no downgrade flow may run when wasPaid is false")
+}
