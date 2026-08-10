@@ -406,9 +406,10 @@ func (s *Server) handlePaymentCallback(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	case "CANCELED", "CHARGEBACKED":
-		// Record the cancellation/chargeback transition, but do not automatically
-		// downgrade the subscription: financial reversal and access revocation
-		// require a separate reviewed operation.
+		// Record the cancellation/chargeback transition. A chargeback on a
+		// previously-paid order automatically downgrades the subscription to the
+		// free plan inside CancelPaymentByProvider (unless another paid order
+		// exists); a plain CANCELED only cancels the pending order.
 		if _, _, err := s.orderService.CancelPaymentByProvider(notifyCtx, paymentID, status, payload.Amount, payload.Currency); err != nil {
 			if errors.Is(err, service.ErrAmountMismatch) || errors.Is(err, service.ErrCurrencyMismatch) {
 				http.Error(w, err.Error(), http.StatusBadRequest)

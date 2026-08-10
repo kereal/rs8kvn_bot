@@ -353,7 +353,7 @@ type CallbackPayload struct {
 - `PENDING` — официальный статус общей модели транзакции; Warn и HTTP 200 без изменения заказа;
 - `CANCELED` — статус webhook; отмена pending-заказа;
 - `CONFIRMED` — статус webhook; подтверждение pending-заказа;
-- `CHARGEBACKED` — официальный статус общей модели транзакции; перевод pending/paid в canceled с обязательным ручным разбором, без автоматического отзыва подписки.
+- `CHARGEBACKED` — официальный статус общей модели транзакции; перевод pending/paid в canceled. При переводе ранее оплаченного (`paid`) заказа подписка автоматически даунгрейдится до free-плана, если у неё нет другого оплаченного заказа; иначе доступ сохраняется для ручного разбора.
 
 Любое неизвестное будущее значение статуса не изменяет заказ, записывается в Warn/audit-log и получает HTTP 200. `SUCCESS` и `PAID` не являются допустимыми aliases.
 
@@ -484,7 +484,7 @@ func (o *OrderService) CancelPaymentByProvider(
 - неизвестный ID → Warn/audit-log, HTTP 200, изменений нет;
 - перед отменой проверить точное совпадение суммы и валюты с Order; mismatch → HTTP 400 без изменения заказа;
 - `CANCELED` переводит только `pending → canceled`;
-- `CHARGEBACKED` может перевести `pending` или `paid` в `canceled`, подписка автоматически не отзывается; webhook только фиксирует событие для ручного разбора;
+- `CHARGEBACKED` может перевести `pending` или `paid` в `canceled`. Перевод `paid → canceled` автоматически даунгрейдит подписку до free-плана (best-effort, после снятия payment lock, с отдельным timeout ≤20 секунд), если у подписки нет другого `paid`-заказа; даунгрейд переводит premium-ноды в `pending_remove` и запускает `SyncSubscription`, чтобы клиенты физически удалялись с панелей; при наличии другого оплаченного заказа доступ сохраняется и событие остаётся на ручной разбор. Перевод `pending → canceled` (деньги не списывались) даунгрейд не выполняет;
 - второй возвращаемый bool — `wasPaid`: `true` только когда `CHARGEBACKED` переводит ранее оплаченный (`paid`) заказ. Чарджбек на ещё `pending` заказе (деньги не списывались) возвращает `wasPaid=false`. Флаг вычисляется из статуса заказа **до** перехода, а не из итогового `canceled`;
 - повторный callback — no-op;
 - `SUCCESS`, `PAID` и неизвестные статусы не обрабатывать.
@@ -507,7 +507,7 @@ func (o *OrderService) CancelPaymentByProvider(
 - late CONFIRMED для expired: заказ не активируется, сохраняются Warn и админское Telegram-сообщение с инструкцией проверить возврат или ручную активацию;
 - параллельный и повторный CONFIRMED активируют только один раз; срок рассчитывается от актуального состояния подписки внутри транзакции, чтобы параллельные разные покупки не теряли продление;
 - snapshot `orders.expires_at` равен `subscriptions.expires_at` после активации и не меняется при повторе;
-- `CANCELED`, `CHARGEBACKED` и запрещённые переходы; `wasPaid=true` только для `paid`-заказа по `CHARGEBACKED`, а чарджбек на `pending` даёт `wasPaid=false`;
+- `CANCELED`, `CHARGEBACKED` и запрещённые переходы; `wasPaid=true` только для `paid`-заказа по `CHARGEBACKED`, а чарджбек на `pending` даёт `wasPaid=false`; чарджбек на `paid`-заказе даунгрейдит подписку до free-плана, при наличии другого `paid`-заказа доступ сохраняется;
 - CAS, активирующий подписку без установки `sub.ExpiresAt`, не вызывает panic и оставляет snapshot `orders.expires_at` равным `nil` (nil-guard);
 - repository guard отклоняет изменение `name`, `plan_id`, `duration_days`, `price_cents`, `currency` после появления Order и разрешает изменение только `is_active`; все административные изменения Product проходят только через этот метод;
 - rollback при ошибке DB-setup sync;
@@ -586,6 +586,7 @@ func (o *OrderService) NotifyPaidUser(
 - body >256 KiB → 400;
 - malformed JSON, trailing JSON, invalid UUID/amount → 400;
 - все четыре официальных статуса;
+- CHARGEBACKED на paid-заказе автоматически даунгрейдит подписку до free-плана (при отсутствии другого paid-заказа);
 - unknown status и unknown provider ID → 200 + Warn;
 - late expired callback → 200 без активации и админское уведомление с order/user/payment details;
 - amount/currency mismatch → 400;
@@ -719,7 +720,7 @@ https://<public-domain>/payment/callback
 - callback URL;
 - статусами и кодами ответа;
 - сроком ссылки и повторным использованием;
-- chargeback/manual-review поведением;
+- chargeback/manual-review поведением: автодаунгрейд до free при чарджбеке на paid-заказе (если нет другого paid-заказа), сохранение доступа при наличии другого оплаченного заказа, ручной разбор по админ-алерту;
 - state machine Order.
 
 После cleanup поиск в исходном коде, конфигурации и тестах (документацию не учитывать) не должен находить:
@@ -768,3 +769,4 @@ RenewSubscription
 26. Guarded Product update имеет тесты для всех immutable fields и разрешённого изменения `is_active`.
 27. Успешное представление оплаты и экран «Моя подписка» используют один formatter/helper.
 28. Все payment/provider/integration errors отправляют администратору Telegram-сообщение с доступным контекстом; failure самой отправки также логируется.
+29. `CHARGEBACKED` на ранее оплаченном (`paid`) заказе автоматически даунгрейдит подписку до free-плана при отсутствии других `paid`-заказов; при наличии другого оплаченного заказа доступ сохраняется и событие обрабатывается вручную.
