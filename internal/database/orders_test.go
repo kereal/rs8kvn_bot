@@ -296,6 +296,40 @@ func TestOrderStatusConstants(t *testing.T) {
 	assert.Equal(t, OrderStatus("canceled"), OrderStatusCanceled)
 }
 
+func TestCalculatePaymentExpiry_SamePlanExtends(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Minute)
+	oldExpiry := now.Add(10 * 24 * time.Hour)
+	product := &Product{PlanID: 1, DurationDays: 30}
+
+	result := CalculatePaymentExpiry(now, &Subscription{PlanID: 1, ExpiresAt: &oldExpiry}, product)
+	assert.Equal(t, oldExpiry.AddDate(0, 0, 30), result)
+}
+
+func TestCalculatePaymentExpiry_NilExpiryUsesNow(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Minute)
+	product := &Product{PlanID: 1, DurationDays: 30}
+
+	result := CalculatePaymentExpiry(now, &Subscription{PlanID: 1, ExpiresAt: nil}, product)
+	assert.Equal(t, now.AddDate(0, 0, 30), result)
+}
+
+func TestCalculatePaymentExpiry_DifferentPlanUsesNow(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Minute)
+	oldExpiry := now.Add(10 * 24 * time.Hour)
+	product := &Product{PlanID: 2, DurationDays: 30}
+
+	result := CalculatePaymentExpiry(now, &Subscription{PlanID: 1, ExpiresAt: &oldExpiry}, product)
+	assert.Equal(t, now.AddDate(0, 0, 30), result)
+}
+
+func TestCalculatePaymentExpiry_NilProductUsesBase(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Minute)
+	oldExpiry := now.Add(10 * 24 * time.Hour)
+
+	result := CalculatePaymentExpiry(now, &Subscription{PlanID: 1, ExpiresAt: &oldExpiry}, nil)
+	assert.Equal(t, now, result)
+}
+
 func TestConfirmOrderPaidCAS_RecalculatesFromCurrentSubscription(t *testing.T) {
 	t.Parallel()
 	svc := newTestService(t)
@@ -313,8 +347,9 @@ func TestConfirmOrderPaidCAS_RecalculatesFromCurrentSubscription(t *testing.T) {
 	order := &Order{SubscriptionID: sub.ID, ProductID: product.ID, Status: OrderStatusPending, AmountCents: 100, Currency: "RUB"}
 	require.NoError(t, svc.CreateOrder(ctx, order))
 
-	staleExpiry := now.Add(30 * 24 * time.Hour)
-	activated, err := svc.ConfirmOrderPaidCAS(ctx, order.ID, now, now, &Subscription{ID: sub.ID, PlanID: plan.ID}, staleExpiry, product, nil)
+	// The CAS must recompute expiry from the current subscription, not from any
+	// stale caller snapshot: the expired-at value passed in is irrelevant.
+	activated, err := svc.ConfirmOrderPaidCAS(ctx, order.ID, now, now, &Subscription{ID: sub.ID, PlanID: plan.ID}, product, nil)
 	require.NoError(t, err)
 	assert.True(t, activated)
 	got, err := svc.GetByID(ctx, sub.ID)
@@ -351,7 +386,6 @@ func TestConfirmOrderPaidCAS_SwitchesPlanAndStatus(t *testing.T) {
 	require.NoError(t, svc.CreateOrder(ctx, order))
 
 	now := time.Now().UTC().Truncate(time.Second)
-	newExpiry := now.Add(30 * 24 * time.Hour)
 
 	var gotPlanID uint
 	applyPlan := func(_ context.Context, tx *gorm.DB, subscriptionID uint, planID uint) error {
@@ -360,7 +394,7 @@ func TestConfirmOrderPaidCAS_SwitchesPlanAndStatus(t *testing.T) {
 		return nil
 	}
 
-	activated, err := svc.ConfirmOrderPaidCAS(ctx, order.ID, now, now, sub, newExpiry, product, applyPlan)
+	activated, err := svc.ConfirmOrderPaidCAS(ctx, order.ID, now, now, sub, product, applyPlan)
 	require.NoError(t, err)
 	assert.True(t, activated)
 	// applyPlan must receive the PRODUCT plan, not the stale sub.PlanID.
@@ -373,7 +407,7 @@ func TestConfirmOrderPaidCAS_SwitchesPlanAndStatus(t *testing.T) {
 	assert.Equal(t, product.ID, *got.ProductID)
 
 	// Idempotent retry: order already paid, no second activation.
-	activated, err = svc.ConfirmOrderPaidCAS(ctx, order.ID, now, now, sub, newExpiry, product, applyPlan)
+	activated, err = svc.ConfirmOrderPaidCAS(ctx, order.ID, now, now, sub, product, applyPlan)
 	require.NoError(t, err)
 	assert.False(t, activated)
 }

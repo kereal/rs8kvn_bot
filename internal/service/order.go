@@ -522,28 +522,25 @@ func (o *OrderService) confirmPayment(ctx context.Context, providerPaymentID uui
 		return nil, fmt.Errorf("get ordered subscription: %w", err)
 	}
 	now := time.Now().UTC().Truncate(time.Minute)
-	newExpiry := calculateProductExpiry(now, sub.PlanID, sub.ExpiresAt, product)
 	var applyPlan database.ApplyPlanInTxFn
 	if o.syncSvc != nil {
 		applyPlan = o.syncSvc.ApplyPlanToSubscriptionInTx
 	}
-	activated, err := o.db.ConfirmOrderPaidCAS(ctx, order.ID, now, now, sub, newExpiry, product, applyPlan)
+	activated, err := o.db.ConfirmOrderPaidCAS(ctx, order.ID, now, now, sub, product, applyPlan)
 	if err != nil {
 		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "confirm_payment_failed", Reason: err.Error(), Action: "retry callback; order must remain pending if DB setup rolled back", OrderID: order.ID, TelegramID: sub.TelegramID, ProductID: order.ProductID, ProductName: product.Name, SubscriptionID: order.SubscriptionID, AmountCents: order.AmountCents, Currency: order.Currency, ProviderID: providerPaymentID.String(), CallbackStatus: "CONFIRMED"})
 		return nil, err
 	}
 	if activated {
-		sub.PlanID = product.PlanID
-		sub.Status = string(database.SubscriptionStatusActive)
-		sub.ProductID = &product.ID
+		// The CAS already populated sub.ExpiresAt from the current subscription
+		// state inside the transaction; mirror that value on the order snapshot.
+		// The nil guard keeps the service robust if a future CAS/fake stops
+		// mutating the caller-supplied subscription pointer.
 		if sub.ExpiresAt != nil {
-			newExpiry = *sub.ExpiresAt
-		} else {
-			sub.ExpiresAt = &newExpiry
+			newExpiry := *sub.ExpiresAt
+			order.ExpiresAt = &newExpiry
 		}
-	}
-	if activated {
-		order.Status, order.PaidAt, order.ActivatedAt, order.ExpiresAt = database.OrderStatusPaid, &now, &now, &newExpiry
+		order.Status, order.PaidAt, order.ActivatedAt = database.OrderStatusPaid, &now, &now
 	}
 	// The database transition and in-memory result are complete. Do not hold the
 	// process-wide payment lock while contacting VPN nodes; that external call is
@@ -560,13 +557,12 @@ func (o *OrderService) confirmPayment(ctx context.Context, providerPaymentID uui
 	return &PaymentConfirmation{Order: order, Activated: activated}, nil
 }
 
-// CancelPaymentByProvider applies provider cancellation/chargeback idempotently.	// It returns the transitioned order and wasPaid=true when a previously-paid
-// order receives a CHARGEBACKED status. The webhook deliberately does not
-// call an automatic subscription downgrade; that status requires manual review.
-// Returns (nil, false, nil) for an idempotent no-op.
 // CancelPaymentByProvider validates a cancellation or chargeback callback and
-// applies an idempotent order transition. A chargeback reports wasPaid=true so
-// callers can trigger manual financial/access reconciliation.
+// applies an idempotent order transition. wasPaid is true only when a
+// previously-paid order is transitioned by a CHARGEBACKED callback — a chargeback
+// on a still-pending order (money never collected) reports wasPaid=false. The
+// webhook deliberately does not call an automatic subscription downgrade; that
+// status requires manual review. Returns (nil, false, nil) for an idempotent no-op.
 func (o *OrderService) CancelPaymentByProvider(ctx context.Context, providerPaymentID uuid.UUID, status string, amount json.Number, currency string) (order *database.Order, wasPaid bool, err error) {
 	start := time.Now()
 	defer func() {
@@ -616,6 +612,9 @@ func (o *OrderService) CancelPaymentByProvider(ctx context.Context, providerPaym
 		return nil, false, ErrInvalidPaymentTransition
 	}
 	isChargeback := status == "CHARGEBACKED"
+	// wasPaid must reflect the order state BEFORE the transition: a chargeback on
+	// a pending order has collected no money yet and must not report wasPaid=true.
+	wasPaid = isChargeback && order.Status == database.OrderStatusPaid
 	from := []database.OrderStatus{database.OrderStatusPending}
 	if isChargeback {
 		from = append(from, database.OrderStatusPaid)
@@ -641,7 +640,7 @@ func (o *OrderService) CancelPaymentByProvider(ctx context.Context, providerPaym
 		}
 		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "chargeback", Reason: "provider reported CHARGEBACKED", Action: "verify access revocation and refund/manual reconciliation", OrderID: order.ID, TelegramID: telegramID, ProductID: order.ProductID, SubscriptionID: order.SubscriptionID, AmountCents: order.AmountCents, Currency: order.Currency, ProviderID: providerPaymentID.String(), CallbackStatus: status})
 	}
-	return order, isChargeback, nil
+	return order, wasPaid, nil
 }
 
 // NotifyPaidUser builds the same subscription presentation used by the bot screen.

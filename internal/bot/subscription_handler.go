@@ -385,8 +385,13 @@ func (sh *SubscriptionHandler) handleBuyProduct(ctx context.Context, chatID int6
 	}
 	info, _, err := sh.h.orderService.RequestPayment(ctx, chatID, username, product)
 	if err != nil {
-		if errors.Is(err, service.ErrPaymentDisabled) {
+		switch {
+		case errors.Is(err, service.ErrPaymentDisabled):
 			return sh.showBuyError(chatID, messageID, "❌ Платежи временно недоступны")
+		case errors.Is(err, service.ErrPaymentAlreadyInProgress):
+			return sh.showBuyError(chatID, messageID, msg(MsgPaymentInProgress))
+		case errors.Is(err, service.ErrPaymentCreationUncertain):
+			return sh.showBuyError(chatID, messageID, msg(MsgPaymentNeedsReview))
 		}
 		logger.Warn("request payment failed",
 			zap.Uint("product_id", productID),
