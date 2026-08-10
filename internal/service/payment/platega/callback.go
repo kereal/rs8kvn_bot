@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+
+	"github.com/google/uuid"
 )
 
 // CallbackPayload is a status notification received from Platega.
@@ -62,10 +64,29 @@ func ParseCallbackAmount(amount json.Number) (int64, error) {
 	return whole*100 + fraction, nil
 }
 
+// ParseTransactionID validates a provider transaction identifier as a canonical UUID v4.
+func ParseTransactionID(raw string) (uuid.UUID, error) {
+	value := strings.TrimSpace(raw)
+	parsed, err := uuid.Parse(value)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("transaction ID must be UUID: %w", err)
+	}
+	if parsed.Version() != uuid.Version(4) {
+		return uuid.Nil, fmt.Errorf("transaction ID must be UUID v4")
+	}
+	if parsed.String() != strings.ToLower(value) {
+		return uuid.Nil, fmt.Errorf("transaction ID must use canonical lowercase UUID format")
+	}
+	return parsed, nil
+}
+
 // Validate checks fields required to process a callback.
 func (p CallbackPayload) Validate() error {
 	if strings.TrimSpace(p.ID) == "" {
 		return errors.New("id is required")
+	}
+	if _, err := ParseTransactionID(p.ID); err != nil {
+		return fmt.Errorf("id: %w", err)
 	}
 	if _, err := ParseCallbackAmount(p.Amount); err != nil {
 		return fmt.Errorf("amount: %w", err)

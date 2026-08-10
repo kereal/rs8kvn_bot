@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
@@ -32,9 +33,9 @@ func (s *Service) GetOrderByID(ctx context.Context, id uint) (*Order, error) {
 }
 
 // GetOrderByProviderPaymentID finds an order by provider and external payment ID.
-func (s *Service) GetOrderByProviderPaymentID(ctx context.Context, provider, providerPaymentID string) (*Order, error) {
+func (s *Service) GetOrderByProviderPaymentID(ctx context.Context, provider string, providerPaymentID uuid.UUID) (*Order, error) {
 	var order Order
-	result := s.db.WithContext(ctx).Where("payment_provider = ? AND provider_payment_id = ?", provider, providerPaymentID).First(&order)
+	result := s.db.WithContext(ctx).Where("payment_provider = ? AND provider_payment_id = ?", provider, providerPaymentID.String()).First(&order)
 	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 		return nil, ErrOrderNotFound
 	}
@@ -45,8 +46,8 @@ func (s *Service) GetOrderByProviderPaymentID(ctx context.Context, provider, pro
 }
 
 // UpdateOrderProviderPaymentID stores an external ID only while the order is pending.
-func (s *Service) UpdateOrderProviderPaymentID(ctx context.Context, orderID uint, providerPaymentID string) error {
-	result := s.db.WithContext(ctx).Model(&Order{}).Where("id = ? AND status = ?", orderID, OrderStatusPending).Update("provider_payment_id", providerPaymentID)
+func (s *Service) UpdateOrderProviderPaymentID(ctx context.Context, orderID uint, providerPaymentID uuid.UUID) error {
+	result := s.db.WithContext(ctx).Model(&Order{}).Where("id = ? AND status = ?", orderID, OrderStatusPending).Update("provider_payment_id", providerPaymentID.String())
 	if result.Error != nil {
 		return fmt.Errorf("failed to update provider payment id: %w", result.Error)
 	}
@@ -70,13 +71,25 @@ func (s *Service) FindPendingPaymentOrder(ctx context.Context, subscriptionID, p
 		return nil, fmt.Errorf("find pending payment order: %w", result.Error)
 	}
 	if order.PaymentExpiresAt != nil && !now.Before(*order.PaymentExpiresAt) {
-		if err := s.db.WithContext(ctx).Model(&Order{}).
+		result := s.db.WithContext(ctx).Model(&Order{}).
 			Where("id = ? AND status = ?", order.ID, OrderStatusPending).
-			Update("status", OrderStatusExpired).Error; err != nil {
-			return nil, fmt.Errorf("expire payment order: %w", err)
+			Update("status", OrderStatusExpired)
+		if result.Error != nil {
+			return nil, fmt.Errorf("expire payment order: %w", result.Error)
 		}
-		order.Status = OrderStatusExpired
-		return &order, nil
+		if result.RowsAffected == 1 {
+			order.Status = OrderStatusExpired
+			return &order, nil
+		}
+		// Another worker may have confirmed/canceled this order between the
+		// lookup and the conditional update. Return the current row so the
+		// caller cannot mistake the race for an absent intent and create a
+		// second payment attempt for the same purchase.
+		var current Order
+		if err := s.db.WithContext(ctx).First(&current, order.ID).Error; err != nil {
+			return nil, fmt.Errorf("reload payment order after expiry race: %w", err)
+		}
+		return &current, nil
 	}
 	return &order, nil
 }
@@ -166,11 +179,11 @@ func (s *Service) MarkPaymentCreationUncertain(ctx context.Context, orderID uint
 
 // SavePaymentDetails stores the provider ID, link and local link deadline in a
 // single update and clears the uncertainty flag.
-func (s *Service) SavePaymentDetails(ctx context.Context, orderID uint, providerPaymentID, paymentURL string, paymentExpiresAt time.Time) error {
+func (s *Service) SavePaymentDetails(ctx context.Context, orderID uint, providerPaymentID uuid.UUID, paymentURL string, paymentExpiresAt time.Time) error {
 	result := s.db.WithContext(ctx).Model(&Order{}).
 		Where("id = ? AND status = ?", orderID, OrderStatusPending).
 		Updates(map[string]interface{}{
-			"provider_payment_id":        providerPaymentID,
+			"provider_payment_id":        providerPaymentID.String(),
 			"payment_url":                paymentURL,
 			"payment_expires_at":         paymentExpiresAt.UTC(),
 			"payment_creation_uncertain": false,
@@ -206,6 +219,21 @@ func (s *Service) ConfirmOrderPaidCAS(ctx context.Context, orderID uint, paidAt,
 		if result.RowsAffected == 0 {
 			return nil
 		}
+
+		// Read after the CAS write acquires SQLite's write lock. A concurrent
+		// confirmation for another product therefore sees the already-committed
+		// expiry instead of calculating from a stale caller snapshot.
+		var currentSub Subscription
+		if err := tx.First(&currentSub, sub.ID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return fmt.Errorf("load subscription for payment: %w", ErrSubscriptionNotFound)
+			}
+			return fmt.Errorf("load subscription for payment: %w", err)
+		}
+		newExpiry = calculatePaymentExpiry(activatedAt, &currentSub, product)
+		if err := tx.Model(&Order{}).Where("id = ? AND status = ?", orderID, OrderStatusPaid).Update("expires_at", newExpiry).Error; err != nil {
+			return fmt.Errorf("update order expiry after payment: %w", err)
+		}
 		result = tx.Model(&Subscription{}).Where("id = ?", sub.ID).Updates(map[string]interface{}{
 			"plan_id": product.PlanID, "status": string(SubscriptionStatusActive),
 			"expires_at": newExpiry, "product_id": product.ID, "started_at": activatedAt,
@@ -217,6 +245,11 @@ func (s *Service) ConfirmOrderPaidCAS(ctx context.Context, orderID uint, paidAt,
 		if result.RowsAffected == 0 {
 			return fmt.Errorf("update subscription after payment: %w", ErrSubscriptionNotFound)
 		}
+		sub.PlanID = product.PlanID
+		sub.Status = string(SubscriptionStatusActive)
+		sub.ProductID = &product.ID
+		expiryCopy := newExpiry
+		sub.ExpiresAt = &expiryCopy
 		if applyPlan != nil {
 			if err := applyPlan(ctx, tx, sub.ID, product.PlanID); err != nil {
 				return fmt.Errorf("apply plan after payment: %w", err)
@@ -231,9 +264,20 @@ func (s *Service) ConfirmOrderPaidCAS(ctx context.Context, orderID uint, paidAt,
 	return activated, nil
 }
 
+func calculatePaymentExpiry(now time.Time, sub *Subscription, product *Product) time.Time {
+	base := now
+	if sub != nil && product != nil && sub.PlanID == product.PlanID && sub.ExpiresAt != nil && sub.ExpiresAt.After(now) {
+		base = *sub.ExpiresAt
+	}
+	if product == nil {
+		return base
+	}
+	return base.AddDate(0, 0, product.DurationDays)
+}
+
 // CancelOrderCAS cancels an order only from one of the supplied states.
-func (s *Service) CancelOrderCAS(ctx context.Context, provider, providerPaymentID string, fromStatuses []OrderStatus) (bool, error) {
-	result := s.db.WithContext(ctx).Model(&Order{}).Where("payment_provider = ? AND provider_payment_id = ? AND status IN ?", provider, providerPaymentID, fromStatuses).Update("status", OrderStatusCanceled)
+func (s *Service) CancelOrderCAS(ctx context.Context, provider string, providerPaymentID uuid.UUID, fromStatuses []OrderStatus) (bool, error) {
+	result := s.db.WithContext(ctx).Model(&Order{}).Where("payment_provider = ? AND provider_payment_id = ? AND status IN ?", provider, providerPaymentID.String(), fromStatuses).Update("status", OrderStatusCanceled)
 	if result.Error != nil {
 		return false, fmt.Errorf("cancel order: %w", result.Error)
 	}

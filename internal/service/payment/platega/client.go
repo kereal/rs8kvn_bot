@@ -153,8 +153,12 @@ func (c *Client) CreateTransaction(ctx context.Context, req CreateTransactionReq
 	if err := json.NewDecoder(limited).Decode(&result); err != nil {
 		return nil, fmt.Errorf("%w: decode transaction response: %v", ErrProvider, err)
 	}
-	if strings.TrimSpace(result.TransactionID) == "" {
+	transactionID := strings.TrimSpace(result.TransactionID)
+	if transactionID == "" {
 		return nil, fmt.Errorf("%w: response has no transactionId", ErrProvider)
+	}
+	if _, err := ParseTransactionID(transactionID); err != nil {
+		return nil, fmt.Errorf("%w: response transactionId must be UUID v4: %v", ErrProvider, err)
 	}
 	if strings.TrimSpace(result.URL) == "" && strings.TrimSpace(result.Redirect) == "" {
 		return nil, fmt.Errorf("%w: response has no payment URL", ErrProvider)
