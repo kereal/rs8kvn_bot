@@ -6,6 +6,7 @@ import (
 	"embed"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/kereal/rs8kvn_bot/internal/logger"
@@ -83,7 +84,10 @@ func runMigrations(sqlDB *sql.DB) error {
 	versionBefore, dirtyBefore, _ := m.Version()
 
 	if dirtyBefore {
-		currentVer := int(versionBefore) //nolint:gosec // migration versions are small and safe for int conversion
+		currentVer, err := migrationVersionToInt(versionBefore)
+		if err != nil {
+			return fmt.Errorf("invalid dirty migration version: %w", err)
+		}
 		logger.Warn("Database is in dirty state, forcing migration back",
 			zap.Int("current_version", currentVer))
 		if err := m.Force(currentVer - 1); err != nil {
@@ -93,7 +97,11 @@ func runMigrations(sqlDB *sql.DB) error {
 
 	if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
 		if strings.Contains(err.Error(), "file does not exist") || strings.Contains(err.Error(), "read down for version") {
-			forceVer := int(versionBefore) - 1 //nolint:gosec // same as above
+			currentVer, versionErr := migrationVersionToInt(versionBefore)
+			if versionErr != nil {
+				return fmt.Errorf("invalid migration version after failure: %w", versionErr)
+			}
+			forceVer := currentVer - 1
 			logger.Warn("Missing migration file detected, forcing version to last known good state",
 				zap.Int("forced_version", forceVer))
 			if forceErr := m.Force(forceVer); forceErr != nil {
@@ -118,4 +126,18 @@ func runMigrations(sqlDB *sql.DB) error {
 	}
 
 	return nil
+}
+
+// migrationVersionToInt converts the migrate library's unsigned version to int
+// before it is passed to Force. Dirty or failed migration recovery must never
+// wrap a large version into a negative value.
+func migrationVersionToInt(version uint) (int, error) {
+	if version == 0 {
+		return 0, errors.New("migration version must be positive")
+	}
+	maxInt := uint(^uint(0) >> 1)
+	if version > maxInt || uint64(version) > uint64(math.MaxInt) {
+		return 0, fmt.Errorf("migration version %d overflows int", version)
+	}
+	return int(version), nil
 }

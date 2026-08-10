@@ -278,7 +278,7 @@ INSERT INTO plan_nodes (plan_id, node_id) VALUES (1, <node_id>);
 # Health check
 curl http://localhost:8880/healthz
 
-# Expected: {"database":"ok","status":"ok"}
+# Expected: JSON with status "ok" and a components.database object with status "ok"
 
 # Bot logs
 docker logs rs8kvn_bot | tail -20
@@ -357,8 +357,8 @@ rm .env
 1. Check logs: `docker logs rs8kvn_bot`
 2. Verify `.env` settings (especially `GLOBAL_SUB_URL`)
 3. Test 3x-ui connectivity: `curl -H "Authorization: Bearer <api_token>" http://your-panel-ip:2053/panel/api/server/status`
-4. Include bot version from logs (`rs8kvn_bot@v2.3.4`)
+4. Include bot version from logs (for example, `rs8kvn_bot@v2.3.11`)
 
 ---
 
-*This document covers installation up to v2.3.4 (2026-07-19). For architecture details, see [handover.md](handover.md).*
+*This document covers installation up to v2.3.11 (2026-08-11). For architecture details, see [handover.md](handover.md).*
