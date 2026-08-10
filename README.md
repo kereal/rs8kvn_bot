@@ -5,11 +5,10 @@
 [![Go](https://img.shields.io/badge/Go-1.25%2B-00ADD8?logo=go)](https://go.dev/)
 [![Coverage](https://img.shields.io/badge/coverage-85%25%2B-green)](https://github.com/kereal/rs8kvn_bot/actions)
 [![Docker](https://img.shields.io/badge/Docker-ghcr.io%2Fkereal%2Frs8kvn_bot-blue?logo=docker)](https://github.com/kereal/rs8kvn_bot/actions)
-[![Go Report Card](https://goreportcard.com/badge/github.com/kereal/rs8kvn_bot)](https://goreportcard.com/report/github.com/kereal/rs8kvn_bot)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL%203.0-blue.svg)](LICENSE)
 
-Нужен VPN? >> telegram: @kereal  
-По всем вопросам пишите в telegram: @kereal  
+Нужен VPN? » telegram: [@kereal](https://t.me/kereal)  
+По всем вопросам пишите в telegram: [@kereal](https://t.me/kereal)  
 Ставьте звездочки! =)
 
 ## Features
@@ -109,7 +108,7 @@ Receives Platega payment notifications. Guard chain, in order:
 2. Service availability: payments must be enabled, `orderService`/`bot` wired, and runtime payment readiness enabled only after the real bot and `SyncService` are initialized (→ 503 otherwise).
 3. Auth: `X-MerchantId` / `X-Secret` headers compared constant-time to `cfg.PlategaMerchantID` / `cfg.PlategaSecret` (→ 401). Both credentials must be non-empty.
 4. Body: `http.MaxBytesReader(256 KiB)`, `json.Decoder.UseNumber`, single JSON object (extra trailing JSON rejected).
-5. `payload.ID` must be a UUID provider transaction ID; `payload.Validate()` requires id/amount/currency/status (→ 400 otherwise). `paymentMethod` is optional because it is not required by the callback schema. Provider transaction IDs are UUIDs; malformed or non-UUID IDs are rejected with 400.
+5. `payload.ID` must be a UUID provider transaction ID; `payload.Validate()` requires id/amount/currency/status (→ 400 otherwise). `paymentMethod` and `payload` принимаются при наличии; официальная документация Platega противоречит сама себе по обязательности этих полей, поэтому интеграция сохраняет совместимость и уведомляет администратора о malformed callback. Provider transaction IDs are UUIDs; malformed or non-UUID IDs are rejected with 400.
 6. Status `CONFIRMED` → `OrderService.ConfirmPayment` (CAS with `pending` guard, exact amount match, atomic plan application in the same DB transaction).
 7. Status `CANCELED|CHARGEBACKED` → `OrderService.CancelPaymentByProvider`; chargeback is recorded and requires manual review, without automatic subscription downgrade.
 
