@@ -1,7 +1,7 @@
 # Operations Guide — rs8kvn_bot
 
-**Version:** 2.3.4
-**Last updated:** 2026-07-19
+**Version:** 2.3.11
+**Last updated:** 2026-08-11
 
 ---
 
@@ -142,8 +142,8 @@ migrate -path internal/database/migrations -database "sqlite3://data/rs8kvn.db" 
 
 **Configured:**
 - **Schedule:** Daily at 03:00 (config `DefaultBackupHour`)
-- **Retention:** 14 days
-- **Location:** Same directory as database (`./data/`)
+- **Retention:** 30 rotated backup files (`config.DefaultBackupRetention`)
+- **Location:** Same directory as database (`./data/`). The scheduler keeps 30 rotated backup files by default.
 - **Naming:** `rs8kvn.db.backup.YYYYMMDD_HHMMSS`
 
 **What gets backed up:**
@@ -154,13 +154,11 @@ migrate -path internal/database/migrations -database "sqlite3://data/rs8kvn.db" 
 ### 3.2 Manual Backup
 
 ```bash
-# Trigger immediately (if bot running, send signal)
-# Or run backup tool directly:
-go run ./internal/backup/backup.go -db ./data/rs8kvn.db -out ./data/manual.backup
-
-# Or copy file manually (ensure WAL checkpoint first):
+# There is no standalone backup CLI. For a manual backup, stop the bot
+# (or otherwise ensure no writes are in progress), checkpoint WAL, then copy:
 sqlite3 ./data/rs8kvn.db "PRAGMA wal_checkpoint(TRUNCATE);"
-cp ./data/rs8kvn.db ./data/backup.manual
+cp --preserve=mode,timestamps ./data/rs8kvn.db ./data/backup.manual
+chmod 600 ./data/backup.manual
 ```
 
 ### 3.3 Restore from Backup
@@ -275,7 +273,7 @@ The main application log records an error message when this access log cannot be
 
 ### 4.4 Logs
 
-**Location:** `./data/bot.log` (rotated: max 100MB × 3 files)
+**Location:** `./data/bot.log` (rotated: max 10MB × 2 backups, 14-day age limit)
 
 **Log rotation:**
 - Daily rotation at midnight (if using lumberjack)
@@ -286,7 +284,7 @@ The main application log records an error message when this access log cannot be
 # /etc/logrotate.d/rs8kvn_bot
 ./data/bot.log {
     daily
-    rotate 7
+    rotate 2
     compress
     missingok
     notifempty
@@ -298,8 +296,8 @@ The main application log records an error message when this access log cannot be
 
 **View logs:**
 ```bash
-# Follow
-tail -f ./data/bot.log | jq .  # if JSON
+# Follow (zap console format)
+tail -f ./data/bot.log
 
 # Search errors
 grep '"level":"error"' ./data/bot.log
@@ -313,8 +311,8 @@ tail -n 100 ./data/bot.log
 If `SENTRY_DSN` configured, errors and panics are reported automatically.
 
 **Features:**
-- Release tracking (`rs8kvn_bot@v2.3.4`)
-- Performance traces (enabled via `SENTRY_TRACES_SAMPLE_RATE`)
+- Release tracking (`rs8kvn_bot@<version>`)
+- Performance traces sampled at 10% by the built-in logger configuration
 - Stack traces on panic
 
 **Test:**
@@ -347,6 +345,9 @@ The bot exposes a `/metrics` endpoint on the same port as health checks (default
 | `subserver_source_fetch_duration_seconds` | Histogram | result | Upstream source fetch duration |
 | `subserver_cache_invalidations_total` | Counter | reason | Cache invalidations by reason |
 | `subserver_no_items_total` | Counter | — | Requests returning no items |
+| `payment_operations_total` | Counter | operation, result | Payment request/confirm/cancel attempts by outcome |
+| `payment_operation_duration_seconds` | Histogram | operation | Payment service operation latency |
+| `payment_issues_total` | Counter | event | Payment incidents requiring investigation or operator attention |
 
 **Prometheus scrape config:**
 ```yaml
@@ -569,7 +570,7 @@ sqlite3 ./data/rs8kvn.db "PRAGMA journal_mode=WAL;"
 
 **Log:** `"XUI API error"`, `"retrying after backoff"`, or similar.
 
-**Note:** The system uses `RetryWithBackoff` with exponential backoff + jitter (up to 3 retries) and a circuit breaker (5 failures → 30s open → half-open with 3 attempts). Monitor `circuit_breaker_state` metric (0=closed, 1=open, 2=half-open).
+**Note:** The system uses `RetryWithBackoff` with exponential backoff + jitter (up to 3 attempts). The circuit breaker implementation is tested but is not currently wired into the live XUI client path.
 
 **Fix:**
 1. Check 3x-ui panel is up: `curl -H "Authorization: Bearer <api_token>" "<panel_host>/panel/api/server/status"`
@@ -584,7 +585,7 @@ sqlite3 ./data/rs8kvn.db "PRAGMA journal_mode=WAL;"
 
 ### 5.9 Logs fill disk
 
-**Symptom:** `data/bot.log` grows beyond 100MB.
+**Symptom:** `data/bot.log` grows beyond 10MB or rotated files are not being created.
 
 **Cause:** Rotation misconfigured or log level `debug` with high traffic.
 
@@ -594,7 +595,7 @@ sqlite3 ./data/rs8kvn.db "PRAGMA journal_mode=WAL;"
 > ./data/bot.log
 
 # Adjust rotation in logger config (code: internal/logger/logger.go)
-# MaxSize: 100 MB, MaxBackups: 3, MaxAge: 7 days
+# MaxSize: 10 MB, MaxBackups: 2, MaxAge: 14 days
 ```
 
 **Logrotate alternative:** See section 4.3.
@@ -758,4 +759,4 @@ limit_req_zone $binary_remote_addr zone=sub:10m rate=30r/m;
 
 ---
 
-*Last updated: 2026-07-19*
+*Last updated: 2026-08-11*
