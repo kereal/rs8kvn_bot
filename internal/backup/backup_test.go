@@ -2,6 +2,7 @@ package backup
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kereal/rs8kvn_bot/internal/testutil"
+	_ "github.com/mattn/go-sqlite3"
 	"go.uber.org/goleak"
 )
 
@@ -47,6 +49,32 @@ func TestBackupDatabase(t *testing.T) {
 	require.NoError(t, err, "Failed to read backup file")
 
 	assert.Equal(t, string(content), string(backupContent), "Backup content does not match original")
+}
+
+func TestBackupDatabase_WALContainsAllCommittedRows(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "wal.db")
+	db, err := sql.Open("sqlite3", dbPath)
+	require.NoError(t, err)
+	defer db.Close()
+
+	_, err = db.Exec("PRAGMA journal_mode=WAL; CREATE TABLE payments (id INTEGER PRIMARY KEY, status TEXT); INSERT INTO payments(status) VALUES ('pending');")
+	require.NoError(t, err)
+	_, err = db.Exec("INSERT INTO payments(status) VALUES ('paid')")
+	require.NoError(t, err)
+	require.FileExists(t, dbPath+"-wal")
+
+	require.NoError(t, BackupDatabase(context.Background(), dbPath))
+
+	backupDB, err := sql.Open("sqlite3", dbPath+".backup")
+	require.NoError(t, err)
+	defer backupDB.Close()
+
+	var count int
+	require.NoError(t, backupDB.QueryRow("SELECT COUNT(*) FROM payments").Scan(&count))
+	assert.Equal(t, 2, count)
 }
 
 func TestBackupDatabase_NonExistentFile(t *testing.T) {

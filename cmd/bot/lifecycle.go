@@ -44,12 +44,10 @@ func initSentry(cfg *config.Config) {
 
 // initLogger initializes the logger and redirects stdlib log output.
 // Returns the log service for deferred cleanup.
-func initLogger(cfg *config.Config) *logger.Service {
+func initLogger(cfg *config.Config) (*logger.Service, error) {
 	logService, err := logger.Init(cfg.LogFilePath, cfg.LogLevel)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
-		sentry.Flush(logger.SentryFlushTimeout)
-		os.Exit(1) //nolint:gocritic
+		return nil, fmt.Errorf("initialize logger: %w", err)
 	}
 
 	logger.RedirectStdLog()
@@ -58,7 +56,7 @@ func initLogger(cfg *config.Config) *logger.Service {
 		zap.String("built", buildTime))
 	logger.Info("Configuration loaded", zap.String("config", cfg.String()))
 
-	return logService
+	return logService, nil
 }
 
 // runtimeDeps holds the initialized runtime node clients.
@@ -70,24 +68,27 @@ type runtimeDeps struct {
 
 // initDatabase initializes the database service and loads runtime node clients.
 // Returns the DB service and runtime dependencies.
-func initDatabase(cfg *config.Config) (*database.Service, *runtimeDeps) {
-	dbService, err := database.NewService(cfg.DatabasePath)
+func initDatabase(cfg *config.Config) (dbService *database.Service, deps *runtimeDeps, err error) {
+	dbService, err = database.NewService(cfg.DatabasePath)
 	if err != nil {
-		logger.Fatal("Failed to initialize database", zap.Error(err))
+		return nil, nil, fmt.Errorf("initialize database: %w", err)
 	}
 
 	metrics.RegisterDBMetrics(dbService.GetDB())
 
 	nodes, err := dbService.ListNodes(context.Background())
 	if err != nil {
-		logger.Fatal("Failed to list nodes", zap.Error(err))
+		_ = dbService.Close()
+		return nil, nil, fmt.Errorf("list nodes: %w", err)
 	}
 	if len(nodes) == 0 {
-		logger.Fatal("No nodes configured — insert at least one node via migration or setup command before starting")
+		_ = dbService.Close()
+		return nil, nil, fmt.Errorf("no nodes configured")
 	}
 	runtimeNodes, xuiClients, vpnClients, err := buildRuntimeNodeClients(nodes, defaultOptions())
 	if err != nil {
-		logger.Fatal("Failed to initialize node clients", zap.Error(err))
+		_ = dbService.Close()
+		return nil, nil, fmt.Errorf("initialize node clients: %w", err)
 	}
 
 	if len(xuiClients) == 0 {
@@ -98,7 +99,7 @@ func initDatabase(cfg *config.Config) (*database.Service, *runtimeDeps) {
 		nodes:      runtimeNodes,
 		xuiClients: xuiClients,
 		vpnClients: vpnClients,
-	}
+	}, nil
 }
 
 type appServices struct {
@@ -139,7 +140,11 @@ func runEventLoop(ctx context.Context, botAPI *tgbotapi.BotAPI, handler *bot.Han
 eventLoop:
 	for {
 		select {
-		case update := <-updates:
+		case update, ok := <-updates:
+			if !ok {
+				logger.Info("Telegram updates channel closed")
+				break eventLoop
+			}
 			select {
 			case updateSem <- struct{}{}:
 				updatesWg.Add(1)
