@@ -3,6 +3,8 @@ package bot
 import (
 	"context"
 	"fmt"
+	"strconv"
+	"strings"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"go.uber.org/zap"
@@ -74,9 +76,21 @@ func (c *CallbackHandler) HandleCallback(ctx context.Context, update tgbotapi.Up
 		if err := c.h.handleBackToStart(ctx, chatID, username, update.CallbackQuery.Message.MessageID); err != nil {
 			return fmt.Errorf("handle back_to_start: %w", err)
 		}
-	case data == "menu_payment":
-		if err := c.h.handlePaymentMenu(ctx, chatID, username, update.CallbackQuery.Message.MessageID); err != nil {
-			return fmt.Errorf("handle menu_payment: %w", err)
+	case data == "buy_premium_list":
+		if err := c.h.handleBuyPremiumList(ctx, chatID, username, update.CallbackQuery.Message.MessageID); err != nil {
+			return fmt.Errorf("handle buy_premium_list: %w", err)
+		}
+	case strings.HasPrefix(data, "buy_product_"):
+		raw := strings.TrimPrefix(data, "buy_product_")
+		id64, err := strconv.ParseUint(raw, 10, 64)
+		if err != nil || id64 == 0 || id64 > uint64(^uint(0)) {
+			logger.Warn("invalid buy_product callback payload",
+				zap.String("data", data),
+				zap.String("raw", raw))
+			return nil
+		}
+		if err := c.h.handleBuyProduct(ctx, chatID, username, update.CallbackQuery.Message.MessageID, uint(id64)); err != nil {
+			return fmt.Errorf("handle buy_product: %w", err)
 		}
 	case data == "menu_donate":
 		if err := c.h.handleMenuDonate(ctx, chatID, username, update.CallbackQuery.Message.MessageID); err != nil {

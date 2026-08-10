@@ -1,287 +1,281 @@
- ```markdown
-# Техническое задание: Интеграция платежной системы Platega.io
+# Техническое задание: интеграция платёжной системы Platega.io
 
-Версия: 1.3 · Дата: 2026-08-09 · Статус: к реализации
+Версия: 1.5 · Дата: 2026-08-10 · Статус: согласовано с текущей реализацией
 
-────────────────────────────────────────────────────────────────────────────────
+> Расхождения официальной документации Platega зафиксированы в [bug report](platega-docs-bug-report.md). До ответа провайдера используем безопасный совместимый контракт, описанный ниже.
 
-## 0. Глоссарий и ссылки
+---
 
-- **Platega** — внешний платёжный провайдер (https://app.platega.io).
-- **Endpoint (исходящий)** — `POST https://app.platega.io/v2/transaction/process` (без выбора метода; плательщик выбирает сам на странице Platega).
-- **Callback (входящий)** — `POST /payment/callback` на нашем сервере, Platega шлёт `X-MerchantId`/`X-Secret` заголовки + JSON body.
-- **Order** — запись в `orders` (см. миграцию 017). Статусы: `pending | paid | expired | canceled`.
-- **Product** — тариф в `products` (см. миграцию 013/021). Поля: `id, plan_id, name, duration_days, price_cents, currency, is_active`.
-- `PAYMENT_ENABLED=false` — флаг, при котором платёжная интеграция выключена, платёжные кнопки скрыты.
-- **subURL** — публичная ссылка пользователя `Config.SubURL(subscriptionID)`.
+## 0. Глоссарий и официальные источники
 
-Документация Platega: https://docs.platega.io/ (раздел «Создание платёжной ссылки без заданного метода», callback «об изменении статуса транзакции»). Или это: https://docs.platega.io/llms.txt
+- **Platega** — внешний платёжный провайдер.
+- **Исходящий endpoint** — `POST https://app.platega.io/v2/transaction/process`; способ оплаты выбирает плательщик на странице Platega.
+- **Входящий callback** — `POST /payment/callback`; Platega передаёт заголовки `X-MerchantId`/`X-Secret` и JSON body.
+- **Order** — запись в `orders`. В этой реализации один Order является одной платёжной попыткой/intent. До получения `provider_payment_id` повтор после явного HTTP 400/401 может использовать тот же pending-заказ. После неопределённого результата автоматический повтор запрещён. Отдельная таблица попыток не вводится.
+- **Статусы Order** — только `pending | paid | expired | canceled`.
+- **Product** — тариф из `products`: `id, plan_id, name, duration_days, price_cents, currency, is_active`.
+- **subURL** — публичная ссылка `Config.SubURL(subscriptionID)`.
 
-────────────────────────────────────────────────────────────────────────────────
+Официальные источники:
 
-## 1. Цели
+- https://docs.platega.io/
+- https://docs.platega.io/llms.txt
+- «Создание платёжной ссылки без заданного метода»
+- «Callback об изменении статуса транзакции»
 
-1. Подключить приём платежей через Platega.io для Telegram-бота.
-2. Тарифы для оплаты — только активные платные продукты из БД (`products.is_active=true AND price_cents > 0`), без хардкода.
-3. Идемпотентная обработка webhook: параллельные и повторные callback'и не активируют подписку и не отправляют уведомление дважды.
-4. После успешной оплаты — новое сообщение пользователю с subURL (без правки исходного экрана).
-5. Полностью удалить старую hardcoded-кнопку `buy_premium_230` и весь связанный бесплатный upgrade flow.
-6. Единая логика отображения тарифа, даты истечения и трафика в «Моя подписка» и сообщении после оплаты.
+В общей схеме статусов транзакции Platega встречаются `PENDING`, `CANCELED`, `CONFIRMED`, `CHARGEBACKED`. В описании webhook явно указаны `CONFIRMED`, `CANCELED` и `CHARGEBACKED`; реализация также безопасно принимает официальный `PENDING` как no-op. Значения `SUCCESS`, `PAID` и иные aliases не поддерживаются.
 
-────────────────────────────────────────────────────────────────────────────────
+---
 
-## 2. Конфигурация (internal/config)
+## 1. Цели и бизнес-правила
 
-### 2.1 Новые env-переменные
+1. Подключить оплату через Platega для Telegram-бота.
+2. Показывать только платные продукты, привязанные к активному плану:
+   `products.is_active=true AND products.price_cents > 0 AND plans.is_active=true`.
+3. Любой пользователь может выбрать платный продукт. Если подписки нет, `RequestPayment` создаёт её до создания заказа.
+4. Повторные и параллельные callback не продлевают подписку повторно и не отправляют второе success-сообщение.
+5. После фактической оплаты отправлять новое сообщение с тарифом, сроком, трафиком и subURL; исходный экран не редактировать.
+6. Использовать ту же presentation-логику для success-сообщения и экрана «Моя подписка».
+7. Удалить старую бесплатную upgrade-логику и hardcoded-кнопку `buy_premium_230`.
+8. Пока платёжная ссылка действительна, повторно возвращать ту же ссылку без создания нового Order и новой транзакции.
+9. После истечения ссылки старый pending-заказ переводить в `expired`, не перезаписывая его provider ID и URL. Следующий запрос создаёт новый pending-заказ.
+10. Срок ссылки брать из ответа Platega `expiresIn`; дополнительный grace-период не вводить.
+11. Внешнюю VPN-синхронизацию выполнять после commit с отдельным timeout не более 20 секунд. Ошибка или timeout синхронизации не отменяют оплату; фоновые workers повторяют доставку.
 
-| Имя                 | Тип    | Default   | Описание                                    |
-|---------------------|--------|-----------|---------------------------------------------|
-| `PAYMENT_ENABLED`     | bool   | false     | Глобальный флаг включения платежей          |
-| `PAYMENT_PROVIDER`    | string | "platega" | Идентификатор провайдера (задел на будущее) |
-| `PLATEGA_MERCHANT_ID` | string | ""        | UUID мерчанта (заголовок X-MerchantId)      |
-| `PLATEGA_SECRET`      | string | ""        | API-ключ (заголовок X-Secret)               |
+---
 
-Базовый URL Platega (`https://app.platega.io`) — константа в коде, не env.
+## 2. Конфигурация
 
-### 2.2 Новые поля Config (Go)
+### 2.1 Environment variables
+
+| Имя | Тип | Default | Описание |
+|---|---|---|---|
+| `PAYMENT_ENABLED` | bool | `false` | Включает платежи и платёжные кнопки |
+| `PAYMENT_PROVIDER` | string | `platega` | Идентификатор провайдера |
+| `PLATEGA_MERCHANT_ID` | string | пусто | UUID мерчанта |
+| `PLATEGA_SECRET` | string | пусто | API-ключ |
+
+Base URL `https://app.platega.io` — константа клиента, не env.
+
+Правила валидации:
+
+- при `PAYMENT_ENABLED=false` credentials могут быть пустыми;
+- при `PAYMENT_ENABLED=true` provider обязан быть `platega`, а merchant ID и secret — непустыми;
+- ошибка должна явно указывать отсутствующие credentials.
+
+Добавить параметры в существующую систему конфигурации и `.env.example`. Удалить `MAIN_MENU_BTN_PRODUCT` и `MainMenuBtnProductID`.
+
+---
+
+## 3. База данных и модель Order
+
+### 3.1 Миграция
+
+Добавить одну миграцию без отдельной таблицы попыток. Проект использует SQLite и partial indexes.
+
+```sql
+-- Migration 031_add_payment_intent_fields
+-- Migration 031_add_payment_intent_fields
+ALTER TABLE orders ADD COLUMN payment_url TEXT;
+ALTER TABLE orders ADD COLUMN payment_expires_at DATETIME;
+ALTER TABLE orders ADD COLUMN payment_creation_uncertain BOOLEAN NOT NULL DEFAULT FALSE;
+
+DROP INDEX IF EXISTS idx_orders_provider_payment_unique;
+
+-- Before creating these indexes, normalize historical duplicates: keep the
+-- oldest provider ID and oldest Platega pending intent; terminalize the rest.
+-- The migration then recreates both invariants.
+CREATE UNIQUE INDEX idx_orders_provider_payment_unique
+    ON orders(payment_provider, provider_payment_id)
+    WHERE provider_payment_id IS NOT NULL AND TRIM(provider_payment_id) <> '';
+
+CREATE UNIQUE INDEX idx_orders_pending_subscription_product_unique
+    ON orders(subscription_id, product_id, payment_provider)
+    WHERE status = 'pending' AND payment_provider = 'platega';
+```
+
+Перед созданием индекса нужно детерминированно обработать исторические дубли pending-заказов: для каждой пары `(subscription_id, product_id)` сохранить заказ с минимальным `id`, а остальные перевести в `expired` без перезаписи их provider ID/URL. После этого создать partial unique index. При конфликте индекса в конкурентном запросе сервис должен перечитать уже существующий pending-заказ и вернуть его, а не показывать инфраструктурную ошибку.
+
+### 3.2 Новые поля Order
+
+Добавить в `internal/database/models.go`:
 
 ```go
-PaymentEnabled    bool
-PaymentProvider   string
-PlategaMerchantID string
-PlategaSecret     string
- ```
+PaymentURL                string     `gorm:"column:payment_url"`
+PaymentExpiresAt          *time.Time `gorm:"column:payment_expires_at"`
+PaymentCreationUncertain  bool       `gorm:"not null;default:false;column:payment_creation_uncertain"`
+```
 
- Регистрируются через существующий internal/flag/flag.go (flag.NewBool, flag.NewString).
+`PaymentExpiresAt` хранится в UTC. `nil` означает, что ссылка ещё не создана или провайдер не вернул срок.
 
- - PAYMENT_ENABLED=false → PLATEGA_* могут быть пустыми; валидация provider credentials пропускается.
- - PAYMENT_ENABLED=true → PAYMENT_PROVIDER обязан быть platega, PLATEGA_MERCHANT_ID и PLATEGA_SECRET обязательны и непусты.
- - Ошибка credentials: PLATEGA_MERCHANT_ID and PLATEGA_SECRET are required when PAYMENT_ENABLED=true.
+### 3.3 Семантика сроков
 
- ### 2.3 Удаляемые env-переменные
+`orders.expires_at` — не срок жизни платёжной ссылки. Это snapshot срока подписки, выданного конкретной оплатой:
 
- Удалить MAIN_MENU_BTN_PRODUCT и поле MainMenuBtnProductID, его флаг и validation (см. §11). .env.example — убрать соответствующую секцию.
+```text
+orders.expires_at == subscriptions.expires_at
+```
 
- ### 2.4 Файлы .env и .env.example
+на момент перехода `pending → paid`.
 
- Добавить секцию (и удалить секцию «Main Menu Product Button» если есть):
+Срок платёжной ссылки хранится отдельно:
 
- ```bash
-# Payment Configuration (optional)
-# Enables in-bot payment integration. Requires PLATEGA_* when true.
-PAYMENT_ENABLED=false
-PAYMENT_PROVIDER=platega
-PLATEGA_MERCHANT_ID=
-PLATEGA_SECRET=
- ```
+- `payment_url` — выбранная ссылка (`url`, иначе `redirect`);
+- `payment_expires_at` — локальная оценка абсолютного UTC-времени, рассчитанная как `receivedAt + expiresIn`. Таймер фактически запускается у Platega раньше, поэтому окончательным источником статуса платежа остаётся callback Platega; grace-период не добавляется;
+- `payment_creation_uncertain=true` — запрос к Platega завершился неопределённо, поэтому повторное создание запрещено до ручной сверки.
 
- ────────────────────────────────────────────────────────────────────────────────
+Не использовать `orders.expires_at` для invoice timeout.
 
- 3. База данных и модели
+### 3.4 Неизменяемость Product
 
- ### 3.1 Миграции
+После появления первого Order для Product запрещено менять:
 
- Не требуется. Решение зафиксировано: после оплаты бот шлёт новое сообщение, поля telegram_id/message_id в orders не добавляются. Существующая миграция 017_create_orders
- достаточна.
+- `name`;
+- `plan_id`;
+- `duration_days`;
+- `price_cents`;
+- `currency`.
 
- ### 3.2 Модель Order (internal/database/models.go)
+Для нового тарифа или исправления цены создавать новый Product. Старый Product можно деактивировать через `is_active=false`.
 
- #### 3.2.1 Семантика Order.ExpiresAt
+Запрет является операционным правилом. Все изменения Product должны проходить через единый guarded repository method, который перед обновлением повторно загружает Product, проверяет наличие любого Order по `product_id` и при наличии Order возвращает ошибку, если меняется хотя бы одно из пяти перечисленных полей. Изменение только `is_active` разрешено. Прямые административные SQL-изменения этим контрактом не поддерживаются. Добавить тест на этот guard. Отдельные snapshot-поля в `orders` не добавляются.
 
- orders.expires_at — это снимок (snapshot) фактического срока подписки, выданной клиенту в результате этой оплаты: копия subscriptions.expires_at на момент подтверждения
- транзакции.
+### 3.5 Репозиторные методы
 
- Это НЕ инвойс-таймаут. Срок жизни платёжки (expiresIn, 15 минут в Platega) живёт только в провайдере и никогда не сохраняется в БД заказа.
+`internal/database/products.go`:
 
- Заказ orders — это аудиторская запись факта сделки («что именно куплено и по какому сроку»). Поэтому он обязан нести полный снимок сделки независимо от будущих изменений живой
- подписки, по причинам:
-
- 1. Аудит сделки. subscriptions.expires_at — текущее (живое) значение, которое сдвигается при каждом продлении, смене плана, отмене, chargeback. Через несколько продлений по
-    живой подписке уже нельзя восстановить, какой срок был выдан именно за эту оплату. Заказ хранит это навсегда.
- 2. Независимость от жизненного цикла подписки. Подписка может быть переписана на другой subscription_id или отвязана. orders должен оставаться самодостаточным документом сделки
-    (связь только через subscription_id — это FK-указатель, а не источник истины о сроке).
- 3. Разрешение споров и поддержка. При вопросе «я платил X — что мне выдали?» заказ даёт полный снимок: продукт + сумма + срок — не зависящий от последующего состояния.
- 4. Идемпотентность. При повторном/параллельном CONFIRMED заказ уже paid и не перезаписывается; ExpiresAt остаётся первым снимком. Это защищает от «раздувания» срока повторами и
-    подтверждает пункт 5.5 (переход совершает только один callback).
-
- #### 3.2.2 Заполнение значения
-
- Order.ExpiresAt заполняется однократно при переходе pending → paid и получает то же значение, что и subscriptions.expires_at:
-
- - newExpiry := calculateProductExpiry(now, sub.PlanID, sub.ExpiresAt, product) (вычисляется внутри DB-транзакции подтверждения — см. §5.5, шаг 3);
- - в той же атомарной DB-транзакции пишутся оба: order.ExpiresAt = &newExpiry и sub.ExpiresAt = &newExpiry;
- - таким образом orders.expires_at == subscriptions.expires_at на момент активации и эти два значения согласованы (никуда не расходятся).
-
- Явно: не вычислять Order.ExpiresAt независимо (например, как now + 30min или order.CreatedAt + timeout) — это была бы ошибочная «инвойс-семантика», которую §3.2.1 запрещает.
- Вычисление newExpiry и запись обоих полей выполняются в одной транзакции (CAS), а не отдельными шагами до/после.
-
- #### 3.2.3 Правка комментариев (обязательная)
-
- Актуализировать устаревшие формулировки в двух местах:
-
- - internal/database/models.go — заменить текущий комментарий, который ошибочно гласит «payment invoice expiry (e.g. 30 minutes from creation)»:
-   ```go
-// ExpiresAt — срок действия купленной подписки (копия subscriptions.expires_at
-// на момент оплаты). НЕ invoice timeout.
-ExpiresAt *time.Time `gorm:"column:expires_at"`
-   ```
- - internal/database/migrations/017_create_orders.up.sql — заголовочный комментарий к полю expires_at там гласит «срок действия invoice (например, 30 минут с момента создания)»
-   (в текущем файле битый пробел: «действияinvoice»). Заменить на:
-   ```sql
--- expires_at           — срок действия подписки, выданной этой покупкой
---                        (копия subscriptions.expires_at на момент оплаты).
---                        НЕ таймаут инвойса.
-   ```
-
- #### 3.2.4 Тест
-
- В тестах ConfirmPayment (см. §5.7) добавить явную проверку:
-
- - после успешной активации order.ExpiresAt == newExpiry и order.ExpiresAt == *sub.ExpiresAt;
- - при повторном CONFIRMED значение order.ExpiresAt не меняется (снимок первого активировавшего callback).
-
- ### 3.3 Новые методы репозиториев
-
- #### internal/database/products.go
-
- ```go
-// ListActiveProducts возвращает все активные платные продукты,
-// отсортированные по (price_cents ASC, id ASC) — детерминированный порядок.
+```go
+// ListActiveProducts возвращает платные продукты активных планов
+// в детерминированном порядке цены и ID.
 func (s *Service) ListActiveProducts(ctx context.Context) ([]Product, error)
- ```
+```
 
- SQL: SELECT products.* FROM products JOIN plans ON plans.id = products.plan_id WHERE products.is_active = true AND products.price_cents > 0 AND plans.is_active = true ORDER BY
- products.price_cents ASC, products.id ASC.
+SQL-фильтр:
 
- #### internal/database/orders.go
+```sql
+SELECT products.*
+FROM products
+JOIN plans ON plans.id = products.plan_id
+WHERE products.is_active = true
+  AND products.price_cents > 0
+  AND plans.is_active = true
+ORDER BY products.price_cents ASC, products.id ASC;
+```
 
- ```go
-// GetOrderByProviderPaymentID находит заказ по (provider, provider_payment_id).
-// Использует существующий уникальный индекс idx_orders_provider_payment_unique.
-// Возвращает ErrOrderNotFound если заказ не найден.
+`internal/database/orders.go`:
+
+```go
 func (s *Service) GetOrderByProviderPaymentID(
-    ctx context.Context, provider, providerPaymentID string,
+    ctx context.Context,
+    provider, providerPaymentID string,
 ) (*Order, error)
 
-// UpdateOrderProviderPaymentID обновляет провайдерный ID заказа после успешного
-// CreateTransaction. Возвращает ErrOrderNotFound если заказ не найден.
-Защита от апдейта уже paid order: WHERE status='pending'.
 func (s *Service) UpdateOrderProviderPaymentID(
-    ctx context.Context, orderID uint, providerPaymentID string,
+    ctx context.Context,
+    orderID uint,
+    providerPaymentID string,
 ) error
 
-// ConfirmOrderPaidCAS атомарно переводит order pending→paid и обновляет
-// подписку в одной DB-транзакции. Это CAS (compare-and-set): UPDATE ... WHERE
-// id=? AND status='pending'. Если RowsAffected==0 → заказ уже не pending
-// (идемпотентный повтор или запрещённый переход); caller перечитывает order
-// для определения нового состояния.
-//
-// Внутри одной транзакции выполняется:
-//   - CAS order pending→paid: paid_at, activated_at, expires_at=newExpiry;
-//   - UPDATE subscriptions SET expires_at=newExpiry, product_id=product.ID,
-//     started_at=now (если ранее null), reminders_sent=0 WHERE id=sub.ID;
-//   - ApplyPlanToSubscription (DB-setup sync: ReconcilePlanNodes +
-//     MarkActiveNodesPendingUpdate) — создаёт pending_* записи subscription_nodes.
-//     При ошибке вся транзакция откатывается, order остаётся pending.
-//
-// Возвращает (activated bool, err error). activated=true если CAS затронул строку
-// (переход pending→paid фактически выполнен этим вызовом).
+func (s *Service) FindOrCreatePendingPaymentOrder(
+    ctx context.Context,
+    subscriptionID, productID uint,
+    amountCents int64,
+    currency string,
+    now time.Time,
+) (*Order, error)
+
 func (s *Service) ConfirmOrderPaidCAS(
-    ctx context.Context, orderID uint,
-    paidAt time.Time, activatedAt time.Time,
-    sub *Subscription, newExpiry time.Time, product *database.Product,
+    ctx context.Context,
+    orderID uint,
+    paidAt time.Time,
+    activatedAt time.Time,
+    sub *Subscription,
+    newExpiry time.Time,
+    product *Product,
+    applyPlan ApplyPlanInTxFn,
 ) (bool, error)
 
-// CancelOrderCAS атомарно переводит order в canceled по условию статуса.
-// fromStatuses — допустимые исходные статусы (['pending'] для CANCELED,
-// ['pending','paid'] для CHARGEBACKED). Возвращает (canceled bool, err error):
-// canceled=true если переход выполнен, false если уже в целевом/запрещённом.
 func (s *Service) CancelOrderCAS(
-    ctx context.Context, provider, providerPaymentID string,
+    ctx context.Context,
+    provider, providerPaymentID string,
     fromStatuses []OrderStatus,
 ) (bool, error)
- ```
+```
 
- │ Примечание: ApplyPlanToSubscription выполняется внутри CAS-транзакции (см. обоснование §5.5/A2). Это отличает контракт ConfirmOrderPaidCAS от обычного status-UPDATE: провал
- │ DB-setup sync откатывает всю активацию, order остаётся pending, callback вернёт 5xx, Platega повторит с нуля. Внешняя VPN-синхронизация (SyncSubscription) остаётся после
- │ commit как best-effort.
+`UpdateOrderProviderPaymentID` обновляет только pending-заказ.
 
- ### 3.4 Интерфейсы (internal/interfaces/interfaces.go)
+`FindOrCreatePendingPaymentOrder` обязан:
 
- Добавить в ProductRepository:
+1. найти pending-заказ по конкретным `subscription_id` и `product_id`;
+2. первым делом проверить `payment_creation_uncertain`;
+3. вернуть действующую ссылку без нового запроса к Platega;
+4. перевести истёкший pending-заказ в `expired` и создать новый;
+5. обработать конфликт partial unique index перечитыванием существующего заказа.
 
- ```go
-ListActiveProducts(ctx context.Context) ([]database.Product, error)
- ```
+`ConfirmOrderPaidCAS` в одной DB-транзакции выполняет:
 
- Добавить в OrderRepository:
+- CAS `pending → paid` с условием `WHERE status='pending'`;
+- запись `paid_at`, `activated_at`, `expires_at`;
+- обновление подписки, `reminders_sent=0`;
+- DB-setup sync через `applyPlan` в той же транзакции.
 
- ```go
-GetOrderByProviderPaymentID(ctx context.Context, provider, providerPaymentID string) (*database.Order, error)
-UpdateOrderProviderPaymentID(ctx context.Context, orderID uint, providerPaymentID string) error
-ConfirmOrderPaidCAS(ctx context.Context, orderID uint, paidAt time.Time, activatedAt time.Time, sub *database.Subscription, newExpiry time.Time, product *database.Product)
-(bool, error)
-CancelOrderCAS(ctx context.Context, provider, providerPaymentID string, fromStatuses []database.OrderStatus) (bool, error)
- ```
+Ошибка `applyPlan` откатывает всю транзакцию.
 
- Success-сообщение собирается в OrderService.NotifyPaidUser (см. §6.3) через SubscriptionService.GetWithTraffic + cfg.SubURL, а не в web-слое. WebRepository не расширяется
- Product/Order-доступом и не дублирует бизнес-логику.
+`ApplyPlanInTxFn`:
 
- ### 3.5 Fakes
+```go
+type ApplyPlanInTxFn func(
+    ctx context.Context,
+    tx *gorm.DB,
+    subscriptionID uint,
+    planID uint,
+) error
+```
 
- Реализовать новые методы в ProductRepositoryFake, OrderRepositoryFake и большом DatabaseService fake. Fakes поддерживают явные function fields и возвращают соответствующую
- ошибку по соглашениям текущих тестов, если callback не задан.
+Обновить `ProductRepository`, `OrderRepository`, fakes и DatabaseService fake.
 
- ────────────────────────────────────────────────────────────────────────────────
+---
 
- 4. Platega клиент (новый пакет)
+## 4. Клиент Platega
 
- ### 4.1 Расположение
+### 4.1 Расположение и конфигурация
 
- internal/service/payment/platega/client.go — клиент исходящего API.
- internal/service/payment/platega/callback.go — тип входящего callback и точный разбор денежных сумм.
+- `internal/service/payment/platega/client.go` — исходящий API;
+- `internal/service/payment/platega/callback.go` — callback payload и fixed-point amount parser.
 
- ### 4.2 Структуры
-
- ```go
-package platega
-
+```go
 type Config struct {
     MerchantID string
     Secret     string
     BaseURL    string
     HTTPClient *http.Client
 }
+```
 
-type Client struct{ cfg Config }
+Defaults:
 
-func New(cfg Config) *Client
- ```
+- BaseURL: `https://app.platega.io`;
+- HTTP timeout: 5 секунд.
 
- Defaults: BaseURL = "https://app.platega.io", HTTPClient = &http.Client{Timeout: 5 * time.Second}.
+### 4.2 Создание транзакции
 
- ### 4.3 Создание транзакции
-
- Используется именно endpoint без выбора метода:
-
- ```text
+```text
 POST {BaseURL}/v2/transaction/process
- ```
+```
 
- Поле paymentMethod не передаётся: способ оплаты выбирает пользователь на странице Platega. Схема общего CreateTransactionRequest, где paymentMethod указан обязательным, к этому
- endpoint не применяется.
+Заголовки:
 
- Заголовки:
-
- ```text
+```text
 X-MerchantId: <UUID>
 X-Secret: <secret>
 Content-Type: application/json
- ```
+```
 
- Тело (без paymentMethod):
+`paymentMethod` не передавать.
 
- ```json
+Тело:
+
+```json
 {
   "paymentDetails": { "amount": 230.00, "currency": "RUB" },
   "description": "Оплата тарифа Premium на 30 дней",
@@ -293,46 +287,13 @@ Content-Type: application/json
     "userName": "@username"
   }
 }
- ```
+```
 
- metadata.userId всегда заполняется Telegram ID; metadata.userName — username либо пустое значение по правилам API. payload содержит внутренний ID заказа.
+Сумма хранится в копейках. JSON amount формировать из целого числа fixed-point форматированием; `float64` запрещён.
 
- Сумма хранится в БД в копейках. Публичный метод клиента принимает AmountCents int64, а JSON формируется как точное десятичное число из копеек целочисленным форматтером
- (cents/100 с padding двух знаков); прямое преобразование через float64 запрещено.
+### 4.3 API-типы
 
- ### 4.4 Ответ и ошибки
-
- Platega публикует два варианта имени ссылки: endpoint-документация показывает url, схема CreateTransactionResponse — redirect. Клиент обязан принимать оба:
-
- ```go
-type CreateTransactionResponse struct {
-    TransactionID string `json:"transactionId"`
-    Status        string `json:"status"`
-    URL           string `json:"url"`
-    Redirect      string `json:"redirect"`
-}
- ```
-
- Использовать URL, иначе Redirect. Если transactionId или обе ссылки пусты, ответ считается malformed и возвращается ErrProvider.
-
- Ошибки:
-
- - 400 → ErrBadRequest;
- - 401 → ErrAuth;
- - 5xx, timeout, context cancellation, malformed response, отсутствующий ID или URL → ErrProvider;
- - тело ответа ограничивается io.LimitReader (например, 1 MB).
-
- ```go
-var (
-    ErrAuth       = errors.New("platega: authentication failed")
-    ErrBadRequest = errors.New("platega: bad request")
-    ErrProvider   = errors.New("platega: provider error")
-)
- ```
-
- ### 4.5 Сигнатура
-
- ```go
+```go
 type CreateTransactionRequest struct {
     AmountCents int64
     Currency    string
@@ -344,162 +305,121 @@ type CreateTransactionRequest struct {
     UserName    string
 }
 
-func (c *Client) CreateTransaction(
-    ctx context.Context, req CreateTransactionRequest,
-) (*CreateTransactionResponse, error)
- ```
+type CreateTransactionResponse struct {
+    TransactionID string `json:"transactionId"`
+    Status        string `json:"status"`
+    URL           string `json:"url"`
+    Redirect      string `json:"redirect"`
+    ExpiresIn     string `json:"expiresIn"`
+}
+```
 
- ### 4.6 Callback payload
+`transactionId`, выбранная ссылка и `expiresIn` обязательны. `expiresIn` должен разбираться как `HH:MM:SS`. Если ID, обе ссылки или срок отсутствуют/некорректны — `ErrProvider`.
 
- ```go
-// CallbackPayload — входящий callback от Platega.
-// Строго обязательны id, amount, currency, status.
-// Payload и PaymentMethod опциональны: приходят не во всех вариантах (схемы Platega противоречивы).
+Клиент принимает и `url`, и `redirect`; приоритет `url`, затем `redirect`.
+
+Ошибки:
+
+- 400 → `ErrBadRequest`;
+- 401 → `ErrAuth`;
+- 5xx, timeout, context cancellation, malformed body → `ErrProvider`.
+
+Ответ ограничить через `io.LimitReader`.
+
+### 4.4 Callback payload
+
+```go
 type CallbackPayload struct {
     ID            string      `json:"id"`
     Amount        json.Number `json:"amount"`
     Currency      string      `json:"currency"`
     Status        string      `json:"status"`
-    PaymentMethod *int        `json:"paymentMethod,omitempty"` // nil = поле отсутствует
+    PaymentMethod *int        `json:"paymentMethod,omitempty"`
     Payload       string      `json:"payload,omitempty"`
 }
- ```
+```
 
- Разрешённые статусы Platega: PENDING, CANCELED, CONFIRMED, CHARGEBACKED. Строго обязательны только id, amount, currency, status. Поля payload и paymentMethod — опциональны и
- обрабатываются defensive: если пришли — используются, если нет — callback всё равно считается валидным.
+Обязательны `id`, `amount`, `currency`, `status`. В текущей реализации `id` должен быть UUID, как указано в официальной схеме Platega. `payload` и `paymentMethod` опциональны: документация показывает `paymentMethod` в примерах, но не включает его в `required`.
 
- Обоснование: опубликованные схемы Platega противоречивы — в описании webhook чисто payload обязателен, а в схеме CallbackPayload — paymentMethod (при additionalProperties:
- false). Требование несуществующего поля заставило бы отклонять легитимные callback'и и ломало бы приём платежей (Platega ретраила бы их).
+Для webhook принимаются только следующие значения, официально присутствующие в схемах Platega:
 
- Денежная сумма callback переводится из json.Number в копейки fixed-point parser'ом (ParseCallbackAmount). Значения с более чем двумя знаками после запятой, отрицательные, пустые
- или нечисловые значения отклоняются.
+- `PENDING` — официальный статус общей модели транзакции; Warn и HTTP 200 без изменения заказа;
+- `CANCELED` — статус webhook; отмена pending-заказа;
+- `CONFIRMED` — статус webhook; подтверждение pending-заказа;
+- `CHARGEBACKED` — официальный статус общей модели транзакции; перевод pending/paid в canceled с обязательным ручным разбором, без автоматического отзыва подписки.
 
- ### 4.7 Тесты
+Любое неизвестное будущее значение статуса не изменяет заказ, записывается в Warn/audit-log и получает HTTP 200. `SUCCESS` и `PAID` не являются допустимыми aliases.
 
- - httptest.Server: успешный ответ с url;
- - успешный ответ только с redirect;
- - отсутствующий URL или transaction ID;
- - 400, 401, 500, malformed JSON;
- - проверка заголовков и JSON body без paymentMethod;
- - проверка metadata и точного преобразования копеек;
- - context cancellation и timeout через Config.HTTPClient.
+Сумму callback разбирать fixed-point parser-ом. Отрицательные, пустые, нечисловые значения и более двух знаков после запятой отклонять.
 
- ────────────────────────────────────────────────────────────────────────────────
+---
 
- 5. OrderService
+## 5. OrderService
 
- ### 5.1 Удаление legacy flow
+### 5.1 Удаление legacy flow
 
- Полностью удалить старый бесплатный upgrade flow: handleUpgradePremium, handleConfirmUpgradePremium, его callbacks, промо-расчёт и связанные тесты. requestPayment также удалить
- как заглушку.
+Удалить бесплатный upgrade flow:
 
- Платный сценарий не использует старый ActivateProduct: создание pending order переносится в RequestPayment, платная активация — в ConfirmPayment. Удалить и ActivateProduct, и
- SubscriptionService.RenewSubscription — оба старых пути теряют смысл в платном потоке. Общую логику активации вынести в applyPaidSubscription.
+- `handleUpgradePremium`;
+- `handleConfirmUpgradePremium`;
+- `buy_premium_230`;
+- `upgrade_premium`;
+- `confirm_upgrade_premium`;
+- `freeUpgradeLabel` и `getFreeUpgradeLabel`;
+- `MainMenuBtnProductID` и `MAIN_MENU_BTN_PRODUCT`;
+- `ActivateProduct`;
+- `RenewSubscription`, если production callers отсутствуют;
+- связанные сообщения и тесты, которые больше не используются.
 
- RenewSubscription в текущем коде вызывается только из тестов (нет production-caller вне *_test.go); ActivateProduct — единственный production-caller через
- handleConfirmUpgradePremium, который удаляется. После миграции callers удалить оба метода целиком.
+Платная активация выполняется только через `RequestPayment` и `ConfirmPayment`.
 
- ### 5.2 Ядро активации
+### 5.2 PaymentProvider
 
- applyPaidSubscription — общее ядро подтверждения платной покупки. Вычисление newExpiry, атомарный CAS order+sub, DB-setup sync выполняются в одной DB-транзакции (через
- ConfirmOrderPaidCAS); внешняя VPN-синхронизация (SyncSubscription) — после commit, best-effort.
-
- ```go
-// applyPaidSubscription — общее ядро подтверждения платной покупки.
-// Вычисляет newExpiry через calculateProductExpiry, выполняет атомарный CAS
-// order pending→paid + обновление подписки + DB-setup sync в одной транзакции
-// (ConfirmOrderPaidCAS). При провале CAS/DB-setup — транзакция откатывается,
-// order остаётся pending, ошибка возвращается caller (callback вернёт 5xx).
-// Внешняя VPN-синхронизация (SyncSubscription) выполняется после commit, best-effort.
-func (o *OrderService) applyPaidSubscription(
-    ctx context.Context,
-    order *database.Order,
-    sub *database.Subscription,
-    product *database.Product,
-    now time.Time,
-) (newExpiry time.Time, err error)
- ```
-
- Внутри applyPaidSubscription:
-
- 1. newExpiry := calculateProductExpiry(now, sub.PlanID, sub.ExpiresAt, product).
- 2. activated, err := o.db.ConfirmOrderPaidCAS(ctx, order.ID, now, now, sub, newExpiry, product) — транзакция выполняет:
-   - CAS order pending→paid (paid_at, activated_at, expires_at=newExpiry);
-   - UPDATE subscriptions SET expires_at=newExpiry, product_id=..., started_at=now, reminders_sent=0 WHERE id=sub.ID;
-   - ApplyPlanToSubscription (DB-setup sync) — внутри транзакции; провал → rollback.
- 3. Возвращает newExpiry, activated, err для передачи в ConfirmPayment.
-
- │ Сброс reminders_sent=0 обязателен при активации/продлении подписки (иначе reminder-воркер не сработает по новой дате). Включён в транзакцию ConfirmOrderPaidCAS.
-
- ### 5.3 Провайдер и конструктор
-
- Для тестируемости OrderService зависит от минимального интерфейса создания транзакции; production-реализация — *platega.Client. Интерфейс определяется в
- internal/service/order.go (потребитель), ссылается на типы service/payment/platega (новый пакет) — циклической зависимости нет (service → service/payment/platega).
-
- ```go
+```go
 type PaymentProvider interface {
-    CreateTransaction(ctx context.Context, req platega.CreateTransactionRequest) (*platega.CreateTransactionResponse, error)
+    CreateTransaction(
+        ctx context.Context,
+        req platega.CreateTransactionRequest,
+    ) (*platega.CreateTransactionResponse, error)
 }
- ```
+```
 
- ```go
-type OrderService struct {
-    db          interfaces.DatabaseService
-    subSvc      *SubscriptionService
-    syncSvc     *SyncService
-    payment     PaymentProvider
-    botUsername string
-}
+Обновить constructor и все callers.
 
-func NewOrderService(
-    db interfaces.DatabaseService,
-    subSvc *SubscriptionService,
-    syncSvc *SyncService,
-    payment PaymentProvider,
-    botUsername string,
-) *OrderService
+### 5.3 RequestPayment
 
-// SetBotUsername устанавливает bot username после initBot/getMe,
-// т.к. на момент initServices botConfig ещё не загружен.
-func (o *OrderService) SetBotUsername(username string)
- ```
-
- payment == nil означает PAYMENT_ENABLED=false.
-
- При смене сигнатуры конструктора обновить все callers:
-
- - cmd/bot/main.go / lifecycle.go — production-wiring: создание OrderService переносится из startBackgroundWorkers в initServices (см. §8.1, §8.3). В initServices botUsername ещё
-   неизвестен → передаётся "", затем SetBotUsername вызывается после initBot.
- - internal/service/order_test.go — обновить конструирование OrderService под новую сигнатуру.
- - cmd/bot/main_test.go — не вызывает NewOrderService напрямую, обновление не требуется (но сборка должна проходить).
-
- Перед изменением прогнать grep -rn "NewOrderService" и обновить избирательно.
-
- ### 5.4 RequestPayment
-
- ```go
+```go
 func (o *OrderService) RequestPayment(
     ctx context.Context,
     telegramID int64,
     username string,
     product *database.Product,
 ) (*PaymentInfo, *database.Order, error)
- ```
+```
 
- Алгоритм:
+Алгоритм:
 
- 1. payment == nil → ErrPaymentDisabled.
- 2. telegramID <= 0, product == nil, !product.IsActive, product.PriceCents <= 0 → ошибка.
- 3. Получить или создать подписку.
- 4. Создать pending order с PaymentProvider="platega" и пустым ProviderPaymentID.
- 5. Создать транзакцию с AmountCents, валютой продукта, payload=order.ID, Telegram metadata и https://t.me/<bot_username> в return/failedUrl.
- 6. При ошибке Platega вернуть ошибку; order остаётся pending и не активирует подписку.
- 7. Сохранить transactionId через UpdateOrderProviderPaymentID (WHERE status='pending' — защита от апдейта уже paid order).
- 8. Вернуть provider, ID и URL (url, затем redirect).
+1. `payment == nil` → `ErrPaymentDisabled`.
+2. Некорректный Telegram ID, nil/inactive/free product → ошибка.
+3. Повторно загрузить канонический Product и его Plan из БД по `product.ID`; использовать из БД `Currency`, `DurationDays` и `PlanID`. Устаревший или поддельный объект отклонить.
+4. Получить или создать подписку.
+5. Найти pending-заказ в транзакции:
+   - `payment_creation_uncertain=true` → запретить новый вызов Platega, Warn/audit-log, ручная сверка;
+   - действующие `payment_url` и `payment_expires_at` → вернуть сохранённую ссылку даже если Product или Plan уже деактивированы;
+   - активность `Product/Plan`, `price_cents > 0` и пригодность для новой покупки проверять только перед созданием новой попытки или нового pending-заказа;
+   - истёкший заказ → перевести в `expired`, не перезаписывать его ID/URL;
+   - pending без provider ID после явного 400/401 → переиспользовать;
+   - если заказа нет → создать новый pending.
+6. Перед вызовом Platega атомарно установить `payment_creation_uncertain=true`.
+7. Создать транзакцию с суммой продукта, валютой, `payload=order.ID` и metadata Telegram.
+8. При HTTP 400/401 сбросить флаг и вернуть ошибку; повтор на том же pending разрешён.
+9. При timeout, context cancellation, 5xx или неполном ответе оставить флаг `true`, записать Warn/audit-log и не создавать новую транзакцию автоматически.
+10. При успехе сохранить transaction ID, ссылку и `payment_expires_at = receivedAt + expiresIn`, затем сбросить флаг.
+11. Вернуть PaymentInfo с provider ID, URL и временем истечения.
 
- ### 5.5 ConfirmPayment
+### 5.4 ConfirmPayment
 
- ```go
+```go
 type PaymentConfirmation struct {
     Order     *database.Order
     Activated bool
@@ -511,467 +431,321 @@ func (o *OrderService) ConfirmPayment(
     amount json.Number,
     currency string,
 ) (*PaymentConfirmation, error)
- ```
+```
 
- Алгоритм (порядок шагов исправлен — вычисление newExpiry внутри транзакции, см. §3.2.2):
+Алгоритм:
 
- 1. Найти заказ по (provider, provider_payment_id).
- 2. Проверить валюту и точное совпадение суммы в копейках. Несовпадение → ErrAmountMismatch/ErrCurrencyMismatch (бизнес-ошибка, callback вернёт 400 без активации).
- 3. Загрузить продукт заказа и подписку. Вычислить newExpiry := calculateProductExpiry(now, sub.PlanID, sub.ExpiresAt, product). Выполнить одну DB-транзакцию через
-    ConfirmOrderPaidCAS:
-   - атомарный переход pending → paid с условием WHERE status='pending';
-   - обновление order.paid_at, order.activated_at, order.expires_at=newExpiry;
-   - обновление subscriptions.expires_at=newExpiry, product_id, started_at, reminders_sent=0;
-   - DB-setup sync (ApplyPlanToSubscription) внутри транзакции; провал → rollback, order остаётся pending, ошибка возвращается caller (callback → 5xx, Platega повторит с нуля).
- 4. Если CAS затронул 0 строк, перечитать order: paid → идемпотентный Activated=false; canceled/expired → запрещённый переход (ErrInvalidTransition).
- 5. После успешного commit выполнить внешнюю VPN-синхронизацию SyncSubscription (best-effort; ошибка логируется Warn, не отменяет commit, callback всё равно 200).
- 6. Вернуть Activated=true только callback, который фактически выполнил переход в paid (CAS затронул строку). Только он имеет право отправить success-сообщение.
+1. Найти заказ по `(provider, provider_payment_id)`.
+   - неизвестный ID → Warn/audit-log и успешный `Activated=false`, HTTP 200;
+   - `expired` → late callback записать в Warn/audit-log, не активировать, HTTP 200;
+   - `paid` → идемпотентный no-op без уведомления.
+2. Проверить точное совпадение валюты и суммы в копейках. Несовпадение → бизнес-ошибка и HTTP 400.
+3. Загрузить канонический Product и Subscription по сохранённым ID заказа. Для расчёта использовать сохранённый ProductID и зафиксированные в Order сумму/валюту; изменение текущего каталога не должно менять уже созданную покупку.
+4. Вычислить `newExpiry := calculateProductExpiry(...)`.
+5. Вызвать `ConfirmOrderPaidCAS` с `applyPlan`.
+6. Если CAS не изменил строку:
+   - paid → no-op;
+   - canceled/expired → позднее подтверждение запрещено, Warn/audit-log.
+7. После commit выполнить `SyncSubscription` с отдельным timeout ≤20 секунд. Ошибка только логируется Warn и не превращает callback в 5xx.
+8. Только `Activated=true` имеет право вызвать success-уведомление.
 
- Допустимые переходы:
+Допустимые переходы:
 
- ```text
+```text
 pending → paid
 pending → canceled
-pending → expired
-paid → paid                 no-op (идемпотентный повтор)
-paid → canceled             только CHARGEBACKED, подписка не отзывается автоматически
-canceled → canceled         no-op
-canceled → paid             запрещено
- ```
+pending → expired       только при новом RequestPayment после payment_expires_at
+paid → paid              no-op
+paid → canceled          только CHARGEBACKED, без автоматического отзыва подписки
+canceled → canceled      no-op
+canceled → paid          запрещено
+expired → paid           запрещено
+```
 
- │ A2-обоснование (DB-setup sync внутри транзакции): предыдущая формулировка ставила ApplyPlanToSubscription после commit. При провале order уже paid, повторный callback даёт
- │ Activated=false, sync не повторяется → subscription_nodes без pending_* → фоновый SyncPendingNodes не имеет что retry'ить → пользователь без VPN. Выполнение
- │ ApplyPlanToSubscription внутри CAS-транзакции гарантирует: либо order+sub+nodes согласованы и закоммичены, либо всё откачено и Platega повторяет с pending.
+### 5.5 CancelPaymentByProvider
 
- ### 5.6 CancelPaymentByProvider
-
- ```go
+```go
 func (o *OrderService) CancelPaymentByProvider(
     ctx context.Context,
     providerPaymentID string,
     status string,
-) error
- ```
+) (*database.Order, bool, error)
+```
 
- Неизвестный order обрабатывается best-effort с Warn. CANCELED переводит только pending в canceled (CancelOrderCAS с fromStatuses=['pending']). CHARGEBACKED может перевести
- pending или paid в canceled (fromStatuses=['pending','paid']), но не отзывает подписку автоматически и логируется для ручного разбора. Повторный callback — no-op (CancelOrderCAS
- вернёт canceled=false).
+- неизвестный ID → Warn/audit-log, HTTP 200, изменений нет;
+- `CANCELED` переводит только `pending → canceled`;
+- `CHARGEBACKED` может перевести `pending` или `paid` в `canceled`, подписка автоматически не отзывается; webhook только фиксирует событие для ручного разбора;
+- повторный callback — no-op;
+- `SUCCESS`, `PAID` и неизвестные статусы не обрабатывать.
 
- ### 5.7 Тесты
+`payload` callback можно писать в audit-log на webhook-слое; менять сигнатуры сервисных методов только ради payload не требуется.
 
- - RequestPayment: success, disabled, invalid product, invalid Telegram ID, provider error, missing URL/ID;
- - ConfirmPayment: activation, exact amount/currency, amount mismatch, currency mismatch, not found;
- - повторный и параллельный CONFIRMED активируют только один раз;
- - продление активной подписки и сохранение orders.expires_at; order.ExpiresAt должен быть снимком newExpiry (равен *sub.ExpiresAt и не меняется при повторном CONFIRMED) —
-   подробная проверка в §3.2.4;
- - CANCELED, CHARGEBACKED, запрещённые переходы и повторные callback;
- - DB-setup error (ApplyPlanToSubscription внутри транзакции падает) → транзакция откатывается, order остаётся pending, ошибка возвращается caller; external sync error
-   (SyncSubscription после commit) не отменяет commit и логируется Warn;
- - reminders_sent=0 сброшен после активации/продления.
+### 5.6 Обязательные тесты OrderService
 
- ────────────────────────────────────────────────────────────────────────────────
+- успешный RequestPayment;
+- disabled/invalid product/invalid Telegram ID;
+- повтор после 400/401 без второго pending-заказа;
+- действующая ссылка возвращается повторно;
+- истёкшая ссылка переводит заказ в expired и создаёт новый Order;
+- timeout/5xx устанавливает `payment_creation_uncertain` и блокирует автоматический retry;
+- параллельный конфликт partial unique index перечитывает существующий pending-заказ;
+- exact amount/currency;
+- неизвестный provider ID;
+- late CONFIRMED для expired;
+- параллельный и повторный CONFIRMED активируют только один раз;
+- snapshot `orders.expires_at` равен `subscriptions.expires_at` после активации и не меняется при повторе;
+- `CANCELED`, `CHARGEBACKED` и запрещённые переходы;
+- repository guard отклоняет изменение `name`, `plan_id`, `duration_days`, `price_cents`, `currency` после появления Order и разрешает изменение только `is_active`;
+- rollback при ошибке DB-setup sync;
+- best-effort error/timeout внешнего SyncSubscription;
+- сброс `reminders_sent=0`.
 
- 6. Webhook handler (internal/web/web.go)
+---
 
- ### 6.1 Изменения Server
+## 6. Webhook handler
 
- ```go
-type Server struct {
-    // ...существующие поля...
-    bot        interfaces.BotAPI
-    orderSvc   *service.OrderService
-    paymentCfg PaymentConfig
-}
+### 6.1 Server dependencies
 
+Добавить/подключить:
+
+```go
 type PaymentConfig struct {
     Enabled    bool
     MerchantID string
     Secret     string
 }
- ```
 
- Сеттеры:
-
- ```go
 func (s *Server) SetBot(bot interfaces.BotAPI)
 func (s *Server) SetOrderService(svc *service.OrderService)
-func (s *Server) SetPaymentConfig(cfg PaymentConfig)
- ```
+func (s *Server) SetPaymentConfig(cfg *PaymentConfig)
+```
 
- До запуска web-сервера должны быть настроены orderSvc, bot и paymentCfg. Если зависимости не настроены, callback отвечает 503 Service Unavailable и не подтверждает оплату (см.
- §6.2, шаг 2).
+Если платежи выключены или `orderSvc`/`bot` не настроены, endpoint отвечает 503 до проверки credentials.
 
- bot — жёсткая зависимость endpoint'а: если он не заведён в Server (bot == nil), endpoint отвечает 503, как и при orderSvc == nil.
+### 6.2 Обработка callback
 
- Эта жёсткость НЕ смешивается с runtime-сбоями отправки уведомления после подтверждения (см. §6.2 и §6.3): если оплата уже подтверждена (pending → paid), а bot.Send в
- notifyUserOnSuccess завершился ошибкой — заказ и подписка НЕ откатываются, callback остаётся успешным (200), ошибка логируется как best-effort (Warn).
+1. Только POST; остальные методы → 405 и `Allow: POST`.
+2. Если платежи выключены или зависимости отсутствуют → 503.
+3. Проверить `X-MerchantId`/`X-Secret` constant-time сравнением. Пустые credentials невалидны → 401.
+4. Ограничить body через `http.MaxBytesReader(..., 256*1024)` — 256 KiB.
+5. Декодировать JSON через `UseNumber()` и отклонять trailing JSON/второй документ → 400.
+6. Проверить UUID `id`, обязательные amount/currency/status и формат callback. `paymentMethod` не требовать: поле не входит в `required` callback-схемы Platega.
+7. Для `CONFIRMED` вызвать `ConfirmPayment`.
+8. Для `CANCELED`/`CHARGEBACKED` вызвать `CancelPaymentByProvider`.
+9. Для `PENDING` и неизвестного статуса записать Warn/audit-log и вернуть 200 без изменения заказа.
+10. Неизвестный provider ID и late callback для expired возвращают 200; временные DB-ошибки и ошибка DB-setup sync возвращают 5xx, чтобы Platega повторила callback.
+11. Ошибка внешнего SyncSubscription и ошибка Telegram после commit не откатывают оплату и не превращают callback в 5xx.
 
- ### 6.2 Обработка callback
+Успешный ответ:
 
- Обработчик выполняет DB-часть синхронно и отвечает 200 только после успешной обработки. Обработка в detached goroutine после 200 запрещена: это может потерять оплату при
- рестарте процесса и отключает retry Platega.
-
- Алгоритм endpoint:
-
- 1. Только POST; иначе 405 и Allow: POST.
- 2. Если платежи выключены (paymentCfg.Enabled == false) или orderSvc == nil/bot == nil — 503.
- 3. Проверить X-MerchantId и X-Secret. Сравнение секретов — constant-time (crypto/subtle.ConstantTimeCompare); пустые credentials невалидны. Ошибка авторизации — 401.
- 4. Ограничить body через http.MaxBytesReader(..., 64*1024).
- 5. Декодировать JSON с json.Decoder.UseNumber() и запретить второй JSON-документ/trailing data (decoder.More() проверка). Ошибка — 400.
- 6. Проверить UUID id, непустые amount, currency, status; payload и paymentMethod — опциональны (если пришли, валидируются; paymentMethod может быть 0 — валидное значение, если
-    поле присутствует). Неизвестный статус не является ошибкой формата. Отсутствие paymentMethod НЕ является ошибкой формата и не должно приводить к 400.
- 7. Для CONFIRMED вызвать ConfirmPayment. Уведомить пользователя только если результат содержит Activated=true.
- 8. Для CANCELED и CHARGEBACKED вызвать CancelPaymentByProvider.
- 9. Для PENDING и неизвестных будущих статусов залогировать Warn и вернуть 200 без изменения заказа.
- 10. Ошибки формата/валидации callback — 400. Ошибки авторизации — 401. Ошибки метода — 405. Amount/currency mismatch — 400 без активации. Временные DB/инфраструктурные ошибки
-     (включая провал ApplyPlanToSubscription внутри CAS-транзакции) — 5xx, чтобы Platega повторила callback.
-
- После commit ошибка отправки Telegram success-message не откатывает оплату и не превращает callback в повторную активацию; она логируется как best-effort failure (Warn).
-
- Успешный ответ:
-
- ```json
+```json
 {"ok":true}
- ```
+```
 
- ### 6.3 notifyUserOnSuccess
+### 6.3 Success notification
 
- notifyUserOnSuccess отправляет новое сообщение только после фактического перехода заказа pending → paid (только при Activated=true). Повторный callback не отправляет второе
- сообщение.
+Отправлять новое сообщение только при `Activated=true`. Повторный callback не должен отправлять его снова.
 
- Success-сообщение собирается в OrderService.NotifyPaidUser (не в web-слое), через переиспользование presentation helpers из handleMySubscription:
+```go
+func (o *OrderService) NotifyPaidUser(
+    ctx context.Context,
+    order *database.Order,
+) (chatID int64, text string, err error)
+```
 
- ```go
-// NotifyPaidUser формирует текст success-сообщения после подтверждения оплаты.
-// Переиспользует SubscriptionService.GetWithTraffic → *TrafficInfo (тот же формат
-// тарифа, даты, трафика, что экран «Моя подписка») и cfg.SubURL.
-// Возвращает chatID (sub.TelegramID) и готовый текст; web вызывает bot.Send.
-func (o *OrderService) NotifyPaidUser(ctx context.Context, order *database.Order) (chatID int64, text string, err error)
- ```
+Использовать те же helpers, что и «Моя подписка»:
 
- Сообщение должно использовать общие presentation helpers с handleMySubscription:
+- название продукта;
+- формат даты;
+- формат трафика;
+- `Config.SubURL(sub.SubscriptionID)`.
 
- - название купленного продукта;
- - тот же формат даты, что и TrafficInfo.ExpiresAtFormatted;
- - тот же формат трафика, что и экран «Моя подписка», а не отдельный упрощённый формат;
- - Config.SubURL(sub.SubscriptionID).
+Если Telegram ID некорректен, подписку всё равно активировать, сообщение не отправлять, записать Warn.
 
- WebRepository не расширяется Product/Order-доступом; web вызывает orderSvc.NotifyPaidUser и bot.Send.
+Ошибка `bot.Send` после commit — best-effort Warn; оплата и подписка не откатываются.
 
- Если sub.TelegramID <= 0, подписка активируется, но сообщение не отправляется; событие логируется Warn.
+### 6.4 Webhook tests
 
- Если активация прошла, а отправка сообщения завершилась ошибкой (bot.Send вернул ошибку) — оплата и подписка НЕ откатываются; callback в любом случае отвечает 200 (активация уже
- закоммичена). Ошибка логируется как best-effort (Warn). Идемпотентность сохраняется: повторный CONFIRMED вернёт Activated=false, NotifyPaidUser не вызывается, повторно сообщение
- не отправляется.
+Проверить:
 
- ### 6.4 Webhook-тесты
+- 405/503/401;
+- body >256 KiB → 400;
+- malformed JSON, trailing JSON, invalid UUID/amount → 400;
+- все четыре официальных статуса;
+- unknown status и unknown provider ID → 200 + Warn;
+- late expired callback → 200 без активации;
+- amount/currency mismatch → 400;
+- один success-message при параллельных CONFIRMED;
+- ошибка Telegram после commit → 200;
+- timeout внешней VPN-синхронизации → 200;
+- DB-setup sync failure → 5xx и pending order.
 
- - CONFIRMED подтверждает заказ и приводит к одному success-сообщению;
- - повторный и параллельный CONFIRMED не продлевают подписку и не дублируют сообщение;
- - CANCELED и CHARGEBACKED обрабатываются согласно state machine;
- - неверные merchant ID/secret → 401;
- - отключённые платежи и отсутствующие зависимости → 503;
- - неверный метод → 405;
- - malformed JSON, trailing JSON, отсутствующие обязательные поля, invalid UUID, invalid amount → 400;
- - body больше 64 KB → 400;
- - unknown status → 200, Warn, никаких действий;
- - amount/currency mismatch → 400 без активации;
- - notifyUserOnSuccess использует тот же формат тарифа, даты и трафика, что «Моя подписка»;
- - runtime-сбой отправки success-сообщения после подтверждения не откатывает оплату и не превращает callback в повторную активацию (callback отвечает 200, ошибка в Warn);
- - sub.TelegramID <= 0: заказ подтверждается и подписка активируется, сообщение не отправляется, пишется Warn;
- - провал ApplyPlanToSubscription (DB-setup sync внутри CAS) → callback 5xx, order остаётся pending (Platega повторит).
+---
 
- ────────────────────────────────────────────────────────────────────────────────
+## 7. Telegram UI
 
- 7. Telegram-бот UI
+### 7.1 Главное меню
 
- ### 7.1 Удаление старого бесплатного flow
+Источником payment flag является `Config.PaymentEnabled`. В текущем UI кнопка оплаты отображается только у пользователя с существующей подпиской и при включённых платежах; пользователь без подписки сначала получает бесплатную подписку через обычный flow.
 
- Удалить полностью, без сохранения совместимых callback-веток и deprecated aliases:
-
- - callback buy_premium_230 и его обработку;
- - callback upgrade_premium;
- - callback confirm_upgrade_premium;
- - методы handleUpgradePremium, handleConfirmUpgradePremium и делегаты к ним;
- - freeUpgradeLabel и getFreeUpgradeLabel;
- - MainMenuBtnProductID и env MAIN_MENU_BTN_PRODUCT (поле, флаг, регистрация, validation — во всех файлах);
- - связанные сообщения MsgPremiumOffer, MsgPremiumAlready, MsgPremiumUnavailable, MsgPremiumConfirm, MsgPremiumSuccess, если после удаления flow они не используются новым
-   платёжным UI;
- - связанные тесты, fixtures и проверки старой кнопки.
-
- Затронутые файлы (~6 исходных + ~6 тестовых): internal/config/config.go (+ config_test.go), internal/bot/handler.go, internal/bot/subscription_handler.go, internal/bot/menu.go,
- internal/bot/keyboard_builder.go, internal/bot/callback.go, internal/bot/messages.go и тесты subscription_test.go, content_test.go, handlers_extended_test.go, keyboard_test.go,
- callbacks_test.go, menu_test.go.
-
- В проекте не должно остаться бесплатной кнопки или callback для получения платного тарифа бесплатно. Бесплатные продукты не показываются в платном UI и не запускаются через
- OrderService.RequestPayment.
-
- ### 7.2 keyboard_builder.go
-
- MainMenu больше не принимает freeUpgradeLabel:
-
- ```go
+```go
 func (kb *KeyboardBuilder) MainMenu(
     hasSubscription bool,
     paymentEnabled bool,
 ) tgbotapi.InlineKeyboardMarkup
- ```
+```
 
- Логика:
+При `paymentEnabled=true` и `hasSubscription=true` добавить кнопку `💎 Купить Premium` с callback `buy_premium_list`. При false или без подписки кнопки нет.
 
- - paymentEnabled && hasSubscription → кнопка 💎 Купить Premium с callback buy_premium_list;
- - paymentEnabled == false → платёжная кнопка отсутствует;
- - бесплатных upgrade-кнопок нет ни при каком значении флага;
- - документы, помощь, донат, подписка и share-кнопка сохраняются.
+### 7.2 Product list and payment confirmation
 
- Источник флага paymentEnabled: только config.Config.PaymentEnabled. Handler хранит его один раз при конструировании (из cfg.PaymentEnabled) и передаёт в
- MainMenu(hasSubscription, paymentEnabled). BotConfig НЕ расширяется — иначе флаг можно задать расходящимся из двух источников. В KeyboardBuilder флаг приходит только как
- аргумент метода, отдельного поля не добавляется.
+```go
+func (kb *KeyboardBuilder) BuyProductList(
+    products []database.Product,
+) tgbotapi.InlineKeyboardMarkup
 
- Новые методы:
+func (kb *KeyboardBuilder) BuyProductConfirm(
+    product *database.Product,
+    paymentURL string,
+) tgbotapi.InlineKeyboardMarkup
+```
 
- ```go
-func (kb *KeyboardBuilder) BuyProductList(products []database.Product) tgbotapi.InlineKeyboardMarkup
-func (kb *KeyboardBuilder) BuyProductConfirm(product *database.Product, paymentURL string) tgbotapi.InlineKeyboardMarkup
- ```
+- список содержит только активные платные продукты активных планов;
+- сортировка: `price_cents ASC`, затем `id ASC`;
+- callback продукта: `buy_product_{id}`;
+- Back списка: `back_to_start`;
+- URL-кнопка содержит payment URL;
+- Back confirmation: `buy_premium_list`;
+- бесплатные продукты не отображаются.
 
- BuyProductList:
+### 7.3 Callback names
 
- - каждый активный платный продукт — кнопка {Name} — {price} ₽ с callback buy_product_{id};
- - в конце — ⬅️ Назад с callback back_to_start;
- - продукты с PriceCents <= 0 не отображаются даже если пришли из fake/ошибочного repository.
+Использовать `switch {}`:
 
- BuyProductConfirm:
-
- - URL-кнопка 🔗 Оплатить {price} ₽;
- - ⬅️ Назад с callback buy_premium_list.
-
- ### 7.3 callback.go
-
- Использовать switch { ... } (без значения), чтобы корректно сочетать точные совпадения и prefix-проверки (прежняя запись switch data { case strings.HasPrefix(...): }
- синтаксически невалидна в Go):
-
- ```go
-switch {
+```go
 case data == "buy_premium_list":
-    if err := c.h.handleBuyPremiumList(ctx, chatID, username, messageID); err != nil {
-        return fmt.Errorf("handle buy_premium_list: %w", err)
-    }
+    handleBuyPremiumList(...)
 case strings.HasPrefix(data, "buy_product_"):
-    rawID := strings.TrimPrefix(data, "buy_product_")
-    productID, err := strconv.ParseUint(rawID, 10, 64)
-    if err != nil || productID == 0 || productID > uint64(^uint(0)) {
-        logger.Warn("callback: invalid buy_product id", zap.String("raw", rawID))
-        return nil
-    }
-    if err := c.h.handleBuyProduct(ctx, chatID, username, messageID, uint(productID)); err != nil {
-        return fmt.Errorf("handle buy_product: %w", err)
-    }
-}
- ```
+    handleBuyProduct(...)
+```
 
- Поддельный callback не должен приводить к panic или запускать оплату без повторной проверки продукта в БД.
+Текущий контракт использует `buy_premium_list`, `handleBuyPremiumList`, `handleBuyProduct`; новые aliases не добавлять.
 
- ### 7.4 Handlers — internal/bot/subscription_handler.go
+### 7.4 Handlers
 
- ```go
-func (sh *SubscriptionHandler) handleBuyPremiumList(ctx context.Context, chatID int64, username string, messageID int) error
-func (sh *SubscriptionHandler) handleBuyProduct(ctx context.Context, chatID int64, username string, messageID int, productID uint) error
- ```
+```go
+func (sh *SubscriptionHandler) handleBuyPremiumList(
+    ctx context.Context,
+    chatID int64,
+    username string,
+    messageID int,
+) error
 
- Делегаты в handler.go должны вызывать только эти два платёжных метода.
+func (sh *SubscriptionHandler) handleBuyProduct(
+    ctx context.Context,
+    chatID int64,
+    username string,
+    messageID int,
+    productID uint,
+) error
+```
 
- handleBuyPremiumList:
+`handleBuyPremiumList` показывает список активных продуктов либо понятную ошибку и Back.
 
- 1. Получить ListActiveProducts.
- 2. При ошибке показать временную ошибку и Back().
- 3. При пустом списке показать Нет доступных тарифов и Back().
- 4. Показать список активных платных продуктов.
+`handleBuyProduct` повторно загружает Product из БД, проверяет активность/цену/план, вызывает RequestPayment и показывает ошибку пользователю, а не просто возвращает её.
 
- handleBuyProduct:
+### 7.5 UI tests
 
- 1. Загрузить продукт из БД.
- 2. Повторно проверить IsActive и PriceCents > 0; иначе показать Тариф недоступен.
- 3. Вызвать RequestPayment.
- 4. При ErrPaymentDisabled показать Платежи временно недоступны; при прочей ошибке показать временную ошибку.
- 5. Отредактировать текущее сообщение, показать название/цену и кнопку оплаты.
- 6. После успешной оплаты пользователь получает отдельное новое сообщение с активированной подпиской.
-
- ### 7.5 UI-тесты
-
- - при PAYMENT_ENABLED=false в меню нет платёжных кнопок;
- - при PAYMENT_ENABLED=true кнопка появляется только у пользователя с подпиской;
- - бесплатные кнопки, freeUpgradeLabel, upgrade_premium, confirm_upgrade_premium и buy_premium_230 отсутствуют;
- - список содержит только активные платные продукты и сортируется по цене, затем ID;
- - inactive/free product не запускает оплату;
- - корректный и поддельный buy_product_{id} callback;
- - URL-кнопка содержит ссылку Platega;
- - back-navigation возвращает в список/главное меню без дубликатов.
-
- ────────────────────────────────────────────────────────────────────────────────
-
- 8. Wiring (cmd/bot/lifecycle.go + cmd/bot/main.go)
-
- ### 8.1 Порядок инициализации
-
- Создать зависимости в порядке:
-
- ```text
-config → database → SubscriptionService → SyncService → Platega client → OrderService → Handler/Web setters → web server → Telegram bot → workers
- ```
-
- OrderService нельзя создавать внутри startBackgroundWorkers: callback endpoint не должен запускаться с nil order service. Создание SyncService также переносится в initServices
- (ранее создавалось в startBackgroundWorkers).
-
- botUsername недоступен в initServices (нужен getMe → botConfig.Username, который загружается в initBot после initServices). Поэтому OrderService создаётся с botUsername="", а
- реальный username устанавливается через SetBotUsername после initBot (§8.3).
-
- ### 8.2 Platega client
-
- ```go
-var paymentProvider service.PaymentProvider
-if cfg.PaymentEnabled {
-    paymentProvider = platega.New(platega.Config{
-        MerchantID: cfg.PlategaMerchantID,
-        Secret:     cfg.PlategaSecret,
-    })
-}
- ```
-
- ### 8.3 OrderService
-
- ```go
-// в initServices (botUsername="" — ещё неизвестен)
-orderSvc := service.NewOrderService(dbService, subService, syncSvc, paymentProvider, "")
-handler.SetOrderService(orderSvc)
-
-// после initBot (main.go, после получения botConfig.Username)
-orderSvc.SetBotUsername(bc.Username)
- ```
-
- BotConfig не расширять полем PaymentEnabled: он содержит только metadata Telegram getMe; состояние платежей берётся из config.Config при построении keyboard/handler.
-
- ### 8.4 WebServer
-
- До запуска web-сервера:
-
- ```go
-webServer.SetOrderService(orderSvc)
-webServer.SetBot(bot) // placeholder до initBot; повторить с real api после initBot
-webServer.SetPaymentConfig(web.PaymentConfig{
-    Enabled:    cfg.PaymentEnabled,
-    MerchantID: cfg.PlategaMerchantID,
-    Secret:     cfg.PlategaSecret,
-})
-// после initBot:
-webServer.SetBot(api)
- ```
-
- При PAYMENT_ENABLED=false платёжные кнопки скрыты, а /payment/callback отвечает 503; credentials не проверяются как рабочие.
-
- ────────────────────────────────────────────────────────────────────────────────
-
- 9. Конфигурация webhook
-
- ### 9.1 Production
-
- Platega требует HTTPS, публичный IP/домен, валидный сертификат доверенного CA и запрещает localhost, loopback и приватные IP.
-
- В личном кабинете Platega указать:
-
- ```text
-https://<your_domain>/payment/callback
- ```
-
- ### 9.2 Development
-
- Использовать ngrok/cloudflared с публичным HTTPS URL, проксирующим локальный web-сервер. Пример команды добавить в README.
-
- ### 9.3 Retry policy
-
- Platega отменяет запрос после 60 секунд без успешного ответа и выполняет до трёх повторов с интервалом 5 минут. Поэтому handler отвечает 200 только после успешной DB-обработки;
- временные ошибки (включая провал ApplyPlanToSubscription внутри CAS) отвечают 5xx.
-
- ────────────────────────────────────────────────────────────────────────────────
-
- 10. Документация
-
- Добавить POST /payment/callback: заголовки, body, статусы, коды ответов, synchronous processing и retry policy.
-
- ### 10.2 README.md
-
- Добавить раздел «Платежи (Platega)»: env-переменные, callback URL, HTTPS/публичный домен и dev-пример.
-
- ### 10.3 Serena memory
-
- Обновить .serena/memories/subscription-nodes/orders-table.md: Platega как источник ProviderPaymentID, state transitions и поведение chargeback. Обновить architecture memory:
- payment integration.
-
- ────────────────────────────────────────────────────────────────────────────────
-
- 11. Удаление старого кода
-
- Удалить:
-
- - internal/service/order.go — requestPayment, ActivateProduct, legacy free upgrade methods и связанные тесты;
- - internal/service/subscription.go — RenewSubscription (после миграции callers; общую логику вынести в applyPaidSubscription);
- - internal/web/web.go — callback-заглушку;
- - internal/bot/callback.go — buy_premium_230, upgrade_premium, confirm_upgrade_premium;
- - internal/bot/keyboard_builder.go — hardcoded Premium 230₽ и freeUpgradeLabel;
- - internal/bot/handler.go — freeUpgradeLabel, getFreeUpgradeLabel, аргументы free upgrade;
- - internal/bot/subscription_handler.go — handleUpgradePremium, handleConfirmUpgradePremium;
- - internal/bot/menu.go — getFreeUpgradeLabel использование в getMainMenuContent;
- - internal/config/config.go — MainMenuBtnProductID, MAIN_MENU_BTN_PRODUCT и их validation/tests;
- - internal/bot/messages.go — сообщения, использовавшиеся только удалённым бесплатным flow;
- - все связанные тесты, fixtures и упоминания в subscription_test.go, content_test.go, handlers_extended_test.go, keyboard_test.go, callbacks_test.go, menu_test.go,
-   config_test.go.
-
- После cleanup поиск по репозиторию не должен находить buy_premium_230, freeUpgradeLabel, getFreeUpgradeLabel, upgrade_premium, confirm_upgrade_premium, MainMenuBtnProductID или
- MAIN_MENU_BTN_PRODUCT, ActivateProduct, RenewSubscription.
-
- ────────────────────────────────────────────────────────────────────────────────
-
- 12. Acceptance criteria
-
- 1. PAYMENT_ENABLED=false — бот стартует без PLATEGA_*, платёжных кнопок нет, webhook отвечает 503.
- 2. PAYMENT_ENABLED=true без PLATEGA_* — config.validate() завершается понятной ошибкой.
- 3. PAYMENT_ENABLED=true — кнопка «Купить Premium» есть только у пользователей с подпиской.
- 4. Бесплатные кнопки и бесплатный upgrade flow полностью удалены.
- 5. В списке отображаются только active paid products (is_active=true, price_cents > 0, active plan), порядок: price_cents ASC, id ASC.
- 6. Выбор продукта создаёт pending order и транзакцию Platega без paymentMethod.
- 7. Ответ Platega с url и ответ только с redirect поддерживаются.
- 8. Отсутствующий transaction ID или URL отклоняется как provider error.
- 9. Валидный CONFIRMED переводит order в paid и активирует подписку атомарно (CAS, WHERE status='pending').
- 10. Только callback, совершивший переход pending→paid, отправляет новое сообщение с subURL.
- 11. Повторный и параллельный CONFIRMED не продлевают подписку и не дублируют сообщение.
- 12. Дата, тариф и трафик в success-сообщении используют те же presentation helpers, что «Моя подписка» (через OrderService.NotifyPaidUser).
- 13. При покупке на активной подписке newExpiry = currentExpiry + DurationDays согласно calculateProductExpiry.
- 14. order.ExpiresAt — снимок newExpiry (равен *sub.ExpiresAt), не меняется при повторном CONFIRMED.
- 15. reminders_sent=0 сбрасывается при активации/продлении подписки.
- 16. Провал DB-setup sync (ApplyPlanToSubscription) откатывает транзакцию: order остаётся pending, callback → 5xx, Platega повторяет.
- 17. MAIN_MENU_BTN_PRODUCT и связанные поля/флаги полностью удалены.
- ```
+- при PAYMENT_ENABLED=false кнопки нет;
+- при true кнопка есть у пользователя с подпиской, а у пользователя без подписки отсутствует;
+- `RequestPayment` создаёт подписку при необходимости;
+- старые бесплатные callbacks отсутствуют;
+- invalid/fake product callback не запускает оплату;
+- Back-navigation не создаёт дубликаты сообщений;
+- ErrPaymentDisabled показывает `Платежи временно недоступны`.
 
 ---
 
-Это полное исправленное ТЗ v1.3. Сводка внесённых изменений относительно v1.2:
+## 8. Wiring
 
-**Исправленные ошибки (A1–A8):**
-- **A1** §5.5: порядок шагов — `newExpiry` вычисляется и пишется внутри транзакции, не после.
-- **A2** §5.5/§3.3: `ApplyPlanToSubscription` выполняется **внутри** CAS-транзакции; провал → rollback, 5xx, повтор Platega.
-- **A3** §5.1/§11: удалить и `ActivateProduct`, и `RenewSubscription`; общая логика в `applyPaidSubscription`.
-- **A4** §7.3: переписан на валидный `switch { }`.
-- **A5** §5.3: уточнён список callers (`main_test.go` не трогать; создание перенести в `initServices`).
-- **A6** §8.3: добавлен `SetBotUsername` setter (botUsername недоступен в `initServices`).
-- **A7** §6.3: `notifyUserOnSuccess` собирается в `OrderService.NotifyPaidUser`; `WebRepository` не расширяется.
-- **A8** §3.2.3: отмечен битый пробел в комментарии миграции.
+Порядок:
 
-**Дополнения (B1–B9 кроме B5):**
-- **B1** §3.3: новый метод `ConfirmOrderPaidCAS` (CAS pending→paid атомарно с sub).
-- **B2** §3.3: `UpdateOrderProviderPaymentID` с `WHERE status='pending'`.
-- **B3** §3.3: новый метод `CancelOrderCAS`.
-- **B4** §7.1/§11: расширенный список затронутых файлов (~12).
-- **B6** §5.2/§5.5: сброс `reminders_sent=0` внутри транзакции (критерий 15).
-- **B7** §5.3: место определения `PaymentProvider` зафиксировано (без циклической зависимости).
-- **B8** §5.3: `main_test.go` подтверждён как не-caller.
-- **B9** §5.2: `applyPaidSubscription` как общий знаменатель.
+```text
+config → database → SubscriptionService → SyncService → Platega client → OrderService → Handler/Web setters → web server → Telegram bot → workers
+```
+
+`OrderService` создаётся до запуска web server, не внутри `startBackgroundWorkers`. `botUsername` сначала пустой, затем устанавливается после `initBot/getMe`.
+
+При `PAYMENT_ENABLED=false` provider равен nil, UI скрывает кнопку, callback отвечает 503.
+
+---
+
+## 9. Webhook deployment and retry
+
+Production callback URL:
+
+```text
+https://<public-domain>/payment/callback
+```
+
+Нужны HTTPS, публичный домен/IP и сертификат доверенного CA. localhost, private IP и self-signed certificate не использовать.
+
+Для development использовать ngrok/cloudflared.
+
+По документации Platega запрос callback отменяется после 60 секунд без успешного ответа; затем возможны повторы. Поэтому DB-обработка выполняется синхронно, а временные DB-ошибки отвечают 5xx. Detached goroutine после HTTP 200 запрещена.
+
+---
+
+## 10. Документация и cleanup
+
+Обновить README и Serena memory с:
+
+- env-переменными;
+- callback URL;
+- статусами и кодами ответа;
+- сроком ссылки и повторным использованием;
+- chargeback/manual-review поведением;
+- state machine Order.
+
+После cleanup поиск в исходном коде, конфигурации и тестах (документацию не учитывать) не должен находить:
+
+```text
+buy_premium_230
+buy_premium_list
+freeUpgradeLabel
+getFreeUpgradeLabel
+upgrade_premium
+confirm_upgrade_premium
+MainMenuBtnProductID
+MAIN_MENU_BTN_PRODUCT
+ActivateProduct
+RenewSubscription
+```
+
+---
+
+## 11. Acceptance criteria
+
+1. `PAYMENT_ENABLED=false`: приложение стартует без PLATEGA credentials, кнопок нет, callback отвечает 503.
+2. `PAYMENT_ENABLED=true` без credentials: понятная ошибка config validation.
+3. При включённых платежах кнопка оплаты отображается у пользователя с подпиской; пользователь без подписки сначала проходит обычный flow создания подписки.
+4. Покупка без подписки создаёт подписку до Order.
+5. Список содержит только активные платные продукты активных планов и сортируется по цене/ID.
+6. Создаётся pending Order и транзакция без `paymentMethod`.
+7. Поддерживаются `url` и `redirect`; `expiresIn` сохраняется как абсолютный `payment_expires_at`.
+8. Действующая ссылка возвращается повторно без нового Order и вызова Platega.
+9. После истечения pending-заказ становится `expired`, старые provider ID/URL не перезаписываются, новая попытка создаёт новый Order.
+10. 400/401 позволяют повторить создание на том же pending-order; timeout/5xx/неполный ответ устанавливают `payment_creation_uncertain` и блокируют автоматический retry.
+11. Partial unique index предотвращает два pending-заказа; конфликт перечитывает существующий Order.
+12. Неизвестный provider ID и late callback для expired дают 200, Warn/audit-log и не активируют подписку.
+13. Только валидный `CONFIRMED` переводит Order `pending → paid` через CAS.
+14. Параллельные/повторные CONFIRMED активируют один раз и отправляют одно сообщение.
+15. `orders.expires_at` — snapshot срока подписки; повторный CONFIRMED его не меняет.
+16. Success-сообщение использует ту же presentation-логику, что «Моя подписка».
+17. DB-setup sync выполняется в той же транзакции; ошибка откатывает Order в pending и callback отвечает 5xx.
+18. Внешняя VPN-синхронизация ограничена timeout ≤20 секунд; её ошибка не отменяет оплату и отвечает 200.
+19. Ошибка Telegram после commit не откатывает оплату и отвечает 200.
+20. Webhook обрабатывает только официальные статусы `PENDING`, `CANCELED`, `CONFIRMED`, `CHARGEBACKED`, перечисленные в официальных схемах Platega; `SUCCESS`/`PAID` не поддерживаются.
+21. Попытка изменить поля тарифа `name`, `plan_id`, `duration_days`, `price_cents`, `currency` после появления Order отклоняется repository guard; изменение `is_active` разрешено.
+22. Body callback ограничен 256 KiB.
+23. Legacy free upgrade flow и перечисленные старые символы полностью удалены.

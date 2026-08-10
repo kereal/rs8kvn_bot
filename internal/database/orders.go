@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -55,8 +56,145 @@ func (s *Service) UpdateOrderProviderPaymentID(ctx context.Context, orderID uint
 	return nil
 }
 
+// FindPendingPaymentOrder returns the current pending payment intent. An
+// expired intent is terminalized, but no replacement is created by this method.
+func (s *Service) FindPendingPaymentOrder(ctx context.Context, subscriptionID, productID uint, now time.Time) (*Order, error) {
+	var order Order
+	result := s.db.WithContext(ctx).
+		Where("subscription_id = ? AND product_id = ? AND payment_provider = ? AND status = ?", subscriptionID, productID, "platega", OrderStatusPending).
+		Order("id ASC").First(&order)
+	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if result.Error != nil {
+		return nil, fmt.Errorf("find pending payment order: %w", result.Error)
+	}
+	if order.PaymentExpiresAt != nil && !now.Before(*order.PaymentExpiresAt) {
+		if err := s.db.WithContext(ctx).Model(&Order{}).
+			Where("id = ? AND status = ?", order.ID, OrderStatusPending).
+			Update("status", OrderStatusExpired).Error; err != nil {
+			return nil, fmt.Errorf("expire payment order: %w", err)
+		}
+		order.Status = OrderStatusExpired
+		return &order, nil
+	}
+	return &order, nil
+}
+
+// CreatePendingPaymentOrder creates a new Platega payment intent. The partial
+// unique index rejects concurrent duplicates; callers should reread the winner.
+func (s *Service) CreatePendingPaymentOrder(ctx context.Context, subscriptionID, productID uint, amountCents int64, currency string, now time.Time) (*Order, error) {
+	order := &Order{SubscriptionID: subscriptionID, ProductID: productID, Status: OrderStatusPending, AmountCents: amountCents, Currency: currency, PaymentProvider: "platega", CreatedAt: now}
+	if err := s.db.WithContext(ctx).Create(order).Error; err != nil {
+		return nil, fmt.Errorf("create pending payment order: %w", err)
+	}
+	return order, nil
+}
+
+// FindOrCreatePendingPaymentOrder returns the single pending payment intent for
+// a subscription/product pair, expiring it first when its local payment-link
+// deadline has passed. The partial unique index is the final concurrency guard.
+func (s *Service) FindOrCreatePendingPaymentOrder(ctx context.Context, subscriptionID, productID uint, amountCents int64, currency string, now time.Time) (*Order, error) {
+	var order Order
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.Where("subscription_id = ? AND product_id = ? AND payment_provider = ? AND status = ?", subscriptionID, productID, "platega", OrderStatusPending).
+			Order("id ASC").First(&order)
+		if result.Error == nil {
+			if order.PaymentCreationUncertain {
+				return nil
+			}
+			if order.PaymentExpiresAt != nil && !now.Before(*order.PaymentExpiresAt) {
+				if err := tx.Model(&Order{}).Where("id = ? AND status = ?", order.ID, OrderStatusPending).
+					Update("status", OrderStatusExpired).Error; err != nil {
+					return fmt.Errorf("expire payment order: %w", err)
+				}
+				order = Order{}
+			} else {
+				return nil
+			}
+		} else if !errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return fmt.Errorf("find pending payment order: %w", result.Error)
+		}
+
+		order = Order{
+			SubscriptionID:  subscriptionID,
+			ProductID:       productID,
+			Status:          OrderStatusPending,
+			AmountCents:     amountCents,
+			Currency:        currency,
+			PaymentProvider: "platega",
+			CreatedAt:       now,
+		}
+		if err := tx.Create(&order).Error; err != nil {
+			return fmt.Errorf("create pending payment order: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		// A concurrent creator can win the partial unique-index race. The
+		// transaction is rolled back, so read the winner and continue with it.
+		message := strings.ToLower(err.Error())
+		if strings.Contains(message, "unique constraint") || strings.Contains(message, "idx_orders_pending_subscription_product_unique") {
+			result := s.db.WithContext(ctx).
+				Where("subscription_id = ? AND product_id = ? AND payment_provider = ? AND status = ?", subscriptionID, productID, "platega", OrderStatusPending).
+				Order("id ASC").First(&order)
+			if result.Error == nil {
+				return &order, nil
+			}
+			return nil, fmt.Errorf("reload concurrent pending payment order: %w", result.Error)
+		}
+		return nil, err
+	}
+	return &order, nil
+}
+
+// MarkPaymentCreationUncertain atomically marks whether an outbound provider
+// request has an outcome that cannot safely be retried automatically.
+func (s *Service) MarkPaymentCreationUncertain(ctx context.Context, orderID uint, uncertain bool) (bool, error) {
+	query := s.db.WithContext(ctx).Model(&Order{}).Where("id = ? AND status = ?", orderID, OrderStatusPending)
+	if uncertain {
+		query = query.Where("payment_creation_uncertain = ? AND (provider_payment_id IS NULL OR provider_payment_id = '')", false)
+	} else {
+		query = query.Where("payment_creation_uncertain = ?", true)
+	}
+	result := query.Update("payment_creation_uncertain", uncertain)
+	if result.Error != nil {
+		return false, fmt.Errorf("mark payment creation uncertainty: %w", result.Error)
+	}
+	return result.RowsAffected == 1, nil
+}
+
+// SavePaymentDetails stores the provider ID, link and local link deadline in a
+// single update and clears the uncertainty flag.
+func (s *Service) SavePaymentDetails(ctx context.Context, orderID uint, providerPaymentID, paymentURL string, paymentExpiresAt time.Time) error {
+	result := s.db.WithContext(ctx).Model(&Order{}).
+		Where("id = ? AND status = ?", orderID, OrderStatusPending).
+		Updates(map[string]interface{}{
+			"provider_payment_id":        providerPaymentID,
+			"payment_url":                paymentURL,
+			"payment_expires_at":         paymentExpiresAt.UTC(),
+			"payment_creation_uncertain": false,
+		})
+	if result.Error != nil {
+		return fmt.Errorf("save payment details: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("order %d is not pending: %w", orderID, ErrOrderNotFound)
+	}
+	return nil
+}
+
+// ApplyPlanInTxFn is invoked inside the transaction that confirms an order.
+// It must materialize all DB prerequisites (pending_add / pending_remove rows)
+// needed by the background sync worker using the supplied tx handle.
+// Returning an error aborts the transaction and rolls back the payment
+// confirmation; returning nil commits it.
+type ApplyPlanInTxFn func(ctx context.Context, tx *gorm.DB, subscriptionID uint, planID uint) error
+
 // ConfirmOrderPaidCAS atomically marks an order paid and updates its subscription.
-func (s *Service) ConfirmOrderPaidCAS(ctx context.Context, orderID uint, paidAt, activatedAt time.Time, sub *Subscription, newExpiry time.Time, product *Product) (bool, error) {
+// If applyPlan is non-nil and the CAS succeeds, it is called with the same tx
+// used to write the subscription; on error the whole transaction rolls back.
+func (s *Service) ConfirmOrderPaidCAS(ctx context.Context, orderID uint, paidAt, activatedAt time.Time, sub *Subscription, newExpiry time.Time, product *Product, applyPlan ApplyPlanInTxFn) (bool, error) {
 	var activated bool
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		result := tx.Model(&Order{}).Where("id = ? AND status = ?", orderID, OrderStatusPending).Updates(map[string]interface{}{
@@ -69,6 +207,7 @@ func (s *Service) ConfirmOrderPaidCAS(ctx context.Context, orderID uint, paidAt,
 			return nil
 		}
 		result = tx.Model(&Subscription{}).Where("id = ?", sub.ID).Updates(map[string]interface{}{
+			"plan_id": product.PlanID, "status": string(SubscriptionStatusActive),
 			"expires_at": newExpiry, "product_id": product.ID, "started_at": activatedAt,
 			"price_paid_cents": product.PriceCents, "currency": product.Currency, "reminders_sent": 0,
 		})
@@ -77,6 +216,11 @@ func (s *Service) ConfirmOrderPaidCAS(ctx context.Context, orderID uint, paidAt,
 		}
 		if result.RowsAffected == 0 {
 			return fmt.Errorf("update subscription after payment: %w", ErrSubscriptionNotFound)
+		}
+		if applyPlan != nil {
+			if err := applyPlan(ctx, tx, sub.ID, product.PlanID); err != nil {
+				return fmt.Errorf("apply plan after payment: %w", err)
+			}
 		}
 		activated = true
 		return nil

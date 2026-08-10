@@ -76,10 +76,23 @@ func (p CallbackPayload) Validate() error {
 	if strings.TrimSpace(p.Status) == "" {
 		return errors.New("status is required")
 	}
+	// paymentMethod is documented in examples but is not listed as a required
+	// property of the callback schema. Accept callbacks that omit it; status,
+	// amount, currency and ID are the fields needed by this integration.
 	return nil
 }
 
 // VerifyHeaders authenticates callback headers using constant-time comparison.
+// Empty credentials are rejected so an unconfigured server never verifies.
 func VerifyHeaders(merchantID, secret string, headers http.Header) bool {
-	return subtle.ConstantTimeCompare([]byte(merchantID), []byte(headers.Get("X-MerchantId"))) == 1 && subtle.ConstantTimeCompare([]byte(secret), []byte(headers.Get("X-Secret"))) == 1
+	if strings.TrimSpace(merchantID) == "" || strings.TrimSpace(secret) == "" {
+		return false
+	}
+	gotMerchant := headers.Get("X-MerchantId")
+	gotSecret := headers.Get("X-Secret")
+	if strings.TrimSpace(gotMerchant) == "" || strings.TrimSpace(gotSecret) == "" {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(merchantID), []byte(gotMerchant)) == 1 &&
+		subtle.ConstantTimeCompare([]byte(secret), []byte(gotSecret)) == 1
 }

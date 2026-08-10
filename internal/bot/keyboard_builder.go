@@ -9,13 +9,12 @@ import (
 
 // KeyboardBuilder creates Telegram inline keyboards.
 type KeyboardBuilder struct {
-	botUsername    string
-	contactUser    string
-	donateCard     string
-	donateURL      string
-	siteURL        string
-	donateEnabled  bool
-	paymentEnabled bool
+	botUsername   string
+	contactUser   string
+	donateCard    string
+	donateURL     string
+	siteURL       string
+	donateEnabled bool
 }
 
 // NewKeyboardBuilder creates a new KeyboardBuilder.
@@ -24,11 +23,10 @@ func NewKeyboardBuilder(botUsername, contactUser, donateCard, donateURL, siteURL
 	return &KeyboardBuilder{botUsername: botUsername, contactUser: contactUser, donateCard: donateCard, donateURL: donateURL, siteURL: siteURL, donateEnabled: donateEnabled}
 }
 
-// SetPaymentEnabled toggles the product-payment entry.
-func (kb *KeyboardBuilder) SetPaymentEnabled(enabled bool) { kb.paymentEnabled = enabled }
-
 // MainMenu returns the inline keyboard for the main menu.
-func (kb *KeyboardBuilder) MainMenu(hasSubscription bool, _ string) tgbotapi.InlineKeyboardMarkup {
+// paymentEnabled controls whether the "💎 Купить Premium" button is shown;
+// it is passed per-call because the flag can be toggled at runtime via config.
+func (kb *KeyboardBuilder) MainMenu(hasSubscription bool, paymentEnabled bool) tgbotapi.InlineKeyboardMarkup {
 	var firstRow []tgbotapi.InlineKeyboardButton
 	firstRow = append(firstRow, tgbotapi.NewInlineKeyboardButtonData("📋 Подписка", "menu_subscription"))
 	if kb.donateEnabled {
@@ -36,8 +34,8 @@ func (kb *KeyboardBuilder) MainMenu(hasSubscription bool, _ string) tgbotapi.Inl
 	}
 	rows := [][]tgbotapi.InlineKeyboardButton{tgbotapi.NewInlineKeyboardRow(firstRow...)}
 	rows = append(rows, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("❓ Помощь", "menu_help"), tgbotapi.NewInlineKeyboardButtonData("📑 Документы", "menu_documents")))
-	if kb.paymentEnabled && hasSubscription {
-		rows = append(rows, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("💳 Оплатить подписку", "menu_payment")))
+	if paymentEnabled && hasSubscription {
+		rows = append(rows, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("💎 Купить Premium", "buy_premium_list")))
 	}
 	if hasSubscription {
 		rows = append(rows, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("📤 Поделиться", "share_invite")))
@@ -66,7 +64,7 @@ func (kb *KeyboardBuilder) BuyProductConfirm(product *database.Product, paymentU
 	}
 	return tgbotapi.InlineKeyboardMarkup{InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{
 		tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonURL("🔗 Оплатить "+price, paymentURL)),
-		tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("⬅️ Назад", "menu_payment")),
+		tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("⬅️ Назад", "buy_premium_list")),
 	}}
 }
 
