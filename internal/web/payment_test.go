@@ -85,6 +85,67 @@ func TestHandlePaymentCallback_InvalidJSON(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
+func TestHandlePaymentCallback_InvalidUUIDNotifiesAdmin(t *testing.T) {
+	t.Parallel()
+
+	srv, _, bot := newPaymentTestServer(t, nil)
+	req := httptest.NewRequest(http.MethodPost, "/payment/callback", strings.NewReader(`{"id":"not-a-uuid","amount":23.00,"currency":"RUB","status":"CONFIRMED"}`))
+	req.Header.Set("X-MerchantId", "merchant")
+	req.Header.Set("X-Secret", "secret")
+	rec := httptest.NewRecorder()
+
+	srv.handlePaymentCallback(rec, req)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	messages := bot.GetAllSentMessages()
+	require.Len(t, messages, 1)
+	assert.Contains(t, messages[0].Text, "invalid_provider_id")
+}
+
+func TestHandlePaymentCallback_TrailingJSONNotifiesAdminAndSkipsProcessing(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		extra string
+	}{
+		{name: "second JSON document", extra: "{}"},
+		{name: "invalid trailing bytes", extra: "garbage"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			order := &database.Order{ID: 26, SubscriptionID: 16, ProductID: 20, Status: database.OrderStatusPending, ProviderPaymentID: testPaymentID.String(), AmountCents: 2300, Currency: "RUB"}
+			srv, _, bot := newPaymentTestServer(t, order)
+			// A valid callback would reach this fake; trailing data must stop the
+			// request before any payment state transition is attempted.
+			req := httptest.NewRequest(http.MethodPost, "/payment/callback", strings.NewReader(`{"id":"550e8400-e29b-41d4-a716-446655440111","amount":23.00,"currency":"RUB","status":"CONFIRMED"}`+tt.extra))
+			req.Header.Set("X-MerchantId", "merchant")
+			req.Header.Set("X-Secret", "secret")
+			rec := httptest.NewRecorder()
+
+			srv.handlePaymentCallback(rec, req)
+			require.Equal(t, http.StatusBadRequest, rec.Code)
+			assert.Equal(t, database.OrderStatusPending, order.Status)
+			messages := bot.GetAllSentMessages()
+			require.Len(t, messages, 1)
+			assert.Contains(t, messages[0].Text, "trailing_callback_data")
+		})
+	}
+}
+
+func TestHandlePaymentCallback_UnsupportedStatusNotifiesAdmin(t *testing.T) {
+	t.Parallel()
+
+	srv, _, bot := newPaymentTestServer(t, nil)
+	req := paymentRequest("REFUNDED", testPaymentID, `23.00`)
+	rec := httptest.NewRecorder()
+
+	srv.handlePaymentCallback(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	messages := bot.GetAllSentMessages()
+	require.Len(t, messages, 1)
+	assert.Contains(t, messages[0].Text, "unsupported_callback_status")
+}
+
 func TestHandlePaymentCallback_RequiresUUIDProviderTransactionID(t *testing.T) {
 	t.Parallel()
 

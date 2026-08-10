@@ -1,3 +1,5 @@
+// Package web exposes the HTTP endpoints used by the bot, subscription server,
+// health checks, invite landing pages, and payment callbacks.
 package web
 
 import (
@@ -29,9 +31,13 @@ import (
 	"gorm.io/gorm"
 )
 
+// allFiles contains the HTML templates and static assets bundled into the binary.
+// Keeping these files embedded makes the web server self-contained in production.
+//
 //go:embed templates/*.html templates/logo.png
 var allFiles embed.FS
 
+// staticFiles is the filesystem used by template parsing and the logo handler.
 var staticFiles = allFiles
 
 // TrialCreationResult holds the outcome of a successful trial creation.
@@ -43,19 +49,25 @@ type TrialCreationResult struct {
 	ExpiresAt  time.Time
 }
 
+// Status is the aggregate health state returned by the health endpoints.
 type Status string
 
 const (
-	StatusOK       Status = "ok"
+	// StatusOK means all registered health checks are healthy.
+	StatusOK Status = "ok"
+	// StatusDegraded means at least one dependency is degraded, but none is down.
 	StatusDegraded Status = "degraded"
-	StatusDown     Status = "down"
+	// StatusDown means at least one dependency is unavailable.
+	StatusDown Status = "down"
 )
 
+// ComponentHealth describes the health state of one registered dependency.
 type ComponentHealth struct {
 	Status  Status `json:"status"`
 	Message string `json:"message,omitempty"`
 }
 
+// subserverAccessLogCloseTimeout bounds shutdown time spent flushing access logs.
 const subserverAccessLogCloseTimeout = 5 * time.Second
 
 // PaymentConfig holds the resolved, ready-to-use payment settings for the
@@ -67,6 +79,8 @@ type PaymentConfig struct {
 	Secret     string
 }
 
+// Server owns the HTTP listener, endpoint dependencies, health checkers, and
+// lifecycle state for the public web service.
 type Server struct {
 	addr            string
 	db              interfaces.WebRepository
@@ -90,16 +104,18 @@ type Server struct {
 	errorTemplate   *template.Template
 }
 
+// NewServer constructs a web server and parses the embedded templates. It does
+// not open a listener; call Start to begin serving requests.
 func NewServer(addr string, db interfaces.WebRepository, cfg *config.Config, botUsername string, subService *service.SubscriptionService, subServer *subserver.Service) *Server {
 	trialTmpl := template.Must(template.New("trial.html").Funcs(template.FuncMap{"formatTime": func(t time.Time) string { return t.Format("02.01.2006 15:04") }}).ParseFS(staticFiles, "templates/trial.html"))
 	errorTmpl := template.Must(template.New("error.html").ParseFS(staticFiles, "templates/error.html"))
 	return &Server{addr: addr, db: db, cfg: cfg, botUsername: botUsername, subService: subService, subServer: subServer, checkers: make(map[string]func(context.Context) ComponentHealth), inviteCodeRegex: regexp.MustCompile(`^[a-zA-Z0-9_-]+$`), startTime: time.Now(), trialTemplate: trialTmpl, errorTemplate: errorTmpl}
 }
 
-// SetOrderService wires payment confirmation into the callback endpoint.
+// SetBot wires Telegram delivery for payment notifications and administrator alerts.
+func (s *Server) SetBot(bot interfaces.BotAPI) { s.bot = bot }
 
-// SetBot wires Telegram delivery for payment notifications.
-func (s *Server) SetBot(bot interfaces.BotAPI)                       { s.bot = bot }
+// SetOrderService wires payment confirmation and cancellation into the callback endpoint.
 func (s *Server) SetOrderService(orderService *service.OrderService) { s.orderService = orderService }
 
 // SetPaymentConfig configures runtime payment settings used by the callback
@@ -110,12 +126,15 @@ func (s *Server) SetPaymentConfig(c *PaymentConfig) {
 	s.paymentConfig = c
 }
 
+// RegisterChecker adds a dependency health check used by /healthz and /readyz.
+// A checker should honor the context deadline and return a stable component name.
 func (s *Server) RegisterChecker(name string, checker func(context.Context) ComponentHealth) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.checkers[name] = checker
 }
 
+// SetReady updates the application readiness flag used by readiness checks.
 func (s *Server) SetReady(ready bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -130,6 +149,7 @@ func (s *Server) SetPaymentReady(ready bool) {
 	s.paymentReady = ready
 }
 
+// SetBotUsername updates the runtime Telegram username used in invite links.
 func (s *Server) SetBotUsername(username string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -145,6 +165,7 @@ func (s *Server) effectiveBotUsername() string {
 	return s.botUsername
 }
 
+// Addr returns the bound listener address, or the configured address before Start.
 func (s *Server) Addr() string {
 	if s.listenerAddr != "" {
 		return s.listenerAddr
@@ -152,6 +173,9 @@ func (s *Server) Addr() string {
 	return s.addr
 }
 
+// Start binds the listener, registers all HTTP routes, and serves requests in a
+// background goroutine. The context is reserved for lifecycle coordination by
+// callers; use Stop to shut the server down gracefully.
 func (s *Server) Start(ctx context.Context) error {
 	mux := http.NewServeMux()
 
@@ -195,6 +219,8 @@ func (s *Server) Start(ctx context.Context) error {
 	return nil
 }
 
+// initSubserverAccessLogger creates the optional subscription access logger
+// configured by SubServerAccessLogPath. Logging remains disabled when no path is set.
 func (s *Server) initSubserverAccessLogger() {
 	if s.cfg == nil || s.cfg.SubServerAccessLogPath == "" {
 		return
@@ -214,6 +240,8 @@ func (s *Server) initSubserverAccessLogger() {
 	}
 }
 
+// Stop flushes the optional access logger and gracefully shuts down the HTTP
+// server. It returns all shutdown errors joined together.
 func (s *Server) Stop(ctx context.Context) error {
 	var errs []error
 	if s.subserverLogger != nil {
@@ -233,6 +261,8 @@ func (s *Server) Stop(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
+// handleHealthz serves the dependency health report. GET and HEAD are accepted;
+// a dependency failure is represented in the JSON response and HTTP status.
 func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		w.Header().Set("Allow", "GET, HEAD")
@@ -247,6 +277,8 @@ func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, health)
 }
 
+// handleReadyz reports whether the service is ready to receive traffic. Unlike
+// healthz, degraded or down dependencies produce a 503 response.
 func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		w.Header().Set("Allow", "GET, HEAD")
@@ -268,6 +300,10 @@ func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// handlePaymentCallback validates and dispatches Platega webhook events. It
+// authenticates the request, enforces a bounded single-JSON body, applies the
+// payment state transition, and returns a JSON acknowledgement for accepted
+// provider statuses.
 func (s *Server) handlePaymentCallback(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", "POST")
@@ -308,9 +344,13 @@ func (s *Server) handlePaymentCallback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid callback", http.StatusBadRequest)
 		return
 	}
-	var trailing struct{}
+	var trailing json.RawMessage
 	if err := decoder.Decode(&trailing); err != io.EOF {
-		s.notifyPaymentCallbackIssue(r.Context(), payload, "trailing_callback_data", err.Error(), "send exactly one JSON callback document")
+		reason := "callback contains trailing JSON data"
+		if err != nil {
+			reason = err.Error()
+		}
+		s.notifyPaymentCallbackIssue(r.Context(), payload, "trailing_callback_data", reason, "send exactly one JSON callback document")
 		http.Error(w, "invalid callback", http.StatusBadRequest)
 		return
 	}
@@ -376,6 +416,8 @@ func (s *Server) handlePaymentCallback(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 }
 
+// notifyPaymentCallbackIssue sends malformed or operational callback details
+// to the payment service, which logs the event and alerts the administrator.
 func (s *Server) notifyPaymentCallbackIssue(ctx context.Context, payload platega.CallbackPayload, event, reason, action string) {
 	if s.orderService == nil {
 		return
@@ -394,6 +436,7 @@ func (s *Server) notifyPaymentCallbackIssue(ctx context.Context, payload platega
 	})
 }
 
+// handleLogo serves the embedded mobile-optimized logo with a long cache lifetime.
 func (s *Server) handleLogo(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		w.Header().Set("Allow", "GET, HEAD")
@@ -413,6 +456,7 @@ func (s *Server) handleLogo(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(data)
 }
 
+// HealthResponse is the JSON document returned by the health endpoint.
 type HealthResponse struct {
 	Status     string                     `json:"status"`
 	Components map[string]ComponentHealth `json:"components"`
@@ -420,6 +464,8 @@ type HealthResponse struct {
 	Uptime     string                     `json:"uptime"`
 }
 
+// checkHealth runs a snapshot of all registered dependency checkers and folds
+// their results into one aggregate status.
 func (s *Server) checkHealth(ctx context.Context) HealthResponse {
 	s.mu.RLock()
 	checkers := make(map[string]func(context.Context) ComponentHealth, len(s.checkers))
@@ -449,6 +495,7 @@ func (s *Server) checkHealth(ctx context.Context) HealthResponse {
 	return response
 }
 
+// writeJSON writes a health response and maps a down aggregate status to HTTP 503.
 func (s *Server) writeJSON(w http.ResponseWriter, resp HealthResponse) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -464,10 +511,14 @@ func (s *Server) writeJSON(w http.ResponseWriter, resp HealthResponse) {
 	}
 }
 
+// handleInvite is the route adapter for the public invite landing page.
 func (s *Server) handleInvite(w http.ResponseWriter, r *http.Request) {
 	s.HandleInvite(w, r)
 }
 
+// HandleInvite validates an invite code, reuses an unactivated trial from the
+// visitor cookie when possible, enforces the IP rate limit, and renders the trial
+// landing page for a newly created subscription.
 func (s *Server) HandleInvite(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", "GET")
@@ -632,6 +683,8 @@ func (s *Server) getExistingTrialFromCookie(r *http.Request, ctx context.Context
 	return sub, nil
 }
 
+// trialPageData contains the server-generated links and duration displayed by
+// the invite landing page template.
 type trialPageData struct {
 	HappLink     template.URL
 	SubURL       string
@@ -639,6 +692,8 @@ type trialPageData struct {
 	TrialHours   int
 }
 
+// renderTrialPage executes the invite landing page template using server-generated
+// subscription and Telegram links.
 func (s *Server) renderTrialPage(w http.ResponseWriter, subID, subURL, telegramLink string, trialHours int) {
 	happLink := "happ://add/" + subURL
 	data := trialPageData{
@@ -652,10 +707,12 @@ func (s *Server) renderTrialPage(w http.ResponseWriter, subID, subURL, telegramL
 	}
 }
 
+// errorPageData is the view model for the generic HTML error page.
 type errorPageData struct {
 	Message string
 }
 
+// renderErrorPage renders a user-facing error without exposing internal details.
 func (s *Server) renderErrorPage(w http.ResponseWriter, message string) {
 	data := errorPageData{Message: message}
 	if err := s.errorTemplate.Execute(w, data); err != nil {
@@ -663,6 +720,8 @@ func (s *Server) renderErrorPage(w http.ResponseWriter, message string) {
 	}
 }
 
+// getClientIP extracts the client address for rate limiting and access logs.
+// Proxy headers are trusted only when the direct peer is local or private.
 func getClientIP(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err == nil && isLocalAddress(host) {
@@ -698,6 +757,8 @@ func getClientIP(r *http.Request) string {
 	return host
 }
 
+// isLocalAddress reports whether a peer belongs to loopback or a private network.
+// Such peers are allowed to supply reverse-proxy client IP headers.
 func isLocalAddress(host string) bool {
 	ip := net.ParseIP(host)
 	if ip == nil {
@@ -813,6 +874,8 @@ func (s *Server) handleSubscription(w http.ResponseWriter, r *http.Request) {
 	_, _ = response.Write(result.Body)
 }
 
+// logSubscriptionAccess records the completed subscription response after the
+// handler has captured its status, source counts, and success count.
 func (s *Server) logSubscriptionAccess(rec *statusRecorder, r *http.Request, clientIP string) {
 	if s == nil || s.subserverLogger == nil || rec == nil {
 		return
@@ -820,12 +883,16 @@ func (s *Server) logSubscriptionAccess(rec *statusRecorder, r *http.Request, cli
 	s.subserverLogger.Log(r, rec.StatusCode(), clientIP, rec.success, rec.total)
 }
 
+// writeSubscriptionText writes a plain-text subscription response with the
+// supplied status code and a consistent content type.
 func writeSubscriptionText(w http.ResponseWriter, statusCode int, body string) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(statusCode)
 	w.Write([]byte(body))
 }
 
+// statusRecorder captures the response status and subscription aggregation counts
+// while preserving the underlying ResponseWriter behavior.
 type statusRecorder struct {
 	http.ResponseWriter
 
@@ -834,6 +901,7 @@ type statusRecorder struct {
 	total      int
 }
 
+// WriteHeader records the first response status before forwarding the call.
 func (r *statusRecorder) WriteHeader(statusCode int) {
 	if r.statusCode == 0 {
 		r.statusCode = statusCode
@@ -841,6 +909,7 @@ func (r *statusRecorder) WriteHeader(statusCode int) {
 	r.ResponseWriter.WriteHeader(statusCode)
 }
 
+// Write defaults an unwritten response to 200 and forwards the body bytes.
 func (r *statusRecorder) Write(b []byte) (int, error) {
 	if r.statusCode == 0 {
 		r.statusCode = http.StatusOK
@@ -848,6 +917,7 @@ func (r *statusRecorder) Write(b []byte) (int, error) {
 	return r.ResponseWriter.Write(b)
 }
 
+// StatusCode returns the recorded status, defaulting to 200 when nothing was written.
 func (r *statusRecorder) StatusCode() int {
 	if r.statusCode == 0 {
 		return http.StatusOK
