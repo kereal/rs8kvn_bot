@@ -41,7 +41,7 @@ func TestCreateTransactionContract(t *testing.T) {
 		require.Equal(t, "123", body.Metadata.UserID)
 		require.Equal(t, "@user", body.Metadata.UserName)
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"transactionId":"tx-7","url":"https://pay.test/7","status":"PENDING","expiresIn":"00:15:00"}`))
+		_, _ = w.Write([]byte(`{"transactionId":"550e8400-e29b-41d4-a716-446655440007","url":"https://pay.test/7","status":"PENDING","expiresIn":"00:15:00"}`))
 	}))
 	defer server.Close()
 
@@ -49,13 +49,13 @@ func TestCreateTransactionContract(t *testing.T) {
 		AmountCents: 23005, Currency: "RUB", Description: "Premium", Payload: "order-7", UserID: "123", UserName: "@user",
 	})
 	require.NoError(t, err)
-	require.Equal(t, "tx-7", got.TransactionID)
+	require.Equal(t, "550e8400-e29b-41d4-a716-446655440007", got.TransactionID)
 	require.Equal(t, "https://pay.test/7", got.URL)
 }
 
 func TestCreateTransactionAcceptsRedirect(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"transactionId":"tx-8","redirect":"https://pay.test/8","expiresIn":"00:15:00"}`))
+		_, _ = w.Write([]byte(`{"transactionId":"550e8400-e29b-41d4-a716-446655440008","redirect":"https://pay.test/8","expiresIn":"00:15:00"}`))
 	}))
 	defer server.Close()
 

@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/google/uuid"
 	flag "github.com/kereal/rs8kvn_bot/internal/flag"
 )
 
@@ -209,6 +210,9 @@ func (c *Config) validate() error {
 		}
 		if strings.TrimSpace(c.PlategaMerchantID) == "" || strings.TrimSpace(c.PlategaSecret) == "" {
 			return fmt.Errorf("PLATEGA_MERCHANT_ID and PLATEGA_SECRET are required when PAYMENT_ENABLED=true")
+		}
+		if _, err := uuid.Parse(strings.TrimSpace(c.PlategaMerchantID)); err != nil {
+			return fmt.Errorf("PLATEGA_MERCHANT_ID must be a UUID: %w", err)
 		}
 	}
 	// Global subscription URL validation (required)
