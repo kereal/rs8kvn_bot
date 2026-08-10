@@ -8,6 +8,7 @@ import (
 
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/logger"
+	"github.com/kereal/rs8kvn_bot/internal/service"
 	"github.com/kereal/rs8kvn_bot/internal/utils"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -366,4 +367,70 @@ func (sh *SubscriptionHandler) handleCreateError(ctx context.Context, chatID int
 	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, errMsg)
 	editMsg.DisableWebPagePreview = true
 	sh.h.safeSend(editMsg)
+}
+
+// handleBuyPremiumList renders the product list for the payment flow.
+func (sh *SubscriptionHandler) handleBuyPremiumList(ctx context.Context, chatID int64, _ string, messageID int) error {
+	if sh.h.orderService == nil || !sh.h.paymentEnabled {
+		return sh.showBuyError(chatID, messageID, "❌ Платежи временно недоступны")
+	}
+	products, err := sh.h.db.ListActiveProducts(ctx)
+	if err != nil {
+		logger.Warn("list active products failed", zap.Error(err))
+		return sh.showBuyError(chatID, messageID, msg(MsgSubTempError))
+	}
+	if len(products) == 0 {
+		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "❌ Нет доступных тарифов")
+		kb := sh.h.keyboards.Back()
+		editMsg.ReplyMarkup = &kb
+		sh.h.safeSend(editMsg)
+		return nil
+	}
+	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "Выберите тариф для оплаты:")
+	keyboard := sh.h.keyboards.BuyProductList(products)
+	editMsg.ReplyMarkup = &keyboard
+	sh.h.safeSend(editMsg)
+	return nil
+}
+
+// handleBuyProduct creates a Platega payment link for a specific product.
+func (sh *SubscriptionHandler) handleBuyProduct(ctx context.Context, chatID int64, username string, messageID int, productID uint) error {
+	if sh.h.orderService == nil || !sh.h.paymentEnabled {
+		return sh.showBuyError(chatID, messageID, "❌ Платежи временно недоступны")
+	}
+	product, err := sh.h.db.GetProductByID(ctx, productID)
+	if err != nil {
+		logger.Warn("load product failed", zap.Uint("product_id", productID), zap.Error(err))
+		return sh.showBuyError(chatID, messageID, msg(MsgSubTempError))
+	}
+	if product == nil || !product.IsActive || product.PriceCents <= 0 {
+		return sh.showBuyError(chatID, messageID, "❌ Тариф недоступен")
+	}
+	info, _, err := sh.h.orderService.RequestPayment(ctx, chatID, username, product)
+	if err != nil {
+		if errors.Is(err, service.ErrPaymentDisabled) {
+			return sh.showBuyError(chatID, messageID, "❌ Платежи временно недоступны")
+		}
+		logger.Warn("request payment failed",
+			zap.Uint("product_id", productID),
+			zap.Int64("chat_id", chatID),
+			zap.Error(err))
+		return sh.showBuyError(chatID, messageID, msg(MsgSubTempError))
+	}
+	text := fmt.Sprintf("Тариф: %s\nСтоимость: %.2f ₽\n\nПосле оплаты бот пришлёт данные подписки.",
+		product.Name, float64(product.PriceCents)/100)
+	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, text)
+	keyboard := sh.h.keyboards.BuyProductConfirm(product, info.URL)
+	editMsg.ReplyMarkup = &keyboard
+	sh.h.safeSend(editMsg)
+	return nil
+}
+
+// showBuyError renders an error message and a back button.
+func (sh *SubscriptionHandler) showBuyError(chatID int64, messageID int, text string) error {
+	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, text)
+	kb := sh.h.keyboards.Back()
+	editMsg.ReplyMarkup = &kb
+	sh.h.safeSend(editMsg)
+	return nil
 }

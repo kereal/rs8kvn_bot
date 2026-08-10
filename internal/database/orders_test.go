@@ -8,6 +8,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 func TestCreateOrder_Success(t *testing.T) {
@@ -185,6 +186,17 @@ func TestUpdateOrderStatus_Transitions(t *testing.T) {
 			PaymentProvider:   fmt.Sprintf("provider-%d", i),
 			ProviderPaymentID: fmt.Sprintf("pay-trans-%d", i),
 		}
+		if i > 0 {
+			// The payment invariant permits only one pending intent for a
+			// subscription/product pair; terminalize the previous row first.
+			previous := &Order{}
+			result := svc.db.Where("subscription_id = ? AND product_id = ? AND status = ?", sub.ID, product.ID, OrderStatusPending).First(previous)
+			if result.Error == nil {
+				require.NoError(t, svc.UpdateOrderStatus(ctx, previous.ID, OrderStatusCanceled))
+			} else {
+				require.ErrorIs(t, result.Error, gorm.ErrRecordNotFound)
+			}
+		}
 		require.NoError(t, svc.CreateOrder(ctx, order))
 
 		err := svc.UpdateOrderStatus(ctx, order.ID, status)
@@ -281,4 +293,59 @@ func TestOrderStatusConstants(t *testing.T) {
 	assert.Equal(t, OrderStatus("paid"), OrderStatusPaid)
 	assert.Equal(t, OrderStatus("expired"), OrderStatusExpired)
 	assert.Equal(t, OrderStatus("canceled"), OrderStatusCanceled)
+}
+
+func TestConfirmOrderPaidCAS_SwitchesPlanAndStatus(t *testing.T) {
+	t.Parallel()
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	// trial plan + paid plan; sub starts on trial with expired status.
+	trialPlan := &Plan{Name: "plan-cas-trial", DevicesLimit: 1, TrafficLimit: 100}
+	require.NoError(t, svc.db.WithContext(ctx).Create(trialPlan).Error)
+	paidPlan := &Plan{Name: "plan-cas-premium", DevicesLimit: 2, TrafficLimit: 20000}
+	require.NoError(t, svc.db.WithContext(ctx).Create(paidPlan).Error)
+	product := &Product{PlanID: paidPlan.ID, Name: "1M", DurationDays: 30, PriceCents: 499, Currency: "RUB", IsActive: true}
+	require.NoError(t, svc.db.WithContext(ctx).Create(product).Error)
+
+	sub := createTestSubscription(t, svc, 900, "usercas", "client-cas")
+	sub.PlanID = trialPlan.ID
+	sub.Status = "expired"
+	require.NoError(t, svc.db.Save(sub).Error)
+
+	order := &Order{
+		SubscriptionID: sub.ID,
+		ProductID:      product.ID,
+		Status:         OrderStatusPending,
+		AmountCents:    499,
+		Currency:       "RUB",
+	}
+	require.NoError(t, svc.CreateOrder(ctx, order))
+
+	now := time.Now().UTC().Truncate(time.Second)
+	newExpiry := now.Add(30 * 24 * time.Hour)
+
+	var gotPlanID uint
+	applyPlan := func(_ context.Context, tx *gorm.DB, subscriptionID uint, planID uint) error {
+		assert.Equal(t, sub.ID, subscriptionID)
+		gotPlanID = planID
+		return nil
+	}
+
+	activated, err := svc.ConfirmOrderPaidCAS(ctx, order.ID, now, now, sub, newExpiry, product, applyPlan)
+	require.NoError(t, err)
+	assert.True(t, activated)
+	// applyPlan must receive the PRODUCT plan, not the stale sub.PlanID.
+	assert.Equal(t, paidPlan.ID, gotPlanID)
+
+	got, err := svc.GetByID(ctx, sub.ID)
+	require.NoError(t, err)
+	assert.Equal(t, paidPlan.ID, got.PlanID, "subscription must switch to the purchased plan")
+	assert.Equal(t, string(SubscriptionStatusActive), got.Status, "payment must reactivate the subscription")
+	assert.Equal(t, product.ID, *got.ProductID)
+
+	// Idempotent retry: order already paid, no second activation.
+	activated, err = svc.ConfirmOrderPaidCAS(ctx, order.ID, now, now, sub, newExpiry, product, applyPlan)
+	require.NoError(t, err)
+	assert.False(t, activated)
 }

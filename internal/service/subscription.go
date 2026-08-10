@@ -260,6 +260,47 @@ func (s *SubscriptionService) reanimateRevokedSubscription(ctx context.Context, 
 	return sub, nil
 }
 
+// DowngradeToFreePlan resets a subscription to the free plan, removes premium VPN
+// nodes, and re-creates free-plan nodes. Used when a paid order is chargebacked:
+// the user loses premium access but retains the free tier. Returns the updated subscription.
+func (s *SubscriptionService) DowngradeToFreePlan(ctx context.Context, sub *database.Subscription) (*database.Subscription, error) {
+	if sub == nil {
+		return nil, errors.New("downgrade: subscription is nil")
+	}
+
+	freePlan, err := s.db.GetPlanByName(ctx, database.FreePlanName)
+	if err != nil {
+		return nil, fmt.Errorf("downgrade: resolve free plan: %w", err)
+	}
+
+	// Reset subscription to free-plan defaults.
+	sub.PlanID = freePlan.ID
+	sub.Status = "active"
+	sub.ExpiresAt = nil
+	sub.ProductID = nil
+	sub.StartedAt = nil
+	sub.PricePaidCents = 0
+	sub.Currency = nil
+
+	if err := s.db.UpdateSubscription(ctx, sub); err != nil {
+		return nil, fmt.Errorf("downgrade: update subscription: %w", err)
+	}
+
+	// Remove premium VPN nodes; ensureSubscriptionNodes rebuilds free-plan nodes.
+	if err := s.db.DeleteSubscriptionNodesBySubscriptionID(ctx, sub.ID); err != nil {
+		logger.Warn("downgrade: failed to clear subscription nodes",
+			zap.Uint("subscription_id", sub.ID),
+			zap.Error(err))
+	}
+
+	if err := s.ensureSubscriptionNodes(ctx, sub); err != nil {
+		return nil, fmt.Errorf("downgrade: ensure subscription nodes: %w", err)
+	}
+
+	s.RefreshActiveSubscriptionsMetric(ctx)
+	return sub, nil
+}
+
 // revokeAndDeprovisionThenDelete runs the two-phase subscription teardown shared by
 // Delete and DeleteByID: mark revoked → deprovision VPN access (best-effort; background
 // sync reconciles on failure) → physically delete the DB row + subscription nodes →

@@ -69,6 +69,7 @@ type Handler struct {
 	sender              *MessageSender
 	keyboards           *KeyboardBuilder
 	orderService        *service.OrderService
+	paymentEnabled      bool
 	version             string
 	referral            *ReferralHandler
 
@@ -98,7 +99,6 @@ type Handler struct {
 func NewHandler(bot interfaces.BotAPI, cfg *config.Config, db interfaces.DatabaseService, botConfig *BotConfig, subService *service.SubscriptionService, version string) *Handler {
 	rl := ratelimiter.NewPerUserRateLimiter(float64(config.RateLimiterMaxTokens), float64(config.RateLimiterRefillRate))
 	kb := NewKeyboardBuilder(botConfig.Username, cfg.ContactUsername, cfg.DonateCardNumber, cfg.DonateURL, cfg.SiteURL, cfg.DonateEnabled)
-	kb.SetPaymentEnabled(cfg != nil && cfg.PaymentEnabled)
 
 	h := &Handler{
 		bot:                 bot,
@@ -114,6 +114,7 @@ func NewHandler(bot interfaces.BotAPI, cfg *config.Config, db interfaces.Databas
 		referralCache:       NewReferralCache(db),
 		sender:              NewMessageSender(bot, rl),
 		keyboards:           kb,
+		paymentEnabled:      cfg != nil && cfg.PaymentEnabled,
 		version:             version,
 	}
 	// Initialize admin rate limiters map
@@ -145,7 +146,6 @@ func (h *Handler) SetBot(bot interfaces.BotAPI) {
 func (h *Handler) SetBotConfig(bc *BotConfig) {
 	h.botConfig = bc
 	h.keyboards = NewKeyboardBuilder(bc.Username, h.cfg.ContactUsername, h.cfg.DonateCardNumber, h.cfg.DonateURL, h.cfg.SiteURL, h.cfg.DonateEnabled)
-	h.keyboards.SetPaymentEnabled(h.cfg != nil && h.cfg.PaymentEnabled)
 	// Propagate to decomposed handlers so generated links use the real bot username.
 	h.referral.SetBotConfig(bc)
 }
@@ -158,38 +158,14 @@ func (h *Handler) Cache() *SubscriptionCache {
 
 // SetOrderService wires the order service after handler construction.
 
-func (h *Handler) handlePaymentMenu(ctx context.Context, chatID int64, username string, messageID int) error {
-	if h.cfg == nil || !h.cfg.PaymentEnabled || h.orderService == nil {
-		return errors.New("payment is unavailable")
-	}
-	products, err := h.db.ListActiveProducts(ctx)
-	if err != nil {
-		return fmt.Errorf("list active products: %w", err)
-	}
-	msg := tgbotapi.NewEditMessageText(chatID, messageID, "Выберите тариф для оплаты:")
-	keyboard := h.keyboards.BuyProductList(products)
-	msg.ReplyMarkup = &keyboard
-	h.safeSend(msg)
-	return nil
+// handleBuyPremiumList and handleBuyProduct are implemented in subscription_handler.go
+// (SubscriptionHandler) and exposed here via delegates for readability.
+func (h *Handler) handleBuyPremiumList(ctx context.Context, chatID int64, username string, messageID int) error {
+	return h.getSubHandler().handleBuyPremiumList(ctx, chatID, username, messageID)
 }
 
-func (h *Handler) handlePayProduct(ctx context.Context, chatID int64, username string, messageID int, productID uint) error {
-	product, err := h.db.GetProductByID(ctx, productID)
-	if err != nil {
-		return err
-	}
-	if product == nil || !product.IsActive || product.PriceCents <= 0 {
-		return errors.New("paid product is unavailable")
-	}
-	info, _, err := h.orderService.RequestPayment(ctx, chatID, username, product)
-	if err != nil {
-		return err
-	}
-	msg := tgbotapi.NewEditMessageText(chatID, messageID, fmt.Sprintf("Тариф: %s\nСтоимость: %.2f ₽\n\nПосле оплаты бот пришлёт данные подписки.", product.Name, float64(product.PriceCents)/100))
-	keyboard := h.keyboards.BuyProductConfirm(product, info.URL)
-	msg.ReplyMarkup = &keyboard
-	h.safeSend(msg)
-	return nil
+func (h *Handler) handleBuyProduct(ctx context.Context, chatID int64, username string, messageID int, productID uint) error {
+	return h.getSubHandler().handleBuyProduct(ctx, chatID, username, messageID, productID)
 }
 
 func (h *Handler) SetOrderService(orderService *service.OrderService) {
@@ -452,17 +428,13 @@ func (h *Handler) getQRKeyboard() tgbotapi.InlineKeyboardMarkup {
 }
 
 // getMainMenuKeyboard builds the main menu keyboard.
-func (h *Handler) getMainMenuKeyboard(hasSubscription bool, freeUpgradeLabel ...string) tgbotapi.InlineKeyboardMarkup {
+func (h *Handler) getMainMenuKeyboard(hasSubscription bool) tgbotapi.InlineKeyboardMarkup {
 	h.keyboardsOnce.Do(func() {
 		if h.keyboards == nil {
 			h.keyboards = NewKeyboardBuilder("", "", "", "", "", true)
 		}
 	})
-	label := ""
-	if len(freeUpgradeLabel) > 0 {
-		label = freeUpgradeLabel[0]
-	}
-	return h.keyboards.MainMenu(hasSubscription, label)
+	return h.keyboards.MainMenu(hasSubscription, h.paymentEnabled)
 }
 
 // addAdminButtons appends admin control buttons to a keyboard if the user is an admin.

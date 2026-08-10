@@ -106,6 +106,26 @@ func TestGetActiveByPlanID_Empty(t *testing.T) {
 	assert.Empty(t, products)
 }
 
+func TestListActiveProducts_FiltersAndSortsByActivePlan(t *testing.T) {
+	t.Parallel()
+	svc := newTestService(t)
+	ctx := context.Background()
+	activePlan := &Plan{Name: "active-paid-plan", IsActive: true, DevicesLimit: 1}
+	inactivePlan := &Plan{Name: "inactive-paid-plan", IsActive: false, DevicesLimit: 1}
+	require.NoError(t, svc.db.Create(activePlan).Error)
+	require.NoError(t, svc.db.Create(inactivePlan).Error)
+	require.NoError(t, svc.db.Model(inactivePlan).Update("is_active", false).Error)
+	require.NoError(t, svc.db.Create(&Product{PlanID: activePlan.ID, Name: "expensive", DurationDays: 30, PriceCents: 200, Currency: "RUB", IsActive: true}).Error)
+	require.NoError(t, svc.db.Create(&Product{PlanID: activePlan.ID, Name: "cheap", DurationDays: 31, PriceCents: 100, Currency: "RUB", IsActive: true}).Error)
+	require.NoError(t, svc.db.Create(&Product{PlanID: inactivePlan.ID, Name: "inactive plan", DurationDays: 30, PriceCents: 1, Currency: "RUB", IsActive: true}).Error)
+	require.NoError(t, svc.db.Create(&Product{PlanID: activePlan.ID, Name: "free", DurationDays: 32, PriceCents: 0, Currency: "RUB", IsActive: true}).Error)
+	products, err := svc.ListActiveProducts(ctx)
+	require.NoError(t, err)
+	require.Len(t, products, 2)
+	assert.Equal(t, "cheap", products[0].Name)
+	assert.Equal(t, "expensive", products[1].Name)
+}
+
 func TestGetProductByID_Success(t *testing.T) {
 	t.Parallel()
 
