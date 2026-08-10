@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/xui"
 
@@ -173,18 +174,18 @@ type OrderRepository interface {
 	CreateOrder(ctx context.Context, order *database.Order) error
 	GetOrderByID(ctx context.Context, id uint) (*database.Order, error)
 	GetOrdersBySubscriptionID(ctx context.Context, subscriptionID uint) ([]database.Order, error)
-	GetOrderByProviderPaymentID(ctx context.Context, provider, providerPaymentID string) (*database.Order, error)
+	GetOrderByProviderPaymentID(ctx context.Context, provider string, providerPaymentID uuid.UUID) (*database.Order, error)
 	UpdateOrderStatus(ctx context.Context, id uint, status database.OrderStatus) error
 	UpdateOrderPaidStatus(ctx context.Context, id uint) error
 	UpdateOrderActivatedAt(ctx context.Context, id uint, activatedAt, expiresAt time.Time) error
-	UpdateOrderProviderPaymentID(ctx context.Context, orderID uint, providerPaymentID string) error
+	UpdateOrderProviderPaymentID(ctx context.Context, orderID uint, providerPaymentID uuid.UUID) error
 	FindPendingPaymentOrder(ctx context.Context, subscriptionID, productID uint, now time.Time) (*database.Order, error)
 	CreatePendingPaymentOrder(ctx context.Context, subscriptionID, productID uint, amountCents int64, currency string, now time.Time) (*database.Order, error)
 	FindOrCreatePendingPaymentOrder(ctx context.Context, subscriptionID, productID uint, amountCents int64, currency string, now time.Time) (*database.Order, error)
 	MarkPaymentCreationUncertain(ctx context.Context, orderID uint, uncertain bool) (bool, error)
-	SavePaymentDetails(ctx context.Context, orderID uint, providerPaymentID, paymentURL string, paymentExpiresAt time.Time) error
+	SavePaymentDetails(ctx context.Context, orderID uint, providerPaymentID uuid.UUID, paymentURL string, paymentExpiresAt time.Time) error
 	ConfirmOrderPaidCAS(ctx context.Context, orderID uint, paidAt, activatedAt time.Time, sub *database.Subscription, newExpiry time.Time, product *database.Product, applyPlan database.ApplyPlanInTxFn) (bool, error)
-	CancelOrderCAS(ctx context.Context, provider, providerPaymentID string, fromStatuses []database.OrderStatus) (bool, error)
+	CancelOrderCAS(ctx context.Context, provider string, providerPaymentID uuid.UUID, fromStatuses []database.OrderStatus) (bool, error)
 }
 
 type DatabaseService interface {

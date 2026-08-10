@@ -456,6 +456,28 @@ func TestMaskURL_InvalidURL(t *testing.T) {
 	assert.Equal(t, ":///***", result, "maskURL() for invalid URL")
 }
 
+func TestConfig_Validate_InvalidPaymentMerchantUUID(t *testing.T) {
+	t.Parallel()
+	cfg := &Config{
+		TelegramBotToken:   "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
+		TelegramAdminID:    123456,
+		HeartbeatInterval:  60,
+		LogLevel:           "info",
+		WebServerPort:      DefaultWebServerPort,
+		SiteURL:            "https://vpn.site",
+		TrialDurationHours: 3,
+		TrialRateLimit:     3,
+		GlobalSubURL:       "https://vpn.example.com/sub/",
+		PaymentEnabled:     true,
+		PaymentProvider:    "platega",
+		PlategaMerchantID:  "not-a-uuid",
+		PlategaSecret:      "secret",
+	}
+	err := cfg.validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "PLATEGA_MERCHANT_ID")
+}
+
 func TestConfig_Validate_Valid(t *testing.T) {
 	t.Parallel()
 
