@@ -21,6 +21,8 @@ const (
 	MsgPremiumUnavailable MessageKey = "premium.unavailable"
 	MsgPremiumConfirm     MessageKey = "premium.confirm"
 	MsgPremiumSuccess     MessageKey = "premium.success"
+	MsgPaymentInProgress  MessageKey = "payment.in_progress"
+	MsgPaymentNeedsReview MessageKey = "payment.needs_review"
 
 	MsgAdminNoSubs       MessageKey = "admin.no_subs"
 	MsgAdminLastReg      MessageKey = "admin.last_reg"
@@ -81,6 +83,8 @@ var messages = map[MessageKey]string{
 	MsgPremiumUnavailable: "❌ Бесплатный premium-продукт сейчас недоступен. Попробуйте позже.",
 	MsgPremiumConfirm:     "💳 Вы покупаете *%s* за *%s*.\n\nНажмите «Получить», чтобы сразу активировать тариф.",
 	MsgPremiumSuccess:     "✅ Ваша подписка %s активирована\n\n%s\n\n🔗 Ссылка на подписку\n`%s`\n\nОбновите подписку в программе чтобы получить изменения",
+	MsgPaymentInProgress:  "❌ Платёж уже запущен. Откройте ссылку, отправленную ранее, или дождитесь её истечения.",
+	MsgPaymentNeedsReview: "❌ Не удалось создать платёж: требуется ручная проверка. Обратитесь к администратору.",
 
 	MsgAdminNoSubs:       "📭 Нет активных подписок",
 	MsgAdminLastReg:      "📋 *Последние регистрации*\n\n",

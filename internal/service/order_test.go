@@ -322,7 +322,8 @@ func TestConfirmPayment_ReleasesPaymentLockBeforePostCommitSync(t *testing.T) {
 		GetByIDFunc: func(_ context.Context, id uint) (*database.Subscription, error) {
 			return &database.Subscription{ID: id, TelegramID: 71, PlanID: 61}, nil
 		},
-		ConfirmOrderPaidCASFunc: func(_ context.Context, _ uint, _, _ time.Time, _ *database.Subscription, _ time.Time, _ *database.Product, _ database.ApplyPlanInTxFn) (bool, error) {
+		ConfirmOrderPaidCASFunc: func(_ context.Context, _ uint, _, _ time.Time, sub *database.Subscription, _ *database.Product, _ database.ApplyPlanInTxFn) (bool, error) {
+			sub.ExpiresAt = testutil.PtrTime(time.Now().UTC().Truncate(time.Minute).AddDate(0, 0, 30))
 			return true, nil
 		},
 		GetPendingBySubscriptionIDFunc: func(context.Context, uint) ([]database.SubscriptionNode, error) {
@@ -413,7 +414,7 @@ func TestConfirmPayment_ValidationAndDatabaseFailuresNotifyAdmin(t *testing.T) {
 					}
 					return &database.Subscription{ID: 10, TelegramID: 49, PlanID: 2}, nil
 				},
-				ConfirmOrderPaidCASFunc: func(context.Context, uint, time.Time, time.Time, *database.Subscription, time.Time, *database.Product, database.ApplyPlanInTxFn) (bool, error) {
+				ConfirmOrderPaidCASFunc: func(context.Context, uint, time.Time, time.Time, *database.Subscription, *database.Product, database.ApplyPlanInTxFn) (bool, error) {
 					return false, tt.casErr
 				},
 			}
@@ -476,33 +477,11 @@ func TestCancelPaymentByProvider_ErrorsNotifyAdmin(t *testing.T) {
 	}
 }
 
-func TestCalculateProductExpiry_SamePlanExtends(t *testing.T) {
-	now := time.Now().UTC().Truncate(time.Minute)
-	oldExpiry := now.Add(10 * 24 * time.Hour)
-	product := &database.Product{PlanID: 1, DurationDays: 30}
-
-	result := calculateProductExpiry(now, 1, &oldExpiry, product)
-	assert.Equal(t, oldExpiry.AddDate(0, 0, 30), result)
-}
-
-func TestCalculateProductExpiry_NilExpiryUsesNow(t *testing.T) {
-	now := time.Now().UTC().Truncate(time.Minute)
-	product := &database.Product{PlanID: 1, DurationDays: 30}
-
-	result := calculateProductExpiry(now, 1, nil, product)
-	assert.Equal(t, now.AddDate(0, 0, 30), result)
-}
-
-func TestCalculateProductExpiry_DifferentPlanUsesNow(t *testing.T) {
-	now := time.Now().UTC().Truncate(time.Minute)
-	oldExpiry := now.Add(10 * 24 * time.Hour)
-	product := &database.Product{PlanID: 2, DurationDays: 30}
-
-	result := calculateProductExpiry(now, 1, &oldExpiry, product)
-	assert.Equal(t, now.AddDate(0, 0, 30), result)
-}
-
 func TestCancelPaymentByProvider_PaidChargebackReturnsWasPaid(t *testing.T) {
+	// The repository is consulted twice: before the CAS (current paid state) and
+	// after the CAS (reloaded canceled state). The wasPaid flag must be derived
+	// from the pre-transition state.
+	calls := 0
 	mock := &testutil.DatabaseService{
 		CancelOrderCASFunc: func(ctx context.Context, provider string, providerID uuid.UUID, from []database.OrderStatus) (bool, error) {
 			assert.Equal(t, "platega", provider)
@@ -511,7 +490,12 @@ func TestCancelPaymentByProvider_PaidChargebackReturnsWasPaid(t *testing.T) {
 			return true, nil
 		},
 		GetOrderByProviderPaymentIDFunc: func(ctx context.Context, provider string, providerID uuid.UUID) (*database.Order, error) {
-			return &database.Order{ID: 7, Status: database.OrderStatusCanceled, PaymentProvider: provider, ProviderPaymentID: providerID.String(), AmountCents: 2300, Currency: "RUB"}, nil
+			calls++
+			status := database.OrderStatusCanceled
+			if calls == 1 {
+				status = database.OrderStatusPaid
+			}
+			return &database.Order{ID: 7, Status: status, PaymentProvider: provider, ProviderPaymentID: providerID.String(), AmountCents: 2300, Currency: "RUB"}, nil
 		},
 	}
 	o := NewOrderService(mock, nil, nil, fakePaymentProvider{}, "", nil)
@@ -520,6 +504,33 @@ func TestCancelPaymentByProvider_PaidChargebackReturnsWasPaid(t *testing.T) {
 	assert.True(t, wasPaid)
 	require.NotNil(t, order)
 	assert.Equal(t, uint(7), order.ID)
+	assert.Equal(t, 2, calls, "repository must be read before and after the CAS")
+}
+
+func TestCancelPaymentByProvider_ChargebackOnPendingReportsNotPaid(t *testing.T) {
+	// A chargeback on an order that never reached paid must NOT report wasPaid:
+	// no money was collected yet, so nothing to refund.
+	calls := 0
+	mock := &testutil.DatabaseService{
+		CancelOrderCASFunc: func(ctx context.Context, provider string, providerID uuid.UUID, from []database.OrderStatus) (bool, error) {
+			assert.Contains(t, from, database.OrderStatusPaid, "chargeback must allow transition from paid")
+			return true, nil
+		},
+		GetOrderByProviderPaymentIDFunc: func(ctx context.Context, provider string, providerID uuid.UUID) (*database.Order, error) {
+			calls++
+			status := database.OrderStatusCanceled
+			if calls == 1 {
+				status = database.OrderStatusPending
+			}
+			return &database.Order{ID: 9, Status: status, PaymentProvider: provider, ProviderPaymentID: providerID.String(), AmountCents: 2300, Currency: "RUB"}, nil
+		},
+	}
+	o := NewOrderService(mock, nil, nil, fakePaymentProvider{}, "", nil)
+	order, wasPaid, err := o.CancelPaymentByProvider(context.Background(), uuid.MustParse("550e8400-e29b-41d4-a716-446655440103"), "CHARGEBACKED", json.Number("23.00"), "RUB")
+	require.NoError(t, err)
+	assert.False(t, wasPaid, "pending order chargeback must not report wasPaid")
+	require.NotNil(t, order)
+	assert.Equal(t, uint(9), order.ID)
 }
 
 func TestCancelPaymentByProvider_RejectsUnknownStatus(t *testing.T) {
@@ -541,13 +552,19 @@ func TestCancelPaymentByProvider_RejectsUnknownStatus(t *testing.T) {
 }
 
 func TestCancelPaymentByProvider_PendingCancelNotChargeback(t *testing.T) {
+	calls := 0
 	mock := &testutil.DatabaseService{
 		CancelOrderCASFunc: func(ctx context.Context, provider string, providerID uuid.UUID, from []database.OrderStatus) (bool, error) {
 			assert.NotContains(t, from, database.OrderStatusPaid, "plain CANCELED must not touch paid orders")
 			return true, nil
 		},
 		GetOrderByProviderPaymentIDFunc: func(ctx context.Context, provider string, providerID uuid.UUID) (*database.Order, error) {
-			return &database.Order{ID: 8, Status: database.OrderStatusCanceled, AmountCents: 2300, Currency: "RUB"}, nil
+			calls++
+			status := database.OrderStatusCanceled
+			if calls == 1 {
+				status = database.OrderStatusPending
+			}
+			return &database.Order{ID: 8, Status: status, AmountCents: 2300, Currency: "RUB"}, nil
 		},
 	}
 	o := NewOrderService(mock, nil, nil, fakePaymentProvider{}, "", nil)
