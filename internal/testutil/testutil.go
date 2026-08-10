@@ -117,6 +117,7 @@ type DatabaseService struct {
 	GetActiveByPlanIDFunc                       func(ctx context.Context, planID uint) ([]database.Product, error)
 	ListActiveProductsFunc                      func(ctx context.Context) ([]database.Product, error)
 	GetProductByIDFunc                          func(ctx context.Context, id uint) (*database.Product, error)
+	UpdateProductGuardedFunc                    func(ctx context.Context, product *database.Product) error
 	GetNodeByIDFunc                             func(ctx context.Context, id uint) (*database.Node, error)
 	ListEnabledFunc                             func(ctx context.Context) ([]database.Node, error)
 	GetNodesByPlanIDFunc                        func(ctx context.Context, planID uint) ([]database.Node, error)
@@ -140,7 +141,12 @@ type DatabaseService struct {
 	UpdateOrderPaidStatusFunc                   func(ctx context.Context, id uint) error
 	UpdateOrderActivatedAtFunc                  func(ctx context.Context, id uint, activatedAt, expiresAt time.Time) error
 	UpdateOrderProviderPaymentIDFunc            func(ctx context.Context, orderID uint, providerPaymentID string) error
-	ConfirmOrderPaidCASFunc                     func(ctx context.Context, orderID uint, paidAt, activatedAt time.Time, sub *database.Subscription, newExpiry time.Time, product *database.Product) (bool, error)
+	FindPendingPaymentOrderFunc                 func(ctx context.Context, subscriptionID, productID uint, now time.Time) (*database.Order, error)
+	CreatePendingPaymentOrderFunc               func(ctx context.Context, subscriptionID, productID uint, amountCents int64, currency string, now time.Time) (*database.Order, error)
+	FindOrCreatePendingPaymentOrderFunc         func(ctx context.Context, subscriptionID, productID uint, amountCents int64, currency string, now time.Time) (*database.Order, error)
+	MarkPaymentCreationUncertainFunc            func(ctx context.Context, orderID uint, uncertain bool) (bool, error)
+	SavePaymentDetailsFunc                      func(ctx context.Context, orderID uint, providerPaymentID, paymentURL string, paymentExpiresAt time.Time) error
+	ConfirmOrderPaidCASFunc                     func(ctx context.Context, orderID uint, paidAt, activatedAt time.Time, sub *database.Subscription, newExpiry time.Time, product *database.Product, applyPlan database.ApplyPlanInTxFn) (bool, error)
 	CancelOrderCASFunc                          func(ctx context.Context, provider, providerPaymentID string, fromStatuses []database.OrderStatus) (bool, error)
 	TransactionFunc                             func(ctx context.Context, fn func(*gorm.DB) error) error
 	GetSubscriptionFunc                         func(ctx context.Context, subscriptionID string) (*database.Subscription, error)
@@ -344,6 +350,13 @@ func (m *DatabaseService) GetProductByID(ctx context.Context, id uint) (*databas
 		return m.GetProductByIDFunc(ctx, id)
 	}
 	return nil, gorm.ErrRecordNotFound
+}
+
+func (m *DatabaseService) UpdateProductGuarded(ctx context.Context, product *database.Product) error {
+	if m.UpdateProductGuardedFunc != nil {
+		return m.UpdateProductGuardedFunc(ctx, product)
+	}
+	return nil
 }
 
 func (m *DatabaseService) UpdateSubscription(ctx context.Context, sub *database.Subscription) error {
@@ -932,9 +945,104 @@ func (m *DatabaseService) UpdateOrderProviderPaymentID(ctx context.Context, orde
 	return nil
 }
 
-func (m *DatabaseService) ConfirmOrderPaidCAS(ctx context.Context, orderID uint, paidAt, activatedAt time.Time, sub *database.Subscription, newExpiry time.Time, product *database.Product) (bool, error) {
+func (m *DatabaseService) FindPendingPaymentOrder(ctx context.Context, subscriptionID, productID uint, now time.Time) (*database.Order, error) {
+	if m.FindPendingPaymentOrderFunc != nil {
+		return m.FindPendingPaymentOrderFunc(ctx, subscriptionID, productID, now)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, order := range m.Orders {
+		if order.SubscriptionID == subscriptionID && order.ProductID == productID && order.PaymentProvider == "platega" && order.Status == database.OrderStatusPending {
+			if order.PaymentExpiresAt != nil && !now.Before(*order.PaymentExpiresAt) {
+				order.Status = database.OrderStatusExpired
+				continue
+			}
+			return order, nil
+		}
+	}
+	return nil, nil
+}
+
+func (m *DatabaseService) CreatePendingPaymentOrder(ctx context.Context, subscriptionID, productID uint, amountCents int64, currency string, now time.Time) (*database.Order, error) {
+	if m.CreatePendingPaymentOrderFunc != nil {
+		return m.CreatePendingPaymentOrderFunc(ctx, subscriptionID, productID, amountCents, currency, now)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.Orders == nil {
+		m.Orders = make(map[uint]*database.Order)
+		m.OrdersBySubscriptionID = make(map[uint][]database.Order)
+	}
+	for _, existing := range m.Orders {
+		if existing.SubscriptionID == subscriptionID && existing.ProductID == productID && existing.PaymentProvider == "platega" && existing.Status == database.OrderStatusPending {
+			return existing, nil
+		}
+	}
+	order := &database.Order{ID: uint(len(m.Orders) + 1), SubscriptionID: subscriptionID, ProductID: productID, Status: database.OrderStatusPending, AmountCents: amountCents, Currency: currency, PaymentProvider: "platega", CreatedAt: now}
+	m.Orders[order.ID] = order
+	m.OrdersBySubscriptionID[subscriptionID] = append(m.OrdersBySubscriptionID[subscriptionID], *order)
+	return order, nil
+}
+
+func (m *DatabaseService) FindOrCreatePendingPaymentOrder(ctx context.Context, subscriptionID, productID uint, amountCents int64, currency string, now time.Time) (*database.Order, error) {
+	if m.FindOrCreatePendingPaymentOrderFunc != nil {
+		return m.FindOrCreatePendingPaymentOrderFunc(ctx, subscriptionID, productID, amountCents, currency, now)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, order := range m.Orders {
+		if order.SubscriptionID == subscriptionID && order.ProductID == productID && order.PaymentProvider == "platega" && order.Status == database.OrderStatusPending {
+			if order.PaymentCreationUncertain {
+				return order, nil
+			}
+			if order.PaymentExpiresAt != nil && !now.Before(*order.PaymentExpiresAt) {
+				order.Status = database.OrderStatusExpired
+				continue
+			}
+			return order, nil
+		}
+	}
+	if m.Orders == nil {
+		m.Orders = make(map[uint]*database.Order)
+		m.OrdersBySubscriptionID = make(map[uint][]database.Order)
+	}
+	order := &database.Order{ID: uint(len(m.Orders) + 1), SubscriptionID: subscriptionID, ProductID: productID, Status: database.OrderStatusPending, AmountCents: amountCents, Currency: currency, PaymentProvider: "platega", CreatedAt: now}
+	m.Orders[order.ID] = order
+	m.OrdersBySubscriptionID[subscriptionID] = append(m.OrdersBySubscriptionID[subscriptionID], *order)
+	return order, nil
+}
+
+func (m *DatabaseService) MarkPaymentCreationUncertain(ctx context.Context, orderID uint, uncertain bool) (bool, error) {
+	if m.MarkPaymentCreationUncertainFunc != nil {
+		return m.MarkPaymentCreationUncertainFunc(ctx, orderID, uncertain)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	order, ok := m.Orders[orderID]
+	if !ok || order.Status != database.OrderStatusPending || order.PaymentCreationUncertain == uncertain || (uncertain && order.ProviderPaymentID != "") {
+		return false, nil
+	}
+	order.PaymentCreationUncertain = uncertain
+	return true, nil
+}
+
+func (m *DatabaseService) SavePaymentDetails(ctx context.Context, orderID uint, providerPaymentID, paymentURL string, paymentExpiresAt time.Time) error {
+	if m.SavePaymentDetailsFunc != nil {
+		return m.SavePaymentDetailsFunc(ctx, orderID, providerPaymentID, paymentURL, paymentExpiresAt)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	order, ok := m.Orders[orderID]
+	if !ok || order.Status != database.OrderStatusPending {
+		return gorm.ErrRecordNotFound
+	}
+	order.ProviderPaymentID, order.PaymentURL, order.PaymentExpiresAt, order.PaymentCreationUncertain = providerPaymentID, paymentURL, &paymentExpiresAt, false
+	return nil
+}
+
+func (m *DatabaseService) ConfirmOrderPaidCAS(ctx context.Context, orderID uint, paidAt, activatedAt time.Time, sub *database.Subscription, newExpiry time.Time, product *database.Product, applyPlan database.ApplyPlanInTxFn) (bool, error) {
 	if m.ConfirmOrderPaidCASFunc != nil {
-		return m.ConfirmOrderPaidCASFunc(ctx, orderID, paidAt, activatedAt, sub, newExpiry, product)
+		return m.ConfirmOrderPaidCASFunc(ctx, orderID, paidAt, activatedAt, sub, newExpiry, product, applyPlan)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -943,6 +1051,12 @@ func (m *DatabaseService) ConfirmOrderPaidCAS(ctx context.Context, orderID uint,
 		return false, nil
 	}
 	order.Status, order.PaidAt, order.ActivatedAt, order.ExpiresAt = database.OrderStatusPaid, &paidAt, &activatedAt, &newExpiry
+	if applyPlan != nil {
+		// The in-memory fake has no transaction handle. Require tests that cover
+		// transaction-scoped plan reconciliation to provide ConfirmOrderPaidCASFunc;
+		// silently invoking the callback with nil would hide a production bug.
+		return false, errors.New("mock ConfirmOrderPaidCAS requires ConfirmOrderPaidCASFunc when applyPlan is set")
+	}
 	return true, nil
 }
 

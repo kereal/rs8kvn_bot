@@ -16,6 +16,7 @@ import (
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"github.com/google/uuid"
 	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/interfaces"
@@ -58,6 +59,15 @@ type ComponentHealth struct {
 
 const subserverAccessLogCloseTimeout = 5 * time.Second
 
+// PaymentConfig holds the resolved, ready-to-use payment settings for the
+// callback endpoint. It is set via SetPaymentConfig; when nil, the endpoint
+// returns 503 to signal that payments are not available.
+type PaymentConfig struct {
+	Enabled    bool
+	MerchantID string
+	Secret     string
+}
+
 type Server struct {
 	addr            string
 	db              interfaces.WebRepository
@@ -66,6 +76,7 @@ type Server struct {
 	bot             interfaces.BotAPI
 	subService      *service.SubscriptionService
 	orderService    *service.OrderService
+	paymentConfig   *PaymentConfig
 	subServer       *subserver.Service
 	subserverLogger *subserver.AccessLogger
 	server          *http.Server
@@ -90,6 +101,14 @@ func NewServer(addr string, db interfaces.WebRepository, cfg *config.Config, bot
 // SetBot wires Telegram delivery for payment notifications.
 func (s *Server) SetBot(bot interfaces.BotAPI)                       { s.bot = bot }
 func (s *Server) SetOrderService(orderService *service.OrderService) { s.orderService = orderService }
+
+// SetPaymentConfig configures runtime payment settings used by the callback
+// endpoint. Set before exposing /payment/callback; nil disables it.
+func (s *Server) SetPaymentConfig(c *PaymentConfig) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.paymentConfig = c
+}
 
 func (s *Server) RegisterChecker(name string, checker func(context.Context) ComponentHealth) {
 	s.mu.Lock()
@@ -247,15 +266,33 @@ func (s *Server) handlePaymentCallback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if s.cfg == nil || !s.cfg.PaymentEnabled || s.orderService == nil || !platega.VerifyHeaders(s.cfg.PlategaMerchantID, s.cfg.PlategaSecret, r.Header) {
+	s.mu.RLock()
+	pc := s.paymentConfig
+	s.mu.RUnlock()
+	if pc == nil || !pc.Enabled || s.orderService == nil || s.bot == nil {
+		http.Error(w, "payments not available", http.StatusServiceUnavailable)
+		return
+	}
+	if !platega.VerifyHeaders(pc.MerchantID, pc.Secret, r.Header) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 	defer r.Body.Close()
-	decoder := json.NewDecoder(io.LimitReader(r.Body, 1<<20))
+	r.Body = http.MaxBytesReader(w, r.Body, 256<<10)
+	decoder := json.NewDecoder(r.Body)
 	decoder.UseNumber()
+	// Ignore provider fields that are not needed by this integration. Platega
+	// may add documented callback fields without requiring a bot deployment.
 	var payload platega.CallbackPayload
-	if err := decoder.Decode(&payload); err != nil || payload.Validate() != nil {
+	if err := decoder.Decode(&payload); err != nil {
+		http.Error(w, "invalid callback", http.StatusBadRequest)
+		return
+	}
+	if _, err := uuid.Parse(strings.TrimSpace(payload.ID)); err != nil {
+		http.Error(w, "invalid callback", http.StatusBadRequest)
+		return
+	}
+	if err := payload.Validate(); err != nil {
 		http.Error(w, "invalid callback", http.StatusBadRequest)
 		return
 	}
@@ -266,8 +303,15 @@ func (s *Server) handlePaymentCallback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	switch strings.ToUpper(strings.TrimSpace(payload.Status)) {
-	case "CONFIRMED", "PAID", "SUCCESS":
+	case "CONFIRMED":
 		confirmation, err := s.orderService.ConfirmPayment(r.Context(), payload.ID, payload.Amount, payload.Currency)
+		if errors.Is(err, database.ErrOrderNotFound) {
+			// Unknown payment id: not ours. Returning 200 tells Platega to stop
+			// retrying; retrying here buys nothing — the order will never exist.
+			logger.Warn("payment callback for unknown order; acking to stop retries",
+				zap.String("payment_id", payload.ID))
+			break
+		}
 		if err != nil {
 			if errors.Is(err, service.ErrAmountMismatch) || errors.Is(err, service.ErrCurrencyMismatch) || errors.Is(err, service.ErrInvalidPaymentTransition) {
 				http.Error(w, err.Error(), http.StatusBadRequest)
@@ -286,11 +330,20 @@ func (s *Server) handlePaymentCallback(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
-	case "CANCELED", "CHARGEBACKED":
-		if err := s.orderService.CancelPaymentByProvider(r.Context(), payload.ID, strings.ToUpper(strings.TrimSpace(payload.Status))); err != nil {
+	case "CANCELED":
+		if _, _, err := s.orderService.CancelPaymentByProvider(r.Context(), payload.ID, "CANCELED"); err != nil {
 			http.Error(w, "processing failed", http.StatusInternalServerError)
 			return
 		}
+	case "CHARGEBACKED":
+		// Record the chargeback transition, but do not automatically downgrade
+		// the subscription: financial reversal and access revocation require a
+		// separate reviewed operation.
+		if _, _, err := s.orderService.CancelPaymentByProvider(r.Context(), payload.ID, "CHARGEBACKED"); err != nil {
+			http.Error(w, "processing failed", http.StatusInternalServerError)
+			return
+		}
+		logger.Warn("chargeback callback recorded; manual review required", zap.String("payment_id", payload.ID), zap.String("payload", payload.Payload))
 	default:
 		logger.Warn("ignored unsupported payment callback status", zap.String("status", payload.Status), zap.String("payment_id", payload.ID))
 	}
