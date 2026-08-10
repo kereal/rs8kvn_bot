@@ -331,7 +331,7 @@ func TestConfirmPayment_ReleasesPaymentLockBeforePostCommitSync(t *testing.T) {
 			return nil, nil
 		},
 	}
-	orderService := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), fakePaymentProvider{})
+	orderService := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), fakePaymentProvider{}, "", nil)
 
 	firstDone := make(chan error, 1)
 	go func() {
@@ -369,7 +369,7 @@ func TestConfirmPayment_RequiresSyncServiceForPendingOrder(t *testing.T) {
 			return &database.Order{ID: 11, Status: database.OrderStatusPending, AmountCents: 2300, Currency: "RUB"}, nil
 		},
 	}
-	o := NewOrderService(mock, nil, nil, fakePaymentProvider{})
+	o := NewOrderService(mock, nil, nil, fakePaymentProvider{}, "", nil)
 	_, err := o.ConfirmPayment(context.Background(), providerID, json.Number("23.00"), "RUB")
 	require.ErrorIs(t, err, ErrPaymentSyncNotReady)
 }
@@ -514,7 +514,7 @@ func TestCancelPaymentByProvider_PaidChargebackReturnsWasPaid(t *testing.T) {
 			return &database.Order{ID: 7, Status: database.OrderStatusCanceled, PaymentProvider: provider, ProviderPaymentID: providerID.String(), AmountCents: 2300, Currency: "RUB"}, nil
 		},
 	}
-	o := NewOrderService(mock, nil, nil, fakePaymentProvider{})
+	o := NewOrderService(mock, nil, nil, fakePaymentProvider{}, "", nil)
 	order, wasPaid, err := o.CancelPaymentByProvider(context.Background(), uuid.MustParse("550e8400-e29b-41d4-a716-446655440101"), "CHARGEBACKED", json.Number("23.00"), "RUB")
 	require.NoError(t, err)
 	assert.True(t, wasPaid)
@@ -534,7 +534,7 @@ func TestCancelPaymentByProvider_RejectsUnknownStatus(t *testing.T) {
 			return true, nil
 		},
 	}
-	o := NewOrderService(mock, nil, nil, fakePaymentProvider{})
+	o := NewOrderService(mock, nil, nil, fakePaymentProvider{}, "", nil)
 	_, _, err := o.CancelPaymentByProvider(context.Background(), providerID, "PAID", json.Number("23.00"), "RUB")
 	require.ErrorIs(t, err, ErrInvalidPaymentTransition)
 	assert.False(t, called)
@@ -550,7 +550,7 @@ func TestCancelPaymentByProvider_PendingCancelNotChargeback(t *testing.T) {
 			return &database.Order{ID: 8, Status: database.OrderStatusCanceled, AmountCents: 2300, Currency: "RUB"}, nil
 		},
 	}
-	o := NewOrderService(mock, nil, nil, fakePaymentProvider{})
+	o := NewOrderService(mock, nil, nil, fakePaymentProvider{}, "", nil)
 	order, wasPaid, err := o.CancelPaymentByProvider(context.Background(), uuid.MustParse("550e8400-e29b-41d4-a716-446655440102"), "CANCELED", json.Number("23.00"), "RUB")
 	require.NoError(t, err)
 	assert.False(t, wasPaid)

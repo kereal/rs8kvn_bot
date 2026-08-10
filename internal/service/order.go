@@ -16,6 +16,7 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/interfaces"
 	"github.com/kereal/rs8kvn_bot/internal/logger"
+	"github.com/kereal/rs8kvn_bot/internal/metrics"
 	"github.com/kereal/rs8kvn_bot/internal/service/payment/platega"
 	"gorm.io/gorm"
 
@@ -98,6 +99,7 @@ type PaymentIssue struct {
 // to the configured administrator. Sending the alert is best-effort, but a
 // failure to send it is logged by notifyAdmin.
 func (o *OrderService) NotifyPaymentIssue(ctx context.Context, issue PaymentIssue) {
+	metrics.PaymentIssuesTotal.WithLabelValues(issue.Event).Inc()
 	logger.Warn("payment integration issue",
 		zap.String("event", issue.Event),
 		zap.String("reason", issue.Reason),
@@ -175,21 +177,16 @@ func truncatePaymentMessage(value string) string {
 	return string(runes[:maxPaymentAlertMessageLength]) + "… [truncated]"
 }
 
-// NewOrderService keeps the existing three-argument call contract; optional
-// arguments are the payment provider, bot username, and runtime configuration.
-// Missing optional arguments leave the corresponding integration disabled.
-func NewOrderService(db interfaces.DatabaseService, subSvc *SubscriptionService, syncSvc *SyncService, options ...interface{}) *OrderService {
-	o := &OrderService{db: db, subSvc: subSvc, syncSvc: syncSvc}
-	if len(options) > 0 {
-		o.payment, _ = options[0].(PaymentProvider)
+// NewOrderService wires the order service dependencies explicitly.
+func NewOrderService(db interfaces.DatabaseService, subSvc *SubscriptionService, syncSvc *SyncService, payment PaymentProvider, botUsername string, cfg *config.Config) *OrderService {
+	return &OrderService{
+		db:          db,
+		subSvc:      subSvc,
+		syncSvc:     syncSvc,
+		payment:     payment,
+		botUsername: botUsername,
+		cfg:         cfg,
 	}
-	if len(options) > 1 {
-		o.botUsername, _ = options[1].(string)
-	}
-	if len(options) > 2 {
-		o.cfg, _ = options[2].(*config.Config)
-	}
-	return o
 }
 
 // SetSyncService wires post-commit VPN synchronization after startup.
@@ -242,6 +239,18 @@ func (o *OrderService) notifyAdmin(ctx context.Context, text string) {
 // An error with an uncertain provider outcome leaves the intent marked uncertain
 // so a duplicate charge is not accidentally created by a retry.
 func (o *OrderService) RequestPayment(ctx context.Context, telegramID int64, username string, product *database.Product) (*PaymentInfo, *database.Order, error) {
+	start := time.Now()
+	info, order, err := o.requestPayment(ctx, telegramID, username, product)
+	result := "success"
+	if err != nil {
+		result = "error"
+	}
+	metrics.PaymentOperationsTotal.WithLabelValues("request", result).Inc()
+	metrics.PaymentOperationDuration.WithLabelValues("request").Observe(time.Since(start).Seconds())
+	return info, order, err
+}
+
+func (o *OrderService) requestPayment(ctx context.Context, telegramID int64, username string, product *database.Product) (*PaymentInfo, *database.Order, error) {
 	if o.payment == nil {
 		return nil, nil, ErrPaymentDisabled
 	}
@@ -434,6 +443,18 @@ func (o *OrderService) RequestPayment(ctx context.Context, telegramID int64, use
 // transition plus subscription plan changes. Only the successful pending-to-paid
 // CAS caller performs post-commit synchronization and reports Activated=true.
 func (o *OrderService) ConfirmPayment(ctx context.Context, providerPaymentID uuid.UUID, amount json.Number, currency string) (*PaymentConfirmation, error) {
+	start := time.Now()
+	confirmation, err := o.confirmPayment(ctx, providerPaymentID, amount, currency)
+	result := "success"
+	if err != nil {
+		result = "error"
+	}
+	metrics.PaymentOperationsTotal.WithLabelValues("confirm", result).Inc()
+	metrics.PaymentOperationDuration.WithLabelValues("confirm").Observe(time.Since(start).Seconds())
+	return confirmation, err
+}
+
+func (o *OrderService) confirmPayment(ctx context.Context, providerPaymentID uuid.UUID, amount json.Number, currency string) (*PaymentConfirmation, error) {
 	if o.payment == nil {
 		return nil, ErrPaymentDisabled
 	}
@@ -546,7 +567,16 @@ func (o *OrderService) ConfirmPayment(ctx context.Context, providerPaymentID uui
 // CancelPaymentByProvider validates a cancellation or chargeback callback and
 // applies an idempotent order transition. A chargeback reports wasPaid=true so
 // callers can trigger manual financial/access reconciliation.
-func (o *OrderService) CancelPaymentByProvider(ctx context.Context, providerPaymentID uuid.UUID, status string, amount json.Number, currency string) (*database.Order, bool, error) {
+func (o *OrderService) CancelPaymentByProvider(ctx context.Context, providerPaymentID uuid.UUID, status string, amount json.Number, currency string) (order *database.Order, wasPaid bool, err error) {
+	start := time.Now()
+	defer func() {
+		result := "success"
+		if err != nil {
+			result = "error"
+		}
+		metrics.PaymentOperationsTotal.WithLabelValues("cancel", result).Inc()
+		metrics.PaymentOperationDuration.WithLabelValues("cancel").Observe(time.Since(start).Seconds())
+	}()
 	if o.payment == nil {
 		return nil, false, ErrPaymentDisabled
 	}
@@ -557,7 +587,7 @@ func (o *OrderService) CancelPaymentByProvider(ctx context.Context, providerPaym
 	o.paymentMu.Lock()
 	defer o.paymentMu.Unlock()
 
-	order, err := o.db.GetOrderByProviderPaymentID(ctx, "platega", providerPaymentID)
+	order, err = o.db.GetOrderByProviderPaymentID(ctx, "platega", providerPaymentID)
 	if err != nil {
 		if errors.Is(err, database.ErrOrderNotFound) || errors.Is(err, gorm.ErrRecordNotFound) {
 			logger.Warn("payment cancellation callback for unknown order", zap.String("provider_payment_id", providerPaymentID.String()), zap.String("status", status))
