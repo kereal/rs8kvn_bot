@@ -148,6 +148,78 @@ func TestGetProductByID_Success(t *testing.T) {
 	assert.True(t, got.IsActive)
 }
 
+func TestUpdateProductGuarded_AllowsChangesBeforeFirstOrder(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+	ctx := context.Background()
+	plan, err := svc.GetPlanByName(ctx, TrialPlanName)
+	require.NoError(t, err)
+	product := &Product{PlanID: plan.ID, Name: "Original", DurationDays: 30, PriceCents: 500, Currency: "RUB", IsActive: true}
+	require.NoError(t, svc.db.Create(product).Error)
+
+	product.Name = "Updated"
+	product.DurationDays = 60
+	product.PriceCents = 700
+	require.NoError(t, svc.UpdateProductGuarded(ctx, product))
+
+	got, err := svc.GetProductByID(ctx, product.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "Updated", got.Name)
+	assert.Equal(t, 60, got.DurationDays)
+	assert.Equal(t, int64(700), got.PriceCents)
+}
+
+func TestUpdateProductGuarded_ProtectsImmutableFieldsAfterOrder(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+	ctx := context.Background()
+	sub := createTestSubscription(t, svc, 991001, "guard-user", "guard-client")
+	plan, err := svc.GetPlanByName(ctx, TrialPlanName)
+	require.NoError(t, err)
+	product := &Product{PlanID: plan.ID, Name: "Original", DurationDays: 30, PriceCents: 500, Currency: "RUB", IsActive: true}
+	require.NoError(t, svc.db.Create(product).Error)
+	require.NoError(t, svc.CreateOrder(ctx, &Order{SubscriptionID: sub.ID, ProductID: product.ID, Status: OrderStatusPending, AmountCents: 500, Currency: "RUB"}))
+
+	fields := []struct {
+		name   string
+		mutate func(*Product)
+	}{
+		{"name", func(p *Product) { p.Name = "Changed" }},
+		{"plan_id", func(p *Product) { p.PlanID++ }},
+		{"duration_days", func(p *Product) { p.DurationDays++ }},
+		{"price_cents", func(p *Product) { p.PriceCents++ }},
+		{"currency", func(p *Product) { p.Currency = "USD" }},
+	}
+	for _, field := range fields {
+		t.Run(field.name, func(t *testing.T) {
+			candidate := *product
+			field.mutate(&candidate)
+			require.ErrorIs(t, svc.UpdateProductGuarded(ctx, &candidate), ErrProductImmutable)
+		})
+	}
+}
+
+func TestUpdateProductGuarded_AllowsDeactivationAfterOrder(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+	ctx := context.Background()
+	sub := createTestSubscription(t, svc, 991002, "guard-user-2", "guard-client-2")
+	plan, err := svc.GetPlanByName(ctx, TrialPlanName)
+	require.NoError(t, err)
+	product := &Product{PlanID: plan.ID, Name: "Original", DurationDays: 30, PriceCents: 500, Currency: "RUB", IsActive: true}
+	require.NoError(t, svc.db.Create(product).Error)
+	require.NoError(t, svc.CreateOrder(ctx, &Order{SubscriptionID: sub.ID, ProductID: product.ID, Status: OrderStatusPending, AmountCents: 500, Currency: "RUB"}))
+
+	product.IsActive = false
+	require.NoError(t, svc.UpdateProductGuarded(ctx, product))
+	got, err := svc.GetProductByID(ctx, product.ID)
+	require.NoError(t, err)
+	assert.False(t, got.IsActive)
+}
+
 func TestGetProductByID_NotFound(t *testing.T) {
 	t.Parallel()
 

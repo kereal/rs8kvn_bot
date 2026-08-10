@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -79,6 +80,36 @@ func TestOrderService_NotifiesAdminForLateConfirmedPayment(t *testing.T) {
 	assert.Contains(t, messages[0].Text, "Late confirmed payment")
 	assert.Contains(t, messages[0].Text, providerID.String())
 	assert.Contains(t, messages[0].Text, "Telegram ID: 43")
+}
+
+func TestOrderService_NotifiesAdminForProviderRejection(t *testing.T) {
+	adminBot := testutil.NewBotAPI()
+	order := &database.Order{ID: 15, SubscriptionID: 6, ProductID: 10, Status: database.OrderStatusPending, AmountCents: 2300, Currency: "RUB"}
+	mock := &testutil.DatabaseService{
+		GetProductByIDFunc: func(context.Context, uint) (*database.Product, error) {
+			return &database.Product{ID: 10, PlanID: 2, Name: "Premium", PriceCents: 2300, Currency: "RUB", IsActive: true}, nil
+		},
+		GetByTelegramIDFunc: func(context.Context, int64) (*database.Subscription, error) {
+			return &database.Subscription{ID: 6, TelegramID: 45}, nil
+		},
+		FindPendingPaymentOrderFunc: func(context.Context, uint, uint, time.Time) (*database.Order, error) {
+			return order, nil
+		},
+		GetPlanByIDFunc: func(context.Context, uint) (*database.Plan, error) {
+			return &database.Plan{ID: 2, IsActive: true}, nil
+		},
+		MarkPaymentCreationUncertainFunc: func(context.Context, uint, bool) (bool, error) { return true, nil },
+		SavePaymentDetailsFunc:           func(context.Context, uint, uuid.UUID, string, time.Time) error { return nil },
+	}
+	o := NewOrderService(mock, nil, nil, errorPaymentProvider{err: fmt.Errorf("%w: invalid request", platega.ErrBadRequest)}, "", &config.Config{TelegramAdminID: 999})
+	o.SetAdminBot(adminBot)
+
+	_, _, err := o.RequestPayment(context.Background(), 45, "user", &database.Product{ID: 10})
+	require.Error(t, err)
+	messages := adminBot.GetAllSentMessages()
+	require.Len(t, messages, 1)
+	assert.Contains(t, messages[0].Text, "provider_create_rejected")
+	assert.Contains(t, messages[0].Text, "Order ID: 15")
 }
 
 func TestOrderService_NotifiesAdminWhenProviderOutcomeIsUncertain(t *testing.T) {

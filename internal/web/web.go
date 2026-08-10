@@ -294,24 +294,29 @@ func (s *Server) handlePaymentCallback(w http.ResponseWriter, r *http.Request) {
 	// may add documented callback fields without requiring a bot deployment.
 	var payload platega.CallbackPayload
 	if err := decoder.Decode(&payload); err != nil {
+		s.notifyPaymentCallbackIssue(r.Context(), payload, "malformed_callback", err.Error(), "send a corrected callback and verify the provider payload")
 		http.Error(w, "invalid callback", http.StatusBadRequest)
 		return
 	}
 	if _, err := platega.ParseTransactionID(payload.ID); err != nil {
+		s.notifyPaymentCallbackIssue(r.Context(), payload, "invalid_provider_id", err.Error(), "verify the provider transaction ID and callback schema")
 		http.Error(w, "invalid callback", http.StatusBadRequest)
 		return
 	}
 	if err := payload.Validate(); err != nil {
+		s.notifyPaymentCallbackIssue(r.Context(), payload, "invalid_callback", err.Error(), "send a corrected callback and verify the provider schema")
 		http.Error(w, "invalid callback", http.StatusBadRequest)
 		return
 	}
 	var trailing struct{}
 	if err := decoder.Decode(&trailing); err != io.EOF {
+		s.notifyPaymentCallbackIssue(r.Context(), payload, "trailing_callback_data", err.Error(), "send exactly one JSON callback document")
 		http.Error(w, "invalid callback", http.StatusBadRequest)
 		return
 	}
 	paymentID, err := platega.ParseTransactionID(payload.ID)
 	if err != nil {
+		s.notifyPaymentCallbackIssue(r.Context(), payload, "invalid_provider_id", err.Error(), "verify the provider transaction ID and callback schema")
 		http.Error(w, "invalid callback", http.StatusBadRequest)
 		return
 	}
@@ -319,13 +324,6 @@ func (s *Server) handlePaymentCallback(w http.ResponseWriter, r *http.Request) {
 	switch strings.ToUpper(strings.TrimSpace(payload.Status)) {
 	case "CONFIRMED":
 		confirmation, err := s.orderService.ConfirmPayment(r.Context(), paymentID, payload.Amount, payload.Currency)
-		if errors.Is(err, database.ErrOrderNotFound) {
-			// Unknown payment id: not ours. Returning 200 tells Platega to stop
-			// retrying; retrying here buys nothing — the order will never exist.
-			logger.Warn("payment callback for unknown order; acking to stop retries",
-				zap.String("payment_id", payload.ID))
-			break
-		}
 		if err != nil {
 			if errors.Is(err, service.ErrAmountMismatch) || errors.Is(err, service.ErrCurrencyMismatch) || errors.Is(err, service.ErrInvalidPaymentTransition) {
 				http.Error(w, err.Error(), http.StatusBadRequest)
@@ -338,9 +336,11 @@ func (s *Server) handlePaymentCallback(w http.ResponseWriter, r *http.Request) {
 			chatID, text, err := s.orderService.NotifyPaidUser(r.Context(), confirmation.Order)
 			if err != nil {
 				logger.Warn("failed to build paid notification", zap.Error(err))
+				s.orderService.NotifyPaymentIssue(r.Context(), service.PaymentIssue{Event: "paid_notification_build_failed", Reason: err.Error(), Action: "send the confirmed payment details to the user manually", OrderID: confirmation.Order.ID, SubscriptionID: confirmation.Order.SubscriptionID, ProductID: confirmation.Order.ProductID, PlanID: 0, AmountCents: confirmation.Order.AmountCents, Currency: confirmation.Order.Currency, ProviderID: payload.ID, CallbackStatus: payload.Status, Payload: payload.Payload, PaymentMethod: payload.PaymentMethod})
 			} else if chatID > 0 && s.bot != nil {
 				if _, err := s.bot.Send(tgbotapi.NewMessage(chatID, text)); err != nil {
 					logger.Warn("failed to send paid notification", zap.Int64("chat_id", chatID), zap.Error(err))
+					s.orderService.NotifyPaymentIssue(r.Context(), service.PaymentIssue{Event: "paid_notification_send_failed", Reason: err.Error(), Action: "send the confirmed payment details to the user manually", OrderID: confirmation.Order.ID, TelegramID: chatID, SubscriptionID: confirmation.Order.SubscriptionID, ProductID: confirmation.Order.ProductID, AmountCents: confirmation.Order.AmountCents, Currency: confirmation.Order.Currency, ProviderID: payload.ID, CallbackStatus: payload.Status, Payload: payload.Payload, PaymentMethod: payload.PaymentMethod})
 				}
 			}
 		}
@@ -366,11 +366,32 @@ func (s *Server) handlePaymentCallback(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		logger.Warn("chargeback callback recorded; manual review required", zap.String("payment_id", payload.ID), zap.String("payload", payload.Payload))
+	case "PENDING":
+		logger.Warn("ignored pending payment callback", zap.String("payment_id", payload.ID))
 	default:
 		logger.Warn("ignored unsupported payment callback status", zap.String("status", payload.Status), zap.String("payment_id", payload.ID))
+		s.notifyPaymentCallbackIssue(r.Context(), payload, "unsupported_callback_status", fmt.Sprintf("unsupported callback status %q", payload.Status), "verify the provider status and update the integration only after documentation confirms it")
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+}
+
+func (s *Server) notifyPaymentCallbackIssue(ctx context.Context, payload platega.CallbackPayload, event, reason, action string) {
+	if s.orderService == nil {
+		return
+	}
+	providerID := strings.TrimSpace(payload.ID)
+	callbackPayload := fmt.Sprintf("amount=%s; payload=%s", payload.Amount.String(), payload.Payload)
+	s.orderService.NotifyPaymentIssue(ctx, service.PaymentIssue{
+		Event:          event,
+		Reason:         reason,
+		Action:         action,
+		ProviderID:     providerID,
+		Currency:       payload.Currency,
+		CallbackStatus: payload.Status,
+		Payload:        callbackPayload,
+		PaymentMethod:  payload.PaymentMethod,
+	})
 }
 
 func (s *Server) handleLogo(w http.ResponseWriter, r *http.Request) {
