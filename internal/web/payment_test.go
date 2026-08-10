@@ -3,12 +3,14 @@ package web
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/google/uuid"
 	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
@@ -165,6 +167,87 @@ func TestHandlePaymentCallback_LateConfirmedNotifiesAdmin(t *testing.T) {
 	assert.Equal(t, int64(999), messages[0].ChatID)
 	assert.Contains(t, messages[0].Text, "Late confirmed payment")
 	assert.Contains(t, messages[0].Text, "Order ID: 3")
+}
+
+func TestHandlePaymentCallback_PostCommitNotificationBuildFailureAlertsAdmin(t *testing.T) {
+	t.Parallel()
+
+	order := &database.Order{ID: 6, SubscriptionID: 24, ProductID: 34, Status: database.OrderStatusPending, ProviderPaymentID: testPaymentID.String(), AmountCents: 2300, Currency: "RUB"}
+	srv, db, bot := newPaymentTestServer(t, order)
+	db.GetByIDFunc = func(context.Context, uint) (*database.Subscription, error) {
+		return &database.Subscription{ID: 24, TelegramID: 42, PlanID: 1, Status: "active"}, nil
+	}
+	db.GetByTelegramIDFunc = func(context.Context, int64) (*database.Subscription, error) {
+		return nil, errors.New("traffic lookup failed")
+	}
+
+	rec := httptest.NewRecorder()
+	srv.handlePaymentCallback(rec, paymentRequest("CONFIRMED", testPaymentID, `23.00`))
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, database.OrderStatusPaid, order.Status)
+	messages := bot.GetAllSentMessages()
+	require.Len(t, messages, 1)
+	assert.Equal(t, int64(999), messages[0].ChatID)
+	assert.Contains(t, messages[0].Text, "paid_notification_build_failed")
+}
+
+func TestHandlePaymentCallback_PostCommitNotificationSendFailureAlertsAdmin(t *testing.T) {
+	t.Parallel()
+
+	order := &database.Order{ID: 7, SubscriptionID: 25, ProductID: 35, Status: database.OrderStatusPending, ProviderPaymentID: testPaymentID.String(), AmountCents: 2300, Currency: "RUB"}
+	srv, db, bot := newPaymentTestServer(t, order)
+	db.GetByIDFunc = func(context.Context, uint) (*database.Subscription, error) {
+		return &database.Subscription{ID: 25, TelegramID: 42, PlanID: 1, Status: "active"}, nil
+	}
+	db.GetByTelegramIDFunc = func(context.Context, int64) (*database.Subscription, error) {
+		return &database.Subscription{ID: 25, TelegramID: 42, PlanID: 1, Status: "active"}, nil
+	}
+	bot.SendFunc = func(chattable tgbotapi.Chattable) (tgbotapi.Message, error) {
+		message, ok := chattable.(tgbotapi.MessageConfig)
+		if ok && message.ChatID == 42 {
+			return tgbotapi.Message{}, errors.New("user delivery failed")
+		}
+		return tgbotapi.Message{MessageID: 1}, nil
+	}
+
+	rec := httptest.NewRecorder()
+	srv.handlePaymentCallback(rec, paymentRequest("CONFIRMED", testPaymentID, `23.00`))
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, database.OrderStatusPaid, order.Status)
+	messages := bot.GetAllSentMessages()
+	require.Len(t, messages, 2)
+	assert.Equal(t, int64(42), messages[0].ChatID)
+	assert.Equal(t, int64(999), messages[1].ChatID)
+	assert.Contains(t, messages[1].Text, "paid_notification_send_failed")
+}
+
+func TestHandlePaymentCallback_PendingDoesNotNotifyAdmin(t *testing.T) {
+	t.Parallel()
+
+	srv, _, bot := newPaymentTestServer(t, nil)
+	req := paymentRequest("PENDING", testPaymentID, `23.00`)
+	rec := httptest.NewRecorder()
+
+	srv.handlePaymentCallback(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Empty(t, bot.GetAllSentMessages())
+}
+
+func TestHandlePaymentCallback_MalformedPayloadNotifiesAdmin(t *testing.T) {
+	t.Parallel()
+
+	srv, _, bot := newPaymentTestServer(t, nil)
+	req := httptest.NewRequest(http.MethodPost, "/payment/callback", strings.NewReader(`{"id":`))
+	req.Header.Set("X-MerchantId", "merchant")
+	req.Header.Set("X-Secret", "secret")
+	rec := httptest.NewRecorder()
+
+	srv.handlePaymentCallback(rec, req)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	messages := bot.GetAllSentMessages()
+	require.Len(t, messages, 1)
+	assert.Equal(t, int64(999), messages[0].ChatID)
+	assert.Contains(t, messages[0].Text, "malformed_callback")
 }
 
 func paymentRequest(status string, id uuid.UUID, amount string) *http.Request {

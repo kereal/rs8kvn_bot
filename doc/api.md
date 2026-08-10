@@ -114,7 +114,7 @@ Required JSON fields:
 }
 ```
 
-`id` is a provider transaction UUID. The JSON value is validated at the webhook boundary; the universal `orders.provider_payment_id` database column remains text for compatibility with historical IDs from other providers. `paymentMethod` and `payload` are optional. Supported statuses are `PENDING`, `CANCELED`, `CONFIRMED`, and `CHARGEBACKED`; unknown statuses are acknowledged without changing the order.
+`id` is a provider transaction UUID. The JSON value is validated at the webhook boundary; the universal `orders.provider_payment_id` database column remains text for compatibility with historical IDs from other providers. `paymentMethod` и `payload` принимаются при наличии. Официальные страницы Platega противоречат друг другу по обязательности этих полей; интеграция сохраняет совместимость. Поддерживаются `PENDING`, `CANCELED`, `CONFIRMED` и `CHARGEBACKED`; неизвестные статусы подтверждаются без изменения заказа и отправляют администратору alert для проверки.
 
 **Responses:**
 

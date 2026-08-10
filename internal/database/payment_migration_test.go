@@ -1,24 +1,53 @@
 package database
 
 import (
+	"database/sql"
+	"path/filepath"
 	"testing"
 
+	migrate "github.com/golang-migrate/migrate/v4"
+	"github.com/golang-migrate/migrate/v4/database/sqlite"
+	"github.com/golang-migrate/migrate/v4/source/iofs"
+	_ "github.com/mattn/go-sqlite3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	gormsqlite "gorm.io/driver/sqlite"
+	"gorm.io/gorm"
 )
 
-func TestMigration_PaymentIntentSchema(t *testing.T) {
-	t.Parallel()
-
-	svc := newTestService(t)
-	t.Cleanup(func() { require.NoError(t, svc.Close()) })
-	sqlDB, err := svc.db.DB()
+// newSQLiteAtMigration30 creates the real application schema immediately
+// before migration 031. The test then invokes runMigrations, so migration 031
+// itself—not a copy of its SQL—is what is validated.
+func newSQLiteAtMigration30(t *testing.T) (*sql.DB, func()) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "payment-migration.db")
+	gormDB, err := gorm.Open(gormsqlite.Open(path), &gorm.Config{})
 	require.NoError(t, err)
+	sqlDB, err := gormDB.DB()
+	require.NoError(t, err)
+
+	source, err := iofs.New(migrationFiles, "migrations")
+	require.NoError(t, err)
+	driver, err := sqlite.WithInstance(sqlDB, &sqlite.Config{})
+	require.NoError(t, err)
+	m, err := migrate.NewWithInstance("iofs", source, "sqlite", driver)
+	require.NoError(t, err)
+	require.NoError(t, m.Steps(30))
+	return sqlDB, func() {
+		_, _ = m.Close()
+		_ = sqlDB.Close()
+	}
+}
+
+func TestMigration031_PaymentIntentSchemaOnSQLite(t *testing.T) {
+	sqlDB, cleanup := newSQLiteAtMigration30(t)
+	t.Cleanup(cleanup)
+
+	require.NoError(t, runMigrations(sqlDB))
 
 	rows, err := sqlDB.Query("PRAGMA table_info(orders)")
 	require.NoError(t, err)
 	defer rows.Close()
-
 	columns := make(map[string]bool)
 	for rows.Next() {
 		var cid, notNull, pk int
@@ -35,13 +64,10 @@ func TestMigration_PaymentIntentSchema(t *testing.T) {
 	rows, err = sqlDB.Query("PRAGMA index_list(orders)")
 	require.NoError(t, err)
 	defer rows.Close()
-
 	indexes := make(map[string]bool)
 	for rows.Next() {
-		var seq int
-		var name string
-		var unique, partial int
-		var origin string
+		var seq, unique, partial int
+		var name, origin string
 		require.NoError(t, rows.Scan(&seq, &name, &unique, &origin, &partial))
 		indexes[name] = unique == 1 && partial == 1
 	}
@@ -50,72 +76,49 @@ func TestMigration_PaymentIntentSchema(t *testing.T) {
 	assert.True(t, indexes["idx_orders_pending_subscription_product_unique"])
 }
 
-func TestMigration_PaymentIntentDuplicateNormalization(t *testing.T) {
-	t.Parallel()
+func TestMigration031_DoesNotRequireLegacyPaymentDeduplication(t *testing.T) {
+	sqlDB, cleanup := newSQLiteAtMigration30(t)
+	t.Cleanup(cleanup)
 
-	svc := newTestService(t)
-	t.Cleanup(func() { require.NoError(t, svc.Close()) })
+	// The project policy guarantees no historical payment rows. Verify the
+	// migration succeeds on the empty pre-031 schema and creates both indexes.
+	require.NoError(t, runMigrations(sqlDB))
+	var orderCount int
+	require.NoError(t, sqlDB.QueryRow("SELECT COUNT(*) FROM orders").Scan(&orderCount))
+	assert.Zero(t, orderCount)
+}
 
-	plan := &Plan{Name: "payment-migration-plan", IsActive: true}
-	require.NoError(t, svc.db.Create(plan).Error)
-	product := &Product{PlanID: plan.ID, Name: "payment-migration-product", DurationDays: 30, PriceCents: 2300, Currency: "RUB", IsActive: true}
-	require.NoError(t, svc.db.Create(product).Error)
-	sub := &Subscription{TelegramID: 991001, Username: "migration-user", ClientID: "migration-client", SubscriptionID: "migration-sub", Status: "active", PlanID: plan.ID}
-	require.NoError(t, svc.db.Create(sub).Error)
+func TestMigration031_DownRestoresOriginalProviderIndexOnSQLite(t *testing.T) {
+	sqlDB, cleanup := newSQLiteAtMigration30(t)
+	t.Cleanup(cleanup)
 
-	sqlDB, err := svc.db.DB()
+	source, err := iofs.New(migrationFiles, "migrations")
 	require.NoError(t, err)
-	_, err = sqlDB.Exec("DROP INDEX IF EXISTS idx_orders_pending_subscription_product_unique")
+	driver, err := sqlite.WithInstance(sqlDB, &sqlite.Config{})
 	require.NoError(t, err)
-	_, err = sqlDB.Exec("DROP INDEX IF EXISTS idx_orders_provider_payment_unique")
+	m, err := migrate.NewWithInstance("iofs", source, "sqlite", driver)
 	require.NoError(t, err)
+	t.Cleanup(func() { _, _ = m.Close() })
 
-	const insertOrder = `INSERT INTO orders
-		(subscription_id, product_id, status, amount_cents, currency, payment_provider,
-		 provider_payment_id, created_at, payment_url, payment_expires_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-	_, err = sqlDB.Exec(insertOrder, sub.ID, product.ID, "paid", 2300, "RUB", "platega", "550e8400-e29b-41d4-a716-446655440201", "2026-01-01 00:00:00", "https://pay/old", "2026-01-01 00:15:00")
-	require.NoError(t, err)
-	_, err = sqlDB.Exec(insertOrder, sub.ID, product.ID, "canceled", 2300, "RUB", "platega", "550e8400-e29b-41d4-a716-446655440201", "2026-01-02 00:00:00", "https://pay/duplicate", "2026-01-02 00:15:00")
-	require.NoError(t, err)
-	_, err = sqlDB.Exec(insertOrder, sub.ID, product.ID, "pending", 2300, "RUB", "platega", "550e8400-e29b-41d4-a716-446655440202", "2026-01-03 00:00:00", "https://pay/pending-old", "2027-01-03 00:15:00")
-	require.NoError(t, err)
-	_, err = sqlDB.Exec(insertOrder, sub.ID, product.ID, "pending", 2300, "RUB", "platega", "550e8400-e29b-41d4-a716-446655440203", "2026-01-04 00:00:00", "https://pay/pending-new", "2027-01-04 00:15:00")
-	require.NoError(t, err)
+	require.NoError(t, m.Steps(1))
+	require.NoError(t, m.Steps(-1))
 
-	_, err = sqlDB.Exec(`UPDATE orders SET provider_payment_id = NULL
-		WHERE id IN (SELECT id FROM (SELECT id, ROW_NUMBER() OVER
-		(PARTITION BY payment_provider, provider_payment_id ORDER BY id ASC) AS duplicate_number
-		FROM orders WHERE provider_payment_id IS NOT NULL AND TRIM(provider_payment_id) <> '') AS provider_duplicates
-		WHERE duplicate_number > 1)`)
+	rows, err := sqlDB.Query("PRAGMA table_info(orders)")
 	require.NoError(t, err)
-	_, err = sqlDB.Exec(`UPDATE orders SET status = 'expired'
-		WHERE id IN (SELECT id FROM (SELECT id, ROW_NUMBER() OVER
-		(PARTITION BY subscription_id, product_id ORDER BY id ASC) AS duplicate_number
-		FROM orders WHERE status = 'pending' AND payment_provider = 'platega') AS pending_duplicates
-		WHERE duplicate_number > 1)`)
-	require.NoError(t, err)
-	_, err = sqlDB.Exec(`CREATE UNIQUE INDEX idx_orders_provider_payment_unique
-		ON orders(payment_provider, provider_payment_id)
-		WHERE provider_payment_id IS NOT NULL AND TRIM(provider_payment_id) <> ''`)
-	require.NoError(t, err)
-	_, err = sqlDB.Exec(`CREATE UNIQUE INDEX idx_orders_pending_subscription_product_unique
-		ON orders(subscription_id, product_id, payment_provider)
-		WHERE status = 'pending' AND payment_provider = 'platega'`)
-	require.NoError(t, err)
+	defer rows.Close()
+	for rows.Next() {
+		var cid, notNull, pk int
+		var name, typeName string
+		var defaultValue any
+		require.NoError(t, rows.Scan(&cid, &name, &typeName, &notNull, &defaultValue, &pk))
+		assert.NotContains(t, name, "payment_url")
+		assert.NotContains(t, name, "payment_expires_at")
+		assert.NotContains(t, name, "payment_creation_uncertain")
+	}
+	require.NoError(t, rows.Err())
 
-	var providerID, paymentURL string
-	require.NoError(t, sqlDB.QueryRow("SELECT provider_payment_id, payment_url FROM orders WHERE id = 1").Scan(&providerID, &paymentURL))
-	assert.Equal(t, "550e8400-e29b-41d4-a716-446655440201", providerID)
-	assert.Equal(t, "https://pay/old", paymentURL)
-	var duplicateID *string
-	require.NoError(t, sqlDB.QueryRow("SELECT provider_payment_id FROM orders WHERE id = 2").Scan(&duplicateID))
-	assert.Nil(t, duplicateID)
-
-	var status, pendingURL string
-	require.NoError(t, sqlDB.QueryRow("SELECT status, payment_url FROM orders WHERE id = 3").Scan(&status, &pendingURL))
-	assert.Equal(t, "pending", status)
-	assert.Equal(t, "https://pay/pending-old", pendingURL)
-	require.NoError(t, sqlDB.QueryRow("SELECT status FROM orders WHERE id = 4").Scan(&status))
-	assert.Equal(t, "expired", status)
+	var partialSQL string
+	require.NoError(t, sqlDB.QueryRow(`SELECT sql FROM sqlite_master WHERE type='index' AND name='idx_orders_provider_payment_unique'`).Scan(&partialSQL))
+	assert.Contains(t, partialSQL, "provider_payment_id IS NOT NULL")
+	assert.NotContains(t, partialSQL, "payment_provider_id <> ''")
 }
