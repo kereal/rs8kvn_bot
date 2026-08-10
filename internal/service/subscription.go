@@ -187,14 +187,6 @@ func (s *SubscriptionService) Create(ctx context.Context, telegramID int64, user
 	return result, nil
 }
 
-func calculateProductExpiry(now time.Time, currentPlanID uint, currentExpiry *time.Time, product *database.Product) time.Time {
-	base := now
-	if product != nil && currentPlanID == product.PlanID && currentExpiry != nil && currentExpiry.After(now) {
-		base = *currentExpiry
-	}
-	return base.AddDate(0, 0, product.DurationDays)
-}
-
 // GetByTelegramID retrieves a subscription by Telegram user ID.
 func (s *SubscriptionService) GetByTelegramID(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 	return s.db.GetByTelegramID(ctx, telegramID)

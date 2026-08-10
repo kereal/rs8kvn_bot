@@ -205,13 +205,16 @@ func (s *Service) SavePaymentDetails(ctx context.Context, orderID uint, provider
 type ApplyPlanInTxFn func(ctx context.Context, tx *gorm.DB, subscriptionID uint, planID uint) error
 
 // ConfirmOrderPaidCAS atomically marks an order paid and updates its subscription.
-// If applyPlan is non-nil and the CAS succeeds, it is called with the same tx
-// used to write the subscription; on error the whole transaction rolls back.
-func (s *Service) ConfirmOrderPaidCAS(ctx context.Context, orderID uint, paidAt, activatedAt time.Time, sub *Subscription, newExpiry time.Time, product *Product, applyPlan ApplyPlanInTxFn) (bool, error) {
+// The order and subscription expiry are both computed inside the transaction from
+// the current subscription state, so the caller does not need to pre-calculate
+// (and cannot pass a stale) expiry value. If applyPlan is non-nil and the CAS
+// succeeds, it is called with the same tx used to write the subscription; on
+// error the whole transaction rolls back.
+func (s *Service) ConfirmOrderPaidCAS(ctx context.Context, orderID uint, paidAt, activatedAt time.Time, sub *Subscription, product *Product, applyPlan ApplyPlanInTxFn) (bool, error) {
 	var activated bool
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		result := tx.Model(&Order{}).Where("id = ? AND status = ?", orderID, OrderStatusPending).Updates(map[string]interface{}{
-			"status": OrderStatusPaid, "paid_at": paidAt, "activated_at": activatedAt, "expires_at": newExpiry,
+			"status": OrderStatusPaid, "paid_at": paidAt, "activated_at": activatedAt,
 		})
 		if result.Error != nil {
 			return fmt.Errorf("confirm order: %w", result.Error)
@@ -230,7 +233,7 @@ func (s *Service) ConfirmOrderPaidCAS(ctx context.Context, orderID uint, paidAt,
 			}
 			return fmt.Errorf("load subscription for payment: %w", err)
 		}
-		newExpiry = calculatePaymentExpiry(activatedAt, &currentSub, product)
+		newExpiry := CalculatePaymentExpiry(activatedAt, &currentSub, product)
 		if err := tx.Model(&Order{}).Where("id = ? AND status = ?", orderID, OrderStatusPaid).Update("expires_at", newExpiry).Error; err != nil {
 			return fmt.Errorf("update order expiry after payment: %w", err)
 		}
@@ -264,7 +267,12 @@ func (s *Service) ConfirmOrderPaidCAS(ctx context.Context, orderID uint, paidAt,
 	return activated, nil
 }
 
-func calculatePaymentExpiry(now time.Time, sub *Subscription, product *Product) time.Time {
+// CalculatePaymentExpiry is the single source of truth for payment expiry
+// computation shared by the order CAS and the service layer. When the current
+// plan matches the purchased product's plan and the existing expiry is still in
+// the future, the new expiry extends the existing one; otherwise it starts from
+// the activation time. A nil product yields the base time unchanged.
+func CalculatePaymentExpiry(now time.Time, sub *Subscription, product *Product) time.Time {
 	base := now
 	if sub != nil && product != nil && sub.PlanID == product.PlanID && sub.ExpiresAt != nil && sub.ExpiresAt.After(now) {
 		base = *sub.ExpiresAt
