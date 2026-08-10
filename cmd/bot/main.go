@@ -258,6 +258,13 @@ func startBackgroundWorkers(ctx context.Context, handler *bot.Handler, subServic
 	if orderService := handler.OrderService(); orderService != nil {
 		orderService.SetSyncService(syncSvc)
 	}
+	// The subscription service also needs the sync service: ExpireSubscription,
+	// CleanupExpiredTrials and DowngradeToFreePlan deprovision VPN access through
+	// it (pending_remove + SyncSubscription) instead of falling back to a plain
+	// DB update that would leave panel clients orphaned.
+	if subService != nil {
+		subService.SetSyncService(syncSvc)
+	}
 
 	go func() {
 		defer recoverAndReport("DB pool metrics collector")
