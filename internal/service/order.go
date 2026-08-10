@@ -26,7 +26,7 @@ import (
 // PaymentProvider is the minimal outbound payment contract consumed by OrderService
 // for creating a provider transaction.
 type PaymentProvider interface {
-	CreateTransaction(context.Context, platega.CreateTransactionRequest) (*platega.CreateTransactionResponse, error)
+	CreateTransaction(ctx context.Context, req platega.CreateTransactionRequest) (*platega.CreateTransactionResponse, error)
 }
 
 // paymentSyncTimeout bounds the best-effort post-commit VPN sync. It prevents a
@@ -416,7 +416,7 @@ func (o *OrderService) requestPayment(ctx context.Context, telegramID int64, use
 	transactionID, err := platega.ParseTransactionID(response.TransactionID)
 	if err != nil {
 		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "provider_invalid_transaction_id", Reason: err.Error(), Action: "verify provider response manually", OrderID: order.ID, TelegramID: telegramID, ProductID: canonical.ID, ProductName: canonical.Name, SubscriptionID: order.SubscriptionID, AmountCents: order.AmountCents, Currency: order.Currency, ProviderID: response.TransactionID})
-		return nil, order, fmt.Errorf("%w: transactionId must be UUID v4: %v", platega.ErrProvider, err)
+		return nil, order, fmt.Errorf("%w: transactionId must be UUID v4: %w", platega.ErrProvider, err)
 	}
 	providerPaymentID := transactionID
 	url := strings.TrimSpace(response.URL)

@@ -159,7 +159,7 @@ var (
 	// database connection wait exceeded the pool (sql.DBStats.WaitCount).
 	DBPoolWait = promauto.NewGauge(
 		prometheus.GaugeOpts{
-			Name: "db_pool_wait_total",
+			Name: "db_pool_wait",
 			Help: "Total number of times a database connection wait exceeded the pool",
 		},
 	)

@@ -65,7 +65,8 @@ func TestHandleSubscription_CacheHit_Revoked_InvalidatesCache(t *testing.T) {
 		return "revoked", time.Time{}, nil
 	}
 
-	_, _, _, err := HandleSubscription(ctx, mockDB, svc, "sub-revoked", "1.2.3.4", nil)
+	result, _, _, err := HandleSubscription(ctx, mockDB, svc, "sub-revoked", "1.2.3.4", nil)
+	_ = result
 	// A revoked subscription must read as not found (404), not as a server error.
 	assert.ErrorIs(t, err, ErrSubscriptionNotFound)
 
@@ -89,7 +90,8 @@ func TestHandleSubscription_CacheHit_Expired_InvalidatesCache(t *testing.T) {
 		return "active", pastTime, nil
 	}
 
-	_, _, _, err := HandleSubscription(ctx, mockDB, svc, "sub-expired", "1.2.3.4", nil)
+	result, _, _, err := HandleSubscription(ctx, mockDB, svc, "sub-expired", "1.2.3.4", nil)
+	_ = result
 	// An expired subscription must read as not found (404), not as a server error.
 	assert.ErrorIs(t, err, ErrSubscriptionNotFound)
 
@@ -133,7 +135,8 @@ func TestHandleSubscription_CacheMiss_SubscriptionNotFound(t *testing.T) {
 		return nil, fmt.Errorf("not found: %w", database.ErrSubscriptionNotFound)
 	}
 
-	_, _, _, err := HandleSubscription(ctx, mockDB, svc, "nonexistent", "1.2.3.4", nil)
+	result, _, _, err := HandleSubscription(ctx, mockDB, svc, "nonexistent", "1.2.3.4", nil)
+	_ = result
 	assert.ErrorIs(t, err, ErrSubscriptionNotFound)
 }
 
@@ -145,7 +148,7 @@ func TestHandleSubscription_Base64Response(t *testing.T) {
 	encodedBody := base64.StdEncoding.EncodeToString([]byte(vlessLink))
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("subscription-userinfo", "upload=0; download=0; total=1073741824; expire=1735689600")
+		w.Header().Set("Subscription-Userinfo", "upload=0; download=0; total=1073741824; expire=1735689600")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(encodedBody))
 	}))
@@ -223,7 +226,8 @@ func TestHandleSubscription_JSONResponse_PureJSON(t *testing.T) {
 		"sni":        "reality.example.com",
 		"remark":     "JSON-Node",
 	}
-	jsonBody, _ := json.Marshal(jsonConfig)
+	jsonBody, err := json.Marshal(jsonConfig)
+	require.NoError(t, err)
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -274,7 +278,8 @@ func TestHandleSubscription_NoNodesWithSubscriptionURL(t *testing.T) {
 	mockDB.UpdateDevicesFunc = func(ctx context.Context, id uint, devicesJSON string) error { return nil }
 	mockDB.UpdateIPsFunc = func(ctx context.Context, id uint, ipsJSON string) error { return nil }
 
-	_, _, _, err := HandleSubscription(ctx, mockDB, svc, "sub-no-url", "1.2.3.4", nil)
+	result, _, _, err := HandleSubscription(ctx, mockDB, svc, "sub-no-url", "1.2.3.4", nil)
+	_ = result
 	assert.ErrorIs(t, err, ErrNoSubscriptionItems)
 }
 
@@ -298,7 +303,8 @@ func TestHandleSubscription_FetchError_SkipsNode(t *testing.T) {
 	mockDB.UpdateDevicesFunc = func(ctx context.Context, id uint, devicesJSON string) error { return nil }
 	mockDB.UpdateIPsFunc = func(ctx context.Context, id uint, ipsJSON string) error { return nil }
 
-	_, _, _, err := HandleSubscription(ctx, mockDB, svc, "sub-fetch-err", "1.2.3.4", nil)
+	result, _, _, err := HandleSubscription(ctx, mockDB, svc, "sub-fetch-err", "1.2.3.4", nil)
+	_ = result
 	assert.ErrorIs(t, err, ErrNoSubscriptionItems)
 }
 
@@ -877,7 +883,8 @@ func TestHandleSubscription_CacheHit_UpdatesLastRequest(t *testing.T) {
 		return nil
 	}
 
-	_, _, _, err := HandleSubscription(ctx, mockDB, svc, "sub-lr-hit", "1.2.3.4", nil)
+	result, _, _, err := HandleSubscription(ctx, mockDB, svc, "sub-lr-hit", "1.2.3.4", nil)
+	_ = result
 	require.NoError(t, err)
 	assert.Equal(t, "sub-lr-hit", calledSubID, "UpdateLastRequest must be called on cache hit")
 }
@@ -910,7 +917,7 @@ func TestHandleSubscription_CacheMiss_UpdatesLastRequest(t *testing.T) {
 	encodedBody := base64.StdEncoding.EncodeToString([]byte(vlessLink))
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("subscription-userinfo", "upload=0; download=0; total=1073741824; expire=1735689600")
+		w.Header().Set("Subscription-Userinfo", "upload=0; download=0; total=1073741824; expire=1735689600")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(encodedBody))
 	}))
@@ -939,7 +946,8 @@ func TestHandleSubscription_CacheMiss_UpdatesLastRequest(t *testing.T) {
 		return nil
 	}
 
-	_, _, _, err := HandleSubscription(ctx, mockDB, svc, "sub-lr-miss", "1.2.3.4", nil)
+	result, _, _, err := HandleSubscription(ctx, mockDB, svc, "sub-lr-miss", "1.2.3.4", nil)
+	_ = result
 	require.NoError(t, err)
 	assert.Equal(t, "sub-lr-miss", calledSubID, "UpdateLastRequest must be called on cache miss")
 }

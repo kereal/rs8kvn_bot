@@ -375,14 +375,17 @@ func main() {
 
 	// 2. Initialize Sentry (before logger)
 	initSentry(cfg)
-	defer sentry.Flush(logger.SentryFlushTimeout)
 
 	// 3. Initialize logger
 	logService, err := initLogger(cfg)
 	if err != nil {
+		// The logger failed to initialize, so the deferred flush below is not
+		// registered yet: flush Sentry explicitly before exiting.
 		fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
+		sentry.Flush(logger.SentryFlushTimeout)
 		os.Exit(1)
 	}
+	defer sentry.Flush(logger.SentryFlushTimeout)
 	defer func() {
 		if err := logService.Close(); err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to close logger: %v\n", err)
