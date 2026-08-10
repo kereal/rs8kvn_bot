@@ -351,11 +351,11 @@ All tests pass with `-race` detector. Fuzzing enabled for critical functions.
 - **`/readyz`:** Simple flag — set to true only after all services initialized → 200 or 503
 
 ### Docker
-- **Base:** Alpine 3.21 (runtime, with wget/procps), golang:1.25-alpine (builder)
+- **Base:** Alpine 3.21 (runtime, with procps), golang:1.25-alpine (builder)
 - **Binary:** UPX compressed (-9) — ~30–40% smaller
 - **Migrations:** Embedded via `COPY internal/database/migrations`
 - **Data volume:** `./data:/app/data` (persistent)
-- **Health check:** `wget --no-verbose --tries=1 --spider http://localhost:8880/healthz`
+- **Health check:** `pgrep -f rs8kvn_bot` (process liveness)
 - **Resource limits:** 0.5 CPU, 128MB memory (2× GOMEMLIMIT for GC headroom)
 - **Stop grace period:** 30s, SIGTERM
 
