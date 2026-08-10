@@ -2,13 +2,13 @@ package scheduler
 
 import (
 	"context"
-	"os"
-	"testing"
-	"time"
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/logger"
 	"github.com/kereal/rs8kvn_bot/internal/service"
 	"github.com/kereal/rs8kvn_bot/internal/testutil"
+	"os"
+	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -22,7 +22,7 @@ func init() {
 	_, _ = logger.Init("", "error")
 }
 
-func TestSubscriptionSyncWorker_Run_CallsSyncPendingNodes(t *testing.T) {
+func TestSubscriptionSyncWorker_Run_RecordsUnavailableNodeRetry(t *testing.T) {
 	t.Parallel()
 
 	db, err := testutil.NewTestDatabaseService(t)
@@ -51,7 +51,7 @@ func TestSubscriptionSyncWorker_Run_CallsSyncPendingNodes(t *testing.T) {
 	syncSvc := service.NewSyncService(db, nil, []database.Node{*node})
 	worker := NewSubscriptionSyncWorker(syncSvc)
 
-	workerCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	workerCtx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
 
 	done := make(chan struct{})
@@ -62,7 +62,15 @@ func TestSubscriptionSyncWorker_Run_CallsSyncPendingNodes(t *testing.T) {
 
 	select {
 	case <-done:
-	case <-time.After(10 * time.Second):
+	case <-time.After(time.Second):
 		t.Fatal("SubscriptionSyncWorker.Run should have returned after context timeout")
 	}
+
+	var nodeState database.SubscriptionNode
+	require.NoError(t, db.GetDB().WithContext(ctx).
+		Where("subscription_id = ? AND node_id = ?", sub.ID, node.ID).
+		First(&nodeState).Error)
+	require.Equal(t, 1, nodeState.RetryCount, "worker must process the pending node")
+	require.NotNil(t, nodeState.LastError, "unavailable node must record retry error")
+	require.Contains(t, *nodeState.LastError, "no VPN client")
 }
