@@ -1685,7 +1685,7 @@ func TestSubscriptionService_Create_ReanimatesRevoked(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, freePlan.ID, matching[0].PlanID)
 	assert.Nil(t, matching[0].ExpiresAt)
-	assert.Equal(t, uint(revoked.ID), matching[0].ID, "same row reanimated, not a new one")
+	assert.Equal(t, revoked.ID, matching[0].ID, "same row reanimated, not a new one")
 
 	// Stale node bindings were wiped so re-provision starts clean.
 	nodes, err := db.GetBySubscriptionID(ctx, revoked.ID)

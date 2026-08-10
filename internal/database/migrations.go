@@ -135,9 +135,10 @@ func migrationVersionToInt(version uint) (int, error) {
 	if version == 0 {
 		return 0, errors.New("migration version must be positive")
 	}
-	maxInt := uint(^uint(0) >> 1)
-	if version > maxInt || uint64(version) > uint64(math.MaxInt) {
+	maxInt := uint(math.MaxInt)
+	if version > maxInt {
 		return 0, fmt.Errorf("migration version %d overflows int", version)
 	}
+	// #nosec G115 -- guarded by the bounds check above
 	return int(version), nil
 }

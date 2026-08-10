@@ -21,7 +21,7 @@ func TestMigrationVersionToInt(t *testing.T) {
 	}{
 		{name: "positive", version: 31, want: 31},
 		{name: "zero", version: 0, wantErr: true},
-		{name: "overflow", version: uint(^uint(0)>>1) + 1, wantErr: true},
+		{name: "overflow", version: ^uint(0)>>1 + 1, wantErr: true},
 	}
 
 	for _, tt := range tests {

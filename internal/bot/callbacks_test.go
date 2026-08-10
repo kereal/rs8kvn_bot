@@ -318,7 +318,6 @@ func TestHandleCallback_CallbackDataRouting(t *testing.T) {
 			} else {
 				assert.False(t, mockBot.SendCalledSafe(), "Bot.Send should not be called for %s", tt.name)
 			}
-
 		})
 	}
 }

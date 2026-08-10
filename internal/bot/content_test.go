@@ -48,7 +48,6 @@ func TestGetMainMenuContent(t *testing.T) {
 			assert.Contains(t, text, tt.username, "getMainMenuContent() text should contain username")
 			assert.NotEmpty(t, text, "getMainMenuContent() text should not be empty")
 			assert.NotEmpty(t, keyboard.InlineKeyboard, "getMainMenuContent() keyboard should have buttons")
-
 		})
 	}
 }
@@ -222,7 +221,6 @@ func TestGetHelpText_DifferentTrafficLimits(t *testing.T) {
 			t.Parallel()
 			text := handler.getHelpText(tt.trafficLimit, "http://test.url/sub")
 			assert.NotEmpty(t, text, "text should not be empty")
-
 		})
 	}
 }
