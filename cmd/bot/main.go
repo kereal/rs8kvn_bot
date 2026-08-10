@@ -225,6 +225,13 @@ func startWebServer(subService *service.SubscriptionService, cfg *config.Config,
 	webServer := web.NewServer(fmt.Sprintf(":%d", cfg.WebServerPort), dbService, cfg, botConfig.Username, subService, subServer)
 	webServer.SetOrderService(orderService)
 	webServer.SetBot(botAPI)
+	if cfg.PaymentEnabled {
+		webServer.SetPaymentConfig(&web.PaymentConfig{
+			Enabled:    true,
+			MerchantID: cfg.PlategaMerchantID,
+			Secret:     cfg.PlategaSecret,
+		})
+	}
 	webServer.RegisterChecker("database", func(ctx context.Context) web.ComponentHealth {
 		if err := dbService.Ping(ctx); err != nil {
 			return web.ComponentHealth{Status: web.StatusDown, Message: err.Error()}

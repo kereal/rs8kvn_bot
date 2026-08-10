@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -40,7 +41,7 @@ func TestCreateTransactionContract(t *testing.T) {
 		require.Equal(t, "123", body.Metadata.UserID)
 		require.Equal(t, "@user", body.Metadata.UserName)
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"transactionId":"tx-7","url":"https://pay.test/7","status":"PENDING"}`))
+		_, _ = w.Write([]byte(`{"transactionId":"tx-7","url":"https://pay.test/7","status":"PENDING","expiresIn":"00:15:00"}`))
 	}))
 	defer server.Close()
 
@@ -54,13 +55,37 @@ func TestCreateTransactionContract(t *testing.T) {
 
 func TestCreateTransactionAcceptsRedirect(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"transactionId":"tx-8","redirect":"https://pay.test/8"}`))
+		_, _ = w.Write([]byte(`{"transactionId":"tx-8","redirect":"https://pay.test/8","expiresIn":"00:15:00"}`))
 	}))
 	defer server.Close()
 
 	got, err := New(Config{BaseURL: server.URL}).CreateTransaction(context.Background(), CreateTransactionRequest{AmountCents: 1, Currency: "RUB"})
 	require.NoError(t, err)
 	require.Equal(t, "https://pay.test/8", got.Redirect)
+}
+
+func TestParseExpiresIn(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		raw     string
+		want    time.Duration
+		wantErr bool
+	}{
+		{name: "valid", raw: "00:15:00", want: 15 * time.Minute},
+		{name: "missing", wantErr: true},
+		{name: "zero", raw: "00:00:00", wantErr: true},
+		{name: "invalid", raw: "15 minutes", wantErr: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ParseExpiresIn(tt.raw)
+			if tt.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tt.want, got)
+		})
+	}
 }
 
 func TestCreateTransactionRejectsProviderErrors(t *testing.T) {

@@ -15,6 +15,7 @@ var (
 	ErrPlanNotFound             = errors.New("plan not found")
 	ErrOrderNotFound            = errors.New("order not found")
 	ErrProductNotFound          = errors.New("product not found")
+	ErrProductImmutable         = errors.New("product immutable after order")
 	ErrSubscriptionNodeNotFound = errors.New("subscription node not found")
 	ErrNodeNotFound             = errors.New("node not found")
 	ErrTrialAlreadyActivated    = errors.New("trial already activated")
@@ -159,18 +160,21 @@ const (
 )
 
 type Order struct {
-	ID                uint        `gorm:"primaryKey;column:id"`
-	SubscriptionID    uint        `gorm:"not null;column:subscription_id"`
-	ProductID         uint        `gorm:"not null;column:product_id"`
-	Status            OrderStatus `gorm:"not null;size:16;column:status"`
-	AmountCents       int64       `gorm:"not null;column:amount_cents"`
-	Currency          string      `gorm:"size:3;not null;default:RUB;column:currency"`
-	PaymentProvider   string      `gorm:"column:payment_provider"`
-	ProviderPaymentID string      `gorm:"column:provider_payment_id"`
-	CreatedAt         time.Time   `gorm:"not null;column:created_at"`
-	PaidAt            *time.Time  `gorm:"column:paid_at"`
-	ActivatedAt       *time.Time  `gorm:"column:activated_at"`
-	ExpiresAt         *time.Time  `gorm:"column:expires_at"`
+	ID                       uint        `gorm:"primaryKey;column:id"`
+	SubscriptionID           uint        `gorm:"not null;column:subscription_id"`
+	ProductID                uint        `gorm:"not null;column:product_id"`
+	Status                   OrderStatus `gorm:"not null;size:16;column:status"`
+	AmountCents              int64       `gorm:"not null;column:amount_cents"`
+	Currency                 string      `gorm:"size:3;not null;default:RUB;column:currency"`
+	PaymentProvider          string      `gorm:"column:payment_provider"`
+	ProviderPaymentID        string      `gorm:"column:provider_payment_id"`
+	CreatedAt                time.Time   `gorm:"not null;column:created_at"`
+	PaidAt                   *time.Time  `gorm:"column:paid_at"`
+	ActivatedAt              *time.Time  `gorm:"column:activated_at"`
+	ExpiresAt                *time.Time  `gorm:"column:expires_at"`
+	PaymentURL               string      `gorm:"column:payment_url"`
+	PaymentExpiresAt         *time.Time  `gorm:"column:payment_expires_at"`
+	PaymentCreationUncertain bool        `gorm:"not null;default:false;column:payment_creation_uncertain"`
 
 	Subscription *Subscription `gorm:"foreignKey:SubscriptionID"`
 	Product      *Product      `gorm:"foreignKey:ProductID"`

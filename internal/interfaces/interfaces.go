@@ -166,6 +166,7 @@ type ProductRepository interface {
 	GetActiveByPlanID(ctx context.Context, planID uint) ([]database.Product, error)
 	ListActiveProducts(ctx context.Context) ([]database.Product, error)
 	GetProductByID(ctx context.Context, id uint) (*database.Product, error)
+	UpdateProductGuarded(ctx context.Context, product *database.Product) error
 }
 
 type OrderRepository interface {
@@ -177,7 +178,12 @@ type OrderRepository interface {
 	UpdateOrderPaidStatus(ctx context.Context, id uint) error
 	UpdateOrderActivatedAt(ctx context.Context, id uint, activatedAt, expiresAt time.Time) error
 	UpdateOrderProviderPaymentID(ctx context.Context, orderID uint, providerPaymentID string) error
-	ConfirmOrderPaidCAS(ctx context.Context, orderID uint, paidAt, activatedAt time.Time, sub *database.Subscription, newExpiry time.Time, product *database.Product) (bool, error)
+	FindPendingPaymentOrder(ctx context.Context, subscriptionID, productID uint, now time.Time) (*database.Order, error)
+	CreatePendingPaymentOrder(ctx context.Context, subscriptionID, productID uint, amountCents int64, currency string, now time.Time) (*database.Order, error)
+	FindOrCreatePendingPaymentOrder(ctx context.Context, subscriptionID, productID uint, amountCents int64, currency string, now time.Time) (*database.Order, error)
+	MarkPaymentCreationUncertain(ctx context.Context, orderID uint, uncertain bool) (bool, error)
+	SavePaymentDetails(ctx context.Context, orderID uint, providerPaymentID, paymentURL string, paymentExpiresAt time.Time) error
+	ConfirmOrderPaidCAS(ctx context.Context, orderID uint, paidAt, activatedAt time.Time, sub *database.Subscription, newExpiry time.Time, product *database.Product, applyPlan database.ApplyPlanInTxFn) (bool, error)
 	CancelOrderCAS(ctx context.Context, provider, providerPaymentID string, fromStatuses []database.OrderStatus) (bool, error)
 }
 

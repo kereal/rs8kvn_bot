@@ -70,6 +70,23 @@ type CreateTransactionResponse struct {
 	Status        string `json:"status"`
 	URL           string `json:"url"`
 	Redirect      string `json:"redirect"`
+	ExpiresIn     string `json:"expiresIn"`
+}
+
+// ParseExpiresIn parses Platega's HH:MM:SS payment-link lifetime.
+func ParseExpiresIn(raw string) (time.Duration, error) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return 0, errors.New("expiresIn is required")
+	}
+	parsed, err := time.Parse("15:04:05", value)
+	if err != nil {
+		return 0, fmt.Errorf("expiresIn must use HH:MM:SS: %w", err)
+	}
+	if parsed.Hour() == 0 && parsed.Minute() == 0 && parsed.Second() == 0 {
+		return 0, errors.New("expiresIn must be positive")
+	}
+	return time.Duration(parsed.Hour())*time.Hour + time.Duration(parsed.Minute())*time.Minute + time.Duration(parsed.Second())*time.Second, nil
 }
 
 // New creates a Platega client with production-safe defaults.
@@ -141,6 +158,9 @@ func (c *Client) CreateTransaction(ctx context.Context, req CreateTransactionReq
 	}
 	if strings.TrimSpace(result.URL) == "" && strings.TrimSpace(result.Redirect) == "" {
 		return nil, fmt.Errorf("%w: response has no payment URL", ErrProvider)
+	}
+	if _, err := ParseExpiresIn(result.ExpiresIn); err != nil {
+		return nil, fmt.Errorf("%w: invalid expiresIn: %v", ErrProvider, err)
 	}
 	return &result, nil
 }
