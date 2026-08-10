@@ -1,3 +1,4 @@
+// Package main wires the bot runtime, services, and graceful shutdown lifecycle.
 package main
 
 import (

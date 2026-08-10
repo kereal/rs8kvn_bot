@@ -1,3 +1,4 @@
+// Package database provides persistence, migrations, models, and repositories.
 package database
 
 import (
@@ -8,7 +9,8 @@ import (
 	"gorm.io/gorm"
 )
 
-// GetActiveByPlanID returns active products for the given plan.
+// GetActiveByPlanID returns active products for the given plan. Free-plan
+// products remain visible for compatibility even when that plan is inactive.
 func (s *Service) GetActiveByPlanID(ctx context.Context, planID uint) ([]Product, error) {
 	var products []Product
 	result := s.db.WithContext(ctx).

@@ -1,3 +1,4 @@
+// Package service contains subscription, payment, and synchronization business logic.
 package service
 
 import (
@@ -18,6 +19,8 @@ import (
 	"gorm.io/gorm"
 )
 
+// SubscriptionService coordinates subscription persistence, VPN provisioning,
+// cache invalidation, metrics, and referral/trial lifecycle operations.
 type SubscriptionService struct {
 	db                interfaces.DatabaseService
 	reminderRepo      interfaces.SubscriptionReminderRepository
@@ -31,6 +34,8 @@ type SubscriptionService struct {
 	bot               interfaces.BotAPI
 }
 
+// CreateResult contains the subscription and referral information produced by
+// creating or recovering a user subscription.
 type CreateResult struct {
 	Subscription    *database.Subscription
 	SubscriptionURL string
@@ -45,7 +50,8 @@ func XUIEmail(username string, telegramID int64) string {
 	return fmt.Sprintf("tgId_%d", telegramID)
 }
 
-// NewSubscriptionService creates a SubscriptionService configured with the given database, xui clients, VPN clients, nodes, and configuration.
+// NewSubscriptionService creates a SubscriptionService configured with the given
+// database, XUI/VPN clients, nodes, and application configuration.
 func NewSubscriptionService(db interfaces.DatabaseService, xuiClients map[uint]interfaces.XUIClient, vpnClients map[uint]vpn.Client, nodes []database.Node, cfg *config.Config) *SubscriptionService {
 	return &SubscriptionService{
 		db:           db,
@@ -349,7 +355,8 @@ func (s *SubscriptionService) deleteClientFromAllNodes(ctx context.Context, prov
 	}
 }
 
-// TrialCreateResult holds the outcome of a trial creation.
+// TrialCreateResult holds the outcome of a trial creation, including the
+// generated identifiers and public subscription URL.
 type TrialCreateResult struct {
 	Subscription    *database.Subscription
 	SubscriptionURL string

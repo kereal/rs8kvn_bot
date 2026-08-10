@@ -1,3 +1,4 @@
+// Package database provides persistence, migrations, models, and repositories.
 package database
 
 import (
