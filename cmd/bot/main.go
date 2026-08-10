@@ -3,8 +3,9 @@ package main
 
 import (
 	"context"
+	cryptorand "crypto/rand"
 	"fmt"
-	"math/rand"
+	"math/big"
 	"os"
 	"os/signal"
 	"runtime/debug"
@@ -192,7 +193,13 @@ func initBot(cfg *config.Config) (*tgbotapi.BotAPI, *bot.BotConfig, error) {
 			break
 		}
 		logger.Warn("Telegram bot init failed, retrying...", zap.Int("attempt", i+1), zap.Int("max_attempts", botInitMaxAttempts), zap.Error(err))
-		time.Sleep(botInitDelay + time.Duration(rand.Int63n(int64(botInitDelay/2)))) //nolint:gosec // jitter
+		jitter := time.Duration(0)
+		if maxJitter := botInitDelay / 2; maxJitter > 0 {
+			if n, randErr := cryptorand.Int(cryptorand.Reader, big.NewInt(int64(maxJitter))); randErr == nil {
+				jitter = time.Duration(n.Int64())
+			}
+		}
+		time.Sleep(botInitDelay + jitter)
 	}
 	return nil, nil, fmt.Errorf("failed to initialize Telegram bot after %d attempts: %w", botInitMaxAttempts, lastErr)
 }

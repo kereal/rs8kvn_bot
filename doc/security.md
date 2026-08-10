@@ -1,7 +1,7 @@
 # Security Policy — rs8kvn_bot
 
-**Version:** 2.3.4
-**Last updated:** 2026-07-19
+**Version:** 2.3.11
+**Last updated:** 2026-08-11
 
 ---
 
@@ -9,9 +9,9 @@
 
 | Version | Supported | Security Updates |
 |---------|-----------|------------------|
-| v3.0.x  | ✅ Yes | ✅ Active |
-| v2.3.x  | ⚠️ Partial (critical only) | ⚠️ Limited |
-| < v2.3  | ❌ No | ❌ End-of-life |
+| v2.3.x  | ✅ Yes | ✅ Active |
+| v2.2.x  | ⚠️ Partial (critical only) | ⚠️ Limited |
+| < v2.2  | ❌ No | ❌ End-of-life |
 
 We recommend always running the latest stable version.
 
@@ -75,7 +75,7 @@ Instead, contact us privately:
 
 - **Database:** SQLite with WAL mode (atomic commits)
 - **Migrations:** Embedded, no external files at runtime
-- **Backups:** Daily rotation (14 days), same directory (consider off-site)
+- **Backups:** Daily rotation (30 files by default), same directory (consider off-site)
 - **Logging:** Sensitive data masked in `Config.String()`; no secrets in logs
 - **Secrets:** Stored in `.env` (not in code), file permissions recommended `600`
 - **Node API tokens:** Stored and managed only via `nodes.api_token` in the database (no env-var dependency)
@@ -94,7 +94,7 @@ Instead, contact us privately:
 - **Race detection:** All tests run with `-race`
 - **Fuzzing:** Markdown sanitization fuzz tests
 - **Leak detection:** Goroutine leak tests in `tests/leak/`
-- **Test coverage:** ~85%
+- **Test coverage:** ~61.1% aggregate (run `go test -coverprofile=coverage.out ./...` to regenerate)
 - **Prometheus metrics** (`internal/metrics/`): HTTP requests, bot updates, XUI/VPN panel requests, DB queries, cache hits/misses, circuit breaker state, active subscriptions, trial conversions, orphaned clients removed — full observability of security-relevant behavior
 
 ### 7. Architecture Security
@@ -327,7 +327,7 @@ go mod verify
 
 ## Contact
 
-Security issues: **security@kereal.me** (example)  
+Security issues: **security@kereal.me** (replace with the maintained security contact before publication)  
 General questions: GitHub Issues (public)
 
-*Last updated: 2026-07-19*
+*Last updated: 2026-08-11*

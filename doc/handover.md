@@ -2,7 +2,7 @@
 
 **Repo:** https://github.com/kereal/rs8kvn_bot
 **Module:** `rs8kvn_bot` (Go 1.25+)
-**Version:** v2.3.4
+**Version:** v2.3.11
 **Branch:** `dev` (GitFlow: `main` = production, `dev` = integration, feature branches from dev or `plans_and_pricing`)
 
 ---
@@ -196,7 +196,7 @@ Cache.Set(240s) → return body with Content-Type + Subscription-Userinfo
 | Testing | `stretchr/testify` | v1.11.1 |
 | CI/CD | GitHub Actions → golangci-lint, gosec, test, Docker → GHCR | — |
 
-## Current State (v2.3.4)
+## Current State (v2.3.11)
 
 ### Working Features
 
@@ -222,12 +222,12 @@ Cache.Set(240s) → return body with Content-Type + Subscription-Userinfo
 | - Invite/trial landing — `/i/{code}` with IP rate limit (3/hour), cookie dedup (3h) |
 | - Per-user rate limiting — chatID token bucket (30 tokens, 5/sec refill, 10-min idle cleanup) |
 | - Subscription proxy — `GET /sub/{subID}` with extra servers + headers, 240s TTL cache, singleflight |
-| - Daily backups — WAL checkpoint, atomic copy, 14-day rotation |
+| - Daily backups — WAL checkpoint, atomic copy, 30 rotated backups by default |
 | - Sentry error tracking (+ traces), Zap structured JSON logging with rotation
 | - Order/Product tracking — payment lifecycle (pending/paid/expired/canceled) with 30-min payment window
 | - Docker: multi-stage build (UPX compression), non-root user, healthcheck, GHCR images
 | - CI/CD: GitHub Actions — golangci-lint, gosec, tests (race), Docker build/push
-| - Prometheus metrics — `/metrics` endpoint with HTTP, bot, XUI, DB, cache, circuit breaker, subscription metrics |
+| - Prometheus metrics — `/metrics` endpoint with HTTP, bot, XUI, DB, cache, subscription, and payment metrics |
 | - VPN client abstraction — `internal/vpn/` package with `Client` interface, `NewClient` factory routing by node type (3x-ui, proxman, fetch) |
 | - Plans & pricing — `plans`, `products`, `orders` tables for subscription plan management and payment lifecycle |
 | - Orphan reconciliation — `ReconcileOrphanedClients` runs every 6h to clean up orphaned XUI clients |
@@ -252,7 +252,7 @@ Cache.Set(240s) → return body with Content-Type + Subscription-Userinfo
 | `internal/scheduler` | **81.2%** | ✅ |
 | `internal/database` | **77.8%** | 🟡 |
 | `cmd/bot` | **5.4%** | 🟡 (integration tests cover indirectly) |
-| **Overall** | **~85%** | ✅ |
+| **Overall** | **~61.1%** | 🟡 |
 
 All tests pass with `-race` detector. Fuzzing enabled for critical functions.
 
@@ -264,7 +264,7 @@ All tests pass with `-race` detector. Fuzzing enabled for critical functions.
 - **API Token auth:** Bearer token via `Authorization` header (no session/login/CSRF/cookiejar)
 - **Node configuration:** Managed entirely via the `nodes` DB table (host, API token, inbound IDs, type, subscription URL). Multi-node support via `nodes` table.
 - **VPN client abstraction:** `internal/vpn/` package provides `Client` interface with `NewClient` factory routing by `NodeType` (3x-ui, proxman, fetch). Each node gets its own VPN client instance. Fetch nodes use no-op client — subscription_url fetched directly by subserver.
-- **Circuit breaker:** 5 failures → 30s open → half-open (3 attempts) → close. Monitor via `circuit_breaker_state` metric.
+- **Circuit breaker:** implementation is covered by tests but is not currently wired into the live XUI client path; production resilience currently relies on retry/backoff. Monitor the retry/error metrics.
 - **RetryWithBackoff:** 3 retries with exponential backoff + jitter. DNS errors fast-fail.
 - **Subscription defaults:** `reset: 30` (days from creation), `expiresAt: now + 30 days`
 - **Auto-reset:** Only works when `expiresAt` > 0. Traffic resets every 30 days, expiry extends (3x-ui auto-renew logic)
@@ -286,7 +286,7 @@ All tests pass with `-race` detector. Fuzzing enabled for critical functions.
 - **Rationale:** Subscription is immediately inaccessible after revoked status is set. VPN deprovisioning is best-effort (background sync retries on failure). Physical deletion happens last. See AGENTS.md for detailed flow description.
 - **Referral cache:** `DecrementReferralCount` called after successful deletion.
 
-### Subscription Proxy (v2.3.4+)
+### Subscription Proxy (v2.3.11+)
 - **Endpoint:** `GET /sub/{subID}` — subID = SubscriptionID from DB (14 random bytes → 28 hex chars)
 - **Config:** Subserver агрегирует ответы нод как-is; кастомные extra-серверы (extra_servers.txt, hot reload) удалены в v2.3.0.
 - **Cache:** 240s TTL hardcoded (`config.SubServerCacheTTL`)
@@ -351,11 +351,11 @@ All tests pass with `-race` detector. Fuzzing enabled for critical functions.
 - **`/readyz`:** Simple flag — set to true only after all services initialized → 200 or 503
 
 ### Docker
-- **Base:** Alpine 3.21 (runtime), golang:1.25-alpine (builder)
+- **Base:** Alpine 3.21 (runtime, with wget/procps), golang:1.25-alpine (builder)
 - **Binary:** UPX compressed (-9) — ~30–40% smaller
 - **Migrations:** Embedded via `COPY internal/database/migrations`
 - **Data volume:** `./data:/app/data` (persistent)
-- **Health check:** `wget --spider http://localhost:8880/healthz`
+- **Health check:** `wget --no-verbose --tries=1 --spider http://localhost:8880/healthz`
 - **Resource limits:** 0.5 CPU, 128MB memory (2× GOMEMLIMIT for GC headroom)
 - **Stop grace period:** 30s, SIGTERM
 
@@ -372,7 +372,7 @@ go test -coverprofile=coverage.out ./...
 go tool cover -func=coverage.out
 
 # Build binary
-go build -ldflags="-s -w -X main.version=v2.3.4 -X main.commit=$(git rev-parse --short HEAD 2>/dev/null || echo unknown) -X main.buildTime=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" -o rs8kvn_bot ./cmd/bot
+go build -ldflags="-s -w -X main.version=v2.3.11 -X main.commit=$(git rev-parse --short HEAD 2>/dev/null || echo unknown) -X main.buildTime=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" -o rs8kvn_bot ./cmd/bot
 
 # Run linters
 golangci-lint run ./...

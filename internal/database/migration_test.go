@@ -10,6 +10,33 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestMigrationVersionToInt(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		version uint
+		want    int
+		wantErr bool
+	}{
+		{name: "positive", version: 31, want: 31},
+		{name: "zero", version: 0, wantErr: true},
+		{name: "overflow", version: uint(^uint(0)>>1) + 1, wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := migrationVersionToInt(tt.version)
+			if tt.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
 func TestMigration_Idempotency(t *testing.T) {
 	t.Parallel()
 

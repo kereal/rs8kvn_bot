@@ -294,7 +294,9 @@ func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 	s.mu.RUnlock()
 	if !ready {
 		w.WriteHeader(http.StatusServiceUnavailable)
-		_, _ = w.Write([]byte("NOT READY"))
+		if _, err := w.Write([]byte("NOT READY")); err != nil {
+			logger.Debug("failed to write readiness response", zap.Error(err))
+		}
 		return
 	}
 
@@ -302,10 +304,14 @@ func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 
 	if health.Status == "ok" {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
+		if _, err := w.Write([]byte("OK")); err != nil {
+			logger.Debug("failed to write readiness response", zap.Error(err))
+		}
 	} else {
 		w.WriteHeader(http.StatusServiceUnavailable)
-		w.Write([]byte("NOT READY"))
+		if _, err := w.Write([]byte("NOT READY")); err != nil {
+			logger.Debug("failed to write readiness response", zap.Error(err))
+		}
 	}
 }
 
@@ -462,7 +468,9 @@ func (s *Server) handleLogo(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodHead {
 		return
 	}
-	_, _ = w.Write(data)
+	if _, err := w.Write(data); err != nil {
+		logger.Debug("failed to write logo response", zap.Error(err))
+	}
 }
 
 // HealthResponse is the JSON document returned by the health endpoint.
@@ -706,9 +714,9 @@ type trialPageData struct {
 func (s *Server) renderTrialPage(w http.ResponseWriter, subID, subURL, telegramLink string, trialHours int) {
 	happLink := "happ://add/" + subURL
 	data := trialPageData{
-		HappLink:     template.URL(happLink), //nolint:gosec // template.URL is the correct html/template idiom for happ:// custom scheme; value is server-generated
+		HappLink:     template.URL(happLink), // #nosec G203 -- scheme is server-generated from validated subscription URL
 		SubURL:       subURL,
-		TelegramLink: template.URL(telegramLink), //nolint:gosec // template.URL is the correct html/template idiom for tg:// custom scheme; value is server-generated
+		TelegramLink: template.URL(telegramLink), // #nosec G203 -- link is server-generated from the Telegram username and subscription ID
 		TrialHours:   trialHours,
 	}
 	if err := s.trialTemplate.Execute(w, data); err != nil {
@@ -880,7 +888,9 @@ func (s *Server) handleSubscription(w http.ResponseWriter, r *http.Request) {
 	} else {
 		response.WriteHeader(http.StatusOK)
 	}
-	_, _ = response.Write(result.Body)
+	if _, err := response.Write(result.Body); err != nil { // #nosec G705 -- body is intentionally returned as the subscription's plain response
+		logger.Debug("failed to write subscription response", zap.Error(err))
+	}
 }
 
 // logSubscriptionAccess records the completed subscription response after the
@@ -897,7 +907,9 @@ func (s *Server) logSubscriptionAccess(rec *statusRecorder, r *http.Request, cli
 func writeSubscriptionText(w http.ResponseWriter, statusCode int, body string) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(statusCode)
-	w.Write([]byte(body))
+	if _, err := w.Write([]byte(body)); err != nil {
+		logger.Debug("failed to write subscription text response", zap.Error(err))
+	}
 }
 
 // statusRecorder captures the response status and subscription aggregation counts
