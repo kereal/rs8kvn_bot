@@ -1,3 +1,4 @@
+// Package bot contains Telegram handlers, callbacks, keyboards, and user flows.
 package bot
 
 import (

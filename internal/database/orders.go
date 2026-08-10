@@ -1,3 +1,4 @@
+// Package database provides persistence, migrations, models, and repositories.
 package database
 
 import (
@@ -33,6 +34,7 @@ func (s *Service) GetOrderByID(ctx context.Context, id uint) (*Order, error) {
 }
 
 // GetOrderByProviderPaymentID finds an order by provider and external payment ID.
+// Not-found results are normalized to ErrOrderNotFound for service-layer handling.
 func (s *Service) GetOrderByProviderPaymentID(ctx context.Context, provider string, providerPaymentID uuid.UUID) (*Order, error) {
 	var order Order
 	result := s.db.WithContext(ctx).Where("payment_provider = ? AND provider_payment_id = ?", provider, providerPaymentID.String()).First(&order)
@@ -275,7 +277,8 @@ func calculatePaymentExpiry(now time.Time, sub *Subscription, product *Product) 
 	return base.AddDate(0, 0, product.DurationDays)
 }
 
-// CancelOrderCAS cancels an order only from one of the supplied states.
+// CancelOrderCAS cancels an order only from one of the supplied states. It
+// returns false without error when the callback is an idempotent no-op.
 func (s *Service) CancelOrderCAS(ctx context.Context, provider string, providerPaymentID uuid.UUID, fromStatuses []OrderStatus) (bool, error) {
 	result := s.db.WithContext(ctx).Model(&Order{}).Where("payment_provider = ? AND provider_payment_id = ? AND status IN ?", provider, providerPaymentID.String(), fromStatuses).Update("status", OrderStatusCanceled)
 	if result.Error != nil {
