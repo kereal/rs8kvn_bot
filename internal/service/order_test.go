@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -299,6 +300,66 @@ func TestRequestPayment_SaveDetailsFailureNotifiesAdmin(t *testing.T) {
 	require.Len(t, messages, 1)
 	assert.Contains(t, messages[0].Text, "payment_details_save_failed")
 	assert.Contains(t, messages[0].Text, "database unavailable")
+}
+
+func TestConfirmPayment_ReleasesPaymentLockBeforePostCommitSync(t *testing.T) {
+	firstID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440120")
+	secondID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440121")
+	syncStarted := make(chan struct{})
+	releaseSync := make(chan struct{})
+	var syncStartOnce sync.Once
+
+	mock := &testutil.DatabaseService{
+		GetOrderByProviderPaymentIDFunc: func(_ context.Context, _ string, id uuid.UUID) (*database.Order, error) {
+			if id == firstID {
+				return &database.Order{ID: 31, SubscriptionID: 41, ProductID: 51, Status: database.OrderStatusPending, AmountCents: 2300, Currency: "RUB"}, nil
+			}
+			return nil, database.ErrOrderNotFound
+		},
+		GetProductByIDFunc: func(_ context.Context, id uint) (*database.Product, error) {
+			return &database.Product{ID: id, PlanID: 61, DurationDays: 30, PriceCents: 2300, Currency: "RUB", IsActive: true}, nil
+		},
+		GetByIDFunc: func(_ context.Context, id uint) (*database.Subscription, error) {
+			return &database.Subscription{ID: id, TelegramID: 71, PlanID: 61}, nil
+		},
+		ConfirmOrderPaidCASFunc: func(_ context.Context, _ uint, _, _ time.Time, _ *database.Subscription, _ time.Time, _ *database.Product, _ database.ApplyPlanInTxFn) (bool, error) {
+			return true, nil
+		},
+		GetPendingBySubscriptionIDFunc: func(context.Context, uint) ([]database.SubscriptionNode, error) {
+			syncStartOnce.Do(func() { close(syncStarted) })
+			<-releaseSync
+			return nil, nil
+		},
+	}
+	orderService := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), fakePaymentProvider{})
+
+	firstDone := make(chan error, 1)
+	go func() {
+		_, err := orderService.ConfirmPayment(context.Background(), firstID, json.Number("23.00"), "RUB")
+		firstDone <- err
+	}()
+
+	select {
+	case <-syncStarted:
+	case <-time.After(time.Second):
+		t.Fatal("post-commit sync did not start")
+	}
+
+	secondDone := make(chan error, 1)
+	go func() {
+		_, err := orderService.ConfirmPayment(context.Background(), secondID, json.Number("23.00"), "RUB")
+		secondDone <- err
+	}()
+
+	select {
+	case err := <-secondDone:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("second payment callback remained blocked by post-commit sync")
+	}
+
+	close(releaseSync)
+	require.NoError(t, <-firstDone)
 }
 
 func TestConfirmPayment_RequiresSyncServiceForPendingOrder(t *testing.T) {

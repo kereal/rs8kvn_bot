@@ -28,6 +28,11 @@ type PaymentProvider interface {
 	CreateTransaction(context.Context, platega.CreateTransactionRequest) (*platega.CreateTransactionResponse, error)
 }
 
+// paymentSyncTimeout bounds the best-effort post-commit VPN sync. It prevents a
+// stuck node from keeping the webhook handler open indefinitely; the sync worker
+// retries any remaining pending node operations later.
+const paymentSyncTimeout = 20 * time.Second
+
 // Sentinel errors returned for expected payment states and configuration failures.
 // Callers should use errors.Is when they need to distinguish these cases.
 var (
@@ -433,7 +438,12 @@ func (o *OrderService) ConfirmPayment(ctx context.Context, providerPaymentID uui
 		return nil, ErrPaymentDisabled
 	}
 	o.paymentMu.Lock()
-	defer o.paymentMu.Unlock()
+	paymentLocked := true
+	defer func() {
+		if paymentLocked {
+			o.paymentMu.Unlock()
+		}
+	}()
 	if providerPaymentID == uuid.Nil {
 		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "invalid_provider_id", Reason: "provider payment UUID is nil", Action: "reject callback and inspect provider payload", CallbackStatus: "CONFIRMED"})
 		return nil, errors.New("invalid provider payment UUID")
@@ -511,15 +521,20 @@ func (o *OrderService) ConfirmPayment(ctx context.Context, providerPaymentID uui
 			sub.ExpiresAt = &newExpiry
 		}
 	}
+	if activated {
+		order.Status, order.PaidAt, order.ActivatedAt, order.ExpiresAt = database.OrderStatusPaid, &now, &now, &newExpiry
+	}
+	// The database transition and in-memory result are complete. Do not hold the
+	// process-wide payment lock while contacting VPN nodes; that external call is
+	// best-effort and may take up to paymentSyncTimeout.
+	o.paymentMu.Unlock()
+	paymentLocked = false
 	if activated && o.syncSvc != nil {
-		syncCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 20*time.Second)
+		syncCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), paymentSyncTimeout)
 		defer cancel()
 		if err := o.syncSvc.SyncSubscription(syncCtx, sub.ID); err != nil {
 			logger.Warn("payment post-commit sync failed", zap.Uint("subscription_id", sub.ID), zap.Error(err))
 		}
-	}
-	if activated {
-		order.Status, order.PaidAt, order.ActivatedAt, order.ExpiresAt = database.OrderStatusPaid, &now, &now, &newExpiry
 	}
 	return &PaymentConfirmation{Order: order, Activated: activated}, nil
 }
