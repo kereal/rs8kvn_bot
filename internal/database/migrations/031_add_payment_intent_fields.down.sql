@@ -7,4 +7,4 @@ ALTER TABLE orders DROP COLUMN payment_url;
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_provider_payment_unique
     ON orders(payment_provider, provider_payment_id)
-    WHERE provider_payment_id IS NOT NULL AND TRIM(provider_payment_id) <> '';
+    WHERE provider_payment_id IS NOT NULL;

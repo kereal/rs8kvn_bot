@@ -119,39 +119,15 @@ func (sh *SubscriptionHandler) handleMySubscription(ctx context.Context, chatID 
 		return nil
 	}
 
-	var trafficInfo string
-	var progressBar string
-	if traffic.LimitGB == 0 {
-		trafficInfo = "неограничен"
-	} else {
-		trafficInfo = fmt.Sprintf("%.2f из %d Гб (%.0f%%)", traffic.UsedGB, traffic.LimitGB, traffic.Percentage)
-		progressBar = "\n" + traffic.ProgressBar
-	}
-
-	// Статус подписки
-	var statusText string
-	switch sub.Status {
-	case "active":
+	statusText := sub.Status
+	if statusText == "active" {
 		statusText = "активна"
-	default:
-		statusText = sub.Status
 	}
-
-	resetInfo := traffic.ResetInfo
-	if resetInfo == "" {
-		resetInfo = "нет"
-	}
-
-	messageText := fmt.Sprintf(
-		"📋 *Ваша подписка*\n\n✌️ Статус: *%s*\n💡 Тариф: *%s*\n📊 Трафик: %s%s\n\n📅 Создана: %s\n⏰ Истекает: %s\n🔄 Сброс: %s\n\n🔗 Ссылка\n`%s`",
+	messageText := service.FormatSubscriptionMessage(
+		"📋 *Ваша подписка*",
 		statusText,
-		traffic.PlanName,
-		trafficInfo,
-		progressBar,
-		traffic.CreatedAtFormatted,
-		traffic.ExpiresAtFormatted,
-		resetInfo,
-		sh.h.cfg.SubURL(sub.SubscriptionID),
+		traffic,
+		service.SubscriptionURL(sh.h.cfg, sub.SubscriptionID),
 	)
 
 	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, messageText)

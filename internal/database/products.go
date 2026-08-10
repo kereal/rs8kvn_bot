@@ -68,6 +68,11 @@ func (s *Service) UpdateProductGuarded(ctx context.Context, product *Product) er
 			}
 			return fmt.Errorf("load product for update: %w", err)
 		}
+		// Acquire SQLite's write lock before counting orders. This serializes the
+		// guard's check-and-update against a concurrent first-order insert.
+		if err := tx.Model(&Product{}).Where("id = ?", product.ID).Update("is_active", current.IsActive).Error; err != nil {
+			return fmt.Errorf("lock product for update: %w", err)
+		}
 		var orderCount int64
 		if err := tx.Model(&Order{}).Where("product_id = ?", product.ID).Count(&orderCount).Error; err != nil {
 			return fmt.Errorf("count product orders: %w", err)
