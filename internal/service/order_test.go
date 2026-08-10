@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -21,6 +22,15 @@ import (
 type fakePaymentProvider struct{}
 
 type errorPaymentProvider struct{ err error }
+
+type responsePaymentProvider struct {
+	response *platega.CreateTransactionResponse
+	err      error
+}
+
+func (p responsePaymentProvider) CreateTransaction(context.Context, platega.CreateTransactionRequest) (*platega.CreateTransactionResponse, error) {
+	return p.response, p.err
+}
 
 func (p errorPaymentProvider) CreateTransaction(context.Context, platega.CreateTransactionRequest) (*platega.CreateTransactionResponse, error) {
 	return nil, p.err
@@ -143,6 +153,215 @@ func TestOrderService_NotifiesAdminWhenProviderOutcomeIsUncertain(t *testing.T) 
 	assert.Contains(t, messages[0].Text, "provider timeout")
 }
 
+func TestRequestPayment_SavesRedirectPaymentDetails(t *testing.T) {
+	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440106")
+	order := &database.Order{ID: 16, SubscriptionID: 7, ProductID: 11, Status: database.OrderStatusPending, AmountCents: 2300, Currency: "RUB"}
+	var savedID uuid.UUID
+	var savedURL string
+	var savedExpiry time.Time
+	mock := &testutil.DatabaseService{
+		GetProductByIDFunc: func(context.Context, uint) (*database.Product, error) {
+			return &database.Product{ID: 11, PlanID: 2, Name: "Premium", PriceCents: 2300, Currency: "RUB", IsActive: true}, nil
+		},
+		GetByTelegramIDFunc: func(context.Context, int64) (*database.Subscription, error) {
+			return &database.Subscription{ID: 7, TelegramID: 46}, nil
+		},
+		FindPendingPaymentOrderFunc: func(context.Context, uint, uint, time.Time) (*database.Order, error) {
+			return order, nil
+		},
+		GetPlanByIDFunc: func(context.Context, uint) (*database.Plan, error) {
+			return &database.Plan{ID: 2, IsActive: true}, nil
+		},
+		MarkPaymentCreationUncertainFunc: func(context.Context, uint, bool) (bool, error) { return true, nil },
+		SavePaymentDetailsFunc: func(_ context.Context, orderID uint, id uuid.UUID, url string, expiry time.Time) error {
+			assert.Equal(t, uint(16), orderID)
+			savedID, savedURL, savedExpiry = id, url, expiry
+			return nil
+		},
+	}
+	provider := responsePaymentProvider{response: &platega.CreateTransactionResponse{
+		TransactionID: providerID.String(), Redirect: "https://pay.example/redirect", ExpiresIn: "00:15:00",
+	}}
+	o := NewOrderService(mock, nil, nil, provider, "@testbot", &config.Config{TelegramAdminID: 999})
+
+	info, gotOrder, err := o.RequestPayment(context.Background(), 46, "user", &database.Product{ID: 11})
+	require.NoError(t, err)
+	require.NotNil(t, info)
+	require.Same(t, order, gotOrder)
+	assert.Equal(t, providerID, info.PaymentID)
+	assert.Equal(t, "https://pay.example/redirect", info.URL)
+	assert.Equal(t, providerID, savedID)
+	assert.Equal(t, info.URL, savedURL)
+	assert.WithinDuration(t, time.Now().Add(15*time.Minute), savedExpiry, 2*time.Second)
+}
+
+func TestRequestPayment_InvalidProviderResponsesNotifyAdmin(t *testing.T) {
+	providerID := "550e8400-e29b-41d4-a716-446655440107"
+	tests := []struct {
+		name      string
+		response  *platega.CreateTransactionResponse
+		wantErr   string
+		wantEvent string
+	}{
+		{name: "empty response", wantErr: "empty response", wantEvent: "provider_empty_response"},
+		{name: "invalid transaction id", response: &platega.CreateTransactionResponse{TransactionID: "not-a-uuid", URL: "https://pay.example", ExpiresIn: "00:15:00"}, wantErr: "transactionId must be UUID v4", wantEvent: "provider_invalid_transaction_id"},
+		{name: "missing URL", response: &platega.CreateTransactionResponse{TransactionID: providerID, ExpiresIn: "00:15:00"}, wantErr: "response has no payment URL", wantEvent: "provider_incomplete_response"},
+		{name: "invalid expiry", response: &platega.CreateTransactionResponse{TransactionID: providerID, URL: "https://pay.example", ExpiresIn: "forever"}, wantErr: "parse payment expiry", wantEvent: "provider_incomplete_response"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			order := &database.Order{ID: 17, SubscriptionID: 8, ProductID: 12, Status: database.OrderStatusPending, AmountCents: 2300, Currency: "RUB"}
+			adminBot := testutil.NewBotAPI()
+			mock := &testutil.DatabaseService{
+				GetProductByIDFunc: func(context.Context, uint) (*database.Product, error) {
+					return &database.Product{ID: 12, PlanID: 2, Name: "Premium", PriceCents: 2300, Currency: "RUB", IsActive: true}, nil
+				},
+				GetByTelegramIDFunc: func(context.Context, int64) (*database.Subscription, error) {
+					return &database.Subscription{ID: 8, TelegramID: 47}, nil
+				},
+				FindPendingPaymentOrderFunc: func(context.Context, uint, uint, time.Time) (*database.Order, error) {
+					return order, nil
+				},
+				GetPlanByIDFunc: func(context.Context, uint) (*database.Plan, error) {
+					return &database.Plan{ID: 2, IsActive: true}, nil
+				},
+				MarkPaymentCreationUncertainFunc: func(context.Context, uint, bool) (bool, error) { return true, nil },
+			}
+			o := NewOrderService(mock, nil, nil, responsePaymentProvider{response: tt.response}, "", &config.Config{TelegramAdminID: 999})
+			o.SetAdminBot(adminBot)
+
+			_, _, err := o.RequestPayment(context.Background(), 47, "user", &database.Product{ID: 12})
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.wantErr)
+			messages := adminBot.GetAllSentMessages()
+			require.Len(t, messages, 1)
+			assert.Contains(t, messages[0].Text, tt.wantEvent)
+		})
+	}
+}
+
+func TestRequestPayment_LatePlanLoadFailureNotifiesAdmin(t *testing.T) {
+	adminBot := testutil.NewBotAPI()
+	order := &database.Order{ID: 21, SubscriptionID: 12, ProductID: 16, Status: database.OrderStatusPending, AmountCents: 2300, Currency: "RUB"}
+	mock := &testutil.DatabaseService{
+		GetProductByIDFunc: func(context.Context, uint) (*database.Product, error) {
+			return &database.Product{ID: 16, PlanID: 2, Name: "Premium", PriceCents: 2300, Currency: "RUB", IsActive: true}, nil
+		},
+		GetByTelegramIDFunc: func(context.Context, int64) (*database.Subscription, error) {
+			return &database.Subscription{ID: 12, TelegramID: 50}, nil
+		},
+		FindPendingPaymentOrderFunc: func(context.Context, uint, uint, time.Time) (*database.Order, error) {
+			return order, nil
+		},
+		GetPlanByIDFunc: func(context.Context, uint) (*database.Plan, error) {
+			return nil, errors.New("late plan database failure")
+		},
+	}
+	o := NewOrderService(mock, nil, nil, fakePaymentProvider{}, "", &config.Config{TelegramAdminID: 999})
+	o.SetAdminBot(adminBot)
+
+	_, _, err := o.RequestPayment(context.Background(), 50, "user", &database.Product{ID: 16})
+	require.Error(t, err)
+	messages := adminBot.GetAllSentMessages()
+	require.Len(t, messages, 1)
+	assert.Contains(t, messages[0].Text, "load_plan_failed")
+	assert.Contains(t, messages[0].Text, "late plan database failure")
+}
+
+func TestRequestPayment_SaveDetailsFailureNotifiesAdmin(t *testing.T) {
+	adminBot := testutil.NewBotAPI()
+	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440108")
+	order := &database.Order{ID: 18, SubscriptionID: 9, ProductID: 13, Status: database.OrderStatusPending, AmountCents: 2300, Currency: "RUB"}
+	mock := &testutil.DatabaseService{
+		GetProductByIDFunc: func(context.Context, uint) (*database.Product, error) {
+			return &database.Product{ID: 13, PlanID: 2, Name: "Premium", PriceCents: 2300, Currency: "RUB", IsActive: true}, nil
+		},
+		GetByTelegramIDFunc: func(context.Context, int64) (*database.Subscription, error) {
+			return &database.Subscription{ID: 9, TelegramID: 48}, nil
+		},
+		FindPendingPaymentOrderFunc: func(context.Context, uint, uint, time.Time) (*database.Order, error) {
+			return order, nil
+		},
+		GetPlanByIDFunc: func(context.Context, uint) (*database.Plan, error) {
+			return &database.Plan{ID: 2, IsActive: true}, nil
+		},
+		MarkPaymentCreationUncertainFunc: func(context.Context, uint, bool) (bool, error) { return true, nil },
+		SavePaymentDetailsFunc: func(context.Context, uint, uuid.UUID, string, time.Time) error {
+			return errors.New("database unavailable")
+		},
+	}
+	o := NewOrderService(mock, nil, nil, responsePaymentProvider{response: &platega.CreateTransactionResponse{TransactionID: providerID.String(), URL: "https://pay.example", ExpiresIn: "00:15:00"}}, "", &config.Config{TelegramAdminID: 999})
+	o.SetAdminBot(adminBot)
+
+	_, _, err := o.RequestPayment(context.Background(), 48, "user", &database.Product{ID: 13})
+	require.Error(t, err)
+	messages := adminBot.GetAllSentMessages()
+	require.Len(t, messages, 1)
+	assert.Contains(t, messages[0].Text, "payment_details_save_failed")
+	assert.Contains(t, messages[0].Text, "database unavailable")
+}
+
+func TestConfirmPayment_ReleasesPaymentLockBeforePostCommitSync(t *testing.T) {
+	firstID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440120")
+	secondID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440121")
+	syncStarted := make(chan struct{})
+	releaseSync := make(chan struct{})
+	var syncStartOnce sync.Once
+
+	mock := &testutil.DatabaseService{
+		GetOrderByProviderPaymentIDFunc: func(_ context.Context, _ string, id uuid.UUID) (*database.Order, error) {
+			if id == firstID {
+				return &database.Order{ID: 31, SubscriptionID: 41, ProductID: 51, Status: database.OrderStatusPending, AmountCents: 2300, Currency: "RUB"}, nil
+			}
+			return nil, database.ErrOrderNotFound
+		},
+		GetProductByIDFunc: func(_ context.Context, id uint) (*database.Product, error) {
+			return &database.Product{ID: id, PlanID: 61, DurationDays: 30, PriceCents: 2300, Currency: "RUB", IsActive: true}, nil
+		},
+		GetByIDFunc: func(_ context.Context, id uint) (*database.Subscription, error) {
+			return &database.Subscription{ID: id, TelegramID: 71, PlanID: 61}, nil
+		},
+		ConfirmOrderPaidCASFunc: func(_ context.Context, _ uint, _, _ time.Time, _ *database.Subscription, _ time.Time, _ *database.Product, _ database.ApplyPlanInTxFn) (bool, error) {
+			return true, nil
+		},
+		GetPendingBySubscriptionIDFunc: func(context.Context, uint) ([]database.SubscriptionNode, error) {
+			syncStartOnce.Do(func() { close(syncStarted) })
+			<-releaseSync
+			return nil, nil
+		},
+	}
+	orderService := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), fakePaymentProvider{})
+
+	firstDone := make(chan error, 1)
+	go func() {
+		_, err := orderService.ConfirmPayment(context.Background(), firstID, json.Number("23.00"), "RUB")
+		firstDone <- err
+	}()
+
+	select {
+	case <-syncStarted:
+	case <-time.After(time.Second):
+		t.Fatal("post-commit sync did not start")
+	}
+
+	secondDone := make(chan error, 1)
+	go func() {
+		_, err := orderService.ConfirmPayment(context.Background(), secondID, json.Number("23.00"), "RUB")
+		secondDone <- err
+	}()
+
+	select {
+	case err := <-secondDone:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("second payment callback remained blocked by post-commit sync")
+	}
+
+	close(releaseSync)
+	require.NoError(t, <-firstDone)
+}
+
 func TestConfirmPayment_RequiresSyncServiceForPendingOrder(t *testing.T) {
 	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440105")
 	mock := &testutil.DatabaseService{
@@ -153,6 +372,108 @@ func TestConfirmPayment_RequiresSyncServiceForPendingOrder(t *testing.T) {
 	o := NewOrderService(mock, nil, nil, fakePaymentProvider{})
 	_, err := o.ConfirmPayment(context.Background(), providerID, json.Number("23.00"), "RUB")
 	require.ErrorIs(t, err, ErrPaymentSyncNotReady)
+}
+
+func TestConfirmPayment_ValidationAndDatabaseFailuresNotifyAdmin(t *testing.T) {
+	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440109")
+	tests := []struct {
+		name       string
+		currency   string
+		amount     json.Number
+		productErr error
+		subErr     error
+		casErr     error
+		wantErr    error
+		wantEvent  string
+	}{
+		{name: "currency mismatch", currency: "USD", amount: "23.00", wantErr: ErrCurrencyMismatch, wantEvent: "callback_currency_mismatch"},
+		{name: "amount mismatch", currency: "RUB", amount: "24.00", wantErr: ErrAmountMismatch, wantEvent: "callback_amount_mismatch"},
+		{name: "invalid amount", currency: "RUB", amount: "23.001", wantEvent: "callback_amount_invalid"},
+		{name: "product load failure", currency: "RUB", amount: "23.00", productErr: errors.New("product database failed"), wantEvent: "load_order_product_failed"},
+		{name: "subscription load failure", currency: "RUB", amount: "23.00", subErr: errors.New("subscription database failed"), wantEvent: "load_order_subscription_failed"},
+		{name: "transaction failure", currency: "RUB", amount: "23.00", casErr: errors.New("transaction rolled back"), wantEvent: "confirm_payment_failed"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			adminBot := testutil.NewBotAPI()
+			mock := &testutil.DatabaseService{
+				GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
+					return &database.Order{ID: 19, SubscriptionID: 10, ProductID: 14, Status: database.OrderStatusPending, AmountCents: 2300, Currency: "RUB"}, nil
+				},
+				GetProductByIDFunc: func(context.Context, uint) (*database.Product, error) {
+					if tt.productErr != nil {
+						return nil, tt.productErr
+					}
+					return &database.Product{ID: 14, PlanID: 2, Name: "Premium", DurationDays: 30, PriceCents: 2300, Currency: "RUB", IsActive: true}, nil
+				},
+				GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
+					if tt.subErr != nil {
+						return nil, tt.subErr
+					}
+					return &database.Subscription{ID: 10, TelegramID: 49, PlanID: 2}, nil
+				},
+				ConfirmOrderPaidCASFunc: func(context.Context, uint, time.Time, time.Time, *database.Subscription, time.Time, *database.Product, database.ApplyPlanInTxFn) (bool, error) {
+					return false, tt.casErr
+				},
+			}
+			o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), fakePaymentProvider{}, "", &config.Config{TelegramAdminID: 999})
+			o.SetAdminBot(adminBot)
+
+			_, err := o.ConfirmPayment(context.Background(), providerID, tt.amount, tt.currency)
+			if tt.wantErr != nil {
+				require.ErrorIs(t, err, tt.wantErr)
+			} else {
+				require.Error(t, err)
+			}
+			messages := adminBot.GetAllSentMessages()
+			require.Len(t, messages, 1)
+			assert.Contains(t, messages[0].Text, tt.wantEvent)
+		})
+	}
+}
+
+func TestCancelPaymentByProvider_ErrorsNotifyAdmin(t *testing.T) {
+	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440110")
+	tests := []struct {
+		name      string
+		currency  string
+		amount    json.Number
+		casErr    error
+		wantErr   error
+		wantEvent string
+	}{
+		{name: "currency mismatch", currency: "USD", amount: "23.00", wantErr: ErrCurrencyMismatch, wantEvent: "callback_currency_mismatch"},
+		{name: "amount mismatch", currency: "RUB", amount: "24.00", wantErr: ErrAmountMismatch, wantEvent: "callback_amount_mismatch"},
+		{name: "invalid amount", currency: "RUB", amount: "23.001", wantEvent: "callback_amount_invalid"},
+		{name: "cancel database failure", currency: "RUB", amount: "23.00", casErr: errors.New("cancel database failed"), wantEvent: "cancel_payment_failed"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			adminBot := testutil.NewBotAPI()
+			mock := &testutil.DatabaseService{
+				GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
+					return &database.Order{ID: 20, SubscriptionID: 11, ProductID: 15, Status: database.OrderStatusPending, AmountCents: 2300, Currency: "RUB"}, nil
+				},
+				CancelOrderCASFunc: func(context.Context, string, uuid.UUID, []database.OrderStatus) (bool, error) {
+					return false, tt.casErr
+				},
+			}
+			o := NewOrderService(mock, nil, nil, fakePaymentProvider{}, "", &config.Config{TelegramAdminID: 999})
+			o.SetAdminBot(adminBot)
+
+			_, _, err := o.CancelPaymentByProvider(context.Background(), providerID, "CANCELED", tt.amount, tt.currency)
+			if tt.wantErr != nil {
+				require.ErrorIs(t, err, tt.wantErr)
+			} else {
+				require.Error(t, err)
+			}
+			messages := adminBot.GetAllSentMessages()
+			require.Len(t, messages, 1)
+			assert.Contains(t, messages[0].Text, tt.wantEvent)
+		})
+	}
 }
 
 func TestCalculateProductExpiry_SamePlanExtends(t *testing.T) {

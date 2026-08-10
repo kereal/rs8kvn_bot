@@ -16,8 +16,9 @@ import (
 )
 
 // newSQLiteAtMigration30 creates the real application schema immediately
-// before migration 031. The test then invokes runMigrations, so migration 031
-// itself—not a copy of its SQL—is what is validated.
+// before migration 031. Use the target version explicitly: Steps(30) would
+// count migration 000 as one of the steps and leave the database at version 29.
+// The tests then invoke migration 031 itself—not a copy of its SQL.
 func newSQLiteAtMigration30(t *testing.T) (*sql.DB, func()) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "payment-migration.db")
@@ -32,7 +33,7 @@ func newSQLiteAtMigration30(t *testing.T) (*sql.DB, func()) {
 	require.NoError(t, err)
 	m, err := migrate.NewWithInstance("iofs", source, "sqlite", driver)
 	require.NoError(t, err)
-	require.NoError(t, m.Steps(30))
+	require.NoError(t, m.Migrate(30))
 	return sqlDB, func() {
 		_, _ = m.Close()
 		_ = sqlDB.Close()
@@ -101,6 +102,19 @@ func TestMigration031_DownRestoresOriginalProviderIndexOnSQLite(t *testing.T) {
 	t.Cleanup(func() { _, _ = m.Close() })
 
 	require.NoError(t, m.Steps(1))
+
+	// The current schema deliberately permits multiple pending orders with an
+	// empty provider ID. Rollback must normalize those placeholders before
+	// restoring the legacy IS NOT NULL index predicate.
+	_, err = sqlDB.Exec(`
+		INSERT INTO orders (subscription_id, product_id, status, amount_cents, currency, payment_provider, provider_payment_id, created_at)
+		VALUES (1001, 1001, 'pending', 100, 'RUB', 'platega', '', datetime('now'))`)
+	require.NoError(t, err)
+	_, err = sqlDB.Exec(`
+		INSERT INTO orders (subscription_id, product_id, status, amount_cents, currency, payment_provider, provider_payment_id, created_at)
+		VALUES (1002, 1002, 'pending', 100, 'RUB', 'platega', '', datetime('now'))`)
+	require.NoError(t, err)
+
 	require.NoError(t, m.Steps(-1))
 
 	rows, err := sqlDB.Query("PRAGMA table_info(orders)")
@@ -117,8 +131,17 @@ func TestMigration031_DownRestoresOriginalProviderIndexOnSQLite(t *testing.T) {
 	}
 	require.NoError(t, rows.Err())
 
+	var nullProviderIDs, emptyProviderIDs int
+	require.NoError(t, sqlDB.QueryRow(`
+		SELECT
+			COALESCE(SUM(CASE WHEN provider_payment_id IS NULL THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN provider_payment_id = '' THEN 1 ELSE 0 END), 0)
+		FROM orders`).Scan(&nullProviderIDs, &emptyProviderIDs))
+	assert.Equal(t, 2, nullProviderIDs)
+	assert.Zero(t, emptyProviderIDs)
+
 	var partialSQL string
 	require.NoError(t, sqlDB.QueryRow(`SELECT sql FROM sqlite_master WHERE type='index' AND name='idx_orders_provider_payment_unique'`).Scan(&partialSQL))
 	assert.Contains(t, partialSQL, "provider_payment_id IS NOT NULL")
-	assert.NotContains(t, partialSQL, "payment_provider_id <> ''")
+	assert.NotContains(t, partialSQL, "provider_payment_id <> ''")
 }
