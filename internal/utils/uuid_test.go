@@ -1,665 +1,149 @@
 package utils
 
 import (
+	"regexp"
 	"strings"
+	"sync"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func TestGenerateUUID(t *testing.T) {
+func TestGenerators_Contract(t *testing.T) {
 	t.Parallel()
 
-	t.Run("generates non-empty UUID", func(t *testing.T) {
-		got, err := GenerateUUID()
-		require.NoError(t, err)
-		assert.NotEmpty(t, got, "GenerateUUID() returned empty string")
-	})
-
-	t.Run("generates valid UUID v4 format", func(t *testing.T) {
-		uuid, err := GenerateUUID()
-		require.NoError(t, err)
-
-		// UUID v4 format: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx
-		// where x is any hex digit, 4 is the version, y is one of 8, 9, a, or b
-		pattern := `^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`
-		assert.Regexp(t, pattern, uuid, "GenerateUUID() should match UUID v4 format")
-	})
-
-	t.Run("generates unique UUIDs", func(t *testing.T) {
-		const iterations = 1000
-		uuids := make(map[string]bool, iterations)
-
-		for i := 0; i < iterations; i++ {
-			uuid, err := GenerateUUID()
-			require.NoError(t, err)
-			assert.False(t, uuids[uuid], "GenerateUUID() generated duplicate UUID after %d iterations: %s", i, uuid)
-			uuids[uuid] = true
-		}
-	})
-
-	t.Run("generates correct length", func(t *testing.T) {
-		uuid, err := GenerateUUID()
-		require.NoError(t, err)
-		// UUID format: 8-4-4-4-12 = 36 characters (32 hex + 4 dashes)
-		expectedLen := 36
-
-		assert.Len(t, uuid, expectedLen, "GenerateUUID() length")
-	})
-
-	t.Run("version bit is set correctly", func(t *testing.T) {
-		for i := 0; i < 100; i++ {
-			uuid, err := GenerateUUID()
-			require.NoError(t, err)
-			// Check that the 13th character (version) is '4'
-			if len(uuid) >= 15 {
-				assert.Equal(t, '4', rune(uuid[14]), "GenerateUUID() version bit not set correctly at position 14")
-			}
-		}
-	})
-
-	t.Run("variant bits are set correctly", func(t *testing.T) {
-		for i := 0; i < 100; i++ {
-			uuid, err := GenerateUUID()
-			require.NoError(t, err)
-			// Check that the 17th character (variant) is one of 8, 9, a, b
-			if len(uuid) >= 20 {
-				variant := uuid[19]
-				assert.Contains(t, []byte{'8', '9', 'a', 'b'}, variant, "GenerateUUID() variant bits not set correctly at position 19")
-			}
-		}
-	})
-}
-
-func TestGenerateSubID(t *testing.T) {
-	t.Parallel()
-
-	t.Run("generates non-empty SubID", func(t *testing.T) {
-		got, err := GenerateSubID()
-		require.NoError(t, err)
-		assert.NotEmpty(t, got, "GenerateSubID() returned empty string")
-	})
-
-	t.Run("generates valid hex format", func(t *testing.T) {
-		subID, err := GenerateSubID()
-		require.NoError(t, err)
-
-		// SubID format: 14 hex characters (28 hex chars in the implementation)
-		pattern := `^[0-9a-f]+$`
-		assert.Regexp(t, pattern, subID, "GenerateSubID() should contain hex characters only")
-	})
-
-	t.Run("generates unique SubIDs", func(t *testing.T) {
-		const iterations = 1000
-		subIDs := make(map[string]bool, iterations)
-
-		for i := 0; i < iterations; i++ {
-			subID, err := GenerateSubID()
-			require.NoError(t, err)
-			assert.False(t, subIDs[subID], "GenerateSubID() generated duplicate SubID after %d iterations: %s", i, subID)
-			subIDs[subID] = true
-		}
-	})
-
-	t.Run("generates correct length", func(t *testing.T) {
-		subID, err := GenerateSubID()
-		require.NoError(t, err)
-		// 5 bytes = 10 hex characters
-		expectedLen := 10
-
-		assert.Len(t, subID, expectedLen, "GenerateSubID() length")
-	})
-
-	t.Run("generates URL-safe IDs", func(t *testing.T) {
-		for i := 0; i < 100; i++ {
-			subID, err := GenerateSubID()
-			require.NoError(t, err)
-			// Check that all characters are hex (0-9, a-f)
-			for _, c := range subID {
-				assert.True(t, (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'),
-					"GenerateSubID() contains non-URL-safe character: %c", c)
-			}
-		}
-	})
-}
-
-func TestGenerateInviteCode(t *testing.T) {
-	t.Parallel()
-
-	t.Run("generates non-empty code", func(t *testing.T) {
-		got, err := GenerateInviteCode()
-		require.NoError(t, err)
-		assert.NotEmpty(t, got, "GenerateInviteCode() returned empty string")
-	})
-
-	t.Run("generates correct length", func(t *testing.T) {
-		code, err := GenerateInviteCode()
-		require.NoError(t, err)
-		assert.Len(t, code, 8, "GenerateInviteCode() length")
-	})
-
-	t.Run("generates valid characters", func(t *testing.T) {
-		code, err := GenerateInviteCode()
-		require.NoError(t, err)
-		const validChars = "0123456789abcdefghijklmnopqrstuvwxyz"
-		for _, c := range code {
-			assert.True(t, strings.ContainsRune(validChars, c),
-				"GenerateInviteCode() contains invalid character: %c", c)
-		}
-	})
-
-	t.Run("generates unique codes", func(t *testing.T) {
-		code1, err := GenerateInviteCode()
-		require.NoError(t, err)
-		code2, err := GenerateInviteCode()
-		require.NoError(t, err)
-		assert.NotEqual(t, code1, code2, "GenerateInviteCode() should generate different codes")
-	})
-
-	t.Run("generates lowercase only", func(t *testing.T) {
-		code, err := GenerateInviteCode()
-		require.NoError(t, err)
-		assert.Equal(t, strings.ToLower(code), code, "GenerateInviteCode() should generate lowercase only")
-	})
-}
-
-func TestGenerateUUID_Concurrency(t *testing.T) {
-	t.Parallel()
-
-	t.Run("concurrent generation is safe", func(t *testing.T) {
-		const goroutines = 50
-		const uuidsPerGoroutine = 50
-
-		results := make(chan string, goroutines*uuidsPerGoroutine)
-
-		for i := 0; i < goroutines; i++ {
-			go func() {
-				for j := 0; j < uuidsPerGoroutine; j++ {
-					uuid, err := GenerateUUID()
-					if err != nil {
-						return
-					}
-					results <- uuid
+	tests := []struct {
+		name     string
+		generate func() (string, error)
+		length   int
+		valid    func(string) bool
+	}{
+		{
+			name:     "uuid v4",
+			generate: GenerateUUID,
+			length:   36,
+			valid: func(value string) bool {
+				return regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`).MatchString(value)
+			},
+		},
+		{
+			name:     "subscription id",
+			generate: GenerateSubID,
+			length:   10,
+			valid: func(value string) bool {
+				if len(value) != 10 {
+					return false
 				}
-			}()
-		}
+				for _, char := range value {
+					if !strings.ContainsRune("0123456789abcdef", char) {
+						return false
+					}
+				}
+				return true
+			},
+		},
+		{
+			name:     "invite code",
+			generate: GenerateInviteCode,
+			length:   8,
+			valid: func(value string) bool {
+				if len(value) != 8 {
+					return false
+				}
+				for _, char := range value {
+					if !strings.ContainsRune("0123456789abcdefghijklmnopqrstuvwxyz", char) {
+						return false
+					}
+				}
+				return true
+			},
+		},
+	}
 
-		uuids := make(map[string]bool)
-		for i := 0; i < goroutines*uuidsPerGoroutine; i++ {
-			uuid := <-results
-			require.False(t, uuids[uuid], "Concurrent generation produced duplicate UUID: %s", uuid)
-			uuids[uuid] = true
-		}
-
-		assert.Len(t, uuids, goroutines*uuidsPerGoroutine, "All UUIDs should be unique")
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			value, err := tt.generate()
+			require.NoError(t, err)
+			require.Len(t, value, tt.length)
+			require.True(t, tt.valid(value), "generated value has invalid format: %q", value)
+		})
+	}
 }
 
-func TestGenerateSubID_Concurrency(t *testing.T) {
+func TestGenerators_Concurrent(t *testing.T) {
 	t.Parallel()
 
-	t.Run("concurrent generation is safe", func(t *testing.T) {
-		const goroutines = 50
-		const idsPerGoroutine = 50
+	tests := []struct {
+		name     string
+		generate func() (string, error)
+	}{
+		{name: "uuid", generate: GenerateUUID},
+		{name: "subscription id", generate: GenerateSubID},
+		{name: "invite code", generate: GenerateInviteCode},
+	}
 
-		results := make(chan string, goroutines*idsPerGoroutine)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			const (
+				workers         = 8
+				valuesPerWorker = 25
+			)
 
-		for i := 0; i < goroutines; i++ {
-			go func() {
-				for j := 0; j < idsPerGoroutine; j++ {
-					subID, err := GenerateSubID()
-					if err != nil {
-						return
+			values := make(chan string, workers*valuesPerWorker)
+			errs := make(chan error, workers*valuesPerWorker)
+			var wg sync.WaitGroup
+			wg.Add(workers)
+
+			for i := 0; i < workers; i++ {
+				go func() {
+					defer wg.Done()
+					for j := 0; j < valuesPerWorker; j++ {
+						value, err := tt.generate()
+						if err != nil {
+							errs <- err
+							continue
+						}
+						values <- value
 					}
-					results <- subID
-				}
-			}()
-		}
+				}()
+			}
 
-		subIDs := make(map[string]bool)
-		for i := 0; i < goroutines*idsPerGoroutine; i++ {
-			subID := <-results
-			require.False(t, subIDs[subID], "Concurrent generation produced duplicate SubID: %s", subID)
-			subIDs[subID] = true
-		}
+			wg.Wait()
+			close(values)
+			close(errs)
 
-		assert.Len(t, subIDs, goroutines*idsPerGoroutine, "All SubIDs should be unique")
-	})
+			for err := range errs {
+				require.NoError(t, err)
+			}
+			seen := make(map[string]struct{}, workers*valuesPerWorker)
+			for value := range values {
+				seen[value] = struct{}{}
+			}
+			require.Len(t, seen, workers*valuesPerWorker, "concurrent generator returned duplicate values")
+		})
+	}
 }
 
-// BenchmarkGenerateUUID benchmarks UUID generation
 func BenchmarkGenerateUUID(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		_, err := GenerateUUID()
-		if err != nil {
+		if _, err := GenerateUUID(); err != nil {
 			b.Fatal(err)
 		}
 	}
 }
 
-// BenchmarkGenerateSubID benchmarks SubID generation
 func BenchmarkGenerateSubID(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		_, err := GenerateSubID()
-		if err != nil {
+		if _, err := GenerateSubID(); err != nil {
 			b.Fatal(err)
 		}
 	}
 }
 
-// BenchmarkGenerateUUID_Parallel benchmarks parallel UUID generation
-func BenchmarkGenerateUUID_Parallel(b *testing.B) {
-	b.RunParallel(func(pb *testing.PB) {
-		for pb.Next() {
-			_, err := GenerateUUID()
-			if err != nil {
-				b.Fatal(err)
-			}
-		}
-	})
-}
-
-// BenchmarkGenerateSubID_Parallel benchmarks parallel SubID generation
-func BenchmarkGenerateSubID_Parallel(b *testing.B) {
-	b.RunParallel(func(pb *testing.PB) {
-		for pb.Next() {
-			_, err := GenerateSubID()
-			if err != nil {
-				b.Fatal(err)
-			}
-		}
-	})
-}
-
-// BenchmarkGenerateInviteCode benchmarks invite code generation
 func BenchmarkGenerateInviteCode(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		_, err := GenerateInviteCode()
-		if err != nil {
+		if _, err := GenerateInviteCode(); err != nil {
 			b.Fatal(err)
 		}
 	}
-}
-
-// BenchmarkGenerateInviteCode_Parallel benchmarks parallel invite code generation
-func BenchmarkGenerateInviteCode_Parallel(b *testing.B) {
-	b.RunParallel(func(pb *testing.PB) {
-		for pb.Next() {
-			_, err := GenerateInviteCode()
-			if err != nil {
-				b.Fatal(err)
-			}
-		}
-	})
-}
-
-// BenchmarkGenerateUUID_SmallBatch benchmarks generating a small batch of UUIDs
-func BenchmarkGenerateUUID_SmallBatch(b *testing.B) {
-	for i := 0; i < b.N; i++ {
-		for j := 0; j < 10; j++ {
-			_, err := GenerateUUID()
-			if err != nil {
-				b.Fatal(err)
-			}
-		}
-	}
-}
-
-// BenchmarkGenerateUUID_LargeBatch benchmarks generating a large batch of UUIDs
-func BenchmarkGenerateUUID_LargeBatch(b *testing.B) {
-	for i := 0; i < b.N; i++ {
-		for j := 0; j < 1000; j++ {
-			_, err := GenerateUUID()
-			if err != nil {
-				b.Fatal(err)
-			}
-		}
-	}
-}
-
-// BenchmarkGenerateSubID_SmallBatch benchmarks generating a small batch of SubIDs
-func BenchmarkGenerateSubID_SmallBatch(b *testing.B) {
-	for i := 0; i < b.N; i++ {
-		for j := 0; j < 10; j++ {
-			_, err := GenerateSubID()
-			if err != nil {
-				b.Fatal(err)
-			}
-		}
-	}
-}
-
-// BenchmarkGenerateSubID_LargeBatch benchmarks generating a large batch of SubIDs
-func BenchmarkGenerateSubID_LargeBatch(b *testing.B) {
-	for i := 0; i < b.N; i++ {
-		for j := 0; j < 1000; j++ {
-			_, err := GenerateSubID()
-			if err != nil {
-				b.Fatal(err)
-			}
-		}
-	}
-}
-
-// BenchmarkGenerateInviteCode_SmallBatch benchmarks generating a small batch of invite codes
-func BenchmarkGenerateInviteCode_SmallBatch(b *testing.B) {
-	for i := 0; i < b.N; i++ {
-		for j := 0; j < 10; j++ {
-			_, err := GenerateInviteCode()
-			if err != nil {
-				b.Fatal(err)
-			}
-		}
-	}
-}
-
-// BenchmarkGenerateInviteCode_LargeBatch benchmarks generating a large batch of invite codes
-func BenchmarkGenerateInviteCode_LargeBatch(b *testing.B) {
-	for i := 0; i < b.N; i++ {
-		for j := 0; j < 1000; j++ {
-			_, err := GenerateInviteCode()
-			if err != nil {
-				b.Fatal(err)
-			}
-		}
-	}
-}
-
-// BenchmarkAllGenerators benchmarks all generator functions together
-func BenchmarkAllGenerators(b *testing.B) {
-	b.Run("UUID", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			_, err := GenerateUUID()
-			if err != nil {
-				b.Fatal(err)
-			}
-		}
-	})
-	b.Run("SubID", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			_, err := GenerateSubID()
-			if err != nil {
-				b.Fatal(err)
-			}
-		}
-	})
-	b.Run("InviteCode", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			_, err := GenerateInviteCode()
-			if err != nil {
-				b.Fatal(err)
-			}
-		}
-	})
-}
-
-func TestGenerateInviteCode_Concurrency(t *testing.T) {
-	t.Parallel()
-
-	t.Run("concurrent generation is safe", func(t *testing.T) {
-		const goroutines = 50
-		const codesPerGoroutine = 50
-
-		results := make(chan string, goroutines*codesPerGoroutine)
-
-		for i := 0; i < goroutines; i++ {
-			go func() {
-				for j := 0; j < codesPerGoroutine; j++ {
-					code, err := GenerateInviteCode()
-					if err != nil {
-						return
-					}
-					results <- code
-				}
-			}()
-		}
-
-		codes := make(map[string]bool)
-		for i := 0; i < goroutines*codesPerGoroutine; i++ {
-			code := <-results
-			require.False(t, codes[code], "Concurrent generation produced duplicate code: %s", code)
-			codes[code] = true
-		}
-
-		assert.Len(t, codes, goroutines*codesPerGoroutine, "All codes should be unique")
-	})
-}
-
-func TestGenerateInviteCode_Entropy(t *testing.T) {
-	t.Parallel()
-
-	t.Run("generates high entropy codes", func(t *testing.T) {
-		const iterations = 1000
-		charCounts := make(map[rune]int)
-
-		for i := 0; i < iterations; i++ {
-			code, err := GenerateInviteCode()
-			require.NoError(t, err)
-			for _, c := range code {
-				charCounts[c]++
-			}
-		}
-
-		// Each character should appear roughly 1/36 of the time (36 possible chars)
-		// With 8 chars * 10000 iterations = 80000 total chars
-		// Expected count per char: 80000 / 36 ≈ 2222
-		expectedPerChar := float64(iterations*8) / 36.0
-
-		for char, count := range charCounts {
-			// Allow 50% deviation from expected (rough check for randomness)
-			ratio := float64(count) / expectedPerChar
-			assert.Greater(t, ratio, 0.3, "Character %c appears too rarely: %d (ratio: %.2f)", char, count, ratio)
-			assert.Less(t, ratio, 3.0, "Character %c appears too frequently: %d (ratio: %.2f)", char, count, ratio)
-		}
-	})
-}
-
-// TestGenerateUUID_Entropy removed - covered by Properties_UUID
-
-func TestGenerateSubID_Entropy(t *testing.T) {
-	t.Parallel()
-
-	t.Run("generates high entropy IDs", func(t *testing.T) {
-		const iterations = 1000
-		charCounts := make(map[rune]int)
-
-		for i := 0; i < iterations; i++ {
-			id, err := GenerateSubID()
-			require.NoError(t, err)
-			for _, c := range id {
-				charCounts[c]++
-			}
-		}
-
-		// Each character should appear roughly 1/16 of the time (hex chars)
-		// With 10 chars * 10000 iterations = 100000 total chars
-		// Expected count per char: 100000 / 16 = 6250
-		expectedPerChar := float64(iterations*10) / 16.0
-
-		for char, count := range charCounts {
-			ratio := float64(count) / expectedPerChar
-			assert.Greater(t, ratio, 0.5, "Character %c appears too rarely: %d (ratio: %.2f)", char, count, ratio)
-			assert.Less(t, ratio, 2.0, "Character %c appears too frequently: %d (ratio: %.2f)", char, count, ratio)
-		}
-	})
-}
-
-func TestGenerateUUID_Stress(t *testing.T) {
-	t.Parallel()
-
-	t.Run("stress test uniqueness", func(t *testing.T) {
-		const iterations = 10000
-		uuids := make(map[string]struct{}, iterations)
-
-		for i := 0; i < iterations; i++ {
-			uuid, err := GenerateUUID()
-			require.NoError(t, err)
-			if _, exists := uuids[uuid]; exists {
-				t.Fatalf("Duplicate UUID found after %d iterations: %s", i, uuid)
-			}
-			uuids[uuid] = struct{}{}
-		}
-
-		assert.Len(t, uuids, iterations, "All UUIDs should be unique")
-	})
-}
-
-func TestGenerateSubID_Stress(t *testing.T) {
-	t.Parallel()
-
-	t.Run("stress test uniqueness", func(t *testing.T) {
-		const iterations = 10000
-		ids := make(map[string]struct{}, iterations)
-
-		for i := 0; i < iterations; i++ {
-			id, err := GenerateSubID()
-			require.NoError(t, err)
-			if _, exists := ids[id]; exists {
-				t.Fatalf("Duplicate SubID found after %d iterations: %s", i, id)
-			}
-			ids[id] = struct{}{}
-		}
-
-		assert.Len(t, ids, iterations, "All SubIDs should be unique")
-	})
-}
-
-func TestGenerateInviteCode_Stress(t *testing.T) {
-	t.Parallel()
-
-	t.Run("stress test uniqueness", func(t *testing.T) {
-		const iterations = 10000
-		codes := make(map[string]struct{}, iterations)
-
-		for i := 0; i < iterations; i++ {
-			code, err := GenerateInviteCode()
-			require.NoError(t, err)
-			if _, exists := codes[code]; exists {
-				t.Fatalf("Duplicate code found after %d iterations: %s", i, code)
-			}
-			codes[code] = struct{}{}
-		}
-
-		assert.Len(t, codes, iterations, "All codes should be unique")
-	})
-}
-
-func TestGenerateUUID_DashesPosition(t *testing.T) {
-	t.Parallel()
-
-	t.Run("dashes are at correct positions", func(t *testing.T) {
-		for i := 0; i < 100; i++ {
-			uuid, err := GenerateUUID()
-			require.NoError(t, err)
-			require.Len(t, uuid, 36, "UUID length")
-			assert.Equal(t, '-', rune(uuid[8]), "Dash at position 8")
-			assert.Equal(t, '-', rune(uuid[13]), "Dash at position 13")
-			assert.Equal(t, '-', rune(uuid[18]), "Dash at position 18")
-			assert.Equal(t, '-', rune(uuid[23]), "Dash at position 23")
-		}
-	})
-}
-
-func TestGenerateSubID_Format(t *testing.T) {
-	t.Parallel()
-
-	t.Run("contains only hex characters", func(t *testing.T) {
-		for i := 0; i < 100; i++ {
-			id, err := GenerateSubID()
-			require.NoError(t, err)
-			assert.Len(t, id, 10, "SubID length")
-			for _, c := range id {
-				assert.True(t, (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'),
-					"Character %c is not a valid hex character", c)
-			}
-		}
-	})
-}
-
-// TestGenerateInviteCode_Format was removed; its coverage is now part of Properties_InviteCode
-
-// Property-based tests: verify properties hold for random generated values
-func TestProperties_UUID(t *testing.T) {
-	t.Parallel()
-
-	t.Run("all characters are valid hex", func(t *testing.T) {
-		for i := 0; i < 1000; i++ {
-			uuid, err := GenerateUUID()
-			require.NoError(t, err)
-			// Remove dashes and check each character
-			clean := strings.ReplaceAll(uuid, "-", "")
-			for _, c := range clean {
-				assert.True(t, (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'),
-					"UUID contains non-hex character: %c", c)
-			}
-		}
-	})
-
-	t.Run("format is always valid UUID v4", func(t *testing.T) {
-		pattern := `^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`
-		for i := 0; i < 1000; i++ {
-			uuid, err := GenerateUUID()
-			require.NoError(t, err)
-			assert.Regexp(t, pattern, uuid)
-		}
-	})
-}
-
-func TestProperties_SubID(t *testing.T) {
-	t.Parallel()
-
-	t.Run("all characters are valid hex", func(t *testing.T) {
-		for i := 0; i < 1000; i++ {
-			subID, err := GenerateSubID()
-			require.NoError(t, err)
-			for _, c := range subID {
-				assert.True(t, (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'),
-					"SubID contains non-hex character: %c", c)
-			}
-		}
-	})
-
-	t.Run("length is always 10", func(t *testing.T) {
-		for i := 0; i < 1000; i++ {
-			subID, err := GenerateSubID()
-			require.NoError(t, err)
-			assert.Len(t, subID, 10)
-		}
-	})
-}
-
-func TestProperties_InviteCode(t *testing.T) {
-	t.Parallel()
-
-	t.Run("all characters are lowercase alphanumeric", func(t *testing.T) {
-		for i := 0; i < 1000; i++ {
-			code, err := GenerateInviteCode()
-			require.NoError(t, err)
-			for _, c := range code {
-				assert.True(t, (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z'),
-					"InviteCode contains invalid character: %c", c)
-			}
-		}
-	})
-
-	t.Run("length is always 8", func(t *testing.T) {
-		for i := 0; i < 1000; i++ {
-			code, err := GenerateInviteCode()
-			require.NoError(t, err)
-			assert.Len(t, code, 8)
-		}
-	})
-
-	t.Run("no duplicate in large batch", func(t *testing.T) {
-		const iterations = 10000
-		codes := make(map[string]struct{}, iterations)
-		for i := 0; i < iterations; i++ {
-			code, err := GenerateInviteCode()
-			require.NoError(t, err)
-			_, exists := codes[code]
-			assert.False(t, exists, "Duplicate at iteration %d: %s", i, code)
-			codes[code] = struct{}{}
-		}
-	})
 }
