@@ -148,7 +148,7 @@ type DatabaseService struct {
 	FindOrCreatePendingPaymentOrderFunc         func(ctx context.Context, subscriptionID, productID uint, amountCents int64, currency string, now time.Time) (*database.Order, error)
 	MarkPaymentCreationUncertainFunc            func(ctx context.Context, orderID uint, uncertain bool) (bool, error)
 	SavePaymentDetailsFunc                      func(ctx context.Context, orderID uint, providerPaymentID uuid.UUID, paymentURL string, paymentExpiresAt time.Time) error
-	ConfirmOrderPaidCASFunc                     func(ctx context.Context, orderID uint, paidAt, activatedAt time.Time, sub *database.Subscription, newExpiry time.Time, product *database.Product, applyPlan database.ApplyPlanInTxFn) (bool, error)
+	ConfirmOrderPaidCASFunc                     func(ctx context.Context, orderID uint, paidAt, activatedAt time.Time, sub *database.Subscription, product *database.Product, applyPlan database.ApplyPlanInTxFn) (bool, error)
 	CancelOrderCASFunc                          func(ctx context.Context, provider string, providerPaymentID uuid.UUID, fromStatuses []database.OrderStatus) (bool, error)
 	TransactionFunc                             func(ctx context.Context, fn func(*gorm.DB) error) error
 	GetSubscriptionFunc                         func(ctx context.Context, subscriptionID string) (*database.Subscription, error)
@@ -1042,9 +1042,9 @@ func (m *DatabaseService) SavePaymentDetails(ctx context.Context, orderID uint, 
 	return nil
 }
 
-func (m *DatabaseService) ConfirmOrderPaidCAS(ctx context.Context, orderID uint, paidAt, activatedAt time.Time, sub *database.Subscription, newExpiry time.Time, product *database.Product, applyPlan database.ApplyPlanInTxFn) (bool, error) {
+func (m *DatabaseService) ConfirmOrderPaidCAS(ctx context.Context, orderID uint, paidAt, activatedAt time.Time, sub *database.Subscription, product *database.Product, applyPlan database.ApplyPlanInTxFn) (bool, error) {
 	if m.ConfirmOrderPaidCASFunc != nil {
-		return m.ConfirmOrderPaidCASFunc(ctx, orderID, paidAt, activatedAt, sub, newExpiry, product, applyPlan)
+		return m.ConfirmOrderPaidCASFunc(ctx, orderID, paidAt, activatedAt, sub, product, applyPlan)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -1052,7 +1052,11 @@ func (m *DatabaseService) ConfirmOrderPaidCAS(ctx context.Context, orderID uint,
 	if !ok || order.Status != database.OrderStatusPending {
 		return false, nil
 	}
+	newExpiry := database.CalculatePaymentExpiry(paidAt, sub, product)
 	order.Status, order.PaidAt, order.ActivatedAt, order.ExpiresAt = database.OrderStatusPaid, &paidAt, &activatedAt, &newExpiry
+	if sub != nil {
+		sub.ExpiresAt = &newExpiry
+	}
 	if applyPlan != nil {
 		// The in-memory fake has no transaction handle. Require tests that cover
 		// transaction-scoped plan reconciliation to provide ConfirmOrderPaidCASFunc;

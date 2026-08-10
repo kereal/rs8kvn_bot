@@ -337,6 +337,11 @@ func (s *Server) handlePaymentCallback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
+	// Payment state transitions and post-commit user/admin notifications must
+	// complete even if the provider closes the connection mid-request. Detach
+	// the request context for all follow-up work so an aborted webhook cannot
+	// drop a confirmed payment or its alert.
+	notifyCtx := context.WithoutCancel(r.Context())
 	defer r.Body.Close()
 	r.Body = http.MaxBytesReader(w, r.Body, 256<<10)
 	decoder := json.NewDecoder(r.Body)
@@ -376,9 +381,10 @@ func (s *Server) handlePaymentCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	switch strings.ToUpper(strings.TrimSpace(payload.Status)) {
+	status := strings.ToUpper(strings.TrimSpace(payload.Status))
+	switch status {
 	case "CONFIRMED":
-		confirmation, err := s.orderService.ConfirmPayment(r.Context(), paymentID, payload.Amount, payload.Currency)
+		confirmation, err := s.orderService.ConfirmPayment(notifyCtx, paymentID, payload.Amount, payload.Currency)
 		if err != nil {
 			if errors.Is(err, service.ErrAmountMismatch) || errors.Is(err, service.ErrCurrencyMismatch) || errors.Is(err, service.ErrInvalidPaymentTransition) {
 				http.Error(w, err.Error(), http.StatusBadRequest)
@@ -388,19 +394,22 @@ func (s *Server) handlePaymentCallback(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if confirmation.Activated {
-			chatID, text, err := s.orderService.NotifyPaidUser(r.Context(), confirmation.Order)
+			chatID, text, err := s.orderService.NotifyPaidUser(notifyCtx, confirmation.Order)
 			if err != nil {
 				logger.Warn("failed to build paid notification", zap.Error(err))
-				s.orderService.NotifyPaymentIssue(r.Context(), service.PaymentIssue{Event: "paid_notification_build_failed", Reason: err.Error(), Action: "send the confirmed payment details to the user manually", OrderID: confirmation.Order.ID, SubscriptionID: confirmation.Order.SubscriptionID, ProductID: confirmation.Order.ProductID, PlanID: 0, AmountCents: confirmation.Order.AmountCents, Currency: confirmation.Order.Currency, ProviderID: payload.ID, CallbackStatus: payload.Status, Payload: payload.Payload, PaymentMethod: payload.PaymentMethod})
+				s.orderService.NotifyPaymentIssue(notifyCtx, service.PaymentIssue{Event: "paid_notification_build_failed", Reason: err.Error(), Action: "send the confirmed payment details to the user manually", OrderID: confirmation.Order.ID, SubscriptionID: confirmation.Order.SubscriptionID, ProductID: confirmation.Order.ProductID, PlanID: 0, AmountCents: confirmation.Order.AmountCents, Currency: confirmation.Order.Currency, ProviderID: payload.ID, CallbackStatus: payload.Status, Payload: payload.Payload, PaymentMethod: payload.PaymentMethod})
 			} else if chatID > 0 && s.bot != nil {
 				if _, err := s.bot.Send(tgbotapi.NewMessage(chatID, text)); err != nil {
 					logger.Warn("failed to send paid notification", zap.Int64("chat_id", chatID), zap.Error(err))
-					s.orderService.NotifyPaymentIssue(r.Context(), service.PaymentIssue{Event: "paid_notification_send_failed", Reason: err.Error(), Action: "send the confirmed payment details to the user manually", OrderID: confirmation.Order.ID, TelegramID: chatID, SubscriptionID: confirmation.Order.SubscriptionID, ProductID: confirmation.Order.ProductID, AmountCents: confirmation.Order.AmountCents, Currency: confirmation.Order.Currency, ProviderID: payload.ID, CallbackStatus: payload.Status, Payload: payload.Payload, PaymentMethod: payload.PaymentMethod})
+					s.orderService.NotifyPaymentIssue(notifyCtx, service.PaymentIssue{Event: "paid_notification_send_failed", Reason: err.Error(), Action: "send the confirmed payment details to the user manually", OrderID: confirmation.Order.ID, TelegramID: chatID, SubscriptionID: confirmation.Order.SubscriptionID, ProductID: confirmation.Order.ProductID, AmountCents: confirmation.Order.AmountCents, Currency: confirmation.Order.Currency, ProviderID: payload.ID, CallbackStatus: payload.Status, Payload: payload.Payload, PaymentMethod: payload.PaymentMethod})
 				}
 			}
 		}
-	case "CANCELED":
-		if _, _, err := s.orderService.CancelPaymentByProvider(r.Context(), paymentID, "CANCELED", payload.Amount, payload.Currency); err != nil {
+	case "CANCELED", "CHARGEBACKED":
+		// Record the cancellation/chargeback transition, but do not automatically
+		// downgrade the subscription: financial reversal and access revocation
+		// require a separate reviewed operation.
+		if _, _, err := s.orderService.CancelPaymentByProvider(notifyCtx, paymentID, status, payload.Amount, payload.Currency); err != nil {
 			if errors.Is(err, service.ErrAmountMismatch) || errors.Is(err, service.ErrCurrencyMismatch) {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 			} else {
@@ -408,19 +417,9 @@ func (s *Server) handlePaymentCallback(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		}
-	case "CHARGEBACKED":
-		// Record the chargeback transition, but do not automatically downgrade
-		// the subscription: financial reversal and access revocation require a
-		// separate reviewed operation.
-		if _, _, err := s.orderService.CancelPaymentByProvider(r.Context(), paymentID, "CHARGEBACKED", payload.Amount, payload.Currency); err != nil {
-			if errors.Is(err, service.ErrAmountMismatch) || errors.Is(err, service.ErrCurrencyMismatch) {
-				http.Error(w, err.Error(), http.StatusBadRequest)
-			} else {
-				http.Error(w, "processing failed", http.StatusInternalServerError)
-			}
-			return
+		if status == "CHARGEBACKED" {
+			logger.Warn("chargeback callback recorded; manual review required", zap.String("payment_id", payload.ID), zap.String("payload", payload.Payload))
 		}
-		logger.Warn("chargeback callback recorded; manual review required", zap.String("payment_id", payload.ID), zap.String("payload", payload.Payload))
 	case "PENDING":
 		logger.Warn("ignored pending payment callback", zap.String("payment_id", payload.ID))
 	default:
@@ -433,13 +432,15 @@ func (s *Server) handlePaymentCallback(w http.ResponseWriter, r *http.Request) {
 
 // notifyPaymentCallbackIssue sends malformed or operational callback details
 // to the payment service, which logs the event and alerts the administrator.
+// The context is detached from the request so a disconnected client cannot
+// suppress the operational alert.
 func (s *Server) notifyPaymentCallbackIssue(ctx context.Context, payload platega.CallbackPayload, event, reason, action string) {
 	if s.orderService == nil {
 		return
 	}
 	providerID := strings.TrimSpace(payload.ID)
 	callbackPayload := fmt.Sprintf("amount=%s; payload=%s", payload.Amount.String(), payload.Payload)
-	s.orderService.NotifyPaymentIssue(ctx, service.PaymentIssue{
+	s.orderService.NotifyPaymentIssue(context.WithoutCancel(ctx), service.PaymentIssue{
 		Event:          event,
 		Reason:         reason,
 		Action:         action,
