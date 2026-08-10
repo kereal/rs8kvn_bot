@@ -1,6 +1,6 @@
 # Техническое задание: интеграция платёжной системы Platega.io
 
-Версия: 1.5 · Дата: 2026-08-10 · Статус: согласовано с текущей реализацией
+Версия: 1.6 · Дата: 2026-08-11 · Статус: согласовано с текущей реализацией
 
 
 ---
@@ -189,7 +189,6 @@ func (s *Service) ConfirmOrderPaidCAS(
     paidAt time.Time,
     activatedAt time.Time,
     sub *Subscription,
-    newExpiry time.Time,
     product *Product,
     applyPlan ApplyPlanInTxFn,
 ) (bool, error)
@@ -200,6 +199,14 @@ func (s *Service) CancelOrderCAS(
     providerPaymentID uuid.UUID,
     fromStatuses []OrderStatus,
 ) (bool, error)
+
+// CalculatePaymentExpiry — единый источник истины для расчёта срока подписки
+// после оплаты. Используется внутри ConfirmOrderPaidCAS и тестами.
+func CalculatePaymentExpiry(
+    now time.Time,
+    sub *Subscription,
+    product *Product,
+) time.Time
 ```
 
 `UpdateOrderProviderPaymentID` обновляет только pending-заказ.
@@ -215,11 +222,11 @@ func (s *Service) CancelOrderCAS(
 `ConfirmOrderPaidCAS` в одной DB-транзакции выполняет:
 
 - CAS `pending → paid` с условием `WHERE status='pending'`;
-- запись `paid_at`, `activated_at`, `expires_at`;
-- обновление подписки, `reminders_sent=0`;
+- вычисление `newExpiry` **внутри транзакции** через `CalculatePaymentExpiry(activatedAt, sub, product)` от актуального состояния подписки (продление не теряется при параллельных покупках) и запись `paid_at`, `activated_at`, `expires_at`;
+- обновление подписки (`subscriptions.expires_at = newExpiry`, `reminders_sent=0`);
 - DB-setup sync через `applyPlan` в той же транзакции.
 
-Ошибка `applyPlan` откатывает всю транзакцию.
+`newExpiry` в параметры не передаётся: предварительный расчёт в сервисе удалён как мёртвый код, а `expires_at` пишется в Order один раз из значения, пересчитанного внутри транзакции (двойная запись устранена). Ошибка `applyPlan` откатывает всю транзакцию. Дубликат хелпера в service-пакете удалён — единая реализация живёт в `database.CalculatePaymentExpiry`.
 
 `ApplyPlanInTxFn`:
 
@@ -441,8 +448,8 @@ func (o *OrderService) ConfirmPayment(
    - `paid` → идемпотентный no-op без уведомления.
 2. Проверить точное совпадение валюты и суммы в копейках. Несовпадение → бизнес-ошибка и HTTP 400.
 3. Загрузить канонический Product и Subscription по сохранённым ID заказа. Для расчёта использовать сохранённый ProductID и зафиксированные в Order сумму/валюту; изменение текущего каталога не должно менять уже созданную покупку.
-4. Вычислить `newExpiry := calculateProductExpiry(...)`.
-5. Вызвать `ConfirmOrderPaidCAS` с `applyPlan`.
+4. Не выполнять предварительный расчёт `newExpiry` в сервисе: `ConfirmOrderPaidCAS` вычисляет срок внутри транзакции через `CalculatePaymentExpiry` от актуального состояния подписки.
+5. Вызвать `ConfirmOrderPaidCAS` с `applyPlan`. После успешного CAS сервис зеркалит `sub.ExpiresAt` (заполняется CAS) в snapshot `order.ExpiresAt`; nil-guard защищает от panic, если CAS активировал подписку без установки `sub.ExpiresAt` (в этом случае `order.ExpiresAt` остаётся `nil`).
 6. Если CAS не изменил строку:
    - paid → no-op;
    - canceled/expired → позднее подтверждение запрещено, Warn/audit-log.
@@ -478,6 +485,7 @@ func (o *OrderService) CancelPaymentByProvider(
 - перед отменой проверить точное совпадение суммы и валюты с Order; mismatch → HTTP 400 без изменения заказа;
 - `CANCELED` переводит только `pending → canceled`;
 - `CHARGEBACKED` может перевести `pending` или `paid` в `canceled`, подписка автоматически не отзывается; webhook только фиксирует событие для ручного разбора;
+- второй возвращаемый bool — `wasPaid`: `true` только когда `CHARGEBACKED` переводит ранее оплаченный (`paid`) заказ. Чарджбек на ещё `pending` заказе (деньги не списывались) возвращает `wasPaid=false`. Флаг вычисляется из статуса заказа **до** перехода, а не из итогового `canceled`;
 - повторный callback — no-op;
 - `SUCCESS`, `PAID` и неизвестные статусы не обрабатывать.
 
@@ -499,7 +507,8 @@ func (o *OrderService) CancelPaymentByProvider(
 - late CONFIRMED для expired: заказ не активируется, сохраняются Warn и админское Telegram-сообщение с инструкцией проверить возврат или ручную активацию;
 - параллельный и повторный CONFIRMED активируют только один раз; срок рассчитывается от актуального состояния подписки внутри транзакции, чтобы параллельные разные покупки не теряли продление;
 - snapshot `orders.expires_at` равен `subscriptions.expires_at` после активации и не меняется при повторе;
-- `CANCELED`, `CHARGEBACKED` и запрещённые переходы;
+- `CANCELED`, `CHARGEBACKED` и запрещённые переходы; `wasPaid=true` только для `paid`-заказа по `CHARGEBACKED`, а чарджбек на `pending` даёт `wasPaid=false`;
+- CAS, активирующий подписку без установки `sub.ExpiresAt`, не вызывает panic и оставляет snapshot `orders.expires_at` равным `nil` (nil-guard);
 - repository guard отклоняет изменение `name`, `plan_id`, `duration_days`, `price_cents`, `currency` после появления Order и разрешает изменение только `is_active`; все административные изменения Product проходят только через этот метод;
 - rollback при ошибке DB-setup sync;
 - best-effort error/timeout внешнего SyncSubscription;
