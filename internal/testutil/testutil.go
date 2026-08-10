@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/logger"
 	"github.com/kereal/rs8kvn_bot/internal/xui"
@@ -136,18 +137,18 @@ type DatabaseService struct {
 	CreateOrderFunc                             func(ctx context.Context, order *database.Order) error
 	GetOrderByIDFunc                            func(ctx context.Context, id uint) (*database.Order, error)
 	GetOrdersBySubscriptionIDFunc               func(ctx context.Context, subscriptionID uint) ([]database.Order, error)
-	GetOrderByProviderPaymentIDFunc             func(ctx context.Context, provider, providerPaymentID string) (*database.Order, error)
+	GetOrderByProviderPaymentIDFunc             func(ctx context.Context, provider string, providerPaymentID uuid.UUID) (*database.Order, error)
 	UpdateOrderStatusFunc                       func(ctx context.Context, id uint, status database.OrderStatus) error
 	UpdateOrderPaidStatusFunc                   func(ctx context.Context, id uint) error
 	UpdateOrderActivatedAtFunc                  func(ctx context.Context, id uint, activatedAt, expiresAt time.Time) error
-	UpdateOrderProviderPaymentIDFunc            func(ctx context.Context, orderID uint, providerPaymentID string) error
+	UpdateOrderProviderPaymentIDFunc            func(ctx context.Context, orderID uint, providerPaymentID uuid.UUID) error
 	FindPendingPaymentOrderFunc                 func(ctx context.Context, subscriptionID, productID uint, now time.Time) (*database.Order, error)
 	CreatePendingPaymentOrderFunc               func(ctx context.Context, subscriptionID, productID uint, amountCents int64, currency string, now time.Time) (*database.Order, error)
 	FindOrCreatePendingPaymentOrderFunc         func(ctx context.Context, subscriptionID, productID uint, amountCents int64, currency string, now time.Time) (*database.Order, error)
 	MarkPaymentCreationUncertainFunc            func(ctx context.Context, orderID uint, uncertain bool) (bool, error)
-	SavePaymentDetailsFunc                      func(ctx context.Context, orderID uint, providerPaymentID, paymentURL string, paymentExpiresAt time.Time) error
+	SavePaymentDetailsFunc                      func(ctx context.Context, orderID uint, providerPaymentID uuid.UUID, paymentURL string, paymentExpiresAt time.Time) error
 	ConfirmOrderPaidCASFunc                     func(ctx context.Context, orderID uint, paidAt, activatedAt time.Time, sub *database.Subscription, newExpiry time.Time, product *database.Product, applyPlan database.ApplyPlanInTxFn) (bool, error)
-	CancelOrderCASFunc                          func(ctx context.Context, provider, providerPaymentID string, fromStatuses []database.OrderStatus) (bool, error)
+	CancelOrderCASFunc                          func(ctx context.Context, provider string, providerPaymentID uuid.UUID, fromStatuses []database.OrderStatus) (bool, error)
 	TransactionFunc                             func(ctx context.Context, fn func(*gorm.DB) error) error
 	GetSubscriptionFunc                         func(ctx context.Context, subscriptionID string) (*database.Subscription, error)
 	GetTrialSubscriptionBySubIDFunc             func(ctx context.Context, subscriptionID string) (*database.Subscription, error)
@@ -917,21 +918,21 @@ func (m *DatabaseService) GetOrdersBySubscriptionID(ctx context.Context, subscri
 	return nil, gorm.ErrRecordNotFound
 }
 
-func (m *DatabaseService) GetOrderByProviderPaymentID(ctx context.Context, provider, providerPaymentID string) (*database.Order, error) {
+func (m *DatabaseService) GetOrderByProviderPaymentID(ctx context.Context, provider string, providerPaymentID uuid.UUID) (*database.Order, error) {
 	if m.GetOrderByProviderPaymentIDFunc != nil {
 		return m.GetOrderByProviderPaymentIDFunc(ctx, provider, providerPaymentID)
 	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	for _, order := range m.Orders {
-		if order.PaymentProvider == provider && order.ProviderPaymentID == providerPaymentID {
+		if order.PaymentProvider == provider && order.ProviderPaymentID == providerPaymentID.String() {
 			return order, nil
 		}
 	}
 	return nil, gorm.ErrRecordNotFound
 }
 
-func (m *DatabaseService) UpdateOrderProviderPaymentID(ctx context.Context, orderID uint, providerPaymentID string) error {
+func (m *DatabaseService) UpdateOrderProviderPaymentID(ctx context.Context, orderID uint, providerPaymentID uuid.UUID) error {
 	if m.UpdateOrderProviderPaymentIDFunc != nil {
 		return m.UpdateOrderProviderPaymentIDFunc(ctx, orderID, providerPaymentID)
 	}
@@ -941,7 +942,7 @@ func (m *DatabaseService) UpdateOrderProviderPaymentID(ctx context.Context, orde
 	if !ok || order.Status != database.OrderStatusPending {
 		return gorm.ErrRecordNotFound
 	}
-	order.ProviderPaymentID = providerPaymentID
+	order.ProviderPaymentID = providerPaymentID.String()
 	return nil
 }
 
@@ -1026,7 +1027,7 @@ func (m *DatabaseService) MarkPaymentCreationUncertain(ctx context.Context, orde
 	return true, nil
 }
 
-func (m *DatabaseService) SavePaymentDetails(ctx context.Context, orderID uint, providerPaymentID, paymentURL string, paymentExpiresAt time.Time) error {
+func (m *DatabaseService) SavePaymentDetails(ctx context.Context, orderID uint, providerPaymentID uuid.UUID, paymentURL string, paymentExpiresAt time.Time) error {
 	if m.SavePaymentDetailsFunc != nil {
 		return m.SavePaymentDetailsFunc(ctx, orderID, providerPaymentID, paymentURL, paymentExpiresAt)
 	}
@@ -1036,7 +1037,7 @@ func (m *DatabaseService) SavePaymentDetails(ctx context.Context, orderID uint, 
 	if !ok || order.Status != database.OrderStatusPending {
 		return gorm.ErrRecordNotFound
 	}
-	order.ProviderPaymentID, order.PaymentURL, order.PaymentExpiresAt, order.PaymentCreationUncertain = providerPaymentID, paymentURL, &paymentExpiresAt, false
+	order.ProviderPaymentID, order.PaymentURL, order.PaymentExpiresAt, order.PaymentCreationUncertain = providerPaymentID.String(), paymentURL, &paymentExpiresAt, false
 	return nil
 }
 
@@ -1060,14 +1061,14 @@ func (m *DatabaseService) ConfirmOrderPaidCAS(ctx context.Context, orderID uint,
 	return true, nil
 }
 
-func (m *DatabaseService) CancelOrderCAS(ctx context.Context, provider, providerPaymentID string, fromStatuses []database.OrderStatus) (bool, error) {
+func (m *DatabaseService) CancelOrderCAS(ctx context.Context, provider string, providerPaymentID uuid.UUID, fromStatuses []database.OrderStatus) (bool, error) {
 	if m.CancelOrderCASFunc != nil {
 		return m.CancelOrderCASFunc(ctx, provider, providerPaymentID, fromStatuses)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, order := range m.Orders {
-		if order.PaymentProvider == provider && order.ProviderPaymentID == providerPaymentID {
+		if order.PaymentProvider == provider && order.ProviderPaymentID == providerPaymentID.String() {
 			for _, status := range fromStatuses {
 				if order.Status == status {
 					order.Status = database.OrderStatusCanceled

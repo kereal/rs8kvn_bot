@@ -16,7 +16,6 @@ import (
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
-	"github.com/google/uuid"
 	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/interfaces"
@@ -83,6 +82,7 @@ type Server struct {
 	listenerAddr    string
 	mu              sync.RWMutex
 	ready           bool
+	paymentReady    bool
 	checkers        map[string]func(context.Context) ComponentHealth
 	inviteCodeRegex *regexp.Regexp
 	startTime       time.Time
@@ -120,6 +120,14 @@ func (s *Server) SetReady(ready bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.ready = ready
+}
+
+// SetPaymentReady enables webhook processing only after the real bot and the
+// post-commit synchronization service have been wired.
+func (s *Server) SetPaymentReady(ready bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.paymentReady = ready
 }
 
 func (s *Server) SetBotUsername(username string) {
@@ -268,8 +276,9 @@ func (s *Server) handlePaymentCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.RLock()
 	pc := s.paymentConfig
+	paymentReady := s.paymentReady
 	s.mu.RUnlock()
-	if pc == nil || !pc.Enabled || s.orderService == nil || s.bot == nil {
+	if !paymentReady || pc == nil || !pc.Enabled || s.orderService == nil || s.bot == nil {
 		http.Error(w, "payments not available", http.StatusServiceUnavailable)
 		return
 	}
@@ -288,7 +297,7 @@ func (s *Server) handlePaymentCallback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid callback", http.StatusBadRequest)
 		return
 	}
-	if _, err := uuid.Parse(strings.TrimSpace(payload.ID)); err != nil {
+	if _, err := platega.ParseTransactionID(payload.ID); err != nil {
 		http.Error(w, "invalid callback", http.StatusBadRequest)
 		return
 	}
@@ -301,10 +310,15 @@ func (s *Server) handlePaymentCallback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid callback", http.StatusBadRequest)
 		return
 	}
+	paymentID, err := platega.ParseTransactionID(payload.ID)
+	if err != nil {
+		http.Error(w, "invalid callback", http.StatusBadRequest)
+		return
+	}
 
 	switch strings.ToUpper(strings.TrimSpace(payload.Status)) {
 	case "CONFIRMED":
-		confirmation, err := s.orderService.ConfirmPayment(r.Context(), payload.ID, payload.Amount, payload.Currency)
+		confirmation, err := s.orderService.ConfirmPayment(r.Context(), paymentID, payload.Amount, payload.Currency)
 		if errors.Is(err, database.ErrOrderNotFound) {
 			// Unknown payment id: not ours. Returning 200 tells Platega to stop
 			// retrying; retrying here buys nothing — the order will never exist.
@@ -331,16 +345,24 @@ func (s *Server) handlePaymentCallback(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	case "CANCELED":
-		if _, _, err := s.orderService.CancelPaymentByProvider(r.Context(), payload.ID, "CANCELED"); err != nil {
-			http.Error(w, "processing failed", http.StatusInternalServerError)
+		if _, _, err := s.orderService.CancelPaymentByProvider(r.Context(), paymentID, "CANCELED", payload.Amount, payload.Currency); err != nil {
+			if errors.Is(err, service.ErrAmountMismatch) || errors.Is(err, service.ErrCurrencyMismatch) {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+			} else {
+				http.Error(w, "processing failed", http.StatusInternalServerError)
+			}
 			return
 		}
 	case "CHARGEBACKED":
 		// Record the chargeback transition, but do not automatically downgrade
 		// the subscription: financial reversal and access revocation require a
 		// separate reviewed operation.
-		if _, _, err := s.orderService.CancelPaymentByProvider(r.Context(), payload.ID, "CHARGEBACKED"); err != nil {
-			http.Error(w, "processing failed", http.StatusInternalServerError)
+		if _, _, err := s.orderService.CancelPaymentByProvider(r.Context(), paymentID, "CHARGEBACKED", payload.Amount, payload.Currency); err != nil {
+			if errors.Is(err, service.ErrAmountMismatch) || errors.Is(err, service.ErrCurrencyMismatch) {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+			} else {
+				http.Error(w, "processing failed", http.StatusInternalServerError)
+			}
 			return
 		}
 		logger.Warn("chargeback callback recorded; manual review required", zap.String("payment_id", payload.ID), zap.String("payload", payload.Payload))

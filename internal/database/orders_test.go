@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -57,12 +58,12 @@ func TestCreateOrder_WithPaymentProvider(t *testing.T) {
 		AmountCents:       500,
 		Currency:          "RUB",
 		PaymentProvider:   "yookassa",
-		ProviderPaymentID: "pay-12345",
+		ProviderPaymentID: uuid.MustParse("550e8400-e29b-41d4-a716-446655440001").String(),
 	}
 	err := svc.CreateOrder(ctx, order)
 	require.NoError(t, err)
 	assert.Equal(t, "yookassa", order.PaymentProvider)
-	assert.Equal(t, "pay-12345", order.ProviderPaymentID)
+	assert.Equal(t, uuid.MustParse("550e8400-e29b-41d4-a716-446655440001").String(), order.ProviderPaymentID)
 }
 
 func TestGetOrderByID_Success(t *testing.T) {
@@ -116,8 +117,8 @@ func TestGetOrdersBySubscriptionID(t *testing.T) {
 	product := &Product{PlanID: plan.ID, Name: "1M", DurationDays: 30, PriceCents: 200, Currency: "RUB", IsActive: true}
 	require.NoError(t, svc.db.WithContext(ctx).Create(product).Error)
 
-	order1 := &Order{SubscriptionID: sub.ID, ProductID: product.ID, Status: OrderStatusPaid, AmountCents: 200, Currency: "RUB", PaymentProvider: "yookassa", ProviderPaymentID: "pay-list-1"}
-	order2 := &Order{SubscriptionID: sub.ID, ProductID: product.ID, Status: OrderStatusPending, AmountCents: 300, Currency: "RUB", PaymentProvider: "yookassa", ProviderPaymentID: "pay-list-2"}
+	order1 := &Order{SubscriptionID: sub.ID, ProductID: product.ID, Status: OrderStatusPaid, AmountCents: 200, Currency: "RUB", PaymentProvider: "yookassa", ProviderPaymentID: uuid.MustParse("550e8400-e29b-41d4-a716-446655440002").String()}
+	order2 := &Order{SubscriptionID: sub.ID, ProductID: product.ID, Status: OrderStatusPending, AmountCents: 300, Currency: "RUB", PaymentProvider: "yookassa", ProviderPaymentID: uuid.MustParse("550e8400-e29b-41d4-a716-446655440003").String()}
 	require.NoError(t, svc.CreateOrder(ctx, order1))
 	require.NoError(t, svc.CreateOrder(ctx, order2))
 
@@ -184,7 +185,7 @@ func TestUpdateOrderStatus_Transitions(t *testing.T) {
 			AmountCents:       600,
 			Currency:          "RUB",
 			PaymentProvider:   fmt.Sprintf("provider-%d", i),
-			ProviderPaymentID: fmt.Sprintf("pay-trans-%d", i),
+			ProviderPaymentID: uuid.New().String(),
 		}
 		if i > 0 {
 			// The payment invariant permits only one pending intent for a
@@ -293,6 +294,33 @@ func TestOrderStatusConstants(t *testing.T) {
 	assert.Equal(t, OrderStatus("paid"), OrderStatusPaid)
 	assert.Equal(t, OrderStatus("expired"), OrderStatusExpired)
 	assert.Equal(t, OrderStatus("canceled"), OrderStatusCanceled)
+}
+
+func TestConfirmOrderPaidCAS_RecalculatesFromCurrentSubscription(t *testing.T) {
+	t.Parallel()
+	svc := newTestService(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Minute)
+	plan := &Plan{Name: "plan-current-expiry", DevicesLimit: 1}
+	require.NoError(t, svc.db.Create(plan).Error)
+	product := &Product{PlanID: plan.ID, Name: "1M", DurationDays: 30, PriceCents: 100, Currency: "RUB", IsActive: true}
+	require.NoError(t, svc.db.Create(product).Error)
+	currentExpiry := now.Add(10 * 24 * time.Hour)
+	sub := createTestSubscription(t, svc, 1901, "current-expiry", "client-current-expiry")
+	sub.PlanID = plan.ID
+	sub.ExpiresAt = &currentExpiry
+	require.NoError(t, svc.db.Save(sub).Error)
+	order := &Order{SubscriptionID: sub.ID, ProductID: product.ID, Status: OrderStatusPending, AmountCents: 100, Currency: "RUB"}
+	require.NoError(t, svc.CreateOrder(ctx, order))
+
+	staleExpiry := now.Add(30 * 24 * time.Hour)
+	activated, err := svc.ConfirmOrderPaidCAS(ctx, order.ID, now, now, &Subscription{ID: sub.ID, PlanID: plan.ID}, staleExpiry, product, nil)
+	require.NoError(t, err)
+	assert.True(t, activated)
+	got, err := svc.GetByID(ctx, sub.ID)
+	require.NoError(t, err)
+	require.NotNil(t, got.ExpiresAt)
+	assert.Equal(t, currentExpiry.AddDate(0, 0, 30), *got.ExpiresAt)
 }
 
 func TestConfirmOrderPaidCAS_SwitchesPlanAndStatus(t *testing.T) {

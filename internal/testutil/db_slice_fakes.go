@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"gorm.io/gorm"
 )
@@ -520,25 +521,25 @@ type OrderRepositoryFake struct {
 	CreatePendingPaymentOrderFunc       func(ctx context.Context, subscriptionID, productID uint, amountCents int64, currency string, now time.Time) (*database.Order, error)
 	FindOrCreatePendingPaymentOrderFunc func(ctx context.Context, subscriptionID, productID uint, amountCents int64, currency string, now time.Time) (*database.Order, error)
 	MarkPaymentCreationUncertainFunc    func(ctx context.Context, orderID uint, uncertain bool) (bool, error)
-	SavePaymentDetailsFunc              func(ctx context.Context, orderID uint, providerPaymentID, paymentURL string, paymentExpiresAt time.Time) error
+	SavePaymentDetailsFunc              func(ctx context.Context, orderID uint, providerPaymentID uuid.UUID, paymentURL string, paymentExpiresAt time.Time) error
 	GetOrderByIDFunc                    func(ctx context.Context, id uint) (*database.Order, error)
 	GetOrdersBySubscriptionIDFunc       func(ctx context.Context, subscriptionID uint) ([]database.Order, error)
 	UpdateOrderStatusFunc               func(ctx context.Context, id uint, status database.OrderStatus) error
 	UpdateOrderPaidStatusFunc           func(ctx context.Context, id uint) error
 	UpdateOrderActivatedAtFunc          func(ctx context.Context, id uint, activatedAt, expiresAt time.Time) error
-	GetOrderByProviderPaymentIDFunc     func(ctx context.Context, provider, providerPaymentID string) (*database.Order, error)
-	CancelOrderCASFunc                  func(ctx context.Context, provider, providerPaymentID string, fromStatuses []database.OrderStatus) (bool, error)
+	GetOrderByProviderPaymentIDFunc     func(ctx context.Context, provider string, providerPaymentID uuid.UUID) (*database.Order, error)
+	CancelOrderCASFunc                  func(ctx context.Context, provider string, providerPaymentID uuid.UUID, fromStatuses []database.OrderStatus) (bool, error)
 }
 
 func NewOrderRepository() *OrderRepositoryFake { return &OrderRepositoryFake{} }
 
-func (m *OrderRepositoryFake) GetOrderByProviderPaymentID(ctx context.Context, provider, providerPaymentID string) (*database.Order, error) {
+func (m *OrderRepositoryFake) GetOrderByProviderPaymentID(ctx context.Context, provider string, providerPaymentID uuid.UUID) (*database.Order, error) {
 	if m.GetOrderByProviderPaymentIDFunc != nil {
 		return m.GetOrderByProviderPaymentIDFunc(ctx, provider, providerPaymentID)
 	}
 	return nil, gorm.ErrRecordNotFound
 }
-func (m *OrderRepositoryFake) CancelOrderCAS(ctx context.Context, provider, providerPaymentID string, fromStatuses []database.OrderStatus) (bool, error) {
+func (m *OrderRepositoryFake) CancelOrderCAS(ctx context.Context, provider string, providerPaymentID uuid.UUID, fromStatuses []database.OrderStatus) (bool, error) {
 	if m.CancelOrderCASFunc != nil {
 		return m.CancelOrderCASFunc(ctx, provider, providerPaymentID, fromStatuses)
 	}
@@ -574,7 +575,7 @@ func (m *OrderRepositoryFake) MarkPaymentCreationUncertain(ctx context.Context, 
 	}
 	return true, nil
 }
-func (m *OrderRepositoryFake) SavePaymentDetails(ctx context.Context, orderID uint, providerPaymentID, paymentURL string, paymentExpiresAt time.Time) error {
+func (m *OrderRepositoryFake) SavePaymentDetails(ctx context.Context, orderID uint, providerPaymentID uuid.UUID, paymentURL string, paymentExpiresAt time.Time) error {
 	if m.SavePaymentDetailsFunc != nil {
 		return m.SavePaymentDetailsFunc(ctx, orderID, providerPaymentID, paymentURL, paymentExpiresAt)
 	}

@@ -431,6 +431,7 @@ func main() {
 			return
 		}
 		webServer.SetReady(false)
+		webServer.SetPaymentReady(false)
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := webServer.Stop(shutdownCtx); err != nil {
@@ -449,6 +450,7 @@ func main() {
 	svc.handler.SetBotConfig(bc)
 	if svc.orderService != nil {
 		svc.orderService.SetBotUsername(bc.Username)
+		svc.orderService.SetAdminBot(api)
 	}
 	botAPI = api
 	if webServer != nil {
@@ -471,6 +473,9 @@ func main() {
 	svc.handler.StartRateLimiterCleanup(ctx, bot.CacheTTL, bot.CacheTTL*2)
 	svc.handler.StartReferralCacheSync(ctx)
 	bgWg := startBackgroundWorkers(ctx, svc.handler, svc.subService, dbService, cfg, deps.vpnClients, deps.nodes)
+	if webServer != nil {
+		webServer.SetPaymentReady(true)
+	}
 
 	logger.Debug("Bot started successfully")
 	if webServer != nil {

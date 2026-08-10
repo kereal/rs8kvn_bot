@@ -2,7 +2,6 @@
 
 Версия: 1.5 · Дата: 2026-08-10 · Статус: согласовано с текущей реализацией
 
-> Расхождения официальной документации Platega зафиксированы в [bug report](platega-docs-bug-report.md). До ответа провайдера используем безопасный совместимый контракт, описанный ниже.
 
 ---
 
@@ -75,7 +74,6 @@ Base URL `https://app.platega.io` — константа клиента, не en
 
 ```sql
 -- Migration 031_add_payment_intent_fields
--- Migration 031_add_payment_intent_fields
 ALTER TABLE orders ADD COLUMN payment_url TEXT;
 ALTER TABLE orders ADD COLUMN payment_expires_at DATETIME;
 ALTER TABLE orders ADD COLUMN payment_creation_uncertain BOOLEAN NOT NULL DEFAULT FALSE;
@@ -94,7 +92,7 @@ CREATE UNIQUE INDEX idx_orders_pending_subscription_product_unique
     WHERE status = 'pending' AND payment_provider = 'platega';
 ```
 
-Перед созданием индекса нужно детерминированно обработать исторические дубли pending-заказов: для каждой пары `(subscription_id, product_id)` сохранить заказ с минимальным `id`, а остальные перевести в `expired` без перезаписи их provider ID/URL. После этого создать partial unique index. При конфликте индекса в конкурентном запросе сервис должен перечитать уже существующий pending-заказ и вернуть его, а не показывать инфраструктурную ошибку.
+Перед созданием индекса нужно детерминированно обработать исторические дубли pending-заказов: для каждой пары `(subscription_id, product_id)` сохранить заказ с минимальным `id`, а остальные перевести в `expired`. Их `payment_url` не изменяется. Если у нескольких исторических заказов одинаковый непустой `provider_payment_id`, сохранить его только у заказа с минимальным `id`, а у остальных очистить значение, иначе уникальный индекс создать невозможно; такие строки остаются доступными для ручного аудита по Order ID. При конфликте индекса в конкурентном запросе сервис должен перечитать уже существующий pending-заказ и вернуть его, а не показывать инфраструктурную ошибку.
 
 ### 3.2 Новые поля Order
 
@@ -106,7 +104,7 @@ PaymentExpiresAt          *time.Time `gorm:"column:payment_expires_at"`
 PaymentCreationUncertain  bool       `gorm:"not null;default:false;column:payment_creation_uncertain"`
 ```
 
-`PaymentExpiresAt` хранится в UTC. `nil` означает, что ссылка ещё не создана или провайдер не вернул срок.
+`PaymentExpiresAt` хранится в UTC. `nil` означает, что ссылка ещё не создана или провайдер не вернул срок. Внутренние методы OrderService/репозитория принимают `uuid.UUID`, но универсальное DB-поле `orders.provider_payment_id` остаётся строковым для совместимости с историческими ID других провайдеров. Для Platega строка валидируется и преобразуется в UUID на границе; повреждённое сохранённое значение даёт контролируемую ошибку без panic.
 
 ### 3.3 Семантика сроков
 
@@ -167,13 +165,14 @@ ORDER BY products.price_cents ASC, products.id ASC;
 ```go
 func (s *Service) GetOrderByProviderPaymentID(
     ctx context.Context,
-    provider, providerPaymentID string,
+    provider string,
+    providerPaymentID uuid.UUID,
 ) (*Order, error)
 
 func (s *Service) UpdateOrderProviderPaymentID(
     ctx context.Context,
     orderID uint,
-    providerPaymentID string,
+    providerPaymentID uuid.UUID,
 ) error
 
 func (s *Service) FindOrCreatePendingPaymentOrder(
@@ -197,7 +196,8 @@ func (s *Service) ConfirmOrderPaidCAS(
 
 func (s *Service) CancelOrderCAS(
     ctx context.Context,
-    provider, providerPaymentID string,
+    provider string,
+    providerPaymentID uuid.UUID,
     fromStatuses []OrderStatus,
 ) (bool, error)
 ```
@@ -306,7 +306,7 @@ type CreateTransactionRequest struct {
 }
 
 type CreateTransactionResponse struct {
-    TransactionID string `json:"transactionId"`
+    TransactionID string `json:"transactionId"` // внешний JSON-string, UUID v4 после валидации на границе
     Status        string `json:"status"`
     URL           string `json:"url"`
     Redirect      string `json:"redirect"`
@@ -314,7 +314,7 @@ type CreateTransactionResponse struct {
 }
 ```
 
-`transactionId`, выбранная ссылка и `expiresIn` обязательны. `expiresIn` должен разбираться как `HH:MM:SS`. Если ID, обе ссылки или срок отсутствуют/некорректны — `ErrProvider`.
+`transactionId` обязателен и должен быть UUID v4; выбранная ссылка и `expiresIn` также обязательны. `expiresIn` должен разбираться как `HH:MM:SS`. Если ID, обе ссылки или срок отсутствуют/некорректны — `ErrProvider`. Клиент и webhook используют один UUID-контракт.
 
 Клиент принимает и `url`, и `redirect`; приоритет `url`, затем `redirect`.
 
@@ -427,7 +427,7 @@ type PaymentConfirmation struct {
 
 func (o *OrderService) ConfirmPayment(
     ctx context.Context,
-    providerPaymentID string,
+    providerPaymentID uuid.UUID,
     amount json.Number,
     currency string,
 ) (*PaymentConfirmation, error)
@@ -467,12 +467,15 @@ expired → paid           запрещено
 ```go
 func (o *OrderService) CancelPaymentByProvider(
     ctx context.Context,
-    providerPaymentID string,
+    providerPaymentID uuid.UUID,
     status string,
+    amount json.Number,
+    currency string,
 ) (*database.Order, bool, error)
 ```
 
 - неизвестный ID → Warn/audit-log, HTTP 200, изменений нет;
+- перед отменой проверить точное совпадение суммы и валюты с Order; mismatch → HTTP 400 без изменения заказа;
 - `CANCELED` переводит только `pending → canceled`;
 - `CHARGEBACKED` может перевести `pending` или `paid` в `canceled`, подписка автоматически не отзывается; webhook только фиксирует событие для ручного разбора;
 - повторный callback — no-op;
@@ -487,12 +490,12 @@ func (o *OrderService) CancelPaymentByProvider(
 - повтор после 400/401 без второго pending-заказа;
 - действующая ссылка возвращается повторно;
 - истёкшая ссылка переводит заказ в expired и создаёт новый Order;
-- timeout/5xx устанавливает `payment_creation_uncertain` и блокирует автоматический retry;
+- timeout/5xx устанавливает `payment_creation_uncertain`, блокирует автоматический retry и отправляет админу Telegram-сообщение с order ID, Telegram ID, товаром, суммой, валютой, причиной и доступными данными провайдера;
 - параллельный конфликт partial unique index перечитывает существующий pending-заказ;
 - exact amount/currency;
 - неизвестный provider ID;
-- late CONFIRMED для expired;
-- параллельный и повторный CONFIRMED активируют только один раз;
+- late CONFIRMED для expired: заказ не активируется, сохраняются Warn и админское Telegram-сообщение с инструкцией проверить возврат или ручную активацию;
+- параллельный и повторный CONFIRMED активируют только один раз; срок рассчитывается от актуального состояния подписки внутри транзакции, чтобы параллельные разные покупки не теряли продление;
 - snapshot `orders.expires_at` равен `subscriptions.expires_at` после активации и не меняется при повторе;
 - `CANCELED`, `CHARGEBACKED` и запрещённые переходы;
 - repository guard отклоняет изменение `name`, `plan_id`, `duration_days`, `price_cents`, `currency` после появления Order и разрешает изменение только `is_active`;
@@ -520,7 +523,7 @@ func (s *Server) SetOrderService(svc *service.OrderService)
 func (s *Server) SetPaymentConfig(cfg *PaymentConfig)
 ```
 
-Если платежи выключены или `orderSvc`/`bot` не настроены, endpoint отвечает 503 до проверки credentials.
+Если платежи выключены, `orderSvc`/`bot` не настроены или runtime ещё не выставил `paymentReady` после wiring реального Telegram-бота и `SyncService`, endpoint отвечает 503 до проверки credentials.
 
 ### 6.2 Обработка callback
 
@@ -531,7 +534,7 @@ func (s *Server) SetPaymentConfig(cfg *PaymentConfig)
 5. Декодировать JSON через `UseNumber()` и отклонять trailing JSON/второй документ → 400.
 6. Проверить UUID `id`, обязательные amount/currency/status и формат callback. `paymentMethod` не требовать: поле не входит в `required` callback-схемы Platega.
 7. Для `CONFIRMED` вызвать `ConfirmPayment`.
-8. Для `CANCELED`/`CHARGEBACKED` вызвать `CancelPaymentByProvider`.
+8. Для `CANCELED`/`CHARGEBACKED` вызвать `CancelPaymentByProvider` с amount и currency для проверки целостности callback.
 9. Для `PENDING` и неизвестного статуса записать Warn/audit-log и вернуть 200 без изменения заказа.
 10. Неизвестный provider ID и late callback для expired возвращают 200; временные DB-ошибки и ошибка DB-setup sync возвращают 5xx, чтобы Platega повторила callback.
 11. Ошибка внешнего SyncSubscription и ошибка Telegram после commit не откатывают оплату и не превращают callback в 5xx.
@@ -573,7 +576,7 @@ func (o *OrderService) NotifyPaidUser(
 - malformed JSON, trailing JSON, invalid UUID/amount → 400;
 - все четыре официальных статуса;
 - unknown status и unknown provider ID → 200 + Warn;
-- late expired callback → 200 без активации;
+- late expired callback → 200 без активации и админское уведомление с order/user/payment details;
 - amount/currency mismatch → 400;
 - один success-message при параллельных CONFIRMED;
 - ошибка Telegram после commit → 200;
@@ -674,9 +677,9 @@ func (sh *SubscriptionHandler) handleBuyProduct(
 config → database → SubscriptionService → SyncService → Platega client → OrderService → Handler/Web setters → web server → Telegram bot → workers
 ```
 
-`OrderService` создаётся до запуска web server, не внутри `startBackgroundWorkers`. `botUsername` сначала пустой, затем устанавливается после `initBot/getMe`.
+`OrderService` создаётся до запуска web server, не внутри `startBackgroundWorkers`. `botUsername` сначала пустой, затем устанавливается после `initBot/getMe`. Webhook не считается готовым сразу после создания Server: `SetPaymentReady(true)` вызывается только после wiring реального Telegram-бота и `SyncService`; до этого callback отвечает 503.
 
-При `PAYMENT_ENABLED=false` provider равен nil, UI скрывает кнопку, callback отвечает 503.
+При `PAYMENT_ENABLED=false` provider равен nil, UI скрывает кнопку, callback отвечает 503. До полной инициализации реального Telegram-бота и `SyncService` callback также отвечает 503.
 
 ---
 
@@ -711,7 +714,6 @@ https://<public-domain>/payment/callback
 
 ```text
 buy_premium_230
-buy_premium_list
 freeUpgradeLabel
 getFreeUpgradeLabel
 upgrade_premium
@@ -727,6 +729,7 @@ RenewSubscription
 ## 11. Acceptance criteria
 
 1. `PAYMENT_ENABLED=false`: приложение стартует без PLATEGA credentials, кнопок нет, callback отвечает 503.
+2. До инициализации реального Telegram-бота и `SyncService` callback отвечает 503; после `SetPaymentReady(true)` обработка разрешается.
 2. `PAYMENT_ENABLED=true` без credentials: понятная ошибка config validation.
 3. При включённых платежах кнопка оплаты отображается у пользователя с подпиской; пользователь без подписки сначала проходит обычный flow создания подписки.
 4. Покупка без подписки создаёт подписку до Order.
