@@ -45,7 +45,7 @@ FROM alpine:3.21
 # Install runtime dependencies only
 # - ca-certificates: HTTPS connections
 # - procps: Process utilities (pgrep for healthcheck)
-RUN apk add --no-cache ca-certificates procps wget && \
+RUN apk add --no-cache ca-certificates procps && \
     rm -rf /var/cache/apk/*
 
 # Create non-root user for security (never run as root)
