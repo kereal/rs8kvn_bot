@@ -207,8 +207,7 @@ internal/
 │   ├── format.go            # Progress bar, date formatting
 │   └── markdown.go          # Markdown sanitization
 └── testutil/         # Test helpers
-    ├── testutil.go          # Mock DB, XUI, Bot + Setenv (flat DatabaseService fake)
-    └── db_slice_fakes.go    # Per-slice fakes (NewSubscriptionRepository, NewInviteRepository, etc.)
+    └── testutil.go          # Mock DB, XUI, Bot (flat DatabaseService fake)
 ```
 
 ---
@@ -376,7 +375,7 @@ ConnMaxIdleTime = 2m
 **Orders/Products support:**
 - `Product` — purchasable subscription product bound to a plan (name, price, duration)
 - `Order` — purchase event with payment tracking (pending/paid/expired/canceled)
-- `UpdateOrderStatus`, `GetActiveByPlanID`, `GetOrdersBySubscriptionID`
+- `ListActiveProducts`, `GetProductByID`, `ConfirmOrderPaidCAS`
 - Migration 017: `orders` table with CHECK constraint on status
 
 **Indexes:**

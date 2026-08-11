@@ -1,6 +1,6 @@
 # Техническое задание: интеграция платёжной системы Platega.io
 
-Версия: 1.7 · Дата: 2026-08-11 · Статус: согласовано с текущей реализацией
+Версия: 1.8 · Дата: 2026-08-11 · Статус: согласовано с текущей реализацией
 
 
 ---
@@ -188,12 +188,6 @@ func (s *Service) GetOrderByProviderPaymentID(
     providerPaymentID uuid.UUID,
 ) (*Order, error)
 
-func (s *Service) UpdateOrderProviderPaymentID(
-    ctx context.Context,
-    orderID uint,
-    providerPaymentID uuid.UUID,
-) error
-
 func (s *Service) FindOrCreatePendingPaymentOrder(
     ctx context.Context,
     subscriptionID, productID uint,
@@ -228,7 +222,7 @@ func CalculatePaymentExpiry(
 ) time.Time
 ```
 
-`UpdateOrderProviderPaymentID` обновляет только pending-заказ.
+`SavePaymentDetails` — единственный путь записи provider ID, ссылки и `payment_expires_at`; он применяется только к pending-заказу. Legacy-методы `UpdateOrderStatus`, `UpdateOrderPaidStatus`, `UpdateOrderActivatedAt`, `UpdateOrderProviderPaymentID` удалены как мёртвый код (пошаговые переходы заменены атомарными CAS: `ConfirmOrderPaidCAS`, `CancelOrderCAS`).
 
 `FindOrCreatePendingPaymentOrder` обязан:
 
