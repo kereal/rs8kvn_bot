@@ -3,6 +3,7 @@
 package web
 
 import (
+	"bytes"
 	"context"
 	"embed"
 	"encoding/json"
@@ -342,18 +343,48 @@ func (s *Server) handlePaymentCallback(w http.ResponseWriter, r *http.Request) {
 	// the request context for all follow-up work so an aborted webhook cannot
 	// drop a confirmed payment or its alert.
 	notifyCtx := context.WithoutCancel(r.Context())
-	defer r.Body.Close()
-	r.Body = http.MaxBytesReader(w, r.Body, 256<<10)
-	decoder := json.NewDecoder(r.Body)
+	defer func() { _ = r.Body.Close() }()
+	// Read the authenticated callback once so DEBUG can preserve every field
+	// sent by the provider, including fields unknown to CallbackPayload.
+	limitedBody := http.MaxBytesReader(w, r.Body, 256<<10)
+	rawBody, readErr := io.ReadAll(limitedBody)
+	if readErr != nil {
+		logger.Info("Payment callback rejected",
+			zap.String("provider", "platega"),
+			zap.String("reason", "body_read_failed"),
+			zap.Int("body_bytes", len(rawBody)),
+			zap.Error(readErr))
+		logger.Debug("Payment callback raw payload",
+			zap.ByteString("body", rawBody))
+		s.notifyPaymentCallbackIssue(r.Context(), platega.CallbackPayload{}, "malformed_callback", readErr.Error(), "send a corrected callback and verify the provider payload")
+		http.Error(w, "invalid callback", http.StatusBadRequest)
+		return
+	}
+	logger.Debug("Payment callback raw payload",
+		zap.ByteString("body", rawBody))
+
+	decoder := json.NewDecoder(bytes.NewReader(rawBody))
 	decoder.UseNumber()
 	// Ignore provider fields that are not needed by this integration. Platega
 	// may add documented callback fields without requiring a bot deployment.
 	var payload platega.CallbackPayload
 	if err := decoder.Decode(&payload); err != nil {
+		logger.Info("Payment callback rejected",
+			zap.String("provider", "platega"),
+			zap.String("reason", "invalid_json"),
+			zap.Int("body_bytes", len(rawBody)),
+			zap.Error(err))
 		s.notifyPaymentCallbackIssue(r.Context(), payload, "malformed_callback", err.Error(), "send a corrected callback and verify the provider payload")
 		http.Error(w, "invalid callback", http.StatusBadRequest)
 		return
 	}
+	logger.Info("Payment callback received",
+		zap.String("provider", "platega"),
+		zap.String("payment_id", strings.TrimSpace(payload.ID)),
+		zap.String("status", strings.ToUpper(strings.TrimSpace(payload.Status))),
+		zap.String("currency", strings.TrimSpace(payload.Currency)),
+		zap.String("amount", payload.Amount.String()),
+		zap.Int("body_bytes", len(rawBody)))
 	if _, err := platega.ParseTransactionID(payload.ID); err != nil {
 		s.notifyPaymentCallbackIssue(r.Context(), payload, "invalid_provider_id", err.Error(), "verify the provider transaction ID and callback schema")
 		http.Error(w, "invalid callback", http.StatusBadRequest)
@@ -370,6 +401,13 @@ func (s *Server) handlePaymentCallback(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			reason = err.Error()
 		}
+		logger.Info("Payment callback rejected",
+			zap.String("provider", "platega"),
+			zap.String("payment_id", strings.TrimSpace(payload.ID)),
+			zap.String("status", strings.ToUpper(strings.TrimSpace(payload.Status))),
+			zap.String("reason", "trailing_callback_data"),
+			zap.Int("body_bytes", len(rawBody)),
+			zap.Error(err))
 		s.notifyPaymentCallbackIssue(r.Context(), payload, "trailing_callback_data", reason, "send exactly one JSON callback document")
 		http.Error(w, "invalid callback", http.StatusBadRequest)
 		return
@@ -428,7 +466,9 @@ func (s *Server) handlePaymentCallback(w http.ResponseWriter, r *http.Request) {
 		s.notifyPaymentCallbackIssue(r.Context(), payload, "unsupported_callback_status", fmt.Sprintf("unsupported callback status %q", payload.Status), "verify the provider status and update the integration only after documentation confirms it")
 	}
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+	if err := json.NewEncoder(w).Encode(map[string]bool{"ok": true}); err != nil {
+		logger.Warn("failed to write payment callback response", zap.Error(err))
+	}
 }
 
 // notifyPaymentCallbackIssue sends malformed or operational callback details

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -77,12 +78,100 @@ func TestHandlePaymentCallback_InvalidJSON(t *testing.T) {
 
 	srv, _, _ := newPaymentTestServer(t, nil)
 	req := httptest.NewRequest(http.MethodPost, "/payment/callback", strings.NewReader(`{invalid`))
-	req.Header.Set("X-MerchantId", "merchant")
+	req.Header.Set("X-Merchantid", "merchant")
 	req.Header.Set("X-Secret", "secret")
 	rec := httptest.NewRecorder()
 
 	srv.handlePaymentCallback(rec, req)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+func TestHandlePaymentCallback_AcceptsUnknownProviderFields(t *testing.T) {
+	t.Parallel()
+
+	srv, _, _ := newPaymentTestServer(t, nil)
+	req := httptest.NewRequest(http.MethodPost, "/payment/callback", strings.NewReader(`{"id":"550e8400-e29b-41d4-a716-446655440111","amount":23.00,"currency":"RUB","status":"PENDING","providerExtra":"kept-in-raw-debug-payload"}`))
+	req.Header.Set("X-Merchantid", "merchant")
+	req.Header.Set("X-Secret", "secret")
+	rec := httptest.NewRecorder()
+
+	srv.handlePaymentCallback(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Body.String(), `"ok":true`)
+}
+
+func TestHandlePaymentCallback_UnauthorizedDoesNotReadBody(t *testing.T) {
+	t.Parallel()
+
+	srv, _, _ := newPaymentTestServer(t, nil)
+	body := &trackingReader{Reader: strings.NewReader(`{"id":"550e8400-e29b-41d4-a716-446655440111","amount":23.00}`)}
+	req := httptest.NewRequest(http.MethodPost, "/payment/callback", body)
+	rec := httptest.NewRecorder()
+
+	srv.handlePaymentCallback(rec, req)
+	require.Equal(t, http.StatusUnauthorized, rec.Code)
+	assert.False(t, body.ReadCalled, "unauthorized callbacks must be rejected before reading/logging the body")
+}
+
+func TestHandlePaymentCallback_InvalidUUIDNotifiesAdmin(t *testing.T) {
+	t.Parallel()
+
+	srv, _, bot := newPaymentTestServer(t, nil)
+	req := httptest.NewRequest(http.MethodPost, "/payment/callback", strings.NewReader(`{"id":"not-a-uuid","amount":23.00,"currency":"RUB","status":"CONFIRMED"}`))
+	req.Header.Set("X-Merchantid", "merchant")
+	req.Header.Set("X-Secret", "secret")
+	rec := httptest.NewRecorder()
+
+	srv.handlePaymentCallback(rec, req)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	messages := bot.GetAllSentMessages()
+	require.Len(t, messages, 1)
+	assert.Contains(t, messages[0].Text, "invalid_provider_id")
+}
+
+func TestHandlePaymentCallback_TrailingJSONNotifiesAdminAndSkipsProcessing(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		extra string
+	}{
+		{name: "second JSON document", extra: "{}"},
+		{name: "invalid trailing bytes", extra: "garbage"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			order := &database.Order{ID: 26, SubscriptionID: 16, ProductID: 20, Status: database.OrderStatusPending, ProviderPaymentID: testPaymentID.String(), AmountCents: 2300, Currency: "RUB"}
+			srv, _, bot := newPaymentTestServer(t, order)
+			// A valid callback would reach this fake; trailing data must stop the
+			// request before any payment state transition is attempted.
+			req := httptest.NewRequest(http.MethodPost, "/payment/callback", strings.NewReader(`{"id":"550e8400-e29b-41d4-a716-446655440111","amount":23.00,"currency":"RUB","status":"CONFIRMED"}`+tt.extra))
+			req.Header.Set("X-Merchantid", "merchant")
+			req.Header.Set("X-Secret", "secret")
+			rec := httptest.NewRecorder()
+
+			srv.handlePaymentCallback(rec, req)
+			require.Equal(t, http.StatusBadRequest, rec.Code)
+			assert.Equal(t, database.OrderStatusPending, order.Status)
+			messages := bot.GetAllSentMessages()
+			require.Len(t, messages, 1)
+			assert.Contains(t, messages[0].Text, "trailing_callback_data")
+		})
+	}
+}
+
+func TestHandlePaymentCallback_UnsupportedStatusNotifiesAdmin(t *testing.T) {
+	t.Parallel()
+
+	srv, _, bot := newPaymentTestServer(t, nil)
+	req := paymentRequest("REFUNDED", testPaymentID, `23.00`)
+	rec := httptest.NewRecorder()
+
+	srv.handlePaymentCallback(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	messages := bot.GetAllSentMessages()
+	require.Len(t, messages, 1)
+	assert.Contains(t, messages[0].Text, "unsupported_callback_status")
 }
 
 func TestHandlePaymentCallback_RequiresUUIDProviderTransactionID(t *testing.T) {
@@ -98,7 +187,7 @@ func TestHandlePaymentCallback_BodySizeLimit(t *testing.T) {
 	body := strings.NewReader(strings.Repeat("x", 300<<10))
 	srv, _, _ := newPaymentTestServer(t, nil)
 	req := httptest.NewRequest(http.MethodPost, "/payment/callback", body)
-	req.Header.Set("X-MerchantId", "merchant")
+	req.Header.Set("X-Merchantid", "merchant")
 	req.Header.Set("X-Secret", "secret")
 	rec := httptest.NewRecorder()
 
@@ -349,7 +438,7 @@ func TestHandlePaymentCallback_MalformedPayloadNotifiesAdmin(t *testing.T) {
 
 	srv, _, bot := newPaymentTestServer(t, nil)
 	req := httptest.NewRequest(http.MethodPost, "/payment/callback", strings.NewReader(`{"id":`))
-	req.Header.Set("X-MerchantId", "merchant")
+	req.Header.Set("X-Merchantid", "merchant")
 	req.Header.Set("X-Secret", "secret")
 	rec := httptest.NewRecorder()
 
@@ -367,9 +456,12 @@ func paymentRequest(status string, id uuid.UUID, amount string) *http.Request {
 
 func paymentRequestWithCurrency(status string, id uuid.UUID, amount, currency string) *http.Request {
 	body := map[string]any{"id": id.String(), "amount": json.Number(amount), "currency": currency, "status": status}
-	encoded, _ := json.Marshal(body)
+	encoded, err := json.Marshal(body)
+	if err != nil {
+		panic(err)
+	}
 	req := httptest.NewRequest(http.MethodPost, "/payment/callback", strings.NewReader(string(encoded)))
-	req.Header.Set("X-MerchantId", "merchant")
+	req.Header.Set("X-Merchantid", "merchant")
 	req.Header.Set("X-Secret", "secret")
 	return req
 }
@@ -431,6 +523,16 @@ func newPaymentTestServer(t *testing.T, order *database.Order) (*Server, *testut
 	srv.SetPaymentConfig(&PaymentConfig{Enabled: true, MerchantID: "merchant", Secret: "secret"})
 	srv.SetPaymentReady(true)
 	return srv, db, bot
+}
+
+type trackingReader struct {
+	io.Reader
+	ReadCalled bool
+}
+
+func (r *trackingReader) Read(p []byte) (int, error) {
+	r.ReadCalled = true
+	return r.Reader.Read(p)
 }
 
 type testPaymentProvider struct{}
