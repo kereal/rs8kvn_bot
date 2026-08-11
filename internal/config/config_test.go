@@ -8,6 +8,19 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestMain isolates the Load() tests from payment environment variables that
+// may be exported in the host shell or a local .env (e.g. a development
+// environment with PAYMENT_ENABLED=true and a placeholder merchant ID). The
+// Load() tests exercise non-payment settings only, so payment vars must not
+// leak into validation. Without this, a host with payments enabled fails every
+// Load() test with "PLATEGA_MERCHANT_ID must be a UUID".
+func TestMain(m *testing.M) {
+	for _, key := range []string{"PAYMENT_ENABLED", "PAYMENT_PROVIDER", "PLATEGA_MERCHANT_ID", "PLATEGA_SECRET"} {
+		_ = os.Unsetenv(key)
+	}
+	os.Exit(m.Run())
+}
+
 func TestLoad_DefaultValues(t *testing.T) {
 	require.NoError(t, os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz"))
 	require.NoError(t, os.Setenv("TELEGRAM_ADMIN_ID", "123456"))
