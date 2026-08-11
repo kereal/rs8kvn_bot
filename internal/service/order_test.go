@@ -40,6 +40,16 @@ func (fakePaymentProvider) CreateTransaction(context.Context, platega.CreateTran
 	return &platega.CreateTransactionResponse{TransactionID: "550e8400-e29b-41d4-a716-446655440099", URL: "https://example.com", ExpiresIn: "00:15:00"}, nil
 }
 
+func atomicChargebackResult(orderID, subscriptionID uint, wasPaid, downgraded bool) (*database.ChargebackResult, error) {
+	return &database.ChargebackResult{
+		Order:          &database.Order{ID: orderID, SubscriptionID: subscriptionID, Status: database.OrderStatusCanceled, AmountCents: 2300, Currency: "RUB"},
+		WasPaid:        wasPaid,
+		Transitioned:   true,
+		Downgraded:     downgraded,
+		SubscriptionID: subscriptionID,
+	}, nil
+}
+
 func TestOrderService_NotifiesAdminForUncertainPayment(t *testing.T) {
 	adminBot := testutil.NewBotAPI()
 	order := &database.Order{ID: 12, SubscriptionID: 3, ProductID: 7, Status: database.OrderStatusPending, AmountCents: 2300, Currency: "RUB", PaymentCreationUncertain: true}
@@ -523,20 +533,19 @@ func TestCancelPaymentByProvider_PaidChargebackReturnsWasPaid(t *testing.T) {
 		},
 		GetOrderByProviderPaymentIDFunc: func(ctx context.Context, provider string, providerID uuid.UUID) (*database.Order, error) {
 			calls++
-			status := database.OrderStatusCanceled
-			if calls == 1 {
-				status = database.OrderStatusPaid
-			}
-			return &database.Order{ID: 7, Status: status, PaymentProvider: provider, ProviderPaymentID: providerID.String(), AmountCents: 2300, Currency: "RUB"}, nil
+			return &database.Order{ID: 7, SubscriptionID: 70, Status: database.OrderStatusPaid, PaymentProvider: provider, ProviderPaymentID: providerID.String(), AmountCents: 2300, Currency: "RUB"}, nil
+		},
+		CancelPaidOrderAndDowngradeCASFunc: func(context.Context, string, uuid.UUID, time.Time, uint, database.ChargebackPlanInTxFn) (*database.ChargebackResult, error) {
+			return atomicChargebackResult(7, 70, true, false)
 		},
 	}
-	o := NewOrderService(mock, nil, nil, fakePaymentProvider{}, "", nil)
+	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), fakePaymentProvider{}, "", nil)
 	order, wasPaid, err := o.CancelPaymentByProvider(context.Background(), uuid.MustParse("550e8400-e29b-41d4-a716-446655440101"), "CHARGEBACKED", json.Number("23.00"), "RUB")
 	require.NoError(t, err)
 	assert.True(t, wasPaid)
 	require.NotNil(t, order)
 	assert.Equal(t, uint(7), order.ID)
-	assert.Equal(t, 2, calls, "repository must be read before and after the CAS")
+	assert.Equal(t, 1, calls, "atomic chargeback repository owns the transition and order reload")
 }
 
 func TestCancelPaymentByProvider_ChargebackOnPendingReportsNotPaid(t *testing.T) {
@@ -550,14 +559,13 @@ func TestCancelPaymentByProvider_ChargebackOnPendingReportsNotPaid(t *testing.T)
 		},
 		GetOrderByProviderPaymentIDFunc: func(ctx context.Context, provider string, providerID uuid.UUID) (*database.Order, error) {
 			calls++
-			status := database.OrderStatusCanceled
-			if calls == 1 {
-				status = database.OrderStatusPending
-			}
-			return &database.Order{ID: 9, Status: status, PaymentProvider: provider, ProviderPaymentID: providerID.String(), AmountCents: 2300, Currency: "RUB"}, nil
+			return &database.Order{ID: 9, SubscriptionID: 90, Status: database.OrderStatusPending, PaymentProvider: provider, ProviderPaymentID: providerID.String(), AmountCents: 2300, Currency: "RUB"}, nil
+		},
+		CancelPaidOrderAndDowngradeCASFunc: func(context.Context, string, uuid.UUID, time.Time, uint, database.ChargebackPlanInTxFn) (*database.ChargebackResult, error) {
+			return atomicChargebackResult(9, 90, false, false)
 		},
 	}
-	o := NewOrderService(mock, nil, nil, fakePaymentProvider{}, "", nil)
+	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), fakePaymentProvider{}, "", nil)
 	order, wasPaid, err := o.CancelPaymentByProvider(context.Background(), uuid.MustParse("550e8400-e29b-41d4-a716-446655440103"), "CHARGEBACKED", json.Number("23.00"), "RUB")
 	require.NoError(t, err)
 	assert.False(t, wasPaid, "pending order chargeback must not report wasPaid")
@@ -644,8 +652,8 @@ func TestConfirmPayment_DeletedSubscriptionOrProductReturnsNoop(t *testing.T) {
 				GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
 					return &database.Order{ID: 90, SubscriptionID: 70, ProductID: 60, Status: database.OrderStatusPending, AmountCents: 2300, Currency: "RUB", ProviderPaymentID: providerID.String()}, nil
 				},
-				GetProductByIDFunc:              tt.productFn,
-				GetByIDFunc:                     tt.subFn,
+				GetProductByIDFunc: tt.productFn,
+				GetByIDFunc:        tt.subFn,
 				ConfirmOrderPaidCASFunc: func(context.Context, uint, time.Time, time.Time, *database.Subscription, *database.Product, database.ApplyPlanInTxFn) (bool, error) {
 					casCalled = true
 					return true, nil
@@ -705,16 +713,12 @@ func TestCancelPaymentByProvider_ChargebackDowngradesPaidSubscription(t *testing
 	calls := 0
 	downgradePersisted := false
 	mock := &testutil.DatabaseService{
-		CancelOrderCASFunc: func(context.Context, string, uuid.UUID, []database.OrderStatus) (bool, error) {
-			return true, nil
-		},
 		GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
 			calls++
-			status := database.OrderStatusCanceled
-			if calls == 1 {
-				status = database.OrderStatusPaid
-			}
-			return &database.Order{ID: 96, SubscriptionID: 85, ProductID: 66, Status: status, AmountCents: 2300, Currency: "RUB", ProviderPaymentID: providerID.String()}, nil
+			return &database.Order{ID: 96, SubscriptionID: 85, ProductID: 66, Status: database.OrderStatusPaid, AmountCents: 2300, Currency: "RUB", ProviderPaymentID: providerID.String()}, nil
+		},
+		CancelPaidOrderAndDowngradeCASFunc: func(context.Context, string, uuid.UUID, time.Time, uint, database.ChargebackPlanInTxFn) (*database.ChargebackResult, error) {
+			return atomicChargebackResult(96, 85, true, true)
 		},
 		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
 			return sub, nil
@@ -735,14 +739,14 @@ func TestCancelPaymentByProvider_ChargebackDowngradesPaidSubscription(t *testing
 		},
 	}
 	subSvc := NewSubscriptionService(mock, nil, nil, nil, &config.Config{})
-	o := NewOrderService(mock, subSvc, nil, fakePaymentProvider{}, "", nil)
+	o := NewOrderService(mock, subSvc, NewSyncService(mock, nil, nil), fakePaymentProvider{}, "", nil)
 
 	order, wasPaid, err := o.CancelPaymentByProvider(context.Background(), providerID, "CHARGEBACKED", json.Number("23.00"), "RUB")
 	require.NoError(t, err)
 	require.True(t, wasPaid)
 	require.NotNil(t, order)
 	assert.Equal(t, uint(96), order.ID)
-	assert.True(t, downgradePersisted, "chargeback on a paid order must downgrade the subscription to free")
+	assert.False(t, downgradePersisted, "the atomic repository owns the subscription downgrade")
 }
 
 func TestCancelPaymentByProvider_ChargebackKeepsAccessWithAnotherPaidOrder(t *testing.T) {
@@ -751,16 +755,12 @@ func TestCancelPaymentByProvider_ChargebackKeepsAccessWithAnotherPaidOrder(t *te
 	calls := 0
 	updateCalled := false
 	mock := &testutil.DatabaseService{
-		CancelOrderCASFunc: func(context.Context, string, uuid.UUID, []database.OrderStatus) (bool, error) {
-			return true, nil
-		},
 		GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
 			calls++
-			status := database.OrderStatusCanceled
-			if calls == 1 {
-				status = database.OrderStatusPaid
-			}
-			return &database.Order{ID: 97, SubscriptionID: 86, ProductID: 67, Status: status, AmountCents: 2300, Currency: "RUB", ProviderPaymentID: providerID.String()}, nil
+			return &database.Order{ID: 97, SubscriptionID: 86, ProductID: 67, Status: database.OrderStatusPaid, AmountCents: 2300, Currency: "RUB", ProviderPaymentID: providerID.String()}, nil
+		},
+		CancelPaidOrderAndDowngradeCASFunc: func(context.Context, string, uuid.UUID, time.Time, uint, database.ChargebackPlanInTxFn) (*database.ChargebackResult, error) {
+			return atomicChargebackResult(97, 86, true, false)
 		},
 		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
 			return sub, nil
@@ -781,7 +781,7 @@ func TestCancelPaymentByProvider_ChargebackKeepsAccessWithAnotherPaidOrder(t *te
 		},
 	}
 	subSvc := NewSubscriptionService(mock, nil, nil, nil, &config.Config{})
-	o := NewOrderService(mock, subSvc, nil, fakePaymentProvider{}, "", nil)
+	o := NewOrderService(mock, subSvc, NewSyncService(mock, nil, nil), fakePaymentProvider{}, "", nil)
 
 	_, wasPaid, err := o.CancelPaymentByProvider(context.Background(), providerID, "CHARGEBACKED", json.Number("23.00"), "RUB")
 	require.NoError(t, err)
@@ -796,16 +796,12 @@ func TestCancelPaymentByProvider_ChargebackDowngradeFailureAlertsAdmin(t *testin
 	sub := &database.Subscription{ID: 88, TelegramID: 58, PlanID: 99, Status: "active", ExpiresAt: testutil.PtrTime(time.Now().Add(24 * time.Hour))}
 	calls := 0
 	mock := &testutil.DatabaseService{
-		CancelOrderCASFunc: func(context.Context, string, uuid.UUID, []database.OrderStatus) (bool, error) {
-			return true, nil
-		},
 		GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
 			calls++
-			status := database.OrderStatusCanceled
-			if calls == 1 {
-				status = database.OrderStatusPaid
-			}
-			return &database.Order{ID: 100, SubscriptionID: 88, ProductID: 69, Status: status, AmountCents: 2300, Currency: "RUB", ProviderPaymentID: providerID.String()}, nil
+			return &database.Order{ID: 100, SubscriptionID: 88, ProductID: 69, Status: database.OrderStatusPaid, AmountCents: 2300, Currency: "RUB", ProviderPaymentID: providerID.String()}, nil
+		},
+		CancelPaidOrderAndDowngradeCASFunc: func(context.Context, string, uuid.UUID, time.Time, uint, database.ChargebackPlanInTxFn) (*database.ChargebackResult, error) {
+			return nil, errors.New("atomic chargeback transaction failed")
 		},
 		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
 			return sub, nil
@@ -819,16 +815,16 @@ func TestCancelPaymentByProvider_ChargebackDowngradeFailureAlertsAdmin(t *testin
 		},
 	}
 	subSvc := NewSubscriptionService(mock, nil, nil, nil, &config.Config{})
-	o := NewOrderService(mock, subSvc, nil, fakePaymentProvider{}, "", &config.Config{TelegramAdminID: 999})
+	o := NewOrderService(mock, subSvc, NewSyncService(mock, nil, nil), fakePaymentProvider{}, "", &config.Config{TelegramAdminID: 999})
 	o.SetAdminBot(adminBot)
 
 	_, wasPaid, err := o.CancelPaymentByProvider(context.Background(), providerID, "CHARGEBACKED", json.Number("23.00"), "RUB")
-	require.NoError(t, err, "a best-effort downgrade failure must not fail the webhook")
-	require.True(t, wasPaid)
+	require.Error(t, err, "an atomic chargeback failure must be returned for provider retry/reconciliation")
+	require.False(t, wasPaid)
 	messages := adminBot.GetAllSentMessages()
-	require.Len(t, messages, 2, "chargeback alert plus downgrade-failure alert")
-	assert.Contains(t, messages[1].Text, "chargeback_downgrade_failed")
-	assert.Contains(t, messages[1].Text, "free plan node lookup failed")
+	require.Len(t, messages, 1, "atomic chargeback failure alert")
+	assert.Contains(t, messages[0].Text, "cancel_payment_failed")
+	assert.Contains(t, messages[0].Text, "atomic chargeback transaction failed")
 }
 
 func TestCancelPaymentByProvider_ChargebackDowngradeUsesSyncService(t *testing.T) {
@@ -843,16 +839,12 @@ func TestCancelPaymentByProvider_ChargebackDowngradeUsesSyncService(t *testing.T
 	syncInvoked := false
 	premiumMarkedForRemoval := false
 	mock := &testutil.DatabaseService{
-		CancelOrderCASFunc: func(context.Context, string, uuid.UUID, []database.OrderStatus) (bool, error) {
-			return true, nil
-		},
 		GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
 			calls++
-			status := database.OrderStatusCanceled
-			if calls == 1 {
-				status = database.OrderStatusPaid
-			}
-			return &database.Order{ID: 101, SubscriptionID: 89, ProductID: 70, Status: status, AmountCents: 2300, Currency: "RUB", ProviderPaymentID: providerID.String()}, nil
+			return &database.Order{ID: 101, SubscriptionID: 89, ProductID: 70, Status: database.OrderStatusPaid, AmountCents: 2300, Currency: "RUB", ProviderPaymentID: providerID.String()}, nil
+		},
+		CancelPaidOrderAndDowngradeCASFunc: func(context.Context, string, uuid.UUID, time.Time, uint, database.ChargebackPlanInTxFn) (*database.ChargebackResult, error) {
+			return atomicChargebackResult(101, 89, true, true)
 		},
 		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
 			return sub, nil
@@ -889,15 +881,16 @@ func TestCancelPaymentByProvider_ChargebackDowngradeUsesSyncService(t *testing.T
 	}
 	subSvc := NewSubscriptionService(mock, nil, nil, nil, &config.Config{})
 	subSvc.SetSyncService(NewSyncService(mock, nil, nil))
-	o := NewOrderService(mock, subSvc, nil, fakePaymentProvider{}, "", nil)
+	o := NewOrderService(mock, subSvc, NewSyncService(mock, nil, nil), fakePaymentProvider{}, "", nil)
 
 	_, wasPaid, err := o.CancelPaymentByProvider(context.Background(), providerID, "CHARGEBACKED", json.Number("23.00"), "RUB")
 	require.NoError(t, err)
 	require.True(t, wasPaid)
-	assert.True(t, updateCalled, "subscription must be reset to the free plan")
-	assert.False(t, deleteNodesCalled, "the sync path must not wipe node bindings without pending_remove")
-	assert.True(t, premiumMarkedForRemoval, "premium node must transition to pending_remove so the panel client is deleted")
-	assert.True(t, syncInvoked, "SyncSubscription must run so premium clients are removed from the panels")
+	assert.True(t, wasPaid)
+	assert.True(t, syncInvoked, "post-commit SyncSubscription must run after the atomic downgrade")
+	assert.False(t, deleteNodesCalled, "the atomic path must not use the legacy node wipe")
+	assert.False(t, updateCalled, "the atomic repository owns subscription downgrade inside its transaction")
+	assert.False(t, premiumMarkedForRemoval, "the fake atomic seam does not re-run plan application")
 }
 
 func TestCancelPaymentByProvider_ChargebackOnPendingDoesNotDowngrade(t *testing.T) {
@@ -905,16 +898,12 @@ func TestCancelPaymentByProvider_ChargebackOnPendingDoesNotDowngrade(t *testing.
 	calls := 0
 	ordersQueried := false
 	mock := &testutil.DatabaseService{
-		CancelOrderCASFunc: func(context.Context, string, uuid.UUID, []database.OrderStatus) (bool, error) {
-			return true, nil
-		},
 		GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
 			calls++
-			status := database.OrderStatusCanceled
-			if calls == 1 {
-				status = database.OrderStatusPending
-			}
-			return &database.Order{ID: 99, SubscriptionID: 87, ProductID: 68, Status: status, AmountCents: 2300, Currency: "RUB", ProviderPaymentID: providerID.String()}, nil
+			return &database.Order{ID: 99, SubscriptionID: 87, ProductID: 68, Status: database.OrderStatusPending, AmountCents: 2300, Currency: "RUB", ProviderPaymentID: providerID.String()}, nil
+		},
+		CancelPaidOrderAndDowngradeCASFunc: func(context.Context, string, uuid.UUID, time.Time, uint, database.ChargebackPlanInTxFn) (*database.ChargebackResult, error) {
+			return atomicChargebackResult(99, 87, false, false)
 		},
 		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
 			return &database.Subscription{ID: 87, TelegramID: 57, PlanID: 99}, nil
@@ -925,7 +914,7 @@ func TestCancelPaymentByProvider_ChargebackOnPendingDoesNotDowngrade(t *testing.
 		},
 	}
 	subSvc := NewSubscriptionService(mock, nil, nil, nil, &config.Config{})
-	o := NewOrderService(mock, subSvc, nil, fakePaymentProvider{}, "", nil)
+	o := NewOrderService(mock, subSvc, NewSyncService(mock, nil, nil), fakePaymentProvider{}, "", nil)
 
 	_, wasPaid, err := o.CancelPaymentByProvider(context.Background(), providerID, "CHARGEBACKED", json.Number("23.00"), "RUB")
 	require.NoError(t, err)

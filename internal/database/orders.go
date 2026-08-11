@@ -1,3 +1,4 @@
+// Package database provides persistence, migrations, models, and repositories.
 package database
 
 import (
@@ -9,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // CreateOrder inserts a new order record.
@@ -33,6 +35,7 @@ func (s *Service) GetOrderByID(ctx context.Context, id uint) (*Order, error) {
 }
 
 // GetOrderByProviderPaymentID finds an order by provider and external payment ID.
+// Not-found results are normalized to ErrOrderNotFound for service-layer handling.
 func (s *Service) GetOrderByProviderPaymentID(ctx context.Context, provider string, providerPaymentID uuid.UUID) (*Order, error) {
 	var order Order
 	result := s.db.WithContext(ctx).Where("payment_provider = ? AND provider_payment_id = ?", provider, providerPaymentID.String()).First(&order)
@@ -213,6 +216,18 @@ type ApplyPlanInTxFn func(ctx context.Context, tx *gorm.DB, subscriptionID uint,
 func (s *Service) ConfirmOrderPaidCAS(ctx context.Context, orderID uint, paidAt, activatedAt time.Time, sub *Subscription, product *Product, applyPlan ApplyPlanInTxFn) (bool, error) {
 	var activated bool
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Serialize every entitlement-changing payment transition on the
+		// subscription row before touching its order. Chargeback acquires this
+		// same lock first, so its active-coverage decision cannot be made from a
+		// snapshot that races a concurrent confirmation.
+		var currentSub Subscription
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&currentSub, sub.ID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return fmt.Errorf("load subscription for payment: %w", ErrSubscriptionNotFound)
+			}
+			return fmt.Errorf("load subscription for payment: %w", err)
+		}
+
 		result := tx.Model(&Order{}).Where("id = ? AND status = ?", orderID, OrderStatusPending).Updates(map[string]interface{}{
 			"status": OrderStatusPaid, "paid_at": paidAt, "activated_at": activatedAt,
 		})
@@ -221,17 +236,6 @@ func (s *Service) ConfirmOrderPaidCAS(ctx context.Context, orderID uint, paidAt,
 		}
 		if result.RowsAffected == 0 {
 			return nil
-		}
-
-		// Read after the CAS write acquires SQLite's write lock. A concurrent
-		// confirmation for another product therefore sees the already-committed
-		// expiry instead of calculating from a stale caller snapshot.
-		var currentSub Subscription
-		if err := tx.First(&currentSub, sub.ID).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return fmt.Errorf("load subscription for payment: %w", ErrSubscriptionNotFound)
-			}
-			return fmt.Errorf("load subscription for payment: %w", err)
 		}
 		newExpiry := CalculatePaymentExpiry(activatedAt, &currentSub, product)
 		if err := tx.Model(&Order{}).Where("id = ? AND status = ?", orderID, OrderStatusPaid).Update("expires_at", newExpiry).Error; err != nil {
@@ -283,7 +287,124 @@ func CalculatePaymentExpiry(now time.Time, sub *Subscription, product *Product) 
 	return base.AddDate(0, 0, product.DurationDays)
 }
 
-// CancelOrderCAS cancels an order only from one of the supplied states.
+// ChargebackPlanInTxFn materializes the DB-side VPN sync prerequisites while the
+// chargeback transaction is open. It must not perform external network calls.
+type ChargebackPlanInTxFn func(ctx context.Context, tx *gorm.DB, subscriptionID uint, freePlanID uint) error
+
+// CancelPaidOrderAndDowngradeCAS atomically records a paid-order chargeback and,
+// when no other currently-valid paid order covers the subscription, resets the
+// subscription to the free plan and materializes its pending sync state.
+//
+// The order status, entitlement update, and pending node transitions share one
+// transaction. A concurrent confirmation therefore cannot commit an entitlement
+// after this chargeback's decision without first observing the serialized DB
+// state. External VPN calls must happen after this method returns successfully.
+func (s *Service) CancelPaidOrderAndDowngradeCAS(ctx context.Context, provider string, providerPaymentID uuid.UUID, now time.Time, freePlanID uint, applyPlan ChargebackPlanInTxFn) (*ChargebackResult, error) {
+	var result ChargebackResult
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var order Order
+		query := tx.Where("payment_provider = ? AND provider_payment_id = ?", provider, providerPaymentID.String()).First(&order)
+		if errors.Is(query.Error, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		if query.Error != nil {
+			return fmt.Errorf("find chargeback order: %w", query.Error)
+		}
+		result.SubscriptionID = order.SubscriptionID
+
+		// Use the same subscription lock order as ConfirmOrderPaidCAS. The lock
+		// is acquired before changing this order or evaluating other paid orders,
+		// which makes the chargeback coverage decision linearizable per user.
+		var currentSub Subscription
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&currentSub, order.SubscriptionID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return fmt.Errorf("load subscription for chargeback: %w", ErrSubscriptionNotFound)
+			}
+			return fmt.Errorf("load subscription for chargeback: %w", err)
+		}
+
+		// Re-read the provider order after the subscription lock. A concurrent
+		// confirmation may have changed it after the initial lookup.
+		if err := tx.First(&order, order.ID).Error; err != nil {
+			return fmt.Errorf("reload chargeback order: %w", err)
+		}
+		result.Order = &order
+		result.WasPaid = order.Status == OrderStatusPaid
+		fromStatus := OrderStatusPending
+		if result.WasPaid {
+			fromStatus = OrderStatusPaid
+		}
+
+		updated := tx.Model(&Order{}).
+			Where("id = ? AND status = ?", order.ID, fromStatus).
+			Update("status", OrderStatusCanceled)
+		if updated.Error != nil {
+			return fmt.Errorf("cancel paid order: %w", updated.Error)
+		}
+		if updated.RowsAffected == 0 {
+			return nil
+		}
+		result.Transitioned = true
+		order.Status = OrderStatusCanceled
+		if !result.WasPaid {
+			result.Order = &order
+			return nil
+		}
+		// A chargeback must never resurrect a subscription that was already
+		// revoked/canceled by another lifecycle flow. The order transition is
+		// still committed, but only active subscriptions may be downgraded to
+		// the active free plan below.
+		if currentSub.Status != string(SubscriptionStatusActive) {
+			result.Order = &order
+			return nil
+		}
+
+		var activePaid int64
+		if err := tx.Model(&Order{}).
+			Where("subscription_id = ? AND status = ? AND (expires_at IS NULL OR expires_at > ?)", order.SubscriptionID, OrderStatusPaid, now).
+			Count(&activePaid).Error; err != nil {
+			return fmt.Errorf("check active paid coverage: %w", err)
+		}
+		if activePaid > 0 {
+			result.Order = &order
+			return nil
+		}
+
+		updated = tx.Model(&Subscription{}).Where("id = ?", order.SubscriptionID).Updates(map[string]interface{}{
+			"status":           string(SubscriptionStatusActive),
+			"expires_at":       nil,
+			"plan_id":          freePlanID,
+			"product_id":       nil,
+			"started_at":       nil,
+			"price_paid_cents": 0,
+			"currency":         nil,
+		})
+		if updated.Error != nil {
+			return fmt.Errorf("downgrade subscription after chargeback: %w", updated.Error)
+		}
+		if updated.RowsAffected == 0 {
+			return fmt.Errorf("downgrade subscription after chargeback: %w", ErrSubscriptionNotFound)
+		}
+		if applyPlan != nil {
+			if err := applyPlan(ctx, tx, order.SubscriptionID, freePlanID); err != nil {
+				return fmt.Errorf("apply free plan after chargeback: %w", err)
+			}
+		}
+		result.Downgraded = true
+		result.Order = &order
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if result.Order == nil {
+		return nil, nil
+	}
+	return &result, nil
+}
+
+// CancelOrderCAS cancels an order only from one of the supplied states. It
+// returns false without error when the callback is an idempotent no-op.
 func (s *Service) CancelOrderCAS(ctx context.Context, provider string, providerPaymentID uuid.UUID, fromStatuses []OrderStatus) (bool, error) {
 	result := s.db.WithContext(ctx).Model(&Order{}).Where("payment_provider = ? AND provider_payment_id = ? AND status IN ?", provider, providerPaymentID.String(), fromStatuses).Update("status", OrderStatusCanceled)
 	if result.Error != nil {

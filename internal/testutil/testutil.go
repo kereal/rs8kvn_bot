@@ -149,6 +149,7 @@ type DatabaseService struct {
 	SavePaymentDetailsFunc                      func(ctx context.Context, orderID uint, providerPaymentID uuid.UUID, paymentURL string, paymentExpiresAt time.Time) error
 	ConfirmOrderPaidCASFunc                     func(ctx context.Context, orderID uint, paidAt, activatedAt time.Time, sub *database.Subscription, product *database.Product, applyPlan database.ApplyPlanInTxFn) (bool, error)
 	CancelOrderCASFunc                          func(ctx context.Context, provider string, providerPaymentID uuid.UUID, fromStatuses []database.OrderStatus) (bool, error)
+	CancelPaidOrderAndDowngradeCASFunc          func(ctx context.Context, provider string, providerPaymentID uuid.UUID, now time.Time, freePlanID uint, applyPlan database.ChargebackPlanInTxFn) (*database.ChargebackResult, error)
 	TransactionFunc                             func(ctx context.Context, fn func(*gorm.DB) error) error
 	GetSubscriptionFunc                         func(ctx context.Context, subscriptionID string) (*database.Subscription, error)
 	GetTrialSubscriptionBySubIDFunc             func(ctx context.Context, subscriptionID string) (*database.Subscription, error)
@@ -1063,6 +1064,13 @@ func (m *DatabaseService) ConfirmOrderPaidCAS(ctx context.Context, orderID uint,
 		return false, errors.New("mock ConfirmOrderPaidCAS requires ConfirmOrderPaidCASFunc when applyPlan is set")
 	}
 	return true, nil
+}
+
+func (m *DatabaseService) CancelPaidOrderAndDowngradeCAS(ctx context.Context, provider string, providerPaymentID uuid.UUID, now time.Time, freePlanID uint, applyPlan database.ChargebackPlanInTxFn) (*database.ChargebackResult, error) {
+	if m.CancelPaidOrderAndDowngradeCASFunc != nil {
+		return m.CancelPaidOrderAndDowngradeCASFunc(ctx, provider, providerPaymentID, now, freePlanID, applyPlan)
+	}
+	return nil, errors.New("mock atomic chargeback requires CancelPaidOrderAndDowngradeCASFunc")
 }
 
 func (m *DatabaseService) CancelOrderCAS(ctx context.Context, provider string, providerPaymentID uuid.UUID, fromStatuses []database.OrderStatus) (bool, error) {

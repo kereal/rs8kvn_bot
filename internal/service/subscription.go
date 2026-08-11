@@ -915,6 +915,10 @@ func (s *SubscriptionService) ensureSubscriptionNodes(ctx context.Context, sub *
 	return nil
 }
 
+type expiryRepository interface {
+	ExpireSubscriptionWithPlanCAS(context.Context, uint, uint, database.ExpireSubscriptionPlanInTxFn) error
+}
+
 // ExpireSubscription downgrades the subscription to the Free plan and syncs node removals.
 func (s *SubscriptionService) ExpireSubscription(ctx context.Context, subscriptionID uint) error {
 	sub, err := s.db.GetByID(ctx, subscriptionID)
@@ -927,7 +931,13 @@ func (s *SubscriptionService) ExpireSubscription(ctx context.Context, subscripti
 		return fmt.Errorf("resolve free plan: %w", err)
 	}
 
-	if err := s.db.ExpireSubscription(ctx, sub.ID, freePlan.ID); err != nil {
+	if repo, ok := s.db.(expiryRepository); ok && s.syncService != nil {
+		if err := repo.ExpireSubscriptionWithPlanCAS(ctx, sub.ID, freePlan.ID, func(ctx context.Context, tx *gorm.DB, subscriptionID, planID uint) error {
+			return s.syncService.ApplyPlanToSubscriptionInTx(ctx, tx, subscriptionID, planID)
+		}); err != nil {
+			return fmt.Errorf("expire subscription: %w", err)
+		}
+	} else if err := s.db.ExpireSubscription(ctx, sub.ID, freePlan.ID); err != nil {
 		return fmt.Errorf("expire subscription: %w", err)
 	}
 
@@ -936,8 +946,10 @@ func (s *SubscriptionService) ExpireSubscription(ctx context.Context, subscripti
 	}
 
 	if s.syncService != nil {
-		if err := s.syncService.ApplyPlanToSubscription(ctx, sub.ID); err != nil {
-			return fmt.Errorf("expire subscription: apply plan: %w", err)
+		if _, atomicPath := s.db.(expiryRepository); !atomicPath {
+			if err := s.syncService.ApplyPlanToSubscription(ctx, sub.ID); err != nil {
+				return fmt.Errorf("expire subscription: apply plan: %w", err)
+			}
 		}
 		if err := s.syncService.SyncSubscription(ctx, sub.ID); err != nil {
 			logger.Warn("sync subscription failed (will retry)", zap.Error(err))

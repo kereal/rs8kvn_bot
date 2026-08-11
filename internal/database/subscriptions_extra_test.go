@@ -2,11 +2,13 @@ package database
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 // ==================== GetSubscriptionStatus Tests ====================
@@ -103,11 +105,7 @@ func TestGetWithPlanAndNodes_RevokedSubscription(t *testing.T) {
 
 // ==================== UpdateDevices Tests ====================
 
-
-
 // ==================== UpdateIPs Tests ====================
-
-
 
 // ==================== ExpireSubscription Tests ====================
 
@@ -237,4 +235,60 @@ func TestGetExpiredPaidSubscriptions_TrialPlanExcluded(t *testing.T) {
 	assert.Empty(t, subs, "trial subscriptions are cleaned up by TrialCleanupScheduler")
 }
 
-// ==================== GetSubscription Tests ====================
+func TestExpireSubscriptionWithPlanCAS_RollsBackOnPlanApplyFailure(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+	ctx := context.Background()
+	freePlan, err := svc.GetPlanByName(ctx, FreePlanName)
+	require.NoError(t, err)
+	paidPlan := &Plan{Name: "expiry-rollback", IsActive: true}
+	require.NoError(t, svc.db.Create(paidPlan).Error)
+	expired := time.Now().UTC().Add(-time.Hour)
+	productID := uint(1)
+	currency := "RUB"
+	sub := &Subscription{TelegramID: 994005, Username: "expiry-rollback", ClientID: "expiry-rollback-client", SubscriptionID: "expiry-rollback-sub", Status: "active", PlanID: paidPlan.ID, ExpiresAt: &expired, ProductID: &productID, PricePaidCents: 100, Currency: &currency}
+	require.NoError(t, svc.CreateSubscription(ctx, sub, ""))
+
+	wantErr := errors.New("expiry sync setup failed")
+	err = svc.ExpireSubscriptionWithPlanCAS(ctx, sub.ID, freePlan.ID, func(context.Context, *gorm.DB, uint, uint) error {
+		return wantErr
+	})
+	require.ErrorIs(t, err, wantErr)
+	stored, err := svc.GetByID(ctx, sub.ID)
+	require.NoError(t, err)
+	assert.Equal(t, paidPlan.ID, stored.PlanID, "expiry downgrade must roll back with sync setup")
+	require.NotNil(t, stored.ExpiresAt)
+	assert.WithinDuration(t, expired, *stored.ExpiresAt, time.Second)
+	assert.Equal(t, int64(100), stored.PricePaidCents)
+}
+
+func TestExpireSubscriptionWithPlanCAS_RequiresExpiredActiveSubscription(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+	ctx := context.Background()
+	freePlan, err := svc.GetPlanByName(ctx, FreePlanName)
+	require.NoError(t, err)
+	paidPlan := &Plan{Name: "expiry-paid", IsActive: true}
+	require.NoError(t, svc.db.Create(paidPlan).Error)
+	expired := time.Now().UTC().Add(-time.Hour)
+	productID := uint(1)
+	currency := "RUB"
+	sub := &Subscription{TelegramID: 994003, Username: "expiry-cas", ClientID: "expiry-cas-client", SubscriptionID: "expiry-cas-sub", Status: "active", PlanID: paidPlan.ID, ExpiresAt: &expired, ProductID: &productID, PricePaidCents: 100, Currency: &currency}
+	require.NoError(t, svc.CreateSubscription(ctx, sub, ""))
+
+	applyCalled := false
+	err = svc.ExpireSubscriptionWithPlanCAS(ctx, sub.ID, freePlan.ID, func(context.Context, *gorm.DB, uint, uint) error {
+		applyCalled = true
+		return nil
+	})
+	require.NoError(t, err)
+	assert.True(t, applyCalled)
+	updated, err := svc.GetByID(ctx, sub.ID)
+	require.NoError(t, err)
+	assert.Equal(t, freePlan.ID, updated.PlanID)
+	assert.Nil(t, updated.ExpiresAt)
+	assert.Zero(t, updated.PricePaidCents)
+	assert.Nil(t, updated.Currency)
+}
