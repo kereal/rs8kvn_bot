@@ -333,6 +333,53 @@ func (s *Service) UpdateLastRequest(ctx context.Context, subscriptionID string) 
 	return nil
 }
 
+// ExpireSubscriptionPlanInTxFn materializes DB-side VPN sync prerequisites while
+// the expiry transaction is open. It must not perform external network calls.
+type ExpireSubscriptionPlanInTxFn func(ctx context.Context, tx *gorm.DB, subscriptionID uint, freePlanID uint) error
+
+// ExpireSubscriptionWithPlanCAS atomically downgrades an expired subscription and
+// creates the pending node-sync state needed to deprovision its previous plan.
+func (s *Service) ExpireSubscriptionWithPlanCAS(ctx context.Context, id uint, freePlanID uint, applyPlan ExpireSubscriptionPlanInTxFn) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&Subscription{}).Where("id = ? AND status = ? AND expires_at IS NOT NULL AND expires_at <= ?", id, "active", time.Now().UTC()).
+			Updates(map[string]interface{}{
+				"status":           "active",
+				"expires_at":       nil,
+				"plan_id":          freePlanID,
+				"product_id":       nil,
+				"started_at":       nil,
+				"price_paid_cents": 0,
+				"currency":         nil,
+			})
+		if result.Error != nil {
+			return fmt.Errorf("expire subscription: %w", result.Error)
+		}
+		if result.RowsAffected == 0 {
+			var current Subscription
+			if err := tx.First(&current, id).Error; errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrSubscriptionNotFound
+			} else if err != nil {
+				return fmt.Errorf("reload subscription after expiry race: %w", err)
+			} else if current.Status == string(SubscriptionStatusActive) &&
+				current.PlanID == freePlanID &&
+				current.ExpiresAt == nil &&
+				current.ProductID == nil &&
+				current.StartedAt == nil &&
+				current.PricePaidCents == 0 &&
+				current.Currency == nil {
+				return nil
+			}
+			return fmt.Errorf("expire subscription %d: state changed concurrently", id)
+		}
+		if applyPlan != nil {
+			if err := applyPlan(ctx, tx, id, freePlanID); err != nil {
+				return fmt.Errorf("apply free plan after expiry: %w", err)
+			}
+		}
+		return nil
+	})
+}
+
 // ExpireSubscription downgrades the subscription to the free plan and clears expires_at.
 func (s *Service) ExpireSubscription(ctx context.Context, id uint, freePlanID uint) error {
 	result := s.db.WithContext(ctx).Model(&Subscription{}).Where("id = ?", id).

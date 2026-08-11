@@ -245,25 +245,15 @@ func startWebServer(subService *service.SubscriptionService, cfg *config.Config,
 // периодическую сверку осиротевших клиентов, бэкапы, heartbeat, очистку trial,
 // а также синхронизацию и истечение подписок. Возвращает WaitGroup для ожидания
 // завершения при штатном выключении.
-func startBackgroundWorkers(ctx context.Context, handler *bot.Handler, subService *service.SubscriptionService, dbService *database.Service, cfg *config.Config, vpnClients map[uint]vpn.Client, nodes []database.Node) *sync.WaitGroup {
+func startBackgroundWorkers(ctx context.Context, handler *bot.Handler, subService *service.SubscriptionService, syncSvc *service.SyncService, dbService *database.Service, cfg *config.Config) *sync.WaitGroup {
 	var wg sync.WaitGroup
 	wg.Add(8)
 
-	// Create sync service and wire it into subscription service BEFORE starting
-	// any background goroutines. This prevents a race where the trial cleanup
-	// scheduler calls CleanupExpiredTrials before SetSyncService has run, which
-	// would bypass the sync-based deprovision path and fall into the legacy
-	// deleteClientFromAllNodes code that sends delete requests to ALL nodes.
-	syncSvc := service.NewSyncService(dbService, vpnClients, nodes)
-	if orderService := handler.OrderService(); orderService != nil {
-		orderService.SetSyncService(syncSvc)
-	}
-	// The subscription service also needs the sync service: ExpireSubscription,
-	// CleanupExpiredTrials and DowngradeToFreePlan deprovision VPN access through
-	// it (pending_remove + SyncSubscription) instead of falling back to a plain
-	// DB update that would leave panel clients orphaned.
-	if subService != nil {
-		subService.SetSyncService(syncSvc)
+	// The services are wired before any background goroutine starts. Reuse the
+	// same SyncService instance that was injected into payment/subscription
+	// services so chargeback, expiry, and the worker share one DB-sync contract.
+	if syncSvc == nil {
+		logger.Warn("SyncService not available; background sync workers may be degraded")
 	}
 
 	go func() {
@@ -475,7 +465,7 @@ func main() {
 	svc.handler.StartCacheCleanup(ctx, bot.CacheTTL/2)
 	svc.handler.StartRateLimiterCleanup(ctx, bot.CacheTTL, bot.CacheTTL*2)
 	svc.handler.StartReferralCacheSync(ctx)
-	bgWg := startBackgroundWorkers(ctx, svc.handler, svc.subService, dbService, cfg, deps.vpnClients, deps.nodes)
+	bgWg := startBackgroundWorkers(ctx, svc.handler, svc.subService, svc.syncService, dbService, cfg)
 	if webServer != nil {
 		webServer.SetPaymentReady(true)
 	}

@@ -257,6 +257,15 @@ func TestHandlePaymentCallback_ChargebackNotifiesAdmin(t *testing.T) {
 	srv, db, bot := newPaymentTestServer(t, order)
 	// The chargeback on a paid order must downgrade the subscription to free.
 	downgradeCalled := false
+	db.CancelPaidOrderAndDowngradeCASFunc = func(ctx context.Context, _ string, _ uuid.UUID, _ time.Time, freePlanID uint, _ database.ChargebackPlanInTxFn) (*database.ChargebackResult, error) {
+		order.Status = database.OrderStatusCanceled
+		if db.UpdateSubscriptionFunc != nil {
+			if err := db.UpdateSubscriptionFunc(ctx, &database.Subscription{ID: order.SubscriptionID, PlanID: freePlanID, Status: "active"}); err != nil {
+				return nil, err
+			}
+		}
+		return &database.ChargebackResult{Order: order, WasPaid: true, Transitioned: true, Downgraded: true, SubscriptionID: order.SubscriptionID}, nil
+	}
 	db.GetNodesByPlanIDFunc = func(context.Context, uint) ([]database.Node, error) { return nil, nil }
 	db.UpdateSubscriptionFunc = func(_ context.Context, sub *database.Subscription) error {
 		downgradeCalled = true
