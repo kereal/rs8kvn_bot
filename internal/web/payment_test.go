@@ -209,7 +209,12 @@ func TestHandlePaymentCallback_ConfirmedActivatesOrder(t *testing.T) {
 	stored, err := db.GetOrderByID(context.Background(), order.ID)
 	require.NoError(t, err)
 	assert.Equal(t, database.OrderStatusPaid, stored.Status)
-	assert.Equal(t, 0, bot.SendCountSafe()) // Telegram success is skipped for invalid Telegram ID
+	// User success message is skipped for invalid Telegram ID; the admin gets
+	// exactly one paid-order notification.
+	messages := bot.GetAllSentMessages()
+	require.Len(t, messages, 1)
+	assert.Equal(t, int64(999), messages[0].ChatID)
+	assert.Contains(t, messages[0].Text, "Покупка подтверждена")
 }
 
 func TestHandlePaymentCallback_DuplicateConfirmedIsIdempotent(t *testing.T) {
@@ -246,7 +251,12 @@ func TestHandlePaymentCallback_DuplicateConfirmedIsIdempotent(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, database.OrderStatusPaid, stored.Status)
 	require.Equal(t, 1, confirmCalls, "duplicate callback must not repeat activation CAS")
-	assert.Empty(t, bot.GetAllSentMessages(), "invalid Telegram ID should not produce duplicate notifications")
+	// The user has an invalid Telegram ID, so only the single admin paid alert
+	// from the first CONFIRMED is expected; the duplicate must stay silent.
+	messages := bot.GetAllSentMessages()
+	require.Len(t, messages, 1, "duplicate callback must not produce duplicate notifications")
+	assert.Equal(t, int64(999), messages[0].ChatID)
+	assert.Contains(t, messages[0].Text, "Покупка подтверждена")
 }
 
 func TestHandlePaymentCallback_CurrencyMismatchLeavesOrderPending(t *testing.T) {
@@ -309,8 +319,12 @@ func TestHandlePaymentCallback_ChargebackNotifiesAdmin(t *testing.T) {
 	assert.Equal(t, database.OrderStatusCanceled, order.Status)
 	assert.True(t, downgradeCalled, "chargeback on a paid order must downgrade access to free")
 	messages := bot.GetAllSentMessages()
-	require.Len(t, messages, 1)
+	require.Len(t, messages, 2, "chargeback must produce the issue alert and the buyer alert")
 	assert.Contains(t, messages[0].Text, "Chargeback requires manual review")
+	assert.Equal(t, int64(999), messages[1].ChatID)
+	assert.Contains(t, messages[1].Text, "Chargeback по платежу")
+	assert.Contains(t, messages[1].Text, "понижен до бесплатного")
+	assert.Contains(t, messages[1].Text, "Заказ: #5")
 }
 
 func TestHandlePaymentCallback_ConfirmedForDeletedSubscription(t *testing.T) {
@@ -386,9 +400,11 @@ func TestHandlePaymentCallback_PostCommitNotificationBuildFailureAlertsAdmin(t *
 	require.Equal(t, http.StatusOK, rec.Code)
 	assert.Equal(t, database.OrderStatusPaid, order.Status)
 	messages := bot.GetAllSentMessages()
-	require.Len(t, messages, 1)
+	require.Len(t, messages, 2)
 	assert.Equal(t, int64(999), messages[0].ChatID)
-	assert.Contains(t, messages[0].Text, "paid_notification_build_failed")
+	assert.Contains(t, messages[0].Text, "Покупка подтверждена")
+	assert.Equal(t, int64(999), messages[1].ChatID)
+	assert.Contains(t, messages[1].Text, "paid_notification_build_failed")
 }
 
 func TestHandlePaymentCallback_PostCommitNotificationSendFailureAlertsAdmin(t *testing.T) {
@@ -415,10 +431,12 @@ func TestHandlePaymentCallback_PostCommitNotificationSendFailureAlertsAdmin(t *t
 	require.Equal(t, http.StatusOK, rec.Code)
 	assert.Equal(t, database.OrderStatusPaid, order.Status)
 	messages := bot.GetAllSentMessages()
-	require.Len(t, messages, 2)
-	assert.Equal(t, int64(42), messages[0].ChatID)
-	assert.Equal(t, int64(999), messages[1].ChatID)
-	assert.Contains(t, messages[1].Text, "paid_notification_send_failed")
+	require.Len(t, messages, 3)
+	assert.Equal(t, int64(999), messages[0].ChatID)
+	assert.Contains(t, messages[0].Text, "Покупка подтверждена")
+	assert.Equal(t, int64(42), messages[1].ChatID)
+	assert.Equal(t, int64(999), messages[2].ChatID)
+	assert.Contains(t, messages[2].Text, "paid_notification_send_failed")
 }
 
 func TestHandlePaymentCallback_PendingDoesNotNotifyAdmin(t *testing.T) {
