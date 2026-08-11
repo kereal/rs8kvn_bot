@@ -471,7 +471,6 @@ func newPaymentTestServer(t *testing.T, order *database.Order) (*Server, *testut
 	db := testutil.NewDatabaseService()
 	if order != nil {
 		db.Orders = map[uint]*database.Order{order.ID: order}
-		db.OrdersBySubscriptionID = map[uint][]database.Order{order.SubscriptionID: {*order}}
 	}
 	db.GetOrderByProviderPaymentIDFunc = func(_ context.Context, _ string, providerID uuid.UUID) (*database.Order, error) {
 		if order != nil && providerID.String() == order.ProviderPaymentID {

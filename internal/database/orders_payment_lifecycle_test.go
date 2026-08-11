@@ -33,7 +33,7 @@ func TestGetOrderByProviderPaymentID_FindsAndNormalizesNotFound(t *testing.T) {
 		ProviderPaymentID: providerID.String(),
 		CreatedAt:         time.Now().UTC(),
 	}
-	require.NoError(t, svc.CreateOrder(ctx, order))
+	require.NoError(t, svc.db.WithContext(ctx).Create(order).Error)
 
 	got, err := svc.GetOrderByProviderPaymentID(ctx, "platega", providerID)
 	require.NoError(t, err)
@@ -43,34 +43,6 @@ func TestGetOrderByProviderPaymentID_FindsAndNormalizesNotFound(t *testing.T) {
 
 	_, err = svc.GetOrderByProviderPaymentID(ctx, "platega", uuid.MustParse("550e8400-e29b-41d4-a716-446655440302"))
 	require.ErrorIs(t, err, ErrOrderNotFound)
-}
-
-func TestUpdateOrderProviderPaymentID_OnlyPendingOrders(t *testing.T) {
-	t.Parallel()
-
-	svc := newTestService(t)
-	ctx := context.Background()
-	sub := createTestSubscription(t, svc, 993002, "provider-update", "provider-update-client")
-	plan := &Plan{Name: "provider-update-plan", IsActive: true}
-	require.NoError(t, svc.db.Create(plan).Error)
-	product := &Product{PlanID: plan.ID, Name: "Provider update", DurationDays: 30, PriceCents: 200, Currency: "RUB", IsActive: true}
-	require.NoError(t, svc.db.Create(product).Error)
-
-	pending := &Order{SubscriptionID: sub.ID, ProductID: product.ID, Status: OrderStatusPending, AmountCents: 200, Currency: "RUB", PaymentProvider: "platega", CreatedAt: time.Now().UTC()}
-	require.NoError(t, svc.CreateOrder(ctx, pending))
-	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440303")
-	require.NoError(t, svc.UpdateOrderProviderPaymentID(ctx, pending.ID, providerID))
-	stored, err := svc.GetOrderByID(ctx, pending.ID)
-	require.NoError(t, err)
-	assert.Equal(t, providerID.String(), stored.ProviderPaymentID)
-
-	paid := &Order{SubscriptionID: sub.ID, ProductID: product.ID, Status: OrderStatusPaid, AmountCents: 200, Currency: "RUB", PaymentProvider: "platega", CreatedAt: time.Now().UTC()}
-	require.NoError(t, svc.CreateOrder(ctx, paid))
-	err = svc.UpdateOrderProviderPaymentID(ctx, paid.ID, uuid.MustParse("550e8400-e29b-41d4-a716-446655440304"))
-	require.ErrorIs(t, err, ErrOrderNotFound)
-	stored, err = svc.GetOrderByID(ctx, paid.ID)
-	require.NoError(t, err)
-	assert.Empty(t, stored.ProviderPaymentID, "a completed order must not receive a new provider ID")
 }
 
 func TestPaymentCreationUncertainty_IsClaimedAndClearedOnce(t *testing.T) {
@@ -84,7 +56,7 @@ func TestPaymentCreationUncertainty_IsClaimedAndClearedOnce(t *testing.T) {
 	product := &Product{PlanID: plan.ID, Name: "Uncertain payment", DurationDays: 30, PriceCents: 300, Currency: "RUB", IsActive: true}
 	require.NoError(t, svc.db.Create(product).Error)
 	order := &Order{SubscriptionID: sub.ID, ProductID: product.ID, Status: OrderStatusPending, AmountCents: 300, Currency: "RUB", PaymentProvider: "platega", CreatedAt: time.Now().UTC()}
-	require.NoError(t, svc.CreateOrder(ctx, order))
+	require.NoError(t, svc.db.WithContext(ctx).Create(order).Error)
 
 	claimed, err := svc.MarkPaymentCreationUncertain(ctx, order.ID, true)
 	require.NoError(t, err)
@@ -116,7 +88,7 @@ func TestSavePaymentDetails_StoresDetailsOnlyForPendingOrder(t *testing.T) {
 	product := &Product{PlanID: plan.ID, Name: "Save payment", DurationDays: 30, PriceCents: 400, Currency: "RUB", IsActive: true}
 	require.NoError(t, svc.db.Create(product).Error)
 	order := &Order{SubscriptionID: sub.ID, ProductID: product.ID, Status: OrderStatusPending, AmountCents: 400, Currency: "RUB", PaymentProvider: "platega", PaymentCreationUncertain: true, CreatedAt: time.Now().UTC()}
-	require.NoError(t, svc.CreateOrder(ctx, order))
+	require.NoError(t, svc.db.WithContext(ctx).Create(order).Error)
 
 	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440305")
 	expiresAt := time.Now().UTC().Add(15 * time.Minute).Truncate(time.Second)
@@ -131,7 +103,7 @@ func TestSavePaymentDetails_StoresDetailsOnlyForPendingOrder(t *testing.T) {
 	assert.False(t, stored.PaymentCreationUncertain)
 
 	paid := &Order{SubscriptionID: sub.ID, ProductID: product.ID, Status: OrderStatusPaid, AmountCents: 400, Currency: "RUB", PaymentProvider: "platega", CreatedAt: time.Now().UTC()}
-	require.NoError(t, svc.CreateOrder(ctx, paid))
+	require.NoError(t, svc.db.WithContext(ctx).Create(paid).Error)
 	err = svc.SavePaymentDetails(ctx, paid.ID, uuid.MustParse("550e8400-e29b-41d4-a716-446655440306"), "https://pay.example/paid", expiresAt)
 	require.ErrorIs(t, err, ErrOrderNotFound)
 }
@@ -148,7 +120,7 @@ func TestCancelOrderCAS_IsIdempotentAndHonorsAllowedStatuses(t *testing.T) {
 	require.NoError(t, svc.db.Create(product).Error)
 	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440307")
 	order := &Order{SubscriptionID: sub.ID, ProductID: product.ID, Status: OrderStatusPending, AmountCents: 500, Currency: "RUB", PaymentProvider: "platega", ProviderPaymentID: providerID.String(), CreatedAt: time.Now().UTC()}
-	require.NoError(t, svc.CreateOrder(ctx, order))
+	require.NoError(t, svc.db.WithContext(ctx).Create(order).Error)
 
 	changed, err := svc.CancelOrderCAS(ctx, "platega", providerID, []OrderStatus{OrderStatusPending})
 	require.NoError(t, err)
@@ -163,7 +135,7 @@ func TestCancelOrderCAS_IsIdempotentAndHonorsAllowedStatuses(t *testing.T) {
 
 	paidID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440308")
 	paid := &Order{SubscriptionID: sub.ID, ProductID: product.ID, Status: OrderStatusPaid, AmountCents: 500, Currency: "RUB", PaymentProvider: "platega", ProviderPaymentID: paidID.String(), CreatedAt: time.Now().UTC()}
-	require.NoError(t, svc.CreateOrder(ctx, paid))
+	require.NoError(t, svc.db.WithContext(ctx).Create(paid).Error)
 	changed, err = svc.CancelOrderCAS(ctx, "platega", paidID, []OrderStatus{OrderStatusPending})
 	require.NoError(t, err)
 	assert.False(t, changed, "paid order must not be canceled by a pending-only transition")
@@ -191,8 +163,8 @@ func TestCancelPaidOrderAndDowngradeCAS_IgnoresExpiredPaidOrders(t *testing.T) {
 	expired := now.Add(-time.Hour)
 	chargebackOrder := &Order{SubscriptionID: sub.ID, ProductID: product.ID, Status: OrderStatusPaid, AmountCents: 100, Currency: "RUB", PaymentProvider: "platega", ProviderPaymentID: providerID.String(), ExpiresAt: ptrTime(now.Add(time.Hour)), CreatedAt: now.Add(-2 * time.Hour)}
 	historical := &Order{SubscriptionID: sub.ID, ProductID: product.ID, Status: OrderStatusPaid, AmountCents: 100, Currency: "RUB", PaymentProvider: "platega", ProviderPaymentID: "550e8400-e29b-41d4-a716-446655440398", ExpiresAt: &expired, CreatedAt: now.Add(-48 * time.Hour)}
-	require.NoError(t, svc.CreateOrder(ctx, chargebackOrder))
-	require.NoError(t, svc.CreateOrder(ctx, historical))
+	require.NoError(t, svc.db.WithContext(ctx).Create(chargebackOrder).Error)
+	require.NoError(t, svc.db.WithContext(ctx).Create(historical).Error)
 
 	result, err := svc.CancelPaidOrderAndDowngradeCAS(ctx, "platega", providerID, now, freePlan.ID, nil)
 	require.NoError(t, err)
@@ -222,7 +194,7 @@ func TestCancelPaidOrderAndDowngradeCAS_RollsBackOnPlanApplyFailure(t *testing.T
 	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440395")
 	now := time.Now().UTC()
 	order := &Order{SubscriptionID: sub.ID, ProductID: product.ID, Status: OrderStatusPaid, AmountCents: 100, Currency: "RUB", PaymentProvider: "platega", ProviderPaymentID: providerID.String(), ExpiresAt: ptrTime(now.Add(time.Hour)), CreatedAt: now}
-	require.NoError(t, svc.CreateOrder(ctx, order))
+	require.NoError(t, svc.db.WithContext(ctx).Create(order).Error)
 
 	wantErr := errors.New("sync setup failed")
 	_, err = svc.CancelPaidOrderAndDowngradeCAS(ctx, "platega", providerID, now, freePlan.ID, func(context.Context, *gorm.DB, uint, uint) error {
@@ -255,7 +227,7 @@ func TestCancelPaidOrderAndDowngradeCAS_DoesNotReactivateRevokedSubscription(t *
 	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440394")
 	now := time.Now().UTC()
 	order := &Order{SubscriptionID: sub.ID, ProductID: product.ID, Status: OrderStatusPaid, AmountCents: 100, Currency: "RUB", PaymentProvider: "platega", ProviderPaymentID: providerID.String(), ExpiresAt: ptrTime(now.Add(time.Hour)), CreatedAt: now}
-	require.NoError(t, svc.CreateOrder(ctx, order))
+	require.NoError(t, svc.db.WithContext(ctx).Create(order).Error)
 
 	result, err := svc.CancelPaidOrderAndDowngradeCAS(ctx, "platega", providerID, now, freePlan.ID, nil)
 	require.NoError(t, err)
@@ -286,8 +258,8 @@ func TestCancelPaidOrderAndDowngradeCAS_PreservesActivePaidCoverage(t *testing.T
 	chargebackID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440397")
 	chargebackOrder := &Order{SubscriptionID: sub.ID, ProductID: product.ID, Status: OrderStatusPaid, AmountCents: 100, Currency: "RUB", PaymentProvider: "platega", ProviderPaymentID: chargebackID.String(), ExpiresAt: ptrTime(now.Add(time.Hour)), CreatedAt: now.Add(-2 * time.Hour)}
 	activeOther := &Order{SubscriptionID: sub.ID, ProductID: product.ID, Status: OrderStatusPaid, AmountCents: 100, Currency: "RUB", PaymentProvider: "platega", ProviderPaymentID: "550e8400-e29b-41d4-a716-446655440396", ExpiresAt: ptrTime(now.Add(2 * time.Hour)), CreatedAt: now.Add(-time.Hour)}
-	require.NoError(t, svc.CreateOrder(ctx, chargebackOrder))
-	require.NoError(t, svc.CreateOrder(ctx, activeOther))
+	require.NoError(t, svc.db.WithContext(ctx).Create(chargebackOrder).Error)
+	require.NoError(t, svc.db.WithContext(ctx).Create(activeOther).Error)
 
 	result, err := svc.CancelPaidOrderAndDowngradeCAS(ctx, "platega", chargebackID, now, freePlan.ID, nil)
 	require.NoError(t, err)

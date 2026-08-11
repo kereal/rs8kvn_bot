@@ -169,7 +169,6 @@ type PlanRepository interface {
 
 // ProductRepository provides product listing, lookup, and guarded update operations.
 type ProductRepository interface {
-	GetActiveByPlanID(ctx context.Context, planID uint) ([]database.Product, error)
 	ListActiveProducts(ctx context.Context) ([]database.Product, error)
 	GetProductByID(ctx context.Context, id uint) (*database.Product, error)
 	UpdateProductGuarded(ctx context.Context, product *database.Product) error
@@ -177,16 +176,9 @@ type ProductRepository interface {
 
 // OrderRepository provides order lifecycle and payment-intent operations.
 type OrderRepository interface {
-	CreateOrder(ctx context.Context, order *database.Order) error
 	GetOrderByID(ctx context.Context, id uint) (*database.Order, error)
-	GetOrdersBySubscriptionID(ctx context.Context, subscriptionID uint) ([]database.Order, error)
 	GetOrderByProviderPaymentID(ctx context.Context, provider string, providerPaymentID uuid.UUID) (*database.Order, error)
-	UpdateOrderStatus(ctx context.Context, id uint, status database.OrderStatus) error
-	UpdateOrderPaidStatus(ctx context.Context, id uint) error
-	UpdateOrderActivatedAt(ctx context.Context, id uint, activatedAt, expiresAt time.Time) error
-	UpdateOrderProviderPaymentID(ctx context.Context, orderID uint, providerPaymentID uuid.UUID) error
 	FindPendingPaymentOrder(ctx context.Context, subscriptionID, productID uint, now time.Time) (*database.Order, error)
-	CreatePendingPaymentOrder(ctx context.Context, subscriptionID, productID uint, amountCents int64, currency string, now time.Time) (*database.Order, error)
 	FindOrCreatePendingPaymentOrder(ctx context.Context, subscriptionID, productID uint, amountCents int64, currency string, now time.Time) (*database.Order, error)
 	MarkPaymentCreationUncertain(ctx context.Context, orderID uint, uncertain bool) (bool, error)
 	SavePaymentDetails(ctx context.Context, orderID uint, providerPaymentID uuid.UUID, paymentURL string, paymentExpiresAt time.Time) error
