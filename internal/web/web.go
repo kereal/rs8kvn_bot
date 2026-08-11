@@ -432,7 +432,7 @@ func (s *Server) handlePaymentCallback(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if confirmation.Activated {
-			chatID, text, err := s.orderService.NotifyPaidUser(notifyCtx, confirmation.Order)
+			chatID, text, err := s.orderService.BuildPaidUserNotification(notifyCtx, confirmation.Order)
 			if err != nil {
 				logger.Warn("failed to build paid notification", zap.Error(err))
 				s.orderService.NotifyPaymentIssue(notifyCtx, service.PaymentIssue{Event: "paid_notification_build_failed", Reason: err.Error(), Action: "send the confirmed payment details to the user manually", OrderID: confirmation.Order.ID, SubscriptionID: confirmation.Order.SubscriptionID, ProductID: confirmation.Order.ProductID, PlanID: 0, AmountCents: confirmation.Order.AmountCents, Currency: confirmation.Order.Currency, ProviderID: payload.ID, CallbackStatus: payload.Status, Payload: payload.Payload, PaymentMethod: payload.PaymentMethod})
