@@ -18,6 +18,8 @@ import (
 	promtestutil "github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
 // fakePaymentProvider satisfies PaymentProvider for tests that never call CreateTransaction.
@@ -477,6 +479,218 @@ func TestConfirmPayment_ValidationAndDatabaseFailuresNotifyAdmin(t *testing.T) {
 			messages := adminBot.GetAllSentMessages()
 			require.Len(t, messages, 1)
 			assert.Contains(t, messages[0].Text, tt.wantEvent)
+		})
+	}
+}
+
+func TestConfirmPayment_NotifiesAdminOnActivation(t *testing.T) {
+	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440125")
+	sub := &database.Subscription{ID: 85, TelegramID: 55, Username: "alice", ExpiresAt: testutil.PtrTime(time.Now().Add(30 * 24 * time.Hour))}
+	product := &database.Product{ID: 66, PlanID: 2, Name: "Premium 1 месяц", PriceCents: 230000, Currency: "RUB"}
+	order := &database.Order{ID: 96, SubscriptionID: 85, ProductID: 66, Status: database.OrderStatusPending, AmountCents: 230000, Currency: "RUB", ProviderPaymentID: providerID.String()}
+	mock := &testutil.DatabaseService{
+		GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
+			return order, nil
+		},
+		GetProductByIDFunc: func(context.Context, uint) (*database.Product, error) {
+			return product, nil
+		},
+		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
+			return sub, nil
+		},
+		ConfirmOrderPaidCASFunc: func(context.Context, uint, time.Time, time.Time, *database.Subscription, *database.Product, database.ApplyPlanInTxFn) (bool, error) {
+			return true, nil
+		},
+	}
+	adminBot := testutil.NewBotAPI()
+	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), fakePaymentProvider{}, "", &config.Config{TelegramAdminID: 999})
+	o.SetAdminBot(adminBot)
+
+	confirmation, err := o.ConfirmPayment(context.Background(), providerID, json.Number("2300.00"), "RUB")
+	require.NoError(t, err)
+	require.True(t, confirmation.Activated)
+
+	messages := adminBot.GetAllSentMessages()
+	require.Len(t, messages, 1, "activated payment must produce exactly one admin notification")
+	msg := messages[0]
+	assert.Equal(t, int64(999), msg.ChatID)
+	assert.Contains(t, msg.Text, "Покупка подтверждена")
+	assert.NotContains(t, msg.Text, "Продление")
+	assert.Contains(t, msg.Text, "Premium 1 месяц")
+	assert.Contains(t, msg.Text, "2 300 ₽")
+	assert.Contains(t, msg.Text, "@alice")
+	assert.Contains(t, msg.Text, "t.me/alice")
+	assert.Contains(t, msg.Text, "Telegram ID: `55`")
+	assert.Contains(t, msg.Text, "Заказ: #96")
+
+	// The fake keeps the original Chattable; assert Markdown is used so the
+	// user link renders clickable in Telegram.
+	chattable := adminBot.LastChattableSafe()
+	msgConfig, ok := chattable.(tgbotapi.MessageConfig)
+	require.True(t, ok, "admin notification must be sent as a tgbotapi message config")
+	assert.Equal(t, "Markdown", msgConfig.ParseMode)
+}
+
+func TestConfirmPayment_NotifiesAdminOnRenewal(t *testing.T) {
+	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440130")
+	productID := uint(67)
+	sub := &database.Subscription{ID: 87, TelegramID: 56, Username: "bob", PlanID: 2, ProductID: &productID, PricePaidCents: 230000, ExpiresAt: testutil.PtrTime(time.Now().Add(10 * 24 * time.Hour))}
+	product := &database.Product{ID: 67, PlanID: 2, Name: "Premium 1 месяц", PriceCents: 230000, Currency: "RUB"}
+	order := &database.Order{ID: 97, SubscriptionID: 87, ProductID: 67, Status: database.OrderStatusPending, AmountCents: 230000, Currency: "RUB", ProviderPaymentID: providerID.String()}
+	mock := &testutil.DatabaseService{
+		GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
+			return order, nil
+		},
+		GetProductByIDFunc: func(context.Context, uint) (*database.Product, error) {
+			return product, nil
+		},
+		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
+			return sub, nil
+		},
+		ConfirmOrderPaidCASFunc: func(context.Context, uint, time.Time, time.Time, *database.Subscription, *database.Product, database.ApplyPlanInTxFn) (bool, error) {
+			return true, nil
+		},
+	}
+	adminBot := testutil.NewBotAPI()
+	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), fakePaymentProvider{}, "", &config.Config{TelegramAdminID: 999})
+	o.SetAdminBot(adminBot)
+
+	confirmation, err := o.ConfirmPayment(context.Background(), providerID, json.Number("2300.00"), "RUB")
+	require.NoError(t, err)
+	require.True(t, confirmation.Activated)
+
+	messages := adminBot.GetAllSentMessages()
+	require.Len(t, messages, 1, "renewed payment must produce exactly one admin notification")
+	msg := messages[0]
+	assert.Equal(t, int64(999), msg.ChatID)
+	assert.Contains(t, msg.Text, "Продление подтверждено")
+	assert.NotContains(t, msg.Text, "Покупка")
+	assert.Contains(t, msg.Text, "@bob")
+	assert.Contains(t, msg.Text, "Заказ: #97")
+}
+
+func TestFormatAdminChargebackAlert(t *testing.T) {
+	tests := []struct {
+		name       string
+		sub        *database.Subscription
+		order      *database.Order
+		product    *database.Product
+		downgraded bool
+		want       []string
+		notWant    []string
+	}{
+		{
+			name:       "downgraded to free",
+			sub:        &database.Subscription{ID: 90, TelegramID: 60, Username: "carol", PlanID: 99},
+			order:      &database.Order{ID: 102, SubscriptionID: 90, ProductID: 71, AmountCents: 690000, Currency: "RUB", ProviderPaymentID: "550e8400-e29b-41d4-a716-446655440131"},
+			product:    &database.Product{ID: 71, Name: "Premium 3 месяца", PriceCents: 690000, Currency: "RUB"},
+			downgraded: true,
+			want:       []string{"Chargeback по платежу", "Premium 3 месяца", "6 900 ₽", "@carol", "понижен до бесплатного"},
+			notWant:    []string{"сохранён"},
+		},
+		{
+			name:       "access preserved",
+			sub:        &database.Subscription{ID: 91, TelegramID: 61, Username: "dave"},
+			order:      &database.Order{ID: 103, SubscriptionID: 91, AmountCents: 2300, Currency: "RUB"},
+			downgraded: false,
+			want:       []string{"Chargeback по платежу", "23 ₽", "@dave", "сохранён"},
+			notWant:    []string{"понижен"},
+		},
+		{
+			name: "nil dependencies render placeholders",
+			sub:  nil, order: nil, product: nil,
+			downgraded: true,
+			want:       []string{"Chargeback по платежу", "Тариф: *—*"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			text := formatAdminChargebackAlert(tt.sub, tt.order, tt.product, tt.downgraded)
+			for _, want := range tt.want {
+				assert.Contains(t, text, want)
+			}
+			for _, nw := range tt.notWant {
+				assert.NotContains(t, text, nw)
+			}
+		})
+	}
+}
+
+func TestCancelPaymentByProvider_ChargebackNotifiesAdmin(t *testing.T) {
+	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440132")
+	tests := []struct {
+		name       string
+		downgraded bool
+		wantAccess string
+	}{
+		{name: "downgrades to free", downgraded: true, wantAccess: "понижен до бесплатного"},
+		{name: "preserves access with another paid order", downgraded: false, wantAccess: "сохранён"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			adminBot := testutil.NewBotAPI()
+			sub := &database.Subscription{ID: 92, TelegramID: 62, Username: "carol", PlanID: 99, Status: "active"}
+			product := &database.Product{ID: 72, PlanID: 99, Name: "Premium 3 месяца", PriceCents: 690000, Currency: "RUB", IsActive: true}
+			order := &database.Order{ID: 104, SubscriptionID: 92, ProductID: 72, Status: database.OrderStatusCanceled, AmountCents: 690000, Currency: "RUB", ProviderPaymentID: providerID.String()}
+			mock := &testutil.DatabaseService{
+				GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
+					return &database.Order{ID: 104, SubscriptionID: 92, ProductID: 72, Status: database.OrderStatusPaid, AmountCents: 690000, Currency: "RUB", ProviderPaymentID: providerID.String()}, nil
+				},
+				CancelPaidOrderAndDowngradeCASFunc: func(context.Context, string, uuid.UUID, time.Time, uint, database.ChargebackPlanInTxFn) (*database.ChargebackResult, error) {
+					return &database.ChargebackResult{Order: order, WasPaid: true, Transitioned: true, Downgraded: tt.downgraded, SubscriptionID: 92}, nil
+				},
+				GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
+					return sub, nil
+				},
+				GetProductByIDFunc: func(context.Context, uint) (*database.Product, error) {
+					return product, nil
+				},
+			}
+			o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), fakePaymentProvider{}, "", &config.Config{TelegramAdminID: 999})
+			o.SetAdminBot(adminBot)
+
+			_, wasPaid, err := o.CancelPaymentByProvider(context.Background(), providerID, "CHARGEBACKED", json.Number("6900.00"), "RUB")
+			require.NoError(t, err)
+			require.True(t, wasPaid)
+
+			messages := adminBot.GetAllSentMessages()
+			require.Len(t, messages, 2, "chargeback on a paid order must produce the issue alert and the buyer alert")
+			assert.Contains(t, messages[0].Text, "Chargeback requires manual review")
+			cb := messages[1]
+			assert.Equal(t, int64(999), cb.ChatID)
+			assert.Contains(t, cb.Text, "Chargeback по платежу")
+			assert.Contains(t, cb.Text, "Premium 3 месяца")
+			assert.Contains(t, cb.Text, "6 900 ₽")
+			assert.Contains(t, cb.Text, "@carol")
+			assert.Contains(t, cb.Text, tt.wantAccess)
+			assert.Contains(t, cb.Text, "Заказ: #104")
+
+			chattable := adminBot.LastChattableSafe()
+			msgConfig, ok := chattable.(tgbotapi.MessageConfig)
+			require.True(t, ok, "chargeback notification must be sent as a tgbotapi message config")
+			assert.Equal(t, "Markdown", msgConfig.ParseMode)
+		})
+	}
+}
+
+func TestFormatMoneyCents(t *testing.T) {
+	tests := []struct {
+		name        string
+		amountCents int64
+		currency    string
+		want        string
+	}{
+		{name: "whole rubles", amountCents: 230000, currency: "RUB", want: "2 300 ₽"},
+		{name: "fractional rubles", amountCents: 230050, currency: "RUB", want: "2 300,50 ₽"},
+		{name: "zero", amountCents: 0, currency: "RUB", want: "0 ₽"},
+		{name: "non RUB currency", amountCents: 100000, currency: "USD", want: "1 000 USD"},
+		{name: "small amount", amountCents: 2300, currency: "RUB", want: "23 ₽"},
+		{name: "empty currency", amountCents: 100, currency: "", want: "1"},
+		{name: "negative", amountCents: -2300, currency: "RUB", want: "-23 ₽"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, formatMoneyCents(tt.amountCents, tt.currency))
 		})
 	}
 }
