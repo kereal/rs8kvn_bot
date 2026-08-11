@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
 
 	"github.com/kereal/rs8kvn_bot/internal/logger"
@@ -83,8 +84,21 @@ func runMigrations(sqlDB *sql.DB) error {
 		return fmt.Errorf("failed to create migration instance: %w", err)
 	}
 
-	// Get current version before migration
-	versionBefore, dirtyBefore, _ := m.Version()
+	maxEmbeddedVersion, err := latestEmbeddedMigrationVersion()
+	if err != nil {
+		return fmt.Errorf("failed to determine latest embedded migration: %w", err)
+	}
+
+	// Get current version before migration. A database newer than the embedded
+	// source is not safe to auto-repair: Force() changes bookkeeping only and
+	// cannot recreate an absent migration's schema changes.
+	versionBefore, dirtyBefore, versionErr := m.Version()
+	if versionErr != nil && !errors.Is(versionErr, migrate.ErrNilVersion) {
+		return fmt.Errorf("failed to read migration version: %w", versionErr)
+	}
+	if versionBefore > uint(maxEmbeddedVersion) {
+		return fmt.Errorf("database migration version %d is newer than the latest embedded migration %d; restore the missing migration files or perform a reviewed schema recovery before starting", versionBefore, maxEmbeddedVersion)
+	}
 
 	if dirtyBefore {
 		currentVer, err := migrationVersionToInt(versionBefore)
@@ -97,22 +111,12 @@ func runMigrations(sqlDB *sql.DB) error {
 			return fmt.Errorf("failed to force migration version: %w", err)
 		}
 	}
-
 	if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
 		if strings.Contains(err.Error(), "file does not exist") || strings.Contains(err.Error(), "read down for version") {
-			currentVer, versionErr := migrationVersionToInt(versionBefore)
-			if versionErr != nil {
-				return fmt.Errorf("invalid migration version after failure: %w", versionErr)
-			}
-			forceVer := currentVer - 1
-			logger.Warn("Missing migration file detected, forcing version to last known good state",
-				zap.Int("forced_version", forceVer))
-			if forceErr := m.Force(forceVer); forceErr != nil {
-				return fmt.Errorf("migration failed: %w; additionally failed to force version: %w", err, forceErr)
-			}
-			logger.Info("Database version forced due to missing migration files",
-				zap.Int("forced_version", forceVer))
-			return nil
+			// Never repair a missing migration by changing only schema_migrations.
+			// Force() cannot recreate the SQL/schema changes and would make a
+			// potentially incompatible database look healthy on the next start.
+			return fmt.Errorf("migration failed: %w; database references a missing migration; restore the exact migration files or perform a reviewed schema recovery", err)
 		}
 		return fmt.Errorf("migration failed: %w", err)
 	}
@@ -129,6 +133,34 @@ func runMigrations(sqlDB *sql.DB) error {
 	}
 
 	return nil
+}
+
+func latestEmbeddedMigrationVersion() (int, error) {
+	entries, err := migrationFiles.ReadDir("migrations")
+	if err != nil {
+		return 0, fmt.Errorf("read embedded migrations: %w", err)
+	}
+	maxVersion := -1
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".up.sql") {
+			continue
+		}
+		separator := strings.IndexByte(entry.Name(), '_')
+		if separator <= 0 {
+			continue
+		}
+		version, parseErr := strconv.Atoi(entry.Name()[:separator])
+		if parseErr != nil || version < 0 {
+			continue
+		}
+		if version > maxVersion {
+			maxVersion = version
+		}
+	}
+	if maxVersion < 0 {
+		return 0, errors.New("no embedded up migrations found")
+	}
+	return maxVersion, nil
 }
 
 // migrationVersionToInt converts the migrate library's unsigned version to int
