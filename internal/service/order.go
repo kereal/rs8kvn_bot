@@ -18,6 +18,7 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/logger"
 	"github.com/kereal/rs8kvn_bot/internal/metrics"
 	"github.com/kereal/rs8kvn_bot/internal/service/payment/platega"
+	"github.com/kereal/rs8kvn_bot/internal/utils"
 	"gorm.io/gorm"
 
 	"go.uber.org/zap"
@@ -241,6 +242,155 @@ func (o *OrderService) notifyAdmin(ctx context.Context, text string) {
 	if _, err := o.adminBot.Send(tgbotapi.NewMessage(o.cfg.TelegramAdminID, text)); err != nil {
 		logger.Warn("failed to notify admin about payment event", zap.Error(err))
 	}
+}
+
+// notifyAdminPaid sends a best-effort Markdown notification about a confirmed
+// payment to the configured administrator: purchase/renewal marker, tariff,
+// amount, buyer link and order context. A delivery failure never fails the
+// payment flow and is only logged.
+func (o *OrderService) notifyAdminPaid(ctx context.Context, sub *database.Subscription, order *database.Order, product *database.Product, isRenewal bool) {
+	if o.adminBot == nil || o.cfg == nil || o.cfg.TelegramAdminID <= 0 {
+		return
+	}
+	msg := tgbotapi.NewMessage(o.cfg.TelegramAdminID, formatAdminPaidAlert(sub, order, product, isRenewal))
+	msg.ParseMode = "Markdown"
+	if _, err := o.adminBot.Send(msg); err != nil {
+		logger.Warn("failed to notify admin about confirmed payment",
+			zap.Uint("order_id", order.ID),
+			zap.Error(err))
+	}
+}
+
+// formatAdminPaidAlert renders the admin notification for a confirmed payment.
+// isRenewal distinguishes a renewal of an already-paid subscription from a
+// first purchase. The message uses Telegram Markdown, so user-controlled fields
+// (product name, username) are escaped; identifiers are safe numeric/alpha values.
+func formatAdminPaidAlert(sub *database.Subscription, order *database.Order, product *database.Product, isRenewal bool) string {
+	title := "🆕 *Покупка подтверждена*"
+	if isRenewal {
+		title = "🔄 *Продление подтверждено*"
+	}
+	productName := "—"
+	if product != nil && strings.TrimSpace(product.Name) != "" {
+		productName = utils.EscapeMarkdown(product.Name)
+	}
+	expiry := "—"
+	if sub != nil && sub.ExpiresAt != nil {
+		expiry = utils.FormatDateRu(*sub.ExpiresAt)
+	}
+	telegramID, subscriptionID, username := int64(0), uint(0), ""
+	if sub != nil {
+		telegramID, subscriptionID, username = sub.TelegramID, sub.ID, sub.Username
+	}
+	orderID, amountCents, currency, providerPaymentID := uint(0), int64(0), "", ""
+	if order != nil {
+		orderID, amountCents, currency, providerPaymentID = order.ID, order.AmountCents, order.Currency, order.ProviderPaymentID
+	}
+	return fmt.Sprintf(title+"\n\n"+
+		"💎 Тариф: *%s*\n"+
+		"💵 Сумма: *%s*\n"+
+		"👤 Покупатель: %s\n"+
+		"🆔 Telegram ID: `%d`\n"+
+		"🔖 Платёж: `%s`\n"+
+		"📋 Подписка: #%d\n"+
+		"🧾 Заказ: #%d\n"+
+		"📅 Действует до: %s",
+		productName,
+		formatMoneyCents(amountCents, currency),
+		utils.FormatUserLink(username, telegramID),
+		telegramID,
+		providerPaymentID,
+		subscriptionID,
+		orderID,
+		expiry)
+}
+
+// notifyAdminChargeback sends a best-effort Markdown notification about a
+// provider chargeback on a paid order: tariff, amount, buyer link and whether
+// the subscription was downgraded to the free plan. Delivery failure is logged
+// and never affects the callback result.
+func (o *OrderService) notifyAdminChargeback(ctx context.Context, sub *database.Subscription, order *database.Order, product *database.Product, downgraded bool) {
+	if o.adminBot == nil || o.cfg == nil || o.cfg.TelegramAdminID <= 0 {
+		return
+	}
+	msg := tgbotapi.NewMessage(o.cfg.TelegramAdminID, formatAdminChargebackAlert(sub, order, product, downgraded))
+	msg.ParseMode = "Markdown"
+	if _, err := o.adminBot.Send(msg); err != nil {
+		logger.Warn("failed to notify admin about chargeback",
+			zap.Uint("order_id", order.ID),
+			zap.Error(err))
+	}
+}
+
+// formatAdminChargebackAlert renders the admin notification for a chargeback on
+// a paid order. The message uses Telegram Markdown, so user-controlled fields
+// (product name, username) are escaped.
+func formatAdminChargebackAlert(sub *database.Subscription, order *database.Order, product *database.Product, downgraded bool) string {
+	productName := "—"
+	if product != nil && strings.TrimSpace(product.Name) != "" {
+		productName = utils.EscapeMarkdown(product.Name)
+	}
+	telegramID, subscriptionID, username := int64(0), uint(0), ""
+	if sub != nil {
+		telegramID, subscriptionID, username = sub.TelegramID, sub.ID, sub.Username
+	}
+	orderID, amountCents, currency, providerPaymentID := uint(0), int64(0), "", ""
+	if order != nil {
+		orderID, amountCents, currency, providerPaymentID = order.ID, order.AmountCents, order.Currency, order.ProviderPaymentID
+	}
+	access := "⬇️ Доступ: *понижен до бесплатного*"
+	if !downgraded {
+		access = "ℹ️ Доступ: *сохранён* (есть другой оплаченный заказ)"
+	}
+	return fmt.Sprintf("🚫 *Chargeback по платежу*\n\n"+
+		"💎 Тариф: *%s*\n"+
+		"💵 Сумма: *%s*\n"+
+		"👤 Покупатель: %s\n"+
+		"🆔 Telegram ID: `%d`\n"+
+		"🔖 Платёж: `%s`\n"+
+		"📋 Подписка: #%d\n"+
+		"🧾 Заказ: #%d\n"+
+		"%s",
+		productName,
+		formatMoneyCents(amountCents, currency),
+		utils.FormatUserLink(username, telegramID),
+		telegramID,
+		providerPaymentID,
+		subscriptionID,
+		orderID,
+		access)
+}
+
+// formatMoneyCents renders an amount in cents as a readable value with a
+// thousands separator and currency symbol/code. Whole amounts drop the
+// fractional part ("2 300 ₽"); fractional amounts keep two digits ("2 300,50 ₽").
+func formatMoneyCents(amountCents int64, currency string) string {
+	negative := amountCents < 0
+	if negative {
+		amountCents = -amountCents
+	}
+	value := fmt.Sprintf("%d", amountCents/100)
+	// Insert a space as the thousands separator (Russian locale convention).
+	grouped := ""
+	for i := 0; i < len(value); i++ {
+		if i > 0 && (len(value)-i)%3 == 0 {
+			grouped += " "
+		}
+		grouped += string(value[i])
+	}
+	if kopeks := amountCents % 100; kopeks != 0 {
+		grouped += fmt.Sprintf(",%02d", kopeks)
+	}
+	if negative {
+		grouped = "-" + grouped
+	}
+	if strings.EqualFold(currency, "RUB") {
+		return grouped + " ₽"
+	}
+	if symbol := strings.ToUpper(strings.TrimSpace(currency)); symbol != "" {
+		return grouped + " " + symbol
+	}
+	return grouped
 }
 
 // RequestPayment validates the current product and plan, reuses a valid pending
@@ -570,6 +720,9 @@ func (o *OrderService) confirmPayment(ctx context.Context, providerPaymentID uui
 		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "load_order_subscription_failed", Reason: err.Error(), Action: "retry callback after database recovery", OrderID: order.ID, ProductID: order.ProductID, SubscriptionID: order.SubscriptionID, AmountCents: order.AmountCents, Currency: order.Currency, ProviderID: providerPaymentID.String(), CallbackStatus: "CONFIRMED"})
 		return nil, fmt.Errorf("get ordered subscription: %w", err)
 	}
+	// A renewal extends an already-paid subscription; a first purchase activates
+	// a free-plan one. Captured before CAS mutates sub in place.
+	isRenewal := sub.PricePaidCents > 0 || sub.ProductID != nil
 	now := time.Now().UTC()
 	var applyPlan database.ApplyPlanInTxFn
 	if o.syncSvc != nil {
@@ -596,6 +749,9 @@ func (o *OrderService) confirmPayment(ctx context.Context, providerPaymentID uui
 	// best-effort and may take up to paymentSyncTimeout.
 	o.paymentMu.Unlock()
 	paymentLocked = false
+	if activated {
+		o.notifyAdminPaid(ctx, sub, order, product, isRenewal)
+	}
 	if activated && o.syncSvc != nil {
 		syncCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), paymentSyncTimeout)
 		defer cancel()
@@ -697,16 +853,27 @@ func (o *OrderService) CancelPaymentByProvider(ctx context.Context, providerPaym
 		}
 		order = result.Order
 		wasPaid = result.WasPaid
+		var chargebackSub *database.Subscription
+		var chargebackProduct *database.Product
 		if wasPaid {
 			recordPaymentAmount("chargeback", order.AmountCents, order.Currency)
 			telegramID := int64(0)
 			if loaded, subErr := o.db.GetByID(ctx, order.SubscriptionID); subErr == nil && loaded != nil {
 				telegramID = loaded.TelegramID
+				chargebackSub = loaded
+			}
+			if order.ProductID != 0 {
+				if loaded, pErr := o.db.GetProductByID(ctx, order.ProductID); pErr == nil && loaded != nil {
+					chargebackProduct = loaded
+				}
 			}
 			o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "chargeback", Reason: "provider reported CHARGEBACKED", Action: "verify the refund; a paid order is downgraded to free automatically", OrderID: order.ID, TelegramID: telegramID, ProductID: order.ProductID, SubscriptionID: order.SubscriptionID, AmountCents: order.AmountCents, Currency: order.Currency, ProviderID: providerPaymentID.String(), CallbackStatus: status})
 		}
 		o.paymentMu.Unlock()
 		paymentLocked = false
+		if wasPaid {
+			o.notifyAdminChargeback(ctx, chargebackSub, order, chargebackProduct, result.Downgraded)
+		}
 		if result.Downgraded {
 			o.syncChargebackAfterCommit(ctx, order.SubscriptionID)
 		}
@@ -726,13 +893,6 @@ func (o *OrderService) CancelPaymentByProvider(ctx context.Context, providerPaym
 	if err != nil {
 		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "load_canceled_order_failed", Reason: err.Error(), Action: "retry callback after database recovery", ProviderID: providerPaymentID.String(), CallbackStatus: status})
 		return nil, false, fmt.Errorf("load canceled order: %w", err)
-	}
-	if isChargeback {
-		telegramID := int64(0)
-		if loaded, subErr := o.db.GetByID(ctx, order.SubscriptionID); subErr == nil && loaded != nil {
-			telegramID = loaded.TelegramID
-		}
-		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "chargeback", Reason: "provider reported CHARGEBACKED", Action: "verify the refund; a paid order is downgraded to free automatically", OrderID: order.ID, TelegramID: telegramID, ProductID: order.ProductID, SubscriptionID: order.SubscriptionID, AmountCents: order.AmountCents, Currency: order.Currency, ProviderID: providerPaymentID.String(), CallbackStatus: status})
 	}
 	o.paymentMu.Unlock()
 	paymentLocked = false
