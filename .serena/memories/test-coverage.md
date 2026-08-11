@@ -62,6 +62,7 @@
 - MockDatabaseService.UpdateIPs не проверяет UpdateIPsFunc — verify через side effect на subFull
 - http.Header канонизирует ключи — "profile-title" → "Profile-Title"
 - orders имеет partial UNIQUE index на (payment_provider, provider_payment_id) WHERE provider_payment_id IS NOT NULL
+- (2026-08-11) Тесты `GetActiveByPlanID`, `CreateOrder`, `GetOrdersBySubscriptionID` удалены вместе с мёртвыми методами (см. orders-table.md)
 
 ## Добавленные тесты (2026-07-17, метрики)
 - `internal/metrics/metrics_test.go` — проверка инициализации всех метрик, smoke-test endpoint `/metrics`
