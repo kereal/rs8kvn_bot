@@ -357,6 +357,17 @@ var (
 		[]string{"operation"},
 	)
 
+	// PaymentAmountCentsTotal counts monetary amounts in cents by business
+	// outcome and currency. Operation values: confirmed, chargeback.
+	// Currency is expected to be a small ISO 4217-like set (for example, RUB).
+	PaymentAmountCentsTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "payment_amount_cents_total",
+			Help: "Total payment amounts in cents by outcome and currency",
+		},
+		[]string{"operation", "currency"},
+	)
+
 	// PaymentIssuesTotal counts operational payment issues by stable event name.
 	// Event names are defined by the payment integration and never contain IDs.
 	PaymentIssuesTotal = promauto.NewCounterVec(

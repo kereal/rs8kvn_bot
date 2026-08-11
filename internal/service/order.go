@@ -131,6 +131,17 @@ func paymentMethodLogValue(method *int) string {
 	return fmt.Sprintf("%d", *method)
 }
 
+// recordPaymentAmount adds a successful monetary transition to the Prometheus
+// counter. Currency is normalized because it is a low-cardinality label, while
+// invalid or non-positive amounts are ignored rather than corrupting a counter.
+func recordPaymentAmount(operation string, amountCents int64, currency string) {
+	currency = strings.ToUpper(strings.TrimSpace(currency))
+	if operation == "" || amountCents <= 0 || currency == "" {
+		return
+	}
+	metrics.PaymentAmountCentsTotal.WithLabelValues(operation, currency).Add(float64(amountCents))
+}
+
 // formatPaymentIssue renders a Telegram-safe operational alert. Provider-controlled
 // fields are truncated both individually and as a whole to stay below Telegram's
 // message limit while preserving valid UTF-8.
@@ -471,6 +482,9 @@ func (o *OrderService) ConfirmPayment(ctx context.Context, providerPaymentID uui
 	}
 	metrics.PaymentOperationsTotal.WithLabelValues("confirm", result).Inc()
 	metrics.PaymentOperationDuration.WithLabelValues("confirm").Observe(time.Since(start).Seconds())
+	if err == nil && confirmation != nil && confirmation.Activated && confirmation.Order != nil {
+		recordPaymentAmount("confirmed", confirmation.Order.AmountCents, confirmation.Order.Currency)
+	}
 	return confirmation, err
 }
 
@@ -687,6 +701,7 @@ func (o *OrderService) CancelPaymentByProvider(ctx context.Context, providerPaym
 		order = result.Order
 		wasPaid = result.WasPaid
 		if wasPaid {
+			recordPaymentAmount("chargeback", order.AmountCents, order.Currency)
 			telegramID := int64(0)
 			if loaded, subErr := o.db.GetByID(ctx, order.SubscriptionID); subErr == nil && loaded != nil {
 				telegramID = loaded.TelegramID
