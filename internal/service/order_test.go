@@ -46,11 +46,10 @@ func (fakePaymentProvider) CreateTransaction(context.Context, platega.CreateTran
 
 func atomicChargebackResult(orderID, subscriptionID uint, wasPaid, downgraded bool) (*database.ChargebackResult, error) {
 	return &database.ChargebackResult{
-		Order:          &database.Order{ID: orderID, SubscriptionID: subscriptionID, Status: database.OrderStatusCanceled, AmountCents: 2300, Currency: "RUB"},
-		WasPaid:        wasPaid,
-		Transitioned:   true,
-		Downgraded:     downgraded,
-		SubscriptionID: subscriptionID,
+		Order:        &database.Order{ID: orderID, SubscriptionID: subscriptionID, Status: database.OrderStatusCanceled, AmountCents: 2300, Currency: "RUB"},
+		WasPaid:      wasPaid,
+		Transitioned: true,
+		Downgraded:   downgraded,
 	}, nil
 }
 
@@ -636,9 +635,9 @@ func TestCancelPaymentByProvider_ChargebackNotifiesAdmin(t *testing.T) {
 				GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
 					return &database.Order{ID: 104, SubscriptionID: 92, ProductID: 72, Status: database.OrderStatusPaid, AmountCents: 690000, Currency: "RUB", ProviderPaymentID: providerID.String()}, nil
 				},
-				CancelPaidOrderAndDowngradeCASFunc: func(context.Context, string, uuid.UUID, time.Time, uint, database.ChargebackPlanInTxFn) (*database.ChargebackResult, error) {
-					return &database.ChargebackResult{Order: order, WasPaid: true, Transitioned: true, Downgraded: tt.downgraded, SubscriptionID: 92}, nil
-				},
+			CancelPaidOrderAndDowngradeCASFunc: func(context.Context, string, uuid.UUID, time.Time, uint, database.ChargebackPlanInTxFn) (*database.ChargebackResult, error) {
+				return &database.ChargebackResult{Order: order, WasPaid: true, Transitioned: true, Downgraded: tt.downgraded}, nil
+			},
 				GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
 					return sub, nil
 				},
@@ -654,9 +653,8 @@ func TestCancelPaymentByProvider_ChargebackNotifiesAdmin(t *testing.T) {
 			require.True(t, wasPaid)
 
 			messages := adminBot.GetAllSentMessages()
-			require.Len(t, messages, 2, "chargeback on a paid order must produce the issue alert and the buyer alert")
-			assert.Contains(t, messages[0].Text, "Chargeback requires manual review")
-			cb := messages[1]
+			require.Len(t, messages, 1, "chargeback on a paid order must produce a single buyer alert")
+			cb := messages[0]
 			assert.Equal(t, int64(999), cb.ChatID)
 			assert.Contains(t, cb.Text, "Chargeback по платежу")
 			assert.Contains(t, cb.Text, "Premium 3 месяца")
@@ -664,6 +662,7 @@ func TestCancelPaymentByProvider_ChargebackNotifiesAdmin(t *testing.T) {
 			assert.Contains(t, cb.Text, "@carol")
 			assert.Contains(t, cb.Text, tt.wantAccess)
 			assert.Contains(t, cb.Text, "Заказ: #104")
+			assert.NotContains(t, cb.Text, "manual review", "deduplicated chargeback path must not reuse the integration-issue header")
 
 			chattable := adminBot.LastChattableSafe()
 			msgConfig, ok := chattable.(tgbotapi.MessageConfig)

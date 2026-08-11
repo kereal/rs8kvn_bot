@@ -142,13 +142,14 @@ type Product struct {
 }
 
 // ChargebackResult describes the atomic order/subscription transition performed
-// for a provider chargeback callback.
+// for a provider chargeback callback. Result.SubscriptionID is intentionally
+// absent: callers read it off result.Order.SubscriptionID to avoid a second
+// repository lookup.
 type ChargebackResult struct {
-	Order          *Order
-	WasPaid        bool
-	Transitioned   bool
-	Downgraded     bool
-	SubscriptionID uint
+	Order        *Order
+	WasPaid      bool
+	Transitioned bool
+	Downgraded   bool
 }
 
 // Order represents a recorded purchase event for a subscription.

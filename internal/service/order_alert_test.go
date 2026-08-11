@@ -20,7 +20,7 @@ func TestFormatPaymentIssue_TruncatesUntrustedFields(t *testing.T) {
 	assert.Contains(t, message, "[truncated]")
 }
 
-func TestNotifyPaidUser_MissingSubscriptionServiceReturnsError(t *testing.T) {
+func TestBuildPaidUserNotification_MissingSubscriptionServiceReturnsError(t *testing.T) {
 	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440211")
 	db := &testutil.DatabaseService{
 		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
@@ -29,7 +29,7 @@ func TestNotifyPaidUser_MissingSubscriptionServiceReturnsError(t *testing.T) {
 	}
 	o := NewOrderService(db, nil, nil, fakePaymentProvider{}, "", &config.Config{})
 
-	_, _, err := o.NotifyPaidUser(context.Background(), &database.Order{ID: 1, SubscriptionID: 1, ProviderPaymentID: providerID.String()})
+	_, _, err := o.BuildPaidUserNotification(context.Background(), &database.Order{ID: 1, SubscriptionID: 1, ProviderPaymentID: providerID.String()})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "subscription service is not configured")
 }
