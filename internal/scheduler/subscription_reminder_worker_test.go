@@ -153,22 +153,8 @@ func (f *fakeRepo) GetSubscriptionStatus(ctx context.Context, subscriptionID str
 func (f *fakeRepo) UpdateDevices(ctx context.Context, id uint, devicesJSON string) error { return nil }
 func (f *fakeRepo) UpdateIPs(ctx context.Context, id uint, ipsJSON string) error         { return nil }
 func (f *fakeRepo) UpdateLastRequest(ctx context.Context, subscriptionID string) error   { return nil }
-func (f *fakeRepo) GetActiveByPlanID(ctx context.Context, planID uint) ([]database.Product, error) {
-	return nil, nil
-}
-func (f *fakeRepo) CreateOrder(ctx context.Context, order *database.Order) error { return nil }
 func (f *fakeRepo) GetOrderByID(ctx context.Context, id uint) (*database.Order, error) {
 	return nil, nil
-}
-func (f *fakeRepo) GetOrdersBySubscriptionID(ctx context.Context, subscriptionID uint) ([]database.Order, error) {
-	return nil, nil
-}
-func (f *fakeRepo) UpdateOrderStatus(ctx context.Context, id uint, status database.OrderStatus) error {
-	return nil
-}
-func (f *fakeRepo) UpdateOrderPaidStatus(ctx context.Context, id uint) error { return nil }
-func (f *fakeRepo) UpdateOrderActivatedAt(ctx context.Context, id uint, activatedAt, expiresAt time.Time) error {
-	return nil
 }
 func (f *fakeRepo) GetOrCreateInvite(ctx context.Context, referrerTGID int64, code string) (*database.Invite, error) {
 	return nil, nil
