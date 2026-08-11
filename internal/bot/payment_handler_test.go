@@ -290,14 +290,19 @@ func TestHandleBuyProduct_SuccessShowsPaymentButton(t *testing.T) {
 	require.NoError(t, err)
 	messages := bot.GetAllSentMessages()
 	require.Len(t, messages, 1)
-	assert.Contains(t, messages[0].Text, "Тариф: Месяц")
-	assert.Contains(t, messages[0].Text, "199.00 ₽")
+	assert.Contains(t, messages[0].Text, "💎 *Тариф: Месяц*")
+	assert.Contains(t, messages[0].Text, "Стоимость: *199₽*")
+	assert.Contains(t, messages[0].Text, "После оплаты тариф активируется автоматически.")
+	assert.Contains(t, messages[0].Text, "Если тариф уже активен, новые дни прибавятся к текущему сроку.")
+	assert.Contains(t, messages[0].Text, "_Платёжная система может дополнительно взимать комиссию._")
 
 	edit, ok := bot.LastChattableSafe().(tgbotapi.EditMessageTextConfig)
 	require.True(t, ok, "expected an edited message with a payment keyboard")
+	require.Equal(t, "Markdown", edit.ParseMode)
 	require.NotNil(t, edit.ReplyMarkup, "payment screen must carry the BuyProductConfirm keyboard")
 	require.NotEmpty(t, edit.ReplyMarkup.InlineKeyboard)
 	urlButton := edit.ReplyMarkup.InlineKeyboard[0][0]
 	require.NotNil(t, urlButton.URL, "payment button must carry the provider URL")
 	assert.Equal(t, "https://pay.example", *urlButton.URL, "payment button must link to the provider URL")
+	assert.Equal(t, "💳 Оплатить 199₽", urlButton.Text)
 }

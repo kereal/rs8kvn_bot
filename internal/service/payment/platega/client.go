@@ -1,3 +1,4 @@
+// Package platega implements the Platega transaction API and callback contract.
 package platega
 
 import (
@@ -10,10 +11,15 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/kereal/rs8kvn_bot/internal/logger"
+	"go.uber.org/zap"
 )
 
 const defaultBaseURL = "https://app.platega.io"
 
+// Sentinel errors classify provider responses so callers can distinguish
+// rejected requests from authentication and transport/provider failures.
 var (
 	ErrAuth       = errors.New("platega: authentication failed")
 	ErrBadRequest = errors.New("platega: bad request")
@@ -28,7 +34,8 @@ type Config struct {
 	HTTPClient *http.Client
 }
 
-// Client creates transactions through the Platega API.
+// Client creates transactions through the Platega API using the configured
+// HTTP client and merchant credentials.
 type Client struct {
 	cfg Config
 }
@@ -73,7 +80,8 @@ type CreateTransactionResponse struct {
 	ExpiresIn     string `json:"expiresIn"`
 }
 
-// ParseExpiresIn parses Platega's HH:MM:SS payment-link lifetime.
+// ParseExpiresIn parses Platega's positive HH:MM:SS payment-link lifetime
+// into a Go duration used for the local payment deadline.
 func ParseExpiresIn(raw string) (time.Duration, error) {
 	value := strings.TrimSpace(raw)
 	if value == "" {
@@ -101,6 +109,8 @@ func New(cfg Config) *Client {
 }
 
 // CreateTransaction creates a payment link without selecting a payment method.
+// The response is validated for a UUID v4 transaction ID, a usable URL, and a
+// positive expiresIn value before it is returned to the order service.
 func (c *Client) CreateTransaction(ctx context.Context, req CreateTransactionRequest) (*CreateTransactionResponse, error) {
 	if req.AmountCents <= 0 {
 		return nil, errors.New("amount must be positive")
@@ -126,15 +136,34 @@ func (c *Client) CreateTransaction(ctx context.Context, req CreateTransactionReq
 	if err != nil {
 		return nil, fmt.Errorf("create transaction request: %w", err)
 	}
-	httpReq.Header.Set("X-MerchantId", c.cfg.MerchantID)
+	httpReq.Header.Set("X-Merchantid", c.cfg.MerchantID)
 	httpReq.Header.Set("X-Secret", c.cfg.Secret)
 	httpReq.Header.Set("Content-Type", "application/json")
 
+	requestStarted := time.Now()
 	resp, err := c.cfg.HTTPClient.Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("%w: send transaction request: %v", ErrProvider, err)
+		if logger.Log != nil {
+			logger.Info("Payment provider request failed",
+				zap.String("provider", "platega"),
+				zap.String("operation", "create_transaction"),
+				zap.Int("status_code", 0),
+				zap.Duration("duration", time.Since(requestStarted)),
+			)
+		}
+		return nil, fmt.Errorf("%w: send transaction request: %w", ErrProvider, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
+	defer func() {
+		if logger.Log != nil {
+			logger.Info("Payment provider response processed",
+				zap.String("provider", "platega"),
+				zap.String("operation", "create_transaction"),
+				zap.Int("status_code", resp.StatusCode),
+				zap.Duration("duration", time.Since(requestStarted)),
+			)
+		}
+	}()
 
 	limited := io.LimitReader(resp.Body, 1<<20)
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
@@ -151,20 +180,20 @@ func (c *Client) CreateTransaction(ctx context.Context, req CreateTransactionReq
 
 	var result CreateTransactionResponse
 	if err := json.NewDecoder(limited).Decode(&result); err != nil {
-		return nil, fmt.Errorf("%w: decode transaction response: %v", ErrProvider, err)
+		return nil, fmt.Errorf("%w: decode transaction response: %w", ErrProvider, err)
 	}
 	transactionID := strings.TrimSpace(result.TransactionID)
 	if transactionID == "" {
 		return nil, fmt.Errorf("%w: response has no transactionId", ErrProvider)
 	}
 	if _, err := ParseTransactionID(transactionID); err != nil {
-		return nil, fmt.Errorf("%w: response transactionId must be UUID v4: %v", ErrProvider, err)
+		return nil, fmt.Errorf("%w: response transactionId must be UUID v4: %w", ErrProvider, err)
 	}
 	if strings.TrimSpace(result.URL) == "" && strings.TrimSpace(result.Redirect) == "" {
 		return nil, fmt.Errorf("%w: response has no payment URL", ErrProvider)
 	}
 	if _, err := ParseExpiresIn(result.ExpiresIn); err != nil {
-		return nil, fmt.Errorf("%w: invalid expiresIn: %v", ErrProvider, err)
+		return nil, fmt.Errorf("%w: invalid expiresIn: %w", ErrProvider, err)
 	}
 	return &result, nil
 }

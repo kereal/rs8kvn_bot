@@ -346,7 +346,10 @@ func (sh *SubscriptionHandler) handleCreateError(ctx context.Context, chatID int
 }
 
 // handleBuyPremiumList renders the product list for the payment flow.
-func (sh *SubscriptionHandler) handleBuyPremiumList(ctx context.Context, chatID int64, _ string, messageID int) error {
+func (sh *SubscriptionHandler) handleBuyPremiumList(ctx context.Context, chatID int64, username string, messageID int) error {
+	logger.Info("Payment menu opened",
+		zap.Int64("chat_id", chatID),
+		zap.String("username", username))
 	if sh.h.orderService == nil || !sh.h.paymentEnabled {
 		return sh.showBuyError(chatID, messageID, "❌ Платежи временно недоступны")
 	}
@@ -382,6 +385,13 @@ func (sh *SubscriptionHandler) handleBuyProduct(ctx context.Context, chatID int6
 	if product == nil || !product.IsActive || product.PriceCents <= 0 {
 		return sh.showBuyError(chatID, messageID, "❌ Тариф недоступен")
 	}
+	logger.Info("Payment purchase requested",
+		zap.Int64("chat_id", chatID),
+		zap.String("username", username),
+		zap.Uint("product_id", productID),
+		zap.String("product_name", product.Name),
+		zap.Int64("amount_cents", product.PriceCents),
+		zap.String("currency", product.Currency))
 	info, _, err := sh.h.orderService.RequestPayment(ctx, chatID, username, product)
 	if err != nil {
 		switch {
@@ -398,9 +408,10 @@ func (sh *SubscriptionHandler) handleBuyProduct(ctx context.Context, chatID int6
 			zap.Error(err))
 		return sh.showBuyError(chatID, messageID, msg(MsgSubTempError))
 	}
-	text := fmt.Sprintf("Тариф: %s\nСтоимость: %.2f ₽\n\nПосле оплаты бот пришлёт данные подписки.",
-		product.Name, float64(product.PriceCents)/100)
+	text := fmt.Sprintf("💎 *Тариф: %s*\n\nСтоимость: *%d₽*\n\nПосле оплаты тариф активируется автоматически.\nЕсли тариф уже активен, новые дни прибавятся к текущему сроку.\n\n_Платёжная система может дополнительно взимать комиссию._",
+		utils.EscapeMarkdown(product.Name), product.PriceCents/100)
 	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, text)
+	editMsg.ParseMode = "Markdown"
 	keyboard := sh.h.keyboards.BuyProductConfirm(product, info.URL)
 	editMsg.ReplyMarkup = &keyboard
 	sh.h.safeSend(editMsg)
