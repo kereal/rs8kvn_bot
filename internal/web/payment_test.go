@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -83,6 +84,33 @@ func TestHandlePaymentCallback_InvalidJSON(t *testing.T) {
 
 	srv.handlePaymentCallback(rec, req)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+func TestHandlePaymentCallback_AcceptsUnknownProviderFields(t *testing.T) {
+	t.Parallel()
+
+	srv, _, _ := newPaymentTestServer(t, nil)
+	req := httptest.NewRequest(http.MethodPost, "/payment/callback", strings.NewReader(`{"id":"550e8400-e29b-41d4-a716-446655440111","amount":23.00,"currency":"RUB","status":"PENDING","providerExtra":"kept-in-raw-debug-payload"}`))
+	req.Header.Set("X-Merchantid", "merchant")
+	req.Header.Set("X-Secret", "secret")
+	rec := httptest.NewRecorder()
+
+	srv.handlePaymentCallback(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Body.String(), `"ok":true`)
+}
+
+func TestHandlePaymentCallback_UnauthorizedDoesNotReadBody(t *testing.T) {
+	t.Parallel()
+
+	srv, _, _ := newPaymentTestServer(t, nil)
+	body := &trackingReader{Reader: strings.NewReader(`{"id":"550e8400-e29b-41d4-a716-446655440111","amount":23.00}`)}
+	req := httptest.NewRequest(http.MethodPost, "/payment/callback", body)
+	rec := httptest.NewRecorder()
+
+	srv.handlePaymentCallback(rec, req)
+	require.Equal(t, http.StatusUnauthorized, rec.Code)
+	assert.False(t, body.ReadCalled, "unauthorized callbacks must be rejected before reading/logging the body")
 }
 
 func TestHandlePaymentCallback_InvalidUUIDNotifiesAdmin(t *testing.T) {
@@ -495,6 +523,16 @@ func newPaymentTestServer(t *testing.T, order *database.Order) (*Server, *testut
 	srv.SetPaymentConfig(&PaymentConfig{Enabled: true, MerchantID: "merchant", Secret: "secret"})
 	srv.SetPaymentReady(true)
 	return srv, db, bot
+}
+
+type trackingReader struct {
+	io.Reader
+	ReadCalled bool
+}
+
+func (r *trackingReader) Read(p []byte) (int, error) {
+	r.ReadCalled = true
+	return r.Reader.Read(p)
 }
 
 type testPaymentProvider struct{}
