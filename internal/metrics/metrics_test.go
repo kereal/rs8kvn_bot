@@ -84,6 +84,7 @@ func TestNewMetricsInitialized(t *testing.T) {
 	require.NotNil(t, SubserverCacheMissDuration)
 	require.NotNil(t, PaymentOperationsTotal)
 	require.NotNil(t, PaymentOperationDuration)
+	require.NotNil(t, PaymentAmountCentsTotal)
 	require.NotNil(t, PaymentIssuesTotal)
 }
 
