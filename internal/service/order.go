@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -57,8 +58,32 @@ type OrderService struct {
 	botUsername string
 	cfg         *config.Config
 	adminBot    interfaces.BotAPI
-	paymentMu   sync.Mutex
+
+	// paymentLocksMu guards paymentLocks. paymentLocks and the per-lock
+	// channels together give each in-flight order (provider payment UUID)
+	// its own serialization point, so concurrent webhook callbacks for
+	// different orders do NOT block each other.
+	paymentLocksMu sync.Mutex
+	paymentLocks   map[uuid.UUID]*paymentLock
+	// paymentLockTimeout caps how long a single goroutine may wait to acquire
+	// a per-order lock. It uses the caller's context deadline if shorter.
+	paymentLockTimeout time.Duration
 }
+
+// paymentLock is a capacity-1 token channel reused by every concurrent
+// caller operating on the same provider payment UUID. The holder owns the
+// token; pending waiters sit on the channel until the previous holder
+// returns it.
+type paymentLock struct {
+	ch      chan struct{}
+	waiters int
+}
+
+// paymentLockTimeoutDefault mirrors the SyncService per-subscription lock
+// default. A stuck holder cannot starve other goroutines on this order past
+// this ceiling; longer-held work (e.g. post-commit sync) happens AFTER the
+// caller releases the token.
+const paymentLockTimeoutDefault = 30 * time.Second
 
 // PaymentInfo contains payment details for an order.
 type PaymentInfo struct {
@@ -193,13 +218,80 @@ func truncatePaymentMessage(value string) string {
 // NewOrderService wires the order service dependencies explicitly.
 func NewOrderService(db interfaces.DatabaseService, subSvc *SubscriptionService, syncSvc *SyncService, payment PaymentProvider, botUsername string, cfg *config.Config) *OrderService {
 	return &OrderService{
-		db:          db,
-		subSvc:      subSvc,
-		syncSvc:     syncSvc,
-		payment:     payment,
-		botUsername: botUsername,
-		cfg:         cfg,
+		db:                db,
+		subSvc:            subSvc,
+		syncSvc:           syncSvc,
+		payment:           payment,
+		botUsername:       botUsername,
+		cfg:               cfg,
+		paymentLocks:      make(map[uuid.UUID]*paymentLock),
+		paymentLockTimeout: paymentLockTimeoutDefault,
 	}
+}
+
+// lockPayment acquires a per-order lock so only one webhook handler at a time
+// mutates state for a given provider payment UUID. The unlock function
+// returns the token to the channel and decrements the waiter count; the
+// map entry is reclaimed once no goroutine holds or waits for it.
+//
+// Acquisition is bounded by the shorter of the caller's context deadline
+// and paymentLockTimeout, so a stuck holder cannot starve others on the
+// same order indefinitely. Concurrent callbacks for DIFFERENT orders run
+// independently and never queue behind each other.
+func (o *OrderService) lockPayment(ctx context.Context, providerPaymentID uuid.UUID) (func(), error) {
+	o.paymentLocksMu.Lock()
+	l, ok := o.paymentLocks[providerPaymentID]
+	if !ok {
+		l = &paymentLock{ch: make(chan struct{}, 1)}
+		l.ch <- struct{}{} // initial token
+		o.paymentLocks[providerPaymentID] = l
+	}
+	l.waiters++
+	o.paymentLocksMu.Unlock()
+
+	timeout := o.paymentLockTimeout
+	if timeout <= 0 {
+		timeout = paymentLockTimeoutDefault
+	}
+	if dl, ok := ctx.Deadline(); ok {
+		if rem := time.Until(dl); rem > 0 && rem < timeout {
+			timeout = rem
+		}
+	}
+	acquireCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	select {
+	case <-l.ch:
+		var released atomic.Bool
+		return func() {
+			// Idempotent: callers explicitly release before best-effort post-commit
+			// sync, and the deferred release on return would otherwise block on the
+			// already-full token channel.
+			if !released.CompareAndSwap(false, true) {
+				return
+			}
+			l.ch <- struct{}{}
+			o.dropPaymentWaiter(l, providerPaymentID)
+		}, nil
+	case <-acquireCtx.Done():
+		// Never return the token here: the holder still owns it. Only undo our
+		// waiter accounting so the map entry can be reclaimed correctly.
+		o.dropPaymentWaiter(l, providerPaymentID)
+		return nil, fmt.Errorf("lock payment %s: %w", providerPaymentID, acquireCtx.Err())
+	}
+}
+
+// dropPaymentWaiter decrements the waiter count for a payment lock and
+// removes the map entry once no goroutine holds or waits for it. It must
+// NOT touch l.ch: only the actual holder returns the token on unlock.
+func (o *OrderService) dropPaymentWaiter(l *paymentLock, providerPaymentID uuid.UUID) {
+	o.paymentLocksMu.Lock()
+	l.waiters--
+	if l.waiters == 0 {
+		delete(o.paymentLocks, providerPaymentID)
+	}
+	o.paymentLocksMu.Unlock()
 }
 
 // SetSyncService wires post-commit VPN synchronization after startup.
@@ -639,13 +731,14 @@ func (o *OrderService) confirmPayment(ctx context.Context, providerPaymentID uui
 	if o.payment == nil {
 		return nil, ErrPaymentDisabled
 	}
-	o.paymentMu.Lock()
-	paymentLocked := true
-	defer func() {
-		if paymentLocked {
-			o.paymentMu.Unlock()
-		}
-	}()
+	// Per-order serialization: webhook callbacks for the same provider payment
+	// UUID run sequentially; callbacks for different orders run in parallel.
+	unlock, err := o.lockPayment(ctx, providerPaymentID)
+	if err != nil {
+		logger.Warn("could not acquire per-order payment lock", zap.String("provider_payment_id", providerPaymentID.String()), zap.Error(err))
+		return nil, fmt.Errorf("acquire payment lock: %w", err)
+	}
+	defer unlock()
 	if providerPaymentID == uuid.Nil {
 		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "invalid_provider_id", Reason: "provider payment UUID is nil", Action: "reject callback and inspect provider payload", CallbackStatus: "CONFIRMED"})
 		return nil, errors.New("invalid provider payment UUID")
@@ -736,11 +829,10 @@ func (o *OrderService) confirmPayment(ctx context.Context, providerPaymentID uui
 	if activated {
 		mirrorOrderFromSubscriptionAfterCAS(order, sub, now)
 	}
-	// The database transition and in-memory result are complete. Do not hold the
-	// process-wide payment lock while contacting VPN nodes; that external call is
-	// best-effort and may take up to paymentSyncTimeout.
-	o.paymentMu.Unlock()
-	paymentLocked = false
+	// The database transition and in-memory result are complete. Do not hold
+	// the per-order payment lock while contacting VPN nodes; that external
+	// call is best-effort and may take up to paymentSyncTimeout.
+	unlock()
 	if activated {
 		o.notifyAdminPaid(ctx, sub, order, product, isRenewal)
 	}
@@ -779,13 +871,14 @@ func (o *OrderService) CancelPaymentByProvider(ctx context.Context, providerPaym
 		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "invalid_provider_id", Reason: "provider payment UUID is nil", Action: "reject callback and inspect provider payload", CallbackStatus: status})
 		return nil, false, errors.New("invalid provider payment UUID")
 	}
-	o.paymentMu.Lock()
-	paymentLocked := true
-	defer func() {
-		if paymentLocked {
-			o.paymentMu.Unlock()
-		}
-	}()
+	// Per-order serialization: confirm/cancel of one provider payment cannot
+	// interleave with itself, but multiple distinct payments run in parallel.
+	unlock, err := o.lockPayment(ctx, providerPaymentID)
+	if err != nil {
+		logger.Warn("could not acquire per-order payment lock", zap.String("provider_payment_id", providerPaymentID.String()), zap.Error(err))
+		return nil, false, fmt.Errorf("acquire payment lock: %w", err)
+	}
+	defer unlock()
 
 	order, err = o.db.GetOrderByProviderPaymentID(ctx, "platega", providerPaymentID)
 	if err != nil {
@@ -853,8 +946,7 @@ func (o *OrderService) CancelPaymentByProvider(ctx context.Context, providerPaym
 			recordPaymentAmount("chargeback", order.AmountCents, order.Currency)
 			chargebackSub, chargebackProduct = o.loadChargebackAlertContext(ctx, order)
 		}
-		o.paymentMu.Unlock()
-		paymentLocked = false
+		unlock()
 		if wasPaid {
 			o.notifyAdminChargeback(ctx, chargebackSub, order, chargebackProduct, result.Downgraded)
 		}
@@ -877,8 +969,7 @@ func (o *OrderService) CancelPaymentByProvider(ctx context.Context, providerPaym
 	// to canceled. The only field changed in the DB is Status; mirror it in
 	// memory so downstream callers do not need a second SELECT.
 	order.Status = database.OrderStatusCanceled
-	o.paymentMu.Unlock()
-	paymentLocked = false
+	unlock()
 	return order, wasPaid, nil
 }
 
