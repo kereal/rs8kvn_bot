@@ -333,7 +333,8 @@ subscription_nodes
 ---
 Schema: `subscription_nodes(subscription_id, node_id, status, retry_count, retry_at, last_error, updated_at)`  
 Go model: `database.SubscriptionNode` + `SyncStatus` в `internal/database/models.go`  
-Migration: `internal/database/migrations/027_add_pending_update_sync_status.up.sql`
+Migration: `internal/database/migrations/027_add_pending_update_sync_status.up.sql`  
+Инвариант «retry_count > 0 ⇒ retry_at NOT NULL» enforced на уровне БД CHECK (миграция 032; 025 была no-op — SQLite не умеет ADD CHECK через ALTER TABLE).
 
 ## Жизненный цикл: pending_update
 
