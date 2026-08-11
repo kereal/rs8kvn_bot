@@ -302,7 +302,7 @@ func TestHandlePaymentCallback_ChargebackNotifiesAdmin(t *testing.T) {
 				return nil, err
 			}
 		}
-		return &database.ChargebackResult{Order: order, WasPaid: true, Transitioned: true, Downgraded: true, SubscriptionID: order.SubscriptionID}, nil
+		return &database.ChargebackResult{Order: order, WasPaid: true, Transitioned: true, Downgraded: true}, nil
 	}
 	db.GetNodesByPlanIDFunc = func(context.Context, uint) ([]database.Node, error) { return nil, nil }
 	db.UpdateSubscriptionFunc = func(_ context.Context, sub *database.Subscription) error {
@@ -319,12 +319,13 @@ func TestHandlePaymentCallback_ChargebackNotifiesAdmin(t *testing.T) {
 	assert.Equal(t, database.OrderStatusCanceled, order.Status)
 	assert.True(t, downgradeCalled, "chargeback on a paid order must downgrade access to free")
 	messages := bot.GetAllSentMessages()
-	require.Len(t, messages, 2, "chargeback must produce the issue alert and the buyer alert")
-	assert.Contains(t, messages[0].Text, "Chargeback requires manual review")
-	assert.Equal(t, int64(999), messages[1].ChatID)
-	assert.Contains(t, messages[1].Text, "Chargeback по платежу")
-	assert.Contains(t, messages[1].Text, "понижен до бесплатного")
-	assert.Contains(t, messages[1].Text, "Заказ: #5")
+	require.Len(t, messages, 1, "chargeback on a paid order must produce a single buyer alert")
+	alert := messages[0]
+	assert.Equal(t, int64(999), alert.ChatID)
+	assert.Contains(t, alert.Text, "Chargeback по платежу")
+	assert.Contains(t, alert.Text, "понижен до бесплатного")
+	assert.Contains(t, alert.Text, "Заказ: #5")
+	assert.NotContains(t, alert.Text, "manual review", "deduplicated chargeback path must not reuse the integration-issue header")
 }
 
 func TestHandlePaymentCallback_ConfirmedForDeletedSubscription(t *testing.T) {

@@ -198,18 +198,18 @@ func (s *Service) ConfirmOrderPaidCAS(ctx context.Context, orderID uint, paidAt,
 			return fmt.Errorf("load subscription for payment: %w", err)
 		}
 
+		newExpiry := CalculatePaymentExpiry(activatedAt, &currentSub, product)
 		result := tx.Model(&Order{}).Where("id = ? AND status = ?", orderID, OrderStatusPending).Updates(map[string]interface{}{
-			"status": OrderStatusPaid, "paid_at": paidAt, "activated_at": activatedAt,
+			"status":       OrderStatusPaid,
+			"paid_at":      paidAt,
+			"activated_at": activatedAt,
+			"expires_at":   newExpiry,
 		})
 		if result.Error != nil {
 			return fmt.Errorf("confirm order: %w", result.Error)
 		}
 		if result.RowsAffected == 0 {
 			return nil
-		}
-		newExpiry := CalculatePaymentExpiry(activatedAt, &currentSub, product)
-		if err := tx.Model(&Order{}).Where("id = ? AND status = ?", orderID, OrderStatusPaid).Update("expires_at", newExpiry).Error; err != nil {
-			return fmt.Errorf("update order expiry after payment: %w", err)
 		}
 		result = tx.Model(&Subscription{}).Where("id = ?", sub.ID).Updates(map[string]interface{}{
 			"plan_id": product.PlanID, "status": string(SubscriptionStatusActive),
@@ -280,7 +280,6 @@ func (s *Service) CancelPaidOrderAndDowngradeCAS(ctx context.Context, provider s
 		if query.Error != nil {
 			return fmt.Errorf("find chargeback order: %w", query.Error)
 		}
-		result.SubscriptionID = order.SubscriptionID
 
 		// Use the same subscription lock order as ConfirmOrderPaidCAS. The lock
 		// is acquired before changing this order or evaluating other paid orders,
