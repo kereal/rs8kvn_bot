@@ -10,6 +10,38 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestLatestEmbeddedMigrationVersion(t *testing.T) {
+	t.Parallel()
+
+	version, err := latestEmbeddedMigrationVersion()
+	require.NoError(t, err)
+	assert.Equal(t, 31, version)
+}
+
+func TestRunMigrationsRejectsDatabaseNewerThanEmbedded(t *testing.T) {
+	t.Parallel()
+
+	dbPath := filepath.Join(t.TempDir(), "newer-schema.db")
+	db, err := NewService(dbPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, db.Close()) })
+
+	sqlDB, err := db.db.DB()
+	require.NoError(t, err)
+	_, err = sqlDB.Exec("UPDATE schema_migrations SET version = ?, dirty = ?", 32, false)
+	require.NoError(t, err)
+
+	err = runMigrations(sqlDB)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "newer than the latest embedded migration 31")
+
+	var version int
+	var dirty bool
+	require.NoError(t, sqlDB.QueryRow("SELECT version, dirty FROM schema_migrations").Scan(&version, &dirty))
+	assert.Equal(t, 32, version)
+	assert.False(t, dirty)
+}
+
 func TestMigrationVersionToInt(t *testing.T) {
 	t.Parallel()
 
