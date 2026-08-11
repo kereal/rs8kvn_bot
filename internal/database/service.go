@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/kereal/rs8kvn_bot/internal/config"
@@ -40,6 +41,11 @@ func NewService(dbPath string) (*Service, error) {
 		return nil, fmt.Errorf("failed to create database directory: %w", err)
 	}
 
+	// SQLite serializes writers; keep transient contention from surfacing as
+	// random "database is locked" webhook failures during concurrent payment
+	// and expiry transitions. The busy timeout is part of the DSN so it applies
+	// to every pooled connection, not only the one used for this setup query.
+	dbPath = sqliteBusyTimeoutDSN(dbPath)
 	db, err := gorm.Open(gormsqlite.Open(dbPath), &gorm.Config{
 		PrepareStmt: false,
 		Logger:      gormlogger.New(log.New(io.Discard, "", 0), gormlogger.Config{SlowThreshold: 200 * time.Millisecond, LogLevel: gormlogger.Silent}),
@@ -96,6 +102,13 @@ func NewService(dbPath string) (*Service, error) {
 		logger.Info("Inserted default trial/free plans")
 	}
 	return &Service{db: db}, nil
+}
+
+func sqliteBusyTimeoutDSN(path string) string {
+	if strings.Contains(path, "?") {
+		return path + "&_busy_timeout=5000"
+	}
+	return path + "?_busy_timeout=5000"
 }
 
 // Close closes the database connection.

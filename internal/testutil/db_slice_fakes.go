@@ -3,6 +3,7 @@ package testutil
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
@@ -530,6 +531,7 @@ type OrderRepositoryFake struct {
 	UpdateOrderActivatedAtFunc          func(ctx context.Context, id uint, activatedAt, expiresAt time.Time) error
 	GetOrderByProviderPaymentIDFunc     func(ctx context.Context, provider string, providerPaymentID uuid.UUID) (*database.Order, error)
 	CancelOrderCASFunc                  func(ctx context.Context, provider string, providerPaymentID uuid.UUID, fromStatuses []database.OrderStatus) (bool, error)
+	CancelPaidOrderAndDowngradeCASFunc  func(ctx context.Context, provider string, providerPaymentID uuid.UUID, now time.Time, freePlanID uint, applyPlan database.ChargebackPlanInTxFn) (*database.ChargebackResult, error)
 }
 
 func NewOrderRepository() *OrderRepositoryFake { return &OrderRepositoryFake{} }
@@ -540,6 +542,13 @@ func (m *OrderRepositoryFake) GetOrderByProviderPaymentID(ctx context.Context, p
 	}
 	return nil, gorm.ErrRecordNotFound
 }
+func (m *OrderRepositoryFake) CancelPaidOrderAndDowngradeCAS(ctx context.Context, provider string, providerPaymentID uuid.UUID, now time.Time, freePlanID uint, applyPlan database.ChargebackPlanInTxFn) (*database.ChargebackResult, error) {
+	if m.CancelPaidOrderAndDowngradeCASFunc != nil {
+		return m.CancelPaidOrderAndDowngradeCASFunc(ctx, provider, providerPaymentID, now, freePlanID, applyPlan)
+	}
+	return nil, errors.New("mock atomic chargeback requires CancelPaidOrderAndDowngradeCASFunc")
+}
+
 func (m *OrderRepositoryFake) CancelOrderCAS(ctx context.Context, provider string, providerPaymentID uuid.UUID, fromStatuses []database.OrderStatus) (bool, error) {
 	if m.CancelOrderCASFunc != nil {
 		return m.CancelOrderCASFunc(ctx, provider, providerPaymentID, fromStatuses)

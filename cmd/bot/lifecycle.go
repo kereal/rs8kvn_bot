@@ -107,13 +107,16 @@ type appServices struct {
 	subServer    *subserver.Service
 	handler      *bot.Handler
 	orderService *service.OrderService
+	syncService  *service.SyncService
 }
 
 // initServices wires the subscription service, subserver, bot handler,
 // and cache invalidation composition.
 func initServices(cfg *config.Config, dbService *database.Service, deps *runtimeDeps, botAPI *tgbotapi.BotAPI, botConfig *bot.BotConfig) *appServices {
+	syncSvc := service.NewSyncService(dbService, deps.vpnClients, deps.nodes)
 	subService := service.NewSubscriptionService(dbService, deps.xuiClients, deps.vpnClients, deps.nodes, cfg)
 	subService.SetBot(botAPI)
+	subService.SetSyncService(syncSvc)
 	subServer := subserver.NewService(config.SubServerCacheTTL)
 	handler := bot.NewHandler(botAPI, cfg, dbService, botConfig, subService, getVersion())
 	botCache := handler.Cache()
@@ -125,9 +128,9 @@ func initServices(cfg *config.Config, dbService *database.Service, deps *runtime
 	if cfg.PaymentEnabled {
 		payment = platega.New(platega.Config{MerchantID: cfg.PlategaMerchantID, Secret: cfg.PlategaSecret})
 	}
-	orderService := service.NewOrderService(dbService, subService, nil, payment, "", cfg)
+	orderService := service.NewOrderService(dbService, subService, syncSvc, payment, "", cfg)
 	handler.SetOrderService(orderService)
-	return &appServices{subService: subService, subServer: subServer, handler: handler, orderService: orderService}
+	return &appServices{subService: subService, subServer: subServer, handler: handler, orderService: orderService, syncService: syncSvc}
 }
 
 // runEventLoop processes Telegram updates with bounded concurrency until

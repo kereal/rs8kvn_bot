@@ -141,6 +141,16 @@ type Product struct {
 	Orders []Order `gorm:"foreignKey:ProductID"`
 }
 
+// ChargebackResult describes the atomic order/subscription transition performed
+// for a provider chargeback callback.
+type ChargebackResult struct {
+	Order          *Order
+	WasPaid        bool
+	Transitioned   bool
+	Downgraded     bool
+	SubscriptionID uint
+}
+
 // Order represents a recorded purchase event for a subscription.
 // Statuses: pending | paid | expired | canceled.
 //
