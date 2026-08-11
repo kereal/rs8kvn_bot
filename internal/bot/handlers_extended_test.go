@@ -10,6 +10,7 @@ import (
 
 	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
+	"github.com/kereal/rs8kvn_bot/internal/utils"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/stretchr/testify/assert"
@@ -519,7 +520,7 @@ func TestFormatUserLink_NumericUsername(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got := formatUserLink(tt.username, tt.id)
+			got := utils.FormatUserLink(tt.username, tt.id)
 			assert.Equal(t, tt.want, got)
 
 		})
