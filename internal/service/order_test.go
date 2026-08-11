@@ -12,8 +12,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
+	"github.com/kereal/rs8kvn_bot/internal/metrics"
 	"github.com/kereal/rs8kvn_bot/internal/service/payment/platega"
 	"github.com/kereal/rs8kvn_bot/internal/testutil"
+	promtestutil "github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -378,9 +380,10 @@ func TestConfirmPayment_ActivatedCASWithNilExpiryDoesNotPanic(t *testing.T) {
 	// the CAS populated it. A CAS/fake that activates without setting
 	// sub.ExpiresAt must not panic and must leave order.ExpiresAt nil.
 	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440122")
+	beforeAmount := promtestutil.ToFloat64(metrics.PaymentAmountCentsTotal.WithLabelValues("confirmed", "METRIC"))
 	mock := &testutil.DatabaseService{
 		GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
-			return &database.Order{ID: 32, SubscriptionID: 42, ProductID: 52, Status: database.OrderStatusPending, AmountCents: 2300, Currency: "RUB"}, nil
+			return &database.Order{ID: 32, SubscriptionID: 42, ProductID: 52, Status: database.OrderStatusPending, AmountCents: 2300, Currency: "METRIC"}, nil
 		},
 		GetProductByIDFunc: func(_ context.Context, id uint) (*database.Product, error) {
 			return &database.Product{ID: id, PlanID: 62, DurationDays: 30, PriceCents: 2300, Currency: "RUB", IsActive: true}, nil
@@ -398,11 +401,13 @@ func TestConfirmPayment_ActivatedCASWithNilExpiryDoesNotPanic(t *testing.T) {
 	}
 	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), fakePaymentProvider{}, "", nil)
 
-	confirmation, err := o.ConfirmPayment(context.Background(), providerID, json.Number("23.00"), "RUB")
+	confirmation, err := o.ConfirmPayment(context.Background(), providerID, json.Number("23.00"), "METRIC")
 	require.NoError(t, err)
 	require.True(t, confirmation.Activated)
 	assert.Equal(t, database.OrderStatusPaid, confirmation.Order.Status)
 	assert.Nil(t, confirmation.Order.ExpiresAt, "expiry must stay nil when CAS leaves sub.ExpiresAt nil")
+	afterAmount := promtestutil.ToFloat64(metrics.PaymentAmountCentsTotal.WithLabelValues("confirmed", "METRIC"))
+	assert.Equal(t, float64(2300), afterAmount-beforeAmount)
 }
 
 func TestConfirmPayment_RequiresSyncServiceForPendingOrder(t *testing.T) {
@@ -523,6 +528,7 @@ func TestCancelPaymentByProvider_PaidChargebackReturnsWasPaid(t *testing.T) {
 	// The repository is consulted twice: before the CAS (current paid state) and
 	// after the CAS (reloaded canceled state). The wasPaid flag must be derived
 	// from the pre-transition state.
+	beforeAmount := promtestutil.ToFloat64(metrics.PaymentAmountCentsTotal.WithLabelValues("chargeback", "RUB"))
 	calls := 0
 	mock := &testutil.DatabaseService{
 		CancelOrderCASFunc: func(ctx context.Context, provider string, providerID uuid.UUID, from []database.OrderStatus) (bool, error) {
@@ -546,11 +552,14 @@ func TestCancelPaymentByProvider_PaidChargebackReturnsWasPaid(t *testing.T) {
 	require.NotNil(t, order)
 	assert.Equal(t, uint(7), order.ID)
 	assert.Equal(t, 1, calls, "atomic chargeback repository owns the transition and order reload")
+	afterAmount := promtestutil.ToFloat64(metrics.PaymentAmountCentsTotal.WithLabelValues("chargeback", "RUB"))
+	assert.Equal(t, float64(2300), afterAmount-beforeAmount)
 }
 
 func TestCancelPaymentByProvider_ChargebackOnPendingReportsNotPaid(t *testing.T) {
 	// A chargeback on an order that never reached paid must NOT report wasPaid:
 	// no money was collected yet, so nothing to refund.
+	beforeAmount := promtestutil.ToFloat64(metrics.PaymentAmountCentsTotal.WithLabelValues("chargeback", "RUB"))
 	calls := 0
 	mock := &testutil.DatabaseService{
 		CancelOrderCASFunc: func(ctx context.Context, provider string, providerID uuid.UUID, from []database.OrderStatus) (bool, error) {
@@ -571,6 +580,8 @@ func TestCancelPaymentByProvider_ChargebackOnPendingReportsNotPaid(t *testing.T)
 	assert.False(t, wasPaid, "pending order chargeback must not report wasPaid")
 	require.NotNil(t, order)
 	assert.Equal(t, uint(9), order.ID)
+	afterAmount := promtestutil.ToFloat64(metrics.PaymentAmountCentsTotal.WithLabelValues("chargeback", "RUB"))
+	assert.Equal(t, beforeAmount, afterAmount)
 }
 
 func TestCancelPaymentByProvider_RejectsUnknownStatus(t *testing.T) {
