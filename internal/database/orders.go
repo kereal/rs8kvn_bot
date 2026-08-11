@@ -13,14 +13,6 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-// CreateOrder inserts a new order record.
-func (s *Service) CreateOrder(ctx context.Context, order *Order) error {
-	if err := s.db.WithContext(ctx).Create(order).Error; err != nil {
-		return fmt.Errorf("failed to create order: %w", err)
-	}
-	return nil
-}
-
 // GetOrderByID retrieves an order by its ID.
 func (s *Service) GetOrderByID(ctx context.Context, id uint) (*Order, error) {
 	var order Order
@@ -46,18 +38,6 @@ func (s *Service) GetOrderByProviderPaymentID(ctx context.Context, provider stri
 		return nil, fmt.Errorf("failed to get order by provider payment id: %w", result.Error)
 	}
 	return &order, nil
-}
-
-// UpdateOrderProviderPaymentID stores an external ID only while the order is pending.
-func (s *Service) UpdateOrderProviderPaymentID(ctx context.Context, orderID uint, providerPaymentID uuid.UUID) error {
-	result := s.db.WithContext(ctx).Model(&Order{}).Where("id = ? AND status = ?", orderID, OrderStatusPending).Update("provider_payment_id", providerPaymentID.String())
-	if result.Error != nil {
-		return fmt.Errorf("failed to update provider payment id: %w", result.Error)
-	}
-	if result.RowsAffected == 0 {
-		return fmt.Errorf("order %d is not pending: %w", orderID, ErrOrderNotFound)
-	}
-	return nil
 }
 
 // FindPendingPaymentOrder returns the current pending payment intent. An
@@ -95,16 +75,6 @@ func (s *Service) FindPendingPaymentOrder(ctx context.Context, subscriptionID, p
 		return &current, nil
 	}
 	return &order, nil
-}
-
-// CreatePendingPaymentOrder creates a new Platega payment intent. The partial
-// unique index rejects concurrent duplicates; callers should reread the winner.
-func (s *Service) CreatePendingPaymentOrder(ctx context.Context, subscriptionID, productID uint, amountCents int64, currency string, now time.Time) (*Order, error) {
-	order := &Order{SubscriptionID: subscriptionID, ProductID: productID, Status: OrderStatusPending, AmountCents: amountCents, Currency: currency, PaymentProvider: "platega", CreatedAt: now}
-	if err := s.db.WithContext(ctx).Create(order).Error; err != nil {
-		return nil, fmt.Errorf("create pending payment order: %w", err)
-	}
-	return order, nil
 }
 
 // FindOrCreatePendingPaymentOrder returns the single pending payment intent for
@@ -424,47 +394,4 @@ func (s *Service) GetOrdersBySubscriptionID(ctx context.Context, subscriptionID 
 		return nil, fmt.Errorf("failed to list orders: %w", result.Error)
 	}
 	return orders, nil
-}
-
-// UpdateOrderStatus updates the status of an order by ID.
-func (s *Service) UpdateOrderStatus(ctx context.Context, id uint, status OrderStatus) error {
-	result := s.db.WithContext(ctx).Model(&Order{}).Where("id = ?", id).Update("status", status)
-	if result.Error != nil {
-		return fmt.Errorf("failed to update order status: %w", result.Error)
-	}
-	if result.RowsAffected == 0 {
-		return fmt.Errorf("order %d not found for status update: %w", id, ErrOrderNotFound)
-	}
-	return nil
-}
-
-// UpdateOrderPaidStatus sets the order as paid with a paid_at timestamp.
-func (s *Service) UpdateOrderPaidStatus(ctx context.Context, id uint) error {
-	now := time.Now().UTC().Truncate(time.Minute)
-	result := s.db.WithContext(ctx).Model(&Order{}).Where("id = ?", id).Updates(map[string]interface{}{
-		"status":  OrderStatusPaid,
-		"paid_at": now,
-	})
-	if result.Error != nil {
-		return fmt.Errorf("failed to update order paid status: %w", result.Error)
-	}
-	if result.RowsAffected == 0 {
-		return fmt.Errorf("order %d not found for paid status update: %w", id, ErrOrderNotFound)
-	}
-	return nil
-}
-
-// UpdateOrderActivatedAt sets activation and expiry timestamps for an order.
-func (s *Service) UpdateOrderActivatedAt(ctx context.Context, id uint, activatedAt, expiresAt time.Time) error {
-	result := s.db.WithContext(ctx).Model(&Order{}).Where("id = ?", id).Updates(map[string]interface{}{
-		"activated_at": activatedAt,
-		"expires_at":   expiresAt,
-	})
-	if result.Error != nil {
-		return fmt.Errorf("failed to update order activation: %w", result.Error)
-	}
-	if result.RowsAffected == 0 {
-		return fmt.Errorf("order %d not found for activation update: %w", id, ErrOrderNotFound)
-	}
-	return nil
 }

@@ -734,10 +734,6 @@ func TestCancelPaymentByProvider_ChargebackDowngradesPaidSubscription(t *testing
 		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
 			return sub, nil
 		},
-		GetOrdersBySubscriptionIDFunc: func(context.Context, uint) ([]database.Order, error) {
-			// Only the chargebacked order itself exists (now canceled).
-			return []database.Order{{ID: 96, SubscriptionID: 85, Status: database.OrderStatusCanceled}}, nil
-		},
 		GetNodesByPlanIDFunc: func(context.Context, uint) ([]database.Node, error) {
 			return nil, nil
 		},
@@ -776,13 +772,6 @@ func TestCancelPaymentByProvider_ChargebackKeepsAccessWithAnotherPaidOrder(t *te
 		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
 			return sub, nil
 		},
-		GetOrdersBySubscriptionIDFunc: func(context.Context, uint) ([]database.Order, error) {
-			// Another paid order for the same subscription is still legitimately active.
-			return []database.Order{
-				{ID: 97, SubscriptionID: 86, Status: database.OrderStatusCanceled},
-				{ID: 98, SubscriptionID: 86, Status: database.OrderStatusPaid},
-			}, nil
-		},
 		GetNodesByPlanIDFunc: func(context.Context, uint) ([]database.Node, error) {
 			return nil, nil
 		},
@@ -816,9 +805,6 @@ func TestCancelPaymentByProvider_ChargebackDowngradeFailureAlertsAdmin(t *testin
 		},
 		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
 			return sub, nil
-		},
-		GetOrdersBySubscriptionIDFunc: func(context.Context, uint) ([]database.Order, error) {
-			return []database.Order{{ID: 100, SubscriptionID: 88, Status: database.OrderStatusCanceled}}, nil
 		},
 		// Free-plan node load fails, so DowngradeToFreePlan errors out.
 		GetNodesByPlanIDFunc: func(context.Context, uint) ([]database.Node, error) {
@@ -859,9 +845,6 @@ func TestCancelPaymentByProvider_ChargebackDowngradeUsesSyncService(t *testing.T
 		},
 		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
 			return sub, nil
-		},
-		GetOrdersBySubscriptionIDFunc: func(context.Context, uint) ([]database.Order, error) {
-			return []database.Order{{ID: 101, SubscriptionID: 89, Status: database.OrderStatusCanceled}}, nil
 		},
 		UpdateSubscriptionFunc: func(_ context.Context, updated *database.Subscription) error {
 			updateCalled = true
@@ -907,7 +890,6 @@ func TestCancelPaymentByProvider_ChargebackDowngradeUsesSyncService(t *testing.T
 func TestCancelPaymentByProvider_ChargebackOnPendingDoesNotDowngrade(t *testing.T) {
 	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440126")
 	calls := 0
-	ordersQueried := false
 	mock := &testutil.DatabaseService{
 		GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
 			calls++
@@ -919,10 +901,6 @@ func TestCancelPaymentByProvider_ChargebackOnPendingDoesNotDowngrade(t *testing.
 		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
 			return &database.Subscription{ID: 87, TelegramID: 57, PlanID: 99}, nil
 		},
-		GetOrdersBySubscriptionIDFunc: func(context.Context, uint) ([]database.Order, error) {
-			ordersQueried = true
-			return nil, nil
-		},
 	}
 	subSvc := NewSubscriptionService(mock, nil, nil, nil, &config.Config{})
 	o := NewOrderService(mock, subSvc, NewSyncService(mock, nil, nil), fakePaymentProvider{}, "", nil)
@@ -930,5 +908,4 @@ func TestCancelPaymentByProvider_ChargebackOnPendingDoesNotDowngrade(t *testing.
 	_, wasPaid, err := o.CancelPaymentByProvider(context.Background(), providerID, "CHARGEBACKED", json.Number("23.00"), "RUB")
 	require.NoError(t, err)
 	require.False(t, wasPaid, "chargeback on pending order collected no money")
-	assert.False(t, ordersQueried, "no downgrade flow may run when wasPaid is false")
 }
