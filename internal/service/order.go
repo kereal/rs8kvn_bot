@@ -734,15 +734,7 @@ func (o *OrderService) confirmPayment(ctx context.Context, providerPaymentID uui
 		return nil, err
 	}
 	if activated {
-		// The CAS already populated sub.ExpiresAt from the current subscription
-		// state inside the transaction; mirror that value on the order snapshot.
-		// The nil guard keeps the service robust if a future CAS/fake stops
-		// mutating the caller-supplied subscription pointer.
-		if sub.ExpiresAt != nil {
-			newExpiry := *sub.ExpiresAt
-			order.ExpiresAt = &newExpiry
-		}
-		order.Status, order.PaidAt, order.ActivatedAt = database.OrderStatusPaid, &now, &now
+		mirrorOrderFromSubscriptionAfterCAS(order, sub, now)
 	}
 	// The database transition and in-memory result are complete. Do not hold the
 	// process-wide payment lock while contacting VPN nodes; that external call is
@@ -824,9 +816,9 @@ func (o *OrderService) CancelPaymentByProvider(ctx context.Context, providerPaym
 		return nil, false, ErrInvalidPaymentTransition
 	}
 	isChargeback := status == "CHARGEBACKED"
-	// wasPaid must reflect the order state BEFORE the transition: a chargeback on
-	// a pending order has collected no money yet and must not report wasPaid=true.
-	wasPaid = isChargeback && order.Status == database.OrderStatusPaid
+	// wasPaid is computed post-CAS from result.WasPaid (the BEFORE-transition
+	// state of the order). A chargeback on a still-pending order has not yet
+	// collected any money and reports wasPaid=false.
 	from := []database.OrderStatus{database.OrderStatusPending}
 	if isChargeback {
 		from = append(from, database.OrderStatusPaid)
@@ -853,21 +845,13 @@ func (o *OrderService) CancelPaymentByProvider(ctx context.Context, providerPaym
 		}
 		order = result.Order
 		wasPaid = result.WasPaid
-		var chargebackSub *database.Subscription
-		var chargebackProduct *database.Product
+		var (
+			chargebackSub     *database.Subscription
+			chargebackProduct *database.Product
+		)
 		if wasPaid {
 			recordPaymentAmount("chargeback", order.AmountCents, order.Currency)
-			telegramID := int64(0)
-			if loaded, subErr := o.db.GetByID(ctx, order.SubscriptionID); subErr == nil && loaded != nil {
-				telegramID = loaded.TelegramID
-				chargebackSub = loaded
-			}
-			if order.ProductID != 0 {
-				if loaded, pErr := o.db.GetProductByID(ctx, order.ProductID); pErr == nil && loaded != nil {
-					chargebackProduct = loaded
-				}
-			}
-			o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "chargeback", Reason: "provider reported CHARGEBACKED", Action: "verify the refund; a paid order is downgraded to free automatically", OrderID: order.ID, TelegramID: telegramID, ProductID: order.ProductID, SubscriptionID: order.SubscriptionID, AmountCents: order.AmountCents, Currency: order.Currency, ProviderID: providerPaymentID.String(), CallbackStatus: status})
+			chargebackSub, chargebackProduct = o.loadChargebackAlertContext(ctx, order)
 		}
 		o.paymentMu.Unlock()
 		paymentLocked = false
@@ -889,11 +873,10 @@ func (o *OrderService) CancelPaymentByProvider(ctx context.Context, providerPaym
 		logger.Warn("payment cancellation callback was a no-op", zap.String("provider_payment_id", providerPaymentID.String()), zap.String("status", status))
 		return nil, false, nil
 	}
-	order, err = o.db.GetOrderByProviderPaymentID(ctx, "platega", providerPaymentID)
-	if err != nil {
-		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "load_canceled_order_failed", Reason: err.Error(), Action: "retry callback after database recovery", ProviderID: providerPaymentID.String(), CallbackStatus: status})
-		return nil, false, fmt.Errorf("load canceled order: %w", err)
-	}
+	// CancelOrderCAS transitioned the row from one of the allowed "from" states
+	// to canceled. The only field changed in the DB is Status; mirror it in
+	// memory so downstream callers do not need a second SELECT.
+	order.Status = database.OrderStatusCanceled
 	o.paymentMu.Unlock()
 	paymentLocked = false
 	return order, wasPaid, nil
@@ -908,6 +891,50 @@ func (o *OrderService) chargebackPlanInTx() database.ChargebackPlanInTxFn {
 	}
 }
 
+// mirrorOrderFromSubscriptionAfterCAS keeps the order snapshot consistent with
+// the subscription state the CAS just wrote. The CAS itself only mutates the
+// caller-supplied subscription pointer; the order snapshot has to be updated
+// separately so downstream notification (admin paid alert, user confirmation,
+// subserver cache invalidation) reads a coherent picture.
+//
+// The nil guard on sub.ExpiresAt keeps the helper safe against fakes or future
+// CAS implementations that activate without setting an expiry (e.g. free plans
+// past paid activation).
+func mirrorOrderFromSubscriptionAfterCAS(order *database.Order, sub *database.Subscription, now time.Time) {
+	if sub != nil && sub.ExpiresAt != nil {
+		newExpiry := *sub.ExpiresAt
+		order.ExpiresAt = &newExpiry
+	}
+	order.Status = database.OrderStatusPaid
+	paidAt, activatedAt := now, now
+	order.PaidAt = &paidAt
+	order.ActivatedAt = &activatedAt
+}
+
+// loadChargebackAlertContext loads the subscription and product needed for the
+// admin chargeback alert. Each load is best-effort: a failure is logged via the
+// returned error context but never blocks the chargeback alert. Callers render
+// placeholders for any nil field, so alerts always go out.
+func (o *OrderService) loadChargebackAlertContext(ctx context.Context, order *database.Order) (*database.Subscription, *database.Product) {
+	var (
+		sub     *database.Subscription
+		product *database.Product
+	)
+	if loaded, subErr := o.db.GetByID(ctx, order.SubscriptionID); subErr == nil && loaded != nil {
+		sub = loaded
+	} else if subErr != nil {
+		logger.Debug("chargeback admin alert: subscription lookup failed", zap.Uint("order_id", order.ID), zap.Error(subErr))
+	}
+	if order.ProductID != 0 {
+		if loaded, pErr := o.db.GetProductByID(ctx, order.ProductID); pErr == nil && loaded != nil {
+			product = loaded
+		} else if pErr != nil {
+			logger.Debug("chargeback admin alert: product lookup failed", zap.Uint("order_id", order.ID), zap.Uint("product_id", order.ProductID), zap.Error(pErr))
+		}
+	}
+	return sub, product
+}
+
 func (o *OrderService) syncChargebackAfterCommit(ctx context.Context, subscriptionID uint) {
 	if o.syncSvc == nil {
 		return
@@ -919,10 +946,11 @@ func (o *OrderService) syncChargebackAfterCommit(ctx context.Context, subscripti
 	}
 }
 
-// NotifyPaidUser builds the same subscription presentation used by the bot screen.
-// It returns the target Telegram ID and message text; delivery is intentionally
-// left to the webhook layer so a send failure cannot roll back a paid order.
-func (o *OrderService) NotifyPaidUser(ctx context.Context, order *database.Order) (int64, string, error) {
+// BuildPaidUserNotification produces the subscription presentation used by the bot
+// "✅ Оплата подтверждена" screen. It returns the target Telegram ID and message
+// text; delivery is intentionally left to the webhook layer so a send failure
+// cannot roll back a paid order.
+func (o *OrderService) BuildPaidUserNotification(ctx context.Context, order *database.Order) (int64, string, error) {
 	if order == nil {
 		return 0, "", errors.New("order is nil")
 	}
