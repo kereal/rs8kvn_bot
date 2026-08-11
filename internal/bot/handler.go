@@ -4,7 +4,6 @@ package bot
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -348,25 +347,6 @@ func userFields(from *tgbotapi.User, chatID int64) []zap.Field {
 		}
 	}
 	return fields
-}
-
-// formatUserLink returns a Markdown-formatted clickable user link for Telegram.
-// For alphabetic usernames, links to https://t.me/username.
-// For purely numeric usernames (e.g. "11"), uses tg://user?id=ID deep link,
-// because Telegram does not resolve t.me/123 as a profile.
-// For empty/unsupported usernames, falls back to tg://user?id=TelegramID deep link
-// with "unknown" display text.
-func formatUserLink(username string, telegramID int64) string {
-	if utils.IsNumericUsername(username) && telegramID != 0 {
-		return fmt.Sprintf("[%s](tg://user?id=%d)", username, telegramID)
-	}
-	if utils.IsRealUsername(username) {
-		return fmt.Sprintf("[@%s](https://t.me/%s)", username, username)
-	}
-	if telegramID != 0 {
-		return fmt.Sprintf("[unknown](tg://user?id=%d)", telegramID)
-	}
-	return "[unknown](#)"
 }
 
 // formatUserDisplay returns a display string suitable for showing a user reference.
