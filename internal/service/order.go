@@ -204,9 +204,6 @@ func NewOrderService(db interfaces.DatabaseService, subSvc *SubscriptionService,
 // SetSyncService wires post-commit VPN synchronization after startup.
 func (o *OrderService) SetSyncService(syncSvc *SyncService) { o.syncSvc = syncSvc }
 
-// SetConfig wires URL presentation configuration used in user notifications.
-func (o *OrderService) SetConfig(cfg *config.Config) { o.cfg = cfg }
-
 // SetBotUsername sets the username used to build provider return and failure URLs.
 func (o *OrderService) SetBotUsername(username string) { o.botUsername = strings.TrimSpace(username) }
 
