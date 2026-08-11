@@ -1,6 +1,6 @@
 # Техническое задание: интеграция платёжной системы Platega.io
 
-Версия: 1.7 · Дата: 2026-08-11 · Статус: согласовано с текущей реализацией
+Версия: 1.10 · Дата: 2026-08-11 · Статус: согласовано с текущей реализацией
 
 
 ---
@@ -188,12 +188,6 @@ func (s *Service) GetOrderByProviderPaymentID(
     providerPaymentID uuid.UUID,
 ) (*Order, error)
 
-func (s *Service) UpdateOrderProviderPaymentID(
-    ctx context.Context,
-    orderID uint,
-    providerPaymentID uuid.UUID,
-) error
-
 func (s *Service) FindOrCreatePendingPaymentOrder(
     ctx context.Context,
     subscriptionID, productID uint,
@@ -228,7 +222,7 @@ func CalculatePaymentExpiry(
 ) time.Time
 ```
 
-`UpdateOrderProviderPaymentID` обновляет только pending-заказ.
+`SavePaymentDetails` — единственный путь записи provider ID, ссылки и `payment_expires_at`; он применяется только к pending-заказу. Legacy-методы `UpdateOrderStatus`, `UpdateOrderPaidStatus`, `UpdateOrderActivatedAt`, `UpdateOrderProviderPaymentID` удалены как мёртвый код (пошаговые переходы заменены атомарными CAS: `ConfirmOrderPaidCAS`, `CancelOrderCAS`).
 
 `FindOrCreatePendingPaymentOrder` обязан:
 
@@ -473,7 +467,9 @@ func (o *OrderService) ConfirmPayment(
    - paid → no-op;
    - canceled/expired → позднее подтверждение запрещено, Warn/audit-log.
 7. После commit выполнить `SyncSubscription` с отдельным timeout ≤20 секунд. Ошибка только логируется Warn и не превращает callback в 5xx.
-8. Только `Activated=true` имеет право вызвать success-уведомление.
+8. Только `Activated=true` имеет право вызвать success-уведомление:
+   - пользователю — `NotifyPaidUser` (веб-слой отправляет сообщение с деталями подписки);
+   - администратору — `notifyAdminPaid` (Markdown-сообщение в TelegramAdminID: тариф, сумма в читаемом виде, кликабельная ссылка на покупателя через `utils.FormatUserLink` — `t.me/username` или `tg://user?id=…`, Telegram ID, provider transaction ID, ID подписки/заказа, срок действия до). Заголовок различает покупку и продление: `🆕 Покупка подтверждена` для подписки без оплаченного состояния до активации (`PricePaidCents == 0` и `ProductID == nil` до CAS), `🔄 Продление подтверждено` для уже оплаченной. Отправка best-effort: при недоставке только Warn-лог, платёжный флоу не ломается.
 
 Допустимые переходы:
 
@@ -608,6 +604,7 @@ func (o *OrderService) NotifyPaidUser(
 - CHARGEBACKED на paid-заказе автоматически даунгрейдит подписку до free-плана (при отсутствии другого paid-заказа);
 - unknown status и unknown provider ID → 200 + Warn;
 - late expired callback → 200 без активации и админское уведомление с order/user/payment details;
+- успешная оплата (Activated=true) → ровно одно админское уведомление с тарифом, суммой и ссылкой на покупателя; повторные CONFIRMED не дублируют его;
 - amount/currency mismatch → 400;
 - один success-message при параллельных CONFIRMED;
 - ошибка Telegram после commit → 200;
@@ -739,7 +736,7 @@ https://<public-domain>/payment/callback
 - callback URL;
 - статусами и кодами ответа;
 - сроком ссылки и повторным использованием;
-- chargeback/manual-review поведением: автодаунгрейд до free при чарджбеке на paid-заказе (если нет другого paid-заказа), сохранение доступа при наличии другого оплаченного заказа, ручной разбор по админ-алерту;
+- chargeback/manual-review поведением: автодаунгрейд до free при чарджбеке на paid-заказе (если нет другого paid-заказа), сохранение доступа при наличии другого оплаченного заказа, ручной разбор по админ-алерту; при чарджбеке на оплаченном заказе (`WasPaid=true`) админ дополнительно получает отдельное Markdown-сообщение `notifyAdminChargeback` (тариф, сумма, ссылка на покупателя, статус доступа: «понижен до бесплатного» / «сохранён»);
 - state machine Order.
 
 После cleanup поиск в исходном коде, конфигурации и тестах (документацию не учитывать) не должен находить:
