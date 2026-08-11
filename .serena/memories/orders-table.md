@@ -14,8 +14,8 @@
 
 ## Admin notifications (TelegramAdminID, best-effort Markdown)
 - On activation (`Activated=true`, only the pending→paid CAS caller) → `notifyAdminPaid`: tariff, formatted amount (`formatMoneyCents`), clickable buyer link (`utils.FormatUserLink` — `t.me/username` or `tg://user?id=…`), provider ID, sub/order IDs, expiry. Title distinguishes `🆕 Покупка подтверждена` vs `🔄 Продление подтверждено` — `isRenewal` captured **before** the CAS mutates `sub` (`PricePaidCents > 0 || ProductID != nil`).
-- On `CHARGEBACKED` with `WasPaid=true` (money collected) → `notifyAdminChargeback`: tariff, amount, buyer link, access status (`понижен до бесплатного` / `сохранён` if another paid order exists). Sent after `paymentMu.Unlock()`.
-- Every payment integration problem (mismatches, late/unknown callbacks, provider errors, uncertain outcomes) → `NotifyPaymentIssue` → `notifyAdmin` (plain-text) + `payment_issues_total{event}`.
+- On `CHARGEBACKED` with `WasPaid=true` (money collected) → `notifyAdminChargeback`: tariff, amount, buyer link, access status (`понижен до бесплатного` / `сохранён` if another paid order exists). Sent after per-order payment lock release. This is the only admin notification sent on the success path; the dedicated chargeback alert already carries the outcome, so a separate integration-issue message is not raised.
+- Every payment integration problem (mismatches, late/unknown callbacks, provider errors, DB failures, uncertain outcomes) → `NotifyPaymentIssue` → `notifyAdmin` (plain-text) + `payment_issues_total{event}`.
 - Duplicate CONFIRMED/CHARGEBACKED callbacks are silent (idempotent no-op) — no repeated alerts.
 
 ## Bot integration
