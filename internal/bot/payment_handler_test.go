@@ -290,7 +290,7 @@ func TestHandleBuyProduct_SuccessShowsPaymentButton(t *testing.T) {
 	require.NoError(t, err)
 	messages := bot.GetAllSentMessages()
 	require.Len(t, messages, 1)
-	assert.Contains(t, messages[0].Text, "💎 *Тариф: Месяц*")
+	assert.Contains(t, messages[0].Text, "Тариф: 💎 *Месяц*")
 	assert.Contains(t, messages[0].Text, "Стоимость: *199₽*")
 	assert.Contains(t, messages[0].Text, "После оплаты тариф активируется автоматически.")
 	assert.Contains(t, messages[0].Text, "Если тариф уже активен, новые дни прибавятся к текущему сроку.")
