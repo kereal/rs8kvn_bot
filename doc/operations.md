@@ -347,6 +347,7 @@ The bot exposes a `/metrics` endpoint on the same port as health checks (default
 | `subserver_no_items_total` | Counter | — | Requests returning no items |
 | `payment_operations_total` | Counter | operation, result | Payment request/confirm/cancel attempts by outcome |
 | `payment_operation_duration_seconds` | Histogram | operation | Payment service operation latency |
+| `payment_amounts_cents_total` | Counter | operation, currency | Monetary amounts in cents by outcome (`confirmed`, `chargeback`) — watch for chargeback totals vs confirmed |
 | `payment_issues_total` | Counter | event | Payment incidents requiring investigation or operator attention |
 
 **Prometheus scrape config:**
