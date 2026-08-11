@@ -1,13 +1,9 @@
-
-
 package e2e
 
 import (
 	"context"
-	"net/http"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/kereal/rs8kvn_bot/internal/bot"
 	"github.com/kereal/rs8kvn_bot/internal/config"
@@ -57,30 +53,6 @@ type e2eTestEnv struct {
 	chatID     int64
 	username   string
 	subService *service.SubscriptionService
-}
-
-// waitForServerReady polls the server's /healthz endpoint until it responds
-// with HTTP 200 or the timeout expires. This is more reliable than a fixed
-// time.Sleep because it works correctly even under heavy CI load.
-func waitForServerReady(t *testing.T, addr string, timeout time.Duration) {
-	t.Helper()
-	deadline := time.Now().Add(timeout)
-	url := "http://" + addr + "/healthz"
-
-	for time.Now().Before(deadline) {
-		resp, err := http.Get(url)
-		if err == nil {
-			if err := resp.Body.Close(); err != nil {
-				t.Logf("Warning: failed to close health check body: %v", err)
-			}
-			if resp.StatusCode == http.StatusOK {
-				return
-			}
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-
-	t.Fatalf("server at %s did not become ready within %v", addr, timeout)
 }
 
 func setupE2EEnv(t *testing.T) *e2eTestEnv {

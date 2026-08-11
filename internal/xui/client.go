@@ -282,44 +282,6 @@ func extractOperation(urlStr string) string {
 	return "unknown"
 }
 
-// tgIDContextKey — ключ контекста для передачи Telegram ID в методы панели.
-//
-// Важно: значение живёт ровно до конца текущего вызова. При копировании
-// контекста через context.WithValue / WithTimeout / WithCancel новый
-// контекст наследует значение, поэтому не оборачивайте ctx вокруг
-// параллельных вызовов, если в них тоже читается TgIDFromContext —
-// они увидят чужой tgID. Ставьте WithTgID максимально локально,
-// сразу перед AddClientWithID / UpdateClient.
-type tgIDContextKey struct{}
-
-// WithTgID сохраняет Telegram ID в контексте для последующего использования
-// при создании/обновлении клиента в панели.
-//
-// Риски:
-//   - Контекст копируется по значению, но карта значений общая; при
-//     параллельных вызовах из того же ctx возможна утечка tgID в
-//     дочерние запросы.
-//   - Если контекст прокидывается выше по стеку (например, через HTTP
-//     middleware), tgID может «протечь» в логирование/метрики, если
-//     они тоже читают контекст. Здесь ключ package-private, поэтому
-//     внешний доступ исключён.
-func WithTgID(ctx context.Context, tgID int64) context.Context {
-	return context.WithValue(ctx, tgIDContextKey{}, tgID)
-}
-
-// TgIDFromContext извлекает Telegram ID из контекста.
-// Возвращает 0, если TgID не был установлен.
-//
-// Вызывается только внутри XUI-методов add/update после WithTgID.
-// Если значение не установлено, панель получит tgId=0, что для
-// большинства инстансов означает «без привязки Telegram».
-func TgIDFromContext(ctx context.Context) int64 {
-	if v, ok := ctx.Value(tgIDContextKey{}).(int64); ok {
-		return v
-	}
-	return 0
-}
-
 // AddClient создаёт клиента с автоматической генерацией clientID и subID.
 func (c *Client) AddClient(ctx context.Context, inboundIDs []int, email string, trafficBytes int64, expiryTime time.Time) (*ClientConfig, error) {
 	clientID, err := utils.GenerateUUID()
@@ -371,9 +333,6 @@ func (c *Client) AddClientWithID(ctx context.Context, req ClientRequest) (*Clien
 	}
 
 	tgID := req.TgID
-	if tgID == 0 {
-		tgID = TgIDFromContext(ctx)
-	}
 
 	var (
 		result   *ClientConfig
