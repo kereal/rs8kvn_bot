@@ -61,10 +61,10 @@ func (kb *KeyboardBuilder) BuyProductList(products []database.Product) tgbotapi.
 func (kb *KeyboardBuilder) BuyProductConfirm(product *database.Product, paymentURL string) tgbotapi.InlineKeyboardMarkup {
 	price := ""
 	if product != nil {
-		price = fmt.Sprintf("%.2f ₽", float64(product.PriceCents)/100)
+		price = fmt.Sprintf("%d₽", product.PriceCents/100)
 	}
 	return tgbotapi.InlineKeyboardMarkup{InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{
-		tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonURL("🔗 Оплатить "+price, paymentURL)),
+		tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonURL("💳 Оплатить "+price, paymentURL)),
 		tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("⬅️ Назад", "buy_premium_list")),
 	}}
 }

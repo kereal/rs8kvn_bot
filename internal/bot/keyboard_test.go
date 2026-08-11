@@ -96,6 +96,16 @@ func TestHandler_BuyProductList_Callback(t *testing.T) {
 	assert.Equal(t, "back_to_start", *last.CallbackData, "last row is back navigation")
 }
 
+func TestKeyboardBuilder_BuyProductConfirm_UsesCardIcon(t *testing.T) {
+	t.Parallel()
+
+	kb := NewKeyboardBuilder("testbot", "", "", "", "", true)
+	keyboard := kb.BuyProductConfirm(&database.Product{PriceCents: 19900}, "https://pay.example")
+
+	require.NotEmpty(t, keyboard.InlineKeyboard)
+	assert.Equal(t, "💳 Оплатить 199₽", keyboard.InlineKeyboard[0][0].Text)
+}
+
 func newTestProductList() []database.Product {
 	return []database.Product{
 		{ID: 1, Name: "Месяц", PriceCents: 19900, IsActive: true},

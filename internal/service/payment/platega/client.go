@@ -11,6 +11,9 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/kereal/rs8kvn_bot/internal/logger"
+	"go.uber.org/zap"
 )
 
 const defaultBaseURL = "https://app.platega.io"
@@ -137,11 +140,30 @@ func (c *Client) CreateTransaction(ctx context.Context, req CreateTransactionReq
 	httpReq.Header.Set("X-Secret", c.cfg.Secret)
 	httpReq.Header.Set("Content-Type", "application/json")
 
+	requestStarted := time.Now()
 	resp, err := c.cfg.HTTPClient.Do(httpReq)
 	if err != nil {
+		if logger.Log != nil {
+			logger.Info("Payment provider request failed",
+				zap.String("provider", "platega"),
+				zap.String("operation", "create_transaction"),
+				zap.Int("status_code", 0),
+				zap.Duration("duration", time.Since(requestStarted)),
+			)
+		}
 		return nil, fmt.Errorf("%w: send transaction request: %w", ErrProvider, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
+	defer func() {
+		if logger.Log != nil {
+			logger.Info("Payment provider response processed",
+				zap.String("provider", "platega"),
+				zap.String("operation", "create_transaction"),
+				zap.Int("status_code", resp.StatusCode),
+				zap.Duration("duration", time.Since(requestStarted)),
+			)
+		}
+	}()
 
 	limited := io.LimitReader(resp.Body, 1<<20)
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
