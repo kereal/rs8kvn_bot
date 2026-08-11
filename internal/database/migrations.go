@@ -93,6 +93,8 @@ func runMigrations(sqlDB *sql.DB) error {
 	if versionErr != nil && !errors.Is(versionErr, migrate.ErrNilVersion) {
 		return fmt.Errorf("failed to read migration version: %w", versionErr)
 	}
+	// #nosec G115 -- maxEmbeddedVersion is guaranteed non-negative: the helper
+	// returns an error when no embedded .up.sql migration is found.
 	if versionBefore > uint(maxEmbeddedVersion) {
 		return fmt.Errorf("database migration version %d is newer than the latest embedded migration %d; restore the missing migration files or perform a reviewed schema recovery before starting", versionBefore, maxEmbeddedVersion)
 	}
