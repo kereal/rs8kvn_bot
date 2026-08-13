@@ -10,6 +10,68 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestLatestEmbeddedMigrationVersion(t *testing.T) {
+	t.Parallel()
+
+	version, err := latestEmbeddedMigrationVersion()
+	require.NoError(t, err)
+	assert.Equal(t, 32, version)
+}
+
+func TestRunMigrationsRejectsDatabaseNewerThanEmbedded(t *testing.T) {
+	t.Parallel()
+
+	dbPath := filepath.Join(t.TempDir(), "newer-schema.db")
+	db, err := NewService(dbPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, db.Close()) })
+
+	sqlDB, err := db.db.DB()
+	require.NoError(t, err)
+	_, err = sqlDB.Exec("UPDATE schema_migrations SET version = ?, dirty = ?", 33, false)
+	require.NoError(t, err)
+
+	err = runMigrations(sqlDB)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "newer than the latest embedded migration 32")
+
+	var (
+		version int
+		dirty   bool
+	)
+	require.NoError(t, sqlDB.QueryRow("SELECT version, dirty FROM schema_migrations").Scan(&version, &dirty))
+	assert.Equal(t, 33, version)
+	assert.False(t, dirty)
+}
+
+func TestMigrationVersionToInt(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		version uint
+		want    int
+		wantErr bool
+	}{
+		{name: "positive", version: 31, want: 31},
+		{name: "zero", version: 0, wantErr: true},
+		{name: "overflow", version: ^uint(0)>>1 + 1, wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := migrationVersionToInt(tt.version)
+			if tt.wantErr {
+				require.Error(t, err)
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
 func TestMigration_Idempotency(t *testing.T) {
 	t.Parallel()
 
@@ -203,6 +265,41 @@ func TestMigration_ProductsHaveRequiredName(t *testing.T) {
 	require.NotNil(t, nameColumn)
 	assert.Equal(t, "VARCHAR(255)", nameColumn.typeName)
 	assert.Equal(t, 1, nameColumn.notNull)
+}
+
+// TestMigration_032_EnforcesRetryInvariant verifies that the retry invariant
+// CHECK (retry_count = 0 OR retry_at IS NOT NULL) from migration 032 is actually
+// enforced — migration 025's ALTER TABLE ADD CHECK was silently ignored by the
+// sqlite driver, so this is the first migration that truly applies it.
+func TestMigration_032_EnforcesRetryInvariant(t *testing.T) {
+	t.Parallel()
+
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	db, err := NewService(dbPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, db.Close()) })
+
+	sqlDB, err := db.db.DB()
+	require.NoError(t, err)
+
+	// Violating insert: retry_count > 0 with NULL retry_at must be rejected.
+	_, err = sqlDB.Exec(`INSERT INTO subscription_nodes
+		(subscription_id, node_id, status, retry_count, retry_at, updated_at)
+		VALUES (1, 1, 'active', 1, NULL, datetime('now'))`)
+	require.Error(t, err, "insert with retry_count > 0 and NULL retry_at must fail")
+	assert.ErrorContains(t, err, "CHECK")
+
+	// Compliant insert: retry_count > 0 with retry_at set must succeed.
+	_, err = sqlDB.Exec(`INSERT INTO subscription_nodes
+		(subscription_id, node_id, status, retry_count, retry_at, updated_at)
+		VALUES (1, 1, 'active', 1, datetime('now'), datetime('now'))`)
+	require.NoError(t, err)
+
+	// Compliant insert: retry_count = 0 with NULL retry_at must succeed.
+	_, err = sqlDB.Exec(`INSERT INTO subscription_nodes
+		(subscription_id, node_id, status, retry_count, retry_at, updated_at)
+		VALUES (1, 2, 'active', 0, NULL, datetime('now'))`)
+	require.NoError(t, err)
 }
 
 // TestMigration_005_CleansUpDuplicateInvites (and the dedup logic) now primarily

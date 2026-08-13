@@ -1,3 +1,4 @@
+// Package interfaces defines narrow dependency-injection contracts for the application.
 package interfaces
 
 import (
@@ -142,6 +143,7 @@ type TrialRepository interface {
 	CleanupExpiredTrials(ctx context.Context, hours int) ([]database.Subscription, error)
 }
 
+// NodeRepository provides node and plan-node lookup operations.
 type NodeRepository interface {
 	ListNodes(ctx context.Context) ([]database.Node, error)
 	GetNodesByPlanName(ctx context.Context, planName string) ([]database.Node, error)
@@ -150,6 +152,7 @@ type NodeRepository interface {
 	ListEnabled(ctx context.Context) ([]database.Node, error)
 }
 
+// InviteRepository provides referral invite and referral-count operations.
 type InviteRepository interface {
 	GetOrCreateInvite(ctx context.Context, referrerTGID int64, code string) (*database.Invite, error)
 	GetInviteByReferrer(ctx context.Context, referrerTGID int64) (*database.Invite, error)
@@ -158,17 +161,20 @@ type InviteRepository interface {
 	GetAllReferralCounts(ctx context.Context) (map[int64]int64, error)
 }
 
+// PlanRepository provides plan lookup operations.
 type PlanRepository interface {
 	GetPlanByName(ctx context.Context, name string) (*database.Plan, error)
 	GetPlanByID(ctx context.Context, id uint) (*database.Plan, error)
 }
 
+// ProductRepository provides product listing, lookup, and guarded update operations.
 type ProductRepository interface {
 	ListActiveProducts(ctx context.Context) ([]database.Product, error)
 	GetProductByID(ctx context.Context, id uint) (*database.Product, error)
 	UpdateProductGuarded(ctx context.Context, product *database.Product) error
 }
 
+// OrderRepository provides order lifecycle and payment-intent operations.
 type OrderRepository interface {
 	GetOrderByID(ctx context.Context, id uint) (*database.Order, error)
 	GetOrderByProviderPaymentID(ctx context.Context, provider string, providerPaymentID uuid.UUID) (*database.Order, error)
@@ -181,6 +187,7 @@ type OrderRepository interface {
 	CancelPaidOrderAndDowngradeCAS(ctx context.Context, provider string, providerPaymentID uuid.UUID, now time.Time, freePlanID uint, applyPlan database.ChargebackPlanInTxFn) (*database.ChargebackResult, error)
 }
 
+// DatabaseService is the composed persistence contract used by application services.
 type DatabaseService interface {
 	SubscriptionNodeRepository
 	SubscriptionRepository
@@ -196,11 +203,13 @@ type DatabaseService interface {
 	Transaction(ctx context.Context, fn func(*gorm.DB) error) error
 }
 
+// XUIClientReader contains read-only panel operations.
 type XUIClientReader interface {
 	Ping(ctx context.Context) error
 	GetClientTraffic(ctx context.Context, email string) (*xui.ClientTraffic, error)
 }
 
+// XUIClientWriter contains panel mutation and lifecycle operations.
 type XUIClientWriter interface {
 	AddClient(ctx context.Context, inboundIDs []int, email string, trafficBytes int64, expiryTime time.Time) (*xui.ClientConfig, error)
 	AddClientWithID(ctx context.Context, req xui.ClientRequest) (*xui.ClientConfig, error)
@@ -209,11 +218,13 @@ type XUIClientWriter interface {
 	Close() error
 }
 
+// XUIClient combines panel read and write operations.
 type XUIClient interface {
 	XUIClientReader
 	XUIClientWriter
 }
 
+// BotAPI is the narrow Telegram client contract required by handlers and services.
 type BotAPI interface {
 	Send(c tgbotapi.Chattable) (tgbotapi.Message, error)
 	Request(c tgbotapi.Chattable) (*tgbotapi.APIResponse, error)
