@@ -116,6 +116,43 @@ func TestSyncService_ReconcilePlanNodes_AddMissing(t *testing.T) {
 	assert.Empty(t, statusMap[node3.ID])
 }
 
+func TestSyncService_ReconcilePlanNodes_ContinuesAfterNodeFailure(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	firstErr := errors.New("node one upsert failed")
+	processed := make([]uint, 0, 2)
+
+	db := testutil.NewDatabaseService()
+	db.GetByIDFunc = func(context.Context, uint) (*database.Subscription, error) {
+		return &database.Subscription{ID: 42, PlanID: 7}, nil
+	}
+	db.GetNodesByPlanIDFunc = func(context.Context, uint) ([]database.Node, error) {
+		return []database.Node{
+			{ID: 1, IsActive: true},
+			{ID: 2, IsActive: true},
+		}, nil
+	}
+	db.GetBySubscriptionIDFunc = func(context.Context, uint) ([]database.SubscriptionNode, error) {
+		return nil, nil
+	}
+	db.UpsertSubscriptionNodeFunc = func(_ context.Context, sn *database.SubscriptionNode) error {
+		processed = append(processed, sn.NodeID)
+		if sn.NodeID == 1 {
+			return firstErr
+		}
+
+		return nil
+	}
+
+	svc := NewSyncService(db, nil, nil)
+
+	err := svc.ReconcilePlanNodes(ctx, 42)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, firstErr)
+	assert.Equal(t, []uint{1, 2}, processed, "a failed node must not prevent the next node from reconciling")
+}
+
 func TestSyncService_ReconcilePlanNodes_RemoveExtra(t *testing.T) {
 	t.Parallel()
 

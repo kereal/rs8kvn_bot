@@ -144,6 +144,8 @@ func (s *Service) BindTrialSubscription(ctx context.Context, subscriptionID stri
 			err := tx.Where("code = ?", *sub.InviteCode).First(&invite).Error
 			if err == nil {
 				referredBy = invite.ReferrerTGID
+			} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return fmt.Errorf("failed to resolve trial invite: %w", err)
 			}
 		}
 

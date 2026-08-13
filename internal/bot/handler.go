@@ -63,6 +63,8 @@ type Handler struct {
 	inProgressSyncMap   sync.Map                // atomic tracking of subscription creation
 	pendingInvites      map[int64]pendingInvite // chatID -> invite_code
 	pendingMu           sync.RWMutex
+	documentMessagesMu  sync.Mutex
+	documentMessages    map[int][]int // final message ID -> preceding legal-message IDs
 	botConfig           *BotConfig
 	subscriptionService *service.SubscriptionService
 	referralCache       *ReferralCache
@@ -113,6 +115,7 @@ func NewHandler(bot interfaces.BotAPI, cfg *config.Config, db interfaces.Databas
 		inProgressSyncMap:   sync.Map{},
 		pendingInvites:      make(map[int64]pendingInvite),
 		pendingMu:           sync.RWMutex{},
+		documentMessages:    make(map[int][]int),
 		botConfig:           botConfig,
 		subscriptionService: subService,
 		referralCache:       NewReferralCache(db),

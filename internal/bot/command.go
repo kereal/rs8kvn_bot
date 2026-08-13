@@ -142,7 +142,7 @@ func (c *CommandHandler) HandleInvite(ctx context.Context, update tgbotapi.Updat
 	// Delegate to referral handler (no rate limit here)
 	err := c.h.referral.HandleInvite(ctx, chatID, username, 0)
 	if err != nil {
-		return err
+		return fmt.Errorf("handle invite: %w", err)
 	}
 
 	return nil
@@ -243,6 +243,10 @@ func (c *CommandHandler) handleBindTrial(ctx context.Context, chatID int64, user
 
 	// Check existing subscription — only truly active ones block trial bind (expired/cancelled allow re-trial)
 	existing, err := c.h.db.GetByTelegramID(ctx, chatID)
+	if err != nil && !errors.Is(err, database.ErrSubscriptionNotFound) {
+		return fmt.Errorf("get existing subscription: %w", err)
+	}
+
 	if err == nil && existing != nil && existing.IsActive() {
 		logger.Warn("User already has active subscription, skipping trial bind",
 			zap.Int64("chat_id", chatID),

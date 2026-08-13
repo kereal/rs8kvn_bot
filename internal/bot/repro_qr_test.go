@@ -96,4 +96,36 @@ func TestNavigation_OpenAndBack(t *testing.T) {
 		assert.NotContains(t, bot.DeletedMessageIDsSafe(), cardMsgID,
 			"back must NOT delete the card (id %d)", cardMsgID)
 	})
+
+	t.Run("documents", func(t *testing.T) {
+		handler, bot := newQRTestHandler(t)
+
+		nextMessageID := screenMsgID
+		bot.SendFunc = func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
+			nextMessageID++
+			return tgbotapi.Message{MessageID: nextMessageID}, nil
+		}
+
+		// The documents menu stays on the existing card.
+		tap(handler, "menu_documents", 42, cardMsgID)
+		assert.Empty(t, bot.DeletedMessageIDsSafe(),
+			"opening documents must NOT delete the underlying card (id %d)", cardMsgID)
+
+		// Legal content is split into separate messages, with Back on the last one.
+		firstLegalMessageID := nextMessageID + 1
+		tap(handler, "menu_privacy", 42, cardMsgID)
+		require.True(t, bot.SendCalledSafe(), "opening legal content must send a message")
+		lastLegalMessageID := nextMessageID
+		require.GreaterOrEqual(t, lastLegalMessageID, firstLegalMessageID)
+
+		tap(handler, "back_to_documents", 42, lastLegalMessageID)
+
+		deleted := bot.DeletedMessageIDsSafe()
+		for id := firstLegalMessageID; id <= lastLegalMessageID; id++ {
+			assert.Contains(t, deleted, id,
+				"back to documents must delete legal message part %d", id)
+		}
+		assert.NotContains(t, deleted, cardMsgID,
+			"back to documents must NOT delete the underlying card (id %d)", cardMsgID)
+	})
 }

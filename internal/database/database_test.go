@@ -1597,6 +1597,33 @@ func TestService_BindTrialSubscription_Success(t *testing.T) {
 	assert.Equal(t, uint(2), bound.PlanID, "Should be switched to free plan after binding")
 }
 
+func TestService_BindTrialSubscription_InviteLookupError(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	_, err := svc.CreateTrialSubscription(
+		ctx,
+		"INVITE-LOOKUP-ERROR",
+		"sub-invite-error",
+		"client-invite-error",
+		time.Now().Add(3*time.Hour),
+	)
+	require.NoError(t, err)
+	require.NoError(t, svc.db.Migrator().DropTable(&Invite{}))
+
+	bound, err := svc.BindTrialSubscription(ctx, "sub-invite-error", 777777, "user")
+
+	require.Error(t, err)
+	assert.Nil(t, bound)
+	assert.Contains(t, err.Error(), "failed to resolve trial invite")
+
+	var sub Subscription
+	require.NoError(t, svc.db.Where("subscription_id = ?", "sub-invite-error").First(&sub).Error)
+	assert.Less(t, sub.TelegramID, int64(0), "binding must not continue after invite lookup failure")
+}
+
 func TestService_BindTrialSubscription_Concurrent(t *testing.T) {
 	t.Parallel()
 

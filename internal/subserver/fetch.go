@@ -50,7 +50,7 @@ func FetchFromNode(ctx context.Context, url string) (*NodeResponse, error) {
 			zap.String("url", url),
 			zap.Error(err))
 
-		return nil, err
+		return nil, fmt.Errorf("create source fetch request: %w", err)
 	}
 
 	req.Header.Set("User-Agent", "RS8 KVN Subserver")
@@ -61,7 +61,7 @@ func FetchFromNode(ctx context.Context, url string) (*NodeResponse, error) {
 			zap.String("url", url),
 			zap.Error(err))
 
-		return nil, err
+		return nil, fmt.Errorf("execute source fetch request: %w", err)
 	}
 
 	if resp == nil || resp.Body == nil {
@@ -95,7 +95,7 @@ func FetchFromNode(ctx context.Context, url string) (*NodeResponse, error) {
 			zap.String("url", url),
 			zap.Error(err))
 
-		return nil, err
+		return nil, fmt.Errorf("read source response body: %w", err)
 	}
 
 	headers := make(map[string]string)

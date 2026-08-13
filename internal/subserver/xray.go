@@ -24,12 +24,12 @@ func ConvertSingleJSONToXray(raw json.RawMessage) (json.RawMessage, error) {
 			zap.Error(err),
 			zap.String("raw_preview", truncateJSON(raw)))
 
-		return nil, err
+		return nil, fmt.Errorf("convert JSON config to Xray outbound: %w", err)
 	}
 
 	outbound, err := buildXrayOutbound(cfg)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("build Xray outbound: %w", err)
 	}
 
 	data, err := json.Marshal(outbound)
