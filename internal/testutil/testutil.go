@@ -628,7 +628,10 @@ func (m *DatabaseService) GetNodesByPlanName(ctx context.Context, planName strin
 		return m.GetNodesByPlanNameFunc(ctx, planName)
 	}
 	if planName == database.TrialPlanName {
-		inboundIDs, _ := json.Marshal([]int{1})
+		inboundIDs, err := json.Marshal([]int{1})
+		if err != nil {
+			return nil, err
+		}
 		return []database.Node{{ID: 1, IsActive: true, Host: "http://localhost:2053", InboundIDs: string(inboundIDs)}}, nil
 	}
 	return nil, nil

@@ -57,7 +57,7 @@ func TestE2E_SubscriptionDelivery_AfterRenew_InvalidatesCacheAndServesUpdatedCon
 		backendState.Lock()
 		defer backendState.Unlock()
 		backendState.requestCnt++
-		w.Header().Set("Subscription-UserInfo", backendState.userInfo)
+		w.Header().Set("Subscription-Userinfo", backendState.userInfo)
 		_, _ = w.Write([]byte(backendState.body))
 	}))
 	defer backend.Close()
@@ -92,7 +92,6 @@ func TestE2E_SubscriptionDelivery_AfterRenew_InvalidatesCacheAndServesUpdatedCon
 	defer cancel()
 	require.NoError(t, srv.Start(ctxSrv))
 	defer srv.Stop(context.Background())
-	waitForServerReady(t, srv.Addr(), time.Second)
 
 	getDecodedBody := func() (string, http.Header) {
 		resp, err := http.Get(fmt.Sprintf("http://%s/sub/%s", srv.Addr(), sub.Subscription.SubscriptionID))

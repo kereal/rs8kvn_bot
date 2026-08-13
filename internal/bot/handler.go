@@ -704,5 +704,4 @@ func (h *Handler) HandleUpdate(ctx context.Context, update tgbotapi.Update) {
 	} else if update.CallbackQuery != nil {
 		err = h.HandleCallback(ctx, update)
 	}
-
 }

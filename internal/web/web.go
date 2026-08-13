@@ -243,10 +243,10 @@ func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 
 	if health.Status == "ok" {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
+		_, _ = w.Write([]byte("OK"))
 	} else {
 		w.WriteHeader(http.StatusServiceUnavailable)
-		w.Write([]byte("NOT READY"))
+		_, _ = w.Write([]byte("NOT READY"))
 	}
 }
 
@@ -279,8 +279,9 @@ func (s *Server) handleLogo(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodHead {
 		return
 	}
-	w.Write(data)
+	_, _ = w.Write(data)
 }
+
 
 type HealthResponse struct {
 	Status     string                     `json:"status"`
@@ -692,7 +693,7 @@ func (s *Server) logSubscriptionAccess(rec *statusRecorder, r *http.Request, cli
 func writeSubscriptionText(w http.ResponseWriter, statusCode int, body string) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(statusCode)
-	w.Write([]byte(body))
+	_, _ = w.Write([]byte(body))
 }
 
 type statusRecorder struct {

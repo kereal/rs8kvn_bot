@@ -207,17 +207,8 @@ func initBot(cfg *config.Config) (*tgbotapi.BotAPI, *bot.BotConfig, error) {
 // startWebServer создаёт и запускает HTTP-сервер (подписки, инвайт/trial-страницы).
 // Сервер стартует асинхронно; функция ждёт до 2 секунд первой ошибки запуска,
 // чтобы не блокировать старт бота, но вернуть ошибку, если сервер точно не поднялся.
-func startWebServer(subService *service.SubscriptionService, cfg *config.Config, botConfig *bot.BotConfig, subServer *subserver.Service, dbService *database.Service, orderService *service.OrderService, botAPI interfaces.BotAPI) (*web.Server, error) {
+func startWebServer(subService *service.SubscriptionService, cfg *config.Config, botConfig *bot.BotConfig, subServer *subserver.Service, dbService *database.Service) (*web.Server, error) {
 	webServer := web.NewServer(fmt.Sprintf(":%d", cfg.WebServerPort), dbService, cfg, botConfig.Username, subService, subServer)
-	webServer.SetOrderService(orderService)
-	webServer.SetBot(botAPI)
-	if cfg.PaymentEnabled {
-		webServer.SetPaymentConfig(&web.PaymentConfig{
-			Enabled:    true,
-			MerchantID: cfg.PlategaMerchantID,
-			Secret:     cfg.PlategaSecret,
-		})
-	}
 	webServer.RegisterChecker("database", func(ctx context.Context) web.ComponentHealth {
 		if err := dbService.Ping(ctx); err != nil {
 			return web.ComponentHealth{Status: web.StatusDown, Message: err.Error()}
@@ -255,9 +246,10 @@ func startBackgroundWorkers(ctx context.Context, handler *bot.Handler, subServic
 	// would bypass the sync-based deprovision path and fall into the legacy
 	// deleteClientFromAllNodes code that sends delete requests to ALL nodes.
 	syncSvc := service.NewSyncService(dbService, vpnClients, nodes)
-	if orderService := handler.OrderService(); orderService != nil {
-		orderService.SetSyncService(syncSvc)
-	}
+	subService.SetSyncService(syncSvc)
+
+	orderService := service.NewOrderService(dbService, subService, syncSvc)
+	handler.SetOrderService(orderService)
 
 	go func() {
 		defer recoverAndReport("DB pool metrics collector")
@@ -368,17 +360,10 @@ func main() {
 
 	// 2. Initialize Sentry (before logger)
 	initSentry(cfg)
+	defer sentry.Flush(logger.SentryFlushTimeout)
 
 	// 3. Initialize logger
-	logService, err := initLogger(cfg)
-	if err != nil {
-		// The logger failed to initialize, so the deferred flush below is not
-		// registered yet: flush Sentry explicitly before exiting.
-		fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
-		sentry.Flush(logger.SentryFlushTimeout)
-		os.Exit(1)
-	}
-	defer sentry.Flush(logger.SentryFlushTimeout)
+	logService := initLogger(cfg)
 	defer func() {
 		if err := logService.Close(); err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to close logger: %v\n", err)
@@ -386,10 +371,7 @@ func main() {
 	}()
 
 	// 4. Initialize database and node clients
-	dbService, deps, err := initDatabase(cfg)
-	if err != nil {
-		logger.Fatal("Failed to initialize database", zap.Error(err))
-	}
+	dbService, deps := initDatabase(cfg)
 	defer func() {
 		if err := dbService.Close(); err != nil {
 			logger.Error("Failed to close database", zap.Error(err))
@@ -418,7 +400,7 @@ func main() {
 	// The web server starts with an empty bot username; initBot injects the real
 	// username (from Telegram getMe) via SetBotUsername once the bot is ready, so
 	// the share/invite page shows the correct @username after startup.
-	webServer, err := startWebServer(svc.subService, cfg, botConfig, svc.subServer, dbService, svc.orderService, botAPI)
+	webServer, err := startWebServer(svc.subService, cfg, botConfig, svc.subServer, dbService)
 	if err != nil {
 		logger.Fatal("Failed to start web server", zap.Error(err))
 	}
@@ -427,7 +409,6 @@ func main() {
 			return
 		}
 		webServer.SetReady(false)
-		webServer.SetPaymentReady(false)
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := webServer.Stop(shutdownCtx); err != nil {
@@ -444,13 +425,8 @@ func main() {
 	svc.handler.SetBot(api)
 	svc.subService.SetBot(api)
 	svc.handler.SetBotConfig(bc)
-	if svc.orderService != nil {
-		svc.orderService.SetBotUsername(bc.Username)
-		svc.orderService.SetAdminBot(api)
-	}
 	botAPI = api
 	if webServer != nil {
-		webServer.SetBot(api)
 		webServer.SetBotUsername(bc.Username)
 	} else {
 		logger.Warn("web server not running; share/invite page username not updated")
@@ -469,9 +445,6 @@ func main() {
 	svc.handler.StartRateLimiterCleanup(ctx, bot.CacheTTL, bot.CacheTTL*2)
 	svc.handler.StartReferralCacheSync(ctx)
 	bgWg := startBackgroundWorkers(ctx, svc.handler, svc.subService, dbService, cfg, deps.vpnClients, deps.nodes)
-	if webServer != nil {
-		webServer.SetPaymentReady(true)
-	}
 
 	logger.Debug("Bot started successfully")
 	if webServer != nil {

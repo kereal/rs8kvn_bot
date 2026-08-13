@@ -206,9 +206,7 @@ func TestAddAdminButtons(t *testing.T) {
 				assert.Len(t, keyboard.InlineKeyboard, 2, "Expected admin buttons")
 			} else {
 				assert.Len(t, keyboard.InlineKeyboard, 1, "Expected no admin buttons")
-			}
-
-		})
+			}		})
 	}
 }
 
