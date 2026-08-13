@@ -1,3 +1,4 @@
+// Package service contains subscription, payment, and synchronization business logic.
 package service
 
 import (

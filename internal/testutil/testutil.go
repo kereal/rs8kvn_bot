@@ -1,13 +1,12 @@
+// Package testutil provides reusable fakes and fixtures for repository and bot tests.
 package testutil
 
 import (
 	"context"
 	"encoding/json"
 	"errors"
-	"os"
 	"path/filepath"
 	"sync"
-	"testing"
 	"time"
 
 	"github.com/google/uuid"
@@ -78,7 +77,6 @@ type DatabaseService struct {
 	SubscriptionsByID                           map[uint]*database.Subscription
 	Products                                    map[uint]*database.Product
 	Orders                                      map[uint]*database.Order
-	OrdersBySubscriptionID                      map[uint][]database.Order
 	PingFunc                                    func(ctx context.Context) error
 	GetByTelegramIDFunc                         func(ctx context.Context, telegramID int64) (*database.Subscription, error)
 	GetAnyByTelegramIDFunc                      func(ctx context.Context, telegramID int64) (*database.Subscription, error)
@@ -115,7 +113,6 @@ type DatabaseService struct {
 	AddSourceToPlanFunc                         func(ctx context.Context, planID, sourceID uint) error
 	RemoveSourceFromPlanFunc                    func(ctx context.Context, planID, sourceID uint) error
 	SeedDefaultDataFunc                         func(ctx context.Context) error
-	GetActiveByPlanIDFunc                       func(ctx context.Context, planID uint) ([]database.Product, error)
 	ListActiveProductsFunc                      func(ctx context.Context) ([]database.Product, error)
 	GetProductByIDFunc                          func(ctx context.Context, id uint) (*database.Product, error)
 	UpdateProductGuardedFunc                    func(ctx context.Context, product *database.Product) error
@@ -134,16 +131,9 @@ type DatabaseService struct {
 	GetPendingSyncFunc                          func(ctx context.Context) ([]database.SubscriptionNode, error)
 	GetPendingBySubscriptionIDFunc              func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error)
 	GetPendingByNodeIDFunc                      func(ctx context.Context, nodeID uint) ([]database.SubscriptionNode, error)
-	CreateOrderFunc                             func(ctx context.Context, order *database.Order) error
 	GetOrderByIDFunc                            func(ctx context.Context, id uint) (*database.Order, error)
-	GetOrdersBySubscriptionIDFunc               func(ctx context.Context, subscriptionID uint) ([]database.Order, error)
 	GetOrderByProviderPaymentIDFunc             func(ctx context.Context, provider string, providerPaymentID uuid.UUID) (*database.Order, error)
-	UpdateOrderStatusFunc                       func(ctx context.Context, id uint, status database.OrderStatus) error
-	UpdateOrderPaidStatusFunc                   func(ctx context.Context, id uint) error
-	UpdateOrderActivatedAtFunc                  func(ctx context.Context, id uint, activatedAt, expiresAt time.Time) error
-	UpdateOrderProviderPaymentIDFunc            func(ctx context.Context, orderID uint, providerPaymentID uuid.UUID) error
 	FindPendingPaymentOrderFunc                 func(ctx context.Context, subscriptionID, productID uint, now time.Time) (*database.Order, error)
-	CreatePendingPaymentOrderFunc               func(ctx context.Context, subscriptionID, productID uint, amountCents int64, currency string, now time.Time) (*database.Order, error)
 	FindOrCreatePendingPaymentOrderFunc         func(ctx context.Context, subscriptionID, productID uint, amountCents int64, currency string, now time.Time) (*database.Order, error)
 	MarkPaymentCreationUncertainFunc            func(ctx context.Context, orderID uint, uncertain bool) (bool, error)
 	SavePaymentDetailsFunc                      func(ctx context.Context, orderID uint, providerPaymentID uuid.UUID, paymentURL string, paymentExpiresAt time.Time) error
@@ -846,24 +836,6 @@ func (m *DatabaseService) ReleaseReminder(ctx context.Context, id uint, bit int,
 	}
 	return nil
 }
-func (m *DatabaseService) GetActiveByPlanID(ctx context.Context, planID uint) ([]database.Product, error) {
-	if m.GetActiveByPlanIDFunc != nil {
-		return m.GetActiveByPlanIDFunc(ctx, planID)
-	}
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	products := make([]database.Product, 0)
-	for _, product := range m.Products {
-		if product.PlanID == planID && product.IsActive {
-			products = append(products, *product)
-		}
-	}
-	if len(products) == 0 {
-		return nil, gorm.ErrRecordNotFound
-	}
-	return products, nil
-}
-
 func (m *DatabaseService) ListActiveProducts(ctx context.Context) ([]database.Product, error) {
 	if m.ListActiveProductsFunc != nil {
 		return m.ListActiveProductsFunc(ctx)
@@ -879,25 +851,6 @@ func (m *DatabaseService) ListActiveProducts(ctx context.Context) ([]database.Pr
 	return products, nil
 }
 
-func (m *DatabaseService) CreateOrder(ctx context.Context, order *database.Order) error {
-	if m.CreateOrderFunc != nil {
-		return m.CreateOrderFunc(ctx, order)
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.Orders == nil {
-		m.Orders = make(map[uint]*database.Order)
-		m.OrdersBySubscriptionID = make(map[uint][]database.Order)
-	}
-	if order.ID == 0 {
-		order.ID = uint(len(m.Orders) + 1) //nolint:gosec // test helper: map size is tiny, no overflow risk
-	}
-	stored := *order
-	m.Orders[order.ID] = &stored
-	m.OrdersBySubscriptionID[order.SubscriptionID] = append(m.OrdersBySubscriptionID[order.SubscriptionID], stored)
-	return nil
-}
-
 func (m *DatabaseService) GetOrderByID(ctx context.Context, id uint) (*database.Order, error) {
 	if m.GetOrderByIDFunc != nil {
 		return m.GetOrderByIDFunc(ctx, id)
@@ -906,18 +859,6 @@ func (m *DatabaseService) GetOrderByID(ctx context.Context, id uint) (*database.
 	defer m.mu.RUnlock()
 	if order, ok := m.Orders[id]; ok {
 		return order, nil
-	}
-	return nil, gorm.ErrRecordNotFound
-}
-
-func (m *DatabaseService) GetOrdersBySubscriptionID(ctx context.Context, subscriptionID uint) ([]database.Order, error) {
-	if m.GetOrdersBySubscriptionIDFunc != nil {
-		return m.GetOrdersBySubscriptionIDFunc(ctx, subscriptionID)
-	}
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	if orders, ok := m.OrdersBySubscriptionID[subscriptionID]; ok {
-		return orders, nil
 	}
 	return nil, gorm.ErrRecordNotFound
 }
@@ -936,20 +877,6 @@ func (m *DatabaseService) GetOrderByProviderPaymentID(ctx context.Context, provi
 	return nil, gorm.ErrRecordNotFound
 }
 
-func (m *DatabaseService) UpdateOrderProviderPaymentID(ctx context.Context, orderID uint, providerPaymentID uuid.UUID) error {
-	if m.UpdateOrderProviderPaymentIDFunc != nil {
-		return m.UpdateOrderProviderPaymentIDFunc(ctx, orderID, providerPaymentID)
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	order, ok := m.Orders[orderID]
-	if !ok || order.Status != database.OrderStatusPending {
-		return gorm.ErrRecordNotFound
-	}
-	order.ProviderPaymentID = providerPaymentID.String()
-	return nil
-}
-
 func (m *DatabaseService) FindPendingPaymentOrder(ctx context.Context, subscriptionID, productID uint, now time.Time) (*database.Order, error) {
 	if m.FindPendingPaymentOrderFunc != nil {
 		return m.FindPendingPaymentOrderFunc(ctx, subscriptionID, productID, now)
@@ -966,27 +893,6 @@ func (m *DatabaseService) FindPendingPaymentOrder(ctx context.Context, subscript
 		}
 	}
 	return nil, nil
-}
-
-func (m *DatabaseService) CreatePendingPaymentOrder(ctx context.Context, subscriptionID, productID uint, amountCents int64, currency string, now time.Time) (*database.Order, error) {
-	if m.CreatePendingPaymentOrderFunc != nil {
-		return m.CreatePendingPaymentOrderFunc(ctx, subscriptionID, productID, amountCents, currency, now)
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.Orders == nil {
-		m.Orders = make(map[uint]*database.Order)
-		m.OrdersBySubscriptionID = make(map[uint][]database.Order)
-	}
-	for _, existing := range m.Orders {
-		if existing.SubscriptionID == subscriptionID && existing.ProductID == productID && existing.PaymentProvider == "platega" && existing.Status == database.OrderStatusPending {
-			return existing, nil
-		}
-	}
-	order := &database.Order{ID: uint(len(m.Orders) + 1), SubscriptionID: subscriptionID, ProductID: productID, Status: database.OrderStatusPending, AmountCents: amountCents, Currency: currency, PaymentProvider: "platega", CreatedAt: now} // #nosec G115 -- slice length is non-negative
-	m.Orders[order.ID] = order
-	m.OrdersBySubscriptionID[subscriptionID] = append(m.OrdersBySubscriptionID[subscriptionID], *order)
-	return order, nil
 }
 
 func (m *DatabaseService) FindOrCreatePendingPaymentOrder(ctx context.Context, subscriptionID, productID uint, amountCents int64, currency string, now time.Time) (*database.Order, error) {
@@ -1009,11 +915,9 @@ func (m *DatabaseService) FindOrCreatePendingPaymentOrder(ctx context.Context, s
 	}
 	if m.Orders == nil {
 		m.Orders = make(map[uint]*database.Order)
-		m.OrdersBySubscriptionID = make(map[uint][]database.Order)
 	}
 	order := &database.Order{ID: uint(len(m.Orders) + 1), SubscriptionID: subscriptionID, ProductID: productID, Status: database.OrderStatusPending, AmountCents: amountCents, Currency: currency, PaymentProvider: "platega", CreatedAt: now} // #nosec G115 -- slice length is non-negative
 	m.Orders[order.ID] = order
-	m.OrdersBySubscriptionID[subscriptionID] = append(m.OrdersBySubscriptionID[subscriptionID], *order)
 	return order, nil
 }
 
@@ -1094,33 +998,6 @@ func (m *DatabaseService) CancelOrderCAS(ctx context.Context, provider string, p
 	}
 	return false, nil
 }
-func (m *DatabaseService) UpdateOrderStatus(ctx context.Context, id uint, status database.OrderStatus) error {
-	if m.UpdateOrderStatusFunc != nil {
-		return m.UpdateOrderStatusFunc(ctx, id, status)
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if order, ok := m.Orders[id]; ok {
-		order.Status = status
-		return nil
-	}
-	return gorm.ErrRecordNotFound
-}
-
-func (m *DatabaseService) UpdateOrderPaidStatus(ctx context.Context, id uint) error {
-	if m.UpdateOrderPaidStatusFunc != nil {
-		return m.UpdateOrderPaidStatusFunc(ctx, id)
-	}
-	return nil
-}
-
-func (m *DatabaseService) UpdateOrderActivatedAt(ctx context.Context, id uint, activatedAt, expiresAt time.Time) error {
-	if m.UpdateOrderActivatedAtFunc != nil {
-		return m.UpdateOrderActivatedAtFunc(ctx, id, activatedAt, expiresAt)
-	}
-	return nil
-}
-
 func (m *DatabaseService) GetReferralCount(ctx context.Context, referrerTGID int64) (int64, error) {
 	if m.GetReferralCountFunc != nil {
 		return m.GetReferralCountFunc(ctx, referrerTGID)
@@ -1438,21 +1315,5 @@ func (m *BotAPI) Self() *tgbotapi.User {
 		CanJoinGroups:           false,
 		CanReadAllGroupMessages: false,
 		SupportsInlineQueries:   false,
-	}
-}
-
-// Setenv sets an environment variable and returns a cleanup function.
-func Setenv(t testing.TB, key, value string) func() {
-	t.Helper()
-	prev, ok := os.LookupEnv(key)
-	if err := os.Setenv(key, value); err != nil {
-		t.Fatalf("failed to set env %s: %v", key, err)
-	}
-	return func() {
-		if ok {
-			_ = os.Setenv(key, prev)
-		} else {
-			_ = os.Unsetenv(key)
-		}
 	}
 }
