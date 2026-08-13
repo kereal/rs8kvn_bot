@@ -20,7 +20,6 @@ func TestMain(m *testing.M) {
 }
 
 func TestSentryLevelFromString(t *testing.T) {
-
 	tests := []struct {
 		name     string
 		input    string
@@ -44,7 +43,6 @@ func TestSentryLevelFromString(t *testing.T) {
 }
 
 func TestInit_CreatesDirectory(t *testing.T) {
-
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "subdir", "test.log")
 
@@ -55,13 +53,13 @@ func TestInit_CreatesDirectory(t *testing.T) {
 	_, err = os.Stat(filepath.Dir(logPath))
 	assert.NoError(t, err, "Init() did not create parent directory")
 
-	if err := Close(); err != nil {
+	err = Close()
+	if err != nil {
 		t.Logf("Warning: failed to close logger: %v", err)
 	}
 }
 
 func TestInit_InvalidLogLevel(t *testing.T) {
-
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
 
@@ -69,20 +67,21 @@ func TestInit_InvalidLogLevel(t *testing.T) {
 	_, err := Init(logPath, "invalid")
 	require.NoError(t, err, "Init() with invalid level should not error")
 
-	if err := Close(); err != nil {
+	err = Close()
+	if err != nil {
 		t.Logf("Warning: failed to close logger: %v", err)
 	}
 }
 
 func TestInfo(t *testing.T) {
-
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
 
 	_, err := Init(logPath, "info")
 	require.NoError(t, err, "Init() error")
 	t.Cleanup(func() {
-		if err := Close(); err != nil {
+		err := Close()
+		if err != nil {
 			t.Logf("Warning: failed to close logger: %v", err)
 		}
 	})
@@ -93,12 +92,12 @@ func TestInfo(t *testing.T) {
 }
 
 func TestError(t *testing.T) {
-
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
 
 	_, err := Init(logPath, "info")
 	require.NoError(t, err, "Init() error")
+
 	defer Close()
 
 	// Should not panic
@@ -107,12 +106,12 @@ func TestError(t *testing.T) {
 }
 
 func TestDebug(t *testing.T) {
-
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
 
 	_, err := Init(logPath, "debug")
 	require.NoError(t, err, "Init() error")
+
 	defer Close()
 
 	// Should not panic
@@ -121,12 +120,12 @@ func TestDebug(t *testing.T) {
 }
 
 func TestWarn(t *testing.T) {
-
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
 
 	_, err := Init(logPath, "info")
 	require.NoError(t, err, "Init() error")
+
 	defer Close()
 
 	// Should not panic
@@ -135,12 +134,12 @@ func TestWarn(t *testing.T) {
 }
 
 func TestSync(t *testing.T) {
-
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
 
 	_, err := Init(logPath, "info")
 	require.NoError(t, err, "Init() error")
+
 	defer Close()
 
 	// Sync may return error for stdout on some systems, that's acceptable
@@ -148,7 +147,6 @@ func TestSync(t *testing.T) {
 }
 
 func TestClose(t *testing.T) {
-
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
 
@@ -160,7 +158,6 @@ func TestClose(t *testing.T) {
 }
 
 func TestClose_MultipleCalls(t *testing.T) {
-
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
 
@@ -175,7 +172,6 @@ func TestClose_MultipleCalls(t *testing.T) {
 }
 
 func TestLogFileWritten(t *testing.T) {
-
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
 
@@ -204,7 +200,6 @@ func TestLogFileWritten(t *testing.T) {
 // ==================== Service Tests ====================
 
 func TestNewService(t *testing.T) {
-
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
 
@@ -217,7 +212,6 @@ func TestNewService(t *testing.T) {
 }
 
 func TestNewService_CreatesDirectory(t *testing.T) {
-
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "subdir", "test.log")
 
@@ -232,7 +226,6 @@ func TestNewService_CreatesDirectory(t *testing.T) {
 }
 
 func TestService_Close(t *testing.T) {
-
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
 
@@ -244,12 +237,12 @@ func TestService_Close(t *testing.T) {
 }
 
 func TestService_Info(t *testing.T) {
-
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
 
 	service, err := NewService(logPath, "info")
 	require.NoError(t, err, "NewService() error")
+
 	defer service.Close()
 
 	// Should not panic
@@ -258,12 +251,12 @@ func TestService_Info(t *testing.T) {
 }
 
 func TestService_Debug(t *testing.T) {
-
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
 
 	service, err := NewService(logPath, "debug")
 	require.NoError(t, err, "NewService() error")
+
 	defer service.Close()
 
 	service.Debug("test debug message")
@@ -271,12 +264,12 @@ func TestService_Debug(t *testing.T) {
 }
 
 func TestService_Warn(t *testing.T) {
-
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
 
 	service, err := NewService(logPath, "info")
 	require.NoError(t, err, "NewService() error")
+
 	defer service.Close()
 
 	service.Warn("test warn message")
@@ -284,12 +277,12 @@ func TestService_Warn(t *testing.T) {
 }
 
 func TestService_Error(t *testing.T) {
-
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
 
 	service, err := NewService(logPath, "info")
 	require.NoError(t, err, "NewService() error")
+
 	defer service.Close()
 
 	service.Error("test error message")
@@ -297,12 +290,12 @@ func TestService_Error(t *testing.T) {
 }
 
 func TestService_With(t *testing.T) {
-
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
 
 	service, err := NewService(logPath, "info")
 	require.NoError(t, err, "NewService() error")
+
 	defer service.Close()
 
 	newService := service.With(zap.String("key", "value"))
@@ -312,12 +305,12 @@ func TestService_With(t *testing.T) {
 }
 
 func TestService_WithFields(t *testing.T) {
-
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
 
 	service, err := NewService(logPath, "info")
 	require.NoError(t, err, "NewService() error")
+
 	defer service.Close()
 
 	newService := service.With(
@@ -330,12 +323,12 @@ func TestService_WithFields(t *testing.T) {
 }
 
 func TestService_SetSentryHub(t *testing.T) {
-
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
 
 	service, err := NewService(logPath, "info")
 	require.NoError(t, err, "NewService() error")
+
 	defer service.Close()
 
 	// Should not panic with nil hub
@@ -345,13 +338,13 @@ func TestService_SetSentryHub(t *testing.T) {
 // ==================== tgbotapiLogger Tests ====================
 
 func TestTgbotapiLogger_Println(t *testing.T) {
-
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
 
 	// Initialize logger first
 	_, err := Init(logPath, "info")
 	require.NoError(t, err, "Init() error")
+
 	defer Close()
 
 	logger := &tgbotapiLogger{}
@@ -360,13 +353,13 @@ func TestTgbotapiLogger_Println(t *testing.T) {
 }
 
 func TestTgbotapiLogger_Printf(t *testing.T) {
-
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
 
 	// Initialize logger first
 	_, err := Init(logPath, "info")
 	require.NoError(t, err, "Init() error")
+
 	defer Close()
 
 	logger := &tgbotapiLogger{}
@@ -377,13 +370,13 @@ func TestTgbotapiLogger_Printf(t *testing.T) {
 // ==================== stdLogWriter Tests ====================
 
 func TestStdLogWriter_Write(t *testing.T) {
-
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
 
 	// Initialize logger first
 	_, err := Init(logPath, "info")
 	require.NoError(t, err, "Init() error")
+
 	defer Close()
 
 	writer := &stdLogWriter{}
@@ -405,13 +398,13 @@ func TestStdLogWriter_Write(t *testing.T) {
 // ==================== Writer Tests ====================
 
 func TestWriter(t *testing.T) {
-
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
 
 	// Initialize logger first
 	_, err := Init(logPath, "info")
 	require.NoError(t, err, "Init() error")
+
 	defer Close()
 
 	writer := Writer()
@@ -425,12 +418,12 @@ func TestWriter(t *testing.T) {
 // ==================== RedirectStdLog Tests ====================
 
 func TestRedirectStdLog_ActualRedirection(t *testing.T) {
-
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
 
 	_, err := Init(logPath, "info")
 	require.NoError(t, err, "Init() error")
+
 	defer Close()
 
 	// Capture original std log output
@@ -459,12 +452,12 @@ func TestRedirectStdLog_ActualRedirection(t *testing.T) {
 // ==================== Edge Cases ====================
 
 func TestCaptureToSentry(t *testing.T) {
-
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
 
 	_, err := Init(logPath, "info")
 	require.NoError(t, err, "Init() error")
+
 	defer Close()
 
 	// Should not panic
@@ -473,12 +466,12 @@ func TestCaptureToSentry(t *testing.T) {
 }
 
 func TestService_WithError(t *testing.T) {
-
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
 
 	service, err := NewService(logPath, "info")
 	require.NoError(t, err, "NewService() error")
+
 	defer service.Close()
 
 	testErr := fmt.Errorf("test error with context")
@@ -490,12 +483,12 @@ func TestService_WithError(t *testing.T) {
 }
 
 func TestService_WithError_NoSentry(t *testing.T) {
-
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
 
 	service, err := NewService(logPath, "info")
 	require.NoError(t, err, "NewService() error")
+
 	defer service.Close()
 
 	testErr := fmt.Errorf("test error without sentry")
@@ -505,24 +498,24 @@ func TestService_WithError_NoSentry(t *testing.T) {
 }
 
 func TestService_CaptureSentry_NoSentry(t *testing.T) {
-
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
 
 	service, err := NewService(logPath, "info")
 	require.NoError(t, err, "NewService() error")
+
 	defer service.Close()
 
 	service.captureSentry("test message", sentry.LevelInfo)
 }
 
 func TestService_FlushSentry_NoSentry(t *testing.T) {
-
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
 
 	service, err := NewService(logPath, "info")
 	require.NoError(t, err, "NewService() error")
+
 	defer service.Close()
 
 	service.flushSentry(0)
@@ -554,12 +547,12 @@ func TestIsStdoutError(t *testing.T) {
 // ==================== Service Sentry Tests ====================
 
 func TestService_CaptureSentry_WithHub(t *testing.T) {
-
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
 
 	service, err := NewService(logPath, "info")
 	require.NoError(t, err, "NewService() error")
+
 	defer service.Close()
 
 	// Create a mock hub
@@ -574,12 +567,12 @@ func TestService_CaptureSentry_WithHub(t *testing.T) {
 }
 
 func TestService_FlushSentry_WithHub(t *testing.T) {
-
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
 
 	service, err := NewService(logPath, "info")
 	require.NoError(t, err, "NewService() error")
+
 	defer service.Close()
 
 	client, _ := sentry.NewClient(sentry.ClientOptions{
@@ -593,12 +586,12 @@ func TestService_FlushSentry_WithHub(t *testing.T) {
 }
 
 func TestService_WithError_WithHub(t *testing.T) {
-
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
 
 	service, err := NewService(logPath, "info")
 	require.NoError(t, err, "NewService() error")
+
 	defer service.Close()
 
 	client, _ := sentry.NewClient(sentry.ClientOptions{
@@ -615,7 +608,6 @@ func TestService_WithError_WithHub(t *testing.T) {
 // ==================== Close Error Aggregation Tests ====================
 
 func TestClose_BothErrors(t *testing.T) {
-
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
 

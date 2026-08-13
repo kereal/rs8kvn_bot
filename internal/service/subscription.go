@@ -1,3 +1,4 @@
+// Package service contains subscription, payment, and synchronization business logic.
 package service
 
 import (
@@ -18,6 +19,8 @@ import (
 	"gorm.io/gorm"
 )
 
+// SubscriptionService coordinates subscription persistence, VPN provisioning,
+// cache invalidation, metrics, and referral/trial lifecycle operations.
 type SubscriptionService struct {
 	db                interfaces.DatabaseService
 	reminderRepo      interfaces.SubscriptionReminderRepository
@@ -31,6 +34,8 @@ type SubscriptionService struct {
 	bot               interfaces.BotAPI
 }
 
+// CreateResult contains the subscription and referral information produced by
+// creating or recovering a user subscription.
 type CreateResult struct {
 	Subscription    *database.Subscription
 	SubscriptionURL string
@@ -42,10 +47,12 @@ func XUIEmail(username string, telegramID int64) string {
 	if utils.IsRealUsername(username) {
 		return username
 	}
+
 	return fmt.Sprintf("tgId_%d", telegramID)
 }
 
-// NewSubscriptionService creates a SubscriptionService configured with the given database, xui clients, VPN clients, nodes, and configuration.
+// NewSubscriptionService creates a SubscriptionService configured with the given
+// database, XUI/VPN clients, nodes, and application configuration.
 func NewSubscriptionService(db interfaces.DatabaseService, xuiClients map[uint]interfaces.XUIClient, vpnClients map[uint]vpn.Client, nodes []database.Node, cfg *config.Config) *SubscriptionService {
 	return &SubscriptionService{
 		db:           db,
@@ -70,11 +77,13 @@ func (s *SubscriptionService) SetSyncService(svc *SyncService) {
 // activeNodes returns nodes that are active and have a host configured.
 func (s *SubscriptionService) activeNodes() []database.Node {
 	var result []database.Node
+
 	for _, node := range s.nodes {
 		if node.IsActive && node.Host != "" {
 			result = append(result, node)
 		}
 	}
+
 	return result
 }
 
@@ -85,9 +94,11 @@ func (s *SubscriptionService) trialNodes(ctx context.Context) ([]database.Node, 
 	if err != nil {
 		return nil, fmt.Errorf("load trial nodes: %w", err)
 	}
+
 	if len(nodes) == 0 {
 		return nil, fmt.Errorf("trial plan has no linked nodes")
 	}
+
 	return nodes, nil
 }
 
@@ -101,19 +112,23 @@ func (s *SubscriptionService) Create(ctx context.Context, telegramID int64, user
 
 	existing, err := s.db.GetByTelegramID(ctx, telegramID)
 	if err == nil {
-		if err := s.ensureSubscriptionNodes(ctx, existing); err != nil {
+		err = s.ensureSubscriptionNodes(ctx, existing)
+		if err != nil {
 			return nil, fmt.Errorf("ensure subscription nodes: %w", err)
 		}
+
 		referrerID := int64(0)
 		if existing.ReferredBy != nil {
 			referrerID = *existing.ReferredBy
 		}
+
 		return &CreateResult{
 			Subscription:    existing,
 			SubscriptionURL: s.cfg.SubURL(existing.SubscriptionID),
 			ReferrerTGID:    referrerID,
 		}, nil
 	}
+
 	if !errors.Is(err, database.ErrSubscriptionNotFound) && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, fmt.Errorf("lookup subscription: %w", err)
 	}
@@ -127,16 +142,19 @@ func (s *SubscriptionService) Create(ctx context.Context, telegramID int64, user
 		if reErr != nil {
 			return nil, fmt.Errorf("reanimate subscription: %w", reErr)
 		}
+
 		referrerID := int64(0)
 		if reanimated.ReferredBy != nil {
 			referrerID = *reanimated.ReferredBy
 		}
+
 		return &CreateResult{
 			Subscription:    reanimated,
 			SubscriptionURL: s.cfg.SubURL(reanimated.SubscriptionID),
 			ReferrerTGID:    referrerID,
 		}, nil
 	}
+
 	if !errors.Is(anyErr, database.ErrSubscriptionNotFound) && !errors.Is(anyErr, gorm.ErrRecordNotFound) {
 		return nil, fmt.Errorf("lookup subscription (any status): %w", anyErr)
 	}
@@ -150,6 +168,7 @@ func (s *SubscriptionService) Create(ctx context.Context, telegramID int64, user
 	if err != nil {
 		return nil, fmt.Errorf("generate client id: %w", err)
 	}
+
 	subID, err := utils.GenerateSubID()
 	if err != nil {
 		return nil, fmt.Errorf("generate sub id: %w", err)
@@ -164,11 +183,13 @@ func (s *SubscriptionService) Create(ctx context.Context, telegramID int64, user
 		Status:         "active",
 	}
 
-	if err := s.db.CreateSubscription(ctx, sub, inviteCode); err != nil {
+	err = s.db.CreateSubscription(ctx, sub, inviteCode)
+	if err != nil {
 		return nil, fmt.Errorf("create subscription: %w", err)
 	}
 
-	if err := s.ensureSubscriptionNodes(ctx, sub); err != nil {
+	err = s.ensureSubscriptionNodes(ctx, sub)
+	if err != nil {
 		return nil, fmt.Errorf("ensure subscription nodes: %w", err)
 	}
 
@@ -176,23 +197,19 @@ func (s *SubscriptionService) Create(ctx context.Context, telegramID int64, user
 	if sub.ReferredBy != nil {
 		referrerID = *sub.ReferredBy
 	}
+
 	subscriptionURL := s.cfg.SubURL(subID)
 	result := &CreateResult{
 		Subscription:    sub,
 		SubscriptionURL: subscriptionURL,
 		ReferrerTGID:    referrerID,
 	}
-	metrics.SubscriptionCreatesTotal.Inc()
-	s.RefreshActiveSubscriptionsMetric(ctx)
-	return result, nil
-}
 
-func calculateProductExpiry(now time.Time, currentPlanID uint, currentExpiry *time.Time, product *database.Product) time.Time {
-	base := now
-	if product != nil && currentPlanID == product.PlanID && currentExpiry != nil && currentExpiry.After(now) {
-		base = *currentExpiry
-	}
-	return base.AddDate(0, 0, product.DurationDays)
+	metrics.SubscriptionCreatesTotal.Inc()
+
+	s.RefreshActiveSubscriptionsMetric(ctx)
+
+	return result, nil
 }
 
 // GetByTelegramID retrieves a subscription by Telegram user ID.
@@ -240,23 +257,107 @@ func (s *SubscriptionService) reanimateRevokedSubscription(ctx context.Context, 
 	sub.Devices = "[]"
 	sub.Ips = "[]"
 
-	if err := s.db.UpdateSubscription(ctx, sub); err != nil {
+	err = s.db.UpdateSubscription(ctx, sub)
+	if err != nil {
 		return nil, fmt.Errorf("reanimate subscription: %w", err)
 	}
 
 	// Wipe stale node bindings; ensureSubscriptionNodes rebuilds them as pending_add.
-	if err := s.db.DeleteSubscriptionNodesBySubscriptionID(ctx, sub.ID); err != nil {
+	err = s.db.DeleteSubscriptionNodesBySubscriptionID(ctx, sub.ID)
+	if err != nil {
 		logger.Warn("failed to clear subscription nodes during reanimation",
 			zap.Uint("subscription_id", sub.ID),
 			zap.Error(err))
 	}
 
-	if err := s.ensureSubscriptionNodes(ctx, sub); err != nil {
+	err = s.ensureSubscriptionNodes(ctx, sub)
+	if err != nil {
 		return nil, fmt.Errorf("ensure subscription nodes: %w", err)
 	}
 
 	metrics.SubscriptionCreatesTotal.Inc()
+
 	s.RefreshActiveSubscriptionsMetric(ctx)
+
+	return sub, nil
+}
+
+// DowngradeToFreePlan resets a subscription to the free plan and deprovisions
+// premium VPN access. Used when a paid order is chargebacked: the user loses
+// premium access but retains the free tier. Returns the updated subscription.
+//
+// With the sync service wired, premium node bindings are first transitioned to
+// pending_remove and free-plan bindings to pending_add via ApplyPlanToSubscription,
+// then SyncSubscription physically deletes the VPN clients from the premium
+// panels. Without the sync service (tests / before wiring) the node bindings are
+// rebuilt in place and the background worker reconciles panels later.
+func (s *SubscriptionService) DowngradeToFreePlan(ctx context.Context, sub *database.Subscription) (*database.Subscription, error) {
+	if sub == nil {
+		return nil, errors.New("downgrade: subscription is nil")
+	}
+
+	freePlan, err := s.db.GetPlanByName(ctx, database.FreePlanName)
+	if err != nil {
+		return nil, fmt.Errorf("downgrade: resolve free plan: %w", err)
+	}
+
+	// Reset subscription to free-plan defaults.
+	sub.PlanID = freePlan.ID
+	sub.Status = "active"
+	sub.ExpiresAt = nil
+	sub.ProductID = nil
+	sub.StartedAt = nil
+	sub.PricePaidCents = 0
+	sub.Currency = nil
+
+	err = s.db.UpdateSubscription(ctx, sub)
+	if err != nil {
+		return nil, fmt.Errorf("downgrade: update subscription: %w", err)
+	}
+
+	if s.invalidateBySubID != nil && sub.SubscriptionID != "" {
+		s.invalidateBySubID(sub.SubscriptionID)
+	}
+
+	if s.syncService != nil {
+		// The subscription now points at the free plan, so ApplyPlanToSubscription
+		// reconciles the bindings against it: premium nodes become pending_remove
+		// and missing free nodes pending_add. SyncSubscription then physically
+		// removes the premium clients from the panels (best-effort; the background
+		// worker retries any failed removals).
+		err = s.syncService.ApplyPlanToSubscription(ctx, sub.ID)
+		if err != nil {
+			return nil, fmt.Errorf("downgrade: apply plan: %w", err)
+		}
+
+		err = s.syncService.SyncSubscription(ctx, sub.ID)
+		if err != nil {
+			logger.Warn("downgrade: sync subscription failed (will retry)",
+				zap.Uint("subscription_id", sub.ID),
+				zap.Error(err))
+		}
+
+		s.RefreshActiveSubscriptionsMetric(ctx)
+
+		return sub, nil
+	}
+
+	// Fallback without the sync service (tests / before wiring): rebuild the
+	// node bindings; physical panel cleanup is left to the background workers.
+	err = s.db.DeleteSubscriptionNodesBySubscriptionID(ctx, sub.ID)
+	if err != nil {
+		logger.Warn("downgrade: failed to clear subscription nodes",
+			zap.Uint("subscription_id", sub.ID),
+			zap.Error(err))
+	}
+
+	err = s.ensureSubscriptionNodes(ctx, sub)
+	if err != nil {
+		return nil, fmt.Errorf("downgrade: ensure subscription nodes: %w", err)
+	}
+
+	s.RefreshActiveSubscriptionsMetric(ctx)
+
 	return sub, nil
 }
 
@@ -268,16 +369,21 @@ func (s *SubscriptionService) reanimateRevokedSubscription(ctx context.Context, 
 func (s *SubscriptionService) revokeAndDeprovisionThenDelete(ctx context.Context, sub *database.Subscription) (*database.Subscription, error) {
 	// Phase 1: mark revoked before any external effect.
 	sub.Status = "revoked"
-	if err := s.db.UpdateSubscription(ctx, sub); err != nil {
+
+	err := s.db.UpdateSubscription(ctx, sub)
+	if err != nil {
 		return nil, fmt.Errorf("mark revoked: %w", err)
 	}
 
 	// Phase 2: deprovision VPN access (best-effort; background sync reconciles on failure).
 	if s.syncService != nil {
-		if err := s.syncService.MarkAllForRemoval(ctx, sub.ID); err != nil {
+		err = s.syncService.MarkAllForRemoval(ctx, sub.ID)
+		if err != nil {
 			return nil, fmt.Errorf("deprovision mark failed: %w", err)
 		}
-		if err := s.syncService.SyncSubscription(ctx, sub.ID); err != nil {
+
+		err = s.syncService.SyncSubscription(ctx, sub.ID)
+		if err != nil {
 			logger.Warn("deprovision sync failed; subscription remains revoked, background sync will retry",
 				zap.Uint("subscription_id", sub.ID),
 				zap.Error(err))
@@ -288,10 +394,13 @@ func (s *SubscriptionService) revokeAndDeprovisionThenDelete(ctx context.Context
 	// If this fails, the row is already revoked; background reconciliation cleans up.
 	// Unified on DeleteSubscriptionByID(sub.ID): both entry points already resolved sub,
 	// so the primary key is known and the telegramID/id divergence in the old copies is gone.
-	if _, err := s.db.DeleteSubscriptionByID(ctx, sub.ID); err != nil {
+	_, err = s.db.DeleteSubscriptionByID(ctx, sub.ID)
+	if err != nil {
 		return nil, fmt.Errorf("db delete: %w", err)
 	}
-	if err := s.db.DeleteSubscriptionNodesBySubscriptionID(ctx, sub.ID); err != nil {
+
+	err = s.db.DeleteSubscriptionNodesBySubscriptionID(ctx, sub.ID)
+	if err != nil {
 		// Non-fatal: SyncPendingNodes will purge orphan nodes on next run.
 		logger.Warn("failed to delete subscription nodes after subscription delete",
 			zap.Uint("subscription_id", sub.ID),
@@ -303,6 +412,7 @@ func (s *SubscriptionService) revokeAndDeprovisionThenDelete(ctx context.Context
 	}
 
 	s.RefreshActiveSubscriptionsMetric(ctx)
+
 	return sub, nil
 }
 
@@ -314,7 +424,9 @@ func (s *SubscriptionService) Delete(ctx context.Context, telegramID int64) erro
 	if err != nil {
 		return err
 	}
+
 	_, err = s.revokeAndDeprovisionThenDelete(ctx, sub)
+
 	return err
 }
 
@@ -325,6 +437,7 @@ func (s *SubscriptionService) DeleteByID(ctx context.Context, id uint) (*databas
 	if err != nil {
 		return nil, fmt.Errorf("get subscription: %w", err)
 	}
+
 	return s.revokeAndDeprovisionThenDelete(ctx, sub)
 }
 
@@ -336,11 +449,14 @@ func (s *SubscriptionService) deleteClientFromAllNodes(ctx context.Context, prov
 		if !node.IsActive {
 			continue
 		}
+
 		client, ok := s.vpnClients[node.ID]
 		if !ok {
 			continue
 		}
-		if err := client.DeleteSubscription(ctx, provision); err != nil {
+
+		err := client.DeleteSubscription(ctx, provision)
+		if err != nil {
 			logger.Warn("failed to delete VPN subscription on node",
 				zap.String("username", provision.Username),
 				zap.Uint("node_id", node.ID),
@@ -349,7 +465,8 @@ func (s *SubscriptionService) deleteClientFromAllNodes(ctx context.Context, prov
 	}
 }
 
-// TrialCreateResult holds the outcome of a trial creation.
+// TrialCreateResult holds the outcome of a trial creation, including the
+// generated identifiers and public subscription URL.
 type TrialCreateResult struct {
 	Subscription    *database.Subscription
 	SubscriptionURL string
@@ -366,6 +483,7 @@ func (s *SubscriptionService) CreateTrial(ctx context.Context, inviteCode string
 	if err != nil {
 		return nil, fmt.Errorf("generate sub id: %w", err)
 	}
+
 	clientID, err := utils.GenerateUUID()
 	if err != nil {
 		return nil, fmt.Errorf("generate client id: %w", err)
@@ -390,6 +508,7 @@ func (s *SubscriptionService) CreateTrial(ctx context.Context, inviteCode string
 	}
 
 	node := trialNodes[0]
+
 	client, ok := s.vpnClients[node.ID]
 	if !ok {
 		return nil, fmt.Errorf("vpn client not found for trial node %d", node.ID)
@@ -405,17 +524,21 @@ func (s *SubscriptionService) CreateTrial(ctx context.Context, inviteCode string
 		ExpiryTime:   expiryTime,
 		ResetDays:    resetDays,
 	}
-	if err = client.CreateSubscription(ctx, provision); err != nil {
+
+	err = client.CreateSubscription(ctx, provision)
+	if err != nil {
 		return nil, fmt.Errorf("add trial client on node %d: %w", node.ID, err)
 	}
 
 	sub, err := s.db.CreateTrialSubscription(ctx, inviteCode, subID, clientID, expiryTime)
 	if err != nil {
-		if delErr := client.DeleteSubscription(ctx, provision); delErr != nil {
+		delErr := client.DeleteSubscription(ctx, provision)
+		if delErr != nil {
 			logger.Warn("failed to rollback trial client on node",
 				zap.Uint("node_id", node.ID),
 				zap.Error(delErr))
 		}
+
 		return nil, fmt.Errorf("create trial subscription: %w", err)
 	}
 
@@ -426,7 +549,9 @@ func (s *SubscriptionService) CreateTrial(ctx context.Context, inviteCode string
 		SubID:           subID,
 		ClientID:        clientID,
 	}
+
 	s.RefreshActiveSubscriptionsMetric(ctx)
+
 	return result, nil
 }
 
@@ -445,7 +570,7 @@ func (s *SubscriptionService) GetInviteByCode(ctx context.Context, code string) 
 	return s.db.GetInviteByCode(ctx, code)
 }
 
-// BindTrialSubscription binds a trial subscription to a Telegram user.
+// BindTrial binds a trial subscription to a Telegram user.
 // It updates the trial in the database, then upgrades the client in the
 // 3x-ui panel with proper traffic limits and expiry settings.
 func (s *SubscriptionService) BindTrial(ctx context.Context, subscriptionID string, telegramID int64, username string) (*database.Subscription, error) {
@@ -460,6 +585,7 @@ func (s *SubscriptionService) BindTrial(ctx context.Context, subscriptionID stri
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve free plan: %w", err)
 	}
+
 	trafficBytes := freePlan.TrafficLimit
 	// Trials must never auto-renew. Keep resetDays=0 even though the free
 	// plan carries a traffic limit (which would otherwise enable reset=-1 → 30).
@@ -468,9 +594,12 @@ func (s *SubscriptionService) BindTrial(ctx context.Context, subscriptionID stri
 	expiryTime := time.UnixMilli(0)
 
 	var comment string
+
 	if sub.InviteCode != nil {
-		if invite, err := s.db.GetInviteByCode(ctx, *sub.InviteCode); err == nil {
-			if referrerSub, err := s.db.GetByTelegramID(ctx, invite.ReferrerTGID); err == nil {
+		invite, err := s.db.GetInviteByCode(ctx, *sub.InviteCode)
+		if err == nil {
+			referrerSub, err := s.db.GetByTelegramID(ctx, invite.ReferrerTGID)
+			if err == nil {
 				comment = fmt.Sprintf("from: @%s", referrerSub.Username)
 			}
 		}
@@ -483,12 +612,14 @@ func (s *SubscriptionService) BindTrial(ctx context.Context, subscriptionID stri
 	if err != nil {
 		return sub, fmt.Errorf("load trial nodes: %w", err)
 	}
+
 	if len(nodes) == 0 {
 		return sub, fmt.Errorf("no trial nodes configured")
 	}
 	// Trial is intentionally single-node (provisioned on nodes[0] by CreateTrial).
 	// Only update the node where the client actually exists.
 	node := nodes[0]
+
 	client, ok := s.vpnClients[node.ID]
 	if !ok {
 		return sub, fmt.Errorf("vpn client not found for trial node %d", node.ID)
@@ -496,7 +627,7 @@ func (s *SubscriptionService) BindTrial(ctx context.Context, subscriptionID stri
 	// Rename the anonymous trial client (email "trial_<subID>") to the bound
 	// user's identity, lift traffic limits to the free plan, and bind the
 	// Telegram id. proxman/fetch nodes treat this as a no-op.
-	if err := client.UpdateSubscription(ctx, vpn.SubscriptionProvision{
+	err = client.UpdateSubscription(ctx, vpn.SubscriptionProvision{
 		ClientID:     sub.ClientID,
 		CurrentEmail: currentEmail,
 		Username:     email,
@@ -506,7 +637,8 @@ func (s *SubscriptionService) BindTrial(ctx context.Context, subscriptionID stri
 		ResetDays:    resetDays,
 		TgID:         telegramID,
 		Comment:      comment,
-	}); err != nil {
+	})
+	if err != nil {
 		return sub, fmt.Errorf("update trial client on node %d: %w", node.ID, err)
 	}
 
@@ -530,6 +662,7 @@ func (s *SubscriptionService) RefreshActiveSubscriptionsMetric(ctx context.Conte
 		logger.Warn("failed to refresh active subscriptions metric", zap.Error(err))
 		return
 	}
+
 	metrics.ActiveSubscriptions.Set(float64(count))
 
 	trialCount, err := s.db.CountTrialSubscriptions(ctx)
@@ -537,6 +670,7 @@ func (s *SubscriptionService) RefreshActiveSubscriptionsMetric(ctx context.Conte
 		logger.Warn("failed to refresh trial subscriptions metric", zap.Error(err))
 		return
 	}
+
 	metrics.TrialSubscriptions.Set(float64(trialCount))
 }
 
@@ -598,6 +732,7 @@ func (s *SubscriptionService) InvalidateBySubID(ctx context.Context, subID strin
 // This is a best-effort background cleanup; errors are logged but do not stop the scan.
 func (s *SubscriptionService) ReconcileOrphanedClients(ctx context.Context) (int, error) {
 	start := time.Now()
+
 	rows, err := s.db.GetAllSubscriptions(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("failed to fetch subscriptions: %w", err)
@@ -611,12 +746,14 @@ func (s *SubscriptionService) ReconcileOrphanedClients(ctx context.Context) (int
 	}
 
 	removed := 0
+
 	for _, sub := range activeSubs {
 		subNodes, nodeErr := s.db.GetBySubscriptionID(ctx, sub.ID)
 		if nodeErr != nil {
 			logger.Warn("failed to load subscription nodes for orphan reconciliation",
 				zap.Uint("subscription_id", sub.ID),
 				zap.Error(nodeErr))
+
 			continue
 		}
 
@@ -627,6 +764,7 @@ func (s *SubscriptionService) ReconcileOrphanedClients(ctx context.Context) (int
 		}
 
 		hasLiveNode := false
+
 		for _, sn := range subNodes {
 			if sn.Status == database.SyncStatusActive ||
 				sn.Status == database.SyncStatusPendingAdd ||
@@ -642,7 +780,8 @@ func (s *SubscriptionService) ReconcileOrphanedClients(ctx context.Context) (int
 
 		// Every node binding is pending_remove (or an unexpected state):
 		// the subscription is fully deprovisioned but the DB row remains.
-		if _, delErr := s.db.DeleteSubscriptionByID(ctx, sub.ID); delErr != nil {
+		_, delErr := s.db.DeleteSubscriptionByID(ctx, sub.ID)
+		if delErr != nil {
 			logger.Warn("failed to delete orphaned subscription",
 				zap.Error(delErr),
 				zap.Uint("id", sub.ID),
@@ -650,17 +789,20 @@ func (s *SubscriptionService) ReconcileOrphanedClients(ctx context.Context) (int
 				zap.String("subscription_id", sub.SubscriptionID))
 		} else {
 			removed++
+
 			logger.Info("removed orphaned subscription (no live node bindings)",
 				zap.Uint("id", sub.ID),
 				zap.Int64("telegram_id", sub.TelegramID),
-				zap.String("username", sub.Username),
-				zap.String("subscription_id", sub.SubscriptionID))
+				zap.String("username", sub.Username), zap.String("subscription_id", sub.SubscriptionID))
+
 			if s.invalidate != nil && sub.TelegramID > 0 {
 				s.invalidate(sub.TelegramID)
 			}
+
 			if s.invalidateBySubID != nil && sub.SubscriptionID != "" {
 				s.invalidateBySubID(sub.SubscriptionID)
 			}
+
 			metrics.OrphanedClientsRemovedTotal.Inc()
 		}
 
@@ -668,19 +810,25 @@ func (s *SubscriptionService) ReconcileOrphanedClients(ctx context.Context) (int
 			return removed, ctx.Err()
 		}
 	}
+
 	s.RefreshActiveSubscriptionsMetric(ctx)
+
 	metrics.ReconcileOrphanedDuration.Observe(time.Since(start).Seconds())
+
 	return removed, nil
 }
 
 // CleanupExpiredTrials deletes expired trial subscriptions from the database
-// and deprovisions their VPN clients via the sync service.
+// and deprovisions their VPN clients.
 //
-// The DB cleanup (database.CleanupExpiredTrials) only returns unbound trials
-// (telegram_id < 0, plan_id == trial plan). These subscriptions always have
-// Status == "active" (BindTrialSubscription changes plan_id to free, which
-// excludes them from the DB query). Therefore the sync-based deprovision path
-// is the only branch that executes in production.
+// The DB cleanup (database.CleanupExpiredTrials) removes rows with
+// `RETURNING id, client_id, subscription_id` — the status column is NOT
+// returned, so sub.Status is empty and the sync-based branch below is
+// unreachable: deprovision always runs through deleteClientFromAllNodes even
+// when a sync service is wired. Do not "fix" this by adding status to the
+// RETURNING clause: the sync path needs the subscription row to still exist
+// (SyncSubscription loads it by ID), but the row is already deleted here,
+// which would leave the trial clients orphaned on the panels.
 func (s *SubscriptionService) CleanupExpiredTrials(ctx context.Context) (int64, error) {
 	subs, err := s.db.CleanupExpiredTrials(ctx, s.cfg.TrialDurationHours)
 	if err != nil {
@@ -688,23 +836,31 @@ func (s *SubscriptionService) CleanupExpiredTrials(ctx context.Context) (int64, 
 	}
 
 	var successCount int64
+
 	for _, sub := range subs {
 		if sub.SubscriptionID == "" {
 			continue
 		}
+
 		if sub.Status == "active" && s.syncService != nil {
-			if markErr := s.syncService.MarkAllForRemoval(ctx, sub.ID); markErr != nil {
+			markErr := s.syncService.MarkAllForRemoval(ctx, sub.ID)
+			if markErr != nil {
 				logger.Warn("cleanup trial: mark for removal failed",
 					zap.Uint("subscription_id", sub.ID),
 					zap.Error(markErr))
+
 				continue
 			}
-			if syncErr := s.syncService.SyncSubscription(ctx, sub.ID); syncErr != nil {
+
+			syncErr := s.syncService.SyncSubscription(ctx, sub.ID)
+			if syncErr != nil {
 				logger.Warn("cleanup trial: sync failed",
 					zap.Uint("subscription_id", sub.ID),
 					zap.Error(syncErr))
+
 				continue
 			}
+
 			successCount++
 		} else {
 			// Fallback: syncService is nil (only possible in tests or before
@@ -715,8 +871,10 @@ func (s *SubscriptionService) CleanupExpiredTrials(ctx context.Context) (int64, 
 				Username: "trial_" + sub.SubscriptionID,
 				SubID:    sub.SubscriptionID,
 			})
+
 			successCount++
 		}
+
 		if s.invalidateBySubID != nil {
 			s.invalidateBySubID(sub.SubscriptionID)
 		}
@@ -746,11 +904,14 @@ func (s *SubscriptionService) GetOrCreateSubscription(ctx context.Context, teleg
 
 	existing, err := s.db.GetByTelegramID(ctx, telegramID)
 	if err == nil {
-		if err := s.ensureSubscriptionNodes(ctx, existing); err != nil {
+		err = s.ensureSubscriptionNodes(ctx, existing)
+		if err != nil {
 			return nil, fmt.Errorf("repair subscription nodes: %w", err)
 		}
+
 		return existing, nil
 	}
+
 	if !errors.Is(err, database.ErrSubscriptionNotFound) && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, fmt.Errorf("lookup subscription: %w", err)
 	}
@@ -761,6 +922,7 @@ func (s *SubscriptionService) GetOrCreateSubscription(ctx context.Context, teleg
 	if anyErr == nil {
 		return s.reanimateRevokedSubscription(ctx, existingAny, inviteCode)
 	}
+
 	if !errors.Is(anyErr, database.ErrSubscriptionNotFound) && !errors.Is(anyErr, gorm.ErrRecordNotFound) {
 		return nil, fmt.Errorf("lookup subscription (any status): %w", anyErr)
 	}
@@ -774,6 +936,7 @@ func (s *SubscriptionService) GetOrCreateSubscription(ctx context.Context, teleg
 	if err != nil {
 		return nil, fmt.Errorf("generate client id: %w", err)
 	}
+
 	subID, err := utils.GenerateSubID()
 	if err != nil {
 		return nil, fmt.Errorf("generate sub id: %w", err)
@@ -788,16 +951,20 @@ func (s *SubscriptionService) GetOrCreateSubscription(ctx context.Context, teleg
 		Status:         "active",
 	}
 
-	if err := s.db.CreateSubscription(ctx, sub, inviteCode); err != nil {
+	err = s.db.CreateSubscription(ctx, sub, inviteCode)
+	if err != nil {
 		return nil, fmt.Errorf("create subscription: %w", err)
 	}
 
-	if err := s.ensureSubscriptionNodes(ctx, sub); err != nil {
+	err = s.ensureSubscriptionNodes(ctx, sub)
+	if err != nil {
 		return nil, fmt.Errorf("ensure subscription nodes: %w", err)
 	}
 
 	metrics.SubscriptionCreatesTotal.Inc()
+
 	s.RefreshActiveSubscriptionsMetric(ctx)
+
 	return sub, nil
 }
 
@@ -812,35 +979,43 @@ func (s *SubscriptionService) ensureSubscriptionNodes(ctx context.Context, sub *
 	if err != nil {
 		return fmt.Errorf("load plan nodes: %w", err)
 	}
+
 	existing, err := s.db.GetBySubscriptionID(ctx, sub.ID)
 	if err != nil {
 		return fmt.Errorf("load subscription nodes: %w", err)
 	}
+
 	existingByNodeID := make(map[uint]database.SubscriptionNode, len(existing))
 	for _, sn := range existing {
 		existingByNodeID[sn.NodeID] = sn
 	}
 
 	createdAny := false
+
 	for _, node := range nodes {
 		if !node.IsActive {
 			continue
 		}
+
 		if _, ok := existingByNodeID[node.ID]; ok {
 			continue
 		}
-		if err := s.db.UpsertSubscriptionNode(ctx, &database.SubscriptionNode{
+
+		err = s.db.UpsertSubscriptionNode(ctx, &database.SubscriptionNode{
 			SubscriptionID: sub.ID,
 			NodeID:         node.ID,
 			Status:         database.SyncStatusPendingAdd,
-		}); err != nil {
+		})
+		if err != nil {
 			return fmt.Errorf("upsert subscription node %d: %w", node.ID, err)
 		}
+
 		createdAny = true
 	}
 
 	if createdAny && s.syncService != nil {
-		if syncErr := s.syncService.SyncSubscription(ctx, sub.ID); syncErr != nil {
+		syncErr := s.syncService.SyncSubscription(ctx, sub.ID)
+		if syncErr != nil {
 			logger.Warn("initial sync failed for subscription",
 				zap.Uint("subscription_id", sub.ID),
 				zap.Error(syncErr))
@@ -850,77 +1025,8 @@ func (s *SubscriptionService) ensureSubscriptionNodes(ctx context.Context, sub *
 	return nil
 }
 
-// RenewSubscription extends the subscription expiry, creates a paid order, recalculates nodes, and syncs.
-func (s *SubscriptionService) RenewSubscription(ctx context.Context, telegramID int64, product *database.Product) (*database.Order, error) {
-	sub, err := s.db.GetByTelegramID(ctx, telegramID)
-	if err != nil {
-		return nil, fmt.Errorf("get subscription: %w", err)
-	}
-
-	now := time.Now().UTC().Truncate(time.Minute)
-	planChanged := sub.PlanID != product.PlanID
-	newExpiry := calculateProductExpiry(now, sub.PlanID, sub.ExpiresAt, product)
-	oldExpiry := sub.ExpiresAt
-
-	sub.PlanID = product.PlanID
-	sub.ProductID = &product.ID
-	sub.ExpiresAt = &newExpiry
-	sub.PricePaidCents = product.PriceCents
-	sub.Currency = &product.Currency
-	sub.StartedAt = &now
-	sub.UpdatedAt = now
-
-	order := &database.Order{
-		SubscriptionID: sub.ID,
-		ProductID:      product.ID,
-		Status:         database.OrderStatusPaid,
-		AmountCents:    product.PriceCents,
-		Currency:       product.Currency,
-		PaidAt:         &now,
-		ActivatedAt:    &now,
-		ExpiresAt:      &newExpiry,
-	}
-	if err := s.db.Transaction(ctx, func(tx *gorm.DB) error {
-		if err := tx.Model(&database.Subscription{}).
-			Where("id = ?", sub.ID).
-			Select("telegram_id", "username", "client_id", "subscription_id", "expires_at", "status", "invite_code", "plan_id", "referred_by", "devices", "ips", "product_id", "started_at", "price_paid_cents", "currency", "updated_at").
-			Updates(sub).Error; err != nil {
-			return fmt.Errorf("update subscription: %w", err)
-		}
-		if err := tx.Model(&database.Subscription{}).
-			Where("id = ?", sub.ID).
-			Update("reminders_sent", 0).Error; err != nil {
-			return fmt.Errorf("reset reminders: %w", err)
-		}
-		if err := tx.Create(order).Error; err != nil {
-			return fmt.Errorf("create order: %w", err)
-		}
-		return nil
-	}); err != nil {
-		return nil, err
-	}
-
-	metrics.SubscriptionRenewalsTotal.Inc()
-	if s.invalidateBySubID != nil && sub.SubscriptionID != "" {
-		s.invalidateBySubID(sub.SubscriptionID)
-	}
-
-	if s.syncService != nil {
-		if planChanged || oldExpiry == nil || !oldExpiry.Equal(newExpiry) {
-			if err := s.syncService.ApplyPlanToSubscription(ctx, sub.ID); err != nil {
-				return order, fmt.Errorf("renew subscription: apply plan: %w", err)
-			}
-		}
-		if err := s.syncService.SyncSubscription(ctx, sub.ID); err != nil {
-			logger.Warn("renew subscription: post-commit sync failed",
-				zap.Uint("subscription_id", sub.ID),
-				zap.Uint("product_id", product.ID),
-				zap.Error(err))
-			return order, nil
-		}
-	}
-
-	return order, nil
+type expiryRepository interface {
+	ExpireSubscriptionWithPlanCAS(ctx context.Context, subscriptionID, planID uint, applyPlan database.ExpireSubscriptionPlanInTxFn) error
 }
 
 // ExpireSubscription downgrades the subscription to the Free plan and syncs node removals.
@@ -935,8 +1041,18 @@ func (s *SubscriptionService) ExpireSubscription(ctx context.Context, subscripti
 		return fmt.Errorf("resolve free plan: %w", err)
 	}
 
-	if err := s.db.ExpireSubscription(ctx, sub.ID, freePlan.ID); err != nil {
-		return fmt.Errorf("expire subscription: %w", err)
+	if repo, ok := s.db.(expiryRepository); ok && s.syncService != nil {
+		err = repo.ExpireSubscriptionWithPlanCAS(ctx, sub.ID, freePlan.ID, func(ctx context.Context, tx *gorm.DB, subscriptionID, planID uint) error {
+			return s.syncService.ApplyPlanToSubscriptionInTx(ctx, tx, subscriptionID, planID)
+		})
+		if err != nil {
+			return fmt.Errorf("expire subscription: %w", err)
+		}
+	} else {
+		err = s.db.ExpireSubscription(ctx, sub.ID, freePlan.ID)
+		if err != nil {
+			return fmt.Errorf("expire subscription: %w", err)
+		}
 	}
 
 	if s.invalidateBySubID != nil && sub.SubscriptionID != "" {
@@ -944,10 +1060,15 @@ func (s *SubscriptionService) ExpireSubscription(ctx context.Context, subscripti
 	}
 
 	if s.syncService != nil {
-		if err := s.syncService.ApplyPlanToSubscription(ctx, sub.ID); err != nil {
-			return fmt.Errorf("expire subscription: apply plan: %w", err)
+		if _, atomicPath := s.db.(expiryRepository); !atomicPath {
+			err = s.syncService.ApplyPlanToSubscription(ctx, sub.ID)
+			if err != nil {
+				return fmt.Errorf("expire subscription: apply plan: %w", err)
+			}
 		}
-		if err := s.syncService.SyncSubscription(ctx, sub.ID); err != nil {
+
+		err = s.syncService.SyncSubscription(ctx, sub.ID)
+		if err != nil {
 			logger.Warn("sync subscription failed (will retry)", zap.Error(err))
 		}
 	}

@@ -1,3 +1,4 @@
+// Package config loads, validates, and presents application configuration.
 package config
 
 import (
@@ -5,6 +6,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/google/uuid"
 	flag "github.com/kereal/rs8kvn_bot/internal/flag"
 )
 
@@ -50,8 +52,11 @@ type Config struct {
 	GlobalSubURL           string
 	SubServerAccessLogPath string
 
-	// Main menu configuration
-	MainMenuBtnProductID uint
+	// Payment configuration
+	PaymentEnabled    bool
+	PaymentProvider   string
+	PlategaMerchantID string
+	PlategaSecret     string
 }
 
 // configFlags holds typed flag values for config fields.
@@ -74,7 +79,10 @@ type configFlags struct {
 	donateEnabled          *flag.BoolValue
 	globalSubURL           *flag.StringValue
 	subServerAccessLogPath *flag.StringValue
-	mainMenuBtnProductID   *flag.IntValue
+	paymentEnabled         *flag.BoolValue
+	paymentProvider        *flag.StringValue
+	plategaMerchantID      *flag.StringValue
+	plategaSecret          *flag.StringValue
 }
 
 // registerFlags creates a new flag.Registry and initializes a configFlags instance with defaults,
@@ -82,29 +90,18 @@ type configFlags struct {
 // It returns the registry and the populated configFlags.
 func registerFlags() (*flag.Registry, *configFlags) {
 	r := flag.New()
-
 	f := &configFlags{
-		telegramBotToken:       flag.NewString(""),
-		telegramAdminID:        flag.NewInt64(0),
-		databasePath:           flag.NewString(DefaultDatabasePath),
-		logFilePath:            flag.NewString(DefaultLogFilePath),
-		logLevel:               flag.NewString(DefaultLogLevel),
-		heartbeatURL:           flag.NewString(""),
-		heartbeatInterval:      flag.NewInt(DefaultHeartbeatInterval),
-		sentryDSN:              flag.NewString(""),
-		webServerPort:          flag.NewInt(DefaultWebServerPort),
-		siteURL:                flag.NewString(DefaultSiteURL),
-		trialDurationHours:     flag.NewInt(DefaultTrialDurationHours),
-		trialRateLimit:         flag.NewInt(DefaultTrialRateLimit),
-		contactUsername:        flag.NewString(ContactUsername),
-		donateCardNumber:       flag.NewString(DonateCardNumber),
-		donateURL:              flag.NewString(DonateURL),
-		donateEnabled:          flag.NewBool(DefaultDonateEnabled),
-		globalSubURL:           flag.NewString(""),
-		subServerAccessLogPath: flag.NewString(""),
-		mainMenuBtnProductID:   flag.NewInt(0),
+		telegramBotToken: flag.NewString(""), telegramAdminID: flag.NewInt64(0),
+		databasePath: flag.NewString(DefaultDatabasePath), logFilePath: flag.NewString(DefaultLogFilePath),
+		logLevel: flag.NewString(DefaultLogLevel), heartbeatURL: flag.NewString(""),
+		heartbeatInterval: flag.NewInt(DefaultHeartbeatInterval), sentryDSN: flag.NewString(""),
+		webServerPort: flag.NewInt(DefaultWebServerPort), siteURL: flag.NewString(DefaultSiteURL),
+		trialDurationHours: flag.NewInt(DefaultTrialDurationHours), trialRateLimit: flag.NewInt(DefaultTrialRateLimit),
+		contactUsername: flag.NewString(ContactUsername), donateCardNumber: flag.NewString(DonateCardNumber),
+		donateURL: flag.NewString(DonateURL), donateEnabled: flag.NewBool(DefaultDonateEnabled),
+		globalSubURL: flag.NewString(""), subServerAccessLogPath: flag.NewString(""),
+		paymentEnabled: flag.NewBool(false), paymentProvider: flag.NewString("platega"), plategaMerchantID: flag.NewString(""), plategaSecret: flag.NewString(""),
 	}
-
 	r.Register("TELEGRAM_BOT_TOKEN", f.telegramBotToken)
 	r.Register("TELEGRAM_ADMIN_ID", f.telegramAdminID)
 	r.Register("GLOBAL_SUB_URL", f.globalSubURL)
@@ -123,7 +120,10 @@ func registerFlags() (*flag.Registry, *configFlags) {
 	r.Register("DONATE_URL", f.donateURL)
 	r.Register("DONATE_ENABLED", f.donateEnabled)
 	r.Register("SUBSERVER_ACCESS_LOG", f.subServerAccessLogPath)
-	r.Register("MAIN_MENU_BTN_PRODUCT", f.mainMenuBtnProductID)
+	r.Register("PAYMENT_ENABLED", f.paymentEnabled)
+	r.Register("PAYMENT_PROVIDER", f.paymentProvider)
+	r.Register("PLATEGA_MERCHANT_ID", f.plategaMerchantID)
+	r.Register("PLATEGA_SECRET", f.plategaSecret)
 
 	return r, f
 }
@@ -134,38 +134,26 @@ func registerFlags() (*flag.Registry, *configFlags) {
 func Load() (*Config, error) {
 	r, f := registerFlags()
 
-	if err := r.LoadEnv(); err != nil {
+	err := r.LoadEnv()
+	if err != nil {
 		return nil, fmt.Errorf("failed to load configuration: %w", err)
 	}
 
-	if v := f.mainMenuBtnProductID.Get(); v < 0 {
-		return nil, fmt.Errorf("MAIN_MENU_BTN_PRODUCT must be non-negative, got %d", v)
-	}
-
 	cfg := &Config{
-		TelegramBotToken:       f.telegramBotToken.Get(),
-		TelegramAdminID:        f.telegramAdminID.Get(),
-		DatabasePath:           f.databasePath.Get(),
-		LogFilePath:            f.logFilePath.Get(),
-		LogLevel:               f.logLevel.Get(),
-		HeartbeatURL:           f.heartbeatURL.Get(),
-		HeartbeatInterval:      f.heartbeatInterval.Get(),
-		SentryDSN:              f.sentryDSN.Get(),
-		WebServerPort:          f.webServerPort.Get(),
-		SiteURL:                f.siteURL.Get(),
-		TrialDurationHours:     f.trialDurationHours.Get(),
-		TrialRateLimit:         f.trialRateLimit.Get(),
-		ContactUsername:        f.contactUsername.Get(),
-		DonateCardNumber:       f.donateCardNumber.Get(),
-		DonateURL:              f.donateURL.Get(),
-		DonateEnabled:          f.donateEnabled.Get(),
-		GlobalSubURL:           f.globalSubURL.Get(),
+		TelegramBotToken: f.telegramBotToken.Get(), TelegramAdminID: f.telegramAdminID.Get(),
+		DatabasePath: f.databasePath.Get(), LogFilePath: f.logFilePath.Get(), LogLevel: f.logLevel.Get(),
+		HeartbeatURL: f.heartbeatURL.Get(), HeartbeatInterval: f.heartbeatInterval.Get(), SentryDSN: f.sentryDSN.Get(),
+		WebServerPort: f.webServerPort.Get(), SiteURL: f.siteURL.Get(),
+		TrialDurationHours: f.trialDurationHours.Get(), TrialRateLimit: f.trialRateLimit.Get(),
+		ContactUsername: f.contactUsername.Get(), DonateCardNumber: f.donateCardNumber.Get(), DonateURL: f.donateURL.Get(),
+		DonateEnabled: f.donateEnabled.Get(), GlobalSubURL: f.globalSubURL.Get(),
 		SubServerAccessLogPath: f.subServerAccessLogPath.Get(),
-		MainMenuBtnProductID:   uint(f.mainMenuBtnProductID.Get()), //nolint:gosec // non-negative value validated above
+		PaymentEnabled:         f.paymentEnabled.Get(), PaymentProvider: f.paymentProvider.Get(),
+		PlategaMerchantID: f.plategaMerchantID.Get(), PlategaSecret: f.plategaSecret.Get(),
 	}
-
 	// Validate all required fields
-	if err := cfg.validate(); err != nil {
+	err = cfg.validate()
+	if err != nil {
 		return nil, fmt.Errorf("configuration validation failed: %w", err)
 	}
 
@@ -178,6 +166,7 @@ func (c *Config) validate() error {
 	if c.TelegramBotToken == "" {
 		return fmt.Errorf("TELEGRAM_BOT_TOKEN is required")
 	}
+
 	if !strings.Contains(c.TelegramBotToken, ":") {
 		return fmt.Errorf("TELEGRAM_BOT_TOKEN appears to be invalid (expected format: 'number:token')")
 	}
@@ -209,29 +198,49 @@ func (c *Config) validate() error {
 
 	// Sentry DSN validation (optional but if provided, should be valid URL)
 	if c.SentryDSN != "" {
-		if err := c.validateURL("SENTRY_DSN", c.SentryDSN); err != nil {
+		err := c.validateURL("SENTRY_DSN", c.SentryDSN)
+		if err != nil {
 			return err
 		}
 	}
 
 	// Heartbeat URL validation (optional but if provided, should be valid URL)
 	if c.HeartbeatURL != "" {
-		if err := c.validateURL("HEARTBEAT_URL", c.HeartbeatURL); err != nil {
+		err := c.validateURL("HEARTBEAT_URL", c.HeartbeatURL)
+		if err != nil {
 			return err
 		}
 	}
 
+	if c.PaymentEnabled {
+		if c.PaymentProvider != "platega" {
+			return fmt.Errorf("PAYMENT_PROVIDER must be platega when PAYMENT_ENABLED=true")
+		}
+
+		if strings.TrimSpace(c.PlategaMerchantID) == "" || strings.TrimSpace(c.PlategaSecret) == "" {
+			return fmt.Errorf("PLATEGA_MERCHANT_ID and PLATEGA_SECRET are required when PAYMENT_ENABLED=true")
+		}
+
+		_, err := uuid.Parse(strings.TrimSpace(c.PlategaMerchantID))
+		if err != nil {
+			return fmt.Errorf("PLATEGA_MERCHANT_ID must be a UUID: %w", err)
+		}
+	}
 	// Global subscription URL validation (required)
 	if c.GlobalSubURL == "" {
 		return fmt.Errorf("GLOBAL_SUB_URL is required")
 	}
-	if err := c.validateURL("GLOBAL_SUB_URL", c.GlobalSubURL); err != nil {
+
+	err := c.validateURL("GLOBAL_SUB_URL", c.GlobalSubURL)
+	if err != nil {
 		return err
 	}
+
 	c.GlobalSubURL = strings.TrimRight(c.GlobalSubURL, "/") + "/"
 
 	// Site URL validation
-	if err := c.validateURL("SITE_URL", c.SiteURL); err != nil {
+	err = c.validateURL("SITE_URL", c.SiteURL)
+	if err != nil {
 		return err
 	}
 
@@ -300,6 +309,7 @@ func (c *Config) SubURL(subID string) string {
 	if err != nil {
 		return c.GlobalSubURL + subID
 	}
+
 	return u
 }
 

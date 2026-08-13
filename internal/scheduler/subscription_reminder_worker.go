@@ -45,19 +45,24 @@ func (w *SubscriptionReminderWorker) Run(ctx context.Context) {
 
 func (w *SubscriptionReminderWorker) process(ctx context.Context) {
 	now := time.Now().UTC()
+
 	metrics.SubscriptionReminderRunsTotal.Inc()
 
 	for _, window := range service.ExpiryReminderWindows() {
 		from, to := service.ReminderWindowBounds(window, now)
+
 		subs, err := w.db.GetSubscriptionsExpiringInRange(ctx, from, to)
 		if err != nil {
 			logger.Error("Failed to query subscriptions for reminder window",
 				zap.String("window", window.Name),
 				zap.Error(err))
+
 			continue
 		}
+
 		for _, sub := range subs {
-			if err := w.subSvc.SendExpiryReminder(ctx, &sub, window); err != nil {
+			err := w.subSvc.SendExpiryReminder(ctx, &sub, window)
+			if err != nil {
 				logger.Error("Failed to send expiry reminder",
 					zap.Uint("subscription_id", sub.ID),
 					zap.String("window", window.Name),

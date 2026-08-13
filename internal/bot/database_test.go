@@ -13,7 +13,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-
 func TestHandleStart_WithDatabase(t *testing.T) {
 	t.Parallel()
 
@@ -100,7 +99,7 @@ func TestHandleAdminStats(t *testing.T) {
 
 	ctx := context.Background()
 
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		sub := testutil.CreateTestSubscription(int64(100000000+i), fmt.Sprintf("user%d", i), "active", testutil.PtrTime(time.Now().Add(24*time.Hour)))
 		require.NoError(t, db.CreateSubscription(ctx, sub, ""), "Failed to create subscription")
 	}
@@ -233,7 +232,7 @@ func TestGetLatestSubscriptions(t *testing.T) {
 
 	ctx := context.Background()
 
-	for i := 0; i < 15; i++ {
+	for i := range 15 {
 		sub := testutil.CreateTestSubscription(int64(100000000+i), fmt.Sprintf("user%d", i), "active", testutil.PtrTime(time.Now().Add(24*time.Hour)))
 		require.NoError(t, db.CreateSubscription(ctx, sub, ""), "Failed to create subscription")
 	}

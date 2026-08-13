@@ -56,9 +56,11 @@ func NewMockXUIServer(t *testing.T) *MockXUIServer {
 		if r.Header.Get("Authorization") != expectedToken {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUnauthorized)
-			json.NewEncoder(w).Encode(map[string]any{"success": false, "msg": "unauthorized"})
+			_, _ = w.Write([]byte(`{"success":false,"msg":"unauthorized"}`))
+
 			return false
 		}
+
 		return true
 	}
 
@@ -80,14 +82,17 @@ func NewMockXUIServer(t *testing.T) *MockXUIServer {
 		if !requireAuth(w, r) {
 			return
 		}
+
 		if mock.AddClientErr != nil {
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]any{
 				"success": false,
 				"msg":     mock.AddClientErr.Error(),
 			})
+
 			return
 		}
+
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]any{
 			"success": true,
@@ -99,6 +104,7 @@ func NewMockXUIServer(t *testing.T) *MockXUIServer {
 		if !requireAuth(w, r) {
 			return
 		}
+
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]any{
 			"success": true,
@@ -110,14 +116,17 @@ func NewMockXUIServer(t *testing.T) *MockXUIServer {
 		if !requireAuth(w, r) {
 			return
 		}
+
 		if mock.DeleteErr != nil {
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]any{
 				"success": false,
 				"msg":     mock.DeleteErr.Error(),
 			})
+
 			return
 		}
+
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]any{"success": true})
 	})
@@ -171,9 +180,11 @@ func NewTestFixture(t *testing.T) *IntegrationTestFixture {
 
 func (f *IntegrationTestFixture) Close() {
 	f.Cancel()
+
 	if f.DB != nil {
 		_ = f.DB.Close()
 	}
+
 	if f.XUIServer != nil {
 		f.XUIServer.Close()
 	}
@@ -297,6 +308,7 @@ func TestSubscriptionFlow_RevokeOldSubscription(t *testing.T) {
 	}
 
 	var activeCount int
+
 	for _, s := range subs {
 		if s.TelegramID == f.UserChatID && s.Status == "active" {
 			activeCount++
@@ -442,15 +454,14 @@ func TestHandler_GetUsername(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
+
 			got := f.Handler.getUsername(tc.user)
 			assert.Equal(t, tc.want, got)
-
 		})
 	}
 }
 
 func TestMockXUIServer_Endpoints(t *testing.T) {
-
 	mock := NewMockXUIServer(t)
 	defer mock.Close()
 
@@ -459,13 +470,14 @@ func TestMockXUIServer_Endpoints(t *testing.T) {
 	t.Run("login", func(t *testing.T) {
 		resp, err := http.Get(mock.Server.URL + "/login")
 		require.NoError(t, err)
+
 		defer func() { _ = resp.Body.Close() }()
 
 		var result map[string]any
+
 		err = json.NewDecoder(resp.Body).Decode(&result)
 		require.NoError(t, err)
 		assert.True(t, result["success"].(bool))
-
 	})
 
 	t.Run("addClient", func(t *testing.T) {
@@ -475,13 +487,14 @@ func TestMockXUIServer_Endpoints(t *testing.T) {
 		req.Header.Set("Authorization", authHeader)
 		resp, err := http.DefaultClient.Do(req)
 		require.NoError(t, err)
+
 		defer func() { _ = resp.Body.Close() }()
 
 		var result map[string]any
+
 		err = json.NewDecoder(resp.Body).Decode(&result)
 		require.NoError(t, err)
 		assert.True(t, result["success"].(bool))
-
 	})
 
 	t.Run("getClientTraffic", func(t *testing.T) {
@@ -490,9 +503,11 @@ func TestMockXUIServer_Endpoints(t *testing.T) {
 		req.Header.Set("Authorization", authHeader)
 		resp, err := http.DefaultClient.Do(req)
 		require.NoError(t, err)
+
 		defer func() { _ = resp.Body.Close() }()
 
 		var result map[string]any
+
 		err = json.NewDecoder(resp.Body).Decode(&result)
 		require.NoError(t, err)
 		assert.True(t, result["success"].(bool))
@@ -500,7 +515,6 @@ func TestMockXUIServer_Endpoints(t *testing.T) {
 		obj := result["obj"].(map[string]any)
 		assert.Equal(t, float64(1024*1024*100), obj["up"])
 		assert.Equal(t, float64(1024*1024*200), obj["down"])
-
 	})
 
 	t.Run("delClient", func(t *testing.T) {
@@ -510,13 +524,14 @@ func TestMockXUIServer_Endpoints(t *testing.T) {
 		req.Header.Set("Authorization", authHeader)
 		resp, err := http.DefaultClient.Do(req)
 		require.NoError(t, err)
+
 		defer resp.Body.Close()
 
 		var result map[string]any
+
 		err = json.NewDecoder(resp.Body).Decode(&result)
 		require.NoError(t, err)
 		assert.True(t, result["success"].(bool))
-
 	})
 }
 
@@ -535,9 +550,11 @@ func TestMockXUIServer_ErrorResponses(t *testing.T) {
 		req.Header.Set("Authorization", authHeader)
 		resp, err := http.DefaultClient.Do(req)
 		require.NoError(t, err)
+
 		defer resp.Body.Close()
 
 		var result map[string]any
+
 		err = json.NewDecoder(resp.Body).Decode(&result)
 		require.NoError(t, err)
 		assert.False(t, result["success"].(bool))
@@ -553,9 +570,11 @@ func TestMockXUIServer_ErrorResponses(t *testing.T) {
 		req.Header.Set("Authorization", authHeader)
 		resp, err := http.DefaultClient.Do(req)
 		require.NoError(t, err)
+
 		defer resp.Body.Close()
 
 		var result map[string]any
+
 		err = json.NewDecoder(resp.Body).Decode(&result)
 		require.NoError(t, err)
 		assert.False(t, result["success"].(bool))
@@ -582,6 +601,7 @@ func TestIntegration_HandleStart_NoSubscription(t *testing.T) {
 	defer f.Close()
 
 	ctx := context.Background()
+
 	resetBotAPI(f.Handler.bot.(*testutil.BotAPI))
 
 	update := tgbotapi.Update{
@@ -607,6 +627,7 @@ func TestIntegration_HandleStart_WithSubscription(t *testing.T) {
 	defer f.Close()
 
 	ctx := context.Background()
+
 	CreateTestSubscriptionInDB(t, f.DB, f.UserChatID, "testuser", "active", testutil.PtrTime(time.Now().Add(30*24*time.Hour)))
 	resetBotAPI(f.Handler.bot.(*testutil.BotAPI))
 
@@ -633,6 +654,7 @@ func TestIntegration_HandleHelp(t *testing.T) {
 	defer f.Close()
 
 	ctx := context.Background()
+
 	resetBotAPI(f.Handler.bot.(*testutil.BotAPI))
 
 	update := tgbotapi.Update{
@@ -658,6 +680,7 @@ func TestIntegration_HandleInvite(t *testing.T) {
 	defer f.Close()
 
 	ctx := context.Background()
+
 	resetBotAPI(f.Handler.bot.(*testutil.BotAPI))
 
 	update := tgbotapi.Update{
@@ -683,6 +706,7 @@ func TestIntegration_Callback_CreateSubscription(t *testing.T) {
 	defer f.Close()
 
 	ctx := context.Background()
+
 	resetBotAPI(f.Handler.bot.(*testutil.BotAPI))
 
 	update := tgbotapi.Update{

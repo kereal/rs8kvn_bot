@@ -48,15 +48,19 @@ func NewSubscriptionCache(maxSize int, ttl time.Duration) *SubscriptionCache {
 
 func (c *SubscriptionCache) Get(telegramID int64) *database.Subscription {
 	c.mu.RLock()
+
 	elem, ok := c.items[telegramID]
 	if !ok {
 		c.mu.RUnlock()
 		metrics.CacheMissesTotal.WithLabelValues("subscription").Inc()
+
 		return nil
 	}
+
 	item := elem.Value.(*lruItem)
 	expired := time.Now().After(item.entry.expiresAt)
 	sub := item.entry.sub
+
 	c.mu.RUnlock()
 
 	if expired {
@@ -69,6 +73,7 @@ func (c *SubscriptionCache) Get(telegramID int64) *database.Subscription {
 		}
 		c.mu.Unlock()
 		metrics.CacheMissesTotal.WithLabelValues("subscription").Inc()
+
 		return nil
 	}
 
@@ -79,6 +84,7 @@ func (c *SubscriptionCache) Get(telegramID int64) *database.Subscription {
 	c.mu.Unlock()
 
 	metrics.CacheHitsTotal.WithLabelValues("subscription").Inc()
+
 	return sub
 }
 
@@ -86,6 +92,7 @@ func (c *SubscriptionCache) Set(telegramID int64, sub *database.Subscription) {
 	if sub == nil {
 		return
 	}
+
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -97,8 +104,10 @@ func (c *SubscriptionCache) Set(telegramID int64, sub *database.Subscription) {
 		item.entry.expiresAt = time.Now().Add(c.ttl)
 		delete(c.bySubID, item.subID)
 		item.subID = subID
+
 		c.lru.MoveToBack(elem)
 		c.bySubID[subID] = elem
+
 		return
 	}
 
@@ -131,6 +140,7 @@ func (c *SubscriptionCache) Invalidate(telegramID int64) {
 	if !ok {
 		return
 	}
+
 	c.removeElement(elem)
 }
 
@@ -142,6 +152,7 @@ func (c *SubscriptionCache) InvalidateBySubID(subID string) {
 	if !ok {
 		return
 	}
+
 	c.removeElement(elem)
 }
 
@@ -149,6 +160,7 @@ func (c *SubscriptionCache) removeElement(elem *list.Element) {
 	item := elem.Value.(*lruItem)
 	c.lru.Remove(elem)
 	delete(c.items, item.telegramID)
+
 	if item.subID != "" {
 		delete(c.bySubID, item.subID)
 	}
@@ -166,6 +178,7 @@ func (c *SubscriptionCache) Clear() {
 func (c *SubscriptionCache) Size() int {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
+
 	return len(c.items)
 }
 
@@ -174,12 +187,15 @@ func (c *SubscriptionCache) Cleanup() {
 	defer c.mu.Unlock()
 
 	now := time.Now()
+
 	for elem := c.lru.Front(); elem != nil; {
 		item := elem.Value.(*lruItem)
+
 		next := elem.Next()
 		if now.After(item.entry.expiresAt) {
 			c.removeElement(elem)
 		}
+
 		elem = next
 	}
 }

@@ -1,3 +1,4 @@
+// Package database provides persistence, migrations, models, and repositories.
 package database
 
 import (
@@ -15,6 +16,7 @@ var (
 	ErrPlanNotFound             = errors.New("plan not found")
 	ErrOrderNotFound            = errors.New("order not found")
 	ErrProductNotFound          = errors.New("product not found")
+	ErrProductImmutable         = errors.New("product immutable after order")
 	ErrSubscriptionNodeNotFound = errors.New("subscription node not found")
 	ErrNodeNotFound             = errors.New("node not found")
 	ErrTrialAlreadyActivated    = errors.New("trial already activated")
@@ -72,10 +74,10 @@ type Subscription struct {
 	Ips            string  `gorm:"type:text;default:'[]'"` // JSON array of {ip: timestamp} entries
 	// LastRequest — дата/время последнего запроса подписки через субсервер (/sub/:id).
 	// Обновляется best-effort при каждом запросе клиента. NULL до первого запроса.
-	LastRequest *time.Time `gorm:"index"`
-	CreatedAt   time.Time  `gorm:"autoCreateTime"`
-	UpdatedAt   time.Time  `gorm:"autoUpdateTime"`
-	RemindersSent int `gorm:"not null;default:0"` // bitmask: 1<<0=3d, 1<<1=1d, 1<<2=3h
+	LastRequest   *time.Time `gorm:"index"`
+	CreatedAt     time.Time  `gorm:"autoCreateTime"`
+	UpdatedAt     time.Time  `gorm:"autoUpdateTime"`
+	RemindersSent int        `gorm:"not null;default:0"` // bitmask: 1<<0=3d, 1<<1=1d, 1<<2=3h
 
 	Plan    *Plan              `gorm:"foreignKey:PlanID"`
 	Product *Product           `gorm:"foreignKey:ProductID"`
@@ -139,6 +141,17 @@ type Product struct {
 	Orders []Order `gorm:"foreignKey:ProductID"`
 }
 
+// ChargebackResult describes the atomic order/subscription transition performed
+// for a provider chargeback callback. Result.SubscriptionID is intentionally
+// absent: callers read it off result.Order.SubscriptionID to avoid a second
+// repository lookup.
+type ChargebackResult struct {
+	Order        *Order
+	WasPaid      bool
+	Transitioned bool
+	Downgraded   bool
+}
+
 // Order represents a recorded purchase event for a subscription.
 // Statuses: pending | paid | expired | canceled.
 //
@@ -146,7 +159,9 @@ type Product struct {
 //   - provider_payment_id — external payment ID from provider.
 //   - paid_at — payment confirmation timestamp.
 //   - activated_at — subscription activation timestamp.
-//   - expires_at — payment invoice expiry (e.g. 30 minutes from creation).
+//   - expires_at — subscription validity granted by this purchase (a snapshot of
+//     subscriptions.expires_at at payment time), not an invoice timeout.
+
 type OrderStatus string
 
 const (
@@ -157,18 +172,21 @@ const (
 )
 
 type Order struct {
-	ID                uint        `gorm:"primaryKey;column:id"`
-	SubscriptionID    uint        `gorm:"not null;column:subscription_id"`
-	ProductID         uint        `gorm:"not null;column:product_id"`
-	Status            OrderStatus `gorm:"not null;size:16;column:status"`
-	AmountCents       int64       `gorm:"not null;column:amount_cents"`
-	Currency          string      `gorm:"size:3;not null;default:RUB;column:currency"`
-	PaymentProvider   string      `gorm:"column:payment_provider"`
-	ProviderPaymentID string      `gorm:"column:provider_payment_id"`
-	CreatedAt         time.Time   `gorm:"not null;column:created_at"`
-	PaidAt            *time.Time  `gorm:"column:paid_at"`
-	ActivatedAt       *time.Time  `gorm:"column:activated_at"`
-	ExpiresAt         *time.Time  `gorm:"column:expires_at"`
+	ID                       uint        `gorm:"primaryKey;column:id"`
+	SubscriptionID           uint        `gorm:"not null;column:subscription_id"`
+	ProductID                uint        `gorm:"not null;column:product_id"`
+	Status                   OrderStatus `gorm:"not null;size:16;column:status"`
+	AmountCents              int64       `gorm:"not null;column:amount_cents"`
+	Currency                 string      `gorm:"size:3;not null;default:RUB;column:currency"`
+	PaymentProvider          string      `gorm:"column:payment_provider"`
+	ProviderPaymentID        string      `gorm:"column:provider_payment_id"`
+	CreatedAt                time.Time   `gorm:"not null;column:created_at"`
+	PaidAt                   *time.Time  `gorm:"column:paid_at"`
+	ActivatedAt              *time.Time  `gorm:"column:activated_at"`
+	ExpiresAt                *time.Time  `gorm:"column:expires_at"`
+	PaymentURL               string      `gorm:"column:payment_url"`
+	PaymentExpiresAt         *time.Time  `gorm:"column:payment_expires_at"`
+	PaymentCreationUncertain bool        `gorm:"not null;default:false;column:payment_creation_uncertain"`
 
 	Subscription *Subscription `gorm:"foreignKey:SubscriptionID"`
 	Product      *Product      `gorm:"foreignKey:ProductID"`
@@ -285,6 +303,7 @@ func (s *Subscription) IsExpired() bool {
 	if s.ExpiresAt == nil {
 		return false
 	}
+
 	return time.Now().After(*s.ExpiresAt)
 }
 
@@ -298,10 +317,14 @@ func (s *Subscription) ParseDevices() ([]map[string]string, error) {
 	if s.Devices == "" {
 		return []map[string]string{}, nil
 	}
+
 	var devices []map[string]string
-	if err := json.Unmarshal([]byte(s.Devices), &devices); err != nil {
+
+	err := json.Unmarshal([]byte(s.Devices), &devices)
+	if err != nil {
 		return nil, fmt.Errorf("failed to unmarshal devices: %w", err)
 	}
+
 	return devices, nil
 }
 
@@ -311,7 +334,9 @@ func (s *Subscription) SetDevices(devices []map[string]string) error {
 	if err != nil {
 		return fmt.Errorf("failed to marshal devices: %w", err)
 	}
+
 	s.Devices = string(data)
+
 	return nil
 }
 
@@ -320,10 +345,14 @@ func (s *Subscription) ParseIPs() ([]map[string]string, error) {
 	if s.Ips == "" {
 		return []map[string]string{}, nil
 	}
+
 	var ips []map[string]string
-	if err := json.Unmarshal([]byte(s.Ips), &ips); err != nil {
+
+	err := json.Unmarshal([]byte(s.Ips), &ips)
+	if err != nil {
 		return nil, fmt.Errorf("failed to unmarshal ips: %w", err)
 	}
+
 	return ips, nil
 }
 
@@ -333,7 +362,9 @@ func (s *Subscription) SetIPs(ips []map[string]string) error {
 	if err != nil {
 		return fmt.Errorf("failed to marshal ips: %w", err)
 	}
+
 	s.Ips = string(data)
+
 	return nil
 }
 
@@ -341,10 +372,14 @@ func (n *Node) ParseInboundIDs() ([]int, error) {
 	if n.InboundIDs == "" {
 		return []int{}, nil
 	}
+
 	var ids []int
-	if err := json.Unmarshal([]byte(n.InboundIDs), &ids); err != nil {
+
+	err := json.Unmarshal([]byte(n.InboundIDs), &ids)
+	if err != nil {
 		return nil, fmt.Errorf("failed to unmarshal inbound_ids: %w", err)
 	}
+
 	return ids, nil
 }
 
@@ -353,11 +388,14 @@ func (n *Node) SetInboundIDs(ids []int) error {
 		n.InboundIDs = "[]"
 		return nil
 	}
+
 	data, err := json.Marshal(ids)
 	if err != nil {
 		return fmt.Errorf("failed to marshal inbound_ids: %w", err)
 	}
+
 	n.InboundIDs = string(data)
+
 	return nil
 }
 
@@ -372,9 +410,12 @@ func (n *Node) ResolveInboundIDs() []int {
 	if err != nil || len(ids) == 0 {
 		out := make([]int, len(DefaultInboundIDs))
 		copy(out, DefaultInboundIDs)
+
 		return out
 	}
+
 	out := make([]int, len(ids))
 	copy(out, ids)
+
 	return out
 }

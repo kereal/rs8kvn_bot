@@ -31,13 +31,16 @@ func FuzzTruncateString(f *testing.F) {
 		if maxLen < 0 || maxLen > 10000 {
 			return
 		}
+
 		result := utils.TruncateString(s, maxLen)
 		if maxLen == 0 {
 			if result != "" {
 				t.Errorf("utils.TruncateString(%q, 0) = %q, want ''", s, result)
 			}
+
 			return
 		}
+
 		r := []rune(s)
 		if len(r) <= maxLen {
 			if result != s {
@@ -49,6 +52,7 @@ func FuzzTruncateString(f *testing.F) {
 			if len(rr) != maxLen+3 {
 				t.Errorf("utils.TruncateString(%q, %d) rune len = %d, want %d", s, maxLen, len(rr), maxLen+3)
 			}
+
 			if !strings.HasSuffix(result, "...") {
 				t.Errorf("utils.TruncateString(%q, %d) = %q, should end with '...'", s, maxLen, result)
 			}

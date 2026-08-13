@@ -2,9 +2,10 @@ package utils
 
 import (
 	"context"
+	cryptorand "crypto/rand"
 	"errors"
 	"fmt"
-	"math/rand"
+	"math/big"
 	"net"
 	"strings"
 	"time"
@@ -20,17 +21,21 @@ func IsRetryable(err error) bool {
 	if err == nil {
 		return false
 	}
+
 	if errors.Is(err, ErrNon200Response) {
 		return false
 	}
+
 	var dnsErr *net.DNSError
 	if errors.As(err, &dnsErr) {
 		return false
 	}
+
 	var netErr net.Error
 	if errors.As(err, &netErr) {
 		return true
 	}
+
 	msg := strings.ToLower(err.Error())
 	if strings.Contains(msg, "no such host") ||
 		strings.Contains(msg, "temporary failure in name resolution") ||
@@ -38,6 +43,7 @@ func IsRetryable(err error) bool {
 		strings.Contains(msg, "nodename nor servname provided") {
 		return false
 	}
+
 	return false
 }
 
@@ -47,11 +53,13 @@ func RetryWithBackoff(ctx context.Context, maxRetries int, initialDelay time.Dur
 	if maxRetries <= 0 {
 		return errors.New("maxRetries must be positive")
 	}
+
 	if initialDelay <= 0 {
 		return errors.New("initialDelay must be positive")
 	}
 
 	var lastErr error
+
 	delay := initialDelay
 
 	for attempt := range maxRetries {
@@ -67,10 +75,27 @@ func RetryWithBackoff(ctx context.Context, maxRetries int, initialDelay time.Dur
 		lastErr = err
 
 		if attempt < maxRetries-1 {
+			jitter := time.Duration(0)
+
+			if maxJitter := delay / 2; maxJitter > 0 {
+				n, randErr := cryptorand.Int(cryptorand.Reader, big.NewInt(int64(maxJitter)))
+				if randErr == nil {
+					jitter = time.Duration(n.Int64())
+				}
+			}
+
+			timer := time.NewTimer(delay + jitter)
 			select {
-			case <-time.After(delay + time.Duration(rand.Int63n(int64(delay/2)))): //nolint:gosec
+			case <-timer.C:
 				delay *= 2
 			case <-ctx.Done():
+				if !timer.Stop() {
+					select {
+					case <-timer.C:
+					default:
+					}
+				}
+
 				return fmt.Errorf("context cancelled: %w", ctx.Err())
 			}
 		}

@@ -19,7 +19,7 @@ func TestFetchAndAggregateSources_Parallel(t *testing.T) {
 	sleepTime := 100 * time.Millisecond
 
 	nodes := make([]database.Node, numNodes)
-	for i := 0; i < numNodes; i++ {
+	for i := range numNodes {
 		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Intentional delay: simulates node work so the test can verify
 			// that nodes are fetched in parallel (not sequentially).
@@ -28,12 +28,14 @@ func TestFetchAndAggregateSources_Parallel(t *testing.T) {
 			_, _ = w.Write([]byte("[]"))
 		}))
 		defer ts.Close()
+
 		nodes[i] = database.Node{Name: "node", SubscriptionURL: ts.URL}
 	}
 
 	start := time.Now()
 	ctx := context.Background()
-	_, _, _ = fetchAndAggregateSources(ctx, "test", nodes)
+	agg, _, _ := fetchAndAggregateSources(ctx, "test", nodes)
+	_ = agg
 	duration := time.Since(start)
 
 	// Verify parallel execution (significantly less than sequential)

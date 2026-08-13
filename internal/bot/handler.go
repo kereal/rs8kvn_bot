@@ -1,9 +1,9 @@
+// Package bot contains Telegram handlers, callbacks, keyboards, and user flows.
 package bot
 
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -63,12 +63,15 @@ type Handler struct {
 	inProgressSyncMap   sync.Map                // atomic tracking of subscription creation
 	pendingInvites      map[int64]pendingInvite // chatID -> invite_code
 	pendingMu           sync.RWMutex
+	documentMessagesMu  sync.Mutex
+	documentMessages    map[int][]int // final message ID -> preceding legal-message IDs
 	botConfig           *BotConfig
 	subscriptionService *service.SubscriptionService
 	referralCache       *ReferralCache
 	sender              *MessageSender
 	keyboards           *KeyboardBuilder
 	orderService        *service.OrderService
+	paymentEnabled      bool
 	version             string
 	referral            *ReferralHandler
 
@@ -96,6 +99,10 @@ type Handler struct {
 
 // NewHandler creates a new Handler with all sub-handlers initialized.
 func NewHandler(bot interfaces.BotAPI, cfg *config.Config, db interfaces.DatabaseService, botConfig *BotConfig, subService *service.SubscriptionService, version string) *Handler {
+	if cfg == nil {
+		cfg = &config.Config{}
+	}
+
 	rl := ratelimiter.NewPerUserRateLimiter(float64(config.RateLimiterMaxTokens), float64(config.RateLimiterRefillRate))
 	kb := NewKeyboardBuilder(botConfig.Username, cfg.ContactUsername, cfg.DonateCardNumber, cfg.DonateURL, cfg.SiteURL, cfg.DonateEnabled)
 
@@ -108,11 +115,13 @@ func NewHandler(bot interfaces.BotAPI, cfg *config.Config, db interfaces.Databas
 		inProgressSyncMap:   sync.Map{},
 		pendingInvites:      make(map[int64]pendingInvite),
 		pendingMu:           sync.RWMutex{},
+		documentMessages:    make(map[int][]int),
 		botConfig:           botConfig,
 		subscriptionService: subService,
 		referralCache:       NewReferralCache(db),
 		sender:              NewMessageSender(bot, rl),
 		keyboards:           kb,
+		paymentEnabled:      cfg.PaymentEnabled,
 		version:             version,
 	}
 	// Initialize admin rate limiters map
@@ -141,12 +150,10 @@ func (h *Handler) SetBot(bot interfaces.BotAPI) {
 	h.sender.SetBot(bot)
 }
 
-// SetBotConfig updates runtime bot config and rebuilds keyboard templates.
 func (h *Handler) SetBotConfig(bc *BotConfig) {
 	h.botConfig = bc
 	h.keyboards = NewKeyboardBuilder(bc.Username, h.cfg.ContactUsername, h.cfg.DonateCardNumber, h.cfg.DonateURL, h.cfg.SiteURL, h.cfg.DonateEnabled)
-	// Propagate to decomposed handlers so generated links (invite/share) use the
-	// real bot username instead of the startup placeholder.
+	// Propagate to decomposed handlers so generated links use the real bot username.
 	h.referral.SetBotConfig(bc)
 }
 
@@ -157,9 +164,23 @@ func (h *Handler) Cache() *SubscriptionCache {
 }
 
 // SetOrderService wires the order service after handler construction.
+
+// handleBuyPremiumList and handleBuyProduct are implemented in subscription_handler.go
+// (SubscriptionHandler) and exposed here via delegates for readability.
+func (h *Handler) handleBuyPremiumList(ctx context.Context, chatID int64, username string, messageID int) error {
+	return h.getSubHandler().handleBuyPremiumList(ctx, chatID, username, messageID)
+}
+
+func (h *Handler) handleBuyProduct(ctx context.Context, chatID int64, username string, messageID int, productID uint) error {
+	return h.getSubHandler().handleBuyProduct(ctx, chatID, username, messageID, productID)
+}
+
 func (h *Handler) SetOrderService(orderService *service.OrderService) {
 	h.orderService = orderService
 }
+
+// OrderService returns the payment service wired into the handler.
+func (h *Handler) OrderService() *service.OrderService { return h.orderService }
 
 // getSubHandler returns the subscription sub-handler, initializing it once.
 // The sync.Once guard supports test-constructed handlers that omit subHandler.
@@ -178,11 +199,12 @@ func (h *Handler) withTimeout(ctx context.Context) (context.Context, context.Can
 	return context.WithTimeout(ctx, HandlerTimeout)
 }
 
-// Command delegates (implemented in command.go after handler split)
+// HandleStart delegates the /start command to the command layer.
 func (h *Handler) HandleStart(ctx context.Context, update tgbotapi.Update) error {
 	if h.cmdHandler == nil {
 		return errors.New("handler: cmdHandler is nil, use NewHandler to construct Handler")
 	}
+
 	return h.cmdHandler.HandleStart(ctx, update)
 }
 
@@ -190,6 +212,7 @@ func (h *Handler) HandleHelp(ctx context.Context, update tgbotapi.Update) error 
 	if h.cmdHandler == nil {
 		return errors.New("handler: cmdHandler is nil, use NewHandler to construct Handler")
 	}
+
 	return h.cmdHandler.HandleHelp(ctx, update)
 }
 
@@ -197,6 +220,7 @@ func (h *Handler) HandleInvite(ctx context.Context, update tgbotapi.Update) erro
 	if h.cmdHandler == nil {
 		return errors.New("handler: cmdHandler is nil, use NewHandler to construct Handler")
 	}
+
 	return h.cmdHandler.HandleInvite(ctx, update)
 }
 
@@ -205,6 +229,7 @@ func (h *Handler) handleBindTrial(ctx context.Context, chatID int64, username, s
 	if h.cmdHandler == nil {
 		return errors.New("handler: cmdHandler is nil, use NewHandler to construct Handler")
 	}
+
 	return h.cmdHandler.handleBindTrial(ctx, chatID, username, subscriptionID)
 }
 
@@ -212,6 +237,7 @@ func (h *Handler) handleShareStart(ctx context.Context, chatID int64, username, 
 	if h.cmdHandler == nil {
 		return errors.New("handler: cmdHandler is nil, use NewHandler to construct Handler")
 	}
+
 	return h.cmdHandler.handleShareStart(ctx, chatID, username, inviteCode)
 }
 
@@ -219,6 +245,7 @@ func (h *Handler) sendInviteLink(ctx context.Context, chatID int64, messageID in
 	if h.referral == nil {
 		return errors.New("handler: referral is nil, use NewHandler to construct Handler")
 	}
+
 	return h.referral.sendInviteLink(ctx, chatID, messageID)
 }
 
@@ -227,6 +254,7 @@ func (h *Handler) HandleCallback(ctx context.Context, update tgbotapi.Update) er
 	if h.cbHandler == nil {
 		return errors.New("handler: cbHandler is nil, use NewHandler to construct Handler")
 	}
+
 	return h.cbHandler.HandleCallback(ctx, update)
 }
 
@@ -235,6 +263,7 @@ func (h *Handler) handleShareInvite(ctx context.Context, chatID int64, username 
 	if h.cbHandler == nil {
 		return errors.New("handler: cbHandler is nil, use NewHandler to construct Handler")
 	}
+
 	return h.cbHandler.handleShareInvite(ctx, chatID, username, messageID)
 }
 
@@ -250,14 +279,6 @@ func (h *Handler) handleMySubscription(ctx context.Context, chatID int64, userna
 
 func (h *Handler) handleQRCode(ctx context.Context, chatID int64, username string, messageID int) error {
 	return h.getSubHandler().handleQRCode(ctx, chatID, username, messageID)
-}
-
-func (h *Handler) handleUpgradePremium(ctx context.Context, chatID int64, username string, messageID int) error {
-	return h.getSubHandler().handleUpgradePremium(ctx, chatID, username, messageID)
-}
-
-func (h *Handler) handleConfirmUpgradePremium(ctx context.Context, chatID int64, username string, messageID int) error {
-	return h.getSubHandler().handleConfirmUpgradePremium(ctx, chatID, username, messageID)
 }
 
 func (h *Handler) handleBackToSubscription(ctx context.Context, chatID int64, username string, messageID int) error {
@@ -283,6 +304,7 @@ func (h *Handler) invalidateCache(ctx context.Context, chatID int64) {
 		h.subscriptionService.InvalidateSubscription(ctx, chatID)
 		return
 	}
+
 	h.cache.Invalidate(chatID)
 }
 
@@ -305,9 +327,11 @@ func (h *Handler) generateInviteLink(ctx context.Context, chatID int64, lt linkT
 	h.referralOnce.Do(func() {
 		h.referral = NewReferralHandler(h.db, h.cfg, h.bot, h.botConfig, h.sender, h.keyboards)
 	})
+
 	if h.referral == nil {
 		return "", errors.New("handler: referral is nil, use NewHandler to construct Handler")
 	}
+
 	return h.referral.generateInviteLink(ctx, chatID, lt)
 }
 
@@ -337,26 +361,8 @@ func userFields(from *tgbotapi.User, chatID int64) []zap.Field {
 			fields = append(fields, zap.String("name", name))
 		}
 	}
-	return fields
-}
 
-// formatUserLink returns a Markdown-formatted clickable user link for Telegram.
-// For alphabetic usernames, links to https://t.me/username.
-// For purely numeric usernames (e.g. "11"), uses tg://user?id=ID deep link,
-// because Telegram does not resolve t.me/123 as a profile.
-// For empty/unsupported usernames, falls back to tg://user?id=TelegramID deep link
-// with "unknown" display text.
-func formatUserLink(username string, telegramID int64) string {
-	if utils.IsNumericUsername(username) && telegramID != 0 {
-		return fmt.Sprintf("[%s](tg://user?id=%d)", username, telegramID)
-	}
-	if utils.IsRealUsername(username) {
-		return fmt.Sprintf("[@%s](https://t.me/%s)", username, username)
-	}
-	if telegramID != 0 {
-		return fmt.Sprintf("[unknown](tg://user?id=%d)", telegramID)
-	}
-	return "[unknown](#)"
+	return fields
 }
 
 // formatUserDisplay returns a display string suitable for showing a user reference.
@@ -366,8 +372,10 @@ func formatUserDisplay(username string) string {
 		if username == "" {
 			return "unknown"
 		}
+
 		return username
 	}
+
 	return "@" + username
 }
 
@@ -377,40 +385,30 @@ func displayUsername(username string) string {
 	if username == "" {
 		return ""
 	}
+
 	return ", @" + username
 }
 
-// getMainMenuContent builds the start-screen text and keyboard for a user.
 func (h *Handler) getMainMenuContent(ctx context.Context, username string, hasSubscription bool, chatID int64, sub *database.Subscription) (string, tgbotapi.InlineKeyboardMarkup) {
-	// Ensure keyboards is initialized (for manually constructed handlers in tests)
 	h.keyboardsOnce.Do(func() {
 		if h.keyboards == nil {
 			h.keyboards = NewKeyboardBuilder("", "", "", "", "", true)
 		}
 	})
 
-	var text string
-	var keyboard tgbotapi.InlineKeyboardMarkup
-	freeUpgradeLabel := ""
-	if hasSubscription {
-		if label, ok := h.getFreeUpgradeLabel(ctx, sub); ok {
-			freeUpgradeLabel = label
-		}
-	}
+	var (
+		text     string
+		keyboard tgbotapi.InlineKeyboardMarkup
+	)
 
 	if hasSubscription {
 		text = msg(MsgStartGreeting, username)
-		keyboard = h.getMainMenuKeyboard(true, freeUpgradeLabel)
+		keyboard = h.getMainMenuKeyboard(true)
 	} else {
 		text = msg(MsgStartGreetingNoSub, username)
-		keyboard = tgbotapi.NewInlineKeyboardMarkup(
-			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData("📥 Получить подписку", "create_subscription"),
-			),
-		)
+		keyboard = tgbotapi.NewInlineKeyboardMarkup(tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("📥 Получить подписку", "create_subscription")))
 	}
 
-	// Add admin buttons if the user is an admin
 	h.addAdminButtons(&keyboard, chatID)
 
 	return text, keyboard
@@ -438,34 +436,14 @@ func (h *Handler) getQRKeyboard() tgbotapi.InlineKeyboardMarkup {
 }
 
 // getMainMenuKeyboard builds the main menu keyboard.
-func (h *Handler) getMainMenuKeyboard(hasSubscription bool, freeUpgradeLabel ...string) tgbotapi.InlineKeyboardMarkup {
+func (h *Handler) getMainMenuKeyboard(hasSubscription bool) tgbotapi.InlineKeyboardMarkup {
 	h.keyboardsOnce.Do(func() {
 		if h.keyboards == nil {
 			h.keyboards = NewKeyboardBuilder("", "", "", "", "", true)
 		}
 	})
-	label := ""
-	if len(freeUpgradeLabel) > 0 {
-		label = freeUpgradeLabel[0]
-	}
-	return h.keyboards.MainMenu(hasSubscription, label)
-}
 
-// getFreeUpgradeLabel returns a free-upgrade promo label when the user is on
-// the free plan and a zero-cost product is configured.
-func (h *Handler) getFreeUpgradeLabel(ctx context.Context, sub *database.Subscription) (string, bool) {
-	if h.db == nil || sub == nil || sub.Status != "active" || h.cfg == nil || h.cfg.MainMenuBtnProductID == 0 {
-		return "", false
-	}
-	plan, err := h.db.GetPlanByID(ctx, sub.PlanID)
-	if err != nil || plan == nil || plan.Name != database.FreePlanName {
-		return "", false
-	}
-	product, err := h.db.GetProductByID(ctx, h.cfg.MainMenuBtnProductID)
-	if err != nil || product == nil || !product.IsActive || product.PriceCents != 0 {
-		return "", false
-	}
-	return fmt.Sprintf("🎁 %s бесплатно", product.Name), true
+	return h.keyboards.MainMenu(hasSubscription, h.paymentEnabled)
 }
 
 // addAdminButtons appends admin control buttons to a keyboard if the user is an admin.
@@ -495,6 +473,7 @@ func (h *Handler) safeSend(chattable tgbotapi.Chattable) bool {
 		logger.Error("Failed to send message", zap.Error(err))
 		return false
 	}
+
 	return true
 }
 
@@ -505,17 +484,21 @@ func (h *Handler) SendMessage(ctx context.Context, chatID int64, text string) {
 func (h *Handler) showLoadingMessage(chatID int64, messageID int) int {
 	if messageID == 0 {
 		msg := tgbotapi.NewMessage(chatID, "⏳ Загрузка...")
+
 		sentMsg, err := h.bot.Send(msg)
 		if err != nil {
 			logger.Error("Failed to send loading message", zap.Error(err))
 			return 0
 		}
+
 		return sentMsg.MessageID
 	}
+
 	edit := tgbotapi.NewEditMessageText(chatID, messageID, "⏳ Загрузка...")
 	if !h.safeSend(edit) {
 		return 0
 	}
+
 	return messageID
 }
 
@@ -533,7 +516,7 @@ func (h *Handler) handleRateLimitExceeded(ctx context.Context, chatID int64, mes
 	}
 }
 
-// Referral cache management (used by CommandHandler)
+// GetReferralCount returns the cached referral count for a chat.
 func (h *Handler) GetReferralCount(chatID int64) int64 {
 	return h.referralCache.Get(chatID)
 }
@@ -551,11 +534,9 @@ func (h *Handler) SyncReferralCache(ctx context.Context) error {
 }
 
 func (h *Handler) StartReferralCacheSync(ctx context.Context) {
-	h.bgWg.Add(1)
-	go func() {
-		defer h.bgWg.Done()
+	h.bgWg.Go(func() {
 		h.referralCache.StartSync(ctx)
-	}()
+	})
 }
 
 func (h *Handler) LoadReferralCache(ctx context.Context) error {
@@ -568,21 +549,17 @@ func (h *Handler) GetSubscriptionService() *service.SubscriptionService {
 	return h.subscriptionService
 }
 
-// Lifecycle
+// StartCacheCleanup runs the cache cleanup loop until ctx is done.
 func (h *Handler) StartCacheCleanup(ctx context.Context, interval time.Duration) {
-	h.bgWg.Add(1)
-	go func() {
-		defer h.bgWg.Done()
+	h.bgWg.Go(func() {
 		h.cache.StartCleanup(ctx, interval)
-	}()
+	})
 }
 
 func (h *Handler) StartRateLimiterCleanup(ctx context.Context, interval, maxIdle time.Duration) {
-	h.bgWg.Add(1)
-	go func() {
-		defer h.bgWg.Done()
+	h.bgWg.Go(func() {
 		h.rateLimiter.StartCleanup(ctx, interval, maxIdle)
-	}()
+	})
 }
 
 func (h *Handler) WaitForBackgroundGoroutines() {
@@ -599,7 +576,9 @@ func (h *Handler) checkAdminSendRateLimit(chatID int64) bool {
 		}
 		h.adminRateLimitMu.Unlock()
 	}
+
 	h.adminRateLimitMu.Lock()
+
 	bucket, ok := h.adminRateLimiters[chatID]
 	if !ok {
 		// Create a new token bucket: 1 token, refills every minute (1/60 per second)
@@ -607,6 +586,7 @@ func (h *Handler) checkAdminSendRateLimit(chatID int64) bool {
 		h.adminRateLimiters[chatID] = bucket
 	}
 	h.adminRateLimitMu.Unlock()
+
 	return bucket.Allow()
 }
 
@@ -618,18 +598,22 @@ func (h *Handler) ClearAdminSendRateLimit(chatID int64) {
 	if h.adminRateLimiters == nil {
 		return
 	}
+
 	if bucket, ok := h.adminRateLimiters[chatID]; ok {
 		bucket.Reset()
 	}
 }
 
-// Main update router
+// HandleUpdate routes incoming Telegram updates through the bot handlers.
 func (h *Handler) HandleUpdate(ctx context.Context, update tgbotapi.Update) {
 	start := time.Now()
 
 	// Rate limiting: extract chat ID and check for non-admin users
-	var chatID int64
-	var command string
+	var (
+		chatID  int64
+		command string
+	)
+
 	if update.Message != nil {
 		chatID = update.Message.Chat.ID
 		if update.Message.IsCommand() {
@@ -643,18 +627,24 @@ func (h *Handler) HandleUpdate(ctx context.Context, update tgbotapi.Update) {
 		} else if update.CallbackQuery.From != nil {
 			chatID = update.CallbackQuery.From.ID
 		}
+
 		command = "callback"
 	}
 
 	var err error
+
 	if chatID != 0 && !h.isAdmin(chatID) && !h.checkRateLimit(chatID) {
 		h.handleRateLimitExceeded(ctx, chatID, 0)
 		metrics.BotUpdatesTotal.WithLabelValues(command, "rate_limited").Inc()
+
 		err = ErrRateLimited
+
 		return
 	}
+
 	defer func() {
 		metrics.BotUpdateDuration.WithLabelValues(command).Observe(time.Since(start).Seconds())
+
 		if err != nil {
 			metrics.BotUpdateErrorsTotal.WithLabelValues(command).Inc()
 			metrics.BotUpdatesTotal.WithLabelValues(command, "error").Inc()
@@ -668,6 +658,7 @@ func (h *Handler) HandleUpdate(ctx context.Context, update tgbotapi.Update) {
 			if h.isAdmin(chatID) && h.broadcastSessionActive(chatID) && update.Message.Command() != "broadcast" {
 				h.clearBroadcastSession(chatID)
 			}
+
 			switch update.Message.Command() {
 			case "start":
 				err = h.HandleStart(ctx, update)
@@ -703,5 +694,4 @@ func (h *Handler) HandleUpdate(ctx context.Context, update tgbotapi.Update) {
 	} else if update.CallbackQuery != nil {
 		err = h.HandleCallback(ctx, update)
 	}
-
 }

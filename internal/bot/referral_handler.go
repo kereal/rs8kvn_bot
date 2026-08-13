@@ -52,6 +52,7 @@ func (rh *ReferralHandler) effectiveBotUsername() string {
 	if rh.botConfig != nil {
 		return rh.botConfig.Username
 	}
+
 	return ""
 }
 
@@ -76,6 +77,7 @@ func (rh *ReferralHandler) HandleInvite(ctx context.Context, chatID int64, usern
 	logger.Info("User requesting invite link",
 		zap.Int64("chat_id", chatID),
 		zap.String("username", username), zap.Int64("chat_id", chatID))
+
 	return rh.sendInviteLink(ctx, chatID, messageID)
 }
 
@@ -91,15 +93,19 @@ func (rh *ReferralHandler) sendInviteLink(ctx context.Context, chatID int64, mes
 				zap.Error(genErr),
 				zap.Int64("chat_id", chatID))
 			rh.sender.SendMessage(ctx, chatID, msg(MsgInviteCreateFailed))
+
 			return fmt.Errorf("generate invite code: %w", genErr)
 		}
+
 		invite, err = rh.db.GetOrCreateInvite(ctx, chatID, inviteCode)
 	}
+
 	if err != nil {
 		logger.Error("Failed to get or create invite",
 			zap.Error(err),
 			zap.Int64("chat_id", chatID))
 		rh.sender.SendMessage(ctx, chatID, msg(MsgInviteCreateFailed))
+
 		return fmt.Errorf("get or create invite: %w", err)
 	}
 
@@ -121,6 +127,7 @@ func (rh *ReferralHandler) sendInviteLink(ctx context.Context, chatID int64, mes
 		msg.ReplyMarkup = &keyboard
 		rh.sender.Send(ctx, msg)
 	}
+
 	return nil
 }
 
@@ -133,8 +140,10 @@ func (rh *ReferralHandler) generateInviteLink(ctx context.Context, chatID int64,
 		if genErr != nil {
 			return "", fmt.Errorf("generate invite code: %w", genErr)
 		}
+
 		invite, err = rh.db.GetOrCreateInvite(ctx, chatID, inviteCode)
 	}
+
 	if err != nil {
 		return "", fmt.Errorf("get or create invite: %w", err)
 	}

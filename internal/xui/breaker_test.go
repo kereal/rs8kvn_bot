@@ -34,6 +34,7 @@ func TestCircuitBreaker_FailureThreshold(t *testing.T) {
 
 			assert.Equal(t, tt.wantState, cb.state)
 			assert.Equal(t, tt.wantAllowed, cb.allowRequest())
+
 			if tt.wantState == CircuitStateOpen {
 				assert.Equal(t, CircuitStateOpen, cb.state)
 			}
@@ -55,7 +56,7 @@ func TestCircuitBreaker_OpensAfterMaxFailures(t *testing.T) {
 
 	cb := NewCircuitBreaker(3, 10*time.Second)
 
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		cb.recordResult(errors.New("failure"))
 	}
 
@@ -97,6 +98,7 @@ func TestCircuitBreaker_Execute(t *testing.T) {
 				cb := NewCircuitBreaker(2, 10*time.Second)
 				cb.recordResult(errors.New("failure"))
 				cb.recordResult(errors.New("failure"))
+
 				return cb
 			},
 			fn:        func() error { return nil },
@@ -113,6 +115,7 @@ func TestCircuitBreaker_Execute(t *testing.T) {
 			wantErrIs: func() error {
 				ctx, cancel := context.WithCancel(context.Background())
 				cancel()
+
 				return ctx.Err()
 			}(),
 		},
@@ -121,8 +124,8 @@ func TestCircuitBreaker_Execute(t *testing.T) {
 			setup: func() *CircuitBreaker {
 				return NewCircuitBreaker(3, 100*time.Millisecond)
 			},
-			fn:      func() error { return nil },
-			wantErr: true,
+			fn:        func() error { return nil },
+			wantErr:   true,
 			wantErrIs: context.DeadlineExceeded,
 		},
 		{
@@ -145,7 +148,9 @@ func TestCircuitBreaker_Execute(t *testing.T) {
 				defer func() {
 					assert.True(t, recover() != nil, "panic should propagate")
 				}()
+
 				cb.Execute(context.Background(), tt.fn)
+
 				return
 			}
 
@@ -153,13 +158,16 @@ func TestCircuitBreaker_Execute(t *testing.T) {
 			if tt.name == "context cancellation" {
 				cancelCtx, cancel := context.WithCancel(ctx)
 				cancel()
+
 				ctx = cancelCtx
 			}
+
 			if tt.name == "context timeout" {
 				// Wait for the timeout context to report completion so the
 				// breaker sees a genuinely-expired context inside Execute.
 				timeoutCtx, cancel := context.WithTimeout(ctx, 1*time.Nanosecond)
 				defer cancel()
+
 				<-timeoutCtx.Done()
 				ctx = timeoutCtx
 			}
@@ -167,6 +175,7 @@ func TestCircuitBreaker_Execute(t *testing.T) {
 			err := cb.Execute(ctx, tt.fn)
 			if tt.wantErr {
 				assert.Error(t, err)
+
 				if tt.wantErrIs != nil {
 					assert.ErrorIs(t, err, tt.wantErrIs)
 				}
@@ -192,6 +201,7 @@ func TestCircuitBreaker_HalfOpenTransitions(t *testing.T) {
 				cb := NewCircuitBreaker(2, 5*time.Millisecond)
 				cb.recordResult(errors.New("failure"))
 				cb.recordResult(errors.New("failure"))
+
 				return cb, func() { time.Sleep(10 * time.Millisecond) }
 			},
 			actions: func(t *testing.T, cb *CircuitBreaker) {
@@ -206,11 +216,13 @@ func TestCircuitBreaker_HalfOpenTransitions(t *testing.T) {
 				cb := NewCircuitBreaker(2, 5*time.Millisecond)
 				cb.recordResult(errors.New("failure"))
 				cb.recordResult(errors.New("failure"))
+
 				return cb, func() { time.Sleep(10 * time.Millisecond) }
 			},
 			actions: func(t *testing.T, cb *CircuitBreaker) {
 				cb.allowRequest() // enter half-open
-				for i := 0; i < 3; i++ {
+
+				for range 3 {
 					cb.recordResult(nil)
 				}
 			},
@@ -222,6 +234,7 @@ func TestCircuitBreaker_HalfOpenTransitions(t *testing.T) {
 				cb := NewCircuitBreaker(2, 5*time.Millisecond)
 				cb.recordResult(errors.New("failure"))
 				cb.recordResult(errors.New("failure"))
+
 				return cb, func() { time.Sleep(10 * time.Millisecond) }
 			},
 			actions: func(t *testing.T, cb *CircuitBreaker) {
@@ -239,6 +252,7 @@ func TestCircuitBreaker_HalfOpenTransitions(t *testing.T) {
 				cb := NewCircuitBreaker(2, 5*time.Millisecond)
 				cb.recordResult(errors.New("failure"))
 				cb.recordResult(errors.New("failure"))
+
 				return cb, func() { time.Sleep(10 * time.Millisecond) }
 			},
 			actions: func(t *testing.T, cb *CircuitBreaker) {
@@ -263,9 +277,10 @@ func TestCircuitBreaker_HalfOpenTransitions(t *testing.T) {
 				require.Eventually(t, cb.allowRequest, 200*time.Millisecond, 5*time.Millisecond, "circuit should become half-open after timeout")
 				assert.Equal(t, CircuitStateHalfOpen, cb.state)
 
-				for i := 0; i < 3; i++ {
+				for range 3 {
 					cb.recordResult(nil)
 				} // half-open -> closed
+
 				assert.Equal(t, CircuitStateClosed, cb.state)
 
 				cb.recordResult(errors.New("failure"))
@@ -280,6 +295,7 @@ func TestCircuitBreaker_HalfOpenTransitions(t *testing.T) {
 				cb := NewCircuitBreaker(2, 1*time.Second)
 				cb.recordResult(errors.New("failure"))
 				cb.recordResult(errors.New("failure"))
+
 				return cb, func() {}
 			},
 			actions: func(t *testing.T, cb *CircuitBreaker) {
@@ -329,17 +345,18 @@ func TestCircuitBreaker_ConcurrentAccess(t *testing.T) {
 
 	cb := NewCircuitBreaker(100, 10*time.Second)
 
-	const goroutines = 50
-	const operationsPerGoroutine = 100
+	const (
+		goroutines             = 50
+		operationsPerGoroutine = 100
+	)
 
 	var wg sync.WaitGroup
+
 	errCh := make(chan error, goroutines*operationsPerGoroutine)
 
-	for i := 0; i < goroutines; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for j := 0; j < operationsPerGoroutine; j++ {
+	for range goroutines {
+		wg.Go(func() {
+			for range operationsPerGoroutine {
 				err := cb.Execute(context.Background(), func() error {
 					return nil
 				})
@@ -347,13 +364,14 @@ func TestCircuitBreaker_ConcurrentAccess(t *testing.T) {
 					errCh <- err
 				}
 			}
-		}()
+		})
 	}
 
 	wg.Wait()
 	close(errCh)
 
 	errorCount := 0
+
 	for err := range errCh {
 		if errors.Is(err, ErrCircuitOpen) {
 			errorCount++
@@ -369,21 +387,21 @@ func TestCircuitBreaker_ConcurrentFailures(t *testing.T) {
 
 	cb := NewCircuitBreaker(10, 10*time.Second)
 
-	const goroutines = 20
-	const failuresPerGoroutine = 2
+	const (
+		goroutines           = 20
+		failuresPerGoroutine = 2
+	)
 
 	var wg sync.WaitGroup
 
-	for i := 0; i < goroutines; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for j := 0; j < failuresPerGoroutine; j++ {
+	for range goroutines {
+		wg.Go(func() {
+			for range failuresPerGoroutine {
 				_ = cb.Execute(context.Background(), func() error {
 					return errors.New("failure")
 				})
 			}
-		}()
+		})
 	}
 
 	wg.Wait()
@@ -404,6 +422,7 @@ func TestCircuitBreaker_ResetClearsAllState(t *testing.T) {
 	require.Eventually(t, func() bool {
 		cb.mu.Lock()
 		defer cb.mu.Unlock()
+
 		return cb.state == CircuitStateOpen
 	}, 200*time.Millisecond, 5*time.Millisecond, "circuit should remain open after failures")
 	cb.allowRequest()

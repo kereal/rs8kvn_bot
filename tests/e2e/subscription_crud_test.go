@@ -1,5 +1,3 @@
-
-
 package e2e
 
 import (
@@ -18,6 +16,7 @@ import (
 
 func TestE2E_CreateSubscription_Success(t *testing.T) {
 	t.Parallel()
+
 	env := setupE2EEnv(t)
 	defer env.db.Close()
 
@@ -57,6 +56,7 @@ func TestE2E_CreateSubscription_Success(t *testing.T) {
 
 func TestE2E_CreateSubscription_NoDuplicate(t *testing.T) {
 	t.Parallel()
+
 	env := setupE2EEnv(t)
 	defer env.db.Close()
 
@@ -102,6 +102,7 @@ func TestE2E_CreateSubscription_NoDuplicate(t *testing.T) {
 
 func TestE2E_CreateSubscription_ConcurrentProtection(t *testing.T) {
 	t.Parallel()
+
 	env := setupE2EEnv(t)
 	defer env.db.Close()
 
@@ -110,9 +111,10 @@ func TestE2E_CreateSubscription_ConcurrentProtection(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(2)
 
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		go func() {
 			defer wg.Done()
+
 			env.handler.HandleCallback(ctx, tgbotapi.Update{
 				CallbackQuery: &tgbotapi.CallbackQuery{
 					From: &tgbotapi.User{
@@ -138,6 +140,7 @@ func TestE2E_CreateSubscription_ConcurrentProtection(t *testing.T) {
 
 func TestE2E_CreateSubscription_XUIFailure(t *testing.T) {
 	t.Parallel()
+
 	env := setupE2EEnv(t)
 	defer env.db.Close()
 
@@ -172,6 +175,7 @@ func TestE2E_CreateSubscription_XUIFailure(t *testing.T) {
 
 func TestE2E_CreateSubscription_TrafficLimitCorrect(t *testing.T) {
 	t.Parallel()
+
 	env := setupE2EEnv(t)
 	defer env.db.Close()
 
@@ -201,6 +205,7 @@ func TestE2E_CreateSubscription_TrafficLimitCorrect(t *testing.T) {
 
 func TestE2E_CreateSubscription_SubscriptionID_Set(t *testing.T) {
 	t.Parallel()
+
 	env := setupE2EEnv(t)
 	defer env.db.Close()
 
@@ -228,6 +233,7 @@ func TestE2E_CreateSubscription_SubscriptionID_Set(t *testing.T) {
 
 func TestE2E_CreateSubscription_UsernameStored(t *testing.T) {
 	t.Parallel()
+
 	env := setupE2EEnv(t)
 	defer env.db.Close()
 
@@ -254,6 +260,7 @@ func TestE2E_CreateSubscription_UsernameStored(t *testing.T) {
 
 func TestE2E_MultipleUsers_Isolation(t *testing.T) {
 	t.Parallel()
+
 	env := setupE2EEnv(t)
 	defer env.db.Close()
 
@@ -297,6 +304,7 @@ func TestE2E_MultipleUsers_Isolation(t *testing.T) {
 
 func TestE2E_Subscription_ReplacesOldActive(t *testing.T) {
 	t.Parallel()
+
 	env := setupE2EEnv(t)
 	defer env.db.Close()
 
@@ -322,6 +330,7 @@ func TestE2E_Subscription_ReplacesOldActive(t *testing.T) {
 
 func TestE2E_CreateSubscription_RevokesOnlyActive(t *testing.T) {
 	t.Parallel()
+
 	env := setupE2EEnv(t)
 	defer env.db.Close()
 
@@ -371,6 +380,7 @@ func TestE2E_Service_Create_XUIFailure_Parameterized(t *testing.T) {
 
 	env := setupE2EEnv(t)
 	defer env.db.Close()
+
 	ctx := context.Background()
 
 	tests := []struct {
@@ -429,6 +439,7 @@ func TestE2E_Service_Create_XUIFailure_Parameterized(t *testing.T) {
 			defer env.db.Close()
 
 			ctx := context.Background()
+
 			tt.setupXUI()
 
 			sub, err := env.subService.Create(ctx, env.chatID, env.username, "")

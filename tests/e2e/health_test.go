@@ -1,5 +1,3 @@
-
-
 package e2e
 
 import (
@@ -21,6 +19,7 @@ import (
 
 func TestE2E_HealthEndpoint(t *testing.T) {
 	t.Parallel()
+
 	env := setupE2EEnv(t)
 	defer env.db.Close()
 
@@ -30,9 +29,11 @@ func TestE2E_HealthEndpoint(t *testing.T) {
 	srv := web.NewServer("127.0.0.1:0", env.db, env.cfg, env.botConfig.Username, subService, nil)
 
 	srv.RegisterChecker("database", func(ctx context.Context) web.ComponentHealth {
-		if err := env.db.Ping(ctx); err != nil {
+		err := env.db.Ping(ctx)
+		if err != nil {
 			return web.ComponentHealth{Status: web.StatusDown, Message: err.Error()}
 		}
+
 		return web.ComponentHealth{Status: web.StatusOK}
 	})
 
@@ -41,12 +42,14 @@ func TestE2E_HealthEndpoint(t *testing.T) {
 
 	err := srv.Start(ctx)
 	require.NoError(t, err)
+
 	defer srv.Stop(context.Background())
 
 	addr := srv.Addr()
 
 	resp, err := http.Get(fmt.Sprintf("http://%s/healthz", addr))
 	require.NoError(t, err)
+
 	defer resp.Body.Close()
 
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
@@ -58,6 +61,7 @@ func TestE2E_HealthEndpoint(t *testing.T) {
 
 func TestE2E_HealthEndpoint_DBError(t *testing.T) {
 	t.Parallel()
+
 	env := setupE2EEnv(t)
 	defer env.db.Close()
 
@@ -75,12 +79,14 @@ func TestE2E_HealthEndpoint_DBError(t *testing.T) {
 
 	err := srv.Start(ctx)
 	require.NoError(t, err)
+
 	defer srv.Stop(context.Background())
 
 	addr := srv.Addr()
 
 	resp, err := http.Get(fmt.Sprintf("http://%s/readyz", addr))
 	require.NoError(t, err)
+
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
@@ -92,6 +98,7 @@ func TestE2E_HealthEndpoint_DBError(t *testing.T) {
 
 func TestE2E_ReadyEndpoint(t *testing.T) {
 	t.Parallel()
+
 	env := setupE2EEnv(t)
 	defer env.db.Close()
 
@@ -101,9 +108,11 @@ func TestE2E_ReadyEndpoint(t *testing.T) {
 	srv := web.NewServer("127.0.0.1:0", env.db, env.cfg, env.botConfig.Username, subService, nil)
 
 	srv.RegisterChecker("database", func(ctx context.Context) web.ComponentHealth {
-		if err := env.db.Ping(ctx); err != nil {
+		err := env.db.Ping(ctx)
+		if err != nil {
 			return web.ComponentHealth{Status: web.StatusDown, Message: err.Error()}
 		}
+
 		return web.ComponentHealth{Status: web.StatusOK}
 	})
 
@@ -112,12 +121,16 @@ func TestE2E_ReadyEndpoint(t *testing.T) {
 
 	err := srv.Start(ctx)
 	require.NoError(t, err)
+
 	defer srv.Stop(context.Background())
+
+	srv.SetReady(true)
 
 	addr := srv.Addr()
 
 	resp, err := http.Get(fmt.Sprintf("http://%s/readyz", addr))
 	require.NoError(t, err)
+
 	defer resp.Body.Close()
 
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
