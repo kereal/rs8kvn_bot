@@ -10,7 +10,9 @@
 --   provider_payment_id  — внешний идентификатор платежа из платёжного провайдера.
 --   paid_at              — момент подтверждения оплаты.
 --   activated_at         — момент фактической активации подписки.
---   expires_at           — срок действияinvoice (например, 30 минут с момента создания).
+--   expires_at           — срок действия подписки, выданной этой покупкой
+--                         (копия subscriptions.expires_at на момент оплаты).
+--                         НЕ таймаут инвойса.
 
 CREATE TABLE orders (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
