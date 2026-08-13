@@ -128,20 +128,31 @@ func (h *Handler) handleMenuDocuments(_ context.Context, chatID int64, username 
 	return nil
 }
 
-// handleBackToDocuments returns to the documents menu.
+// handleBackToDocuments closes the separate legal-content message.
 func (h *Handler) handleBackToDocuments(_ context.Context, chatID int64, _ string, messageID int) error {
-	logger.Info("User returning to documents", zap.Int64("chat_id", chatID))
+	logger.Info("User closing documents screen", zap.Int64("chat_id", chatID))
 
-	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "📑 *Документы*")
-	editMsg.ParseMode = "Markdown"
-	editMsg.DisableWebPagePreview = true
-	keyboard := h.keyboards.Documents()
+	h.documentMessagesMu.Lock()
+	precedingIDs := append([]int(nil), h.documentMessages[messageID]...)
+	delete(h.documentMessages, messageID)
+	h.documentMessagesMu.Unlock()
 
-	editMsg.ReplyMarkup = &keyboard
+	messageIDs := append(precedingIDs, messageID)
+	var deleteErr error
 
-	_, err := h.bot.Request(editMsg)
-	if err != nil {
-		return fmt.Errorf("return to documents menu: %w", err)
+	for _, id := range messageIDs {
+		if id <= 0 {
+			continue
+		}
+
+		deleteMsg := tgbotapi.NewDeleteMessage(chatID, id)
+		if _, err := h.bot.Request(deleteMsg); err != nil {
+			deleteErr = errors.Join(deleteErr, fmt.Errorf("message %d: %w", id, err))
+		}
+	}
+
+	if deleteErr != nil {
+		return fmt.Errorf("delete documents screen: %w", deleteErr)
 	}
 
 	return nil
@@ -152,6 +163,9 @@ func (h *Handler) sendLegalText(ctx context.Context, chatID int64, messageID int
 	if len(chunks) == 0 {
 		return nil
 	}
+
+	precedingIDs := make([]int, 0, len(chunks)-1)
+	finalMessageID := 0
 
 	for i, chunk := range chunks {
 		var keyboard *tgbotapi.InlineKeyboardMarkup
@@ -166,9 +180,28 @@ func (h *Handler) sendLegalText(ctx context.Context, chatID int64, messageID int
 		msg.DisableWebPagePreview = true
 
 		msg.ReplyMarkup = keyboard
-		if !h.safeSend(msg) {
-			return fmt.Errorf("legal chunk send failed")
+		sent, err := h.bot.Send(msg)
+		if err != nil {
+			logger.Error("Failed to send legal message", zap.Error(err))
+			return fmt.Errorf("legal chunk send failed: %w", err)
 		}
+
+		if i < len(chunks)-1 && sent.MessageID > 0 {
+			precedingIDs = append(precedingIDs, sent.MessageID)
+		}
+
+		if i == len(chunks)-1 {
+			finalMessageID = sent.MessageID
+		}
+	}
+
+	if len(precedingIDs) > 0 && finalMessageID > 0 {
+		h.documentMessagesMu.Lock()
+		if h.documentMessages == nil {
+			h.documentMessages = make(map[int][]int)
+		}
+		h.documentMessages[finalMessageID] = precedingIDs
+		h.documentMessagesMu.Unlock()
 	}
 
 	return nil

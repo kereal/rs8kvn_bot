@@ -47,7 +47,11 @@ func (s *Service) LinkNodeToPlan(ctx context.Context, planName string, nodeID ui
 		return fmt.Errorf("plan %q not found: %w", planName, err)
 	}
 
-	return s.db.WithContext(ctx).Create(&PlanNode{PlanID: plan.ID, NodeID: nodeID}).Error
+	if err := s.db.WithContext(ctx).Create(&PlanNode{PlanID: plan.ID, NodeID: nodeID}).Error; err != nil {
+		return fmt.Errorf("link node %d to plan %q: %w", nodeID, planName, err)
+	}
+
+	return nil
 }
 
 // GetNodeByID retrieves a node by its ID.

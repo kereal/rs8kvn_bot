@@ -90,7 +90,7 @@ func toServerConfig(raw json.RawMessage) (*serverConfig, error) {
 			zap.Error(err),
 			zap.String("raw_preview", utils.TruncateString(string(raw), 200)))
 
-		return nil, err
+		return nil, fmt.Errorf("parse server config JSON: %w", err)
 	}
 
 	if cfg.Address == "" {
@@ -149,7 +149,7 @@ func ConvertSingleJSONToLink(raw json.RawMessage) (string, error) {
 			zap.Error(err),
 			zap.String("raw_preview", utils.TruncateString(string(raw), 200)))
 
-		return "", err
+		return "", fmt.Errorf("convert JSON config to share link: %w", err)
 	}
 
 	switch strings.ToLower(cfg.Type) {

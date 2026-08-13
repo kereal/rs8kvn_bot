@@ -912,16 +912,17 @@ func TestGetRequiredFlow_Fallback(t *testing.T) {
 		t.Skip("Skipping slow test in short mode")
 	}
 
-	// When getInbound fails, should return default flow
-	// Use guaranteed-unresolvable host to trigger error path
+	// When getInbound fails, surface the wrapped error instead of guessing a flow.
+	// Use guaranteed-unresolvable host to trigger error path.
 	client, err := NewClient("http://nonexistent.invalid:2053", testAPIToken)
 	require.NoError(t, err)
 
 	defer client.Close()
 
 	flow, err := client.getRequiredFlow(context.Background(), 1)
-	assert.NoError(t, err)
-	assert.Equal(t, "xtls-rprx-vision", flow)
+	require.Error(t, err)
+	assert.Empty(t, flow)
+	assert.Contains(t, err.Error(), "get inbound for flow")
 }
 
 func TestAPIResponseParsing(t *testing.T) {

@@ -155,18 +155,17 @@ func TestTokenBucket_Refill_DoesNotExceedMax(t *testing.T) {
 
 	tb := NewTokenBucket(10, 100)
 
-	// Wait for potential refill without fixed sleep
+	// Start below capacity so elapsed time must refill the bucket.
+	require.True(t, tb.AllowN(5), "AllowN(5) should consume available tokens")
+	assert.Less(t, tb.AvailableTokens(), tb.maxTokens, "bucket should start below maxTokens")
+
+	// 100 tokens/sec needs about 50ms to restore the five consumed tokens.
 	require.Eventually(t, func() bool {
-		tb.mu.Lock()
-		defer tb.mu.Unlock()
+		return tb.AvailableTokens() >= tb.maxTokens
+	}, 200*time.Millisecond, 5*time.Millisecond, "tokens should refill to max")
 
-		return tb.tokens >= tb.maxTokens
-	}, 200*time.Millisecond, 5*time.Millisecond, "tokens should reach max")
-
-	tb.mu.Lock()
-	tokens := tb.tokens
-	tb.mu.Unlock()
-
+	tokens := tb.AvailableTokens()
+	assert.Equal(t, tb.maxTokens, tokens, "refill should restore the bucket to maxTokens")
 	assert.LessOrEqual(t, tokens, tb.maxTokens, "tokens should not exceed maxTokens")
 }
 

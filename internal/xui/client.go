@@ -190,8 +190,7 @@ func (in *Inbound) GetTransport() string {
 
 // GetRequiredFlow возвращает значение flow, необходимое для данного inbound.
 // Для транспортов, не использующих XTLS (xhttp, hysteria2, ws, grpc, и т.д.),
-// flow не требуется (""). Fallback "xtls-rprx-vision" используется только
-// при ошибке получения inbound'а.
+// flow не требуется (""). Ошибка получения inbound передаётся вызывающему коду.
 func (in *Inbound) GetRequiredFlow() string {
 	transport := in.GetTransport()
 	switch transport {
@@ -695,7 +694,6 @@ func (c *Client) doGetInbound(ctx context.Context, inboundID int) (*Inbound, err
 }
 
 // getRequiredFlow возвращает flow, требуемый для работы с указанным inbound.
-// При ошибке получения inbound'а используется безопасный fallback xtls-rprx-vision.
 func (c *Client) getRequiredFlow(ctx context.Context, inboundID int) (string, error) {
 	err := ctx.Err()
 	if err != nil {
@@ -704,10 +702,14 @@ func (c *Client) getRequiredFlow(ctx context.Context, inboundID int) (string, er
 
 	inbound, err := c.doGetInbound(ctx, inboundID)
 	if err != nil {
-		logger.Debug("Failed to get inbound for flow, using default",
+		logger.Debug("Failed to get inbound for flow",
 			zap.Error(err))
 
-		return "xtls-rprx-vision", nil
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return "", err
+		}
+
+		return "", fmt.Errorf("get inbound for flow: %w", err)
 	}
 
 	return inbound.GetRequiredFlow(), nil
