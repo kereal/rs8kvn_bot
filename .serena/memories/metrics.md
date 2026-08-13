@@ -10,6 +10,9 @@
 - `subscription_expire_total` + `subscription_expire_duration_seconds` — инкрементируются в `SubscriptionExpireWorker.process`.
 - `reconcile_orphaned_duration_seconds` — инкрементируется в `ReconcileOrphanedClients`.
 - `subserver_cache_hit_duration_seconds` + `subserver_cache_miss_duration_seconds` — замеры в `HandleSubscription`.
+- `payment_operations_total{operation,result}` + `payment_operation_duration_seconds{operation}` — счётчики/гистограмма операций `OrderService` (request/confirm/cancel × success/error).
+- `payment_amounts_cents_total{operation,currency}` — суммы в копейках по денежным переходам: `confirmed` (успешный CONFIRMED, только Activated) и `chargeback` (CHARGEBACKED на оплаченном заказе). Валюта нормализуется (upper), невалидные/неположительные суммы игнорируются.
+- `payment_issues_total{event}` — операционные проблемы платежей по стабильному имени события (`NotifyPaymentIssue`); те же события уходят админу в Telegram.
 
 ## Удалённые метрики
 

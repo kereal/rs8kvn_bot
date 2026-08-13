@@ -281,6 +281,15 @@ All tests pass with `-race` detector. Fuzzing enabled for critical functions.
 - **Share referral:** `pendingInvites[chatID]` cached 60 min (in-memory, periodic cleanup prevents leak)
 - **TelegramID conventions:** Positive = bound users, Negative = unbound trial subscriptions
 
+### Payments (Platega)
+- **Entry point:** `POST /payment/callback` — guard chain 405/503/401/400/200; body 256 KiB, `UseNumber`, single JSON document.
+- **Confirm:** `CONFIRMED` → `OrderService.ConfirmPayment` — atomic CAS `pending → paid` + subscription update + plan reconciliation in one DB transaction (`ConfirmOrderPaidCAS` with `ApplyPlanInTxFn`). Post-commit `SyncSubscription` is best-effort (≤20 s timeout, background worker retries).
+- **Admin alerts (best-effort Markdown, `TelegramAdminID`):** on activation (`Activated=true`, only the pending→paid caller) `notifyAdminPaid` — tariff, formatted amount, clickable buyer link (`utils.FormatUserLink`), `🆕 Покупка` vs `🔄 Продление` (from `PricePaidCents`/`ProductID` captured before CAS); on paid-order chargeback (`WasPaid=true`) `notifyAdminChargeback` — single alert with tariff, amount, buyer link and access status (downgraded to free / preserved). Every integration problem (mismatch, late/unknown callback, provider error, DB failure) → `NotifyPaymentIssue` → `notifyAdmin` + `payment_issues_total{event}`. Duplicate callbacks are silent.
+- **Late confirmed payment:** `CONFIRMED` for an `expired`/`canceled` order never activates it — money flagged for manual review (refund or manual activation), admin alerted (`late_confirmed_callback`). Race documented in `doc/platega-T3.md` §5.4.
+- **Chargeback:** `CHARGEBACKED` on a paid order auto-downgrades the subscription to the free plan unless another paid order exists (access preserved for manual review).
+- **Payment window:** link lifetime = Platega `expiresIn` (≈30 min), stored as absolute UTC `payment_expires_at`; a still-valid saved link is reused, after expiry the pending order is terminalized as `expired`.
+- **Metrics:** `payment_operations_total{operation,result}`, `payment_operation_duration_seconds`, `payment_amounts_cents_total{operation,currency}` (confirmed/chargeback), `payment_issues_total{event}`.
+
 ### Subscription Deletion (v2.2.0+)
 - **Order:** Mark as revoked → best-effort deprovision VPN access → physical deletion of DB row
 - **Rationale:** Subscription is immediately inaccessible after revoked status is set. VPN deprovisioning is best-effort (background sync retries on failure). Physical deletion happens last. See AGENTS.md for detailed flow description.
@@ -310,7 +319,7 @@ All tests pass with `-race` detector. Fuzzing enabled for critical functions.
 - **Legacy support:** Auto-migration for pre-embedded databases (adds `subscription_id` column, drops `x_ui_host`)
 - **trial_requests cleanup:** 1-hour cutoff (matching rate-limit window) + 1s buffer to avoid boundary race
 - **Connection pool:** `MaxOpenConns=1` (SQLite single-writer), `MaxIdle=1`, `ConnMaxLifetime=5m`
-- **Orders:** `orders` table tracks payment lifecycle: pending → paid → expired/canceled. Statuses enforced via CHECK constraint. 30-minute expiry window for unpaid invoices.
+- **Orders:** `orders` table tracks payment lifecycle: pending → paid → expired/canceled. Statuses enforced via CHECK constraint (created with the table, migration 017 — effective, unlike the ALTER-based retry CHECK from 025). Payment window is provider-defined: Platega `expiresIn` (≈30 min) stored as absolute `payment_expires_at`.
 - **Nodes:** `nodes` table stores VPN panel sources (host, api_token, inbound_ids, type, subscription_url). Managed via DB only.
 - **Plans:** `plans` table (name, devices_limit, traffic_limit), `plan_nodes` M2M join, `products` (duration, price), `subscription_nodes` (sync state machine: active/pending_add/pending_remove/pending_update)
 - **Devices tracking:** `subscriptions.devices` column stores JSON array of client request header maps (HWID, Device-OS, etc.). `ips` column stores IP→timestamp entries. `last_request` column (*time, indexed) records the last time a client fetched its subscription via `/sub/{id}` (best-effort, updated on both cache hit and cache miss).

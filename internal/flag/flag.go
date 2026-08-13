@@ -44,6 +44,7 @@ func New() *Registry {
 func (r *Registry) Register(name string, v Value) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
 	r.values[name] = v
 }
 
@@ -51,6 +52,7 @@ func (r *Registry) Register(name string, v Value) {
 func (r *Registry) Value(name string) Value {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
+
 	return r.values[name]
 }
 
@@ -58,10 +60,12 @@ func (r *Registry) Value(name string) Value {
 func (r *Registry) Names() []string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
+
 	names := make([]string, 0, len(r.values))
 	for k := range r.values {
 		names = append(names, k)
 	}
+
 	return names
 }
 
@@ -70,7 +74,8 @@ func (r *Registry) Names() []string {
 // Unknown environment variables are ignored.
 func (r *Registry) LoadEnv() error {
 	// Load .env file if present (optional)
-	if err := godotenv.Load(); err != nil && !os.IsNotExist(err) {
+	err := godotenv.Load()
+	if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to load .env file: %w", err)
 	}
 
@@ -82,13 +87,16 @@ func (r *Registry) LoadEnv() error {
 		if !ok {
 			continue
 		}
+
 		val = strings.TrimSpace(val)
 		// An empty environment value is treated as unset: keep the default.
 		// Required fields are still caught by config validation.
 		if val == "" {
 			continue
 		}
-		if err := v.Set(val); err != nil {
+
+		err := v.Set(val)
+		if err != nil {
 			return fmt.Errorf("invalid value for %s: %w", name, err)
 		}
 	}
@@ -135,7 +143,9 @@ func (v *IntValue) Set(s string) error {
 	if err != nil {
 		return fmt.Errorf("must be an integer, got: %q", s)
 	}
+
 	v.val = n
+
 	return nil
 }
 
@@ -159,7 +169,9 @@ func (v *Int64Value) Set(s string) error {
 	if err != nil {
 		return fmt.Errorf("must be an integer, got: %q", s)
 	}
+
 	v.val = n
+
 	return nil
 }
 
@@ -184,7 +196,9 @@ func (v *BoolValue) Set(s string) error {
 	if err != nil {
 		return fmt.Errorf("must be a boolean (true/false/1/0), got: %q", s)
 	}
+
 	v.val = b
+
 	return nil
 }
 

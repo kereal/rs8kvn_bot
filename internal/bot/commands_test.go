@@ -43,7 +43,7 @@ func TestHandleStart_WithTrialCode(t *testing.T) {
 			args: "trial_abc12345",
 			setupMock: func(db *testutil.DatabaseService) {
 				db.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
-					return nil, gorm.ErrRecordNotFound
+					return nil, database.ErrSubscriptionNotFound
 				}
 				db.BindTrialSubscriptionFunc = func(ctx context.Context, subscriptionID string, telegramID int64, username string) (*database.Subscription, error) {
 					return &database.Subscription{
@@ -90,7 +90,7 @@ func TestHandleStart_WithTrialCode(t *testing.T) {
 			args: "trial_fail123",
 			setupMock: func(db *testutil.DatabaseService) {
 				db.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
-					return nil, gorm.ErrRecordNotFound
+					return nil, database.ErrSubscriptionNotFound
 				}
 				db.BindTrialSubscriptionFunc = func(ctx context.Context, subscriptionID string, telegramID int64, username string) (*database.Subscription, error) {
 					return nil, errors.New("bind failed")
@@ -380,7 +380,7 @@ func TestHandleBindTrial_DatabaseError(t *testing.T) {
 	handler := newTestHandlerWithSubService(t, nil, mockDB, mockXUI, mockBot)
 
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
-		return nil, gorm.ErrRecordNotFound
+		return nil, database.ErrSubscriptionNotFound
 	}
 	mockDB.BindTrialSubscriptionFunc = func(ctx context.Context, subscriptionID string, telegramID int64, username string) (*database.Subscription, error) {
 		return nil, errors.New("database error")
@@ -410,10 +410,10 @@ func TestHandleBindTrial_WithReferrerNotification(t *testing.T) {
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 		callCount++
 		if callCount == 1 {
-			return nil, gorm.ErrRecordNotFound
+			return nil, database.ErrSubscriptionNotFound
 		}
 
-		return nil, gorm.ErrRecordNotFound
+		return nil, database.ErrSubscriptionNotFound
 	}
 	mockDB.BindTrialSubscriptionFunc = func(ctx context.Context, subscriptionID string, telegramID int64, username string) (*database.Subscription, error) {
 		return &database.Subscription{
@@ -510,7 +510,7 @@ func TestHandleBindTrial_Success(t *testing.T) {
 	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), subService, "")
 
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
-		return nil, gorm.ErrRecordNotFound
+		return nil, database.ErrSubscriptionNotFound
 	}
 	mockDB.BindTrialSubscriptionFunc = func(ctx context.Context, subscriptionID string, telegramID int64, username string) (*database.Subscription, error) {
 		return &database.Subscription{
@@ -558,7 +558,7 @@ func TestHandleBindTrial_IncrementsReferrerCacheCount(t *testing.T) {
 	referrerTGID := int64(888777)
 
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
-		return nil, gorm.ErrRecordNotFound
+		return nil, database.ErrSubscriptionNotFound
 	}
 	mockDB.BindTrialSubscriptionFunc = func(ctx context.Context, subscriptionID string, telegramID int64, username string) (*database.Subscription, error) {
 		return &database.Subscription{
@@ -605,7 +605,7 @@ func TestHandleBindTrial_NoReferrerLeavesCacheUntouched(t *testing.T) {
 	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), subService, "")
 
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
-		return nil, gorm.ErrRecordNotFound
+		return nil, database.ErrSubscriptionNotFound
 	}
 	mockDB.BindTrialSubscriptionFunc = func(ctx context.Context, subscriptionID string, telegramID int64, username string) (*database.Subscription, error) {
 		return &database.Subscription{
@@ -778,7 +778,7 @@ func TestHandleBindTrial_UpdateClientError(t *testing.T) {
 		callCount++
 		if callCount == 1 {
 			// First call: check if user already has subscription
-			return nil, gorm.ErrRecordNotFound
+			return nil, database.ErrSubscriptionNotFound
 		}
 		// Subsequent calls: return referrer subscription
 		return &database.Subscription{TelegramID: telegramID, Username: "referrer"}, nil
@@ -818,6 +818,9 @@ func TestHandleBindTrial_GetInviteError(t *testing.T) {
 		ClientID:       "test-client-id",
 		InviteCode:     testutil.PtrString("ABC123"),
 		Status:         "active",
+	}
+	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
+		return nil, database.ErrSubscriptionNotFound
 	}
 	mockDB.BindTrialSubscriptionFunc = func(ctx context.Context, subscriptionID string, telegramID int64, username string) (*database.Subscription, error) {
 		return sub, nil

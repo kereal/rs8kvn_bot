@@ -24,11 +24,14 @@ func TestListNodes_Empty(t *testing.T) {
 func createTestNode(t *testing.T, svc *Service, name, host, apiToken string) Node {
 	node := Node{Name: name, IsActive: true, Host: host, APIToken: apiToken, Type: NodeType3xUI, InboundIDs: "[1]"}
 	require.NoError(t, svc.CreateNode(context.Background(), &node))
+
 	var plans []Plan
 	require.NoError(t, svc.db.Find(&plans).Error)
+
 	for _, p := range plans {
 		require.NoError(t, svc.db.Create(&PlanNode{PlanID: p.ID, NodeID: node.ID}).Error)
 	}
+
 	return node
 }
 
@@ -224,9 +227,10 @@ func TestNodeRepository_ListEnabled(t *testing.T) {
 
 	activeNode := &Node{Name: "active-node", IsActive: true, Host: "http://a", APIToken: "t", InboundIDs: `[1]`}
 	require.NoError(t, svc.db.WithContext(ctx).Create(activeNode).Error)
+
 	inactiveNode := &Node{Name: "inactive-node", Host: "http://i", APIToken: "t", InboundIDs: `[1]`}
 	require.NoError(t, svc.db.WithContext(ctx).Create(inactiveNode).Error)
-	require.NoError(t, svc.db.WithContext(ctx).Model(inactiveNode).Updates(map[string]interface{}{"is_active": false}).Error)
+	require.NoError(t, svc.db.WithContext(ctx).Model(inactiveNode).Updates(map[string]any{"is_active": false}).Error)
 
 	nodes, err := svc.ListEnabled(ctx)
 	require.NoError(t, err)
@@ -257,12 +261,13 @@ func TestNodeRepository_GetNodesByPlanID(t *testing.T) {
 
 	node1 := &Node{Name: "plan-node-1", IsActive: true, Host: "http://p1", APIToken: "t1", InboundIDs: `[1]`}
 	node2 := &Node{Name: "plan-node-2", IsActive: true, Host: "http://p2", APIToken: "t2", InboundIDs: `[1]`}
+
 	require.NoError(t, svc.db.WithContext(ctx).Create(node1).Error)
 	require.NoError(t, svc.db.WithContext(ctx).Create(node2).Error)
 
 	inactiveNode := &Node{Name: "inactive-plan-node", Host: "http://ip", APIToken: "t3", InboundIDs: `[1]`}
 	require.NoError(t, svc.db.WithContext(ctx).Create(inactiveNode).Error)
-	require.NoError(t, svc.db.WithContext(ctx).Model(inactiveNode).Updates(map[string]interface{}{"is_active": false}).Error)
+	require.NoError(t, svc.db.WithContext(ctx).Model(inactiveNode).Updates(map[string]any{"is_active": false}).Error)
 
 	require.NoError(t, svc.db.WithContext(ctx).Create(&PlanNode{PlanID: plan.ID, NodeID: node1.ID}).Error)
 	require.NoError(t, svc.db.WithContext(ctx).Create(&PlanNode{PlanID: plan.ID, NodeID: node2.ID}).Error)
