@@ -1,3 +1,4 @@
+// Package platega implements the Platega transaction API and callback contract.
 package platega
 
 import (
@@ -24,6 +25,8 @@ type CallbackPayload struct {
 }
 
 // ParseCallbackAmount converts a decimal major-unit amount to integer cents.
+// It accepts fixed-point notation with at most two fractional digits and rejects
+// signs, exponents, malformed values, and int64 overflow.
 func ParseCallbackAmount(amount json.Number) (int64, error) {
 	raw := strings.TrimSpace(amount.String())
 	if raw == "" {
@@ -64,7 +67,8 @@ func ParseCallbackAmount(amount json.Number) (int64, error) {
 	return whole*100 + fraction, nil
 }
 
-// ParseTransactionID validates a provider transaction identifier as a canonical UUID v4.
+// ParseTransactionID validates a provider transaction identifier as a canonical
+// lowercase UUID v4, matching the identifier format used by the provider.
 func ParseTransactionID(raw string) (uuid.UUID, error) {
 	value := strings.TrimSpace(raw)
 	parsed, err := uuid.Parse(value)
@@ -80,7 +84,9 @@ func ParseTransactionID(raw string) (uuid.UUID, error) {
 	return parsed, nil
 }
 
-// Validate checks fields required to process a callback.
+// Validate checks the required callback fields before any order lookup or state
+// transition is attempted. paymentMethod remains optional for compatibility with
+// provider callbacks that omit it.
 func (p CallbackPayload) Validate() error {
 	if strings.TrimSpace(p.ID) == "" {
 		return errors.New("id is required")
@@ -104,6 +110,7 @@ func (p CallbackPayload) Validate() error {
 }
 
 // VerifyHeaders authenticates callback headers using constant-time comparison.
+// Empty configured or received credentials are rejected before comparison.
 // Empty credentials are rejected so an unconfigured server never verifies.
 func VerifyHeaders(merchantID, secret string, headers http.Header) bool {
 	if strings.TrimSpace(merchantID) == "" || strings.TrimSpace(secret) == "" {
