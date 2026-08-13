@@ -24,6 +24,7 @@ func BearerAuthMiddleware(expectedToken string) func(http.Handler) http.Handler 
 					zap.String("path", r.URL.Path),
 					zap.String("method", r.Method))
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
+
 				return
 			}
 
@@ -41,6 +42,7 @@ func BearerAuthMiddleware(expectedToken string) func(http.Handler) http.Handler 
 					zap.String("path", r.URL.Path),
 					zap.String("method", r.Method))
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
+
 				return
 			}
 
@@ -51,6 +53,7 @@ func BearerAuthMiddleware(expectedToken string) func(http.Handler) http.Handler 
 					zap.String("path", r.URL.Path),
 					zap.String("method", r.Method))
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
+
 				return
 			}
 
@@ -60,6 +63,7 @@ func BearerAuthMiddleware(expectedToken string) func(http.Handler) http.Handler 
 					zap.String("path", r.URL.Path),
 					zap.String("method", r.Method))
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
+
 				return
 			}
 
@@ -71,6 +75,7 @@ func BearerAuthMiddleware(expectedToken string) func(http.Handler) http.Handler 
 					zap.String("path", r.URL.Path),
 					zap.String("method", r.Method))
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
+
 				return
 			}
 

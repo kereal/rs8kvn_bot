@@ -1,5 +1,3 @@
-
-
 package e2e
 
 import (
@@ -18,9 +16,11 @@ import (
 
 func TestE2E_DelCommand_Success(t *testing.T) {
 	t.Parallel()
+
 	env := setupE2EEnv(t)
 	defer func() {
-		if err := env.db.Close(); err != nil {
+		err := env.db.Close()
+		if err != nil {
 			t.Logf("Warning: failed to close database: %v", err)
 		}
 	}()
@@ -33,6 +33,7 @@ func TestE2E_DelCommand_Success(t *testing.T) {
 
 	sub, err := env.db.GetByTelegramID(ctx, env.chatID)
 	require.NoError(t, err)
+
 	subID := sub.ID
 
 	resetBotAPI(env.botAPI)
@@ -80,7 +81,8 @@ func TestE2E_DelCommand_ArgValidation(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			env := setupE2EEnv(t)
 			defer func() {
-				if err := env.db.Close(); err != nil {
+				err := env.db.Close()
+				if err != nil {
 					t.Logf("Warning: failed to close database: %v", err)
 				}
 			}()
@@ -113,7 +115,8 @@ func TestE2E_DelCommand_XUIFailure(t *testing.T) {
 
 	env := setupE2EEnv(t)
 	defer func() {
-		if err := env.db.Close(); err != nil {
+		err := env.db.Close()
+		if err != nil {
 			t.Logf("Warning: failed to close database: %v", err)
 		}
 	}()
@@ -159,13 +162,14 @@ func TestE2E_DelCommand_XUIFailure(t *testing.T) {
 // runBroadcastFlow drives the draft -> preview -> confirm broadcast flow end to end.
 func runBroadcastFlow(t *testing.T, env *e2eTestEnv, adminID int64, draftText string) {
 	t.Helper()
+
 	ctx := context.Background()
 
 	env.handler.HandleBroadcast(ctx, tgbotapi.Update{
 		Message: &tgbotapi.Message{
-			Chat: &tgbotapi.Chat{ID: adminID},
-			From: &tgbotapi.User{ID: adminID, UserName: "admin"},
-			Text: "/broadcast",
+			Chat:     &tgbotapi.Chat{ID: adminID},
+			From:     &tgbotapi.User{ID: adminID, UserName: "admin"},
+			Text:     "/broadcast",
 			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 10}},
 		},
 	})
@@ -195,7 +199,8 @@ func TestE2E_BroadcastCommand_Success(t *testing.T) {
 
 	env := setupE2EEnv(t)
 	defer func() {
-		if err := env.db.Close(); err != nil {
+		err := env.db.Close()
+		if err != nil {
 			t.Logf("Warning: failed to close database: %v", err)
 		}
 	}()
@@ -203,7 +208,7 @@ func TestE2E_BroadcastCommand_Success(t *testing.T) {
 	ctx := context.Background()
 	adminID := env.cfg.TelegramAdminID
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		chatID := int64(300000 + i)
 		_, err := env.subService.Create(ctx, chatID, fmt.Sprintf("user%d", i), "")
 		require.NoError(t, err)
@@ -220,9 +225,11 @@ func TestE2E_BroadcastCommand_Success(t *testing.T) {
 
 func TestE2E_BroadcastCommand_NoArgs(t *testing.T) {
 	t.Parallel()
+
 	env := setupE2EEnv(t)
 	defer func() {
-		if err := env.db.Close(); err != nil {
+		err := env.db.Close()
+		if err != nil {
 			t.Logf("Warning: failed to close database: %v", err)
 		}
 	}()
@@ -250,9 +257,11 @@ func TestE2E_BroadcastCommand_NoArgs(t *testing.T) {
 
 func TestE2E_BroadcastCommand_NoUsers(t *testing.T) {
 	t.Parallel()
+
 	env := setupE2EEnv(t)
 	defer func() {
-		if err := env.db.Close(); err != nil {
+		err := env.db.Close()
+		if err != nil {
 			t.Logf("Warning: failed to close database: %v", err)
 		}
 	}()
@@ -268,9 +277,11 @@ func TestE2E_BroadcastCommand_NoUsers(t *testing.T) {
 
 func TestE2E_BroadcastCommand_SomeFailures(t *testing.T) {
 	t.Parallel()
+
 	env := setupE2EEnv(t)
 	defer func() {
-		if err := env.db.Close(); err != nil {
+		err := env.db.Close()
+		if err != nil {
 			t.Logf("Warning: failed to close database: %v", err)
 		}
 	}()
@@ -278,7 +289,7 @@ func TestE2E_BroadcastCommand_SomeFailures(t *testing.T) {
 	ctx := context.Background()
 	adminID := env.cfg.TelegramAdminID
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		chatID := int64(400000 + i)
 		_, err := env.subService.Create(ctx, chatID, fmt.Sprintf("user%d", i), "")
 		require.NoError(t, err)
@@ -290,9 +301,9 @@ func TestE2E_BroadcastCommand_SomeFailures(t *testing.T) {
 	// then make the actual user sends fail.
 	env.handler.HandleBroadcast(ctx, tgbotapi.Update{
 		Message: &tgbotapi.Message{
-			Chat: &tgbotapi.Chat{ID: adminID},
-			From: &tgbotapi.User{ID: adminID, UserName: "admin"},
-			Text: "/broadcast",
+			Chat:     &tgbotapi.Chat{ID: adminID},
+			From:     &tgbotapi.User{ID: adminID, UserName: "admin"},
+			Text:     "/broadcast",
 			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 10}},
 		},
 	})
@@ -323,7 +334,8 @@ func TestE2E_BroadcastCommand_SomeFailures(t *testing.T) {
 func TestE2E_SendCommand_ByTelegramID(t *testing.T) {
 	env := setupE2EEnv(t)
 	defer func() {
-		if err := env.db.Close(); err != nil {
+		err := env.db.Close()
+		if err != nil {
 			t.Logf("Warning: failed to close database: %v", err)
 		}
 	}()
@@ -356,7 +368,8 @@ func TestE2E_SendCommand_ByTelegramID(t *testing.T) {
 func TestE2E_SendCommand_ByUsername(t *testing.T) {
 	env := setupE2EEnv(t)
 	defer func() {
-		if err := env.db.Close(); err != nil {
+		err := env.db.Close()
+		if err != nil {
 			t.Logf("Warning: failed to close database: %v", err)
 		}
 	}()
@@ -403,7 +416,8 @@ func TestE2E_SendCommand_ArgValidation(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			env := setupE2EEnv(t)
 			defer func() {
-				if err := env.db.Close(); err != nil {
+				err := env.db.Close()
+				if err != nil {
 					t.Logf("Warning: failed to close database: %v", err)
 				}
 			}()
@@ -431,7 +445,8 @@ func TestE2E_SendCommand_ArgValidation(t *testing.T) {
 func TestE2E_SendCommand_ByTelegramID_SendError(t *testing.T) {
 	env := setupE2EEnv(t)
 	defer func() {
-		if err := env.db.Close(); err != nil {
+		err := env.db.Close()
+		if err != nil {
 			t.Logf("Warning: failed to close database: %v", err)
 		}
 	}()
@@ -465,7 +480,8 @@ func TestE2E_SendCommand_ByTelegramID_SendError(t *testing.T) {
 func TestE2E_SendCommand_WithAtPrefix(t *testing.T) {
 	env := setupE2EEnv(t)
 	defer func() {
-		if err := env.db.Close(); err != nil {
+		err := env.db.Close()
+		if err != nil {
 			t.Logf("Warning: failed to close database: %v", err)
 		}
 	}()
@@ -493,7 +509,8 @@ func TestE2E_SendCommand_WithAtPrefix(t *testing.T) {
 func TestE2E_SendCommand_OnlyMessageNoTarget(t *testing.T) {
 	env := setupE2EEnv(t)
 	defer func() {
-		if err := env.db.Close(); err != nil {
+		err := env.db.Close()
+		if err != nil {
 			t.Logf("Warning: failed to close database: %v", err)
 		}
 	}()
@@ -520,7 +537,8 @@ func TestE2E_SendCommand_OnlyMessageNoTarget(t *testing.T) {
 func TestE2E_SendCommand_OnlyTargetNoMessage(t *testing.T) {
 	env := setupE2EEnv(t)
 	defer func() {
-		if err := env.db.Close(); err != nil {
+		err := env.db.Close()
+		if err != nil {
 			t.Logf("Warning: failed to close database: %v", err)
 		}
 	}()
@@ -547,7 +565,8 @@ func TestE2E_SendCommand_OnlyTargetNoMessage(t *testing.T) {
 func TestE2E_SendCommand_RateLimitBlocksExcess(t *testing.T) {
 	env := setupE2EEnv(t)
 	defer func() {
-		if err := env.db.Close(); err != nil {
+		err := env.db.Close()
+		if err != nil {
 			t.Logf("Warning: failed to close database: %v", err)
 		}
 	}()
@@ -586,7 +605,8 @@ func TestE2E_SendCommand_RateLimitBlocksExcess(t *testing.T) {
 func TestE2E_BroadcastCommand_PreservesFormatting(t *testing.T) {
 	env := setupE2EEnv(t)
 	defer func() {
-		if err := env.db.Close(); err != nil {
+		err := env.db.Close()
+		if err != nil {
 			t.Logf("Warning: failed to close database: %v", err)
 		}
 	}()
@@ -606,18 +626,21 @@ func TestE2E_BroadcastCommand_PreservesFormatting(t *testing.T) {
 
 	// Formatting must be delivered as-is (MarkdownV2, not escaped with backslashes).
 	var delivered bool
+
 	for _, m := range env.botAPI.GetAllSentMessages() {
 		if strings.Contains(m.Text, "*bold*") && !strings.Contains(m.Text, `\*bold\*`) {
 			delivered = true
 		}
 	}
+
 	assert.True(t, delivered, "delivered message should keep MarkdownV2 formatting unescaped")
 }
 
 func TestE2E_SendCommand_EscapesMarkdown(t *testing.T) {
 	env := setupE2EEnv(t)
 	defer func() {
-		if err := env.db.Close(); err != nil {
+		err := env.db.Close()
+		if err != nil {
 			t.Logf("Warning: failed to close database: %v", err)
 		}
 	}()
@@ -746,12 +769,14 @@ func TestE2E_NonAdmin_AccessControl(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			env := setupE2EEnv(t)
 			defer func() {
-				if err := env.db.Close(); err != nil {
+				err := env.db.Close()
+				if err != nil {
 					t.Logf("Warning: failed to close database: %v", err)
 				}
 			}()
 
 			ctx := context.Background()
+
 			resetBotAPI(env.botAPI)
 			tt.setupEnv(env, ctx)
 
@@ -767,9 +792,11 @@ func TestE2E_NonAdmin_AccessControl(t *testing.T) {
 
 func TestE2E_NonAdmin_CannotUseDel(t *testing.T) {
 	t.Parallel()
+
 	env := setupE2EEnv(t)
 	defer func() {
-		if err := env.db.Close(); err != nil {
+		err := env.db.Close()
+		if err != nil {
 			t.Logf("Warning: failed to close database: %v", err)
 		}
 	}()
@@ -796,9 +823,11 @@ func TestE2E_NonAdmin_CannotUseDel(t *testing.T) {
 
 func TestE2E_AdminLastReg(t *testing.T) {
 	t.Parallel()
+
 	env := setupE2EEnv(t)
 	defer func() {
-		if err := env.db.Close(); err != nil {
+		err := env.db.Close()
+		if err != nil {
 			t.Logf("Warning: failed to close database: %v", err)
 		}
 	}()
@@ -838,7 +867,8 @@ func TestE2E_AdminLastReg(t *testing.T) {
 func TestE2E_VersionCommand_Admin(t *testing.T) {
 	env := setupE2EEnv(t)
 	defer func() {
-		if err := env.db.Close(); err != nil {
+		err := env.db.Close()
+		if err != nil {
 			t.Logf("Warning: failed to close database: %v", err)
 		}
 	}()
@@ -866,13 +896,15 @@ func TestE2E_VersionCommand_Admin(t *testing.T) {
 func TestE2E_VersionCommand_NonAdmin(t *testing.T) {
 	env := setupE2EEnv(t)
 	defer func() {
-		if err := env.db.Close(); err != nil {
+		err := env.db.Close()
+		if err != nil {
 			t.Logf("Warning: failed to close database: %v", err)
 		}
 	}()
 
 	ctx := context.Background()
 	nonAdminID := int64(999999)
+
 	resetBotAPI(env.botAPI)
 
 	update := tgbotapi.Update{

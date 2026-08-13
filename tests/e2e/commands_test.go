@@ -1,5 +1,3 @@
-
-
 package e2e
 
 import (
@@ -75,6 +73,7 @@ func TestE2E_StartCommand_Parameterized(t *testing.T) {
 
 func TestE2E_MySubscription(t *testing.T) {
 	t.Parallel()
+
 	env := setupE2EEnv(t)
 	defer env.db.Close()
 
@@ -112,6 +111,7 @@ func TestE2E_MySubscription(t *testing.T) {
 
 func TestE2E_HelpCommand(t *testing.T) {
 	t.Parallel()
+
 	env := setupE2EEnv(t)
 	defer env.db.Close()
 
@@ -134,6 +134,7 @@ func TestE2E_HelpCommand(t *testing.T) {
 
 func TestE2E_InviteCommand(t *testing.T) {
 	t.Parallel()
+
 	env := setupE2EEnv(t)
 	defer env.db.Close()
 
@@ -157,6 +158,7 @@ func TestE2E_InviteCommand(t *testing.T) {
 
 func TestE2E_StartCommand_AdminUser(t *testing.T) {
 	t.Parallel()
+
 	env := setupE2EEnv(t)
 	defer env.db.Close()
 

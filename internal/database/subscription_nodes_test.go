@@ -20,6 +20,7 @@ func TestSubscriptionNodeRepository_GetBySubscriptionID(t *testing.T) {
 
 	node1 := &Node{Name: "node-1", IsActive: true, Host: "http://n1", APIToken: "t1", InboundIDs: `[1]`}
 	node2 := &Node{Name: "node-2", IsActive: true, Host: "http://n2", APIToken: "t2", InboundIDs: `[1]`}
+
 	require.NoError(t, svc.db.WithContext(ctx).Create(node1).Error)
 	require.NoError(t, svc.db.WithContext(ctx).Create(node2).Error)
 	require.NoError(t, svc.db.WithContext(ctx).Create(&PlanNode{PlanID: plan.ID, NodeID: node1.ID}).Error)
@@ -47,6 +48,7 @@ func TestSubscriptionNodeRepository_GetBySubscriptionID(t *testing.T) {
 	for _, r := range rows {
 		nodeIDs[r.NodeID] = true
 	}
+
 	assert.True(t, nodeIDs[node1.ID])
 	assert.True(t, nodeIDs[node2.ID])
 }
@@ -77,6 +79,7 @@ func TestSubscriptionNodeRepository_GetByNodeID(t *testing.T) {
 
 	sub1 := &Subscription{TelegramID: 101, Username: "u1", ClientID: "c1", SubscriptionID: "s1", Status: "active", PlanID: plan.ID}
 	require.NoError(t, svc.CreateSubscription(ctx, sub1, ""))
+
 	sub2 := &Subscription{TelegramID: 102, Username: "u2", ClientID: "c2", SubscriptionID: "s2", Status: "active", PlanID: plan.ID}
 	require.NoError(t, svc.CreateSubscription(ctx, sub2, ""))
 
@@ -100,6 +103,7 @@ func TestSubscriptionNodeRepository_GetPendingSync(t *testing.T) {
 	node1 := &Node{Name: "node-pending-1", IsActive: true, Host: "http://p1", APIToken: "t", InboundIDs: `[1]`}
 	node2 := &Node{Name: "node-pending-2", IsActive: true, Host: "http://p2", APIToken: "t", InboundIDs: `[1]`}
 	node3 := &Node{Name: "node-pending-3", IsActive: true, Host: "http://p3", APIToken: "t", InboundIDs: `[1]`}
+
 	require.NoError(t, svc.db.WithContext(ctx).Create(node1).Error)
 	require.NoError(t, svc.db.WithContext(ctx).Create(node2).Error)
 	require.NoError(t, svc.db.WithContext(ctx).Create(node3).Error)
@@ -110,6 +114,7 @@ func TestSubscriptionNodeRepository_GetPendingSync(t *testing.T) {
 	require.NoError(t, svc.CreateSubscription(ctx, sub, ""))
 	require.NoError(t, svc.CreateSubscriptionNode(ctx, &SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: SyncStatusPendingAdd}))
 	require.NoError(t, svc.CreateSubscriptionNode(ctx, &SubscriptionNode{SubscriptionID: sub.ID, NodeID: node2.ID, Status: SyncStatusActive}))
+
 	future := time.Now().UTC().Add(10 * time.Minute)
 	require.NoError(t, svc.CreateSubscriptionNode(ctx, &SubscriptionNode{SubscriptionID: sub.ID, NodeID: node3.ID, Status: SyncStatusPendingRemove, RetryAt: &future}))
 
@@ -142,6 +147,7 @@ func TestSubscriptionNodeRepository_GetPendingByNodeID(t *testing.T) {
 	nodeA := &Node{Name: "node-a", IsActive: true, Host: "http://a", APIToken: "ta", InboundIDs: `[1]`}
 	nodeB := &Node{Name: "node-b", IsActive: true, Host: "http://b", APIToken: "tb", InboundIDs: `[1]`}
 	nodeC := &Node{Name: "node-c", IsActive: true, Host: "http://c", APIToken: "tc", InboundIDs: `[1]`}
+
 	require.NoError(t, svc.db.WithContext(ctx).Create(nodeA).Error)
 	require.NoError(t, svc.db.WithContext(ctx).Create(nodeB).Error)
 	require.NoError(t, svc.db.WithContext(ctx).Create(nodeC).Error)
@@ -170,6 +176,7 @@ func TestSubscriptionNodeRepository_CreateSubscriptionNode(t *testing.T) {
 
 	plan := &Plan{Name: "test-plan-create-sn", DevicesLimit: 1, TrafficLimit: 1024}
 	require.NoError(t, svc.db.WithContext(ctx).Create(plan).Error)
+
 	node := &Node{Name: "node-create-sn", IsActive: true, Host: "http://cs", APIToken: "t", InboundIDs: `[1]`}
 	require.NoError(t, svc.db.WithContext(ctx).Create(node).Error)
 	require.NoError(t, svc.db.WithContext(ctx).Create(&PlanNode{PlanID: plan.ID, NodeID: node.ID}).Error)
@@ -193,12 +200,14 @@ func TestSubscriptionNodeRepository_UpdateSubscriptionNodeStatus(t *testing.T) {
 
 	plan := &Plan{Name: "test-plan-update-status", DevicesLimit: 1, TrafficLimit: 1024}
 	require.NoError(t, svc.db.WithContext(ctx).Create(plan).Error)
+
 	node := &Node{Name: "node-update-status", IsActive: true, Host: "http://us", APIToken: "t", InboundIDs: `[1]`}
 	require.NoError(t, svc.db.WithContext(ctx).Create(node).Error)
 	require.NoError(t, svc.db.WithContext(ctx).Create(&PlanNode{PlanID: plan.ID, NodeID: node.ID}).Error)
 
 	sub := &Subscription{TelegramID: 505, Username: "updatestatus", ClientID: "c-us", SubscriptionID: "s-us", Status: "active", PlanID: plan.ID}
 	require.NoError(t, svc.CreateSubscription(ctx, sub, ""))
+
 	errMsg := "boom"
 	retryAt := time.Now().UTC().Add(10 * time.Minute)
 	require.NoError(t, svc.db.WithContext(ctx).Create(&SubscriptionNode{SubscriptionID: sub.ID, NodeID: node.ID, Status: SyncStatusPendingAdd, RetryCount: 3, RetryAt: &retryAt, LastError: &errMsg}).Error)
@@ -231,6 +240,7 @@ func TestSubscriptionNodeRepository_UpsertSubscriptionNode(t *testing.T) {
 
 	plan := &Plan{Name: "test-plan-upsert", DevicesLimit: 1, TrafficLimit: 1024}
 	require.NoError(t, svc.db.WithContext(ctx).Create(plan).Error)
+
 	node := &Node{Name: "node-upsert", IsActive: true, Host: "http://u", APIToken: "t", InboundIDs: `[1]`}
 	require.NoError(t, svc.db.WithContext(ctx).Create(node).Error)
 	require.NoError(t, svc.db.WithContext(ctx).Create(&PlanNode{PlanID: plan.ID, NodeID: node.ID}).Error)
@@ -261,6 +271,7 @@ func TestSubscriptionNodeRepository_DeleteSubscriptionNode(t *testing.T) {
 
 	plan := &Plan{Name: "test-plan-delete-sn", DevicesLimit: 1, TrafficLimit: 1024}
 	require.NoError(t, svc.db.WithContext(ctx).Create(plan).Error)
+
 	node := &Node{Name: "node-delete-sn", IsActive: true, Host: "http://d", APIToken: "t", InboundIDs: `[1]`}
 	require.NoError(t, svc.db.WithContext(ctx).Create(node).Error)
 	require.NoError(t, svc.db.WithContext(ctx).Create(&PlanNode{PlanID: plan.ID, NodeID: node.ID}).Error)
@@ -272,6 +283,7 @@ func TestSubscriptionNodeRepository_DeleteSubscriptionNode(t *testing.T) {
 	require.NoError(t, svc.DeleteSubscriptionNode(ctx, sub.ID, node.ID))
 
 	var found SubscriptionNode
+
 	err := svc.db.WithContext(ctx).Where("subscription_id = ? AND node_id = ?", sub.ID, node.ID).First(&found).Error
 	assert.Error(t, err)
 }
@@ -294,6 +306,7 @@ func TestSubscriptionNodeRepository_UpdateRetry(t *testing.T) {
 
 	plan := &Plan{Name: "test-plan-update-retry", DevicesLimit: 1, TrafficLimit: 1024}
 	require.NoError(t, svc.db.WithContext(ctx).Create(plan).Error)
+
 	node := &Node{Name: "node-update-retry", IsActive: true, Host: "http://r", APIToken: "t", InboundIDs: `[1]`}
 	require.NoError(t, svc.db.WithContext(ctx).Create(node).Error)
 	require.NoError(t, svc.db.WithContext(ctx).Create(&PlanNode{PlanID: plan.ID, NodeID: node.ID}).Error)

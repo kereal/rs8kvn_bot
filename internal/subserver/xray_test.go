@@ -213,6 +213,7 @@ func TestConvertSingleJSONToXray_RawNormalisesToTCP(t *testing.T) {
 
 func TestConvertJSONConfigsToXray_Batch(t *testing.T) {
 	t.Parallel()
+
 	configs, err := ExtractClashConfigs([]byte(clashVlessRealityYAML))
 	require.NoError(t, err)
 
@@ -230,9 +231,11 @@ func TestConvertJSONConfigsToXray_Batch(t *testing.T) {
 
 func mustNormalise(t *testing.T, yamlBody string) json.RawMessage {
 	t.Helper()
+
 	configs, err := ExtractClashConfigs([]byte(yamlBody))
 	require.NoError(t, err)
 	require.Len(t, configs, 1)
+
 	return configs[0]
 }
 

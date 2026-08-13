@@ -1,5 +1,3 @@
-
-
 package e2e
 
 import (
@@ -21,16 +19,16 @@ func TestE2E_Concurrent_CreateSubscription_SameUser(t *testing.T) {
 	defer env.db.Close()
 
 	ctx := context.Background()
+
 	var wg sync.WaitGroup
+
 	results := make(chan error, 5)
 
 	for range 5 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			_, err := env.subService.Create(ctx, env.chatID, env.username, "")
 			results <- err
-		}()
+		})
 	}
 
 	wg.Wait()
@@ -38,6 +36,7 @@ func TestE2E_Concurrent_CreateSubscription_SameUser(t *testing.T) {
 
 	successCount := 0
 	errorCount := 0
+
 	for err := range results {
 		if err == nil {
 			successCount++
@@ -52,12 +51,15 @@ func TestE2E_Concurrent_CreateSubscription_SameUser(t *testing.T) {
 	// subscription (idempotency), regardless of how many calls raced.
 	all, err := env.db.GetAllSubscriptions(ctx)
 	require.NoError(t, err)
+
 	active := 0
+
 	for _, s := range all {
 		if s.TelegramID == env.chatID && s.Status == "active" {
 			active++
 		}
 	}
+
 	assert.Equal(t, 1, active, "exactly one active subscription should exist for the user after concurrent creates")
 }
 
@@ -68,17 +70,20 @@ func TestE2E_Concurrent_CreateSubscription_DifferentUsers(t *testing.T) {
 	ctx := context.Background()
 
 	var wg sync.WaitGroup
+
 	results := make(chan struct {
 		chatID int64
 		err    error
 	}, 10)
 
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
+
 			chatID := int64(500000 + idx)
 			username := fmt.Sprintf("user_%d", idx)
+
 			_, err := env.subService.Create(ctx, chatID, username, "")
 			results <- struct {
 				chatID int64
@@ -91,6 +96,7 @@ func TestE2E_Concurrent_CreateSubscription_DifferentUsers(t *testing.T) {
 	close(results)
 
 	successCount := 0
+
 	for r := range results {
 		if r.err == nil {
 			successCount++
@@ -99,7 +105,7 @@ func TestE2E_Concurrent_CreateSubscription_DifferentUsers(t *testing.T) {
 
 	assert.Equal(t, 10, successCount, "All concurrent creations should succeed for different users")
 
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		chatID := int64(500000 + i)
 		sub, err := env.db.GetByTelegramID(ctx, chatID)
 		require.NoError(t, err, "User %d subscription should exist", chatID)
@@ -119,14 +125,17 @@ func TestE2E_Concurrent_TrialBind_SameTrial(t *testing.T) {
 	require.NoError(t, err)
 
 	var wg sync.WaitGroup
+
 	results := make(chan error, 5)
 
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
+
 			chatID := int64(600000 + idx)
 			username := fmt.Sprintf("user_%d", idx)
+
 			_, err := env.db.BindTrialSubscription(ctx, trialSubID, chatID, username)
 			results <- err
 		}(i)
@@ -136,6 +145,7 @@ func TestE2E_Concurrent_TrialBind_SameTrial(t *testing.T) {
 	close(results)
 
 	successCount := 0
+
 	for err := range results {
 		if err == nil {
 			successCount++
@@ -146,12 +156,15 @@ func TestE2E_Concurrent_TrialBind_SameTrial(t *testing.T) {
 
 	allSubs, err := env.db.GetAllSubscriptions(ctx)
 	require.NoError(t, err)
+
 	boundCount := 0
+
 	for _, sub := range allSubs {
 		if sub.SubscriptionID == trialSubID && sub.TelegramID > 0 {
 			boundCount++
 		}
 	}
+
 	assert.Equal(t, 1, boundCount, "Exactly one trial subscription should be bound")
 }
 
@@ -163,9 +176,7 @@ func TestE2E_Concurrent_Handler_CreateSubscription(t *testing.T) {
 
 	var wg sync.WaitGroup
 	for range 5 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			env.handler.HandleCallback(ctx, tgbotapi.Update{
 				CallbackQuery: &tgbotapi.CallbackQuery{
 					Message: &tgbotapi.Message{
@@ -182,7 +193,7 @@ func TestE2E_Concurrent_Handler_CreateSubscription(t *testing.T) {
 					Data: "create_subscription",
 				},
 			})
-		}()
+		})
 	}
 
 	wg.Wait()
@@ -204,17 +215,16 @@ func TestE2E_Concurrent_GetSubscription_SameUser(t *testing.T) {
 	require.NoError(t, err)
 
 	var wg sync.WaitGroup
+
 	results := make(chan *database.Subscription, 10)
 
-	for i := 0; i < 10; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 10 {
+		wg.Go(func() {
 			sub, err := env.db.GetByTelegramID(ctx, env.chatID)
 			if err == nil {
 				results <- sub
 			}
-		}()
+		})
 	}
 
 	wg.Wait()
@@ -223,7 +233,9 @@ func TestE2E_Concurrent_GetSubscription_SameUser(t *testing.T) {
 	count := 0
 	for sub := range results {
 		count++
+
 		assert.Equal(t, env.chatID, sub.TelegramID)
 	}
+
 	assert.Equal(t, 10, count, "All concurrent reads should succeed")
 }
