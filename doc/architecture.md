@@ -1,7 +1,7 @@
 # Architecture — rs8kvn_bot
 
-**Version:** v2.3.4
-**Date:** 2026-07-19
+**Version:** v2.3.11
+**Date:** 2026-08-11
 
 ## Multi-outbounds per node
 
@@ -11,10 +11,10 @@ rs8kvn_bot — production-ready Telegram bot for distributing VLESS+Reality+Visi
 
 **Key characteristics:**
 - Event-driven with bounded concurrency (worker pool)
-- Circuit breaker pattern for external dependencies
+- Retry with exponential backoff for external dependencies (the circuit breaker implementation is currently not wired into the live XUI path)
 - Comprehensive caching (in-memory LRU, TTL)
 - Graceful shutdown with coordinated cleanup
-- 85%+ test coverage (unit, e2e, fuzz, leak detection)
+- ~61.1% aggregate test coverage (unit, e2e, fuzz, leak detection)
 - Payment/order tracking for subscription purchases
 - Node-based subscription synchronization with 4-state sync machine (`subscription_nodes`)
 - 3-touch expiry reminders (3d/1d/3h) with atomic claim and bitmask (`subscriptions.reminders_sent`)
@@ -87,7 +87,7 @@ rs8kvn_bot — production-ready Telegram bot for distributing VLESS+Reality+Visi
 │  │           │                                      │               │ │
 │  │  ┌────────▼─────────┐                         ┌─┴─────────────┐ │ │
 │  │  │  XUIClient       │ (3x-ui API wrapper)     │  Database     │ │ │
-│  │  │ • AddClient      │ • CircuitBreaker        │  Service      │ │ │
+│  │  │ • AddClient      │ • Retry+Jitter          │  Service      │ │ │
 │  │  │ • GetTraffic     │ • Retry+Jitter          │  (GORM+SQLite)│ │ │
 │  │  │ • DeleteClient   │ • Singleflight          │  • CRUD       │ │ │
 │  │  │ • Login          │ • Session mgmt          │  • Queries    │ │ │
@@ -207,8 +207,7 @@ internal/
 │   ├── format.go            # Progress bar, date formatting
 │   └── markdown.go          # Markdown sanitization
 └── testutil/         # Test helpers
-    ├── testutil.go          # Mock DB, XUI, Bot + Setenv (flat DatabaseService fake)
-    └── db_slice_fakes.go    # Per-slice fakes (NewSubscriptionRepository, NewInviteRepository, etc.)
+    └── testutil.go          # Mock DB, XUI, Bot (flat DatabaseService fake)
 ```
 
 ---
@@ -376,7 +375,7 @@ ConnMaxIdleTime = 2m
 **Orders/Products support:**
 - `Product` — purchasable subscription product bound to a plan (name, price, duration)
 - `Order` — purchase event with payment tracking (pending/paid/expired/canceled)
-- `UpdateOrderStatus`, `GetActiveByPlanID`, `GetOrdersBySubscriptionID`
+- `ListActiveProducts`, `GetProductByID`, `ConfirmOrderPaidCAS`
 - Migration 017: `orders` table with CHECK constraint on status
 
 **Indexes:**
