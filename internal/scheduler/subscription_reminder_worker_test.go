@@ -153,22 +153,8 @@ func (f *fakeRepo) GetSubscriptionStatus(ctx context.Context, subscriptionID str
 func (f *fakeRepo) UpdateDevices(ctx context.Context, id uint, devicesJSON string) error { return nil }
 func (f *fakeRepo) UpdateIPs(ctx context.Context, id uint, ipsJSON string) error         { return nil }
 func (f *fakeRepo) UpdateLastRequest(ctx context.Context, subscriptionID string) error   { return nil }
-func (f *fakeRepo) GetActiveByPlanID(ctx context.Context, planID uint) ([]database.Product, error) {
-	return nil, nil
-}
-func (f *fakeRepo) CreateOrder(ctx context.Context, order *database.Order) error { return nil }
 func (f *fakeRepo) GetOrderByID(ctx context.Context, id uint) (*database.Order, error) {
 	return nil, nil
-}
-func (f *fakeRepo) GetOrdersBySubscriptionID(ctx context.Context, subscriptionID uint) ([]database.Order, error) {
-	return nil, nil
-}
-func (f *fakeRepo) UpdateOrderStatus(ctx context.Context, id uint, status database.OrderStatus) error {
-	return nil
-}
-func (f *fakeRepo) UpdateOrderPaidStatus(ctx context.Context, id uint) error { return nil }
-func (f *fakeRepo) UpdateOrderActivatedAt(ctx context.Context, id uint, activatedAt, expiresAt time.Time) error {
-	return nil
 }
 func (f *fakeRepo) GetOrCreateInvite(ctx context.Context, referrerTGID int64, code string) (*database.Invite, error) {
 	return nil, nil
@@ -229,6 +215,7 @@ func TestSubscriptionReminderWorker_process_SendsReminderForMatchingWindow(t *te
 			if from.Sub(now) >= 71*time.Hour && from.Sub(now) <= 73*time.Hour {
 				return []database.Subscription{sub}, nil
 			}
+
 			return nil, nil
 		},
 	}
@@ -239,6 +226,7 @@ func TestSubscriptionReminderWorker_process_SendsReminderForMatchingWindow(t *te
 		daysLeft  int
 		hoursLeft int
 	}
+
 	svc := &fakeSubSvc{
 		bot: testutil.NewBotAPI(),
 		sendFn: func(ctx context.Context, s *database.Subscription, bit int, daysLeft int, hoursLeft int) error {
@@ -248,6 +236,7 @@ func TestSubscriptionReminderWorker_process_SendsReminderForMatchingWindow(t *te
 				daysLeft  int
 				hoursLeft int
 			}{s, bit, daysLeft, hoursLeft})
+
 			return nil
 		},
 	}
@@ -276,6 +265,7 @@ func TestSubscriptionReminderWorker_process_SkipsSendError(t *testing.T) {
 					ExpiresAt:  testutil.PtrTime(now.Add(24*time.Hour - 5*time.Minute)),
 				}}, nil
 			}
+
 			return nil, nil
 		},
 	}

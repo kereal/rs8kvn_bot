@@ -5,6 +5,8 @@ import (
 	"embed"
 	"errors"
 	"fmt"
+	"math"
+	"strconv"
 	"strings"
 
 	"github.com/kereal/rs8kvn_bot/internal/logger"
@@ -31,7 +33,9 @@ var migrationFiles embed.FS
 func runMigrations(sqlDB *sql.DB) error {
 	// Determine SQLite version to verify features (DROP COLUMN, RETURNING) availability
 	var sqliteVersion string
-	if err := sqlDB.QueryRow("select sqlite_version()").Scan(&sqliteVersion); err == nil {
+
+	err := sqlDB.QueryRow("select sqlite_version()").Scan(&sqliteVersion)
+	if err == nil {
 		logger.Info("SQLite version detected", zap.String("version", sqliteVersion))
 	} else {
 		logger.Warn("Failed to detect SQLite version", zap.Error(err))
@@ -43,19 +47,26 @@ func runMigrations(sqlDB *sql.DB) error {
 		// simple semver compare: major.minor.patch
 		parse := func(v string) (int, int, int) {
 			var a, b, c int
-			if _, err := fmt.Sscanf(v, "%d.%d.%d", &a, &b, &c); err != nil {
+
+			_, err := fmt.Sscanf(v, "%d.%d.%d", &a, &b, &c)
+			if err != nil {
 				return 0, 0, 0
 			}
+
 			return a, b, c
 		}
 		va, vb, vc := parse(sqliteVersion)
+
 		ma, mb, mc := parse(minSQLiteForDropAndReturning)
 		if va < ma || (va == ma && vb < mb) || (va == ma && vb == mb && vc < mc) {
 			// scan embedded migrations for DROP COLUMN or RETURNING usage
-			if bytes, _ := migrationFiles.ReadFile("migrations/006_create_sources.up.sql"); bytes != nil {
-				content := string(bytes)
-				if strings.Contains(strings.ToUpper(content), "DROP COLUMN") || strings.Contains(strings.ToUpper(content), "RETURNING") {
-					return fmt.Errorf("SQLite version %s does not support required SQL features (DROP COLUMN/RETURNING). Upgrade SQLite to >= %s or run compatible migrations manually", sqliteVersion, minSQLiteForDropAndReturning)
+			migrationNames := []string{"migrations/006_create_sources.up.sql", "migrations/031_add_payment_intent_fields.down.sql"}
+			for _, migrationName := range migrationNames {
+				if bytes, _ := migrationFiles.ReadFile(migrationName); bytes != nil {
+					content := string(bytes)
+					if strings.Contains(strings.ToUpper(content), "DROP COLUMN") || strings.Contains(strings.ToUpper(content), "RETURNING") {
+						return fmt.Errorf("SQLite version %s does not support required SQL features (DROP COLUMN/RETURNING). Upgrade SQLite to >= %s or run compatible migrations manually", sqliteVersion, minSQLiteForDropAndReturning)
+					}
 				}
 			}
 		}
@@ -78,30 +89,48 @@ func runMigrations(sqlDB *sql.DB) error {
 		return fmt.Errorf("failed to create migration instance: %w", err)
 	}
 
-	// Get current version before migration
-	versionBefore, dirtyBefore, _ := m.Version()
+	maxEmbeddedVersion, err := latestEmbeddedMigrationVersion()
+	if err != nil {
+		return fmt.Errorf("failed to determine latest embedded migration: %w", err)
+	}
+
+	// Get current version before migration. A database newer than the embedded
+	// source is not safe to auto-repair: Force() changes bookkeeping only and
+	// cannot recreate an absent migration's schema changes.
+	versionBefore, dirtyBefore, versionErr := m.Version()
+	if versionErr != nil && !errors.Is(versionErr, migrate.ErrNilVersion) {
+		return fmt.Errorf("failed to read migration version: %w", versionErr)
+	}
+	// #nosec G115 -- maxEmbeddedVersion is guaranteed non-negative: the helper
+	// returns an error when no embedded .up.sql migration is found.
+	if versionBefore > uint(maxEmbeddedVersion) {
+		return fmt.Errorf("database migration version %d is newer than the latest embedded migration %d; restore the missing migration files or perform a reviewed schema recovery before starting", versionBefore, maxEmbeddedVersion)
+	}
 
 	if dirtyBefore {
-		currentVer := int(versionBefore) //nolint:gosec // migration versions are small and safe for int conversion
+		currentVer, err := migrationVersionToInt(versionBefore)
+		if err != nil {
+			return fmt.Errorf("invalid dirty migration version: %w", err)
+		}
+
 		logger.Warn("Database is in dirty state, forcing migration back",
 			zap.Int("current_version", currentVer))
-		if err := m.Force(currentVer - 1); err != nil {
+
+		err = m.Force(currentVer - 1)
+		if err != nil {
 			return fmt.Errorf("failed to force migration version: %w", err)
 		}
 	}
 
-	if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
+	err = m.Up()
+	if err != nil && !errors.Is(err, migrate.ErrNoChange) {
 		if strings.Contains(err.Error(), "file does not exist") || strings.Contains(err.Error(), "read down for version") {
-			forceVer := int(versionBefore) - 1 //nolint:gosec // same as above
-			logger.Warn("Missing migration file detected, forcing version to last known good state",
-				zap.Int("forced_version", forceVer))
-			if forceErr := m.Force(forceVer); forceErr != nil {
-				return fmt.Errorf("migration failed: %w; additionally failed to force version: %w", err, forceErr)
-			}
-			logger.Info("Database version forced due to missing migration files",
-				zap.Int("forced_version", forceVer))
-			return nil
+			// Never repair a missing migration by changing only schema_migrations.
+			// Force() cannot recreate the SQL/schema changes and would make a
+			// potentially incompatible database look healthy on the next start.
+			return fmt.Errorf("migration failed: %w; database references a missing migration; restore the exact migration files or perform a reviewed schema recovery", err)
 		}
+
 		return fmt.Errorf("migration failed: %w", err)
 	}
 
@@ -117,4 +146,55 @@ func runMigrations(sqlDB *sql.DB) error {
 	}
 
 	return nil
+}
+
+func latestEmbeddedMigrationVersion() (int, error) {
+	entries, err := migrationFiles.ReadDir("migrations")
+	if err != nil {
+		return 0, fmt.Errorf("read embedded migrations: %w", err)
+	}
+
+	maxVersion := -1
+
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".up.sql") {
+			continue
+		}
+
+		separator := strings.IndexByte(entry.Name(), '_')
+		if separator <= 0 {
+			continue
+		}
+
+		version, parseErr := strconv.Atoi(entry.Name()[:separator])
+		if parseErr != nil || version < 0 {
+			continue
+		}
+
+		if version > maxVersion {
+			maxVersion = version
+		}
+	}
+
+	if maxVersion < 0 {
+		return 0, errors.New("no embedded up migrations found")
+	}
+
+	return maxVersion, nil
+}
+
+// migrationVersionToInt converts the migrate library's unsigned version to int
+// before it is passed to Force. Dirty or failed migration recovery must never
+// wrap a large version into a negative value.
+func migrationVersionToInt(version uint) (int, error) {
+	if version == 0 {
+		return 0, errors.New("migration version must be positive")
+	}
+
+	maxInt := uint(math.MaxInt)
+	if version > maxInt {
+		return 0, fmt.Errorf("migration version %d overflows int", version)
+	}
+	// #nosec G115 -- guarded by the bounds check above
+	return int(version), nil
 }

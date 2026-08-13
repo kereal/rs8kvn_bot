@@ -5,10 +5,10 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNormalizePath(t *testing.T) {
@@ -82,6 +82,10 @@ func TestNewMetricsInitialized(t *testing.T) {
 	require.NotNil(t, SubserverNoItemsTotal)
 	require.NotNil(t, SubserverCacheHitDuration)
 	require.NotNil(t, SubserverCacheMissDuration)
+	require.NotNil(t, PaymentOperationsTotal)
+	require.NotNil(t, PaymentOperationDuration)
+	require.NotNil(t, PaymentAmountCentsTotal)
+	require.NotNil(t, PaymentIssuesTotal)
 }
 
 func TestMetricsEndpoint(t *testing.T) {
