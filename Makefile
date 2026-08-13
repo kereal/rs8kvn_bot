@@ -12,7 +12,7 @@ lint:
 	golangci-lint run
 
 fmt:
-	gofmt -s -w .
+	gofmt -s -w $$(find . -type f -name '*.go' -not -path './.git/*')
 
 run: build
 	./$(BINARY)
