@@ -1,4 +1,3 @@
-// Package platega implements the Platega transaction API and callback contract.
 package platega
 
 import (
@@ -32,38 +31,48 @@ func ParseCallbackAmount(amount json.Number) (int64, error) {
 	if raw == "" {
 		return 0, errors.New("amount is required")
 	}
+
 	if strings.HasPrefix(raw, "-") || strings.HasPrefix(raw, "+") {
 		return 0, errors.New("amount must be non-negative")
 	}
+
 	if strings.ContainsAny(raw, "eE") {
 		return 0, errors.New("amount must use fixed-point notation")
 	}
+
 	parts := strings.Split(raw, ".")
 	if len(parts) > 2 || parts[0] == "" {
 		return 0, errors.New("amount is invalid")
 	}
+
 	if len(parts) == 1 {
 		parts = append(parts, "")
 	}
+
 	if len(parts[1]) > 2 {
 		return 0, errors.New("amount has more than two decimal places")
 	}
+
 	if parts[1] == "" {
 		parts[1] = "00"
 	} else if len(parts[1]) == 1 {
 		parts[1] += "0"
 	}
+
 	whole, err := strconv.ParseInt(parts[0], 10, 64)
 	if err != nil || whole > (math.MaxInt64/100) {
 		return 0, errors.New("amount is out of range")
 	}
+
 	fraction, err := strconv.ParseInt(parts[1], 10, 64)
 	if err != nil {
 		return 0, errors.New("amount is invalid")
 	}
+
 	if whole*100 > math.MaxInt64-fraction {
 		return 0, errors.New("amount is out of range")
 	}
+
 	return whole*100 + fraction, nil
 }
 
@@ -71,16 +80,20 @@ func ParseCallbackAmount(amount json.Number) (int64, error) {
 // lowercase UUID v4, matching the identifier format used by the provider.
 func ParseTransactionID(raw string) (uuid.UUID, error) {
 	value := strings.TrimSpace(raw)
+
 	parsed, err := uuid.Parse(value)
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("transaction ID must be UUID: %w", err)
 	}
+
 	if parsed.Version() != uuid.Version(4) {
 		return uuid.Nil, fmt.Errorf("transaction ID must be UUID v4")
 	}
+
 	if parsed.String() != strings.ToLower(value) {
 		return uuid.Nil, fmt.Errorf("transaction ID must use canonical lowercase UUID format")
 	}
+
 	return parsed, nil
 }
 
@@ -91,15 +104,21 @@ func (p CallbackPayload) Validate() error {
 	if strings.TrimSpace(p.ID) == "" {
 		return errors.New("id is required")
 	}
-	if _, err := ParseTransactionID(p.ID); err != nil {
+
+	_, err := ParseTransactionID(p.ID)
+	if err != nil {
 		return fmt.Errorf("id: %w", err)
 	}
-	if _, err := ParseCallbackAmount(p.Amount); err != nil {
+
+	_, err = ParseCallbackAmount(p.Amount)
+	if err != nil {
 		return fmt.Errorf("amount: %w", err)
 	}
+
 	if strings.TrimSpace(p.Currency) == "" {
 		return errors.New("currency is required")
 	}
+
 	if strings.TrimSpace(p.Status) == "" {
 		return errors.New("status is required")
 	}
@@ -116,11 +135,14 @@ func VerifyHeaders(merchantID, secret string, headers http.Header) bool {
 	if strings.TrimSpace(merchantID) == "" || strings.TrimSpace(secret) == "" {
 		return false
 	}
+
 	gotMerchant := headers.Get("X-Merchantid")
+
 	gotSecret := headers.Get("X-Secret")
 	if strings.TrimSpace(gotMerchant) == "" || strings.TrimSpace(gotSecret) == "" {
 		return false
 	}
+
 	return subtle.ConstantTimeCompare([]byte(merchantID), []byte(gotMerchant)) == 1 &&
 		subtle.ConstantTimeCompare([]byte(secret), []byte(gotSecret)) == 1
 }

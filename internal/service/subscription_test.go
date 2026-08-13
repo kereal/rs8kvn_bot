@@ -21,10 +21,12 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	if err := testutil.InitLogger(m); err != nil {
+	err := testutil.InitLogger(m)
+	if err != nil {
 		fmt.Fprintln(os.Stderr, "Failed to initialize logger:", err)
 		os.Exit(1)
 	}
+
 	os.Exit(m.Run())
 }
 
@@ -147,8 +149,11 @@ func TestSubscriptionService_Create_PropagatesInviteCodeToDB(t *testing.T) {
 
 	cfg := &config.Config{}
 
-	var gotSub *database.Subscription
-	var gotInviteCode string
+	var (
+		gotSub        *database.Subscription
+		gotInviteCode string
+	)
+
 	db := &testutil.DatabaseService{
 		GetPlanByNameFunc: func(ctx context.Context, name string) (*database.Plan, error) {
 			return &database.Plan{ID: 1, Name: database.FreePlanName, TrafficLimit: 1073741824}, nil
@@ -157,6 +162,7 @@ func TestSubscriptionService_Create_PropagatesInviteCodeToDB(t *testing.T) {
 			gotSub = sub
 			gotInviteCode = inviteCode
 			sub.ID = 1
+
 			return nil
 		},
 		GetNodesByPlanIDFunc: func(ctx context.Context, planID uint) ([]database.Node, error) {
@@ -188,6 +194,7 @@ func TestSubscriptionService_Create_EmptyInviteCodeIsNoop(t *testing.T) {
 	cfg := &config.Config{}
 
 	var gotInviteCode string
+
 	db := &testutil.DatabaseService{
 		GetPlanByNameFunc: func(ctx context.Context, name string) (*database.Plan, error) {
 			return &database.Plan{ID: 1, Name: database.FreePlanName, TrafficLimit: 1073741824}, nil
@@ -195,6 +202,7 @@ func TestSubscriptionService_Create_EmptyInviteCodeIsNoop(t *testing.T) {
 		CreateSubscriptionFunc: func(ctx context.Context, sub *database.Subscription, inviteCode string) error {
 			gotInviteCode = inviteCode
 			sub.ID = 1
+
 			return nil
 		},
 		GetNodesByPlanIDFunc: func(ctx context.Context, planID uint) ([]database.Node, error) {
@@ -222,6 +230,7 @@ func TestSubscriptionService_Create_FillsFallbackUsername(t *testing.T) {
 	cfg := &config.Config{}
 
 	var gotSub *database.Subscription
+
 	db := &testutil.DatabaseService{
 		GetPlanByNameFunc: func(ctx context.Context, name string) (*database.Plan, error) {
 			return &database.Plan{ID: 1, Name: database.FreePlanName, TrafficLimit: 1073741824}, nil
@@ -229,6 +238,7 @@ func TestSubscriptionService_Create_FillsFallbackUsername(t *testing.T) {
 		CreateSubscriptionFunc: func(ctx context.Context, sub *database.Subscription, inviteCode string) error {
 			gotSub = sub
 			sub.ID = 1
+
 			return nil
 		},
 		GetNodesByPlanIDFunc: func(ctx context.Context, planID uint) ([]database.Node, error) {
@@ -543,7 +553,9 @@ func TestSubscriptionService_CreateTrial_Success(t *testing.T) {
 			return &database.Plan{ID: 1, Name: name, TrafficLimit: 1073741824}, nil
 		},
 	}
+
 	var gotResetDays = -1
+
 	xuiClient := &testutil.XUIClient{
 		AddClientWithIDFunc: func(ctx context.Context, req xui.ClientRequest) (*xui.ClientConfig, error) {
 			gotResetDays = req.ResetDays
@@ -626,7 +638,9 @@ func TestSubscriptionService_CreateTrial_DBError(t *testing.T) {
 		},
 		DeleteClientFunc: func(ctx context.Context, email string) error {
 			deleteCalled = true
+
 			assert.True(t, strings.HasPrefix(email, "trial_"), "trial rollback must use trial_ email")
+
 			return nil
 		},
 	}
@@ -722,6 +736,7 @@ func TestSubscriptionService_ReconcileOrphanedClients_RemovesFullyDeprovisioned(
 	svc := NewSubscriptionService(db, nil, nil, nil, cfg)
 
 	invoked := []int64{}
+
 	svc.SetInvalidateFunc(func(id int64) { invoked = append(invoked, id) })
 
 	count, err := svc.ReconcileOrphanedClients(context.Background())
@@ -783,13 +798,16 @@ func TestSubscriptionService_BindTrial_SingleNode_ErrorPropagated(t *testing.T) 
 					{ID: 2, IsActive: true, Host: "http://x2", InboundIDs: "[1]"},
 				}, nil
 			}
+
 			return nil, nil
 		},
 	}
 
 	xui1Calls := 0
 	xui2Calls := 0
+
 	var gotReq vpn.SubscriptionProvision
+
 	xui1 := &testutil.XUIClient{
 		UpdateClientFunc: func(ctx context.Context, req xui.ClientRequest) error {
 			xui1Calls++
@@ -804,6 +822,7 @@ func TestSubscriptionService_BindTrial_SingleNode_ErrorPropagated(t *testing.T) 
 				TgID:         req.TgID,
 				Comment:      req.Comment,
 			}
+
 			return errors.New("source 1 unreachable")
 		},
 	}
@@ -868,13 +887,16 @@ func TestSubscriptionService_BindTrial_SingleNode_Success(t *testing.T) {
 					{ID: 2, IsActive: true, Host: "http://x2", InboundIDs: "[1]"},
 				}, nil
 			}
+
 			return nil, nil
 		},
 	}
 
 	xui1Calls := 0
 	xui2Calls := 0
+
 	var gotReq vpn.SubscriptionProvision
+
 	xui1 := &testutil.XUIClient{
 		UpdateClientFunc: func(ctx context.Context, req xui.ClientRequest) error {
 			xui1Calls++
@@ -889,6 +911,7 @@ func TestSubscriptionService_BindTrial_SingleNode_Success(t *testing.T) {
 				TgID:         req.TgID,
 				Comment:      req.Comment,
 			}
+
 			return nil
 		},
 	}
@@ -1004,8 +1027,11 @@ func TestSubscriptionService_DeleteByID_DBError(t *testing.T) {
 func TestSubscriptionService_DeleteByID_MarkRevokedBeforeDBDelete(t *testing.T) {
 	t.Parallel()
 
-	var updatedStatus string
-	var updateBeforeDelete bool
+	var (
+		updatedStatus      string
+		updateBeforeDelete bool
+	)
+
 	deleteCalled := false
 
 	cfg := &config.Config{}
@@ -1019,6 +1045,7 @@ func TestSubscriptionService_DeleteByID_MarkRevokedBeforeDBDelete(t *testing.T) 
 			if !deleteCalled {
 				updateBeforeDelete = true
 			}
+
 			return nil
 		},
 		DeleteSubscriptionByIDFunc: func(ctx context.Context, id uint) (*database.Subscription, error) {
@@ -1147,6 +1174,7 @@ func TestSubscriptionService_GetOrCreateInvite_Delegates(t *testing.T) {
 		GetOrCreateInviteFunc: func(ctx context.Context, referrerTGID int64, code string) (*database.Invite, error) {
 			assert.Equal(t, int64(111), referrerTGID)
 			assert.Equal(t, "ABC", code)
+
 			return want, nil
 		},
 	}
@@ -1269,6 +1297,7 @@ func TestSubscriptionService_InvalidateSubscription_CallsCallback(t *testing.T) 
 	svc := NewSubscriptionService(&testutil.DatabaseService{}, xuiClients, nil, sources, cfg)
 
 	var captured int64
+
 	svc.SetInvalidateFunc(func(telegramID int64) {
 		captured = telegramID
 	})
@@ -1369,6 +1398,7 @@ func TestSubscriptionService_GetTelegramIDsBatch_Delegates(t *testing.T) {
 		GetTelegramIDsBatchFunc: func(ctx context.Context, offset, limit int) ([]int64, error) {
 			assert.Equal(t, 10, offset)
 			assert.Equal(t, 5, limit)
+
 			return want, nil
 		},
 	}
@@ -1484,6 +1514,7 @@ func TestSubscriptionService_Create_ReanimatesRevoked(t *testing.T) {
 
 	db, err := testutil.NewTestDatabaseService(t)
 	require.NoError(t, err)
+
 	ctx := context.Background()
 
 	// Simulate a partially-failed delete: a row left in "revoked" with a
@@ -1515,12 +1546,15 @@ func TestSubscriptionService_Create_ReanimatesRevoked(t *testing.T) {
 	// Exactly one row for this telegram_id, now active — no duplicate.
 	all, err := db.GetAllSubscriptions(ctx)
 	require.NoError(t, err)
+
 	var matching []database.Subscription
+
 	for _, s := range all {
 		if s.TelegramID == 777777 {
 			matching = append(matching, s)
 		}
 	}
+
 	require.Len(t, matching, 1, "must not create a second row")
 	assert.Equal(t, "active", matching[0].Status)
 

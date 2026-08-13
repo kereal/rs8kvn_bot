@@ -49,7 +49,7 @@ func TestTokenBucket_Allow_WhenTokensAvailable(t *testing.T) {
 	tb := NewTokenBucket(10, 1)
 
 	// Should allow when tokens available
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		assert.True(t, tb.Allow(), "Allow() on iteration %d, expected true", i)
 	}
 
@@ -63,7 +63,7 @@ func TestTokenBucket_Allow_ConsumesTokens(t *testing.T) {
 	tb := NewTokenBucket(5, 1)
 
 	// Consume all tokens
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		tb.Allow()
 	}
 
@@ -72,17 +72,17 @@ func TestTokenBucket_Allow_ConsumesTokens(t *testing.T) {
 }
 
 func TestTokenBucket_Allow_RefillsOverTime(t *testing.T) {
-t.Parallel()
+	t.Parallel()
 
-tb := NewTokenBucket(10, 100) // 100 tokens per second
+	tb := NewTokenBucket(10, 100) // 100 tokens per second
 
-// Consume all tokens
-for i := 0; i < 10; i++ {
-	tb.Allow()
-}
+	// Consume all tokens
+	for range 10 {
+		tb.Allow()
+	}
 
-// Wait for refill (100 tokens/sec = 1 token per 10ms) without fixed sleep
-require.Eventually(t, tb.Allow, 200*time.Millisecond, 2*time.Millisecond, "token should refill")
+	// Wait for refill (100 tokens/sec = 1 token per 10ms) without fixed sleep
+	require.Eventually(t, tb.Allow, 200*time.Millisecond, 2*time.Millisecond, "token should refill")
 }
 
 func TestTokenBucket_Wait_WhenTokenAvailable(t *testing.T) {
@@ -151,22 +151,23 @@ func TestTokenBucket_Wait_ContextTimeout(t *testing.T) {
 }
 
 func TestTokenBucket_Refill_DoesNotExceedMax(t *testing.T) {
-t.Parallel()
+	t.Parallel()
 
-tb := NewTokenBucket(10, 100)
+	tb := NewTokenBucket(10, 100)
 
-// Wait for potential refill without fixed sleep
-require.Eventually(t, func() bool {
+	// Wait for potential refill without fixed sleep
+	require.Eventually(t, func() bool {
+		tb.mu.Lock()
+		defer tb.mu.Unlock()
+
+		return tb.tokens >= tb.maxTokens
+	}, 200*time.Millisecond, 5*time.Millisecond, "tokens should reach max")
+
 	tb.mu.Lock()
-	defer tb.mu.Unlock()
-	return tb.tokens >= tb.maxTokens
-}, 200*time.Millisecond, 5*time.Millisecond, "tokens should reach max")
+	tokens := tb.tokens
+	tb.mu.Unlock()
 
-tb.mu.Lock()
-tokens := tb.tokens
-tb.mu.Unlock()
-
-assert.LessOrEqual(t, tokens, tb.maxTokens, "tokens should not exceed maxTokens")
+	assert.LessOrEqual(t, tokens, tb.maxTokens, "tokens should not exceed maxTokens")
 }
 
 func TestTokenBucket_ConcurrentAccess(t *testing.T) {
@@ -176,17 +177,18 @@ func TestTokenBucket_ConcurrentAccess(t *testing.T) {
 	done := make(chan bool)
 
 	// Multiple goroutines trying to get tokens concurrently
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		go func() {
-			for j := 0; j < 100; j++ {
+			for range 100 {
 				tb.Allow()
 			}
+
 			done <- true
 		}()
 	}
 
 	// Wait for all goroutines to finish
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		<-done
 	}
 
@@ -275,23 +277,23 @@ func TestTokenBucket_Burst_100Concurrent(t *testing.T) {
 	tb := NewTokenBucket(30, 5) // 30 tokens, 5/sec refill
 
 	var wg sync.WaitGroup
+
 	results := make(chan bool, 100)
 
 	// 100 concurrent requests
-	for i := 0; i < 100; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 100 {
+		wg.Go(func() {
 			allowed := tb.Allow()
 			results <- allowed
-		}()
+		})
 	}
 
 	wg.Wait()
 
 	allowed := 0
 	blocked := 0
-	for i := 0; i < 100; i++ {
+
+	for range 100 {
 		if <-results {
 			allowed++
 		} else {
@@ -305,20 +307,20 @@ func TestTokenBucket_Burst_100Concurrent(t *testing.T) {
 }
 
 func TestTokenBucket_Burst_Boundary(t *testing.T) {
-t.Parallel()
+	t.Parallel()
 
-tb := NewTokenBucket(10, 10)
+	tb := NewTokenBucket(10, 10)
 
-// Fill to capacity
-for i := 0; i < 10; i++ {
-	assert.True(t, tb.Allow(), "Should allow first 10")
-}
+	// Fill to capacity
+	for range 10 {
+		assert.True(t, tb.Allow(), "Should allow first 10")
+	}
 
-// 11th should be blocked
-assert.False(t, tb.Allow(), "Should block 11th request (boundary)")
+	// 11th should be blocked
+	assert.False(t, tb.Allow(), "Should block 11th request (boundary)")
 
-// Wait for refill deterministically instead of fixed sleep
-require.Eventually(t, tb.Allow, time.Second, 5*time.Millisecond, "Should allow after refill")
+	// Wait for refill deterministically instead of fixed sleep
+	require.Eventually(t, tb.Allow, time.Second, 5*time.Millisecond, "Should allow after refill")
 }
 
 func TestTokenBucket_PerUserIsolation(t *testing.T) {
@@ -328,12 +330,12 @@ func TestTokenBucket_PerUserIsolation(t *testing.T) {
 	tb2 := NewTokenBucket(5, 1)
 
 	// User 1: consume all tokens
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		assert.True(t, tb1.Allow(), "User 1 should consume tokens")
 	}
 
 	// User 2: should still have tokens (independent)
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		assert.True(t, tb2.Allow(), "User 2 should have independent limit")
 	}
 

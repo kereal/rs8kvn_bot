@@ -19,6 +19,7 @@ func TestFindOrCreatePendingPaymentOrder_ReusesActiveIntent(t *testing.T) {
 	require.NoError(t, svc.db.Create(plan).Error)
 	product := &Product{PlanID: plan.ID, Name: "Intent product", DurationDays: 30, PriceCents: 1200, Currency: "RUB", IsActive: true}
 	require.NoError(t, svc.db.Create(product).Error)
+
 	now := time.Now().UTC().Truncate(time.Second)
 	first, err := svc.FindOrCreatePendingPaymentOrder(ctx, sub.ID, product.ID, product.PriceCents, product.Currency, now)
 	require.NoError(t, err)
@@ -47,9 +48,11 @@ func TestFindOrCreatePendingPaymentOrder_ExpiresAndCreatesReplacement(t *testing
 	require.NoError(t, svc.db.Create(plan).Error)
 	product := &Product{PlanID: plan.ID, Name: "Expiring product", DurationDays: 30, PriceCents: 1300, Currency: "RUB", IsActive: true}
 	require.NoError(t, svc.db.Create(product).Error)
+
 	now := time.Now().UTC().Truncate(time.Second)
 	old, err := svc.FindOrCreatePendingPaymentOrder(ctx, sub.ID, product.ID, product.PriceCents, product.Currency, now)
 	require.NoError(t, err)
+
 	expires := now.Add(-time.Minute)
 	require.NoError(t, svc.db.Model(&Order{}).Where("id = ?", old.ID).Updates(map[string]any{
 		"payment_expires_at":  expires,
@@ -64,6 +67,7 @@ func TestFindOrCreatePendingPaymentOrder_ExpiresAndCreatesReplacement(t *testing
 	assert.Equal(t, OrderStatusExpired, func() OrderStatus {
 		var stored Order
 		require.NoError(t, svc.db.First(&stored, old.ID).Error)
+
 		return stored.Status
 	}())
 	assert.Empty(t, replacement.ProviderPaymentID)

@@ -34,11 +34,13 @@ func TestGenerators_Contract(t *testing.T) {
 				if len(value) != 10 {
 					return false
 				}
+
 				for _, char := range value {
 					if !strings.ContainsRune("0123456789abcdef", char) {
 						return false
 					}
 				}
+
 				return true
 			},
 		},
@@ -50,11 +52,13 @@ func TestGenerators_Contract(t *testing.T) {
 				if len(value) != 8 {
 					return false
 				}
+
 				for _, char := range value {
 					if !strings.ContainsRune("0123456789abcdefghijklmnopqrstuvwxyz", char) {
 						return false
 					}
 				}
+
 				return true
 			},
 		},
@@ -91,18 +95,21 @@ func TestGenerators_Concurrent(t *testing.T) {
 
 			values := make(chan string, workers*valuesPerWorker)
 			errs := make(chan error, workers*valuesPerWorker)
+
 			var wg sync.WaitGroup
 			wg.Add(workers)
 
-			for i := 0; i < workers; i++ {
+			for range workers {
 				go func() {
 					defer wg.Done()
-					for j := 0; j < valuesPerWorker; j++ {
+
+					for range valuesPerWorker {
 						value, err := tt.generate()
 						if err != nil {
 							errs <- err
 							continue
 						}
+
 						values <- value
 					}
 				}()
@@ -115,10 +122,12 @@ func TestGenerators_Concurrent(t *testing.T) {
 			for err := range errs {
 				require.NoError(t, err)
 			}
+
 			seen := make(map[string]struct{}, workers*valuesPerWorker)
 			for value := range values {
 				seen[value] = struct{}{}
 			}
+
 			require.Len(t, seen, workers*valuesPerWorker, "concurrent generator returned duplicate values")
 		})
 	}
@@ -126,7 +135,8 @@ func TestGenerators_Concurrent(t *testing.T) {
 
 func BenchmarkGenerateUUID(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		if _, err := GenerateUUID(); err != nil {
+		_, err := GenerateUUID()
+		if err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -134,7 +144,8 @@ func BenchmarkGenerateUUID(b *testing.B) {
 
 func BenchmarkGenerateSubID(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		if _, err := GenerateSubID(); err != nil {
+		_, err := GenerateSubID()
+		if err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -142,7 +153,8 @@ func BenchmarkGenerateSubID(b *testing.B) {
 
 func BenchmarkGenerateInviteCode(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		if _, err := GenerateInviteCode(); err != nil {
+		_, err := GenerateInviteCode()
+		if err != nil {
 			b.Fatal(err)
 		}
 	}

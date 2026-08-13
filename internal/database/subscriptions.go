@@ -12,6 +12,7 @@ import (
 // GetByTelegramID retrieves an active subscription by Telegram ID.
 func (s *Service) GetByTelegramID(ctx context.Context, telegramID int64) (*Subscription, error) {
 	var sub Subscription
+
 	result := s.db.WithContext(ctx).
 		Where("telegram_id = ? AND status = ?", telegramID, "active").
 		Order("created_at DESC").
@@ -20,8 +21,10 @@ func (s *Service) GetByTelegramID(ctx context.Context, telegramID int64) (*Subsc
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 			return nil, ErrSubscriptionNotFound
 		}
+
 		return nil, fmt.Errorf("failed to get subscription by telegram ID: %w", result.Error)
 	}
+
 	return &sub, nil
 }
 
@@ -32,6 +35,7 @@ func (s *Service) GetByTelegramID(ctx context.Context, telegramID int64) (*Subsc
 // duplicate row that violates the telegram_id uniqueness expectation.
 func (s *Service) GetAnyByTelegramID(ctx context.Context, telegramID int64) (*Subscription, error) {
 	var sub Subscription
+
 	result := s.db.WithContext(ctx).
 		Where("telegram_id = ?", telegramID).
 		Order("created_at DESC").
@@ -40,21 +44,26 @@ func (s *Service) GetAnyByTelegramID(ctx context.Context, telegramID int64) (*Su
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 			return nil, ErrSubscriptionNotFound
 		}
+
 		return nil, fmt.Errorf("failed to get subscription by telegram ID: %w", result.Error)
 	}
+
 	return &sub, nil
 }
 
 // GetByID retrieves a subscription by its database ID.
 func (s *Service) GetByID(ctx context.Context, id uint) (*Subscription, error) {
 	var sub Subscription
+
 	result := s.db.WithContext(ctx).First(&sub, id)
 	if result.Error != nil {
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 			return nil, ErrSubscriptionNotFound
 		}
+
 		return nil, fmt.Errorf("failed to get subscription: %w", result.Error)
 	}
+
 	return &sub, nil
 }
 
@@ -65,7 +74,9 @@ func (s *Service) CreateSubscription(ctx context.Context, sub *Subscription, inv
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if inviteCode != "" {
 			var inv Invite
-			if err := tx.Where("code = ?", inviteCode).First(&inv).Error; err == nil {
+
+			err := tx.Where("code = ?", inviteCode).First(&inv).Error
+			if err == nil {
 				inviteVal := inviteCode
 				sub.InviteCode = &inviteVal
 				referredBy := inv.ReferrerTGID
@@ -75,7 +86,8 @@ func (s *Service) CreateSubscription(ctx context.Context, sub *Subscription, inv
 			}
 		}
 
-		if err := tx.Create(sub).Error; err != nil {
+		err := tx.Create(sub).Error
+		if err != nil {
 			return fmt.Errorf("failed to create new subscription: %w", err)
 		}
 
@@ -93,9 +105,11 @@ func (s *Service) UpdateSubscription(ctx context.Context, sub *Subscription) err
 	if result.Error != nil {
 		return fmt.Errorf("failed to update subscription: %w", result.Error)
 	}
+
 	if result.RowsAffected == 0 {
 		return ErrSubscriptionNotFound
 	}
+
 	return nil
 }
 
@@ -105,15 +119,18 @@ func (s *Service) DeleteSubscription(ctx context.Context, telegramID int64) erro
 	if result.Error != nil {
 		return fmt.Errorf("failed to delete subscription: %w", result.Error)
 	}
+
 	if result.RowsAffected == 0 {
 		return fmt.Errorf("no subscription found for telegram_id %d: %w", telegramID, ErrSubscriptionNotFound)
 	}
+
 	return nil
 }
 
 // DeleteSubscriptionByID hard-deletes a subscription by its database ID.
 func (s *Service) DeleteSubscriptionByID(ctx context.Context, id uint) (*Subscription, error) {
 	var deleted Subscription
+
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		result := tx.First(&deleted, id)
 		if result.Error != nil {
@@ -135,6 +152,7 @@ func (s *Service) DeleteSubscriptionByID(ctx context.Context, id uint) (*Subscri
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrSubscriptionNotFound
 		}
+
 		return nil, fmt.Errorf("failed to delete subscription: %w", err)
 	}
 
@@ -144,6 +162,7 @@ func (s *Service) DeleteSubscriptionByID(ctx context.Context, id uint) (*Subscri
 // GetLatestSubscriptions retrieves the latest N subscriptions ordered by creation date.
 func (s *Service) GetLatestSubscriptions(ctx context.Context, limit int) ([]Subscription, error) {
 	var subs []Subscription
+
 	result := s.db.WithContext(ctx).
 		Where("status = ?", "active").
 		Order("created_at DESC").
@@ -152,34 +171,40 @@ func (s *Service) GetLatestSubscriptions(ctx context.Context, limit int) ([]Subs
 	if result.Error != nil {
 		return nil, fmt.Errorf("failed to get latest subscriptions: %w", result.Error)
 	}
+
 	return subs, nil
 }
 
 // GetAllSubscriptions retrieves all subscriptions (for admin stats and reconciliation).
 func (s *Service) GetAllSubscriptions(ctx context.Context) ([]Subscription, error) {
 	var subs []Subscription
+
 	result := s.db.WithContext(ctx).Find(&subs)
 	if result.Error != nil {
 		return nil, fmt.Errorf("failed to get all subscriptions: %w", result.Error)
 	}
+
 	return subs, nil
 }
 
 // CountAllSubscriptions returns the total number of subscriptions.
 func (s *Service) CountAllSubscriptions(ctx context.Context) (int64, error) {
 	var count int64
+
 	result := s.db.WithContext(ctx).
 		Model(&Subscription{}).
 		Count(&count)
 	if result.Error != nil {
 		return 0, fmt.Errorf("failed to count all subscriptions: %w", result.Error)
 	}
+
 	return count, nil
 }
 
 // CountActiveSubscriptions returns the number of active subscriptions.
 func (s *Service) CountActiveSubscriptions(ctx context.Context) (int64, error) {
 	var count int64
+
 	result := s.db.WithContext(ctx).
 		Model(&Subscription{}).
 		Where("status = ?", "active").
@@ -187,12 +212,14 @@ func (s *Service) CountActiveSubscriptions(ctx context.Context) (int64, error) {
 	if result.Error != nil {
 		return 0, fmt.Errorf("failed to count active subscriptions: %w", result.Error)
 	}
+
 	return count, nil
 }
 
 // CountTrialSubscriptions returns the number of trial subscriptions (telegram_id < 0).
 func (s *Service) CountTrialSubscriptions(ctx context.Context) (int64, error) {
 	var count int64
+
 	result := s.db.WithContext(ctx).
 		Model(&Subscription{}).
 		Where("telegram_id < 0").
@@ -200,12 +227,14 @@ func (s *Service) CountTrialSubscriptions(ctx context.Context) (int64, error) {
 	if result.Error != nil {
 		return 0, fmt.Errorf("failed to count trial subscriptions: %w", result.Error)
 	}
+
 	return count, nil
 }
 
 // CountExpiredSubscriptions returns the number of expired subscriptions.
 func (s *Service) CountExpiredSubscriptions(ctx context.Context) (int64, error) {
 	var count int64
+
 	result := s.db.WithContext(ctx).
 		Model(&Subscription{}).
 		Where("expires_at <= ?", time.Now().UTC()).
@@ -213,19 +242,23 @@ func (s *Service) CountExpiredSubscriptions(ctx context.Context) (int64, error) 
 	if result.Error != nil {
 		return 0, fmt.Errorf("failed to count expired subscriptions: %w", result.Error)
 	}
+
 	return count, nil
 }
 
 // GetSubscription retrieves a subscription by its subscription ID.
 func (s *Service) GetSubscription(ctx context.Context, subscriptionID string) (*Subscription, error) {
 	var sub Subscription
+
 	result := s.db.WithContext(ctx).Where("subscription_id = ?", subscriptionID).First(&sub)
 	if result.Error != nil {
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 			return nil, ErrSubscriptionNotFound
 		}
+
 		return nil, fmt.Errorf("failed to get subscription by subscription_id: %w", result.Error)
 	}
+
 	return &sub, nil
 }
 
@@ -242,6 +275,7 @@ func (s *Service) GetSubscriptionStatus(ctx context.Context, subscriptionID stri
 		Status    string
 		ExpiresAt time.Time
 	}
+
 	result := s.db.WithContext(ctx).
 		Table("subscriptions").
 		Select("status, expires_at").
@@ -251,8 +285,10 @@ func (s *Service) GetSubscriptionStatus(ctx context.Context, subscriptionID stri
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 			return "", time.Time{}, ErrSubscriptionNotFound
 		}
+
 		return "", time.Time{}, result.Error
 	}
+
 	return row.Status, row.ExpiresAt, nil
 }
 
@@ -263,28 +299,35 @@ func (s *Service) GetWithPlanAndNodes(ctx context.Context, subscriptionID string
 
 	subQuery := s.db.WithContext(ctx).Where("subscription_id = ? AND status = ?", subscriptionID, "active")
 
-	if err := subQuery.First(&result.Subscription).Error; err != nil {
+	err := subQuery.First(&result.Subscription).Error
+	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrSubscriptionNotFound
 		}
+
 		return nil, fmt.Errorf("failed to get subscription: %w", err)
 	}
 
 	var plan Plan
-	if err := s.db.WithContext(ctx).First(&plan, result.Subscription.PlanID).Error; err != nil {
+
+	err = s.db.WithContext(ctx).First(&plan, result.Subscription.PlanID).Error
+	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrPlanNotFound
 		}
+
 		return nil, fmt.Errorf("failed to get plan: %w", err)
 	}
+
 	result.Plan = plan
 
-	if err := s.db.WithContext(ctx).
+	err = s.db.WithContext(ctx).
 		Table("nodes").
 		Select("nodes.*").
 		Joins("JOIN plan_nodes ON plan_nodes.node_id = nodes.id").
 		Where("plan_nodes.plan_id = ? AND nodes.is_active = ?", result.Plan.ID, true).
-		Find(&result.Nodes).Error; err != nil {
+		Find(&result.Nodes).Error
+	if err != nil {
 		return nil, fmt.Errorf("failed to get nodes: %w", err)
 	}
 
@@ -297,9 +340,11 @@ func (s *Service) UpdateDevices(ctx context.Context, id uint, devicesJSON string
 	if result.Error != nil {
 		return fmt.Errorf("failed to update subscription devices: %w", result.Error)
 	}
+
 	if result.RowsAffected == 0 {
 		return ErrSubscriptionNotFound
 	}
+
 	return nil
 }
 
@@ -309,9 +354,11 @@ func (s *Service) UpdateIPs(ctx context.Context, id uint, ipsJSON string) error 
 	if result.Error != nil {
 		return fmt.Errorf("failed to update subscription ips: %w", result.Error)
 	}
+
 	if result.RowsAffected == 0 {
 		return ErrSubscriptionNotFound
 	}
+
 	return nil
 }
 
@@ -321,15 +368,18 @@ func (s *Service) UpdateIPs(ctx context.Context, id uint, ipsJSON string) error 
 // ошибки логируются вызывающим кодом и не блокируют выдачу подписки.
 func (s *Service) UpdateLastRequest(ctx context.Context, subscriptionID string) error {
 	now := time.Now().UTC()
+
 	result := s.db.WithContext(ctx).Model(&Subscription{}).
 		Where("subscription_id = ?", subscriptionID).
 		Update("last_request", now)
 	if result.Error != nil {
 		return fmt.Errorf("failed to update subscription last_request: %w", result.Error)
 	}
+
 	if result.RowsAffected == 0 {
 		return ErrSubscriptionNotFound
 	}
+
 	return nil
 }
 
@@ -342,7 +392,7 @@ type ExpireSubscriptionPlanInTxFn func(ctx context.Context, tx *gorm.DB, subscri
 func (s *Service) ExpireSubscriptionWithPlanCAS(ctx context.Context, id uint, freePlanID uint, applyPlan ExpireSubscriptionPlanInTxFn) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		result := tx.Model(&Subscription{}).Where("id = ? AND status = ? AND expires_at IS NOT NULL AND expires_at <= ?", id, "active", time.Now().UTC()).
-			Updates(map[string]interface{}{
+			Updates(map[string]any{
 				"status":           "active",
 				"expires_at":       nil,
 				"plan_id":          freePlanID,
@@ -354,28 +404,36 @@ func (s *Service) ExpireSubscriptionWithPlanCAS(ctx context.Context, id uint, fr
 		if result.Error != nil {
 			return fmt.Errorf("expire subscription: %w", result.Error)
 		}
+
 		if result.RowsAffected == 0 {
 			var current Subscription
-			if err := tx.First(&current, id).Error; errors.Is(err, gorm.ErrRecordNotFound) {
+
+			err := tx.First(&current, id).Error
+			switch {
+			case errors.Is(err, gorm.ErrRecordNotFound):
 				return ErrSubscriptionNotFound
-			} else if err != nil {
+			case err != nil:
 				return fmt.Errorf("reload subscription after expiry race: %w", err)
-			} else if current.Status == string(SubscriptionStatusActive) &&
+			case current.Status == string(SubscriptionStatusActive) &&
 				current.PlanID == freePlanID &&
 				current.ExpiresAt == nil &&
 				current.ProductID == nil &&
 				current.StartedAt == nil &&
 				current.PricePaidCents == 0 &&
-				current.Currency == nil {
+				current.Currency == nil:
 				return nil
 			}
+
 			return fmt.Errorf("expire subscription %d: state changed concurrently", id)
 		}
+
 		if applyPlan != nil {
-			if err := applyPlan(ctx, tx, id, freePlanID); err != nil {
+			err := applyPlan(ctx, tx, id, freePlanID)
+			if err != nil {
 				return fmt.Errorf("apply free plan after expiry: %w", err)
 			}
 		}
+
 		return nil
 	})
 }
@@ -383,7 +441,7 @@ func (s *Service) ExpireSubscriptionWithPlanCAS(ctx context.Context, id uint, fr
 // ExpireSubscription downgrades the subscription to the free plan and clears expires_at.
 func (s *Service) ExpireSubscription(ctx context.Context, id uint, freePlanID uint) error {
 	result := s.db.WithContext(ctx).Model(&Subscription{}).Where("id = ?", id).
-		Updates(map[string]interface{}{
+		Updates(map[string]any{
 			"status":     "active",
 			"expires_at": nil,
 			"plan_id":    freePlanID,
@@ -392,19 +450,23 @@ func (s *Service) ExpireSubscription(ctx context.Context, id uint, freePlanID ui
 	if result.Error != nil {
 		return fmt.Errorf("failed to expire subscription: %w", result.Error)
 	}
+
 	if result.RowsAffected == 0 {
 		return ErrSubscriptionNotFound
 	}
+
 	return nil
 }
 
 // GetExpiredPaidSubscriptions returns active subscriptions that have expired and are not on free or trial plans.
 func (s *Service) GetExpiredPaidSubscriptions(ctx context.Context, now time.Time) ([]Subscription, error) {
 	var subs []Subscription
+
 	nonExpiringPlanSubQuery := s.db.WithContext(ctx).
 		Select("id").
 		Table("plans").
 		Where("name IN ?", []string{FreePlanName, TrialPlanName})
+
 	result := s.db.WithContext(ctx).
 		Where("expires_at <= ? AND status = ? AND plan_id NOT IN (?)",
 			now, "active", nonExpiringPlanSubQuery).
@@ -412,12 +474,14 @@ func (s *Service) GetExpiredPaidSubscriptions(ctx context.Context, now time.Time
 	if result.Error != nil {
 		return nil, fmt.Errorf("failed to get expired paid subscriptions: %w", result.Error)
 	}
+
 	return subs, nil
 }
 
 // GetAllTelegramIDs returns unique Telegram IDs for active subscriptions eligible for broadcast.
 func (s *Service) GetAllTelegramIDs(ctx context.Context) ([]int64, error) {
 	var ids []int64
+
 	result := s.db.WithContext(ctx).Model(&Subscription{}).
 		Where("telegram_id > 0 AND status = ?", "active").
 		Distinct("telegram_id").
@@ -425,19 +489,23 @@ func (s *Service) GetAllTelegramIDs(ctx context.Context) ([]int64, error) {
 	if result.Error != nil {
 		return nil, fmt.Errorf("failed to get telegram IDs: %w", result.Error)
 	}
+
 	return ids, nil
 }
 
 // GetTelegramIDByUsername returns the Telegram ID for a given username.
 func (s *Service) GetTelegramIDByUsername(ctx context.Context, username string) (int64, error) {
 	var sub Subscription
+
 	result := s.db.WithContext(ctx).Where("username = ?", username).First(&sub)
 	if result.Error != nil {
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 			return 0, ErrSubscriptionNotFound
 		}
+
 		return 0, fmt.Errorf("failed to find user by username: %w", result.Error)
 	}
+
 	return sub.TelegramID, nil
 }
 
@@ -445,6 +513,7 @@ func (s *Service) GetTelegramIDByUsername(ctx context.Context, username string) 
 // offset is the starting position, limit is the maximum number of IDs to return.
 func (s *Service) GetTelegramIDsBatch(ctx context.Context, offset, limit int) ([]int64, error) {
 	var ids []int64
+
 	result := s.db.WithContext(ctx).
 		Model(&Subscription{}).
 		Where("telegram_id > 0 AND status = ?", "active").
@@ -456,12 +525,14 @@ func (s *Service) GetTelegramIDsBatch(ctx context.Context, offset, limit int) ([
 	if result.Error != nil {
 		return nil, fmt.Errorf("failed to get telegram IDs batch: %w", result.Error)
 	}
+
 	return ids, nil
 }
 
 // GetTotalTelegramIDCount returns the count of unique Telegram IDs for active subscriptions eligible for broadcast.
 func (s *Service) GetTotalTelegramIDCount(ctx context.Context) (int64, error) {
 	var count int64
+
 	result := s.db.WithContext(ctx).
 		Model(&Subscription{}).
 		Where("telegram_id > 0 AND status = ?", "active").
@@ -470,5 +541,6 @@ func (s *Service) GetTotalTelegramIDCount(ctx context.Context) (int64, error) {
 	if result.Error != nil {
 		return 0, fmt.Errorf("failed to count telegram IDs: %w", result.Error)
 	}
+
 	return count, nil
 }

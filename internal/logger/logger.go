@@ -42,6 +42,7 @@ const (
 
 var (
 	// Log is the global logger instance.
+	//
 	// Deprecated: Use logger.Service for dependency injection.
 	Log        *zap.Logger
 	fileWriter *lumberjack.Logger
@@ -57,7 +58,9 @@ func Init(logFilePath, level string) (*Service, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	Log = svc.log
+
 	return svc, nil
 }
 
@@ -71,17 +74,18 @@ func (w *stdLogWriter) Write(p []byte) (n int, err error) {
 	}
 
 	Log.Info(msg)
+
 	return len(p), nil
 }
 
 // tgbotapiLogger implements tgbotapi.BotLogger interface.
 type tgbotapiLogger struct{}
 
-func (l *tgbotapiLogger) Println(v ...interface{}) {
+func (l *tgbotapiLogger) Println(v ...any) {
 	Log.Warn(fmt.Sprint(v...))
 }
 
-func (l *tgbotapiLogger) Printf(format string, v ...interface{}) {
+func (l *tgbotapiLogger) Printf(format string, v ...any) {
 	Log.Warn(fmt.Sprintf(format, v...))
 }
 
@@ -105,6 +109,7 @@ func Writer() io.Writer {
 func SetSentryHub(hub *sentry.Hub) {
 	logMu.Lock()
 	defer logMu.Unlock()
+
 	sentryHub = hub
 }
 
@@ -150,12 +155,14 @@ func Close() error {
 
 	var errs []error
 
-	if err := Log.Sync(); err != nil {
+	err := Log.Sync()
+	if err != nil {
 		errs = append(errs, err)
 	}
 
 	if fileWriter != nil {
-		if err := fileWriter.Close(); err != nil {
+		err := fileWriter.Close()
+		if err != nil {
 			errs = append(errs, err)
 		}
 	}
@@ -163,6 +170,7 @@ func Close() error {
 	if len(errs) > 0 {
 		return fmt.Errorf("errors closing logger: %w", errors.Join(errs...))
 	}
+
 	return nil
 }
 
@@ -229,18 +237,23 @@ func NewConsoleEncoderConfig() zapcore.EncoderConfig {
 	encoderConfig.TimeKey = "timestamp"
 	encoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
 	encoderConfig.EncodeLevel = zapcore.CapitalLevelEncoder
+
 	return encoderConfig
 }
 
 // NewService creates a new logger service with file and console output.
 func NewService(logFilePath, level string) (*Service, error) {
 	logDir := filepath.Dir(logFilePath)
-	if err := os.MkdirAll(logDir, 0750); err != nil {
+
+	err := os.MkdirAll(logDir, 0750)
+	if err != nil {
 		return nil, fmt.Errorf("failed to create log directory: %w", err)
 	}
 
 	var zapLevel zapcore.Level
-	if err := zapLevel.UnmarshalText([]byte(level)); err != nil {
+
+	err = zapLevel.UnmarshalText([]byte(level))
+	if err != nil {
 		zapLevel = zapcore.InfoLevel
 	}
 
@@ -286,7 +299,8 @@ func (s *Service) Close() error {
 	var errs []error
 
 	if s.log != nil {
-		if err := s.log.Sync(); err != nil {
+		err := s.log.Sync()
+		if err != nil {
 			if !isStdoutError(err) {
 				errs = append(errs, err)
 			}
@@ -294,7 +308,8 @@ func (s *Service) Close() error {
 	}
 
 	if s.file != nil {
-		if err := s.file.Close(); err != nil {
+		err := s.file.Close()
+		if err != nil {
 			errs = append(errs, err)
 		}
 	}
@@ -302,6 +317,7 @@ func (s *Service) Close() error {
 	if len(errs) > 0 {
 		return fmt.Errorf("errors closing logger: %w", errors.Join(errs...))
 	}
+
 	return nil
 }
 
@@ -309,7 +325,9 @@ func isStdoutError(err error) bool {
 	if err == nil {
 		return false
 	}
+
 	errStr := err.Error()
+
 	return strings.Contains(errStr, "invalid argument") || strings.Contains(errStr, "bad file descriptor")
 }
 
@@ -318,6 +336,7 @@ func isStdoutError(err error) bool {
 func Recover(component string) {
 	if r := recover(); r != nil {
 		stack := debug.Stack()
+
 		sentry.CurrentHub().Recover(r)
 		sentry.Flush(SentryPanicFlushTimeout)
 		Log.Error(component+" panicked",
@@ -362,6 +381,7 @@ func (s *Service) WithError(err error) *Service {
 			scope.SetTag("error", err.Error())
 		})
 	}
+
 	return s
 }
 

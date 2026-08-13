@@ -82,15 +82,18 @@ func TestHandler_GetMainMenuKeyboard_CallbackData(t *testing.T) {
 
 func TestHandler_BuyProductList_Callback(t *testing.T) {
 	t.Parallel()
+
 	kb := NewKeyboardBuilder("testbot", "", "", "", "", true)
 	products := newTestProductList()
 	keyboard := kb.BuyProductList(products)
 
 	require.NotEmpty(t, keyboard.InlineKeyboard)
+
 	for _, row := range keyboard.InlineKeyboard[:len(keyboard.InlineKeyboard)-1] {
 		require.NotNil(t, row[0].CallbackData)
 		assert.Contains(t, *row[0].CallbackData, "buy_product_", "product rows use buy_product_{id} callbacks")
 	}
+
 	last := keyboard.InlineKeyboard[len(keyboard.InlineKeyboard)-1][0]
 	require.NotNil(t, last.CallbackData)
 	assert.Equal(t, "back_to_start", *last.CallbackData, "last row is back navigation")

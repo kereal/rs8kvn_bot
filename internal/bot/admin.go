@@ -51,6 +51,7 @@ func (h *Handler) HandleVersion(ctx context.Context, update tgbotapi.Update) err
 
 	logger.Info("Admin requesting version", zap.Int64("chat_id", chatID))
 	h.SendMessage(ctx, chatID, h.version)
+
 	return nil
 }
 
@@ -66,6 +67,7 @@ func (h *Handler) handleAdminLastReg(ctx context.Context, chatID int64, username
 	if err != nil {
 		logger.Error("Failed to get latest subscriptions", zap.Error(err))
 		h.sendLastRegText(ctx, chatID, messageID, "❌ Ошибка получения списка подписок", true)
+
 		return fmt.Errorf("get latest subscriptions: %w", err)
 	}
 
@@ -84,6 +86,7 @@ func (h *Handler) handleAdminLastReg(ctx context.Context, chatID int64, username
 	}
 
 	h.sendLastRegText(ctx, chatID, messageID, sb.String(), true)
+
 	return nil
 }
 
@@ -95,13 +98,16 @@ func (h *Handler) sendLastRegText(ctx context.Context, chatID int64, messageID i
 		h.sendLastRegNewMessage(ctx, chatID, text, isMarkdown)
 		return
 	}
+
 	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, text)
 	editMsg.DisableWebPagePreview = true
 	keyboard := h.getBackKeyboard()
+
 	editMsg.ReplyMarkup = &keyboard
 	if isMarkdown {
 		editMsg.ParseMode = "Markdown"
 	}
+
 	h.safeSend(editMsg)
 }
 
@@ -109,10 +115,12 @@ func (h *Handler) sendLastRegNewMessage(ctx context.Context, chatID int64, text 
 	msg := tgbotapi.NewMessage(chatID, text)
 	msg.DisableWebPagePreview = true
 	keyboard := h.getBackKeyboard()
+
 	msg.ReplyMarkup = &keyboard
 	if isMarkdown {
 		msg.ParseMode = "Markdown"
 	}
+
 	h.send(ctx, msg)
 }
 
@@ -144,9 +152,13 @@ func (h *Handler) HandleDel(ctx context.Context, update tgbotapi.Update) error {
 	}
 
 	// Parse the ID - use int64 to properly detect negative numbers
-	var parsedID int64
-	var err error
-	if parsedID, err = strconv.ParseInt(strings.TrimSpace(args), 10, 64); err != nil {
+	var (
+		parsedID int64
+		err      error
+	)
+
+	parsedID, err = strconv.ParseInt(strings.TrimSpace(args), 10, 64)
+	if err != nil {
 		h.SendMessage(ctx, chatID, "❌ Неверный формат ID. Использование: /del <id>\n\nПример: /del 5")
 		return nil
 	}
@@ -168,6 +180,7 @@ func (h *Handler) HandleDel(ctx context.Context, update tgbotapi.Update) error {
 			zap.Error(err),
 			zap.Uint("id", id))
 		h.SendMessage(ctx, chatID, fmt.Sprintf("❌ Ошибка удаления подписки: %v", err))
+
 		return fmt.Errorf("delete subscription: %w", err)
 	}
 
@@ -197,6 +210,7 @@ func (h *Handler) HandleDel(ctx context.Context, update tgbotapi.Update) error {
 		formatUserDisplay(deleted.Username),
 		deleted.TelegramID,
 	))
+
 	return nil
 }
 
@@ -207,7 +221,9 @@ func isUserBlockedError(err error) bool {
 	if err == nil {
 		return false
 	}
+
 	msg := strings.ToLower(err.Error())
+
 	return strings.Contains(msg, "bot was blocked by the user") ||
 		strings.Contains(msg, "user is deactivated") ||
 		strings.Contains(msg, "chat not found")
@@ -234,6 +250,7 @@ func (h *Handler) HandleBroadcast(ctx context.Context, update tgbotapi.Update) e
 	h.SendMessage(ctx, chatID, "✍️ Отправьте сообщение для рассылки (MarkdownV2, до 4096 символов, с форматированием).\n\n"+
 		"Многострочный текст поддерживается. После отправки бот покажет превью и кнопки подтверждения.\n\n"+
 		"Нажмите /cancel для отмены.")
+
 	return nil
 }
 
@@ -257,32 +274,42 @@ func (h *Handler) HandleBroadcastDraft(ctx context.Context, update tgbotapi.Upda
 		h.SendMessage(ctx, chatID, "❌ Поддерживаются только текстовые сообщения. /cancel для отмены.")
 		return nil
 	}
+
 	if text == "/cancel" {
 		h.clearBroadcastSession(chatID)
 		h.SendMessage(ctx, chatID, "❌ Рассылка отменена.")
+
 		return nil
 	}
+
 	const maxBroadcastLen = config.MaxTelegramMessageLen * 20
 	if len(text) > maxBroadcastLen {
 		h.clearBroadcastSession(chatID)
 		h.SendMessage(ctx, chatID, fmt.Sprintf("❌ Сообщение слишком длинное (%d символов). Максимум — %d символов; рассылка автоматически разбивается на части по %d символов.", len(text), maxBroadcastLen, config.MaxTelegramMessageLen))
+
 		return nil
 	}
 
 	// D3: preview with MarkdownV2. The draft may exceed one Telegram message,
 	// so show the first chunk and note how many parts the broadcast will use.
 	chunks := splitMessage(text, config.MaxTelegramMessageLen)
+
 	previewText := chunks[0]
 	if len(chunks) > 1 {
 		previewText += fmt.Sprintf("\n\n… (и ещё %d частей по %d символов)", len(chunks)-1, config.MaxTelegramMessageLen)
 	}
+
 	preview := tgbotapi.NewMessage(chatID, utils.EscapeMarkdownV2(previewText))
 	preview.ParseMode = "MarkdownV2"
+
 	preview.DisableWebPagePreview = true
-	if _, err := h.bot.Send(preview); err != nil {
+
+	_, err := h.bot.Send(preview)
+	if err != nil {
 		logger.Warn("Broadcast preview failed", zap.Error(err))
 		h.SendMessage(ctx, chatID, fmt.Sprintf("❌ Не удалось отправить превью:\n\n%v\n\n"+
 			"/cancel для отмены.", err))
+
 		return nil
 	}
 
@@ -299,6 +326,7 @@ func (h *Handler) HandleBroadcastDraft(ctx context.Context, update tgbotapi.Upda
 	msg := tgbotapi.NewMessage(chatID, "✅ Превью готово. Отправить это сообщение всем пользователям?")
 	msg.ReplyMarkup = kb
 	h.send(ctx, msg)
+
 	return nil
 }
 
@@ -309,8 +337,11 @@ func (h *Handler) handleBroadcastConfirm(ctx context.Context, chatID int64) erro
 		h.SendMessage(ctx, chatID, "❌ Нет активной рассылки для подтверждения.")
 		return nil
 	}
+
 	text := s.text
+
 	h.clearBroadcastSession(chatID)
+
 	return h.runBroadcast(ctx, chatID, text)
 }
 
@@ -318,12 +349,14 @@ func (h *Handler) handleBroadcastConfirm(ctx context.Context, chatID int64) erro
 func (h *Handler) handleBroadcastCancel(ctx context.Context, chatID int64) error {
 	h.clearBroadcastSession(chatID)
 	h.SendMessage(ctx, chatID, "❌ Рассылка отменена.")
+
 	return nil
 }
 
 // runBroadcast sends text (MarkdownV2, as-is) to all users in batches.
 func (h *Handler) runBroadcast(ctx context.Context, adminChatID int64, text string) error {
 	const broadcastTimeout = 5 * time.Minute
+
 	ctx, cancel := context.WithTimeout(ctx, broadcastTimeout)
 	defer cancel()
 
@@ -333,20 +366,23 @@ func (h *Handler) runBroadcast(ctx context.Context, adminChatID int64, text stri
 	)
 
 	var (
-		successCount       int64
-		failCount          int64
-		blockedCount       int64
+		successCount       atomic.Int64
+		failCount          atomic.Int64
+		blockedCount       atomic.Int64
 		totalProcessed     int64
 		batchErr           error
 		broadcastCancelled bool
 	)
+
 	offset := 0
+
 	for {
 		select {
 		case <-ctx.Done():
 			broadcastCancelled = true
 		default:
 		}
+
 		if broadcastCancelled {
 			break
 		}
@@ -355,22 +391,27 @@ func (h *Handler) runBroadcast(ctx context.Context, adminChatID int64, text stri
 		if err != nil {
 			logger.Error("Failed to get telegram IDs batch", zap.Error(err))
 			batchErr = err
+
 			break
 		}
+
 		if len(ids) == 0 {
 			break
 		}
 
 		var wg sync.WaitGroup
+
 		sem := make(chan struct{}, broadcastConcurrency)
 
 		for _, telegramID := range ids {
 			if broadcastCancelled {
 				break
 			}
+
 			select {
 			case sem <- struct{}{}:
 				wg.Add(1)
+
 				go func(tg int64) {
 					defer logger.Recover("Broadcast worker")
 					defer wg.Done()
@@ -387,14 +428,19 @@ func (h *Handler) runBroadcast(ctx context.Context, adminChatID int64, text stri
 
 					chunks := splitMessage(text, config.MaxTelegramMessageLen)
 					userBlocked, userFailed := false, false
+
 					for _, chunk := range chunks {
 						msg := tgbotapi.NewMessage(tg, utils.EscapeMarkdownV2(chunk))
 						msg.ParseMode = "MarkdownV2"
+
 						msg.DisableWebPagePreview = true
-						if err := h.sendWithError(ctx, msg); err != nil {
+
+						err := h.sendWithError(ctx, msg)
+						if err != nil {
 							if ctx.Err() != nil {
 								return
 							}
+
 							if isUserBlockedError(err) {
 								userBlocked = true
 							} else {
@@ -402,16 +448,18 @@ func (h *Handler) runBroadcast(ctx context.Context, adminChatID int64, text stri
 							}
 						}
 					}
+
 					if ctx.Err() != nil {
 						return
 					}
+
 					switch {
 					case userBlocked:
-						atomic.AddInt64(&blockedCount, 1)
+						blockedCount.Add(1)
 					case userFailed:
-						atomic.AddInt64(&failCount, 1)
+						failCount.Add(1)
 					default:
-						atomic.AddInt64(&successCount, 1)
+						successCount.Add(1)
 					}
 				}(telegramID)
 			case <-ctx.Done():
@@ -420,16 +468,18 @@ func (h *Handler) runBroadcast(ctx context.Context, adminChatID int64, text stri
 		}
 
 		wg.Wait()
+
 		offset += len(ids)
 		atomic.AddInt64(&totalProcessed, int64(len(ids)))
+
 		if broadcastCancelled {
 			break
 		}
 	}
 
-	sent := atomic.LoadInt64(&successCount)
-	failed := atomic.LoadInt64(&failCount)
-	blocked := atomic.LoadInt64(&blockedCount)
+	sent := successCount.Load()
+	failed := failCount.Load()
+	blocked := blockedCount.Load()
 	remaining := int(totalProcessed) - int(sent+failed+blocked)
 
 	if broadcastCancelled {
@@ -440,8 +490,10 @@ func (h *Handler) runBroadcast(ctx context.Context, adminChatID int64, text stri
 ❌ Ошибок: %d
 👥 Осталось: %d`,
 			sent, blocked, failed, remaining))
+
 		return fmt.Errorf("broadcast cancelled: %w", ctx.Err())
 	}
+
 	if batchErr != nil {
 		h.SendMessage(context.WithoutCancel(ctx), adminChatID, fmt.Sprintf(`❌ Рассылка прервана из-за ошибки!
 
@@ -459,6 +511,7 @@ func (h *Handler) runBroadcast(ctx context.Context, adminChatID int64, text stri
 			zap.Int64("blocked", blocked),
 			zap.Int64("failed", failed),
 			zap.Int("remaining", remaining))
+
 		return fmt.Errorf("broadcast batch error: %w", batchErr)
 	}
 
@@ -475,6 +528,7 @@ func (h *Handler) runBroadcast(ctx context.Context, adminChatID int64, text stri
 		zap.Int64("blocked", blocked),
 		zap.Int64("failed", failed),
 		zap.Int64("total", totalProcessed))
+
 	return nil
 }
 
@@ -482,6 +536,7 @@ func (h *Handler) runBroadcast(ctx context.Context, adminChatID int64, text stri
 func (h *Handler) startBroadcastSession(chatID int64) {
 	h.broadcastMu.Lock()
 	defer h.broadcastMu.Unlock()
+
 	h.broadcastSessions[chatID] = &broadcastSession{createdAt: time.Now(), stage: broadcastStageAwaitingDraft}
 }
 
@@ -489,11 +544,13 @@ func (h *Handler) startBroadcastSession(chatID int64) {
 func (h *Handler) getBroadcastSession(chatID int64) *broadcastSession {
 	h.broadcastMu.Lock()
 	defer h.broadcastMu.Unlock()
+
 	s, ok := h.broadcastSessions[chatID]
 	if !ok || time.Since(s.createdAt) > broadcastSessionTTL {
 		delete(h.broadcastSessions, chatID)
 		return nil
 	}
+
 	return s
 }
 
@@ -501,6 +558,7 @@ func (h *Handler) getBroadcastSession(chatID int64) *broadcastSession {
 func (h *Handler) clearBroadcastSession(chatID int64) {
 	h.broadcastMu.Lock()
 	defer h.broadcastMu.Unlock()
+
 	delete(h.broadcastSessions, chatID)
 }
 
@@ -517,20 +575,26 @@ func splitMessage(text string, maxLen int) []string {
 	if maxLen <= 0 {
 		return []string{text}
 	}
+
 	if len(text) <= maxLen {
 		return []string{text}
 	}
 
-	var chunks []string
-	var cur strings.Builder
-	var open []string
+	var (
+		chunks []string
+		cur    strings.Builder
+		open   []string
+	)
+
 	lastNewline := false
 	flush := func() {
 		if cur.Len() > 0 {
 			chunks = append(chunks, cur.String())
 			cur.Reset()
+
 			open = nil
 		}
+
 		lastNewline = false
 	}
 
@@ -543,14 +607,19 @@ func splitMessage(text string, maxLen int) []string {
 		if cur.Len() > 0 && !lastNewline {
 			sep = 1
 		}
+
 		if len(open) == 0 && cur.Len() > 0 && cur.Len()+sep+len(word) > maxLen {
 			flush()
 		}
+
 		if cur.Len() > 0 && !lastNewline {
 			cur.WriteByte(' ')
 		}
+
 		cur.WriteString(word)
+
 		lastNewline = false
+
 		updateEntities(&open, word)
 	}
 
@@ -563,10 +632,12 @@ func splitMessage(text string, maxLen int) []string {
 				flush()
 			} else {
 				cur.WriteByte('\n')
+
 				lastNewline = true
 			}
 		}
-		for _, word := range strings.Fields(line) {
+
+		for word := range strings.FieldsSeq(line) {
 			if len(word) > maxLen {
 				// The token is over-long. If an entity is open, or the token
 				// itself contains an entity delimiter, keep it whole: a
@@ -577,19 +648,26 @@ func splitMessage(text string, maxLen int) []string {
 					addWord(word)
 					continue
 				}
+
 				flush()
+
 				for _, piece := range hardSplitToken(word, maxLen) {
 					if cur.Len() > 0 {
 						flush()
 					}
+
 					cur.WriteString(piece)
 				}
+
 				continue
 			}
+
 			addWord(word)
 		}
 	}
+
 	flush()
+
 	return chunks
 }
 
@@ -624,7 +702,9 @@ func hardSplitToken(word string, maxLen int) []string {
 	// Split by runes first to preserve UTF-8, then re-encode each chunk and
 	// verify its byte length stays within maxLen.
 	runes := []rune(word)
+
 	var out []string
+
 	for len(runes) > 0 {
 		// Grow the chunk by runes until adding the next rune would exceed
 		// maxLen bytes (or we run out of runes).
@@ -634,16 +714,20 @@ func hardSplitToken(word string, maxLen int) []string {
 			if len(next) > maxLen {
 				break
 			}
+
 			take++
 		}
+
 		if take == 0 {
 			// A single rune is wider than maxLen; emit it alone to make
 			// progress without producing invalid UTF-8.
 			take = 1
 		}
+
 		out = append(out, string(runes[:take]))
 		runes = runes[take:]
 	}
+
 	return out
 }
 
@@ -656,6 +740,7 @@ func containsEntityChar(s string) bool {
 			return true
 		}
 	}
+
 	return false
 }
 
@@ -707,11 +792,14 @@ func (h *Handler) HandleSend(ctx context.Context, update tgbotapi.Update) error 
 	message := parts[1]
 
 	// Try to parse as Telegram ID first, then as username
-	var telegramID int64
-	var err error
+	var (
+		telegramID int64
+		err        error
+	)
 
 	// Check if target is a number (Telegram ID)
-	if id, parseErr := strconv.ParseInt(target, 10, 64); parseErr == nil {
+	id, parseErr := strconv.ParseInt(target, 10, 64)
+	if parseErr == nil {
 		telegramID = id
 	} else {
 		// Try to find by username
@@ -727,12 +815,14 @@ func (h *Handler) HandleSend(ctx context.Context, update tgbotapi.Update) error 
 	msg := tgbotapi.NewMessage(telegramID, escapedMessage)
 	msg.ParseMode = "MarkdownV2"
 	msg.DisableWebPagePreview = true
+
 	sentMsg, err := h.bot.Send(msg)
 	if err != nil {
 		logger.Error("Failed to send admin message",
 			zap.Int64("telegram_id", telegramID),
 			zap.Error(err))
 		h.SendMessage(ctx, chatID, fmt.Sprintf("❌ Ошибка отправки сообщения: %v", err))
+
 		return fmt.Errorf("send admin message: %w", err)
 	}
 
@@ -745,6 +835,7 @@ func (h *Handler) HandleSend(ctx context.Context, update tgbotapi.Update) error 
 	logger.Info("Message sent via /send command",
 		zap.Int64("telegram_id", telegramID),
 		zap.Int64("admin_id", chatID))
+
 	return nil
 }
 
@@ -762,17 +853,20 @@ func (h *Handler) handleAdminStats(ctx context.Context, chatID int64, username s
 	totalCount, err := h.db.CountAllSubscriptions(ctx)
 	if err != nil {
 		logger.Error("Failed to count subscriptions for stats", zap.Error(err))
+
 		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "❌ Ошибка получения статистики")
 		editMsg.DisableWebPagePreview = true
 		keyboard := h.getBackKeyboard()
 		editMsg.ReplyMarkup = &keyboard
 		h.safeSend(editMsg)
+
 		return fmt.Errorf("count all subscriptions: %w", err)
 	}
 
 	activeCount, err := h.db.CountActiveSubscriptions(ctx)
 	if err != nil {
 		logger.Error("Failed to count active subscriptions", zap.Error(err))
+
 		activeCount = 0
 		// Continue with partial stats; not a fatal error
 	}
@@ -789,6 +883,7 @@ func (h *Handler) handleAdminStats(ctx context.Context, chatID int64, username s
 	keyboard := h.getBackKeyboard()
 	editMsg.ReplyMarkup = &keyboard
 	h.safeSend(editMsg)
+
 	return nil
 }
 
@@ -813,6 +908,7 @@ func (h *Handler) notifyAdmin(ctx context.Context, username string, chatID int64
 	}
 
 	logger.Info("Admin notified about new subscription", zap.String("username", username), zap.Int64("chat_id", chatID))
+
 	return nil
 }
 
@@ -835,6 +931,7 @@ func (h *Handler) HandleRefstats(ctx context.Context, update tgbotapi.Update) er
 	}
 
 	chatID := update.Message.Chat.ID
+
 	username := "unknown"
 	if update.Message.From != nil && update.Message.From.UserName != "" {
 		username = update.Message.From.UserName
@@ -848,10 +945,12 @@ func (h *Handler) HandleRefstats(ctx context.Context, update tgbotapi.Update) er
 	logger.Info("Admin requesting referral stats", zap.String("username", username), zap.Int64("chat_id", chatID))
 
 	allCounts := h.referralCache.GetAll()
+
 	type referrer struct {
 		chatID int64
 		count  int64
 	}
+
 	referrals := make([]referrer, 0, len(allCounts))
 
 	for chatID, count := range allCounts {
@@ -872,18 +971,17 @@ func (h *Handler) HandleRefstats(ctx context.Context, update tgbotapi.Update) er
 	// Format message
 	var sb strings.Builder
 	sb.WriteString("📊 *Статистика рефералов*\n\n")
-	sb.WriteString(fmt.Sprintf("👥 Всего рефералов: %d\n", totalReferrals))
-	sb.WriteString(fmt.Sprintf("👤 Уникальных рефереров: %d\n\n", len(referrals)))
+	fmt.Fprintf(&sb, "👥 Всего рефералов: %d\n", totalReferrals)
+	fmt.Fprintf(&sb, "👤 Уникальных рефереров: %d\n\n", len(referrals))
 
 	if len(referrals) > 0 {
 		sb.WriteString("🏆 *Топ-10 рефереров:*\n")
-		limit := 10
-		if len(referrals) < limit {
-			limit = len(referrals)
-		}
-		for i := 0; i < limit; i++ {
+
+		limit := min(len(referrals), 10)
+
+		for i := range limit {
 			r := referrals[i]
-			sb.WriteString(fmt.Sprintf("%d\\. ID %d: %d рефералов\n", i+1, r.chatID, r.count))
+			fmt.Fprintf(&sb, "%d\\. ID %d: %d рефералов\n", i+1, r.chatID, r.count)
 		}
 	} else {
 		sb.WriteString("📭 Нет данных о рефералах")
@@ -892,5 +990,6 @@ func (h *Handler) HandleRefstats(ctx context.Context, update tgbotapi.Update) er
 	msg := tgbotapi.NewMessage(chatID, sb.String())
 	msg.ParseMode = "MarkdownV2"
 	h.send(ctx, msg)
+
 	return nil
 }

@@ -32,6 +32,7 @@ func TestBot_GracefulShutdown(t *testing.T) {
 	handler.StartRateLimiterCleanup(ctx, 20*time.Millisecond, 100*time.Millisecond)
 
 	runtime.GC()
+
 	var memStatsBefore runtime.MemStats
 	runtime.ReadMemStats(&memStatsBefore)
 
@@ -40,6 +41,7 @@ func TestBot_GracefulShutdown(t *testing.T) {
 	runtime.GC()
 	runtime.Gosched()
 	runtime.GC()
+
 	var memStatsAfter runtime.MemStats
 	runtime.ReadMemStats(&memStatsAfter)
 
@@ -52,6 +54,7 @@ func TestServer_GracefulShutdown(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping in short mode")
 	}
+
 	t.Parallel()
 
 	cfg := &config.Config{
@@ -70,16 +73,15 @@ func TestServer_GracefulShutdown(t *testing.T) {
 	handler.StartRateLimiterCleanup(ctx, time.Minute, 5*time.Minute)
 
 	var wg sync.WaitGroup
-	wg.Add(1)
 
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		<-ctx.Done()
-	}()
+	})
 
 	cancel()
 
 	done := make(chan struct{})
+
 	go func() {
 		wg.Wait()
 		close(done)
@@ -97,6 +99,7 @@ func TestHeartbeat_StopOnContextCancel(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping in short mode")
 	}
+
 	t.Parallel()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -121,12 +124,10 @@ func TestGoroutineLeak(t *testing.T) {
 
 	var wg sync.WaitGroup
 
-	for i := 0; i < 10; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 10 {
+		wg.Go(func() {
 			time.Sleep(2 * time.Millisecond)
-		}()
+		})
 	}
 
 	wg.Wait()

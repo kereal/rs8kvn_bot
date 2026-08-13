@@ -59,6 +59,7 @@ func (m *SubscriptionRepositoryFake) GetSubscriptionsExpiringInRange(ctx context
 	if m.GetSubscriptionsExpiringInRangeFunc != nil {
 		return m.GetSubscriptionsExpiringInRangeFunc(ctx, from, to)
 	}
+
 	return nil, nil
 }
 
@@ -66,6 +67,7 @@ func (m *SubscriptionRepositoryFake) ClaimReminder(ctx context.Context, id uint,
 	if m.ClaimReminderFunc != nil {
 		return m.ClaimReminderFunc(ctx, id, bit, expiresAt)
 	}
+
 	return true, nil
 }
 
@@ -73,6 +75,7 @@ func (m *SubscriptionRepositoryFake) ReleaseReminder(ctx context.Context, id uin
 	if m.ReleaseReminderFunc != nil {
 		return m.ReleaseReminderFunc(ctx, id, bit, expiresAt)
 	}
+
 	return nil
 }
 
@@ -80,144 +83,168 @@ func (m *SubscriptionRepositoryFake) GetByTelegramID(ctx context.Context, telegr
 	if m.GetByTelegramIDFunc != nil {
 		return m.GetByTelegramIDFunc(ctx, telegramID)
 	}
+
 	return nil, gorm.ErrRecordNotFound
 }
 func (m *SubscriptionRepositoryFake) GetAnyByTelegramID(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 	if m.GetAnyByTelegramIDFunc != nil {
 		return m.GetAnyByTelegramIDFunc(ctx, telegramID)
 	}
+
 	return nil, gorm.ErrRecordNotFound
 }
 func (m *SubscriptionRepositoryFake) CreateSubscription(ctx context.Context, sub *database.Subscription, inviteCode string) error {
 	if m.CreateSubscriptionFunc != nil {
 		return m.CreateSubscriptionFunc(ctx, sub, inviteCode)
 	}
+
 	return nil
 }
 func (m *SubscriptionRepositoryFake) UpdateSubscription(ctx context.Context, sub *database.Subscription) error {
 	if m.UpdateSubscriptionFunc != nil {
 		return m.UpdateSubscriptionFunc(ctx, sub)
 	}
+
 	return nil
 }
 func (m *SubscriptionRepositoryFake) DeleteSubscription(ctx context.Context, telegramID int64) error {
 	if m.DeleteSubscriptionFunc != nil {
 		return m.DeleteSubscriptionFunc(ctx, telegramID)
 	}
+
 	return nil
 }
 func (m *SubscriptionRepositoryFake) DeleteSubscriptionByID(ctx context.Context, id uint) (*database.Subscription, error) {
 	if m.DeleteSubscriptionByIDFunc != nil {
 		return m.DeleteSubscriptionByIDFunc(ctx, id)
 	}
+
 	return nil, gorm.ErrRecordNotFound
 }
 func (m *SubscriptionRepositoryFake) GetLatestSubscriptions(ctx context.Context, limit int) ([]database.Subscription, error) {
 	if m.GetLatestSubscriptionsFunc != nil {
 		return m.GetLatestSubscriptionsFunc(ctx, limit)
 	}
+
 	return nil, nil
 }
 func (m *SubscriptionRepositoryFake) GetAllSubscriptions(ctx context.Context) ([]database.Subscription, error) {
 	if m.GetAllSubscriptionsFunc != nil {
 		return m.GetAllSubscriptionsFunc(ctx)
 	}
+
 	return nil, nil
 }
 func (m *SubscriptionRepositoryFake) CountAllSubscriptions(ctx context.Context) (int64, error) {
 	if m.CountAllSubscriptionsFunc != nil {
 		return m.CountAllSubscriptionsFunc(ctx)
 	}
+
 	return 0, nil
 }
 func (m *SubscriptionRepositoryFake) CountActiveSubscriptions(ctx context.Context) (int64, error) {
 	if m.CountActiveSubscriptionsFunc != nil {
 		return m.CountActiveSubscriptionsFunc(ctx)
 	}
+
 	return 0, nil
 }
 func (m *SubscriptionRepositoryFake) CountTrialSubscriptions(ctx context.Context) (int64, error) {
 	if m.CountTrialSubscriptionsFunc != nil {
 		return m.CountTrialSubscriptionsFunc(ctx)
 	}
+
 	return 0, nil
 }
 func (m *SubscriptionRepositoryFake) CountExpiredSubscriptions(ctx context.Context) (int64, error) {
 	if m.CountExpiredSubscriptionsFunc != nil {
 		return m.CountExpiredSubscriptionsFunc(ctx)
 	}
+
 	return 0, nil
 }
 func (m *SubscriptionRepositoryFake) GetAllTelegramIDs(ctx context.Context) ([]int64, error) {
 	if m.GetAllTelegramIDsFunc != nil {
 		return m.GetAllTelegramIDsFunc(ctx)
 	}
+
 	return nil, nil
 }
 func (m *SubscriptionRepositoryFake) GetTelegramIDByUsername(ctx context.Context, username string) (int64, error) {
 	if m.GetTelegramIDByUsernameFunc != nil {
 		return m.GetTelegramIDByUsernameFunc(ctx, username)
 	}
+
 	return 0, gorm.ErrRecordNotFound
 }
 func (m *SubscriptionRepositoryFake) GetTelegramIDsBatch(ctx context.Context, offset, limit int) ([]int64, error) {
 	if m.GetTelegramIDsBatchFunc != nil {
 		return m.GetTelegramIDsBatchFunc(ctx, offset, limit)
 	}
+
 	return nil, nil
 }
 func (m *SubscriptionRepositoryFake) GetTotalTelegramIDCount(ctx context.Context) (int64, error) {
 	if m.GetTotalTelegramIDCountFunc != nil {
 		return m.GetTotalTelegramIDCountFunc(ctx)
 	}
+
 	return 0, nil
 }
 func (m *SubscriptionRepositoryFake) GetSubscriptionStatus(ctx context.Context, subscriptionID string) (string, time.Time, error) {
 	if m.GetSubscriptionStatusFunc != nil {
 		return m.GetSubscriptionStatusFunc(ctx, subscriptionID)
 	}
+
 	return "", time.Time{}, gorm.ErrRecordNotFound
 }
 func (m *SubscriptionRepositoryFake) ExpireSubscription(ctx context.Context, id uint, freePlanID uint) error {
 	if m.ExpireSubscriptionFunc != nil {
 		return m.ExpireSubscriptionFunc(ctx, id, freePlanID)
 	}
+
 	return nil
 }
 func (m *SubscriptionRepositoryFake) GetExpiredPaidSubscriptions(ctx context.Context, now time.Time) ([]database.Subscription, error) {
 	if m.GetExpiredPaidSubscriptionsFunc != nil {
 		return m.GetExpiredPaidSubscriptionsFunc(ctx, now)
 	}
+
 	return nil, nil
 }
 func (m *SubscriptionRepositoryFake) UpdateDevices(ctx context.Context, id uint, devicesJSON string) error {
 	if m.UpdateDevicesFunc != nil {
 		return m.UpdateDevicesFunc(ctx, id, devicesJSON)
 	}
+
 	return nil
 }
 func (m *SubscriptionRepositoryFake) UpdateIPs(ctx context.Context, id uint, ipsJSON string) error {
 	if m.UpdateIPsFunc != nil {
 		return m.UpdateIPsFunc(ctx, id, ipsJSON)
 	}
+
 	return nil
 }
 func (m *SubscriptionRepositoryFake) UpdateLastRequest(ctx context.Context, subscriptionID string) error {
 	if m.UpdateLastRequestFunc != nil {
 		return m.UpdateLastRequestFunc(ctx, subscriptionID)
 	}
+
 	return nil
 }
 func (m *SubscriptionRepositoryFake) GetSubscription(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
 	if m.GetSubscriptionFunc != nil {
 		return m.GetSubscriptionFunc(ctx, subscriptionID)
 	}
+
 	return nil, gorm.ErrRecordNotFound
 }
 func (m *SubscriptionRepositoryFake) GetWithPlanAndNodes(ctx context.Context, subscriptionID string) (*database.SubscriptionFull, error) {
 	if m.GetWithPlanAndNodesFunc != nil {
 		return m.GetWithPlanAndNodesFunc(ctx, subscriptionID)
 	}
+
 	return nil, gorm.ErrRecordNotFound
 }
 
@@ -246,72 +273,84 @@ func (m *SubscriptionNodeRepositoryFake) GetBySubscriptionID(ctx context.Context
 	if m.GetBySubscriptionIDFunc != nil {
 		return m.GetBySubscriptionIDFunc(ctx, subscriptionID)
 	}
+
 	return nil, nil
 }
 func (m *SubscriptionNodeRepositoryFake) GetByNodeID(ctx context.Context, nodeID uint) ([]database.SubscriptionNode, error) {
 	if m.GetByNodeIDFunc != nil {
 		return m.GetByNodeIDFunc(ctx, nodeID)
 	}
+
 	return nil, nil
 }
 func (m *SubscriptionNodeRepositoryFake) CreateSubscriptionNode(ctx context.Context, sn *database.SubscriptionNode) error {
 	if m.CreateSubscriptionNodeFunc != nil {
 		return m.CreateSubscriptionNodeFunc(ctx, sn)
 	}
+
 	return nil
 }
 func (m *SubscriptionNodeRepositoryFake) UpsertSubscriptionNode(ctx context.Context, sn *database.SubscriptionNode) error {
 	if m.UpsertSubscriptionNodeFunc != nil {
 		return m.UpsertSubscriptionNodeFunc(ctx, sn)
 	}
+
 	return nil
 }
 func (m *SubscriptionNodeRepositoryFake) DeleteSubscriptionNode(ctx context.Context, subID, nodeID uint) error {
 	if m.DeleteSubscriptionNodeFunc != nil {
 		return m.DeleteSubscriptionNodeFunc(ctx, subID, nodeID)
 	}
+
 	return nil
 }
 func (m *SubscriptionNodeRepositoryFake) DeleteSubscriptionNodesBySubscriptionID(ctx context.Context, subID uint) error {
 	if m.DeleteSubscriptionNodesBySubscriptionIDFunc != nil {
 		return m.DeleteSubscriptionNodesBySubscriptionIDFunc(ctx, subID)
 	}
+
 	return nil
 }
 func (m *SubscriptionNodeRepositoryFake) MarkActiveNodesPendingUpdate(ctx context.Context, subID uint, targetNodeIDs []uint) error {
 	if m.MarkActiveNodesPendingUpdateFunc != nil {
 		return m.MarkActiveNodesPendingUpdateFunc(ctx, subID, targetNodeIDs)
 	}
+
 	return nil
 }
 func (m *SubscriptionNodeRepositoryFake) UpdateSubscriptionNodeStatus(ctx context.Context, subID, nodeID uint, status database.SyncStatus) error {
 	if m.UpdateSubscriptionNodeStatusFunc != nil {
 		return m.UpdateSubscriptionNodeStatusFunc(ctx, subID, nodeID, status)
 	}
+
 	return nil
 }
 func (m *SubscriptionNodeRepositoryFake) UpdateRetry(ctx context.Context, subID, nodeID uint, retryCount int, retryAt *time.Time, lastErr *string) error {
 	if m.UpdateRetryFunc != nil {
 		return m.UpdateRetryFunc(ctx, subID, nodeID, retryCount, retryAt, lastErr)
 	}
+
 	return nil
 }
 func (m *SubscriptionNodeRepositoryFake) GetPendingSync(ctx context.Context) ([]database.SubscriptionNode, error) {
 	if m.GetPendingSyncFunc != nil {
 		return m.GetPendingSyncFunc(ctx)
 	}
+
 	return nil, nil
 }
 func (m *SubscriptionNodeRepositoryFake) GetPendingBySubscriptionID(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
 	if m.GetPendingBySubscriptionIDFunc != nil {
 		return m.GetPendingBySubscriptionIDFunc(ctx, subscriptionID)
 	}
+
 	return nil, nil
 }
 func (m *SubscriptionNodeRepositoryFake) GetPendingByNodeID(ctx context.Context, nodeID uint) ([]database.SubscriptionNode, error) {
 	if m.GetPendingByNodeIDFunc != nil {
 		return m.GetPendingByNodeIDFunc(ctx, nodeID)
 	}
+
 	return nil, nil
 }
 
@@ -332,6 +371,7 @@ func (m *TrialRepositoryFake) CreateTrialSubscription(ctx context.Context, invit
 	if m.CreateTrialSubscriptionFunc != nil {
 		return m.CreateTrialSubscriptionFunc(ctx, inviteCode, subscriptionID, clientID, expiryTime)
 	}
+
 	return &database.Subscription{
 		SubscriptionID: subscriptionID,
 		ClientID:       clientID,
@@ -343,30 +383,35 @@ func (m *TrialRepositoryFake) GetTrialSubscriptionBySubID(ctx context.Context, s
 	if m.GetTrialSubscriptionBySubIDFunc != nil {
 		return m.GetTrialSubscriptionBySubIDFunc(ctx, subscriptionID)
 	}
+
 	return nil, gorm.ErrRecordNotFound
 }
 func (m *TrialRepositoryFake) BindTrialSubscription(ctx context.Context, subscriptionID string, telegramID int64, username string) (*database.Subscription, error) {
 	if m.BindTrialSubscriptionFunc != nil {
 		return m.BindTrialSubscriptionFunc(ctx, subscriptionID, telegramID, username)
 	}
+
 	return nil, gorm.ErrRecordNotFound
 }
 func (m *TrialRepositoryFake) CountTrialRequestsByIPLastHour(ctx context.Context, ip string) (int, error) {
 	if m.CountTrialRequestsByIPLastHourFunc != nil {
 		return m.CountTrialRequestsByIPLastHourFunc(ctx, ip)
 	}
+
 	return 0, nil
 }
 func (m *TrialRepositoryFake) CreateTrialRequest(ctx context.Context, ip string) error {
 	if m.CreateTrialRequestFunc != nil {
 		return m.CreateTrialRequestFunc(ctx, ip)
 	}
+
 	return nil
 }
 func (m *TrialRepositoryFake) CleanupExpiredTrials(ctx context.Context, hours int) ([]database.Subscription, error) {
 	if m.CleanupExpiredTrialsFunc != nil {
 		return m.CleanupExpiredTrialsFunc(ctx, hours)
 	}
+
 	return nil, nil
 }
 
@@ -386,30 +431,35 @@ func (m *NodeRepositoryFake) ListNodes(ctx context.Context) ([]database.Node, er
 	if m.ListNodesFunc != nil {
 		return m.ListNodesFunc(ctx)
 	}
+
 	return nil, nil
 }
 func (m *NodeRepositoryFake) GetNodesByPlanName(ctx context.Context, planName string) ([]database.Node, error) {
 	if m.GetNodesByPlanNameFunc != nil {
 		return m.GetNodesByPlanNameFunc(ctx, planName)
 	}
+
 	return nil, nil
 }
 func (m *NodeRepositoryFake) GetNodesByPlanID(ctx context.Context, planID uint) ([]database.Node, error) {
 	if m.GetNodesByPlanIDFunc != nil {
 		return m.GetNodesByPlanIDFunc(ctx, planID)
 	}
+
 	return nil, nil
 }
 func (m *NodeRepositoryFake) GetNodeByID(ctx context.Context, id uint) (*database.Node, error) {
 	if m.GetNodeByIDFunc != nil {
 		return m.GetNodeByIDFunc(ctx, id)
 	}
+
 	return nil, gorm.ErrRecordNotFound
 }
 func (m *NodeRepositoryFake) ListEnabled(ctx context.Context) ([]database.Node, error) {
 	if m.ListEnabledFunc != nil {
 		return m.ListEnabledFunc(ctx)
 	}
+
 	return nil, nil
 }
 
@@ -429,30 +479,35 @@ func (m *InviteRepositoryFake) GetOrCreateInvite(ctx context.Context, referrerTG
 	if m.GetOrCreateInviteFunc != nil {
 		return m.GetOrCreateInviteFunc(ctx, referrerTGID, code)
 	}
+
 	return nil, gorm.ErrRecordNotFound
 }
 func (m *InviteRepositoryFake) GetInviteByCode(ctx context.Context, code string) (*database.Invite, error) {
 	if m.GetInviteByCodeFunc != nil {
 		return m.GetInviteByCodeFunc(ctx, code)
 	}
+
 	return nil, gorm.ErrRecordNotFound
 }
 func (m *InviteRepositoryFake) GetInviteByReferrer(ctx context.Context, referrerTGID int64) (*database.Invite, error) {
 	if m.GetInviteByReferrerFunc != nil {
 		return m.GetInviteByReferrerFunc(ctx, referrerTGID)
 	}
+
 	return nil, gorm.ErrRecordNotFound
 }
 func (m *InviteRepositoryFake) GetReferralCount(ctx context.Context, referrerTGID int64) (int64, error) {
 	if m.GetReferralCountFunc != nil {
 		return m.GetReferralCountFunc(ctx, referrerTGID)
 	}
+
 	return 0, nil
 }
 func (m *InviteRepositoryFake) GetAllReferralCounts(ctx context.Context) (map[int64]int64, error) {
 	if m.GetAllReferralCountsFunc != nil {
 		return m.GetAllReferralCountsFunc(ctx)
 	}
+
 	return nil, nil
 }
 
@@ -469,12 +524,14 @@ func (m *PlanRepositoryFake) GetPlanByName(ctx context.Context, name string) (*d
 	if m.GetPlanByNameFunc != nil {
 		return m.GetPlanByNameFunc(ctx, name)
 	}
+
 	return nil, gorm.ErrRecordNotFound
 }
 func (m *PlanRepositoryFake) GetPlanByID(ctx context.Context, planID uint) (*database.Plan, error) {
 	if m.GetPlanByIDFunc != nil {
 		return m.GetPlanByIDFunc(ctx, planID)
 	}
+
 	return nil, gorm.ErrRecordNotFound
 }
 
@@ -493,24 +550,28 @@ func (m *ProductRepositoryFake) GetActiveByPlanID(ctx context.Context, planID ui
 	if m.GetActiveByPlanIDFunc != nil {
 		return m.GetActiveByPlanIDFunc(ctx, planID)
 	}
+
 	return nil, nil
 }
 func (m *ProductRepositoryFake) ListActiveProducts(ctx context.Context) ([]database.Product, error) {
 	if m.ListActiveProductsFunc != nil {
 		return m.ListActiveProductsFunc(ctx)
 	}
+
 	return nil, nil
 }
 func (m *ProductRepositoryFake) GetProductByID(ctx context.Context, id uint) (*database.Product, error) {
 	if m.GetProductByIDFunc != nil {
 		return m.GetProductByIDFunc(ctx, id)
 	}
+
 	return nil, gorm.ErrRecordNotFound
 }
 func (m *ProductRepositoryFake) UpdateProductGuarded(ctx context.Context, product *database.Product) error {
 	if m.UpdateProductGuardedFunc != nil {
 		return m.UpdateProductGuardedFunc(ctx, product)
 	}
+
 	return nil
 }
 
@@ -539,12 +600,14 @@ func (m *OrderRepositoryFake) GetOrderByProviderPaymentID(ctx context.Context, p
 	if m.GetOrderByProviderPaymentIDFunc != nil {
 		return m.GetOrderByProviderPaymentIDFunc(ctx, provider, providerPaymentID)
 	}
+
 	return nil, gorm.ErrRecordNotFound
 }
 func (m *OrderRepositoryFake) CancelPaidOrderAndDowngradeCAS(ctx context.Context, provider string, providerPaymentID uuid.UUID, now time.Time, freePlanID uint, applyPlan database.ChargebackPlanInTxFn) (*database.ChargebackResult, error) {
 	if m.CancelPaidOrderAndDowngradeCASFunc != nil {
 		return m.CancelPaidOrderAndDowngradeCASFunc(ctx, provider, providerPaymentID, now, freePlanID, applyPlan)
 	}
+
 	return nil, errors.New("mock atomic chargeback requires CancelPaidOrderAndDowngradeCASFunc")
 }
 
@@ -552,42 +615,49 @@ func (m *OrderRepositoryFake) CancelOrderCAS(ctx context.Context, provider strin
 	if m.CancelOrderCASFunc != nil {
 		return m.CancelOrderCASFunc(ctx, provider, providerPaymentID, fromStatuses)
 	}
+
 	return false, nil
 }
 func (m *OrderRepositoryFake) CreateOrder(ctx context.Context, order *database.Order) error {
 	if m.CreateOrderFunc != nil {
 		return m.CreateOrderFunc(ctx, order)
 	}
+
 	return nil
 }
 func (m *OrderRepositoryFake) FindPendingPaymentOrder(ctx context.Context, subscriptionID, productID uint, now time.Time) (*database.Order, error) {
 	if m.FindPendingPaymentOrderFunc != nil {
 		return m.FindPendingPaymentOrderFunc(ctx, subscriptionID, productID, now)
 	}
+
 	return nil, nil
 }
 func (m *OrderRepositoryFake) CreatePendingPaymentOrder(ctx context.Context, subscriptionID, productID uint, amountCents int64, currency string, now time.Time) (*database.Order, error) {
 	if m.CreatePendingPaymentOrderFunc != nil {
 		return m.CreatePendingPaymentOrderFunc(ctx, subscriptionID, productID, amountCents, currency, now)
 	}
+
 	return nil, nil
 }
 func (m *OrderRepositoryFake) FindOrCreatePendingPaymentOrder(ctx context.Context, subscriptionID, productID uint, amountCents int64, currency string, now time.Time) (*database.Order, error) {
 	if m.FindOrCreatePendingPaymentOrderFunc != nil {
 		return m.FindOrCreatePendingPaymentOrderFunc(ctx, subscriptionID, productID, amountCents, currency, now)
 	}
+
 	return nil, gorm.ErrRecordNotFound
 }
 func (m *OrderRepositoryFake) MarkPaymentCreationUncertain(ctx context.Context, orderID uint, uncertain bool) (bool, error) {
 	if m.MarkPaymentCreationUncertainFunc != nil {
 		return m.MarkPaymentCreationUncertainFunc(ctx, orderID, uncertain)
 	}
+
 	return true, nil
 }
 func (m *OrderRepositoryFake) SavePaymentDetails(ctx context.Context, orderID uint, providerPaymentID uuid.UUID, paymentURL string, paymentExpiresAt time.Time) error {
 	if m.SavePaymentDetailsFunc != nil {
 		return m.SavePaymentDetailsFunc(ctx, orderID, providerPaymentID, paymentURL, paymentExpiresAt)
 	}
+
 	return nil
 }
 
@@ -595,29 +665,34 @@ func (m *OrderRepositoryFake) GetOrderByID(ctx context.Context, id uint) (*datab
 	if m.GetOrderByIDFunc != nil {
 		return m.GetOrderByIDFunc(ctx, id)
 	}
+
 	return nil, gorm.ErrRecordNotFound
 }
 func (m *OrderRepositoryFake) GetOrdersBySubscriptionID(ctx context.Context, subscriptionID uint) ([]database.Order, error) {
 	if m.GetOrdersBySubscriptionIDFunc != nil {
 		return m.GetOrdersBySubscriptionIDFunc(ctx, subscriptionID)
 	}
+
 	return nil, nil
 }
 func (m *OrderRepositoryFake) UpdateOrderStatus(ctx context.Context, id uint, status database.OrderStatus) error {
 	if m.UpdateOrderStatusFunc != nil {
 		return m.UpdateOrderStatusFunc(ctx, id, status)
 	}
+
 	return nil
 }
 func (m *OrderRepositoryFake) UpdateOrderPaidStatus(ctx context.Context, id uint) error {
 	if m.UpdateOrderPaidStatusFunc != nil {
 		return m.UpdateOrderPaidStatusFunc(ctx, id)
 	}
+
 	return nil
 }
 func (m *OrderRepositoryFake) UpdateOrderActivatedAt(ctx context.Context, id uint, activatedAt, expiresAt time.Time) error {
 	if m.UpdateOrderActivatedAtFunc != nil {
 		return m.UpdateOrderActivatedAtFunc(ctx, id, activatedAt, expiresAt)
 	}
+
 	return nil
 }

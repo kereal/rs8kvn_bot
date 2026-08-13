@@ -35,6 +35,7 @@ func isValidServer(line string) bool {
 			return true
 		}
 	}
+
 	return false
 }
 
@@ -82,24 +83,32 @@ type serverConfig struct {
 // field aliases (address←host, port←portNumber, uuid←userId, remark←tag).
 func toServerConfig(raw json.RawMessage) (*serverConfig, error) {
 	var cfg serverConfig
-	if err := json.Unmarshal(raw, &cfg); err != nil {
+
+	err := json.Unmarshal(raw, &cfg)
+	if err != nil {
 		logger.Error("Failed to parse server config JSON",
 			zap.Error(err),
 			zap.String("raw_preview", utils.TruncateString(string(raw), 200)))
+
 		return nil, err
 	}
+
 	if cfg.Address == "" {
 		cfg.Address = cfg.Host
 	}
+
 	if cfg.Port == 0 {
 		cfg.Port = cfg.PortNumber
 	}
+
 	if cfg.UserID != "" && cfg.UUID == "" {
 		cfg.UUID = cfg.UserID
 	}
+
 	if cfg.Tag != "" && cfg.Remark == "" {
 		cfg.Remark = cfg.Tag
 	}
+
 	return &cfg, nil
 }
 
@@ -111,17 +120,23 @@ func toServerConfig(raw json.RawMessage) (*serverConfig, error) {
 // objects are wrapped in a one-element slice.
 func ExtractJSONConfigs(body []byte) ([]json.RawMessage, error) {
 	var items []json.RawMessage
-	if err := json.Unmarshal(body, &items); err != nil {
+
+	err := json.Unmarshal(body, &items)
+	if err != nil {
 		if len(body) > 0 && body[0] == '{' {
 			items = make([]json.RawMessage, 0, 1)
 			items = append(items, body)
+
 			return items, nil
 		}
+
 		logger.Error("Failed to extract JSON configs",
 			zap.Error(err),
 			zap.String("body_preview", utils.TruncateString(string(body), 200)))
+
 		return nil, fmt.Errorf("extract JSON configs: %w", err)
 	}
+
 	return items, nil
 }
 
@@ -133,6 +148,7 @@ func ConvertSingleJSONToLink(raw json.RawMessage) (string, error) {
 		logger.Error("Failed to convert JSON config to share link",
 			zap.Error(err),
 			zap.String("raw_preview", utils.TruncateString(string(raw), 200)))
+
 		return "", err
 	}
 
@@ -157,14 +173,18 @@ func ConvertSingleJSONToLink(raw json.RawMessage) (string, error) {
 // buildVLESSServerLink builds a vless:// share URI from a parsed server config.
 func buildVLESSServerLink(cfg *serverConfig) (string, error) {
 	params := url.Values{}
+
 	encryption := cfg.Encryption
 	if encryption == "" {
 		encryption = "none"
 	}
+
 	params.Set("encryption", encryption)
+
 	if cfg.Flow != "" {
 		params.Set("flow", cfg.Flow)
 	}
+
 	switch {
 	case cfg.Security != "":
 		params.Set("security", cfg.Security)
@@ -173,18 +193,23 @@ func buildVLESSServerLink(cfg *serverConfig) (string, error) {
 	default:
 		params.Set("security", "none")
 	}
+
 	if cfg.AllowInsecure {
 		params.Set("allowInsecure", "1")
 	}
+
 	if cfg.SNI != "" {
 		params.Set("sni", cfg.SNI)
 	}
+
 	if cfg.Fingerprint != "" {
 		params.Set("fp", cfg.Fingerprint)
 	}
+
 	if cfg.PublicKey != "" {
 		params.Set("pbk", cfg.PublicKey)
 	}
+
 	if cfg.ShortID != "" {
 		params.Set("sid", cfg.ShortID)
 	}
@@ -194,30 +219,38 @@ func buildVLESSServerLink(cfg *serverConfig) (string, error) {
 	if cfg.Security == "reality" {
 		params.Set("spx", "/")
 	}
+
 	if cfg.Network != "" {
 		netType := cfg.Network
 		// Legacy "splithttp" was renamed to "xhttp" in v2rayN 7.x / Xray-core.
 		if netType == "splithttp" {
 			netType = "xhttp"
 		}
+
 		params.Set("type", netType)
+
 		if netType == "grpc" && cfg.Path != "" {
 			// gRPC transport uses serviceName, not path, in share links.
 			params.Set("serviceName", cfg.Path)
 		}
+
 		if netType == "xhttp" && cfg.Mode != "" {
 			params.Set("mode", cfg.Mode)
 		}
 	}
+
 	if cfg.Host != "" {
 		params.Set("host", cfg.Host)
 	}
+
 	if cfg.Path != "" && cfg.Network != "grpc" {
 		params.Set("path", cfg.Path)
 	}
+
 	if cfg.Alpn != "" {
 		params.Set("alpn", cfg.Alpn)
 	}
+
 	if cfg.HeaderType != "" {
 		params.Set("headerType", cfg.HeaderType)
 	}
@@ -271,9 +304,11 @@ func buildVMessServerLink(cfg *serverConfig) (string, error) {
 	if obj.Scy == "" {
 		obj.Scy = "auto"
 	}
+
 	if obj.Aid == "" {
 		obj.Aid = "0"
 	}
+
 	if obj.Net == "" {
 		obj.Net = "tcp"
 	}
@@ -282,7 +317,9 @@ func buildVMessServerLink(cfg *serverConfig) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("marshal vmess object: %w", err)
 	}
+
 	encoded := base64.StdEncoding.EncodeToString(data)
+
 	return "vmess://" + encoded, nil
 }
 
@@ -294,32 +331,41 @@ func buildTrojanServerLink(cfg *serverConfig) (string, error) {
 	} else if cfg.TLS != "" {
 		params.Set("security", cfg.TLS)
 	}
+
 	if cfg.SNI != "" {
 		params.Set("sni", cfg.SNI)
 	}
+
 	if cfg.Network != "" {
 		netType := cfg.Network
 		// Legacy "splithttp" was renamed to "xhttp" in v2rayN 7.x / Xray-core.
 		if netType == "splithttp" {
 			netType = "xhttp"
 		}
+
 		params.Set("type", netType)
+
 		if netType == "grpc" && cfg.Path != "" {
 			params.Set("serviceName", cfg.Path)
 		}
 	}
+
 	if cfg.Host != "" {
 		params.Set("host", cfg.Host)
 	}
+
 	if cfg.Path != "" && cfg.Network != "grpc" {
 		params.Set("path", cfg.Path)
 	}
+
 	if cfg.Fingerprint != "" {
 		params.Set("fp", cfg.Fingerprint)
 	}
+
 	if cfg.Alpn != "" {
 		params.Set("alpn", cfg.Alpn)
 	}
+
 	if cfg.AllowInsecure {
 		params.Set("allowInsecure", "1")
 	}
@@ -338,7 +384,9 @@ func buildTrojanServerLink(cfg *serverConfig) (string, error) {
 	if params.Encode() != "" {
 		base += "?" + params.Encode()
 	}
+
 	base += "#" + url.QueryEscape(remark)
+
 	return base, nil
 }
 
@@ -356,9 +404,11 @@ func buildShadowsocksServerLink(cfg *serverConfig) (string, error) {
 	if cfg.PluginOpts != "" {
 		link += "?plugin=" + url.QueryEscape(cfg.PluginOpts)
 	}
+
 	if remark != "" {
 		link += "#" + url.QueryEscape(remark)
 	}
+
 	return link, nil
 }
 
@@ -368,21 +418,27 @@ func buildHysteriaServerLink(cfg *serverConfig, protocol string) (string, error)
 	if cfg.Host != "" {
 		params.Set("sni", cfg.Host)
 	}
+
 	if cfg.SNI != "" {
 		params.Set("sni", cfg.SNI)
 	}
+
 	if cfg.AllowInsecure {
 		params.Set("insecure", "1")
 	}
+
 	if cfg.Fingerprint != "" {
 		params.Set("fp", cfg.Fingerprint)
 	}
+
 	if cfg.Obfs != "" {
 		params.Set("obfs", cfg.Obfs)
 	}
+
 	if cfg.ObfsPassword != "" {
 		params.Set("obfs-password", cfg.ObfsPassword)
 	}
+
 	if cfg.Alpn != "" {
 		params.Set("alpn", cfg.Alpn)
 	}
@@ -398,11 +454,14 @@ func buildHysteriaServerLink(cfg *serverConfig, protocol string) (string, error)
 	}
 
 	addr := net.JoinHostPort(cfg.Address, strconv.Itoa(cfg.Port))
+
 	link := protocol + "://" + url.User(password).String() + "@" + addr
 	if params.Encode() != "" {
 		link += "?" + params.Encode()
 	}
+
 	link += "#" + url.QueryEscape(remark)
+
 	return link, nil
 }
 
@@ -415,13 +474,16 @@ func buildTUICServerLink(cfg *serverConfig) (string, error) {
 	} else if cfg.SNI != "" {
 		params.Set("sni", cfg.SNI)
 	}
+
 	if cfg.Alpn != "" {
 		params.Set("alpn", cfg.Alpn)
 	}
+
 	if cfg.AllowInsecure {
 		params.Set("allow_insecure", "1")
 		params.Set("insecure", "1")
 	}
+
 	if cfg.Fingerprint != "" {
 		params.Set("fp", cfg.Fingerprint)
 	}
@@ -442,6 +504,8 @@ func buildTUICServerLink(cfg *serverConfig) (string, error) {
 	if params.Encode() != "" {
 		base += "?" + params.Encode()
 	}
+
 	base += "#" + url.QueryEscape(remark)
+
 	return base, nil
 }

@@ -45,6 +45,7 @@ func (w *SubscriptionExpireWorker) Run(ctx context.Context) {
 
 func (w *SubscriptionExpireWorker) process(ctx context.Context) {
 	metrics.SubscriptionExpireTotal.Inc()
+
 	start := time.Now()
 	defer func() {
 		metrics.SubscriptionExpireDuration.Observe(time.Since(start).Seconds())
@@ -61,14 +62,18 @@ func (w *SubscriptionExpireWorker) process(ctx context.Context) {
 	}
 
 	processed := 0
+
 	for _, sub := range subs {
-		if err := w.subSvc.ExpireSubscription(ctx, sub.ID); err != nil {
+		err := w.subSvc.ExpireSubscription(ctx, sub.ID)
+		if err != nil {
 			logger.Warn("Expire subscription failed",
 				zap.Uint("subscription_id", sub.ID),
 				zap.Int64("telegram_id", sub.TelegramID),
 				zap.Error(err))
+
 			continue
 		}
+
 		processed++
 	}
 

@@ -215,6 +215,7 @@ func TestSubscriptionReminderWorker_process_SendsReminderForMatchingWindow(t *te
 			if from.Sub(now) >= 71*time.Hour && from.Sub(now) <= 73*time.Hour {
 				return []database.Subscription{sub}, nil
 			}
+
 			return nil, nil
 		},
 	}
@@ -225,6 +226,7 @@ func TestSubscriptionReminderWorker_process_SendsReminderForMatchingWindow(t *te
 		daysLeft  int
 		hoursLeft int
 	}
+
 	svc := &fakeSubSvc{
 		bot: testutil.NewBotAPI(),
 		sendFn: func(ctx context.Context, s *database.Subscription, bit int, daysLeft int, hoursLeft int) error {
@@ -234,6 +236,7 @@ func TestSubscriptionReminderWorker_process_SendsReminderForMatchingWindow(t *te
 				daysLeft  int
 				hoursLeft int
 			}{s, bit, daysLeft, hoursLeft})
+
 			return nil
 		},
 	}
@@ -262,6 +265,7 @@ func TestSubscriptionReminderWorker_process_SkipsSendError(t *testing.T) {
 					ExpiresAt:  testutil.PtrTime(now.Add(24*time.Hour - 5*time.Minute)),
 				}}, nil
 			}
+
 			return nil, nil
 		},
 	}

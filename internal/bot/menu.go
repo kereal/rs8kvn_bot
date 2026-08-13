@@ -20,12 +20,15 @@ func (h *Handler) handleBackToStart(ctx context.Context, chatID int64, username 
 
 	// Check if user has an active subscription
 	sub, err := h.getSubscriptionWithCache(ctx, chatID)
+
 	var hasSubscription bool
+
 	if err != nil {
 		if errors.Is(err, database.ErrSubscriptionNotFound) || errors.Is(err, gorm.ErrRecordNotFound) {
 			hasSubscription = false
 		} else {
 			logger.Error("Failed to get subscription", zap.Error(err))
+
 			hasSubscription = false
 		}
 	} else {
@@ -37,6 +40,7 @@ func (h *Handler) handleBackToStart(ctx context.Context, chatID int64, username 
 	editMsg.DisableWebPagePreview = true
 	editMsg.ReplyMarkup = &keyboard
 	h.safeSend(editMsg)
+
 	return nil
 }
 
@@ -49,6 +53,7 @@ func (h *Handler) handleMenuDonate(_ context.Context, chatID int64, username str
 	keyboard := h.getBackKeyboard()
 	editMsg.ReplyMarkup = &keyboard
 	h.safeSend(editMsg)
+
 	return nil
 }
 
@@ -64,22 +69,28 @@ func (h *Handler) handleMenuHelp(ctx context.Context, chatID int64, username str
 			keyboard := h.getBackKeyboard()
 			editMsg.ReplyMarkup = &keyboard
 			h.safeSend(editMsg)
+
 			return nil
 		}
+
 		logger.Error("Failed to get subscription", zap.Error(err))
+
 		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "❌ Временная ошибка. Попробуйте позже.")
 		editMsg.DisableWebPagePreview = true
 		keyboard := h.getBackKeyboard()
 		editMsg.ReplyMarkup = &keyboard
 		h.safeSend(editMsg)
+
 		return nil
 	}
+
 	if sub == nil {
 		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "❌ У вас нет активной подписки.\n\nНажмите «Получить подписку» для создания.")
 		editMsg.DisableWebPagePreview = true
 		keyboard := h.getBackKeyboard()
 		editMsg.ReplyMarkup = &keyboard
 		h.safeSend(editMsg)
+
 		return nil
 	}
 
@@ -87,6 +98,7 @@ func (h *Handler) handleMenuHelp(ctx context.Context, chatID int64, username str
 	if h.subscriptionService != nil {
 		trafficLimit = h.subscriptionService.PlanTrafficLimitGB(ctx, sub.TelegramID)
 	}
+
 	text := h.getHelpText(trafficLimit, h.cfg.SubURL(sub.SubscriptionID))
 	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, text)
 	editMsg.ParseMode = "Markdown"
@@ -94,6 +106,7 @@ func (h *Handler) handleMenuHelp(ctx context.Context, chatID int64, username str
 	keyboard := h.getBackKeyboard()
 	editMsg.ReplyMarkup = &keyboard
 	h.safeSend(editMsg)
+
 	return nil
 }
 
@@ -104,10 +117,14 @@ func (h *Handler) handleMenuDocuments(_ context.Context, chatID int64, username 
 	editMsg.ParseMode = "Markdown"
 	editMsg.DisableWebPagePreview = true
 	keyboard := h.keyboards.Documents()
+
 	editMsg.ReplyMarkup = &keyboard
-	if _, err := h.bot.Send(editMsg); err != nil {
+
+	_, err := h.bot.Send(editMsg)
+	if err != nil {
 		return fmt.Errorf("send documents menu: %w", err)
 	}
+
 	return nil
 }
 
@@ -119,10 +136,14 @@ func (h *Handler) handleBackToDocuments(_ context.Context, chatID int64, _ strin
 	editMsg.ParseMode = "Markdown"
 	editMsg.DisableWebPagePreview = true
 	keyboard := h.keyboards.Documents()
+
 	editMsg.ReplyMarkup = &keyboard
-	if _, err := h.bot.Request(editMsg); err != nil {
+
+	_, err := h.bot.Request(editMsg)
+	if err != nil {
 		return fmt.Errorf("return to documents menu: %w", err)
 	}
+
 	return nil
 }
 
@@ -131,20 +152,25 @@ func (h *Handler) sendLegalText(ctx context.Context, chatID int64, messageID int
 	if len(chunks) == 0 {
 		return nil
 	}
+
 	for i, chunk := range chunks {
 		var keyboard *tgbotapi.InlineKeyboardMarkup
+
 		if i == len(chunks)-1 {
 			key := h.keyboards.BackToDocuments()
 			keyboard = &key
 		}
+
 		msg := tgbotapi.NewMessage(chatID, chunk)
 		msg.ParseMode = "Markdown"
 		msg.DisableWebPagePreview = true
+
 		msg.ReplyMarkup = keyboard
 		if !h.safeSend(msg) {
 			return fmt.Errorf("legal chunk send failed")
 		}
 	}
+
 	return nil
 }
 
