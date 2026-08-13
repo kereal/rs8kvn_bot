@@ -128,9 +128,9 @@ services:
     security_opt:
       - no-new-privileges:true
 
-    # Health check - verify the process is running
+    # Health check - verify application is ready
     healthcheck:
-      test: ["CMD", "pgrep", "-f", "rs8kvn_bot"]
+      test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
       interval: 30s
       timeout: 10s
       retries: 3
