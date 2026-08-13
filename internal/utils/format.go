@@ -2,6 +2,7 @@ package utils
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -11,11 +12,13 @@ func IsRealUsername(username string) bool {
 	if username == "" {
 		return false
 	}
+
 	for _, r := range username {
 		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_') { //nolint:staticcheck // QF1001 suppressed: negation of combined range check is clearer than expanded De Morgan form
 			return false
 		}
 	}
+
 	return true
 }
 
@@ -26,12 +29,36 @@ func IsNumericUsername(username string) bool {
 	if username == "" {
 		return false
 	}
+
 	for _, r := range username {
 		if r < '0' || r > '9' {
 			return false
 		}
 	}
+
 	return true
+}
+
+// FormatUserLink returns a Markdown-formatted clickable user link for Telegram.
+// For alphabetic usernames, links to https://t.me/username.
+// For purely numeric usernames (e.g. "11"), uses tg://user?id=ID deep link,
+// because Telegram does not resolve t.me/123 as a profile.
+// For empty/unsupported usernames, falls back to tg://user?id=TelegramID deep link
+// with "unknown" display text.
+func FormatUserLink(username string, telegramID int64) string {
+	if IsNumericUsername(username) && telegramID != 0 {
+		return fmt.Sprintf("[%s](tg://user?id=%d)", username, telegramID)
+	}
+
+	if IsRealUsername(username) {
+		return fmt.Sprintf("[@%s](https://t.me/%s)", username, username)
+	}
+
+	if telegramID != 0 {
+		return fmt.Sprintf("[unknown](tg://user?id=%d)", telegramID)
+	}
+
+	return "[unknown](#)"
 }
 
 // GenerateProgressBar creates a 10-block emoji progress bar representing
@@ -47,21 +74,19 @@ func GenerateProgressBar(usedGB, limitGB float64) string {
 	}
 
 	// 10 blocks total
-	filled := int(percentage / 10)
-	if filled > 10 {
-		filled = 10
-	}
+	filled := min(int(percentage/10), 10)
 
-	bar := ""
-	for i := 0; i < 10; i++ {
+	var bar strings.Builder
+
+	for i := range 10 {
 		if i < filled {
-			bar += "🟩"
+			bar.WriteString("🟩")
 		} else {
-			bar += "⬜"
+			bar.WriteString("⬜")
 		}
 	}
 
-	return bar
+	return bar.String()
 }
 
 // DaysUntilReset calculates the number of days until the next traffic reset.
@@ -78,11 +103,7 @@ func DaysUntilReset(now, expiryTime time.Time) int {
 	}
 
 	duration := expiryTime.Sub(now)
-	days := int(duration.Hours() / 24)
-
-	if days < 0 {
-		days = 0
-	}
+	days := max(int(duration.Hours()/24), 0)
 
 	return days
 }
@@ -106,15 +127,29 @@ func FormatDateRu(t time.Time) string {
 	return fmt.Sprintf("%d %s %d", day, month, year)
 }
 
+// FormatPriceCents renders an amount in cents as a ruble value. Whole amounts
+// drop the fractional part ("127₽"); fractional amounts keep two digits
+// ("127.37₽").
+func FormatPriceCents(amountCents int64) string {
+	value := fmt.Sprintf("%d", amountCents/100)
+	if kopeks := amountCents % 100; kopeks != 0 {
+		value += fmt.Sprintf(".%02d", kopeks)
+	}
+
+	return value + "₽"
+}
+
 // TruncateString truncates s to at most maxLen runes, appending "..." if truncation occurs.
 // Rune-safe: correctly handles multi-byte UTF-8 (Cyrillic, CJK, emoji) without splitting characters.
 func TruncateString(s string, maxLen int) string {
 	if maxLen <= 0 {
 		return ""
 	}
+
 	r := []rune(s)
 	if len(r) <= maxLen {
 		return s
 	}
+
 	return string(r[:maxLen]) + "..."
 }

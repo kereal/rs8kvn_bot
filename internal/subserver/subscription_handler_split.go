@@ -25,6 +25,7 @@ import (
 // should proceed to a cache-miss path.
 func serveFromCache(ctx context.Context, db interfaces.SubscriptionRepository, subSvc *Service, subID string) (*SubscriptionResult, bool, error) {
 	cacheKey := subID
+
 	cachedBody, cachedHeaders, ok := subSvc.GetCache(cacheKey)
 	if !ok {
 		return nil, false, nil
@@ -36,6 +37,7 @@ func serveFromCache(ctx context.Context, db interfaces.SubscriptionRepository, s
 		if errors.Is(err, database.ErrSubscriptionNotFound) {
 			subSvc.InvalidateCache(cacheKey)
 			metrics.SubserverCacheInvalidationsTotal.WithLabelValues("not_found").Inc()
+
 			return nil, true, ErrSubscriptionNotFound
 		}
 		// Transient DB error: serve the stale entry best-effort instead of
@@ -44,21 +46,25 @@ func serveFromCache(ctx context.Context, db interfaces.SubscriptionRepository, s
 			zap.String("sub_id", subID),
 			zap.Error(err))
 		// best-effort: обновляем last_request, ошибки не блокируют выдачу.
-		if err := db.UpdateLastRequest(ctx, subID); err != nil {
+		err := db.UpdateLastRequest(ctx, subID)
+		if err != nil {
 			logger.Warn("Failed to update last_request",
 				zap.String("sub_id", subID),
 				zap.Error(err))
 		}
+
 		return &SubscriptionResult{Body: cachedBody, Headers: cachedHeaders}, true, nil
 	}
 
 	// If the subscription is no longer active or expired, invalidate the cache.
 	if status != "active" || (!expiryTime.IsZero() && time.Now().After(expiryTime)) {
 		subSvc.InvalidateCache(cacheKey)
+
 		invalidReason := "revoked"
 		if status == "active" {
 			invalidReason = "expired"
 		}
+
 		metrics.SubserverCacheInvalidationsTotal.WithLabelValues(invalidReason).Inc()
 		logger.Warn("Cache invalidated: subscription no longer active",
 			zap.String("sub_id", subID),
@@ -72,11 +78,13 @@ func serveFromCache(ctx context.Context, db interfaces.SubscriptionRepository, s
 
 	logger.Debug("Cache hit", zap.String("sub_id", subID))
 	// best-effort: обновляем last_request, ошибки не блокируют выдачу.
-	if err := db.UpdateLastRequest(ctx, subID); err != nil {
+	err = db.UpdateLastRequest(ctx, subID)
+	if err != nil {
 		logger.Warn("Failed to update last_request",
 			zap.String("sub_id", subID),
 			zap.Error(err))
 	}
+
 	return &SubscriptionResult{
 		Body:    cachedBody,
 		Headers: cachedHeaders,
@@ -92,11 +100,14 @@ func loadSubscription(ctx context.Context, db interfaces.SubscriptionRepository,
 		if errors.Is(err, database.ErrSubscriptionNotFound) {
 			logger.Debug("Subscription not found in database",
 				zap.String("sub_id", subID))
+
 			return nil, ErrSubscriptionNotFound
 		}
+
 		logger.Error("Failed to get subscription with plan and sources",
 			zap.String("sub_id", subID),
 			zap.Error(err))
+
 		return nil, fmt.Errorf("database error: %w", err)
 	}
 
@@ -113,7 +124,8 @@ func loadSubscription(ctx context.Context, db interfaces.SubscriptionRepository,
 	UpdateIPs(ctx, db, subFull, clientIP)
 
 	// best-effort: обновляем last_request, ошибки не блокируют выдачу.
-	if err := db.UpdateLastRequest(ctx, subID); err != nil {
+	err = db.UpdateLastRequest(ctx, subID)
+	if err != nil {
 		logger.Warn("Failed to update last_request",
 			zap.String("sub_id", subID),
 			zap.Error(err))
@@ -158,6 +170,7 @@ func fetchAndAggregateSources(ctx context.Context, subID string, nodes []databas
 
 	results := make([]sourceResult, len(nodes))
 	sem := make(chan struct{}, maxSourceConcurrency)
+
 	var wg sync.WaitGroup
 
 	for i := range nodes {
@@ -167,28 +180,38 @@ func fetchAndAggregateSources(ctx context.Context, subID string, nodes []databas
 				zap.String("sub_id", subID),
 				zap.String("source", src.Name),
 			)
+
 			continue
 		}
+
 		if ctx.Err() != nil {
 			break
 		}
+
 		wg.Add(1)
+
 		sem <- struct{}{}
+
 		go func(idx int, src database.Node) {
 			defer wg.Done()
 			defer func() { <-sem }()
+
 			results[idx] = fetchSource(ctx, subID, src)
 		}(i, src)
 	}
+
 	wg.Wait()
 
 	successCount := 0
 	totalCount := 0
+
 	for i := range nodes {
 		if nodes[i].SubscriptionURL == "" {
 			continue
 		}
+
 		totalCount++
+
 		if results[i].body != nil {
 			successCount++
 		}
@@ -203,6 +226,7 @@ func fetchAndAggregateSources(ctx context.Context, subID string, nodes []databas
 		if agg.firstSourceHeaders == nil {
 			agg.firstSourceHeaders = res.headers
 		}
+
 		updateMinExpire(&agg, res.headers)
 
 		// Aggregate usage counters across all sources.
@@ -224,6 +248,7 @@ func fetchSource(ctx context.Context, subID string, src database.Node) sourceRes
 	fetchStart := time.Now()
 	srcResp, err := FetchFromNode(ctx, sourceURL)
 	fetchDuration := time.Since(fetchStart).Seconds()
+
 	if err != nil {
 		metrics.SubserverSourceFetchTotal.WithLabelValues("error", "unknown").Inc()
 		metrics.SubserverSourceFetchDuration.WithLabelValues("error").Observe(fetchDuration)
@@ -232,10 +257,12 @@ func fetchSource(ctx context.Context, subID string, src database.Node) sourceRes
 			zap.String("source", src.Name),
 			zap.String("node_url", sourceURL),
 			zap.Error(err))
+
 		return sourceResult{}
 	}
 
 	body := srcResp.Body
+
 	srcHeaders := srcResp.Headers
 	if srcHeaders == nil {
 		srcHeaders = make(map[string]string)
@@ -266,10 +293,12 @@ func buildSourceURL(src database.Node, subID string) string {
 	if src.Type == database.NodeTypeFetch {
 		return src.SubscriptionURL
 	}
+
 	srcSubURL := src.SubscriptionURL
 	if !strings.HasSuffix(srcSubURL, "/") {
 		srcSubURL += "/"
 	}
+
 	return srcSubURL + subID
 }
 
@@ -284,24 +313,31 @@ func aggregateFormat(agg *aggregatedSources, format Format, body []byte, src dat
 				zap.String("sub_id", subID),
 				zap.String("source", src.Name),
 				zap.Error(parseErr))
+
 			agg.allJSON = false
+
 			return
 		}
+
 		agg.jsonConfigs = append(agg.jsonConfigs, configs...)
 	case FormatClash:
 		// Clash is not a pure-JSON source, so force the base64/link output path.
 		agg.allJSON = false
+
 		configs, parseErr := ExtractClashConfigs(body)
 		if parseErr != nil {
 			logger.Error("Failed to parse Clash configs from node",
 				zap.String("sub_id", subID),
 				zap.String("source", src.Name),
 				zap.Error(parseErr))
+
 			return
 		}
+
 		agg.jsonConfigs = append(agg.jsonConfigs, configs...)
 	case FormatBase64:
 		agg.allJSON = false
+
 		decoded, decErr := base64.StdEncoding.DecodeString(strings.TrimSpace(string(body)))
 		if decErr != nil {
 			agg.items = append(agg.items, strings.TrimSpace(string(body)))
@@ -310,7 +346,8 @@ func aggregateFormat(agg *aggregatedSources, format Format, body []byte, src dat
 		}
 	case FormatPlain:
 		agg.allJSON = false
-		for _, line := range strings.Split(string(body), "\n") {
+
+		for line := range strings.SplitSeq(string(body), "\n") {
 			line = strings.TrimSpace(line)
 			if line != "" {
 				agg.items = append(agg.items, line)
@@ -327,10 +364,12 @@ func updateMinExpire(agg *aggregatedSources, srcHeaders map[string]string) {
 	if !ok {
 		return
 	}
+
 	exp, ok := parseExpireToInt(userInfo)
 	if !ok {
 		return
 	}
+
 	if agg.firstExpireVal == 0 || exp < agg.firstExpireVal {
 		agg.firstExpireVal = exp
 		agg.firstExpire = strconv.FormatInt(exp, 10)
@@ -346,13 +385,16 @@ func parseExpireToInt(userInfo string) (int64, bool) {
 	if raw == "" {
 		return 0, false
 	}
+
 	exp, err := strconv.ParseInt(raw, 10, 64)
 	if err != nil {
 		return 0, false
 	}
+
 	if exp > 1e11 {
 		exp /= 1000
 	}
+
 	return exp, true
 }
 
@@ -369,8 +411,10 @@ func buildResponse(subSvc *Service, cacheKey string, agg aggregatedSources, traf
 			if convErr != nil {
 				logger.Error("Failed to convert JSON config to share link",
 					zap.Error(convErr))
+
 				continue
 			}
+
 			agg.items = append(agg.items, link)
 		}
 	}
@@ -382,10 +426,13 @@ func buildResponse(subSvc *Service, cacheKey string, agg aggregatedSources, traf
 		if marshalErr != nil {
 			logger.Error("Failed to marshal JSON response",
 				zap.Error(marshalErr))
+
 			return nil, fmt.Errorf("failed to marshal response: %w", marshalErr)
 		}
+
 		cacheHeaders := ResponseHeaders(agg.firstSourceHeaders, "application/json; charset=utf-8", userInfo)
 		subSvc.SetCache(cacheKey, responseBody, cacheHeaders)
+
 		return &SubscriptionResult{
 			Body:    responseBody,
 			Headers: cacheHeaders,

@@ -11,27 +11,33 @@ import (
 // GetBySubscriptionID returns subscription node records for the given subscription.
 func (s *Service) GetBySubscriptionID(ctx context.Context, subscriptionID uint) ([]SubscriptionNode, error) {
 	var rows []SubscriptionNode
+
 	result := s.db.WithContext(ctx).Where("subscription_id = ?", subscriptionID).Find(&rows)
 	if result.Error != nil {
 		return nil, fmt.Errorf("failed to get subscription nodes: %w", result.Error)
 	}
+
 	return rows, nil
 }
 
 // GetByNodeID returns subscription node records for the given node.
 func (s *Service) GetByNodeID(ctx context.Context, nodeID uint) ([]SubscriptionNode, error) {
 	var rows []SubscriptionNode
+
 	result := s.db.WithContext(ctx).Where("node_id = ?", nodeID).Find(&rows)
 	if result.Error != nil {
 		return nil, fmt.Errorf("failed to get subscription nodes by node id: %w", result.Error)
 	}
+
 	return rows, nil
 }
 
 // GetPendingSync returns subscription nodes awaiting synchronization, limited by retry window.
 func (s *Service) GetPendingSync(ctx context.Context) ([]SubscriptionNode, error) {
 	var rows []SubscriptionNode
+
 	nowUTC := time.Now().UTC().Truncate(time.Minute)
+
 	result := s.db.WithContext(ctx).
 		Where("status IN ?", []SyncStatus{SyncStatusPendingAdd, SyncStatusPendingRemove, SyncStatusPendingUpdate}).
 		Where("retry_at IS NULL OR retry_at <= ?", nowUTC).
@@ -39,13 +45,16 @@ func (s *Service) GetPendingSync(ctx context.Context) ([]SubscriptionNode, error
 	if result.Error != nil {
 		return nil, fmt.Errorf("failed to get pending sync nodes: %w", result.Error)
 	}
+
 	return rows, nil
 }
 
 // GetPendingBySubscriptionID returns pending subscription nodes for the given subscription.
 func (s *Service) GetPendingBySubscriptionID(ctx context.Context, subscriptionID uint) ([]SubscriptionNode, error) {
 	var rows []SubscriptionNode
+
 	nowUTC := time.Now().UTC().Truncate(time.Minute)
+
 	result := s.db.WithContext(ctx).
 		Where("subscription_id = ? AND status IN ? AND (retry_at IS NULL OR retry_at <= ?)",
 			subscriptionID, []SyncStatus{SyncStatusPendingAdd, SyncStatusPendingRemove, SyncStatusPendingUpdate}, nowUTC).
@@ -53,13 +62,16 @@ func (s *Service) GetPendingBySubscriptionID(ctx context.Context, subscriptionID
 	if result.Error != nil {
 		return nil, fmt.Errorf("failed to get pending nodes by subscription id: %w", result.Error)
 	}
+
 	return rows, nil
 }
 
 // GetPendingByNodeID returns pending subscription nodes for the given node.
 func (s *Service) GetPendingByNodeID(ctx context.Context, nodeID uint) ([]SubscriptionNode, error) {
 	var rows []SubscriptionNode
+
 	nowUTC := time.Now().UTC().Truncate(time.Minute)
+
 	result := s.db.WithContext(ctx).
 		Where("node_id = ? AND status IN ? AND (retry_at IS NULL OR retry_at <= ?)",
 			nodeID, []SyncStatus{SyncStatusPendingAdd, SyncStatusPendingRemove, SyncStatusPendingUpdate}, nowUTC).
@@ -67,14 +79,17 @@ func (s *Service) GetPendingByNodeID(ctx context.Context, nodeID uint) ([]Subscr
 	if result.Error != nil {
 		return nil, fmt.Errorf("failed to get pending nodes by node id: %w", result.Error)
 	}
+
 	return rows, nil
 }
 
 // CreateSubscriptionNode inserts a new subscription node record.
 func (s *Service) CreateSubscriptionNode(ctx context.Context, sn *SubscriptionNode) error {
-	if err := s.db.WithContext(ctx).Create(sn).Error; err != nil {
+	err := s.db.WithContext(ctx).Create(sn).Error
+	if err != nil {
 		return fmt.Errorf("failed to create subscription node: %w", err)
 	}
+
 	return nil
 }
 
@@ -82,7 +97,7 @@ func (s *Service) CreateSubscriptionNode(ctx context.Context, sn *SubscriptionNo
 func (s *Service) UpdateSubscriptionNodeStatus(ctx context.Context, subID, nodeID uint, status SyncStatus) error {
 	result := s.db.WithContext(ctx).Model(&SubscriptionNode{}).
 		Where("subscription_id = ? AND node_id = ?", subID, nodeID).
-		Updates(map[string]interface{}{
+		Updates(map[string]any{
 			"status":      status,
 			"retry_count": 0,
 			"retry_at":    nil,
@@ -91,9 +106,11 @@ func (s *Service) UpdateSubscriptionNodeStatus(ctx context.Context, subID, nodeI
 	if result.Error != nil {
 		return fmt.Errorf("failed to update subscription node status: %w", result.Error)
 	}
+
 	if result.RowsAffected == 0 {
 		return fmt.Errorf("subscription node not found for sub_id=%d node_id=%d: %w", subID, nodeID, ErrSubscriptionNodeNotFound)
 	}
+
 	return nil
 }
 
@@ -109,6 +126,7 @@ func (s *Service) UpsertSubscriptionNode(ctx context.Context, sn *SubscriptionNo
 	if result.Error != nil {
 		return fmt.Errorf("failed to upsert subscription node: %w", result.Error)
 	}
+
 	return nil
 }
 
@@ -122,7 +140,7 @@ func (s *Service) MarkActiveNodesPendingUpdate(ctx context.Context, subID uint, 
 
 	result := s.db.WithContext(ctx).Model(&SubscriptionNode{}).
 		Where("subscription_id = ? AND node_id IN (?) AND status = ?", subID, targetNodeIDs, SyncStatusActive).
-		Updates(map[string]interface{}{
+		Updates(map[string]any{
 			"status":      SyncStatusPendingUpdate,
 			"retry_count": 0,
 			"retry_at":    nil,
@@ -131,6 +149,7 @@ func (s *Service) MarkActiveNodesPendingUpdate(ctx context.Context, subID uint, 
 	if result.Error != nil {
 		return fmt.Errorf("mark active nodes pending update: %w", result.Error)
 	}
+
 	return nil
 }
 
@@ -142,9 +161,11 @@ func (s *Service) DeleteSubscriptionNode(ctx context.Context, subID, nodeID uint
 	if result.Error != nil {
 		return fmt.Errorf("failed to delete subscription node: %w", result.Error)
 	}
+
 	if result.RowsAffected == 0 {
 		return fmt.Errorf("subscription node not found for sub_id=%d node_id=%d: %w", subID, nodeID, ErrSubscriptionNodeNotFound)
 	}
+
 	return nil
 }
 
@@ -156,6 +177,7 @@ func (s *Service) DeleteSubscriptionNodesBySubscriptionID(ctx context.Context, s
 	if result.Error != nil {
 		return fmt.Errorf("failed to delete subscription nodes for sub_id=%d: %w", subID, result.Error)
 	}
+
 	return nil
 }
 
@@ -163,7 +185,7 @@ func (s *Service) DeleteSubscriptionNodesBySubscriptionID(ctx context.Context, s
 func (s *Service) UpdateRetry(ctx context.Context, subID, nodeID uint, retryCount int, retryAt *time.Time, lastErr *string) error {
 	result := s.db.WithContext(ctx).Model(&SubscriptionNode{}).
 		Where("subscription_id = ? AND node_id = ?", subID, nodeID).
-		Updates(map[string]interface{}{
+		Updates(map[string]any{
 			"retry_count": retryCount,
 			"retry_at":    retryAt,
 			"last_error":  lastErr,
@@ -171,8 +193,10 @@ func (s *Service) UpdateRetry(ctx context.Context, subID, nodeID uint, retryCoun
 	if result.Error != nil {
 		return fmt.Errorf("failed to update retry: %w", result.Error)
 	}
+
 	if result.RowsAffected == 0 {
 		return fmt.Errorf("subscription node not found for sub_id=%d node_id=%d: %w", subID, nodeID, ErrSubscriptionNodeNotFound)
 	}
+
 	return nil
 }

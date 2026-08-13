@@ -72,6 +72,19 @@ func TestHandleHealthz_HeadMethod(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rec.Code, "handleHealthz() should accept HEAD")
 }
 
+func TestHandleReadyz_NotReadyEvenWhenHealthy(t *testing.T) {
+	t.Parallel()
+
+	srv := NewServer(":8880", nil, &config.Config{}, "testbot", nil, nil)
+	req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+	rec := httptest.NewRecorder()
+
+	srv.handleReadyz(rec, req)
+
+	assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
+	assert.Equal(t, "NOT READY", rec.Body.String())
+}
+
 func TestHandleReadyz_MethodNotAllowed(t *testing.T) {
 	t.Parallel()
 
@@ -139,6 +152,7 @@ func TestHandleReadyz_Ready(t *testing.T) {
 	t.Parallel()
 
 	srv := NewServer(":8880", nil, &config.Config{}, "testbot", nil, nil)
+	srv.SetReady(true)
 	// No checkers registered means health status will be "ok"
 
 	req := httptest.NewRequest("GET", "/readyz", nil)
@@ -154,6 +168,7 @@ func TestHandleReadyz_WithChecker(t *testing.T) {
 	t.Parallel()
 
 	srv := NewServer(":8880", nil, &config.Config{}, "testbot", nil, nil)
+	srv.SetReady(true)
 
 	// Register a health checker that returns OK
 	srv.RegisterChecker("test-component", func(ctx context.Context) ComponentHealth {
@@ -174,6 +189,7 @@ func TestHandleReadyz_WithFailingChecker(t *testing.T) {
 	t.Parallel()
 
 	srv := NewServer(":8880", nil, &config.Config{}, "testbot", nil, nil)
+	srv.SetReady(true)
 
 	// Register a health checker that returns degraded
 	srv.RegisterChecker("failing-component", func(ctx context.Context) ComponentHealth {
@@ -194,6 +210,7 @@ func TestHandleReadyz_WithDownChecker(t *testing.T) {
 	t.Parallel()
 
 	srv := NewServer(":8880", nil, &config.Config{}, "testbot", nil, nil)
+	srv.SetReady(true)
 
 	// Register a health checker that returns down
 	srv.RegisterChecker("down-component", func(ctx context.Context) ComponentHealth {

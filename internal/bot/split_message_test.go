@@ -68,7 +68,6 @@ func TestSplitMessage_EntitySafe(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
@@ -97,6 +96,7 @@ func TestSplitMessage_NoEntitySplitAcrossChunks(t *testing.T) {
 	t.Parallel()
 
 	const maxLen = 4096
+
 	inputs := []string{
 		"hello *bold and italic* world, then more text that wraps",
 		"*a very long bold phrase with several words inside* trailing",
@@ -118,8 +118,10 @@ func TestSplitMessage_NoEntitySplitAcrossChunks(t *testing.T) {
 // delimiters (used as a lightweight invariant check, not a full parser).
 func markdownEntitiesBalanced(s string) bool {
 	var open []rune
+
 	for _, r := range s {
 		var closeFor rune
+
 		switch r {
 		case '[':
 			open = append(open, '[')
@@ -131,6 +133,7 @@ func markdownEntitiesBalanced(s string) bool {
 		default:
 			continue
 		}
+
 		if closeFor != 0 {
 			if len(open) > 0 && open[len(open)-1] == closeFor {
 				open = open[:len(open)-1]
@@ -139,5 +142,6 @@ func markdownEntitiesBalanced(s string) bool {
 			}
 		}
 	}
+
 	return len(open) == 0
 }

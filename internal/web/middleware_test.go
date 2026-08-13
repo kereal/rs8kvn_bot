@@ -14,6 +14,7 @@ func TestBearerAuthMiddleware_ValidToken(t *testing.T) {
 	called := false
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		called = true
+
 		w.WriteHeader(http.StatusOK)
 	})
 
@@ -21,6 +22,7 @@ func TestBearerAuthMiddleware_ValidToken(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/subscriptions", nil)
 	req.Header.Set("Authorization", "Bearer my-secret-token")
+
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
@@ -35,6 +37,7 @@ func TestBearerAuthMiddleware_InvalidToken(t *testing.T) {
 	called := false
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		called = true
+
 		w.WriteHeader(http.StatusOK)
 	})
 
@@ -42,6 +45,7 @@ func TestBearerAuthMiddleware_InvalidToken(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/subscriptions", nil)
 	req.Header.Set("Authorization", "Bearer wrong-token")
+
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
@@ -66,6 +70,7 @@ func TestBearerAuthMiddleware_Rejection(t *testing.T) {
 		{"wrong scheme Basic", "my-secret-token", "Basic dXNlcjpwYXNz", false, http.StatusUnauthorized},
 		{"wrong scheme no prefix", "my-secret-token", "my-secret-token", false, http.StatusUnauthorized},
 		{"wrong scheme lowercase bearer", "my-secret-token", "bearer my-secret-token", false, http.StatusUnauthorized},
+		//nolint:dupword // intentional: testing rejection of duplicated Bearer prefix
 		{"double bearer", "my-secret-token", "Bearer Bearer my-secret-token", false, http.StatusUnauthorized},
 		{"bearer with extra space", "my-secret-token", "Bearer  my-secret-token", false, http.StatusUnauthorized},
 	}
@@ -75,6 +80,7 @@ func TestBearerAuthMiddleware_Rejection(t *testing.T) {
 			called := false
 			next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				called = true
+
 				w.WriteHeader(http.StatusOK)
 			})
 
@@ -84,6 +90,7 @@ func TestBearerAuthMiddleware_Rejection(t *testing.T) {
 			if tt.header != "" {
 				req.Header.Set("Authorization", tt.header)
 			}
+
 			rec := httptest.NewRecorder()
 
 			handler.ServeHTTP(rec, req)
@@ -112,6 +119,7 @@ func TestBearerAuthMiddleware_EmptyExpectedToken(t *testing.T) {
 			called := false
 			next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				called = true
+
 				w.WriteHeader(http.StatusOK)
 			})
 
@@ -121,11 +129,13 @@ func TestBearerAuthMiddleware_EmptyExpectedToken(t *testing.T) {
 			if tt.authHeader != "" {
 				req.Header.Set("Authorization", tt.authHeader)
 			}
+
 			rec := httptest.NewRecorder()
 
 			handler.ServeHTTP(rec, req)
 
 			assert.Equal(t, tt.shouldAllow, called)
+
 			if tt.shouldAllow {
 				assert.Equal(t, http.StatusOK, rec.Code)
 			} else {
@@ -141,6 +151,7 @@ func TestBearerAuthMiddleware_OptionsRequest(t *testing.T) {
 	called := false
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		called = true
+
 		w.WriteHeader(http.StatusOK)
 	})
 
@@ -175,6 +186,7 @@ func TestBearerAuthMiddleware_TokenWithSpecialChars(t *testing.T) {
 			called := false
 			next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				called = true
+
 				w.WriteHeader(http.StatusOK)
 			})
 
@@ -182,6 +194,7 @@ func TestBearerAuthMiddleware_TokenWithSpecialChars(t *testing.T) {
 
 			req := httptest.NewRequest(http.MethodGet, "/api/v1/subscriptions", nil)
 			req.Header.Set("Authorization", tt.header)
+
 			rec := httptest.NewRecorder()
 
 			handler.ServeHTTP(rec, req)
@@ -206,6 +219,7 @@ func TestBearerAuthMiddleware_DifferentMethods(t *testing.T) {
 		t.Run(method, func(t *testing.T) {
 			req := httptest.NewRequest(method, "/api/v1/subscriptions", nil)
 			req.Header.Set("Authorization", "Bearer "+token)
+
 			rec := httptest.NewRecorder()
 
 			handler.ServeHTTP(rec, req)
@@ -223,14 +237,16 @@ func TestBearerAuthMiddleware_MultipleRequests(t *testing.T) {
 
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		callCount++
+
 		w.WriteHeader(http.StatusOK)
 	})
 
 	handler := BearerAuthMiddleware(token)(next)
 
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/subscriptions", nil)
 		req.Header.Set("Authorization", "Bearer "+token)
+
 		rec := httptest.NewRecorder()
 
 		handler.ServeHTTP(rec, req)
@@ -249,6 +265,7 @@ func TestBearerAuthMiddleware_RejectThenAllow(t *testing.T) {
 
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		callCount++
+
 		w.WriteHeader(http.StatusOK)
 	})
 
@@ -257,6 +274,7 @@ func TestBearerAuthMiddleware_RejectThenAllow(t *testing.T) {
 	// First request with wrong token
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/subscriptions", nil)
 	req.Header.Set("Authorization", "Bearer wrong")
+
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	assert.Equal(t, http.StatusUnauthorized, rec.Code)
@@ -265,6 +283,7 @@ func TestBearerAuthMiddleware_RejectThenAllow(t *testing.T) {
 	// Second request with correct token
 	req = httptest.NewRequest(http.MethodGet, "/api/v1/subscriptions", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
+
 	rec = httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	assert.Equal(t, http.StatusOK, rec.Code)

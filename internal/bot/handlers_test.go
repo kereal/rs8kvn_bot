@@ -101,6 +101,7 @@ func TestHandleBroadcast_MessageTooLong(t *testing.T) {
 	for i := range justOver {
 		justOver[i] = 'a'
 	}
+
 	handler.HandleBroadcast(ctx, createCommandUpdate(123456, admin, "/broadcast"))
 	handler.HandleBroadcastDraft(ctx, createTextUpdate(admin, string(justOver)))
 	assert.True(t, handler.broadcastSessionActive(123456),
@@ -110,10 +111,12 @@ func TestHandleBroadcast_MessageTooLong(t *testing.T) {
 
 	// (b) A message over the hard broadcast cap is rejected.
 	handler.HandleBroadcast(ctx, createCommandUpdate(123456, admin, "/broadcast"))
+
 	tooLong := make([]byte, config.MaxTelegramMessageLen*20+1)
 	for i := range tooLong {
 		tooLong[i] = 'a'
 	}
+
 	handler.HandleBroadcastDraft(ctx, createTextUpdate(admin, string(tooLong)))
 	assert.True(t, mockBot.SendCalledSafe())
 	assert.Contains(t, mockBot.LastSentTextSafe(), "слишком длинное")
@@ -399,6 +402,7 @@ func TestHandleCreateError_AllErrorTypes(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
+
 			mockBot := testutil.NewBotAPI()
 			handler := &Handler{
 				bot:    mockBot,
@@ -494,7 +498,6 @@ func TestHandleUpdate_CommandRouting(t *testing.T) {
 			handler.HandleUpdate(context.Background(), tt.update)
 
 			assert.True(t, mockBot.SendCalledSafe(), "should send response")
-
 		})
 	}
 }
@@ -590,7 +593,9 @@ func TestHandleUpdate_PropagatesStartErrorToMetrics(t *testing.T) {
 	}
 
 	before := promtestutil.ToFloat64(metrics.BotUpdateErrorsTotal.WithLabelValues("start"))
+
 	handler.HandleUpdate(context.Background(), update)
+
 	after := promtestutil.ToFloat64(metrics.BotUpdateErrorsTotal.WithLabelValues("start"))
 
 	assert.Greater(t, after, before, "BotUpdateErrorsTotal must increment when /start handler errors")

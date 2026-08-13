@@ -19,7 +19,9 @@ func GenerateQRCodePNG(data string) ([]byte, error) {
 	config := go_qr.NewQrCodeImgConfig(14, 4)
 
 	var buf bytes.Buffer
-	if err := qr.WriteAsPNG(config, &buf); err != nil {
+
+	err = qr.WriteAsPNG(config, &buf)
+	if err != nil {
 		return nil, fmt.Errorf("failed to write PNG: %w", err)
 	}
 

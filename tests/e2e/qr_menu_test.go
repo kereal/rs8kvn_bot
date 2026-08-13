@@ -1,5 +1,3 @@
-
-
 package e2e
 
 import (
@@ -15,6 +13,7 @@ import (
 
 func TestE2E_QRCodeGeneration(t *testing.T) {
 	t.Parallel()
+
 	env := setupE2EEnv(t)
 	defer env.db.Close()
 
@@ -50,6 +49,7 @@ func TestE2E_QRCodeGeneration(t *testing.T) {
 
 func TestE2E_BackToSubscription(t *testing.T) {
 	t.Parallel()
+
 	env := setupE2EEnv(t)
 	defer env.db.Close()
 
@@ -74,6 +74,7 @@ func TestE2E_BackToSubscription(t *testing.T) {
 
 func TestE2E_MenuHelp(t *testing.T) {
 	t.Parallel()
+
 	env := setupE2EEnv(t)
 	defer env.db.Close()
 

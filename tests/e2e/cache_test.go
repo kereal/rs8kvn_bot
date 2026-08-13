@@ -1,5 +1,3 @@
-
-
 package e2e
 
 import (
@@ -17,6 +15,7 @@ import (
 
 func TestE2E_Cache_SetAndGet(t *testing.T) {
 	t.Parallel()
+
 	env := setupE2EEnv(t)
 	defer env.db.Close()
 
@@ -40,6 +39,7 @@ func TestE2E_Cache_SetAndGet(t *testing.T) {
 
 func TestE2E_Cache_GetNonExistent(t *testing.T) {
 	t.Parallel()
+
 	env := setupE2EEnv(t)
 	defer env.db.Close()
 
@@ -53,6 +53,7 @@ func TestE2E_Cache_GetNonExistent(t *testing.T) {
 
 func TestE2E_Cache_DbHitOnCacheMiss(t *testing.T) {
 	t.Parallel()
+
 	env := setupE2EEnv(t)
 	defer env.db.Close()
 
@@ -79,6 +80,7 @@ func TestE2E_Cache_DbHitOnCacheMiss(t *testing.T) {
 }
 func TestE2E_Cache_ExpiredEntry(t *testing.T) {
 	t.Parallel()
+
 	env := setupE2EEnv(t)
 	defer env.db.Close()
 
@@ -122,6 +124,7 @@ func TestE2E_Cache_CacheInvalidation(t *testing.T) {
 		require.NoError(t, err)
 		env.handler.Cache().Set(env.chatID, sub1)
 	}
+
 	require.NoError(t, err)
 	assert.Equal(t, env.username, sub1.Username)
 

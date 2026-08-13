@@ -1,5 +1,3 @@
-
-
 package e2e
 
 import (
@@ -89,14 +87,18 @@ func TestE2E_ShareLink_InvalidCode(t *testing.T) {
 
 func setupInviteServer(t *testing.T, env *e2eTestEnv, inviteCode string, xuiSetup func(*testutil.XUIClient)) (*web.Server, *service.SubscriptionService) {
 	t.Helper()
+
 	env.cfg.TrialRateLimit = 100
+
 	xuiClients := map[uint]interfaces.XUIClient{1: env.xui}
 	if xuiSetup != nil {
 		xuiSetup(env.xui)
 	}
+
 	nodes := []database.Node{{Name: "main", Host: "https://panel.example.com", APIToken: "test-api-token", InboundIDs: "[1]", IsActive: true, ID: 1}}
 	subService := service.NewSubscriptionService(env.db, xuiClients, e2eVPNClients(xuiClients), nodes, env.cfg)
 	srv := web.NewServer("127.0.0.1:0", env.db, env.cfg, env.botConfig.Username, subService, nil)
+
 	return srv, subService
 }
 
@@ -127,12 +129,15 @@ func TestE2E_InviteLink_Parameterized(t *testing.T) {
 				require.NoError(t, err)
 				allSubs, err := env.db.GetAllSubscriptions(ctx)
 				require.NoError(t, err)
+
 				trialCount := 0
+
 				for _, sub := range allSubs {
 					if sub.PlanID == trialPlan.ID {
 						trialCount++
 					}
 				}
+
 				assert.Equal(t, 1, trialCount, "Trial subscription should be created in DB")
 				assert.True(t, env.xui.AddClientWithIDCalled, "XUI AddClientWithID should be called")
 			},
@@ -178,12 +183,14 @@ func TestE2E_InviteLink_Parameterized(t *testing.T) {
 
 			req := httptest.NewRequest("GET", "/i/"+tt.inviteCode, nil)
 			req.Header.Set("X-Forwarded-For", "10.1.1.1")
+
 			rec := httptest.NewRecorder()
 
 			srv.HandleInvite(rec, req)
 
 			assert.Equal(t, tt.wantStatus, rec.Code)
 			assert.Contains(t, rec.Body.String(), tt.wantContains)
+
 			if tt.check != nil {
 				tt.check(t, env, rec)
 			}
@@ -209,6 +216,7 @@ func TestE2E_AutoRelogin_On401(t *testing.T) {
 		if addClientCallCount == 1 {
 			return nil, fmt.Errorf("authentication failed")
 		}
+
 		return &xui.ClientConfig{
 			ID:    req.ClientID,
 			Email: req.Email,
@@ -223,6 +231,7 @@ func TestE2E_AutoRelogin_On401(t *testing.T) {
 
 	req := httptest.NewRequest("GET", "/i/"+inviteCode, nil)
 	req.Header.Set("X-Forwarded-For", "10.2.1.1")
+
 	rec := httptest.NewRecorder()
 
 	srv.HandleInvite(rec, req)
@@ -249,12 +258,14 @@ func TestE2E_InviteLink_RateLimitExceeded(t *testing.T) {
 
 	req1 := httptest.NewRequest("GET", "/i/"+inviteCode, nil)
 	req1.Header.Set("X-Forwarded-For", "10.1.4.1")
+
 	rec1 := httptest.NewRecorder()
 	srv.HandleInvite(rec1, req1)
 	assert.Equal(t, http.StatusOK, rec1.Code)
 
 	req2 := httptest.NewRequest("GET", "/i/"+inviteCode, nil)
 	req2.Header.Set("X-Forwarded-For", "10.1.4.1")
+
 	rec2 := httptest.NewRecorder()
 	srv.HandleInvite(rec2, req2)
 
@@ -281,6 +292,7 @@ func TestE2E_InviteLink_FullFlow_BindTrial(t *testing.T) {
 
 	req := httptest.NewRequest("GET", "/i/"+inviteCode, nil)
 	req.Header.Set("X-Forwarded-For", "10.1.5.1")
+
 	rec := httptest.NewRecorder()
 	srv.HandleInvite(rec, req)
 
@@ -333,6 +345,7 @@ func TestE2E_FullCycle_InviteToQR(t *testing.T) {
 
 	req := httptest.NewRequest("GET", "/i/"+inviteCode, nil)
 	req.Header.Set("X-Forwarded-For", "10.2.1.1")
+
 	rec := httptest.NewRecorder()
 	srv.HandleInvite(rec, req)
 
@@ -460,6 +473,7 @@ func TestE2E_FullCycle_MultipleUsersViaInvite(t *testing.T) {
 	for _, chatID := range []int64{user1ChatID, user2ChatID} {
 		req := httptest.NewRequest("GET", "/i/"+inviteCode, nil)
 		req.Header.Set("X-Forwarded-For", fmt.Sprintf("10.3.%d.1", chatID%256))
+
 		rec := httptest.NewRecorder()
 		srv.HandleInvite(rec, req)
 
@@ -486,6 +500,7 @@ func TestE2E_FullCycle_MultipleUsersViaInvite(t *testing.T) {
 		sub, err := env.db.GetByTelegramID(ctx, chatID)
 		require.NoError(t, err, "User %d should have subscription", chatID)
 		assert.Equal(t, chatID, sub.TelegramID)
+
 		trialPlan, err := env.db.GetPlanByName(ctx, database.TrialPlanName)
 		require.NoError(t, err)
 		assert.False(t, sub.PlanID == trialPlan.ID)
@@ -516,6 +531,7 @@ func TestE2E_FullCycle_InviteThenShare(t *testing.T) {
 
 	req := httptest.NewRequest("GET", "/i/"+webInviteCode, nil)
 	req.Header.Set("X-Forwarded-For", "10.4.1.1")
+
 	rec := httptest.NewRecorder()
 	srv.HandleInvite(rec, req)
 
@@ -565,15 +581,17 @@ func TestE2E_FullCycle_ConcurrentInviteAccess(t *testing.T) {
 	srv := web.NewServer("127.0.0.1:0", env.db, env.cfg, env.botConfig.Username, subService, nil)
 
 	var wg sync.WaitGroup
+
 	results := make(chan int, 10)
 
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
 
 			req := httptest.NewRequest("GET", "/i/"+inviteCode, nil)
 			req.Header.Set("X-Forwarded-For", fmt.Sprintf("10.5.%d.1", idx))
+
 			rec := httptest.NewRecorder()
 			srv.HandleInvite(rec, req)
 
@@ -585,6 +603,7 @@ func TestE2E_FullCycle_ConcurrentInviteAccess(t *testing.T) {
 	close(results)
 
 	successCount := 0
+
 	for code := range results {
 		if code == http.StatusOK {
 			successCount++
@@ -597,12 +616,15 @@ func TestE2E_FullCycle_ConcurrentInviteAccess(t *testing.T) {
 	require.NoError(t, err)
 	trialPlan, err := env.db.GetPlanByName(ctx, database.TrialPlanName)
 	require.NoError(t, err)
+
 	trialCount := 0
+
 	for _, sub := range allSubs {
 		if sub.PlanID == trialPlan.ID && sub.TelegramID < 0 {
 			trialCount++
 		}
 	}
+
 	assert.GreaterOrEqual(t, trialCount, 10, "Should have at least 10 trial subscriptions")
 }
 
@@ -685,6 +707,7 @@ func TestE2E_InviteChain_ABC(t *testing.T) {
 
 	subB, err := env.db.GetByTelegramID(ctx, userB)
 	require.NoError(t, err)
+
 	referredByB := int64(100000)
 	subB.ReferredBy = &referredByB
 	err = env.db.UpdateSubscription(ctx, subB)
@@ -705,6 +728,7 @@ func TestE2E_InviteChain_ABC(t *testing.T) {
 
 	subC, err := env.db.GetByTelegramID(ctx, userC)
 	require.NoError(t, err)
+
 	referredByC := int64(200000)
 	subC.ReferredBy = &referredByC
 	err = env.db.UpdateSubscription(ctx, subC)
