@@ -36,8 +36,12 @@ Indexes: `idx_orders_subscription_id`, `idx_orders_status`, `idx_orders_created_
 ## Repository
 
 Interface `OrderRepository` в `internal/interfaces/interfaces.go`:
+- `CreateOrder(ctx, order *Order) error`
 - `GetOrderByID(ctx, id uint) (*Order, error)`
-- `CancelOrderCAS(ctx, provider string, providerPaymentID uuid.UUID, fromStatuses []OrderStatus) (bool, error)`
+- `GetOrdersBySubscriptionID(ctx, subscriptionID uint) ([]Order, error)`
+- `UpdateOrderStatus(ctx, id uint, status OrderStatus) error`
+- `UpdateOrderPaidStatus(ctx, id uint) error`
+- `UpdateOrderActivatedAt(ctx, id uint, activatedAt, expiresAt time.Time) error`
 
 ## Documentation
 
