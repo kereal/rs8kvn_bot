@@ -117,10 +117,22 @@ func NewServer(addr string, db interfaces.WebRepository, cfg *config.Config, bot
 }
 
 // SetBot wires Telegram delivery for payment notifications and administrator alerts.
-func (s *Server) SetBot(bot interfaces.BotAPI) { s.bot = bot }
+// The server may already be serving when this is called (payment callbacks run
+// concurrently), so the field is written under the lock.
+func (s *Server) SetBot(bot interfaces.BotAPI) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.bot = bot
+}
 
 // SetOrderService wires payment confirmation and cancellation into the callback endpoint.
-func (s *Server) SetOrderService(orderService *service.OrderService) { s.orderService = orderService }
+func (s *Server) SetOrderService(orderService *service.OrderService) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.orderService = orderService
+}
 
 // SetPaymentConfig configures runtime payment settings used by the callback
 // endpoint. Set before exposing /payment/callback; nil disables it.
@@ -177,8 +189,12 @@ func (s *Server) effectiveBotUsername() string {
 
 // Addr returns the bound listener address, or the configured address before Start.
 func (s *Server) Addr() string {
-	if s.listenerAddr != "" {
-		return s.listenerAddr
+	s.mu.RLock()
+	listenerAddr := s.listenerAddr
+	s.mu.RUnlock()
+
+	if listenerAddr != "" {
+		return listenerAddr
 	}
 
 	return s.addr
@@ -215,7 +231,10 @@ func (s *Server) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to bind %s: %w", s.addr, err)
 	}
 
+	s.mu.Lock()
 	s.listenerAddr = listener.Addr().String()
+	s.mu.Unlock()
+
 	logger.Info("Web server started", zap.String("addr", s.listenerAddr))
 	s.initSubserverAccessLogger()
 
@@ -356,12 +375,16 @@ func (s *Server) handlePaymentCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Snapshot the runtime-wired dependencies under the same lock so a concurrent
+	// SetBot/SetOrderService cannot be observed as a torn state.
 	s.mu.RLock()
 	pc := s.paymentConfig
 	paymentReady := s.paymentReady
+	bot := s.bot
+	orderService := s.orderService
 	s.mu.RUnlock()
 
-	if !paymentReady || pc == nil || !pc.Enabled || s.orderService == nil || s.bot == nil {
+	if !paymentReady || pc == nil || !pc.Enabled || orderService == nil || bot == nil {
 		http.Error(w, "payments not available", http.StatusServiceUnavailable)
 		return
 	}
@@ -425,7 +448,7 @@ func (s *Server) handlePaymentCallback(w http.ResponseWriter, r *http.Request) {
 		zap.String("amount", payload.Amount.String()),
 		zap.Int("body_bytes", len(rawBody)))
 
-	_, err = platega.ParseTransactionID(payload.ID)
+	paymentID, err := platega.ParseTransactionID(payload.ID)
 	if err != nil {
 		s.notifyPaymentCallbackIssue(r.Context(), payload, "invalid_provider_id", err.Error(), "verify the provider transaction ID and callback schema")
 		http.Error(w, "invalid callback", http.StatusBadRequest)
@@ -463,18 +486,10 @@ func (s *Server) handlePaymentCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	paymentID, err := platega.ParseTransactionID(payload.ID)
-	if err != nil {
-		s.notifyPaymentCallbackIssue(r.Context(), payload, "invalid_provider_id", err.Error(), "verify the provider transaction ID and callback schema")
-		http.Error(w, "invalid callback", http.StatusBadRequest)
-
-		return
-	}
-
 	status := strings.ToUpper(strings.TrimSpace(payload.Status))
 	switch status {
 	case "CONFIRMED":
-		confirmation, err := s.orderService.ConfirmPayment(notifyCtx, paymentID, payload.Amount, payload.Currency)
+		confirmation, err := orderService.ConfirmPayment(notifyCtx, paymentID, payload.Amount, payload.Currency)
 		if err != nil {
 			if errors.Is(err, service.ErrAmountMismatch) || errors.Is(err, service.ErrCurrencyMismatch) || errors.Is(err, service.ErrInvalidPaymentTransition) {
 				http.Error(w, err.Error(), http.StatusBadRequest)
@@ -486,15 +501,15 @@ func (s *Server) handlePaymentCallback(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if confirmation.Activated {
-			chatID, text, err := s.orderService.BuildPaidUserNotification(notifyCtx, confirmation.Order)
+			chatID, text, err := orderService.BuildPaidUserNotification(notifyCtx, confirmation.Order)
 			if err != nil {
 				logger.Warn("failed to build paid notification", zap.Error(err))
-				s.orderService.NotifyPaymentIssue(notifyCtx, service.PaymentIssue{Event: "paid_notification_build_failed", Reason: err.Error(), Action: "send the confirmed payment details to the user manually", OrderID: confirmation.Order.ID, SubscriptionID: confirmation.Order.SubscriptionID, ProductID: confirmation.Order.ProductID, PlanID: 0, AmountCents: confirmation.Order.AmountCents, Currency: confirmation.Order.Currency, ProviderID: payload.ID, CallbackStatus: payload.Status, Payload: payload.Payload, PaymentMethod: payload.PaymentMethod})
-			} else if chatID > 0 && s.bot != nil {
-				_, err := s.bot.Send(tgbotapi.NewMessage(chatID, text))
+				orderService.NotifyPaymentIssue(notifyCtx, service.PaymentIssue{Event: "paid_notification_build_failed", Reason: err.Error(), Action: "send the confirmed payment details to the user manually", OrderID: confirmation.Order.ID, SubscriptionID: confirmation.Order.SubscriptionID, ProductID: confirmation.Order.ProductID, PlanID: 0, AmountCents: confirmation.Order.AmountCents, Currency: confirmation.Order.Currency, ProviderID: payload.ID, CallbackStatus: payload.Status, Payload: payload.Payload, PaymentMethod: payload.PaymentMethod})
+			} else if chatID > 0 && bot != nil {
+				_, err := bot.Send(tgbotapi.NewMessage(chatID, text))
 				if err != nil {
 					logger.Warn("failed to send paid notification", zap.Int64("chat_id", chatID), zap.Error(err))
-					s.orderService.NotifyPaymentIssue(notifyCtx, service.PaymentIssue{Event: "paid_notification_send_failed", Reason: err.Error(), Action: "send the confirmed payment details to the user manually", OrderID: confirmation.Order.ID, TelegramID: chatID, SubscriptionID: confirmation.Order.SubscriptionID, ProductID: confirmation.Order.ProductID, AmountCents: confirmation.Order.AmountCents, Currency: confirmation.Order.Currency, ProviderID: payload.ID, CallbackStatus: payload.Status, Payload: payload.Payload, PaymentMethod: payload.PaymentMethod})
+					orderService.NotifyPaymentIssue(notifyCtx, service.PaymentIssue{Event: "paid_notification_send_failed", Reason: err.Error(), Action: "send the confirmed payment details to the user manually", OrderID: confirmation.Order.ID, TelegramID: chatID, SubscriptionID: confirmation.Order.SubscriptionID, ProductID: confirmation.Order.ProductID, AmountCents: confirmation.Order.AmountCents, Currency: confirmation.Order.Currency, ProviderID: payload.ID, CallbackStatus: payload.Status, Payload: payload.Payload, PaymentMethod: payload.PaymentMethod})
 				}
 			}
 		}
@@ -503,7 +518,7 @@ func (s *Server) handlePaymentCallback(w http.ResponseWriter, r *http.Request) {
 		// previously-paid order automatically downgrades the subscription to the
 		// free plan inside CancelPaymentByProvider (unless another paid order
 		// exists); a plain CANCELED only cancels the pending order.
-		_, _, err = s.orderService.CancelPaymentByProvider(notifyCtx, paymentID, status, payload.Amount, payload.Currency)
+		_, _, err = orderService.CancelPaymentByProvider(notifyCtx, paymentID, status, payload.Amount, payload.Currency)
 		if err != nil {
 			if errors.Is(err, service.ErrAmountMismatch) || errors.Is(err, service.ErrCurrencyMismatch) {
 				http.Error(w, err.Error(), http.StatusBadRequest)
@@ -537,13 +552,17 @@ func (s *Server) handlePaymentCallback(w http.ResponseWriter, r *http.Request) {
 // The context is detached from the request so a disconnected client cannot
 // suppress the operational alert.
 func (s *Server) notifyPaymentCallbackIssue(ctx context.Context, payload platega.CallbackPayload, event, reason, action string) {
-	if s.orderService == nil {
+	s.mu.RLock()
+	orderService := s.orderService
+	s.mu.RUnlock()
+
+	if orderService == nil {
 		return
 	}
 
 	providerID := strings.TrimSpace(payload.ID)
 	callbackPayload := fmt.Sprintf("amount=%s; payload=%s", payload.Amount.String(), payload.Payload)
-	s.orderService.NotifyPaymentIssue(context.WithoutCancel(ctx), service.PaymentIssue{
+	orderService.NotifyPaymentIssue(context.WithoutCancel(ctx), service.PaymentIssue{
 		Event:          event,
 		Reason:         reason,
 		Action:         action,

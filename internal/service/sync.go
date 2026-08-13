@@ -329,11 +329,26 @@ func (s *SyncService) SyncSubscription(ctx context.Context, subscriptionID uint)
 		return fmt.Errorf("sync subscription: load subscription: %w", err)
 	}
 
-	return s.syncNodes(ctx, sub, pending)
+	err = s.syncNodes(ctx, sub, pending)
+	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return err
+		}
+
+		// External-sync phase is best-effort: per-node failures keep the
+		// subscription active and are retried by the background worker, so
+		// they must not surface to the caller.
+		logger.Warn("sync subscription: per-node failure logged, background will retry",
+			zap.Uint("subscription_id", subscriptionID),
+			zap.Error(err))
+	}
+
+	return nil
 }
 
 // syncNodes iterates over pending subscription nodes and dispatches add/remove/update operations.
-// Individual node failures are logged; returns nil unless ctx is cancelled upstream.
+// Per-node failures are logged and aggregated via errors.Join so background workers can observe
+// degraded runs; processing continues past a failed node. Only ctx cancellation/deadline aborts early.
 func (s *SyncService) syncNodes(ctx context.Context, sub *database.Subscription, pending []database.SubscriptionNode) error {
 	if sub == nil {
 		return fmt.Errorf("sync subscription: nil subscription")
@@ -347,6 +362,8 @@ func (s *SyncService) syncNodes(ctx context.Context, sub *database.Subscription,
 	logger.Debug("processing pending nodes",
 		zap.Uint("subscription_id", sub.ID),
 		zap.Int("pending_count", len(pending)))
+
+	var nodeErrs []error
 
 	for _, sn := range pending {
 		nodeType, hasNode := nodeTypes[sn.NodeID]
@@ -387,6 +404,7 @@ func (s *SyncService) syncNodes(ctx context.Context, sub *database.Subscription,
 					zap.Uint("subscription_id", sub.ID),
 					zap.Uint("node_id", sn.NodeID),
 					zap.Error(err))
+				nodeErrs = append(nodeErrs, err)
 			}
 		case database.SyncStatusPendingRemove:
 			logger.Debug("processing pending_remove",
@@ -403,6 +421,7 @@ func (s *SyncService) syncNodes(ctx context.Context, sub *database.Subscription,
 					zap.Uint("subscription_id", sub.ID),
 					zap.Uint("node_id", sn.NodeID),
 					zap.Error(err))
+				nodeErrs = append(nodeErrs, err)
 			}
 		case database.SyncStatusPendingUpdate:
 			logger.Debug("processing pending_update",
@@ -419,8 +438,13 @@ func (s *SyncService) syncNodes(ctx context.Context, sub *database.Subscription,
 					zap.Uint("subscription_id", sub.ID),
 					zap.Uint("node_id", sn.NodeID),
 					zap.Error(err))
+				nodeErrs = append(nodeErrs, err)
 			}
 		}
+	}
+
+	if len(nodeErrs) > 0 {
+		return errors.Join(nodeErrs...)
 	}
 
 	return nil

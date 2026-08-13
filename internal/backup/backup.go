@@ -98,13 +98,22 @@ func checkpointWAL(ctx context.Context, dbPath string) error {
 	}()
 
 	// WAL checkpoint: PASSIVE returns immediately, TRUNCATE tries to reset WAL file
-	// Using TRUNCATE to ensure all data is in the main database file
+	// Using TRUNCATE to ensure all data is in the main database file. The pragma
+	// returns a row (busy, log, checkpointed): a nonzero busy count means frames
+	// are still in use and would be omitted from a raw copy of the DB file, so the
+	// backup must not proceed.
 	ctxWithTimeout, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	_, err = db.ExecContext(ctxWithTimeout, "PRAGMA wal_checkpoint(TRUNCATE)")
+	var busy, logFrames, checkpointedFrames int
+
+	err = db.QueryRowContext(ctxWithTimeout, "PRAGMA wal_checkpoint(TRUNCATE)").Scan(&busy, &logFrames, &checkpointedFrames)
 	if err != nil {
 		return fmt.Errorf("checkpoint failed: %w", err)
+	}
+
+	if busy != 0 {
+		return fmt.Errorf("checkpoint incomplete: %d WAL frames still busy (log=%d, checkpointed=%d)", busy, logFrames, checkpointedFrames)
 	}
 
 	return nil
