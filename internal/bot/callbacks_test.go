@@ -3,6 +3,7 @@ package bot
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/kereal/rs8kvn_bot/internal/config"
@@ -89,6 +90,7 @@ func TestHandleCallback_CallbackDataRouting(t *testing.T) {
 			setupSubService: func(mockDB *testutil.DatabaseService, mockXUI *testutil.XUIClient, cfg *config.Config) *service.SubscriptionService {
 				mockXUIClients := map[uint]interfaces.XUIClient{1: mockXUI}
 				nodes := []database.Node{{ID: 1, Name: "main", IsActive: true, Host: "http://example.com", APIToken: "token", InboundIDs: "[1]"}}
+
 				return service.NewSubscriptionService(mockDB, mockXUIClients, nil, nodes, cfg)
 			},
 			wantSend: true,
@@ -178,6 +180,7 @@ func TestHandleCallback_CallbackDataRouting(t *testing.T) {
 			setupSubService: func(mockDB *testutil.DatabaseService, mockXUI *testutil.XUIClient, cfg *config.Config) *service.SubscriptionService {
 				mockXUIClients := map[uint]interfaces.XUIClient{1: mockXUI}
 				nodes := []database.Node{{ID: 1, Name: "main", IsActive: true, Host: "http://example.com", APIToken: "token", InboundIDs: "[1]"}}
+
 				return service.NewSubscriptionService(mockDB, mockXUIClients, nil, nodes, cfg)
 			},
 			wantSend: true,
@@ -191,17 +194,6 @@ func TestHandleCallback_CallbackDataRouting(t *testing.T) {
 			},
 			wantSend: false,
 			wantText: "",
-		},
-		{
-			name:         "buy_premium_230",
-			callbackData: "buy_premium_230",
-			setupMock: func(mockDB *testutil.DatabaseService, mockXUI *testutil.XUIClient) {
-				// No special setup needed - just answers callback with alert
-			},
-			wantSend:      false,
-			wantText:      "",
-			wantRequest:   true,
-			wantAlertText: "Скоро в продаже",
 		},
 		{
 			name:         "menu_help",
@@ -233,29 +225,29 @@ func TestHandleCallback_CallbackDataRouting(t *testing.T) {
 			name:         "menu_documents",
 			callbackData: "menu_documents",
 			setupMock:    func(mockDB *testutil.DatabaseService, mockXUI *testutil.XUIClient) {},
-			wantSend: true,
-			wantText: "Документы",
+			wantSend:     true,
+			wantText:     "Документы",
 		},
 		{
 			name:         "menu_privacy",
 			callbackData: "menu_privacy",
 			setupMock:    func(mockDB *testutil.DatabaseService, mockXUI *testutil.XUIClient) {},
-			wantSend: true,
-			wantText: "*Политика конфиденциальности*",
+			wantSend:     true,
+			wantText:     "*Политика конфиденциальности*",
 		},
 		{
 			name:         "menu_terms",
 			callbackData: "menu_terms",
 			setupMock:    func(mockDB *testutil.DatabaseService, mockXUI *testutil.XUIClient) {},
-			wantSend: true,
-			wantText: "*Пользовательское соглашение*",
+			wantSend:     true,
+			wantText:     "*Пользовательское соглашение*",
 		},
 		{
 			name:         "menu_support",
 			callbackData: "menu_support",
 			setupMock:    func(mockDB *testutil.DatabaseService, mockXUI *testutil.XUIClient) {},
-			wantSend: true,
-			wantText: "С любыми проблемами и вопросами обращайтесь сюда: @kereal",
+			wantSend:     true,
+			wantText:     "С любыми проблемами и вопросами обращайтесь сюда: @kereal",
 		},
 		{
 			name:         "unknown callback",
@@ -271,6 +263,7 @@ func TestHandleCallback_CallbackDataRouting(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
+
 			cfg := &config.Config{
 				TelegramAdminID: 123456,
 				SiteURL:         "https://example.com",
@@ -278,11 +271,14 @@ func TestHandleCallback_CallbackDataRouting(t *testing.T) {
 			mockDB := testutil.NewDatabaseService()
 			mockXUI := testutil.NewXUIClient()
 			mockBot := testutil.NewBotAPI()
+
 			tt.setupMock(mockDB, mockXUI)
+
 			var subService *service.SubscriptionService
 			if tt.setupSubService != nil {
 				subService = tt.setupSubService(mockDB, mockXUI, cfg)
 			}
+
 			handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), subService, "")
 
 			ctx := context.Background()
@@ -302,15 +298,18 @@ func TestHandleCallback_CallbackDataRouting(t *testing.T) {
 
 			if tt.wantSend {
 				assert.True(t, mockBot.SendCalledSafe(), "Bot.Send should be called for %s", tt.name)
+
 				if tt.wantText != "" {
 					switch tt.callbackData {
 					case "menu_privacy", "menu_terms", "menu_support":
 						all := mockBot.GetAllSentMessages()
-						var combined string
+
+						var combined strings.Builder
 						for _, m := range all {
-							combined += m.Text
+							combined.WriteString(m.Text)
 						}
-						assert.Contains(t, combined, tt.wantText, "message should contain %q", tt.wantText)
+
+						assert.Contains(t, combined.String(), tt.wantText, "message should contain %q", tt.wantText)
 					default:
 						assert.Contains(t, mockBot.LastSentTextSafe(), tt.wantText, "message should contain %q", tt.wantText)
 					}
@@ -318,7 +317,6 @@ func TestHandleCallback_CallbackDataRouting(t *testing.T) {
 			} else {
 				assert.False(t, mockBot.SendCalledSafe(), "Bot.Send should not be called for %s", tt.name)
 			}
-
 		})
 	}
 }
@@ -853,14 +851,15 @@ func TestHandleBackToSubscription_RequestError(t *testing.T) {
 
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
-		SiteURL:          "https://x.com",
-		GlobalSubURL:     "https://x.com/sub/",
+		SiteURL:         "https://x.com",
+		GlobalSubURL:    "https://x.com/sub/",
 	}
 	mockDB := testutil.NewDatabaseService()
 	mockBot := testutil.NewBotAPI()
 	mockBot.RequestError = errors.New("request failed")
 	xuiClients := map[uint]interfaces.XUIClient{1: testutil.NewXUIClient()}
 	nodes := []database.Node{{ID: 1, IsActive: true, Host: "https://p", APIToken: "t", InboundIDs: "[1]"}}
+
 	require.NoError(t, mockDB.CreateSubscription(context.Background(), &database.Subscription{
 		TelegramID: 123456, Username: "testuser", ClientID: "c", SubscriptionID: "s", Status: "active",
 	}, ""))
@@ -1067,12 +1066,14 @@ func TestHandleCallback_MenuPrivacy(t *testing.T) {
 	assert.True(t, mockBot.SendCalledSafe(), "Bot.Send should be called for privacy policy")
 	all := mockBot.GetAllSentMessages()
 	assert.NotEmpty(t, all)
-	var combined string
+
+	var combined strings.Builder
 	for _, m := range all {
-		combined += m.Text
+		combined.WriteString(m.Text)
 	}
-	assert.Contains(t, combined, "Политика конфиденциальности", "message should contain privacy title")
-	assert.Contains(t, combined, "Бот «RS8 KVN», 28.07.2026", "message should contain legal footer")
+
+	assert.Contains(t, combined.String(), "Политика конфиденциальности", "message should contain privacy title")
+	assert.Contains(t, combined.String(), "Бот «RS8 KVN», 28.07.2026", "message should contain legal footer")
 }
 
 func TestHandleCallback_MenuTerms(t *testing.T) {
@@ -1102,12 +1103,14 @@ func TestHandleCallback_MenuTerms(t *testing.T) {
 	assert.True(t, mockBot.SendCalledSafe(), "Bot.Send should be called for terms of service")
 	all := mockBot.GetAllSentMessages()
 	assert.NotEmpty(t, all)
-	var combined string
+
+	var combined strings.Builder
 	for _, m := range all {
-		combined += m.Text
+		combined.WriteString(m.Text)
 	}
-	assert.Contains(t, combined, "Пользовательское соглашение", "message should contain terms title")
-	assert.Contains(t, combined, "Бот «RS8 KVN», 28.07.2026", "message should contain legal footer")
+
+	assert.Contains(t, combined.String(), "Пользовательское соглашение", "message should contain terms title")
+	assert.Contains(t, combined.String(), "Бот «RS8 KVN», 28.07.2026", "message should contain legal footer")
 }
 
 func TestHandleCallback_MenuSupport(t *testing.T) {
@@ -1137,43 +1140,11 @@ func TestHandleCallback_MenuSupport(t *testing.T) {
 	assert.True(t, mockBot.SendCalledSafe(), "Bot.Send should be called for support")
 	all := mockBot.GetAllSentMessages()
 	assert.NotEmpty(t, all)
-	var combined string
+
+	var combined strings.Builder
 	for _, m := range all {
-		combined += m.Text
+		combined.WriteString(m.Text)
 	}
-	assert.Contains(t, combined, "С любыми проблемами и вопросами обращайтесь сюда: @kereal", "message should contain support contact text")
+
+	assert.Contains(t, combined.String(), "С любыми проблемами и вопросами обращайтесь сюда: @kereal", "message should contain support contact text")
 }
-
-func TestHandleCallback_BuyPremium230_RequestError(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{
-		TelegramAdminID: 123456,
-	}
-	mockDB := testutil.NewDatabaseService()
-
-	mockBot := testutil.NewBotAPI()
-	mockBot.RequestError = errors.New("request failed")
-	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
-
-	ctx := context.Background()
-	update := tgbotapi.Update{
-		CallbackQuery: &tgbotapi.CallbackQuery{
-			ID:   "test-callback-id",
-			Data: "buy_premium_230",
-			From: &tgbotapi.User{ID: 123456, UserName: "testuser"},
-			Message: &tgbotapi.Message{
-				MessageID: 100,
-				Chat:      &tgbotapi.Chat{ID: 123456},
-			},
-		},
-	}
-
-	err := handler.HandleCallback(ctx, update)
-
-	assert.NoError(t, err, "HandleCallback should return nil even if Request fails for buy_premium_230")
-	assert.True(t, mockBot.RequestCalledSafe(), "Bot.Request should be called to answer callback")
-	assert.False(t, mockBot.SendCalledSafe(), "Bot.Send should not be called for buy_premium_230")
-}
-
-

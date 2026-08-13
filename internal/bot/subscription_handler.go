@@ -8,6 +8,7 @@ import (
 
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/logger"
+	"github.com/kereal/rs8kvn_bot/internal/service"
 	"github.com/kereal/rs8kvn_bot/internal/utils"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -67,9 +68,11 @@ func (sh *SubscriptionHandler) handleCreateSubscription(ctx context.Context, cha
 			logger.Info("No existing subscription, creating new one", zap.String("username", username), zap.Int64("chat_id", chatID))
 		} else {
 			logger.Error("Failed to check subscription", zap.Error(err))
+
 			errMsg := msg(MsgSubTempError)
 			editMsg := tgbotapi.NewEditMessageText(chatID, messageID, errMsg)
 			sh.h.safeSend(editMsg)
+
 			return fmt.Errorf("check subscription: %w", err)
 		}
 	} else if sub != nil {
@@ -77,12 +80,14 @@ func (sh *SubscriptionHandler) handleCreateSubscription(ctx context.Context, cha
 		if sh.h.subscriptionService != nil {
 			trafficLimit = sh.h.subscriptionService.PlanTrafficLimitGB(ctx, chatID)
 		}
+
 		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgSubCreatedSuccess, trafficLimit, sh.h.cfg.SubURL(sub.SubscriptionID)))
 		editMsg.ParseMode = "Markdown"
 		editMsg.DisableWebPagePreview = true
 		kb := sh.h.getQRKeyboard()
 		editMsg.ReplyMarkup = &kb
 		sh.h.safeSend(editMsg)
+
 		return nil
 	}
 
@@ -104,53 +109,35 @@ func (sh *SubscriptionHandler) handleMySubscription(ctx context.Context, chatID 
 		if errors.Is(err, database.ErrSubscriptionNotFound) || errors.Is(err, gorm.ErrRecordNotFound) {
 			editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgSubNoActive))
 			sh.h.safeSend(editMsg)
+
 			return nil
 		}
+
 		logger.Error("Failed to get subscription", zap.Error(err))
+
 		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgSubTempError))
 		sh.h.safeSend(editMsg)
+
 		return fmt.Errorf("get subscription: %w", err)
 	}
 
 	if sub.Status != "active" {
 		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgSubNoActive))
 		sh.h.safeSend(editMsg)
+
 		return nil
 	}
 
-	var trafficInfo string
-	var progressBar string
-	if traffic.LimitGB == 0 {
-		trafficInfo = "неограничен"
-	} else {
-		trafficInfo = fmt.Sprintf("%.2f из %d Гб (%.0f%%)", traffic.UsedGB, traffic.LimitGB, traffic.Percentage)
-		progressBar = "\n" + traffic.ProgressBar
-	}
-
-	// Статус подписки
-	var statusText string
-	switch sub.Status {
-	case "active":
+	statusText := sub.Status
+	if statusText == "active" {
 		statusText = "активна"
-	default:
-		statusText = sub.Status
 	}
 
-	resetInfo := traffic.ResetInfo
-	if resetInfo == "" {
-		resetInfo = "нет"
-	}
-
-	messageText := fmt.Sprintf(
-		"📋 *Ваша подписка*\n\n✌️ Статус: *%s*\n💡 Тариф: *%s*\n📊 Трафик: %s%s\n\n📅 Создана: %s\n⏰ Истекает: %s\n🔄 Сброс: %s\n\n🔗 Ссылка\n`%s`",
+	messageText := service.FormatSubscriptionMessage(
+		"📋 *Ваша подписка*",
 		statusText,
-		traffic.PlanName,
-		trafficInfo,
-		progressBar,
-		traffic.CreatedAtFormatted,
-		traffic.ExpiresAtFormatted,
-		resetInfo,
-		sh.h.cfg.SubURL(sub.SubscriptionID),
+		traffic,
+		service.SubscriptionURL(sh.h.cfg, sub.SubscriptionID),
 	)
 
 	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, messageText)
@@ -159,6 +146,7 @@ func (sh *SubscriptionHandler) handleMySubscription(ctx context.Context, chatID 
 	kb := sh.h.getQRKeyboard()
 	editMsg.ReplyMarkup = &kb
 	sh.h.safeSend(editMsg)
+
 	return nil
 }
 
@@ -172,23 +160,30 @@ func (sh *SubscriptionHandler) handleQRCode(ctx context.Context, chatID int64, u
 			// No active subscription — user-friendly message
 			editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgSubNoActive))
 			sh.h.safeSend(editMsg)
+
 			return nil
 		}
+
 		logger.Error("Failed to get subscription for QR", zap.Error(err), zap.Int64("chat_id", chatID))
+
 		return fmt.Errorf("get subscription: %w", err)
 	}
+
 	if sub == nil {
 		// Safety net: sub nil with no error
 		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgSubNoActive))
 		sh.h.safeSend(editMsg)
+
 		return nil
 	}
 
 	pngBytes, err := utils.GenerateQRCodePNG(sh.h.cfg.SubURL(sub.SubscriptionID))
 	if err != nil {
 		logger.Error("Failed to generate QR code", zap.Error(err))
+
 		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgQRCodeFailed))
 		sh.h.safeSend(editMsg)
+
 		return fmt.Errorf("generate QR code: %w", err)
 	}
 
@@ -206,7 +201,8 @@ func (sh *SubscriptionHandler) handleQRCode(ctx context.Context, chatID int64, u
 	)
 	photo.ReplyMarkup = &backKeyboard
 
-	if _, err := sh.h.bot.Send(photo); err != nil {
+	_, err = sh.h.bot.Send(photo)
+	if err != nil {
 		logger.Error("Failed to send QR photo", zap.Error(err))
 		return fmt.Errorf("send QR photo: %w", err)
 	}
@@ -232,9 +228,12 @@ func (sh *SubscriptionHandler) handleBackToSubscription(_ context.Context, chatI
 	logger.Info("User closing QR code", zap.Int64("chat_id", chatID))
 
 	deleteMsg := tgbotapi.NewDeleteMessage(chatID, messageID)
-	if _, err := sh.h.bot.Request(deleteMsg); err != nil {
+
+	_, err := sh.h.bot.Request(deleteMsg)
+	if err != nil {
 		logger.Warn("Failed to delete QR message", zap.Error(err), zap.Int("target_msg_id", messageID))
 	}
+
 	return nil
 }
 
@@ -243,8 +242,10 @@ func (sh *SubscriptionHandler) sendQRCode(ctx context.Context, chatID int64, mes
 	pngBytes, err := utils.GenerateQRCodePNG(url)
 	if err != nil {
 		logger.Error("Failed to generate QR code", zap.Error(err))
+
 		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgQRCodeFailed))
 		sh.h.safeSend(editMsg)
+
 		return fmt.Errorf("generate QR code: %w", err)
 	}
 
@@ -262,146 +263,26 @@ func (sh *SubscriptionHandler) sendQRCode(ctx context.Context, chatID int64, mes
 	)
 	photo.ReplyMarkup = &backKeyboard
 
-	if _, err := sh.h.bot.Send(photo); err != nil {
+	_, err = sh.h.bot.Send(photo)
+	if err != nil {
 		logger.Error("Failed to send QR photo", zap.Error(err))
 		return fmt.Errorf("send QR photo: %w", err)
 	}
+
 	return nil
 }
 
 // handleBackToInvite deletes the QR photo and returns to invite.
 func (sh *SubscriptionHandler) handleBackToInvite(_ context.Context, chatID int64, username string, messageID int) error {
 	logger.Info("User closing QR code", zap.String("username", username), zap.Int64("chat_id", chatID))
+
 	deleteMsg := tgbotapi.NewDeleteMessage(chatID, messageID)
-	if _, err := sh.h.bot.Request(deleteMsg); err != nil {
+
+	_, err := sh.h.bot.Request(deleteMsg)
+	if err != nil {
 		logger.Warn("Failed to delete QR message", zap.Error(err))
 	}
-	return nil
-}
 
-// handleUpgradePremium shows the premium upgrade confirmation screen.
-func (sh *SubscriptionHandler) handleUpgradePremium(ctx context.Context, chatID int64, username string, messageID int) error {
-	logger.Info("User viewing premium offer", zap.String("username", username), zap.Int64("chat_id", chatID))
-
-	if sh.h.cfg == nil || sh.h.cfg.MainMenuBtnProductID == 0 || sh.h.db == nil {
-		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgPremiumUnavailable))
-		sh.h.safeSend(editMsg)
-		return nil
-	}
-
-	sub, err := sh.getSubscriptionWithCache(ctx, chatID)
-	if err != nil {
-		if errors.Is(err, database.ErrSubscriptionNotFound) || errors.Is(err, gorm.ErrRecordNotFound) {
-			editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgSubNoActive))
-			sh.h.safeSend(editMsg)
-			return nil
-		}
-		logger.Error("Failed to get subscription for premium offer", zap.Error(err), zap.Int64("chat_id", chatID))
-		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgSubTempError))
-		sh.h.safeSend(editMsg)
-		return fmt.Errorf("get subscription for premium offer: %w", err)
-	}
-	if sub == nil || sub.Status != "active" {
-		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgSubNoActive))
-		sh.h.safeSend(editMsg)
-		return nil
-	}
-
-	plan, err := sh.h.db.GetPlanByID(ctx, sub.PlanID)
-	if err != nil {
-		logger.Error("Failed to get plan for premium offer", zap.Error(err), zap.Int64("chat_id", chatID))
-		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgSubTempError))
-		sh.h.safeSend(editMsg)
-		return fmt.Errorf("get plan %d: %w", sub.PlanID, err)
-	}
-	if plan == nil || plan.Name != database.FreePlanName {
-		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgPremiumAlready, "Premium"))
-		editMsg.ParseMode = "Markdown"
-		sh.h.safeSend(editMsg)
-		return nil
-	}
-
-	product, err := sh.h.db.GetProductByID(ctx, sh.h.cfg.MainMenuBtnProductID)
-	if err != nil {
-		logger.Error("Failed to get product for premium offer", zap.Error(err), zap.Int64("chat_id", chatID))
-		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgSubTempError))
-		sh.h.safeSend(editMsg)
-		return fmt.Errorf("get product %d: %w", sh.h.cfg.MainMenuBtnProductID, err)
-	}
-	if product == nil || !product.IsActive || product.PriceCents != 0 {
-		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgPremiumUnavailable))
-		sh.h.safeSend(editMsg)
-		return nil
-	}
-
-	priceRub := fmt.Sprintf("%.2f ₽", float64(product.PriceCents)/100)
-	text := msg(MsgPremiumConfirm, product.Name, priceRub)
-	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, text)
-	editMsg.ParseMode = "Markdown"
-	editMsg.DisableWebPagePreview = true
-	kb := tgbotapi.NewInlineKeyboardMarkup(
-		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("✅ Получить", "confirm_upgrade_premium"),
-		),
-		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("⬅️ "+msg(MsgQRCodeBack), "back_to_start"),
-		),
-	)
-	editMsg.ReplyMarkup = &kb
-	sh.h.safeSend(editMsg)
-	return nil
-}
-
-// handleConfirmUpgradePremium activates the free premium product via OrderService.
-func (sh *SubscriptionHandler) handleConfirmUpgradePremium(ctx context.Context, chatID int64, username string, messageID int) error {
-	logger.Info("User confirming premium upgrade", zap.String("username", username), zap.Int64("chat_id", chatID))
-
-	if sh.h.cfg == nil || sh.h.cfg.MainMenuBtnProductID == 0 || sh.h.db == nil {
-		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgPremiumUnavailable))
-		sh.h.safeSend(editMsg)
-		return fmt.Errorf("product purchase not configured")
-	}
-
-	if sh.h.orderService == nil {
-		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgSubTempError))
-		sh.h.safeSend(editMsg)
-		return fmt.Errorf("order service not available")
-	}
-
-	product, err := sh.h.db.GetProductByID(ctx, sh.h.cfg.MainMenuBtnProductID)
-	if err != nil || product == nil || !product.IsActive || product.PriceCents != 0 {
-		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgPremiumUnavailable))
-		sh.h.safeSend(editMsg)
-		//nolint:nilerr // product unavailable is an expected business state, surfaced to user as MsgPremiumUnavailable
-		return nil
-	}
-
-	_, err = sh.h.orderService.ActivateProduct(ctx, chatID, username, product)
-	if err != nil {
-		logger.Error("Failed to activate premium product", zap.Error(err))
-		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgSubTempError))
-		sh.h.safeSend(editMsg)
-		return fmt.Errorf("activate product: %w", err)
-	}
-
-	sh.h.invalidateCache(ctx, chatID)
-
-	sub, dbErr := sh.h.db.GetByTelegramID(ctx, chatID)
-	var subscriptionURL, expiresText string
-	if dbErr == nil && sub != nil {
-		subscriptionURL = sh.h.cfg.SubURL(sub.SubscriptionID)
-		if sub.ExpiresAt != nil {
-			expiresText = fmt.Sprintf("Истекает: %s", sub.ExpiresAt.Format("02.01.2006 15:04"))
-		}
-	}
-
-	text := msg(MsgPremiumSuccess, product.Name, expiresText, subscriptionURL)
-	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, text)
-	editMsg.ParseMode = "Markdown"
-	editMsg.DisableWebPagePreview = true
-	kb := sh.h.keyboards.Back()
-	editMsg.ReplyMarkup = &kb
-	sh.h.safeSend(editMsg)
 	return nil
 }
 
@@ -416,6 +297,7 @@ func (sh *SubscriptionHandler) createSubscription(ctx context.Context, chatID in
 	// Capture the pending invite code under a brief lock, then release it
 	// before the (potentially slow) HTTP call into the XUI panel.
 	sh.h.pendingMu.Lock()
+
 	var inviteCode string
 	if p, ok := sh.h.pendingInvites[chatID]; ok && time.Now().Before(p.expiresAt) {
 		inviteCode = p.code
@@ -439,7 +321,9 @@ func (sh *SubscriptionHandler) createSubscription(ctx context.Context, chatID in
 	}
 
 	sh.h.cache.Set(chatID, result.Subscription)
-	if err := sh.h.notifyAdmin(ctx, username, chatID, result.SubscriptionURL); err != nil {
+
+	err = sh.h.notifyAdmin(ctx, username, chatID, result.SubscriptionURL)
+	if err != nil {
 		logger.Warn("Failed to notify admin of new subscription", zap.Error(err))
 	}
 
@@ -448,10 +332,12 @@ func (sh *SubscriptionHandler) createSubscription(ctx context.Context, chatID in
 			tgbotapi.NewInlineKeyboardButtonData("🏠 В начало", "back_to_start"),
 		),
 	)
+
 	trafficLimit := 0
 	if sh.h.subscriptionService != nil {
 		trafficLimit = sh.h.subscriptionService.PlanTrafficLimitGB(ctx, result.Subscription.TelegramID)
 	}
+
 	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, sh.h.getHelpText(trafficLimit, result.SubscriptionURL))
 	editMsg.ParseMode = "Markdown"
 	editMsg.DisableWebPagePreview = true
@@ -461,6 +347,7 @@ func (sh *SubscriptionHandler) createSubscription(ctx context.Context, chatID in
 	logger.Info("Subscription created successfully",
 		zap.String("username", username),
 		zap.Int64("chat_id", chatID))
+
 	return nil
 }
 
@@ -471,6 +358,7 @@ func (sh *SubscriptionHandler) handleCreateError(ctx context.Context, chatID int
 	classified := classifyXUIError(err)
 
 	errMsg := msg(MsgErrGeneric)
+
 	switch {
 	case errors.Is(classified, ErrXUIConnection):
 		errMsg = msg(MsgErrConnection)
@@ -486,10 +374,108 @@ func (sh *SubscriptionHandler) handleCreateError(ctx context.Context, chatID int
 		errMsg = msg(MsgErrInboundNotFound)
 	case errors.Is(classified, ErrXUIRollbackFailed):
 		errMsg = msg(MsgErrPartialSave)
+
 		sh.h.notifyAdminError(ctx, fmt.Sprintf("⚠️ ORPHAN CLIENT WARNING: %v", err))
 	}
 
 	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, errMsg)
 	editMsg.DisableWebPagePreview = true
 	sh.h.safeSend(editMsg)
+}
+
+// handleBuyPremiumList renders the product list for the payment flow.
+func (sh *SubscriptionHandler) handleBuyPremiumList(ctx context.Context, chatID int64, username string, messageID int) error {
+	logger.Info("Payment menu opened",
+		zap.Int64("chat_id", chatID),
+		zap.String("username", username))
+
+	if sh.h.orderService == nil || !sh.h.paymentEnabled {
+		return sh.showBuyError(chatID, messageID, "❌ Платежи временно недоступны")
+	}
+
+	products, err := sh.h.db.ListActiveProducts(ctx)
+	if err != nil {
+		logger.Warn("list active products failed", zap.Error(err))
+		return sh.showBuyError(chatID, messageID, msg(MsgSubTempError))
+	}
+
+	if len(products) == 0 {
+		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "❌ Нет доступных тарифов")
+		kb := sh.h.keyboards.Back()
+		editMsg.ReplyMarkup = &kb
+		sh.h.safeSend(editMsg)
+
+		return nil
+	}
+
+	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "Выберите тариф для оплаты:")
+	keyboard := sh.h.keyboards.BuyProductList(products)
+	editMsg.ReplyMarkup = &keyboard
+	sh.h.safeSend(editMsg)
+
+	return nil
+}
+
+// handleBuyProduct creates a Platega payment link for a specific product.
+func (sh *SubscriptionHandler) handleBuyProduct(ctx context.Context, chatID int64, username string, messageID int, productID uint) error {
+	if sh.h.orderService == nil || !sh.h.paymentEnabled {
+		return sh.showBuyError(chatID, messageID, "❌ Платежи временно недоступны")
+	}
+
+	product, err := sh.h.db.GetProductByID(ctx, productID)
+	if err != nil {
+		logger.Warn("load product failed", zap.Uint("product_id", productID), zap.Error(err))
+		return sh.showBuyError(chatID, messageID, msg(MsgSubTempError))
+	}
+
+	if product == nil || !product.IsActive || product.PriceCents <= 0 {
+		return sh.showBuyError(chatID, messageID, "❌ Тариф недоступен")
+	}
+
+	logger.Info("Payment purchase requested",
+		zap.Int64("chat_id", chatID),
+		zap.String("username", username),
+		zap.Uint("product_id", productID),
+		zap.String("product_name", product.Name),
+		zap.Int64("amount_cents", product.PriceCents),
+		zap.String("currency", product.Currency))
+
+	info, _, err := sh.h.orderService.RequestPayment(ctx, chatID, username, product)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrPaymentDisabled):
+			return sh.showBuyError(chatID, messageID, "❌ Платежи временно недоступны")
+		case errors.Is(err, service.ErrPaymentAlreadyInProgress):
+			return sh.showBuyError(chatID, messageID, msg(MsgPaymentInProgress))
+		case errors.Is(err, service.ErrPaymentCreationUncertain):
+			return sh.showBuyError(chatID, messageID, msg(MsgPaymentNeedsReview))
+		}
+
+		logger.Warn("request payment failed",
+			zap.Uint("product_id", productID),
+			zap.Int64("chat_id", chatID),
+			zap.Error(err))
+
+		return sh.showBuyError(chatID, messageID, msg(MsgSubTempError))
+	}
+
+	text := fmt.Sprintf("Тариф: 💎 *%s*\n\nСтоимость: *%d₽*\n\nПосле оплаты тариф активируется автоматически.\nЕсли тариф уже активен, новые дни прибавятся к текущему сроку.\n\n_Платёжная система может дополнительно взимать комиссию._",
+		utils.EscapeMarkdown(product.Name), product.PriceCents/100)
+	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, text)
+	editMsg.ParseMode = "Markdown"
+	keyboard := sh.h.keyboards.BuyProductConfirm(product, info.URL)
+	editMsg.ReplyMarkup = &keyboard
+	sh.h.safeSend(editMsg)
+
+	return nil
+}
+
+// showBuyError renders an error message and a back button.
+func (sh *SubscriptionHandler) showBuyError(chatID int64, messageID int, text string) error {
+	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, text)
+	kb := sh.h.keyboards.Back()
+	editMsg.ReplyMarkup = &kb
+	sh.h.safeSend(editMsg)
+
+	return nil
 }

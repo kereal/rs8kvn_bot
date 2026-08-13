@@ -34,7 +34,6 @@ func TestSelf_ReturnsCorrectUser(t *testing.T) {
 }
 
 func TestSelf_DefaultValues(t *testing.T) {
-
 	botConfig := &BotConfig{}
 
 	user := botConfig.Self()
@@ -82,7 +81,6 @@ func TestNewBotConfig_ReturnsValidConfig(t *testing.T) {
 }
 
 func TestNewBotConfig_WithBotAPI(t *testing.T) {
-
 	botAPI := &tgbotapi.BotAPI{
 		Self: tgbotapi.User{
 			ID:                      999888777,

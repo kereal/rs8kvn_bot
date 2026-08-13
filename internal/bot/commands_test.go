@@ -104,6 +104,7 @@ func TestHandleStart_WithTrialCode(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
+
 			mockDB := testutil.NewDatabaseService()
 			mockXUI := testutil.NewXUIClient()
 			mockBot := testutil.NewBotAPI()
@@ -127,7 +128,6 @@ func TestHandleStart_WithTrialCode(t *testing.T) {
 			assert.True(t, mockBot.SendCalledSafe(), "Should send a message")
 			assert.Equal(t, tt.wantSendCount, mockBot.SendCountSafe(), "Should send expected number of messages")
 			assert.Contains(t, mockBot.LastSentTextSafe(), tt.wantText, "Should contain expected text")
-
 		})
 	}
 }
@@ -172,6 +172,7 @@ func TestHandleStart_NormalFlow(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
+
 			mockDB := testutil.NewDatabaseService()
 			mockXUI := testutil.NewXUIClient()
 			mockBot := testutil.NewBotAPI()
@@ -196,7 +197,6 @@ func TestHandleStart_NormalFlow(t *testing.T) {
 
 			assert.True(t, mockBot.SendCalledSafe(), "Should send a message")
 			assert.Contains(t, mockBot.LastSentTextSafe(), tt.wantText, "Should contain expected text")
-
 		})
 	}
 }
@@ -412,6 +412,7 @@ func TestHandleBindTrial_WithReferrerNotification(t *testing.T) {
 		if callCount == 1 {
 			return nil, gorm.ErrRecordNotFound
 		}
+
 		return nil, gorm.ErrRecordNotFound
 	}
 	mockDB.BindTrialSubscriptionFunc = func(ctx context.Context, subscriptionID string, telegramID int64, username string) (*database.Subscription, error) {
@@ -443,12 +444,14 @@ func TestHandleBindTrial_WithReferrerNotification(t *testing.T) {
 
 	// Verify referrer notification (use variable instead of hardcoded)
 	referrerNotified := false
+
 	for _, msg := range messages {
 		if msg.ChatID == referrerTGID && strings.Contains(msg.Text, "активировал подписку") {
 			referrerNotified = true
 			break
 		}
 	}
+
 	assert.True(t, referrerNotified, "Referrer should receive notification about activation")
 }
 

@@ -97,7 +97,7 @@ func (c *ProxmanClient) sendEvent(ctx context.Context, event ProxmanEvent) error
 	if err != nil {
 		return fmt.Errorf("proxman request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBody, _ := io.ReadAll(resp.Body)
 	bodyStr := string(bytes.TrimSpace(respBody))
@@ -107,6 +107,7 @@ func (c *ProxmanClient) sendEvent(ctx context.Context, event ProxmanEvent) error
 		if bodyStr == "duplicate" {
 			return ErrSubscriptionAlreadyExists
 		}
+
 		return nil
 	case http.StatusBadRequest:
 		return fmt.Errorf("proxman bad request: %s", bodyStr)

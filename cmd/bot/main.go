@@ -1,9 +1,11 @@
+// Package main starts the Telegram bot and its HTTP/background services.
 package main
 
 import (
 	"context"
+	cryptorand "crypto/rand"
 	"fmt"
-	"math/rand"
+	"math/big"
 	"os"
 	"os/signal"
 	"runtime/debug"
@@ -11,6 +13,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/getsentry/sentry-go"
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/kereal/rs8kvn_bot/internal/bot"
 	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
@@ -24,9 +28,6 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/vpn"
 	"github.com/kereal/rs8kvn_bot/internal/web"
 	"github.com/kereal/rs8kvn_bot/internal/xui"
-
-	"github.com/getsentry/sentry-go"
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"go.uber.org/zap"
 )
 
@@ -67,6 +68,7 @@ func defaultOptions() *runOptions {
 			if err != nil {
 				return nil, err
 			}
+
 			return c, nil
 		},
 		vpnClientFn: vpn.NewClient,
@@ -83,6 +85,7 @@ func buildRuntimeNodeClients(nodes []database.Node, opts *runOptions) ([]databas
 			runtimeNodes = append(runtimeNodes, node)
 		}
 	}
+
 	if len(runtimeNodes) == 0 {
 		return nil, nil, nil, fmt.Errorf("no active nodes configured")
 	}
@@ -92,11 +95,13 @@ func buildRuntimeNodeClients(nodes []database.Node, opts *runOptions) ([]databas
 
 	for _, node := range runtimeNodes {
 		var xuiClient interfaces.XUIClient
+
 		if node.Type == database.NodeType3xUI {
 			client, err := opts.xuiClientFn(node.Host, node.APIToken)
 			if err != nil {
 				return nil, nil, nil, fmt.Errorf("init 3x-ui client for node %d: %w", node.ID, err)
 			}
+
 			xuiClient = client
 			xuiClients[node.ID] = client
 		}
@@ -111,6 +116,7 @@ func buildRuntimeNodeClients(nodes []database.Node, opts *runOptions) ([]databas
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("init vpn client for node %d: %w", node.ID, err)
 		}
+
 		vpnClients[node.ID] = client
 	}
 
@@ -161,80 +167,95 @@ func initBot(cfg *config.Config) (*tgbotapi.BotAPI, *bot.BotConfig, error) {
 	logger.Info("Validating Telegram bot token")
 
 	const botInitMaxAttempts = 5
+
 	botInitDelay := 3 * time.Second
 
-	var api *tgbotapi.BotAPI
-	var bc *bot.BotConfig
+	var lastErr error
 
-	for i := 0; i < botInitMaxAttempts; i++ {
+	for i := range botInitMaxAttempts {
+		var (
+			api *tgbotapi.BotAPI
+			bc  *bot.BotConfig
+			err error
+		)
+
 		func() {
-			defer recoverAndReport("Telegram bot init")
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					lastErr = fmt.Errorf("telegram bot init panic: %v", recovered)
+				}
+			}()
 
-			var err error
 			api, err = tgbotapi.NewBotAPI(cfg.TelegramBotToken)
-			if err != nil {
-				if i == botInitMaxAttempts-1 {
-					logger.Fatal("Failed to initialize Telegram bot after max attempts",
-						zap.Error(err),
-						zap.Int("attempts", botInitMaxAttempts))
-				}
-				logger.Warn("Telegram bot init failed, retrying...",
-					zap.Int("attempt", i+1),
-					zap.Int("max_attempts", botInitMaxAttempts),
-					zap.Error(err))
-				time.Sleep(botInitDelay + time.Duration(rand.Int63n(int64(botInitDelay/2)))) //nolint:gosec // jitter
-				return
-			}
-
-			bc, err = bot.NewBotConfig(api)
-			if err != nil {
-				if i == botInitMaxAttempts-1 {
-					logger.Fatal("Failed to create bot config after max attempts",
-						zap.Int("attempts", botInitMaxAttempts),
-						zap.Error(err))
-				}
-				logger.Warn("Bot config creation failed, retrying...",
-					zap.Int("attempt", i+1),
-					zap.Int("max_attempts", botInitMaxAttempts),
-					zap.Error(err))
-				time.Sleep(botInitDelay + time.Duration(rand.Int63n(int64(botInitDelay/2)))) //nolint:gosec // jitter
-				return
+			if err == nil {
+				bc, err = bot.NewBotConfig(api)
 			}
 		}()
 
-		if api != nil && bc != nil {
+		if err == nil && api != nil && bc != nil {
+			logger.Info("Telegram bot authorized", zap.String("username", bc.Username))
+			return api, bc, nil
+		}
+
+		if err == nil {
+			err = lastErr
+		}
+
+		lastErr = err
+
+		if i == botInitMaxAttempts-1 {
 			break
 		}
+
+		logger.Warn("Telegram bot init failed, retrying...", zap.Int("attempt", i+1), zap.Int("max_attempts", botInitMaxAttempts), zap.Error(err))
+
+		jitter := time.Duration(0)
+
+		if maxJitter := botInitDelay / 2; maxJitter > 0 {
+			n, randErr := cryptorand.Int(cryptorand.Reader, big.NewInt(int64(maxJitter)))
+			if randErr == nil {
+				jitter = time.Duration(n.Int64())
+			}
+		}
+
+		time.Sleep(botInitDelay + jitter)
 	}
 
-	if api == nil || bc == nil {
-		return nil, nil, fmt.Errorf("failed to initialize Telegram bot after all attempts")
-	}
-
-	// The username comes from Telegram getMe (populated in NewBotConfig above).
-	// The bot is authorized via its token, and getMe reliably returns the @username,
-	// which is then propagated to handlers/links via SetBotConfig.
-	logger.Info("Telegram bot authorized", zap.String("username", bc.Username))
-
-	return api, bc, nil
+	return nil, nil, fmt.Errorf("failed to initialize Telegram bot after %d attempts: %w", botInitMaxAttempts, lastErr)
 }
 
 // startWebServer создаёт и запускает HTTP-сервер (подписки, инвайт/trial-страницы).
 // Сервер стартует асинхронно; функция ждёт до 2 секунд первой ошибки запуска,
 // чтобы не блокировать старт бота, но вернуть ошибку, если сервер точно не поднялся.
-func startWebServer(subService *service.SubscriptionService, cfg *config.Config, botConfig *bot.BotConfig, subServer *subserver.Service, dbService *database.Service) (*web.Server, error) {
+func startWebServer(subService *service.SubscriptionService, cfg *config.Config, botConfig *bot.BotConfig, subServer *subserver.Service, dbService *database.Service, orderService *service.OrderService, botAPI interfaces.BotAPI) (*web.Server, error) {
 	webServer := web.NewServer(fmt.Sprintf(":%d", cfg.WebServerPort), dbService, cfg, botConfig.Username, subService, subServer)
+	webServer.SetOrderService(orderService)
+	webServer.SetBot(botAPI)
+
+	if cfg.PaymentEnabled {
+		webServer.SetPaymentConfig(&web.PaymentConfig{
+			Enabled:    true,
+			MerchantID: cfg.PlategaMerchantID,
+			Secret:     cfg.PlategaSecret,
+		})
+	}
+
 	webServer.RegisterChecker("database", func(ctx context.Context) web.ComponentHealth {
-		if err := dbService.Ping(ctx); err != nil {
+		err := dbService.Ping(ctx)
+		if err != nil {
 			return web.ComponentHealth{Status: web.StatusDown, Message: err.Error()}
 		}
+
 		return web.ComponentHealth{Status: web.StatusOK}
 	})
 
 	webServerStartErr := make(chan error, 1)
+
 	go func() {
 		defer recoverAndReport("Web server start")
-		if err := webServer.Start(context.Background()); err != nil {
+
+		err := webServer.Start(context.Background())
+		if err != nil {
 			webServerStartErr <- err
 		}
 	}()
@@ -251,26 +272,24 @@ func startWebServer(subService *service.SubscriptionService, cfg *config.Config,
 // периодическую сверку осиротевших клиентов, бэкапы, heartbeat, очистку trial,
 // а также синхронизацию и истечение подписок. Возвращает WaitGroup для ожидания
 // завершения при штатном выключении.
-func startBackgroundWorkers(ctx context.Context, handler *bot.Handler, subService *service.SubscriptionService, dbService *database.Service, cfg *config.Config, vpnClients map[uint]vpn.Client, nodes []database.Node) *sync.WaitGroup {
+func startBackgroundWorkers(ctx context.Context, handler *bot.Handler, subService *service.SubscriptionService, syncSvc *service.SyncService, dbService *database.Service, cfg *config.Config) *sync.WaitGroup {
 	var wg sync.WaitGroup
 	wg.Add(8)
 
-	// Create sync service and wire it into subscription service BEFORE starting
-	// any background goroutines. This prevents a race where the trial cleanup
-	// scheduler calls CleanupExpiredTrials before SetSyncService has run, which
-	// would bypass the sync-based deprovision path and fall into the legacy
-	// deleteClientFromAllNodes code that sends delete requests to ALL nodes.
-	syncSvc := service.NewSyncService(dbService, vpnClients, nodes)
-	subService.SetSyncService(syncSvc)
-
-	orderService := service.NewOrderService(dbService, subService, syncSvc)
-	handler.SetOrderService(orderService)
+	// The services are wired before any background goroutine starts. Reuse the
+	// same SyncService instance that was injected into payment/subscription
+	// services so chargeback, expiry, and the worker share one DB-sync contract.
+	if syncSvc == nil {
+		logger.Warn("SyncService not available; background sync workers may be degraded")
+	}
 
 	go func() {
 		defer recoverAndReport("DB pool metrics collector")
 		defer wg.Done()
+
 		ticker := time.NewTicker(10 * time.Second)
 		defer ticker.Stop()
+
 		for {
 			select {
 			case <-ctx.Done():
@@ -284,29 +303,36 @@ func startBackgroundWorkers(ctx context.Context, handler *bot.Handler, subServic
 	go func() {
 		defer recoverAndReport("Orphan reconciler")
 		defer wg.Done()
+
 		select {
 		case <-time.After(30 * time.Second):
 		case <-ctx.Done():
 			return
 		}
+
 		svc := handler.GetSubscriptionService()
 		if svc == nil {
 			logger.Warn("SubscriptionService not available, skipping orphan reconciliation")
 			return
 		}
-		if count, err := svc.ReconcileOrphanedClients(ctx); err != nil {
+
+		count, err := svc.ReconcileOrphanedClients(ctx)
+		if err != nil {
 			logger.Warn("Initial orphan reconciliation failed", zap.Error(err))
 		} else {
 			logger.Info("Orphan reconciliation completed", zap.Int("removed", count))
 		}
+
 		ticker := time.NewTicker(6 * time.Hour)
 		defer ticker.Stop()
+
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				if count, err := svc.ReconcileOrphanedClients(ctx); err != nil {
+				count, err := svc.ReconcileOrphanedClients(ctx)
+				if err != nil {
 					logger.Warn("Orphan reconciliation failed", zap.Error(err))
 				} else {
 					logger.Info("Orphan reconciliation completed", zap.Int("removed", count))
@@ -316,21 +342,25 @@ func startBackgroundWorkers(ctx context.Context, handler *bot.Handler, subServic
 	}()
 
 	backupSched := scheduler.NewBackupScheduler(cfg.DatabasePath, config.DefaultBackupHour, config.DefaultBackupRetention)
+
 	go func() {
 		defer recoverAndReport("Backup scheduler")
 		defer wg.Done()
+
 		backupSched.Start(ctx)
 	}()
 
 	go func() {
 		defer recoverAndReport("Heartbeat scheduler")
 		defer wg.Done()
+
 		heartbeat.Start(ctx, cfg.HeartbeatURL, cfg.HeartbeatInterval)
 	}()
 
 	go func() {
 		defer recoverAndReport("Trial cleanup scheduler")
 		defer wg.Done()
+
 		trialSched := scheduler.NewTrialCleanupScheduler(subService)
 		trialSched.Start(ctx)
 	}()
@@ -338,6 +368,7 @@ func startBackgroundWorkers(ctx context.Context, handler *bot.Handler, subServic
 	go func() {
 		defer recoverAndReport("Subscription sync worker")
 		defer wg.Done()
+
 		syncWorker := scheduler.NewSubscriptionSyncWorker(syncSvc)
 		syncWorker.Run(ctx)
 	}()
@@ -345,6 +376,7 @@ func startBackgroundWorkers(ctx context.Context, handler *bot.Handler, subServic
 	go func() {
 		defer recoverAndReport("Subscription expire worker")
 		defer wg.Done()
+
 		expireWorker := scheduler.NewSubscriptionExpireWorker(dbService, subService)
 		expireWorker.Run(ctx)
 	}()
@@ -352,6 +384,7 @@ func startBackgroundWorkers(ctx context.Context, handler *bot.Handler, subServic
 	go func() {
 		defer recoverAndReport("Subscription reminder worker")
 		defer wg.Done()
+
 		reminderWorker := scheduler.NewSubscriptionReminderWorker(dbService, subService)
 		reminderWorker.Run(ctx)
 	}()
@@ -375,32 +408,46 @@ func main() {
 
 	// 2. Initialize Sentry (before logger)
 	initSentry(cfg)
-	defer sentry.Flush(logger.SentryFlushTimeout)
 
 	// 3. Initialize logger
-	logService := initLogger(cfg)
+	logService, err := initLogger(cfg)
+	if err != nil {
+		// The logger failed to initialize, so the deferred flush below is not
+		// registered yet: flush Sentry explicitly before exiting.
+		fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
+		sentry.Flush(logger.SentryFlushTimeout)
+		os.Exit(1)
+	}
+	defer sentry.Flush(logger.SentryFlushTimeout)
 	defer func() {
-		if err := logService.Close(); err != nil {
+		err := logService.Close()
+		if err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to close logger: %v\n", err)
 		}
 	}()
 
 	// 4. Initialize database and node clients
-	dbService, deps := initDatabase(cfg)
+	dbService, deps, err := initDatabase(cfg)
+	if err != nil {
+		logger.Fatal("Failed to initialize database", zap.Error(err))
+	}
 	defer func() {
-		if err := dbService.Close(); err != nil {
+		err := dbService.Close()
+		if err != nil {
 			logger.Error("Failed to close database", zap.Error(err))
 		}
 	}()
 	defer func() {
 		for id, client := range deps.xuiClients {
-			if err := client.Close(); err != nil {
+			err := client.Close()
+			if err != nil {
 				logger.Error("Failed to close 3x-ui client",
 					zap.Uint("node_id", id),
 					zap.Error(err))
 			}
 		}
 	}()
+
 	logger.Info("Database initialized successfully")
 	// 5. Wire application services with a placeholder bot; initBot runs below
 	// (step 7) and replaces it with the real bot before any update is processed.
@@ -415,40 +462,52 @@ func main() {
 	// The web server starts with an empty bot username; initBot injects the real
 	// username (from Telegram getMe) via SetBotUsername once the bot is ready, so
 	// the share/invite page shows the correct @username after startup.
-	webServer, err := startWebServer(svc.subService, cfg, botConfig, svc.subServer, dbService)
+	webServer, err := startWebServer(svc.subService, cfg, botConfig, svc.subServer, dbService, svc.orderService, botAPI)
 	if err != nil {
-		logger.Warn("Failed to start web server, continuing without web server", zap.Error(err))
+		logger.Fatal("Failed to start web server", zap.Error(err))
 	}
 	defer func() {
 		if webServer == nil {
 			return
 		}
+
 		webServer.SetReady(false)
+		webServer.SetPaymentReady(false)
+
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		if err := webServer.Stop(shutdownCtx); err != nil {
+
+		err := webServer.Stop(shutdownCtx)
+		if err != nil {
 			logger.Error("Failed to stop web server", zap.Error(err))
 		}
 	}()
 
 	// 7. Initialize Telegram bot (initBot retries internally and calls Fatal on total failure).
 	logger.Info("Initializing Telegram bot...")
+
 	api, bc, err := initBot(cfg)
 	if err != nil {
 		logger.Fatal("Telegram bot initialization failed", zap.Error(err))
 	}
+
 	svc.handler.SetBot(api)
 	svc.subService.SetBot(api)
 	svc.handler.SetBotConfig(bc)
+
+	if svc.orderService != nil {
+		svc.orderService.SetBotUsername(bc.Username)
+		svc.orderService.SetAdminBot(api)
+	}
+
 	botAPI = api
 	if webServer != nil {
+		webServer.SetBot(api)
 		webServer.SetBotUsername(bc.Username)
 	} else {
 		logger.Warn("web server not running; share/invite page username not updated")
 	}
-	logger.Info("Telegram bot initialized successfully")
 
-	// 8. Configure update listener
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = config.BotUpdateTimeout
 	u.AllowedUpdates = []string{"message", "callback_query"}
@@ -462,9 +521,14 @@ func main() {
 	svc.handler.StartCacheCleanup(ctx, bot.CacheTTL/2)
 	svc.handler.StartRateLimiterCleanup(ctx, bot.CacheTTL, bot.CacheTTL*2)
 	svc.handler.StartReferralCacheSync(ctx)
-	bgWg := startBackgroundWorkers(ctx, svc.handler, svc.subService, dbService, cfg, deps.vpnClients, deps.nodes)
+	bgWg := startBackgroundWorkers(ctx, svc.handler, svc.subService, svc.syncService, dbService, cfg)
+
+	if webServer != nil {
+		webServer.SetPaymentReady(true)
+	}
 
 	logger.Debug("Bot started successfully")
+
 	if webServer != nil {
 		webServer.SetReady(true)
 	}
@@ -481,6 +545,7 @@ func main() {
 func recoverAndReport(component string) {
 	if r := recover(); r != nil {
 		stack := debug.Stack()
+
 		sentry.CurrentHub().Recover(r)
 		sentry.Flush(logger.SentryPanicFlushTimeout)
 		logger.Error(component+" panicked",
@@ -493,5 +558,6 @@ func recoverAndReport(component string) {
 // handleUpdateSafely handles a Telegram update with panic recovery.
 func handleUpdateSafely(ctx context.Context, handler *bot.Handler, update tgbotapi.Update) {
 	defer recoverAndReport("Update handler")
+
 	handler.HandleUpdate(ctx, update)
 }

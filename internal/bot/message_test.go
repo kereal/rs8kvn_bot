@@ -3,6 +3,7 @@ package bot
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/kereal/rs8kvn_bot/internal/config"
@@ -72,11 +73,13 @@ func TestSend_DisablesWebPagePreview(t *testing.T) {
 	ctx := context.Background()
 
 	var capturedMsg tgbotapi.MessageConfig
+
 	mockBot := &testutil.BotAPI{
 		SendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
 			if msg, ok := c.(tgbotapi.MessageConfig); ok {
 				capturedMsg = msg
 			}
+
 			return tgbotapi.Message{MessageID: 123}, nil
 		},
 	}
@@ -254,11 +257,13 @@ func TestSendMessage_SpecialCharacters(t *testing.T) {
 	ctx := context.Background()
 
 	var capturedMsg tgbotapi.MessageConfig
+
 	mockBot := &testutil.BotAPI{
 		SendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
 			if msg, ok := c.(tgbotapi.MessageConfig); ok {
 				capturedMsg = msg
 			}
+
 			return tgbotapi.Message{MessageID: 999}, nil
 		},
 	}
@@ -283,11 +288,13 @@ func TestSendMessage_Unicode(t *testing.T) {
 	ctx := context.Background()
 
 	var capturedMsg tgbotapi.MessageConfig
+
 	mockBot := &testutil.BotAPI{
 		SendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
 			if msg, ok := c.(tgbotapi.MessageConfig); ok {
 				capturedMsg = msg
 			}
+
 			return tgbotapi.Message{MessageID: 999}, nil
 		},
 	}
@@ -312,11 +319,13 @@ func TestSendMessage_LongMessage(t *testing.T) {
 	ctx := context.Background()
 
 	var capturedMsg tgbotapi.MessageConfig
+
 	mockBot := &testutil.BotAPI{
 		SendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
 			if msg, ok := c.(tgbotapi.MessageConfig); ok {
 				capturedMsg = msg
 			}
+
 			return tgbotapi.Message{MessageID: 999}, nil
 		},
 	}
@@ -329,14 +338,14 @@ func TestSendMessage_LongMessage(t *testing.T) {
 	handler := NewHandler(mockBot, cfg, nil, NewTestBotConfig(), nil, "")
 
 	// Create a long message
-	longText := ""
-	for i := 0; i < 1000; i++ {
-		longText += "This is a test message. "
+	var longText strings.Builder
+	for range 1000 {
+		longText.WriteString("This is a test message. ")
 	}
 
-	handler.SendMessage(ctx, 12345, longText)
+	handler.SendMessage(ctx, 12345, longText.String())
 
-	assert.Equal(t, longText, capturedMsg.Text, "Message text should preserve long text")
+	assert.Equal(t, longText.String(), capturedMsg.Text, "Message text should preserve long text")
 }
 
 // TestSendMessage_MultipleMessages tests sending multiple messages
@@ -359,7 +368,7 @@ func TestSendMessage_MultipleMessages(t *testing.T) {
 	handler := NewHandler(mockBot, cfg, nil, NewTestBotConfig(), nil, "")
 
 	// Send multiple messages
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		handler.SendMessage(ctx, 12345, "test message")
 	}
 
@@ -385,12 +394,15 @@ func TestSendMessage_DifferentChatIDs(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
+
 			var capturedMsg tgbotapi.MessageConfig
+
 			mockBot := &testutil.BotAPI{
 				SendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
 					if msg, ok := c.(tgbotapi.MessageConfig); ok {
 						capturedMsg = msg
 					}
+
 					return tgbotapi.Message{MessageID: 999}, nil
 				},
 			}
@@ -405,7 +417,6 @@ func TestSendMessage_DifferentChatIDs(t *testing.T) {
 			handler.SendMessage(ctx, tc.chatID, "test message")
 
 			assert.Equal(t, tc.chatID, capturedMsg.ChatID, "ChatID should match")
-
 		})
 	}
 }
@@ -447,6 +458,7 @@ func TestSafeSend_WithVariousChattables(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
+
 			mockBot := &testutil.BotAPI{
 				SendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
 					return tgbotapi.Message{MessageID: 999}, nil
@@ -464,7 +476,6 @@ func TestSafeSend_WithVariousChattables(t *testing.T) {
 
 			assert.Equal(t, 1, mockBot.SendCountSafe(), "Send should be called once")
 			tc.checkFunc(t, mockBot.LastChattableSafe())
-
 		})
 	}
 }
@@ -490,16 +501,18 @@ func TestSend_MultipleConcurrentSends(t *testing.T) {
 
 	// Send multiple messages concurrently
 	done := make(chan bool, 10)
-	for i := 0; i < 10; i++ {
+
+	for range 10 {
 		go func() {
 			msg := tgbotapi.NewMessage(12345, "concurrent message")
 			handler.send(ctx, msg)
+
 			done <- true
 		}()
 	}
 
 	// Wait for all goroutines to complete
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		<-done
 	}
 
@@ -538,11 +551,13 @@ func TestSend_WithMarkdownText(t *testing.T) {
 	ctx := context.Background()
 
 	var capturedMsg tgbotapi.MessageConfig
+
 	mockBot := &testutil.BotAPI{
 		SendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
 			if msg, ok := c.(tgbotapi.MessageConfig); ok {
 				capturedMsg = msg
 			}
+
 			return tgbotapi.Message{MessageID: 123}, nil
 		},
 	}

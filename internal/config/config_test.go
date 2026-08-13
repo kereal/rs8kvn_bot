@@ -8,28 +8,50 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestMain isolates the Load() tests from payment environment variables that
+// may be exported in the host shell or a local .env (e.g. a development
+// environment with PAYMENT_ENABLED=true and a placeholder merchant ID). The
+// Load() tests exercise non-payment settings only, so payment vars must not
+// leak into validation. Without this, a host with payments enabled fails every
+// Load() test with "PLATEGA_MERCHANT_ID must be a UUID".
+func TestMain(m *testing.M) {
+	for _, key := range []string{"PAYMENT_ENABLED", "PAYMENT_PROVIDER", "PLATEGA_MERCHANT_ID", "PLATEGA_SECRET"} {
+		_ = os.Unsetenv(key)
+	}
+
+	os.Exit(m.Run())
+}
+
 func TestLoad_DefaultValues(t *testing.T) {
 	require.NoError(t, os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz"))
 	require.NoError(t, os.Setenv("TELEGRAM_ADMIN_ID", "123456"))
 	require.NoError(t, os.Setenv("LOG_LEVEL", "info"))
+
 	defer func() {
-		if err := os.Unsetenv("TELEGRAM_BOT_TOKEN"); err != nil {
-			t.Logf("Warning: Unsetenv failed: %v", err)
-		}
-		if err := os.Unsetenv("TELEGRAM_ADMIN_ID"); err != nil {
+		err := os.Unsetenv("TELEGRAM_BOT_TOKEN")
+		if err != nil {
 			t.Logf("Warning: Unsetenv failed: %v", err)
 		}
 
-		if err := os.Unsetenv("LOG_LEVEL"); err != nil {
+		err = os.Unsetenv("TELEGRAM_ADMIN_ID")
+		if err != nil {
+			t.Logf("Warning: Unsetenv failed: %v", err)
+		}
+
+		err = os.Unsetenv("LOG_LEVEL")
+		if err != nil {
 			t.Logf("Warning: Unsetenv failed: %v", err)
 		}
 	}()
 
 	// Isolate from host environment — SUBSERVER_ACCESS_LOG may be set in .env
-	if err := os.Unsetenv("SUBSERVER_ACCESS_LOG"); err != nil {
+	err := os.Unsetenv("SUBSERVER_ACCESS_LOG")
+	if err != nil {
 		t.Logf("Warning: Unsetenv failed: %v", err)
 	}
+
 	require.NoError(t, os.Setenv("GLOBAL_SUB_URL", "https://vpn.example.com/sub/"))
+
 	defer os.Unsetenv("GLOBAL_SUB_URL")
 
 	cfg, err := Load()
@@ -74,6 +96,7 @@ func TestLoad_MissingBotToken(t *testing.T) {
 	os.Setenv("TELEGRAM_BOT_TOKEN", "")
 	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
 	os.Setenv("LOG_LEVEL", "info")
+
 	defer func() {
 		os.Unsetenv("TELEGRAM_BOT_TOKEN")
 		os.Unsetenv("TELEGRAM_ADMIN_ID")
@@ -88,6 +111,7 @@ func TestLoad_InvalidTelegramAdminID(t *testing.T) {
 	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
 	os.Setenv("TELEGRAM_ADMIN_ID", "invalid")
 	os.Setenv("LOG_LEVEL", "info")
+
 	defer func() {
 		os.Unsetenv("TELEGRAM_BOT_TOKEN")
 		os.Unsetenv("LOG_LEVEL")
@@ -106,6 +130,7 @@ func TestLoad_InvalidHeartbeatInterval_Zero(t *testing.T) {
 	os.Setenv("LOG_LEVEL", "info")
 
 	os.Setenv("GLOBAL_SUB_URL", "https://vpn.example.com/sub/")
+
 	defer func() {
 		os.Unsetenv("TELEGRAM_BOT_TOKEN")
 		os.Unsetenv("TELEGRAM_ADMIN_ID")
@@ -146,6 +171,7 @@ func TestLoad_InvalidWebServerPort_Zero(t *testing.T) {
 	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
 	os.Setenv("WEB_SERVER_PORT", "0")
 	os.Setenv("LOG_LEVEL", "info")
+
 	defer func() {
 		os.Unsetenv("TELEGRAM_BOT_TOKEN")
 		os.Unsetenv("TELEGRAM_ADMIN_ID")
@@ -162,6 +188,7 @@ func TestLoad_InvalidWebServerPort_Max(t *testing.T) {
 	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
 	os.Setenv("WEB_SERVER_PORT", "65536")
 	os.Setenv("LOG_LEVEL", "info")
+
 	defer func() {
 		os.Unsetenv("TELEGRAM_BOT_TOKEN")
 		os.Unsetenv("TELEGRAM_ADMIN_ID")
@@ -180,6 +207,7 @@ func TestLoad_ValidWebServerPort_Max(t *testing.T) {
 	os.Setenv("LOG_LEVEL", "info")
 
 	os.Setenv("GLOBAL_SUB_URL", "https://vpn.example.com/sub/")
+
 	defer func() {
 		os.Unsetenv("TELEGRAM_BOT_TOKEN")
 		os.Unsetenv("TELEGRAM_ADMIN_ID")
@@ -199,6 +227,7 @@ func TestLoad_ValidTelegramAdminID(t *testing.T) {
 	os.Setenv("LOG_LEVEL", "info")
 
 	os.Setenv("GLOBAL_SUB_URL", "https://vpn.example.com/sub/")
+
 	defer func() {
 		os.Unsetenv("TELEGRAM_BOT_TOKEN")
 		os.Unsetenv("TELEGRAM_ADMIN_ID")
@@ -240,6 +269,7 @@ func TestLoad_ValidTrialDurationHours_Min(t *testing.T) {
 	os.Setenv("LOG_LEVEL", "info")
 
 	os.Setenv("GLOBAL_SUB_URL", "https://vpn.example.com/sub/")
+
 	defer func() {
 		os.Unsetenv("TELEGRAM_BOT_TOKEN")
 		os.Unsetenv("TELEGRAM_ADMIN_ID")
@@ -282,6 +312,7 @@ func TestLoad_InvalidTrialDurationHours_OverMax(t *testing.T) {
 	os.Setenv("TRIAL_DURATION_HOURS", "169")
 	os.Setenv("SITE_URL", "https://example.com")
 	os.Setenv("LOG_LEVEL", "info")
+
 	defer func() {
 		os.Unsetenv("TELEGRAM_BOT_TOKEN")
 		os.Unsetenv("TELEGRAM_ADMIN_ID")
@@ -302,6 +333,7 @@ func TestLoad_InvalidTrialRateLimit_Zero(t *testing.T) {
 	os.Setenv("LOG_LEVEL", "info")
 
 	os.Setenv("GLOBAL_SUB_URL", "https://vpn.example.com/sub/")
+
 	defer func() {
 		os.Unsetenv("TELEGRAM_BOT_TOKEN")
 		os.Unsetenv("TELEGRAM_ADMIN_ID")
@@ -323,6 +355,7 @@ func TestLoad_ValidTrialRateLimit_Min(t *testing.T) {
 	os.Setenv("LOG_LEVEL", "info")
 
 	os.Setenv("GLOBAL_SUB_URL", "https://vpn.example.com/sub/")
+
 	defer func() {
 		os.Unsetenv("TELEGRAM_BOT_TOKEN")
 		os.Unsetenv("TELEGRAM_ADMIN_ID")
@@ -345,6 +378,7 @@ func TestLoad_ValidTrialRateLimit_Max(t *testing.T) {
 	os.Setenv("LOG_LEVEL", "info")
 
 	os.Setenv("GLOBAL_SUB_URL", "https://vpn.example.com/sub/")
+
 	defer func() {
 		os.Unsetenv("TELEGRAM_BOT_TOKEN")
 		os.Unsetenv("TELEGRAM_ADMIN_ID")
@@ -364,6 +398,7 @@ func TestLoad_InvalidHeartbeatInterval(t *testing.T) {
 	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
 	os.Setenv("HEARTBEAT_INTERVAL", "invalid")
 	os.Setenv("LOG_LEVEL", "info")
+
 	defer func() {
 		os.Unsetenv("TELEGRAM_BOT_TOKEN")
 		os.Unsetenv("TELEGRAM_ADMIN_ID")
@@ -454,6 +489,29 @@ func TestMaskURL_InvalidURL(t *testing.T) {
 
 	result := maskURL("not a valid url")
 	assert.Equal(t, ":///***", result, "maskURL() for invalid URL")
+}
+
+func TestConfig_Validate_InvalidPaymentMerchantUUID(t *testing.T) {
+	t.Parallel()
+
+	cfg := &Config{
+		TelegramBotToken:   "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
+		TelegramAdminID:    123456,
+		HeartbeatInterval:  60,
+		LogLevel:           "info",
+		WebServerPort:      DefaultWebServerPort,
+		SiteURL:            "https://vpn.site",
+		TrialDurationHours: 3,
+		TrialRateLimit:     3,
+		GlobalSubURL:       "https://vpn.example.com/sub/",
+		PaymentEnabled:     true,
+		PaymentProvider:    "platega",
+		PlategaMerchantID:  "not-a-uuid",
+		PlategaSecret:      "secret",
+	}
+	err := cfg.validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "PLATEGA_MERCHANT_ID")
 }
 
 func TestConfig_Validate_Valid(t *testing.T) {
@@ -880,6 +938,7 @@ func FuzzLoad_InvalidEnvValues(f *testing.F) {
 		for _, key := range []string{"TELEGRAM_ADMIN_ID", "HEARTBEAT_INTERVAL", "TRIAL_DURATION_HOURS", "TRIAL_RATE_LIMIT", "WEB_SERVER_PORT"} {
 			os.Setenv(key, invalidVal)
 		}
+
 		for k, v := range baseEnvs {
 			os.Setenv(k, v)
 		}
@@ -887,6 +946,7 @@ func FuzzLoad_InvalidEnvValues(f *testing.F) {
 			for key := range baseEnvs {
 				os.Unsetenv(key)
 			}
+
 			for _, key := range []string{"HEARTBEAT_INTERVAL", "TRIAL_DURATION_HOURS", "TRIAL_RATE_LIMIT", "WEB_SERVER_PORT"} {
 				os.Unsetenv(key)
 			}
