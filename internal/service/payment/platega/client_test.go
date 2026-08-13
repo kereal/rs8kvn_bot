@@ -17,7 +17,7 @@ func TestCreateTransactionContract(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, http.MethodPost, r.Method)
 		require.Equal(t, "/v2/transaction/process", r.URL.Path)
-		require.Equal(t, "merchant", r.Header.Get("X-MerchantId"))
+		require.Equal(t, "merchant", r.Header.Get("X-Merchantid"))
 		require.Equal(t, "secret", r.Header.Get("X-Secret"))
 		require.Equal(t, "application/json", r.Header.Get("Content-Type"))
 

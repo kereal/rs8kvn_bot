@@ -66,6 +66,7 @@ func TestBearerAuthMiddleware_Rejection(t *testing.T) {
 		{"wrong scheme Basic", "my-secret-token", "Basic dXNlcjpwYXNz", false, http.StatusUnauthorized},
 		{"wrong scheme no prefix", "my-secret-token", "my-secret-token", false, http.StatusUnauthorized},
 		{"wrong scheme lowercase bearer", "my-secret-token", "bearer my-secret-token", false, http.StatusUnauthorized},
+		//nolint:dupword // intentional: testing rejection of duplicated Bearer prefix
 		{"double bearer", "my-secret-token", "Bearer Bearer my-secret-token", false, http.StatusUnauthorized},
 		{"bearer with extra space", "my-secret-token", "Bearer  my-secret-token", false, http.StatusUnauthorized},
 	}

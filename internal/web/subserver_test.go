@@ -139,7 +139,7 @@ func TestHandleSubscription_SourceVariants(t *testing.T) {
 				require.NoError(t, err)
 				assert.Contains(t, string(decoded), "vless://abc@x.com:443")
 				assert.Contains(t, string(decoded), "vmess://def@y.com:8443")
-				userInfo := w.Header().Get("Subscription-UserInfo")
+				userInfo := w.Header().Get("Subscription-Userinfo")
 				assert.Contains(t, userInfo, "upload=100")
 				assert.Contains(t, userInfo, "download=200")
 			},
@@ -157,7 +157,7 @@ func TestHandleSubscription_SourceVariants(t *testing.T) {
 				require.NoError(t, json.Unmarshal(items[0], &parsed))
 				assert.Equal(t, "vless", parsed["type"])
 				assert.Equal(t, "x.com", parsed["address"])
-				userInfo := w.Header().Get("Subscription-UserInfo")
+				userInfo := w.Header().Get("Subscription-Userinfo")
 				assert.Contains(t, userInfo, "upload=50")
 			},
 		},
@@ -172,11 +172,11 @@ func TestHandleSubscription_SourceVariants(t *testing.T) {
 						Plan:         database.Plan{TrafficLimit: 10 << 30},
 						Nodes: []database.Node{
 							{ID: 1, Name: "s1", IsActive: true, SubscriptionURL: httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-								w.Header().Set("Subscription-UserInfo", "upload=100; download=200; total=500; expire=111")
+								w.Header().Set("Subscription-Userinfo", "upload=100; download=200; total=500; expire=111")
 								w.Write([]byte("vless://a@x.com:443"))
 							})).URL + "/sub/"},
 							{ID: 2, Name: "s2", IsActive: true, SubscriptionURL: httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-								w.Header().Set("Subscription-UserInfo", "upload=300; download=400; total=500; expire=222")
+								w.Header().Set("Subscription-Userinfo", "upload=300; download=400; total=500; expire=222")
 								w.Write([]byte("trojan://b@y.com:8443"))
 							})).URL + "/sub/"},
 						},
@@ -188,7 +188,7 @@ func TestHandleSubscription_SourceVariants(t *testing.T) {
 				require.NoError(t, err)
 				assert.Contains(t, string(decoded), "vless://a@x.com:443")
 				assert.Contains(t, string(decoded), "trojan://b@y.com:8443")
-				userInfo := w.Header().Get("Subscription-UserInfo")
+				userInfo := w.Header().Get("Subscription-Userinfo")
 				assert.Contains(t, userInfo, "upload=400")
 				assert.Contains(t, userInfo, "download=600")
 			},
@@ -248,7 +248,7 @@ func TestHandleSubscription_SourceVariants(t *testing.T) {
 				// already set in mockDBExtra
 			} else {
 				backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					w.Header().Set("Subscription-UserInfo", tt.userInfo)
+					w.Header().Set("Subscription-Userinfo", tt.userInfo)
 					w.Write([]byte(tt.body))
 				}))
 				defer backend.Close()

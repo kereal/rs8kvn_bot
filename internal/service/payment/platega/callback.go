@@ -109,7 +109,7 @@ func VerifyHeaders(merchantID, secret string, headers http.Header) bool {
 	if strings.TrimSpace(merchantID) == "" || strings.TrimSpace(secret) == "" {
 		return false
 	}
-	gotMerchant := headers.Get("X-MerchantId")
+	gotMerchant := headers.Get("X-Merchantid")
 	gotSecret := headers.Get("X-Secret")
 	if strings.TrimSpace(gotMerchant) == "" || strings.TrimSpace(gotSecret) == "" {
 		return false

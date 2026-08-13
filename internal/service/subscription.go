@@ -916,7 +916,7 @@ func (s *SubscriptionService) ensureSubscriptionNodes(ctx context.Context, sub *
 }
 
 type expiryRepository interface {
-	ExpireSubscriptionWithPlanCAS(context.Context, uint, uint, database.ExpireSubscriptionPlanInTxFn) error
+	ExpireSubscriptionWithPlanCAS(ctx context.Context, subscriptionID, planID uint, applyPlan database.ExpireSubscriptionPlanInTxFn) error
 }
 
 // ExpireSubscription downgrades the subscription to the Free plan and syncs node removals.

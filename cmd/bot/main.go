@@ -1,9 +1,11 @@
+// Package main starts the Telegram bot and its HTTP/background services.
 package main
 
 import (
 	"context"
+	cryptorand "crypto/rand"
 	"fmt"
-	"math/rand"
+	"math/big"
 	"os"
 	"os/signal"
 	"runtime/debug"
@@ -191,7 +193,13 @@ func initBot(cfg *config.Config) (*tgbotapi.BotAPI, *bot.BotConfig, error) {
 			break
 		}
 		logger.Warn("Telegram bot init failed, retrying...", zap.Int("attempt", i+1), zap.Int("max_attempts", botInitMaxAttempts), zap.Error(err))
-		time.Sleep(botInitDelay + time.Duration(rand.Int63n(int64(botInitDelay/2)))) //nolint:gosec // jitter
+		jitter := time.Duration(0)
+		if maxJitter := botInitDelay / 2; maxJitter > 0 {
+			if n, randErr := cryptorand.Int(cryptorand.Reader, big.NewInt(int64(maxJitter))); randErr == nil {
+				jitter = time.Duration(n.Int64())
+			}
+		}
+		time.Sleep(botInitDelay + jitter)
 	}
 	return nil, nil, fmt.Errorf("failed to initialize Telegram bot after %d attempts: %w", botInitMaxAttempts, lastErr)
 }
@@ -357,14 +365,17 @@ func main() {
 
 	// 2. Initialize Sentry (before logger)
 	initSentry(cfg)
-	defer sentry.Flush(logger.SentryFlushTimeout)
 
 	// 3. Initialize logger
 	logService, err := initLogger(cfg)
 	if err != nil {
+		// The logger failed to initialize, so the deferred flush below is not
+		// registered yet: flush Sentry explicitly before exiting.
 		fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
+		sentry.Flush(logger.SentryFlushTimeout)
 		os.Exit(1)
 	}
+	defer sentry.Flush(logger.SentryFlushTimeout)
 	defer func() {
 		if err := logService.Close(); err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to close logger: %v\n", err)
