@@ -36,7 +36,9 @@ func TestBackupScheduler_Start_ContextCancel(t *testing.T) {
 
 	f, err := os.Create(dbPath)
 	require.NoError(t, err)
-	if err := f.Close(); err != nil {
+
+	err = f.Close()
+	if err != nil {
 		t.Logf("Warning: failed to close file: %v", err)
 	}
 
@@ -45,6 +47,7 @@ func TestBackupScheduler_Start_ContextCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	done := make(chan struct{})
+
 	go func() {
 		scheduler.Start(ctx)
 		close(done)
@@ -67,7 +70,9 @@ func TestBackupScheduler_CalculateNextBackup(t *testing.T) {
 
 	f, err := os.Create(dbPath)
 	require.NoError(t, err)
-	if err := f.Close(); err != nil {
+
+	err = f.Close()
+	if err != nil {
 		t.Logf("Warning: failed to close file: %v", err)
 	}
 
@@ -76,6 +81,7 @@ func TestBackupScheduler_CalculateNextBackup(t *testing.T) {
 	_ = scheduler
 
 	now := time.Now()
+
 	next := time.Date(now.Year(), now.Month(), now.Day(), 2, 0, 0, 0, now.Location())
 	if now.After(next) {
 		next = next.Add(24 * time.Hour)

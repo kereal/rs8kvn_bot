@@ -32,6 +32,7 @@ func (s *BackupScheduler) Start(ctx context.Context) {
 
 	for {
 		now := time.Now()
+
 		next := time.Date(now.Year(), now.Month(), now.Day(),
 			s.hour, 0, 0, 0, now.Location())
 		if now.After(next) {
@@ -44,7 +45,9 @@ func (s *BackupScheduler) Start(ctx context.Context) {
 		select {
 		case <-time.After(sleepDuration):
 			logger.Info("Running scheduled database backup")
-			if err := backup.DailyBackup(ctx, s.dbPath, s.retention); err != nil {
+
+			err := backup.DailyBackup(ctx, s.dbPath, s.retention)
+			if err != nil {
 				logger.Error("Backup failed", zap.Error(err))
 			} else {
 				logger.Info("Database backup completed successfully")

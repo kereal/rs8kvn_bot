@@ -148,16 +148,18 @@ func TestSubscriptionCache_Concurrent(t *testing.T) {
 	done := make(chan bool, 2)
 
 	go func() {
-		for i := int64(0); i < 100; i++ {
+		for i := range int64(100) {
 			cache.Set(i, &database.Subscription{TelegramID: i})
 		}
+
 		done <- true
 	}()
 
 	go func() {
-		for i := int64(0); i < 100; i++ {
+		for i := range int64(100) {
 			cache.Get(i)
 		}
+
 		done <- true
 	}()
 
@@ -171,6 +173,7 @@ func TestSubscriptionCache_StartCleanup(t *testing.T) {
 	t.Parallel()
 
 	cache := NewSubscriptionCache(10, 5*time.Millisecond)
+
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
@@ -203,8 +206,10 @@ func TestSubscriptionCache_StartCleanup_Cancellation(t *testing.T) {
 
 	// Start background cleanup
 	done := make(chan bool, 1)
+
 	go func() {
 		cache.StartCleanup(ctx, 10*time.Millisecond)
+
 		done <- true
 	}()
 

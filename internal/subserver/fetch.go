@@ -49,6 +49,7 @@ func FetchFromNode(ctx context.Context, url string) (*NodeResponse, error) {
 		logger.Error("Failed to create HTTP request for source fetch",
 			zap.String("url", url),
 			zap.Error(err))
+
 		return nil, err
 	}
 
@@ -59,22 +60,29 @@ func FetchFromNode(ctx context.Context, url string) (*NodeResponse, error) {
 		logger.Error("Source fetch request failed",
 			zap.String("url", url),
 			zap.Error(err))
+
 		return nil, err
 	}
+
 	if resp == nil || resp.Body == nil {
 		logger.Error("Source fetch returned no response body",
 			zap.String("url", url))
+
 		return nil, fmt.Errorf("source fetch returned no body: %s", url)
 	}
+
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		_ = resp.Body.Close()
 		logger.Error("Source fetch returned non-2xx status",
 			zap.String("url", url),
 			zap.Int("status", resp.StatusCode))
+
 		return nil, fmt.Errorf("source fetch %s returned status %d", url, resp.StatusCode)
 	}
+
 	defer func() {
-		if closeErr := resp.Body.Close(); closeErr != nil {
+		closeErr := resp.Body.Close()
+		if closeErr != nil {
 			logger.Error("Failed to close source response body",
 				zap.String("url", url),
 				zap.Error(closeErr))
@@ -86,10 +94,12 @@ func FetchFromNode(ctx context.Context, url string) (*NodeResponse, error) {
 		logger.Error("Failed to read source response body",
 			zap.String("url", url),
 			zap.Error(err))
+
 		return nil, err
 	}
 
 	headers := make(map[string]string)
+
 	for key, values := range resp.Header {
 		if len(values) > 0 {
 			headers[strings.ToLower(key)] = values[0]
@@ -171,25 +181,31 @@ func DetectFormat(body []byte) Format {
 // must run after json.Valid.
 func isClashYAML(body []byte) bool {
 	var root map[string]yaml.Node
-	if err := yaml.Unmarshal(body, &root); err != nil {
+
+	err := yaml.Unmarshal(body, &root)
+	if err != nil {
 		return false
 	}
+
 	_, ok := root["proxies"]
+
 	return ok
 }
 
 // isValidSubscription returns true if at least one line in data is a recognised share link.
 func isValidSubscription(data string) bool {
-	lines := strings.Split(data, "\n")
-	for _, line := range lines {
+	lines := strings.SplitSeq(data, "\n")
+	for line := range lines {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
 		}
+
 		if isValidServer(line) {
 			return true
 		}
 	}
+
 	return false
 }
 

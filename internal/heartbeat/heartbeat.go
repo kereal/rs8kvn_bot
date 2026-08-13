@@ -36,6 +36,7 @@ func getHTTPClient() *http.Client {
 			Transport: transport,
 		}
 	}
+
 	return httpClient
 }
 
@@ -44,6 +45,7 @@ func getHTTPClient() *http.Client {
 func resetHTTPClient() {
 	httpClientMu.Lock()
 	defer httpClientMu.Unlock()
+
 	httpClient = nil
 }
 
@@ -102,7 +104,8 @@ func sendHeartbeat(url string) {
 		return
 	}
 	defer func() {
-		if closeErr := resp.Body.Close(); closeErr != nil {
+		closeErr := resp.Body.Close()
+		if closeErr != nil {
 			logger.Debug("Failed to close heartbeat response body", zap.Error(closeErr))
 		}
 	}()
@@ -123,6 +126,7 @@ func maskURL(urlStr string) string {
 
 	// Find the scheme separator
 	schemeEnd := 0
+
 	for i := 0; i < len(urlStr)-2; i++ {
 		if urlStr[i] == ':' && urlStr[i+1] == '/' && urlStr[i+2] == '/' {
 			schemeEnd = i
@@ -135,6 +139,7 @@ func maskURL(urlStr string) string {
 		if len(urlStr) > 10 {
 			return urlStr[:10] + "..."
 		}
+
 		return "***"
 	}
 

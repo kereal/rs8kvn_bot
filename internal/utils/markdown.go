@@ -9,12 +9,15 @@ import (
 func EscapeMarkdown(text string) string {
 	var b strings.Builder
 	b.Grow(len(text) * 2)
+
 	for _, r := range text {
 		if strings.ContainsRune(`\_*[]()~`+"`"+">-#+=|{}^", r) {
 			b.WriteRune('\\')
 		}
+
 		b.WriteRune(r)
 	}
+
 	return b.String()
 }
 
@@ -38,6 +41,7 @@ var mdv2Protect = []*regexp.Regexp{
 // admin wrote. The admin no longer has to manually escape special characters.
 func EscapeMarkdownV2(text string) string {
 	protected := make([]string, 0, 4)
+
 	scrubbed := text
 	for _, re := range mdv2Protect {
 		scrubbed = re.ReplaceAllStringFunc(scrubbed, func(m string) string {
@@ -48,10 +52,12 @@ func EscapeMarkdownV2(text string) string {
 
 	var b strings.Builder
 	b.Grow(len(scrubbed) + 8)
+
 	for _, r := range scrubbed {
 		if strings.ContainsRune(mdv2Reserved, r) || r == '>' || r == '#' {
 			b.WriteRune('\\')
 		}
+
 		b.WriteRune(r)
 	}
 
@@ -59,6 +65,7 @@ func EscapeMarkdownV2(text string) string {
 	for i, p := range protected {
 		out = strings.ReplaceAll(out, mdv2Token(i), escapeProtected(p))
 	}
+
 	return out
 }
 
@@ -75,8 +82,10 @@ func escapeProtected(m string) string {
 		if closeBracket > 0 {
 			textPart := m[1:closeBracket]
 			urlPart := m[closeBracket+2 : len(m)-1]
+
 			return "[" + escapeMdv2(textPart) + "](" + escapeMdv2(urlPart) + ")"
 		}
+
 		return m
 	case strings.HasPrefix(m, "*") && strings.HasSuffix(m, "*") && len(m) >= 2:
 		inner := m[1 : len(m)-1]
@@ -95,12 +104,15 @@ func escapeProtected(m string) string {
 func escapeMdv2(s string) string {
 	var b strings.Builder
 	b.Grow(len(s) + 8)
+
 	for _, r := range s {
 		if strings.ContainsRune(mdv2Reserved, r) || r == '>' || r == '#' {
 			b.WriteRune('\\')
 		}
+
 		b.WriteRune(r)
 	}
+
 	return b.String()
 }
 

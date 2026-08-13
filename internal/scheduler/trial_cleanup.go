@@ -46,6 +46,7 @@ func (s *TrialCleanupScheduler) Start(ctx context.Context) {
 
 func (s *TrialCleanupScheduler) runCleanup(ctx context.Context) {
 	logger.Info("Running trial cleanup")
+
 	deleted, err := s.subService.CleanupExpiredTrials(ctx)
 	if err != nil {
 		logger.Error("Trial cleanup failed", zap.Error(err))

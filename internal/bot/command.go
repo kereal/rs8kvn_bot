@@ -28,15 +28,18 @@ func NewCommandHandler(parent *Handler) *CommandHandler {
 func (c *CommandHandler) HandleStart(ctx context.Context, update tgbotapi.Update) error {
 	ctxWithTimeout, cancel := c.h.withTimeout(ctx)
 	defer cancel()
+
 	ctx = ctxWithTimeout
 
 	if update.Message == nil {
 		logger.Error("HandleStart called with nil Message")
 		return fmt.Errorf("nil message")
 	}
+
 	if update.Message.From == nil {
 		logger.Error("HandleStart: Message.From is nil",
 			zap.Int64("chat_id", update.Message.Chat.ID))
+
 		return fmt.Errorf("nil from")
 	}
 
@@ -44,11 +47,12 @@ func (c *CommandHandler) HandleStart(ctx context.Context, update tgbotapi.Update
 	username := c.h.getUsername(update.Message.From)
 
 	args := update.Message.CommandArguments()
-	if strings.HasPrefix(args, "trial_") {
-		return c.handleBindTrial(ctx, chatID, username, strings.TrimPrefix(args, "trial_"))
+	if after, ok := strings.CutPrefix(args, "trial_"); ok {
+		return c.handleBindTrial(ctx, chatID, username, after)
 	}
-	if strings.HasPrefix(args, "share_") {
-		return c.handleShareStart(ctx, chatID, username, strings.TrimPrefix(args, "share_"))
+
+	if after, ok := strings.CutPrefix(args, "share_"); ok {
+		return c.handleShareStart(ctx, chatID, username, after)
 	}
 
 	logger.Info("User started bot", userFields(update.Message.From, chatID)...)
@@ -60,6 +64,7 @@ func (c *CommandHandler) HandleStart(ctx context.Context, update tgbotapi.Update
 	msg := tgbotapi.NewMessage(chatID, text)
 	msg.ReplyMarkup = &keyboard
 	c.h.send(ctx, msg)
+
 	return nil
 }
 
@@ -67,12 +72,14 @@ func (c *CommandHandler) HandleStart(ctx context.Context, update tgbotapi.Update
 func (c *CommandHandler) HandleHelp(ctx context.Context, update tgbotapi.Update) error {
 	ctxWithTimeout, cancel := c.h.withTimeout(ctx)
 	defer cancel()
+
 	ctx = ctxWithTimeout
 
 	if update.Message == nil {
 		logger.Error("HandleHelp called with nil Message")
 		return fmt.Errorf("nil message")
 	}
+
 	chatID := update.Message.Chat.ID
 
 	helpText := fmt.Sprintf(`📖 *Справка по командам бота*
@@ -104,6 +111,7 @@ func (c *CommandHandler) HandleHelp(ctx context.Context, update tgbotapi.Update)
 	msg := tgbotapi.NewMessage(chatID, helpText)
 	msg.ParseMode = "Markdown"
 	c.h.send(ctx, msg)
+
 	return nil
 }
 
@@ -111,12 +119,14 @@ func (c *CommandHandler) HandleHelp(ctx context.Context, update tgbotapi.Update)
 func (c *CommandHandler) HandleInvite(ctx context.Context, update tgbotapi.Update) error {
 	ctxWithTimeout, cancel := c.h.withTimeout(ctx)
 	defer cancel()
+
 	ctx = ctxWithTimeout
 
 	if update.Message == nil {
 		logger.Error("HandleInvite called with nil Message")
 		return fmt.Errorf("nil message")
 	}
+
 	if update.Message.From == nil {
 		logger.Error("HandleInvite called with nil From")
 		return fmt.Errorf("nil from")
@@ -130,9 +140,11 @@ func (c *CommandHandler) HandleInvite(ctx context.Context, update tgbotapi.Updat
 		zap.String("username", username), zap.Int64("chat_id", chatID))
 
 	// Delegate to referral handler (no rate limit here)
-	if err := c.h.referral.HandleInvite(ctx, chatID, username, 0); err != nil {
+	err := c.h.referral.HandleInvite(ctx, chatID, username, 0)
+	if err != nil {
 		return err
 	}
+
 	return nil
 }
 
@@ -156,6 +168,7 @@ func (c *CommandHandler) handleShareStart(ctx context.Context, chatID int64, use
 		msg := tgbotapi.NewMessage(chatID, text)
 		msg.ReplyMarkup = &keyboard
 		c.h.send(ctx, msg)
+
 		return nil
 	}
 
@@ -171,16 +184,19 @@ func (c *CommandHandler) handleShareStart(ctx context.Context, chatID int64, use
 			msg := tgbotapi.NewMessage(chatID, text)
 			msg.ReplyMarkup = &keyboard
 			c.h.send(ctx, msg)
+
 			return nil
 		}
 		// Infra error (DB down, etc) — log full, do not treat as "invalid code"
 		logger.Error("Failed to validate invite code (infrastructure error)",
 			zap.String("invite_code", inviteCode),
 			zap.Error(err))
+
 		text, keyboard := c.h.getMainMenuContent(ctx, username, false, chatID, nil)
 		msg := tgbotapi.NewMessage(chatID, text)
 		msg.ReplyMarkup = &keyboard
 		c.h.send(ctx, msg)
+
 		return fmt.Errorf("get invite by code: %w", err)
 	}
 
@@ -209,6 +225,7 @@ func (c *CommandHandler) handleShareStart(ctx context.Context, chatID int64, use
 	msg := tgbotapi.NewMessage(chatID, text)
 	msg.ReplyMarkup = &keyboard
 	c.h.send(ctx, msg)
+
 	return nil
 }
 
@@ -216,6 +233,7 @@ func (c *CommandHandler) handleShareStart(ctx context.Context, chatID int64, use
 func (c *CommandHandler) handleBindTrial(ctx context.Context, chatID int64, username, subscriptionID string) error {
 	ctxWithTimeout, cancel := c.h.withTimeout(ctx)
 	defer cancel()
+
 	ctx = ctxWithTimeout
 
 	logger.Info("User binding trial subscription",
@@ -224,11 +242,13 @@ func (c *CommandHandler) handleBindTrial(ctx context.Context, chatID int64, user
 		zap.String("subscription_id", subscriptionID))
 
 	// Check existing subscription — only truly active ones block trial bind (expired/cancelled allow re-trial)
-	if existing, err := c.h.db.GetByTelegramID(ctx, chatID); err == nil && existing != nil && existing.IsActive() {
+	existing, err := c.h.db.GetByTelegramID(ctx, chatID)
+	if err == nil && existing != nil && existing.IsActive() {
 		logger.Warn("User already has active subscription, skipping trial bind",
 			zap.Int64("chat_id", chatID),
 			zap.String("existing_sub_id", existing.SubscriptionID))
 		c.h.SendMessage(ctx, chatID, "❌ У вас уже есть активная подписка. Используйте /start для управления.")
+
 		return nil
 	}
 
@@ -238,6 +258,7 @@ func (c *CommandHandler) handleBindTrial(ctx context.Context, chatID int64, user
 			zap.Error(err),
 			zap.Int64("chat_id", chatID))
 		c.h.SendMessage(ctx, chatID, "❌ Не удалось активировать подписку. Возможно, ссылка уже была использована.")
+
 		return fmt.Errorf("bind trial: %w", err)
 	}
 
@@ -267,14 +288,19 @@ func (c *CommandHandler) handleBindTrial(ctx context.Context, chatID int64, user
 	if sub.ReferredBy != nil {
 		referredBy = *sub.ReferredBy
 	}
+
 	if referredBy > 0 {
 		referrerMsg := fmt.Sprintf("🎉 По вашей ссылке новый пользователь @%s активировал подписку!", username)
+
 		msg := tgbotapi.NewMessage(referredBy, referrerMsg)
-		if err := c.h.sendWithError(ctx, msg); err != nil {
+
+		err := c.h.sendWithError(ctx, msg)
+		if err != nil {
 			logger.Warn("Failed to notify referrer", zap.Int64("referrer_id", referredBy), zap.Error(err))
 		} else {
 			logger.Info("Referrer notified", zap.Int64("referrer_id", referredBy))
 		}
+
 		c.h.IncrementReferralCount(referredBy)
 	}
 
