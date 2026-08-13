@@ -571,7 +571,7 @@ sqlite3 ./data/rs8kvn.db "PRAGMA journal_mode=WAL;"
 
 **Log:** `"XUI API error"`, `"retrying after backoff"`, or similar.
 
-**Note:** The system uses `RetryWithBackoff` with exponential backoff + jitter (up to 3 attempts). The circuit breaker implementation is tested but is not currently wired into the live XUI client path.
+**Note:** The system uses `RetryWithBackoff` with exponential backoff + jitter (up to 3 total attempts (2 retries)). The circuit breaker implementation is tested but is not currently wired into the live XUI client path.
 
 **Fix:**
 1. Check 3x-ui panel is up: `curl -H "Authorization: Bearer <api_token>" "<panel_host>/panel/api/server/status"`
