@@ -127,6 +127,18 @@ func FormatDateRu(t time.Time) string {
 	return fmt.Sprintf("%d %s %d", day, month, year)
 }
 
+// FormatPriceCents renders an amount in cents as a ruble value. Whole amounts
+// drop the fractional part ("127₽"); fractional amounts keep two digits
+// ("127.37₽").
+func FormatPriceCents(amountCents int64) string {
+	value := fmt.Sprintf("%d", amountCents/100)
+	if kopeks := amountCents % 100; kopeks != 0 {
+		value += fmt.Sprintf(".%02d", kopeks)
+	}
+
+	return value + "₽"
+}
+
 // TruncateString truncates s to at most maxLen runes, appending "..." if truncation occurs.
 // Rune-safe: correctly handles multi-byte UTF-8 (Cyrillic, CJK, emoji) without splitting characters.
 func TruncateString(s string, maxLen int) string {

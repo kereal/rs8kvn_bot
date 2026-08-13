@@ -1037,7 +1037,9 @@ func TestSyncService_SyncPendingNodes_ContinuesAfterNodeFailure(t *testing.T) {
 	successClient := &mockVPNClient{}
 	svc := NewSyncService(db, map[uint]vpn.Client{nodeOne.ID: failedClient, nodeTwo.ID: successClient}, []database.Node{*nodeOne, *nodeTwo})
 
-	require.NoError(t, svc.SyncPendingNodes(ctx), "a per-node failure is best-effort and must not stop other subscriptions")
+	err = svc.SyncPendingNodes(ctx)
+	require.Error(t, err, "a per-node failure must surface as an aggregate error so the caller can observe degraded runs")
+	assert.ErrorIs(t, err, failedClient.createError, "the aggregate error must contain the nodeOne failure via errors.Join")
 
 	rowsOne, err := db.GetBySubscriptionID(ctx, subOne.ID)
 	require.NoError(t, err)

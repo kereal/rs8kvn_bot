@@ -5,6 +5,7 @@ import (
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/kereal/rs8kvn_bot/internal/database"
+	"github.com/kereal/rs8kvn_bot/internal/utils"
 )
 
 // KeyboardBuilder creates Telegram inline keyboards.
@@ -56,7 +57,7 @@ func (kb *KeyboardBuilder) BuyProductList(products []database.Product) tgbotapi.
 			continue
 		}
 
-		rows = append(rows, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData(fmt.Sprintf("%s — %.2f ₽", product.Name, float64(product.PriceCents)/100), fmt.Sprintf("buy_product_%d", product.ID))))
+		rows = append(rows, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData(fmt.Sprintf("%s — %s", product.Name, utils.FormatPriceCents(product.PriceCents)), fmt.Sprintf("buy_product_%d", product.ID))))
 	}
 
 	rows = append(rows, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("⬅️ Назад", "back_to_start")))
@@ -68,7 +69,7 @@ func (kb *KeyboardBuilder) BuyProductList(products []database.Product) tgbotapi.
 func (kb *KeyboardBuilder) BuyProductConfirm(product *database.Product, paymentURL string) tgbotapi.InlineKeyboardMarkup {
 	price := ""
 	if product != nil {
-		price = fmt.Sprintf("%d₽", product.PriceCents/100)
+		price = utils.FormatPriceCents(product.PriceCents)
 	}
 
 	return tgbotapi.InlineKeyboardMarkup{InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{
