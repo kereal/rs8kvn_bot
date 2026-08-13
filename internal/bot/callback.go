@@ -1,3 +1,4 @@
+// Package bot contains Telegram handlers, callbacks, keyboards, and user flows.
 package bot
 
 import (
@@ -82,8 +83,8 @@ func (c *CallbackHandler) HandleCallback(ctx context.Context, update tgbotapi.Up
 		}
 	case strings.HasPrefix(data, "buy_product_"):
 		raw := strings.TrimPrefix(data, "buy_product_")
-		id64, err := strconv.ParseUint(raw, 10, 64)
-		if err != nil || id64 == 0 || id64 > uint64(^uint(0)) {
+		id64, _ := strconv.ParseUint(raw, 10, 64)
+		if id64 == 0 || id64 > uint64(^uint(0)) {
 			logger.Warn("invalid buy_product callback payload",
 				zap.String("data", data),
 				zap.String("raw", raw))

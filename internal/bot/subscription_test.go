@@ -252,7 +252,6 @@ func TestCreateSubscription_XUIFailure(t *testing.T) {
 			// DB-first: subscription is created even if XUI fails (sync will retry)
 			assert.True(t, mockBot.SendCalledSafe())
 			assert.Contains(t, mockBot.LastSentTextSafe(), "подписк")
-
 		})
 	}
 }

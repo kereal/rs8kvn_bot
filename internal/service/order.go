@@ -28,7 +28,7 @@ import (
 // PaymentProvider is the minimal outbound payment contract consumed by OrderService
 // for creating a provider transaction.
 type PaymentProvider interface {
-	CreateTransaction(context.Context, platega.CreateTransactionRequest) (*platega.CreateTransactionResponse, error)
+	CreateTransaction(ctx context.Context, req platega.CreateTransactionRequest) (*platega.CreateTransactionResponse, error)
 }
 
 // paymentSyncTimeout bounds the best-effort post-commit VPN sync. It prevents a
@@ -305,8 +305,8 @@ func (o *OrderService) SetAdminBot(bot interfaces.BotAPI) { o.adminBot = bot }
 
 // notifyRequestIssue enriches an early RequestPayment failure with whichever
 // product/order context is available and routes it through the common alert path.
-func (o *OrderService) notifyRequestIssue(ctx context.Context, event, reason, action string, telegramID uint64, product *database.Product, order *database.Order) {
-	issue := PaymentIssue{Event: event, Reason: reason, Action: action, TelegramID: int64(telegramID)}
+func (o *OrderService) notifyRequestIssue(ctx context.Context, event, reason, action string, telegramID int64, product *database.Product, order *database.Order) {
+	issue := PaymentIssue{Event: event, Reason: reason, Action: action, TelegramID: telegramID}
 	if product != nil {
 		issue.ProductID = product.ID
 		issue.ProductName = product.Name
@@ -511,12 +511,12 @@ func (o *OrderService) requestPayment(ctx context.Context, telegramID int64, use
 
 	canonical, err := o.db.GetProductByID(ctx, product.ID)
 	if err != nil {
-		o.notifyRequestIssue(ctx, "load_product_failed", err.Error(), "retry after database recovery", uint64(telegramID), product, nil)
+		o.notifyRequestIssue(ctx, "load_product_failed", err.Error(), "retry after database recovery", telegramID, product, nil)
 		return nil, nil, fmt.Errorf("load canonical product: %w", err)
 	}
 	if canonical == nil {
 		err := errors.New("load canonical product: product is nil")
-		o.notifyRequestIssue(ctx, "load_product_failed", err.Error(), "verify the product record", uint64(telegramID), product, nil)
+		o.notifyRequestIssue(ctx, "load_product_failed", err.Error(), "verify the product record", telegramID, product, nil)
 		return nil, nil, err
 	}
 	now := time.Now().UTC()
@@ -527,7 +527,7 @@ func (o *OrderService) requestPayment(ctx context.Context, telegramID int64, use
 	sub, err = o.db.GetByTelegramID(ctx, telegramID)
 	if err != nil {
 		if !errors.Is(err, database.ErrSubscriptionNotFound) && !errors.Is(err, gorm.ErrRecordNotFound) {
-			o.notifyRequestIssue(ctx, "load_subscription_failed", err.Error(), "retry after database recovery", uint64(telegramID), canonical, nil)
+			o.notifyRequestIssue(ctx, "load_subscription_failed", err.Error(), "retry after database recovery", telegramID, canonical, nil)
 			return nil, nil, fmt.Errorf("load payment subscription: %w", err)
 		}
 		if !canonical.IsActive || canonical.PriceCents <= 0 {
@@ -535,7 +535,7 @@ func (o *OrderService) requestPayment(ctx context.Context, telegramID int64, use
 		}
 		plan, planErr := o.db.GetPlanByID(ctx, canonical.PlanID)
 		if planErr != nil {
-			o.notifyRequestIssue(ctx, "load_plan_failed", planErr.Error(), "retry after database recovery", uint64(telegramID), canonical, nil)
+			o.notifyRequestIssue(ctx, "load_plan_failed", planErr.Error(), "retry after database recovery", telegramID, canonical, nil)
 			return nil, nil, fmt.Errorf("load product plan: %w", planErr)
 		}
 		if plan == nil || !plan.IsActive {
@@ -543,12 +543,12 @@ func (o *OrderService) requestPayment(ctx context.Context, telegramID int64, use
 		}
 		if o.subSvc == nil {
 			err := errors.New("subscription service is not configured")
-			o.notifyRequestIssue(ctx, "subscription_service_not_ready", err.Error(), "wire SubscriptionService before enabling payments", uint64(telegramID), canonical, nil)
+			o.notifyRequestIssue(ctx, "subscription_service_not_ready", err.Error(), "wire SubscriptionService before enabling payments", telegramID, canonical, nil)
 			return nil, nil, err
 		}
 		sub, err = o.subSvc.GetOrCreateSubscription(ctx, telegramID, username, "")
 		if err != nil {
-			o.notifyRequestIssue(ctx, "create_subscription_failed", err.Error(), "retry after subscription service recovery", uint64(telegramID), canonical, nil)
+			o.notifyRequestIssue(ctx, "create_subscription_failed", err.Error(), "retry after subscription service recovery", telegramID, canonical, nil)
 			return nil, nil, fmt.Errorf("get or create subscription: %w", err)
 		}
 	}
@@ -558,7 +558,7 @@ func (o *OrderService) requestPayment(ctx context.Context, telegramID int64, use
 	// still usable. Expiry is terminalized by the repository lookup.
 	order, err := o.db.FindPendingPaymentOrder(ctx, sub.ID, canonical.ID, now)
 	if err != nil {
-		o.notifyRequestIssue(ctx, "find_pending_order_failed", err.Error(), "retry after database recovery", uint64(telegramID), canonical, nil)
+		o.notifyRequestIssue(ctx, "find_pending_order_failed", err.Error(), "retry after database recovery", telegramID, canonical, nil)
 		return nil, nil, fmt.Errorf("find pending payment order: %w", err)
 	}
 	if order != nil && order.Status == database.OrderStatusExpired {
@@ -573,7 +573,7 @@ func (o *OrderService) requestPayment(ctx context.Context, telegramID int64, use
 		}
 		plan, planErr := o.db.GetPlanByID(ctx, canonical.PlanID)
 		if planErr != nil {
-			o.notifyRequestIssue(ctx, "load_plan_failed", planErr.Error(), "retry after database recovery", uint64(telegramID), canonical, nil)
+			o.notifyRequestIssue(ctx, "load_plan_failed", planErr.Error(), "retry after database recovery", telegramID, canonical, nil)
 			return nil, nil, fmt.Errorf("load product plan: %w", planErr)
 		}
 		if plan == nil || !plan.IsActive {
@@ -584,7 +584,7 @@ func (o *OrderService) requestPayment(ctx context.Context, telegramID int64, use
 		// creation path, so concurrent requests cannot create duplicate intents.
 		order, err = o.db.FindOrCreatePendingPaymentOrder(ctx, sub.ID, canonical.ID, canonical.PriceCents, canonical.Currency, now)
 		if err != nil {
-			o.notifyRequestIssue(ctx, "create_pending_order_failed", err.Error(), "retry after database recovery", uint64(telegramID), canonical, nil)
+			o.notifyRequestIssue(ctx, "create_pending_order_failed", err.Error(), "retry after database recovery", telegramID, canonical, nil)
 			return nil, nil, fmt.Errorf("find or create pending payment order: %w", err)
 		}
 	}
@@ -619,7 +619,7 @@ func (o *OrderService) requestPayment(ctx context.Context, telegramID int64, use
 	}
 	plan, planErr := o.db.GetPlanByID(ctx, canonical.PlanID)
 	if planErr != nil {
-		o.notifyRequestIssue(ctx, "load_plan_failed", planErr.Error(), "retry after database recovery", uint64(telegramID), canonical, order)
+		o.notifyRequestIssue(ctx, "load_plan_failed", planErr.Error(), "retry after database recovery", telegramID, canonical, order)
 		return nil, order, fmt.Errorf("load product plan: %w", planErr)
 	}
 	if plan == nil || !plan.IsActive {
@@ -627,13 +627,13 @@ func (o *OrderService) requestPayment(ctx context.Context, telegramID int64, use
 	}
 	claimed, err := o.db.MarkPaymentCreationUncertain(ctx, order.ID, true)
 	if err != nil {
-		o.notifyRequestIssue(ctx, "claim_payment_creation_failed", err.Error(), "retry after database recovery", uint64(telegramID), canonical, order)
+		o.notifyRequestIssue(ctx, "claim_payment_creation_failed", err.Error(), "retry after database recovery", telegramID, canonical, order)
 		return nil, order, fmt.Errorf("mark payment creation uncertain: %w", err)
 	}
 	if !claimed {
 		latest, loadErr := o.db.GetOrderByID(ctx, order.ID)
 		if loadErr != nil {
-			o.notifyRequestIssue(ctx, "reload_pending_order_failed", loadErr.Error(), "retry after database recovery", uint64(telegramID), canonical, order)
+			o.notifyRequestIssue(ctx, "reload_pending_order_failed", loadErr.Error(), "retry after database recovery", telegramID, canonical, order)
 			return nil, order, fmt.Errorf("reload payment order after concurrent claim: %w", loadErr)
 		}
 		if latest.PaymentCreationUncertain {
@@ -674,7 +674,7 @@ func (o *OrderService) requestPayment(ctx context.Context, telegramID int64, use
 	transactionID, err := platega.ParseTransactionID(response.TransactionID)
 	if err != nil {
 		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "provider_invalid_transaction_id", Reason: err.Error(), Action: "verify provider response manually", OrderID: order.ID, TelegramID: telegramID, ProductID: canonical.ID, ProductName: canonical.Name, SubscriptionID: order.SubscriptionID, AmountCents: order.AmountCents, Currency: order.Currency, ProviderID: response.TransactionID})
-		return nil, order, fmt.Errorf("%w: transactionId must be UUID v4: %v", platega.ErrProvider, err)
+		return nil, order, fmt.Errorf("%w: transactionId must be UUID v4: %w", platega.ErrProvider, err)
 	}
 	providerPaymentID := transactionID
 	url := strings.TrimSpace(response.URL)
