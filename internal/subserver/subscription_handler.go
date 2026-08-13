@@ -5,6 +5,7 @@ package subserver
 
 import (
 	"context"
+	"maps"
 	"time"
 
 	"github.com/kereal/rs8kvn_bot/internal/database"
@@ -35,6 +36,7 @@ func HandleSubscription(ctx context.Context, db interfaces.SubscriptionRepositor
 
 	// 2. Cache miss: load the subscription with plan and active sources.
 	missStart := time.Now()
+
 	subFull, err := loadSubscription(ctx, db, subID, clientIP, requestHeaders)
 	if err != nil {
 		metrics.SubserverCacheMissDuration.Observe(time.Since(missStart).Seconds())
@@ -46,7 +48,9 @@ func HandleSubscription(ctx context.Context, db interfaces.SubscriptionRepositor
 
 	// 5. Build the final response and cache it.
 	res, err := buildResponse(subSvc, subID, agg, subFull.Plan.TrafficLimit)
+
 	metrics.SubserverCacheMissDuration.Observe(time.Since(missStart).Seconds())
+
 	return res, success, total, err
 }
 
@@ -62,6 +66,7 @@ func UpdateDevices(ctx context.Context, db interfaces.SubscriptionRepository, su
 			zap.Uint("sub_pk", subFull.Subscription.ID),
 			zap.String("sub_id", subFull.Subscription.SubscriptionID),
 			zap.Error(err))
+
 		devices = []map[string]string{}
 	}
 
@@ -77,9 +82,8 @@ func UpdateDevices(ctx context.Context, db interfaces.SubscriptionRepository, su
 		}
 
 		entry := make(map[string]string, len(headers)+1)
-		for k, v := range headers {
-			entry[k] = v
-		}
+		maps.Copy(entry, headers)
+
 		entry["timestamp"] = nowStr
 		devices = append(devices, entry)
 
@@ -88,15 +92,18 @@ func UpdateDevices(ctx context.Context, db interfaces.SubscriptionRepository, su
 		}
 	}
 
-	if err := subFull.Subscription.SetDevices(devices); err != nil {
+	err = subFull.Subscription.SetDevices(devices)
+	if err != nil {
 		logger.Error("Failed to set devices JSON",
 			zap.Uint("sub_pk", subFull.Subscription.ID),
 			zap.String("sub_id", subFull.Subscription.SubscriptionID),
 			zap.Error(err))
+
 		return
 	}
 
-	if err := db.UpdateDevices(ctx, subFull.Subscription.ID, subFull.Subscription.Devices); err != nil {
+	err = db.UpdateDevices(ctx, subFull.Subscription.ID, subFull.Subscription.Devices)
+	if err != nil {
 		logger.Error("Failed to save devices to database",
 			zap.Uint("sub_pk", subFull.Subscription.ID),
 			zap.String("sub_id", subFull.Subscription.SubscriptionID),
@@ -114,6 +121,7 @@ func UpdateIPs(ctx context.Context, db interfaces.SubscriptionRepository, subFul
 			zap.Uint("sub_pk", subFull.Subscription.ID),
 			zap.String("sub_id", subFull.Subscription.SubscriptionID),
 			zap.Error(err))
+
 		ips = []map[string]string{}
 	}
 
@@ -135,15 +143,18 @@ func UpdateIPs(ctx context.Context, db interfaces.SubscriptionRepository, subFul
 		}
 	}
 
-	if err := subFull.Subscription.SetIPs(ips); err != nil {
+	err = subFull.Subscription.SetIPs(ips)
+	if err != nil {
 		logger.Error("Failed to set ips JSON",
 			zap.Uint("sub_pk", subFull.Subscription.ID),
 			zap.String("sub_id", subFull.Subscription.SubscriptionID),
 			zap.Error(err))
+
 		return
 	}
 
-	if err := db.UpdateIPs(ctx, subFull.Subscription.ID, subFull.Subscription.Ips); err != nil {
+	err = db.UpdateIPs(ctx, subFull.Subscription.ID, subFull.Subscription.Ips)
+	if err != nil {
 		logger.Error("Failed to save ips to database",
 			zap.Uint("sub_pk", subFull.Subscription.ID),
 			zap.String("sub_id", subFull.Subscription.SubscriptionID),

@@ -23,18 +23,20 @@ func ConvertSingleJSONToXray(raw json.RawMessage) (json.RawMessage, error) {
 		logger.Error("Failed to convert JSON config to Xray outbound",
 			zap.Error(err),
 			zap.String("raw_preview", truncateJSON(raw)))
-		return nil, err
+
+		return nil, fmt.Errorf("convert JSON config to Xray outbound: %w", err)
 	}
 
 	outbound, err := buildXrayOutbound(cfg)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("build Xray outbound: %w", err)
 	}
 
 	data, err := json.Marshal(outbound)
 	if err != nil {
 		return nil, fmt.Errorf("marshal xray outbound: %w", err)
 	}
+
 	return data, nil
 }
 
@@ -49,13 +51,17 @@ func ConvertJSONConfigsToXray(items []json.RawMessage) ([]json.RawMessage, error
 			logger.Warn("Skipping config in Xray conversion",
 				zap.Int("index", i),
 				zap.Error(err))
+
 			continue
 		}
+
 		out = append(out, x)
 	}
+
 	if len(out) == 0 {
 		return nil, fmt.Errorf("no valid xray configs")
 	}
+
 	return out, nil
 }
 
@@ -64,11 +70,13 @@ func buildXrayOutbound(cfg *serverConfig) (map[string]any, error) {
 	if cfg.Address == "" {
 		return nil, fmt.Errorf("missing address")
 	}
+
 	if cfg.Port == 0 {
 		return nil, fmt.Errorf("missing port")
 	}
 
 	var outbound map[string]any
+
 	switch strings.ToLower(cfg.Type) {
 	case "vless":
 		outbound = buildVLESSXray(cfg)
@@ -87,6 +95,7 @@ func buildXrayOutbound(cfg *serverConfig) (map[string]any, error) {
 	if cfg.Remark != "" {
 		outbound["tag"] = cfg.Remark
 	}
+
 	return outbound, nil
 }
 
@@ -94,6 +103,7 @@ func buildVLESSXray(cfg *serverConfig) map[string]any {
 	if cfg.UUID == "" {
 		cfg.UUID = cfg.UserID
 	}
+
 	user := map[string]any{
 		"id":         cfg.UUID,
 		"encryption": "none",
@@ -102,6 +112,7 @@ func buildVLESSXray(cfg *serverConfig) map[string]any {
 	if cfg.Flow != "" {
 		user["flow"] = cfg.Flow
 	}
+
 	return map[string]any{
 		"protocol": "vless",
 		"settings": map[string]any{
@@ -121,22 +132,28 @@ func buildVMessXray(cfg *serverConfig) map[string]any {
 	if cfg.UUID == "" {
 		cfg.UUID = cfg.UserID
 	}
+
 	aid := 0
+
 	if cfg.Aid != "" {
-		if n, err := strconv.Atoi(cfg.Aid); err == nil {
+		n, err := strconv.Atoi(cfg.Aid)
+		if err == nil {
 			aid = n
 		}
 	}
+
 	scy := cfg.Scy
 	if scy == "" {
 		scy = "auto"
 	}
+
 	user := map[string]any{
 		"id":       cfg.UUID,
 		"alterId":  aid,
 		"security": scy,
 		"level":    0,
 	}
+
 	return map[string]any{
 		"protocol": "vmess",
 		"settings": map[string]any{
@@ -157,12 +174,14 @@ func buildTrojanXray(cfg *serverConfig) map[string]any {
 	if password == "" {
 		password = cfg.UUID
 	}
+
 	server := map[string]any{
 		"address":  cfg.Address,
 		"port":     cfg.Port,
 		"password": password,
 		"level":    0,
 	}
+
 	return map[string]any{
 		"protocol": "trojan",
 		"settings": map[string]any{
@@ -184,6 +203,7 @@ func buildShadowsocksXray(cfg *serverConfig) map[string]any {
 		server["plugin"] = cfg.Plugin
 		server["pluginOpts"] = cfg.PluginOpts
 	}
+
 	return map[string]any{
 		"protocol": "shadowsocks",
 		"settings": map[string]any{
@@ -198,6 +218,7 @@ func buildHysteria2Xray(cfg *serverConfig) map[string]any {
 	if password == "" {
 		password = cfg.UUID
 	}
+
 	server := map[string]any{
 		"address":  net.JoinHostPort(cfg.Address, strconv.Itoa(cfg.Port)),
 		"password": password,
@@ -206,16 +227,20 @@ func buildHysteria2Xray(cfg *serverConfig) map[string]any {
 	if cfg.SNI != "" {
 		server["sni"] = cfg.SNI
 	}
+
 	if cfg.Obfs != "" {
 		obfs := map[string]any{"type": cfg.Obfs}
 		if cfg.ObfsPassword != "" {
 			obfs["password"] = cfg.ObfsPassword
 		}
+
 		server["obfs"] = obfs
 	}
+
 	if cfg.AllowInsecure {
 		server["allowInsecure"] = true
 	}
+
 	return map[string]any{
 		"protocol": "hysteria2",
 		"settings": map[string]any{
@@ -224,8 +249,6 @@ func buildHysteria2Xray(cfg *serverConfig) map[string]any {
 		"streamSettings": map[string]any{"network": "tcp"},
 	}
 }
-
-
 
 // buildStreamSettings builds the Xray streamSettings object. For VLESS/VMess/Trojan
 // it fully resolves the transport (ws/grpc/xhttp/h2/http/tcp) and security layer
@@ -245,6 +268,7 @@ func buildStreamSettings(cfg *serverConfig, protocol string) map[string]any {
 	if network == "raw" {
 		network = "tcp"
 	}
+
 	if network == "splithttp" {
 		network = "xhttp"
 	}
@@ -262,30 +286,38 @@ func buildStreamSettings(cfg *serverConfig, protocol string) map[string]any {
 		if cfg.SNI != "" {
 			rs["serverName"] = cfg.SNI
 		}
+
 		if cfg.Fingerprint != "" {
 			rs["fingerprint"] = cfg.Fingerprint
 		}
+
 		if cfg.PublicKey != "" {
 			rs["publicKey"] = cfg.PublicKey
 		}
+
 		if cfg.ShortID != "" {
 			rs["shortId"] = cfg.ShortID
 		}
+
 		ss["realitySettings"] = rs
 	case "tls":
 		ts := map[string]any{}
 		if cfg.SNI != "" {
 			ts["serverName"] = cfg.SNI
 		}
+
 		if cfg.Fingerprint != "" {
 			ts["fingerprint"] = cfg.Fingerprint
 		}
+
 		if cfg.AllowInsecure {
 			ts["allowInsecure"] = true
 		}
+
 		if cfg.Alpn != "" {
 			ts["alpn"] = splitComma(cfg.Alpn)
 		}
+
 		ss["tlsSettings"] = ts
 	}
 
@@ -295,36 +327,44 @@ func buildStreamSettings(cfg *serverConfig, protocol string) map[string]any {
 		if cfg.Path != "" {
 			ws["path"] = cfg.Path
 		}
+
 		if cfg.Host != "" {
 			ws["headers"] = map[string]any{"Host": cfg.Host}
 		}
+
 		ss["wsSettings"] = ws
 	case "grpc":
 		grpc := map[string]any{"multiMode": false}
 		if cfg.Path != "" {
 			grpc["serviceName"] = cfg.Path
 		}
+
 		ss["grpcSettings"] = grpc
 	case "xhttp":
 		xh := map[string]any{}
 		if cfg.Path != "" {
 			xh["path"] = cfg.Path
 		}
+
 		if cfg.Host != "" {
 			xh["host"] = cfg.Host
 		}
+
 		if cfg.Mode != "" {
 			xh["mode"] = cfg.Mode
 		}
+
 		ss["xhttpSettings"] = xh
 	case "h2", "http":
 		hs := map[string]any{}
 		if cfg.Path != "" {
 			hs["path"] = cfg.Path
 		}
+
 		if cfg.Host != "" {
 			hs["host"] = []string{cfg.Host}
 		}
+
 		ss["httpSettings"] = hs
 	}
 
@@ -337,14 +377,17 @@ func resolveXraySecurity(cfg *serverConfig) string {
 	if cfg.Security != "" {
 		return cfg.Security
 	}
+
 	if cfg.TLS != "" {
 		return cfg.TLS
 	}
+
 	return "none"
 }
 
 func splitComma(s string) []string {
 	parts := strings.Split(s, ",")
+
 	out := make([]string, 0, len(parts))
 	for _, p := range parts {
 		p = strings.TrimSpace(p)
@@ -352,6 +395,7 @@ func splitComma(s string) []string {
 			out = append(out, p)
 		}
 	}
+
 	return out
 }
 
@@ -360,5 +404,6 @@ func truncateJSON(raw json.RawMessage) string {
 	if len(s) > 200 {
 		return s[:200]
 	}
+
 	return s
 }

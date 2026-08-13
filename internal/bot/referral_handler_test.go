@@ -36,9 +36,11 @@ func TestReferralInviteLinkUsesRealBotUsername(t *testing.T) {
 	if !strings.Contains(link, "https://t.me/"+realUsername+"?start=share_") {
 		t.Fatalf("invite link missing real username %q: got %q", realUsername, link)
 	}
+
 	if strings.Contains(link, "rs8kvn_bot_offline") {
 		t.Fatalf("invite link leaked placeholder username: %q", link)
 	}
+
 	if strings.Contains(link, "https://t.me/?start=") {
 		t.Fatalf("invite link has empty username: %q", link)
 	}
@@ -66,6 +68,7 @@ func TestReferralInviteTextShowsRealBotUsername(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generateInviteLink returned error: %v", err)
 	}
+
 	webLink := "https://example.com/i/x"
 	text := h.referral.keyboards.InviteLinkText(link, webLink)
 

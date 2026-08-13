@@ -2,6 +2,7 @@ package subserver
 
 import (
 	"bytes"
+	"maps"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -41,6 +42,7 @@ func NewCache(ttl time.Duration) *Cache {
 		stopCh:  make(chan struct{}),
 	}
 	go c.cleanupLoop()
+
 	return c
 }
 
@@ -49,16 +51,19 @@ func (c *Cache) Get(key string) ([]byte, map[string]string, bool) {
 	c.mu.RLock()
 	entry, ok := c.entries[key]
 	expired := ok && time.Now().After(entry.expiresAt)
+
 	c.mu.RUnlock()
 
 	if !ok || expired {
 		c.misses.Add(1)
 		metrics.CacheMissesTotal.WithLabelValues("subserver").Inc()
+
 		return nil, nil, false
 	}
 
 	c.hits.Add(1)
 	metrics.CacheHitsTotal.WithLabelValues("subserver").Inc()
+
 	return bytes.Clone(entry.body), cloneHeaders(entry.headers), true
 }
 
@@ -79,10 +84,10 @@ func cloneHeaders(h map[string]string) map[string]string {
 	if h == nil {
 		return nil
 	}
+
 	out := make(map[string]string, len(h))
-	for k, v := range h {
-		out[k] = v
-	}
+	maps.Copy(out, h)
+
 	return out
 }
 
@@ -90,6 +95,7 @@ func cloneHeaders(h map[string]string) map[string]string {
 func (c *Cache) Delete(key string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
 	delete(c.entries, key)
 }
 
@@ -113,12 +119,14 @@ func (c *Cache) cleanup() {
 	now := time.Now()
 
 	c.mu.RLock()
+
 	keys := make([]string, 0, len(c.entries))
 	for k, e := range c.entries {
 		if now.After(e.expiresAt) {
 			keys = append(keys, k)
 		}
 	}
+
 	c.mu.RUnlock()
 
 	if len(keys) == 0 {
@@ -127,6 +135,7 @@ func (c *Cache) cleanup() {
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
 	for _, k := range keys {
 		if e, ok := c.entries[k]; ok && now.After(e.expiresAt) {
 			delete(c.entries, k)
@@ -139,5 +148,6 @@ func (c *Cache) Stop() {
 	if c.stopped.Swap(true) {
 		return
 	}
+
 	close(c.stopCh)
 }

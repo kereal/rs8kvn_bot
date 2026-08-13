@@ -85,6 +85,7 @@ func TestPerUserRateLimiter_Wait_ContextTimeout(t *testing.T) {
 	t.Parallel()
 
 	rl := NewPerUserRateLimiter(1, 0.001) // very slow refill
+
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
@@ -181,16 +182,18 @@ func TestPerUserRateLimiter_ConcurrentAllow(t *testing.T) {
 	rl := NewPerUserRateLimiter(100, 0)
 
 	done := make(chan bool)
-	for i := int64(0); i < 10; i++ {
+
+	for i := range int64(10) {
 		go func(userID int64) {
-			for j := 0; j < 10; j++ {
+			for range 10 {
 				rl.Allow(userID)
 			}
+
 			done <- true
 		}(i)
 	}
 
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		<-done
 	}
 

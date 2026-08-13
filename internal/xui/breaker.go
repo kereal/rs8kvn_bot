@@ -46,13 +46,16 @@ func NewCircuitBreaker(maxFailures int, timeout time.Duration) *CircuitBreaker {
 		timeout:     timeout,
 		halfOpenMax: 3,
 	}
+
 	metrics.CircuitBreakerState.WithLabelValues("xui").Set(0)
+
 	return cb
 }
 
 func (cb *CircuitBreaker) Execute(ctx context.Context, fn func() error) error {
 	// Check if context is cancelled before proceeding
-	if err := ctx.Err(); err != nil {
+	err := ctx.Err()
+	if err != nil {
 		return err
 	}
 
@@ -60,12 +63,13 @@ func (cb *CircuitBreaker) Execute(ctx context.Context, fn func() error) error {
 		return ErrCircuitOpen
 	}
 
-	err := fn()
+	err = fn()
 	cb.recordResult(err)
 
 	if err != nil {
 		return err
 	}
+
 	return nil
 }
 
@@ -82,9 +86,12 @@ func (cb *CircuitBreaker) allowRequest() bool {
 			cb.state = CircuitStateHalfOpen
 			cb.successes = 0
 			cb.halfOpenAttempts = 1 // Count this transition as the first half-open attempt
+
 			metrics.CircuitBreakerState.WithLabelValues("xui").Set(2)
+
 			return true
 		}
+
 		return false
 
 	case CircuitStateHalfOpen:
@@ -93,6 +100,7 @@ func (cb *CircuitBreaker) allowRequest() bool {
 			cb.halfOpenAttempts++
 			return true
 		}
+
 		return false
 
 	default:
@@ -110,8 +118,10 @@ func (cb *CircuitBreaker) recordResult(err error) {
 
 		if cb.failures >= cb.maxFailures && cb.state != CircuitStateOpen {
 			cb.state = CircuitStateOpen
+
 			metrics.CircuitBreakerState.WithLabelValues("xui").Set(1)
 		}
+
 		return
 	}
 
@@ -126,6 +136,7 @@ func (cb *CircuitBreaker) recordResult(err error) {
 			cb.failures = 0
 			cb.successes = 0
 			cb.halfOpenAttempts = 0
+
 			metrics.CircuitBreakerState.WithLabelValues("xui").Set(0)
 		}
 	}
@@ -134,18 +145,21 @@ func (cb *CircuitBreaker) recordResult(err error) {
 func (cb *CircuitBreaker) State() CircuitState {
 	cb.mu.RLock()
 	defer cb.mu.RUnlock()
+
 	return cb.state
 }
 
 func (cb *CircuitBreaker) Failures() int {
 	cb.mu.RLock()
 	defer cb.mu.RUnlock()
+
 	return cb.failures
 }
 
 func (cb *CircuitBreaker) Reset() {
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
+
 	cb.state = CircuitStateClosed
 	cb.failures = 0
 	cb.successes = 0

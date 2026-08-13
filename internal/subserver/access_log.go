@@ -49,7 +49,8 @@ func NewAccessLogger(path string) (*AccessLogger, error) {
 		return &AccessLogger{}, nil
 	}
 
-	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+	err := os.MkdirAll(filepath.Dir(path), 0o750)
+	if err != nil {
 		return nil, fmt.Errorf("create access log directory: %w", err)
 	}
 
@@ -60,6 +61,7 @@ func NewAccessLogger(path string) (*AccessLogger, error) {
 	}
 
 	writer := newAsyncAccessLogWriter(path, file)
+
 	return &AccessLogger{writer: writer}, nil
 }
 
@@ -107,6 +109,7 @@ func appendAccessLogPart(b *strings.Builder, value string) {
 	if b.Len() > 0 {
 		b.WriteByte(' ')
 	}
+
 	if strings.Contains(value, " ") {
 		b.WriteByte('"')
 		b.WriteString(value)
@@ -126,6 +129,7 @@ func (l *AccessLogger) CloseWithContext(ctx context.Context) error {
 	if l == nil || l.writer == nil {
 		return nil
 	}
+
 	return l.writer.Sync(ctx)
 }
 
@@ -136,8 +140,10 @@ func newAsyncAccessLogWriter(path string, file *os.File) *asyncAccessLogWriter {
 		queue: make(chan []byte, accessLogQueueSize),
 		done:  make(chan struct{}),
 	}
+
 	writer.wg.Add(1)
 	go writer.run()
+
 	return writer
 }
 
@@ -167,6 +173,7 @@ func (w *asyncAccessLogWriter) Sync(ctx context.Context) error {
 		w.mu.Unlock()
 		return nil
 	}
+
 	w.closed = true
 	close(w.queue)
 	w.mu.Unlock()
@@ -181,12 +188,14 @@ func (w *asyncAccessLogWriter) Sync(ctx context.Context) error {
 		w.mu.Unlock()
 		<-w.done
 		w.logDroppedRecords()
+
 		return ctx.Err()
 	case <-w.done:
 	}
 
 	err := w.closeFile()
 	w.logDroppedRecords()
+
 	return err
 }
 
@@ -200,9 +209,11 @@ func (w *asyncAccessLogWriter) closeFile() error {
 
 	err := w.file.Close()
 	w.fileClosed = true
+
 	if err != nil {
 		return fmt.Errorf("close access log file: %w", err)
 	}
+
 	return nil
 }
 
@@ -219,7 +230,8 @@ func (w *asyncAccessLogWriter) run() {
 	defer close(w.done)
 
 	for data := range w.queue {
-		if _, err := w.file.Write(data); err != nil && w.warned.CompareAndSwap(false, true) {
+		_, err := w.file.Write(data)
+		if err != nil && w.warned.CompareAndSwap(false, true) {
 			logger.Warn("Subserver access log write failed",
 				zap.String("path", w.path),
 				zap.Error(err))
@@ -238,5 +250,6 @@ func sanitizeAccessLogValue(value string) string {
 	value = strings.ReplaceAll(value, "\n", " ")
 	value = strings.ReplaceAll(value, "\t", " ")
 	value = strings.ReplaceAll(value, "\"", " ")
+
 	return strings.TrimSpace(value)
 }

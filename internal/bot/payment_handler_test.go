@@ -281,44 +281,59 @@ func TestHandleBuyProduct_GenericRequestErrorShowsTempError(t *testing.T) {
 func TestHandleBuyProduct_SuccessShowsPaymentButton(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewDatabaseService()
-	mockDB.GetProductByIDFunc = func(context.Context, uint) (*database.Product, error) {
-		return &database.Product{ID: 1, Name: "Месяц", PriceCents: 19900, Currency: "RUB", IsActive: true}, nil
+	tests := []struct {
+		name       string
+		priceCents int64
+		wantPrice  string
+	}{
+		{name: "whole rubles", priceCents: 19900, wantPrice: "199₽"},
+		{name: "kopecks preserved", priceCents: 19999, wantPrice: "199.99₽"},
 	}
-	mockDB.GetByTelegramIDFunc = func(context.Context, int64) (*database.Subscription, error) {
-		return &database.Subscription{ID: 7, TelegramID: 42}, nil
-	}
-	mockDB.FindPendingPaymentOrderFunc = func(context.Context, uint, uint, time.Time) (*database.Order, error) {
-		return nil, nil
-	}
-	mockDB.GetPlanByIDFunc = func(context.Context, uint) (*database.Plan, error) {
-		return &database.Plan{ID: 2, IsActive: true}, nil
-	}
-	mockDB.FindOrCreatePendingPaymentOrderFunc = func(context.Context, uint, uint, int64, string, time.Time) (*database.Order, error) {
-		return &database.Order{ID: 3, SubscriptionID: 7, ProductID: 1, Status: database.OrderStatusPending, AmountCents: 19900, Currency: "RUB"}, nil
-	}
-	mockDB.MarkPaymentCreationUncertainFunc = func(context.Context, uint, bool) (bool, error) { return true, nil }
-	mockDB.SavePaymentDetailsFunc = func(context.Context, uint, uuid.UUID, string, time.Time) error { return nil }
-	h, bot := newPaymentTestHandler(t, mockDB, fakePaymentProvider{})
 
-	err := h.handleBuyProduct(context.Background(), 42, "user", 99, 1)
-	require.NoError(t, err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 
-	messages := bot.GetAllSentMessages()
-	require.Len(t, messages, 1)
-	assert.Contains(t, messages[0].Text, "Тариф: 💎 *Месяц*")
-	assert.Contains(t, messages[0].Text, "Стоимость: *199₽*")
-	assert.Contains(t, messages[0].Text, "После оплаты тариф активируется автоматически.")
-	assert.Contains(t, messages[0].Text, "Если тариф уже активен, новые дни прибавятся к текущему сроку.")
-	assert.Contains(t, messages[0].Text, "_Платёжная система может дополнительно взимать комиссию._")
+			mockDB := testutil.NewDatabaseService()
+			mockDB.GetProductByIDFunc = func(context.Context, uint) (*database.Product, error) {
+				return &database.Product{ID: 1, Name: "Месяц", PriceCents: tt.priceCents, Currency: "RUB", IsActive: true}, nil
+			}
+			mockDB.GetByTelegramIDFunc = func(context.Context, int64) (*database.Subscription, error) {
+				return &database.Subscription{ID: 7, TelegramID: 42}, nil
+			}
+			mockDB.FindPendingPaymentOrderFunc = func(context.Context, uint, uint, time.Time) (*database.Order, error) {
+				return nil, nil
+			}
+			mockDB.GetPlanByIDFunc = func(context.Context, uint) (*database.Plan, error) {
+				return &database.Plan{ID: 2, IsActive: true}, nil
+			}
+			mockDB.FindOrCreatePendingPaymentOrderFunc = func(context.Context, uint, uint, int64, string, time.Time) (*database.Order, error) {
+				return &database.Order{ID: 3, SubscriptionID: 7, ProductID: 1, Status: database.OrderStatusPending, AmountCents: tt.priceCents, Currency: "RUB"}, nil
+			}
+			mockDB.MarkPaymentCreationUncertainFunc = func(context.Context, uint, bool) (bool, error) { return true, nil }
+			mockDB.SavePaymentDetailsFunc = func(context.Context, uint, uuid.UUID, string, time.Time) error { return nil }
+			h, bot := newPaymentTestHandler(t, mockDB, fakePaymentProvider{})
 
-	edit, ok := bot.LastChattableSafe().(tgbotapi.EditMessageTextConfig)
-	require.True(t, ok, "expected an edited message with a payment keyboard")
-	require.Equal(t, "Markdown", edit.ParseMode)
-	require.NotNil(t, edit.ReplyMarkup, "payment screen must carry the BuyProductConfirm keyboard")
-	require.NotEmpty(t, edit.ReplyMarkup.InlineKeyboard)
-	urlButton := edit.ReplyMarkup.InlineKeyboard[0][0]
-	require.NotNil(t, urlButton.URL, "payment button must carry the provider URL")
-	assert.Equal(t, "https://pay.example", *urlButton.URL, "payment button must link to the provider URL")
-	assert.Equal(t, "💳 Оплатить 199₽", urlButton.Text)
+			err := h.handleBuyProduct(context.Background(), 42, "user", 99, 1)
+			require.NoError(t, err)
+
+			messages := bot.GetAllSentMessages()
+			require.Len(t, messages, 1)
+			assert.Contains(t, messages[0].Text, "Тариф: 💎 *Месяц*")
+			assert.Contains(t, messages[0].Text, "Стоимость: *"+tt.wantPrice+"*")
+			assert.Contains(t, messages[0].Text, "После оплаты тариф активируется автоматически.")
+			assert.Contains(t, messages[0].Text, "Если тариф уже активен, новые дни прибавятся к текущему сроку.")
+			assert.Contains(t, messages[0].Text, "_Платёжная система может дополнительно взимать комиссию._")
+
+			edit, ok := bot.LastChattableSafe().(tgbotapi.EditMessageTextConfig)
+			require.True(t, ok, "expected an edited message with a payment keyboard")
+			require.Equal(t, "Markdown", edit.ParseMode)
+			require.NotNil(t, edit.ReplyMarkup, "payment screen must carry the BuyProductConfirm keyboard")
+			require.NotEmpty(t, edit.ReplyMarkup.InlineKeyboard)
+			urlButton := edit.ReplyMarkup.InlineKeyboard[0][0]
+			require.NotNil(t, urlButton.URL, "payment button must carry the provider URL")
+			assert.Equal(t, "https://pay.example", *urlButton.URL, "payment button must link to the provider URL")
+			assert.Equal(t, "💳 Оплатить "+tt.wantPrice, urlButton.Text)
+		})
+	}
 }

@@ -459,8 +459,8 @@ func (sh *SubscriptionHandler) handleBuyProduct(ctx context.Context, chatID int6
 		return sh.showBuyError(chatID, messageID, msg(MsgSubTempError))
 	}
 
-	text := fmt.Sprintf("Тариф: 💎 *%s*\n\nСтоимость: *%d₽*\n\nПосле оплаты тариф активируется автоматически.\nЕсли тариф уже активен, новые дни прибавятся к текущему сроку.\n\n_Платёжная система может дополнительно взимать комиссию._",
-		utils.EscapeMarkdown(product.Name), product.PriceCents/100)
+	text := fmt.Sprintf("Тариф: 💎 *%s*\n\nСтоимость: *%s*\n\nПосле оплаты тариф активируется автоматически.\nЕсли тариф уже активен, новые дни прибавятся к текущему сроку.\n\n_Платёжная система может дополнительно взимать комиссию._",
+		utils.EscapeMarkdown(product.Name), utils.FormatPriceCents(product.PriceCents))
 	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, text)
 	editMsg.ParseMode = "Markdown"
 	keyboard := sh.h.keyboards.BuyProductConfirm(product, info.URL)

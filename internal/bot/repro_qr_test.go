@@ -29,6 +29,7 @@ func tap(h *Handler, data string, chatID int64, msgID int) {
 
 func newQRTestHandler(t *testing.T) (*Handler, *testutil.BotAPI) {
 	t.Helper()
+
 	ctx := context.Background()
 	db := testutil.NewDatabaseService()
 	cfg := &config.Config{TelegramAdminID: 123456, SiteURL: "https://x.com", GlobalSubURL: "https://x.com/sub/"}
@@ -39,6 +40,7 @@ func newQRTestHandler(t *testing.T) (*Handler, *testutil.BotAPI) {
 	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
 	svc := service.NewSubscriptionService(db, xuiClients, nil, nodes, cfg)
 	bot := testutil.NewBotAPI()
+
 	return NewHandler(bot, cfg, db, NewTestBotConfig(), svc, ""), bot
 }
 
@@ -55,7 +57,7 @@ func newQRTestHandler(t *testing.T) (*Handler, *testutil.BotAPI) {
 // same pattern, so the test is written against the contract, not the QR alone.
 func TestNavigation_OpenAndBack(t *testing.T) {
 	const (
-		cardMsgID  = 100 // the subscription card / menu already on screen
+		cardMsgID   = 100 // the subscription card / menu already on screen
 		screenMsgID = 555 // the separate QR/invite message Telegram assigns
 	)
 
@@ -93,5 +95,37 @@ func TestNavigation_OpenAndBack(t *testing.T) {
 			"back must delete only the invite QR message (id %d)", screenMsgID)
 		assert.NotContains(t, bot.DeletedMessageIDsSafe(), cardMsgID,
 			"back must NOT delete the card (id %d)", cardMsgID)
+	})
+
+	t.Run("documents", func(t *testing.T) {
+		handler, bot := newQRTestHandler(t)
+
+		nextMessageID := screenMsgID
+		bot.SendFunc = func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
+			nextMessageID++
+			return tgbotapi.Message{MessageID: nextMessageID}, nil
+		}
+
+		// The documents menu stays on the existing card.
+		tap(handler, "menu_documents", 42, cardMsgID)
+		assert.Empty(t, bot.DeletedMessageIDsSafe(),
+			"opening documents must NOT delete the underlying card (id %d)", cardMsgID)
+
+		// Legal content is split into separate messages, with Back on the last one.
+		firstLegalMessageID := nextMessageID + 1
+		tap(handler, "menu_privacy", 42, cardMsgID)
+		require.True(t, bot.SendCalledSafe(), "opening legal content must send a message")
+		lastLegalMessageID := nextMessageID
+		require.GreaterOrEqual(t, lastLegalMessageID, firstLegalMessageID)
+
+		tap(handler, "back_to_documents", 42, lastLegalMessageID)
+
+		deleted := bot.DeletedMessageIDsSafe()
+		for id := firstLegalMessageID; id <= lastLegalMessageID; id++ {
+			assert.Contains(t, deleted, id,
+				"back to documents must delete legal message part %d", id)
+		}
+		assert.NotContains(t, deleted, cardMsgID,
+			"back to documents must NOT delete the underlying card (id %d)", cardMsgID)
 	})
 }

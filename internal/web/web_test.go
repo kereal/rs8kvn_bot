@@ -2,6 +2,8 @@ package web
 
 import (
 	"context"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -10,8 +12,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 
 	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
@@ -138,18 +138,21 @@ func TestRenderTrialPage(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var srv *Server
+
 			if tt.mockDB {
 				mockDB := testutil.NewDatabaseService()
 				cfg := &config.Config{SiteURL: "https://example.com", TrialDurationHours: 24}
 				mockDB.GetPlanByNameFunc = func(ctx context.Context, name string) (*database.Plan, error) {
 					return &database.Plan{ID: 1, Name: "trial", DevicesLimit: 1, TrafficLimit: 1073741824}, nil
 				}
+
 				srv = NewServer(":8880", mockDB, cfg, "testbot", nil, nil)
 				defer mockDB.Close()
 			} else {
 				cfg := &config.Config{SiteURL: "https://vpn.site", TrialDurationHours: 3}
 				srv = NewServer(":8880", nil, cfg, "testbot", nil, nil)
 			}
+
 			w := httptest.NewRecorder()
 			srv.renderTrialPage(w, "sub1", tt.subURL, tt.telegramLink, tt.trialHours)
 			tt.check(t, w.Body.String())
@@ -245,6 +248,7 @@ func TestServer_Stop_AlwaysShutdownsHTTPServer(t *testing.T) {
 	if conn != nil {
 		conn.Close()
 	}
+
 	if dialErr != nil {
 		require.False(t, os.IsTimeout(dialErr), "dial should not hang after listener release")
 	}
@@ -312,13 +316,16 @@ func TestGetClientIP(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			req := httptest.NewRequest("GET", "/i/test", nil)
+
 			req.RemoteAddr = tt.remote
 			if tt.forward != "" {
 				req.Header.Set("X-Forwarded-For", tt.forward)
 			}
+
 			if tt.realIP != "" {
 				req.Header.Set("X-Real-IP", tt.realIP)
 			}
+
 			ip := getClientIP(req)
 			assert.Equal(t, tt.expected, ip)
 		})
@@ -385,6 +392,7 @@ func TestServer_StartPortInUse(t *testing.T) {
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err, "Failed to create listener")
+
 	defer listener.Close()
 
 	addr := listener.Addr().String()
@@ -401,6 +409,7 @@ func TestServer_StartPortInUse(t *testing.T) {
 	t.Run("port_inuse_does_not_create_subserver_log", func(t *testing.T) {
 		listener2, err2 := net.Listen("tcp", "127.0.0.1:0")
 		require.NoError(t, err2)
+
 		defer listener2.Close()
 
 		logPath := filepath.Join(t.TempDir(), "subserver.log")

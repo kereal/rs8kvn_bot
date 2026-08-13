@@ -43,11 +43,15 @@ func (w *SubscriptionSyncWorker) Run(ctx context.Context) {
 
 func (w *SubscriptionSyncWorker) process(ctx context.Context) {
 	metrics.SubscriptionSyncTotal.Inc()
+
 	start := time.Now()
-	if err := w.syncSvc.SyncPendingNodes(ctx); err != nil {
+
+	err := w.syncSvc.SyncPendingNodes(ctx)
+	if err != nil {
 		logger.Warn("Subscription sync failed", zap.Error(err))
 	} else {
 		logger.Debug("Subscription sync completed")
 	}
+
 	metrics.SubscriptionSyncDuration.Observe(time.Since(start).Seconds())
 }

@@ -1119,18 +1119,21 @@ func (m *DatabaseService) ConfirmOrderPaidCAS(ctx context.Context, orderID uint,
 		return false, nil
 	}
 
+	if applyPlan != nil {
+		// The in-memory fake has no transaction handle. Require tests that cover
+		// transaction-scoped plan reconciliation to provide ConfirmOrderPaidCASFunc;
+		// silently invoking the callback with nil would hide a production bug.
+		// Validate before mutating any state: in production an applyPlan failure
+		// rolls back the whole transaction, so the mock must not leave partial
+		// order/subscription mutations behind when it returns this error.
+		return false, errors.New("mock ConfirmOrderPaidCAS requires ConfirmOrderPaidCASFunc when applyPlan is set")
+	}
+
 	newExpiry := database.CalculatePaymentExpiry(paidAt, sub, product)
 
 	order.Status, order.PaidAt, order.ActivatedAt, order.ExpiresAt = database.OrderStatusPaid, &paidAt, &activatedAt, &newExpiry
 	if sub != nil {
 		sub.ExpiresAt = &newExpiry
-	}
-
-	if applyPlan != nil {
-		// The in-memory fake has no transaction handle. Require tests that cover
-		// transaction-scoped plan reconciliation to provide ConfirmOrderPaidCASFunc;
-		// silently invoking the callback with nil would hide a production bug.
-		return false, errors.New("mock ConfirmOrderPaidCAS requires ConfirmOrderPaidCASFunc when applyPlan is set")
 	}
 
 	return true, nil

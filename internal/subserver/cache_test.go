@@ -12,10 +12,12 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	if err := testutil.InitLogger(m); err != nil {
+	err := testutil.InitLogger(m)
+	if err != nil {
 		fmt.Fprintln(os.Stderr, "Failed to initialize logger:", err)
 		os.Exit(1)
 	}
+
 	os.Exit(m.Run())
 }
 
@@ -77,6 +79,7 @@ func TestCache_Cleanup(t *testing.T) {
 		cache.mu.RLock()
 		count := len(cache.entries)
 		cache.mu.RUnlock()
+
 		return count == 0
 	}, 200*time.Millisecond, 5*time.Millisecond, "all entries should be cleaned up after TTL")
 }

@@ -15,7 +15,8 @@ import (
 func GenerateUUID() (string, error) {
 	uuid := make([]byte, 16)
 
-	if _, err := io.ReadFull(rand.Reader, uuid); err != nil {
+	_, err := io.ReadFull(rand.Reader, uuid)
+	if err != nil {
 		return "", fmt.Errorf("generate uuid: %w", err)
 	}
 
@@ -43,7 +44,8 @@ func GenerateUUID() (string, error) {
 func GenerateSubID() (string, error) {
 	bytes := make([]byte, 5)
 
-	if _, err := io.ReadFull(rand.Reader, bytes); err != nil {
+	_, err := io.ReadFull(rand.Reader, bytes)
+	if err != nil {
 		return "", fmt.Errorf("generate sub id: %w", err)
 	}
 
@@ -55,26 +57,32 @@ func GenerateSubID() (string, error) {
 // Uses rejection sampling to avoid modulo bias.
 func GenerateInviteCode() (string, error) {
 	const charset = "0123456789abcdefghijklmnopqrstuvwxyz"
+
 	const charsetLen = len(charset) // 36
-	const limit = 252               // 36 * 7, largest multiple of 36 < 256
+
+	const limit = 252 // 36 * 7, largest multiple of 36 < 256
 
 	result := make([]byte, 8)
 	buf := make([]byte, 8)
 
-	for i := 0; i < 8; i++ {
+	for i := range 8 {
 		for {
-			if _, err := io.ReadFull(rand.Reader, buf); err != nil {
+			_, err := io.ReadFull(rand.Reader, buf)
+			if err != nil {
 				return "", fmt.Errorf("generate invite code: %w", err)
 			}
 			// Use bytes from buffer, rejecting values >= limit to avoid bias
 			used := false
-			for j := 0; j < len(buf); j++ {
+
+			for j := range buf {
 				if buf[j] < limit {
 					result[i] = charset[buf[j]%byte(charsetLen)]
 					used = true
+
 					break
 				}
 			}
+
 			if used {
 				break
 			}

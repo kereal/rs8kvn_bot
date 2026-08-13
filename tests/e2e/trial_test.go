@@ -1,5 +1,3 @@
-
-
 package e2e
 
 import (
@@ -31,6 +29,7 @@ func TestE2E_TrialBind_Parameterized(t *testing.T) {
 				trialSubID := "trial-abc-123"
 				_, err := env.db.CreateTrialSubscription(ctx, "test_invite_code", trialSubID, "trial-client-id", time.Now().Add(24*time.Hour))
 				require.NoError(t, err)
+
 				return trialSubID
 			},
 			wantSent:    true,
@@ -54,9 +53,11 @@ func TestE2E_TrialBind_Parameterized(t *testing.T) {
 					Status:         "active",
 				}
 				require.NoError(t, env.db.CreateSubscription(ctx, existingSub, ""))
+
 				trialSubID := "trial-xyz-789"
 				_, err := env.db.CreateTrialSubscription(ctx, "test_invite_code", trialSubID, "trial-client-id", time.Now().Add(24*time.Hour))
 				require.NoError(t, err)
+
 				return trialSubID
 			},
 			wantSent:    true,
@@ -82,6 +83,7 @@ func TestE2E_TrialBind_Parameterized(t *testing.T) {
 					Message: newCommandMessage(env.chatID, env.chatID, env.username, "/start trial_"+trialSubID, 6),
 				})
 				resetBotAPI(env.botAPI)
+
 				return trialSubID
 			},
 			wantSent:    true,
@@ -96,6 +98,7 @@ func TestE2E_TrialBind_Parameterized(t *testing.T) {
 			defer env.db.Close()
 
 			ctx := context.Background()
+
 			resetBotAPI(env.botAPI)
 			trialSubID := tt.setup(t, ctx, env)
 
@@ -104,9 +107,11 @@ func TestE2E_TrialBind_Parameterized(t *testing.T) {
 			})
 
 			assert.Equal(t, tt.wantSent, env.botAPI.SendCalledSafe())
+
 			if tt.wantSent {
 				assert.Contains(t, env.botAPI.LastSentText, tt.wantMessage)
 			}
+
 			if tt.checkSub != nil {
 				tt.checkSub(t, ctx, env)
 			}

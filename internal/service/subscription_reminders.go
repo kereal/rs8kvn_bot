@@ -37,7 +37,9 @@ func ExpiryReminderWindows() [3]interfaces.SubscriptionReminderWindow {
 // ReminderWindowBounds returns the scan range for a worker tick.
 func ReminderWindowBounds(w interfaces.SubscriptionReminderWindow, now time.Time) (time.Time, time.Time) {
 	const halfTick = 30 * time.Minute
+
 	center := now.Add(w.LeadTime)
+
 	return center.Add(-halfTick), center.Add(halfTick)
 }
 
@@ -47,6 +49,7 @@ func ReminderWindowRemaining(now, expiresAt time.Time) (daysLeft, hoursLeft int)
 	if remaining <= 0 {
 		return 0, 0
 	}
+
 	return int(remaining.Hours() / 24), int(remaining.Hours()) % 24
 }
 
@@ -61,6 +64,7 @@ func (s *SubscriptionService) SendExpiryReminder(ctx context.Context, sub *datab
 		metrics.SubscriptionRemindersTotal.WithLabelValues(window.Name, "error").Inc()
 		return fmt.Errorf("claim reminder: %w", err)
 	}
+
 	if !claimed {
 		return nil
 	}
@@ -68,16 +72,23 @@ func (s *SubscriptionService) SendExpiryReminder(ctx context.Context, sub *datab
 	daysLeft, hoursLeft := ReminderWindowRemaining(time.Now().UTC(), *sub.ExpiresAt)
 	text := utils.EscapeMarkdownV2(reminderText(daysLeft, hoursLeft, s.cfg.SubURL(sub.SubscriptionID)))
 	msg := tgbotapi.NewMessage(sub.TelegramID, text)
+
 	msg.ParseMode = tgbotapi.ModeMarkdownV2
-	if _, err := s.bot.Send(msg); err != nil {
-		if releaseErr := s.reminderRepo.ReleaseReminder(ctx, sub.ID, window.Bit, *sub.ExpiresAt); releaseErr != nil {
+
+	_, err = s.bot.Send(msg)
+	if err != nil {
+		releaseErr := s.reminderRepo.ReleaseReminder(ctx, sub.ID, window.Bit, *sub.ExpiresAt)
+		if releaseErr != nil {
 			err = errors.Join(err, releaseErr)
 		}
+
 		metrics.SubscriptionRemindersTotal.WithLabelValues(window.Name, "error").Inc()
+
 		return fmt.Errorf("send reminder: %w", err)
 	}
 
 	metrics.SubscriptionRemindersTotal.WithLabelValues(window.Name, "success").Inc()
+
 	return nil
 }
 
@@ -86,5 +97,6 @@ func reminderText(daysLeft int, hoursLeft int, subURL string) string {
 	if daysLeft > 0 {
 		return fmt.Sprintf("⏳ До окончания подписки осталось %d д\n%s%s", daysLeft, subURL, renewalInstruction)
 	}
+
 	return fmt.Sprintf("🚨 До окончания подписки осталось %d ч\n%s%s", hoursLeft, subURL, renewalInstruction)
 }

@@ -1,10 +1,15 @@
 # Telegram Bot for 3x-ui VLESS Subscription Distribution
 
 [![GitHub release](https://img.shields.io/github/v/release/kereal/rs8kvn_bot?logo=github)](https://github.com/kereal/rs8kvn_bot/releases)
-[![Coverage](https://img.shields.io/badge/coverage-85%25%2B-green)](https://github.com/kereal/rs8kvn_bot/actions)
+[![CI](https://img.shields.io/github/actions/workflow/status/kereal/rs8kvn_bot/docker.yml?branch=main)](https://github.com/kereal/rs8kvn_bot/actions)
 [![Go](https://img.shields.io/badge/Go-1.25%2B-00ADD8?logo=go)](https://go.dev/)
-[![Go Report Card](https://goreportcard.com/badge/github.com/kereal/rs8kvn_bot)](https://goreportcard.com/report/github.com/kereal/rs8kvn_bot)
-[![License](https://img.shields.io/github/license/kereal/rs8kvn_bot)](LICENSE)
+[![Coverage](https://img.shields.io/badge/coverage-85%25%2B-green)](https://github.com/kereal/rs8kvn_bot/actions)
+[![Docker](https://img.shields.io/badge/Docker-ghcr.io%2Fkereal%2Frs8kvn_bot-blue?logo=docker)](https://github.com/kereal/rs8kvn_bot/actions)
+[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL%203.0-blue.svg)](LICENSE)
+
+Нужен VPN? » telegram: [@kereal](https://t.me/kereal)  
+По всем вопросам пишите в telegram: [@kereal](https://t.me/kereal)  
+Ставьте звездочки! =)
 
 ## Features
 
@@ -15,7 +20,7 @@
 - 🔗 Subscription server endpoint (`/sub/{subID}`) with multi-source aggregation, devices/IPs tracking, and profile headers, node-state synchronization via subscription_nodes table
 - 🌐 Multi-node VPN abstraction — `internal/vpn/` with `Client` interface, 3x-ui, proxman, and fetch support, per-node client provisioning
 - 📈 Prometheus metrics — `/metrics` endpoint with HTTP, bot, XUI, DB, cache, circuit breaker, subscription metrics
-- 🗄️ Daily database backups with rotation, embedded migrations (000–029)
+- 🗄️ Daily database backups with rotation, embedded SQLite migrations
 - 🐛 Sentry error tracking (+ performance traces)
 - 🐳 Docker support with health checks, non-root user, UPX compression
 - 🧪 Unit + E2E tests (~85% coverage, race-safe, fuzzing)
@@ -94,7 +99,20 @@ The bot exposes HTTP endpoints on port 8880:
 | `GET /metrics` | Prometheus metrics endpoint | 200 |
 | `GET /sub/{subID}` | Subscription server | 200/404/502/405 |
 | `GET /static/logo.png` | Logo image (mobile-optimized PNG) | 200/404 |
-| `POST /payment/callback` | Payment provider callback (stub) | 200/405 |
+| `POST /payment/callback` | Platega payment webhook (X-MerchantId / X-Secret) | 200/400/401/405/503 |
+
+### Payment Callback (`/payment/callback`)
+
+Receives Platega payment notifications. Guard chain, in order:
+1. Method: POST-only (405 otherwise).
+2. Service availability: payments must be enabled, `orderService`/`bot` wired, and runtime payment readiness enabled only after the real bot and `SyncService` are initialized (→ 503 otherwise).
+3. Auth: `X-MerchantId` / `X-Secret` headers compared constant-time to `cfg.PlategaMerchantID` / `cfg.PlategaSecret` (→ 401). Both credentials must be non-empty.
+4. Body: `http.MaxBytesReader(256 KiB)`, `json.Decoder.UseNumber`, single JSON object (extra trailing JSON rejected).
+5. `payload.ID` must be a UUID provider transaction ID; `payload.Validate()` requires id/amount/currency/status (→ 400 otherwise). `paymentMethod` and `payload` принимаются при наличии; официальная документация Platega противоречит сама себе по обязательности этих полей, поэтому интеграция сохраняет совместимость и уведомляет администратора о malformed callback. Provider transaction IDs are UUIDs; malformed or non-UUID IDs are rejected with 400.
+6. Status `CONFIRMED` → `OrderService.ConfirmPayment` (CAS with `pending` guard, exact amount match, atomic plan application in the same DB transaction).
+7. Status `CANCELED|CHARGEBACKED` → `OrderService.CancelPaymentByProvider`; a chargeback on a previously-paid order automatically downgrades the subscription to the free plan (unless another paid order exists), otherwise it is recorded for manual review.
+
+Development: expose the webhook with `ngrok http 8880` and configure the resulting URL in the Platega dashboard. The shared `.env` controls the endpoint via `PAYMENT_ENABLED`, `PLATEGA_MERCHANT_ID`, `PLATEGA_SECRET`. Link lifetime is taken from Platega `expiresIn`; a valid saved link is reused. `CHARGEBACKED` on a paid order automatically downgrades the subscription to the free plan unless another paid order exists; otherwise it is recorded for manual review. A confirmed payment (purchase or renewal) sends the admin a Telegram alert with the tariff, formatted amount and a clickable buyer link (`utils.FormatUserLink`); a `CHARGEBACKED` on a paid order additionally sends a dedicated chargeback alert with the access status (downgraded to free vs preserved). Uncertain provider outcomes and late confirmed payments generate an admin Telegram alert containing the order, user, amount, currency and provider transaction ID.
 
 ### Invite/Trial Landing Page (`/i/{code}`)
 

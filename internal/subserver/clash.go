@@ -26,10 +26,13 @@ type clashConfig struct {
 // so downstream ConvertSingleJSONToLink can consume it unchanged.
 func ExtractClashConfigs(body []byte) ([]json.RawMessage, error) {
 	var cfg clashConfig
-	if err := yaml.Unmarshal(body, &cfg); err != nil {
+
+	err := yaml.Unmarshal(body, &cfg)
+	if err != nil {
 		logger.Error("Failed to parse Clash YAML",
 			zap.Error(err),
 			zap.String("body_preview", utils.TruncateString(string(body), 200)))
+
 		return nil, fmt.Errorf("parse clash yaml: %w", err)
 	}
 
@@ -44,21 +47,26 @@ func ExtractClashConfigs(body []byte) ([]json.RawMessage, error) {
 			logger.Warn("Skipping clash proxy entry",
 				zap.Int("index", i),
 				zap.Error(err))
+
 			continue
 		}
+
 		raw, err := json.Marshal(normalised)
 		if err != nil {
 			logger.Warn("Failed to marshal normalised clash proxy",
 				zap.Int("index", i),
 				zap.Error(err))
+
 			continue
 		}
+
 		items = append(items, raw)
 	}
 
 	if len(items) == 0 {
 		return nil, fmt.Errorf("no valid clash proxy entries")
 	}
+
 	return items, nil
 }
 
@@ -69,6 +77,7 @@ func normaliseClashProxy(p map[string]any) (map[string]any, error) {
 	if proxyType == "" {
 		return nil, fmt.Errorf("missing type field")
 	}
+
 	proxyType = strings.ToLower(proxyType)
 
 	out := make(map[string]any)
@@ -77,6 +86,7 @@ func normaliseClashProxy(p map[string]any) (map[string]any, error) {
 	out["type"] = proxyType
 	setStrFallback(out, p, []string{"server", "address"}, "address")
 	setStrFallback(out, p, []string{"name", "remark"}, "remark")
+
 	if v, ok := p["port"]; ok {
 		if port := portToInt(v); port > 0 {
 			out["port"] = port
@@ -101,6 +111,7 @@ func normaliseClashProxy(p map[string]any) (map[string]any, error) {
 		setStrFallback(out, p, []string{"client-fingerprint", "fp"}, "fp")
 		setAlpn(out, p)
 		setPacketEncoding(out, p)
+
 		if toBool(p["skip-cert-verify"]) || toBool(p["allowInsecure"]) {
 			out["allowInsecure"] = true
 		}
@@ -138,6 +149,7 @@ func normaliseClashProxy(p map[string]any) (map[string]any, error) {
 			if s := firstListOrString(h["path"]); s != "" {
 				out["path"] = s
 			}
+
 			if s := httpOptsHost(h); s != "" {
 				out["host"] = s
 			}
@@ -147,6 +159,7 @@ func normaliseClashProxy(p map[string]any) (map[string]any, error) {
 			if s := firstListOrString(h["path"]); s != "" {
 				out["path"] = s
 			}
+
 			if s := httpOptsHost(h); s != "" {
 				out["host"] = s
 			}
@@ -160,14 +173,17 @@ func normaliseClashProxy(p map[string]any) (map[string]any, error) {
 		setStrFallback(out, p, []string{"client-fingerprint", "fp"}, "fp")
 		setAlpn(out, p)
 		setStrFallback(out, p, []string{"alterId", "aid"}, "aid")
+
 		if toBool(p["tls"]) {
 			out["tls"] = "tls"
 		}
+
 		if g := getMap(p, "grpc-opts"); g != nil {
 			if s, ok := g["grpc-service-name"].(string); ok {
 				out["path"] = s
 			}
 		}
+
 		if w := getMap(p, "ws-opts"); w != nil {
 			setWSHost(out, w)
 			setWSPath(out, w)
@@ -181,10 +197,12 @@ func normaliseClashProxy(p map[string]any) (map[string]any, error) {
 		if net, _ := out["network"].(string); net == "http" {
 			out["headerType"] = "http"
 		}
+
 		if h := getMap(p, "http-opts"); h != nil {
 			if s := firstListOrString(h["path"]); s != "" {
 				out["path"] = s
 			}
+
 			if s := httpOptsHost(h); s != "" {
 				out["host"] = s
 			}
@@ -194,6 +212,7 @@ func normaliseClashProxy(p map[string]any) (map[string]any, error) {
 			if s := firstListOrString(h["path"]); s != "" {
 				out["path"] = s
 			}
+
 			if s := httpOptsHost(h); s != "" {
 				out["host"] = s
 			}
@@ -205,6 +224,7 @@ func normaliseClashProxy(p map[string]any) (map[string]any, error) {
 		setStrFallback(out, p, []string{"sni", "servername"}, "sni")
 		setStrFallback(out, p, []string{"client-fingerprint", "fp"}, "fp")
 		setAlpn(out, p)
+
 		if toBool(p["skip-cert-verify"]) || toBool(p["allowInsecure"]) {
 			out["allowInsecure"] = true
 		}
@@ -217,11 +237,13 @@ func normaliseClashProxy(p map[string]any) (map[string]any, error) {
 				out["security"] = "tls"
 			}
 		}
+
 		if g := getMap(p, "grpc-opts"); g != nil {
 			if s, ok := g["grpc-service-name"].(string); ok {
 				out["path"] = s
 			}
 		}
+
 		if w := getMap(p, "ws-opts"); w != nil {
 			setWSHost(out, w)
 			setWSPath(out, w)
@@ -236,18 +258,22 @@ func normaliseClashProxy(p map[string]any) (map[string]any, error) {
 			setStrFallback(out, x, []string{"host"}, "host")
 			setStrFallback(out, x, []string{"mode"}, "mode")
 		}
+
 		if h := getMap(p, "http-opts"); h != nil {
 			if s := firstListOrString(h["path"]); s != "" {
 				out["path"] = s
 			}
+
 			if s := httpOptsHost(h); s != "" {
 				out["host"] = s
 			}
 		}
+
 		if h := getMap(p, "h2-opts"); h != nil {
 			if s := firstListOrString(h["path"]); s != "" {
 				out["path"] = s
 			}
+
 			if s := httpOptsHost(h); s != "" {
 				out["host"] = s
 			}
@@ -269,13 +295,16 @@ func normaliseClashProxy(p map[string]any) (map[string]any, error) {
 		if proxyType == "hy2" || proxyType == "hysteria2" {
 			out["type"] = "hysteria2"
 		}
+
 		setStrFallback(out, p, []string{"password", "auth", "auth-str", "auth_str"}, "password")
 		setStrFallback(out, p, []string{"sni", "servername"}, "sni")
 		setStrFallback(out, p, []string{"obfs"}, "obfs")
 		setStrFallback(out, p, []string{"obfs-password", "obfs_password", "obfsPassword"}, "obfsPassword")
+
 		if toBool(p["skip-cert-verify"]) || toBool(p["allowInsecure"]) || toBool(p["insecure"]) {
 			out["allowInsecure"] = true
 		}
+
 		setStrFallback(out, p, []string{"client-fingerprint", "fp"}, "fp")
 		setAlpn(out, p)
 	case "tuic":
@@ -283,9 +312,11 @@ func normaliseClashProxy(p map[string]any) (map[string]any, error) {
 		setStrFallback(out, p, []string{"password", "pass"}, "password")
 		setStrFallback(out, p, []string{"sni", "servername"}, "sni")
 		setAlpn(out, p)
+
 		if toBool(p["skip-cert-verify"]) || toBool(p["allowInsecure"]) {
 			out["allowInsecure"] = true
 		}
+
 		setStrFallback(out, p, []string{"client-fingerprint", "fp"}, "fp")
 	default:
 		return nil, fmt.Errorf("unsupported clash proxy type: %s", proxyType)
@@ -296,6 +327,7 @@ func normaliseClashProxy(p map[string]any) (map[string]any, error) {
 	if addr, _ := out["address"].(string); addr == "" {
 		return nil, fmt.Errorf("clash proxy %q missing address", proxyType)
 	}
+
 	port, _ := out["port"].(int)
 	if port <= 0 {
 		return nil, fmt.Errorf("clash proxy %q missing port", proxyType)
@@ -333,6 +365,7 @@ func setPacketEncoding(out, p map[string]any) {
 			return
 		}
 	}
+
 	if v, ok := p["packetEncoding"]; ok {
 		if s, ok := v.(string); ok && s != "" {
 			out["packetEncoding"] = s
@@ -357,14 +390,17 @@ func firstPortFromPorts(v any) int {
 		if token == "" {
 			return 0
 		}
+
 		if i := strings.IndexByte(token, '-'); i >= 0 {
 			token = token[:i]
 		}
+
 		return portToInt(token)
 	case []any:
 		if len(x) == 0 {
 			return 0
 		}
+
 		return firstPortFromPorts(x[0])
 	default:
 		return portToInt(v)
@@ -393,6 +429,7 @@ func setAlpn(out, p map[string]any) {
 	if !ok {
 		return
 	}
+
 	switch a := v.(type) {
 	case string:
 		if a != "" {
@@ -405,6 +442,7 @@ func setAlpn(out, p map[string]any) {
 				parts = append(parts, s)
 			}
 		}
+
 		if len(parts) > 0 {
 			out["alpn"] = strings.Join(parts, ",")
 		}
@@ -441,6 +479,7 @@ func toBool(v any) bool {
 	case int:
 		return b != 0
 	}
+
 	return false
 }
 
@@ -453,10 +492,12 @@ func getHostFromHeaders(headers map[string]any) string {
 // that may be a ws-opts (with nested "headers") or a raw headers map.
 func getWSHeaderHost(wsOpts map[string]any) string {
 	headers := getMap(wsOpts, "headers")
+
 	src := wsOpts
 	if headers != nil {
 		src = headers
 	}
+
 	for k, v := range src {
 		if strings.EqualFold(k, "host") {
 			if s, ok := v.(string); ok {
@@ -464,6 +505,7 @@ func getWSHeaderHost(wsOpts map[string]any) string {
 			}
 		}
 	}
+
 	return ""
 }
 
@@ -474,6 +516,7 @@ func getMap(src map[string]any, key string) map[string]any {
 			return m
 		}
 	}
+
 	return nil
 }
 
@@ -490,6 +533,7 @@ func firstListOrString(v any) string {
 			}
 		}
 	}
+
 	return ""
 }
 
@@ -525,6 +569,7 @@ func formatSSPluginOpts(plugin string, opts map[string]any) string {
 	if plugin == "obfs" {
 		name = "obfs-local"
 	}
+
 	keyMap := ssPluginKeyMap[plugin]
 
 	pairs := make([]string, 0, len(opts))
@@ -535,8 +580,10 @@ func formatSSPluginOpts(plugin string, opts map[string]any) string {
 				outKey = mapped
 			}
 		}
+
 		pairs = append(pairs, outKey+"="+ssPluginValue(opts[k]))
 	}
+
 	return name + ";" + strings.Join(pairs, ";")
 }
 
@@ -549,6 +596,7 @@ func ssPluginValue(v any) string {
 		if x {
 			return "1"
 		}
+
 		return "0"
 	case int:
 		return strconv.Itoa(x)
@@ -559,8 +607,10 @@ func ssPluginValue(v any) string {
 				parts = append(parts, s)
 			}
 		}
+
 		return strings.Join(parts, "&")
 	}
+
 	return fmt.Sprintf("%v", v)
 }
 
@@ -574,10 +624,12 @@ func httpOptsHost(h map[string]any) string {
 				if s := firstListOrString(v); s != "" {
 					return s
 				}
+
 				break
 			}
 		}
 	}
+
 	return firstListOrString(h["host"])
 }
 
@@ -588,7 +640,9 @@ func sortedKeys(m map[string]any) []string {
 	for k := range m {
 		keys = append(keys, k)
 	}
+
 	sort.Strings(keys)
+
 	return keys
 }
 
@@ -601,5 +655,6 @@ func portToInt(v any) int {
 		p, _ := strconv.Atoi(n)
 		return p
 	}
+
 	return 0
 }
