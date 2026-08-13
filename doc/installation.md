@@ -128,9 +128,9 @@ services:
     security_opt:
       - no-new-privileges:true
 
-    # Health check
+    # Health check - verify the process is running
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8880/healthz"]
+      test: ["CMD", "pgrep", "-f", "rs8kvn_bot"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -228,6 +228,11 @@ Air will automatically rebuild and restart the bot when you save changes to Go f
 | `SITE_URL` | Base URL for landing pages | `https://vpn.site` | ❌ | Must be valid http/https URL; used in Telegram links |
 | `TRIAL_DURATION_HOURS` | Trial subscription duration | `3` | ❌ | 1–168 hours (7 days max) |
 | `TRIAL_RATE_LIMIT` | Max trial requests per IP per hour | `3` | ❌ | 1–100 |
+| **Payments** |
+| `PAYMENT_ENABLED` | Enable Platega payment buttons and webhook | `false` | ❌ | Requires merchant ID and secret when `true` |
+| `PAYMENT_PROVIDER` | Payment provider | `platega` | ❌ | Only `platega` is supported |
+| `PLATEGA_MERCHANT_ID` | Platega merchant ID | *(empty)* | Required when enabled | Sent as `X-MerchantId` |
+| `PLATEGA_SECRET` | Platega webhook/API secret | *(empty)* | Required when enabled | Sent as `X-Secret`; keep private |
 | **Donation** |
 | `DONATE_CARD_NUMBER` | Donation card (T-Bank) | *(empty)* | ❌ | Shown in donate menu |
 | `DONATE_URL` | Donation collection link | *(empty)* | ❌ | T-Bank or other |
@@ -278,7 +283,7 @@ INSERT INTO plan_nodes (plan_id, node_id) VALUES (1, <node_id>);
 # Health check
 curl http://localhost:8880/healthz
 
-# Expected: {"database":"ok","status":"ok"}
+# Expected: JSON with status "ok" and a components.database object with status "ok"
 
 # Bot logs
 docker logs rs8kvn_bot | tail -20
@@ -309,7 +314,7 @@ Admin-only commands:
 ### From v2.x → v2.3.0
 
 1. Backup database: `cp data/rs8kvn.db data/rs8kvn.db.backup`
-2. Pull new image or rebuild from source — migrations (021–029) run automatically
+2. Pull new image or rebuild from source — embedded migrations run automatically
 3. Update `.env`:
    - **New required:** `GLOBAL_SUB_URL` (base URL for subscription links)
    - **New optional:** `SUBSERVER_ACCESS_LOG` (subscription access log)
@@ -357,8 +362,8 @@ rm .env
 1. Check logs: `docker logs rs8kvn_bot`
 2. Verify `.env` settings (especially `GLOBAL_SUB_URL`)
 3. Test 3x-ui connectivity: `curl -H "Authorization: Bearer <api_token>" http://your-panel-ip:2053/panel/api/server/status`
-4. Include bot version from logs (`rs8kvn_bot@v2.3.4`)
+4. Include bot version from logs (for example, `rs8kvn_bot@v2.3.11`)
 
 ---
 
-*This document covers installation up to v2.3.4 (2026-07-19). For architecture details, see [handover.md](handover.md).*
+*This document covers installation up to v2.3.11 (2026-08-11). For architecture details, see [handover.md](handover.md).*

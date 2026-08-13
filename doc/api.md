@@ -1,7 +1,7 @@
 # API Reference — rs8kvn_bot
 
-**Version:** v2.3.4
-**Date:** 2026-07-19
+**Version:** v2.4.0
+**Date:** 2026-08-10
 **Base URL:** `http://localhost:8880` (configurable via `WEB_SERVER_PORT`)
 
 ---
@@ -39,7 +39,7 @@ Liveness probe — returns overall service health, aggregating registered compon
 }
 ```
 
-**Response 503 Service Unavailable** (degraded — a component is down or degraded):
+**Response 503 Service Unavailable** (a component is down):
 ```json
 {
   "status": "down",
@@ -53,135 +53,23 @@ Liveness probe — returns overall service health, aggregating registered compon
 
 > `status` is `ok` only when every component is `ok`; it becomes `down` if any component is `down`.
 
-**Headers:**
-```
-Content-Type: application/json
-Cache-Control: no-cache
-```
-
-**Usage:** Kubernetes liveness probe, monitoring systems (UptimeRobot, healthchecks.io).
-
----
-
-### `GET /readyz`
-
-Readiness probe — returns 200 only when bot has finished initialization and is ready to accept traffic.
-
-**Response 200 OK:**
-```
-OK
-```
-
-**Response 503 Service Unavailable:**
-```
-NOT READY
-```
-
-**Headers:**
-```
-Content-Type: text/plain
-Cache-Control: no-cache
-```
-
-**Usage:** Kubernetes readiness probe — prevents traffic during startup.
-
 ---
 
 ## 2. Trial Landing Page
 
 ### `GET /i/{code}`
 
-Trial invitation page. Validates invite code, applies IP rate limit, creates trial subscription via the multi-node VPN abstraction (`internal/vpn/`), renders mobile-friendly page with Happ deep-link and Telegram activation link.
+Trial invitation page. Validates invite code, applies IP rate limit, creates trial subscription, and renders the Happ/Telegram activation page.
 
-**Path Parameters:**
-| Parameter | Description |
-|-----------|-------------|
-| `code` | Invite code (alphanumeric, `_`, `-`, max 16 chars) |
+**Path Parameters:** `code` — alphanumeric invite code with `_`/`-`.
 
-**Query Parameters:**
-| Parameter | Description |
-|-----------|-------------|
-| `debug` | (optional) Set to `true` to bypass rate limit for testing |
+**Response 200:** HTML page with Happ download links, subscription URL, and Telegram activation link.
 
-**Cookies:**
-- `rs8kvn_trial_{code}` — set after successful trial creation to prevent duplicate trials
+**Response 404:** Invite code not found or invalid.
 
-**Response 200 OK:**
+**Response 429:** IP rate limit exceeded.
 
-Returns HTML page with:
-- Happ download buttons (Android/iOS)
-- "Add to Happ" button (`happ://add/` deep-link)
-- Copy-to-clipboard subscription URL
-- Telegram activation deep-link: `https://t.me/{botUsername}?start=trial_{subID}`
-
-The `botUsername` is the Telegram bot username passed to `web.NewServer(...)` (extracted from the bot config at startup, decoupling the `web` package from the `bot` package — see security fix A1). The link uses the `https://t.me/` format with a `start=trial_{subID}` payload so Telegram opens the bot chat and the bot receives the `/start trial_{subID}` command to bind the user.
-
-Example body (simplified):
-```html
-<!DOCTYPE html>
-<html>
-  <head><title>RS8 KVN</title></head>
-  <body>
-    <div class="container">
-      <h2>📱 Скачайте Happ</h2>
-      <a href="https://play.google.com/...">Android</a>
-      <a href="https://apps.apple.com/...">iOS</a>
-
-      <h2>➕ Добавьте подписку</h2>
-      <a href="happ://add/vless%3A%2F%2Fuser%40server%3A443%3F...">📥 Добавить в Happ</a>
-
-      <h2>🔌 Нажмите большую кнопку включения</h2>
-      <h2>📱 Активируйте в Telegram</h2>
-      <a href="https://t.me/your_bot?start=trial_abc123def456">🚀 Активировать</a>
-    </div>
-  </body>
-</html>
-```
-
-**Response 404 Not Found:**
-
-Invalid invite code (not in `invites` table).
-
-```json
-{
-  "error": "invite not found",
-  "code": "INVITE_NOT_FOUND"
-}
-```
-
-**Response 429 Too Many Requests:**
-
-IP rate limit exceeded (default: 3 trials/hour per IP).
-
-```json
-{
-  "error": "rate limit exceeded",
-  "code": "RATE_LIMIT_EXCEEDED",
-  "retry_after_seconds": 3600
-}
-```
-
-**Response 500 Internal Server Error:**
-
-VPN node failure or database error.
-
-```json
-{
-  "error": "failed to create trial",
-  "code": "TRIAL_CREATION_FAILED",
-  "details": "VPN client error message"
-}
-```
-
-**Security Headers (auto-set):**
-```
-X-Content-Type-Options: nosniff
-X-Frame-Options: DENY
-```
-
-**IP extraction (S2 fix):** `getClientIP()` uses the **rightmost** IP from `X-Forwarded-For` (set by the trusted reverse proxy) instead of the leftmost (which is client-controlled and spoofable). Falls back to `r.RemoteAddr` when no proxy header is present or the request is not from a loopback address.
-
-**Future improvements:** CSP, HSTS headers.
+**Response 500:** VPN node or database failure.
 
 ---
 
@@ -189,65 +77,15 @@ X-Frame-Options: DENY
 
 ### `GET /sub/{subID}`
 
-Returns the merged subscription configuration aggregated from **all active nodes** for the subscription. This is a multi-node flow: the subserver (`internal/subserver/`) fetches the subscription's plan and active node sources from the database, requests each node's subscription URL in parallel, detects the response format (JSON / Clash YAML / Base64 / plain), normalises Clash YAML and JSON server configs to share links, aggregates `subscription-userinfo` headers across sources (earliest expiry, summed upload/download), and returns the combined body.
+Returns the merged subscription configuration from all active nodes. Responses are cached for 240 seconds; inactive/expired subscriptions return 404.
 
-**Path Parameters:**
-| Parameter | Description |
-|-----------|-------------|
-| `subID` | Subscription ID (alphanumeric, `_`, `-`; matched by `^[a-zA-Z0-9_-]+$`) |
+**Response 200:** Subscription body and aggregated `Subscription-Userinfo` headers.
 
-**Query Parameters:** None
+**Response 404:** Subscription not found, inactive, or expired.
 
-**Flow:**
-1. Check the per-`subID` response cache (240s TTL). On hit, verify the subscription is still active via a cheap status lookup. If active, serve from cache and update `subscriptions.last_request` and device/IP tracking (best-effort). If the subscription is revoked or expired, return `404 Not Found` and leave the cache entry intact. If the status lookup fails (e.g. a transient DB error), serve the stale cached body best-effort and update `last_request` (best-effort).
-2. On cache miss, load the subscription with its plan and active node sources (`db.GetWithPlanAndNodes`).
-3. Track the requesting device (HWID, Device-OS, Ver-OS, Device-Model from request headers) and client IP. Update `subscriptions.last_request` (best-effort).
-4. For each active node source, fetch the upstream subscription URL. Request headers are filtered via `subserver.FilterHeaders` (excludes `X-Forwarded-Proto`, `X-Forwarded-For`, `X-Real-Ip`).
-5. Detect format (JSON / Clash YAML / Base64 / plain); convert Clash YAML and JSON configs to share links if mixed mode detected.
-6. Aggregate `subscription-userinfo` headers across all sources.
-7. Cache and return the final body with appropriate `Content-Type`.
+**Response 503:** Subserver not initialized.
 
-**Response 200 OK:**
-
-Raw subscription body (VLESS, VMESS, Trojan, etc.) — servers from all active nodes merged.
-
-**Example response** (VLESS):
-```
-vless://uuid@node1.example.com:443?security=reality&ps=RS8+KVN+Node1&flow=xtls-rprx-vision&... # node 1
-vless://uuid@node2.example.com:443?security=reality&ps=RS8+KVN+Node2&...                       # node 2
-vless://uuid@node3.example.com:443?security=reality&ps=RS8+KVN+Node3&...                       # node 3
-```
-
-**Headers:**
-- `Content-Type: text/plain` (or `application/octet-stream` depending on upstream)
-- `Subscription-Userinfo: upload=...; download=...; total=...; expire=...` (aggregated across nodes)
-- `Profile-Update-Interval: 24` (if provided by upstream)
-
-**Cache:** 240 seconds (4 minutes) — subsequent requests served from memory.
-
-**Response 404 Not Found:**
-
-Subscription not found, inactive, or expired.
-
-```json
-{
-  "error": "subscription not found",
-  "code": "SUBSCRIPTION_NOT_FOUND"
-}
-```
-
-**Response 503 Service Unavailable:**
-
-Subserver not initialized.
-
-**Response 405 Method Not Allowed:**
-
-Non-GET request.
-
-**Notes:**
-- If an upstream node fails, partial results from remaining nodes are still served; the `subserver_source_fetch_total{result="error"}` metric is incremented
-- `Content-Length` header removed after merge (chunked encoding)
-- Access logging is enabled when `SUBSERVER_ACCESS_LOG` is configured
+**Response 405:** Non-GET request.
 
 ---
 
@@ -255,33 +93,7 @@ Non-GET request.
 
 ### `GET /metrics`
 
-Prometheus exposition endpoint — served via `promhttp.Handler()` on the same mux as all other routes. Returns metrics in Prometheus text exposition format for scraping by Prometheus/Grafana Agent.
-
-**Response 200 OK:**
-```
-Content-Type: text/plain; version=0.0.4; charset=utf-8
-```
-
-**Key metrics:**
-
-| Metric | Type | Labels | Description |
-|--------|------|--------|-------------|
-| `http_requests_total` | counter | `method`, `path`, `status` | Total HTTP requests processed |
-| `http_request_duration_seconds` | histogram | `method`, `path` | HTTP request duration |
-| `http_requests_in_flight` | gauge | `method`, `path` | Current in-flight HTTP requests |
-| `bot_updates_total` | counter | `command`, `result` | Bot updates processed (`result`: success, error, rate_limited) |
-| `bot_update_errors_total` | counter | `type` | Errors during bot update processing |
-| `bot_update_duration_seconds` | histogram | — | Bot update processing duration |
-| `cache_hits_total` | counter | `cache` | Cache hits (`cache`: subscription, referral, subserver) |
-| `cache_misses_total` | counter | `cache` | Cache misses |
-| `circuit_breaker_state` | gauge | `target` | Circuit breaker state (0=closed, 1=open, 2=half-open) |
-| `bot_orphaned_clients_removed_total` | counter | — | Orphaned clients removed during reconciliation |
-| `subserver_source_fetch_total` | counter | `result`, `format` | Upstream source fetch results (success/error by format) |
-| `subserver_source_fetch_duration_seconds` | histogram | `result` | Upstream source fetch duration |
-| `subserver_cache_invalidations_total` | counter | `reason` | Subscription cache invalidations (not_found, status_error, revoked, expired) |
-| `subserver_no_items_total` | counter | — | Subscription requests with no items returned |
-
-**Path normalization:** Dynamic path segments are normalized for cardinality control — `/i/{code}` → `/i/:code`, `/sub/{subID}` → `/sub/:id`.
+Prometheus exposition endpoint. It exposes HTTP, bot, cache, subserver, circuit-breaker, and database metrics.
 
 ---
 
@@ -289,18 +101,33 @@ Content-Type: text/plain; version=0.0.4; charset=utf-8
 
 ### `POST /payment/callback`
 
-Payment provider webhook callback endpoint. Currently returns a stub success response.
+Receives Platega transaction status callbacks. Requests must include non-empty `X-MerchantId` and `X-Secret` headers matching the configured credentials. The body is limited to **256 KiB**, decoded with fixed-point JSON numbers, and must contain exactly one JSON document.
 
-**Response 200 OK:**
+Required JSON fields:
+
 ```json
 {
-  "ok": true,
-  "provider_payment_id": "fake",
-  "status": "paid"
+  "id": "550e8400-e29b-41d4-a716-446655440111",
+  "amount": 230.00,
+  "currency": "RUB",
+  "status": "CONFIRMED"
 }
 ```
 
-**Response 405 Method Not Allowed:** Non-POST request.
+`id` is a provider transaction UUID. The JSON value is validated at the webhook boundary; the universal `orders.provider_payment_id` database column remains text for compatibility with historical IDs from other providers. `paymentMethod` и `payload` принимаются при наличии. Официальные страницы Platega противоречат друг другу по обязательности этих полей; интеграция сохраняет совместимость. Поддерживаются `PENDING`, `CANCELED`, `CONFIRMED` и `CHARGEBACKED`; неизвестные статусы подтверждаются без изменения заказа и отправляют администратору alert для проверки.
+
+**Responses:**
+
+- `200 {"ok":true}` — callback processed, ignored as a no-op, unknown provider ID, or manual-review event;
+- `400` — malformed payload, invalid UUID/amount, amount or currency mismatch, or forbidden state transition;
+- `401` — invalid or missing provider credentials;
+- `405` — method other than POST (`Allow: POST`);
+- `503` — payments disabled, order service/bot not wired, or runtime payment readiness has not been enabled after real bot and SyncService initialization;
+- `500` — temporary database/transaction failure. The provider should retry these callbacks.
+
+`CONFIRMED` atomically changes `pending → paid`, updates the subscription and creates DB sync prerequisites in one transaction. Post-commit VPN sync and Telegram delivery are best-effort and do not roll back the payment. Only the callback that actually activated the order (`Activated=true`) sends the success notifications: the user gets the subscription message, and the admin gets a Markdown alert (`notifyAdminPaid`) with tariff, formatted amount and a clickable buyer link (`utils.FormatUserLink` — `t.me/username` or `tg://user?id=…`). The title distinguishes a first purchase (`🆕 Покупка подтверждена`) from a renewal of an already-paid subscription (`🔄 Продление подтверждено`, detected from `PricePaidCents`/`ProductID` before the CAS mutates the subscription). Duplicate `CONFIRMED` callbacks are idempotent no-ops and send nothing. `CANCELED` cancels only pending orders. `CHARGEBACKED` cancels pending/paid orders; a chargeback on a previously-paid order automatically downgrades the subscription to the free plan (unless another paid order for the same subscription exists — access is then preserved), and when money was actually collected (`WasPaid=true`) sends a single `notifyAdminChargeback` Markdown alert with tariff, amount, buyer link and access status (downgraded to free vs preserved). Infrastructure-level failures (DB outage, mismatches, late/unknown callbacks, provider errors) continue to flow through `NotifyPaymentIssue` → `notifyAdmin` for ops visibility.
+
+The payment link lifetime is taken from Platega `expiresIn` and stored as an absolute local UTC `payment_expires_at`. A still-valid saved link is reused. After local expiry, the pending order is terminalized as `expired`; its provider ID and URL are retained and the next request creates a new pending order. If the provider request has an uncertain outcome, automatic retry is blocked and the administrator receives a reconciliation alert. A late `CONFIRMED` for an already `expired`/`canceled` order never activates it: the money is flagged for manual review (refund or manual activation) and the admin gets a `late_confirmed_callback` alert.
 
 ---
 
@@ -308,45 +135,20 @@ Payment provider webhook callback endpoint. Currently returns a stub success res
 
 ### `GET /static/logo.png`
 
-Bot logo (PNG, 512×512, optimized for mobile). Also responds to `HEAD`.
-
-**Response 200 OK:**
-
-Binary PNG image.
-
-**Headers:**
-```
-Content-Type: image/png
-Cache-Control: public, max-age=86400
-```
-
-**Usage:** Used in trial landing page.
+Returns the embedded 512×512 PNG logo. Also responds to `HEAD`.
 
 ---
 
 ## 7. Error Codes
 
-All errors follow this format:
-
-```json
-{
-  "error": "human readable message",
-  "code": "UPPER_SNAKE_CASE_CODE",
-  "details": "optional technical details"
-}
-```
-
-### Common Error Codes
-
 | Code | HTTP Status | Description |
 |------|------------|-------------|
 | `INVITE_NOT_FOUND` | 404 | Invite code invalid |
 | `RATE_LIMIT_EXCEEDED` | 429 | Too many trial requests from IP |
-| `SUBSCRIPTION_NOT_FOUND` | 404 | Subscription not found (inactive/expired) |
+| `SUBSCRIPTION_NOT_FOUND` | 404 | Subscription not found/inactive/expired |
 | `TRIAL_CREATION_FAILED` | 500 | VPN node failed to create trial |
-| `XUI_UNAVAILABLE` | 502 | VPN node unreachable |
 | `DATABASE_ERROR` | 500 | Database query failed |
-| `INTERNAL_ERROR` | 500 | Unexpected panic or system error |
+| `INTERNAL_ERROR` | 500 | Unexpected system failure |
 
 ---
 
@@ -354,14 +156,10 @@ All errors follow this format:
 
 | Endpoint | Limit | Enforcement |
 |----------|-------|-------------|
-| `/i/{code}` (trial) | 3 requests/hour per IP | In-memory DB counter |
-| `/sub/{subID}` | None (cached, 240s TTL) | No explicit rate limit; cache TTL mitigates abuse |
-| `/metrics` | None | Prometheus scrape interval governs load |
+| `/i/{code}` (trial) | 3 requests/hour per IP | Database counter |
+| `/sub/{subID}` | None | 240-second response cache |
+| `/metrics` | None | Prometheus scrape interval |
 | Telegram bot commands | 30 tokens/user, 5/sec refill | In-memory token bucket |
-
-**Burst capacity:** Token bucket allows short bursts up to 30 requests.
-
-**IP extraction:** Trial rate limiting uses `getClientIP()` which reads the **rightmost** IP from `X-Forwarded-For` (trusted proxy) — not the leftmost (spoofable). See security fix S2.
 
 ---
 
@@ -372,41 +170,26 @@ All errors follow this format:
 curl -s http://localhost:8880/healthz | jq
 ```
 
-**Readiness check:**
-```bash
-curl -s http://localhost:8880/readyz
-```
-
 **Trial page:**
 ```bash
-curl -i http://localhost:8880/i/ABC123def
+curl -i http://localhost:8880/i/ABC123def456
 ```
 
-**Check subscription proxy (multi-node):**
+**Payment callback:**
 ```bash
-curl -s http://localhost:8880/sub/abc123def456 | base64 -d | head -20
-```
-
-**Prometheus metrics:**
-```bash
-curl -s http://localhost:8880/metrics | grep -E 'http_requests_total|active_subscriptions|bot_updates_total'
-```
-
-**Payment callback (stub):**
-```bash
-curl -s -X POST http://localhost:8880/payment/callback | jq
+curl -i -X POST http://localhost:8880/payment/callback \
+  -H 'X-MerchantId: <merchant-id>' \
+  -H 'X-Secret: <secret>' \
+  -H 'Content-Type: application/json' \
+  -d '{"id":"550e8400-e29b-41d4-a716-446655440111","amount":230.00,"currency":"RUB","status":"CONFIRMED"}'
 ```
 
 ---
 
 ## 10. Versioning
 
-API version is implicit in endpoint paths:
-- `/sub/{subID}` — subscription proxy (multi-node, current)
-- No breaking changes expected without major version bump
-
-Bot version in logs: `rs8kvn_bot@v2.3.4`
+API version is implicit in endpoint paths. Bot version in logs: `rs8kvn_bot@<version>`.
 
 ---
 
-*Documentation last updated: 2026-07-19*
+*Documentation last updated: 2026-08-10*
