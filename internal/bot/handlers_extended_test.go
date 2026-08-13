@@ -10,6 +10,7 @@ import (
 
 	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
+	"github.com/kereal/rs8kvn_bot/internal/utils"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/stretchr/testify/assert"
@@ -174,9 +175,9 @@ func TestGetUsername_EdgeCases(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
+
 			result := h.getUsername(tt.user)
 			assert.Equal(t, tt.expected, result)
-
 		})
 	}
 }
@@ -244,11 +245,11 @@ func TestIsAdmin_EdgeCases(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
+
 			cfg := &config.Config{TelegramAdminID: tt.adminID}
 			h := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, cfg.DonateCardNumber, cfg.DonateURL, cfg.SiteURL, true)}
 			result := h.isAdmin(tt.chatID)
 			assert.Equal(t, tt.expected, result)
-
 		})
 	}
 }
@@ -304,6 +305,7 @@ func TestGetHelpText_EdgeCases(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
+
 			text := h.getHelpText(tt.trafficLimit, tt.subscriptionURL)
 
 			assert.Contains(t, text, fmt.Sprintf("%dГб", tt.trafficLimit))
@@ -311,7 +313,6 @@ func TestGetHelpText_EdgeCases(t *testing.T) {
 			assert.Contains(t, text, "Happ")
 			assert.Contains(t, text, "iOS")
 			assert.Contains(t, text, "Android")
-
 		})
 	}
 }
@@ -321,36 +322,37 @@ func TestSubscriptionCache_EdgeCases(t *testing.T) {
 
 	t.Run("Set with nil subscription", func(t *testing.T) {
 		t.Parallel()
+
 		cache := NewSubscriptionCache(10, 5*time.Minute)
 		cache.Set(123, nil)
 
 		// Should not panic, and Get should return nil
 		result := cache.Get(123)
 		assert.Nil(t, result)
-
 	})
 
 	t.Run("Get on empty cache", func(t *testing.T) {
 		t.Parallel()
+
 		cache := NewSubscriptionCache(10, 5*time.Minute)
 
 		assert.Nil(t, cache.Get(999))
 		assert.Equal(t, 0, cache.Size())
-
 	})
 
 	t.Run("Invalidate non-existent key", func(t *testing.T) {
 		t.Parallel()
+
 		cache := NewSubscriptionCache(10, 5*time.Minute)
 
 		// Should not panic
 		cache.Invalidate(999)
 		assert.Equal(t, 0, cache.Size())
-
 	})
 
 	t.Run("Set updates existing entry", func(t *testing.T) {
 		t.Parallel()
+
 		cache := NewSubscriptionCache(10, 5*time.Minute)
 
 		sub1 := &database.Subscription{TelegramID: 123, Username: "user1"}
@@ -368,11 +370,11 @@ func TestSubscriptionCache_EdgeCases(t *testing.T) {
 
 		// Size should still be 1
 		assert.Equal(t, 1, cache.Size())
-
 	})
 
 	t.Run("Zero TTL behavior", func(t *testing.T) {
 		t.Parallel()
+
 		cache := NewSubscriptionCache(10, 1*time.Nanosecond)
 
 		sub := &database.Subscription{TelegramID: 123, Username: "user"}
@@ -382,11 +384,11 @@ func TestSubscriptionCache_EdgeCases(t *testing.T) {
 		require.Eventually(t, func() bool {
 			return cache.Get(123) == nil
 		}, 100*time.Millisecond, 1*time.Millisecond, "entry should expire")
-
 	})
 
 	t.Run("Negative telegram ID", func(t *testing.T) {
 		t.Parallel()
+
 		cache := NewSubscriptionCache(10, 5*time.Minute)
 
 		sub := &database.Subscription{TelegramID: -123, Username: "user"}
@@ -395,7 +397,6 @@ func TestSubscriptionCache_EdgeCases(t *testing.T) {
 		result := cache.Get(-123)
 		require.NotNil(t, result)
 		assert.Equal(t, int64(-123), result.TelegramID)
-
 	})
 }
 
@@ -405,17 +406,20 @@ func TestSubscriptionCache_ConcurrentStress(t *testing.T) {
 
 	cache := NewSubscriptionCache(1000, 5*time.Minute)
 
-	const numGoroutines = 100
-	const numOperations = 1000
+	const (
+		numGoroutines = 100
+		numOperations = 1000
+	)
 
 	var wg sync.WaitGroup
 	wg.Add(numGoroutines * 3) // 3 types of operations
 
 	// Concurrent writes
-	for i := 0; i < numGoroutines; i++ {
+	for i := range numGoroutines {
 		go func(id int) {
 			defer wg.Done()
-			for j := 0; j < numOperations; j++ {
+
+			for j := range numOperations {
 				key := int64(id*numOperations + j)
 				cache.Set(key, &database.Subscription{TelegramID: key})
 			}
@@ -423,10 +427,11 @@ func TestSubscriptionCache_ConcurrentStress(t *testing.T) {
 	}
 
 	// Concurrent reads
-	for i := 0; i < numGoroutines; i++ {
+	for i := range numGoroutines {
 		go func(id int) {
 			defer wg.Done()
-			for j := 0; j < numOperations; j++ {
+
+			for j := range numOperations {
 				key := int64(id*numOperations + j)
 				cache.Get(key)
 			}
@@ -434,10 +439,11 @@ func TestSubscriptionCache_ConcurrentStress(t *testing.T) {
 	}
 
 	// Concurrent invalidates
-	for i := 0; i < numGoroutines; i++ {
+	for i := range numGoroutines {
 		go func(id int) {
 			defer wg.Done()
-			for j := 0; j < numOperations; j++ {
+
+			for j := range numOperations {
 				key := int64(id*numOperations + j)
 				cache.Invalidate(key)
 			}
@@ -467,9 +473,9 @@ func TestGetMainMenuContent_SpecialUsernameChars(t *testing.T) {
 	for _, username := range specialUsernames {
 		t.Run(fmt.Sprintf("username_len_%d", len(username)), func(t *testing.T) {
 			t.Parallel()
+
 			text, _ := h.getMainMenuContent(context.Background(), username, true, 456, nil)
 			assert.Contains(t, text, username)
-
 		})
 	}
 }
@@ -490,10 +496,10 @@ func TestHelpText_InjectionSafety(t *testing.T) {
 	for _, url := range maliciousURLs {
 		t.Run("url_safety", func(t *testing.T) {
 			t.Parallel()
+
 			text := h.getHelpText(10, url)
 			// URL should be included as-is (Markdown code block handles special chars)
 			assert.Contains(t, text, url)
-
 		})
 	}
 }
@@ -519,9 +525,9 @@ func TestFormatUserLink_NumericUsername(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got := formatUserLink(tt.username, tt.id)
-			assert.Equal(t, tt.want, got)
 
+			got := utils.FormatUserLink(tt.username, tt.id)
+			assert.Equal(t, tt.want, got)
 		})
 	}
 }

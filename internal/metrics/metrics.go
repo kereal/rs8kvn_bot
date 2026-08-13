@@ -159,7 +159,7 @@ var (
 	// database connection wait exceeded the pool (sql.DBStats.WaitCount).
 	DBPoolWait = promauto.NewGauge(
 		prometheus.GaugeOpts{
-			Name: "db_pool_wait_total",
+			Name: "db_pool_wait",
 			Help: "Total number of times a database connection wait exceeded the pool",
 		},
 	)
@@ -335,6 +335,48 @@ var (
 			Buckets: []float64{0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30},
 		},
 	)
+
+	// PaymentOperationsTotal counts payment service operations by operation and result.
+	// Operation values: request, confirm, cancel. Result values: success, error.
+	PaymentOperationsTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "payment_operations_total",
+			Help: "Total payment service operations by operation and result",
+		},
+		[]string{"operation", "result"},
+	)
+
+	// PaymentOperationDuration measures payment service operation latency.
+	// Operation values: request, confirm, cancel.
+	PaymentOperationDuration = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "payment_operation_duration_seconds",
+			Help:    "Payment service operation duration in seconds",
+			Buckets: []float64{0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 20, 30},
+		},
+		[]string{"operation"},
+	)
+
+	// PaymentAmountCentsTotal counts monetary amounts in cents by business
+	// outcome and currency. Operation values: confirmed, chargeback.
+	// Currency is expected to be a small ISO 4217-like set (for example, RUB).
+	PaymentAmountCentsTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "payment_amount_cents_total",
+			Help: "Total payment amounts in cents by outcome and currency",
+		},
+		[]string{"operation", "currency"},
+	)
+
+	// PaymentIssuesTotal counts operational payment issues by stable event name.
+	// Event names are defined by the payment integration and never contain IDs.
+	PaymentIssuesTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "payment_issues_total",
+			Help: "Total operational payment issues by event",
+		},
+		[]string{"event"},
+	)
 )
 
 // SubscriptionRemindersTotal counts reminder sends by expiry window and result.
@@ -406,6 +448,7 @@ func (r *responseRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	if h, ok := r.ResponseWriter.(http.Hijacker); ok {
 		return h.Hijack()
 	}
+
 	return nil, nil, http.ErrNotSupported
 }
 
@@ -421,6 +464,7 @@ func (r *responseRecorder) Push(target string, opts *http.PushOptions) error {
 	if p, ok := r.ResponseWriter.(http.Pusher); ok {
 		return p.Push(target, opts)
 	}
+
 	return http.ErrNotSupported
 }
 

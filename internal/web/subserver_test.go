@@ -30,6 +30,7 @@ import (
 func testServer(t *testing.T, db interfaces.DatabaseService, cfg *config.Config) *Server {
 	subSvc := service.NewSubscriptionService(db, nil, nil, nil, cfg)
 	srv := NewServer(":0", db, cfg, "testbot", subSvc, subserver.NewService(config.SubServerCacheTTL))
+
 	return srv
 }
 
@@ -139,7 +140,8 @@ func TestHandleSubscription_SourceVariants(t *testing.T) {
 				require.NoError(t, err)
 				assert.Contains(t, string(decoded), "vless://abc@x.com:443")
 				assert.Contains(t, string(decoded), "vmess://def@y.com:8443")
-				userInfo := w.Header().Get("Subscription-UserInfo")
+
+				userInfo := w.Header().Get("Subscription-Userinfo")
 				assert.Contains(t, userInfo, "upload=100")
 				assert.Contains(t, userInfo, "download=200")
 			},
@@ -150,14 +152,17 @@ func TestHandleSubscription_SourceVariants(t *testing.T) {
 			userInfo: "upload=50; download=75; total=500; expire=9999",
 			check: func(t *testing.T, w *httptest.ResponseRecorder, body string) {
 				assert.Equal(t, "application/json; charset=utf-8", w.Header().Get("Content-Type"))
+
 				var items []json.RawMessage
 				require.NoError(t, json.Unmarshal(w.Body.Bytes(), &items))
 				require.Len(t, items, 1)
+
 				var parsed map[string]any
 				require.NoError(t, json.Unmarshal(items[0], &parsed))
 				assert.Equal(t, "vless", parsed["type"])
 				assert.Equal(t, "x.com", parsed["address"])
-				userInfo := w.Header().Get("Subscription-UserInfo")
+
+				userInfo := w.Header().Get("Subscription-Userinfo")
 				assert.Contains(t, userInfo, "upload=50")
 			},
 		},
@@ -172,11 +177,11 @@ func TestHandleSubscription_SourceVariants(t *testing.T) {
 						Plan:         database.Plan{TrafficLimit: 10 << 30},
 						Nodes: []database.Node{
 							{ID: 1, Name: "s1", IsActive: true, SubscriptionURL: httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-								w.Header().Set("Subscription-UserInfo", "upload=100; download=200; total=500; expire=111")
+								w.Header().Set("Subscription-Userinfo", "upload=100; download=200; total=500; expire=111")
 								w.Write([]byte("vless://a@x.com:443"))
 							})).URL + "/sub/"},
 							{ID: 2, Name: "s2", IsActive: true, SubscriptionURL: httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-								w.Header().Set("Subscription-UserInfo", "upload=300; download=400; total=500; expire=222")
+								w.Header().Set("Subscription-Userinfo", "upload=300; download=400; total=500; expire=222")
 								w.Write([]byte("trojan://b@y.com:8443"))
 							})).URL + "/sub/"},
 						},
@@ -188,7 +193,8 @@ func TestHandleSubscription_SourceVariants(t *testing.T) {
 				require.NoError(t, err)
 				assert.Contains(t, string(decoded), "vless://a@x.com:443")
 				assert.Contains(t, string(decoded), "trojan://b@y.com:8443")
-				userInfo := w.Header().Get("Subscription-UserInfo")
+
+				userInfo := w.Header().Get("Subscription-Userinfo")
 				assert.Contains(t, userInfo, "upload=400")
 				assert.Contains(t, userInfo, "download=600")
 			},
@@ -225,9 +231,11 @@ func TestHandleSubscription_SourceVariants(t *testing.T) {
 				b2 = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					w.Write([]byte("vless://p@plain.com:443"))
 				}))
+
 				defer b1.Close()
 				defer b2.Close()
 			}
+
 			if tt.name == "multiple sources" {
 				defer func() {
 					if b1 != nil {
@@ -248,10 +256,11 @@ func TestHandleSubscription_SourceVariants(t *testing.T) {
 				// already set in mockDBExtra
 			} else {
 				backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					w.Header().Set("Subscription-UserInfo", tt.userInfo)
+					w.Header().Set("Subscription-Userinfo", tt.userInfo)
 					w.Write([]byte(tt.body))
 				}))
 				defer backend.Close()
+
 				sourceURL = backend.URL + "/sub/"
 			}
 
@@ -267,6 +276,7 @@ func TestHandleSubscription_SourceVariants(t *testing.T) {
 							{ID: 2, Name: "plain", IsActive: true, SubscriptionURL: b2.URL + "/sub/"},
 						}
 					}
+
 					return &database.SubscriptionFull{
 						Subscription: database.Subscription{ID: 1, Status: "active"},
 						Plan:         database.Plan{TrafficLimit: 1 << 30},
@@ -274,6 +284,7 @@ func TestHandleSubscription_SourceVariants(t *testing.T) {
 					}, nil
 				}
 			}
+
 			srv := testServer(t, db, &config.Config{})
 
 			w := httptest.NewRecorder()
@@ -303,6 +314,7 @@ func TestHandleSubscription_AccessLogVariants(t *testing.T) {
 				r.Header.Set("X-Ver-Os", "17.0")
 				r.Header.Set("X-Device-Model", "iPhone 15")
 				r.Header.Set("User-Agent", "V2Ray/1.0")
+
 				return r
 			},
 			wantFields: []string{"GET", "/sub/unknown?debug=1", "404", "-", "203.0.113.10", "hw-1", "iOS", "17.0", "iPhone 15", "V2Ray/1.0"},
@@ -312,6 +324,7 @@ func TestHandleSubscription_AccessLogVariants(t *testing.T) {
 			setupReq: func() *http.Request {
 				r := httptest.NewRequest(http.MethodGet, "/sub/unknown", nil)
 				r.RemoteAddr = "203.0.113.10:1234"
+
 				return r
 			},
 			wantFields: []string{"GET", "/sub/unknown", "404", "-", "203.0.113.10", "", "", "", "", ""},
@@ -325,6 +338,7 @@ func TestHandleSubscription_AccessLogVariants(t *testing.T) {
 			logPath := filepath.Join(t.TempDir(), "subserver.log")
 			accessLogger, err := subserver.NewAccessLogger(logPath)
 			require.NoError(t, err)
+
 			srv.subserverLogger = accessLogger
 
 			r := tt.setupReq()
@@ -332,14 +346,17 @@ func TestHandleSubscription_AccessLogVariants(t *testing.T) {
 			srv.handleSubscription(w, r)
 
 			require.NoError(t, accessLogger.Close())
+
 			content, err := os.ReadFile(logPath)
 			require.NoError(t, err)
 
 			line := strings.TrimRight(string(content), "\n")
+
 			parts := splitAccessLogLine(line)
 			for len(parts) < 11 {
 				parts = append(parts, "")
 			}
+
 			require.Len(t, parts, 11)
 			assert.Regexp(t, regexp.MustCompile(`\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}`), parts[0])
 			assert.NotContains(t, line, "\nGET")
@@ -363,6 +380,7 @@ func TestHandleSubscription_AccessLogSuccessTotalOrder(t *testing.T) {
 	accessLogger.Log(r, 200, "203.0.113.10", 3, 5)
 
 	require.NoError(t, accessLogger.Close())
+
 	content, err := os.ReadFile(logPath)
 	require.NoError(t, err)
 
@@ -374,8 +392,11 @@ func TestHandleSubscription_AccessLogSuccessTotalOrder(t *testing.T) {
 }
 
 func splitAccessLogLine(line string) []string {
-	var parts []string
-	var current strings.Builder
+	var (
+		parts   []string
+		current strings.Builder
+	)
+
 	inQuotes := false
 	for _, r := range line {
 		if r == '"' {
@@ -383,16 +404,20 @@ func splitAccessLogLine(line string) []string {
 		} else if r == ' ' && !inQuotes {
 			parts = append(parts, current.String())
 			current.Reset()
+
 			continue
 		}
+
 		current.WriteRune(r)
 	}
+
 	parts = append(parts, current.String())
 	for i, p := range parts {
 		if len(p) >= 2 && p[0] == '"' && p[len(p)-1] == '"' {
 			parts[i] = p[1 : len(p)-1]
 		}
 	}
+
 	return parts
 }
 func TestHandleSubscription_SourceFetchError(t *testing.T) {
@@ -449,8 +474,10 @@ func TestHandleSubscription_CacheSubscriptionResult(t *testing.T) {
 	plainContent := "vless://cached@x.com:443"
 
 	callCount := 0
+
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		callCount++
+
 		w.Write([]byte(plainContent))
 	}))
 	defer backend.Close()
@@ -494,6 +521,7 @@ func TestHandleSubscription_DevicesTracking(t *testing.T) {
 	defer backend.Close()
 
 	var savedDevices string
+
 	db := testutil.NewDatabaseService()
 	db.GetWithPlanAndNodesFunc = func(ctx context.Context, _ string) (*database.SubscriptionFull, error) {
 		return &database.SubscriptionFull{
@@ -517,7 +545,9 @@ func TestHandleSubscription_DevicesTracking(t *testing.T) {
 	srv.handleSubscription(w, r)
 
 	require.NotEmpty(t, savedDevices, "devices should have been saved")
+
 	var devices []map[string]string
+
 	err := json.Unmarshal([]byte(savedDevices), &devices)
 	require.NoError(t, err)
 	require.Len(t, devices, 1)
@@ -551,7 +581,8 @@ func TestHandleSubscription_SourceWithoutSubURL(t *testing.T) {
 }
 
 func init() {
-	if err := testutil.InitLogger(nil); err != nil {
+	err := testutil.InitLogger(nil)
+	if err != nil {
 		fmt.Fprintln(os.Stderr, "Failed to initialize logger:", err)
 	}
 }
