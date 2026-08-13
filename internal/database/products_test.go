@@ -14,6 +14,7 @@ func TestListActiveProducts_FiltersAndSortsByActivePlan(t *testing.T) {
 	ctx := context.Background()
 	activePlan := &Plan{Name: "active-paid-plan", IsActive: true, DevicesLimit: 1}
 	inactivePlan := &Plan{Name: "inactive-paid-plan", IsActive: false, DevicesLimit: 1}
+
 	require.NoError(t, svc.db.Create(activePlan).Error)
 	require.NoError(t, svc.db.Create(inactivePlan).Error)
 	require.NoError(t, svc.db.Model(inactivePlan).Update("is_active", false).Error)
@@ -57,6 +58,7 @@ func TestUpdateProductGuarded_AllowsChangesBeforeFirstOrder(t *testing.T) {
 	ctx := context.Background()
 	plan, err := svc.GetPlanByName(ctx, TrialPlanName)
 	require.NoError(t, err)
+
 	product := &Product{PlanID: plan.ID, Name: "Original", DurationDays: 30, PriceCents: 500, Currency: "RUB", IsActive: true}
 	require.NoError(t, svc.db.Create(product).Error)
 
@@ -80,6 +82,7 @@ func TestUpdateProductGuarded_ProtectsImmutableFieldsAfterOrder(t *testing.T) {
 	sub := createTestSubscription(t, svc, 991001, "guard-user", "guard-client")
 	plan, err := svc.GetPlanByName(ctx, TrialPlanName)
 	require.NoError(t, err)
+
 	product := &Product{PlanID: plan.ID, Name: "Original", DurationDays: 30, PriceCents: 500, Currency: "RUB", IsActive: true}
 	require.NoError(t, svc.db.Create(product).Error)
 	require.NoError(t, svc.db.WithContext(ctx).Create(&Order{SubscriptionID: sub.ID, ProductID: product.ID, Status: OrderStatusPending, AmountCents: 500, Currency: "RUB"}).Error)
@@ -111,6 +114,7 @@ func TestUpdateProductGuarded_AllowsDeactivationAfterOrder(t *testing.T) {
 	sub := createTestSubscription(t, svc, 991002, "guard-user-2", "guard-client-2")
 	plan, err := svc.GetPlanByName(ctx, TrialPlanName)
 	require.NoError(t, err)
+
 	product := &Product{PlanID: plan.ID, Name: "Original", DurationDays: 30, PriceCents: 500, Currency: "RUB", IsActive: true}
 	require.NoError(t, svc.db.Create(product).Error)
 	require.NoError(t, svc.db.WithContext(ctx).Create(&Order{SubscriptionID: sub.ID, ProductID: product.ID, Status: OrderStatusPending, AmountCents: 500, Currency: "RUB"}).Error)

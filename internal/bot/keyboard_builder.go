@@ -28,18 +28,23 @@ func NewKeyboardBuilder(botUsername, contactUser, donateCard, donateURL, siteURL
 // it is passed per-call because the flag can be toggled at runtime via config.
 func (kb *KeyboardBuilder) MainMenu(hasSubscription bool, paymentEnabled bool) tgbotapi.InlineKeyboardMarkup {
 	var firstRow []tgbotapi.InlineKeyboardButton
+
 	firstRow = append(firstRow, tgbotapi.NewInlineKeyboardButtonData("📋 Подписка", "menu_subscription"))
 	if kb.donateEnabled {
 		firstRow = append(firstRow, tgbotapi.NewInlineKeyboardButtonData("☕ Донат", "menu_donate"))
 	}
+
 	rows := [][]tgbotapi.InlineKeyboardButton{tgbotapi.NewInlineKeyboardRow(firstRow...)}
+
 	rows = append(rows, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("❓ Помощь", "menu_help"), tgbotapi.NewInlineKeyboardButtonData("📑 Документы", "menu_documents")))
 	if paymentEnabled && hasSubscription {
 		rows = append(rows, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("💎 Купить Premium", "buy_premium_list")))
 	}
+
 	if hasSubscription {
 		rows = append(rows, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("📤 Поделиться", "share_invite")))
 	}
+
 	return tgbotapi.InlineKeyboardMarkup{InlineKeyboard: rows}
 }
 
@@ -50,9 +55,12 @@ func (kb *KeyboardBuilder) BuyProductList(products []database.Product) tgbotapi.
 		if !product.IsActive || product.PriceCents <= 0 {
 			continue
 		}
+
 		rows = append(rows, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData(fmt.Sprintf("%s — %.2f ₽", product.Name, float64(product.PriceCents)/100), fmt.Sprintf("buy_product_%d", product.ID))))
 	}
+
 	rows = append(rows, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("⬅️ Назад", "back_to_start")))
+
 	return tgbotapi.InlineKeyboardMarkup{InlineKeyboard: rows}
 }
 
@@ -62,6 +70,7 @@ func (kb *KeyboardBuilder) BuyProductConfirm(product *database.Product, paymentU
 	if product != nil {
 		price = fmt.Sprintf("%d₽", product.PriceCents/100)
 	}
+
 	return tgbotapi.InlineKeyboardMarkup{InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{
 		tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonURL("💳 Оплатить "+price, paymentURL)),
 		tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("⬅️ Назад", "buy_premium_list")),

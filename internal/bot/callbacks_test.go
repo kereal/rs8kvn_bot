@@ -3,6 +3,7 @@ package bot
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/kereal/rs8kvn_bot/internal/config"
@@ -89,6 +90,7 @@ func TestHandleCallback_CallbackDataRouting(t *testing.T) {
 			setupSubService: func(mockDB *testutil.DatabaseService, mockXUI *testutil.XUIClient, cfg *config.Config) *service.SubscriptionService {
 				mockXUIClients := map[uint]interfaces.XUIClient{1: mockXUI}
 				nodes := []database.Node{{ID: 1, Name: "main", IsActive: true, Host: "http://example.com", APIToken: "token", InboundIDs: "[1]"}}
+
 				return service.NewSubscriptionService(mockDB, mockXUIClients, nil, nodes, cfg)
 			},
 			wantSend: true,
@@ -178,6 +180,7 @@ func TestHandleCallback_CallbackDataRouting(t *testing.T) {
 			setupSubService: func(mockDB *testutil.DatabaseService, mockXUI *testutil.XUIClient, cfg *config.Config) *service.SubscriptionService {
 				mockXUIClients := map[uint]interfaces.XUIClient{1: mockXUI}
 				nodes := []database.Node{{ID: 1, Name: "main", IsActive: true, Host: "http://example.com", APIToken: "token", InboundIDs: "[1]"}}
+
 				return service.NewSubscriptionService(mockDB, mockXUIClients, nil, nodes, cfg)
 			},
 			wantSend: true,
@@ -260,6 +263,7 @@ func TestHandleCallback_CallbackDataRouting(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
+
 			cfg := &config.Config{
 				TelegramAdminID: 123456,
 				SiteURL:         "https://example.com",
@@ -267,11 +271,14 @@ func TestHandleCallback_CallbackDataRouting(t *testing.T) {
 			mockDB := testutil.NewDatabaseService()
 			mockXUI := testutil.NewXUIClient()
 			mockBot := testutil.NewBotAPI()
+
 			tt.setupMock(mockDB, mockXUI)
+
 			var subService *service.SubscriptionService
 			if tt.setupSubService != nil {
 				subService = tt.setupSubService(mockDB, mockXUI, cfg)
 			}
+
 			handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), subService, "")
 
 			ctx := context.Background()
@@ -291,15 +298,18 @@ func TestHandleCallback_CallbackDataRouting(t *testing.T) {
 
 			if tt.wantSend {
 				assert.True(t, mockBot.SendCalledSafe(), "Bot.Send should be called for %s", tt.name)
+
 				if tt.wantText != "" {
 					switch tt.callbackData {
 					case "menu_privacy", "menu_terms", "menu_support":
 						all := mockBot.GetAllSentMessages()
-						var combined string
+
+						var combined strings.Builder
 						for _, m := range all {
-							combined += m.Text
+							combined.WriteString(m.Text)
 						}
-						assert.Contains(t, combined, tt.wantText, "message should contain %q", tt.wantText)
+
+						assert.Contains(t, combined.String(), tt.wantText, "message should contain %q", tt.wantText)
 					default:
 						assert.Contains(t, mockBot.LastSentTextSafe(), tt.wantText, "message should contain %q", tt.wantText)
 					}
@@ -849,6 +859,7 @@ func TestHandleBackToSubscription_RequestError(t *testing.T) {
 	mockBot.RequestError = errors.New("request failed")
 	xuiClients := map[uint]interfaces.XUIClient{1: testutil.NewXUIClient()}
 	nodes := []database.Node{{ID: 1, IsActive: true, Host: "https://p", APIToken: "t", InboundIDs: "[1]"}}
+
 	require.NoError(t, mockDB.CreateSubscription(context.Background(), &database.Subscription{
 		TelegramID: 123456, Username: "testuser", ClientID: "c", SubscriptionID: "s", Status: "active",
 	}, ""))
@@ -1055,12 +1066,14 @@ func TestHandleCallback_MenuPrivacy(t *testing.T) {
 	assert.True(t, mockBot.SendCalledSafe(), "Bot.Send should be called for privacy policy")
 	all := mockBot.GetAllSentMessages()
 	assert.NotEmpty(t, all)
-	var combined string
+
+	var combined strings.Builder
 	for _, m := range all {
-		combined += m.Text
+		combined.WriteString(m.Text)
 	}
-	assert.Contains(t, combined, "Политика конфиденциальности", "message should contain privacy title")
-	assert.Contains(t, combined, "Бот «RS8 KVN», 28.07.2026", "message should contain legal footer")
+
+	assert.Contains(t, combined.String(), "Политика конфиденциальности", "message should contain privacy title")
+	assert.Contains(t, combined.String(), "Бот «RS8 KVN», 28.07.2026", "message should contain legal footer")
 }
 
 func TestHandleCallback_MenuTerms(t *testing.T) {
@@ -1090,12 +1103,14 @@ func TestHandleCallback_MenuTerms(t *testing.T) {
 	assert.True(t, mockBot.SendCalledSafe(), "Bot.Send should be called for terms of service")
 	all := mockBot.GetAllSentMessages()
 	assert.NotEmpty(t, all)
-	var combined string
+
+	var combined strings.Builder
 	for _, m := range all {
-		combined += m.Text
+		combined.WriteString(m.Text)
 	}
-	assert.Contains(t, combined, "Пользовательское соглашение", "message should contain terms title")
-	assert.Contains(t, combined, "Бот «RS8 KVN», 28.07.2026", "message should contain legal footer")
+
+	assert.Contains(t, combined.String(), "Пользовательское соглашение", "message should contain terms title")
+	assert.Contains(t, combined.String(), "Бот «RS8 KVN», 28.07.2026", "message should contain legal footer")
 }
 
 func TestHandleCallback_MenuSupport(t *testing.T) {
@@ -1125,9 +1140,11 @@ func TestHandleCallback_MenuSupport(t *testing.T) {
 	assert.True(t, mockBot.SendCalledSafe(), "Bot.Send should be called for support")
 	all := mockBot.GetAllSentMessages()
 	assert.NotEmpty(t, all)
-	var combined string
+
+	var combined strings.Builder
 	for _, m := range all {
-		combined += m.Text
+		combined.WriteString(m.Text)
 	}
-	assert.Contains(t, combined, "С любыми проблемами и вопросами обращайтесь сюда: @kereal", "message should contain support contact text")
+
+	assert.Contains(t, combined.String(), "С любыми проблемами и вопросами обращайтесь сюда: @kereal", "message should contain support contact text")
 }

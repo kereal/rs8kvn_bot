@@ -63,18 +63,21 @@ func TestGenerateQRCodePNG_Concurrent(t *testing.T) {
 
 	results := make(chan []byte, workers*perWorker)
 	errs := make(chan error, workers*perWorker)
+
 	var wg sync.WaitGroup
 	wg.Add(workers)
 
-	for i := 0; i < workers; i++ {
+	for range workers {
 		go func() {
 			defer wg.Done()
-			for j := 0; j < perWorker; j++ {
+
+			for range perWorker {
 				pngData, err := GenerateQRCodePNG(input)
 				if err != nil {
 					errs <- err
 					continue
 				}
+
 				results <- pngData
 			}
 		}()
@@ -89,23 +92,30 @@ func TestGenerateQRCodePNG_Concurrent(t *testing.T) {
 	}
 
 	var first []byte
+
 	count := 0
+
 	for pngData := range results {
 		if first == nil {
 			first = pngData
 		} else {
 			require.Equal(t, first, pngData, "concurrent generation must be deterministic")
 		}
+
 		count++
 	}
+
 	require.Equal(t, workers*perWorker, count)
 }
 
 func BenchmarkGenerateQRCodePNG(b *testing.B) {
 	data := "https://example.com/vless://abc123-uuid@example.com:443?encryption=none&security=reality"
+
 	b.ResetTimer()
+
 	for i := 0; i < b.N; i++ {
-		if _, err := GenerateQRCodePNG(data); err != nil {
+		_, err := GenerateQRCodePNG(data)
+		if err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -113,9 +123,11 @@ func BenchmarkGenerateQRCodePNG(b *testing.B) {
 
 func BenchmarkGenerateQRCodePNG_Parallel(b *testing.B) {
 	data := "https://example.com/test"
+
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			if _, err := GenerateQRCodePNG(data); err != nil {
+			_, err := GenerateQRCodePNG(data)
+			if err != nil {
 				b.Fatal(err)
 			}
 		}
@@ -124,8 +136,9 @@ func BenchmarkGenerateQRCodePNG_Parallel(b *testing.B) {
 
 func repeatString(s string, n int) string {
 	result := make([]byte, 0, len(s)*n)
-	for i := 0; i < n; i++ {
+	for range n {
 		result = append(result, s...)
 	}
+
 	return string(result)
 }

@@ -153,11 +153,15 @@ func TestRegistry_LoadEnv_FromEnv(t *testing.T) {
 
 	require.NoError(t, os.Setenv("TEST_FLAG_STRING", "from-env"))
 	require.NoError(t, os.Setenv("TEST_FLAG_INT", "42"))
+
 	defer func() {
-		if err := os.Unsetenv("TEST_FLAG_STRING"); err != nil {
+		err := os.Unsetenv("TEST_FLAG_STRING")
+		if err != nil {
 			t.Logf("Warning: failed to unset TEST_FLAG_STRING: %v", err)
 		}
-		if err := os.Unsetenv("TEST_FLAG_INT"); err != nil {
+
+		err = os.Unsetenv("TEST_FLAG_INT")
+		if err != nil {
 			t.Logf("Warning: failed to unset TEST_FLAG_INT: %v", err)
 		}
 	}()
@@ -165,6 +169,7 @@ func TestRegistry_LoadEnv_FromEnv(t *testing.T) {
 	r := New()
 	s := NewString("default")
 	i := NewInt(0)
+
 	r.Register("TEST_FLAG_STRING", s)
 	r.Register("TEST_FLAG_INT", i)
 
@@ -193,8 +198,10 @@ func TestRegistry_LoadEnv_WhitespaceTrimmed(t *testing.T) {
 	t.Parallel()
 
 	require.NoError(t, os.Setenv("TEST_TRIM_FLAG", "  trimmed  "))
+
 	defer func() {
-		if err := os.Unsetenv("TEST_TRIM_FLAG"); err != nil {
+		err := os.Unsetenv("TEST_TRIM_FLAG")
+		if err != nil {
 			t.Logf("Warning: failed to unset TEST_TRIM_FLAG: %v", err)
 		}
 	}()
@@ -212,6 +219,7 @@ func TestRegistry_LoadEnv_InvalidInt(t *testing.T) {
 	t.Parallel()
 
 	os.Setenv("TEST_BAD_INT", "notanint")
+
 	defer os.Unsetenv("TEST_BAD_INT")
 
 	r := New()
@@ -227,6 +235,7 @@ func TestRegistry_LoadEnv_IgnoresUnregistered(t *testing.T) {
 	t.Parallel()
 
 	os.Setenv("UNREGISTERED_VAR", "should-be-ignored")
+
 	defer os.Unsetenv("UNREGISTERED_VAR")
 
 	r := New()

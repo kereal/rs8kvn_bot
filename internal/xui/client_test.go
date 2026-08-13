@@ -25,6 +25,7 @@ import (
 
 func TestMain(m *testing.M) {
 	_, _ = logger.Init("", "error")
+
 	goleak.VerifyTestMain(m)
 }
 
@@ -32,10 +33,12 @@ const testAPIToken = "test-api-token"
 
 func setupTestServer(handler http.HandlerFunc) (*httptest.Server, *Client) {
 	server := httptest.NewServer(handler)
+
 	client, err := NewClient(server.URL, testAPIToken)
 	if err != nil {
 		panic(err)
 	}
+
 	return server, client
 }
 
@@ -96,6 +99,7 @@ func TestMarshalJSON(t *testing.T) {
 		require.NotNil(t, reader)
 
 		var result map[string]string
+
 		err = json.NewDecoder(reader).Decode(&result)
 		require.NoError(t, err)
 		assert.Equal(t, "value", result["key"])
@@ -107,6 +111,7 @@ func TestMarshalJSON(t *testing.T) {
 		assert.NotNil(t, reader)
 
 		var decoded any
+
 		err = json.NewDecoder(reader).Decode(&decoded)
 		require.NoError(t, err)
 		assert.Nil(t, decoded)
@@ -166,8 +171,10 @@ func (testNetError) Temporary() bool { return true }
 func TestRetryWithBackoff(t *testing.T) {
 	t.Parallel()
 
-	var successRetryCalls, exhaustedCalls, non200Calls atomic.Int32
-	var cancelledCalls, nonRetryableCalls atomic.Int32
+	var (
+		successRetryCalls, exhaustedCalls, non200Calls atomic.Int32
+		cancelledCalls, nonRetryableCalls              atomic.Int32
+	)
 
 	tests := []struct {
 		name         string
@@ -196,9 +203,11 @@ func TestRetryWithBackoff(t *testing.T) {
 			fn: func() error {
 				calls := successRetryCalls.Load()
 				successRetryCalls.Add(1)
+
 				if calls < 2 {
 					return testNetError{}
 				}
+
 				return nil
 			},
 			wantErr:   false,
@@ -222,6 +231,7 @@ func TestRetryWithBackoff(t *testing.T) {
 			setupCtx: func() context.Context {
 				ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
 				cancel()
+
 				return ctx
 			},
 			fn: func() error {
@@ -265,6 +275,7 @@ func TestRetryWithBackoff(t *testing.T) {
 
 			if tt.wantErr {
 				assert.Error(t, err)
+
 				if tt.wantContains != "" {
 					assert.Contains(t, err.Error(), tt.wantContains)
 				}
@@ -366,6 +377,7 @@ func TestDoHTTPRequest(t *testing.T) {
 	t.Run("body function error", func(t *testing.T) {
 		client, err := NewClient("http://localhost:2053", testAPIToken)
 		require.NoError(t, err)
+
 		defer client.Close()
 
 		_, err = client.doHTTPRequest(context.Background(), http.MethodPost, "http://localhost:2053/test", func() (io.Reader, error) {
@@ -378,6 +390,7 @@ func TestDoHTTPRequest(t *testing.T) {
 	t.Run("request creation error", func(t *testing.T) {
 		client, err := NewClient("http://localhost:2053", testAPIToken)
 		require.NoError(t, err)
+
 		defer client.Close()
 
 		_, err = client.doHTTPRequest(context.Background(), http.MethodGet, "://invalid-url", nil)
@@ -445,6 +458,7 @@ func TestInbound_GetRequiredFlow(t *testing.T) {
 			if tt.transport != "" {
 				in.StreamSettings = json.RawMessage(fmt.Sprintf(`{"network":"%s"}`, tt.transport))
 			}
+
 			assert.Equal(t, tt.expected, in.GetRequiredFlow())
 		})
 	}
@@ -470,6 +484,7 @@ func TestCloseResponseBody(t *testing.T) {
 
 func TestAddClient(t *testing.T) {
 	t.Parallel()
+
 	if testing.Short() {
 		t.Skip("Skipping slow test in short mode")
 	}
@@ -480,8 +495,10 @@ func TestAddClient(t *testing.T) {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusOK)
 				fmt.Fprint(w, `{"success":true,"obj":{"id":1,"streamSettings":"{\"network\":\"tcp\"}"}}`)
+
 				return
 			}
+
 			assert.Equal(t, "/panel/api/clients/add", r.URL.Path)
 			assert.Equal(t, "Bearer "+testAPIToken, r.Header.Get("Authorization"))
 			body, _ := io.ReadAll(r.Body)
@@ -496,6 +513,7 @@ func TestAddClient(t *testing.T) {
 
 		client, err := NewClient(server.URL, testAPIToken)
 		require.NoError(t, err)
+
 		defer client.Close()
 
 		result, err := client.AddClient(context.Background(), []int{1}, "test@example.com", 1<<30, time.Now().Add(24*time.Hour))
@@ -511,8 +529,10 @@ func TestAddClient(t *testing.T) {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusOK)
 				fmt.Fprint(w, `{"success":true,"obj":{"id":1}}`)
+
 				return
 			}
+
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
 			fmt.Fprint(w, `{"success":false,"msg":"inbound not found"}`)
@@ -521,6 +541,7 @@ func TestAddClient(t *testing.T) {
 
 		client, err := NewClient(server.URL, testAPIToken)
 		require.NoError(t, err)
+
 		defer client.Close()
 
 		_, err = client.AddClient(context.Background(), []int{1}, "test@example.com", 1<<30, time.Now().Add(24*time.Hour))
@@ -536,8 +557,10 @@ func TestAddClientWithID_SurfacesPanelMsg(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
 			fmt.Fprint(w, `{"success":true,"obj":{"id":1}}`)
+
 			return
 		}
+
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprint(w, `{"success":false,"msg":"A client with this email already exists"}`)
@@ -546,6 +569,7 @@ func TestAddClientWithID_SurfacesPanelMsg(t *testing.T) {
 
 	client, err := NewClient(server.URL, testAPIToken)
 	require.NoError(t, err)
+
 	defer client.Close()
 
 	_, err = client.AddClientWithID(context.Background(), ClientRequest{
@@ -562,6 +586,7 @@ func TestAddClientWithID_Validation(t *testing.T) {
 
 	client, err := NewClient("http://localhost:2053", testAPIToken)
 	require.NoError(t, err)
+
 	defer client.Close()
 
 	ctx := context.Background()
@@ -587,12 +612,15 @@ func TestAddClientWithID(t *testing.T) {
 
 	t.Run("success", func(t *testing.T) {
 		var callCount atomic.Int32
+
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			callCount.Add(1)
+
 			if strings.Contains(r.URL.Path, "get/") {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusOK)
 				fmt.Fprint(w, `{"success":true,"obj":{"id":1}}`)
+
 				return
 			}
 
@@ -609,6 +637,7 @@ func TestAddClientWithID(t *testing.T) {
 
 		client, err := NewClient(server.URL, testAPIToken)
 		require.NoError(t, err)
+
 		defer client.Close()
 
 		result, err := client.AddClientWithID(context.Background(), ClientRequest{InboundIDs: []int{1}, Email: "test@example.com", ClientID: "some-uuid", SubID: "sub-123", TrafficBytes: 1 << 30, ExpiryTime: time.Now().Add(24 * time.Hour), ResetDays: 0})
@@ -625,8 +654,10 @@ func TestAddClientWithID(t *testing.T) {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusOK)
 				fmt.Fprint(w, `{"success":true,"obj":{"id":1}}`)
+
 				return
 			}
+
 			body, _ := io.ReadAll(r.Body)
 			// The panel must receive the normalized value, not -1
 			assert.Contains(t, string(body), `"reset":30`, "negative ResetDays must be normalized to SubscriptionResetDay")
@@ -638,6 +669,7 @@ func TestAddClientWithID(t *testing.T) {
 
 		client, err := NewClient(server.URL, testAPIToken)
 		require.NoError(t, err)
+
 		defer client.Close()
 
 		result, err := client.AddClientWithID(context.Background(), ClientRequest{InboundIDs: []int{1}, Email: "test@example.com", ClientID: "uuid", SubID: "sub", TrafficBytes: 100, ExpiryTime: time.Now().Add(24 * time.Hour), ResetDays: -1})
@@ -648,6 +680,7 @@ func TestAddClientWithID(t *testing.T) {
 
 func TestDeleteClient(t *testing.T) {
 	t.Parallel()
+
 	if testing.Short() {
 		t.Skip("Skipping slow test in short mode")
 	}
@@ -663,6 +696,7 @@ func TestDeleteClient(t *testing.T) {
 
 		client, err := NewClient(server.URL, testAPIToken)
 		require.NoError(t, err)
+
 		defer client.Close()
 
 		err = client.DeleteClient(context.Background(), "test-email")
@@ -679,6 +713,7 @@ func TestDeleteClient(t *testing.T) {
 
 		client, err := NewClient(server.URL, testAPIToken)
 		require.NoError(t, err)
+
 		defer client.Close()
 
 		err = client.DeleteClient(context.Background(), "nonexistent")
@@ -689,6 +724,7 @@ func TestDeleteClient(t *testing.T) {
 
 func TestUpdateClient(t *testing.T) {
 	t.Parallel()
+
 	if testing.Short() {
 		t.Skip("Skipping slow test in short mode")
 	}
@@ -699,8 +735,10 @@ func TestUpdateClient(t *testing.T) {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusOK)
 				fmt.Fprint(w, `{"success":true,"obj":{"id":1}}`)
+
 				return
 			}
+
 			assert.Contains(t, r.URL.Path, "/panel/api/clients/update/old-email")
 			body, _ := io.ReadAll(r.Body)
 			assert.Contains(t, string(body), `"email":"new@email.com"`)
@@ -715,6 +753,7 @@ func TestUpdateClient(t *testing.T) {
 
 		client, err := NewClient(server.URL, testAPIToken)
 		require.NoError(t, err)
+
 		defer client.Close()
 
 		err = client.UpdateClient(context.Background(), ClientRequest{InboundIDs: []int{1}, CurrentEmail: "old-email", ClientID: "test-uuid", Email: "new@email.com", SubID: "sub-456", TrafficBytes: 1 << 30, ExpiryTime: time.Now().Add(48 * time.Hour), ResetDays: -1, TgID: 12345, Comment: "test comment"})
@@ -724,6 +763,7 @@ func TestUpdateClient(t *testing.T) {
 	t.Run("empty client ID", func(t *testing.T) {
 		client, err := NewClient("http://localhost:2053", testAPIToken)
 		require.NoError(t, err)
+
 		defer client.Close()
 
 		err = client.UpdateClient(context.Background(), ClientRequest{InboundIDs: []int{1}, CurrentEmail: "current-email", ClientID: "", Email: "email", SubID: "sub", TrafficBytes: 0, ExpiryTime: time.Time{}, ResetDays: -1, TgID: 0, Comment: ""})
@@ -737,8 +777,10 @@ func TestUpdateClient(t *testing.T) {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusOK)
 				fmt.Fprint(w, `{"success":true,"obj":{"id":1}}`)
+
 				return
 			}
+
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
 			fmt.Fprint(w, `{"success":false,"msg":"update failed"}`)
@@ -747,6 +789,7 @@ func TestUpdateClient(t *testing.T) {
 
 		client, err := NewClient(server.URL, testAPIToken)
 		require.NoError(t, err)
+
 		defer client.Close()
 
 		err = client.UpdateClient(context.Background(), ClientRequest{InboundIDs: []int{1}, CurrentEmail: "current-email", ClientID: "test-uuid", Email: "email", SubID: "sub", TrafficBytes: 0, ExpiryTime: time.Time{}, ResetDays: -1, TgID: 0, Comment: ""})
@@ -756,6 +799,7 @@ func TestUpdateClient(t *testing.T) {
 
 func TestGetClientTraffic(t *testing.T) {
 	t.Parallel()
+
 	if testing.Short() {
 		t.Skip("Skipping slow test in short mode")
 	}
@@ -772,6 +816,7 @@ func TestGetClientTraffic(t *testing.T) {
 
 		client, err := NewClient(server.URL, testAPIToken)
 		require.NoError(t, err)
+
 		defer client.Close()
 
 		traffic, err := client.GetClientTraffic(context.Background(), "test@example.com")
@@ -791,6 +836,7 @@ func TestGetClientTraffic(t *testing.T) {
 
 		client, err := NewClient(server.URL, testAPIToken)
 		require.NoError(t, err)
+
 		defer client.Close()
 
 		_, err = client.GetClientTraffic(context.Background(), "nonexistent@example.com")
@@ -807,6 +853,7 @@ func TestGetClientTraffic(t *testing.T) {
 
 		client, err := NewClient(server.URL, testAPIToken)
 		require.NoError(t, err)
+
 		defer client.Close()
 
 		_, err = client.GetClientTraffic(context.Background(), "test@example.com")
@@ -828,6 +875,7 @@ func TestGetInbound(t *testing.T) {
 
 		client, err := NewClient(server.URL, testAPIToken)
 		require.NoError(t, err)
+
 		defer client.Close()
 
 		inbound, err := client.GetInbound(context.Background(), 1)
@@ -849,6 +897,7 @@ func TestGetInbound(t *testing.T) {
 
 		client, err := NewClient(server.URL, testAPIToken)
 		require.NoError(t, err)
+
 		defer client.Close()
 
 		_, err = client.GetInbound(context.Background(), 999)
@@ -858,6 +907,7 @@ func TestGetInbound(t *testing.T) {
 
 func TestGetRequiredFlow_Fallback(t *testing.T) {
 	t.Parallel()
+
 	if testing.Short() {
 		t.Skip("Skipping slow test in short mode")
 	}
@@ -866,6 +916,7 @@ func TestGetRequiredFlow_Fallback(t *testing.T) {
 	// Use guaranteed-unresolvable host to trigger error path
 	client, err := NewClient("http://nonexistent.invalid:2053", testAPIToken)
 	require.NoError(t, err)
+
 	defer client.Close()
 
 	flow, err := client.getRequiredFlow(context.Background(), 1)
@@ -901,6 +952,7 @@ func TestHTTPStatusHandling(t *testing.T) {
 
 		client, err := NewClient(server.URL, testAPIToken)
 		require.NoError(t, err)
+
 		defer client.Close()
 
 		_, err = client.GetInbound(context.Background(), 1)
@@ -917,6 +969,7 @@ func TestHTTPStatusHandling(t *testing.T) {
 
 		client, err := NewClient(server.URL, testAPIToken)
 		require.NoError(t, err)
+
 		defer client.Close()
 
 		_, err = client.GetInbound(context.Background(), 1)
@@ -933,6 +986,7 @@ func TestHTTPStatusHandling(t *testing.T) {
 
 		client, err := NewClient(server.URL, testAPIToken)
 		require.NoError(t, err)
+
 		defer client.Close()
 
 		_, err = client.GetInbound(context.Background(), 1)

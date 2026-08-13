@@ -19,6 +19,7 @@ type BotConfig struct {
 
 func NewBotConfig(botAPI *tgbotapi.BotAPI) (*BotConfig, error) {
 	self := botAPI.Self
+
 	return &BotConfig{
 		Username:                self.UserName,
 		ID:                      self.ID,

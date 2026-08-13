@@ -43,6 +43,7 @@ func TestGetMainMenuContent(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
+
 			text, keyboard := handler.getMainMenuContent(context.Background(), tt.username, tt.hasSubscription, tt.chatID, nil)
 
 			assert.Contains(t, text, tt.username, "getMainMenuContent() text should contain username")
@@ -86,6 +87,7 @@ func TestGetMainMenuContent_WithoutSubscription(t *testing.T) {
 	assert.GreaterOrEqual(t, len(keyboard.InlineKeyboard), 1, "Expected at least 1 keyboard row")
 
 	found := false
+
 	for _, row := range keyboard.InlineKeyboard {
 		for _, button := range row {
 			if button.CallbackData != nil && *button.CallbackData == "create_subscription" {
@@ -94,6 +96,7 @@ func TestGetMainMenuContent_WithoutSubscription(t *testing.T) {
 			}
 		}
 	}
+
 	assert.True(t, found, "Expected create_subscription callback in keyboard for user without subscription")
 }
 
@@ -111,16 +114,19 @@ func TestGetMainMenuContent_AdminButtons(t *testing.T) {
 
 	foundStats := false
 	foundLastReg := false
+
 	for _, row := range keyboard.InlineKeyboard {
 		for _, button := range row {
 			if button.CallbackData != nil && *button.CallbackData == "admin_stats" {
 				foundStats = true
 			}
+
 			if button.CallbackData != nil && *button.CallbackData == "admin_lastreg" {
 				foundLastReg = true
 			}
 		}
 	}
+
 	assert.True(t, foundStats, "Expected admin_stats button for admin user")
 	assert.True(t, foundLastReg, "Expected admin_lastreg button for admin user")
 }
@@ -219,6 +225,7 @@ func TestGetHelpText_DifferentTrafficLimits(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
+
 			text := handler.getHelpText(tt.trafficLimit, "http://test.url/sub")
 			assert.NotEmpty(t, text, "text should not be empty")
 		})

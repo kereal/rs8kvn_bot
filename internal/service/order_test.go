@@ -73,6 +73,7 @@ func TestOrderService_NotifiesAdminForUncertainPayment(t *testing.T) {
 	_, gotOrder, err := o.RequestPayment(context.Background(), 42, "user", &database.Product{ID: 7})
 	require.ErrorIs(t, err, ErrPaymentCreationUncertain)
 	require.Same(t, order, gotOrder)
+
 	messages := adminBot.GetAllSentMessages()
 	require.Len(t, messages, 1)
 	assert.Equal(t, int64(999), messages[0].ChatID)
@@ -98,6 +99,7 @@ func TestOrderService_NotifiesAdminForLateConfirmedPayment(t *testing.T) {
 	confirmation, err := o.ConfirmPayment(context.Background(), providerID, json.Number("23.00"), "RUB")
 	require.NoError(t, err)
 	assert.False(t, confirmation.Activated)
+
 	messages := adminBot.GetAllSentMessages()
 	require.Len(t, messages, 1)
 	assert.Contains(t, messages[0].Text, "Late confirmed payment")
@@ -129,6 +131,7 @@ func TestOrderService_NotifiesAdminForProviderRejection(t *testing.T) {
 
 	_, _, err := o.RequestPayment(context.Background(), 45, "user", &database.Product{ID: 10})
 	require.Error(t, err)
+
 	messages := adminBot.GetAllSentMessages()
 	require.Len(t, messages, 1)
 	assert.Contains(t, messages[0].Text, "provider_create_rejected")
@@ -159,6 +162,7 @@ func TestOrderService_NotifiesAdminWhenProviderOutcomeIsUncertain(t *testing.T) 
 
 	_, _, err := o.RequestPayment(context.Background(), 44, "user", &database.Product{ID: 9})
 	require.Error(t, err)
+
 	messages := adminBot.GetAllSentMessages()
 	require.Len(t, messages, 1)
 	assert.Contains(t, messages[0].Text, "outcome is uncertain")
@@ -169,9 +173,13 @@ func TestOrderService_NotifiesAdminWhenProviderOutcomeIsUncertain(t *testing.T) 
 func TestRequestPayment_SavesRedirectPaymentDetails(t *testing.T) {
 	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440106")
 	order := &database.Order{ID: 16, SubscriptionID: 7, ProductID: 11, Status: database.OrderStatusPending, AmountCents: 2300, Currency: "RUB"}
-	var savedID uuid.UUID
-	var savedURL string
-	var savedExpiry time.Time
+
+	var (
+		savedID     uuid.UUID
+		savedURL    string
+		savedExpiry time.Time
+	)
+
 	mock := &testutil.DatabaseService{
 		GetProductByIDFunc: func(context.Context, uint) (*database.Product, error) {
 			return &database.Product{ID: 11, PlanID: 2, Name: "Premium", PriceCents: 2300, Currency: "RUB", IsActive: true}, nil
@@ -188,7 +196,9 @@ func TestRequestPayment_SavesRedirectPaymentDetails(t *testing.T) {
 		MarkPaymentCreationUncertainFunc: func(context.Context, uint, bool) (bool, error) { return true, nil },
 		SavePaymentDetailsFunc: func(_ context.Context, orderID uint, id uuid.UUID, url string, expiry time.Time) error {
 			assert.Equal(t, uint(16), orderID)
+
 			savedID, savedURL, savedExpiry = id, url, expiry
+
 			return nil
 		},
 	}
@@ -247,6 +257,7 @@ func TestRequestPayment_InvalidProviderResponsesNotifyAdmin(t *testing.T) {
 			_, _, err := o.RequestPayment(context.Background(), 47, "user", &database.Product{ID: 12})
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tt.wantErr)
+
 			messages := adminBot.GetAllSentMessages()
 			require.Len(t, messages, 1)
 			assert.Contains(t, messages[0].Text, tt.wantEvent)
@@ -276,6 +287,7 @@ func TestRequestPayment_LatePlanLoadFailureNotifiesAdmin(t *testing.T) {
 
 	_, _, err := o.RequestPayment(context.Background(), 50, "user", &database.Product{ID: 16})
 	require.Error(t, err)
+
 	messages := adminBot.GetAllSentMessages()
 	require.Len(t, messages, 1)
 	assert.Contains(t, messages[0].Text, "load_plan_failed")
@@ -309,6 +321,7 @@ func TestRequestPayment_SaveDetailsFailureNotifiesAdmin(t *testing.T) {
 
 	_, _, err := o.RequestPayment(context.Background(), 48, "user", &database.Product{ID: 13})
 	require.Error(t, err)
+
 	messages := adminBot.GetAllSentMessages()
 	require.Len(t, messages, 1)
 	assert.Contains(t, messages[0].Text, "payment_details_save_failed")
@@ -320,6 +333,7 @@ func TestConfirmPayment_ReleasesPaymentLockBeforePostCommitSync(t *testing.T) {
 	secondID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440121")
 	syncStarted := make(chan struct{})
 	releaseSync := make(chan struct{})
+
 	var syncStartOnce sync.Once
 
 	mock := &testutil.DatabaseService{
@@ -327,6 +341,7 @@ func TestConfirmPayment_ReleasesPaymentLockBeforePostCommitSync(t *testing.T) {
 			if id == firstID {
 				return &database.Order{ID: 31, SubscriptionID: 41, ProductID: 51, Status: database.OrderStatusPending, AmountCents: 2300, Currency: "RUB"}, nil
 			}
+
 			return nil, database.ErrOrderNotFound
 		},
 		GetProductByIDFunc: func(_ context.Context, id uint) (*database.Product, error) {
@@ -342,12 +357,14 @@ func TestConfirmPayment_ReleasesPaymentLockBeforePostCommitSync(t *testing.T) {
 		GetPendingBySubscriptionIDFunc: func(context.Context, uint) ([]database.SubscriptionNode, error) {
 			syncStartOnce.Do(func() { close(syncStarted) })
 			<-releaseSync
+
 			return nil, nil
 		},
 	}
 	orderService := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), fakePaymentProvider{}, "", nil)
 
 	firstDone := make(chan error, 1)
+
 	go func() {
 		_, err := orderService.ConfirmPayment(context.Background(), firstID, json.Number("23.00"), "RUB")
 		firstDone <- err
@@ -360,6 +377,7 @@ func TestConfirmPayment_ReleasesPaymentLockBeforePostCommitSync(t *testing.T) {
 	}
 
 	secondDone := make(chan error, 1)
+
 	go func() {
 		_, err := orderService.ConfirmPayment(context.Background(), secondID, json.Number("23.00"), "RUB")
 		secondDone <- err
@@ -407,6 +425,7 @@ func TestConfirmPayment_ActivatedCASWithNilExpiryDoesNotPanic(t *testing.T) {
 	require.True(t, confirmation.Activated)
 	assert.Equal(t, database.OrderStatusPaid, confirmation.Order.Status)
 	assert.Nil(t, confirmation.Order.ExpiresAt, "expiry must stay nil when CAS leaves sub.ExpiresAt nil")
+
 	afterAmount := promtestutil.ToFloat64(metrics.PaymentAmountCentsTotal.WithLabelValues("confirmed", "METRIC"))
 	assert.Equal(t, float64(2300), afterAmount-beforeAmount)
 }
@@ -454,12 +473,14 @@ func TestConfirmPayment_ValidationAndDatabaseFailuresNotifyAdmin(t *testing.T) {
 					if tt.productErr != nil {
 						return nil, tt.productErr
 					}
+
 					return &database.Product{ID: 14, PlanID: 2, Name: "Premium", DurationDays: 30, PriceCents: 2300, Currency: "RUB", IsActive: true}, nil
 				},
 				GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
 					if tt.subErr != nil {
 						return nil, tt.subErr
 					}
+
 					return &database.Subscription{ID: 10, TelegramID: 49, PlanID: 2}, nil
 				},
 				ConfirmOrderPaidCASFunc: func(context.Context, uint, time.Time, time.Time, *database.Subscription, *database.Product, database.ApplyPlanInTxFn) (bool, error) {
@@ -475,6 +496,7 @@ func TestConfirmPayment_ValidationAndDatabaseFailuresNotifyAdmin(t *testing.T) {
 			} else {
 				require.Error(t, err)
 			}
+
 			messages := adminBot.GetAllSentMessages()
 			require.Len(t, messages, 1)
 			assert.Contains(t, messages[0].Text, tt.wantEvent)
@@ -608,6 +630,7 @@ func TestFormatAdminChargebackAlert(t *testing.T) {
 			for _, want := range tt.want {
 				assert.Contains(t, text, want)
 			}
+
 			for _, nw := range tt.notWant {
 				assert.NotContains(t, text, nw)
 			}
@@ -617,6 +640,7 @@ func TestFormatAdminChargebackAlert(t *testing.T) {
 
 func TestCancelPaymentByProvider_ChargebackNotifiesAdmin(t *testing.T) {
 	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440132")
+
 	tests := []struct {
 		name       string
 		downgraded bool
@@ -635,9 +659,9 @@ func TestCancelPaymentByProvider_ChargebackNotifiesAdmin(t *testing.T) {
 				GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
 					return &database.Order{ID: 104, SubscriptionID: 92, ProductID: 72, Status: database.OrderStatusPaid, AmountCents: 690000, Currency: "RUB", ProviderPaymentID: providerID.String()}, nil
 				},
-			CancelPaidOrderAndDowngradeCASFunc: func(context.Context, string, uuid.UUID, time.Time, uint, database.ChargebackPlanInTxFn) (*database.ChargebackResult, error) {
-				return &database.ChargebackResult{Order: order, WasPaid: true, Transitioned: true, Downgraded: tt.downgraded}, nil
-			},
+				CancelPaidOrderAndDowngradeCASFunc: func(context.Context, string, uuid.UUID, time.Time, uint, database.ChargebackPlanInTxFn) (*database.ChargebackResult, error) {
+					return &database.ChargebackResult{Order: order, WasPaid: true, Transitioned: true, Downgraded: tt.downgraded}, nil
+				},
 				GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
 					return sub, nil
 				},
@@ -730,6 +754,7 @@ func TestCancelPaymentByProvider_ErrorsNotifyAdmin(t *testing.T) {
 			} else {
 				require.Error(t, err)
 			}
+
 			messages := adminBot.GetAllSentMessages()
 			require.Len(t, messages, 1)
 			assert.Contains(t, messages[0].Text, tt.wantEvent)
@@ -748,6 +773,7 @@ func TestCancelPaymentByProvider_PaidChargebackReturnsWasPaid(t *testing.T) {
 			assert.Equal(t, "platega", provider)
 			assert.Equal(t, "550e8400-e29b-41d4-a716-446655440101", providerID.String())
 			assert.Contains(t, from, database.OrderStatusPaid, "chargeback must allow transition from paid")
+
 			return true, nil
 		},
 		GetOrderByProviderPaymentIDFunc: func(ctx context.Context, provider string, providerID uuid.UUID) (*database.Order, error) {
@@ -765,6 +791,7 @@ func TestCancelPaymentByProvider_PaidChargebackReturnsWasPaid(t *testing.T) {
 	require.NotNil(t, order)
 	assert.Equal(t, uint(7), order.ID)
 	assert.Equal(t, 1, calls, "atomic chargeback repository owns the transition and order reload")
+
 	afterAmount := promtestutil.ToFloat64(metrics.PaymentAmountCentsTotal.WithLabelValues("chargeback", "RUB"))
 	assert.Equal(t, float64(2300), afterAmount-beforeAmount)
 }
@@ -793,6 +820,7 @@ func TestCancelPaymentByProvider_ChargebackOnPendingReportsNotPaid(t *testing.T)
 	assert.False(t, wasPaid, "pending order chargeback must not report wasPaid")
 	require.NotNil(t, order)
 	assert.Equal(t, uint(9), order.ID)
+
 	afterAmount := promtestutil.ToFloat64(metrics.PaymentAmountCentsTotal.WithLabelValues("chargeback", "RUB"))
 	assert.Equal(t, beforeAmount, afterAmount)
 }
@@ -824,10 +852,12 @@ func TestCancelPaymentByProvider_PendingCancelNotChargeback(t *testing.T) {
 		},
 		GetOrderByProviderPaymentIDFunc: func(ctx context.Context, provider string, providerID uuid.UUID) (*database.Order, error) {
 			calls++
+
 			status := database.OrderStatusCanceled
 			if calls == 1 {
 				status = database.OrderStatusPending
 			}
+
 			return &database.Order{ID: 8, Status: status, AmountCents: 2300, Currency: "RUB"}, nil
 		},
 	}
@@ -890,6 +920,7 @@ func TestConfirmPayment_DeletedSubscriptionOrProductReturnsNoop(t *testing.T) {
 			require.NoError(t, err, "deleted dependency must acknowledge the callback instead of 500")
 			require.False(t, confirmation.Activated)
 			assert.False(t, casCalled, "no CAS may run when the product/subscription is gone")
+
 			messages := adminBot.GetAllSentMessages()
 			require.Len(t, messages, 1)
 			assert.Contains(t, messages[0].Text, tt.wantEvent)
@@ -952,9 +983,11 @@ func TestCancelPaymentByProvider_ChargebackDowngradesPaidSubscription(t *testing
 		},
 		UpdateSubscriptionFunc: func(_ context.Context, updated *database.Subscription) error {
 			downgradePersisted = true
+
 			assert.Equal(t, uint(2), updated.PlanID, "subscription must be downgraded to the free plan")
 			assert.Nil(t, updated.ExpiresAt, "free plan has no expiry")
 			assert.Nil(t, updated.ProductID)
+
 			return nil
 		},
 	}
@@ -1031,6 +1064,7 @@ func TestCancelPaymentByProvider_ChargebackDowngradeFailureAlertsAdmin(t *testin
 	_, wasPaid, err := o.CancelPaymentByProvider(context.Background(), providerID, "CHARGEBACKED", json.Number("23.00"), "RUB")
 	require.Error(t, err, "an atomic chargeback failure must be returned for provider retry/reconciliation")
 	require.False(t, wasPaid)
+
 	messages := adminBot.GetAllSentMessages()
 	require.Len(t, messages, 1, "atomic chargeback failure alert")
 	assert.Contains(t, messages[0].Text, "cancel_payment_failed")
@@ -1061,7 +1095,9 @@ func TestCancelPaymentByProvider_ChargebackDowngradeUsesSyncService(t *testing.T
 		},
 		UpdateSubscriptionFunc: func(_ context.Context, updated *database.Subscription) error {
 			updateCalled = true
+
 			assert.Equal(t, uint(2), updated.PlanID)
+
 			return nil
 		},
 		DeleteSubscriptionNodesBySubscriptionIDFunc: func(context.Context, uint) error {
@@ -1078,7 +1114,9 @@ func TestCancelPaymentByProvider_ChargebackDowngradeUsesSyncService(t *testing.T
 			assert.Equal(t, uint(89), subID)
 			assert.Equal(t, uint(555), nodeID)
 			assert.Equal(t, database.SyncStatusPendingRemove, status, "premium node must be marked pending_remove for physical deprovision")
+
 			premiumMarkedForRemoval = true
+
 			return nil
 		},
 		GetPendingBySubscriptionIDFunc: func(context.Context, uint) ([]database.SubscriptionNode, error) {

@@ -29,6 +29,7 @@ func tap(h *Handler, data string, chatID int64, msgID int) {
 
 func newQRTestHandler(t *testing.T) (*Handler, *testutil.BotAPI) {
 	t.Helper()
+
 	ctx := context.Background()
 	db := testutil.NewDatabaseService()
 	cfg := &config.Config{TelegramAdminID: 123456, SiteURL: "https://x.com", GlobalSubURL: "https://x.com/sub/"}
@@ -39,6 +40,7 @@ func newQRTestHandler(t *testing.T) (*Handler, *testutil.BotAPI) {
 	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
 	svc := service.NewSubscriptionService(db, xuiClients, nil, nodes, cfg)
 	bot := testutil.NewBotAPI()
+
 	return NewHandler(bot, cfg, db, NewTestBotConfig(), svc, ""), bot
 }
 
@@ -55,7 +57,7 @@ func newQRTestHandler(t *testing.T) (*Handler, *testutil.BotAPI) {
 // same pattern, so the test is written against the contract, not the QR alone.
 func TestNavigation_OpenAndBack(t *testing.T) {
 	const (
-		cardMsgID  = 100 // the subscription card / menu already on screen
+		cardMsgID   = 100 // the subscription card / menu already on screen
 		screenMsgID = 555 // the separate QR/invite message Telegram assigns
 	)
 

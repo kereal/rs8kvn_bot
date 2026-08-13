@@ -31,7 +31,9 @@ var migrationFiles embed.FS
 func runMigrations(sqlDB *sql.DB) error {
 	// Determine SQLite version to verify features (DROP COLUMN, RETURNING) availability
 	var sqliteVersion string
-	if err := sqlDB.QueryRow("select sqlite_version()").Scan(&sqliteVersion); err == nil {
+
+	err := sqlDB.QueryRow("select sqlite_version()").Scan(&sqliteVersion)
+	if err == nil {
 		logger.Info("SQLite version detected", zap.String("version", sqliteVersion))
 	} else {
 		logger.Warn("Failed to detect SQLite version", zap.Error(err))
@@ -43,12 +45,16 @@ func runMigrations(sqlDB *sql.DB) error {
 		// simple semver compare: major.minor.patch
 		parse := func(v string) (int, int, int) {
 			var a, b, c int
-			if _, err := fmt.Sscanf(v, "%d.%d.%d", &a, &b, &c); err != nil {
+
+			_, err := fmt.Sscanf(v, "%d.%d.%d", &a, &b, &c)
+			if err != nil {
 				return 0, 0, 0
 			}
+
 			return a, b, c
 		}
 		va, vb, vc := parse(sqliteVersion)
+
 		ma, mb, mc := parse(minSQLiteForDropAndReturning)
 		if va < ma || (va == ma && vb < mb) || (va == ma && vb == mb && vc < mc) {
 			// scan embedded migrations for DROP COLUMN or RETURNING usage
@@ -88,23 +94,31 @@ func runMigrations(sqlDB *sql.DB) error {
 		currentVer := int(versionBefore) //nolint:gosec // migration versions are small and safe for int conversion
 		logger.Warn("Database is in dirty state, forcing migration back",
 			zap.Int("current_version", currentVer))
-		if err := m.Force(currentVer - 1); err != nil {
+
+		err := m.Force(currentVer - 1)
+		if err != nil {
 			return fmt.Errorf("failed to force migration version: %w", err)
 		}
 	}
 
-	if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
+	err = m.Up()
+	if err != nil && !errors.Is(err, migrate.ErrNoChange) {
 		if strings.Contains(err.Error(), "file does not exist") || strings.Contains(err.Error(), "read down for version") {
 			forceVer := int(versionBefore) - 1 //nolint:gosec // same as above
 			logger.Warn("Missing migration file detected, forcing version to last known good state",
 				zap.Int("forced_version", forceVer))
-			if forceErr := m.Force(forceVer); forceErr != nil {
+
+			forceErr := m.Force(forceVer)
+			if forceErr != nil {
 				return fmt.Errorf("migration failed: %w; additionally failed to force version: %w", err, forceErr)
 			}
+
 			logger.Info("Database version forced due to missing migration files",
 				zap.Int("forced_version", forceVer))
+
 			return nil
 		}
+
 		return fmt.Errorf("migration failed: %w", err)
 	}
 

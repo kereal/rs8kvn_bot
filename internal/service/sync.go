@@ -23,8 +23,8 @@ type SyncService struct {
 	vpnClients map[uint]vpn.Client
 	nodes      []database.Node
 
-	locksMu    sync.Mutex
-	locks      map[uint]*subscriptionSyncLock
+	locksMu     sync.Mutex
+	locks       map[uint]*subscriptionSyncLock
 	lockTimeout time.Duration
 }
 
@@ -41,10 +41,10 @@ func syncIdentifier(sub *database.Subscription) string {
 // NewSyncService creates a new SyncService.
 func NewSyncService(db interfaces.DatabaseService, vpnClients map[uint]vpn.Client, nodes []database.Node) *SyncService {
 	return &SyncService{
-		db:         db,
-		vpnClients: vpnClients,
-		nodes:      nodes,
-		locks:      make(map[uint]*subscriptionSyncLock),
+		db:          db,
+		vpnClients:  vpnClients,
+		nodes:       nodes,
+		locks:       make(map[uint]*subscriptionSyncLock),
 		lockTimeout: 2 * time.Minute,
 	}
 }
@@ -57,12 +57,15 @@ func NewSyncService(db interfaces.DatabaseService, vpnClients map[uint]vpn.Clien
 // growth over the lifetime of the process.
 func (s *SyncService) lockSubscription(ctx context.Context, subscriptionID uint) (func(), error) {
 	s.locksMu.Lock()
+
 	l, ok := s.locks[subscriptionID]
 	if !ok {
 		l = &subscriptionSyncLock{ch: make(chan struct{}, 1)}
 		l.ch <- struct{}{} // initial token available
+
 		s.locks[subscriptionID] = l
 	}
+
 	l.waiters++
 	s.locksMu.Unlock()
 
@@ -72,6 +75,7 @@ func (s *SyncService) lockSubscription(ctx context.Context, subscriptionID uint)
 			timeout = rem
 		}
 	}
+
 	acquireCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
@@ -79,6 +83,7 @@ func (s *SyncService) lockSubscription(ctx context.Context, subscriptionID uint)
 	case <-l.ch:
 		return func() {
 			l.ch <- struct{}{} // return the token to the next waiter
+
 			s.dropWaiter(l, subscriptionID)
 		}, nil
 	case <-acquireCtx.Done():
@@ -94,6 +99,7 @@ func (s *SyncService) lockSubscription(ctx context.Context, subscriptionID uint)
 // only the actual holder returns the token on unlock.
 func (s *SyncService) dropWaiter(l *subscriptionSyncLock, subscriptionID uint) {
 	s.locksMu.Lock()
+
 	l.waiters--
 	if l.waiters == 0 {
 		delete(s.locks, subscriptionID)
@@ -116,6 +122,7 @@ func (s *SyncService) ReconcilePlanNodes(ctx context.Context, subscriptionID uin
 		return fmt.Errorf("reconcile plan nodes: acquire lock: %w", err)
 	}
 	defer unlock()
+
 	return s.reconcilePlanNodesLocked(ctx, subscriptionID)
 }
 
@@ -151,6 +158,7 @@ func (s *SyncService) reconcilePlanNodesLocked(ctx context.Context, subscription
 	currentPendingAdd := make(map[uint]database.SubscriptionNode)
 	currentPendingRemove := make(map[uint]database.SubscriptionNode)
 	currentPendingUpdate := make(map[uint]database.SubscriptionNode)
+
 	for _, sn := range currentNodes {
 		switch sn.Status {
 		case database.SyncStatusActive:
@@ -168,34 +176,45 @@ func (s *SyncService) reconcilePlanNodesLocked(ctx context.Context, subscription
 		if !target.IsActive {
 			continue
 		}
+
 		if _, exists := currentActive[target.ID]; exists {
 			continue
 		}
+
 		if _, exists := currentPendingAdd[target.ID]; exists {
 			continue
 		}
+
 		if _, exists := currentPendingUpdate[target.ID]; exists {
 			logger.Debug("pending_update node in target plan, leaving as-is",
 				zap.Uint("subscription_id", subscriptionID),
 				zap.Uint("node_id", target.ID))
+
 			continue
 		}
+
 		if pending, ok := currentPendingRemove[target.ID]; ok {
-			if err := s.db.UpdateSubscriptionNodeStatus(ctx, pending.SubscriptionID, pending.NodeID, database.SyncStatusPendingAdd); err != nil {
+			err := s.db.UpdateSubscriptionNodeStatus(ctx, pending.SubscriptionID, pending.NodeID, database.SyncStatusPendingAdd)
+			if err != nil {
 				return fmt.Errorf("reconcile plan nodes: reactivate pending_remove node %d: %w", target.ID, err)
 			}
+
 			logger.Debug("reactivated pending_remove to pending_add",
 				zap.Uint("subscription_id", subscriptionID),
 				zap.Uint("node_id", target.ID))
+
 			continue
 		}
-		if err := s.db.UpsertSubscriptionNode(ctx, &database.SubscriptionNode{
+
+		err := s.db.UpsertSubscriptionNode(ctx, &database.SubscriptionNode{
 			SubscriptionID: subscriptionID,
 			NodeID:         target.ID,
 			Status:         database.SyncStatusPendingAdd,
-		}); err != nil {
+		})
+		if err != nil {
 			return fmt.Errorf("reconcile plan nodes: upsert pending_add node %d: %w", target.ID, err)
 		}
+
 		logger.Debug("created pending_add node",
 			zap.Uint("subscription_id", subscriptionID),
 			zap.Uint("node_id", target.ID))
@@ -205,9 +224,12 @@ func (s *SyncService) reconcilePlanNodesLocked(ctx context.Context, subscription
 		if _, inTarget := targetSet[nodeID]; inTarget {
 			continue
 		}
-		if err := s.db.UpdateSubscriptionNodeStatus(ctx, sn.SubscriptionID, sn.NodeID, database.SyncStatusPendingRemove); err != nil {
+
+		err := s.db.UpdateSubscriptionNodeStatus(ctx, sn.SubscriptionID, sn.NodeID, database.SyncStatusPendingRemove)
+		if err != nil {
 			return fmt.Errorf("reconcile plan nodes: set pending_remove node %d: %w", nodeID, err)
 		}
+
 		logger.Debug("set pending_remove for active node not in target",
 			zap.Uint("subscription_id", subscriptionID),
 			zap.Uint("node_id", nodeID))
@@ -217,9 +239,12 @@ func (s *SyncService) reconcilePlanNodesLocked(ctx context.Context, subscription
 		if _, inTarget := targetSet[nodeID]; inTarget {
 			continue
 		}
-		if err := s.db.UpdateSubscriptionNodeStatus(ctx, sn.SubscriptionID, sn.NodeID, database.SyncStatusPendingRemove); err != nil {
+
+		err := s.db.UpdateSubscriptionNodeStatus(ctx, sn.SubscriptionID, sn.NodeID, database.SyncStatusPendingRemove)
+		if err != nil {
 			return fmt.Errorf("reconcile plan nodes: set pending_remove for stale pending_add node %d: %w", nodeID, err)
 		}
+
 		logger.Debug("set pending_remove for stale pending_add node",
 			zap.Uint("subscription_id", subscriptionID),
 			zap.Uint("node_id", nodeID))
@@ -229,9 +254,12 @@ func (s *SyncService) reconcilePlanNodesLocked(ctx context.Context, subscription
 		if _, inTarget := targetSet[nodeID]; inTarget {
 			continue
 		}
-		if err := s.db.UpdateSubscriptionNodeStatus(ctx, sn.SubscriptionID, sn.NodeID, database.SyncStatusPendingRemove); err != nil {
+
+		err := s.db.UpdateSubscriptionNodeStatus(ctx, sn.SubscriptionID, sn.NodeID, database.SyncStatusPendingRemove)
+		if err != nil {
 			return fmt.Errorf("reconcile plan nodes: set pending_remove for stale pending_update node %d: %w", nodeID, err)
 		}
+
 		logger.Debug("set pending_remove for stale pending_update node",
 			zap.Uint("subscription_id", subscriptionID),
 			zap.Uint("node_id", nodeID))
@@ -255,9 +283,11 @@ func (s *SyncService) MarkAllForRemoval(ctx context.Context, subscriptionID uint
 	}
 
 	for _, sn := range nodes {
-		if err := s.db.UpdateSubscriptionNodeStatus(ctx, sn.SubscriptionID, sn.NodeID, database.SyncStatusPendingRemove); err != nil {
+		err := s.db.UpdateSubscriptionNodeStatus(ctx, sn.SubscriptionID, sn.NodeID, database.SyncStatusPendingRemove)
+		if err != nil {
 			return fmt.Errorf("mark all for removal: set pending_remove node %d: %w", sn.NodeID, err)
 		}
+
 		logger.Debug("marked node for removal",
 			zap.Uint("subscription_id", subscriptionID),
 			zap.Uint("node_id", sn.NodeID))
@@ -290,6 +320,7 @@ func (s *SyncService) SyncSubscription(ctx context.Context, subscriptionID uint)
 	if len(pending) == 0 {
 		logger.Debug("sync subscription: no pending nodes",
 			zap.Uint("subscription_id", subscriptionID))
+
 		return nil
 	}
 
@@ -324,8 +355,10 @@ func (s *SyncService) syncNodes(ctx context.Context, sub *database.Subscription,
 				zap.Uint("subscription_id", sub.ID),
 				zap.Uint("node_id", sn.NodeID))
 			s.handleSyncError(ctx, &sn, fmt.Errorf("node not found in runtime clients"))
+
 			continue
 		}
+
 		switch nodeType {
 		case database.NodeType3xUI, database.NodeTypeProxman, database.NodeTypeFetch:
 		default:
@@ -334,6 +367,7 @@ func (s *SyncService) syncNodes(ctx context.Context, sub *database.Subscription,
 				zap.Uint("node_id", sn.NodeID),
 				zap.String("node_type", string(nodeType)))
 			s.handleSyncError(ctx, &sn, fmt.Errorf("unsupported node type %s", nodeType))
+
 			continue
 		}
 
@@ -342,10 +376,13 @@ func (s *SyncService) syncNodes(ctx context.Context, sub *database.Subscription,
 			logger.Debug("processing pending_add",
 				zap.Uint("subscription_id", sub.ID),
 				zap.Uint("node_id", sn.NodeID))
-			if err := s.processPendingAdd(ctx, &sn, sub); err != nil {
+
+			err := s.processPendingAdd(ctx, &sn, sub)
+			if err != nil {
 				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 					return err
 				}
+
 				logger.Warn("pending_add failed",
 					zap.Uint("subscription_id", sub.ID),
 					zap.Uint("node_id", sn.NodeID),
@@ -355,10 +392,13 @@ func (s *SyncService) syncNodes(ctx context.Context, sub *database.Subscription,
 			logger.Debug("processing pending_remove",
 				zap.Uint("subscription_id", sub.ID),
 				zap.Uint("node_id", sn.NodeID))
-			if err := s.processPendingRemove(ctx, &sn, sub); err != nil {
+
+			err := s.processPendingRemove(ctx, &sn, sub)
+			if err != nil {
 				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 					return err
 				}
+
 				logger.Warn("pending_remove failed",
 					zap.Uint("subscription_id", sub.ID),
 					zap.Uint("node_id", sn.NodeID),
@@ -368,10 +408,13 @@ func (s *SyncService) syncNodes(ctx context.Context, sub *database.Subscription,
 			logger.Debug("processing pending_update",
 				zap.Uint("subscription_id", sub.ID),
 				zap.Uint("node_id", sn.NodeID))
-			if err := s.processPendingUpdate(ctx, &sn, sub); err != nil {
+
+			err := s.processPendingUpdate(ctx, &sn, sub)
+			if err != nil {
 				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 					return err
 				}
+
 				logger.Warn("pending_update failed",
 					zap.Uint("subscription_id", sub.ID),
 					zap.Uint("node_id", sn.NodeID),
@@ -393,6 +436,7 @@ func (s *SyncService) retryUnavailableNode(ctx context.Context, sn *database.Sub
 			zap.Uint("node_id", sn.NodeID),
 			zap.Error(err))
 		s.handleSyncError(ctx, sn, err)
+
 		return err
 	}
 
@@ -406,11 +450,13 @@ func (s *SyncService) retryUnavailableNode(ctx context.Context, sn *database.Sub
 			zap.String("node_type", string(node.Type)),
 			zap.Error(err))
 		s.handleSyncError(ctx, sn, err)
+
 		return err
 	}
 
 	err := fmt.Errorf("%s node %d unavailable: no VPN client", operation, sn.NodeID)
 	s.handleSyncError(ctx, sn, err)
+
 	return err
 }
 
@@ -440,6 +486,7 @@ func (s *SyncService) processPendingUpdate(ctx context.Context, sn *database.Sub
 		} else {
 			provision.ResetDays = -1
 		}
+
 		if sub.ExpiresAt != nil {
 			provision.ExpiryTime = *sub.ExpiresAt
 		} else {
@@ -451,17 +498,21 @@ func (s *SyncService) processPendingUpdate(ctx context.Context, sn *database.Sub
 		zap.Uint("subscription_id", sub.ID),
 		zap.Uint("node_id", sn.NodeID))
 
-	if err := client.UpdateSubscription(ctx, provision); err != nil {
+	err = client.UpdateSubscription(ctx, provision)
+	if err != nil {
 		s.handleSyncError(ctx, sn, err)
 		return fmt.Errorf("update VPN subscription node %d: %w", sn.NodeID, err)
 	}
 
-	if err := s.db.UpdateSubscriptionNodeStatus(ctx, sn.SubscriptionID, sn.NodeID, database.SyncStatusActive); err != nil {
+	err = s.db.UpdateSubscriptionNodeStatus(ctx, sn.SubscriptionID, sn.NodeID, database.SyncStatusActive)
+	if err != nil {
 		return fmt.Errorf("mark active: %w", err)
 	}
+
 	logger.Debug("subscription updated and marked active",
 		zap.Uint("subscription_id", sub.ID),
 		zap.Uint("node_id", sn.NodeID))
+
 	return nil
 }
 
@@ -493,6 +544,7 @@ func (s *SyncService) processPendingAdd(ctx context.Context, sn *database.Subscr
 		} else {
 			provision.ResetDays = -1
 		}
+
 		if sub.ExpiresAt != nil {
 			provision.ExpiryTime = *sub.ExpiresAt
 		} else {
@@ -504,30 +556,41 @@ func (s *SyncService) processPendingAdd(ctx context.Context, sn *database.Subscr
 		zap.Uint("subscription_id", sub.ID),
 		zap.Uint("node_id", sn.NodeID))
 
-	if err := client.CreateSubscription(ctx, provision); err != nil {
+	err = client.CreateSubscription(ctx, provision)
+	if err != nil {
 		if errors.Is(err, vpn.ErrSubscriptionAlreadyExists) {
-			if updateErr := client.UpdateSubscription(ctx, provision); updateErr != nil {
+			updateErr := client.UpdateSubscription(ctx, provision)
+			if updateErr != nil {
 				s.handleSyncError(ctx, sn, updateErr)
 				return fmt.Errorf("update existing VPN subscription node %d: %w", sn.NodeID, updateErr)
 			}
+
 			logger.Info("client already exists on node, configuration updated/synchronized",
 				zap.Uint("subscription_id", sub.ID),
 				zap.Uint("node_id", sn.NodeID))
-			if err := s.db.UpdateSubscriptionNodeStatus(ctx, sn.SubscriptionID, sn.NodeID, database.SyncStatusActive); err != nil {
+
+			err := s.db.UpdateSubscriptionNodeStatus(ctx, sn.SubscriptionID, sn.NodeID, database.SyncStatusActive)
+			if err != nil {
 				return fmt.Errorf("mark active: %w", err)
 			}
+
 			return nil
 		}
+
 		s.handleSyncError(ctx, sn, err)
+
 		return err
 	}
 
-	if err := s.db.UpdateSubscriptionNodeStatus(ctx, sn.SubscriptionID, sn.NodeID, database.SyncStatusActive); err != nil {
+	err = s.db.UpdateSubscriptionNodeStatus(ctx, sn.SubscriptionID, sn.NodeID, database.SyncStatusActive)
+	if err != nil {
 		return fmt.Errorf("mark active: %w", err)
 	}
+
 	logger.Debug("subscription created and marked active",
 		zap.Uint("subscription_id", sub.ID),
 		zap.Uint("node_id", sn.NodeID))
+
 	return nil
 }
 
@@ -549,17 +612,23 @@ func (s *SyncService) processPendingRemove(ctx context.Context, sn *database.Sub
 		zap.Uint("subscription_id", sub.ID),
 		zap.Uint("node_id", sn.NodeID))
 
-	if err := client.DeleteSubscription(ctx, provision); err != nil {
+	err := client.DeleteSubscription(ctx, provision)
+	if err != nil {
 		if errors.Is(err, vpn.ErrSubscriptionNotFound) {
 			logger.Info("client not found on node, treating as success",
 				zap.Uint("subscription_id", sub.ID),
 				zap.Uint("node_id", sn.NodeID))
-			if err := s.db.DeleteSubscriptionNode(ctx, sn.SubscriptionID, sn.NodeID); err != nil {
+
+			err := s.db.DeleteSubscriptionNode(ctx, sn.SubscriptionID, sn.NodeID)
+			if err != nil {
 				return fmt.Errorf("delete subscription node: %w", err)
 			}
+
 			return nil
 		}
+
 		s.handleSyncError(ctx, sn, err)
+
 		return err
 	}
 
@@ -567,9 +636,11 @@ func (s *SyncService) processPendingRemove(ctx context.Context, sn *database.Sub
 		zap.Uint("subscription_id", sub.ID),
 		zap.Uint("node_id", sn.NodeID))
 
-	if err := s.db.DeleteSubscriptionNode(ctx, sn.SubscriptionID, sn.NodeID); err != nil {
+	err = s.db.DeleteSubscriptionNode(ctx, sn.SubscriptionID, sn.NodeID)
+	if err != nil {
 		return fmt.Errorf("delete subscription node: %w", err)
 	}
+
 	return nil
 }
 
@@ -587,7 +658,8 @@ func (s *SyncService) handleSyncError(ctx context.Context, sn *database.Subscrip
 	errMsg := err.Error()
 	sn.LastError = &errMsg
 
-	if dbErr := s.db.UpdateRetry(ctx, sn.SubscriptionID, sn.NodeID, sn.RetryCount, sn.RetryAt, sn.LastError); dbErr != nil {
+	dbErr := s.db.UpdateRetry(ctx, sn.SubscriptionID, sn.NodeID, sn.RetryCount, sn.RetryAt, sn.LastError)
+	if dbErr != nil {
 		logger.Warn("failed to update retry metadata",
 			zap.Uint("subscription_id", sn.SubscriptionID),
 			zap.Uint("node_id", sn.NodeID),
@@ -615,6 +687,7 @@ func CalculateRetryAt(retryCount int) time.Time {
 	if idx >= len(retryBackoffIntervals) {
 		idx = len(retryBackoffIntervals) - 1
 	}
+
 	return time.Now().UTC().Truncate(time.Minute).Add(retryBackoffIntervals[idx])
 }
 
@@ -643,6 +716,7 @@ func (s *SyncService) SyncPendingNodes(ctx context.Context) error {
 		zap.Int("subscriptions_count", len(groups)))
 
 	var errs []error
+
 	for subID := range groups {
 		unlock, err := s.lockSubscription(ctx, subID)
 		if err != nil {
@@ -650,16 +724,19 @@ func (s *SyncService) SyncPendingNodes(ctx context.Context) error {
 			logger.Warn("sync pending nodes: failed to acquire lock",
 				zap.Uint("subscription_id", subID),
 				zap.Error(err))
+
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				break
 			}
+
 			continue
 		}
 
 		sub, subErr := s.db.GetByID(ctx, subID)
 		if subErr != nil {
 			if errors.Is(subErr, database.ErrSubscriptionNotFound) || errors.Is(subErr, gorm.ErrRecordNotFound) {
-				if clErr := s.db.DeleteSubscriptionNodesBySubscriptionID(ctx, subID); clErr != nil {
+				clErr := s.db.DeleteSubscriptionNodesBySubscriptionID(ctx, subID)
+				if clErr != nil {
 					logger.Warn("purge orphan subscription nodes failed",
 						zap.Uint("subscription_id", subID),
 						zap.Error(clErr))
@@ -668,12 +745,14 @@ func (s *SyncService) SyncPendingNodes(ctx context.Context) error {
 						zap.Uint("subscription_id", subID))
 				}
 			}
+
 			err := fmt.Errorf("sync pending nodes: load subscription %d: %w", subID, subErr)
 			errs = append(errs, err)
 			logger.Warn("sync subscription failed",
 				zap.Uint("subscription_id", subID),
 				zap.Error(err))
 			unlock()
+
 			continue
 		}
 
@@ -688,12 +767,15 @@ func (s *SyncService) SyncPendingNodes(ctx context.Context) error {
 				zap.Uint("subscription_id", subID),
 				zap.Error(err))
 			unlock()
+
 			continue
 		}
+
 		if len(freshNodes) == 0 {
 			logger.Debug("sync pending nodes: no pending after lock (already processed)",
 				zap.Uint("subscription_id", subID))
 			unlock()
+
 			continue
 		}
 
@@ -701,7 +783,8 @@ func (s *SyncService) SyncPendingNodes(ctx context.Context) error {
 			zap.Uint("subscription_id", subID),
 			zap.Int("pending_nodes", len(freshNodes)))
 
-		if err := s.syncNodes(ctx, sub, freshNodes); err != nil {
+		err = s.syncNodes(ctx, sub, freshNodes)
+		if err != nil {
 			logger.Warn("sync subscription failed",
 				zap.Uint("subscription_id", sub.ID),
 				zap.Int("pending_nodes", len(freshNodes)),
@@ -710,18 +793,22 @@ func (s *SyncService) SyncPendingNodes(ctx context.Context) error {
 		}
 
 		// Use locked variant — we already hold the subscription lock.
-		if pruneErr := s.reconcilePlanNodesLocked(ctx, sub.ID); pruneErr != nil {
+		pruneErr := s.reconcilePlanNodesLocked(ctx, sub.ID)
+		if pruneErr != nil {
 			logger.Warn("reconcile plan nodes failed",
 				zap.Uint("subscription_id", sub.ID),
 				zap.Error(pruneErr))
 			errs = append(errs, pruneErr)
 		}
+
 		unlock()
 	}
 
-	if err := ctx.Err(); err != nil {
+	err = ctx.Err()
+	if err != nil {
 		return err
 	}
+
 	if len(errs) > 0 {
 		return errors.Join(errs...)
 	}
@@ -744,17 +831,20 @@ func (s *SyncService) ApplyPlanToSubscription(ctx context.Context, subscriptionI
 	}
 
 	var newNodeIDs []uint
+
 	for _, n := range newNodes {
 		if n.IsActive {
 			newNodeIDs = append(newNodeIDs, n.ID)
 		}
 	}
 
-	if err := s.db.MarkActiveNodesPendingUpdate(ctx, subscriptionID, newNodeIDs); err != nil {
+	err = s.db.MarkActiveNodesPendingUpdate(ctx, subscriptionID, newNodeIDs)
+	if err != nil {
 		return fmt.Errorf("apply plan to subscription %d: mark active nodes pending update: %w", subscriptionID, err)
 	}
 
-	if err := s.ReconcilePlanNodes(ctx, subscriptionID); err != nil {
+	err = s.ReconcilePlanNodes(ctx, subscriptionID)
+	if err != nil {
 		return fmt.Errorf("apply plan to subscription %d: reconcile plan nodes: %w", subscriptionID, err)
 	}
 

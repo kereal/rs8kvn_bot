@@ -31,18 +31,21 @@ type mockVPNClient struct {
 func (m *mockVPNClient) CreateSubscription(ctx context.Context, provision vpn.SubscriptionProvision) error {
 	m.createCalled = true
 	m.createProvision = provision
+
 	return m.createError
 }
 
 func (m *mockVPNClient) UpdateSubscription(ctx context.Context, provision vpn.SubscriptionProvision) error {
 	m.updateCalled = true
 	m.updateProvision = provision
+
 	return m.updateError
 }
 
 func (m *mockVPNClient) DeleteSubscription(ctx context.Context, provision vpn.SubscriptionProvision) error {
 	m.deleteCalled = true
 	m.deleteProvision = provision
+
 	return m.deleteError
 }
 
@@ -52,10 +55,12 @@ func (m *mockVPNClient) Close() error {
 
 func newTestSyncService(t *testing.T, db interfaces.DatabaseService, nodes []database.Node) *SyncService {
 	t.Helper()
+
 	vpnClients := make(map[uint]vpn.Client)
 	for _, n := range nodes {
 		vpnClients[n.ID] = &mockVPNClient{}
 	}
+
 	return NewSyncService(db, vpnClients, nodes)
 }
 
@@ -64,6 +69,7 @@ func TestSyncService_ReconcilePlanNodes_AddMissing(t *testing.T) {
 
 	db, err := testutil.NewTestDatabaseService(t)
 	require.NoError(t, err)
+
 	ctx := context.Background()
 
 	plan := &database.Plan{Name: "test-plan-recalc", DevicesLimit: 1, TrafficLimit: 1024}
@@ -72,6 +78,7 @@ func TestSyncService_ReconcilePlanNodes_AddMissing(t *testing.T) {
 	node1 := &database.Node{Name: "rec-node-1", IsActive: true, Host: "http://r1", APIToken: "t1", InboundIDs: `[1]`}
 	node2 := &database.Node{Name: "rec-node-2", IsActive: true, Host: "http://r2", APIToken: "t2", InboundIDs: `[1]`}
 	node3 := &database.Node{Name: "rec-node-3", IsActive: false, Host: "http://r3", APIToken: "t3", InboundIDs: `[1]`}
+
 	require.NoError(t, db.GetDB().WithContext(ctx).Create(node1).Error)
 	require.NoError(t, db.GetDB().WithContext(ctx).Create(node2).Error)
 	require.NoError(t, db.GetDB().WithContext(ctx).Create(node3).Error)
@@ -103,6 +110,7 @@ func TestSyncService_ReconcilePlanNodes_AddMissing(t *testing.T) {
 	for _, r := range rows {
 		statusMap[r.NodeID] = r.Status
 	}
+
 	assert.Equal(t, database.SyncStatusActive, statusMap[node1.ID])
 	assert.Equal(t, database.SyncStatusPendingAdd, statusMap[node2.ID])
 	assert.Empty(t, statusMap[node3.ID])
@@ -113,6 +121,7 @@ func TestSyncService_ReconcilePlanNodes_RemoveExtra(t *testing.T) {
 
 	db, err := testutil.NewTestDatabaseService(t)
 	require.NoError(t, err)
+
 	ctx := context.Background()
 
 	plan := &database.Plan{Name: "test-plan-recalc-rm", DevicesLimit: 1, TrafficLimit: 1024}
@@ -120,6 +129,7 @@ func TestSyncService_ReconcilePlanNodes_RemoveExtra(t *testing.T) {
 
 	node1 := &database.Node{Name: "recrm-1", IsActive: true, Host: "http://rr1", APIToken: "t1", InboundIDs: `[1]`}
 	node2 := &database.Node{Name: "recrm-2", IsActive: false, Host: "http://rr2", APIToken: "t2", InboundIDs: `[1]`}
+
 	require.NoError(t, db.GetDB().WithContext(ctx).Create(node1).Error)
 	require.NoError(t, db.GetDB().WithContext(ctx).Create(node2).Error)
 	require.NoError(t, db.GetDB().WithContext(ctx).Create(&database.PlanNode{PlanID: plan.ID, NodeID: node1.ID}).Error)
@@ -148,6 +158,7 @@ func TestSyncService_ReconcilePlanNodes_RemoveExtra(t *testing.T) {
 	for _, row := range rows {
 		statusMap[row.NodeID] = row.Status
 	}
+
 	assert.Equal(t, database.SyncStatusActive, statusMap[node1.ID])
 	assert.Equal(t, database.SyncStatusPendingRemove, statusMap[node2.ID])
 }
@@ -157,6 +168,7 @@ func TestSyncService_ReconcilePlanNodes_KeepExisting(t *testing.T) {
 
 	db, err := testutil.NewTestDatabaseService(t)
 	require.NoError(t, err)
+
 	ctx := context.Background()
 
 	plan := &database.Plan{Name: "test-plan-recalc-keep", DevicesLimit: 1, TrafficLimit: 1024}
@@ -192,6 +204,7 @@ func TestSyncService_SyncNodes_SkipsUnknownNodeType(t *testing.T) {
 
 	db, err := testutil.NewTestDatabaseService(t)
 	require.NoError(t, err)
+
 	ctx := context.Background()
 
 	plan := &database.Plan{Name: "test-plan-unknown-type", DevicesLimit: 1, TrafficLimit: 1024}
@@ -232,6 +245,7 @@ func TestSyncService_SyncNodes_FetchType_PendingAddBecomesActive(t *testing.T) {
 
 	db, err := testutil.NewTestDatabaseService(t)
 	require.NoError(t, err)
+
 	ctx := context.Background()
 
 	plan := &database.Plan{Name: "test-plan-fetch", DevicesLimit: 1, TrafficLimit: 1024}
@@ -271,6 +285,7 @@ func TestSyncService_ReconcilePlanNodes_ReactivatePendingRemove(t *testing.T) {
 
 	db, err := testutil.NewTestDatabaseService(t)
 	require.NoError(t, err)
+
 	ctx := context.Background()
 
 	plan := &database.Plan{Name: "test-plan-recalc-react", DevicesLimit: 1, TrafficLimit: 1024}
@@ -306,6 +321,7 @@ func TestSyncService_ReconcilePlanNodes_RemovesStalePendingAdd(t *testing.T) {
 
 	db, err := testutil.NewTestDatabaseService(t)
 	require.NoError(t, err)
+
 	ctx := context.Background()
 
 	plan := &database.Plan{Name: "test-plan-recalc-stale", DevicesLimit: 1, TrafficLimit: 1024}
@@ -313,6 +329,7 @@ func TestSyncService_ReconcilePlanNodes_RemovesStalePendingAdd(t *testing.T) {
 
 	node1 := &database.Node{Name: "stale-1", IsActive: true, Host: "http://st1", APIToken: "t1", InboundIDs: `[1]`}
 	node2 := &database.Node{Name: "stale-2", IsActive: true, Host: "http://st2", APIToken: "t2", InboundIDs: `[1]`}
+
 	require.NoError(t, db.GetDB().WithContext(ctx).Create(node1).Error)
 	require.NoError(t, db.GetDB().WithContext(ctx).Create(node2).Error)
 	require.NoError(t, db.GetDB().WithContext(ctx).Create(&database.PlanNode{PlanID: plan.ID, NodeID: node1.ID}).Error)
@@ -347,10 +364,12 @@ func TestSyncService_ReconcilePlanNodes_PlanChange_KeepsActiveWhenSamePlan(t *te
 
 	db, err := testutil.NewTestDatabaseService(t)
 	require.NoError(t, err)
+
 	ctx := context.Background()
 
 	planFree := &database.Plan{Name: "test-plan-keep-free", DevicesLimit: 1, TrafficLimit: 1024}
 	planPremium := &database.Plan{Name: "test-plan-keep-premium", DevicesLimit: 1, TrafficLimit: 0}
+
 	require.NoError(t, db.GetDB().WithContext(ctx).Create(planFree).Error)
 	require.NoError(t, db.GetDB().WithContext(ctx).Create(planPremium).Error)
 
@@ -384,6 +403,7 @@ func TestSyncService_SyncSubscription_PendingAdd(t *testing.T) {
 
 	db, err := testutil.NewTestDatabaseService(t)
 	require.NoError(t, err)
+
 	ctx := context.Background()
 
 	plan := &database.Plan{Name: "test-plan-sync-add", DevicesLimit: 1, TrafficLimit: 1024}
@@ -427,6 +447,7 @@ func TestSyncService_SyncSubscription_PendingAdd_UnlimitedPlan(t *testing.T) {
 
 	db, err := testutil.NewTestDatabaseService(t)
 	require.NoError(t, err)
+
 	ctx := context.Background()
 
 	plan := &database.Plan{Name: "test-plan-sync-add-unlimited", DevicesLimit: 1, TrafficLimit: 0}
@@ -469,6 +490,7 @@ func TestSyncService_SyncSubscription_PendingRemove(t *testing.T) {
 
 	db, err := testutil.NewTestDatabaseService(t)
 	require.NoError(t, err)
+
 	ctx := context.Background()
 
 	plan := &database.Plan{Name: "test-plan-sync-rm", DevicesLimit: 1, TrafficLimit: 1024}
@@ -509,6 +531,7 @@ func TestSyncService_SyncSubscription_UsesFallbackXUIIdentifier(t *testing.T) {
 
 	db, err := testutil.NewTestDatabaseService(t)
 	require.NoError(t, err)
+
 	ctx := context.Background()
 
 	plan := &database.Plan{Name: "test-plan-sync-fallback", DevicesLimit: 1, TrafficLimit: 1024}
@@ -542,6 +565,7 @@ func TestSyncService_SyncPendingNodes_ProcessesOnlyDueNodes(t *testing.T) {
 
 	db, err := testutil.NewTestDatabaseService(t)
 	require.NoError(t, err)
+
 	ctx := context.Background()
 
 	plan := &database.Plan{Name: "test-plan-sync-due-only", DevicesLimit: 1, TrafficLimit: 1024}
@@ -549,6 +573,7 @@ func TestSyncService_SyncPendingNodes_ProcessesOnlyDueNodes(t *testing.T) {
 
 	nodeDue := &database.Node{Name: "sync-due-node", IsActive: true, Host: "http://sd1", APIToken: "t1", InboundIDs: `[1]`}
 	nodeLater := &database.Node{Name: "sync-later-node", IsActive: true, Host: "http://sd2", APIToken: "t2", InboundIDs: `[1]`}
+
 	require.NoError(t, db.GetDB().WithContext(ctx).Create(nodeDue).Error)
 	require.NoError(t, db.GetDB().WithContext(ctx).Create(nodeLater).Error)
 	require.NoError(t, db.GetDB().WithContext(ctx).Create(&database.PlanNode{PlanID: plan.ID, NodeID: nodeDue.ID}).Error)
@@ -566,6 +591,7 @@ func TestSyncService_SyncPendingNodes_ProcessesOnlyDueNodes(t *testing.T) {
 	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
 
 	future := time.Now().UTC().Add(10 * time.Minute)
+
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: nodeDue.ID, Status: database.SyncStatusPendingAdd}))
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: nodeLater.ID, Status: database.SyncStatusPendingAdd, RetryAt: &future}))
 
@@ -579,10 +605,12 @@ func TestSyncService_SyncPendingNodes_ProcessesOnlyDueNodes(t *testing.T) {
 
 	rows, err := db.GetBySubscriptionID(ctx, sub.ID)
 	require.NoError(t, err)
+
 	statusByNode := make(map[uint]database.SubscriptionNode)
 	for _, row := range rows {
 		statusByNode[row.NodeID] = row
 	}
+
 	assert.Equal(t, database.SyncStatusActive, statusByNode[nodeDue.ID].Status)
 	assert.Equal(t, database.SyncStatusPendingAdd, statusByNode[nodeLater.ID].Status)
 	assert.NotNil(t, statusByNode[nodeLater.ID].RetryAt)
@@ -593,6 +621,7 @@ func TestSyncService_handleSyncError_IncrementsRetry(t *testing.T) {
 
 	db, err := testutil.NewTestDatabaseService(t)
 	require.NoError(t, err)
+
 	ctx := context.Background()
 
 	plan := &database.Plan{Name: "test-plan-sync-err", DevicesLimit: 1, TrafficLimit: 1024}
@@ -702,6 +731,7 @@ func TestSyncService_SyncSubscription_PendingAdd_AlreadyExists(t *testing.T) {
 
 	db, err := testutil.NewTestDatabaseService(t)
 	require.NoError(t, err)
+
 	ctx := context.Background()
 
 	plan := &database.Plan{Name: "test-plan-sync-add-exists", DevicesLimit: 1, TrafficLimit: 1024}
@@ -741,6 +771,7 @@ func TestSyncService_SyncSubscription_PendingAdd_AlreadyExistsUpdateFails(t *tes
 
 	db, err := testutil.NewTestDatabaseService(t)
 	require.NoError(t, err)
+
 	ctx := context.Background()
 
 	plan := &database.Plan{Name: "test-plan-sync-add-exists-update-fails", DevicesLimit: 1, TrafficLimit: 1024}
@@ -783,6 +814,7 @@ func TestSyncService_SyncSubscription_PendingRemove_NotFound(t *testing.T) {
 
 	db, err := testutil.NewTestDatabaseService(t)
 	require.NoError(t, err)
+
 	ctx := context.Background()
 
 	plan := &database.Plan{Name: "test-plan-sync-rm-notfound", DevicesLimit: 1, TrafficLimit: 1024}
@@ -819,6 +851,7 @@ func TestSyncService_SyncSubscription_PendingAdd_RetryOnOtherError(t *testing.T)
 
 	db, err := testutil.NewTestDatabaseService(t)
 	require.NoError(t, err)
+
 	ctx := context.Background()
 
 	plan := &database.Plan{Name: "test-plan-sync-add-retry", DevicesLimit: 1, TrafficLimit: 1024}
@@ -858,6 +891,7 @@ func TestSyncService_SyncSubscription_PendingAdd_NoVPNClientKeepsPending(t *test
 
 	db, err := testutil.NewTestDatabaseService(t)
 	require.NoError(t, err)
+
 	ctx := context.Background()
 
 	plan := &database.Plan{Name: "test-plan-sync-add-no-vpn-client", DevicesLimit: 1, TrafficLimit: 1024}
@@ -897,6 +931,7 @@ func TestSyncService_SyncSubscription_PendingUpdate_NoVPNClientKeepsPending(t *t
 
 	db, err := testutil.NewTestDatabaseService(t)
 	require.NoError(t, err)
+
 	ctx := context.Background()
 
 	plan := &database.Plan{Name: "test-plan-sync-update-no-vpn-client", DevicesLimit: 1, TrafficLimit: 1024}
@@ -935,6 +970,7 @@ func TestSyncService_SyncSubscription_PendingRemove_NoVPNClientKeepsPending(t *t
 
 	db, err := testutil.NewTestDatabaseService(t)
 	require.NoError(t, err)
+
 	ctx := context.Background()
 
 	plan := &database.Plan{Name: "test-plan-sync-remove-no-vpn-client", DevicesLimit: 1, TrafficLimit: 1024}
@@ -977,11 +1013,13 @@ func TestSyncService_SyncPendingNodes_ContinuesAfterNodeFailure(t *testing.T) {
 
 	planOne := &database.Plan{Name: "test-plan-sync-continue-one", DevicesLimit: 1, TrafficLimit: 1024}
 	planTwo := &database.Plan{Name: "test-plan-sync-continue-two", DevicesLimit: 1, TrafficLimit: 1024}
+
 	require.NoError(t, db.GetDB().WithContext(ctx).Create(planOne).Error)
 	require.NoError(t, db.GetDB().WithContext(ctx).Create(planTwo).Error)
 
 	nodeOne := &database.Node{Name: "sync-continue-one", Type: database.NodeType3xUI, IsActive: true, Host: "http://one", APIToken: "one", InboundIDs: `[1]`}
 	nodeTwo := &database.Node{Name: "sync-continue-two", Type: database.NodeType3xUI, IsActive: true, Host: "http://two", APIToken: "two", InboundIDs: `[1]`}
+
 	require.NoError(t, db.GetDB().WithContext(ctx).Create(nodeOne).Error)
 	require.NoError(t, db.GetDB().WithContext(ctx).Create(nodeTwo).Error)
 	require.NoError(t, db.GetDB().WithContext(ctx).Create(&database.PlanNode{PlanID: planOne.ID, NodeID: nodeOne.ID}).Error)
@@ -989,6 +1027,7 @@ func TestSyncService_SyncPendingNodes_ContinuesAfterNodeFailure(t *testing.T) {
 
 	subOne := &database.Subscription{TelegramID: 9101, Username: "sync-continue-one", ClientID: "client-one", SubscriptionID: "sub-one", Status: "active", PlanID: planOne.ID, ExpiresAt: testutil.PtrTime(time.Now().Add(24 * time.Hour))}
 	subTwo := &database.Subscription{TelegramID: 9102, Username: "sync-continue-two", ClientID: "client-two", SubscriptionID: "sub-two", Status: "active", PlanID: planTwo.ID, ExpiresAt: testutil.PtrTime(time.Now().Add(24 * time.Hour))}
+
 	require.NoError(t, db.CreateSubscription(ctx, subOne, ""))
 	require.NoError(t, db.CreateSubscription(ctx, subTwo, ""))
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: subOne.ID, NodeID: nodeOne.ID, Status: database.SyncStatusPendingAdd}))
@@ -1052,6 +1091,7 @@ func TestSyncService_SyncPendingNodes_JoinsErrors(t *testing.T) {
 				{SubscriptionID: 10, NodeID: 1, Status: database.SyncStatusPendingAdd},
 			}, nil
 		}
+
 		return []database.SubscriptionNode{}, nil
 	}
 	db.GetBySubscriptionIDFunc = func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
@@ -1078,6 +1118,7 @@ func TestSyncService_lockSubscription_Timeout(t *testing.T) {
 	holdCtx := context.Background()
 	release, err := svc.lockSubscription(holdCtx, 42)
 	require.NoError(t, err)
+
 	defer release()
 
 	// A waiter must not block forever when the holder hangs.

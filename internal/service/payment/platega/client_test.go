@@ -82,6 +82,7 @@ func TestParseExpiresIn(t *testing.T) {
 				require.Error(t, err)
 				return
 			}
+
 			require.NoError(t, err)
 			require.Equal(t, tt.want, got)
 		})
@@ -93,6 +94,7 @@ func TestCreateTransactionRejectsProviderErrors(t *testing.T) {
 		t.Run(http.StatusText(status), func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Error(w, "failure", status) }))
 			defer server.Close()
+
 			_, err := New(Config{BaseURL: server.URL}).CreateTransaction(context.Background(), CreateTransactionRequest{AmountCents: 100, Currency: "RUB"})
 			require.Error(t, err)
 		})

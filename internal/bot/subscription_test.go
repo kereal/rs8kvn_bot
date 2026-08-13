@@ -125,6 +125,7 @@ func TestCreateSubscription_Success(t *testing.T) {
 		assert.Equal(t, int64(123456), sub.TelegramID)
 		assert.Equal(t, "testuser", sub.Username)
 		sub.ID = 1
+
 		return nil
 	}
 	mockDB.GetNodesByPlanIDFunc = func(ctx context.Context, planID uint) ([]database.Node, error) {
@@ -311,10 +312,13 @@ func TestCreateSubscription_CacheUpdate(t *testing.T) {
 	mockDB.GetPlanByNameFunc = func(ctx context.Context, name string) (*database.Plan, error) {
 		return &database.Plan{ID: 1, Name: database.FreePlanName, TrafficLimit: 1073741824}, nil
 	}
+
 	var savedSub *database.Subscription
+
 	mockDB.CreateSubscriptionFunc = func(ctx context.Context, sub *database.Subscription, inviteCode string) error {
 		savedSub = sub
 		sub.ID = 1
+
 		return nil
 	}
 	mockDB.GetNodesByPlanIDFunc = func(ctx context.Context, planID uint) ([]database.Node, error) {
@@ -1050,6 +1054,7 @@ func TestHandleBackToSubscription(t *testing.T) {
 	mockBot := testutil.NewBotAPI()
 	xuiClients := map[uint]interfaces.XUIClient{1: testutil.NewXUIClient()}
 	nodes := []database.Node{{ID: 1, IsActive: true, Host: "https://p", APIToken: "t", InboundIDs: "[1]"}}
+
 	require.NoError(t, mockDB.CreateSubscription(context.Background(), &database.Subscription{
 		TelegramID: 123456, Username: "testuser", ClientID: "c", SubscriptionID: "s", Status: "active",
 	}, ""))
@@ -1289,8 +1294,11 @@ func TestCreateSubscription_WithPendingInvite(t *testing.T) {
 
 	// Simulate production DB behavior: resolve invite → set InviteCode + ReferredBy.
 	// This is what real db.Service.CreateSubscription does inside the tx.
-	var savedSub *database.Subscription
-	var gotInviteCode string
+	var (
+		savedSub      *database.Subscription
+		gotInviteCode string
+	)
+
 	mockDB.CreateSubscriptionFunc = func(ctx context.Context, sub *database.Subscription, inviteCode string) error {
 		gotInviteCode = inviteCode
 		if inviteCode == "ABC123" {
@@ -1299,10 +1307,12 @@ func TestCreateSubscription_WithPendingInvite(t *testing.T) {
 			referredBy := int64(999999)
 			sub.ReferredBy = &referredBy
 		}
+
 		sub.ID = 1
 		// Store a value copy so assertions see a stable snapshot.
 		stored := *sub
 		savedSub = &stored
+
 		return nil
 	}
 	mockDB.GetNodesByPlanIDFunc = func(ctx context.Context, planID uint) ([]database.Node, error) {
@@ -1313,6 +1323,7 @@ func TestCreateSubscription_WithPendingInvite(t *testing.T) {
 	}
 
 	inviteCode := "ABC123"
+
 	handler.pendingMu.Lock()
 	handler.pendingInvites[123456] = pendingInvite{
 		code:      inviteCode,
@@ -1363,6 +1374,7 @@ func TestCreateSubscription_WithExpiredPendingInvite(t *testing.T) {
 	}
 
 	var gotInviteCode string = "NON_EMPTY_DEFAULT"
+
 	mockDB.CreateSubscriptionFunc = func(ctx context.Context, sub *database.Subscription, inviteCode string) error {
 		gotInviteCode = inviteCode
 		return nil
@@ -1464,6 +1476,7 @@ func TestHandleBackToSubscription_DeleteFails(t *testing.T) {
 	mockBot.RequestError = errors.New("delete failed")
 	xuiClients := map[uint]interfaces.XUIClient{1: testutil.NewXUIClient()}
 	nodes := []database.Node{{ID: 1, IsActive: true, Host: "https://p", APIToken: "t", InboundIDs: "[1]"}}
+
 	require.NoError(t, mockDB.CreateSubscription(context.Background(), &database.Subscription{
 		TelegramID: 123456, Username: "testuser", ClientID: "c", SubscriptionID: "s", Status: "active",
 	}, ""))

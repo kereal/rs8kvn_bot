@@ -20,8 +20,11 @@ import (
 // newTestSubSvc creates a subserver.Service with a short TTL for tests.
 func newTestSubSvc(t *testing.T) *Service {
 	t.Helper()
+
 	svc := NewService(5 * time.Minute)
+
 	t.Cleanup(func() { svc.Stop() })
+
 	return svc
 }
 
@@ -137,6 +140,7 @@ func TestHandleSubscription_CacheMiss_SubscriptionNotFound(t *testing.T) {
 
 	result, _, _, err := HandleSubscription(ctx, mockDB, svc, "nonexistent", "1.2.3.4", nil)
 	_ = result
+
 	assert.ErrorIs(t, err, ErrSubscriptionNotFound)
 }
 
@@ -182,6 +186,7 @@ func TestHandleSubscription_PlainResponse(t *testing.T) {
 	t.Parallel()
 
 	vlessLink := "vless://uuid@server:443?encryption=none&security=tls&type=tcp&sni=example.com#Plain"
+
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(vlessLink))
@@ -216,7 +221,7 @@ func TestHandleSubscription_PlainResponse(t *testing.T) {
 func TestHandleSubscription_JSONResponse_PureJSON(t *testing.T) {
 	t.Parallel()
 
-	jsonConfig := map[string]interface{}{
+	jsonConfig := map[string]any{
 		"type":       "vless",
 		"address":    "json-server.example.com",
 		"port":       443,
@@ -280,6 +285,7 @@ func TestHandleSubscription_NoNodesWithSubscriptionURL(t *testing.T) {
 
 	result, _, _, err := HandleSubscription(ctx, mockDB, svc, "sub-no-url", "1.2.3.4", nil)
 	_ = result
+
 	assert.ErrorIs(t, err, ErrNoSubscriptionItems)
 }
 
@@ -305,6 +311,7 @@ func TestHandleSubscription_FetchError_SkipsNode(t *testing.T) {
 
 	result, _, _, err := HandleSubscription(ctx, mockDB, svc, "sub-fetch-err", "1.2.3.4", nil)
 	_ = result
+
 	assert.ErrorIs(t, err, ErrNoSubscriptionItems)
 }
 
@@ -351,6 +358,7 @@ func TestHandleSubscription_MultipleNodes_AggregatesResponses(t *testing.T) {
 	// Decode base64 body and check both links are present
 	decoded, decErr := base64.StdEncoding.DecodeString(string(result.Body))
 	require.NoError(t, decErr)
+
 	bodyStr := string(decoded)
 	assert.Contains(t, bodyStr, "vless://uuid1@")
 	assert.Contains(t, bodyStr, "vless://uuid2@")
@@ -383,6 +391,7 @@ func newClashServer() *httptest.Server {
 // Clash-only must be returned as base64-encoded share links, not a JSON array.
 func TestHandleSubscription_ClashOnly_ReturnsBase64Links(t *testing.T) {
 	t.Parallel()
+
 	ts := newClashServer()
 	defer ts.Close()
 
@@ -418,10 +427,12 @@ func TestHandleSubscription_ClashOnly_ReturnsBase64Links(t *testing.T) {
 // Any Clash node mixed with another format forces the base64/link output.
 func TestHandleSubscription_JSONAndClash_ReturnsBase64(t *testing.T) {
 	t.Parallel()
+
 	tsClash := newClashServer()
 	defer tsClash.Close()
 
 	jsonBody := `[{"type":"vless","address":"9.9.9.9","port":443,"uuid":"aaaaaaaa-8c61-4ae7-8c3f-385a6f1e17e4","remark":"J"}]`
+
 	tsJSON := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(jsonBody))
 	}))
@@ -450,6 +461,7 @@ func TestHandleSubscription_JSONAndClash_ReturnsBase64(t *testing.T) {
 
 	decoded, decErr := base64.StdEncoding.DecodeString(string(result.Body))
 	require.NoError(t, decErr)
+
 	bodyStr := string(decoded)
 	assert.Contains(t, bodyStr, "vless://0970324b-8c61-4ae7-8c3f-385a6f1e17e4@46.101.238.160:443")
 	assert.Contains(t, bodyStr, "vless://aaaaaaaa-8c61-4ae7-8c3f-385a6f1e17e4@9.9.9.9:443")
@@ -458,10 +470,12 @@ func TestHandleSubscription_JSONAndClash_ReturnsBase64(t *testing.T) {
 // Base64 + Clash also forces the base64/link output.
 func TestHandleSubscription_Base64AndClash_ReturnsBase64(t *testing.T) {
 	t.Parallel()
+
 	tsClash := newClashServer()
 	defer tsClash.Close()
 
 	link := "trojan://pass@8.8.8.8:443?security=tls#T"
+
 	tsB64 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(base64.StdEncoding.EncodeToString([]byte(link))))
 	}))
@@ -490,6 +504,7 @@ func TestHandleSubscription_Base64AndClash_ReturnsBase64(t *testing.T) {
 
 	decoded, decErr := base64.StdEncoding.DecodeString(string(result.Body))
 	require.NoError(t, decErr)
+
 	bodyStr := string(decoded)
 	assert.Contains(t, bodyStr, "trojan://pass@8.8.8.8:443")
 	assert.Contains(t, bodyStr, "vless://0970324b-8c61-4ae7-8c3f-385a6f1e17e4@46.101.238.160:443")
@@ -503,8 +518,10 @@ func TestHandleSubscription_FetchNode_UsesURLDirectly(t *testing.T) {
 	vlessLink := "vless://uuid@fetch-server:443?encryption=none#FetchNode"
 
 	var requestedPath string
+
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestedPath = r.URL.Path
+
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(vlessLink))
 	}))
@@ -545,7 +562,9 @@ func TestUpdateDevices_NewDevice(t *testing.T) {
 	t.Parallel()
 
 	mockDB := testutil.NewDatabaseService()
+
 	var capturedDevices string
+
 	mockDB.UpdateDevicesFunc = func(ctx context.Context, id uint, devicesJSON string) error {
 		capturedDevices = devicesJSON
 		return nil
@@ -571,7 +590,9 @@ func TestUpdateDevices_NilHeaders_SkipsDevice(t *testing.T) {
 	t.Parallel()
 
 	mockDB := testutil.NewDatabaseService()
+
 	var capturedDevices string
+
 	mockDB.UpdateDevicesFunc = func(ctx context.Context, id uint, devicesJSON string) error {
 		capturedDevices = devicesJSON
 		return nil
@@ -594,7 +615,9 @@ func TestUpdateDevices_ReplacesExistingDevice(t *testing.T) {
 	t.Parallel()
 
 	mockDB := testutil.NewDatabaseService()
+
 	var capturedDevices string
+
 	mockDB.UpdateDevicesFunc = func(ctx context.Context, id uint, devicesJSON string) error {
 		capturedDevices = devicesJSON
 		return nil
@@ -878,6 +901,7 @@ func TestHandleSubscription_CacheHit_UpdatesLastRequest(t *testing.T) {
 	}
 
 	var calledSubID string
+
 	mockDB.UpdateLastRequestFunc = func(ctx context.Context, subscriptionID string) error {
 		calledSubID = subscriptionID
 		return nil
@@ -885,6 +909,7 @@ func TestHandleSubscription_CacheHit_UpdatesLastRequest(t *testing.T) {
 
 	result, _, _, err := HandleSubscription(ctx, mockDB, svc, "sub-lr-hit", "1.2.3.4", nil)
 	_ = result
+
 	require.NoError(t, err)
 	assert.Equal(t, "sub-lr-hit", calledSubID, "UpdateLastRequest must be called on cache hit")
 }
@@ -941,6 +966,7 @@ func TestHandleSubscription_CacheMiss_UpdatesLastRequest(t *testing.T) {
 	mockDB.UpdateIPsFunc = func(ctx context.Context, id uint, ipsJSON string) error { return nil }
 
 	var calledSubID string
+
 	mockDB.UpdateLastRequestFunc = func(ctx context.Context, subscriptionID string) error {
 		calledSubID = subscriptionID
 		return nil
@@ -948,6 +974,7 @@ func TestHandleSubscription_CacheMiss_UpdatesLastRequest(t *testing.T) {
 
 	result, _, _, err := HandleSubscription(ctx, mockDB, svc, "sub-lr-miss", "1.2.3.4", nil)
 	_ = result
+
 	require.NoError(t, err)
 	assert.Equal(t, "sub-lr-miss", calledSubID, "UpdateLastRequest must be called on cache miss")
 }
@@ -959,6 +986,7 @@ func TestUpdateLastRequest_DB(t *testing.T) {
 
 	db, err := testutil.NewTestDatabaseService(t)
 	require.NoError(t, err, "Failed to create test database service")
+
 	ctx := context.Background()
 
 	sub := &database.Subscription{
@@ -972,6 +1000,7 @@ func TestUpdateLastRequest_DB(t *testing.T) {
 	require.Nil(t, sub.LastRequest, "LastRequest must be nil before first request")
 
 	before := time.Now().UTC().Add(-1 * time.Second)
+
 	require.NoError(t, db.UpdateLastRequest(ctx, "sub-lr-integration"), "UpdateLastRequest failed")
 
 	loaded, err := db.GetSubscription(ctx, "sub-lr-integration")
@@ -981,6 +1010,7 @@ func TestUpdateLastRequest_DB(t *testing.T) {
 
 	// Повторный вызов обновляет timestamp (не раньше первого).
 	first := *loaded.LastRequest
+
 	require.NoError(t, db.UpdateLastRequest(ctx, "sub-lr-integration"))
 	loaded2, err := db.GetSubscription(ctx, "sub-lr-integration")
 	require.NoError(t, err)

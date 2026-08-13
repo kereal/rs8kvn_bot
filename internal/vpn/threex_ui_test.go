@@ -57,6 +57,7 @@ func (f *fakeXUIClient) AddClientWithID(ctx context.Context, req xui.ClientReque
 		expiryTime:   req.ExpiryTime,
 		resetDays:    req.ResetDays,
 	}
+
 	return &xui.ClientConfig{ID: req.ClientID, SubID: req.SubID, Email: req.Email}, f.addErr
 }
 
@@ -68,6 +69,7 @@ func (f *fakeXUIClient) UpdateClient(ctx context.Context, req xui.ClientRequest)
 func (f *fakeXUIClient) DeleteClient(ctx context.Context, email string) error {
 	f.deleteCalled = true
 	f.deleteCapture = &capturedDeleteClient{email: email}
+
 	return f.deleteErr
 }
 

@@ -25,10 +25,12 @@ func FilterHeaders(h http.Header) map[string]string {
 		if excluded[lowerKey] {
 			continue
 		}
+
 		if len(values) > 0 {
 			result[lowerKey] = strings.ToLower(values[0])
 		}
 	}
+
 	return result
 }
 
@@ -38,35 +40,42 @@ func ParseUserInfoValue(headers map[string]string, key string) int64 {
 	if headers == nil {
 		return 0
 	}
+
 	userInfo, ok := headers["subscription-userinfo"]
 	if !ok {
 		return 0
 	}
+
 	prefix := key + "="
-	parts := strings.Split(userInfo, ";")
-	for _, part := range parts {
+
+	parts := strings.SplitSeq(userInfo, ";")
+	for part := range parts {
 		part = strings.TrimSpace(part)
-		if strings.HasPrefix(part, prefix) {
-			val := strings.TrimPrefix(part, prefix)
+		if after, ok0 := strings.CutPrefix(part, prefix); ok0 {
+			val := after
+
 			n, err := strconv.ParseInt(val, 10, 64)
 			if err != nil {
 				return 0
 			}
+
 			return n
 		}
 	}
+
 	return 0
 }
 
 // ParseExpireFromUserInfo extracts the "expire=" value from a subscription-userinfo header string.
 func ParseExpireFromUserInfo(userInfo string) string {
-	parts := strings.Split(userInfo, ";")
-	for _, part := range parts {
+	parts := strings.SplitSeq(userInfo, ";")
+	for part := range parts {
 		part = strings.TrimSpace(part)
-		if strings.HasPrefix(part, "expire=") {
-			return strings.TrimPrefix(part, "expire=")
+		if after, ok := strings.CutPrefix(part, "expire="); ok {
+			return after
 		}
 	}
+
 	return ""
 }
 
@@ -81,6 +90,7 @@ func BuildUserInfoHeader(upload, download, total int64, expire string) string {
 	if expire != "" {
 		parts = append(parts, "expire="+expire)
 	}
+
 	return strings.Join(parts, "; ")
 }
 
@@ -104,6 +114,7 @@ func ApplySourceHeaders(target http.Header, source map[string]string) {
 	if source == nil {
 		return
 	}
+
 	for k, v := range source {
 		if !SkipTransportHeader(k) {
 			target.Set(k, v)
@@ -118,11 +129,14 @@ func ApplySourceHeaders(target http.Header, source map[string]string) {
 func ResponseHeaders(sourceHeaders map[string]string, contentType, userInfo string) map[string]string {
 	h := http.Header{}
 	ApplySourceHeaders(h, sourceHeaders)
+
 	out := make(map[string]string, len(h)+2)
 	for k, v := range h {
 		out[k] = v[0]
 	}
+
 	out["content-type"] = contentType
 	out["subscription-userinfo"] = userInfo
+
 	return out
 }

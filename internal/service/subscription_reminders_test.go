@@ -23,6 +23,7 @@ func TestSubscriptionService_SendExpiryReminder_SendsMessageAndMarksBit(t *testi
 
 	db, err := testutil.NewTestDatabaseService(t)
 	require.NoError(t, err)
+
 	ctx := context.Background()
 
 	expiry := time.Now().UTC().Add(72*time.Hour + 10*time.Minute)
@@ -70,6 +71,7 @@ func TestSubscriptionService_SendExpiryReminder_NilBotNoop(t *testing.T) {
 
 	db, err := testutil.NewTestDatabaseService(t)
 	require.NoError(t, err)
+
 	ctx := context.Background()
 
 	expiry := time.Now().UTC().Add(24 * time.Hour)
@@ -135,6 +137,7 @@ func TestSubscriptionService_SendExpiryReminder_HoursOnlyText(t *testing.T) {
 
 	db, err := testutil.NewTestDatabaseService(t)
 	require.NoError(t, err)
+
 	ctx := context.Background()
 	expiry := time.Now().UTC().Add(3 * time.Hour)
 	sub := &database.Subscription{TelegramID: 888, Username: "hour_user", ClientID: "client-hour", SubscriptionID: "sub-hour", Status: "active", PlanID: 1, ExpiresAt: &expiry}
@@ -146,6 +149,7 @@ func TestSubscriptionService_SendExpiryReminder_HoursOnlyText(t *testing.T) {
 
 	err = svc.SendExpiryReminder(ctx, sub, ExpiryReminderWindows()[2])
 	require.NoError(t, err)
+
 	sent := bot.GetAllSentMessages()
 	require.Len(t, sent, 1)
 	assert.Contains(t, sent[0].Text, " ч")

@@ -99,6 +99,7 @@ func TestConfirmOrderPaidCAS_RecalculatesFromCurrentSubscription(t *testing.T) {
 	require.NoError(t, svc.db.Create(plan).Error)
 	product := &Product{PlanID: plan.ID, Name: "1M", DurationDays: 30, PriceCents: 100, Currency: "RUB", IsActive: true}
 	require.NoError(t, svc.db.Create(product).Error)
+
 	currentExpiry := now.Add(10 * 24 * time.Hour)
 	sub := createTestSubscription(t, svc, 1901, "current-expiry", "client-current-expiry")
 	sub.PlanID = plan.ID
@@ -112,6 +113,7 @@ func TestConfirmOrderPaidCAS_RecalculatesFromCurrentSubscription(t *testing.T) {
 	activated, err := svc.ConfirmOrderPaidCAS(ctx, order.ID, now, now, &Subscription{ID: sub.ID, PlanID: plan.ID}, product, nil)
 	require.NoError(t, err)
 	assert.True(t, activated)
+
 	got, err := svc.GetByID(ctx, sub.ID)
 	require.NoError(t, err)
 	require.NotNil(t, got.ExpiresAt)
@@ -126,6 +128,7 @@ func TestConfirmOrderPaidCAS_SwitchesPlanAndStatus(t *testing.T) {
 	// trial plan + paid plan; sub starts on trial with expired status.
 	trialPlan := &Plan{Name: "plan-cas-trial", DevicesLimit: 1, TrafficLimit: 100}
 	require.NoError(t, svc.db.WithContext(ctx).Create(trialPlan).Error)
+
 	paidPlan := &Plan{Name: "plan-cas-premium", DevicesLimit: 2, TrafficLimit: 20000}
 	require.NoError(t, svc.db.WithContext(ctx).Create(paidPlan).Error)
 	product := &Product{PlanID: paidPlan.ID, Name: "1M", DurationDays: 30, PriceCents: 499, Currency: "RUB", IsActive: true}
@@ -148,9 +151,12 @@ func TestConfirmOrderPaidCAS_SwitchesPlanAndStatus(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 
 	var gotPlanID uint
+
 	applyPlan := func(_ context.Context, tx *gorm.DB, subscriptionID uint, planID uint) error {
 		assert.Equal(t, sub.ID, subscriptionID)
+
 		gotPlanID = planID
+
 		return nil
 	}
 

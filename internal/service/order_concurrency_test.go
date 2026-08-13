@@ -31,8 +31,10 @@ func TestConfirmPayment_SameOrderParallelCallbacksActivateOnlyOnce(t *testing.T)
 	order := &database.Order{ID: 31, SubscriptionID: 41, ProductID: 51, Status: database.OrderStatusPending, AmountCents: 2300, Currency: "RUB", ProviderPaymentID: providerID.String()}
 
 	var firstStartedOnce sync.Once
+
 	firstStarted := make(chan struct{})
 	release := make(chan struct{})
+
 	var casCalls atomic.Int32
 
 	mock := &testutil.DatabaseService{
@@ -49,9 +51,12 @@ func TestConfirmPayment_SameOrderParallelCallbacksActivateOnlyOnce(t *testing.T)
 				// second caller queued on the per-order lock will block on lock
 				// acquisition long before reaching this point.
 				<-release
+
 				order.Status = database.OrderStatusPaid
+
 				return true, nil
 			}
+
 			return false, nil
 		},
 		GetPendingBySubscriptionIDFunc: func(context.Context, uint) ([]database.SubscriptionNode, error) {
@@ -61,18 +66,25 @@ func TestConfirmPayment_SameOrderParallelCallbacksActivateOnlyOnce(t *testing.T)
 	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), fakePaymentProvider{}, "", &config.Config{})
 
 	const workers = 4
+
 	type result struct {
 		activated bool
 		err       error
 	}
+
 	results := make([]result, workers)
+
 	var wg sync.WaitGroup
 	wg.Add(workers)
+
 	start := make(chan struct{})
-	for i := 0; i < workers; i++ {
+
+	for i := range workers {
 		go func() {
 			defer wg.Done()
+
 			<-start
+
 			confirmation, err := o.ConfirmPayment(context.Background(), providerID, json.Number("23.00"), "RUB")
 			if confirmation != nil {
 				results[i] = result{activated: confirmation.Activated, err: err}
@@ -81,6 +93,7 @@ func TestConfirmPayment_SameOrderParallelCallbacksActivateOnlyOnce(t *testing.T)
 			}
 		}()
 	}
+
 	close(start)
 
 	// Wait for the first goroutine to enter CAS, then release it. Other
@@ -96,12 +109,15 @@ func TestConfirmPayment_SameOrderParallelCallbacksActivateOnlyOnce(t *testing.T)
 	wg.Wait()
 
 	activated := 0
+
 	for _, r := range results {
 		require.NoError(t, r.err)
+
 		if r.activated {
 			activated++
 		}
 	}
+
 	assert.Equal(t, 1, activated, "exactly one ConfirmPayment caller may transition pending→paid")
 	// After the first goroutine activates the order, every later caller should
 	// take the paid/duplicate early-return path and must NOT reach the CAS.
@@ -136,8 +152,11 @@ func TestConfirmPayment_DifferentOrdersRunInParallel(t *testing.T) {
 	started2 := make(chan struct{})
 	release1 := make(chan struct{})
 	release2 := make(chan struct{})
-	var startOnce1, startOnce2 sync.Once
-	var casCalls atomic.Int32
+
+	var (
+		startOnce1, startOnce2 sync.Once
+		casCalls               atomic.Int32
+	)
 
 	mock := &testutil.DatabaseService{
 		GetOrderByProviderPaymentIDFunc: func(_ context.Context, _ string, id uuid.UUID) (*database.Order, error) {
@@ -145,6 +164,7 @@ func TestConfirmPayment_DifferentOrdersRunInParallel(t *testing.T) {
 			if !ok {
 				return nil, database.ErrOrderNotFound
 			}
+
 			return o, nil
 		},
 		GetProductByIDFunc: func(_ context.Context, id uint) (*database.Product, error) { return productFor(id), nil },
@@ -153,22 +173,30 @@ func TestConfirmPayment_DifferentOrdersRunInParallel(t *testing.T) {
 			if !ok {
 				return nil, database.ErrSubscriptionNotFound
 			}
+
 			return sub, nil
 		},
 		ConfirmOrderPaidCASFunc: func(_ context.Context, orderID uint, _, _ time.Time, _ *database.Subscription, _ *database.Product, _ database.ApplyPlanInTxFn) (bool, error) {
 			casCalls.Add(1)
+
 			if orderID == order1.ID {
 				startOnce1.Do(func() { close(started1) })
 				<-release1
+
 				order1.Status = database.OrderStatusPaid
+
 				return true, nil
 			}
+
 			if orderID == order2.ID {
 				startOnce2.Do(func() { close(started2) })
 				<-release2
+
 				order2.Status = database.OrderStatusPaid
+
 				return true, nil
 			}
+
 			return false, nil
 		},
 		GetPendingBySubscriptionIDFunc: func(context.Context, uint) ([]database.SubscriptionNode, error) {
@@ -179,17 +207,24 @@ func TestConfirmPayment_DifferentOrdersRunInParallel(t *testing.T) {
 
 	var wg sync.WaitGroup
 	wg.Add(2)
+
 	start := make(chan struct{})
+
 	go func() {
 		defer wg.Done()
+
 		<-start
+
 		_, _ = o.ConfirmPayment(context.Background(), firstID, json.Number("23.00"), "RUB")
 	}()
 	go func() {
 		defer wg.Done()
+
 		<-start
+
 		_, _ = o.ConfirmPayment(context.Background(), secondID, json.Number("24.00"), "RUB")
 	}()
+
 	close(start)
 
 	// Both goroutines must enter ConfirmOrderPaidCAS within 1 second; on a global
@@ -199,6 +234,7 @@ func TestConfirmPayment_DifferentOrdersRunInParallel(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("first ConfirmPayment did not reach CAS")
 	}
+
 	select {
 	case <-started2:
 	case <-time.After(time.Second):
@@ -228,6 +264,7 @@ func TestCancelPaymentByProvider_DifferentOrdersRunInParallel(t *testing.T) {
 	started2 := make(chan struct{})
 	release1 := make(chan struct{})
 	release2 := make(chan struct{})
+
 	var startOnce1, startOnce2 sync.Once
 
 	mock := &testutil.DatabaseService{
@@ -236,6 +273,7 @@ func TestCancelPaymentByProvider_DifferentOrdersRunInParallel(t *testing.T) {
 			if !ok {
 				return nil, database.ErrOrderNotFound
 			}
+
 			return o, nil
 		},
 		CancelPaidOrderAndDowngradeCASFunc: func(_ context.Context, _ string, id uuid.UUID, _ time.Time, _ uint, _ database.ChargebackPlanInTxFn) (*database.ChargebackResult, error) {
@@ -243,16 +281,23 @@ func TestCancelPaymentByProvider_DifferentOrdersRunInParallel(t *testing.T) {
 			if id == firstID {
 				startOnce1.Do(func() { close(started1) })
 				<-release1
+
 				o.Status = database.OrderStatusCanceled
+
 				return &database.ChargebackResult{Order: o, WasPaid: true, Transitioned: true, Downgraded: true}, nil
 			}
+
 			if id == secondID {
 				startOnce2.Do(func() { close(started2) })
 				<-release2
+
 				o.Status = database.OrderStatusCanceled
+
 				return &database.ChargebackResult{Order: o, WasPaid: true, Transitioned: true, Downgraded: true}, nil
 			}
+
 			t.Fatalf("unexpected provider id %s", id.String())
+
 			return nil, nil
 		},
 	}
@@ -260,17 +305,24 @@ func TestCancelPaymentByProvider_DifferentOrdersRunInParallel(t *testing.T) {
 
 	var wg sync.WaitGroup
 	wg.Add(2)
+
 	start := make(chan struct{})
+
 	go func() {
 		defer wg.Done()
+
 		<-start
+
 		_, _, _ = o.CancelPaymentByProvider(context.Background(), firstID, "CHARGEBACKED", json.Number("23.00"), "RUB")
 	}()
 	go func() {
 		defer wg.Done()
+
 		<-start
+
 		_, _, _ = o.CancelPaymentByProvider(context.Background(), secondID, "CHARGEBACKED", json.Number("24.00"), "RUB")
 	}()
+
 	close(start)
 
 	select {
@@ -278,6 +330,7 @@ func TestCancelPaymentByProvider_DifferentOrdersRunInParallel(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("first CancelPaymentByProvider did not reach CAS")
 	}
+
 	select {
 	case <-started2:
 	case <-time.After(time.Second):
@@ -299,6 +352,7 @@ type countingPaymentProvider struct {
 
 func (p *countingPaymentProvider) CreateTransaction(context.Context, platega.CreateTransactionRequest) (*platega.CreateTransactionResponse, error) {
 	p.calls.Add(1)
+
 	return &platega.CreateTransactionResponse{
 		TransactionID: "550e8400-e29b-41d4-a716-446655440199",
 		URL:           "https://pay.example",
@@ -368,20 +422,26 @@ func TestRequestPayment_ConcurrentCallersSingleProviderTransaction(t *testing.T)
 	o := NewOrderService(mock, nil, nil, provider, "", &config.Config{})
 
 	const workers = 6
+
 	type outcome struct {
 		info *PaymentInfo
 		err  error
 	}
+
 	results := make([]outcome, workers)
+
 	var wg sync.WaitGroup
 	wg.Add(workers)
-	for i := 0; i < workers; i++ {
+
+	for i := range workers {
 		go func() {
 			defer wg.Done()
+
 			info, _, err := o.RequestPayment(context.Background(), sub.TelegramID, "user", product)
 			results[i] = outcome{info: info, err: err}
 		}()
 	}
+
 	wg.Wait()
 
 	assert.Equal(t, int32(1), provider.calls.Load(),
@@ -391,6 +451,7 @@ func TestRequestPayment_ConcurrentCallersSingleProviderTransaction(t *testing.T)
 
 	successes := 0
 	losers := 0
+
 	for _, r := range results {
 		switch {
 		case r.err == nil && r.info != nil:
@@ -401,6 +462,7 @@ func TestRequestPayment_ConcurrentCallersSingleProviderTransaction(t *testing.T)
 			t.Fatalf("unexpected outcome: info=%+v err=%v", r.info, r.err)
 		}
 	}
+
 	assert.Equal(t, 1, successes,
 		"exactly one goroutine may produce a payment link (the claim winner)")
 	assert.Equal(t, workers-1, losers,
@@ -426,8 +488,10 @@ func TestCancelPaymentByProvider_SameOrderParallelChargebacksTransitionOnce(t *t
 	// how many goroutines reached the repository-level atomic. Both are
 	// observable: the lock-serializes CAS-call counts are >= 1, the
 	// "real" Post-CAS transition count must be exactly 1 in any execution.
-	var lockCASCalls atomic.Int32
-	var transitions atomic.Int32
+	var (
+		lockCASCalls atomic.Int32
+		transitions  atomic.Int32
+	)
 
 	mock := &testutil.DatabaseService{
 		GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
@@ -452,7 +516,9 @@ func TestCancelPaymentByProvider_SameOrderParallelChargebacksTransitionOnce(t *t
 				sub.ProductID = nil
 				sub.PricePaidCents = 0
 				sub.Currency = nil
+
 				transitions.Add(1)
+
 				return &database.ChargebackResult{Order: order, WasPaid: true, Transitioned: true, Downgraded: true}, nil
 			}
 			// Subsequent callers observe that the order was already canceled
@@ -468,22 +534,30 @@ func TestCancelPaymentByProvider_SameOrderParallelChargebacksTransitionOnce(t *t
 	o.SetAdminBot(adminBot)
 
 	const workers = 4
+
 	type outcome struct {
 		wasPaid bool
 		err     error
 	}
+
 	outcomes := make([]outcome, workers)
+
 	var wg sync.WaitGroup
 	wg.Add(workers)
+
 	start := make(chan struct{})
-	for i := 0; i < workers; i++ {
+
+	for i := range workers {
 		go func() {
 			defer wg.Done()
+
 			<-start
+
 			_, wasPaid, err := o.CancelPaymentByProvider(context.Background(), providerID, "CHARGEBACKED", json.Number("69.00"), "RUB")
 			outcomes[i] = outcome{wasPaid: wasPaid, err: err}
 		}()
 	}
+
 	close(start)
 
 	select {
@@ -491,16 +565,20 @@ func TestCancelPaymentByProvider_SameOrderParallelChargebacksTransitionOnce(t *t
 	case <-time.After(2 * time.Second):
 		t.Fatal("first CHARGEBACKED did not reach CAS")
 	}
+
 	close(release)
 	wg.Wait()
 
 	paidReports := 0
+
 	for _, r := range outcomes {
 		require.NoError(t, r.err)
+
 		if r.wasPaid {
 			paidReports++
 		}
 	}
+
 	assert.Equal(t, 1, paidReports, "only the first CHARGEBACKED may report wasPaid=true")
 	// The lock-serialized path may run the CAS again for every goroutine that
 	// reacquires after the first release; the strict invariant is that exactly
@@ -530,8 +608,10 @@ func TestCancelPaymentByProvider_SameOrderParallelPendingCancelsIdempotent(t *te
 	release := make(chan struct{})
 	// lockCASCalls counts every goroutine that reached the atomic, transitions
 	// tracks real pending→canceled actions.
-	var lockCASCalls atomic.Int32
-	var transitions atomic.Int32
+	var (
+		lockCASCalls atomic.Int32
+		transitions  atomic.Int32
+	)
 
 	mock := &testutil.DatabaseService{
 		GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
@@ -542,8 +622,11 @@ func TestCancelPaymentByProvider_SameOrderParallelPendingCancelsIdempotent(t *te
 			if n == 1 {
 				close(started)
 				<-release
+
 				order.Status = database.OrderStatusCanceled
+
 				transitions.Add(1)
+
 				return true, nil
 			}
 			// Subsequent callers observe that the order was already canceled
@@ -556,22 +639,30 @@ func TestCancelPaymentByProvider_SameOrderParallelPendingCancelsIdempotent(t *te
 	o.SetAdminBot(adminBot)
 
 	const workers = 4
+
 	type outcome struct {
 		wasPaid bool
 		err     error
 	}
+
 	outcomes := make([]outcome, workers)
+
 	var wg sync.WaitGroup
 	wg.Add(workers)
+
 	start := make(chan struct{})
-	for i := 0; i < workers; i++ {
+
+	for i := range workers {
 		go func() {
 			defer wg.Done()
+
 			<-start
+
 			_, wasPaid, err := o.CancelPaymentByProvider(context.Background(), providerID, "CANCELED", json.Number("23.00"), "RUB")
 			outcomes[i] = outcome{wasPaid: wasPaid, err: err}
 		}()
 	}
+
 	close(start)
 
 	select {
@@ -579,6 +670,7 @@ func TestCancelPaymentByProvider_SameOrderParallelPendingCancelsIdempotent(t *te
 	case <-time.After(2 * time.Second):
 		t.Fatal("first CANCELED did not reach CAS")
 	}
+
 	close(release)
 	wg.Wait()
 
@@ -586,6 +678,7 @@ func TestCancelPaymentByProvider_SameOrderParallelPendingCancelsIdempotent(t *te
 		require.NoError(t, r.err)
 		assert.False(t, r.wasPaid, "a plain CANCELED must never report wasPaid, even under contention")
 	}
+
 	assert.Equal(t, int32(1), transitions.Load(),
 		"exactly one goroutine may transition pending→canceled")
 	assert.GreaterOrEqual(t, lockCASCalls.Load(), int32(1),
