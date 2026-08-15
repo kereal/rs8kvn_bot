@@ -113,9 +113,12 @@ func TestNavigation_OpenAndBack(t *testing.T) {
 
 		// Legal content is split into separate messages, with Back on the last one.
 		firstLegalMessageID := nextMessageID + 1
+
 		tap(handler, "menu_privacy", 42, cardMsgID)
 		require.True(t, bot.SendCalledSafe(), "opening legal content must send a message")
+
 		lastLegalMessageID := nextMessageID
+
 		require.GreaterOrEqual(t, lastLegalMessageID, firstLegalMessageID)
 
 		tap(handler, "back_to_documents", 42, lastLegalMessageID)
@@ -125,6 +128,7 @@ func TestNavigation_OpenAndBack(t *testing.T) {
 			assert.Contains(t, deleted, id,
 				"back to documents must delete legal message part %d", id)
 		}
+
 		assert.NotContains(t, deleted, cardMsgID,
 			"back to documents must NOT delete the underlying card (id %d)", cardMsgID)
 	})

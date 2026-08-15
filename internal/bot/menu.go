@@ -137,7 +137,10 @@ func (h *Handler) handleBackToDocuments(_ context.Context, chatID int64, _ strin
 	delete(h.documentMessages, messageID)
 	h.documentMessagesMu.Unlock()
 
-	messageIDs := append(precedingIDs, messageID)
+	messageIDs := make([]int, 0, len(precedingIDs)+1)
+	messageIDs = append(messageIDs, precedingIDs...)
+	messageIDs = append(messageIDs, messageID)
+
 	var deleteErr error
 
 	for _, id := range messageIDs {
@@ -146,7 +149,9 @@ func (h *Handler) handleBackToDocuments(_ context.Context, chatID int64, _ strin
 		}
 
 		deleteMsg := tgbotapi.NewDeleteMessage(chatID, id)
-		if _, err := h.bot.Request(deleteMsg); err != nil {
+
+		_, err := h.bot.Request(deleteMsg)
+		if err != nil {
 			deleteErr = errors.Join(deleteErr, fmt.Errorf("message %d: %w", id, err))
 		}
 	}
@@ -180,6 +185,7 @@ func (h *Handler) sendLegalText(ctx context.Context, chatID int64, messageID int
 		msg.DisableWebPagePreview = true
 
 		msg.ReplyMarkup = keyboard
+
 		sent, err := h.bot.Send(msg)
 		if err != nil {
 			logger.Error("Failed to send legal message", zap.Error(err))
@@ -200,6 +206,7 @@ func (h *Handler) sendLegalText(ctx context.Context, chatID int64, messageID int
 		if h.documentMessages == nil {
 			h.documentMessages = make(map[int][]int)
 		}
+
 		h.documentMessages[finalMessageID] = precedingIDs
 		h.documentMessagesMu.Unlock()
 	}
