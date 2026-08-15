@@ -79,8 +79,6 @@ Base URL `https://app.platega.io` — константа клиента, не en
 - при `PAYMENT_ENABLED=true` provider обязан быть `platega`, а merchant ID и secret — непустыми;
 - ошибка должна явно указывать отсутствующие credentials.
 
-Добавить параметры в существующую систему конфигурации и `.env.example`. Удалить `MAIN_MENU_BTN_PRODUCT` и `MainMenuBtnProductID`.
-
 ---
 
 ## 3. База данных и модель Order
@@ -386,7 +384,6 @@ type CallbackPayload struct {
 - `upgrade_premium`;
 - `confirm_upgrade_premium`;
 - `freeUpgradeLabel` и `getFreeUpgradeLabel`;
-- `MainMenuBtnProductID` и `MAIN_MENU_BTN_PRODUCT`;
 - `ActivateProduct`;
 - `RenewSubscription`, если production callers отсутствуют;
 - связанные сообщения и тесты, которые больше не используются.
@@ -747,8 +744,6 @@ freeUpgradeLabel
 getFreeUpgradeLabel
 upgrade_premium
 confirm_upgrade_premium
-MainMenuBtnProductID
-MAIN_MENU_BTN_PRODUCT
 ActivateProduct
 RenewSubscription
 ```
