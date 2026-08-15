@@ -158,6 +158,7 @@ func (s *SyncService) reconcilePlanNodesLocked(ctx context.Context, subscription
 	currentPendingAdd := make(map[uint]database.SubscriptionNode)
 	currentPendingRemove := make(map[uint]database.SubscriptionNode)
 	currentPendingUpdate := make(map[uint]database.SubscriptionNode)
+
 	var errs []error
 
 	recordNodeError := func(operation string, nodeID uint, err error) error {
@@ -214,7 +215,8 @@ func (s *SyncService) reconcilePlanNodesLocked(ctx context.Context, subscription
 		if pending, ok := currentPendingRemove[target.ID]; ok {
 			err := s.db.UpdateSubscriptionNodeStatus(ctx, pending.SubscriptionID, pending.NodeID, database.SyncStatusPendingAdd)
 			if err != nil {
-				if stopErr := recordNodeError("reactivate pending_remove", target.ID, err); stopErr != nil {
+				stopErr := recordNodeError("reactivate pending_remove", target.ID, err)
+				if stopErr != nil {
 					return stopErr
 				}
 
@@ -234,7 +236,8 @@ func (s *SyncService) reconcilePlanNodesLocked(ctx context.Context, subscription
 			Status:         database.SyncStatusPendingAdd,
 		})
 		if err != nil {
-			if stopErr := recordNodeError("upsert pending_add", target.ID, err); stopErr != nil {
+			stopErr := recordNodeError("upsert pending_add", target.ID, err)
+			if stopErr != nil {
 				return stopErr
 			}
 
@@ -253,7 +256,8 @@ func (s *SyncService) reconcilePlanNodesLocked(ctx context.Context, subscription
 
 		err := s.db.UpdateSubscriptionNodeStatus(ctx, sn.SubscriptionID, sn.NodeID, database.SyncStatusPendingRemove)
 		if err != nil {
-			if stopErr := recordNodeError("set pending_remove", nodeID, err); stopErr != nil {
+			stopErr := recordNodeError("set pending_remove", nodeID, err)
+			if stopErr != nil {
 				return stopErr
 			}
 
@@ -272,7 +276,8 @@ func (s *SyncService) reconcilePlanNodesLocked(ctx context.Context, subscription
 
 		err := s.db.UpdateSubscriptionNodeStatus(ctx, sn.SubscriptionID, sn.NodeID, database.SyncStatusPendingRemove)
 		if err != nil {
-			if stopErr := recordNodeError("set pending_remove for stale pending_add", nodeID, err); stopErr != nil {
+			stopErr := recordNodeError("set pending_remove for stale pending_add", nodeID, err)
+			if stopErr != nil {
 				return stopErr
 			}
 
@@ -291,7 +296,8 @@ func (s *SyncService) reconcilePlanNodesLocked(ctx context.Context, subscription
 
 		err := s.db.UpdateSubscriptionNodeStatus(ctx, sn.SubscriptionID, sn.NodeID, database.SyncStatusPendingRemove)
 		if err != nil {
-			if stopErr := recordNodeError("set pending_remove for stale pending_update", nodeID, err); stopErr != nil {
+			stopErr := recordNodeError("set pending_remove for stale pending_update", nodeID, err)
+			if stopErr != nil {
 				return stopErr
 			}
 

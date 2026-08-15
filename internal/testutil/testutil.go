@@ -1129,7 +1129,7 @@ func (m *DatabaseService) ConfirmOrderPaidCAS(ctx context.Context, orderID uint,
 		return false, errors.New("mock ConfirmOrderPaidCAS requires ConfirmOrderPaidCASFunc when applyPlan is set")
 	}
 
-	newExpiry := database.CalculatePaymentExpiry(paidAt, sub, product)
+	newExpiry := database.CalculatePaymentExpiry(activatedAt, sub, product)
 
 	order.Status, order.PaidAt, order.ActivatedAt, order.ExpiresAt = database.OrderStatusPaid, &paidAt, &activatedAt, &newExpiry
 	if sub != nil {
