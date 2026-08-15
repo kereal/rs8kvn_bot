@@ -123,7 +123,6 @@ func TestE2E_ReadyEndpoint(t *testing.T) {
 	require.NoError(t, err)
 
 	defer srv.Stop(context.Background())
-	srv.SetReady(true)
 
 	srv.SetReady(true)
 
