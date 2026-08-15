@@ -87,7 +87,9 @@ func TestOrderService_NotifiesAdminForLateConfirmedPayment(t *testing.T) {
 	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440103")
 	mock := &testutil.DatabaseService{
 		GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
-			return &database.Order{ID: 13, SubscriptionID: 4, ProductID: 8, Status: database.OrderStatusExpired, AmountCents: 2300, Currency: "RUB", ProviderPaymentID: providerID.String()}, nil
+			expiresAt := time.Now().UTC().Add(-6 * time.Minute)
+
+			return &database.Order{ID: 13, SubscriptionID: 4, ProductID: 8, Status: database.OrderStatusExpired, AmountCents: 2300, Currency: "RUB", ProviderPaymentID: providerID.String(), PaymentExpiresAt: &expiresAt}, nil
 		},
 		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
 			return &database.Subscription{ID: 4, TelegramID: 43}, nil
@@ -105,6 +107,54 @@ func TestOrderService_NotifiesAdminForLateConfirmedPayment(t *testing.T) {
 	assert.Contains(t, messages[0].Text, "Late confirmed payment")
 	assert.Contains(t, messages[0].Text, providerID.String())
 	assert.Contains(t, messages[0].Text, "Telegram ID: 43")
+}
+
+func TestOrderService_ActivatesExpiredPaymentWithinSettlementGrace(t *testing.T) {
+	t.Parallel()
+
+	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440107")
+	expiresAt := time.Now().UTC().Add(-4 * time.Minute)
+	order := &database.Order{
+		ID:                17,
+		SubscriptionID:    8,
+		ProductID:         12,
+		Status:            database.OrderStatusExpired,
+		AmountCents:       2300,
+		Currency:          "RUB",
+		ProviderPaymentID: providerID.String(),
+		PaymentExpiresAt:  &expiresAt,
+	}
+	product := &database.Product{ID: 12, PlanID: 2, Name: "Premium", DurationDays: 30, PriceCents: 2300, Currency: "RUB", IsActive: true}
+	sub := &database.Subscription{ID: 8, TelegramID: 44, PlanID: 1, Status: "active"}
+	casCalls := 0
+
+	mock := &testutil.DatabaseService{
+		GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
+			return order, nil
+		},
+		GetProductByIDFunc: func(context.Context, uint) (*database.Product, error) {
+			return product, nil
+		},
+		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
+			return sub, nil
+		},
+		GetPendingBySubscriptionIDFunc: func(context.Context, uint) ([]database.SubscriptionNode, error) {
+			return nil, nil
+		},
+		ConfirmOrderPaidCASFunc: func(context.Context, uint, time.Time, time.Time, *database.Subscription, *database.Product, database.ApplyPlanInTxFn) (bool, error) {
+			casCalls++
+			order.Status = database.OrderStatusPaid
+
+			return true, nil
+		},
+	}
+	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), fakePaymentProvider{}, "", nil)
+
+	confirmation, err := o.ConfirmPayment(context.Background(), providerID, json.Number("23.00"), "RUB")
+	require.NoError(t, err)
+	require.True(t, confirmation.Activated, "a callback arriving four minutes after the provider deadline is inside the settlement grace period")
+	assert.Equal(t, database.OrderStatusPaid, order.Status)
+	assert.Equal(t, 1, casCalls)
 }
 
 func TestOrderService_NotifiesAdminForProviderRejection(t *testing.T) {

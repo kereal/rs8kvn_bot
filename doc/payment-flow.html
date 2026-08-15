@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Payment Flow &amp; Chargeback — rs8kvn_bot</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #070b14;
+      --panel: #111827;
+      --muted: #94a3b8;
+      --text: #f8fafc;
+      --accent: #38bdf8;
+      --success: #34d399;
+      --warning: #fbbf24;
+      --danger: #fb7185;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: radial-gradient(circle at top, #172554 0, var(--bg) 48rem);
+      color: var(--text);
+      font: 16px/1.55 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    main { width: min(1800px, calc(100% - 32px)); margin: 0 auto; padding: 28px 0 56px; }
+    header { margin-bottom: 22px; }
+    h1 { margin: 0 0 6px; font-size: clamp(28px, 4vw, 48px); line-height: 1.1; }
+    header p { color: var(--muted); margin: 0; }
+    .diagram {
+      background: rgba(15, 23, 42, .72);
+      border: 1px solid #263449;
+      border-radius: 18px;
+      padding: 12px;
+      overflow: auto;
+      box-shadow: 0 20px 70px rgba(0, 0, 0, .3);
+    }
+    .diagram img { display: block; width: 1800px; max-width: none; height: auto; }
+    .cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-top: 20px; }
+    .card { background: rgba(17, 24, 39, .9); border: 1px solid #263449; border-radius: 14px; padding: 18px; }
+    .card h2 { margin: 0 0 10px; font-size: 19px; }
+    .card p { margin: 0; color: #cbd5e1; }
+    .card strong { color: var(--text); }
+    .success { border-top: 3px solid var(--success); }
+    .warning { border-top: 3px solid var(--warning); }
+    .danger { border-top: 3px solid var(--danger); }
+    code { color: #bae6fd; background: #0b1220; padding: 2px 5px; border-radius: 5px; }
+    .note { margin-top: 20px; padding: 16px 18px; background: #172033; border-left: 4px solid var(--accent); border-radius: 8px; color: #dbeafe; }
+    ul { margin: 8px 0 0; padding-left: 22px; color: #cbd5e1; }
+    @media (max-width: 900px) {
+      main { width: min(100% - 20px, 1800px); padding-top: 18px; }
+      .cards { grid-template-columns: 1fr; }
+      .diagram { padding: 6px; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Payment Flow &amp; Chargeback</h1>
+      <p>Текущая схема rs8kvn_bot: Platega, payment intent, delayed webhook grace period и atomic subscription sync.</p>
+    </header>
+
+    <section class="diagram" aria-label="Графическая схема Payment Flow">
+      <img src="payment-flow.svg" alt="Схема создания платежа, обработки callback и chargeback">
+    </section>
+
+    <section class="cards">
+      <article class="card success">
+        <h2>Срок ссылки</h2>
+        <p><strong>PaymentExpiresAt</strong> остаётся реальным сроком, который вернул Platega. После его окончания старая ссылка не переиспользуется и не выдаётся пользователю повторно.</p>
+      </article>
+      <article class="card warning">
+        <h2>Grace period</h2>
+        <p>Для уже <code>expired</code> заказа callback <code>CONFIRMED</code> принимается ещё 5 минут. Эти 5 минут относятся только к задержавшемуся webhook и не продлевают payment URL.</p>
+      </article>
+      <article class="card danger">
+        <h2>После grace period</h2>
+        <p>Callback не активирует подписку автоматически. Создаётся operational alert <code>late_confirmed_callback</code>, после чего нужна ручная сверка платежа.</p>
+      </article>
+    </section>
+
+    <section class="note">
+      <strong>Главные гарантии:</strong>
+      <ul>
+        <li>повторный <code>CONFIRMED</code> идемпотентен;</li>
+        <li>сумма и валюта callback сверяются с заказом;</li>
+        <li>DB-подготовка VPN-синхронизации коммитится вместе с оплатой;</li>
+        <li>внешний VPN sync выполняется best-effort и повторяется worker-ом;</li>
+        <li><code>canceled → paid</code> невозможен;</li>
+        <li>chargeback либо переводит подписку на free plan, либо сохраняет доступ при наличии другого действующего paid order.</li>
+      </ul>
+    </section>
+  </main>
+</body>
+</html>

@@ -878,22 +878,39 @@ func (o *OrderService) confirmPayment(ctx context.Context, providerPaymentID uui
 		return &PaymentConfirmation{Order: order}, nil
 	}
 
+	now := time.Now().UTC()
 	if order.Status == database.OrderStatusExpired || order.Status == database.OrderStatusCanceled {
-		logger.Warn("late payment callback ignored", zap.Uint("order_id", order.ID), zap.String("provider_payment_id", providerPaymentID.String()), zap.String("order_status", string(order.Status)))
+		// PaymentExpiresAt is the real provider-link deadline and must stay
+		// unchanged: extending it would make RequestPayment reuse a link that
+		// Platega has already invalidated. The provider can nevertheless deliver
+		// a CONFIRMED webhook several minutes after the customer paid near that
+		// deadline. Therefore an already-expired order receives a five-minute
+		// settlement grace period, measured from the original provider deadline.
+		// This grace affects only acceptance of this callback; it does not extend
+		// the payment link and does not allow a canceled order to be resurrected.
+		withinSettlementGrace := order.Status == database.OrderStatusExpired &&
+			order.PaymentExpiresAt != nil &&
+			!now.After(order.PaymentExpiresAt.Add(5*time.Minute))
 
-		telegramID := int64(0)
+		if !withinSettlementGrace {
+			logger.Warn("late payment callback ignored", zap.Uint("order_id", order.ID), zap.String("provider_payment_id", providerPaymentID.String()), zap.String("order_status", string(order.Status)))
 
-		sub, subErr := o.db.GetByID(ctx, order.SubscriptionID)
-		if subErr == nil && sub != nil {
-			telegramID = sub.TelegramID
+			telegramID := int64(0)
+
+			sub, subErr := o.db.GetByID(ctx, order.SubscriptionID)
+			if subErr == nil && sub != nil {
+				telegramID = sub.TelegramID
+			}
+
+			o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "late_confirmed_callback", Reason: fmt.Sprintf("callback received for order status %s", order.Status), Action: "verify payment and refund or activate manually", OrderID: order.ID, TelegramID: telegramID, ProductID: order.ProductID, SubscriptionID: order.SubscriptionID, AmountCents: order.AmountCents, Currency: order.Currency, ProviderID: providerPaymentID.String(), CallbackStatus: "CONFIRMED"})
+
+			return &PaymentConfirmation{Order: order}, nil
 		}
 
-		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "late_confirmed_callback", Reason: fmt.Sprintf("callback received for order status %s", order.Status), Action: "verify payment and refund or activate manually", OrderID: order.ID, TelegramID: telegramID, ProductID: order.ProductID, SubscriptionID: order.SubscriptionID, AmountCents: order.AmountCents, Currency: order.Currency, ProviderID: providerPaymentID.String(), CallbackStatus: "CONFIRMED"})
-
-		return &PaymentConfirmation{Order: order}, nil
+		logger.Info("accepting expired payment callback inside settlement grace", zap.Uint("order_id", order.ID), zap.String("provider_payment_id", providerPaymentID.String()), zap.Time("provider_link_expires_at", *order.PaymentExpiresAt), zap.Time("settlement_deadline", order.PaymentExpiresAt.Add(5*time.Minute)))
 	}
 
-	if order.Status != database.OrderStatusPending {
+	if order.Status != database.OrderStatusPending && order.Status != database.OrderStatusExpired {
 		return nil, ErrInvalidPaymentTransition
 	}
 
@@ -940,8 +957,6 @@ func (o *OrderService) confirmPayment(ctx context.Context, providerPaymentID uui
 	// A renewal extends an already-paid subscription; a first purchase activates
 	// a free-plan one. Captured before CAS mutates sub in place.
 	isRenewal := sub.PricePaidCents > 0 || sub.ProductID != nil
-	now := time.Now().UTC()
-
 	var applyPlan database.ApplyPlanInTxFn
 	if o.syncSvc != nil {
 		applyPlan = o.syncSvc.ApplyPlanToSubscriptionInTx

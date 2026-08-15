@@ -2,10 +2,14 @@ package database
 
 import (
 	"context"
+	"database/sql"
 	"os"
 	"path/filepath"
 	"testing"
 
+	migrate "github.com/golang-migrate/migrate/v4"
+	"github.com/golang-migrate/migrate/v4/database/sqlite"
+	"github.com/golang-migrate/migrate/v4/source/iofs"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -265,6 +269,48 @@ func TestMigration_ProductsHaveRequiredName(t *testing.T) {
 	require.NotNil(t, nameColumn)
 	assert.Equal(t, "VARCHAR(255)", nameColumn.typeName)
 	assert.Equal(t, 1, nameColumn.notNull)
+}
+
+// TestMigration_032_NormalizesInvalidRetryState verifies that legacy rows which
+// violate the new invariant are normalized while the table is rebuilt.
+func TestMigration_032_NormalizesInvalidRetryState(t *testing.T) {
+	t.Parallel()
+
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	db, err := NewService(dbPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, db.Close()) })
+
+	sqlDB, err := db.db.DB()
+	require.NoError(t, err)
+
+	source, err := iofs.New(migrationFiles, "migrations")
+	require.NoError(t, err)
+	driver, err := sqlite.WithInstance(sqlDB, &sqlite.Config{})
+	require.NoError(t, err)
+	m, err := migrate.NewWithInstance("iofs", source, "sqlite", driver)
+	require.NoError(t, err)
+	t.Cleanup(func() { _, _ = m.Close() })
+
+	// Return to the pre-032 schema, where legacy invalid retry state is still
+	// representable, then insert the row that caused the production risk.
+	require.NoError(t, m.Steps(-1))
+
+	_, err = sqlDB.Exec(`INSERT INTO subscription_nodes
+		(subscription_id, node_id, status, retry_count, retry_at, updated_at)
+		VALUES (1, 1, 'active', 3, NULL, datetime('now'))`)
+	require.NoError(t, err)
+
+	require.NoError(t, m.Steps(1))
+
+	var (
+		retryCount int
+		retryAt    sql.NullString
+	)
+	require.NoError(t, sqlDB.QueryRow(`SELECT retry_count, retry_at
+		FROM subscription_nodes WHERE subscription_id = 1 AND node_id = 1`).Scan(&retryCount, &retryAt))
+	assert.Zero(t, retryCount)
+	assert.False(t, retryAt.Valid)
 }
 
 // TestMigration_032_EnforcesRetryInvariant verifies that the retry invariant
