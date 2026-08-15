@@ -120,6 +120,40 @@ func TestConfirmOrderPaidCAS_RecalculatesFromCurrentSubscription(t *testing.T) {
 	assert.Equal(t, currentExpiry.AddDate(0, 0, 30), *got.ExpiresAt)
 }
 
+func TestConfirmOrderPaidCAS_AcceptsExpiredOrderForSettlementCallback(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	plan := &Plan{Name: "plan-cas-expired-callback", DevicesLimit: 1}
+	require.NoError(t, svc.db.WithContext(ctx).Create(plan).Error)
+	product := &Product{PlanID: plan.ID, Name: "1M", DurationDays: 30, PriceCents: 100, Currency: "RUB", IsActive: true}
+	require.NoError(t, svc.db.WithContext(ctx).Create(product).Error)
+
+	sub := createTestSubscription(t, svc, 902, "expired-callback", "client-expired-callback")
+	sub.PlanID = plan.ID
+	require.NoError(t, svc.db.Save(sub).Error)
+
+	order := &Order{
+		SubscriptionID: sub.ID,
+		ProductID:      product.ID,
+		Status:         OrderStatusExpired,
+		AmountCents:    100,
+		Currency:       "RUB",
+	}
+	require.NoError(t, svc.db.WithContext(ctx).Create(order).Error)
+
+	now := time.Now().UTC().Truncate(time.Second)
+	activated, err := svc.ConfirmOrderPaidCAS(ctx, order.ID, now, now, sub, product, nil)
+	require.NoError(t, err)
+	require.True(t, activated, "the service grace-period check allows an expired order to enter the atomic paid transition")
+
+	stored, err := svc.GetOrderByID(ctx, order.ID)
+	require.NoError(t, err)
+	assert.Equal(t, OrderStatusPaid, stored.Status)
+}
+
 func TestConfirmOrderPaidCAS_SwitchesPlanAndStatus(t *testing.T) {
 	t.Parallel()
 	svc := newTestService(t)
