@@ -1115,7 +1115,7 @@ func (m *DatabaseService) ConfirmOrderPaidCAS(ctx context.Context, orderID uint,
 	defer m.mu.Unlock()
 
 	order, ok := m.Orders[orderID]
-	if !ok || order.Status != database.OrderStatusPending {
+	if !ok || (order.Status != database.OrderStatusPending && order.Status != database.OrderStatusExpired) {
 		return false, nil
 	}
 

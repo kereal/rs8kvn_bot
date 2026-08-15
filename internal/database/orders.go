@@ -207,9 +207,12 @@ type ApplyPlanInTxFn func(ctx context.Context, tx *gorm.DB, subscriptionID uint,
 // ConfirmOrderPaidCAS atomically marks an order paid and updates its subscription.
 // The order and subscription expiry are both computed inside the transaction from
 // the current subscription state, so the caller does not need to pre-calculate
-// (and cannot pass a stale) expiry value. If applyPlan is non-nil and the CAS
-// succeeds, it is called with the same tx used to write the subscription; on
-// error the whole transaction rolls back.
+// (and cannot pass a stale) expiry value. The OrderService may call this method
+// for an expired order when its provider callback is still inside the short
+// settlement grace period; the service validates that time window before
+// entering this transaction. If applyPlan is non-nil and the CAS succeeds, it
+// is called with the same tx used to write the subscription; on error the whole
+// transaction rolls back.
 func (s *Service) ConfirmOrderPaidCAS(ctx context.Context, orderID uint, paidAt, activatedAt time.Time, sub *Subscription, product *Product, applyPlan ApplyPlanInTxFn) (bool, error) {
 	var activated bool
 
@@ -231,7 +234,11 @@ func (s *Service) ConfirmOrderPaidCAS(ctx context.Context, orderID uint, paidAt,
 
 		newExpiry := CalculatePaymentExpiry(activatedAt, &currentSub, product)
 
-		result := tx.Model(&Order{}).Where("id = ? AND status = ?", orderID, OrderStatusPending).Updates(map[string]any{
+		// An expired order is accepted here only for the provider callback grace
+		// path documented above. The service layer checks the grace deadline;
+		// keeping both statuses in the same conditional update preserves the
+		// pending/expired -> paid transition as one atomic compare-and-swap.
+		result := tx.Model(&Order{}).Where("id = ? AND status IN ?", orderID, []OrderStatus{OrderStatusPending, OrderStatusExpired}).Updates(map[string]any{
 			"status":       OrderStatusPaid,
 			"paid_at":      paidAt,
 			"activated_at": activatedAt,
