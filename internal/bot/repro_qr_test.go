@@ -116,6 +116,7 @@ func TestNavigation_OpenAndBack(t *testing.T) {
 
 		tap(handler, "menu_privacy", 42, cardMsgID)
 		require.True(t, bot.SendCalledSafe(), "opening legal content must send a message")
+
 		lastLegalMessageID := nextMessageID
 
 		require.GreaterOrEqual(t, lastLegalMessageID, firstLegalMessageID)
