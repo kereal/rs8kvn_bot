@@ -908,13 +908,14 @@ func TestGetInbound(t *testing.T) {
 func TestGetRequiredFlow_Fallback(t *testing.T) {
 	t.Parallel()
 
-	if testing.Short() {
-		t.Skip("Skipping slow test in short mode")
-	}
-
 	// When getInbound fails, surface the wrapped error instead of guessing a flow.
-	// Use guaranteed-unresolvable host to trigger error path.
-	client, err := NewClient("http://nonexistent.invalid:2053", testAPIToken)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte("upstream error"))
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, testAPIToken)
 	require.NoError(t, err)
 
 	defer client.Close()
