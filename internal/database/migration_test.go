@@ -295,7 +295,6 @@ func TestMigration_032_NormalizesInvalidRetryState(t *testing.T) {
 	// Return to the pre-032 schema, where legacy invalid retry state is still
 	// representable, then insert the row that caused the production risk.
 	require.NoError(t, m.Steps(-1))
-	require.NoError(t, m.Steps(-1))
 
 	_, err = sqlDB.Exec(`INSERT INTO subscription_nodes
 		(subscription_id, node_id, status, retry_count, retry_at, updated_at)
