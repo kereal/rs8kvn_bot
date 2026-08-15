@@ -158,6 +158,7 @@ func (s *SyncService) reconcilePlanNodesLocked(ctx context.Context, subscription
 	currentPendingAdd := make(map[uint]database.SubscriptionNode)
 	currentPendingRemove := make(map[uint]database.SubscriptionNode)
 	currentPendingUpdate := make(map[uint]database.SubscriptionNode)
+
 	var errs []error
 
 	recordNodeError := func(operation string, nodeID uint, err error) error {
