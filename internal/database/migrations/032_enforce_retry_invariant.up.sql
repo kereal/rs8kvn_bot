@@ -33,7 +33,13 @@ CREATE TABLE subscription_nodes_new (
 );
 
 INSERT INTO subscription_nodes_new (subscription_id, node_id, status, retry_count, retry_at, last_error, updated_at)
-SELECT subscription_id, node_id, status, retry_count, retry_at, last_error, updated_at
+SELECT subscription_id,
+       node_id,
+       status,
+       CASE WHEN retry_count > 0 AND retry_at IS NULL THEN 0 ELSE retry_count END,
+       retry_at,
+       last_error,
+       updated_at
 FROM subscription_nodes;
 
 DROP TABLE subscription_nodes;
