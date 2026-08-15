@@ -22,9 +22,11 @@ func init() {
 
 func newTestSubService(t testing.TB, db *database.Service) *service.SubscriptionService {
 	t.Helper()
+
 	cfg := &config.Config{
 		TrialDurationHours: 1,
 	}
+
 	return service.NewSubscriptionService(db, nil, nil, nil, cfg)
 }
 
@@ -103,6 +105,7 @@ func TestTrialCleanupScheduler_RunCleanup_WithExpiredTrials(t *testing.T) {
 	remaining, err := db.GetAllSubscriptions(ctx)
 	require.NoError(t, err)
 	assert.Len(t, remaining, 1, "Only the active trial should remain")
+
 	if len(remaining) > 0 {
 		assert.Equal(t, "active-sub", remaining[0].SubscriptionID)
 	}
@@ -183,6 +186,7 @@ func TestTrialCleanupScheduler_Start_ContextCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	done := make(chan struct{})
+
 	go func() {
 		scheduler.Start(ctx)
 		close(done)

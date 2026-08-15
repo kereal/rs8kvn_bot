@@ -34,6 +34,7 @@ func newSQLiteAtMigration30(t *testing.T) (*sql.DB, func()) {
 	m, err := migrate.NewWithInstance("iofs", source, "sqlite", driver)
 	require.NoError(t, err)
 	require.NoError(t, m.Migrate(30))
+
 	return sqlDB, func() {
 		_, _ = m.Close()
 		_ = sqlDB.Close()
@@ -48,15 +49,21 @@ func TestMigration031_PaymentIntentSchemaOnSQLite(t *testing.T) {
 
 	rows, err := sqlDB.Query("PRAGMA table_info(orders)")
 	require.NoError(t, err)
+
 	defer rows.Close()
+
 	columns := make(map[string]bool)
+
 	for rows.Next() {
-		var cid, notNull, pk int
-		var name, typeName string
-		var defaultValue any
+		var (
+			cid, notNull, pk int
+			name, typeName   string
+			defaultValue     any
+		)
 		require.NoError(t, rows.Scan(&cid, &name, &typeName, &notNull, &defaultValue, &pk))
 		columns[name] = true
 	}
+
 	require.NoError(t, rows.Err())
 	assert.True(t, columns["payment_url"])
 	assert.True(t, columns["payment_expires_at"])
@@ -64,14 +71,20 @@ func TestMigration031_PaymentIntentSchemaOnSQLite(t *testing.T) {
 
 	rows, err = sqlDB.Query("PRAGMA index_list(orders)")
 	require.NoError(t, err)
+
 	defer rows.Close()
+
 	indexes := make(map[string]bool)
+
 	for rows.Next() {
-		var seq, unique, partial int
-		var name, origin string
+		var (
+			seq, unique, partial int
+			name, origin         string
+		)
 		require.NoError(t, rows.Scan(&seq, &name, &unique, &origin, &partial))
 		indexes[name] = unique == 1 && partial == 1
 	}
+
 	require.NoError(t, rows.Err())
 	assert.True(t, indexes["idx_orders_provider_payment_unique"])
 	assert.True(t, indexes["idx_orders_pending_subscription_product_unique"])
@@ -84,6 +97,7 @@ func TestMigration031_DoesNotRequireLegacyPaymentDeduplication(t *testing.T) {
 	// The project policy guarantees no historical payment rows. Verify the
 	// migration succeeds on the empty pre-031 schema and creates both indexes.
 	require.NoError(t, runMigrations(sqlDB))
+
 	var orderCount int
 	require.NoError(t, sqlDB.QueryRow("SELECT COUNT(*) FROM orders").Scan(&orderCount))
 	assert.Zero(t, orderCount)
@@ -134,16 +148,21 @@ func TestMigration031_DownRestoresOriginalProviderIndexOnSQLite(t *testing.T) {
 
 	rows, err := sqlDB.Query("PRAGMA table_info(orders)")
 	require.NoError(t, err)
+
 	defer rows.Close()
+
 	for rows.Next() {
-		var cid, notNull, pk int
-		var name, typeName string
-		var defaultValue any
+		var (
+			cid, notNull, pk int
+			name, typeName   string
+			defaultValue     any
+		)
 		require.NoError(t, rows.Scan(&cid, &name, &typeName, &notNull, &defaultValue, &pk))
 		assert.NotContains(t, name, "payment_url")
 		assert.NotContains(t, name, "payment_expires_at")
 		assert.NotContains(t, name, "payment_creation_uncertain")
 	}
+
 	require.NoError(t, rows.Err())
 
 	var nullProviderIDs, emptyProviderIDs int

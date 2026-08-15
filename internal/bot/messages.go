@@ -128,6 +128,6 @@ var messages = map[MessageKey]string{
 	MsgErrPartialSave:     "❌ Подписка создана в панели, но не сохранена в базе. Обратитесь к администратору.",
 }
 
-func msg(key MessageKey, a ...interface{}) string {
+func msg(key MessageKey, a ...any) string {
 	return fmt.Sprintf(messages[key], a...)
 }

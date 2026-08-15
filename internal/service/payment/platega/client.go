@@ -87,13 +87,16 @@ func ParseExpiresIn(raw string) (time.Duration, error) {
 	if value == "" {
 		return 0, errors.New("expiresIn is required")
 	}
+
 	parsed, err := time.Parse("15:04:05", value)
 	if err != nil {
 		return 0, fmt.Errorf("expiresIn must use HH:MM:SS: %w", err)
 	}
+
 	if parsed.Hour() == 0 && parsed.Minute() == 0 && parsed.Second() == 0 {
 		return 0, errors.New("expiresIn must be positive")
 	}
+
 	return time.Duration(parsed.Hour())*time.Hour + time.Duration(parsed.Minute())*time.Minute + time.Duration(parsed.Second())*time.Second, nil
 }
 
@@ -102,9 +105,11 @@ func New(cfg Config) *Client {
 	if strings.TrimSpace(cfg.BaseURL) == "" {
 		cfg.BaseURL = defaultBaseURL
 	}
+
 	if cfg.HTTPClient == nil {
 		cfg.HTTPClient = &http.Client{Timeout: 5 * time.Second}
 	}
+
 	return &Client{cfg: cfg}
 }
 
@@ -115,11 +120,13 @@ func (c *Client) CreateTransaction(ctx context.Context, req CreateTransactionReq
 	if req.AmountCents <= 0 {
 		return nil, errors.New("amount must be positive")
 	}
+
 	if strings.TrimSpace(req.Currency) == "" {
 		return nil, errors.New("currency is required")
 	}
 
-	amount := []byte(fmt.Sprintf("%d.%02d", req.AmountCents/100, req.AmountCents%100))
+	amount := fmt.Appendf(nil, "%d.%02d", req.AmountCents/100, req.AmountCents%100)
+
 	body, err := json.Marshal(transactionRequest{
 		PaymentDetails: paymentDetails{Amount: json.RawMessage(amount), Currency: req.Currency},
 		Description:    req.Description,
@@ -136,14 +143,16 @@ func (c *Client) CreateTransaction(ctx context.Context, req CreateTransactionReq
 	if err != nil {
 		return nil, fmt.Errorf("create transaction request: %w", err)
 	}
+
 	httpReq.Header.Set("X-Merchantid", c.cfg.MerchantID)
 	httpReq.Header.Set("X-Secret", c.cfg.Secret)
 	httpReq.Header.Set("Content-Type", "application/json")
 
 	requestStarted := time.Now()
+
 	resp, err := c.cfg.HTTPClient.Do(httpReq)
 	if err != nil {
-		if logger.Log != nil {
+		if logger.Log != nil { //nolint:staticcheck // defensive guard: global logger may be uninitialized
 			logger.Info("Payment provider request failed",
 				zap.String("provider", "platega"),
 				zap.String("operation", "create_transaction"),
@@ -151,11 +160,13 @@ func (c *Client) CreateTransaction(ctx context.Context, req CreateTransactionReq
 				zap.Duration("duration", time.Since(requestStarted)),
 			)
 		}
+
 		return nil, fmt.Errorf("%w: send transaction request: %w", ErrProvider, err)
 	}
+
 	defer func() { _ = resp.Body.Close() }()
 	defer func() {
-		if logger.Log != nil {
+		if logger.Log != nil { //nolint:staticcheck // defensive guard: global logger may be uninitialized
 			logger.Info("Payment provider response processed",
 				zap.String("provider", "platega"),
 				zap.String("operation", "create_transaction"),
@@ -168,6 +179,7 @@ func (c *Client) CreateTransaction(ctx context.Context, req CreateTransactionReq
 	limited := io.LimitReader(resp.Body, 1<<20)
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		message, _ := io.ReadAll(limited)
+
 		switch resp.StatusCode {
 		case http.StatusBadRequest:
 			return nil, fmt.Errorf("%w: %s", ErrBadRequest, strings.TrimSpace(string(message)))
@@ -179,21 +191,30 @@ func (c *Client) CreateTransaction(ctx context.Context, req CreateTransactionReq
 	}
 
 	var result CreateTransactionResponse
-	if err := json.NewDecoder(limited).Decode(&result); err != nil {
+
+	err = json.NewDecoder(limited).Decode(&result)
+	if err != nil {
 		return nil, fmt.Errorf("%w: decode transaction response: %w", ErrProvider, err)
 	}
+
 	transactionID := strings.TrimSpace(result.TransactionID)
 	if transactionID == "" {
 		return nil, fmt.Errorf("%w: response has no transactionId", ErrProvider)
 	}
-	if _, err := ParseTransactionID(transactionID); err != nil {
+
+	_, err = ParseTransactionID(transactionID)
+	if err != nil {
 		return nil, fmt.Errorf("%w: response transactionId must be UUID v4: %w", ErrProvider, err)
 	}
+
 	if strings.TrimSpace(result.URL) == "" && strings.TrimSpace(result.Redirect) == "" {
 		return nil, fmt.Errorf("%w: response has no payment URL", ErrProvider)
 	}
-	if _, err := ParseExpiresIn(result.ExpiresIn); err != nil {
+
+	_, err = ParseExpiresIn(result.ExpiresIn)
+	if err != nil {
 		return nil, fmt.Errorf("%w: invalid expiresIn: %w", ErrProvider, err)
 	}
+
 	return &result, nil
 }

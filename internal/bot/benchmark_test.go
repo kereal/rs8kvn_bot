@@ -18,6 +18,7 @@ func BenchmarkEscapeMarkdown(b *testing.B) {
 	}
 
 	b.ResetTimer()
+
 	for i := 0; i < b.N; i++ {
 		for _, input := range inputs {
 			utils.EscapeMarkdown(input)
@@ -27,7 +28,9 @@ func BenchmarkEscapeMarkdown(b *testing.B) {
 
 func BenchmarkEscapeMarkdown_Single(b *testing.B) {
 	input := "test_user_name_with_special_chars"
+
 	b.ResetTimer()
+
 	for i := 0; i < b.N; i++ {
 		utils.EscapeMarkdown(input)
 	}
@@ -35,6 +38,7 @@ func BenchmarkEscapeMarkdown_Single(b *testing.B) {
 
 func BenchmarkEscapeMarkdown_Parallel(b *testing.B) {
 	input := "test_user_name_with_special_chars"
+
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
 			utils.EscapeMarkdown(input)

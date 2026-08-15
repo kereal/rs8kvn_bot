@@ -50,6 +50,7 @@ func (rc *ReferralCache) Load(ctx context.Context) error {
 	for id, count := range counts {
 		rc.data[id] = &referralEntry{count: count}
 	}
+
 	return nil
 }
 
@@ -60,6 +61,7 @@ func (rc *ReferralCache) Get(chatID int64) int64 {
 	if entry, ok := rc.data[chatID]; ok {
 		return entry.count
 	}
+
 	return 0
 }
 
@@ -71,12 +73,14 @@ func (rc *ReferralCache) GetAll() map[int64]int64 {
 	for id, entry := range rc.data {
 		result[id] = entry.count
 	}
+
 	return result
 }
 
 func (rc *ReferralCache) SetForTest(chatID int64, count int64) {
 	rc.mu.Lock()
 	defer rc.mu.Unlock()
+
 	rc.data[chatID] = &referralEntry{count: count}
 }
 
@@ -120,10 +124,12 @@ func (rc *ReferralCache) Sync(ctx context.Context) error {
 
 func (rc *ReferralCache) StartSync(ctx context.Context) {
 	defer logger.Recover("ReferralCache sync")
+
 	ticker := time.NewTicker(1 * time.Hour)
 	defer ticker.Stop()
 
-	if err := rc.Load(ctx); err != nil {
+	err := rc.Load(ctx)
+	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			logger.Info("Referral cache load skipped (context ending)")
 		} else {
@@ -136,7 +142,8 @@ func (rc *ReferralCache) StartSync(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if err := rc.Sync(ctx); err != nil {
+			err := rc.Sync(ctx)
+			if err != nil {
 				logger.Error("Failed to sync referral cache", zap.Error(err))
 			}
 		}
@@ -155,6 +162,7 @@ func (rc *ReferralCache) CheckAdminSendRateLimit(chatID int64) bool {
 	}
 
 	rc.sendMu.Store(chatID, now)
+
 	return true
 }
 

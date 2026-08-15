@@ -448,6 +448,7 @@ func (r *responseRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	if h, ok := r.ResponseWriter.(http.Hijacker); ok {
 		return h.Hijack()
 	}
+
 	return nil, nil, http.ErrNotSupported
 }
 
@@ -463,6 +464,7 @@ func (r *responseRecorder) Push(target string, opts *http.PushOptions) error {
 	if p, ok := r.ResponseWriter.(http.Pusher); ok {
 		return p.Push(target, opts)
 	}
+
 	return http.ErrNotSupported
 }
 

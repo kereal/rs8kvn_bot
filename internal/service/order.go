@@ -1,4 +1,3 @@
-// Package service contains subscription, payment, and synchronization business logic.
 package service
 
 import (
@@ -154,6 +153,7 @@ func paymentMethodLogValue(method *int) string {
 	if method == nil {
 		return "-"
 	}
+
 	return fmt.Sprintf("%d", *method)
 }
 
@@ -165,6 +165,7 @@ func recordPaymentAmount(operation string, amountCents int64, currency string) {
 	if operation == "" || amountCents <= 0 || currency == "" {
 		return
 	}
+
 	metrics.PaymentAmountCentsTotal.WithLabelValues(operation, currency).Add(float64(amountCents))
 }
 
@@ -176,6 +177,7 @@ func formatPaymentIssue(issue PaymentIssue) string {
 	if issue.PaymentMethod != nil {
 		method = fmt.Sprintf("%d", *issue.PaymentMethod)
 	}
+
 	event := issue.Event
 	switch issue.Event {
 	case "late_confirmed_callback":
@@ -185,7 +187,9 @@ func formatPaymentIssue(issue PaymentIssue) string {
 	case "chargeback":
 		event = "Chargeback requires manual review"
 	}
+
 	message := fmt.Sprintf("🚨 Payment integration issue\n\nEvent: %s\nReason: %s\nAction: %s\n\nOrder ID: %d\nTelegram ID: %d\nProduct ID: %d\nProduct: %s\nSubscription DB ID: %d\nPlan ID: %d\nAmount: %d cents\nCurrency: %s\nProvider transaction ID: %s\nPayment URL: %s\nCallback status: %s\nPayload: %s\nPayment method: %s", truncatePaymentField(event), truncatePaymentField(issue.Reason), truncatePaymentField(issue.Action), issue.OrderID, issue.TelegramID, issue.ProductID, truncatePaymentField(issue.ProductName), issue.SubscriptionID, issue.PlanID, issue.AmountCents, truncatePaymentField(issue.Currency), truncatePaymentField(issue.ProviderID), truncatePaymentField(issue.PaymentURL), truncatePaymentField(issue.CallbackStatus), truncatePaymentField(issue.Payload), method)
+
 	return truncatePaymentMessage(message)
 }
 
@@ -202,6 +206,7 @@ func truncatePaymentField(value string) string {
 	if len(runes) <= maxPaymentAlertFieldLength {
 		return value
 	}
+
 	return string(runes[:maxPaymentAlertFieldLength]) + "… [truncated]"
 }
 
@@ -212,19 +217,20 @@ func truncatePaymentMessage(value string) string {
 	if len(runes) <= maxPaymentAlertMessageLength {
 		return value
 	}
+
 	return string(runes[:maxPaymentAlertMessageLength]) + "… [truncated]"
 }
 
 // NewOrderService wires the order service dependencies explicitly.
 func NewOrderService(db interfaces.DatabaseService, subSvc *SubscriptionService, syncSvc *SyncService, payment PaymentProvider, botUsername string, cfg *config.Config) *OrderService {
 	return &OrderService{
-		db:                db,
-		subSvc:            subSvc,
-		syncSvc:           syncSvc,
-		payment:           payment,
-		botUsername:       botUsername,
-		cfg:               cfg,
-		paymentLocks:      make(map[uuid.UUID]*paymentLock),
+		db:                 db,
+		subSvc:             subSvc,
+		syncSvc:            syncSvc,
+		payment:            payment,
+		botUsername:        botUsername,
+		cfg:                cfg,
+		paymentLocks:       make(map[uuid.UUID]*paymentLock),
 		paymentLockTimeout: paymentLockTimeoutDefault,
 	}
 }
@@ -240,12 +246,15 @@ func NewOrderService(db interfaces.DatabaseService, subSvc *SubscriptionService,
 // independently and never queue behind each other.
 func (o *OrderService) lockPayment(ctx context.Context, providerPaymentID uuid.UUID) (func(), error) {
 	o.paymentLocksMu.Lock()
+
 	l, ok := o.paymentLocks[providerPaymentID]
 	if !ok {
 		l = &paymentLock{ch: make(chan struct{}, 1)}
 		l.ch <- struct{}{} // initial token
+
 		o.paymentLocks[providerPaymentID] = l
 	}
+
 	l.waiters++
 	o.paymentLocksMu.Unlock()
 
@@ -253,17 +262,20 @@ func (o *OrderService) lockPayment(ctx context.Context, providerPaymentID uuid.U
 	if timeout <= 0 {
 		timeout = paymentLockTimeoutDefault
 	}
+
 	if dl, ok := ctx.Deadline(); ok {
 		if rem := time.Until(dl); rem > 0 && rem < timeout {
 			timeout = rem
 		}
 	}
+
 	acquireCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	select {
 	case <-l.ch:
 		var released atomic.Bool
+
 		return func() {
 			// Idempotent: callers explicitly release before best-effort post-commit
 			// sync, and the deferred release on return would otherwise block on the
@@ -271,7 +283,9 @@ func (o *OrderService) lockPayment(ctx context.Context, providerPaymentID uuid.U
 			if !released.CompareAndSwap(false, true) {
 				return
 			}
+
 			l.ch <- struct{}{}
+
 			o.dropPaymentWaiter(l, providerPaymentID)
 		}, nil
 	case <-acquireCtx.Done():
@@ -287,6 +301,7 @@ func (o *OrderService) lockPayment(ctx context.Context, providerPaymentID uuid.U
 // NOT touch l.ch: only the actual holder returns the token on unlock.
 func (o *OrderService) dropPaymentWaiter(l *paymentLock, providerPaymentID uuid.UUID) {
 	o.paymentLocksMu.Lock()
+
 	l.waiters--
 	if l.waiters == 0 {
 		delete(o.paymentLocks, providerPaymentID)
@@ -314,6 +329,7 @@ func (o *OrderService) notifyRequestIssue(ctx context.Context, event, reason, ac
 		issue.Currency = product.Currency
 		issue.PlanID = product.PlanID
 	}
+
 	if order != nil {
 		issue.OrderID = order.ID
 		issue.SubscriptionID = order.SubscriptionID
@@ -322,6 +338,7 @@ func (o *OrderService) notifyRequestIssue(ctx context.Context, event, reason, ac
 		issue.ProviderID = order.ProviderPaymentID
 		issue.PaymentURL = order.PaymentURL
 	}
+
 	o.NotifyPaymentIssue(ctx, issue)
 }
 
@@ -331,7 +348,9 @@ func (o *OrderService) notifyAdmin(ctx context.Context, text string) {
 	if o.adminBot == nil || o.cfg == nil || o.cfg.TelegramAdminID <= 0 {
 		return
 	}
-	if _, err := o.adminBot.Send(tgbotapi.NewMessage(o.cfg.TelegramAdminID, text)); err != nil {
+
+	_, err := o.adminBot.Send(tgbotapi.NewMessage(o.cfg.TelegramAdminID, text))
+	if err != nil {
 		logger.Warn("failed to notify admin about payment event", zap.Error(err))
 	}
 }
@@ -344,9 +363,13 @@ func (o *OrderService) notifyAdminPaid(ctx context.Context, sub *database.Subscr
 	if o.adminBot == nil || o.cfg == nil || o.cfg.TelegramAdminID <= 0 {
 		return
 	}
+
 	msg := tgbotapi.NewMessage(o.cfg.TelegramAdminID, formatAdminPaidAlert(sub, order, product, isRenewal))
+
 	msg.ParseMode = "Markdown"
-	if _, err := o.adminBot.Send(msg); err != nil {
+
+	_, err := o.adminBot.Send(msg)
+	if err != nil {
 		logger.Warn("failed to notify admin about confirmed payment",
 			zap.Uint("order_id", order.ID),
 			zap.Error(err))
@@ -362,22 +385,27 @@ func formatAdminPaidAlert(sub *database.Subscription, order *database.Order, pro
 	if isRenewal {
 		title = "🔄 *Продление подтверждено*"
 	}
+
 	productName := "—"
 	if product != nil && strings.TrimSpace(product.Name) != "" {
 		productName = utils.EscapeMarkdown(product.Name)
 	}
+
 	expiry := "—"
 	if sub != nil && sub.ExpiresAt != nil {
 		expiry = utils.FormatDateRu(*sub.ExpiresAt)
 	}
+
 	telegramID, subscriptionID, username := int64(0), uint(0), ""
 	if sub != nil {
 		telegramID, subscriptionID, username = sub.TelegramID, sub.ID, sub.Username
 	}
+
 	orderID, amountCents, currency, providerPaymentID := uint(0), int64(0), "", ""
 	if order != nil {
 		orderID, amountCents, currency, providerPaymentID = order.ID, order.AmountCents, order.Currency, order.ProviderPaymentID
 	}
+
 	return fmt.Sprintf(title+"\n\n"+
 		"💎 Тариф: *%s*\n"+
 		"💵 Сумма: *%s*\n"+
@@ -405,9 +433,13 @@ func (o *OrderService) notifyAdminChargeback(ctx context.Context, sub *database.
 	if o.adminBot == nil || o.cfg == nil || o.cfg.TelegramAdminID <= 0 {
 		return
 	}
+
 	msg := tgbotapi.NewMessage(o.cfg.TelegramAdminID, formatAdminChargebackAlert(sub, order, product, downgraded))
+
 	msg.ParseMode = "Markdown"
-	if _, err := o.adminBot.Send(msg); err != nil {
+
+	_, err := o.adminBot.Send(msg)
+	if err != nil {
 		logger.Warn("failed to notify admin about chargeback",
 			zap.Uint("order_id", order.ID),
 			zap.Error(err))
@@ -422,18 +454,22 @@ func formatAdminChargebackAlert(sub *database.Subscription, order *database.Orde
 	if product != nil && strings.TrimSpace(product.Name) != "" {
 		productName = utils.EscapeMarkdown(product.Name)
 	}
+
 	telegramID, subscriptionID, username := int64(0), uint(0), ""
 	if sub != nil {
 		telegramID, subscriptionID, username = sub.TelegramID, sub.ID, sub.Username
 	}
+
 	orderID, amountCents, currency, providerPaymentID := uint(0), int64(0), "", ""
 	if order != nil {
 		orderID, amountCents, currency, providerPaymentID = order.ID, order.AmountCents, order.Currency, order.ProviderPaymentID
 	}
+
 	access := "⬇️ Доступ: *понижен до бесплатного*"
 	if !downgraded {
 		access = "ℹ️ Доступ: *сохранён* (есть другой оплаченный заказ)"
 	}
+
 	return fmt.Sprintf("🚫 *Chargeback по платежу*\n\n"+
 		"💎 Тариф: *%s*\n"+
 		"💵 Сумма: *%s*\n"+
@@ -461,27 +497,35 @@ func formatMoneyCents(amountCents int64, currency string) string {
 	if negative {
 		amountCents = -amountCents
 	}
+
 	value := fmt.Sprintf("%d", amountCents/100)
 	// Insert a space as the thousands separator (Russian locale convention).
 	grouped := ""
+
 	for i := 0; i < len(value); i++ {
 		if i > 0 && (len(value)-i)%3 == 0 {
 			grouped += " "
 		}
+
 		grouped += string(value[i])
 	}
+
 	if kopeks := amountCents % 100; kopeks != 0 {
 		grouped += fmt.Sprintf(",%02d", kopeks)
 	}
+
 	if negative {
 		grouped = "-" + grouped
 	}
+
 	if strings.EqualFold(currency, "RUB") {
 		return grouped + " ₽"
 	}
+
 	if symbol := strings.ToUpper(strings.TrimSpace(currency)); symbol != "" {
 		return grouped + " " + symbol
 	}
+
 	return grouped
 }
 
@@ -492,12 +536,15 @@ func formatMoneyCents(amountCents int64, currency string) string {
 func (o *OrderService) RequestPayment(ctx context.Context, telegramID int64, username string, product *database.Product) (*PaymentInfo, *database.Order, error) {
 	start := time.Now()
 	info, order, err := o.requestPayment(ctx, telegramID, username, product)
+
 	result := "success"
 	if err != nil {
 		result = "error"
 	}
+
 	metrics.PaymentOperationsTotal.WithLabelValues("request", result).Inc()
 	metrics.PaymentOperationDuration.WithLabelValues("request").Observe(time.Since(start).Seconds())
+
 	return info, order, err
 }
 
@@ -505,6 +552,7 @@ func (o *OrderService) requestPayment(ctx context.Context, telegramID int64, use
 	if o.payment == nil {
 		return nil, nil, ErrPaymentDisabled
 	}
+
 	if telegramID <= 0 || product == nil || product.ID == 0 {
 		return nil, nil, errors.New("invalid paid product request")
 	}
@@ -514,38 +562,48 @@ func (o *OrderService) requestPayment(ctx context.Context, telegramID int64, use
 		o.notifyRequestIssue(ctx, "load_product_failed", err.Error(), "retry after database recovery", telegramID, product, nil)
 		return nil, nil, fmt.Errorf("load canonical product: %w", err)
 	}
+
 	if canonical == nil {
 		err := errors.New("load canonical product: product is nil")
 		o.notifyRequestIssue(ctx, "load_product_failed", err.Error(), "verify the product record", telegramID, product, nil)
+
 		return nil, nil, err
 	}
+
 	now := time.Now().UTC()
 	// Resolve the subscription before looking up the intent. Intents belong to
 	// a concrete subscription, not merely to a Telegram ID; this matters when
 	// historical data contains more than one subscription for one user.
 	var sub *database.Subscription
+
 	sub, err = o.db.GetByTelegramID(ctx, telegramID)
 	if err != nil {
 		if !errors.Is(err, database.ErrSubscriptionNotFound) && !errors.Is(err, gorm.ErrRecordNotFound) {
 			o.notifyRequestIssue(ctx, "load_subscription_failed", err.Error(), "retry after database recovery", telegramID, canonical, nil)
 			return nil, nil, fmt.Errorf("load payment subscription: %w", err)
 		}
+
 		if !canonical.IsActive || canonical.PriceCents <= 0 {
 			return nil, nil, errors.New("invalid paid product request")
 		}
+
 		plan, planErr := o.db.GetPlanByID(ctx, canonical.PlanID)
 		if planErr != nil {
 			o.notifyRequestIssue(ctx, "load_plan_failed", planErr.Error(), "retry after database recovery", telegramID, canonical, nil)
 			return nil, nil, fmt.Errorf("load product plan: %w", planErr)
 		}
+
 		if plan == nil || !plan.IsActive {
 			return nil, nil, errors.New("product plan is inactive")
 		}
+
 		if o.subSvc == nil {
 			err := errors.New("subscription service is not configured")
 			o.notifyRequestIssue(ctx, "subscription_service_not_ready", err.Error(), "wire SubscriptionService before enabling payments", telegramID, canonical, nil)
+
 			return nil, nil, err
 		}
+
 		sub, err = o.subSvc.GetOrCreateSubscription(ctx, telegramID, username, "")
 		if err != nil {
 			o.notifyRequestIssue(ctx, "create_subscription_failed", err.Error(), "retry after subscription service recovery", telegramID, canonical, nil)
@@ -561,21 +619,26 @@ func (o *OrderService) requestPayment(ctx context.Context, telegramID int64, use
 		o.notifyRequestIssue(ctx, "find_pending_order_failed", err.Error(), "retry after database recovery", telegramID, canonical, nil)
 		return nil, nil, fmt.Errorf("find pending payment order: %w", err)
 	}
+
 	if order != nil && order.Status == database.OrderStatusExpired {
 		order = nil
 	}
+
 	if order != nil && order.Status != database.OrderStatusPending {
 		return nil, order, ErrPaymentAlreadyInProgress
 	}
+
 	if order == nil {
 		if !canonical.IsActive || canonical.PriceCents <= 0 {
 			return nil, nil, errors.New("invalid paid product request")
 		}
+
 		plan, planErr := o.db.GetPlanByID(ctx, canonical.PlanID)
 		if planErr != nil {
 			o.notifyRequestIssue(ctx, "load_plan_failed", planErr.Error(), "retry after database recovery", telegramID, canonical, nil)
 			return nil, nil, fmt.Errorf("load product plan: %w", planErr)
 		}
+
 		if plan == nil || !plan.IsActive {
 			return nil, nil, errors.New("product plan is inactive")
 		}
@@ -588,17 +651,21 @@ func (o *OrderService) requestPayment(ctx context.Context, telegramID int64, use
 			return nil, nil, fmt.Errorf("find or create pending payment order: %w", err)
 		}
 	}
+
 	if order.PaymentCreationUncertain {
 		logger.Warn("payment creation requires manual reconciliation", zap.Uint("order_id", order.ID), zap.Uint("product_id", canonical.ID))
 		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "payment_creation_uncertain", Reason: "previous provider request has an uncertain outcome", Action: "reconcile provider transaction manually", OrderID: order.ID, TelegramID: telegramID, ProductID: canonical.ID, ProductName: canonical.Name, SubscriptionID: order.SubscriptionID, AmountCents: order.AmountCents, Currency: order.Currency, ProviderID: order.ProviderPaymentID, PaymentURL: order.PaymentURL})
+
 		return nil, order, ErrPaymentCreationUncertain
 	}
+
 	if strings.TrimSpace(order.ProviderPaymentID) != "" && order.PaymentURL != "" && order.PaymentExpiresAt != nil && now.Before(*order.PaymentExpiresAt) {
 		paymentID, parseErr := platega.ParseTransactionID(order.ProviderPaymentID)
 		if parseErr != nil {
 			o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "stored_provider_id_invalid", Reason: parseErr.Error(), Action: "reconcile order manually", OrderID: order.ID, TelegramID: telegramID, ProductID: canonical.ID, ProductName: canonical.Name, SubscriptionID: order.SubscriptionID, AmountCents: order.AmountCents, Currency: order.Currency, ProviderID: order.ProviderPaymentID, PaymentURL: order.PaymentURL})
 			return nil, order, fmt.Errorf("parse stored payment ID: %w", parseErr)
 		}
+
 		logger.Info("Payment link reused",
 			zap.Uint("order_id", order.ID),
 			zap.Uint("product_id", canonical.ID),
@@ -606,8 +673,10 @@ func (o *OrderService) requestPayment(ctx context.Context, telegramID int64, use
 			zap.String("provider_payment_id", paymentID.String()),
 			zap.Int64("amount_cents", order.AmountCents),
 			zap.String("currency", order.Currency))
+
 		return &PaymentInfo{URL: order.PaymentURL, Provider: "platega", PaymentID: paymentID, ExpiresAt: *order.PaymentExpiresAt}, order, nil
 	}
+
 	if strings.TrimSpace(order.ProviderPaymentID) != "" {
 		return nil, order, ErrPaymentAlreadyInProgress
 	}
@@ -617,25 +686,30 @@ func (o *OrderService) requestPayment(ctx context.Context, telegramID int64, use
 	if !canonical.IsActive || canonical.PriceCents <= 0 {
 		return nil, order, errors.New("invalid paid product request")
 	}
+
 	plan, planErr := o.db.GetPlanByID(ctx, canonical.PlanID)
 	if planErr != nil {
 		o.notifyRequestIssue(ctx, "load_plan_failed", planErr.Error(), "retry after database recovery", telegramID, canonical, order)
 		return nil, order, fmt.Errorf("load product plan: %w", planErr)
 	}
+
 	if plan == nil || !plan.IsActive {
 		return nil, order, errors.New("product plan is inactive")
 	}
+
 	claimed, err := o.db.MarkPaymentCreationUncertain(ctx, order.ID, true)
 	if err != nil {
 		o.notifyRequestIssue(ctx, "claim_payment_creation_failed", err.Error(), "retry after database recovery", telegramID, canonical, order)
 		return nil, order, fmt.Errorf("mark payment creation uncertain: %w", err)
 	}
+
 	if !claimed {
 		latest, loadErr := o.db.GetOrderByID(ctx, order.ID)
 		if loadErr != nil {
 			o.notifyRequestIssue(ctx, "reload_pending_order_failed", loadErr.Error(), "retry after database recovery", telegramID, canonical, order)
 			return nil, order, fmt.Errorf("reload payment order after concurrent claim: %w", loadErr)
 		}
+
 		if latest.PaymentCreationUncertain {
 			// The intent was claimed by a concurrent RequestPayment in this race:
 			// that caller is already contacting the provider. This is not the
@@ -644,59 +718,79 @@ func (o *OrderService) requestPayment(ctx context.Context, telegramID int64, use
 			// progress instead of alarming the user.
 			return nil, latest, ErrPaymentAlreadyInProgress
 		}
+
 		if strings.TrimSpace(latest.ProviderPaymentID) != "" && latest.PaymentURL != "" && latest.PaymentExpiresAt != nil && now.Before(*latest.PaymentExpiresAt) {
 			paymentID, parseErr := platega.ParseTransactionID(latest.ProviderPaymentID)
 			if parseErr != nil {
 				return nil, latest, fmt.Errorf("parse stored payment ID: %w", parseErr)
 			}
+
 			return &PaymentInfo{URL: latest.PaymentURL, Provider: "platega", PaymentID: paymentID, ExpiresAt: *latest.PaymentExpiresAt}, latest, nil
 		}
+
 		return nil, latest, ErrPaymentAlreadyInProgress
 	}
+
 	base := "https://t.me/" + strings.TrimPrefix(o.botUsername, "@")
+
 	response, err := o.payment.CreateTransaction(ctx, platega.CreateTransactionRequest{AmountCents: canonical.PriceCents, Currency: canonical.Currency, Description: canonical.Name, ReturnURL: base, FailedURL: base, Payload: fmt.Sprint(order.ID), UserID: fmt.Sprint(telegramID), UserName: username})
 	if err != nil {
 		if errors.Is(err, platega.ErrBadRequest) || errors.Is(err, platega.ErrAuth) {
 			o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "provider_create_rejected", Reason: err.Error(), Action: "inspect Platega credentials and request fields before retrying", OrderID: order.ID, TelegramID: telegramID, ProductID: canonical.ID, ProductName: canonical.Name, SubscriptionID: order.SubscriptionID, AmountCents: order.AmountCents, Currency: order.Currency, ProviderID: order.ProviderPaymentID, PaymentURL: order.PaymentURL})
-			if _, clearErr := o.db.MarkPaymentCreationUncertain(ctx, order.ID, false); clearErr != nil {
+
+			_, clearErr := o.db.MarkPaymentCreationUncertain(ctx, order.ID, false)
+			if clearErr != nil {
 				o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "clear_payment_uncertainty_failed", Reason: clearErr.Error(), Action: "clear the pending intent flag manually before retrying", OrderID: order.ID, TelegramID: telegramID, ProductID: canonical.ID, ProductName: canonical.Name, SubscriptionID: order.SubscriptionID, AmountCents: order.AmountCents, Currency: order.Currency, ProviderID: order.ProviderPaymentID, PaymentURL: order.PaymentURL})
 				return nil, order, fmt.Errorf("clear payment creation uncertainty: %w", clearErr)
 			}
 		} else {
 			o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "provider_create_uncertain", Reason: err.Error(), Action: "find the provider transaction and attach or refund it manually", OrderID: order.ID, TelegramID: telegramID, ProductID: canonical.ID, ProductName: canonical.Name, SubscriptionID: order.SubscriptionID, AmountCents: order.AmountCents, Currency: order.Currency, ProviderID: order.ProviderPaymentID, PaymentURL: order.PaymentURL})
 		}
+
 		return nil, order, fmt.Errorf("create payment transaction: %w", err)
 	}
+
 	if response == nil {
 		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "provider_empty_response", Reason: "provider returned an empty response", Action: "verify provider transaction manually", OrderID: order.ID, TelegramID: telegramID, ProductID: canonical.ID, ProductName: canonical.Name, SubscriptionID: order.SubscriptionID, AmountCents: order.AmountCents, Currency: order.Currency})
 		return nil, order, fmt.Errorf("%w: empty response", platega.ErrProvider)
 	}
+
 	transactionID, err := platega.ParseTransactionID(response.TransactionID)
 	if err != nil {
 		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "provider_invalid_transaction_id", Reason: err.Error(), Action: "verify provider response manually", OrderID: order.ID, TelegramID: telegramID, ProductID: canonical.ID, ProductName: canonical.Name, SubscriptionID: order.SubscriptionID, AmountCents: order.AmountCents, Currency: order.Currency, ProviderID: response.TransactionID})
 		return nil, order, fmt.Errorf("%w: transactionId must be UUID v4: %w", platega.ErrProvider, err)
 	}
+
 	providerPaymentID := transactionID
+
 	url := strings.TrimSpace(response.URL)
 	if url == "" {
 		url = strings.TrimSpace(response.Redirect)
 	}
+
 	if url == "" {
 		err := fmt.Errorf("%w: response has no payment URL", platega.ErrProvider)
 		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "provider_incomplete_response", Reason: err.Error(), Action: "verify provider transaction manually", OrderID: order.ID, TelegramID: telegramID, ProductID: canonical.ID, ProductName: canonical.Name, SubscriptionID: order.SubscriptionID, AmountCents: order.AmountCents, Currency: order.Currency, ProviderID: response.TransactionID, PaymentURL: url})
+
 		return nil, order, err
 	}
+
 	expiresIn, err := platega.ParseExpiresIn(response.ExpiresIn)
 	if err != nil {
 		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "provider_incomplete_response", Reason: err.Error(), Action: "verify provider transaction manually", OrderID: order.ID, TelegramID: telegramID, ProductID: canonical.ID, ProductName: canonical.Name, SubscriptionID: order.SubscriptionID, AmountCents: order.AmountCents, Currency: order.Currency, ProviderID: response.TransactionID, PaymentURL: url})
 		return nil, order, fmt.Errorf("parse payment expiry: %w", err)
 	}
+
 	expiresAt := time.Now().UTC().Add(expiresIn)
-	if err := o.db.SavePaymentDetails(ctx, order.ID, providerPaymentID, url, expiresAt); err != nil {
+
+	err = o.db.SavePaymentDetails(ctx, order.ID, providerPaymentID, url, expiresAt)
+	if err != nil {
 		logger.Warn("provider transaction created but payment details were not saved; manual reconciliation required", zap.Uint("order_id", order.ID), zap.String("provider_payment_id", providerPaymentID.String()), zap.Error(err))
 		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "payment_details_save_failed", Reason: err.Error(), Action: "attach or refund provider transaction manually", OrderID: order.ID, TelegramID: telegramID, ProductID: canonical.ID, ProductName: canonical.Name, SubscriptionID: order.SubscriptionID, AmountCents: order.AmountCents, Currency: order.Currency, ProviderID: providerPaymentID.String(), PaymentURL: url})
+
 		return nil, order, fmt.Errorf("save payment details: %w", err)
 	}
+
 	order.ProviderPaymentID, order.PaymentURL = providerPaymentID.String(), url
 	order.PaymentExpiresAt, order.PaymentCreationUncertain = &expiresAt, false
 	logger.Info("Payment link created",
@@ -706,6 +800,7 @@ func (o *OrderService) requestPayment(ctx context.Context, telegramID int64, use
 		zap.String("provider_payment_id", providerPaymentID.String()),
 		zap.Int64("amount_cents", order.AmountCents),
 		zap.String("currency", order.Currency))
+
 	return &PaymentInfo{URL: url, Provider: "platega", PaymentID: providerPaymentID, ExpiresAt: expiresAt}, order, nil
 }
 
@@ -715,15 +810,19 @@ func (o *OrderService) requestPayment(ctx context.Context, telegramID int64, use
 func (o *OrderService) ConfirmPayment(ctx context.Context, providerPaymentID uuid.UUID, amount json.Number, currency string) (*PaymentConfirmation, error) {
 	start := time.Now()
 	confirmation, err := o.confirmPayment(ctx, providerPaymentID, amount, currency)
+
 	result := "success"
 	if err != nil {
 		result = "error"
 	}
+
 	metrics.PaymentOperationsTotal.WithLabelValues("confirm", result).Inc()
 	metrics.PaymentOperationDuration.WithLabelValues("confirm").Observe(time.Since(start).Seconds())
+
 	if err == nil && confirmation != nil && confirmation.Activated && confirmation.Order != nil {
 		recordPaymentAmount("confirmed", confirmation.Order.AmountCents, confirmation.Order.Currency)
 	}
+
 	return confirmation, err
 }
 
@@ -739,52 +838,70 @@ func (o *OrderService) confirmPayment(ctx context.Context, providerPaymentID uui
 		return nil, fmt.Errorf("acquire payment lock: %w", err)
 	}
 	defer unlock()
+
 	if providerPaymentID == uuid.Nil {
 		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "invalid_provider_id", Reason: "provider payment UUID is nil", Action: "reject callback and inspect provider payload", CallbackStatus: "CONFIRMED"})
 		return nil, errors.New("invalid provider payment UUID")
 	}
+
 	order, err := o.db.GetOrderByProviderPaymentID(ctx, "platega", providerPaymentID)
 	if err != nil {
 		if errors.Is(err, database.ErrOrderNotFound) || errors.Is(err, gorm.ErrRecordNotFound) {
 			logger.Warn("payment callback for unknown order", zap.String("provider_payment_id", providerPaymentID.String()))
 			o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "unknown_provider_id", Reason: "callback references an order that does not exist", Action: "verify the provider transaction and reconcile manually", ProviderID: providerPaymentID.String(), CallbackStatus: "CONFIRMED"})
+
 			return &PaymentConfirmation{Activated: false}, nil
 		}
+
 		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "load_order_failed", Reason: err.Error(), Action: "retry callback after database recovery", ProviderID: providerPaymentID.String(), CallbackStatus: "CONFIRMED"})
+
 		return nil, fmt.Errorf("find payment order: %w", err)
 	}
+
 	if order.Currency != currency {
 		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "callback_currency_mismatch", Reason: fmt.Sprintf("callback currency %q does not match order currency %q", currency, order.Currency), Action: "reject callback and investigate provider payload", OrderID: order.ID, ProductID: order.ProductID, SubscriptionID: order.SubscriptionID, AmountCents: order.AmountCents, Currency: currency, ProviderID: providerPaymentID.String(), CallbackStatus: "CONFIRMED"})
 		return nil, ErrCurrencyMismatch
 	}
+
 	cents, err := platega.ParseCallbackAmount(amount)
 	if err != nil {
 		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "callback_amount_invalid", Reason: err.Error(), Action: "reject callback and inspect provider payload", OrderID: order.ID, ProductID: order.ProductID, SubscriptionID: order.SubscriptionID, AmountCents: order.AmountCents, Currency: currency, ProviderID: providerPaymentID.String(), CallbackStatus: "CONFIRMED", Payload: amount.String()})
 		return nil, fmt.Errorf("parse callback amount: %w", err)
 	}
+
 	if cents != order.AmountCents {
 		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "callback_amount_mismatch", Reason: fmt.Sprintf("callback amount %d cents does not match order amount %d cents", cents, order.AmountCents), Action: "reject callback and investigate provider payload", OrderID: order.ID, ProductID: order.ProductID, SubscriptionID: order.SubscriptionID, AmountCents: cents, Currency: currency, ProviderID: providerPaymentID.String(), CallbackStatus: "CONFIRMED"})
 		return nil, ErrAmountMismatch
 	}
+
 	if order.Status == database.OrderStatusPaid {
 		return &PaymentConfirmation{Order: order}, nil
 	}
+
 	if order.Status == database.OrderStatusExpired || order.Status == database.OrderStatusCanceled {
 		logger.Warn("late payment callback ignored", zap.Uint("order_id", order.ID), zap.String("provider_payment_id", providerPaymentID.String()), zap.String("order_status", string(order.Status)))
+
 		telegramID := int64(0)
-		if sub, subErr := o.db.GetByID(ctx, order.SubscriptionID); subErr == nil && sub != nil {
+
+		sub, subErr := o.db.GetByID(ctx, order.SubscriptionID)
+		if subErr == nil && sub != nil {
 			telegramID = sub.TelegramID
 		}
+
 		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "late_confirmed_callback", Reason: fmt.Sprintf("callback received for order status %s", order.Status), Action: "verify payment and refund or activate manually", OrderID: order.ID, TelegramID: telegramID, ProductID: order.ProductID, SubscriptionID: order.SubscriptionID, AmountCents: order.AmountCents, Currency: order.Currency, ProviderID: providerPaymentID.String(), CallbackStatus: "CONFIRMED"})
+
 		return &PaymentConfirmation{Order: order}, nil
 	}
+
 	if order.Status != database.OrderStatusPending {
 		return nil, ErrInvalidPaymentTransition
 	}
+
 	if o.syncSvc == nil {
 		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "payment_sync_not_ready", Reason: "post-commit synchronization service is not configured", Action: "wire SyncService before enabling payment callbacks", OrderID: order.ID, ProductID: order.ProductID, SubscriptionID: order.SubscriptionID, AmountCents: order.AmountCents, Currency: order.Currency, ProviderID: providerPaymentID.String(), CallbackStatus: "CONFIRMED"})
 		return nil, ErrPaymentSyncNotReady
 	}
+
 	product, err := o.db.GetProductByID(ctx, order.ProductID)
 	if err != nil {
 		if errors.Is(err, database.ErrProductNotFound) || errors.Is(err, gorm.ErrRecordNotFound) {
@@ -794,11 +911,15 @@ func (o *OrderService) confirmPayment(ctx context.Context, providerPaymentID uui
 			// refund/reconciliation instead of returning 5xx forever.
 			logger.Warn("payment callback for deleted product", zap.Uint("order_id", order.ID), zap.Uint("product_id", order.ProductID), zap.String("provider_payment_id", providerPaymentID.String()))
 			o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "load_order_product_failed", Reason: "ordered product no longer exists", Action: "verify payment and refund or activate manually", OrderID: order.ID, ProductID: order.ProductID, SubscriptionID: order.SubscriptionID, AmountCents: order.AmountCents, Currency: order.Currency, ProviderID: providerPaymentID.String(), CallbackStatus: "CONFIRMED"})
+
 			return &PaymentConfirmation{Activated: false}, nil
 		}
+
 		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "load_order_product_failed", Reason: err.Error(), Action: "retry callback after database recovery", OrderID: order.ID, ProductID: order.ProductID, SubscriptionID: order.SubscriptionID, AmountCents: order.AmountCents, Currency: order.Currency, ProviderID: providerPaymentID.String(), CallbackStatus: "CONFIRMED"})
+
 		return nil, fmt.Errorf("get ordered product: %w", err)
 	}
+
 	sub, err := o.db.GetByID(ctx, order.SubscriptionID)
 	if err != nil {
 		if errors.Is(err, database.ErrSubscriptionNotFound) || errors.Is(err, gorm.ErrRecordNotFound) {
@@ -808,24 +929,30 @@ func (o *OrderService) confirmPayment(ctx context.Context, providerPaymentID uui
 			// returning 5xx forever while Platega retries.
 			logger.Warn("payment callback for deleted subscription", zap.Uint("order_id", order.ID), zap.Uint("subscription_id", order.SubscriptionID), zap.String("provider_payment_id", providerPaymentID.String()))
 			o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "load_order_subscription_failed", Reason: "ordered subscription no longer exists", Action: "verify payment and refund or reconcile manually", OrderID: order.ID, ProductID: order.ProductID, SubscriptionID: order.SubscriptionID, AmountCents: order.AmountCents, Currency: order.Currency, ProviderID: providerPaymentID.String(), CallbackStatus: "CONFIRMED"})
+
 			return &PaymentConfirmation{Activated: false}, nil
 		}
+
 		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "load_order_subscription_failed", Reason: err.Error(), Action: "retry callback after database recovery", OrderID: order.ID, ProductID: order.ProductID, SubscriptionID: order.SubscriptionID, AmountCents: order.AmountCents, Currency: order.Currency, ProviderID: providerPaymentID.String(), CallbackStatus: "CONFIRMED"})
+
 		return nil, fmt.Errorf("get ordered subscription: %w", err)
 	}
 	// A renewal extends an already-paid subscription; a first purchase activates
 	// a free-plan one. Captured before CAS mutates sub in place.
 	isRenewal := sub.PricePaidCents > 0 || sub.ProductID != nil
 	now := time.Now().UTC()
+
 	var applyPlan database.ApplyPlanInTxFn
 	if o.syncSvc != nil {
 		applyPlan = o.syncSvc.ApplyPlanToSubscriptionInTx
 	}
+
 	activated, err := o.db.ConfirmOrderPaidCAS(ctx, order.ID, now, now, sub, product, applyPlan)
 	if err != nil {
 		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "confirm_payment_failed", Reason: err.Error(), Action: "retry callback; order must remain pending if DB setup rolled back", OrderID: order.ID, TelegramID: sub.TelegramID, ProductID: order.ProductID, ProductName: product.Name, SubscriptionID: order.SubscriptionID, AmountCents: order.AmountCents, Currency: order.Currency, ProviderID: providerPaymentID.String(), CallbackStatus: "CONFIRMED"})
 		return nil, err
 	}
+
 	if activated {
 		mirrorOrderFromSubscriptionAfterCAS(order, sub, now)
 	}
@@ -833,16 +960,21 @@ func (o *OrderService) confirmPayment(ctx context.Context, providerPaymentID uui
 	// the per-order payment lock while contacting VPN nodes; that external
 	// call is best-effort and may take up to paymentSyncTimeout.
 	unlock()
+
 	if activated {
 		o.notifyAdminPaid(ctx, sub, order, product, isRenewal)
 	}
+
 	if activated && o.syncSvc != nil {
 		syncCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), paymentSyncTimeout)
 		defer cancel()
-		if err := o.syncSvc.SyncSubscription(syncCtx, sub.ID); err != nil {
+
+		err := o.syncSvc.SyncSubscription(syncCtx, sub.ID)
+		if err != nil {
 			logger.Warn("payment post-commit sync failed", zap.Uint("subscription_id", sub.ID), zap.Error(err))
 		}
 	}
+
 	return &PaymentConfirmation{Order: order, Activated: activated}, nil
 }
 
@@ -856,17 +988,21 @@ func (o *OrderService) confirmPayment(ctx context.Context, providerPaymentID uui
 // preserved for manual review. Returns (nil, false, nil) for an idempotent no-op.
 func (o *OrderService) CancelPaymentByProvider(ctx context.Context, providerPaymentID uuid.UUID, status string, amount json.Number, currency string) (order *database.Order, wasPaid bool, err error) {
 	start := time.Now()
+
 	defer func() {
 		result := "success"
 		if err != nil {
 			result = "error"
 		}
+
 		metrics.PaymentOperationsTotal.WithLabelValues("cancel", result).Inc()
 		metrics.PaymentOperationDuration.WithLabelValues("cancel").Observe(time.Since(start).Seconds())
 	}()
+
 	if o.payment == nil {
 		return nil, false, ErrPaymentDisabled
 	}
+
 	if providerPaymentID == uuid.Nil {
 		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "invalid_provider_id", Reason: "provider payment UUID is nil", Action: "reject callback and inspect provider payload", CallbackStatus: status})
 		return nil, false, errors.New("invalid provider payment UUID")
@@ -885,20 +1021,26 @@ func (o *OrderService) CancelPaymentByProvider(ctx context.Context, providerPaym
 		if errors.Is(err, database.ErrOrderNotFound) || errors.Is(err, gorm.ErrRecordNotFound) {
 			logger.Warn("payment cancellation callback for unknown order", zap.String("provider_payment_id", providerPaymentID.String()), zap.String("status", status))
 			o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "unknown_provider_id", Reason: "cancellation callback references an order that does not exist", Action: "verify the provider transaction and reconcile manually", ProviderID: providerPaymentID.String(), CallbackStatus: status})
+
 			return nil, false, nil
 		}
+
 		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "load_order_failed", Reason: err.Error(), Action: "retry callback after database recovery", ProviderID: providerPaymentID.String(), CallbackStatus: status})
+
 		return nil, false, fmt.Errorf("find payment order for cancellation: %w", err)
 	}
+
 	if order.Currency != currency {
 		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "callback_currency_mismatch", Reason: fmt.Sprintf("callback currency %q does not match order currency %q", currency, order.Currency), Action: "reject callback and investigate provider payload", OrderID: order.ID, ProductID: order.ProductID, SubscriptionID: order.SubscriptionID, AmountCents: order.AmountCents, Currency: currency, ProviderID: providerPaymentID.String(), CallbackStatus: status})
 		return nil, false, ErrCurrencyMismatch
 	}
+
 	cents, err := platega.ParseCallbackAmount(amount)
 	if err != nil {
 		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "callback_amount_invalid", Reason: err.Error(), Action: "reject callback and inspect provider payload", OrderID: order.ID, ProductID: order.ProductID, SubscriptionID: order.SubscriptionID, AmountCents: order.AmountCents, Currency: currency, ProviderID: providerPaymentID.String(), CallbackStatus: status, Payload: amount.String()})
 		return nil, false, fmt.Errorf("parse cancellation amount: %w", err)
 	}
+
 	if cents != order.AmountCents {
 		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "callback_amount_mismatch", Reason: fmt.Sprintf("callback amount %d cents does not match order amount %d cents", cents, order.AmountCents), Action: "reject callback and investigate provider payload", OrderID: order.ID, ProductID: order.ProductID, SubscriptionID: order.SubscriptionID, AmountCents: cents, Currency: currency, ProviderID: providerPaymentID.String(), CallbackStatus: status})
 		return nil, false, ErrAmountMismatch
@@ -908,6 +1050,7 @@ func (o *OrderService) CancelPaymentByProvider(ctx context.Context, providerPaym
 		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "invalid_payment_status", Reason: fmt.Sprintf("unsupported cancellation status %q", status), Action: "ignore callback and verify provider status", OrderID: order.ID, ProductID: order.ProductID, SubscriptionID: order.SubscriptionID, AmountCents: order.AmountCents, Currency: order.Currency, ProviderID: providerPaymentID.String(), CallbackStatus: status})
 		return nil, false, ErrInvalidPaymentTransition
 	}
+
 	isChargeback := status == "CHARGEBACKED"
 	// wasPaid is computed post-CAS from result.WasPaid (the BEFORE-transition
 	// state of the order). A chargeback on a still-pending order has not yet
@@ -916,43 +1059,55 @@ func (o *OrderService) CancelPaymentByProvider(ctx context.Context, providerPaym
 	if isChargeback {
 		from = append(from, database.OrderStatusPaid)
 	}
+
 	if isChargeback {
 		if o.syncSvc == nil {
 			err := fmt.Errorf("%w: SyncService is not configured", ErrChargebackAtomicPathNotReady)
 			o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "cancel_payment_failed", Reason: err.Error(), Action: "wire SyncService before enabling chargebacks", OrderID: order.ID, ProductID: order.ProductID, SubscriptionID: order.SubscriptionID, AmountCents: order.AmountCents, Currency: order.Currency, ProviderID: providerPaymentID.String(), CallbackStatus: status})
+
 			return nil, false, err
 		}
+
 		freePlan, planErr := o.db.GetPlanByName(ctx, database.FreePlanName)
 		if planErr != nil {
 			o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "cancel_payment_failed", Reason: planErr.Error(), Action: "retry callback after database recovery", OrderID: order.ID, ProductID: order.ProductID, SubscriptionID: order.SubscriptionID, AmountCents: order.AmountCents, Currency: order.Currency, ProviderID: providerPaymentID.String(), CallbackStatus: status})
 			return nil, false, fmt.Errorf("resolve free plan for chargeback: %w", planErr)
 		}
+
 		result, txErr := o.db.CancelPaidOrderAndDowngradeCAS(ctx, "platega", providerPaymentID, time.Now().UTC(), freePlan.ID, o.chargebackPlanInTx())
 		if txErr != nil {
 			o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "cancel_payment_failed", Reason: txErr.Error(), Action: "retry callback after database recovery", OrderID: order.ID, ProductID: order.ProductID, SubscriptionID: order.SubscriptionID, AmountCents: order.AmountCents, Currency: order.Currency, ProviderID: providerPaymentID.String(), CallbackStatus: status})
 			return nil, false, fmt.Errorf("cancel payment: %w", txErr)
 		}
+
 		if result == nil || !result.Transitioned {
 			logger.Warn("payment cancellation callback was a no-op", zap.String("provider_payment_id", providerPaymentID.String()), zap.String("status", status))
 			return nil, false, nil
 		}
+
 		order = result.Order
 		wasPaid = result.WasPaid
+
 		var (
 			chargebackSub     *database.Subscription
 			chargebackProduct *database.Product
 		)
+
 		if wasPaid {
 			recordPaymentAmount("chargeback", order.AmountCents, order.Currency)
 			chargebackSub, chargebackProduct = o.loadChargebackAlertContext(ctx, order)
 		}
+
 		unlock()
+
 		if wasPaid {
 			o.notifyAdminChargeback(ctx, chargebackSub, order, chargebackProduct, result.Downgraded)
 		}
+
 		if result.Downgraded {
 			o.syncChargebackAfterCommit(ctx, order.SubscriptionID)
 		}
+
 		return order, wasPaid, nil
 	}
 
@@ -961,6 +1116,7 @@ func (o *OrderService) CancelPaymentByProvider(ctx context.Context, providerPaym
 		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "cancel_payment_failed", Reason: err.Error(), Action: "retry callback after database recovery", OrderID: order.ID, ProductID: order.ProductID, SubscriptionID: order.SubscriptionID, AmountCents: order.AmountCents, Currency: order.Currency, ProviderID: providerPaymentID.String(), CallbackStatus: status})
 		return nil, false, fmt.Errorf("cancel payment: %w", err)
 	}
+
 	if !transitioned {
 		logger.Warn("payment cancellation callback was a no-op", zap.String("provider_payment_id", providerPaymentID.String()), zap.String("status", status))
 		return nil, false, nil
@@ -969,7 +1125,9 @@ func (o *OrderService) CancelPaymentByProvider(ctx context.Context, providerPaym
 	// to canceled. The only field changed in the DB is Status; mirror it in
 	// memory so downstream callers do not need a second SELECT.
 	order.Status = database.OrderStatusCanceled
+
 	unlock()
+
 	return order, wasPaid, nil
 }
 
@@ -977,6 +1135,7 @@ func (o *OrderService) chargebackPlanInTx() database.ChargebackPlanInTxFn {
 	if o.syncSvc == nil {
 		return nil
 	}
+
 	return func(ctx context.Context, tx *gorm.DB, subscriptionID, freePlanID uint) error {
 		return o.syncSvc.ApplyPlanToSubscriptionInTx(ctx, tx, subscriptionID, freePlanID)
 	}
@@ -996,6 +1155,7 @@ func mirrorOrderFromSubscriptionAfterCAS(order *database.Order, sub *database.Su
 		newExpiry := *sub.ExpiresAt
 		order.ExpiresAt = &newExpiry
 	}
+
 	order.Status = database.OrderStatusPaid
 	paidAt, activatedAt := now, now
 	order.PaidAt = &paidAt
@@ -1011,18 +1171,23 @@ func (o *OrderService) loadChargebackAlertContext(ctx context.Context, order *da
 		sub     *database.Subscription
 		product *database.Product
 	)
-	if loaded, subErr := o.db.GetByID(ctx, order.SubscriptionID); subErr == nil && loaded != nil {
+
+	loaded, subErr := o.db.GetByID(ctx, order.SubscriptionID)
+	if subErr == nil && loaded != nil {
 		sub = loaded
 	} else if subErr != nil {
 		logger.Debug("chargeback admin alert: subscription lookup failed", zap.Uint("order_id", order.ID), zap.Error(subErr))
 	}
+
 	if order.ProductID != 0 {
-		if loaded, pErr := o.db.GetProductByID(ctx, order.ProductID); pErr == nil && loaded != nil {
+		loaded, pErr := o.db.GetProductByID(ctx, order.ProductID)
+		if pErr == nil && loaded != nil {
 			product = loaded
 		} else if pErr != nil {
 			logger.Debug("chargeback admin alert: product lookup failed", zap.Uint("order_id", order.ID), zap.Uint("product_id", order.ProductID), zap.Error(pErr))
 		}
 	}
+
 	return sub, product
 }
 
@@ -1030,9 +1195,12 @@ func (o *OrderService) syncChargebackAfterCommit(ctx context.Context, subscripti
 	if o.syncSvc == nil {
 		return
 	}
+
 	dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), paymentSyncTimeout)
 	defer cancel()
-	if err := o.syncSvc.SyncSubscription(dctx, subscriptionID); err != nil {
+
+	err := o.syncSvc.SyncSubscription(dctx, subscriptionID)
+	if err != nil {
 		logger.Warn("chargeback post-commit sync failed", zap.Uint("subscription_id", subscriptionID), zap.Error(err))
 	}
 }
@@ -1045,27 +1213,35 @@ func (o *OrderService) BuildPaidUserNotification(ctx context.Context, order *dat
 	if order == nil {
 		return 0, "", errors.New("order is nil")
 	}
+
 	sub, err := o.db.GetByID(ctx, order.SubscriptionID)
 	if err != nil {
 		return 0, "", fmt.Errorf("load paid subscription: %w", err)
 	}
+
 	if sub == nil {
 		return 0, "", errors.New("paid subscription is nil")
 	}
+
 	if sub.TelegramID <= 0 {
 		logger.Warn("paid subscription has invalid telegram id; skipping notification",
 			zap.Uint("order_id", order.ID),
 			zap.Uint("subscription_id", order.SubscriptionID),
 			zap.Int64("telegram_id", sub.TelegramID))
+
 		return 0, "", nil
 	}
+
 	if o.subSvc == nil {
 		return 0, "", errors.New("subscription service is not configured")
 	}
+
 	_, traffic, err := o.subSvc.GetWithTraffic(ctx, sub.TelegramID)
 	if err != nil {
 		return 0, "", fmt.Errorf("load paid subscription traffic: %w", err)
 	}
+
 	text := FormatSubscriptionMessage("✅ *Оплата подтверждена!*", "", traffic, SubscriptionURL(o.cfg, sub.SubscriptionID))
+
 	return sub.TelegramID, text, nil
 }

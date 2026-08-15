@@ -242,8 +242,10 @@ func TestExpireSubscriptionWithPlanCAS_RollsBackOnPlanApplyFailure(t *testing.T)
 	ctx := context.Background()
 	freePlan, err := svc.GetPlanByName(ctx, FreePlanName)
 	require.NoError(t, err)
+
 	paidPlan := &Plan{Name: "expiry-rollback", IsActive: true}
 	require.NoError(t, svc.db.Create(paidPlan).Error)
+
 	expired := time.Now().UTC().Add(-time.Hour)
 	productID := uint(1)
 	currency := "RUB"
@@ -270,8 +272,10 @@ func TestExpireSubscriptionWithPlanCAS_RequiresExpiredActiveSubscription(t *test
 	ctx := context.Background()
 	freePlan, err := svc.GetPlanByName(ctx, FreePlanName)
 	require.NoError(t, err)
+
 	paidPlan := &Plan{Name: "expiry-paid", IsActive: true}
 	require.NoError(t, svc.db.Create(paidPlan).Error)
+
 	expired := time.Now().UTC().Add(-time.Hour)
 	productID := uint(1)
 	currency := "RUB"
@@ -285,6 +289,7 @@ func TestExpireSubscriptionWithPlanCAS_RequiresExpiredActiveSubscription(t *test
 	})
 	require.NoError(t, err)
 	assert.True(t, applyCalled)
+
 	updated, err := svc.GetByID(ctx, sub.ID)
 	require.NoError(t, err)
 	assert.Equal(t, freePlan.ID, updated.PlanID)

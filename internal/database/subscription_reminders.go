@@ -18,18 +18,22 @@ func (s *Service) ClaimReminder(ctx context.Context, id uint, bit int, expiresAt
 	if result.Error != nil {
 		return false, fmt.Errorf("failed to claim reminder: %w", result.Error)
 	}
+
 	if result.RowsAffected > 0 {
 		return true, nil
 	}
 
 	var current Subscription
+
 	check := s.db.WithContext(ctx).Select("id, expires_at").First(&current, id)
 	if errors.Is(check.Error, gorm.ErrRecordNotFound) {
 		return false, ErrSubscriptionNotFound
 	}
+
 	if check.Error != nil {
 		return false, fmt.Errorf("failed to verify reminder claim: %w", check.Error)
 	}
+
 	return false, nil
 }
 
@@ -41,18 +45,22 @@ func (s *Service) ReleaseReminder(ctx context.Context, id uint, bit int, expires
 	if result.Error != nil {
 		return fmt.Errorf("failed to release reminder: %w", result.Error)
 	}
+
 	if result.RowsAffected > 0 {
 		return nil
 	}
 
 	var current Subscription
+
 	check := s.db.WithContext(ctx).Select("id, expires_at").First(&current, id)
 	if errors.Is(check.Error, gorm.ErrRecordNotFound) {
 		return ErrSubscriptionNotFound
 	}
+
 	if check.Error != nil {
 		return fmt.Errorf("failed to verify reminder release: %w", check.Error)
 	}
+
 	return nil
 }
 
@@ -60,10 +68,12 @@ func (s *Service) ReleaseReminder(ctx context.Context, id uint, bit int, expires
 // It uses indexed expires_at and excludes perpetual, free, and trial subscriptions.
 func (s *Service) GetSubscriptionsExpiringInRange(ctx context.Context, from, to time.Time) ([]Subscription, error) {
 	var subs []Subscription
+
 	nonPaidPlanSubQuery := s.db.WithContext(ctx).
 		Select("id").
 		Table("plans").
 		Where("name IN ?", []string{FreePlanName, TrialPlanName})
+
 	result := s.db.WithContext(ctx).
 		Where("status = ? AND expires_at IS NOT NULL AND expires_at >= ? AND expires_at <= ? AND plan_id NOT IN (?)",
 			"active", from, to, nonPaidPlanSubQuery).
@@ -71,5 +81,6 @@ func (s *Service) GetSubscriptionsExpiringInRange(ctx context.Context, from, to 
 	if result.Error != nil {
 		return nil, fmt.Errorf("failed to get subscriptions expiring in range: %w", result.Error)
 	}
+
 	return subs, nil
 }

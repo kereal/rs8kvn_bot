@@ -32,6 +32,7 @@ func (p *PerUserRateLimiter) getOrCreateBucket(userID int64) *TokenBucket {
 	p.mu.RLock()
 	bucket, exists := p.buckets[userID]
 	p.mu.RUnlock()
+
 	if exists {
 		return bucket
 	}
@@ -47,6 +48,7 @@ func (p *PerUserRateLimiter) getOrCreateBucket(userID int64) *TokenBucket {
 
 	bucket = NewTokenBucket(p.maxTokens, p.refillRate)
 	p.buckets[userID] = bucket
+
 	return bucket
 }
 
@@ -69,6 +71,7 @@ func (p *PerUserRateLimiter) Cleanup(maxIdle time.Duration) int {
 	defer p.mu.Unlock()
 
 	now := time.Now()
+
 	var toDelete []int64
 
 	for userID, bucket := range p.buckets {
@@ -108,5 +111,6 @@ func (p *PerUserRateLimiter) StartCleanup(ctx context.Context, interval, maxIdle
 func (p *PerUserRateLimiter) BucketCount() int {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
+
 	return len(p.buckets)
 }

@@ -2,8 +2,10 @@ package e2e
 
 import (
 	"context"
+	"net/http"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/kereal/rs8kvn_bot/internal/bot"
 	"github.com/kereal/rs8kvn_bot/internal/config"
@@ -30,7 +32,8 @@ func setupTestDB(t *testing.T) *database.Service {
 	require.NoError(t, err, "Failed to create database service")
 
 	t.Cleanup(func() {
-		if err := db.Close(); err != nil {
+		err := db.Close()
+		if err != nil {
 			t.Logf("Warning: failed to close database: %v", err)
 		}
 	})
@@ -53,6 +56,34 @@ type e2eTestEnv struct {
 	chatID     int64
 	username   string
 	subService *service.SubscriptionService
+}
+
+// waitForServerReady polls the server's /healthz endpoint until it responds
+// with HTTP 200 or the timeout expires. This is more reliable than a fixed
+// time.Sleep because it works correctly even under heavy CI load.
+func waitForServerReady(t *testing.T, addr string, timeout time.Duration) {
+	t.Helper()
+
+	deadline := time.Now().Add(timeout)
+	url := "http://" + addr + "/healthz"
+
+	for time.Now().Before(deadline) {
+		resp, err := http.Get(url)
+		if err == nil {
+			err := resp.Body.Close()
+			if err != nil {
+				t.Logf("Warning: failed to close health check body: %v", err)
+			}
+
+			if resp.StatusCode == http.StatusOK {
+				return
+			}
+		}
+
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	t.Fatalf("server at %s did not become ready within %v", addr, timeout)
 }
 
 func setupE2EEnv(t *testing.T) *e2eTestEnv {
@@ -82,6 +113,7 @@ func setupE2EEnv(t *testing.T) *e2eTestEnv {
 	require.NoError(t, db.CreateNode(ctx, node), "create test node")
 	require.NoError(t, db.LinkNodeToPlan(ctx, "trial", node.ID), "link node to trial plan")
 	require.NoError(t, db.LinkNodeToPlan(ctx, "free", node.ID), "link node to free plan")
+
 	xuiClients := map[uint]interfaces.XUIClient{1: mockXUI}
 	nodes := e2eNodes("https://panel.example.com")
 	subService := service.NewSubscriptionService(db, xuiClients, e2eVPNClients(xuiClients), nodes, cfg)
@@ -133,5 +165,6 @@ func e2eVPNClients(xuiClients map[uint]interfaces.XUIClient) map[uint]vpn.Client
 	for id, xc := range xuiClients {
 		m[id] = vpn.NewThreeXUIClient(xc, []int{1})
 	}
+
 	return m
 }

@@ -27,6 +27,7 @@ func TestSubscriptionSyncWorker_Run_RecordsUnavailableNodeRetry(t *testing.T) {
 
 	db, err := testutil.NewTestDatabaseService(t)
 	require.NoError(t, err)
+
 	ctx := context.Background()
 
 	plan := &database.Plan{Name: "test-plan-sync-worker", DevicesLimit: 1, TrafficLimit: 1024}
@@ -55,6 +56,7 @@ func TestSubscriptionSyncWorker_Run_RecordsUnavailableNodeRetry(t *testing.T) {
 	defer cancel()
 
 	done := make(chan struct{})
+
 	go func() {
 		worker.Run(workerCtx)
 		close(done)

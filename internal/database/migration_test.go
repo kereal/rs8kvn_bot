@@ -35,8 +35,10 @@ func TestRunMigrationsRejectsDatabaseNewerThanEmbedded(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "newer than the latest embedded migration 32")
 
-	var version int
-	var dirty bool
+	var (
+		version int
+		dirty   bool
+	)
 	require.NoError(t, sqlDB.QueryRow("SELECT version, dirty FROM schema_migrations").Scan(&version, &dirty))
 	assert.Equal(t, 33, version)
 	assert.False(t, dirty)
@@ -63,6 +65,7 @@ func TestMigrationVersionToInt(t *testing.T) {
 				require.Error(t, err)
 				return
 			}
+
 			require.NoError(t, err)
 			assert.Equal(t, tt.want, got)
 		})
@@ -76,6 +79,7 @@ func TestMigration_Idempotency(t *testing.T) {
 
 	db1, err := NewService(dbPath)
 	require.NoError(t, err)
+
 	ctx := context.Background()
 
 	sub := &Subscription{
@@ -118,6 +122,7 @@ func TestMigration_AddNewTable(t *testing.T) {
 	require.NoError(t, err)
 
 	var count int
+
 	err = sqlDB.QueryRow("SELECT COUNT(*) FROM test_table").Scan(&count)
 	require.NoError(t, err)
 
@@ -133,6 +138,7 @@ func TestMigration_PreserveDataOnUpgrade(t *testing.T) {
 
 	db1, err := NewService(dbPath)
 	require.NoError(t, err)
+
 	ctx := context.Background()
 
 	sub := &Subscription{
@@ -163,7 +169,7 @@ func TestMigration_RunMultipleTimes(t *testing.T) {
 
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		db, err := NewService(dbPath)
 		require.NoError(t, err, "Migration should succeed on attempt %d", i+1)
 		require.NoError(t, db.Close())
@@ -176,9 +182,12 @@ func TestMigration_InvalidSchema(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	f, err := os.Create(dbPath)
 	require.NoError(t, err)
-	if _, err := f.WriteString("invalid sqlite content"); err != nil {
+
+	_, err = f.WriteString("invalid sqlite content")
+	if err != nil {
 		t.Logf("Warning: failed to write to file: %v", err)
 	}
+
 	require.NoError(t, f.Close())
 
 	_, err = NewService(dbPath)
@@ -196,8 +205,11 @@ func TestMigration_SchemaVersionTracking(t *testing.T) {
 	sqlDB, err := db.db.DB()
 	require.NoError(t, err)
 
-	var version int
-	var dirty bool
+	var (
+		version int
+		dirty   bool
+	)
+
 	err = sqlDB.QueryRow("SELECT version, dirty FROM schema_migrations").Scan(&version, &dirty)
 	require.NoError(t, err)
 
@@ -222,6 +234,7 @@ func TestMigration_ProductsHaveRequiredName(t *testing.T) {
 
 	rows, err := sqlDB.Query("PRAGMA table_info(products)")
 	require.NoError(t, err)
+
 	defer rows.Close()
 
 	type columnInfo struct {
@@ -231,18 +244,23 @@ func TestMigration_ProductsHaveRequiredName(t *testing.T) {
 	}
 
 	var nameColumn *columnInfo
+
 	for rows.Next() {
-		var cid int
-		var name, typeName string
-		var notNull int
-		var defaultValue any
-		var pk int
+		var (
+			cid            int
+			name, typeName string
+			notNull        int
+			defaultValue   any
+			pk             int
+		)
 
 		require.NoError(t, rows.Scan(&cid, &name, &typeName, &notNull, &defaultValue, &pk))
+
 		if name == "name" {
 			nameColumn = &columnInfo{name: name, typeName: typeName, notNull: notNull}
 		}
 	}
+
 	require.NoError(t, rows.Err())
 	require.NotNil(t, nameColumn)
 	assert.Equal(t, "VARCHAR(255)", nameColumn.typeName)
@@ -296,6 +314,7 @@ func TestMigration_005_CleansUpDuplicateInvites(t *testing.T) {
 	// 1. Create DB (this runs all migrations including 005 + creates the unique index)
 	db, err := NewService(dbPath)
 	require.NoError(t, err)
+
 	defer db.Close()
 
 	sqlDB, err := db.db.DB()
@@ -318,6 +337,7 @@ func TestMigration_005_CleansUpDuplicateInvites(t *testing.T) {
 
 	// Verify we now have 3 rows (pre-005 state)
 	var count int
+
 	err = sqlDB.QueryRow("SELECT COUNT(*) FROM invites WHERE referrer_tg_id = ?", referrer).Scan(&count)
 	require.NoError(t, err)
 	assert.Equal(t, 3, count, "Should have 3 duplicate invites before running 005 dedup logic")
@@ -350,6 +370,7 @@ func TestMigration_005_CleansUpDuplicateInvites(t *testing.T) {
 	assert.Equal(t, 1, count, "005 dedup must leave exactly one code per referrer")
 
 	var remainingCode string
+
 	err = sqlDB.QueryRow("SELECT code FROM invites WHERE referrer_tg_id = ?", referrer).Scan(&remainingCode)
 	require.NoError(t, err)
 	assert.Equal(t, "VERYOLD", remainingCode, "005 must keep the oldest code by created_at")

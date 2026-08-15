@@ -172,12 +172,16 @@ func (m *mockXUIClient) Close() error {
 func TestProxmanClient_CreateSubscription_SendsWebhook(t *testing.T) {
 	t.Parallel()
 
-	var gotToken string
-	var gotBody string
+	var (
+		gotToken string
+		gotBody  string
+	)
+
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotToken = r.Header.Get("Authorization")
 		b, _ := io.ReadAll(r.Body)
 		gotBody = string(b)
+
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("ok"))
 	}))
@@ -261,8 +265,10 @@ func TestProxmanClient_UpdateSubscription_NoOp(t *testing.T) {
 	t.Parallel()
 
 	var calls int
+
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
+
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("ok"))
 	}))

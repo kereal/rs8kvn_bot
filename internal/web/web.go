@@ -11,9 +11,11 @@ import (
 	"fmt"
 	"html/template"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -110,20 +112,34 @@ type Server struct {
 func NewServer(addr string, db interfaces.WebRepository, cfg *config.Config, botUsername string, subService *service.SubscriptionService, subServer *subserver.Service) *Server {
 	trialTmpl := template.Must(template.New("trial.html").Funcs(template.FuncMap{"formatTime": func(t time.Time) string { return t.Format("02.01.2006 15:04") }}).ParseFS(staticFiles, "templates/trial.html"))
 	errorTmpl := template.Must(template.New("error.html").ParseFS(staticFiles, "templates/error.html"))
+
 	return &Server{addr: addr, db: db, cfg: cfg, botUsername: botUsername, subService: subService, subServer: subServer, checkers: make(map[string]func(context.Context) ComponentHealth), inviteCodeRegex: regexp.MustCompile(`^[a-zA-Z0-9_-]+$`), startTime: time.Now(), trialTemplate: trialTmpl, errorTemplate: errorTmpl}
 }
 
 // SetBot wires Telegram delivery for payment notifications and administrator alerts.
-func (s *Server) SetBot(bot interfaces.BotAPI) { s.bot = bot }
+// The server may already be serving when this is called (payment callbacks run
+// concurrently), so the field is written under the lock.
+func (s *Server) SetBot(bot interfaces.BotAPI) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.bot = bot
+}
 
 // SetOrderService wires payment confirmation and cancellation into the callback endpoint.
-func (s *Server) SetOrderService(orderService *service.OrderService) { s.orderService = orderService }
+func (s *Server) SetOrderService(orderService *service.OrderService) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.orderService = orderService
+}
 
 // SetPaymentConfig configures runtime payment settings used by the callback
 // endpoint. Set before exposing /payment/callback; nil disables it.
 func (s *Server) SetPaymentConfig(c *PaymentConfig) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	s.paymentConfig = c
 }
 
@@ -132,6 +148,7 @@ func (s *Server) SetPaymentConfig(c *PaymentConfig) {
 func (s *Server) RegisterChecker(name string, checker func(context.Context) ComponentHealth) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	s.checkers[name] = checker
 }
 
@@ -139,6 +156,7 @@ func (s *Server) RegisterChecker(name string, checker func(context.Context) Comp
 func (s *Server) SetReady(ready bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	s.ready = ready
 }
 
@@ -147,6 +165,7 @@ func (s *Server) SetReady(ready bool) {
 func (s *Server) SetPaymentReady(ready bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	s.paymentReady = ready
 }
 
@@ -154,6 +173,7 @@ func (s *Server) SetPaymentReady(ready bool) {
 func (s *Server) SetBotUsername(username string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	s.botUsername = username
 }
 
@@ -163,14 +183,20 @@ func (s *Server) SetBotUsername(username string) {
 func (s *Server) effectiveBotUsername() string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+
 	return s.botUsername
 }
 
 // Addr returns the bound listener address, or the configured address before Start.
 func (s *Server) Addr() string {
-	if s.listenerAddr != "" {
-		return s.listenerAddr
+	s.mu.RLock()
+	listenerAddr := s.listenerAddr
+	s.mu.RUnlock()
+
+	if listenerAddr != "" {
+		return listenerAddr
 	}
+
 	return s.addr
 }
 
@@ -204,13 +230,19 @@ func (s *Server) Start(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to bind %s: %w", s.addr, err)
 	}
+
+	s.mu.Lock()
 	s.listenerAddr = listener.Addr().String()
+	s.mu.Unlock()
+
 	logger.Info("Web server started", zap.String("addr", s.listenerAddr))
 	s.initSubserverAccessLogger()
 
 	go func() {
 		defer logger.Recover("HTTP server")
-		if err := s.server.Serve(listener); err != nil && err != http.ErrServerClosed {
+
+		err := s.server.Serve(listener)
+		if err != nil && err != http.ErrServerClosed {
 			logger.Error("HTTP server error", zap.Error(err))
 		} else if err == http.ErrServerClosed {
 			logger.Info("HTTP server stopped gracefully")
@@ -232,6 +264,7 @@ func (s *Server) initSubserverAccessLogger() {
 		logger.Error("Subserver access logging disabled",
 			zap.String("path", s.cfg.SubServerAccessLogPath),
 			zap.Error(err))
+
 		return
 	}
 
@@ -245,20 +278,24 @@ func (s *Server) initSubserverAccessLogger() {
 // server. It returns all shutdown errors joined together.
 func (s *Server) Stop(ctx context.Context) error {
 	var errs []error
+
 	if s.subserverLogger != nil {
 		closeCtx, cancel := context.WithTimeout(ctx, subserverAccessLogCloseTimeout)
 		defer cancel()
 
-		if cerr := s.subserverLogger.CloseWithContext(closeCtx); cerr != nil {
+		cerr := s.subserverLogger.CloseWithContext(closeCtx)
+		if cerr != nil {
 			errs = append(errs, cerr)
 		}
 	}
 	// HTTP server must shut down even if access-log close failed.
 	if s.server != nil {
-		if serr := s.server.Shutdown(ctx); serr != nil {
+		serr := s.server.Shutdown(ctx)
+		if serr != nil {
 			errs = append(errs, serr)
 		}
 	}
+
 	return errors.Join(errs...)
 }
 
@@ -268,6 +305,7 @@ func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		w.Header().Set("Allow", "GET, HEAD")
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+
 		return
 	}
 
@@ -284,6 +322,7 @@ func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		w.Header().Set("Allow", "GET, HEAD")
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+
 		return
 	}
 
@@ -293,11 +332,15 @@ func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 	s.mu.RLock()
 	ready := s.ready
 	s.mu.RUnlock()
+
 	if !ready {
 		w.WriteHeader(http.StatusServiceUnavailable)
-		if _, err := w.Write([]byte("NOT READY")); err != nil {
+
+		_, err := w.Write([]byte("NOT READY"))
+		if err != nil {
 			logger.Debug("failed to write readiness response", zap.Error(err))
 		}
+
 		return
 	}
 
@@ -305,12 +348,16 @@ func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 
 	if health.Status == "ok" {
 		w.WriteHeader(http.StatusOK)
-		if _, err := w.Write([]byte("OK")); err != nil {
+
+		_, err := w.Write([]byte("OK"))
+		if err != nil {
 			logger.Debug("failed to write readiness response", zap.Error(err))
 		}
 	} else {
 		w.WriteHeader(http.StatusServiceUnavailable)
-		if _, err := w.Write([]byte("NOT READY")); err != nil {
+
+		_, err := w.Write([]byte("NOT READY"))
+		if err != nil {
 			logger.Debug("failed to write readiness response", zap.Error(err))
 		}
 	}
@@ -324,16 +371,24 @@ func (s *Server) handlePaymentCallback(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", "POST")
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+
 		return
 	}
+
+	// Snapshot the runtime-wired dependencies under the same lock so a concurrent
+	// SetBot/SetOrderService cannot be observed as a torn state.
 	s.mu.RLock()
 	pc := s.paymentConfig
 	paymentReady := s.paymentReady
+	bot := s.bot
+	orderService := s.orderService
 	s.mu.RUnlock()
-	if !paymentReady || pc == nil || !pc.Enabled || s.orderService == nil || s.bot == nil {
+
+	if !paymentReady || pc == nil || !pc.Enabled || orderService == nil || bot == nil {
 		http.Error(w, "payments not available", http.StatusServiceUnavailable)
 		return
 	}
+
 	if !platega.VerifyHeaders(pc.MerchantID, pc.Secret, r.Header) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
@@ -347,6 +402,7 @@ func (s *Server) handlePaymentCallback(w http.ResponseWriter, r *http.Request) {
 	// Read the authenticated callback once so DEBUG can preserve every field
 	// sent by the provider, including fields unknown to CallbackPayload.
 	limitedBody := http.MaxBytesReader(w, r.Body, 256<<10)
+
 	rawBody, readErr := io.ReadAll(limitedBody)
 	if readErr != nil {
 		logger.Info("Payment callback rejected",
@@ -358,8 +414,10 @@ func (s *Server) handlePaymentCallback(w http.ResponseWriter, r *http.Request) {
 			zap.ByteString("body", rawBody))
 		s.notifyPaymentCallbackIssue(r.Context(), platega.CallbackPayload{}, "malformed_callback", readErr.Error(), "send a corrected callback and verify the provider payload")
 		http.Error(w, "invalid callback", http.StatusBadRequest)
+
 		return
 	}
+
 	logger.Debug("Payment callback raw payload",
 		zap.ByteString("body", rawBody))
 
@@ -368,7 +426,9 @@ func (s *Server) handlePaymentCallback(w http.ResponseWriter, r *http.Request) {
 	// Ignore provider fields that are not needed by this integration. Platega
 	// may add documented callback fields without requiring a bot deployment.
 	var payload platega.CallbackPayload
-	if err := decoder.Decode(&payload); err != nil {
+
+	err := decoder.Decode(&payload)
+	if err != nil {
 		logger.Info("Payment callback rejected",
 			zap.String("provider", "platega"),
 			zap.String("reason", "invalid_json"),
@@ -376,8 +436,10 @@ func (s *Server) handlePaymentCallback(w http.ResponseWriter, r *http.Request) {
 			zap.Error(err))
 		s.notifyPaymentCallbackIssue(r.Context(), payload, "malformed_callback", err.Error(), "send a corrected callback and verify the provider payload")
 		http.Error(w, "invalid callback", http.StatusBadRequest)
+
 		return
 	}
+
 	logger.Info("Payment callback received",
 		zap.String("provider", "platega"),
 		zap.String("payment_id", strings.TrimSpace(payload.ID)),
@@ -385,22 +447,32 @@ func (s *Server) handlePaymentCallback(w http.ResponseWriter, r *http.Request) {
 		zap.String("currency", strings.TrimSpace(payload.Currency)),
 		zap.String("amount", payload.Amount.String()),
 		zap.Int("body_bytes", len(rawBody)))
-	if _, err := platega.ParseTransactionID(payload.ID); err != nil {
+
+	paymentID, err := platega.ParseTransactionID(payload.ID)
+	if err != nil {
 		s.notifyPaymentCallbackIssue(r.Context(), payload, "invalid_provider_id", err.Error(), "verify the provider transaction ID and callback schema")
 		http.Error(w, "invalid callback", http.StatusBadRequest)
+
 		return
 	}
-	if err := payload.Validate(); err != nil {
+
+	err = payload.Validate()
+	if err != nil {
 		s.notifyPaymentCallbackIssue(r.Context(), payload, "invalid_callback", err.Error(), "send a corrected callback and verify the provider schema")
 		http.Error(w, "invalid callback", http.StatusBadRequest)
+
 		return
 	}
+
 	var trailing json.RawMessage
-	if err := decoder.Decode(&trailing); err != io.EOF {
+
+	err = decoder.Decode(&trailing)
+	if !errors.Is(err, io.EOF) {
 		reason := "callback contains trailing JSON data"
 		if err != nil {
 			reason = err.Error()
 		}
+
 		logger.Info("Payment callback rejected",
 			zap.String("provider", "platega"),
 			zap.String("payment_id", strings.TrimSpace(payload.ID)),
@@ -410,36 +482,34 @@ func (s *Server) handlePaymentCallback(w http.ResponseWriter, r *http.Request) {
 			zap.Error(err))
 		s.notifyPaymentCallbackIssue(r.Context(), payload, "trailing_callback_data", reason, "send exactly one JSON callback document")
 		http.Error(w, "invalid callback", http.StatusBadRequest)
-		return
-	}
-	paymentID, err := platega.ParseTransactionID(payload.ID)
-	if err != nil {
-		s.notifyPaymentCallbackIssue(r.Context(), payload, "invalid_provider_id", err.Error(), "verify the provider transaction ID and callback schema")
-		http.Error(w, "invalid callback", http.StatusBadRequest)
+
 		return
 	}
 
 	status := strings.ToUpper(strings.TrimSpace(payload.Status))
 	switch status {
 	case "CONFIRMED":
-		confirmation, err := s.orderService.ConfirmPayment(notifyCtx, paymentID, payload.Amount, payload.Currency)
+		confirmation, err := orderService.ConfirmPayment(notifyCtx, paymentID, payload.Amount, payload.Currency)
 		if err != nil {
 			if errors.Is(err, service.ErrAmountMismatch) || errors.Is(err, service.ErrCurrencyMismatch) || errors.Is(err, service.ErrInvalidPaymentTransition) {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 			} else {
 				http.Error(w, "processing failed", http.StatusInternalServerError)
 			}
+
 			return
 		}
+
 		if confirmation.Activated {
-			chatID, text, err := s.orderService.BuildPaidUserNotification(notifyCtx, confirmation.Order)
+			chatID, text, err := orderService.BuildPaidUserNotification(notifyCtx, confirmation.Order)
 			if err != nil {
 				logger.Warn("failed to build paid notification", zap.Error(err))
-				s.orderService.NotifyPaymentIssue(notifyCtx, service.PaymentIssue{Event: "paid_notification_build_failed", Reason: err.Error(), Action: "send the confirmed payment details to the user manually", OrderID: confirmation.Order.ID, SubscriptionID: confirmation.Order.SubscriptionID, ProductID: confirmation.Order.ProductID, PlanID: 0, AmountCents: confirmation.Order.AmountCents, Currency: confirmation.Order.Currency, ProviderID: payload.ID, CallbackStatus: payload.Status, Payload: payload.Payload, PaymentMethod: payload.PaymentMethod})
-			} else if chatID > 0 && s.bot != nil {
-				if _, err := s.bot.Send(tgbotapi.NewMessage(chatID, text)); err != nil {
+				orderService.NotifyPaymentIssue(notifyCtx, service.PaymentIssue{Event: "paid_notification_build_failed", Reason: err.Error(), Action: "send the confirmed payment details to the user manually", OrderID: confirmation.Order.ID, SubscriptionID: confirmation.Order.SubscriptionID, ProductID: confirmation.Order.ProductID, PlanID: 0, AmountCents: confirmation.Order.AmountCents, Currency: confirmation.Order.Currency, ProviderID: payload.ID, CallbackStatus: payload.Status, Payload: payload.Payload, PaymentMethod: payload.PaymentMethod})
+			} else if chatID > 0 && bot != nil {
+				_, err := bot.Send(tgbotapi.NewMessage(chatID, text))
+				if err != nil {
 					logger.Warn("failed to send paid notification", zap.Int64("chat_id", chatID), zap.Error(err))
-					s.orderService.NotifyPaymentIssue(notifyCtx, service.PaymentIssue{Event: "paid_notification_send_failed", Reason: err.Error(), Action: "send the confirmed payment details to the user manually", OrderID: confirmation.Order.ID, TelegramID: chatID, SubscriptionID: confirmation.Order.SubscriptionID, ProductID: confirmation.Order.ProductID, AmountCents: confirmation.Order.AmountCents, Currency: confirmation.Order.Currency, ProviderID: payload.ID, CallbackStatus: payload.Status, Payload: payload.Payload, PaymentMethod: payload.PaymentMethod})
+					orderService.NotifyPaymentIssue(notifyCtx, service.PaymentIssue{Event: "paid_notification_send_failed", Reason: err.Error(), Action: "send the confirmed payment details to the user manually", OrderID: confirmation.Order.ID, TelegramID: chatID, SubscriptionID: confirmation.Order.SubscriptionID, ProductID: confirmation.Order.ProductID, AmountCents: confirmation.Order.AmountCents, Currency: confirmation.Order.Currency, ProviderID: payload.ID, CallbackStatus: payload.Status, Payload: payload.Payload, PaymentMethod: payload.PaymentMethod})
 				}
 			}
 		}
@@ -448,14 +518,17 @@ func (s *Server) handlePaymentCallback(w http.ResponseWriter, r *http.Request) {
 		// previously-paid order automatically downgrades the subscription to the
 		// free plan inside CancelPaymentByProvider (unless another paid order
 		// exists); a plain CANCELED only cancels the pending order.
-		if _, _, err := s.orderService.CancelPaymentByProvider(notifyCtx, paymentID, status, payload.Amount, payload.Currency); err != nil {
+		_, _, err = orderService.CancelPaymentByProvider(notifyCtx, paymentID, status, payload.Amount, payload.Currency)
+		if err != nil {
 			if errors.Is(err, service.ErrAmountMismatch) || errors.Is(err, service.ErrCurrencyMismatch) {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 			} else {
 				http.Error(w, "processing failed", http.StatusInternalServerError)
 			}
+
 			return
 		}
+
 		if status == "CHARGEBACKED" {
 			logger.Warn("chargeback callback recorded; manual review required", zap.String("payment_id", payload.ID), zap.String("payload", payload.Payload))
 		}
@@ -465,8 +538,11 @@ func (s *Server) handlePaymentCallback(w http.ResponseWriter, r *http.Request) {
 		logger.Warn("ignored unsupported payment callback status", zap.String("status", payload.Status), zap.String("payment_id", payload.ID))
 		s.notifyPaymentCallbackIssue(r.Context(), payload, "unsupported_callback_status", fmt.Sprintf("unsupported callback status %q", payload.Status), "verify the provider status and update the integration only after documentation confirms it")
 	}
+
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(map[string]bool{"ok": true}); err != nil {
+
+	err = json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+	if err != nil {
 		logger.Warn("failed to write payment callback response", zap.Error(err))
 	}
 }
@@ -476,12 +552,17 @@ func (s *Server) handlePaymentCallback(w http.ResponseWriter, r *http.Request) {
 // The context is detached from the request so a disconnected client cannot
 // suppress the operational alert.
 func (s *Server) notifyPaymentCallbackIssue(ctx context.Context, payload platega.CallbackPayload, event, reason, action string) {
-	if s.orderService == nil {
+	s.mu.RLock()
+	orderService := s.orderService
+	s.mu.RUnlock()
+
+	if orderService == nil {
 		return
 	}
+
 	providerID := strings.TrimSpace(payload.ID)
 	callbackPayload := fmt.Sprintf("amount=%s; payload=%s", payload.Amount.String(), payload.Payload)
-	s.orderService.NotifyPaymentIssue(context.WithoutCancel(ctx), service.PaymentIssue{
+	orderService.NotifyPaymentIssue(context.WithoutCancel(ctx), service.PaymentIssue{
 		Event:          event,
 		Reason:         reason,
 		Action:         action,
@@ -498,19 +579,25 @@ func (s *Server) handleLogo(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		w.Header().Set("Allow", "GET, HEAD")
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+
 		return
 	}
+
 	data, err := staticFiles.ReadFile("templates/logo.png")
 	if err != nil {
 		http.Error(w, "logo not found", http.StatusNotFound)
 		return
 	}
+
 	w.Header().Set("Content-Type", "image/png")
 	w.Header().Set("Cache-Control", "public, max-age=86400")
+
 	if r.Method == http.MethodHead {
 		return
 	}
-	if _, err := w.Write(data); err != nil {
+
+	_, err = w.Write(data)
+	if err != nil {
 		logger.Debug("failed to write logo response", zap.Error(err))
 	}
 }
@@ -527,10 +614,10 @@ type HealthResponse struct {
 // their results into one aggregate status.
 func (s *Server) checkHealth(ctx context.Context) HealthResponse {
 	s.mu.RLock()
+
 	checkers := make(map[string]func(context.Context) ComponentHealth, len(s.checkers))
-	for k, v := range s.checkers {
-		checkers[k] = v
-	}
+	maps.Copy(checkers, s.checkers)
+
 	s.mu.RUnlock()
 
 	response := HealthResponse{
@@ -565,7 +652,8 @@ func (s *Server) writeJSON(w http.ResponseWriter, resp HealthResponse) {
 		w.WriteHeader(http.StatusOK)
 	}
 
-	if err := json.NewEncoder(w).Encode(resp); err != nil {
+	err := json.NewEncoder(w).Encode(resp)
+	if err != nil {
 		logger.Error("Failed to encode JSON response", zap.Error(err))
 	}
 }
@@ -582,6 +670,7 @@ func (s *Server) HandleInvite(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", "GET")
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+
 		return
 	}
 
@@ -592,6 +681,7 @@ func (s *Server) HandleInvite(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusNotFound)
 		s.renderErrorPage(w, "Страница не найдена")
+
 		return
 	}
 
@@ -600,6 +690,7 @@ func (s *Server) HandleInvite(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusNotFound)
 		s.renderErrorPage(w, "Приглашение не найдено")
+
 		return
 	}
 
@@ -612,6 +703,7 @@ func (s *Server) HandleInvite(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusNotFound)
 		s.renderErrorPage(w, "Приглашение не найдено")
+
 		return
 	}
 
@@ -626,10 +718,13 @@ func (s *Server) HandleInvite(w http.ResponseWriter, r *http.Request) {
 		// Trial уже создан — показываем существующий
 		logger.Info("Existing trial found via cookie", zap.String("sub_id", existingSub.SubscriptionID))
 		telegramLink := "https://t.me/" + s.effectiveBotUsername() + "?start=trial_" + existingSub.SubscriptionID
+
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
+
 		subURL := s.cfg.GlobalSubURL + existingSub.SubscriptionID
 		s.renderTrialPage(w, existingSub.SubscriptionID, subURL, telegramLink, s.cfg.TrialDurationHours)
+
 		return
 	}
 
@@ -641,17 +736,21 @@ func (s *Server) HandleInvite(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusInternalServerError)
 		s.renderErrorPage(w, "Ошибка сервера. Попробуйте позже.")
+
 		return
 	}
+
 	if count >= s.cfg.TrialRateLimit {
 		logger.Warn("Rate limit exceeded", zap.String("ip", ip), zap.Int("count", count))
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusTooManyRequests)
 		s.renderErrorPage(w, "Слишком много запросов. Попробуйте позже.")
+
 		return
 	}
 
-	if err := s.db.CreateTrialRequest(ctx, ip); err != nil {
+	err = s.db.CreateTrialRequest(ctx, ip)
+	if err != nil {
 		logger.Error("Failed to create trial request", zap.Error(err))
 	}
 
@@ -660,6 +759,7 @@ func (s *Server) HandleInvite(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusInternalServerError)
 		s.renderErrorPage(w, "Ошибка сервера. Попробуйте позже.")
+
 		return
 	}
 
@@ -669,6 +769,7 @@ func (s *Server) HandleInvite(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusInternalServerError)
 		s.renderErrorPage(w, "Ошибка сервера. Попробуйте позже.")
+
 		return
 	}
 
@@ -690,6 +791,7 @@ func (s *Server) HandleInvite(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
+
 	telegramLink := "https://t.me/" + s.effectiveBotUsername() + "?start=trial_" + result.SubID
 	s.renderTrialPage(w, result.SubID, result.SubscriptionURL, telegramLink, s.cfg.TrialDurationHours)
 }
@@ -717,6 +819,7 @@ func (s *Server) getExistingTrialFromCookie(r *http.Request, ctx context.Context
 			// Trial was cleaned up or not found — expected, fall through to new trial creation.
 			return nil, nil
 		}
+
 		return nil, fmt.Errorf("get trial subscription by sub id: %w", err)
 	}
 
@@ -729,6 +832,7 @@ func (s *Server) getExistingTrialFromCookie(r *http.Request, ctx context.Context
 	if planErr != nil {
 		return nil, fmt.Errorf("get plan for trial check: %w", planErr)
 	}
+
 	if plan.Name != database.TrialPlanName {
 		// Not a trial — expected business state.
 		return nil, nil
@@ -755,13 +859,16 @@ type trialPageData struct {
 // subscription and Telegram links.
 func (s *Server) renderTrialPage(w http.ResponseWriter, subID, subURL, telegramLink string, trialHours int) {
 	happLink := "happ://add/" + subURL
+
 	data := trialPageData{
 		HappLink:     template.URL(happLink), // #nosec G203 -- scheme is server-generated from validated subscription URL
 		SubURL:       subURL,
 		TelegramLink: template.URL(telegramLink), // #nosec G203 -- link is server-generated from the Telegram username and subscription ID
 		TrialHours:   trialHours,
 	}
-	if err := s.trialTemplate.Execute(w, data); err != nil {
+
+	err := s.trialTemplate.Execute(w, data)
+	if err != nil {
 		logger.Error("Failed to render trial page", zap.Error(err))
 	}
 }
@@ -774,7 +881,9 @@ type errorPageData struct {
 // renderErrorPage renders a user-facing error without exposing internal details.
 func (s *Server) renderErrorPage(w http.ResponseWriter, message string) {
 	data := errorPageData{Message: message}
-	if err := s.errorTemplate.Execute(w, data); err != nil {
+
+	err := s.errorTemplate.Execute(w, data)
+	if err != nil {
 		logger.Error("Failed to render error page", zap.Error(err))
 	}
 }
@@ -788,13 +897,14 @@ func getClientIP(r *http.Request) string {
 		if realIP := strings.TrimSpace(r.Header.Get("X-Real-IP")); realIP != "" {
 			return realIP
 		}
+
 		forwarded := r.Header.Get("X-Forwarded-For")
 		if forwarded != "" {
 			ips := strings.Split(forwarded, ",")
 			// Use the rightmost IP — set by the trusted reverse proxy.
 			// The leftmost is client-controlled and spoofable.
-			for i := len(ips) - 1; i >= 0; i-- {
-				ip := strings.TrimSpace(ips[i])
+			for _, v := range slices.Backward(ips) {
+				ip := strings.TrimSpace(v)
 				if ip != "" {
 					return ip
 				}
@@ -811,8 +921,10 @@ func getClientIP(r *http.Request) string {
 		if splitErr == nil {
 			return fallbackHost
 		}
+
 		return r.RemoteAddr
 	}
+
 	return host
 }
 
@@ -842,10 +954,13 @@ func isLocalAddress(host string) bool {
 func (s *Server) handleSubscription(w http.ResponseWriter, r *http.Request) {
 	clientIP := getClientIP(r)
 
-	var rec *statusRecorder
-	var response = w
+	var (
+		rec      *statusRecorder
+		response = w
+	)
 	if s.subserverLogger != nil && s.subserverLogger.Enabled() {
 		rec = &statusRecorder{ResponseWriter: w}
+
 		response = rec
 		defer s.logSubscriptionAccess(rec, r, clientIP)
 	}
@@ -853,6 +968,7 @@ func (s *Server) handleSubscription(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		response.Header().Set("Allow", "GET")
 		writeSubscriptionText(response, http.StatusMethodNotAllowed, "Method Not Allowed")
+
 		return
 	}
 
@@ -887,29 +1003,36 @@ func (s *Server) handleSubscription(w http.ResponseWriter, r *http.Request) {
 	)
 
 	requestHeaders := subserver.FilterHeaders(r.Header)
+
 	result, success, total, err := subserver.HandleSubscription(ctx, s.db, s.subServer, subID, clientIP, requestHeaders)
 	if rec != nil {
 		rec.success = success
 		rec.total = total
 	}
+
 	if err != nil {
 		if errors.Is(err, subserver.ErrSubscriptionNotFound) {
 			logger.Warn("Subscription not found",
 				zap.String("sub_id", subID),
 				zap.String("client_ip", clientIP))
 			writeSubscriptionText(response, http.StatusNotFound, "Subscription not found")
+
 			return
 		}
+
 		logger.Error("Failed to process subscription",
 			zap.String("sub_id", subID),
 			zap.String("client_ip", clientIP),
 			zap.Error(err))
+
 		if errors.Is(err, gorm.ErrRecordNotFound) ||
 			errors.Is(err, subserver.ErrNoSubscriptionItems) {
 			writeSubscriptionText(response, http.StatusNotFound, "Subscription not found")
 			return
 		}
+
 		writeSubscriptionText(response, http.StatusInternalServerError, "Internal Server Error")
+
 		return
 	}
 
@@ -918,6 +1041,7 @@ func (s *Server) handleSubscription(w http.ResponseWriter, r *http.Request) {
 			zap.String("sub_id", subID),
 			zap.String("client_ip", clientIP))
 		writeSubscriptionText(response, http.StatusInternalServerError, "Internal Server Error")
+
 		return
 	}
 
@@ -930,7 +1054,9 @@ func (s *Server) handleSubscription(w http.ResponseWriter, r *http.Request) {
 	} else {
 		response.WriteHeader(http.StatusOK)
 	}
-	if _, err := response.Write(result.Body); err != nil { // #nosec G705 -- body is intentionally returned as the subscription's plain response
+
+	_, err = response.Write(result.Body) // #nosec G705 -- body is intentionally returned as the subscription's plain response
+	if err != nil {
 		logger.Debug("failed to write subscription response", zap.Error(err))
 	}
 }
@@ -941,6 +1067,7 @@ func (s *Server) logSubscriptionAccess(rec *statusRecorder, r *http.Request, cli
 	if s == nil || s.subserverLogger == nil || rec == nil {
 		return
 	}
+
 	s.subserverLogger.Log(r, rec.StatusCode(), clientIP, rec.success, rec.total)
 }
 
@@ -949,7 +1076,9 @@ func (s *Server) logSubscriptionAccess(rec *statusRecorder, r *http.Request, cli
 func writeSubscriptionText(w http.ResponseWriter, statusCode int, body string) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(statusCode)
-	if _, err := w.Write([]byte(body)); err != nil {
+
+	_, err := w.Write([]byte(body))
+	if err != nil {
 		logger.Debug("failed to write subscription text response", zap.Error(err))
 	}
 }
@@ -969,6 +1098,7 @@ func (r *statusRecorder) WriteHeader(statusCode int) {
 	if r.statusCode == 0 {
 		r.statusCode = statusCode
 	}
+
 	r.ResponseWriter.WriteHeader(statusCode)
 }
 
@@ -977,6 +1107,7 @@ func (r *statusRecorder) Write(b []byte) (int, error) {
 	if r.statusCode == 0 {
 		r.statusCode = http.StatusOK
 	}
+
 	return r.ResponseWriter.Write(b)
 }
 
@@ -985,5 +1116,6 @@ func (r *statusRecorder) StatusCode() int {
 	if r.statusCode == 0 {
 		return http.StatusOK
 	}
+
 	return r.statusCode
 }

@@ -1,4 +1,3 @@
-// Package service contains subscription, payment, and synchronization business logic.
 package service
 
 import (
@@ -14,19 +13,24 @@ func FormatSubscriptionMessage(heading, status string, traffic *TrafficInfo, sub
 	if traffic == nil {
 		traffic = &TrafficInfo{}
 	}
+
 	trafficInfo := "неограничен"
 	progress := ""
+
 	if traffic.LimitGB > 0 {
 		trafficInfo = fmt.Sprintf("%.2f из %d Гб (%.0f%%)", traffic.UsedGB, traffic.LimitGB, traffic.Percentage)
 		progress = "\n" + traffic.ProgressBar
 	}
+
 	resetInfo := traffic.ResetInfo
 	if resetInfo == "" {
 		resetInfo = "нет"
 	}
+
 	if status == "" {
 		status = "активна"
 	}
+
 	return fmt.Sprintf(
 		"%s\n\n✌️ Статус: *%s*\n💡 Тариф: *%s*\n📊 Трафик: %s%s\n\n📅 Создана: %s\n⏰ Истекает: %s\n🔄 Сброс: %s\n\n🔗 Ссылка\n`%s`",
 		heading,
@@ -47,5 +51,6 @@ func SubscriptionURL(cfg *config.Config, subID string) string {
 	if cfg == nil {
 		return ""
 	}
+
 	return cfg.SubURL(subID)
 }

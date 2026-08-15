@@ -17,10 +17,12 @@ func TestSyncService_SyncSubscription_PendingUpdate_SendsProvisionAndActivates(t
 
 	db, err := testutil.NewTestDatabaseService(t)
 	require.NoError(t, err)
+
 	ctx := context.Background()
 
 	plan := &database.Plan{Name: "premium-update-plan", IsActive: true, DevicesLimit: 2, TrafficLimit: 8192}
 	require.NoError(t, db.GetDB().WithContext(ctx).Create(plan).Error)
+
 	node := &database.Node{Name: "pending-update-node", Type: database.NodeType3xUI, IsActive: true, Host: "http://update", APIToken: "token", InboundIDs: `[1]`}
 	require.NoError(t, db.GetDB().WithContext(ctx).Create(node).Error)
 	require.NoError(t, db.GetDB().WithContext(ctx).Create(&database.PlanNode{PlanID: plan.ID, NodeID: node.ID}).Error)
@@ -53,12 +55,15 @@ func TestSyncService_ApplyPlanToSubscription_MarksUpdatesAndReconcilesMembership
 
 	db, err := testutil.NewTestDatabaseService(t)
 	require.NoError(t, err)
+
 	ctx := context.Background()
 
 	plan := &database.Plan{Name: "apply-plan", IsActive: true, DevicesLimit: 1, TrafficLimit: 1024}
 	require.NoError(t, db.GetDB().WithContext(ctx).Create(plan).Error)
+
 	oldNode := &database.Node{Name: "apply-old", Type: database.NodeType3xUI, IsActive: true, Host: "http://old", APIToken: "old", InboundIDs: `[1]`}
 	targetNode := &database.Node{Name: "apply-target", Type: database.NodeType3xUI, IsActive: true, Host: "http://target", APIToken: "target", InboundIDs: `[1]`}
+
 	require.NoError(t, db.GetDB().WithContext(ctx).Create(oldNode).Error)
 	require.NoError(t, db.GetDB().WithContext(ctx).Create(targetNode).Error)
 	require.NoError(t, db.GetDB().WithContext(ctx).Create(&database.PlanNode{PlanID: plan.ID, NodeID: targetNode.ID}).Error)
@@ -74,10 +79,12 @@ func TestSyncService_ApplyPlanToSubscription_MarksUpdatesAndReconcilesMembership
 
 	rows, err := db.GetBySubscriptionID(ctx, sub.ID)
 	require.NoError(t, err)
+
 	statusByNode := make(map[uint]database.SyncStatus, len(rows))
 	for _, row := range rows {
 		statusByNode[row.NodeID] = row.Status
 	}
+
 	assert.Equal(t, database.SyncStatusPendingRemove, statusByNode[oldNode.ID])
 	assert.Equal(t, database.SyncStatusPendingUpdate, statusByNode[targetNode.ID])
 }

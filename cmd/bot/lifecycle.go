@@ -1,4 +1,3 @@
-// Package main wires the bot runtime, services, and graceful shutdown lifecycle.
 package main
 
 import (
@@ -29,6 +28,7 @@ func initSentry(cfg *config.Config) {
 	if cfg.SentryDSN == "" {
 		return
 	}
+
 	err := sentry.Init(sentry.ClientOptions{
 		Dsn:              cfg.SentryDSN,
 		Environment:      "production",
@@ -39,6 +39,7 @@ func initSentry(cfg *config.Config) {
 		fmt.Fprintf(os.Stderr, "Failed to initialize Sentry: %v\n", err)
 		return
 	}
+
 	fmt.Fprintln(os.Stderr, "Sentry error tracking initialized")
 }
 
@@ -81,10 +82,12 @@ func initDatabase(cfg *config.Config) (dbService *database.Service, deps *runtim
 		_ = dbService.Close()
 		return nil, nil, fmt.Errorf("list nodes: %w", err)
 	}
+
 	if len(nodes) == 0 {
 		_ = dbService.Close()
 		return nil, nil, fmt.Errorf("no nodes configured")
 	}
+
 	runtimeNodes, xuiClients, vpnClients, err := buildRuntimeNodeClients(nodes, defaultOptions())
 	if err != nil {
 		_ = dbService.Close()
@@ -117,19 +120,24 @@ func initServices(cfg *config.Config, dbService *database.Service, deps *runtime
 	subService := service.NewSubscriptionService(dbService, deps.xuiClients, deps.vpnClients, deps.nodes, cfg)
 	subService.SetBot(botAPI)
 	subService.SetSyncService(syncSvc)
+
 	subServer := subserver.NewService(config.SubServerCacheTTL)
 	handler := bot.NewHandler(botAPI, cfg, dbService, botConfig, subService, getVersion())
 	botCache := handler.Cache()
+
 	subService.SetInvalidateBySubIDFunc(func(subID string) {
 		botCache.InvalidateBySubID(subID)
 		subServer.InvalidateCache(subID)
 	})
+
 	var payment service.PaymentProvider
 	if cfg.PaymentEnabled {
 		payment = platega.New(platega.Config{MerchantID: cfg.PlategaMerchantID, Secret: cfg.PlategaSecret})
 	}
+
 	orderService := service.NewOrderService(dbService, subService, syncSvc, payment, "", cfg)
 	handler.SetOrderService(orderService)
+
 	return &appServices{subService: subService, subServer: subServer, handler: handler, orderService: orderService, syncService: syncSvc}
 }
 
@@ -138,6 +146,7 @@ func initServices(cfg *config.Config, dbService *database.Service, deps *runtime
 // complete or the shutdown timeout elapses.
 func runEventLoop(ctx context.Context, botAPI *tgbotapi.BotAPI, handler *bot.Handler, updates tgbotapi.UpdatesChannel) {
 	updateSem := make(chan struct{}, config.MaxConcurrentHandlers)
+
 	var updatesWg sync.WaitGroup
 
 eventLoop:
@@ -148,14 +157,17 @@ eventLoop:
 				logger.Info("Telegram updates channel closed")
 				break eventLoop
 			}
+
 			select {
 			case updateSem <- struct{}{}:
 				updatesWg.Add(1)
+
 				go func(u tgbotapi.Update) {
 					defer func() {
 						<-updateSem
 						updatesWg.Done()
 					}()
+
 					handleUpdateSafely(ctx, handler, u)
 				}(update)
 			case <-ctx.Done():
@@ -181,7 +193,9 @@ eventLoop:
 
 	// Wait for in-flight update handlers to complete
 	logger.Info("Waiting for update handlers to complete...")
+
 	done := make(chan struct{})
+
 	go func() {
 		updatesWg.Wait()
 		close(done)
@@ -202,7 +216,9 @@ func gracefulShutdown(bgWg *sync.WaitGroup, handler *bot.Handler, subServer *sub
 	subServer.Stop()
 
 	logger.Info("Waiting for background tasks to stop...")
+
 	bgDone := make(chan struct{})
+
 	go func() {
 		bgWg.Wait()
 		close(bgDone)

@@ -18,10 +18,12 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	if err := testutil.InitLogger(m); err != nil {
+	err := testutil.InitLogger(m)
+	if err != nil {
 		os.Stderr.WriteString("Failed to initialize logger: " + err.Error() + "\n")
 		os.Exit(1)
 	}
+
 	goleak.VerifyTestMain(m)
 }
 
@@ -58,6 +60,7 @@ func TestBackupDatabase_WALContainsAllCommittedRows(t *testing.T) {
 	dbPath := filepath.Join(tmpDir, "wal.db")
 	db, err := sql.Open("sqlite3", dbPath)
 	require.NoError(t, err)
+
 	defer db.Close()
 
 	_, err = db.Exec("PRAGMA journal_mode=WAL; CREATE TABLE payments (id INTEGER PRIMARY KEY, status TEXT); INSERT INTO payments(status) VALUES ('pending');")
@@ -70,6 +73,7 @@ func TestBackupDatabase_WALContainsAllCommittedRows(t *testing.T) {
 
 	backupDB, err := sql.Open("sqlite3", dbPath+".backup")
 	require.NoError(t, err)
+
 	defer backupDB.Close()
 
 	var count int
@@ -182,7 +186,7 @@ func TestRotateBackups(t *testing.T) {
 		tmpDir := t.TempDir()
 		dbPath := filepath.Join(tmpDir, "test.db")
 
-		for i := 0; i < 7; i++ {
+		for i := range 7 {
 			timedPath := dbPath + ".backup." + "20060102_15040" + string(rune('0'+i))
 			require.NoError(t, os.WriteFile(timedPath, []byte("backup"), 0644))
 		}
@@ -202,9 +206,9 @@ func TestRotateBackups(t *testing.T) {
 		tmpDir := t.TempDir()
 		dbPath := filepath.Join(tmpDir, "test.db")
 
-		for i := 0; i < 5; i++ {
+		for i := range 5 {
 			backupName := fmt.Sprintf("%s.backup.2024010%d_120000", dbPath, i)
-			require.NoError(t, os.WriteFile(backupName, []byte(fmt.Sprintf("backup %d", i)), 0644))
+			require.NoError(t, os.WriteFile(backupName, fmt.Appendf(nil, "backup %d", i), 0644))
 		}
 
 		require.NoError(t, os.WriteFile(dbPath+".backup", []byte("current backup"), 0644))
@@ -297,6 +301,7 @@ func TestDailyBackup(t *testing.T) {
 				require.NoError(t, os.WriteFile(dbPath, []byte("content"), 0600), "Failed to create test database")
 				require.NoError(t, DailyBackup(context.Background(), dbPath, tt.keepDays), "DailyBackup() error")
 			}
+
 			tt.check(t, dbPath)
 		})
 	}
@@ -326,6 +331,7 @@ func TestGetBackupInfo(t *testing.T) {
 			},
 			check: func(t *testing.T, infos []BackupInfo) {
 				assert.Greater(t, len(infos), 0, "Expected at least 1 backup info")
+
 				for _, info := range infos {
 					assert.NotEmpty(t, info.Path, "Backup path should not be empty")
 					assert.NotEmpty(t, info.Size, "BackupInfo.Size should not be zero")
@@ -355,9 +361,10 @@ func TestGetBackupInfo_SortedByTime(t *testing.T) {
 	dbPath := filepath.Join(tmpDir, "test.db")
 	base := time.Now().Add(-3 * time.Hour)
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		path := fmt.Sprintf("%s.backup.2024010%d_120000", dbPath, i)
 		require.NoError(t, os.WriteFile(path, []byte("backup"), 0600))
+
 		modTime := base.Add(time.Duration(i) * time.Hour)
 		require.NoError(t, os.Chtimes(path, modTime, modTime))
 	}
@@ -365,6 +372,7 @@ func TestGetBackupInfo_SortedByTime(t *testing.T) {
 	infos, err := GetBackupInfo(dbPath)
 	require.NoError(t, err, "GetBackupInfo() error")
 	require.Len(t, infos, 3)
+
 	for i := 0; i < len(infos)-1; i++ {
 		require.True(t, infos[i].ModTime.After(infos[i+1].ModTime),
 			"backups should be sorted newest first")
@@ -437,6 +445,7 @@ func TestBackupDatabase_ContextCancellation(t *testing.T) {
 	for i := range content {
 		content[i] = byte(i % 256)
 	}
+
 	require.NoError(t, os.WriteFile(dbPath, content, 0600), "Failed to create test database")
 
 	// Create a context that will be cancelled immediately
@@ -501,6 +510,7 @@ func TestBackupDatabase_LargeFile(t *testing.T) {
 	for i := range content {
 		content[i] = byte(i % 256)
 	}
+
 	require.NoError(t, os.WriteFile(dbPath, content, 0600), "Failed to create large test file")
 
 	ctx := context.Background()

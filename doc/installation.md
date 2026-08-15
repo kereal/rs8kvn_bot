@@ -128,9 +128,9 @@ services:
     security_opt:
       - no-new-privileges:true
 
-    # Health check - verify the process is running
+    # Health check - verify application is ready
     healthcheck:
-      test: ["CMD", "pgrep", "-f", "rs8kvn_bot"]
+      test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -228,7 +228,7 @@ Air will automatically rebuild and restart the bot when you save changes to Go f
 | `SITE_URL` | Base URL for landing pages | `https://vpn.site` | ❌ | Must be valid http/https URL; used in Telegram links |
 | `TRIAL_DURATION_HOURS` | Trial subscription duration | `3` | ❌ | 1–168 hours (7 days max) |
 | `TRIAL_RATE_LIMIT` | Max trial requests per IP per hour | `3` | ❌ | 1–100 |
-| **Payments** |
+| **Payments** | | | | |
 | `PAYMENT_ENABLED` | Enable Platega payment buttons and webhook | `false` | ❌ | Requires merchant ID and secret when `true` |
 | `PAYMENT_PROVIDER` | Payment provider | `platega` | ❌ | Only `platega` is supported |
 | `PLATEGA_MERCHANT_ID` | Platega merchant ID | *(empty)* | Required when enabled | Sent as `X-MerchantId` |
