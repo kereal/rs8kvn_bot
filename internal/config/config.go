@@ -124,6 +124,7 @@ func registerFlags() (*flag.Registry, *configFlags) {
 	r.Register("PAYMENT_PROVIDER", f.paymentProvider)
 	r.Register("PLATEGA_MERCHANT_ID", f.plategaMerchantID)
 	r.Register("PLATEGA_SECRET", f.plategaSecret)
+
 	return r, f
 }
 
@@ -133,9 +134,11 @@ func registerFlags() (*flag.Registry, *configFlags) {
 func Load() (*Config, error) {
 	r, f := registerFlags()
 
-	if err := r.LoadEnv(); err != nil {
+	err := r.LoadEnv()
+	if err != nil {
 		return nil, fmt.Errorf("failed to load configuration: %w", err)
 	}
+
 	cfg := &Config{
 		TelegramBotToken: f.telegramBotToken.Get(), TelegramAdminID: f.telegramAdminID.Get(),
 		DatabasePath: f.databasePath.Get(), LogFilePath: f.logFilePath.Get(), LogLevel: f.logLevel.Get(),
@@ -149,7 +152,8 @@ func Load() (*Config, error) {
 		PlategaMerchantID: f.plategaMerchantID.Get(), PlategaSecret: f.plategaSecret.Get(),
 	}
 	// Validate all required fields
-	if err := cfg.validate(); err != nil {
+	err = cfg.validate()
+	if err != nil {
 		return nil, fmt.Errorf("configuration validation failed: %w", err)
 	}
 
@@ -162,6 +166,7 @@ func (c *Config) validate() error {
 	if c.TelegramBotToken == "" {
 		return fmt.Errorf("TELEGRAM_BOT_TOKEN is required")
 	}
+
 	if !strings.Contains(c.TelegramBotToken, ":") {
 		return fmt.Errorf("TELEGRAM_BOT_TOKEN appears to be invalid (expected format: 'number:token')")
 	}
@@ -193,14 +198,16 @@ func (c *Config) validate() error {
 
 	// Sentry DSN validation (optional but if provided, should be valid URL)
 	if c.SentryDSN != "" {
-		if err := c.validateURL("SENTRY_DSN", c.SentryDSN); err != nil {
+		err := c.validateURL("SENTRY_DSN", c.SentryDSN)
+		if err != nil {
 			return err
 		}
 	}
 
 	// Heartbeat URL validation (optional but if provided, should be valid URL)
 	if c.HeartbeatURL != "" {
-		if err := c.validateURL("HEARTBEAT_URL", c.HeartbeatURL); err != nil {
+		err := c.validateURL("HEARTBEAT_URL", c.HeartbeatURL)
+		if err != nil {
 			return err
 		}
 	}
@@ -209,10 +216,13 @@ func (c *Config) validate() error {
 		if c.PaymentProvider != "platega" {
 			return fmt.Errorf("PAYMENT_PROVIDER must be platega when PAYMENT_ENABLED=true")
 		}
+
 		if strings.TrimSpace(c.PlategaMerchantID) == "" || strings.TrimSpace(c.PlategaSecret) == "" {
 			return fmt.Errorf("PLATEGA_MERCHANT_ID and PLATEGA_SECRET are required when PAYMENT_ENABLED=true")
 		}
-		if _, err := uuid.Parse(strings.TrimSpace(c.PlategaMerchantID)); err != nil {
+
+		_, err := uuid.Parse(strings.TrimSpace(c.PlategaMerchantID))
+		if err != nil {
 			return fmt.Errorf("PLATEGA_MERCHANT_ID must be a UUID: %w", err)
 		}
 	}
@@ -220,13 +230,17 @@ func (c *Config) validate() error {
 	if c.GlobalSubURL == "" {
 		return fmt.Errorf("GLOBAL_SUB_URL is required")
 	}
-	if err := c.validateURL("GLOBAL_SUB_URL", c.GlobalSubURL); err != nil {
+
+	err := c.validateURL("GLOBAL_SUB_URL", c.GlobalSubURL)
+	if err != nil {
 		return err
 	}
+
 	c.GlobalSubURL = strings.TrimRight(c.GlobalSubURL, "/") + "/"
 
 	// Site URL validation
-	if err := c.validateURL("SITE_URL", c.SiteURL); err != nil {
+	err = c.validateURL("SITE_URL", c.SiteURL)
+	if err != nil {
 		return err
 	}
 
@@ -295,6 +309,7 @@ func (c *Config) SubURL(subID string) string {
 	if err != nil {
 		return c.GlobalSubURL + subID
 	}
+
 	return u
 }
 

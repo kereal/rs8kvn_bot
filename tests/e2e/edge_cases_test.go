@@ -1,5 +1,3 @@
-
-
 package e2e
 
 import (
@@ -16,7 +14,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
 
 func TestE2E_CreateSubscription_EmptyUsername(t *testing.T) {
 	env := setupE2EEnv(t)
@@ -67,6 +64,7 @@ func TestE2E_Subscription_LongUsername(t *testing.T) {
 	ctx := context.Background()
 
 	longUsername := strings.Repeat("a", 1000)
+
 	_, err := env.subService.Create(ctx, env.chatID, longUsername, "")
 	if err == nil {
 		sub, err := env.db.GetByTelegramID(ctx, env.chatID)
@@ -82,6 +80,7 @@ func TestE2E_Subscription_SpecialCharactersInUsername(t *testing.T) {
 	ctx := context.Background()
 
 	specialUsername := "test@user#123!"
+
 	_, err := env.subService.Create(ctx, env.chatID, specialUsername, "")
 	if err != nil {
 		assert.Contains(t, err.Error(), "invalid", "Error should mention invalid characters")
@@ -211,6 +210,7 @@ func TestE2E_Subscription_Expired(t *testing.T) {
 
 	fetched, err := env.db.GetByTelegramID(ctx, env.chatID)
 	assert.Error(t, err, "Expired subscription should not be returned by GetByTelegramID")
+
 	_ = fetched
 }
 
@@ -246,7 +246,7 @@ func TestE2E_RateLimit_ExactlyAtLimit(t *testing.T) {
 	_, err := env.subService.Create(ctx, env.chatID, env.username, "")
 	require.NoError(t, err)
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		resetBotAPI(env.botAPI)
 		update := tgbotapi.Update{
 			Message: &tgbotapi.Message{

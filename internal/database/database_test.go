@@ -17,20 +17,19 @@ import (
 
 func TestMain(m *testing.M) {
 	_, _ = logger.Init("", "error")
+
 	os.Exit(m.Run())
 }
 func ptrTime(t time.Time) *time.Time { return &t }
 
 func ptrInt64(v int64) *int64 { return &v }
 
-
-
 // ==================== Model Method Tests ====================
 
 func TestOrder_StatusUsesOrderStatusType(t *testing.T) {
 	t.Parallel()
 
-	orderType := reflect.TypeOf(Order{})
+	orderType := reflect.TypeFor[Order]()
 	statusField, ok := orderType.FieldByName("Status")
 	require.True(t, ok)
 	assert.Equal(t, "database.OrderStatus", statusField.Type.String())
@@ -39,7 +38,7 @@ func TestOrder_StatusUsesOrderStatusType(t *testing.T) {
 func TestNode_TypeUsesNodeType(t *testing.T) {
 	t.Parallel()
 
-	nodeType := reflect.TypeOf(Node{})
+	nodeType := reflect.TypeFor[Node]()
 	typeField, ok := nodeType.FieldByName("Type")
 	require.True(t, ok)
 	assert.Equal(t, "database.NodeType", typeField.Type.String())
@@ -48,7 +47,7 @@ func TestNode_TypeUsesNodeType(t *testing.T) {
 func TestSubscriptionNode_StatusUsesSyncStatus(t *testing.T) {
 	t.Parallel()
 
-	subscriptionNodeType := reflect.TypeOf(SubscriptionNode{})
+	subscriptionNodeType := reflect.TypeFor[SubscriptionNode]()
 	statusField, ok := subscriptionNodeType.FieldByName("Status")
 	require.True(t, ok)
 	assert.Equal(t, "database.SyncStatus", statusField.Type.String())
@@ -115,7 +114,8 @@ func TestNewService(t *testing.T) {
 	require.NotNil(t, svc)
 	require.NotNil(t, svc.db)
 
-	if err := svc.Close(); err != nil {
+	err = svc.Close()
+	if err != nil {
 		t.Logf("Warning: failed to close database service: %v", err)
 	}
 }
@@ -127,9 +127,11 @@ func TestNewService_CreatesDirectory(t *testing.T) {
 	dbPath := filepath.Join(tmpDir, "subdir", "test.db")
 
 	svc, err := NewService(dbPath)
+
 	require.NoError(t, err)
 	defer func() {
-		if err := svc.Close(); err != nil {
+		err := svc.Close()
+		if err != nil {
 			t.Logf("Warning: failed to close database service: %v", err)
 		}
 	}()
@@ -171,9 +173,11 @@ func TestService_Close_AlreadyClosed(t *testing.T) {
 	svc, err := NewService(dbPath)
 	require.NoError(t, err)
 
-	if err := svc.Close(); err != nil {
+	err = svc.Close()
+	if err != nil {
 		t.Logf("Warning: failed to close database service: %v", err)
 	}
+
 	assert.NoError(t, svc.Close(), "Second Close should return no error")
 }
 
@@ -184,9 +188,11 @@ func TestService_Ping(t *testing.T) {
 	dbPath := filepath.Join(tmpDir, "test.db")
 
 	svc, err := NewService(dbPath)
+
 	require.NoError(t, err)
 	defer func() {
-		if err := svc.Close(); err != nil {
+		err := svc.Close()
+		if err != nil {
 			t.Logf("Warning: failed to close database service: %v", err)
 		}
 	}()
@@ -201,9 +207,11 @@ func TestService_GetPoolStats(t *testing.T) {
 	dbPath := filepath.Join(tmpDir, "test.db")
 
 	svc, err := NewService(dbPath)
+
 	require.NoError(t, err)
 	defer func() {
-		if err := svc.Close(); err != nil {
+		err := svc.Close()
+		if err != nil {
 			t.Logf("Warning: failed to close database service: %v", err)
 		}
 	}()
@@ -428,6 +436,7 @@ func TestService_CreateSubscription_Timestamps(t *testing.T) {
 		ExpiresAt:  ptrTime(time.Now().Add(24 * time.Hour)),
 	}
 	require.NoError(t, svc.CreateSubscription(context.Background(), sub, ""))
+
 	after := time.Now()
 
 	assert.True(t, sub.CreatedAt.After(before) || sub.CreatedAt.Equal(before))
@@ -562,7 +571,7 @@ func TestService_GetLatestSubscriptions(t *testing.T) {
 
 	svc := newTestService(t)
 
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		sub := &Subscription{
 			TelegramID:     int64(200000000 + i),
 			Username:       fmt.Sprintf("service_user%d", i),
@@ -627,7 +636,7 @@ func TestService_GetLatestSubscriptions_LimitZero(t *testing.T) {
 
 	svc := newTestService(t)
 
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		createTestSubscription(t, svc, int64(100000000+i), fmt.Sprintf("user%d", i), fmt.Sprintf("client-%d", i))
 	}
 
@@ -641,7 +650,7 @@ func TestService_GetLatestSubscriptions_LimitOne(t *testing.T) {
 
 	svc := newTestService(t)
 
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		sub := &Subscription{
 			TelegramID:     int64(100000000 + i),
 			Username:       fmt.Sprintf("user%d", i),
@@ -665,7 +674,7 @@ func TestService_GetLatestSubscriptions_LimitGreaterThanTotal(t *testing.T) {
 
 	svc := newTestService(t)
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		sub := &Subscription{
 			TelegramID:     int64(100000000 + i),
 			Username:       fmt.Sprintf("user%d", i),
@@ -724,7 +733,7 @@ func TestService_GetLatestSubscriptions_OrderingConsistency(t *testing.T) {
 
 	baseTime := time.Date(2026, 3, 15, 12, 0, 0, 0, time.UTC)
 
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		sub := &Subscription{
 			TelegramID:     int64(100000000 + i),
 			Username:       fmt.Sprintf("ordered_user%d", i),
@@ -746,6 +755,7 @@ func TestService_GetLatestSubscriptions_OrderingConsistency(t *testing.T) {
 		if i >= len(subs) {
 			break
 		}
+
 		assert.Equal(t, expected, subs[i].Username, "Position %d", i)
 	}
 }
@@ -774,6 +784,7 @@ func TestService_GetLatestSubscriptions_MixedStatuses(t *testing.T) {
 	require.NoError(t, err)
 
 	expectedActive := 0
+
 	for _, status := range statuses {
 		if status == "active" {
 			expectedActive++
@@ -794,7 +805,7 @@ func TestService_GetAllSubscriptions(t *testing.T) {
 
 	svc := newTestService(t)
 
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		sub := &Subscription{
 			TelegramID:     int64(10000 + i),
 			Username:       fmt.Sprintf("user%d", i),
@@ -828,7 +839,7 @@ func TestService_CountActiveSubscriptions(t *testing.T) {
 
 	svc := newTestService(t)
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		sub := &Subscription{
 			TelegramID:     int64(20000 + i),
 			Username:       fmt.Sprintf("active%d", i),
@@ -862,7 +873,7 @@ func TestService_CountTrialSubscriptions(t *testing.T) {
 	svc := newTestService(t)
 
 	// Create trial subscriptions (telegram_id < 0)
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		sub := &Subscription{
 			TelegramID:     int64(-1000 - i), // negative IDs are for trials
 			Username:       fmt.Sprintf("trial%d", i),
@@ -895,7 +906,7 @@ func TestService_CountExpiredSubscriptions(t *testing.T) {
 
 	svc := newTestService(t)
 
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		sub := &Subscription{
 			TelegramID:     int64(30000 + i),
 			Username:       fmt.Sprintf("expired%d", i),
@@ -927,7 +938,7 @@ func TestService_CountAllSubscriptions(t *testing.T) {
 
 	svc := newTestService(t)
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		sub := &Subscription{
 			TelegramID:     int64(40000 + i),
 			Username:       fmt.Sprintf("countuser%d", i),
@@ -1046,7 +1057,7 @@ func TestService_GetTelegramIDsBatch(t *testing.T) {
 
 	svc := newTestService(t)
 
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		sub := &Subscription{
 			TelegramID:     int64(50000 + i),
 			Username:       fmt.Sprintf("batchuser%d", i),
@@ -1072,7 +1083,7 @@ func TestService_GetTelegramIDsBatch_OffsetBeyondTotal(t *testing.T) {
 
 	svc := newTestService(t)
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		sub := &Subscription{
 			TelegramID:     int64(60000 + i),
 			Username:       fmt.Sprintf("offsetuser%d", i),
@@ -1177,7 +1188,7 @@ func TestService_GetReferralCount(t *testing.T) {
 	svc := newTestService(t)
 
 	referrerID := int64(22222)
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		sub := &Subscription{
 			TelegramID:     int64(70000 + i),
 			Username:       fmt.Sprintf("referral%d", i),
@@ -1212,7 +1223,7 @@ func TestService_GetAllReferralCounts(t *testing.T) {
 	svc := newTestService(t)
 
 	referrerID := int64(33333)
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		sub := &Subscription{
 			TelegramID:     int64(80000 + i),
 			Username:       fmt.Sprintf("refuser%d", i),
@@ -1239,7 +1250,7 @@ func TestService_GetTotalTelegramIDCount_WithData(t *testing.T) {
 	svc := newTestService(t)
 
 	// Create multiple subscriptions (some with same telegram_id to test distinct)
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		sub := &Subscription{
 			TelegramID:     int64(90000 + i),
 			Username:       fmt.Sprintf("countuser%d", i),
@@ -1287,7 +1298,7 @@ func TestService_CountTrialRequestsByIPLastHour(t *testing.T) {
 	svc := newTestService(t)
 
 	ip := "10.0.0.1"
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		require.NoError(t, svc.CreateTrialRequest(context.Background(), ip))
 	}
 
@@ -1586,6 +1597,33 @@ func TestService_BindTrialSubscription_Success(t *testing.T) {
 	assert.Equal(t, uint(2), bound.PlanID, "Should be switched to free plan after binding")
 }
 
+func TestService_BindTrialSubscription_InviteLookupError(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	_, err := svc.CreateTrialSubscription(
+		ctx,
+		"INVITE-LOOKUP-ERROR",
+		"sub-invite-error",
+		"client-invite-error",
+		time.Now().Add(3*time.Hour),
+	)
+	require.NoError(t, err)
+	require.NoError(t, svc.db.Migrator().DropTable(&Invite{}))
+
+	bound, err := svc.BindTrialSubscription(ctx, "sub-invite-error", 777777, "user")
+
+	require.Error(t, err)
+	assert.Nil(t, bound)
+	assert.Contains(t, err.Error(), "failed to resolve trial invite")
+
+	var sub Subscription
+	require.NoError(t, svc.db.Where("subscription_id = ?", "sub-invite-error").First(&sub).Error)
+	assert.Less(t, sub.TelegramID, int64(0), "binding must not continue after invite lookup failure")
+}
+
 func TestService_BindTrialSubscription_Concurrent(t *testing.T) {
 	t.Parallel()
 
@@ -1665,7 +1703,8 @@ func TestService_Ping_ContextCanceled(t *testing.T) {
 
 	svc := newTestService(t)
 	defer func() {
-		if err := svc.Close(); err != nil {
+		err := svc.Close()
+		if err != nil {
 			t.Logf("Warning: failed to close database service: %v", err)
 		}
 	}()
@@ -1713,7 +1752,8 @@ func newTestService(t *testing.T) *Service {
 	svc, err := NewService(dbPath)
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		if err := svc.Close(); err != nil {
+		err := svc.Close()
+		if err != nil {
 			t.Logf("Warning: failed to close database service: %v", err)
 		}
 	})
@@ -1723,6 +1763,7 @@ func newTestService(t *testing.T) *Service {
 
 func createTestSubscription(t *testing.T, svc *Service, telegramID int64, username, clientID string) *Subscription {
 	t.Helper()
+
 	sub := &Subscription{
 		TelegramID:     telegramID,
 		Username:       username,
@@ -1732,5 +1773,6 @@ func createTestSubscription(t *testing.T, svc *Service, telegramID int64, userna
 		Status:         "active",
 	}
 	require.NoError(t, svc.CreateSubscription(context.Background(), sub, ""))
+
 	return sub
 }

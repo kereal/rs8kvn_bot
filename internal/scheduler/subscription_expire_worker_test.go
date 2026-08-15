@@ -20,7 +20,6 @@ func init() {
 	_, _ = logger.Init("", "error")
 }
 
-
 type mockVPNClientForExpire struct {
 	deleteCalled     bool
 	deleteProvision  vpn.SubscriptionProvision
@@ -37,15 +36,18 @@ func (m *mockVPNClientForExpire) DeleteSubscription(ctx context.Context, provisi
 	m.deleteCalled = true
 	m.deleteProvision = provision
 	m.deleteProvisions = append(m.deleteProvisions, provision)
+
 	return nil
 }
 func (m *mockVPNClientForExpire) Close() error { return nil }
 
 func newTestSubServiceForExpire(t testing.TB, db *database.Service) *service.SubscriptionService {
 	t.Helper()
+
 	cfg := &config.Config{
 		TrialDurationHours: 1,
 	}
+
 	return service.NewSubscriptionService(db, nil, nil, nil, cfg)
 }
 
@@ -54,6 +56,7 @@ func TestSubscriptionExpireWorker_process_FindsAndExpires(t *testing.T) {
 
 	db, err := testutil.NewTestDatabaseService(t)
 	require.NoError(t, err)
+
 	ctx := context.Background()
 
 	plan, planErr := db.GetPlanByName(ctx, database.FreePlanName)
@@ -90,6 +93,7 @@ func TestSubscriptionExpireWorker_process_EmptyResult(t *testing.T) {
 
 	db, err := testutil.NewTestDatabaseService(t)
 	require.NoError(t, err)
+
 	ctx := context.Background()
 
 	plan, planErr := db.GetPlanByName(ctx, database.FreePlanName)
@@ -133,6 +137,7 @@ func TestSubscriptionExpireWorker_Run_ContextCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	done := make(chan struct{})
+
 	go func() {
 		worker.Run(ctx)
 		close(done)
@@ -152,6 +157,7 @@ func TestSubscriptionExpireWorker_process_PaidPlanExpires_DowngradesToFree(t *te
 
 	db, err := testutil.NewTestDatabaseService(t)
 	require.NoError(t, err)
+
 	ctx := context.Background()
 
 	freePlan, planErr := db.GetPlanByName(ctx, database.FreePlanName)
@@ -180,8 +186,11 @@ func TestSubscriptionExpireWorker_process_PaidPlanExpires_DowngradesToFree(t *te
 	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node.ID, Status: database.SyncStatusActive}))
 
-	var invalidateCalled bool
-	var invalidateSubID string
+	var (
+		invalidateCalled bool
+		invalidateSubID  string
+	)
+
 	mockVPN := &mockVPNClientForExpire{}
 	vpnClients := map[uint]vpn.Client{node.ID: mockVPN}
 	syncSvc := service.NewSyncService(db, vpnClients, []database.Node{*node})

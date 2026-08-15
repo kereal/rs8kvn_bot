@@ -1,4 +1,3 @@
-// Package database provides persistence, migrations, models, and repositories.
 package database
 
 import (
@@ -34,7 +33,9 @@ var migrationFiles embed.FS
 func runMigrations(sqlDB *sql.DB) error {
 	// Determine SQLite version to verify features (DROP COLUMN, RETURNING) availability
 	var sqliteVersion string
-	if err := sqlDB.QueryRow("select sqlite_version()").Scan(&sqliteVersion); err == nil {
+
+	err := sqlDB.QueryRow("select sqlite_version()").Scan(&sqliteVersion)
+	if err == nil {
 		logger.Info("SQLite version detected", zap.String("version", sqliteVersion))
 	} else {
 		logger.Warn("Failed to detect SQLite version", zap.Error(err))
@@ -46,12 +47,16 @@ func runMigrations(sqlDB *sql.DB) error {
 		// simple semver compare: major.minor.patch
 		parse := func(v string) (int, int, int) {
 			var a, b, c int
-			if _, err := fmt.Sscanf(v, "%d.%d.%d", &a, &b, &c); err != nil {
+
+			_, err := fmt.Sscanf(v, "%d.%d.%d", &a, &b, &c)
+			if err != nil {
 				return 0, 0, 0
 			}
+
 			return a, b, c
 		}
 		va, vb, vc := parse(sqliteVersion)
+
 		ma, mb, mc := parse(minSQLiteForDropAndReturning)
 		if va < ma || (va == ma && vb < mb) || (va == ma && vb == mb && vc < mc) {
 			// scan embedded migrations for DROP COLUMN or RETURNING usage
@@ -107,19 +112,25 @@ func runMigrations(sqlDB *sql.DB) error {
 		if err != nil {
 			return fmt.Errorf("invalid dirty migration version: %w", err)
 		}
+
 		logger.Warn("Database is in dirty state, forcing migration back",
 			zap.Int("current_version", currentVer))
-		if err := m.Force(currentVer - 1); err != nil {
+
+		err = m.Force(currentVer - 1)
+		if err != nil {
 			return fmt.Errorf("failed to force migration version: %w", err)
 		}
 	}
-	if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
+
+	err = m.Up()
+	if err != nil && !errors.Is(err, migrate.ErrNoChange) {
 		if strings.Contains(err.Error(), "file does not exist") || strings.Contains(err.Error(), "read down for version") {
 			// Never repair a missing migration by changing only schema_migrations.
 			// Force() cannot recreate the SQL/schema changes and would make a
 			// potentially incompatible database look healthy on the next start.
 			return fmt.Errorf("migration failed: %w; database references a missing migration; restore the exact migration files or perform a reviewed schema recovery", err)
 		}
+
 		return fmt.Errorf("migration failed: %w", err)
 	}
 
@@ -142,26 +153,33 @@ func latestEmbeddedMigrationVersion() (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("read embedded migrations: %w", err)
 	}
+
 	maxVersion := -1
+
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".up.sql") {
 			continue
 		}
+
 		separator := strings.IndexByte(entry.Name(), '_')
 		if separator <= 0 {
 			continue
 		}
+
 		version, parseErr := strconv.Atoi(entry.Name()[:separator])
 		if parseErr != nil || version < 0 {
 			continue
 		}
+
 		if version > maxVersion {
 			maxVersion = version
 		}
 	}
+
 	if maxVersion < 0 {
 		return 0, errors.New("no embedded up migrations found")
 	}
+
 	return maxVersion, nil
 }
 
@@ -172,6 +190,7 @@ func migrationVersionToInt(version uint) (int, error) {
 	if version == 0 {
 		return 0, errors.New("migration version must be positive")
 	}
+
 	maxInt := uint(math.MaxInt)
 	if version > maxInt {
 		return 0, fmt.Errorf("migration version %d overflows int", version)

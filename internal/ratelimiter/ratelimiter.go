@@ -79,17 +79,15 @@ func (tb *TokenBucket) WaitN(ctx context.Context, n float64) bool {
 		if tb.tokens >= n {
 			tb.tokens -= n
 			tb.mu.Unlock()
+
 			return true
 		}
 
 		// Calculate time until we have enough tokens
 		tokensNeeded := n - tb.tokens
-		waitDuration := time.Duration(tokensNeeded/tb.refillRate) * time.Second
-
-		// Minimum wait of 1ms to avoid busy looping
-		if waitDuration < time.Millisecond {
-			waitDuration = time.Millisecond
-		}
+		waitDuration := max(
+			// Minimum wait of 1ms to avoid busy looping
+			time.Duration(tokensNeeded/tb.refillRate)*time.Second, time.Millisecond)
 
 		tb.mu.Unlock()
 
@@ -108,7 +106,9 @@ func (tb *TokenBucket) WaitN(ctx context.Context, n float64) bool {
 func (tb *TokenBucket) AvailableTokens() float64 {
 	tb.mu.Lock()
 	defer tb.mu.Unlock()
+
 	tb.refill()
+
 	return tb.tokens
 }
 
@@ -116,6 +116,7 @@ func (tb *TokenBucket) AvailableTokens() float64 {
 func (tb *TokenBucket) Reset() {
 	tb.mu.Lock()
 	defer tb.mu.Unlock()
+
 	tb.tokens = tb.maxTokens
 	tb.lastRefill = time.Now()
 }

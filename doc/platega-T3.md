@@ -478,7 +478,7 @@ pending → paid
 pending → canceled
 pending → expired       только при новом RequestPayment после payment_expires_at
 paid → paid              no-op
-paid → canceled          только CHARGEBACKED, без автоматического отзыва подписки
+paid → canceled          automatically downgrades to free plan when no other paid order exists
 canceled → canceled      no-op
 canceled → paid          запрещено
 expired → paid           запрещено

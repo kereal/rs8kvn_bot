@@ -1,4 +1,3 @@
-// Package bot contains Telegram handlers, callbacks, keyboards, and user flows.
 package bot
 
 import (
@@ -6,6 +5,7 @@ import (
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/kereal/rs8kvn_bot/internal/database"
+	"github.com/kereal/rs8kvn_bot/internal/utils"
 )
 
 // KeyboardBuilder creates Telegram inline keyboards.
@@ -29,18 +29,23 @@ func NewKeyboardBuilder(botUsername, contactUser, donateCard, donateURL, siteURL
 // it is passed per-call because the flag can be toggled at runtime via config.
 func (kb *KeyboardBuilder) MainMenu(hasSubscription bool, paymentEnabled bool) tgbotapi.InlineKeyboardMarkup {
 	var firstRow []tgbotapi.InlineKeyboardButton
+
 	firstRow = append(firstRow, tgbotapi.NewInlineKeyboardButtonData("📋 Подписка", "menu_subscription"))
 	if kb.donateEnabled {
 		firstRow = append(firstRow, tgbotapi.NewInlineKeyboardButtonData("☕ Донат", "menu_donate"))
 	}
+
 	rows := [][]tgbotapi.InlineKeyboardButton{tgbotapi.NewInlineKeyboardRow(firstRow...)}
+
 	rows = append(rows, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("❓ Помощь", "menu_help"), tgbotapi.NewInlineKeyboardButtonData("📑 Документы", "menu_documents")))
 	if paymentEnabled && hasSubscription {
 		rows = append(rows, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("💎 Купить Premium", "buy_premium_list")))
 	}
+
 	if hasSubscription {
 		rows = append(rows, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("📤 Поделиться", "share_invite")))
 	}
+
 	return tgbotapi.InlineKeyboardMarkup{InlineKeyboard: rows}
 }
 
@@ -51,9 +56,12 @@ func (kb *KeyboardBuilder) BuyProductList(products []database.Product) tgbotapi.
 		if !product.IsActive || product.PriceCents <= 0 {
 			continue
 		}
-		rows = append(rows, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData(fmt.Sprintf("%s — %.2f ₽", product.Name, float64(product.PriceCents)/100), fmt.Sprintf("buy_product_%d", product.ID))))
+
+		rows = append(rows, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData(fmt.Sprintf("%s — %s", product.Name, utils.FormatPriceCents(product.PriceCents)), fmt.Sprintf("buy_product_%d", product.ID))))
 	}
+
 	rows = append(rows, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("⬅️ Назад", "back_to_start")))
+
 	return tgbotapi.InlineKeyboardMarkup{InlineKeyboard: rows}
 }
 
@@ -61,8 +69,9 @@ func (kb *KeyboardBuilder) BuyProductList(products []database.Product) tgbotapi.
 func (kb *KeyboardBuilder) BuyProductConfirm(product *database.Product, paymentURL string) tgbotapi.InlineKeyboardMarkup {
 	price := ""
 	if product != nil {
-		price = fmt.Sprintf("%d₽", product.PriceCents/100)
+		price = utils.FormatPriceCents(product.PriceCents)
 	}
+
 	return tgbotapi.InlineKeyboardMarkup{InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{
 		tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonURL("💳 Оплатить "+price, paymentURL)),
 		tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("⬅️ Назад", "buy_premium_list")),

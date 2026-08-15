@@ -82,15 +82,18 @@ func TestHandler_GetMainMenuKeyboard_CallbackData(t *testing.T) {
 
 func TestHandler_BuyProductList_Callback(t *testing.T) {
 	t.Parallel()
+
 	kb := NewKeyboardBuilder("testbot", "", "", "", "", true)
 	products := newTestProductList()
 	keyboard := kb.BuyProductList(products)
 
 	require.NotEmpty(t, keyboard.InlineKeyboard)
+
 	for _, row := range keyboard.InlineKeyboard[:len(keyboard.InlineKeyboard)-1] {
 		require.NotNil(t, row[0].CallbackData)
 		assert.Contains(t, *row[0].CallbackData, "buy_product_", "product rows use buy_product_{id} callbacks")
 	}
+
 	last := keyboard.InlineKeyboard[len(keyboard.InlineKeyboard)-1][0]
 	require.NotNil(t, last.CallbackData)
 	assert.Equal(t, "back_to_start", *last.CallbackData, "last row is back navigation")
@@ -100,10 +103,41 @@ func TestKeyboardBuilder_BuyProductConfirm_UsesCardIcon(t *testing.T) {
 	t.Parallel()
 
 	kb := NewKeyboardBuilder("testbot", "", "", "", "", true)
-	keyboard := kb.BuyProductConfirm(&database.Product{PriceCents: 19900}, "https://pay.example")
 
-	require.NotEmpty(t, keyboard.InlineKeyboard)
-	assert.Equal(t, "💳 Оплатить 199₽", keyboard.InlineKeyboard[0][0].Text)
+	tests := []struct {
+		name       string
+		priceCents int64
+		wantText   string
+	}{
+		{name: "whole rubles drop kopecks", priceCents: 19900, wantText: "💳 Оплатить 199₽"},
+		{name: "fractional rubles keep kopecks", priceCents: 19999, wantText: "💳 Оплатить 199.99₽"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			keyboard := kb.BuyProductConfirm(&database.Product{PriceCents: tt.priceCents}, "https://pay.example")
+
+			require.NotEmpty(t, keyboard.InlineKeyboard)
+			assert.Equal(t, tt.wantText, keyboard.InlineKeyboard[0][0].Text)
+		})
+	}
+}
+
+func TestKeyboardBuilder_BuyProductList_FormatsPrice(t *testing.T) {
+	t.Parallel()
+
+	kb := NewKeyboardBuilder("testbot", "", "", "", "", true)
+	products := []database.Product{
+		{ID: 1, Name: "Месяц", PriceCents: 19900, IsActive: true},
+		{ID: 2, Name: "Год", PriceCents: 19999, IsActive: true},
+	}
+	keyboard := kb.BuyProductList(products)
+
+	require.Len(t, keyboard.InlineKeyboard, 3)
+	assert.Equal(t, "Месяц — 199₽", keyboard.InlineKeyboard[0][0].Text)
+	assert.Equal(t, "Год — 199.99₽", keyboard.InlineKeyboard[1][0].Text)
 }
 
 func newTestProductList() []database.Product {

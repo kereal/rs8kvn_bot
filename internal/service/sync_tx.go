@@ -1,4 +1,3 @@
-// Package service contains subscription, payment, and synchronization business logic.
 package service
 
 // This file contains the transaction-scoped variant of ApplyPlanToSubscription
@@ -37,44 +36,51 @@ func (s *SyncService) ApplyPlanToSubscriptionInTx(ctx context.Context, tx *gorm.
 
 	// Load plan-linked active nodes within the tx.
 	var targetNodes []database.Node
-	if err := tx.WithContext(ctx).
+
+	err := tx.WithContext(ctx).
 		Table("nodes").
 		Select("nodes.*").
 		Joins("JOIN plan_nodes ON plan_nodes.node_id = nodes.id").
 		Where("plan_nodes.plan_id = ? AND nodes.is_active = ?", planID, true).
-		Find(&targetNodes).Error; err != nil {
+		Find(&targetNodes).Error
+	if err != nil {
 		return fmt.Errorf("apply plan to subscription %d: load plan nodes: %w", subscriptionID, err)
 	}
 
 	targetNodeIDs := make([]uint, 0, len(targetNodes))
+
 	targetSet := make(map[uint]struct{}, len(targetNodes))
 	for _, n := range targetNodes {
 		if !n.IsActive {
 			continue
 		}
+
 		targetNodeIDs = append(targetNodeIDs, n.ID)
 		targetSet[n.ID] = struct{}{}
 	}
 
 	// Mark currently active nodes that are still in the target plan for update.
 	if len(targetNodeIDs) > 0 {
-		if err := tx.WithContext(ctx).Model(&database.SubscriptionNode{}).
+		err := tx.WithContext(ctx).Model(&database.SubscriptionNode{}).
 			Where("subscription_id = ? AND node_id IN (?) AND status = ?", subscriptionID, targetNodeIDs, database.SyncStatusActive).
-			Updates(map[string]interface{}{
+			Updates(map[string]any{
 				"status":      database.SyncStatusPendingUpdate,
 				"retry_count": 0,
 				"retry_at":    nil,
 				"last_error":  nil,
-			}).Error; err != nil {
+			}).Error
+		if err != nil {
 			return fmt.Errorf("apply plan to subscription %d: mark active nodes pending update: %w", subscriptionID, err)
 		}
 	}
 
 	// Re-fetch the freshly-marked set to drive reconcile semantics.
 	var currentNodes []database.SubscriptionNode
-	if err := tx.WithContext(ctx).
+
+	err = tx.WithContext(ctx).
 		Where("subscription_id = ?", subscriptionID).
-		Find(&currentNodes).Error; err != nil {
+		Find(&currentNodes).Error
+	if err != nil {
 		return fmt.Errorf("apply plan to subscription %d: load current nodes: %w", subscriptionID, err)
 	}
 
@@ -82,6 +88,7 @@ func (s *SyncService) ApplyPlanToSubscriptionInTx(ctx context.Context, tx *gorm.
 	currentPendingAdd := make(map[uint]database.SubscriptionNode)
 	currentPendingRemove := make(map[uint]database.SubscriptionNode)
 	currentPendingUpdate := make(map[uint]database.SubscriptionNode)
+
 	for _, sn := range currentNodes {
 		switch sn.Status {
 		case database.SyncStatusActive:
@@ -100,37 +107,45 @@ func (s *SyncService) ApplyPlanToSubscriptionInTx(ctx context.Context, tx *gorm.
 		if _, exists := currentActive[nodeID]; exists {
 			continue
 		}
+
 		if _, exists := currentPendingAdd[nodeID]; exists {
 			continue
 		}
+
 		if _, exists := currentPendingUpdate[nodeID]; exists {
 			// pending_update nodes already on plan: leave as-is.
 			continue
 		}
+
 		if pending, ok := currentPendingRemove[nodeID]; ok {
-			if err := tx.WithContext(ctx).Model(&database.SubscriptionNode{}).
+			err := tx.WithContext(ctx).Model(&database.SubscriptionNode{}).
 				Where("subscription_id = ? AND node_id = ?", pending.SubscriptionID, pending.NodeID).
-				Updates(map[string]interface{}{
+				Updates(map[string]any{
 					"status":      database.SyncStatusPendingAdd,
 					"retry_count": 0,
 					"retry_at":    nil,
 					"last_error":  nil,
-				}).Error; err != nil {
+				}).Error
+			if err != nil {
 				return fmt.Errorf("apply plan to subscription %d: reactivate pending_remove node %d: %w", subscriptionID, nodeID, err)
 			}
+
 			continue
 		}
+
 		newNode := &database.SubscriptionNode{
 			SubscriptionID: subscriptionID,
 			NodeID:         nodeID,
 			Status:         database.SyncStatusPendingAdd,
 		}
-		if err := tx.WithContext(ctx).
+
+		err := tx.WithContext(ctx).
 			Clauses(clause.OnConflict{
 				Columns:   []clause.Column{{Name: "subscription_id"}, {Name: "node_id"}},
 				DoUpdates: clause.AssignmentColumns([]string{"status", "retry_count", "retry_at", "last_error", "updated_at"}),
 			}).
-			Create(newNode).Error; err != nil {
+			Create(newNode).Error
+		if err != nil {
 			return fmt.Errorf("apply plan to subscription %d: upsert pending_add node %d: %w", subscriptionID, nodeID, err)
 		}
 	}
@@ -139,7 +154,7 @@ func (s *SyncService) ApplyPlanToSubscriptionInTx(ctx context.Context, tx *gorm.
 	transitionToPendingRemove := func(sn database.SubscriptionNode) error {
 		return tx.WithContext(ctx).Model(&database.SubscriptionNode{}).
 			Where("subscription_id = ? AND node_id = ?", sn.SubscriptionID, sn.NodeID).
-			Updates(map[string]interface{}{
+			Updates(map[string]any{
 				"status":      database.SyncStatusPendingRemove,
 				"retry_count": 0,
 				"retry_at":    nil,
@@ -150,25 +165,34 @@ func (s *SyncService) ApplyPlanToSubscriptionInTx(ctx context.Context, tx *gorm.
 		if _, inTarget := targetSet[nodeID]; inTarget {
 			continue
 		}
-		if err := transitionToPendingRemove(sn); err != nil {
+
+		err := transitionToPendingRemove(sn)
+		if err != nil {
 			return fmt.Errorf("apply plan to subscription %d: set pending_remove node %d: %w", subscriptionID, nodeID, err)
 		}
 	}
+
 	for nodeID, sn := range currentPendingAdd {
 		if _, inTarget := targetSet[nodeID]; inTarget {
 			continue
 		}
-		if err := transitionToPendingRemove(sn); err != nil {
+
+		err := transitionToPendingRemove(sn)
+		if err != nil {
 			return fmt.Errorf("apply plan to subscription %d: set pending_remove for stale pending_add node %d: %w", subscriptionID, nodeID, err)
 		}
 	}
+
 	for nodeID, sn := range currentPendingUpdate {
 		if _, inTarget := targetSet[nodeID]; inTarget {
 			continue
 		}
-		if err := transitionToPendingRemove(sn); err != nil {
+
+		err := transitionToPendingRemove(sn)
+		if err != nil {
 			return fmt.Errorf("apply plan to subscription %d: set pending_remove for stale pending_update node %d: %w", subscriptionID, nodeID, err)
 		}
 	}
+
 	return nil
 }

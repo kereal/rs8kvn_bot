@@ -34,6 +34,7 @@ func (s *stubVPNClient) Close() error { return nil }
 
 func TestMain(m *testing.M) {
 	_, _ = logger.Init("", "error")
+
 	os.Exit(m.Run())
 }
 
@@ -404,7 +405,6 @@ func TestHandleUpdate_NilMessageAndNilCallback(t *testing.T) {
 
 func TestConfigLoad_MissingRequiredFields(t *testing.T) {
 	// Not parallel: uses os.Unsetenv which modifies global process state
-
 	require.NoError(t, os.Unsetenv("TELEGRAM_BOT_TOKEN"))
 	require.NoError(t, os.Unsetenv("DATABASE_PATH"))
 
@@ -415,7 +415,6 @@ func TestConfigLoad_MissingRequiredFields(t *testing.T) {
 
 func TestConfigLoad_InvalidNumericValues(t *testing.T) {
 	// Not parallel: t.Setenv cannot be used with t.Parallel
-
 	t.Setenv("TELEGRAM_BOT_TOKEN", "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11")
 	t.Setenv("TELEGRAM_ADMIN_ID", "not_a_number")
 	t.Setenv("DATABASE_PATH", ":memory:")
@@ -426,13 +425,13 @@ func TestConfigLoad_InvalidNumericValues(t *testing.T) {
 	t.Setenv("TRIAL_DURATION_HOURS", "24")
 	t.Setenv("TRIAL_RATE_LIMIT", "10")
 	t.Setenv("CONTACT_USERNAME", "admin")
+
 	_, err := config.Load()
 	assert.Error(t, err)
 }
 
 func TestConfigLoad_InvalidURL(t *testing.T) {
 	// Not parallel: t.Setenv cannot be used with t.Parallel
-
 	t.Setenv("TELEGRAM_BOT_TOKEN", "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11")
 	t.Setenv("TELEGRAM_ADMIN_ID", "123456789")
 	t.Setenv("DATABASE_PATH", ":memory:")
@@ -450,7 +449,6 @@ func TestConfigLoad_InvalidURL(t *testing.T) {
 
 func TestConfigLoad_InvalidPort(t *testing.T) {
 	// Not parallel: t.Setenv cannot be used with t.Parallel
-
 	t.Setenv("TELEGRAM_BOT_TOKEN", "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11")
 	t.Setenv("TELEGRAM_ADMIN_ID", "123456789")
 	t.Setenv("DATABASE_PATH", ":memory:")

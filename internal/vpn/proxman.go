@@ -107,6 +107,7 @@ func (c *ProxmanClient) sendEvent(ctx context.Context, event ProxmanEvent) error
 		if bodyStr == "duplicate" {
 			return ErrSubscriptionAlreadyExists
 		}
+
 		return nil
 	case http.StatusBadRequest:
 		return fmt.Errorf("proxman bad request: %s", bodyStr)

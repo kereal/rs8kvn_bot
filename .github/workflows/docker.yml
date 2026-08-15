@@ -53,7 +53,7 @@ jobs:
 
             - name: Run gosec security scan
               if: startsWith(github.ref, 'refs/tags/v')
-              uses: securego/gosec@v2
+              uses: securego/gosec@v2.28.0
               with:
                   # Fail release builds on every non-suppressed finding.
                   args: -quiet ./...

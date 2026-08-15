@@ -93,6 +93,7 @@ func NewClient(cfg Config) (Client, error) {
 		if cfg.XUIClient == nil {
 			return nil, errors.New("xui client is required for 3x-ui node")
 		}
+
 		return NewThreeXUIClient(cfg.XUIClient, cfg.InboundIDs), nil
 	case database.NodeTypeProxman:
 		return NewProxmanClient(cfg.Host, cfg.APIToken), nil

@@ -36,14 +36,17 @@ func (s *SubscriptionService) PlanTrafficLimitGB(ctx context.Context, telegramID
 		logger.Warn("PlanTrafficLimitGB: failed to load subscription", zap.Int64("telegram_id", telegramID), zap.Error(err))
 		return 0
 	}
+
 	if sub == nil {
 		return 0
 	}
+
 	plan, planErr := s.db.GetPlanByID(ctx, sub.PlanID)
 	if planErr != nil {
 		logger.Warn("PlanTrafficLimitGB: failed to load plan, reporting unlimited", zap.Uint("plan_id", sub.PlanID), zap.Error(planErr))
 		return 0
 	}
+
 	return planTrafficLimitGB(plan)
 }
 
@@ -52,10 +55,11 @@ func planTrafficLimitGB(plan *database.Plan) int {
 	if plan == nil {
 		return 0
 	}
+
 	return int(float64(plan.TrafficLimit) / 1024 / 1024 / 1024)
 }
 
-// Получаем данные подписки, содержащие информацию о трафике
+// GetWithTraffic returns subscription data including traffic information.
 func (s *SubscriptionService) GetWithTraffic(ctx context.Context, telegramID int64) (*database.Subscription, *TrafficInfo, error) {
 	// получили подписку
 	sub, err := s.db.GetByTelegramID(ctx, telegramID)
@@ -66,6 +70,7 @@ func (s *SubscriptionService) GetWithTraffic(ctx context.Context, telegramID int
 	// Получаем план один раз и переиспользуем для лимита и названия.
 	plan, planErr := s.db.GetPlanByID(ctx, sub.PlanID)
 	limitGB := planTrafficLimitGB(plan)
+
 	var planName string
 	if planErr == nil && plan != nil {
 		planName = plan.Name
@@ -98,8 +103,10 @@ func (s *SubscriptionService) GetWithTraffic(ctx context.Context, telegramID int
 		logger.Warn("GetWithTraffic: failed to load subscription nodes, falling back to all active nodes",
 			zap.Uint("subscription_id", sub.ID),
 			zap.Error(err))
+
 		subNodes = nil
 	}
+
 	activeSubNodeIDs := make(map[uint]struct{}, len(subNodes))
 	for _, sn := range subNodes {
 		if sn.Status == database.SyncStatusActive {
@@ -107,27 +114,34 @@ func (s *SubscriptionService) GetWithTraffic(ctx context.Context, telegramID int
 		}
 	}
 
-	var totalUp, totalDown int64
-	var anySuccess bool
-	var panelResetExpiry int64
-	var panelResetDays int
+	var (
+		totalUp, totalDown int64
+		anySuccess         bool
+		panelResetExpiry   int64
+		panelResetDays     int
+	)
+
 	for _, node := range s.activeNodes() {
 		if len(activeSubNodeIDs) > 0 {
 			if _, ok := activeSubNodeIDs[node.ID]; !ok {
 				continue
 			}
 		}
+
 		client, ok := s.xuiClients[node.ID]
 		if !ok {
 			continue
 		}
+
 		traffic, err := client.GetClientTraffic(ctx, email)
 		if err != nil {
 			logger.Debug("GetClientTraffic failed on source",
 				zap.Uint("node_id", node.ID),
 				zap.Error(err))
+
 			continue
 		}
+
 		totalUp += traffic.Up
 		totalDown += traffic.Down
 		panelResetExpiry = traffic.ExpiresAt
@@ -162,12 +176,17 @@ func (s *SubscriptionService) GetWithTraffic(ctx context.Context, telegramID int
 	progressBar := utils.GenerateProgressBar(usedGB, float64(limitGB))
 
 	// Calculate reset time from panel: expiryTime + reset days
-	var resetInfo string
-	var daysUntilReset int
+	var (
+		resetInfo      string
+		daysUntilReset int
+	)
+
 	if panelResetExpiry > 0 && panelResetDays > 0 {
 		resetTime := time.UnixMilli(panelResetExpiry)
 		daysUntilReset = utils.DaysUntilReset(time.Now(), resetTime)
+
 		var resetText string
+
 		switch {
 		case daysUntilReset < 0:
 			resetText = "отключен"
@@ -176,6 +195,7 @@ func (s *SubscriptionService) GetWithTraffic(ctx context.Context, telegramID int
 		default:
 			resetText = fmt.Sprintf("через %d дн.", daysUntilReset)
 		}
+
 		resetInfo = resetText
 	}
 
@@ -197,5 +217,6 @@ func formatExpiresAt(t *time.Time) string {
 	if t == nil {
 		return "бессрочно"
 	}
+
 	return utils.FormatDateRu(*t)
 }

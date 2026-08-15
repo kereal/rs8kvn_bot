@@ -22,9 +22,9 @@ import (
 	"gorm.io/gorm"
 )
 
-
 func setupInviteServer(t *testing.T, inviteCode string) *Server {
 	t.Helper()
+
 	mockDB := testutil.NewDatabaseService()
 	mockDB.GetPlanByNameFunc = func(ctx context.Context, name string) (*database.Plan, error) {
 		return &database.Plan{ID: 1, Name: "trial", DevicesLimit: 1, TrafficLimit: 1073741824}, nil
@@ -37,6 +37,7 @@ func setupInviteServer(t *testing.T, inviteCode string) *Server {
 		TrialDurationHours: 3,
 		TrialRateLimit:     3,
 	}
+
 	return NewServer(":8880", mockDB, cfg, "testbot", nil, nil)
 }
 
@@ -61,6 +62,7 @@ func TestHandleInvite_InvalidCodeVariants(t *testing.T) {
 			rec := httptest.NewRecorder()
 			srv.handleInvite(rec, req)
 			assert.Equal(t, tt.wantCode, rec.Code, "handleInvite() status")
+
 			if tt.wantBody != "" {
 				assert.Contains(t, rec.Body.String(), tt.wantBody)
 			}
@@ -87,6 +89,7 @@ func makeTestSubService(mockDB *testutil.DatabaseService) (*config.Config, *serv
 	vpnClients := map[uint]vpn.Client{1: vpn.NewThreeXUIClient(mockXUI, []int{1})}
 	nodes := []database.Node{{ID: 1, Name: "default", IsActive: true, Host: "http://localhost:2053", APIToken: "test-token", InboundIDs: "[1]", SubscriptionURL: cfg.GlobalSubURL}}
 	subService := service.NewSubscriptionService(mockDB, xuiClients, vpnClients, nodes, cfg)
+
 	return cfg, subService, mockXUI
 }
 
@@ -120,6 +123,7 @@ func TestHandleInvite_InvalidCode(t *testing.T) {
 
 	mockDB.CreateTrialSubscriptionFunc = func(ctx context.Context, inviteCode, subscriptionID, clientID string, expiryTime time.Time) (*database.Subscription, error) {
 		inviteVal := inviteCode
+
 		return &database.Subscription{
 			SubscriptionID: subscriptionID,
 			ClientID:       clientID,
@@ -509,6 +513,7 @@ func TestHandleInvite_ExistingTrialFromCookie(t *testing.T) {
 		Name:  "rs8kvn_trial_testcode",
 		Value: "existing-sub-id",
 	})
+
 	rec := httptest.NewRecorder()
 
 	srv.handleInvite(rec, req)
@@ -516,6 +521,7 @@ func TestHandleInvite_ExistingTrialFromCookie(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rec.Code)
 	body := rec.Body.String()
 	assert.Contains(t, body, "existing-sub-id")
+
 	expectedSubURL := cfg.GlobalSubURL + "existing-sub-id"
 	assert.Contains(t, body, expectedSubURL)
 }
@@ -590,6 +596,7 @@ func TestHandleInvite_ParallelRequests(t *testing.T) {
 		mu    sync.Mutex
 		count int
 	)
+
 	mockDB.GetInviteByCodeFunc = func(ctx context.Context, code string) (*database.Invite, error) {
 		return &database.Invite{Code: "testcode", ReferrerTGID: 12345}, nil
 	}
@@ -597,7 +604,9 @@ func TestHandleInvite_ParallelRequests(t *testing.T) {
 	mockDB.CountTrialRequestsByIPLastHourFunc = func(ctx context.Context, ip string) (int, error) {
 		mu.Lock()
 		defer mu.Unlock()
+
 		count++
+
 		return count, nil
 	}
 	mockDB.CreateTrialRequestFunc = func(ctx context.Context, ip string) error {
@@ -605,6 +614,7 @@ func TestHandleInvite_ParallelRequests(t *testing.T) {
 	}
 	mockDB.CreateTrialSubscriptionFunc = func(ctx context.Context, inviteCode, subscriptionID, clientID string, expiryTime time.Time) (*database.Subscription, error) {
 		inviteVal := inviteCode
+
 		return &database.Subscription{
 			SubscriptionID: subscriptionID,
 			PlanID:         1,
@@ -613,19 +623,20 @@ func TestHandleInvite_ParallelRequests(t *testing.T) {
 	}
 
 	const numParallel = 10
+
 	var wg sync.WaitGroup
+
 	results := make(chan int, numParallel)
 
-	for i := 0; i < numParallel; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range numParallel {
+		wg.Go(func() {
 			req := httptest.NewRequest("GET", "/i/testcode", nil)
 			req.RemoteAddr = "192.168.1.1:12345"
 			rec := httptest.NewRecorder()
 			srv.handleInvite(rec, req)
+
 			results <- rec.Code
-		}()
+		})
 	}
 
 	wg.Wait()
@@ -633,6 +644,7 @@ func TestHandleInvite_ParallelRequests(t *testing.T) {
 
 	successCount := 0
 	rateLimitedCount := 0
+
 	for code := range results {
 		if code == http.StatusOK {
 			successCount++

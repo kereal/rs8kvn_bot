@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"path/filepath"
+	"slices"
 	"sync"
 	"time"
 
@@ -61,6 +62,7 @@ func NewTestDatabaseService(t any) (*database.Service, error) {
 	}
 
 	dbPath := filepath.Join(tmpDir, "test_service.db")
+
 	return database.NewService(dbPath)
 }
 
@@ -163,6 +165,7 @@ func (m *DatabaseService) Ping(ctx context.Context) error {
 	if m.PingFunc != nil {
 		return m.PingFunc(ctx)
 	}
+
 	return nil
 }
 
@@ -170,6 +173,7 @@ func (m *DatabaseService) Transaction(ctx context.Context, fn func(*gorm.DB) err
 	if m.TransactionFunc != nil {
 		return m.TransactionFunc(ctx, fn)
 	}
+
 	return errors.New("mock transaction not configured")
 }
 
@@ -177,11 +181,14 @@ func (m *DatabaseService) GetByTelegramID(ctx context.Context, telegramID int64)
 	if m.GetByTelegramIDFunc != nil {
 		return m.GetByTelegramIDFunc(ctx, telegramID)
 	}
+
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+
 	if sub, ok := m.Subscriptions[telegramID]; ok {
 		return sub, nil
 	}
+
 	return nil, gorm.ErrRecordNotFound
 }
 
@@ -189,11 +196,14 @@ func (m *DatabaseService) GetAnyByTelegramID(ctx context.Context, telegramID int
 	if m.GetAnyByTelegramIDFunc != nil {
 		return m.GetAnyByTelegramIDFunc(ctx, telegramID)
 	}
+
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+
 	if sub, ok := m.Subscriptions[telegramID]; ok {
 		return sub, nil
 	}
+
 	return nil, gorm.ErrRecordNotFound
 }
 
@@ -201,12 +211,15 @@ func (m *DatabaseService) GetByID(ctx context.Context, id uint) (*database.Subsc
 	if m.GetByIDFunc != nil {
 		return m.GetByIDFunc(ctx, id)
 	}
+
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+
 	if sub, ok := m.SubscriptionsByID[id]; ok {
 		copy := *sub
 		return &copy, nil
 	}
+
 	return nil, gorm.ErrRecordNotFound
 }
 
@@ -214,21 +227,27 @@ func (m *DatabaseService) CreateSubscription(ctx context.Context, sub *database.
 	if m.CreateSubscriptionFunc != nil {
 		return m.CreateSubscriptionFunc(ctx, sub, inviteCode)
 	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
 	if m.Subscriptions == nil {
 		m.Subscriptions = make(map[int64]*database.Subscription)
 	}
+
 	if m.SubscriptionsByID == nil {
 		m.SubscriptionsByID = make(map[uint]*database.Subscription)
 	}
+
 	stored := *sub
 	if sub.TelegramID > 0 {
 		m.Subscriptions[sub.TelegramID] = &stored
 	}
+
 	if sub.ID > 0 {
 		m.SubscriptionsByID[sub.ID] = &stored
 	}
+
 	return nil
 }
 
@@ -236,6 +255,7 @@ func (m *DatabaseService) CreateSubscriptionNode(ctx context.Context, sn *databa
 	if m.CreateSubscriptionNodeFunc != nil {
 		return m.CreateSubscriptionNodeFunc(ctx, sn)
 	}
+
 	return nil
 }
 
@@ -243,6 +263,7 @@ func (m *DatabaseService) UpdateSubscriptionNodeStatus(ctx context.Context, subI
 	if m.UpdateSubscriptionNodeStatusFunc != nil {
 		return m.UpdateSubscriptionNodeStatusFunc(ctx, subID, nodeID, status)
 	}
+
 	return nil
 }
 
@@ -250,6 +271,7 @@ func (m *DatabaseService) UpsertSubscriptionNode(ctx context.Context, sn *databa
 	if m.UpsertSubscriptionNodeFunc != nil {
 		return m.UpsertSubscriptionNodeFunc(ctx, sn)
 	}
+
 	return nil
 }
 
@@ -257,6 +279,7 @@ func (m *DatabaseService) DeleteSubscriptionNode(ctx context.Context, subID, nod
 	if m.DeleteSubscriptionNodeFunc != nil {
 		return m.DeleteSubscriptionNodeFunc(ctx, subID, nodeID)
 	}
+
 	return nil
 }
 
@@ -264,6 +287,7 @@ func (m *DatabaseService) DeleteSubscriptionNodesBySubscriptionID(ctx context.Co
 	if m.DeleteSubscriptionNodesBySubscriptionIDFunc != nil {
 		return m.DeleteSubscriptionNodesBySubscriptionIDFunc(ctx, subID)
 	}
+
 	return nil
 }
 
@@ -271,6 +295,7 @@ func (m *DatabaseService) MarkActiveNodesPendingUpdate(ctx context.Context, subI
 	if m.MarkActiveNodesPendingUpdateFunc != nil {
 		return m.MarkActiveNodesPendingUpdateFunc(ctx, subID, targetNodeIDs)
 	}
+
 	return nil
 }
 
@@ -278,6 +303,7 @@ func (m *DatabaseService) UpdateRetry(ctx context.Context, subID, nodeID uint, r
 	if m.UpdateRetryFunc != nil {
 		return m.UpdateRetryFunc(ctx, subID, nodeID, retryCount, retryAt, lastErr)
 	}
+
 	return nil
 }
 
@@ -285,6 +311,7 @@ func (m *DatabaseService) GetBySubscriptionID(ctx context.Context, subscriptionI
 	if m.GetBySubscriptionIDFunc != nil {
 		return m.GetBySubscriptionIDFunc(ctx, subscriptionID)
 	}
+
 	return nil, nil
 }
 
@@ -292,6 +319,7 @@ func (m *DatabaseService) GetByNodeID(ctx context.Context, nodeID uint) ([]datab
 	if m.GetByNodeIDFunc != nil {
 		return m.GetByNodeIDFunc(ctx, nodeID)
 	}
+
 	return nil, nil
 }
 
@@ -299,6 +327,7 @@ func (m *DatabaseService) GetPendingSync(ctx context.Context) ([]database.Subscr
 	if m.GetPendingSyncFunc != nil {
 		return m.GetPendingSyncFunc(ctx)
 	}
+
 	return nil, nil
 }
 
@@ -306,6 +335,7 @@ func (m *DatabaseService) GetPendingBySubscriptionID(ctx context.Context, subscr
 	if m.GetPendingBySubscriptionIDFunc != nil {
 		return m.GetPendingBySubscriptionIDFunc(ctx, subscriptionID)
 	}
+
 	return nil, nil
 }
 
@@ -313,6 +343,7 @@ func (m *DatabaseService) GetPendingByNodeID(ctx context.Context, nodeID uint) (
 	if m.GetPendingByNodeIDFunc != nil {
 		return m.GetPendingByNodeIDFunc(ctx, nodeID)
 	}
+
 	return nil, nil
 }
 
@@ -320,6 +351,7 @@ func (m *DatabaseService) GetNodeByID(ctx context.Context, id uint) (*database.N
 	if m.GetNodeByIDFunc != nil {
 		return m.GetNodeByIDFunc(ctx, id)
 	}
+
 	return nil, gorm.ErrRecordNotFound
 }
 
@@ -327,6 +359,7 @@ func (m *DatabaseService) GetNodesByPlanID(ctx context.Context, planID uint) ([]
 	if m.GetNodesByPlanIDFunc != nil {
 		return m.GetNodesByPlanIDFunc(ctx, planID)
 	}
+
 	return nil, gorm.ErrRecordNotFound
 }
 
@@ -334,6 +367,7 @@ func (m *DatabaseService) ListEnabled(ctx context.Context) ([]database.Node, err
 	if m.ListEnabledFunc != nil {
 		return m.ListEnabledFunc(ctx)
 	}
+
 	return nil, gorm.ErrRecordNotFound
 }
 
@@ -341,6 +375,7 @@ func (m *DatabaseService) GetProductByID(ctx context.Context, id uint) (*databas
 	if m.GetProductByIDFunc != nil {
 		return m.GetProductByIDFunc(ctx, id)
 	}
+
 	return nil, gorm.ErrRecordNotFound
 }
 
@@ -348,6 +383,7 @@ func (m *DatabaseService) UpdateProductGuarded(ctx context.Context, product *dat
 	if m.UpdateProductGuardedFunc != nil {
 		return m.UpdateProductGuardedFunc(ctx, product)
 	}
+
 	return nil
 }
 
@@ -355,21 +391,27 @@ func (m *DatabaseService) UpdateSubscription(ctx context.Context, sub *database.
 	if m.UpdateSubscriptionFunc != nil {
 		return m.UpdateSubscriptionFunc(ctx, sub)
 	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
 	if m.Subscriptions == nil {
 		m.Subscriptions = make(map[int64]*database.Subscription)
 	}
+
 	stored := *sub
 	if sub.TelegramID > 0 {
 		m.Subscriptions[sub.TelegramID] = &stored
 	}
+
 	if sub.ID > 0 {
 		if m.SubscriptionsByID == nil {
 			m.SubscriptionsByID = make(map[uint]*database.Subscription)
 		}
+
 		m.SubscriptionsByID[sub.ID] = &stored
 	}
+
 	return nil
 }
 
@@ -377,9 +419,11 @@ func (m *DatabaseService) DeleteSubscription(ctx context.Context, telegramID int
 	if m.DeleteSubscriptionFunc != nil {
 		return m.DeleteSubscriptionFunc(ctx, telegramID)
 	}
+
 	m.mu.Lock()
 	delete(m.Subscriptions, telegramID)
 	m.mu.Unlock()
+
 	return nil
 }
 
@@ -387,17 +431,22 @@ func (m *DatabaseService) GetLatestSubscriptions(ctx context.Context, limit int)
 	if m.GetLatestSubscriptionsFunc != nil {
 		return m.GetLatestSubscriptionsFunc(ctx, limit)
 	}
+
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+
 	var result []database.Subscription
+
 	for _, sub := range m.Subscriptions {
 		if sub.Status == "active" {
 			result = append(result, *sub)
 		}
 	}
+
 	if len(result) > limit {
 		result = result[:limit]
 	}
+
 	return result, nil
 }
 
@@ -405,12 +454,15 @@ func (m *DatabaseService) GetAllSubscriptions(ctx context.Context) ([]database.S
 	if m.GetAllSubscriptionsFunc != nil {
 		return m.GetAllSubscriptionsFunc(ctx)
 	}
+
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+
 	var result []database.Subscription
 	for _, sub := range m.Subscriptions {
 		result = append(result, *sub)
 	}
+
 	return result, nil
 }
 
@@ -418,14 +470,18 @@ func (m *DatabaseService) CountActiveSubscriptions(ctx context.Context) (int64, 
 	if m.CountActiveSubscriptionsFunc != nil {
 		return m.CountActiveSubscriptionsFunc(ctx)
 	}
+
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+
 	var count int64
+
 	for _, sub := range m.Subscriptions {
 		if sub.Status == "active" && !sub.IsExpired() {
 			count++
 		}
 	}
+
 	return count, nil
 }
 
@@ -433,14 +489,18 @@ func (m *DatabaseService) CountTrialSubscriptions(ctx context.Context) (int64, e
 	if m.CountTrialSubscriptionsFunc != nil {
 		return m.CountTrialSubscriptionsFunc(ctx)
 	}
+
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+
 	var count int64
+
 	for _, sub := range m.Subscriptions {
 		if sub.TelegramID < 0 {
 			count++
 		}
 	}
+
 	return count, nil
 }
 
@@ -448,8 +508,10 @@ func (m *DatabaseService) CountAllSubscriptions(ctx context.Context) (int64, err
 	if m.CountAllSubscriptionsFunc != nil {
 		return m.CountAllSubscriptionsFunc(ctx)
 	}
+
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+
 	return int64(len(m.Subscriptions)), nil
 }
 
@@ -457,14 +519,18 @@ func (m *DatabaseService) CountExpiredSubscriptions(ctx context.Context) (int64,
 	if m.CountExpiredSubscriptionsFunc != nil {
 		return m.CountExpiredSubscriptionsFunc(ctx)
 	}
+
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+
 	var count int64
+
 	for _, sub := range m.Subscriptions {
 		if sub.Status == "active" && sub.IsExpired() {
 			count++
 		}
 	}
+
 	return count, nil
 }
 
@@ -472,12 +538,15 @@ func (m *DatabaseService) GetAllTelegramIDs(ctx context.Context) ([]int64, error
 	if m.GetAllTelegramIDsFunc != nil {
 		return m.GetAllTelegramIDsFunc(ctx)
 	}
+
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+
 	var result []int64
 	for id := range m.Subscriptions {
 		result = append(result, id)
 	}
+
 	return result, nil
 }
 
@@ -485,13 +554,16 @@ func (m *DatabaseService) GetTelegramIDByUsername(ctx context.Context, username 
 	if m.GetTelegramIDByUsernameFunc != nil {
 		return m.GetTelegramIDByUsernameFunc(ctx, username)
 	}
+
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+
 	for _, sub := range m.Subscriptions {
 		if sub.Username == username {
 			return sub.TelegramID, nil
 		}
 	}
+
 	return 0, gorm.ErrRecordNotFound
 }
 
@@ -499,6 +571,7 @@ func (m *DatabaseService) DeleteSubscriptionByID(ctx context.Context, id uint) (
 	if m.DeleteSubscriptionByIDFunc != nil {
 		return m.DeleteSubscriptionByIDFunc(ctx, id)
 	}
+
 	return nil, gorm.ErrRecordNotFound
 }
 
@@ -506,19 +579,21 @@ func (m *DatabaseService) GetTelegramIDsBatch(ctx context.Context, offset, limit
 	if m.GetTelegramIDsBatchFunc != nil {
 		return m.GetTelegramIDsBatchFunc(ctx, offset, limit)
 	}
+
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+
 	var ids []int64
 	for id := range m.Subscriptions {
 		ids = append(ids, id)
 	}
+
 	if offset >= len(ids) {
 		return []int64{}, nil
 	}
-	end := offset + limit
-	if end > len(ids) {
-		end = len(ids)
-	}
+
+	end := min(offset+limit, len(ids))
+
 	return ids[offset:end], nil
 }
 
@@ -526,8 +601,10 @@ func (m *DatabaseService) GetTotalTelegramIDCount(ctx context.Context) (int64, e
 	if m.GetTotalTelegramIDCountFunc != nil {
 		return m.GetTotalTelegramIDCountFunc(ctx)
 	}
+
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+
 	return int64(len(m.Subscriptions)), nil
 }
 
@@ -539,6 +616,7 @@ func (m *DatabaseService) GetOrCreateInvite(ctx context.Context, referrerTGID in
 	if m.GetOrCreateInviteFunc != nil {
 		return m.GetOrCreateInviteFunc(ctx, referrerTGID, code)
 	}
+
 	return &database.Invite{Code: code, ReferrerTGID: referrerTGID}, nil
 }
 
@@ -546,6 +624,7 @@ func (m *DatabaseService) GetInviteByCode(ctx context.Context, code string) (*da
 	if m.GetInviteByCodeFunc != nil {
 		return m.GetInviteByCodeFunc(ctx, code)
 	}
+
 	return nil, gorm.ErrRecordNotFound
 }
 
@@ -553,6 +632,7 @@ func (m *DatabaseService) GetInviteByReferrer(ctx context.Context, referrerTGID 
 	if m.GetInviteByReferrerFunc != nil {
 		return m.GetInviteByReferrerFunc(ctx, referrerTGID)
 	}
+
 	return nil, database.ErrInviteNotFound
 }
 
@@ -560,11 +640,14 @@ func (m *DatabaseService) CreateTrialSubscription(ctx context.Context, inviteCod
 	if m.CreateTrialSubscriptionFunc != nil {
 		return m.CreateTrialSubscriptionFunc(ctx, inviteCode, subscriptionID, clientID, expiryTime)
 	}
+
 	trialPlan, err := m.GetPlanByName(ctx, database.TrialPlanName)
 	if err != nil {
 		return nil, err
 	}
+
 	inviteVal := inviteCode
+
 	return &database.Subscription{InviteCode: &inviteVal, SubscriptionID: subscriptionID, ClientID: clientID, PlanID: trialPlan.ID}, nil
 }
 
@@ -572,6 +655,7 @@ func (m *DatabaseService) ListNodes(ctx context.Context) ([]database.Node, error
 	if m.ListNodesFunc != nil {
 		return m.ListNodesFunc(ctx)
 	}
+
 	return []database.Node{
 		{ID: 1, Name: "default", IsActive: true, Host: "http://localhost:2053", APIToken: "test-token", InboundIDs: `[1]`, SubscriptionURL: "http://example.com/sub/"},
 	}, nil
@@ -581,6 +665,7 @@ func (m *DatabaseService) SeedDefaultData(ctx context.Context) error {
 	if m.SeedDefaultDataFunc != nil {
 		return m.SeedDefaultDataFunc(ctx)
 	}
+
 	return nil
 }
 
@@ -588,12 +673,15 @@ func (m *DatabaseService) GetPlanByName(ctx context.Context, name string) (*data
 	if m.GetPlanByNameFunc != nil {
 		return m.GetPlanByNameFunc(ctx, name)
 	}
+
 	if name == database.FreePlanName {
 		return &database.Plan{ID: 2, Name: name, DevicesLimit: 1, TrafficLimit: 1073741824}, nil
 	}
+
 	if name == database.TrialPlanName {
 		return &database.Plan{ID: 1, Name: name, DevicesLimit: 1, TrafficLimit: 1073741824}, nil
 	}
+
 	return nil, gorm.ErrRecordNotFound
 }
 
@@ -601,6 +689,7 @@ func (m *DatabaseService) GetPlanByID(ctx context.Context, planID uint) (*databa
 	if m.GetPlanByIDFunc != nil {
 		return m.GetPlanByIDFunc(ctx, planID)
 	}
+
 	return nil, gorm.ErrRecordNotFound
 }
 
@@ -608,6 +697,7 @@ func (m *DatabaseService) GetAllPlans(ctx context.Context) ([]database.Plan, err
 	if m.GetAllPlansFunc != nil {
 		return m.GetAllPlansFunc(ctx)
 	}
+
 	return nil, nil
 }
 
@@ -615,6 +705,7 @@ func (m *DatabaseService) CreatePlan(ctx context.Context, plan *database.Plan) e
 	if m.CreatePlanFunc != nil {
 		return m.CreatePlanFunc(ctx, plan)
 	}
+
 	return nil
 }
 
@@ -622,6 +713,7 @@ func (m *DatabaseService) UpdatePlan(ctx context.Context, plan *database.Plan) e
 	if m.UpdatePlanFunc != nil {
 		return m.UpdatePlanFunc(ctx, plan)
 	}
+
 	return nil
 }
 
@@ -629,6 +721,7 @@ func (m *DatabaseService) DeletePlan(ctx context.Context, planID uint) error {
 	if m.DeletePlanFunc != nil {
 		return m.DeletePlanFunc(ctx, planID)
 	}
+
 	return nil
 }
 
@@ -636,13 +729,16 @@ func (m *DatabaseService) GetNodesByPlanName(ctx context.Context, planName strin
 	if m.GetNodesByPlanNameFunc != nil {
 		return m.GetNodesByPlanNameFunc(ctx, planName)
 	}
+
 	if planName == database.TrialPlanName {
 		inboundIDs, err := json.Marshal([]int{1})
 		if err != nil {
 			return nil, err
 		}
+
 		return []database.Node{{ID: 1, IsActive: true, Host: "http://localhost:2053", InboundIDs: string(inboundIDs)}}, nil
 	}
+
 	return nil, nil
 }
 
@@ -650,6 +746,7 @@ func (m *DatabaseService) GetPlansBySourceID(ctx context.Context, sourceID uint)
 	if m.GetPlansBySourceIDFunc != nil {
 		return m.GetPlansBySourceIDFunc(ctx, sourceID)
 	}
+
 	return nil, nil
 }
 
@@ -657,6 +754,7 @@ func (m *DatabaseService) AddSourceToPlan(ctx context.Context, planID, sourceID 
 	if m.AddSourceToPlanFunc != nil {
 		return m.AddSourceToPlanFunc(ctx, planID, sourceID)
 	}
+
 	return nil
 }
 
@@ -664,6 +762,7 @@ func (m *DatabaseService) RemoveSourceFromPlan(ctx context.Context, planID, sour
 	if m.RemoveSourceFromPlanFunc != nil {
 		return m.RemoveSourceFromPlanFunc(ctx, planID, sourceID)
 	}
+
 	return nil
 }
 
@@ -671,13 +770,16 @@ func (m *DatabaseService) GetSubscription(ctx context.Context, subscriptionID st
 	if m.GetSubscriptionFunc != nil {
 		return m.GetSubscriptionFunc(ctx, subscriptionID)
 	}
+
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+
 	for _, sub := range m.Subscriptions {
 		if sub.SubscriptionID == subscriptionID {
 			return sub, nil
 		}
 	}
+
 	return nil, gorm.ErrRecordNotFound
 }
 
@@ -685,17 +787,21 @@ func (m *DatabaseService) GetTrialSubscriptionBySubID(ctx context.Context, subsc
 	if m.GetTrialSubscriptionBySubIDFunc != nil {
 		return m.GetTrialSubscriptionBySubIDFunc(ctx, subscriptionID)
 	}
+
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+
 	trialPlan, err := m.GetPlanByName(ctx, database.TrialPlanName)
 	if err != nil {
 		return nil, err
 	}
+
 	for _, sub := range m.Subscriptions {
 		if sub.SubscriptionID == subscriptionID && sub.PlanID == trialPlan.ID {
 			return sub, nil
 		}
 	}
+
 	return nil, gorm.ErrRecordNotFound
 }
 
@@ -703,16 +809,20 @@ func (m *DatabaseService) BindTrialSubscription(ctx context.Context, subscriptio
 	if m.BindTrialSubscriptionFunc != nil {
 		return m.BindTrialSubscriptionFunc(ctx, subscriptionID, telegramID, username)
 	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
 	for _, sub := range m.Subscriptions {
 		if sub.SubscriptionID == subscriptionID {
 			sub.TelegramID = telegramID
 			sub.Username = username
 			sub.PlanID = 0
+
 			return sub, nil
 		}
 	}
+
 	return nil, gorm.ErrRecordNotFound
 }
 
@@ -720,6 +830,7 @@ func (m *DatabaseService) CountTrialRequestsByIPLastHour(ctx context.Context, ip
 	if m.CountTrialRequestsByIPLastHourFunc != nil {
 		return m.CountTrialRequestsByIPLastHourFunc(ctx, ip)
 	}
+
 	return 0, nil
 }
 
@@ -727,6 +838,7 @@ func (m *DatabaseService) CreateTrialRequest(ctx context.Context, ip string) err
 	if m.CreateTrialRequestFunc != nil {
 		return m.CreateTrialRequestFunc(ctx, ip)
 	}
+
 	return nil
 }
 
@@ -734,6 +846,7 @@ func (m *DatabaseService) CleanupExpiredTrials(ctx context.Context, hours int) (
 	if m.CleanupExpiredTrialsFunc != nil {
 		return m.CleanupExpiredTrialsFunc(ctx, hours)
 	}
+
 	return nil, nil
 }
 
@@ -741,6 +854,7 @@ func (m *DatabaseService) GetPoolStats() (*database.PoolStats, error) {
 	if m.GetPoolStatsFunc != nil {
 		return m.GetPoolStatsFunc()
 	}
+
 	return &database.PoolStats{}, nil
 }
 
@@ -748,6 +862,7 @@ func (m *DatabaseService) GetWithPlanAndNodes(ctx context.Context, subscriptionI
 	if m.GetWithPlanAndNodesFunc != nil {
 		return m.GetWithPlanAndNodesFunc(ctx, subscriptionID)
 	}
+
 	return nil, gorm.ErrRecordNotFound
 }
 
@@ -755,6 +870,7 @@ func (m *DatabaseService) GetSubscriptionStatus(ctx context.Context, subscriptio
 	if m.GetSubscriptionStatusFunc != nil {
 		return m.GetSubscriptionStatusFunc(ctx, subscriptionID)
 	}
+
 	return "", time.Time{}, gorm.ErrRecordNotFound
 }
 
@@ -762,6 +878,7 @@ func (m *DatabaseService) UpdateDevices(ctx context.Context, id uint, devicesJSO
 	if m.UpdateDevicesFunc != nil {
 		return m.UpdateDevicesFunc(ctx, id, devicesJSON)
 	}
+
 	return nil
 }
 
@@ -773,6 +890,7 @@ func (m *DatabaseService) UpdateLastRequest(ctx context.Context, subscriptionID 
 	if m.UpdateLastRequestFunc != nil {
 		return m.UpdateLastRequestFunc(ctx, subscriptionID)
 	}
+
 	return nil
 }
 
@@ -788,6 +906,7 @@ func (m *DatabaseService) GetSubscriptionsExpiringInRange(ctx context.Context, f
 	if m.GetSubscriptionsExpiringInRangeFunc != nil {
 		return m.GetSubscriptionsExpiringInRangeFunc(ctx, from, to)
 	}
+
 	return nil, nil
 }
 
@@ -796,21 +915,26 @@ func (m *DatabaseService) ClaimReminder(ctx context.Context, id uint, bit int, e
 	if m.ClaimReminderFunc != nil {
 		return m.ClaimReminderFunc(ctx, id, bit, expiresAt)
 	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
 	sub, ok := m.SubscriptionsByID[id]
 	if !ok {
 		return false, gorm.ErrRecordNotFound
 	}
+
 	if sub.ExpiresAt == nil || !sub.ExpiresAt.Equal(expiresAt) || sub.RemindersSent&bit != 0 {
 		return false, nil
 	}
+
 	sub.RemindersSent |= bit
 	if sub.TelegramID > 0 {
 		if current, exists := m.Subscriptions[sub.TelegramID]; exists {
 			current.RemindersSent = sub.RemindersSent
 		}
 	}
+
 	return true, nil
 }
 
@@ -819,35 +943,43 @@ func (m *DatabaseService) ReleaseReminder(ctx context.Context, id uint, bit int,
 	if m.ReleaseReminderFunc != nil {
 		return m.ReleaseReminderFunc(ctx, id, bit, expiresAt)
 	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
 	sub, ok := m.SubscriptionsByID[id]
 	if !ok {
 		return gorm.ErrRecordNotFound
 	}
+
 	if sub.ExpiresAt == nil || !sub.ExpiresAt.Equal(expiresAt) {
 		return nil
 	}
+
 	sub.RemindersSent &^= bit
 	if sub.TelegramID > 0 {
 		if current, exists := m.Subscriptions[sub.TelegramID]; exists {
 			current.RemindersSent = sub.RemindersSent
 		}
 	}
+
 	return nil
 }
 func (m *DatabaseService) ListActiveProducts(ctx context.Context) ([]database.Product, error) {
 	if m.ListActiveProductsFunc != nil {
 		return m.ListActiveProductsFunc(ctx)
 	}
+
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+
 	products := make([]database.Product, 0, len(m.Products))
 	for _, product := range m.Products {
 		if product.IsActive && product.PriceCents > 0 {
 			products = append(products, *product)
 		}
 	}
+
 	return products, nil
 }
 
@@ -855,11 +987,14 @@ func (m *DatabaseService) GetOrderByID(ctx context.Context, id uint) (*database.
 	if m.GetOrderByIDFunc != nil {
 		return m.GetOrderByIDFunc(ctx, id)
 	}
+
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+
 	if order, ok := m.Orders[id]; ok {
 		return order, nil
 	}
+
 	return nil, gorm.ErrRecordNotFound
 }
 
@@ -867,13 +1002,16 @@ func (m *DatabaseService) GetOrderByProviderPaymentID(ctx context.Context, provi
 	if m.GetOrderByProviderPaymentIDFunc != nil {
 		return m.GetOrderByProviderPaymentIDFunc(ctx, provider, providerPaymentID)
 	}
+
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+
 	for _, order := range m.Orders {
 		if order.PaymentProvider == provider && order.ProviderPaymentID == providerPaymentID.String() {
 			return order, nil
 		}
 	}
+
 	return nil, gorm.ErrRecordNotFound
 }
 
@@ -881,17 +1019,21 @@ func (m *DatabaseService) FindPendingPaymentOrder(ctx context.Context, subscript
 	if m.FindPendingPaymentOrderFunc != nil {
 		return m.FindPendingPaymentOrderFunc(ctx, subscriptionID, productID, now)
 	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
 	for _, order := range m.Orders {
 		if order.SubscriptionID == subscriptionID && order.ProductID == productID && order.PaymentProvider == "platega" && order.Status == database.OrderStatusPending {
 			if order.PaymentExpiresAt != nil && !now.Before(*order.PaymentExpiresAt) {
 				order.Status = database.OrderStatusExpired
 				continue
 			}
+
 			return order, nil
 		}
 	}
+
 	return nil, nil
 }
 
@@ -899,25 +1041,32 @@ func (m *DatabaseService) FindOrCreatePendingPaymentOrder(ctx context.Context, s
 	if m.FindOrCreatePendingPaymentOrderFunc != nil {
 		return m.FindOrCreatePendingPaymentOrderFunc(ctx, subscriptionID, productID, amountCents, currency, now)
 	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
 	for _, order := range m.Orders {
 		if order.SubscriptionID == subscriptionID && order.ProductID == productID && order.PaymentProvider == "platega" && order.Status == database.OrderStatusPending {
 			if order.PaymentCreationUncertain {
 				return order, nil
 			}
+
 			if order.PaymentExpiresAt != nil && !now.Before(*order.PaymentExpiresAt) {
 				order.Status = database.OrderStatusExpired
 				continue
 			}
+
 			return order, nil
 		}
 	}
+
 	if m.Orders == nil {
 		m.Orders = make(map[uint]*database.Order)
 	}
+
 	order := &database.Order{ID: uint(len(m.Orders) + 1), SubscriptionID: subscriptionID, ProductID: productID, Status: database.OrderStatusPending, AmountCents: amountCents, Currency: currency, PaymentProvider: "platega", CreatedAt: now} // #nosec G115 -- slice length is non-negative
 	m.Orders[order.ID] = order
+
 	return order, nil
 }
 
@@ -925,13 +1074,17 @@ func (m *DatabaseService) MarkPaymentCreationUncertain(ctx context.Context, orde
 	if m.MarkPaymentCreationUncertainFunc != nil {
 		return m.MarkPaymentCreationUncertainFunc(ctx, orderID, uncertain)
 	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
 	order, ok := m.Orders[orderID]
 	if !ok || order.Status != database.OrderStatusPending || order.PaymentCreationUncertain == uncertain || (uncertain && order.ProviderPaymentID != "") {
 		return false, nil
 	}
+
 	order.PaymentCreationUncertain = uncertain
+
 	return true, nil
 }
 
@@ -939,13 +1092,17 @@ func (m *DatabaseService) SavePaymentDetails(ctx context.Context, orderID uint, 
 	if m.SavePaymentDetailsFunc != nil {
 		return m.SavePaymentDetailsFunc(ctx, orderID, providerPaymentID, paymentURL, paymentExpiresAt)
 	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
 	order, ok := m.Orders[orderID]
 	if !ok || order.Status != database.OrderStatusPending {
 		return gorm.ErrRecordNotFound
 	}
+
 	order.ProviderPaymentID, order.PaymentURL, order.PaymentExpiresAt, order.PaymentCreationUncertain = providerPaymentID.String(), paymentURL, &paymentExpiresAt, false
+
 	return nil
 }
 
@@ -953,23 +1110,32 @@ func (m *DatabaseService) ConfirmOrderPaidCAS(ctx context.Context, orderID uint,
 	if m.ConfirmOrderPaidCASFunc != nil {
 		return m.ConfirmOrderPaidCASFunc(ctx, orderID, paidAt, activatedAt, sub, product, applyPlan)
 	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
 	order, ok := m.Orders[orderID]
 	if !ok || order.Status != database.OrderStatusPending {
 		return false, nil
 	}
-	newExpiry := database.CalculatePaymentExpiry(paidAt, sub, product)
-	order.Status, order.PaidAt, order.ActivatedAt, order.ExpiresAt = database.OrderStatusPaid, &paidAt, &activatedAt, &newExpiry
-	if sub != nil {
-		sub.ExpiresAt = &newExpiry
-	}
+
 	if applyPlan != nil {
 		// The in-memory fake has no transaction handle. Require tests that cover
 		// transaction-scoped plan reconciliation to provide ConfirmOrderPaidCASFunc;
 		// silently invoking the callback with nil would hide a production bug.
+		// Validate before mutating any state: in production an applyPlan failure
+		// rolls back the whole transaction, so the mock must not leave partial
+		// order/subscription mutations behind when it returns this error.
 		return false, errors.New("mock ConfirmOrderPaidCAS requires ConfirmOrderPaidCASFunc when applyPlan is set")
 	}
+
+	newExpiry := database.CalculatePaymentExpiry(paidAt, sub, product)
+
+	order.Status, order.PaidAt, order.ActivatedAt, order.ExpiresAt = database.OrderStatusPaid, &paidAt, &activatedAt, &newExpiry
+	if sub != nil {
+		sub.ExpiresAt = &newExpiry
+	}
+
 	return true, nil
 }
 
@@ -977,6 +1143,7 @@ func (m *DatabaseService) CancelPaidOrderAndDowngradeCAS(ctx context.Context, pr
 	if m.CancelPaidOrderAndDowngradeCASFunc != nil {
 		return m.CancelPaidOrderAndDowngradeCASFunc(ctx, provider, providerPaymentID, now, freePlanID, applyPlan)
 	}
+
 	return nil, errors.New("mock atomic chargeback requires CancelPaidOrderAndDowngradeCASFunc")
 }
 
@@ -984,24 +1151,26 @@ func (m *DatabaseService) CancelOrderCAS(ctx context.Context, provider string, p
 	if m.CancelOrderCASFunc != nil {
 		return m.CancelOrderCASFunc(ctx, provider, providerPaymentID, fromStatuses)
 	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
 	for _, order := range m.Orders {
 		if order.PaymentProvider == provider && order.ProviderPaymentID == providerPaymentID.String() {
-			for _, status := range fromStatuses {
-				if order.Status == status {
-					order.Status = database.OrderStatusCanceled
-					return true, nil
-				}
+			if slices.Contains(fromStatuses, order.Status) {
+				order.Status = database.OrderStatusCanceled
+				return true, nil
 			}
 		}
 	}
+
 	return false, nil
 }
 func (m *DatabaseService) GetReferralCount(ctx context.Context, referrerTGID int64) (int64, error) {
 	if m.GetReferralCountFunc != nil {
 		return m.GetReferralCountFunc(ctx, referrerTGID)
 	}
+
 	return 0, nil
 }
 
@@ -1009,6 +1178,7 @@ func (m *DatabaseService) GetAllReferralCounts(ctx context.Context) (map[int64]i
 	if m.GetAllReferralCountsFunc != nil {
 		return m.GetAllReferralCountsFunc(ctx)
 	}
+
 	return make(map[int64]int64), nil
 }
 
@@ -1045,6 +1215,7 @@ func (m *XUIClient) Ping(ctx context.Context) error {
 	if m.PingFunc != nil {
 		return m.PingFunc(ctx)
 	}
+
 	return nil
 }
 
@@ -1052,9 +1223,11 @@ func (m *XUIClient) AddClient(ctx context.Context, inboundIDs []int, email strin
 	m.mu.Lock()
 	m.AddClientCalled = true
 	m.mu.Unlock()
+
 	if m.AddClientFunc != nil {
 		return m.AddClientFunc(ctx, inboundIDs, email, trafficBytes, expiryTime)
 	}
+
 	return &xui.ClientConfig{
 		ID:        "test-client-id",
 		Email:     email,
@@ -1068,9 +1241,11 @@ func (m *XUIClient) AddClientWithID(ctx context.Context, req xui.ClientRequest) 
 	m.mu.Lock()
 	m.AddClientWithIDCalled = true
 	m.mu.Unlock()
+
 	if m.AddClientWithIDFunc != nil {
 		return m.AddClientWithIDFunc(ctx, req)
 	}
+
 	return &xui.ClientConfig{
 		ID:        req.ClientID,
 		Email:     req.Email,
@@ -1085,9 +1260,11 @@ func (m *XUIClient) UpdateClient(ctx context.Context, req xui.ClientRequest) err
 	m.mu.Lock()
 	m.UpdateClientCalled = true
 	m.mu.Unlock()
+
 	if m.UpdateClientFunc != nil {
 		return m.UpdateClientFunc(ctx, req)
 	}
+
 	return nil
 }
 
@@ -1095,9 +1272,11 @@ func (m *XUIClient) DeleteClient(ctx context.Context, email string) error {
 	m.mu.Lock()
 	m.DeleteClientCalled = true
 	m.mu.Unlock()
+
 	if m.DeleteClientFunc != nil {
 		return m.DeleteClientFunc(ctx, email)
 	}
+
 	return nil
 }
 
@@ -1105,6 +1284,7 @@ func (m *XUIClient) GetClientTraffic(ctx context.Context, email string) (*xui.Cl
 	if m.GetClientTrafficFunc != nil {
 		return m.GetClientTrafficFunc(ctx, email)
 	}
+
 	return &xui.ClientTraffic{
 		Up:   1024 * 1024 * 100,
 		Down: 1024 * 1024 * 200,
@@ -1115,6 +1295,7 @@ func (m *XUIClient) GetSubscriptionLink(host, subID, subPath string) string {
 	if m.GetSubscriptionLinkFunc != nil {
 		return m.GetSubscriptionLinkFunc(host, subID, subPath)
 	}
+
 	return host + "/" + subPath + "/" + subID
 }
 
@@ -1122,6 +1303,7 @@ func (m *XUIClient) GetExternalURL(host string) string {
 	if m.GetExternalURLFunc != nil {
 		return m.GetExternalURLFunc(host)
 	}
+
 	return host
 }
 
@@ -1164,6 +1346,7 @@ func NewBotAPI() *BotAPI {
 func (m *BotAPI) Send(c tgbotapi.Chattable) (tgbotapi.Message, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
 	m.sendCalled = true
 	m.SendCount++
 	m.LastChattable = c
@@ -1196,12 +1379,14 @@ func (m *BotAPI) Send(c tgbotapi.Chattable) (tgbotapi.Message, error) {
 	if m.SendError != nil {
 		return tgbotapi.Message{}, m.SendError
 	}
+
 	return tgbotapi.Message{MessageID: 1}, nil
 }
 
 func (m *BotAPI) Request(c tgbotapi.Chattable) (*tgbotapi.APIResponse, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
 	m.requestCalled = true
 	m.LastRequest = c
 
@@ -1212,6 +1397,7 @@ func (m *BotAPI) Request(c tgbotapi.Chattable) (*tgbotapi.APIResponse, error) {
 	if m.RequestError != nil {
 		return nil, m.RequestError
 	}
+
 	return &tgbotapi.APIResponse{Ok: true}, nil
 }
 
@@ -1219,6 +1405,7 @@ func (m *BotAPI) Request(c tgbotapi.Chattable) (*tgbotapi.APIResponse, error) {
 func (m *BotAPI) SendCountSafe() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+
 	return m.SendCount
 }
 
@@ -1226,6 +1413,7 @@ func (m *BotAPI) SendCountSafe() int {
 func (m *BotAPI) SendCalledSafe() bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+
 	return m.sendCalled
 }
 
@@ -1233,6 +1421,7 @@ func (m *BotAPI) SendCalledSafe() bool {
 func (m *BotAPI) RequestCalledSafe() bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+
 	return m.requestCalled
 }
 
@@ -1240,6 +1429,7 @@ func (m *BotAPI) RequestCalledSafe() bool {
 func (m *BotAPI) LastRequestSafe() tgbotapi.Chattable {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+
 	return m.LastRequest
 }
 
@@ -1247,8 +1437,10 @@ func (m *BotAPI) LastRequestSafe() tgbotapi.Chattable {
 func (m *BotAPI) DeletedMessageIDsSafe() []int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+
 	out := make([]int, len(m.DeletedMessageIDs))
 	copy(out, m.DeletedMessageIDs)
+
 	return out
 }
 
@@ -1256,6 +1448,7 @@ func (m *BotAPI) DeletedMessageIDsSafe() []int {
 func (m *BotAPI) LastSentTextSafe() string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+
 	return m.LastSentText
 }
 
@@ -1263,6 +1456,7 @@ func (m *BotAPI) LastSentTextSafe() string {
 func (m *BotAPI) LastChattableSafe() tgbotapi.Chattable {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+
 	return m.LastChattable
 }
 
@@ -1270,8 +1464,10 @@ func (m *BotAPI) LastChattableSafe() tgbotapi.Chattable {
 func (m *BotAPI) GetAllSentMessages() []SentMessage {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+
 	out := make([]SentMessage, len(m.AllSentMessages))
 	copy(out, m.AllSentMessages)
+
 	return out
 }
 
@@ -1279,6 +1475,7 @@ func (m *BotAPI) GetAllSentMessages() []SentMessage {
 func (m *BotAPI) SetSendCalled(b bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
 	m.sendCalled = b
 }
 
@@ -1286,6 +1483,7 @@ func (m *BotAPI) SetSendCalled(b bool) {
 func (m *BotAPI) SetRequestCalled(b bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
 	m.requestCalled = b
 }
 
@@ -1293,12 +1491,14 @@ func (m *BotAPI) SetRequestCalled(b bool) {
 func (m *BotAPI) SetSendCount(c int) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
 	m.SendCount = c
 }
 
 func (m *BotAPI) GetUpdatesChan(config tgbotapi.UpdateConfig) tgbotapi.UpdatesChannel {
 	ch := make(chan tgbotapi.Update)
 	close(ch)
+
 	return ch
 }
 

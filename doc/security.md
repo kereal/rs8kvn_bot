@@ -136,7 +136,7 @@ Instead, contact us privately:
 - **Body hardening:** `http.MaxBytesReader(256 KiB)`, `json.Decoder.UseNumber` (fixed-point amounts), exactly one JSON document (trailing data → 400).
 - **Business validation:** callback amount and currency must equal the stored order exactly (→ 400); provider transaction ID must be a UUID v4 (→ 400). Mismatches cannot activate an order.
 - **Idempotent transitions:** `ConfirmOrderPaidCAS`/`CancelOrderCAS` are guarded CAS transitions (`pending → paid`, `pending/canceled`); duplicate callbacks are no-ops. A late `CONFIRMED` for an expired/canceled order never activates it.
-- **Chargebacks:** `CHARGEBACKED` on a paid order auto-downgrades the subscription to the free plan unless another paid order exists; both cases are surfaced to the admin (issue alert + dedicated chargeback alert with buyer link) for manual review.
+- **Chargebacks:** `CHARGEBACKED` on a paid order auto-downgrades the subscription to the free plan unless another paid order exists. On the successful paid-order path (`WasPaid=true`), the admin receives exactly one dedicated `notifyAdminChargeback` alert with the buyer link and access status (downgraded or preserved). `NotifyPaymentIssue` is reserved for infrastructure or integration failures and is not a normal duplicate chargeback notification.
 - **Secrets:** payment credentials are **not** included in `Config.String()` (masked by absence) and are never logged.
 - **Monitoring:** `payment_issues_total{event}` + `payment_amounts_cents_total{operation,currency}` for alerting on anomalies (unexpected chargebacks, callback mismatches, late confirmations).
 

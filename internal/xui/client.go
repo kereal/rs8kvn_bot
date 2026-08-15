@@ -116,6 +116,7 @@ func marshalJSON[T any](v T) (*bytes.Reader, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	return bytes.NewReader(body), nil
 }
 
@@ -127,6 +128,7 @@ func (c *Client) buildClientBody(clientObj map[string]any, inboundIDs []int) fun
 			"client":     clientObj,
 			"inboundIds": inboundIDs,
 		}
+
 		return marshalJSON(requestData)
 	}
 }
@@ -136,7 +138,9 @@ func closeResponseBody(resp *http.Response) {
 	if resp == nil || resp.Body == nil {
 		return
 	}
-	if err := resp.Body.Close(); err != nil {
+
+	err := resp.Body.Close()
+	if err != nil {
 		logger.Debug("Failed to close response body",
 			zap.Error(err),
 			zap.String("url", resp.Request.URL.String()))
@@ -154,30 +158,39 @@ func (in *Inbound) GetTransport() string {
 	var netSettings struct {
 		Network string `json:"network"`
 	}
-	if err := json.Unmarshal(in.StreamSettings, &netSettings); err == nil && netSettings.Network != "" {
+
+	err := json.Unmarshal(in.StreamSettings, &netSettings)
+	if err == nil && netSettings.Network != "" {
 		return netSettings.Network
 	}
 
 	// Fallback for old format: StreamSettings is a JSON-encoded string (legacy panel)
 	var rawStr string
-	if err := json.Unmarshal(in.StreamSettings, &rawStr); err != nil {
+
+	err = json.Unmarshal(in.StreamSettings, &rawStr)
+	if err != nil {
 		logger.Debug("GetTransport: failed to unmarshal legacy streamSettings string",
 			zap.Error(err))
+
 		return ""
 	}
+
 	cleaned := strings.ReplaceAll(rawStr, "\\n", "\n")
-	if err := json.Unmarshal([]byte(cleaned), &netSettings); err != nil {
+
+	err = json.Unmarshal([]byte(cleaned), &netSettings)
+	if err != nil {
 		logger.Debug("GetTransport: failed to parse legacy streamSettings JSON",
 			zap.Error(err))
+
 		return ""
 	}
+
 	return netSettings.Network
 }
 
 // GetRequiredFlow возвращает значение flow, необходимое для данного inbound.
 // Для транспортов, не использующих XTLS (xhttp, hysteria2, ws, grpc, и т.д.),
-// flow не требуется (""). Fallback "xtls-rprx-vision" используется только
-// при ошибке получения inbound'а.
+// flow не требуется (""). Ошибка получения inbound передаётся вызывающему коду.
 func (in *Inbound) GetRequiredFlow() string {
 	transport := in.GetTransport()
 	switch transport {
@@ -215,6 +228,7 @@ func NewClient(host, apiToken string) (*Client, error) {
 func (c *Client) Ping(ctx context.Context) error {
 	statusURL := fmt.Sprintf("%s/panel/api/server/status", c.host)
 	_, err := c.doHTTPRequest(ctx, http.MethodGet, statusURL, nil)
+
 	return err
 }
 
@@ -231,8 +245,10 @@ func (c *Client) doHTTPRequest(ctx context.Context, method, url string, bodyFn f
 	}()
 
 	var body io.Reader
+
 	if bodyFn != nil {
 		var err error
+
 		body, err = bodyFn()
 		if err != nil {
 			result = "error"
@@ -248,6 +264,7 @@ func (c *Client) doHTTPRequest(ctx context.Context, method, url string, bodyFn f
 
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Authorization", "Bearer "+c.apiToken)
+
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -279,7 +296,47 @@ func extractOperation(urlStr string) string {
 	if len(matches) >= 2 {
 		return matches[1]
 	}
+
 	return "unknown"
+}
+
+// tgIDContextKey — ключ контекста для передачи Telegram ID в методы панели.
+//
+// Важно: значение живёт ровно до конца текущего вызова. При копировании
+// контекста через context.WithValue / WithTimeout / WithCancel новый
+// контекст наследует значение, поэтому не оборачивайте ctx вокруг
+// параллельных вызовов, если в них тоже читается TgIDFromContext —
+// они увидят чужой tgID. Ставьте WithTgID максимально локально,
+// сразу перед AddClientWithID / UpdateClient.
+type tgIDContextKey struct{}
+
+// WithTgID сохраняет Telegram ID в контексте для последующего использования
+// при создании/обновлении клиента в панели.
+//
+// Риски:
+//   - Контекст копируется по значению, но карта значений общая; при
+//     параллельных вызовах из того же ctx возможна утечка tgID в
+//     дочерние запросы.
+//   - Если контекст прокидывается выше по стеку (например, через HTTP
+//     middleware), tgID может «протечь» в логирование/метрики, если
+//     они тоже читают контекст. Здесь ключ package-private, поэтому
+//     внешний доступ исключён.
+func WithTgID(ctx context.Context, tgID int64) context.Context {
+	return context.WithValue(ctx, tgIDContextKey{}, tgID)
+}
+
+// TgIDFromContext извлекает Telegram ID из контекста.
+// Возвращает 0, если TgID не был установлен.
+//
+// Вызывается только внутри XUI-методов add/update после WithTgID.
+// Если значение не установлено, панель получит tgId=0, что для
+// большинства инстансов означает «без привязки Telegram».
+func TgIDFromContext(ctx context.Context) int64 {
+	if v, ok := ctx.Value(tgIDContextKey{}).(int64); ok {
+		return v
+	}
+
+	return 0
 }
 
 // AddClient создаёт клиента с автоматической генерацией clientID и subID.
@@ -288,6 +345,7 @@ func (c *Client) AddClient(ctx context.Context, inboundIDs []int, email string, 
 	if err != nil {
 		return nil, fmt.Errorf("generate client id: %w", err)
 	}
+
 	subID, err := utils.GenerateSubID()
 	if err != nil {
 		return nil, fmt.Errorf("generate sub id: %w", err)
@@ -311,12 +369,15 @@ func (c *Client) AddClientWithID(ctx context.Context, req ClientRequest) (*Clien
 	if len(req.InboundIDs) == 0 {
 		return nil, fmt.Errorf("inbound IDs cannot be empty")
 	}
+
 	if req.ClientID == "" {
 		return nil, fmt.Errorf("client ID cannot be empty")
 	}
+
 	if req.SubID == "" {
 		return nil, fmt.Errorf("sub ID cannot be empty")
 	}
+
 	for _, id := range req.InboundIDs {
 		if id <= 0 {
 			return nil, fmt.Errorf("invalid inbound ID %d: must be positive", id)
@@ -333,15 +394,21 @@ func (c *Client) AddClientWithID(ctx context.Context, req ClientRequest) (*Clien
 	}
 
 	tgID := req.TgID
+	if tgID == 0 {
+		tgID = TgIDFromContext(ctx)
+	}
 
 	var (
 		result   *ClientConfig
 		firstErr error
 	)
+
 	for flow, ids := range groups {
 		errRetry := utils.RetryWithBackoff(ctx, config.XUIMaxRetries, config.XUIInitialRetryDelay, func() error {
 			var innerErr error
+
 			result, innerErr = c.doAddClientWithID(ctx, ids, req, flow, tgID)
+
 			return innerErr
 		})
 		if errRetry != nil {
@@ -349,6 +416,7 @@ func (c *Client) AddClientWithID(ctx context.Context, req ClientRequest) (*Clien
 			break
 		}
 	}
+
 	return result, firstErr
 }
 
@@ -385,7 +453,8 @@ func (c *Client) doAddClientWithID(ctx context.Context, inboundIDs []int, req Cl
 		Obj     any    `json:"obj,omitempty"`
 	}
 
-	if err := json.Unmarshal(respBody, &simpleResp); err != nil {
+	err = json.Unmarshal(respBody, &simpleResp)
+	if err != nil {
 		return nil, fmt.Errorf("failed to parse response: %w", err)
 	}
 
@@ -409,6 +478,7 @@ func (c *Client) DeleteClient(ctx context.Context, email string) error {
 	if email == "" {
 		return fmt.Errorf("email cannot be empty")
 	}
+
 	return utils.RetryWithBackoff(ctx, config.XUIMaxRetries, config.XUIInitialRetryDelay, func() error {
 		return c.doDeleteClient(ctx, email)
 	})
@@ -428,7 +498,9 @@ func (c *Client) doDeleteClient(ctx context.Context, email string) error {
 	}
 
 	var apiResp APIResponse
-	if err := json.Unmarshal(respBody, &apiResp); err != nil {
+
+	err = json.Unmarshal(respBody, &apiResp)
+	if err != nil {
 		return fmt.Errorf("failed to parse response: %w", err)
 	}
 
@@ -438,6 +510,7 @@ func (c *Client) doDeleteClient(ctx context.Context, email string) error {
 
 	logger.Info("Successfully deleted client",
 		zap.String("email", email))
+
 	return nil
 }
 
@@ -448,12 +521,15 @@ func (c *Client) UpdateClient(ctx context.Context, req ClientRequest) error {
 	if req.ClientID == "" {
 		return fmt.Errorf("client ID cannot be empty")
 	}
+
 	if req.CurrentEmail == "" {
 		return fmt.Errorf("current email cannot be empty")
 	}
+
 	if len(req.InboundIDs) == 0 {
 		return fmt.Errorf("inbound IDs cannot be empty")
 	}
+
 	for _, id := range req.InboundIDs {
 		if id <= 0 {
 			return fmt.Errorf("invalid inbound ID %d: must be positive", id)
@@ -466,6 +542,7 @@ func (c *Client) UpdateClient(ctx context.Context, req ClientRequest) error {
 	}
 
 	var firstErr error
+
 	for flow, ids := range groups {
 		errRetry := utils.RetryWithBackoff(ctx, config.XUIMaxRetries, config.XUIInitialRetryDelay, func() error {
 			return c.doUpdateClient(ctx, ids, req, flow)
@@ -475,6 +552,7 @@ func (c *Client) UpdateClient(ctx context.Context, req ClientRequest) error {
 			break
 		}
 	}
+
 	return firstErr
 }
 
@@ -486,6 +564,7 @@ func (c *Client) doUpdateClient(ctx context.Context, inboundIDs []int, req Clien
 	if resetDays < 0 {
 		resetDays = config.SubscriptionResetDay
 	}
+
 	clientObj := map[string]any{
 		"id":         req.ClientID,
 		"email":      req.Email,
@@ -510,7 +589,9 @@ func (c *Client) doUpdateClient(ctx context.Context, inboundIDs []int, req Clien
 	}
 
 	var apiResp APIResponse
-	if err := json.Unmarshal(respBody, &apiResp); err != nil {
+
+	err = json.Unmarshal(respBody, &apiResp)
+	if err != nil {
 		return fmt.Errorf("failed to parse response: %w", err)
 	}
 
@@ -528,11 +609,15 @@ func (c *Client) doUpdateClient(ctx context.Context, inboundIDs []int, req Clien
 // GetClientTraffic возвращает актуальный трафик клиента по email.
 func (c *Client) GetClientTraffic(ctx context.Context, email string) (*ClientTraffic, error) {
 	var result *ClientTraffic
+
 	err := utils.RetryWithBackoff(ctx, config.XUIMaxRetries, config.XUIInitialRetryDelay, func() error {
 		var err error
+
 		result, err = c.doGetClientTraffic(ctx, email)
+
 		return err
 	})
+
 	return result, err
 }
 
@@ -549,7 +634,9 @@ func (c *Client) doGetClientTraffic(ctx context.Context, email string) (*ClientT
 	}
 
 	var apiResp APIResponse
-	if err := json.Unmarshal(respBody, &apiResp); err != nil {
+
+	err = json.Unmarshal(respBody, &apiResp)
+	if err != nil {
 		return nil, fmt.Errorf("failed to parse response: %w", err)
 	}
 
@@ -557,11 +644,14 @@ func (c *Client) doGetClientTraffic(ctx context.Context, email string) (*ClientT
 		if strings.Contains(strings.ToLower(apiResp.Msg), "client not found") {
 			return nil, ErrClientNotFound
 		}
+
 		return nil, fmt.Errorf("failed to get client traffic: %s", apiResp.Msg)
 	}
 
 	var traffic ClientTraffic
-	if err := json.Unmarshal(apiResp.Obj, &traffic); err != nil {
+
+	err = json.Unmarshal(apiResp.Obj, &traffic)
+	if err != nil {
 		return nil, fmt.Errorf("failed to parse traffic data: %w", err)
 	}
 
@@ -583,7 +673,9 @@ func (c *Client) doGetInbound(ctx context.Context, inboundID int) (*Inbound, err
 	}
 
 	var apiResp APIResponse
-	if err := json.Unmarshal(respBody, &apiResp); err != nil {
+
+	err = json.Unmarshal(respBody, &apiResp)
+	if err != nil {
 		return nil, fmt.Errorf("failed to parse response: %w", err)
 	}
 
@@ -592,7 +684,9 @@ func (c *Client) doGetInbound(ctx context.Context, inboundID int) (*Inbound, err
 	}
 
 	var inbound Inbound
-	if err := json.Unmarshal(apiResp.Obj, &inbound); err != nil {
+
+	err = json.Unmarshal(apiResp.Obj, &inbound)
+	if err != nil {
 		return nil, fmt.Errorf("failed to parse inbound data: %w", err)
 	}
 
@@ -600,16 +694,22 @@ func (c *Client) doGetInbound(ctx context.Context, inboundID int) (*Inbound, err
 }
 
 // getRequiredFlow возвращает flow, требуемый для работы с указанным inbound.
-// При ошибке получения inbound'а используется безопасный fallback xtls-rprx-vision.
 func (c *Client) getRequiredFlow(ctx context.Context, inboundID int) (string, error) {
-	if err := ctx.Err(); err != nil {
+	err := ctx.Err()
+	if err != nil {
 		return "", err
 	}
+
 	inbound, err := c.doGetInbound(ctx, inboundID)
 	if err != nil {
-		logger.Debug("Failed to get inbound for flow, using default",
+		logger.Debug("Failed to get inbound for flow",
 			zap.Error(err))
-		return "xtls-rprx-vision", nil
+
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return "", err
+		}
+
+		return "", fmt.Errorf("get inbound for flow: %w", err)
 	}
 
 	return inbound.GetRequiredFlow(), nil
@@ -620,6 +720,7 @@ func (c *Client) getRequiredFlow(ctx context.Context, inboundID int) (string, er
 // что позволяет корректно обработать их отдельными вызовами панели.
 func (c *Client) groupInboundIDsByFlow(ctx context.Context, inboundIDs []int) (map[string][]int, error) {
 	seen := make(map[int]struct{}, len(inboundIDs))
+
 	uniqueIDs := make([]int, 0, len(inboundIDs))
 	for _, id := range inboundIDs {
 		if _, ok := seen[id]; !ok {
@@ -629,13 +730,16 @@ func (c *Client) groupInboundIDsByFlow(ctx context.Context, inboundIDs []int) (m
 	}
 
 	groups := make(map[string][]int)
+
 	for _, id := range uniqueIDs {
 		flow, err := c.getRequiredFlow(ctx, id)
 		if err != nil {
 			return nil, fmt.Errorf("failed to determine flow for inbound %d: %w", id, err)
 		}
+
 		groups[flow] = append(groups[flow], id)
 	}
+
 	return groups, nil
 }
 
@@ -644,6 +748,7 @@ func (c *Client) Close() error {
 	if c.transport != nil {
 		c.transport.CloseIdleConnections()
 	}
+
 	return nil
 }
 
@@ -652,5 +757,6 @@ func getExpiresAtMillis(expiryTime time.Time) int64 {
 	if expiryTime.IsZero() {
 		return 0
 	}
+
 	return expiryTime.UnixMilli()
 }
