@@ -486,7 +486,7 @@ func (s *SubscriptionService) CreateTrial(ctx context.Context, inviteCode string
 	}
 
 	trafficBytes := trialPlan.TrafficLimit
-	expiryTime := time.Now().Add(time.Duration(s.cfg.TrialDurationHours) * time.Hour)
+	expiryTime := time.Now().UTC().Add(time.Duration(s.cfg.TrialDurationHours) * time.Hour)
 	email := "trial_" + subID
 	// Trials must not auto-renew. resetDays=0 disables the 3x-ui auto-renew,
 	// which (reset>0 + expiryTime>0) would otherwise reset traffic and extend
