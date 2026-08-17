@@ -212,11 +212,6 @@ func (s *SubscriptionService) Create(ctx context.Context, telegramID int64, user
 	return result, nil
 }
 
-// GetByTelegramID retrieves a subscription by Telegram user ID.
-func (s *SubscriptionService) GetByTelegramID(ctx context.Context, telegramID int64) (*database.Subscription, error) {
-	return s.db.GetByTelegramID(ctx, telegramID)
-}
-
 // reanimateRevokedSubscription recovers a subscription left in a non-active state
 // (e.g. "revoked") after a partially-failed delete, turning it back into an
 // active free-plan subscription. This avoids creating a second row for the same
@@ -542,21 +537,6 @@ func (s *SubscriptionService) CreateTrial(ctx context.Context, inviteCode string
 	return result, nil
 }
 
-// GetByID retrieves a subscription by database ID.
-func (s *SubscriptionService) GetByID(ctx context.Context, id uint) (*database.Subscription, error) {
-	return s.db.GetByID(ctx, id)
-}
-
-// GetOrCreateInvite gets an existing invite or creates a new one for the given referrer.
-func (s *SubscriptionService) GetOrCreateInvite(ctx context.Context, referrerTGID int64, code string) (*database.Invite, error) {
-	return s.db.GetOrCreateInvite(ctx, referrerTGID, code)
-}
-
-// GetInviteByCode retrieves an invite by its code.
-func (s *SubscriptionService) GetInviteByCode(ctx context.Context, code string) (*database.Invite, error) {
-	return s.db.GetInviteByCode(ctx, code)
-}
-
 // BindTrial binds a trial subscription to a Telegram user.
 // It updates the trial in the database, then upgrades the client in the
 // 3x-ui panel with proper traffic limits and expiry settings.
@@ -632,19 +612,9 @@ func (s *SubscriptionService) BindTrial(ctx context.Context, subscriptionID stri
 	return sub, nil
 }
 
-// CountAll returns the total number of subscriptions.
-func (s *SubscriptionService) CountAll(ctx context.Context) (int64, error) {
-	return s.db.CountAllSubscriptions(ctx)
-}
-
-// CountActive returns the number of active subscriptions.
-func (s *SubscriptionService) CountActive(ctx context.Context) (int64, error) {
-	return s.db.CountActiveSubscriptions(ctx)
-}
-
 // RefreshActiveSubscriptionsMetric updates the active_subscriptions and trial_subscriptions gauges.
 func (s *SubscriptionService) RefreshActiveSubscriptionsMetric(ctx context.Context) {
-	count, err := s.CountActive(ctx)
+	count, err := s.db.CountActiveSubscriptions(ctx)
 	if err != nil {
 		logger.Warn("failed to refresh active subscriptions metric", zap.Error(err))
 		return
@@ -659,16 +629,6 @@ func (s *SubscriptionService) RefreshActiveSubscriptionsMetric(ctx context.Conte
 	}
 
 	metrics.TrialSubscriptions.Set(float64(trialCount))
-}
-
-// GetLatest returns the most recent subscriptions up to the given limit.
-func (s *SubscriptionService) GetLatest(ctx context.Context, limit int) ([]database.Subscription, error) {
-	return s.db.GetLatestSubscriptions(ctx, limit)
-}
-
-// GetTelegramIDByUsername looks up a Telegram ID by username.
-func (s *SubscriptionService) GetTelegramIDByUsername(ctx context.Context, username string) (int64, error) {
-	return s.db.GetTelegramIDByUsername(ctx, username)
 }
 
 // SetInvalidateFunc sets the cache invalidation callback.
@@ -875,21 +835,6 @@ func (s *SubscriptionService) CleanupExpiredTrials(ctx context.Context) (int64, 
 	}
 
 	return successCount, nil
-}
-
-// GetTotalTelegramIDCount returns the count of unique Telegram IDs for active subscriptions eligible for broadcast.
-func (s *SubscriptionService) GetTotalTelegramIDCount(ctx context.Context) (int64, error) {
-	return s.db.GetTotalTelegramIDCount(ctx)
-}
-
-// GetTelegramIDsBatch returns a batch of Telegram IDs for active subscriptions eligible for broadcast.
-func (s *SubscriptionService) GetTelegramIDsBatch(ctx context.Context, offset, limit int) ([]int64, error) {
-	return s.db.GetTelegramIDsBatch(ctx, offset, limit)
-}
-
-// GetAllReferralCounts returns referral counts for all users.
-func (s *SubscriptionService) GetAllReferralCounts(ctx context.Context) (map[int64]int64, error) {
-	return s.db.GetAllReferralCounts(ctx)
 }
 
 // GetOrCreateSubscription returns an existing subscription or creates a new free-plan one with sync.

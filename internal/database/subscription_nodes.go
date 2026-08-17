@@ -20,18 +20,6 @@ func (s *Service) GetBySubscriptionID(ctx context.Context, subscriptionID uint) 
 	return rows, nil
 }
 
-// GetByNodeID returns subscription node records for the given node.
-func (s *Service) GetByNodeID(ctx context.Context, nodeID uint) ([]SubscriptionNode, error) {
-	var rows []SubscriptionNode
-
-	result := s.db.WithContext(ctx).Where("node_id = ?", nodeID).Find(&rows)
-	if result.Error != nil {
-		return nil, fmt.Errorf("failed to get subscription nodes by node id: %w", result.Error)
-	}
-
-	return rows, nil
-}
-
 // GetPendingSync returns subscription nodes awaiting synchronization, limited by retry window.
 func (s *Service) GetPendingSync(ctx context.Context) ([]SubscriptionNode, error) {
 	var rows []SubscriptionNode
@@ -61,23 +49,6 @@ func (s *Service) GetPendingBySubscriptionID(ctx context.Context, subscriptionID
 		Find(&rows)
 	if result.Error != nil {
 		return nil, fmt.Errorf("failed to get pending nodes by subscription id: %w", result.Error)
-	}
-
-	return rows, nil
-}
-
-// GetPendingByNodeID returns pending subscription nodes for the given node.
-func (s *Service) GetPendingByNodeID(ctx context.Context, nodeID uint) ([]SubscriptionNode, error) {
-	var rows []SubscriptionNode
-
-	nowUTC := time.Now().UTC().Truncate(time.Minute)
-
-	result := s.db.WithContext(ctx).
-		Where("node_id = ? AND status IN ? AND (retry_at IS NULL OR retry_at <= ?)",
-			nodeID, []SyncStatus{SyncStatusPendingAdd, SyncStatusPendingRemove, SyncStatusPendingUpdate}, nowUTC).
-		Find(&rows)
-	if result.Error != nil {
-		return nil, fmt.Errorf("failed to get pending nodes by node id: %w", result.Error)
 	}
 
 	return rows, nil
