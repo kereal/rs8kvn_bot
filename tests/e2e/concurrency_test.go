@@ -55,7 +55,7 @@ func TestE2E_Concurrent_CreateSubscription_SameUser(t *testing.T) {
 	active := 0
 
 	for _, s := range all {
-		if s.TelegramID == env.chatID && s.Status == "active" {
+		if s.TelegramID == env.chatID && s.Status == string(database.SubscriptionStatusActive) {
 			active++
 		}
 	}

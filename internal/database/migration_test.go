@@ -19,7 +19,7 @@ func TestLatestEmbeddedMigrationVersion(t *testing.T) {
 
 	version, err := latestEmbeddedMigrationVersion()
 	require.NoError(t, err)
-	assert.Equal(t, 32, version)
+	assert.Equal(t, 33, version)
 }
 
 func TestRunMigrationsRejectsDatabaseNewerThanEmbedded(t *testing.T) {
@@ -32,19 +32,19 @@ func TestRunMigrationsRejectsDatabaseNewerThanEmbedded(t *testing.T) {
 
 	sqlDB, err := db.db.DB()
 	require.NoError(t, err)
-	_, err = sqlDB.Exec("UPDATE schema_migrations SET version = ?, dirty = ?", 33, false)
+	_, err = sqlDB.Exec("UPDATE schema_migrations SET version = ?, dirty = ?", 34, false)
 	require.NoError(t, err)
 
 	err = runMigrations(sqlDB)
 	require.Error(t, err)
-	assert.ErrorContains(t, err, "newer than the latest embedded migration 32")
+	assert.ErrorContains(t, err, "newer than the latest embedded migration 33")
 
 	var (
 		version int
 		dirty   bool
 	)
 	require.NoError(t, sqlDB.QueryRow("SELECT version, dirty FROM schema_migrations").Scan(&version, &dirty))
-	assert.Equal(t, 33, version)
+	assert.Equal(t, 34, version)
 	assert.False(t, dirty)
 }
 
@@ -294,14 +294,16 @@ func TestMigration_032_NormalizesInvalidRetryState(t *testing.T) {
 
 	// Return to the pre-032 schema, where legacy invalid retry state is still
 	// representable, then insert the row that caused the production risk.
-	require.NoError(t, m.Steps(-1))
+	// Steps(-2) skips both 032 and 033: 033 rebuilds subscriptions only, but
+	// the step counter must land on the 031 schema for this test's intent.
+	require.NoError(t, m.Steps(-2))
 
 	_, err = sqlDB.Exec(`INSERT INTO subscription_nodes
 		(subscription_id, node_id, status, retry_count, retry_at, updated_at)
 		VALUES (1, 1, 'active', 3, NULL, datetime('now'))`)
 	require.NoError(t, err)
 
-	require.NoError(t, m.Steps(1))
+	require.NoError(t, m.Steps(2))
 
 	var (
 		retryCount int
@@ -424,4 +426,84 @@ func TestMigration_005_CleansUpDuplicateInvites(t *testing.T) {
 	// 7. Bonus: after the index is back, inserting another code for the same referrer must fail
 	_, err = sqlDB.Exec(`INSERT INTO invites (code, referrer_tg_id, created_at) VALUES ('SHOULDFAIL', ?, datetime('now'))`, referrer)
 	assert.Error(t, err, "Unique index created by 005 must prevent future duplicates")
+}
+
+// TestMigration_033_EnforcesSubscriptionStatusCheck verifies that migration 033
+// actually applies a CHECK constraint on subscriptions.status — only the statuses
+// declared in models.go (active | expired | paused | canceled | revoked) are
+// allowed, matching the behavior of subscription_nodes/orders.
+func TestMigration_033_EnforcesSubscriptionStatusCheck(t *testing.T) {
+	t.Parallel()
+
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	db, err := NewService(dbPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, db.Close()) })
+
+	sqlDB, err := db.db.DB()
+	require.NoError(t, err)
+
+	// Violating insert: an arbitrary status string must be rejected.
+	_, err = sqlDB.Exec(`INSERT INTO subscriptions (telegram_id, username, client_id, subscription_id, status)
+		VALUES (888001, 'bogus-user', 'client-bogus', 'sub-bogus', 'bogus')`)
+	require.Error(t, err, "insert with an unknown status must fail")
+	assert.ErrorContains(t, err, "CHECK")
+
+	// Compliant insert: 'revoked' is a declared status and must succeed.
+	_, err = sqlDB.Exec(`INSERT INTO subscriptions (telegram_id, username, client_id, subscription_id, status)
+		VALUES (888002, 'revoked-user', 'client-revoked', 'sub-revoked', 'revoked')`)
+	require.NoError(t, err)
+
+	// Compliant insert: the 'active' default must succeed.
+	_, err = sqlDB.Exec(`INSERT INTO subscriptions (telegram_id, username, client_id, subscription_id)
+		VALUES (888003, 'default-user', 'client-default', 'sub-default')`)
+	require.NoError(t, err)
+}
+
+// TestMigration_033_NormalizesInvalidStatuses verifies that legacy rows with a
+// NULL or unknown status are normalized to 'revoked' while the table is rebuilt.
+// 'revoked' is the terminal status: the subserver serves 404 and the row stays
+// in the database, which matches the "never delete subscriptions" policy.
+func TestMigration_033_NormalizesInvalidStatuses(t *testing.T) {
+	t.Parallel()
+
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	db, err := NewService(dbPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, db.Close()) })
+
+	sqlDB, err := db.db.DB()
+	require.NoError(t, err)
+
+	source, err := iofs.New(migrationFiles, "migrations")
+	require.NoError(t, err)
+	driver, err := sqlite.WithInstance(sqlDB, &sqlite.Config{})
+	require.NoError(t, err)
+	m, err := migrate.NewWithInstance("iofs", source, "sqlite", driver)
+	require.NoError(t, err)
+	t.Cleanup(func() { _, _ = m.Close() })
+
+	// Return to the pre-033 schema, where arbitrary statuses are still
+	// representable, then insert the legacy rows.
+	require.NoError(t, m.Steps(-1))
+
+	_, err = sqlDB.Exec(`INSERT INTO subscriptions (telegram_id, username, client_id, subscription_id, status)
+		VALUES (777001, 'legacy-garbage', 'client-garbage', 'sub-garbage', 'garbage')`)
+	require.NoError(t, err)
+
+	_, err = sqlDB.Exec(`INSERT INTO subscriptions (telegram_id, username, client_id, subscription_id, status)
+		VALUES (777002, 'legacy-null', 'client-null', 'sub-null', NULL)`)
+	require.NoError(t, err)
+
+	require.NoError(t, m.Steps(1))
+
+	var garbageStatus string
+
+	require.NoError(t, sqlDB.QueryRow(`SELECT status FROM subscriptions WHERE telegram_id = 777001`).Scan(&garbageStatus))
+	assert.Equal(t, "revoked", garbageStatus)
+
+	var nullStatus string
+
+	require.NoError(t, sqlDB.QueryRow(`SELECT status FROM subscriptions WHERE telegram_id = 777002`).Scan(&nullStatus))
+	assert.Equal(t, "revoked", nullStatus)
 }

@@ -323,7 +323,7 @@ func startBackgroundWorkers(ctx context.Context, handler *bot.Handler, subServic
 			logger.Info("Orphan reconciliation completed", zap.Int("removed", count))
 		}
 
-		ticker := time.NewTicker(6 * time.Hour)
+		ticker := time.NewTicker(8 * time.Hour)
 		defer ticker.Stop()
 
 		for {

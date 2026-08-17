@@ -487,29 +487,6 @@ func TestService_UpdateSubscription_NotFound(t *testing.T) {
 	assert.ErrorIs(t, err, ErrSubscriptionNotFound)
 }
 
-func TestService_DeleteSubscription(t *testing.T) {
-	t.Parallel()
-
-	svc := newTestService(t)
-
-	createTestSubscription(t, svc, 77777, "deleteuser", "client-delete")
-
-	require.NoError(t, svc.DeleteSubscription(context.Background(), 77777))
-
-	_, err := svc.GetByTelegramID(context.Background(), 77777)
-	assert.Error(t, err)
-}
-
-func TestService_DeleteSubscription_NotFound(t *testing.T) {
-	t.Parallel()
-
-	svc := newTestService(t)
-
-	err := svc.DeleteSubscription(context.Background(), 999999)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "no subscription found")
-}
-
 // ==================== Service GetByID Tests ====================
 
 func TestService_GetByID(t *testing.T) {
