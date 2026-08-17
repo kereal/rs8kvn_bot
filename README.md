@@ -73,6 +73,7 @@ See **[Installation Guide](doc/installation.md)** for:
 |---------|-------------|
 | `/lastreg` | Show the last 10 registered users |
 | `/del <id>` | Delete a subscription by database ID |
+| `/setplan <subscription_id> <plan_id> [days]` | Change a subscription's plan through the service layer (reconciles VPN nodes, extends expiry; defaults to 30 days when none given) |
 | `/broadcast <message>` | Send a message to all users who have a subscription (MarkdownV2, special chars auto-escaped) |
 | `/send <id or @username> <message>` | Send a message to a specific user |
 | `/refstats` | Show referral statistics (count per user from cache) |
@@ -81,6 +82,7 @@ See **[Installation Guide](doc/installation.md)** for:
 
 ```text
 /del 5                                    # Delete subscription with DB ID 5
+/setplan 5 3 30                            # Change subscription 5 to plan 3 for 30 days
 /broadcast 🔔 Важное обновление!          # Broadcast to all subscribers (MarkdownV2 supported)
 /send 123456789 Привет!                   # Private message by Telegram ID
 /send @username Привет!                   # Private message by username

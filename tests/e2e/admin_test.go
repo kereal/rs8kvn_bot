@@ -159,6 +159,110 @@ func TestE2E_DelCommand_XUIFailure(t *testing.T) {
 	assert.Equal(t, database.SubscriptionStatusRevoked, database.SubscriptionStatus(stored.Status))
 }
 
+func TestE2E_SetPlanCommand_Success(t *testing.T) {
+	t.Parallel()
+
+	env := setupE2EEnv(t)
+	defer func() {
+		err := env.db.Close()
+		if err != nil {
+			t.Logf("Warning: failed to close database: %v", err)
+		}
+	}()
+
+	ctx := context.Background()
+	adminID := env.cfg.TelegramAdminID
+
+	_, err := env.subService.Create(ctx, env.chatID, env.username, "")
+	require.NoError(t, err)
+
+	sub, err := env.db.GetByTelegramID(ctx, env.chatID)
+	require.NoError(t, err)
+
+	// Seed a premium plan and link the existing node to it.
+	premiumPlan := &database.Plan{Name: "e2e-premium", DevicesLimit: 2, TrafficLimit: 1024}
+	require.NoError(t, env.db.GetDB().WithContext(ctx).Create(premiumPlan).Error)
+	require.NoError(t, env.db.LinkNodeToPlan(ctx, premiumPlan.Name, 1), "link node to premium plan")
+
+	resetBotAPI(env.botAPI)
+
+	update := tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat: &tgbotapi.Chat{ID: adminID},
+			From: &tgbotapi.User{
+				ID:       adminID,
+				UserName: "admin",
+			},
+			Text:     fmt.Sprintf("/setplan %d %d 30", sub.ID, premiumPlan.ID),
+			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 7}},
+		},
+	}
+	env.handler.HandleSetPlan(ctx, update)
+
+	assert.True(t, env.botAPI.SendCalledSafe())
+	assert.Contains(t, env.botAPI.LastSentText, "Тариф подписки изменён")
+
+	stored, err := env.db.GetByID(ctx, sub.ID)
+	require.NoError(t, err)
+	assert.Equal(t, premiumPlan.ID, stored.PlanID)
+	require.NotNil(t, stored.ExpiresAt)
+	assert.WithinDuration(t, time.Now().Add(30*24*time.Hour), *stored.ExpiresAt, time.Minute)
+
+	// Node bindings were reconciled and the best-effort sync pushed the new
+	// plan to the panel: the shared node ends up active with the new plan.
+	nodes, err := env.db.GetBySubscriptionID(ctx, sub.ID)
+	require.NoError(t, err)
+	require.Len(t, nodes, 1)
+	assert.Equal(t, database.SyncStatusActive, nodes[0].Status)
+}
+
+func TestE2E_SetPlanCommand_ArgValidation(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		cmd     string
+		wantMsg string
+	}{
+		{name: "no_args", cmd: "/setplan", wantMsg: "Использование: /setplan"},
+		{name: "invalid_sub_id", cmd: "/setplan abc 2", wantMsg: "Неверный ID подписки"},
+		{name: "invalid_plan_id", cmd: "/setplan 5 abc", wantMsg: "Неверный ID тарифа"},
+		{name: "not_found", cmd: "/setplan 99999 2", wantMsg: "Ошибка смены тарифа"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env := setupE2EEnv(t)
+			defer func() {
+				err := env.db.Close()
+				if err != nil {
+					t.Logf("Warning: failed to close database: %v", err)
+				}
+			}()
+
+			ctx := context.Background()
+			adminID := env.cfg.TelegramAdminID
+			resetBotAPI(env.botAPI)
+
+			update := tgbotapi.Update{
+				Message: &tgbotapi.Message{
+					Chat: &tgbotapi.Chat{ID: adminID},
+					From: &tgbotapi.User{
+						ID:       adminID,
+						UserName: "admin",
+					},
+					Text:     tt.cmd,
+					Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 7}},
+				},
+			}
+			env.handler.HandleSetPlan(ctx, update)
+
+			assert.True(t, env.botAPI.SendCalledSafe())
+			assert.Contains(t, env.botAPI.LastSentText, tt.wantMsg)
+		})
+	}
+}
+
 // runBroadcastFlow drives the draft -> preview -> confirm broadcast flow end to end.
 func runBroadcastFlow(t *testing.T, env *e2eTestEnv, adminID int64, draftText string) {
 	t.Helper()

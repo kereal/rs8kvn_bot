@@ -1330,3 +1330,226 @@ func TestSubscriptionService_Create_ReanimatesRevoked(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, nodes, "stale pending_remove node must be cleared")
 }
+
+func TestSubscriptionService_AdminSetPlan_ReconcilesNodesAndInvalidatesCache(t *testing.T) {
+	t.Parallel()
+
+	db, err := testutil.NewTestDatabaseService(t)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	// The free plan is seeded by migrations; the premium plan is created here.
+	freePlan, err := db.GetPlanByName(ctx, database.FreePlanName)
+	require.NoError(t, err)
+	premiumPlan := &database.Plan{Name: "premium-admin-setplan", DevicesLimit: 2, TrafficLimit: 1024}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(premiumPlan).Error)
+
+	nodeA := &database.Node{Name: "setplan-a", Host: "http://a", APIToken: "a", InboundIDs: `[1]`, Type: database.NodeType3xUI}
+	nodeB := &database.Node{Name: "setplan-b", Host: "http://b", APIToken: "b", InboundIDs: `[1]`, Type: database.NodeType3xUI}
+	nodeC := &database.Node{Name: "setplan-c", Host: "http://c", APIToken: "c", InboundIDs: `[1]`, Type: database.NodeType3xUI}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(nodeA).Error)
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(nodeB).Error)
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(nodeC).Error)
+
+	// Old (free) plan → nodeA + nodeC; new (premium) plan → nodeA + nodeB.
+	// nodeA is shared (must be pending_update), nodeB is new (pending_add),
+	// nodeC leaves the plan (pending_remove).
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(&database.PlanNode{PlanID: freePlan.ID, NodeID: nodeA.ID}).Error)
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(&database.PlanNode{PlanID: freePlan.ID, NodeID: nodeC.ID}).Error)
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(&database.PlanNode{PlanID: premiumPlan.ID, NodeID: nodeA.ID}).Error)
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(&database.PlanNode{PlanID: premiumPlan.ID, NodeID: nodeB.ID}).Error)
+
+	sub := &database.Subscription{
+		TelegramID:     999802,
+		Username:       "adminsetplan",
+		ClientID:       "c-adminsetplan",
+		SubscriptionID: "s-adminsetplan",
+		Status:         string(database.SubscriptionStatusActive),
+		PlanID:         freePlan.ID,
+		ExpiresAt:      testutil.PtrTime(time.Now().Add(5 * 24 * time.Hour)),
+	}
+	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
+	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: nodeA.ID, Status: database.SyncStatusActive}))
+	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: nodeC.ID, Status: database.SyncStatusActive}))
+
+	var invalidatedTGIDs []int64
+	var invalidatedSubIDs []string
+
+	svc := NewSubscriptionService(db, nil, nil, nil, &config.Config{})
+	svc.SetInvalidateFunc(func(id int64) { invalidatedTGIDs = append(invalidatedTGIDs, id) })
+	svc.SetInvalidateBySubIDFunc(func(id string) { invalidatedSubIDs = append(invalidatedSubIDs, id) })
+	// No VPN clients wired: SyncSubscription treats nodes as unavailable and
+	// keeps them pending (best-effort), leaving the reconciled state visible.
+	svc.SetSyncService(NewSyncService(db, map[uint]vpn.Client{}, nil))
+
+	updated, err := svc.AdminSetPlan(ctx, sub.ID, premiumPlan.ID, 30)
+	require.NoError(t, err)
+
+	assert.Equal(t, premiumPlan.ID, updated.PlanID)
+	assert.Equal(t, string(database.SubscriptionStatusActive), updated.Status)
+	require.NotNil(t, updated.ExpiresAt)
+	assert.WithinDuration(t, time.Now().Add(30*24*time.Hour), *updated.ExpiresAt, time.Minute)
+
+	// Cache invalidated by both keys.
+	assert.Contains(t, invalidatedTGIDs, sub.TelegramID)
+	assert.Contains(t, invalidatedSubIDs, sub.SubscriptionID)
+
+	// Bindings reconciled per plan membership.
+	rows, err := db.GetBySubscriptionID(ctx, sub.ID)
+	require.NoError(t, err)
+	require.Len(t, rows, 3)
+
+	byNode := make(map[uint]database.SyncStatus, len(rows))
+	for _, r := range rows {
+		byNode[r.NodeID] = r.Status
+	}
+	assert.Equal(t, database.SyncStatusPendingUpdate, byNode[nodeA.ID], "shared node must get pending_update")
+	assert.Equal(t, database.SyncStatusPendingAdd, byNode[nodeB.ID], "new plan node must get pending_add")
+	assert.Equal(t, database.SyncStatusPendingRemove, byNode[nodeC.ID], "leaving node must get pending_remove")
+}
+
+func TestSubscriptionService_AdminSetPlan_ExpirySemantics(t *testing.T) {
+	t.Parallel()
+
+	nearFuture := time.Now().Add(10 * 24 * time.Hour).Truncate(time.Second)
+	past := time.Now().Add(-24 * time.Hour)
+
+	tests := []struct {
+		name      string
+		planName  string
+		days      int
+		existing  *time.Time
+		wantNil   bool
+		wantDelta time.Duration // 0 means "preserve existing"
+	}{
+		{name: "explicit days", planName: "premium", days: 30, existing: testutil.PtrTime(nearFuture), wantDelta: 30 * 24 * time.Hour},
+		{name: "future expiry preserved", planName: "premium", days: 0, existing: testutil.PtrTime(nearFuture), wantDelta: 0},
+		{name: "nil expiry gets default", planName: "premium", days: 0, existing: nil, wantDelta: 30 * 24 * time.Hour},
+		{name: "past expiry gets default", planName: "premium", days: 0, existing: testutil.PtrTime(past), wantDelta: 30 * 24 * time.Hour},
+		{name: "free plan clears expiry", planName: database.FreePlanName, days: 30, existing: testutil.PtrTime(nearFuture), wantNil: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			now := time.Now()
+
+			sub := &database.Subscription{
+				ID:             42,
+				TelegramID:     999803,
+				Username:       "expiry-semantics",
+				ClientID:       "c-expiry",
+				SubscriptionID: "s-expiry",
+				Status:         string(database.SubscriptionStatusActive),
+				PlanID:         1,
+				ExpiresAt:      tt.existing,
+			}
+
+			var captured *database.Subscription
+
+			db := &testutil.DatabaseService{
+				GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
+					return sub, nil
+				},
+				GetPlanByIDFunc: func(context.Context, uint) (*database.Plan, error) {
+					return &database.Plan{ID: 2, Name: tt.planName}, nil
+				},
+				UpdateSubscriptionFunc: func(_ context.Context, updated *database.Subscription) error {
+					captured = updated
+					return nil
+				},
+			}
+
+			svc := NewSubscriptionService(db, nil, nil, nil, &config.Config{})
+
+			updated, err := svc.AdminSetPlan(context.Background(), sub.ID, 2, tt.days)
+			require.NoError(t, err)
+			require.NotNil(t, captured, "UpdateSubscription must be called")
+
+			assert.Equal(t, uint(2), updated.PlanID)
+			assert.Equal(t, string(database.SubscriptionStatusActive), updated.Status)
+			assert.Equal(t, 0, updated.RemindersSent, "reminder bitmask must reset for the new expiry")
+
+			if tt.wantNil {
+				assert.Nil(t, captured.ExpiresAt, "free plan must clear expiry")
+			} else if tt.wantDelta == 0 {
+				require.NotNil(t, captured.ExpiresAt)
+				assert.Equal(t, tt.existing, captured.ExpiresAt, "future expiry must be preserved")
+			} else {
+				require.NotNil(t, captured.ExpiresAt)
+				assert.WithinDuration(t, now.Add(tt.wantDelta), *captured.ExpiresAt, time.Minute)
+			}
+		})
+	}
+}
+
+func TestSubscriptionService_AdminSetPlan_Errors(t *testing.T) {
+	t.Parallel()
+
+	sub := &database.Subscription{
+		ID:             42,
+		TelegramID:     999804,
+		Username:       "adminsetplan-errors",
+		ClientID:       "c-errors",
+		SubscriptionID: "s-errors",
+		Status:         string(database.SubscriptionStatusActive),
+		PlanID:         1,
+	}
+
+	t.Run("subscription not found", func(t *testing.T) {
+		db := &testutil.DatabaseService{
+			GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
+				return nil, database.ErrSubscriptionNotFound
+			},
+		}
+		svc := NewSubscriptionService(db, nil, nil, nil, &config.Config{})
+
+		_, err := svc.AdminSetPlan(context.Background(), 42, 2, 30)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, database.ErrSubscriptionNotFound)
+		assert.Contains(t, err.Error(), "load subscription")
+	})
+
+	t.Run("plan not found", func(t *testing.T) {
+		db := &testutil.DatabaseService{
+			GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
+				return sub, nil
+			},
+			GetPlanByIDFunc: func(context.Context, uint) (*database.Plan, error) {
+				return nil, database.ErrPlanNotFound
+			},
+		}
+		svc := NewSubscriptionService(db, nil, nil, nil, &config.Config{})
+
+		_, err := svc.AdminSetPlan(context.Background(), 42, 2, 30)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, database.ErrPlanNotFound)
+		assert.Contains(t, err.Error(), "load plan")
+	})
+
+	t.Run("apply plan failure surfaces to caller", func(t *testing.T) {
+		applyErr := errors.New("reconcile plan nodes database unavailable")
+
+		db := &testutil.DatabaseService{
+			GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
+				return sub, nil
+			},
+			GetPlanByIDFunc: func(context.Context, uint) (*database.Plan, error) {
+				return &database.Plan{ID: 2, Name: "premium-errors"}, nil
+			},
+			UpdateSubscriptionFunc: func(context.Context, *database.Subscription) error {
+				return nil
+			},
+			GetNodesByPlanIDFunc: func(context.Context, uint) ([]database.Node, error) {
+				return nil, applyErr
+			},
+		}
+
+		svc := NewSubscriptionService(db, nil, nil, nil, &config.Config{})
+		svc.SetSyncService(NewSyncService(db, nil, nil))
+
+		_, err := svc.AdminSetPlan(context.Background(), 42, 2, 30)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, applyErr, "DB-setup phase failure must surface, not be swallowed")
+	})
+}

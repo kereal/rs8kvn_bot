@@ -19,6 +19,7 @@ func TestNormalizeCommand(t *testing.T) {
 		{"help", "help"},
 		{"invite", "invite"},
 		{"del", "del"},
+		{"setplan", "setplan"},
 		{"broadcast", "broadcast"},
 		{"send", "send"},
 		{"refstats", "refstats"},
