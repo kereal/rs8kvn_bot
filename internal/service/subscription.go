@@ -242,6 +242,9 @@ func (s *SubscriptionService) reanimateRevokedSubscription(ctx context.Context, 
 		sub.ReferredBy = nil
 	}
 
+	// Keep the row revoked until stale node bindings have been cleared
+	// successfully; otherwise an active subscription could be returned without
+	// a working VPN binding.
 	sub.PlanID = freePlan.ID
 	sub.Status = string(database.SubscriptionStatusActive)
 	sub.ExpiresAt = nil
@@ -252,17 +255,16 @@ func (s *SubscriptionService) reanimateRevokedSubscription(ctx context.Context, 
 	sub.Devices = "[]"
 	sub.Ips = "[]"
 
+	// This is a DB-setup prerequisite of the user-initiated operation. Do not
+	// continue with an active subscription when cleanup fails.
+	err = s.db.DeleteSubscriptionNodesBySubscriptionID(ctx, sub.ID)
+	if err != nil {
+		return nil, fmt.Errorf("clear subscription nodes during reanimation: %w", err)
+	}
+
 	err = s.db.UpdateSubscription(ctx, sub)
 	if err != nil {
 		return nil, fmt.Errorf("reanimate subscription: %w", err)
-	}
-
-	// Wipe stale node bindings; ensureSubscriptionNodes rebuilds them as pending_add.
-	err = s.db.DeleteSubscriptionNodesBySubscriptionID(ctx, sub.ID)
-	if err != nil {
-		logger.Warn("failed to clear subscription nodes during reanimation",
-			zap.Uint("subscription_id", sub.ID),
-			zap.Error(err))
 	}
 
 	err = s.ensureSubscriptionNodes(ctx, sub)
@@ -385,21 +387,28 @@ func (s *SubscriptionService) revokeAndDeprovisionThenDelete(ctx context.Context
 		}
 	}
 
-	// Phase 3: physical delete.
-	// If this fails, the row is already revoked; background reconciliation cleans up.
-	// Unified on DeleteSubscriptionByID(sub.ID): both entry points already resolved sub,
-	// so the primary key is known and the telegramID/id divergence in the old copies is gone.
+	// SyncSubscription intentionally treats external node failures as best-effort
+	// and may return nil after scheduling a retry. Inspect the durable DB state
+	// before deleting the subscription: pending bindings are the retry queue.
+	nodes, nodesErr := s.db.GetBySubscriptionID(ctx, sub.ID)
+	if nodesErr != nil {
+		return nil, fmt.Errorf("deprovision: verify node bindings: %w", nodesErr)
+	}
+	if len(nodes) > 0 {
+		return nil, fmt.Errorf("deprovision incomplete: %d node bindings remain", len(nodes))
+	}
+
+	// Phase 3: remove the now-empty binding set before the parent row. This keeps
+	// the operation valid even when SQLite foreign-key enforcement is enabled and
+	// prevents a failed cleanup from destroying the retry queue.
+	err = s.db.DeleteSubscriptionNodesBySubscriptionID(ctx, sub.ID)
+	if err != nil {
+		return nil, fmt.Errorf("delete subscription nodes: %w", err)
+	}
+
 	_, err = s.db.DeleteSubscriptionByID(ctx, sub.ID)
 	if err != nil {
 		return nil, fmt.Errorf("db delete: %w", err)
-	}
-
-	err = s.db.DeleteSubscriptionNodesBySubscriptionID(ctx, sub.ID)
-	if err != nil {
-		// Non-fatal: SyncPendingNodes will purge orphan nodes on next run.
-		logger.Warn("failed to delete subscription nodes after subscription delete",
-			zap.Uint("subscription_id", sub.ID),
-			zap.Error(err))
 	}
 
 	if s.invalidateBySubID != nil && sub.SubscriptionID != "" {

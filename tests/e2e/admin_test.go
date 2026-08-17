@@ -150,13 +150,13 @@ func TestE2E_DelCommand_XUIFailure(t *testing.T) {
 	env.handler.HandleDel(ctx, update)
 
 	assert.True(t, env.botAPI.SendCalledSafe())
-	// With DB-first deletion, the subscription is removed from DB even when
-	// XUI deletion fails (best-effort XUI cleanup). The orphaned XUI client
-	// is less critical than an orphaned DB record.
-	assert.Contains(t, env.botAPI.LastSentText, "успешно удалена")
+	// Failed external deprovisioning keeps the subscription revoked so the
+	// background sync worker can retry the pending_remove operation.
+	assert.Contains(t, env.botAPI.LastSentText, "Ошибка удаления подписки")
 
-	_, err = env.db.GetByID(ctx, sub.ID)
-	assert.Error(t, err, "Subscription should be deleted from DB even when XUI fails")
+	stored, err := env.db.GetByID(ctx, sub.ID)
+	require.NoError(t, err, "revoked subscription must remain for retry")
+	assert.Equal(t, database.SubscriptionStatusRevoked, database.SubscriptionStatus(stored.Status))
 }
 
 // runBroadcastFlow drives the draft -> preview -> confirm broadcast flow end to end.
