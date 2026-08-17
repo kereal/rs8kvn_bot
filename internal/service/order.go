@@ -1266,7 +1266,7 @@ func (o *OrderService) BuildPaidUserNotification(ctx context.Context, order *dat
 		return 0, "", fmt.Errorf("load paid subscription traffic: %w", err)
 	}
 
-	text := FormatSubscriptionMessage("✅ *Оплата подтверждена!*", "", traffic, SubscriptionURL(o.cfg, sub.SubscriptionID))
+	text := fmt.Sprintf("🎉 *Добро пожаловать в Premium!*\n\n%s\n\n%s", PremiumBenefitsText, FormatSubscriptionMessage("✅ *Оплата подтверждена!*", "", traffic, SubscriptionURL(o.cfg, sub.SubscriptionID)))
 
 	return sub.TelegramID, text, nil
 }

@@ -110,10 +110,13 @@ func TestHandleBuyPremiumList_SuccessShowsProducts(t *testing.T) {
 
 	messages := bot.GetAllSentMessages()
 	require.Len(t, messages, 1)
-	assert.Contains(t, messages[0].Text, "Выберите тариф для оплаты:")
+	assert.Equal(t, msg(MsgPremiumBenefits), messages[0].Text)
+	assert.Contains(t, messages[0].Text, "🌍 Больше серверов и вариантов подключения")
+	assert.Contains(t, messages[0].Text, "💬 Приоритетная поддержка")
 
 	edit, ok := bot.LastChattableSafe().(tgbotapi.EditMessageTextConfig)
 	require.True(t, ok, "expected an edited message with a keyboard")
+	assert.Equal(t, tgbotapi.ModeMarkdown, edit.ParseMode)
 	require.NotNil(t, edit.ReplyMarkup, "product list must carry the BuyProductList keyboard")
 	require.NotEmpty(t, edit.ReplyMarkup.InlineKeyboard)
 
