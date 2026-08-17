@@ -119,3 +119,22 @@ func escapeMdv2(s string) string {
 func mdv2Token(i int) string {
 	return "\x01" + strconv.Itoa(i) + "\x01"
 }
+
+// EscapeLegacyMarkdown escapes special characters for Telegram's legacy Markdown
+// (ParseMode "Markdown"). It escapes only the four reserved characters:
+// _ (italic), * (bold), ` (code), [ (link start).
+// Use this when embedding user-controlled text into messages sent with ModeMarkdown.
+func EscapeLegacyMarkdown(text string) string {
+	var b strings.Builder
+	b.Grow(len(text) + len(text)/4) // pre-allocate for ~25% escaped chars
+
+	for _, r := range text {
+		switch r {
+		case '_', '*', '`', '[':
+			b.WriteRune('\\')
+		}
+		b.WriteRune(r)
+	}
+
+	return b.String()
+}
