@@ -518,7 +518,8 @@ func (s *SubscriptionService) AdminSetPlan(ctx context.Context, subscriptionID, 
 		}
 
 		// External-sync phase is best-effort: SyncPendingNodes retries on failure.
-		if err = s.syncService.SyncSubscription(ctx, sub.ID); err != nil {
+		err = s.syncService.SyncSubscription(ctx, sub.ID)
+		if err != nil {
 			logger.Warn("admin set plan: external sync failed; background will retry",
 				zap.Uint("subscription_id", sub.ID),
 				zap.Uint("plan_id", plan.ID),
