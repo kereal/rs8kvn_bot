@@ -869,9 +869,16 @@ func (o *OrderService) confirmPayment(ctx context.Context, providerPaymentID uui
 		return nil, fmt.Errorf("parse callback amount: %w", err)
 	}
 
-	if cents != order.AmountCents {
-		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "callback_amount_mismatch", Reason: fmt.Sprintf("callback amount %d cents does not match order amount %d cents", cents, order.AmountCents), Action: "reject callback and investigate provider payload", OrderID: order.ID, ProductID: order.ProductID, SubscriptionID: order.SubscriptionID, AmountCents: cents, Currency: currency, ProviderID: providerPaymentID.String(), CallbackStatus: "CONFIRMED"})
+	// Platega may include its payment-method commission in the callback amount.
+	// The order amount is the merchant's requested price, so underpayment is
+	// rejected while a provider-calculated amount above it is accepted.
+	if cents < order.AmountCents {
+		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "callback_amount_mismatch", Reason: fmt.Sprintf("callback amount %d cents is below order amount %d cents", cents, order.AmountCents), Action: "reject callback and investigate provider payload", OrderID: order.ID, ProductID: order.ProductID, SubscriptionID: order.SubscriptionID, AmountCents: cents, Currency: currency, ProviderID: providerPaymentID.String(), CallbackStatus: "CONFIRMED"})
 		return nil, ErrAmountMismatch
+	}
+
+	if cents > order.AmountCents {
+		logger.Info("payment callback includes provider fee", zap.Uint("order_id", order.ID), zap.Int64("order_amount_cents", order.AmountCents), zap.Int64("callback_amount_cents", cents), zap.Int64("provider_fee_cents", cents-order.AmountCents), zap.String("currency", currency), zap.String("provider_payment_id", providerPaymentID.String()))
 	}
 
 	if order.Status == database.OrderStatusPaid {
@@ -1056,8 +1063,11 @@ func (o *OrderService) CancelPaymentByProvider(ctx context.Context, providerPaym
 		return nil, false, fmt.Errorf("parse cancellation amount: %w", err)
 	}
 
-	if cents != order.AmountCents {
-		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "callback_amount_mismatch", Reason: fmt.Sprintf("callback amount %d cents does not match order amount %d cents", cents, order.AmountCents), Action: "reject callback and investigate provider payload", OrderID: order.ID, ProductID: order.ProductID, SubscriptionID: order.SubscriptionID, AmountCents: cents, Currency: currency, ProviderID: providerPaymentID.String(), CallbackStatus: status})
+	// Cancellation/chargeback callbacks carry the same provider-total amount
+	// as CONFIRMED callbacks and may therefore include the payment commission.
+	// Only an amount below the order price is rejected.
+	if cents < order.AmountCents {
+		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "callback_amount_mismatch", Reason: fmt.Sprintf("callback amount %d cents is below order amount %d cents", cents, order.AmountCents), Action: "reject callback and investigate provider payload", OrderID: order.ID, ProductID: order.ProductID, SubscriptionID: order.SubscriptionID, AmountCents: cents, Currency: currency, ProviderID: providerPaymentID.String(), CallbackStatus: status})
 		return nil, false, ErrAmountMismatch
 	}
 

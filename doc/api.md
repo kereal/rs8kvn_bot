@@ -119,7 +119,7 @@ Required JSON fields:
 **Responses:**
 
 - `200 {"ok":true}` — callback processed, ignored as a terminal-order no-op (including duplicate or late `CONFIRMED` callbacks), unknown provider ID, or manual-review event;
-- `400` — malformed payload, invalid UUID/amount, or amount/currency mismatch;
+- `400` — malformed payload, invalid UUID/amount, invalid currency, or callback amount below the stored order amount; a larger callback amount is accepted because Platega may include its payment-method commission;
 - `401` — invalid or missing provider credentials;
 - `405` — method other than POST (`Allow: POST`);
 - `503` — payments disabled, order service/bot not wired, or runtime payment readiness has not been enabled after real bot and SyncService initialization;
