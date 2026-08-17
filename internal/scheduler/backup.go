@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/kereal/rs8kvn_bot/internal/backup"
@@ -28,7 +29,7 @@ func NewBackupScheduler(dbPath string, hour, retention int) *BackupScheduler {
 
 // Start runs the backup scheduler loop. It blocks until ctx is cancelled.
 func (s *BackupScheduler) Start(ctx context.Context) {
-	logger.Info("Backup scheduler started", zap.Int("schedule_hour", s.hour))
+	logger.Info("Backup scheduler started", zap.String("schedule_hour", fmt.Sprintf("%dh", s.hour)))
 
 	for {
 		now := time.Now()
@@ -40,7 +41,7 @@ func (s *BackupScheduler) Start(ctx context.Context) {
 		}
 
 		sleepDuration := time.Until(next)
-		logger.Info("Next backup scheduled", zap.Duration("duration", sleepDuration.Round(time.Minute)))
+		logger.Info("Next backup scheduled", zap.String("duration", fmt.Sprintf("%dh", int(sleepDuration.Round(time.Hour).Hours()))))
 
 		select {
 		case <-time.After(sleepDuration):

@@ -586,7 +586,7 @@ func TestSubscriptionService_ReconcileOrphanedClients_RevokesFullyDeprovisioned(
 }
 
 // TestSubscriptionService_ReconcileOrphanedClients_NoActive verifies that an
-// all-revoked set produces no deletions and no error.
+// all-revoked set produces no revocations and no error.
 func TestSubscriptionService_ReconcileOrphanedClients_NoActive(t *testing.T) {
 	t.Parallel()
 
@@ -601,6 +601,83 @@ func TestSubscriptionService_ReconcileOrphanedClients_NoActive(t *testing.T) {
 	count, err := svc.ReconcileOrphanedClients(context.Background())
 	assert.NoError(t, err)
 	assert.Equal(t, 0, count)
+}
+
+// TestSubscriptionService_ReconcileOrphanedClients_UpdateError verifies that a
+// failed status update on an orphaned subscription is logged and skipped (the
+// row stays active for the next run), while the scan continues with the
+// remaining subscriptions.
+func TestSubscriptionService_ReconcileOrphanedClients_UpdateError(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{}
+
+	orphan := &database.Subscription{ID: 20, TelegramID: 200, Username: "orphanuser", Status: "active"}
+	withLive := &database.Subscription{ID: 10, TelegramID: 100, Username: "liveuser", Status: "active"}
+
+	db := &testutil.DatabaseService{
+		GetAllSubscriptionsFunc: func(ctx context.Context) ([]database.Subscription, error) {
+			return []database.Subscription{*orphan, *withLive}, nil
+		},
+		GetBySubscriptionIDFunc: func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
+			switch subscriptionID {
+			case orphan.ID:
+				return []database.SubscriptionNode{
+					{SubscriptionID: orphan.ID, NodeID: 1, Status: database.SyncStatusPendingRemove},
+				}, nil
+			case withLive.ID:
+				return []database.SubscriptionNode{
+					{SubscriptionID: withLive.ID, NodeID: 1, Status: database.SyncStatusActive},
+				}, nil
+			default:
+				return nil, nil
+			}
+		},
+		UpdateSubscriptionFunc: func(ctx context.Context, sub *database.Subscription) error {
+			return errors.New("db write failed")
+		},
+	}
+	svc := NewSubscriptionService(db, nil, nil, nil, cfg)
+
+	count, err := svc.ReconcileOrphanedClients(context.Background())
+	assert.NoError(t, err)
+	assert.Equal(t, 0, count, "failed revoke must not count as processed")
+}
+
+// TestSubscriptionService_ReconcileOrphanedClients_InvalidatesBySubID verifies
+// that a successfully revoked orphan also invalidates the subserver cache keyed
+// by subscription_id (so the stale config is dropped and /sub/:id serves 404).
+func TestSubscriptionService_ReconcileOrphanedClients_InvalidatesBySubID(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{}
+
+	orphan := &database.Subscription{ID: 20, TelegramID: 200, Username: "orphanuser", SubscriptionID: "sub-orphan", Status: "active"}
+
+	db := &testutil.DatabaseService{
+		GetAllSubscriptionsFunc: func(ctx context.Context) ([]database.Subscription, error) {
+			return []database.Subscription{*orphan}, nil
+		},
+		GetBySubscriptionIDFunc: func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
+			return []database.SubscriptionNode{
+				{SubscriptionID: orphan.ID, NodeID: 1, Status: database.SyncStatusPendingRemove},
+			}, nil
+		},
+		UpdateSubscriptionFunc: func(ctx context.Context, sub *database.Subscription) error {
+			assert.Equal(t, string(database.SubscriptionStatusRevoked), sub.Status)
+			return nil
+		},
+	}
+	svc := NewSubscriptionService(db, nil, nil, nil, cfg)
+
+	invokedSubIDs := []string{}
+
+	svc.SetInvalidateBySubIDFunc(func(subID string) { invokedSubIDs = append(invokedSubIDs, subID) })
+
+	count, err := svc.ReconcileOrphanedClients(context.Background())
+	assert.NoError(t, err)
+	assert.Equal(t, 1, count)
+	assert.Equal(t, []string{"sub-orphan"}, invokedSubIDs)
 }
 
 // TestSubscriptionService_BindTrial_SingleNode_ErrorPropagated verifies the
