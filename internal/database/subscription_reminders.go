@@ -76,7 +76,7 @@ func (s *Service) GetSubscriptionsExpiringInRange(ctx context.Context, from, to 
 
 	result := s.db.WithContext(ctx).
 		Where("status = ? AND expires_at IS NOT NULL AND expires_at >= ? AND expires_at <= ? AND plan_id NOT IN (?)",
-			"active", from, to, nonPaidPlanSubQuery).
+			string(SubscriptionStatusActive), from, to, nonPaidPlanSubQuery).
 		Find(&subs)
 	if result.Error != nil {
 		return nil, fmt.Errorf("failed to get subscriptions expiring in range: %w", result.Error)

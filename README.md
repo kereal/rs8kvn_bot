@@ -3,7 +3,7 @@
 [![GitHub release](https://img.shields.io/github/v/release/kereal/rs8kvn_bot?logo=github)](https://github.com/kereal/rs8kvn_bot/releases)
 [![CI](https://img.shields.io/github/actions/workflow/status/kereal/rs8kvn_bot/docker.yml?branch=main)](https://github.com/kereal/rs8kvn_bot/actions)
 [![Go](https://img.shields.io/badge/Go-1.25%2B-00ADD8?logo=go)](https://go.dev/)
-[![Coverage](https://img.shields.io/badge/coverage-63.1%25-green)](https://github.com/kereal/rs8kvn_bot/actions)
+[![Coverage](https://img.shields.io/badge/coverage-65.3%25-green)](https://github.com/kereal/rs8kvn_bot/actions)
 [![Docker](https://img.shields.io/badge/Docker-ghcr.io%2Fkereal%2Frs8kvn_bot-blue?logo=docker)](https://github.com/kereal/rs8kvn_bot/actions)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL%203.0-blue.svg)](LICENSE)
 
@@ -17,6 +17,7 @@
 - 🔗 Invite/trial landing page (`/i/{code}`) with one-click Happ setup
 - 👥 Referral system — users generate invite codes with in-memory cache + periodic sync
 - 📊 Plans & pricing — plan-based traffic/device limits, products, orders, multi-node via `nodes`/`plan_nodes` schema
+- 💳 **Platega payments** — in-bot purchase flow (💎 Купить Premium), provider payment links, authenticated webhook (`X-MerchantId`/`X-Secret`) with atomic confirmation, renewals, and chargeback auto-downgrade to the free plan
 - 🔗 Subscription server endpoint (`/sub/{subID}`) with multi-source aggregation, devices/IPs tracking, and profile headers, node-state synchronization via subscription_nodes table
 - 🌐 Multi-node VPN abstraction — `internal/vpn/` with `Client` interface, 3x-ui, proxman, and fetch support, per-node client provisioning
 - 📈 Prometheus metrics — `/metrics` endpoint with HTTP, bot, XUI, DB, cache, circuit breaker, subscription metrics
@@ -29,7 +30,7 @@
 ## Quick Start
 
 ```bash
-docker pull ghcr.io/kereal/rs8kvn_bot:latest
+docker pull ghcr.io/kereal/rs8kvn_bot:2.4.0
 
 docker run -d \
   --name rs8kvn_bot \
@@ -37,8 +38,10 @@ docker run -d \
   -v $(pwd)/.env:/app/.env:ro \
   -v $(pwd)/data:/app/data \
   -p 127.0.0.1:8880:8880 \
-  ghcr.io/kereal/rs8kvn_bot:latest
+  ghcr.io/kereal/rs8kvn_bot:2.4.0
 ```
+
+> Registry tags are SemVer (`2.4.0`, `2.4`) and commit SHA — there is no `latest` tag.
 
 See **[Installation Guide](doc/installation.md)** for:
 - All 4 installation methods (Docker, Docker Compose, Build from Source, Air hot reload)
@@ -54,8 +57,10 @@ See **[Installation Guide](doc/installation.md)** for:
      - **📋 Подписка** — View subscription info (traffic usage, subscription link)
        - **📱 QR-код** — Generate QR code for Happ app import
        - **🏠 В начало** — Return to main menu
+     - **💎 Купить Premium** — Buy or renew a paid plan (shown when `PAYMENT_ENABLED=true`)
      - **☕ Донат** — View donation info
      - **❓ Помощь** — View VPN setup instructions
+     - **📑 Документы** — Documents / legal menu
    - **For users without subscription:**
      - **📥 Получить подписку** — Create a new subscription
 3. Admin users also see **📊 Стат** — View bot statistics
@@ -68,6 +73,7 @@ See **[Installation Guide](doc/installation.md)** for:
 |---------|-------------|
 | `/lastreg` | Show the last 10 registered users |
 | `/del <id>` | Delete a subscription by database ID |
+| `/setplan <subscription_id> <plan_id> [days]` | Change a subscription's plan through the service layer (reconciles VPN nodes, extends expiry; defaults to 30 days when none given) |
 | `/broadcast <message>` | Send a message to all users who have a subscription (MarkdownV2, special chars auto-escaped) |
 | `/send <id or @username> <message>` | Send a message to a specific user |
 | `/refstats` | Show referral statistics (count per user from cache) |
@@ -76,6 +82,7 @@ See **[Installation Guide](doc/installation.md)** for:
 
 ```text
 /del 5                                    # Delete subscription with DB ID 5
+/setplan 5 3 30                            # Change subscription 5 to plan 3 for 30 days
 /broadcast 🔔 Важное обновление!          # Broadcast to all subscribers (MarkdownV2 supported)
 /send 123456789 Привет!                   # Private message by Telegram ID
 /send @username Привет!                   # Private message by username
@@ -101,19 +108,6 @@ The bot exposes HTTP endpoints on port 8880:
 | `GET /static/logo.png` | Logo image (mobile-optimized PNG) | 200/404 |
 | `POST /payment/callback` | Platega payment webhook (X-MerchantId / X-Secret) | 200/400/401/405/503 |
 
-### Payment Callback (`/payment/callback`)
-
-Receives Platega payment notifications. Guard chain, in order:
-1. Method: POST-only (405 otherwise).
-2. Service availability: payments must be enabled, `orderService`/`bot` wired, and runtime payment readiness enabled only after the real bot and `SyncService` are initialized (→ 503 otherwise).
-3. Auth: `X-MerchantId` / `X-Secret` headers compared constant-time to `cfg.PlategaMerchantID` / `cfg.PlategaSecret` (→ 401). Both credentials must be non-empty.
-4. Body: `http.MaxBytesReader(256 KiB)`, `json.Decoder.UseNumber`, single JSON object (extra trailing JSON rejected).
-5. `payload.ID` must be a UUID provider transaction ID; `payload.Validate()` requires id/amount/currency/status (→ 400 otherwise). `paymentMethod` and `payload` принимаются при наличии; официальная документация Platega противоречит сама себе по обязательности этих полей, поэтому интеграция сохраняет совместимость и уведомляет администратора о malformed callback. Provider transaction IDs are UUIDs; malformed or non-UUID IDs are rejected with 400.
-6. Status `CONFIRMED` → `OrderService.ConfirmPayment` (CAS with `pending` guard, exact amount match, atomic plan application in the same DB transaction).
-7. Status `CANCELED|CHARGEBACKED` → `OrderService.CancelPaymentByProvider`; a chargeback on a previously-paid order automatically downgrades the subscription to the free plan (unless another paid order exists), otherwise it is recorded for manual review.
-
-Development: expose the webhook with `ngrok http 8880` and configure the resulting URL in the Platega dashboard. The shared `.env` controls the endpoint via `PAYMENT_ENABLED`, `PLATEGA_MERCHANT_ID`, `PLATEGA_SECRET`. Link lifetime is taken from Platega `expiresIn`; a valid saved link is reused. `CHARGEBACKED` on a paid order automatically downgrades the subscription to the free plan unless another paid order exists; otherwise it is recorded for manual review. A confirmed payment (purchase or renewal) sends the admin a Telegram alert with the tariff, formatted amount and a clickable buyer link (`utils.FormatUserLink`); a `CHARGEBACKED` on a paid order additionally sends a dedicated chargeback alert with the access status (downgraded to free vs preserved). Uncertain provider outcomes and late confirmed payments generate an admin Telegram alert containing the order, user, amount, currency and provider transaction ID.
-
 ### Invite/Trial Landing Page (`/i/{code}`)
 
 Each user can generate an invite code via the referral flow. The landing page validates the code, applies IP-based rate limiting (429 if exceeded), creates a trial subscription in 3x-ui, and renders a mobile-friendly page with:
@@ -132,6 +126,27 @@ When `SUBSERVER_ACCESS_LOG` is set, each `/sub/{id}` request is appended to the 
 
 - **Auto-reset**: Every 30 days from creation date — 3x-ui resets traffic to 0 and extends `expiresAt` by 30 days automatically when `expiresAt` > 0
 - **Source**: [3x-ui inbound.go - autoRenewClients()](https://github.com/mhsanaei/3x-ui/blob/main/web/service/inbound.go#L888-L912)
+
+### Payment Callback (`/payment/callback`)
+
+Receives Platega payment notifications on port 8880. Guard chain: POST-only → readiness (503) → `X-MerchantId`/`X-Secret` constant-time auth (401) → body ≤ 256 KiB, single JSON object → UUID `id` and amount/currency/status validation (400).
+
+- `CONFIRMED` → atomic `pending → paid` (or `expired → paid` within 5 minutes after `PaymentExpiresAt`); plan sync is prepared in the same DB transaction. Duplicate callbacks are idempotent no-ops.
+- `CANCELED|CHARGEBACKED` → order cancellation; a chargeback on a paid order auto-downgrades the subscription to the free plan unless another paid order exists.
+- Mismatches, unknown statuses and other issues alert the admin (`NotifyPaymentIssue`).
+
+Expose it at `https://<domain>/payment/callback`: locally via `ngrok http 8880`, in production via nginx (see [doc/operations.md](doc/operations.md)). Enabled by `PAYMENT_ENABLED`, `PLATEGA_MERCHANT_ID`, `PLATEGA_SECRET`.
+
+## Releases
+
+Current release: **[v2.4.0](https://github.com/kereal/rs8kvn_bot/releases/tag/v2.4.0)**
+
+Releases are fully automated:
+
+1. Tag `main` with a SemVer tag and push it (e.g. `git tag -a v2.4.1 -m "Release v2.4.1" && git push origin v2.4.1`).
+2. CI/CD Pipeline runs tests, `go vet`, `go build`, golangci-lint and the **gosec** security scan.
+3. The Docker image is built and pushed to `ghcr.io/kereal/rs8kvn_bot` (tags: `2.4.0`, `2.4`, commit SHA).
+4. A GitHub Release is created with an auto-generated changelog.
 
 ## Development
 
@@ -153,7 +168,7 @@ golangci-lint run ./...
 gosec ./...
 ```
 
-Test suite: ~63.1% aggregate coverage (generated with `go test -coverprofile`), race-safe, fuzzing, table-driven tests, integration tests with mock HTTP server.
+Test suite: ~65.3% aggregate coverage (generated with `go test -coverprofile`), race-safe, fuzzing, table-driven tests, integration tests with mock HTTP server.
 
 ### Build
 

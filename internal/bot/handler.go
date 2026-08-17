@@ -37,7 +37,7 @@ const (
 // label values. Known commands are returned as-is; anything else becomes "unknown".
 func normalizeCommand(cmd string) string {
 	switch cmd {
-	case "start", "help", "invite", "del", "broadcast", "send", "refstats", "v", "lastreg":
+	case "start", "help", "invite", "del", "setplan", "broadcast", "send", "refstats", "v", "lastreg":
 		return cmd
 	default:
 		return "unknown"
@@ -668,6 +668,8 @@ func (h *Handler) HandleUpdate(ctx context.Context, update tgbotapi.Update) {
 				err = h.HandleInvite(ctx, update)
 			case "del":
 				err = h.HandleDel(ctx, update)
+			case "setplan":
+				err = h.HandleSetPlan(ctx, update)
 			case "broadcast":
 				err = h.HandleBroadcast(ctx, update)
 			case "send":

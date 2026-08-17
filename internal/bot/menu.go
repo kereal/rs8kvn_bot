@@ -32,7 +32,7 @@ func (h *Handler) handleBackToStart(ctx context.Context, chatID int64, username 
 			hasSubscription = false
 		}
 	} else {
-		hasSubscription = sub != nil && sub.Status == "active"
+		hasSubscription = sub != nil && sub.Status == string(database.SubscriptionStatusActive)
 	}
 
 	text, keyboard := h.getMainMenuContent(ctx, username, hasSubscription, chatID, sub)

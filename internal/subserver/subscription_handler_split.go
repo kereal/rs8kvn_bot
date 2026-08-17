@@ -57,11 +57,11 @@ func serveFromCache(ctx context.Context, db interfaces.SubscriptionRepository, s
 	}
 
 	// If the subscription is no longer active or expired, invalidate the cache.
-	if status != "active" || (!expiryTime.IsZero() && time.Now().After(expiryTime)) {
+	if status != string(database.SubscriptionStatusActive) || (!expiryTime.IsZero() && time.Now().After(expiryTime)) {
 		subSvc.InvalidateCache(cacheKey)
 
-		invalidReason := "revoked"
-		if status == "active" {
+		invalidReason := string(database.SubscriptionStatusRevoked)
+		if status == string(database.SubscriptionStatusActive) {
 			invalidReason = "expired"
 		}
 

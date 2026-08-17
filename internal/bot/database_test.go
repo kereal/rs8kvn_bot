@@ -175,8 +175,8 @@ func TestHandleBroadcast_DatabaseFunction(t *testing.T) {
 		require.NoError(t, db.CreateSubscription(ctx, sub, ""), "Failed to create subscription")
 	}
 
-	ids, err := db.GetAllTelegramIDs(ctx)
-	require.NoError(t, err, "GetAllTelegramIDs() error")
+	ids, err := db.GetTelegramIDsBatch(ctx, 0, 100)
+	require.NoError(t, err, "GetTelegramIDsBatch() error")
 	assert.Len(t, ids, 2)
 }
 
@@ -274,38 +274,3 @@ func TestGetLatestSubscriptions_OnlyActive(t *testing.T) {
 	assert.Len(t, subs, 1)
 }
 
-func TestGetAllTelegramIDs(t *testing.T) {
-	t.Parallel()
-
-	db, err := testutil.NewTestDatabaseService(t)
-	require.NoError(t, err, "Failed to create test database service")
-
-	ctx := context.Background()
-
-	subs := []*database.Subscription{
-		{TelegramID: 111111111, Username: "user1", ClientID: "client1", SubscriptionID: "sub-user1", Status: "active", ExpiresAt: testutil.PtrTime(time.Now().Add(24 * time.Hour))},
-		{TelegramID: 222222222, Username: "user2", ClientID: "client2", SubscriptionID: "sub-user2", Status: "active", ExpiresAt: testutil.PtrTime(time.Now().Add(24 * time.Hour))},
-		{TelegramID: 333333333, Username: "user3", ClientID: "client3", SubscriptionID: "sub-user3", Status: "active", ExpiresAt: testutil.PtrTime(time.Now().Add(24 * time.Hour))},
-	}
-
-	for _, sub := range subs {
-		require.NoError(t, db.CreateSubscription(ctx, sub, ""), "Failed to create subscription")
-	}
-
-	ids, err := db.GetAllTelegramIDs(ctx)
-	require.NoError(t, err, "GetAllTelegramIDs() error")
-	assert.Len(t, ids, 3)
-}
-
-func TestGetAllTelegramIDs_Empty(t *testing.T) {
-	t.Parallel()
-
-	db, err := testutil.NewTestDatabaseService(t)
-	require.NoError(t, err, "Failed to create test database service")
-
-	ctx := context.Background()
-
-	ids, err := db.GetAllTelegramIDs(ctx)
-	require.NoError(t, err, "GetAllTelegramIDs() error")
-	assert.Empty(t, ids)
-}

@@ -12,6 +12,7 @@ import (
 
 	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/logger"
+	"github.com/kereal/rs8kvn_bot/internal/service"
 	"github.com/kereal/rs8kvn_bot/internal/utils"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -209,6 +210,100 @@ func (h *Handler) HandleDel(ctx context.Context, update tgbotapi.Update) error {
 		id,
 		formatUserDisplay(deleted.Username),
 		deleted.TelegramID,
+	))
+
+	return nil
+}
+
+// HandleSetPlan handles the /setplan command for admins.
+// Changes the subscription plan through the service layer: subscription row is
+// updated (plan, status, expiry), node bindings are reconciled
+// (pending_add/pending_update/pending_remove), and VPN panels are synced
+// best-effort. Usage: /setplan <subscription_id> <plan_id> [days]
+func (h *Handler) HandleSetPlan(ctx context.Context, update tgbotapi.Update) error {
+	ctx, cancel := h.withTimeout(ctx)
+	defer cancel()
+
+	if update.Message == nil {
+		logger.Error("HandleSetPlan called with nil Message")
+		return fmt.Errorf("nil message")
+	}
+
+	chatID := update.Message.Chat.ID
+
+	// Verify admin access
+	if !h.isAdmin(chatID) {
+		logger.Warn("Non-admin user attempted to access /setplan", zap.Int64("chat_id", chatID))
+		return nil
+	}
+
+	// Parse the command arguments
+	fields := strings.Fields(update.Message.CommandArguments())
+	if len(fields) < 2 {
+		h.SendMessage(ctx, chatID, "❌ Использование: /setplan <id_подписки> <id_тарифа> [дней]\n\nПример: /setplan 5 3 30")
+		return nil
+	}
+
+	subID, err := strconv.ParseUint(fields[0], 10, 64)
+	if err != nil || subID == 0 {
+		h.SendMessage(ctx, chatID, "❌ Неверный ID подписки. Использование: /setplan <id_подписки> <id_тарифа> [дней]")
+		return nil
+	}
+
+	planID, err := strconv.ParseUint(fields[1], 10, 64)
+	if err != nil || planID == 0 {
+		h.SendMessage(ctx, chatID, "❌ Неверный ID тарифа. Использование: /setplan <id_подписки> <id_тарифа> [дней]")
+		return nil
+	}
+
+	var days int
+	if len(fields) >= 3 {
+		days, err = strconv.Atoi(fields[2])
+		if err != nil || days <= 0 {
+			h.SendMessage(ctx, chatID, "❌ Количество дней должно быть положительным числом")
+			return nil
+		}
+
+		if days > service.AdminSetPlanMaxDays {
+			h.SendMessage(ctx, chatID, fmt.Sprintf("❌ Количество дней не может превышать %d", service.AdminSetPlanMaxDays))
+			return nil
+		}
+	}
+
+	updated, err := h.subscriptionService.AdminSetPlan(ctx, uint(subID), uint(planID), days)
+	if err != nil {
+		logger.Error("Failed to set subscription plan",
+			zap.Error(err),
+			zap.Uint("subscription_id", uint(subID)),
+			zap.Uint("plan_id", uint(planID)))
+		h.SendMessage(ctx, chatID, fmt.Sprintf("❌ Ошибка смены тарифа: %v", err))
+
+		return fmt.Errorf("set plan: %w", err)
+	}
+
+	logger.Info("Subscription plan changed",
+		zap.Uint("subscription_id", updated.ID),
+		zap.Uint("plan_id", updated.PlanID),
+		zap.String("username", updated.Username),
+		zap.Int64("telegram_id", updated.TelegramID))
+
+	expiry := "без срока (free)"
+	if updated.ExpiresAt != nil {
+		expiry = updated.ExpiresAt.Format("02.01.2006")
+	}
+
+	h.SendMessage(ctx, chatID, fmt.Sprintf(
+		"✅ Тариф подписки изменён!\n\n"+
+			"🆔 ID: %d\n"+
+			"👤 Пользователь: %s\n"+
+			"🆔 Telegram ID: %d\n"+
+			"💡 Тариф: %d\n"+
+			"⏰ Истекает: %s",
+		updated.ID,
+		formatUserDisplay(updated.Username),
+		updated.TelegramID,
+		updated.PlanID,
+		expiry,
 	))
 
 	return nil

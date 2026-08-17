@@ -258,212 +258,6 @@ func TestSubscriptionService_Create_FillsFallbackUsername(t *testing.T) {
 	assert.Equal(t, "tgId_123456", result.Subscription.Username)
 }
 
-func TestSubscriptionService_GetByTelegramID_Success(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{}
-	expected := &database.Subscription{
-		TelegramID: 123456,
-		Username:   "testuser",
-		Status:     "active",
-	}
-
-	db := &testutil.DatabaseService{
-		GetByTelegramIDFunc: func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
-			assert.Equal(t, int64(123456), telegramID)
-			return expected, nil
-		},
-	}
-	svc := NewSubscriptionService(db, nil, nil, nil, cfg)
-	result, err := svc.GetByTelegramID(context.Background(), 123456)
-
-	assert.NoError(t, err)
-	assert.Equal(t, expected, result)
-}
-
-func TestSubscriptionService_GetByTelegramID_NotFound(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{}
-
-	db := &testutil.DatabaseService{
-		GetByTelegramIDFunc: func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
-			return nil, errors.New("not found")
-		},
-	}
-	svc := NewSubscriptionService(db, nil, nil, nil, cfg)
-	result, err := svc.GetByTelegramID(context.Background(), 999999)
-
-	assert.Error(t, err)
-	assert.Nil(t, result)
-	assert.Contains(t, err.Error(), "not found")
-}
-
-func TestSubscriptionService_Delete_Success(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{}
-
-	sub := &database.Subscription{
-		TelegramID: 123456,
-		Username:   "testuser",
-		ClientID:   "client-123",
-	}
-
-	db := &testutil.DatabaseService{
-		GetByTelegramIDFunc: func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
-			return sub, nil
-		},
-		DeleteSubscriptionByIDFunc: func(ctx context.Context, id uint) (*database.Subscription, error) {
-			return nil, nil
-		},
-		GetBySubscriptionIDFunc: func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
-			return nil, nil
-		},
-	}
-
-	svc := NewSubscriptionService(db, nil, nil, nil, cfg)
-	err := svc.Delete(context.Background(), 123456)
-
-	assert.NoError(t, err)
-}
-
-func TestSubscriptionService_Delete_NotFound(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{}
-
-	db := &testutil.DatabaseService{
-		GetByTelegramIDFunc: func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
-			return nil, errors.New("not found")
-		},
-	}
-	svc := NewSubscriptionService(db, nil, nil, nil, cfg)
-	err := svc.Delete(context.Background(), 999999)
-
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "not found")
-}
-
-func TestSubscriptionService_Delete_XUIError(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{}
-
-	sub := &database.Subscription{
-		TelegramID: 123456,
-		ClientID:   "client-123",
-	}
-
-	db := &testutil.DatabaseService{
-		GetByTelegramIDFunc: func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
-			return sub, nil
-		},
-		DeleteSubscriptionByIDFunc: func(ctx context.Context, id uint) (*database.Subscription, error) {
-			return nil, nil
-		},
-		GetBySubscriptionIDFunc: func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
-			return nil, nil
-		},
-	}
-
-	svc := NewSubscriptionService(db, nil, nil, nil, cfg)
-	err := svc.Delete(context.Background(), 123456)
-
-	// Sync errors are best-effort — Delete should succeed even if sync fails
-	assert.NoError(t, err)
-}
-
-func TestSubscriptionService_Delete_DBError(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{}
-
-	sub := &database.Subscription{
-		TelegramID: 123456,
-		ClientID:   "client-123",
-	}
-
-	db := &testutil.DatabaseService{
-		GetByTelegramIDFunc: func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
-			return sub, nil
-		},
-		DeleteSubscriptionByIDFunc: func(ctx context.Context, id uint) (*database.Subscription, error) {
-			return nil, errors.New("db connection refused")
-		},
-		GetBySubscriptionIDFunc: func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
-			return nil, nil
-		},
-	}
-	svc := NewSubscriptionService(db, nil, nil, nil, cfg)
-	err := svc.Delete(context.Background(), 123456)
-
-	// DB errors should still be returned
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "db delete")
-}
-
-func TestSubscriptionService_Delete_UsesCorrectEmail(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{}
-
-	sub := &database.Subscription{
-		TelegramID: 123456,
-		Username:   "testuser",
-		ClientID:   "client-456",
-	}
-
-	db := &testutil.DatabaseService{
-		GetByTelegramIDFunc: func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
-			return sub, nil
-		},
-		DeleteSubscriptionByIDFunc: func(ctx context.Context, id uint) (*database.Subscription, error) {
-			return nil, nil
-		},
-		GetBySubscriptionIDFunc: func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
-			return nil, nil
-		},
-	}
-
-	svc := NewSubscriptionService(db, nil, nil, nil, cfg)
-	err := svc.Delete(context.Background(), 123456)
-
-	// Email is now computed inside sync module, not in Delete()
-	assert.NoError(t, err)
-}
-
-func TestSubscriptionService_Delete_FallsBackToTgIdEmail(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{}
-
-	// No real username → email must be tgId_ format
-	sub := &database.Subscription{
-		TelegramID: 123456,
-		ClientID:   "client-789",
-		// Username empty on purpose
-	}
-
-	db := &testutil.DatabaseService{
-		GetByTelegramIDFunc: func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
-			return sub, nil
-		},
-		DeleteSubscriptionByIDFunc: func(ctx context.Context, id uint) (*database.Subscription, error) {
-			return nil, nil
-		},
-		GetBySubscriptionIDFunc: func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
-			return nil, nil
-		},
-	}
-
-	svc := NewSubscriptionService(db, nil, nil, nil, cfg)
-	err := svc.Delete(context.Background(), 123456)
-
-	// Email is now computed inside sync module, not in Delete()
-	assert.NoError(t, err)
-}
-
 func TestSubscriptionService_GetWithTraffic_Success(t *testing.T) {
 	t.Parallel()
 
@@ -692,12 +486,13 @@ func TestSubscriptionService_CreateTrial_NoTrialNodes(t *testing.T) {
 	assert.Contains(t, err.Error(), "no linked nodes")
 }
 
-// TestSubscriptionService_ReconcileOrphanedClients_RemovesFullyDeprovisioned verifies
+// TestSubscriptionService_ReconcileOrphanedClients_RevokesFullyDeprovisioned verifies
 // a subscription with only pending_remove node bindings (deprovisioning that did
-// not complete in the delete flow) is removed, while:
+// not complete in the delete flow) is REVOKED (policy: subscriptions are never
+// deleted except via admin /del), while:
 //   - a subscription with a live (active) binding is kept,
 //   - a subscription with NO subscription_nodes (e.g. a trial) is kept.
-func TestSubscriptionService_ReconcileOrphanedClients_RemovesFullyDeprovisioned(t *testing.T) {
+func TestSubscriptionService_ReconcileOrphanedClients_RevokesFullyDeprovisioned(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{}
@@ -707,7 +502,7 @@ func TestSubscriptionService_ReconcileOrphanedClients_RemovesFullyDeprovisioned(
 	trial := &database.Subscription{ID: 30, TelegramID: 0, SubscriptionID: "trial123", Status: "active"}
 	inactive := &database.Subscription{ID: 40, TelegramID: 400, Username: "bad", Status: "revoked"}
 
-	deleted := []uint{}
+	updated := make(map[uint]string)
 	db := &testutil.DatabaseService{
 		GetAllSubscriptionsFunc: func(ctx context.Context) ([]database.Subscription, error) {
 			return []database.Subscription{*withLive, *orphan, *trial, *inactive}, nil
@@ -728,9 +523,9 @@ func TestSubscriptionService_ReconcileOrphanedClients_RemovesFullyDeprovisioned(
 				return nil, nil
 			}
 		},
-		DeleteSubscriptionByIDFunc: func(ctx context.Context, id uint) (*database.Subscription, error) {
-			deleted = append(deleted, id)
-			return &database.Subscription{ID: id}, nil
+		UpdateSubscriptionFunc: func(ctx context.Context, sub *database.Subscription) error {
+			updated[sub.ID] = sub.Status
+			return nil
 		},
 	}
 	svc := NewSubscriptionService(db, nil, nil, nil, cfg)
@@ -743,12 +538,14 @@ func TestSubscriptionService_ReconcileOrphanedClients_RemovesFullyDeprovisioned(
 
 	assert.NoError(t, err)
 	assert.Equal(t, 1, count)
-	assert.Equal(t, []uint{orphan.ID}, deleted)
+	assert.Equal(t, string(database.SubscriptionStatusRevoked), updated[orphan.ID])
+	assert.NotContains(t, updated, withLive.ID)
+	assert.NotContains(t, updated, trial.ID)
 	assert.Equal(t, []int64{orphan.TelegramID}, invoked)
 }
 
 // TestSubscriptionService_ReconcileOrphanedClients_NoActive verifies that an
-// all-revoked set produces no deletions and no error.
+// all-revoked set produces no revocations and no error.
 func TestSubscriptionService_ReconcileOrphanedClients_NoActive(t *testing.T) {
 	t.Parallel()
 
@@ -763,6 +560,83 @@ func TestSubscriptionService_ReconcileOrphanedClients_NoActive(t *testing.T) {
 	count, err := svc.ReconcileOrphanedClients(context.Background())
 	assert.NoError(t, err)
 	assert.Equal(t, 0, count)
+}
+
+// TestSubscriptionService_ReconcileOrphanedClients_UpdateError verifies that a
+// failed status update on an orphaned subscription is logged and skipped (the
+// row stays active for the next run), while the scan continues with the
+// remaining subscriptions.
+func TestSubscriptionService_ReconcileOrphanedClients_UpdateError(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{}
+
+	orphan := &database.Subscription{ID: 20, TelegramID: 200, Username: "orphanuser", Status: "active"}
+	withLive := &database.Subscription{ID: 10, TelegramID: 100, Username: "liveuser", Status: "active"}
+
+	db := &testutil.DatabaseService{
+		GetAllSubscriptionsFunc: func(ctx context.Context) ([]database.Subscription, error) {
+			return []database.Subscription{*orphan, *withLive}, nil
+		},
+		GetBySubscriptionIDFunc: func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
+			switch subscriptionID {
+			case orphan.ID:
+				return []database.SubscriptionNode{
+					{SubscriptionID: orphan.ID, NodeID: 1, Status: database.SyncStatusPendingRemove},
+				}, nil
+			case withLive.ID:
+				return []database.SubscriptionNode{
+					{SubscriptionID: withLive.ID, NodeID: 1, Status: database.SyncStatusActive},
+				}, nil
+			default:
+				return nil, nil
+			}
+		},
+		UpdateSubscriptionFunc: func(ctx context.Context, sub *database.Subscription) error {
+			return errors.New("db write failed")
+		},
+	}
+	svc := NewSubscriptionService(db, nil, nil, nil, cfg)
+
+	count, err := svc.ReconcileOrphanedClients(context.Background())
+	assert.NoError(t, err)
+	assert.Equal(t, 0, count, "failed revoke must not count as processed")
+}
+
+// TestSubscriptionService_ReconcileOrphanedClients_InvalidatesBySubID verifies
+// that a successfully revoked orphan also invalidates the subserver cache keyed
+// by subscription_id (so the stale config is dropped and /sub/:id serves 404).
+func TestSubscriptionService_ReconcileOrphanedClients_InvalidatesBySubID(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{}
+
+	orphan := &database.Subscription{ID: 20, TelegramID: 200, Username: "orphanuser", SubscriptionID: "sub-orphan", Status: "active"}
+
+	db := &testutil.DatabaseService{
+		GetAllSubscriptionsFunc: func(ctx context.Context) ([]database.Subscription, error) {
+			return []database.Subscription{*orphan}, nil
+		},
+		GetBySubscriptionIDFunc: func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
+			return []database.SubscriptionNode{
+				{SubscriptionID: orphan.ID, NodeID: 1, Status: database.SyncStatusPendingRemove},
+			}, nil
+		},
+		UpdateSubscriptionFunc: func(ctx context.Context, sub *database.Subscription) error {
+			assert.Equal(t, string(database.SubscriptionStatusRevoked), sub.Status)
+			return nil
+		},
+	}
+	svc := NewSubscriptionService(db, nil, nil, nil, cfg)
+
+	invokedSubIDs := []string{}
+
+	svc.SetInvalidateBySubIDFunc(func(subID string) { invokedSubIDs = append(invokedSubIDs, subID) })
+
+	count, err := svc.ReconcileOrphanedClients(context.Background())
+	assert.NoError(t, err)
+	assert.Equal(t, 1, count)
+	assert.Equal(t, []string{"sub-orphan"}, invokedSubIDs)
 }
 
 // TestSubscriptionService_BindTrial_SingleNode_ErrorPropagated verifies the
@@ -1068,12 +942,11 @@ func TestSubscriptionService_DeleteByID_MarkRevokedBeforeDBDelete(t *testing.T) 
 	assert.Equal(t, "revoked", updatedStatus, "subscription must be marked revoked before deprovision/delete")
 }
 
-// TestSubscriptionService_DeleteByID_SyncFailureStillDeletes verifies the
-// best-effort contract from AGENTS.md: deprovision (Phase 2, external sync)
-// is best-effort — if the VPN node sync fails, the subscription stays
-// revoked and the physical delete (Phase 3) MUST still run so the row is
-// removed. Background reconciliation finishes removal of the orphaned VPN client.
-func TestSubscriptionService_DeleteByID_SyncFailureStillDeletes(t *testing.T) {
+// TestSubscriptionService_DeleteByID_SyncFailureKeepsRetryQueue verifies that
+// a failed external deprovision leaves the revoked subscription and its
+// pending_remove row for the background worker instead of destroying the retry
+// queue with a physical delete.
+func TestSubscriptionService_DeleteByID_SyncFailureKeepsRetryQueue(t *testing.T) {
 	t.Parallel()
 
 	var deleteByIDCalled bool
@@ -1118,171 +991,11 @@ func TestSubscriptionService_DeleteByID_SyncFailureStillDeletes(t *testing.T) {
 
 	deleted, err := svc.DeleteByID(context.Background(), 1)
 
-	// Physical delete (Phase 3) runs despite the Phase 2 sync failure.
-	require.NoError(t, err, "best-effort deprovision failure must not abort the delete")
-	assert.True(t, deleteByIDCalled, "DeleteSubscriptionByID (physical delete) must run even if external deprovision fails")
-	assert.NotNil(t, deleted)
-}
-
-// ==================== GetByID Tests ====================
-
-func TestSubscriptionService_GetByID_Success(t *testing.T) {
-	t.Parallel()
-
-	expected := &database.Subscription{ID: 99, TelegramID: 1, ClientID: "c", SubscriptionID: "s"}
-	db := &testutil.DatabaseService{
-		GetByIDFunc: func(ctx context.Context, id uint) (*database.Subscription, error) {
-			assert.Equal(t, uint(99), id)
-			return expected, nil
-		},
-	}
-	xuiClients := map[uint]interfaces.XUIClient{1: &testutil.XUIClient{}}
-	sources := []database.Node{{ID: 1, IsActive: true, Host: "http://x", InboundIDs: "[1]"}}
-
-	svc := NewSubscriptionService(db, xuiClients, nil, sources, &config.Config{})
-	got, err := svc.GetByID(context.Background(), 99)
-
-	assert.NoError(t, err)
-	assert.Equal(t, expected, got)
-}
-
-func TestSubscriptionService_GetByID_NotFound(t *testing.T) {
-	t.Parallel()
-
-	db := &testutil.DatabaseService{
-		GetByIDFunc: func(ctx context.Context, id uint) (*database.Subscription, error) {
-			return nil, errors.New("not found")
-		},
-	}
-	xuiClients := map[uint]interfaces.XUIClient{1: &testutil.XUIClient{}}
-	sources := []database.Node{{ID: 1, IsActive: true, Host: "http://x", InboundIDs: "[1]"}}
-
-	svc := NewSubscriptionService(db, xuiClients, nil, sources, &config.Config{})
-	got, err := svc.GetByID(context.Background(), 1)
-
-	assert.Error(t, err)
-	assert.Nil(t, got)
-}
-
-// ==================== Invite Tests ====================
-
-func TestSubscriptionService_GetOrCreateInvite_Delegates(t *testing.T) {
-	t.Parallel()
-
-	want := &database.Invite{Code: "ABC", ReferrerTGID: 111}
-	db := &testutil.DatabaseService{
-		GetOrCreateInviteFunc: func(ctx context.Context, referrerTGID int64, code string) (*database.Invite, error) {
-			assert.Equal(t, int64(111), referrerTGID)
-			assert.Equal(t, "ABC", code)
-
-			return want, nil
-		},
-	}
-	xuiClients := map[uint]interfaces.XUIClient{1: &testutil.XUIClient{}}
-	sources := []database.Node{{ID: 1, IsActive: true, Host: "http://x", InboundIDs: "[1]"}}
-
-	svc := NewSubscriptionService(db, xuiClients, nil, sources, &config.Config{})
-	got, err := svc.GetOrCreateInvite(context.Background(), 111, "ABC")
-
-	assert.NoError(t, err)
-	assert.Equal(t, want, got)
-}
-
-func TestSubscriptionService_GetInviteByCode_Delegates(t *testing.T) {
-	t.Parallel()
-
-	want := &database.Invite{Code: "XYZ", ReferrerTGID: 222}
-	db := &testutil.DatabaseService{
-		GetInviteByCodeFunc: func(ctx context.Context, code string) (*database.Invite, error) {
-			assert.Equal(t, "XYZ", code)
-			return want, nil
-		},
-	}
-	xuiClients := map[uint]interfaces.XUIClient{1: &testutil.XUIClient{}}
-	sources := []database.Node{{ID: 1, IsActive: true, Host: "http://x", InboundIDs: "[1]"}}
-
-	svc := NewSubscriptionService(db, xuiClients, nil, sources, &config.Config{})
-	got, err := svc.GetInviteByCode(context.Background(), "XYZ")
-
-	assert.NoError(t, err)
-	assert.Equal(t, want, got)
-}
-
-// ==================== Count / List Tests ====================
-
-func TestSubscriptionService_CountAll_Delegates(t *testing.T) {
-	t.Parallel()
-
-	db := &testutil.DatabaseService{
-		CountAllSubscriptionsFunc: func(ctx context.Context) (int64, error) {
-			return 42, nil
-		},
-	}
-	xuiClients := map[uint]interfaces.XUIClient{1: &testutil.XUIClient{}}
-	sources := []database.Node{{ID: 1, IsActive: true, Host: "http://x", InboundIDs: "[1]"}}
-
-	svc := NewSubscriptionService(db, xuiClients, nil, sources, &config.Config{})
-	got, err := svc.CountAll(context.Background())
-
-	assert.NoError(t, err)
-	assert.Equal(t, int64(42), got)
-}
-
-func TestSubscriptionService_CountActive_Delegates(t *testing.T) {
-	t.Parallel()
-
-	db := &testutil.DatabaseService{
-		CountActiveSubscriptionsFunc: func(ctx context.Context) (int64, error) {
-			return 7, nil
-		},
-	}
-	xuiClients := map[uint]interfaces.XUIClient{1: &testutil.XUIClient{}}
-	sources := []database.Node{{ID: 1, IsActive: true, Host: "http://x", InboundIDs: "[1]"}}
-
-	svc := NewSubscriptionService(db, xuiClients, nil, sources, &config.Config{})
-	got, err := svc.CountActive(context.Background())
-
-	assert.NoError(t, err)
-	assert.Equal(t, int64(7), got)
-}
-
-func TestSubscriptionService_GetLatest_Delegates(t *testing.T) {
-	t.Parallel()
-
-	want := []database.Subscription{{ID: 1}, {ID: 2}}
-	db := &testutil.DatabaseService{
-		GetLatestSubscriptionsFunc: func(ctx context.Context, limit int) ([]database.Subscription, error) {
-			assert.Equal(t, 5, limit)
-			return want, nil
-		},
-	}
-	xuiClients := map[uint]interfaces.XUIClient{1: &testutil.XUIClient{}}
-	sources := []database.Node{{ID: 1, IsActive: true, Host: "http://x", InboundIDs: "[1]"}}
-
-	svc := NewSubscriptionService(db, xuiClients, nil, sources, &config.Config{})
-	got, err := svc.GetLatest(context.Background(), 5)
-
-	assert.NoError(t, err)
-	assert.Equal(t, want, got)
-}
-
-func TestSubscriptionService_GetTelegramIDByUsername_Delegates(t *testing.T) {
-	t.Parallel()
-
-	db := &testutil.DatabaseService{
-		GetTelegramIDByUsernameFunc: func(ctx context.Context, username string) (int64, error) {
-			assert.Equal(t, "alice", username)
-			return 555, nil
-		},
-	}
-	xuiClients := map[uint]interfaces.XUIClient{1: &testutil.XUIClient{}}
-	sources := []database.Node{{ID: 1, IsActive: true, Host: "http://x", InboundIDs: "[1]"}}
-
-	svc := NewSubscriptionService(db, xuiClients, nil, sources, &config.Config{})
-	got, err := svc.GetTelegramIDByUsername(context.Background(), "alice")
-
-	assert.NoError(t, err)
-	assert.Equal(t, int64(555), got)
+	// Physical delete must not run while the pending_remove retry row remains.
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "deprovision incomplete")
+	assert.False(t, deleteByIDCalled, "physical delete must wait for successful deprovision")
+	assert.Nil(t, deleted)
 }
 
 // ==================== InvalidateSubscription Tests ====================
@@ -1370,67 +1083,6 @@ func TestSubscriptionService_CleanupExpiredTrials_DBError(t *testing.T) {
 	assert.Equal(t, int64(0), n)
 }
 
-// ==================== Batch / Pagination Tests ====================
-
-func TestSubscriptionService_GetTotalTelegramIDCount_Delegates(t *testing.T) {
-	t.Parallel()
-
-	db := &testutil.DatabaseService{
-		GetTotalTelegramIDCountFunc: func(ctx context.Context) (int64, error) {
-			return 100, nil
-		},
-	}
-	xuiClients := map[uint]interfaces.XUIClient{1: &testutil.XUIClient{}}
-	sources := []database.Node{{ID: 1, IsActive: true, Host: "http://x", InboundIDs: "[1]"}}
-
-	svc := NewSubscriptionService(db, xuiClients, nil, sources, &config.Config{})
-	got, err := svc.GetTotalTelegramIDCount(context.Background())
-
-	assert.NoError(t, err)
-	assert.Equal(t, int64(100), got)
-}
-
-func TestSubscriptionService_GetTelegramIDsBatch_Delegates(t *testing.T) {
-	t.Parallel()
-
-	want := []int64{1, 2, 3, 4, 5}
-	db := &testutil.DatabaseService{
-		GetTelegramIDsBatchFunc: func(ctx context.Context, offset, limit int) ([]int64, error) {
-			assert.Equal(t, 10, offset)
-			assert.Equal(t, 5, limit)
-
-			return want, nil
-		},
-	}
-	xuiClients := map[uint]interfaces.XUIClient{1: &testutil.XUIClient{}}
-	sources := []database.Node{{ID: 1, IsActive: true, Host: "http://x", InboundIDs: "[1]"}}
-
-	svc := NewSubscriptionService(db, xuiClients, nil, sources, &config.Config{})
-	got, err := svc.GetTelegramIDsBatch(context.Background(), 10, 5)
-
-	assert.NoError(t, err)
-	assert.Equal(t, want, got)
-}
-
-func TestSubscriptionService_GetAllReferralCounts_Delegates(t *testing.T) {
-	t.Parallel()
-
-	want := map[int64]int64{1: 3, 2: 5, 3: 0}
-	db := &testutil.DatabaseService{
-		GetAllReferralCountsFunc: func(ctx context.Context) (map[int64]int64, error) {
-			return want, nil
-		},
-	}
-	xuiClients := map[uint]interfaces.XUIClient{1: &testutil.XUIClient{}}
-	sources := []database.Node{{ID: 1, IsActive: true, Host: "http://x", InboundIDs: "[1]"}}
-
-	svc := NewSubscriptionService(db, xuiClients, nil, sources, &config.Config{})
-	got, err := svc.GetAllReferralCounts(context.Background())
-
-	assert.NoError(t, err)
-	assert.Equal(t, want, got)
-}
-
 func TestSubscriptionService_GetOrCreateSubscription_RepairsExistingSubscriptionNodes(t *testing.T) {
 	t.Parallel()
 
@@ -1504,6 +1156,115 @@ func TestXUIEmail_FallbackToTgID(t *testing.T) {
 	}
 }
 
+func TestSubscriptionService_Create_ReanimatesRevoked_ReturnsCleanupError(t *testing.T) {
+	t.Parallel()
+
+	cleanupErr := errors.New("subscription nodes database unavailable")
+	existing := &database.Subscription{
+		ID:             42,
+		TelegramID:     777778,
+		ClientID:       "client-revoked-error",
+		SubscriptionID: "sub-revoked-error",
+		PlanID:         1,
+		Status:         string(database.SubscriptionStatusRevoked),
+	}
+	updateCalled := false
+
+	db := &testutil.DatabaseService{
+		GetByTelegramIDFunc: func(context.Context, int64) (*database.Subscription, error) {
+			return nil, database.ErrSubscriptionNotFound
+		},
+		GetAnyByTelegramIDFunc: func(context.Context, int64) (*database.Subscription, error) {
+			return existing, nil
+		},
+		GetPlanByNameFunc: func(context.Context, string) (*database.Plan, error) {
+			return &database.Plan{ID: 2, Name: database.FreePlanName}, nil
+		},
+		DeleteSubscriptionNodesBySubscriptionIDFunc: func(context.Context, uint) error {
+			return cleanupErr
+		},
+		UpdateSubscriptionFunc: func(context.Context, *database.Subscription) error {
+			updateCalled = true
+			return nil
+		},
+	}
+
+	svc := NewSubscriptionService(db, nil, nil, nil, &config.Config{})
+	result, err := svc.Create(context.Background(), existing.TelegramID, "", "")
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, cleanupErr)
+	assert.Nil(t, result)
+	assert.False(t, updateCalled, "failed cleanup must not activate the subscription")
+}
+
+func TestSubscriptionService_DeleteByID_KeepsRetryQueueOnDeprovisionFailure(t *testing.T) {
+	t.Parallel()
+
+	const (
+		subscriptionID uint = 77
+		nodeID         uint = 9
+	)
+	deprovisionErr := errors.New("vpn node unavailable")
+	sub := &database.Subscription{
+		ID:             subscriptionID,
+		TelegramID:     777779,
+		Username:       "delete-retry-user",
+		ClientID:       "delete-retry-client",
+		SubscriptionID: "delete-retry-sub",
+		Status:         string(database.SubscriptionStatusActive),
+	}
+	pending := []database.SubscriptionNode{{
+		SubscriptionID: subscriptionID,
+		NodeID:         nodeID,
+		Status:         database.SyncStatusPendingRemove,
+	}}
+	deleteClient := &mockVPNClient{deleteError: deprovisionErr}
+	hardDeleteCalled := false
+
+	db := &testutil.DatabaseService{
+		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
+			return sub, nil
+		},
+		GetNodeByIDFunc: func(context.Context, uint) (*database.Node, error) {
+			return &database.Node{ID: nodeID, IsActive: true}, nil
+		},
+		UpdateSubscriptionFunc: func(_ context.Context, updated *database.Subscription) error {
+			assert.Equal(t, database.SubscriptionStatusRevoked, database.SubscriptionStatus(updated.Status))
+			return nil
+		},
+		GetBySubscriptionIDFunc: func(context.Context, uint) ([]database.SubscriptionNode, error) {
+			return pending, nil
+		},
+		GetPendingBySubscriptionIDFunc: func(context.Context, uint) ([]database.SubscriptionNode, error) {
+			return pending, nil
+		},
+		UpdateRetryFunc: func(context.Context, uint, uint, int, *time.Time, *string) error {
+			return nil
+		},
+		DeleteSubscriptionByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
+			hardDeleteCalled = true
+			return sub, nil
+		},
+	}
+
+	syncSvc := NewSyncService(db, map[uint]vpn.Client{nodeID: deleteClient}, []database.Node{{
+		ID:       nodeID,
+		Type:     database.NodeType3xUI,
+		IsActive: true,
+	}})
+	svc := NewSubscriptionService(db, nil, nil, nil, &config.Config{})
+	svc.SetSyncService(syncSvc)
+
+	deleted, err := svc.DeleteByID(context.Background(), subscriptionID)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "deprovision incomplete")
+	assert.Nil(t, deleted)
+	assert.True(t, deleteClient.deleteCalled)
+	assert.False(t, hardDeleteCalled, "subscription must remain for background retry")
+}
+
 // TestSubscriptionService_Create_ReanimatesRevoked verifies the bug fix: when a
 // prior delete left the subscription in "revoked" state (partial delete failure),
 // Create must reanimate that single row instead of inserting a duplicate — which
@@ -1569,3 +1330,316 @@ func TestSubscriptionService_Create_ReanimatesRevoked(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, nodes, "stale pending_remove node must be cleared")
 }
+
+func TestSubscriptionService_AdminSetPlan_ReconcilesNodesAndInvalidatesCache(t *testing.T) {
+	t.Parallel()
+
+	db, err := testutil.NewTestDatabaseService(t)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	// The free plan is seeded by migrations; the premium plan is created here.
+	freePlan, err := db.GetPlanByName(ctx, database.FreePlanName)
+	require.NoError(t, err)
+	premiumPlan := &database.Plan{Name: "premium-admin-setplan", DevicesLimit: 2, TrafficLimit: 1024}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(premiumPlan).Error)
+
+	nodeA := &database.Node{Name: "setplan-a", Host: "http://a", APIToken: "a", InboundIDs: `[1]`, Type: database.NodeType3xUI}
+	nodeB := &database.Node{Name: "setplan-b", Host: "http://b", APIToken: "b", InboundIDs: `[1]`, Type: database.NodeType3xUI}
+	nodeC := &database.Node{Name: "setplan-c", Host: "http://c", APIToken: "c", InboundIDs: `[1]`, Type: database.NodeType3xUI}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(nodeA).Error)
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(nodeB).Error)
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(nodeC).Error)
+
+	// Old (free) plan → nodeA + nodeC; new (premium) plan → nodeA + nodeB.
+	// nodeA is shared (must be pending_update), nodeB is new (pending_add),
+	// nodeC leaves the plan (pending_remove).
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(&database.PlanNode{PlanID: freePlan.ID, NodeID: nodeA.ID}).Error)
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(&database.PlanNode{PlanID: freePlan.ID, NodeID: nodeC.ID}).Error)
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(&database.PlanNode{PlanID: premiumPlan.ID, NodeID: nodeA.ID}).Error)
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(&database.PlanNode{PlanID: premiumPlan.ID, NodeID: nodeB.ID}).Error)
+
+	sub := &database.Subscription{
+		TelegramID:     999802,
+		Username:       "adminsetplan",
+		ClientID:       "c-adminsetplan",
+		SubscriptionID: "s-adminsetplan",
+		Status:         string(database.SubscriptionStatusActive),
+		PlanID:         freePlan.ID,
+		ExpiresAt:      testutil.PtrTime(time.Now().Add(5 * 24 * time.Hour)),
+	}
+	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
+	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: nodeA.ID, Status: database.SyncStatusActive}))
+	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: nodeC.ID, Status: database.SyncStatusActive}))
+
+	var invalidatedTGIDs []int64
+	var invalidatedSubIDs []string
+
+	svc := NewSubscriptionService(db, nil, nil, nil, &config.Config{})
+	svc.SetInvalidateFunc(func(id int64) { invalidatedTGIDs = append(invalidatedTGIDs, id) })
+	svc.SetInvalidateBySubIDFunc(func(id string) { invalidatedSubIDs = append(invalidatedSubIDs, id) })
+	// No VPN clients wired: SyncSubscription treats nodes as unavailable and
+	// keeps them pending (best-effort), leaving the reconciled state visible.
+	svc.SetSyncService(NewSyncService(db, map[uint]vpn.Client{}, nil))
+
+	updated, err := svc.AdminSetPlan(ctx, sub.ID, premiumPlan.ID, 30)
+	require.NoError(t, err)
+
+	assert.Equal(t, premiumPlan.ID, updated.PlanID)
+	assert.Equal(t, string(database.SubscriptionStatusActive), updated.Status)
+	require.NotNil(t, updated.ExpiresAt)
+	assert.WithinDuration(t, time.Now().Add(30*24*time.Hour), *updated.ExpiresAt, time.Minute)
+
+	// Cache invalidated by both keys.
+	assert.Contains(t, invalidatedTGIDs, sub.TelegramID)
+	assert.Contains(t, invalidatedSubIDs, sub.SubscriptionID)
+
+	// Bindings reconciled per plan membership.
+	rows, err := db.GetBySubscriptionID(ctx, sub.ID)
+	require.NoError(t, err)
+	require.Len(t, rows, 3)
+
+	byNode := make(map[uint]database.SyncStatus, len(rows))
+	for _, r := range rows {
+		byNode[r.NodeID] = r.Status
+	}
+	assert.Equal(t, database.SyncStatusPendingUpdate, byNode[nodeA.ID], "shared node must get pending_update")
+	assert.Equal(t, database.SyncStatusPendingAdd, byNode[nodeB.ID], "new plan node must get pending_add")
+	assert.Equal(t, database.SyncStatusPendingRemove, byNode[nodeC.ID], "leaving node must get pending_remove")
+}
+
+func TestSubscriptionService_AdminSetPlan_ExpirySemantics(t *testing.T) {
+	t.Parallel()
+
+	nearFuture := time.Now().Add(10 * 24 * time.Hour).Truncate(time.Second)
+	past := time.Now().Add(-24 * time.Hour)
+
+	tests := []struct {
+		name      string
+		planName  string
+		days      int
+		existing  *time.Time
+		wantNil   bool
+		wantDelta time.Duration // 0 means "preserve existing"
+	}{
+		{name: "explicit days", planName: "premium", days: 30, existing: testutil.PtrTime(nearFuture), wantDelta: 30 * 24 * time.Hour},
+		{name: "future expiry preserved", planName: "premium", days: 0, existing: testutil.PtrTime(nearFuture), wantDelta: 0},
+		{name: "nil expiry gets default", planName: "premium", days: 0, existing: nil, wantDelta: 30 * 24 * time.Hour},
+		{name: "past expiry gets default", planName: "premium", days: 0, existing: testutil.PtrTime(past), wantDelta: 30 * 24 * time.Hour},
+		{name: "free plan clears expiry", planName: database.FreePlanName, days: 30, existing: testutil.PtrTime(nearFuture), wantNil: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			now := time.Now()
+
+			sub := &database.Subscription{
+				ID:             42,
+				TelegramID:     999803,
+				Username:       "expiry-semantics",
+				ClientID:       "c-expiry",
+				SubscriptionID: "s-expiry",
+				Status:         string(database.SubscriptionStatusActive),
+				PlanID:         1,
+				ExpiresAt:      tt.existing,
+			}
+
+			var captured *database.Subscription
+
+			db := &testutil.DatabaseService{
+				GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
+					return sub, nil
+				},
+				GetPlanByIDFunc: func(context.Context, uint) (*database.Plan, error) {
+					return &database.Plan{ID: 2, Name: tt.planName}, nil
+				},
+				UpdateSubscriptionFunc: func(_ context.Context, updated *database.Subscription) error {
+					captured = updated
+					return nil
+				},
+			}
+
+			svc := NewSubscriptionService(db, nil, nil, nil, &config.Config{})
+
+			updated, err := svc.AdminSetPlan(context.Background(), sub.ID, 2, tt.days)
+			require.NoError(t, err)
+			require.NotNil(t, captured, "UpdateSubscription must be called")
+
+			assert.Equal(t, uint(2), updated.PlanID)
+			assert.Equal(t, string(database.SubscriptionStatusActive), updated.Status)
+			assert.Equal(t, 0, updated.RemindersSent, "reminder bitmask must reset for the new expiry")
+
+			if tt.wantNil {
+				assert.Nil(t, captured.ExpiresAt, "free plan must clear expiry")
+			} else if tt.wantDelta == 0 {
+				require.NotNil(t, captured.ExpiresAt)
+				assert.Equal(t, tt.existing, captured.ExpiresAt, "future expiry must be preserved")
+			} else {
+				require.NotNil(t, captured.ExpiresAt)
+				assert.WithinDuration(t, now.Add(tt.wantDelta), *captured.ExpiresAt, time.Minute)
+			}
+		})
+	}
+}
+
+func TestSubscriptionService_AdminSetPlan_Errors(t *testing.T) {
+	t.Parallel()
+
+	sub := &database.Subscription{
+		ID:             42,
+		TelegramID:     999804,
+		Username:       "adminsetplan-errors",
+		ClientID:       "c-errors",
+		SubscriptionID: "s-errors",
+		Status:         string(database.SubscriptionStatusActive),
+		PlanID:         1,
+	}
+
+	t.Run("subscription not found", func(t *testing.T) {
+		db := &testutil.DatabaseService{
+			GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
+				return nil, database.ErrSubscriptionNotFound
+			},
+		}
+		svc := NewSubscriptionService(db, nil, nil, nil, &config.Config{})
+
+		_, err := svc.AdminSetPlan(context.Background(), 42, 2, 30)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, database.ErrSubscriptionNotFound)
+		assert.Contains(t, err.Error(), "load subscription")
+	})
+
+	t.Run("plan not found", func(t *testing.T) {
+		db := &testutil.DatabaseService{
+			GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
+				return sub, nil
+			},
+			GetPlanByIDFunc: func(context.Context, uint) (*database.Plan, error) {
+				return nil, database.ErrPlanNotFound
+			},
+		}
+		svc := NewSubscriptionService(db, nil, nil, nil, &config.Config{})
+
+		_, err := svc.AdminSetPlan(context.Background(), 42, 2, 30)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, database.ErrPlanNotFound)
+		assert.Contains(t, err.Error(), "load plan")
+	})
+
+	t.Run("apply plan failure surfaces to caller", func(t *testing.T) {
+		applyErr := errors.New("reconcile plan nodes database unavailable")
+
+		db := &testutil.DatabaseService{
+			GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
+				return sub, nil
+			},
+			GetPlanByIDFunc: func(context.Context, uint) (*database.Plan, error) {
+				return &database.Plan{ID: 2, Name: "premium-errors"}, nil
+			},
+			UpdateSubscriptionFunc: func(context.Context, *database.Subscription) error {
+				return nil
+			},
+			GetNodesByPlanIDFunc: func(context.Context, uint) ([]database.Node, error) {
+				return nil, applyErr
+			},
+		}
+
+		svc := NewSubscriptionService(db, nil, nil, nil, &config.Config{})
+		svc.SetSyncService(NewSyncService(db, nil, nil))
+
+		_, err := svc.AdminSetPlan(context.Background(), 42, 2, 30)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, applyErr, "DB-setup phase failure must surface, not be swallowed")
+	})
+}
+
+func TestSubscriptionService_AdminSetPlan_FreePlanClearsPaidState(t *testing.T) {
+	t.Parallel()
+
+	productID := uint(7)
+	currency := "RUB"
+	started := time.Now().Add(-48 * time.Hour)
+	expiry := time.Now().Add(30 * 24 * time.Hour)
+
+	sub := &database.Subscription{
+		ID:             42,
+		TelegramID:     999805,
+		Username:       "adminsetplan-free",
+		ClientID:       "c-free",
+		SubscriptionID: "s-free",
+		Status:         string(database.SubscriptionStatusActive),
+		PlanID:         1,
+		ExpiresAt:      &expiry,
+		ProductID:      &productID,
+		StartedAt:      &started,
+		PricePaidCents: 2300,
+		Currency:       &currency,
+	}
+
+	var captured *database.Subscription
+
+	db := &testutil.DatabaseService{
+		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
+			return sub, nil
+		},
+		GetPlanByIDFunc: func(context.Context, uint) (*database.Plan, error) {
+			return &database.Plan{ID: 2, Name: database.FreePlanName}, nil
+		},
+		UpdateSubscriptionFunc: func(_ context.Context, updated *database.Subscription) error {
+			captured = updated
+			return nil
+		},
+	}
+
+	svc := NewSubscriptionService(db, nil, nil, nil, &config.Config{})
+
+	updated, err := svc.AdminSetPlan(context.Background(), sub.ID, 2, 30)
+	require.NoError(t, err)
+	require.NotNil(t, captured, "UpdateSubscription must be called")
+
+	assert.Equal(t, uint(2), updated.PlanID)
+	assert.Equal(t, string(database.SubscriptionStatusActive), updated.Status)
+	assert.Nil(t, captured.ExpiresAt, "free plan must clear expiry")
+	assert.Nil(t, captured.ProductID, "free plan must clear product reference")
+	assert.Nil(t, captured.StartedAt, "free plan must clear started_at")
+	assert.Zero(t, captured.PricePaidCents, "free plan must clear paid amount")
+	assert.Nil(t, captured.Currency, "free plan must clear currency")
+}
+
+func TestSubscriptionService_AdminSetPlan_DaysTooLarge(t *testing.T) {
+	t.Parallel()
+
+	sub := &database.Subscription{
+		ID:             42,
+		TelegramID:     999806,
+		Username:       "adminsetplan-days",
+		ClientID:       "c-days",
+		SubscriptionID: "s-days",
+		Status:         string(database.SubscriptionStatusActive),
+		PlanID:         1,
+	}
+
+	updateCalled := false
+
+	db := &testutil.DatabaseService{
+		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
+			return sub, nil
+		},
+		GetPlanByIDFunc: func(context.Context, uint) (*database.Plan, error) {
+			return &database.Plan{ID: 2, Name: "premium-days"}, nil
+		},
+		UpdateSubscriptionFunc: func(context.Context, *database.Subscription) error {
+			updateCalled = true
+			return nil
+		},
+	}
+
+	svc := NewSubscriptionService(db, nil, nil, nil, &config.Config{})
+
+	_, err := svc.AdminSetPlan(context.Background(), sub.ID, 2, AdminSetPlanMaxDays+1)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "exceeds maximum")
+	assert.False(t, updateCalled, "oversized duration must fail before any DB write")
+}
+

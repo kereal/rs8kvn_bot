@@ -58,7 +58,7 @@ func (c *CommandHandler) HandleStart(ctx context.Context, update tgbotapi.Update
 	logger.Info("User started bot", userFields(update.Message.From, chatID)...)
 
 	sub, err := c.h.db.GetByTelegramID(ctx, chatID)
-	hasSubscription := err == nil && sub != nil && sub.Status == "active"
+	hasSubscription := err == nil && sub != nil && sub.Status == string(database.SubscriptionStatusActive)
 
 	text, keyboard := c.h.getMainMenuContent(ctx, username, hasSubscription, chatID, sub)
 	msg := tgbotapi.NewMessage(chatID, text)
@@ -157,7 +157,7 @@ func (c *CommandHandler) handleShareStart(ctx context.Context, chatID int64, use
 
 	// Check existing subscription
 	sub, err := c.h.db.GetByTelegramID(ctx, chatID)
-	hasSubscription := err == nil && sub != nil && sub.Status == "active"
+	hasSubscription := err == nil && sub != nil && sub.Status == string(database.SubscriptionStatusActive)
 
 	if hasSubscription {
 		logger.Info("User with existing subscription clicked share link, ignoring",

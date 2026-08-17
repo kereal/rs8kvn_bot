@@ -31,6 +31,8 @@ func generateTrialTelegramID(subscriptionID string) int64 {
 
 // CreateTrialSubscription creates a new trial subscription.
 func (s *Service) CreateTrialSubscription(ctx context.Context, inviteCode, subscriptionID, clientID string, expiryTime time.Time) (*Subscription, error) {
+	expiryTime = expiryTime.UTC()
+
 	planID, err := s.resolveTrialPlanID(ctx)
 	if err != nil {
 		return nil, err
@@ -41,7 +43,7 @@ func (s *Service) CreateTrialSubscription(ctx context.Context, inviteCode, subsc
 		SubscriptionID: subscriptionID,
 		ClientID:       clientID,
 		PlanID:         planID,
-		Status:         "active",
+		Status:         string(SubscriptionStatusActive),
 	}
 
 	if inviteCode != "" {
@@ -165,6 +167,8 @@ func (s *Service) BindTrialSubscription(ctx context.Context, subscriptionID stri
 				"username":    username,
 				"plan_id":     freePlanID,
 				"referred_by": referredBy,
+				// Binding converts the expiring trial into a perpetual free plan.
+				"expires_at": nil,
 			})
 		if result.Error != nil {
 			return fmt.Errorf("failed to bind trial subscription: %w", result.Error)
@@ -183,6 +187,7 @@ func (s *Service) BindTrialSubscription(ctx context.Context, subscriptionID stri
 	sub.TelegramID = telegramID
 	sub.Username = username
 	sub.PlanID = freePlanID
+	sub.ExpiresAt = nil
 
 	if referredBy != 0 {
 		rb := referredBy

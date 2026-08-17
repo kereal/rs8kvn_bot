@@ -13,6 +13,13 @@
 6. Используй подходящие mcp-инструменты
 
 
+## Git commits
+
+- Коммит-сообщения — Conventional Commits: `feat:`, `fix:`, `docs:`, `test:`, `chore:` и т.п.
+- НИКОГДА не добавлять авто-футеры вида «Generated with Codebuff» / «Co-Authored-By: …»
+  в сообщения коммитов — только описание изменения.
+
+
 ## RTK - Rust Token Killer
 
 **Usage**: Token-optimized CLI proxy for shell commands.
@@ -80,13 +87,18 @@ spawns a stray duplicate. Guard: `TestNavigation_OpenAndBack`
 
 This project distinguishes between user-initiated operations (must be reliable) and background best-effort work (can tolerate partial failure).
 
-- **User-initiated** (`Create`, `BindTrial`, `RenewSubscription`, `Delete`): return errors to the caller. The handler will surface the failure to the user. Do NOT log + continue silently.
+**Subscription deletion policy**: subscriptions are NEVER physically deleted, except two cases:
+1. admin `/del` — `SubscriptionService.DeleteByID` (the only product deletion path, backed by `DeleteSubscriptionByID`);
+2. expired anonymous trials — `CleanupExpiredTrials` (trials are not real user subscriptions).
+Everything else only changes subscription status (`revoked`, free-plan downgrade, reanimation). There is no `Delete(telegramID)` anymore — it was a dead duplicate.
+
+- **User-initiated** (`Create`, `BindTrial`, `RenewSubscription`, `DeleteByID`): return errors to the caller. The handler will surface the failure to the user. Do NOT log + continue silently.
 - **Provisioning (two-phase, user-initiated)**: Provisioning splits into a **DB-setup phase** and an **external-sync phase**, with different reliability contracts.
   - **DB-setup phase** (`GetNodesByPlanID`, `MarkActiveNodesPendingUpdate`, `ReconcilePlanNodes`): pure DB operations that create/update `pending_add`/`pending_remove` records. These are **structural prerequisites** — without them the background worker has nothing to retry — so failures MUST be returned to the caller (the handler surfaces the error to the user). The user sees an error, but the subscription/order row is already committed (status `active`); the state is recoverable via `ReconcileOrphanedClients`/`SyncPendingNodes` once the DB issue is resolved.
   - **External-sync phase** (`SyncSubscription`): best-effort. Calls the XUI/proxman node API to materialize VPN clients. If this immediate sync fails, the subscription stays `active` and the background `SyncPendingNodes` worker retries with exponential backoff. The user may receive a "success" response before VPN access is fully provisioned; this is the documented trade-off. Sub URL is valid immediately (subserver serves config once the client is provisioned by the background worker).
   - This two-phase split replaces the previous blanket "provisioning is eventual-consistency" wording: DB-setup is synchronous-must, external-sync is best-effort.
-- **Delete flow** (`Delete`, `DeleteByID`): two-phase. Phase 1 marks the subscription `revoked` (so `/sub/{id}` returns 404 immediately). Phase 2 deprovisions VPN access via sync (best-effort; background sync retries on failure). Phase 3 physically deletes the DB row. If deprovision fails, the subscription stays revoked and `ReconcileOrphanedClients`/`SyncPendingNodes` finishes removal in the background.
-- **Background sync** (`SyncSubscription` for single-sub, `SyncPendingNodes`, `ReconcilePlanNodes`, `ReconcileOrphanedClients`): per-item failures are logged as `Warn` and processing continues. `SyncPendingNodes` returns an aggregate error (`errors.Join`) on partial failures so the caller can observe degraded runs; the scheduler (`SubscriptionSyncWorker`) treats this as best-effort (`logger.Warn`) and does NOT abort or change retry cadence. Only `context.Cancelled`/`DeadlineExceeded` abort the scan early.
+- **Delete flow** (`DeleteByID` only — admin `/del`): two-phase. Phase 1 marks the subscription `revoked` (so `/sub/{id}` returns 404 immediately). Phase 2 deprovisions VPN access via sync (best-effort; background sync retries on failure). Phase 3 physically deletes the DB row. If deprovision fails, the subscription stays revoked and `SyncPendingNodes` finishes the VPN-client removal in the background.
+- **Background sync** (`SyncSubscription` for single-sub, `SyncPendingNodes`, `ReconcilePlanNodes`): per-item failures are logged as `Warn` and processing continues. `ReconcileOrphanedClients` REVOKES orphaned subscriptions (status `revoked`) instead of deleting them — the row stays in the DB, the subserver serves 404. `SyncPendingNodes` returns an aggregate error (`errors.Join`) on partial failures so the caller can observe degraded runs; the scheduler (`SubscriptionSyncWorker`) treats this as best-effort (`logger.Warn`) and does NOT abort or change retry cadence. Only `context.Cancelled`/`DeadlineExceeded` abort the scan early.
 - **Never** use `panic` for control flow in handlers or services. Panic recovery exists only at the top level (`main.go`, `handleUpdateSafely`).
 - Always wrap errors with `%w` to preserve the chain for `errors.Is` / `errors.As` checks.
 - Sentinel errors (`database.ErrSubscriptionNotFound`, `xui.ErrClientNotFound`) are the preferred way to signal expected "not found" states. Callers must use `errors.Is` to distinguish them from infrastructure errors.

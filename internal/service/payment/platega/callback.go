@@ -24,8 +24,10 @@ type CallbackPayload struct {
 }
 
 // ParseCallbackAmount converts a decimal major-unit amount to integer cents.
-// It accepts fixed-point notation with at most two fractional digits and rejects
-// signs, exponents, malformed values, and int64 overflow.
+// It accepts fixed-point notation with at most two significant fractional digits
+// (extra trailing zeroes are allowed because providers may serialize decimal
+// amounts with a fixed precision) and rejects signs, exponents, malformed values,
+// and int64 overflow.
 func ParseCallbackAmount(amount json.Number) (int64, error) {
 	raw := strings.TrimSpace(amount.String())
 	if raw == "" {
@@ -49,8 +51,13 @@ func ParseCallbackAmount(amount json.Number) (int64, error) {
 		parts = append(parts, "")
 	}
 
-	if len(parts[1]) > 2 {
+	if len(parts[1]) > 2 && len(strings.TrimRight(parts[1], "0")) > 2 {
 		return 0, errors.New("amount has more than two decimal places")
+	}
+	if len(parts[1]) > 2 {
+		// Ignore only zeroes beyond cents: 52.5000000000000000 is 52.50,
+		// while 52.501 remains invalid and cannot be rounded silently.
+		parts[1] = parts[1][:2]
 	}
 
 	if parts[1] == "" {

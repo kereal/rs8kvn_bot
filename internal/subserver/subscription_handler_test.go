@@ -1003,7 +1003,7 @@ func TestUpdateLastRequest_DB(t *testing.T) {
 
 	require.NoError(t, db.UpdateLastRequest(ctx, "sub-lr-integration"), "UpdateLastRequest failed")
 
-	loaded, err := db.GetSubscription(ctx, "sub-lr-integration")
+	loaded, err := db.GetByID(ctx, sub.ID)
 	require.NoError(t, err)
 	require.NotNil(t, loaded.LastRequest, "LastRequest must be set after update")
 	assert.True(t, loaded.LastRequest.After(before), "LastRequest must be >= invocation time")
@@ -1012,7 +1012,7 @@ func TestUpdateLastRequest_DB(t *testing.T) {
 	first := *loaded.LastRequest
 
 	require.NoError(t, db.UpdateLastRequest(ctx, "sub-lr-integration"))
-	loaded2, err := db.GetSubscription(ctx, "sub-lr-integration")
+	loaded2, err := db.GetByID(ctx, sub.ID)
 	require.NoError(t, err)
 	require.NotNil(t, loaded2.LastRequest)
 	assert.False(t, loaded2.LastRequest.Before(first), "LastRequest must not be earlier than the first call")

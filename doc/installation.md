@@ -303,6 +303,7 @@ Set `TELEGRAM_ADMIN_ID` in `.env` to your Telegram user ID.
 Admin-only commands:
 - `/lastreg` — last 10 subscribers
 - `/del <id>` — delete subscription by DB ID
+- `/setplan <subscription_id> <plan_id> [days]` — change subscription plan (reconciles VPN nodes; if `days` omitted, keeps a future expiry or applies a 30-day default)
 - `/broadcast <msg>` — message all users
 - `/send <id|@username> <msg>` — private message
 - `/refstats` — referral statistics
