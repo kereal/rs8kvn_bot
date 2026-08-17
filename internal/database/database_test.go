@@ -878,38 +878,6 @@ func TestService_CountTrialSubscriptions(t *testing.T) {
 	assert.Equal(t, int64(3), count)
 }
 
-func TestService_CountExpiredSubscriptions(t *testing.T) {
-	t.Parallel()
-
-	svc := newTestService(t)
-
-	for i := range 2 {
-		sub := &Subscription{
-			TelegramID:     int64(30000 + i),
-			Username:       fmt.Sprintf("expired%d", i),
-			ClientID:       fmt.Sprintf("client-expired-%d", i),
-			SubscriptionID: fmt.Sprintf("sub-expired-%d", i),
-			ExpiresAt:      ptrTime(time.Now().UTC().Add(-1 * time.Hour)),
-			Status:         "active",
-		}
-		require.NoError(t, svc.db.Create(sub).Error)
-	}
-
-	activeSub := &Subscription{
-		TelegramID:     39999,
-		Username:       "active",
-		ClientID:       "client-active",
-		SubscriptionID: "sub-active-final",
-		ExpiresAt:      ptrTime(time.Now().UTC().Add(1 * time.Hour)),
-		Status:         "active",
-	}
-	require.NoError(t, svc.db.Create(activeSub).Error)
-
-	count, err := svc.CountExpiredSubscriptions(context.Background())
-	require.NoError(t, err)
-	assert.Equal(t, int64(2), count)
-}
-
 func TestService_CountAllSubscriptions(t *testing.T) {
 	t.Parallel()
 
@@ -930,70 +898,6 @@ func TestService_CountAllSubscriptions(t *testing.T) {
 	count, err := svc.CountAllSubscriptions(context.Background())
 	require.NoError(t, err)
 	assert.Equal(t, int64(3), count)
-}
-
-// ==================== Service GetAllTelegramIDs Tests ====================
-
-func TestService_GetAllTelegramIDs(t *testing.T) {
-	t.Parallel()
-
-	svc := newTestService(t)
-
-	subs := []*Subscription{
-		{TelegramID: 111111111, Username: "user1", ClientID: "client1", SubscriptionID: "sub-user1", Status: "active", ExpiresAt: ptrTime(time.Now().Add(24 * time.Hour))},
-		{TelegramID: 222222222, Username: "user2", ClientID: "client2", SubscriptionID: "sub-user2", Status: "active", ExpiresAt: ptrTime(time.Now().Add(24 * time.Hour))},
-		{TelegramID: 333333333, Username: "user3", ClientID: "client3", SubscriptionID: "sub-user3", Status: "active", ExpiresAt: ptrTime(time.Now().Add(24 * time.Hour))},
-	}
-
-	for _, sub := range subs {
-		require.NoError(t, svc.db.Create(sub).Error)
-	}
-
-	ids, err := svc.GetAllTelegramIDs(context.Background())
-	require.NoError(t, err)
-	assert.Len(t, ids, 3)
-
-	idMap := make(map[int64]bool)
-	for _, id := range ids {
-		idMap[id] = true
-	}
-
-	for _, expectedID := range []int64{111111111, 222222222, 333333333} {
-		assert.True(t, idMap[expectedID], "TelegramID %d not found", expectedID)
-	}
-}
-
-func TestService_GetAllTelegramIDs_Empty(t *testing.T) {
-	t.Parallel()
-
-	svc := newTestService(t)
-
-	ids, err := svc.GetAllTelegramIDs(context.Background())
-	require.NoError(t, err)
-	assert.Len(t, ids, 0)
-}
-
-func TestService_GetAllTelegramIDs_Duplicates(t *testing.T) {
-	t.Parallel()
-
-	svc := newTestService(t)
-
-	// With UNIQUE constraint on telegram_id, we can't create multiple subscriptions
-	// with the same telegram_id. This test verifies that GetAllTelegramIDs returns
-	// unique telegram_ids.
-	sub := &Subscription{
-		TelegramID:     111111111,
-		Username:       "user1",
-		ClientID:       "client-1",
-		SubscriptionID: "sub-client-1",
-		Status:         "active",
-		ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
-	}
-	require.NoError(t, svc.db.Create(sub).Error)
-
-	ids, err := svc.GetAllTelegramIDs(context.Background())
-	require.NoError(t, err)
-	assert.Len(t, ids, 1)
 }
 
 // ==================== Service GetTelegramIDByUsername Tests ====================
@@ -1420,67 +1324,6 @@ func TestService_CreateTrialSubscription_AllowsSameSubID(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "sub-same", sub.SubscriptionID)
 	assert.Less(t, sub.TelegramID, int64(0), "Trial should have negative telegram_id")
-}
-
-func TestService_GetSubscription_Success(t *testing.T) {
-	t.Parallel()
-
-	svc := newTestService(t)
-
-	ctx := context.Background()
-
-	origSub := &Subscription{
-		TelegramID:     123456,
-		Username:       "testuser",
-		ClientID:       "client-abc",
-		SubscriptionID: "sub-find-me",
-		ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
-		Status:         "active",
-	}
-	err := svc.db.Create(origSub).Error
-	require.NoError(t, err)
-
-	found, err := svc.GetSubscription(ctx, "sub-find-me")
-
-	require.NoError(t, err)
-	assert.NotNil(t, found)
-	assert.Equal(t, int64(123456), found.TelegramID)
-	assert.Equal(t, "testuser", found.Username)
-}
-
-func TestService_GetSubscriptionBySubscriptionID_NotFound(t *testing.T) {
-	t.Parallel()
-
-	svc := newTestService(t)
-
-	ctx := context.Background()
-
-	_, err := svc.GetSubscription(ctx, "nonexistent-sub-id")
-
-	assert.Error(t, err, "Non-existent subscription ID should return error")
-}
-
-func TestService_GetSubscription_Trial(t *testing.T) {
-	t.Parallel()
-
-	svc := newTestService(t)
-
-	ctx := context.Background()
-
-	_, err := svc.CreateTrialSubscription(
-		ctx,
-		"INVITE789",
-		"sub-trial-find",
-		"client-trial",
-		time.Now().Add(3*time.Hour),
-	)
-	require.NoError(t, err)
-
-	found, err := svc.GetSubscription(ctx, "sub-trial-find")
-
-	require.NoError(t, err)
-	assert.NotNil(t, found)
-	assert.True(t, found.PlanID == 1)
 }
 
 func TestService_GetTrialSubscriptionBySubID_Success(t *testing.T) {

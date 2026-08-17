@@ -498,6 +498,9 @@ func (s *SyncService) syncNodes(ctx context.Context, sub *database.Subscription,
 	return nil
 }
 
+// retryUnavailableNode reports a node that cannot serve the given sync
+// operation (missing config, inactive, or no VPN client) and keeps the
+// subscription_node record pending for the background worker to retry.
 func (s *SyncService) retryUnavailableNode(ctx context.Context, sn *database.SubscriptionNode, sub *database.Subscription, operation string) error {
 	node, nodeErr := s.db.GetNodeByID(ctx, sn.NodeID)
 	if nodeErr != nil {

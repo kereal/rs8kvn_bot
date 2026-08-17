@@ -64,33 +64,6 @@ func TestSubscriptionNodeRepository_GetBySubscriptionID_Empty(t *testing.T) {
 	assert.Empty(t, rows)
 }
 
-func TestSubscriptionNodeRepository_GetByNodeID(t *testing.T) {
-	t.Parallel()
-
-	svc := newTestService(t)
-	ctx := context.Background()
-
-	plan := &Plan{Name: "test-plan-node-by-node", DevicesLimit: 1, TrafficLimit: 1024}
-	require.NoError(t, svc.db.WithContext(ctx).Create(plan).Error)
-
-	node := &Node{Name: "node-by-node", IsActive: true, Host: "http://by", APIToken: "t", InboundIDs: `[1]`}
-	require.NoError(t, svc.db.WithContext(ctx).Create(node).Error)
-	require.NoError(t, svc.db.WithContext(ctx).Create(&PlanNode{PlanID: plan.ID, NodeID: node.ID}).Error)
-
-	sub1 := &Subscription{TelegramID: 101, Username: "u1", ClientID: "c1", SubscriptionID: "s1", Status: "active", PlanID: plan.ID}
-	require.NoError(t, svc.CreateSubscription(ctx, sub1, ""))
-
-	sub2 := &Subscription{TelegramID: 102, Username: "u2", ClientID: "c2", SubscriptionID: "s2", Status: "active", PlanID: plan.ID}
-	require.NoError(t, svc.CreateSubscription(ctx, sub2, ""))
-
-	require.NoError(t, svc.CreateSubscriptionNode(ctx, &SubscriptionNode{SubscriptionID: sub1.ID, NodeID: node.ID, Status: SyncStatusActive}))
-	require.NoError(t, svc.CreateSubscriptionNode(ctx, &SubscriptionNode{SubscriptionID: sub2.ID, NodeID: node.ID, Status: SyncStatusPendingAdd}))
-
-	rows, err := svc.GetByNodeID(ctx, node.ID)
-	require.NoError(t, err)
-	assert.Len(t, rows, 2)
-}
-
 func TestSubscriptionNodeRepository_GetPendingSync(t *testing.T) {
 	t.Parallel()
 
@@ -133,39 +106,6 @@ func TestSubscriptionNodeRepository_GetPendingSync_Empty(t *testing.T) {
 	rows, err := svc.GetPendingSync(ctx)
 	require.NoError(t, err)
 	assert.Empty(t, rows)
-}
-
-func TestSubscriptionNodeRepository_GetPendingByNodeID(t *testing.T) {
-	t.Parallel()
-
-	svc := newTestService(t)
-	ctx := context.Background()
-
-	plan := &Plan{Name: "test-plan-pending-by-node", DevicesLimit: 1, TrafficLimit: 1024}
-	require.NoError(t, svc.db.WithContext(ctx).Create(plan).Error)
-
-	nodeA := &Node{Name: "node-a", IsActive: true, Host: "http://a", APIToken: "ta", InboundIDs: `[1]`}
-	nodeB := &Node{Name: "node-b", IsActive: true, Host: "http://b", APIToken: "tb", InboundIDs: `[1]`}
-	nodeC := &Node{Name: "node-c", IsActive: true, Host: "http://c", APIToken: "tc", InboundIDs: `[1]`}
-
-	require.NoError(t, svc.db.WithContext(ctx).Create(nodeA).Error)
-	require.NoError(t, svc.db.WithContext(ctx).Create(nodeB).Error)
-	require.NoError(t, svc.db.WithContext(ctx).Create(nodeC).Error)
-	require.NoError(t, svc.db.WithContext(ctx).Create(&PlanNode{PlanID: plan.ID, NodeID: nodeA.ID}).Error)
-	require.NoError(t, svc.db.WithContext(ctx).Create(&PlanNode{PlanID: plan.ID, NodeID: nodeB.ID}).Error)
-	require.NoError(t, svc.db.WithContext(ctx).Create(&PlanNode{PlanID: plan.ID, NodeID: nodeC.ID}).Error)
-
-	sub := &Subscription{TelegramID: 303, Username: "by-node-user", ClientID: "c-by", SubscriptionID: "s-by", Status: "active", PlanID: plan.ID}
-	require.NoError(t, svc.CreateSubscription(ctx, sub, ""))
-
-	require.NoError(t, svc.CreateSubscriptionNode(ctx, &SubscriptionNode{SubscriptionID: sub.ID, NodeID: nodeA.ID, Status: SyncStatusPendingAdd}))
-	require.NoError(t, svc.CreateSubscriptionNode(ctx, &SubscriptionNode{SubscriptionID: sub.ID, NodeID: nodeB.ID, Status: SyncStatusPendingAdd}))
-	require.NoError(t, svc.CreateSubscriptionNode(ctx, &SubscriptionNode{SubscriptionID: sub.ID, NodeID: nodeC.ID, Status: SyncStatusActive}))
-
-	rows, err := svc.GetPendingByNodeID(ctx, nodeA.ID)
-	require.NoError(t, err)
-	assert.Len(t, rows, 1)
-	assert.Equal(t, SyncStatusPendingAdd, rows[0].Status)
 }
 
 func TestSubscriptionNodeRepository_CreateSubscriptionNode(t *testing.T) {

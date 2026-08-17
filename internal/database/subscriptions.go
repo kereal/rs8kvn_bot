@@ -219,37 +219,6 @@ func (s *Service) CountTrialSubscriptions(ctx context.Context) (int64, error) {
 	return count, nil
 }
 
-// CountExpiredSubscriptions returns the number of expired subscriptions.
-func (s *Service) CountExpiredSubscriptions(ctx context.Context) (int64, error) {
-	var count int64
-
-	result := s.db.WithContext(ctx).
-		Model(&Subscription{}).
-		Where("expires_at <= ?", time.Now().UTC()).
-		Count(&count)
-	if result.Error != nil {
-		return 0, fmt.Errorf("failed to count expired subscriptions: %w", result.Error)
-	}
-
-	return count, nil
-}
-
-// GetSubscription retrieves a subscription by its subscription ID.
-func (s *Service) GetSubscription(ctx context.Context, subscriptionID string) (*Subscription, error) {
-	var sub Subscription
-
-	result := s.db.WithContext(ctx).Where("subscription_id = ?", subscriptionID).First(&sub)
-	if result.Error != nil {
-		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-			return nil, ErrSubscriptionNotFound
-		}
-
-		return nil, fmt.Errorf("failed to get subscription by subscription_id: %w", result.Error)
-	}
-
-	return &sub, nil
-}
-
 // GetSubscriptionStatus returns subscription status and expiry time for the
 // subscription server (since v2.3.0) — it avoids the full JOIN with plans and
 // sources required by GetSubscriptionWithPlanAndNodes. Returns
@@ -464,21 +433,6 @@ func (s *Service) GetExpiredPaidSubscriptions(ctx context.Context, now time.Time
 	}
 
 	return subs, nil
-}
-
-// GetAllTelegramIDs returns unique Telegram IDs for active subscriptions eligible for broadcast.
-func (s *Service) GetAllTelegramIDs(ctx context.Context) ([]int64, error) {
-	var ids []int64
-
-	result := s.db.WithContext(ctx).Model(&Subscription{}).
-		Where("telegram_id > 0 AND status = ?", string(SubscriptionStatusActive)).
-		Distinct("telegram_id").
-		Pluck("telegram_id", &ids)
-	if result.Error != nil {
-		return nil, fmt.Errorf("failed to get telegram IDs: %w", result.Error)
-	}
-
-	return ids, nil
 }
 
 // GetTelegramIDByUsername returns the Telegram ID for a given username.

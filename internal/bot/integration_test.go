@@ -351,7 +351,7 @@ func TestAdminStats(t *testing.T) {
 	}
 }
 
-func TestDatabaseService_GetAllTelegramIDs(t *testing.T) {
+func TestDatabaseService_GetTelegramIDsBatch(t *testing.T) {
 	t.Parallel()
 
 	f := NewTestFixture(t)
@@ -363,9 +363,9 @@ func TestDatabaseService_GetAllTelegramIDs(t *testing.T) {
 	CreateTestSubscriptionInDB(t, f.DB, 222, "user2", "active", testutil.PtrTime(time.Now().Add(30*24*time.Hour)))
 	CreateTestSubscriptionInDB(t, f.DB, 333, "user3", "revoked", testutil.PtrTime(time.Now().Add(-24*time.Hour)))
 
-	ids, err := f.DB.GetAllTelegramIDs(ctx)
+	ids, err := f.DB.GetTelegramIDsBatch(ctx, 0, 100)
 	if err != nil {
-		t.Fatalf("Failed to get all telegram IDs: %v", err)
+		t.Fatalf("Failed to get telegram IDs batch: %v", err)
 	}
 
 	if len(ids) != 2 {
