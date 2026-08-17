@@ -1226,6 +1226,9 @@ func TestSubscriptionService_DeleteByID_KeepsRetryQueueOnDeprovisionFailure(t *t
 		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
 			return sub, nil
 		},
+		GetNodeByIDFunc: func(context.Context, uint) (*database.Node, error) {
+			return &database.Node{ID: nodeID, IsActive: true}, nil
+		},
 		UpdateSubscriptionFunc: func(_ context.Context, updated *database.Subscription) error {
 			assert.Equal(t, database.SubscriptionStatusRevoked, database.SubscriptionStatus(updated.Status))
 			return nil

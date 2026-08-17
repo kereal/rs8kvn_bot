@@ -414,6 +414,31 @@ func (s *SyncService) syncNodes(ctx context.Context, sub *database.Subscription,
 	var nodeErrs []error
 
 	for _, sn := range pending {
+		// pending_remove is dispatched before the runtime node-type check: a
+		// removal binding may reference a node that is now gone or inactive, in
+		// which case the binding is stale and must be dropped instead of being
+		// retried against the startup snapshot forever (which would wedge the
+		// admin /del flow and the background worker).
+		if sn.Status == database.SyncStatusPendingRemove {
+			logger.Debug("processing pending_remove",
+				zap.Uint("subscription_id", sub.ID),
+				zap.Uint("node_id", sn.NodeID))
+
+			if err := s.processPendingRemove(ctx, &sn, sub); err != nil {
+				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+					return err
+				}
+
+				logger.Warn("pending_remove failed",
+					zap.Uint("subscription_id", sub.ID),
+					zap.Uint("node_id", sn.NodeID),
+					zap.Error(err))
+				nodeErrs = append(nodeErrs, err)
+			}
+
+			continue
+		}
+
 		nodeType, hasNode := nodeTypes[sn.NodeID]
 		if !hasNode {
 			logger.Warn("node not found in runtime clients, skipping",
@@ -449,23 +474,6 @@ func (s *SyncService) syncNodes(ctx context.Context, sub *database.Subscription,
 				}
 
 				logger.Warn("pending_add failed",
-					zap.Uint("subscription_id", sub.ID),
-					zap.Uint("node_id", sn.NodeID),
-					zap.Error(err))
-				nodeErrs = append(nodeErrs, err)
-			}
-		case database.SyncStatusPendingRemove:
-			logger.Debug("processing pending_remove",
-				zap.Uint("subscription_id", sub.ID),
-				zap.Uint("node_id", sn.NodeID))
-
-			err := s.processPendingRemove(ctx, &sn, sub)
-			if err != nil {
-				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-					return err
-				}
-
-				logger.Warn("pending_remove failed",
 					zap.Uint("subscription_id", sub.ID),
 					zap.Uint("node_id", sn.NodeID),
 					zap.Error(err))
@@ -670,8 +678,34 @@ func (s *SyncService) processPendingAdd(ctx context.Context, sn *database.Subscr
 }
 
 // processPendingRemove deletes a VPN subscription from the target node.
-// Handles idempotent "not found" errors by removing the DB record.
+// Handles idempotent "not found" errors by removing the DB record. A node that
+// is gone or inactive has no reachable VPN client to remove, so its binding is
+// stale DB state and is dropped instead of retried forever (which would wedge
+// the admin /del flow and the background worker).
 func (s *SyncService) processPendingRemove(ctx context.Context, sn *database.SubscriptionNode, sub *database.Subscription) error {
+	// Resolve the node's current state first: a dead node must not be retried
+	// forever, unlike pending_add/update where it may be reactivated later.
+	node, nodeErr := s.db.GetNodeByID(ctx, sn.NodeID)
+	if nodeErr != nil {
+		if errors.Is(nodeErr, database.ErrNodeNotFound) || errors.Is(nodeErr, gorm.ErrRecordNotFound) {
+			if err := s.db.DeleteSubscriptionNode(ctx, sn.SubscriptionID, sn.NodeID); err != nil {
+				return fmt.Errorf("drop binding for missing node %d: %w", sn.NodeID, err)
+			}
+
+			return nil
+		}
+
+		return s.retryUnavailableNode(ctx, sn, sub, "pending_remove")
+	}
+
+	if !node.IsActive {
+		if err := s.db.DeleteSubscriptionNode(ctx, sn.SubscriptionID, sn.NodeID); err != nil {
+			return fmt.Errorf("drop binding for inactive node %d: %w", sn.NodeID, err)
+		}
+
+		return nil
+	}
+
 	client, ok := s.vpnClients[sn.NodeID]
 	if !ok {
 		return s.retryUnavailableNode(ctx, sn, sub, "pending_remove")
