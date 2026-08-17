@@ -432,6 +432,93 @@ func (s *SubscriptionService) DeleteByID(ctx context.Context, id uint) (*databas
 	return s.revokeAndDeprovisionThenDelete(ctx, sub)
 }
 
+// adminSetPlanDefaultDays is the default expiry window (in days) applied when an
+// admin changes a plan without an explicit duration and the subscription has no
+// future expiry to preserve.
+const adminSetPlanDefaultDays = 30
+
+// AdminSetPlan changes a subscription's plan through the service layer
+// (admin override, no payment involved). It mirrors the payment activation
+// flow: update the subscription row (plan, status, expiry, reminder state),
+// materialize DB sync prerequisites via ApplyPlanToSubscription
+// (pending_add/pending_update/pending_remove), then best-effort
+// SyncSubscription to push changes to VPN panels. Cache is invalidated and
+// metrics refreshed. Returns the updated subscription.
+//
+// days, when > 0, sets ExpiresAt = now + days. When 0, an existing future
+// expiry is preserved; otherwise the subscription is given a fresh
+// adminSetPlanDefaultDays window. Setting the free plan clears ExpiresAt
+// (бессрочная), mirroring DowngradeToFreePlan.
+func (s *SubscriptionService) AdminSetPlan(ctx context.Context, subscriptionID, planID uint, days int) (*database.Subscription, error) {
+	sub, err := s.db.GetByID(ctx, subscriptionID)
+	if err != nil {
+		return nil, fmt.Errorf("admin set plan: load subscription: %w", err)
+	}
+
+	plan, err := s.db.GetPlanByID(ctx, planID)
+	if err != nil {
+		return nil, fmt.Errorf("admin set plan: load plan: %w", err)
+	}
+
+	now := time.Now()
+	if plan.Name == database.FreePlanName {
+		sub.ExpiresAt = nil
+	} else {
+		switch {
+		case days > 0:
+			expiry := now.AddDate(0, 0, days)
+			sub.ExpiresAt = &expiry
+		case sub.ExpiresAt == nil || !sub.ExpiresAt.After(now):
+			expiry := now.AddDate(0, 0, adminSetPlanDefaultDays)
+			sub.ExpiresAt = &expiry
+		}
+	}
+
+	sub.PlanID = plan.ID
+	sub.Status = string(database.SubscriptionStatusActive)
+	if sub.StartedAt == nil {
+		started := now
+		sub.StartedAt = &started
+	}
+	// Reset the reminder bitmask so the expiry-reminder cycle restarts for the
+	// new expiry (mirrors ConfirmOrderPaidCAS).
+	sub.RemindersSent = 0
+
+	err = s.db.UpdateSubscription(ctx, sub)
+	if err != nil {
+		return nil, fmt.Errorf("admin set plan: update subscription: %w", err)
+	}
+
+	// DB-setup phase: structural prerequisites for the background worker. These
+	// must fail loudly — the row is already committed and ApplyPlanToSubscription
+	// is idempotent, so a retry converges.
+	if s.syncService != nil {
+		err = s.syncService.ApplyPlanToSubscription(ctx, sub.ID)
+		if err != nil {
+			return nil, fmt.Errorf("admin set plan: apply plan: %w", err)
+		}
+
+		// External-sync phase is best-effort: SyncPendingNodes retries on failure.
+		if err = s.syncService.SyncSubscription(ctx, sub.ID); err != nil {
+			logger.Warn("admin set plan: external sync failed; background will retry",
+				zap.Uint("subscription_id", sub.ID),
+				zap.Uint("plan_id", plan.ID),
+				zap.Error(err))
+		}
+	}
+
+	if s.invalidate != nil && sub.TelegramID > 0 {
+		s.invalidate(sub.TelegramID)
+	}
+	if s.invalidateBySubID != nil && sub.SubscriptionID != "" {
+		s.invalidateBySubID(sub.SubscriptionID)
+	}
+
+	s.RefreshActiveSubscriptionsMetric(ctx)
+
+	return sub, nil
+}
+
 // deleteClientFromAllNodes removes the VPN subscription from all active nodes.
 // Uses vpnClients (supports 3x-ui and proxman) — the legacy xuiClients map
 // covers only 3x-ui nodes and must not be used here.

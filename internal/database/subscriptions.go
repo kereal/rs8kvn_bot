@@ -96,11 +96,13 @@ func (s *Service) CreateSubscription(ctx context.Context, sub *Subscription, inv
 }
 
 // UpdateSubscription updates an existing subscription.
-// UpdateSubscription updates lifecycle fields without touching reminder state.
+// UpdateSubscription updates lifecycle fields without touching reminder state
+// unless the caller explicitly modified RemindersSent (all callers load the row
+// first, so persisting it is a no-op unless changed).
 func (s *Service) UpdateSubscription(ctx context.Context, sub *Subscription) error {
 	result := s.db.WithContext(ctx).Model(&Subscription{}).
 		Where("id = ?", sub.ID).
-		Select("telegram_id", "username", "client_id", "subscription_id", "expires_at", "status", "invite_code", "plan_id", "referred_by", "devices", "ips", "product_id", "started_at", "price_paid_cents", "currency").
+		Select("telegram_id", "username", "client_id", "subscription_id", "expires_at", "status", "invite_code", "plan_id", "referred_by", "devices", "ips", "product_id", "started_at", "price_paid_cents", "currency", "reminders_sent").
 		Updates(sub)
 	if result.Error != nil {
 		return fmt.Errorf("failed to update subscription: %w", result.Error)
