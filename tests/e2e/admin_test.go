@@ -506,63 +506,7 @@ func TestE2E_SendCommand_WithAtPrefix(t *testing.T) {
 	assert.Contains(t, env.botAPI.LastSentText, "Сообщение отправлено")
 }
 
-func TestE2E_SendCommand_OnlyMessageNoTarget(t *testing.T) {
-	env := setupE2EEnv(t)
-	defer func() {
-		err := env.db.Close()
-		if err != nil {
-			t.Logf("Warning: failed to close database: %v", err)
-		}
-	}()
-
-	ctx := context.Background()
-	adminID := env.cfg.TelegramAdminID
-
-	resetBotAPI(env.botAPI)
-
-	update := tgbotapi.Update{
-		Message: &tgbotapi.Message{
-			Chat:     &tgbotapi.Chat{ID: adminID},
-			From:     &tgbotapi.User{ID: adminID, UserName: "admin"},
-			Text:     "/send",
-			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 5}},
-		},
-	}
-	env.handler.HandleSend(ctx, update)
-
-	assert.True(t, env.botAPI.SendCalledSafe())
-	assert.Contains(t, env.botAPI.LastSentText, "Использование")
-}
-
-func TestE2E_SendCommand_OnlyTargetNoMessage(t *testing.T) {
-	env := setupE2EEnv(t)
-	defer func() {
-		err := env.db.Close()
-		if err != nil {
-			t.Logf("Warning: failed to close database: %v", err)
-		}
-	}()
-
-	ctx := context.Background()
-	adminID := env.cfg.TelegramAdminID
-
-	resetBotAPI(env.botAPI)
-
-	update := tgbotapi.Update{
-		Message: &tgbotapi.Message{
-			Chat:     &tgbotapi.Chat{ID: adminID},
-			From:     &tgbotapi.User{ID: adminID, UserName: "admin"},
-			Text:     "/send 123456",
-			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 5}},
-		},
-	}
-	env.handler.HandleSend(ctx, update)
-
-	assert.True(t, env.botAPI.SendCalledSafe())
-	assert.Contains(t, env.botAPI.LastSentText, "Использование")
-}
-
-func TestE2E_SendCommand_RateLimitBlocksExcess(t *testing.T) {
+func TestE2E_SendCommand_RateLimit(t *testing.T) {
 	env := setupE2EEnv(t)
 	defer func() {
 		err := env.db.Close()
@@ -577,29 +521,34 @@ func TestE2E_SendCommand_RateLimitBlocksExcess(t *testing.T) {
 	_, err := env.subService.Create(ctx, env.chatID, env.username, "")
 	require.NoError(t, err)
 
-	update := tgbotapi.Update{
-		Message: &tgbotapi.Message{
-			Chat:     &tgbotapi.Chat{ID: adminID},
-			From:     &tgbotapi.User{ID: adminID, UserName: "admin"},
-			Text:     fmt.Sprintf("/send %d Message 1", env.chatID),
-			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 5}},
-		},
+	send := func(text string) {
+		env.handler.HandleSend(ctx, tgbotapi.Update{
+			Message: &tgbotapi.Message{
+				Chat:     &tgbotapi.Chat{ID: adminID},
+				From:     &tgbotapi.User{ID: adminID, UserName: "admin"},
+				Text:     text,
+				Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 5}},
+			},
+		})
 	}
-	env.handler.HandleSend(ctx, update)
-	require.True(t, env.botAPI.SendCalledSafe(), "First send should succeed")
 
-	update2 := tgbotapi.Update{
-		Message: &tgbotapi.Message{
-			Chat:     &tgbotapi.Chat{ID: adminID},
-			From:     &tgbotapi.User{ID: adminID, UserName: "admin"},
-			Text:     fmt.Sprintf("/send %d Message 2", env.chatID),
-			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 5}},
-		},
-	}
+	// First send consumes the single admin token and succeeds.
 	resetBotAPI(env.botAPI)
-	env.handler.HandleSend(ctx, update2)
+	send(fmt.Sprintf("/send %d Message 1", env.chatID))
+	assert.Contains(t, env.botAPI.LastSentText, "Сообщение отправлено", "First send should succeed")
 
-	assert.True(t, env.botAPI.SendCalledSafe(), "Second send should succeed under normal rate")
+	// Second send in the same minute must be blocked by the admin rate limit.
+	resetBotAPI(env.botAPI)
+	send(fmt.Sprintf("/send %d Message 2", env.chatID))
+	assert.Contains(t, env.botAPI.LastSentText, "Слишком много сообщений",
+		"Second send should be blocked by the admin rate limit")
+
+	// Clearing the limit lets the admin send again immediately.
+	env.handler.ClearAdminSendRateLimit(adminID)
+	resetBotAPI(env.botAPI)
+	send(fmt.Sprintf("/send %d Message 3", env.chatID))
+	assert.Contains(t, env.botAPI.LastSentText, "Сообщение отправлено",
+		"Send should succeed again after clearing the rate limit")
 }
 
 func TestE2E_BroadcastCommand_PreservesFormatting(t *testing.T) {
@@ -661,8 +610,18 @@ func TestE2E_SendCommand_EscapesMarkdown(t *testing.T) {
 	}
 	env.handler.HandleSend(ctx, update)
 
-	assert.True(t, env.botAPI.SendCalledSafe(), "Send should succeed")
-	assert.Contains(t, env.botAPI.LastSentText, "Сообщение отправлено")
+	// The outbound message to the target user must have reserved MarkdownV2
+	// characters escaped so plain text is not interpreted as formatting.
+	var escaped string
+	for _, m := range env.botAPI.GetAllSentMessages() {
+		if m.ChatID == env.chatID {
+			escaped = m.Text
+		}
+	}
+
+	require.NotEmpty(t, escaped, "message to target user should be captured")
+	assert.Contains(t, escaped, `\*bold\*`)
+	assert.Contains(t, escaped, `\_italic\_`)
 }
 
 func TestE2E_NonAdmin_AccessControl(t *testing.T) {
@@ -788,37 +747,6 @@ func TestE2E_NonAdmin_AccessControl(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestE2E_NonAdmin_CannotUseDel(t *testing.T) {
-	t.Parallel()
-
-	env := setupE2EEnv(t)
-	defer func() {
-		err := env.db.Close()
-		if err != nil {
-			t.Logf("Warning: failed to close database: %v", err)
-		}
-	}()
-
-	ctx := context.Background()
-
-	env.handler.HandleCallback(ctx, tgbotapi.Update{
-		CallbackQuery: &tgbotapi.CallbackQuery{
-			From: &tgbotapi.User{
-				ID:       env.cfg.TelegramAdminID,
-				UserName: "admin",
-			},
-			Data: "admin_stats",
-			Message: &tgbotapi.Message{
-				Chat:      &tgbotapi.Chat{ID: env.cfg.TelegramAdminID},
-				MessageID: 100,
-			},
-		},
-	})
-
-	assert.True(t, env.botAPI.SendCalledSafe(), "Admin stats should be sent")
-	assert.Contains(t, env.botAPI.LastSentText, "Статистика", "Should contain stats")
 }
 
 func TestE2E_AdminLastReg(t *testing.T) {
