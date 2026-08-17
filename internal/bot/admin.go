@@ -12,6 +12,7 @@ import (
 
 	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/logger"
+	"github.com/kereal/rs8kvn_bot/internal/service"
 	"github.com/kereal/rs8kvn_bot/internal/utils"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -260,6 +261,11 @@ func (h *Handler) HandleSetPlan(ctx context.Context, update tgbotapi.Update) err
 		days, err = strconv.Atoi(fields[2])
 		if err != nil || days <= 0 {
 			h.SendMessage(ctx, chatID, "❌ Количество дней должно быть положительным числом")
+			return nil
+		}
+
+		if days > service.AdminSetPlanMaxDays {
+			h.SendMessage(ctx, chatID, fmt.Sprintf("❌ Количество дней не может превышать %d", service.AdminSetPlanMaxDays))
 			return nil
 		}
 	}

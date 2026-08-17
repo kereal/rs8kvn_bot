@@ -227,6 +227,7 @@ func TestE2E_SetPlanCommand_ArgValidation(t *testing.T) {
 		{name: "no_args", cmd: "/setplan", wantMsg: "Использование: /setplan"},
 		{name: "invalid_sub_id", cmd: "/setplan abc 2", wantMsg: "Неверный ID подписки"},
 		{name: "invalid_plan_id", cmd: "/setplan 5 abc", wantMsg: "Неверный ID тарифа"},
+		{name: "days_too_large", cmd: "/setplan 5 3 99999", wantMsg: "Количество дней не может превышать"},
 		{name: "not_found", cmd: "/setplan 99999 2", wantMsg: "Ошибка смены тарифа"},
 	}
 
