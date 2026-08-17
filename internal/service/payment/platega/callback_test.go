@@ -17,6 +17,8 @@ func TestParseCallbackAmount(t *testing.T) {
 	}{
 		{name: "whole", amount: "230", want: 23000},
 		{name: "fraction", amount: "230.5", want: 23050},
+		{name: "provider precision padding", amount: "52.5000000000000000", want: 5250},
+		{name: "trailing zeroes after cents", amount: "230.1200", want: 23012},
 		{name: "too precise", amount: "230.001", wantErr: true},
 		{name: "exponent", amount: "2.3e2", wantErr: true},
 	}

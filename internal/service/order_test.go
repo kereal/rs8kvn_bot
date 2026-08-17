@@ -505,7 +505,7 @@ func TestConfirmPayment_ValidationAndDatabaseFailuresNotifyAdmin(t *testing.T) {
 		wantEvent  string
 	}{
 		{name: "currency mismatch", currency: "USD", amount: "23.00", wantErr: ErrCurrencyMismatch, wantEvent: "callback_currency_mismatch"},
-		{name: "amount mismatch", currency: "RUB", amount: "24.00", wantErr: ErrAmountMismatch, wantEvent: "callback_amount_mismatch"},
+		{name: "amount mismatch", currency: "RUB", amount: "22.00", wantErr: ErrAmountMismatch, wantEvent: "callback_amount_mismatch"},
 		{name: "invalid amount", currency: "RUB", amount: "23.001", wantEvent: "callback_amount_invalid"},
 		{name: "product load failure", currency: "RUB", amount: "23.00", productErr: errors.New("product database failed"), wantEvent: "load_order_product_failed"},
 		{name: "subscription load failure", currency: "RUB", amount: "23.00", subErr: errors.New("subscription database failed"), wantEvent: "load_order_subscription_failed"},
@@ -779,7 +779,7 @@ func TestCancelPaymentByProvider_ErrorsNotifyAdmin(t *testing.T) {
 		wantEvent string
 	}{
 		{name: "currency mismatch", currency: "USD", amount: "23.00", wantErr: ErrCurrencyMismatch, wantEvent: "callback_currency_mismatch"},
-		{name: "amount mismatch", currency: "RUB", amount: "24.00", wantErr: ErrAmountMismatch, wantEvent: "callback_amount_mismatch"},
+		{name: "amount mismatch", currency: "RUB", amount: "22.00", wantErr: ErrAmountMismatch, wantEvent: "callback_amount_mismatch"},
 		{name: "invalid amount", currency: "RUB", amount: "23.001", wantEvent: "callback_amount_invalid"},
 		{name: "cancel database failure", currency: "RUB", amount: "23.00", casErr: errors.New("cancel database failed"), wantEvent: "cancel_payment_failed"},
 	}

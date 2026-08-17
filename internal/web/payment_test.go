@@ -227,6 +227,24 @@ func TestHandlePaymentCallback_ConfirmedActivatesOrder(t *testing.T) {
 	assert.Contains(t, messages[0].Text, "Покупка подтверждена")
 }
 
+func TestHandlePaymentCallback_ConfirmedAcceptsProviderCommissionPrecision(t *testing.T) {
+	t.Parallel()
+
+	// The product/order price is 50.00 RUB, while Platega reports the charged
+	// customer total (including its 5% commission) with padded decimal precision.
+	order := &database.Order{ID: 10, SubscriptionID: 28, ProductID: 38, Status: database.OrderStatusPending, ProviderPaymentID: testPaymentID.String(), AmountCents: 5000, Currency: "RUB"}
+	srv, db, _ := newPaymentTestServer(t, order)
+
+	rec := httptest.NewRecorder()
+	srv.handlePaymentCallback(rec, paymentRequest("CONFIRMED", testPaymentID, `52.5000000000000000`))
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Body.String(), `"ok":true`)
+
+	stored, err := db.GetOrderByID(context.Background(), order.ID)
+	require.NoError(t, err)
+	assert.Equal(t, database.OrderStatusPaid, stored.Status)
+}
+
 func TestHandlePaymentCallback_DuplicateConfirmedIsIdempotent(t *testing.T) {
 	t.Parallel()
 
@@ -293,7 +311,7 @@ func TestHandlePaymentCallback_CanceledAmountMismatch(t *testing.T) {
 
 	order := &database.Order{ID: 4, SubscriptionID: 22, ProductID: 32, Status: database.OrderStatusPending, ProviderPaymentID: testPaymentID.String(), AmountCents: 2300, Currency: "RUB"}
 	srv, _, _ := newPaymentTestServer(t, order)
-	req := paymentRequest("CANCELED", testPaymentID, `24.00`)
+	req := paymentRequest("CANCELED", testPaymentID, `22.00`)
 	rec := httptest.NewRecorder()
 
 	srv.handlePaymentCallback(rec, req)
