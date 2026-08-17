@@ -1284,12 +1284,13 @@ func TestService_CreateTrialSubscription_Success(t *testing.T) {
 	svc := newTestService(t)
 
 	ctx := context.Background()
+	expiresAt := time.Now().UTC().Add(3 * time.Hour)
 	sub, err := svc.CreateTrialSubscription(
 		ctx,
 		"INVITE123",
 		"sub-trial-abc",
 		"client-xyz",
-		time.Now().Add(3*time.Hour),
+		expiresAt,
 	)
 
 	require.NoError(t, err, "CreateTrialSubscription should not error")
@@ -1298,6 +1299,8 @@ func TestService_CreateTrialSubscription_Success(t *testing.T) {
 	assert.Equal(t, "client-xyz", sub.ClientID)
 	assert.Equal(t, uint(1), sub.PlanID, "Should be marked as trial")
 	assert.Less(t, sub.TelegramID, int64(0), "Unbound trial should have negative telegram_id")
+	require.NotNil(t, sub.ExpiresAt)
+	assert.WithinDuration(t, expiresAt, *sub.ExpiresAt, time.Second)
 	require.NotNil(t, sub.InviteCode)
 	assert.Equal(t, "INVITE123", *sub.InviteCode)
 }
@@ -1415,6 +1418,11 @@ func TestService_BindTrialSubscription_Success(t *testing.T) {
 	assert.Equal(t, int64(555555), bound.TelegramID)
 	assert.Equal(t, "bounduser", bound.Username)
 	assert.Equal(t, uint(2), bound.PlanID, "Should be switched to free plan after binding")
+	assert.Nil(t, bound.ExpiresAt, "bound trial becomes a perpetual free subscription")
+
+	var stored Subscription
+	require.NoError(t, svc.db.Where("subscription_id = ?", "sub-bind-test").First(&stored).Error)
+	assert.Nil(t, stored.ExpiresAt, "free subscription must not retain the trial expiry")
 }
 
 func TestService_BindTrialSubscription_InviteLookupError(t *testing.T) {
@@ -1514,6 +1522,7 @@ func TestService_BindTrialSubscription_SetsTelegramID(t *testing.T) {
 	require.NoError(t, svc.db.Where("subscription_id = ?", "sub-bind-test").First(&sub).Error)
 	assert.Equal(t, int64(999000), sub.TelegramID)
 	assert.Equal(t, freePlan.ID, sub.PlanID)
+	assert.Nil(t, sub.ExpiresAt, "bound free subscription must have no expiry")
 }
 
 // ==================== Edge-case Tests ====================
