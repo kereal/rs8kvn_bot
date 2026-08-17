@@ -424,7 +424,8 @@ func (s *SyncService) syncNodes(ctx context.Context, sub *database.Subscription,
 				zap.Uint("subscription_id", sub.ID),
 				zap.Uint("node_id", sn.NodeID))
 
-			if err := s.processPendingRemove(ctx, &sn, sub); err != nil {
+			err := s.processPendingRemove(ctx, &sn, sub)
+			if err != nil {
 				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 					return err
 				}
@@ -688,7 +689,8 @@ func (s *SyncService) processPendingRemove(ctx context.Context, sn *database.Sub
 	node, nodeErr := s.db.GetNodeByID(ctx, sn.NodeID)
 	if nodeErr != nil {
 		if errors.Is(nodeErr, database.ErrNodeNotFound) || errors.Is(nodeErr, gorm.ErrRecordNotFound) {
-			if err := s.db.DeleteSubscriptionNode(ctx, sn.SubscriptionID, sn.NodeID); err != nil {
+			err := s.db.DeleteSubscriptionNode(ctx, sn.SubscriptionID, sn.NodeID)
+			if err != nil {
 				return fmt.Errorf("drop binding for missing node %d: %w", sn.NodeID, err)
 			}
 
@@ -699,7 +701,8 @@ func (s *SyncService) processPendingRemove(ctx context.Context, sn *database.Sub
 	}
 
 	if !node.IsActive {
-		if err := s.db.DeleteSubscriptionNode(ctx, sn.SubscriptionID, sn.NodeID); err != nil {
+		err := s.db.DeleteSubscriptionNode(ctx, sn.SubscriptionID, sn.NodeID)
+		if err != nil {
 			return fmt.Errorf("drop binding for inactive node %d: %w", sn.NodeID, err)
 		}
 
