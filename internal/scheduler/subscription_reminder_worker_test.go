@@ -36,14 +36,12 @@ func (f *fakeRepo) CreateSubscription(ctx context.Context, sub *database.Subscri
 func (f *fakeRepo) UpdateSubscription(ctx context.Context, sub *database.Subscription) error {
 	return nil
 }
-func (f *fakeRepo) DeleteSubscription(ctx context.Context, telegramID int64) error { return nil }
 func (f *fakeRepo) GetAllSubscriptions(ctx context.Context) ([]database.Subscription, error) {
 	return nil, nil
 }
 func (f *fakeRepo) CountAllSubscriptions(ctx context.Context) (int64, error)           { return 0, nil }
 func (f *fakeRepo) CountActiveSubscriptions(ctx context.Context) (int64, error)        { return 0, nil }
 func (f *fakeRepo) CountTrialSubscriptions(ctx context.Context) (int64, error)         { return 0, nil }
-func (f *fakeRepo) CountExpiredSubscriptions(ctx context.Context) (int64, error)       { return 0, nil }
 func (f *fakeRepo) CountExpiredAtTime(ctx context.Context, t time.Time) (int64, error) { return 0, nil }
 func (f *fakeRepo) GetExpiredSubscriptionsBefore(ctx context.Context, t time.Time) ([]database.Subscription, error) {
 	return nil, nil
@@ -70,16 +68,10 @@ func (f *fakeRepo) GetLatestSubscriptions(ctx context.Context, limit int) ([]dat
 func (f *fakeRepo) GetBySubscriptionID(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
 	return nil, nil
 }
-func (f *fakeRepo) GetByNodeID(ctx context.Context, nodeID uint) ([]database.SubscriptionNode, error) {
-	return nil, nil
-}
 func (f *fakeRepo) GetPendingSync(ctx context.Context) ([]database.SubscriptionNode, error) {
 	return nil, nil
 }
 func (f *fakeRepo) GetPendingBySubscriptionID(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
-	return nil, nil
-}
-func (f *fakeRepo) GetPendingByNodeID(ctx context.Context, nodeID uint) ([]database.SubscriptionNode, error) {
 	return nil, nil
 }
 func (f *fakeRepo) GetNodeByID(ctx context.Context, id uint) (*database.Node, error) { return nil, nil }
@@ -173,7 +165,6 @@ func (f *fakeRepo) SeedDefaultData(ctx context.Context) error              { ret
 func (f *fakeRepo) GetTelegramIDByUsername(ctx context.Context, username string) (int64, error) {
 	return 0, nil
 }
-func (f *fakeRepo) GetAllTelegramIDs(ctx context.Context) ([]int64, error) { return nil, nil }
 func (f *fakeRepo) GetExpiredPaidSubscriptions(ctx context.Context, now time.Time) ([]database.Subscription, error) {
 	return nil, nil
 }

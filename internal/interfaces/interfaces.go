@@ -20,7 +20,6 @@ var _ WebRepository = (*database.Service)(nil)
 // SubscriptionNodeCRUD provides basic CRUD operations for subscription nodes.
 type SubscriptionNodeCRUD interface {
 	GetBySubscriptionID(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error)
-	GetByNodeID(ctx context.Context, nodeID uint) ([]database.SubscriptionNode, error)
 	CreateSubscriptionNode(ctx context.Context, sn *database.SubscriptionNode) error
 	UpsertSubscriptionNode(ctx context.Context, sn *database.SubscriptionNode) error
 	DeleteSubscriptionNode(ctx context.Context, subID, nodeID uint) error
@@ -38,7 +37,6 @@ type SubscriptionNodeStatus interface {
 type SubscriptionNodeQueries interface {
 	GetPendingSync(ctx context.Context) ([]database.SubscriptionNode, error)
 	GetPendingBySubscriptionID(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error)
-	GetPendingByNodeID(ctx context.Context, nodeID uint) ([]database.SubscriptionNode, error)
 }
 
 // SubscriptionNodeRepository combines all subscription node interfaces.
@@ -49,10 +47,11 @@ type SubscriptionNodeRepository interface {
 }
 
 // SubscriptionCRUD provides basic CRUD operations for subscriptions.
+// DeleteSubscriptionByID is the only physical deletion (admin /del); all other
+// lifecycle changes are status updates via UpdateSubscription.
 type SubscriptionCRUD interface {
 	CreateSubscription(ctx context.Context, sub *database.Subscription, inviteCode string) error
 	UpdateSubscription(ctx context.Context, sub *database.Subscription) error
-	DeleteSubscription(ctx context.Context, telegramID int64) error
 	DeleteSubscriptionByID(ctx context.Context, id uint) (*database.Subscription, error)
 }
 
@@ -71,8 +70,6 @@ type SubscriptionCounts interface {
 	CountAllSubscriptions(ctx context.Context) (int64, error)
 	CountActiveSubscriptions(ctx context.Context) (int64, error)
 	CountTrialSubscriptions(ctx context.Context) (int64, error)
-	CountExpiredSubscriptions(ctx context.Context) (int64, error)
-	GetAllTelegramIDs(ctx context.Context) ([]int64, error)
 	GetTelegramIDByUsername(ctx context.Context, username string) (int64, error)
 	GetTelegramIDsBatch(ctx context.Context, offset, limit int) ([]int64, error)
 	GetTotalTelegramIDCount(ctx context.Context) (int64, error)

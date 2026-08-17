@@ -13,30 +13,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestE2E_Cache_SetAndGet(t *testing.T) {
-	t.Parallel()
-
-	env := setupE2EEnv(t)
-	defer env.db.Close()
-
-	ctx := context.Background()
-	chatID := int64(900001)
-
-	sub := &database.Subscription{
-		TelegramID:     chatID,
-		Username:       "cacheduser",
-		ClientID:       "client-123",
-		SubscriptionID: "sub-123",
-		Status:         "active",
-	}
-	require.NoError(t, env.db.CreateSubscription(ctx, sub, ""))
-
-	fetched, err := env.db.GetByTelegramID(ctx, chatID)
-	require.NoError(t, err)
-	assert.Equal(t, chatID, fetched.TelegramID)
-	assert.Equal(t, "cacheduser", fetched.Username)
-}
-
 func TestE2E_Cache_GetNonExistent(t *testing.T) {
 	t.Parallel()
 

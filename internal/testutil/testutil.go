@@ -84,14 +84,11 @@ type DatabaseService struct {
 	GetAnyByTelegramIDFunc                      func(ctx context.Context, telegramID int64) (*database.Subscription, error)
 	CreateSubscriptionFunc                      func(ctx context.Context, sub *database.Subscription, inviteCode string) error
 	UpdateSubscriptionFunc                      func(ctx context.Context, sub *database.Subscription) error
-	DeleteSubscriptionFunc                      func(ctx context.Context, telegramID int64) error
 	GetLatestSubscriptionsFunc                  func(ctx context.Context, limit int) ([]database.Subscription, error)
 	GetAllSubscriptionsFunc                     func(ctx context.Context) ([]database.Subscription, error)
 	CountAllSubscriptionsFunc                   func(ctx context.Context) (int64, error)
 	CountActiveSubscriptionsFunc                func(ctx context.Context) (int64, error)
 	CountTrialSubscriptionsFunc                 func(ctx context.Context) (int64, error)
-	CountExpiredSubscriptionsFunc               func(ctx context.Context) (int64, error)
-	GetAllTelegramIDsFunc                       func(ctx context.Context) ([]int64, error)
 	GetByIDFunc                                 func(ctx context.Context, id uint) (*database.Subscription, error)
 	GetTelegramIDByUsernameFunc                 func(ctx context.Context, username string) (int64, error)
 	DeleteSubscriptionByIDFunc                  func(ctx context.Context, id uint) (*database.Subscription, error)
@@ -129,10 +126,8 @@ type DatabaseService struct {
 	MarkActiveNodesPendingUpdateFunc            func(ctx context.Context, subID uint, targetNodeIDs []uint) error
 	UpdateRetryFunc                             func(ctx context.Context, subID, nodeID uint, retryCount int, retryAt *time.Time, lastErr *string) error
 	GetBySubscriptionIDFunc                     func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error)
-	GetByNodeIDFunc                             func(ctx context.Context, nodeID uint) ([]database.SubscriptionNode, error)
 	GetPendingSyncFunc                          func(ctx context.Context) ([]database.SubscriptionNode, error)
 	GetPendingBySubscriptionIDFunc              func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error)
-	GetPendingByNodeIDFunc                      func(ctx context.Context, nodeID uint) ([]database.SubscriptionNode, error)
 	GetOrderByIDFunc                            func(ctx context.Context, id uint) (*database.Order, error)
 	GetOrderByProviderPaymentIDFunc             func(ctx context.Context, provider string, providerPaymentID uuid.UUID) (*database.Order, error)
 	FindPendingPaymentOrderFunc                 func(ctx context.Context, subscriptionID, productID uint, now time.Time) (*database.Order, error)
@@ -315,14 +310,6 @@ func (m *DatabaseService) GetBySubscriptionID(ctx context.Context, subscriptionI
 	return nil, nil
 }
 
-func (m *DatabaseService) GetByNodeID(ctx context.Context, nodeID uint) ([]database.SubscriptionNode, error) {
-	if m.GetByNodeIDFunc != nil {
-		return m.GetByNodeIDFunc(ctx, nodeID)
-	}
-
-	return nil, nil
-}
-
 func (m *DatabaseService) GetPendingSync(ctx context.Context) ([]database.SubscriptionNode, error) {
 	if m.GetPendingSyncFunc != nil {
 		return m.GetPendingSyncFunc(ctx)
@@ -334,14 +321,6 @@ func (m *DatabaseService) GetPendingSync(ctx context.Context) ([]database.Subscr
 func (m *DatabaseService) GetPendingBySubscriptionID(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
 	if m.GetPendingBySubscriptionIDFunc != nil {
 		return m.GetPendingBySubscriptionIDFunc(ctx, subscriptionID)
-	}
-
-	return nil, nil
-}
-
-func (m *DatabaseService) GetPendingByNodeID(ctx context.Context, nodeID uint) ([]database.SubscriptionNode, error) {
-	if m.GetPendingByNodeIDFunc != nil {
-		return m.GetPendingByNodeIDFunc(ctx, nodeID)
 	}
 
 	return nil, nil
@@ -415,18 +394,6 @@ func (m *DatabaseService) UpdateSubscription(ctx context.Context, sub *database.
 	return nil
 }
 
-func (m *DatabaseService) DeleteSubscription(ctx context.Context, telegramID int64) error {
-	if m.DeleteSubscriptionFunc != nil {
-		return m.DeleteSubscriptionFunc(ctx, telegramID)
-	}
-
-	m.mu.Lock()
-	delete(m.Subscriptions, telegramID)
-	m.mu.Unlock()
-
-	return nil
-}
-
 func (m *DatabaseService) GetLatestSubscriptions(ctx context.Context, limit int) ([]database.Subscription, error) {
 	if m.GetLatestSubscriptionsFunc != nil {
 		return m.GetLatestSubscriptionsFunc(ctx, limit)
@@ -438,7 +405,7 @@ func (m *DatabaseService) GetLatestSubscriptions(ctx context.Context, limit int)
 	var result []database.Subscription
 
 	for _, sub := range m.Subscriptions {
-		if sub.Status == "active" {
+		if sub.Status == string(database.SubscriptionStatusActive) {
 			result = append(result, *sub)
 		}
 	}
@@ -477,7 +444,7 @@ func (m *DatabaseService) CountActiveSubscriptions(ctx context.Context) (int64, 
 	var count int64
 
 	for _, sub := range m.Subscriptions {
-		if sub.Status == "active" && !sub.IsExpired() {
+		if sub.Status == string(database.SubscriptionStatusActive) && !sub.IsExpired() {
 			count++
 		}
 	}
@@ -513,41 +480,6 @@ func (m *DatabaseService) CountAllSubscriptions(ctx context.Context) (int64, err
 	defer m.mu.RUnlock()
 
 	return int64(len(m.Subscriptions)), nil
-}
-
-func (m *DatabaseService) CountExpiredSubscriptions(ctx context.Context) (int64, error) {
-	if m.CountExpiredSubscriptionsFunc != nil {
-		return m.CountExpiredSubscriptionsFunc(ctx)
-	}
-
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	var count int64
-
-	for _, sub := range m.Subscriptions {
-		if sub.Status == "active" && sub.IsExpired() {
-			count++
-		}
-	}
-
-	return count, nil
-}
-
-func (m *DatabaseService) GetAllTelegramIDs(ctx context.Context) ([]int64, error) {
-	if m.GetAllTelegramIDsFunc != nil {
-		return m.GetAllTelegramIDsFunc(ctx)
-	}
-
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	var result []int64
-	for id := range m.Subscriptions {
-		result = append(result, id)
-	}
-
-	return result, nil
 }
 
 func (m *DatabaseService) GetTelegramIDByUsername(ctx context.Context, username string) (int64, error) {

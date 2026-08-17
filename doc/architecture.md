@@ -666,7 +666,6 @@ and validated in `internal/config/config.go`. Required vars must be set or `Load
 | `DONATE_URL` | string | `''` | |
 | `DONATE_ENABLED` | bool | `true` | Toggle "☕ Донат" button in main menu |
 | `SUBSERVER_ACCESS_LOG` | path | `''` (disabled) | Optional access log |
-| `MAIN_MENU_BTN_PRODUCT` | uint | `0` | Product shown on main-menu button |
 
 **Seeding:** `xui_seed` does **not** exist. Nodes are configured via admin commands / DB, not env.
 Only the default **plans** (`trial`, `free`) are auto-seeded when the `plans` table is empty

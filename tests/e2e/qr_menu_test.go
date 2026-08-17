@@ -243,3 +243,56 @@ func TestE2E_Callback_QRWeb(t *testing.T) {
 
 	assert.True(t, env.botAPI.SendCalledSafe(), "QR code for web link should be sent")
 }
+
+// TestE2E_QR_OpenAndBack asserts the shared navigation contract for every
+// "show content in its own message + Back button" screen (see AGENTS.md
+// "Back-button navigation", was broken once):
+//   - opening the screen sends a NEW message and does NOT delete the underlying
+//     card/menu;
+//   - pressing Back deletes ONLY that screen's message, by the id the callback
+//     carries, and never re-shows the card.
+func TestE2E_QR_OpenAndBack(t *testing.T) {
+	t.Parallel()
+
+	env := setupE2EEnv(t)
+	defer env.db.Close()
+
+	ctx := context.Background()
+
+	sub := &database.Subscription{
+		TelegramID:     env.chatID,
+		Username:       env.username,
+		ClientID:       "test-client-id",
+		SubscriptionID: "test-sub-id",
+		Status:         "active",
+	}
+	require.NoError(t, env.db.CreateSubscription(ctx, sub, ""))
+
+	const (
+		cardMsgID   = 100 // subscription card already on screen
+		screenMsgID = 555 // QR message Telegram assigns to the new photo
+	)
+
+	tap := func(data string, msgID int) {
+		env.handler.HandleCallback(ctx, tgbotapi.Update{
+			CallbackQuery: &tgbotapi.CallbackQuery{
+				From:    &tgbotapi.User{ID: env.chatID, UserName: env.username},
+				Data:    data,
+				Message: &tgbotapi.Message{Chat: &tgbotapi.Chat{ID: env.chatID}, MessageID: msgID},
+			},
+		})
+	}
+
+	resetBotAPI(env.botAPI)
+	tap("qr_code", cardMsgID)
+
+	require.True(t, env.botAPI.SendCalledSafe(), "opening QR must send a message")
+	assert.Empty(t, env.botAPI.DeletedMessageIDsSafe(), "opening QR must NOT delete the card")
+
+	tap("back_to_subscription", screenMsgID)
+
+	assert.Equal(t, []int{screenMsgID}, env.botAPI.DeletedMessageIDsSafe(),
+		"back must delete only the QR message (id %d)", screenMsgID)
+	assert.NotContains(t, env.botAPI.DeletedMessageIDsSafe(), cardMsgID,
+		"back must NOT delete the card (id %d)", cardMsgID)
+}

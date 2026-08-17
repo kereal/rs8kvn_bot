@@ -113,18 +113,14 @@ func TestHandleCallback_CallbackDataRouting(t *testing.T) {
 		},
 		{
 			name:         "admin_stats",
-			callbackData: "admin_stats",
-			setupMock: func(mockDB *testutil.DatabaseService, mockXUI *testutil.XUIClient) {
-				mockDB.CountAllSubscriptionsFunc = func(ctx context.Context) (int64, error) {
-					return 10, nil
-				}
-				mockDB.CountActiveSubscriptionsFunc = func(ctx context.Context) (int64, error) {
-					return 8, nil
-				}
-				mockDB.CountExpiredSubscriptionsFunc = func(ctx context.Context) (int64, error) {
-					return 2, nil
-				}
-			},
+			callbackData: "admin_stats",				setupMock: func(mockDB *testutil.DatabaseService, mockXUI *testutil.XUIClient) {
+					mockDB.CountAllSubscriptionsFunc = func(ctx context.Context) (int64, error) {
+						return 10, nil
+					}
+					mockDB.CountActiveSubscriptionsFunc = func(ctx context.Context) (int64, error) {
+						return 8, nil
+					}
+				},
 			wantSend: true,
 			wantText: "10",
 		},

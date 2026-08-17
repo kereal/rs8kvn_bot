@@ -36,6 +36,19 @@ const (
 )
 
 // SubscriptionStatus represents the lifecycle state of a subscription.
+//
+// Это единственный допустимый набор значений: колонка subscriptions.status
+// ограничена CHECK-constraint из миграции 033_enforce_subscription_status_check.
+// Добавление нового статуса требует и изменения констант, и новой миграции.
+//
+//   - active   — активная: выдача через субсервер, рассылки, метрики.
+//   - expired  — истекла по сроку (зарезервирован; сейчас истечение понижает
+//     план до free, оставляя статус active).
+//   - paused   — на паузе (зарезервирован, в коде не используется).
+//   - canceled — отменена (зарезервирован, в коде не используется).
+//   - revoked  — отозвана: VPN-доступ снят, субсервер отдаёт 404, но запись
+//     в БД сохраняется (политика «подписки не удаляем»). При повторном
+//     заходе пользователя может быть «оживлена» (reanimateRevokedSubscription).
 type SubscriptionStatus string
 
 const (
@@ -43,6 +56,7 @@ const (
 	SubscriptionStatusExpired  SubscriptionStatus = "expired"
 	SubscriptionStatusPaused   SubscriptionStatus = "paused"
 	SubscriptionStatusCanceled SubscriptionStatus = "canceled"
+	SubscriptionStatusRevoked  SubscriptionStatus = "revoked"
 )
 
 // Subscription represents a user's VPN subscription.
@@ -309,7 +323,7 @@ func (s *Subscription) IsExpired() bool {
 
 // IsActive returns true if the subscription is active and not expired.
 func (s *Subscription) IsActive() bool {
-	return s.Status == "active" && !s.IsExpired()
+	return s.Status == string(SubscriptionStatusActive) && !s.IsExpired()
 }
 
 // ParseDevices parses the Devices JSON string into a slice of header maps.
