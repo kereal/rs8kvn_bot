@@ -46,16 +46,17 @@ func e2eNodes(host string) []database.Node {
 }
 
 type e2eTestEnv struct {
-	t          *testing.T
-	db         *database.Service
-	xui        *testutil.XUIClient
-	botAPI     *testutil.BotAPI
-	handler    *bot.Handler
-	cfg        *config.Config
-	botConfig  *bot.BotConfig
-	chatID     int64
-	username   string
-	subService *service.SubscriptionService
+	t           *testing.T
+	db          *database.Service
+	xui         *testutil.XUIClient
+	botAPI      *testutil.BotAPI
+	handler     *bot.Handler
+	cfg         *config.Config
+	botConfig   *bot.BotConfig
+	chatID      int64
+	username    string
+	subService  *service.SubscriptionService
+	syncService *service.SyncService
 }
 
 // waitForServerReady polls the server's /healthz endpoint until it responds
@@ -96,6 +97,7 @@ func setupE2EEnv(t *testing.T) *e2eTestEnv {
 		SiteURL:          "https://example.com",
 		TelegramBotToken: "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11",
 		GlobalSubURL:     "https://example.com/sub/",
+		PaymentEnabled:   true,
 	}
 
 	mockXUI := testutil.NewXUIClient()
@@ -123,16 +125,17 @@ func setupE2EEnv(t *testing.T) *e2eTestEnv {
 	handler := bot.NewHandler(mockBotAPI, cfg, db, botCfg, subService, "")
 
 	return &e2eTestEnv{
-		t:          t,
-		db:         db,
-		xui:        mockXUI,
-		botAPI:     mockBotAPI,
-		handler:    handler,
-		cfg:        cfg,
-		botConfig:  botCfg,
-		chatID:     987654321,
-		username:   "testuser",
-		subService: subService,
+		t:           t,
+		db:          db,
+		xui:         mockXUI,
+		botAPI:      mockBotAPI,
+		handler:     handler,
+		cfg:         cfg,
+		botConfig:   botCfg,
+		chatID:      987654321,
+		username:    "testuser",
+		subService:  subService,
+		syncService: syncService,
 	}
 }
 
