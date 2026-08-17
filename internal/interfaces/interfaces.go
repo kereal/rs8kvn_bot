@@ -49,10 +49,11 @@ type SubscriptionNodeRepository interface {
 }
 
 // SubscriptionCRUD provides basic CRUD operations for subscriptions.
+// DeleteSubscriptionByID is the only physical deletion (admin /del); all other
+// lifecycle changes are status updates via UpdateSubscription.
 type SubscriptionCRUD interface {
 	CreateSubscription(ctx context.Context, sub *database.Subscription, inviteCode string) error
 	UpdateSubscription(ctx context.Context, sub *database.Subscription) error
-	DeleteSubscription(ctx context.Context, telegramID int64) error
 	DeleteSubscriptionByID(ctx context.Context, id uint) (*database.Subscription, error)
 }
 

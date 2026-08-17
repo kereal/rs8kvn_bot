@@ -36,7 +36,6 @@ func (f *fakeRepo) CreateSubscription(ctx context.Context, sub *database.Subscri
 func (f *fakeRepo) UpdateSubscription(ctx context.Context, sub *database.Subscription) error {
 	return nil
 }
-func (f *fakeRepo) DeleteSubscription(ctx context.Context, telegramID int64) error { return nil }
 func (f *fakeRepo) GetAllSubscriptions(ctx context.Context) ([]database.Subscription, error) {
 	return nil, nil
 }

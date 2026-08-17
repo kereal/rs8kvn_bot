@@ -14,7 +14,7 @@ func (s *Service) GetByTelegramID(ctx context.Context, telegramID int64) (*Subsc
 	var sub Subscription
 
 	result := s.db.WithContext(ctx).
-		Where("telegram_id = ? AND status = ?", telegramID, "active").
+		Where("telegram_id = ? AND status = ?", telegramID, string(SubscriptionStatusActive)).
 		Order("created_at DESC").
 		First(&sub)
 	if result.Error != nil {
@@ -113,21 +113,9 @@ func (s *Service) UpdateSubscription(ctx context.Context, sub *Subscription) err
 	return nil
 }
 
-// DeleteSubscription deletes a subscription.
-func (s *Service) DeleteSubscription(ctx context.Context, telegramID int64) error {
-	result := s.db.WithContext(ctx).Where("telegram_id = ?", telegramID).Delete(&Subscription{})
-	if result.Error != nil {
-		return fmt.Errorf("failed to delete subscription: %w", result.Error)
-	}
-
-	if result.RowsAffected == 0 {
-		return fmt.Errorf("no subscription found for telegram_id %d: %w", telegramID, ErrSubscriptionNotFound)
-	}
-
-	return nil
-}
-
 // DeleteSubscriptionByID hard-deletes a subscription by its database ID.
+// This is the ONLY physical subscription deletion in the product, used by the
+// admin /del flow. Everything else only changes subscription status.
 func (s *Service) DeleteSubscriptionByID(ctx context.Context, id uint) (*Subscription, error) {
 	var deleted Subscription
 
@@ -164,7 +152,7 @@ func (s *Service) GetLatestSubscriptions(ctx context.Context, limit int) ([]Subs
 	var subs []Subscription
 
 	result := s.db.WithContext(ctx).
-		Where("status = ?", "active").
+		Where("status = ?", string(SubscriptionStatusActive)).
 		Order("created_at DESC").
 		Limit(limit).
 		Find(&subs)
@@ -207,7 +195,7 @@ func (s *Service) CountActiveSubscriptions(ctx context.Context) (int64, error) {
 
 	result := s.db.WithContext(ctx).
 		Model(&Subscription{}).
-		Where("status = ?", "active").
+		Where("status = ?", string(SubscriptionStatusActive)).
 		Count(&count)
 	if result.Error != nil {
 		return 0, fmt.Errorf("failed to count active subscriptions: %w", result.Error)
@@ -297,7 +285,7 @@ func (s *Service) GetSubscriptionStatus(ctx context.Context, subscriptionID stri
 func (s *Service) GetWithPlanAndNodes(ctx context.Context, subscriptionID string) (*SubscriptionFull, error) {
 	var result SubscriptionFull
 
-	subQuery := s.db.WithContext(ctx).Where("subscription_id = ? AND status = ?", subscriptionID, "active")
+	subQuery := s.db.WithContext(ctx).Where("subscription_id = ? AND status = ?", subscriptionID, string(SubscriptionStatusActive))
 
 	err := subQuery.First(&result.Subscription).Error
 	if err != nil {
@@ -391,9 +379,9 @@ type ExpireSubscriptionPlanInTxFn func(ctx context.Context, tx *gorm.DB, subscri
 // creates the pending node-sync state needed to deprovision its previous plan.
 func (s *Service) ExpireSubscriptionWithPlanCAS(ctx context.Context, id uint, freePlanID uint, applyPlan ExpireSubscriptionPlanInTxFn) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		result := tx.Model(&Subscription{}).Where("id = ? AND status = ? AND expires_at IS NOT NULL AND expires_at <= ?", id, "active", time.Now().UTC()).
+		result := tx.Model(&Subscription{}).Where("id = ? AND status = ? AND expires_at IS NOT NULL AND expires_at <= ?", id, string(SubscriptionStatusActive), time.Now().UTC()).
 			Updates(map[string]any{
-				"status":           "active",
+				"status":           string(SubscriptionStatusActive),
 				"expires_at":       nil,
 				"plan_id":          freePlanID,
 				"product_id":       nil,
@@ -442,7 +430,7 @@ func (s *Service) ExpireSubscriptionWithPlanCAS(ctx context.Context, id uint, fr
 func (s *Service) ExpireSubscription(ctx context.Context, id uint, freePlanID uint) error {
 	result := s.db.WithContext(ctx).Model(&Subscription{}).Where("id = ?", id).
 		Updates(map[string]any{
-			"status":     "active",
+			"status":     string(SubscriptionStatusActive),
 			"expires_at": nil,
 			"plan_id":    freePlanID,
 			"product_id": nil,
@@ -469,7 +457,7 @@ func (s *Service) GetExpiredPaidSubscriptions(ctx context.Context, now time.Time
 
 	result := s.db.WithContext(ctx).
 		Where("expires_at <= ? AND status = ? AND plan_id NOT IN (?)",
-			now, "active", nonExpiringPlanSubQuery).
+			now, string(SubscriptionStatusActive), nonExpiringPlanSubQuery).
 		Find(&subs)
 	if result.Error != nil {
 		return nil, fmt.Errorf("failed to get expired paid subscriptions: %w", result.Error)
@@ -483,7 +471,7 @@ func (s *Service) GetAllTelegramIDs(ctx context.Context) ([]int64, error) {
 	var ids []int64
 
 	result := s.db.WithContext(ctx).Model(&Subscription{}).
-		Where("telegram_id > 0 AND status = ?", "active").
+		Where("telegram_id > 0 AND status = ?", string(SubscriptionStatusActive)).
 		Distinct("telegram_id").
 		Pluck("telegram_id", &ids)
 	if result.Error != nil {
@@ -516,7 +504,7 @@ func (s *Service) GetTelegramIDsBatch(ctx context.Context, offset, limit int) ([
 
 	result := s.db.WithContext(ctx).
 		Model(&Subscription{}).
-		Where("telegram_id > 0 AND status = ?", "active").
+		Where("telegram_id > 0 AND status = ?", string(SubscriptionStatusActive)).
 		Distinct("telegram_id").
 		Order("telegram_id ASC").
 		Limit(limit).
@@ -535,7 +523,7 @@ func (s *Service) GetTotalTelegramIDCount(ctx context.Context) (int64, error) {
 
 	result := s.db.WithContext(ctx).
 		Model(&Subscription{}).
-		Where("telegram_id > 0 AND status = ?", "active").
+		Where("telegram_id > 0 AND status = ?", string(SubscriptionStatusActive)).
 		Distinct("telegram_id").
 		Count(&count)
 	if result.Error != nil {

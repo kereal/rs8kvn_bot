@@ -30,7 +30,7 @@ func NewSubscriptionHandler(parent *Handler) *SubscriptionHandler {
 func (sh *SubscriptionHandler) getSubscriptionWithCache(ctx context.Context, chatID int64) (*database.Subscription, error) {
 	// Try cache first
 	if sub := sh.h.cache.Get(chatID); sub != nil {
-		if sub.Status == "active" {
+		if sub.Status == string(database.SubscriptionStatusActive) {
 			return sub, nil
 		}
 		// Stale cache entry (non-active) — invalidate and fall through
@@ -44,7 +44,7 @@ func (sh *SubscriptionHandler) getSubscriptionWithCache(ctx context.Context, cha
 	}
 
 	// Store in cache only if active
-	if sub != nil && sub.Status == "active" {
+	if sub != nil && sub.Status == string(database.SubscriptionStatusActive) {
 		sh.h.cache.Set(chatID, sub)
 	}
 
@@ -121,7 +121,7 @@ func (sh *SubscriptionHandler) handleMySubscription(ctx context.Context, chatID 
 		return fmt.Errorf("get subscription: %w", err)
 	}
 
-	if sub.Status != "active" {
+	if sub.Status != string(database.SubscriptionStatusActive) {
 		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgSubNoActive))
 		sh.h.safeSend(editMsg)
 
@@ -129,7 +129,7 @@ func (sh *SubscriptionHandler) handleMySubscription(ctx context.Context, chatID 
 	}
 
 	statusText := sub.Status
-	if statusText == "active" {
+	if statusText == string(database.SubscriptionStatusActive) {
 		statusText = "активна"
 	}
 

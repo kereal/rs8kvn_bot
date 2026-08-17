@@ -41,7 +41,7 @@ func (s *Service) CreateTrialSubscription(ctx context.Context, inviteCode, subsc
 		SubscriptionID: subscriptionID,
 		ClientID:       clientID,
 		PlanID:         planID,
-		Status:         "active",
+		Status:         string(SubscriptionStatusActive),
 	}
 
 	if inviteCode != "" {

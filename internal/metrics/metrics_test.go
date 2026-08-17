@@ -75,7 +75,7 @@ func TestNewMetricsInitialized(t *testing.T) {
 	require.NotNil(t, SubscriptionExpireTotal)
 	require.NotNil(t, SubscriptionExpireDuration)
 	require.NotNil(t, ReconcileOrphanedDuration)
-	require.NotNil(t, OrphanedClientsRemovedTotal)
+	require.NotNil(t, OrphanedClientsRevokedTotal)
 	require.NotNil(t, SubserverSourceFetchTotal)
 	require.NotNil(t, SubserverSourceFetchDuration)
 	require.NotNil(t, SubserverCacheInvalidationsTotal)

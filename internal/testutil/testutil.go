@@ -84,7 +84,6 @@ type DatabaseService struct {
 	GetAnyByTelegramIDFunc                      func(ctx context.Context, telegramID int64) (*database.Subscription, error)
 	CreateSubscriptionFunc                      func(ctx context.Context, sub *database.Subscription, inviteCode string) error
 	UpdateSubscriptionFunc                      func(ctx context.Context, sub *database.Subscription) error
-	DeleteSubscriptionFunc                      func(ctx context.Context, telegramID int64) error
 	GetLatestSubscriptionsFunc                  func(ctx context.Context, limit int) ([]database.Subscription, error)
 	GetAllSubscriptionsFunc                     func(ctx context.Context) ([]database.Subscription, error)
 	CountAllSubscriptionsFunc                   func(ctx context.Context) (int64, error)
@@ -415,18 +414,6 @@ func (m *DatabaseService) UpdateSubscription(ctx context.Context, sub *database.
 	return nil
 }
 
-func (m *DatabaseService) DeleteSubscription(ctx context.Context, telegramID int64) error {
-	if m.DeleteSubscriptionFunc != nil {
-		return m.DeleteSubscriptionFunc(ctx, telegramID)
-	}
-
-	m.mu.Lock()
-	delete(m.Subscriptions, telegramID)
-	m.mu.Unlock()
-
-	return nil
-}
-
 func (m *DatabaseService) GetLatestSubscriptions(ctx context.Context, limit int) ([]database.Subscription, error) {
 	if m.GetLatestSubscriptionsFunc != nil {
 		return m.GetLatestSubscriptionsFunc(ctx, limit)
@@ -438,7 +425,7 @@ func (m *DatabaseService) GetLatestSubscriptions(ctx context.Context, limit int)
 	var result []database.Subscription
 
 	for _, sub := range m.Subscriptions {
-		if sub.Status == "active" {
+		if sub.Status == string(database.SubscriptionStatusActive) {
 			result = append(result, *sub)
 		}
 	}
@@ -477,7 +464,7 @@ func (m *DatabaseService) CountActiveSubscriptions(ctx context.Context) (int64, 
 	var count int64
 
 	for _, sub := range m.Subscriptions {
-		if sub.Status == "active" && !sub.IsExpired() {
+		if sub.Status == string(database.SubscriptionStatusActive) && !sub.IsExpired() {
 			count++
 		}
 	}
@@ -526,7 +513,7 @@ func (m *DatabaseService) CountExpiredSubscriptions(ctx context.Context) (int64,
 	var count int64
 
 	for _, sub := range m.Subscriptions {
-		if sub.Status == "active" && sub.IsExpired() {
+		if sub.Status == string(database.SubscriptionStatusActive) && sub.IsExpired() {
 			count++
 		}
 	}

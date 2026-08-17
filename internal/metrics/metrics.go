@@ -267,12 +267,13 @@ var (
 		},
 	)
 
-	// OrphanedClientsRemovedTotal counts XUI clients/subscriptions removed
-	// during background reconciliation of orphaned entries.
-	OrphanedClientsRemovedTotal = promauto.NewCounter(
+	// OrphanedClientsRevokedTotal counts subscriptions revoked (not deleted —
+	// policy: subscriptions are never removed except via admin /del) during
+	// background reconciliation of orphaned entries.
+	OrphanedClientsRevokedTotal = promauto.NewCounter(
 		prometheus.CounterOpts{
-			Name: "bot_orphaned_clients_removed_total",
-			Help: "Total number of orphaned XUI clients/subscriptions removed during reconciliation",
+			Name: "bot_orphaned_clients_revoked_total",
+			Help: "Total number of orphaned subscriptions revoked during reconciliation",
 		},
 	)
 

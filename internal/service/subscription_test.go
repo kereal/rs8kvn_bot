@@ -299,171 +299,6 @@ func TestSubscriptionService_GetByTelegramID_NotFound(t *testing.T) {
 	assert.Contains(t, err.Error(), "not found")
 }
 
-func TestSubscriptionService_Delete_Success(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{}
-
-	sub := &database.Subscription{
-		TelegramID: 123456,
-		Username:   "testuser",
-		ClientID:   "client-123",
-	}
-
-	db := &testutil.DatabaseService{
-		GetByTelegramIDFunc: func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
-			return sub, nil
-		},
-		DeleteSubscriptionByIDFunc: func(ctx context.Context, id uint) (*database.Subscription, error) {
-			return nil, nil
-		},
-		GetBySubscriptionIDFunc: func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
-			return nil, nil
-		},
-	}
-
-	svc := NewSubscriptionService(db, nil, nil, nil, cfg)
-	err := svc.Delete(context.Background(), 123456)
-
-	assert.NoError(t, err)
-}
-
-func TestSubscriptionService_Delete_NotFound(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{}
-
-	db := &testutil.DatabaseService{
-		GetByTelegramIDFunc: func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
-			return nil, errors.New("not found")
-		},
-	}
-	svc := NewSubscriptionService(db, nil, nil, nil, cfg)
-	err := svc.Delete(context.Background(), 999999)
-
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "not found")
-}
-
-func TestSubscriptionService_Delete_XUIError(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{}
-
-	sub := &database.Subscription{
-		TelegramID: 123456,
-		ClientID:   "client-123",
-	}
-
-	db := &testutil.DatabaseService{
-		GetByTelegramIDFunc: func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
-			return sub, nil
-		},
-		DeleteSubscriptionByIDFunc: func(ctx context.Context, id uint) (*database.Subscription, error) {
-			return nil, nil
-		},
-		GetBySubscriptionIDFunc: func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
-			return nil, nil
-		},
-	}
-
-	svc := NewSubscriptionService(db, nil, nil, nil, cfg)
-	err := svc.Delete(context.Background(), 123456)
-
-	// Sync errors are best-effort — Delete should succeed even if sync fails
-	assert.NoError(t, err)
-}
-
-func TestSubscriptionService_Delete_DBError(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{}
-
-	sub := &database.Subscription{
-		TelegramID: 123456,
-		ClientID:   "client-123",
-	}
-
-	db := &testutil.DatabaseService{
-		GetByTelegramIDFunc: func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
-			return sub, nil
-		},
-		DeleteSubscriptionByIDFunc: func(ctx context.Context, id uint) (*database.Subscription, error) {
-			return nil, errors.New("db connection refused")
-		},
-		GetBySubscriptionIDFunc: func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
-			return nil, nil
-		},
-	}
-	svc := NewSubscriptionService(db, nil, nil, nil, cfg)
-	err := svc.Delete(context.Background(), 123456)
-
-	// DB errors should still be returned
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "db delete")
-}
-
-func TestSubscriptionService_Delete_UsesCorrectEmail(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{}
-
-	sub := &database.Subscription{
-		TelegramID: 123456,
-		Username:   "testuser",
-		ClientID:   "client-456",
-	}
-
-	db := &testutil.DatabaseService{
-		GetByTelegramIDFunc: func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
-			return sub, nil
-		},
-		DeleteSubscriptionByIDFunc: func(ctx context.Context, id uint) (*database.Subscription, error) {
-			return nil, nil
-		},
-		GetBySubscriptionIDFunc: func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
-			return nil, nil
-		},
-	}
-
-	svc := NewSubscriptionService(db, nil, nil, nil, cfg)
-	err := svc.Delete(context.Background(), 123456)
-
-	// Email is now computed inside sync module, not in Delete()
-	assert.NoError(t, err)
-}
-
-func TestSubscriptionService_Delete_FallsBackToTgIdEmail(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{}
-
-	// No real username → email must be tgId_ format
-	sub := &database.Subscription{
-		TelegramID: 123456,
-		ClientID:   "client-789",
-		// Username empty on purpose
-	}
-
-	db := &testutil.DatabaseService{
-		GetByTelegramIDFunc: func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
-			return sub, nil
-		},
-		DeleteSubscriptionByIDFunc: func(ctx context.Context, id uint) (*database.Subscription, error) {
-			return nil, nil
-		},
-		GetBySubscriptionIDFunc: func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
-			return nil, nil
-		},
-	}
-
-	svc := NewSubscriptionService(db, nil, nil, nil, cfg)
-	err := svc.Delete(context.Background(), 123456)
-
-	// Email is now computed inside sync module, not in Delete()
-	assert.NoError(t, err)
-}
-
 func TestSubscriptionService_GetWithTraffic_Success(t *testing.T) {
 	t.Parallel()
 
@@ -692,12 +527,13 @@ func TestSubscriptionService_CreateTrial_NoTrialNodes(t *testing.T) {
 	assert.Contains(t, err.Error(), "no linked nodes")
 }
 
-// TestSubscriptionService_ReconcileOrphanedClients_RemovesFullyDeprovisioned verifies
+// TestSubscriptionService_ReconcileOrphanedClients_RevokesFullyDeprovisioned verifies
 // a subscription with only pending_remove node bindings (deprovisioning that did
-// not complete in the delete flow) is removed, while:
+// not complete in the delete flow) is REVOKED (policy: subscriptions are never
+// deleted except via admin /del), while:
 //   - a subscription with a live (active) binding is kept,
 //   - a subscription with NO subscription_nodes (e.g. a trial) is kept.
-func TestSubscriptionService_ReconcileOrphanedClients_RemovesFullyDeprovisioned(t *testing.T) {
+func TestSubscriptionService_ReconcileOrphanedClients_RevokesFullyDeprovisioned(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{}
@@ -707,7 +543,7 @@ func TestSubscriptionService_ReconcileOrphanedClients_RemovesFullyDeprovisioned(
 	trial := &database.Subscription{ID: 30, TelegramID: 0, SubscriptionID: "trial123", Status: "active"}
 	inactive := &database.Subscription{ID: 40, TelegramID: 400, Username: "bad", Status: "revoked"}
 
-	deleted := []uint{}
+	updated := make(map[uint]string)
 	db := &testutil.DatabaseService{
 		GetAllSubscriptionsFunc: func(ctx context.Context) ([]database.Subscription, error) {
 			return []database.Subscription{*withLive, *orphan, *trial, *inactive}, nil
@@ -728,9 +564,9 @@ func TestSubscriptionService_ReconcileOrphanedClients_RemovesFullyDeprovisioned(
 				return nil, nil
 			}
 		},
-		DeleteSubscriptionByIDFunc: func(ctx context.Context, id uint) (*database.Subscription, error) {
-			deleted = append(deleted, id)
-			return &database.Subscription{ID: id}, nil
+		UpdateSubscriptionFunc: func(ctx context.Context, sub *database.Subscription) error {
+			updated[sub.ID] = sub.Status
+			return nil
 		},
 	}
 	svc := NewSubscriptionService(db, nil, nil, nil, cfg)
@@ -743,7 +579,9 @@ func TestSubscriptionService_ReconcileOrphanedClients_RemovesFullyDeprovisioned(
 
 	assert.NoError(t, err)
 	assert.Equal(t, 1, count)
-	assert.Equal(t, []uint{orphan.ID}, deleted)
+	assert.Equal(t, string(database.SubscriptionStatusRevoked), updated[orphan.ID])
+	assert.NotContains(t, updated, withLive.ID)
+	assert.NotContains(t, updated, trial.ID)
 	assert.Equal(t, []int64{orphan.TelegramID}, invoked)
 }
 
