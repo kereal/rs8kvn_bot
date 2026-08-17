@@ -942,12 +942,11 @@ func TestSubscriptionService_DeleteByID_MarkRevokedBeforeDBDelete(t *testing.T) 
 	assert.Equal(t, "revoked", updatedStatus, "subscription must be marked revoked before deprovision/delete")
 }
 
-// TestSubscriptionService_DeleteByID_SyncFailureStillDeletes verifies the
-// best-effort contract from AGENTS.md: deprovision (Phase 2, external sync)
-// is best-effort — if the VPN node sync fails, the subscription stays
-// revoked and the physical delete (Phase 3) MUST still run so the row is
-// removed. Background reconciliation finishes removal of the orphaned VPN client.
-func TestSubscriptionService_DeleteByID_SyncFailureStillDeletes(t *testing.T) {
+// TestSubscriptionService_DeleteByID_SyncFailureKeepsRetryQueue verifies that
+// a failed external deprovision leaves the revoked subscription and its
+// pending_remove row for the background worker instead of destroying the retry
+// queue with a physical delete.
+func TestSubscriptionService_DeleteByID_SyncFailureKeepsRetryQueue(t *testing.T) {
 	t.Parallel()
 
 	var deleteByIDCalled bool
@@ -992,10 +991,11 @@ func TestSubscriptionService_DeleteByID_SyncFailureStillDeletes(t *testing.T) {
 
 	deleted, err := svc.DeleteByID(context.Background(), 1)
 
-	// Physical delete (Phase 3) runs despite the Phase 2 sync failure.
-	require.NoError(t, err, "best-effort deprovision failure must not abort the delete")
-	assert.True(t, deleteByIDCalled, "DeleteSubscriptionByID (physical delete) must run even if external deprovision fails")
-	assert.NotNil(t, deleted)
+	// Physical delete must not run while the pending_remove retry row remains.
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "deprovision incomplete")
+	assert.False(t, deleteByIDCalled, "physical delete must wait for successful deprovision")
+	assert.Nil(t, deleted)
 }
 
 // ==================== InvalidateSubscription Tests ====================
@@ -1154,6 +1154,112 @@ func TestXUIEmail_FallbackToTgID(t *testing.T) {
 			assert.Equal(t, tt.want, XUIEmail(tt.username, tt.chatID))
 		})
 	}
+}
+
+func TestSubscriptionService_Create_ReanimatesRevoked_ReturnsCleanupError(t *testing.T) {
+	t.Parallel()
+
+	cleanupErr := errors.New("subscription nodes database unavailable")
+	existing := &database.Subscription{
+		ID:             42,
+		TelegramID:     777778,
+		ClientID:       "client-revoked-error",
+		SubscriptionID: "sub-revoked-error",
+		PlanID:         1,
+		Status:         string(database.SubscriptionStatusRevoked),
+	}
+	updateCalled := false
+
+	db := &testutil.DatabaseService{
+		GetByTelegramIDFunc: func(context.Context, int64) (*database.Subscription, error) {
+			return nil, database.ErrSubscriptionNotFound
+		},
+		GetAnyByTelegramIDFunc: func(context.Context, int64) (*database.Subscription, error) {
+			return existing, nil
+		},
+		GetPlanByNameFunc: func(context.Context, string) (*database.Plan, error) {
+			return &database.Plan{ID: 2, Name: database.FreePlanName}, nil
+		},
+		DeleteSubscriptionNodesBySubscriptionIDFunc: func(context.Context, uint) error {
+			return cleanupErr
+		},
+		UpdateSubscriptionFunc: func(context.Context, *database.Subscription) error {
+			updateCalled = true
+			return nil
+		},
+	}
+
+	svc := NewSubscriptionService(db, nil, nil, nil, &config.Config{})
+	result, err := svc.Create(context.Background(), existing.TelegramID, "", "")
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, cleanupErr)
+	assert.Nil(t, result)
+	assert.False(t, updateCalled, "failed cleanup must not activate the subscription")
+}
+
+func TestSubscriptionService_DeleteByID_KeepsRetryQueueOnDeprovisionFailure(t *testing.T) {
+	t.Parallel()
+
+	const (
+		subscriptionID uint = 77
+		nodeID         uint = 9
+	)
+	deprovisionErr := errors.New("vpn node unavailable")
+	sub := &database.Subscription{
+		ID:             subscriptionID,
+		TelegramID:     777779,
+		Username:       "delete-retry-user",
+		ClientID:       "delete-retry-client",
+		SubscriptionID: "delete-retry-sub",
+		Status:         string(database.SubscriptionStatusActive),
+	}
+	pending := []database.SubscriptionNode{{
+		SubscriptionID: subscriptionID,
+		NodeID:         nodeID,
+		Status:         database.SyncStatusPendingRemove,
+	}}
+	deleteClient := &mockVPNClient{deleteError: deprovisionErr}
+	hardDeleteCalled := false
+
+	db := &testutil.DatabaseService{
+		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
+			return sub, nil
+		},
+		UpdateSubscriptionFunc: func(_ context.Context, updated *database.Subscription) error {
+			assert.Equal(t, database.SubscriptionStatusRevoked, database.SubscriptionStatus(updated.Status))
+			return nil
+		},
+		GetBySubscriptionIDFunc: func(context.Context, uint) ([]database.SubscriptionNode, error) {
+			return pending, nil
+		},
+		GetPendingBySubscriptionIDFunc: func(context.Context, uint) ([]database.SubscriptionNode, error) {
+			return pending, nil
+		},
+		UpdateRetryFunc: func(context.Context, uint, uint, int, *time.Time, *string) error {
+			return nil
+		},
+		DeleteSubscriptionByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
+			hardDeleteCalled = true
+			return sub, nil
+		},
+	}
+
+	syncSvc := NewSyncService(db, map[uint]vpn.Client{nodeID: deleteClient}, []database.Node{{
+		ID:       nodeID,
+		Type:     database.NodeType3xUI,
+		IsActive: true,
+	}})
+	svc := NewSubscriptionService(db, nil, nil, nil, &config.Config{})
+	svc.SetSyncService(syncSvc)
+
+	deleted, err := svc.DeleteByID(context.Background(), subscriptionID)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "deprovision incomplete")
+	assert.Nil(t, deleted)
+	assert.True(t, deleteClient.deleteCalled)
+	assert.False(t, hardDeleteCalled, "subscription must remain for background retry")
 }
 
 // TestSubscriptionService_Create_ReanimatesRevoked verifies the bug fix: when a

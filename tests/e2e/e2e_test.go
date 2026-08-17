@@ -42,7 +42,7 @@ func setupTestDB(t *testing.T) *database.Service {
 }
 
 func e2eNodes(host string) []database.Node {
-	return []database.Node{{ID: 1, Name: "main", IsActive: true, Host: host, APIToken: "test-api-token", InboundIDs: "[1]"}}
+	return []database.Node{{ID: 1, Name: "main", IsActive: true, Host: host, APIToken: "test-api-token", Type: database.NodeType3xUI, InboundIDs: "[1]"}}
 }
 
 type e2eTestEnv struct {
@@ -116,7 +116,10 @@ func setupE2EEnv(t *testing.T) *e2eTestEnv {
 
 	xuiClients := map[uint]interfaces.XUIClient{1: mockXUI}
 	nodes := e2eNodes("https://panel.example.com")
-	subService := service.NewSubscriptionService(db, xuiClients, e2eVPNClients(xuiClients), nodes, cfg)
+	vpnClients := e2eVPNClients(xuiClients)
+	syncService := service.NewSyncService(db, vpnClients, nodes)
+	subService := service.NewSubscriptionService(db, xuiClients, vpnClients, nodes, cfg)
+	subService.SetSyncService(syncService)
 	handler := bot.NewHandler(mockBotAPI, cfg, db, botCfg, subService, "")
 
 	return &e2eTestEnv{
