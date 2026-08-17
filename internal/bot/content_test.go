@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/kereal/rs8kvn_bot/internal/config"
+	"github.com/kereal/rs8kvn_bot/internal/database"
+	"github.com/kereal/rs8kvn_bot/internal/testutil"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -68,6 +70,27 @@ func TestGetMainMenuContent_WithSubscription(t *testing.T) {
 	assert.NotEmpty(t, text, "Expected non-empty text for user with subscription")
 	assert.Contains(t, text, "testuser", "Expected text to contain username")
 	assert.GreaterOrEqual(t, len(keyboard.InlineKeyboard), 2, "Expected at least 2 keyboard rows")
+}
+
+func TestGetMainMenuContent_FreeSubscriptionShowsPremiumTeaser(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{TelegramAdminID: 0, PaymentEnabled: true}
+	db := &testutil.DatabaseService{
+		GetPlanByIDFunc: func(context.Context, uint) (*database.Plan, error) {
+			return &database.Plan{ID: 2, Name: database.FreePlanName}, nil
+		},
+	}
+	handler := &Handler{
+		cfg:            cfg,
+		db:             db,
+		paymentEnabled: true,
+		keyboards:      NewKeyboardBuilder("testbot", "", "", "", "", true),
+	}
+
+	text, _ := handler.getMainMenuContent(context.Background(), "testuser", true, 123456789, &database.Subscription{PlanID: 2})
+
+	assert.Contains(t, text, "💎 Premium — безлимитный трафик и больше серверов")
 }
 
 func TestGetMainMenuContent_WithoutSubscription(t *testing.T) {

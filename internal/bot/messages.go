@@ -1,6 +1,10 @@
 package bot
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/kereal/rs8kvn_bot/internal/service"
+)
 
 type MessageKey string
 
@@ -17,6 +21,8 @@ const (
 	MsgSubCreateError     MessageKey = "sub.create_error"
 	MsgSubCreatedSuccess  MessageKey = "sub.created_success"
 	MsgPremiumOffer       MessageKey = "premium.offer"
+	MsgPremiumBenefits    MessageKey = "premium.benefits"
+	MsgPremiumMenuTeaser  MessageKey = "premium.menu_teaser"
 	MsgPremiumAlready     MessageKey = "premium.already"
 	MsgPremiumUnavailable MessageKey = "premium.unavailable"
 	MsgPremiumConfirm     MessageKey = "premium.confirm"
@@ -79,6 +85,8 @@ var messages = map[MessageKey]string{
 	MsgSubCreateError:     "❌ Ошибка при создании подписки.",
 	MsgSubCreatedSuccess:  "✅ Ваша подписка\n\n📊 Трафик: %d ГБ\n\n🔗 Ссылка\n`%s`",
 	MsgPremiumOffer:       "💎 *Бесплатный апгрейд*\n\nСейчас у вас тариф *%s*.\n\nВы можете получить *%s* сразу после подтверждения.\nСтоимость сейчас: *%s*.\n\nПосле подтверждения тариф сменится автоматически.",
+	MsgPremiumBenefits:    "✨ *Преимущества Premium*\n\n" + service.PremiumBenefitsText + "\n\nВыберите тариф",
+	MsgPremiumMenuTeaser:  "💎 Premium — безлимитный трафик и больше серверов",
 	MsgPremiumAlready:     "✅ У вас уже активирован тариф *%s*.",
 	MsgPremiumUnavailable: "❌ Бесплатный premium-продукт сейчас недоступен. Попробуйте позже.",
 	MsgPremiumConfirm:     "💳 Вы покупаете *%s* за *%s*.\n\nНажмите «Получить», чтобы сразу активировать тариф.",

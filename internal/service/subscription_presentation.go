@@ -6,6 +6,10 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/config"
 )
 
+// PremiumBenefitsText is the concise user-facing summary shared by purchase
+// and payment-success messages.
+const PremiumBenefitsText = "♾️ Безлимитный трафик\n🌍 Больше серверов и вариантов подключения\n🧪 Дополнительные и экспериментальные функции\n💬 Приоритетная поддержка"
+
 // FormatSubscriptionMessage renders the canonical subscription presentation.
 // Both the bot's "My subscription" screen and payment success notification use
 // this helper so tariff, traffic, dates, reset information and URL stay aligned.

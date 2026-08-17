@@ -462,6 +462,8 @@ func TestHandlePaymentCallback_PostCommitNotificationSendFailureAlertsAdmin(t *t
 	bot.SendFunc = func(chattable tgbotapi.Chattable) (tgbotapi.Message, error) {
 		message, ok := chattable.(tgbotapi.MessageConfig)
 		if ok && message.ChatID == 42 {
+			assert.Equal(t, tgbotapi.ModeMarkdown, message.ParseMode)
+			assert.Contains(t, message.Text, "Добро пожаловать в Premium!")
 			return tgbotapi.Message{}, errors.New("user delivery failed")
 		}
 
