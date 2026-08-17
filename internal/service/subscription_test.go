@@ -1553,3 +1553,93 @@ func TestSubscriptionService_AdminSetPlan_Errors(t *testing.T) {
 		assert.ErrorIs(t, err, applyErr, "DB-setup phase failure must surface, not be swallowed")
 	})
 }
+
+func TestSubscriptionService_AdminSetPlan_FreePlanClearsPaidState(t *testing.T) {
+	t.Parallel()
+
+	productID := uint(7)
+	currency := "RUB"
+	started := time.Now().Add(-48 * time.Hour)
+	expiry := time.Now().Add(30 * 24 * time.Hour)
+
+	sub := &database.Subscription{
+		ID:             42,
+		TelegramID:     999805,
+		Username:       "adminsetplan-free",
+		ClientID:       "c-free",
+		SubscriptionID: "s-free",
+		Status:         string(database.SubscriptionStatusActive),
+		PlanID:         1,
+		ExpiresAt:      &expiry,
+		ProductID:      &productID,
+		StartedAt:      &started,
+		PricePaidCents: 2300,
+		Currency:       &currency,
+	}
+
+	var captured *database.Subscription
+
+	db := &testutil.DatabaseService{
+		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
+			return sub, nil
+		},
+		GetPlanByIDFunc: func(context.Context, uint) (*database.Plan, error) {
+			return &database.Plan{ID: 2, Name: database.FreePlanName}, nil
+		},
+		UpdateSubscriptionFunc: func(_ context.Context, updated *database.Subscription) error {
+			captured = updated
+			return nil
+		},
+	}
+
+	svc := NewSubscriptionService(db, nil, nil, nil, &config.Config{})
+
+	updated, err := svc.AdminSetPlan(context.Background(), sub.ID, 2, 30)
+	require.NoError(t, err)
+	require.NotNil(t, captured, "UpdateSubscription must be called")
+
+	assert.Equal(t, uint(2), updated.PlanID)
+	assert.Equal(t, string(database.SubscriptionStatusActive), updated.Status)
+	assert.Nil(t, captured.ExpiresAt, "free plan must clear expiry")
+	assert.Nil(t, captured.ProductID, "free plan must clear product reference")
+	assert.Nil(t, captured.StartedAt, "free plan must clear started_at")
+	assert.Zero(t, captured.PricePaidCents, "free plan must clear paid amount")
+	assert.Nil(t, captured.Currency, "free plan must clear currency")
+}
+
+func TestSubscriptionService_AdminSetPlan_DaysTooLarge(t *testing.T) {
+	t.Parallel()
+
+	sub := &database.Subscription{
+		ID:             42,
+		TelegramID:     999806,
+		Username:       "adminsetplan-days",
+		ClientID:       "c-days",
+		SubscriptionID: "s-days",
+		Status:         string(database.SubscriptionStatusActive),
+		PlanID:         1,
+	}
+
+	updateCalled := false
+
+	db := &testutil.DatabaseService{
+		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
+			return sub, nil
+		},
+		GetPlanByIDFunc: func(context.Context, uint) (*database.Plan, error) {
+			return &database.Plan{ID: 2, Name: "premium-days"}, nil
+		},
+		UpdateSubscriptionFunc: func(context.Context, *database.Subscription) error {
+			updateCalled = true
+			return nil
+		},
+	}
+
+	svc := NewSubscriptionService(db, nil, nil, nil, &config.Config{})
+
+	_, err := svc.AdminSetPlan(context.Background(), sub.ID, 2, AdminSetPlanMaxDays+1)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "exceeds maximum")
+	assert.False(t, updateCalled, "oversized duration must fail before any DB write")
+}
+

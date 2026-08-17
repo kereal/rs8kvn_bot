@@ -437,6 +437,11 @@ func (s *SubscriptionService) DeleteByID(ctx context.Context, id uint) (*databas
 // future expiry to preserve.
 const adminSetPlanDefaultDays = 30
 
+// AdminSetPlanMaxDays is the upper bound for the explicit duration in /setplan.
+// It guards against typos (e.g. an extra zero) silently extending a
+// subscription for centuries.
+const AdminSetPlanMaxDays = 3650
+
 // AdminSetPlan changes a subscription's plan through the service layer
 // (admin override, no payment involved). It mirrors the payment activation
 // flow: update the subscription row (plan, status, expiry, reminder state),
@@ -450,6 +455,10 @@ const adminSetPlanDefaultDays = 30
 // adminSetPlanDefaultDays window. Setting the free plan clears ExpiresAt
 // (бессрочная), mirroring DowngradeToFreePlan.
 func (s *SubscriptionService) AdminSetPlan(ctx context.Context, subscriptionID, planID uint, days int) (*database.Subscription, error) {
+	if days > AdminSetPlanMaxDays {
+		return nil, fmt.Errorf("admin set plan: days %d exceeds maximum %d", days, AdminSetPlanMaxDays)
+	}
+
 	sub, err := s.db.GetByID(ctx, subscriptionID)
 	if err != nil {
 		return nil, fmt.Errorf("admin set plan: load subscription: %w", err)
@@ -460,9 +469,17 @@ func (s *SubscriptionService) AdminSetPlan(ctx context.Context, subscriptionID, 
 		return nil, fmt.Errorf("admin set plan: load plan: %w", err)
 	}
 
-	now := time.Now()
+	now := time.Now().UTC()
 	if plan.Name == database.FreePlanName {
+		// Free plan: clear expiry and paid state, mirroring DowngradeToFreePlan.
+		// Leaving ProductID/PricePaidCents behind would keep the subscription
+		// looking "paid" (renewal vs first-purchase detection in the payment
+		// flow) while it is on the free tier.
 		sub.ExpiresAt = nil
+		sub.ProductID = nil
+		sub.StartedAt = nil
+		sub.PricePaidCents = 0
+		sub.Currency = nil
 	} else {
 		switch {
 		case days > 0:
@@ -472,14 +489,16 @@ func (s *SubscriptionService) AdminSetPlan(ctx context.Context, subscriptionID, 
 			expiry := now.AddDate(0, 0, adminSetPlanDefaultDays)
 			sub.ExpiresAt = &expiry
 		}
+
+		if sub.StartedAt == nil {
+			started := now
+			sub.StartedAt = &started
+		}
 	}
 
 	sub.PlanID = plan.ID
 	sub.Status = string(database.SubscriptionStatusActive)
-	if sub.StartedAt == nil {
-		started := now
-		sub.StartedAt = &started
-	}
+
 	// Reset the reminder bitmask so the expiry-reminder cycle restarts for the
 	// new expiry (mirrors ConfirmOrderPaidCAS).
 	sub.RemindersSent = 0

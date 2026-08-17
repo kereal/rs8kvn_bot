@@ -46,6 +46,7 @@ func TestHandleSetPlan_UsageAndValidation(t *testing.T) {
 		{name: "invalid_plan_id", cmd: "/setplan 5 abc", wantMsg: "Неверный ID тарифа"},
 		{name: "invalid_days", cmd: "/setplan 5 3 abc", wantMsg: "Количество дней должно быть положительным"},
 		{name: "zero_days", cmd: "/setplan 5 3 0", wantMsg: "Количество дней должно быть положительным"},
+		{name: "days_too_large", cmd: "/setplan 5 3 99999", wantMsg: "Количество дней не может превышать"},
 	}
 
 	for _, tt := range tests {
