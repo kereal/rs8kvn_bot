@@ -358,8 +358,8 @@ func (s *SubscriptionService) DowngradeToFreePlan(ctx context.Context, sub *data
 	return sub, nil
 }
 
-// revokeAndDeprovisionThenDelete runs the two-phase subscription teardown shared by
-// Delete and DeleteByID: mark revoked → deprovision VPN access (best-effort; background
+// revokeAndDeprovisionThenDelete runs the two-phase subscription teardown used by
+// DeleteByID: mark revoked → deprovision VPN access (best-effort; background
 // sync reconciles on failure) → physically delete the DB row + subscription nodes →
 // invalidate the cache. The resolved sub is the single input, so the lifecycle contract
 // lives in exactly one place. Returns the deleted subscription (nil on error).

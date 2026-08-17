@@ -1041,6 +1041,80 @@ func TestSyncService_SyncSubscription_PendingRemove_NoVPNClientKeepsPending(t *t
 	assert.Equal(t, 1, rows[0].RetryCount)
 }
 
+func TestSyncService_SyncSubscription_PendingRemove_InactiveNodeDropsBinding(t *testing.T) {
+	t.Parallel()
+
+	db, err := testutil.NewTestDatabaseService(t)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	plan := &database.Plan{Name: "test-plan-sync-rm-inactive", DevicesLimit: 1, TrafficLimit: 1024}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(plan).Error)
+
+	node1 := &database.Node{Name: "sync-rm-inactive-node", Host: "http://srni", APIToken: "trni", InboundIDs: `[1]`}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(node1).Error)
+	// GORM's default:true tag omits the zero-valued bool on Create, so flip the
+	// column explicitly to produce a genuinely inactive node.
+	require.NoError(t, db.GetDB().WithContext(ctx).Model(&database.Node{}).Where("id = ?", node1.ID).Update("is_active", false).Error)
+
+	sub := &database.Subscription{
+		TelegramID:     9998,
+		Username:       "syncrminactive",
+		ClientID:       "c-syncrminactive",
+		SubscriptionID: "s-syncrminactive",
+		Status:         "active",
+		PlanID:         plan.ID,
+		ExpiresAt:      testutil.PtrTime(time.Now().Add(24 * time.Hour)),
+	}
+	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
+	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusPendingRemove}))
+
+	// Inactive nodes are not loaded into the runtime snapshot, so there is no
+	// VPN client — the stale binding must be dropped, not retried forever.
+	svc := NewSyncService(db, map[uint]vpn.Client{}, nil)
+
+	require.NoError(t, svc.SyncSubscription(ctx, sub.ID))
+
+	rows, err := db.GetBySubscriptionID(ctx, sub.ID)
+	require.NoError(t, err)
+	assert.Empty(t, rows, "pending_remove on an inactive node must drop the stale binding")
+}
+
+func TestSyncService_SyncSubscription_PendingRemove_MissingNodeDropsBinding(t *testing.T) {
+	t.Parallel()
+
+	db, err := testutil.NewTestDatabaseService(t)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	plan := &database.Plan{Name: "test-plan-sync-rm-missing", DevicesLimit: 1, TrafficLimit: 1024}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(plan).Error)
+
+	sub := &database.Subscription{
+		TelegramID:     9999,
+		Username:       "syncrmmissing",
+		ClientID:       "c-syncrmmissing",
+		SubscriptionID: "s-syncrmmissing",
+		Status:         "active",
+		PlanID:         plan.ID,
+		ExpiresAt:      testutil.PtrTime(time.Now().Add(24 * time.Hour)),
+	}
+	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
+
+	// Node 999999 never existed: the binding references a gone node.
+	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: 999999, Status: database.SyncStatusPendingRemove}))
+
+	svc := NewSyncService(db, map[uint]vpn.Client{}, nil)
+
+	require.NoError(t, svc.SyncSubscription(ctx, sub.ID))
+
+	rows, err := db.GetBySubscriptionID(ctx, sub.ID)
+	require.NoError(t, err)
+	assert.Empty(t, rows, "pending_remove on a missing node must drop the stale binding")
+}
+
 func TestSyncService_SyncPendingNodes_ContinuesAfterNodeFailure(t *testing.T) {
 	t.Parallel()
 

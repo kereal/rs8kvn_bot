@@ -320,7 +320,7 @@ func startBackgroundWorkers(ctx context.Context, handler *bot.Handler, subServic
 		if err != nil {
 			logger.Warn("Initial orphan reconciliation failed", zap.Error(err))
 		} else {
-			logger.Info("Orphan reconciliation completed", zap.Int("removed", count))
+			logger.Info("Orphan reconciliation completed", zap.Int("revoked", count))
 		}
 
 		ticker := time.NewTicker(8 * time.Hour)
@@ -335,7 +335,7 @@ func startBackgroundWorkers(ctx context.Context, handler *bot.Handler, subServic
 				if err != nil {
 					logger.Warn("Orphan reconciliation failed", zap.Error(err))
 				} else {
-					logger.Info("Orphan reconciliation completed", zap.Int("removed", count))
+					logger.Info("Orphan reconciliation completed", zap.Int("revoked", count))
 				}
 			}
 		}
