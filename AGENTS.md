@@ -13,6 +13,13 @@
 6. Используй подходящие mcp-инструменты
 
 
+## Git commits
+
+- Коммит-сообщения — Conventional Commits: `feat:`, `fix:`, `docs:`, `test:`, `chore:` и т.п.
+- НИКОГДА не добавлять авто-футеры вида «Generated with Codebuff» / «Co-Authored-By: …»
+  в сообщения коммитов — только описание изменения.
+
+
 ## RTK - Rust Token Killer
 
 **Usage**: Token-optimized CLI proxy for shell commands.
