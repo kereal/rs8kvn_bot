@@ -730,6 +730,49 @@ func TestSubscriptionService_BindTrial_SingleNode_ErrorPropagated(t *testing.T) 
 	assert.Equal(t, "testuser", gotReq.Username, "Username must be the resolved XUIEmail (username)")
 }
 
+func TestSubscriptionService_BindTrial_ReferrerErrorStopsProvisioning(t *testing.T) {
+	t.Parallel()
+
+	bound := &database.Subscription{
+		ID:             42,
+		TelegramID:     123456,
+		Username:       "testuser",
+		ClientID:       "client-xyz",
+		SubscriptionID: "trial-sub-1",
+		Status:         "active",
+		PlanID:         2,
+		InviteCode:     testutil.PtrString("REFER123"),
+	}
+	updateCalls := 0
+
+	db := &testutil.DatabaseService{
+		BindTrialSubscriptionFunc: func(ctx context.Context, subscriptionID string, telegramID int64, username string) (*database.Subscription, error) {
+			return bound, nil
+		},
+		GetPlanByNameFunc: func(ctx context.Context, name string) (*database.Plan, error) {
+			return &database.Plan{ID: 2, Name: database.FreePlanName, TrafficLimit: 1024}, nil
+		},
+		GetInviteByCodeFunc: func(ctx context.Context, code string) (*database.Invite, error) {
+			return nil, context.Canceled
+		},
+	}
+
+	client := &testutil.XUIClient{
+		UpdateClientFunc: func(ctx context.Context, req xui.ClientRequest) error {
+			updateCalls++
+			return nil
+		},
+	}
+	node := database.Node{ID: 1, IsActive: true, Host: "http://x1", InboundIDs: "[1]"}
+	svc := NewSubscriptionService(db, nil, map[uint]vpn.Client{1: vpn.NewThreeXUIClient(client, []int{1})}, []database.Node{node}, &config.Config{})
+
+	got, err := svc.BindTrial(context.Background(), "trial-sub-1", 123456, "testuser")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.NotNil(t, got)
+	assert.Zero(t, updateCalls, "referrer lookup errors must not send an empty Comment to the panel")
+}
+
 // TestSubscriptionService_BindTrial_SingleNode_Success verifies the happy path
 // of the single-node trial contract: exactly one UpdateClient on nodes[0].
 func TestSubscriptionService_BindTrial_SingleNode_Success(t *testing.T) {
@@ -825,20 +868,24 @@ func TestReferrerComment(t *testing.T) {
 
 	t.Run("no invite code returns empty", func(t *testing.T) {
 		db := &testutil.DatabaseService{}
-		assert.Equal(t, "", referrerComment(ctx, db, &database.Subscription{}))
+		comment, err := referrerComment(ctx, db, &database.Subscription{})
+		require.NoError(t, err)
+		assert.Empty(t, comment)
 	})
 
-	t.Run("unknown invite returns empty", func(t *testing.T) {
+	t.Run("unknown invite returns empty without error", func(t *testing.T) {
 		db := &testutil.DatabaseService{
 			GetInviteByCodeFunc: func(ctx context.Context, code string) (*database.Invite, error) {
 				return nil, database.ErrInviteNotFound
 			},
 		}
 		sub := &database.Subscription{InviteCode: testutil.PtrString("REFER123")}
-		assert.Equal(t, "", referrerComment(ctx, db, sub))
+		comment, err := referrerComment(ctx, db, sub)
+		require.NoError(t, err)
+		assert.Empty(t, comment)
 	})
 
-	t.Run("unknown referrer returns empty", func(t *testing.T) {
+	t.Run("unknown referrer returns empty without error", func(t *testing.T) {
 		db := &testutil.DatabaseService{
 			GetInviteByCodeFunc: func(ctx context.Context, code string) (*database.Invite, error) {
 				return &database.Invite{Code: code, ReferrerTGID: 555}, nil
@@ -848,7 +895,41 @@ func TestReferrerComment(t *testing.T) {
 			},
 		}
 		sub := &database.Subscription{InviteCode: testutil.PtrString("REFER123")}
-		assert.Equal(t, "", referrerComment(ctx, db, sub))
+		comment, err := referrerComment(ctx, db, sub)
+		require.NoError(t, err)
+		assert.Empty(t, comment)
+	})
+
+	t.Run("context error is wrapped", func(t *testing.T) {
+		db := &testutil.DatabaseService{
+			GetInviteByCodeFunc: func(ctx context.Context, code string) (*database.Invite, error) {
+				return nil, context.DeadlineExceeded
+			},
+		}
+		sub := &database.Subscription{InviteCode: testutil.PtrString("REFER123")}
+		comment, err := referrerComment(ctx, db, sub)
+		assert.Empty(t, comment)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, context.DeadlineExceeded)
+		assert.Contains(t, err.Error(), "load invite by code")
+	})
+
+	t.Run("referrer error is wrapped", func(t *testing.T) {
+		loadErr := errors.New("database unavailable")
+		db := &testutil.DatabaseService{
+			GetInviteByCodeFunc: func(ctx context.Context, code string) (*database.Invite, error) {
+				return &database.Invite{Code: code, ReferrerTGID: 555}, nil
+			},
+			GetByTelegramIDFunc: func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
+				return nil, loadErr
+			},
+		}
+		sub := &database.Subscription{InviteCode: testutil.PtrString("REFER123")}
+		comment, err := referrerComment(ctx, db, sub)
+		assert.Empty(t, comment)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, loadErr)
+		assert.Contains(t, err.Error(), "load referrer subscription")
 	})
 
 	t.Run("referrer found formats comment", func(t *testing.T) {
@@ -861,7 +942,9 @@ func TestReferrerComment(t *testing.T) {
 			},
 		}
 		sub := &database.Subscription{InviteCode: testutil.PtrString("REFER123")}
-		assert.Equal(t, "from: @referrer", referrerComment(ctx, db, sub))
+		comment, err := referrerComment(ctx, db, sub)
+		require.NoError(t, err)
+		assert.Equal(t, "from: @referrer", comment)
 	})
 }
 
@@ -1694,4 +1777,3 @@ func TestSubscriptionService_AdminSetPlan_DaysTooLarge(t *testing.T) {
 	assert.Contains(t, err.Error(), "exceeds maximum")
 	assert.False(t, updateCalled, "oversized duration must fail before any DB write")
 }
-

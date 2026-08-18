@@ -72,40 +72,16 @@ func runMigrations(sqlDB *sql.DB) error {
 		}
 	}
 
-	// Create embedded source driver from migrationFiles
-	sourceDriver, err := iofs.New(migrationFiles, "migrations")
-	if err != nil {
-		return fmt.Errorf("failed to create embedded migration source: %w", err)
-	}
-
-	// Create SQLite driver. NoTxWrap runs every migration outside a transaction.
-	// SQLite treats `PRAGMA foreign_keys = OFF/ON` as a no-op inside a transaction,
-	// so table-rebuild migrations (022/027/033/034) need the pragma statements to
-	// execute on a bare connection to actually disable/re-enable FK enforcement
-	// around DROP TABLE. Without this, the pragmas are silently ignored and the
-	// rebuilds either fail (FK on) or leave enforcement off.
-	driver, err := sqlite.WithInstance(sqlDB, &sqlite.Config{NoTxWrap: true})
-	if err != nil {
-		return fmt.Errorf("failed to create migrate driver: %w", err)
-	}
-
-	m, err := migrate.NewWithInstance("iofs", sourceDriver, "sqlite", driver)
-	if err != nil {
-		return fmt.Errorf("failed to create migration instance: %w", err)
-	}
-
 	maxEmbeddedVersion, err := latestEmbeddedMigrationVersion()
 	if err != nil {
 		return fmt.Errorf("failed to determine latest embedded migration: %w", err)
 	}
 
-	// Get current version before migration. A database newer than the embedded
-	// source is not safe to auto-repair: Force() changes bookkeeping only and
-	// cannot recreate an absent migration's schema changes.
-	versionBefore, dirtyBefore, versionErr := m.Version()
-	if versionErr != nil && !errors.Is(versionErr, migrate.ErrNilVersion) {
-		return fmt.Errorf("failed to read migration version: %w", versionErr)
+	versionBefore, dirtyBefore, err := migrationState(sqlDB)
+	if err != nil {
+		return fmt.Errorf("failed to read migration version: %w", err)
 	}
+
 	// #nosec G115 -- maxEmbeddedVersion is guaranteed non-negative: the helper
 	// returns an error when no embedded .up.sql migration is found.
 	if versionBefore > uint(maxEmbeddedVersion) {
@@ -113,34 +89,19 @@ func runMigrations(sqlDB *sql.DB) error {
 	}
 
 	if dirtyBefore {
-		currentVer, err := migrationVersionToInt(versionBefore)
-		if err != nil {
-			return fmt.Errorf("invalid dirty migration version: %w", err)
-		}
-
-		logger.Warn("Database is in dirty state, forcing migration back",
-			zap.Int("current_version", currentVer))
-
-		err = m.Force(currentVer - 1)
-		if err != nil {
-			return fmt.Errorf("failed to force migration version: %w", err)
+		if err := recoverDirtyMigration(sqlDB, versionBefore); err != nil {
+			return err
 		}
 	}
 
-	err = m.Up()
-	if err != nil && !errors.Is(err, migrate.ErrNoChange) {
-		if strings.Contains(err.Error(), "file does not exist") || strings.Contains(err.Error(), "read down for version") {
-			// Never repair a missing migration by changing only schema_migrations.
-			// Force() cannot recreate the SQL/schema changes and would make a
-			// potentially incompatible database look healthy on the next start.
-			return fmt.Errorf("migration failed: %w; database references a missing migration; restore the exact migration files or perform a reviewed schema recovery", err)
-		}
-
-		return fmt.Errorf("migration failed: %w", err)
+	if err := applyMigrations(sqlDB, maxEmbeddedVersion); err != nil {
+		return err
 	}
 
-	// Get version after migration
-	versionAfter, _, _ := m.Version()
+	versionAfter, _, err := migrationState(sqlDB)
+	if err != nil {
+		return fmt.Errorf("failed to read migration version after migration: %w", err)
+	}
 
 	if versionAfter > versionBefore {
 		logger.Info("Database migrations applied",
@@ -151,6 +112,246 @@ func runMigrations(sqlDB *sql.DB) error {
 	}
 
 	return nil
+}
+
+// migrationState reads metadata using the transactional driver configuration.
+// NoTxWrap is relevant to applying a migration, not to reading or updating the
+// bookkeeping row.
+func migrationState(sqlDB *sql.DB) (uint, bool, error) {
+	m, err := newMigration(sqlDB, false)
+	if err != nil {
+		return 0, false, err
+	}
+	version, dirty, err := m.Version()
+	if errors.Is(err, migrate.ErrNilVersion) {
+		return 0, false, nil
+	}
+
+	return version, dirty, err
+}
+
+// applyMigrations keeps ordinary migrations transactional and runs only the
+// migrations that change PRAGMA foreign_keys through the explicit no-transaction
+// path. A single NoTxWrap driver cannot be used for the whole history: it would
+// remove rollback protection from otherwise ordinary migrations.
+func applyMigrations(sqlDB *sql.DB, maxVersion int) error {
+	for {
+		version, dirty, err := migrationState(sqlDB)
+		if err != nil {
+			return fmt.Errorf("failed to read migration state: %w", err)
+		}
+		if dirty {
+			return fmt.Errorf("migration state became dirty at version %d; schema recovery is required before retrying", version)
+		}
+		if version >= uint(maxVersion) {
+			return nil
+		}
+
+		currentVersion := int(version)
+		nextPragmaVersion, err := nextForeignKeysMigration(currentVersion, maxVersion)
+		if err != nil {
+			return fmt.Errorf("failed to classify migrations: %w", err)
+		}
+
+		if nextPragmaVersion < 0 {
+			if err := migrateTo(sqlDB, maxVersion, false); err != nil {
+				return fmt.Errorf("migration failed: %w", err)
+			}
+			continue
+		}
+
+		// Bring the database to the migration immediately before the special one
+		// with the normal transactional driver.
+		if currentVersion < nextPragmaVersion-1 {
+			if err := migrateTo(sqlDB, nextPragmaVersion-1, false); err != nil {
+				return fmt.Errorf("migration failed before foreign-key migration %d: %w", nextPragmaVersion, err)
+			}
+			continue
+		}
+
+		// This is deliberately the only NoTxWrap invocation. If it fails, the
+		// dirty marker is left untouched and the caller must inspect/recover the
+		// schema before any metadata repair is attempted.
+		if err := migrateTo(sqlDB, nextPragmaVersion, true); err != nil {
+			return fmt.Errorf("foreign-key migration %d failed; schema may be partially applied: %w", nextPragmaVersion, err)
+		}
+	}
+}
+
+func migrateTo(sqlDB *sql.DB, targetVersion int, noTxWrap bool) error {
+	m, err := newMigration(sqlDB, noTxWrap)
+	if err != nil {
+		return err
+	}
+	err = m.Migrate(uint(targetVersion))
+	if errors.Is(err, migrate.ErrNoChange) {
+		return nil
+	}
+
+	return err
+}
+
+func newMigration(sqlDB *sql.DB, noTxWrap bool) (*migrate.Migrate, error) {
+	sourceDriver, err := iofs.New(migrationFiles, "migrations")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create embedded migration source: %w", err)
+	}
+
+	driver, err := sqlite.WithInstance(sqlDB, &sqlite.Config{NoTxWrap: noTxWrap})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create migrate driver: %w", err)
+	}
+
+	m, err := migrate.NewWithInstance("iofs", sourceDriver, "sqlite", driver)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create migration instance: %w", err)
+	}
+
+	return m, nil
+}
+
+// recoverDirtyMigration is intentionally conservative. Transactional
+// migrations can be safely rewound in metadata because their SQL was rolled
+// back. A NoTxWrap migration is different: Force(previous) would hide a
+// partially rebuilt table. First inspect the resulting schema; only a complete
+// schema is allowed to be marked clean at the current version.
+func recoverDirtyMigration(sqlDB *sql.DB, version uint) error {
+	currentVersion, err := migrationVersionToInt(version)
+	if err != nil {
+		return fmt.Errorf("invalid dirty migration version: %w", err)
+	}
+
+	requiresForeignKeys, err := migrationRequiresForeignKeys(currentVersion)
+	if err != nil {
+		return fmt.Errorf("failed to classify dirty migration %d: %w", currentVersion, err)
+	}
+
+	if requiresForeignKeys {
+		complete, err := foreignKeysMigrationSchemaComplete(sqlDB, currentVersion)
+		if err != nil {
+			return fmt.Errorf("failed to inspect schema for dirty migration %d: %w", currentVersion, err)
+		}
+		if !complete {
+			return fmt.Errorf("migration %d is dirty and its non-transactional schema is incomplete; refusing to change migration metadata; restore the schema manually before retrying", currentVersion)
+		}
+
+		if err := forceMigrationVersion(sqlDB, currentVersion); err != nil {
+			return fmt.Errorf("failed to mark recovered migration %d as clean: %w", currentVersion, err)
+		}
+		return nil
+	}
+
+	previousVersion := currentVersion - 1
+	if err := forceMigrationVersion(sqlDB, previousVersion); err != nil {
+		return fmt.Errorf("failed to rewind transactional migration version: %w", err)
+	}
+
+	return nil
+}
+
+func forceMigrationVersion(sqlDB *sql.DB, version int) error {
+	m, err := newMigration(sqlDB, false)
+	if err != nil {
+		return err
+	}
+	return m.Force(version)
+}
+
+func nextForeignKeysMigration(currentVersion, maxVersion int) (int, error) {
+	for version := currentVersion + 1; version <= maxVersion; version++ {
+		requires, err := migrationRequiresForeignKeys(version)
+		if err != nil {
+			return 0, err
+		}
+		if requires {
+			return version, nil
+		}
+	}
+
+	return -1, nil
+}
+
+func migrationRequiresForeignKeys(version int) (bool, error) {
+	entries, err := migrationFiles.ReadDir("migrations")
+	if err != nil {
+		return false, fmt.Errorf("read embedded migrations: %w", err)
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".up.sql") {
+			continue
+		}
+
+		separator := strings.IndexByte(entry.Name(), '_')
+		if separator <= 0 {
+			continue
+		}
+		entryVersion, parseErr := strconv.Atoi(entry.Name()[:separator])
+		if parseErr != nil || entryVersion != version {
+			continue
+		}
+
+		migration, readErr := migrationFiles.ReadFile("migrations/" + entry.Name())
+		if readErr != nil {
+			return false, fmt.Errorf("read migration %s: %w", entry.Name(), readErr)
+		}
+
+		return strings.Contains(strings.ToUpper(string(migration)), "PRAGMA FOREIGN_KEYS"), nil
+	}
+
+	return false, nil
+}
+
+func foreignKeysMigrationSchemaComplete(sqlDB *sql.DB, version int) (bool, error) {
+	var complete bool
+	var err error
+
+	switch version {
+	case 27:
+		complete, err = tableRebuildComplete(sqlDB, "subscription_nodes", "subscription_nodes_old", "pending_update")
+	case 33:
+		complete, err = tableRebuildComplete(sqlDB, "subscriptions", "subscriptions_old", "status VARCHAR(50) NOT NULL DEFAULT 'active' CHECK")
+		if complete {
+			var invalidRows int
+			err = sqlDB.QueryRow(`SELECT COUNT(*) FROM subscriptions
+				WHERE status IS NULL OR status NOT IN ('active', 'expired', 'paused', 'canceled', 'revoked')`).Scan(&invalidRows)
+			complete = invalidRows == 0
+		}
+	case 34:
+		complete, err = tableRebuildComplete(sqlDB, "orders", "orders_old", "ON DELETE CASCADE")
+	default:
+		return false, fmt.Errorf("no schema recovery verifier for migration %d", version)
+	}
+	if err != nil || !complete {
+		return complete, err
+	}
+
+	var integrity string
+	if err := sqlDB.QueryRow("PRAGMA integrity_check").Scan(&integrity); err != nil {
+		return false, err
+	}
+
+	return strings.EqualFold(integrity, "ok"), nil
+}
+
+func tableRebuildComplete(sqlDB *sql.DB, tableName, oldTableName, requiredSQL string) (bool, error) {
+	var tableSQL sql.NullString
+	if err := sqlDB.QueryRow(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?`, tableName).Scan(&tableSQL); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		return false, err
+	}
+	if !tableSQL.Valid || !strings.Contains(strings.ToUpper(tableSQL.String), strings.ToUpper(requiredSQL)) {
+		return false, nil
+	}
+
+	var oldTableCount int
+	if err := sqlDB.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, oldTableName).Scan(&oldTableCount); err != nil {
+		return false, err
+	}
+
+	return oldTableCount == 0, nil
 }
 
 func latestEmbeddedMigrationVersion() (int, error) {
