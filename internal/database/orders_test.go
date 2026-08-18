@@ -49,6 +49,61 @@ func TestGetOrderByID_NotFound(t *testing.T) {
 	assert.ErrorIs(t, err, ErrOrderNotFound)
 }
 
+func TestSaveOrderPaymentAmounts(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	sub := createTestSubscription(t, svc, 301, "user-payment-amounts", "client-payment-amounts")
+	plan := &Plan{Name: "plan-order-amounts", DevicesLimit: 1, TrafficLimit: 1024}
+	require.NoError(t, svc.db.WithContext(ctx).Create(plan).Error)
+	product := &Product{PlanID: plan.ID, Name: "1M", DurationDays: 30, PriceCents: 5000, Currency: "RUB", IsActive: true}
+	require.NoError(t, svc.db.WithContext(ctx).Create(product).Error)
+
+	order := &Order{
+		SubscriptionID: sub.ID,
+		ProductID:      product.ID,
+		Status:         OrderStatusPaid,
+		AmountCents:    5000,
+		Currency:       "RUB",
+	}
+	require.NoError(t, svc.db.WithContext(ctx).Create(order).Error)
+
+	// First call stores the callback amount; fee fields stay NULL.
+	require.NoError(t, svc.SaveOrderPaymentAmounts(ctx, order.ID, 5250, nil, nil))
+
+	got, err := svc.GetOrderByID(ctx, order.ID)
+	require.NoError(t, err)
+	require.NotNil(t, got.CallbackAmountCents)
+	assert.Equal(t, int64(5250), *got.CallbackAmountCents)
+	assert.Nil(t, got.ProviderFeeCents)
+	assert.Nil(t, got.ProviderFeeType)
+
+	// Best-effort follow-up call adds the provider fee without touching the amount.
+	feeType := 1
+
+	require.NoError(t, svc.SaveOrderPaymentAmounts(ctx, order.ID, 5250, ptrInt64(450), &feeType))
+
+	got, err = svc.GetOrderByID(ctx, order.ID)
+	require.NoError(t, err)
+	require.NotNil(t, got.CallbackAmountCents)
+	assert.Equal(t, int64(5250), *got.CallbackAmountCents)
+	require.NotNil(t, got.ProviderFeeCents)
+	assert.Equal(t, int64(450), *got.ProviderFeeCents)
+	require.NotNil(t, got.ProviderFeeType)
+	assert.Equal(t, 1, *got.ProviderFeeType)
+}
+
+func TestSaveOrderPaymentAmounts_UnknownOrder(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+
+	err := svc.SaveOrderPaymentAmounts(context.Background(), 99999, 5250, nil, nil)
+	require.NoError(t, err)
+}
+
 func TestOrderStatusConstants(t *testing.T) {
 	assert.Equal(t, OrderStatus("pending"), OrderStatusPending)
 	assert.Equal(t, OrderStatus("paid"), OrderStatusPaid)

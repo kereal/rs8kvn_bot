@@ -44,6 +44,35 @@ func (fakePaymentProvider) CreateTransaction(context.Context, platega.CreateTran
 	return &platega.CreateTransactionResponse{TransactionID: "550e8400-e29b-41d4-a716-446655440099", URL: "https://example.com", ExpiresIn: "00:15:00"}, nil
 }
 
+// GetTransactionStatus is not configured in the payment mocks; returning an
+// error keeps the best-effort fee fetch out of tests that do not care about it.
+func (p responsePaymentProvider) GetTransactionStatus(context.Context, uuid.UUID) (*platega.TransactionStatusResponse, error) {
+	return nil, errors.New("status not configured")
+}
+
+func (p errorPaymentProvider) GetTransactionStatus(context.Context, uuid.UUID) (*platega.TransactionStatusResponse, error) {
+	return nil, errors.New("status not configured")
+}
+
+func (fakePaymentProvider) GetTransactionStatus(context.Context, uuid.UUID) (*platega.TransactionStatusResponse, error) {
+	return nil, errors.New("status not configured")
+}
+
+// statusPaymentProvider returns a fixed transaction status, mimicking the
+// provider's GET /transaction/{id} endpoint used for the best-effort fee fetch.
+type statusPaymentProvider struct {
+	status *platega.TransactionStatusResponse
+	err    error
+}
+
+func (p statusPaymentProvider) CreateTransaction(context.Context, platega.CreateTransactionRequest) (*platega.CreateTransactionResponse, error) {
+	return nil, errors.New("create not configured")
+}
+
+func (p statusPaymentProvider) GetTransactionStatus(context.Context, uuid.UUID) (*platega.TransactionStatusResponse, error) {
+	return p.status, p.err
+}
+
 func atomicChargebackResult(orderID, subscriptionID uint, wasPaid, downgraded bool) (*database.ChargebackResult, error) {
 	return &database.ChargebackResult{
 		Order:        &database.Order{ID: orderID, SubscriptionID: subscriptionID, Status: database.OrderStatusCanceled, AmountCents: 2300, Currency: "RUB"},
@@ -1186,6 +1215,96 @@ func TestCancelPaymentByProvider_ChargebackDowngradeUsesSyncService(t *testing.T
 	assert.False(t, deleteNodesCalled, "the atomic path must not use the legacy node wipe")
 	assert.False(t, updateCalled, "the atomic repository owns subscription downgrade inside its transaction")
 	assert.False(t, premiumMarkedForRemoval, "the fake atomic seam does not re-run plan application")
+}
+
+type paymentAmountsSave struct {
+	orderID       uint
+	callbackCents int64
+	feeCents      *int64
+	feeType       *int
+}
+
+func TestConfirmPayment_PersistsCallbackAmountAndProviderFee(t *testing.T) {
+	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440127")
+	var saves []paymentAmountsSave
+
+	mock := &testutil.DatabaseService{
+		GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
+			return &database.Order{ID: 33, SubscriptionID: 43, ProductID: 53, Status: database.OrderStatusPending, AmountCents: 5000, Currency: "RUB"}, nil
+		},
+		GetProductByIDFunc: func(_ context.Context, id uint) (*database.Product, error) {
+			return &database.Product{ID: id, PlanID: 63, DurationDays: 30, PriceCents: 5000, Currency: "RUB", IsActive: true}, nil
+		},
+		GetByIDFunc: func(_ context.Context, id uint) (*database.Subscription, error) {
+			return &database.Subscription{ID: id, TelegramID: 73, PlanID: 63}, nil
+		},
+		ConfirmOrderPaidCASFunc: func(_ context.Context, _ uint, _, _ time.Time, sub *database.Subscription, _ *database.Product, _ database.ApplyPlanInTxFn) (bool, error) {
+			sub.ExpiresAt = testutil.PtrTime(time.Now().UTC().Truncate(time.Minute).AddDate(0, 0, 30))
+			return true, nil
+		},
+		GetPendingBySubscriptionIDFunc: func(context.Context, uint) ([]database.SubscriptionNode, error) {
+			return nil, nil
+		},
+		SaveOrderPaymentAmountsFunc: func(_ context.Context, orderID uint, callbackCents int64, feeCents *int64, feeType *int) error {
+			saves = append(saves, paymentAmountsSave{orderID: orderID, callbackCents: callbackCents, feeCents: feeCents, feeType: feeType})
+			return nil
+		},
+	}
+	feeType := 1
+	provider := statusPaymentProvider{status: &platega.TransactionStatusResponse{Commission: json.Number("4.5"), CommissionType: &feeType}}
+	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), provider, "", nil)
+
+	confirmation, err := o.ConfirmPayment(context.Background(), providerID, json.Number("52.50"), "RUB")
+	require.NoError(t, err)
+	require.True(t, confirmation.Activated)
+
+	require.Len(t, saves, 2, "callback amount saved first, provider fee appended second")
+	assert.Equal(t, uint(33), saves[0].orderID)
+	assert.Equal(t, int64(5250), saves[0].callbackCents)
+	assert.Nil(t, saves[0].feeCents, "first save must not carry the fee")
+	assert.Equal(t, int64(5250), saves[1].callbackCents)
+	require.NotNil(t, saves[1].feeCents)
+	assert.Equal(t, int64(450), *saves[1].feeCents, "4.5 RUB commission must be stored as 450 cents")
+	require.NotNil(t, saves[1].feeType)
+	assert.Equal(t, 1, *saves[1].feeType)
+}
+
+func TestConfirmPayment_ProviderFeeUnavailableKeepsCallbackAmount(t *testing.T) {
+	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440128")
+	var saves []paymentAmountsSave
+
+	mock := &testutil.DatabaseService{
+		GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
+			return &database.Order{ID: 34, SubscriptionID: 44, ProductID: 54, Status: database.OrderStatusPending, AmountCents: 5000, Currency: "RUB"}, nil
+		},
+		GetProductByIDFunc: func(_ context.Context, id uint) (*database.Product, error) {
+			return &database.Product{ID: id, PlanID: 64, DurationDays: 30, PriceCents: 5000, Currency: "RUB", IsActive: true}, nil
+		},
+		GetByIDFunc: func(_ context.Context, id uint) (*database.Subscription, error) {
+			return &database.Subscription{ID: id, TelegramID: 74, PlanID: 64}, nil
+		},
+		ConfirmOrderPaidCASFunc: func(_ context.Context, _ uint, _, _ time.Time, sub *database.Subscription, _ *database.Product, _ database.ApplyPlanInTxFn) (bool, error) {
+			sub.ExpiresAt = testutil.PtrTime(time.Now().UTC().Truncate(time.Minute).AddDate(0, 0, 30))
+			return true, nil
+		},
+		GetPendingBySubscriptionIDFunc: func(context.Context, uint) ([]database.SubscriptionNode, error) {
+			return nil, nil
+		},
+		SaveOrderPaymentAmountsFunc: func(_ context.Context, orderID uint, callbackCents int64, feeCents *int64, feeType *int) error {
+			saves = append(saves, paymentAmountsSave{orderID: orderID, callbackCents: callbackCents, feeCents: feeCents, feeType: feeType})
+			return nil
+		},
+	}
+	provider := statusPaymentProvider{err: errors.New("transaction API unreachable")}
+	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), provider, "", nil)
+
+	confirmation, err := o.ConfirmPayment(context.Background(), providerID, json.Number("52.50"), "RUB")
+	require.NoError(t, err)
+	require.True(t, confirmation.Activated)
+
+	require.Len(t, saves, 1, "activation must not depend on the provider fee API")
+	assert.Equal(t, int64(5250), saves[0].callbackCents)
+	assert.Nil(t, saves[0].feeCents)
 }
 
 func TestCancelPaymentByProvider_ChargebackOnPendingDoesNotDowngrade(t *testing.T) {
