@@ -203,6 +203,13 @@ func CreateTestSubscriptionInDB(t *testing.T, db *database.Service, chatID int64
 		t.Fatalf("Failed to generate subscription ID: %v", err)
 	}
 
+	// The test DSN enables SQLite foreign-key enforcement: reference the seeded
+	// free plan so the insert is valid.
+	plan, planErr := db.GetPlanByName(context.Background(), database.FreePlanName)
+	if planErr != nil {
+		t.Fatalf("Failed to resolve free plan: %v", planErr)
+	}
+
 	sub := &database.Subscription{
 		TelegramID:     chatID,
 		Username:       username,
@@ -210,6 +217,7 @@ func CreateTestSubscriptionInDB(t *testing.T, db *database.Service, chatID int64
 		SubscriptionID: subscriptionID,
 		ExpiresAt:      expiry,
 		Status:         status,
+		PlanID:         plan.ID,
 	}
 
 	err = db.CreateSubscription(context.Background(), sub, "")
@@ -288,6 +296,11 @@ func TestSubscriptionFlow_RevokeOldSubscription(t *testing.T) {
 		t.Fatalf("Failed to generate client ID: %v", err)
 	}
 
+	plan, planErr := f.DB.GetPlanByName(ctx, database.FreePlanName)
+	if planErr != nil {
+		t.Fatalf("Failed to resolve free plan: %v", planErr)
+	}
+
 	// Creating another subscription with the same telegram_id should fail
 	// due to UNIQUE constraint
 	err = f.DB.CreateSubscription(ctx, &database.Subscription{
@@ -297,6 +310,7 @@ func TestSubscriptionFlow_RevokeOldSubscription(t *testing.T) {
 		SubscriptionID: "testuser2",
 		ExpiresAt:      testutil.PtrTime(time.Now().Add(30 * 24 * time.Hour)),
 		Status:         "active",
+		PlanID:         plan.ID,
 	}, "")
 	if err == nil {
 		t.Fatal("Expected error due to UNIQUE constraint on telegram_id")

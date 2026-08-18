@@ -245,9 +245,11 @@ func TestExpireSubscriptionWithPlanCAS_RollsBackOnPlanApplyFailure(t *testing.T)
 
 	paidPlan := &Plan{Name: "expiry-rollback", IsActive: true}
 	require.NoError(t, svc.db.Create(paidPlan).Error)
+	product := &Product{PlanID: paidPlan.ID, Name: "rollback", DurationDays: 30, PriceCents: 100, Currency: "RUB", IsActive: true}
+	require.NoError(t, svc.db.Create(product).Error)
 
 	expired := time.Now().UTC().Add(-time.Hour)
-	productID := uint(1)
+	productID := product.ID
 	currency := "RUB"
 	sub := &Subscription{TelegramID: 994005, Username: "expiry-rollback", ClientID: "expiry-rollback-client", SubscriptionID: "expiry-rollback-sub", Status: "active", PlanID: paidPlan.ID, ExpiresAt: &expired, ProductID: &productID, PricePaidCents: 100, Currency: &currency}
 	require.NoError(t, svc.CreateSubscription(ctx, sub, ""))
@@ -275,9 +277,11 @@ func TestExpireSubscriptionWithPlanCAS_RequiresExpiredActiveSubscription(t *test
 
 	paidPlan := &Plan{Name: "expiry-paid", IsActive: true}
 	require.NoError(t, svc.db.Create(paidPlan).Error)
+	product := &Product{PlanID: paidPlan.ID, Name: "expiry", DurationDays: 30, PriceCents: 100, Currency: "RUB", IsActive: true}
+	require.NoError(t, svc.db.Create(product).Error)
 
 	expired := time.Now().UTC().Add(-time.Hour)
-	productID := uint(1)
+	productID := product.ID
 	currency := "RUB"
 	sub := &Subscription{TelegramID: 994003, Username: "expiry-cas", ClientID: "expiry-cas-client", SubscriptionID: "expiry-cas-sub", Status: "active", PlanID: paidPlan.ID, ExpiresAt: &expired, ProductID: &productID, PricePaidCents: 100, Currency: &currency}
 	require.NoError(t, svc.CreateSubscription(ctx, sub, ""))

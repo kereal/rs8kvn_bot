@@ -19,7 +19,7 @@ func TestLatestEmbeddedMigrationVersion(t *testing.T) {
 
 	version, err := latestEmbeddedMigrationVersion()
 	require.NoError(t, err)
-	assert.Equal(t, 33, version)
+	assert.Equal(t, 34, version)
 }
 
 func TestRunMigrationsRejectsDatabaseNewerThanEmbedded(t *testing.T) {
@@ -32,19 +32,19 @@ func TestRunMigrationsRejectsDatabaseNewerThanEmbedded(t *testing.T) {
 
 	sqlDB, err := db.db.DB()
 	require.NoError(t, err)
-	_, err = sqlDB.Exec("UPDATE schema_migrations SET version = ?, dirty = ?", 34, false)
+	_, err = sqlDB.Exec("UPDATE schema_migrations SET version = ?, dirty = ?", 35, false)
 	require.NoError(t, err)
 
 	err = runMigrations(sqlDB)
 	require.Error(t, err)
-	assert.ErrorContains(t, err, "newer than the latest embedded migration 33")
+	assert.ErrorContains(t, err, "newer than the latest embedded migration 34")
 
 	var (
 		version int
 		dirty   bool
 	)
 	require.NoError(t, sqlDB.QueryRow("SELECT version, dirty FROM schema_migrations").Scan(&version, &dirty))
-	assert.Equal(t, 34, version)
+	assert.Equal(t, 35, version)
 	assert.False(t, dirty)
 }
 
@@ -93,7 +93,7 @@ func TestMigration_Idempotency(t *testing.T) {
 		SubscriptionID: "sub-123",
 		Status:         "active",
 	}
-	err = db1.CreateSubscription(ctx, sub, "")
+	err = db1.CreateSubscription(ctx, prepareForCreate(t, db1, sub), "")
 	require.NoError(t, err)
 
 	require.NoError(t, db1.Close())
@@ -152,7 +152,7 @@ func TestMigration_PreserveDataOnUpgrade(t *testing.T) {
 		SubscriptionID: "sub-999",
 		Status:         "active",
 	}
-	err = db1.CreateSubscription(ctx, sub, "")
+	err = db1.CreateSubscription(ctx, prepareForCreate(t, db1, sub), "")
 	require.NoError(t, err)
 
 	require.NoError(t, db1.Close())
@@ -276,13 +276,16 @@ func TestMigration_ProductsHaveRequiredName(t *testing.T) {
 func TestMigration_032_NormalizesInvalidRetryState(t *testing.T) {
 	t.Parallel()
 
+	// This test runs on a connection WITHOUT _foreign_keys=on: the legacy world
+	// migration 032 was written for had FK enforcement disabled, and the retry
+	// normalization is what this test verifies (the orphan binding surviving the
+	// 033 table rebuild only exists in that FK-off world). With FK enabled, the
+	// 033 rebuild would cascade-delete the binding instead, so the harness keeps
+	// the raw (FK-off) connection.
 	dbPath := filepath.Join(t.TempDir(), "test.db")
-	db, err := NewService(dbPath)
+	sqlDB, err := sql.Open("sqlite3", dbPath)
 	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, db.Close()) })
-
-	sqlDB, err := db.db.DB()
-	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
 
 	source, err := iofs.New(migrationFiles, "migrations")
 	require.NoError(t, err)
@@ -292,11 +295,13 @@ func TestMigration_032_NormalizesInvalidRetryState(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _, _ = m.Close() })
 
+	require.NoError(t, m.Up())
+
 	// Return to the pre-032 schema, where legacy invalid retry state is still
 	// representable, then insert the row that caused the production risk.
-	// Steps(-2) skips both 032 and 033: 033 rebuilds subscriptions only, but
+	// Steps(-3) skips 034, 033 and 032: 033 rebuilds subscriptions only, but
 	// the step counter must land on the 031 schema for this test's intent.
-	require.NoError(t, m.Steps(-2))
+	require.NoError(t, m.Steps(-3))
 
 	_, err = sqlDB.Exec(`INSERT INTO subscription_nodes
 		(subscription_id, node_id, status, retry_count, retry_at, updated_at)
@@ -328,6 +333,16 @@ func TestMigration_032_EnforcesRetryInvariant(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, db.Close()) })
 
 	sqlDB, err := db.db.DB()
+	require.NoError(t, err)
+
+	// FK enforcement is enabled on the pool (DSN _foreign_keys=on), so the
+	// subscription_nodes rows below need real parent rows.
+	_, err = sqlDB.Exec(`INSERT INTO subscriptions (telegram_id, username, client_id, subscription_id, status)
+		VALUES (1, 'parent-sub', 'client-parent', 'sub-parent', 'active')`)
+	require.NoError(t, err)
+	_, err = sqlDB.Exec(`INSERT INTO nodes (name, subscription_url) VALUES ('node-1', 'http://node-1')`)
+	require.NoError(t, err)
+	_, err = sqlDB.Exec(`INSERT INTO nodes (name, subscription_url) VALUES ('node-2', 'http://node-2')`)
 	require.NoError(t, err)
 
 	// Violating insert: retry_count > 0 with NULL retry_at must be rejected.
@@ -484,8 +499,9 @@ func TestMigration_033_NormalizesInvalidStatuses(t *testing.T) {
 	t.Cleanup(func() { _, _ = m.Close() })
 
 	// Return to the pre-033 schema, where arbitrary statuses are still
-	// representable, then insert the legacy rows.
-	require.NoError(t, m.Steps(-1))
+	// representable, then insert the legacy rows. Steps(-2) also reverts 034
+	// so the counter lands on the 032 schema.
+	require.NoError(t, m.Steps(-2))
 
 	_, err = sqlDB.Exec(`INSERT INTO subscriptions (telegram_id, username, client_id, subscription_id, status)
 		VALUES (777001, 'legacy-garbage', 'client-garbage', 'sub-garbage', 'garbage')`)

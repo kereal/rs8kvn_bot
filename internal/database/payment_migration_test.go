@@ -106,7 +106,17 @@ func TestMigration031_DoesNotRequireLegacyPaymentDeduplication(t *testing.T) {
 func TestMigration031_PendingIndexEnforcesOnlyPlategaPendingOrders(t *testing.T) {
 	sqlDB, cleanup := newSQLiteAtMigration30(t)
 	t.Cleanup(cleanup)
+
+	// runMigrations now applies 033/034 with NoTxWrap, so their trailing
+	// PRAGMA foreign_keys = ON actually takes effect on the migration
+	// connection. This harness tests the legacy FK-off world (it inserts orders
+	// with non-existent parents), so pin the pool to one connection and reset
+	// the flag after migration.
+	sqlDB.SetMaxOpenConns(1)
 	require.NoError(t, runMigrations(sqlDB))
+
+	_, err := sqlDB.Exec("PRAGMA foreign_keys = OFF")
+	require.NoError(t, err)
 
 	insert := func(status, provider string) error {
 		_, err := sqlDB.Exec(`INSERT INTO orders (subscription_id, product_id, status, amount_cents, currency, payment_provider, created_at) VALUES (?, ?, ?, ?, ?, ?, datetime('now'))`, 1, 1, status, 100, "RUB", provider)
