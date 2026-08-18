@@ -272,7 +272,7 @@ func startWebServer(subService *service.SubscriptionService, cfg *config.Config,
 // периодическую сверку осиротевших клиентов, бэкапы, heartbeat, очистку trial,
 // а также синхронизацию и истечение подписок. Возвращает WaitGroup для ожидания
 // завершения при штатном выключении.
-func startBackgroundWorkers(ctx context.Context, handler *bot.Handler, subService *service.SubscriptionService, syncSvc *service.SyncService, dbService *database.Service, cfg *config.Config) *sync.WaitGroup {
+func startBackgroundWorkers(ctx context.Context, handler *bot.Handler, subService *service.SubscriptionService, syncSvc *service.SyncService, orderSvc *service.OrderService, dbService *database.Service, cfg *config.Config) *sync.WaitGroup {
 	var wg sync.WaitGroup
 	wg.Add(8)
 
@@ -369,7 +369,7 @@ func startBackgroundWorkers(ctx context.Context, handler *bot.Handler, subServic
 		defer recoverAndReport("Subscription sync worker")
 		defer wg.Done()
 
-		syncWorker := scheduler.NewSubscriptionSyncWorker(syncSvc)
+		syncWorker := scheduler.NewSubscriptionSyncWorker(syncSvc, orderSvc)
 		syncWorker.Run(ctx)
 	}()
 
@@ -521,7 +521,7 @@ func main() {
 	svc.handler.StartCacheCleanup(ctx, bot.CacheTTL/2)
 	svc.handler.StartRateLimiterCleanup(ctx, bot.CacheTTL, bot.CacheTTL*2)
 	svc.handler.StartReferralCacheSync(ctx)
-	bgWg := startBackgroundWorkers(ctx, svc.handler, svc.subService, svc.syncService, dbService, cfg)
+	bgWg := startBackgroundWorkers(ctx, svc.handler, svc.subService, svc.syncService, svc.orderService, dbService, cfg)
 
 	if webServer != nil {
 		webServer.SetPaymentReady(true)

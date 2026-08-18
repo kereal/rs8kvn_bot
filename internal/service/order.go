@@ -988,8 +988,6 @@ func (o *OrderService) confirmPayment(ctx context.Context, providerPaymentID uui
 
 	if activated {
 		o.notifyAdminPaid(ctx, sub, order, product, isRenewal)
-
-		o.persistProviderFee(ctx, order.ID, providerPaymentID, cents)
 	}
 
 	if activated && o.syncSvc != nil {
@@ -1005,36 +1003,75 @@ func (o *OrderService) confirmPayment(ctx context.Context, providerPaymentID uui
 	return &PaymentConfirmation{Order: order, Activated: activated}, nil
 }
 
-// persistProviderFee сохраняет комиссию провайдера best-effort из API
-// транзакций — колбэк комиссию не содержит. Фактическая сумма с клиента
-// (callback amount) уже записана атомарно в ConfirmOrderPaidCAS; здесь
-// дописывается только комиссия, и при недоступности API поле остаётся NULL.
-func (o *OrderService) persistProviderFee(ctx context.Context, orderID uint, providerPaymentID uuid.UUID, callbackAmountCents int64) {
-	feeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), paymentSyncTimeout)
+// SyncProviderFees retries best-effort provider fee lookups for paid orders.
+// The nullable provider_fee_cents column is the durable retry queue, so payment
+// callbacks do not wait for a second provider request and a later worker run can
+// recover from provider, network, or database failures.
+func (o *OrderService) SyncProviderFees(ctx context.Context, limit int) error {
+	if o.payment == nil {
+		return nil
+	}
+
+	orders, err := o.db.GetPaidOrdersWithoutProviderFee(ctx, limit)
+	if err != nil {
+		return fmt.Errorf("load paid orders without provider fee: %w", err)
+	}
+
+	var errs []error
+	for _, order := range orders {
+		err = ctx.Err()
+		if err != nil {
+			return err
+		}
+
+		providerPaymentID, parseErr := platega.ParseTransactionID(order.ProviderPaymentID)
+		if parseErr != nil {
+			wrappedErr := fmt.Errorf("order %d: parse provider payment ID: %w", order.ID, parseErr)
+			logger.Warn("failed to parse provider payment ID for fee sync", zap.Uint("order_id", order.ID), zap.String("provider_payment_id", order.ProviderPaymentID), zap.Error(wrappedErr))
+			errs = append(errs, wrappedErr)
+			continue
+		}
+
+		callbackAmountCents := order.AmountCents
+		if order.CallbackAmountCents != nil {
+			callbackAmountCents = *order.CallbackAmountCents
+		}
+		err = o.persistProviderFee(ctx, order.ID, providerPaymentID, callbackAmountCents)
+		if err != nil {
+			wrappedErr := fmt.Errorf("order %d: %w", order.ID, err)
+			logger.Warn("provider fee sync failed", zap.Uint("order_id", order.ID), zap.Error(wrappedErr))
+			errs = append(errs, wrappedErr)
+		}
+	}
+
+	return errors.Join(errs...)
+}
+
+// persistProviderFee saves the provider commission from the transaction API.
+// It is called by the background fee worker, not from the payment callback.
+func (o *OrderService) persistProviderFee(ctx context.Context, orderID uint, providerPaymentID uuid.UUID, callbackAmountCents int64) error {
+	feeCtx, cancel := context.WithTimeout(ctx, paymentSyncTimeout)
 	defer cancel()
 
-	status, statusErr := o.payment.GetTransactionStatus(feeCtx, providerPaymentID)
-	if statusErr != nil || status == nil {
-		logger.Warn("failed to fetch provider fee from transaction API",
-			zap.Uint("order_id", orderID),
-			zap.String("provider_payment_id", providerPaymentID.String()),
-			zap.Error(statusErr))
-		return
+	status, err := o.payment.GetTransactionStatus(feeCtx, providerPaymentID)
+	if err != nil {
+		return fmt.Errorf("fetch provider fee: %w", err)
+	}
+	if status == nil {
+		return errors.New("fetch provider fee: empty transaction status")
 	}
 
-	feeCents, convErr := status.CommissionCents()
-	if convErr != nil {
-		logger.Warn("failed to parse provider fee",
-			zap.Uint("order_id", orderID),
-			zap.String("provider_fee_raw", status.Commission.String()),
-			zap.Error(convErr))
-		return
+	feeCents, err := status.CommissionCents()
+	if err != nil {
+		return fmt.Errorf("parse provider fee: %w", err)
 	}
 
-	saveErr := o.db.SaveOrderPaymentAmounts(ctx, orderID, callbackAmountCents, &feeCents)
-	if saveErr != nil {
-		logger.Warn("failed to save provider fee", zap.Uint("order_id", orderID), zap.Int64("provider_fee_cents", feeCents), zap.Error(saveErr))
+	err = o.db.SaveOrderPaymentAmounts(feeCtx, orderID, callbackAmountCents, &feeCents)
+	if err != nil {
+		return fmt.Errorf("save provider fee: %w", err)
 	}
+
+	return nil
 }
 
 // CancelPaymentByProvider validates a cancellation or chargeback callback and

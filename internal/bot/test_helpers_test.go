@@ -1,6 +1,7 @@
 package bot
 
 import (
+	"context"
 	"testing"
 
 	"github.com/kereal/rs8kvn_bot/internal/config"
@@ -95,6 +96,13 @@ func newTestHandlerWithSubService(t *testing.T, cfg *config.Config, mockDB *test
 
 	if mockBot == nil {
 		mockBot = testutil.NewBotAPI()
+	}
+
+	if mockDB.GetTrialSubscriptionBySubIDFunc == nil {
+		mockDB.GetTrialSubscriptionBySubIDFunc = func(_ context.Context, subscriptionID string) (*database.Subscription, error) {
+			inviteCode := subscriptionID
+			return &database.Subscription{SubscriptionID: subscriptionID, InviteCode: &inviteCode}, nil
+		}
 	}
 
 	dbSources := []database.Node{{

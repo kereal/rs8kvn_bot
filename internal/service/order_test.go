@@ -1246,6 +1246,9 @@ func TestConfirmPayment_PersistsCallbackAmountAndProviderFee(t *testing.T) {
 		GetPendingBySubscriptionIDFunc: func(context.Context, uint) ([]database.SubscriptionNode, error) {
 			return nil, nil
 		},
+		GetPaidOrdersWithoutProviderFeeFunc: func(context.Context, int) ([]database.Order, error) {
+			return []database.Order{{ID: 33, AmountCents: 5000, CallbackAmountCents: testutil.PtrInt64(5250), ProviderPaymentID: providerID.String()}}, nil
+		},
 		SaveOrderPaymentAmountsFunc: func(_ context.Context, orderID uint, callbackCents int64, feeCents *int64) error {
 			saves = append(saves, paymentAmountsSave{orderID: orderID, callbackCents: callbackCents, feeCents: feeCents})
 			return nil
@@ -1259,7 +1262,10 @@ func TestConfirmPayment_PersistsCallbackAmountAndProviderFee(t *testing.T) {
 	require.True(t, confirmation.Activated)
 
 	assert.Equal(t, int64(5250), casAmount, "callback amount must be persisted atomically inside the paid CAS")
-	require.Len(t, saves, 1, "only the best-effort provider fee is saved after activation")
+	assert.Empty(t, saves, "the callback must not wait for the provider fee lookup")
+
+	require.NoError(t, o.SyncProviderFees(context.Background(), 10))
+	require.Len(t, saves, 1, "the background fee retry must persist the commission")
 	assert.Equal(t, uint(33), saves[0].orderID)
 	assert.Equal(t, int64(5250), saves[0].callbackCents)
 	require.NotNil(t, saves[0].feeCents)
