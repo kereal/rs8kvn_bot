@@ -619,3 +619,7 @@ type testPaymentProvider struct{}
 func (testPaymentProvider) CreateTransaction(context.Context, platega.CreateTransactionRequest) (*platega.CreateTransactionResponse, error) {
 	return &platega.CreateTransactionResponse{TransactionID: testPaymentID.String(), URL: "https://pay.example", ExpiresIn: "00:15:00"}, nil
 }
+
+func (testPaymentProvider) GetTransactionStatus(context.Context, uuid.UUID) (*platega.TransactionStatusResponse, error) {
+	return nil, errors.New("status not configured")
+}

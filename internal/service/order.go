@@ -25,9 +25,12 @@ import (
 )
 
 // PaymentProvider is the minimal outbound payment contract consumed by OrderService
-// for creating a provider transaction.
+// for creating a provider transaction and reading back its details. The status
+// call is used best-effort to persist the provider fee, which the callback does
+// not carry.
 type PaymentProvider interface {
 	CreateTransaction(ctx context.Context, req platega.CreateTransactionRequest) (*platega.CreateTransactionResponse, error)
+	GetTransactionStatus(ctx context.Context, transactionID uuid.UUID) (*platega.TransactionStatusResponse, error)
 }
 
 // paymentSyncTimeout bounds the best-effort post-commit VPN sync. It prevents a
@@ -985,6 +988,8 @@ func (o *OrderService) confirmPayment(ctx context.Context, providerPaymentID uui
 
 	if activated {
 		o.notifyAdminPaid(ctx, sub, order, product, isRenewal)
+
+		o.persistCallbackAmountAndFee(ctx, order.ID, providerPaymentID, cents)
 	}
 
 	if activated && o.syncSvc != nil {
@@ -998,6 +1003,43 @@ func (o *OrderService) confirmPayment(ctx context.Context, providerPaymentID uui
 	}
 
 	return &PaymentConfirmation{Order: order, Activated: activated}, nil
+}
+
+// persistCallbackAmountAndFee сохраняет фактически списанную с клиента сумму
+// (надёжно, из callback) и, best-effort, комиссию провайдера из API
+// транзакций — колбэк комиссию не содержит. Ошибки не блокируют активацию:
+// callback amount критичен и пишется первым; комиссия дописывается, если API
+// доступен, иначе поля остаются NULL.
+func (o *OrderService) persistCallbackAmountAndFee(ctx context.Context, orderID uint, providerPaymentID uuid.UUID, callbackAmountCents int64) {
+	if err := o.db.SaveOrderPaymentAmounts(ctx, orderID, callbackAmountCents, nil, nil); err != nil {
+		logger.Warn("failed to save callback amount", zap.Uint("order_id", orderID), zap.Int64("callback_amount_cents", callbackAmountCents), zap.Error(err))
+		return
+	}
+
+	feeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), paymentSyncTimeout)
+	defer cancel()
+
+	status, statusErr := o.payment.GetTransactionStatus(feeCtx, providerPaymentID)
+	if statusErr != nil || status == nil {
+		logger.Warn("failed to fetch provider fee from transaction API",
+			zap.Uint("order_id", orderID),
+			zap.String("provider_payment_id", providerPaymentID.String()),
+			zap.Error(statusErr))
+		return
+	}
+
+	feeCents, convErr := status.CommissionCents()
+	if convErr != nil {
+		logger.Warn("failed to parse provider fee",
+			zap.Uint("order_id", orderID),
+			zap.String("provider_fee_raw", status.Commission.String()),
+			zap.Error(convErr))
+		return
+	}
+
+	if err := o.db.SaveOrderPaymentAmounts(ctx, orderID, callbackAmountCents, &feeCents, status.CommissionType); err != nil {
+		logger.Warn("failed to save provider fee", zap.Uint("order_id", orderID), zap.Int64("provider_fee_cents", feeCents), zap.Error(err))
+	}
 }
 
 // CancelPaymentByProvider validates a cancellation or chargeback callback and

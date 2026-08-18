@@ -360,6 +360,10 @@ func (p *countingPaymentProvider) CreateTransaction(context.Context, platega.Cre
 	}, nil
 }
 
+func (p *countingPaymentProvider) GetTransactionStatus(context.Context, uuid.UUID) (*platega.TransactionStatusResponse, error) {
+	return nil, errors.New("status not configured")
+}
+
 // TestRequestPayment_ConcurrentCallersSingleProviderTransaction verifies the
 // per-(subscription,product) claim race: even when many goroutines race for the
 // same pending intent, only one goroutine reaches the PaymentProvider. Each

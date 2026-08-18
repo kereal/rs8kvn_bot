@@ -2,12 +2,14 @@ package e2e
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/service"
 	"github.com/kereal/rs8kvn_bot/internal/service/payment/platega"
@@ -33,6 +35,10 @@ func (fixedPaymentProvider) CreateTransaction(_ context.Context, _ platega.Creat
 		URL:           "https://pay.example/checkout",
 		ExpiresIn:     "00:15:00",
 	}, nil
+}
+
+func (fixedPaymentProvider) GetTransactionStatus(_ context.Context, _ uuid.UUID) (*platega.TransactionStatusResponse, error) {
+	return nil, errors.New("status not configured")
 }
 
 // TestE2E_PremiumPurchase_FullFlow drives the whole purchase path against a real
