@@ -801,6 +801,10 @@ func TestSyncService_SyncSubscription_PendingAdd_AlreadyExists(t *testing.T) {
 	assert.Equal(t, database.SyncStatusActive, rows[0].Status, "should mark active when client already exists")
 	assert.Equal(t, 0, rows[0].RetryCount, "should not increment retry count")
 	assert.True(t, mockVPN.updateCalled, "UpdateSubscription should be called when client already exists")
+	assert.Equal(t, XUIEmail(sub.Username, sub.TelegramID), mockVPN.updateProvision.CurrentEmail, "CurrentEmail must identify the existing client on the panel")
+	assert.Equal(t, XUIEmail(sub.Username, sub.TelegramID), mockVPN.updateProvision.Username)
+	assert.Equal(t, sub.TelegramID, mockVPN.createProvision.TgID, "create must carry the Telegram id")
+	assert.Equal(t, sub.TelegramID, mockVPN.updateProvision.TgID, "update must preserve the Telegram id")
 }
 
 func TestSyncService_SyncSubscription_PendingAdd_AlreadyExistsUpdateFails(t *testing.T) {
