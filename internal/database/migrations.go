@@ -60,7 +60,7 @@ func runMigrations(sqlDB *sql.DB) error {
 		ma, mb, mc := parse(minSQLiteForDropAndReturning)
 		if va < ma || (va == ma && vb < mb) || (va == ma && vb == mb && vc < mc) {
 			// scan embedded migrations for DROP COLUMN or RETURNING usage
-			migrationNames := []string{"migrations/006_create_sources.up.sql", "migrations/031_add_payment_intent_fields.down.sql"}
+			migrationNames := []string{"migrations/006_create_sources.up.sql", "migrations/031_add_payment_intent_fields.down.sql", "migrations/035_add_order_payment_amounts.down.sql"}
 			for _, migrationName := range migrationNames {
 				if bytes, _ := migrationFiles.ReadFile(migrationName); bytes != nil {
 					content := string(bytes)
@@ -312,12 +312,15 @@ func migrationRequiresForeignKeys(version int) (bool, error) {
 func foreignKeysMigrationSchemaComplete(sqlDB *sql.DB, version int) (bool, error) {
 	var complete bool
 	var err error
+	var fkTable string
 
 	switch version {
 	case 27:
-		complete, err = tableRebuildComplete(sqlDB, "subscription_nodes", "subscription_nodes_old", "pending_update")
+		fkTable = "subscription_nodes"
+		complete, err = tableRebuildComplete(sqlDB, fkTable, "subscription_nodes_old", "pending_update")
 	case 33:
-		complete, err = tableRebuildComplete(sqlDB, "subscriptions", "subscriptions_old", "status VARCHAR(50) NOT NULL DEFAULT 'active' CHECK")
+		fkTable = "subscriptions"
+		complete, err = tableRebuildComplete(sqlDB, fkTable, "subscriptions_old", "status VARCHAR(50) NOT NULL DEFAULT 'active' CHECK")
 		if complete {
 			var invalidRows int
 			err = sqlDB.QueryRow(`SELECT COUNT(*) FROM subscriptions
@@ -329,7 +332,8 @@ func foreignKeysMigrationSchemaComplete(sqlDB *sql.DB, version int) (bool, error
 			}
 		}
 	case 34:
-		complete, err = tableRebuildComplete(sqlDB, "orders", "orders_old", "ON DELETE CASCADE")
+		fkTable = "orders"
+		complete, err = tableRebuildComplete(sqlDB, fkTable, "orders_old", "ON DELETE CASCADE")
 	default:
 		return false, fmt.Errorf("no schema recovery verifier for migration %d", version)
 	}
@@ -349,9 +353,12 @@ func foreignKeysMigrationSchemaComplete(sqlDB *sql.DB, version int) (bool, error
 	// PRAGMA integrity_check does not report foreign-key violations. A failed
 	// table-rebuild migration may leave the new table structurally complete
 	// while retaining orphan rows, so metadata must not be repaired until the
-	// separate foreign-key check is clean as well.
+	// separate foreign-key check is clean as well. The check is narrowed to the
+	// rebuilt table: a table rebuild copies every row (INSERT ... SELECT), so
+	// its own orphans are the only data damage it can introduce. Unrelated
+	// foreign-key violations elsewhere (legacy data) must not block recovery.
 	var foreignKeyViolations int
-	err = sqlDB.QueryRow("SELECT COUNT(*) FROM pragma_foreign_key_check").Scan(&foreignKeyViolations)
+	err = sqlDB.QueryRow(fmt.Sprintf("SELECT COUNT(*) FROM pragma_foreign_key_check('%s')", fkTable)).Scan(&foreignKeyViolations)
 	if err != nil {
 		return false, err
 	}

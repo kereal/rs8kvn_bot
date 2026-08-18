@@ -38,6 +38,11 @@ type PaymentProvider interface {
 // retries any remaining pending node operations later.
 const paymentSyncTimeout = 20 * time.Second
 
+// feeSyncBudget bounds one whole provider-fee sync pass. Without it, a hung
+// provider could stall the scheduler for limit×paymentSyncTimeout (up to ~16
+// minutes) and delay the node sync that shares the same worker tick.
+const feeSyncBudget = 60 * time.Second
+
 // Sentinel errors returned for expected payment states and configuration failures.
 // Callers should use errors.Is when they need to distinguish these cases.
 var (
@@ -1012,14 +1017,20 @@ func (o *OrderService) SyncProviderFees(ctx context.Context, limit int) error {
 		return nil
 	}
 
-	orders, err := o.db.GetPaidOrdersWithoutProviderFee(ctx, limit)
+	// One shared deadline for the whole pass: a provider that hangs on every
+	// request must not extend one scheduler tick beyond feeSyncBudget. Each
+	// per-order lookup keeps its own shorter paymentSyncTimeout.
+	budgetCtx, cancel := context.WithTimeout(ctx, feeSyncBudget)
+	defer cancel()
+
+	orders, err := o.db.GetPaidOrdersWithoutProviderFee(budgetCtx, limit)
 	if err != nil {
 		return fmt.Errorf("load paid orders without provider fee: %w", err)
 	}
 
 	var errs []error
 	for _, order := range orders {
-		err = ctx.Err()
+		err = budgetCtx.Err()
 		if err != nil {
 			return err
 		}
@@ -1036,7 +1047,7 @@ func (o *OrderService) SyncProviderFees(ctx context.Context, limit int) error {
 		if order.CallbackAmountCents != nil {
 			callbackAmountCents = *order.CallbackAmountCents
 		}
-		err = o.persistProviderFee(ctx, order.ID, providerPaymentID, callbackAmountCents)
+		err = o.persistProviderFee(budgetCtx, order.ID, providerPaymentID, callbackAmountCents)
 		if err != nil {
 			wrappedErr := fmt.Errorf("order %d: %w", order.ID, err)
 			logger.Warn("provider fee sync failed", zap.Uint("order_id", order.ID), zap.Error(wrappedErr))
@@ -1055,10 +1066,32 @@ func (o *OrderService) persistProviderFee(ctx context.Context, orderID uint, pro
 
 	status, err := o.payment.GetTransactionStatus(feeCtx, providerPaymentID)
 	if err != nil {
+		if errors.Is(err, platega.ErrTransactionNotFound) {
+			// Транзакция удалена у провайдера — комиссию уже не получить.
+			// Пишем 0 как терминальный маркер, чтобы заказ не оставался в
+			// очереди ретрая (provider_fee_cents IS NULL) вечно.
+			logger.Warn("provider transaction not found; provider fee recorded as unavailable",
+				zap.Uint("order_id", orderID),
+				zap.String("provider_payment_id", providerPaymentID.String()))
+			feeUnavailable := int64(0)
+
+			return o.db.SaveOrderPaymentAmounts(feeCtx, orderID, callbackAmountCents, &feeUnavailable)
+		}
+
 		return fmt.Errorf("fetch provider fee: %w", err)
 	}
 	if status == nil {
 		return errors.New("fetch provider fee: empty transaction status")
+	}
+	if status.Status != "CONFIRMED" {
+		// Не-финальный статус транзакции: комиссию пока не записываем,
+		// NULL-маркер оставляет заказ в очереди ретрая следующего тика.
+		logger.Warn("provider transaction is not confirmed; fee sync deferred",
+			zap.Uint("order_id", orderID),
+			zap.String("provider_payment_id", providerPaymentID.String()),
+			zap.String("transaction_status", status.Status))
+
+		return nil
 	}
 
 	feeCents, err := status.CommissionCents()

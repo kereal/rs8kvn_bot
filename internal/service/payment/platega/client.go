@@ -24,6 +24,10 @@ var (
 	ErrAuth       = errors.New("platega: authentication failed")
 	ErrBadRequest = errors.New("platega: bad request")
 	ErrProvider   = errors.New("platega: provider error")
+	// ErrTransactionNotFound сигнализирует, что транзакция удалена у провайдера
+	// (HTTP 404). Для best-effort синка комиссии это терминальное состояние:
+	// повторные запросы никогда не вернут данные, поэтому ретраить нельзя.
+	ErrTransactionNotFound = errors.New("platega: transaction not found")
 )
 
 // Config configures the Platega API client.
@@ -38,6 +42,9 @@ type Config struct {
 // HTTP client and merchant credentials.
 type Client struct {
 	cfg Config
+	// rejectingClient переиспользуется всеми запросами: http.Client без
+	// редиректов, построенный из конфигурационного клиента.
+	rejectingClient *http.Client
 }
 
 // CreateTransactionRequest describes a payment link request.
@@ -110,21 +117,18 @@ func New(cfg Config) *Client {
 		cfg.HTTPClient = &http.Client{Timeout: 5 * time.Second}
 	}
 
-	return &Client{cfg: cfg}
-}
-
-// httpClientRejectingRedirects возвращает клиент на основе конфигурационного,
-// но с отклонением редиректов: http.Client копирует пользовательские заголовки
-// (включая X-Secret) на целевой хост редиректа, что может привести к утечке
-// секрета. 3xx-ответ возвращается как есть и обрабатывается как ошибка.
-func (c *Client) httpClientRejectingRedirects() *http.Client {
-	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	if c.cfg.HTTPClient != nil {
-		client.Transport = c.cfg.HTTPClient.Transport
-		client.Timeout = c.cfg.HTTPClient.Timeout
+	// http.Client копирует пользовательские заголовки (включая X-Secret) на
+	// целевой хост редиректа, что может привести к утечке секрета. Все запросы
+	// идут через клиент с отклонением редиректов: 3xx-ответ возвращается как
+	// есть и обрабатывается как ошибка.
+	return &Client{
+		cfg: cfg,
+		rejectingClient: &http.Client{
+			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+			Transport:     cfg.HTTPClient.Transport,
+			Timeout:       cfg.HTTPClient.Timeout,
+		},
 	}
-
-	return client
 }
 
 // CreateTransaction creates a payment link without selecting a payment method.
@@ -164,7 +168,7 @@ func (c *Client) CreateTransaction(ctx context.Context, req CreateTransactionReq
 
 	requestStarted := time.Now()
 
-	resp, err := c.httpClientRejectingRedirects().Do(httpReq)
+	resp, err := c.rejectingClient.Do(httpReq)
 	if err != nil {
 		if logger.Log != nil { //nolint:staticcheck // defensive guard: global logger may be uninitialized
 			logger.Info("Payment provider request failed",

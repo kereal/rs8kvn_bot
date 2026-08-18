@@ -58,7 +58,7 @@ func (c *Client) GetTransactionStatus(ctx context.Context, transactionID uuid.UU
 	httpReq.Header.Set("X-Merchantid", c.cfg.MerchantID)
 	httpReq.Header.Set("X-Secret", c.cfg.Secret)
 
-	resp, err := c.httpClientRejectingRedirects().Do(httpReq)
+	resp, err := c.rejectingClient.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("%w: send status request: %w", ErrProvider, err)
 	}
@@ -73,7 +73,7 @@ func (c *Client) GetTransactionStatus(ctx context.Context, transactionID uuid.UU
 		case http.StatusUnauthorized:
 			return nil, fmt.Errorf("%w: %s", ErrAuth, strings.TrimSpace(string(message)))
 		case http.StatusNotFound:
-			return nil, fmt.Errorf("%w: transaction %s not found", ErrProvider, transactionID.String())
+			return nil, fmt.Errorf("%w: %s", ErrTransactionNotFound, transactionID.String())
 		default:
 			return nil, fmt.Errorf("%w: %s: %s", ErrProvider, resp.Status, strings.TrimSpace(string(message)))
 		}
