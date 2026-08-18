@@ -48,6 +48,59 @@ func TestRunMigrationsRejectsDatabaseNewerThanEmbedded(t *testing.T) {
 	assert.False(t, dirty)
 }
 
+func TestRunMigrationsRefusesToRepairIncompleteNoTxMigration(t *testing.T) {
+	t.Parallel()
+
+	dbPath := filepath.Join(t.TempDir(), "partial-schema.db")
+	db, err := NewService(dbPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, db.Close()) })
+
+	sqlDB, err := db.db.DB()
+	require.NoError(t, err)
+	_, err = sqlDB.Exec("CREATE TABLE subscription_nodes_old AS SELECT * FROM subscription_nodes")
+	require.NoError(t, err)
+	_, err = sqlDB.Exec("UPDATE schema_migrations SET version = ?, dirty = ?", 27, true)
+	require.NoError(t, err)
+
+	err = runMigrations(sqlDB)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "schema is incomplete")
+
+	var (
+		version int
+		dirty   bool
+	)
+	require.NoError(t, sqlDB.QueryRow("SELECT version, dirty FROM schema_migrations").Scan(&version, &dirty))
+	assert.Equal(t, 27, version)
+	assert.True(t, dirty)
+}
+
+func TestRunMigrationsRepairsMetadataOnlyAfterCompleteNoTxMigration(t *testing.T) {
+	t.Parallel()
+
+	dbPath := filepath.Join(t.TempDir(), "complete-schema.db")
+	db, err := NewService(dbPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, db.Close()) })
+
+	sqlDB, err := db.db.DB()
+	require.NoError(t, err)
+	require.NoError(t, migrateTo(sqlDB, 27, true))
+	_, err = sqlDB.Exec("UPDATE schema_migrations SET version = ?, dirty = ?", 27, true)
+	require.NoError(t, err)
+
+	require.NoError(t, runMigrations(sqlDB))
+
+	var (
+		version int
+		dirty   bool
+	)
+	require.NoError(t, sqlDB.QueryRow("SELECT version, dirty FROM schema_migrations").Scan(&version, &dirty))
+	assert.Equal(t, 35, version)
+	assert.False(t, dirty)
+}
+
 func TestMigrationVersionToInt(t *testing.T) {
 	t.Parallel()
 

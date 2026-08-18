@@ -1147,6 +1147,53 @@ func TestSyncService_SyncPendingNodes_ContinuesAfterNodeFailure(t *testing.T) {
 	assert.True(t, successClient.createCalled)
 }
 
+func TestSyncService_SyncNodes_ReferrerErrorRetriesAndContinues(t *testing.T) {
+	t.Parallel()
+
+	referrerErr := errors.New("referrer lookup failed")
+	retryNodes := make([]uint, 0, 2)
+	db := testutil.NewDatabaseService()
+	db.GetPlanByIDFunc = func(context.Context, uint) (*database.Plan, error) {
+		return &database.Plan{ID: 7, Name: database.FreePlanName, TrafficLimit: 1024}, nil
+	}
+	db.GetInviteByCodeFunc = func(context.Context, string) (*database.Invite, error) {
+		return nil, referrerErr
+	}
+	db.UpdateRetryFunc = func(_ context.Context, _, nodeID uint, _ int, _ *time.Time, _ *string) error {
+		retryNodes = append(retryNodes, nodeID)
+		return nil
+	}
+
+	clients := map[uint]vpn.Client{
+		1: &mockVPNClient{},
+		2: &mockVPNClient{},
+	}
+	svc := NewSyncService(db, clients, []database.Node{
+		{ID: 1, Type: database.NodeType3xUI, IsActive: true},
+		{ID: 2, Type: database.NodeType3xUI, IsActive: true},
+	})
+	sub := &database.Subscription{
+		ID:             42,
+		PlanID:         7,
+		TelegramID:     100,
+		Username:       "sync-user",
+		ClientID:       "client-42",
+		SubscriptionID: "sub-42",
+		InviteCode:     testutil.PtrString("REFER123"),
+	}
+	pending := []database.SubscriptionNode{
+		{SubscriptionID: 42, NodeID: 1, Status: database.SyncStatusPendingAdd},
+		{SubscriptionID: 42, NodeID: 2, Status: database.SyncStatusPendingAdd},
+	}
+
+	err := svc.syncNodes(context.Background(), sub, pending)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, referrerErr)
+	assert.ElementsMatch(t, []uint{1, 2}, retryNodes)
+	assert.False(t, clients[1].(*mockVPNClient).createCalled)
+	assert.False(t, clients[2].(*mockVPNClient).createCalled)
+}
+
 func TestSyncService_SyncPendingNodes_JoinsErrors(t *testing.T) {
 	t.Parallel()
 

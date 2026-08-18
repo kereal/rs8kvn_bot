@@ -676,7 +676,10 @@ func (s *SubscriptionService) BindTrial(ctx context.Context, subscriptionID stri
 
 	expiryTime := time.UnixMilli(0)
 
-	comment := referrerComment(ctx, s.db, sub)
+	comment, err := referrerComment(ctx, s.db, sub)
+	if err != nil {
+		return sub, fmt.Errorf("resolve referrer comment: %w", err)
+	}
 
 	currentEmail := "trial_" + subscriptionID
 	email := XUIEmail(username, telegramID)
@@ -718,26 +721,34 @@ func (s *SubscriptionService) BindTrial(ctx context.Context, subscriptionID stri
 	return sub, nil
 }
 
-// referrerComment возвращает панельный комментарий "from: @<username>" для
-// подписки, созданной по инвайт-коду. Пустая строка, если инвайт или реферер
-// не найдены. Используется и при bind trial, и при синхронизации с нодами,
-// чтобы обновление клиента не затирало комментарий на панели.
-func referrerComment(ctx context.Context, db interfaces.DatabaseService, sub *database.Subscription) string {
+// referrerComment returns the panel comment "from: @<username>" for a
+// subscription created through an invite code. Missing referral records are
+// expected after legacy cleanup and produce an empty comment; all other errors
+// are returned so callers do not overwrite a panel comment with empty data.
+func referrerComment(ctx context.Context, db interfaces.DatabaseService, sub *database.Subscription) (string, error) {
 	if sub.InviteCode == nil {
-		return ""
+		return "", nil
 	}
 
 	invite, err := db.GetInviteByCode(ctx, *sub.InviteCode)
 	if err != nil {
-		return ""
+		if errors.Is(err, database.ErrInviteNotFound) {
+			return "", nil
+		}
+
+		return "", fmt.Errorf("load invite by code: %w", err)
 	}
 
 	referrerSub, err := db.GetByTelegramID(ctx, invite.ReferrerTGID)
 	if err != nil {
-		return ""
+		if errors.Is(err, database.ErrSubscriptionNotFound) {
+			return "", nil
+		}
+
+		return "", fmt.Errorf("load referrer subscription: %w", err)
 	}
 
-	return fmt.Sprintf("from: @%s", referrerSub.Username)
+	return fmt.Sprintf("from: @%s", referrerSub.Username), nil
 }
 
 // RefreshActiveSubscriptionsMetric updates the active_subscriptions and trial_subscriptions gauges.

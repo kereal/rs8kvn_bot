@@ -558,6 +558,12 @@ func (s *SyncService) processPendingUpdate(ctx context.Context, sn *database.Sub
 		return fmt.Errorf("load plan for subscription sync: %w", err)
 	}
 
+	comment, err := referrerComment(ctx, s.db, sub)
+	if err != nil {
+		s.handleSyncError(ctx, sn, err)
+		return fmt.Errorf("load referrer comment: %w", err)
+	}
+
 	provision := vpn.SubscriptionProvision{
 		ClientID:     sub.ClientID,
 		Username:     syncIdentifier(sub),
@@ -565,7 +571,7 @@ func (s *SyncService) processPendingUpdate(ctx context.Context, sn *database.Sub
 		SubID:        sub.SubscriptionID,
 		TrafficBytes: plan.TrafficLimit,
 		TgID:         sub.TelegramID,
-		Comment:      referrerComment(ctx, s.db, sub),
+		Comment:      comment,
 	}
 	if plan.TrafficLimit > 0 {
 		if plan.Name == database.TrialPlanName {
@@ -617,6 +623,12 @@ func (s *SyncService) processPendingAdd(ctx context.Context, sn *database.Subscr
 		return fmt.Errorf("load plan for subscription sync: %w", err)
 	}
 
+	comment, err := referrerComment(ctx, s.db, sub)
+	if err != nil {
+		s.handleSyncError(ctx, sn, err)
+		return fmt.Errorf("load referrer comment: %w", err)
+	}
+
 	provision := vpn.SubscriptionProvision{
 		ClientID:     sub.ClientID,
 		Username:     syncIdentifier(sub),
@@ -624,7 +636,7 @@ func (s *SyncService) processPendingAdd(ctx context.Context, sn *database.Subscr
 		SubID:        sub.SubscriptionID,
 		TrafficBytes: plan.TrafficLimit,
 		TgID:         sub.TelegramID,
-		Comment:      referrerComment(ctx, s.db, sub),
+		Comment:      comment,
 	}
 	if plan.TrafficLimit > 0 {
 		// Trials must never auto-renew even though the trial plan carries a
