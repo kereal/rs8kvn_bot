@@ -22,6 +22,7 @@ const (
 	MsgSubCreatedSuccess  MessageKey = "sub.created_success"
 	MsgPremiumOffer       MessageKey = "premium.offer"
 	MsgPremiumBenefits    MessageKey = "premium.benefits"
+	MsgPremiumBadge       MessageKey = "premium.badge"
 	MsgPremiumMenuTeaser  MessageKey = "premium.menu_teaser"
 	MsgPremiumAlready     MessageKey = "premium.already"
 	MsgPremiumUnavailable MessageKey = "premium.unavailable"
@@ -86,6 +87,7 @@ var messages = map[MessageKey]string{
 	MsgSubCreatedSuccess:  "✅ Ваша подписка\n\n📊 Трафик: %d ГБ\n\n🔗 Ссылка\n`%s`",
 	MsgPremiumOffer:       "💎 *Бесплатный апгрейд*\n\nСейчас у вас тариф *%s*.\n\nВы можете получить *%s* сразу после подтверждения.\nСтоимость сейчас: *%s*.\n\nПосле подтверждения тариф сменится автоматически.",
 	MsgPremiumBenefits:    "✨ *Преимущества Premium*\n\n" + service.PremiumBenefitsText + "\n\nВыберите тариф",
+	MsgPremiumBadge:       "Вы — 💎 Premium",
 	MsgPremiumMenuTeaser:  "💎 Premium — безлимитный трафик и больше серверов",
 	MsgPremiumAlready:     "✅ У вас уже активирован тариф *%s*.",
 	MsgPremiumUnavailable: "❌ Бесплатный premium-продукт сейчас недоступен. Попробуйте позже.",

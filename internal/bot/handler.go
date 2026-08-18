@@ -411,7 +411,9 @@ func (h *Handler) getMainMenuContent(ctx context.Context, username string, hasSu
 
 	if hasSubscription {
 		text = msg(MsgStartGreeting, username)
-		if h.paymentEnabled && h.isFreePlanSubscription(ctx, sub) {
+		if sub.IsPaid() {
+			text += "\n\n" + msg(MsgPremiumBadge)
+		} else if h.paymentEnabled && h.isFreePlanSubscription(ctx, sub) {
 			text += "\n\n" + msg(MsgPremiumMenuTeaser)
 		}
 		keyboard = h.getMainMenuKeyboard(true)
