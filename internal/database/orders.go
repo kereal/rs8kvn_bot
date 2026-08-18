@@ -200,14 +200,13 @@ func (s *Service) SavePaymentDetails(ctx context.Context, orderID uint, provider
 // SaveOrderPaymentAmounts persists the actual amounts known only at callback
 // time: what was really charged from the customer (callbackAmountCents,
 // including any customer-paid provider fee) and, when the provider API
-// answered, the provider fee and its type. Nil fee fields leave the stored
-// fee values untouched, so the first call can save the callback amount and a
-// later best-effort call can add the fee without disturbing it.
-func (s *Service) SaveOrderPaymentAmounts(ctx context.Context, orderID uint, callbackAmountCents int64, providerFeeCents *int64, providerFeeType *int) error {
+// answered, the provider fee. A nil providerFeeCents leaves the stored fee
+// value untouched, so the first call can save the callback amount and a later
+// best-effort call can add the fee without disturbing it.
+func (s *Service) SaveOrderPaymentAmounts(ctx context.Context, orderID uint, callbackAmountCents int64, providerFeeCents *int64) error {
 	return s.db.WithContext(ctx).Model(&Order{}).Where("id = ?", orderID).Updates(map[string]any{
 		"callback_amount_cents": callbackAmountCents,
 		"provider_fee_cents":    providerFeeCents,
-		"provider_fee_type":     providerFeeType,
 	}).Error
 }
 

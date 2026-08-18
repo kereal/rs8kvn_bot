@@ -1011,7 +1011,7 @@ func (o *OrderService) confirmPayment(ctx context.Context, providerPaymentID uui
 // callback amount критичен и пишется первым; комиссия дописывается, если API
 // доступен, иначе поля остаются NULL.
 func (o *OrderService) persistCallbackAmountAndFee(ctx context.Context, orderID uint, providerPaymentID uuid.UUID, callbackAmountCents int64) {
-	if err := o.db.SaveOrderPaymentAmounts(ctx, orderID, callbackAmountCents, nil, nil); err != nil {
+	if err := o.db.SaveOrderPaymentAmounts(ctx, orderID, callbackAmountCents, nil); err != nil {
 		logger.Warn("failed to save callback amount", zap.Uint("order_id", orderID), zap.Int64("callback_amount_cents", callbackAmountCents), zap.Error(err))
 		return
 	}
@@ -1037,7 +1037,7 @@ func (o *OrderService) persistCallbackAmountAndFee(ctx context.Context, orderID 
 		return
 	}
 
-	if err := o.db.SaveOrderPaymentAmounts(ctx, orderID, callbackAmountCents, &feeCents, status.CommissionType); err != nil {
+	if err := o.db.SaveOrderPaymentAmounts(ctx, orderID, callbackAmountCents, &feeCents); err != nil {
 		logger.Warn("failed to save provider fee", zap.Uint("order_id", orderID), zap.Int64("provider_fee_cents", feeCents), zap.Error(err))
 	}
 }

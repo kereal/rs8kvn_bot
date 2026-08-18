@@ -31,7 +31,6 @@ func TestGetTransactionStatusContract(t *testing.T) {
 			"paymentMethod": "SBPQR",
 			"comissionUsdt": 1.64044944,
 			"amountUsdt": 10.8988764,
-			"comissionType": 1,
 			"externalId": "ext-1",
 			"description": "Оплата заказа #1"
 		}`))
@@ -44,8 +43,6 @@ func TestGetTransactionStatusContract(t *testing.T) {
 	require.Equal(t, "CONFIRMED", got.Status)
 	require.Equal(t, "RUB", got.PaymentDetails.Currency)
 	require.Equal(t, "4.5", got.Commission.String())
-	require.NotNil(t, got.CommissionType)
-	require.Equal(t, 1, *got.CommissionType)
 	require.Equal(t, "1.64044944", got.CommissionUsdt.String())
 
 	fee, err := got.CommissionCents()
