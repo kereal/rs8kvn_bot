@@ -88,6 +88,16 @@ func TestSaveOrderPaymentAmounts(t *testing.T) {
 	assert.Equal(t, int64(5250), *got.CallbackAmountCents)
 	require.NotNil(t, got.ProviderFeeCents)
 	assert.Equal(t, int64(450), *got.ProviderFeeCents)
+
+	// A nil fee on a later call must not overwrite the stored commission with NULL.
+	require.NoError(t, svc.SaveOrderPaymentAmounts(ctx, order.ID, 5250, nil))
+
+	got, err = svc.GetOrderByID(ctx, order.ID)
+	require.NoError(t, err)
+	require.NotNil(t, got.CallbackAmountCents)
+	assert.Equal(t, int64(5250), *got.CallbackAmountCents)
+	require.NotNil(t, got.ProviderFeeCents, "stored commission must survive a nil update")
+	assert.Equal(t, int64(450), *got.ProviderFeeCents)
 }
 
 func TestConfirmOrderPaidCAS_PersistsCallbackAmount(t *testing.T) {
