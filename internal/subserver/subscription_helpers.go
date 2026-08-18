@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 // FilterHeaders extracts request headers into a lowercased map, excluding following:
@@ -179,12 +181,27 @@ func decodeProfileTitle(value string) string {
 
 	for _, enc := range []*base64.Encoding{base64.StdEncoding, base64.RawStdEncoding} {
 		decoded, err := enc.DecodeString(payload)
-		if err == nil {
-			return string(decoded)
+		decodedString := string(decoded)
+		if err == nil && isPrintableProfileTitle(decodedString) {
+			return decodedString
 		}
 	}
 
 	return payload
+}
+
+func isPrintableProfileTitle(value string) bool {
+	if !utf8.ValidString(value) || value == "" {
+		return false
+	}
+
+	for _, r := range value {
+		if unicode.IsControl(r) {
+			return false
+		}
+	}
+
+	return true
 }
 
 // ApplyProfileTitleSuffix appends suffix to the profile-title entry of a header
