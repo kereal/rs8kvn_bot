@@ -1049,7 +1049,9 @@ func (m *DatabaseService) SaveOrderPaymentAmounts(ctx context.Context, orderID u
 
 	order, ok := m.Orders[orderID]
 	if !ok {
-		return gorm.ErrRecordNotFound
+		// Production Updates() on a missing row succeeds with no error
+		// (RowsAffected 0); mirror that instead of surfacing ErrRecordNotFound.
+		return nil
 	}
 
 	order.CallbackAmountCents = &callbackAmountCents
