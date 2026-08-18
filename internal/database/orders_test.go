@@ -126,6 +126,10 @@ func TestGetPaidOrdersWithoutProviderFee(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, got, 1)
 	assert.Equal(t, "paid-without-fee", got[0].ProviderPaymentID)
+
+	got, err = svc.GetPaidOrdersWithoutProviderFeeAfterID(ctx, got[0].ID, 10)
+	require.NoError(t, err)
+	assert.Empty(t, got, "paging after the only eligible order must not return it again")
 }
 
 func TestConfirmOrderPaidCAS_PersistsCallbackAmount(t *testing.T) {

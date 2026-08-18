@@ -1391,6 +1391,46 @@ func TestSyncProviderFees_NotConfirmedDeferred(t *testing.T) {
 	assert.Empty(t, saves, "a non-confirmed transaction must keep the NULL fee retry marker")
 }
 
+func TestSyncProviderFees_ContinuesPastDeferredFirstPage(t *testing.T) {
+	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440131")
+	orders := make([]database.Order, 0, 51)
+	for id := uint(1); id <= 51; id++ {
+		providerPaymentID := fmt.Sprintf("invalid-%d", id)
+		if id == 51 {
+			providerPaymentID = providerID.String()
+		}
+		orders = append(orders, database.Order{ID: id, AmountCents: 5000, ProviderPaymentID: providerPaymentID})
+	}
+
+	var saves []paymentAmountsSave
+	mock := &testutil.DatabaseService{
+		GetPaidOrdersWithoutProviderFeeAfterIDFunc: func(_ context.Context, afterID uint, limit int) ([]database.Order, error) {
+			page := make([]database.Order, 0, limit)
+			for _, order := range orders {
+				if order.ID <= afterID {
+					continue
+				}
+				page = append(page, order)
+				if len(page) == limit {
+					break
+				}
+			}
+			return page, nil
+		},
+		SaveOrderPaymentAmountsFunc: func(_ context.Context, orderID uint, callbackCents int64, feeCents *int64) error {
+			saves = append(saves, paymentAmountsSave{orderID: orderID, callbackCents: callbackCents, feeCents: feeCents})
+			return nil
+		},
+	}
+	provider := statusPaymentProvider{status: &platega.TransactionStatusResponse{Status: "CONFIRMED", Commission: json.Number("4.5")}}
+	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), provider, "", nil)
+
+	err := o.SyncProviderFees(context.Background(), 50)
+	require.Error(t, err, "invalid IDs remain retryable and should be reported")
+	require.Len(t, saves, 1, "the second page must be processed despite failures on the first page")
+	assert.Equal(t, uint(51), saves[0].orderID)
+}
+
 func TestCancelPaymentByProvider_ChargebackOnPendingDoesNotDowngrade(t *testing.T) {
 	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440126")
 	calls := 0
