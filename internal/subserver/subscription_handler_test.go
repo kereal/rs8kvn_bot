@@ -855,6 +855,12 @@ func TestAppendProfileTitleSuffix(t *testing.T) {
 			want:   "base64:" + encode("My Profile Premium"),
 		},
 		{
+			name:   "plain text that looks like base64",
+			value:  "Test",
+			suffix: " Premium",
+			want:   "base64:" + encode("Test Premium"),
+		},
+		{
 			name:   "cyrillic title",
 			value:  "base64:" + encode("Мой профиль"),
 			suffix: " Premium",
