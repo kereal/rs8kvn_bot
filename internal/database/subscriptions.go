@@ -401,10 +401,13 @@ func (s *Service) ExpireSubscriptionWithPlanCAS(ctx context.Context, id uint, fr
 func (s *Service) ExpireSubscription(ctx context.Context, id uint, freePlanID uint) error {
 	result := s.db.WithContext(ctx).Model(&Subscription{}).Where("id = ?", id).
 		Updates(map[string]any{
-			"status":     string(SubscriptionStatusActive),
-			"expires_at": nil,
-			"plan_id":    freePlanID,
-			"product_id": nil,
+			"status":           string(SubscriptionStatusActive),
+			"expires_at":       nil,
+			"plan_id":          freePlanID,
+			"product_id":       nil,
+			"started_at":       nil,
+			"price_paid_cents": 0,
+			"currency":         nil,
 		})
 	if result.Error != nil {
 		return fmt.Errorf("failed to expire subscription: %w", result.Error)
