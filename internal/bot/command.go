@@ -68,6 +68,37 @@ func (c *CommandHandler) HandleStart(ctx context.Context, update tgbotapi.Update
 	return nil
 }
 
+// HandleMySub processes /mysub — shows the "Ваша подписка" window. There is
+// no message to edit (unlike the 📋 Подписка button), so messageID=0 makes
+// handleMySubscription send a fresh message instead of editing an existing one.
+func (c *CommandHandler) HandleMySub(ctx context.Context, update tgbotapi.Update) error {
+	ctxWithTimeout, cancel := c.h.withTimeout(ctx)
+	defer cancel()
+
+	ctx = ctxWithTimeout
+
+	if update.Message == nil {
+		logger.Error("HandleMySub called with nil Message")
+		return fmt.Errorf("nil message")
+	}
+
+	if update.Message.From == nil {
+		logger.Error("HandleMySub: Message.From is nil",
+			zap.Int64("chat_id", update.Message.Chat.ID))
+
+		return fmt.Errorf("nil from")
+	}
+
+	chatID := update.Message.Chat.ID
+	username := c.h.getUsername(update.Message.From)
+
+	logger.Info("User checked subscription via /mysub",
+		zap.Int64("chat_id", chatID),
+		zap.String("username", username))
+
+	return c.h.handleMySubscription(ctx, chatID, username, 0)
+}
+
 // HandleHelp sends help message.
 func (c *CommandHandler) HandleHelp(ctx context.Context, update tgbotapi.Update) error {
 	ctxWithTimeout, cancel := c.h.withTimeout(ctx)
@@ -86,6 +117,7 @@ func (c *CommandHandler) HandleHelp(ctx context.Context, update tgbotapi.Update)
 
 *Доступные команды:*
 /start - Начать работу с ботом
+/mysub - Показать информацию о подписке
 /help - Показать эту справку
 /invite - Получить реферальную ссылку
 

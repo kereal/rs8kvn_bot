@@ -67,6 +67,15 @@ See **[Installation Guide](doc/installation.md)** for:
 
 > All menu buttons are inline (shown under the message). Each submenu has a "🏠 В начало" button to return.
 
+## User Commands
+
+| Command | Description |
+|---------|-------------|
+| `/start` | Start working with the bot / main menu |
+| `/mysub` | Show your subscription info (traffic usage, subscription link) |
+| `/help` | Show bot help |
+| `/invite` | Get your referral link |
+
 ## Admin Commands
 
 | Command | Description |
