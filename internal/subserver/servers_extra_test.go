@@ -31,6 +31,18 @@ func TestExtractJSONConfigs_SingleObject(t *testing.T) {
 	assert.Len(t, configs, 1)
 }
 
+func TestExtractJSONConfigs_LeadingWhitespaceObject(t *testing.T) {
+	t.Parallel()
+
+	// DetectFormat trims the body before JSON validation, so a single JSON
+	// object with leading whitespace must parse the same way (regression: the
+	// old body[0] == '{' fallback lost the source and the subscription 404'd).
+	body := []byte("  \n\t{\"type\":\"vless\",\"address\":\"s1.example.com\",\"port\":443}")
+	configs, err := ExtractJSONConfigs(body)
+	require.NoError(t, err)
+	require.Len(t, configs, 1)
+}
+
 func TestExtractJSONConfigs_InvalidJSON(t *testing.T) {
 	t.Parallel()
 
@@ -232,6 +244,26 @@ func TestConvertSingleJSONToLink_VMess_Aid(t *testing.T) {
 	decoded, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(link, "vmess://"))
 	require.NoError(t, err)
 	assert.Contains(t, string(decoded), `"aid":"1"`)
+}
+
+func TestConvertSingleJSONToLink_MissingAddressOrPort(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		raw  string
+	}{
+		{name: "missing address", raw: `{"type":"vless","port":443,"uuid":"u1"}`},
+		{name: "missing port", raw: `{"type":"vless","address":"x.example.com","uuid":"u1"}`},
+		{name: "zero port", raw: `{"type":"vless","address":"x.example.com","port":0,"uuid":"u1"}`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ConvertSingleJSONToLink(json.RawMessage(tt.raw))
+			assert.Error(t, err, "broken configs must be rejected, not emitted as malformed links")
+		})
+	}
 }
 
 func TestConvertSingleJSONToLink_UnsupportedType(t *testing.T) {
