@@ -113,6 +113,20 @@ func New(cfg Config) *Client {
 	return &Client{cfg: cfg}
 }
 
+// httpClientRejectingRedirects возвращает клиент на основе конфигурационного,
+// но с отклонением редиректов: http.Client копирует пользовательские заголовки
+// (включая X-Secret) на целевой хост редиректа, что может привести к утечке
+// секрета. 3xx-ответ возвращается как есть и обрабатывается как ошибка.
+func (c *Client) httpClientRejectingRedirects() *http.Client {
+	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	if c.cfg.HTTPClient != nil {
+		client.Transport = c.cfg.HTTPClient.Transport
+		client.Timeout = c.cfg.HTTPClient.Timeout
+	}
+
+	return client
+}
+
 // CreateTransaction creates a payment link without selecting a payment method.
 // The response is validated for a UUID v4 transaction ID, a usable URL, and a
 // positive expiresIn value before it is returned to the order service.
@@ -150,7 +164,7 @@ func (c *Client) CreateTransaction(ctx context.Context, req CreateTransactionReq
 
 	requestStarted := time.Now()
 
-	resp, err := c.cfg.HTTPClient.Do(httpReq)
+	resp, err := c.httpClientRejectingRedirects().Do(httpReq)
 	if err != nil {
 		if logger.Log != nil { //nolint:staticcheck // defensive guard: global logger may be uninitialized
 			logger.Info("Payment provider request failed",
