@@ -72,6 +72,12 @@ func (s *SubscriptionService) SendExpiryReminder(ctx context.Context, sub *datab
 	daysLeft, hoursLeft := ReminderWindowRemaining(time.Now().UTC(), *sub.ExpiresAt)
 	text := utils.EscapeMarkdownV2(reminderText(daysLeft, hoursLeft, s.cfg.SubURL(sub.SubscriptionID)))
 	msg := tgbotapi.NewMessage(sub.TelegramID, text)
+	renewalKeyboard := tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("💎 Продлить Premium", "buy_premium_list"),
+		),
+	)
+	msg.ReplyMarkup = &renewalKeyboard
 
 	msg.ParseMode = tgbotapi.ModeMarkdownV2
 
@@ -93,10 +99,10 @@ func (s *SubscriptionService) SendExpiryReminder(ctx context.Context, sub *datab
 }
 
 func reminderText(daysLeft int, hoursLeft int, subURL string) string {
-	const renewalInstruction = "\n\nЧтобы продлить подписку, откройте главное меню — нажмите /start."
+	const benefits = "Сохраните преимущества Premium:\n♾️ Безлимитный трафик\n🌍 Больше серверов и вариантов подключения\n🧪 Дополнительные и экспериментальные функции"
 	if daysLeft > 0 {
-		return fmt.Sprintf("⏳ До окончания подписки осталось %d д\n%s%s", daysLeft, subURL, renewalInstruction)
+		return fmt.Sprintf("⏳ *Premium заканчивается через %d дн.*\n\n%s\n\n🔗 Ссылка на подписку\n%s\n\nПродлите Premium заранее — новые дни прибавятся к текущему сроку.", daysLeft, benefits, subURL)
 	}
 
-	return fmt.Sprintf("🚨 До окончания подписки осталось %d ч\n%s%s", hoursLeft, subURL, renewalInstruction)
+	return fmt.Sprintf("🚨 *Premium закончится примерно через %d ч.*\n\n%s\n\n🔗 Ссылка на подписку\n%s\n\nПродлите Premium сейчас, чтобы сохранить доступ без перерыва.", hoursLeft, benefits, subURL)
 }

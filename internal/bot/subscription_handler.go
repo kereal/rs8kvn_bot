@@ -408,7 +408,8 @@ func (sh *SubscriptionHandler) handleBuyPremiumList(ctx context.Context, chatID 
 		return nil
 	}
 
-	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "Выберите тариф для оплаты:")
+	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msg(MsgPremiumBenefits))
+	editMsg.ParseMode = tgbotapi.ModeMarkdown
 	keyboard := sh.h.keyboards.BuyProductList(products)
 	editMsg.ReplyMarkup = &keyboard
 	sh.h.safeSend(editMsg)

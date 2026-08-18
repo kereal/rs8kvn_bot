@@ -4,7 +4,12 @@ import (
 	"fmt"
 
 	"github.com/kereal/rs8kvn_bot/internal/config"
+	"github.com/kereal/rs8kvn_bot/internal/utils"
 )
+
+// PremiumBenefitsText is the concise user-facing summary shared by purchase
+// and payment-success messages.
+const PremiumBenefitsText = "♾️ Безлимитный трафик\n🌍 Больше серверов и вариантов подключения\n🧪 Дополнительные и экспериментальные функции\n💬 Приоритетная поддержка"
 
 // FormatSubscriptionMessage renders the canonical subscription presentation.
 // Both the bot's "My subscription" screen and payment success notification use
@@ -35,7 +40,7 @@ func FormatSubscriptionMessage(heading, status string, traffic *TrafficInfo, sub
 		"%s\n\n✌️ Статус: *%s*\n💡 Тариф: *%s*\n📊 Трафик: %s%s\n\n📅 Создана: %s\n⏰ Истекает: %s\n🔄 Сброс: %s\n\n🔗 Ссылка\n`%s`",
 		heading,
 		status,
-		traffic.PlanName,
+		utils.EscapeLegacyMarkdown(traffic.PlanName),
 		trafficInfo,
 		progress,
 		traffic.CreatedAtFormatted,

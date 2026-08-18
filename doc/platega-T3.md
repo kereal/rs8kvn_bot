@@ -623,7 +623,7 @@ func (kb *KeyboardBuilder) MainMenu(
 ) tgbotapi.InlineKeyboardMarkup
 ```
 
-При `paymentEnabled=true` и `hasSubscription=true` добавить кнопку `💎 Купить Premium` с callback `buy_premium_list`. При false или без подписки кнопки нет.
+При `paymentEnabled=true` и `hasSubscription=true` добавить кнопку `💎 Купить Premium` с callback `buy_premium_list`. Для активной подписки на канонический `free`-план над клавиатурой также показывать короткий teaser: `💎 Premium — безлимитный трафик и больше серверов`. При false или без подписки кнопки нет.
 
 ### 7.2 Product list and payment confirmation
 
@@ -644,7 +644,9 @@ func (kb *KeyboardBuilder) BuyProductConfirm(
 - Back списка: `back_to_start`;
 - URL-кнопка содержит payment URL;
 - Back confirmation: `buy_premium_list`;
-- бесплатные продукты не отображаются.
+- бесплатные продукты не отображаются;
+- перед оплатой сообщение повторяет преимущества Premium: безлимитный трафик, больше серверов и вариантов подключения, дополнительные/экспериментальные функции и приоритетная поддержка;
+- экран списка тарифов использует Markdown-разметку для заголовка преимуществ.
 
 ### 7.3 Callback names
 
@@ -682,6 +684,8 @@ func (sh *SubscriptionHandler) handleBuyProduct(
 
 `handleBuyProduct` повторно загружает Product из БД, проверяет активность/цену/план, вызывает RequestPayment и показывает ошибку пользователю, а не просто возвращает её.
 
+После подтверждённой оплаты webhook отправляет пользователю Markdown-сообщение с приветствием Premium, преимуществами, данными подписки, сроком действия и ссылкой. Повторные callback не отправляют это сообщение повторно.
+
 ### 7.5 UI tests
 
 - при PAYMENT_ENABLED=false кнопки нет;
@@ -691,7 +695,11 @@ func (sh *SubscriptionHandler) handleBuyProduct(
 - invalid/fake product callback не запускает оплату;
 - продукт с неактивным планом не запускает оплату и показывает `Тариф недоступен`;
 - Back-navigation не создаёт дубликаты сообщений;
-- ErrPaymentDisabled показывает `Платежи временно недоступны`.
+- ErrPaymentDisabled показывает `Платежи временно недоступны`;
+- список тарифов показывает Premium benefits с `ParseMode=Markdown` и без двоеточий в заголовке/финальной строке;
+- Free-подписка с включёнными платежами показывает Premium teaser в главном меню, а платный план — нет;
+- успешная оплата отправляет пользователю Markdown-приветствие Premium;
+- expiry reminder содержит преимущества Premium и кнопку `💎 Продлить Premium` с callback `buy_premium_list`.
 
 ---
 

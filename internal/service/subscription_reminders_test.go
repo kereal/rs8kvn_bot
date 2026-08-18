@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"errors"
-	"fmt"
 	"testing"
 	"time"
 
@@ -11,6 +10,7 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/testutil"
 
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -55,8 +55,21 @@ func TestSubscriptionService_SendExpiryReminder_SendsMessageAndMarksBit(t *testi
 	require.Len(t, sent, 1)
 	assert.Equal(t, sub.TelegramID, sent[0].ChatID)
 
-	expectedText := fmt.Sprintf("⏳ До окончания подписки осталось 3 д\nhttps://vpn\\.example\\.com/sub/sub\\-remind\n\nЧтобы продлить подписку, откройте главное меню — нажмите /start\\.")
-	assert.Equal(t, expectedText, sent[0].Text)
+	assert.Contains(t, sent[0].Text, "Premium заканчивается через 3 дн")
+	assert.Contains(t, sent[0].Text, "Безлимитный трафик")
+	assert.Contains(t, sent[0].Text, "Больше серверов и вариантов подключения")
+	assert.Contains(t, sent[0].Text, "Продлите Premium заранее")
+
+	message, ok := bot.LastChattableSafe().(tgbotapi.MessageConfig)
+	require.True(t, ok)
+	require.NotNil(t, message.ReplyMarkup)
+	keyboard, ok := message.ReplyMarkup.(*tgbotapi.InlineKeyboardMarkup)
+	require.True(t, ok)
+	require.Len(t, keyboard.InlineKeyboard, 1)
+	require.Len(t, keyboard.InlineKeyboard[0], 1)
+	assert.Equal(t, "💎 Продлить Premium", keyboard.InlineKeyboard[0][0].Text)
+	require.NotNil(t, keyboard.InlineKeyboard[0][0].CallbackData)
+	assert.Equal(t, "buy_premium_list", *keyboard.InlineKeyboard[0][0].CallbackData)
 
 	// A second call for the same expiry and bit must be a no-op after the atomic claim.
 	err = svc.SendExpiryReminder(ctx, sub, ExpiryReminderWindows()[0])
