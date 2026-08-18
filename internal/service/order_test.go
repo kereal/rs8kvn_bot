@@ -1254,7 +1254,7 @@ func TestConfirmPayment_PersistsCallbackAmountAndProviderFee(t *testing.T) {
 			return nil
 		},
 	}
-	provider := statusPaymentProvider{status: &platega.TransactionStatusResponse{Commission: json.Number("4.5")}}
+	provider := statusPaymentProvider{status: &platega.TransactionStatusResponse{Status: "CONFIRMED", Commission: json.Number("4.5")}}
 	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), provider, "", nil)
 
 	confirmation, err := o.ConfirmPayment(context.Background(), providerID, json.Number("52.50"), "RUB")
@@ -1309,6 +1309,50 @@ func TestConfirmPayment_ProviderFeeUnavailableKeepsCallbackAmount(t *testing.T) 
 
 	assert.Equal(t, int64(5250), casAmount, "callback amount must be persisted even when the fee API is unavailable")
 	assert.Empty(t, saves, "no provider fee is written when the transaction API fails")
+}
+
+func TestSyncProviderFees_NotFoundIsTerminal(t *testing.T) {
+	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440129")
+	var saves []paymentAmountsSave
+
+	mock := &testutil.DatabaseService{
+		GetPaidOrdersWithoutProviderFeeFunc: func(context.Context, int) ([]database.Order, error) {
+			return []database.Order{{ID: 35, AmountCents: 5000, CallbackAmountCents: testutil.PtrInt64(5250), ProviderPaymentID: providerID.String()}}, nil
+		},
+		SaveOrderPaymentAmountsFunc: func(_ context.Context, orderID uint, callbackCents int64, feeCents *int64) error {
+			saves = append(saves, paymentAmountsSave{orderID: orderID, callbackCents: callbackCents, feeCents: feeCents})
+			return nil
+		},
+	}
+	provider := statusPaymentProvider{err: platega.ErrTransactionNotFound}
+	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), provider, "", nil)
+
+	require.NoError(t, o.SyncProviderFees(context.Background(), 10))
+	require.Len(t, saves, 1, "a purged transaction must clear the retry marker instead of retrying forever")
+	assert.Equal(t, uint(35), saves[0].orderID)
+	assert.Equal(t, int64(5250), saves[0].callbackCents)
+	require.NotNil(t, saves[0].feeCents)
+	assert.Zero(t, *saves[0].feeCents, "fee is recorded as unavailable (0) so the order leaves the retry set")
+}
+
+func TestSyncProviderFees_NotConfirmedDeferred(t *testing.T) {
+	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440130")
+	var saves []paymentAmountsSave
+
+	mock := &testutil.DatabaseService{
+		GetPaidOrdersWithoutProviderFeeFunc: func(context.Context, int) ([]database.Order, error) {
+			return []database.Order{{ID: 36, AmountCents: 5000, CallbackAmountCents: testutil.PtrInt64(5250), ProviderPaymentID: providerID.String()}}, nil
+		},
+		SaveOrderPaymentAmountsFunc: func(_ context.Context, orderID uint, callbackCents int64, feeCents *int64) error {
+			saves = append(saves, paymentAmountsSave{orderID: orderID, callbackCents: callbackCents, feeCents: feeCents})
+			return nil
+		},
+	}
+	provider := statusPaymentProvider{status: &platega.TransactionStatusResponse{Status: "PENDING", Commission: json.Number("4.5")}}
+	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), provider, "", nil)
+
+	require.NoError(t, o.SyncProviderFees(context.Background(), 10))
+	assert.Empty(t, saves, "a non-confirmed transaction must keep the NULL fee retry marker")
 }
 
 func TestCancelPaymentByProvider_ChargebackOnPendingDoesNotDowngrade(t *testing.T) {

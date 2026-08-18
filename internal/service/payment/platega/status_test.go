@@ -3,6 +3,7 @@ package platega
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -82,6 +83,19 @@ func TestGetTransactionStatusRejectsRedirects(t *testing.T) {
 	_, err := New(Config{MerchantID: "merchant", Secret: "secret", BaseURL: server.URL}).GetTransactionStatus(context.Background(), uuid.MustParse("550e8400-e29b-41d4-a716-446655440103"))
 	require.Error(t, err, "a redirect must surface as an error instead of forwarding the authenticated request")
 	require.False(t, redirected, "the redirect target must never receive a request carrying X-Secret")
+}
+
+func TestGetTransactionStatusNotFoundIsTerminalSentinel(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "gone", http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	_, err := New(Config{BaseURL: server.URL}).GetTransactionStatus(context.Background(), uuid.MustParse("550e8400-e29b-41d4-a716-446655440104"))
+	require.Error(t, err)
+	require.True(t, errors.Is(err, ErrTransactionNotFound), "404 must map to the terminal sentinel so fee sync can stop retrying")
 }
 
 func TestGetTransactionStatusRejectsNilID(t *testing.T) {

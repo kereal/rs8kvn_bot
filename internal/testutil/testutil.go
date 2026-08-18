@@ -1085,9 +1085,21 @@ func (m *DatabaseService) GetPaidOrdersWithoutProviderFee(ctx context.Context, l
 			continue
 		}
 		orders = append(orders, *order)
-		if limit > 0 && len(orders) >= limit {
-			break
+	}
+	// Map iteration order is random; sort by ID so callers observe the same
+	// deterministic order as the production query (ORDER BY id ASC).
+	slices.SortFunc(orders, func(a, b database.Order) int {
+		switch {
+		case a.ID < b.ID:
+			return -1
+		case a.ID > b.ID:
+			return 1
+		default:
+			return 0
 		}
+	})
+	if limit > 0 && len(orders) > limit {
+		orders = orders[:limit]
 	}
 
 	return orders, nil
