@@ -89,12 +89,14 @@ func runMigrations(sqlDB *sql.DB) error {
 	}
 
 	if dirtyBefore {
-		if err := recoverDirtyMigration(sqlDB, versionBefore); err != nil {
+		err = recoverDirtyMigration(sqlDB, versionBefore)
+		if err != nil {
 			return err
 		}
 	}
 
-	if err := applyMigrations(sqlDB, maxEmbeddedVersion); err != nil {
+	err = applyMigrations(sqlDB, maxEmbeddedVersion)
+	if err != nil {
 		return err
 	}
 
@@ -154,7 +156,8 @@ func applyMigrations(sqlDB *sql.DB, maxVersion int) error {
 		}
 
 		if nextPragmaVersion < 0 {
-			if err := migrateTo(sqlDB, maxVersion, false); err != nil {
+			err = migrateTo(sqlDB, maxVersion, false)
+			if err != nil {
 				return fmt.Errorf("migration failed: %w", err)
 			}
 			continue
@@ -163,7 +166,8 @@ func applyMigrations(sqlDB *sql.DB, maxVersion int) error {
 		// Bring the database to the migration immediately before the special one
 		// with the normal transactional driver.
 		if currentVersion < nextPragmaVersion-1 {
-			if err := migrateTo(sqlDB, nextPragmaVersion-1, false); err != nil {
+			err = migrateTo(sqlDB, nextPragmaVersion-1, false)
+			if err != nil {
 				return fmt.Errorf("migration failed before foreign-key migration %d: %w", nextPragmaVersion, err)
 			}
 			continue
@@ -172,7 +176,8 @@ func applyMigrations(sqlDB *sql.DB, maxVersion int) error {
 		// This is deliberately the only NoTxWrap invocation. If it fails, the
 		// dirty marker is left untouched and the caller must inspect/recover the
 		// schema before any metadata repair is attempted.
-		if err := migrateTo(sqlDB, nextPragmaVersion, true); err != nil {
+		err = migrateTo(sqlDB, nextPragmaVersion, true)
+		if err != nil {
 			return fmt.Errorf("foreign-key migration %d failed; schema may be partially applied: %w", nextPragmaVersion, err)
 		}
 	}
@@ -235,14 +240,16 @@ func recoverDirtyMigration(sqlDB *sql.DB, version uint) error {
 			return fmt.Errorf("migration %d is dirty and its non-transactional schema is incomplete; refusing to change migration metadata; restore the schema manually before retrying", currentVersion)
 		}
 
-		if err := forceMigrationVersion(sqlDB, currentVersion); err != nil {
+		err = forceMigrationVersion(sqlDB, currentVersion)
+		if err != nil {
 			return fmt.Errorf("failed to mark recovered migration %d as clean: %w", currentVersion, err)
 		}
 		return nil
 	}
 
 	previousVersion := currentVersion - 1
-	if err := forceMigrationVersion(sqlDB, previousVersion); err != nil {
+	err = forceMigrationVersion(sqlDB, previousVersion)
+	if err != nil {
 		return fmt.Errorf("failed to rewind transactional migration version: %w", err)
 	}
 
@@ -315,7 +322,11 @@ func foreignKeysMigrationSchemaComplete(sqlDB *sql.DB, version int) (bool, error
 			var invalidRows int
 			err = sqlDB.QueryRow(`SELECT COUNT(*) FROM subscriptions
 				WHERE status IS NULL OR status NOT IN ('active', 'expired', 'paused', 'canceled', 'revoked')`).Scan(&invalidRows)
-			complete = invalidRows == 0
+			if err != nil {
+				complete = false
+			} else {
+				complete = invalidRows == 0
+			}
 		}
 	case 34:
 		complete, err = tableRebuildComplete(sqlDB, "orders", "orders_old", "ON DELETE CASCADE")
@@ -327,16 +338,34 @@ func foreignKeysMigrationSchemaComplete(sqlDB *sql.DB, version int) (bool, error
 	}
 
 	var integrity string
-	if err := sqlDB.QueryRow("PRAGMA integrity_check").Scan(&integrity); err != nil {
+	err = sqlDB.QueryRow("PRAGMA integrity_check").Scan(&integrity)
+	if err != nil {
 		return false, err
 	}
+	if !strings.EqualFold(integrity, "ok") {
+		return false, nil
+	}
 
-	return strings.EqualFold(integrity, "ok"), nil
+	// PRAGMA integrity_check does not report foreign-key violations. A failed
+	// table-rebuild migration may leave the new table structurally complete
+	// while retaining orphan rows, so metadata must not be repaired until the
+	// separate foreign-key check is clean as well.
+	var foreignKeyViolations int
+	err = sqlDB.QueryRow("SELECT COUNT(*) FROM pragma_foreign_key_check").Scan(&foreignKeyViolations)
+	if err != nil {
+		return false, err
+	}
+	if foreignKeyViolations > 0 {
+		return false, fmt.Errorf("foreign key check found %d violations", foreignKeyViolations)
+	}
+
+	return true, nil
 }
 
 func tableRebuildComplete(sqlDB *sql.DB, tableName, oldTableName, requiredSQL string) (bool, error) {
 	var tableSQL sql.NullString
-	if err := sqlDB.QueryRow(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?`, tableName).Scan(&tableSQL); err != nil {
+	err := sqlDB.QueryRow(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?`, tableName).Scan(&tableSQL)
+	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return false, nil
 		}
@@ -347,7 +376,8 @@ func tableRebuildComplete(sqlDB *sql.DB, tableName, oldTableName, requiredSQL st
 	}
 
 	var oldTableCount int
-	if err := sqlDB.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, oldTableName).Scan(&oldTableCount); err != nil {
+	err = sqlDB.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, oldTableName).Scan(&oldTableCount)
+	if err != nil {
 		return false, err
 	}
 

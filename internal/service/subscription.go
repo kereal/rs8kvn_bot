@@ -659,6 +659,18 @@ func (s *SubscriptionService) CreateTrial(ctx context.Context, inviteCode string
 func (s *SubscriptionService) BindTrial(ctx context.Context, subscriptionID string, telegramID int64, username string) (*database.Subscription, error) {
 	username = XUIEmail(username, telegramID)
 
+	// Resolve the panel comment before the binding transaction commits. If the
+	// referral lookup has an infrastructure error, the trial remains unbound
+	// and the user can retry instead of ending up with a DB-only activation.
+	trial, err := s.db.GetTrialSubscriptionBySubID(ctx, subscriptionID)
+	if err != nil {
+		return nil, fmt.Errorf("load trial subscription: %w", err)
+	}
+	comment, err := referrerComment(ctx, s.db, trial)
+	if err != nil {
+		return nil, fmt.Errorf("resolve referrer comment: %w", err)
+	}
+
 	sub, err := s.db.BindTrialSubscription(ctx, subscriptionID, telegramID, username)
 	if err != nil {
 		return nil, fmt.Errorf("bind trial subscription: %w", err)
@@ -675,11 +687,6 @@ func (s *SubscriptionService) BindTrial(ctx context.Context, subscriptionID stri
 	resetDays := 0
 
 	expiryTime := time.UnixMilli(0)
-
-	comment, err := referrerComment(ctx, s.db, sub)
-	if err != nil {
-		return sub, fmt.Errorf("resolve referrer comment: %w", err)
-	}
 
 	currentEmail := "trial_" + subscriptionID
 	email := XUIEmail(username, telegramID)

@@ -100,6 +100,34 @@ func TestSaveOrderPaymentAmounts(t *testing.T) {
 	assert.Equal(t, int64(450), *got.ProviderFeeCents)
 }
 
+func TestGetPaidOrdersWithoutProviderFee(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+	ctx := context.Background()
+	sub := createTestSubscription(t, svc, 302, "user-provider-fee-queue", "client-provider-fee-queue")
+	plan := &Plan{Name: "plan-provider-fee-queue", DevicesLimit: 1, TrafficLimit: 1024}
+	require.NoError(t, svc.db.WithContext(ctx).Create(plan).Error)
+	product := &Product{PlanID: plan.ID, Name: "1M", DurationDays: 30, PriceCents: 100, Currency: "RUB", IsActive: true}
+	require.NoError(t, svc.db.WithContext(ctx).Create(product).Error)
+
+	fee := int64(10)
+	orders := []*Order{
+		{SubscriptionID: sub.ID, ProductID: product.ID, Status: OrderStatusPaid, AmountCents: 100, Currency: "RUB", PaymentProvider: "platega", ProviderPaymentID: "paid-without-fee"},
+		{SubscriptionID: sub.ID, ProductID: product.ID, Status: OrderStatusPaid, AmountCents: 100, Currency: "RUB", PaymentProvider: "platega", ProviderPaymentID: "paid-with-fee", ProviderFeeCents: &fee},
+		{SubscriptionID: sub.ID, ProductID: product.ID, Status: OrderStatusPending, AmountCents: 100, Currency: "RUB", PaymentProvider: "platega", ProviderPaymentID: "pending-without-fee"},
+		{SubscriptionID: sub.ID, ProductID: product.ID, Status: OrderStatusPaid, AmountCents: 100, Currency: "RUB", PaymentProvider: "other", ProviderPaymentID: "other-provider"},
+	}
+	for _, order := range orders {
+		require.NoError(t, svc.db.WithContext(ctx).Create(order).Error)
+	}
+
+	got, err := svc.GetPaidOrdersWithoutProviderFee(ctx, 10)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, "paid-without-fee", got[0].ProviderPaymentID)
+}
+
 func TestConfirmOrderPaidCAS_PersistsCallbackAmount(t *testing.T) {
 	t.Parallel()
 

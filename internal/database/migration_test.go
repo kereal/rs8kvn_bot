@@ -58,7 +58,9 @@ func TestRunMigrationsRefusesToRepairIncompleteNoTxMigration(t *testing.T) {
 
 	sqlDB, err := db.db.DB()
 	require.NoError(t, err)
-	_, err = sqlDB.Exec("CREATE TABLE subscription_nodes_old AS SELECT * FROM subscription_nodes")
+	_, err = sqlDB.Exec(`CREATE TABLE subscription_nodes_old AS
+		SELECT subscription_id, node_id, status, retry_count, retry_at, last_error, updated_at
+		FROM subscription_nodes`)
 	require.NoError(t, err)
 	_, err = sqlDB.Exec("UPDATE schema_migrations SET version = ?, dirty = ?", 27, true)
 	require.NoError(t, err)
@@ -74,6 +76,31 @@ func TestRunMigrationsRefusesToRepairIncompleteNoTxMigration(t *testing.T) {
 	require.NoError(t, sqlDB.QueryRow("SELECT version, dirty FROM schema_migrations").Scan(&version, &dirty))
 	assert.Equal(t, 27, version)
 	assert.True(t, dirty)
+}
+
+func TestForeignKeysMigrationSchemaComplete_PropagatesStatusQueryError(t *testing.T) {
+	t.Parallel()
+
+	dbPath := filepath.Join(t.TempDir(), "invalid-status-schema.db")
+	db, err := NewService(dbPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, db.Close()) })
+
+	sqlDB, err := db.db.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
+	_, err = sqlDB.Exec("PRAGMA foreign_keys = OFF")
+	require.NoError(t, err)
+	_, err = sqlDB.Exec("DROP TABLE subscriptions")
+	require.NoError(t, err)
+	_, err = sqlDB.Exec(`CREATE TABLE subscriptions (
+		"status VARCHAR(50) NOT NULL DEFAULT 'active' CHECK" TEXT
+	)`)
+	require.NoError(t, err)
+
+	complete, err := foreignKeysMigrationSchemaComplete(sqlDB, 33)
+	require.Error(t, err)
+	assert.False(t, complete)
 }
 
 func TestRunMigrationsRepairsMetadataOnlyAfterCompleteNoTxMigration(t *testing.T) {

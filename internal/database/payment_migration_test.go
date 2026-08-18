@@ -177,6 +177,30 @@ func TestMigration034_DownRejectsOrphanOrders(t *testing.T) {
 	assert.True(t, dirty)
 }
 
+func TestRunMigrationsRefusesDirty034WithForeignKeyViolations(t *testing.T) {
+	t.Parallel()
+
+	sqlDB, cleanup := newSQLiteAtMigration30(t)
+	t.Cleanup(cleanup)
+	sqlDB.SetMaxOpenConns(1)
+
+	require.NoError(t, migrateTo(sqlDB, 33, false))
+	insertOrphanOrder034(t, sqlDB)
+	require.Error(t, migrateTo(sqlDB, 34, true))
+
+	err := runMigrations(sqlDB)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "foreign key check found")
+
+	var (
+		version int
+		dirty   bool
+	)
+	require.NoError(t, sqlDB.QueryRow("SELECT version, dirty FROM schema_migrations").Scan(&version, &dirty))
+	assert.Equal(t, 34, version)
+	assert.True(t, dirty)
+}
+
 func insertOrphanOrder034(t *testing.T, sqlDB *sql.DB) {
 	t.Helper()
 

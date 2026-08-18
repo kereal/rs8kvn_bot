@@ -659,6 +659,9 @@ func TestSubscriptionService_BindTrial_SingleNode_ErrorPropagated(t *testing.T) 
 	}
 
 	db := &testutil.DatabaseService{
+		GetTrialSubscriptionBySubIDFunc: func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
+			return bound, nil
+		},
 		BindTrialSubscriptionFunc: func(ctx context.Context, subscriptionID string, telegramID int64, username string) (*database.Subscription, error) {
 			return bound, nil
 		},
@@ -744,9 +747,14 @@ func TestSubscriptionService_BindTrial_ReferrerErrorStopsProvisioning(t *testing
 		InviteCode:     testutil.PtrString("REFER123"),
 	}
 	updateCalls := 0
+	bindCalls := 0
 
 	db := &testutil.DatabaseService{
+		GetTrialSubscriptionBySubIDFunc: func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
+			return bound, nil
+		},
 		BindTrialSubscriptionFunc: func(ctx context.Context, subscriptionID string, telegramID int64, username string) (*database.Subscription, error) {
+			bindCalls++
 			return bound, nil
 		},
 		GetPlanByNameFunc: func(ctx context.Context, name string) (*database.Plan, error) {
@@ -769,7 +777,8 @@ func TestSubscriptionService_BindTrial_ReferrerErrorStopsProvisioning(t *testing
 	got, err := svc.BindTrial(context.Background(), "trial-sub-1", 123456, "testuser")
 	require.Error(t, err)
 	assert.ErrorIs(t, err, context.Canceled)
-	assert.NotNil(t, got)
+	assert.Nil(t, got)
+	assert.Zero(t, bindCalls, "referrer lookup errors must not commit the trial binding")
 	assert.Zero(t, updateCalls, "referrer lookup errors must not send an empty Comment to the panel")
 }
 
@@ -791,6 +800,9 @@ func TestSubscriptionService_BindTrial_SingleNode_Success(t *testing.T) {
 	}
 
 	db := &testutil.DatabaseService{
+		GetTrialSubscriptionBySubIDFunc: func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
+			return bound, nil
+		},
 		BindTrialSubscriptionFunc: func(ctx context.Context, subscriptionID string, telegramID int64, username string) (*database.Subscription, error) {
 			return bound, nil
 		},

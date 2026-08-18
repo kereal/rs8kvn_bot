@@ -222,6 +222,27 @@ func (s *Service) SaveOrderPaymentAmounts(ctx context.Context, orderID uint, cal
 	return nil
 }
 
+// GetPaidOrdersWithoutProviderFee returns paid Platega orders whose provider
+// commission has not been persisted yet. A NULL fee is the durable retry marker
+// for the best-effort provider status lookup.
+func (s *Service) GetPaidOrdersWithoutProviderFee(ctx context.Context, limit int) ([]Order, error) {
+	var orders []Order
+
+	query := s.db.WithContext(ctx).
+		Where("status = ? AND payment_provider = ? AND provider_payment_id IS NOT NULL AND provider_payment_id <> '' AND provider_fee_cents IS NULL", OrderStatusPaid, "platega").
+		Order("id ASC")
+	if limit > 0 {
+		query = query.Limit(limit)
+	}
+
+	err := query.Find(&orders).Error
+	if err != nil {
+		return nil, fmt.Errorf("get paid orders without provider fee: %w", err)
+	}
+
+	return orders, nil
+}
+
 // ApplyPlanInTxFn is invoked inside the transaction that confirms an order.
 // It must materialize all DB prerequisites (pending_add / pending_remove rows)
 // needed by the background sync worker using the supplied tx handle.

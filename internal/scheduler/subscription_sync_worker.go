@@ -13,12 +13,20 @@ import (
 
 // SubscriptionSyncWorker periodically syncs pending VPN subscription nodes.
 type SubscriptionSyncWorker struct {
-	syncSvc *service.SyncService
+	syncSvc  *service.SyncService
+	orderSvc *service.OrderService
 }
 
-// NewSubscriptionSyncWorker creates a new SubscriptionSyncWorker.
-func NewSubscriptionSyncWorker(syncSvc *service.SyncService) *SubscriptionSyncWorker {
-	return &SubscriptionSyncWorker{syncSvc: syncSvc}
+// NewSubscriptionSyncWorker creates a new SubscriptionSyncWorker. The optional
+// order service enables durable provider-fee retries without changing existing
+// test and embedding call sites.
+func NewSubscriptionSyncWorker(syncSvc *service.SyncService, orderSvc ...*service.OrderService) *SubscriptionSyncWorker {
+	worker := &SubscriptionSyncWorker{syncSvc: syncSvc}
+	if len(orderSvc) > 0 {
+		worker.orderSvc = orderSvc[0]
+	}
+
+	return worker
 }
 
 // Run starts the periodic sync loop. It blocks until ctx is cancelled.
@@ -51,6 +59,13 @@ func (w *SubscriptionSyncWorker) process(ctx context.Context) {
 		logger.Warn("Subscription sync failed", zap.Error(err))
 	} else {
 		logger.Debug("Subscription sync completed")
+	}
+
+	if w.orderSvc != nil {
+		err = w.orderSvc.SyncProviderFees(ctx, 50)
+		if err != nil {
+			logger.Warn("Provider fee sync failed", zap.Error(err))
+		}
 	}
 
 	metrics.SubscriptionSyncDuration.Observe(time.Since(start).Seconds())
