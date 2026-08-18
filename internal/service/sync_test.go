@@ -801,6 +801,10 @@ func TestSyncService_SyncSubscription_PendingAdd_AlreadyExists(t *testing.T) {
 	assert.Equal(t, database.SyncStatusActive, rows[0].Status, "should mark active when client already exists")
 	assert.Equal(t, 0, rows[0].RetryCount, "should not increment retry count")
 	assert.True(t, mockVPN.updateCalled, "UpdateSubscription should be called when client already exists")
+	assert.Equal(t, XUIEmail(sub.Username, sub.TelegramID), mockVPN.updateProvision.CurrentEmail, "CurrentEmail must identify the existing client on the panel")
+	assert.Equal(t, XUIEmail(sub.Username, sub.TelegramID), mockVPN.updateProvision.Username)
+	assert.Equal(t, sub.TelegramID, mockVPN.createProvision.TgID, "create must carry the Telegram id")
+	assert.Equal(t, sub.TelegramID, mockVPN.updateProvision.TgID, "update must preserve the Telegram id")
 }
 
 func TestSyncService_SyncSubscription_PendingAdd_AlreadyExistsUpdateFails(t *testing.T) {
@@ -1081,39 +1085,13 @@ func TestSyncService_SyncSubscription_PendingRemove_InactiveNodeDropsBinding(t *
 	assert.Empty(t, rows, "pending_remove on an inactive node must drop the stale binding")
 }
 
-func TestSyncService_SyncSubscription_PendingRemove_MissingNodeDropsBinding(t *testing.T) {
-	t.Parallel()
-
-	db, err := testutil.NewTestDatabaseService(t)
-	require.NoError(t, err)
-
-	ctx := context.Background()
-
-	plan := &database.Plan{Name: "test-plan-sync-rm-missing", DevicesLimit: 1, TrafficLimit: 1024}
-	require.NoError(t, db.GetDB().WithContext(ctx).Create(plan).Error)
-
-	sub := &database.Subscription{
-		TelegramID:     9999,
-		Username:       "syncrmmissing",
-		ClientID:       "c-syncrmmissing",
-		SubscriptionID: "s-syncrmmissing",
-		Status:         "active",
-		PlanID:         plan.ID,
-		ExpiresAt:      testutil.PtrTime(time.Now().Add(24 * time.Hour)),
-	}
-	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
-
-	// Node 999999 never existed: the binding references a gone node.
-	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: 999999, Status: database.SyncStatusPendingRemove}))
-
-	svc := NewSyncService(db, map[uint]vpn.Client{}, nil)
-
-	require.NoError(t, svc.SyncSubscription(ctx, sub.ID))
-
-	rows, err := db.GetBySubscriptionID(ctx, sub.ID)
-	require.NoError(t, err)
-	assert.Empty(t, rows, "pending_remove on a missing node must drop the stale binding")
-}
+// The former TestSyncService_SyncSubscription_PendingRemove_MissingNodeDropsBinding
+// was removed: with SQLite foreign-key enforcement enabled (DSN _foreign_keys=on)
+// and the ON DELETE CASCADE on subscription_nodes.node_id (migration 022), a
+// binding referencing a nonexistent node cannot be inserted in the first place.
+// The drop-binding path is still covered by
+// TestSyncService_SyncSubscription_PendingRemove_InactiveNodeDropsBinding and the
+// retry path by TestSyncService_SyncSubscription_PendingRemove_NoVPNClientKeepsPending.
 
 func TestSyncService_SyncPendingNodes_ContinuesAfterNodeFailure(t *testing.T) {
 	t.Parallel()

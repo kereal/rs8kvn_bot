@@ -41,6 +41,22 @@ func setupTestDB(t *testing.T) *database.Service {
 	return db
 }
 
+// createE2ESub inserts a subscription, defaulting its plan to the seeded free
+// plan: the test DSN enables SQLite foreign-key enforcement, so a subscription
+// must reference an existing plan row.
+func createE2ESub(t *testing.T, db *database.Service, sub *database.Subscription) {
+	t.Helper()
+
+	ctx := context.Background()
+	if sub.PlanID == 0 {
+		plan, err := db.GetPlanByName(ctx, database.FreePlanName)
+		require.NoError(t, err, "Failed to resolve free plan")
+		sub.PlanID = plan.ID
+	}
+
+	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
+}
+
 func e2eNodes(host string) []database.Node {
 	return []database.Node{{ID: 1, Name: "main", IsActive: true, Host: host, APIToken: "test-api-token", Type: database.NodeType3xUI, InboundIDs: "[1]"}}
 }

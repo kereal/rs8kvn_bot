@@ -676,17 +676,7 @@ func (s *SubscriptionService) BindTrial(ctx context.Context, subscriptionID stri
 
 	expiryTime := time.UnixMilli(0)
 
-	var comment string
-
-	if sub.InviteCode != nil {
-		invite, err := s.db.GetInviteByCode(ctx, *sub.InviteCode)
-		if err == nil {
-			referrerSub, err := s.db.GetByTelegramID(ctx, invite.ReferrerTGID)
-			if err == nil {
-				comment = fmt.Sprintf("from: @%s", referrerSub.Username)
-			}
-		}
-	}
+	comment := referrerComment(ctx, s.db, sub)
 
 	currentEmail := "trial_" + subscriptionID
 	email := XUIEmail(username, telegramID)
@@ -726,6 +716,28 @@ func (s *SubscriptionService) BindTrial(ctx context.Context, subscriptionID stri
 	}
 
 	return sub, nil
+}
+
+// referrerComment возвращает панельный комментарий "from: @<username>" для
+// подписки, созданной по инвайт-коду. Пустая строка, если инвайт или реферер
+// не найдены. Используется и при bind trial, и при синхронизации с нодами,
+// чтобы обновление клиента не затирало комментарий на панели.
+func referrerComment(ctx context.Context, db interfaces.DatabaseService, sub *database.Subscription) string {
+	if sub.InviteCode == nil {
+		return ""
+	}
+
+	invite, err := db.GetInviteByCode(ctx, *sub.InviteCode)
+	if err != nil {
+		return ""
+	}
+
+	referrerSub, err := db.GetByTelegramID(ctx, invite.ReferrerTGID)
+	if err != nil {
+		return ""
+	}
+
+	return fmt.Sprintf("from: @%s", referrerSub.Username)
 }
 
 // RefreshActiveSubscriptionsMetric updates the active_subscriptions and trial_subscriptions gauges.

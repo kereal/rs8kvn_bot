@@ -989,12 +989,18 @@ func TestUpdateLastRequest_DB(t *testing.T) {
 
 	ctx := context.Background()
 
+	// The test DSN enables SQLite foreign-key enforcement: reference the
+	// seeded free plan so the insert is valid.
+	plan, planErr := db.GetPlanByName(ctx, database.FreePlanName)
+	require.NoError(t, planErr, "Failed to resolve free plan")
+
 	sub := &database.Subscription{
 		TelegramID:     999888777,
 		Username:       "lr-test",
 		ClientID:       "client-lr-1",
 		SubscriptionID: "sub-lr-integration",
 		Status:         "active",
+		PlanID:         plan.ID,
 	}
 	require.NoError(t, db.CreateSubscription(ctx, sub, ""), "Failed to create subscription")
 	require.Nil(t, sub.LastRequest, "LastRequest must be nil before first request")

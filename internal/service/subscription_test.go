@@ -818,6 +818,53 @@ func TestSubscriptionService_BindTrial_SingleNode_Success(t *testing.T) {
 	assert.Equal(t, "testuser", gotReq.Username, "Username must be the resolved XUIEmail (username)")
 }
 
+func TestReferrerComment(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+
+	t.Run("no invite code returns empty", func(t *testing.T) {
+		db := &testutil.DatabaseService{}
+		assert.Equal(t, "", referrerComment(ctx, db, &database.Subscription{}))
+	})
+
+	t.Run("unknown invite returns empty", func(t *testing.T) {
+		db := &testutil.DatabaseService{
+			GetInviteByCodeFunc: func(ctx context.Context, code string) (*database.Invite, error) {
+				return nil, database.ErrInviteNotFound
+			},
+		}
+		sub := &database.Subscription{InviteCode: testutil.PtrString("REFER123")}
+		assert.Equal(t, "", referrerComment(ctx, db, sub))
+	})
+
+	t.Run("unknown referrer returns empty", func(t *testing.T) {
+		db := &testutil.DatabaseService{
+			GetInviteByCodeFunc: func(ctx context.Context, code string) (*database.Invite, error) {
+				return &database.Invite{Code: code, ReferrerTGID: 555}, nil
+			},
+			GetByTelegramIDFunc: func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
+				return nil, database.ErrSubscriptionNotFound
+			},
+		}
+		sub := &database.Subscription{InviteCode: testutil.PtrString("REFER123")}
+		assert.Equal(t, "", referrerComment(ctx, db, sub))
+	})
+
+	t.Run("referrer found formats comment", func(t *testing.T) {
+		db := &testutil.DatabaseService{
+			GetInviteByCodeFunc: func(ctx context.Context, code string) (*database.Invite, error) {
+				return &database.Invite{Code: code, ReferrerTGID: 555}, nil
+			},
+			GetByTelegramIDFunc: func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
+				return &database.Subscription{TelegramID: telegramID, Username: "referrer"}, nil
+			},
+		}
+		sub := &database.Subscription{InviteCode: testutil.PtrString("REFER123")}
+		assert.Equal(t, "from: @referrer", referrerComment(ctx, db, sub))
+	})
+}
+
 // ==================== DeleteByID Tests ====================
 
 func TestSubscriptionService_DeleteByID_Success(t *testing.T) {
@@ -1289,9 +1336,14 @@ func TestSubscriptionService_Create_ReanimatesRevoked(t *testing.T) {
 		Status:         "revoked",
 	}
 	require.NoError(t, db.CreateSubscription(ctx, revoked, ""))
+
+	// The test DSN enables SQLite foreign-key enforcement, so the stale binding
+	// below must reference an existing node row.
+	staleNode := &database.Node{ID: 1, Name: "stale-node", Host: "http://stale", APIToken: "token", InboundIDs: `[1]`}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(staleNode).Error)
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{
 		SubscriptionID: revoked.ID,
-		NodeID:         1,
+		NodeID:         staleNode.ID,
 		Status:         database.SyncStatusPendingRemove,
 	}))
 
