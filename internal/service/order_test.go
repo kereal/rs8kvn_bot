@@ -170,7 +170,7 @@ func TestOrderService_ActivatesExpiredPaymentWithinSettlementGrace(t *testing.T)
 		GetPendingBySubscriptionIDFunc: func(context.Context, uint) ([]database.SubscriptionNode, error) {
 			return nil, nil
 		},
-		ConfirmOrderPaidCASFunc: func(context.Context, uint, time.Time, time.Time, *database.Subscription, *database.Product, database.ApplyPlanInTxFn) (bool, error) {
+		ConfirmOrderPaidCASFunc: func(context.Context, uint, time.Time, time.Time, *database.Subscription, *database.Product, database.ApplyPlanInTxFn, int64) (bool, error) {
 			casCalls++
 			order.Status = database.OrderStatusPaid
 
@@ -429,7 +429,7 @@ func TestConfirmPayment_ReleasesPaymentLockBeforePostCommitSync(t *testing.T) {
 		GetByIDFunc: func(_ context.Context, id uint) (*database.Subscription, error) {
 			return &database.Subscription{ID: id, TelegramID: 71, PlanID: 61}, nil
 		},
-		ConfirmOrderPaidCASFunc: func(_ context.Context, _ uint, _, _ time.Time, sub *database.Subscription, _ *database.Product, _ database.ApplyPlanInTxFn) (bool, error) {
+		ConfirmOrderPaidCASFunc: func(_ context.Context, _ uint, _, _ time.Time, sub *database.Subscription, _ *database.Product, _ database.ApplyPlanInTxFn, _ int64) (bool, error) {
 			sub.ExpiresAt = testutil.PtrTime(time.Now().UTC().Truncate(time.Minute).AddDate(0, 0, 30))
 			return true, nil
 		},
@@ -489,7 +489,7 @@ func TestConfirmPayment_ActivatedCASWithNilExpiryDoesNotPanic(t *testing.T) {
 		GetByIDFunc: func(_ context.Context, id uint) (*database.Subscription, error) {
 			return &database.Subscription{ID: id, TelegramID: 72, PlanID: 62}, nil
 		},
-		ConfirmOrderPaidCASFunc: func(_ context.Context, _ uint, _, _ time.Time, _ *database.Subscription, _ *database.Product, _ database.ApplyPlanInTxFn) (bool, error) {
+		ConfirmOrderPaidCASFunc: func(_ context.Context, _ uint, _, _ time.Time, _ *database.Subscription, _ *database.Product, _ database.ApplyPlanInTxFn, _ int64) (bool, error) {
 			// Intentionally leaves sub.ExpiresAt nil.
 			return true, nil
 		},
@@ -562,7 +562,7 @@ func TestConfirmPayment_ValidationAndDatabaseFailuresNotifyAdmin(t *testing.T) {
 
 					return &database.Subscription{ID: 10, TelegramID: 49, PlanID: 2}, nil
 				},
-				ConfirmOrderPaidCASFunc: func(context.Context, uint, time.Time, time.Time, *database.Subscription, *database.Product, database.ApplyPlanInTxFn) (bool, error) {
+				ConfirmOrderPaidCASFunc: func(context.Context, uint, time.Time, time.Time, *database.Subscription, *database.Product, database.ApplyPlanInTxFn, int64) (bool, error) {
 					return false, tt.casErr
 				},
 			}
@@ -598,7 +598,7 @@ func TestConfirmPayment_NotifiesAdminOnActivation(t *testing.T) {
 		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
 			return sub, nil
 		},
-		ConfirmOrderPaidCASFunc: func(context.Context, uint, time.Time, time.Time, *database.Subscription, *database.Product, database.ApplyPlanInTxFn) (bool, error) {
+		ConfirmOrderPaidCASFunc: func(context.Context, uint, time.Time, time.Time, *database.Subscription, *database.Product, database.ApplyPlanInTxFn, int64) (bool, error) {
 			return true, nil
 		},
 	}
@@ -647,7 +647,7 @@ func TestConfirmPayment_NotifiesAdminOnRenewal(t *testing.T) {
 		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
 			return sub, nil
 		},
-		ConfirmOrderPaidCASFunc: func(context.Context, uint, time.Time, time.Time, *database.Subscription, *database.Product, database.ApplyPlanInTxFn) (bool, error) {
+		ConfirmOrderPaidCASFunc: func(context.Context, uint, time.Time, time.Time, *database.Subscription, *database.Product, database.ApplyPlanInTxFn, int64) (bool, error) {
 			return true, nil
 		},
 	}
@@ -987,7 +987,7 @@ func TestConfirmPayment_DeletedSubscriptionOrProductReturnsNoop(t *testing.T) {
 				},
 				GetProductByIDFunc: tt.productFn,
 				GetByIDFunc:        tt.subFn,
-				ConfirmOrderPaidCASFunc: func(context.Context, uint, time.Time, time.Time, *database.Subscription, *database.Product, database.ApplyPlanInTxFn) (bool, error) {
+				ConfirmOrderPaidCASFunc: func(context.Context, uint, time.Time, time.Time, *database.Subscription, *database.Product, database.ApplyPlanInTxFn, int64) (bool, error) {
 					casCalled = true
 					return true, nil
 				},
@@ -1225,6 +1225,7 @@ type paymentAmountsSave struct {
 
 func TestConfirmPayment_PersistsCallbackAmountAndProviderFee(t *testing.T) {
 	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440127")
+	var casAmount int64 = -1
 	var saves []paymentAmountsSave
 
 	mock := &testutil.DatabaseService{
@@ -1237,7 +1238,8 @@ func TestConfirmPayment_PersistsCallbackAmountAndProviderFee(t *testing.T) {
 		GetByIDFunc: func(_ context.Context, id uint) (*database.Subscription, error) {
 			return &database.Subscription{ID: id, TelegramID: 73, PlanID: 63}, nil
 		},
-		ConfirmOrderPaidCASFunc: func(_ context.Context, _ uint, _, _ time.Time, sub *database.Subscription, _ *database.Product, _ database.ApplyPlanInTxFn) (bool, error) {
+		ConfirmOrderPaidCASFunc: func(_ context.Context, _ uint, _, _ time.Time, sub *database.Subscription, _ *database.Product, _ database.ApplyPlanInTxFn, callbackAmountCents int64) (bool, error) {
+			casAmount = callbackAmountCents
 			sub.ExpiresAt = testutil.PtrTime(time.Now().UTC().Truncate(time.Minute).AddDate(0, 0, 30))
 			return true, nil
 		},
@@ -1256,17 +1258,17 @@ func TestConfirmPayment_PersistsCallbackAmountAndProviderFee(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, confirmation.Activated)
 
-	require.Len(t, saves, 2, "callback amount saved first, provider fee appended second")
+	assert.Equal(t, int64(5250), casAmount, "callback amount must be persisted atomically inside the paid CAS")
+	require.Len(t, saves, 1, "only the best-effort provider fee is saved after activation")
 	assert.Equal(t, uint(33), saves[0].orderID)
 	assert.Equal(t, int64(5250), saves[0].callbackCents)
-	assert.Nil(t, saves[0].feeCents, "first save must not carry the fee")
-	assert.Equal(t, int64(5250), saves[1].callbackCents)
-	require.NotNil(t, saves[1].feeCents)
-	assert.Equal(t, int64(450), *saves[1].feeCents, "4.5 RUB commission must be stored as 450 cents")
+	require.NotNil(t, saves[0].feeCents)
+	assert.Equal(t, int64(450), *saves[0].feeCents, "4.5 RUB commission must be stored as 450 cents")
 }
 
 func TestConfirmPayment_ProviderFeeUnavailableKeepsCallbackAmount(t *testing.T) {
 	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440128")
+	var casAmount int64 = -1
 	var saves []paymentAmountsSave
 
 	mock := &testutil.DatabaseService{
@@ -1279,7 +1281,8 @@ func TestConfirmPayment_ProviderFeeUnavailableKeepsCallbackAmount(t *testing.T) 
 		GetByIDFunc: func(_ context.Context, id uint) (*database.Subscription, error) {
 			return &database.Subscription{ID: id, TelegramID: 74, PlanID: 64}, nil
 		},
-		ConfirmOrderPaidCASFunc: func(_ context.Context, _ uint, _, _ time.Time, sub *database.Subscription, _ *database.Product, _ database.ApplyPlanInTxFn) (bool, error) {
+		ConfirmOrderPaidCASFunc: func(_ context.Context, _ uint, _, _ time.Time, sub *database.Subscription, _ *database.Product, _ database.ApplyPlanInTxFn, callbackAmountCents int64) (bool, error) {
+			casAmount = callbackAmountCents
 			sub.ExpiresAt = testutil.PtrTime(time.Now().UTC().Truncate(time.Minute).AddDate(0, 0, 30))
 			return true, nil
 		},
@@ -1298,9 +1301,8 @@ func TestConfirmPayment_ProviderFeeUnavailableKeepsCallbackAmount(t *testing.T) 
 	require.NoError(t, err)
 	require.True(t, confirmation.Activated)
 
-	require.Len(t, saves, 1, "activation must not depend on the provider fee API")
-	assert.Equal(t, int64(5250), saves[0].callbackCents)
-	assert.Nil(t, saves[0].feeCents)
+	assert.Equal(t, int64(5250), casAmount, "callback amount must be persisted even when the fee API is unavailable")
+	assert.Empty(t, saves, "no provider fee is written when the transaction API fails")
 }
 
 func TestCancelPaymentByProvider_ChargebackOnPendingDoesNotDowngrade(t *testing.T) {
