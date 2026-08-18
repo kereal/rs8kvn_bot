@@ -43,7 +43,7 @@ func TestE2E_Cache_DbHitOnCacheMiss(t *testing.T) {
 		SubscriptionID: "sub-789",
 		Status:         "active",
 	}
-	require.NoError(t, env.db.CreateSubscription(ctx, sub, ""))
+	createE2ESub(t, env.db, sub)
 
 	// Clear the subscription cache so the subsequent lookup is served from the
 	// database, not from a stale in-memory entry.

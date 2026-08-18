@@ -171,7 +171,7 @@ func TestE2E_Create_ReturnsExistingActiveSubscription(t *testing.T) {
 		SubscriptionID: "existing-sub-id",
 		Status:         "active",
 	}
-	require.NoError(t, env.db.CreateSubscription(ctx, existing, ""))
+	createE2ESub(t, env.db, existing)
 
 	// Creating again for the same telegram_id must be idempotent: it returns the
 	// existing active subscription instead of inserting a duplicate.
@@ -199,7 +199,7 @@ func TestE2E_CreateSubscription_RevokesOnlyActive(t *testing.T) {
 		SubscriptionID: "old-sub-id",
 		Status:         "expired",
 	}
-	require.NoError(t, env.db.CreateSubscription(ctx, oldSub, ""))
+	createE2ESub(t, env.db, oldSub)
 
 	resetBotAPI(env.botAPI)
 
@@ -248,7 +248,7 @@ func TestE2E_Create_ReanimatesRevokedSubscription(t *testing.T) {
 		SubscriptionID: "revoked-sub-id",
 		Status:         "revoked",
 	}
-	require.NoError(t, env.db.CreateSubscription(ctx, revoked, ""))
+	createE2ESub(t, env.db, revoked)
 
 	result, err := env.subService.Create(ctx, env.chatID, env.username, "")
 	require.NoError(t, err, "re-creating after revoke should reanimate, not error")

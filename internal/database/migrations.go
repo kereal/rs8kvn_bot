@@ -78,8 +78,13 @@ func runMigrations(sqlDB *sql.DB) error {
 		return fmt.Errorf("failed to create embedded migration source: %w", err)
 	}
 
-	// Create SQLite driver
-	driver, err := sqlite.WithInstance(sqlDB, &sqlite.Config{})
+	// Create SQLite driver. NoTxWrap runs every migration outside a transaction.
+	// SQLite treats `PRAGMA foreign_keys = OFF/ON` as a no-op inside a transaction,
+	// so table-rebuild migrations (022/027/033/034) need the pragma statements to
+	// execute on a bare connection to actually disable/re-enable FK enforcement
+	// around DROP TABLE. Without this, the pragmas are silently ignored and the
+	// rebuilds either fail (FK on) or leave enforcement off.
+	driver, err := sqlite.WithInstance(sqlDB, &sqlite.Config{NoTxWrap: true})
 	if err != nil {
 		return fmt.Errorf("failed to create migrate driver: %w", err)
 	}

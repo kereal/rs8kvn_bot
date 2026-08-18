@@ -260,7 +260,7 @@ func TestService_GetByTelegramID_ReturnsActiveOnly(t *testing.T) {
 		Status:     "active",
 		ExpiresAt:  ptrTime(time.Now().Add(24 * time.Hour)),
 	}
-	require.NoError(t, svc.CreateSubscription(context.Background(), activeSub, ""))
+	require.NoError(t, svc.CreateSubscription(context.Background(), prepareForCreate(t, svc, activeSub), ""))
 
 	retrieved, err := svc.GetByTelegramID(context.Background(), 12345)
 	require.NoError(t, err)
@@ -307,7 +307,7 @@ func TestService_CreateSubscription(t *testing.T) {
 		Status:         "active",
 	}
 
-	require.NoError(t, svc.CreateSubscription(context.Background(), sub, ""))
+	require.NoError(t, svc.CreateSubscription(context.Background(), prepareForCreate(t, svc, sub), ""))
 
 	retrieved, err := svc.GetByTelegramID(context.Background(), 54321)
 	require.NoError(t, err)
@@ -333,7 +333,7 @@ func TestService_CreateSubscription_PersistsInviteCodeAndReferredBy(t *testing.T
 		Status:         "active",
 	}
 
-	require.NoError(t, svc.CreateSubscription(ctx, sub, "REFER123"))
+	require.NoError(t, svc.CreateSubscription(ctx, prepareForCreate(t, svc, sub), "REFER123"))
 
 	retrieved, err := svc.GetByTelegramID(ctx, 888888)
 	require.NoError(t, err)
@@ -363,7 +363,7 @@ func TestService_CreateSubscription_EmptyInviteCodeLeavesFieldsEmpty(t *testing.
 		Status:         "active",
 	}
 
-	require.NoError(t, svc.CreateSubscription(ctx, sub, ""))
+	require.NoError(t, svc.CreateSubscription(ctx, prepareForCreate(t, svc, sub), ""))
 
 	retrieved, err := svc.GetByTelegramID(ctx, 888889)
 	require.NoError(t, err)
@@ -387,7 +387,7 @@ func TestService_CreateSubscription_UnknownInviteCodeDoesNotFail(t *testing.T) {
 	}
 
 	// An unknown invite code must not abort subscription creation.
-	require.NoError(t, svc.CreateSubscription(ctx, sub, "DOES_NOT_EXIST"))
+	require.NoError(t, svc.CreateSubscription(ctx, prepareForCreate(t, svc, sub), "DOES_NOT_EXIST"))
 
 	retrieved, err := svc.GetByTelegramID(ctx, 888890)
 	require.NoError(t, err)
@@ -410,7 +410,7 @@ func TestService_CreateSubscription_AllFields(t *testing.T) {
 		Status:         "active",
 	}
 
-	require.NoError(t, svc.CreateSubscription(context.Background(), sub, ""))
+	require.NoError(t, svc.CreateSubscription(context.Background(), prepareForCreate(t, svc, sub), ""))
 
 	var retrieved Subscription
 	require.NoError(t, svc.db.First(&retrieved, sub.ID).Error)
@@ -435,7 +435,7 @@ func TestService_CreateSubscription_Timestamps(t *testing.T) {
 		Status:     "active",
 		ExpiresAt:  ptrTime(time.Now().Add(24 * time.Hour)),
 	}
-	require.NoError(t, svc.CreateSubscription(context.Background(), sub, ""))
+	require.NoError(t, svc.CreateSubscription(context.Background(), prepareForCreate(t, svc, sub), ""))
 
 	after := time.Now()
 
@@ -458,7 +458,7 @@ func TestService_UpdateSubscription(t *testing.T) {
 		ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
 		Status:         "active",
 	}
-	require.NoError(t, svc.CreateSubscription(context.Background(), sub, ""))
+	require.NoError(t, svc.CreateSubscription(context.Background(), prepareForCreate(t, svc, sub), ""))
 
 	sub.Username = "updateduser"
 
@@ -532,6 +532,51 @@ func TestService_DeleteSubscriptionByID(t *testing.T) {
 	assert.Error(t, err)
 }
 
+// TestNewService_EnablesForeignKeys verifies that the shared DSN enables
+// SQLite foreign-key enforcement on every connection (mattn/go-sqlite3 defaults
+// to OFF): the migrations' PRAGMA foreign_keys epilogues and the admin /del
+// cascade (migration 034) rely on it.
+func TestNewService_EnablesForeignKeys(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+
+	var foreignKeys int
+	require.NoError(t, svc.db.Raw("PRAGMA foreign_keys").Scan(&foreignKeys).Error)
+	assert.Equal(t, 1, foreignKeys, "_foreign_keys=on in the DSN must be applied per connection")
+}
+
+// TestService_DeleteSubscriptionByID_CascadesOrders verifies migration 034:
+// deleting a subscription that has orders must succeed because the
+// orders.subscription_id FK is ON DELETE CASCADE — otherwise the admin /del
+// flow would fail with FOREIGN KEY constraint failed once FK enforcement is on.
+func TestService_DeleteSubscriptionByID_CascadesOrders(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	sub := createTestSubscription(t, svc, 987654, "cascade-user", "client-cascade")
+	plan, err := svc.GetPlanByName(ctx, TrialPlanName)
+	require.NoError(t, err)
+	product := &Product{PlanID: plan.ID, Name: "cascade", DurationDays: 30, PriceCents: 100, Currency: "RUB", IsActive: true}
+	require.NoError(t, svc.db.Create(product).Error)
+	require.NoError(t, svc.db.Create(&Order{
+		SubscriptionID: sub.ID,
+		ProductID:      product.ID,
+		Status:         OrderStatusPaid,
+		AmountCents:    100,
+		Currency:       "RUB",
+	}).Error)
+
+	_, err = svc.DeleteSubscriptionByID(ctx, sub.ID)
+	require.NoError(t, err, "delete must cascade the subscription's orders")
+
+	var orderCount int64
+	require.NoError(t, svc.db.Model(&Order{}).Where("subscription_id = ?", sub.ID).Count(&orderCount).Error)
+	assert.Zero(t, orderCount, "orders must be cascade-deleted with the subscription")
+}
+
 func TestService_DeleteSubscriptionByID_NotFound(t *testing.T) {
 	t.Parallel()
 
@@ -558,7 +603,7 @@ func TestService_GetLatestSubscriptions(t *testing.T) {
 			Status:         "active",
 			CreatedAt:      time.Now().Add(-time.Duration(5-i) * time.Minute),
 		}
-		require.NoError(t, svc.db.Create(sub).Error)
+		require.NoError(t, svc.db.Create(prepareForCreate(t, svc, sub)).Error)
 	}
 
 	subs, err := svc.GetLatestSubscriptions(context.Background(), 3)
@@ -590,7 +635,7 @@ func TestService_GetLatestSubscriptions_OnlyActive(t *testing.T) {
 		ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
 		Status:         "active",
 	}
-	require.NoError(t, svc.db.Create(activeSub).Error)
+	require.NoError(t, svc.db.Create(prepareForCreate(t, svc, activeSub)).Error)
 
 	revokedSub := &Subscription{
 		TelegramID:     100000002,
@@ -600,7 +645,7 @@ func TestService_GetLatestSubscriptions_OnlyActive(t *testing.T) {
 		ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
 		Status:         "revoked",
 	}
-	require.NoError(t, svc.db.Create(revokedSub).Error)
+	require.NoError(t, svc.db.Create(prepareForCreate(t, svc, revokedSub)).Error)
 
 	subs, err := svc.GetLatestSubscriptions(context.Background(), 10)
 	require.NoError(t, err)
@@ -637,7 +682,7 @@ func TestService_GetLatestSubscriptions_LimitOne(t *testing.T) {
 			Status:         "active",
 			CreatedAt:      time.Now().Add(-time.Duration(5-i) * time.Minute),
 		}
-		require.NoError(t, svc.db.Create(sub).Error)
+		require.NoError(t, svc.db.Create(prepareForCreate(t, svc, sub)).Error)
 	}
 
 	subs, err := svc.GetLatestSubscriptions(context.Background(), 1)
@@ -661,7 +706,7 @@ func TestService_GetLatestSubscriptions_LimitGreaterThanTotal(t *testing.T) {
 			Status:         "active",
 			CreatedAt:      time.Now().Add(-time.Duration(3-i) * time.Minute),
 		}
-		require.NoError(t, svc.db.Create(sub).Error)
+		require.NoError(t, svc.db.Create(prepareForCreate(t, svc, sub)).Error)
 	}
 
 	subs, err := svc.GetLatestSubscriptions(context.Background(), 10)
@@ -686,7 +731,7 @@ func TestService_GetLatestSubscriptions_SpecialCharacters(t *testing.T) {
 			Status:         "active",
 			CreatedAt:      time.Now().Add(-time.Duration(len(specialUsernames)-i) * time.Minute),
 		}
-		require.NoError(t, svc.db.Create(sub).Error)
+		require.NoError(t, svc.db.Create(prepareForCreate(t, svc, sub)).Error)
 	}
 
 	subs, err := svc.GetLatestSubscriptions(context.Background(), 10)
@@ -720,7 +765,7 @@ func TestService_GetLatestSubscriptions_OrderingConsistency(t *testing.T) {
 			Status:         "active",
 			CreatedAt:      baseTime.Add(time.Duration(i) * time.Hour),
 		}
-		require.NoError(t, svc.db.Create(sub).Error)
+		require.NoError(t, svc.db.Create(prepareForCreate(t, svc, sub)).Error)
 	}
 
 	subs, err := svc.GetLatestSubscriptions(context.Background(), 10)
@@ -754,7 +799,7 @@ func TestService_GetLatestSubscriptions_MixedStatuses(t *testing.T) {
 			Status:         status,
 			CreatedAt:      time.Now().Add(-time.Duration(len(statuses)-i) * time.Minute),
 		}
-		require.NoError(t, svc.db.Create(sub).Error)
+		require.NoError(t, svc.db.Create(prepareForCreate(t, svc, sub)).Error)
 	}
 
 	subs, err := svc.GetLatestSubscriptions(context.Background(), 10)
@@ -791,7 +836,7 @@ func TestService_GetAllSubscriptions(t *testing.T) {
 			ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
 			Status:         "active",
 		}
-		require.NoError(t, svc.CreateSubscription(context.Background(), sub, ""))
+		require.NoError(t, svc.CreateSubscription(context.Background(), prepareForCreate(t, svc, sub), ""))
 	}
 
 	subs, err := svc.GetAllSubscriptions(context.Background())
@@ -825,7 +870,7 @@ func TestService_CountActiveSubscriptions(t *testing.T) {
 			ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
 			Status:         "active",
 		}
-		require.NoError(t, svc.CreateSubscription(context.Background(), sub, ""))
+		require.NoError(t, svc.CreateSubscription(context.Background(), prepareForCreate(t, svc, sub), ""))
 	}
 
 	// Create expired subscription (status=active but expiry in past)
@@ -837,7 +882,7 @@ func TestService_CountActiveSubscriptions(t *testing.T) {
 		ExpiresAt:      ptrTime(time.Now().Add(-1 * time.Hour)),
 		Status:         "active",
 	}
-	require.NoError(t, svc.CreateSubscription(context.Background(), expiredSub, ""))
+	require.NoError(t, svc.CreateSubscription(context.Background(), prepareForCreate(t, svc, expiredSub), ""))
 
 	count, err := svc.CountActiveSubscriptions(context.Background())
 	require.NoError(t, err)
@@ -859,7 +904,7 @@ func TestService_CountTrialSubscriptions(t *testing.T) {
 			ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
 			Status:         "active",
 		}
-		require.NoError(t, svc.CreateSubscription(context.Background(), sub, ""))
+		require.NoError(t, svc.CreateSubscription(context.Background(), prepareForCreate(t, svc, sub), ""))
 	}
 
 	// Create regular subscription (telegram_id > 0)
@@ -871,7 +916,7 @@ func TestService_CountTrialSubscriptions(t *testing.T) {
 		ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
 		Status:         "active",
 	}
-	require.NoError(t, svc.CreateSubscription(context.Background(), regularSub, ""))
+	require.NoError(t, svc.CreateSubscription(context.Background(), prepareForCreate(t, svc, regularSub), ""))
 
 	count, err := svc.CountTrialSubscriptions(context.Background())
 	require.NoError(t, err)
@@ -892,7 +937,7 @@ func TestService_CountAllSubscriptions(t *testing.T) {
 			Status:         "active",
 			ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
 		}
-		require.NoError(t, svc.db.Create(sub).Error)
+		require.NoError(t, svc.db.Create(prepareForCreate(t, svc, sub)).Error)
 	}
 
 	count, err := svc.CountAllSubscriptions(context.Background())
@@ -915,7 +960,7 @@ func TestService_GetTelegramIDByUsername(t *testing.T) {
 		Status:         "active",
 		ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
 	}
-	require.NoError(t, svc.db.Create(sub).Error)
+	require.NoError(t, svc.db.Create(prepareForCreate(t, svc, sub)).Error)
 
 	id, err := svc.GetTelegramIDByUsername(context.Background(), "testuser")
 	require.NoError(t, err)
@@ -947,7 +992,7 @@ func TestService_GetTelegramIDsBatch(t *testing.T) {
 			Status:         "active",
 			ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
 		}
-		require.NoError(t, svc.db.Create(sub).Error)
+		require.NoError(t, svc.db.Create(prepareForCreate(t, svc, sub)).Error)
 	}
 
 	ids, err := svc.GetTelegramIDsBatch(context.Background(), 0, 5)
@@ -973,7 +1018,7 @@ func TestService_GetTelegramIDsBatch_OffsetBeyondTotal(t *testing.T) {
 			Status:         "active",
 			ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
 		}
-		require.NoError(t, svc.db.Create(sub).Error)
+		require.NoError(t, svc.db.Create(prepareForCreate(t, svc, sub)).Error)
 	}
 
 	ids, err := svc.GetTelegramIDsBatch(context.Background(), 10, 5)
@@ -1080,7 +1125,7 @@ func TestService_GetReferralCount(t *testing.T) {
 			ReferredBy:     ptrInt64(referrerID),
 			PlanID:         0,
 		}
-		require.NoError(t, svc.db.Create(sub).Error)
+		require.NoError(t, svc.db.Create(prepareForCreate(t, svc, sub)).Error)
 	}
 
 	count, err := svc.GetReferralCount(context.Background(), referrerID)
@@ -1115,7 +1160,7 @@ func TestService_GetAllReferralCounts(t *testing.T) {
 			ReferredBy:     ptrInt64(referrerID),
 			PlanID:         0,
 		}
-		require.NoError(t, svc.db.Create(sub).Error)
+		require.NoError(t, svc.db.Create(prepareForCreate(t, svc, sub)).Error)
 	}
 
 	counts, err := svc.GetAllReferralCounts(context.Background())
@@ -1141,7 +1186,7 @@ func TestService_GetTotalTelegramIDCount_WithData(t *testing.T) {
 			Status:         "active",
 			PlanID:         0,
 		}
-		require.NoError(t, svc.db.Create(sub).Error)
+		require.NoError(t, svc.db.Create(prepareForCreate(t, svc, sub)).Error)
 	}
 
 	count, err := svc.GetTotalTelegramIDCount(context.Background())
@@ -1372,7 +1417,7 @@ func TestService_GetTrialSubscriptionBySubID_NonTrial(t *testing.T) {
 		Status:         "active",
 		PlanID:         0,
 	}
-	err := svc.db.Create(origSub).Error
+	err := svc.db.Create(prepareForCreate(t, svc, origSub)).Error
 	require.NoError(t, err)
 
 	// GetTrialSubscriptionBySubID should NOT return non-trial subscriptions
@@ -1590,6 +1635,29 @@ func newTestService(t *testing.T) *Service {
 	return svc
 }
 
+// testFreePlanID returns the seeded free plan ID. The test DSN enables SQLite
+// foreign-key enforcement, so subscriptions must reference an existing plan.
+func testFreePlanID(t *testing.T, svc *Service) uint {
+	t.Helper()
+
+	plan, err := svc.GetPlanByName(context.Background(), FreePlanName)
+	require.NoError(t, err)
+
+	return plan.ID
+}
+
+// prepareForCreate defaults a subscription's plan to the seeded free plan so
+// raw inserts satisfy the plans(id) foreign key enforced by the test DSN.
+func prepareForCreate(t *testing.T, svc *Service, sub *Subscription) *Subscription {
+	t.Helper()
+
+	if sub.PlanID == 0 {
+		sub.PlanID = testFreePlanID(t, svc)
+	}
+
+	return sub
+}
+
 func createTestSubscription(t *testing.T, svc *Service, telegramID int64, username, clientID string) *Subscription {
 	t.Helper()
 
@@ -1600,8 +1668,9 @@ func createTestSubscription(t *testing.T, svc *Service, telegramID int64, userna
 		SubscriptionID: fmt.Sprintf("sub-%s", clientID),
 		ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
 		Status:         "active",
+		PlanID:         testFreePlanID(t, svc),
 	}
-	require.NoError(t, svc.CreateSubscription(context.Background(), sub, ""))
+	require.NoError(t, svc.CreateSubscription(context.Background(), prepareForCreate(t, svc, sub), ""))
 
 	return sub
 }

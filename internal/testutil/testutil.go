@@ -1115,6 +1115,10 @@ func (m *DatabaseService) GetAllReferralCounts(ctx context.Context) (map[int64]i
 }
 
 func CreateTestSubscription(telegramID int64, username string, status string, expiry *time.Time) *database.Subscription {
+	// PlanID 2 is the seeded free plan: NewService seeds trial then free
+	// (ids 1, 2), and the in-memory DatabaseService mock mirrors this. The test
+	// DSN enables SQLite foreign-key enforcement, so a subscription must
+	// reference an existing plan to be insertable into a real database.
 	return &database.Subscription{
 		TelegramID:     telegramID,
 		Username:       username,
@@ -1122,6 +1126,7 @@ func CreateTestSubscription(telegramID int64, username string, status string, ex
 		SubscriptionID: username,
 		ExpiresAt:      expiry,
 		Status:         status,
+		PlanID:         2,
 	}
 }
 

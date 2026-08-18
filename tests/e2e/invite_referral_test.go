@@ -54,7 +54,7 @@ func TestE2E_ShareLink_ExistingSubscription_Ignored(t *testing.T) {
 		SubscriptionID: "existing-sub",
 		Status:         "active",
 	}
-	require.NoError(t, env.db.CreateSubscription(ctx, existingSub, ""))
+	createE2ESub(t, env.db, existingSub)
 
 	_, err := env.db.GetOrCreateInvite(ctx, 111222, "sharecode456")
 	require.NoError(t, err)

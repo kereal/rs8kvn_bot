@@ -561,8 +561,11 @@ func (s *SyncService) processPendingUpdate(ctx context.Context, sn *database.Sub
 	provision := vpn.SubscriptionProvision{
 		ClientID:     sub.ClientID,
 		Username:     syncIdentifier(sub),
+		CurrentEmail: syncIdentifier(sub),
 		SubID:        sub.SubscriptionID,
 		TrafficBytes: plan.TrafficLimit,
+		TgID:         sub.TelegramID,
+		Comment:      referrerComment(ctx, s.db, sub),
 	}
 	if plan.TrafficLimit > 0 {
 		if plan.Name == database.TrialPlanName {
@@ -617,8 +620,11 @@ func (s *SyncService) processPendingAdd(ctx context.Context, sn *database.Subscr
 	provision := vpn.SubscriptionProvision{
 		ClientID:     sub.ClientID,
 		Username:     syncIdentifier(sub),
+		CurrentEmail: syncIdentifier(sub),
 		SubID:        sub.SubscriptionID,
 		TrafficBytes: plan.TrafficLimit,
+		TgID:         sub.TelegramID,
+		Comment:      referrerComment(ctx, s.db, sub),
 	}
 	if plan.TrafficLimit > 0 {
 		// Trials must never auto-renew even though the trial plan carries a

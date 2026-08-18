@@ -166,9 +166,11 @@ func TestHandleBroadcast_DatabaseFunction(t *testing.T) {
 
 	ctx := context.Background()
 
+	// The test DSN enables SQLite foreign-key enforcement: PlanID 2 is the
+	// seeded free plan (NewService seeds trial then free).
 	subs := []*database.Subscription{
-		{TelegramID: 111111111, Username: "user1", ClientID: "client1", SubscriptionID: "sub-user1", Status: "active", ExpiresAt: testutil.PtrTime(time.Now().Add(24 * time.Hour))},
-		{TelegramID: 222222222, Username: "user2", ClientID: "client2", SubscriptionID: "sub-user2", Status: "active", ExpiresAt: testutil.PtrTime(time.Now().Add(24 * time.Hour))},
+		{TelegramID: 111111111, Username: "user1", ClientID: "client1", SubscriptionID: "sub-user1", Status: "active", ExpiresAt: testutil.PtrTime(time.Now().Add(24 * time.Hour)), PlanID: 2},
+		{TelegramID: 222222222, Username: "user2", ClientID: "client2", SubscriptionID: "sub-user2", Status: "active", ExpiresAt: testutil.PtrTime(time.Now().Add(24 * time.Hour)), PlanID: 2},
 	}
 
 	for _, sub := range subs {
