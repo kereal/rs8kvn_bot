@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+//nolint:misspell // фикстура повторяет имена полей API провайдера (comission)
 func TestGetTransactionStatusContract(t *testing.T) {
 	t.Parallel()
 
