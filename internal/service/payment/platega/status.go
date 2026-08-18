@@ -58,7 +58,16 @@ func (c *Client) GetTransactionStatus(ctx context.Context, transactionID uuid.UU
 	httpReq.Header.Set("X-Merchantid", c.cfg.MerchantID)
 	httpReq.Header.Set("X-Secret", c.cfg.Secret)
 
-	resp, err := c.cfg.HTTPClient.Do(httpReq)
+	// Reject redirects: http.Client copies custom headers (including X-Secret)
+	// to the redirect target, which could leak the secret to another host.
+	// A 3xx response is returned as-is and falls into the error branch below.
+	statusClient := http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	if c.cfg.HTTPClient != nil {
+		statusClient.Transport = c.cfg.HTTPClient.Transport
+		statusClient.Timeout = c.cfg.HTTPClient.Timeout
+	}
+
+	resp, err := statusClient.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("%w: send status request: %w", ErrProvider, err)
 	}
