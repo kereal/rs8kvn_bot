@@ -1,6 +1,7 @@
 package subserver
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -119,13 +120,18 @@ func toServerConfig(raw json.RawMessage) (*serverConfig, error) {
 // preserves the original bytes and reuses the backing array, while single
 // objects are wrapped in a one-element slice.
 func ExtractJSONConfigs(body []byte) ([]json.RawMessage, error) {
+	// DetectFormat validates the trimmed body, so parsing must also start from
+	// trimmed bytes: a leading space/newline before a single JSON object would
+	// otherwise defeat the body[0] == '{' single-object fallback below.
+	trimmed := bytes.TrimSpace(body)
+
 	var items []json.RawMessage
 
-	err := json.Unmarshal(body, &items)
+	err := json.Unmarshal(trimmed, &items)
 	if err != nil {
-		if len(body) > 0 && body[0] == '{' {
+		if len(trimmed) > 0 && trimmed[0] == '{' {
 			items = make([]json.RawMessage, 0, 1)
-			items = append(items, body)
+			items = append(items, trimmed)
 
 			return items, nil
 		}
@@ -142,6 +148,9 @@ func ExtractJSONConfigs(body []byte) ([]json.RawMessage, error) {
 
 // ConvertSingleJSONToLink converts a single raw JSON server config into a share link
 // by dispatching to the protocol-specific builder based on the "type" field.
+// Entries missing the minimum connection fields (address/port) are rejected so
+// the caller skips them instead of emitting a malformed "vless://uuid@:0" link
+// (the Clash path validates the same fields before conversion).
 func ConvertSingleJSONToLink(raw json.RawMessage) (string, error) {
 	cfg, err := toServerConfig(raw)
 	if err != nil {
@@ -150,6 +159,14 @@ func ConvertSingleJSONToLink(raw json.RawMessage) (string, error) {
 			zap.String("raw_preview", utils.TruncateString(string(raw), 200)))
 
 		return "", fmt.Errorf("convert JSON config to share link: %w", err)
+	}
+
+	if cfg.Address == "" {
+		return "", fmt.Errorf("server config missing address")
+	}
+
+	if cfg.Port <= 0 {
+		return "", fmt.Errorf("server config missing port")
 	}
 
 	switch strings.ToLower(cfg.Type) {
