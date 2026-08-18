@@ -134,7 +134,9 @@ type DatabaseService struct {
 	FindOrCreatePendingPaymentOrderFunc         func(ctx context.Context, subscriptionID, productID uint, amountCents int64, currency string, now time.Time) (*database.Order, error)
 	MarkPaymentCreationUncertainFunc            func(ctx context.Context, orderID uint, uncertain bool) (bool, error)
 	SavePaymentDetailsFunc                      func(ctx context.Context, orderID uint, providerPaymentID uuid.UUID, paymentURL string, paymentExpiresAt time.Time) error
-	ConfirmOrderPaidCASFunc                     func(ctx context.Context, orderID uint, paidAt, activatedAt time.Time, sub *database.Subscription, product *database.Product, applyPlan database.ApplyPlanInTxFn) (bool, error)
+	SaveOrderPaymentAmountsFunc                 func(ctx context.Context, orderID uint, callbackAmountCents int64, providerFeeCents *int64) error
+	GetPaidOrdersWithoutProviderFeeFunc         func(ctx context.Context, limit int) ([]database.Order, error)
+	ConfirmOrderPaidCASFunc                     func(ctx context.Context, orderID uint, paidAt, activatedAt time.Time, sub *database.Subscription, product *database.Product, applyPlan database.ApplyPlanInTxFn, callbackAmountCents int64) (bool, error)
 	CancelOrderCASFunc                          func(ctx context.Context, provider string, providerPaymentID uuid.UUID, fromStatuses []database.OrderStatus) (bool, error)
 	CancelPaidOrderAndDowngradeCASFunc          func(ctx context.Context, provider string, providerPaymentID uuid.UUID, now time.Time, freePlanID uint, applyPlan database.ChargebackPlanInTxFn) (*database.ChargebackResult, error)
 	TransactionFunc                             func(ctx context.Context, fn func(*gorm.DB) error) error
@@ -734,6 +736,14 @@ func (m *DatabaseService) GetTrialSubscriptionBySubID(ctx context.Context, subsc
 		}
 	}
 
+	// Lightweight command-handler tests often configure only the bind seam. A
+	// synthetic trial keeps that fake compatible with the service's pre-bind
+	// referral validation while preserving the normal not-found default.
+	if m.BindTrialSubscriptionFunc != nil {
+		inviteCode := subscriptionID
+		return &database.Subscription{SubscriptionID: subscriptionID, InviteCode: &inviteCode, PlanID: trialPlan.ID}, nil
+	}
+
 	return nil, gorm.ErrRecordNotFound
 }
 
@@ -1038,9 +1048,66 @@ func (m *DatabaseService) SavePaymentDetails(ctx context.Context, orderID uint, 
 	return nil
 }
 
-func (m *DatabaseService) ConfirmOrderPaidCAS(ctx context.Context, orderID uint, paidAt, activatedAt time.Time, sub *database.Subscription, product *database.Product, applyPlan database.ApplyPlanInTxFn) (bool, error) {
+func (m *DatabaseService) SaveOrderPaymentAmounts(ctx context.Context, orderID uint, callbackAmountCents int64, providerFeeCents *int64) error {
+	if m.SaveOrderPaymentAmountsFunc != nil {
+		return m.SaveOrderPaymentAmountsFunc(ctx, orderID, callbackAmountCents, providerFeeCents)
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	order, ok := m.Orders[orderID]
+	if !ok {
+		// Production Updates() on a missing row succeeds with no error
+		// (RowsAffected 0); mirror that instead of surfacing ErrRecordNotFound.
+		return nil
+	}
+
+	order.CallbackAmountCents = &callbackAmountCents
+	if providerFeeCents != nil {
+		order.ProviderFeeCents = providerFeeCents
+	}
+
+	return nil
+}
+
+func (m *DatabaseService) GetPaidOrdersWithoutProviderFee(ctx context.Context, limit int) ([]database.Order, error) {
+	if m.GetPaidOrdersWithoutProviderFeeFunc != nil {
+		return m.GetPaidOrdersWithoutProviderFeeFunc(ctx, limit)
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	orders := make([]database.Order, 0)
+	for _, order := range m.Orders {
+		if order == nil || order.Status != database.OrderStatusPaid || order.PaymentProvider != "platega" || order.ProviderPaymentID == "" || order.ProviderFeeCents != nil {
+			continue
+		}
+		orders = append(orders, *order)
+	}
+	// Map iteration order is random; sort by ID so callers observe the same
+	// deterministic order as the production query (ORDER BY id ASC).
+	slices.SortFunc(orders, func(a, b database.Order) int {
+		switch {
+		case a.ID < b.ID:
+			return -1
+		case a.ID > b.ID:
+			return 1
+		default:
+			return 0
+		}
+	})
+	if limit > 0 && len(orders) > limit {
+		orders = orders[:limit]
+	}
+
+	return orders, nil
+}
+
+func (m *DatabaseService) ConfirmOrderPaidCAS(ctx context.Context, orderID uint, paidAt, activatedAt time.Time, sub *database.Subscription, product *database.Product, applyPlan database.ApplyPlanInTxFn, callbackAmountCents int64) (bool, error) {
 	if m.ConfirmOrderPaidCASFunc != nil {
-		return m.ConfirmOrderPaidCASFunc(ctx, orderID, paidAt, activatedAt, sub, product, applyPlan)
+		return m.ConfirmOrderPaidCASFunc(ctx, orderID, paidAt, activatedAt, sub, product, applyPlan, callbackAmountCents)
 	}
 
 	m.mu.Lock()
@@ -1064,6 +1131,7 @@ func (m *DatabaseService) ConfirmOrderPaidCAS(ctx context.Context, orderID uint,
 	newExpiry := database.CalculatePaymentExpiry(activatedAt, sub, product)
 
 	order.Status, order.PaidAt, order.ActivatedAt, order.ExpiresAt = database.OrderStatusPaid, &paidAt, &activatedAt, &newExpiry
+	order.CallbackAmountCents = &callbackAmountCents
 	if sub != nil {
 		sub.ExpiresAt = &newExpiry
 	}

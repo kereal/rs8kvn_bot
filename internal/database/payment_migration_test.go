@@ -128,6 +128,102 @@ func TestMigration031_PendingIndexEnforcesOnlyPlategaPendingOrders(t *testing.T)
 	require.NoError(t, insert("pending", "other-provider"), "other providers are outside the pending partial index")
 }
 
+func TestMigration034_UpRejectsOrphanOrders(t *testing.T) {
+	t.Parallel()
+
+	sqlDB, cleanup := newSQLiteAtMigration30(t)
+	t.Cleanup(cleanup)
+
+	require.NoError(t, migrateTo(sqlDB, 33, false))
+	insertOrphanOrder034(t, sqlDB)
+
+	err := migrateTo(sqlDB, 34, true)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "CHECK constraint failed")
+
+	var (
+		version int
+		dirty   bool
+	)
+	require.NoError(t, sqlDB.QueryRow("SELECT version, dirty FROM schema_migrations").Scan(&version, &dirty))
+	assert.Equal(t, 34, version)
+	assert.True(t, dirty)
+}
+
+func TestMigration034_DownRejectsOrphanOrders(t *testing.T) {
+	t.Parallel()
+
+	sqlDB, cleanup := newSQLiteAtMigration30(t)
+	t.Cleanup(cleanup)
+	sqlDB.SetMaxOpenConns(1)
+
+	require.NoError(t, migrateTo(sqlDB, 34, true))
+	_, err := sqlDB.Exec("PRAGMA foreign_keys = OFF")
+	require.NoError(t, err)
+	insertOrphanOrder034(t, sqlDB)
+
+	m, err := newMigration(sqlDB, true)
+	require.NoError(t, err)
+	err = m.Steps(-1)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "CHECK constraint failed")
+
+	var (
+		version int
+		dirty   bool
+	)
+	require.NoError(t, sqlDB.QueryRow("SELECT version, dirty FROM schema_migrations").Scan(&version, &dirty))
+	assert.Equal(t, 33, version)
+	assert.True(t, dirty)
+}
+
+func TestRunMigrationsRefusesDirty034WithForeignKeyViolations(t *testing.T) {
+	t.Parallel()
+
+	sqlDB, cleanup := newSQLiteAtMigration30(t)
+	t.Cleanup(cleanup)
+	sqlDB.SetMaxOpenConns(1)
+
+	require.NoError(t, migrateTo(sqlDB, 33, false))
+	insertOrphanOrder034(t, sqlDB)
+	require.Error(t, migrateTo(sqlDB, 34, true))
+
+	err := runMigrations(sqlDB)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "foreign key check found")
+
+	var (
+		version int
+		dirty   bool
+	)
+	require.NoError(t, sqlDB.QueryRow("SELECT version, dirty FROM schema_migrations").Scan(&version, &dirty))
+	assert.Equal(t, 34, version)
+	assert.True(t, dirty)
+}
+
+func insertOrphanOrder034(t *testing.T, sqlDB *sql.DB) {
+	t.Helper()
+
+	result, err := sqlDB.Exec(`INSERT INTO plans
+		(name, devices_limit, traffic_limit)
+		VALUES ('migration-034-plan', 1, 1024)`)
+	require.NoError(t, err)
+	planID, err := result.LastInsertId()
+	require.NoError(t, err)
+
+	result, err = sqlDB.Exec(`INSERT INTO products
+		(plan_id, duration_days, price_cents, currency)
+		VALUES (?, 30, 100, 'RUB')`, planID)
+	require.NoError(t, err)
+	productID, err := result.LastInsertId()
+	require.NoError(t, err)
+
+	_, err = sqlDB.Exec(`INSERT INTO orders
+		(subscription_id, product_id, status, amount_cents, currency, created_at)
+		VALUES (999999, ?, 'pending', 100, 'RUB', datetime('now'))`, productID)
+	require.NoError(t, err)
+}
+
 func TestMigration031_DownRestoresOriginalProviderIndexOnSQLite(t *testing.T) {
 	sqlDB, cleanup := newSQLiteAtMigration30(t)
 	t.Cleanup(cleanup)
