@@ -84,8 +84,18 @@ func TestCommissionCents(t *testing.T) {
 		{raw: "5.00", want: 500},
 		{raw: "1.64044944", want: 164},
 		{raw: "52.5000000000000000", want: 5250},
+		// Half-up rounding to the nearest kopeck, exact decimal arithmetic:
+		// float parsing would turn 1.005 into 100.4999… and round it down.
+		{raw: "1.005", want: 101},
+		{raw: "1.004", want: 100},
+		{raw: "1.015", want: 102},
+		{raw: "0.005", want: 1},
 		{raw: "", wantErr: true},
 		{raw: "abc", wantErr: true},
+		{raw: "-1", wantErr: true},
+		{raw: "1e2", wantErr: true},
+		{raw: "92233720368547758.08", wantErr: true}, // whole*100 overflows int64
+		{raw: "92233720368547758.99", wantErr: true},
 	} {
 		t.Run(tt.raw, func(t *testing.T) {
 			resp := &TransactionStatusResponse{Commission: json.Number(tt.raw)}
