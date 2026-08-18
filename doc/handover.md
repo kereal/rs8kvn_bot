@@ -201,7 +201,7 @@ Cache.Set(240s) → return body with Content-Type + Subscription-Userinfo
 ### Working Features
 
 **User Features:**
-- `/start`, `/help` — start commands with inline keyboards
+- `/start`, `/help`, `/mysub` — start commands with inline keyboards (`/mysub` opens the subscription window directly)
 - 📋 Subscription view — traffic usage, subscription link, QR code
 - ☕ Donate, ❓ Help — auxiliary menus
 - 🔗 Referral system — share links with in-memory cache + periodic DB sync

@@ -37,7 +37,7 @@ const (
 // label values. Known commands are returned as-is; anything else becomes "unknown".
 func normalizeCommand(cmd string) string {
 	switch cmd {
-	case "start", "help", "invite", "del", "setplan", "broadcast", "send", "refstats", "v", "lastreg":
+	case "start", "help", "invite", "mysub", "del", "setplan", "broadcast", "send", "refstats", "v", "lastreg":
 		return cmd
 	default:
 		return "unknown"
@@ -222,6 +222,14 @@ func (h *Handler) HandleInvite(ctx context.Context, update tgbotapi.Update) erro
 	}
 
 	return h.cmdHandler.HandleInvite(ctx, update)
+}
+
+func (h *Handler) HandleMySub(ctx context.Context, update tgbotapi.Update) error {
+	if h.cmdHandler == nil {
+		return errors.New("handler: cmdHandler is nil, use NewHandler to construct Handler")
+	}
+
+	return h.cmdHandler.HandleMySub(ctx, update)
 }
 
 // Private delegations kept for test compatibility after handler split
@@ -681,6 +689,8 @@ func (h *Handler) HandleUpdate(ctx context.Context, update tgbotapi.Update) {
 				err = h.HandleHelp(ctx, update)
 			case "invite":
 				err = h.HandleInvite(ctx, update)
+			case "mysub":
+				err = h.HandleMySub(ctx, update)
 			case "del":
 				err = h.HandleDel(ctx, update)
 			case "setplan":
