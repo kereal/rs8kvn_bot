@@ -64,6 +64,25 @@ func TestGetTransactionStatusRejectsErrors(t *testing.T) {
 	}
 }
 
+func TestGetTransactionStatusRejectsRedirects(t *testing.T) {
+	t.Parallel()
+
+	redirected := false
+	redirectTarget := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		redirected = true
+	}))
+	defer redirectTarget.Close()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, redirectTarget.URL, http.StatusFound)
+	}))
+	defer server.Close()
+
+	_, err := New(Config{MerchantID: "merchant", Secret: "secret", BaseURL: server.URL}).GetTransactionStatus(context.Background(), uuid.MustParse("550e8400-e29b-41d4-a716-446655440103"))
+	require.Error(t, err, "a redirect must surface as an error instead of forwarding the authenticated request")
+	require.False(t, redirected, "the redirect target must never receive a request carrying X-Secret")
+}
+
 func TestGetTransactionStatusRejectsNilID(t *testing.T) {
 	t.Parallel()
 
