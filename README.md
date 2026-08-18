@@ -54,12 +54,12 @@ See **[Installation Guide](doc/installation.md)** for:
 1. Start the bot with `/start`
 2. Use the inline buttons:
    - **For users with subscription:**
-     - **📋 Подписка** — View subscription info (traffic usage, subscription link)
+     - **🚀 Подписка** — View subscription info (traffic usage, subscription link)
        - **📱 QR-код** — Generate QR code for Happ app import
        - **🏠 В начало** — Return to main menu
      - **💎 Купить Premium** — Buy or renew a paid plan (shown when `PAYMENT_ENABLED=true`)
      - **☕ Донат** — View donation info
-     - **❓ Помощь** — View VPN setup instructions
+     - **📖 Помощь** — View VPN setup instructions
      - **📑 Документы** — Documents / legal menu
    - **For users without subscription:**
      - **📥 Получить подписку** — Create a new subscription

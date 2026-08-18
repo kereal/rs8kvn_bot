@@ -69,7 +69,7 @@ func (c *CommandHandler) HandleStart(ctx context.Context, update tgbotapi.Update
 }
 
 // HandleMySub processes /mysub — shows the "Ваша подписка" window. There is
-// no message to edit (unlike the 📋 Подписка button), so messageID=0 makes
+// no message to edit (unlike the 🚀 Подписка button), so messageID=0 makes
 // handleMySubscription send a fresh message instead of editing an existing one.
 func (c *CommandHandler) HandleMySub(ctx context.Context, update tgbotapi.Update) error {
 	ctxWithTimeout, cancel := c.h.withTimeout(ctx)
