@@ -50,9 +50,9 @@ func TestHandler_GetMainMenuKeyboard_ButtonLabels(t *testing.T) {
 
 	keyboard := handler.getMainMenuKeyboard(true)
 
-	assert.Equal(t, "📋 Подписка", keyboard.InlineKeyboard[0][0].Text)
+	assert.Equal(t, "🚀 Подписка", keyboard.InlineKeyboard[0][0].Text)
 	assert.Equal(t, "☕ Донат", keyboard.InlineKeyboard[0][1].Text)
-	assert.Equal(t, "❓ Помощь", keyboard.InlineKeyboard[1][0].Text)
+	assert.Equal(t, "📖 Помощь", keyboard.InlineKeyboard[1][0].Text)
 	assert.Equal(t, "📑 Документы", keyboard.InlineKeyboard[1][1].Text)
 	assert.Equal(t, "💎 Купить Premium", keyboard.InlineKeyboard[2][0].Text, "§7.1 label")
 	assert.Equal(t, "📤 Поделиться", keyboard.InlineKeyboard[3][0].Text)
