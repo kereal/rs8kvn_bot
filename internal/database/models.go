@@ -328,6 +328,16 @@ func (s *Subscription) IsActive() bool {
 	return s.Status == string(SubscriptionStatusActive) && !s.IsExpired()
 }
 
+// IsPaid reports whether the subscription is on a paid (premium) tier, i.e. a
+// product was purchased and/or money was actually paid. Both fields are set by
+// the payment flow and cleared on any downgrade to the free plan (chargeback,
+// expiry, reanimation, admin /setplan on free). Admin plan overrides that do not
+// involve payment (e.g. /setplan onto a premium plan) intentionally do NOT count
+// as paid here.
+func (s *Subscription) IsPaid() bool {
+	return s != nil && (s.ProductID != nil || s.PricePaidCents > 0)
+}
+
 // ParseDevices parses the Devices JSON string into a slice of header maps.
 func (s *Subscription) ParseDevices() ([]map[string]string, error) {
 	if s.Devices == "" {

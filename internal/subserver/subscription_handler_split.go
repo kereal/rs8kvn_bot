@@ -399,8 +399,10 @@ func parseExpireToInt(userInfo string) (int64, bool) {
 }
 
 // buildResponse takes the aggregated source data and constructs the final
-// subscription response body with headers, writing it to cache.
-func buildResponse(subSvc *Service, cacheKey string, agg aggregatedSources, trafficLimit int64) (*SubscriptionResult, error) {
+// subscription response body with headers, writing it to cache. When
+// profileTitleSuffix is non-empty it is appended (base64-aware) to the upstream
+// profile-title header before the response is cached.
+func buildResponse(subSvc *Service, cacheKey string, agg aggregatedSources, trafficLimit int64, profileTitleSuffix string) (*SubscriptionResult, error) {
 	userInfo := BuildUserInfoHeader(agg.totalUpload, agg.totalDownload, trafficLimit, agg.firstExpire)
 
 	// If we are in mixed mode (some sources returned non-JSON),
@@ -431,6 +433,7 @@ func buildResponse(subSvc *Service, cacheKey string, agg aggregatedSources, traf
 		}
 
 		cacheHeaders := ResponseHeaders(agg.firstSourceHeaders, "application/json; charset=utf-8", userInfo)
+		ApplyProfileTitleSuffix(cacheHeaders, profileTitleSuffix)
 		subSvc.SetCache(cacheKey, responseBody, cacheHeaders)
 
 		return &SubscriptionResult{
@@ -450,6 +453,7 @@ func buildResponse(subSvc *Service, cacheKey string, agg aggregatedSources, traf
 	responseBody := []byte(base64.StdEncoding.EncodeToString([]byte(combined)))
 	ct := "text/plain; charset=utf-8; profile=base64"
 	cacheHeaders := ResponseHeaders(agg.firstSourceHeaders, ct, userInfo)
+	ApplyProfileTitleSuffix(cacheHeaders, profileTitleSuffix)
 	subSvc.SetCache(cacheKey, responseBody, cacheHeaders)
 
 	return &SubscriptionResult{

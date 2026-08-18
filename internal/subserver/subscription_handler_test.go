@@ -817,6 +817,194 @@ func TestResponseHeaders(t *testing.T) {
 	assert.Equal(t, "upload=0; download=0; total=1000", result["subscription-userinfo"])
 }
 
+// TestAppendProfileTitleSuffix covers the base64-aware suffix logic used to add
+// " Premium" to the upstream profile-title header for premium subscriptions.
+func TestAppendProfileTitleSuffix(t *testing.T) {
+	t.Parallel()
+
+	encode := func(s string) string { return base64.StdEncoding.EncodeToString([]byte(s)) }
+
+	tests := []struct {
+		name   string
+		value  string
+		suffix string
+		want   string
+	}{
+		{
+			name:   "base64 prefixed",
+			value:  "base64:" + encode("My Profile"),
+			suffix: " Premium",
+			want:   "base64:" + encode("My Profile Premium"),
+		},
+		{
+			name:   "uppercase base64 prefix",
+			value:  "BASE64:" + encode("My Profile"),
+			suffix: " Premium",
+			want:   "base64:" + encode("My Profile Premium"),
+		},
+		{
+			name:   "raw base64 without prefix",
+			value:  encode("My Profile"),
+			suffix: " Premium",
+			want:   "base64:" + encode("My Profile Premium"),
+		},
+		{
+			name:   "plain text",
+			value:  "My Profile",
+			suffix: " Premium",
+			want:   "base64:" + encode("My Profile Premium"),
+		},
+		{
+			name:   "cyrillic title",
+			value:  "base64:" + encode("Мой профиль"),
+			suffix: " Premium",
+			want:   "base64:" + encode("Мой профиль Premium"),
+		},
+		{
+			name:   "title already contains Premium is still suffixed",
+			value:  "base64:" + encode("Premium Profile"),
+			suffix: " Premium",
+			want:   "base64:" + encode("Premium Profile Premium"),
+		},
+		{
+			name:   "non-decodable payload treated as plain text",
+			value:  "base64:not-valid-base64!!!",
+			suffix: " Premium",
+			want:   "base64:" + encode("not-valid-base64!!! Premium"),
+		},
+		{
+			name:   "empty value",
+			value:  "",
+			suffix: " Premium",
+			want:   "",
+		},
+		{
+			name:   "empty suffix",
+			value:  "base64:" + encode("My Profile"),
+			suffix: "",
+			want:   "base64:" + encode("My Profile"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := AppendProfileTitleSuffix(tt.value, tt.suffix)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestApplyProfileTitleSuffix(t *testing.T) {
+	t.Parallel()
+
+	encode := func(s string) string { return base64.StdEncoding.EncodeToString([]byte(s)) }
+
+	t.Run("title-case key", func(t *testing.T) {
+		headers := map[string]string{"Profile-Title": "My Profile", "content-type": "text/plain"}
+		ApplyProfileTitleSuffix(headers, " Premium")
+
+		assert.Equal(t, "base64:"+encode("My Profile Premium"), headers["Profile-Title"])
+		assert.Equal(t, "text/plain", headers["content-type"])
+	})
+
+	t.Run("lowercase key", func(t *testing.T) {
+		headers := map[string]string{"profile-title": encode("My Profile")}
+		ApplyProfileTitleSuffix(headers, " Premium")
+
+		assert.Equal(t, "base64:"+encode("My Profile Premium"), headers["profile-title"])
+	})
+
+	t.Run("no profile-title header is a no-op", func(t *testing.T) {
+		headers := map[string]string{"content-type": "text/plain"}
+		result := ApplyProfileTitleSuffix(headers, " Premium")
+
+		assert.Equal(t, map[string]string{"content-type": "text/plain"}, result)
+		assert.Equal(t, map[string]string{"content-type": "text/plain"}, headers)
+	})
+
+	t.Run("nil headers is a no-op", func(t *testing.T) {
+		assert.Nil(t, ApplyProfileTitleSuffix(nil, " Premium"))
+	})
+
+	t.Run("empty suffix is a no-op", func(t *testing.T) {
+		headers := map[string]string{"Profile-Title": "My Profile"}
+		ApplyProfileTitleSuffix(headers, "")
+
+		assert.Equal(t, "My Profile", headers["Profile-Title"])
+	})
+}
+
+// TestHandleSubscription_PaidSubscription_ProfileTitleSuffix verifies that a paid
+// (premium) subscription gets " Premium" appended (base64-aware) to the upstream
+// profile-title header, while the header is passed through untouched otherwise.
+// "Paid" means a product was purchased or money was paid — admin plan overrides
+// without payment do not count (see Subscription.IsPaid).
+func TestHandleSubscription_PaidSubscription_ProfileTitleSuffix(t *testing.T) {
+	t.Parallel()
+
+	vlessLink := "vless://uuid@server:443#TitleTest"
+	encodedBody := base64.StdEncoding.EncodeToString([]byte(vlessLink))
+	title := "My Profile"
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Profile-Title", "base64:"+base64.StdEncoding.EncodeToString([]byte(title)))
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(encodedBody))
+	}))
+	defer ts.Close()
+
+	productID := uint(7)
+
+	tests := []struct {
+		name     string
+		product  *uint
+		price    int64
+		want     string
+	}{
+		{"paid via product", &productID, 2300, title + " Premium"},
+		{"paid via price only", nil, 100, title + " Premium"},
+		{"free subscription untouched", nil, 0, title},
+		{"trial subscription untouched", nil, 0, title},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockDB := testutil.NewDatabaseService()
+			svc := newTestSubSvc(t)
+
+			mockDB.GetWithPlanAndNodesFunc = func(ctx context.Context, subID string) (*database.SubscriptionFull, error) {
+				return &database.SubscriptionFull{
+					Subscription: database.Subscription{
+						ID:             1,
+						SubscriptionID: subID,
+						Status:         "active",
+						ProductID:      tt.product,
+						PricePaidCents: tt.price,
+					},
+					Plan: database.Plan{ID: 1, Name: "premium", TrafficLimit: 0},
+					Nodes: []database.Node{
+						{ID: 1, Name: "node", IsActive: true, SubscriptionURL: ts.URL + "/"},
+					},
+				}, nil
+			}
+			mockDB.UpdateDevicesFunc = func(ctx context.Context, id uint, devicesJSON string) error { return nil }
+			mockDB.UpdateIPsFunc = func(ctx context.Context, id uint, ipsJSON string) error { return nil }
+
+			result, _, _, err := HandleSubscription(context.Background(), mockDB, svc, "sub-title-"+tt.name, "1.2.3.4", nil)
+			require.NoError(t, err)
+			require.NotNil(t, result)
+
+			got := result.Headers["Profile-Title"]
+			require.NotEmpty(t, got)
+			require.True(t, strings.HasPrefix(got, "base64:"))
+
+			decoded, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(got, "base64:"))
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, string(decoded))
+		})
+	}
+}
+
 // ==================== Format Detection Tests ====================
 
 func TestDetectFormat(t *testing.T) {

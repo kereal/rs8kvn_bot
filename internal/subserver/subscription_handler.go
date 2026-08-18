@@ -46,8 +46,14 @@ func HandleSubscription(ctx context.Context, db interfaces.SubscriptionRepositor
 	// 3-4. Fetch from all active sources and aggregate items + traffic.
 	agg, success, total := fetchAndAggregateSources(ctx, subID, subFull.Nodes)
 
-	// 5. Build the final response and cache it.
-	res, err := buildResponse(subSvc, subID, agg, subFull.Plan.TrafficLimit)
+	// 5. Build the final response and cache it. Paid (premium) subscriptions get
+	// a " Premium" suffix appended to the upstream profile-title header.
+	profileTitleSuffix := ""
+	if subFull.Subscription.IsPaid() {
+		profileTitleSuffix = " Premium"
+	}
+
+	res, err := buildResponse(subSvc, subID, agg, subFull.Plan.TrafficLimit, profileTitleSuffix)
 
 	metrics.SubserverCacheMissDuration.Observe(time.Since(missStart).Seconds())
 
