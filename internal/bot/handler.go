@@ -403,6 +403,9 @@ func (h *Handler) getMainMenuContent(ctx context.Context, username string, hasSu
 
 	if hasSubscription {
 		text = msg(MsgStartGreeting, username)
+		if h.paymentEnabled && h.isFreePlanSubscription(ctx, sub) {
+			text += "\n\n" + msg(MsgPremiumMenuTeaser)
+		}
 		keyboard = h.getMainMenuKeyboard(true)
 	} else {
 		text = msg(MsgStartGreetingNoSub, username)
@@ -412,6 +415,18 @@ func (h *Handler) getMainMenuContent(ctx context.Context, username string, hasSu
 	h.addAdminButtons(&keyboard, chatID)
 
 	return text, keyboard
+}
+
+// isFreePlanSubscription reports whether the active subscription belongs to the
+// canonical free plan. A lookup failure deliberately suppresses the Premium teaser
+// instead of showing a potentially misleading offer.
+func (h *Handler) isFreePlanSubscription(ctx context.Context, sub *database.Subscription) bool {
+	if h.db == nil || sub == nil {
+		return false
+	}
+
+	plan, err := h.db.GetPlanByID(ctx, sub.PlanID)
+	return err == nil && plan != nil && plan.Name == database.FreePlanName
 }
 
 // getHelpText returns the detailed setup help text.

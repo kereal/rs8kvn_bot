@@ -38,3 +38,62 @@ func TestFormatSubscriptionMessage_DefaultsUnlimitedAndStatus(t *testing.T) {
 	assert.Contains(t, got, "Трафик: неограничен")
 	assert.Contains(t, got, "Сброс: нет")
 }
+
+func TestFormatSubscriptionMessage_EscapesMarkdownInPlanName(t *testing.T) {
+	tests := []struct {
+		name             string
+		planName         string
+		expectedInOutput string
+	}{
+		{
+			name:             "underscore in plan name",
+			planName:         "Premium_Pro",
+			expectedInOutput: `Тариф: *Premium\_Pro*`,
+		},
+		{
+			name:             "asterisk in plan name",
+			planName:         "Plan*VIP",
+			expectedInOutput: `Тариф: *Plan\*VIP*`,
+		},
+		{
+			name:             "backtick in plan name",
+			planName:         "Plan`Special",
+			expectedInOutput: "Тариф: *Plan\\`Special*",
+		},
+		{
+			name:             "opening bracket in plan name",
+			planName:         "Plan[Elite]",
+			expectedInOutput: `Тариф: *Plan\[Elite]*`,
+		},
+		{
+			name:             "multiple special chars",
+			planName:         "Pro_*Test*_Plan",
+			expectedInOutput: `Тариф: *Pro\_\*Test\*\_Plan*`,
+		},
+		{
+			name:             "all special chars",
+			planName:         "_*`[VIP",
+			expectedInOutput: "Тариф: *\\_\\*\\`\\[VIP*",
+		},
+		{
+			name:             "normal plan name unchanged",
+			planName:         "Premium Pro 2024",
+			expectedInOutput: `Тариф: *Premium Pro 2024*`,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			traffic := &TrafficInfo{
+				PlanName:           tc.planName,
+				CreatedAtFormatted: "01.01.2026",
+				ExpiresAtFormatted: "31.01.2026",
+			}
+
+			got := FormatSubscriptionMessage("Test", "активна", traffic, "https://example.com/sub/test")
+
+			assert.Contains(t, got, tc.expectedInOutput,
+				"Plan name should be properly escaped in the output message")
+		})
+	}
+}

@@ -71,3 +71,69 @@ func TestEscapeMarkdownV2_PreservesEntities(t *testing.T) {
 		})
 	}
 }
+
+func TestEscapeLegacyMarkdown(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "underscore for italic",
+			in:   "plan_name",
+			want: `plan\_name`,
+		},
+		{
+			name: "asterisk for bold",
+			in:   "plan*pro",
+			want: `plan\*pro`,
+		},
+		{
+			name: "backtick for code",
+			in:   "plan`special",
+			want: "plan\\`special",
+		},
+		{
+			name: "opening bracket for links",
+			in:   "plan[vip]",
+			want: `plan\[vip]`,
+		},
+		{
+			name: "multiple special chars",
+			in:   "plan_*test*_name",
+			want: `plan\_\*test\*\_name`,
+		},
+		{
+			name: "all four special chars",
+			in:   "_*`[test",
+			want: "\\_\\*\\`\\[test",
+		},
+		{
+			name: "no special chars",
+			in:   "Premium Plan",
+			want: "Premium Plan",
+		},
+		{
+			name: "empty string",
+			in:   "",
+			want: "",
+		},
+		{
+			name: "only special chars",
+			in:   "_*`[",
+			want: "\\_\\*\\`\\[",
+		},
+		{
+			name: "mixed with safe chars",
+			in:   "Premium_Pro (2024) #1",
+			want: `Premium\_Pro (2024) #1`,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := EscapeLegacyMarkdown(tc.in)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
