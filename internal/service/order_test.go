@@ -669,6 +669,42 @@ func TestConfirmPayment_NotifiesAdminOnRenewal(t *testing.T) {
 	assert.Contains(t, msg.Text, "Заказ: #97")
 }
 
+func TestConfirmPayment_InvalidatesSubserverCacheOnActivation(t *testing.T) {
+	t.Parallel()
+
+	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440131")
+	sub := &database.Subscription{ID: 95, TelegramID: 57, Username: "carol", SubscriptionID: "sub-abc", ExpiresAt: testutil.PtrTime(time.Now().Add(30 * 24 * time.Hour))}
+	product := &database.Product{ID: 68, PlanID: 2, Name: "Premium 1 месяц", PriceCents: 230000, Currency: "RUB"}
+	order := &database.Order{ID: 98, SubscriptionID: 95, ProductID: 68, Status: database.OrderStatusPending, AmountCents: 230000, Currency: "RUB", ProviderPaymentID: providerID.String()}
+	mock := &testutil.DatabaseService{
+		GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
+			return order, nil
+		},
+		GetProductByIDFunc: func(context.Context, uint) (*database.Product, error) {
+			return product, nil
+		},
+		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
+			return sub, nil
+		},
+		ConfirmOrderPaidCASFunc: func(context.Context, uint, time.Time, time.Time, *database.Subscription, *database.Product, database.ApplyPlanInTxFn, int64) (bool, error) {
+			return true, nil
+		},
+	}
+
+	var invalidated []string
+
+	subSvc := NewSubscriptionService(mock, nil, nil, nil, nil)
+	subSvc.SetInvalidateBySubIDFunc(func(subID string) { invalidated = append(invalidated, subID) })
+
+	o := NewOrderService(mock, subSvc, NewSyncService(mock, nil, nil), fakePaymentProvider{}, "", nil)
+
+	confirmation, err := o.ConfirmPayment(context.Background(), providerID, json.Number("2300.00"), "RUB")
+	require.NoError(t, err)
+	require.True(t, confirmation.Activated)
+	assert.Equal(t, []string{"sub-abc"}, invalidated,
+		"activated payment must invalidate the subserver response cache (stale profile-title/traffic limit)")
+}
+
 func TestFormatAdminChargebackAlert(t *testing.T) {
 	tests := []struct {
 		name       string

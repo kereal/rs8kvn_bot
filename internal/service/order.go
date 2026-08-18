@@ -992,6 +992,14 @@ func (o *OrderService) confirmPayment(ctx context.Context, providerPaymentID uui
 	unlock()
 
 	if activated {
+		// The subscription row changed (plan/product/price) and the subserver
+		// response cache is keyed by the unchanged subID, so a stale cached
+		// entry (old profile-title, old traffic limit) would otherwise be
+		// served until its TTL expires.
+		if o.subSvc != nil && sub.SubscriptionID != "" {
+			o.subSvc.InvalidateBySubID(ctx, sub.SubscriptionID)
+		}
+
 		o.notifyAdminPaid(ctx, sub, order, product, isRenewal)
 	}
 
