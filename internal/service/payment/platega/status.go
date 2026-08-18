@@ -37,7 +37,6 @@ type TransactionStatusResponse struct {
 	QR                string      `json:"qr"`
 	PayformSuccessURL string      `json:"payformSuccessUrl"`
 	Payload           string      `json:"payload"`
-	CommissionType    *int        `json:"comissionType"`
 	ExternalID        string      `json:"externalId"`
 	Description       string      `json:"description"`
 }

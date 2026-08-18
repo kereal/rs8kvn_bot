@@ -70,20 +70,17 @@ func TestSaveOrderPaymentAmounts(t *testing.T) {
 	}
 	require.NoError(t, svc.db.WithContext(ctx).Create(order).Error)
 
-	// First call stores the callback amount; fee fields stay NULL.
-	require.NoError(t, svc.SaveOrderPaymentAmounts(ctx, order.ID, 5250, nil, nil))
+	// First call stores the callback amount; the fee stays NULL.
+	require.NoError(t, svc.SaveOrderPaymentAmounts(ctx, order.ID, 5250, nil))
 
 	got, err := svc.GetOrderByID(ctx, order.ID)
 	require.NoError(t, err)
 	require.NotNil(t, got.CallbackAmountCents)
 	assert.Equal(t, int64(5250), *got.CallbackAmountCents)
 	assert.Nil(t, got.ProviderFeeCents)
-	assert.Nil(t, got.ProviderFeeType)
 
 	// Best-effort follow-up call adds the provider fee without touching the amount.
-	feeType := 1
-
-	require.NoError(t, svc.SaveOrderPaymentAmounts(ctx, order.ID, 5250, ptrInt64(450), &feeType))
+	require.NoError(t, svc.SaveOrderPaymentAmounts(ctx, order.ID, 5250, ptrInt64(450)))
 
 	got, err = svc.GetOrderByID(ctx, order.ID)
 	require.NoError(t, err)
@@ -91,8 +88,6 @@ func TestSaveOrderPaymentAmounts(t *testing.T) {
 	assert.Equal(t, int64(5250), *got.CallbackAmountCents)
 	require.NotNil(t, got.ProviderFeeCents)
 	assert.Equal(t, int64(450), *got.ProviderFeeCents)
-	require.NotNil(t, got.ProviderFeeType)
-	assert.Equal(t, 1, *got.ProviderFeeType)
 }
 
 func TestSaveOrderPaymentAmounts_UnknownOrder(t *testing.T) {
@@ -100,7 +95,7 @@ func TestSaveOrderPaymentAmounts_UnknownOrder(t *testing.T) {
 
 	svc := newTestService(t)
 
-	err := svc.SaveOrderPaymentAmounts(context.Background(), 99999, 5250, nil, nil)
+	err := svc.SaveOrderPaymentAmounts(context.Background(), 99999, 5250, nil)
 	require.NoError(t, err)
 }
 

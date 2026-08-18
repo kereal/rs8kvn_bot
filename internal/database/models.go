@@ -193,7 +193,6 @@ type Order struct {
 	AmountCents              int64       `gorm:"not null;column:amount_cents"`
 	CallbackAmountCents      *int64      `gorm:"column:callback_amount_cents"` // фактически списано с клиента (с учётом комиссии)
 	ProviderFeeCents         *int64      `gorm:"column:provider_fee_cents"`     // комиссия провайдера из API транзакции (best-effort)
-	ProviderFeeType          *int        `gorm:"column:provider_fee_type"`      // тип комиссии провайдера
 	Currency                 string      `gorm:"size:3;not null;default:RUB;column:currency"`
 	PaymentProvider          string      `gorm:"column:payment_provider"`
 	ProviderPaymentID        string      `gorm:"column:provider_payment_id"`

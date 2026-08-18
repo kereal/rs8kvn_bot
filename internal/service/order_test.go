@@ -1221,7 +1221,6 @@ type paymentAmountsSave struct {
 	orderID       uint
 	callbackCents int64
 	feeCents      *int64
-	feeType       *int
 }
 
 func TestConfirmPayment_PersistsCallbackAmountAndProviderFee(t *testing.T) {
@@ -1245,13 +1244,12 @@ func TestConfirmPayment_PersistsCallbackAmountAndProviderFee(t *testing.T) {
 		GetPendingBySubscriptionIDFunc: func(context.Context, uint) ([]database.SubscriptionNode, error) {
 			return nil, nil
 		},
-		SaveOrderPaymentAmountsFunc: func(_ context.Context, orderID uint, callbackCents int64, feeCents *int64, feeType *int) error {
-			saves = append(saves, paymentAmountsSave{orderID: orderID, callbackCents: callbackCents, feeCents: feeCents, feeType: feeType})
+		SaveOrderPaymentAmountsFunc: func(_ context.Context, orderID uint, callbackCents int64, feeCents *int64) error {
+			saves = append(saves, paymentAmountsSave{orderID: orderID, callbackCents: callbackCents, feeCents: feeCents})
 			return nil
 		},
 	}
-	feeType := 1
-	provider := statusPaymentProvider{status: &platega.TransactionStatusResponse{Commission: json.Number("4.5"), CommissionType: &feeType}}
+	provider := statusPaymentProvider{status: &platega.TransactionStatusResponse{Commission: json.Number("4.5")}}
 	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), provider, "", nil)
 
 	confirmation, err := o.ConfirmPayment(context.Background(), providerID, json.Number("52.50"), "RUB")
@@ -1265,8 +1263,6 @@ func TestConfirmPayment_PersistsCallbackAmountAndProviderFee(t *testing.T) {
 	assert.Equal(t, int64(5250), saves[1].callbackCents)
 	require.NotNil(t, saves[1].feeCents)
 	assert.Equal(t, int64(450), *saves[1].feeCents, "4.5 RUB commission must be stored as 450 cents")
-	require.NotNil(t, saves[1].feeType)
-	assert.Equal(t, 1, *saves[1].feeType)
 }
 
 func TestConfirmPayment_ProviderFeeUnavailableKeepsCallbackAmount(t *testing.T) {
@@ -1290,8 +1286,8 @@ func TestConfirmPayment_ProviderFeeUnavailableKeepsCallbackAmount(t *testing.T) 
 		GetPendingBySubscriptionIDFunc: func(context.Context, uint) ([]database.SubscriptionNode, error) {
 			return nil, nil
 		},
-		SaveOrderPaymentAmountsFunc: func(_ context.Context, orderID uint, callbackCents int64, feeCents *int64, feeType *int) error {
-			saves = append(saves, paymentAmountsSave{orderID: orderID, callbackCents: callbackCents, feeCents: feeCents, feeType: feeType})
+		SaveOrderPaymentAmountsFunc: func(_ context.Context, orderID uint, callbackCents int64, feeCents *int64) error {
+			saves = append(saves, paymentAmountsSave{orderID: orderID, callbackCents: callbackCents, feeCents: feeCents})
 			return nil
 		},
 	}
