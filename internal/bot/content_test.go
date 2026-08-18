@@ -91,6 +91,38 @@ func TestGetMainMenuContent_FreeSubscriptionShowsPremiumTeaser(t *testing.T) {
 	text, _ := handler.getMainMenuContent(context.Background(), "testuser", true, 123456789, &database.Subscription{PlanID: 2})
 
 	assert.Contains(t, text, "💎 Premium — безлимитный трафик и больше серверов")
+	assert.NotContains(t, text, "Вы — 💎 Premium")
+}
+
+func TestGetMainMenuContent_PaidSubscriptionShowsPremiumBadge(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{TelegramAdminID: 0}
+	handler := &Handler{
+		cfg:       cfg,
+		keyboards: NewKeyboardBuilder("testbot", "", "", "", "", true),
+	}
+
+	productID := uint(5)
+
+	text, _ := handler.getMainMenuContent(context.Background(), "testuser", true, 123456789, &database.Subscription{ProductID: &productID})
+
+	assert.Contains(t, text, "Вы — 💎 Premium")
+	assert.NotContains(t, text, "💎 Premium — безлимитный трафик и больше серверов")
+}
+
+func TestGetMainMenuContent_PaidByAmountShowsPremiumBadge(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{TelegramAdminID: 0}
+	handler := &Handler{
+		cfg:       cfg,
+		keyboards: NewKeyboardBuilder("testbot", "", "", "", "", true),
+	}
+
+	text, _ := handler.getMainMenuContent(context.Background(), "testuser", true, 123456789, &database.Subscription{PricePaidCents: 25000})
+
+	assert.Contains(t, text, "Вы — 💎 Premium")
 }
 
 func TestGetMainMenuContent_WithoutSubscription(t *testing.T) {
