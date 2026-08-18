@@ -91,17 +91,65 @@ func (c *Client) GetTransactionStatus(ctx context.Context, transactionID uuid.UU
 
 // CommissionCents возвращает комиссию провайдера в копейках валюты транзакции.
 // Провайдер может отдавать комиссию с произвольной десятичной точностью,
-// поэтому значение округляется до копеек.
+// поэтому значение округляется к ближайшей копейке (half-up) точной
+// десятичной арифметикой — без промежуточного float, который искажает такие
+// значения, как 1.005. Результат явно проверяется на переполнение int64.
 func (r *TransactionStatusResponse) CommissionCents() (int64, error) {
 	raw := strings.TrimSpace(r.Commission.String())
 	if raw == "" {
 		return 0, errors.New("provider commission is empty")
 	}
-
-	value, err := strconv.ParseFloat(raw, 64)
-	if err != nil {
-		return 0, fmt.Errorf("parse comission: %w", err)
+	if strings.HasPrefix(raw, "-") || strings.HasPrefix(raw, "+") {
+		return 0, errors.New("provider commission must be non-negative")
+	}
+	if strings.ContainsAny(raw, "eE") {
+		return 0, errors.New("provider commission must use fixed-point notation")
 	}
 
-	return int64(math.Round(value * 100)), nil
+	parts := strings.Split(raw, ".")
+	if len(parts) > 2 || parts[0] == "" {
+		return 0, errors.New("provider commission is invalid")
+	}
+
+	fraction := ""
+	if len(parts) == 2 {
+		fraction = parts[1]
+	}
+
+	for _, ch := range parts[0] + fraction {
+		if ch < '0' || ch > '9' {
+			return 0, errors.New("provider commission is invalid")
+		}
+	}
+
+	whole, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil {
+		return 0, errors.New("provider commission is out of range")
+	}
+
+	cents := int64(0)
+	if len(fraction) >= 1 {
+		cents += int64(fraction[0]-'0') * 10
+	}
+	if len(fraction) >= 2 {
+		cents += int64(fraction[1]-'0')
+	}
+
+	// Half-up округление: решает старший отбрасываемый знак (третий после
+	// запятой); более дальние знаки не могут изменить результат.
+	roundUp := len(fraction) >= 3 && fraction[2] >= '5'
+
+	if whole > (math.MaxInt64-cents)/100 {
+		return 0, errors.New("provider commission is out of range")
+	}
+
+	total := whole*100 + cents
+	if roundUp {
+		if total == math.MaxInt64 {
+			return 0, errors.New("provider commission is out of range")
+		}
+		total++
+	}
+
+	return total, nil
 }
