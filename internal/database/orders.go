@@ -204,10 +204,17 @@ func (s *Service) SavePaymentDetails(ctx context.Context, orderID uint, provider
 // value untouched, so the first call can save the callback amount and a later
 // best-effort call can add the fee without disturbing it.
 func (s *Service) SaveOrderPaymentAmounts(ctx context.Context, orderID uint, callbackAmountCents int64, providerFeeCents *int64) error {
-	err := s.db.WithContext(ctx).Model(&Order{}).Where("id = ?", orderID).Updates(map[string]any{
+	// The callback amount is always written; the provider fee is added only
+	// when supplied so a nil value cannot overwrite previously stored
+	// commission data with NULL.
+	updates := map[string]any{
 		"callback_amount_cents": callbackAmountCents,
-		"provider_fee_cents":    providerFeeCents,
-	}).Error
+	}
+	if providerFeeCents != nil {
+		updates["provider_fee_cents"] = *providerFeeCents
+	}
+
+	err := s.db.WithContext(ctx).Model(&Order{}).Where("id = ?", orderID).Updates(updates).Error
 	if err != nil {
 		return fmt.Errorf("save order payment amounts: %w", err)
 	}
