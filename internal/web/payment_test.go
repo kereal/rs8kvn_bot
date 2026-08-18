@@ -251,7 +251,7 @@ func TestHandlePaymentCallback_DuplicateConfirmedIsIdempotent(t *testing.T) {
 	order := &database.Order{ID: 8, SubscriptionID: 26, ProductID: 36, Status: database.OrderStatusPending, ProviderPaymentID: testPaymentID.String(), AmountCents: 2300, Currency: "RUB"}
 	srv, db, bot := newPaymentTestServer(t, order)
 	confirmCalls := 0
-	db.ConfirmOrderPaidCASFunc = func(_ context.Context, orderID uint, paidAt, activatedAt time.Time, sub *database.Subscription, _ *database.Product, _ database.ApplyPlanInTxFn) (bool, error) {
+	db.ConfirmOrderPaidCASFunc = func(_ context.Context, orderID uint, paidAt, activatedAt time.Time, sub *database.Subscription, _ *database.Product, _ database.ApplyPlanInTxFn, _ int64) (bool, error) {
 		confirmCalls++
 
 		if orderID != order.ID || order.Status != database.OrderStatusPending {
@@ -562,7 +562,7 @@ func newPaymentTestServer(t *testing.T, order *database.Order) (*Server, *testut
 		return &database.Product{ID: id, PlanID: 1, DurationDays: 30, PriceCents: 2300, Currency: "RUB", IsActive: true}, nil
 	}
 	if order != nil {
-		db.ConfirmOrderPaidCASFunc = func(_ context.Context, orderID uint, paidAt, activatedAt time.Time, sub *database.Subscription, product *database.Product, _ database.ApplyPlanInTxFn) (bool, error) {
+		db.ConfirmOrderPaidCASFunc = func(_ context.Context, orderID uint, paidAt, activatedAt time.Time, sub *database.Subscription, product *database.Product, _ database.ApplyPlanInTxFn, _ int64) (bool, error) {
 			if orderID != order.ID || order.Status != database.OrderStatusPending {
 				return false, nil
 			}

@@ -226,7 +226,7 @@ type ApplyPlanInTxFn func(ctx context.Context, tx *gorm.DB, subscriptionID uint,
 // entering this transaction. If applyPlan is non-nil and the CAS succeeds, it
 // is called with the same tx used to write the subscription; on error the whole
 // transaction rolls back.
-func (s *Service) ConfirmOrderPaidCAS(ctx context.Context, orderID uint, paidAt, activatedAt time.Time, sub *Subscription, product *Product, applyPlan ApplyPlanInTxFn) (bool, error) {
+func (s *Service) ConfirmOrderPaidCAS(ctx context.Context, orderID uint, paidAt, activatedAt time.Time, sub *Subscription, product *Product, applyPlan ApplyPlanInTxFn, callbackAmountCents int64) (bool, error) {
 	var activated bool
 
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -252,10 +252,11 @@ func (s *Service) ConfirmOrderPaidCAS(ctx context.Context, orderID uint, paidAt,
 		// keeping both statuses in the same conditional update preserves the
 		// pending/expired -> paid transition as one atomic compare-and-swap.
 		result := tx.Model(&Order{}).Where("id = ? AND status IN ?", orderID, []OrderStatus{OrderStatusPending, OrderStatusExpired}).Updates(map[string]any{
-			"status":       OrderStatusPaid,
-			"paid_at":      paidAt,
-			"activated_at": activatedAt,
-			"expires_at":   newExpiry,
+			"status":                OrderStatusPaid,
+			"paid_at":               paidAt,
+			"activated_at":          activatedAt,
+			"expires_at":            newExpiry,
+			"callback_amount_cents": callbackAmountCents,
 		})
 		if result.Error != nil {
 			return fmt.Errorf("confirm order: %w", result.Error)

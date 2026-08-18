@@ -135,7 +135,7 @@ type DatabaseService struct {
 	MarkPaymentCreationUncertainFunc            func(ctx context.Context, orderID uint, uncertain bool) (bool, error)
 	SavePaymentDetailsFunc                      func(ctx context.Context, orderID uint, providerPaymentID uuid.UUID, paymentURL string, paymentExpiresAt time.Time) error
 	SaveOrderPaymentAmountsFunc                 func(ctx context.Context, orderID uint, callbackAmountCents int64, providerFeeCents *int64) error
-	ConfirmOrderPaidCASFunc                     func(ctx context.Context, orderID uint, paidAt, activatedAt time.Time, sub *database.Subscription, product *database.Product, applyPlan database.ApplyPlanInTxFn) (bool, error)
+	ConfirmOrderPaidCASFunc                     func(ctx context.Context, orderID uint, paidAt, activatedAt time.Time, sub *database.Subscription, product *database.Product, applyPlan database.ApplyPlanInTxFn, callbackAmountCents int64) (bool, error)
 	CancelOrderCASFunc                          func(ctx context.Context, provider string, providerPaymentID uuid.UUID, fromStatuses []database.OrderStatus) (bool, error)
 	CancelPaidOrderAndDowngradeCASFunc          func(ctx context.Context, provider string, providerPaymentID uuid.UUID, now time.Time, freePlanID uint, applyPlan database.ChargebackPlanInTxFn) (*database.ChargebackResult, error)
 	TransactionFunc                             func(ctx context.Context, fn func(*gorm.DB) error) error
@@ -1062,9 +1062,9 @@ func (m *DatabaseService) SaveOrderPaymentAmounts(ctx context.Context, orderID u
 	return nil
 }
 
-func (m *DatabaseService) ConfirmOrderPaidCAS(ctx context.Context, orderID uint, paidAt, activatedAt time.Time, sub *database.Subscription, product *database.Product, applyPlan database.ApplyPlanInTxFn) (bool, error) {
+func (m *DatabaseService) ConfirmOrderPaidCAS(ctx context.Context, orderID uint, paidAt, activatedAt time.Time, sub *database.Subscription, product *database.Product, applyPlan database.ApplyPlanInTxFn, callbackAmountCents int64) (bool, error) {
 	if m.ConfirmOrderPaidCASFunc != nil {
-		return m.ConfirmOrderPaidCASFunc(ctx, orderID, paidAt, activatedAt, sub, product, applyPlan)
+		return m.ConfirmOrderPaidCASFunc(ctx, orderID, paidAt, activatedAt, sub, product, applyPlan, callbackAmountCents)
 	}
 
 	m.mu.Lock()
@@ -1088,6 +1088,7 @@ func (m *DatabaseService) ConfirmOrderPaidCAS(ctx context.Context, orderID uint,
 	newExpiry := database.CalculatePaymentExpiry(activatedAt, sub, product)
 
 	order.Status, order.PaidAt, order.ActivatedAt, order.ExpiresAt = database.OrderStatusPaid, &paidAt, &activatedAt, &newExpiry
+	order.CallbackAmountCents = &callbackAmountCents
 	if sub != nil {
 		sub.ExpiresAt = &newExpiry
 	}
