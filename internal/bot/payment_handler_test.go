@@ -2,6 +2,7 @@ package bot
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -26,6 +27,10 @@ func (fakePaymentProvider) CreateTransaction(context.Context, platega.CreateTran
 		URL:           "https://pay.example",
 		ExpiresIn:     "00:15:00",
 	}, nil
+}
+
+func (fakePaymentProvider) GetTransactionStatus(context.Context, uuid.UUID) (*platega.TransactionStatusResponse, error) {
+	return nil, errors.New("status not configured")
 }
 
 // newPaymentTestHandler builds a Handler with payment enabled and an OrderService

@@ -197,6 +197,52 @@ func (s *Service) SavePaymentDetails(ctx context.Context, orderID uint, provider
 	return nil
 }
 
+// SaveOrderPaymentAmounts persists the actual amounts known only at callback
+// time: what was really charged from the customer (callbackAmountCents,
+// including any customer-paid provider fee) and, when the provider API
+// answered, the provider fee. A nil providerFeeCents leaves the stored fee
+// value untouched, so the first call can save the callback amount and a later
+// best-effort call can add the fee without disturbing it.
+func (s *Service) SaveOrderPaymentAmounts(ctx context.Context, orderID uint, callbackAmountCents int64, providerFeeCents *int64) error {
+	// The callback amount is always written; the provider fee is added only
+	// when supplied so a nil value cannot overwrite previously stored
+	// commission data with NULL.
+	updates := map[string]any{
+		"callback_amount_cents": callbackAmountCents,
+	}
+	if providerFeeCents != nil {
+		updates["provider_fee_cents"] = *providerFeeCents
+	}
+
+	err := s.db.WithContext(ctx).Model(&Order{}).Where("id = ?", orderID).Updates(updates).Error
+	if err != nil {
+		return fmt.Errorf("save order payment amounts: %w", err)
+	}
+
+	return nil
+}
+
+// GetPaidOrdersWithoutProviderFee returns paid Platega orders whose provider
+// commission has not been persisted yet. A NULL fee is the durable retry marker
+// for the best-effort provider status lookup.
+func (s *Service) GetPaidOrdersWithoutProviderFee(ctx context.Context, limit int) ([]Order, error) {
+	var orders []Order
+
+	query := s.db.WithContext(ctx).
+		Where("status = ? AND payment_provider = ? AND provider_payment_id IS NOT NULL AND provider_payment_id <> '' AND provider_fee_cents IS NULL", OrderStatusPaid, "platega").
+		Order("id ASC")
+	if limit > 0 {
+		query = query.Limit(limit)
+	}
+
+	err := query.Find(&orders).Error
+	if err != nil {
+		return nil, fmt.Errorf("get paid orders without provider fee: %w", err)
+	}
+
+	return orders, nil
+}
+
 // ApplyPlanInTxFn is invoked inside the transaction that confirms an order.
 // It must materialize all DB prerequisites (pending_add / pending_remove rows)
 // needed by the background sync worker using the supplied tx handle.
@@ -213,7 +259,7 @@ type ApplyPlanInTxFn func(ctx context.Context, tx *gorm.DB, subscriptionID uint,
 // entering this transaction. If applyPlan is non-nil and the CAS succeeds, it
 // is called with the same tx used to write the subscription; on error the whole
 // transaction rolls back.
-func (s *Service) ConfirmOrderPaidCAS(ctx context.Context, orderID uint, paidAt, activatedAt time.Time, sub *Subscription, product *Product, applyPlan ApplyPlanInTxFn) (bool, error) {
+func (s *Service) ConfirmOrderPaidCAS(ctx context.Context, orderID uint, paidAt, activatedAt time.Time, sub *Subscription, product *Product, applyPlan ApplyPlanInTxFn, callbackAmountCents int64) (bool, error) {
 	var activated bool
 
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -239,10 +285,11 @@ func (s *Service) ConfirmOrderPaidCAS(ctx context.Context, orderID uint, paidAt,
 		// keeping both statuses in the same conditional update preserves the
 		// pending/expired -> paid transition as one atomic compare-and-swap.
 		result := tx.Model(&Order{}).Where("id = ? AND status IN ?", orderID, []OrderStatus{OrderStatusPending, OrderStatusExpired}).Updates(map[string]any{
-			"status":       OrderStatusPaid,
-			"paid_at":      paidAt,
-			"activated_at": activatedAt,
-			"expires_at":   newExpiry,
+			"status":                OrderStatusPaid,
+			"paid_at":               paidAt,
+			"activated_at":          activatedAt,
+			"expires_at":            newExpiry,
+			"callback_amount_cents": callbackAmountCents,
 		})
 		if result.Error != nil {
 			return fmt.Errorf("confirm order: %w", result.Error)

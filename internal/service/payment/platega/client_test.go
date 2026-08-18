@@ -64,6 +64,25 @@ func TestCreateTransactionAcceptsRedirect(t *testing.T) {
 	require.Equal(t, "https://pay.test/8", got.Redirect)
 }
 
+func TestCreateTransactionRejectsHTTPRedirects(t *testing.T) {
+	t.Parallel()
+
+	redirected := false
+	redirectTarget := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		redirected = true
+	}))
+	defer redirectTarget.Close()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, redirectTarget.URL, http.StatusFound)
+	}))
+	defer server.Close()
+
+	_, err := New(Config{MerchantID: "merchant", Secret: "secret", BaseURL: server.URL}).CreateTransaction(context.Background(), CreateTransactionRequest{AmountCents: 100, Currency: "RUB"})
+	require.Error(t, err, "an HTTP redirect must surface as an error instead of forwarding the authenticated request")
+	require.False(t, redirected, "the redirect target must never receive a request carrying X-Secret")
+}
+
 func TestParseExpiresIn(t *testing.T) {
 	for _, tt := range []struct {
 		name    string

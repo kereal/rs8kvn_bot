@@ -19,7 +19,7 @@ func TestLatestEmbeddedMigrationVersion(t *testing.T) {
 
 	version, err := latestEmbeddedMigrationVersion()
 	require.NoError(t, err)
-	assert.Equal(t, 34, version)
+	assert.Equal(t, 35, version)
 }
 
 func TestRunMigrationsRejectsDatabaseNewerThanEmbedded(t *testing.T) {
@@ -32,12 +32,92 @@ func TestRunMigrationsRejectsDatabaseNewerThanEmbedded(t *testing.T) {
 
 	sqlDB, err := db.db.DB()
 	require.NoError(t, err)
-	_, err = sqlDB.Exec("UPDATE schema_migrations SET version = ?, dirty = ?", 35, false)
+	_, err = sqlDB.Exec("UPDATE schema_migrations SET version = ?, dirty = ?", 36, false)
 	require.NoError(t, err)
 
 	err = runMigrations(sqlDB)
 	require.Error(t, err)
-	assert.ErrorContains(t, err, "newer than the latest embedded migration 34")
+	assert.ErrorContains(t, err, "newer than the latest embedded migration 35")
+
+	var (
+		version int
+		dirty   bool
+	)
+	require.NoError(t, sqlDB.QueryRow("SELECT version, dirty FROM schema_migrations").Scan(&version, &dirty))
+	assert.Equal(t, 36, version)
+	assert.False(t, dirty)
+}
+
+func TestRunMigrationsRefusesToRepairIncompleteNoTxMigration(t *testing.T) {
+	t.Parallel()
+
+	dbPath := filepath.Join(t.TempDir(), "partial-schema.db")
+	db, err := NewService(dbPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, db.Close()) })
+
+	sqlDB, err := db.db.DB()
+	require.NoError(t, err)
+	_, err = sqlDB.Exec(`CREATE TABLE subscription_nodes_old AS
+		SELECT subscription_id, node_id, status, retry_count, retry_at, last_error, updated_at
+		FROM subscription_nodes`)
+	require.NoError(t, err)
+	_, err = sqlDB.Exec("UPDATE schema_migrations SET version = ?, dirty = ?", 27, true)
+	require.NoError(t, err)
+
+	err = runMigrations(sqlDB)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "schema is incomplete")
+
+	var (
+		version int
+		dirty   bool
+	)
+	require.NoError(t, sqlDB.QueryRow("SELECT version, dirty FROM schema_migrations").Scan(&version, &dirty))
+	assert.Equal(t, 27, version)
+	assert.True(t, dirty)
+}
+
+func TestForeignKeysMigrationSchemaComplete_PropagatesStatusQueryError(t *testing.T) {
+	t.Parallel()
+
+	dbPath := filepath.Join(t.TempDir(), "invalid-status-schema.db")
+	db, err := NewService(dbPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, db.Close()) })
+
+	sqlDB, err := db.db.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
+	_, err = sqlDB.Exec("PRAGMA foreign_keys = OFF")
+	require.NoError(t, err)
+	_, err = sqlDB.Exec("DROP TABLE subscriptions")
+	require.NoError(t, err)
+	_, err = sqlDB.Exec(`CREATE TABLE subscriptions (
+		"status VARCHAR(50) NOT NULL DEFAULT 'active' CHECK" TEXT
+	)`)
+	require.NoError(t, err)
+
+	complete, err := foreignKeysMigrationSchemaComplete(sqlDB, 33)
+	require.Error(t, err)
+	assert.False(t, complete)
+}
+
+func TestRunMigrationsRepairsMetadataOnlyAfterCompleteNoTxMigration(t *testing.T) {
+	t.Parallel()
+
+	dbPath := filepath.Join(t.TempDir(), "complete-schema.db")
+	db, err := NewService(dbPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, db.Close()) })
+
+	sqlDB, err := db.db.DB()
+	require.NoError(t, err)
+	require.NoError(t, migrateTo(sqlDB, 27, true))
+	_, err = sqlDB.Exec("UPDATE schema_migrations SET version = ?, dirty = ?", 27, true)
+	require.NoError(t, err)
+
+	require.NoError(t, runMigrations(sqlDB))
 
 	var (
 		version int
@@ -299,9 +379,9 @@ func TestMigration_032_NormalizesInvalidRetryState(t *testing.T) {
 
 	// Return to the pre-032 schema, where legacy invalid retry state is still
 	// representable, then insert the row that caused the production risk.
-	// Steps(-3) skips 034, 033 and 032: 033 rebuilds subscriptions only, but
-	// the step counter must land on the 031 schema for this test's intent.
-	require.NoError(t, m.Steps(-3))
+	// Steps(-4) skips 035, 034, 033 and 032: 033 rebuilds subscriptions only,
+	// but the step counter must land on the 031 schema for this test's intent.
+	require.NoError(t, m.Steps(-4))
 
 	_, err = sqlDB.Exec(`INSERT INTO subscription_nodes
 		(subscription_id, node_id, status, retry_count, retry_at, updated_at)
@@ -499,9 +579,9 @@ func TestMigration_033_NormalizesInvalidStatuses(t *testing.T) {
 	t.Cleanup(func() { _, _ = m.Close() })
 
 	// Return to the pre-033 schema, where arbitrary statuses are still
-	// representable, then insert the legacy rows. Steps(-2) also reverts 034
-	// so the counter lands on the 032 schema.
-	require.NoError(t, m.Steps(-2))
+	// representable, then insert the legacy rows. Steps(-3) also reverts 035
+	// and 034 so the counter lands on the 032 schema.
+	require.NoError(t, m.Steps(-3))
 
 	_, err = sqlDB.Exec(`INSERT INTO subscriptions (telegram_id, username, client_id, subscription_id, status)
 		VALUES (777001, 'legacy-garbage', 'client-garbage', 'sub-garbage', 'garbage')`)

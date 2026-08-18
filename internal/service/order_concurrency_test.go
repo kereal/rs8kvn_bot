@@ -43,7 +43,7 @@ func TestConfirmPayment_SameOrderParallelCallbacksActivateOnlyOnce(t *testing.T)
 		},
 		GetProductByIDFunc: func(context.Context, uint) (*database.Product, error) { return product, nil },
 		GetByIDFunc:        func(context.Context, uint) (*database.Subscription, error) { return sub, nil },
-		ConfirmOrderPaidCASFunc: func(_ context.Context, orderID uint, _, _ time.Time, _ *database.Subscription, _ *database.Product, _ database.ApplyPlanInTxFn) (bool, error) {
+		ConfirmOrderPaidCASFunc: func(_ context.Context, orderID uint, _, _ time.Time, _ *database.Subscription, _ *database.Product, _ database.ApplyPlanInTxFn, _ int64) (bool, error) {
 			count := casCalls.Add(1)
 			if count == 1 {
 				firstStartedOnce.Do(func() { close(firstStarted) })
@@ -176,7 +176,7 @@ func TestConfirmPayment_DifferentOrdersRunInParallel(t *testing.T) {
 
 			return sub, nil
 		},
-		ConfirmOrderPaidCASFunc: func(_ context.Context, orderID uint, _, _ time.Time, _ *database.Subscription, _ *database.Product, _ database.ApplyPlanInTxFn) (bool, error) {
+		ConfirmOrderPaidCASFunc: func(_ context.Context, orderID uint, _, _ time.Time, _ *database.Subscription, _ *database.Product, _ database.ApplyPlanInTxFn, _ int64) (bool, error) {
 			casCalls.Add(1)
 
 			if orderID == order1.ID {
@@ -358,6 +358,10 @@ func (p *countingPaymentProvider) CreateTransaction(context.Context, platega.Cre
 		URL:           "https://pay.example",
 		ExpiresIn:     "00:15:00",
 	}, nil
+}
+
+func (p *countingPaymentProvider) GetTransactionStatus(context.Context, uuid.UUID) (*platega.TransactionStatusResponse, error) {
+	return nil, errors.New("status not configured")
 }
 
 // TestRequestPayment_ConcurrentCallersSingleProviderTransaction verifies the

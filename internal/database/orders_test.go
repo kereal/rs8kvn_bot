@@ -49,6 +49,123 @@ func TestGetOrderByID_NotFound(t *testing.T) {
 	assert.ErrorIs(t, err, ErrOrderNotFound)
 }
 
+func TestSaveOrderPaymentAmounts(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	sub := createTestSubscription(t, svc, 301, "user-payment-amounts", "client-payment-amounts")
+	plan := &Plan{Name: "plan-order-amounts", DevicesLimit: 1, TrafficLimit: 1024}
+	require.NoError(t, svc.db.WithContext(ctx).Create(plan).Error)
+	product := &Product{PlanID: plan.ID, Name: "1M", DurationDays: 30, PriceCents: 5000, Currency: "RUB", IsActive: true}
+	require.NoError(t, svc.db.WithContext(ctx).Create(product).Error)
+
+	order := &Order{
+		SubscriptionID: sub.ID,
+		ProductID:      product.ID,
+		Status:         OrderStatusPaid,
+		AmountCents:    5000,
+		Currency:       "RUB",
+	}
+	require.NoError(t, svc.db.WithContext(ctx).Create(order).Error)
+
+	// First call stores the callback amount; the fee stays NULL.
+	require.NoError(t, svc.SaveOrderPaymentAmounts(ctx, order.ID, 5250, nil))
+
+	got, err := svc.GetOrderByID(ctx, order.ID)
+	require.NoError(t, err)
+	require.NotNil(t, got.CallbackAmountCents)
+	assert.Equal(t, int64(5250), *got.CallbackAmountCents)
+	assert.Nil(t, got.ProviderFeeCents)
+
+	// Best-effort follow-up call adds the provider fee without touching the amount.
+	require.NoError(t, svc.SaveOrderPaymentAmounts(ctx, order.ID, 5250, ptrInt64(450)))
+
+	got, err = svc.GetOrderByID(ctx, order.ID)
+	require.NoError(t, err)
+	require.NotNil(t, got.CallbackAmountCents)
+	assert.Equal(t, int64(5250), *got.CallbackAmountCents)
+	require.NotNil(t, got.ProviderFeeCents)
+	assert.Equal(t, int64(450), *got.ProviderFeeCents)
+
+	// A nil fee on a later call must not overwrite the stored commission with NULL.
+	require.NoError(t, svc.SaveOrderPaymentAmounts(ctx, order.ID, 5250, nil))
+
+	got, err = svc.GetOrderByID(ctx, order.ID)
+	require.NoError(t, err)
+	require.NotNil(t, got.CallbackAmountCents)
+	assert.Equal(t, int64(5250), *got.CallbackAmountCents)
+	require.NotNil(t, got.ProviderFeeCents, "stored commission must survive a nil update")
+	assert.Equal(t, int64(450), *got.ProviderFeeCents)
+}
+
+func TestGetPaidOrdersWithoutProviderFee(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+	ctx := context.Background()
+	sub := createTestSubscription(t, svc, 302, "user-provider-fee-queue", "client-provider-fee-queue")
+	plan := &Plan{Name: "plan-provider-fee-queue", DevicesLimit: 1, TrafficLimit: 1024}
+	require.NoError(t, svc.db.WithContext(ctx).Create(plan).Error)
+	product := &Product{PlanID: plan.ID, Name: "1M", DurationDays: 30, PriceCents: 100, Currency: "RUB", IsActive: true}
+	require.NoError(t, svc.db.WithContext(ctx).Create(product).Error)
+
+	fee := int64(10)
+	orders := []*Order{
+		{SubscriptionID: sub.ID, ProductID: product.ID, Status: OrderStatusPaid, AmountCents: 100, Currency: "RUB", PaymentProvider: "platega", ProviderPaymentID: "paid-without-fee"},
+		{SubscriptionID: sub.ID, ProductID: product.ID, Status: OrderStatusPaid, AmountCents: 100, Currency: "RUB", PaymentProvider: "platega", ProviderPaymentID: "paid-with-fee", ProviderFeeCents: &fee},
+		{SubscriptionID: sub.ID, ProductID: product.ID, Status: OrderStatusPending, AmountCents: 100, Currency: "RUB", PaymentProvider: "platega", ProviderPaymentID: "pending-without-fee"},
+		{SubscriptionID: sub.ID, ProductID: product.ID, Status: OrderStatusPaid, AmountCents: 100, Currency: "RUB", PaymentProvider: "other", ProviderPaymentID: "other-provider"},
+	}
+	for _, order := range orders {
+		require.NoError(t, svc.db.WithContext(ctx).Create(order).Error)
+	}
+
+	got, err := svc.GetPaidOrdersWithoutProviderFee(ctx, 10)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, "paid-without-fee", got[0].ProviderPaymentID)
+}
+
+func TestConfirmOrderPaidCAS_PersistsCallbackAmount(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	plan := &Plan{Name: "plan-cas-callback-amount", DevicesLimit: 1, TrafficLimit: 1024}
+	require.NoError(t, svc.db.WithContext(ctx).Create(plan).Error)
+	product := &Product{PlanID: plan.ID, Name: "1M", DurationDays: 30, PriceCents: 5000, Currency: "RUB", IsActive: true}
+	require.NoError(t, svc.db.WithContext(ctx).Create(product).Error)
+
+	sub := createTestSubscription(t, svc, 905, "cas-callback-amount", "client-cas-callback-amount")
+	sub.PlanID = plan.ID
+	require.NoError(t, svc.db.Save(sub).Error)
+
+	order := &Order{SubscriptionID: sub.ID, ProductID: product.ID, Status: OrderStatusPending, AmountCents: 5000, Currency: "RUB"}
+	require.NoError(t, svc.db.WithContext(ctx).Create(order).Error)
+
+	now := time.Now().UTC().Truncate(time.Second)
+	activated, err := svc.ConfirmOrderPaidCAS(ctx, order.ID, now, now, sub, product, nil, 5250)
+	require.NoError(t, err)
+	require.True(t, activated)
+
+	stored, err := svc.GetOrderByID(ctx, order.ID)
+	require.NoError(t, err)
+	require.NotNil(t, stored.CallbackAmountCents, "callback amount must be persisted in the same transaction as the paid transition")
+	assert.Equal(t, int64(5250), *stored.CallbackAmountCents)
+}
+
+func TestSaveOrderPaymentAmounts_UnknownOrder(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+
+	err := svc.SaveOrderPaymentAmounts(context.Background(), 99999, 5250, nil)
+	require.NoError(t, err)
+}
+
 func TestOrderStatusConstants(t *testing.T) {
 	assert.Equal(t, OrderStatus("pending"), OrderStatusPending)
 	assert.Equal(t, OrderStatus("paid"), OrderStatusPaid)
@@ -110,7 +227,7 @@ func TestConfirmOrderPaidCAS_RecalculatesFromCurrentSubscription(t *testing.T) {
 
 	// The CAS must recompute expiry from the current subscription, not from any
 	// stale caller snapshot: the expired-at value passed in is irrelevant.
-	activated, err := svc.ConfirmOrderPaidCAS(ctx, order.ID, now, now, &Subscription{ID: sub.ID, PlanID: plan.ID}, product, nil)
+	activated, err := svc.ConfirmOrderPaidCAS(ctx, order.ID, now, now, &Subscription{ID: sub.ID, PlanID: plan.ID}, product, nil, order.AmountCents)
 	require.NoError(t, err)
 	assert.True(t, activated)
 
@@ -145,7 +262,7 @@ func TestConfirmOrderPaidCAS_AcceptsExpiredOrderForSettlementCallback(t *testing
 	require.NoError(t, svc.db.WithContext(ctx).Create(order).Error)
 
 	now := time.Now().UTC().Truncate(time.Second)
-	activated, err := svc.ConfirmOrderPaidCAS(ctx, order.ID, now, now, sub, product, nil)
+	activated, err := svc.ConfirmOrderPaidCAS(ctx, order.ID, now, now, sub, product, nil, order.AmountCents)
 	require.NoError(t, err)
 	require.True(t, activated, "the service grace-period check allows an expired order to enter the atomic paid transition")
 
@@ -194,7 +311,7 @@ func TestConfirmOrderPaidCAS_SwitchesPlanAndStatus(t *testing.T) {
 		return nil
 	}
 
-	activated, err := svc.ConfirmOrderPaidCAS(ctx, order.ID, now, now, sub, product, applyPlan)
+	activated, err := svc.ConfirmOrderPaidCAS(ctx, order.ID, now, now, sub, product, applyPlan, order.AmountCents)
 	require.NoError(t, err)
 	assert.True(t, activated)
 	// applyPlan must receive the PRODUCT plan, not the stale sub.PlanID.
@@ -207,7 +324,7 @@ func TestConfirmOrderPaidCAS_SwitchesPlanAndStatus(t *testing.T) {
 	assert.Equal(t, product.ID, *got.ProductID)
 
 	// Idempotent retry: order already paid, no second activation.
-	activated, err = svc.ConfirmOrderPaidCAS(ctx, order.ID, now, now, sub, product, applyPlan)
+	activated, err = svc.ConfirmOrderPaidCAS(ctx, order.ID, now, now, sub, product, applyPlan, order.AmountCents)
 	require.NoError(t, err)
 	assert.False(t, activated)
 }

@@ -523,7 +523,7 @@ func TestHandleBindTrial_Success(t *testing.T) {
 		}, nil
 	}
 	mockDB.GetInviteByCodeFunc = func(ctx context.Context, code string) (*database.Invite, error) {
-		return nil, gorm.ErrRecordNotFound
+		return nil, database.ErrInviteNotFound
 	}
 
 	ctx := context.Background()
@@ -835,7 +835,8 @@ func TestHandleBindTrial_GetInviteError(t *testing.T) {
 	ctx := context.Background()
 	handler.handleBindTrial(ctx, 123456, "testuser", "ABC123")
 
-	assert.True(t, mockBot.SendCalledSafe(), "Should send success message even if get invite fails")
+	assert.True(t, mockBot.SendCalledSafe(), "Should send an error message when get invite fails")
+	assert.Contains(t, mockBot.LastSentTextSafe(), "❌")
 }
 
 func TestHandleMySubscription_ShowLoadingFails(t *testing.T) {

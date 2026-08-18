@@ -55,4 +55,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_pending_subscription_product_unique
 
 PRAGMA foreign_keys = ON;
 
-PRAGMA foreign_key_check;
+-- golang-migrate executes this script through Exec and discards PRAGMA rows.
+-- Convert every returned violation into a CHECK error before the version is stored.
+DROP TABLE IF EXISTS migration_034_foreign_key_check;
+CREATE TEMP TABLE migration_034_foreign_key_check (
+    violation_count INTEGER NOT NULL CHECK (violation_count = 0)
+);
+INSERT INTO migration_034_foreign_key_check
+SELECT COUNT(*) FROM pragma_foreign_key_check;
+DROP TABLE migration_034_foreign_key_check;
