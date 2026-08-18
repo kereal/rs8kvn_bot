@@ -177,6 +177,34 @@ func TestMigration034_DownRejectsOrphanOrders(t *testing.T) {
 	assert.True(t, dirty)
 }
 
+func TestMigration034_IgnoresViolationsOutsideOrders(t *testing.T) {
+	t.Parallel()
+
+	sqlDB, cleanup := newSQLiteAtMigration30(t)
+	t.Cleanup(cleanup)
+
+	require.NoError(t, migrateTo(sqlDB, 33, false))
+
+	// Legacy FK-off era orphan in subscription_nodes: both parents are gone.
+	// Migration 034 rebuilds only orders, so unrelated violations elsewhere in
+	// the database must not block it (production incident: the DB-wide check
+	// aborted 034 on exactly this kind of leftover data).
+	_, err := sqlDB.Exec(`INSERT INTO subscription_nodes
+		(subscription_id, node_id, status, retry_count, retry_at, updated_at)
+		VALUES (999999, 999999, 'active', 0, NULL, datetime('now'))`)
+	require.NoError(t, err)
+
+	require.NoError(t, migrateTo(sqlDB, 34, true))
+
+	var (
+		version int
+		dirty   bool
+	)
+	require.NoError(t, sqlDB.QueryRow("SELECT version, dirty FROM schema_migrations").Scan(&version, &dirty))
+	assert.Equal(t, 34, version)
+	assert.False(t, dirty)
+}
+
 func TestRunMigrationsRefusesDirty034WithForeignKeyViolations(t *testing.T) {
 	t.Parallel()
 
