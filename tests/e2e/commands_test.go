@@ -11,7 +11,6 @@ import (
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
 
@@ -39,7 +38,7 @@ func TestE2E_StartCommand_Parameterized(t *testing.T) {
 					SubscriptionID: "test-sub-id",
 					Status:         "active",
 				}
-				require.NoError(t, env.db.CreateSubscription(ctx, sub, ""))
+				createE2ESub(t, env.db, sub)
 				resetBotAPI(env.botAPI)
 			},
 			wantMsg: "кнопки ниже",
@@ -86,7 +85,7 @@ func TestE2E_MySubscription(t *testing.T) {
 		SubscriptionID: "test-sub-id",
 		Status:         "active",
 	}
-	require.NoError(t, env.db.CreateSubscription(ctx, sub, ""))
+	createE2ESub(t, env.db, sub)
 
 	resetBotAPI(env.botAPI)
 

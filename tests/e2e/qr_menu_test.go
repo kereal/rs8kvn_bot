@@ -26,7 +26,7 @@ func TestE2E_QRCodeGeneration(t *testing.T) {
 		SubscriptionID: "test-sub-id",
 		Status:         "active",
 	}
-	require.NoError(t, env.db.CreateSubscription(ctx, sub, ""))
+	createE2ESub(t, env.db, sub)
 
 	resetBotAPI(env.botAPI)
 
@@ -87,7 +87,7 @@ func TestE2E_MenuHelp(t *testing.T) {
 		SubscriptionID: "test-sub-id",
 		Status:         "active",
 	}
-	require.NoError(t, env.db.CreateSubscription(ctx, sub, ""))
+	createE2ESub(t, env.db, sub)
 
 	resetBotAPI(env.botAPI)
 
@@ -146,7 +146,7 @@ func TestE2E_BackToStart(t *testing.T) {
 		SubscriptionID: "test-sub-id",
 		Status:         "active",
 	}
-	require.NoError(t, env.db.CreateSubscription(ctx, sub, ""))
+	createE2ESub(t, env.db, sub)
 
 	resetBotAPI(env.botAPI)
 
@@ -266,7 +266,7 @@ func TestE2E_QR_OpenAndBack(t *testing.T) {
 		SubscriptionID: "test-sub-id",
 		Status:         "active",
 	}
-	require.NoError(t, env.db.CreateSubscription(ctx, sub, ""))
+	createE2ESub(t, env.db, sub)
 
 	const (
 		cardMsgID   = 100 // subscription card already on screen

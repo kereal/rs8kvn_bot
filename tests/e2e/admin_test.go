@@ -875,7 +875,7 @@ func TestE2E_AdminLastReg(t *testing.T) {
 		Status:         "active",
 		CreatedAt:      time.Now(),
 	}
-	require.NoError(t, env.db.CreateSubscription(ctx, sub, ""))
+	createE2ESub(t, env.db, sub)
 
 	resetBotAPI(env.botAPI)
 

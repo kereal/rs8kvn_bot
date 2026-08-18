@@ -52,7 +52,7 @@ func TestE2E_TrialBind_Parameterized(t *testing.T) {
 					SubscriptionID: "existing-sub",
 					Status:         "active",
 				}
-				require.NoError(t, env.db.CreateSubscription(ctx, existingSub, ""))
+				createE2ESub(t, env.db, existingSub)
 
 				trialSubID := "trial-xyz-789"
 				_, err := env.db.CreateTrialSubscription(ctx, "test_invite_code", trialSubID, "trial-client-id", time.Now().Add(24*time.Hour))
@@ -141,7 +141,7 @@ func TestE2E_CleanupExpiredTrials(t *testing.T) {
 		SubscriptionID: "bound-sub-id",
 		Status:         "active",
 	}
-	require.NoError(t, env.db.CreateSubscription(ctx, bound, ""))
+	createE2ESub(t, env.db, bound)
 
 	removed, err := env.db.CleanupExpiredTrials(ctx, 0)
 	require.NoError(t, err)

@@ -62,6 +62,11 @@ func TestSubscriptionExpireWorker_process_FindsAndExpires(t *testing.T) {
 	plan, planErr := db.GetPlanByName(ctx, database.FreePlanName)
 	require.NoError(t, planErr)
 
+	// The test DSN enables SQLite foreign-key enforcement: ProductID must
+	// reference an existing product row.
+	product := &database.Product{PlanID: plan.ID, Name: "expire product", DurationDays: 30, PriceCents: 100, Currency: "RUB", IsActive: true}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(product).Error)
+
 	expiredSub := &database.Subscription{
 		TelegramID:     99991,
 		Username:       "expireuser1",
@@ -72,7 +77,7 @@ func TestSubscriptionExpireWorker_process_FindsAndExpires(t *testing.T) {
 		ExpiresAt:      testutil.PtrTime(time.Now().Add(-1 * time.Hour)),
 		PricePaidCents: 100,
 		Currency:       testutil.PtrString("RUB"),
-		ProductID:      testutil.PtrUint(1),
+		ProductID:      &product.ID,
 		StartedAt:      testutil.PtrTime(time.Now().Add(-48 * time.Hour)),
 	}
 	require.NoError(t, db.CreateSubscription(ctx, expiredSub, ""))
@@ -99,6 +104,9 @@ func TestSubscriptionExpireWorker_process_EmptyResult(t *testing.T) {
 	plan, planErr := db.GetPlanByName(ctx, database.FreePlanName)
 	require.NoError(t, planErr)
 
+	product := &database.Product{PlanID: plan.ID, Name: "noexpire product", DurationDays: 30, PriceCents: 100, Currency: "RUB", IsActive: true}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(product).Error)
+
 	activeSub := &database.Subscription{
 		TelegramID:     99992,
 		Username:       "noexpire",
@@ -109,7 +117,7 @@ func TestSubscriptionExpireWorker_process_EmptyResult(t *testing.T) {
 		ExpiresAt:      testutil.PtrTime(time.Now().Add(24 * time.Hour)),
 		PricePaidCents: 100,
 		Currency:       testutil.PtrString("RUB"),
-		ProductID:      testutil.PtrUint(1),
+		ProductID:      &product.ID,
 		StartedAt:      testutil.PtrTime(time.Now().Add(-1 * time.Hour)),
 	}
 	require.NoError(t, db.CreateSubscription(ctx, activeSub, ""))
@@ -166,6 +174,9 @@ func TestSubscriptionExpireWorker_process_PaidPlanExpires_DowngradesToFree(t *te
 	paidPlan := &database.Plan{Name: "paid-plan-expire-e2e", DevicesLimit: 3, TrafficLimit: 1024 * 1024 * 1024}
 	require.NoError(t, db.GetDB().WithContext(ctx).Create(paidPlan).Error)
 
+	product := &database.Product{PlanID: paidPlan.ID, Name: "paid expire product", DurationDays: 30, PriceCents: 100, Currency: "RUB", IsActive: true}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(product).Error)
+
 	node := &database.Node{Name: "expire-e2e-node", IsActive: true, Host: "http://expire-e2e", APIToken: "token", InboundIDs: `[1]`}
 	require.NoError(t, db.GetDB().WithContext(ctx).Create(node).Error)
 	require.NoError(t, db.GetDB().WithContext(ctx).Create(&database.PlanNode{PlanID: paidPlan.ID, NodeID: node.ID}).Error)
@@ -180,7 +191,7 @@ func TestSubscriptionExpireWorker_process_PaidPlanExpires_DowngradesToFree(t *te
 		ExpiresAt:      testutil.PtrTime(time.Now().Add(-1 * time.Hour).UTC().Truncate(time.Minute)),
 		PricePaidCents: 100,
 		Currency:       testutil.PtrString("RUB"),
-		ProductID:      testutil.PtrUint(1),
+		ProductID:      &product.ID,
 		StartedAt:      testutil.PtrTime(time.Now().Add(-48 * time.Hour).UTC().Truncate(time.Minute)),
 	}
 	require.NoError(t, db.CreateSubscription(ctx, sub, ""))

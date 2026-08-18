@@ -65,7 +65,7 @@ func TestE2E_GetSubscription_DatabaseClosed(t *testing.T) {
 		SubscriptionID: "test-sub-id",
 		Status:         "active",
 	}
-	require.NoError(t, env.db.CreateSubscription(ctx, sub, ""))
+	createE2ESub(t, env.db, sub)
 	env.db.Close()
 
 	_, err := env.db.GetByTelegramID(ctx, env.chatID)
@@ -86,7 +86,7 @@ func TestE2E_Subscription_Expired(t *testing.T) {
 		Status:         "expired",
 		ExpiresAt:      testutil.PtrTime(time.Now().Add(-1 * time.Hour)),
 	}
-	require.NoError(t, env.db.CreateSubscription(ctx, sub, ""))
+	createE2ESub(t, env.db, sub)
 
 	_, err := env.db.GetByTelegramID(ctx, env.chatID)
 	assert.ErrorIs(t, err, database.ErrSubscriptionNotFound,

@@ -1289,9 +1289,14 @@ func TestSubscriptionService_Create_ReanimatesRevoked(t *testing.T) {
 		Status:         "revoked",
 	}
 	require.NoError(t, db.CreateSubscription(ctx, revoked, ""))
+
+	// The test DSN enables SQLite foreign-key enforcement, so the stale binding
+	// below must reference an existing node row.
+	staleNode := &database.Node{ID: 1, Name: "stale-node", Host: "http://stale", APIToken: "token", InboundIDs: `[1]`}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(staleNode).Error)
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{
 		SubscriptionID: revoked.ID,
-		NodeID:         1,
+		NodeID:         staleNode.ID,
 		Status:         database.SyncStatusPendingRemove,
 	}))
 
