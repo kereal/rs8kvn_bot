@@ -16,9 +16,9 @@ import (
 
 // TransactionStatusResponse содержит детали транзакции, возвращаемые
 // GET /transaction/{id} («Проверка статуса оплаты платежа»). Имена полей
-// сохранены как в API провайдера, включая их опечатки (mechantId, comission,
-// comissionUsdt). Amount/Commission парсятся как json.Number, чтобы сохранить
-// точное десятичное представление провайдера.
+// сохранены как в API провайдера, включая их опечатки (например, mechantId).
+// Amount/Commission парсятся как json.Number, чтобы сохранить точное
+// десятичное представление провайдера.
 type TransactionStatusResponse struct {
 	ID          string `json:"id"`
 	Status      string `json:"status"`
@@ -28,7 +28,7 @@ type TransactionStatusResponse struct {
 	} `json:"paymentDetails"`
 	MerchantName      string      `json:"merchantName"`
 	MerchantID        string      `json:"mechantId"`
-	Commission        json.Number `json:"comission"`
+	Commission        json.Number `json:"comission"` //nolint:misspell // имя поля в API провайдера
 	PaymentMethod     string      `json:"paymentMethod"`
 	ExpiresIn         string      `json:"expiresIn"`
 	Return            string      `json:"return"`
@@ -95,7 +95,7 @@ func (c *Client) GetTransactionStatus(ctx context.Context, transactionID uuid.UU
 func (r *TransactionStatusResponse) CommissionCents() (int64, error) {
 	raw := strings.TrimSpace(r.Commission.String())
 	if raw == "" {
-		return 0, errors.New("comission is empty")
+		return 0, errors.New("provider commission is empty")
 	}
 
 	value, err := strconv.ParseFloat(raw, 64)
