@@ -116,6 +116,13 @@ func TestExpireSubscription_Success(t *testing.T) {
 	ctx := context.Background()
 
 	sub := createTestSubscription(t, svc, 9400, "expire-user", "client-expire-1")
+	startedAt := time.Now().UTC().Add(-24 * time.Hour)
+	currency := "RUB"
+	sub.StartedAt = &startedAt
+	sub.PricePaidCents = 2300
+	sub.Currency = &currency
+	require.NoError(t, svc.db.Save(sub).Error)
+
 	freePlan, err := svc.GetPlanByName(ctx, FreePlanName)
 	require.NoError(t, err)
 
@@ -127,6 +134,11 @@ func TestExpireSubscription_Success(t *testing.T) {
 	assert.Equal(t, "active", got.Status)
 	assert.Nil(t, got.ExpiresAt)
 	assert.Equal(t, freePlan.ID, got.PlanID)
+	assert.Nil(t, got.ProductID)
+	assert.Nil(t, got.StartedAt)
+	assert.Zero(t, got.PricePaidCents)
+	assert.Nil(t, got.Currency)
+	assert.False(t, got.IsPaid())
 }
 
 func TestExpireSubscription_NotFound(t *testing.T) {

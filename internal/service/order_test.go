@@ -669,6 +669,42 @@ func TestConfirmPayment_NotifiesAdminOnRenewal(t *testing.T) {
 	assert.Contains(t, msg.Text, "Заказ: #97")
 }
 
+func TestConfirmPayment_InvalidatesSubserverCacheOnActivation(t *testing.T) {
+	t.Parallel()
+
+	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440131")
+	sub := &database.Subscription{ID: 95, TelegramID: 57, Username: "carol", SubscriptionID: "sub-abc", ExpiresAt: testutil.PtrTime(time.Now().Add(30 * 24 * time.Hour))}
+	product := &database.Product{ID: 68, PlanID: 2, Name: "Premium 1 месяц", PriceCents: 230000, Currency: "RUB"}
+	order := &database.Order{ID: 98, SubscriptionID: 95, ProductID: 68, Status: database.OrderStatusPending, AmountCents: 230000, Currency: "RUB", ProviderPaymentID: providerID.String()}
+	mock := &testutil.DatabaseService{
+		GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
+			return order, nil
+		},
+		GetProductByIDFunc: func(context.Context, uint) (*database.Product, error) {
+			return product, nil
+		},
+		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
+			return sub, nil
+		},
+		ConfirmOrderPaidCASFunc: func(context.Context, uint, time.Time, time.Time, *database.Subscription, *database.Product, database.ApplyPlanInTxFn, int64) (bool, error) {
+			return true, nil
+		},
+	}
+
+	var invalidated []string
+
+	subSvc := NewSubscriptionService(mock, nil, nil, nil, nil)
+	subSvc.SetInvalidateBySubIDFunc(func(subID string) { invalidated = append(invalidated, subID) })
+
+	o := NewOrderService(mock, subSvc, NewSyncService(mock, nil, nil), fakePaymentProvider{}, "", nil)
+
+	confirmation, err := o.ConfirmPayment(context.Background(), providerID, json.Number("2300.00"), "RUB")
+	require.NoError(t, err)
+	require.True(t, confirmation.Activated)
+	assert.Equal(t, []string{"sub-abc"}, invalidated,
+		"activated payment must invalidate the subserver response cache (stale profile-title/traffic limit)")
+}
+
 func TestFormatAdminChargebackAlert(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -1353,6 +1389,46 @@ func TestSyncProviderFees_NotConfirmedDeferred(t *testing.T) {
 
 	require.NoError(t, o.SyncProviderFees(context.Background(), 10))
 	assert.Empty(t, saves, "a non-confirmed transaction must keep the NULL fee retry marker")
+}
+
+func TestSyncProviderFees_ContinuesPastDeferredFirstPage(t *testing.T) {
+	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440131")
+	orders := make([]database.Order, 0, 51)
+	for id := uint(1); id <= 51; id++ {
+		providerPaymentID := fmt.Sprintf("invalid-%d", id)
+		if id == 51 {
+			providerPaymentID = providerID.String()
+		}
+		orders = append(orders, database.Order{ID: id, AmountCents: 5000, ProviderPaymentID: providerPaymentID})
+	}
+
+	var saves []paymentAmountsSave
+	mock := &testutil.DatabaseService{
+		GetPaidOrdersWithoutProviderFeeAfterIDFunc: func(_ context.Context, afterID uint, limit int) ([]database.Order, error) {
+			page := make([]database.Order, 0, limit)
+			for _, order := range orders {
+				if order.ID <= afterID {
+					continue
+				}
+				page = append(page, order)
+				if len(page) == limit {
+					break
+				}
+			}
+			return page, nil
+		},
+		SaveOrderPaymentAmountsFunc: func(_ context.Context, orderID uint, callbackCents int64, feeCents *int64) error {
+			saves = append(saves, paymentAmountsSave{orderID: orderID, callbackCents: callbackCents, feeCents: feeCents})
+			return nil
+		},
+	}
+	provider := statusPaymentProvider{status: &platega.TransactionStatusResponse{Status: "CONFIRMED", Commission: json.Number("4.5")}}
+	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), provider, "", nil)
+
+	err := o.SyncProviderFees(context.Background(), 50)
+	require.Error(t, err, "invalid IDs remain retryable and should be reported")
+	require.Len(t, saves, 1, "the second page must be processed despite failures on the first page")
+	assert.Equal(t, uint(51), saves[0].orderID)
 }
 
 func TestCancelPaymentByProvider_ChargebackOnPendingDoesNotDowngrade(t *testing.T) {
