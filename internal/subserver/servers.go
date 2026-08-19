@@ -161,6 +161,7 @@ func ConvertSingleJSONToLink(raw json.RawMessage) (string, error) {
 		return "", fmt.Errorf("convert JSON config to share link: %w", err)
 	}
 
+	cfg.Address = strings.TrimSpace(cfg.Address)
 	if cfg.Address == "" {
 		return "", fmt.Errorf("server config missing address")
 	}
