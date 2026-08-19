@@ -992,6 +992,14 @@ func (o *OrderService) confirmPayment(ctx context.Context, providerPaymentID uui
 	unlock()
 
 	if activated {
+		// The subscription row changed (plan/product/price) and the subserver
+		// response cache is keyed by the unchanged subID, so a stale cached
+		// entry (old profile-title, old traffic limit) would otherwise be
+		// served until its TTL expires.
+		if o.subSvc != nil && sub.SubscriptionID != "" {
+			o.subSvc.InvalidateBySubID(ctx, sub.SubscriptionID)
+		}
+
 		o.notifyAdminPaid(ctx, sub, order, product, isRenewal)
 	}
 
@@ -1023,36 +1031,52 @@ func (o *OrderService) SyncProviderFees(ctx context.Context, limit int) error {
 	budgetCtx, cancel := context.WithTimeout(ctx, feeSyncBudget)
 	defer cancel()
 
-	orders, err := o.db.GetPaidOrdersWithoutProviderFee(budgetCtx, limit)
-	if err != nil {
-		return fmt.Errorf("load paid orders without provider fee: %w", err)
+	pageSize := limit
+	if pageSize <= 0 {
+		pageSize = 50
 	}
 
-	var errs []error
-	for _, order := range orders {
-		err = budgetCtx.Err()
+	var (
+		afterID uint
+		errs    []error
+	)
+
+	for {
+		orders, err := o.db.GetPaidOrdersWithoutProviderFeeAfterID(budgetCtx, afterID, pageSize)
 		if err != nil {
-			return err
+			return fmt.Errorf("load paid orders without provider fee after id %d: %w", afterID, err)
+		}
+		if len(orders) == 0 {
+			break
 		}
 
-		providerPaymentID, parseErr := platega.ParseTransactionID(order.ProviderPaymentID)
-		if parseErr != nil {
-			wrappedErr := fmt.Errorf("order %d: parse provider payment ID: %w", order.ID, parseErr)
-			logger.Warn("failed to parse provider payment ID for fee sync", zap.Uint("order_id", order.ID), zap.String("provider_payment_id", order.ProviderPaymentID), zap.Error(wrappedErr))
-			errs = append(errs, wrappedErr)
-			continue
+		for _, order := range orders {
+			err = budgetCtx.Err()
+			if err != nil {
+				return err
+			}
+
+			providerPaymentID, parseErr := platega.ParseTransactionID(order.ProviderPaymentID)
+			if parseErr != nil {
+				wrappedErr := fmt.Errorf("order %d: parse provider payment ID: %w", order.ID, parseErr)
+				logger.Warn("failed to parse provider payment ID for fee sync", zap.Uint("order_id", order.ID), zap.String("provider_payment_id", order.ProviderPaymentID), zap.Error(wrappedErr))
+				errs = append(errs, wrappedErr)
+				continue
+			}
+
+			callbackAmountCents := order.AmountCents
+			if order.CallbackAmountCents != nil {
+				callbackAmountCents = *order.CallbackAmountCents
+			}
+			err = o.persistProviderFee(budgetCtx, order.ID, providerPaymentID, callbackAmountCents)
+			if err != nil {
+				wrappedErr := fmt.Errorf("order %d: %w", order.ID, err)
+				logger.Warn("provider fee sync failed", zap.Uint("order_id", order.ID), zap.Error(wrappedErr))
+				errs = append(errs, wrappedErr)
+			}
 		}
 
-		callbackAmountCents := order.AmountCents
-		if order.CallbackAmountCents != nil {
-			callbackAmountCents = *order.CallbackAmountCents
-		}
-		err = o.persistProviderFee(budgetCtx, order.ID, providerPaymentID, callbackAmountCents)
-		if err != nil {
-			wrappedErr := fmt.Errorf("order %d: %w", order.ID, err)
-			logger.Warn("provider fee sync failed", zap.Uint("order_id", order.ID), zap.Error(wrappedErr))
-			errs = append(errs, wrappedErr)
-		}
+		afterID = orders[len(orders)-1].ID
 	}
 
 	return errors.Join(errs...)

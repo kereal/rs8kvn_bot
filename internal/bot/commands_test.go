@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
@@ -837,6 +838,108 @@ func TestHandleBindTrial_GetInviteError(t *testing.T) {
 
 	assert.True(t, mockBot.SendCalledSafe(), "Should send an error message when get invite fails")
 	assert.Contains(t, mockBot.LastSentTextSafe(), "❌")
+}
+
+func TestHandleMySub_Success(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{
+		TelegramAdminID: 123456,
+	}
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
+	mockBot := testutil.NewBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
+	mockXUIClients := map[uint]interfaces.XUIClient{1: mockXUI}
+	nodes := []database.Node{{ID: 1, Name: "main", IsActive: true, Host: "https://panel.example.com", APIToken: "token", InboundIDs: "[1]"}}
+	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUIClients, nil, nodes, cfg)
+	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
+
+	sub := &database.Subscription{
+		TelegramID: 123456,
+		Username:   "testuser",
+		PlanID:     1,
+		ExpiresAt:  testutil.PtrTime(time.Now().Add(30 * 24 * time.Hour)),
+		Status:     "active",
+		CreatedAt:  time.Now().Add(-7 * 24 * time.Hour),
+	}
+
+	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
+		return sub, nil
+	}
+	mockDB.GetPlanByIDFunc = func(ctx context.Context, planID uint) (*database.Plan, error) {
+		return &database.Plan{
+			ID:           planID,
+			Name:         "test",
+			TrafficLimit: 100 * 1024 * 1024 * 1024,
+		}, nil
+	}
+
+	traffic := &xui.ClientTraffic{
+		Up:        1024 * 1024 * 1024, // 1 GB
+		Down:      2048 * 1024 * 1024, // 2 GB
+		ExpiresAt: time.Now().AddDate(0, 1, 0).UnixMilli(),
+		Reset:     30,
+	}
+
+	mockXUI.GetClientTrafficFunc = func(ctx context.Context, email string) (*xui.ClientTraffic, error) {
+		return traffic, nil
+	}
+
+	ctx := context.Background()
+	update := tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat: &tgbotapi.Chat{ID: 123456},
+			From: &tgbotapi.User{ID: 123456, UserName: "testuser"},				Text: "/mysub",
+				Entities: []tgbotapi.MessageEntity{
+					{Type: "bot_command", Offset: 0, Length: 6}, // "/mysub"
+				},
+		},
+	}
+
+	err := handler.HandleMySub(ctx, update)
+
+	assert.NoError(t, err)
+	assert.True(t, mockBot.SendCalledSafe(), "Should send the subscription window")
+	assert.Contains(t, mockBot.LastSentTextSafe(), "Ваша подписка")
+	assert.Contains(t, mockBot.LastSentTextSafe(), "3.00 из 100 Гб (3%)")
+}
+
+func TestHandleMySub_NoSubscription(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{
+		TelegramAdminID: 123456,
+	}
+	mockDB := testutil.NewDatabaseService()
+	mockXUI := testutil.NewXUIClient()
+	mockBot := testutil.NewBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
+	mockXUIClients := map[uint]interfaces.XUIClient{1: mockXUI}
+	nodes := []database.Node{{ID: 1, Name: "main", IsActive: true, Host: "https://panel.example.com", APIToken: "token", InboundIDs: "[1]"}}
+	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUIClients, nil, nodes, cfg)
+	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
+
+	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
+		return nil, gorm.ErrRecordNotFound
+	}
+
+	ctx := context.Background()
+	update := tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat: &tgbotapi.Chat{ID: 123456},
+			From: &tgbotapi.User{ID: 123456, UserName: "testuser"},				Text: "/mysub",
+				Entities: []tgbotapi.MessageEntity{
+					{Type: "bot_command", Offset: 0, Length: 6},
+				},
+		},
+	}
+
+	err := handler.HandleMySub(ctx, update)
+
+	assert.NoError(t, err)
+	assert.True(t, mockBot.SendCalledSafe(), "Should send a message")
+	assert.Contains(t, mockBot.LastSentTextSafe(), "нет активной подписки")
 }
 
 func TestHandleMySubscription_ShowLoadingFails(t *testing.T) {

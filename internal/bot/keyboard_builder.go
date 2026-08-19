@@ -30,14 +30,14 @@ func NewKeyboardBuilder(botUsername, contactUser, donateCard, donateURL, siteURL
 func (kb *KeyboardBuilder) MainMenu(hasSubscription bool, paymentEnabled bool) tgbotapi.InlineKeyboardMarkup {
 	var firstRow []tgbotapi.InlineKeyboardButton
 
-	firstRow = append(firstRow, tgbotapi.NewInlineKeyboardButtonData("📋 Подписка", "menu_subscription"))
+	firstRow = append(firstRow, tgbotapi.NewInlineKeyboardButtonData("🚀 Подписка", "menu_subscription"))
 	if kb.donateEnabled {
 		firstRow = append(firstRow, tgbotapi.NewInlineKeyboardButtonData("☕ Донат", "menu_donate"))
 	}
 
 	rows := [][]tgbotapi.InlineKeyboardButton{tgbotapi.NewInlineKeyboardRow(firstRow...)}
 
-	rows = append(rows, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("❓ Помощь", "menu_help"), tgbotapi.NewInlineKeyboardButtonData("📑 Документы", "menu_documents")))
+	rows = append(rows, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("📖 Помощь", "menu_help"), tgbotapi.NewInlineKeyboardButtonData("📑 Документы", "menu_documents")))
 	if paymentEnabled && hasSubscription {
 		rows = append(rows, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("💎 Купить Premium", "buy_premium_list")))
 	}

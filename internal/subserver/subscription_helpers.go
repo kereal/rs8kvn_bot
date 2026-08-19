@@ -1,9 +1,12 @@
 package subserver
 
 import (
+	"encoding/base64"
 	"net/http"
 	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 // FilterHeaders extracts request headers into a lowercased map, excluding following:
@@ -139,4 +142,85 @@ func ResponseHeaders(sourceHeaders map[string]string, contentType, userInfo stri
 	out["subscription-userinfo"] = userInfo
 
 	return out
+}
+
+// AppendProfileTitleSuffix appends suffix to a profile-title header value and
+// re-encodes the result in the canonical form used by 3x-ui panels and sing-box
+// clients: "base64:<b64>". The incoming value may arrive as
+//
+//   - "base64:<b64>" (3x-ui / hiddify convention): the payload is decoded,
+//     suffixed, and re-encoded;
+//   - raw base64 (no prefix): decoded, suffixed, re-encoded with the prefix so
+//     clients that only understand the prefixed form still decode it;
+//   - plain text: treated as the title itself, encoded with the prefix.
+//
+// An empty value or empty suffix is returned unchanged.
+func AppendProfileTitleSuffix(value, suffix string) string {
+	value = strings.TrimSpace(value)
+	if value == "" || suffix == "" {
+		return value
+	}
+
+	return "base64:" + base64.StdEncoding.EncodeToString([]byte(decodeProfileTitle(value)+suffix))
+}
+
+// decodeProfileTitle extracts the plain title from a profile-title header value
+// regardless of whether it uses the "base64:" prefix, raw base64, or plain text.
+// Non-decodable payloads are returned as-is.
+func decodeProfileTitle(value string) string {
+	payload := value
+
+	if strings.HasPrefix(strings.ToLower(value), "base64:") {
+		payload = value[len("base64:"):]
+	}
+
+	payload = strings.TrimSpace(payload)
+	if payload == "" {
+		return ""
+	}
+
+	for _, enc := range []*base64.Encoding{base64.StdEncoding, base64.RawStdEncoding} {
+		decoded, err := enc.DecodeString(payload)
+		decodedString := string(decoded)
+		if err == nil && isPrintableProfileTitle(decodedString) {
+			return decodedString
+		}
+	}
+
+	return payload
+}
+
+func isPrintableProfileTitle(value string) bool {
+	if !utf8.ValidString(value) || value == "" {
+		return false
+	}
+
+	for _, r := range value {
+		if unicode.IsControl(r) {
+			return false
+		}
+	}
+
+	return true
+}
+
+// ApplyProfileTitleSuffix appends suffix to the profile-title entry of a header
+// map in place and returns the map. It is a no-op when the header is absent or
+// the suffix is empty. The key lookup is case-insensitive because upstream
+// headers arrive lowercased (FetchFromNode) while ResponseHeaders canonicalizes
+// keys to Title-Case via http.Header.
+func ApplyProfileTitleSuffix(headers map[string]string, suffix string) map[string]string {
+	if headers == nil || suffix == "" {
+		return headers
+	}
+
+	for k, v := range headers {
+		if strings.EqualFold(k, "profile-title") {
+			headers[k] = AppendProfileTitleSuffix(v, suffix)
+
+			break
+		}
+	}
+
+	return headers
 }

@@ -46,10 +46,13 @@ PRAGMA foreign_keys = ON;
 
 -- golang-migrate executes this script through Exec and discards PRAGMA rows.
 -- Convert every returned violation into a CHECK error before the version is stored.
+-- Scoped to orders (the table this migration rebuilds): legacy violations
+-- elsewhere must not block the rollback, mirroring the up migration and the
+-- dirty recovery verifier.
 DROP TABLE IF EXISTS migration_034_foreign_key_check;
 CREATE TEMP TABLE migration_034_foreign_key_check (
     violation_count INTEGER NOT NULL CHECK (violation_count = 0)
 );
 INSERT INTO migration_034_foreign_key_check
-SELECT COUNT(*) FROM pragma_foreign_key_check;
+SELECT COUNT(*) FROM pragma_foreign_key_check('orders');
 DROP TABLE migration_034_foreign_key_check;
