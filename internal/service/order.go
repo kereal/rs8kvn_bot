@@ -1051,7 +1051,8 @@ func (o *OrderService) SyncProviderFees(ctx context.Context, limit int) error {
 		}
 
 		for _, order := range orders {
-			if err := budgetCtx.Err(); err != nil {
+			err = budgetCtx.Err()
+			if err != nil {
 				return err
 			}
 
