@@ -83,7 +83,7 @@ See **[Installation Guide](doc/installation.md)** for:
 | `/lastreg` | Show the last 10 registered users |
 | `/del <id>` | Delete a subscription by database ID |
 | `/setplan <subscription_id> <plan_id> [days]` | Change a subscription's plan through the service layer (reconciles VPN nodes, extends expiry; defaults to 30 days when none given) |
-| `/broadcast <message>` | Send a message to all users who have a subscription (MarkdownV2, special chars auto-escaped) |
+| `/broadcast` | Start a broadcast: name → message → preview → confirm (MarkdownV2, special chars auto-escaped); sends to all users who have a subscription and records the broadcast with delivery stats |
 | `/send <id or @username> <message>` | Send a message to a specific user |
 | `/refstats` | Show referral statistics (count per user from cache) |
 
@@ -92,16 +92,21 @@ See **[Installation Guide](doc/installation.md)** for:
 ```text
 /del 5                                    # Delete subscription with DB ID 5
 /setplan 5 3 30                            # Change subscription 5 to plan 3 for 30 days
-/broadcast 🔔 Важное обновление!          # Broadcast to all subscribers (MarkdownV2 supported)
+/broadcast                                 # Start a broadcast (name → message → preview → confirm)
 /send 123456789 Привет!                   # Private message by Telegram ID
 /send @username Привет!                   # Private message by username
 ```
 
-**Broadcast formatting:** messages are sent as MarkdownV2. Special characters
-(`.`, `!`, `_`, `*`, etc.) are escaped automatically, so plain text needs no
-manual escaping — but `*bold*`, `_italic_`, `` `code` `` and `[text](url)` are
-preserved. At the end the admin gets a report splitting successful deliveries,
-users who blocked the bot, and other errors.
+**Broadcast flow:** `/broadcast` asks for a broadcast *name*, then the message.
+Messages are sent as MarkdownV2. Special characters (`.`, `!`, `_`, `*`, etc.)
+are escaped automatically, so plain text needs no manual escaping — but
+`*bold*`, `_italic_`, `` `code` `` and `[text](url)` are preserved. After
+confirmation every broadcast is stored in the `broadcasts` table with the message
+text, planned/started/finished dates, counters (recipients / delivered /
+blocked-the-bot / errors) and a JSON delivery report with recipient Telegram
+IDs. Transient (non-blocked) send failures are retried twice with backoff. The
+final report shows the broadcast id and name and offers a "📋 Детали рассылки"
+button that opens the broadcast card.
 
 ## Health Check & Web Endpoints
 

@@ -180,6 +180,18 @@ func (c *CallbackHandler) HandleCallback(ctx context.Context, update tgbotapi.Up
 		if err != nil {
 			return fmt.Errorf("handle back_to_invite: %w", err)
 		}
+	case strings.HasPrefix(data, "broadcast_details_"):
+		raw := strings.TrimPrefix(data, "broadcast_details_")
+
+		id64, _ := strconv.ParseUint(raw, 10, 64)
+		if id64 == 0 || id64 > uint64(^uint(0)) {
+			logger.Warn("invalid broadcast_details callback payload",
+				zap.String("data", data))
+
+			return nil
+		}
+
+		c.h.sendBroadcastDetails(ctx, chatID, uint(id64))
 	default:
 		logger.Warn("Unknown callback data", zap.String("data", data))
 	}
