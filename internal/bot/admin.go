@@ -419,7 +419,7 @@ func (h *Handler) handleBroadcastName(ctx context.Context, chatID int64, raw str
 		return nil
 	}
 
-	if len(name) > broadcastNameMaxLen {
+	if len([]rune(name)) > broadcastNameMaxLen {
 		h.SendMessage(ctx, chatID, fmt.Sprintf("❌ Название слишком длинное (до %d символов). /cancel для отмены.", broadcastNameMaxLen))
 		return nil
 	}
@@ -484,7 +484,7 @@ func (h *Handler) handleBroadcastDraftText(ctx context.Context, chatID int64, te
 			tgbotapi.NewInlineKeyboardButtonData("❌ Отмена", "broadcast_cancel"),
 		),
 	)
-	msg := tgbotapi.NewMessage(chatID, fmt.Sprintf("✅ Превью готово. Рассылка «%s».\n\nОтправить это сообщение всем пользователям?", utils.EscapeMarkdownV2(name)))
+	msg := tgbotapi.NewMessage(chatID, utils.EscapeMarkdownV2(fmt.Sprintf("✅ Превью готово. Рассылка «%s».\n\nОтправить это сообщение всем пользователям?", name)))
 	msg.ParseMode = "MarkdownV2"
 	msg.ReplyMarkup = kb
 	h.send(ctx, msg)
@@ -649,9 +649,9 @@ func (h *Handler) runBroadcast(ctx context.Context, adminChatID int64, name, tex
 							break
 						}
 
-						if userBlocked || ctx.Err() != nil {
-							break
-						}
+					if userBlocked || userFailed || ctx.Err() != nil {
+						break
+					}
 					}
 
 					if ctx.Err() != nil {
@@ -693,9 +693,13 @@ func (h *Handler) runBroadcast(ctx context.Context, adminChatID int64, name, tex
 	remaining := int(totalProcessed) - int(sent+failed+blocked)
 	finishedAt := time.Now().UTC()
 
+	// Используем context.WithoutCancel, чтобы финализация (обновление БД и
+	// отправка отчёта админу) работала даже при отменённом/таймаутном контексте.
+	bgCtx := context.WithoutCancel(ctx)
+
 	if broadcastCancelled {
-		h.finalizeBroadcast(ctx, broadcastID, string(database.BroadcastStatusCanceled), &report, finishedAt, totalProcessed, sent, blocked, failed)
-		h.sendBroadcastReport(ctx, adminChatID, fmt.Sprintf(`⚠️ Рассылка прервана!
+		h.finalizeBroadcast(bgCtx, broadcastID, string(database.BroadcastStatusCanceled), &report, finishedAt, totalProcessed, sent, blocked, failed)
+		h.sendBroadcastReport(bgCtx, adminChatID, fmt.Sprintf(`⚠️ Рассылка прервана!
 
 📦 Рассылка #%d: %s
 
@@ -709,8 +713,8 @@ func (h *Handler) runBroadcast(ctx context.Context, adminChatID int64, name, tex
 	}
 
 	if batchErr != nil {
-		h.finalizeBroadcast(ctx, broadcastID, string(database.BroadcastStatusFailed), &report, finishedAt, totalProcessed, sent, blocked, failed)
-		h.sendBroadcastReport(ctx, adminChatID, fmt.Sprintf(`❌ Рассылка прервана из-за ошибки!
+		h.finalizeBroadcast(bgCtx, broadcastID, string(database.BroadcastStatusFailed), &report, finishedAt, totalProcessed, sent, blocked, failed)
+		h.sendBroadcastReport(bgCtx, adminChatID, fmt.Sprintf(`❌ Рассылка прервана из-за ошибки!
 
 📦 Рассылка #%d: %s
 
@@ -732,8 +736,8 @@ func (h *Handler) runBroadcast(ctx context.Context, adminChatID int64, name, tex
 		return fmt.Errorf("broadcast batch error: %w", batchErr)
 	}
 
-	h.finalizeBroadcast(ctx, broadcastID, string(database.BroadcastStatusCompleted), &report, finishedAt, totalProcessed, sent, blocked, failed)
-	h.sendBroadcastReport(ctx, adminChatID, fmt.Sprintf(`✅ Рассылка завершена!
+	h.finalizeBroadcast(bgCtx, broadcastID, string(database.BroadcastStatusCompleted), &report, finishedAt, totalProcessed, sent, blocked, failed)
+	h.sendBroadcastReport(bgCtx, adminChatID, fmt.Sprintf(`✅ Рассылка завершена!
 
 📦 Рассылка #%d: %s
 
@@ -1034,6 +1038,7 @@ func (h *Handler) sendBroadcastDetails(ctx context.Context, chatID int64, broadc
 	report, err := c.ParseDeliveryReport()
 	if err != nil {
 		logger.Warn("Failed to parse delivery report", zap.Uint("broadcast_id", c.ID), zap.Error(err))
+		report = &database.BroadcastDeliveryReport{Delivered: []int64{}, Blocked: []int64{}, Errors: []database.BroadcastSendError{}}
 	}
 
 	var sb strings.Builder
