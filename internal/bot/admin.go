@@ -2,6 +2,7 @@ package bot
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/kereal/rs8kvn_bot/internal/config"
+	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/logger"
 	"github.com/kereal/rs8kvn_bot/internal/service"
 	"github.com/kereal/rs8kvn_bot/internal/utils"
@@ -24,18 +26,30 @@ type broadcastStage int
 
 const (
 	broadcastStageIdle broadcastStage = iota
+	broadcastStageAwaitingName
 	broadcastStageAwaitingDraft
 	broadcastStagePreview
 )
 
 const (
 	broadcastSessionTTL = 15 * time.Minute
+	// broadcastNameMaxLen — максимальная длина названия рассылки.
+	broadcastNameMaxLen = 100
+	// broadcastRetries — число повторов доставки при временных (не blocked) ошибках.
+	broadcastRetries = 2
+	// broadcastRetryBaseDelay — базовая пауза между повторами (растёт линейно).
+	broadcastRetryBaseDelay = 300 * time.Millisecond
+	// broadcastErrorTextMaxLen — максимальная длина текста ошибки в отчёте.
+	broadcastErrorTextMaxLen = 500
+	// broadcastTextPreviewMaxRunes — максимальная длина текста в карточке рассылки.
+	broadcastTextPreviewMaxRunes = 500
 )
 
 // broadcastSession holds the in-progress broadcast draft for an admin.
 type broadcastSession struct {
 	createdAt time.Time
 	stage     broadcastStage
+	name      string
 	text      string
 }
 
@@ -325,8 +339,10 @@ func isUserBlockedError(err error) bool {
 }
 
 // HandleBroadcast handles the /broadcast command for admins.
-// It starts the draft flow: the admin then sends a multi-line MarkdownV2
-// message which is previewed, and confirmed via inline buttons before sending.
+// It starts the broadcast flow: the admin first sends a broadcast NAME, then a
+// multi-line MarkdownV2 message which is previewed, and confirmed via inline
+// buttons before sending. The confirmed broadcast is recorded in the broadcasts
+// table with delivery statistics.
 func (h *Handler) HandleBroadcast(ctx context.Context, update tgbotapi.Update) error {
 	if update.Message == nil {
 		logger.Error("HandleBroadcast called with nil Message")
@@ -342,15 +358,15 @@ func (h *Handler) HandleBroadcast(ctx context.Context, update tgbotapi.Update) e
 
 	h.startBroadcastSession(chatID)
 
-	h.SendMessage(ctx, chatID, "✍️ Отправьте сообщение для рассылки (MarkdownV2, до 4096 символов, с форматированием).\n\n"+
-		"Многострочный текст поддерживается. После отправки бот покажет превью и кнопки подтверждения.\n\n"+
+	h.SendMessage(ctx, chatID, "📦 Отправьте *название* рассылки (для статистики, до 100 символов).\n\n"+
 		"Нажмите /cancel для отмены.")
 
 	return nil
 }
 
-// HandleBroadcastDraft consumes the admin's text message as a broadcast draft,
-// previews it (validating MarkdownV2), and offers confirm/cancel buttons.
+// HandleBroadcastDraft consumes the admin's text messages: first the broadcast
+// name, then the broadcast draft (previewed with MarkdownV2 and confirmed via
+// inline buttons).
 func (h *Handler) HandleBroadcastDraft(ctx context.Context, update tgbotapi.Update) error {
 	if update.Message == nil {
 		logger.Error("HandleBroadcastDraft called with nil Message")
@@ -377,12 +393,62 @@ func (h *Handler) HandleBroadcastDraft(ctx context.Context, update tgbotapi.Upda
 		return nil
 	}
 
+	s := h.getBroadcastSession(chatID)
+	if s == nil {
+		h.SendMessage(ctx, chatID, "❌ Нет активной рассылки. Начните с /broadcast")
+		return nil
+	}
+
+	switch s.stage {
+	case broadcastStageAwaitingName:
+		return h.handleBroadcastName(ctx, chatID, text)
+	case broadcastStageAwaitingDraft:
+		return h.handleBroadcastDraftText(ctx, chatID, text)
+	default:
+		h.SendMessage(ctx, chatID, "❌ Нет активной рассылки. Начните с /broadcast")
+		return nil
+	}
+}
+
+// handleBroadcastName consumes the broadcast name and moves the session to the
+// draft stage.
+func (h *Handler) handleBroadcastName(ctx context.Context, chatID int64, raw string) error {
+	name := strings.TrimSpace(raw)
+	if name == "" {
+		h.SendMessage(ctx, chatID, "❌ Название не может быть пустым. /cancel для отмены.")
+		return nil
+	}
+
+	if len(name) > broadcastNameMaxLen {
+		h.SendMessage(ctx, chatID, fmt.Sprintf("❌ Название слишком длинное (до %d символов). /cancel для отмены.", broadcastNameMaxLen))
+		return nil
+	}
+
+	h.broadcastMu.Lock()
+	h.broadcastSessions[chatID] = &broadcastSession{createdAt: time.Now(), stage: broadcastStageAwaitingDraft, name: name}
+	h.broadcastMu.Unlock()
+
+	h.SendMessage(ctx, chatID, "✅ Название принято.\n\n✍️ Теперь отправьте текст сообщения (MarkdownV2, до 4096 символов на часть, с форматированием).\n\n"+
+		"Многострочный текст поддерживается. После отправки бот покажет превью и кнопки подтверждения.\n\n"+
+		"Нажмите /cancel для отмены.")
+
+	return nil
+}
+
+// handleBroadcastDraftText consumes the broadcast text, previews it (validating
+// MarkdownV2), and offers confirm/cancel buttons.
+func (h *Handler) handleBroadcastDraftText(ctx context.Context, chatID int64, text string) error {
 	const maxBroadcastLen = config.MaxTelegramMessageLen * 20
 	if len(text) > maxBroadcastLen {
 		h.clearBroadcastSession(chatID)
 		h.SendMessage(ctx, chatID, fmt.Sprintf("❌ Сообщение слишком длинное (%d символов). Максимум — %d символов; рассылка автоматически разбивается на части по %d символов.", len(text), maxBroadcastLen, config.MaxTelegramMessageLen))
 
 		return nil
+	}
+
+	name := ""
+	if s := h.getBroadcastSession(chatID); s != nil {
+		name = s.name
 	}
 
 	// D3: preview with MarkdownV2. The draft may exceed one Telegram message,
@@ -409,7 +475,7 @@ func (h *Handler) HandleBroadcastDraft(ctx context.Context, update tgbotapi.Upda
 	}
 
 	h.broadcastMu.Lock()
-	h.broadcastSessions[chatID] = &broadcastSession{createdAt: time.Now(), stage: broadcastStagePreview, text: text}
+	h.broadcastSessions[chatID] = &broadcastSession{createdAt: time.Now(), stage: broadcastStagePreview, name: name, text: text}
 	h.broadcastMu.Unlock()
 
 	kb := tgbotapi.NewInlineKeyboardMarkup(
@@ -418,14 +484,17 @@ func (h *Handler) HandleBroadcastDraft(ctx context.Context, update tgbotapi.Upda
 			tgbotapi.NewInlineKeyboardButtonData("❌ Отмена", "broadcast_cancel"),
 		),
 	)
-	msg := tgbotapi.NewMessage(chatID, "✅ Превью готово. Отправить это сообщение всем пользователям?")
+	msg := tgbotapi.NewMessage(chatID, fmt.Sprintf("✅ Превью готово. Рассылка «%s».\n\nОтправить это сообщение всем пользователям?", utils.EscapeMarkdownV2(name)))
+	msg.ParseMode = "MarkdownV2"
 	msg.ReplyMarkup = kb
 	h.send(ctx, msg)
 
 	return nil
 }
 
-// handleBroadcastConfirm runs the broadcast for the confirmed draft.
+// handleBroadcastConfirm creates the broadcast record (DB-setup phase: a failure
+// aborts the broadcast — the broadcast must be recorded before any message is
+// sent) and runs the broadcast.
 func (h *Handler) handleBroadcastConfirm(ctx context.Context, chatID int64) error {
 	s := h.getBroadcastSession(chatID)
 	if s == nil || s.stage != broadcastStagePreview {
@@ -433,11 +502,28 @@ func (h *Handler) handleBroadcastConfirm(ctx context.Context, chatID int64) erro
 		return nil
 	}
 
-	text := s.text
+	name, text := s.name, s.text
 
 	h.clearBroadcastSession(chatID)
 
-	return h.runBroadcast(ctx, chatID, text)
+	now := time.Now().UTC()
+	broadcast := &database.Broadcast{
+		Name:        name,
+		Filters:     "{}",
+		MessageText: text,
+		Status:      string(database.BroadcastStatusRunning),
+		PlannedAt:   &now,
+		StartedAt:   &now,
+	}
+	err := h.db.CreateBroadcast(ctx, broadcast)
+	if err != nil {
+		logger.Error("Failed to create broadcast", zap.Error(err))
+		h.SendMessage(ctx, chatID, fmt.Sprintf("❌ Не удалось сохранить рассылку:\n\n%v", err))
+
+		return fmt.Errorf("create broadcast: %w", err)
+	}
+
+	return h.runBroadcast(ctx, chatID, name, text, broadcast.ID)
 }
 
 // handleBroadcastCancel discards the in-progress broadcast draft.
@@ -448,8 +534,10 @@ func (h *Handler) handleBroadcastCancel(ctx context.Context, chatID int64) error
 	return nil
 }
 
-// runBroadcast sends text (MarkdownV2, as-is) to all users in batches.
-func (h *Handler) runBroadcast(ctx context.Context, adminChatID int64, text string) error {
+// runBroadcast sends text (MarkdownV2, as-is) to all users in batches, retrying
+// transient (non-blocked) failures, and records the outcome in the broadcast row
+// (counters + delivery_report JSON).
+func (h *Handler) runBroadcast(ctx context.Context, adminChatID int64, name, text string, broadcastID uint) error {
 	const broadcastTimeout = 5 * time.Minute
 
 	ctx, cancel := context.WithTimeout(ctx, broadcastTimeout)
@@ -467,6 +555,8 @@ func (h *Handler) runBroadcast(ctx context.Context, adminChatID int64, text stri
 		totalProcessed     int64
 		batchErr           error
 		broadcastCancelled bool
+		report             = database.BroadcastDeliveryReport{Delivered: []int64{}, Blocked: []int64{}, Errors: []database.BroadcastSendError{}}
+		reportMu           sync.Mutex
 	)
 
 	offset := 0
@@ -523,6 +613,7 @@ func (h *Handler) runBroadcast(ctx context.Context, adminChatID int64, text stri
 
 					chunks := splitMessage(text, config.MaxTelegramMessageLen)
 					userBlocked, userFailed := false, false
+					var lastErr error
 
 					for _, chunk := range chunks {
 						msg := tgbotapi.NewMessage(tg, utils.EscapeMarkdownV2(chunk))
@@ -530,17 +621,36 @@ func (h *Handler) runBroadcast(ctx context.Context, adminChatID int64, text stri
 
 						msg.DisableWebPagePreview = true
 
-						err := h.sendWithError(ctx, msg)
-						if err != nil {
+						// Retry transient failures up to broadcastRetries times with
+						// linear backoff. Blocked-type errors are permanent and never
+						// retried; ctx cancellation aborts immediately.
+						for attempt := 0; ; attempt++ {
+							err := h.sendWithError(ctx, msg)
+							if err == nil {
+								break
+							}
 							if ctx.Err() != nil {
 								return
 							}
-
 							if isUserBlockedError(err) {
 								userBlocked = true
-							} else {
-								userFailed = true
+								break
 							}
+							lastErr = err
+							if attempt < broadcastRetries {
+								select {
+								case <-time.After(broadcastRetryBaseDelay * time.Duration(attempt+1)):
+								case <-ctx.Done():
+									return
+								}
+								continue
+							}
+							userFailed = true
+							break
+						}
+
+						if userBlocked || ctx.Err() != nil {
+							break
 						}
 					}
 
@@ -548,14 +658,19 @@ func (h *Handler) runBroadcast(ctx context.Context, adminChatID int64, text stri
 						return
 					}
 
+					reportMu.Lock()
 					switch {
 					case userBlocked:
 						blockedCount.Add(1)
+						report.Blocked = append(report.Blocked, tg)
 					case userFailed:
 						failCount.Add(1)
+						report.Errors = append(report.Errors, database.BroadcastSendError{TelegramID: tg, Error: truncateRunes(lastErr.Error(), broadcastErrorTextMaxLen)})
 					default:
 						successCount.Add(1)
+						report.Delivered = append(report.Delivered, tg)
 					}
+					reportMu.Unlock()
 				}(telegramID)
 			case <-ctx.Done():
 				broadcastCancelled = true
@@ -576,21 +691,28 @@ func (h *Handler) runBroadcast(ctx context.Context, adminChatID int64, text stri
 	failed := failCount.Load()
 	blocked := blockedCount.Load()
 	remaining := int(totalProcessed) - int(sent+failed+blocked)
+	finishedAt := time.Now().UTC()
 
 	if broadcastCancelled {
-		h.SendMessage(context.WithoutCancel(ctx), adminChatID, fmt.Sprintf(`⚠️ Рассылка прервана!
+		h.finalizeBroadcast(ctx, broadcastID, string(database.BroadcastStatusCanceled), &report, finishedAt, totalProcessed, sent, blocked, failed)
+		h.sendBroadcastReport(ctx, adminChatID, fmt.Sprintf(`⚠️ Рассылка прервана!
+
+📦 Рассылка #%d: %s
 
 📤 Отправлено: %d
 🚫 Заблокировали бота: %d
 ❌ Ошибок: %d
 👥 Осталось: %d`,
-			sent, blocked, failed, remaining))
+			broadcastID, name, sent, blocked, failed, remaining), broadcastID)
 
 		return fmt.Errorf("broadcast cancelled: %w", ctx.Err())
 	}
 
 	if batchErr != nil {
-		h.SendMessage(context.WithoutCancel(ctx), adminChatID, fmt.Sprintf(`❌ Рассылка прервана из-за ошибки!
+		h.finalizeBroadcast(ctx, broadcastID, string(database.BroadcastStatusFailed), &report, finishedAt, totalProcessed, sent, blocked, failed)
+		h.sendBroadcastReport(ctx, adminChatID, fmt.Sprintf(`❌ Рассылка прервана из-за ошибки!
+
+📦 Рассылка #%d: %s
 
 📤 Отправлено: %d
 🚫 Заблокировали бота: %d
@@ -598,10 +720,10 @@ func (h *Handler) runBroadcast(ctx context.Context, adminChatID int64, text stri
 👥 Не обработано: %d
 
 Ошибка: %v`,
-			sent, blocked, failed, remaining, batchErr,
-		))
+			broadcastID, name, sent, blocked, failed, remaining, batchErr), broadcastID)
 		logger.Error("Broadcast failed due to batch retrieval error",
 			zap.Error(batchErr),
+			zap.Uint("broadcast_id", broadcastID),
 			zap.Int64("success", sent),
 			zap.Int64("blocked", blocked),
 			zap.Int64("failed", failed),
@@ -610,15 +732,18 @@ func (h *Handler) runBroadcast(ctx context.Context, adminChatID int64, text stri
 		return fmt.Errorf("broadcast batch error: %w", batchErr)
 	}
 
-	h.SendMessage(context.WithoutCancel(ctx), adminChatID, fmt.Sprintf(`✅ Рассылка завершена!
+	h.finalizeBroadcast(ctx, broadcastID, string(database.BroadcastStatusCompleted), &report, finishedAt, totalProcessed, sent, blocked, failed)
+	h.sendBroadcastReport(ctx, adminChatID, fmt.Sprintf(`✅ Рассылка завершена!
+
+📦 Рассылка #%d: %s
 
 📤 Отправлено: %d
 🚫 Заблокировали бота: %d
 ❌ Ошибок: %d
 👥 Всего: %d`,
-		sent, blocked, failed, totalProcessed,
-	))
+		broadcastID, name, sent, blocked, failed, totalProcessed), broadcastID)
 	logger.Info("Broadcast completed",
+		zap.Uint("broadcast_id", broadcastID),
 		zap.Int64("success", sent),
 		zap.Int64("blocked", blocked),
 		zap.Int64("failed", failed),
@@ -627,12 +752,57 @@ func (h *Handler) runBroadcast(ctx context.Context, adminChatID int64, text stri
 	return nil
 }
 
+// finalizeBroadcast сохраняет итоги рассылки в строку рассылки: статус, время
+// завершения, счётчики и JSON-отчёт. Ошибка обновления логируется — отчёт
+// администратору отправляется в любом случае.
+func (h *Handler) finalizeBroadcast(ctx context.Context, broadcastID uint, status string, report *database.BroadcastDeliveryReport, finishedAt time.Time, totalProcessed, sent, blocked, failed int64) {
+	broadcast := &database.Broadcast{
+		ID:              broadcastID,
+		Status:          status,
+		FinishedAt:      &finishedAt,
+		RecipientsTotal: totalProcessed,
+		SentCount:       sent,
+		BlockedCount:    blocked,
+		FailedCount:     failed,
+	}
+	err := broadcast.SetDeliveryReport(report)
+	if err != nil {
+		logger.Error("Failed to marshal broadcast delivery report", zap.Uint("broadcast_id", broadcastID), zap.Error(err))
+	}
+	err = h.db.UpdateBroadcast(ctx, broadcast)
+	if err != nil {
+		logger.Error("Failed to update broadcast", zap.Uint("broadcast_id", broadcastID), zap.Error(err))
+	}
+}
+
+// sendBroadcastReport отправляет финальный отчёт администратору с кнопкой
+// «Детали рассылки» (ссылка на карточку).
+func (h *Handler) sendBroadcastReport(ctx context.Context, chatID int64, text string, broadcastID uint) {
+	msg := tgbotapi.NewMessage(chatID, text)
+	msg.DisableWebPagePreview = true
+	if broadcastID > 0 {
+		msg.ReplyMarkup = broadcastDetailsKeyboard(broadcastID)
+	}
+	h.send(ctx, msg)
+}
+
+// broadcastDetailsKeyboard возвращает кнопку перехода к карточке рассылки.
+func broadcastDetailsKeyboard(broadcastID uint) *tgbotapi.InlineKeyboardMarkup {
+	kb := tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("📋 Детали рассылки", fmt.Sprintf("broadcast_details_%d", broadcastID)),
+		),
+	)
+
+	return &kb
+}
+
 // startBroadcastSession begins (or restarts) the draft flow for an admin.
 func (h *Handler) startBroadcastSession(chatID int64) {
 	h.broadcastMu.Lock()
 	defer h.broadcastMu.Unlock()
 
-	h.broadcastSessions[chatID] = &broadcastSession{createdAt: time.Now(), stage: broadcastStageAwaitingDraft}
+	h.broadcastSessions[chatID] = &broadcastSession{createdAt: time.Now(), stage: broadcastStageAwaitingName}
 }
 
 // getBroadcastSession returns the active broadcast session for an admin, or nil.
@@ -842,7 +1012,162 @@ func containsEntityChar(s string) bool {
 // broadcastSessionActive reports whether an admin has an in-progress broadcast.
 func (h *Handler) broadcastSessionActive(chatID int64) bool {
 	s := h.getBroadcastSession(chatID)
-	return s != nil && (s.stage == broadcastStageAwaitingDraft || s.stage == broadcastStagePreview)
+	return s != nil && (s.stage == broadcastStageAwaitingName || s.stage == broadcastStageAwaitingDraft || s.stage == broadcastStagePreview)
+}
+
+// sendBroadcastDetails отправляет карточку рассылки. Используется кнопкой
+// «Детали рассылки» из финального отчёта рассылки.
+func (h *Handler) sendBroadcastDetails(ctx context.Context, chatID int64, broadcastID uint) {
+	c, err := h.db.GetBroadcast(ctx, broadcastID)
+	if err != nil {
+		if errors.Is(err, database.ErrBroadcastNotFound) {
+			h.SendMessage(ctx, chatID, "❌ Рассылка не найдена.")
+			return
+		}
+
+		logger.Error("Failed to get broadcast", zap.Uint("broadcast_id", broadcastID), zap.Error(err))
+		h.SendMessage(ctx, chatID, "❌ Ошибка получения рассылки.")
+
+		return
+	}
+
+	report, err := c.ParseDeliveryReport()
+	if err != nil {
+		logger.Warn("Failed to parse delivery report", zap.Uint("broadcast_id", c.ID), zap.Error(err))
+	}
+
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "📦 *Рассылка #%d: %s*\n\n", c.ID, c.Name)
+	fmt.Fprintf(&sb, "🗂 Статус: %s %s\n", broadcastStatusEmoji(c.Status), broadcastStatusLabel(c.Status))
+
+	if c.PlannedAt != nil {
+		fmt.Fprintf(&sb, "🗓 Запланирована: %s\n", c.PlannedAt.Format("02.01.06 15:04"))
+	}
+	if c.StartedAt != nil {
+		fmt.Fprintf(&sb, "▶️ Начало: %s\n", c.StartedAt.Format("02.01.06 15:04"))
+	}
+	if c.FinishedAt != nil {
+		fmt.Fprintf(&sb, "⏹ Конец: %s\n", c.FinishedAt.Format("02.01.06 15:04"))
+	}
+
+	fmt.Fprintf(&sb, "\n👥 Получателей: %d\n", c.RecipientsTotal)
+	fmt.Fprintf(&sb, "📤 Отправлено: %d\n", c.SentCount)
+	fmt.Fprintf(&sb, "🚫 Заблокировали бота: %d\n", c.BlockedCount)
+	fmt.Fprintf(&sb, "❌ Ошибок: %d\n", c.FailedCount)
+
+	if c.Filters != "" && c.Filters != "{}" {
+		fmt.Fprintf(&sb, "\n🔎 Фильтры: `%s`\n", c.Filters)
+	}
+
+	if len(report.Delivered) > 0 {
+		fmt.Fprintf(&sb, "\n✅ Доставлено (ID): %s\n", formatIDList(report.Delivered, 15))
+	}
+	if len(report.Blocked) > 0 {
+		fmt.Fprintf(&sb, "🚫 Заблокировали (ID): %s\n", formatIDList(report.Blocked, 15))
+	}
+	if len(report.Errors) > 0 {
+		fmt.Fprintf(&sb, "❌ Ошибки (ID): %s\n", formatErrorList(report.Errors, 15))
+	}
+
+	fmt.Fprintf(&sb, "\n💬 *Текст:*\n%s", truncateRunes(c.MessageText, broadcastTextPreviewMaxRunes))
+
+	msg := tgbotapi.NewMessage(chatID, utils.EscapeMarkdownV2(sb.String()))
+	msg.ParseMode = "MarkdownV2"
+	h.send(ctx, msg)
+}
+
+// broadcastStatusEmoji возвращает эмодзи статуса рассылки для списков.
+func broadcastStatusEmoji(status string) string {
+	switch status {
+	case string(database.BroadcastStatusScheduled):
+		return "⏳"
+	case string(database.BroadcastStatusRunning):
+		return "▶️"
+	case string(database.BroadcastStatusCompleted):
+		return "✅"
+	case string(database.BroadcastStatusFailed):
+		return "❌"
+	case string(database.BroadcastStatusCanceled):
+		return "⚠️"
+	default:
+		return "❔"
+	}
+}
+
+// broadcastStatusLabel возвращает человекочитаемую подпись статуса рассылки.
+func broadcastStatusLabel(status string) string {
+	switch status {
+	case string(database.BroadcastStatusScheduled):
+		return "запланирована"
+	case string(database.BroadcastStatusRunning):
+		return "идёт отправка"
+	case string(database.BroadcastStatusCompleted):
+		return "завершена"
+	case string(database.BroadcastStatusFailed):
+		return "прервана ошибкой"
+	case string(database.BroadcastStatusCanceled):
+		return "прервана"
+	default:
+		return status
+	}
+}
+
+// formatIDList форматирует список telegram_id, усекая до maxItems.
+func formatIDList(ids []int64, maxItems int) string {
+	if len(ids) == 0 {
+		return "—"
+	}
+
+	parts := make([]string, 0, min(len(ids), maxItems))
+	for i, id := range ids {
+		if i >= maxItems {
+			break
+		}
+		parts = append(parts, strconv.FormatInt(id, 10))
+	}
+
+	s := strings.Join(parts, ", ")
+	if len(ids) > maxItems {
+		s += fmt.Sprintf(" … и ещё %d", len(ids)-maxItems)
+	}
+
+	return s
+}
+
+// formatErrorList форматирует список ошибок доставки, усекая до maxItems.
+func formatErrorList(errs []database.BroadcastSendError, maxItems int) string {
+	if len(errs) == 0 {
+		return "—"
+	}
+
+	parts := make([]string, 0, min(len(errs), maxItems))
+	for i, e := range errs {
+		if i >= maxItems {
+			break
+		}
+		parts = append(parts, fmt.Sprintf("%d (%s)", e.TelegramID, e.Error))
+	}
+
+	s := strings.Join(parts, "; ")
+	if len(errs) > maxItems {
+		s += fmt.Sprintf(" … и ещё %d", len(errs)-maxItems)
+	}
+
+	return s
+}
+
+// truncateRunes обрезает строку до maxRunes рун (без разрыва UTF-8) с эллипсисом.
+func truncateRunes(s string, maxRunes int) string {
+	if maxRunes <= 0 {
+		return ""
+	}
+
+	r := []rune(s)
+	if len(r) <= maxRunes {
+		return s
+	}
+
+	return string(r[:maxRunes]) + "…"
 }
 
 // HandleSend handles the /send command for admins to send a message to a specific user.

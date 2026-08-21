@@ -129,7 +129,7 @@ internal/
 │   ├── handler.go           # Main router, update loop
 │   ├── command.go            # /start, /help, /invite
 │   ├── callback.go           # Inline keyboard callbacks
-│   ├── admin.go             # /del, /broadcast, /send, /refstats
+│   ├── admin.go             # /del, /broadcast, /send, /refstats, broadcast cards
 │   ├── subscription_handler.go # Create/view/QR subscription
 │   ├── menu.go              # Navigation: donate, help, back
 │   ├── cache.go             # LRU cache (1000 entries, 5min TTL)

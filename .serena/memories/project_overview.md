@@ -56,10 +56,14 @@ Production-grade: миграции, мониторинг, rate-limiting, circuit
 - `statusRecorder` tracks per-request source success/total counts
 
 ## Broadcast (рассылка `/broadcast`)
-- Поток: `/broadcast` → черновик (текст) → превью (MarkdownV2) → подтверждение inline-кнопками → массовая отправка батчами (100, concurrency 10) всем `telegram_id` из БД.
+- Поток: `/broadcast` → **название рассылки** → текст → превью (MarkdownV2) → подтверждение inline-кнопками → массовая отправка батчами (100, concurrency 10) всем `telegram_id` из БД.
 - Текст отправляется как **MarkdownV2**. Спецсимволы (`.`, `!`, `_`, `*`, `()` и т.д.) **авто-экранируются** в `utils.EscapeMarkdownV2`, форматирование сохраняется — ручное экранирование юзеру не нужно.
-- Отчёт в конце разделяет счётчики: `Отправлено` / `Заблокировали бота` / `Ошибок` / `Всего`. Ошибки «bot was blocked by the user» / «user is deactivated» / «chat not found» считаются отдельно (`isUserBlockedError`), не смешиваясь с реальными сбоями.
-- Таймаут рассылки 5 мин; при отмене/ошибке БД отправляется частичный отчёт.
+- Каждая подтверждённая рассылка сохраняется в таблицу **`broadcasts`** (миграция 036): название, `filters` (JSON, резерв под таргетинг), текст, статус (`scheduled|running|completed|failed|canceled`, CHECK-constraint в БД), `planned_at` (nullable) / `started_at` / `finished_at`, счётчики `recipients_total`/`sent_count`/`blocked_count`/`failed_count` и `delivery_report` (JSON: `delivered`/`blocked` — списки telegram_id, `errors` — `{telegram_id, error}`).
+- **Ретраи**: временные (не blocked) ошибки доставки ретраятся до 2 раз с линейной паузой (300/600 мс); blocked-ошибки («bot was blocked by the user» / «user is deactivated» / «chat not found», `isUserBlockedError`) не ретраятся; отмена/таймаут — немедленный выход.
+- Отчёт в конце разделяет счётчики: `Отправлено` / `Заблокировали бота` / `Ошибок` / `Всего`, показывает `Рассылка #id: название` и кнопку «📋 Детали рассылки» (`broadcast_details_<id>`).
+- Карточка рассылки (даты, статус, счётчики, фильтры, текст, списки ID) открывается кнопкой «📋 Детали рассылки» из финального отчёта рассылки (отдельных команд `/campaigns`/`/campaign` нет). Репозиторий: `internal/database/broadcasts.go`, модель + JSON-хелперы в `models.go` (`ParseDeliveryReport`/`SetDeliveryReport`/`ParseFilters`/`SetFilters`).
+- DB-фаза (создание рассылки) — обязательна: при ошибке рассылка **отменяется** до отправки. `UpdateBroadcast` обновляет только изменяемые поля (статус, даты, счётчики, отчёт), карточку не затирает.
+- Таймаут рассылки 5 мин; при отмене/ошибке БД статус `canceled`/`failed`, в отчёте только обработанные.
 
 ## Стек
 - **Go 1.25** (go.mod)

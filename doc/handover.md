@@ -210,7 +210,7 @@ Cache.Set(240s) → return body with Content-Type + Subscription-Userinfo
 **Admin Features:**
 - `/del <id>` — delete subscription by ID
 - `/setplan <subscription_id> <plan_id> [days]` — change subscription plan through the service layer (subscription row + node reconciliation + best-effort VPN sync; free plan clears expiry, future expiry preserved when `days` omitted, else 30-day default)
-- `/broadcast <msg>` — draft → MarkdownV2 preview (special chars auto-escaped, `*bold*`/`_italic_`/`` `code` ``/`[text](url)` preserved) → inline confirm → batched send to all subscribers (100/batch, concurrency 10); final report splits delivered / blocked-the-bot / other errors
+- `/broadcast` — broadcast flow: name → draft → MarkdownV2 preview (special chars auto-escaped) → inline confirm → batched send (100/batch, concurrency 10) with 2 retries on transient errors; every broadcast is stored in the `broadcasts` table (text, dates, counters, JSON delivery report with recipient IDs); the final report's "📋 Детали рассылки" button opens the broadcast card
 - `/send <id|username> <msg>` — private message (30s cooldown per admin)
 - `/refstats` — referral statistics (top 10 from cache)
 - 📊 Stats — bot statistics

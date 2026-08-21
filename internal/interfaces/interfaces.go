@@ -189,6 +189,15 @@ type OrderRepository interface {
 	CancelPaidOrderAndDowngradeCAS(ctx context.Context, provider string, providerPaymentID uuid.UUID, now time.Time, freePlanID uint, applyPlan database.ChargebackPlanInTxFn) (*database.ChargebackResult, error)
 }
 
+// BroadcastRepository provides CRUD for broadcast cards
+// (название, текст, статус, даты, счётчики, JSON-отчёт).
+type BroadcastRepository interface {
+	CreateBroadcast(ctx context.Context, b *database.Broadcast) error
+	GetBroadcast(ctx context.Context, id uint) (*database.Broadcast, error)
+	ListBroadcasts(ctx context.Context, limit int) ([]database.Broadcast, error)
+	UpdateBroadcast(ctx context.Context, b *database.Broadcast) error
+}
+
 // DatabaseService is the composed persistence contract used by application services.
 type DatabaseService interface {
 	SubscriptionNodeRepository
@@ -199,6 +208,7 @@ type DatabaseService interface {
 	PlanRepository
 	ProductRepository
 	OrderRepository
+	BroadcastRepository
 	Ping(ctx context.Context) error
 	Close() error
 	GetPoolStats() (*database.PoolStats, error)
