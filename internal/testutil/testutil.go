@@ -147,6 +147,8 @@ type DatabaseService struct {
 	CountTrialRequestsByIPLastHourFunc          func(ctx context.Context, ip string) (int, error)
 	CreateTrialRequestFunc                      func(ctx context.Context, ip string) error
 	CleanupExpiredTrialsFunc                    func(ctx context.Context, hours int) ([]database.Subscription, error)
+	ClaimExpiredTrialsFunc                      func(ctx context.Context, hours int) ([]database.Subscription, error)
+	DeleteClaimedTrialFunc                      func(ctx context.Context, id uint) error
 	GetPoolStatsFunc                            func() (*database.PoolStats, error)
 	GetWithPlanAndNodesFunc                     func(ctx context.Context, subscriptionID string) (*database.SubscriptionFull, error)
 	GetSubscriptionStatusFunc                   func(ctx context.Context, subscriptionID string) (string, time.Time, error)
@@ -791,6 +793,25 @@ func (m *DatabaseService) CleanupExpiredTrials(ctx context.Context, hours int) (
 	}
 
 	return nil, nil
+}
+
+func (m *DatabaseService) ClaimExpiredTrials(ctx context.Context, hours int) ([]database.Subscription, error) {
+	if m.ClaimExpiredTrialsFunc != nil {
+		return m.ClaimExpiredTrialsFunc(ctx, hours)
+	}
+	if m.CleanupExpiredTrialsFunc != nil {
+		return m.CleanupExpiredTrialsFunc(ctx, hours)
+	}
+
+	return nil, nil
+}
+
+func (m *DatabaseService) DeleteClaimedTrial(ctx context.Context, id uint) error {
+	if m.DeleteClaimedTrialFunc != nil {
+		return m.DeleteClaimedTrialFunc(ctx, id)
+	}
+
+	return nil
 }
 
 func (m *DatabaseService) GetPoolStats() (*database.PoolStats, error) {

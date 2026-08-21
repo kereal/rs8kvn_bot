@@ -138,6 +138,8 @@ type TrialRepository interface {
 	CountTrialRequestsByIPLastHour(ctx context.Context, ip string) (int, error)
 	CreateTrialRequest(ctx context.Context, ip string) error
 	CleanupExpiredTrials(ctx context.Context, hours int) ([]database.Subscription, error)
+	ClaimExpiredTrials(ctx context.Context, hours int) ([]database.Subscription, error)
+	DeleteClaimedTrial(ctx context.Context, id uint) error
 }
 
 // NodeRepository provides node and plan-node lookup operations.

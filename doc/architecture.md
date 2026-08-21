@@ -244,8 +244,8 @@ for update := range updates {
 1. Signal received → `ctx.Done()` closes
 2. `botAPI.StopReceivingUpdates()` — stops long polling
 3. Drain updates channel (empty it)
-4. Wait for `updatesWg` (in-flight handlers) with 30s timeout
-5. Wait for background workers (`wg.Wait()`) with 30s timeout
+4. Wait for `updatesWg` (in-flight handlers) with 90s timeout
+5. Wait for background workers (`wg.Wait()`) with 90s timeout
 6. Close logger, database
 
 **Result:** No updates lost, all handlers complete or timeout, clean exit.
@@ -350,7 +350,7 @@ if !rateLimiter.Allow(chatID) {
 - Trial bound → `invalidateCache(telegramID)`
 - Subserver reload → entire cache cleared on config change
 
-**Pattern:** Cache-Aside with stale-as-fallback (proxy returns stale if XUI down).
+**Pattern:** Cache-Aside with fail-closed status revalidation (a cache hit is not served when DB status cannot be verified).
 
 ---
 
@@ -395,8 +395,9 @@ CREATE INDEX idx_orders_created_at             ON orders(created_at);
 ```
 
 **Race-safe patterns:**
-- `BindTrialSubscription`: `UPDATE WHERE telegram_id < 0 AND plan_id = <trial_plan_id>` + `RowsAffected` check (trial-подписки используют отрицательные `telegram_id`, колонки `is_trial` нет)
-- `CleanupExpiredTrials`: `DELETE ... RETURNING` to atomically fetch deleted rows
+- `BindTrialSubscription`: `UPDATE WHERE status = active AND telegram_id < 0 AND plan_id = <trial_plan_id>` + `RowsAffected` check (trial-подписки используют отрицательные `telegram_id`, колонки `is_trial` нет)
+- `CleanupExpiredTrials`: claim as `expired`, deprovision externally, then delete; failed panel operations remain retryable
+- `ApplyPlanToSubscription` / `MarkAllForRemoval`: hold the per-subscription sync lock across the full DB state transition
 - `GetOrCreateInvite`: always returns the oldest (canonical) code for the referrer.
   The UNIQUE constraint + "one code per referrer" guarantee is enforced by migration 004
   (aggressive deduplication of historical duplicates that accumulated because 004 was
@@ -464,15 +465,15 @@ SIGQUIT (kill -3) → graceful shutdown (also handled)
 1. `ctx.Done()` received → break event loop
 2. `botAPI.StopReceivingUpdates()` — stops long polling, channel closes
 3. Drain updates channel (discard remaining updates)
-4. Wait for `updatesWg` (max 30s) — all handlers finish or timeout
-5. Wait for background `wg` (backup, heartbeat, trial cleanup, sync/expire/orphan workers) (max 30s)
+4. Wait for `updatesWg` (max 90s) — all handlers finish or timeout
+5. Wait for background `wg` (backup, heartbeat, trial cleanup, sync/expire/orphan workers) (max 90s)
 6. Stop `subProxy` cache cleanup
 7. Set `webServer.ready = false`
 8. `webServer.Stop(ctx)` — shutdown HTTP server (5s timeout)
 9. Close logger, database
 
 **Timeouts:**
-- `ShutdownTimeout = 30s` (config constant)
+- `ShutdownTimeout = 90s` (config constant)
 - Web server stop: 5s
 - Total shutdown: ~60s worst-case
 

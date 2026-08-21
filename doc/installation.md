@@ -154,7 +154,7 @@ services:
         max-file: "3"
 
     # Graceful shutdown
-    stop_grace_period: 30s
+    stop_grace_period: 90s
     stop_signal: SIGTERM
 ```
 

@@ -725,8 +725,8 @@ func TestSubscriptionService_BindTrial_SingleNode_ErrorPropagated(t *testing.T) 
 	got, err := svc.BindTrial(context.Background(), "trial-sub-1", 123456, "testuser")
 	require.Error(t, err, "BindTrial must propagate UpdateClient failure on nodes[0]")
 	assert.Contains(t, err.Error(), "update trial client on node 1")
-	// On error the bound sub is still returned for caller context.
-	assert.NotNil(t, got)
+	// The DB binding has not happened because panel sync failed first.
+	assert.Nil(t, got)
 	assert.Equal(t, 1, xui1Calls, "only nodes[0] must be contacted")
 	assert.Equal(t, 0, xui2Calls, "nodes[1] must not be contacted (single-node trial contract)")
 	assert.Equal(t, "trial_trial-sub-1", gotReq.CurrentEmail, "CurrentEmail must be trial_ + subscriptionID")
@@ -1197,9 +1197,10 @@ func TestSubscriptionService_CleanupExpiredTrials_Success(t *testing.T) {
 		},
 	}
 	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
+	vpnClients := map[uint]vpn.Client{1: vpn.NewThreeXUIClient(xuiClient, []int{1})}
 	sources := []database.Node{{ID: 1, IsActive: true, Host: "http://x", InboundIDs: "[1]"}}
 
-	svc := NewSubscriptionService(db, xuiClients, nil, sources, cfg)
+	svc := NewSubscriptionService(db, xuiClients, vpnClients, sources, cfg)
 	n, err := svc.CleanupExpiredTrials(context.Background())
 
 	assert.NoError(t, err)

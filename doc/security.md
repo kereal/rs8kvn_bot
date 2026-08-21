@@ -85,7 +85,7 @@ Instead, contact us privately:
 - **Panic recovery** in all goroutines (`recoverAndReport`)
 - **Graceful shutdown** — in-flight requests allowed to complete
 - **RetryWithBackoff** retries VPN panel calls on transient errors (exponential backoff + jitter, up to 3 retries)
-- **Stale cache fallback** for Subscription server if panel is down
+- **Fail-closed cache revalidation** for the Subscription server: cached access is not served when subscription status cannot be checked
 - **Circuit breaker** state tracked via Prometheus metrics (`circuit_breaker_state`)
 
 ### 6. Code Quality

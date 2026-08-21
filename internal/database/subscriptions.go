@@ -251,12 +251,14 @@ func (s *Service) GetSubscriptionStatus(ctx context.Context, subscriptionID stri
 	return row.Status, row.ExpiresAt, nil
 }
 
-// GetWithPlanAndNodes returns a subscription (status=active) by subscription ID
-// together with its plan and active nodes, via JOINs through plan_nodes.
+// GetWithPlanAndNodes returns a currently servable subscription (active and
+// not expired) by subscription ID together with its plan and active nodes.
 func (s *Service) GetWithPlanAndNodes(ctx context.Context, subscriptionID string) (*SubscriptionFull, error) {
 	var result SubscriptionFull
 
-	subQuery := s.db.WithContext(ctx).Where("subscription_id = ? AND status = ?", subscriptionID, string(SubscriptionStatusActive))
+	subQuery := s.db.WithContext(ctx).
+		Where("subscription_id = ? AND status = ? AND (expires_at IS NULL OR expires_at > ?)",
+			subscriptionID, string(SubscriptionStatusActive), time.Now())
 
 	err := subQuery.First(&result.Subscription).Error
 	if err != nil {

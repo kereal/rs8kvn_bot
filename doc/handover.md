@@ -367,7 +367,7 @@ All tests pass with `-race` detector. Fuzzing enabled for critical functions.
 - **Data volume:** `./data:/app/data` (persistent)
 - **Health check:** `curl -f http://localhost:8080/healthz` (application readiness)
 - **Resource limits:** 0.5 CPU, 128MB memory (2× GOMEMLIMIT for GC headroom)
-- **Stop grace period:** 30s, SIGTERM
+- **Stop grace period:** 90s, SIGTERM
 
 ---
 

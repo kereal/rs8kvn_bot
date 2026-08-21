@@ -540,9 +540,11 @@ func (s *SubscriptionService) AdminSetPlan(ctx context.Context, subscriptionID, 
 }
 
 // deleteClientFromAllNodes removes the VPN subscription from all active nodes.
-// Uses vpnClients (supports 3x-ui and proxman) — the legacy xuiClients map
-// covers only 3x-ui nodes and must not be used here.
-func (s *SubscriptionService) deleteClientFromAllNodes(ctx context.Context, provision vpn.SubscriptionProvision) {
+// It returns an aggregate error so cleanup keeps the DB row when an external
+// deletion fails and the next scheduler run can retry it.
+func (s *SubscriptionService) deleteClientFromAllNodes(ctx context.Context, provision vpn.SubscriptionProvision) error {
+	var errs []error
+
 	for _, node := range s.nodes {
 		if !node.IsActive {
 			continue
@@ -550,17 +552,27 @@ func (s *SubscriptionService) deleteClientFromAllNodes(ctx context.Context, prov
 
 		client, ok := s.vpnClients[node.ID]
 		if !ok {
+			errs = append(errs, fmt.Errorf("delete client on node %d: VPN client is not configured", node.ID))
 			continue
 		}
 
 		err := client.DeleteSubscription(ctx, provision)
-		if err != nil {
-			logger.Warn("failed to delete VPN subscription on node",
-				zap.String("username", provision.Username),
-				zap.Uint("node_id", node.ID),
-				zap.Error(err))
+		if err == nil || errors.Is(err, vpn.ErrSubscriptionNotFound) {
+			continue
 		}
+
+		logger.Warn("failed to delete VPN subscription on node",
+			zap.String("username", provision.Username),
+			zap.Uint("node_id", node.ID),
+			zap.Error(err))
+		errs = append(errs, fmt.Errorf("delete client on node %d: %w", node.ID, err))
 	}
+
+	if len(errs) > 0 {
+		return errors.Join(errs...)
+	}
+
+	return nil
 }
 
 // TrialCreateResult holds the outcome of a trial creation, including the
@@ -654,26 +666,20 @@ func (s *SubscriptionService) CreateTrial(ctx context.Context, inviteCode string
 }
 
 // BindTrial binds a trial subscription to a Telegram user.
-// It updates the trial in the database, then upgrades the client in the
-// 3x-ui panel with proper traffic limits and expiry settings.
+// The panel is updated before the DB binding is committed. If the DB bind
+// fails (for example because another request won the race), the anonymous
+// panel client is restored so the two systems do not diverge.
 func (s *SubscriptionService) BindTrial(ctx context.Context, subscriptionID string, telegramID int64, username string) (*database.Subscription, error) {
 	username = XUIEmail(username, telegramID)
 
-	// Resolve the panel comment before the binding transaction commits. If the
-	// referral lookup has an infrastructure error, the trial remains unbound
-	// and the user can retry instead of ending up with a DB-only activation.
 	trial, err := s.db.GetTrialSubscriptionBySubID(ctx, subscriptionID)
 	if err != nil {
 		return nil, fmt.Errorf("load trial subscription: %w", err)
 	}
+
 	comment, err := referrerComment(ctx, s.db, trial)
 	if err != nil {
 		return nil, fmt.Errorf("resolve referrer comment: %w", err)
-	}
-
-	sub, err := s.db.BindTrialSubscription(ctx, subscriptionID, telegramID, username)
-	if err != nil {
-		return nil, fmt.Errorf("bind trial subscription: %w", err)
 	}
 
 	freePlan, err := s.db.GetPlanByName(ctx, database.FreePlanName)
@@ -681,49 +687,75 @@ func (s *SubscriptionService) BindTrial(ctx context.Context, subscriptionID stri
 		return nil, fmt.Errorf("failed to resolve free plan: %w", err)
 	}
 
-	trafficBytes := freePlan.TrafficLimit
-	// Trials must never auto-renew. Keep resetDays=0 even though the free
-	// plan carries a traffic limit (which would otherwise enable reset=-1 → 30).
-	resetDays := 0
-
-	expiryTime := time.UnixMilli(0)
-
-	currentEmail := "trial_" + subscriptionID
-	email := XUIEmail(username, telegramID)
-
 	nodes, err := s.trialNodes(ctx)
 	if err != nil {
-		return sub, fmt.Errorf("load trial nodes: %w", err)
+		return nil, fmt.Errorf("load trial nodes: %w", err)
 	}
-
 	if len(nodes) == 0 {
-		return sub, fmt.Errorf("no trial nodes configured")
+		return nil, fmt.Errorf("no trial nodes configured")
 	}
-	// Trial is intentionally single-node (provisioned on nodes[0] by CreateTrial).
-	// Only update the node where the client actually exists.
-	node := nodes[0]
 
+	node := nodes[0]
 	client, ok := s.vpnClients[node.ID]
 	if !ok {
-		return sub, fmt.Errorf("vpn client not found for trial node %d", node.ID)
+		return nil, fmt.Errorf("vpn client not found for trial node %d", node.ID)
 	}
-	// Rename the anonymous trial client (email "trial_<subID>") to the bound
-	// user's identity, lift traffic limits to the free plan, and bind the
-	// Telegram id. proxman/fetch nodes treat this as a no-op.
-	err = client.UpdateSubscription(ctx, vpn.SubscriptionProvision{
-		ClientID:     sub.ClientID,
+
+	currentEmail := "trial_" + subscriptionID
+	boundEmail := XUIEmail(username, telegramID)
+	boundProvision := vpn.SubscriptionProvision{
+		ClientID:     trial.ClientID,
 		CurrentEmail: currentEmail,
-		Username:     email,
-		SubID:        sub.SubscriptionID,
-		TrafficBytes: trafficBytes,
-		ExpiryTime:   expiryTime,
-		ResetDays:    resetDays,
+		Username:     boundEmail,
+		SubID:        trial.SubscriptionID,
+		TrafficBytes: freePlan.TrafficLimit,
+		ExpiryTime:   time.UnixMilli(0),
+		ResetDays:    0,
 		TgID:         telegramID,
 		Comment:      comment,
-	})
-	if err != nil {
-		return sub, fmt.Errorf("update trial client on node %d: %w", node.ID, err)
 	}
+
+	err = client.UpdateSubscription(ctx, boundProvision)
+	if err != nil {
+		return nil, fmt.Errorf("update trial client on node %d: %w", node.ID, err)
+	}
+
+	sub, err := s.db.BindTrialSubscription(ctx, subscriptionID, telegramID, username)
+	if err != nil {
+		// Do not roll back blindly: another concurrent binder may have won
+		// the DB race after this request updated the panel. Roll back only if
+		// the row is still an unbound trial; an infrastructure lookup error is
+		// treated conservatively as "do not undo another user's binding".
+		stillTrial, checkErr := s.db.GetTrialSubscriptionBySubID(ctx, subscriptionID)
+		if checkErr == nil && stillTrial.TelegramID < 0 {
+			rollback := vpn.SubscriptionProvision{
+				ClientID:     trial.ClientID,
+				CurrentEmail: boundEmail,
+				Username:     currentEmail,
+				SubID:        trial.SubscriptionID,
+				ResetDays:    0,
+				Comment:      comment,
+			}
+			rollbackErr := client.UpdateSubscription(ctx, rollback)
+			if rollbackErr != nil {
+				logger.Warn("failed to roll back trial client after DB bind failure",
+					zap.Uint("node_id", node.ID),
+					zap.String("subscription_id", subscriptionID),
+					zap.Error(rollbackErr))
+			}
+		} else if checkErr != nil {
+			logger.Warn("could not verify trial state after DB bind failure; leaving panel update intact",
+				zap.String("subscription_id", subscriptionID),
+				zap.Error(checkErr))
+		}
+
+		return nil, fmt.Errorf("bind trial subscription: %w", err)
+	}
+
+	if s.invalidateBySubID != nil {
+		s.invalidateBySubID(subscriptionID)
+	}
+	s.RefreshActiveSubscriptionsMetric(ctx)
 
 	return sub, nil
 }
@@ -854,9 +886,33 @@ func (s *SubscriptionService) ReconcileOrphanedClients(ctx context.Context) (int
 			continue
 		}
 
-		// No node bindings: trial subscription (cleaned up by expiry) or a
-		// subscription still being provisioned. Never treat as orphan here.
+		// No node bindings: trials are handled by their own lifecycle, but a
+		// normal active subscription may have lost its queue after a transient
+		// DB error during creation. Recreate pending_add rows so the next sync
+		// pass can recover it instead of leaving active access with no nodes.
 		if len(subNodes) == 0 {
+			plan, planErr := s.db.GetPlanByID(ctx, sub.PlanID)
+			if planErr != nil {
+				logger.Warn("failed to load plan for node queue recovery",
+					zap.Uint("subscription_id", sub.ID),
+					zap.Error(planErr))
+				continue
+			}
+
+			if plan.Name == database.TrialPlanName {
+				continue
+			}
+
+			queueErr := s.ensureSubscriptionNodes(ctx, &sub)
+			if queueErr != nil {
+				logger.Warn("failed to recreate missing subscription node queue",
+					zap.Uint("subscription_id", sub.ID),
+					zap.Error(queueErr))
+			} else {
+				logger.Info("recreated missing subscription node queue",
+					zap.Uint("subscription_id", sub.ID))
+			}
+
 			continue
 		}
 
@@ -918,66 +974,47 @@ func (s *SubscriptionService) ReconcileOrphanedClients(ctx context.Context) (int
 	return revoked, nil
 }
 
-// CleanupExpiredTrials deletes expired trial subscriptions from the database
-// and deprovisions their VPN clients.
-//
-// The DB cleanup (database.CleanupExpiredTrials) removes rows with
-// `RETURNING id, client_id, subscription_id` — the status column is NOT
-// returned, so sub.Status is empty and the sync-based branch below is
-// unreachable: deprovision always runs through deleteClientFromAllNodes even
-// when a sync service is wired. Do not "fix" this by adding status to the
-// RETURNING clause: the sync path needs the subscription row to still exist
-// (SyncSubscription loads it by ID), but the row is already deleted here,
-// which would leave the trial clients orphaned on the panels.
+// CleanupExpiredTrials claims expired anonymous trials, deprovisions their
+// external clients, and deletes the DB row only after deprovision succeeds.
+// A failed external operation leaves the claimed row for the next retry.
 func (s *SubscriptionService) CleanupExpiredTrials(ctx context.Context) (int64, error) {
-	subs, err := s.db.CleanupExpiredTrials(ctx, s.cfg.TrialDurationHours)
+	subs, err := s.db.ClaimExpiredTrials(ctx, s.cfg.TrialDurationHours)
 	if err != nil {
 		return 0, err
 	}
 
 	var successCount int64
+	var errs []error
 
 	for _, sub := range subs {
 		if sub.SubscriptionID == "" {
 			continue
 		}
 
-		if sub.Status == string(database.SubscriptionStatusActive) && s.syncService != nil {
-			markErr := s.syncService.MarkAllForRemoval(ctx, sub.ID)
-			if markErr != nil {
-				logger.Warn("cleanup trial: mark for removal failed",
-					zap.Uint("subscription_id", sub.ID),
-					zap.Error(markErr))
-
-				continue
-			}
-
-			syncErr := s.syncService.SyncSubscription(ctx, sub.ID)
-			if syncErr != nil {
-				logger.Warn("cleanup trial: sync failed",
-					zap.Uint("subscription_id", sub.ID),
-					zap.Error(syncErr))
-
-				continue
-			}
-
-			successCount++
-		} else {
-			// Fallback: syncService is nil (only possible in tests or before
-			// SetSyncService is called). Use direct deprovision so VPN clients
-			// are still cleaned up.
-			s.deleteClientFromAllNodes(ctx, vpn.SubscriptionProvision{
-				ClientID: sub.ClientID,
-				Username: "trial_" + sub.SubscriptionID,
-				SubID:    sub.SubscriptionID,
-			})
-
-			successCount++
+		deprovisionErr := s.deleteClientFromAllNodes(ctx, vpn.SubscriptionProvision{
+			ClientID: sub.ClientID,
+			Username: "trial_" + sub.SubscriptionID,
+			SubID:    sub.SubscriptionID,
+		})
+		if deprovisionErr != nil {
+			errs = append(errs, fmt.Errorf("cleanup trial %s: %w", sub.SubscriptionID, deprovisionErr))
+			continue
 		}
 
+		err = s.db.DeleteClaimedTrial(ctx, sub.ID)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("delete cleaned trial %s: %w", sub.SubscriptionID, err))
+			continue
+		}
+
+		successCount++
 		if s.invalidateBySubID != nil {
 			s.invalidateBySubID(sub.SubscriptionID)
 		}
+	}
+
+	if len(errs) > 0 {
+		return successCount, errors.Join(errs...)
 	}
 
 	return successCount, nil

@@ -1,13 +1,17 @@
 package subserver
 
-import "time"
+import (
+	"sync"
+	"time"
+)
 
 // Service wraps the subscription response cache.
 // It is a thin adapter that the web layer uses for cache operations.
 // Since v2.3.0 GetCache/SetCache carry the response headers alongside the
 // body so cache hits can be replayed verbatim.
 type Service struct {
-	cache *Cache
+	cache       *Cache
+	analyticsMu sync.Mutex
 }
 
 // NewService creates a new Service with a cache TTL.

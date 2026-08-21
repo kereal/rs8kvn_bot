@@ -40,20 +40,13 @@ func serveFromCache(ctx context.Context, db interfaces.SubscriptionRepository, s
 
 			return nil, true, ErrSubscriptionNotFound
 		}
-		// Transient DB error: serve the stale entry best-effort instead of
-		// failing the request or destroying a still-valid cache entry.
-		logger.Warn("Cache status revalidation failed, serving stale entry",
+		// Fail closed when status cannot be revalidated. Serving stale access
+		// after a revoke or chargeback is worse than a temporary 5xx.
+		logger.Error("Cache status revalidation failed, refusing stale entry",
 			zap.String("sub_id", subID),
 			zap.Error(err))
-		// best-effort: обновляем last_request, ошибки не блокируют выдачу.
-		err := db.UpdateLastRequest(ctx, subID)
-		if err != nil {
-			logger.Warn("Failed to update last_request",
-				zap.String("sub_id", subID),
-				zap.Error(err))
-		}
 
-		return &SubscriptionResult{Body: cachedBody, Headers: cachedHeaders}, true, nil
+		return nil, true, fmt.Errorf("revalidate subscription status: %w", err)
 	}
 
 	// If the subscription is no longer active or expired, invalidate the cache.
@@ -94,7 +87,7 @@ func serveFromCache(ctx context.Context, db interfaces.SubscriptionRepository, s
 // loadSubscription fetches the subscription with plan and nodes from the DB,
 // records device/IP analytics, and updates last_request. Returns the full
 // subscription or an error.
-func loadSubscription(ctx context.Context, db interfaces.SubscriptionRepository, subID, clientIP string, requestHeaders map[string]string) (*database.SubscriptionFull, error) {
+func loadSubscription(ctx context.Context, db interfaces.SubscriptionRepository, subSvc *Service, subID, clientIP string, requestHeaders map[string]string) (*database.SubscriptionFull, error) {
 	subFull, err := db.GetWithPlanAndNodes(ctx, subID)
 	if err != nil {
 		if errors.Is(err, database.ErrSubscriptionNotFound) {
@@ -119,9 +112,12 @@ func loadSubscription(ctx context.Context, db interfaces.SubscriptionRepository,
 		zap.Int("nodes_count", len(subFull.Nodes)),
 	)
 
-	// Track the requesting device and IP for analytics/audit.
+	// Serialize read-modify-write analytics updates so concurrent cache misses
+	// do not overwrite each other's device/IP entries.
+	subSvc.analyticsMu.Lock()
 	UpdateDevices(ctx, db, subFull, requestHeaders)
 	UpdateIPs(ctx, db, subFull, clientIP)
+	subSvc.analyticsMu.Unlock()
 
 	// best-effort: обновляем last_request, ошибки не блокируют выдачу.
 	err = db.UpdateLastRequest(ctx, subID)
@@ -338,11 +334,20 @@ func aggregateFormat(agg *aggregatedSources, format Format, body []byte, src dat
 	case FormatBase64:
 		agg.allJSON = false
 
-		decoded, decErr := base64.StdEncoding.DecodeString(strings.TrimSpace(string(body)))
+		encoded := strings.TrimSpace(string(body))
+		decoded, decErr := base64.StdEncoding.DecodeString(encoded)
 		if decErr != nil {
-			agg.items = append(agg.items, strings.TrimSpace(string(body)))
+			decoded, decErr = base64.RawStdEncoding.DecodeString(encoded)
+		}
+		if decErr != nil {
+			agg.items = append(agg.items, encoded)
 		} else {
-			agg.items = append(agg.items, strings.TrimSpace(string(decoded)))
+			for line := range strings.SplitSeq(string(decoded), "\n") {
+				line = strings.TrimSpace(line)
+				if line != "" {
+					agg.items = append(agg.items, line)
+				}
+			}
 		}
 	case FormatPlain:
 		agg.allJSON = false

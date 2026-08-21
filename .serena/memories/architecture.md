@@ -11,6 +11,13 @@
 - **Admin payment alerts** — on activation `notifyAdminPaid` (Markdown: tariff, amount, clickable buyer link via `utils.FormatUserLink`, purchase `🆕` vs renewal `🔄` from `PricePaidCents`/`ProductID` before CAS); on paid-order chargeback a single `notifyAdminChargeback` (tariff, amount, buyer link, access status). Both best-effort after per-order payment lock release; integration problems (mismatches, DB failures, provider errors) go through `NotifyPaymentIssue` → `notifyAdmin`.
 - **Per-order payment lock** — `OrderService.lockPayment(ctx, providerPaymentID)` keeps a capacity-1 token channel per `provider_payment_id`. Confirms/cancels for the SAME order serialize; confirms/cancels for DIFFERENT orders run in parallel (verified by `TestConfirmPayment_DifferentOrdersRunInParallel` / `TestCancelPaymentByProvider_DifferentOrdersRunInParallel`). Lock is released BEFORE best-effort VPN sync so post-commit work does not block other orders.
 
+## Audit follow-up (2026-08-21)
+- Expired active subscriptions are excluded at the DB cache-miss query boundary.
+- Subserver cache revalidation fails closed on DB errors; upstream bodies are capped at 2 MiB.
+- Trial cleanup claims rows, deprovisions external clients, and deletes only after success so failures remain retryable.
+- Trial binding updates the panel before the DB bind and rolls back the panel rename if the DB race loses.
+- Subscription sync plan/removal transitions hold the per-subscription lock; graceful shutdown waits up to 90 seconds.
+
 ## Previous changes (2026-07-22)
 - **Expiry reminders**: added 3-touch flow 3d/1d/3h, atomic bitmask (`subscriptions.reminders_sent`), standalone worker `SubscriptionReminderWorker` (30 min), plus DB/service/scheduler/test split (`subscription_reminders.go` + `subscription_reminders_test.go`).
 - **Trial exclusion**: paid-only expiry and reminder flows now exclude free/trial plans (`GetExpiredPaidSubscriptions`, `GetSubscriptionsExpiringInRange`).
