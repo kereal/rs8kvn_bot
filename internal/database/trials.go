@@ -131,7 +131,7 @@ func (s *Service) BindTrialSubscription(ctx context.Context, subscriptionID stri
 
 		planID := trialPlan.ID
 
-		err = tx.Where("subscription_id = ? AND plan_id = ? AND telegram_id < 0", subscriptionID, planID).First(&sub).Error
+		err = tx.Where("subscription_id = ? AND plan_id = ? AND telegram_id < 0 AND status = ?", subscriptionID, planID, SubscriptionStatusActive).First(&sub).Error
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return fmt.Errorf("trial subscription not found or already activated: %w", ErrTrialAlreadyActivated)
@@ -195,6 +195,62 @@ func (s *Service) BindTrialSubscription(ctx context.Context, subscriptionID stri
 	}
 
 	return &sub, nil
+}
+
+// ClaimExpiredTrials marks expired anonymous trials as expired and returns them
+// for external deprovisioning. Keeping the row until deprovisioning succeeds
+// makes cleanup retryable and prevents orphaned panel clients.
+func (s *Service) ClaimExpiredTrials(ctx context.Context, hours int) ([]Subscription, error) {
+	var trialPlan Plan
+	err := s.db.WithContext(ctx).Where("name = ?", TrialPlanName).First(&trialPlan).Error
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve trial plan: %w", err)
+	}
+
+	cutoff := time.Now().Add(-time.Duration(hours) * time.Hour)
+	var subs []Subscription
+	result := s.db.WithContext(ctx).Raw(
+		`UPDATE subscriptions
+		 SET status = ?
+		 WHERE plan_id = ? AND telegram_id < 0 AND status IN (?, ?) AND created_at < ?
+		 RETURNING id, client_id, subscription_id, plan_id, telegram_id, status`,
+		SubscriptionStatusExpired, trialPlan.ID, SubscriptionStatusActive, SubscriptionStatusExpired, cutoff,
+	).Scan(&subs)
+	if result.Error != nil {
+		return nil, fmt.Errorf("failed to claim expired trials: %w", result.Error)
+	}
+
+	rateLimitCutoff := time.Now().Add(-1*time.Hour + 1*time.Second)
+	err = s.db.WithContext(ctx).Where("created_at < ?", rateLimitCutoff).Delete(&TrialRequest{}).Error
+	if err != nil {
+		return nil, fmt.Errorf("failed to cleanup expired trial requests: %w", err)
+	}
+
+	return subs, nil
+}
+
+// DeleteClaimedTrial removes a trial after its external client has been
+// deprovisioned. The guard prevents a concurrently bound trial from being
+// deleted accidentally.
+func (s *Service) DeleteClaimedTrial(ctx context.Context, id uint) error {
+	var trialPlan Plan
+	err := s.db.WithContext(ctx).Where("name = ?", TrialPlanName).First(&trialPlan).Error
+	if err != nil {
+		return fmt.Errorf("failed to resolve trial plan: %w", err)
+	}
+
+	result := s.db.WithContext(ctx).Where(
+		"id = ? AND plan_id = ? AND telegram_id < 0 AND status = ?",
+		id, trialPlan.ID, SubscriptionStatusExpired,
+	).Delete(&Subscription{})
+	if result.Error != nil {
+		return fmt.Errorf("failed to delete claimed trial: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return ErrSubscriptionNotFound
+	}
+
+	return nil
 }
 
 // CountTrialRequestsByIPLastHour returns the number of trial requests from an IP in the last hour.

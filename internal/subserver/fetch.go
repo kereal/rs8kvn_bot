@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/logger"
 
 	"go.uber.org/zap"
@@ -39,7 +40,7 @@ type NodeResponse struct {
 }
 
 // FetchFromNode sends an HTTP GET to url with a custom User-Agent and returns
-// the response body (up to 10 MB) together with all response headers stored
+// the response body (up to config.MaxResponseSize) together with all response headers stored
 // under lowercased keys. Header values are taken from the first value for each key.
 // Non-2xx responses are treated as fetch errors so upstream failures are never
 // aggregated into a subscription.
@@ -89,13 +90,21 @@ func FetchFromNode(ctx context.Context, url string) (*NodeResponse, error) {
 		}
 	}()
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 10<<20))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, config.MaxResponseSize+1))
 	if err != nil {
 		logger.Error("Failed to read source response body",
 			zap.String("url", url),
 			zap.Error(err))
 
 		return nil, fmt.Errorf("read source response body: %w", err)
+	}
+
+	if len(body) > config.MaxResponseSize {
+		logger.Error("Source response body exceeds size limit",
+			zap.String("url", url),
+			zap.Int("limit", config.MaxResponseSize))
+
+		return nil, fmt.Errorf("source response body exceeds %d bytes", config.MaxResponseSize)
 	}
 
 	headers := make(map[string]string)

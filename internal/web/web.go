@@ -98,6 +98,7 @@ type Server struct {
 	server          *http.Server
 	listenerAddr    string
 	mu              sync.RWMutex
+	trialRateMu     sync.Mutex
 	ready           bool
 	paymentReady    bool
 	checkers        map[string]func(context.Context) ComponentHealth
@@ -215,7 +216,7 @@ func (s *Server) Start(ctx context.Context) error {
 
 	mux.Handle("/metrics", promhttp.Handler())
 
-	instrumentedHandler := metrics.InstrumentHTTP(mux)
+	instrumentedHandler := metrics.InstrumentHTTP(SecurityHeadersMiddleware(mux))
 
 	s.server = &http.Server{
 		Addr:              s.addr,
@@ -732,9 +733,14 @@ func (s *Server) HandleInvite(w http.ResponseWriter, r *http.Request) {
 
 	ip := getClientIP(r)
 
+	// Serialize the check-and-record pair. Without this, concurrent requests
+	// from one IP can all observe the same count and bypass the limit.
+	s.trialRateMu.Lock()
+
 	count, err := s.db.CountTrialRequestsByIPLastHour(ctx, ip)
 	if err != nil {
 		logger.Error("Failed to check rate limit", zap.Error(err), zap.String("ip", ip))
+		s.trialRateMu.Unlock()
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusInternalServerError)
 		s.renderErrorPage(w, "Ошибка сервера. Попробуйте позже.")
@@ -744,6 +750,7 @@ func (s *Server) HandleInvite(w http.ResponseWriter, r *http.Request) {
 
 	if count >= s.cfg.TrialRateLimit {
 		logger.Warn("Rate limit exceeded", zap.String("ip", ip), zap.Int("count", count))
+		s.trialRateMu.Unlock()
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusTooManyRequests)
 		s.renderErrorPage(w, "Слишком много запросов. Попробуйте позже.")
@@ -754,7 +761,14 @@ func (s *Server) HandleInvite(w http.ResponseWriter, r *http.Request) {
 	err = s.db.CreateTrialRequest(ctx, ip)
 	if err != nil {
 		logger.Error("Failed to create trial request", zap.Error(err))
+		s.trialRateMu.Unlock()
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusInternalServerError)
+		s.renderErrorPage(w, "Ошибка сервера. Попробуйте позже.")
+
+		return
 	}
+	s.trialRateMu.Unlock()
 
 	if s.subService == nil {
 		logger.Error("Subscription service not initialized")

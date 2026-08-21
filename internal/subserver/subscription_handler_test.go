@@ -112,19 +112,19 @@ func TestHandleSubscription_CacheHit_StatusCheckError_ReturnsError(t *testing.T)
 	cachedBody := []byte("stale-content")
 	svc.SetCache("sub-err", cachedBody, map[string]string{"content-type": "text/plain"})
 
-	// A transient DB error during revalidation must not fail the request or
-	// destroy a still-valid cache entry: the stale response is served best-effort.
+	// A DB error during revalidation must fail closed instead of serving stale
+	// access that may already have been revoked.
 	mockDB.GetSubscriptionStatusFunc = func(ctx context.Context, subID string) (string, time.Time, error) {
 		return "", time.Time{}, fmt.Errorf("db error")
 	}
 
 	result, _, _, err := HandleSubscription(ctx, mockDB, svc, "sub-err", "1.2.3.4", nil)
-	require.NoError(t, err)
-	assert.Equal(t, cachedBody, result.Body)
+	require.Error(t, err)
+	assert.Nil(t, result)
 
-	// Cache must remain intact on revalidation error.
+	// Keep the entry so a later successful revalidation can still use it.
 	_, _, ok := svc.GetCache("sub-err")
-	assert.True(t, ok, "cache must not be invalidated on transient revalidation error")
+	assert.True(t, ok, "cache entry should remain available after a transient DB error")
 }
 
 func TestHandleSubscription_CacheMiss_SubscriptionNotFound(t *testing.T) {
@@ -962,10 +962,10 @@ func TestHandleSubscription_PaidSubscription_ProfileTitleSuffix(t *testing.T) {
 	productID := uint(7)
 
 	tests := []struct {
-		name     string
-		product  *uint
-		price    int64
-		want     string
+		name    string
+		product *uint
+		price   int64
+		want    string
 	}{
 		{"paid via product", &productID, 2300, title + " Premium"},
 		{"paid via price only", nil, 100, title + " Premium"},
