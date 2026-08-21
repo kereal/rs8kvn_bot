@@ -119,17 +119,11 @@ The bot exposes HTTP endpoints on port 8880:
 
 ### Invite/Trial Landing Page (`/i/{code}`)
 
-Each user can generate an invite code via the referral flow. The landing page validates the code, applies IP-based rate limiting (429 if exceeded), creates a trial subscription in 3x-ui, and renders a mobile-friendly page with:
-- Happ app download links (Android / iOS)
-- One-click "Добавить в Happ" button (`happ://add/` deep-link)
-- Copy-to-clipboard subscription URL
-- Telegram activation link
+Referral-based trial flow: validates the invite code, applies IP rate limiting, creates a trial subscription, and renders a mobile-friendly landing page with Happ download links, one-click deep-link import, copy-to-clipboard URL, and Telegram activation.
 
 ### Subscription Server (`/sub/{subID}`)
 
-Serves subscriptions with custom headers. Validates `subID`, checks cache (240s TTL), fetches from all active nodes (3x-ui, proxman, fetch), merges responses, returns combined output. Fetch nodes use `subscription_url` directly; other types append `subID`.
-
-When `SUBSERVER_ACCESS_LOG` is set, each `/sub/{id}` request is appended to the configured access log file in a zap-console line without a message, caller, or field keys. The record includes timestamp, level, method, URL, response status, client IP, device headers, and User-Agent as space-separated values; values containing spaces are quoted, and empty optional values are written as `-`. The main log also records an INFO message when access logging is enabled. Access log writes are buffered asynchronously; if the file cannot be opened, the bot continues without the access log and writes an error to the main log.
+Serves merged subscriptions from all active nodes (3x-ui, proxman, fetch) with a 240s singleflight cache. Optional access logging is enabled via `SUBSERVER_ACCESS_LOG`.
 
 ## Traffic and Expiry
 
