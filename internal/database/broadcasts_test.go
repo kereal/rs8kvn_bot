@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
@@ -135,4 +136,62 @@ func TestBroadcastJSONHelpers(t *testing.T) {
 	assert.Empty(t, empty.Delivered)
 	assert.NotNil(t, empty.Blocked)
 	assert.NotNil(t, empty.Errors)
+}
+
+func TestParseBroadcastFilter_Empty(t *testing.T) {
+	t.Parallel()
+
+	f, err := ParseBroadcastFilter("")
+	require.NoError(t, err)
+	assert.True(t, f.IsEmpty())
+
+	f, err = ParseBroadcastFilter("{}")
+	require.NoError(t, err)
+	assert.True(t, f.IsEmpty())
+}
+
+func TestParseBroadcastFilter_InvalidJSON(t *testing.T) {
+	t.Parallel()
+
+	_, err := ParseBroadcastFilter("not json")
+	assert.Error(t, err)
+}
+
+func TestParseBroadcastFilter_FullFilter(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now().UTC().Truncate(time.Second)
+	daysAgo30 := now.AddDate(0, 0, -30)
+
+	f, err := ParseBroadcastFilter(fmt.Sprintf(`{"plan_type":"paid","subscription_status":"active","registered_after":"%s","inactive_days":30}`, daysAgo30.Format(time.RFC3339)))
+	require.NoError(t, err)
+	assert.Equal(t, "paid", f.PlanType)
+	assert.Equal(t, "active", f.SubscriptionStatus)
+	assert.NotNil(t, f.RegisteredAfter)
+	assert.NotNil(t, f.InactiveDays)
+	assert.Equal(t, 30, *f.InactiveDays)
+}
+
+func TestBroadcastFilter_String(t *testing.T) {
+	t.Parallel()
+
+	f := BroadcastFilter{}
+	assert.Equal(t, "Все активные пользователи", f.String())
+
+	f.PlanType = "paid"
+	assert.Contains(t, f.String(), "Платные")
+
+	days := 30
+	f.InactiveDays = &days
+	assert.Contains(t, f.String(), "Не активны > 30 дн.")
+}
+
+func TestBroadcastFilter_MarshalJSON(t *testing.T) {
+	t.Parallel()
+
+	f := BroadcastFilter{PlanType: "paid"}
+	data, err := json.Marshal(f)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "plan_type")
+	assert.Contains(t, string(data), "paid")
 }

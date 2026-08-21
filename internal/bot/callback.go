@@ -175,6 +175,24 @@ func (c *CallbackHandler) HandleCallback(ctx context.Context, update tgbotapi.Up
 		if err != nil {
 			return fmt.Errorf("handle broadcast_cancel: %w", err)
 		}
+	case data == "broadcast_final_confirm":
+		err := c.h.handleBroadcastFinalConfirm(ctx, chatID)
+		if err != nil {
+			return fmt.Errorf("handle broadcast_final_confirm: %w", err)
+		}
+	case data == "broadcast_back_to_filters":
+		err := c.h.handleBroadcastBackToFilters(ctx, chatID, update.CallbackQuery.Message.MessageID)
+		if err != nil {
+			return fmt.Errorf("handle broadcast_back_to_filters: %w", err)
+		}
+	case strings.HasPrefix(data, "bfilter_"):
+		if !c.h.isAdmin(chatID) {
+			return nil
+		}
+		err := c.h.handleBroadcastFilter(ctx, chatID, update.CallbackQuery.Message.MessageID, data)
+		if err != nil {
+			return fmt.Errorf("handle broadcast filter: %w", err)
+		}
 	case data == "back_to_invite":
 		err := c.h.handleBackToInvite(ctx, chatID, username, update.CallbackQuery.Message.MessageID)
 		if err != nil {

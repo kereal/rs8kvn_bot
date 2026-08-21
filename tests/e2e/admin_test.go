@@ -299,10 +299,23 @@ func runBroadcastFlow(t *testing.T, env *e2eTestEnv, adminID int64, draftText st
 		},
 	})
 
+	// Шаг 1: показать количество получателей.
 	env.handler.HandleCallback(ctx, tgbotapi.Update{
 		CallbackQuery: &tgbotapi.CallbackQuery{
 			From: &tgbotapi.User{ID: adminID, UserName: "admin"},
 			Data: "broadcast_confirm",
+			Message: &tgbotapi.Message{
+				Chat:      &tgbotapi.Chat{ID: adminID},
+				MessageID: 1,
+			},
+		},
+	})
+
+	// Шаг 2: подтвердить и запустить рассылку.
+	env.handler.HandleCallback(ctx, tgbotapi.Update{
+		CallbackQuery: &tgbotapi.CallbackQuery{
+			From: &tgbotapi.User{ID: adminID, UserName: "admin"},
+			Data: "broadcast_final_confirm",
 			Message: &tgbotapi.Message{
 				Chat:      &tgbotapi.Chat{ID: adminID},
 				MessageID: 1,
@@ -458,11 +471,24 @@ func TestE2E_BroadcastCommand_SomeFailures(t *testing.T) {
 			Text: "Hello",
 		},
 	})
-	env.botAPI.SendError = fmt.Errorf("send failed")
+	// Шаг 1: показать количество получателей (без ошибки).
 	env.handler.HandleCallback(ctx, tgbotapi.Update{
 		CallbackQuery: &tgbotapi.CallbackQuery{
 			From: &tgbotapi.User{ID: adminID, UserName: "admin"},
 			Data: "broadcast_confirm",
+			Message: &tgbotapi.Message{
+				Chat:      &tgbotapi.Chat{ID: adminID},
+				MessageID: 1,
+			},
+		},
+	})
+
+	// Шаг 2: установить ошибку и запустить рассылку.
+	env.botAPI.SendError = fmt.Errorf("send failed")
+	env.handler.HandleCallback(ctx, tgbotapi.Update{
+		CallbackQuery: &tgbotapi.CallbackQuery{
+			From: &tgbotapi.User{ID: adminID, UserName: "admin"},
+			Data: "broadcast_final_confirm",
 			Message: &tgbotapi.Message{
 				Chat:      &tgbotapi.Chat{ID: adminID},
 				MessageID: 1,

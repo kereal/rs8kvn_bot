@@ -96,6 +96,8 @@ type DatabaseService struct {
 	DeleteSubscriptionByIDFunc                  func(ctx context.Context, id uint) (*database.Subscription, error)
 	GetTelegramIDsBatchFunc                     func(ctx context.Context, offset, limit int) ([]int64, error)
 	GetTotalTelegramIDCountFunc                 func(ctx context.Context) (int64, error)
+	GetFilteredTelegramIDsBatchFunc             func(ctx context.Context, offset, limit int, filter database.BroadcastFilter) ([]int64, error)
+	GetFilteredTelegramIDCountFunc              func(ctx context.Context, filter database.BroadcastFilter) (int64, error)
 	GetOrCreateInviteFunc                       func(ctx context.Context, referrerTGID int64, code string) (*database.Invite, error)
 	GetInviteByReferrerFunc                     func(ctx context.Context, referrerTGID int64) (*database.Invite, error)
 	GetInviteByCodeFunc                         func(ctx context.Context, code string) (*database.Invite, error)
@@ -550,6 +552,23 @@ func (m *DatabaseService) GetTotalTelegramIDCount(ctx context.Context) (int64, e
 	defer m.mu.RUnlock()
 
 	return int64(len(m.Subscriptions)), nil
+}
+
+func (m *DatabaseService) GetFilteredTelegramIDsBatch(ctx context.Context, offset, limit int, filter database.BroadcastFilter) ([]int64, error) {
+	if m.GetFilteredTelegramIDsBatchFunc != nil {
+		return m.GetFilteredTelegramIDsBatchFunc(ctx, offset, limit, filter)
+	}
+
+	// Delegates to unfiltered batch — tests control via func hook.
+	return m.GetTelegramIDsBatch(ctx, offset, limit)
+}
+
+func (m *DatabaseService) GetFilteredTelegramIDCount(ctx context.Context, filter database.BroadcastFilter) (int64, error) {
+	if m.GetFilteredTelegramIDCountFunc != nil {
+		return m.GetFilteredTelegramIDCountFunc(ctx, filter)
+	}
+
+	return m.GetTotalTelegramIDCount(ctx)
 }
 
 func (m *DatabaseService) CreateBroadcast(ctx context.Context, b *database.Broadcast) error {
