@@ -70,6 +70,7 @@ func NewDatabaseService() *DatabaseService {
 	return &DatabaseService{
 		Subscriptions:     make(map[int64]*database.Subscription),
 		SubscriptionsByID: make(map[uint]*database.Subscription),
+		Broadcasts:        make(map[uint]*database.Broadcast),
 	}
 }
 
@@ -79,6 +80,7 @@ type DatabaseService struct {
 	SubscriptionsByID                           map[uint]*database.Subscription
 	Products                                    map[uint]*database.Product
 	Orders                                      map[uint]*database.Order
+	Broadcasts                                  map[uint]*database.Broadcast
 	PingFunc                                    func(ctx context.Context) error
 	GetByTelegramIDFunc                         func(ctx context.Context, telegramID int64) (*database.Subscription, error)
 	GetAnyByTelegramIDFunc                      func(ctx context.Context, telegramID int64) (*database.Subscription, error)
@@ -159,6 +161,11 @@ type DatabaseService struct {
 	GetSubscriptionsExpiringInRangeFunc func(ctx context.Context, from, to time.Time) ([]database.Subscription, error)
 	ClaimReminderFunc                   func(ctx context.Context, id uint, bit int, expiresAt time.Time) (bool, error)
 	ReleaseReminderFunc                 func(ctx context.Context, id uint, bit int, expiresAt time.Time) error
+
+	CreateBroadcastFunc func(ctx context.Context, b *database.Broadcast) error
+	GetBroadcastFunc    func(ctx context.Context, id uint) (*database.Broadcast, error)
+	ListBroadcastsFunc  func(ctx context.Context, limit int) ([]database.Broadcast, error)
+	UpdateBroadcastFunc func(ctx context.Context, b *database.Broadcast) error
 }
 
 func (m *DatabaseService) Ping(ctx context.Context) error {
@@ -543,6 +550,108 @@ func (m *DatabaseService) GetTotalTelegramIDCount(ctx context.Context) (int64, e
 	defer m.mu.RUnlock()
 
 	return int64(len(m.Subscriptions)), nil
+}
+
+func (m *DatabaseService) CreateBroadcast(ctx context.Context, b *database.Broadcast) error {
+	if m.CreateBroadcastFunc != nil {
+		return m.CreateBroadcastFunc(ctx, b)
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.Broadcasts == nil {
+		m.Broadcasts = make(map[uint]*database.Broadcast)
+	}
+
+	if b.ID == 0 {
+		// #nosec G115 -- map length is non-negative
+		b.ID = uint(len(m.Broadcasts) + 1)
+	}
+
+	stored := *b
+	m.Broadcasts[b.ID] = &stored
+
+	return nil
+}
+
+func (m *DatabaseService) GetBroadcast(ctx context.Context, id uint) (*database.Broadcast, error) {
+	if m.GetBroadcastFunc != nil {
+		return m.GetBroadcastFunc(ctx, id)
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if b, ok := m.Broadcasts[id]; ok {
+		copy := *b
+		return &copy, nil
+	}
+
+	return nil, database.ErrBroadcastNotFound
+}
+
+func (m *DatabaseService) ListBroadcasts(ctx context.Context, limit int) ([]database.Broadcast, error) {
+	if m.ListBroadcastsFunc != nil {
+		return m.ListBroadcastsFunc(ctx, limit)
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	ids := make([]uint, 0, len(m.Broadcasts))
+	for id := range m.Broadcasts {
+		ids = append(ids, id)
+	}
+	// Same order as production: newest first.
+	slices.SortFunc(ids, func(a, b uint) int {
+		switch {
+		case a > b:
+			return -1
+		case a < b:
+			return 1
+		default:
+			return 0
+		}
+	})
+
+	out := make([]database.Broadcast, 0, min(limit, len(ids)))
+	for _, id := range ids {
+		if len(out) >= limit {
+			break
+		}
+		out = append(out, *m.Broadcasts[id])
+	}
+
+	return out, nil
+}
+
+func (m *DatabaseService) UpdateBroadcast(ctx context.Context, b *database.Broadcast) error {
+	if m.UpdateBroadcastFunc != nil {
+		return m.UpdateBroadcastFunc(ctx, b)
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	existing, ok := m.Broadcasts[b.ID]
+	if !ok {
+		return database.ErrBroadcastNotFound
+	}
+
+	// Merge semantics mirror production: only mutable lifecycle/stats fields
+	// are updated; name/filters/message_text/planned_at are never overwritten.
+	existing.Status = b.Status
+	existing.StartedAt = b.StartedAt
+	existing.FinishedAt = b.FinishedAt
+	existing.RecipientsTotal = b.RecipientsTotal
+	existing.SentCount = b.SentCount
+	existing.BlockedCount = b.BlockedCount
+	existing.FailedCount = b.FailedCount
+	existing.DeliveryReport = b.DeliveryReport
+	existing.UpdatedAt = b.UpdatedAt
+
+	return nil
 }
 
 func (m *DatabaseService) Close() error {

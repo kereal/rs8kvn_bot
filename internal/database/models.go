@@ -20,6 +20,7 @@ var (
 	ErrSubscriptionNodeNotFound = errors.New("subscription node not found")
 	ErrNodeNotFound             = errors.New("node not found")
 	ErrTrialAlreadyActivated    = errors.New("trial already activated")
+	ErrBroadcastNotFound       = errors.New("broadcast not found")
 )
 
 const (
@@ -217,6 +218,66 @@ type Invite struct {
 	Subscriptions []Subscription `gorm:"foreignKey:InviteCode"`
 }
 
+// BroadcastStatus represents the lifecycle state of a broadcast.
+//
+// Это единственный допустимый набор значений: колонка broadcasts.status
+// ограничена CHECK-constraint из миграции 036_create_broadcasts.
+// Добавление нового статуса требует и изменения констант, и новой миграции.
+//
+//   - scheduled — рассылка создана (запланирована), отправка не начиналась.
+//   - running   — отправка в процессе.
+//   - completed — отправка завершена полностью.
+//   - failed    — прервана ошибкой БД при получении батчей получателей.
+//   - canceled  — прервана таймаутом/отменой; в отчёте только обработанные.
+type BroadcastStatus string
+
+const (
+	BroadcastStatusScheduled BroadcastStatus = "scheduled"
+	BroadcastStatusRunning   BroadcastStatus = "running"
+	BroadcastStatusCompleted BroadcastStatus = "completed"
+	BroadcastStatusFailed    BroadcastStatus = "failed"
+	BroadcastStatusCanceled  BroadcastStatus = "canceled"
+)
+
+// Broadcast — карточка одной массовой рассылки (таблица broadcasts).
+//
+// Поля:
+//   - Filters        — JSON, резерв под таргетинг аудитории; сейчас всегда '{}'.
+//   - DeliveryReport — JSON-отчёт по получателям: delivered/blocked/errors
+//     (см. BroadcastDeliveryReport). Счётчики Sent/Blocked/FailedCount хранятся
+//     отдельно, чтобы список рассылок не читал большой JSON.
+type Broadcast struct {
+	ID              uint      `gorm:"primaryKey"`
+	Name            string    `gorm:"size:255;not null"`
+	Filters         string    `gorm:"type:text;not null;default:'{}'"`
+	MessageText     string    `gorm:"type:text;not null"`
+	Status          string    `gorm:"not null;size:16;default:scheduled"`
+	PlannedAt       *time.Time
+	StartedAt       *time.Time
+	FinishedAt      *time.Time
+	RecipientsTotal int64     `gorm:"not null;default:0"`
+	SentCount       int64     `gorm:"not null;default:0"`
+	BlockedCount    int64     `gorm:"not null;default:0"`
+	FailedCount     int64     `gorm:"not null;default:0"`
+	DeliveryReport  string    `gorm:"type:text;not null;default:'{}'"`
+	CreatedAt       time.Time `gorm:"autoCreateTime"`
+	UpdatedAt       time.Time `gorm:"autoUpdateTime"`
+}
+
+// BroadcastSendError описывает одного получателя, которому сообщение не
+// доставлено по причине, отличной от блокировки бота.
+type BroadcastSendError struct {
+	TelegramID int64  `json:"telegram_id"`
+	Error      string `json:"error"`
+}
+
+// BroadcastDeliveryReport — JSON-отчёт рассылки: списки telegram_id по исходам.
+type BroadcastDeliveryReport struct {
+	Delivered []int64              `json:"delivered"`
+	Blocked   []int64              `json:"blocked"`
+	Errors    []BroadcastSendError `json:"errors"`
+}
+
 // SyncStatus represents the synchronization status of a subscription on a VPN node.
 // Statuses: active | pending_add | pending_remove | pending_update.
 //
@@ -313,6 +374,10 @@ func (SubscriptionNode) TableName() string {
 	return "subscription_nodes"
 }
 
+func (Broadcast) TableName() string {
+	return "broadcasts"
+}
+
 // IsExpired returns true if the subscription has expired.
 // A nil ExpiresAt means the subscription is perpetual (no expiry set).
 func (s *Subscription) IsExpired() bool {
@@ -390,6 +455,83 @@ func (s *Subscription) SetIPs(ips []map[string]string) error {
 	}
 
 	s.Ips = string(data)
+
+	return nil
+}
+
+// ParseFilters декодирует JSON-поле фильтров аудитории. Пустая/битая строка
+// возвращает пустой map — фильтры сейчас не используются (резерв под таргетинг).
+func (c *Broadcast) ParseFilters() (map[string]any, error) {
+	if c.Filters == "" {
+		return map[string]any{}, nil
+	}
+
+	var filters map[string]any
+
+	err := json.Unmarshal([]byte(c.Filters), &filters)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal broadcast filters: %w", err)
+	}
+
+	return filters, nil
+}
+
+// SetFilters сериализует фильтры аудитории в JSON-поле.
+func (c *Broadcast) SetFilters(filters map[string]any) error {
+	data, err := json.Marshal(filters)
+	if err != nil {
+		return fmt.Errorf("failed to marshal broadcast filters: %w", err)
+	}
+
+	c.Filters = string(data)
+
+	return nil
+}
+
+// ParseDeliveryReport декодирует JSON-отчёт рассылки. Пустая/битая строка
+// возвращает пустой отчёт с инициализированными (не nil) списками.
+func (c *Broadcast) ParseDeliveryReport() (*BroadcastDeliveryReport, error) {
+	report := &BroadcastDeliveryReport{}
+	if c.DeliveryReport == "" {
+		report.Delivered = []int64{}
+		report.Blocked = []int64{}
+		report.Errors = []BroadcastSendError{}
+
+		return report, nil
+	}
+
+	err := json.Unmarshal([]byte(c.DeliveryReport), report)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal broadcast delivery report: %w", err)
+	}
+
+	if report.Delivered == nil {
+		report.Delivered = []int64{}
+	}
+	if report.Blocked == nil {
+		report.Blocked = []int64{}
+	}
+	if report.Errors == nil {
+		report.Errors = []BroadcastSendError{}
+	}
+
+	return report, nil
+}
+
+// SetDeliveryReport сериализует отчёт рассылки в JSON-поле.
+func (c *Broadcast) SetDeliveryReport(report *BroadcastDeliveryReport) error {
+	if report == nil {
+		c.DeliveryReport = "{}"
+
+		return nil
+	}
+
+	data, err := json.Marshal(report)
+	if err != nil {
+		return fmt.Errorf("failed to marshal broadcast delivery report: %w", err)
+	}
+
+	c.DeliveryReport = string(data)
 
 	return nil
 }

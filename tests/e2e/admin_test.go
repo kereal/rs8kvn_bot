@@ -264,7 +264,11 @@ func TestE2E_SetPlanCommand_ArgValidation(t *testing.T) {
 	}
 }
 
-// runBroadcastFlow drives the draft -> preview -> confirm broadcast flow end to end.
+// broadcastName is the fixed broadcast name used by runBroadcastFlow.
+const broadcastName = "E2E рассылка"
+
+// runBroadcastFlow drives the name -> draft -> preview -> confirm broadcast
+// flow end to end.
 func runBroadcastFlow(t *testing.T, env *e2eTestEnv, adminID int64, draftText string) {
 	t.Helper()
 
@@ -276,6 +280,14 @@ func runBroadcastFlow(t *testing.T, env *e2eTestEnv, adminID int64, draftText st
 			From:     &tgbotapi.User{ID: adminID, UserName: "admin"},
 			Text:     "/broadcast",
 			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 10}},
+		},
+	})
+
+	env.handler.HandleBroadcastDraft(ctx, tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat: &tgbotapi.Chat{ID: adminID},
+			From: &tgbotapi.User{ID: adminID, UserName: "admin"},
+			Text: broadcastName,
 		},
 	})
 
@@ -326,6 +338,26 @@ func TestE2E_BroadcastCommand_Success(t *testing.T) {
 	assert.True(t, env.botAPI.SendCalledSafe())
 	assert.GreaterOrEqual(t, env.botAPI.SendCount, 3, "Should send to at least 3 users")
 	assert.Contains(t, env.botAPI.LastSentText, "Рассылка завершена")
+	assert.Contains(t, env.botAPI.LastSentText, "Рассылка #1")
+
+	// Рассылка сохранена со счётчиками и JSON-отчётом.
+	broadcasts, err := env.db.ListBroadcasts(ctx, 10)
+	require.NoError(t, err)
+	require.Len(t, broadcasts, 1)
+
+	b := broadcasts[0]
+	assert.Equal(t, broadcastName, b.Name)
+	assert.Equal(t, string(database.BroadcastStatusCompleted), b.Status)
+	assert.Equal(t, int64(3), b.RecipientsTotal)
+	assert.Equal(t, int64(3), b.SentCount)
+	assert.Equal(t, int64(0), b.BlockedCount)
+	assert.Equal(t, int64(0), b.FailedCount)
+
+	report, err := b.ParseDeliveryReport()
+	require.NoError(t, err)
+	assert.Len(t, report.Delivered, 3)
+	assert.Empty(t, report.Blocked)
+	assert.Empty(t, report.Errors)
 }
 
 func TestE2E_BroadcastCommand_NoArgs(t *testing.T) {
@@ -357,7 +389,7 @@ func TestE2E_BroadcastCommand_NoArgs(t *testing.T) {
 	env.handler.HandleBroadcast(ctx, update)
 
 	assert.True(t, env.botAPI.SendCalledSafe())
-	assert.Contains(t, env.botAPI.LastSentText, "Отправьте сообщение")
+	assert.Contains(t, env.botAPI.LastSentText, "название")
 }
 
 func TestE2E_BroadcastCommand_NoUsers(t *testing.T) {
@@ -410,6 +442,13 @@ func TestE2E_BroadcastCommand_SomeFailures(t *testing.T) {
 			From:     &tgbotapi.User{ID: adminID, UserName: "admin"},
 			Text:     "/broadcast",
 			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 10}},
+		},
+	})
+	env.handler.HandleBroadcastDraft(ctx, tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat: &tgbotapi.Chat{ID: adminID},
+			From: &tgbotapi.User{ID: adminID, UserName: "admin"},
+			Text: broadcastName,
 		},
 	})
 	env.handler.HandleBroadcastDraft(ctx, tgbotapi.Update{
