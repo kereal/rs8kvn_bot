@@ -189,10 +189,10 @@ func (c *CallbackHandler) HandleCallback(ctx context.Context, update tgbotapi.Up
 
 		raw := strings.TrimPrefix(data, "broadcast_details_")
 
-		id64, _ := strconv.ParseUint(raw, 10, 64)
-		if id64 == 0 || id64 > uint64(^uint(0)) {
+		id64, err := strconv.ParseUint(raw, 10, 64)
+		if err != nil || id64 == 0 || id64 > uint64(^uint(0)) {
 			logger.Warn("invalid broadcast_details callback payload",
-				zap.String("data", data))
+				zap.String("data", data), zap.Error(err))
 
 			return nil
 		}
