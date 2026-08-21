@@ -73,6 +73,8 @@ type SubscriptionCounts interface {
 	GetTelegramIDByUsername(ctx context.Context, username string) (int64, error)
 	GetTelegramIDsBatch(ctx context.Context, offset, limit int) ([]int64, error)
 	GetTotalTelegramIDCount(ctx context.Context) (int64, error)
+	GetFilteredTelegramIDsBatch(ctx context.Context, offset, limit int, filter database.BroadcastFilter) ([]int64, error)
+	GetFilteredTelegramIDCount(ctx context.Context, filter database.BroadcastFilter) (int64, error)
 }
 
 // SubscriptionStatus manages subscription lifecycle operations.

@@ -73,10 +73,24 @@ func confirmBroadcast(t *testing.T, handler *Handler) {
 	t.Helper()
 
 	ctx := context.Background()
+
+	// Шаг 1: показать количество получателей.
 	require.NoError(t, handler.HandleCallback(ctx, tgbotapi.Update{
 		CallbackQuery: &tgbotapi.CallbackQuery{
 			From: broadcastTestAdmin(),
 			Data: "broadcast_confirm",
+			Message: &tgbotapi.Message{
+				Chat:      &tgbotapi.Chat{ID: broadcastTestAdminID},
+				MessageID: 1,
+			},
+		},
+	}))
+
+	// Шаг 2: подтвердить и запустить рассылку.
+	require.NoError(t, handler.HandleCallback(ctx, tgbotapi.Update{
+		CallbackQuery: &tgbotapi.CallbackQuery{
+			From: broadcastTestAdmin(),
+			Data: "broadcast_final_confirm",
 			Message: &tgbotapi.Message{
 				Chat:      &tgbotapi.Chat{ID: broadcastTestAdminID},
 				MessageID: 1,
@@ -245,12 +259,24 @@ func TestBroadcast_ConfirmDBFailureAborts(t *testing.T) {
 
 	prepareBroadcastSession(t, handler, mockDB)
 
-	// Ошибка DB-фазы: рассылка отменена, сообщение не сохранено. В отличие от
-	// confirmBroadcast здесь ожидаем, что колбэк вернёт ошибку создания.
+	// Шаг 1: показать количество получателей (успешно).
 	err := handler.HandleCallback(ctx, tgbotapi.Update{
 		CallbackQuery: &tgbotapi.CallbackQuery{
 			From: broadcastTestAdmin(),
 			Data: "broadcast_confirm",
+			Message: &tgbotapi.Message{
+				Chat:      &tgbotapi.Chat{ID: broadcastTestAdminID},
+				MessageID: 1,
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	// Шаг 2: Ошибка DB-фазы — CreateBroadcast падает, рассылка отменена.
+	err = handler.HandleCallback(ctx, tgbotapi.Update{
+		CallbackQuery: &tgbotapi.CallbackQuery{
+			From: broadcastTestAdmin(),
+			Data: "broadcast_final_confirm",
 			Message: &tgbotapi.Message{
 				Chat:      &tgbotapi.Chat{ID: broadcastTestAdminID},
 				MessageID: 1,

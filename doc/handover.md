@@ -210,7 +210,84 @@ Cache.Set(240s) → return body with Content-Type + Subscription-Userinfo
 **Admin Features:**
 - `/del <id>` — delete subscription by ID
 - `/setplan <subscription_id> <plan_id> [days]` — change subscription plan through the service layer (subscription row + node reconciliation + best-effort VPN sync; free plan clears expiry, future expiry preserved when `days` omitted, else 30-day default)
-- `/broadcast` — broadcast flow: name → draft → MarkdownV2 preview (special chars auto-escaped) → inline confirm → batched send (100/batch, concurrency 10) with 2 retries on transient errors; every broadcast is stored in the `broadcasts` table (text, dates, counters, JSON delivery report with recipient IDs); the final report's "📋 Детали рассылки" button opens the broadcast card
+- `/broadcast` — broadcast flow: name → draft → **filter selection** → **recipient count preview** → inline confirm → batched send (100/batch, concurrency 10) with 2 retries on transient errors; every broadcast is stored in the `broadcasts` table (text, dates, counters, JSON filter, JSON delivery report with recipient IDs); the final report's "📋 Детали рассылки" button opens the broadcast card
+
+#### Broadcast Filters
+
+After entering the draft text, the admin sees an inline keyboard for selecting recipient filters. Filters are stored as JSON in `broadcasts.filters` and applied server-side via SQL WHERE clauses.
+
+**Filter fields (`BroadcastFilter` struct):**
+
+| Field | JSON key | Type | Description |
+|-------|----------|------|-------------|
+| `PlanType` | `plan_type` | `string` | `"paid"` (all non-free plans) or `"free"` (free plan only). Empty = all plans. |
+| `SubscriptionStatus` | `subscription_status` | `string` | `"active"`, `"expired"`, `"revoked"`. Empty = `"active"` (default). |
+| `RegisteredAfter` | `registered_after` | `*time.Time` | Users registered after this date (inclusive). |
+| `RegisteredBefore` | `registered_before` | `*time.Time` | Users registered before this date (inclusive). |
+| `InactiveDays` | `inactive_days` | `*int` | `0` = never accessed (`last_request IS NULL`). `>0` = last access older than N days. `nil` = no filter. |
+| `EverPaid` | `ever_paid` | `*bool` | `true` = at least one paid order in `orders` table. `false` = never paid. `nil` = no filter. |
+
+**How filters combine:**
+
+All active filters are combined with **AND** logic. Example:
+```json
+{"plan_type": "paid", "inactive_days": 30, "ever_paid": true}
+```
+= Paid plan AND inactive for 30+ days AND has payment history.
+
+**Keyboard layout (filter selection):**
+
+```
+[👥 Все] [💰 Платные] [🆓 Бесплатные]
+[📋 Все] [✅ Активные] [⏰ Истёкшие] [🚫 Отозванные]
+[📅 Рег. за 3 мес] [📅 Рег. за 6 мес] [📅 Рег. за год] [📅 Рег. все]
+[🚫 Не обращались] [⏰ > 1 мес] [⏰ > 3 мес] [👤 Без фильтра]
+[💳 Платили] [🆓 Не платили] [👤 Без фильтра]
+[✅ Отправить] [❌ Отмена]
+```
+
+**Recipient count preview:**
+
+After pressing "✅ Отправить", the system queries `GetFilteredTelegramIDCount` and shows:
+
+```
+📦 Рассылка: Промо
+
+👥 Получателей: 1234
+🔍 Фильтр: Платные · Активные · Не активны > 30 дн.
+
+⚡ Отправить 1234 пользователям?
+```
+
+Buttons:
+```
+[✅ Подтвердить]
+[🔙 Назад к фильтрам] [❌ Отмена]
+```
+
+The admin can go back to adjust filters or confirm to start the broadcast.
+
+**SQL WHERE clauses generated:**
+
+| Filter | SQL condition |
+|--------|---------------|
+| `plan_type: paid` | `plan_id != (SELECT id FROM plans WHERE name = 'free')` |
+| `plan_type: free` | `plan_id = (SELECT id FROM plans WHERE name = 'free')` |
+| `subscription_status: active` | `status = 'active'` |
+| `subscription_status: expired` | `status = 'expired'` |
+| `subscription_status: revoked` | `status = 'revoked'` |
+| `registered_after` | `created_at >= ?` |
+| `registered_before` | `created_at <= ?` |
+| `inactive_days: 0` | `last_request IS NULL` |
+| `inactive_days: N` | `last_request < datetime('now', '-N days')` |
+| `ever_paid: true` | `id IN (SELECT subscription_id FROM orders WHERE status = 'paid')` |
+| `ever_paid: false` | `id NOT IN (SELECT subscription_id FROM orders WHERE status = 'paid')` |
+
+**Important notes:**
+- `PricePaidCents` is NOT cumulative — it stores the current product price, not total spent. For historical payment checks, the `orders` table is used.
+- `plan_type` uses a subquery to `plans` table, not `PricePaidCents`, because plan IDs are stable identifiers.
+- Empty filter `{}` = all active users (same as no filter).
+- Filters are applied at the SQL level (not in-memory), so they scale to thousands of users.
 - `/send <id|username> <msg>` — private message (30s cooldown per admin)
 - `/refstats` — referral statistics (top 10 from cache)
 - 📊 Stats — bot statistics

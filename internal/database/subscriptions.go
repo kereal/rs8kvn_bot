@@ -478,6 +478,124 @@ func (s *Service) GetTelegramIDsBatch(ctx context.Context, offset, limit int) ([
 	return ids, nil
 }
 
+// GetFilteredTelegramIDsBatch возвращает batch telegram_id с учётом фильтра рассылки.
+// Фильтр применяется на стороне БД — в WHERE-условиях запроса.
+func (s *Service) GetFilteredTelegramIDsBatch(ctx context.Context, offset, limit int, filter BroadcastFilter) ([]int64, error) {
+	var ids []int64
+
+	q := s.db.WithContext(ctx).
+		Model(&Subscription{}).
+		Where("telegram_id > 0")
+
+	// Статус подписки: по умолчанию active.
+	status := filter.SubscriptionStatus
+	if status == "" {
+		status = string(SubscriptionStatusActive)
+	}
+	q = q.Where("status = ?", status)
+
+	// Тариф: paid ≠ free.
+	switch filter.PlanType {
+	case "paid":
+		q = q.Where("plan_id != (SELECT id FROM plans WHERE name = ?)", FreePlanName)
+	case "free":
+		q = q.Where("plan_id = (SELECT id FROM plans WHERE name = ?)", FreePlanName)
+	}
+
+	// Дата регистрации.
+	if filter.RegisteredAfter != nil {
+		q = q.Where("created_at >= ?", *filter.RegisteredAfter)
+	}
+	if filter.RegisteredBefore != nil {
+		q = q.Where("created_at <= ?", *filter.RegisteredBefore)
+	}
+
+	// Неактивность (last_request).
+	if filter.InactiveDays != nil {
+		days := *filter.InactiveDays
+		if days == 0 {
+			q = q.Where("last_request IS NULL")
+		} else {
+			// SQLite: datetime('now', '-N days')
+			q = q.Where(fmt.Sprintf("last_request < datetime('now', '-%d days')", days))
+		}
+	}
+
+	// История платежей: через orders таблицу.
+	if filter.EverPaid != nil {
+		if *filter.EverPaid {
+			q = q.Where("id IN (SELECT subscription_id FROM orders WHERE status = ?)", "paid")
+		} else {
+			q = q.Where("id NOT IN (SELECT subscription_id FROM orders WHERE status = ?)", "paid")
+		}
+	}
+
+	result := q.
+		Distinct("telegram_id").
+		Order("telegram_id ASC").
+		Limit(limit).
+		Offset(offset).
+		Pluck("telegram_id", &ids)
+	if result.Error != nil {
+		return nil, fmt.Errorf("failed to get filtered telegram IDs batch: %w", result.Error)
+	}
+
+	return ids, nil
+}
+
+// GetFilteredTelegramIDCount возвращает количество уникальных telegram_id с учётом фильтра.
+func (s *Service) GetFilteredTelegramIDCount(ctx context.Context, filter BroadcastFilter) (int64, error) {
+	var count int64
+
+	q := s.db.WithContext(ctx).
+		Model(&Subscription{}).
+		Where("telegram_id > 0")
+
+	status := filter.SubscriptionStatus
+	if status == "" {
+		status = string(SubscriptionStatusActive)
+	}
+	q = q.Where("status = ?", status)
+
+	switch filter.PlanType {
+	case "paid":
+		q = q.Where("plan_id != (SELECT id FROM plans WHERE name = ?)", FreePlanName)
+	case "free":
+		q = q.Where("plan_id = (SELECT id FROM plans WHERE name = ?)", FreePlanName)
+	}
+
+	if filter.RegisteredAfter != nil {
+		q = q.Where("created_at >= ?", *filter.RegisteredAfter)
+	}
+	if filter.RegisteredBefore != nil {
+		q = q.Where("created_at <= ?", *filter.RegisteredBefore)
+	}
+
+	if filter.InactiveDays != nil {
+		days := *filter.InactiveDays
+		if days == 0 {
+			q = q.Where("last_request IS NULL")
+		} else {
+			q = q.Where(fmt.Sprintf("last_request < datetime('now', '-%d days')", days))
+		}
+	}
+
+	if filter.EverPaid != nil {
+		if *filter.EverPaid {
+			q = q.Where("id IN (SELECT subscription_id FROM orders WHERE status = ?)", "paid")
+		} else {
+			q = q.Where("id NOT IN (SELECT subscription_id FROM orders WHERE status = ?)", "paid")
+		}
+	}
+
+	result := q.Distinct("telegram_id").Count(&count)
+	if result.Error != nil {
+		return 0, fmt.Errorf("failed to get filtered telegram ID count: %w", result.Error)
+	}
+
+	return count, nil
+}
+
 // GetTotalTelegramIDCount returns the count of unique Telegram IDs for active subscriptions eligible for broadcast.
 func (s *Service) GetTotalTelegramIDCount(ctx context.Context) (int64, error) {
 	var count int64
