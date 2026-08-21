@@ -64,7 +64,7 @@ Production-grade: миграции, мониторинг, rate-limiting, circuit
 ## Стек
 - **Go 1.25** (go.mod)
 - **Bot**: telegram-bot-api/v5
-- **DB**: SQLite + GORM + golang-migrate (embedded, migration 030)
+- **DB**: SQLite + GORM + golang-migrate (embedded, current schema migrations are applied at startup)
 - **Logging**: Zap (с ротацией)
 - **Tests**: testify
 - **QR**: piglig/go-qr
@@ -75,7 +75,7 @@ Production-grade: миграции, мониторинг, rate-limiting, circuit
 - Транспортная нормализация сведена в `normaliseTransportNetwork` + `setPacketEncoding`.
 
 ## Scheduler
-- Backup ежедневно, trial cleanup каждый час, sync workers фоном, reminders — каждые 30 минут (`SubscriptionReminderWorker`).
+- Backup ежедневно, trial cleanup сразу при старте и затем каждые 3 часа, sync workers фоном, reminders — каждые 30 минут (`SubscriptionReminderWorker`).
 
 ## Базовый worker set
 - Backup ежедневно, trial cleanup каждый час, sync workers фоном, reminders — каждые 30 минут.
@@ -84,7 +84,7 @@ Production-grade: миграции, мониторинг, rate-limiting, circuit
 ```text
 cmd/bot/                     — точка входа, graceful shutdown, lifecycle workers
 internal/bot/                — handlers, commands, callbacks, referral cache, keyboard/menu
-internal/database/           — GORM-модели, миграции 000-030, транзакции
+internal/database/           — GORM-модели, embedded migrations, транзакции
 internal/service/            — SubscriptionService + SyncService + reminders
 internal/vpn/                — VPN client abstraction (3x-ui, proxman, fetch)
 internal/xui/                — 3x-ui HTTP-клиент + circuit breaker

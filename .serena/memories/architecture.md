@@ -1,7 +1,5 @@
 # Architecture — rs8kvn_bot
 
-**Version:** v2.4.0
-**Updated:** 2026-08-09
 **Branch:** `dev`
 
 ## Changes since 2026-07-22
@@ -35,7 +33,7 @@ Telegram Bot API  3x-ui / proxman panels  Sentry
        │
        ├── Bot API layer + web server
        ├── Service layer + VPN abstraction
-       ├── SQLite/GORM + migrations 000-030
+       ├── SQLite/GORM + embedded migrations
        ├── Subserver /sub/{subID} + Clash normalization
        └── Background workers
 ```
@@ -58,7 +56,7 @@ Telegram Bot API  3x-ui / proxman panels  Sentry
 - Password encoding in server links via `url.User` / `url.UserPassword`.
 
 ## Schema
-- Version: **after migration 030**.
+- Schema: embedded migrations are applied automatically at startup; the current repository includes migrations through 035.
 - `subscriptions.reminders_sent` stores reminder bitmask.
 - `subscription_nodes` machine: `active`, `pending_add`, `pending_remove`, `pending_update`.
 - Paid expiry excludes free/trial plans; reminder query excludes free/trial plans.
@@ -70,7 +68,7 @@ Telegram Bot API  3x-ui / proxman panels  Sentry
 - `subscription_traffic.go` owns presentation helpers.
 
 ## Scheduler
-- Daily backup, hourly trial cleanup, sync workers, expiry reminders worker.
+- Daily backup, trial cleanup at startup and every 3h, sync workers, expiry reminders worker.
 
 ## Subserver
 - `/sub/{subID}` serves merged subscription payloads.

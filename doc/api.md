@@ -1,7 +1,5 @@
 # API Reference — rs8kvn_bot
 
-**Version:** v2.4.0
-**Date:** 2026-08-10
 **Base URL:** `http://localhost:8880` (configurable via `WEB_SERVER_PORT`)
 
 ---
@@ -192,4 +190,4 @@ API version is implicit in endpoint paths. Bot version in logs: `rs8kvn_bot@<ver
 
 ---
 
-*Documentation last updated: 2026-08-10*
+*This reference is maintained against the current codebase.*

@@ -2,7 +2,6 @@
 
 **Repo:** https://github.com/kereal/rs8kvn_bot
 **Module:** `rs8kvn_bot` (Go 1.25+)
-**Version:** v2.3.11
 **Branch:** `dev` (GitFlow: `main` = production, `dev` = integration, feature branches from dev or `plans_and_pricing`)
 
 ---
@@ -196,7 +195,7 @@ Cache.Set(240s) → return body with Content-Type + Subscription-Userinfo
 | Testing | `stretchr/testify` | v1.11.1 |
 | CI/CD | GitHub Actions → golangci-lint, gosec, test, Docker → GHCR | — |
 
-## Current State (v2.3.11)
+## Current State
 
 ### Working Features
 
@@ -222,7 +221,7 @@ Cache.Set(240s) → return body with Content-Type + Subscription-Userinfo
 | - Health endpoints — `/healthz` (503 when Down), `/readyz` (503 during init)
 | - Invite/trial landing — `/i/{code}` with IP rate limit (3/hour), cookie dedup (3h) |
 | - Per-user rate limiting — chatID token bucket (30 tokens, 5/sec refill, 10-min idle cleanup) |
-| - Subscription proxy — `GET /sub/{subID}` with extra servers + headers, 240s TTL cache, singleflight |
+| - Subscription proxy — `GET /sub/{subID}` with multi-node aggregation, headers, 240s TTL cache, singleflight |
 | - Daily backups — WAL checkpoint, atomic copy, 30 rotated backups by default |
 | - Sentry error tracking (+ traces), Zap structured JSON logging with rotation
 | - Order/Product tracking — payment lifecycle (pending/paid/expired/canceled) with 30-min payment window
@@ -231,7 +230,7 @@ Cache.Set(240s) → return body with Content-Type + Subscription-Userinfo
 | - Prometheus metrics — `/metrics` endpoint with HTTP, bot, XUI, DB, cache, subscription, and payment metrics |
 | - VPN client abstraction — `internal/vpn/` package with `Client` interface, `NewClient` factory routing by node type (3x-ui, proxman, fetch) |
 | - Plans & pricing — `plans`, `products`, `orders` tables for subscription plan management and payment lifecycle |
-| - Orphan reconciliation — `ReconcileOrphanedClients` runs every 6h to clean up orphaned XUI clients |
+| - Orphan reconciliation — initial pass after 30s, then every 8h; orphaned subscriptions are revoked rather than deleted |
 | - Subscription expire worker — background worker handling subscription expiration |
 
 ### Test Coverage
@@ -253,7 +252,7 @@ Cache.Set(240s) → return body with Content-Type + Subscription-Userinfo
 | `internal/scheduler` | **81.2%** | ✅ |
 | `internal/database` | **77.8%** | 🟡 |
 | `cmd/bot` | **5.4%** | 🟡 (integration tests cover indirectly) |
-| **Overall** | **~61.1%** | 🟡 |
+| **Overall** | **66.2%** | 🟡 |
 
 All tests pass with `-race` detector. Fuzzing enabled for critical functions.
 
@@ -291,19 +290,18 @@ All tests pass with `-race` detector. Fuzzing enabled for critical functions.
 - **Payment window:** link lifetime is determined by Platega `expiresIn` and stored as absolute UTC `payment_expires_at`; a still-valid saved link is reused. Only a new `RequestPayment` after that timestamp terminalizes the pending order as `expired`; a late `CONFIRMED` for an `expired`/`canceled` order never activates it and is sent for manual review.
 - **Metrics:** `payment_operations_total{operation,result}`, `payment_operation_duration_seconds`, `payment_amounts_cents_total{operation,currency}` (confirmed/chargeback), `payment_issues_total{event}`.
 
-### Subscription Deletion (v2.2.0+)
+### Subscription Deletion
 - **Order:** Mark as revoked → best-effort deprovision VPN access → physical deletion of DB row
 - **Rationale:** Subscription is immediately inaccessible after revoked status is set. VPN deprovisioning is best-effort (background sync retries on failure). Physical deletion happens last. See AGENTS.md for detailed flow description.
 - **Referral cache:** `DecrementReferralCount` called after successful deletion.
 
-### Subscription Proxy (v2.3.11+)
+### Subscription Proxy
 - **Endpoint:** `GET /sub/{subID}` — subID = SubscriptionID from DB (14 random bytes → 28 hex chars)
-- **Config:** Subserver агрегирует ответы нод как-is; кастомные extra-серверы (extra_servers.txt, hot reload) удалены в v2.3.0.
+- **Config:** Subserver агрегирует ответы активных нод как-is; отдельный extra-servers файл не используется.
 - **Cache:** 240s TTL hardcoded (`config.SubServerCacheTTL`)
 - **Singleflight:** First request fetches, others wait and get same result (prevents thundering herd) — загрузка внешнего конфиг-файла не выполняется (фича удалена)
 - **Content-Length:** Removed after merge (body size changes, Go uses chunked encoding)
 - **Rate limiting:** Currently none — 240s cache TTL mitigates abuse; future: per-IP limit
-- **Path traversal protection:** (исторически) `extra_servers.txt` path валидировался перед открытием — фича удалена в v2.3.0, проверка больше не применяется.
 
 ### Referral Cache
 - **Source of truth:** subscriptions table (`SELECT referred_by, COUNT(*) GROUP BY referred_by`)
@@ -344,7 +342,7 @@ All tests pass with `-race` detector. Fuzzing enabled for critical functions.
 - **Broadcast:** 50ms delay between messages (~20 msg/sec, respects Telegram limits)
 
 ### Security
-- **Input validation:** Regex validation rejects path-separator/invalid characters in invite codes (`internal/web/web.go`) and subIDs (`^[a-zA-Z0-9_-]+$` in `internal/subserver/subscription.go`). (The historical `extra_servers.txt` file-path check was removed in v2.3.0 along with that feature.)
+- **Input validation:** Regex validation rejects path-separator/invalid characters in invite codes (`internal/web/web.go`) and subscription IDs.
 - **IP spoofing (S2):** `getClientIP` uses rightmost IP from `X-Forwarded-For` (set by trusted reverse proxy), NOT leftmost (client-controlled, spoofable). Only trusted from loopback.
 - **URL scheme restriction (S3):** `validateURL` restricts all configured URLs to `http`/`https` schemes only — prevents `file://`, `gopher://`, etc. SSRF vectors
 - **Web→bot dependency break (A1):** `internal/web` no longer imports `internal/bot` — `Server.botUsername string` instead of `*bot.BotConfig`, reducing coupling and attack surface
@@ -365,7 +363,7 @@ All tests pass with `-race` detector. Fuzzing enabled for critical functions.
 - **Binary:** UPX compressed (-9) — ~30–40% smaller
 - **Migrations:** Embedded via `COPY internal/database/migrations`
 - **Data volume:** `./data:/app/data` (persistent)
-- **Health check:** `curl -f http://localhost:8080/healthz` (application readiness)
+- **Health check:** `wget -q -O - http://127.0.0.1:8880/healthz` (application and database health)
 - **Resource limits:** 0.5 CPU, 128MB memory (2× GOMEMLIMIT for GC headroom)
 - **Stop grace period:** 90s, SIGTERM
 
@@ -382,7 +380,7 @@ go test -coverprofile=coverage.out ./...
 go tool cover -func=coverage.out
 
 # Build binary
-go build -ldflags="-s -w -X main.version=v2.3.11 -X main.commit=$(git rev-parse --short HEAD 2>/dev/null || echo unknown) -X main.buildTime=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" -o rs8kvn_bot ./cmd/bot
+go build -ldflags="-s -w -X main.commit=$(git rev-parse --short HEAD 2>/dev/null || echo unknown) -X main.buildTime=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" -o rs8kvn_bot ./cmd/bot
 
 # Run linters
 golangci-lint run ./...

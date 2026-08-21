@@ -3,7 +3,7 @@
 [![GitHub release](https://img.shields.io/github/v/release/kereal/rs8kvn_bot?logo=github)](https://github.com/kereal/rs8kvn_bot/releases)
 [![CI](https://img.shields.io/github/actions/workflow/status/kereal/rs8kvn_bot/docker.yml?branch=main)](https://github.com/kereal/rs8kvn_bot/actions)
 [![Go](https://img.shields.io/badge/Go-1.25%2B-00ADD8?logo=go)](https://go.dev/)
-[![Coverage](https://img.shields.io/badge/coverage-65.3%25-green)](https://github.com/kereal/rs8kvn_bot/actions)
+[![Coverage](https://img.shields.io/badge/coverage-66.2%25-green)](https://github.com/kereal/rs8kvn_bot/actions)
 [![Docker](https://img.shields.io/badge/Docker-ghcr.io%2Fkereal%2Frs8kvn_bot-blue?logo=docker)](https://github.com/kereal/rs8kvn_bot/actions)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL%203.0-blue.svg)](LICENSE)
 
@@ -24,7 +24,7 @@
 - 🗄️ Daily database backups with rotation, embedded SQLite migrations
 - 🐛 Sentry error tracking (+ performance traces)
 - 🐳 Docker support with health checks, non-root user, UPX compression
-- 🧪 Unit + E2E tests (~63.1% aggregate coverage, race-safe, fuzzing)
+- 🧪 Unit + E2E tests (66.2% aggregate coverage, race-safe, fuzzing)
 - 🔒 Security hardening — X-Forwarded-For rightmost IP (S2), URL scheme allowlist http/https (S3), web↔bot dependency isolation (A1)
 
 ## Quick Start
@@ -41,7 +41,7 @@ docker run -d \
   ghcr.io/kereal/rs8kvn_bot:2.4.0
 ```
 
-> Registry tags are SemVer (`2.4.0`, `2.4`) and commit SHA — there is no `latest` tag.
+> The registry provides a `latest` tag as well as SemVer (`2.4.0`, `2.4`) and commit SHA tags. Pin a concrete SemVer or SHA tag when reproducible deployments are required.
 
 See **[Installation Guide](doc/installation.md)** for:
 - All 4 installation methods (Docker, Docker Compose, Build from Source, Air hot reload)
@@ -127,7 +127,7 @@ Each user can generate an invite code via the referral flow. The landing page va
 
 ### Subscription Server (`/sub/{subID}`)
 
-Serves subscriptions with optional extra servers and custom headers. Validates `subID`, checks cache (240s TTL), fetches from all active nodes (3x-ui, proxman, fetch), merges responses, returns combined output. Fetch nodes use `subscription_url` directly; other types append `subID`.
+Serves subscriptions with custom headers. Validates `subID`, checks cache (240s TTL), fetches from all active nodes (3x-ui, proxman, fetch), merges responses, returns combined output. Fetch nodes use `subscription_url` directly; other types append `subID`.
 
 When `SUBSERVER_ACCESS_LOG` is set, each `/sub/{id}` request is appended to the configured access log file in a zap-console line without a message, caller, or field keys. The record includes timestamp, level, method, URL, response status, client IP, device headers, and User-Agent as space-separated values; values containing spaces are quoted, and empty optional values are written as `-`. The main log also records an INFO message when access logging is enabled. Access log writes are buffered asynchronously; if the file cannot be opened, the bot continues without the access log and writes an error to the main log.
 
@@ -154,7 +154,7 @@ Releases are fully automated:
 
 1. Tag `main` with a SemVer tag and push it (e.g. `git tag -a v2.4.1 -m "Release v2.4.1" && git push origin v2.4.1`).
 2. CI/CD Pipeline runs tests, `go vet`, `go build`, golangci-lint and the **gosec** security scan.
-3. The Docker image is built and pushed to `ghcr.io/kereal/rs8kvn_bot` (tags: `2.4.0`, `2.4`, commit SHA).
+3. The Docker image is built and pushed to `ghcr.io/kereal/rs8kvn_bot` (tags: `latest`, SemVer, and commit SHA).
 4. A GitHub Release is created with an auto-generated changelog.
 
 ## Development
@@ -177,7 +177,7 @@ golangci-lint run ./...
 gosec ./...
 ```
 
-Test suite: ~65.3% aggregate coverage (generated with `go test -coverprofile`), race-safe, fuzzing, table-driven tests, integration tests with mock HTTP server.
+Test suite: 66.2% aggregate coverage in the latest documented run (generated with `go test -coverprofile`), race-safe, fuzzing, table-driven tests, integration tests with mock HTTP server.
 
 ### Build
 

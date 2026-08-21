@@ -1,7 +1,6 @@
 # Аудит метрик subserver
 
-Дата: 2026-07-03 (обновлено 2026-07-17)
-Статус: актуализировано
+Статус: проверено по текущему коду
 
 ## Что есть в `internal/metrics/metrics.go`
 
@@ -17,7 +16,9 @@
 | `bot_update_duration_seconds` | histogram | `bot/handler.go:622` |
 | `cache_hits_total{cache}` | counter | `subserver/cache.go:61`, `bot/cache.go:81` |
 | `cache_misses_total{cache}` | counter | `subserver/cache.go:56`, `bot/cache.go:54,71` |
-| `circuit_breaker_state{target}` | gauge | `xui/breaker.go:49,85,113,129` |
+| `xui_requests_total{operation,result}` | counter | `xui/client.go` — live XUI request instrumentation |
+| `xui_request_duration_seconds{operation}` | histogram | `xui/client.go` — live XUI request timing |
+| `circuit_breaker_state{target}` | gauge | `xui/breaker.go` — updated by the tested breaker; no live production caller |
 | `active_subscriptions` | gauge | `service/subscription.go` — `.Set()` после мутаций |
 | `subscription_creates_total` | counter | `service/subscription.go` — `Create`, `GetOrCreateSubscription` |
 | `subscription_renewals_total` | counter | `service/subscription.go` — `RenewSubscription` |
@@ -26,7 +27,7 @@
 | `subscription_expire_total` | counter | `scheduler/subscription_expire_worker.go:45` |
 | `subscription_expire_duration_seconds` | histogram | `scheduler/subscription_expire_worker.go:45` |
 | `reconcile_orphaned_duration_seconds` | histogram | `service/subscription.go:480` |
-| `bot_orphaned_clients_removed_total` | counter | `service/subscription.go:575` |
+| `bot_orphaned_clients_revoked_total` | counter | `service/subscription.go` |
 | `db_queries_total{operation,result}` | counter | `metrics/db.go` — GORM callbacks |
 | `db_query_duration_seconds{operation}` | histogram | `metrics/db.go` — GORM callbacks |
 | `subserver_source_fetch_total{result,format}` | counter | `subscription_handler_split.go:225,242` |
@@ -36,18 +37,14 @@
 | `subserver_cache_hit_duration_seconds` | histogram | `subscription_handler.go:29` |
 | `subserver_cache_miss_duration_seconds` | histogram | `subscription_handler.go:34` |
 
-### Мёртвые метрики (объявлены, нигде не инкрементируются)
+### Удалённые или ранее ошибочно классифицированные метрики
 
-| Метрика | Тип | Проблема |
-|---|---|---|
-| `xui_requests_total{operation,result}` | counter | Объявлена, но `fetch.go` не инструментирован. |
-| `xui_request_duration_seconds{operation}` | histogram | Аналогично. |
-| `trial_conversions_total` | counter | Удалена — нет явного trial→paid флоу. |
+| Метрика | Статус |
+|---|---|
+| `trial_conversions_total` | Удалена: явного trial→paid флоу нет. |
+| `subserver_partial_sources_total{sub_id}` | Удалена из-за опасной cardinality. |
 
-### Удалённые метрики
-
-- `subserver_partial_sources_total{sub_id}` — deprecated, опасная cardinality, заменена на `subserver_source_fetch_total{result="error"}`.
-- `trial_conversions_total` — удалена, нет явного trial→paid флоу.
+XUI-метрики не являются мёртвыми: `xui_requests_total{operation,result}` и `xui_request_duration_seconds{operation}` инкрементируются в `internal/xui/client.go`.
 
 ## Ситуация по subserver конкретно
 
