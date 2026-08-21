@@ -2,6 +2,7 @@ package bot
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -28,7 +29,9 @@ const (
 	broadcastStageIdle broadcastStage = iota
 	broadcastStageAwaitingName
 	broadcastStageAwaitingDraft
+	broadcastStageFiltering
 	broadcastStagePreview
+	broadcastStageConfirming
 )
 
 const (
@@ -51,6 +54,8 @@ type broadcastSession struct {
 	stage     broadcastStage
 	name      string
 	text      string
+	filter    database.BroadcastFilter
+	recipientCount int64 // количество получателей (для preview перед подтверждением)
 }
 
 func (h *Handler) HandleVersion(ctx context.Context, update tgbotapi.Update) error {
@@ -474,17 +479,14 @@ func (h *Handler) handleBroadcastDraftText(ctx context.Context, chatID int64, te
 		return nil
 	}
 
+	var emptyFilter database.BroadcastFilter
+
 	h.broadcastMu.Lock()
-	h.broadcastSessions[chatID] = &broadcastSession{createdAt: time.Now(), stage: broadcastStagePreview, name: name, text: text}
+	h.broadcastSessions[chatID] = &broadcastSession{createdAt: time.Now(), stage: broadcastStageFiltering, name: name, text: text}
 	h.broadcastMu.Unlock()
 
-	kb := tgbotapi.NewInlineKeyboardMarkup(
-		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("✅ Отправить всем", "broadcast_confirm"),
-			tgbotapi.NewInlineKeyboardButtonData("❌ Отмена", "broadcast_cancel"),
-		),
-	)
-	msg := tgbotapi.NewMessage(chatID, utils.EscapeMarkdownV2(fmt.Sprintf("✅ Превью готово. Рассылка «%s».\n\nОтправить это сообщение всем пользователям?", name)))
+	kb := broadcastFilterKeyboard(emptyFilter)
+	msg := tgbotapi.NewMessage(chatID, utils.EscapeMarkdownV2(broadcastFilterPreview(name, emptyFilter)))
 	msg.ParseMode = "MarkdownV2"
 	msg.ReplyMarkup = kb
 	h.send(ctx, msg)
@@ -492,24 +494,212 @@ func (h *Handler) handleBroadcastDraftText(ctx context.Context, chatID int64, te
 	return nil
 }
 
-// handleBroadcastConfirm creates the broadcast record (DB-setup phase: a failure
-// aborts the broadcast — the broadcast must be recorded before any message is
-// sent) and runs the broadcast.
+// handleBroadcastFilter обрабатывает нажатия кнопок фильтров в broadcastSession.
+// callbackData формат: bfilter_<type>_<value>
+//   - bfilter_plan_ / bfilter_plan_paid / bfilter_plan_free
+//   - bfilter_date_<days> / bfilter_date_ (сброс)
+//   - bfilter_inactive_<days> / bfilter_inactive_ (сброс)
+func (h *Handler) handleBroadcastFilter(ctx context.Context, chatID int64, messageID int, callbackData string) error {
+	s := h.getBroadcastSession(chatID)
+	if s == nil || s.stage != broadcastStageFiltering {
+		h.SendMessage(ctx, chatID, "❌ Нет активной рассылки для настройки фильтров.")
+		return nil
+	}
+
+	f := s.filter
+
+	switch {
+	case strings.HasPrefix(callbackData, "bfilter_plan_"):
+		val := strings.TrimPrefix(callbackData, "bfilter_plan_")
+		if val == f.PlanType {
+			f.PlanType = "" // toggle off
+		} else {
+			f.PlanType = val
+		}
+
+	case strings.HasPrefix(callbackData, "bfilter_status_"):
+		val := strings.TrimPrefix(callbackData, "bfilter_status_")
+		if val == f.SubscriptionStatus {
+			f.SubscriptionStatus = "" // toggle off -> default active
+		} else {
+			f.SubscriptionStatus = val
+		}
+
+	case strings.HasPrefix(callbackData, "bfilter_date_"):
+		val := strings.TrimPrefix(callbackData, "bfilter_date_")
+		if val == "" {
+			f.RegisteredAfter = nil
+		} else {
+			days, err := strconv.Atoi(val)
+			if err != nil {
+				return fmt.Errorf("parse date filter: %w", err)
+			}
+			daysAgo := time.Now().AddDate(0, 0, -days)
+			f.RegisteredAfter = &daysAgo
+		}
+		f.RegisteredBefore = nil // сброс верхней границы при выборе "За N мес"
+
+	case strings.HasPrefix(callbackData, "bfilter_inactive_"):
+		val := strings.TrimPrefix(callbackData, "bfilter_inactive_")
+		if val == "" {
+			f.InactiveDays = nil
+		} else {
+			days, err := strconv.Atoi(val)
+			if err != nil {
+				return fmt.Errorf("parse inactive filter: %w", err)
+			}
+			f.InactiveDays = &days
+		}
+
+	case strings.HasPrefix(callbackData, "bfilter_ever_paid_"):
+		val := strings.TrimPrefix(callbackData, "bfilter_ever_paid_")
+		if val == "" {
+			f.EverPaid = nil
+		} else {
+			everPaid := val == "true"
+			f.EverPaid = &everPaid
+		}
+
+	default:
+		return fmt.Errorf("unknown filter callback: %s", callbackData)
+	}
+
+	h.broadcastMu.Lock()
+	s.filter = f
+	h.broadcastSessions[chatID] = s
+	h.broadcastMu.Unlock()
+
+	// Обновляем сообщение с новым превью и клавиатурой.
+	preview := broadcastFilterPreview(s.name, f)
+	kb := broadcastFilterKeyboard(f)
+
+	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, utils.EscapeMarkdownV2(preview))
+	editMsg.ParseMode = "MarkdownV2"
+	editMsg.ReplyMarkup = kb
+	_, err := h.bot.Send(editMsg)
+	if err != nil {
+		logger.Warn("Failed to update broadcast filter preview", zap.Error(err))
+	}
+
+	return nil
+}
+
+// handleBroadcastConfirm обрабатывает подтверждение рассылки.
+// Из broadcastStageFiltering → показывает количество получателей → broadcastStageConfirming.
+// Из broadcastStageConfirming → запускает рассылку.
 func (h *Handler) handleBroadcastConfirm(ctx context.Context, chatID int64) error {
 	s := h.getBroadcastSession(chatID)
-	if s == nil || s.stage != broadcastStagePreview {
+	if s == nil || (s.stage != broadcastStagePreview && s.stage != broadcastStageFiltering && s.stage != broadcastStageConfirming) {
 		h.SendMessage(ctx, chatID, "❌ Нет активной рассылки для подтверждения.")
 		return nil
 	}
 
-	name, text := s.name, s.text
+	// Если estamos на этапе фильтров — показываем количество получателей.
+	if s.stage == broadcastStageFiltering || s.stage == broadcastStagePreview {
+		count, err := h.db.GetFilteredTelegramIDCount(ctx, s.filter)
+		if err != nil {
+			logger.Error("Failed to count broadcast recipients", zap.Error(err))
+			h.SendMessage(ctx, chatID, fmt.Sprintf("❌ Не удалось посчитать получателей:\n\n%v", err))
+			return fmt.Errorf("count broadcast recipients: %w", err)
+		}
+
+		h.broadcastMu.Lock()
+		s.recipientCount = count
+		s.stage = broadcastStageConfirming
+		h.broadcastSessions[chatID] = s
+		h.broadcastMu.Unlock()
+
+		// Формируем текст подтверждения.
+		filterDesc := s.filter.String()
+		confirmText := fmt.Sprintf(
+			"📦 *Рассылка: %s*\n\n"+
+				"👥 Получателей: *%d*\n"+
+				"🔍 Фильтр: %s\n\n"+
+				"⚡ Отправить %d пользователям?",
+			s.name, count, filterDesc, count)
+
+		// Кнопки: Подтвердить / Назад к фильтрам / Отмена.
+		kb := tgbotapi.NewInlineKeyboardMarkup(
+			tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("✅ Подтвердить", "broadcast_final_confirm"),
+			),
+			tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("🔙 Назад к фильтрам", "broadcast_back_to_filters"),
+				tgbotapi.NewInlineKeyboardButtonData("❌ Отмена", "broadcast_cancel"),
+			),
+		)
+
+		msg := tgbotapi.NewMessage(chatID, utils.EscapeMarkdownV2(confirmText))
+		msg.ParseMode = "MarkdownV2"
+		msg.ReplyMarkup = kb
+		h.send(ctx, msg)
+
+		return nil
+	}
+
+	// На этапе подтверждения — запускаем рассылку.
+	return h.startBroadcast(ctx, chatID, s)
+}
+
+// handleBroadcastFinalConfirm запускает рассылку после подтверждения количества получателей.
+func (h *Handler) handleBroadcastFinalConfirm(ctx context.Context, chatID int64) error {
+	s := h.getBroadcastSession(chatID)
+	if s == nil || s.stage != broadcastStageConfirming {
+		h.SendMessage(ctx, chatID, "❌ Нет активной рассылки для подтверждения.")
+		return nil
+	}
+
+	return h.startBroadcast(ctx, chatID, s)
+}
+
+// handleBroadcastBackToFilters возвращает к выбору фильтров из этапа подтверждения.
+func (h *Handler) handleBroadcastBackToFilters(ctx context.Context, chatID int64, messageID int) error {
+	s := h.getBroadcastSession(chatID)
+	if s == nil || s.stage != broadcastStageConfirming {
+		h.SendMessage(ctx, chatID, "❌ Нет активной рассылки.")
+		return nil
+	}
+
+	h.broadcastMu.Lock()
+	s.stage = broadcastStageFiltering
+	h.broadcastSessions[chatID] = s
+	h.broadcastMu.Unlock()
+
+	// Показываем keyboard фильтров.
+	preview := broadcastFilterPreview(s.name, s.filter)
+	kb := broadcastFilterKeyboard(s.filter)
+
+	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, utils.EscapeMarkdownV2(preview))
+	editMsg.ParseMode = "MarkdownV2"
+	editMsg.ReplyMarkup = kb
+	_, err := h.bot.Send(editMsg)
+	if err != nil {
+		logger.Warn("Failed to go back to filters", zap.Error(err))
+	}
+
+	return nil
+}
+
+// startBroadcast запускает рассылку: создаёт запись в БД и отправляет сообщения.
+func (h *Handler) startBroadcast(ctx context.Context, chatID int64, s *broadcastSession) error {
+	name, text, filter := s.name, s.text, s.filter
 
 	h.clearBroadcastSession(chatID)
+
+	// Сериализуем фильтр в JSON.
+	filtersJSON := "{}"
+	if !filter.IsEmpty() {
+		data, err := json.Marshal(filter)
+		if err != nil {
+			return fmt.Errorf("marshal broadcast filter: %w", err)
+		}
+		filtersJSON = string(data)
+	}
 
 	now := time.Now().UTC()
 	broadcast := &database.Broadcast{
 		Name:        name,
-		Filters:     "{}",
+		Filters:     filtersJSON,
 		MessageText: text,
 		Status:      string(database.BroadcastStatusRunning),
 		PlannedAt:   &now,
@@ -523,7 +713,7 @@ func (h *Handler) handleBroadcastConfirm(ctx context.Context, chatID int64) erro
 		return fmt.Errorf("create broadcast: %w", err)
 	}
 
-	return h.runBroadcast(ctx, chatID, name, text, broadcast.ID)
+	return h.runBroadcast(ctx, chatID, name, text, broadcast.ID, filter)
 }
 
 // handleBroadcastCancel discards the in-progress broadcast draft.
@@ -537,7 +727,7 @@ func (h *Handler) handleBroadcastCancel(ctx context.Context, chatID int64) error
 // runBroadcast sends text (MarkdownV2, as-is) to all users in batches, retrying
 // transient (non-blocked) failures, and records the outcome in the broadcast row
 // (counters + delivery_report JSON).
-func (h *Handler) runBroadcast(ctx context.Context, adminChatID int64, name, text string, broadcastID uint) error {
+func (h *Handler) runBroadcast(ctx context.Context, adminChatID int64, name, text string, broadcastID uint, filter database.BroadcastFilter) error {
 	const broadcastTimeout = 5 * time.Minute
 
 	ctx, cancel := context.WithTimeout(ctx, broadcastTimeout)
@@ -572,7 +762,7 @@ func (h *Handler) runBroadcast(ctx context.Context, adminChatID int64, name, tex
 			break
 		}
 
-		ids, err := h.db.GetTelegramIDsBatch(ctx, offset, batchSize)
+		ids, err := h.db.GetFilteredTelegramIDsBatch(ctx, offset, batchSize, filter)
 		if err != nil {
 			logger.Error("Failed to get telegram IDs batch", zap.Error(err))
 			batchErr = err
@@ -801,6 +991,143 @@ func broadcastDetailsKeyboard(broadcastID uint) *tgbotapi.InlineKeyboardMarkup {
 	return &kb
 }
 
+// broadcastFilterKeyboard создаёт inline keyboard для выбора фильтров рассылки.
+// Текущий фильтр отображается в тексте сообщения (preview).
+func broadcastFilterKeyboard(f database.BroadcastFilter) *tgbotapi.InlineKeyboardMarkup {
+	// Ряд 1 — Тариф
+	planAll := "👥 Все"
+	planPaid := "💰 Платные"
+	planFree := "🆓 Бесплатные"
+	if f.PlanType == "" {
+		planAll = "👥 Все ✓"
+	} else if f.PlanType == "paid" {
+		planPaid = "💰 Платные ✓"
+	} else if f.PlanType == "free" {
+		planFree = "🆓 Бесплатные ✓"
+	}
+
+	// Ряд 2 — Статус подписки
+	statusAll := "📋 Все"
+	statusActive := "✅ Активные"
+	statusExpired := "⏰ Истёкшие"
+	statusRevoked := "🚫 Отозванные"
+	switch f.SubscriptionStatus {
+	case "active":
+		statusActive = "✅ Активные ✓"
+	case "expired":
+		statusExpired = "⏰ Истёкшие ✓"
+	case "revoked":
+		statusRevoked = "🚫 Отозванные ✓"
+	default:
+		statusAll = "📋 Все ✓"
+	}
+
+	// Ряд 3 — Дата регистрации
+	date3m := "📅 Рег. за 3 мес"
+	date6m := "📅 Рег. за 6 мес"
+	date1y := "📅 Рег. за год"
+	dateAll := "📅 Рег. все"
+	if f.RegisteredAfter != nil {
+		now := time.Now()
+		diff := now.Sub(*f.RegisteredAfter)
+		days := int(diff.Hours() / 24)
+		switch {
+		case days <= 95:
+			date3m = "📅 Рег. за 3 мес ✓"
+		case days <= 185:
+			date6m = "📅 Рег. за 6 мес ✓"
+		case days <= 370:
+			date1y = "📅 Рег. за год ✓"
+		default:
+			dateAll = "📅 Рег. все ✓"
+		}
+	}
+	if f.RegisteredAfter == nil {
+		dateAll = "📅 Рег. все ✓"
+	}
+
+	// Ряд 3 — Неактивность
+	inactiveNever := "🚫 Не обращались"
+	inactive1m := "⏰ > 1 мес"
+	inactive3m := "⏰ > 3 мес"
+	inactiveNone := "👤 Без фильтра"
+	if f.InactiveDays != nil {
+		switch *f.InactiveDays {
+		case 0:
+			inactiveNever = "🚫 Не обращались ✓"
+		case 30:
+			inactive1m = "⏰ > 1 мес ✓"
+		case 90:
+			inactive3m = "⏰ > 3 мес ✓"
+		}
+	} else {
+		inactiveNone = "👤 Без фильтра ✓"
+	}
+
+	// Ряд 4 — Платежи
+	payYes := "💳 Платили"
+	payNo := "🆓 Не платили"
+	payNone := "👤 Без фильтра"
+	if f.EverPaid != nil {
+		if *f.EverPaid {
+			payYes = "💳 Платили ✓"
+		} else {
+			payNo = "🆓 Не платили ✓"
+		}
+	} else {
+		payNone = "👤 Без фильтра ✓"
+	}
+
+	kb := tgbotapi.NewInlineKeyboardMarkup(
+		// Ряд 1: Тариф
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(planAll, "bfilter_plan_"),
+			tgbotapi.NewInlineKeyboardButtonData(planPaid, "bfilter_plan_paid"),
+			tgbotapi.NewInlineKeyboardButtonData(planFree, "bfilter_plan_free"),
+		),
+		// Ряд 2: Статус подписки
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(statusAll, "bfilter_status_"),
+			tgbotapi.NewInlineKeyboardButtonData(statusActive, "bfilter_status_active"),
+			tgbotapi.NewInlineKeyboardButtonData(statusExpired, "bfilter_status_expired"),
+			tgbotapi.NewInlineKeyboardButtonData(statusRevoked, "bfilter_status_revoked"),
+		),
+		// Ряд 3: Дата регистрации
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(date3m, "bfilter_date_90"),
+			tgbotapi.NewInlineKeyboardButtonData(date6m, "bfilter_date_180"),
+			tgbotapi.NewInlineKeyboardButtonData(date1y, "bfilter_date_365"),
+			tgbotapi.NewInlineKeyboardButtonData(dateAll, "bfilter_date_"),
+		),
+		// Ряд 4: Неактивность
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(inactiveNever, "bfilter_inactive_0"),
+			tgbotapi.NewInlineKeyboardButtonData(inactive1m, "bfilter_inactive_30"),
+			tgbotapi.NewInlineKeyboardButtonData(inactive3m, "bfilter_inactive_90"),
+			tgbotapi.NewInlineKeyboardButtonData(inactiveNone, "bfilter_inactive_"),
+		),
+		// Ряд 5: Платежи
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(payYes, "bfilter_ever_paid_true"),
+			tgbotapi.NewInlineKeyboardButtonData(payNo, "bfilter_ever_paid_false"),
+			tgbotapi.NewInlineKeyboardButtonData(payNone, "bfilter_ever_paid_"),
+		),
+		// Ряд 6: Действия
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("✅ Отправить", "broadcast_confirm"),
+			tgbotapi.NewInlineKeyboardButtonData("❌ Отмена", "broadcast_cancel"),
+		),
+	)
+
+	return &kb
+}
+
+// broadcastFilterPreview возвращает текст превью с описанием текущего фильтра.
+func broadcastFilterPreview(name string, f database.BroadcastFilter) string {
+	filterDesc := f.String()
+	return fmt.Sprintf("✅ Превью готово. Рассылка «%s».\n\n👥 Фильтр: %s\n\n📤 Отправить это сообщение всем?", name, filterDesc)
+}
+
 // startBroadcastSession begins (or restarts) the draft flow for an admin.
 func (h *Handler) startBroadcastSession(chatID int64) {
 	h.broadcastMu.Lock()
@@ -1016,7 +1343,7 @@ func containsEntityChar(s string) bool {
 // broadcastSessionActive reports whether an admin has an in-progress broadcast.
 func (h *Handler) broadcastSessionActive(chatID int64) bool {
 	s := h.getBroadcastSession(chatID)
-	return s != nil && (s.stage == broadcastStageAwaitingName || s.stage == broadcastStageAwaitingDraft || s.stage == broadcastStagePreview)
+	return s != nil && (s.stage == broadcastStageAwaitingName || s.stage == broadcastStageAwaitingDraft || s.stage == broadcastStageFiltering || s.stage == broadcastStagePreview || s.stage == broadcastStageConfirming)
 }
 
 // sendBroadcastDetails отправляет карточку рассылки. Используется кнопкой
