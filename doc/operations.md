@@ -1,8 +1,5 @@
 # Operations Guide — rs8kvn_bot
 
-**Version:** 2.3.11
-**Last updated:** 2026-08-11
-
 ---
 
 ## Table of Contents
@@ -339,8 +336,10 @@ The bot exposes a `/metrics` endpoint on the same port as health checks (default
 | `bot_update_errors_total` | Counter | type | Bot update errors |
 | `bot_update_duration_seconds` | Histogram | — | Bot update processing time |
 | `cache_hits_total` / `cache_misses_total` | Counter | cache | Cache hit/miss (subscription, referral, subserver) |
-| `circuit_breaker_state` | Gauge | target | Circuit breaker state (0=closed, 1=open, 2=half-open) |
-| `bot_orphaned_clients_removed_total` | Counter | — | Orphaned XUI clients removed |
+| `xui_requests_total` | Counter | operation, result | Live 3x-ui request count |
+| `xui_request_duration_seconds` | Histogram | operation | Live 3x-ui request duration |
+| `circuit_breaker_state` | Gauge | target | Circuit breaker state when the tested breaker is wired into a live path |
+| `bot_orphaned_clients_revoked_total` | Counter | — | Orphaned subscriptions revoked during reconciliation |
 | `subserver_source_fetch_total` | Counter | result, format | Upstream source fetch results (success/error by format) |
 | `subserver_source_fetch_duration_seconds` | Histogram | result | Upstream source fetch duration |
 | `subserver_cache_invalidations_total` | Counter | reason | Cache invalidations by reason |
@@ -554,7 +553,7 @@ curl http://localhost:8880/debug/pprof/goroutine?debug=1  # if enabled
 
 **Solutions:**
 1. **Tune connection pool:** Already set `MaxOpenConns=1`. Check if other processes accessing DB.
-2. **Reduce write frequency:** Trial cleanup runs hourly, backup daily — OK.
+2. **Reduce write frequency:** Trial cleanup runs every 3 hours, backup daily — OK.
 3. **Consider PostgreSQL** if >10k writes/day.
 
 **Check locking:**
@@ -626,7 +625,7 @@ ORDER BY updated_at DESC;
 2. Review `last_error` column for specific error messages
 3. The background `SyncPendingNodes` worker retries with exponential backoff automatically
 4. For persistent stuck states, restart bot to reset worker state
-5. Check `bot_orphaned_clients_removed_total` metric for orphan reconciliation activity
+5. Check `bot_orphaned_clients_revoked_total` for orphan reconciliation activity
 
 ---
 
@@ -760,4 +759,4 @@ limit_req_zone $binary_remote_addr zone=sub:10m rate=30r/m;
 
 ---
 
-*Last updated: 2026-08-11*
+*This guide is maintained against the current codebase.*
