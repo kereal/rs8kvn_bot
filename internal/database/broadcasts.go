@@ -59,7 +59,7 @@ func (s *Service) UpdateBroadcast(ctx context.Context, b *Broadcast) error {
 	result := s.db.WithContext(ctx).
 		Model(&Broadcast{}).
 		Where("id = ?", b.ID).
-		Select("status", "started_at", "finished_at",
+		Select("status", "finished_at",
 			"recipients_total", "sent_count", "blocked_count", "failed_count", "delivery_report").
 		Updates(b)
 	if result.Error != nil {

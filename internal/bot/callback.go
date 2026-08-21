@@ -181,6 +181,12 @@ func (c *CallbackHandler) HandleCallback(ctx context.Context, update tgbotapi.Up
 			return fmt.Errorf("handle back_to_invite: %w", err)
 		}
 	case strings.HasPrefix(data, "broadcast_details_"):
+		if !c.h.isAdmin(chatID) {
+			logger.Warn("Non-admin user attempted to access broadcast details",
+				zap.Int64("chat_id", chatID))
+			return nil
+		}
+
 		raw := strings.TrimPrefix(data, "broadcast_details_")
 
 		id64, _ := strconv.ParseUint(raw, 10, 64)
