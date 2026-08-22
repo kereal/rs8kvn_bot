@@ -217,6 +217,7 @@ type XUIClientWriter interface {
 	AddClientWithID(ctx context.Context, req xui.ClientRequest) (*xui.ClientConfig, error)
 	UpdateClient(ctx context.Context, req xui.ClientRequest) error
 	DeleteClient(ctx context.Context, email string) error
+	ResetTraffic(ctx context.Context, email string) error
 	Close() error
 }
 

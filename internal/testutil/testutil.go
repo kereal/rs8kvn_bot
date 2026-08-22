@@ -1256,6 +1256,7 @@ type XUIClient struct {
 	AddClientWithIDCalled bool
 	DeleteClientCalled    bool
 	UpdateClientCalled    bool
+	ResetTrafficCalled    bool
 }
 
 func (m *XUIClient) Ping(ctx context.Context) error {
@@ -1323,6 +1324,14 @@ func (m *XUIClient) DeleteClient(ctx context.Context, email string) error {
 	if m.DeleteClientFunc != nil {
 		return m.DeleteClientFunc(ctx, email)
 	}
+
+	return nil
+}
+
+func (m *XUIClient) ResetTraffic(_ context.Context, _ string) error {
+	m.mu.Lock()
+	m.ResetTrafficCalled = true
+	m.mu.Unlock()
 
 	return nil
 }
