@@ -38,6 +38,11 @@ type Client interface {
 	CreateSubscription(ctx context.Context, provision SubscriptionProvision) error
 	UpdateSubscription(ctx context.Context, provision SubscriptionProvision) error
 	DeleteSubscription(ctx context.Context, provision SubscriptionProvision) error
+	// ResetTraffic обнуляет счётчик трафика (up/down) клиента на панели.
+	// Используется при смене тарифа, чтобы трафик предыдущего периода
+	// не влиял на лимит нового тарифа. Не все node-типы поддерживают
+	// эту операцию — для неподдерживаемых это no-op.
+	ResetTraffic(ctx context.Context, provision SubscriptionProvision) error
 	Close() error
 }
 

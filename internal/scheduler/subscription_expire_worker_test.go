@@ -39,6 +39,7 @@ func (m *mockVPNClientForExpire) DeleteSubscription(ctx context.Context, provisi
 
 	return nil
 }
+func (m *mockVPNClientForExpire) ResetTraffic(_ context.Context, _ vpn.SubscriptionProvision) error { return nil }
 func (m *mockVPNClientForExpire) Close() error { return nil }
 
 func newTestSubServiceForExpire(t testing.TB, db *database.Service) *service.SubscriptionService {

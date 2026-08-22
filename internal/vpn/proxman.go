@@ -120,6 +120,11 @@ func (c *ProxmanClient) sendEvent(ctx context.Context, event ProxmanEvent) error
 	}
 }
 
+// ResetTraffic is a no-op: proxman nodes do not support traffic reset.
+func (c *ProxmanClient) ResetTraffic(_ context.Context, _ SubscriptionProvision) error {
+	return nil
+}
+
 // Close is a no-op for the HTTP proxman client.
 func (c *ProxmanClient) Close() error {
 	return nil

@@ -609,6 +609,17 @@ func (s *SyncService) processPendingUpdate(ctx context.Context, sn *database.Sub
 		return fmt.Errorf("update VPN subscription node %d: %w", sn.NodeID, err)
 	}
 
+	// Сбрасываем счётчик трафика, чтобы трафик предыдущего тарифа
+	// не влиял на лимит нового. Best-effort: update уже прошёл успешно,
+	// сброс трафика — улучшение, а не критическая операция.
+	err = client.ResetTraffic(ctx, provision)
+	if err != nil {
+		logger.Warn("reset traffic after plan change failed (best-effort)",
+			zap.Uint("subscription_id", sub.ID),
+			zap.Uint("node_id", sn.NodeID),
+			zap.Error(err))
+	}
+
 	err = s.db.UpdateSubscriptionNodeStatus(ctx, sn.SubscriptionID, sn.NodeID, database.SyncStatusActive)
 	if err != nil {
 		return fmt.Errorf("mark active: %w", err)
