@@ -375,12 +375,14 @@ func userFields(from *tgbotapi.User, chatID int64) []zap.Field {
 
 // formatUserDisplay returns a display string suitable for showing a user reference.
 // For real usernames returns "@username", otherwise returns the raw identifier.
+// Fallback usernames (tgId_XXX) are returned without @ prefix since they are
+// not real Telegram usernames and @ mentions would not resolve.
 func formatUserDisplay(username string) string {
-	if !utils.IsRealUsername(username) {
-		if username == "" {
-			return "unknown"
-		}
+	if username == "" {
+		return "unknown"
+	}
 
+	if !utils.IsRealUsername(username) || strings.HasPrefix(username, "tgId_") {
 		return username
 	}
 
@@ -389,9 +391,15 @@ func formatUserDisplay(username string) string {
 
 // displayUsername formats a username for display in Telegram messages.
 // Returns ", @username" if non-empty, or empty string for missing usernames.
+// Fallback usernames (tgId_XXX) are shown without @ since they are not real
+// Telegram usernames.
 func displayUsername(username string) string {
 	if username == "" {
 		return ""
+	}
+
+	if strings.HasPrefix(username, "tgId_") {
+		return ", " + username
 	}
 
 	return ", @" + username
@@ -504,6 +512,10 @@ func (h *Handler) safeSend(chattable tgbotapi.Chattable) bool {
 
 func (h *Handler) SendMessage(ctx context.Context, chatID int64, text string) {
 	h.sender.SendMessage(ctx, chatID, text)
+}
+
+func (h *Handler) SendMessageMarkdown(ctx context.Context, chatID int64, text string) {
+	h.sender.SendMessageMarkdown(ctx, chatID, text)
 }
 
 func (h *Handler) showLoadingMessage(chatID int64, messageID int) int {
