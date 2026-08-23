@@ -202,13 +202,13 @@ func (h *Handler) HandleDel(ctx context.Context, update tgbotapi.Update) error {
 		zap.Int64("telegram_id", deleted.TelegramID),
 		zap.String("client_id", deleted.ClientID))
 
-	h.SendMessage(ctx, chatID, fmt.Sprintf(
+	h.SendMessageMarkdown(ctx, chatID, fmt.Sprintf(
 		"✅ Подписка успешно удалена!\n\n"+
 			"🆔 ID: %d\n"+
 			"👤 Пользователь: %s\n"+
-			"🆔 Telegram ID: %d",
+			"🆔 Telegram ID: `%d`",
 		id,
-		formatUserDisplay(deleted.Username),
+		utils.FormatUserLink(deleted.Username, deleted.TelegramID),
 		deleted.TelegramID,
 	))
 
@@ -292,15 +292,15 @@ func (h *Handler) HandleSetPlan(ctx context.Context, update tgbotapi.Update) err
 		expiry = updated.ExpiresAt.Format("02.01.2006")
 	}
 
-	h.SendMessage(ctx, chatID, fmt.Sprintf(
+	h.SendMessageMarkdown(ctx, chatID, fmt.Sprintf(
 		"✅ Тариф подписки изменён!\n\n"+
 			"🆔 ID: %d\n"+
 			"👤 Пользователь: %s\n"+
-			"🆔 Telegram ID: %d\n"+
+			"🆔 Telegram ID: `%d`\n"+
 			"💡 Тариф: %d\n"+
 			"⏰ Истекает: %s",
 		updated.ID,
-		formatUserDisplay(updated.Username),
+		utils.FormatUserLink(updated.Username, updated.TelegramID),
 		updated.TelegramID,
 		updated.PlanID,
 		expiry,

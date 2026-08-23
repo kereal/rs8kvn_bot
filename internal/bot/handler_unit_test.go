@@ -52,6 +52,7 @@ func TestFormatUserDisplay(t *testing.T) {
 		{"empty -> unknown", "", "unknown"},
 		{"real username -> @username", "alice", "@alice"},
 		{"underscore username", "alice_bob", "@alice_bob"},
+		{"tgId_ fallback -> raw (no @)", "tgId_123456", "tgId_123456"},
 		{"special char -> raw", "user@host", "user@host"},
 		{"cyrillic -> raw", "юзер", "юзер"},
 	}
@@ -78,6 +79,7 @@ func TestDisplayUsername(t *testing.T) {
 		{"regular", "alice", ", @alice"},
 		{"underscore", "alice_bob", ", @alice_bob"},
 		{"numeric", "12345", ", @12345"},
+		{"tgId_ fallback", "tgId_123456", ", tgId_123456"},
 	}
 
 	for _, tt := range tests {

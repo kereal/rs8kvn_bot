@@ -90,3 +90,10 @@ func (ms *MessageSender) SendMessage(ctx context.Context, chatID int64, text str
 	msg := tgbotapi.NewMessage(chatID, text)
 	ms.Send(ctx, msg)
 }
+
+// SendMessageMarkdown sends a Markdown-formatted message to a chat.
+func (ms *MessageSender) SendMessageMarkdown(ctx context.Context, chatID int64, text string) {
+	msg := tgbotapi.NewMessage(chatID, text)
+	msg.ParseMode = "Markdown"
+	ms.Send(ctx, msg)
+}

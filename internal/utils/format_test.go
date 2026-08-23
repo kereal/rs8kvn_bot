@@ -93,6 +93,7 @@ func TestIsRealUsername(t *testing.T) {
 		{"with digits", "user123", true},
 		{"mixed", "User_Name_123", true},
 		{"only digits", "11", true},
+		{"tgId_ fallback", "tgId_123", true},
 		{"with spaces", "user name", false},
 		{"with dash", "user-name", false},
 		{"with dot", "user.name", false},
