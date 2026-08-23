@@ -81,7 +81,7 @@ type Handler struct {
 
 	// Broadcast draft -> preview -> confirm session state (admin only)
 	broadcastSessions map[int64]*broadcastSession
-	broadcastMu       sync.Mutex
+	broadcastMu       sync.RWMutex
 	broadcastWorker   *BroadcastWorker
 	broadcastCtx      context.Context
 

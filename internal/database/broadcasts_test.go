@@ -122,15 +122,13 @@ func TestBroadcastStatusCheckConstraint(t *testing.T) {
 func TestBroadcastJSONHelpers(t *testing.T) {
 	t.Parallel()
 
-	b := &Broadcast{}
-
-	require.NoError(t, b.SetFilters(map[string]any{"plan": "free"}))
-	filters, err := b.ParseFilters()
+	// ParseBroadcastFilter — typed API для фильтров аудитории.
+	f, err := ParseBroadcastFilter(`{"plan_type":"paid"}`)
 	require.NoError(t, err)
-	assert.Equal(t, "free", filters["plan"])
+	assert.Equal(t, "paid", f.PlanType)
 
 	// Пустой отчёт возвращает инициализированные (не nil) списки.
-	empty, err := b.ParseDeliveryReport()
+	empty, err := (&Broadcast{}).ParseDeliveryReport()
 	require.NoError(t, err)
 	assert.NotNil(t, empty.Delivered)
 	assert.Empty(t, empty.Delivered)

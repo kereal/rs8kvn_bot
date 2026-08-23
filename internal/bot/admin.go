@@ -31,19 +31,7 @@ const (
 	broadcastStageConfirming
 )
 
-const (
-	broadcastSessionTTL = 15 * time.Minute
-	// broadcastNameMaxLen — максимальная длина названия рассылки.
-	broadcastNameMaxLen = 100
-	// broadcastRetries — число повторов доставки при временных (не blocked) ошибках.
-	broadcastRetries = 2
-	// broadcastSendRetryBaseDelay — короткая пауза между повторами одного сообщения.
-	broadcastSendRetryBaseDelay = 300 * time.Millisecond
-	// broadcastErrorTextMaxLen — максимальная длина текста ошибки в отчёте.
-	broadcastErrorTextMaxLen = 500
-	// broadcastTextPreviewMaxRunes — максимальная длина текста в карточке рассылки.
-	broadcastTextPreviewMaxRunes = 500
-)
+
 
 // broadcastSession holds the in-progress broadcast draft for an admin.
 type broadcastSession struct {
@@ -767,8 +755,8 @@ func (h *Handler) startBroadcastSession(chatID int64) {
 
 // getBroadcastSession returns the active broadcast session for an admin, or nil.
 func (h *Handler) getBroadcastSession(chatID int64) *broadcastSession {
-	h.broadcastMu.Lock()
-	defer h.broadcastMu.Unlock()
+	h.broadcastMu.RLock()
+	defer h.broadcastMu.RUnlock()
 
 	s, ok := h.broadcastSessions[chatID]
 	if !ok || time.Since(s.createdAt) > broadcastSessionTTL {
