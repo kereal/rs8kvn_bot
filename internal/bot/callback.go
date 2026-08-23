@@ -166,21 +166,33 @@ func (c *CallbackHandler) HandleCallback(ctx context.Context, update tgbotapi.Up
 			return fmt.Errorf("handle qr_web: %w", err)
 		}
 	case data == "broadcast_confirm":
+		if !c.h.isAdmin(chatID) {
+			return nil
+		}
 		err := c.h.handleBroadcastConfirm(ctx, chatID)
 		if err != nil {
 			return fmt.Errorf("handle broadcast_confirm: %w", err)
 		}
 	case data == "broadcast_cancel":
+		if !c.h.isAdmin(chatID) {
+			return nil
+		}
 		err := c.h.handleBroadcastCancel(ctx, chatID)
 		if err != nil {
 			return fmt.Errorf("handle broadcast_cancel: %w", err)
 		}
 	case data == "broadcast_final_confirm":
+		if !c.h.isAdmin(chatID) {
+			return nil
+		}
 		err := c.h.handleBroadcastFinalConfirm(ctx, chatID)
 		if err != nil {
 			return fmt.Errorf("handle broadcast_final_confirm: %w", err)
 		}
 	case data == "broadcast_back_to_filters":
+		if !c.h.isAdmin(chatID) {
+			return nil
+		}
 		err := c.h.handleBroadcastBackToFilters(ctx, chatID, update.CallbackQuery.Message.MessageID)
 		if err != nil {
 			return fmt.Errorf("handle broadcast_back_to_filters: %w", err)
@@ -198,6 +210,30 @@ func (c *CallbackHandler) HandleCallback(ctx context.Context, update tgbotapi.Up
 		if err != nil {
 			return fmt.Errorf("handle back_to_invite: %w", err)
 		}
+	case strings.HasPrefix(data, "broadcast_cancel_"):
+		if !c.h.isAdmin(chatID) {
+			return nil
+		}
+		id, err := parseBroadcastCallbackID(data, "broadcast_cancel_")
+		if err != nil {
+			return err
+		}
+		if err := c.h.broadcastWorker.Cancel(ctx, id); err != nil {
+			return fmt.Errorf("cancel broadcast: %w", err)
+		}
+		c.h.SendMessage(ctx, chatID, fmt.Sprintf("⏹ Рассылка #%d отменена.", id))
+	case strings.HasPrefix(data, "broadcast_retry_"):
+		if !c.h.isAdmin(chatID) {
+			return nil
+		}
+		id, err := parseBroadcastCallbackID(data, "broadcast_retry_")
+		if err != nil {
+			return err
+		}
+		if err := c.h.broadcastWorker.RetryFailed(ctx, id); err != nil {
+			return fmt.Errorf("retry broadcast: %w", err)
+		}
+		c.h.SendMessage(ctx, chatID, fmt.Sprintf("🔁 Повторная отправка ошибок для рассылки #%d поставлена в очередь.", id))
 	case strings.HasPrefix(data, "broadcast_details_"):
 		if !c.h.isAdmin(chatID) {
 			logger.Warn("Non-admin user attempted to access broadcast details",

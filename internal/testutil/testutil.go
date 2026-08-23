@@ -75,12 +75,13 @@ func NewDatabaseService() *DatabaseService {
 }
 
 type DatabaseService struct {
-	mu                                          sync.RWMutex
-	Subscriptions                               map[int64]*database.Subscription
-	SubscriptionsByID                           map[uint]*database.Subscription
-	Products                                    map[uint]*database.Product
-	Orders                                      map[uint]*database.Order
-	Broadcasts                                  map[uint]*database.Broadcast
+	mu                sync.RWMutex
+	Subscriptions     map[int64]*database.Subscription
+	SubscriptionsByID map[uint]*database.Subscription
+	Products          map[uint]*database.Product
+	Orders            map[uint]*database.Order
+	Broadcasts        map[uint]*database.Broadcast
+
 	PingFunc                                    func(ctx context.Context) error
 	GetByTelegramIDFunc                         func(ctx context.Context, telegramID int64) (*database.Subscription, error)
 	GetAnyByTelegramIDFunc                      func(ctx context.Context, telegramID int64) (*database.Subscription, error)
@@ -164,10 +165,19 @@ type DatabaseService struct {
 	ClaimReminderFunc                   func(ctx context.Context, id uint, bit int, expiresAt time.Time) (bool, error)
 	ReleaseReminderFunc                 func(ctx context.Context, id uint, bit int, expiresAt time.Time) error
 
-	CreateBroadcastFunc func(ctx context.Context, b *database.Broadcast) error
-	GetBroadcastFunc    func(ctx context.Context, id uint) (*database.Broadcast, error)
-	ListBroadcastsFunc  func(ctx context.Context, limit int) ([]database.Broadcast, error)
-	UpdateBroadcastFunc func(ctx context.Context, b *database.Broadcast) error
+	CreateBroadcastFunc                 func(ctx context.Context, b *database.Broadcast) error
+	GetBroadcastFunc                    func(ctx context.Context, id uint) (*database.Broadcast, error)
+	ListBroadcastsFunc                  func(ctx context.Context, limit int) ([]database.Broadcast, error)
+	UpdateBroadcastFunc                 func(ctx context.Context, b *database.Broadcast) error
+	SnapshotBroadcastRecipientsFunc     func(ctx context.Context, broadcastID uint, filter database.BroadcastFilter) (int64, error)
+	ClaimBroadcastFunc                  func(ctx context.Context, id uint, now time.Time) (bool, error)
+	CancelBroadcastFunc                 func(ctx context.Context, id uint, now time.Time) (bool, error)
+	GetRunnableBroadcastsFunc           func(ctx context.Context, now time.Time) ([]database.Broadcast, error)
+	RecoverStaleBroadcastRecipientsFunc func(ctx context.Context, broadcastID uint, before time.Time) error
+	ClaimBroadcastRecipientsFunc        func(ctx context.Context, broadcastID uint, now time.Time, limit int) ([]database.BroadcastRecipient, error)
+	FinishBroadcastRecipientFunc        func(ctx context.Context, broadcastID uint, id uint, expectedAttempts int, status database.BroadcastRecipientStatus, lastError string, now time.Time) error
+	ResetBroadcastFailedRecipientsFunc  func(ctx context.Context, id uint, now time.Time) error
+	GetBroadcastRecipientsStatsFunc     func(ctx context.Context, broadcastID uint) (total, sent, blocked, unreachable, failed int64, report database.BroadcastDeliveryReport, err error)
 }
 
 func (m *DatabaseService) Ping(ctx context.Context) error {
@@ -666,11 +676,283 @@ func (m *DatabaseService) UpdateBroadcast(ctx context.Context, b *database.Broad
 	existing.RecipientsTotal = b.RecipientsTotal
 	existing.SentCount = b.SentCount
 	existing.BlockedCount = b.BlockedCount
+	existing.UnreachableCount = b.UnreachableCount
 	existing.FailedCount = b.FailedCount
+	existing.LastError = b.LastError
+	existing.RetryAt = b.RetryAt
+	existing.RetryCount = b.RetryCount
 	existing.DeliveryReport = b.DeliveryReport
+	if b.RecipientsState != "" {
+		existing.RecipientsState = b.RecipientsState
+	}
 	existing.UpdatedAt = b.UpdatedAt
 
 	return nil
+}
+
+type fakeBroadcastRecipientState struct {
+	Snapshot   bool                          `json:"snapshot"`
+	Recipients []database.BroadcastRecipient `json:"recipients"`
+}
+
+func fakeBroadcastState(b *database.Broadcast) (fakeBroadcastRecipientState, error) {
+	state := fakeBroadcastRecipientState{Recipients: []database.BroadcastRecipient{}}
+	if b.RecipientsState == "" || b.RecipientsState == "{}" {
+		return state, nil
+	}
+	if err := json.Unmarshal([]byte(b.RecipientsState), &state); err != nil {
+		return state, err
+	}
+	if state.Recipients == nil {
+		state.Recipients = []database.BroadcastRecipient{}
+	}
+	for i := range state.Recipients {
+		state.Recipients[i].BroadcastID = b.ID
+	}
+	return state, nil
+}
+
+func setFakeBroadcastState(b *database.Broadcast, state fakeBroadcastRecipientState) error {
+	data, err := json.Marshal(state)
+	if err != nil {
+		return err
+	}
+	b.RecipientsState = string(data)
+	return nil
+}
+
+func (m *DatabaseService) SnapshotBroadcastRecipients(ctx context.Context, broadcastID uint, filter database.BroadcastFilter) (int64, error) {
+	if m.SnapshotBroadcastRecipientsFunc != nil {
+		return m.SnapshotBroadcastRecipientsFunc(ctx, broadcastID, filter)
+	}
+	ids, err := m.GetFilteredTelegramIDsBatch(ctx, 0, int(^uint(0)>>1), filter)
+	if err != nil {
+		return 0, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	b, ok := m.Broadcasts[broadcastID]
+	if !ok {
+		return 0, database.ErrBroadcastNotFound
+	}
+	state, err := fakeBroadcastState(b)
+	if err != nil {
+		return 0, err
+	}
+	if state.Snapshot {
+		return int64(len(state.Recipients)), nil
+	}
+	state.Snapshot = true
+	now := time.Now().UTC()
+	for i, telegramID := range ids {
+		state.Recipients = append(state.Recipients, database.BroadcastRecipient{ID: uint(i + 1), BroadcastID: broadcastID, TelegramID: telegramID, Status: database.BroadcastRecipientPending, UpdatedAt: now})
+	}
+	if err := setFakeBroadcastState(b, state); err != nil {
+		return 0, err
+	}
+	return int64(len(state.Recipients)), nil
+}
+
+func (m *DatabaseService) ClaimBroadcast(ctx context.Context, id uint, now time.Time) (bool, error) {
+	if m.ClaimBroadcastFunc != nil {
+		return m.ClaimBroadcastFunc(ctx, id, now)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	b, ok := m.Broadcasts[id]
+	if !ok {
+		return false, database.ErrBroadcastNotFound
+	}
+	if b.Status != string(database.BroadcastStatusScheduled) {
+		return false, nil
+	}
+	b.Status = string(database.BroadcastStatusRunning)
+	b.StartedAt = &now
+	return true, nil
+}
+
+func (m *DatabaseService) CancelBroadcast(ctx context.Context, id uint, now time.Time) (bool, error) {
+	if m.CancelBroadcastFunc != nil {
+		return m.CancelBroadcastFunc(ctx, id, now)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	b, ok := m.Broadcasts[id]
+	if !ok {
+		return false, database.ErrBroadcastNotFound
+	}
+	if b.Status != string(database.BroadcastStatusScheduled) && b.Status != string(database.BroadcastStatusRunning) {
+		return false, nil
+	}
+	b.Status = string(database.BroadcastStatusCanceled)
+	b.FinishedAt = &now
+	if state, err := fakeBroadcastState(b); err == nil {
+		for i := range state.Recipients {
+			if state.Recipients[i].Status == database.BroadcastRecipientSending {
+				state.Recipients[i].Status = database.BroadcastRecipientPending
+			}
+		}
+		_ = setFakeBroadcastState(b, state)
+	}
+	return true, nil
+}
+
+func (m *DatabaseService) GetRunnableBroadcasts(ctx context.Context, now time.Time) ([]database.Broadcast, error) {
+	if m.GetRunnableBroadcastsFunc != nil {
+		return m.GetRunnableBroadcastsFunc(ctx, now)
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]database.Broadcast, 0)
+	for _, b := range m.Broadcasts {
+		if (b.Status == string(database.BroadcastStatusScheduled) || b.Status == string(database.BroadcastStatusRunning)) && (b.RetryAt == nil || !b.RetryAt.After(now)) {
+			out = append(out, *b)
+		}
+	}
+	return out, nil
+}
+
+func (m *DatabaseService) RecoverStaleBroadcastRecipients(ctx context.Context, broadcastID uint, before time.Time) error {
+	if m.RecoverStaleBroadcastRecipientsFunc != nil {
+		return m.RecoverStaleBroadcastRecipientsFunc(ctx, broadcastID, before)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	b, ok := m.Broadcasts[broadcastID]
+	if !ok {
+		return database.ErrBroadcastNotFound
+	}
+	state, err := fakeBroadcastState(b)
+	if err != nil {
+		return err
+	}
+	for i := range state.Recipients {
+		if state.Recipients[i].Status == database.BroadcastRecipientSending && state.Recipients[i].UpdatedAt.Before(before) {
+			state.Recipients[i].Status = database.BroadcastRecipientPending
+			state.Recipients[i].UpdatedAt = time.Now().UTC()
+		}
+	}
+	return setFakeBroadcastState(b, state)
+}
+
+func (m *DatabaseService) ClaimBroadcastRecipients(ctx context.Context, broadcastID uint, now time.Time, limit int) ([]database.BroadcastRecipient, error) {
+	if m.ClaimBroadcastRecipientsFunc != nil {
+		return m.ClaimBroadcastRecipientsFunc(ctx, broadcastID, now, limit)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	b, ok := m.Broadcasts[broadcastID]
+	if !ok {
+		return nil, database.ErrBroadcastNotFound
+	}
+	state, err := fakeBroadcastState(b)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]database.BroadcastRecipient, 0, limit)
+	for i := range state.Recipients {
+		if state.Recipients[i].Status == database.BroadcastRecipientPending && len(out) < limit {
+			state.Recipients[i].Status = database.BroadcastRecipientSending
+			state.Recipients[i].Attempts++
+			state.Recipients[i].UpdatedAt = now
+			out = append(out, state.Recipients[i])
+		}
+	}
+	if err := setFakeBroadcastState(b, state); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (m *DatabaseService) FinishBroadcastRecipient(ctx context.Context, broadcastID uint, id uint, expectedAttempts int, status database.BroadcastRecipientStatus, lastError string, now time.Time) error {
+	if m.FinishBroadcastRecipientFunc != nil {
+		return m.FinishBroadcastRecipientFunc(ctx, broadcastID, id, expectedAttempts, status, lastError, now)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	b, ok := m.Broadcasts[broadcastID]
+	if !ok {
+		return database.ErrBroadcastNotFound
+	}
+	state, err := fakeBroadcastState(b)
+	if err != nil {
+		return err
+	}
+	for i := range state.Recipients {
+		if state.Recipients[i].ID == id {
+			if state.Recipients[i].Status != database.BroadcastRecipientSending || state.Recipients[i].Attempts != expectedAttempts {
+				return database.ErrBroadcastRecipientStale
+			}
+			state.Recipients[i].Status, state.Recipients[i].LastError, state.Recipients[i].UpdatedAt = status, lastError, now
+			return setFakeBroadcastState(b, state)
+		}
+	}
+	return database.ErrBroadcastNotFound
+}
+
+func (m *DatabaseService) ResetBroadcastFailedRecipients(ctx context.Context, id uint, now time.Time) error {
+	if m.ResetBroadcastFailedRecipientsFunc != nil {
+		return m.ResetBroadcastFailedRecipientsFunc(ctx, id, now)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	b, ok := m.Broadcasts[id]
+	if !ok {
+		return database.ErrBroadcastNotFound
+	}
+	state, err := fakeBroadcastState(b)
+	if err != nil {
+		return err
+	}
+	for i := range state.Recipients {
+		if state.Recipients[i].Status == database.BroadcastRecipientFailed || state.Recipients[i].Status == database.BroadcastRecipientSending {
+			state.Recipients[i].Status, state.Recipients[i].LastError, state.Recipients[i].UpdatedAt = database.BroadcastRecipientPending, "", now
+		}
+	}
+	b.LastError = ""
+	b.RetryAt = nil
+	b.RetryCount = 0
+	if b.Status == string(database.BroadcastStatusCompleted) || b.Status == string(database.BroadcastStatusFailed) || b.Status == string(database.BroadcastStatusCanceled) {
+		b.Status = string(database.BroadcastStatusRunning)
+		b.FinishedAt = nil
+	}
+	return setFakeBroadcastState(b, state)
+}
+
+func (m *DatabaseService) GetBroadcastRecipientsStats(ctx context.Context, broadcastID uint) (total, sent, blocked, unreachable, failed int64, report database.BroadcastDeliveryReport, err error) {
+	if m.GetBroadcastRecipientsStatsFunc != nil {
+		return m.GetBroadcastRecipientsStatsFunc(ctx, broadcastID)
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	b, ok := m.Broadcasts[broadcastID]
+	if !ok {
+		return 0, 0, 0, 0, 0, report, database.ErrBroadcastNotFound
+	}
+	state, err := fakeBroadcastState(b)
+	if err != nil {
+		return 0, 0, 0, 0, 0, report, err
+	}
+	for _, recipient := range state.Recipients {
+		total++
+		switch recipient.Status {
+		case database.BroadcastRecipientSent:
+			sent++
+			report.Delivered = append(report.Delivered, recipient.TelegramID)
+		case database.BroadcastRecipientBlocked:
+			blocked++
+			report.Blocked = append(report.Blocked, recipient.TelegramID)
+		case database.BroadcastRecipientUnreachable:
+			unreachable++
+			report.Unreachable = append(report.Unreachable, recipient.TelegramID)
+		case database.BroadcastRecipientFailed:
+			failed++
+			report.Errors = append(report.Errors, database.BroadcastSendError{TelegramID: recipient.TelegramID, Error: recipient.LastError})
+		case database.BroadcastRecipientPending, database.BroadcastRecipientSending:
+			report.NotProcessed = append(report.NotProcessed, recipient.TelegramID)
+		}
+	}
+	return total, sent, blocked, unreachable, failed, report, nil
 }
 
 func (m *DatabaseService) Close() error {

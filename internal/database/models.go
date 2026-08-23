@@ -20,7 +20,8 @@ var (
 	ErrSubscriptionNodeNotFound = errors.New("subscription node not found")
 	ErrNodeNotFound             = errors.New("node not found")
 	ErrTrialAlreadyActivated    = errors.New("trial already activated")
-	ErrBroadcastNotFound       = errors.New("broadcast not found")
+	ErrBroadcastNotFound        = errors.New("broadcast not found")
+	ErrBroadcastRecipientStale  = errors.New("broadcast recipient claim is stale")
 )
 
 const (
@@ -193,7 +194,7 @@ type Order struct {
 	Status                   OrderStatus `gorm:"not null;size:16;column:status"`
 	AmountCents              int64       `gorm:"not null;column:amount_cents"`
 	CallbackAmountCents      *int64      `gorm:"column:callback_amount_cents"` // фактически списано с клиента (с учётом комиссии)
-	ProviderFeeCents         *int64      `gorm:"column:provider_fee_cents"`     // комиссия провайдера из API транзакции (best-effort)
+	ProviderFeeCents         *int64      `gorm:"column:provider_fee_cents"`    // комиссия провайдера из API транзакции (best-effort)
 	Currency                 string      `gorm:"size:3;not null;default:RUB;column:currency"`
 	PaymentProvider          string      `gorm:"column:payment_provider"`
 	ProviderPaymentID        string      `gorm:"column:provider_payment_id"`
@@ -246,20 +247,31 @@ const (
 //   - DeliveryReport — JSON-отчёт по получателям: delivered/blocked/errors
 //     (см. BroadcastDeliveryReport). Счётчики Sent/Blocked/FailedCount хранятся
 //     отдельно, чтобы список рассылок не читал большой JSON.
+//   - RecipientsState — JSON snapshot аудитории и состояния доставки каждого
+//     получателя; хранится в этой же строке для восстановления без отдельной
+//     таблицы.
 type Broadcast struct {
-	ID              uint      `gorm:"primaryKey"`
-	Name            string    `gorm:"size:255;not null"`
-	Filters         string    `gorm:"type:text;not null;default:'{}'"`
-	MessageText     string    `gorm:"type:text;not null"`
-	Status          string    `gorm:"not null;size:16;default:scheduled"`
-	PlannedAt       *time.Time
-	StartedAt       *time.Time
-	FinishedAt      *time.Time
-	RecipientsTotal int64     `gorm:"not null;default:0"`
-	SentCount       int64     `gorm:"not null;default:0"`
-	BlockedCount    int64     `gorm:"not null;default:0"`
-	FailedCount     int64     `gorm:"not null;default:0"`
-	DeliveryReport  string    `gorm:"type:text;not null;default:'{}'"`
+	ID               uint   `gorm:"primaryKey"`
+	Name             string `gorm:"size:255;not null"`
+	Filters          string `gorm:"type:text;not null;default:'{}'"`
+	MessageText      string `gorm:"type:text;not null"`
+	Status           string `gorm:"not null;size:16;default:scheduled"`
+	PlannedAt        *time.Time
+	StartedAt        *time.Time
+	FinishedAt       *time.Time
+	RecipientsTotal  int64      `gorm:"not null;default:0"`
+	SentCount        int64      `gorm:"not null;default:0"`
+	BlockedCount     int64      `gorm:"not null;default:0"`
+	FailedCount      int64      `gorm:"not null;default:0"`
+	UnreachableCount int64      `gorm:"not null;default:0"`
+	DeliveryReport   string     `gorm:"type:text;not null;default:'{}'"`
+	LastError        string     `gorm:"type:text;not null;default:''"`
+	RetryAt          *time.Time `gorm:"index"`
+	RetryCount       int        `gorm:"not null;default:0"`
+	// RecipientsState stores the immutable audience snapshot and per-recipient
+	// delivery state as JSON. It keeps broadcast recovery durable without a
+	// separate recipient table.
+	RecipientsState string    `gorm:"type:text;not null;default:'{\"snapshot\":false,\"recipients\":[]}'"`
 	CreatedAt       time.Time `gorm:"autoCreateTime"`
 	UpdatedAt       time.Time `gorm:"autoUpdateTime"`
 }
@@ -273,10 +285,26 @@ type BroadcastSendError struct {
 
 // BroadcastDeliveryReport — JSON-отчёт рассылки: списки telegram_id по исходам.
 type BroadcastDeliveryReport struct {
-	Delivered []int64              `json:"delivered"`
-	Blocked   []int64              `json:"blocked"`
-	Errors    []BroadcastSendError `json:"errors"`
+	Delivered    []int64              `json:"delivered"`
+	Blocked      []int64              `json:"blocked"`
+	Unreachable  []int64              `json:"unreachable"`
+	Errors       []BroadcastSendError `json:"errors"`
+	NotProcessed []int64              `json:"not_processed"`
 }
+
+// BroadcastRecipientStatus represents the durable delivery state of one
+// recipient in a broadcast snapshot. Delivery outcomes are copied to
+// BroadcastDeliveryReport so the admin can inspect delivered and blocked IDs.
+type BroadcastRecipientStatus string
+
+const (
+	BroadcastRecipientPending     BroadcastRecipientStatus = "pending"
+	BroadcastRecipientSending     BroadcastRecipientStatus = "sending"
+	BroadcastRecipientSent        BroadcastRecipientStatus = "sent"
+	BroadcastRecipientBlocked     BroadcastRecipientStatus = "blocked"
+	BroadcastRecipientUnreachable BroadcastRecipientStatus = "unreachable"
+	BroadcastRecipientFailed      BroadcastRecipientStatus = "failed"
+)
 
 // SyncStatus represents the synchronization status of a subscription on a VPN node.
 // Statuses: active | pending_add | pending_remove | pending_update.
@@ -495,7 +523,9 @@ func (c *Broadcast) ParseDeliveryReport() (*BroadcastDeliveryReport, error) {
 	if c.DeliveryReport == "" {
 		report.Delivered = []int64{}
 		report.Blocked = []int64{}
+		report.Unreachable = []int64{}
 		report.Errors = []BroadcastSendError{}
+		report.NotProcessed = []int64{}
 
 		return report, nil
 	}
@@ -511,8 +541,14 @@ func (c *Broadcast) ParseDeliveryReport() (*BroadcastDeliveryReport, error) {
 	if report.Blocked == nil {
 		report.Blocked = []int64{}
 	}
+	if report.Unreachable == nil {
+		report.Unreachable = []int64{}
+	}
 	if report.Errors == nil {
 		report.Errors = []BroadcastSendError{}
+	}
+	if report.NotProcessed == nil {
+		report.NotProcessed = []int64{}
 	}
 
 	return report, nil

@@ -195,3 +195,46 @@ func TestBroadcastFilter_MarshalJSON(t *testing.T) {
 	assert.Contains(t, string(data), "plan_type")
 	assert.Contains(t, string(data), "paid")
 }
+
+func TestSnapshotBroadcastRecipientsExcludesTrialsAndIsIdempotent(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+	ctx := context.Background()
+	freePlan := testFreePlanID(t, svc)
+
+	require.NoError(t, svc.db.Create(&Subscription{
+		TelegramID: 700001, Username: "free", ClientID: "client-free", SubscriptionID: "sub-free",
+		PlanID: freePlan, Status: string(SubscriptionStatusActive),
+	}).Error)
+	require.NoError(t, svc.db.Create(&Subscription{
+		TelegramID: 700002, Username: "trial", ClientID: "client-trial", SubscriptionID: "sub-trial",
+		PlanID: 1, Status: string(SubscriptionStatusActive),
+	}).Error)
+	require.NoError(t, svc.CreateBroadcast(ctx, &Broadcast{
+		Name: "snapshot", MessageText: "text", Status: string(BroadcastStatusRunning),
+	}))
+
+	first, err := svc.SnapshotBroadcastRecipients(ctx, 1, BroadcastFilter{SubscriptionStatus: "all"})
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), first)
+
+	second, err := svc.SnapshotBroadcastRecipients(ctx, 1, BroadcastFilter{SubscriptionStatus: "all"})
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), second)
+
+	broadcast, err := svc.GetBroadcast(ctx, 1)
+	require.NoError(t, err)
+	state, err := parseBroadcastRecipientState(broadcast)
+	require.NoError(t, err)
+	require.Len(t, state.Recipients, 1)
+	assert.Equal(t, int64(700001), state.Recipients[0].TelegramID)
+	assert.True(t, state.Snapshot)
+}
+
+func TestBroadcastFilterRejectsExpiredStatus(t *testing.T) {
+	t.Parallel()
+
+	_, err := ParseBroadcastFilter(`{"subscription_status":"expired"}`)
+	assert.Error(t, err)
+}
