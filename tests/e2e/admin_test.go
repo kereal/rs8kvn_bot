@@ -348,17 +348,13 @@ func TestE2E_BroadcastCommand_Success(t *testing.T) {
 
 	runBroadcastFlow(t, env, adminID, "Hello everyone!")
 
+	b := waitForBroadcastFinished(t, env)
 	assert.True(t, env.botAPI.SendCalledSafe())
-	assert.GreaterOrEqual(t, env.botAPI.SendCount, 3, "Should send to at least 3 users")
-	assert.Contains(t, env.botAPI.LastSentText, "Рассылка завершена")
-	assert.Contains(t, env.botAPI.LastSentText, "Рассылка #1")
+	assert.GreaterOrEqual(t, env.botAPI.SendCountSafe(), 3, "Should send to at least 3 users")
+	assert.Contains(t, env.botAPI.LastSentTextSafe(), "Рассылка завершена")
+	assert.Contains(t, env.botAPI.LastSentTextSafe(), "Рассылка #1")
 
 	// Рассылка сохранена со счётчиками и JSON-отчётом.
-	broadcasts, err := env.db.ListBroadcasts(ctx, 10)
-	require.NoError(t, err)
-	require.Len(t, broadcasts, 1)
-
-	b := broadcasts[0]
 	assert.Equal(t, broadcastName, b.Name)
 	assert.Equal(t, string(database.BroadcastStatusCompleted), b.Status)
 	assert.Equal(t, int64(3), b.RecipientsTotal)
@@ -421,8 +417,10 @@ func TestE2E_BroadcastCommand_NoUsers(t *testing.T) {
 
 	runBroadcastFlow(t, env, adminID, "Hello")
 
+	b := waitForBroadcastFinished(t, env)
 	assert.True(t, env.botAPI.SendCalledSafe())
-	assert.Contains(t, env.botAPI.LastSentText, "Всего: 0")
+	assert.Equal(t, int64(0), b.RecipientsTotal)
+	assert.Contains(t, env.botAPI.LastSentTextSafe(), "Отправлено: 0")
 }
 
 func TestE2E_BroadcastCommand_SomeFailures(t *testing.T) {
@@ -496,9 +494,10 @@ func TestE2E_BroadcastCommand_SomeFailures(t *testing.T) {
 		},
 	})
 
+	_ = waitForBroadcastFinished(t, env)
 	assert.True(t, env.botAPI.SendCalledSafe())
-	assert.Contains(t, env.botAPI.LastSentText, "Рассылка завершена")
-	assert.Contains(t, env.botAPI.LastSentText, "Ошибок: 3")
+	assert.Contains(t, env.botAPI.LastSentTextSafe(), "Рассылка завершена")
+	assert.Contains(t, env.botAPI.LastSentTextSafe(), "Ошибок: 3")
 }
 
 func TestE2E_SendCommand_ByTelegramID(t *testing.T) {
@@ -741,7 +740,8 @@ func TestE2E_BroadcastCommand_PreservesFormatting(t *testing.T) {
 	const draft = "Test *bold* _italic_ [link](https://example.com)"
 	runBroadcastFlow(t, env, adminID, draft)
 
-	assert.Contains(t, env.botAPI.LastSentText, "Рассылка завершена")
+	_ = waitForBroadcastFinished(t, env)
+	assert.Contains(t, env.botAPI.LastSentTextSafe(), "Рассылка завершена")
 
 	// Formatting must be delivered as-is (MarkdownV2, not escaped with backslashes).
 	var delivered bool

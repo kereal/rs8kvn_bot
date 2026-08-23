@@ -18,8 +18,8 @@ type BroadcastFilter struct {
 	// Пустая строка = все тарифы.
 	PlanType string `json:"plan_type,omitempty"`
 
-	// SubscriptionStatus фильтрует по статусу подписки: "active", "expired", "revoked".
-	// Пустая строка = "active" (по умолчанию, как и сейчас).
+	// SubscriptionStatus фильтрует по статусу подписки: "active", "revoked" или
+	// "all". Пустая строка = "active" (по умолчанию).
 	SubscriptionStatus string `json:"subscription_status,omitempty"`
 
 	// RegisteredAfter — пользователи, зарегистрированные после этой даты (включительно).
@@ -51,6 +51,9 @@ func ParseBroadcastFilter(raw string) (BroadcastFilter, error) {
 	if err := json.Unmarshal([]byte(raw), &f); err != nil {
 		return BroadcastFilter{}, fmt.Errorf("parse broadcast filter: %w", err)
 	}
+	if f.SubscriptionStatus != "" && f.SubscriptionStatus != "active" && f.SubscriptionStatus != "revoked" && f.SubscriptionStatus != "all" {
+		return BroadcastFilter{}, fmt.Errorf("parse broadcast filter: unsupported subscription status %q", f.SubscriptionStatus)
+	}
 
 	return f, nil
 }
@@ -71,7 +74,11 @@ func (f BroadcastFilter) String() string {
 	}
 
 	if f.SubscriptionStatus != "" && f.SubscriptionStatus != "active" {
-		parts = append(parts, "Статус: "+f.SubscriptionStatus)
+		if f.SubscriptionStatus == "all" {
+			parts = append(parts, "Все статусы")
+		} else {
+			parts = append(parts, "Статус: "+f.SubscriptionStatus)
+		}
 	}
 
 	if f.RegisteredAfter != nil {
@@ -168,8 +175,7 @@ func (s *Service) UpdateBroadcast(ctx context.Context, b *Broadcast) error {
 	result := s.db.WithContext(ctx).
 		Model(&Broadcast{}).
 		Where("id = ?", b.ID).
-		Select("status", "finished_at",
-			"recipients_total", "sent_count", "blocked_count", "failed_count", "delivery_report").
+		Select("status", "finished_at", "recipients_total", "sent_count", "blocked_count", "unreachable_count", "failed_count", "last_error", "retry_at", "retry_count", "delivery_report").
 		Updates(b)
 	if result.Error != nil {
 		return fmt.Errorf("failed to update broadcast: %w", result.Error)

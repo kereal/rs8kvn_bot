@@ -210,7 +210,8 @@ Cache.Set(240s) → return body with Content-Type + Subscription-Userinfo
 **Admin Features:**
 - `/del <id>` — delete subscription by ID
 - `/setplan <subscription_id> <plan_id> [days]` — change subscription plan through the service layer (subscription row + node reconciliation + best-effort VPN sync; free plan clears expiry, future expiry preserved when `days` omitted, else 30-day default)
-- `/broadcast` — broadcast flow: name → draft → **filter selection** → **recipient count preview** → inline confirm → batched send (100/batch, concurrency 10) with 2 retries on transient errors; every broadcast is stored in the `broadcasts` table (text, dates, counters, JSON filter, JSON delivery report with recipient IDs); the final report's "📋 Детали рассылки" button opens the broadcast card
+- `/broadcast` — asynchronous broadcast flow: name → draft → **filter selection** → **recipient count preview** → inline confirm. Confirmation queues a campaign; a durable worker snapshots the audience into `broadcasts.recipients_state`, sends in batches (100, concurrency 10), retries transient errors twice, recovers stale leases after restart, and stores final counters/report in `broadcasts`.
+- `/broadcasts` — recent campaign history with details, cancellation of active campaigns, and retry of failed recipients. Anonymous trials are excluded; `expired` is not offered as a broadcast status, while `all` is explicit. Migration 036 creates `broadcasts` with recipient state, delivery classification, and retry metadata columns; no recipient table is created. `blocked` means Telegram explicitly reports that the user blocked the bot; deactivated or missing chats are `unreachable`. Details send one compact admin message, while complete ID lists remain in the persisted campaign report.
 
 #### Broadcast Filters
 
@@ -220,8 +221,8 @@ After entering the draft text, the admin sees an inline keyboard for selecting r
 
 | Field | JSON key | Type | Description |
 |-------|----------|------|-------------|
-| `PlanType` | `plan_type` | `string` | `"paid"` (all non-free plans) or `"free"` (free plan only). Empty = all plans. |
-| `SubscriptionStatus` | `subscription_status` | `string` | `"active"`, `"expired"`, `"revoked"`. Empty = `"active"` (default). |
+| `PlanType` | `plan_type` | `string` | `"paid"` (purchased/paid subscriptions only) or `"free"` (free plan without payment). Empty = all eligible plans. Trials are always excluded. |
+| `SubscriptionStatus` | `subscription_status` | `string` | `"active"`, `"revoked"`, `"all"`. Empty = `"active"` (default); expired is not a broadcast option. |
 | `RegisteredAfter` | `registered_after` | `*time.Time` | Users registered after this date (inclusive). |
 | `RegisteredBefore` | `registered_before` | `*time.Time` | Users registered before this date (inclusive). |
 | `InactiveDays` | `inactive_days` | `*int` | `0` = never accessed (`last_request IS NULL`). `>0` = last access older than N days. `nil` = no filter. |
@@ -239,7 +240,7 @@ All active filters are combined with **AND** logic. Example:
 
 ```
 [👥 Все] [💰 Платные] [🆓 Бесплатные]
-[📋 Все] [✅ Активные] [⏰ Истёкшие] [🚫 Отозванные]
+[📋 Все] [✅ Активные] [🚫 Отозванные]
 [📅 Рег. за 3 мес] [📅 Рег. за 6 мес] [📅 Рег. за год] [📅 Рег. все]
 [🚫 Не обращались] [⏰ > 1 мес] [⏰ > 3 мес] [👤 Без фильтра]
 [💳 Платили] [🆓 Не платили] [👤 Без фильтра]
@@ -271,10 +272,9 @@ The admin can go back to adjust filters or confirm to start the broadcast.
 
 | Filter | SQL condition |
 |--------|---------------|
-| `plan_type: paid` | `plan_id != (SELECT id FROM plans WHERE name = 'free')` |
-| `plan_type: free` | `plan_id = (SELECT id FROM plans WHERE name = 'free')` |
+| `plan_type: paid` | `product_id IS NOT NULL OR price_paid_cents > 0` |
+| `plan_type: free` | `plan_id = (SELECT id FROM plans WHERE name = 'free') AND product_id IS NULL AND price_paid_cents <= 0` |
 | `subscription_status: active` | `status = 'active'` |
-| `subscription_status: expired` | `status = 'expired'` |
 | `subscription_status: revoked` | `status = 'revoked'` |
 | `registered_after` | `created_at >= ?` |
 | `registered_before` | `created_at <= ?` |
@@ -285,8 +285,9 @@ The admin can go back to adjust filters or confirm to start the broadcast.
 
 **Important notes:**
 - `PricePaidCents` is NOT cumulative — it stores the current product price, not total spent. For historical payment checks, the `orders` table is used.
-- `plan_type` uses a subquery to `plans` table, not `PricePaidCents`, because plan IDs are stable identifiers.
+- `plan_type: paid` uses payment fields (`product_id`/`price_paid_cents`), so trial and manually granted premium plans are not treated as paid. Trials are excluded by `telegram_id > 0` and the trial-plan predicate.
 - Empty filter `{}` = all active users (same as no filter).
+- Broadcast details show counters plus complete Telegram ID lists for delivered, blocked, failed, and unprocessed recipients; blocked IDs are retained in `delivery_report.blocked`.
 - Filters are applied at the SQL level (not in-memory), so they scale to thousands of users.
 - `/send <id|username> <msg>` — private message (30s cooldown per admin)
 - `/refstats` — referral statistics (top 10 from cache)

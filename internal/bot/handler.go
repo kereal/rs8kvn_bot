@@ -37,7 +37,7 @@ const (
 // label values. Known commands are returned as-is; anything else becomes "unknown".
 func normalizeCommand(cmd string) string {
 	switch cmd {
-	case "start", "help", "invite", "mysub", "del", "setplan", "broadcast", "send", "refstats", "v", "lastreg":
+	case "start", "help", "invite", "mysub", "del", "setplan", "broadcast", "broadcasts", "send", "refstats", "v", "lastreg":
 		return cmd
 	default:
 		return "unknown"
@@ -82,6 +82,8 @@ type Handler struct {
 	// Broadcast draft -> preview -> confirm session state (admin only)
 	broadcastSessions map[int64]*broadcastSession
 	broadcastMu       sync.Mutex
+	broadcastWorker   *BroadcastWorker
+	broadcastCtx      context.Context
 
 	// Decomposed handlers
 	cmdHandler *CommandHandler
@@ -127,6 +129,7 @@ func NewHandler(bot interfaces.BotAPI, cfg *config.Config, db interfaces.Databas
 	// Initialize admin rate limiters map
 	h.adminRateLimiters = make(map[int64]*ratelimiter.TokenBucket)
 	h.broadcastSessions = make(map[int64]*broadcastSession)
+	h.broadcastWorker = NewBroadcastWorker(h)
 
 	// Initialize decomposed handlers
 	h.cmdHandler = NewCommandHandler(h)
@@ -599,6 +602,26 @@ func (h *Handler) StartRateLimiterCleanup(ctx context.Context, interval, maxIdle
 	})
 }
 
+// StartBroadcastWorker starts the durable broadcast worker under the handler
+// lifecycle so shutdown waits for it.
+func (h *Handler) StartBroadcastWorker(ctx context.Context) {
+	h.broadcastMu.Lock()
+	h.broadcastCtx = ctx
+	h.broadcastMu.Unlock()
+	h.bgWg.Go(func() {
+		h.broadcastWorker.Run(ctx)
+	})
+}
+
+func (h *Handler) broadcastContext() context.Context {
+	h.broadcastMu.Lock()
+	defer h.broadcastMu.Unlock()
+	if h.broadcastCtx != nil {
+		return h.broadcastCtx
+	}
+	return context.Background()
+}
+
 func (h *Handler) WaitForBackgroundGoroutines() {
 	h.bgWg.Wait()
 }
@@ -711,6 +734,8 @@ func (h *Handler) HandleUpdate(ctx context.Context, update tgbotapi.Update) {
 				err = h.HandleSetPlan(ctx, update)
 			case "broadcast":
 				err = h.HandleBroadcast(ctx, update)
+			case "broadcasts":
+				err = h.HandleBroadcastHistory(ctx, update)
 			case "send":
 				err = h.HandleSend(ctx, update)
 			case "refstats":

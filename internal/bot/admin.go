@@ -3,13 +3,10 @@ package bot
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/kereal/rs8kvn_bot/internal/config"
@@ -40,8 +37,8 @@ const (
 	broadcastNameMaxLen = 100
 	// broadcastRetries — число повторов доставки при временных (не blocked) ошибках.
 	broadcastRetries = 2
-	// broadcastRetryBaseDelay — базовая пауза между повторами (растёт линейно).
-	broadcastRetryBaseDelay = 300 * time.Millisecond
+	// broadcastSendRetryBaseDelay — короткая пауза между повторами одного сообщения.
+	broadcastSendRetryBaseDelay = 300 * time.Millisecond
 	// broadcastErrorTextMaxLen — максимальная длина текста ошибки в отчёте.
 	broadcastErrorTextMaxLen = 500
 	// broadcastTextPreviewMaxRunes — максимальная длина текста в карточке рассылки.
@@ -50,11 +47,11 @@ const (
 
 // broadcastSession holds the in-progress broadcast draft for an admin.
 type broadcastSession struct {
-	createdAt time.Time
-	stage     broadcastStage
-	name      string
-	text      string
-	filter    database.BroadcastFilter
+	createdAt      time.Time
+	stage          broadcastStage
+	name           string
+	text           string
+	filter         database.BroadcastFilter
 	recipientCount int64 // количество получателей (для preview перед подтверждением)
 }
 
@@ -328,21 +325,6 @@ func (h *Handler) HandleSetPlan(ctx context.Context, update tgbotapi.Update) err
 	return nil
 }
 
-// isUserBlockedError reports whether the Telegram error means the user can no
-// longer receive messages (blocked the bot, deactivated, or chat gone). These
-// are expected during a broadcast and reported separately from real failures.
-func isUserBlockedError(err error) bool {
-	if err == nil {
-		return false
-	}
-
-	msg := strings.ToLower(err.Error())
-
-	return strings.Contains(msg, "bot was blocked by the user") ||
-		strings.Contains(msg, "user is deactivated") ||
-		strings.Contains(msg, "chat not found")
-}
-
 // HandleBroadcast handles the /broadcast command for admins.
 // It starts the broadcast flow: the admin first sends a broadcast NAME, then a
 // multi-line MarkdownV2 message which is previewed, and confirmed via inline
@@ -519,8 +501,13 @@ func (h *Handler) handleBroadcastFilter(ctx context.Context, chatID int64, messa
 
 	case strings.HasPrefix(callbackData, "bfilter_status_"):
 		val := strings.TrimPrefix(callbackData, "bfilter_status_")
-		if val == f.SubscriptionStatus {
-			f.SubscriptionStatus = "" // toggle off -> default active
+		if val != "active" && val != "all" && val != "revoked" {
+			return fmt.Errorf("unsupported broadcast status filter: %s", val)
+		}
+		if val == "active" && f.SubscriptionStatus == "" {
+			// default active is already selected
+		} else if val == f.SubscriptionStatus {
+			f.SubscriptionStatus = ""
 		} else {
 			f.SubscriptionStatus = val
 		}
@@ -682,11 +669,18 @@ func (h *Handler) handleBroadcastBackToFilters(ctx context.Context, chatID int64
 
 // startBroadcast запускает рассылку: создаёт запись в БД и отправляет сообщения.
 func (h *Handler) startBroadcast(ctx context.Context, chatID int64, s *broadcastSession) error {
-	name, text, filter := s.name, s.text, s.filter
+	// Claim the in-memory confirmation before any database work. This closes the
+	// duplicate callback race even when two Telegram updates arrive together.
+	h.broadcastMu.Lock()
+	current, ok := h.broadcastSessions[chatID]
+	if !ok || current.stage != broadcastStageConfirming {
+		h.broadcastMu.Unlock()
+		return nil
+	}
+	name, text, filter := current.name, current.text, current.filter
+	delete(h.broadcastSessions, chatID)
+	h.broadcastMu.Unlock()
 
-	h.clearBroadcastSession(chatID)
-
-	// Сериализуем фильтр в JSON.
 	filtersJSON := "{}"
 	if !filter.IsEmpty() {
 		data, err := json.Marshal(filter)
@@ -696,24 +690,63 @@ func (h *Handler) startBroadcast(ctx context.Context, chatID int64, s *broadcast
 		filtersJSON = string(data)
 	}
 
-	now := time.Now().UTC()
 	broadcast := &database.Broadcast{
-		Name:        name,
-		Filters:     filtersJSON,
-		MessageText: text,
-		Status:      string(database.BroadcastStatusRunning),
-		PlannedAt:   &now,
-		StartedAt:   &now,
+		Name: name, Filters: filtersJSON, MessageText: text,
+		Status: string(database.BroadcastStatusScheduled),
 	}
-	err := h.db.CreateBroadcast(ctx, broadcast)
-	if err != nil {
+	if err := h.db.CreateBroadcast(ctx, broadcast); err != nil {
 		logger.Error("Failed to create broadcast", zap.Error(err))
 		h.SendMessage(ctx, chatID, fmt.Sprintf("❌ Не удалось сохранить рассылку:\n\n%v", err))
-
 		return fmt.Errorf("create broadcast: %w", err)
 	}
 
-	return h.runBroadcast(ctx, chatID, name, text, broadcast.ID, filter)
+	// Snapshot and sending happen in the background. The worker claims the
+	// persistent row, so a second callback or a process restart cannot duplicate it.
+	h.bgWg.Go(func() {
+		workerCtx := h.broadcastContext()
+		if err := h.broadcastWorker.processCampaign(workerCtx, broadcast); err != nil {
+			logger.Warn("Broadcast launch failed", zap.Uint("broadcast_id", broadcast.ID), zap.Error(err))
+		}
+	})
+	h.SendMessage(ctx, chatID, fmt.Sprintf("📤 Рассылка #%d поставлена в очередь. Отправка продолжается в фоне.", broadcast.ID))
+	return nil
+}
+
+// HandleBroadcastHistory shows recent campaign cards to an administrator.
+func (h *Handler) HandleBroadcastHistory(ctx context.Context, update tgbotapi.Update) error {
+	if update.Message == nil {
+		return fmt.Errorf("nil message")
+	}
+	chatID := update.Message.Chat.ID
+	if !h.isAdmin(chatID) {
+		return nil
+	}
+
+	broadcasts, err := h.db.ListBroadcasts(ctx, 10)
+	if err != nil {
+		return fmt.Errorf("list broadcasts: %w", err)
+	}
+	if len(broadcasts) == 0 {
+		h.SendMessage(ctx, chatID, "📭 История рассылок пуста.")
+		return nil
+	}
+
+	var text strings.Builder
+	text.WriteString("📋 *Последние рассылки*\n\n")
+	rows := make([][]tgbotapi.InlineKeyboardButton, 0, len(broadcasts))
+	for _, broadcast := range broadcasts {
+		fmt.Fprintf(&text, "%s #%d · %s · %d/%d\n", broadcastStatusEmoji(broadcast.Status), broadcast.ID, broadcast.Name, broadcast.SentCount, broadcast.RecipientsTotal)
+		rows = append(rows, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData(
+			fmt.Sprintf("📋 #%d %s", broadcast.ID, truncateRunes(broadcast.Name, 25)),
+			fmt.Sprintf("broadcast_details_%d", broadcast.ID),
+		)))
+	}
+
+	msg := tgbotapi.NewMessage(chatID, utils.EscapeMarkdownV2(text.String()))
+	msg.ParseMode = "MarkdownV2"
+	msg.ReplyMarkup = &tgbotapi.InlineKeyboardMarkup{InlineKeyboard: rows}
+	h.send(ctx, msg)
+	return nil
 }
 
 // handleBroadcastCancel discards the in-progress broadcast draft.
@@ -722,410 +755,6 @@ func (h *Handler) handleBroadcastCancel(ctx context.Context, chatID int64) error
 	h.SendMessage(ctx, chatID, "❌ Рассылка отменена.")
 
 	return nil
-}
-
-// runBroadcast sends text (MarkdownV2, as-is) to all users in batches, retrying
-// transient (non-blocked) failures, and records the outcome in the broadcast row
-// (counters + delivery_report JSON).
-func (h *Handler) runBroadcast(ctx context.Context, adminChatID int64, name, text string, broadcastID uint, filter database.BroadcastFilter) error {
-	const broadcastTimeout = 5 * time.Minute
-
-	ctx, cancel := context.WithTimeout(ctx, broadcastTimeout)
-	defer cancel()
-
-	const (
-		batchSize            = 100
-		broadcastConcurrency = 10 // max concurrent sends per batch
-	)
-
-	var (
-		successCount       atomic.Int64
-		failCount          atomic.Int64
-		blockedCount       atomic.Int64
-		totalProcessed     int64
-		batchErr           error
-		broadcastCancelled bool
-		report             = database.BroadcastDeliveryReport{Delivered: []int64{}, Blocked: []int64{}, Errors: []database.BroadcastSendError{}}
-		reportMu           sync.Mutex
-	)
-
-	offset := 0
-
-	for {
-		select {
-		case <-ctx.Done():
-			broadcastCancelled = true
-		default:
-		}
-
-		if broadcastCancelled {
-			break
-		}
-
-		ids, err := h.db.GetFilteredTelegramIDsBatch(ctx, offset, batchSize, filter)
-		if err != nil {
-			logger.Error("Failed to get telegram IDs batch", zap.Error(err))
-			batchErr = err
-
-			break
-		}
-
-		if len(ids) == 0 {
-			break
-		}
-
-		var wg sync.WaitGroup
-
-		sem := make(chan struct{}, broadcastConcurrency)
-
-		for _, telegramID := range ids {
-			if broadcastCancelled {
-				break
-			}
-
-			select {
-			case sem <- struct{}{}:
-				wg.Add(1)
-
-				go func(tg int64) {
-					defer logger.Recover("Broadcast worker")
-					defer wg.Done()
-					defer func() {
-						time.Sleep(50 * time.Millisecond)
-						<-sem
-					}()
-
-					select {
-					case <-ctx.Done():
-						return
-					default:
-					}
-
-					chunks := splitMessage(text, config.MaxTelegramMessageLen)
-					userBlocked, userFailed := false, false
-					var lastErr error
-
-					for _, chunk := range chunks {
-						msg := tgbotapi.NewMessage(tg, utils.EscapeMarkdownV2(chunk))
-						msg.ParseMode = "MarkdownV2"
-
-						msg.DisableWebPagePreview = true
-
-						// Retry transient failures up to broadcastRetries times with
-						// linear backoff. Blocked-type errors are permanent and never
-						// retried; ctx cancellation aborts immediately.
-						for attempt := 0; ; attempt++ {
-							err := h.sendWithError(ctx, msg)
-							if err == nil {
-								break
-							}
-							if ctx.Err() != nil {
-								return
-							}
-							if isUserBlockedError(err) {
-								userBlocked = true
-								break
-							}
-							lastErr = err
-							if attempt < broadcastRetries {
-								select {
-								case <-time.After(broadcastRetryBaseDelay * time.Duration(attempt+1)):
-								case <-ctx.Done():
-									return
-								}
-								continue
-							}
-							userFailed = true
-							break
-						}
-
-					if userBlocked || userFailed || ctx.Err() != nil {
-						break
-					}
-					}
-
-					if ctx.Err() != nil {
-						return
-					}
-
-					reportMu.Lock()
-					switch {
-					case userBlocked:
-						blockedCount.Add(1)
-						report.Blocked = append(report.Blocked, tg)
-					case userFailed:
-						failCount.Add(1)
-						report.Errors = append(report.Errors, database.BroadcastSendError{TelegramID: tg, Error: truncateRunes(lastErr.Error(), broadcastErrorTextMaxLen)})
-					default:
-						successCount.Add(1)
-						report.Delivered = append(report.Delivered, tg)
-					}
-					reportMu.Unlock()
-				}(telegramID)
-			case <-ctx.Done():
-				broadcastCancelled = true
-			}
-		}
-
-		wg.Wait()
-
-		offset += len(ids)
-		atomic.AddInt64(&totalProcessed, int64(len(ids)))
-
-		if broadcastCancelled {
-			break
-		}
-	}
-
-	sent := successCount.Load()
-	failed := failCount.Load()
-	blocked := blockedCount.Load()
-	remaining := int(totalProcessed) - int(sent+failed+blocked)
-	finishedAt := time.Now().UTC()
-
-	// Используем context.WithoutCancel, чтобы финализация (обновление БД и
-	// отправка отчёта админу) работала даже при отменённом/таймаутном контексте.
-	bgCtx := context.WithoutCancel(ctx)
-
-	if broadcastCancelled {
-		h.finalizeBroadcast(bgCtx, broadcastID, string(database.BroadcastStatusCanceled), &report, finishedAt, totalProcessed, sent, blocked, failed)
-		h.sendBroadcastReport(bgCtx, adminChatID, fmt.Sprintf(`⚠️ Рассылка прервана!
-
-📦 Рассылка #%d: %s
-
-📤 Отправлено: %d
-🚫 Заблокировали бота: %d
-❌ Ошибок: %d
-👥 Осталось: %d`,
-			broadcastID, name, sent, blocked, failed, remaining), broadcastID)
-
-		return fmt.Errorf("broadcast cancelled: %w", ctx.Err())
-	}
-
-	if batchErr != nil {
-		h.finalizeBroadcast(bgCtx, broadcastID, string(database.BroadcastStatusFailed), &report, finishedAt, totalProcessed, sent, blocked, failed)
-		h.sendBroadcastReport(bgCtx, adminChatID, fmt.Sprintf(`❌ Рассылка прервана из-за ошибки!
-
-📦 Рассылка #%d: %s
-
-📤 Отправлено: %d
-🚫 Заблокировали бота: %d
-❌ Ошибок: %d
-👥 Не обработано: %d
-
-Ошибка: %v`,
-			broadcastID, name, sent, blocked, failed, remaining, batchErr), broadcastID)
-		logger.Error("Broadcast failed due to batch retrieval error",
-			zap.Error(batchErr),
-			zap.Uint("broadcast_id", broadcastID),
-			zap.Int64("success", sent),
-			zap.Int64("blocked", blocked),
-			zap.Int64("failed", failed),
-			zap.Int("remaining", remaining))
-
-		return fmt.Errorf("broadcast batch error: %w", batchErr)
-	}
-
-	h.finalizeBroadcast(bgCtx, broadcastID, string(database.BroadcastStatusCompleted), &report, finishedAt, totalProcessed, sent, blocked, failed)
-	h.sendBroadcastReport(bgCtx, adminChatID, fmt.Sprintf(`✅ Рассылка завершена!
-
-📦 Рассылка #%d: %s
-
-📤 Отправлено: %d
-🚫 Заблокировали бота: %d
-❌ Ошибок: %d
-👥 Всего: %d`,
-		broadcastID, name, sent, blocked, failed, totalProcessed), broadcastID)
-	logger.Info("Broadcast completed",
-		zap.Uint("broadcast_id", broadcastID),
-		zap.Int64("success", sent),
-		zap.Int64("blocked", blocked),
-		zap.Int64("failed", failed),
-		zap.Int64("total", totalProcessed))
-
-	return nil
-}
-
-// finalizeBroadcast сохраняет итоги рассылки в строку рассылки: статус, время
-// завершения, счётчики и JSON-отчёт. Ошибка обновления логируется — отчёт
-// администратору отправляется в любом случае.
-func (h *Handler) finalizeBroadcast(ctx context.Context, broadcastID uint, status string, report *database.BroadcastDeliveryReport, finishedAt time.Time, totalProcessed, sent, blocked, failed int64) {
-	broadcast := &database.Broadcast{
-		ID:              broadcastID,
-		Status:          status,
-		FinishedAt:      &finishedAt,
-		RecipientsTotal: totalProcessed,
-		SentCount:       sent,
-		BlockedCount:    blocked,
-		FailedCount:     failed,
-	}
-	err := broadcast.SetDeliveryReport(report)
-	if err != nil {
-		logger.Error("Failed to marshal broadcast delivery report", zap.Uint("broadcast_id", broadcastID), zap.Error(err))
-	}
-	err = h.db.UpdateBroadcast(ctx, broadcast)
-	if err != nil {
-		logger.Error("Failed to update broadcast", zap.Uint("broadcast_id", broadcastID), zap.Error(err))
-	}
-}
-
-// sendBroadcastReport отправляет финальный отчёт администратору с кнопкой
-// «Детали рассылки» (ссылка на карточку).
-func (h *Handler) sendBroadcastReport(ctx context.Context, chatID int64, text string, broadcastID uint) {
-	msg := tgbotapi.NewMessage(chatID, text)
-	msg.DisableWebPagePreview = true
-	if broadcastID > 0 {
-		msg.ReplyMarkup = broadcastDetailsKeyboard(broadcastID)
-	}
-	h.send(ctx, msg)
-}
-
-// broadcastDetailsKeyboard возвращает кнопку перехода к карточке рассылки.
-func broadcastDetailsKeyboard(broadcastID uint) *tgbotapi.InlineKeyboardMarkup {
-	kb := tgbotapi.NewInlineKeyboardMarkup(
-		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("📋 Детали рассылки", fmt.Sprintf("broadcast_details_%d", broadcastID)),
-		),
-	)
-
-	return &kb
-}
-
-// broadcastFilterKeyboard создаёт inline keyboard для выбора фильтров рассылки.
-// Текущий фильтр отображается в тексте сообщения (preview).
-func broadcastFilterKeyboard(f database.BroadcastFilter) *tgbotapi.InlineKeyboardMarkup {
-	// Ряд 1 — Тариф
-	planAll := "👥 Все"
-	planPaid := "💰 Платные"
-	planFree := "🆓 Бесплатные"
-	if f.PlanType == "" {
-		planAll = "👥 Все ✓"
-	} else if f.PlanType == "paid" {
-		planPaid = "💰 Платные ✓"
-	} else if f.PlanType == "free" {
-		planFree = "🆓 Бесплатные ✓"
-	}
-
-	// Ряд 2 — Статус подписки
-	statusAll := "📋 Все"
-	statusActive := "✅ Активные"
-	statusExpired := "⏰ Истёкшие"
-	statusRevoked := "🚫 Отозванные"
-	switch f.SubscriptionStatus {
-	case "active":
-		statusActive = "✅ Активные ✓"
-	case "expired":
-		statusExpired = "⏰ Истёкшие ✓"
-	case "revoked":
-		statusRevoked = "🚫 Отозванные ✓"
-	default:
-		statusAll = "📋 Все ✓"
-	}
-
-	// Ряд 3 — Дата регистрации
-	date3m := "📅 Рег. за 3 мес"
-	date6m := "📅 Рег. за 6 мес"
-	date1y := "📅 Рег. за год"
-	dateAll := "📅 Рег. все"
-	if f.RegisteredAfter != nil {
-		now := time.Now()
-		diff := now.Sub(*f.RegisteredAfter)
-		days := int(diff.Hours() / 24)
-		switch {
-		case days <= 95:
-			date3m = "📅 Рег. за 3 мес ✓"
-		case days <= 185:
-			date6m = "📅 Рег. за 6 мес ✓"
-		case days <= 370:
-			date1y = "📅 Рег. за год ✓"
-		default:
-			dateAll = "📅 Рег. все ✓"
-		}
-	}
-	if f.RegisteredAfter == nil {
-		dateAll = "📅 Рег. все ✓"
-	}
-
-	// Ряд 3 — Неактивность
-	inactiveNever := "🚫 Не обращались"
-	inactive1m := "⏰ > 1 мес"
-	inactive3m := "⏰ > 3 мес"
-	inactiveNone := "👤 Без фильтра"
-	if f.InactiveDays != nil {
-		switch *f.InactiveDays {
-		case 0:
-			inactiveNever = "🚫 Не обращались ✓"
-		case 30:
-			inactive1m = "⏰ > 1 мес ✓"
-		case 90:
-			inactive3m = "⏰ > 3 мес ✓"
-		}
-	} else {
-		inactiveNone = "👤 Без фильтра ✓"
-	}
-
-	// Ряд 4 — Платежи
-	payYes := "💳 Платили"
-	payNo := "🆓 Не платили"
-	payNone := "👤 Без фильтра"
-	if f.EverPaid != nil {
-		if *f.EverPaid {
-			payYes = "💳 Платили ✓"
-		} else {
-			payNo = "🆓 Не платили ✓"
-		}
-	} else {
-		payNone = "👤 Без фильтра ✓"
-	}
-
-	kb := tgbotapi.NewInlineKeyboardMarkup(
-		// Ряд 1: Тариф
-		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData(planAll, "bfilter_plan_"),
-			tgbotapi.NewInlineKeyboardButtonData(planPaid, "bfilter_plan_paid"),
-			tgbotapi.NewInlineKeyboardButtonData(planFree, "bfilter_plan_free"),
-		),
-		// Ряд 2: Статус подписки
-		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData(statusAll, "bfilter_status_"),
-			tgbotapi.NewInlineKeyboardButtonData(statusActive, "bfilter_status_active"),
-			tgbotapi.NewInlineKeyboardButtonData(statusExpired, "bfilter_status_expired"),
-			tgbotapi.NewInlineKeyboardButtonData(statusRevoked, "bfilter_status_revoked"),
-		),
-		// Ряд 3: Дата регистрации
-		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData(date3m, "bfilter_date_90"),
-			tgbotapi.NewInlineKeyboardButtonData(date6m, "bfilter_date_180"),
-			tgbotapi.NewInlineKeyboardButtonData(date1y, "bfilter_date_365"),
-			tgbotapi.NewInlineKeyboardButtonData(dateAll, "bfilter_date_"),
-		),
-		// Ряд 4: Неактивность
-		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData(inactiveNever, "bfilter_inactive_0"),
-			tgbotapi.NewInlineKeyboardButtonData(inactive1m, "bfilter_inactive_30"),
-			tgbotapi.NewInlineKeyboardButtonData(inactive3m, "bfilter_inactive_90"),
-			tgbotapi.NewInlineKeyboardButtonData(inactiveNone, "bfilter_inactive_"),
-		),
-		// Ряд 5: Платежи
-		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData(payYes, "bfilter_ever_paid_true"),
-			tgbotapi.NewInlineKeyboardButtonData(payNo, "bfilter_ever_paid_false"),
-			tgbotapi.NewInlineKeyboardButtonData(payNone, "bfilter_ever_paid_"),
-		),
-		// Ряд 6: Действия
-		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("✅ Отправить", "broadcast_confirm"),
-			tgbotapi.NewInlineKeyboardButtonData("❌ Отмена", "broadcast_cancel"),
-		),
-	)
-
-	return &kb
-}
-
-// broadcastFilterPreview возвращает текст превью с описанием текущего фильтра.
-func broadcastFilterPreview(name string, f database.BroadcastFilter) string {
-	filterDesc := f.String()
-	return fmt.Sprintf("✅ Превью готово. Рассылка «%s».\n\n👥 Фильтр: %s\n\n📤 Отправить это сообщение всем?", name, filterDesc)
 }
 
 // startBroadcastSession begins (or restarts) the draft flow for an admin.
@@ -1147,7 +776,10 @@ func (h *Handler) getBroadcastSession(chatID int64) *broadcastSession {
 		return nil
 	}
 
-	return s
+	// Return a snapshot so concurrent Telegram callbacks cannot race on the
+	// mutable session object while one callback updates the filter or stage.
+	copy := *s
+	return &copy
 }
 
 // clearBroadcastSession removes the broadcast session for an admin.
@@ -1344,162 +976,6 @@ func containsEntityChar(s string) bool {
 func (h *Handler) broadcastSessionActive(chatID int64) bool {
 	s := h.getBroadcastSession(chatID)
 	return s != nil && (s.stage == broadcastStageAwaitingName || s.stage == broadcastStageAwaitingDraft || s.stage == broadcastStageFiltering || s.stage == broadcastStagePreview || s.stage == broadcastStageConfirming)
-}
-
-// sendBroadcastDetails отправляет карточку рассылки. Используется кнопкой
-// «Детали рассылки» из финального отчёта рассылки.
-func (h *Handler) sendBroadcastDetails(ctx context.Context, chatID int64, broadcastID uint) {
-	c, err := h.db.GetBroadcast(ctx, broadcastID)
-	if err != nil {
-		if errors.Is(err, database.ErrBroadcastNotFound) {
-			h.SendMessage(ctx, chatID, "❌ Рассылка не найдена.")
-			return
-		}
-
-		logger.Error("Failed to get broadcast", zap.Uint("broadcast_id", broadcastID), zap.Error(err))
-		h.SendMessage(ctx, chatID, "❌ Ошибка получения рассылки.")
-
-		return
-	}
-
-	report, err := c.ParseDeliveryReport()
-	if err != nil {
-		logger.Warn("Failed to parse delivery report", zap.Uint("broadcast_id", c.ID), zap.Error(err))
-		report = &database.BroadcastDeliveryReport{Delivered: []int64{}, Blocked: []int64{}, Errors: []database.BroadcastSendError{}}
-	}
-
-	var sb strings.Builder
-	fmt.Fprintf(&sb, "📦 *Рассылка #%d: %s*\n\n", c.ID, c.Name)
-	fmt.Fprintf(&sb, "🗂 Статус: %s %s\n", broadcastStatusEmoji(c.Status), broadcastStatusLabel(c.Status))
-
-	if c.PlannedAt != nil {
-		fmt.Fprintf(&sb, "🗓 Запланирована: %s\n", c.PlannedAt.Format("02.01.06 15:04"))
-	}
-	if c.StartedAt != nil {
-		fmt.Fprintf(&sb, "▶️ Начало: %s\n", c.StartedAt.Format("02.01.06 15:04"))
-	}
-	if c.FinishedAt != nil {
-		fmt.Fprintf(&sb, "⏹ Конец: %s\n", c.FinishedAt.Format("02.01.06 15:04"))
-	}
-
-	fmt.Fprintf(&sb, "\n👥 Получателей: %d\n", c.RecipientsTotal)
-	fmt.Fprintf(&sb, "📤 Отправлено: %d\n", c.SentCount)
-	fmt.Fprintf(&sb, "🚫 Заблокировали бота: %d\n", c.BlockedCount)
-	fmt.Fprintf(&sb, "❌ Ошибок: %d\n", c.FailedCount)
-
-	if c.Filters != "" && c.Filters != "{}" {
-		fmt.Fprintf(&sb, "\n🔎 Фильтры: `%s`\n", c.Filters)
-	}
-
-	if len(report.Delivered) > 0 {
-		fmt.Fprintf(&sb, "\n✅ Доставлено (ID): %s\n", formatIDList(report.Delivered, 15))
-	}
-	if len(report.Blocked) > 0 {
-		fmt.Fprintf(&sb, "🚫 Заблокировали (ID): %s\n", formatIDList(report.Blocked, 15))
-	}
-	if len(report.Errors) > 0 {
-		fmt.Fprintf(&sb, "❌ Ошибки (ID): %s\n", formatErrorList(report.Errors, 15))
-	}
-
-	fmt.Fprintf(&sb, "\n💬 *Текст:*\n%s", truncateRunes(c.MessageText, broadcastTextPreviewMaxRunes))
-
-	msg := tgbotapi.NewMessage(chatID, utils.EscapeMarkdownV2(sb.String()))
-	msg.ParseMode = "MarkdownV2"
-	h.send(ctx, msg)
-}
-
-// broadcastStatusEmoji возвращает эмодзи статуса рассылки для списков.
-func broadcastStatusEmoji(status string) string {
-	switch status {
-	case string(database.BroadcastStatusScheduled):
-		return "⏳"
-	case string(database.BroadcastStatusRunning):
-		return "▶️"
-	case string(database.BroadcastStatusCompleted):
-		return "✅"
-	case string(database.BroadcastStatusFailed):
-		return "❌"
-	case string(database.BroadcastStatusCanceled):
-		return "⚠️"
-	default:
-		return "❔"
-	}
-}
-
-// broadcastStatusLabel возвращает человекочитаемую подпись статуса рассылки.
-func broadcastStatusLabel(status string) string {
-	switch status {
-	case string(database.BroadcastStatusScheduled):
-		return "запланирована"
-	case string(database.BroadcastStatusRunning):
-		return "идёт отправка"
-	case string(database.BroadcastStatusCompleted):
-		return "завершена"
-	case string(database.BroadcastStatusFailed):
-		return "прервана ошибкой"
-	case string(database.BroadcastStatusCanceled):
-		return "прервана"
-	default:
-		return status
-	}
-}
-
-// formatIDList форматирует список telegram_id, усекая до maxItems.
-func formatIDList(ids []int64, maxItems int) string {
-	if len(ids) == 0 {
-		return "—"
-	}
-
-	parts := make([]string, 0, min(len(ids), maxItems))
-	for i, id := range ids {
-		if i >= maxItems {
-			break
-		}
-		parts = append(parts, strconv.FormatInt(id, 10))
-	}
-
-	s := strings.Join(parts, ", ")
-	if len(ids) > maxItems {
-		s += fmt.Sprintf(" … и ещё %d", len(ids)-maxItems)
-	}
-
-	return s
-}
-
-// formatErrorList форматирует список ошибок доставки, усекая до maxItems.
-func formatErrorList(errs []database.BroadcastSendError, maxItems int) string {
-	if len(errs) == 0 {
-		return "—"
-	}
-
-	parts := make([]string, 0, min(len(errs), maxItems))
-	for i, e := range errs {
-		if i >= maxItems {
-			break
-		}
-		parts = append(parts, fmt.Sprintf("%d (%s)", e.TelegramID, e.Error))
-	}
-
-	s := strings.Join(parts, "; ")
-	if len(errs) > maxItems {
-		s += fmt.Sprintf(" … и ещё %d", len(errs)-maxItems)
-	}
-
-	return s
-}
-
-// truncateRunes обрезает строку до maxRunes рун (без разрыва UTF-8) с эллипсисом.
-func truncateRunes(s string, maxRunes int) string {
-	if maxRunes <= 0 {
-		return ""
-	}
-
-	r := []rune(s)
-	if len(r) <= maxRunes {
-		return s
-	}
-
-	return string(r[:maxRunes]) + "…"
 }
 
 // HandleSend handles the /send command for admins to send a message to a specific user.
