@@ -19,14 +19,6 @@ import (
 	"go.uber.org/zap"
 )
 
-const (
-	broadcastWorkerInterval = 15 * time.Second
-	broadcastTimeout        = 5 * time.Minute
-	broadcastRetryBaseDelay = 5 * time.Second
-	broadcastRetryMaxDelay  = 15 * time.Minute
-	broadcastConcurrency    = 10
-	broadcastBatchSize      = 100
-)
 
 // BroadcastWorker processes durable broadcast campaigns independently from the
 // Telegram update loop. A process restart resumes scheduled/running campaigns.

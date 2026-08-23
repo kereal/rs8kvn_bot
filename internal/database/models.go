@@ -487,35 +487,6 @@ func (s *Subscription) SetIPs(ips []map[string]string) error {
 	return nil
 }
 
-// ParseFilters декодирует JSON-поле фильтров аудитории. Пустая/битая строка
-// возвращает пустой map — фильтры сейчас не используются (резерв под таргетинг).
-func (c *Broadcast) ParseFilters() (map[string]any, error) {
-	if c.Filters == "" {
-		return map[string]any{}, nil
-	}
-
-	var filters map[string]any
-
-	err := json.Unmarshal([]byte(c.Filters), &filters)
-	if err != nil {
-		return nil, fmt.Errorf("failed to unmarshal broadcast filters: %w", err)
-	}
-
-	return filters, nil
-}
-
-// SetFilters сериализует фильтры аудитории в JSON-поле.
-func (c *Broadcast) SetFilters(filters map[string]any) error {
-	data, err := json.Marshal(filters)
-	if err != nil {
-		return fmt.Errorf("failed to marshal broadcast filters: %w", err)
-	}
-
-	c.Filters = string(data)
-
-	return nil
-}
-
 // ParseDeliveryReport декодирует JSON-отчёт рассылки. Пустая/битая строка
 // возвращает пустой отчёт с инициализированными (не nil) списками.
 func (c *Broadcast) ParseDeliveryReport() (*BroadcastDeliveryReport, error) {

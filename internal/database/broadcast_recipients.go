@@ -196,7 +196,7 @@ func (s *Service) ClaimBroadcastRecipients(ctx context.Context, broadcastID uint
 
 // FinishBroadcastRecipient records a terminal outcome for one recipient.
 func (s *Service) FinishBroadcastRecipient(ctx context.Context, broadcastID uint, id uint, expectedAttempts int, status BroadcastRecipientStatus, lastError string, now time.Time) error {
-	if status != BroadcastRecipientSent && status != BroadcastRecipientBlocked && status != BroadcastRecipientFailed {
+	if status != BroadcastRecipientSent && status != BroadcastRecipientBlocked && status != BroadcastRecipientUnreachable && status != BroadcastRecipientFailed {
 		return fmt.Errorf("invalid broadcast recipient status: %s", status)
 	}
 	return updateBroadcastRecipientState(ctx, s, broadcastID, func(_ *Broadcast, state *broadcastRecipientState) error {
