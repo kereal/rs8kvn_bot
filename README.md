@@ -205,4 +205,5 @@ go build -ldflags="-s -w" -o rs8kvn_bot ./cmd/bot
 - **[API Reference](doc/api.md)** — HTTP endpoints, error codes, rate limits
 - **[Operations Guide](doc/operations.md)** — Monitoring, troubleshooting, scaling, backup/restore
 - **[Broadcast](doc/broadcast.md)** — Admin broadcast flow, filters, delivery worker
+- **[Traffic notifications](doc/architecture.md)** — `SubscriptionTrafficWorker`: 90%/exhausted warnings with Premium CTA and auto-re-enable after traffic reset
 - **[.serena/instructions.md](.serena/instructions.md)** — AI assistant workflow and memory structure

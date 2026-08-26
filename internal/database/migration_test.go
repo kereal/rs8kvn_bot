@@ -20,7 +20,7 @@ func TestLatestEmbeddedMigrationVersion(t *testing.T) {
 
 	version, err := latestEmbeddedMigrationVersion()
 	require.NoError(t, err)
-	assert.Equal(t, 36, version)
+	assert.Equal(t, 38, version)
 }
 
 func TestRunMigrationsRejectsDatabaseNewerThanEmbedded(t *testing.T) {
@@ -33,19 +33,19 @@ func TestRunMigrationsRejectsDatabaseNewerThanEmbedded(t *testing.T) {
 
 	sqlDB, err := db.db.DB()
 	require.NoError(t, err)
-	_, err = sqlDB.Exec("UPDATE schema_migrations SET version = ?, dirty = ?", 38, false)
+	_, err = sqlDB.Exec("UPDATE schema_migrations SET version = ?, dirty = ?", 39, false)
 	require.NoError(t, err)
 
 	err = runMigrations(sqlDB)
 	require.Error(t, err)
-	assert.ErrorContains(t, err, "newer than the latest embedded migration 36")
+	assert.ErrorContains(t, err, "newer than the latest embedded migration 38")
 
 	var (
 		version int
 		dirty   bool
 	)
 	require.NoError(t, sqlDB.QueryRow("SELECT version, dirty FROM schema_migrations").Scan(&version, &dirty))
-	assert.Equal(t, 38, version)
+	assert.Equal(t, 39, version)
 	assert.False(t, dirty)
 }
 
@@ -62,7 +62,7 @@ func TestRunMigrationsCollapsesLegacyBroadcastMigration37(t *testing.T) {
 	require.NoError(t, runMigrations(sqlDB))
 	version, dirty, err := migrationState(sqlDB)
 	require.NoError(t, err)
-	assert.Equal(t, uint(36), version)
+	assert.Equal(t, uint(38), version)
 	assert.False(t, dirty)
 }
 
@@ -142,7 +142,7 @@ func TestRunMigrationsRepairsMetadataOnlyAfterCompleteNoTxMigration(t *testing.T
 		dirty   bool
 	)
 	require.NoError(t, sqlDB.QueryRow("SELECT version, dirty FROM schema_migrations").Scan(&version, &dirty))
-	assert.Equal(t, 36, version)
+	assert.Equal(t, 38, version)
 	assert.False(t, dirty)
 }
 
@@ -458,16 +458,14 @@ func TestMigration_032_NormalizesInvalidRetryState(t *testing.T) {
 
 	// Return to the pre-032 schema, where legacy invalid retry state is still
 	// representable, then insert the row that caused the production risk.
-	// Steps(-5) skips the broadcast migration and lands on the
-	// 031 schema for this test's intent.
-	require.NoError(t, m.Steps(-5))
+	require.NoError(t, m.Migrate(31))
 
 	_, err = sqlDB.Exec(`INSERT INTO subscription_nodes
 		(subscription_id, node_id, status, retry_count, retry_at, updated_at)
 		VALUES (1, 1, 'active', 3, NULL, datetime('now'))`)
 	require.NoError(t, err)
 
-	require.NoError(t, m.Steps(2))
+	require.NoError(t, m.Migrate(33))
 
 	var (
 		retryCount int
@@ -658,9 +656,8 @@ func TestMigration_033_NormalizesInvalidStatuses(t *testing.T) {
 	t.Cleanup(func() { _, _ = m.Close() })
 
 	// Return to the pre-033 schema, where arbitrary statuses are still
-	// representable, then insert the legacy rows. Steps(-4) reverts the
-	// broadcast migration and lands on 032.
-	require.NoError(t, m.Steps(-4))
+	// representable, then insert the legacy rows.
+	require.NoError(t, m.Migrate(32))
 
 	_, err = sqlDB.Exec(`INSERT INTO subscriptions (telegram_id, username, client_id, subscription_id, status)
 		VALUES (777001, 'legacy-garbage', 'client-garbage', 'sub-garbage', 'garbage')`)
@@ -670,7 +667,7 @@ func TestMigration_033_NormalizesInvalidStatuses(t *testing.T) {
 		VALUES (777002, 'legacy-null', 'client-null', 'sub-null', NULL)`)
 	require.NoError(t, err)
 
-	require.NoError(t, m.Steps(1))
+	require.NoError(t, m.Migrate(33))
 
 	var garbageStatus string
 
