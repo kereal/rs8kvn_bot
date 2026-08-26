@@ -16,11 +16,12 @@ func broadcastFilterKeyboard(f database.BroadcastFilter) *tgbotapi.InlineKeyboar
 	planAll := "👥 Все"
 	planPaid := "💰 Платные"
 	planFree := "🆓 Бесплатные"
-	if f.PlanType == "" {
+	switch f.PlanType {
+	case "":
 		planAll = "👥 Все ✓"
-	} else if f.PlanType == "paid" {
+	case "paid":
 		planPaid = "💰 Платные ✓"
-	} else if f.PlanType == "free" {
+	case "free":
 		planFree = "🆓 Бесплатные ✓"
 	}
 
@@ -158,7 +159,7 @@ func broadcastScheduleHourKeyboard() *tgbotapi.InlineKeyboardMarkup {
 	rows := make([][]tgbotapi.InlineKeyboardButton, 0, 5)
 	for h := 0; h < 24; h += 6 {
 		row := make([]tgbotapi.InlineKeyboardButton, 0, 6)
-		for i := 0; i < 6; i++ {
+		for i := range 6 {
 			hour := h + i
 			row = append(row, tgbotapi.NewInlineKeyboardButtonData(fmt.Sprintf("%02d:00", hour), fmt.Sprintf("bsched_hour_%d", hour)))
 		}

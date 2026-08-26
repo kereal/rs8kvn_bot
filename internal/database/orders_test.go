@@ -332,3 +332,61 @@ func TestConfirmOrderPaidCAS_SwitchesPlanAndStatus(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, activated)
 }
+
+// TestConfirmOrderPaidCAS_SamePlanRenewalSkipsApplyPlan locks the renewal
+// contract: paying for the plan the subscription already has extends the expiry
+// but must NOT schedule a VPN re-sync (no pending_update rows, no traffic
+// reset). Only an actual plan change runs applyPlan.
+func TestConfirmOrderPaidCAS_SamePlanRenewalSkipsApplyPlan(t *testing.T) {
+	t.Parallel()
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	plan := &Plan{Name: "plan-renew", DevicesLimit: 2, TrafficLimit: 20000}
+	require.NoError(t, svc.db.WithContext(ctx).Create(plan).Error)
+	product := &Product{PlanID: plan.ID, Name: "1M", DurationDays: 30, PriceCents: 499, Currency: "RUB", IsActive: true}
+	require.NoError(t, svc.db.WithContext(ctx).Create(product).Error)
+
+	expiresAt := time.Now().UTC().Add(10 * 24 * time.Hour)
+	sub := createTestSubscription(t, svc, 901, "userrenew", "client-renew")
+	sub.PlanID = plan.ID
+	sub.Status = "active"
+	sub.ExpiresAt = &expiresAt
+	require.NoError(t, svc.db.Save(sub).Error)
+
+	order := &Order{
+		SubscriptionID: sub.ID,
+		ProductID:      product.ID,
+		Status:         OrderStatusPending,
+		AmountCents:    499,
+		Currency:       "RUB",
+	}
+	require.NoError(t, svc.db.WithContext(ctx).Create(order).Error)
+
+	now := time.Now().UTC().Truncate(time.Second)
+
+	applyPlanCalls := 0
+	applyPlan := func(_ context.Context, tx *gorm.DB, subscriptionID uint, planID uint) error {
+		applyPlanCalls++
+
+		return nil
+	}
+
+	activated, err := svc.ConfirmOrderPaidCAS(ctx, order.ID, now, now, sub, product, applyPlan, order.AmountCents)
+	require.NoError(t, err)
+	assert.True(t, activated)
+	// Same-plan renewal: the CAS must not schedule a VPN re-sync.
+	assert.Zero(t, applyPlanCalls, "same-plan renewal must not run applyPlan (no pending_update, no traffic reset)")
+
+	got, err := svc.GetByID(ctx, sub.ID)
+	require.NoError(t, err)
+	assert.Equal(t, plan.ID, got.PlanID)
+	require.NotNil(t, got.ExpiresAt)
+	// Renewal extends the existing future expiry by the product duration.
+	assert.True(t, got.ExpiresAt.After(expiresAt), "renewal must extend the existing expiry")
+
+	// No pending subscription_node rows were created by the renewal.
+	rows, err := svc.GetBySubscriptionID(ctx, sub.ID)
+	require.NoError(t, err)
+	assert.Empty(t, rows)
+}

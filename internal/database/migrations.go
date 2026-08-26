@@ -89,13 +89,15 @@ func runMigrations(sqlDB *sql.DB) error {
 	// collapse the metadata back to the squashed 036 version before continuing.
 	if versionBefore == 37 && !dirtyBefore {
 		var stateColumns int
-		if err := sqlDB.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('broadcasts') WHERE name = 'recipients_state'`).Scan(&stateColumns); err != nil {
+		err := sqlDB.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('broadcasts') WHERE name = 'recipients_state'`).Scan(&stateColumns)
+		if err != nil {
 			return fmt.Errorf("inspect legacy broadcast state column: %w", err)
 		}
 		if stateColumns == 0 {
 			return errors.New("database is marked at legacy migration 37 but broadcasts.recipients_state is missing")
 		}
-		if err := forceMigrationVersion(sqlDB, maxEmbeddedVersion); err != nil {
+		err = forceMigrationVersion(sqlDB, maxEmbeddedVersion)
+		if err != nil {
 			return fmt.Errorf("collapse legacy migration 37 to 36: %w", err)
 		}
 		versionBefore = uint(maxEmbeddedVersion)
@@ -115,7 +117,8 @@ func runMigrations(sqlDB *sql.DB) error {
 	if err != nil {
 		return err
 	}
-	if err := ensureBroadcastColumns(sqlDB); err != nil {
+	err = ensureBroadcastColumns(sqlDB)
+	if err != nil {
 		return fmt.Errorf("failed to ensure broadcast columns: %w", err)
 	}
 
@@ -414,7 +417,8 @@ func tableRebuildComplete(sqlDB *sql.DB, tableName, oldTableName, requiredSQL st
 // in place; the feature deliberately keeps all state in the existing table.
 func ensureBroadcastColumns(sqlDB *sql.DB) error {
 	var tableCount int
-	if err := sqlDB.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'broadcasts'`).Scan(&tableCount); err != nil {
+	err := sqlDB.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'broadcasts'`).Scan(&tableCount)
+	if err != nil {
 		return fmt.Errorf("inspect broadcasts table: %w", err)
 	}
 	if tableCount == 0 {
@@ -433,11 +437,13 @@ func ensureBroadcastColumns(sqlDB *sql.DB) error {
 	}
 	for _, column := range columns {
 		var count int
-		if err := sqlDB.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('broadcasts') WHERE name = ?`, column.name).Scan(&count); err != nil {
+		err := sqlDB.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('broadcasts') WHERE name = ?`, column.name).Scan(&count)
+		if err != nil {
 			return fmt.Errorf("inspect broadcasts.%s: %w", column.name, err)
 		}
 		if count == 0 {
-			if _, err := sqlDB.Exec(column.ddl); err != nil {
+			_, err = sqlDB.Exec(column.ddl)
+			if err != nil {
 				return fmt.Errorf("add broadcasts.%s: %w", column.name, err)
 			}
 		}

@@ -44,7 +44,8 @@ func parseBroadcastRecipientState(b *Broadcast) (broadcastRecipientState, error)
 	if b.RecipientsState == "" || b.RecipientsState == "{}" {
 		return state, nil
 	}
-	if err := json.Unmarshal([]byte(b.RecipientsState), &state); err != nil {
+	err := json.Unmarshal([]byte(b.RecipientsState), &state)
+	if err != nil {
 		return state, fmt.Errorf("parse broadcast recipient state: %w", err)
 	}
 	if state.Recipients == nil {
@@ -71,7 +72,8 @@ func setBroadcastRecipientState(b *Broadcast, state broadcastRecipientState) err
 func updateBroadcastRecipientState(ctx context.Context, s *Service, broadcastID uint, mutate func(*Broadcast, *broadcastRecipientState) error) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var broadcast Broadcast
-		if err := tx.First(&broadcast, broadcastID).Error; err != nil {
+		err := tx.First(&broadcast, broadcastID).Error
+		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return ErrBroadcastNotFound
 			}
@@ -81,10 +83,12 @@ func updateBroadcastRecipientState(ctx context.Context, s *Service, broadcastID 
 		if err != nil {
 			return err
 		}
-		if err := mutate(&broadcast, &state); err != nil {
+		err = mutate(&broadcast, &state)
+		if err != nil {
 			return err
 		}
-		if err := setBroadcastRecipientState(&broadcast, state); err != nil {
+		err = setBroadcastRecipientState(&broadcast, state)
+		if err != nil {
 			return err
 		}
 		result := tx.Model(&Broadcast{}).Where("id = ?", broadcastID).Update("recipients_state", broadcast.RecipientsState)
@@ -141,7 +145,8 @@ func (s *Service) ClaimBroadcast(ctx context.Context, id uint, now time.Time) (b
 	}
 	if result.RowsAffected == 0 {
 		var count int64
-		if err := s.db.WithContext(ctx).Model(&Broadcast{}).Where("id = ?", id).Count(&count).Error; err != nil {
+		err := s.db.WithContext(ctx).Model(&Broadcast{}).Where("id = ?", id).Count(&count).Error
+		if err != nil {
 			return false, fmt.Errorf("check broadcast claim: %w", err)
 		}
 		if count == 0 {
@@ -232,7 +237,8 @@ func (s *Service) CancelBroadcast(ctx context.Context, id uint, now time.Time) (
 	var canceled bool
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var broadcast Broadcast
-		if err := tx.First(&broadcast, id).Error; err != nil {
+		err := tx.First(&broadcast, id).Error
+		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return ErrBroadcastNotFound
 			}
@@ -260,7 +266,8 @@ func (s *Service) CancelBroadcast(ctx context.Context, id uint, now time.Time) (
 func (s *Service) ResetBroadcastFailedRecipients(ctx context.Context, id uint, now time.Time) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var broadcast Broadcast
-		if err := tx.First(&broadcast, id).Error; err != nil {
+		err := tx.First(&broadcast, id).Error
+		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return ErrBroadcastNotFound
 			}
@@ -277,7 +284,8 @@ func (s *Service) ResetBroadcastFailedRecipients(ctx context.Context, id uint, n
 				state.Recipients[i].LastError = ""
 			}
 		}
-		if err := setBroadcastRecipientState(&broadcast, state); err != nil {
+		err = setBroadcastRecipientState(&broadcast, state)
+		if err != nil {
 			return err
 		}
 		updates := map[string]any{

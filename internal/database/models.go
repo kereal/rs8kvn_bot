@@ -244,7 +244,8 @@ const (
 // Broadcast — карточка одной массовой рассылки (таблица broadcasts).
 //
 // Поля:
-//   - Filters        — JSON, резерв под таргетинг аудитории; сейчас всегда '{}'.
+//   - Filters        — JSON-таргетинг аудитории (см. BroadcastFilter,
+//     ParseBroadcastFilter, applyBroadcastFilter); '{}' = без ограничений.
 //   - DeliveryReport — JSON-отчёт по получателям: delivered/blocked/errors
 //     (см. BroadcastDeliveryReport). Счётчики Sent/Blocked/FailedCount хранятся
 //     отдельно, чтобы список рассылок не читал большой JSON.
