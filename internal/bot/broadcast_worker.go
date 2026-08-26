@@ -60,7 +60,8 @@ func (w *BroadcastWorker) process(ctx context.Context) {
 		return
 	}
 	for i := range campaigns {
-		if err := w.processCampaign(ctx, &campaigns[i]); err != nil {
+		err := w.processCampaign(ctx, &campaigns[i])
+		if err != nil {
 			switch {
 			case errors.Is(err, context.Canceled):
 				// Admin cancel or shutdown — nothing to log.
@@ -92,7 +93,8 @@ func (w *BroadcastWorker) processCampaign(ctx context.Context, campaign *databas
 			// retry_count or push retry_at into the future.
 			return
 		}
-		if retryErr := w.scheduleRetry(context.WithoutCancel(ctx), campaign.ID, resultErr); retryErr != nil {
+		retryErr := w.scheduleRetry(context.WithoutCancel(ctx), campaign.ID, resultErr)
+		if retryErr != nil {
 			logger.Error("Failed to schedule broadcast retry", zap.Uint("broadcast_id", campaign.ID), zap.Error(retryErr))
 		}
 	}()
@@ -132,7 +134,8 @@ func (w *BroadcastWorker) processCampaign(ctx context.Context, campaign *databas
 	filter, err := database.ParseBroadcastFilter(campaign.Filters)
 	if err != nil {
 		parseErr := fmt.Errorf("parse broadcast filter: %w", err)
-		if markErr := w.markCampaignFailed(campaignCtx, campaign.ID, parseErr); markErr != nil {
+		markErr := w.markCampaignFailed(campaignCtx, campaign.ID, parseErr)
+		if markErr != nil {
 			return errors.Join(parseErr, fmt.Errorf("mark campaign failed: %w", markErr))
 		}
 		return parseErr
@@ -143,15 +146,13 @@ func (w *BroadcastWorker) processCampaign(ctx context.Context, campaign *databas
 	}
 	campaign.RecipientsTotal = total
 
-	if err := w.h.db.RecoverStaleBroadcastRecipients(campaignCtx, campaign.ID, time.Now().UTC().Add(-2*time.Minute)); err != nil {
+	err = w.h.db.RecoverStaleBroadcastRecipients(campaignCtx, campaign.ID, time.Now().UTC().Add(-2*time.Minute))
+	if err != nil {
 		return fmt.Errorf("recover stale broadcast recipients: %w", err)
 	}
 
 	var current *database.Broadcast
-	for {
-		if campaignCtx.Err() != nil {
-			break
-		}
+	for campaignCtx.Err() == nil {
 		current, err = w.h.db.GetBroadcast(campaignCtx, campaign.ID)
 		if err != nil {
 			if campaignCtx.Err() != nil {
@@ -173,7 +174,8 @@ func (w *BroadcastWorker) processCampaign(ctx context.Context, campaign *databas
 		if len(recipients) == 0 {
 			break
 		}
-		if err := w.processRecipients(campaignCtx, campaign.MessageText, recipients); err != nil && campaignCtx.Err() == nil {
+		err = w.processRecipients(campaignCtx, campaign.MessageText, recipients)
+		if err != nil && campaignCtx.Err() == nil {
 			return fmt.Errorf("process broadcast recipients: %w", err)
 		}
 	}
@@ -212,7 +214,8 @@ launch:
 			go func(r database.BroadcastRecipient) {
 				defer wg.Done()
 				defer func() { <-sem }()
-				if err := w.processRecipientSafely(ctx, text, r); err != nil && !errors.Is(err, database.ErrBroadcastRecipientStale) {
+				err := w.processRecipientSafely(ctx, text, r)
+				if err != nil && !errors.Is(err, database.ErrBroadcastRecipientStale) {
 					mu.Lock()
 					errs = append(errs, fmt.Errorf("recipient %d: %w", r.ID, err))
 					mu.Unlock()
@@ -249,7 +252,8 @@ func (w *BroadcastWorker) processRecipientSafely(ctx context.Context, text strin
 // finishRecipientState persists a terminal outcome for one recipient and wraps
 // the repository error with a status-specific context.
 func (w *BroadcastWorker) finishRecipientState(ctx context.Context, recipient database.BroadcastRecipient, status database.BroadcastRecipientStatus, lastError string) error {
-	if finishErr := w.h.db.FinishBroadcastRecipient(context.WithoutCancel(ctx), recipient.BroadcastID, recipient.ID, recipient.Attempts, status, lastError, time.Now().UTC()); finishErr != nil {
+	finishErr := w.h.db.FinishBroadcastRecipient(context.WithoutCancel(ctx), recipient.BroadcastID, recipient.ID, recipient.Attempts, status, lastError, time.Now().UTC())
+	if finishErr != nil {
 		return fmt.Errorf("record %s recipient: %w", status, finishErr)
 	}
 	return nil
@@ -268,7 +272,8 @@ func (w *BroadcastWorker) processRecipient(ctx context.Context, text string, rec
 	trySend:
 		for attempt := 0; attempt <= broadcastRetries; attempt++ {
 			if attempt > 0 {
-				if err := waitBroadcastDelay(ctx, broadcastSendRetryBaseDelay*time.Duration(attempt)); err != nil {
+				err := waitBroadcastDelay(ctx, broadcastSendRetryBaseDelay*time.Duration(attempt))
+				if err != nil {
 					return err
 				}
 			}
@@ -289,8 +294,9 @@ func (w *BroadcastWorker) processRecipient(ctx context.Context, text string, rec
 				// broadcastFloodMaxWaits ожиданий. Один большой retry_after
 				// ограничен сверху, чтобы не съесть весь временной слайс кампании.
 				flooded := true
-				for waits := 0; waits < broadcastFloodMaxWaits; waits++ {
-					if err := waitBroadcastDelay(ctx, floodRetryDelay(err)); err != nil {
+				for range broadcastFloodMaxWaits {
+					err := waitBroadcastDelay(ctx, floodRetryDelay(err))
+					if err != nil {
 						return err
 					}
 					err = w.h.sendWithError(ctx, msg)
@@ -340,10 +346,12 @@ func (w *BroadcastWorker) markCampaignFailed(ctx context.Context, id uint, cause
 	finishedAt := time.Now().UTC()
 	report := database.BroadcastDeliveryReport{Delivered: []int64{}, Blocked: []int64{}, Unreachable: []int64{}, Errors: []database.BroadcastSendError{}, NotProcessed: []int64{}}
 	broadcast := &database.Broadcast{ID: id, Status: string(database.BroadcastStatusFailed), FinishedAt: &finishedAt, LastError: truncateRunes(cause.Error(), broadcastErrorTextMaxLen)}
-	if err := broadcast.SetDeliveryReport(&report); err != nil {
+	err := broadcast.SetDeliveryReport(&report)
+	if err != nil {
 		return err
 	}
-	if err := w.h.db.UpdateBroadcast(ctx, broadcast); err != nil {
+	err = w.h.db.UpdateBroadcast(ctx, broadcast)
+	if err != nil {
 		return err
 	}
 	logger.Warn("Broadcast marked failed", zap.Uint("broadcast_id", id), zap.Error(cause))
@@ -374,10 +382,12 @@ func (w *BroadcastWorker) finishCampaign(ctx context.Context, campaign *database
 	if !finishedAt.IsZero() {
 		b.FinishedAt = &finishedAt
 	}
-	if err := b.SetDeliveryReport(&report); err != nil {
+	err = b.SetDeliveryReport(&report)
+	if err != nil {
 		return fmt.Errorf("marshal broadcast report: %w", err)
 	}
-	if err := w.h.db.UpdateBroadcast(ctx, b); err != nil {
+	err = w.h.db.UpdateBroadcast(ctx, b)
+	if err != nil {
 		return err
 	}
 	return incompleteErr
@@ -393,10 +403,7 @@ func (w *BroadcastWorker) scheduleRetry(ctx context.Context, id uint, cause erro
 	if campaign.Status == string(database.BroadcastStatusCompleted) || campaign.Status == string(database.BroadcastStatusFailed) || campaign.Status == string(database.BroadcastStatusCanceled) {
 		return nil
 	}
-	attempt := campaign.RetryCount
-	if attempt < 0 {
-		attempt = 0
-	}
+	attempt := max(campaign.RetryCount, 0)
 	delay := broadcastRetryBaseDelay
 	for i := 0; i < attempt && delay < broadcastRetryMaxDelay; i++ {
 		delay *= 2
@@ -411,7 +418,8 @@ func (w *BroadcastWorker) scheduleRetry(ctx context.Context, id uint, cause erro
 	if campaign.Status == string(database.BroadcastStatusScheduled) {
 		campaign.Status = string(database.BroadcastStatusRunning)
 	}
-	if err := w.h.db.UpdateBroadcast(ctx, campaign); err != nil {
+	err = w.h.db.UpdateBroadcast(ctx, campaign)
+	if err != nil {
 		return fmt.Errorf("save broadcast retry state: %w", err)
 	}
 	return nil

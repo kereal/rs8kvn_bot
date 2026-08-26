@@ -270,7 +270,8 @@ func (c *CallbackHandler) HandleCallback(ctx context.Context, update tgbotapi.Up
 		if err != nil {
 			return err
 		}
-		if err := c.h.broadcastWorker.RetryFailed(ctx, id); err != nil {
+		err = c.h.broadcastWorker.RetryFailed(ctx, id)
+		if err != nil {
 			logger.Error("Failed to retry broadcast", zap.Uint("broadcast_id", id), zap.Int64("chat_id", chatID), zap.Error(err))
 			return fmt.Errorf("retry broadcast: %w", err)
 		}
