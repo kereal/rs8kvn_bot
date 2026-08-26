@@ -62,9 +62,6 @@ func (f *fakeRepo) GetTelegramIDsBatch(ctx context.Context, offset, limit int) (
 	return nil, nil
 }
 func (f *fakeRepo) GetTotalTelegramIDCount(ctx context.Context) (int64, error) { return 0, nil }
-func (f *fakeRepo) GetFilteredTelegramIDsBatch(ctx context.Context, offset, limit int, filter database.BroadcastFilter) ([]int64, error) {
-	return nil, nil
-}
 func (f *fakeRepo) GetFilteredTelegramIDCount(ctx context.Context, filter database.BroadcastFilter) (int64, error) {
 	return 0, nil
 }

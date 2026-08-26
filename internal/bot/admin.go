@@ -28,7 +28,6 @@ const (
 	broadcastStageAwaitingName
 	broadcastStageAwaitingDraft
 	broadcastStageFiltering
-	broadcastStagePreview
 	broadcastStageConfirming
 )
 
@@ -566,13 +565,13 @@ func (h *Handler) handleBroadcastFilter(ctx context.Context, chatID int64, messa
 // Из broadcastStageConfirming → запускает рассылку.
 func (h *Handler) handleBroadcastConfirm(ctx context.Context, chatID int64) error {
 	s := h.getBroadcastSession(chatID)
-	if s == nil || (s.stage != broadcastStagePreview && s.stage != broadcastStageFiltering && s.stage != broadcastStageConfirming) {
+	if s == nil || (s.stage != broadcastStageFiltering && s.stage != broadcastStageConfirming) {
 		h.SendMessage(ctx, chatID, "❌ Нет активной рассылки для подтверждения.")
 		return nil
 	}
 
-	// Если estamos на этапе фильтров — показываем количество получателей.
-	if s.stage == broadcastStageFiltering || s.stage == broadcastStagePreview {
+	// Если мы на этапе фильтров — показываем количество получателей.
+	if s.stage == broadcastStageFiltering {
 		count, err := h.db.GetFilteredTelegramIDCount(ctx, s.filter)
 		if err != nil {
 			logger.Error("Failed to count broadcast recipients", zap.Error(err))
@@ -988,7 +987,7 @@ func containsEntityChar(s string) bool {
 // broadcastSessionActive reports whether an admin has an in-progress broadcast.
 func (h *Handler) broadcastSessionActive(chatID int64) bool {
 	s := h.getBroadcastSession(chatID)
-	return s != nil && (s.stage == broadcastStageAwaitingName || s.stage == broadcastStageAwaitingDraft || s.stage == broadcastStageFiltering || s.stage == broadcastStagePreview || s.stage == broadcastStageConfirming)
+	return s != nil && (s.stage == broadcastStageAwaitingName || s.stage == broadcastStageAwaitingDraft || s.stage == broadcastStageFiltering || s.stage == broadcastStageConfirming)
 }
 
 // HandleSend handles the /send command for admins to send a message to a specific user.

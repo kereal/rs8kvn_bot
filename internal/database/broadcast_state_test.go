@@ -255,3 +255,43 @@ func TestBroadcastRecipientLeaseRecoveryAndCancel(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, string(BroadcastStatusCanceled), stored.Status)
 }
+
+// TestBroadcastRecipientFinishSucceedsAfterCancel guards against the cancel
+// releasing sending leases: an in-flight delivery that completes after the
+// cancel transition must still be recorded (and counted), not rejected as stale.
+func TestBroadcastRecipientFinishSucceedsAfterCancel(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	svc := newTestService(t)
+	b := createBroadcastForStateTest(t, svc)
+	freePlan := testFreePlanID(t, svc)
+	require.NoError(t, svc.db.Create(&Subscription{
+		TelegramID: 710061, Username: "inflight", ClientID: "inflight-client", SubscriptionID: "inflight-sub",
+		Status: string(SubscriptionStatusActive), PlanID: freePlan,
+	}).Error)
+	require.True(t, func() bool {
+		claimed, err := svc.ClaimBroadcast(ctx, b.ID, time.Now().UTC())
+		return err == nil && claimed
+	}())
+	_, err := svc.SnapshotBroadcastRecipients(ctx, b.ID, BroadcastFilter{})
+	require.NoError(t, err)
+	claimed, err := svc.ClaimBroadcastRecipients(ctx, b.ID, time.Now().UTC(), 1)
+	require.NoError(t, err)
+	require.Len(t, claimed, 1)
+
+	canceled, err := svc.CancelBroadcast(ctx, b.ID, time.Now().UTC())
+	require.NoError(t, err)
+	assert.True(t, canceled)
+
+	// The in-flight delivery finishes after the cancel transition: it must be
+	// accepted and counted as delivered, not rejected as a stale lease.
+	require.NoError(t, svc.FinishBroadcastRecipient(ctx, b.ID, claimed[0].ID, claimed[0].Attempts, BroadcastRecipientSent, "", time.Now().UTC()))
+	total, sent, blocked, unreachable, failed, report, err := svc.GetBroadcastRecipientsStats(ctx, b.ID)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), total)
+	assert.Equal(t, int64(1), sent)
+	assert.Zero(t, blocked)
+	assert.Zero(t, unreachable)
+	assert.Zero(t, failed)
+	assert.Equal(t, []int64{710061}, report.Delivered)
+}

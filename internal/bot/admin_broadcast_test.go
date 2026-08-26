@@ -359,6 +359,35 @@ func TestBroadcast_ProcessFailurePersistsRetryMetadata(t *testing.T) {
 	assert.NotNil(t, stored.RetryAt)
 }
 
+func TestBroadcast_PlannedResumeDoesNotCountAsRetry(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	mockDB := testutil.NewDatabaseService()
+	mockBot := testutil.NewBotAPI()
+	handler := newBroadcastTestHandler(mockDB, mockBot)
+	campaign := &database.Broadcast{Name: "resume", MessageText: "text", Status: string(database.BroadcastStatusScheduled)}
+	require.NoError(t, mockDB.CreateBroadcast(ctx, campaign))
+
+	// One recipient already delivered, one still in flight: the campaign ends
+	// its time slice incomplete and must resume on the next pass without being
+	// counted as a failed launch.
+	mockDB.ClaimBroadcastRecipientsFunc = func(context.Context, uint, time.Time, int) ([]database.BroadcastRecipient, error) {
+		return nil, nil
+	}
+	mockDB.GetBroadcastRecipientsStatsFunc = func(context.Context, uint) (total, sent, blocked, unreachable, failed int64, report database.BroadcastDeliveryReport, err error) {
+		return 2, 1, 0, 0, 0, database.BroadcastDeliveryReport{Delivered: []int64{710001}}, nil
+	}
+
+	err := handler.broadcastWorker.processCampaign(ctx, campaign)
+	require.ErrorIs(t, err, errBroadcastIncomplete)
+
+	stored, getErr := mockDB.GetBroadcast(ctx, campaign.ID)
+	require.NoError(t, getErr)
+	assert.Equal(t, string(database.BroadcastStatusRunning), stored.Status, "incomplete campaign stays resumable")
+	assert.Zero(t, stored.RetryCount, "a planned resume must not count as a retry")
+	assert.Nil(t, stored.RetryAt)
+}
+
 func TestBroadcast_ScheduleRetryPersistsBackoffMetadata(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

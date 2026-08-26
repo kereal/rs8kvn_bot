@@ -478,26 +478,6 @@ func (s *Service) GetTelegramIDsBatch(ctx context.Context, offset, limit int) ([
 	return ids, nil
 }
 
-// GetFilteredTelegramIDsBatch возвращает batch telegram_id с учётом фильтра рассылки.
-// Фильтр применяется на стороне БД — в WHERE-условиях запроса.
-func (s *Service) GetFilteredTelegramIDsBatch(ctx context.Context, offset, limit int, filter BroadcastFilter) ([]int64, error) {
-	var ids []int64
-
-	q := applyBroadcastFilter(s.db.WithContext(ctx).Model(&Subscription{}), filter)
-	result := q.
-		Where("telegram_id > 0").
-		Distinct("telegram_id").
-		Order("telegram_id ASC").
-		Limit(limit).
-		Offset(offset).
-		Pluck("telegram_id", &ids)
-	if result.Error != nil {
-		return nil, fmt.Errorf("failed to get filtered telegram IDs batch: %w", result.Error)
-	}
-
-	return ids, nil
-}
-
 // GetFilteredTelegramIDCount возвращает количество уникальных telegram_id с учётом фильтра.
 func (s *Service) GetFilteredTelegramIDCount(ctx context.Context, filter BroadcastFilter) (int64, error) {
 	var count int64
