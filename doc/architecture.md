@@ -986,7 +986,7 @@ WHERE telegram_id > 0
 
 1. **`PricePaidCents` is NOT cumulative** — it stores the current product price, not total spent. For historical payment checks, the `orders` table is used (`ever_paid` filter).
 
-2. **Plan detection uses `plans` table** — `plan_type` filter queries `plans.name = 'free'`, not `PricePaidCents`, because plan IDs are stable identifiers.
+2. **Plan detection uses `plans` table** — the `plan_type` filter resolves the free plan by stable `plans.name = 'free'`, but eligibility is decided by payment state: `"paid"` = `product_id IS NOT NULL OR price_paid_cents > 0` (even on the free plan), `"free"` = free plan AND `product_id IS NULL AND price_paid_cents <= 0`.
 
 3. **SQLite compatibility** — date arithmetic uses `datetime('now', '-N days')` syntax, not PostgreSQL `INTERVAL`.
 
