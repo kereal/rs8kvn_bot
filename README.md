@@ -3,7 +3,7 @@
 [![GitHub release](https://img.shields.io/github/v/release/kereal/rs8kvn_bot?logo=github)](https://github.com/kereal/rs8kvn_bot/releases)
 [![CI](https://img.shields.io/github/actions/workflow/status/kereal/rs8kvn_bot/docker.yml?branch=main)](https://github.com/kereal/rs8kvn_bot/actions)
 [![Go](https://img.shields.io/badge/Go-1.25%2B-00ADD8?logo=go)](https://go.dev/)
-[![Coverage](https://img.shields.io/badge/coverage-65.3%25-green)](https://github.com/kereal/rs8kvn_bot/actions)
+[![Coverage](https://img.shields.io/badge/coverage-66.2%25-green)](https://github.com/kereal/rs8kvn_bot/actions)
 [![Docker](https://img.shields.io/badge/Docker-ghcr.io%2Fkereal%2Frs8kvn_bot-blue?logo=docker)](https://github.com/kereal/rs8kvn_bot/actions)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL%203.0-blue.svg)](LICENSE)
 
@@ -24,7 +24,7 @@
 - 🗄️ Daily database backups with rotation, embedded SQLite migrations
 - 🐛 Sentry error tracking (+ performance traces)
 - 🐳 Docker support with health checks, non-root user, UPX compression
-- 🧪 Unit + E2E tests (~63.1% aggregate coverage, race-safe, fuzzing)
+- 🧪 Unit + E2E tests (66.2% aggregate coverage, race-safe, fuzzing)
 - 🔒 Security hardening — X-Forwarded-For rightmost IP (S2), URL scheme allowlist http/https (S3), web↔bot dependency isolation (A1)
 
 ## Quick Start
@@ -41,7 +41,7 @@ docker run -d \
   ghcr.io/kereal/rs8kvn_bot:2.4.0
 ```
 
-> Registry tags are SemVer (`2.4.0`, `2.4`) and commit SHA — there is no `latest` tag.
+> The registry provides a `latest` tag as well as SemVer (`2.4.0`, `2.4`) and commit SHA tags. Pin a concrete SemVer or SHA tag when reproducible deployments are required.
 
 See **[Installation Guide](doc/installation.md)** for:
 - All 4 installation methods (Docker, Docker Compose, Build from Source, Air hot reload)
@@ -83,7 +83,8 @@ See **[Installation Guide](doc/installation.md)** for:
 | `/lastreg` | Show the last 10 registered users |
 | `/del <id>` | Delete a subscription by database ID |
 | `/setplan <subscription_id> <plan_id> [days]` | Change a subscription's plan through the service layer (reconciles VPN nodes, extends expiry; defaults to 30 days when none given) |
-| `/broadcast <message>` | Send a message to all users who have a subscription (MarkdownV2, special chars auto-escaped) |
+| `/broadcast` | Start an asynchronous broadcast: name → message → filters → preview → confirm |
+| `/broadcasts` | Show recent broadcasts; open details, cancel active campaigns, or retry failed recipients |
 | `/send <id or @username> <message>` | Send a message to a specific user |
 | `/refstats` | Show referral statistics (count per user from cache) |
 
@@ -92,16 +93,32 @@ See **[Installation Guide](doc/installation.md)** for:
 ```text
 /del 5                                    # Delete subscription with DB ID 5
 /setplan 5 3 30                            # Change subscription 5 to plan 3 for 30 days
-/broadcast 🔔 Важное обновление!          # Broadcast to all subscribers (MarkdownV2 supported)
+/broadcast                                 # Start a broadcast (name → message → preview → confirm)
 /send 123456789 Привет!                   # Private message by Telegram ID
 /send @username Привет!                   # Private message by username
 ```
 
-**Broadcast formatting:** messages are sent as MarkdownV2. Special characters
-(`.`, `!`, `_`, `*`, etc.) are escaped automatically, so plain text needs no
-manual escaping — but `*bold*`, `_italic_`, `` `code` `` and `[text](url)` are
-preserved. At the end the admin gets a report splitting successful deliveries,
-users who blocked the bot, and other errors.
+**Broadcast flow:** `/broadcast` asks for a broadcast *name*, then the message and
+filters. Confirmation creates a queued campaign; delivery runs in a durable
+background worker. The admin can send immediately or schedule the campaign for a
+future day and hour (day picker → hour picker, Moscow time); a scheduled campaign
+stays in `scheduled` state and is claimed by the worker only when `planned_at` is
+due. The audience is snapshotted in `broadcasts.recipients_state`, so
+changes to subscriptions cannot shift pagination or add duplicate recipients.
+Anonymous trials are excluded, `active` is the default status, and `all` is an
+explicit status choice; `paid` uses payment state rather than plan name.
+Messages preserve MarkdownV2 formatting and transient failures are retried twice
+with backoff. `/broadcasts` opens recent cards with details, cancellation for
+active campaigns, and retry for failed recipients. A restart resumes scheduled or
+running campaigns and releases stale recipient leases. The worker polls every 15 seconds;
+launch and persistence failures are stored in `broadcasts.last_error`, `retry_at`, and
+`retry_count` with exponential backoff. Delivery outcomes are split into `blocked` (Telegram
+explicitly says the user blocked the bot), `unreachable` (deactivated or unavailable chat),
+and other errors. The audience snapshot and per-recipient state are stored in the
+`broadcasts.recipients_state` JSON column; for the current user count this keeps recovery
+simple, and no separate broadcast-recipient table is required. The details card sends one
+compact admin message; complete delivered and blocked ID lists remain persisted in
+`delivery_report` and can be inspected from the database.
 
 ## Health Check & Web Endpoints
 
@@ -119,17 +136,11 @@ The bot exposes HTTP endpoints on port 8880:
 
 ### Invite/Trial Landing Page (`/i/{code}`)
 
-Each user can generate an invite code via the referral flow. The landing page validates the code, applies IP-based rate limiting (429 if exceeded), creates a trial subscription in 3x-ui, and renders a mobile-friendly page with:
-- Happ app download links (Android / iOS)
-- One-click "Добавить в Happ" button (`happ://add/` deep-link)
-- Copy-to-clipboard subscription URL
-- Telegram activation link
+Referral-based trial flow: validates the invite code, applies IP rate limiting, creates a trial subscription, and renders a mobile-friendly landing page with Happ download links, one-click deep-link import, copy-to-clipboard URL, and Telegram activation.
 
 ### Subscription Server (`/sub/{subID}`)
 
-Serves subscriptions with optional extra servers and custom headers. Validates `subID`, checks cache (240s TTL), fetches from all active nodes (3x-ui, proxman, fetch), merges responses, returns combined output. Fetch nodes use `subscription_url` directly; other types append `subID`.
-
-When `SUBSERVER_ACCESS_LOG` is set, each `/sub/{id}` request is appended to the configured access log file in a zap-console line without a message, caller, or field keys. The record includes timestamp, level, method, URL, response status, client IP, device headers, and User-Agent as space-separated values; values containing spaces are quoted, and empty optional values are written as `-`. The main log also records an INFO message when access logging is enabled. Access log writes are buffered asynchronously; if the file cannot be opened, the bot continues without the access log and writes an error to the main log.
+Serves merged subscriptions from all active nodes (3x-ui, proxman, fetch) with a 240s singleflight cache. Optional access logging is enabled via `SUBSERVER_ACCESS_LOG`.
 
 ## Traffic and Expiry
 
@@ -154,7 +165,7 @@ Releases are fully automated:
 
 1. Tag `main` with a SemVer tag and push it (e.g. `git tag -a v2.4.1 -m "Release v2.4.1" && git push origin v2.4.1`).
 2. CI/CD Pipeline runs tests, `go vet`, `go build`, golangci-lint and the **gosec** security scan.
-3. The Docker image is built and pushed to `ghcr.io/kereal/rs8kvn_bot` (tags: `2.4.0`, `2.4`, commit SHA).
+3. The Docker image is built and pushed to `ghcr.io/kereal/rs8kvn_bot` (tags: `latest`, SemVer, and commit SHA).
 4. A GitHub Release is created with an auto-generated changelog.
 
 ## Development
@@ -177,7 +188,7 @@ golangci-lint run ./...
 gosec ./...
 ```
 
-Test suite: ~65.3% aggregate coverage (generated with `go test -coverprofile`), race-safe, fuzzing, table-driven tests, integration tests with mock HTTP server.
+Test suite: 66.2% aggregate coverage in the latest documented run (generated with `go test -coverprofile`), race-safe, fuzzing, table-driven tests, integration tests with mock HTTP server.
 
 ### Build
 

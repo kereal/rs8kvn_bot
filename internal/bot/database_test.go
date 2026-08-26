@@ -275,4 +275,3 @@ func TestGetLatestSubscriptions_OnlyActive(t *testing.T) {
 	require.NoError(t, err, "GetLatestSubscriptions() error")
 	assert.Len(t, subs, 1)
 }
-

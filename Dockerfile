@@ -74,10 +74,9 @@ ENV GOGC=40
 # Health check port
 EXPOSE 8880
 
-# Health check - verifies process is running
-# Returns 0 if process found, 1 otherwise
+# Health check - verify the application and database are healthy
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
-    CMD pgrep rs8kvn_bot > /dev/null && exit 0 || exit 1
+    CMD wget -q -O - http://127.0.0.1:8880/healthz > /dev/null
 
 # Run the bot
 CMD ["/app/rs8kvn_bot"]

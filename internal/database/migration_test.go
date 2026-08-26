@@ -3,6 +3,7 @@ package database
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -19,7 +20,7 @@ func TestLatestEmbeddedMigrationVersion(t *testing.T) {
 
 	version, err := latestEmbeddedMigrationVersion()
 	require.NoError(t, err)
-	assert.Equal(t, 35, version)
+	assert.Equal(t, 36, version)
 }
 
 func TestRunMigrationsRejectsDatabaseNewerThanEmbedded(t *testing.T) {
@@ -32,19 +33,36 @@ func TestRunMigrationsRejectsDatabaseNewerThanEmbedded(t *testing.T) {
 
 	sqlDB, err := db.db.DB()
 	require.NoError(t, err)
-	_, err = sqlDB.Exec("UPDATE schema_migrations SET version = ?, dirty = ?", 36, false)
+	_, err = sqlDB.Exec("UPDATE schema_migrations SET version = ?, dirty = ?", 38, false)
 	require.NoError(t, err)
 
 	err = runMigrations(sqlDB)
 	require.Error(t, err)
-	assert.ErrorContains(t, err, "newer than the latest embedded migration 35")
+	assert.ErrorContains(t, err, "newer than the latest embedded migration 36")
 
 	var (
 		version int
 		dirty   bool
 	)
 	require.NoError(t, sqlDB.QueryRow("SELECT version, dirty FROM schema_migrations").Scan(&version, &dirty))
-	assert.Equal(t, 36, version)
+	assert.Equal(t, 38, version)
+	assert.False(t, dirty)
+}
+
+func TestRunMigrationsCollapsesLegacyBroadcastMigration37(t *testing.T) {
+	t.Parallel()
+	dbPath := filepath.Join(t.TempDir(), "legacy-037.db")
+	db, err := NewService(dbPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, db.Close()) })
+	sqlDB, err := db.db.DB()
+	require.NoError(t, err)
+	_, err = sqlDB.Exec("UPDATE schema_migrations SET version = ?, dirty = ?", 37, false)
+	require.NoError(t, err)
+	require.NoError(t, runMigrations(sqlDB))
+	version, dirty, err := migrationState(sqlDB)
+	require.NoError(t, err)
+	assert.Equal(t, uint(36), version)
 	assert.False(t, dirty)
 }
 
@@ -124,8 +142,69 @@ func TestRunMigrationsRepairsMetadataOnlyAfterCompleteNoTxMigration(t *testing.T
 		dirty   bool
 	)
 	require.NoError(t, sqlDB.QueryRow("SELECT version, dirty FROM schema_migrations").Scan(&version, &dirty))
-	assert.Equal(t, 35, version)
+	assert.Equal(t, 36, version)
 	assert.False(t, dirty)
+}
+
+func TestMigration_036StoresBroadcastStateOnExistingTable(t *testing.T) {
+	t.Parallel()
+
+	dbPath := filepath.Join(t.TempDir(), "broadcast-state.db")
+	db, err := NewService(dbPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, db.Close()) })
+
+	sqlDB, err := db.db.DB()
+	require.NoError(t, err)
+
+	rows, err := sqlDB.Query("PRAGMA table_info(broadcasts)")
+	require.NoError(t, err)
+	defer rows.Close()
+
+	foundState := false
+	foundColumns := map[string]bool{}
+	for rows.Next() {
+		var cid, notNull, pk int
+		var name, typeName string
+		var defaultValue any
+		require.NoError(t, rows.Scan(&cid, &name, &typeName, &notNull, &defaultValue, &pk))
+		foundColumns[name] = true
+		if name == "recipients_state" {
+			foundState = true
+			assert.Equal(t, 1, notNull)
+			assert.Contains(t, fmt.Sprint(defaultValue), "snapshot")
+		}
+	}
+	require.NoError(t, rows.Err())
+	assert.True(t, foundState)
+	for _, name := range []string{"unreachable_count", "last_error", "retry_at", "retry_count"} {
+		assert.True(t, foundColumns[name], "broadcasts must contain %s", name)
+	}
+
+	var tableCount int
+	require.NoError(t, sqlDB.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'broadcast_recipients'").Scan(&tableCount))
+	assert.Zero(t, tableCount)
+}
+
+func TestEnsureBroadcastColumns(t *testing.T) {
+	t.Parallel()
+	dbPath := filepath.Join(t.TempDir(), "legacy-broadcasts.db")
+	db, err := NewService(dbPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, db.Close()) })
+	sqlDB, err := db.db.DB()
+	require.NoError(t, err)
+	_, err = sqlDB.Exec("ALTER TABLE broadcasts DROP COLUMN recipients_state")
+	require.NoError(t, err)
+	require.NoError(t, ensureBroadcastColumns(sqlDB))
+	for _, name := range []string{"recipients_state", "unreachable_count", "last_error", "retry_at", "retry_count"} {
+		var count int
+		require.NoError(t, sqlDB.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('broadcasts') WHERE name = ?`, name).Scan(&count))
+		assert.Equal(t, 1, count, "legacy schema must gain %s", name)
+	}
+	var count int
+	require.NoError(t, sqlDB.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('broadcasts') WHERE name = 'recipients_state'`).Scan(&count))
+	assert.Equal(t, 1, count)
 }
 
 func TestMigrationVersionToInt(t *testing.T) {
@@ -379,9 +458,9 @@ func TestMigration_032_NormalizesInvalidRetryState(t *testing.T) {
 
 	// Return to the pre-032 schema, where legacy invalid retry state is still
 	// representable, then insert the row that caused the production risk.
-	// Steps(-4) skips 035, 034, 033 and 032: 033 rebuilds subscriptions only,
-	// but the step counter must land on the 031 schema for this test's intent.
-	require.NoError(t, m.Steps(-4))
+	// Steps(-5) skips the broadcast migration and lands on the
+	// 031 schema for this test's intent.
+	require.NoError(t, m.Steps(-5))
 
 	_, err = sqlDB.Exec(`INSERT INTO subscription_nodes
 		(subscription_id, node_id, status, retry_count, retry_at, updated_at)
@@ -579,9 +658,9 @@ func TestMigration_033_NormalizesInvalidStatuses(t *testing.T) {
 	t.Cleanup(func() { _, _ = m.Close() })
 
 	// Return to the pre-033 schema, where arbitrary statuses are still
-	// representable, then insert the legacy rows. Steps(-3) also reverts 035
-	// and 034 so the counter lands on the 032 schema.
-	require.NoError(t, m.Steps(-3))
+	// representable, then insert the legacy rows. Steps(-4) reverts the
+	// broadcast migration and lands on 032.
+	require.NoError(t, m.Steps(-4))
 
 	_, err = sqlDB.Exec(`INSERT INTO subscriptions (telegram_id, username, client_id, subscription_id, status)
 		VALUES (777001, 'legacy-garbage', 'client-garbage', 'sub-garbage', 'garbage')`)

@@ -251,12 +251,14 @@ func (s *Service) GetSubscriptionStatus(ctx context.Context, subscriptionID stri
 	return row.Status, row.ExpiresAt, nil
 }
 
-// GetWithPlanAndNodes returns a subscription (status=active) by subscription ID
-// together with its plan and active nodes, via JOINs through plan_nodes.
+// GetWithPlanAndNodes returns a currently servable subscription (active and
+// not expired) by subscription ID together with its plan and active nodes.
 func (s *Service) GetWithPlanAndNodes(ctx context.Context, subscriptionID string) (*SubscriptionFull, error) {
 	var result SubscriptionFull
 
-	subQuery := s.db.WithContext(ctx).Where("subscription_id = ? AND status = ?", subscriptionID, string(SubscriptionStatusActive))
+	subQuery := s.db.WithContext(ctx).
+		Where("subscription_id = ? AND status = ? AND (expires_at IS NULL OR expires_at > ?)",
+			subscriptionID, string(SubscriptionStatusActive), time.Now())
 
 	err := subQuery.First(&result.Subscription).Error
 	if err != nil {
@@ -474,6 +476,20 @@ func (s *Service) GetTelegramIDsBatch(ctx context.Context, offset, limit int) ([
 	}
 
 	return ids, nil
+}
+
+// GetFilteredTelegramIDCount возвращает количество уникальных telegram_id с учётом фильтра.
+func (s *Service) GetFilteredTelegramIDCount(ctx context.Context, filter BroadcastFilter) (int64, error) {
+	var count int64
+
+	q := applyBroadcastFilter(s.db.WithContext(ctx).Model(&Subscription{}), filter).
+		Where("telegram_id > 0")
+	result := q.Distinct("telegram_id").Count(&count)
+	if result.Error != nil {
+		return 0, fmt.Errorf("failed to get filtered telegram ID count: %w", result.Error)
+	}
+
+	return count, nil
 }
 
 // GetTotalTelegramIDCount returns the count of unique Telegram IDs for active subscriptions eligible for broadcast.

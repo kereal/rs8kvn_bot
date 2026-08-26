@@ -521,6 +521,7 @@ func main() {
 	svc.handler.StartCacheCleanup(ctx, bot.CacheTTL/2)
 	svc.handler.StartRateLimiterCleanup(ctx, bot.CacheTTL, bot.CacheTTL*2)
 	svc.handler.StartReferralCacheSync(ctx)
+	svc.handler.StartBroadcastWorker(ctx)
 	bgWg := startBackgroundWorkers(ctx, svc.handler, svc.subService, svc.syncService, svc.orderService, dbService, cfg)
 
 	if webServer != nil {

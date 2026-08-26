@@ -328,7 +328,13 @@ func (s *Service) ConfirmOrderPaidCAS(ctx context.Context, orderID uint, paidAt,
 		expiryCopy := newExpiry
 
 		sub.ExpiresAt = &expiryCopy
-		if applyPlan != nil {
+		// Plan reconciliation runs only when the purchased plan actually differs
+		// from the subscription's current one. A same-plan renewal extends the
+		// expiry but must NOT recreate pending_update rows: that path re-syncs
+		// the VPN client and resets its traffic counter, which would wipe the
+		// user's remaining quota mid-period. Renewals only touch the DB; the
+		// panel keeps serving the client (its own 30-day auto-renew continues).
+		if applyPlan != nil && currentSub.PlanID != product.PlanID {
 			err := applyPlan(ctx, tx, sub.ID, product.PlanID)
 			if err != nil {
 				return fmt.Errorf("apply plan after payment: %w", err)
@@ -449,6 +455,13 @@ func (s *Service) CancelPaidOrderAndDowngradeCAS(ctx context.Context, provider s
 
 		var activePaid int64
 
+		// Count all paid orders for this subscription, INCLUDING the order
+		// being charged back (it is still OrderStatusPaid at this point in
+		// the transaction). This is intentional: if this is the only paid
+		// order, activePaid == 1, which correctly triggers a downgrade to
+		// free. If another active paid order exists, activePaid > 1 and
+		// access is preserved. The count is taken BEFORE the order status
+		// update below, so it reflects the pre-chargeback state.
 		err = tx.Model(&Order{}).
 			Where("subscription_id = ? AND status = ? AND (expires_at IS NULL OR expires_at > ?)", order.SubscriptionID, OrderStatusPaid, now).
 			Count(&activePaid).Error

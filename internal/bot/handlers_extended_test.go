@@ -519,6 +519,8 @@ func TestFormatUserLink_NumericUsername(t *testing.T) {
 		{"numeric username different id", "99", 11, "[99](tg://user?id=11)"},
 		{"empty username with id", "", 11, "[unknown](tg://user?id=11)"},
 		{"alphabetic username", "user11", 11, "[@user11](https://t.me/user11)"},
+		{"tgId_ fallback with id", "tgId_123456", 123456, "[unknown](tg://user?id=123456)"},
+		{"tgId_ fallback with different id", "tgId_111", 222, "[unknown](tg://user?id=222)"},
 		{"zero id empty username", "", 0, "[unknown](#)"},
 	}
 

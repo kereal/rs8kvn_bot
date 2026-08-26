@@ -1,0 +1,266 @@
+package database
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func TestBroadcastCRUD(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	b := &Broadcast{
+		Name:        "Акция",
+		Filters:     "{}",
+		MessageText: "Привет всем!",
+		Status:      string(BroadcastStatusCompleted),
+	}
+	require.NoError(t, svc.CreateBroadcast(ctx, b))
+	require.NotZero(t, b.ID)
+
+	got, err := svc.GetBroadcast(ctx, b.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "Акция", got.Name)
+	assert.Equal(t, string(BroadcastStatusCompleted), got.Status)
+
+	finished := time.Now().UTC()
+	upd := &Broadcast{
+		ID:              b.ID,
+		Name:            got.Name,
+		Filters:         got.Filters,
+		MessageText:     got.MessageText,
+		Status:          string(BroadcastStatusCompleted),
+		FinishedAt:      &finished,
+		RecipientsTotal: 4,
+		SentCount:       2,
+		BlockedCount:    1,
+		FailedCount:     1,
+	}
+	require.NoError(t, upd.SetDeliveryReport(&BroadcastDeliveryReport{
+		Delivered: []int64{111, 222},
+		Blocked:   []int64{333},
+		Errors:    []BroadcastSendError{{TelegramID: 444, Error: "boom"}},
+	}))
+	require.NoError(t, svc.UpdateBroadcast(ctx, upd))
+
+	got2, err := svc.GetBroadcast(ctx, b.ID)
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), got2.SentCount)
+	assert.Equal(t, int64(1), got2.BlockedCount)
+	assert.Equal(t, int64(1), got2.FailedCount)
+
+	parsed, err := got2.ParseDeliveryReport()
+	require.NoError(t, err)
+	assert.Equal(t, []int64{111, 222}, parsed.Delivered)
+	assert.Equal(t, []int64{333}, parsed.Blocked)
+	require.Len(t, parsed.Errors, 1)
+	assert.Equal(t, int64(444), parsed.Errors[0].TelegramID)
+	assert.Equal(t, "boom", parsed.Errors[0].Error)
+}
+
+func TestGetRunnableBroadcastsRespectsPlannedAt(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	create := func(name string, plannedAt *time.Time) uint {
+		b := &Broadcast{Name: name, MessageText: "text", Status: string(BroadcastStatusScheduled), PlannedAt: plannedAt}
+		require.NoError(t, svc.CreateBroadcast(ctx, b))
+		return b.ID
+	}
+
+	dueNow := create("now", nil)
+	past := create("past", ptrTime(now.Add(-time.Hour)))
+	future := create("future", ptrTime(now.Add(time.Hour)))
+
+	runnable, err := svc.GetRunnableBroadcasts(ctx, now)
+	require.NoError(t, err)
+	var ids []uint
+	for _, b := range runnable {
+		ids = append(ids, b.ID)
+	}
+	assert.Contains(t, ids, dueNow, "nil planned_at starts immediately")
+	assert.Contains(t, ids, past, "past planned_at starts immediately")
+	assert.NotContains(t, ids, future, "future planned_at must be held until its time")
+}
+
+func TestBroadcastNotFound(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	_, err := svc.GetBroadcast(ctx, 999)
+	assert.ErrorIs(t, err, ErrBroadcastNotFound)
+
+	err = svc.UpdateBroadcast(ctx, &Broadcast{ID: 999})
+	assert.ErrorIs(t, err, ErrBroadcastNotFound)
+}
+
+func TestBroadcastListNewestFirst(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	for i := range 3 {
+		require.NoError(t, svc.CreateBroadcast(ctx, &Broadcast{
+			Name:        fmt.Sprintf("Рассылка %d", i+1),
+			MessageText: "x",
+		}))
+	}
+
+	broadcasts, err := svc.ListBroadcasts(ctx, 10)
+	require.NoError(t, err)
+	require.Len(t, broadcasts, 3)
+	assert.Equal(t, "Рассылка 3", broadcasts[0].Name)
+	assert.Equal(t, "Рассылка 1", broadcasts[2].Name)
+
+	limited, err := svc.ListBroadcasts(ctx, 2)
+	require.NoError(t, err)
+	require.Len(t, limited, 2)
+	assert.Equal(t, "Рассылка 3", limited[0].Name)
+}
+
+func TestBroadcastStatusCheckConstraint(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	// CHECK-constraint миграции 036: недопустимый статус не сохраняется.
+	err := svc.db.WithContext(ctx).Create(&Broadcast{
+		Name:        "bad",
+		MessageText: "x",
+		Status:      "not-a-status",
+	}).Error
+	assert.Error(t, err)
+}
+
+func TestBroadcastJSONHelpers(t *testing.T) {
+	t.Parallel()
+
+	// ParseBroadcastFilter — typed API для фильтров аудитории.
+	f, err := ParseBroadcastFilter(`{"plan_type":"paid"}`)
+	require.NoError(t, err)
+	assert.Equal(t, "paid", f.PlanType)
+
+	// Пустой отчёт возвращает инициализированные (не nil) списки.
+	empty, err := (&Broadcast{}).ParseDeliveryReport()
+	require.NoError(t, err)
+	assert.NotNil(t, empty.Delivered)
+	assert.Empty(t, empty.Delivered)
+	assert.NotNil(t, empty.Blocked)
+	assert.NotNil(t, empty.Errors)
+}
+
+func TestParseBroadcastFilter_Empty(t *testing.T) {
+	t.Parallel()
+
+	f, err := ParseBroadcastFilter("")
+	require.NoError(t, err)
+	assert.True(t, f.IsEmpty())
+
+	f, err = ParseBroadcastFilter("{}")
+	require.NoError(t, err)
+	assert.True(t, f.IsEmpty())
+}
+
+func TestParseBroadcastFilter_InvalidJSON(t *testing.T) {
+	t.Parallel()
+
+	_, err := ParseBroadcastFilter("not json")
+	assert.Error(t, err)
+}
+
+func TestParseBroadcastFilter_FullFilter(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now().UTC().Truncate(time.Second)
+	daysAgo30 := now.AddDate(0, 0, -30)
+
+	f, err := ParseBroadcastFilter(fmt.Sprintf(`{"plan_type":"paid","subscription_status":"active","registered_after":"%s","inactive_days":30}`, daysAgo30.Format(time.RFC3339)))
+	require.NoError(t, err)
+	assert.Equal(t, "paid", f.PlanType)
+	assert.Equal(t, "active", f.SubscriptionStatus)
+	assert.NotNil(t, f.RegisteredAfter)
+	assert.NotNil(t, f.InactiveDays)
+	assert.Equal(t, 30, *f.InactiveDays)
+}
+
+func TestBroadcastFilter_String(t *testing.T) {
+	t.Parallel()
+
+	f := BroadcastFilter{}
+	assert.Equal(t, "Все активные пользователи", f.String())
+
+	f.PlanType = "paid"
+	assert.Contains(t, f.String(), "Платные")
+
+	days := 30
+	f.InactiveDays = &days
+	assert.Contains(t, f.String(), "Не активны > 30 дн.")
+}
+
+func TestBroadcastFilter_MarshalJSON(t *testing.T) {
+	t.Parallel()
+
+	f := BroadcastFilter{PlanType: "paid"}
+	data, err := json.Marshal(f)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "plan_type")
+	assert.Contains(t, string(data), "paid")
+}
+
+func TestSnapshotBroadcastRecipientsExcludesTrialsAndIsIdempotent(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+	ctx := context.Background()
+	freePlan := testFreePlanID(t, svc)
+
+	require.NoError(t, svc.db.Create(&Subscription{
+		TelegramID: 700001, Username: "free", ClientID: "client-free", SubscriptionID: "sub-free",
+		PlanID: freePlan, Status: string(SubscriptionStatusActive),
+	}).Error)
+	require.NoError(t, svc.db.Create(&Subscription{
+		TelegramID: 700002, Username: "trial", ClientID: "client-trial", SubscriptionID: "sub-trial",
+		PlanID: 1, Status: string(SubscriptionStatusActive),
+	}).Error)
+	require.NoError(t, svc.CreateBroadcast(ctx, &Broadcast{
+		Name: "snapshot", MessageText: "text", Status: string(BroadcastStatusRunning),
+	}))
+
+	first, err := svc.SnapshotBroadcastRecipients(ctx, 1, BroadcastFilter{SubscriptionStatus: "all"})
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), first)
+
+	second, err := svc.SnapshotBroadcastRecipients(ctx, 1, BroadcastFilter{SubscriptionStatus: "all"})
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), second)
+
+	broadcast, err := svc.GetBroadcast(ctx, 1)
+	require.NoError(t, err)
+	state, err := parseBroadcastRecipientState(broadcast)
+	require.NoError(t, err)
+	require.Len(t, state.Recipients, 1)
+	assert.Equal(t, int64(700001), state.Recipients[0].TelegramID)
+	assert.True(t, state.Snapshot)
+}
+
+func TestBroadcastFilterRejectsExpiredStatus(t *testing.T) {
+	t.Parallel()
+
+	_, err := ParseBroadcastFilter(`{"subscription_status":"expired"}`)
+	assert.Error(t, err)
+}

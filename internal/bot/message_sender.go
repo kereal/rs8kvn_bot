@@ -49,7 +49,7 @@ func (ms *MessageSender) SendWithError(ctx context.Context, msg tgbotapi.Message
 		metrics.TelegramAPICallsTotal.WithLabelValues("send", "error").Inc()
 		metrics.TelegramAPIDuration.WithLabelValues("send").Observe(duration)
 
-		if isUserBlockedError(err) {
+		if isUserBlockedOrGoneError(err) {
 			logger.Warn("Failed to send message", zap.Error(err))
 		} else {
 			logger.Error("Failed to send message", zap.Error(err))
@@ -74,7 +74,7 @@ func (ms *MessageSender) SafeSend(chattable tgbotapi.Chattable) {
 		metrics.TelegramAPICallsTotal.WithLabelValues("send", "error").Inc()
 		metrics.TelegramAPIDuration.WithLabelValues("send").Observe(duration)
 
-		if isUserBlockedError(err) {
+		if isUserBlockedOrGoneError(err) {
 			logger.Warn("Failed to send message", zap.Error(err))
 		} else {
 			logger.Error("Failed to send message", zap.Error(err))
@@ -88,5 +88,12 @@ func (ms *MessageSender) SafeSend(chattable tgbotapi.Chattable) {
 // SendMessage sends a plain text message to a chat.
 func (ms *MessageSender) SendMessage(ctx context.Context, chatID int64, text string) {
 	msg := tgbotapi.NewMessage(chatID, text)
+	ms.Send(ctx, msg)
+}
+
+// SendMessageMarkdown sends a Markdown-formatted message to a chat.
+func (ms *MessageSender) SendMessageMarkdown(ctx context.Context, chatID int64, text string) {
+	msg := tgbotapi.NewMessage(chatID, text)
+	msg.ParseMode = "Markdown"
 	ms.Send(ctx, msg)
 }

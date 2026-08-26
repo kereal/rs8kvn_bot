@@ -7,7 +7,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kereal/rs8kvn_bot/internal/bot"
+	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
+	"github.com/kereal/rs8kvn_bot/internal/testutil"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/stretchr/testify/assert"
@@ -264,7 +267,11 @@ func TestE2E_SetPlanCommand_ArgValidation(t *testing.T) {
 	}
 }
 
-// runBroadcastFlow drives the draft -> preview -> confirm broadcast flow end to end.
+// broadcastName is the fixed broadcast name used by runBroadcastFlow.
+const broadcastName = "E2E рассылка"
+
+// runBroadcastFlow drives the name -> draft -> preview -> confirm broadcast
+// flow end to end.
 func runBroadcastFlow(t *testing.T, env *e2eTestEnv, adminID int64, draftText string) {
 	t.Helper()
 
@@ -283,14 +290,35 @@ func runBroadcastFlow(t *testing.T, env *e2eTestEnv, adminID int64, draftText st
 		Message: &tgbotapi.Message{
 			Chat: &tgbotapi.Chat{ID: adminID},
 			From: &tgbotapi.User{ID: adminID, UserName: "admin"},
+			Text: broadcastName,
+		},
+	})
+
+	env.handler.HandleBroadcastDraft(ctx, tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat: &tgbotapi.Chat{ID: adminID},
+			From: &tgbotapi.User{ID: adminID, UserName: "admin"},
 			Text: draftText,
 		},
 	})
 
+	// Шаг 1: показать количество получателей.
 	env.handler.HandleCallback(ctx, tgbotapi.Update{
 		CallbackQuery: &tgbotapi.CallbackQuery{
 			From: &tgbotapi.User{ID: adminID, UserName: "admin"},
 			Data: "broadcast_confirm",
+			Message: &tgbotapi.Message{
+				Chat:      &tgbotapi.Chat{ID: adminID},
+				MessageID: 1,
+			},
+		},
+	})
+
+	// Шаг 2: подтвердить и запустить рассылку.
+	env.handler.HandleCallback(ctx, tgbotapi.Update{
+		CallbackQuery: &tgbotapi.CallbackQuery{
+			From: &tgbotapi.User{ID: adminID, UserName: "admin"},
+			Data: "broadcast_final_confirm",
 			Message: &tgbotapi.Message{
 				Chat:      &tgbotapi.Chat{ID: adminID},
 				MessageID: 1,
@@ -323,9 +351,25 @@ func TestE2E_BroadcastCommand_Success(t *testing.T) {
 
 	runBroadcastFlow(t, env, adminID, "Hello everyone!")
 
+	b := waitForBroadcastFinished(t, env)
 	assert.True(t, env.botAPI.SendCalledSafe())
-	assert.GreaterOrEqual(t, env.botAPI.SendCount, 3, "Should send to at least 3 users")
-	assert.Contains(t, env.botAPI.LastSentText, "Рассылка завершена")
+	assert.GreaterOrEqual(t, env.botAPI.SendCountSafe(), 3, "Should send to at least 3 users")
+	assert.Contains(t, env.botAPI.LastSentTextSafe(), "Рассылка завершена")
+	assert.Contains(t, env.botAPI.LastSentTextSafe(), "Рассылка #1")
+
+	// Рассылка сохранена со счётчиками и JSON-отчётом.
+	assert.Equal(t, broadcastName, b.Name)
+	assert.Equal(t, string(database.BroadcastStatusCompleted), b.Status)
+	assert.Equal(t, int64(3), b.RecipientsTotal)
+	assert.Equal(t, int64(3), b.SentCount)
+	assert.Equal(t, int64(0), b.BlockedCount)
+	assert.Equal(t, int64(0), b.FailedCount)
+
+	report, err := b.ParseDeliveryReport()
+	require.NoError(t, err)
+	assert.Len(t, report.Delivered, 3)
+	assert.Empty(t, report.Blocked)
+	assert.Empty(t, report.Errors)
 }
 
 func TestE2E_BroadcastCommand_NoArgs(t *testing.T) {
@@ -357,7 +401,7 @@ func TestE2E_BroadcastCommand_NoArgs(t *testing.T) {
 	env.handler.HandleBroadcast(ctx, update)
 
 	assert.True(t, env.botAPI.SendCalledSafe())
-	assert.Contains(t, env.botAPI.LastSentText, "Отправьте сообщение")
+	assert.Contains(t, env.botAPI.LastSentText, "название")
 }
 
 func TestE2E_BroadcastCommand_NoUsers(t *testing.T) {
@@ -376,8 +420,10 @@ func TestE2E_BroadcastCommand_NoUsers(t *testing.T) {
 
 	runBroadcastFlow(t, env, adminID, "Hello")
 
+	b := waitForBroadcastFinished(t, env)
 	assert.True(t, env.botAPI.SendCalledSafe())
-	assert.Contains(t, env.botAPI.LastSentText, "Всего: 0")
+	assert.Equal(t, int64(0), b.RecipientsTotal)
+	assert.Contains(t, env.botAPI.LastSentTextSafe(), "Отправлено: 0")
 }
 
 func TestE2E_BroadcastCommand_SomeFailures(t *testing.T) {
@@ -416,10 +462,17 @@ func TestE2E_BroadcastCommand_SomeFailures(t *testing.T) {
 		Message: &tgbotapi.Message{
 			Chat: &tgbotapi.Chat{ID: adminID},
 			From: &tgbotapi.User{ID: adminID, UserName: "admin"},
+			Text: broadcastName,
+		},
+	})
+	env.handler.HandleBroadcastDraft(ctx, tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Chat: &tgbotapi.Chat{ID: adminID},
+			From: &tgbotapi.User{ID: adminID, UserName: "admin"},
 			Text: "Hello",
 		},
 	})
-	env.botAPI.SendError = fmt.Errorf("send failed")
+	// Шаг 1: показать количество получателей (без ошибки).
 	env.handler.HandleCallback(ctx, tgbotapi.Update{
 		CallbackQuery: &tgbotapi.CallbackQuery{
 			From: &tgbotapi.User{ID: adminID, UserName: "admin"},
@@ -431,9 +484,23 @@ func TestE2E_BroadcastCommand_SomeFailures(t *testing.T) {
 		},
 	})
 
+	// Шаг 2: установить ошибку и запустить рассылку.
+	env.botAPI.SendError = fmt.Errorf("send failed")
+	env.handler.HandleCallback(ctx, tgbotapi.Update{
+		CallbackQuery: &tgbotapi.CallbackQuery{
+			From: &tgbotapi.User{ID: adminID, UserName: "admin"},
+			Data: "broadcast_final_confirm",
+			Message: &tgbotapi.Message{
+				Chat:      &tgbotapi.Chat{ID: adminID},
+				MessageID: 1,
+			},
+		},
+	})
+
+	_ = waitForBroadcastFinished(t, env)
 	assert.True(t, env.botAPI.SendCalledSafe())
-	assert.Contains(t, env.botAPI.LastSentText, "Рассылка завершена")
-	assert.Contains(t, env.botAPI.LastSentText, "Ошибок: 3")
+	assert.Contains(t, env.botAPI.LastSentTextSafe(), "Рассылка завершена")
+	assert.Contains(t, env.botAPI.LastSentTextSafe(), "Ошибок: 3")
 }
 
 func TestE2E_SendCommand_ByTelegramID(t *testing.T) {
@@ -676,7 +743,8 @@ func TestE2E_BroadcastCommand_PreservesFormatting(t *testing.T) {
 	const draft = "Test *bold* _italic_ [link](https://example.com)"
 	runBroadcastFlow(t, env, adminID, draft)
 
-	assert.Contains(t, env.botAPI.LastSentText, "Рассылка завершена")
+	_ = waitForBroadcastFinished(t, env)
+	assert.Contains(t, env.botAPI.LastSentTextSafe(), "Рассылка завершена")
 
 	// Formatting must be delivered as-is (MarkdownV2, not escaped with backslashes).
 	var delivered bool
@@ -954,4 +1022,100 @@ func TestE2E_VersionCommand_NonAdmin(t *testing.T) {
 	env.handler.HandleVersion(ctx, update)
 
 	assert.False(t, env.botAPI.SendCalledSafe(), "Non-admin should not receive version info")
+}
+
+// TestE2E_BroadcastCrashMidChunksResumesAfterRestart моделирует падение воркера
+// после доставки первого чанка многочастной рассылки (3 чанка по 4096 байт) и
+// проверяет корректное возобновление после рестарта процесса: чанк 0 повторно
+// не отправляется, доставка продолжается со второго чанка.
+//
+// Краш симулируется через реальный API БД — ровно то состояние, которое
+// остаётся после смерти процесса между чанками: кампания Running, получатель
+// в статусе Sending с сохранённым NextChunk=1 и протухшей арендой (прошло
+// больше broadcastRecipientLease с момента падения). Рестарт идёт через
+// прод-путь StartBroadcastWorker на той же БД.
+func TestE2E_BroadcastCrashMidChunksResumesAfterRestart(t *testing.T) {
+	t.Parallel()
+
+	env := setupE2EEnv(t)
+	defer func() {
+		err := env.db.Close()
+		if err != nil {
+			t.Logf("Warning: failed to close database: %v", err)
+		}
+	}()
+
+	ctx := context.Background()
+	userChatID := int64(500001)
+
+	// Получатель рассылки — тот же путь, что и в остальных e2e-тестах рассылок.
+	_, err := env.subService.Create(ctx, userChatID, "crashuser", "")
+	require.NoError(t, err)
+
+	// Три чанка ровно по config.MaxTelegramMessageLen байт: splitMessage режет
+	// по границе maxLen, поэтому получаются ровно 3 различимых чанка.
+	text := strings.Repeat("1", config.MaxTelegramMessageLen) +
+		strings.Repeat("2", config.MaxTelegramMessageLen) +
+		strings.Repeat("3", config.MaxTelegramMessageLen)
+
+	b := &database.Broadcast{
+		Name: "crash resume", MessageText: text, Filters: "{}",
+		Status: string(database.BroadcastStatusScheduled),
+	}
+	require.NoError(t, env.db.CreateBroadcast(ctx, b))
+
+	// Фаза 1 (до «краша»): кампания захвачена, аудитория снэпшотится — как при
+	// обычном запуске. Время краша — 3 минуты назад, чтобы аренда получателя
+	// уже протухла к моменту рестарта (broadcastRecipientLease = 2 мин).
+	crashTime := time.Now().UTC().Add(-3 * time.Minute)
+	claimed, err := env.db.ClaimBroadcast(ctx, b.ID, crashTime)
+	require.NoError(t, err)
+	require.True(t, claimed)
+	total, err := env.db.SnapshotBroadcastRecipients(ctx, b.ID, database.BroadcastFilter{})
+	require.NoError(t, err)
+	require.Equal(t, int64(1), total)
+
+	// «Краш» после доставки чанка 0: получатель остаётся в Sending с
+	// NextChunk=1 — ровно то, что БД хранит после падения процесса между
+	// чанками. Финальный статус (Sent) не записан, аренда протухла.
+	recipients, err := env.db.ClaimBroadcastRecipients(ctx, b.ID, crashTime, 10)
+	require.NoError(t, err)
+	require.Len(t, recipients, 1)
+	require.NoError(t, env.db.UpdateBroadcastRecipientProgress(ctx, b.ID, recipients[0].ID, recipients[0].Attempts, 1, crashTime))
+
+	// «Рестарт процесса»: новый handler, новый бот, та же БД. Worker стартует
+	// через прод-путь StartBroadcastWorker.
+	restartBot := testutil.NewBotAPI()
+	restartHandler := bot.NewHandler(restartBot, env.cfg, env.db, env.botConfig, env.subService, "")
+	runCtx, cancel := context.WithCancel(ctx)
+	restartHandler.StartBroadcastWorker(runCtx)
+	t.Cleanup(func() {
+		cancel()
+		restartHandler.WaitForBackgroundGoroutines()
+	})
+
+	require.Eventually(t, func() bool {
+		cur, err := env.db.GetBroadcast(ctx, b.ID)
+		return err == nil && cur.Status == string(database.BroadcastStatusCompleted)
+	}, 5*time.Second, 10*time.Millisecond)
+
+	// Чанк 0 не отправлен повторно: пользователю ушли ровно два сообщения —
+	// второй и третий чанки.
+	var userSends []string
+	for _, msg := range restartBot.GetAllSentMessages() {
+		if msg.ChatID == userChatID {
+			userSends = append(userSends, msg.Text)
+		}
+	}
+	require.Len(t, userSends, 2, "chunk 0 was already delivered — only chunks 2 and 3 must be sent")
+	assert.Contains(t, userSends[0], strings.Repeat("2", 64))
+	assert.Contains(t, userSends[1], strings.Repeat("3", 64))
+	assert.NotContains(t, strings.Join(userSends, ""), strings.Repeat("1", 64), "already delivered chunk must not be re-sent")
+
+	cur, err := env.db.GetBroadcast(ctx, b.ID)
+	require.NoError(t, err)
+	assert.Equal(t, string(database.BroadcastStatusCompleted), cur.Status)
+	assert.Equal(t, int64(1), cur.RecipientsTotal)
+	assert.Equal(t, int64(1), cur.SentCount)
+	assert.Equal(t, int64(0), cur.FailedCount)
 }

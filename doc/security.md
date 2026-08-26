@@ -1,19 +1,8 @@
 # Security Policy — rs8kvn_bot
 
-**Version:** 2.3.11
-**Last updated:** 2026-08-11
-
 ---
 
-## Supported Versions
-
-| Version | Supported | Security Updates |
-|---------|-----------|------------------|
-| v2.3.x  | ✅ Yes | ✅ Active |
-| v2.2.x  | ⚠️ Partial (critical only) | ⚠️ Limited |
-| < v2.2  | ❌ No | ❌ End-of-life |
-
-We recommend always running the latest stable version.
+Use the latest stable image tag. For reproducible deployments, pin a concrete SemVer or commit SHA tag.
 
 ---
 
@@ -47,15 +36,14 @@ Instead, contact us privately:
 | Component | Protection |
 |-----------|------------|
 | Telegram bot | User identification via `chat_id`; admin commands check `TELEGRAM_ADMIN_ID` |
-| VPN panels (3x-ui / proxman) | API token per node (`nodes.api_token`) via Bearer header over HTTPS |
+| VPN panels (3x-ui / proxman) | API token per node (`nodes.api_token`) via Bearer header; HTTPS is recommended for production |
 | Fetch nodes | No API token; `subscription_url` fetched via HTTP GET (no client management) |
 | Trial Telegram IDs | Positive = bound users, Negative = unbound trial subscriptions, 0 = unused |
 
 ### 2. Input Validation
 
-- **Extra servers file:** Path traversal checks (`..`, system dirs) before opening
 - **URLs (S3):** `validateURL()` restricts schemes to `http` and `https` only — prevents `file://`, `gopher://`, and other schemes that could enable SSRF
-- **HTTPS enforcement:** All sensitive VPN panel endpoints (`nodes.host`) require HTTPS
+- **Node transport:** `nodes.host` accepts HTTP or HTTPS; use HTTPS for production panel traffic and keep HTTP limited to trusted private networks
 - **Invite codes:** Alphanumeric regex validation
 - **Telegram IDs:** Integer parsing with overflow protection
 - **Type-safe env vars:** `internal/flag/` typed registry validates and parses all env vars at config load time
@@ -85,8 +73,8 @@ Instead, contact us privately:
 - **Panic recovery** in all goroutines (`recoverAndReport`)
 - **Graceful shutdown** — in-flight requests allowed to complete
 - **RetryWithBackoff** retries VPN panel calls on transient errors (exponential backoff + jitter, up to 3 retries)
-- **Stale cache fallback** for Subscription server if panel is down
-- **Circuit breaker** state tracked via Prometheus metrics (`circuit_breaker_state`)
+- **Fail-closed cache revalidation** for the Subscription server: cached access is not served when subscription status cannot be checked
+- **Circuit breaker:** implemented and tested, but not wired into the live XUI client path; production resilience currently relies on timeout and retry/backoff
 
 ### 6. Code Quality
 
@@ -94,8 +82,8 @@ Instead, contact us privately:
 - **Race detection:** All tests run with `-race`
 - **Fuzzing:** Markdown sanitization fuzz tests
 - **Leak detection:** Goroutine leak tests in `tests/leak/`
-- **Test coverage:** ~61.1% aggregate (run `go test -coverprofile=coverage.out ./...` to regenerate)
-- **Prometheus metrics** (`internal/metrics/`): HTTP requests, bot updates, XUI/VPN panel requests, DB queries, cache hits/misses, circuit breaker state, active subscriptions, trial conversions, orphaned clients removed — full observability of security-relevant behavior
+- **Test coverage:** 66.2% aggregate in the latest documented run; regenerate with `go test -coverprofile=coverage.out ./...`
+- **Prometheus metrics** (`internal/metrics/`): HTTP requests, bot updates, live XUI requests, DB queries, cache hits/misses, active subscriptions, reminder delivery, payment events, and orphaned subscriptions revoked during reconciliation
 
 ### 7. Architecture Security
 
@@ -160,7 +148,7 @@ Instead, contact us privately:
 
 - [ ] **Rotate secrets** every 90 days (panel API tokens)
 - [ ] Monitor `/healthz` with external service (UptimeRobot, healthchecks.io)
-- [ ] Monitor Prometheus metrics for anomalies (circuit breaker trips, error rate spikes)
+- [ ] Monitor Prometheus metrics for anomalies (XUI errors, payment issues, error-rate spikes; circuit-breaker trips if the breaker is enabled in the live path)
 - [ ] Review logs daily for `error`/`warn` level
 - [ ] Watch for `401` / `XUI API error` patterns indicating token issues
 - [ ] Backup verification: monthly restore test
@@ -194,7 +182,6 @@ Instead, contact us privately:
 | No built-in DDoS protection | Layer 7 | Use nginx rate limiting or cloud WAF |
 | No request signing for API | Bearer token only | Use HTTPS + rotate token regularly |
 | Trial rate limit per IP (not per user) | IPs can be changed via VPN | Acceptable for free tier; paid users get unique links |
-| Extra servers file path validation | Could be stricter (currently prevents traversal but allows any absolute path within readable FS) | Future: restrict to `./data/` subdirectory only |
 | Fetch node SSRF | `subscription_url` can point to arbitrary internal addresses | Restrict via firewall; do not use fetch nodes with untrusted URLs; validate `subscription_url` points to expected hosts |
 
 ---
@@ -242,9 +229,9 @@ TELEGRAM_ADMIN_ID=123456789
 # VPN Panel configuration is managed via the `nodes` table in the database.
 # Add nodes via SQL or admin commands after first startup.
 
-# Subscription server (REQUIRED in v3.0+)
+# Subscription server (required)
 GLOBAL_SUB_URL=https://sub.example.com  # Public HTTPS URL for subscription links
-SUBSERVER_ACCESS_LOG=true               # Enable access logging on sub server
+SUBSERVER_ACCESS_LOG=/app/data/subserver.log  # Empty disables access logging
 
 # Database (on persistent volume)
 DATABASE_PATH=/app/data/rs8kvn.db
@@ -340,4 +327,4 @@ go mod verify
 Security issues: **security@kereal.me** (replace with the maintained security contact before publication)  
 General questions: GitHub Issues (public)
 
-*Last updated: 2026-08-11*
+*This policy is maintained against the current codebase.*

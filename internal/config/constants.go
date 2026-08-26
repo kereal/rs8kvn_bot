@@ -121,7 +121,7 @@ const (
 // Graceful Shutdown Constants
 const (
 	// ShutdownTimeout is the maximum time to wait for graceful shutdown
-	ShutdownTimeout = 30 * time.Second
+	ShutdownTimeout = 90 * time.Second
 )
 
 // Web Server Constants
@@ -136,8 +136,8 @@ const (
 	SubIDLengthBytes = 14
 )
 
-// MaxResponseSize is the maximum response size to read (1MB)
-const MaxResponseSize = 1 << 20
+// MaxResponseSize is the maximum response size to read from upstream responses (2MB).
+const MaxResponseSize = 2 << 20
 
 const (
 	CircuitBreakerMaxFailures = 5

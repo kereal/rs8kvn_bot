@@ -49,7 +49,10 @@ func (s *TrialCleanupScheduler) runCleanup(ctx context.Context) {
 
 	deleted, err := s.subService.CleanupExpiredTrials(ctx)
 	if err != nil {
-		logger.Error("Trial cleanup failed", zap.Error(err))
+		// Best-effort background work: partial failures are retried on the next
+		// pass, so a degraded run is a warning, not an error (same as
+		// SubscriptionSyncWorker's aggregate sync failure).
+		logger.Warn("Trial cleanup failed", zap.Error(err))
 	} else if deleted > 0 {
 		logger.Info("Trial cleanup completed", zap.Int64("deleted", deleted))
 	}

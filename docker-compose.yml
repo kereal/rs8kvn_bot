@@ -3,8 +3,7 @@
 
 services:
     rs8kvn_bot:
-        # Use specific version tag instead of :latest for reproducibility
-        # Replace 'v1.0.0' with your actual version
+        # :latest is convenient for automatic updates; pin a concrete SemVer or SHA tag for reproducibility
         image: ghcr.io/kereal/rs8kvn_bot:latest
         container_name: rs8kvn_bot
         restart: unless-stopped
@@ -35,9 +34,9 @@ services:
             - no-new-privileges:true
         # Note: read_only filesystem not possible due to SQLite writes
 
-        # Health check - verify the process is running
+        # Health check - verify the application and database are healthy
         healthcheck:
-            test: ["CMD", "pgrep", "-f", "rs8kvn_bot"]
+            test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8880/healthz > /dev/null"]
             interval: 30s
             timeout: 10s
             retries: 3
@@ -62,5 +61,5 @@ services:
                 max-file: "3"
 
         # Graceful shutdown
-        stop_grace_period: 30s
+        stop_grace_period: 90s
         stop_signal: SIGTERM

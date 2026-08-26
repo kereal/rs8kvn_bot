@@ -1,7 +1,5 @@
 # Architecture — rs8kvn_bot
 
-**Version:** v2.4.0
-**Updated:** 2026-08-09
 **Branch:** `dev`
 
 ## Changes since 2026-07-22
@@ -10,6 +8,22 @@
 - **Bot rename callbacks** — `menu_payment` → `buy_premium_list` (list) + `buy_product_{id}` (per-product payment link). `KeyboardBuilder.SetPaymentEnabled` dropped; the flag is passed per-call into `MainMenu(hasSub, paymentEnabled)` instead.
 - **Admin payment alerts** — on activation `notifyAdminPaid` (Markdown: tariff, amount, clickable buyer link via `utils.FormatUserLink`, purchase `🆕` vs renewal `🔄` from `PricePaidCents`/`ProductID` before CAS); on paid-order chargeback a single `notifyAdminChargeback` (tariff, amount, buyer link, access status). Both best-effort after per-order payment lock release; integration problems (mismatches, DB failures, provider errors) go through `NotifyPaymentIssue` → `notifyAdmin`.
 - **Per-order payment lock** — `OrderService.lockPayment(ctx, providerPaymentID)` keeps a capacity-1 token channel per `provider_payment_id`. Confirms/cancels for the SAME order serialize; confirms/cancels for DIFFERENT orders run in parallel (verified by `TestConfirmPayment_DifferentOrdersRunInParallel` / `TestCancelPaymentByProvider_DifferentOrdersRunInParallel`). Lock is released BEFORE best-effort VPN sync so post-commit work does not block other orders.
+
+## Broadcast campaigns (2026-08, branch feat/broadcast-campaigns)
+- **Durable `BroadcastWorker`** (`internal/bot/broadcast_worker.go`): tick 15 s, per-campaign timeout 5 min, batches of 100 (concurrency 10), survives process restarts. Audience snapshot + per-recipient state live in the `broadcasts.recipients_state` JSON column; leases (2 min) recover after crashes.
+- Admin session flow: name → text → filters (`bfilter_*`) → confirm; campaign lifecycle `scheduled|running|completed|failed|canceled`; cancel (`broadcast_cancel_<id>`) and retry-failed (`broadcast_retry_<id>`) actions.
+- Delivery: blocked vs unreachable classification, per-message retries (2, = broadcastRetries повторов сверх первой попытки), campaign-level exponential backoff (`retry_at`, 5 s → 15 min).
+- **Flood (HTTP 429)**: `processRecipient` распознаёт `isFloodError` и ждёт `retry_after` (`floodRetryDelay`, кап `broadcastFloodMaxDelay`=90 s, дефолт 5 s) ДО `broadcastFloodMaxWaits`=5 раз в рамках той же обычной попытки; только когда ожидания исчерпаны, сообщение уходит в общий счётчик retry и фиксируется как failed. Финиш получателя вынесен в `finishRecipientState`, ожидание с учётом ctx — в `waitBroadcastDelay`.
+- Logging: `Info` for create/start/finish/cancel/retry and planned resume after timeout; `Warn` for background failures; `Error` for panics, retry-persistence, cancel/retry callback errors.
+
+## Audit follow-up (2026-08-21/26)
+- Expired active subscriptions are excluded at the DB cache-miss query boundary.
+- Subserver cache revalidation fails closed on DB errors; upstream bodies are capped at 2 MiB (`config.MaxResponseSize`).
+- Trial cleanup claims rows, deprovisions external clients, and deletes only after success so failures remain retryable.
+- Trial binding updates the panel before the DB bind and rolls back the panel rename if the DB race loses.
+- Subscription sync plan/removal transitions hold the per-subscription lock; graceful shutdown waits up to 90 seconds.
+- **`ResetTraffic`** on plan change: new `vpn.Client.ResetTraffic` (3x-ui `POST /panel/api/clients/resetTraffic/{email}`, proxman/fetch no-op) runs best-effort in `SyncService.processPendingUpdate`.
+- `ReconcileOrphanedClients` recreates a missing `pending_add` node queue for active non-trial subscriptions instead of revoking them.
 
 ## Previous changes (2026-07-22)
 - **Expiry reminders**: added 3-touch flow 3d/1d/3h, atomic bitmask (`subscriptions.reminders_sent`), standalone worker `SubscriptionReminderWorker` (30 min), plus DB/service/scheduler/test split (`subscription_reminders.go` + `subscription_reminders_test.go`).
@@ -28,7 +42,7 @@ Telegram Bot API  3x-ui / proxman panels  Sentry
        │
        ├── Bot API layer + web server
        ├── Service layer + VPN abstraction
-       ├── SQLite/GORM + migrations 000-030
+       ├── SQLite/GORM + embedded migrations
        ├── Subserver /sub/{subID} + Clash normalization
        └── Background workers
 ```
@@ -51,7 +65,7 @@ Telegram Bot API  3x-ui / proxman panels  Sentry
 - Password encoding in server links via `url.User` / `url.UserPassword`.
 
 ## Schema
-- Version: **after migration 030**.
+- Schema: embedded migrations are applied automatically at startup; the current repository includes migrations through 036.
 - `subscriptions.reminders_sent` stores reminder bitmask.
 - `subscription_nodes` machine: `active`, `pending_add`, `pending_remove`, `pending_update`.
 - Paid expiry excludes free/trial plans; reminder query excludes free/trial plans.
@@ -63,7 +77,7 @@ Telegram Bot API  3x-ui / proxman panels  Sentry
 - `subscription_traffic.go` owns presentation helpers.
 
 ## Scheduler
-- Daily backup, hourly trial cleanup, sync workers, expiry reminders worker.
+- Daily backup, trial cleanup at startup and every 3h, sync workers, expiry reminders worker.
 
 ## Subserver
 - `/sub/{subID}` serves merged subscription payloads.

@@ -37,7 +37,7 @@ func HandleSubscription(ctx context.Context, db interfaces.SubscriptionRepositor
 	// 2. Cache miss: load the subscription with plan and active sources.
 	missStart := time.Now()
 
-	subFull, err := loadSubscription(ctx, db, subID, clientIP, requestHeaders)
+	subFull, err := loadSubscription(ctx, db, subSvc, subID, clientIP, requestHeaders)
 	if err != nil {
 		metrics.SubserverCacheMissDuration.Observe(time.Since(missStart).Seconds())
 		return nil, 0, 0, err

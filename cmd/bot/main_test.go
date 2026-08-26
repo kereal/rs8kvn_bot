@@ -30,6 +30,9 @@ func (s *stubVPNClient) UpdateSubscription(ctx context.Context, provision vpn.Su
 func (s *stubVPNClient) DeleteSubscription(ctx context.Context, provision vpn.SubscriptionProvision) error {
 	return nil
 }
+func (s *stubVPNClient) ResetTraffic(_ context.Context, _ vpn.SubscriptionProvision) error {
+	return nil
+}
 func (s *stubVPNClient) Close() error { return nil }
 
 func TestMain(m *testing.M) {
