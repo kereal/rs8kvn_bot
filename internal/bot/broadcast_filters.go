@@ -134,8 +134,8 @@ func broadcastScheduleDayLabel(offset int) string {
 	if offset == 1 {
 		return "Завтра"
 	}
-	day := time.Now().AddDate(0, 0, offset)
-	return fmt.Sprintf("%s %s", ruWeekdays[day.Weekday()], day.Format("02.01"))
+	day := time.Now().In(broadcastScheduleTZ).AddDate(0, 0, offset)
+	return fmt.Sprintf("%s %s", ruWeekdays[day.Weekday()], day.In(broadcastScheduleTZ).Format("02.01"))
 }
 
 // broadcastScheduleDayKeyboard строит клавиатуру выбора дня отправки.
