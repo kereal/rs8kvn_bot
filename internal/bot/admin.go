@@ -29,9 +29,8 @@ const (
 	broadcastStageAwaitingDraft
 	broadcastStageFiltering
 	broadcastStageConfirming
+	broadcastStageScheduling
 )
-
-
 
 // broadcastSession holds the in-progress broadcast draft for an admin.
 type broadcastSession struct {
@@ -40,7 +39,9 @@ type broadcastSession struct {
 	name           string
 	text           string
 	filter         database.BroadcastFilter
-	recipientCount int64 // количество получателей (для preview перед подтверждением)
+	recipientCount int64  // количество получателей (для preview перед подтверждением)
+	plannedAt      *time.Time // выбранное время запланированной отправки (nil = отправить сейчас)
+	scheduleDay    int        // выбранный день в планировании: 0 = сегодня, 1 = завтра, ...; -1 = не выбран
 }
 
 func (h *Handler) HandleVersion(ctx context.Context, update tgbotapi.Update) error {
@@ -585,25 +586,7 @@ func (h *Handler) handleBroadcastConfirm(ctx context.Context, chatID int64) erro
 		h.broadcastSessions[chatID] = s
 		h.broadcastMu.Unlock()
 
-		// Формируем текст подтверждения.
-		filterDesc := s.filter.String()
-		confirmText := fmt.Sprintf(
-			"📦 *Рассылка: %s*\n\n"+
-				"👥 Получателей: *%d*\n"+
-				"🔍 Фильтр: %s\n\n"+
-				"⚡ Отправить %d пользователям?",
-			s.name, count, filterDesc, count)
-
-		// Кнопки: Подтвердить / Назад к фильтрам / Отмена.
-		kb := tgbotapi.NewInlineKeyboardMarkup(
-			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData("✅ Подтвердить", "broadcast_final_confirm"),
-			),
-			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData("🔙 Назад к фильтрам", "broadcast_back_to_filters"),
-				tgbotapi.NewInlineKeyboardButtonData("❌ Отмена", "broadcast_cancel"),
-			),
-		)
+		confirmText, kb := broadcastConfirmContent(s)
 
 		msg := tgbotapi.NewMessage(chatID, utils.EscapeMarkdownV2(confirmText))
 		msg.ParseMode = "MarkdownV2"
@@ -617,15 +600,204 @@ func (h *Handler) handleBroadcastConfirm(ctx context.Context, chatID int64) erro
 	return h.startBroadcast(ctx, chatID, s)
 }
 
-// handleBroadcastFinalConfirm запускает рассылку после подтверждения количества получателей.
+// broadcastConfirmContent возвращает текст и клавиатуру сообщения подтверждения:
+// отправка сейчас либо переход к планированию времени.
+func broadcastConfirmContent(s *broadcastSession) (string, *tgbotapi.InlineKeyboardMarkup) {
+	confirmText := fmt.Sprintf(
+		"📦 *Рассылка: %s*\n\n"+
+			"👥 Получателей: *%d*\n"+
+			"🔍 Фильтр: %s\n\n"+
+			"⚡ Отправить %d пользователям?",
+		s.name, s.recipientCount, s.filter.String(), s.recipientCount)
+
+	kb := tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("✅ Отправить сейчас", "broadcast_final_confirm"),
+			tgbotapi.NewInlineKeyboardButtonData("⏰ Запланировать", "broadcast_schedule"),
+		),
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("🔙 Назад к фильтрам", "broadcast_back_to_filters"),
+			tgbotapi.NewInlineKeyboardButtonData("❌ Отмена", "broadcast_cancel"),
+		),
+	)
+	return confirmText, &kb
+}
+
+// handleBroadcastFinalConfirm запускает рассылку сразу или по расписанию после
+// подтверждения количества получателей.
 func (h *Handler) handleBroadcastFinalConfirm(ctx context.Context, chatID int64) error {
 	s := h.getBroadcastSession(chatID)
-	if s == nil || s.stage != broadcastStageConfirming {
+	if s == nil || (s.stage != broadcastStageConfirming && s.stage != broadcastStageScheduling) {
 		h.SendMessage(ctx, chatID, "❌ Нет активной рассылки для подтверждения.")
 		return nil
 	}
 
 	return h.startBroadcast(ctx, chatID, s)
+}
+
+// handleBroadcastSchedule открывает выбор дня отправки из этапа подтверждения.
+func (h *Handler) handleBroadcastSchedule(ctx context.Context, chatID int64, messageID int) error {
+	s := h.getBroadcastSession(chatID)
+	if s == nil || s.stage != broadcastStageConfirming {
+		h.SendMessage(ctx, chatID, "❌ Нет активной рассылки для планирования.")
+		return nil
+	}
+
+	h.broadcastMu.Lock()
+	s.stage = broadcastStageScheduling
+	s.plannedAt = nil
+	s.scheduleDay = -1
+	h.broadcastSessions[chatID] = s
+	h.broadcastMu.Unlock()
+
+	text := fmt.Sprintf("🗓 Рассылка *«%s»* — выберите день отправки:", s.name)
+	edit := tgbotapi.NewEditMessageText(chatID, messageID, utils.EscapeMarkdownV2(text))
+	edit.ParseMode = "MarkdownV2"
+	edit.ReplyMarkup = broadcastScheduleDayKeyboard()
+	if _, err := h.bot.Send(edit); err != nil {
+		logger.Warn("Failed to open broadcast schedule picker", zap.Error(err))
+	}
+	return nil
+}
+
+// handleBroadcastScheduleDay фиксирует выбранный день и показывает выбор часа.
+// callbackData формат: bsched_day_<offset>, где offset — дней от сегодня.
+func (h *Handler) handleBroadcastScheduleDay(ctx context.Context, chatID int64, messageID int, callbackData string) error {
+	s := h.getBroadcastSession(chatID)
+	if s == nil || s.stage != broadcastStageScheduling {
+		h.SendMessage(ctx, chatID, "❌ Нет активной рассылки для планирования.")
+		return nil
+	}
+
+	offset, err := strconv.Atoi(strings.TrimPrefix(callbackData, "bsched_day_"))
+	if err != nil {
+		return fmt.Errorf("parse schedule day: %w", err)
+	}
+	valid := false
+	for _, o := range scheduleDayOptions {
+		if o == offset {
+			valid = true
+			break
+		}
+	}
+	if !valid {
+		return fmt.Errorf("unsupported schedule day offset: %d", offset)
+	}
+
+	h.broadcastMu.Lock()
+	s.scheduleDay = offset
+	s.plannedAt = nil
+	h.broadcastSessions[chatID] = s
+	h.broadcastMu.Unlock()
+
+	text := fmt.Sprintf("🕐 Выбран день: *%s*. В какое время (МСК)?", broadcastScheduleDayLabel(offset))
+	edit := tgbotapi.NewEditMessageText(chatID, messageID, utils.EscapeMarkdownV2(text))
+	edit.ParseMode = "MarkdownV2"
+	edit.ReplyMarkup = broadcastScheduleHourKeyboard()
+	if _, err := h.bot.Send(edit); err != nil {
+		logger.Warn("Failed to open broadcast schedule hour picker", zap.Error(err))
+	}
+	return nil
+}
+
+// handleBroadcastScheduleHour фиксирует выбранный час и показывает превью
+// запланированной рассылки. callbackData формат: bsched_hour_<час 0-23>.
+func (h *Handler) handleBroadcastScheduleHour(ctx context.Context, chatID int64, messageID int, callbackData string) error {
+	s := h.getBroadcastSession(chatID)
+	if s == nil || s.stage != broadcastStageScheduling || s.scheduleDay < 0 {
+		h.SendMessage(ctx, chatID, "❌ Нет активной рассылки для планирования.")
+		return nil
+	}
+
+	hour, err := strconv.Atoi(strings.TrimPrefix(callbackData, "bsched_hour_"))
+	if err != nil || hour < 0 || hour > 23 {
+		return fmt.Errorf("parse schedule hour: %w", err)
+	}
+	day := time.Now().AddDate(0, 0, s.scheduleDay)
+	plannedAt := time.Date(day.Year(), day.Month(), day.Day(), hour, 0, 0, 0, time.Local)
+
+	// Время в прошлом (например, «Сегодня» + уже прошедший час) не принимаем.
+	if !plannedAt.After(time.Now()) {
+		edit := tgbotapi.NewEditMessageText(chatID, messageID, utils.EscapeMarkdownV2("⏰ Выбранное время уже прошло. Выберите другое:"))
+		edit.ParseMode = "MarkdownV2"
+		edit.ReplyMarkup = broadcastScheduleHourKeyboard()
+		if _, err := h.bot.Send(edit); err != nil {
+			logger.Warn("Failed to reject past schedule time", zap.Error(err))
+		}
+		return nil
+	}
+
+	h.broadcastMu.Lock()
+	s.plannedAt = &plannedAt
+	h.broadcastSessions[chatID] = s
+	h.broadcastMu.Unlock()
+
+	text := fmt.Sprintf("🗓 Рассылка *«%s»* запланирована на *%s*.\n\n👥 Получателей: *%d*\n\nПодтверждаете?",
+		s.name, plannedAt.Format("02.01.2006 15:04"), s.recipientCount)
+	edit := tgbotapi.NewEditMessageText(chatID, messageID, utils.EscapeMarkdownV2(text))
+	edit.ParseMode = "MarkdownV2"
+	edit.ReplyMarkup = broadcastSchedulePreviewKeyboard()
+	if _, err := h.bot.Send(edit); err != nil {
+		logger.Warn("Failed to render broadcast schedule preview", zap.Error(err))
+	}
+	return nil
+}
+
+// handleBroadcastScheduleBack — обратная навигация по этапу планирования:
+// из превью/часа — к выбору дня, из выбора дня — обратно к подтверждению.
+func (h *Handler) handleBroadcastScheduleBack(ctx context.Context, chatID int64, messageID int) error {
+	s := h.getBroadcastSession(chatID)
+	if s == nil || s.stage != broadcastStageScheduling {
+		return nil
+	}
+
+	if s.plannedAt != nil {
+		// Из превью — обратно к выбору дня.
+		h.broadcastMu.Lock()
+		s.plannedAt = nil
+		s.scheduleDay = -1
+		h.broadcastSessions[chatID] = s
+		h.broadcastMu.Unlock()
+
+		edit := tgbotapi.NewEditMessageText(chatID, messageID, utils.EscapeMarkdownV2("🗓 Выберите *день* отправки:"))
+		edit.ParseMode = "MarkdownV2"
+		edit.ReplyMarkup = broadcastScheduleDayKeyboard()
+		if _, err := h.bot.Send(edit); err != nil {
+			logger.Warn("Failed to reopen broadcast schedule picker", zap.Error(err))
+		}
+		return nil
+	}
+
+	if s.scheduleDay >= 0 {
+		// Из выбора часа — обратно к выбору дня.
+		h.broadcastMu.Lock()
+		s.scheduleDay = -1
+		h.broadcastSessions[chatID] = s
+		h.broadcastMu.Unlock()
+
+		edit := tgbotapi.NewEditMessageText(chatID, messageID, utils.EscapeMarkdownV2("🗓 Выберите *день* отправки:"))
+		edit.ParseMode = "MarkdownV2"
+		edit.ReplyMarkup = broadcastScheduleDayKeyboard()
+		if _, err := h.bot.Send(edit); err != nil {
+			logger.Warn("Failed to reopen broadcast schedule picker", zap.Error(err))
+		}
+		return nil
+	}
+
+	// Из выбора дня — обратно к сообщению подтверждения.
+	h.broadcastMu.Lock()
+	s.stage = broadcastStageConfirming
+	h.broadcastSessions[chatID] = s
+	h.broadcastMu.Unlock()
+
+	confirmText, kb := broadcastConfirmContent(s)
+	edit := tgbotapi.NewEditMessageText(chatID, messageID, utils.EscapeMarkdownV2(confirmText))
+	edit.ParseMode = "MarkdownV2"
+	edit.ReplyMarkup = kb
+	if _, err := h.bot.Send(edit); err != nil {
+		logger.Warn("Failed to return to broadcast confirmation", zap.Error(err))
+	}
+	return nil
 }
 
 // handleBroadcastBackToFilters возвращает к выбору фильтров из этапа подтверждения.
@@ -662,11 +834,21 @@ func (h *Handler) startBroadcast(ctx context.Context, chatID int64, s *broadcast
 	// duplicate callback race even when two Telegram updates arrive together.
 	h.broadcastMu.Lock()
 	current, ok := h.broadcastSessions[chatID]
-	if !ok || current.stage != broadcastStageConfirming {
+	if !ok || (current.stage != broadcastStageConfirming && current.stage != broadcastStageScheduling) {
+		h.broadcastMu.Unlock()
+		return nil
+	}
+	// Кнопка подтверждения в планировании видна только после выбора времени;
+	// если планирование без времени (гоночный дубль) — игнорируем.
+	if current.stage == broadcastStageScheduling && current.plannedAt == nil {
 		h.broadcastMu.Unlock()
 		return nil
 	}
 	name, text, filter := current.name, current.text, current.filter
+	var plannedAt *time.Time
+	if current.stage == broadcastStageScheduling {
+		plannedAt = current.plannedAt
+	}
 	delete(h.broadcastSessions, chatID)
 	h.broadcastMu.Unlock()
 
@@ -682,6 +864,7 @@ func (h *Handler) startBroadcast(ctx context.Context, chatID int64, s *broadcast
 	broadcast := &database.Broadcast{
 		Name: name, Filters: filtersJSON, MessageText: text,
 		Status: string(database.BroadcastStatusScheduled),
+		PlannedAt: plannedAt,
 	}
 	if err := h.db.CreateBroadcast(ctx, broadcast); err != nil {
 		logger.Error("Failed to create broadcast", zap.Error(err))
@@ -697,21 +880,29 @@ func (h *Handler) startBroadcast(ctx context.Context, chatID int64, s *broadcast
 
 	// Snapshot and sending happen in the background. The worker claims the
 	// persistent row, so a second callback or a process restart cannot duplicate it.
-	h.bgWg.Go(func() {
-		workerCtx := h.broadcastContext()
-		if err := h.broadcastWorker.processCampaign(workerCtx, broadcast); err != nil {
-			switch {
-			case errors.Is(err, context.Canceled):
-				// Admin cancel or shutdown — nothing to log.
-			case errors.Is(err, context.DeadlineExceeded), errors.Is(err, errBroadcastIncomplete):
-				// Planned resume: a long campaign exceeded its time slice.
-				logger.Info("Broadcast campaign will resume on next pass", zap.Uint("broadcast_id", broadcast.ID), zap.Error(err))
-			default:
-				logger.Warn("Broadcast launch failed", zap.Uint("broadcast_id", broadcast.ID), zap.Error(err))
+	// A campaign scheduled for the future is left for the ticker worker, which
+	// only claims it once planned_at is due.
+	if plannedAt == nil || !plannedAt.After(time.Now()) {
+		h.bgWg.Go(func() {
+			workerCtx := h.broadcastContext()
+			if err := h.broadcastWorker.processCampaign(workerCtx, broadcast); err != nil {
+				switch {
+				case errors.Is(err, context.Canceled):
+					// Admin cancel or shutdown — nothing to log.
+				case errors.Is(err, context.DeadlineExceeded), errors.Is(err, errBroadcastIncomplete):
+					// Planned resume: a long campaign exceeded its time slice.
+					logger.Info("Broadcast campaign will resume on next pass", zap.Uint("broadcast_id", broadcast.ID), zap.Error(err))
+				default:
+					logger.Warn("Broadcast launch failed", zap.Uint("broadcast_id", broadcast.ID), zap.Error(err))
+				}
 			}
-		}
-	})
-	h.SendMessage(ctx, chatID, fmt.Sprintf("📤 Рассылка #%d поставлена в очередь. Отправка продолжается в фоне.", broadcast.ID))
+		})
+	}
+	if plannedAt != nil {
+		h.SendMessage(ctx, chatID, fmt.Sprintf("🗓 Рассылка #%d запланирована на %s. Отправка начнётся автоматически.", broadcast.ID, plannedAt.Format("02.01.2006 15:04")))
+	} else {
+		h.SendMessage(ctx, chatID, fmt.Sprintf("📤 Рассылка #%d поставлена в очередь. Отправка продолжается в фоне.", broadcast.ID))
+	}
 	return nil
 }
 
@@ -987,7 +1178,7 @@ func containsEntityChar(s string) bool {
 // broadcastSessionActive reports whether an admin has an in-progress broadcast.
 func (h *Handler) broadcastSessionActive(chatID int64) bool {
 	s := h.getBroadcastSession(chatID)
-	return s != nil && (s.stage == broadcastStageAwaitingName || s.stage == broadcastStageAwaitingDraft || s.stage == broadcastStageFiltering || s.stage == broadcastStageConfirming)
+	return s != nil && (s.stage == broadcastStageAwaitingName || s.stage == broadcastStageAwaitingDraft || s.stage == broadcastStageFiltering || s.stage == broadcastStageConfirming || s.stage == broadcastStageScheduling)
 }
 
 // HandleSend handles the /send command for admins to send a message to a specific user.

@@ -66,6 +66,34 @@ func TestBroadcastCRUD(t *testing.T) {
 	assert.Equal(t, "boom", parsed.Errors[0].Error)
 }
 
+func TestGetRunnableBroadcastsRespectsPlannedAt(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	create := func(name string, plannedAt *time.Time) uint {
+		b := &Broadcast{Name: name, MessageText: "text", Status: string(BroadcastStatusScheduled), PlannedAt: plannedAt}
+		require.NoError(t, svc.CreateBroadcast(ctx, b))
+		return b.ID
+	}
+
+	dueNow := create("now", nil)
+	past := create("past", ptrTime(now.Add(-time.Hour)))
+	future := create("future", ptrTime(now.Add(time.Hour)))
+
+	runnable, err := svc.GetRunnableBroadcasts(ctx, now)
+	require.NoError(t, err)
+	var ids []uint
+	for _, b := range runnable {
+		ids = append(ids, b.ID)
+	}
+	assert.Contains(t, ids, dueNow, "nil planned_at starts immediately")
+	assert.Contains(t, ids, past, "past planned_at starts immediately")
+	assert.NotContains(t, ids, future, "future planned_at must be held until its time")
+}
+
 func TestBroadcastNotFound(t *testing.T) {
 	t.Parallel()
 

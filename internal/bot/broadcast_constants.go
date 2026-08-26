@@ -2,6 +2,12 @@ package bot
 
 import "time"
 
+// scheduleDayOptions — доступные дни для планирования рассылки, offset дней от сегодня.
+var scheduleDayOptions = []int{0, 1, 2, 3, 6}
+
+// ruWeekdays — короткие названия дней недели по time.Weekday() (0 = Вс).
+var ruWeekdays = [...]string{"Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"}
+
 const (
 	// --- Session / UI ---
 

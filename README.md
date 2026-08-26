@@ -99,8 +99,11 @@ See **[Installation Guide](doc/installation.md)** for:
 ```
 
 **Broadcast flow:** `/broadcast` asks for a broadcast *name*, then the message and
-filters. Confirmation only creates a queued campaign; delivery runs in a durable
-background worker. The audience is snapshotted in `broadcasts.recipients_state`, so
+filters. Confirmation creates a queued campaign; delivery runs in a durable
+background worker. The admin can send immediately or schedule the campaign for a
+future day and hour (day picker → hour picker, Moscow time); a scheduled campaign
+stays in `scheduled` state and is claimed by the worker only when `planned_at` is
+due. The audience is snapshotted in `broadcasts.recipients_state`, so
 changes to subscriptions cannot shift pagination or add duplicate recipients.
 Anonymous trials are excluded, `active` is the default status, and `all` is an
 explicit status choice; `paid` uses payment state rather than plan name.
