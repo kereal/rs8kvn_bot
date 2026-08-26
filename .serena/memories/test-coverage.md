@@ -74,6 +74,7 @@
 
 ## Добавленные тесты (2026-08-26, ветка feat/broadcast-campaigns)
 - `internal/bot/broadcast_admin_flow_test.go` — parseBroadcastCallbackID (0/overflow/нечисловой), callbacks broadcast_cancel_/broadcast_retry_ (+не-админ), handleBroadcastFilter (plan/status/date/inactive/ever_paid + toggle off), handleBroadcastBackToFilters, форматтеры truncateRunes/formatIDList/formatErrorList
+- `internal/bot/admin_broadcast_test.go` (+flood) — TestBroadcastFloodClassificationAndRetryDelay (распознавание 429, уважение/каппинг `retry_after`), TestBroadcast_FloodWaitsRetryAfterThenDelivers (429 не расходует обычные попытки → sent)
 - `internal/xui/reset_traffic_test.go` — ResetTraffic: пустой email, успех (метод/путь/экранирование), Success:false с msg панели, невалидный JSON, не-2xx
 - `internal/service/sync_test.go` — processPendingUpdate вызывает ResetTraffic при смене тарифа; сбой ResetTraffic — best-effort (нода всё равно active)
 - `internal/service/subscription_test.go` — BindTrial rollback при DB-bind failure (rollback и conservative skip), CleanupExpiredTrials deprovision-failure оставляет строку, ReconcileOrphanedClients пересоздаёт node queue

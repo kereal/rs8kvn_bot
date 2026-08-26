@@ -246,6 +246,15 @@ func (w *BroadcastWorker) processRecipientSafely(ctx context.Context, text strin
 	return w.processRecipient(ctx, text, recipient)
 }
 
+// finishRecipientState persists a terminal outcome for one recipient and wraps
+// the repository error with a status-specific context.
+func (w *BroadcastWorker) finishRecipientState(ctx context.Context, recipient database.BroadcastRecipient, status database.BroadcastRecipientStatus, lastError string) error {
+	if finishErr := w.h.db.FinishBroadcastRecipient(context.WithoutCancel(ctx), recipient.BroadcastID, recipient.ID, recipient.Attempts, status, lastError, time.Now().UTC()); finishErr != nil {
+		return fmt.Errorf("record %s recipient: %w", status, finishErr)
+	}
+	return nil
+}
+
 func (w *BroadcastWorker) processRecipient(ctx context.Context, text string, recipient database.BroadcastRecipient) error {
 	chunks := splitMessage(text, config.MaxTelegramMessageLen)
 	var lastErr error
@@ -253,44 +262,78 @@ func (w *BroadcastWorker) processRecipient(ctx context.Context, text string, rec
 		msg := tgbotapi.NewMessage(recipient.TelegramID, utils.EscapeMarkdownV2(chunk))
 		msg.ParseMode = "MarkdownV2"
 		msg.DisableWebPagePreview = true
+
+		// Обычный счётчик попыток: первая отправка + broadcastRetries повторов.
+		// Флуд (HTTP 429) ждёт retry_after и не расходует эту попытку.
+	trySend:
 		for attempt := 0; attempt <= broadcastRetries; attempt++ {
+			if attempt > 0 {
+				if err := waitBroadcastDelay(ctx, broadcastSendRetryBaseDelay*time.Duration(attempt)); err != nil {
+					return err
+				}
+			}
 			err := w.h.sendWithError(ctx, msg)
 			if err == nil {
 				lastErr = nil
-				break
+				break trySend
 			}
 			if isUserBlockedError(err) {
-				if finishErr := w.h.db.FinishBroadcastRecipient(context.WithoutCancel(ctx), recipient.BroadcastID, recipient.ID, recipient.Attempts, database.BroadcastRecipientBlocked, err.Error(), time.Now().UTC()); finishErr != nil {
-					return fmt.Errorf("record blocked recipient: %w", finishErr)
-				}
-				return nil
+				return w.finishRecipientState(ctx, recipient, database.BroadcastRecipientBlocked, err.Error())
 			}
 			if isUserUnreachableError(err) {
-				if finishErr := w.h.db.FinishBroadcastRecipient(context.WithoutCancel(ctx), recipient.BroadcastID, recipient.ID, recipient.Attempts, database.BroadcastRecipientUnreachable, err.Error(), time.Now().UTC()); finishErr != nil {
-					return fmt.Errorf("record unreachable recipient: %w", finishErr)
+				return w.finishRecipientState(ctx, recipient, database.BroadcastRecipientUnreachable, err.Error())
+			}
+			if isFloodError(err) {
+				// 429 (Too Many Requests): переходная ошибка. Ждём retry_after и
+				// пробуем снова в рамках той же обычной попытки, максимум
+				// broadcastFloodMaxWaits ожиданий. Один большой retry_after
+				// ограничен сверху, чтобы не съесть весь временной слайс кампании.
+				flooded := true
+				for waits := 0; waits < broadcastFloodMaxWaits; waits++ {
+					if err := waitBroadcastDelay(ctx, floodRetryDelay(err)); err != nil {
+						return err
+					}
+					err = w.h.sendWithError(ctx, msg)
+					if err == nil {
+						lastErr = nil
+						break trySend
+					}
+					if isUserBlockedError(err) {
+						return w.finishRecipientState(ctx, recipient, database.BroadcastRecipientBlocked, err.Error())
+					}
+					if isUserUnreachableError(err) {
+						return w.finishRecipientState(ctx, recipient, database.BroadcastRecipientUnreachable, err.Error())
+					}
+					if !isFloodError(err) {
+						flooded = false
+						break
+					}
 				}
-				return nil
+				lastErr = err
+				if flooded {
+					// Исчерпаны flood-ожидания — уходим в общий счётчик попыток.
+					continue trySend
+				}
+				// Перестало быть 429 — обрабатываем как обычную ошибку тем же циклом.
 			}
 			lastErr = err
-			if attempt < broadcastRetries {
-				select {
-				case <-time.After(broadcastSendRetryBaseDelay * time.Duration(attempt+1)):
-				case <-ctx.Done():
-					return ctx.Err()
-				}
-			}
 		}
 		if lastErr != nil {
-			if finishErr := w.h.db.FinishBroadcastRecipient(context.WithoutCancel(ctx), recipient.BroadcastID, recipient.ID, recipient.Attempts, database.BroadcastRecipientFailed, truncateRunes(lastErr.Error(), broadcastErrorTextMaxLen), time.Now().UTC()); finishErr != nil {
-				return fmt.Errorf("record failed recipient: %w", finishErr)
-			}
-			return nil
+			return w.finishRecipientState(ctx, recipient, database.BroadcastRecipientFailed, truncateRunes(lastErr.Error(), broadcastErrorTextMaxLen))
 		}
 	}
-	if err := w.h.db.FinishBroadcastRecipient(context.WithoutCancel(ctx), recipient.BroadcastID, recipient.ID, recipient.Attempts, database.BroadcastRecipientSent, "", time.Now().UTC()); err != nil {
-		return fmt.Errorf("record sent recipient: %w", err)
+	return w.finishRecipientState(ctx, recipient, database.BroadcastRecipientSent, "")
+}
+
+// waitBroadcastDelay sleeps for d, aborting early when the campaign context is
+// cancelled (admin cancel or worker timeout).
+func waitBroadcastDelay(ctx context.Context, d time.Duration) error {
+	select {
+	case <-time.After(d):
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
-	return nil
 }
 
 func (w *BroadcastWorker) markCampaignFailed(ctx context.Context, id uint, cause error) error {

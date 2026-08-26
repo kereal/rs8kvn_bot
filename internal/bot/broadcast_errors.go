@@ -1,6 +1,12 @@
 package bot
 
-import "strings"
+import (
+	"errors"
+	"strings"
+	"time"
+
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+)
 
 // isUserBlockedError recognizes only Telegram's explicit blocked-by-user error.
 // Deactivated accounts and missing chats are tracked as unreachable instead.
@@ -40,4 +46,34 @@ func isUserUnreachableError(err error) bool {
 		strings.Contains(message, "chat not found") ||
 		strings.Contains(message, "kicked from the group") ||
 		strings.Contains(message, "have no rights to send a message")
+}
+
+// isFloodError reports whether Telegram rate-limited the bot (HTTP 429,
+// "Too Many Requests"). Flood errors are transient: delivery waits out the
+// retry_after hint instead of recording the recipient as permanently failed.
+func isFloodError(err error) bool {
+	var apiErr *tgbotapi.Error
+	if errors.As(err, &apiErr) {
+		return apiErr.Code == 429 || strings.Contains(strings.ToLower(apiErr.Message), "too many requests")
+	}
+
+	return err != nil && strings.Contains(strings.ToLower(err.Error()), "too many requests")
+}
+
+// floodRetryDelay extracts the wait hinted by Telegram's retry_after parameter
+// (seconds). Falls back to a default when the hint is missing and caps the
+// result so one large hint cannot consume the whole campaign time slice.
+func floodRetryDelay(err error) time.Duration {
+	delay := broadcastFloodDefaultDelay
+
+	var apiErr *tgbotapi.Error
+	if errors.As(err, &apiErr) && apiErr.RetryAfter > 0 {
+		if hinted := time.Duration(apiErr.RetryAfter) * time.Second; hinted < broadcastFloodMaxDelay {
+			delay = hinted
+		} else {
+			delay = broadcastFloodMaxDelay
+		}
+	}
+
+	return delay
 }

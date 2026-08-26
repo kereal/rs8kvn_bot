@@ -576,6 +576,12 @@ func (h *Handler) startBroadcast(ctx context.Context, chatID int64, s *broadcast
 	// persistent row, so a second callback or a process restart cannot duplicate it.
 	// A campaign scheduled for the future is left for the ticker worker, which
 	// only claims it once planned_at is due.
+	//
+	// Немедленные кампании (planned_at = nil) запускаются здесь синхронно в фоне,
+	// чтобы не ждать следующий тик воркера (до broadcastWorkerInterval). Дубликат
+	// невозможен: processCampaign сериализуется через w.mu, а claim получателей —
+	// атомарная транзакция, поэтому воркер при следующем тике увидит уже
+	// завершённую либо занятую кампанию.
 	if plannedAt == nil || !plannedAt.After(time.Now()) {
 		h.bgWg.Go(func() {
 			workerCtx := h.broadcastContext()
