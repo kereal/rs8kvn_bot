@@ -3,6 +3,7 @@ package bot
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -363,6 +364,7 @@ func (h *Handler) HandleBroadcastDraft(ctx context.Context, update tgbotapi.Upda
 
 	if text == "/cancel" {
 		h.clearBroadcastSession(chatID)
+		logger.Info("Broadcast draft canceled", zap.Int64("chat_id", chatID))
 		h.SendMessage(ctx, chatID, "❌ Рассылка отменена.")
 
 		return nil
@@ -688,12 +690,26 @@ func (h *Handler) startBroadcast(ctx context.Context, chatID int64, s *broadcast
 		return fmt.Errorf("create broadcast: %w", err)
 	}
 
+	logger.Info("Broadcast created",
+		zap.Uint("broadcast_id", broadcast.ID),
+		zap.String("name", name),
+		zap.Int64("recipient_count", current.recipientCount),
+		zap.String("filters", filtersJSON))
+
 	// Snapshot and sending happen in the background. The worker claims the
 	// persistent row, so a second callback or a process restart cannot duplicate it.
 	h.bgWg.Go(func() {
 		workerCtx := h.broadcastContext()
 		if err := h.broadcastWorker.processCampaign(workerCtx, broadcast); err != nil {
-			logger.Warn("Broadcast launch failed", zap.Uint("broadcast_id", broadcast.ID), zap.Error(err))
+			switch {
+			case errors.Is(err, context.Canceled):
+				// Admin cancel or shutdown — nothing to log.
+			case errors.Is(err, context.DeadlineExceeded), errors.Is(err, errBroadcastIncomplete):
+				// Planned resume: a long campaign exceeded its time slice.
+				logger.Info("Broadcast campaign will resume on next pass", zap.Uint("broadcast_id", broadcast.ID), zap.Error(err))
+			default:
+				logger.Warn("Broadcast launch failed", zap.Uint("broadcast_id", broadcast.ID), zap.Error(err))
+			}
 		}
 	})
 	h.SendMessage(ctx, chatID, fmt.Sprintf("📤 Рассылка #%d поставлена в очередь. Отправка продолжается в фоне.", broadcast.ID))
@@ -740,6 +756,7 @@ func (h *Handler) HandleBroadcastHistory(ctx context.Context, update tgbotapi.Up
 // handleBroadcastCancel discards the in-progress broadcast draft.
 func (h *Handler) handleBroadcastCancel(ctx context.Context, chatID int64) error {
 	h.clearBroadcastSession(chatID)
+	logger.Info("Broadcast draft canceled", zap.Int64("chat_id", chatID))
 	h.SendMessage(ctx, chatID, "❌ Рассылка отменена.")
 
 	return nil
