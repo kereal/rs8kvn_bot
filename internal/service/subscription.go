@@ -812,34 +812,30 @@ func (s *SubscriptionService) RefreshActiveSubscriptionsMetric(ctx context.Conte
 
 	if err != nil {
 		logger.Warn("failed to refresh active subscriptions metric", zap.Error(err))
-		return
+	} else {
+		metrics.ActiveSubscriptions.Set(float64(count))
 	}
-
-	metrics.ActiveSubscriptions.Set(float64(count))
 
 	premiumCount, err := s.db.CountPremiumSubscriptions(ctx)
 	if err != nil {
 		logger.Warn("failed to refresh premium subscriptions metric", zap.Error(err))
-		return
+	} else {
+		metrics.PremiumSubscriptions.Set(float64(premiumCount))
 	}
-
-	metrics.PremiumSubscriptions.Set(float64(premiumCount))
 
 	freeCount, err := s.db.CountFreeSubscriptions(ctx)
 	if err != nil {
 		logger.Warn("failed to refresh free subscriptions metric", zap.Error(err))
-		return
+	} else {
+		metrics.FreeSubscriptions.Set(float64(freeCount))
 	}
-
-	metrics.FreeSubscriptions.Set(float64(freeCount))
 
 	trialCount, err := s.db.CountTrialSubscriptions(ctx)
 	if err != nil {
 		logger.Warn("failed to refresh trial subscriptions metric", zap.Error(err))
-		return
+	} else {
+		metrics.TrialSubscriptions.Set(float64(trialCount))
 	}
-
-	metrics.TrialSubscriptions.Set(float64(trialCount))
 }
 
 // SetInvalidateFunc sets the cache invalidation callback.

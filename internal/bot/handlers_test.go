@@ -565,9 +565,9 @@ func TestHandleUpdate_CallbackQuery(t *testing.T) {
 	assert.True(t, mockBot.SendCalledSafe(), "should handle callback query")
 }
 
-// TestHandleUpdate_PropagatesStartError verifies that HandleUpdate handles a
-// malformed /start update without panicking.
-func TestHandleUpdate_PropagatesStartErrorToMetrics(t *testing.T) {
+// TestHandleUpdateMalformedStartDoesNotPanic verifies that HandleUpdate handles
+// a malformed /start update without panicking.
+func TestHandleUpdateMalformedStartDoesNotPanic(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{

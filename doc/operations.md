@@ -374,7 +374,7 @@ sum(rate(payment_operations_total{operation="request",result="success"}[1h]))
 # Подтверждённый оборот за сутки в копейках
 sum by (currency) (increase(payment_amount_cents_total{operation="confirmed"}[24h]))
 
-# Chargeback rate
+# Chargeback amount rate (доля подтверждённого оборота, возвращённая через chargeback)
 sum(rate(payment_amount_cents_total{operation="chargeback"}[24h]))
 /
 sum(rate(payment_amount_cents_total{operation="confirmed"}[24h]))
