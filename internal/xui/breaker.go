@@ -5,8 +5,6 @@ import (
 	"errors"
 	"sync"
 	"time"
-
-	"github.com/kereal/rs8kvn_bot/internal/metrics"
 )
 
 var ErrCircuitOpen = errors.New("circuit breaker is open")
@@ -47,8 +45,6 @@ func NewCircuitBreaker(maxFailures int, timeout time.Duration) *CircuitBreaker {
 		halfOpenMax: 3,
 	}
 
-	metrics.CircuitBreakerState.WithLabelValues("xui").Set(0)
-
 	return cb
 }
 
@@ -87,8 +83,6 @@ func (cb *CircuitBreaker) allowRequest() bool {
 			cb.successes = 0
 			cb.halfOpenAttempts = 1 // Count this transition as the first half-open attempt
 
-			metrics.CircuitBreakerState.WithLabelValues("xui").Set(2)
-
 			return true
 		}
 
@@ -118,8 +112,6 @@ func (cb *CircuitBreaker) recordResult(err error) {
 
 		if cb.failures >= cb.maxFailures && cb.state != CircuitStateOpen {
 			cb.state = CircuitStateOpen
-
-			metrics.CircuitBreakerState.WithLabelValues("xui").Set(1)
 		}
 
 		return
@@ -136,8 +128,6 @@ func (cb *CircuitBreaker) recordResult(err error) {
 			cb.failures = 0
 			cb.successes = 0
 			cb.halfOpenAttempts = 0
-
-			metrics.CircuitBreakerState.WithLabelValues("xui").Set(0)
 		}
 	}
 }

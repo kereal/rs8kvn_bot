@@ -693,7 +693,6 @@ func (h *Handler) HandleUpdate(ctx context.Context, update tgbotapi.Update) {
 		metrics.BotUpdateDuration.WithLabelValues(command).Observe(time.Since(start).Seconds())
 
 		if err != nil {
-			metrics.BotUpdateErrorsTotal.WithLabelValues(command).Inc()
 			metrics.BotUpdatesTotal.WithLabelValues(command, "error").Inc()
 		} else {
 			metrics.BotUpdatesTotal.WithLabelValues(command, "success").Inc()

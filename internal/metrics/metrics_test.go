@@ -5,11 +5,23 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	dto "github.com/prometheus/client_model/go"
+
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestShouldSkipHTTPMetrics(t *testing.T) {
+	t.Parallel()
+
+	assert.True(t, shouldSkipHTTPMetrics("/metrics"))
+	assert.True(t, shouldSkipHTTPMetrics("/static/logo.png"))
+	assert.True(t, shouldSkipHTTPMetrics("/static/js/app.js"))
+	assert.False(t, shouldSkipHTTPMetrics("/sub/abc"))
+	assert.False(t, shouldSkipHTTPMetrics("/payment/callback"))
+}
 
 func TestNormalizePath(t *testing.T) {
 	t.Parallel()
@@ -56,9 +68,7 @@ func TestStatusCodeString(t *testing.T) {
 func TestNewMetricsInitialized(t *testing.T) {
 	require.NotNil(t, HTTPRequestsTotal)
 	require.NotNil(t, HTTPRequestDuration)
-	require.NotNil(t, HTTPRequestsInFlight)
 	require.NotNil(t, BotUpdatesTotal)
-	require.NotNil(t, BotUpdateErrorsTotal)
 	require.NotNil(t, BotUpdateDuration)
 	require.NotNil(t, XUIRequestsTotal)
 	require.NotNil(t, XUIRequestDuration)
@@ -66,8 +76,9 @@ func TestNewMetricsInitialized(t *testing.T) {
 	require.NotNil(t, DBQueryDuration)
 	require.NotNil(t, CacheHitsTotal)
 	require.NotNil(t, CacheMissesTotal)
-	require.NotNil(t, CircuitBreakerState)
 	require.NotNil(t, ActiveSubscriptions)
+	require.NotNil(t, PremiumSubscriptions)
+	require.NotNil(t, FreeSubscriptions)
 	require.NotNil(t, SubscriptionCreatesTotal)
 	require.NotNil(t, SubscriptionRenewalsTotal)
 	require.NotNil(t, SubscriptionSyncTotal)
@@ -80,12 +91,55 @@ func TestNewMetricsInitialized(t *testing.T) {
 	require.NotNil(t, SubserverSourceFetchDuration)
 	require.NotNil(t, SubserverCacheInvalidationsTotal)
 	require.NotNil(t, SubserverNoItemsTotal)
-	require.NotNil(t, SubserverCacheHitDuration)
-	require.NotNil(t, SubserverCacheMissDuration)
 	require.NotNil(t, PaymentOperationsTotal)
 	require.NotNil(t, PaymentOperationDuration)
 	require.NotNil(t, PaymentAmountCentsTotal)
 	require.NotNil(t, PaymentIssuesTotal)
+}
+
+func TestInstrumentHTTPSkipsMetricsAndStatic(t *testing.T) {
+	t.Parallel()
+
+	handler := InstrumentHTTP(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	beforeRequests := metricSamples(t, HTTPRequestsTotal)
+	beforeDuration := metricSamples(t, HTTPRequestDuration)
+
+	for _, path := range []string{"/metrics", "/static/app.js"} {
+		resp := httptest.NewRecorder()
+		handler.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, path, nil))
+		assert.Equal(t, http.StatusOK, resp.Code)
+	}
+
+	assert.Equal(t, beforeRequests, metricSamples(t, HTTPRequestsTotal), "skipped routes must not record request samples")
+	assert.Equal(t, beforeDuration, metricSamples(t, HTTPRequestDuration), "skipped routes must not record duration samples")
+
+	resp := httptest.NewRecorder()
+	handler.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	assert.Equal(t, http.StatusOK, resp.Code)
+	assert.Greater(t, metricSamples(t, HTTPRequestsTotal), beforeRequests)
+	assert.Greater(t, metricSamples(t, HTTPRequestDuration), beforeDuration)
+}
+
+func metricSamples(t *testing.T, collector prometheus.Collector) int {
+	t.Helper()
+
+	ch := make(chan prometheus.Metric, 1)
+	go func() {
+		collector.Collect(ch)
+		close(ch)
+	}()
+
+	count := 0
+	for metric := range ch {
+		dtoMetric := &dto.Metric{}
+		if metric.Write(dtoMetric) == nil {
+			count++
+		}
+	}
+	return count
 }
 
 func TestMetricsEndpoint(t *testing.T) {
