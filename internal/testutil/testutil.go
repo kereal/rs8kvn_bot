@@ -887,7 +887,7 @@ func (m *DatabaseService) FinishBroadcastRecipient(ctx context.Context, broadcas
 			return setFakeBroadcastState(b, state)
 		}
 	}
-	return database.ErrBroadcastNotFound
+	return database.ErrBroadcastRecipientNotFound
 }
 
 func (m *DatabaseService) ResetBroadcastFailedRecipients(ctx context.Context, id uint, now time.Time) error {

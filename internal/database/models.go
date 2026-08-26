@@ -11,17 +11,18 @@ import (
 // Sentinel errors returned by Get* functions when a record is not found.
 // Callers should use errors.Is to distinguish "not found" from infrastructure/DB errors.
 var (
-	ErrInviteNotFound           = errors.New("invite not found")
-	ErrSubscriptionNotFound     = errors.New("subscription not found")
-	ErrPlanNotFound             = errors.New("plan not found")
-	ErrOrderNotFound            = errors.New("order not found")
-	ErrProductNotFound          = errors.New("product not found")
-	ErrProductImmutable         = errors.New("product immutable after order")
-	ErrSubscriptionNodeNotFound = errors.New("subscription node not found")
-	ErrNodeNotFound             = errors.New("node not found")
-	ErrTrialAlreadyActivated    = errors.New("trial already activated")
-	ErrBroadcastNotFound        = errors.New("broadcast not found")
-	ErrBroadcastRecipientStale  = errors.New("broadcast recipient claim is stale")
+	ErrInviteNotFound             = errors.New("invite not found")
+	ErrSubscriptionNotFound       = errors.New("subscription not found")
+	ErrPlanNotFound               = errors.New("plan not found")
+	ErrOrderNotFound              = errors.New("order not found")
+	ErrProductNotFound            = errors.New("product not found")
+	ErrProductImmutable           = errors.New("product immutable after order")
+	ErrSubscriptionNodeNotFound   = errors.New("subscription node not found")
+	ErrNodeNotFound               = errors.New("node not found")
+	ErrTrialAlreadyActivated      = errors.New("trial already activated")
+	ErrBroadcastNotFound          = errors.New("broadcast not found")
+	ErrBroadcastRecipientStale    = errors.New("broadcast recipient claim is stale")
+	ErrBroadcastRecipientNotFound = errors.New("broadcast recipient not found")
 )
 
 const (
