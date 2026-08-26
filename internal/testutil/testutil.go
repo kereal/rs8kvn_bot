@@ -92,6 +92,8 @@ type DatabaseService struct {
 	GetAllSubscriptionsFunc                     func(ctx context.Context) ([]database.Subscription, error)
 	CountAllSubscriptionsFunc                   func(ctx context.Context) (int64, error)
 	CountActiveSubscriptionsFunc                func(ctx context.Context) (int64, error)
+	CountPremiumSubscriptionsFunc               func(ctx context.Context) (int64, error)
+	CountFreeSubscriptionsFunc                  func(ctx context.Context) (int64, error)
 	CountTrialSubscriptionsFunc                 func(ctx context.Context) (int64, error)
 	GetByIDFunc                                 func(ctx context.Context, id uint) (*database.Subscription, error)
 	GetTelegramIDByUsernameFunc                 func(ctx context.Context, username string) (int64, error)
@@ -470,6 +472,44 @@ func (m *DatabaseService) CountActiveSubscriptions(ctx context.Context) (int64, 
 
 	for _, sub := range m.Subscriptions {
 		if sub.Status == string(database.SubscriptionStatusActive) && !sub.IsExpired() {
+			count++
+		}
+	}
+
+	return count, nil
+}
+
+func (m *DatabaseService) CountPremiumSubscriptions(ctx context.Context) (int64, error) {
+	if m.CountPremiumSubscriptionsFunc != nil {
+		return m.CountPremiumSubscriptionsFunc(ctx)
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	var count int64
+	for _, sub := range m.Subscriptions {
+		if sub.Status == string(database.SubscriptionStatusActive) &&
+			(sub.ProductID != nil || sub.PricePaidCents > 0) {
+			count++
+		}
+	}
+
+	return count, nil
+}
+
+func (m *DatabaseService) CountFreeSubscriptions(ctx context.Context) (int64, error) {
+	if m.CountFreeSubscriptionsFunc != nil {
+		return m.CountFreeSubscriptionsFunc(ctx)
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	var count int64
+	for _, sub := range m.Subscriptions {
+		if sub.Status == string(database.SubscriptionStatusActive) &&
+			sub.TelegramID > 0 && sub.ProductID == nil && sub.PricePaidCents == 0 {
 			count++
 		}
 	}

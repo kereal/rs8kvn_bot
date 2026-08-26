@@ -53,9 +53,14 @@ func (h *Handler) editBroadcastMessage(chatID int64, messageID int, text string,
 	edit.ParseMode = "MarkdownV2"
 	edit.ReplyMarkup = kb
 	_, err := h.bot.Send(edit)
-	if err != nil {
-		logger.Warn(warn, zap.Error(err))
+	if err == nil {
+		return
 	}
+	if strings.Contains(err.Error(), "message is not modified") {
+		logger.Debug("Broadcast message was not modified", zap.Error(err))
+		return
+	}
+	logger.Warn(warn, zap.Error(err))
 }
 
 // HandleBroadcast handles the /broadcast command for admins.

@@ -16,7 +16,8 @@ import (
 )
 
 var (
-	// HTTPRequestsTotal is a counter of total HTTP requests with labels: method, path, status.
+	// HTTPRequestsTotal is a counter of application HTTP requests. The metrics
+	// endpoint and static assets are intentionally excluded.
 	HTTPRequestsTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "http_requests_total",
@@ -25,21 +26,12 @@ var (
 		[]string{"method", "path", "status"},
 	)
 
-	// HTTPRequestDuration is a histogram of HTTP request durations in seconds with labels: method, path.
+	// HTTPRequestDuration is a histogram of application HTTP request durations.
 	HTTPRequestDuration = promauto.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Name:    "http_request_duration_seconds",
 			Help:    "HTTP request duration in seconds",
 			Buckets: prometheus.DefBuckets,
-		},
-		[]string{"method", "path"},
-	)
-
-	// HTTPRequestsInFlight is a gauge of current HTTP requests being processed with labels: method, path.
-	HTTPRequestsInFlight = promauto.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name: "http_requests_in_flight",
-			Help: "Current number of HTTP requests being processed",
 		},
 		[]string{"method", "path"},
 	)
@@ -52,15 +44,6 @@ var (
 			Help: "Total number of bot updates processed",
 		},
 		[]string{"command", "result"},
-	)
-
-	// BotUpdateErrorsTotal is a counter of errors during bot update processing with label: type.
-	BotUpdateErrorsTotal = promauto.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "bot_update_errors_total",
-			Help: "Total number of errors during bot update processing",
-		},
-		[]string{"type"},
 	)
 
 	// BotUpdateDuration is a histogram of bot update processing duration in seconds with label: command.
@@ -131,30 +114,6 @@ var (
 		[]string{"operation"},
 	)
 
-	// DBPoolOpen is a gauge of current open database connections.
-	DBPoolOpen = promauto.NewGauge(
-		prometheus.GaugeOpts{
-			Name: "db_pool_open",
-			Help: "Current number of open database connections",
-		},
-	)
-
-	// DBPoolInUse is a gauge of database connections currently in use.
-	DBPoolInUse = promauto.NewGauge(
-		prometheus.GaugeOpts{
-			Name: "db_pool_in_use",
-			Help: "Current number of database connections in use",
-		},
-	)
-
-	// DBPoolIdle is a gauge of idle database connections.
-	DBPoolIdle = promauto.NewGauge(
-		prometheus.GaugeOpts{
-			Name: "db_pool_idle",
-			Help: "Current number of idle database connections",
-		},
-	)
-
 	// DBPoolWait is a gauge reflecting the cumulative number of times a
 	// database connection wait exceeded the pool (sql.DBStats.WaitCount).
 	DBPoolWait = promauto.NewGauge(
@@ -183,20 +142,27 @@ var (
 		[]string{"cache"},
 	)
 
-	// CircuitBreakerState is a gauge of circuit breaker state (0=closed, 1=open, 2=half-open) with label: target.
-	CircuitBreakerState = promauto.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name: "circuit_breaker_state",
-			Help: "Circuit breaker state (0=closed, 1=open, 2=half-open)",
-		},
-		[]string{"target"},
-	)
-
 	// ActiveSubscriptions is a gauge of current active subscriptions.
 	ActiveSubscriptions = promauto.NewGauge(
 		prometheus.GaugeOpts{
 			Name: "active_subscriptions",
 			Help: "Current number of active subscriptions",
+		},
+	)
+
+	// PremiumSubscriptions is a gauge of current active paid subscriptions.
+	PremiumSubscriptions = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "premium_subscriptions",
+			Help: "Current number of active paid subscriptions",
+		},
+	)
+
+	// FreeSubscriptions is a gauge of active free subscriptions.
+	FreeSubscriptions = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "free_subscriptions",
+			Help: "Current number of active free subscriptions",
 		},
 	)
 
@@ -317,26 +283,6 @@ var (
 		},
 	)
 
-	// SubserverCacheHitDuration is a histogram of time spent serving
-	// a subscription response from cache (including DB revalidation).
-	SubserverCacheHitDuration = promauto.NewHistogram(
-		prometheus.HistogramOpts{
-			Name:    "subserver_cache_hit_duration_seconds",
-			Help:    "Time spent serving subscription from cache",
-			Buckets: []float64{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1},
-		},
-	)
-
-	// SubserverCacheMissDuration is a histogram of time spent building
-	// a subscription response on cache miss (DB load + upstream fetch + aggregation).
-	SubserverCacheMissDuration = promauto.NewHistogram(
-		prometheus.HistogramOpts{
-			Name:    "subserver_cache_miss_duration_seconds",
-			Help:    "Time spent building subscription response on cache miss",
-			Buckets: []float64{0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30},
-		},
-	)
-
 	// PaymentOperationsTotal counts payment service operations by operation and result.
 	// Operation values: request, confirm, cancel. Result values: success, error.
 	PaymentOperationsTotal = promauto.NewCounterVec(
@@ -378,9 +324,7 @@ var (
 		},
 		[]string{"event"},
 	)
-)
-
-// SubscriptionRemindersTotal counts reminder sends by expiry window and result.
+) // SubscriptionRemindersTotal counts reminder sends by expiry window and result.
 var SubscriptionRemindersTotal = promauto.NewCounterVec(
 	prometheus.CounterOpts{
 		Name: "subscription_reminders_total",
@@ -391,8 +335,8 @@ var SubscriptionRemindersTotal = promauto.NewCounterVec(
 
 // SubscriptionReminderRunsTotal counts reminder worker scans.
 var SubscriptionReminderRunsTotal = promauto.NewCounter(
-	prometheus.CounterOpts{
-		Name: "subscription_reminder_runs_total",
+	prometheus.CounterOpts{Name: "subscription_reminder_runs_total",
+
 		Help: "Total number of subscription reminder worker scans.",
 	},
 )
@@ -400,11 +344,13 @@ var SubscriptionReminderRunsTotal = promauto.NewCounter(
 // InstrumentHTTP middleware records metrics for HTTP requests.
 func InstrumentHTTP(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if shouldSkipHTTPMetrics(r.URL.Path) {
+			next.ServeHTTP(w, r)
+			return
+		}
+
 		path := normalizePath(r.URL.Path)
 		method := r.Method
-
-		HTTPRequestsInFlight.WithLabelValues(method, path).Inc()
-		defer HTTPRequestsInFlight.WithLabelValues(method, path).Dec()
 
 		start := time.Now()
 		rr := &responseRecorder{ResponseWriter: w, statusCode: http.StatusOK}
@@ -418,6 +364,10 @@ func InstrumentHTTP(next http.Handler) http.Handler {
 
 // normalizePath reduces cardinality by replacing dynamic path segments
 // (such as invite codes, subscription IDs, UUIDs) with placeholders.
+func shouldSkipHTTPMetrics(path string) bool {
+	return path == "/metrics" || path == "/static/logo.png" || strings.HasPrefix(path, "/static/")
+}
+
 func normalizePath(p string) string {
 	// Dynamic routes with slash separator
 	if strings.HasPrefix(p, "/i/") {
@@ -428,7 +378,7 @@ func normalizePath(p string) string {
 		return "/sub/:id"
 	}
 
-	// Static/known paths pass through unchanged
+	// Static/known application paths pass through unchanged.
 	return p
 }
 

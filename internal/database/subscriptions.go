@@ -206,6 +206,37 @@ func (s *Service) CountActiveSubscriptions(ctx context.Context) (int64, error) {
 	return count, nil
 }
 
+// CountPremiumSubscriptions returns active subscriptions that use a paid plan.
+func (s *Service) CountPremiumSubscriptions(ctx context.Context) (int64, error) {
+	var count int64
+
+	result := s.db.WithContext(ctx).
+		Table("subscriptions").
+		Joins("JOIN plans ON plans.id = subscriptions.plan_id").
+		Where("subscriptions.status = ? AND (subscriptions.product_id IS NOT NULL OR subscriptions.price_paid_cents > 0)", string(SubscriptionStatusActive)).
+		Count(&count)
+	if result.Error != nil {
+		return 0, fmt.Errorf("failed to count premium subscriptions: %w", result.Error)
+	}
+
+	return count, nil
+}
+
+// CountFreeSubscriptions returns active non-trial subscriptions without a paid purchase.
+func (s *Service) CountFreeSubscriptions(ctx context.Context) (int64, error) {
+	var count int64
+
+	result := s.db.WithContext(ctx).
+		Model(&Subscription{}).
+		Where("status = ? AND telegram_id > 0 AND product_id IS NULL AND price_paid_cents = 0", string(SubscriptionStatusActive)).
+		Count(&count)
+	if result.Error != nil {
+		return 0, fmt.Errorf("failed to count free subscriptions: %w", result.Error)
+	}
+
+	return count, nil
+}
+
 // CountTrialSubscriptions returns the number of trial subscriptions (telegram_id < 0).
 func (s *Service) CountTrialSubscriptions(ctx context.Context) (int64, error) {
 	var count int64
