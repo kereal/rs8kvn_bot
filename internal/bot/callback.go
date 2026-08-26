@@ -220,11 +220,14 @@ func (c *CallbackHandler) HandleCallback(ctx context.Context, update tgbotapi.Up
 		}
 		canceled, err := c.h.broadcastWorker.Cancel(ctx, id)
 		if err != nil {
+			logger.Error("Failed to cancel broadcast", zap.Uint("broadcast_id", id), zap.Int64("chat_id", chatID), zap.Error(err))
 			return fmt.Errorf("cancel broadcast: %w", err)
 		}
 		if canceled {
+			logger.Info("Broadcast canceled", zap.Uint("broadcast_id", id), zap.Int64("chat_id", chatID))
 			c.h.SendMessage(ctx, chatID, fmt.Sprintf("⏹ Рассылка #%d отменена.", id))
 		} else {
+			logger.Info("Broadcast cancel skipped, already terminal", zap.Uint("broadcast_id", id), zap.Int64("chat_id", chatID))
 			c.h.SendMessage(ctx, chatID, fmt.Sprintf("ℹ️ Рассылка #%d уже завершена — отменять нечего.", id))
 		}
 	case strings.HasPrefix(data, "broadcast_retry_"):
@@ -236,8 +239,10 @@ func (c *CallbackHandler) HandleCallback(ctx context.Context, update tgbotapi.Up
 			return err
 		}
 		if err := c.h.broadcastWorker.RetryFailed(ctx, id); err != nil {
+			logger.Error("Failed to retry broadcast", zap.Uint("broadcast_id", id), zap.Int64("chat_id", chatID), zap.Error(err))
 			return fmt.Errorf("retry broadcast: %w", err)
 		}
+		logger.Info("Broadcast retry scheduled", zap.Uint("broadcast_id", id), zap.Int64("chat_id", chatID))
 		c.h.SendMessage(ctx, chatID, fmt.Sprintf("🔁 Повторная отправка ошибок для рассылки #%d поставлена в очередь.", id))
 	case strings.HasPrefix(data, "broadcast_details_"):
 		if !c.h.isAdmin(chatID) {

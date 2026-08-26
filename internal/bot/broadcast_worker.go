@@ -19,6 +19,10 @@ import (
 	"go.uber.org/zap"
 )
 
+// errBroadcastIncomplete signals that a campaign finished its time slice with
+// recipients still in flight. This is a planned resume, not a failure: the
+// worker picks the campaign up again on the next pass.
+var errBroadcastIncomplete = errors.New("broadcast has unfinished recipients")
 
 // BroadcastWorker processes durable broadcast campaigns independently from the
 // Telegram update loop. A process restart resumes scheduled/running campaigns.
@@ -56,8 +60,17 @@ func (w *BroadcastWorker) process(ctx context.Context) {
 		return
 	}
 	for i := range campaigns {
-		if err := w.processCampaign(ctx, &campaigns[i]); err != nil && !errors.Is(err, context.Canceled) {
-			logger.Warn("Broadcast campaign failed", zap.Uint("broadcast_id", campaigns[i].ID), zap.Error(err))
+		if err := w.processCampaign(ctx, &campaigns[i]); err != nil {
+			switch {
+			case errors.Is(err, context.Canceled):
+				// Admin cancel or shutdown — nothing to log.
+			case errors.Is(err, context.DeadlineExceeded), errors.Is(err, errBroadcastIncomplete):
+				// Planned resume: the campaign exceeded its time slice with
+				// recipients still in flight and will be picked up again.
+				logger.Info("Broadcast campaign will resume on next pass", zap.Uint("broadcast_id", campaigns[i].ID), zap.Error(err))
+			default:
+				logger.Warn("Broadcast campaign failed", zap.Uint("broadcast_id", campaigns[i].ID), zap.Error(err))
+			}
 		}
 	}
 }
@@ -105,6 +118,7 @@ func (w *BroadcastWorker) processCampaign(ctx context.Context, campaign *databas
 		if !claimed {
 			return nil
 		}
+		logger.Info("Broadcast campaign started", zap.Uint("broadcast_id", campaign.ID))
 	}
 
 	// Snapshot is idempotent and also covers a crash between claim and snapshot.
@@ -304,7 +318,7 @@ func (w *BroadcastWorker) finishCampaign(ctx context.Context, campaign *database
 		status = database.BroadcastStatusRunning
 		finishedAt = time.Time{}
 		lastError, retryAt, retryCount = campaign.LastError, campaign.RetryAt, campaign.RetryCount
-		incompleteErr = fmt.Errorf("broadcast has %d unfinished recipients", total-terminal)
+		incompleteErr = fmt.Errorf("%w: %d recipients", errBroadcastIncomplete, total-terminal)
 	}
 	b := &database.Broadcast{ID: campaign.ID, Status: string(status), RecipientsTotal: total, SentCount: sent, BlockedCount: blocked, UnreachableCount: unreachable, FailedCount: failed, LastError: lastError, RetryAt: retryAt, RetryCount: retryCount}
 	if !finishedAt.IsZero() {
@@ -362,6 +376,14 @@ func (w *BroadcastWorker) sendAdminReport(ctx context.Context, campaign *databas
 		logger.Warn("Failed to load broadcast report", zap.Uint("broadcast_id", campaign.ID), zap.Error(err))
 		return
 	}
+	logger.Info("Broadcast finished",
+		zap.Uint("broadcast_id", campaign.ID),
+		zap.String("status", campaign.Status),
+		zap.Int64("sent", sent),
+		zap.Int64("blocked", blocked),
+		zap.Int64("unreachable", unreachable),
+		zap.Int64("failed", failed))
+
 	statusText := "✅ Рассылка завершена!"
 	if campaign.Status == string(database.BroadcastStatusCanceled) {
 		statusText = "⚠️ Рассылка отменена"
