@@ -806,15 +806,32 @@ func referrerComment(ctx context.Context, db interfaces.DatabaseService, sub *da
 	return fmt.Sprintf("from: @%s", referrerSub.Username), nil
 }
 
-// RefreshActiveSubscriptionsMetric updates the active_subscriptions and trial_subscriptions gauges.
+// RefreshActiveSubscriptionsMetric updates active, premium, and trial subscription gauges.
 func (s *SubscriptionService) RefreshActiveSubscriptionsMetric(ctx context.Context) {
 	count, err := s.db.CountActiveSubscriptions(ctx)
+
 	if err != nil {
 		logger.Warn("failed to refresh active subscriptions metric", zap.Error(err))
 		return
 	}
 
 	metrics.ActiveSubscriptions.Set(float64(count))
+
+	premiumCount, err := s.db.CountPremiumSubscriptions(ctx)
+	if err != nil {
+		logger.Warn("failed to refresh premium subscriptions metric", zap.Error(err))
+		return
+	}
+
+	metrics.PremiumSubscriptions.Set(float64(premiumCount))
+
+	freeCount, err := s.db.CountFreeSubscriptions(ctx)
+	if err != nil {
+		logger.Warn("failed to refresh free subscriptions metric", zap.Error(err))
+		return
+	}
+
+	metrics.FreeSubscriptions.Set(float64(freeCount))
 
 	trialCount, err := s.db.CountTrialSubscriptions(ctx)
 	if err != nil {

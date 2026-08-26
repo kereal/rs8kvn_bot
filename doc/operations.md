@@ -325,20 +325,75 @@ The bot exposes a `/metrics` endpoint on the same port as health checks (default
 
 **Endpoint:** `GET /metrics`
 
+**Результат аудита (2026-08-26):**
+
+Цель — держать только метрики, по которым есть алерт, SLO или оперативное действие. Сейчас объявлено 34 прикладных collector-а (без стандартных `go_*`, `process_*` и `promhttp_*`); это ещё приемлемо, но часть из них имеет невысокую диагностическую ценность. Платёжные метрики в целом добавлены правильно: отсутствуют user/order/provider ID labels, а суммы нормализуются до копеек и валюты.
+
+**Рекомендуемый обязательный набор:**
+
+- `http_requests_total`, `http_request_duration_seconds` — трафик, ошибки и latency API;
+- `bot_updates_total`, `bot_update_duration_seconds` — основной пользовательский канал;
+- `xui_requests_total`, `xui_request_duration_seconds` — доступность и latency VPN-панелей;
+- `db_queries_total`, `db_query_duration_seconds`, `db_pool_wait` — ошибки/замедление SQLite;
+- `active_subscriptions` — все активные подписки;
+- `premium_subscriptions` — активные оплаченные Premium-подписки;
+- `free_subscriptions` — активные бесплатные подписки;
+- `trial_subscriptions` — активные trial-подписки; отозванные/неактивные отдельно не считаются;
+- `subscription_sync_total`, `subscription_sync_duration_seconds`, `bot_orphaned_clients_revoked_total` — целостность VPN-доступа;
+- `payment_operations_total`, `payment_operation_duration_seconds`, `payment_amount_cents_total`, `payment_issues_total` — платёжная воронка и инциденты;
+
+**Второстепенные:** cache hit/miss, Telegram API latency, subserver fetch детализация, worker run/latency и `db_pool_wait` полезны для расследований, но не требуют обязательных алертов.
+
+**Кандидаты на удаление или исправление:**
+
+1. `db_pool_open`, `db_pool_in_use`, `db_pool_idle` удалены: при `MaxOpenConns=1` они почти не дают новой информации.
+2. `subscription_reminder_runs_total` и `subscription_expire_total` оставлены только как контроль запуска фоновых workers; обязательные алерты на них не нужны.
+3. Детальные cache hit/miss duration-метрики удалены, чтобы не дублировать HTTP latency.
+4. В документации используется фактическое имя `payment_amount_cents_total`.
+
+**Labels:**
+
+- Оставить bounded labels: `status` (лучше числовой код или класс `2xx/4xx/5xx`), `method`, нормализованный route, `result`, `operation`, `currency`, `event`, `window`, `format`, `cache`, `target`.
+- Для HTTP желательно перейти от ручного `normalizePath` к router route pattern, чтобы новые динамические endpoints не создавали series по ID. Текущая нормализация покрывает только `/i/*` и `/sub/*`.
+- Не добавлять `telegram_id`, `user_id`, `order_id`, `subscription_id`, `provider_payment_id`, URL, payload, username или payment URL: это unbounded/high-cardinality и потенциально PII.
+- Для платежей полезно добавить только bounded `provider` (сейчас фактически всегда Platega) и, если появятся провайдеры, `payment_provider` в `payment_operations_total` и `payment_operation_duration_seconds`. Не добавлять `payment_method`, если его набор/значения не зафиксированы и он не нужен для отдельного алерта.
+- Для `payment_operations_total` стоит различать bounded результаты `success`, `error`, `disabled`, `idempotent`, `manual_review`, `expired`, `rejected`; это даст воронку без IDs. Отдельный `payment_issues_total{event}` уже подходит для ручного разбора.
+- `currency` допустима только при allowlist ISO-кодов; текущая нормализация регистра правильна, но желательно явно ограничить неожиданные значения.
+
+**Минимальные платёжные запросы:**
+
+```promql
+# Ошибки платёжных операций
+sum by (operation) (rate(payment_operations_total{result="error"}[15m]))
+
+# Конверсия request → confirm (приближённо, по успешным операциям)
+sum(rate(payment_operations_total{operation="confirm",result="success"}[1h]))
+/
+sum(rate(payment_operations_total{operation="request",result="success"}[1h]))
+
+# Подтверждённый оборот за сутки в копейках
+sum by (currency) (increase(payment_amount_cents_total{operation="confirmed"}[24h]))
+
+# Chargeback rate
+sum(rate(payment_amount_cents_total{operation="chargeback"}[24h]))
+/
+sum(rate(payment_amount_cents_total{operation="confirmed"}[24h]))
+```
+
+> Важно: суммы — counters, поэтому для оборота используйте `increase`, а не текущее значение. Для денежных алертов полезно дополнительно иметь в логах/БД точную детализацию; Prometheus не должен становиться платёжным ledger.
+
 **Key metrics:**
 
 | Metric | Type | Labels | Description |
 |--------|------|--------|-------------|
-| `http_requests_total` | Counter | method, path, status | Total HTTP requests |
-| `http_request_duration_seconds` | Histogram | method, path | HTTP request latency |
-| `http_requests_in_flight` | Gauge | method, path | Current in-flight requests |
+| `http_requests_total` | Counter | method, path, status | Application HTTP requests; `/metrics` and `/static/*` excluded |
+| `http_request_duration_seconds` | Histogram | method, path | Application HTTP latency; `/metrics` and `/static/*` excluded |
+| `premium_subscriptions` | Gauge | — | Текущее количество активных оплаченных Premium-подписок |
 | `bot_updates_total` | Counter | command, result | Bot updates processed (success/error/rate_limited) |
-| `bot_update_errors_total` | Counter | type | Bot update errors |
 | `bot_update_duration_seconds` | Histogram | — | Bot update processing time |
 | `cache_hits_total` / `cache_misses_total` | Counter | cache | Cache hit/miss (subscription, referral, subserver) |
 | `xui_requests_total` | Counter | operation, result | Live 3x-ui request count |
 | `xui_request_duration_seconds` | Histogram | operation | Live 3x-ui request duration |
-| `circuit_breaker_state` | Gauge | target | Circuit breaker state when the tested breaker is wired into a live path |
 | `bot_orphaned_clients_revoked_total` | Counter | — | Orphaned subscriptions revoked during reconciliation |
 | `subserver_source_fetch_total` | Counter | result, format | Upstream source fetch results (success/error by format) |
 | `subserver_source_fetch_duration_seconds` | Histogram | result | Upstream source fetch duration |
@@ -346,7 +401,7 @@ The bot exposes a `/metrics` endpoint on the same port as health checks (default
 | `subserver_no_items_total` | Counter | — | Requests returning no items |
 | `payment_operations_total` | Counter | operation, result | Payment request/confirm/cancel attempts by outcome |
 | `payment_operation_duration_seconds` | Histogram | operation | Payment service operation latency |
-| `payment_amounts_cents_total` | Counter | operation, currency | Monetary amounts in cents by outcome (`confirmed`, `chargeback`) — watch for chargeback totals vs confirmed |
+| `payment_amount_cents_total` | Counter | operation, currency | Monetary amounts in cents by outcome (`confirmed`, `chargeback`) — watch for chargeback totals vs confirmed |
 | `payment_issues_total` | Counter | event | Payment incidents requiring investigation or operator attention |
 
 **Prometheus scrape config:**

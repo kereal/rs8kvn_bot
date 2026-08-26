@@ -11,6 +11,16 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestShouldSkipHTTPMetrics(t *testing.T) {
+	t.Parallel()
+
+	assert.True(t, shouldSkipHTTPMetrics("/metrics"))
+	assert.True(t, shouldSkipHTTPMetrics("/static/logo.png"))
+	assert.True(t, shouldSkipHTTPMetrics("/static/js/app.js"))
+	assert.False(t, shouldSkipHTTPMetrics("/sub/abc"))
+	assert.False(t, shouldSkipHTTPMetrics("/payment/callback"))
+}
+
 func TestNormalizePath(t *testing.T) {
 	t.Parallel()
 
@@ -56,9 +66,7 @@ func TestStatusCodeString(t *testing.T) {
 func TestNewMetricsInitialized(t *testing.T) {
 	require.NotNil(t, HTTPRequestsTotal)
 	require.NotNil(t, HTTPRequestDuration)
-	require.NotNil(t, HTTPRequestsInFlight)
 	require.NotNil(t, BotUpdatesTotal)
-	require.NotNil(t, BotUpdateErrorsTotal)
 	require.NotNil(t, BotUpdateDuration)
 	require.NotNil(t, XUIRequestsTotal)
 	require.NotNil(t, XUIRequestDuration)
@@ -66,8 +74,9 @@ func TestNewMetricsInitialized(t *testing.T) {
 	require.NotNil(t, DBQueryDuration)
 	require.NotNil(t, CacheHitsTotal)
 	require.NotNil(t, CacheMissesTotal)
-	require.NotNil(t, CircuitBreakerState)
 	require.NotNil(t, ActiveSubscriptions)
+	require.NotNil(t, PremiumSubscriptions)
+	require.NotNil(t, FreeSubscriptions)
 	require.NotNil(t, SubscriptionCreatesTotal)
 	require.NotNil(t, SubscriptionRenewalsTotal)
 	require.NotNil(t, SubscriptionSyncTotal)
@@ -80,12 +89,23 @@ func TestNewMetricsInitialized(t *testing.T) {
 	require.NotNil(t, SubserverSourceFetchDuration)
 	require.NotNil(t, SubserverCacheInvalidationsTotal)
 	require.NotNil(t, SubserverNoItemsTotal)
-	require.NotNil(t, SubserverCacheHitDuration)
-	require.NotNil(t, SubserverCacheMissDuration)
 	require.NotNil(t, PaymentOperationsTotal)
 	require.NotNil(t, PaymentOperationDuration)
 	require.NotNil(t, PaymentAmountCentsTotal)
 	require.NotNil(t, PaymentIssuesTotal)
+}
+
+func TestInstrumentHTTPSkipsMetricsAndStatic(t *testing.T) {
+	t.Parallel()
+
+	handler := InstrumentHTTP(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	for _, path := range []string{"/metrics", "/static/app.js"} {
+		resp := httptest.NewRecorder()
+		handler.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, path, nil))
+		assert.Equal(t, http.StatusOK, resp.Code)
+	}
 }
 
 func TestMetricsEndpoint(t *testing.T) {

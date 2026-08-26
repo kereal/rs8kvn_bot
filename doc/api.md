@@ -91,7 +91,7 @@ Returns the merged subscription configuration from all active nodes. Responses a
 
 ### `GET /metrics`
 
-Prometheus exposition endpoint. It exposes HTTP, bot, cache, subserver, circuit-breaker, and database metrics.
+Prometheus exposition endpoint. It exposes application, bot, cache, subserver, database, subscription, and payment metrics. Requests to `/metrics` itself and `/static/*` are deliberately excluded from `http_requests_total` and `http_request_duration_seconds`, so scrapes and asset 404s do not pollute application traffic metrics.
 
 ---
 

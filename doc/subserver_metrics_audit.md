@@ -10,15 +10,12 @@
 |---|---|---|
 | `http_requests_total{method,path,status}` | counter | `web/web.go:135` — `InstrumentHTTP` middleware |
 | `http_request_duration_seconds{method,path}` | histogram | там же |
-| `http_requests_in_flight{method,path}` | gauge | там же |
 | `bot_updates_total{command,result}` | counter | `bot/handler.go:647,654,656` |
-| `bot_update_errors_total{type}` | counter | `bot/handler.go:653` |
 | `bot_update_duration_seconds` | histogram | `bot/handler.go:622` |
 | `cache_hits_total{cache}` | counter | `subserver/cache.go:61`, `bot/cache.go:81` |
 | `cache_misses_total{cache}` | counter | `subserver/cache.go:56`, `bot/cache.go:54,71` |
 | `xui_requests_total{operation,result}` | counter | `xui/client.go` — live XUI request instrumentation |
 | `xui_request_duration_seconds{operation}` | histogram | `xui/client.go` — live XUI request timing |
-| `circuit_breaker_state{target}` | gauge | `xui/breaker.go` — updated by the tested breaker; no live production caller |
 | `active_subscriptions` | gauge | `service/subscription.go` — `.Set()` после мутаций |
 | `subscription_creates_total` | counter | `service/subscription.go` — `Create`, `GetOrCreateSubscription` |
 | `subscription_renewals_total` | counter | `service/subscription.go` — `RenewSubscription` |
@@ -34,8 +31,6 @@
 | `subserver_source_fetch_duration_seconds{result}` | histogram | `subscription_handler_split.go:226,243` |
 | `subserver_cache_invalidations_total{reason}` | counter | `subscription_handler_split.go:38,62` |
 | `subserver_no_items_total` | counter | `subscription_handler_split.go:394` |
-| `subserver_cache_hit_duration_seconds` | histogram | `subscription_handler.go:29` |
-| `subserver_cache_miss_duration_seconds` | histogram | `subscription_handler.go:34` |
 
 ### Удалённые или ранее ошибочно классифицированные метрики
 

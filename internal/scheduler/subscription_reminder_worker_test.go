@@ -41,6 +41,8 @@ func (f *fakeRepo) GetAllSubscriptions(ctx context.Context) ([]database.Subscrip
 }
 func (f *fakeRepo) CountAllSubscriptions(ctx context.Context) (int64, error)           { return 0, nil }
 func (f *fakeRepo) CountActiveSubscriptions(ctx context.Context) (int64, error)        { return 0, nil }
+func (f *fakeRepo) CountPremiumSubscriptions(ctx context.Context) (int64, error)       { return 0, nil }
+func (f *fakeRepo) CountFreeSubscriptions(ctx context.Context) (int64, error)          { return 0, nil }
 func (f *fakeRepo) CountTrialSubscriptions(ctx context.Context) (int64, error)         { return 0, nil }
 func (f *fakeRepo) CountExpiredAtTime(ctx context.Context, t time.Time) (int64, error) { return 0, nil }
 func (f *fakeRepo) GetExpiredSubscriptionsBefore(ctx context.Context, t time.Time) ([]database.Subscription, error) {
