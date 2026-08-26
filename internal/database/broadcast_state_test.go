@@ -6,6 +6,7 @@ package database
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -122,20 +123,23 @@ func TestBroadcastRecipientClaimIsAtomic(t *testing.T) {
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	claimedCount := 0
+	var claimErrs []error
 	for range 2 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			recipients, err := svc.ClaimBroadcastRecipients(ctx, b.ID, time.Now().UTC(), 1)
+			mu.Lock()
+			defer mu.Unlock()
 			if err != nil {
+				claimErrs = append(claimErrs, err)
 				return
 			}
-			mu.Lock()
 			claimedCount += len(recipients)
-			mu.Unlock()
 		}()
 	}
 	wg.Wait()
+	require.NoError(t, errors.Join(claimErrs...))
 	assert.Equal(t, 1, claimedCount)
 }
 

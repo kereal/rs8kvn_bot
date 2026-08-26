@@ -221,7 +221,7 @@ After entering the draft text, the admin sees an inline keyboard for selecting r
 
 | Field | JSON key | Type | Description |
 |-------|----------|------|-------------|
-| `PlanType` | `plan_type` | `string` | `"paid"` (purchased/paid subscriptions only) or `"free"` (free plan without payment). Empty = all eligible plans. Trials are always excluded. |
+| `PlanType` | `plan_type` | `string` | `"paid"` (has `product_id` or positive `price_paid_cents`) or `"free"` (free plan without product and payment). Payment state, not plan name. Empty = all eligible plans. Trials are always excluded. |
 | `SubscriptionStatus` | `subscription_status` | `string` | `"active"`, `"revoked"`, `"all"`. Empty = `"active"` (default); expired is not a broadcast option. |
 | `RegisteredAfter` | `registered_after` | `*time.Time` | Users registered after this date (inclusive). |
 | `RegisteredBefore` | `registered_before` | `*time.Time` | Users registered before this date (inclusive). |

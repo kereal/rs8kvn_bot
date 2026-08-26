@@ -930,7 +930,7 @@ All fields are optional. Empty filter `{}` = all active users.
 
 | Field | Type | SQL Condition | Notes |
 |-------|------|---------------|-------|
-| `plan_type` | `string` | `plan_id != (SELECT id FROM plans WHERE name='free')` | `"paid"` or `"free"` only |
+| `plan_type` | `string` | `"paid"`: `product_id IS NOT NULL OR price_paid_cents > 0`; `"free"`: free plan AND `product_id IS NULL` AND `price_paid_cents <= 0` | `"paid"` or `"free"` only |
 | `subscription_status` | `string` | `status = ?` | Default: `"active"` |
 | `registered_after` | `*time.Time` | `created_at >= ?` | Inclusive |
 | `registered_before` | `*time.Time` | `created_at <= ?` | Inclusive |
@@ -944,7 +944,7 @@ All active filters are combined with **AND**:
 ```
 WHERE telegram_id > 0
   AND status = 'active'
-  AND plan_id != (SELECT id FROM plans WHERE name = 'free')
+  AND (product_id IS NOT NULL OR price_paid_cents > 0)
   AND created_at >= '2026-01-01'
   AND last_request < datetime('now', '-30 days')
   AND id IN (SELECT subscription_id FROM orders WHERE status = 'paid')
@@ -958,7 +958,7 @@ WHERE telegram_id > 0
 → Enter text (MarkdownV2)
 → Filter keyboard appears:
   [👥 All] [💰 Paid] [🆓 Free]
-  [📋 All] [✅ Active] [⏰ Expired] [🚫 Revoked]
+  [📋 All] [✅ Active] [🚫 Revoked]
   [📅 Reg. 3m] [📅 Reg. 6m] [📅 Reg. 1y] [📅 Reg. all]
   [🚫 Never accessed] [⏰ >1m] [⏰ >3m] [👤 No filter]
   [💳 Paid] [🆓 Never paid] [👤 No filter]

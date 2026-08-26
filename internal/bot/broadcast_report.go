@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
+	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/logger"
 	"github.com/kereal/rs8kvn_bot/internal/utils"
@@ -90,7 +92,7 @@ func (h *Handler) sendBroadcastDetails(ctx context.Context, chatID int64, broadc
 	fmt.Fprintf(&sb, "⚠️ Недоступны: %d\n", c.UnreachableCount)
 	fmt.Fprintf(&sb, "❌ Ошибок: %d\n", c.FailedCount)
 	if c.LastError != "" {
-		fmt.Fprintf(&sb, "⚠️ Последняя ошибка worker-а: %s\n", c.LastError)
+		fmt.Fprintf(&sb, "⚠️ Последняя ошибка worker-а: %s\n", truncateRunes(c.LastError, broadcastErrorPreviewMaxRunes))
 	}
 	if c.Filters != "" && c.Filters != "{}" {
 		fmt.Fprintf(&sb, "\n🔎 Фильтры: `%s`\n", c.Filters)
@@ -112,8 +114,18 @@ func (h *Handler) sendBroadcastDetails(ctx context.Context, chatID int64, broadc
 	}
 	fmt.Fprintf(&sb, "\n💬 *Текст:*\n%s", truncateRunes(c.MessageText, broadcastTextPreviewMaxRunes))
 
-	msg := tgbotapi.NewMessage(chatID, utils.EscapeMarkdownV2(sb.String()))
-	msg.ParseMode = "MarkdownV2"
+	// EscapeMarkdownV2 может заметно увеличить длину строки, поэтому итог
+	// проверяется после экранирования: при превышении лимита Telegram карточка
+	// уходит ограниченным plain-text'ом без ParseMode (обрезка не может сломать
+	// MarkdownV2-сущности); полные данные остаются в delivery_report.
+	escaped := utils.EscapeMarkdownV2(sb.String())
+	var msg tgbotapi.MessageConfig
+	if utf8.RuneCountInString(escaped) <= config.MaxTelegramMessageLen {
+		msg = tgbotapi.NewMessage(chatID, escaped)
+		msg.ParseMode = "MarkdownV2"
+	} else {
+		msg = tgbotapi.NewMessage(chatID, truncateRunes(sb.String(), config.MaxTelegramMessageLen-1))
+	}
 	msg.ReplyMarkup = broadcastControlKeyboard(c)
 	h.send(ctx, msg)
 }
@@ -197,6 +209,8 @@ func formatIDList(ids []int64, maxItems int) string {
 }
 
 // formatErrorList formats failed recipient IDs and their persisted error text.
+// Each error text is preview-bounded so a single long message cannot blow up
+// the final card size.
 func formatErrorList(errs []database.BroadcastSendError, maxItems int) string {
 	if len(errs) == 0 {
 		return "—"
@@ -210,7 +224,7 @@ func formatErrorList(errs []database.BroadcastSendError, maxItems int) string {
 		if maxItems > 0 && i >= maxItems {
 			break
 		}
-		parts = append(parts, fmt.Sprintf("%d (%s)", e.TelegramID, e.Error))
+		parts = append(parts, fmt.Sprintf("%d (%s)", e.TelegramID, truncateRunes(e.Error, broadcastErrorPreviewMaxRunes)))
 	}
 	result := strings.Join(parts, "; ")
 	if maxItems > 0 && len(errs) > maxItems {

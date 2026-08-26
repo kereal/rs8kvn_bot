@@ -274,7 +274,7 @@ func (w *BroadcastWorker) processRecipient(ctx context.Context, text string, rec
 
 func (w *BroadcastWorker) markCampaignFailed(ctx context.Context, id uint, cause error) error {
 	finishedAt := time.Now().UTC()
-	report := database.BroadcastDeliveryReport{Delivered: []int64{}, Blocked: []int64{}, Errors: []database.BroadcastSendError{}, NotProcessed: []int64{}}
+	report := database.BroadcastDeliveryReport{Delivered: []int64{}, Blocked: []int64{}, Unreachable: []int64{}, Errors: []database.BroadcastSendError{}, NotProcessed: []int64{}}
 	broadcast := &database.Broadcast{ID: id, Status: string(database.BroadcastStatusFailed), FinishedAt: &finishedAt, LastError: truncateRunes(cause.Error(), broadcastErrorTextMaxLen)}
 	if err := broadcast.SetDeliveryReport(&report); err != nil {
 		return err

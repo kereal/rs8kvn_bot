@@ -13,6 +13,9 @@ const (
 	broadcastTextPreviewMaxRunes = 500
 	// broadcastErrorTextMaxLen — максимальная длина текста ошибки в отчёте.
 	broadcastErrorTextMaxLen = 500
+	// broadcastErrorPreviewMaxRunes — максимальная длина текста одной ошибки
+	// в карточке деталей рассылки (полный текст остаётся в delivery_report).
+	broadcastErrorPreviewMaxRunes = 120
 
 	// --- Per-message delivery ---
 
