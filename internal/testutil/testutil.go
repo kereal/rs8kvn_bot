@@ -165,20 +165,20 @@ type DatabaseService struct {
 	ClaimReminderFunc                   func(ctx context.Context, id uint, bit int, expiresAt time.Time) (bool, error)
 	ReleaseReminderFunc                 func(ctx context.Context, id uint, bit int, expiresAt time.Time) error
 
-	CreateBroadcastFunc                 func(ctx context.Context, b *database.Broadcast) error
-	GetBroadcastFunc                    func(ctx context.Context, id uint) (*database.Broadcast, error)
-	ListBroadcastsFunc                  func(ctx context.Context, limit int) ([]database.Broadcast, error)
-	UpdateBroadcastFunc                 func(ctx context.Context, b *database.Broadcast) error
-	SnapshotBroadcastRecipientsFunc     func(ctx context.Context, broadcastID uint, filter database.BroadcastFilter) (int64, error)
-	ClaimBroadcastFunc                  func(ctx context.Context, id uint, now time.Time) (bool, error)
-	CancelBroadcastFunc                 func(ctx context.Context, id uint, now time.Time) (bool, error)
-	GetRunnableBroadcastsFunc           func(ctx context.Context, now time.Time) ([]database.Broadcast, error)
-	RecoverStaleBroadcastRecipientsFunc func(ctx context.Context, broadcastID uint, before time.Time) error
-	ClaimBroadcastRecipientsFunc        func(ctx context.Context, broadcastID uint, now time.Time, limit int) ([]database.BroadcastRecipient, error)
-	FinishBroadcastRecipientFunc        func(ctx context.Context, broadcastID uint, id uint, expectedAttempts int, status database.BroadcastRecipientStatus, lastError string, now time.Time) error
+	CreateBroadcastFunc                  func(ctx context.Context, b *database.Broadcast) error
+	GetBroadcastFunc                     func(ctx context.Context, id uint) (*database.Broadcast, error)
+	ListBroadcastsFunc                   func(ctx context.Context, limit int) ([]database.Broadcast, error)
+	UpdateBroadcastFunc                  func(ctx context.Context, b *database.Broadcast) error
+	SnapshotBroadcastRecipientsFunc      func(ctx context.Context, broadcastID uint, filter database.BroadcastFilter) (int64, error)
+	ClaimBroadcastFunc                   func(ctx context.Context, id uint, now time.Time) (bool, error)
+	CancelBroadcastFunc                  func(ctx context.Context, id uint, now time.Time) (bool, error)
+	GetRunnableBroadcastsFunc            func(ctx context.Context, now time.Time) ([]database.Broadcast, error)
+	RecoverStaleBroadcastRecipientsFunc  func(ctx context.Context, broadcastID uint, before time.Time) error
+	ClaimBroadcastRecipientsFunc         func(ctx context.Context, broadcastID uint, now time.Time, limit int) ([]database.BroadcastRecipient, error)
+	FinishBroadcastRecipientFunc         func(ctx context.Context, broadcastID uint, id uint, expectedAttempts int, status database.BroadcastRecipientStatus, lastError string, now time.Time) error
 	UpdateBroadcastRecipientProgressFunc func(ctx context.Context, broadcastID uint, id uint, expectedAttempts int, nextChunk int, now time.Time) error
-	ResetBroadcastFailedRecipientsFunc  func(ctx context.Context, id uint, now time.Time) error
-	GetBroadcastRecipientsStatsFunc     func(ctx context.Context, broadcastID uint) (total, sent, blocked, unreachable, failed int64, report database.BroadcastDeliveryReport, err error)
+	ResetBroadcastFailedRecipientsFunc   func(ctx context.Context, id uint, now time.Time) error
+	GetBroadcastRecipientsStatsFunc      func(ctx context.Context, broadcastID uint) (total, sent, blocked, unreachable, failed int64, report database.BroadcastDeliveryReport, err error)
 }
 
 func (m *DatabaseService) Ping(ctx context.Context) error {

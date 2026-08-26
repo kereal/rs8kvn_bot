@@ -20,8 +20,8 @@ import (
 // Amount/Commission парсятся как json.Number, чтобы сохранить точное
 // десятичное представление провайдера.
 type TransactionStatusResponse struct {
-	ID          string `json:"id"`
-	Status      string `json:"status"`
+	ID             string `json:"id"`
+	Status         string `json:"status"`
 	PaymentDetails struct {
 		Amount   json.Number `json:"amount"`
 		Currency string      `json:"currency"`
@@ -132,7 +132,7 @@ func (r *TransactionStatusResponse) CommissionCents() (int64, error) {
 		cents += int64(fraction[0]-'0') * 10
 	}
 	if len(fraction) >= 2 {
-		cents += int64(fraction[1]-'0')
+		cents += int64(fraction[1] - '0')
 	}
 
 	// Half-up округление: решает старший отбрасываемый знак (третий после

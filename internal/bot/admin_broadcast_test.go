@@ -701,7 +701,7 @@ func TestHandleCallback_BroadcastNonAdminAnswersCallback(t *testing.T) {
 	ctx := context.Background()
 	update := tgbotapi.Update{CallbackQuery: &tgbotapi.CallbackQuery{
 		ID: "cb-nonadmin", Data: "broadcast_confirm",
-		From: &tgbotapi.User{ID: 123456},
+		From:    &tgbotapi.User{ID: 123456},
 		Message: &tgbotapi.Message{MessageID: 1, Chat: &tgbotapi.Chat{ID: 123456}},
 	}}
 	require.NoError(t, handler.HandleCallback(ctx, update))
