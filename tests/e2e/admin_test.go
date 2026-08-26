@@ -7,7 +7,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kereal/rs8kvn_bot/internal/bot"
+	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
+	"github.com/kereal/rs8kvn_bot/internal/testutil"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/stretchr/testify/assert"
@@ -1019,4 +1022,100 @@ func TestE2E_VersionCommand_NonAdmin(t *testing.T) {
 	env.handler.HandleVersion(ctx, update)
 
 	assert.False(t, env.botAPI.SendCalledSafe(), "Non-admin should not receive version info")
+}
+
+// TestE2E_BroadcastCrashMidChunksResumesAfterRestart моделирует падение воркера
+// после доставки первого чанка многочастной рассылки (3 чанка по 4096 байт) и
+// проверяет корректное возобновление после рестарта процесса: чанк 0 повторно
+// не отправляется, доставка продолжается со второго чанка.
+//
+// Краш симулируется через реальный API БД — ровно то состояние, которое
+// остаётся после смерти процесса между чанками: кампания Running, получатель
+// в статусе Sending с сохранённым NextChunk=1 и протухшей арендой (прошло
+// больше broadcastRecipientLease с момента падения). Рестарт идёт через
+// прод-путь StartBroadcastWorker на той же БД.
+func TestE2E_BroadcastCrashMidChunksResumesAfterRestart(t *testing.T) {
+	t.Parallel()
+
+	env := setupE2EEnv(t)
+	defer func() {
+		err := env.db.Close()
+		if err != nil {
+			t.Logf("Warning: failed to close database: %v", err)
+		}
+	}()
+
+	ctx := context.Background()
+	userChatID := int64(500001)
+
+	// Получатель рассылки — тот же путь, что и в остальных e2e-тестах рассылок.
+	_, err := env.subService.Create(ctx, userChatID, "crashuser", "")
+	require.NoError(t, err)
+
+	// Три чанка ровно по config.MaxTelegramMessageLen байт: splitMessage режет
+	// по границе maxLen, поэтому получаются ровно 3 различимых чанка.
+	text := strings.Repeat("1", config.MaxTelegramMessageLen) +
+		strings.Repeat("2", config.MaxTelegramMessageLen) +
+		strings.Repeat("3", config.MaxTelegramMessageLen)
+
+	b := &database.Broadcast{
+		Name: "crash resume", MessageText: text, Filters: "{}",
+		Status: string(database.BroadcastStatusScheduled),
+	}
+	require.NoError(t, env.db.CreateBroadcast(ctx, b))
+
+	// Фаза 1 (до «краша»): кампания захвачена, аудитория снэпшотится — как при
+	// обычном запуске. Время краша — 3 минуты назад, чтобы аренда получателя
+	// уже протухла к моменту рестарта (broadcastRecipientLease = 2 мин).
+	crashTime := time.Now().UTC().Add(-3 * time.Minute)
+	claimed, err := env.db.ClaimBroadcast(ctx, b.ID, crashTime)
+	require.NoError(t, err)
+	require.True(t, claimed)
+	total, err := env.db.SnapshotBroadcastRecipients(ctx, b.ID, database.BroadcastFilter{})
+	require.NoError(t, err)
+	require.Equal(t, int64(1), total)
+
+	// «Краш» после доставки чанка 0: получатель остаётся в Sending с
+	// NextChunk=1 — ровно то, что БД хранит после падения процесса между
+	// чанками. Финальный статус (Sent) не записан, аренда протухла.
+	recipients, err := env.db.ClaimBroadcastRecipients(ctx, b.ID, crashTime, 10)
+	require.NoError(t, err)
+	require.Len(t, recipients, 1)
+	require.NoError(t, env.db.UpdateBroadcastRecipientProgress(ctx, b.ID, recipients[0].ID, recipients[0].Attempts, 1, crashTime))
+
+	// «Рестарт процесса»: новый handler, новый бот, та же БД. Worker стартует
+	// через прод-путь StartBroadcastWorker.
+	restartBot := testutil.NewBotAPI()
+	restartHandler := bot.NewHandler(restartBot, env.cfg, env.db, env.botConfig, env.subService, "")
+	runCtx, cancel := context.WithCancel(ctx)
+	restartHandler.StartBroadcastWorker(runCtx)
+	t.Cleanup(func() {
+		cancel()
+		restartHandler.WaitForBackgroundGoroutines()
+	})
+
+	require.Eventually(t, func() bool {
+		cur, err := env.db.GetBroadcast(ctx, b.ID)
+		return err == nil && cur.Status == string(database.BroadcastStatusCompleted)
+	}, 5*time.Second, 10*time.Millisecond)
+
+	// Чанк 0 не отправлен повторно: пользователю ушли ровно два сообщения —
+	// второй и третий чанки.
+	var userSends []string
+	for _, msg := range restartBot.GetAllSentMessages() {
+		if msg.ChatID == userChatID {
+			userSends = append(userSends, msg.Text)
+		}
+	}
+	require.Len(t, userSends, 2, "chunk 0 was already delivered — only chunks 2 and 3 must be sent")
+	assert.Contains(t, userSends[0], strings.Repeat("2", 64))
+	assert.Contains(t, userSends[1], strings.Repeat("3", 64))
+	assert.NotContains(t, strings.Join(userSends, ""), strings.Repeat("1", 64), "already delivered chunk must not be re-sent")
+
+	cur, err := env.db.GetBroadcast(ctx, b.ID)
+	require.NoError(t, err)
+	assert.Equal(t, string(database.BroadcastStatusCompleted), cur.Status)
+	assert.Equal(t, int64(1), cur.RecipientsTotal)
+	assert.Equal(t, int64(1), cur.SentCount)
+	assert.Equal(t, int64(0), cur.FailedCount)
 }

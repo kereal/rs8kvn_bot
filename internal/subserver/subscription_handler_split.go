@@ -90,13 +90,14 @@ func serveFromCache(ctx context.Context, db interfaces.SubscriptionRepository, s
 func loadSubscription(ctx context.Context, db interfaces.SubscriptionRepository, subSvc *Service, subID, clientIP string, requestHeaders map[string]string) (*database.SubscriptionFull, error) {
 	// The analytics update is a read-modify-write on the subscription row
 	// (devices/IPs JSON). The freshest row must be loaded AFTER taking the lock
-	// so concurrent cache misses serialize the whole read-modify-write and
-	// cannot overwrite each other's entries.
-	subSvc.analyticsMu.Lock()
+	// so concurrent cache misses for the SAME subID serialize the whole
+	// read-modify-write and cannot overwrite each other's entries; requests for
+	// different subIDs proceed in parallel. The lock is released via defer, so
+	// it is guaranteed to be freed on error or panic.
+	unlock := subSvc.analyticsLocks.Lock(subID)
+	defer unlock()
 	subFull, err := db.GetWithPlanAndNodes(ctx, subID)
 	if err != nil {
-		subSvc.analyticsMu.Unlock()
-
 		if errors.Is(err, database.ErrSubscriptionNotFound) {
 			logger.Debug("Subscription not found in database",
 				zap.String("sub_id", subID))
@@ -121,7 +122,6 @@ func loadSubscription(ctx context.Context, db interfaces.SubscriptionRepository,
 
 	UpdateDevices(ctx, db, subFull, requestHeaders)
 	UpdateIPs(ctx, db, subFull, clientIP)
-	subSvc.analyticsMu.Unlock()
 
 	// best-effort: обновляем last_request, ошибки не блокируют выдачу.
 	err = db.UpdateLastRequest(ctx, subID)

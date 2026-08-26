@@ -261,9 +261,16 @@ func (w *BroadcastWorker) finishRecipientState(ctx context.Context, recipient da
 
 func (w *BroadcastWorker) processRecipient(ctx context.Context, text string, recipient database.BroadcastRecipient) error {
 	chunks := splitMessage(text, config.MaxTelegramMessageLen)
+	// Возобновляем с сохранённого прогресса: чанки, доставленные до краша,
+	// восстановления аренды или ручного повтора, не отправляются повторно.
+	// Новые получатели начинают с первого чанка (NextChunk == 0).
+	start := recipient.NextChunk
+	if start < 0 || start > len(chunks) {
+		start = len(chunks)
+	}
 	var lastErr error
-	for _, chunk := range chunks {
-		msg := tgbotapi.NewMessage(recipient.TelegramID, utils.EscapeMarkdownV2(chunk))
+	for chunkIndex := start; chunkIndex < len(chunks); chunkIndex++ {
+		msg := tgbotapi.NewMessage(recipient.TelegramID, utils.EscapeMarkdownV2(chunks[chunkIndex]))
 		msg.ParseMode = "MarkdownV2"
 		msg.DisableWebPagePreview = true
 
@@ -327,8 +334,31 @@ func (w *BroadcastWorker) processRecipient(ctx context.Context, text string, rec
 		if lastErr != nil {
 			return w.finishRecipientState(ctx, recipient, database.BroadcastRecipientFailed, truncateRunes(lastErr.Error(), broadcastErrorTextMaxLen))
 		}
+		// Чанк доставлен — фиксируем прогресс, чтобы последующий краш или
+		// ручной повтор не дублировал его. Чекпоинт best-effort: при временной
+		// ошибке БД продолжаем (сообщение уже ушло); при stale/not-found
+		// останавливаемся — получателем уже занялся другой воркер.
+		if err := w.saveRecipientProgress(ctx, recipient, chunkIndex+1); err != nil {
+			if errors.Is(err, database.ErrBroadcastRecipientStale) || errors.Is(err, database.ErrBroadcastRecipientNotFound) {
+				return err
+			}
+			logger.Warn("Failed to persist broadcast recipient progress",
+				zap.Uint("broadcast_id", recipient.BroadcastID),
+				zap.Uint("recipient_id", recipient.ID),
+				zap.Int("next_chunk", chunkIndex+1),
+				zap.Error(err))
+		}
 	}
 	return w.finishRecipientState(ctx, recipient, database.BroadcastRecipientSent, "")
+}
+
+// saveRecipientProgress persists the index of the next chunk after a successful
+// send. The lease guard (Sending + matching Attempts) prevents a stale worker
+// from checkpointing a recipient that was already recovered and re-claimed.
+// WithoutCancel keeps the checkpoint durable even when the campaign context is
+// cancelled right after the delivery.
+func (w *BroadcastWorker) saveRecipientProgress(ctx context.Context, recipient database.BroadcastRecipient, nextChunk int) error {
+	return w.h.db.UpdateBroadcastRecipientProgress(context.WithoutCancel(ctx), recipient.BroadcastID, recipient.ID, recipient.Attempts, nextChunk, time.Now().UTC())
 }
 
 // waitBroadcastDelay sleeps for d, aborting early when the campaign context is
@@ -348,11 +378,11 @@ func (w *BroadcastWorker) markCampaignFailed(ctx context.Context, id uint, cause
 	broadcast := &database.Broadcast{ID: id, Status: string(database.BroadcastStatusFailed), FinishedAt: &finishedAt, LastError: truncateRunes(cause.Error(), broadcastErrorTextMaxLen)}
 	err := broadcast.SetDeliveryReport(&report)
 	if err != nil {
-		return err
+		return fmt.Errorf("marshal delivery report for failed campaign: %w", err)
 	}
 	err = w.h.db.UpdateBroadcast(ctx, broadcast)
 	if err != nil {
-		return err
+		return fmt.Errorf("mark campaign failed: %w", err)
 	}
 	logger.Warn("Broadcast marked failed", zap.Uint("broadcast_id", id), zap.Error(cause))
 	return nil
@@ -361,7 +391,7 @@ func (w *BroadcastWorker) markCampaignFailed(ctx context.Context, id uint, cause
 func (w *BroadcastWorker) finishCampaign(ctx context.Context, campaign *database.Broadcast) error {
 	total, sent, blocked, unreachable, failed, report, err := w.h.db.GetBroadcastRecipientsStats(ctx, campaign.ID)
 	if err != nil {
-		return err
+		return fmt.Errorf("get broadcast recipients stats: %w", err)
 	}
 	terminal := sent + blocked + unreachable + failed
 	status := database.BroadcastStatusCompleted
@@ -388,7 +418,7 @@ func (w *BroadcastWorker) finishCampaign(ctx context.Context, campaign *database
 	}
 	err = w.h.db.UpdateBroadcast(ctx, b)
 	if err != nil {
-		return err
+		return fmt.Errorf("finish campaign: %w", err)
 	}
 	return incompleteErr
 }
