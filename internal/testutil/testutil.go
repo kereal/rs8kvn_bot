@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"slices"
 	"sync"
@@ -699,7 +700,7 @@ func fakeBroadcastState(b *database.Broadcast) (fakeBroadcastRecipientState, err
 	}
 	err := json.Unmarshal([]byte(b.RecipientsState), &state)
 	if err != nil {
-		return state, err
+		return state, fmt.Errorf("parse fake broadcast recipient state: %w", err)
 	}
 	if state.Recipients == nil {
 		state.Recipients = []database.BroadcastRecipient{}
@@ -713,7 +714,7 @@ func fakeBroadcastState(b *database.Broadcast) (fakeBroadcastRecipientState, err
 func setFakeBroadcastState(b *database.Broadcast, state fakeBroadcastRecipientState) error {
 	data, err := json.Marshal(state)
 	if err != nil {
-		return err
+		return fmt.Errorf("marshal fake broadcast recipient state: %w", err)
 	}
 	b.RecipientsState = string(data)
 	return nil
