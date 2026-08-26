@@ -840,7 +840,13 @@ func (o *OrderService) confirmPayment(ctx context.Context, providerPaymentID uui
 	}
 	// Per-order serialization: webhook callbacks for the same provider payment
 	// UUID run sequentially; callbacks for different orders run in parallel.
-	unlock, err := o.lockPayment(ctx, providerPaymentID)
+	//
+	// detachCtx ensures that a client disconnect (aborted webhook HTTP
+	// connection) does not cancel lock acquisition or the initial order
+	// lookup. The payment processing that follows uses the caller's ctx,
+	// so DB-level timeouts still apply.
+	detachCtx := context.WithoutCancel(ctx)
+	unlock, err := o.lockPayment(detachCtx, providerPaymentID)
 	if err != nil {
 		logger.Warn("could not acquire per-order payment lock", zap.String("provider_payment_id", providerPaymentID.String()), zap.Error(err))
 		return nil, fmt.Errorf("acquire payment lock: %w", err)
@@ -852,7 +858,7 @@ func (o *OrderService) confirmPayment(ctx context.Context, providerPaymentID uui
 		return nil, errors.New("invalid provider payment UUID")
 	}
 
-	order, err := o.db.GetOrderByProviderPaymentID(ctx, "platega", providerPaymentID)
+	order, err := o.db.GetOrderByProviderPaymentID(detachCtx, "platega", providerPaymentID)
 	if err != nil {
 		if errors.Is(err, database.ErrOrderNotFound) || errors.Is(err, gorm.ErrRecordNotFound) {
 			logger.Warn("payment callback for unknown order", zap.String("provider_payment_id", providerPaymentID.String()))
@@ -1162,14 +1168,19 @@ func (o *OrderService) CancelPaymentByProvider(ctx context.Context, providerPaym
 	}
 	// Per-order serialization: confirm/cancel of one provider payment cannot
 	// interleave with itself, but multiple distinct payments run in parallel.
-	unlock, err := o.lockPayment(ctx, providerPaymentID)
+	//
+	// detachCtx ensures that a client disconnect (aborted webhook HTTP
+	// connection) does not cancel lock acquisition or the initial order
+	// lookup.
+	detachCtx := context.WithoutCancel(ctx)
+	unlock, err := o.lockPayment(detachCtx, providerPaymentID)
 	if err != nil {
 		logger.Warn("could not acquire per-order payment lock", zap.String("provider_payment_id", providerPaymentID.String()), zap.Error(err))
 		return nil, false, fmt.Errorf("acquire payment lock: %w", err)
 	}
 	defer unlock()
 
-	order, err = o.db.GetOrderByProviderPaymentID(ctx, "platega", providerPaymentID)
+	order, err = o.db.GetOrderByProviderPaymentID(detachCtx, "platega", providerPaymentID)
 	if err != nil {
 		if errors.Is(err, database.ErrOrderNotFound) || errors.Is(err, gorm.ErrRecordNotFound) {
 			logger.Warn("payment cancellation callback for unknown order", zap.String("provider_payment_id", providerPaymentID.String()), zap.String("status", status))

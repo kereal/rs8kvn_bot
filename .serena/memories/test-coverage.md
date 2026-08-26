@@ -1,8 +1,10 @@
 # Test Coverage Analysis — rs8kvn_bot
 
-**Дата анализа:** 2026-06-26
-**Метод:** Ручной анализ coverage.out (2407 строк, mode: set)
-**Общее покрытие:** ~65-70% (целевой показатель из code_style: ~51%)
+**Последняя проверка:** 2026-08-21
+**Метод:** `go test -coverprofile=/tmp/coverage.out ./...` и `go tool cover -func=/tmp/coverage.out`
+**Общее покрытие:** 66.2% в последнем запуске
+
+Пакетные значения ниже — исторический снимок от 2026-06-26, а не актуальный CI-отчёт. Для текущих значений всегда использовать команду выше.
 
 ## По пакетам (оценка)
 
@@ -44,7 +46,9 @@
 ### P3 — Низкое
 5. utils/markdown.go — EscapeMarkdown
 
-## Количество тестовых файлов: 86 (+5)
+## Количество тестовых файлов
+
+Количество тестовых файлов меняется вместе с кодом; не использовать историческое число ниже как текущую метрику.
 
 ## Добавленные тесты (2026-06-26, ветка test/add-coverage-p1-p2)
 
@@ -67,3 +71,10 @@
 ## Добавленные тесты (2026-07-17, метрики)
 - `internal/metrics/metrics_test.go` — проверка инициализации всех метрик, smoke-test endpoint `/metrics`
 - `internal/metrics/db_test.go` — 4 теста: GORM callbacks для create/query/update/delete
+
+## Добавленные тесты (2026-08-26, ветка feat/broadcast-campaigns)
+- `internal/bot/broadcast_admin_flow_test.go` — parseBroadcastCallbackID (0/overflow/нечисловой), callbacks broadcast_cancel_/broadcast_retry_ (+не-админ), handleBroadcastFilter (plan/status/date/inactive/ever_paid + toggle off), handleBroadcastBackToFilters, форматтеры truncateRunes/formatIDList/formatErrorList
+- `internal/bot/admin_broadcast_test.go` (+flood) — TestBroadcastFloodClassificationAndRetryDelay (распознавание 429, уважение/каппинг `retry_after`), TestBroadcast_FloodWaitsRetryAfterThenDelivers (429 не расходует обычные попытки → sent)
+- `internal/xui/reset_traffic_test.go` — ResetTraffic: пустой email, успех (метод/путь/экранирование), Success:false с msg панели, невалидный JSON, не-2xx
+- `internal/service/sync_test.go` — processPendingUpdate вызывает ResetTraffic при смене тарифа; сбой ResetTraffic — best-effort (нода всё равно active)
+- `internal/service/subscription_test.go` — BindTrial rollback при DB-bind failure (rollback и conservative skip), CleanupExpiredTrials deprovision-failure оставляет строку, ReconcileOrphanedClients пересоздаёт node queue

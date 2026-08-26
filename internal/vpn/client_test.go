@@ -165,6 +165,10 @@ func (m *mockXUIClient) DeleteClient(ctx context.Context, email string) error {
 	return nil
 }
 
+func (m *mockXUIClient) ResetTraffic(_ context.Context, _ string) error {
+	return nil
+}
+
 func (m *mockXUIClient) Close() error {
 	return nil
 }

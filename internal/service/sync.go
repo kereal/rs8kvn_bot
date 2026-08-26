@@ -322,6 +322,18 @@ func (s *SyncService) reconcilePlanNodesLocked(ctx context.Context, subscription
 // MarkAllForRemoval sets all subscription nodes (active, pending_add, pending_remove) to pending_remove status.
 // Used before deleting a subscription to ensure VPN clients are removed via sync.
 func (s *SyncService) MarkAllForRemoval(ctx context.Context, subscriptionID uint) error {
+	unlock, err := s.lockSubscription(ctx, subscriptionID)
+	if err != nil {
+		return fmt.Errorf("mark all for removal: acquire lock: %w", err)
+	}
+	defer unlock()
+
+	return s.markAllForRemovalLocked(ctx, subscriptionID)
+}
+
+// markAllForRemovalLocked is the lock-free body used by callers that already
+// hold the subscription lock.
+func (s *SyncService) markAllForRemovalLocked(ctx context.Context, subscriptionID uint) error {
 	logger.Debug("mark all nodes for removal",
 		zap.Uint("subscription_id", subscriptionID))
 
@@ -595,6 +607,17 @@ func (s *SyncService) processPendingUpdate(ctx context.Context, sn *database.Sub
 	if err != nil {
 		s.handleSyncError(ctx, sn, err)
 		return fmt.Errorf("update VPN subscription node %d: %w", sn.NodeID, err)
+	}
+
+	// Сбрасываем счётчик трафика, чтобы трафик предыдущего тарифа
+	// не влиял на лимит нового. Best-effort: update уже прошёл успешно,
+	// сброс трафика — улучшение, а не критическая операция.
+	err = client.ResetTraffic(ctx, provision)
+	if err != nil {
+		logger.Warn("reset traffic after plan change failed (best-effort)",
+			zap.Uint("subscription_id", sub.ID),
+			zap.Uint("node_id", sn.NodeID),
+			zap.Error(err))
 	}
 
 	err = s.db.UpdateSubscriptionNodeStatus(ctx, sn.SubscriptionID, sn.NodeID, database.SyncStatusActive)
@@ -950,6 +973,16 @@ func (s *SyncService) SyncPendingNodes(ctx context.Context) error {
 // pending_update for the current plan, and reconciles plan membership.
 // The caller is responsible for invoking SyncSubscription afterwards.
 func (s *SyncService) ApplyPlanToSubscription(ctx context.Context, subscriptionID uint) error {
+	unlock, err := s.lockSubscription(ctx, subscriptionID)
+	if err != nil {
+		return fmt.Errorf("apply plan to subscription %d: acquire lock: %w", subscriptionID, err)
+	}
+	defer unlock()
+
+	return s.applyPlanToSubscriptionLocked(ctx, subscriptionID)
+}
+
+func (s *SyncService) applyPlanToSubscriptionLocked(ctx context.Context, subscriptionID uint) error {
 	sub, err := s.db.GetByID(ctx, subscriptionID)
 	if err != nil {
 		return fmt.Errorf("apply plan to subscription %d: load subscription: %w", subscriptionID, err)
@@ -973,7 +1006,7 @@ func (s *SyncService) ApplyPlanToSubscription(ctx context.Context, subscriptionI
 		return fmt.Errorf("apply plan to subscription %d: mark active nodes pending update: %w", subscriptionID, err)
 	}
 
-	err = s.ReconcilePlanNodes(ctx, subscriptionID)
+	err = s.reconcilePlanNodesLocked(ctx, subscriptionID)
 	if err != nil {
 		return fmt.Errorf("apply plan to subscription %d: reconcile plan nodes: %w", subscriptionID, err)
 	}

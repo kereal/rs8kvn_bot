@@ -90,6 +90,29 @@ func TestGetWithPlanAndNodes_NotFound(t *testing.T) {
 	assert.ErrorIs(t, err, ErrSubscriptionNotFound)
 }
 
+func TestGetWithPlanAndNodes_ExpiredActiveSubscription(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+	ctx := context.Background()
+	plan, err := svc.GetPlanByName(ctx, TrialPlanName)
+	require.NoError(t, err)
+
+	sub := &Subscription{
+		TelegramID:     9102,
+		Username:       "expired-cache-miss",
+		ClientID:       "client-expired-cache-miss",
+		SubscriptionID: "sub-expired-cache-miss",
+		Status:         "active",
+		PlanID:         plan.ID,
+		ExpiresAt:      ptrTime(time.Now().Add(-time.Minute)),
+	}
+	require.NoError(t, svc.CreateSubscription(ctx, sub, ""))
+
+	_, err = svc.GetWithPlanAndNodes(ctx, sub.SubscriptionID)
+	assert.ErrorIs(t, err, ErrSubscriptionNotFound)
+}
+
 func TestGetWithPlanAndNodes_RevokedSubscription(t *testing.T) {
 	t.Parallel()
 

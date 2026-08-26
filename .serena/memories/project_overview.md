@@ -56,15 +56,27 @@ Production-grade: миграции, мониторинг, rate-limiting, circuit
 - `statusRecorder` tracks per-request source success/total counts
 
 ## Broadcast (рассылка `/broadcast`)
-- Поток: `/broadcast` → черновик (текст) → превью (MarkdownV2) → подтверждение inline-кнопками → массовая отправка батчами (100, concurrency 10) всем `telegram_id` из БД.
-- Текст отправляется как **MarkdownV2**. Спецсимволы (`.`, `!`, `_`, `*`, `()` и т.д.) **авто-экранируются** в `utils.EscapeMarkdownV2`, форматирование сохраняется — ручное экранирование юзеру не нужно.
-- Отчёт в конце разделяет счётчики: `Отправлено` / `Заблокировали бота` / `Ошибок` / `Всего`. Ошибки «bot was blocked by the user» / «user is deactivated» / «chat not found» считаются отдельно (`isUserBlockedError`), не смешиваясь с реальными сбоями.
-- Таймаут рассылки 5 мин; при отмене/ошибке БД отправляется частичный отчёт.
+- Админский флоу (сессия с TTL 15 мин): `/broadcast` → **название** → **текст** (MarkdownV2, спецсимволы авто-экранируются `utils.EscapeMarkdownV2`) → превью → **фильтры** (`bfilter_*`: plan paid/free, status active/all/revoked, дата регистрации 90/180/365, inactive 0/30/90 дн., ever_paid) → подтверждение (`broadcast_confirm` → счётчик получателей → `broadcast_final_confirm`).
+- **Durable BroadcastWorker** (`internal/bot/broadcast_worker.go`): тик 15 с, таймаут кампании 5 мин, батчи по 100 (concurrency 10), независим от update-loop, переживает рестарт процесса (кампании `scheduled|running` резюмируются через `retry_at`).
+- Аудитория снапшотится в JSON **`recipients_state`** той же строки `broadcasts` (миграция 036): snapshot + per-recipient `pending|sending|sent|blocked|unreachable|failed`, lease 2 мин, восстановление после краха (`RecoverStaleBroadcastRecipients`). Строка `broadcasts`: `filters` (JSON), статус (`scheduled|running|completed|failed|canceled`, CHECK-constraint), `planned_at`/`started_at`/`finished_at`, счётчики `recipients_total`/`sent_count`/`blocked_count`/`unreachable_count`/`failed_count`, `delivery_report` (JSON: `delivered`/`blocked`/`unreachable` — списки telegram_id, `errors` — `{telegram_id, error}`), `last_error`/`retry_at`/`retry_count`.
+- **Ретраи**: per-message 2 попытки (300/600 мс); `blocked` — только явная блокировка бота («bot was blocked by the user»), deactivated/недоступный/удалённый чат (вкл. «chat not found») → `unreachable`, не ретраются. Инфраструктурные/персистентные сбои кампании → `retry_at` с exponential backoff (5 с → 15 мин), статус остаётся `running`.
+- Управление: кнопки «📋 Детали рассылки» (`broadcast_details_<id>`), «⏹ Отменить» (`broadcast_cancel_<id>`), «🔁 Повторить ошибки» (`broadcast_retry_<id>`) в карточке; история — `/broadcasts` (10 последних).
+- Отчёт админу: счётчики `Отправлено/Заблокировали/Недоступны/Ошибок`; полные списки ID остаются в `delivery_report`. `UpdateBroadcast` обновляет только изменяемые поля, карточку не затирает.
+- **Логирование**: `Info` — создание/старт/завершение/отмена/retry кампании и черновика, плановый resume после таймаута (`DeadlineExceeded`/`errBroadcastIncomplete`); `Warn` — фоновые сбои (загрузка runnable, launch failed, markCampaignFailed, report load); `Error` — паника получателя, сбой scheduleRetry/создания, ошибки cancel/retry из callback.
+
+## Последние изменения (2026-08-26, ветка feat/broadcast-campaigns)
+- **ResetTraffic при смене тарифа**: `vpn.Client.ResetTraffic` (3x-ui POST `/panel/api/clients/resetTraffic/{email}`; proxman/fetch — no-op). Вызывается в `processPendingUpdate` после update, **best-effort** (Warn при ошибке, не блокирует переход в `active`).
+- **CleanupExpiredTrials двухфазный**: `ClaimExpiredTrials` (атомарный claim) → deprovision внешних клиентов → `DeleteClaimedTrial` только после успеха; сбой оставляет строку для ретрая, ошибки агрегируются (`errors.Join`).
+- **BindTrial**: панель обновляется ДО DB-bind; если DB-bind проиграл гонку и строка всё ещё не привязана (`telegram_id < 0`) — панель откатывается к анонимной `trial_`-идентичности; при неопределённости (check error) rollback не делается.
+- **ReconcileOrphanedClients**: активная non-trial подписка без node bindings — пересоздаётся `pending_add`-очередь (`ensureSubscriptionNodes`), а не ревокация.
+- **Subserver**: кэш-ревалидация **fail-closed** (Error + 5xx вместо stale после revoke/chargeback); лимит тела 2 MiB (`config.MaxResponseSize`); `analyticsMu` сериализует `UpdateDevices`/`UpdateIPs`; base64-агрегация поддерживает RawStdEncoding (без padding) и разбивает по строкам.
+- **Web**: check-and-record trial rate-limit под `trialRateMu`; `SecurityHeadersMiddleware` (nosniff/DENY/no-referrer/Permissions-Policy).
+- **Тесты**: `internal/bot/broadcast_admin_flow_test.go` (callback ID, cancel/retry, фильтры, форматтеры), `internal/xui/reset_traffic_test.go`, sync ResetTraffic best-effort, BindTrial rollback, CleanupExpiredTrials deprovision-failure, ReconcileOrphaned queue recovery.
 
 ## Стек
 - **Go 1.25** (go.mod)
 - **Bot**: telegram-bot-api/v5
-- **DB**: SQLite + GORM + golang-migrate (embedded, migration 030)
+- **DB**: SQLite + GORM + golang-migrate (embedded, current schema migrations are applied at startup)
 - **Logging**: Zap (с ротацией)
 - **Tests**: testify
 - **QR**: piglig/go-qr
@@ -75,7 +87,7 @@ Production-grade: миграции, мониторинг, rate-limiting, circuit
 - Транспортная нормализация сведена в `normaliseTransportNetwork` + `setPacketEncoding`.
 
 ## Scheduler
-- Backup ежедневно, trial cleanup каждый час, sync workers фоном, reminders — каждые 30 минут (`SubscriptionReminderWorker`).
+- Backup ежедневно, trial cleanup сразу при старте и затем каждые 3 часа, sync workers фоном, reminders — каждые 30 минут (`SubscriptionReminderWorker`).
 
 ## Базовый worker set
 - Backup ежедневно, trial cleanup каждый час, sync workers фоном, reminders — каждые 30 минут.
@@ -84,7 +96,7 @@ Production-grade: миграции, мониторинг, rate-limiting, circuit
 ```text
 cmd/bot/                     — точка входа, graceful shutdown, lifecycle workers
 internal/bot/                — handlers, commands, callbacks, referral cache, keyboard/menu
-internal/database/           — GORM-модели, миграции 000-030, транзакции
+internal/database/           — GORM-модели, embedded migrations, транзакции
 internal/service/            — SubscriptionService + SyncService + reminders
 internal/vpn/                — VPN client abstraction (3x-ui, proxman, fetch)
 internal/xui/                — 3x-ui HTTP-клиент + circuit breaker

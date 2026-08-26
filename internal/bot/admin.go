@@ -6,11 +6,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
-	"sync/atomic"
-	"time"
 
-	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/logger"
 	"github.com/kereal/rs8kvn_bot/internal/service"
 	"github.com/kereal/rs8kvn_bot/internal/utils"
@@ -18,26 +14,6 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"go.uber.org/zap"
 )
-
-// broadcastStage represents the state of an admin broadcast session.
-type broadcastStage int
-
-const (
-	broadcastStageIdle broadcastStage = iota
-	broadcastStageAwaitingDraft
-	broadcastStagePreview
-)
-
-const (
-	broadcastSessionTTL = 15 * time.Minute
-)
-
-// broadcastSession holds the in-progress broadcast draft for an admin.
-type broadcastSession struct {
-	createdAt time.Time
-	stage     broadcastStage
-	text      string
-}
 
 func (h *Handler) HandleVersion(ctx context.Context, update tgbotapi.Update) error {
 	if update.Message == nil {
@@ -202,13 +178,13 @@ func (h *Handler) HandleDel(ctx context.Context, update tgbotapi.Update) error {
 		zap.Int64("telegram_id", deleted.TelegramID),
 		zap.String("client_id", deleted.ClientID))
 
-	h.SendMessage(ctx, chatID, fmt.Sprintf(
+	h.SendMessageMarkdown(ctx, chatID, fmt.Sprintf(
 		"✅ Подписка успешно удалена!\n\n"+
 			"🆔 ID: %d\n"+
 			"👤 Пользователь: %s\n"+
-			"🆔 Telegram ID: %d",
+			"🆔 Telegram ID: `%d`",
 		id,
-		formatUserDisplay(deleted.Username),
+		utils.FormatUserLink(deleted.Username, deleted.TelegramID),
 		deleted.TelegramID,
 	))
 
@@ -292,369 +268,21 @@ func (h *Handler) HandleSetPlan(ctx context.Context, update tgbotapi.Update) err
 		expiry = updated.ExpiresAt.Format("02.01.2006")
 	}
 
-	h.SendMessage(ctx, chatID, fmt.Sprintf(
+	h.SendMessageMarkdown(ctx, chatID, fmt.Sprintf(
 		"✅ Тариф подписки изменён!\n\n"+
 			"🆔 ID: %d\n"+
 			"👤 Пользователь: %s\n"+
-			"🆔 Telegram ID: %d\n"+
+			"🆔 Telegram ID: `%d`\n"+
 			"💡 Тариф: %d\n"+
 			"⏰ Истекает: %s",
 		updated.ID,
-		formatUserDisplay(updated.Username),
+		utils.FormatUserLink(updated.Username, updated.TelegramID),
 		updated.TelegramID,
 		updated.PlanID,
 		expiry,
 	))
 
 	return nil
-}
-
-// isUserBlockedError reports whether the Telegram error means the user can no
-// longer receive messages (blocked the bot, deactivated, or chat gone). These
-// are expected during a broadcast and reported separately from real failures.
-func isUserBlockedError(err error) bool {
-	if err == nil {
-		return false
-	}
-
-	msg := strings.ToLower(err.Error())
-
-	return strings.Contains(msg, "bot was blocked by the user") ||
-		strings.Contains(msg, "user is deactivated") ||
-		strings.Contains(msg, "chat not found")
-}
-
-// HandleBroadcast handles the /broadcast command for admins.
-// It starts the draft flow: the admin then sends a multi-line MarkdownV2
-// message which is previewed, and confirmed via inline buttons before sending.
-func (h *Handler) HandleBroadcast(ctx context.Context, update tgbotapi.Update) error {
-	if update.Message == nil {
-		logger.Error("HandleBroadcast called with nil Message")
-		return fmt.Errorf("nil message")
-	}
-
-	chatID := update.Message.Chat.ID
-
-	if !h.isAdmin(chatID) {
-		logger.Warn("Non-admin user attempted to access /broadcast", zap.Int64("chat_id", chatID))
-		return nil
-	}
-
-	h.startBroadcastSession(chatID)
-
-	h.SendMessage(ctx, chatID, "✍️ Отправьте сообщение для рассылки (MarkdownV2, до 4096 символов, с форматированием).\n\n"+
-		"Многострочный текст поддерживается. После отправки бот покажет превью и кнопки подтверждения.\n\n"+
-		"Нажмите /cancel для отмены.")
-
-	return nil
-}
-
-// HandleBroadcastDraft consumes the admin's text message as a broadcast draft,
-// previews it (validating MarkdownV2), and offers confirm/cancel buttons.
-func (h *Handler) HandleBroadcastDraft(ctx context.Context, update tgbotapi.Update) error {
-	if update.Message == nil {
-		logger.Error("HandleBroadcastDraft called with nil Message")
-		return fmt.Errorf("nil message")
-	}
-
-	chatID := update.Message.Chat.ID
-
-	if !h.isAdmin(chatID) {
-		h.clearBroadcastSession(chatID)
-		return nil
-	}
-
-	text := update.Message.Text
-	if text == "" {
-		h.SendMessage(ctx, chatID, "❌ Поддерживаются только текстовые сообщения. /cancel для отмены.")
-		return nil
-	}
-
-	if text == "/cancel" {
-		h.clearBroadcastSession(chatID)
-		h.SendMessage(ctx, chatID, "❌ Рассылка отменена.")
-
-		return nil
-	}
-
-	const maxBroadcastLen = config.MaxTelegramMessageLen * 20
-	if len(text) > maxBroadcastLen {
-		h.clearBroadcastSession(chatID)
-		h.SendMessage(ctx, chatID, fmt.Sprintf("❌ Сообщение слишком длинное (%d символов). Максимум — %d символов; рассылка автоматически разбивается на части по %d символов.", len(text), maxBroadcastLen, config.MaxTelegramMessageLen))
-
-		return nil
-	}
-
-	// D3: preview with MarkdownV2. The draft may exceed one Telegram message,
-	// so show the first chunk and note how many parts the broadcast will use.
-	chunks := splitMessage(text, config.MaxTelegramMessageLen)
-
-	previewText := chunks[0]
-	if len(chunks) > 1 {
-		previewText += fmt.Sprintf("\n\n… (и ещё %d частей по %d символов)", len(chunks)-1, config.MaxTelegramMessageLen)
-	}
-
-	preview := tgbotapi.NewMessage(chatID, utils.EscapeMarkdownV2(previewText))
-	preview.ParseMode = "MarkdownV2"
-
-	preview.DisableWebPagePreview = true
-
-	_, err := h.bot.Send(preview)
-	if err != nil {
-		logger.Warn("Broadcast preview failed", zap.Error(err))
-		h.SendMessage(ctx, chatID, fmt.Sprintf("❌ Не удалось отправить превью:\n\n%v\n\n"+
-			"/cancel для отмены.", err))
-
-		return nil
-	}
-
-	h.broadcastMu.Lock()
-	h.broadcastSessions[chatID] = &broadcastSession{createdAt: time.Now(), stage: broadcastStagePreview, text: text}
-	h.broadcastMu.Unlock()
-
-	kb := tgbotapi.NewInlineKeyboardMarkup(
-		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("✅ Отправить всем", "broadcast_confirm"),
-			tgbotapi.NewInlineKeyboardButtonData("❌ Отмена", "broadcast_cancel"),
-		),
-	)
-	msg := tgbotapi.NewMessage(chatID, "✅ Превью готово. Отправить это сообщение всем пользователям?")
-	msg.ReplyMarkup = kb
-	h.send(ctx, msg)
-
-	return nil
-}
-
-// handleBroadcastConfirm runs the broadcast for the confirmed draft.
-func (h *Handler) handleBroadcastConfirm(ctx context.Context, chatID int64) error {
-	s := h.getBroadcastSession(chatID)
-	if s == nil || s.stage != broadcastStagePreview {
-		h.SendMessage(ctx, chatID, "❌ Нет активной рассылки для подтверждения.")
-		return nil
-	}
-
-	text := s.text
-
-	h.clearBroadcastSession(chatID)
-
-	return h.runBroadcast(ctx, chatID, text)
-}
-
-// handleBroadcastCancel discards the in-progress broadcast draft.
-func (h *Handler) handleBroadcastCancel(ctx context.Context, chatID int64) error {
-	h.clearBroadcastSession(chatID)
-	h.SendMessage(ctx, chatID, "❌ Рассылка отменена.")
-
-	return nil
-}
-
-// runBroadcast sends text (MarkdownV2, as-is) to all users in batches.
-func (h *Handler) runBroadcast(ctx context.Context, adminChatID int64, text string) error {
-	const broadcastTimeout = 5 * time.Minute
-
-	ctx, cancel := context.WithTimeout(ctx, broadcastTimeout)
-	defer cancel()
-
-	const (
-		batchSize            = 100
-		broadcastConcurrency = 10 // max concurrent sends per batch
-	)
-
-	var (
-		successCount       atomic.Int64
-		failCount          atomic.Int64
-		blockedCount       atomic.Int64
-		totalProcessed     int64
-		batchErr           error
-		broadcastCancelled bool
-	)
-
-	offset := 0
-
-	for {
-		select {
-		case <-ctx.Done():
-			broadcastCancelled = true
-		default:
-		}
-
-		if broadcastCancelled {
-			break
-		}
-
-		ids, err := h.db.GetTelegramIDsBatch(ctx, offset, batchSize)
-		if err != nil {
-			logger.Error("Failed to get telegram IDs batch", zap.Error(err))
-			batchErr = err
-
-			break
-		}
-
-		if len(ids) == 0 {
-			break
-		}
-
-		var wg sync.WaitGroup
-
-		sem := make(chan struct{}, broadcastConcurrency)
-
-		for _, telegramID := range ids {
-			if broadcastCancelled {
-				break
-			}
-
-			select {
-			case sem <- struct{}{}:
-				wg.Add(1)
-
-				go func(tg int64) {
-					defer logger.Recover("Broadcast worker")
-					defer wg.Done()
-					defer func() {
-						time.Sleep(50 * time.Millisecond)
-						<-sem
-					}()
-
-					select {
-					case <-ctx.Done():
-						return
-					default:
-					}
-
-					chunks := splitMessage(text, config.MaxTelegramMessageLen)
-					userBlocked, userFailed := false, false
-
-					for _, chunk := range chunks {
-						msg := tgbotapi.NewMessage(tg, utils.EscapeMarkdownV2(chunk))
-						msg.ParseMode = "MarkdownV2"
-
-						msg.DisableWebPagePreview = true
-
-						err := h.sendWithError(ctx, msg)
-						if err != nil {
-							if ctx.Err() != nil {
-								return
-							}
-
-							if isUserBlockedError(err) {
-								userBlocked = true
-							} else {
-								userFailed = true
-							}
-						}
-					}
-
-					if ctx.Err() != nil {
-						return
-					}
-
-					switch {
-					case userBlocked:
-						blockedCount.Add(1)
-					case userFailed:
-						failCount.Add(1)
-					default:
-						successCount.Add(1)
-					}
-				}(telegramID)
-			case <-ctx.Done():
-				broadcastCancelled = true
-			}
-		}
-
-		wg.Wait()
-
-		offset += len(ids)
-		atomic.AddInt64(&totalProcessed, int64(len(ids)))
-
-		if broadcastCancelled {
-			break
-		}
-	}
-
-	sent := successCount.Load()
-	failed := failCount.Load()
-	blocked := blockedCount.Load()
-	remaining := int(totalProcessed) - int(sent+failed+blocked)
-
-	if broadcastCancelled {
-		h.SendMessage(context.WithoutCancel(ctx), adminChatID, fmt.Sprintf(`⚠️ Рассылка прервана!
-
-📤 Отправлено: %d
-🚫 Заблокировали бота: %d
-❌ Ошибок: %d
-👥 Осталось: %d`,
-			sent, blocked, failed, remaining))
-
-		return fmt.Errorf("broadcast cancelled: %w", ctx.Err())
-	}
-
-	if batchErr != nil {
-		h.SendMessage(context.WithoutCancel(ctx), adminChatID, fmt.Sprintf(`❌ Рассылка прервана из-за ошибки!
-
-📤 Отправлено: %d
-🚫 Заблокировали бота: %d
-❌ Ошибок: %d
-👥 Не обработано: %d
-
-Ошибка: %v`,
-			sent, blocked, failed, remaining, batchErr,
-		))
-		logger.Error("Broadcast failed due to batch retrieval error",
-			zap.Error(batchErr),
-			zap.Int64("success", sent),
-			zap.Int64("blocked", blocked),
-			zap.Int64("failed", failed),
-			zap.Int("remaining", remaining))
-
-		return fmt.Errorf("broadcast batch error: %w", batchErr)
-	}
-
-	h.SendMessage(context.WithoutCancel(ctx), adminChatID, fmt.Sprintf(`✅ Рассылка завершена!
-
-📤 Отправлено: %d
-🚫 Заблокировали бота: %d
-❌ Ошибок: %d
-👥 Всего: %d`,
-		sent, blocked, failed, totalProcessed,
-	))
-	logger.Info("Broadcast completed",
-		zap.Int64("success", sent),
-		zap.Int64("blocked", blocked),
-		zap.Int64("failed", failed),
-		zap.Int64("total", totalProcessed))
-
-	return nil
-}
-
-// startBroadcastSession begins (or restarts) the draft flow for an admin.
-func (h *Handler) startBroadcastSession(chatID int64) {
-	h.broadcastMu.Lock()
-	defer h.broadcastMu.Unlock()
-
-	h.broadcastSessions[chatID] = &broadcastSession{createdAt: time.Now(), stage: broadcastStageAwaitingDraft}
-}
-
-// getBroadcastSession returns the active broadcast session for an admin, or nil.
-func (h *Handler) getBroadcastSession(chatID int64) *broadcastSession {
-	h.broadcastMu.Lock()
-	defer h.broadcastMu.Unlock()
-
-	s, ok := h.broadcastSessions[chatID]
-	if !ok || time.Since(s.createdAt) > broadcastSessionTTL {
-		delete(h.broadcastSessions, chatID)
-		return nil
-	}
-
-	return s
-}
-
-// clearBroadcastSession removes the broadcast session for an admin.
-func (h *Handler) clearBroadcastSession(chatID int64) {
-	h.broadcastMu.Lock()
-	defer h.broadcastMu.Unlock()
-
-	delete(h.broadcastSessions, chatID)
 }
 
 // splitMessage splits text into chunks of at most maxLen bytes. It prefers to
@@ -842,7 +470,7 @@ func containsEntityChar(s string) bool {
 // broadcastSessionActive reports whether an admin has an in-progress broadcast.
 func (h *Handler) broadcastSessionActive(chatID int64) bool {
 	s := h.getBroadcastSession(chatID)
-	return s != nil && (s.stage == broadcastStageAwaitingDraft || s.stage == broadcastStagePreview)
+	return s != nil && (s.stage == broadcastStageAwaitingName || s.stage == broadcastStageAwaitingDraft || s.stage == broadcastStageFiltering || s.stage == broadcastStageConfirming || s.stage == broadcastStageScheduling)
 }
 
 // HandleSend handles the /send command for admins to send a message to a specific user.

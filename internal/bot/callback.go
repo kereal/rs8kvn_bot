@@ -166,32 +166,166 @@ func (c *CallbackHandler) HandleCallback(ctx context.Context, update tgbotapi.Up
 			return fmt.Errorf("handle qr_web: %w", err)
 		}
 	case data == "broadcast_confirm":
+		if !c.h.isAdmin(chatID) {
+			c.answerCallback(update.CallbackQuery.ID)
+			return nil
+		}
 		err := c.h.handleBroadcastConfirm(ctx, chatID)
 		if err != nil {
 			return fmt.Errorf("handle broadcast_confirm: %w", err)
 		}
 	case data == "broadcast_cancel":
+		if !c.h.isAdmin(chatID) {
+			c.answerCallback(update.CallbackQuery.ID)
+			return nil
+		}
 		err := c.h.handleBroadcastCancel(ctx, chatID)
 		if err != nil {
 			return fmt.Errorf("handle broadcast_cancel: %w", err)
+		}
+	case data == "broadcast_final_confirm":
+		if !c.h.isAdmin(chatID) {
+			c.answerCallback(update.CallbackQuery.ID)
+			return nil
+		}
+		err := c.h.handleBroadcastFinalConfirm(ctx, chatID)
+		if err != nil {
+			return fmt.Errorf("handle broadcast_final_confirm: %w", err)
+		}
+	case data == "broadcast_back_to_filters":
+		if !c.h.isAdmin(chatID) {
+			c.answerCallback(update.CallbackQuery.ID)
+			return nil
+		}
+		err := c.h.handleBroadcastBackToFilters(ctx, chatID, update.CallbackQuery.Message.MessageID)
+		if err != nil {
+			return fmt.Errorf("handle broadcast_back_to_filters: %w", err)
+		}
+	case data == "broadcast_schedule":
+		if !c.h.isAdmin(chatID) {
+			c.answerCallback(update.CallbackQuery.ID)
+			return nil
+		}
+		err := c.h.handleBroadcastSchedule(ctx, chatID, update.CallbackQuery.Message.MessageID)
+		if err != nil {
+			return fmt.Errorf("handle broadcast_schedule: %w", err)
+		}
+	case strings.HasPrefix(data, "bsched_day_"):
+		if !c.h.isAdmin(chatID) {
+			c.answerCallback(update.CallbackQuery.ID)
+			return nil
+		}
+		err := c.h.handleBroadcastScheduleDay(ctx, chatID, update.CallbackQuery.Message.MessageID, data)
+		if err != nil {
+			return fmt.Errorf("handle broadcast schedule day: %w", err)
+		}
+	case strings.HasPrefix(data, "bsched_hour_"):
+		if !c.h.isAdmin(chatID) {
+			c.answerCallback(update.CallbackQuery.ID)
+			return nil
+		}
+		err := c.h.handleBroadcastScheduleHour(ctx, chatID, update.CallbackQuery.Message.MessageID, data)
+		if err != nil {
+			return fmt.Errorf("handle broadcast schedule hour: %w", err)
+		}
+	case data == "bsched_back":
+		if !c.h.isAdmin(chatID) {
+			c.answerCallback(update.CallbackQuery.ID)
+			return nil
+		}
+		err := c.h.handleBroadcastScheduleBack(ctx, chatID, update.CallbackQuery.Message.MessageID)
+		if err != nil {
+			return fmt.Errorf("handle broadcast schedule back: %w", err)
+		}
+	case strings.HasPrefix(data, "bfilter_"):
+		if !c.h.isAdmin(chatID) {
+			c.answerCallback(update.CallbackQuery.ID)
+			return nil
+		}
+		err := c.h.handleBroadcastFilter(ctx, chatID, update.CallbackQuery.Message.MessageID, data)
+		if err != nil {
+			return fmt.Errorf("handle broadcast filter: %w", err)
 		}
 	case data == "back_to_invite":
 		err := c.h.handleBackToInvite(ctx, chatID, username, update.CallbackQuery.Message.MessageID)
 		if err != nil {
 			return fmt.Errorf("handle back_to_invite: %w", err)
 		}
+	case strings.HasPrefix(data, "broadcast_cancel_"):
+		if !c.h.isAdmin(chatID) {
+			c.answerCallback(update.CallbackQuery.ID)
+			return nil
+		}
+		id, err := parseBroadcastCallbackID(data, "broadcast_cancel_")
+		if err != nil {
+			return err
+		}
+		canceled, err := c.h.broadcastWorker.Cancel(ctx, id)
+		if err != nil {
+			logger.Error("Failed to cancel broadcast", zap.Uint("broadcast_id", id), zap.Int64("chat_id", chatID), zap.Error(err))
+			return fmt.Errorf("cancel broadcast: %w", err)
+		}
+		if canceled {
+			logger.Info("Broadcast canceled", zap.Uint("broadcast_id", id), zap.Int64("chat_id", chatID))
+			c.h.SendMessage(ctx, chatID, fmt.Sprintf("⏹ Рассылка #%d отменена.", id))
+		} else {
+			logger.Info("Broadcast cancel skipped, already terminal", zap.Uint("broadcast_id", id), zap.Int64("chat_id", chatID))
+			c.h.SendMessage(ctx, chatID, fmt.Sprintf("ℹ️ Рассылка #%d уже завершена — отменять нечего.", id))
+		}
+	case strings.HasPrefix(data, "broadcast_retry_"):
+		if !c.h.isAdmin(chatID) {
+			c.answerCallback(update.CallbackQuery.ID)
+			return nil
+		}
+		id, err := parseBroadcastCallbackID(data, "broadcast_retry_")
+		if err != nil {
+			return err
+		}
+		err = c.h.broadcastWorker.RetryFailed(ctx, id)
+		if err != nil {
+			logger.Error("Failed to retry broadcast", zap.Uint("broadcast_id", id), zap.Int64("chat_id", chatID), zap.Error(err))
+			return fmt.Errorf("retry broadcast: %w", err)
+		}
+		logger.Info("Broadcast retry scheduled", zap.Uint("broadcast_id", id), zap.Int64("chat_id", chatID))
+		c.h.SendMessage(ctx, chatID, fmt.Sprintf("🔁 Повторная отправка ошибок для рассылки #%d поставлена в очередь.", id))
+	case strings.HasPrefix(data, "broadcast_details_"):
+		if !c.h.isAdmin(chatID) {
+			logger.Warn("Non-admin user attempted to access broadcast details",
+				zap.Int64("chat_id", chatID))
+			c.answerCallback(update.CallbackQuery.ID)
+			return nil
+		}
+
+		raw := strings.TrimPrefix(data, "broadcast_details_")
+
+		id64, err := strconv.ParseUint(raw, 10, 64)
+		if err != nil || id64 == 0 || id64 > uint64(^uint(0)) {
+			logger.Warn("invalid broadcast_details callback payload",
+				zap.String("data", data), zap.Error(err))
+
+			return nil
+		}
+
+		c.h.sendBroadcastDetails(ctx, chatID, uint(id64))
 	default:
 		logger.Warn("Unknown callback data", zap.String("data", data))
 	}
 
-	callback := tgbotapi.NewCallback(update.CallbackQuery.ID, "")
+	c.answerCallback(update.CallbackQuery.ID)
+
+	return nil
+}
+
+// answerCallback acknowledges the callback query so Telegram stops showing the
+// button loading spinner. Admin-only buttons pressed by a non-admin must still
+// be acknowledged, otherwise the client keeps the spinner until the timeout.
+func (c *CallbackHandler) answerCallback(callbackID string) {
+	callback := tgbotapi.NewCallback(callbackID, "")
 
 	_, err := c.h.bot.Request(callback)
 	if err != nil {
 		logger.Error("Failed to answer callback", zap.Error(err))
 	}
-
-	return nil
 }
 
 // handleShareInvite generates and sends an invite link.

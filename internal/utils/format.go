@@ -43,14 +43,14 @@ func IsNumericUsername(username string) bool {
 // For alphabetic usernames, links to https://t.me/username.
 // For purely numeric usernames (e.g. "11"), uses tg://user?id=ID deep link,
 // because Telegram does not resolve t.me/123 as a profile.
-// For empty/unsupported usernames, falls back to tg://user?id=TelegramID deep link
-// with "unknown" display text.
+// For fallback usernames (tgId_XXX) and empty/unsupported usernames,
+// falls back to tg://user?id=TelegramID deep link with "unknown" display text.
 func FormatUserLink(username string, telegramID int64) string {
 	if IsNumericUsername(username) && telegramID != 0 {
 		return fmt.Sprintf("[%s](tg://user?id=%d)", username, telegramID)
 	}
 
-	if IsRealUsername(username) {
+	if IsRealUsername(username) && !strings.HasPrefix(username, "tgId_") {
 		return fmt.Sprintf("[@%s](https://t.me/%s)", username, username)
 	}
 

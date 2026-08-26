@@ -1,8 +1,5 @@
 # Architecture — rs8kvn_bot
 
-**Version:** v2.3.11
-**Date:** 2026-08-11
-
 ## Multi-outbounds per node
 
 A single 3x-ui node can now expose multiple inbounds. Inbound IDs are stored as a JSON array in `nodes.inbound_ids` and sent to the panel as `inboundIds` during client creation/update.
@@ -14,7 +11,7 @@ rs8kvn_bot — production-ready Telegram bot for distributing VLESS+Reality+Visi
 - Retry with exponential backoff for external dependencies (the circuit breaker implementation is currently not wired into the live XUI path)
 - Comprehensive caching (in-memory LRU, TTL)
 - Graceful shutdown with coordinated cleanup
-- ~61.1% aggregate test coverage (unit, e2e, fuzz, leak detection)
+- 66.2% aggregate test coverage in the latest documented run (unit, e2e, fuzz, leak detection)
 - Payment/order tracking for subscription purchases
 - Node-based subscription synchronization with 4-state sync machine (`subscription_nodes`)
 - 3-touch expiry reminders (3d/1d/3h) with atomic claim and bitmask (`subscriptions.reminders_sent`)
@@ -57,10 +54,10 @@ rs8kvn_bot — production-ready Telegram bot for distributing VLESS+Reality+Visi
 │  │ Layer    │              │  (port 8880) │              │ Service  ││
 │  │          │              │              │              │          ││
 │  │ Handler  │              │ /healthz     │              │ cache    ││
-│  │ Commands │              │ /readyz      │              │ extra    ││
-│  │ Callbacks│              │ /i/{code}    │              │ servers  ││
-│  │ RateLim  │              │ /sub/{subID} │              │ merge    ││
-│  │  Cache    │              │ /payment/cb │              │ reload   ││
+│  │ Commands │              │ /readyz      │              │ merge    ││
+│  │ Callbacks│              │ /i/{code}    │              │ headers  ││
+│  │ RateLim  │              │ /sub/{subID} │              │          ││
+│  │  Cache    │              │ /payment/cb │              │          ││
 │  │          │              │ /static/logo│              │          ││
 │  │          │              │ /metrics     │              │          ││
 │  └────┬─────┘              └──────┬───────┘              └────┬─────┘│
@@ -90,7 +87,7 @@ rs8kvn_bot — production-ready Telegram bot for distributing VLESS+Reality+Visi
 │  │  │ • AddClient      │ • Retry+Jitter          │  Service      │ │ │
 │  │  │ • GetTraffic     │ • Retry+Jitter          │  (GORM+SQLite)│ │ │
 │  │  │ • DeleteClient   │ • Singleflight          │  • CRUD       │ │ │
-│  │  │ • Login          │ • Session mgmt          │  • Queries    │ │ │
+│  │  │ • Bearer auth  │ • Retry + timeout       │  • Queries    │ │ │
 │  │  └──────────────────┘                         └───────────────┘ │ │
 │  └─────────────────────────────────────────────────────────────────┘ │
 │                                 │                                   │
@@ -130,9 +127,9 @@ rs8kvn_bot — production-ready Telegram bot for distributing VLESS+Reality+Visi
 internal/
 ├── bot/              # Telegram layer
 │   ├── handler.go           # Main router, update loop
-│   ├── commands.go          # /start, /help, /invite
-│   ├── callbacks.go         # Inline keyboard callbacks
-│   ├── admin.go             # /del, /broadcast, /send, /refstats
+│   ├── command.go            # /start, /help, /invite
+│   ├── callback.go           # Inline keyboard callbacks
+│   ├── admin.go             # /del, /broadcast, /send, /refstats, broadcast cards
 │   ├── subscription_handler.go # Create/view/QR subscription
 │   ├── menu.go              # Navigation: donate, help, back
 │   ├── cache.go             # LRU cache (1000 entries, 5min TTL)
@@ -146,7 +143,7 @@ internal/
 ├── subserver/         # Subscription server (aggregation + proxy)
 │   ├── service.go           # Thin cache adapter over SubscriptionCache (Get/Set/Invalidate)
 │   ├── fetch.go             # Fetch from upstream nodes + format detection (JSON/Clash/Base64/Plain)
-│   └── servers.go           # Legacy: загрузка extra-серверов (фича удалена в v2.3.0, не используется в prod)
+│   └── servers.go           # Subscription format helpers and server-config conversion
 ├── service/          # Business logic
 │   ├── subscription.go      # Use cases: Create, Delete, DeleteByID, Renew; unified two-phase teardown (revokeAndDeprovisionThenDelete)
 │   ├── subscription_reminders.go # Reminder window model and Telegram delivery
@@ -166,7 +163,7 @@ internal/
 ├── database/         # Persistence
 │   ├── service.go           # GORM service + connection pool
 │   ├── migrations.go        # Embedded migration runner
-│   ├── migrations/          # 000..030 SQL files (embedded)
+│   ├── migrations/          # Embedded SQL migrations through the current schema version
 │   ├── models.go            # Subscription, Plan, Node, Product, Order, Invite, SubscriptionNode
 │   ├── trials.go             # Trial subscription logic, generateTrialTelegramID
 │   ├── subscriptions.go      # Subscription CRUD and lifecycle queries
@@ -190,7 +187,7 @@ internal/
 │   └── per_user.go          # Per-chatID wrapper
 ├── scheduler/        # Background jobs
 │   ├── backup.go            # Daily backup (03:00)
-│   ├── trial_cleanup.go     # Hourly expired trial cleanup
+│   ├── trial_cleanup.go     # Expired trial cleanup at startup and every 3h
 │   ├── subscription_sync_worker.go  # SyncPendingNodes worker
 │   ├── subscription_expire_worker.go # Subscription expiry worker
 │   └── subscription_reminder_worker.go # Expiry reminders: 3d / 1d / 3h, idempotent bitmask
@@ -244,8 +241,8 @@ for update := range updates {
 1. Signal received → `ctx.Done()` closes
 2. `botAPI.StopReceivingUpdates()` — stops long polling
 3. Drain updates channel (empty it)
-4. Wait for `updatesWg` (in-flight handlers) with 30s timeout
-5. Wait for background workers (`wg.Wait()`) with 30s timeout
+4. Wait for `updatesWg` (in-flight handlers) with 90s timeout
+5. Wait for background workers (`wg.Wait()`) with 90s timeout
 6. Close logger, database
 
 **Result:** No updates lost, all handlers complete or timeout, clean exit.
@@ -350,7 +347,7 @@ if !rateLimiter.Allow(chatID) {
 - Trial bound → `invalidateCache(telegramID)`
 - Subserver reload → entire cache cleared on config change
 
-**Pattern:** Cache-Aside with stale-as-fallback (proxy returns stale if XUI down).
+**Pattern:** Cache-Aside with fail-closed status revalidation (a cache hit is not served when DB status cannot be verified).
 
 ---
 
@@ -395,8 +392,9 @@ CREATE INDEX idx_orders_created_at             ON orders(created_at);
 ```
 
 **Race-safe patterns:**
-- `BindTrialSubscription`: `UPDATE WHERE telegram_id < 0 AND plan_id = <trial_plan_id>` + `RowsAffected` check (trial-подписки используют отрицательные `telegram_id`, колонки `is_trial` нет)
-- `CleanupExpiredTrials`: `DELETE ... RETURNING` to atomically fetch deleted rows
+- `BindTrialSubscription`: `UPDATE WHERE status = active AND telegram_id < 0 AND plan_id = <trial_plan_id>` + `RowsAffected` check (trial-подписки используют отрицательные `telegram_id`, колонки `is_trial` нет)
+- `CleanupExpiredTrials`: claim as `expired`, deprovision externally, then delete; failed panel operations remain retryable
+- `ApplyPlanToSubscription` / `MarkAllForRemoval`: hold the per-subscription sync lock across the full DB state transition
 - `GetOrCreateInvite`: always returns the oldest (canonical) code for the referrer.
   The UNIQUE constraint + "one code per referrer" guarantee is enforced by migration 004
   (aggressive deduplication of historical duplicates that accumulated because 004 was
@@ -464,17 +462,17 @@ SIGQUIT (kill -3) → graceful shutdown (also handled)
 1. `ctx.Done()` received → break event loop
 2. `botAPI.StopReceivingUpdates()` — stops long polling, channel closes
 3. Drain updates channel (discard remaining updates)
-4. Wait for `updatesWg` (max 30s) — all handlers finish or timeout
-5. Wait for background `wg` (backup, heartbeat, trial cleanup, sync/expire/orphan workers) (max 30s)
+4. Wait for `updatesWg` (max 90s) — all handlers finish or timeout
+5. Wait for background `wg` (backup, heartbeat, trial cleanup, sync/expire/orphan workers) (max 90s)
 6. Stop `subProxy` cache cleanup
 7. Set `webServer.ready = false`
 8. `webServer.Stop(ctx)` — shutdown HTTP server (5s timeout)
 9. Close logger, database
 
 **Timeouts:**
-- `ShutdownTimeout = 30s` (config constant)
-- Web server stop: 5s
-- Total shutdown: ~60s worst-case
+- `ShutdownTimeout = 90s` (config constant) for Telegram handlers and background workers
+- Web server/access-log stop: 5s context in `main()`
+- Docker `stop_grace_period`: 90s; the actual duration depends on the active shutdown phase
 
 **Safety:** In-flight requests complete, no new updates accepted.
 
@@ -838,7 +836,7 @@ The `SyncService` manages synchronization of subscriptions with VPN nodes via a 
 | `SyncSubscription` | Sync a single subscription across all its nodes |
 | `SyncPendingNodes` | Scan all `pending_*` records, process with retry |
 | `ReconcilePlanNodes` | Add/remove nodes when plan changes |
-| `ReconcileOrphanedClients` | Find XUI clients without DB subscription, delete them |
+| `ReconcileOrphanedClients` | Recover missing node queues and revoke fully deprovisioned subscriptions |
 
 ### Concurrency
 - Per-subscription locking via `lockSubscription(subscriptionID)` — prevents concurrent sync of the same subscription
@@ -848,9 +846,13 @@ The `SyncService` manages synchronization of subscriptions with VPN nodes via a 
 
 | Worker | Schedule | Description |
 |--------|----------|-------------|
-| `SubscriptionSyncWorker` | Continuous | Processes `pending_*` states with exponential backoff |
-| `SubscriptionExpireWorker` | Periodic | Expires subscriptions past `expires_at` |
-| `OrphanReconciler` | Every 6h | Cleans up orphaned XUI clients |
+| `BackupScheduler` | Daily at 03:00 | WAL checkpoint, database backup and rotation |
+| `TrialCleanupScheduler` | Immediately at startup, then every 3h | Deprovisions and removes expired anonymous trials |
+| `SubscriptionSyncWorker` | Immediately at startup, then every 5m | Processes `pending_*` states with exponential backoff |
+| `SubscriptionExpireWorker` | Immediately at startup, then every 1h | Expires paid subscriptions past `expires_at` |
+| `SubscriptionReminderWorker` | Immediately at startup, then every 30m | Sends idempotent 3d/1d/3h expiry reminders |
+| `OrphanReconciler` | After 30s, then every 8h | Recovers missing queues and revokes fully deprovisioned subscriptions |
+| `Heartbeat` | Configured interval, default 5m | Sends optional external monitoring heartbeat |
 
 ### Retry Behavior
 - Transient failures: `retry_count` incremented, `retry_at` set with exponential backoff
@@ -875,8 +877,8 @@ The bot exposes a `/metrics` endpoint (via `promhttp.Handler()`) on the HTTP ser
 | `subserver_source_fetch_total` | Counter | `result`, `format` | Upstream source fetch results |
 | `subserver_source_fetch_duration_seconds` | Histogram | `result` | Upstream source fetch duration |
 | `cache_hits_total` / `cache_misses_total` | Counter | cache | Cache hit/miss |
-| `circuit_breaker_state` | Gauge | target | CB state (0=closed, 1=open, 2=half-open) |
-| `bot_orphaned_clients_removed_total` | Counter | — | Orphaned clients removed |
+| `circuit_breaker_state` | Gauge | target | Circuit breaker state when the tested breaker is wired into a live path |
+| `bot_orphaned_clients_revoked_total` | Counter | — | Orphaned subscriptions revoked during reconciliation |
 | `subserver_cache_invalidations_total` | Counter | `reason` | Cache invalidations by reason |
 | `subserver_no_items_total` | Counter | — | Requests returning no items |
 
@@ -902,6 +904,93 @@ The bot exposes a `/metrics` endpoint (via `promhttp.Handler()`) on the HTTP ser
 | 2026-06 | Subscription sync pipeline | 4-state sync machine (subscription_nodes) with per-sub locking |
 | 2026-06 | Prometheus metrics | `/metrics` endpoint with HTTP, bot, XUI, DB, cache metrics |
 | 2026-07 | Security hardening (S2/S3/A1) | X-Forwarded-For rightmost IP, URL scheme allowlist, web→bot dependency break |
+
+---
+
+## Broadcast Filters
+
+The broadcast system supports recipient filtering via JSON predicates stored in `broadcasts.filters`. Filters are applied server-side using SQL WHERE clauses, ensuring scalability.
+
+### Filter Schema
+
+```json
+{
+  "plan_type": "paid",
+  "subscription_status": "active",
+  "registered_after": "2026-01-01T00:00:00Z",
+  "registered_before": "2026-06-01T00:00:00Z",
+  "inactive_days": 30,
+  "ever_paid": true
+}
+```
+
+All fields are optional. Empty filter `{}` = all active users.
+
+### Filter Fields
+
+| Field | Type | SQL Condition | Notes |
+|-------|------|---------------|-------|
+| `plan_type` | `string` | `"paid"`: `product_id IS NOT NULL OR price_paid_cents > 0`; `"free"`: free plan AND `product_id IS NULL` AND `price_paid_cents <= 0` | `"paid"` or `"free"` only |
+| `subscription_status` | `string` | `status = ?` | Default: `"active"` |
+| `registered_after` | `*time.Time` | `created_at >= ?` | Inclusive |
+| `registered_before` | `*time.Time` | `created_at <= ?` | Inclusive |
+| `inactive_days` | `*int` | `last_request < datetime('now', '-N days')` | `0` = never accessed |
+| `ever_paid` | `*bool` | `id IN (SELECT subscription_id FROM orders WHERE status='paid')` | Historical check |
+
+### Filter Combination Logic
+
+All active filters are combined with **AND**:
+
+```
+WHERE telegram_id > 0
+  AND status = 'active'
+  AND (product_id IS NOT NULL OR price_paid_cents > 0)
+  AND created_at >= '2026-01-01'
+  AND last_request < datetime('now', '-30 days')
+  AND id IN (SELECT subscription_id FROM orders WHERE status = 'paid')
+```
+
+### UX Flow
+
+```
+/broadcast
+→ Enter name
+→ Enter text (MarkdownV2)
+→ Filter keyboard appears:
+  [👥 All] [💰 Paid] [🆓 Free]
+  [📋 All] [✅ Active] [🚫 Revoked]
+  [📅 Reg. 3m] [📅 Reg. 6m] [📅 Reg. 1y] [📅 Reg. all]
+  [🚫 Never accessed] [⏰ >1m] [⏰ >3m] [👤 No filter]
+  [💳 Paid] [🆓 Never paid] [👤 No filter]
+  [✅ Send] [❌ Cancel]
+→ Admin selects filters (toggle on/off)
+→ Preview updates with filter description
+→ Press "✅ Send" → Recipient count preview:
+  📦 Broadcast: Promo
+  👥 Recipients: 1234
+  🔍 Filter: Paid · Active · Inactive >30d
+  ⚡ Send to 1234 users?
+  [✅ Send now] [⏰ Schedule]
+  [🔙 Back to filters] [❌ Cancel]
+→ Press "✅ Send now" → Broadcast starts immediately
+→ Press "⏰ Schedule" → Day picker (today / tomorrow / +3d / +1w)
+  → Hour picker (00:00–23:00, Moscow time)
+  → Preview: "Scheduled for 15.08.2026 18:00"
+  [✅ Confirm] [🔙 Change time] [❌ Cancel]
+→ Press "✅ Confirm" → campaign is stored with `planned_at` set and stays
+  `scheduled`; the worker claims it once `planned_at` is due (also after restart).
+  `planned_at` is preserved, not overwritten at start time.
+```
+
+### Important Implementation Details
+
+1. **`PricePaidCents` is NOT cumulative** — it stores the current product price, not total spent. For historical payment checks, the `orders` table is used (`ever_paid` filter).
+
+2. **Plan detection uses `plans` table** — the `plan_type` filter resolves the free plan by stable `plans.name = 'free'`, but eligibility is decided by payment state: `"paid"` = `product_id IS NOT NULL OR price_paid_cents > 0` (even on the free plan), `"free"` = free plan AND `product_id IS NULL AND price_paid_cents <= 0`.
+
+3. **SQLite compatibility** — date arithmetic uses `datetime('now', '-N days')` syntax, not PostgreSQL `INTERVAL`.
+
+4. **Performance** — all filters are applied at the SQL level (subqueries for `ever_paid`), not in-memory filtering. Scales to thousands of users.
 
 ---
 

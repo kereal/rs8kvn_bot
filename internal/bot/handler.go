@@ -37,7 +37,7 @@ const (
 // label values. Known commands are returned as-is; anything else becomes "unknown".
 func normalizeCommand(cmd string) string {
 	switch cmd {
-	case "start", "help", "invite", "mysub", "del", "setplan", "broadcast", "send", "refstats", "v", "lastreg":
+	case "start", "help", "invite", "mysub", "del", "setplan", "broadcast", "broadcasts", "send", "refstats", "v", "lastreg":
 		return cmd
 	default:
 		return "unknown"
@@ -81,7 +81,8 @@ type Handler struct {
 
 	// Broadcast draft -> preview -> confirm session state (admin only)
 	broadcastSessions map[int64]*broadcastSession
-	broadcastMu       sync.Mutex
+	broadcastMu       sync.RWMutex
+	broadcastWorker   *BroadcastWorker
 
 	// Decomposed handlers
 	cmdHandler *CommandHandler
@@ -127,6 +128,7 @@ func NewHandler(bot interfaces.BotAPI, cfg *config.Config, db interfaces.Databas
 	// Initialize admin rate limiters map
 	h.adminRateLimiters = make(map[int64]*ratelimiter.TokenBucket)
 	h.broadcastSessions = make(map[int64]*broadcastSession)
+	h.broadcastWorker = NewBroadcastWorker(h)
 
 	// Initialize decomposed handlers
 	h.cmdHandler = NewCommandHandler(h)
@@ -375,12 +377,14 @@ func userFields(from *tgbotapi.User, chatID int64) []zap.Field {
 
 // formatUserDisplay returns a display string suitable for showing a user reference.
 // For real usernames returns "@username", otherwise returns the raw identifier.
+// Fallback usernames (tgId_XXX) are returned without @ prefix since they are
+// not real Telegram usernames and @ mentions would not resolve.
 func formatUserDisplay(username string) string {
-	if !utils.IsRealUsername(username) {
-		if username == "" {
-			return "unknown"
-		}
+	if username == "" {
+		return "unknown"
+	}
 
+	if !utils.IsRealUsername(username) || strings.HasPrefix(username, "tgId_") {
 		return username
 	}
 
@@ -389,9 +393,15 @@ func formatUserDisplay(username string) string {
 
 // displayUsername formats a username for display in Telegram messages.
 // Returns ", @username" if non-empty, or empty string for missing usernames.
+// Fallback usernames (tgId_XXX) are shown without @ since they are not real
+// Telegram usernames.
 func displayUsername(username string) string {
 	if username == "" {
 		return ""
+	}
+
+	if strings.HasPrefix(username, "tgId_") {
+		return ", " + username
 	}
 
 	return ", @" + username
@@ -506,6 +516,10 @@ func (h *Handler) SendMessage(ctx context.Context, chatID int64, text string) {
 	h.sender.SendMessage(ctx, chatID, text)
 }
 
+func (h *Handler) SendMessageMarkdown(ctx context.Context, chatID int64, text string) {
+	h.sender.SendMessageMarkdown(ctx, chatID, text)
+}
+
 func (h *Handler) showLoadingMessage(chatID int64, messageID int) int {
 	if messageID == 0 {
 		msg := tgbotapi.NewMessage(chatID, "⏳ Загрузка...")
@@ -584,6 +598,14 @@ func (h *Handler) StartCacheCleanup(ctx context.Context, interval time.Duration)
 func (h *Handler) StartRateLimiterCleanup(ctx context.Context, interval, maxIdle time.Duration) {
 	h.bgWg.Go(func() {
 		h.rateLimiter.StartCleanup(ctx, interval, maxIdle)
+	})
+}
+
+// StartBroadcastWorker starts the durable broadcast worker under the handler
+// lifecycle so shutdown waits for it.
+func (h *Handler) StartBroadcastWorker(ctx context.Context) {
+	h.bgWg.Go(func() {
+		h.broadcastWorker.Run(ctx)
 	})
 }
 
@@ -699,6 +721,8 @@ func (h *Handler) HandleUpdate(ctx context.Context, update tgbotapi.Update) {
 				err = h.HandleSetPlan(ctx, update)
 			case "broadcast":
 				err = h.HandleBroadcast(ctx, update)
+			case "broadcasts":
+				err = h.HandleBroadcastHistory(ctx, update)
 			case "send":
 				err = h.HandleSend(ctx, update)
 			case "refstats":

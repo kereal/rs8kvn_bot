@@ -1,4 +1,4 @@
-# Метрики Prometheus — текущее состояние (2026-07-17)
+# Метрики Prometheus — текущее состояние
 
 ## Обновлённые/оживлённые метрики
 
@@ -8,7 +8,7 @@
 - `subscription_renewals_total` — инкрементируется в `RenewSubscription`.
 - `subscription_sync_total` + `subscription_sync_duration_seconds` — инкрементируются в `SubscriptionSyncWorker.process`.
 - `subscription_expire_total` + `subscription_expire_duration_seconds` — инкрементируются в `SubscriptionExpireWorker.process`.
-- `reconcile_orphaned_duration_seconds` — инкрементируется в `ReconcileOrphanedClients`.
+- `reconcile_orphaned_duration_seconds` — наблюдается в `ReconcileOrphanedClients`.
 - `subserver_cache_hit_duration_seconds` + `subserver_cache_miss_duration_seconds` — замеры в `HandleSubscription`.
 - `payment_operations_total{operation,result}` + `payment_operation_duration_seconds{operation}` — счётчики/гистограмма операций `OrderService` (request/confirm/cancel × success/error).
 - `payment_amounts_cents_total{operation,currency}` — суммы в копейках по денежным переходам: `confirmed` (успешный CONFIRMED, только Activated) и `chargeback` (CHARGEBACKED на оплаченном заказе). Валюта нормализуется (upper), невалидные/неположительные суммы игнорируются.
@@ -19,15 +19,20 @@
 - `subserver_partial_sources_total{sub_id}` — deprecated, опасная cardinality.
 - `trial_conversions_total` — удалена, нет явного trial→paid флоу.
 
-## Оставлены dead на будущее
+## Живые метрики XUI
 
-- `xui_requests_total{operation,result}` и `xui_request_duration_seconds{operation}` — объявлены, но не используются. Оставлены для будущего инструментирования `fetch.go`.
+- `xui_requests_total{operation,result}` — счётчик XUI-запросов, инкрементируется в `internal/xui/client.go`.
+- `xui_request_duration_seconds{operation}` — длительность XUI-запросов, инкрементируется в `internal/xui/client.go`.
+
+## Важно
+
+- `bot_orphaned_clients_revoked_total` считает отозванные orphan subscriptions; старого имени `bot_orphaned_clients_removed_total` больше нет.
 
 ## Тесты
 
 - `internal/metrics/metrics_test.go` — проверяет инициализацию всех метрик и доступность на `/metrics`.
 - `internal/metrics/db_test.go` — smoke-test GORM callbacks для CRUD операций.
-- Все метрики покрыты базовыми проверками, сборка и тесты зелёные.
+- Метрики имеют базовые smoke-проверки; актуальные имена следует сверять с `internal/metrics/metrics.go`.
 
 ## Документация
 

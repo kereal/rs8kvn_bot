@@ -33,6 +33,11 @@ func (c *FetchClient) DeleteSubscription(_ context.Context, _ SubscriptionProvis
 	return nil
 }
 
+// ResetTraffic is a no-op: fetch nodes do not manage VPN clients.
+func (c *FetchClient) ResetTraffic(_ context.Context, _ SubscriptionProvision) error {
+	return nil
+}
+
 // Close is a no-op: fetch nodes hold no resources.
 func (c *FetchClient) Close() error {
 	return nil

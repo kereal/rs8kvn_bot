@@ -2,7 +2,6 @@
 
 **Repo:** https://github.com/kereal/rs8kvn_bot
 **Module:** `rs8kvn_bot` (Go 1.25+)
-**Version:** v2.3.11
 **Branch:** `dev` (GitFlow: `main` = production, `dev` = integration, feature branches from dev or `plans_and_pricing`)
 
 ---
@@ -196,7 +195,7 @@ Cache.Set(240s) → return body with Content-Type + Subscription-Userinfo
 | Testing | `stretchr/testify` | v1.11.1 |
 | CI/CD | GitHub Actions → golangci-lint, gosec, test, Docker → GHCR | — |
 
-## Current State (v2.3.11)
+## Current State
 
 ### Working Features
 
@@ -211,7 +210,85 @@ Cache.Set(240s) → return body with Content-Type + Subscription-Userinfo
 **Admin Features:**
 - `/del <id>` — delete subscription by ID
 - `/setplan <subscription_id> <plan_id> [days]` — change subscription plan through the service layer (subscription row + node reconciliation + best-effort VPN sync; free plan clears expiry, future expiry preserved when `days` omitted, else 30-day default)
-- `/broadcast <msg>` — draft → MarkdownV2 preview (special chars auto-escaped, `*bold*`/`_italic_`/`` `code` ``/`[text](url)` preserved) → inline confirm → batched send to all subscribers (100/batch, concurrency 10); final report splits delivered / blocked-the-bot / other errors
+- `/broadcast` — asynchronous broadcast flow: name → draft → **filter selection** → **recipient count preview** → inline confirm. Confirmation queues a campaign; a durable worker snapshots the audience into `broadcasts.recipients_state`, sends in batches (100, concurrency 10), retries transient errors twice, recovers stale leases after restart, and stores final counters/report in `broadcasts`. The confirm step offers **send now** or **schedule** (day picker → hour picker, Moscow time). A scheduled campaign keeps `planned_at` (persisted, never overwritten) and stays `scheduled`; `GetRunnableBroadcasts` only returns it once `planned_at` is due, so it also survives restarts and can be canceled before launch.
+- `/broadcasts` — recent campaign history with details, cancellation of active campaigns, and retry of failed recipients. Anonymous trials are excluded; `expired` is not offered as a broadcast status, while `all` is explicit. Migration 036 creates `broadcasts` with recipient state, delivery classification, and retry metadata columns; no recipient table is created. `blocked` means Telegram explicitly reports that the user blocked the bot; deactivated or missing chats are `unreachable`. Details send one compact admin message, while complete ID lists remain in the persisted campaign report.
+
+#### Broadcast Filters
+
+After entering the draft text, the admin sees an inline keyboard for selecting recipient filters. Filters are stored as JSON in `broadcasts.filters` and applied server-side via SQL WHERE clauses.
+
+**Filter fields (`BroadcastFilter` struct):**
+
+| Field | JSON key | Type | Description |
+|-------|----------|------|-------------|
+| `PlanType` | `plan_type` | `string` | `"paid"` (has `product_id` or positive `price_paid_cents`) or `"free"` (free plan without product and payment). Payment state, not plan name. Empty = all eligible plans. Trials are always excluded. |
+| `SubscriptionStatus` | `subscription_status` | `string` | `"active"`, `"revoked"`, `"all"`. Empty = `"active"` (default); expired is not a broadcast option. |
+| `RegisteredAfter` | `registered_after` | `*time.Time` | Users registered after this date (inclusive). |
+| `RegisteredBefore` | `registered_before` | `*time.Time` | Users registered before this date (inclusive). |
+| `InactiveDays` | `inactive_days` | `*int` | `0` = never accessed (`last_request IS NULL`). `>0` = last access older than N days. `nil` = no filter. |
+| `EverPaid` | `ever_paid` | `*bool` | `true` = at least one paid order in `orders` table. `false` = never paid. `nil` = no filter. |
+
+**How filters combine:**
+
+All active filters are combined with **AND** logic. Example:
+```json
+{"plan_type": "paid", "inactive_days": 30, "ever_paid": true}
+```
+= Paid plan AND inactive for 30+ days AND has payment history.
+
+**Keyboard layout (filter selection):**
+
+```
+[👥 Все] [💰 Платные] [🆓 Бесплатные]
+[📋 Все] [✅ Активные] [🚫 Отозванные]
+[📅 Рег. за 3 мес] [📅 Рег. за 6 мес] [📅 Рег. за год] [📅 Рег. все]
+[🚫 Не обращались] [⏰ > 1 мес] [⏰ > 3 мес] [👤 Без фильтра]
+[💳 Платили] [🆓 Не платили] [👤 Без фильтра]
+[✅ Отправить] [❌ Отмена]
+```
+
+**Recipient count preview:**
+
+After pressing "✅ Отправить", the system queries `GetFilteredTelegramIDCount` and shows:
+
+```
+📦 Рассылка: Промо
+
+👥 Получателей: 1234
+🔍 Фильтр: Платные · Активные · Не активны > 30 дн.
+
+⚡ Отправить 1234 пользователям?
+```
+
+Buttons:
+```
+[✅ Подтвердить]
+[🔙 Назад к фильтрам] [❌ Отмена]
+```
+
+The admin can go back to adjust filters or confirm to start the broadcast.
+
+**SQL WHERE clauses generated:**
+
+| Filter | SQL condition |
+|--------|---------------|
+| `plan_type: paid` | `product_id IS NOT NULL OR price_paid_cents > 0` |
+| `plan_type: free` | `plan_id = (SELECT id FROM plans WHERE name = 'free') AND product_id IS NULL AND price_paid_cents <= 0` |
+| `subscription_status: active` | `status = 'active'` |
+| `subscription_status: revoked` | `status = 'revoked'` |
+| `registered_after` | `created_at >= ?` |
+| `registered_before` | `created_at <= ?` |
+| `inactive_days: 0` | `last_request IS NULL` |
+| `inactive_days: N` | `last_request < datetime('now', '-N days')` |
+| `ever_paid: true` | `id IN (SELECT subscription_id FROM orders WHERE status = 'paid')` |
+| `ever_paid: false` | `id NOT IN (SELECT subscription_id FROM orders WHERE status = 'paid')` |
+
+**Important notes:**
+- `PricePaidCents` is NOT cumulative — it stores the current product price, not total spent. For historical payment checks, the `orders` table is used.
+- `plan_type: paid` uses payment fields (`product_id`/`price_paid_cents`), so trial and manually granted premium plans are not treated as paid. Trials are excluded by `telegram_id > 0` and the trial-plan predicate.
+- Empty filter `{}` = all active users (same as no filter).
+- Broadcast details show counters plus complete Telegram ID lists for delivered, blocked, failed, and unprocessed recipients; blocked IDs are retained in `delivery_report.blocked`.
+- Filters are applied at the SQL level (not in-memory), so they scale to thousands of users.
 - `/send <id|username> <msg>` — private message (30s cooldown per admin)
 - `/refstats` — referral statistics (top 10 from cache)
 - 📊 Stats — bot statistics
@@ -222,7 +299,7 @@ Cache.Set(240s) → return body with Content-Type + Subscription-Userinfo
 | - Health endpoints — `/healthz` (503 when Down), `/readyz` (503 during init)
 | - Invite/trial landing — `/i/{code}` with IP rate limit (3/hour), cookie dedup (3h) |
 | - Per-user rate limiting — chatID token bucket (30 tokens, 5/sec refill, 10-min idle cleanup) |
-| - Subscription proxy — `GET /sub/{subID}` with extra servers + headers, 240s TTL cache, singleflight |
+| - Subscription proxy — `GET /sub/{subID}` with multi-node aggregation, headers, 240s TTL cache, singleflight |
 | - Daily backups — WAL checkpoint, atomic copy, 30 rotated backups by default |
 | - Sentry error tracking (+ traces), Zap structured JSON logging with rotation
 | - Order/Product tracking — payment lifecycle (pending/paid/expired/canceled) with 30-min payment window
@@ -231,7 +308,7 @@ Cache.Set(240s) → return body with Content-Type + Subscription-Userinfo
 | - Prometheus metrics — `/metrics` endpoint with HTTP, bot, XUI, DB, cache, subscription, and payment metrics |
 | - VPN client abstraction — `internal/vpn/` package with `Client` interface, `NewClient` factory routing by node type (3x-ui, proxman, fetch) |
 | - Plans & pricing — `plans`, `products`, `orders` tables for subscription plan management and payment lifecycle |
-| - Orphan reconciliation — `ReconcileOrphanedClients` runs every 6h to clean up orphaned XUI clients |
+| - Orphan reconciliation — initial pass after 30s, then every 8h; orphaned subscriptions are revoked rather than deleted |
 | - Subscription expire worker — background worker handling subscription expiration |
 
 ### Test Coverage
@@ -253,7 +330,7 @@ Cache.Set(240s) → return body with Content-Type + Subscription-Userinfo
 | `internal/scheduler` | **81.2%** | ✅ |
 | `internal/database` | **77.8%** | 🟡 |
 | `cmd/bot` | **5.4%** | 🟡 (integration tests cover indirectly) |
-| **Overall** | **~61.1%** | 🟡 |
+| **Overall** | **66.2%** | 🟡 |
 
 All tests pass with `-race` detector. Fuzzing enabled for critical functions.
 
@@ -291,19 +368,18 @@ All tests pass with `-race` detector. Fuzzing enabled for critical functions.
 - **Payment window:** link lifetime is determined by Platega `expiresIn` and stored as absolute UTC `payment_expires_at`; a still-valid saved link is reused. Only a new `RequestPayment` after that timestamp terminalizes the pending order as `expired`; a late `CONFIRMED` for an `expired`/`canceled` order never activates it and is sent for manual review.
 - **Metrics:** `payment_operations_total{operation,result}`, `payment_operation_duration_seconds`, `payment_amounts_cents_total{operation,currency}` (confirmed/chargeback), `payment_issues_total{event}`.
 
-### Subscription Deletion (v2.2.0+)
+### Subscription Deletion
 - **Order:** Mark as revoked → best-effort deprovision VPN access → physical deletion of DB row
 - **Rationale:** Subscription is immediately inaccessible after revoked status is set. VPN deprovisioning is best-effort (background sync retries on failure). Physical deletion happens last. See AGENTS.md for detailed flow description.
 - **Referral cache:** `DecrementReferralCount` called after successful deletion.
 
-### Subscription Proxy (v2.3.11+)
+### Subscription Proxy
 - **Endpoint:** `GET /sub/{subID}` — subID = SubscriptionID from DB (14 random bytes → 28 hex chars)
-- **Config:** Subserver агрегирует ответы нод как-is; кастомные extra-серверы (extra_servers.txt, hot reload) удалены в v2.3.0.
+- **Config:** Subserver агрегирует ответы активных нод как-is; отдельный extra-servers файл не используется.
 - **Cache:** 240s TTL hardcoded (`config.SubServerCacheTTL`)
 - **Singleflight:** First request fetches, others wait and get same result (prevents thundering herd) — загрузка внешнего конфиг-файла не выполняется (фича удалена)
 - **Content-Length:** Removed after merge (body size changes, Go uses chunked encoding)
 - **Rate limiting:** Currently none — 240s cache TTL mitigates abuse; future: per-IP limit
-- **Path traversal protection:** (исторически) `extra_servers.txt` path валидировался перед открытием — фича удалена в v2.3.0, проверка больше не применяется.
 
 ### Referral Cache
 - **Source of truth:** subscriptions table (`SELECT referred_by, COUNT(*) GROUP BY referred_by`)
@@ -344,7 +420,7 @@ All tests pass with `-race` detector. Fuzzing enabled for critical functions.
 - **Broadcast:** 50ms delay between messages (~20 msg/sec, respects Telegram limits)
 
 ### Security
-- **Input validation:** Regex validation rejects path-separator/invalid characters in invite codes (`internal/web/web.go`) and subIDs (`^[a-zA-Z0-9_-]+$` in `internal/subserver/subscription.go`). (The historical `extra_servers.txt` file-path check was removed in v2.3.0 along with that feature.)
+- **Input validation:** Regex validation rejects path-separator/invalid characters in invite codes (`internal/web/web.go`) and subscription IDs.
 - **IP spoofing (S2):** `getClientIP` uses rightmost IP from `X-Forwarded-For` (set by trusted reverse proxy), NOT leftmost (client-controlled, spoofable). Only trusted from loopback.
 - **URL scheme restriction (S3):** `validateURL` restricts all configured URLs to `http`/`https` schemes only — prevents `file://`, `gopher://`, etc. SSRF vectors
 - **Web→bot dependency break (A1):** `internal/web` no longer imports `internal/bot` — `Server.botUsername string` instead of `*bot.BotConfig`, reducing coupling and attack surface
@@ -365,9 +441,9 @@ All tests pass with `-race` detector. Fuzzing enabled for critical functions.
 - **Binary:** UPX compressed (-9) — ~30–40% smaller
 - **Migrations:** Embedded via `COPY internal/database/migrations`
 - **Data volume:** `./data:/app/data` (persistent)
-- **Health check:** `curl -f http://localhost:8080/healthz` (application readiness)
+- **Health check:** `wget -q -O - http://127.0.0.1:8880/healthz` (application and database health)
 - **Resource limits:** 0.5 CPU, 128MB memory (2× GOMEMLIMIT for GC headroom)
-- **Stop grace period:** 30s, SIGTERM
+- **Stop grace period:** 90s, SIGTERM
 
 ---
 
@@ -382,7 +458,7 @@ go test -coverprofile=coverage.out ./...
 go tool cover -func=coverage.out
 
 # Build binary
-go build -ldflags="-s -w -X main.version=v2.3.11 -X main.commit=$(git rev-parse --short HEAD 2>/dev/null || echo unknown) -X main.buildTime=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" -o rs8kvn_bot ./cmd/bot
+go build -ldflags="-s -w -X main.commit=$(git rev-parse --short HEAD 2>/dev/null || echo unknown) -X main.buildTime=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" -o rs8kvn_bot ./cmd/bot
 
 # Run linters
 golangci-lint run ./...

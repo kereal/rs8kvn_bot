@@ -73,6 +73,10 @@ func (f *fakeXUIClient) DeleteClient(ctx context.Context, email string) error {
 	return f.deleteErr
 }
 
+func (f *fakeXUIClient) ResetTraffic(_ context.Context, _ string) error {
+	return nil
+}
+
 func (f *fakeXUIClient) GetClientTraffic(ctx context.Context, email string) (*xui.ClientTraffic, error) {
 	return nil, nil
 }

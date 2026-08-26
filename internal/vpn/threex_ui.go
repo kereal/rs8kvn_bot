@@ -72,6 +72,16 @@ func (c *ThreeXUIClient) DeleteSubscription(ctx context.Context, provision Subsc
 	return nil
 }
 
+// ResetTraffic обнуляет счётчик трафика клиента на панели 3x-ui.
+func (c *ThreeXUIClient) ResetTraffic(ctx context.Context, provision SubscriptionProvision) error {
+	err := c.client.ResetTraffic(ctx, provision.Username)
+	if err != nil {
+		return fmt.Errorf("3x-ui reset traffic: %w", err)
+	}
+
+	return nil
+}
+
 // Close closes the underlying XUI client.
 func (c *ThreeXUIClient) Close() error {
 	return c.client.Close()
