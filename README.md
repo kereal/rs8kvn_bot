@@ -204,4 +204,5 @@ go build -ldflags="-s -w" -o rs8kvn_bot ./cmd/bot
 - **[Security Policy](doc/security.md)** — Security measures, hardening checklist, incident response
 - **[API Reference](doc/api.md)** — HTTP endpoints, error codes, rate limits
 - **[Operations Guide](doc/operations.md)** — Monitoring, troubleshooting, scaling, backup/restore
+- **[Broadcast](doc/broadcast.md)** — Admin broadcast flow, filters, delivery worker
 - **[.serena/instructions.md](.serena/instructions.md)** — AI assistant workflow and memory structure

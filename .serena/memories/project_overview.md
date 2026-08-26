@@ -72,6 +72,7 @@ Production-grade: миграции, мониторинг, rate-limiting, circuit
 - **Subserver**: кэш-ревалидация **fail-closed** (Error + 5xx вместо stale после revoke/chargeback); лимит тела 2 MiB (`config.MaxResponseSize`); `analyticsMu` сериализует `UpdateDevices`/`UpdateIPs`; base64-агрегация поддерживает RawStdEncoding (без padding) и разбивает по строкам.
 - **Web**: check-and-record trial rate-limit под `trialRateMu`; `SecurityHeadersMiddleware` (nosniff/DENY/no-referrer/Permissions-Policy).
 - **Тесты**: `internal/bot/broadcast_admin_flow_test.go` (callback ID, cancel/retry, фильтры, форматтеры), `internal/xui/reset_traffic_test.go`, sync ResetTraffic best-effort, BindTrial rollback, CleanupExpiredTrials deprovision-failure, ReconcileOrphaned queue recovery.
+- **Документация**: добавлен краткий README по флоу рассылок — `doc/broadcast.md` (флоу админа, воркер доставки, управление, указатели на код); ссылка добавлена в «Project Documentation» корневого README.md.
 
 ## Стек
 - **Go 1.25** (go.mod)
@@ -132,5 +133,6 @@ internal/metrics/            — Prometheus/обёртка; напоминани
 - Тесты: см. `test-info`
 - Аудиты: см. `audit/*`
 - Исторические фиксы: см. `fixes/*`
+- Рассылки (кратко): см. `doc/broadcast.md`
 - x-ui протокол: см. `xui/*`
 - Subscription Nodes: см. `subscription-nodes/state-machine` + `subscription-nodes/orders-table`
