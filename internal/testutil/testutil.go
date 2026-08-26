@@ -634,9 +634,15 @@ func (m *DatabaseService) ListBroadcasts(ctx context.Context, limit int) ([]data
 		}
 	})
 
-	out := make([]database.Broadcast, 0, min(limit, len(ids)))
+	// Negative limit means "no limit", matching the production GORM query
+	// (LIMIT is omitted when limit < 0, returning all broadcasts).
+	capacity := len(ids)
+	if limit >= 0 && limit < capacity {
+		capacity = limit
+	}
+	out := make([]database.Broadcast, 0, capacity)
 	for _, id := range ids {
-		if len(out) >= limit {
+		if limit >= 0 && len(out) >= limit {
 			break
 		}
 		out = append(out, *m.Broadcasts[id])
@@ -659,9 +665,9 @@ func (m *DatabaseService) UpdateBroadcast(ctx context.Context, b *database.Broad
 	}
 
 	// Merge semantics mirror production: only mutable lifecycle/stats fields
-	// are updated; name/filters/message_text/planned_at are never overwritten.
+	// are updated; name/filters/message_text/planned_at/started_at are never
+	// overwritten — started_at is owned exclusively by ClaimBroadcast.
 	existing.Status = b.Status
-	existing.StartedAt = b.StartedAt
 	existing.FinishedAt = b.FinishedAt
 	existing.RecipientsTotal = b.RecipientsTotal
 	existing.SentCount = b.SentCount
@@ -690,7 +696,8 @@ func fakeBroadcastState(b *database.Broadcast) (fakeBroadcastRecipientState, err
 	if b.RecipientsState == "" || b.RecipientsState == "{}" {
 		return state, nil
 	}
-	if err := json.Unmarshal([]byte(b.RecipientsState), &state); err != nil {
+	err := json.Unmarshal([]byte(b.RecipientsState), &state)
+	if err != nil {
 		return state, err
 	}
 	if state.Recipients == nil {
@@ -739,7 +746,8 @@ func (m *DatabaseService) SnapshotBroadcastRecipients(ctx context.Context, broad
 	for i, telegramID := range ids {
 		state.Recipients = append(state.Recipients, database.BroadcastRecipient{ID: uint(i + 1), BroadcastID: broadcastID, TelegramID: telegramID, Status: database.BroadcastRecipientPending, UpdatedAt: now})
 	}
-	if err := setFakeBroadcastState(b, state); err != nil {
+	err = setFakeBroadcastState(b, state)
+	if err != nil {
 		return 0, err
 	}
 	return int64(len(state.Recipients)), nil
@@ -846,7 +854,8 @@ func (m *DatabaseService) ClaimBroadcastRecipients(ctx context.Context, broadcas
 			out = append(out, state.Recipients[i])
 		}
 	}
-	if err := setFakeBroadcastState(b, state); err != nil {
+	err = setFakeBroadcastState(b, state)
+	if err != nil {
 		return nil, err
 	}
 	return out, nil
@@ -1245,6 +1254,10 @@ func (m *DatabaseService) UpdateDevices(ctx context.Context, id uint, devicesJSO
 }
 
 func (m *DatabaseService) UpdateIPs(ctx context.Context, id uint, ipsJSON string) error {
+	if m.UpdateIPsFunc != nil {
+		return m.UpdateIPsFunc(ctx, id, ipsJSON)
+	}
+
 	return nil
 }
 
