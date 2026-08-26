@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -554,6 +555,119 @@ func TestHandleSubscription_FetchNode_UsesURLDirectly(t *testing.T) {
 	decoded, decErr := base64.StdEncoding.DecodeString(string(result.Body))
 	require.NoError(t, decErr)
 	assert.Contains(t, string(decoded), "vless://uuid@fetch-server")
+}
+
+// TestHandleSubscription_ParallelCacheMiss_PreservesDevicesAndIPs locks the
+// analytics read-modify-write contract: concurrent cache-miss requests must not
+// overwrite each other's device/IP entries. Each request re-reads the freshest
+// subscription row inside the analytics critical section before appending its
+// own entry, so every device and every IP must survive.
+func TestHandleSubscription_ParallelCacheMiss_PreservesDevicesAndIPs(t *testing.T) {
+	t.Parallel()
+
+	const requests = 8
+
+	var (
+		stateMu sync.Mutex
+		devices = "[]"
+		ips     = "[]"
+	)
+
+	mockDB := testutil.NewDatabaseService()
+	mockDB.GetWithPlanAndNodesFunc = func(ctx context.Context, subID string) (*database.SubscriptionFull, error) {
+		stateMu.Lock()
+		curDevices, curIPs := devices, ips
+		stateMu.Unlock()
+
+		// Widen the read-modify-write window so the buggy version (load outside
+		// the lock) reliably reads the same stale snapshot for all requests and
+		// loses concurrent updates.
+		time.Sleep(10 * time.Millisecond)
+
+		return &database.SubscriptionFull{
+			Subscription: database.Subscription{
+				ID:             1,
+				SubscriptionID: subID,
+				Status:         "active",
+				Devices:        curDevices,
+				Ips:            curIPs,
+			},
+			Plan: database.Plan{ID: 1, Name: "test", TrafficLimit: 0},
+			// No node with a subscription_url: fetching yields no items, the
+			// cache is never populated, so every request stays on the
+			// cache-miss path and runs the analytics update.
+			Nodes: []database.Node{{ID: 1, Name: "no-url", IsActive: true, SubscriptionURL: ""}},
+		}, nil
+	}
+	mockDB.UpdateDevicesFunc = func(ctx context.Context, id uint, devicesJSON string) error {
+		stateMu.Lock()
+		defer stateMu.Unlock()
+
+		devices = devicesJSON
+
+		return nil
+	}
+	mockDB.UpdateIPsFunc = func(ctx context.Context, id uint, ipsJSON string) error {
+		stateMu.Lock()
+		defer stateMu.Unlock()
+
+		ips = ipsJSON
+
+		return nil
+	}
+
+	svc := newTestSubSvc(t)
+	ctx := context.Background()
+
+	start := make(chan struct{})
+	errs := make([]error, requests)
+
+	var wg sync.WaitGroup
+
+	for i := range requests {
+		wg.Add(1)
+
+		go func(i int) {
+			defer wg.Done()
+
+			<-start
+
+			headers := map[string]string{"x-hwid": fmt.Sprintf("device-%d", i)}
+			_, _, _, err := HandleSubscription(ctx, mockDB, svc, "sub-parallel", fmt.Sprintf("10.0.0.%d", i), headers)
+			errs[i] = err
+		}(i)
+	}
+
+	close(start)
+	wg.Wait()
+
+	// Every request runs the analytics path; the fetch yields no items, which
+	// is expected and irrelevant for this test.
+	for i, err := range errs {
+		require.ErrorIs(t, err, ErrNoSubscriptionItems, "request %d", i)
+	}
+
+	stateMu.Lock()
+	finalDevices, finalIPs := devices, ips
+	stateMu.Unlock()
+
+	// All concurrent requests' devices must be preserved.
+	var parsedDevices []map[string]string
+	require.NoError(t, json.Unmarshal([]byte(finalDevices), &parsedDevices))
+	require.Len(t, parsedDevices, requests)
+
+	for i := range requests {
+		assert.Contains(t, finalDevices, fmt.Sprintf("device-%d", i))
+	}
+
+	// All concurrent requests' IPs must be preserved.
+	var parsedIPs []map[string]string
+	require.NoError(t, json.Unmarshal([]byte(finalIPs), &parsedIPs))
+	require.Len(t, parsedIPs, requests)
+
+	for i := range requests {
+		assert.Contains(t, finalIPs, fmt.Sprintf("10.0.0.%d", i))
+	}
 }
 
 // ==================== UpdateDevices Tests ====================

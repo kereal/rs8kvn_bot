@@ -882,6 +882,7 @@ func TestSubscriptionService_BindTrial_DBBindFailureRollsBack(t *testing.T) {
 
 	cfg := &config.Config{TrialDurationHours: 3}
 
+	trialExpiresAt := time.Now().UTC().Add(3 * time.Hour)
 	unboundTrial := &database.Subscription{
 		ID:             42,
 		TelegramID:     -5,
@@ -889,6 +890,7 @@ func TestSubscriptionService_BindTrial_DBBindFailureRollsBack(t *testing.T) {
 		SubscriptionID: "trial-sub-1",
 		Status:         "active",
 		PlanID:         2,
+		ExpiresAt:      &trialExpiresAt,
 	}
 
 	lookupCalls := 0
@@ -902,7 +904,12 @@ func TestSubscriptionService_BindTrial_DBBindFailureRollsBack(t *testing.T) {
 			return nil, errors.New("bind race lost")
 		},
 		GetPlanByNameFunc: func(ctx context.Context, name string) (*database.Plan, error) {
-			return &database.Plan{ID: 2, Name: database.FreePlanName, TrafficLimit: 1024 * 1024 * 1024}, nil
+			switch name {
+			case database.TrialPlanName:
+				return &database.Plan{ID: 1, Name: database.TrialPlanName, TrafficLimit: 512 * 1024 * 1024}, nil
+			default:
+				return &database.Plan{ID: 2, Name: database.FreePlanName, TrafficLimit: 1024 * 1024 * 1024}, nil
+			}
 		},
 		GetNodesByPlanNameFunc: func(ctx context.Context, planName string) ([]database.Node, error) {
 			if planName == database.TrialPlanName {
@@ -944,6 +951,8 @@ func TestSubscriptionService_BindTrial_DBBindFailureRollsBack(t *testing.T) {
 	assert.Equal(t, "testuser", provisions[0].Username)
 	assert.Equal(t, "testuser", provisions[1].CurrentEmail, "rollback renames the bound email back to the anonymous trial identity")
 	assert.Equal(t, "trial_trial-sub-1", provisions[1].Username)
+	assert.Equal(t, int64(512*1024*1024), provisions[1].TrafficBytes, "rollback must restore the trial plan traffic limit")
+	assert.Equal(t, trialExpiresAt, provisions[1].ExpiryTime, "rollback must restore the original trial expiry")
 }
 
 // TestSubscriptionService_BindTrial_DBBindFailureCheckErrorSkipsRollback verifies

@@ -83,7 +83,6 @@ type Handler struct {
 	broadcastSessions map[int64]*broadcastSession
 	broadcastMu       sync.RWMutex
 	broadcastWorker   *BroadcastWorker
-	broadcastCtx      context.Context
 
 	// Decomposed handlers
 	cmdHandler *CommandHandler
@@ -605,21 +604,9 @@ func (h *Handler) StartRateLimiterCleanup(ctx context.Context, interval, maxIdle
 // StartBroadcastWorker starts the durable broadcast worker under the handler
 // lifecycle so shutdown waits for it.
 func (h *Handler) StartBroadcastWorker(ctx context.Context) {
-	h.broadcastMu.Lock()
-	h.broadcastCtx = ctx
-	h.broadcastMu.Unlock()
 	h.bgWg.Go(func() {
 		h.broadcastWorker.Run(ctx)
 	})
-}
-
-func (h *Handler) broadcastContext() context.Context {
-	h.broadcastMu.Lock()
-	defer h.broadcastMu.Unlock()
-	if h.broadcastCtx != nil {
-		return h.broadcastCtx
-	}
-	return context.Background()
 }
 
 func (h *Handler) WaitForBackgroundGoroutines() {

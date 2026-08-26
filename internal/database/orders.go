@@ -328,7 +328,13 @@ func (s *Service) ConfirmOrderPaidCAS(ctx context.Context, orderID uint, paidAt,
 		expiryCopy := newExpiry
 
 		sub.ExpiresAt = &expiryCopy
-		if applyPlan != nil {
+		// Plan reconciliation runs only when the purchased plan actually differs
+		// from the subscription's current one. A same-plan renewal extends the
+		// expiry but must NOT recreate pending_update rows: that path re-syncs
+		// the VPN client and resets its traffic counter, which would wipe the
+		// user's remaining quota mid-period. Renewals only touch the DB; the
+		// panel keeps serving the client (its own 30-day auto-renew continues).
+		if applyPlan != nil && currentSub.PlanID != product.PlanID {
 			err := applyPlan(ctx, tx, sub.ID, product.PlanID)
 			if err != nil {
 				return fmt.Errorf("apply plan after payment: %w", err)

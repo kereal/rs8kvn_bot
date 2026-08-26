@@ -48,7 +48,8 @@ func ParseBroadcastFilter(raw string) (BroadcastFilter, error) {
 	}
 
 	var f BroadcastFilter
-	if err := json.Unmarshal([]byte(raw), &f); err != nil {
+	err := json.Unmarshal([]byte(raw), &f)
+	if err != nil {
 		return BroadcastFilter{}, fmt.Errorf("parse broadcast filter: %w", err)
 	}
 	if f.SubscriptionStatus != "" && f.SubscriptionStatus != "active" && f.SubscriptionStatus != "revoked" && f.SubscriptionStatus != "all" {
