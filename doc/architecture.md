@@ -970,9 +970,16 @@ WHERE telegram_id > 0
   👥 Recipients: 1234
   🔍 Filter: Paid · Active · Inactive >30d
   ⚡ Send to 1234 users?
-  [✅ Confirm]
+  [✅ Send now] [⏰ Schedule]
   [🔙 Back to filters] [❌ Cancel]
-→ Press "✅ Confirm" → Broadcast starts
+→ Press "✅ Send now" → Broadcast starts immediately
+→ Press "⏰ Schedule" → Day picker (today / tomorrow / +3d / +1w)
+  → Hour picker (00:00–23:00, Moscow time)
+  → Preview: "Scheduled for 15.08.2026 18:00"
+  [✅ Confirm] [🔙 Change time] [❌ Cancel]
+→ Press "✅ Confirm" → campaign is stored with `planned_at` set and stays
+  `scheduled`; the worker claims it once `planned_at` is due (also after restart).
+  `planned_at` is preserved, not overwritten at start time.
 ```
 
 ### Important Implementation Details

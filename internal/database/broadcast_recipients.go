@@ -130,11 +130,12 @@ func (s *Service) SnapshotBroadcastRecipients(ctx context.Context, broadcastID u
 	return returnValue, nil
 }
 
-// ClaimBroadcast atomically changes a scheduled campaign to running.
+// ClaimBroadcast atomically changes a scheduled campaign to running. planned_at
+// is preserved so the details card keeps showing the originally planned time.
 func (s *Service) ClaimBroadcast(ctx context.Context, id uint, now time.Time) (bool, error) {
 	result := s.db.WithContext(ctx).Model(&Broadcast{}).
 		Where("id = ? AND status = ?", id, BroadcastStatusScheduled).
-		Updates(map[string]any{"status": BroadcastStatusRunning, "started_at": now, "planned_at": now})
+		Updates(map[string]any{"status": BroadcastStatusRunning, "started_at": now})
 	if result.Error != nil {
 		return false, fmt.Errorf("claim broadcast: %w", result.Error)
 	}
@@ -301,10 +302,12 @@ func (s *Service) ResetBroadcastFailedRecipients(ctx context.Context, id uint, n
 }
 
 // GetRunnableBroadcasts returns campaigns that can be resumed after restart.
+// Scheduled campaigns with a future planned_at are held until their time comes.
 func (s *Service) GetRunnableBroadcasts(ctx context.Context, now time.Time) ([]Broadcast, error) {
 	var broadcasts []Broadcast
 	result := s.db.WithContext(ctx).
-		Where("status IN ? AND (retry_at IS NULL OR retry_at <= ?)", []BroadcastStatus{BroadcastStatusScheduled, BroadcastStatusRunning}, now).
+		Where("status IN ? AND (retry_at IS NULL OR retry_at <= ?) AND (planned_at IS NULL OR planned_at <= ?)",
+			[]BroadcastStatus{BroadcastStatusScheduled, BroadcastStatusRunning}, now, now).
 		Order("id ASC").Find(&broadcasts)
 	if result.Error != nil {
 		return nil, fmt.Errorf("get runnable broadcasts: %w", result.Error)

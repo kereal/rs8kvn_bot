@@ -197,6 +197,38 @@ func (c *CallbackHandler) HandleCallback(ctx context.Context, update tgbotapi.Up
 		if err != nil {
 			return fmt.Errorf("handle broadcast_back_to_filters: %w", err)
 		}
+	case data == "broadcast_schedule":
+		if !c.h.isAdmin(chatID) {
+			return nil
+		}
+		err := c.h.handleBroadcastSchedule(ctx, chatID, update.CallbackQuery.Message.MessageID)
+		if err != nil {
+			return fmt.Errorf("handle broadcast_schedule: %w", err)
+		}
+	case strings.HasPrefix(data, "bsched_day_"):
+		if !c.h.isAdmin(chatID) {
+			return nil
+		}
+		err := c.h.handleBroadcastScheduleDay(ctx, chatID, update.CallbackQuery.Message.MessageID, data)
+		if err != nil {
+			return fmt.Errorf("handle broadcast schedule day: %w", err)
+		}
+	case strings.HasPrefix(data, "bsched_hour_"):
+		if !c.h.isAdmin(chatID) {
+			return nil
+		}
+		err := c.h.handleBroadcastScheduleHour(ctx, chatID, update.CallbackQuery.Message.MessageID, data)
+		if err != nil {
+			return fmt.Errorf("handle broadcast schedule hour: %w", err)
+		}
+	case data == "bsched_back":
+		if !c.h.isAdmin(chatID) {
+			return nil
+		}
+		err := c.h.handleBroadcastScheduleBack(ctx, chatID, update.CallbackQuery.Message.MessageID)
+		if err != nil {
+			return fmt.Errorf("handle broadcast schedule back: %w", err)
+		}
 	case strings.HasPrefix(data, "bfilter_"):
 		if !c.h.isAdmin(chatID) {
 			return nil

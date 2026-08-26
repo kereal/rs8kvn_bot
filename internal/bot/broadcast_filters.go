@@ -125,3 +125,59 @@ func broadcastFilterKeyboard(f database.BroadcastFilter) *tgbotapi.InlineKeyboar
 func broadcastFilterPreview(name string, f database.BroadcastFilter) string {
 	return fmt.Sprintf("✅ Превью готово. Рассылка «%s».\n\n👥 Фильтр: %s\n\n📤 Отправить это сообщение всем?", name, f.String())
 }
+
+// broadcastScheduleDayLabel возвращает человекочитаемую подпись дня по offset.
+func broadcastScheduleDayLabel(offset int) string {
+	if offset == 0 {
+		return "Сегодня"
+	}
+	if offset == 1 {
+		return "Завтра"
+	}
+	day := time.Now().AddDate(0, 0, offset)
+	return fmt.Sprintf("%s %s", ruWeekdays[day.Weekday()], day.Format("02.01"))
+}
+
+// broadcastScheduleDayKeyboard строит клавиатуру выбора дня отправки.
+func broadcastScheduleDayKeyboard() *tgbotapi.InlineKeyboardMarkup {
+	var row []tgbotapi.InlineKeyboardButton
+	for _, offset := range scheduleDayOptions {
+		row = append(row, tgbotapi.NewInlineKeyboardButtonData("📅 "+broadcastScheduleDayLabel(offset), fmt.Sprintf("bsched_day_%d", offset)))
+	}
+	return &tgbotapi.InlineKeyboardMarkup{InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{
+		row,
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("🔙 Назад", "bsched_back"),
+			tgbotapi.NewInlineKeyboardButtonData("❌ Отмена", "broadcast_cancel"),
+		),
+	}}
+}
+
+// broadcastScheduleHourKeyboard строит клавиатуру выбора часа (0-23, МСК).
+func broadcastScheduleHourKeyboard() *tgbotapi.InlineKeyboardMarkup {
+	rows := make([][]tgbotapi.InlineKeyboardButton, 0, 5)
+	for h := 0; h < 24; h += 6 {
+		row := make([]tgbotapi.InlineKeyboardButton, 0, 6)
+		for i := 0; i < 6; i++ {
+			hour := h + i
+			row = append(row, tgbotapi.NewInlineKeyboardButtonData(fmt.Sprintf("%02d:00", hour), fmt.Sprintf("bsched_hour_%d", hour)))
+		}
+		rows = append(rows, row)
+	}
+	rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+		tgbotapi.NewInlineKeyboardButtonData("🔙 Назад", "bsched_back"),
+		tgbotapi.NewInlineKeyboardButtonData("❌ Отмена", "broadcast_cancel"),
+	))
+	return &tgbotapi.InlineKeyboardMarkup{InlineKeyboard: rows}
+}
+
+// broadcastSchedulePreviewKeyboard — подтверждение запланированной рассылки.
+func broadcastSchedulePreviewKeyboard() *tgbotapi.InlineKeyboardMarkup {
+	return &tgbotapi.InlineKeyboardMarkup{InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{
+		tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("✅ Подтвердить", "broadcast_final_confirm")),
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("🔙 Изменить время", "bsched_back"),
+			tgbotapi.NewInlineKeyboardButtonData("❌ Отмена", "broadcast_cancel"),
+		),
+	}}
+}

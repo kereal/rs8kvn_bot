@@ -791,7 +791,9 @@ func (m *DatabaseService) GetRunnableBroadcasts(ctx context.Context, now time.Ti
 	defer m.mu.RUnlock()
 	out := make([]database.Broadcast, 0)
 	for _, b := range m.Broadcasts {
-		if (b.Status == string(database.BroadcastStatusScheduled) || b.Status == string(database.BroadcastStatusRunning)) && (b.RetryAt == nil || !b.RetryAt.After(now)) {
+		if (b.Status == string(database.BroadcastStatusScheduled) || b.Status == string(database.BroadcastStatusRunning)) &&
+			(b.RetryAt == nil || !b.RetryAt.After(now)) &&
+			(b.PlannedAt == nil || !b.PlannedAt.After(now)) {
 			out = append(out, *b)
 		}
 	}

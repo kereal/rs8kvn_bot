@@ -247,6 +247,116 @@ func TestHandleBroadcastBackToFilters(t *testing.T) {
 	assert.Equal(t, broadcastStageFiltering, handler.getBroadcastSession(broadcastTestAdminID).stage)
 }
 
+func TestBroadcastScheduleFlow(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	mockDB := testutil.NewDatabaseService()
+	mockBot := testutil.NewBotAPI()
+	handler := newBroadcastTestHandler(mockDB, mockBot)
+	prepareBroadcastSession(t, handler, mockDB)
+
+	// Количество получателей → подтверждение.
+	require.NoError(t, handler.HandleCallback(ctx, tgbotapi.Update{CallbackQuery: &tgbotapi.CallbackQuery{
+		From: broadcastTestAdmin(), Data: "broadcast_confirm",
+		Message: &tgbotapi.Message{Chat: &tgbotapi.Chat{ID: broadcastTestAdminID}, MessageID: 1},
+	}}))
+	assert.Equal(t, broadcastStageConfirming, handler.getBroadcastSession(broadcastTestAdminID).stage)
+
+	// Переход к планированию: выбор дня.
+	require.NoError(t, handler.HandleCallback(ctx, tgbotapi.Update{CallbackQuery: &tgbotapi.CallbackQuery{
+		From: broadcastTestAdmin(), Data: "broadcast_schedule",
+		Message: &tgbotapi.Message{Chat: &tgbotapi.Chat{ID: broadcastTestAdminID}, MessageID: 1},
+	}}))
+	s := handler.getBroadcastSession(broadcastTestAdminID)
+	require.NotNil(t, s)
+	assert.Equal(t, broadcastStageScheduling, s.stage)
+	assert.Nil(t, s.plannedAt)
+	assert.Equal(t, -1, s.scheduleDay)
+
+	// Выбор дня «Завтра» (offset 1).
+	require.NoError(t, handler.HandleCallback(ctx, tgbotapi.Update{CallbackQuery: &tgbotapi.CallbackQuery{
+		From: broadcastTestAdmin(), Data: "bsched_day_1",
+		Message: &tgbotapi.Message{Chat: &tgbotapi.Chat{ID: broadcastTestAdminID}, MessageID: 1},
+	}}))
+	assert.Equal(t, 1, handler.getBroadcastSession(broadcastTestAdminID).scheduleDay)
+
+	// Выбор часа 18:00.
+	require.NoError(t, handler.HandleCallback(ctx, tgbotapi.Update{CallbackQuery: &tgbotapi.CallbackQuery{
+		From: broadcastTestAdmin(), Data: "bsched_hour_18",
+		Message: &tgbotapi.Message{Chat: &tgbotapi.Chat{ID: broadcastTestAdminID}, MessageID: 1},
+	}}))
+	s = handler.getBroadcastSession(broadcastTestAdminID)
+	require.NotNil(t, s.plannedAt)
+	tomorrow := time.Now().AddDate(0, 0, 1)
+	assert.Equal(t, tomorrow.Year(), s.plannedAt.Year())
+	assert.Equal(t, tomorrow.Month(), s.plannedAt.Month())
+	assert.Equal(t, tomorrow.Day(), s.plannedAt.Day())
+	assert.Equal(t, 18, s.plannedAt.Hour())
+
+	// Подтверждение создаёт запланированную кампанию.
+	require.NoError(t, handler.HandleCallback(ctx, tgbotapi.Update{CallbackQuery: &tgbotapi.CallbackQuery{
+		From: broadcastTestAdmin(), Data: "broadcast_final_confirm",
+		Message: &tgbotapi.Message{Chat: &tgbotapi.Chat{ID: broadcastTestAdminID}, MessageID: 1},
+	}}))
+
+	stored, err := mockDB.GetBroadcast(ctx, 1)
+	require.NoError(t, err)
+	require.NotNil(t, stored.PlannedAt, "scheduled campaign must persist planned_at")
+	assert.Equal(t, string(database.BroadcastStatusScheduled), stored.Status, "future campaign stays scheduled until its time")
+	assert.Contains(t, mockBot.LastSentTextSafe(), "запланирована")
+	assert.Nil(t, handler.getBroadcastSession(broadcastTestAdminID), "session must be closed after launch")
+}
+
+func TestBroadcastScheduleBackToConfirm(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	mockDB := testutil.NewDatabaseService()
+	mockBot := testutil.NewBotAPI()
+	handler := newBroadcastTestHandler(mockDB, mockBot)
+	prepareBroadcastSession(t, handler, mockDB)
+
+	require.NoError(t, handler.HandleCallback(ctx, tgbotapi.Update{CallbackQuery: &tgbotapi.CallbackQuery{
+		From: broadcastTestAdmin(), Data: "broadcast_confirm",
+		Message: &tgbotapi.Message{Chat: &tgbotapi.Chat{ID: broadcastTestAdminID}, MessageID: 1},
+	}}))
+	require.NoError(t, handler.HandleCallback(ctx, tgbotapi.Update{CallbackQuery: &tgbotapi.CallbackQuery{
+		From: broadcastTestAdmin(), Data: "broadcast_schedule",
+		Message: &tgbotapi.Message{Chat: &tgbotapi.Chat{ID: broadcastTestAdminID}, MessageID: 1},
+	}}))
+
+	// Из выбора дня — обратно к подтверждению.
+	require.NoError(t, handler.HandleCallback(ctx, tgbotapi.Update{CallbackQuery: &tgbotapi.CallbackQuery{
+		From: broadcastTestAdmin(), Data: "bsched_back",
+		Message: &tgbotapi.Message{Chat: &tgbotapi.Chat{ID: broadcastTestAdminID}, MessageID: 1},
+	}}))
+	assert.Equal(t, broadcastStageConfirming, handler.getBroadcastSession(broadcastTestAdminID).stage)
+
+	// Снова в планирование: день → час → «Изменить время» возвращает к выбору дня.
+	require.NoError(t, handler.HandleCallback(ctx, tgbotapi.Update{CallbackQuery: &tgbotapi.CallbackQuery{
+		From: broadcastTestAdmin(), Data: "broadcast_schedule",
+		Message: &tgbotapi.Message{Chat: &tgbotapi.Chat{ID: broadcastTestAdminID}, MessageID: 1},
+	}}))
+	require.NoError(t, handler.HandleCallback(ctx, tgbotapi.Update{CallbackQuery: &tgbotapi.CallbackQuery{
+		From: broadcastTestAdmin(), Data: "bsched_day_2",
+		Message: &tgbotapi.Message{Chat: &tgbotapi.Chat{ID: broadcastTestAdminID}, MessageID: 1},
+	}}))
+	require.NoError(t, handler.HandleCallback(ctx, tgbotapi.Update{CallbackQuery: &tgbotapi.CallbackQuery{
+		From: broadcastTestAdmin(), Data: "bsched_hour_10",
+		Message: &tgbotapi.Message{Chat: &tgbotapi.Chat{ID: broadcastTestAdminID}, MessageID: 1},
+	}}))
+	require.NoError(t, handler.HandleCallback(ctx, tgbotapi.Update{CallbackQuery: &tgbotapi.CallbackQuery{
+		From: broadcastTestAdmin(), Data: "bsched_back",
+		Message: &tgbotapi.Message{Chat: &tgbotapi.Chat{ID: broadcastTestAdminID}, MessageID: 1},
+	}}))
+	s := handler.getBroadcastSession(broadcastTestAdminID)
+	require.NotNil(t, s)
+	assert.Equal(t, broadcastStageScheduling, s.stage)
+	assert.Nil(t, s.plannedAt, "changing the time must reset planned_at")
+	assert.Equal(t, -1, s.scheduleDay)
+}
+
 func TestTruncateRunes(t *testing.T) {
 	t.Parallel()
 
