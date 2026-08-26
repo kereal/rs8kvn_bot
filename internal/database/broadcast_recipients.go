@@ -390,14 +390,16 @@ func applyBroadcastFilter(q *gorm.DB, filter BroadcastFilter) *gorm.DB {
 	// NOT IN (not !=) so a missing standard trial plan degrades to a no-op
 	// instead of UNKNOWN: a scalar subquery without rows turns `!=` into
 	// `plan_id != NULL`, which filters out the whole audience.
-	// NOT IN (not !=) so a missing standard trial plan degrades to a no-op
-	// instead of UNKNOWN: a scalar subquery without rows turns `!=` into
-	// `plan_id != NULL`, which filters out the whole audience.
 	q = q.Where("plan_id NOT IN (SELECT id FROM plans WHERE name = ?)", TrialPlanName)
 	switch filter.PlanType {
 	case "paid":
 		q = q.Where("(product_id IS NOT NULL OR price_paid_cents > 0)")
 	case "free":
+		// Здесь `=` (не NOT IN) намеренно: цель фильтра — выбрать именно free-план,
+		// а не вычесть его. Если строки FreePlanName нет в plans, подзапрос даёт
+		// NULL и `plan_id = NULL` всегда UNKNOWN => пустая аудитория. Это ожидаемо
+		// (нет free-плана => нет free-аудитории), в отличие от trial-фильтра выше,
+		// где отсутствие плана не должно выключить всю рассылку.
 		q = q.Where("plan_id = (SELECT id FROM plans WHERE name = ?)", FreePlanName).Where("product_id IS NULL AND price_paid_cents <= 0")
 	}
 	if filter.RegisteredAfter != nil {

@@ -67,6 +67,64 @@ func TestBroadcastErrorClassificationSeparatesBlockedAndUnreachable(t *testing.T
 	assert.True(t, isUserUnreachableError(fmt.Errorf("Bad Request: chat not found")))
 }
 
+func TestBroadcastFloodClassificationAndRetryDelay(t *testing.T) {
+	t.Parallel()
+	// 429 from Telegram is a transient flood error, not a permanent delivery failure.
+	flood := &tgbotapi.Error{Code: 429, Message: "Too Many Requests: retry after some time"}
+	assert.True(t, isFloodError(flood))
+	assert.False(t, isUserBlockedError(flood))
+	assert.False(t, isUserUnreachableError(flood))
+	// Plain infrastructure errors are not flood errors.
+	assert.False(t, isFloodError(fmt.Errorf("network error")))
+	// A small hint is honoured verbatim.
+	small := &tgbotapi.Error{Code: 429, Message: "flood", ResponseParameters: tgbotapi.ResponseParameters{RetryAfter: 3}}
+	assert.Equal(t, 3*time.Second, floodRetryDelay(small))
+	// A huge hint is clamped so one delay cannot consume the whole time slice.
+	huge := &tgbotapi.Error{Code: 429, Message: "flood", ResponseParameters: tgbotapi.ResponseParameters{RetryAfter: int(broadcastFloodMaxDelay.Seconds()) + 9999}}
+	assert.Equal(t, broadcastFloodMaxDelay, floodRetryDelay(huge))
+	// Missing hint falls back to the default delay.
+	assert.Equal(t, broadcastFloodDefaultDelay, floodRetryDelay(flood))
+}
+
+func TestBroadcast_FloodWaitsRetryAfterThenDelivers(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	mockDB := testutil.NewDatabaseService()
+	mockBot := testutil.NewBotAPI()
+	handler := newBroadcastTestHandler(mockDB, mockBot)
+
+	prepareBroadcastSession(t, handler, mockDB)
+
+	// Telegram rate-limits the bot once (429, retry_after 1s). Delivery must wait
+	// out the hint and deliver WITHOUT spending a normal retry: a flood wait is not
+	// a failed attempt, so the message goes out on the first ordinary attempt.
+	var sendCalls int
+	mockBot.SendFunc = func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
+		if mc, ok := c.(tgbotapi.MessageConfig); ok && mc.ChatID == 111 {
+			sendCalls++
+			if sendCalls == 1 {
+				return tgbotapi.Message{}, &tgbotapi.Error{Code: 429, Message: "Too Many Requests", ResponseParameters: tgbotapi.ResponseParameters{RetryAfter: 1}}
+			}
+		}
+		return tgbotapi.Message{MessageID: 1}, nil
+	}
+
+	confirmBroadcast(t, handler, mockDB)
+
+	assert.Equal(t, 2, sendCalls, "one flood wait + one successful send, normal retry not consumed")
+	broadcasts, err := mockDB.ListBroadcasts(ctx, 10)
+	require.NoError(t, err)
+	require.Len(t, broadcasts, 1)
+	b := broadcasts[0]
+	assert.Equal(t, string(database.BroadcastStatusCompleted), b.Status)
+	assert.Equal(t, int64(1), b.SentCount)
+	assert.Equal(t, int64(0), b.FailedCount)
+	report, err := b.ParseDeliveryReport()
+	require.NoError(t, err)
+	assert.Equal(t, []int64{111}, report.Delivered)
+}
+
 func TestBroadcastDetailsCallback(t *testing.T) {
 	t.Parallel()
 

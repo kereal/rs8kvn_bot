@@ -36,12 +36,21 @@ const (
 
 	// --- Per-message delivery ---
 
-	// broadcastRetries — число повторов доставки одного сообщения при временных
-	// (не blocked/unreachable) ошибках.
+	// broadcastRetries — число ПОВТОРОВ (сверх первой отправки) доставки одного
+	// сообщения при временных (не blocked/unreachable) ошибках. Итого за одно
+	// сообщение выполняется broadcastRetries+1 попыток отправки.
 	broadcastRetries = 2
 	// broadcastSendRetryBaseDelay — короткая пауза между повторами одного
 	// сообщения; фактическая задержка = base * (attempt+1) (linear backoff).
 	broadcastSendRetryBaseDelay = 300 * time.Millisecond
+	// broadcastFloodMaxWaits — сколько раз одно сообщение может ждать по
+	// retry_after (429), прежде чем исход фиксируется как постоянная ошибка.
+	broadcastFloodMaxWaits = 5
+	// broadcastFloodDefaultDelay — ожидание при 429 без явного retry_after.
+	broadcastFloodDefaultDelay = 5 * time.Second
+	// broadcastFloodMaxDelay — верхняя граница ожидания по retry_after,
+	// чтобы одна подсказка не съела весь временной слайс кампании.
+	broadcastFloodMaxDelay = 90 * time.Second
 
 	// --- Worker / campaign ---
 

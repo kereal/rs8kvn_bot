@@ -12,7 +12,8 @@
 ## Broadcast campaigns (2026-08, branch feat/broadcast-campaigns)
 - **Durable `BroadcastWorker`** (`internal/bot/broadcast_worker.go`): tick 15 s, per-campaign timeout 5 min, batches of 100 (concurrency 10), survives process restarts. Audience snapshot + per-recipient state live in the `broadcasts.recipients_state` JSON column; leases (2 min) recover after crashes.
 - Admin session flow: name → text → filters (`bfilter_*`) → confirm; campaign lifecycle `scheduled|running|completed|failed|canceled`; cancel (`broadcast_cancel_<id>`) and retry-failed (`broadcast_retry_<id>`) actions.
-- Delivery: blocked vs unreachable classification, per-message retries (2), campaign-level exponential backoff (`retry_at`, 5 s → 15 min).
+- Delivery: blocked vs unreachable classification, per-message retries (2, = broadcastRetries повторов сверх первой попытки), campaign-level exponential backoff (`retry_at`, 5 s → 15 min).
+- **Flood (HTTP 429)**: `processRecipient` распознаёт `isFloodError` и ждёт `retry_after` (`floodRetryDelay`, кап `broadcastFloodMaxDelay`=90 s, дефолт 5 s) ДО `broadcastFloodMaxWaits`=5 раз в рамках той же обычной попытки; только когда ожидания исчерпаны, сообщение уходит в общий счётчик retry и фиксируется как failed. Финиш получателя вынесен в `finishRecipientState`, ожидание с учётом ctx — в `waitBroadcastDelay`.
 - Logging: `Info` for create/start/finish/cancel/retry and planned resume after timeout; `Warn` for background failures; `Error` for panics, retry-persistence, cancel/retry callback errors.
 
 ## Audit follow-up (2026-08-21/26)
