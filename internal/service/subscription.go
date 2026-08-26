@@ -715,6 +715,20 @@ func (s *SubscriptionService) BindTrial(ctx context.Context, subscriptionID stri
 		Comment:      comment,
 	}
 
+	// Snapshot the trial's panel state (traffic limit and expiry) BEFORE the
+	// bind update. If the DB bind fails, the rollback must restore the
+	// anonymous trial client exactly as it was, not zero out its traffic and
+	// expiry on the panel.
+	trialPlan, err := s.db.GetPlanByName(ctx, database.TrialPlanName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve trial plan: %w", err)
+	}
+	trialTrafficBytes := trialPlan.TrafficLimit
+	var trialExpiresAt time.Time
+	if trial.ExpiresAt != nil {
+		trialExpiresAt = *trial.ExpiresAt
+	}
+
 	err = client.UpdateSubscription(ctx, boundProvision)
 	if err != nil {
 		return nil, fmt.Errorf("update trial client on node %d: %w", node.ID, err)
@@ -733,6 +747,8 @@ func (s *SubscriptionService) BindTrial(ctx context.Context, subscriptionID stri
 				CurrentEmail: boundEmail,
 				Username:     currentEmail,
 				SubID:        trial.SubscriptionID,
+				TrafficBytes: trialTrafficBytes,
+				ExpiryTime:   trialExpiresAt,
 				ResetDays:    0,
 				Comment:      comment,
 			}
